@@ -5,7 +5,9 @@ node_modules/
 dist/
 
 # Claude Code 本地配置 / 外部 skill
-.claude/
+.claude/settings.local.json
+.claude/skills/
+.claude/scheduled_tasks.json
 
 # 系统文件
 .DS_Store
