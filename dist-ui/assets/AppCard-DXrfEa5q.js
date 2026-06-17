@@ -1,0 +1,2 @@
+import{a as d,e as c,s as t,K as l,q as s,x as r}from"./index-SKH2g27Q.js";const n=d({__name:"AppCard",props:{quality:{},clickable:{type:Boolean},selected:{type:Boolean},padding:{}},setup(e){return(a,o)=>(s(),c("div",{class:t(["app-card",{[`card-${e.quality||"default"}`]:!0,"card-clickable":e.clickable,"card-selected":e.selected,[`card-padding-${e.padding||"md"}`]:!0}])},[l(a.$slots,"default",{},void 0)],2))}}),p=r(n,[["__scopeId","data-v-bfde23e6"]]);export{p as A};
+//# sourceMappingURL=AppCard-DXrfEa5q.js.map

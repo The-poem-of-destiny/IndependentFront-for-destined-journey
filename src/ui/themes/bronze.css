@@ -1,0 +1,50 @@
+/* ===== Bronze (古铜) — 琥珀金属风格 ===== */
+[data-theme="bronze"] {
+  --theme-window-bg: #1a1510;
+  --theme-window-border: #4a3520;
+  --theme-content-bg: #15110d;
+  --theme-card-bg: #221c14;
+  --theme-card-border: #4a3520;
+  --theme-surface-muted: color-mix(in srgb, #1a1510 72%, #221c14 28%);
+  --theme-overlay-bg: color-mix(in srgb, #1a1510 58%, transparent);
+
+  --theme-title-bar-bg: #1f1914;
+  --theme-title-bar-text: #f0e0c8;
+  --theme-title-bar-icon: #c0a080;
+  --theme-title-bar-btn-hover: rgba(255,255,255,0.06);
+  --theme-tab-bar-bg: #1c1712;
+  --theme-tab-text: #a08868;
+  --theme-tab-active-text: #f0d8b0;
+  --theme-tab-indicator: #d4a354;
+  --theme-tab-hover-bg: rgba(255,255,255,0.04);
+
+  --theme-text-primary: #f0e0c8;
+  --theme-text-secondary: #c0a080;
+  --theme-text-muted: #807060;
+
+  --theme-primary: #d4a354;
+  --theme-primary-text: #1a1510;
+  --theme-success: #6bbf6b;
+  --theme-warning: #e8b84b;
+  --theme-error: #e06050;
+
+  --theme-hp: #e06050;
+  --theme-mp: #6888cc;
+  --theme-sp: #6bbf6b;
+  --theme-exp: #e8b84b;
+  --theme-affection: #e08090;
+  --theme-affection-bg: rgba(224,128,144,0.18);
+  --theme-affection-text: #f0b0b8;
+
+  --theme-quality-common: #c0b098;
+  --theme-quality-uncommon: #6bbf6b;
+  --theme-quality-rare: #6888cc;
+  --theme-quality-epic: #a080d0;
+  --theme-quality-legendary: #e8b84b;
+  --theme-quality-mythic: #e08090;
+  --theme-quality-unique: #f0a050;
+
+  --theme-currency-gold: #e8b84b;
+  --theme-currency-silver: #c0b098;
+  --theme-currency-copper: #c08050;
+}

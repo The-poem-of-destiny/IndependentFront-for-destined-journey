@@ -1,0 +1,62 @@
+/* ===== Utility Classes ===== */
+
+/* Flex */
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.flex-row { flex-direction: row; }
+.flex-wrap { flex-wrap: wrap; }
+.flex-1 { flex: 1; }
+.items-center { align-items: center; }
+.justify-center { justify-content: center; }
+.justify-between { justify-content: space-between; }
+.gap-xs { gap: var(--theme-spacing-xs); }
+.gap-sm { gap: var(--theme-spacing-sm); }
+.gap-md { gap: var(--theme-spacing-md); }
+.gap-lg { gap: var(--theme-spacing-lg); }
+.gap-xl { gap: var(--theme-spacing-xl); }
+
+/* Grid */
+.grid { display: grid; }
+
+/* Text */
+.text-center { text-align: center; }
+.text-muted { color: var(--theme-text-muted); }
+.text-secondary { color: var(--theme-text-secondary); }
+.text-primary { color: var(--theme-text-primary); }
+.text-sm { font-size: 0.85rem; }
+.text-xs { font-size: 0.75rem; }
+.text-lg { font-size: 1.1rem; }
+.text-xl { font-size: 1.3rem; }
+.font-title { font-family: var(--theme-font-title); }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Spacing */
+.p-sm { padding: var(--theme-spacing-sm); }
+.p-md { padding: var(--theme-spacing-md); }
+.p-lg { padding: var(--theme-spacing-lg); }
+.p-xl { padding: var(--theme-spacing-xl); }
+.m-0 { margin: 0; }
+
+/* Display */
+.hidden { display: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+
+/* Scroll */
+.scroll-y { overflow-y: auto; }
+.scroll-x { overflow-x: auto; }
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Interactive */
+.cursor-pointer { cursor: pointer; }
+.select-none { user-select: none; }
+.disabled { opacity: 0.5; pointer-events: none; }
+
+/* Quality text colors */
+.quality-common { color: var(--theme-quality-common); }
+.quality-uncommon { color: var(--theme-quality-uncommon); }
+.quality-rare { color: var(--theme-quality-rare); }
+.quality-epic { color: var(--theme-quality-epic); }
+.quality-legendary { color: var(--theme-quality-legendary); }
+.quality-mythic { color: var(--theme-quality-mythic); }
+.quality-unique { color: var(--theme-quality-unique); }

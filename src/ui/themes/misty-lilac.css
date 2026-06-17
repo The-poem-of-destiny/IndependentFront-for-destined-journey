@@ -1,0 +1,57 @@
+/* ===== Misty Lilac (雾紫) — 淡紫梦幻风格 ===== */
+[data-theme="misty-lilac"] {
+  --theme-window-bg: #f5f0fa;
+  --theme-window-border: #d8c8e8;
+  --theme-content-bg: #faf8fc;
+  --theme-card-bg: rgba(255,255,255,0.85);
+  --theme-card-border: #d8c8e8;
+  --theme-surface-muted: #ede4f5;
+  --theme-overlay-bg: rgba(0,0,0,0.3);
+
+  --theme-title-bar-bg: #efe8f5;
+  --theme-title-bar-text: #4a3060;
+  --theme-title-bar-icon: #8a68b0;
+  --theme-title-bar-btn-hover: rgba(0,0,0,0.05);
+  --theme-tab-bar-bg: #ebe0f0;
+  --theme-tab-text: #8a68b0;
+  --theme-tab-active-text: #4a3060;
+  --theme-tab-indicator: #9a72f8;
+  --theme-tab-hover-bg: rgba(0,0,0,0.04);
+
+  --theme-text-primary: #3a2848;
+  --theme-text-secondary: #685878;
+  --theme-text-muted: #9888a8;
+
+  --theme-primary: #9a72f8;
+  --theme-primary-text: #fff;
+  --theme-success: #4a9e6c;
+  --theme-warning: #d4983c;
+  --theme-error: #d0445c;
+
+  --theme-hp: #d0445c;
+  --theme-mp: #6878e0;
+  --theme-sp: #4a9e6c;
+  --theme-exp: #d4983c;
+  --theme-affection: #e068a0;
+  --theme-affection-bg: rgba(224,104,160,0.1);
+  --theme-affection-text: #b04878;
+
+  --theme-quality-common: #a090b0;
+  --theme-quality-uncommon: #4a9e6c;
+  --theme-quality-rare: #6878e0;
+  --theme-quality-epic: #9a72f8;
+  --theme-quality-legendary: #d4983c;
+  --theme-quality-mythic: #e068a0;
+  --theme-quality-unique: #e08848;
+
+  --theme-currency-gold: #c8a848;
+  --theme-currency-silver: #b0a8b8;
+  --theme-currency-copper: #c88050;
+
+  --theme-font-title: 'Cinzel', serif;
+  --theme-font-body: 'Noto Sans SC', sans-serif;
+
+  --theme-shadow-sm: 0 1px 3px rgba(100,60,130,0.08);
+  --theme-shadow-md: 0 2px 8px rgba(100,60,130,0.12);
+  --theme-shadow-lg: 0 4px 16px rgba(100,60,130,0.18);
+}

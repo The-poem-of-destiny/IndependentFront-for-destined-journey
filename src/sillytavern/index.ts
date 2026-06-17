@@ -8,5 +8,7 @@ export * from './lorebook-engine';
 export * from './prompt-assembler';
 export * from './importer';
 export * from './variables';
+export * from './marker-protocol';
+export * from './char-gen-agent';
 
-export const VERSION = '3.0.0';
+export const VERSION = '4.0.0';

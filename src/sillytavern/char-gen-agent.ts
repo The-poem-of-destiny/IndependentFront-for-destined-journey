@@ -1,0 +1,433 @@
+/**
+ * Char Gen Agent — 角色生成编排模块 (Phase 6e)
+ *
+ * ADR-26: char_gen → item_gen SubAgent 链 (仅1次调用)
+ * 触发时机: vars_update (Stage 2) 检测到 <char_detect> 标记后异步触发
+ * 下一个流程 (Stage 3): char_update × N 并行，包含新生成的角色
+ *
+ * 职责:
+ * 1. detectNewCharacters() — 扫描 <char_detect> + 过滤已存在角色
+ * 2. runCharGenChain() — 完整链: callCharGenAgent → callItemGenAgent → assemble → buildPatches
+ * 3. assembleCharacterState() — 纯函数: 合并 Agent 输出为完整 CharacterState
+ * 4. buildCharGenPatches() — 生成 add_character + add_skill + add_item + equip_item patches
+ *
+ * 依赖注入 (测试友好):
+ * - CharGenAgentDeps.clientFactory: AgentClient 工厂
+ * - CharGenAgentDeps.stateManager: StateManager (可选，用于持久化)
+ */
+
+import type {
+  AgentContext,
+  ApiEndpoint,
+  CharDetectMarker,
+  CharGenOutput,
+  CharGenChainResult,
+  ItemGenOutput,
+  CharacterState,
+  StatePatch,
+  QualityLevel,
+  EquipmentSlot,
+  InventoryItem,
+} from './types';
+import { createDefaultCharacterState } from './types';
+import { scanCharDetects } from './marker-protocol';
+import { buildAgentMessages } from './agent-templates';
+import { getTierConfig } from './tier-constants';
+
+// ========== Types ==========
+
+export interface CharGenRequest {
+  saveId: string;
+  detection: CharDetectMarker;
+  context: AgentContext;
+  endpoint: ApiEndpoint;
+}
+
+export interface CharGenAgentDeps {
+  /** AgentClient 工厂 — 每次调用创建新实例 (缓存隔离) */
+  clientFactory: (agentId: string, endpoint: ApiEndpoint, saveId: string) => CharGenClient;
+  /** StateManager 写入入口 (可选，测试可不提供) */
+  stateManager?: {
+    commitChatState: (patches: StatePatch[]) => Promise<void>;
+  };
+}
+
+/**
+ * CharGen 客户端接口 — 抽象的 API 调用层。
+ * 生产环境使用 AgentClient，测试使用 mock。
+ */
+export interface CharGenClient {
+  chat(messages: Array<{ role: string; content: string }>): Promise<{
+    output: string | null;
+    rawResponse: string;
+    tokensUsed: number;
+    cacheHit: boolean;
+    duration: number;
+    error?: string;
+  }>;
+}
+
+// ========== Constants ==========
+
+/** T1 默认 HP/MP/SP 基准 (被 tier-constants 覆盖) */
+const DEFAULT_BASE_HP = 100;
+const DEFAULT_BASE_MP = 50;
+const DEFAULT_BASE_SP = 50;
+
+// ========== Public API ==========
+
+/**
+ * 从 story 输出中检测新角色。
+ * 扫描 <char_detect> 标记，过滤掉名字已存在于 existingChars 中的角色。
+ *
+ * @param storyOutput - Stage 1 story agent 的原始输出
+ * @param existingChars - 当前存档中已有的角色列表
+ * @returns 需要生成的新角色标记列表
+ */
+export function detectNewCharacters(
+  storyOutput: string,
+  existingChars: CharacterState[],
+): CharDetectMarker[] {
+  const allDetects = scanCharDetects(storyOutput);
+  if (allDetects.length === 0) return [];
+
+  const existingNames = new Set(
+    existingChars.map((c) => c.name.toLowerCase()),
+  );
+
+  return allDetects.filter((marker) => {
+    // 如果没有名字，视为新角色（需要生成名字）
+    if (!marker.characterName) return true;
+    // 如果名字已存在，跳过
+    return !existingNames.has(marker.characterName.toLowerCase());
+  });
+}
+
+/**
+ * 调用 char_gen Agent — 生成角色基础数据。
+ * 使用 AgentClient 调用 AI，agentId='char_gen'。
+ */
+export async function callCharGenAgent(
+  request: CharGenRequest,
+  deps: CharGenAgentDeps,
+): Promise<CharGenOutput> {
+  const messages = buildAgentMessages('char_gen', {
+    ...request.context,
+    agentOutputs: new Map([['story', request.detection.rawContent]]),
+  });
+
+  if (!messages) {
+    throw new Error('char_gen 模板未找到 — 请检查 AGENT_TEMPLATES 注册');
+  }
+
+  const client = deps.clientFactory('char_gen', request.endpoint, request.saveId);
+  const result = await client.chat(messages);
+
+  if (result.error) {
+    throw new Error(`char_gen Agent 调用失败: ${result.error}`);
+  }
+
+  const rawOutput = result.output ?? result.rawResponse;
+  return parseCharGenOutput(rawOutput);
+}
+
+/**
+ * 调用 item_gen Agent — 为已生成角色创建装备/技能/物品。
+ * 使用 AgentClient 调用 AI，agentId='item_gen'。
+ * ADR-26: 仅调用 1 次，防止高并发浪费 token。
+ */
+export async function callItemGenAgent(
+  charData: CharGenOutput,
+  request: CharGenRequest,
+  deps: CharGenAgentDeps,
+): Promise<ItemGenOutput> {
+  const contextWithCharData: AgentContext = {
+    ...request.context,
+    agentOutputs: new Map([
+      ['char_gen', JSON.stringify(charData)],
+      ['story', request.detection.rawContent],
+    ]),
+  };
+
+  const messages = buildAgentMessages('item_gen', contextWithCharData);
+
+  if (!messages) {
+    throw new Error('item_gen 模板未找到 — 请检查 AGENT_TEMPLATES 注册');
+  }
+
+  const client = deps.clientFactory('item_gen', request.endpoint, request.saveId);
+  const result = await client.chat(messages);
+
+  if (result.error) {
+    // item_gen 失败不阻断流程 — 返回空物品数据
+    return { skills: [], equipment: [], inventory: [] };
+  }
+
+  const rawOutput = result.output ?? result.rawResponse;
+  return parseItemGenOutput(rawOutput);
+}
+
+/**
+ * 纯函数: 将 char_gen + item_gen 的输出合并为完整的 CharacterState。
+ * 使用 createDefaultCharacterState() 作为基础模板。
+ *
+ * @param charData - char_gen Agent 的输出
+ * @param itemData - item_gen Agent 的输出
+ * @param overrides - 可选的额外覆盖
+ */
+export function assembleCharacterState(
+  charData: CharGenOutput,
+  itemData: ItemGenOutput,
+  overrides: Partial<CharacterState> = {},
+): CharacterState {
+  const tierConfig = getTierConfig(charData.tier);
+  const tierName = tierConfig?.name ?? '普通';
+  const hpMultiplier = tierConfig?.hpMultiplier ?? 1;
+  const mpMultiplier = tierConfig?.mpMultiplier ?? 1;
+  const spMultiplier = tierConfig?.spMultiplier ?? 1;
+
+  const skills = itemData.skills.map((s) => ({
+    id: crypto.randomUUID(),
+    name: s.name,
+    description: s.description,
+    type: s.type,
+    cost: s.cost ? { type: s.cost.type, amount: s.cost.amount } : undefined,
+    cooldown: s.cooldown,
+    level: 1,
+  }));
+
+  const equipment: EquipmentSlot[] = itemData.equipment.map((e) => {
+    const itemId = crypto.randomUUID();
+    return {
+      slot: e.slot,
+      itemId,
+      name: e.name,
+      description: e.description,
+      stats: e.stats,
+      durability: e.durability,
+      maxDurability: e.durability,
+    };
+  });
+
+  const inventory: InventoryItem[] = itemData.inventory.map((inv) => ({
+    id: crypto.randomUUID(),
+    name: inv.name,
+    description: inv.description,
+    type: inv.type,
+    quantity: inv.quantity,
+    rarity: (inv.rarity as QualityLevel) || undefined,
+  }));
+
+  return createDefaultCharacterState({
+    type: 'npc',
+    name: charData.name,
+    race: charData.race,
+    identity: charData.identity,
+    occupation: charData.occupation,
+    tier: charData.tier,
+    tierName,
+    level: charData.level,
+    attributes: charData.attributes,
+    hp: DEFAULT_BASE_HP * hpMultiplier,
+    maxHp: DEFAULT_BASE_HP * hpMultiplier,
+    mp: DEFAULT_BASE_MP * mpMultiplier,
+    maxMp: DEFAULT_BASE_MP * mpMultiplier,
+    sp: DEFAULT_BASE_SP * spMultiplier,
+    maxSp: DEFAULT_BASE_SP * spMultiplier,
+    ascension: {
+      enabled: charData.ascension.enabled,
+      elements: {},
+      authority: {},
+      law: {},
+      deityPosition: '',
+      divineKingdom: { name: '', description: '' },
+    },
+    equipment,
+    skills,
+    inventory,
+    customFields: {
+      background: charData.background,
+      appearance: charData.appearance,
+      personality: charData.personality,
+      ascensionPath: charData.ascension.path,
+      ascensionDescription: charData.ascension.description,
+    },
+    ...overrides,
+  });
+}
+
+/**
+ * 为生成的 CharacterState 构建 StatePatch[]。
+ * 产出: add_character + add_skill × N + add_item × N + equip_item × N
+ */
+export function buildCharGenPatches(character: CharacterState): StatePatch[] {
+  const patches: StatePatch[] = [];
+
+  // 1. 添加角色
+  patches.push({
+    op: 'add_character',
+    target: `characters.${character.id}`,
+    value: character,
+    metadata: { source: 'char_gen', phase: '6e' },
+  });
+
+  // 2. 添加技能
+  for (const skill of character.skills) {
+    patches.push({
+      op: 'add_skill',
+      target: `characters.${character.id}.skills`,
+      value: skill,
+      metadata: { source: 'item_gen' },
+    });
+  }
+
+  // 3. 添加背包物品
+  for (const item of character.inventory) {
+    patches.push({
+      op: 'add_item',
+      target: `characters.${character.id}.inventory`,
+      value: item,
+      metadata: { source: 'item_gen' },
+    });
+  }
+
+  // 4. 装备物品
+  for (const equip of character.equipment) {
+    patches.push({
+      op: 'equip_item',
+      target: `characters.${character.id}.equipment`,
+      value: equip,
+      metadata: { source: 'item_gen' },
+    });
+  }
+
+  return patches;
+}
+
+/**
+ * 完整的角色生成链入口 — char_gen → item_gen → assemble → buildPatches。
+ *
+ * 流程:
+ * 1. callCharGenAgent() — 生成角色基础数据
+ * 2. callItemGenAgent() — 生成装备/技能/物品 (仅1次)
+ * 3. assembleCharacterState() — 合并为完整 CharacterState
+ * 4. buildCharGenPatches() — 生成 StatePatch[]
+ * 5. (可选) stateManager.commitChatState() — 持久化
+ *
+ * @returns CharGenChainResult (含 character + patches + narrativeSummary)
+ */
+export async function runCharGenChain(
+  request: CharGenRequest,
+  deps: CharGenAgentDeps,
+): Promise<CharGenChainResult> {
+  // Step 1: 生成角色基础数据
+  const charData = await callCharGenAgent(request, deps);
+
+  // Step 2: 生成装备/技能/物品 (仅1次, ADR-26)
+  const itemData = await callItemGenAgent(charData, request, deps);
+
+  // Step 3: 组装完整 CharacterState
+  const character = assembleCharacterState(charData, itemData);
+
+  // Step 4: 生成 StatePatch[]
+  const patches = buildCharGenPatches(character);
+
+  // Step 5: (可选) 持久化
+  if (deps.stateManager) {
+    await deps.stateManager.commitChatState(patches);
+  }
+
+  // 叙事摘要
+  const narrativeSummary = `新角色「${charData.name}」已生成: ${charData.race} ${charData.occupation.join('/')}, T${charData.tier} Lv.${charData.level}, ${charData.background.slice(0, 100)}`;
+
+  return { character, patches, narrativeSummary };
+}
+
+// ========== Internal Helpers ==========
+
+/**
+ * 解析 char_gen Agent 的 JSON 输出。
+ * 容忍 markdown 代码块包裹。
+ */
+function parseCharGenOutput(raw: string): CharGenOutput {
+  const json = extractJSON(raw);
+  const data = JSON.parse(json);
+
+  // 验证必需字段
+  if (!data.name) throw new Error('char_gen 输出缺少 name 字段');
+  if (!data.race) throw new Error('char_gen 输出缺少 race 字段');
+  if (!data.attributes) throw new Error('char_gen 输出缺少 attributes 字段');
+
+  return {
+    name: data.name,
+    race: data.race,
+    tier: data.tier ?? 1,
+    level: data.level ?? 1,
+    attributes: {
+      str: data.attributes?.str ?? 10,
+      dex: data.attributes?.dex ?? 10,
+      con: data.attributes?.con ?? 10,
+      int: data.attributes?.int ?? 10,
+      spi: data.attributes?.spi ?? 10,
+    },
+    identity: data.identity ?? [],
+    occupation: data.occupation ?? [],
+    background: data.background ?? '',
+    appearance: data.appearance ?? '',
+    personality: data.personality ?? '',
+    ascension: {
+      enabled: data.ascension?.enabled ?? false,
+      path: data.ascension?.path ?? '',
+      description: data.ascension?.description ?? '',
+    },
+  };
+}
+
+/**
+ * 解析 item_gen Agent 的 JSON 输出。
+ * 容忍 markdown 代码块包裹。
+ */
+function parseItemGenOutput(raw: string): ItemGenOutput {
+  const json = extractJSON(raw);
+  const data = JSON.parse(json);
+
+  return {
+    skills: data.skills ?? [],
+    equipment: data.equipment ?? [],
+    inventory: data.inventory ?? [],
+  };
+}
+
+/**
+ * 从可能含 markdown 代码块的文本中提取 JSON。
+ * 处理 ```json ... ``` 和 ``` ... ``` 包裹。
+ */
+function extractJSON(text: string): string {
+  // 尝试匹配 ```json ... ```
+  const jsonBlockMatch = text.match(/```json\s*([\s\S]*?)```/);
+  if (jsonBlockMatch) return jsonBlockMatch[1].trim();
+
+  // 尝试匹配 ``` ... ```
+  const codeBlockMatch = text.match(/```\s*([\s\S]*?)```/);
+  if (codeBlockMatch) return codeBlockMatch[1].trim();
+
+  // 查找第一个 { 到最后一个 }
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return text.slice(firstBrace, lastBrace + 1);
+  }
+
+  return text;
+}
+
+// ========== $chargen API ==========
+
+export const $chargen = {
+  /** 检测正文中的新角色标记 */
+  detect: detectNewCharacters,
+  /** 运行完整角色生成链 */
+  generate: runCharGenChain,
+  /** 组装 CharacterState (纯函数) */
+  assemble: assembleCharacterState,
+};

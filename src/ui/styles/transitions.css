@@ -1,0 +1,57 @@
+/* ===== Page Transitions ===== */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.fade-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+/* Slide transitions for create steps */
+.slide-left-enter-active,
+.slide-left-leave-active,
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition: all 0.3s ease;
+}
+.slide-left-enter-from {
+  opacity: 0;
+  transform: translateX(30px);
+}
+.slide-left-leave-to {
+  opacity: 0;
+  transform: translateX(-30px);
+}
+.slide-right-enter-from {
+  opacity: 0;
+  transform: translateX(-30px);
+}
+.slide-right-leave-to {
+  opacity: 0;
+  transform: translateX(30px);
+}
+
+/* ===== Modal ===== */
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 0.2s ease;
+}
+.modal-enter-active .modal-content,
+.modal-leave-active .modal-content {
+  transition: transform 0.2s ease;
+}
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+.modal-enter-from .modal-content {
+  transform: scale(0.95);
+}
+.modal-leave-to .modal-content {
+  transform: scale(0.95);
+}

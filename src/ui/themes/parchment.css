@@ -1,0 +1,66 @@
+/* ===== Parchment (羊皮纸) — 暖色古典风格 ===== */
+[data-theme="parchment"] {
+  --theme-window-bg: #f5efe6;
+  --theme-window-border: #d3c5b3;
+  --theme-content-bg: #faf6f0;
+  --theme-card-bg: rgba(253,250,245,0.9);
+  --theme-card-border: #d4c4b0;
+  --theme-surface-muted: rgba(240,230,210,0.9);
+  --theme-overlay-bg: rgba(0,0,0,0.4);
+
+  --theme-title-bar-bg: #ede0d4;
+  --theme-title-bar-text: #5d4037;
+  --theme-title-bar-icon: #8c6d62;
+  --theme-title-bar-btn-hover: rgba(139,115,85,0.1);
+  --theme-tab-bar-bg: #f0e8db;
+  --theme-tab-text: #8c6d62;
+  --theme-tab-active-text: #5d4037;
+  --theme-tab-indicator: #d4af37;
+  --theme-tab-hover-bg: rgba(139,115,85,0.08);
+
+  --theme-text-primary: #3a3a3a;
+  --theme-text-secondary: #666666;
+  --theme-text-muted: #9d8873;
+
+  --theme-primary: #d4af37;
+  --theme-primary-text: #fff;
+  --theme-success: #388e3c;
+  --theme-warning: #e67e22;
+  --theme-error: #d32f2f;
+
+  --theme-hp: #e53935;
+  --theme-mp: #3949ab;
+  --theme-sp: #2e7d32;
+  --theme-exp: #f9a825;
+  --theme-affection: #e91e63;
+  --theme-affection-bg: rgba(233,30,99,0.12);
+  --theme-affection-text: #c2185b;
+
+  --theme-quality-common: #9e9e9e;
+  --theme-quality-uncommon: #4caf50;
+  --theme-quality-rare: #2196f3;
+  --theme-quality-epic: #9c27b0;
+  --theme-quality-legendary: #ff9800;
+  --theme-quality-mythic: #e91e63;
+  --theme-quality-unique: #f09f4d;
+
+  --theme-currency-gold: #d4af37;
+  --theme-currency-silver: #b0a295;
+  --theme-currency-copper: #cd7f32;
+
+  --theme-tag-present-bg: rgba(56,142,60,0.12);
+  --theme-tag-present-text: #2e7d32;
+  --theme-tag-contract-bg: rgba(233,30,99,0.1);
+  --theme-tag-contract-text: #c2185b;
+
+  --theme-ascension-element: rgba(33,150,243,0.1);
+  --theme-ascension-power: rgba(255,152,0,0.1);
+  --theme-ascension-law: rgba(156,39,176,0.1);
+
+  --theme-font-title: 'Cinzel', serif;
+  --theme-font-body: 'Noto Serif SC', serif;
+
+  --theme-shadow-sm: 0 1px 3px rgba(139,115,85,0.12);
+  --theme-shadow-md: 0 2px 8px rgba(139,115,85,0.18);
+  --theme-shadow-lg: 0 4px 16px rgba(139,115,85,0.25);
+}

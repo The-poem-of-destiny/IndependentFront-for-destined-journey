@@ -833,3 +833,171 @@ interface AgentPromptTemplate {
 | ADR-08 | 角色卡用统一 CharacterState | NPC/主角/怪物可插拔 | 需要为不同类型做兼容字段 |
 | ADR-09 | 战斗用 Function Calling | LLM 不参与数值计算 | 需要实现完整的 CombatResolver |
 | ADR-10 | 角色更新 Agent 并行 | N 个角色 N 个请求，快 | API 并发限制需关注 |
+| ADR-16 | PlotEvent 扁平存储 (childrenIds) | 避免 IndexedDB 嵌套查询复杂度和 Dexie 类型推断循环引用 | 运行时 resolvePlotTree() 重建嵌套树，轻微性能开销 |
+| ADR-17 | SaveSlot 级联删除 | 删除存档时自动清理关联快照/记忆/剧情事件 | 需要多表事务保证一致性 |
+| ADR-18 | importAllData 拆分 3 transaction | Dexie TypeScript 重载最多 ~5 表参数 | 不是原子操作，但全量导入场景可接受 |
+
+---
+
+## Phase 2 实现记录
+
+### 类型系统决策
+
+| 决策 | 理由 |
+|------|------|
+| PlotEvent 扁平存储 (childrenIds) | 避免 IndexedDB 嵌套查询复杂度和 Dexie 类型推断循环引用 |
+| CharacterState 统一接口 | NPC/主角/怪物/召唤物共用，type 字段区分 |
+| VarsPatch 支持 replace/delta/insert | 与 mvu_update 协议完全兼容 |
+| Snapshot 全量存储 | 30 快照数据量可控 (~1-2MB)，全量比增量可靠 |
+| SaveSlot 级联删除 | 删除存档时自动清理关联快照/记忆/剧情事件 |
+| 存档系统：10 槽 × 30 快照/槽 | 槽数固定 (slot: 0-9)，每槽自动 trimSnapshots() |
+| importAllData 3-transaction 拆分 | Dexie 类型签名限制，非原子但全量导入场景可接受 |
+
+### 数据库 v4 变更
+
+**新增 6 表**：
+
+| 表 | 主键 | 索引 | 说明 |
+|----|------|------|------|
+| memories | id | saveId, createdAt, realTimestamp | MEM 记忆记录 |
+| plotEvents | id | saveId, parentId, status, updatedAt | 剧情事件(扁平) |
+| characters | id | type | 统一角色状态 |
+| snapshots | id | saveId, index, timestamp | 快照检查点 |
+| saves | id | slot, updatedAt | 存档槽 |
+| apiEndpoints | id | name | API 端点配置 |
+
+**迁移策略** (v3 → v4)：
+1. 读取现有 settings 记录
+2. 为每条记录添加 v4 新字段默认值（apiEndpoints: [], agentConfigs: [], agentPipeline: DEFAULT_AGENT_PIPELINE 等）
+3. 写回 settings 表
+4. 现有 lorebooks/presets/chats 数据不变
+
+### 新增辅助函数
+
+- `createDefaultCharacterState(overrides?)` — 创建默认角色状态
+- `resolvePlotTree(flatEvents)` — 将扁平 PlotEvent[] 重建为 PlotEventNode[] 嵌套树
+- `trimSnapshots(saveId, maxCount)` — 清理超出上限的快照
+- `getRecentMemories(saveId, limit)` — 按时间倒序获取最新记忆
+- `getActivePlotEvents(saveId)` — 获取所有 active 状态的事件
+
+### 遇到的问题
+
+1. **Dexie transaction() 参数限制**：TypeScript 类型重载最多支持 ~5 个表参数，10 表全量导入需要拆分为 3 个独立的 transaction（lorebooks+presets+settings+chats / memories+plotEvents+characters / snapshots+saves+apiEndpoints）。不是原子操作，但导入场景可接受。
+
+2. **PlotEvent.children 循环引用**：`children: PlotEvent[]` 导致 Dexie 的 mapped type（用于索引键路径推断）无限递归 → TS2615 编译错误。改用 `childrenIds: string[]` 扁平存储 + `resolvePlotTree()` 运行时重建嵌套树。`PlotEventNode` 类型提供嵌套视图。
+
+---
+
+## Phase 3 实现记录
+
+### Agent 编排引擎架构
+
+**3 个新模块**：
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `agent-client.ts` | ~130 | API 客户端：userId 缓存隔离、重试、超时、缓存命中检测 |
+| `agent-templates.ts` | ~320 | 7 Agent 的 Prompt 模板：固定前缀 + 可变后缀 |
+| `agent-orchestrator.ts` | ~270 | DAG 编排引擎：阶段串行 + Agent 并行 + 单向上下文流 |
+
+### 技术决策
+
+| 决策 | 理由 |
+|------|------|
+| `fp|{saveId}|{agentId}` 作为 userId | 简洁、可逆解析、每个存档+Agent 独立缓存空间 |
+| `stageDependenciesMet()` 跳过而非报错 | 上游 Agent 失败不应阻止管线继续（其他分支可能成功） |
+| `regenerateAgent()` 不传播到下游 | 保持流程单向性 — 手动重生成只更新该 Agent 的结果 |
+| 同阶段 Agent `Promise.allSettled` | 允许部分失败，不互相阻塞 |
+| Prompt 模板用 `Record<string, AgentPromptTemplate>` | 可扩展 — 新增 Agent 只需加 key + 模板 |
+| `buildAgentMessages()` 独立于 AgentClient | 关注点分离 — 模板构建 vs API 调用 |
+
+### 测试覆盖
+
+| 文件 | Tests | 覆盖 |
+|------|-------|------|
+| `agent-client.test.ts` | 15 | userId 构建/解析、成功响应、HTTP 错误、重试、超时、AbortSignal、缓存命中 |
+| `agent-templates.test.ts` | 50 | 7 Agent 存在性、fixedSystem>50字、fixedExamples>20字、variableContext/variableInstruction 非空、buildAgentMessages 结构、世界书注入、角色状态注入、模板质量 |
+| `agent-orchestrator.test.ts` | 16 | 管线验证(有效+无效)、单/多阶段执行、并行验证、上下文传递、错误处理(部分失败)、regenerateAgent、onlyAgents、禁用Agent、事件回调、OrchestratorRun 结构 |
+
+### 遇到的问题
+
+1. **AbortSignal 竞态**：外部 signal 在 `addEventListener` 注册前已 aborted → listener 永不触发 → fetch 永不取消。修复：注册前检查 `signal.aborted`。
+
+2. **ESM require() 报错**：`createDefaultPipeline()` 中使用 `require('./types')` → type:module 下不可用。修复：改用顶层 `export { DEFAULT_AGENT_PIPELINE } from './types'`。
+
+3. **OrchestratorRun.status 缺 'idle'**：内部状态机需要 idle → running → completed/failed 完整生命周期。修复：types.ts 中添加 'idle' 到 status 联合类型。
+
+---
+
+## Phase 6e 实现记录
+
+### 对话总结 (2026-06-15)
+
+本对话完成了 Phase 6e: Marker Protocol + SubAgent 系统的全部实现，共 +108 tests，累计 1978 tests。
+
+#### 新建模块
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `marker-protocol.ts` | ~220 | XML 标记检测：scanMarkers / stripMarkers / parseTagAttributes 等 8 个纯函数 |
+| `char-gen-agent.ts` | ~300 | 角色生成链：detectNewCharacters / runCharGenChain / assembleCharacterState / $chargen API |
+
+#### 修改模块
+| 文件 | 变更 | 内容 |
+|------|------|------|
+| `types.ts` | +~130 行 | 10 个新类型 + `add_character` StatePatchOp |
+| `agent-templates.ts` | +~180 行 | craft_gen / char_gen / item_gen 模板，REGISTERED_AGENT_IDS 10→13 |
+| `agent-orchestrator.ts` | +~80 行 | 3 个 Marker 回调 + processStageMarkers + pendingCombatMarkers |
+| `index.ts` | +4 行 | 导出新模块 + VERSION → 4.0.0 |
+
+#### 关键架构决策
+
+1. **Combat 延迟到 Stage 2 后** (主人反馈修正):
+   - 原始设计: Stage 1 story 后立即触发 combat
+   - 修正后: Stage 1 暂存 combat_trigger → Stage 2 char_gen 先执行 → 再执行 combat
+   - 理由: 正文中可能同时出现 `<char_detect>` 和 `<combat_trigger>`，新敌人/monster 必须在战斗开始前生成完毕
+
+2. **Craft 阻塞注入**: Stage 1 story 后扫描 craft_request → 调 Craft Agent → 用 position 精确替换标记块为制作结果叙事
+
+3. **Char Gen 链式触发**: vars_update 检测 char_detect → char_gen → item_gen (仅1次, ADR-26) → Stage 3 并行 char_update
+
+#### Pipeline 最终形态
+```
+Stage 0: memory_recall + plot_pre_check     (并行)
+Stage 1: story → craft 🛑阻塞注入 + combat 🚩暂存
+Stage 2: vars_update → char_detect 👤 → combat 🚩执行 (新敌人已就绪)
+Stage 3: char_update × N (并行，含新NPC)
+Stage 4: memory_summary
+Stage 5: plot_post_check
+```
+
+### 犯过的错误 (自省)
+
+1. **架构假设错误 — Combat 时序**:
+   - 错误: 最初设计 combat 在 Stage 1 story 后立即触发
+   - 根因: 没有考虑到 `<char_detect>` 和 `<combat_trigger>` 可以同时出现在正文中，新敌人需要在战斗前生成
+   - 教训: 多人/多实体场景要考虑数据依赖顺序，标记处理要考虑交叉场景
+   - 主人纠正后修正
+
+2. **类型不匹配 — TierConfig 字段名臆测**:
+   - 错误: 使用 `tierConfig.mpSpMultiplier`，实际字段是分开的 `mpMultiplier` 和 `spMultiplier`
+   - 根因: 凭记忆写代码，没有先查 tier-constants.ts 的 TierConfig 接口定义
+   - 教训: 引用外部类型字段前必须先 grep 确认字段名
+
+3. **类型不匹配 — EquipmentSlot 结构臆测**:
+   - 错误: 假设 EquipmentSlot 是 `{id, slot, item: {id, name, ...}}`，实际是 `{slot, itemId, name}`
+   - 根因: 同上，没有查 types.ts 中 EquipmentSlot 的实际定义
+   - 教训: 涉及数据库/持久化类型的结构体必须查源定义，不能凭其他项目经验猜测
+
+4. **类型不匹配 — StatePatchOp 未包含新 op**:
+   - 错误: 在 char-gen-agent.ts 中使用 `add_character` 操作，但 StatePatchOp 联合类型中没有此项
+   - 根因: 添加新操作时只改了使用方，忘了改类型定义方
+   - 教训: 新增枚举/联合类型的成员时，要同步修改类型定义和使用方
+
+5. **测试文件导入路径错误**:
+   - 错误: 从 `./types` 导入 `CharGenRequest` / `CharGenAgentDeps` / `CharGenClient`，但这些类型定义在 `./char-gen-agent` 中
+   - 根因: 写完 char-gen-agent.ts 后写测试，大脑默认"所有类型都在 types.ts"
+   - 教训: 写测试前先确认每个类型的实际定义位置
+
+6. **VERSION 号未及时更新**:
+   - 错误: 新增 2 个模块后仍保持 VERSION = '3.0.0'
+   - 教训: 模块级里程碑完成后应更新版本号

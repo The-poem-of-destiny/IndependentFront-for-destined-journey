@@ -1,0 +1,50 @@
+/* ===== Forest (森林) — 墨绿自然风格 ===== */
+[data-theme="forest"] {
+  --theme-window-bg: #0d1a12;
+  --theme-window-border: #1a3a25;
+  --theme-content-bg: #0a150e;
+  --theme-card-bg: #152218;
+  --theme-card-border: #1a3a25;
+  --theme-surface-muted: color-mix(in srgb, #0d1a12 72%, #152218 28%);
+  --theme-overlay-bg: color-mix(in srgb, #0d1a12 58%, transparent);
+
+  --theme-title-bar-bg: #111f16;
+  --theme-title-bar-text: #d8f0e0;
+  --theme-title-bar-icon: #80b898;
+  --theme-title-bar-btn-hover: rgba(255,255,255,0.06);
+  --theme-tab-bar-bg: #0f1c14;
+  --theme-tab-text: #689878;
+  --theme-tab-active-text: #c8f0d8;
+  --theme-tab-indicator: #4ade80;
+  --theme-tab-hover-bg: rgba(255,255,255,0.04);
+
+  --theme-text-primary: #d8f0e0;
+  --theme-text-secondary: #80b898;
+  --theme-text-muted: #587860;
+
+  --theme-primary: #4ade80;
+  --theme-primary-text: #0d1a12;
+  --theme-success: #4ade80;
+  --theme-warning: #d4a834;
+  --theme-error: #e85555;
+
+  --theme-hp: #e85555;
+  --theme-mp: #6088d8;
+  --theme-sp: #4ade80;
+  --theme-exp: #d4a834;
+  --theme-affection: #e87898;
+  --theme-affection-bg: rgba(232,120,152,0.18);
+  --theme-affection-text: #f8b0c0;
+
+  --theme-quality-common: #b0c0b0;
+  --theme-quality-uncommon: #4ade80;
+  --theme-quality-rare: #6088d8;
+  --theme-quality-epic: #a070e0;
+  --theme-quality-legendary: #d4a834;
+  --theme-quality-mythic: #e87898;
+  --theme-quality-unique: #e89848;
+
+  --theme-currency-gold: #d4a834;
+  --theme-currency-silver: #b0c0b0;
+  --theme-currency-copper: #c08050;
+}

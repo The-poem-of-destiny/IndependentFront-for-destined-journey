@@ -1,0 +1,102 @@
+/* ============================================================
+   命定之诗 — 主题变量系统
+   所有主题共享同一套 CSS 变量名，通过 [data-theme="xxx"] 切换
+   使用 color-mix() 做动态透明度计算
+   ============================================================ */
+
+/* ===== 默认主题 (obsidian — 深色 HUD) ===== */
+:root, [data-theme="obsidian"] {
+  /* 基础背景 */
+  --theme-window-bg: #15171c;
+  --theme-window-border: #323846;
+  --theme-content-bg: #12151b;
+  --theme-card-bg: #1b1f27;
+  --theme-card-border: #2c3340;
+  --theme-surface-muted: color-mix(in srgb, #15171c 72%, #1b1f27 28%);
+  --theme-overlay-bg: color-mix(in srgb, #15171c 58%, transparent);
+
+  /* 标题栏/导航 */
+  --theme-title-bar-bg: #1a1d24;
+  --theme-title-bar-text: #f3f5f8;
+  --theme-title-bar-icon: #b9c0cc;
+  --theme-title-bar-btn-hover: rgba(255,255,255,0.08);
+  --theme-tab-bar-bg: #171a21;
+  --theme-tab-text: #a6afbd;
+  --theme-tab-active-text: #f4f7fb;
+  --theme-tab-indicator: #8f9fff;
+  --theme-tab-hover-bg: rgba(255,255,255,0.06);
+
+  /* 文字 */
+  --theme-text-primary: #f3f5f8;
+  --theme-text-secondary: #c1c8d4;
+  --theme-text-muted: #8f98a8;
+
+  /* 语义色 */
+  --theme-primary: #8f9fff;
+  --theme-primary-text: #10131a;
+  --theme-success: #35c98a;
+  --theme-warning: #f0b84b;
+  --theme-error: #ff6d6d;
+
+  /* 资源色 */
+  --theme-hp: #ff5f57;
+  --theme-mp: #5b8cff;
+  --theme-sp: #35c98a;
+  --theme-exp: #f0b84b;
+  --theme-affection: #ff6f91;
+  --theme-affection-bg: rgba(255,111,145,0.18);
+  --theme-affection-text: #ffb2c1;
+
+  /* 品质色 (7级) */
+  --theme-quality-common: #e2e8f0;
+  --theme-quality-uncommon: #56bf7b;
+  --theme-quality-rare: #5d97ff;
+  --theme-quality-epic: #9a72f8;
+  --theme-quality-legendary: #e5c166;
+  --theme-quality-mythic: #e4587d;
+  --theme-quality-unique: #f09f4d;
+
+  /* 货币 */
+  --theme-currency-gold: #f5c24f;
+  --theme-currency-silver: #d4dae4;
+  --theme-currency-copper: #d18b62;
+
+  /* 标签 */
+  --theme-tag-present-bg: rgba(53,201,138,0.16);
+  --theme-tag-present-text: #7ce3b4;
+  --theme-tag-contract-bg: rgba(255,111,145,0.16);
+  --theme-tag-contract-text: #ffb0c0;
+
+  /* 登神长阶 */
+  --theme-ascension-element: rgba(91,140,255,0.12);
+  --theme-ascension-power: rgba(240,184,75,0.12);
+  --theme-ascension-law: rgba(154,114,248,0.12);
+
+  /* 排版 */
+  --theme-font-title: 'Cinzel', serif;
+  --theme-font-body: 'Noto Sans SC', sans-serif;
+
+  /* 间距 */
+  --theme-spacing-xs: 4px;
+  --theme-spacing-sm: 8px;
+  --theme-spacing-md: 12px;
+  --theme-spacing-lg: 16px;
+  --theme-spacing-xl: 24px;
+  --theme-spacing-2xl: 32px;
+
+  /* 圆角 */
+  --theme-radius-sm: 4px;
+  --theme-radius-md: 6px;
+  --theme-radius-lg: 8px;
+  --theme-radius-xl: 12px;
+  --theme-radius-full: 999px;
+
+  /* 阴影 */
+  --theme-shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
+  --theme-shadow-md: 0 2px 8px rgba(0,0,0,0.3);
+  --theme-shadow-lg: 0 4px 16px rgba(0,0,0,0.4);
+
+  /* 过渡 */
+  --theme-transition-fast: 0.15s ease;
+  --theme-transition-normal: 0.25s ease;
+}

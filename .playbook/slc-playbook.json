@@ -1,0 +1,265 @@
+{
+  "metadata": {
+    "created": "2026-06-15T11:27:34.620464",
+    "seeded": true,
+    "last_success": "2026-06-15T17:30:00.000000",
+    "total_successes": 9,
+    "last_failure": "2026-06-15T15:40:23.631862",
+    "total_failures": 4
+  },
+  "bullets": [
+    {
+      "id": "P-6971ab",
+      "content": "Don't use mutable default arguments in Python (e.g., def foo(items=[]))",
+      "category": "pitfall",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "created": "2026-06-15T11:27:34.620464"
+    },
+    {
+      "id": "P-c579f4",
+      "content": "Always validate input at API boundaries before processing",
+      "category": "pitfall",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "created": "2026-06-15T11:27:34.620464"
+    },
+    {
+      "id": "P-0ac0d5",
+      "content": "Check for null/undefined before accessing nested object properties",
+      "category": "pitfall",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "created": "2026-06-15T11:27:34.620464"
+    },
+    {
+      "id": "S-0a35f1",
+      "content": "Write tests before fixing bugs to prevent regression",
+      "category": "strategy",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "created": "2026-06-15T11:27:34.620464"
+    },
+    {
+      "id": "S-327365",
+      "content": "Use environment variables for configuration, not hardcoded values",
+      "category": "strategy",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "created": "2026-06-15T11:27:34.620464"
+    },
+    {
+      "id": "S-348994",
+      "content": "Log errors with context (request ID, user ID, operation) for debugging",
+      "category": "strategy",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "created": "2026-06-15T11:27:34.620464"
+    },
+    {
+      "id": "C-c171c4",
+      "content": "Use try/finally or context managers to ensure resource cleanup",
+      "category": "code",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "created": "2026-06-15T11:27:34.620464"
+    },
+    {
+      "id": "C-176818",
+      "content": "Prefer explicit imports over wildcard imports for clarity",
+      "category": "code",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "created": "2026-06-15T11:27:34.620464"
+    },
+    {
+      "id": "P-697b60",
+      "content": "Always read reference/world_book_index.md and reference/audit_report.md before writing any module involving numbers/geography/qualities. Never invent data.",
+      "category": "pitfall",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": null,
+      "created": "2026-06-15T11:28:52.930215"
+    },
+    {
+      "id": "P-373f00",
+      "content": "After modifying types.ts (adding fields to interfaces), immediately run typecheck to find all test files that need updating",
+      "category": "pitfall",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": null,
+      "created": "2026-06-15T11:29:51.198175"
+    },
+    {
+      "id": "S-01a081",
+      "content": "MapTopology/TopologyEdge in types.ts were dead code with zero references - deleting them is safe. Always grep for references before deleting types.",
+      "category": "strategy",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": null,
+      "created": "2026-06-15T11:29:51.457055"
+    },
+    {
+      "id": "D-30d0d8",
+      "content": "World book data source: reference/world_book_index.md maps all 605 entries. Key sections: tier values (#417617), geography (#580370 topology), quality names (#265160), combat protocol (#837805)",
+      "category": "domain",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": null,
+      "created": "2026-06-15T11:29:51.718663"
+    },
+    {
+      "id": "D-fd1bec",
+      "content": "Default era name is fuxing-era, not glorious-era. Affection range is -100 to +100, not -50 to +100. Quality names: putong/youliang/x\u012byou/shishi/chuanshuo/shenhua/weiyi",
+      "category": "domain",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": null,
+      "created": "2026-06-15T11:29:51.969036"
+    },
+    {
+      "id": "P-89c540",
+      "content": "AVOID: ADR-11 boundary: never assume a subsystem is pure-Code without asking. Crafting needs AI for creative effects (affix naming, descriptions), Code only does DC/check/settlement math. Clarify division BEFORE implementing.",
+      "category": "pitfall",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "source_endpoint": "Phase 6b Craft System",
+      "created": "2026-06-15T15:38:08.727488"
+    },
+    {
+      "id": "P-92e568",
+      "content": "AVOID: When adding quality-to-tier mappings, cross-reference tier-constants.ts qualityCap. \u53f2\u8bd7 is first producible at T3 (not T4). mismatch propagated to 8 test failures.",
+      "category": "pitfall",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "source_endpoint": "Phase 6b Craft System",
+      "created": "2026-06-15T15:39:14.227635"
+    },
+    {
+      "id": "P-ff8498",
+      "content": "AVOID: StatePatch uses 'op' not 'type' field. grep the target type definition before building patches, don't guess field names.",
+      "category": "pitfall",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "source_endpoint": "Phase 6b Craft System",
+      "created": "2026-06-15T15:39:47.676342"
+    },
+    {
+      "id": "P-532142",
+      "content": "AVOID: BuildCraftDescription checked rating before prep-failure, causing resource-blocked crafts to say '\u5931\u8d25' instead of '\u7ec8\u6b62'. Order: prep-failure \u2192 \u5927\u5931\u8d25 \u2192 \u5931\u8d25 \u2192 success.",
+      "category": "pitfall",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "source_endpoint": "Phase 6b Craft System",
+      "created": "2026-06-15T15:40:23.631862"
+    },
+    {
+      "id": "S-5ed84e",
+      "content": "After major type changes, run tsc --noEmit first \u2192 collect ALL failures \u2192 fix in batch. Went from 12 test failures to 0 in one iteration by fixing root causes (QUALITY_TIER_REFERENCE + production bonus DC) rather than patching individual tests.",
+      "category": "strategy",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": "Phase 6b Craft System",
+      "created": "2026-06-15T15:40:45.042273"
+    },
+    {
+      "id": "C-6b9a12",
+      "content": "Windows: use python.exe directly in PowerShell (not python3 or full path). This resolves to Python 3.10 at E:/Python310/python.exe.",
+      "category": "code",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": "SLC tool invocation",
+      "created": "2026-06-15T15:42:00.000000"
+    },
+    {
+      "id": "S-b2af04",
+      "content": "When the user says 'plan is too complex, just give me bounds and an API', LISTEN. Affection system went from 6 functions (calcAffectionChange/getAffectionTier/etc.) to 6 simple methods (get/set/add/batch/label/simpleLabel). Code does clamping, AI does judgment.",
+      "category": "strategy",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": "Phase 6d Affection System",
+      "created": "2026-06-15T17:30:00.000000"
+    },
+    {
+      "id": "P-f6c183",
+      "content": "AVOID: When writing integration scenario tests, always check actual function signatures first (grep '^export function' in source), not what you remember. combat-resolver exports resolveAttack not executeAttack; combat-turn exports rollInitiative not createCombatUnitTurn.",
+      "category": "pitfall",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": "Phase 6c Integration Scenario",
+      "created": "2026-06-15T17:30:00.000000"
+    },
+    {
+      "id": "S-8d3b1b",
+      "content": "Integration scenario tests are worth the effort: 44 tests covering full combat flow (encounter→cluster→AoE→morale→execution→settlement) caught interface mismatches and validated ALL subsystems work together. Write them after completing a subsystem group.",
+      "category": "strategy",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": "Phase 6a-d Integration",
+      "created": "2026-06-15T17:30:00.000000"
+    },
+    {
+      "id": "P-019c35",
+      "content": "AVOID: Don't put Prompt engineering before frontend. User explicitly said context visibility & prompt tuning goes AFTER UI because you need a running system to iterate on prompt quality. Plan order: backend → frontend → prompt tuning → integration.",
+      "category": "pitfall",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "source_endpoint": "Plan restructuring Phase 8",
+      "created": "2026-06-15T17:30:00.000000"
+    },
+    {
+      "id": "P-ab12cd",
+      "content": "AVOID: AppModal Escape key handler on div @keydown never fires without focus. Use document.addEventListener('keydown', handler) in onMounted + removeEventListener in onUnmounted. Always add a visible close button as fallback.",
+      "category": "pitfall",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "source_endpoint": "Phase 7c SettingsPage",
+      "created": "2026-06-16T00:00:00.000000"
+    },
+    {
+      "id": "P-ef34gh",
+      "content": "AVOID: Vue template expressions cannot use IIFE arrows or complex inline logic like (()=>{...})(). Use computed properties instead — define const activePreset = computed(() => presets.value.find(...)) in <script> and reference it in template.",
+      "category": "pitfall",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "source_endpoint": "Phase 7c SettingsPage preset viewer",
+      "created": "2026-06-16T00:00:00.000000"
+    },
+    {
+      "id": "P-ij56kl",
+      "content": "AVOID: Declaring variables (showSaveModal) in multiple places when merging code blocks. When editing script setup, grep for existing declarations before adding new ones — vite build catches this but tsc --noEmit doesn't always.",
+      "category": "pitfall",
+      "helpful_count": 0,
+      "harmful_count": 0,
+      "source_endpoint": "Phase 7c HomePage",
+      "created": "2026-06-16T00:00:00.000000"
+    },
+    {
+      "id": "S-78mn90",
+      "content": "CSS multi-theme system: use <html data-theme=\"xxx\"> + CSS :root/[data-theme] selectors for all color/typography tokens. Use color-mix() for dynamic transparency (hover/focus/selected states). Store theme preference in localStorage. Each theme defines ~40 CSS custom properties in one file.",
+      "category": "strategy",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": "Phase 7b Theme System",
+      "created": "2026-06-16T00:00:00.000000"
+    },
+    {
+      "id": "D-op12qr",
+      "content": "SillyTavern preset JSON structure: top-level has temperature/frequency_penalty/presence_penalty/top_p/openai_max_tokens etc. The 'prompts' array contains sub-prompt objects with: name, enabled (bool), role (system/user/assistant), content (string), identifier (UUID), injection_position/depth/order, marker (bool), forbid_overrides (bool), system_prompt (bool). Imported files should use filename as preset name.",
+      "category": "domain",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": "Phase 7c Preset System",
+      "created": "2026-06-16T00:00:00.000000"
+    },
+    {
+      "id": "S-st34uv",
+      "content": "When adding Vue 3 frontend to a tsc-only TypeScript project: keep tsc for engine compilation, use vite build for UI. Add separate build:engine script. Use path aliases (@engine) in both vite.config.ts and tsconfig.json paths. Add src/**/*.vue to tsconfig include. Create src/env.d.ts for .vue module declarations.",
+      "category": "strategy",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": "Phase 7a Engineering Setup",
+      "created": "2026-06-16T00:00:00.000000"
+    }
+  ]
+}

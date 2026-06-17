@@ -1,0 +1,50 @@
+/* ===== Sakura (樱) — 紫粉浪漫风格 ===== */
+[data-theme="sakura"] {
+  --theme-window-bg: #1a1018;
+  --theme-window-border: #3d2a3a;
+  --theme-content-bg: #150d14;
+  --theme-card-bg: #22151f;
+  --theme-card-border: #3d2a3a;
+  --theme-surface-muted: color-mix(in srgb, #1a1018 72%, #22151f 28%);
+  --theme-overlay-bg: color-mix(in srgb, #1a1018 58%, transparent);
+
+  --theme-title-bar-bg: #1f141d;
+  --theme-title-bar-text: #f5e0f0;
+  --theme-title-bar-icon: #c090b8;
+  --theme-title-bar-btn-hover: rgba(255,255,255,0.06);
+  --theme-tab-bar-bg: #1c121a;
+  --theme-tab-text: #a08098;
+  --theme-tab-active-text: #f5d0e8;
+  --theme-tab-indicator: #e080b0;
+  --theme-tab-hover-bg: rgba(255,255,255,0.04);
+
+  --theme-text-primary: #f5e0f0;
+  --theme-text-secondary: #c090b8;
+  --theme-text-muted: #7a5a70;
+
+  --theme-primary: #e080b0;
+  --theme-primary-text: #fff;
+  --theme-success: #6bbf8a;
+  --theme-warning: #e0b060;
+  --theme-error: #e06070;
+
+  --theme-hp: #e06070;
+  --theme-mp: #8090e0;
+  --theme-sp: #6bbf8a;
+  --theme-exp: #e0b060;
+  --theme-affection: #f090b0;
+  --theme-affection-bg: rgba(240,144,176,0.18);
+  --theme-affection-text: #f8c0d0;
+
+  --theme-quality-common: #c0a8b8;
+  --theme-quality-uncommon: #6bbf8a;
+  --theme-quality-rare: #8090e0;
+  --theme-quality-epic: #b080d8;
+  --theme-quality-legendary: #e0b060;
+  --theme-quality-mythic: #f090b0;
+  --theme-quality-unique: #f0a060;
+
+  --theme-currency-gold: #e0b060;
+  --theme-currency-silver: #c0a8b8;
+  --theme-currency-copper: #c08060;
+}

@@ -1,0 +1,75 @@
+/* ===== CSS Reset & Base ===== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--theme-font-body, 'Noto Sans SC', sans-serif);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--theme-text-primary);
+  background: var(--theme-window-bg);
+  overflow: hidden;
+  height: 100vh;
+}
+
+#app {
+  height: 100vh;
+  overflow: hidden;
+}
+
+a {
+  color: var(--theme-primary);
+  text-decoration: none;
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+  border: none;
+  background: none;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--theme-text-muted);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--theme-text-secondary);
+}
+
+/* ===== Focus ===== */
+:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ===== Selection ===== */
+::selection {
+  background: var(--theme-primary);
+  color: var(--theme-window-bg);
+}

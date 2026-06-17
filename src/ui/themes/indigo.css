@@ -1,0 +1,50 @@
+/* ===== Indigo (靛蓝) — 深邃蓝紫风格 ===== */
+[data-theme="indigo"] {
+  --theme-window-bg: #111827;
+  --theme-window-border: #1e3a5f;
+  --theme-content-bg: #0d1320;
+  --theme-card-bg: #1a2440;
+  --theme-card-border: #1e3a5f;
+  --theme-surface-muted: color-mix(in srgb, #111827 72%, #1a2440 28%);
+  --theme-overlay-bg: color-mix(in srgb, #111827 58%, transparent);
+
+  --theme-title-bar-bg: #151e33;
+  --theme-title-bar-text: #e0e8f8;
+  --theme-title-bar-icon: #a0b8d8;
+  --theme-title-bar-btn-hover: rgba(255,255,255,0.06);
+  --theme-tab-bar-bg: #131b2e;
+  --theme-tab-text: #8098b8;
+  --theme-tab-active-text: #d8e4f8;
+  --theme-tab-indicator: #6b8cff;
+  --theme-tab-hover-bg: rgba(255,255,255,0.04);
+
+  --theme-text-primary: #e0e8f8;
+  --theme-text-secondary: #a0b8d8;
+  --theme-text-muted: #687890;
+
+  --theme-primary: #6b8cff;
+  --theme-primary-text: #fff;
+  --theme-success: #4ade80;
+  --theme-warning: #fbbf24;
+  --theme-error: #f87171;
+
+  --theme-hp: #f87171;
+  --theme-mp: #6b8cff;
+  --theme-sp: #4ade80;
+  --theme-exp: #fbbf24;
+  --theme-affection: #f472b6;
+  --theme-affection-bg: rgba(244,114,182,0.18);
+  --theme-affection-text: #fda4d4;
+
+  --theme-quality-common: #c0c8d8;
+  --theme-quality-uncommon: #4ade80;
+  --theme-quality-rare: #6b8cff;
+  --theme-quality-epic: #a78bfa;
+  --theme-quality-legendary: #fbbf24;
+  --theme-quality-mythic: #f472b6;
+  --theme-quality-unique: #fbbf24;
+
+  --theme-currency-gold: #fbbf24;
+  --theme-currency-silver: #c0c8d8;
+  --theme-currency-copper: #d08860;
+}

@@ -5,17 +5,33 @@
   "main": "dist/sillytavern/index.js",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "dev": "vite",
+    "build": "vite build",
+    "build:engine": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "echo \"No tests configured\""
+    "test": "vitest",
+    "test:run": "vitest --run",
+    "preview": "vite preview"
   },
-  "keywords": ["sillytavern", "lorebook", "ai-chat"],
+  "keywords": [
+    "sillytavern",
+    "lorebook",
+    "ai-chat"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "dexie": "^4.4.3"
+    "dexie": "^4.4.3",
+    "pinia": "^2.3.1",
+    "vue": "^3.5.38",
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
-    "typescript": "^5.4.0"
+    "@vitejs/plugin-vue": "^5.2.4",
+    "@vue/test-utils": "^2.4.11",
+    "fake-indexeddb": "^6.2.5",
+    "typescript": "^5.4.0",
+    "vite": "^6.4.3",
+    "vitest": "^4.1.8"
   }
 }
