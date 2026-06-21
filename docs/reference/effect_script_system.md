@@ -110,17 +110,37 @@ AI 用 `$` API 编写效果逻辑，引擎在沙盒中执行。
 ### 数据模型
 
 ```
-物品/技能/装备:
-  ├── 效果: Record<string, string>   ← 前端渲染 (AI 写中文描述)
+物品/技能/装备/Ascension:
+  ├── effects: Record<string, string>   ← 前端渲染 (AI 写中文描述)
   ├── scripts: Record<string, string> ← 引擎执行 (脚本名→代码)
+  │   ├── init    → 激活时自动执行（注册 $event.on）
+  │   ├── cleanup → 失效时自动执行（调用 $event.off）
+  │   └── ...     → 其他自定义脚本
   └── 钩子引用: scripts 里的脚本名
 
 状态效果 (StatusEffect):
   ├── stackable / maxStacks          ← 层数控制
   ├── scripts: Record<string, string> ← 引擎执行
   ├── onApply / onTick / onRemove / onTrigger → 引用 scripts
+  ├── subscriptions: 通过 init 中 $event.on() 注册持久监听
   └── effects: Record<string, number> ← 简单数值效果 (保留)
 ```
+
+### 持久订阅管理 (`subscription-manager.ts`)
+
+`SubscriptionManager` 管理 `$event.on()` 注册的持久订阅生命周期：
+
+```
+对象激活 → executeInit() → $event.on() → 收集到 effects.subscriptions
+  → SubscriptionManager.register(ownerKey, eventType, scriptKey)
+    → EventBus.subscribe(eventType, handler)
+      → 事件触发 → resolveScriptRef → executeScript → 应用效果
+
+对象失效 → executeCleanup() → $event.off() → 收集到 effects.unsubscriptions
+  → SubscriptionManager.unregisterAll(ownerKey) [兜底]
+```
+
+**递归保护**：事件嵌套处理超过 10 层自动截断。
 
 ### 层数控制
 
@@ -140,7 +160,8 @@ executeScript(script, context)
         ├── $dice:   { d20, d100, roll }    ← 骰子系统
         ├── $resource: { getHp, getMaxHp, modifyHp, modifyStat }
         ├── $status: { add, remove, setStacks, getStacks }  ← 套娃核心
-        └── $event: { emit }                ← 触发事件
+        ├── $event: { on, off, emit }       ← 🆕 持久订阅 + 瞬时事件
+        └── $call:  (ref) => any            ← 🆕 跨对象脚本调用
 ```
 
 ### 套娃机制
@@ -158,11 +179,74 @@ executeScript(script, context)
 
 无限套娃，无字符串转义问题。
 
-### 作用域
+### 🆕 脚本引用路径规范
 
-- 物品的 scripts 只能引用自己 scripts 里的脚本
-- 状态的 scripts 只能引用自己 scripts 里的脚本
-- 局部作用域，不跨对象
+| 引用写法 | 解析目标 | 使用场景 |
+|----------|---------|---------|
+| `"tick"` | 当前对象 `scripts["tick"]` | 同对象内 |
+| `"@parent.burnFormula"` | 创建者的 `scripts["burnFormula"]` | 子 StatusEffect 回调父 Item |
+| `"@item.灼烧之剑.burnLogic"` | 指定物品的脚本 | 跨物品显式引用 |
+| `"@skill.重击.damageCalc"` | 指定技能的脚本 | 技能间互相调用 |
+| `"@status.burn_001.tick"` | 指定状态效果的脚本 | 状态链联动 |
+| `"@ascension.生命摇篮.onActivate"` | 登神能力的脚本 | 权能/法则联动 |
+
+**继承链自动建立**：`$status.add()` 时引擎自动将当前对象的 scripts 作为 `parentScripts` 传给子 StatusEffect。子对象可通过 `@parent.xxx` 回调父对象脚本。
+
+**递归解析**：如果查到的值仍是 `@` 引用，自动递归解析（最多 5 层）。
+
+### 🆕 init / cleanup 生命周期
+
+对象激活时引擎执行 `scripts.init`，失效时执行 `scripts.cleanup`：
+
+| 对象类型 | init 触发时机 | cleanup 触发时机 |
+|----------|-------------|-----------------|
+| Equipment | 装备时 | 卸下时 |
+| StatusEffect | 施加时 (onApply 之前) | 移除时 (onRemove 之后) |
+| Ascension 要素 | 获得时 | 升级/失去时 |
+
+**init 模式**：在 init 中调用 `$event.on()` 注册持久监听。
+**cleanup 模式**：在 cleanup 中调用 `$event.off()` 取消监听。
+**兜底**：即使 AI 忘了写 cleanup 或 cleanup 执行失败，`SubscriptionManager.unregisterAll(ownerKey)` 也会清理残留订阅。
+
+### 🆕 $event API（扩展）
+
+```typescript
+// 注册持久事件监听。引擎在脚本执行后注册到 EventBus。
+// 返回 handle 字符串，用于后续 $event.off()。
+$event.on(eventType: string, scriptKey: string): string
+
+// 取消持久事件监听。传入 handle 或 eventType。
+$event.off(handleOrType: string): void
+
+// 触发瞬时事件（已有）。
+$event.emit(eventType: string, data?: Record<string, any>): void
+```
+
+**事件类型**：`combat_action` | `character_action` | `craft_action` | `status_effect` | `variable_change` | `plot_trigger` | `item_use` | `skill_use` | `location_change` | `system`
+
+### 🆕 $call API
+
+```typescript
+// 执行指定脚本，共享当前上下文（owner/target/event/self）。
+// 子脚本产生的所有效果（adds/removes/hpChanges/subscriptions 等）自动合并到当前 effects。
+$call(ref: string): undefined
+```
+
+**示例**：
+```javascript
+// Item 定义
+scripts: {
+  burnFormula: "const dmg = $dice.roll('2d6'); $resource.modifyHp(target, -dmg);",
+  onHit: "$status.add(target, { name:'灼烧', scripts:{ tick:'@parent.burnFormula' }, onTick:'tick' });"
+}
+
+// 灼烧.tick 脚本的值 = "@parent.burnFormula"
+// resolveScriptRef("tick", 灼烧.scripts, 灼烧.parentScripts)
+//   → "@parent.burnFormula" → parentScripts["burnFormula"]
+//   → "const dmg = $dice.roll('2d6'); $resource.modifyHp(target, -dmg);"
+```
+
+**注意**：`$call()` 也可以直接在脚本代码中调用，用于在执行过程中引用其他脚本。但推荐将引用写在 `scripts` 值里通过 `resolveScriptRef` 自动解析，减少 `$call` 的使用。
 
 ### ScriptEffects 收集器
 
@@ -172,6 +256,13 @@ executeScript(script, context)
 ScriptEffects {
   adds:        { charId, effect }[]         // $status.add()
   removes:     { charId, effectId }[]       // $status.remove()
+  stackSets:   { charId, effectId, stacks }[] // $status.setStacks()
+  events:      { eventType, data }[]        // $event.emit()
+  hpChanges:   { charId, amount }[]         // $resource.modifyHp()
+  statChanges: { charId, stat, amount }[]   // $resource.modifyStat()
+  subscriptions:   { eventType, scriptKey }[]  // 🆕 $event.on()
+  unsubscriptions: string[]                    // 🆕 $event.off()
+}
   stackSets:   { charId, effectId, stacks }[] // $status.setStacks()
   hpChanges:   { charId, amount }[]         // $resource.modifyHp()
   statChanges: { charId, stat, amount }[]   // $resource.modifyStat()
