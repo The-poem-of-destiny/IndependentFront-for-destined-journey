@@ -1,7 +1,7 @@
 {
-  "name": "fated_poem_independent",
+  "name": "IndependentFront-for-destined-journey",
   "version": "1.0.0",
-  "description": "命定之诗 — SillyTavern Web Integration",
+  "description": "IndependentFront for Destined Journey — 命定之诗独立前端，多 Agent 文字 RPG 引擎",
   "main": "dist/sillytavern/index.js",
   "type": "module",
   "scripts": {

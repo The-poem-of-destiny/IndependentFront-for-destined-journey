@@ -1,4 +1,4 @@
-# Product Requirements Document: 命定之诗 (Fated Poem) 引擎
+# Product Requirements Document: IndependentFront-for-destined-journey
 
 **Version**: 1.0
 **Date**: 2026-06-21
@@ -9,9 +9,9 @@
 
 ## Executive Summary
 
-《命定之诗》（Fated Poem）是一个独立的文字 RPG 引擎库，专为 AI Roleplay (AIRP) 玩家设计。项目的核心动机是解决 SillyTavern（酒馆）单 LLM 架构无法承载大型世界观的根本问题——当世界观规模超过单一模型的上下文处理能力时，叙事质量会严重退化。
+IndependentFront-for-destined-journey（命定之诗独立前端）是一个独立的文字 RPG 引擎库，专为 AI Roleplay (AIRP) 玩家设计。项目的核心动机是解决 SillyTavern（酒馆）单 LLM 架构无法承载大型世界观的根本问题——当世界观规模超过单一模型的上下文处理能力时，叙事质量会严重退化。
 
-命定之诗通过**多 Agent 协作架构**将叙事、记忆召回、变量更新、角色管理、剧情追踪等职责拆分为独立的 Agent 管线，每个 Agent 只处理自己可见的上下文子集。配合 DeepSeek 上下文缓存隔离策略，实现大型世界观下的高质量文字 RPG 体验。
+本引擎通过**多 Agent 协作架构**将叙事、记忆召回、变量更新、角色管理、剧情追踪等职责拆分为独立的 Agent 管线，每个 Agent 只处理自己可见的上下文子集。配合 DeepSeek 上下文缓存隔离策略，实现大型世界观下的高质量文字 RPG 体验。
 
 项目以 GitHub Release 形式分发，用户在本地部署为静态网站即可运行。
 
