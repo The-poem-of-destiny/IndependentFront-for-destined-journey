@@ -38,6 +38,22 @@ reference/world_book_index.md    # 世界书条目索引（605 条目 → 主世
 reference/audit_report.md        # 代码 vs 世界书冲突审计报告
 ```
 
+## 世界观叙事内容生成规范（必读）
+
+**在生成任何与《命定之诗》世界观相关的叙事内容时，必须先查阅 `reference/narrative_context_example.md`。**
+
+该文件定义了两件事：
+1. **应该考虑什么** — 生成叙事场景时，需要从哪些维度提取世界信息（外貌/种族/背景/性格/五维/装备/技能/背包/关系/好感度/状态效果/时间/地点/天气等）并自然地编织进叙事
+2. **不应该出现什么** — 什么内容会破坏世界观沉浸感（装备数值 `攻击力+15`、技能消耗 `SP消耗:15`、物品数值效果 `恢复20HP`、游戏机制术语 `好感度+5` 等）
+
+```bash
+reference/narrative_context_example.md  # 完整叙事示例 + 维度清单 + 反例对照
+```
+
+**适用范围**: 编写 Agent prompt 模板（尤其是 story 的 fixedExamples）、生成设计文档中的场景示例、编写测试用例的 mock 数据、生成世界书条目内容、编写剧情大纲。
+
+**子 Agent 规则**: 所有分派出去的子 Agent，如果任务涉及生成世界观叙事内容，必须在 prompt 中明确告知参考此规范。
+
 ## 前端 UI 参考（Phase 7 必读）
 
 **写任何前端 UI 代码前，必须先查阅以下参考页面。这些是从 v4.2.1 角色卡 CDN 爬取的原始前端，需用 Vanilla TS + HTML 重新实现:**
@@ -161,17 +177,27 @@ src/sillytavern/                    ← 核心引擎（30+ 模块，含 Phase 1-
   ├── agent-templates.ts            ← [Phase 3+6e] Prompt 模板系统
   │   ├── 10+3 Agent 模板: memory_recall / plot_pre_check / story / vars_update
   │   │   char_update / memory_summary / plot_post_check / plot_outline
-  │   │   craft_gen / char_gen / item_gen (Phase 6e)
+  │   │   craft_gen / char_gen / item_gen (Phase 6e → 8.5 Agentic)
   │   ├── 每个模板: fixedSystem + fixedExamples (缓存敏感) + variableContext + variableInstruction (每轮动态)
   │   └── buildAgentMessages() / getAgentTemplate()
   │
-  ├── agent-orchestrator.ts         ← [Phase 3+6e] DAG 编排引擎
+  ├── agent-tools.ts                 ← [Phase 8.5] Agentic 工具注册表 (17 tools)
+  │   ├── OpenAI 兼容 function schemas: roll_d20 / craft_check / random_name 等
+  │   ├── AGENT_TOOL_MAP: 每 Agent 工具白名单
+  │   └── executeToolCall(): 工具名 → Code 层真实函数分发
+  │
+  ├── random-tables.ts               ← [Phase 8.5] NPC 生成随机表
+  │   ├── randomName / randomHairColor / randomEyeColor / randomPersonality
+  │   └── rollAttributes: 三池分配 [基础]+[层级]+{等级}
+  │
+  ├── agent-orchestrator.ts         ← [Phase 3+6e+8.5] DAG 编排引擎
   │   ├── AgentOrchestrator 类: 阶段串行 + 同阶段 Agent 并行
   │   ├── 流程单向性: 上游输出 → context.agentOutputs → 下游读取 (不可回写)
   │   ├── regenerateAgent() 手动重生成 / onlyAgents 过滤器
-  │   ├── 事件回调: onStageStart / onAgentStart / onAgentComplete / onAgentError
-  │   └── [6e] Marker回调: onCraftRequest / onCombatTrigger / onCharDetect
-  │         + processStageMarkers (craft阻塞注入 / combat延迟到Stage2 / char触发chain)
+  │   ├── 事件回调: onStageStart / onAgentStart / onAgentComplete / onAgentError / onToolCall
+  │   ├── [6e] Marker回调: onCraftRequest / onCombatTrigger / onCharDetect
+  │   │     + processStageMarkers (craft延迟到Stage2 / combat延迟到Stage2 / char触发chain)
+  │   └── [8.5] callAgenticAgent(): toolsEnabled=true → chatWithTools() 多轮循环
   │
   ├── tier-constants.ts             ← [Phase 5] 核心数值表 (世界书 #417617)
   ├── bloodlines.ts                 ← [Phase 5] 血脉系统 (23 种族)
@@ -292,13 +318,17 @@ Layer 1  原语级 状态读写        StateManager.commitChatState() / $validat
 | 持久订阅管理 | subscription-manager.ts | 递归保护(≤10) + 僵尸兜底(unregisterAll) |
 | EffectRuntime 时序 | 管线完成后批量执行 | 保持 DAG 原子性 |
 | EventBus 引入时机 | Phase 7e+8（已完成） | 与 Script 系统同步上线 |
+| Agentic 模式 | OpenAI function calling (Phase 8.5) | craft_gen/char_gen/item_gen 通过 tools 调用真实 Code 函数，禁止 AI 编造数值 |
+| craft_request 时序 | 延迟型 (对齐 combat_trigger) | Stage 1 暂存 → Stage 2 统一执行，避免阻塞叙事 |
 
 ## v4 三层子系统分流 (ADR-24/25/26, 2026-06-15)
 
 ```
-SubSystem-Craft  制作  → 正文阻塞: Story AI 暂停 → 调用 Craft Agent
-                          Craft Agent: 读正文 → $craft工具(Code) → 生成创意效果(AI)
-                          → 结果注入正文 → 继续叙事
+SubSystem-Craft  制作  → 🚩 延迟型 (Phase 8.5): Story 输出 <craft_request>
+                          Stage1 暂存 → Stage2 执行 craft_gen Agent
+                          craft_gen: AI 调 tools (get_inventory→craft_check→craft_settle)
+                          → 真实 DC+骰值+评级+结算 (Code) → 创意效果 (AI)
+                          → 结果注入正文 + StatePatch 提交
 
 SubSystem-Combat 战斗  → Stage1后检测 <combat_trigger> → 暂存
                           Stage2 vars_update 完成 char_gen 后唤起
@@ -306,7 +336,8 @@ SubSystem-Combat 战斗  → Stage1后检测 <combat_trigger> → 暂存
                           → 摘要回注正文 + 批量StatePatch
 
 SubSystem-CharGen 角色 → Stage2 vars_update 异步检测新NPC
-                          char_gen Agent: 名字/五维/背景/登神长阶
+                          char_gen Agent: 调 tools (random_name/hair/eye/personality/roll_attributes)
+                          → 输出 <char_result> XML
                           → 调 item_gen Agent (仅1次, ADR-26)
                           → 下回合可用
 ```
@@ -350,10 +381,11 @@ SubSystem-CharGen 角色 → Stage2 vars_update 异步检测新NPC
 | 7e | 游戏页 + 状态栏 HUD + 脚本引擎(init自注册+@parent跨对象引用+subscription-manager) | ✅ 脚本系统完成 |
 | 7f | 创意工坊 `/workshop` | ⬜ |
 | 7g | 衔接 & 测试 | ⬜ |
-| 8 | Agent 上下文可见性 & Prompt 体系 | ⬜ |
+| 8 | Agent 上下文可见性 & Prompt 体系 | ✅ |
+| 8.5 | Agentic Agent 系统 (function calling + 工具注册表 + F1-F7 修复) | ✅ |
 | 9 | 集成测试 & 交付 | ⬜ |
 
-**当前: 2171 tests | 53 test files | 编译 0 错误 | UI: 10主题/16组件/4页面 | 单URL架构 | 脚本沙盒(init自注册+@parent跨对象引用+持久订阅管理) | 全局时间系统**
+**当前: 2205 tests | 54 test files | 编译 0 错误 | UI: 10主题/16组件/4页面 | 单URL架构 | Agentic 系统(17 tools + 3 agentic Agents) | 脚本沙盒 | 全局时间系统**
 
 ## 前端架构 (Phase 7, 2026-06-17)
 
