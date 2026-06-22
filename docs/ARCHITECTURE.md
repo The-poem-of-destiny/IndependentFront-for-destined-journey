@@ -49,28 +49,54 @@
 ```
 fated_poem_independent/
 ├── src/
-│   ├── sillytavern/              ← 核心引擎（10 个模块）
-│   │   ├── types.ts              # 所有 TypeScript 类型 & 默认常量
-│   │   ├── database.ts           # Dexie/IndexedDB 持久化层
-│   │   ├── lorebook-engine.ts    # 世界书关键词匹配引擎
-│   │   ├── prompt-assembler.ts   # AI Prompt 组装器
-│   │   ├── importer.ts           # SillyTavern 格式导入/导出
-│   │   ├── variables.ts          # 游戏变量系统
-│   │   ├── stream-parser.ts      # 流式 XML 标签解析器
-│   │   ├── vars-merger.ts        # <vars> JSON 深合并
-│   │   ├── api-router.ts         # 多 API 任务路由
-│   │   ├── api-tools.ts          # API 连通性/模型发现
-│   │   ├── editor-utils.ts       # 编辑器纯工具函数
+│   ├── sillytavern/              ← 核心引擎（30+ 模块）
+│   │   ├── types.ts              # 所有 TypeScript 类型 (~45 接口)
+│   │   ├── database.ts           # Dexie/IndexedDB 持久化层 (10 表)
+│   │   ├── agent-orchestrator.ts # Agent DAG 编排引擎 (5 Stage)
+│   │   ├── agent-templates.ts    # 11 Agent Prompt 模板
+│   │   ├── agent-client.ts       # API 客户端 (重试+缓存)
+│   │   ├── state-manager.ts      # 唯一状态写入入口 (ADR-21)
+│   │   ├── effect-parser.ts      # 中文→结构化 ParsedEffect
+│   │   ├── effect-runtime.ts     # 声明式效果运行时 (6类型)
+│   │   ├── game-event.ts         # EventBus 发布-订阅
+│   │   ├── dice.ts               # 骰子系统
+│   │   ├── script-executor.ts    # 脚本沙盒 ($event.on/off + $call + init/cleanup)
+│   │   ├── subscription-manager.ts # 持久订阅管理 (递归保护+僵尸兜底)
+│   │   ├── combat-resolver.ts    # $combat API + 8步伤害管线
+│   │   ├── craft-resolver.ts     # $craft API (3阶段)
+│   │   ├── char-gen-agent.ts     # 角色生成编排 (char_gen→item_gen)
+│   │   ├── marker-protocol.ts    # XML 标记检测 (craft/combat/char)
+│   │   ├── memory-store.ts       # 记忆存储 + Embedding 召回
+│   │   ├── memory-summarizer.ts  # 记忆压缩
+│   │   ├── plot-engine.ts        # 剧情引擎
+│   │   ├── plot-outline.ts       # 剧情大纲
+│   │   ├── tier-constants.ts     # 核心数值表 (T1-T7)
+│   │   ├── bloodlines.ts         # 血脉系统 (23种族)
+│   │   ├── location-db.ts        # 位置数据库 (10势力/32节点)
+│   │   ├── char-query.ts         # 角色查询
+│   │   ├── resource-calc.ts      # 资源计算
+│   │   ├── time-system.ts        # 游戏时间系统
+│   │   ├── lorebook-engine.ts    # 世界书关键词匹配
+│   │   ├── variables.ts          # 变量提取+命名空间隔离
+│   │   ├── vars-merger.ts        # VarsPatch 深合并
+│   │   ├── stream-parser.ts      # XML 增量解析器
+│   │   ├── importer.ts           # ST 格式导入/导出
+│   │   ├── ...                   # 还有更多模块
 │   │   └── index.ts              # 统一导出入口
-│   ├── vanilla/
-│   │   └── sillytavern-store.ts  # Vanilla JS 响应式 Store
-│   └── components/SillyTavern/
-│       └── index.html            # Vanilla 演示页面
+│   ├── ui/                       # Vue 3 前端 (10主题/16组件/4页面)
+│   │   ├── main.ts / App.vue
+│   │   ├── themes/ / stores/ / components/
+│   │   └── styles/
+│   └── vanilla/
+│       └── sillytavern-store.ts  # Vanilla JS 响应式 Store
 ├── docs/
-│   └── ARCHITECTURE.md           # 本文档
+│   ├── ARCHITECTURE.md           # 本文档
+│   ├── phases/                   # Phase 计划
+│   ├── planning/                 # 会话追踪
+│   └── reference/                # 参考文档
 ├── CLAUDE.md                     # Claude Code 工作指导
-├── package.json                  # 依赖：dexie + typescript
-├── tsconfig.json                 # TypeScript 配置
+├── package.json
+├── tsconfig.json
 ├── reference/
 │   ├── v4.2.1.png                # 角色卡图片
 │   ├── v4.2.1_chara_card.json    # 角色卡 JSON
@@ -201,37 +227,25 @@ createSillytavernStore()
 └──────────────────────────────────────────────────┘
 ```
 
-### 4.2 Agent 调用架构（未来扩展）
+### 4.2 Agent 编排架构（Phase 3-6e 已实现）
 
-当前系统是"单次请求-响应"模式。计划扩展为多 Agent 协作：
+已从"单次请求-响应"升级为多 Agent DAG 编排：
 
 ```
-                      ┌─────────────┐
-                      │  用户输入     │
-                      └──────┬──────┘
-                             │
-              ┌──────────────┼──────────────┐
-              │              │              │
-        ┌─────▼─────┐  ┌────▼────┐  ┌─────▼─────┐
-        │ 剧情 Agent  │  │记忆 Agent│  │ 校验 Agent │
-        │ (主 API)    │  │(次 API)  │  │(次 API)   │
-        │             │  │          │  │           │
-        │ 生成正文    │  │ 检索历史  │  │ 规则校验   │
-        │ 生成选项    │  │ 归纳要点  │  │ 数值结算   │
-        └─────┬─────┘  └────┬────┘  └─────┬─────┘
-              │              │              │
-              └──────────────┼──────────────┘
-                             │
-                    ┌────────▼────────┐
-                    │  结果合并 & 输出  │
-                    │  vars-merger     │
-                    └─────────────────┘
+Stage 0:  memory_recall + plot_pre_check    (并行)
+Stage 1:  story (+ craft_gen 阻塞注入)      (正文生成)
+Stage 2:  vars_update (+ char_gen 异步)     (变量更新+角色生成)
+Stage 3:  char_update (并行×N)              (角色状态更新)
+Stage 4:  memory_summary                    (记忆压缩)
+Stage 5:  plot_post_check                   (剧情后校验)
 ```
 
-当前 api-router.ts 的 `Task` 类型（`'story' | 'summary' | 'vars'`）预留了扩展点。改造方向：
-- `Task` 扩展为 `'story' | 'memory' | 'summary' | 'vars' | 'narrative' | string`
-- `ApiSettings` 中 `secondary` 扩展为 `Record<string, ApiEndpoint>` 映射表
-- `SettingsModal` 增加动态 API 条目管理 UI
+Agent 编排引擎: `agent-orchestrator.ts`
+- 阶段串行 + 同阶段 Agent 并行
+- 流程单向性: 上游输出 → context.agentOutputs → 下游读取
+- 事件回调: onStageStart / onAgentStart / onAgentComplete / onAgentError
+- Marker 回调: onCraftRequest / onCombatTrigger / onCharDetect
+- 11 个 Agent 模板: `agent-templates.ts`
 
 ### 4.3 XML 输出契约
 
@@ -330,16 +344,20 @@ createSillytavernStore()
 
 ---
 
-## 六、扩展点 & 待建设
+## 六、已实现 & 待建设
 
-| 模块 | 当前状态 | 计划 |
-|------|---------|------|
-| 多 Agent 协作 | `api-router.ts` 仅双 API | 扩展为 Task→API 映射表 |
-| 记忆召回 Agent | 无 | 新增 memory Task，定期总结历史 |
-| Schema-first 状态 | 占位 | JSON Schema 严格约束变量结构 |
-| Vue 游戏模式 | v2 聊天模式 | 迁移 v3 stream-parser + GameView |
-| 流式输出 | stream-parser 已就绪 | 前端接入 SSE/stream |
-| 测试覆盖 | vitest 模板有但未集成 | 迁移模板测试文件 |
+| 模块 | 状态 | 实现 |
+|------|------|------|
+| 多 Agent 协作 | ✅ 已完成 | `agent-orchestrator.ts` — 5 Stage DAG + 11 Agent |
+| 记忆召回 Agent | ✅ 已完成 | `memory-store.ts` + `memory-summarizer.ts` — Embedding 向量召回 |
+| Schema-first 状态 | ✅ 已完成 | `types.ts` — ~45 接口/类型，所有状态结构强类型 |
+| 前端 UI (Vue 3) | ✅ 已完成 | `src/ui/` — 10 主题/16 组件/4 页面/单URL架构 |
+| 流式输出 | ✅ 已完成 | `stream-parser.ts` — XML 增量解析 + SSE |
+| 脚本沙盒 | ✅ 已完成 | `script-executor.ts` — $event.on/off 持久订阅 + $call 跨对象引用 |
+| 持久订阅管理 | ✅ 已完成 | `subscription-manager.ts` — init/cleanup 生命周期 + 递归保护 |
+| 测试覆盖 | ✅ 已完成 | 53 files / 2171 tests — Vitest + fake-indexeddb |
+| 登神长阶系统 | ⬜ 待建设 | AscensionAbility 统一类型 + $ascension API |
+| 创意工坊前端 | ⬜ 待建设 | Phase 7f `/workshop` |
 
 ---
 
