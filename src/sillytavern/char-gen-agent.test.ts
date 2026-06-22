@@ -329,11 +329,14 @@ describe('assembleCharacterState', () => {
     expect(result.location).toBe('白曜城');
   });
 
-  it('高层级角色应有更高的 HP', () => {
-    const charData = makeCharGenOutput({ tier: 5, level: 15 });
+  it('高层级角色应有更高的 HP（体质×层级乘数）', () => {
+    const charData = makeCharGenOutput({ tier: 5, level: 15, attributes: { str: 8, dex: 8, con: 10, int: 8, spi: 8 } });
     const result = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] });
-    // T5 HP multiplier = 20
-    expect(result.maxHp).toBeGreaterThan(500);
+    // T5: hpMultiplier=20, mpMultiplier=35, spMultiplier=35
+    // con=10 → 20*10=200, int=8 → 35*8=280, spi=8 → 35*8=280
+    expect(result.maxHp).toBe(200);
+    expect(result.maxMp).toBe(280);
+    expect(result.maxSp).toBe(280);
   });
 });
 

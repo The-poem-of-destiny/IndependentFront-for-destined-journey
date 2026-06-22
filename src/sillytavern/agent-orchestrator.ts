@@ -13,12 +13,15 @@ import type {
   Pipeline, PipelineStage, AgentContext, AgentResult,
   OrchestratorRun, AgentConfig, ApiEndpoint, AgentDefinition,
   CraftRequestMarker, CombatTriggerMarker, CharDetectMarker, CombatSummaryResult,
+  ToolExecutionContext,
 } from './types';
 import { AgentClient } from './agent-client';
 import type { ChatRequest } from './agent-client';
 import { buildAgentMessages, getAgentTemplate } from './agent-templates';
 import { scanMarkers } from './marker-protocol';
 import { recallMemories } from './memory-store';
+import { buildZoneContext } from './context-visibility';
+import { getToolsForAgent, executeToolCall } from './agent-tools';
 
 // ========== Types ==========
 
@@ -68,6 +71,9 @@ export interface OrchestratorEvents {
    * 调用方应运行 char_gen → item_gen 链生成新角色数据。
    */
   onCharDetect?: (markers: CharDetectMarker[], storyOutput: string, context: AgentContext) => Promise<void>;
+
+  /** Phase 8.5: Agentic Agent 发出工具调用时触发 */
+  onToolCall?: (agentId: string, toolName: string, args: any, result: any) => void;
 }
 
 // ========== AgentOrchestrator ==========
@@ -93,6 +99,9 @@ export class AgentOrchestrator {
 
   /** Phase 6e: Stage 1 检测到的 combat markers — 延迟到 Stage 2 char_gen 后执行 */
   private pendingCombatMarkers: CombatTriggerMarker[] = [];
+
+  /** Phase 8.5: Stage 1 检测到的 craft markers — 延迟到 Stage 2 统一执行 */
+  private pendingCraftMarkers: CraftRequestMarker[] = [];
 
   constructor(options: OrchestratorOptions, events: OrchestratorEvents = {}) {
     this.pipeline = options.pipeline;
@@ -136,6 +145,11 @@ export class AgentOrchestrator {
     if (errors.length > 0) {
       this.status = 'failed';
       return this.buildRun(startTime, errors);
+    }
+
+    // Phase 8: 组装 Zone — 一次组装，所有 Agent 调用共享
+    if (!this.context.zones) {
+      this.context.zones = buildZoneContext(this.context);
     }
 
     // 逐阶段执行
@@ -302,6 +316,11 @@ export class AgentOrchestrator {
       return this.callMemoryRecallEmbedding(endpoint, config);
     }
 
+    // 🆕 Phase 8.5 Agentic 路径
+    if (config.toolsEnabled) {
+      return this.callAgenticAgent(config, endpoint);
+    }
+
     // 构建 messages (Phase 8: 四部分拼接)
     const configsArr = Array.from(this.agentConfigs.values());
     const messages = buildAgentMessages(
@@ -341,6 +360,80 @@ export class AgentOrchestrator {
     };
 
     return client.chat(request);
+  }
+
+  /**
+   * 🆕 Phase 8.5: Agentic Agent 执行路径。
+   * 使用 chatWithTools() 支持多轮 function calling 循环。
+   */
+  private async callAgenticAgent(config: AgentConfig, endpoint: ApiEndpoint): Promise<AgentResult> {
+    const startTime = Date.now();
+    const tools = getToolsForAgent(config.agentId);
+    if (tools.length === 0) {
+      // 没有工具的 Agent 走普通路径
+      return this.callAgent({ ...config, toolsEnabled: false });
+    }
+
+    // 构建 messages
+    const configsArr = Array.from(this.agentConfigs.values());
+    const messages = buildAgentMessages(
+      config.agentId,
+      this.context,
+      configsArr,
+      this.worldBooks,
+      this.presets,
+    );
+    if (!messages) {
+      return {
+        agentId: config.agentId,
+        output: null,
+        rawResponse: '',
+        tokensUsed: 0,
+        cacheHit: false,
+        duration: 0,
+        error: `No template found for agent "${config.agentId}"`,
+      };
+    }
+
+    const client = new AgentClient({
+      endpoint,
+      agentId: config.agentId,
+      saveId: this.saveId,
+      timeout: config.timeout || endpoint.timeout,
+      maxRetries: config.retryOnFail ? 1 : 0,
+    });
+
+    const toolContext: ToolExecutionContext = {
+      characters: this.context.characters ?? [],
+      variables: this.context.variables ?? {},
+      saveId: this.saveId,
+    };
+
+    const request: ChatRequest = {
+      messages,
+      temperature: config.temperature,
+      maxTokens: config.maxTokens,
+      topP: config.topP,
+      frequencyPenalty: config.frequencyPenalty,
+      presencePenalty: config.presencePenalty,
+      tools,
+      tool_choice: 'auto',
+    };
+
+    const result = await client.chatWithTools(
+      request,
+      async (name, args) => {
+        const toolResult = await executeToolCall(name, args, toolContext);
+        if (this.events.onToolCall) {
+          this.events.onToolCall(config.agentId, name, args, toolResult);
+        }
+        return toolResult;
+      },
+      { maxRounds: config.maxToolCallRounds ?? 5 },
+    );
+
+    result.duration = Date.now() - startTime;
+    return result;
   }
 
   // ========== Internal: Embedding 记忆召回路径 ==========
@@ -462,46 +555,29 @@ export class AgentOrchestrator {
 
   /**
    * 在 Stage 完成后处理 XML 标记。
-   * - Stage 1 (story) 后: 处理 craft_request → 注入结果；暂存 combat_trigger
-   * - Stage 2 (vars_update) 后: 先处理 char_detect → 再执行暂存的 combat_trigger
+   * - Stage 1 (story) 后: 暂存 craft_request 和 combat_trigger
+   * - Stage 2 (vars_update) 后: 先 char_detect → 再 craft → 最后 combat
    *
-   * 战斗延迟理由: <char_detect> 生成的新敌人/monster 必须在战斗开始前就绪。
+   * Phase 8.5: craft_request 由阻塞型改为延迟型（对齐 combat_trigger）。
+   * 延迟理由: 制作可能依赖 char_gen 生成的 NPC（如铁匠），且统一在 Stage 2 执行可并行 batched。
    */
   private async processStageMarkers(stageIndex: number): Promise<void> {
-    // Stage 1 (story): craft markers (立即阻塞执行) + combat markers (暂存)
+    // Stage 1 (story): 暂存 craft markers + combat markers
     if (this.isStoryStage(stageIndex)) {
       const storyOutput = this.getAgentOutputText('story');
       if (!storyOutput) return;
 
       const scanResult = scanMarkers(storyOutput);
 
-      // 🛑 Craft markers: 立即注入制作结果
+      // 🛑→🚩 Craft markers: 改为暂存，Stage 2 统一执行
       const craftMarkers = scanResult.markers.filter(
         (m): m is CraftRequestMarker => m.type === 'craft_request',
       );
-      if (craftMarkers.length > 0 && this.events.onCraftRequest) {
-        let modifiedOutput = storyOutput;
-        for (const marker of craftMarkers) {
-          const craftResult = await this.events.onCraftRequest(marker, storyOutput);
-          if (craftResult) {
-            modifiedOutput =
-              modifiedOutput.slice(0, marker.position) +
-              craftResult +
-              modifiedOutput.slice(marker.position + marker.rawContent.length);
-            const lengthDiff = craftResult.length - marker.rawContent.length;
-            if (lengthDiff !== 0) {
-              for (const m of craftMarkers) {
-                if (m.position > marker.position) {
-                  m.position += lengthDiff;
-                }
-              }
-            }
-          }
-        }
-        this.context.agentOutputs!.set('story', modifiedOutput);
+      if (craftMarkers.length > 0) {
+        this.pendingCraftMarkers.push(...craftMarkers);
       }
 
-      // 🚩 Combat markers: 暂存，等 Stage 2 char_gen 完成后再执行
+      // 🚩 Combat markers: 暂存
       const combatMarkers = scanResult.markers.filter(
         (m): m is CombatTriggerMarker => m.type === 'combat_trigger',
       );
@@ -510,14 +586,14 @@ export class AgentOrchestrator {
       }
     }
 
-    // Stage 2 (vars_update): 先 char_detect → 再执行 combat
+    // Stage 2 (vars_update): 先 char_detect → 再 craft → 最后 combat
     if (this.isVarsUpdateStage(stageIndex)) {
       const storyOutput = this.getAgentOutputText('story');
       if (!storyOutput) return;
 
       const scanResult = scanMarkers(storyOutput);
 
-      // 👤 Char detect: 先生成新角色（新敌人/monster 需要在战斗前就绪）
+      // 👤 Char detect: 先生成新角色
       const charMarkers = scanResult.markers.filter(
         (m): m is CharDetectMarker => m.type === 'char_detect',
       );
@@ -525,7 +601,31 @@ export class AgentOrchestrator {
         await this.events.onCharDetect(charMarkers, storyOutput, this.context);
       }
 
-      // 🚩 执行暂存的 combat markers（新角色已生成完毕）
+      // 🛑 Craft: 执行暂存的 craft markers，结果注入 story output
+      if (this.pendingCraftMarkers.length > 0 && this.events.onCraftRequest) {
+        let modifiedOutput = storyOutput;
+        for (const marker of this.pendingCraftMarkers) {
+          const craftResult = await this.events.onCraftRequest(marker, modifiedOutput);
+          if (craftResult) {
+            modifiedOutput =
+              modifiedOutput.slice(0, marker.position) +
+              craftResult +
+              modifiedOutput.slice(marker.position + marker.rawContent.length);
+            const lengthDiff = craftResult.length - marker.rawContent.length;
+            if (lengthDiff !== 0) {
+              for (const m of this.pendingCraftMarkers) {
+                if (m.position > marker.position) {
+                  m.position += lengthDiff;
+                }
+              }
+            }
+          }
+        }
+        this.context.agentOutputs!.set('story', modifiedOutput);
+        this.pendingCraftMarkers = [];
+      }
+
+      // 🚩 Combat: 执行暂存的 combat markers
       if (this.pendingCombatMarkers.length > 0 && this.events.onCombatTrigger) {
         for (const marker of this.pendingCombatMarkers) {
           await this.events.onCombatTrigger(marker, storyOutput);
@@ -533,14 +633,52 @@ export class AgentOrchestrator {
         this.pendingCombatMarkers = [];
       }
 
-      // 🆕 时间推进: vars_update 输出 delta_time
+      // 🆕 Phase 8.5: vars_update 结构化输出 → StatePatch
       const varsOutput = this.getAgentOutputText('vars_update');
       if (varsOutput) {
         try {
           const parsed = JSON.parse(varsOutput.trim());
+          const { createStateManager } = await import('./state-manager');
+          const sm = createStateManager(this.saveId);
+          const patches: import('./types').StatePatch[] = [];
+
+          // replace → set_variable
+          for (const r of (parsed.replace ?? [])) {
+            patches.push({
+              op: 'set_variable',
+              target: `variables.${r.path}`,
+              value: r.value,
+              metadata: { source: 'vars_update', operation: 'replace' },
+            });
+          }
+
+          // delta → delta_variable
+          for (const d of (parsed.delta ?? [])) {
+            patches.push({
+              op: 'delta_variable',
+              target: `variables.${d.path}`,
+              amount: d.amount,
+              metadata: { source: 'vars_update', operation: 'delta' },
+            });
+          }
+
+          // insert → insert_variable
+          for (const ins of (parsed.insert ?? [])) {
+            patches.push({
+              op: 'insert_variable',
+              target: `variables.${ins.path}`,
+              value: ins.value,
+              metadata: { source: 'vars_update', operation: 'insert', index: ins.index },
+            });
+          }
+
+          // Submit patches (if any)
+          if (patches.length > 0) {
+            await sm.commitChatState(patches);
+          }
+
+          // delta_time → 时间推进
           if (parsed.delta_time && typeof parsed.delta_time === 'number' && parsed.delta_time > 0) {
-            const { createStateManager } = await import('./state-manager');
-            const sm = createStateManager(this.saveId);
             await sm.applyTimeAdvance(parsed.delta_time);
           }
         } catch {

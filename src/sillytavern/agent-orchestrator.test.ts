@@ -486,13 +486,19 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
     expect(run.status).toBe('completed');
   });
 
-  it('onCraftRequest 应在 story stage 后触发', async () => {
+  it('onCraftRequest 应在 vars_update stage 后触发 (延迟执行)', async () => {
     const storyContent = '正文开头<craft_request industry="锻造">制作长剑</craft_request>正文结尾';
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true, status: 200, headers: new Headers(),
-      json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 100 } }),
-      text: async () => '',
-    });
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true, status: 200, headers: new Headers(),
+        json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 100 } }),
+        text: async () => '',
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200, headers: new Headers(),
+        json: async () => ({ choices: [{ message: { content: '{}' } }], usage: { total_tokens: 20 } }),
+        text: async () => '',
+      });
 
     const onCraftRequest = vi.fn().mockResolvedValue('【制作成功：长剑已锻造完成】');
 
@@ -501,6 +507,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       retryOnFail: false,
       stages: [
         { agents: ['story'], waitFor: [] },
+        { agents: ['vars_update'], waitFor: ['story'] },
       ],
     };
 
@@ -508,7 +515,10 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       {
         pipeline,
         context: makeContext(),
-        agentConfigs: [makeAgentConfig({ agentId: 'story' })],
+        agentConfigs: [
+          makeAgentConfig({ agentId: 'story' }),
+          makeAgentConfig({ agentId: 'vars_update' }),
+        ],
         endpoints: [makeEndpoint()],
         saveId: 'test',
       },
@@ -523,13 +533,19 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
     expect(callArgs[0].industry).toBe('锻造');
   });
 
-  it('onCraftRequest 返回结果应注入 story output', async () => {
+  it('onCraftRequest 返回结果应注入 story output (延迟到 Stage 2)', async () => {
     const storyContent = '前言<craft_request>制作</craft_request>后语';
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true, status: 200, headers: new Headers(),
-      json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 50 } }),
-      text: async () => '',
-    });
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true, status: 200, headers: new Headers(),
+        json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 50 } }),
+        text: async () => '',
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200, headers: new Headers(),
+        json: async () => ({ choices: [{ message: { content: '{}' } }], usage: { total_tokens: 20 } }),
+        text: async () => '',
+      });
 
     const craftResult = '【制作结果叙事】';
     const onCraftRequest = vi.fn().mockResolvedValue(craftResult);
@@ -539,6 +555,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       retryOnFail: false,
       stages: [
         { agents: ['story'], waitFor: [] },
+        { agents: ['vars_update'], waitFor: ['story'] },
       ],
     };
 
@@ -547,7 +564,10 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       {
         pipeline,
         context,
-        agentConfigs: [makeAgentConfig({ agentId: 'story' })],
+        agentConfigs: [
+          makeAgentConfig({ agentId: 'story' }),
+          makeAgentConfig({ agentId: 'vars_update' }),
+        ],
         endpoints: [makeEndpoint()],
         saveId: 'test',
       },
@@ -561,13 +581,19 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
     expect(modifiedOutput).toBe('前言' + craftResult + '后语');
   });
 
-  it('onCraftRequest 返回 null 应跳过注入', async () => {
+  it('onCraftRequest 返回 null 应跳过注入 (延迟到 Stage 2)', async () => {
     const storyContent = '前言<craft_request>制作</craft_request>后语';
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true, status: 200, headers: new Headers(),
-      json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 50 } }),
-      text: async () => '',
-    });
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true, status: 200, headers: new Headers(),
+        json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 50 } }),
+        text: async () => '',
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200, headers: new Headers(),
+        json: async () => ({ choices: [{ message: { content: '{}' } }], usage: { total_tokens: 20 } }),
+        text: async () => '',
+      });
 
     const onCraftRequest = vi.fn().mockResolvedValue(null);
 
@@ -576,6 +602,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       retryOnFail: false,
       stages: [
         { agents: ['story'], waitFor: [] },
+        { agents: ['vars_update'], waitFor: ['story'] },
       ],
     };
 
@@ -584,7 +611,10 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       {
         pipeline,
         context,
-        agentConfigs: [makeAgentConfig({ agentId: 'story' })],
+        agentConfigs: [
+          makeAgentConfig({ agentId: 'story' }),
+          makeAgentConfig({ agentId: 'vars_update' }),
+        ],
         endpoints: [makeEndpoint()],
         saveId: 'test',
       },
@@ -822,13 +852,19 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
     expect(callOrder).toEqual(['char_detect', 'combat_trigger']);
   });
 
-  it('多个 craft_request 应依次处理', async () => {
+  it('多个 craft_request 应依次处理 (延迟到 Stage 2)', async () => {
     const storyContent = '<craft_request>第一件</craft_request>和<craft_request>第二件</craft_request>';
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true, status: 200, headers: new Headers(),
-      json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 50 } }),
-      text: async () => '',
-    });
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true, status: 200, headers: new Headers(),
+        json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 50 } }),
+        text: async () => '',
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200, headers: new Headers(),
+        json: async () => ({ choices: [{ message: { content: '{}' } }], usage: { total_tokens: 20 } }),
+        text: async () => '',
+      });
 
     const craftResults = ['【结果1】', '【结果2】'];
     let callCount = 0;
@@ -841,6 +877,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       retryOnFail: false,
       stages: [
         { agents: ['story'], waitFor: [] },
+        { agents: ['vars_update'], waitFor: ['story'] },
       ],
     };
 
@@ -849,7 +886,10 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       {
         pipeline,
         context,
-        agentConfigs: [makeAgentConfig({ agentId: 'story' })],
+        agentConfigs: [
+          makeAgentConfig({ agentId: 'story' }),
+          makeAgentConfig({ agentId: 'vars_update' }),
+        ],
         endpoints: [makeEndpoint()],
         saveId: 'test',
       },

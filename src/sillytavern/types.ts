@@ -12,16 +12,21 @@ import type { GameTime } from './time-system';
 // ========== World Book Types (Phase 8) ==========
 
 export type WorldBookPartition =
-  | 'world_overview'     // 世界总览 → story, plot_pre/post
-  | 'numerical_design'   // 数值化设计 → vars_update, craft_gen
-  | 'character_detail'   // 角色详细 → char_update, char_gen, item_gen
-  | 'race_detail'        // 种族详细 → char_update, char_gen
-  | 'region_detail'      // 地区详细 → story, plot_pre/post
-  | 'var_update'         // 变量更新规则 → vars_update
-  | 'fated_core'         // 命定核心 → story
-  | 'narrative_guide'    // 叙事指导 → story
-  | 'event_detail'       // 事件相关 → plot_pre/post
-  | 'ejs_deferred';      // EJS 延后处理
+  | 'world_setting'      // 世界设定 — 宇宙观/规则/层级/登神
+  | 'race'               // 种族 — 全部族血脉与特性
+  | 'faction'            // 势力 — 国家/城邦/政治实体
+  | 'character'          // 角色 — NPC/命定核心/人物卡
+  | 'event'              // 事件 — 剧情线/EJS 事件脚本
+  | 'adventure_area'     // 冒险区域 — 地下城/危险地带
+  | 'monster_ecology'    // 怪物生态 — 魔物/BOSS/生态链
+  | 'industry'           // 产业 — 经济/贸易/锻造/炼金/服务业
+  | 'organization'       // 组织 — 公会/商会/秘密结社
+  | 'system_core'        // 系统 — 命定核心/变量更新/数值公式
+  | 'variable'           // 变量 — 初始设定/变量规则/output_format
+  | 'quick_feature'      // 快捷功能 — 命运抽卡/盲盒/FP扩展
+  | 'extra_setting'      // 额外设定 — 数值表/战斗/制作/旅行/状态
+  | 'cot'                // COT — Chain-of-Thought 推理模板
+  | 'dlc';               // DLC — 可开关扩展内容
 
 export interface WorldBookEntry {
   uid: number;                        // 唯一标识（来自原版世界书 UID）
@@ -229,6 +234,12 @@ export interface AgentConfig {
   };
   worldBookIds: string[];       // Phase 8: 该 Agent 挂载的世界书 ID 列表
   presetId?: string;            // Phase 8: 该 Agent 使用的预设 ID
+  /** 🆕 Agentic: 启用 OpenAI function calling（工具调用），默认 false */
+  toolsEnabled?: boolean;
+  /** 🆕 Agentic: 最大工具调用轮数，超限后强制输出（默认 5） */
+  maxToolCallRounds?: number;
+  /** 🆕 Agentic: 允许的工具 ID 列表（空=全部白名单） */
+  allowedToolIds?: string[];
 }
 
 // ========== Preset (Phase 8) ==========
@@ -924,6 +935,45 @@ export interface SaveSlot {
 
 // ========== Agent 编排引擎 (Agent Orchestration) ==========
 
+// ═══════════════════════════════════════════════════════════
+// Agentic Tool Calling Types (Phase 8.5)
+// ═══════════════════════════════════════════════════════════
+
+/** OpenAI 兼容的函数定义（工具 schema） */
+export interface ToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, any>;   // JSON Schema 对象
+  };
+}
+
+/** AI 响应中的单次工具调用 */
+export interface ToolCallRequest {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;                 // JSON-encoded arguments string
+  };
+}
+
+/** 工具执行结果 */
+export interface ToolCallResult {
+  toolCallId: string;
+  functionName: string;
+  result: any;                         // 工具返回的原始值
+  error?: string;                      // 执行失败时的错误消息
+}
+
+/** 工具执行所需的运行时上下文（非纯函数工具需要） */
+export interface ToolExecutionContext {
+  characters: CharacterState[];
+  variables: Record<string, any>;
+  saveId: string;
+}
+
 /** Agent 定义 */
 export interface AgentDefinition {
   id: string;                    // 'story' | 'memory_recall' | 'plot_check' | ...
@@ -941,6 +991,42 @@ export interface AgentDefinition {
   outputSchema?: object;         // 输出 JSON Schema (用于 function calling)
 }
 
+// ═══════════════════════════════════════════════════════════
+// Phase 8 — Variable Zone 可见性系统
+// ═══════════════════════════════════════════════════════════
+
+/** Variable Zone 可见性级别 */
+export type VisibilityLevel = 'FULL' | 'NARRATIVE' | 'SUMMARY' | 'KEYS' | 'NONE';
+
+/** 8 个 Zone ID */
+export type ZoneId = 'memory' | 'npc' | 'world' | 'quest' | 'craft' | 'combat' | 'outline' | 'variable';
+
+/** Zone 注入行为配置 */
+export interface ZoneConfig {
+  orderBy?: string;       // 注入排序字段
+  limit?: number;         // 注入截断上限
+  injectAs?: 'json' | 'list' | 'table' | 'summary';
+}
+
+/** 单个 Variable Zone — 三层自描述容器 */
+export interface VariableZone {
+  config: ZoneConfig;
+  visibility: string[];   // Agent ID 可见白名单
+  content: Record<string, any>;
+}
+
+/** Per-Agent 的 Zone 可见性矩阵 */
+export interface ZoneVisibilityMatrix {
+  memory: VisibilityLevel;
+  npc: VisibilityLevel;
+  world: VisibilityLevel;
+  quest: VisibilityLevel;
+  craft: VisibilityLevel;
+  combat: VisibilityLevel;
+  outline: VisibilityLevel;
+  variable: VisibilityLevel;
+}
+
 /** Agent 运行上下文 */
 export interface AgentContext {
   userInput: string;
@@ -953,6 +1039,12 @@ export interface AgentContext {
   plotEvents: PlotEvent[];
   memories: MemoryRecord[];
   agentOutputs: Map<string, any>;  // 上游 Agent 的输出
+
+  // --- Phase 8: Variable Zone 可见性系统 ---
+  /** 8-zone 变量区（由 buildZoneContext() 组装） */
+  zones?: Record<ZoneId, VariableZone>;
+  /** per-call 过滤 — char_update 并行时指定当前目标角色 ID */
+  targetCharacterId?: string;
 }
 
 /** 单个 Agent 的运行结果 */
@@ -964,6 +1056,8 @@ export interface AgentResult {
   cacheHit: boolean;             // DeepSeek 缓存命中
   duration: number;              // ms
   error?: string;
+  /** 🆕 Agentic: 本 Agent 产生的所有工具调用记录 */
+  toolCalls?: Array<{ name: string; arguments: any; result: any }>;
 }
 
 /** 编排器运行记录 */
@@ -2151,7 +2245,7 @@ export interface DetectedMarkerBase {
 
 /**
  * <craft_request> 标记 — Story AI 在正文中产生制作意图时输出。
- * 🛑 阻塞型: 引擎解析后立即暂停叙事，执行 $craft + Craft Agent，结果注入正文后继续。
+ * 🚩 延迟型: Stage 1 正文结束后暂存，Stage 2 统一执行 craft_gen → item_gen 链。
  */
 export interface CraftRequestMarker extends DetectedMarkerBase {
   type: 'craft_request';
@@ -2163,6 +2257,8 @@ export interface CraftRequestMarker extends DetectedMarkerBase {
   productName?: string;
   /** 目标品质 */
   targetQuality?: string;
+  /** 🆕 用户对该制品的期望需求 / 特殊效果要求 */
+  expects?: string;
   /** 标签内部正文 (AI 描述的制作意图和背景) */
   bodyText?: string;
 }
@@ -2221,10 +2317,26 @@ export interface CraftAgentOutput {
   creativeEffects: Array<{
     /** 词条名称 */
     name: string;
-    /** 词条描述 */
+    /** 词条自然语言描述 */
     description: string;
     /** 词条类型 */
     type: '增益' | '减益' | '特殊';
+    /** 🆕 结构化数值效果: 效果名 → 数值 (如 {"atk": 5, "def": -3}) */
+    effects?: Record<string, number>;
+    /** 🆕 持续回合数 (null=永久) */
+    duration?: number | null;
+    /** 🆕 持续时长单位 */
+    durationUnit?: '回合' | '分钟' | '小时';
+    /** 🆕 是否可叠加层数 */
+    stackable?: boolean;
+    /** 🆕 最大层数 */
+    maxStacks?: number;
+    /** 🆕 伤害类型 (如 "物理"/"能量"/"精神"/"真实"/"毒") */
+    damageType?: string;
+    /** 🆕 施加状态效果的名称引用 */
+    appliesStatus?: string;
+    /** 🆕 词条脚本注册表: 脚本名→可执行代码（支持 $event.on/off, $call, @parent 等） */
+    scripts?: Record<string, string>;
   }>;
   /** 效果声明列表 (可被 effect-parser 解析) */
   effectDeclarations: string[];
@@ -2237,6 +2349,8 @@ export interface CraftAgentOutput {
     targetQuality: string;
     quantity: number;
     materials: string[];
+    /** 🆕 用户对该制品的期望需求 / 特殊效果要求 */
+    expects?: string;
   };
 }
 

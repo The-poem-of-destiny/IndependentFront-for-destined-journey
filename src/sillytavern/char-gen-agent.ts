@@ -32,7 +32,7 @@ import type {
 import { createDefaultCharacterState } from './types';
 import { scanCharDetects } from './marker-protocol';
 import { buildAgentMessages } from './agent-templates';
-import { getTierConfig } from './tier-constants';
+import { getTierConfig, calcHP, calcMP, calcSP } from './tier-constants';
 
 // ========== Types ==========
 
@@ -66,13 +66,6 @@ export interface CharGenClient {
     error?: string;
   }>;
 }
-
-// ========== Constants ==========
-
-/** T1 默认 HP/MP/SP 基准 (被 tier-constants 覆盖) */
-const DEFAULT_BASE_HP = 100;
-const DEFAULT_BASE_MP = 50;
-const DEFAULT_BASE_SP = 50;
 
 // ========== Public API ==========
 
@@ -228,12 +221,12 @@ export function assembleCharacterState(
     tierName,
     level: charData.level,
     attributes: charData.attributes,
-    hp: DEFAULT_BASE_HP * hpMultiplier,
-    maxHp: DEFAULT_BASE_HP * hpMultiplier,
-    mp: DEFAULT_BASE_MP * mpMultiplier,
-    maxMp: DEFAULT_BASE_MP * mpMultiplier,
-    sp: DEFAULT_BASE_SP * spMultiplier,
-    maxSp: DEFAULT_BASE_SP * spMultiplier,
+    hp: calcHP(charData.tier, charData.attributes.con),
+    maxHp: calcHP(charData.tier, charData.attributes.con),
+    mp: calcMP(charData.tier, charData.attributes.int),
+    maxMp: calcMP(charData.tier, charData.attributes.int),
+    sp: calcSP(charData.tier, charData.attributes.spi),
+    maxSp: calcSP(charData.tier, charData.attributes.spi),
     ascension: {
       enabled: charData.ascension.enabled,
       elements: {},
@@ -346,68 +339,237 @@ export async function runCharGenChain(
 // ========== Internal Helpers ==========
 
 /**
- * 解析 char_gen Agent 的 JSON 输出。
- * 容忍 markdown 代码块包裹。
+ * 解析 char_gen Agent 的输出。
+ * 支持两种格式:
+ * 1. JSON（旧格式，向后兼容）
+ * 2. XML <char_result>（新 Agentic 格式，Phase 8.5）
  */
 function parseCharGenOutput(raw: string): CharGenOutput {
-  const json = extractJSON(raw);
-  const data = JSON.parse(json);
+  // 先尝试 XML
+  const xml = extractXML(raw, 'char_result');
+  if (xml) {
+    return parseCharGenXML(xml);
+  }
 
-  // 验证必需字段
-  if (!data.name) throw new Error('char_gen 输出缺少 name 字段');
-  if (!data.race) throw new Error('char_gen 输出缺少 race 字段');
-  if (!data.attributes) throw new Error('char_gen 输出缺少 attributes 字段');
+  // 回退到 JSON
+  try {
+    const json = extractJSON(raw);
+    const data = JSON.parse(json);
 
+    if (!data.name) throw new Error('char_gen 输出缺少 name 字段');
+    if (!data.race) throw new Error('char_gen 输出缺少 race 字段');
+
+    return {
+      name: data.name,
+      race: data.race,
+      tier: data.tier ?? 1,
+      level: data.level ?? 1,
+      attributes: {
+        str: data.attributes?.str ?? 10,
+        dex: data.attributes?.dex ?? 10,
+        con: data.attributes?.con ?? 10,
+        int: data.attributes?.int ?? 10,
+        spi: data.attributes?.spi ?? 10,
+      },
+      identity: data.identity ?? [],
+      occupation: data.occupation ?? [],
+      background: data.background ?? '',
+      appearance: data.appearance ?? '',
+      personality: data.personality ?? '',
+      ascension: {
+        enabled: data.ascension?.enabled ?? false,
+        path: data.ascension?.path ?? '',
+        description: data.ascension?.description ?? '',
+      },
+    };
+  } catch {
+    throw new Error(`char_gen 输出无法解析 (JSON+XML 均失败): ${raw.slice(0, 200)}`);
+  }
+}
+
+/** 从 XML <char_result> 中解析角色数据 */
+function parseCharGenXML(xml: string): CharGenOutput {
   return {
-    name: data.name,
-    race: data.race,
-    tier: data.tier ?? 1,
-    level: data.level ?? 1,
+    name: extractTag(xml, 'name') ?? '未命名',
+    race: extractTag(xml, 'race') ?? '人类',
+    tier: parseInt(extractTag(xml, 'tier') ?? '1') || 1,
+    level: parseInt(extractTag(xml, 'level') ?? '1') || 1,
     attributes: {
-      str: data.attributes?.str ?? 10,
-      dex: data.attributes?.dex ?? 10,
-      con: data.attributes?.con ?? 10,
-      int: data.attributes?.int ?? 10,
-      spi: data.attributes?.spi ?? 10,
+      str: parseInt(extractAttr(xml, 'attributes', 'str') ?? '10') || 10,
+      dex: parseInt(extractAttr(xml, 'attributes', 'dex') ?? '10') || 10,
+      con: parseInt(extractAttr(xml, 'attributes', 'con') ?? '10') || 10,
+      int: parseInt(extractAttr(xml, 'attributes', 'int') ?? '10') || 10,
+      spi: parseInt(extractAttr(xml, 'attributes', 'spi') ?? '10') || 10,
     },
-    identity: data.identity ?? [],
-    occupation: data.occupation ?? [],
-    background: data.background ?? '',
-    appearance: data.appearance ?? '',
-    personality: data.personality ?? '',
+    identity: extractTag(xml, 'identity')?.split(',').map(s => s.trim()).filter(Boolean) ?? [],
+    occupation: extractTag(xml, 'occupation')?.split(',').map(s => s.trim()).filter(Boolean) ?? [],
+    background: extractTag(xml, 'background') ?? '',
+    appearance: extractTag(xml, 'appearance') ?? '',
+    personality: extractTag(xml, 'personality') ?? extractAttr(xml, 'personality', 'code') ?? '',
     ascension: {
-      enabled: data.ascension?.enabled ?? false,
-      path: data.ascension?.path ?? '',
-      description: data.ascension?.description ?? '',
+      enabled: (extractAttr(xml, 'ascension', 'enabled') ?? 'false') === 'true',
+      path: extractAttr(xml, 'ascension', 'path') ?? '',
+      description: extractAttr(xml, 'ascension', 'description') ?? '',
     },
   };
 }
 
 /**
- * 解析 item_gen Agent 的 JSON 输出。
- * 容忍 markdown 代码块包裹。
+ * 解析 item_gen Agent 的输出。
+ * 支持两种格式:
+ * 1. JSON（旧格式，向后兼容）
+ * 2. XML <item_result>（新 Agentic 格式，Phase 8.5）
  */
 function parseItemGenOutput(raw: string): ItemGenOutput {
-  const json = extractJSON(raw);
-  const data = JSON.parse(json);
+  // 先尝试 XML
+  const xml = extractXML(raw, 'item_result');
+  if (xml) {
+    return parseItemGenXML(xml);
+  }
 
-  return {
-    skills: data.skills ?? [],
-    equipment: data.equipment ?? [],
-    inventory: data.inventory ?? [],
-  };
+  // 回退到 JSON
+  try {
+    const json = extractJSON(raw);
+    const data = JSON.parse(json);
+
+    return {
+      skills: data.skills ?? [],
+      equipment: data.equipment ?? [],
+      inventory: data.inventory ?? [],
+    };
+  } catch {
+    // 不阻断流程
+    return { skills: [], equipment: [], inventory: [] };
+  }
+}
+
+/** 从 XML <item_result> 中解析物品数据 */
+function parseItemGenXML(xml: string): ItemGenOutput {
+  const skillsXML = extractTagBlock(xml, 'skills');
+  const equipmentXML = extractTagBlock(xml, 'equipment');
+  const inventoryXML = extractTagBlock(xml, 'inventory');
+
+  const skills = skillsXML ? parseSkillsXML(skillsXML) : [];
+  const equipment = equipmentXML ? parseEquipmentXML(equipmentXML) : [];
+  const inventory = inventoryXML ? parseInventoryXML(inventoryXML) : [];
+
+  return { skills, equipment, inventory };
+}
+
+function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
+  const matches = xml.matchAll(/<skill\s+([^>]*?)>([\s\S]*?)<\/skill>/g);
+  const results: ItemGenOutput['skills'] = [];
+  for (const m of matches) {
+    const attrs = parseAttrsStr(m[1]);
+    results.push({
+      name: attrs['name'] ?? '未命名技能',
+      description: m[2]?.trim() ?? '',
+      type: (attrs['type'] as 'active' | 'passive') ?? 'active',
+      cost: attrs['cost_type'] ? { type: attrs['cost_type'] as 'HP' | 'MP' | 'SP', amount: parseInt(attrs['cost_amount'] ?? '0') } : undefined,
+      cooldown: attrs['cooldown'] ? parseInt(attrs['cooldown']) : undefined,
+    });
+  }
+  return results;
+}
+
+function parseEquipmentXML(xml: string): ItemGenOutput['equipment'] {
+  const matches = xml.matchAll(/<equip\s+([^>]*?)>([\s\S]*?)<\/equip>/g);
+  const results: ItemGenOutput['equipment'] = [];
+  for (const m of matches) {
+    const attrs = parseAttrsStr(m[1]);
+    const statsStr = attrs['stats'] ?? '';
+    const stats: Record<string, number> = {};
+    for (const pair of statsStr.split(',')) {
+      const [k, v] = pair.split(':').map(s => s.trim());
+      if (k && v) stats[k] = parseFloat(v) || 0;
+    }
+    results.push({
+      slot: attrs['slot'] ?? '饰品',
+      name: attrs['name'] ?? '未命名装备',
+      description: m[2]?.trim() ?? '',
+      stats,
+      durability: attrs['durability'] ? parseInt(attrs['durability']) : undefined,
+      quality: attrs['quality'],
+    });
+  }
+  return results;
+}
+
+function parseInventoryXML(xml: string): ItemGenOutput['inventory'] {
+  const matches = xml.matchAll(/<item\s+([^>]*?)>([\s\S]*?)<\/item>/g);
+  const results: ItemGenOutput['inventory'] = [];
+  for (const m of matches) {
+    const attrs = parseAttrsStr(m[1]);
+    results.push({
+      name: attrs['name'] ?? '未命名物品',
+      description: m[2]?.trim() ?? '',
+      quantity: parseInt(attrs['quantity'] ?? '1') || 1,
+      type: attrs['type'] ?? '消耗品',
+      rarity: attrs['rarity'],
+    });
+  }
+  return results;
+}
+
+// ── XML helpers ──
+
+/** 从文本中提取指定 XML 标签的内容块 */
+function extractXML(text: string, tagName: string): string | null {
+  const regex = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i');
+  const match = text.match(regex);
+  return match ? match[0] : null;
+}
+
+/** 提取 XML 标签的文本内容 */
+function extractTag(xml: string, tagName: string): string | null {
+  const regex = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i');
+  const match = xml.match(regex);
+  return match ? match[1].trim() : null;
+}
+
+/** 提取 XML 标签中的属性值 */
+function extractAttr(xml: string, tagName: string, attrName: string): string | null {
+  const regex = new RegExp(`<${tagName}[^>]*?${attrName}\\s*=\\s*"([^"]*)"`, 'i');
+  const match = xml.match(regex);
+  if (match) return match[1];
+  // Try single quotes
+  const regex2 = new RegExp(`<${tagName}[^>]*?${attrName}\\s*=\\s*'([^']*)'`, 'i');
+  const match2 = xml.match(regex2);
+  return match2 ? match2[1] : null;
+}
+
+/** 提取标签内的子块 */
+function extractTagBlock(xml: string, tagName: string): string | null {
+  const regex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, 'i');
+  const match = xml.match(regex);
+  return match ? match[1].trim() : null;
+}
+
+/** 解析属性字符串 key="val" key2="val2" */
+function parseAttrsStr(attrStr: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  const regex = /(\w+)\s*=\s*"([^"]*)"|(\w+)\s*=\s*'([^']*)'/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(attrStr)) !== null) {
+    if (match[1] !== undefined) {
+      attrs[match[1]] = match[2];
+    } else if (match[3] !== undefined) {
+      attrs[match[3]] = match[4];
+    }
+  }
+  return attrs;
 }
 
 /**
  * 从可能含 markdown 代码块的文本中提取 JSON。
- * 处理 ```json ... ``` 和 ``` ... ``` 包裹。
+ * 处理 \`\`\`json ... \`\`\` 和 \`\`\` ... \`\`\` 包裹。
  */
 function extractJSON(text: string): string {
-  // 尝试匹配 ```json ... ```
+  // 尝试匹配 \`\`\`json ... \`\`\`
   const jsonBlockMatch = text.match(/```json\s*([\s\S]*?)```/);
   if (jsonBlockMatch) return jsonBlockMatch[1].trim();
 
-  // 尝试匹配 ``` ... ```
+  // 尝试匹配 \`\`\` ... \`\`\`
   const codeBlockMatch = text.match(/```\s*([\s\S]*?)```/);
   if (codeBlockMatch) return codeBlockMatch[1].trim();
 

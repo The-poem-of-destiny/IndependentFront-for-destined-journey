@@ -122,6 +122,7 @@ export function scanCraftRequests(text: string): CraftRequestMarker[] {
       industry: attrs['industry'],
       productName: attrs['productName'],
       targetQuality: attrs['targetQuality'],
+      expects: attrs['expects'],
       bodyText: match[2]?.trim() || undefined,
     });
   }
