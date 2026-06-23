@@ -85,27 +85,38 @@ const store = useCreateStore()
 </template>
 
 <style scoped>
-.step-confirm { max-width: 560px; margin: 0 auto; }
+.step-confirm { max-width: 600px; margin: 0 auto; }
 .step-title { font-family: var(--theme-font-title, serif); color: var(--theme-text-primary); font-size: 1.3rem; margin-bottom: var(--theme-spacing-md); }
 .confirm-card {
   background: var(--theme-card-bg);
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-lg);
+  border-radius: var(--theme-radius-xl, 16px);
   padding: var(--theme-spacing-lg);
+  overflow: hidden;
 }
-.hero-row { display: flex; align-items: center; gap: var(--theme-spacing-md); margin-bottom: var(--theme-spacing-md); }
-.hero-info { display: flex; flex-direction: column; gap: 2px; }
-.hero-name { font-size: 1.2rem; font-weight: 700; color: var(--theme-text-primary); }
+.hero-row { display: flex; align-items: center; gap: var(--theme-spacing-md); margin-bottom: var(--theme-spacing-md); padding-bottom: var(--theme-spacing-md); border-bottom: 1px solid var(--theme-card-border); }
+.hero-info { display: flex; flex-direction: column; gap: 3px; }
+.hero-name { font-size: 1.2rem; font-weight: 700; color: var(--theme-text-primary); font-family: var(--theme-font-title, serif); }
 .hero-meta { font-size: 0.8rem; color: var(--theme-text-secondary); }
-.hero-tier { font-size: 0.75rem; color: var(--theme-color-primary); font-weight: 600; }
+.hero-tier { font-size: 0.75rem; color: var(--theme-quality-epic); font-weight: 600; }
 .hero-location { font-size: 0.7rem; color: var(--theme-text-muted); }
-.hero-core { font-size: 0.7rem; color: var(--theme-quality-史诗); }
-.resource-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: var(--theme-spacing-md); }
-.attr-row { display: flex; gap: var(--theme-spacing-md); font-size: 0.8rem; color: var(--theme-text-secondary); margin-bottom: var(--theme-spacing-sm); }
-.attr-row strong { color: var(--theme-color-primary); }
+.hero-core { font-size: 0.7rem; color: var(--theme-primary); font-weight: 500; }
+.resource-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: var(--theme-spacing-md); padding-bottom: var(--theme-spacing-md); border-bottom: 1px solid var(--theme-card-border); }
+.attr-row { display: flex; gap: var(--theme-spacing-md); font-size: 0.8rem; color: var(--theme-text-secondary); margin-bottom: var(--theme-spacing-sm); padding-bottom: var(--theme-spacing-sm); border-bottom: 1px solid var(--theme-card-border); }
+.attr-row strong { color: var(--theme-primary); }
 .stats-row { display: flex; flex-wrap: wrap; gap: var(--theme-spacing-sm) var(--theme-spacing-lg); font-size: 0.75rem; color: var(--theme-text-muted); margin-bottom: var(--theme-spacing-sm); }
-.items-summary { margin-bottom: var(--theme-spacing-xs); }
-.items-summary h4 { font-size: 0.7rem; color: var(--theme-text-muted); margin: 4px 0; }
-.item-chip { display: inline-flex; align-items: center; gap: 3px; margin: 2px 4px 2px 0; font-size: 0.7rem; color: var(--theme-text-primary); }
-.points-remaining { text-align: center; margin-top: var(--theme-spacing-md); font-size: 0.8rem; color: var(--theme-text-muted); }
+.items-summary { margin-bottom: var(--theme-spacing-sm); padding: var(--theme-spacing-xs) var(--theme-spacing-sm); background: var(--theme-surface-muted); border-radius: var(--theme-radius-md); }
+.items-summary h4 { font-size: 0.7rem; color: var(--theme-text-muted); margin: 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+.item-chip { display: inline-flex; align-items: center; gap: 4px; margin: 2px 6px 2px 0; padding: 2px 8px; background: var(--theme-card-bg); border-radius: 4px; font-size: 0.72rem; color: var(--theme-text-primary); border: 1px solid var(--theme-card-border); }
+.points-remaining {
+  margin-top: var(--theme-spacing-lg);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  background: color-mix(in srgb, var(--theme-primary) 6%, var(--theme-card-bg));
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 15%, transparent);
+  border-radius: var(--theme-radius-md);
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--theme-text-secondary);
+}
+.points-remaining strong { color: var(--theme-primary); }
 </style>

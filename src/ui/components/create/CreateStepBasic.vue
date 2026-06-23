@@ -205,11 +205,12 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 4px 14px;
+  padding: 5px 18px;
   border-radius: var(--theme-radius-md);
-  background: linear-gradient(135deg, #d4af37 0%, #8b6914 100%);
+  background: linear-gradient(135deg, var(--theme-quality-epic) 0%, color-mix(in srgb, var(--theme-quality-epic) 60%, #000) 100%);
   color: #fff;
   margin-bottom: 4px;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--theme-quality-epic) 25%, transparent);
 }
 .tier-name {
   font-family: var(--theme-font-title, serif);
@@ -294,13 +295,13 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
   padding-top: var(--theme-spacing-sm);
   margin-top: var(--theme-spacing-xs);
   border-top: 1px solid var(--theme-card-border);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--theme-text-secondary);
 }
 .points-status .divider { color: var(--theme-card-border); }
-.points-status .remaining { color: var(--theme-quality-优良); margin-left: 4px; }
+.points-status .remaining { color: var(--theme-success); margin-left: 4px; font-weight: 600; }
 .bp-status.exhausted .remaining { color: var(--theme-text-muted); }
-.ap-status.over { color: var(--theme-quality-唯一); }
+.ap-status.over { color: var(--theme-quality-mythic); font-weight: 700; }
 
 /* ===== ResourceBar 预览 ===== */
 .preview-section {
@@ -352,9 +353,11 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
   flex-wrap: wrap;
   gap: var(--theme-spacing-xs) var(--theme-spacing-lg);
   padding: var(--theme-spacing-sm) var(--theme-spacing-md);
-  background: var(--theme-card-bg);
+  background: var(--theme-surface-muted);
   border-radius: var(--theme-radius-md);
-  font-size: 0.7rem;
-  color: var(--theme-text-muted);
+  font-size: 0.72rem;
+  color: var(--theme-text-secondary);
+  border: 1px solid var(--theme-card-border);
+  line-height: 1.6;
 }
 </style>

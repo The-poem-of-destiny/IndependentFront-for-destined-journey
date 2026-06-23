@@ -17,7 +17,7 @@ defineEmits<{
 <template>
   <footer class="create-footer">
     <AppButton variant="ghost" size="sm" @click="$emit('openPreset')">
-      角色预设
+      <span class="btn-icon">📋</span> 角色预设
     </AppButton>
 
     <div class="footer-nav">
@@ -50,9 +50,13 @@ defineEmits<{
   padding-bottom: max(var(--theme-spacing-md), env(safe-area-inset-bottom, 12px));
   background: var(--theme-card-bg);
   border-top: 1px solid var(--theme-card-border);
+  flex-shrink: 0;
 }
 .footer-nav {
   display: flex;
   gap: var(--theme-spacing-sm);
+}
+.btn-icon {
+  margin-right: 4px;
 }
 </style>

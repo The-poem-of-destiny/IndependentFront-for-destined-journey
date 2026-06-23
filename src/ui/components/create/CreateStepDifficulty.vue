@@ -57,11 +57,21 @@ const store = useCreateStore()
 }
 .difficulty-card {
   padding: var(--theme-spacing-md);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.difficulty-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+}
+.difficulty-card.selected {
+  border-color: var(--theme-primary) !important;
+  box-shadow: 0 0 0 1px var(--theme-primary),
+              0 4px 20px color-mix(in srgb, var(--theme-primary) 20%, transparent);
 }
 .card-inner {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 .diff-name {
   font-weight: 700;
@@ -70,17 +80,20 @@ const store = useCreateStore()
 }
 .diff-points {
   font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--theme-color-primary);
+  font-weight: 700;
+  color: var(--theme-primary);
+  font-family: var(--theme-font-title, serif);
 }
 .diff-desc {
   font-size: 0.75rem;
   color: var(--theme-text-muted);
+  line-height: 1.4;
 }
 .selected-hint {
   margin-top: var(--theme-spacing-md);
   text-align: center;
   font-size: 0.85rem;
-  color: var(--theme-color-primary);
+  color: var(--theme-primary);
+  font-weight: 500;
 }
 </style>

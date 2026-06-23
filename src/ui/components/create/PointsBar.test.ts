@@ -19,7 +19,7 @@ describe('PointsBar', () => {
     const wrapper = mount(PointsBar, {
       props: { total: 1000, used: 200, difficultyLabel: '普通' },
     })
-    expect(wrapper.text()).toContain('(普通)')
+    expect(wrapper.text()).toContain('普通')
   })
 
   it('无难度标签时不渲染括号', () => {

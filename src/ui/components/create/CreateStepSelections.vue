@@ -172,15 +172,15 @@ const visiblePool = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 50vh;  /* 和 cat-content 一致, 超出由 sub-nav 滚动 */
+  max-height: 50vh;
   overflow: hidden;
   background: var(--theme-card-bg);
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-md);
+  border-radius: var(--theme-radius-lg, 12px);
   padding: var(--theme-spacing-sm);
 }
 
-/* 子分类 (自身可滚动) */
+/* 子分类 */
 .sub-nav {
   margin-top: var(--theme-spacing-xs);
   padding-top: var(--theme-spacing-xs);
@@ -212,12 +212,12 @@ const visiblePool = computed(() => {
 }
 .sub-btn:hover {
   color: var(--theme-text-primary);
-  background: var(--theme-card-border);
+  background: var(--theme-tab-hover-bg);
 }
 .sub-btn.active {
-  color: var(--theme-color-primary);
-  background: var(--theme-card-border);
-  border-left-color: var(--theme-color-primary);
+  color: var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+  border-left-color: var(--theme-primary);
   font-weight: 700;
 }
 
@@ -225,27 +225,40 @@ const visiblePool = computed(() => {
 .search-box { position: relative; margin-left: auto; }
 .search-input {
   width: 10em;
-  padding: 0.35em 1.6em 0.35em 0.6em;
+  padding: 0.4em 1.8em 0.4em 0.8em;
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-md);
+  border-radius: var(--theme-radius-md, 8px);
   background: var(--theme-card-bg);
   color: var(--theme-text-primary);
   font-size: 0.82em;
   outline: none;
-  transition: border-color var(--theme-transition-fast);
+  transition: border-color var(--theme-transition-fast), box-shadow var(--theme-transition-fast);
+  font-family: inherit;
 }
 .search-input::placeholder { color: var(--theme-text-muted); }
-.search-input:focus { border-color: var(--theme-color-primary); }
+.search-input:focus {
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 12%, transparent);
+}
 .search-clear {
   position: absolute;
-  right: 0.35em;
+  right: 0.4em;
   top: 50%;
   transform: translateY(-50%);
   cursor: pointer;
-  font-size: 0.8em;
+  font-size: 0.75em;
   color: var(--theme-text-muted);
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
 }
-.search-clear:hover { color: var(--theme-text-primary); }
+.search-clear:hover {
+  color: var(--theme-text-primary);
+  background: var(--theme-surface-muted);
+}
 
 /* ===== 右侧已选面板 ===== */
 .selected-sidebar {
@@ -253,15 +266,19 @@ const visiblePool = computed(() => {
   flex-shrink: 0;
   overflow-y: auto;
 }
+.selected-sidebar :deep(.selected-panel) {
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-lg, 12px);
+}
 
 /* ================================================
-   卡片框 ②: 伙伴区 (完全独立, 互不干扰)
+   卡片框 ②: 伙伴区
    ================================================ */
 .partner-section {
   flex-shrink: 0;
   background: var(--theme-card-bg);
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-lg);
+  border-radius: var(--theme-radius-lg, 12px);
   padding: var(--theme-spacing-md);
 }
 
@@ -280,6 +297,6 @@ const visiblePool = computed(() => {
   .sidebar-nav { max-height: none; overflow: visible; }
   .sub-nav { flex-direction: row; flex-wrap: wrap; overflow-y: visible; flex: none; }
   .sub-btn { width: auto; font-size: 0.82em; padding: 0.4em 0.7em; min-height: 1.8em; border-left: none; border-bottom: 2px solid transparent; border-radius: 0; }
-  .sub-btn.active { border-left: none; border-bottom-color: var(--theme-color-primary); }
+  .sub-btn.active { border-left: none; border-bottom-color: var(--theme-primary); }
 }
 </style>

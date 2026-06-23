@@ -23,10 +23,16 @@ const store = useCreateStore()
     </div>
 
     <div v-if="store.destinyCore" class="selected-detail">
-      <h3>已选: {{ store.destinyCore.name }}</h3>
-      <p><strong>作者:</strong> {{ store.destinyCore.author }}</p>
-      <p><strong>主题:</strong> {{ store.destinyCore.theme }}</p>
-      <p v-if="store.destinyCore.description">{{ store.destinyCore.description }}</p>
+      <div class="sd-header">
+        <span class="sd-dot" />
+        <h3>{{ store.destinyCore.name }}</h3>
+      </div>
+      <div class="sd-meta">
+        <span><strong>作者</strong> {{ store.destinyCore.author }}</span>
+        <span class="sd-sep">|</span>
+        <span><strong>主题</strong> {{ store.destinyCore.theme }}</span>
+      </div>
+      <p v-if="store.destinyCore.description" class="sd-desc">{{ store.destinyCore.description }}</p>
     </div>
   </section>
 </template>
@@ -41,9 +47,14 @@ const store = useCreateStore()
   margin-top: var(--theme-spacing-lg);
   padding: var(--theme-spacing-md);
   background: var(--theme-card-bg);
-  border: 1px solid var(--theme-card-border);
+  border: 1px solid var(--theme-quality-epic);
   border-radius: var(--theme-radius-md);
+  border-left: 3px solid var(--theme-quality-epic);
 }
-.selected-detail h3 { color: var(--theme-color-primary); margin-bottom: var(--theme-spacing-xs); }
-.selected-detail p { font-size: 0.8rem; color: var(--theme-text-secondary); }
+.sd-header { display: flex; align-items: center; gap: 8px; margin-bottom: var(--theme-spacing-xs); }
+.sd-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--theme-quality-epic); flex-shrink: 0; }
+.sd-header h3 { color: var(--theme-quality-epic); margin: 0; font-size: 0.95rem; }
+.sd-meta { display: flex; gap: 8px; font-size: 0.75rem; color: var(--theme-text-secondary); flex-wrap: wrap; }
+.sd-sep { color: var(--theme-card-border); }
+.sd-desc { font-size: 0.8rem; color: var(--theme-text-secondary); line-height: 1.5; margin: var(--theme-spacing-xs) 0 0; }
 </style>

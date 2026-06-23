@@ -278,33 +278,40 @@ watch(() => props.book, (newBook) => {
 </script>
 
 <style scoped>
+/* ═══════════════════════════════════════
+   世界书条目编辑器
+   使用主题变量，支持所有主题
+   ═══════════════════════════════════════ */
+
 .worldbook-editor {
   max-width: 900px;
+  width: 100%;
 }
 
-/* ===== Container ===== */
+/* ===== 容器卡片 ===== */
 .worldbook-editor {
-  background: rgba(128,128,128,0.06);
-  border: 2px solid rgba(255,255,255,0.2);
-  border-radius: var(--theme-radius-lg);
+  background: var(--theme-content-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-xl, 16px);
   padding: 24px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
 }
 
-/* ===== Header ===== */
+/* ===== 顶栏 ===== */
 .editor-header {
   display: flex;
   align-items: center;
   gap: 16px;
   margin-bottom: 20px;
   padding-bottom: 16px;
-  border-bottom: 1px solid rgba(255,255,255,0.18);
+  border-bottom: 1px solid var(--theme-card-border);
 }
 
 .editor-header h3 {
   flex: 1;
   margin: 0;
-  font-size: 16px;
+  font-size: 1rem;
+  font-family: var(--theme-font-title);
+  color: var(--theme-text-primary);
 }
 
 .back-btn, .add-btn {
@@ -312,111 +319,118 @@ watch(() => props.book, (newBook) => {
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  border: 1px solid rgba(255,255,255,0.18);
-  border-radius: var(--theme-radius-sm);
-  background: rgba(128,128,128,0.06);
-  color: var(--theme-text);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md, 8px);
+  background: var(--theme-surface-muted);
+  color: var(--theme-text-primary);
   cursor: pointer;
-  font-size: 14px;
-  min-height: 44px;
-  transition: background 0.15s, transform 0.1s;
+  font-family: inherit;
+  font-size: 0.85rem;
+  min-height: 36px;
+  transition: all 0.15s;
 }
-
 .back-btn:hover, .add-btn:hover {
-  filter: brightness(0.95);
+  filter: brightness(1.1);
 }
-
 .back-btn:active, .add-btn:active {
   transform: scale(0.97);
 }
 
 .add-btn {
-  background: var(--theme-color-primary, #15803D);
-  color: white;
+  background: var(--theme-primary);
+  color: var(--theme-primary-text);
   border-color: transparent;
+  font-weight: 600;
 }
 
-/* ===== Empty State ===== */
+/* ===== 内置只读标识 ===== */
+.builtin-notice {
+  font-size: 0.8rem;
+  color: var(--theme-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ===== 空状态 ===== */
 .empty-state {
   text-align: center;
   padding: 48px 16px;
-  border: 2px dashed rgba(255,255,255,0.18);
-  border-radius: var(--theme-radius-md);
+  border: 2px dashed var(--theme-card-border);
+  border-radius: var(--theme-radius-md, 8px);
 }
 
 .empty-icon {
-  font-size: 40px;
-  color: var(--theme-text-secondary);
+  font-size: 2.5rem;
+  color: var(--theme-text-muted);
   margin-bottom: 12px;
   opacity: 0.5;
 }
 
 .empty-title {
-  font-size: 16px;
+  font-size: 1rem;
   font-weight: 600;
+  color: var(--theme-text-primary);
   margin: 0 0 4px;
 }
 
 .empty-desc {
-  font-size: 14px;
-  color: var(--theme-text-secondary);
+  font-size: 0.85rem;
+  color: var(--theme-text-muted);
   margin: 0 0 16px;
 }
 
-/* ===== Table ===== */
+/* ===== 条目表格 ===== */
 .entry-table {
-  border: 1px solid rgba(255,255,255,0.18);
-  border-radius: var(--theme-radius-md);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md, 8px);
   overflow: hidden;
-  background: var(--theme-surface);
 }
 
 .entry-row {
   display: flex;
   align-items: center;
-  padding: 10px 16px;
-  border-bottom: 1px solid rgba(255,255,255,0.18);
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--theme-card-border);
   gap: 8px;
-  font-size: 14px;
+  font-size: 0.85rem;
   transition: background 0.12s;
-}
-
-.entry-row:nth-child(even):not(.entry-header) {
-  background: rgba(128, 128, 128, 0.03);
-}
-
-.entry-row:hover {
-  background: var(--theme-hover, rgba(128, 128, 128, 0.08)) !important;
+  color: var(--theme-text-primary);
 }
 
 .entry-row:last-child {
   border-bottom: none;
 }
 
-.entry-row.entry-header {
-  background: rgba(128,128,128,0.06);
-  font-weight: 600;
-  font-size: 13px;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--theme-text-secondary);
-  border-bottom: 2px solid rgba(255,255,255,0.18);
+.entry-row:nth-child(even):not(.entry-header) {
+  background: var(--theme-surface-muted);
 }
 
+.entry-row:hover {
+  background: var(--theme-tab-hover-bg) !important;
+}
+
+/* 表头 */
+.entry-row.entry-header {
+  background: var(--theme-surface-muted);
+  font-weight: 600;
+  font-size: 0.78rem;
+  color: var(--theme-text-secondary);
+  border-bottom: 2px solid var(--theme-card-border);
+}
+
+/* 禁用行 */
 .entry-row.disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   text-decoration: line-through;
 }
 
-.entry-row.disabled:hover {
-  background: transparent !important;
-}
-
+/* ===== 列宽 ===== */
 .col-num {
   width: 32px;
   text-align: center;
-  color: var(--theme-text-secondary);
-  font-size: 12px;
+  color: var(--theme-text-muted);
+  font-size: 0.75rem;
 }
 
 .col-name {
@@ -425,7 +439,7 @@ watch(() => props.book, (newBook) => {
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
-  color: var(--theme-color-primary, #15803D);
+  color: var(--theme-primary);
   font-weight: 500;
 }
 
@@ -435,7 +449,7 @@ watch(() => props.book, (newBook) => {
 }
 
 .col-order {
-  width: 130px;
+  width: 138px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -450,7 +464,7 @@ watch(() => props.book, (newBook) => {
   gap: 4px;
 }
 
-/* ===== Toggle Slider (inline, small) ===== */
+/* ===== Toggle 开关 (小号) ===== */
 .toggle-label-inline {
   display: inline-flex;
   align-items: center;
@@ -473,7 +487,7 @@ watch(() => props.book, (newBook) => {
   display: inline-block;
   width: 36px;
   height: 22px;
-  background: rgba(255,255,255,0.18);
+  background: var(--theme-card-border);
   border-radius: 11px;
   position: relative;
   transition: background 0.2s;
@@ -486,13 +500,13 @@ watch(() => props.book, (newBook) => {
   left: 2px;
   width: 18px;
   height: 18px;
-  background: white;
+  background: var(--theme-text-primary);
   border-radius: 50%;
   transition: transform 0.2s;
 }
 
 .toggle-label-inline input:checked + .toggle-slider-sm {
-  background: var(--theme-color-primary, #15803D);
+  background: var(--theme-success);
 }
 
 .toggle-label-inline input:checked + .toggle-slider-sm::after {
@@ -500,26 +514,28 @@ watch(() => props.book, (newBook) => {
 }
 
 .toggle-label-inline input:focus-visible + .toggle-slider-sm {
-  outline: 2px solid rgba(34,197,94,0.6);
+  outline: 2px solid var(--theme-primary);
   outline-offset: 2px;
 }
 
-/* ===== Order ===== */
+/* ===== 排序控件 ===== */
 .order-input {
   width: 54px;
   text-align: center;
-  border: 1px solid rgba(255,255,255,0.18);
-  border-radius: var(--theme-radius-sm);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm, 6px);
   padding: 4px 6px;
-  font-size: 14px;
-  background: rgba(128,128,128,0.06);
-  color: var(--theme-text);
+  font-size: 0.85rem;
+  background: var(--theme-content-bg);
+  color: var(--theme-text-primary);
+  font-family: inherit;
   min-height: 32px;
 }
 
 .order-input:focus {
-  outline: 2px solid rgba(34,197,94,0.6);
-  outline-offset: -1px;
+  outline: none;
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 15%, transparent);
 }
 
 .order-btn {
@@ -528,18 +544,18 @@ watch(() => props.book, (newBook) => {
   justify-content: center;
   width: 32px;
   height: 32px;
-  border: 1px solid rgba(255,255,255,0.18);
-  border-radius: var(--theme-radius-sm);
-  background: rgba(128,128,128,0.06);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm, 6px);
+  background: var(--theme-content-bg);
   cursor: pointer;
   color: var(--theme-text-secondary);
-  font-size: 12px;
-  transition: background 0.15s, color 0.15s;
+  font-size: 0.75rem;
+  transition: all 0.15s;
 }
 
 .order-btn:hover:not(:disabled) {
-  background: var(--theme-hover, rgba(255,255,255,0.1));
-  color: var(--theme-text);
+  background: var(--theme-tab-hover-bg);
+  color: var(--theme-text-primary);
 }
 
 .order-btn:disabled {
@@ -547,27 +563,25 @@ watch(() => props.book, (newBook) => {
   cursor: default;
 }
 
-/* ===== Icon buttons ===== */
+/* ===== 操作图标按钮 ===== */
 .icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 36px;
   height: 36px;
-  min-width: 36px;
-  min-height: 36px;
   border: none;
-  border-radius: var(--theme-radius-sm);
+  border-radius: var(--theme-radius-sm, 6px);
   background: transparent;
   cursor: pointer;
   color: var(--theme-text-secondary);
-  font-size: 14px;
-  transition: background 0.15s, color 0.15s, transform 0.1s;
+  font-size: 0.85rem;
+  transition: all 0.15s;
 }
 
 .icon-btn:hover {
-  background: var(--theme-hover, rgba(255,255,255,0.08));
-  color: var(--theme-text);
+  background: var(--theme-tab-hover-bg);
+  color: var(--theme-text-primary);
 }
 
 .icon-btn:active {
@@ -575,56 +589,58 @@ watch(() => props.book, (newBook) => {
 }
 
 .icon-btn:focus-visible {
-  outline: 2px solid rgba(34,197,94,0.6);
+  outline: 2px solid var(--theme-primary);
   outline-offset: 2px;
 }
 
 .icon-btn.danger:hover {
-  background: rgba(220, 38, 38, 0.15);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--theme-error) 15%, transparent);
+  color: var(--theme-error);
 }
 
-/* ===== Edit Modal ===== */
+/* ===== 编辑弹窗 ===== */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--theme-overlay-bg);
+  backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
-  animation: fadeIn 0.15s ease;
+  animation: wbFadeIn 0.15s ease;
 }
 
-@keyframes fadeIn {
+@keyframes wbFadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
 .edit-modal {
-  background: #1a2035;
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: var(--theme-radius-lg);
-  padding: 24px;
+  background: var(--theme-card-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-xl, 16px);
+  padding: 28px;
   width: min(640px, calc(100vw - 32px));
   max-height: 85vh;
   max-height: 85dvh;
   overflow-y: auto;
-  animation: slideUp 0.2s ease;
+  animation: wbSlideUp 0.2s ease;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
 }
 
-@keyframes slideUp {
+@keyframes wbSlideUp {
   from { transform: translateY(16px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
 
 .edit-modal h4 {
   margin: 0 0 20px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-  font-size: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--theme-card-border);
+  font-size: 1.1rem;
   font-weight: 700;
-  color: rgba(255,255,255,0.9);
+  color: var(--theme-text-primary);
 }
 
 .edit-row {
@@ -634,62 +650,40 @@ watch(() => props.book, (newBook) => {
   margin-bottom: 0;
 }
 
-.edit-modal .checkbox-label,
-.checkbox-label {
-  display: flex !important;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  min-height: 44px;
-  font-size: 14px;
-  color: rgba(255,255,255,0.75);
-  margin-top: 14px;
-}
-
-.checkbox-label input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: #22c55e;
-}
-
-.order-input-sm {
-  width: 72px;
-  text-align: center;
-}
-
-/* ===== 表单输入框 ===== */
+/* ===== 表单 ===== */
 .edit-modal .form-label {
   display: block;
-  font-size: 13px;
+  font-size: 0.8rem;
   font-weight: 600;
-  color: rgba(255,255,255,0.6);
+  color: var(--theme-text-secondary);
   margin-bottom: 4px;
   margin-top: 14px;
+  flex: 1;
 }
 
 .edit-modal .form-input {
   width: 100%;
   padding: 10px 14px;
-  font-size: 14px;
+  font-size: 0.85rem;
   line-height: 1.5;
-  color: rgba(255,255,255,0.9);
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 8px;
+  color: var(--theme-text-primary);
+  background: var(--theme-content-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md, 8px);
   outline: none;
-  transition: border-color 0.15s, background 0.15s;
-  font-family: inherit;
   box-sizing: border-box;
+  font-family: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .edit-modal .form-input:focus {
-  border-color: rgba(34, 197, 94, 0.5);
-  background: rgba(255,255,255,0.07);
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 15%, transparent);
 }
 
 .edit-modal .form-input::placeholder {
-  color: rgba(255,255,255,0.2);
+  color: var(--theme-text-muted);
+  opacity: 0.5;
 }
 
 .edit-modal select.form-input {
@@ -697,87 +691,115 @@ watch(() => props.book, (newBook) => {
   padding-right: 30px;
 }
 
+/* ===== 复选框标签 ===== */
+.checkbox-label {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  min-height: 44px;
+  font-size: 0.85rem;
+  color: var(--theme-text-secondary);
+  padding-top: 18px !important;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--theme-primary);
+}
+
+.order-input-sm {
+  width: 72px;
+  text-align: center;
+}
+
+/* ===== 文本域 ===== */
 .form-textarea {
   width: 100%;
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 13px;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md, 8px);
+  padding: 12px 14px;
+  font-size: 0.82rem;
   line-height: 1.6;
-  font-family: ui-monospace, 'JetBrains Mono', 'Consolas', monospace;
-  background: rgba(255,255,255,0.05);
-  color: rgba(255,255,255,0.9);
+  font-family: 'Monaco', 'Menlo', 'Cascadia Code', monospace;
+  background: var(--theme-content-bg);
+  color: var(--theme-text-primary);
   resize: vertical;
   min-height: 200px;
   outline: none;
-  transition: border-color 0.15s, background 0.15s;
   box-sizing: border-box;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .form-textarea:focus {
-  border-color: rgba(34, 197, 94, 0.5);
-  background: rgba(255,255,255,0.07);
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 15%, transparent);
 }
 
 .form-textarea::placeholder {
-  color: rgba(255,255,255,0.2);
+  color: var(--theme-text-muted);
+  opacity: 0.5;
 }
 
+/* ===== 弹窗按钮 ===== */
 .modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 20px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--theme-card-border);
 }
 
 .btn-primary, .btn-secondary {
   display: inline-flex;
   align-items: center;
   padding: 10px 24px;
-  border-radius: 8px;
+  border-radius: var(--theme-radius-md, 8px);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 0.85rem;
   font-weight: 600;
-  min-height: 44px;
-  transition: background 0.15s;
+  font-family: inherit;
+  min-height: 40px;
+  transition: all 0.15s;
 }
 
 .btn-primary {
-  background: #22c55e;
-  color: white;
+  background: var(--theme-primary);
+  color: var(--theme-primary-text);
   border: none;
 }
 
 .btn-primary:hover {
-  background: #16a34a;
+  filter: brightness(1.1);
 }
 
 .btn-secondary {
-  background: rgba(255,255,255,0.06);
-  color: rgba(255,255,255,0.6);
-  border: 1px solid rgba(255,255,255,0.1);
+  background: var(--theme-surface-muted);
+  color: var(--theme-text-secondary);
+  border: 1px solid var(--theme-card-border);
 }
 
 .btn-secondary:hover {
-  background: rgba(255,255,255,0.1);
+  background: var(--theme-tab-hover-bg);
+  color: var(--theme-text-primary);
 }
 
-/* ===== 内置只读 ===== */
-.builtin-notice {
-  font-size: 13px;
-  color: rgba(255,255,255,0.4);
-  display: flex;
-  align-items: center;
-  gap: 6px;
+/* ===== 禁用态 ===== */
+input:disabled, select:disabled, textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
-input:disabled, .order-btn:disabled, .icon-btn:disabled {
+button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
 /* ===== Focus visible ===== */
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
-  outline: 2px solid rgba(34,197,94,0.6);
+  outline: 2px solid var(--theme-primary);
   outline-offset: 2px;
 }
 </style>

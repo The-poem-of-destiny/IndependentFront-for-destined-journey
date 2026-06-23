@@ -55,12 +55,9 @@ async function handleNext() {
     />
 
     <main class="create-content">
-      <Suspense>
-        <component :is="currentComponent" />
-        <template #fallback>
-          <div class="step-loading">加载中…</div>
-        </template>
-      </Suspense>
+      <Transition name="step-fade" mode="out-in">
+        <component :key="store.currentStep" :is="currentComponent" />
+      </Transition>
     </main>
 
     <CreateFooter
@@ -120,5 +117,19 @@ async function handleNext() {
   height: 100%;
   color: var(--theme-text-muted);
   font-size: 1rem;
+}
+
+/* 步骤切换动画 */
+.step-fade-enter-active,
+.step-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.step-fade-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
+.step-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 </style>

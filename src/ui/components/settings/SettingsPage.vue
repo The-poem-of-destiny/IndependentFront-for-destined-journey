@@ -21,15 +21,15 @@ const s = cfg.settings  // 短别名，模板里用 s.xxx
 type Section = 'api' | 'agent' | 'worldbook' | 'plot' | 'memory' | 'theme' | 'data' | 'about'
 const activeSection = ref<Section>('api')
 
-const navItems: { key: Section; label: string }[] = [
-  { key: 'api', label: 'API 配置' },
-  { key: 'agent', label: 'Agent 配置' },
-  { key: 'worldbook', label: '世界书' },
-  { key: 'plot', label: '剧情系统' },
-  { key: 'memory', label: '记忆 & 缓存' },
-  { key: 'theme', label: '外观主题' },
-  { key: 'data', label: '存档数据' },
-  { key: 'about', label: '关于' },
+const navItems: { key: Section; label: string; icon: string }[] = [
+  { key: 'api', label: 'API 配置', icon: 'fa-solid fa-plug' },
+  { key: 'agent', label: 'Agent 配置', icon: 'fa-solid fa-robot' },
+  { key: 'worldbook', label: '世界书', icon: 'fa-solid fa-book-open' },
+  { key: 'plot', label: '剧情系统', icon: 'fa-solid fa-scroll' },
+  { key: 'memory', label: '记忆 & 缓存', icon: 'fa-solid fa-brain' },
+  { key: 'theme', label: '外观主题', icon: 'fa-solid fa-palette' },
+  { key: 'data', label: '存档数据', icon: 'fa-solid fa-database' },
+  { key: 'about', label: '关于', icon: 'fa-solid fa-circle-info' },
 ]
 
 // ============================================================
@@ -369,7 +369,7 @@ async function importWorldBook() {
       const book: WorldBook = {
         id: f.name.replace(/\.json$/i, ''),
         name: raw.name || f.name.replace(/\.json$/i, ''),
-        partition: 'world_overview',
+        partition: 'world_setting',
         description: raw.description || '',
         entries: Array.isArray(raw.entries) ? raw.entries.map((e: any) => ({
           uid: e.uid || Date.now(),
@@ -398,7 +398,7 @@ function newWorldBook() {
   const book: WorldBook = {
     id,
     name,
-    partition: 'world_overview',
+    partition: 'world_setting',
     entries: [],
   }
   s.worldBooks.push(book)
@@ -416,6 +416,17 @@ function deleteWorldBook(id: string) {
 
 function closeWorldBookEditor() {
   activeWorldBook.value = null
+}
+
+async function resetWorldBooks() {
+  if (!confirm('确定恢复所有世界书为默认吗？\n\n这将清除所有修改和导入的世界书，重新加载内置版本。此操作不可撤销。')) return
+  try {
+    await cfg.resetWorldBooksToDefaults()
+    activeWorldBook.value = null
+    ui.toast('世界书已恢复为默认', 'success')
+  } catch {
+    ui.toast('恢复失败，请检查 data/worldbooks/ 目录', 'error')
+  }
 }
 
 function handleWorldBookUpdate(updated: WorldBook) {
@@ -485,7 +496,9 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
       <nav class="main-nav">
         <button v-for="item in navItems" :key="item.key" class="nav-item" :class="{ 'nav-active': activeSection === item.key }"
           @click="activeSection = item.key; activeAgent = null">
-          {{ item.label }}
+          <span class="nav-icon"><i :class="item.icon" aria-hidden="true"></i></span>
+          <span class="nav-label">{{ item.label }}</span>
+          <span class="nav-indicator" v-if="activeSection === item.key" />
         </button>
       </nav>
 
@@ -502,9 +515,11 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 
       <!-- ====== 右侧内容（居中）====== -->
       <div class="settings-content" :class="{ 'content-with-subnav': activeSection === 'agent' }">
+        <Transition name="section-fade" mode="out-in">
+          <div :key="activeSection" class="section-wrapper">
 
-        <!-- ========== API 池 ========== -->
-        <section v-if="activeSection === 'api'" class="section centered">
+            <!-- ========== API 池 ========== -->
+            <section v-if="activeSection === 'api'" class="section centered">
           <div class="section-head">
             <div><h3>API 池管理</h3><p class="section-desc">管理 AI 模型连接端点。支持所有 OpenAI 兼容 API。</p></div>
             <AppButton variant="primary" size="sm" @click="openAddApi">+ 添加 API</AppButton>
@@ -724,6 +739,7 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
                 </label>
                 <AppButton variant="secondary" size="sm" @click="importWorldBook">导入ST世界书</AppButton>
                 <AppButton variant="primary" size="sm" @click="newWorldBook">+ 新建世界书</AppButton>
+                <AppButton variant="ghost" size="sm" @click="resetWorldBooks" style="color:var(--color-warning)">⟳ 恢复默认</AppButton>
               </div>
             </div>
 
@@ -819,6 +835,9 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
           <div class="about-grid"><AppCard padding="md"><h4>引擎信息</h4><div class="about-table"><div class="about-row"><span>引擎版本</span><span>{{ VERSION }}</span></div><div class="about-row"><span>UI 版本</span><span>1.0.0</span></div><div class="about-row"><span>构建时间</span><span>2026-06-15</span></div></div></AppCard><AppCard padding="md"><h4>技术栈</h4><div class="about-table"><div class="about-row"><span>框架</span><span>Vue 3.5 + Pinia 2</span></div><div class="about-row"><span>构建</span><span>Vite 6</span></div><div class="about-row"><span>数据库</span><span>Dexie.js (IndexedDB)</span></div><div class="about-row"><span>语言</span><span>TypeScript 5.4</span></div></div></AppCard><AppCard padding="md"><h4>引擎统计</h4><div class="about-table"><div class="about-row"><span>引擎模块</span><span>41 模块</span></div><div class="about-row"><span>单元测试</span><span>1978 tests</span></div><div class="about-row"><span>主题</span><span>10 套</span></div><div class="about-row"><span>纪元</span><span>复兴纪元</span></div></div></AppCard></div>
           <p class="text-muted text-sm text-center" style="margin-top:16px">《命定之诗》Fated Poem — 多 Agent 协作文字 RPG 引擎<br/>© 2026 命定之诗创作组</p>
         </section>
+
+          </div><!-- /section-wrapper -->
+        </Transition>
       </div>
     </div>
 
@@ -890,36 +909,49 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 .settings-body{display:flex;flex:1;overflow:hidden}
 
 /* 主导航 */
-.main-nav{width:170px;flex-shrink:0;background:var(--theme-title-bar-bg);border-right:1px solid var(--theme-card-border);padding:8px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
-.nav-item{display:flex;align-items:center;padding:9px 12px;border:none;border-radius:var(--theme-radius-md);background:transparent;color:var(--theme-tab-text);font-family:inherit;font-size:0.88rem;cursor:pointer;transition:all var(--theme-transition-fast);text-align:left}
+.main-nav{width:180px;flex-shrink:0;background:var(--theme-title-bar-bg);border-right:1px solid var(--theme-card-border);padding:12px 8px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:none;border-radius:var(--theme-radius-md);background:transparent;color:var(--theme-tab-text);font-family:inherit;font-size:0.88rem;cursor:pointer;transition:all var(--theme-transition-fast);text-align:left;position:relative}
 .nav-item:hover{background:var(--theme-tab-hover-bg);color:var(--theme-text-primary)}
 .nav-active{background:var(--theme-surface-muted);color:var(--theme-text-primary);font-weight:600}
+.nav-icon{font-size:1rem;line-height:1;flex-shrink:0;width:24px;text-align:center;opacity:0.7;display:flex;align-items:center;justify-content:center}
+.nav-icon i{font-size:1rem}
+.nav-active .nav-icon{opacity:1}
+.nav-label{flex:1}
+.nav-indicator{width:3px;height:16px;border-radius:2px;background:var(--theme-primary);position:absolute;left:-8px;top:50%;transform:translateY(-50%)}
 
 /* Agent 子导航 */
-.sub-nav{width:160px;flex-shrink:0;background:var(--theme-content-bg);border-right:1px solid var(--theme-card-border);padding:8px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
-.sub-nav-item{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border:none;border-radius:var(--theme-radius-sm);background:transparent;color:var(--theme-tab-text);font-family:inherit;font-size:0.8rem;cursor:pointer;transition:all var(--theme-transition-fast);text-align:left}
+.sub-nav{width:170px;flex-shrink:0;background:var(--theme-content-bg);border-right:1px solid var(--theme-card-border);padding:10px 8px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+.sub-nav-item{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border:none;border-radius:var(--theme-radius-sm);background:transparent;color:var(--theme-tab-text);font-family:inherit;font-size:0.8rem;cursor:pointer;transition:all var(--theme-transition-fast);text-align:left}
 .sub-nav-item:hover{background:var(--theme-tab-hover-bg);color:var(--theme-text-primary)}
-.sub-nav-active{background:var(--theme-surface-muted);color:var(--theme-text-primary);font-weight:600}
-.sub-nav-badge{font-size:0.65rem;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sub-nav-active{background:var(--theme-surface-muted);color:var(--theme-text-primary);font-weight:600;border-left:2px solid var(--theme-primary)}
+.sub-nav-name{flex:1}
+.sub-nav-badge{font-size:0.65rem;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .sub-nav-bad{background:var(--theme-error);color:#fff}
 .sub-nav-ok{background:var(--theme-success);color:#fff}
 
 /* 内容区 */
 .settings-content{flex:1;overflow-y:auto;padding:32px 40px}
-.content-with-subnav{padding:32px}
+.content-with-subnav{padding:32px 32px}
+.section-wrapper{width:100%}
+
+/* 分区切换动画 */
+.section-fade-enter-active,
+.section-fade-leave-active{transition:opacity 0.2s ease,transform 0.2s ease}
+.section-fade-enter-from{opacity:0;transform:translateY(8px)}
+.section-fade-leave-to{opacity:0;transform:translateY(-4px)}
 
 /* 居中 */
 .centered{max-width:780px;margin:0 auto}
 
 /* 通用 */
-.section>h3{font-family:var(--theme-font-title);font-size:1.3rem;color:var(--theme-text-primary);margin:0 0 4px}
+.section>h3{font-family:var(--theme-font-title);font-size:1.4rem;color:var(--theme-text-primary);margin:0 0 4px;padding-left:12px;border-left:3px solid var(--theme-primary)}
 .section-desc{margin:0 0 20px;font-size:0.85rem;color:var(--theme-text-muted)}
 .section-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;gap:16px}
 .section-head h3{font-family:var(--theme-font-title);font-size:1.3rem;color:var(--theme-text-primary);margin:0 0 4px}
 .form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
 .form-label{display:flex;flex-direction:column;gap:2px;font-size:0.85rem;font-weight:500;color:var(--theme-text-secondary)}
-.form-input{padding:8px 10px;border:1px solid var(--theme-card-border);border-radius:var(--theme-radius-md);background:var(--theme-content-bg);color:var(--theme-text-primary);font-family:inherit;font-size:0.9rem;transition:border-color var(--theme-transition-fast);width:100%}
-.form-input:focus{outline:none;border-color:var(--theme-primary)}
+.form-input{padding:8px 12px;border:1px solid var(--theme-card-border);border-radius:var(--theme-radius-md);background:var(--theme-content-bg);color:var(--theme-text-primary);font-family:inherit;font-size:0.9rem;transition:border-color var(--theme-transition-fast),box-shadow 0.15s;width:100%}
+.form-input:focus{outline:none;border-color:var(--theme-primary);box-shadow:0 0 0 2px color-mix(in srgb, var(--theme-primary) 15%, transparent)}
 .form-textarea{resize:vertical;min-height:50px}
 .form-hint{font-size:0.72rem;color:var(--theme-text-muted);margin:0 0 4px;line-height:1.4}
 .key-row{display:flex;gap:8px;align-items:center}
@@ -937,13 +969,14 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 .api-ok{color:var(--theme-success);font-size:0.9rem;font-weight:700}
 
 /* Agent */
-.agent-detail-head{margin-bottom:16px}
-.agent-detail-head h3{font-family:var(--theme-font-title);font-size:1.2rem;margin:0 0 4px}
-.detail-card{margin-bottom:16px}
-.detail-card h4{margin:0 0 6px;font-size:0.95rem}
-.detail-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
-.prompt-editor{font-family:'Monaco','Menlo',monospace;font-size:0.8rem;line-height:1.5;min-height:180px;width:100%;padding:10px;border:1px solid var(--theme-card-border);border-radius:var(--theme-radius-md);background:var(--theme-content-bg);color:var(--theme-text-primary);resize:vertical}
-.prompt-editor:focus{outline:none;border-color:var(--theme-primary)}
+.agent-detail-head{margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--theme-card-border)}
+.agent-detail-head h3{font-family:var(--theme-font-title);font-size:1.3rem;margin:0 0 6px}
+.detail-card{margin-bottom:20px;border:1px solid var(--theme-card-border);transition:border-color 0.15s;border-radius:var(--theme-radius-lg, 12px)}
+.detail-card:hover{border-color:color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border))}
+.detail-card h4{margin:0 0 8px;font-size:1rem;color:var(--theme-text-primary)}
+.detail-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;padding-top:16px;border-top:1px solid var(--theme-card-border)}
+.prompt-editor{font-family:'Monaco','Menlo','Cascadia Code',monospace;font-size:0.8rem;line-height:1.6;min-height:200px;width:100%;padding:14px;border:1px solid var(--theme-card-border);border-radius:var(--theme-radius-md);background:color-mix(in srgb, #000 6%, var(--theme-content-bg));color:var(--theme-text-primary);resize:vertical;tab-size:2}
+.prompt-editor:focus{outline:none;border-color:var(--theme-primary);box-shadow:0 0 0 2px color-mix(in srgb, var(--theme-primary) 12%, transparent)}
 
 /* Preset 预设系统 — 仿 ST 面板 */
 .preset-selector-bar{display:flex;gap:8px;align-items:center;margin-bottom:12px}
@@ -986,13 +1019,13 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 
 .preset-empty{padding:24px;text-align:center}
 .worldbook-select-list{border:1px solid var(--theme-card-border);border-radius:var(--theme-radius-md);min-height:60px;padding:8px;display:flex;flex-direction:column;gap:2px}
-.worldbook-checkbox{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:6px;cursor:pointer;min-height:44px;transition:background 0.15s}
-.worldbook-checkbox:hover{background:var(--theme-hover,rgba(255,255,255,0.05))}
+.worldbook-checkbox{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;min-height:44px;transition:background 0.15s}
+.worldbook-checkbox:hover{background:var(--theme-tab-hover-bg)}
 .worldbook-checkbox input[type=checkbox]{width:18px;height:18px;cursor:pointer;margin:0;accent-color:var(--theme-color-primary,#15803D)}
 .wb-check-label{flex:1;font-size:14px;font-weight:500}
-.worldbook-list{display:flex;flex-direction:column;gap:8px}
-.worldbook-card{display:flex;align-items:center;justify-content:space-between;gap:16px;transition:background 0.15s}
-.worldbook-card:hover{background:var(--theme-hover,rgba(255,255,255,0.02))}
+.worldbook-list{display:flex;flex-direction:column;gap:10px}
+.worldbook-card{display:flex;align-items:center;justify-content:space-between;gap:16px;transition:all 0.15s;border:1px solid var(--theme-card-border);border-radius:var(--theme-radius-lg, 12px)}
+.worldbook-card:hover{border-color:color-mix(in srgb, var(--theme-primary) 25%, var(--theme-card-border));transform:translateY(-1px);box-shadow:0 2px 8px rgba(0,0,0,0.12)}
 .wb-info{flex:1;min-width:0}
 .wb-info h4{font-size:15px;margin:0 0 4px;display:flex;align-items:center;gap:8px}
 .builtin-badge{font-size:11px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(34,197,94,0.15);color:#22c55e;border:1px solid rgba(34,197,94,0.3)}
@@ -1007,7 +1040,8 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 
 /* Plot */
 .genre-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
-.genre-chip{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border:1.5px solid var(--theme-card-border);border-radius:var(--theme-radius-md);cursor:pointer;transition:all var(--theme-transition-fast);user-select:none}
+.genre-chip{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border:1.5px solid var(--theme-card-border);border-radius:var(--theme-radius-md);cursor:pointer;transition:all var(--theme-transition-fast);user-select:none;background:var(--theme-card-bg)}
+.genre-chip:hover{border-color:var(--theme-primary);transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.1)}
 .genre-chip:hover{border-color:var(--theme-primary)}
 .genre-active{border-color:var(--theme-primary);background:color-mix(in srgb,var(--theme-primary) 10%,var(--theme-card-bg))}
 .genre-chip-label{font-weight:600;font-size:0.9rem;color:var(--theme-text-primary)}
@@ -1020,23 +1054,24 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 .plot-preview-body{display:flex;flex-direction:column;gap:4px}
 
 /* Theme */
-.theme-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px}
-.theme-option{position:relative;aspect-ratio:16/10;border:2px solid var(--theme-card-border);border-radius:var(--theme-radius-lg);cursor:pointer;transition:all var(--theme-transition-fast);overflow:hidden;display:flex;align-items:flex-end;padding:8px}
-.theme-option:hover{transform:translateY(-2px);box-shadow:var(--theme-shadow-md)}
-.theme-selected{border-color:var(--theme-primary);box-shadow:0 0 14px color-mix(in srgb,var(--theme-primary) 30%,transparent)}
-.theme-name{font-size:0.75rem;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,0.5)}
-.theme-check{position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:50%;background:var(--theme-primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700}
+.theme-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:14px}
+.theme-option{position:relative;aspect-ratio:16/10;border:2px solid var(--theme-card-border);border-radius:var(--theme-radius-lg);cursor:pointer;transition:all var(--theme-transition-fast);overflow:hidden;display:flex;align-items:flex-end;padding:10px}
+.theme-option:hover{transform:translateY(-3px);box-shadow:0 6px 20px color-mix(in srgb, #000 25%, transparent);border-color:color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border))}
+.theme-selected{border-color:var(--theme-primary) !important;box-shadow:0 0 16px color-mix(in srgb,var(--theme-primary) 25%,transparent)}
+.theme-name{font-size:0.75rem;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,0.6);letter-spacing:0.5px}
+.theme-check{position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:var(--theme-primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;box-shadow:0 0 8px color-mix(in srgb, var(--theme-primary) 40%, transparent)}
 
 /* Data */
-.data-actions{display:flex;flex-direction:column;gap:12px}
+.data-actions{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
 .data-actions h4{margin:0 0 4px;font-size:0.95rem}
-.data-danger{border-color:color-mix(in srgb,var(--theme-error) 30%,transparent)}
+.data-danger{border-color:color-mix(in srgb,var(--theme-error) 25%,transparent) !important;background:color-mix(in srgb,var(--theme-error) 3%,transparent)}
+.data-danger:hover{border-color:color-mix(in srgb,var(--theme-error) 45%,transparent) !important}
 .storage-bar-track{height:8px;border-radius:4px;background:var(--theme-card-border);overflow:hidden}
-.storage-bar-fill{height:100%;border-radius:4px;background:var(--theme-quality-优良);transition:width 0.5s ease}
+.storage-bar-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--theme-quality-common),var(--theme-quality-rare));transition:width 0.5s ease}
 
 /* About */
-.about-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
-.about-grid h4{margin:0 0 8px;font-size:0.95rem}
+.about-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.about-grid h4{margin:0 0 10px;font-size:0.95rem;color:var(--theme-text-primary);padding-bottom:8px;border-bottom:1px solid var(--theme-card-border)}
 .about-table{display:flex;flex-direction:column;gap:6px}
 .about-row{display:flex;justify-content:space-between;font-size:0.85rem;color:var(--theme-text-primary)}
 .about-row span:first-child{color:var(--theme-text-muted)}
