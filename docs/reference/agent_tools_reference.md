@@ -938,27 +938,25 @@ Story 输出 → scanMarkers()
 
 ## 待修改区域
 
-> 2026-06-22 — Phase 8.5 Agentic 系统可靠性验证（对照游戏实例 99 轮对话，发现 29 个问题）
+> 2026-06-22 — Phase 8.5 Agentic 系统可靠性验证（对照游戏实例 99 轮对话）
+> 2026-06-23 — F1-F7 已修复 ✅；剩余 F8-F14 + P1-P15
 
 ---
 
-### 🔴 框架问题（必须改引擎代码，共 13 个）
+### 🔴 框架问题
 
-**致命 (阻塞级)**
+**已完成（F1-F7，2026-06-23）**
 
-| # | 来源 | 问题 | 修改位置 |
-|---|------|------|----------|
-| F1 | vars | **vars_update 结构化输出未布线** — 管线只提取 delta_time，replace/delta/insert 全部丢弃，实际变量变更全靠 v3 `<vars>` merge | `agent-orchestrator.ts` processStageMarkers → 解析 vars_update JSON → 转 StatePatch |
-| F3 | char | **`assembleCharacterState` 资源计算 Bug** — `hp = 100 × hpMultiplier`，应为 `体质 × 100 × hpMultiplier` | `char-gen-agent.ts` 调用 `tier-constants.ts` 的 `calcHP()` |
-| F4 | char | **`roll_attributes` 公式不对齐** — 随机 1~cap 后 T1 缩放，游戏用 `[基础]+[层级]+{等级}` 三池分配 | `random-tables.ts` 重写，加 tier/level 参数 |
-| F5 | craft | **缺少 `get_inventory` 工具** — craft_gen 无法查询角色背包，不知道有什么材料可用 | `agent-tools.ts` 新增，从 context 读背包返回材料清单 |
-| F6 | craft | **缺少 `craft_settle` 工具** — 无法获取资源消耗/材料损耗/品质降级/精益求精/EXP/FP | `agent-tools.ts` 新增，调 `$craft.startProject()` 完整管线 |
-| F7 | craft | **creative_effects 缺少结构化数值字段** — 只有文本，无法承载"800 点物理伤害, DC20, 持续2回合" | `types.ts` 扩展 effect 模板；craft_gen 模板加数值字段 |
+| # | 来源 | 问题 | 状态 |
+|---|------|------|:--:|
+| F1 | vars | vars_update 结构化输出未布线 | ✅ 已布线到 StatePatch |
+| F3 | char | assembleCharacterState 资源计算 Bug | ✅ 改用 calcHP/calcMP/calcSP |
+| F4 | char | roll_attributes 公式不对齐 | ✅ 三池分配 |
+| F5 | craft | 缺少 get_inventory 工具 | ✅ 新增 |
+| F6 | craft | 缺少 craft_settle 工具 | ✅ 新增 |
+| F7 | craft | creative_effects 缺少结构化数值字段 + scripts | ✅ 扩展类型 |
 
-**高**
-
-| # | 来源 | 问题 | 修改位置 |
-|---|------|------|----------|
+**待修复（F8-F14）**
 | F8 | craft | **缺少 `craft_prepare` 工具** — 生产准备阶段（管制物/品质要求/资源预检/批量）无返回值 | `agent-tools.ts` 新增或扩展 craft_check |
 | F9 | char | **登神长阶输出严重不足** — `<ascension>` 只有 3 属性，游戏有权能树（要素/权能/法则/神位/神国） | `types.ts` CharGenOutput.ascension 扩展 + 模板加子标签 |
 | F10 | char | **缺 `get_tier_config` 工具** — 层级锚定需要人口分布/属性上限/等级范围数据 | `agent-tools.ts` 新增，查 tier-constants 表 |
@@ -1011,7 +1009,7 @@ Story 输出 → scanMarkers()
 |---|------|----------|
 | P15 | craft_request 标记说明不够详细 — 缺少 expects/材料/品质填写指引 | story 模板加完整 craft_request 属性说明 |
 
-> 📊 总计: 🔴 13 框架 + 🟢 15 提示词 = **28 项**
+> 📊 统计: ✅ 7 已修复 / 🔴 7 待修复 / 🟢 15 待修复 = **共 22 项待处理**
 
 ---
 
