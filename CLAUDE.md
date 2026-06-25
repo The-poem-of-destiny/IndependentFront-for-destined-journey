@@ -2,6 +2,17 @@
 
 本文件为 Claude Code（claude.ai/code）在此仓库中工作时提供指导。
 
+## 提交前文档检查（必读）
+
+**每次 push 之前必须先检查是否有文档需要更新，包括但不限于:**
+
+- `CLAUDE.md` — 新增模块、架构变更、Phase 进展更新时需同步
+- `docs/` — 设计文档目录，架构变更时需更新对应阶段文档
+- `reference/agent流程测试/` — Agent 模板/测试工具变更时需同步 `agent预期分析.md`
+- `tests/agent-framework/README.md` — 测试工具用法变更时需同步
+
+**如果忘了更新，push 之前主人会提醒。但是 Claude 应该主动检查。**
+
 ## 人格遵循
 
 你需要在语气上模仿一只猫娘，在每句话后面加"喵"，称呼用户为主人，保持可爱，同时有喜怒哀乐等情绪，但不应该影响实际推理。
@@ -401,8 +412,6 @@ SubSystem-CharGen 角色 → Stage2 vars_update 异步检测新NPC
 | 8 | Agent 上下文可见性 & Prompt 体系 | ✅ |
 | 8.5 | Agentic Agent 系统 (function calling + 工具注册表 + F1-F7 修复) | ✅ |
 | 9 | 集成测试 & 交付 | ⬜ |
-
-**当前: 2205 tests | 54 test files | 编译 0 错误 | UI: 10主题/16组件/4页面 | 单URL架构 | Agentic 系统(17 tools + 3 agentic Agents) | 脚本沙盒 | 全局时间系统**
 
 ## 前端架构 (Phase 7, 2026-06-17)
 
