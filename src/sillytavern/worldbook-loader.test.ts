@@ -32,9 +32,9 @@ function makeEntry(overrides: Partial<WorldBookEntry> = {}): WorldBookEntry {
 
 function makeBook(overrides: Partial<WorldBook> = {}): WorldBook {
   return {
-    id: 'world_overview',
+    id: 'world_setting',
     name: '世界总览',
-    partition: 'world_overview',
+    partition: 'world_setting',
     entries: [],
     ...overrides,
   };
@@ -65,18 +65,18 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 describe('loadWorldBooksSync', () => {
   it('returns books for matching IDs', () => {
     const preloaded: Record<string, WorldBook> = {
-      world_overview: makeBook({ id: 'world_overview', name: '世界总览' }),
-      region_detail: makeBook({ id: 'region_detail', name: '地区详细' }),
+      world_setting: makeBook({ id: 'world_setting', name: '世界总览' }),
+      adventure_area: makeBook({ id: 'adventure_area', name: '地区详细' }),
     };
-    const result = loadWorldBooksSync(['world_overview', 'region_detail'], preloaded);
+    const result = loadWorldBooksSync(['world_setting', 'adventure_area'], preloaded);
     expect(result).toHaveLength(2);
   });
 
   it('skips missing IDs', () => {
     const preloaded: Record<string, WorldBook> = {
-      world_overview: makeBook(),
+      world_setting: makeBook(),
     };
-    const result = loadWorldBooksSync(['world_overview', 'nonexistent'], preloaded);
+    const result = loadWorldBooksSync(['world_setting', 'nonexistent'], preloaded);
     expect(result).toHaveLength(1);
   });
 });
@@ -85,14 +85,14 @@ describe('loadWorldBooksSync', () => {
 
 describe('getEntriesForAgent', () => {
   it('returns entries from allowed world books', () => {
-    const configs = [makeConfig({ agentId: 'story', worldBookIds: ['world_overview'] })];
+    const configs = [makeConfig({ agentId: 'story', worldBookIds: ['world_setting'] })];
     const books = [
       makeBook({
-        id: 'world_overview',
+        id: 'world_setting',
         entries: [makeEntry({ uid: 1, content: '世界主设定' })],
       }),
       makeBook({
-        id: 'region_detail',
+        id: 'adventure_area',
         entries: [makeEntry({ uid: 2, content: '白曜城' })],
       }),
     ];

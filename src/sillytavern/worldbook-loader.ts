@@ -14,16 +14,21 @@ import type { WorldBook, WorldBookEntry, AgentConfig } from './types';
 
 /** 所有可用的世界书文件路径 */
 const WORLD_BOOK_FILES: Record<string, string> = {
-  world_overview: 'world_overview.json',
-  numerical_design: 'numerical_design.json',
-  character_detail: 'character_detail.json',
-  race_detail: 'race_detail.json',
-  region_detail: 'region_detail.json',
-  var_update: 'var_update.json',
-  fated_core: 'fated_core.json',
-  narrative_guide: 'narrative_guide.json',
-  event_detail: 'event_detail.json',
-  ejs_deferred: '_ejs_deferred.json',
+  world_setting: 'world_setting.json',
+  race: 'race.json',
+  faction: 'faction.json',
+  character: 'character.json',
+  event: 'event.json',
+  adventure_area: 'adventure_area.json',
+  monster_ecology: 'monster_ecology.json',
+  industry: 'industry.json',
+  organization: 'organization.json',
+  system_core: 'system_core.json',
+  variable: 'variable.json',
+  quick_feature: 'quick_feature.json',
+  extra_setting: 'extra_setting.json',
+  cot: 'cot.json',
+  dlc: 'dlc.json',
 };
 
 /**

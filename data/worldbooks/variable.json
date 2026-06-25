@@ -1,0 +1,8 @@
+{
+  "id": "variable",
+  "name": "变量",
+  "partition": "variable",
+  "description": "变量初始设定/更新规则/output_format — 变量系统（暂不填充）",
+  "entries": [],
+  "builtIn": true
+}

@@ -7,15 +7,16 @@ export default defineConfig({
   plugins: [
     vue(),
     {
-      name: 'worldbook-api',
+      name: 'file-write-api',
       configureServer(server) {
         const dataDir = resolve(__dirname, 'data')
-        // GET: 读取世界书文件 → fetch('/data/worldbooks/xxx.json')
+
         server.middlewares.use('/data', (req, res, next) => {
           if (req.method !== 'GET' && req.method !== 'HEAD') return next()
           const url = new URL(req.url || '', 'http://localhost')
-          const filePath = resolve(dataDir, url.pathname.replace(/^\/data\//, ''))
-          if (fs.existsSync(filePath) && fs.statSync(filePath).isFile() && !filePath.includes('..')) {
+          const relPath = url.pathname.replace(/^\/data\//, '')
+          const filePath = resolve(dataDir, relPath)
+          if (fs.existsSync(filePath) && fs.statSync(filePath).isFile() && !relPath.includes('..')) {
             res.statusCode = 200
             res.setHeader('Content-Type', 'application/json')
             res.setHeader('Cache-Control', 'no-cache')
@@ -24,7 +25,7 @@ export default defineConfig({
           }
           next()
         })
-        // PUT: 保存世界书 JSON 到本地文件
+
         server.middlewares.use('/api/worldbooks', (req, res, next) => {
           if (req.method !== 'PUT' && req.method !== 'POST') return next()
           const id = (req.url || '').replace(/^\//, '').replace(/\.json$/, '')
@@ -33,8 +34,8 @@ export default defineConfig({
           req.on('data', (chunk: Buffer) => { body += chunk.toString() })
           req.on('end', () => {
             try {
-              const filePath = resolve(dataDir, `${id}.json`)
-              // 只允许覆盖已存在的内置文件
+              const worldbooksDir = resolve(dataDir, 'worldbooks')
+              const filePath = resolve(worldbooksDir, `${id}.json`)
               if (!fs.existsSync(filePath)) {
                 res.statusCode = 404
                 res.end(JSON.stringify({ error: 'not found' }))
@@ -50,12 +51,12 @@ export default defineConfig({
             }
           })
         })
-        // PUT: 保存项目默认 Agent 配置 (允许创建新文件)
+
         server.middlewares.use('/api/defaults', (req, res, next) => {
           if (req.method !== 'PUT' && req.method !== 'POST') return next()
-          const url = new URL(req.url || '', 'http://localhost')
-          const fileName = url.pathname.replace(/^\/api\/defaults\//, '').replace(/\.json$/, '')
-          if (!fileName || fileName.includes('..')) return next()
+          const rawUrl = (req.url || '').replace(/^\//, '').replace(/\.json$/, '')
+          const fileName = rawUrl || 'agent-config'
+          if (fileName.includes('..')) return next()
           let body = ''
           req.on('data', (chunk: Buffer) => { body += chunk.toString() })
           req.on('end', () => {
@@ -73,6 +74,33 @@ export default defineConfig({
             }
           })
         })
+
+        // CORS proxy: /api/proxy/<encoded_url> -> forward to external API
+        server.middlewares.use('/api/proxy', (req, res) => {
+          const targetUrl = (req.url || '').replace(/^\//, '')
+          if (!targetUrl) { res.statusCode = 400; res.end('missing url'); return }
+          const decoded = decodeURIComponent(targetUrl)
+          if (!/^https?:\/\//.test(decoded)) { res.statusCode = 403; res.end('invalid url'); return }
+          const headers: Record<string, string> = {}
+          for (const [k, v] of Object.entries(req.headers)) {
+            if (k !== 'host' && k !== 'origin' && k !== 'referer' && typeof v === 'string') headers[k] = v as string
+          }
+          const chunks: Buffer[] = []
+          req.on('data', (c: Buffer) => chunks.push(c))
+          req.on('end', () => {
+            fetch(decoded, {
+              method: (req.method || 'GET') as any,
+              headers,
+              body: chunks.length > 0 ? Buffer.concat(chunks) as any : undefined,
+            })
+              .then(async (r) => {
+                res.statusCode = r.status || 200
+                for (const [k, v] of r.headers) { try { res.setHeader(k, v) } catch {} }
+                res.end(await r.text())
+              })
+              .catch((e: any) => { res.statusCode = 502; res.end(JSON.stringify({ error: e.message })) })
+          })
+        })
       },
     },
   ],
@@ -87,7 +115,7 @@ export default defineConfig({
     port: 5173,
     open: true,
     watch: {
-      ignored: ['**/data/worldbooks/**', '**/data/defaults/**'],  // API 写入文件，不需触发热更新
+      ignored: ['**/data/worldbooks/**', '**/data/defaults/**'],
     },
   },
   build: {

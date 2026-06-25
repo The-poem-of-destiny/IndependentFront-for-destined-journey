@@ -166,18 +166,38 @@ executeScript(script, context)
 
 ### 套娃机制
 
-脚本通过 `$status.add()` 创建新状态，新状态带自己的 scripts：
+脚本通过 `$status.add()` 创建新状态。**子 StatusEffect 只做 @parent 薄壳引用**，逻辑定义在父级 scripts 池（详见下方 ADR-27）：
 
 ```
-灼烧之剑.scripts["hit"]
-  → $status.add(target, { name:"灼烧", scripts:{tick:"..."}, onTick:"tick" })
-    → 灼烧.onTick → scripts["tick"]
-      → $resource.modifyHp(owner, -5%)
-      → $status.add(owner, { name:"余烬", scripts:{tick:"..."}, onTick:"tick" })
-        → 余烬.onTick → scripts["tick"] → $resource.modifyHp(owner, -2)
+// 父级（灼烧之剑.scripts）— 所有逻辑在这里扁平铺开:
+{
+  burnFormula: "$resource.modifyHp(owner, -5 * self.stacks);",
+  ashFormula:  "$resource.modifyHp(owner, -2);",
+  onHit: [
+    "$status.add(target, { name:'灼烧', stacks:2,",
+    "  scripts:{ tick:'@parent.burnFormula' },",
+    "  onTick:'tick' });",
+    "if ($dice.d100() <= 20) {",
+    "  $status.add(owner, { name:'余烬', stacks:1,",
+    "    scripts:{ tick:'@parent.ashFormula' },",
+    "    onTick:'tick' });",
+    "}",
+  ].join('\n'),
+}
+
+// 子 StatusEffect.scripts — 只有引用:
+灼烧: { tick: '@parent.burnFormula' }
+余烬: { tick: '@parent.ashFormula' }
+
+// 执行链:
+灼烧之剑.onHit → $status.add(灼烧) → _parentScripts=灼烧之剑.scripts
+  → 灼烧.onTick → resolveScriptRef('tick') → '@parent.burnFormula'
+    → executeScript("$resource.modifyHp(owner, -5 * self.stacks);", {self:{stacks:2}})
+      → 20%概率 → $status.add(余烬) → _parentScripts=灼烧之剑.scripts
+        → 余烬.onTick → resolveScriptRef('tick') → '@parent.ashFormula'
 ```
 
-无限套娃，无字符串转义问题。
+无限套娃，无字符串转义问题，且所有公式在父级统一管理。
 
 ### 🆕 脚本引用路径规范
 
@@ -193,6 +213,79 @@ executeScript(script, context)
 **继承链自动建立**：`$status.add()` 时引擎自动将当前对象的 scripts 作为 `parentScripts` 传给子 StatusEffect。子对象可通过 `@parent.xxx` 回调父对象脚本。
 
 **递归解析**：如果查到的值仍是 `@` 引用，自动递归解析（最多 5 层）。
+
+### 🆕 编写规范：scripts 池扁平化 (ADR-27)
+
+**核心原则：逻辑定义在父级 scripts 池扁平铺开，子 StatusEffect 只做 `@parent` 薄壳引用。禁止在 `$status.add()` 内联大段 JS 代码。**
+
+#### ✅ 正确写法（分开写，不套娃）
+
+```javascript
+// 父级（Skill/Equipment/Item）的 scripts 池 — 所有逻辑在这里，扁平铺开:
+{
+  // 入口脚本（短，只负责 $status.add 薄壳）
+  cast: [
+    '$status.add(owner, {',
+    "  name: '钢铁护盾',",
+    '  category: \'增益\',',
+    '  stacks: 1000,',
+    '  remainingTime: null,',
+    '  timeUnit: \'回合\',',
+    '  source: \'钢铁护盾\',',
+    "  scripts: { absorb: '@parent.absorbDamage' },",  // ← 只有引用！
+    "  onTrigger: 'absorb'",
+    '});',
+  ].join('\n'),
+
+  // 核心逻辑（独立 key，扁平在父级）
+  absorbDamage: [
+    'var dmg = event.damage || 0;',
+    'var armor = self.stacks;',
+    'if (armor <= 0) { $status.remove(owner, self.name); return; }',
+    'if (dmg >= armor) {',
+    '  $status.setStacks(owner, self.name, 0);',
+    '  $status.remove(owner, self.name);',
+    '  $event.emit("shield_broken", { absorbed: armor, overflow: dmg - armor });',
+    '} else {',
+    '  $status.setStacks(owner, self.name, armor - dmg);',
+    '  $event.emit("shield_absorbed", { absorbed: dmg, remaining: armor - dmg });',
+    '}',
+  ].join('\n'),
+}
+
+// 子 StatusEffect.scripts — 只有 @parent 引用，极薄:
+{ absorb: '@parent.absorbDamage' }
+```
+
+执行时 `$status.add()` 自动注入 `_parentScripts`，`executeHook()` 通过 `resolveScriptRef()` 递归解析 `@parent` 引用，最终执行的是父级代码，但 `self.stacks` / `self.name` 使用的是子 StatusEffect 的值。
+
+#### ❌ 错误写法（套娃内联，禁止）
+
+```javascript
+// 不要在 $status.add() 里内联大段代码！
+$status.add(owner, {
+  name: '护盾',
+  scripts: {
+    absorb: [
+      'var dmg = event.damage || 0;',   // 大段逻辑塞在子级
+      'var armor = self.stacks;',
+      'if (armor <= 0) { ... }',
+      '// ... 20 行 ...'
+    ].join('\n')
+  },
+  onTrigger: 'absorb'
+});
+```
+
+#### 为什么要这样做
+
+| 理由 | 说明 |
+|------|------|
+| 不套娃 | 所有逻辑在父级扁平铺开，一个 key 一个函数 |
+| 可复用 | 多个子对象共享父级公式池（`@parent` 继承链自动建立） |
+| 好维护 | 改一处公式，所有引用自动生效 |
+| 好测试 | 直接测父级 `scripts['absorbDamage']`，无需构造深层 StatusEffect |
+| AI 友好 | 每个 script key 是独立小函数，AI 生成/理解更准确 |
 
 ### 🆕 init / cleanup 生命周期
 
@@ -301,36 +394,60 @@ executeHook([newEffect], 'onApply', { owner: charId })
 
 ## 七、Agent 模板指示
 
-AI (item_gen / vars_update) 生成物品/状态时需遵循：
+AI (item_gen / vars_update) 生成物品/状态时需遵循 **ADR-27 scripts 池扁平化** 规范：
+
+**核心规则：逻辑定义在父级（Skill/Equipment/Item）的 `scripts` 池扁平铺开，子 StatusEffect 只用 `@parent` 引用。禁止在 `$status.add()` 内联大段 JS。**
 
 ```
-输出格式:
+✅ 正确输出格式:
 {
   "效果": { "锐利": "攻击力 +15%", "灼烧": "命中时50%附加灼烧" },
   "scripts": {
-    "hit": "if($dice.d100()<=50){$status.add(target,灼烧状态对象)}",
-    "burn_tick": "$resource.modifyHp(owner,-floor($resource.maxHp(owner)*0.05))"
-  },
-  "effects": [
-    { "name": "灼烧印记", "onTrigger": "hit" }
-  ]
+    // 父级 scripts 池 — 所有逻辑扁平铺开（一个 key 一个函数）
+    "burnFormula": "$resource.modifyHp(owner, -floor($resource.maxHp(owner) * 0.05 * self.stacks));",
+    "onHit": [
+      "if ($dice.d100() <= 50) {",
+      "  $status.add(target, {",
+      "    name: '灼烧', category: '减益', stacks: 1, remainingTime: 3, timeUnit: '回合',",
+      "    source: '灼烧之剑',",
+      "    scripts: { tick: '@parent.burnFormula' },",  // ← 只有引用！
+      "    onTick: 'tick'",
+      "  });",
+      "}",
+    ].join('\n')
+  }
 }
+
+// 子 StatusEffect.scripts — 只有 @parent 引用，极薄:
+{ tick: '@parent.burnFormula' }
+```
+
+```
+❌ 错误格式（禁止）:
+{
+  "scripts": {
+    "hit": "$status.add(target, { scripts: { tick: '$resource.modifyHp(...)' }, onTick: 'tick' })"
+    // ☝ 大段代码内联在子 StatusEffect 里 — 违反 ADR-27
+  }
+}
+```
 
 $ API 可用:
   $dice.d20() / $dice.d100()  — 骰子
   $resource.modifyHp(id, amount)  — 修改HP (负数为伤害)
   $resource.modifyStat(id, stat, amount)  — 修改属性
-  $status.add(id, {name, scripts, onTick, ...})  — 添加状态
+  $status.add(id, {name, scripts, onTick, ...})  — 添加状态（scripts 只用 @parent 引用）
   $status.remove(id, effectName)  — 移除状态
   $status.setStacks(id, effectName, n)  — 设置层数
   $event.emit(type, data)  — 触发事件
+  $event.on(type, scriptKey) — 注册持久监听（init 中使用）
+  $event.off(handleOrType) — 取消监听（cleanup 中使用）
 
 上下文变量:
   owner  — 效果持有者
   target — 事件目标
   self   — 当前效果自身 { stacks, remainingTime, name }
   event  — 触发事件数据
-```
 
 ---
 

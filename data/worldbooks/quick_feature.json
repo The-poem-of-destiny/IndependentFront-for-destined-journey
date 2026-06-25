@@ -1,0 +1,8 @@
+{
+  "id": "quick_feature",
+  "name": "快捷功能",
+  "partition": "quick_feature",
+  "description": "命运抽卡/盲盒/FP扩展 — 快捷交互功能",
+  "entries": [],
+  "builtIn": true
+}

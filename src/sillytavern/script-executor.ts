@@ -10,6 +10,8 @@
  * - 🆕 支持跨对象脚本引用: @parent.xxx / @type.id.xxx
  * - 🆕 支持 $event.on/off 持久事件订阅
  * - 🆕 支持 init/cleanup 生命周期钩子
+ *
+ * 📖 脚本编写规范详见: docs/reference/effect_script_system.md
  */
 
 import type { StatusEffect } from './types';

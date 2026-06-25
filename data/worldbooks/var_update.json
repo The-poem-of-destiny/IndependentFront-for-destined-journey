@@ -1,8 +1,0 @@
-{
-  "id": "var_update",
-  "name": "变量更新规则",
-  "partition": "var_update",
-  "description": "变量命名规范、合法值域、VarsPatch 操作说明、命名空间映射。注入给 vars_update。",
-  "entries": [],
-  "builtIn": true
-}

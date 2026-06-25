@@ -170,6 +170,16 @@ export const useSettingsStore = defineStore('settings', () => {
     saveNow()
   }
 
+  /** 恢复世界书为默认：清除旧数据，重新从 data/worldbooks/ 加载 */
+  async function resetWorldBooksToDefaults() {
+    try {
+      const builtIn = await loadBuiltInWorldBooks()
+      settings.value.worldBooks = builtIn
+      settings.value.activeWorldBookId = null
+      saveNow()
+    } catch { /* fetch 不可用时静默跳过 */ }
+  }
+
   // ===== 项目默认 Agent 配置 =====
 
   const projectAgentDefaults = ref<AgentProjectDefaults>({ version: 1, agents: {} })
@@ -260,5 +270,5 @@ export const useSettingsStore = defineStore('settings', () => {
     return null
   }
 
-  return { settings, saveNow, resetAll, getStorageUsage, projectAgentDefaults, loadAgentProjectDefaults, saveAgentProjectDefaults }
+  return { settings, saveNow, resetAll, resetWorldBooksToDefaults, getStorageUsage, projectAgentDefaults, loadAgentProjectDefaults, saveAgentProjectDefaults }
 })

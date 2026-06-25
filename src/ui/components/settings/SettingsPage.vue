@@ -44,11 +44,11 @@ const apiFormFetchingModels = ref(false)
 const editingApiId = ref<string | null>(null)
 
 function maskKey(key: string): string { if (!key || key.length < 8) return key ? key.slice(0,3)+'***' : ''; return key.slice(0,3)+'***'+key.slice(-4) }
-async function testApiAndFetch() { if(!apiForm.baseUrl||!apiForm.apiKey)return; apiFormTesting.value=true; try{const r=await fetch(apiForm.baseUrl+'/chat/completions',{method:'POST',headers:{'Authorization':`Bearer ${apiForm.apiKey}`,'Content-Type':'application/json'},body:JSON.stringify({model:apiForm.model||'default',messages:[{role:'user',content:'hi'}],max_tokens:1})});if(!r.ok)throw Error('');apiForm.apiKey=maskKey(apiForm.apiKey);ui.toast('连接成功','success');await fetchModelList()}catch{ui.toast('连接失败','error')} apiFormTesting.value=false }
-async function fetchModelList() { apiFormFetchingModels.value=true; try{const r=await fetch(apiForm.baseUrl+'/models',{headers:{'Authorization':`Bearer ${apiForm.apiKey}`,'Content-Type':'application/json'}});if(r.ok){const d=await r.json();apiModels.value=(d.data||[]).map((m:any)=>m.id).filter(Boolean);if(apiModels.value.length>0)apiForm.model=apiModels.value[0];ui.toast(`获取到 ${apiModels.value.length} 个模型`,'success')}}catch{} apiFormFetchingModels.value=false }
+	async function testApiAndFetch() { if(!apiForm.baseUrl||!apiForm.apiKey)return; apiFormTesting.value=true; const realKey=apiForm.apiKey; try{const r=await new Promise((ok,rej)=>{const x=new XMLHttpRequest();x.open("POST","/api/proxy/"+encodeURIComponent(apiForm.baseUrl+"/chat/completions"));x.setRequestHeader("Content-Type","application/json");x.setRequestHeader("Authorization","Bearer "+realKey);x.timeout=15000;x.onload=()=>{if(x.status>=200&&x.status<300)ok(x);else rej(new Error(x.status+" "+x.responseText.slice(0,100)))};x.onerror=()=>rej(new Error("network error"));x.ontimeout=()=>rej(new Error("timeout"));x.send(JSON.stringify({model:apiForm.model||"default",messages:[{role:"user",content:"hi"}],max_tokens:1}))});apiForm.apiKey=maskKey(realKey);apiForm._realKey=realKey;ui.toast("ok","success");await fetchModelList()}catch(e){ui.toast("fail: "+(e.message||"").slice(0,60),"error")} apiFormTesting.value=false }
+	async function fetchModelList() { apiFormFetchingModels.value=true; const rk=apiForm._realKey||apiForm.apiKey; try{const r=await new Promise((ok,rej)=>{const x=new XMLHttpRequest();x.open("GET","/api/proxy/"+encodeURIComponent(apiForm.baseUrl+"/models"));x.setRequestHeader("Authorization","Bearer "+rk);x.timeout=10000;x.onload=()=>{if(x.status>=200&&x.status<300)ok(x);else rej(new Error(x.status+" "+x.responseText.slice(0,100)))};x.onerror=()=>rej(new Error("network error"));x.ontimeout=()=>rej(new Error("timeout"));x.send()});const d=JSON.parse(r.responseText);apiModels.value=(d.data||[]).map(function(m){return m.id}).filter(Boolean);if(apiModels.value.length>0)apiForm.model=apiModels.value[0];ui.toast("got "+apiModels.value.length+" models","success")}catch(e){ui.toast("err: "+(e.message||"").slice(0,60),"error")} apiFormFetchingModels.value=false }
 function openAddApi() { editingApiId.value=null; apiForm.name='';apiForm.baseUrl='';apiForm.apiKey='';apiForm.model='';apiModels.value=[];showAddApi.value=true }
 function openEditApi(ep: ApiEntry) { editingApiId.value=ep.id;apiForm.name=ep.name;apiForm.baseUrl=ep.baseUrl;apiForm.apiKey=ep.apiKey||'';apiForm.model=ep.model;apiModels.value=ep.models?.length?ep.models:[ep.model].filter(Boolean);showAddApi.value=true }
-function saveApi() { const e: ApiEntry = {id:editingApiId.value||crypto.randomUUID(),name:apiForm.name,baseUrl:apiForm.baseUrl,apiKey:apiForm.apiKey,maskedKey:maskKey(apiForm.apiKey),model:apiForm.model,models:apiModels.value.length>0?apiModels.value:[apiForm.model].filter(Boolean)};if(editingApiId.value){const i=s.apiPool.findIndex(x=>x.id===editingApiId.value);if(i>=0)s.apiPool[i]=e}else s.apiPool.push(e);showAddApi.value=false;editingApiId.value=null;ui.toast(editingApiId.value?'API 已更新':'API 已添加','success') }
+	function saveApi() { const realKey=apiForm._realKey||apiForm.apiKey; const e: ApiEntry = {id:editingApiId.value||crypto.randomUUID(),name:apiForm.name,baseUrl:apiForm.baseUrl,apiKey:realKey,maskedKey:maskKey(realKey),model:apiForm.model,models:apiModels.value.length>0?apiModels.value:[apiForm.model].filter(Boolean)};if(editingApiId.value){const i=s.apiPool.findIndex(x=>x.id===editingApiId.value);if(i>=0)s.apiPool[i]=e}else s.apiPool.push(e);showAddApi.value=false;editingApiId.value=null;ui.toast(editingApiId.value?"API updated":"API added","success") }
 function deleteApi(id:string) { s.apiPool = s.apiPool.filter(e=>e.id!==id);ui.toast('API 已删除','info') }
 
 // ============================================================
@@ -140,7 +140,7 @@ function selectPreset(id: string) {
   if (p) {
     const ps = p.settings
     agentPromptDraft.value = ps.prompts?.[0]?.content || ps.mainPrompt || ps.system_prompt || ''
-    s.s.agentPromptEdited = true
+    s.agentPromptEdited = true
   }
 }
 function openNewPreset() {
@@ -248,11 +248,11 @@ function selectAgent(agentId: string) {
   activeAgent.value = agentId
   s.activeAgent = agentId
   agentPromptDraft.value = s.agentPrompts[agentId] || ''
-  s.s.agentPromptEdited = false
+  s.agentPromptEdited = false
 }
 
-function confirmPrompt() { if(!activeAgent.value)return; s.agentPrompts[activeAgent.value]=agentPromptDraft.value; s.s.agentPromptEdited=false; s.agentDirty[activeAgent.value]=true; ui.toast('提示词已保存','success') }
-function resetPrompt() { if(!activeAgent.value)return; agentPromptDraft.value=''; s.agentPrompts[activeAgent.value]=''; s.s.agentPromptEdited=false; s.agentDirty[activeAgent.value]=false; ui.toast('已恢复默认提示词','info') }
+function confirmPrompt() { if(!activeAgent.value)return; s.agentPrompts[activeAgent.value]=agentPromptDraft.value; s.agentPromptEdited=false; s.agentDirty[activeAgent.value]=true; ui.toast('提示词已保存','success') }
+function resetPrompt() { if(!activeAgent.value)return; agentPromptDraft.value=''; s.agentPrompts[activeAgent.value]=''; s.agentPromptEdited=false; s.agentDirty[activeAgent.value]=false; ui.toast('已恢复默认提示词','info') }
 async function saveAsDefault() {
   if (!activeAgent.value) return
   const agentId = activeAgent.value
@@ -335,7 +335,7 @@ function restoreAgentDefaults() {
     s.agentFreqPen[agentId] = pd.freqPen ?? 0
     s.agentPresPen[agentId] = pd.presPen ?? 0
     s.agentMaxTokens[agentId] = pd.maxTokens ?? 16384
-    s.s.agentPromptEdited = false
+    s.agentPromptEdited = false
     s.agentDirty[agentId] = false
     ui.toast('已恢复项目默认设置', 'info')
     return
@@ -353,7 +353,7 @@ function restoreAgentDefaults() {
   s.agentFreqPen[agentId] = 0
   s.agentPresPen[agentId] = 0
   s.agentMaxTokens[agentId] = 16384
-  s.s.agentPromptEdited = false
+  s.agentPromptEdited = false
   s.agentDirty[agentId] = false
   ui.toast('已恢复默认设置', 'info')
 }

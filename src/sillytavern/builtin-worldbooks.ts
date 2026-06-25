@@ -9,15 +9,21 @@ import type { WorldBook } from './types';
 
 /** 内置世界书文件名列表 */
 const BUILTIN_IDS = [
-  'world_overview',
-  'numerical_design',
-  'character_detail',
-  'race_detail',
-  'region_detail',
-  'var_update',
-  'fated_core',
-  'narrative_guide',
-  'event_detail',
+  'world_setting',
+  'race',
+  'faction',
+  'character',
+  'event',
+  'adventure_area',
+  'monster_ecology',
+  'industry',
+  'organization',
+  'system_core',
+  'variable',
+  'quick_feature',
+  'extra_setting',
+  'cot',
+  'dlc',
 ];
 
 /** 运行时从 /data/worldbooks/ 加载所有内置世界书 */
