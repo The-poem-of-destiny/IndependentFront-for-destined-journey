@@ -1052,6 +1052,8 @@ export interface AgentResult {
   agentId: string;
   output: any;                   // 解析后的输出
   rawResponse: string;
+  /** 🆕 DeepSeek 思考模式 — 思维链内容 */
+  reasoning?: string;
   tokensUsed: number;
   cacheHit: boolean;             // DeepSeek 缓存命中
   duration: number;              // ms

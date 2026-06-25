@@ -8,6 +8,24 @@ import { calcHP, calcMP, calcSP } from '../../src/sillytavern/tier-constants.js'
 import { createDefaultSaveProfile } from '../../src/sillytavern/database.js';
 import fs from 'fs';
 
+function loadWorldBooks(ids: string[]): any[] {
+  const books: any[] = [];
+  for (const id of ids) {
+    const path = `data/worldbooks/${id}.json`;
+    if (fs.existsSync(path)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(path, 'utf-8'));
+        if (Array.isArray(data)) {
+          books.push({ id, name: id, entries: data });
+        } else if (data && typeof data === 'object') {
+          books.push(data.id ? data : { id, name: id, entries: data.entries || [] });
+        }
+      } catch {}
+    }
+  }
+  return books;
+}
+
 const SAVE_ID = 'save-progressive';
 const NOW = Date.now();
 
@@ -217,7 +235,7 @@ const saveSlot = {
 // ===== FullBackup =====
 const backup = {
   version: 7, exportedAt: NOW,
-  lorebooks: [], presets: [], settings: [],
+  lorebooks: loadWorldBooks(['system_core', 'race', 'faction', 'character', 'variable', 'world_setting']), presets: [], settings: [],
   chats: [chatSession], memories, plotEvents: [], characters, snapshots,
   saves: [saveSlot], apiEndpoints: [], plotOutlines: [],
   saveProfiles: [saveProfile], createPresets: [],

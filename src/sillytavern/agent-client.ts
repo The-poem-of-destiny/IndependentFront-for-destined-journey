@@ -35,6 +35,8 @@ export interface ChatRequest {
   tools?: ToolDefinition[];
   /** 🆕 Agentic: 工具调用策略 */
   tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
+  /** 🆕 DeepSeek 思考模式 */
+  reasoning?: boolean;
 }
 
 export interface AgentClientOptions {
@@ -257,6 +259,11 @@ export class AgentClient {
         body.tool_choice = request.tool_choice ?? 'auto';
       }
 
+      // 🆕 DeepSeek 思考模式
+      if (request.reasoning && this.endpoint.provider === 'deepseek') {
+        body.thinking = { type: 'enabled' };
+      }
+
       const res = await fetch(`${this.endpoint.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -276,6 +283,7 @@ export class AgentClient {
       const choice = data.choices?.[0];
       const message = choice?.message;
       const rawResponse: string = message?.content ?? '';
+      const reasoningContent: string = message?.reasoning_content ?? '';
       const tokensUsed: number = data.usage?.total_tokens ?? 0;
 
       // 提取 tool_calls（如果存在）
@@ -291,6 +299,7 @@ export class AgentClient {
         agentId: this.agentId,
         output: rawResponse,
         rawResponse,
+        reasoning: reasoningContent || undefined,
         tokensUsed,
         cacheHit,
         duration: 0,

@@ -9,6 +9,7 @@ import AppModal from '../shared/AppModal.vue'
 import WorldBookEditor from './WorldBookEditor.vue'
 import type { WorldBook } from '@engine/types'
 import { VERSION } from '@engine/index'
+import { getAgentTemplate } from '@engine/agent-templates'
 
 const theme = useThemeStore()
 const ui = useUIStore()
@@ -247,12 +248,19 @@ const availableApiModels = computed(() => {
 function selectAgent(agentId: string) {
   activeAgent.value = agentId
   s.activeAgent = agentId
-  agentPromptDraft.value = s.agentPrompts[agentId] || ''
+  // 优先加载用户自定义的 system prompt，否则加载引擎内置模板
+  const custom = s.agentPrompts[agentId]
+  if (custom) {
+    agentPromptDraft.value = custom
+  } else {
+    const tpl = getAgentTemplate(agentId)
+    agentPromptDraft.value = tpl ? (tpl.fixedSystem + '\n\n' + (tpl.fixedExamples || '')).trim() : ''
+  }
   s.agentPromptEdited = false
 }
 
 function confirmPrompt() { if(!activeAgent.value)return; s.agentPrompts[activeAgent.value]=agentPromptDraft.value; s.agentPromptEdited=false; s.agentDirty[activeAgent.value]=true; ui.toast('提示词已保存','success') }
-function resetPrompt() { if(!activeAgent.value)return; agentPromptDraft.value=''; s.agentPrompts[activeAgent.value]=''; s.agentPromptEdited=false; s.agentDirty[activeAgent.value]=false; ui.toast('已恢复默认提示词','info') }
+function resetPrompt() { if(!activeAgent.value)return; agentPromptDraft.value=''; s.agentPrompts[activeAgent.value]=''; s.agentPromptEdited=false; s.agentDirty[activeAgent.value]=false; ui.toast('已清除自定义提示词，将使用引擎内置模板','info') }
 async function saveAsDefault() {
   if (!activeAgent.value) return
   const agentId = activeAgent.value
@@ -509,7 +517,7 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
           <span class="sub-nav-name">{{ ag.name }}</span>
           <!-- 未配置 API 标红 -->
           <span v-if="!hasApi" class="sub-nav-badge sub-nav-bad">!</span>
-          <span v-else-if="agentDirty[ag.id]" class="sub-nav-badge sub-nav-ok">✓</span>
+          <span v-else-if="s.agentDirty[ag.id]" class="sub-nav-badge sub-nav-ok">✓</span>
         </button>
       </nav>
 
@@ -697,7 +705,7 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
           <AppCard v-else padding="md" class="detail-card">
             <h4>System Prompt</h4>
             <p class="form-hint">编辑此 Agent 的固定系统提示词。留空则使用引擎默认模板。</p>
-            <textarea v-model="agentPromptDraft" class="form-textarea prompt-editor" rows="10" placeholder="留空使用引擎默认模板..." @input="s.agentPromptEdited=true" />
+            <textarea v-model="agentPromptDraft" class="form-textarea prompt-editor" rows="10" placeholder="当前显示引擎内置模板。修改后保存即覆盖默认。清空后恢复使用内置模板。" @input="s.agentPromptEdited=true" />
           </AppCard>
 
           <!-- 操作按钮 -->

@@ -551,18 +551,39 @@ ${formatVariables(ctx)}`,
 - roll_d20/roll_d100/roll_dice: 掷骰（用于等级/层级随机）
 - get_character: 查询已有角色（避免重名）
 
+---
+# 核心原则 — 正文优先
+
+**<char_detect> 中的角色描述是权威来源。** 正文明确说了的特性（外貌/种族/层级/身份/伤疤/残疾/年龄等）必须原样保留，工具随机值只能填充正文**未提及**的部分。
+
+**示例**: 正文说 "一个浑身伤疤的独臂老兵" → 外貌中必须保留"伤疤"和"独臂"；工具随机roll出的"魁梧"如果与"独臂老兵"冲突→以正文为准；发色瞳色正文没提→用工具随机roll的值。
+
+---
+# 思考深度要求
+
+在调用任何工具之前，你必须先进行充足的思考（至少500字中文），逐条分析：
+
+1. **<char_detect> 中的角色定位**: 这个角色在当前场景中的作用？是临时NPC还是重要角色？与已有角色的关系？
+2. **正文中已明确的信息**: 逐条列出正文中已明确提到的所有特征——这些必须保留，不可被工具覆盖
+3. **环境一致性**: 当前世界的时间、地点、势力背景是什么？该角色出现在此地的动机是否合理？
+4. **背景推导**: 从角色的身份/职业/外貌出发，推导一个符合世界观的背景故事（至少200字）。世界书中有相关设定的，优先引用
+5. **与已有角色的关系**: 检查已有角色列表，看看是否存在潜在的联系或冲突
+
+（你的思考过程不需要展示给用户，但会影响生成质量。请在最终的 <char_result> 之前或期间充分思考。）
+
+---
 **工作流程:**
-1. 理解 <char_detect> 中描述的新角色
-2. 调用 get_character 查重（避免生成已存在的角色名）
-3. 根据角色描述确定种族和 tier
-4. 调用 random_name 生成名称
-5. 调用 random_hair_color / random_eye_color / random_appearance 生成外貌
-6. 调用 random_personality 生成性格
-7. 调用 roll_attributes 生成五维
-8. 综合所有数据输出最终 <char_result> XML
+1. 先进行至少500字中文思考（见上方要求）
+2. 调用 get_character 查重
+3. 根据正文描述确定种族和 tier（正文未提则合理推断）
+4. 调用 random_name → random_hair_color → random_eye_color → random_appearance（正文已明确的特性保留，只用工具填充未提及的部分）
+5. 调用 random_personality → roll_attributes
+6. 综合所有数据，输出 <char_result> XML
 
 **⚠️ 绝对禁止: 自己编造名字、发色、瞳色、性格编码。必须调用工具获取随机值。**
+**⚠️ 角色的技能、装备、物品将由后续 item_gen Agent 生成，char_gen 不需要生成这些。**
 
+---
 **输出格式 (严格 XML):**
 <char_result>
 <name>名称</name>
@@ -572,37 +593,77 @@ ${formatVariables(ctx)}`,
 <attributes str="6" dex="5" con="5" int="4" spi="5"/>
 <identity>身份1, 身份2</identity>
 <occupation>职业1, 职业2</occupation>
-<background>角色背景故事（100-200字）</background>
-<appearance>外貌描述（含发色/瞳色/体型等，50-100字）</appearance>
-<personality code="wOaGz(A)">性格描述</personality>
+<background>角色背景故事（≥200字，必须包含出场动机、与当前场景的关联、世界观一致性）</background>
+<appearance>外貌描述（≥100字，含发色/瞳色/体型/着装/特殊特征，正文已明确的必须保留）</appearance>
+<personality code="wOaGz(A)">性格描述（≥80字，从工具返回的code展开，结合正文中的言行推导具体性格）</personality>
 <ascension enabled="false" path="" description=""/>
 </char_result>`,
 
     fixedExamples:
-`**示例:**
-正文中出现: <char_detect characterName="艾琳">一位银发的精灵少女走进铁匠铺</char_detect>
+`**示例 1: 正文中有明确特征的覆盖规则**
 
-步骤1 — 调用 get_character({}) → 查重列表
-步骤2 — 调用 random_name({race:"精灵",gender:"女"}) → {name:"艾琳·月影"}
-步骤3 — 调用 random_hair_color({race:"精灵"}) → {color:"月光银"}
-步骤4 — 调用 random_eye_color({race:"精灵"}) → {color:"翠绿"}
-步骤5 — 调用 random_personality({}) → {code:"wOaGz(A)",description:"..."}
-步骤6 — 调用 roll_attributes({tier:2}) → {str:4,dex:10,con:5,int:7,spi:8}
-步骤7 — 输出最终 XML:
+正文中出现: <char_detect characterName="老铁匠" characterType="npc">一个浑身伤疤的独臂老兵，沉默寡言地在铁砧前锻打</char_detect>
+
+思考过程（摘要）:
+- 正文明确: 浑身伤疤、独臂、老兵、沉默寡言、铁匠 → 这些必须保留
+- 正文未提: 具体发色、瞳色、年龄 → 可以用工具随机
+- 身份推导: "老兵"说明至少参加过战争，T2 退役佣兵级别合理
+- 背景推导: 曾在某场战役中失去手臂，退伍后在白曜城开了这家铁匠铺
+- 已有角色: [柠萌茶] — 无冲突
+
+步骤1 — 调用 get_character({}) → 查重通过
+步骤2 — 调用 random_name({race:"人类",gender:"男"}) → {name:"格雷厄姆·铁砧"}
+步骤3 — 调用 random_hair_color({race:"人类"}) → {color:"花白灰色"}
+步骤4 — 调用 random_eye_color({race:"人类"}) → {color:"灰褐色"}
+步骤5 — 调用 random_personality({}) → {code:"w-aG-z+(S)",description:"疏离冷淡，主见适度，安静内敛，稳定恒心"}
+步骤6 — 调用 roll_attributes({tier:2,level:7}) → {str:11,dex:5,con:10,int:5,spi:4}
+步骤7 — 输出:
 
 <char_result>
-<name>艾琳·月影</name>
-<race>精灵</race>
+<name>格雷厄姆·铁砧</name>
+<race>人类</race>
 <tier>2</tier>
-<level>8</level>
-<attributes str="4" dex="10" con="5" int="7" spi="8"/>
-<identity>巡林者, 北方游侠</identity>
-<occupation>弓箭手, 侦察兵</occupation>
-<background>艾琳出身于北方森林的精灵部落，从小接受巡林者训练。成年后离开部落云游四方，以佣兵身份赚取旅费。她正在追查一个与北境古墓有关的黑暗势力线索，因此来到白曜城调查。</background>
-<appearance>身材纤细但肌肉线条分明，月光银色长发扎成高马尾。翠绿色的眼眸中透着锐利。穿着轻便的皮甲，腰间挂着精良的精灵长弓。</appearance>
-<personality code="wOaGz(A)">冷静果断，对陌生人保持警惕，但对认可的朋友极为忠诚。话不多但观察力极强。</personality>
+<level>7</level>
+<attributes str="11" dex="5" con="10" int="5" spi="4"/>
+<identity>白曜城铁匠, 退役老兵</identity>
+<occupation>铁匠, 武器匠人</occupation>
+<background>格雷厄姆曾在奥古斯提姆帝国与兽族联盟的边境战争中服役十五年，一场惨烈的伏击战让他失去了左臂，也让他永远告别了军旅生涯。退伍后他带着抚恤金来到白曜城，凭着从小跟父亲学的打铁手艺开了一家铁匠铺。十年的锻打生涯让他的独臂变得异常强壮，而满身的伤疤则是沉默的勋章——每一道都有一段他不愿提起的故事。</background>
+<appearance>年近五十的魁梧老兵，花白灰色的短发凌乱地贴在额头上。裸露的右臂上布满交错的旧伤疤，左臂从肘部以下截断，套着一个老旧的皮革护套。灰褐色的眼眸中透着经历过生死的沉静，脸上常年挂着煤灰和汗渍。</appearance>
+<personality code="w-aG-z+(S)">极度沉默寡言，不擅寒暄，用最短的句子回答顾客的问题。但对武器有近乎偏执的追求——\"刀不行就是不行，多说没用\"。偶尔对熟客多聊两句，但也仅限于武器的话题。</personality>
+<ascension enabled="false" path="" description=""/>
+</char_result>
+
+（注意：正文说的"伤疤""独臂""老兵""沉默寡言"全部保留；发色/瞳色正文未提，用了工具随机值。技能/装备不在此 Agent 生成，由后续 item_gen 负责。）
+
+---
+
+**示例 2: 复杂角色 — 贵族出身的神秘访客**
+
+正文中出现: <char_detect characterName="神秘女子" characterType="npc">一位穿着暗紫色丝绒斗篷的年轻女子，举止优雅，袖口绣着帝国贵族的金线家徽</char_detect>
+
+步骤1 — 调用 get_character({}) → 查重通过
+步骤2 — 调用 random_name({race:"人类",gender:"女"}) → {name:"塞西莉亚·奥古斯都"}
+步骤3 — 调用 random_hair_color({race:"人类"}) → {color:"深棕色"}
+步骤4 — 调用 random_eye_color({race:"人类"}) → {color:"琥珀色"}
+步骤5 — 调用 random_personality({}) → {code:"wO+aGz+(A)"}
+步骤6 — 调用 roll_attributes({tier:3,level:11}) → {str:4,dex:8,con:5,int:12,spi:10}
+步骤7 — 输出:
+
+<char_result>
+<name>塞西莉亚·奥古斯都</name>
+<race>人类</race>
+<tier>3</tier>
+<level>11</level>
+<attributes str="4" dex="8" con="5" int="12" spi="10"/>
+<identity>奥古斯提姆帝国子爵之女, 皇家学院讲师</identity>
+<occupation>魔法学者, 贵族外交官</occupation>
+<background>塞西莉亚出身于奥古斯提姆帝国最古老的贵族世家之一——奥古斯都家族。她的父亲是帝国西部行省的世袭子爵，但塞西莉亚从小对政治不感兴趣，反而沉迷于皇家学院的古籍和魔法研究。凭借家族地位和个人才智，她在26岁就获得了皇家学院魔法理论系的讲师职位。然而最近她在古籍中发现了一段关于"失亡彼岸"的记载，引起了她的警觉——她相信这与帝国边境近来频繁的失踪事件有关。她来到白曜城是为了寻找一位能够帮她解读这段文字的人。</background>
+<appearance>一位身着暗紫色丝绒斗篷的年轻女性，深棕色长发整齐地束在脑后，几缕碎发垂在额前。琥珀色的眼眸中闪烁着属于学者的锐利光芒。袖口的金线家徽——交叉的剑与月桂花环——在光线下隐约可见。她的手指修长白皙，指尖因常年翻阅古籍而略微粗糙。</appearance>
+<personality code="wO+aGz+(A)">外表温和有礼但始终保持距离，对人热情但不说实话。极度聪明且自知，善于利用自己的贵族身份和学识在社交场合周旋。内心深处对家族的政治阴谋感到厌倦，渴望通过学术研究找到自己的价值。</personality>
 <ascension enabled="false" path="" description=""/>
 </char_result>`,
+
+    variableContext: (ctx: AgentContext) => {
 
     variableContext: (ctx: AgentContext) => {
       let prompt = '';
@@ -630,23 +691,78 @@ ${formatVariables(ctx)}`,
 - craft_get_base_dc: 查询品质基准 DC（参考品质级别）
 - get_character: 查询已有角色数据
 
-**生成规则 (对齐世界书 #261442 + #265160):**
-- Tier 匹配: T1 角色→1-2个基础技能+1-2件普通装备; T7→完整技能树+神话装备
-- 技能: 主动技能注明消耗(HP/MP/SP)和冷却回合; 被动技能注明常驻效果
-- 装备: 按槽位分配（武器必有一件）；品质按 tier 匹配
-- 背包物品: 与角色身份匹配
+---
+# 核心原则 — 背景一致性
 
-**工作流程:**
-1. 读取 char_gen 输出的角色数据
-2. 根据角色 tier 确定技能/装备数量范围
-3. 调用 roll_dice 确定实际数量
+你必须**完整阅读理解 char_gen 的角色数据**（name, race, tier, level, identity, occupation, background, appearance, personality, attributes）后再设计技能和装备。生成的所有内容必须与角色的背景故事、职业身份、性格特征保持一致。
+
+**角色背景中提到战斗经验的** → 至少1个战斗技能
+**角色职业是工匠/生产类** → 至少1个生产/生活技能
+**角色身份含贵族/皇室/高层** → 装备品质+1级
+**角色 personality 偏进攻（w+,a+,z+）** → 技能多为主动攻击型
+**角色 personality 偏防守（w-,a-,G-）** → 技能多为被动/生存/逃逸型
+**正文中有特殊描述（如"独臂""伤疤""变异血脉"）** → 技能设计需呼应这些特征
+
+---
+# 思考深度要求
+
+在生成之前，你必须进行充足的思考（至少300字中文），分析：
+1. char_gen 输出中的关键信息（身份/职业/背景/性格/属性）如何映射到技能设计
+2. 该角色的战斗定位是什么？在团队中的作用？
+3. 为什么选择这些技能/装备/物品？它们如何体现角色的背景故事？
+
+---
+# Tier 匹配表（对齐世界书 #261442 + #265160）
+
+| Tier | 技能数 | 装备数 | 品质上限 | 装备品质 |
+|------|--------|--------|---------|---------|
+| T1   | 1-2    | 1-2    | 优良    | 普通~优良 |
+| T2   | 2-3    | 2      | 稀有    | 优良~稀有 |
+| T3   | 3-4    | 2-3    | 史诗    | 稀有~史诗 |
+| T4   | 3-5    | 3-4    | 传说    | 史诗~传说 |
+| T5   | 4-5    | 4-5    | 神话    | 传说~神话 |
+| T6   | 5-7    | 5+     | 神话+   | 传说~神话 |
+| T7   | 完整技能树 | 全部   | 唯一    | 神话~唯一 |
+
+**数量必须用 roll_dice 确定，禁止自己编造。**
+**品质必须参照上表，禁止跨越 tier 限制。**
+
+---
+# 技能质量要求
+
+- **主动技能**: 必须明确消耗类型和数值(HP/MP/SP)、冷却回合数。效果描述必须具体，不能写"造成伤害"或"提升攻击力"这种模糊描述
+- **被动技能**: 必须明确常驻效果的具体数值或触发条件
+- **每个技能的效果描述 ≥2句话**：第一句说明机制，第二句说明场景或限制
+- **技能命名**: 必须与角色背景/职业/文化一致。精灵弓箭手叫"精准射击"，矮人铁匠叫"锻打强化"
+- 🆕 **effects 子元素**: 重要的词条效果用 <effect name="词条名">效果描述</effect> 标注，供前端展示
+- 🆕 **scripts 子元素**: 需要引擎执行逻辑的技能用 <script name="init|cast|tick|cleanup">代码</script> 标注（主动技能用 cast，被动技能用 init，需清理的加 cleanup）
+
+---
+# 装备质量要求
+
+- **武器必须有明确的 stats**（至少攻击力），有特殊效果的用 <effect> 标注
+- **护甲必须有 stats**（至少防御力）
+- **装备与角色身份匹配**: 贵族给精致武器，铁匠给锻打大锤，猎人给轻便皮甲
+- **slot 必须是有效槽位**: 武器, 护甲, 头部, 身体, 饰品, 腰带, 鞋子, 主手, 副手, 惯用手
+
+---
+# 工作流程:
+
+1. 先进行至少300字中文思考（见上方要求）
+2. 调用 roll_dice 确定技能/装备数量
+3. （可选）调用 craft_get_base_dc 查询品质级别
 4. 生成具体的技能/装备/物品列表
 5. 输出最终 <item_result> XML
 
+---
 **输出格式 (严格 XML):**
 <item_result>
 <skills>
-<skill name="技能名" type="active|passive" cost_type="MP" cost_amount="10" cooldown="2">效果描述</skill>
+<skill name="技能名" type="active|passive" cost_type="MP" cost_amount="10" cooldown="2">
+  技能效果描述（≥2句话）。第一句说明机制，第二句说明场景或限制。
+  <effect name="词条名">词条中文描述（可选，前端展示用）</effect>
+  <script name="init">$event.on(...)/* 对应引擎 API */</script>
+</skill>
 </skills>
 <equipment>
 <equip slot="武器" name="装备名" quality="品质" durability="100" stats="攻击力:18,敏捷:2">描述</equip>
@@ -657,27 +773,87 @@ ${formatVariables(ctx)}`,
 </item_result>`,
 
     fixedExamples:
-`**示例:**
-角色数据: 艾琳·月影，T2 精灵弓箭手，Lv.8
+`---
 
-步骤1 — 调用 craft_get_base_dc({quality:"优良"}) → {baseDC:10}
-步骤2 — 调用 roll_dice({formula:"1d3+1"}) → 确定技能数量=2
-步骤3 — 输出最终 XML:
+**示例 1: 精灵弓箭手（与 char_gen 示例对应的背景一致性）**
+
+角色数据 (char_gen 输出):
+{ "name":"艾琳·月影", "race":"精灵", "tier":2, "level":8, "identity":["巡林者","北方游侠"], "occupation":["弓箭手","侦察兵"], "background":"艾琳出身于北方森林的精灵部落，从小接受巡林者训练。成年后离开部落云游四方，以佣兵身份赚取旅费。她正在追查一个与北境古墓有关的黑暗势力线索...", "personality":"冷静果断，对陌生人保持警惕，但对认可的朋友极为忠诚" }
+
+思考:
+- tier:2 → T2 2-3技能, 2装备, 品质上限稀有
+- 职业: 弓箭手+侦察兵 → 至少1个远程战斗技能 + 1个侦察/感知技能
+- 背景: 北方森林巡林者 → 装备以轻便皮甲为主，武器为精灵长弓
+- 性格: 冷静果断 → 技能偏进攻型
+- attribution: dex=10 敏捷突出 → 技能与敏捷属性匹配
+
+步骤1 — 调用 roll_dice({formula:"1d2+1",reason:"技能数量"}) → 确定技能数量=2
+步骤2 — 调用 craft_get_base_dc({quality:"优良"}) → {baseDC:10}
 
 <item_result>
 <skills>
-<skill name="精准射击" type="active" cost_type="SP" cost_amount="15" cooldown="3">进行一次精准的瞄准射击，命中率+20%，造成120%伤害</skill>
-<skill name="自然感知" type="passive">被动提升对周围环境的感知能力，闪避率+10%</skill>
+<skill name="精准射击" type="active" cost_type="SP" cost_amount="15" cooldown="3">
+  进行一次精准的瞄准射击，将感知集中在目标上，使本次攻击命中率额外+20%，且造成的伤害提升至120%。
+  适合用于在远距离开启战斗或对付高回避的敌人。施放后进入3回合冷却。
+  <effect name="精准瞄准">命中率+20%，伤害120%</effect>
+</skill>
+<skill name="自然感知" type="passive">
+  被动提升对周围环境的感知能力，依靠精灵与生俱来的敏锐听觉和嗅觉察觉隐藏的敌人和陷阱。
+  闪避率+10%，进入新区域后自动感知3米范围内的隐藏单位。
+  <effect name="警觉">闪避率+10%，3米内感知隐藏单位</effect>
+</skill>
 </skills>
 <equipment>
-<equip slot="武器" name="精灵长弓" quality="优良" durability="120" stats="攻击力:18,敏捷:2">由精灵工匠打造的轻量化长弓，射程和精准度优秀</equip>
-<equip slot="护甲" name="巡林者皮甲" quality="普通" durability="100" stats="防御力:8,敏捷:1">轻便的皮质护甲，不限制行动</equip>
+<equip slot="武器" name="精灵长弓" quality="优良" durability="120" stats="攻击力:18,敏捷:2">由精灵工匠打造的轻量化长弓，射程和精准度远超普通木弓。弓身雕刻着精灵族的森林图腾。</equip>
+<equip slot="护甲" name="巡林者皮甲" quality="普通" durability="100" stats="防御力:8,敏捷:1">轻便的皮质护甲，多层皮革叠压缝制，不限制行动，适合需要灵活移动的斥候和弓箭手。</equip>
 </equipment>
 <inventory>
-<item name="猎人箭袋" quantity="1" type="消耗品" rarity="普通">装有30支精制箭矢的箭袋</item>
-<item name="草药包" quantity="3" type="消耗品" rarity="普通">装有基础疗伤草药的布袋</item>
+<item name="猎人箭袋" quantity="1" type="消耗品" rarity="普通">装有30支精制箭矢的箭袋，箭杆上刻有精灵族的标记</item>
+<item name="草药包" quantity="3" type="消耗品" rarity="普通">装有基础疗伤草药的布袋，巡林者的标准配置</item>
+</inventory>
+</item_result>
+
+---
+
+**示例 2: 独臂老兵铁匠（展示背景深度如何指导技能设计）**
+
+角色数据 (char_gen 输出):
+{ "name":"格雷厄姆·铁砧", "race":"人类", "tier":2, "level":7, "identity":["白曜城铁匠","退役老兵"], "occupation":["铁匠","武器匠人"], "background":"格雷厄姆在帝国边境战争中服役十五年...失去左臂...凭着打铁手艺开了铁匠铺。十年的锻打生涯让他的独臂变得异常强壮...", "personality":"极度沉默寡言...对武器有近乎偏执的追求" }
+
+思考:
+- tier:2 → T2 2-3技能, 2装备, 品质上限稀有
+- 职业: 铁匠 + 退役老兵 → 至少1个生产技能 + 1个战斗技能
+- background: "独臂老兵""打铁十年" → 技能体现独臂锻打的特殊性 + 武器修复能力
+- 性格: 沉默寡言+武器偏执 → 被动技能突出武器的使用
+- attributes: str=11 力量突出 → 装备重型武器
+
+步骤1 — 调用 roll_dice({formula:"1d2+1",reason:"技能数量"}) → 确定技能数量=2
+
+<item_result>
+<skills>
+<skill name="锻打强化" type="active" cost_type="SP" cost_amount="20" cooldown="0">
+  花费20SP，用锻锤敲击对一件装备的破损处进行紧急修补。目标装备恢复50%的耐久度，并获得"锻火余温"效果——接下来的3回合内该装备的防御力或攻击力临时+10%。
+  无法在战斗外施放。可重复对同一装备使用，但每次效果递减5%。
+  <effect name="紧急修补">恢复目标装备50%耐久度</effect>
+  <effect name="锻火余温">3回合内装备数值+10%</effect>
+</skill>
+<skill name="武器专精·锤" type="passive">
+  格雷厄姆一生打过最多的武器就是锤子，对锤类武器的重量分布和打击点有着近乎本能的掌握。
+  装备锤类武器时攻击力+15%。如果武器是锻铁大锤，额外获得10%暴击伤害。
+  <effect name="锤类精通">装备锤类武器时攻击力+15%</effect>
+</skill>
+</skills>
+<equipment>
+<equip slot="武器" name="锻铁大锤" quality="优良" durability="150" stats="攻击力:22,力量:3">一把沉重得离谱的铁锤。格雷厄姆在失去左臂后专门为自己打造的——他用独臂也能挥出致命一击。锤头经过反复折叠锻打，纹理如流水般致密。</equip>
+<equip slot="身体" name="老兵的皮围裙" quality="普通" durability="80" stats="防御力:10">一件被火星烫得千疮百孔的厚皮革围裙，上面还残留着多年前被刀锋划过的痕迹。它不仅挡火花，也是一件沉默的勋章。</equip>
+</equipment>
+<inventory>
+<item name="精炼铁矿石" quantity="15" type="材料" rarity="优良">上好的铁矿石，来自诺斯加德联盟的矿产</item>
+<item name="磨刀石" quantity="1" type="消耗品" rarity="普通">专业级磨刀石，格雷厄姆自己打磨用的</item>
 </inventory>
 </item_result>`,
+
+    variableContext: (ctx: AgentContext) => {
 
     variableContext: (ctx: AgentContext) => {
       let prompt = '';

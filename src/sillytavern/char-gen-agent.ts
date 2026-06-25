@@ -461,12 +461,33 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
   const results: ItemGenOutput['skills'] = [];
   for (const m of matches) {
     const attrs = parseAttrsStr(m[1]);
+    const innerContent = m[2]?.trim() ?? '';
+
+    // 提取 <effect name="...">content</effect> 子元素
+    const effects: Record<string, string> = {};
+    const effectMatches = innerContent.matchAll(/<effect\s+name="([^"]*)">([\s\S]*?)<\/effect>/g);
+    for (const em of effectMatches) {
+      effects[em[1]] = em[2]?.trim() ?? '';
+    }
+
+    // 提取 <script name="...">code</script> 子元素
+    const scripts: Record<string, string> = {};
+    const scriptMatches = innerContent.matchAll(/<script\s+name="([^"]*)">([\s\S]*?)<\/script>/g);
+    for (const sm of scriptMatches) {
+      scripts[sm[1]] = sm[2]?.trim() ?? '';
+    }
+
+    // 描述 = 技能内容中的纯文本部分（去除 effect/script 标签）
+    const description = innerContent.replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/g, '').trim();
+
     results.push({
       name: attrs['name'] ?? '未命名技能',
-      description: m[2]?.trim() ?? '',
+      description: description || innerContent,
       type: (attrs['type'] as 'active' | 'passive') ?? 'active',
       cost: attrs['cost_type'] ? { type: attrs['cost_type'] as 'HP' | 'MP' | 'SP', amount: parseInt(attrs['cost_amount'] ?? '0') } : undefined,
       cooldown: attrs['cooldown'] ? parseInt(attrs['cooldown']) : undefined,
+      effects: Object.keys(effects).length > 0 ? effects : undefined,
+      scripts: Object.keys(scripts).length > 0 ? scripts : undefined,
     });
   }
   return results;

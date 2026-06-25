@@ -171,7 +171,7 @@ function buildContextFromSave(backup: any, overrideUserInput?: string): AgentCon
     variables: chat.variables || {},
     plotEvents: backup.plotEvents || [],
     memories: backup.memories || [],
-    agentOutputs: new Map(),
+    agentOutputs: (function(){ const m=new Map(); const lastAsst=[...messages].reverse().find(function(x){return x.role==="assistant"}); if(lastAsst)m.set("story",lastAsst.content); return m; })(),
     saveId: backup.saves?.[0]?.id || 'test-save',
   };
 }
@@ -187,7 +187,7 @@ async function main() {
   // 1. 加载存档
   log(VERBOSE, `Loading save: ${SAVE_PATH}`);
   const backup = JSON.parse(fs.readFileSync(SAVE_PATH, 'utf-8'));
-  const ctx = buildContextFromSave(backup);
+  let ctx = buildContextFromSave(backup);
 
   log(VERBOSE, `Context: ${ctx.characters.length} chars, ${ctx.memories.length} memories, ${ctx.plotEvents.length} plot events, ${backup.chats?.length || 0} chats`);
 
@@ -208,7 +208,18 @@ async function main() {
 
   if (DRY_RUN) {
     // 3a. 干跑模式：构建并打印
-    const msgs = buildAgentMessages(AGENT_ID, ctx);
+    // 加载 agent 配置和世界书
+    let acfg: any = {};
+    try { const ac = JSON.parse(fs.readFileSync("data/defaults/agent-config.json", "utf-8")); acfg = (ac.agents || {})[AGENT_ID] || {}; } catch {}
+    const _agentConfig = { agentId: AGENT_ID, enabled: true, worldBookIds: acfg.worldBookIds || [], model: acfg.model || "", presetId: acfg.presetId || "" };
+    const _worldBooks: any[] = [];
+    for (const wbId of _agentConfig.worldBookIds) {
+      const wbPath = "data/worldbooks/" + wbId + ".json";
+      if (fs.existsSync(wbPath)) {
+        try { const wb = JSON.parse(fs.readFileSync(wbPath, "utf-8")); _worldBooks.push({ id: wbId, name: wbId, entries: Array.isArray(wb) ? wb : (wb.entries || []) }); } catch {}
+      }
+    }
+    const msgs = buildAgentMessages(AGENT_ID, ctx, [_agentConfig], _worldBooks);
     if (!msgs) { console.error(`未知 Agent: ${AGENT_ID}`); process.exit(1); }
     for (const m of msgs) {
       console.log(`\n=== ${m.role.toUpperCase()} (${m.content.length} chars) ===`);
@@ -228,7 +239,7 @@ async function main() {
     if (upstreamId) {
       log(VERBOSE, `[upstream] Running ${upstreamId} first...`);
       const upClient = new AgentClient({ endpoint: { baseUrl: apiUrl, apiKey, defaultModel: model, id: 'up', name: 'up', provider: 'custom', models: [model], timeout: 120 }, agentId: upstreamId, saveId: ctx.saveId || 'test' });
-      const upMsgs = buildAgentMessages(upstreamId, ctx);
+      const upMsgs = buildAgentMessages(upstreamId, ctx, [agentConfig], worldBooks);
       if (upMsgs) {
         const upReq: ChatRequest = { messages: upMsgs, temperature: 0.7, maxTokens: 4096 };
         const upResult = await upClient.chat(upReq);
@@ -243,7 +254,42 @@ async function main() {
 
   // 4. 构建目标 Agent 的消息
   log(VERBOSE, `Agent: ${AGENT_ID} | API: ${model} @ ${apiUrl}`);
-  const msgs = buildAgentMessages(AGENT_ID, ctx);
+
+  // Build AgentConfig and WorldBook arrays for buildAgentMessages
+  const agentConfig: any = (function() {
+    var cfg = { agentId: AGENT_ID, enabled: true, worldBookIds: [] };
+    try {
+      var acPath = "data/defaults/agent-config.json";
+      if (fs.existsSync(acPath)) {
+        var ac = JSON.parse(fs.readFileSync(acPath, "utf-8"));
+        var ag = (ac.agents || {})[AGENT_ID];
+        if (ag) {
+          cfg.worldBookIds = ag.worldBookIds || [];
+          if (ag.temperature !== undefined) cfg.temperature = ag.temperature;
+          if (ag.maxTokens !== undefined) cfg.maxTokens = ag.maxTokens;
+          if (ag.model) cfg.model = ag.model;
+          cfg.presetId = ag.presetId || "";
+        }
+      }
+    } catch(e) {}
+    return cfg;
+  })();
+  const worldBooks: any[] = (function() {
+    var wbs = backup.lorebooks || [];
+    if (wbs.length === 0 && agentConfig.worldBookIds && agentConfig.worldBookIds.length > 0) {
+      for (var i = 0; i < agentConfig.worldBookIds.length; i++) {
+        var wbPath = "data/worldbooks/" + agentConfig.worldBookIds[i] + ".json";
+        if (fs.existsSync(wbPath)) {
+          try {
+            var wb = JSON.parse(fs.readFileSync(wbPath, "utf-8"));
+            wbs.push({ id: agentConfig.worldBookIds[i], name: agentConfig.worldBookIds[i], entries: Array.isArray(wb) ? wb : (wb.entries || []) });
+          } catch(e) {}
+        }
+      }
+    }
+    return wbs;
+  })();
+  const msgs = buildAgentMessages(AGENT_ID, ctx, [agentConfig], worldBooks);
   if (!msgs) { console.error(`未知 Agent: ${AGENT_ID}`); process.exit(1); }
   log(VERBOSE, `System prompt: ${msgs[0]?.content.length || 0} chars`);
   if (msgs.length > 1) log(VERBOSE, `User message: ${msgs[1]?.content.length || 0} chars`);
@@ -274,7 +320,7 @@ async function main() {
         }, { maxRounds: 5 });
       })()
     : await (async () => {
-        const req: ChatRequest = { messages: msgs, temperature: 0.7, maxTokens: 4096 };
+        const req: ChatRequest = { messages: msgs, temperature: 0.7, maxTokens: 4096, reasoning: true };
         return client.chat(req);
       })();
 
@@ -300,7 +346,7 @@ async function main() {
     const outputData = {
       agentId: AGENT_ID, saveFile: SAVE_PATH, model,
       messages: msgs,
-      response: { output: result.output, rawResponse: result.rawResponse, tokensUsed: result.tokensUsed, cacheHit: result.cacheHit, duration: result.duration, error: result.error },
+      response: { output: result.output, rawResponse: result.rawResponse, reasoning: result.reasoning, tokensUsed: result.tokensUsed, cacheHit: result.cacheHit, duration: result.duration, error: result.error },
       validation,
       toolCalls: result.toolCalls || [],
     };
