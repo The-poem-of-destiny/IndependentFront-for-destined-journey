@@ -28,11 +28,14 @@ import type {
   QualityLevel,
   EquipmentSlot,
   InventoryItem,
+  ToolDefinition,
 } from './types';
 import { createDefaultCharacterState } from './types';
 import { scanCharDetects } from './marker-protocol';
 import { buildAgentMessages } from './agent-templates';
 import { getTierConfig, calcHP, calcMP, calcSP } from './tier-constants';
+import { getToolsForAgent, executeToolCall } from './agent-tools';
+import type { ToolExecutionContext } from './types';
 
 // ========== Types ==========
 
@@ -58,6 +61,24 @@ export interface CharGenAgentDeps {
  */
 export interface CharGenClient {
   chat(messages: Array<{ role: string; content: string }>): Promise<{
+    output: string | null;
+    rawResponse: string;
+    tokensUsed: number;
+    cacheHit: boolean;
+    duration: number;
+    error?: string;
+  }>;
+
+  /** 🆕 Phase 8.5 Agentic: 多轮 function calling 路径 */
+  chatWithTools?: (
+    request: {
+      messages: Array<{ role: string; content: string }>;
+      tools: ToolDefinition[];
+      tool_choice: string;
+    },
+    toolExecutor: (name: string, args: Record<string, any>) => Promise<any>,
+    options: { maxRounds: number },
+  ) => Promise<{
     output: string | null;
     rawResponse: string;
     tokensUsed: number;
@@ -114,6 +135,31 @@ export async function callCharGenAgent(
   }
 
   const client = deps.clientFactory('char_gen', request.endpoint, request.saveId);
+
+  // 🆕 Phase 8.5: 优先走 Agentic 路径（function calling 多轮循环）
+  if (client.chatWithTools) {
+    const tools = getToolsForAgent('char_gen');
+    const toolContext: ToolExecutionContext = {
+      characters: request.context.characters ?? [],
+      variables: request.context.variables ?? {},
+      saveId: request.saveId,
+    };
+
+    const result = await client.chatWithTools(
+      { messages, tools, tool_choice: 'auto' },
+      async (name, args) => executeToolCall(name, args, toolContext),
+      { maxRounds: 10 },
+    );
+
+    if (result.error) {
+      throw new Error(`char_gen Agent 调用失败: ${result.error}`);
+    }
+
+    const rawOutput = result.output ?? result.rawResponse;
+    return parseCharGenOutput(rawOutput);
+  }
+
+  // 回退: 旧路径（无工具，直接 chat）
   const result = await client.chat(messages);
 
   if (result.error) {
@@ -149,6 +195,32 @@ export async function callItemGenAgent(
   }
 
   const client = deps.clientFactory('item_gen', request.endpoint, request.saveId);
+
+  // 🆕 Phase 8.5: 优先走 Agentic 路径（function calling 多轮循环）
+  if (client.chatWithTools) {
+    const tools = getToolsForAgent('item_gen');
+    const toolContext: ToolExecutionContext = {
+      characters: request.context.characters ?? [],
+      variables: request.context.variables ?? {},
+      saveId: request.saveId,
+    };
+
+    const result = await client.chatWithTools(
+      { messages, tools, tool_choice: 'auto' },
+      async (name, args) => executeToolCall(name, args, toolContext),
+      { maxRounds: 10 },
+    );
+
+    if (result.error) {
+      // item_gen 失败不阻断流程 — 返回空物品数据
+      return { skills: [], equipment: [], inventory: [] };
+    }
+
+    const rawOutput = result.output ?? result.rawResponse;
+    return parseItemGenOutput(rawOutput);
+  }
+
+  // 回退: 旧路径（无工具，直接 chat）
   const result = await client.chat(messages);
 
   if (result.error) {

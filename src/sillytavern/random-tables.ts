@@ -137,6 +137,73 @@ const NAME_POOLS: Record<string, NamePool> = {
       '烬灭', '炎渊', '雷暴', '虚空', '熔岩', '飓风', '冰狱',
       '裂空', '永恒', '始源', '终焉', '天灾',
     ],
+    // TODO Phase 9: 巨龙应有凡世名(化用名) + 真名(龙之名讳+史诗称号) 双名体系
+    // 世界书 #443: "凡世名: {化用名}; 真名: {龙之名讳}(极为复杂)，{史诗称号}"
+  },
+  // ── 世界书 #443 补充种族 ──
+  '半身人': {
+    male: [
+      '托博', '费尔顿', '潘伯', '科顿', '米罗', '洛宾', '巴里',
+      '霍比', '罗恩', '迪克', '芬恩', '曼尼', '皮普', '利奥',
+    ],
+    female: [
+      '多拉', '梅莉', '潘妮', '艾维', '罗丝', '贝拉', '芬妮',
+      '霍莉', '波比', '蒂莉', '洛蒂', '米娅', '珀尔', '玛吉',
+    ],
+    surnames: [
+      '麦穗', '蜜酒', '织布', '陶匠', '守林人', '面包师', '酒窖',
+      '烟斗', '耕田', '花圃', '木匠', '磨坊', '铁匠', '裁缝',
+      '果园', '奶酪', '蜂蜜', '渔钩', '草药', '鞋匠',
+    ],
+  },
+  '巨人': {
+    male: [
+      '斯克里米尔', '尤弥尔', '赫朗格尼尔', '索列姆', '贝格尔米尔',
+      '格尔罗德', '伦格尼尔', '沃苏德', '斯塔卡德', '艾吉尔',
+      '洛基', '布利', '乌特加德', '洛德', '哈迪',
+    ],
+    female: [
+      '格瑞德', '芬雅', '斯卡蒂', '安格尔波达', '贝斯特拉',
+      '海蒂', '尼奥德', '吉尔德', '赫尔', '琳达',
+      '索拉', '诺恩', '索格', '约德', '贝尔格',
+    ],
+    // 巨人仅有名字不设姓氏（世界书 #443: "强者有称号但非姓氏"）
+    surnames: [],
+  },
+  '妖精': {
+    // 世界书 #443: "无传统姓名，名字为{诗意短语} (不超过8字)"
+    male: [
+      '露珠之舞', '晨光微语', '花间风吟', '星屑流光', '蝶影轻掠',
+      '雨后虹桥', '林隙碎金', '夜莺低语', '溪涧浅唱', '萤火之约',
+      '霜叶轻旋', '云隙微光', '春泥初醒', '月影徘徊', '蝉鸣夏梦',
+    ],
+    female: [
+      '花瓣坠落', '薄雾柔光', '蔷薇私语', '雪融之息', '月华如水',
+      '清泉映月', '蒲公英飞', '月光摇篮', '浅梦幽兰', '风铃轻响',
+      '樱吹雪', '星之泪', '朝露待晞', '烟霞微漪', '幻蝶迷踪',
+    ],
+    surnames: [
+      // 妖精无姓氏，名字本身就是完整标识
+    ],
+  },
+  '亡灵': {
+    // 世界书 #443: "保留生前姓名，高阶亡灵可能以{称号意译}替代姓氏"
+    // 从各族混合抽取名字（模拟"生前"种族多样性）
+    male: [
+      '莫德雷德', '骸骨', '苍白', '寂灭', '无光',
+      '影蚀', '死棘', '幽魂', '虚空行者', '终末',
+      '悲鸣', '腐蚀', '寂静', '凋零', '灰烬',
+    ],
+    female: [
+      '莫尔甘娜', '苍白夫人', '寂静女爵', '哀霜', '幽冥',
+      '亡语', '暗月', '残烛', '冥河', '安息',
+      '蚀骨', '暗纱', '孤影', '灵薄', '冷霜',
+    ],
+    surnames: [
+      '寂灭者', '永夜', '破晓之影', '哀悼', '冥河渡者',
+      '不眠者', '残响', '血色挽歌', '黑曜', '终焉之誓',
+      '暗翼', '低语者', '遗忘', '寒霜之握', '深渊之眼',
+    ],
   },
 };
 
@@ -174,6 +241,19 @@ const HAIR_COLORS: Record<string, string[]> = {
     '熔金', '赤红', '墨黑', '银白', '深蓝', '青铜', '紫晶',
     '翡翠绿', '暗金',
   ],
+  // ── 世界书 #443 新增种族 ──
+  '半身人': [
+    '棕色', '金色', '红色', '姜黄色', '黑色', '栗色', '亚麻色',
+  ],
+  '巨人': [
+    '棕色', '灰色', '黑色', '姜黄色', '灰白', '白色', '深棕',
+  ],
+  '妖精': [
+    '银色', '金色', '淡金', '浅绿', '浅蓝', '月光银', '铂金',
+  ],
+  '亡灵': [
+    '灰白', '银白', '惨白', '灰黑', '枯黄', '透明光泽',
+  ],
   '默认': [
     '樱粉', '紫红', '桃红', '酒红', '泰尔紫', '姜黄色', '玫瑰红',
     '墨绿', '熔金', '碧绿', '浅金', '月白', '品红', '象牙白',
@@ -206,8 +286,22 @@ const EYE_COLORS: Record<string, string[]> = {
   '血族': [
     '深红', '暗金', '紫罗兰', '冰蓝', '漆黑', '猩红',
   ],
+  // ── 世界书 #443 新增种族 ──
+  '半身人': [
+    '棕色', '蓝色', '绿色', '灰色', '淡褐色', '琥珀色',
+  ],
+  '巨人': [
+    '灰色', '深棕', '蓝灰', '琥珀', '冰蓝',
+  ],
+  '妖精': [
+    '翠绿', '银灰', '天蓝', '紫罗兰', '金色', '浅蓝',
+  ],
+  '亡灵': [
+    '幽绿', '暗红', '冰蓝', '灰白', '漆黑', '磷光白',
+  ],
   '巨龙': [
-    '熔金', '竖瞳金', '竖瞳赤', '竖瞳蓝', '竖瞳绿', '竖瞳紫',
+    '竖瞳金', '竖瞳赤', '竖瞳蓝', '竖瞳绿', '竖瞳紫',
+    '熔金',
   ],
   '默认': [
     '棕色', '蓝色', '绿色', '灰色', '淡褐色', '琥珀色', '金色',
@@ -323,38 +417,67 @@ export function getTierAttributeCap(tier: number): number {
 }
 
 /**
- * 按 Tier 随机生成五维属性（三池分配模型，对齐世界书 #444 Step2）
+ * 按 Tier 随机生成五维属性（三池分配模型，对齐世界书 #444 Step2 + #445）
  *
  * 公式: 每项 = [基础池分配] + [层级固定 tier-1] + {等级额外分配}
- * - 基础池: 0~25 点自由分配（代表天赋/种族优劣）
+ * - 基础池: 0~25 点自由分配，每项上限 6（世界书 #445: "每项上限6点，与层级实力无关，仅代表天赋与种族优劣"）
  * - 层级固定: 每属性固定获得 tier-1 点
- * - 等级额外: 每等级 1 点自由分配（共 level-1 点）
- * - 每项硬上限由 tier 决定（见 getTierAttributeCap）
+ * - 等级额外: 每等级 1 点自由分配（共 level-1 点），不超 tierCap
+ * - 每项总上限由 tier 决定（见 getTierAttributeCap）
  */
 export function rollAttributes(tier: number, level: number = 1): {
   str: number; dex: number; con: number; int: number; spi: number;
   /** 三池分解信息 */
-  breakdown: { basePool: number; tierFixed: number; levelExtra: number; cap: number };
+  breakdown: {
+    basePool: number;
+    tierFixed: number;
+    levelExtra: number;
+    cap: number;
+    baseCap: number;
+    baseUsed: number;
+    levelUsed: number;
+  };
 } {
   const cap = getTierAttributeCap(tier);
+  const baseCap = 6; // 世界书 #445: 天赋基础每项上限 6
   const tierFixed = Math.max(0, tier - 1);          // 每属性固定 +tier-1
-  const basePool = randInt(0, 25);                   // 基础浮动池
+  const basePool = randInt(0, 25);                   // 基础浮动池（天赋/种族优劣）
   const levelExtra = Math.max(0, level - 1);          // 等级额外池
 
-  // 初始化属性为层级固定值
   const attrs: Record<string, number> = {
-    str: tierFixed, dex: tierFixed, con: tierFixed, int: tierFixed, spi: tierFixed,
+    str: 0, dex: 0, con: 0, int: 0, spi: 0,
   };
-
-  // 随机分配基础池 + 等级额外点（优先随机到未达上限的属性）
-  let remaining = basePool + levelExtra;
   const keys = ['str', 'dex', 'con', 'int', 'spi'] as const;
-  while (remaining > 0) {
-    const eligible = keys.filter(k => attrs[k] < cap);
+
+  // 阶段 1: 分配基础池 — 每项上限 baseCap(6)
+  let baseRemaining = basePool;
+  let baseUsed = 0;
+  while (baseRemaining > 0) {
+    const eligible = keys.filter(k => attrs[k] < baseCap);
     if (eligible.length === 0) break;
     const key = eligible[Math.floor(Math.random() * eligible.length)];
     attrs[key]++;
-    remaining--;
+    baseRemaining--;
+    baseUsed++;
+  }
+  // 未分配完的 basePool 舍弃（已达每项 6 上限）
+
+  // 阶段 2: 分配等级额外点 — 每项总上限 = cap - tierFixed（让最终值不超 cap）
+  let levelRemaining = levelExtra;
+  let levelUsed = 0;
+  const levelCap = cap - tierFixed; // 这是等级额外的实际上限
+  while (levelRemaining > 0) {
+    const eligible = keys.filter(k => attrs[k] < levelCap);
+    if (eligible.length === 0) break;
+    const key = eligible[Math.floor(Math.random() * eligible.length)];
+    attrs[key]++;
+    levelRemaining--;
+    levelUsed++;
+  }
+
+  // 阶段 3: 每项 + tierFixed
+  for (const k of keys) {
+    attrs[k] += tierFixed;
   }
 
   return {
@@ -363,7 +486,7 @@ export function rollAttributes(tier: number, level: number = 1): {
     con: attrs['con']!,
     int: attrs['int']!,
     spi: attrs['spi']!,
-    breakdown: { basePool, tierFixed, levelExtra, cap },
+    breakdown: { basePool, tierFixed, levelExtra, cap, baseCap, baseUsed, levelUsed },
   };
 }
 

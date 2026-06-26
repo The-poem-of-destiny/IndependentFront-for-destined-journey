@@ -250,7 +250,7 @@ export class AgentClient {
         presence_penalty: request.presencePenalty ?? 0,
         stream: false,
         stop: request.stop,
-        user: this.userId,
+        user_id: this.userId,
       };
 
       // 🆕 注入 tools / tool_choice（如果提供）

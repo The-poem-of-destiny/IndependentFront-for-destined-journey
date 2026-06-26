@@ -664,8 +664,6 @@ ${formatVariables(ctx)}`,
 </char_result>`,
 
     variableContext: (ctx: AgentContext) => {
-
-    variableContext: (ctx: AgentContext) => {
       let prompt = '';
       prompt += `**已有角色 (避免重名):**\n${formatCharacters(ctx)}\n\n`;
       const lorebook = formatLorebook(ctx);
@@ -852,8 +850,6 @@ ${formatVariables(ctx)}`,
 <item name="磨刀石" quantity="1" type="消耗品" rarity="普通">专业级磨刀石，格雷厄姆自己打磨用的</item>
 </inventory>
 </item_result>`,
-
-    variableContext: (ctx: AgentContext) => {
 
     variableContext: (ctx: AgentContext) => {
       let prompt = '';

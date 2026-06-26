@@ -27,7 +27,9 @@ import type {
   CharacterState,
   ApiEndpoint,
   AgentContext,
+  ToolDefinition,
 } from './types';
+import { executeToolCall } from './agent-tools';
 
 // ========== Factory Helpers ==========
 
@@ -568,5 +570,344 @@ describe('$chargen', () => {
 
   it('应暴露 assemble 方法', () => {
     expect($chargen.assemble).toBe(assembleCharacterState);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 🆕 Phase 8.5 Agentic 路径测试 (function calling 多轮循环)
+// ═══════════════════════════════════════════════════════════════
+
+// ── Test helpers ──
+
+/**
+ * 测试专用的工具执行器。
+ * - 纯函数工具（dice/random/attributes）→ 调真实 executeToolCall()
+ * - 需要 character context 的工具 → 空 context 自然降级
+ * - get_inventory 需要 characterId，空 context 会 throw → catch 降级
+ */
+async function executeToolCallForTest(functionName: string, args: Record<string, any>): Promise<any> {
+  // get_inventory 需要 characterId → 空 context 找不到角色会抛错 → 降级
+  if (functionName === 'get_inventory') {
+    return {
+      _test_mode: true,
+      itemCount: 0,
+      items: [],
+      hint: '测试环境无背包数据，请根据角色背景自行设计物品',
+    };
+  }
+
+  // get_character 不传 characterId → 返回空字符列表（天然降级语义）
+  // 其余所有工具（roll_d20, random_name, roll_attributes, etc.）→ 纯函数，context 不读取
+  return executeToolCall(functionName, args, {
+    characters: [],
+    variables: {},
+    saveId: 'test-save',
+  });
+}
+
+interface ToolCallStep {
+  /** 本轮 AI 要调的工具 */
+  calls: Array<{ name: string; args: Record<string, any> }>;
+}
+
+/**
+ * 构造模拟多轮 Agentic 循环的 CharGenClient。
+ *
+ * 工作方式:
+ * - toolCallSequence: 每轮模拟 AI "调了哪些工具"（按顺序执行并向 conversation 回注结果）
+ * - finalOutput: 所有工具调用完成后返回的最终输出
+ * - 工具执行使用 executeToolCallForTest（纯函数→真实 / context→降级）
+ */
+function makeAgenticMockClient(
+  toolCallSequence: ToolCallStep[],
+  finalOutput: string,
+): CharGenClient {
+  return {
+    chatWithTools: vi.fn().mockImplementation(
+      async (request, toolExecutor, _options) => {
+        const conversation = [...request.messages];
+
+        for (const step of toolCallSequence) {
+          // 注入 assistant 消息（含 tool_calls）
+          const toolCalls = step.calls.map((c) => ({
+            id: `call_${c.name}_${Date.now()}`,
+            type: 'function' as const,
+            function: {
+              name: c.name,
+              arguments: JSON.stringify(c.args),
+            },
+          }));
+
+          conversation.push({
+            role: 'assistant',
+            content: `Calling ${step.calls.map((c) => c.name).join(', ')}...`,
+            tool_calls: toolCalls,
+          } as any);
+
+          // 逐个执行工具并回注 tool 消息
+          for (const c of step.calls) {
+            const result = await toolExecutor(c.name, c.args);
+            conversation.push({
+              role: 'tool',
+              tool_call_id: `call_${c.name}`,
+              name: c.name,
+              content: JSON.stringify(result),
+            } as any);
+          }
+        }
+
+        return {
+          output: finalOutput,
+          rawResponse: finalOutput,
+          tokensUsed: 500,
+          cacheHit: false,
+          duration: 1000,
+        };
+      },
+    ),
+  };
+}
+
+// ── Agentic callCharGenAgent 测试 ──
+
+describe('callCharGenAgent (Agentic 路径)', () => {
+  it('应通过多轮工具调用生成角色', async () => {
+    const mockClient = makeAgenticMockClient(
+      [
+        // 第 1 轮: 调查重 + 随机名
+        {
+          calls: [
+            { name: 'get_character', args: {} },
+            { name: 'random_name', args: { race: '精灵', gender: '女' } },
+          ],
+        },
+        // 第 2 轮: 调属性骰 + 性格
+        {
+          calls: [
+            { name: 'roll_attributes', args: { tier: 2, level: 8 } },
+            { name: 'random_personality', args: {} },
+          ],
+        },
+      ],
+      // 最终输出 (模拟 AI 看到工具结果后生成的 XML)
+      `<char_result>
+<name>艾琳</name>
+<race>精灵</race>
+<tier>2</tier>
+<level>8</level>
+<attributes str="4" dex="10" con="5" int="7" spi="8"/>
+<identity>巡林者</identity>
+<occupation>弓箭手</occupation>
+<background>精灵巡林者背景故事</background>
+<appearance>银发精灵外貌描述</appearance>
+<personality code="wOaGz(A)">冷静果断的性格描述</personality>
+<ascension enabled="false" path="" description=""/>
+</char_result>`,
+    );
+
+    const deps = makeDeps(mockClient);
+    const result = await callCharGenAgent(makeRequest(), deps);
+
+    expect(result.name).toBe('艾琳');
+    expect(result.race).toBe('精灵');
+    expect(result.tier).toBe(2);
+    expect(result.attributes.str).toBe(4);
+    expect(mockClient.chatWithTools).toHaveBeenCalledTimes(1);
+  });
+
+  it('get_character 空 context 应返回空角色列表（自然降级）', async () => {
+    const result = await executeToolCallForTest('get_character', {});
+    // 不传 characterId → 返回所有角色列表（空数组）
+    expect(result.characters).toBeDefined();
+    expect(result.characters).toEqual([]);
+  });
+
+  it('get_inventory 空 context 应返回测试降级提示', async () => {
+    const result = await executeToolCallForTest('get_inventory', { characterId: 'nonexistent' });
+    expect(result._test_mode).toBe(true);
+    expect(result.items).toEqual([]);
+    expect(result.hint).toBeDefined();
+  });
+
+  it('纯函数工具应返回真实数据', async () => {
+    const diceResult = await executeToolCallForTest('roll_d20', { modifier: 0, reason: 'test' });
+    expect(diceResult.total).toBeGreaterThanOrEqual(1);
+    expect(diceResult.total).toBeLessThanOrEqual(20);
+    expect(diceResult.formula).toBeDefined();
+
+    const nameResult = await executeToolCallForTest('random_name', { race: '人类', gender: '女' });
+    expect(nameResult.name).toBeDefined();
+    expect(nameResult.race).toBe('人类');
+    expect(nameResult.gender).toBe('女');
+
+    const personalityResult = await executeToolCallForTest('random_personality', {});
+    expect(personalityResult.code).toBeDefined();
+    expect(personalityResult.description).toBeDefined();
+
+    const attrResult = await executeToolCallForTest('roll_attributes', { tier: 2, level: 8 });
+    expect(attrResult.str).toBeDefined();
+    // roll_attributes 返回 { str, dex, con, int, spi, breakdown } 不带 tier
+
+    // craft_get_base_dc 在 item_gen 白名单中
+    const dcResult = await executeToolCall('craft_get_base_dc', { quality: '稀有' }, { characters: [], variables: {}, saveId: 'test' });
+    expect(dcResult.baseDC).toBeDefined();
+    expect(dcResult.quality).toBe('稀有');
+  });
+
+  it('Agentic 路径失败应抛出异常', async () => {
+    const mockClient: CharGenClient = {
+      chatWithTools: vi.fn().mockResolvedValue({
+        output: null,
+        rawResponse: '',
+        tokensUsed: 0,
+        cacheHit: false,
+        duration: 100,
+        error: 'API timeout',
+      }),
+    };
+    const deps = makeDeps(mockClient);
+
+    await expect(callCharGenAgent(makeRequest(), deps)).rejects.toThrow('char_gen Agent 调用失败');
+  });
+
+  it('应回退到旧路径 (无 chatWithTools 时)', async () => {
+    // makeMockClient 只提供 chat，不提供 chatWithTools → 应走旧路径
+    const mockClient = makeMockClient(makeCharGenOutput());
+    const deps = makeDeps(mockClient);
+
+    const result = await callCharGenAgent(makeRequest(), deps);
+    expect(result.name).toBe('艾琳');
+    expect(mockClient.chat).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── Agentic callItemGenAgent 测试 ──
+
+describe('callItemGenAgent (Agentic 路径)', () => {
+  it('应通过多轮工具调用生成物品', async () => {
+    const mockClient = makeAgenticMockClient(
+      [
+        // 第 1 轮: 查品质基准 DC + 查角色数据
+        {
+          calls: [
+            { name: 'craft_get_base_dc', args: { quality: '优良' } },
+            { name: 'get_character', args: {} },
+          ],
+        },
+        // 第 2 轮: 掷骰确定数量
+        {
+          calls: [
+            { name: 'roll_dice', args: { formula: '2d3', reason: '确定技能数量' } },
+            { name: 'roll_dice', args: { formula: '1d3+1', reason: '确定装备数量' } },
+          ],
+        },
+      ],
+      `<item_result>
+<skills>
+<skill name="精准射击" type="active" cost_type="SP" cost_amount="15" cooldown="3">精准瞄准，命中率+20%</skill>
+</skills>
+<equipment>
+<equip slot="武器" name="精灵长弓" quality="优良" durability="120" stats="攻击力:18,敏捷:2">轻量化长弓</equip>
+</equipment>
+<inventory>
+<item name="猎人箭袋" quantity="1" type="消耗品" rarity="普通">装有30支箭矢</item>
+</inventory>
+</item_result>`,
+    );
+
+    const deps = makeDeps(mockClient);
+    const result = await callItemGenAgent(makeCharGenOutput(), makeRequest(), deps);
+
+    expect(result.skills).toHaveLength(1);
+    expect(result.equipment).toHaveLength(1);
+    expect(result.inventory).toHaveLength(1);
+    expect(result.skills[0].name).toBe('精准射击');
+    expect(mockClient.chatWithTools).toHaveBeenCalledTimes(1);
+  });
+
+  it('Agentic 路径失败应返回空物品（不阻断流程）', async () => {
+    const mockClient: CharGenClient = {
+      chatWithTools: vi.fn().mockResolvedValue({
+        output: null,
+        rawResponse: '',
+        tokensUsed: 0,
+        cacheHit: false,
+        duration: 100,
+        error: 'Timeout',
+      }),
+    };
+    const deps = makeDeps(mockClient);
+
+    const result = await callItemGenAgent(makeCharGenOutput(), makeRequest(), deps);
+    expect(result.skills).toHaveLength(0);
+    expect(result.equipment).toHaveLength(0);
+    expect(result.inventory).toHaveLength(0);
+  });
+});
+
+// ── Agentic runCharGenChain 集成测试 ──
+
+describe('runCharGenChain (Agentic 路径)', () => {
+  it('应通过 Agentic 路径运行完整角色生成链', async () => {
+    const charXml = `<char_result>
+<name>格雷厄姆</name>
+<race>人类</race>
+<tier>2</tier>
+<level>7</level>
+<attributes str="11" dex="5" con="10" int="5" spi="4"/>
+<identity>白曜城铁匠, 退役老兵</identity>
+<occupation>铁匠, 武器匠人</occupation>
+<background>曾在边境战争中服役十五年，失去左臂后开了铁匠铺</background>
+<appearance>魁梧老兵，花白短发，独臂</appearance>
+<personality code="w-aG-z+(S)">沉默寡言，对武器有近乎偏执的追求</personality>
+<ascension enabled="false" path="" description=""/>
+</char_result>`;
+
+    const itemXml = `<item_result>
+<skills>
+<skill name="锻打强化" type="active" cost_type="SP" cost_amount="10" cooldown="2">利用锻造技巧增强武器威力</skill>
+</skills>
+<equipment>
+<equip slot="武器" name="锻铁大锤" quality="优良" durability="150" stats="攻击力:22,力量:3">沉重铁锤</equip>
+</equipment>
+<inventory>
+<item name="精炼铁矿石" quantity="15" type="材料" rarity="优良">上好的铁矿石</item>
+</inventory>
+</item_result>`;
+
+    // char_gen: 2 轮工具调用 → 最终输出 charXml
+    const charClient = makeAgenticMockClient(
+      [
+        { calls: [{ name: 'get_character', args: {} }, { name: 'random_name', args: { race: '人类', gender: '男' } }] },
+        { calls: [{ name: 'roll_attributes', args: { tier: 2, level: 7 } }, { name: 'random_personality', args: {} }] },
+      ],
+      charXml,
+    );
+
+    // item_gen: 1 轮工具调用 → 最终输出 itemXml
+    const itemClient = makeAgenticMockClient(
+      [
+        { calls: [{ name: 'craft_get_base_dc', args: { quality: '优良' } }, { name: 'roll_dice', args: { formula: '1d3+1' } }] },
+      ],
+      itemXml,
+    );
+
+    const clientMap: Record<string, CharGenClient> = {
+      char_gen: charClient,
+      item_gen: itemClient,
+    };
+
+    const deps: CharGenAgentDeps = {
+      clientFactory: (agentId: string) => clientMap[agentId],
+    };
+
+    const result = await runCharGenChain(makeRequest(), deps);
+
+    expect(result.character).toBeDefined();
+    expect(result.character.name).toBe('格雷厄姆');
+    expect(result.patches.length).toBeGreaterThan(0);
+    expect(result.narrativeSummary).toContain('格雷厄姆');
+    expect(charClient.chatWithTools).toHaveBeenCalledTimes(1);
+    expect(itemClient.chatWithTools).toHaveBeenCalledTimes(1);
   });
 });

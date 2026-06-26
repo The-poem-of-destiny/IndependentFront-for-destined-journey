@@ -2403,6 +2403,10 @@ export interface ItemGenOutput {
     };
     /** 冷却回合数 (可选) */
     cooldown?: number;
+    /** 🆕 Phase 8.5: 词条效果 <effect name="...">...</effect> */
+    effects?: Record<string, string>;
+    /** 🆕 Phase 8.5: 脚本 <script name="init|cast|tick|cleanup">code</script> */
+    scripts?: Record<string, string>;
   }>;
   /** 装备列表 */
   equipment: Array<{

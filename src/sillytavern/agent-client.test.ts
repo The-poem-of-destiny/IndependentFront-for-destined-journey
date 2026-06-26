@@ -118,7 +118,7 @@ describe('AgentClient', () => {
       expect(result.cacheHit).toBe(true);
     });
 
-    it('fetch 应带 user 参数（DeepSeek 缓存隔离）', async () => {
+    it('fetch 应带 user_id 参数（DeepSeek 缓存隔离）', async () => {
       const mockFn = mockFetch({
         choices: [{ message: { content: 'ok' } }],
         usage: { total_tokens: 10 },
@@ -128,7 +128,7 @@ describe('AgentClient', () => {
       await client.chat({ messages: [{ role: 'user', content: 'test' }] });
 
       const body = JSON.parse(mockFn.mock.calls[0][1].body);
-      expect(body.user).toBe('fp|save_test|story');
+      expect(body.user_id).toBe('fp|save_test|story');
     });
   });
 
