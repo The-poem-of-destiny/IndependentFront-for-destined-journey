@@ -26,10 +26,73 @@ import { buildZoneSection, buildZoneContext } from './context-visibility';
 
 // ========== 通用工具 ==========
 
-function formatHistory(ctx: AgentContext, maxMessages: number = 10): string {
+/**
+ * Phase 8.6: 各 Agent 历史注入（最近几轮 user+ai 对）的默认值。
+ * 由 buildAgentMessages 调用 formatHistory 时，优先读 ctx.agentConfig.historyLayers；
+ * AgentConfig 未设该字段则回退到这里。层数 N → 注入最近 N*2 条消息（user/ai 一对）。
+ */
+export function defaultHistoryLayers(agentId: string): number {
+  switch (agentId) {
+    case 'story':            return 6;   // 正文 AI, 主上下文, 注入较多轮
+    case 'memory_summary':   return 4;   // 记忆总结需看连续剧情
+    case 'plot_post_check':  return 4;   // 剧情/世界线需连续上下文
+    case 'plot_outline':     return 3;
+    case 'memory_recall':    return 3;
+    // 后置抽取型: 原本不看历史, 8.6 默认给 1 轮上轮辅助上文, 可配 0 关闭
+    case 'vars_update':
+    case 'char_update':
+    case 'char_gen':
+    case 'item_gen':
+    case 'craft_gen':        return 1;
+    default:                 return 2;
+  }
+}
+
+/**
+ * Phase 8.6: 各 Agent 每条历史正文截断字数的默认值。
+ * 长正文 agent (story/memory_summary) 给较大值, 后置抽取型给中等值。
+ */
+export function defaultHistorySlice(agentId: string): number {
+  switch (agentId) {
+    case 'story':
+    case 'memory_summary':   return 1500;
+    case 'plot_post_check':
+    case 'plot_outline':
+    case 'memory_recall':    return 1000;
+    // 后置型历史是辅助上文, 不必太长
+    case 'vars_update':
+    case 'char_update':
+    case 'char_gen':
+    case 'item_gen':
+    case 'craft_gen':        return 800;
+    default:                 return 800;
+  }
+}
+
+/**
+ * 格式化最近对话历史。层数 N → 注入最近 N*2 条 user/ai 消息；每条按 historySlice 截断。
+ * 优先读 ctx.agentConfig.historyLayers/historySlice（per-agent 可配），回退到默认值。
+ * ctx.agentConfig 可能为空（非 buildAgentMessages 路径, 如测试）, 此时代理 agentId 由 _proxyAgentId 提供。
+ */
+function formatHistory(ctx: AgentContext): string {
+  const agentId = ctx.agentConfig?.agentId ?? (ctx as any)._proxyAgentId ?? '';
+  const layers = ctx.agentConfig?.historyLayers ?? defaultHistoryLayers(agentId);
+  const slice = ctx.agentConfig?.historySlice ?? defaultHistorySlice(agentId);
+  if (layers <= 0) return '';                        // 0 层 = 不注入
+  const maxMessages = layers * 2;                    // user/ai 一对算一层
   return ctx.history.slice(-maxMessages)
-    .map(m => `[${m.role}]: ${m.content.slice(0, 500)}`)
+    .map(m => `[${m.role}]: ${m.content.slice(0, slice)}`)
     .join('\n');
+}
+
+/**
+ * Phase 8.6: 注入最近对话历史作为"辅助上文"块 (含标题)。layers<=0 时返回空串。
+ * 供后置抽取型 agent (vars_update/char_update/char_gen/craft_gen/item_gen) 在 story 输出前调用,
+ * 让它们除本轮 story 外还能看到上一轮上下文 (如 vars_update 能据此判断前一轮位置)。
+ */
+function recentHistoryBlock(ctx: AgentContext): string {
+  const h = formatHistory(ctx);
+  return h ? `**最近对话:**\n${h}\n\n` : '';
 }
 
 function formatCharacters(ctx: AgentContext): string {
@@ -105,7 +168,7 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
 ${formatMemories(ctx)}
 
 **最近对话:**
-${formatHistory(ctx, 5)}`,
+${formatHistory(ctx)}`,
 
     variableInstruction: (ctx: AgentContext) => `用户输入: ${ctx.userInput}
 
@@ -151,7 +214,7 @@ ${formatMemories(ctx)}
 ${formatCharacters(ctx)}
 
 **最近对话:**
-${formatHistory(ctx, 8)}`,
+${formatHistory(ctx)}`,
 
     variableInstruction: (ctx: AgentContext) => `**用户输入:** ${ctx.userInput}
 
@@ -237,7 +300,7 @@ ${formatHistory(ctx, 8)}`,
 
     variableInstruction: (ctx: AgentContext) => {
       // 注入最近对话历史（作为 user message）
-      return `**最近对话:**\n${formatHistory(ctx, 15)}\n\n**玩家输入:** ${ctx.userInput}\n\n请生成下一段剧情。`;
+      return `**最近对话:**\n${formatHistory(ctx)}\n\n**玩家输入:** ${ctx.userInput}\n\n请生成下一段剧情。`;
     },
   },
 
@@ -279,7 +342,8 @@ ${formatCharacters(ctx)}`,
 
     variableInstruction: (ctx: AgentContext) => {
       const storyOutput = ctx.agentOutputs?.get('story') ?? '';
-      return `**正文 AI 输出:**\n${storyOutput}\n\n请提取变量变更。`;
+      // Phase 8.6: 默认注入 1 轮历史, 辅助判断"位置/时间"等指依赖前文的变化 (可配 historyLayers=0 关闭)
+      return `${recentHistoryBlock(ctx)}**正文 AI 输出:**\n${storyOutput}\n\n请提取变量变更。`;
     },
   },
 
@@ -319,7 +383,8 @@ ${formatVariables(ctx)}`,
 
     variableInstruction: (ctx: AgentContext) => {
       const storyOutput = ctx.agentOutputs?.get('story') ?? '';
-      return `**正文 AI 输出:**\n${storyOutput}\n\n请提取所有角色状态变化。对每个有变化的角色返回 changes 对象。`;
+      // Phase 8.6: 默认注入 1 轮历史, 辅助判断 HP/状态是否受了前文影响 (可配 historyLayers=0 关闭)
+      return `${recentHistoryBlock(ctx)}**正文 AI 输出:**\n${storyOutput}\n\n请提取所有角色状态变化。对每个有变化的角色返回 changes 对象。`;
     },
   },
 
@@ -351,7 +416,7 @@ ${formatVariables(ctx)}`,
 
     variableContext: (ctx: AgentContext) => `
 **最近对话历史:**
-${formatHistory(ctx, 10)}
+${formatHistory(ctx)}
 
 **当前变量状态:**
 ${formatVariables(ctx)}
@@ -405,7 +470,7 @@ ${formatMemories(ctx)}
 ${formatCharacters(ctx)}
 
 **最近对话:**
-${formatHistory(ctx, 8)}`,
+${formatHistory(ctx)}`,
 
     variableInstruction: (ctx: AgentContext) => {
       const storyOutput = ctx.agentOutputs?.get('story') ?? '';
@@ -531,7 +596,8 @@ ${formatVariables(ctx)}`,
 
     variableInstruction: (ctx: AgentContext) => {
       const storyOutput = ctx.agentOutputs?.get('story') ?? '';
-      return `**正文输出 (含 <craft_request> 标记):**\n${storyOutput}\n\n请调用工具获取真实数据（不要编造数值），然后输出 craft_result。`;
+      // Phase 8.6: 默认注入 1 轮历史, 辅助判断制作意图的连续性 (可配 historyLayers=0 关闭)
+      return `${recentHistoryBlock(ctx)}**正文输出 (含 <craft_request> 标记):**\n${storyOutput}\n\n请调用工具获取真实数据（不要编造数值），然后输出 craft_result。`;
     },
   },
 
@@ -674,7 +740,8 @@ ${formatVariables(ctx)}`,
 
     variableInstruction: (ctx: AgentContext) => {
       const storyOutput = ctx.agentOutputs?.get('story') ?? '';
-      return `**正文输出 (含 <char_detect> 标记):**\n${storyOutput}\n\n请调用工具获取真实随机值（不要自己编造名称/发色/瞳色/性格），然后输出 char_result。`;
+      // Phase 8.6: 默认注入 1 轮历史, 让 char_gen 能参考前文出场描写 (可配 historyLayers=0 关闭)
+      return `${recentHistoryBlock(ctx)}**正文输出 (含 <char_detect> 标记):**\n${storyOutput}\n\n请调用工具获取真实随机值（不要自己编造名称/发色/瞳色/性格），然后输出 char_result。`;
     },
   },
 
@@ -861,7 +928,8 @@ ${formatVariables(ctx)}`,
     variableInstruction: (ctx: AgentContext) => {
       const charGenOutput = ctx.agentOutputs?.get('char_gen') ?? '';
       const storyOutput = ctx.agentOutputs?.get('story') ?? '';
-      return `**生成的角色的数据 (char_gen 输出):**\n${charGenOutput}\n\n**正文上下文:**\n${storyOutput}\n\n请为该角色生成合适的装备、技能和背包物品。`;
+      // Phase 8.6: 默认注入 1 轮历史, 辅助生成贴合前文场景的装备 (可配 historyLayers=0 关闭)
+      return `${recentHistoryBlock(ctx)}**生成的角色的数据 (char_gen 输出):**\n${charGenOutput}\n\n**正文上下文:**\n${storyOutput}\n\n请为该角色生成合适的装备、技能和背包物品。`;
     },
   },
 
@@ -910,10 +978,15 @@ export function buildAgentMessages(
   const tpl = getAgentTemplate(agentId);
   if (!tpl) return null;
 
+  // Phase 8.6: 提前找到本 agent 的 config (供预设/世界书/历史注入共用)
+  const config = configs?.find(c => c.agentId === agentId);
+  // 关键: 不可 mutate 原 ctx (orchestrator 同 stage 多 agent 共享), 用浅拷贝注入 agentConfig
+  // 模板函数 (variableContext/variableInstruction/formatHistory/buildZoneSection) 经此 ctx 读 per-agent 设置.
+  const tplCtx: AgentContext = config ? { ...ctx, agentConfig: config } : ctx;
+
   // Part 1: 预设 (固定部分)
   let presetSection = '';
   if (presets && configs) {
-    const config = configs.find(c => c.agentId === agentId);
     if (config?.presetId) {
       const preset = getPreset(config.presetId, presets);
       if (preset) {
@@ -932,19 +1005,19 @@ export function buildAgentMessages(
     const entries = getEntriesForAgent(agentId, configs, worldBooks);
     const activeEntries = filterActiveEntries(
       entries,
-      ctx.userInput + '\n' + (ctx.history.slice(-5).map(m => m.content).join('\n')),
+      tplCtx.userInput + '\n' + (tplCtx.history.slice(-5).map(m => m.content).join('\n')),
     );
     worldBookSection = formatWorldBookEntries(activeEntries);
   }
 
   // Part 3: 变量区 (动态上下文)
   // Phase 8: 优先使用 zone-based 注入，未传 zones 时回退到旧的 variableContext()
-  const variableSection = ctx.zones
-    ? buildZoneSection(agentId, ctx)
-    : tpl.variableContext(ctx);
+  const variableSection = tplCtx.zones
+    ? buildZoneSection(agentId, tplCtx)
+    : tpl.variableContext(tplCtx);
 
   // Part 4: 正文/用户输入
-  const bodySection = tpl.variableInstruction(ctx);
+  const bodySection = tpl.variableInstruction(tplCtx);
 
   const systemContent = [
     presetSection,

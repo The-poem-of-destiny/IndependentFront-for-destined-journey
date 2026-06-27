@@ -278,6 +278,9 @@ async function saveAsDefault() {
     freqPen: s.agentFreqPen[agentId] ?? 0,
     presPen: s.agentPresPen[agentId] ?? 0,
     maxTokens: s.agentMaxTokens[agentId] ?? 16384,
+    // Phase 8.6: Agent 历史注入配置 (存档不设则引擎侧按类别默认)
+    historyLayers: s.agentHistoryLayers[agentId],
+    historySlice: s.agentHistorySlice[agentId],
   }
 
   if (agentId === 'story') {
@@ -318,6 +321,23 @@ function saveAgentSettings() {
   s.agentDirty[activeAgent.value]=true
   ui.toast('Agent 设置已保存','success')
 }
+
+/** Phase 8.6: 历史注入层数输入 — 空值清除 (走引擎类别默认)，非空写入 */
+function onHistoryLayersInput(ev: Event) {
+  if (!activeAgent.value) return
+  const v = (ev.target as HTMLInputElement).value
+  if (v === '') delete s.agentHistoryLayers[activeAgent.value]
+  else s.agentHistoryLayers[activeAgent.value] = Number(v)
+  s.agentDirty[activeAgent.value] = true
+}
+/** Phase 8.6: 历史截断字数输入 — 空值清除 (走引擎类别默认)，非空写入 */
+function onHistorySliceInput(ev: Event) {
+  if (!activeAgent.value) return
+  const v = (ev.target as HTMLInputElement).value
+  if (v === '') delete s.agentHistorySlice[activeAgent.value]
+  else s.agentHistorySlice[activeAgent.value] = Number(v)
+  s.agentDirty[activeAgent.value] = true
+}
 function restoreAgentDefaults() {
   if (!activeAgent.value) return
   const agentId = activeAgent.value
@@ -345,6 +365,11 @@ function restoreAgentDefaults() {
     s.agentMaxTokens[agentId] = pd.maxTokens ?? 16384
     s.agentPromptEdited = false
     s.agentDirty[agentId] = false
+    // Phase 8.6: 恢复历史注入配置 (项目默认未设则清除走引擎默认)
+    if (pd.historyLayers !== undefined) s.agentHistoryLayers[agentId] = pd.historyLayers
+    else delete s.agentHistoryLayers[agentId]
+    if (pd.historySlice !== undefined) s.agentHistorySlice[agentId] = pd.historySlice
+    else delete s.agentHistorySlice[agentId]
     ui.toast('已恢复项目默认设置', 'info')
     return
   }
@@ -363,6 +388,8 @@ function restoreAgentDefaults() {
   s.agentMaxTokens[agentId] = 16384
   s.agentPromptEdited = false
   s.agentDirty[agentId] = false
+  delete s.agentHistoryLayers[agentId]
+  delete s.agentHistorySlice[agentId]
   ui.toast('已恢复默认设置', 'info')
 }
 
@@ -606,6 +633,20 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
                   :value="s.agentMaxTokens[activeAgent] ?? 16384"
                   @input="s.agentMaxTokens[activeAgent] = Number(($event.target as HTMLInputElement).value); s.agentDirty[activeAgent] = true"
                   class="form-input" />
+              </label>
+              <label class="form-label">历史注入层数
+                <p class="form-hint">注入最近 N 轮「玩家+AI」对话历史（0=不注入；留空=按 Agent 类别默认）。后置型 Agent 默认 1 轮辅助上文，长正文型默认 6 轮</p>
+                <input type="number" min="0" max="20" step="1"
+                  :value="s.agentHistoryLayers[activeAgent] ?? ''"
+                  @input="onHistoryLayersInput($event)"
+                  placeholder="(默认)" class="form-input" />
+              </label>
+              <label class="form-label">历史截断字数
+                <p class="form-hint">每条历史正文保留前多少字（留空=按 Agent 类别默认，长正文型默认 1500，后置型默认 800）</p>
+                <input type="number" min="100" max="8000" step="100"
+                  :value="s.agentHistorySlice[activeAgent] ?? ''"
+                  @input="onHistorySliceInput($event)"
+                  placeholder="(默认)" class="form-input" />
               </label>
             </div>
           </AppCard>

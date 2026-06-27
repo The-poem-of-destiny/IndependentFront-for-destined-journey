@@ -29,6 +29,37 @@ function loadWorldBooks(ids: string[]): any[] {
 const SAVE_ID = 'save-progressive';
 const NOW = Date.now();
 
+/**
+ * 真实游戏实例对话源 (reference/游戏实例_对话.json): SillyTavern 导出的完整对话 (98 条 mes),
+ * 每条 AI mes 的 <gametxt> 内含 Recorder 思维链 + 叙事正文 + <!-- ..Think --> 注释 + 面板 XML.
+ * extractNarrative 把某条 AI mes 清洗为纯叙事正文: 删注释、删所有面板标签、按起点锚截取正文段.
+ */
+const RAW_CHAT_PATH = 'reference/游戏实例_对话.json';
+const _rawChat = JSON.parse(fs.readFileSync(RAW_CHAT_PATH, 'utf-8')) as Array<any>;
+// 真实游戏实例对话源 (reference/游戏实例_对话.json): SillyTavern 导出的完整对话 (98 条 mes),
+// 每条 AI mes 的 <gametxt> 内含 [Recorder 思维链前缀 + <tp>时间戳 + 正文 + <!-- ..Think --> 注释 + <item_info>/<char_info> HTML 面板].
+// extractNarrative: 思维链/面板/注释都在 <gametxt> 内, 但开标签常在思维链而闭标签在正文内, 若先做全段非贪婪 strip 会跨吞正文.
+// 故采用「先按起点锚朴素切片 (丢弃思维链, 留正文段) → 再在正文段内删注释与成对面板」策略, 配对在正文段内必完整, 不会跨吞.
+const _stripTags = [
+  'item_info', 'char_info', 'status_current_variables', 'action_info', 'task_info',
+  'sex_style', 'tp', 'summary', 'StatusPlaceHolderImpl', 'customized',
+  'custom_start_data', 'UpdateVariable', 'Analysis', 'var', 'think',
+  'maintext', 'option', 'sum', 'gametxt',
+];
+export function extractNarrative(aiMes: string, anchor: string): string {
+  const full = (aiMes.match(/<gametxt>([\s\S]*?)<\/gametxt>/) || [])[1];
+  if (!full) throw new Error('AI mes 中未找到 <gametxt>');
+  const i = full.indexOf(anchor);                    // 按起点锚切片 (思维链在锚之前, 一并丢弃)
+  if (i < 0) throw new Error('正文起点锚未命中: ' + anchor + ' (full len=' + full.length + ')');
+  let t = full.slice(i);                              // 正文段
+  t = t.replace(/<!--[\s\S]*?-->/g, '');             // 删 charThink/itemThink 等注释
+  for (const tag of _stripTags) {                     // 删正文段内成对面板 + 孤立标签 (配对在段内完整, 非贪婪不会跨吞)
+    t = t.replace(new RegExp('<' + tag + '[\\s\\S]*?</' + tag + '>', 'g'), '');
+    t = t.replace(new RegExp('</?' + tag + '\\s*[^>]*>', 'g'), '');
+  }
+  return t.replace(/\n{3,}/g, '\n\n').trim();
+}
+
 // ===== 柠萌茶 (Player T3 Lv.9) =====
 const player = createDefaultCharacterState({
   id: 'char-player-001', type: 'player', name: '柠萌茶', race: '人类',
@@ -205,15 +236,40 @@ for (let t = 2; t <= 5; t++) {
 }
 
 // ===== ChatSession =====
+// 5 轮真实对话 — 提取自 reference/游戏实例_对话.json 的发现绮萝莉娅线 (user idx 3/5/7/9/11, ai idx 4/6/8/10/12).
+// user 消息取源里 is_user 的 mes 原样 (口语化玩家意图含括号设定注解); assistant 用 extractNarrative 清洗后的纯叙事正文 (按起点锚截取思维链之后的正文段).
+const roundAnchors: Record<number, string> = {
+  4:  '仓库里的空气',
+  6:  '面对那双冰冷',
+  8:  '面对柠萌茶那混杂着得意',
+  10: '他的手掌托在她的臀下',
+  12: '浴缸里的热水满得快要溢出',
+};
+const roundUserMsg: Record<number, string> = {
+  3: (_rawChat[3]?.mes || '').trim(),
+  5: (_rawChat[5]?.mes || '').trim(),
+  7: (_rawChat[7]?.mes || '').trim(),
+  9: (_rawChat[9]?.mes || '').trim(),
+  11: (_rawChat[11]?.mes || '').trim(),
+};
+const roundAiMsg: Record<number, string> = {
+  4:  extractNarrative(_rawChat[4]?.mes || '',  roundAnchors[4]),
+  6:  extractNarrative(_rawChat[6]?.mes || '',  roundAnchors[6]),
+  8:  extractNarrative(_rawChat[8]?.mes || '',  roundAnchors[8]),
+  10: extractNarrative(_rawChat[10]?.mes || '', roundAnchors[10]),
+  12: extractNarrative(_rawChat[12]?.mes || '', roundAnchors[12]),
+};
 const rawMessages: Array<{ role: string; content: string }> = [
-  { role: 'user', content: '柠萌茶把石棺擦得干干净净，然后发现石棺可以打开？使用魔力推不动，才发现要翻开。把石棺翻开后，里面有一个女孩子。冰蓝色长发，蓝粉混合色眼睛，身材匀称但肚子很大，胸部饱满。灵魂无法操控身体，只能灵体对话。柠萌茶听到空灵可爱的声音，看到大肚子感觉奇怪，趴下钻裙底看私处发现是处女。柠萌茶问为什么肚子大却又是处女。' },
-  { role: 'assistant', content: '仓库的空气因卖力擦拭扬起更多尘埃。柠萌茶将石棺从头擦净，发现隐藏接缝。他用魔力推不动，改为向上翻才打开棺盖。石棺内铺着天鹅绒衬里，一位冰蓝色长发少女静静躺在其中，身着华丽白裙，腹部高高隆起。他将她从棺中抱出放在亚麻布上。一个空灵清脆的少女声音在他脑海中响起："你是谁？这里是哪里？"柠萌茶被灵体对话吓了一跳，注意到她隆起的小腹，怀着好奇心钻入裙底——竟是个彻底的处女。少女声音带上怒意。他抬头对上那双睁开的蓝粉色眼眸，问出心中疑惑。绮萝莉娅冷冷反问："孕育和那种低等的交媾行为有什么关系？"' },
-  { role: 'user', content: '柠萌茶说我不告诉你，你又能怎么样。我现在是你的主人了，我叫柠萌茶，这里是瓦伦蒂亚城，复兴纪元488年。绮萝莉娅内心疑惑教团本在无尽树海深处，怎么被搬到瓦伦蒂亚城，这座大陆南部超大要塞。488年，上次教会的仪式在459年，居然过去了那么久，修炼数百年居然白费了。' },
-  { role: 'assistant', content: '面对那双冰冷中带着愠怒的蓝粉色眼眸，柠萌茶非但没有道歉，反而像抓到把柄的孩子露出狡黠的得意。"你的身体好像动不了吧？我现在可是你的主人了！我叫柠萌茶。这里是瓦伦蒂亚城，复兴纪元488年。"绮萝莉娅眼眸中的冰冷凝固了。无尽树海深处……教团……459年的仪式……她沉默了很久。柠萌茶以为她认清了现实，她却突然开口："那，你想让我做什么？"' },
-  { role: 'user', content: '绮萝莉娅看了看柠萌茶叹了口气，开始撒娇般说话，让柠萌茶做好饲主本职工作，保护好她的身体，平时对外说身体是炼金人偶——毕竟炼金术可以塑造人偶身体，大肚子人偶只会让人觉得制作者变态。柠萌茶问教团是什么？她是怎么被封印在石棺里的？' },
-  { role: 'assistant', content: '面对柠萌茶得意的追问，绮萝莉娅注视着他，眼底的冰冷悄然融化。一个软糯的、带撒娇意味的声音在他脑海中响起："好吧，主人。那你可要好好养着我哦。我很脆弱的，不能让别人碰，也不能让别人抢走。平时就说我是你的人偶——反正炼金术本来就可以做奇怪的人偶。"柠萌茶被她突然转变的态度弄得有点懵。"那你先告诉我，你到底是什么人？什么教团？为什么会被封在石棺里？"绮萝莉娅沉默片刻。"我来自无尽树海深处的生命神教。一个崇拜生命法则的隐修教团。我是教团的圣女，曾经是最强大的那一个。"' },
-  { role: 'user', content: '柠萌茶问你是你们教团最强者吗？绮萝莉娅说是，自己便是最强的圣女，其他比如主教是第四层级，教徒可能才第二第三层级。柠萌茶问为什么你不是教主？明明最强。绮萝莉娅说没想过这种事，不过自己想当教主也行吧，在石棺里无聊倒是想出来很多以前没想过的事情。柠萌茶说那好，抱她去浴室洗洗。' },
-  { role: 'assistant', content: '柠萌茶的坦然追问让绮萝莉娅眼中那层伪装出来的柔弱如退潮般褪去，第一次显露出纯粹的愕然。"所以你就是你们教团最厉害的人了？""是。""那为什么不是教主？""我没想过。修炼和仪式占据了我全部的时间。不过……在石棺里这几百年，我想出来很多以前没想过的事情。"柠萌茶拍板定案："那好吧，你现在是我的宠物了！"他弯腰将少女从地上抱起，她的身体轻盈得不符合那丰满的身材。"带你先去洗洗。"浴室氤氲水汽中，他第一次完整端详这具既陌生又迷人的身体。"你的身体真的什么都感觉不到吗？""感觉不到。"她的声音平静而肯定。"那为什么我刚才叫你站起来的时候，你的身体动了？"' },
+  { role: 'user', content: roundUserMsg[3] },
+  { role: 'assistant', content: roundAiMsg[4] },
+  { role: 'user', content: roundUserMsg[5] },
+  { role: 'assistant', content: roundAiMsg[6] },
+  { role: 'user', content: roundUserMsg[7] },
+  { role: 'assistant', content: roundAiMsg[8] },
+  { role: 'user', content: roundUserMsg[9] },
+  { role: 'assistant', content: roundAiMsg[10] },
+  { role: 'user', content: roundUserMsg[11] },
+  { role: 'assistant', content: roundAiMsg[12] },
 ];
 const messages = rawMessages.map((m, i) => ({ ...m, id: 'msg-' + (i + 1), timestamp: NOW + i * 30000 }));
 

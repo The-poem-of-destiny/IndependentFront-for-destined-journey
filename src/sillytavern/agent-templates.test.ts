@@ -7,8 +7,10 @@ import {
   getAgentTemplate,
   buildAgentMessages,
   REGISTERED_AGENT_IDS,
+  defaultHistoryLayers,
+  defaultHistorySlice,
 } from './agent-templates';
-import type { AgentContext } from './types';
+import type { AgentContext, AgentConfig } from './types';
 
 // ========== Test Context ==========
 
@@ -253,5 +255,112 @@ describe('模板质量', () => {
     for (const [id, tpl] of activeTemplates) {
       expect(tpl.fixedSystem.trim().length).toBeGreaterThan(100);
     }
+  });
+});
+
+// ========== Phase 8.6: 历史注入 per-Agent 配置 ==========
+
+function makeHistory(n: number): AgentContext['history'] {
+  const h: AgentContext['history'] = [];
+  for (let i = 0; i < n; i++) {
+    h.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: `消息${i}内容`.repeat(20) });
+  }
+  return h;
+}
+function makeCfg(agentId: string, overrides: Partial<AgentConfig> = {}): AgentConfig {
+  return { agentId, enabled: true, apiEndpointId: '', model: '', temperature: 0.7,
+    maxTokens: 4096, topP: 1, frequencyPenalty: 0, presencePenalty: 0, retryOnFail: false, timeout: 0,
+    userId: '', promptTemplate: { fixedSystem: '', fixedExamples: '' }, worldBookIds: [], ...overrides };
+}
+function countHistoryEntries(userContent: string): number {
+  return (userContent.match(/^\[(user|assistant)\]:/gm) || []).length;
+}
+
+describe('默认历史层数 defaultHistoryLayers', () => {
+  it('story 类给较多轮(6)、后置型给 1、其余适中', () => {
+    expect(defaultHistoryLayers('story')).toBe(6);
+    expect(defaultHistoryLayers('memory_summary')).toBe(4);
+    expect(defaultHistoryLayers('plot_post_check')).toBe(4);
+    expect(defaultHistoryLayers('memory_recall')).toBe(3);
+    expect(defaultHistoryLayers('vars_update')).toBe(1);
+    expect(defaultHistoryLayers('char_gen')).toBe(1);
+    expect(defaultHistoryLayers('item_gen')).toBe(1);
+  });
+  it('未知 agent 回退中等值', () => {
+    expect(defaultHistoryLayers('unknown')).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('默认截断字数 defaultHistorySlice', () => {
+  it('长正文 agent 大、后置型小', () => {
+    expect(defaultHistorySlice('story')).toBe(1500);
+    expect(defaultHistorySlice('memory_summary')).toBe(1500);
+    expect(defaultHistorySlice('vars_update')).toBe(800);
+    expect(defaultHistorySlice('char_gen')).toBe(800);
+  });
+});
+
+describe('formatHistory 读取 per-agent 配置', () => {
+  it('story 默认注入最近 6*2=12 条 (历史不足则全注入)', () => {
+    const ctx = makeContext({ history: makeHistory(8) });   // 8 条历史 < 12
+    const cfg = makeCfg('story');
+    const msgs = buildAgentMessages('story', ctx, [cfg]);
+    expect(countHistoryEntries(msgs![1].content)).toBe(8);  // 全部 8 条
+  });
+  it('vars_update 默认(1层)注入最近 2 条历史, 在 story 输出之前', () => {
+    const ctx = makeContext({
+      history: makeHistory(8),
+      agentOutputs: new Map([['story', 'SOME_STORY_OUTPUT']]),
+    });
+    const cfg = makeCfg('vars_update');
+    const msgs = buildAgentMessages('vars_update', ctx, [cfg]);
+    const u = msgs![1].content;
+    expect(u).toContain('**最近对话:**');
+    expect(countHistoryEntries(u)).toBe(2);
+    expect(u.indexOf('**最近对话:**')).toBeLessThan(u.indexOf('**正文 AI 输出:**'));
+  });
+  it('historyLayers=0 → 不注入历史, 回退到只看 story', () => {
+    const ctx = makeContext({
+      history: makeHistory(8),
+      agentOutputs: new Map([['story', 'SOME_STORY_OUTPUT']]),
+    });
+    const cfg = makeCfg('vars_update', { historyLayers: 0 });
+    const msgs = buildAgentMessages('vars_update', ctx, [cfg]);
+    const u = msgs![1].content;
+    expect(u).not.toContain('**最近对话:**');
+    expect(u.trimStart().startsWith('**正文 AI 输出:**')).toBe(true);
+  });
+  it('historyLayers=3 → 注入最近 6 条', () => {
+    const ctx = makeContext({
+      history: makeHistory(10),
+      agentOutputs: new Map([['story', 'X']]),
+    });
+    const cfg = makeCfg('vars_update', { historyLayers: 3 });
+    const msgs = buildAgentMessages('vars_update', ctx, [cfg]);
+    expect(countHistoryEntries(msgs![1].content)).toBe(6);
+  });
+  it('historySlice 限制每条正文截断字数', () => {
+    const long = '长'.repeat(2000);
+    const ctx = makeContext({
+      history: [{ role: 'user', content: long }, { role: 'assistant', content: long }],
+      agentOutputs: new Map([['story', 'X']]),
+    });
+    const cfg = makeCfg('vars_update', { historyLayers: 1, historySlice: 200 });
+    const msgs = buildAgentMessages('vars_update', ctx, [cfg]);
+    const u = msgs![1].content;
+    // 截断后正文中"长"字符应 ≤ 200/条 (两条各 200, 总 400)
+    expect((u.match(/长/g) || []).length).toBe(400);
+  });
+  it('不传 config (测试/非 orchestrator 路径) → 走类别默认不报错', () => {
+    const ctx = makeContext({ history: makeHistory(4) });
+    const msgs = buildAgentMessages('story', ctx);
+    expect(countHistoryEntries(msgs![1].content)).toBe(4);
+  });
+  it('buildAgentMessages 不会 mutate 共享 ctx.agentConfig (并行安全)', () => {
+    const ctx = makeContext({ history: makeHistory(2) });
+    const cfgStory = makeCfg('story');
+    buildAgentMessages('story', ctx, [cfgStory]);
+    // 调用后 ctx 不应被注入 agentConfig (orchestrator 同 stage 多 agent 共享 ctx)
+    expect(ctx.agentConfig).toBeUndefined();
   });
 });

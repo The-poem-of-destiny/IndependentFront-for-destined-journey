@@ -53,6 +53,10 @@ export interface AgentDefaultEntry {
   freqPen: number
   presPen: number
   maxTokens: number
+  /** Phase 8.6: 历史对话注入层数（几轮 user+ai 对，0=不注入；不填=按 agent 类别默认） */
+  historyLayers?: number
+  /** Phase 8.6: 每条历史正文截断字数（不填=按 agent 类别默认） */
+  historySlice?: number
 }
 
 export interface AgentProjectDefaults {
@@ -84,6 +88,9 @@ function getDefaults(): Record<string, any> {
     agentFreqPen: {} as Record<string, number>,
     agentPresPen: {} as Record<string, number>,
     agentMaxTokens: {} as Record<string, number>,
+    // Phase 8.6: Agent 上下文注入 (每 Agent 独立)
+    agentHistoryLayers: {} as Record<string, number>,
+    agentHistorySlice: {} as Record<string, number>,
 
     // 预设系统 (ChatPreset)
     presets: [] as PresetItem[],
@@ -225,6 +232,13 @@ export const useSettingsStore = defineStore('settings', () => {
       }
       if (!(agentId in (settings.value.agentMaxTokens as Record<string, number>))) {
         settings.value.agentMaxTokens[agentId] = entry.maxTokens ?? 16384
+      }
+      // Phase 8.6: 历史注入层数/截断字数 — 不设则留空 (引擎侧 defaultHistoryLayers/Slice 兜底)
+      if (entry.historyLayers !== undefined && !(agentId in (settings.value.agentHistoryLayers as Record<string, number>))) {
+        settings.value.agentHistoryLayers[agentId] = entry.historyLayers
+      }
+      if (entry.historySlice !== undefined && !(agentId in (settings.value.agentHistorySlice as Record<string, number>))) {
+        settings.value.agentHistorySlice[agentId] = entry.historySlice
       }
       // 预设：如果项目默认有预设且用户本地没有，插入 presets 数组
       if (entry.preset && entry.presetId) {

@@ -2289,7 +2289,9 @@
       "topP": 1,
       "freqPen": 0,
       "presPen": 0,
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "historyLayers": 6,
+      "historySlice": 1500
     },
     "memory_recall": {
       "worldBookEnabled": false,
@@ -2302,7 +2304,9 @@
       "topP": 1,
       "freqPen": 0,
       "presPen": 0,
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "historyLayers": 3,
+      "historySlice": 1000
     },
     "plot_pre_check": {
       "worldBookEnabled": false,
@@ -2315,7 +2319,9 @@
       "topP": 1,
       "freqPen": 0,
       "presPen": 0,
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "historyLayers": 2,
+      "historySlice": 1000
     },
     "craft_gen": {
       "worldBookEnabled": true,
@@ -2331,7 +2337,9 @@
       "topP": 1,
       "freqPen": 0,
       "presPen": 0,
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "historyLayers": 1,
+      "historySlice": 800
     },
     "vars_update": {
       "worldBookEnabled": true,
@@ -2347,7 +2355,9 @@
       "topP": 1,
       "freqPen": 0,
       "presPen": 0,
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "historyLayers": 1,
+      "historySlice": 800
     },
     "char_update": {
       "worldBookEnabled": true,
@@ -2365,7 +2375,9 @@
       "topP": 1,
       "freqPen": 0,
       "presPen": 0,
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "historyLayers": 1,
+      "historySlice": 800
     },
     "char_gen": {
       "worldBookEnabled": true,
@@ -2385,7 +2397,9 @@
       "topP": 1,
       "freqPen": 0,
       "presPen": 0,
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "historyLayers": 1,
+      "historySlice": 800
     },
     "item_gen": {
       "worldBookEnabled": false,
@@ -2403,7 +2417,9 @@
       "topP": 1,
       "freqPen": 0,
       "presPen": 0,
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "historyLayers": 1,
+      "historySlice": 800
     },
     "memory_summary": {
       "worldBookEnabled": true,
@@ -2418,7 +2434,9 @@
       "topP": 1,
       "freqPen": 0,
       "presPen": 0,
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "historyLayers": 4,
+      "historySlice": 1500
     },
     "plot_post_check": {
       "worldBookEnabled": true,
@@ -2441,7 +2459,9 @@
       "topP": 1,
       "freqPen": 0,
       "presPen": 0,
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "historyLayers": 4,
+      "historySlice": 1000
     },
     "plot_outline": {
       "worldBookEnabled": true,
@@ -2465,7 +2485,9 @@
       "topP": 1,
       "freqPen": 0,
       "presPen": 0,
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "historyLayers": 3,
+      "historySlice": 1000
     }
   }
 }

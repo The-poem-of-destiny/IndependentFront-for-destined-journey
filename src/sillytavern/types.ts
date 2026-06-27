@@ -240,6 +240,10 @@ export interface AgentConfig {
   maxToolCallRounds?: number;
   /** 🆕 Agentic: 允许的工具 ID 列表（空=全部白名单） */
   allowedToolIds?: string[];
+  /** 🆕 Phase 8.6: 历史对话注入层数（几轮 user+ai 对，0=不注入，不填=按 agent 类别默认） */
+  historyLayers?: number;
+  /** 🆕 Phase 8.6: 每条历史正文截断字数（不填=按 agent 类别默认，长正文 agent 默认更大） */
+  historySlice?: number;
 }
 
 // ========== Preset (Phase 8) ==========
@@ -1045,6 +1049,10 @@ export interface AgentContext {
   zones?: Record<ZoneId, VariableZone>;
   /** per-call 过滤 — char_update 并行时指定当前目标角色 ID */
   targetCharacterId?: string;
+
+  // --- Phase 8.6: per-Agent 可调上下文（由 buildAgentMessages 注入，读 AgentConfig） ---
+  /** 当前 Agent 的配置（含 historyLayers/historySlice 等），模板函数借此读 per-agent 设置 */
+  agentConfig?: AgentConfig;
 }
 
 /** 单个 Agent 的运行结果 */
