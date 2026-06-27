@@ -251,7 +251,7 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'random_appearance',
-      description: '随机生成角色外貌摘要（发色、瞳色、外观年龄、体型）。',
+      description: '随机生成角色外貌摘要（外观年龄、体型）。发色和瞳色请分别调用 random_hair_color 和 random_eye_color。',
       parameters: {
         type: 'object',
         properties: {
@@ -330,6 +330,24 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'call_item_gen',
+      description: '异步派发物品生成子 Agent（item_gen）。传入角色摘要数据后立即返回 ack，不等待 item_gen 完成。char_gen 应在生成完技能/装备/道具后，调用此工具将摘要派发给 item_gen 做进一步细化和异步持久化。不要阻塞等待 item_gen 结果。',
+      parameters: {
+        type: 'object',
+        properties: {
+          characterName: { type: 'string', description: '角色名' },
+          tier: { type: 'integer', description: '生命层级 (1-7)' },
+          skillsSummary: { type: 'string', description: '技能摘要 — 每个技能的名称+效果一句话' },
+          equipmentSummary: { type: 'string', description: '装备摘要 — 每件装备的名称+属性一句话' },
+          inventorySummary: { type: 'string', description: '物品摘要 — 每个物品的名称+用途一句话' },
+        },
+        required: ['characterName'],
+      },
+    },
+  },
 ];
 
 // ═══════════════════════════════════════════════════════════
@@ -347,6 +365,7 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
     'random_name', 'random_hair_color', 'random_eye_color',
     'random_personality', 'random_appearance', 'roll_attributes',
     'get_character', 'get_inventory',
+    'call_item_gen',
   ],
   item_gen: [
     'roll_d20', 'roll_d100', 'roll_dice',
@@ -614,6 +633,16 @@ export async function executeToolCall(
           effects: i.effects ?? {},
           description: i.description ?? '',
         })),
+      };
+    }
+
+    // ── Async dispatch: call_item_gen ──
+    case 'call_item_gen': {
+      // item_gen 异步运行中，返回即时 ack
+      // char_gen 不应阻塞等待 — 直接继续生成其他 XML 标签
+      return {
+        status: 'dispatched',
+        message: `item_gen 已收到 ${args.characterName || '角色'} 的摘要，正在异步生成中。请继续完成 char_gen 的其余输出。`,
       };
     }
 

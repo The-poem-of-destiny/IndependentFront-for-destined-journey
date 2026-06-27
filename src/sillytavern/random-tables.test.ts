@@ -258,10 +258,8 @@ describe('randomPersonality', () => {
 // ========== randomAppearanceSummary ==========
 
 describe('randomAppearanceSummary', () => {
-  it('应返回完整的外貌字段', () => {
+  it('应返回完整的外貌字段（年龄+体型，不含发色瞳色）', () => {
     const result = randomAppearanceSummary('人类', '男');
-    expect(typeof result.hairColor).toBe('string');
-    expect(typeof result.eyeColor).toBe('string');
     expect(typeof result.ageAppearance).toBe('string');
     expect(typeof result.build).toBe('string');
   });

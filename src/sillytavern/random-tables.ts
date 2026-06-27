@@ -490,16 +490,11 @@ export function rollAttributes(tier: number, level: number = 1): {
   };
 }
 
-/** 随机生成外貌描述摘要 */
+/** 随机生成外貌描述摘要（年龄+体型，不含发色瞳色——请单独调用 random_hair_color / random_eye_color） */
 export function randomAppearanceSummary(race: string, gender: '男' | '女'): {
-  hairColor: string;
-  eyeColor: string;
   ageAppearance: string;    // 外观年龄范围
   build: string;            // 体型描述
 } {
-  const hairColor = randomHairColor(race);
-  const eyeColor = randomEyeColor(race);
-
   const agePool = ['少年', '青年', '壮年', '中年'];
   const buildMale = ['瘦削', '精壮', '魁梧', '匀称', '健硕'];
   const buildFemale = ['纤细', '匀称', '丰满', '娇小', '高挑'];
@@ -510,5 +505,5 @@ export function randomAppearanceSummary(race: string, gender: '男' | '女'): {
     : gender === '女' ? pick(buildFemale)
     : pick(buildGeneric);
 
-  return { hairColor, eyeColor, ageAppearance, build };
+  return { ageAppearance, build };
 }

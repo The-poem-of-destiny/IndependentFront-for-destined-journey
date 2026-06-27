@@ -2368,6 +2368,10 @@ export interface CraftAgentOutput {
 export interface CharGenOutput {
   name: string;
   race: string;
+  /** 性别 ('男'|'女'|'无性'|'双性'|'其他') */
+  gender: string;
+  /** 阵营/所属势力 */
+  faction?: string;
   tier: number;
   level: number;
   /** 五维属性 (范围由 tier 决定) */
@@ -2382,19 +2386,61 @@ export interface CharGenOutput {
   identity: string[];
   /** 职业标签 */
   occupation: string[];
-  /** 角色背景故事 */
+  /** 角色背景故事 (80-150 tokens) */
   background: string;
-  /** 外貌描述 */
+  /** 外貌描述 — 裸体 (100-200 tokens，含私密部位) */
   appearance: string;
-  /** 性格描述 */
+  /** 衣物装饰 (80-150 tokens，全身从头到脚) */
+  clothing: string;
+  /** 性格描述 (40-80 tokens，含性格编码) */
   personality: string;
+  /** 喜爱/偏好 (20-50 tokens) */
+  likes: string;
   /** 登神长阶 (Lv.13+ 可用) */
   ascension: {
     enabled: boolean;
     /** 登神路径描述 */
     path: string;
     description: string;
+    /** 要素 (Lv.13-16, 1-3个) */
+    elements: Array<{ name: string; description: string; effects: string[] }>;
+    /** 权能 (Lv.17-20, 1个) */
+    authorities: Array<{ name: string; description: string; effects: string[]; costDescription: string }>;
+    /** 法则 (Lv.21-24, 1-2个) */
+    laws: Array<{ name: string; description: string; passiveEffects: string[]; activeEffects: string[]; costDescription: string }>;
+    /** 神位 (Lv.25) */
+    deityPosition: string;
+    /** 神国 (Lv.25 巅峰) */
+    divineKingdom: { name: string; description: string };
   };
+  /** 🆕 char_gen 自身生成的技能 (供异步 item_gen 参考，也直接写入角色) */
+  skills: Array<{
+    name: string;
+    description: string;
+    type: 'active' | 'passive';
+    cost?: { type: 'HP' | 'MP' | 'SP'; amount: number };
+    cooldown?: number;
+    effects?: Record<string, string>;
+    scripts?: Record<string, string>;
+  }>;
+  /** 🆕 char_gen 自身生成的装备 */
+  equipment: Array<{
+    slot: string;
+    name: string;
+    description: string;
+    stats: Record<string, number>;
+    durability?: number;
+    quality?: string;
+    effects?: Record<string, string>;
+  }>;
+  /** 🆕 char_gen 自身生成的背包物品 */
+  inventory: Array<{
+    name: string;
+    description: string;
+    quantity: number;
+    type: string;
+    rarity?: string;
+  }>;
 }
 
 /** Item Gen Agent (item_gen) 的输出 — 角色装备/技能/道具 (对齐世界书 #261442 + #265160) */

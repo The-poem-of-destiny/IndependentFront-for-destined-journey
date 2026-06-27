@@ -30,3 +30,6 @@ data/worldbooks/_batch_*.json
 data/worldbooks/_batch_*.txt
 data/worldbooks/_mapping_*
 data/worldbooks/_classification_guide.md
+
+# 本地 API 配置（含 key，不提交）
+tests/agent-framework/.api-config.json

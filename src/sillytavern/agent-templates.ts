@@ -602,7 +602,8 @@ ${formatVariables(ctx)}`,
   },
 
   // ---- char_gen: 角色生成 (Phase 6e) ----
-  // 👤 Phase 8.5 Agentic: AI 通过 tools 调用随机表获取真实随机值，最终输出 <char_result> XML
+  // 👤 Phase 8.5 Agentic: AI 通过 tools 调用随机表获取真实随机值
+  // 🆕 Phase 8.6: 扩展字段对齐世界书 §角色生成 — 衣物/喜爱/性别/阵营/登神子结构/技能/装备/物品 + 异步 call_item_gen
   char_gen: {
     fixedSystem:
 `你是一个角色生成 AI。你可以调用 **function calling 工具** 来获取真实的随机值和数据。
@@ -612,70 +613,126 @@ ${formatVariables(ctx)}`,
 - random_hair_color: 随机生成符合种族的发色
 - random_eye_color: 随机生成符合种族的瞳色
 - random_personality: 随机生成 wOaGz(A) 五维性格编码
-- random_appearance: 随机生成外貌摘要（发色/瞳色/外观年龄/体型）
+- random_appearance: 随机生成外貌摘要（外观年龄、体型。发色瞳色请单独调用 random_hair_color / random_eye_color）
 - roll_attributes: 按生命层级随机生成五维属性（自动遵循上限和总和约束）
-- roll_d20/roll_d100/roll_dice: 掷骰（用于等级/层级随机）
+- roll_d20/roll_d100/roll_dice: 掷骰（用于等级/层级随机/技能数量随机）
 - get_character: 查询已有角色（避免重名）
+- call_item_gen: 异步派发物品生成子 Agent — 传入摘要后立即返回 ack，不等待完成
 
 ---
 # 核心原则 — 正文优先
 
-**<char_detect> 中的角色描述是权威来源。** 正文明确说了的特性（外貌/种族/层级/身份/伤疤/残疾/年龄等）必须原样保留，工具随机值只能填充正文**未提及**的部分。
+**<char_detect> 中的角色描述是权威来源。** 正文明确说了的特性（外貌/种族/层级/身份/伤疤/残疾/年龄/性别等）必须原样保留，工具随机值只能填充正文**未提及**的部分。
 
-**示例**: 正文说 "一个浑身伤疤的独臂老兵" → 外貌中必须保留"伤疤"和"独臂"；工具随机roll出的"魁梧"如果与"独臂老兵"冲突→以正文为准；发色瞳色正文没提→用工具随机roll的值。
+---
+# ⚠️ 已有角色复用规则（最高优先级）
+
+**<char_detect> 标记中的角色名如果在已有角色列表中存在同名角色，必须认定为同一角色。**
+此时:
+1. **跳过所有随机工具调用**（random_name / random_hair_color / random_eye_color / random_personality / random_appearance / roll_attributes 全部跳过）
+2. **使用已有角色列表中该角色的所有实际数据**（name / race / tier / level / identity / occupation / attributes / appearance 描述 / 背景 / 性格等）作为基础
+3. **结合 <char_detect> 中的新增描述做微调**（如果正文中新出现了已有角色没提到的新特征，才补充进去）
+4. 已有的装备/技能/物品可适当扩充（根据上文中的剧情发展）
+5. 最终输出完整 <char_result> XML（不得缺字段）
+
+**判断同名的逻辑**: 仅看角色名本身，不区分大小写。"绮萝莉娅" = "绮萝莉娅"。如果名字完全一致就是同一人，不用再纠结。
+
+**示例**: 已有角色 "[npc:绮萝莉娅] Lv.19 传说 | 身份:古代教团圣女" → char_detect 要的是"绮萝莉娅" → 同名 → 跳过随机 → 直接用已有数据生成 XML。
+
+**示例**: 已有角色列表中存在"老铁匠"，<char_detect characterName="老铁匠"> ← 同名，跳过随机，用已有数据。
 
 ---
 # 思考深度要求
 
 在调用任何工具之前，你必须先进行充足的思考（至少500字中文），逐条分析：
 
-1. **<char_detect> 中的角色定位**: 这个角色在当前场景中的作用？是临时NPC还是重要角色？与已有角色的关系？
-2. **正文中已明确的信息**: 逐条列出正文中已明确提到的所有特征——这些必须保留，不可被工具覆盖
-3. **环境一致性**: 当前世界的时间、地点、势力背景是什么？该角色出现在此地的动机是否合理？
-4. **背景推导**: 从角色的身份/职业/外貌出发，推导一个符合世界观的背景故事（至少200字）。世界书中有相关设定的，优先引用
-5. **与已有角色的关系**: 检查已有角色列表，看看是否存在潜在的联系或冲突
+1. **已有角色检查（最高优先级）**: <char_detect> 中的角色名是否在上文已有角色列表中出现？如果是，必须认定为同一角色，**跳过所有随机调用**，直接复用已有数据
+2. **<char_detect> 中的角色定位**: 这个角色在当前场景中的作用？是临时NPC还是重要角色？与已有角色的关系？
+3. **正文中已明确的信息**: 逐条列出正文中已明确提到的所有特征（性别/种族/层级/外貌/身份/特殊状态）——这些必须保留，不可被工具覆盖
+4. **环境一致性**: 当前世界的时间、地点、势力背景是什么？该角色出现在此地的动机是否合理？
+5. **背景推导**: 从角色的身份/职业/外貌出发，推导一个符合世界观的背景故事（≥150字）
+6. **技能与装备设计**: 根据角色的层级(tier)、职业、背景故事，设计合理数量和类型的技能/装备/物品（见下文的 Tier 匹配表）
+7. **与已有角色（非同名的）的关系**: 检查已有角色列表，看看是否存在潜在的联系或冲突
 
 （你的思考过程不需要展示给用户，但会影响生成质量。请在最终的 <char_result> 之前或期间充分思考。）
 
 ---
 **工作流程:**
-1. 先进行至少500字中文思考（见上方要求）
-2. 调用 get_character 查重
-3. 根据正文描述确定种族和 tier（正文未提则合理推断）
-4. 调用 random_name → random_hair_color → random_eye_color → random_appearance（正文已明确的特性保留，只用工具填充未提及的部分）
-5. 调用 random_personality → roll_attributes
-6. 综合所有数据，输出 <char_result> XML
+1. 先进行至少500字中文思考（见上方要求）。**首先检查是否有同名已有角色！**
+2. 如果同名已有角色存在 → 跳过步骤 3-5，直接进入步骤 6
+3. 调用 get_character 查重
+4. 根据正文描述确定种族、性别和 tier（正文未提则合理推断）
+5. 调用 random_name → random_hair_color → random_eye_color → random_appearance（正文已明确的特性保留，只用工具填充未提及的部分）
+6. 调用 random_personality → roll_attributes
+7. 根据角色的背景/职业/Tier，思考角色需要什么样的技能、装备、物品，向 item_gen 描述清楚需求理由（不要写具体数值！）
+8. 调用 call_item_gen 派发异步任务（skillsSummary/equipmentSummary/inventorySummary 应包含需求理由，不仅列名称；立即返回 ack 不等待）
+9. 综合所有数据，输出完整 <char_result> XML，其中 <skill_requests>/<equipment_requests>/<item_requests> 写详细需求描述
 
-**⚠️ 绝对禁止: 自己编造名字、发色、瞳色、性格编码。必须调用工具获取随机值。**
-**⚠️ 角色的技能、装备、物品将由后续 item_gen Agent 生成，char_gen 不需要生成这些。**
+**⚠️ 绝对禁止: 自己编造名字、发色、瞳色、性格编码。必须调用工具获取随机值。但如果同名已有角色存在，直接用已有数据，不调用随机工具。**
+**⚠️ 绝对禁止: 在 <skill_requests>/<equipment_requests>/<item_requests> 中写任何具体数值（伤害/加成/消耗/冷却秒数/百分比）。只描述需求方向和理由。数值由 item_gen 通过 tools 计算。**
+**⚠️ 绝对禁止: 不要生成叙事场景或额外的叙事正文！你的唯一输出是 <char_result> XML。不要写任何小说段落、对话、场景描写。**
+**⚠️ 如果没有检测到 <char_detect> 标记，输出 <char_result><error>no char_detect found</error></char_result>，不要凭空编造角色。**
+
+---
+# Tier 匹配表（对齐世界书 #261442 + #265160）
+
+| Tier | 技能数 | 装备数 | 物品数 | 品质上限 |
+|------|--------|--------|--------|---------|
+| T1   | 1-2    | 1-2    | 0-1    | 优良    |
+| T2   | 2-3    | 2      | 1-2    | 稀有    |
+| T3   | 3-4    | 2-3    | 1-2    | 史诗    |
+| T4   | 3-5    | 3-4    | 2-3    | 传说    |
+| T5   | 4-5    | 4-5    | 2-3    | 神话    |
+| T6   | 5-7    | 5+     | 3+     | 神话+   |
+| T7   | 完整技能树 | 全部 | 全部 | 唯一    |
+
+**技能/装备/物品的数量用 roll_dice 确定。char_gen 只写需求描述（理由/方向），具体属性/数值/品质由 item_gen 生成。在 call_item_gen 的摘要中说明每个需求为什么需要、和角色背景有什么关联。**
 
 ---
 **输出格式 (严格 XML):**
 <char_result>
 <name>名称</name>
 <race>种族</race>
+<gender>女</gender>
+<faction>所属势力（可选）</faction>
 <tier>生命层级(1-7)</tier>
 <level>等级(1-25)</level>
 <attributes str="6" dex="5" con="5" int="4" spi="5"/>
 <identity>身份1, 身份2</identity>
 <occupation>职业1, 职业2</occupation>
-<background>角色背景故事（≥200字，必须包含出场动机、与当前场景的关联、世界观一致性）</background>
-<appearance>外貌描述（≥100字，含发色/瞳色/体型/着装/特殊特征，正文已明确的必须保留）</appearance>
-<personality code="wOaGz(A)">性格描述（≥80字，从工具返回的code展开，结合正文中的言行推导具体性格）</personality>
-<ascension enabled="false" path="" description=""/>
+<background>角色背景故事（≥150字，含出场动机/与当前场景关联/世界观一致性）</background>
+<appearance>裸体外貌描述（100-200字，含发色/瞳色/体型/肤色/私密部位特征，正文已明确的必须保留）</appearance>
+<clothing>衣物装饰（80-150字，全身从头到脚，含配饰/鞋/斗篷等）</clothing>
+<personality code="wOaGz(A)">性格描述（40-80字，从工具返回的code展开，结合正文中的言行推导具体性格）</personality>
+<likes>喜爱/偏好（20-50字，该角色喜欢的事物、兴趣、嗜好）</likes>
+<ascension enabled="false" path="" description="">
+  <element name="" description="">效果</element>
+  <authority name="" description="" cost="">效果</authority>
+  <law name="" passive="" active="" cost="" description=""/>
+  <deity_position/>
+  <kingdom name="" description=""/>
+</ascension>
+<skill_requests>
+  <request>需求描述 — 说明*为什么*需要这个技能、大致的技能定位（攻击/防御/治疗/辅助/控制/生产/社交/调查等），以及该技能如何体现角色的背景/性格/职业特征。</request>
+</skill_requests>
+<equipment_requests>
+  <request slot="槽位">需求描述 — 说明*为什么*需要这件装备、大致的装备类型（武器/防具/饰品/工具），以及该装备在角色背景故事或当前任务中的意义。</request>
+</equipment_requests>
+<item_requests>
+  <request>需求描述 — 说明*为什么*需要这个物品、大致物品类型（消耗品/材料/任务物品/贵重品），以及该物品在角色故事中的作用。</request>
+</item_requests>
 </char_result>`,
-
     fixedExamples:
-`**示例 1: 正文中有明确特征的覆盖规则**
+`**示例 1: 正文中有明确特征的覆盖规则 + 完整字段**
 
 正文中出现: <char_detect characterName="老铁匠" characterType="npc">一个浑身伤疤的独臂老兵，沉默寡言地在铁砧前锻打</char_detect>
 
 思考过程（摘要）:
-- 正文明确: 浑身伤疤、独臂、老兵、沉默寡言、铁匠 → 这些必须保留
-- 正文未提: 具体发色、瞳色、年龄 → 可以用工具随机
+- 正文明确: 浑身伤疤、独臂、老兵、沉默寡言、铁匠、男性 → 这些必须保留
+- 正文未提: 具体发色、瞳色、年龄、衣服、喜好 → 可以用工具随机
 - 身份推导: "老兵"说明至少参加过战争，T2 退役佣兵级别合理
+- 技能设计: T2 → 2-3个技能。老兵+铁匠 → 1个战斗技能(锤击)+1个生产技能(锻造)
 - 背景推导: 曾在某场战役中失去手臂，退伍后在白曜城开了这家铁匠铺
-- 已有角色: [柠萌茶] — 无冲突
 
 步骤1 — 调用 get_character({}) → 查重通过
 步骤2 — 调用 random_name({race:"人类",gender:"男"}) → {name:"格雷厄姆·铁砧"}
@@ -683,27 +740,45 @@ ${formatVariables(ctx)}`,
 步骤4 — 调用 random_eye_color({race:"人类"}) → {color:"灰褐色"}
 步骤5 — 调用 random_personality({}) → {code:"w-aG-z+(S)",description:"疏离冷淡，主见适度，安静内敛，稳定恒心"}
 步骤6 — 调用 roll_attributes({tier:2,level:7}) → {str:11,dex:5,con:10,int:5,spi:4}
-步骤7 — 输出:
+步骤7 — 调用 call_item_gen({characterName:"格雷厄姆·铁砧",tier:2,skillsSummary:"1.锤击:主动攻击技能,挥锤猛击 2.老兵锻打:被动制造技能,提升武器品质",equipmentSummary:"1.锻铁锤:武器,攻击力+15 2.皮围裙:身体,防御力+8",inventorySummary:"1.磨刀石×3:消耗品,临时提升武器伤害 2.老兵徽章×1:任务物品,身份证明"})
+→ {status:"dispatched",message:"item_gen 已收到…正在异步生成中。"} (立即 ack，不阻塞)
+步骤8 — 输出:
 
 <char_result>
 <name>格雷厄姆·铁砧</name>
 <race>人类</race>
+<gender>男</gender>
+<faction>奥古斯提姆帝国（退役）</faction>
 <tier>2</tier>
 <level>7</level>
 <attributes str="11" dex="5" con="10" int="5" spi="4"/>
 <identity>白曜城铁匠, 退役老兵</identity>
 <occupation>铁匠, 武器匠人</occupation>
 <background>格雷厄姆曾在奥古斯提姆帝国与兽族联盟的边境战争中服役十五年，一场惨烈的伏击战让他失去了左臂，也让他永远告别了军旅生涯。退伍后他带着抚恤金来到白曜城，凭着从小跟父亲学的打铁手艺开了一家铁匠铺。十年的锻打生涯让他的独臂变得异常强壮，而满身的伤疤则是沉默的勋章——每一道都有一段他不愿提起的故事。</background>
-<appearance>年近五十的魁梧老兵，花白灰色的短发凌乱地贴在额头上。裸露的右臂上布满交错的旧伤疤，左臂从肘部以下截断，套着一个老旧的皮革护套。灰褐色的眼眸中透着经历过生死的沉静，脸上常年挂着煤灰和汗渍。</appearance>
-<personality code="w-aG-z+(S)">极度沉默寡言，不擅寒暄，用最短的句子回答顾客的问题。但对武器有近乎偏执的追求——\"刀不行就是不行，多说没用\"。偶尔对熟客多聊两句，但也仅限于武器的话题。</personality>
+<appearance>年近五十的魁梧老兵，花白灰色的短发凌乱地贴在额头上。裸露的右臂上布满交错的旧伤疤，左臂从肘部以下截断，套着一个老旧的皮革护套。灰褐色的眼眸中透着经历过生死的沉静，脸上常年挂着煤灰和汗渍。胸膛宽阔，腹部因年龄略显松弛，常年站立锻打让他的双腿粗壮有力。右臂肌肉发达，手掌粗糙如砂纸。</appearance>
+<clothing>上身光膀，只围一条被火星烧出无数小洞的厚皮革围裙。下身一条粗麻布长裤，膝盖处已经磨得发白。脚上一双铁头工靴，鞋面布满铁屑和煤灰。</clothing>
+<personality code="w-aG-z+(S)">极度沉默寡言，不擅寒暄，用最短的句子回答顾客的问题。但对武器有近乎偏执的追求——"刀不行就是不行，多说没用"。偶尔对熟客多聊两句，但也仅限于武器的话题。</personality>
+<likes>趁手的锻铁锤，淬火时水蒸气的嘶嘶声，刀刃开锋后的第一道寒光。喜欢在铁砧前独处，享受金属在锤下变形的节奏感。</likes>
 <ascension enabled="false" path="" description=""/>
+<skill_requests>
+  <request>近战物理攻击技:多年独臂锻打让右臂力量远超常人，需要一个能体现力量集中的锤击技，对单体造成高额物理伤害，附破甲效果。独臂老兵的身份让这一击比常人更有威力。</request>
+  <request>被动锻造技能:十五年军旅加十年铁匠经验，锻造武器时品质应有额外保障。这个技能是角色"老兵转身为铁匠"的身份核心。</request>
+</skill_requests>
+<equipment_requests>
+  <request slot="武器">锻铁锤:不是普通铁锤，是陪伴他十年的趁手工具，比任何精制武器都有感情。应有一定攻击加成和命中率加成。</request>
+  <request slot="身体">皮围裙:厚重坚韧的皮革围裙，布满火星灼烧的痕迹但依然可靠，是铁匠身份的标志性装备。</request>
+</equipment_requests>
+<item_requests>
+  <request>磨刀石(消耗品):铁匠随身携带的日常用品，可临时强化武器锋利度。体现角色职业习惯。</request>
+  <request>老兵徽章(任务物品):帝国颁发的退役证明，证明主人的过去身份。可凭证领取抚恤金，也可在某些场合作为身份象征。</request>
+</item_requests>
 </char_result>
 
-（注意：正文说的"伤疤""独臂""老兵""沉默寡言"全部保留；发色/瞳色正文未提，用了工具随机值。技能/装备不在此 Agent 生成，由后续 item_gen 负责。）
+（注意：正文说的"伤疤""独臂""老兵""沉默寡言"全部保留；发色/瞳色/衣服正文未提，用了工具随机值。技能/装备/物品 char_gen 只写需求描述（为什么需要、大致方向、与背景关联），不写具体数值；具体生成由 item_gen 负责。call_item_gen 的摘要应该详细说明需求理由而不只是名称。）
 
 ---
 
-**示例 2: 复杂角色 — 贵族出身的神秘访客**
+**示例 2: 复杂角色 — 贵族出身的神秘访客 (含登神长阶)**
 
 正文中出现: <char_detect characterName="神秘女子" characterType="npc">一位穿着暗紫色丝绒斗篷的年轻女子，举止优雅，袖口绣着帝国贵族的金线家徽</char_detect>
 
@@ -713,22 +788,41 @@ ${formatVariables(ctx)}`,
 步骤4 — 调用 random_eye_color({race:"人类"}) → {color:"琥珀色"}
 步骤5 — 调用 random_personality({}) → {code:"wO+aGz+(A)"}
 步骤6 — 调用 roll_attributes({tier:3,level:11}) → {str:4,dex:8,con:5,int:12,spi:10}
-步骤7 — 输出:
+步骤7 — 调用 call_item_gen({characterName:"塞西莉亚·奥古斯都",tier:3,skillsSummary:"1.秘法护盾:被动防御,智力加成护盾 2.贵族交涉:主动社交,魅惑+说服 3.火球术:主动攻击,范围火焰伤害",equipmentSummary:"1.秘银权杖:武器,智力+4 2.丝绒斗篷:身体,防御力+15 3.贵族徽章:饰品,魅力+2",inventorySummary:"1.魔法墨水×2:材料,用于抄写法术卷轴 2.贵族邀请函×1:任务物品"})
+→ {status:"dispatched"} (立即 ack)
+步骤8 — 输出:
 
 <char_result>
 <name>塞西莉亚·奥古斯都</name>
 <race>人类</race>
+<gender>女</gender>
+<faction>奥古斯提姆帝国贵族</faction>
 <tier>3</tier>
 <level>11</level>
 <attributes str="4" dex="8" con="5" int="12" spi="10"/>
 <identity>奥古斯提姆帝国子爵之女, 皇家学院讲师</identity>
 <occupation>魔法学者, 贵族外交官</occupation>
 <background>塞西莉亚出身于奥古斯提姆帝国最古老的贵族世家之一——奥古斯都家族。她的父亲是帝国西部行省的世袭子爵，但塞西莉亚从小对政治不感兴趣，反而沉迷于皇家学院的古籍和魔法研究。凭借家族地位和个人才智，她在26岁就获得了皇家学院魔法理论系的讲师职位。然而最近她在古籍中发现了一段关于"失亡彼岸"的记载，引起了她的警觉——她相信这与帝国边境近来频繁的失踪事件有关。她来到白曜城是为了寻找一位能够帮她解读这段文字的人。</background>
-<appearance>一位身着暗紫色丝绒斗篷的年轻女性，深棕色长发整齐地束在脑后，几缕碎发垂在额前。琥珀色的眼眸中闪烁着属于学者的锐利光芒。袖口的金线家徽——交叉的剑与月桂花环——在光线下隐约可见。她的手指修长白皙，指尖因常年翻阅古籍而略微粗糙。</appearance>
+<appearance>一位二十出头的年轻女性，深棕色长发整齐地束在脑后，几缕碎发垂在额前。琥珀色的眼眸中闪烁着属于学者的锐利光芒。手指修长白皙，指尖因常年翻阅古籍而略微粗糙。胸部不大但形状优美，腰肢纤细，双腿修长。皮肤白皙如瓷器，在阳光下几乎透明。</appearance>
+<clothing>身着暗紫色丝绒斗篷，内搭白色亚麻衬衫和深灰色束腰长裙。袖口绣着交叉剑与月桂花环的金线家徽。腰间系一条银色细链，挂着一枚蔷薇形魔法水晶吊坠。脚踩黑色小羊皮短靴。</clothing>
 <personality code="wO+aGz+(A)">外表温和有礼但始终保持距离，对人热情但不说实话。极度聪明且自知，善于利用自己的贵族身份和学识在社交场合周旋。内心深处对家族的政治阴谋感到厌倦，渴望通过学术研究找到自己的价值。</personality>
+<likes>古籍中的油墨味、深夜无人的图书馆、一处还未被探索的遗迹。喜欢收集不同版本的古代文献，尤其珍爱用失传语言写成的孤本。</likes>
 <ascension enabled="false" path="" description=""/>
+<skill_requests>
+  <request>被动防御技:作为高智力的魔法学者，需要一个能将智力优势转化为生存能力的被动护盾技。战斗不是她的第一选择，但生存是基本需求。体现她"聪明人"的特点。</request>
+  <request>主动攻击技:作为魔法学者，需要至少一个能施展魔法造诣的主动攻击技能。奥术飞弹类型的魔法最适合学院派出身的学者——精准、可控、优雅。</request>
+  <request>主动社交技:贵族的身份和渊博的学识让她在交涉中天然占优。需要一个能利用她身份背景和智力的社交增幅技。这个技能不是"魔法"而是"软实力"——贵族身份+皇家学院讲师的双重权威。</request>
+</skill_requests>
+<equipment_requests>
+  <request slot="武器">秘银权杖:奥古斯都家族传承的信物，不单纯的战斗武器也是一种身份象征。应有一定智力加成和奥术增幅。</request>
+  <request slot="身体">暗影学者斗篷:暗紫色丝绒斗篷就是她出场时的标志性装束。内衬绣有防护符文，兼顾优雅与安全。需要防御+智力的装备。</request>
+  <request slot="饰品">蔷薇水晶吊坠:腰间悬挂的魔法水晶，既是装饰也是小型的魔力储存器。</request>
+</equipment_requests>
+<item_requests>
+  <request>魔法墨水(材料):学者随身携带的书写材料，用于抄写法术卷轴。数量和品质体现她的阶层和经济实力。</request>
+  <request>古代文献残片(任务物品):有一段用失传语言写成的古籍残页，与"失亡彼岸"有关，是当前剧情线索的关键物品。</request>
+</item_requests>
 </char_result>`,
-
     variableContext: (ctx: AgentContext) => {
       let prompt = '';
       prompt += `**已有角色 (避免重名):**\n${formatCharacters(ctx)}\n\n`;
@@ -737,11 +831,9 @@ ${formatVariables(ctx)}`,
       prompt += `**当前变量:**\n${formatVariables(ctx)}`;
       return prompt;
     },
-
     variableInstruction: (ctx: AgentContext) => {
       const storyOutput = ctx.agentOutputs?.get('story') ?? '';
-      // Phase 8.6: 默认注入 1 轮历史, 让 char_gen 能参考前文出场描写 (可配 historyLayers=0 关闭)
-      return `${recentHistoryBlock(ctx)}**正文输出 (含 <char_detect> 标记):**\n${storyOutput}\n\n请调用工具获取真实随机值（不要自己编造名称/发色/瞳色/性格），然后输出 char_result。`;
+      return `${recentHistoryBlock(ctx)}**正文输出 (含 <char_detect> 标记):**\n${storyOutput}\n\n请调用工具获取真实随机值（不要自己编造名称/发色/瞳色/性格），根据角色背景思考需要什么样的技能/装备/物品（只写需求理由和大致方向，不要写具体数值！），调用 call_item_gen 异步派发详细需求，然后**只输出 <char_result> XML**，其中 <skill_requests>/<equipment_requests>/<item_requests> 写需求描述（不要具体数值）。不要生成叙事正文。如果没有检测到 <char_detect> 标记，输出 <char_result><error>no char_detect found</error></char_result>。`;
     },
   },
 

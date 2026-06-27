@@ -132,6 +132,7 @@ export class AgentClient {
     // 复制消息列表（后续轮次会追加 assistant + tool 消息）
     const conversation = [...request.messages];
     let totalTokens = 0;
+    const allReasoning: string[] = [];  // 跨轮次收集 reasoning
 
     for (let round = 0; round < maxRounds; round++) {
       const roundRequest: ChatRequest = {
@@ -144,9 +145,15 @@ export class AgentClient {
       const innerResult = await this.chat(roundRequest, options.signal);
       totalTokens += innerResult.tokensUsed;
 
+      // 收集每轮的 reasoning（不会被子调用覆盖）
+      if (innerResult.reasoning) {
+        allReasoning.push(`[Round ${round + 1}] ${innerResult.reasoning}`);
+      }
+
       if (innerResult.error) {
         return {
           ...innerResult,
+          reasoning: allReasoning.join('\n'),
           toolCalls: toolCallHistory,
           tokensUsed: totalTokens,
           duration: Date.now() - startTime,
@@ -208,6 +215,7 @@ export class AgentClient {
         agentId: this.agentId,
         output: innerResult.output,
         rawResponse: innerResult.rawResponse,
+        reasoning: allReasoning.join('\n'),
         tokensUsed: totalTokens,
         cacheHit: innerResult.cacheHit,
         duration: Date.now() - startTime,
@@ -220,6 +228,7 @@ export class AgentClient {
       agentId: this.agentId,
       output: null,
       rawResponse: '',
+      reasoning: allReasoning.join('\n'),
       tokensUsed: totalTokens,
       cacheHit: false,
       duration: Date.now() - startTime,

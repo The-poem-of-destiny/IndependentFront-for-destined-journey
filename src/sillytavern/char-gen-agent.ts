@@ -251,7 +251,14 @@ export function assembleCharacterState(
   const mpMultiplier = tierConfig?.mpMultiplier ?? 1;
   const spMultiplier = tierConfig?.spMultiplier ?? 1;
 
-  const skills = itemData.skills.map((s) => ({
+  // 合并技能: char_gen 自产优先，item_gen 补充（去重+合并）
+  const charSkills = charData.skills ?? [];
+  const itemGenSkills = itemData.skills ?? [];
+  const charSkillNames = new Set(charSkills.map(s => s.name));
+  // item_gen 的 skill 不覆盖 char_gen 同名
+  const mergedSkills = [...itemGenSkills.filter(s => !charSkillNames.has(s.name)), ...charSkills];
+
+  const skills = mergedSkills.map((s) => ({
     id: crypto.randomUUID(),
     name: s.name,
     description: s.description,
@@ -259,9 +266,17 @@ export function assembleCharacterState(
     cost: s.cost ? { type: s.cost.type, amount: s.cost.amount } : undefined,
     cooldown: s.cooldown,
     level: 1,
+    effects: s.effects,
+    scripts: s.scripts,
   }));
 
-  const equipment: EquipmentSlot[] = itemData.equipment.map((e) => {
+  // 合并装备: char_gen 自产优先
+  const charEquip = charData.equipment ?? [];
+  const itemGenEquip = itemData.equipment ?? [];
+  const charEquipNames = new Set(charEquip.map(e => e.name));
+  const mergedEquip = [...itemGenEquip.filter(e => !charEquipNames.has(e.name)), ...charEquip];
+
+  const equipment: EquipmentSlot[] = mergedEquip.map((e) => {
     const itemId = crypto.randomUUID();
     return {
       slot: e.slot,
@@ -271,10 +286,17 @@ export function assembleCharacterState(
       stats: e.stats,
       durability: e.durability,
       maxDurability: e.durability,
+      effects: (e as any).effects,
     };
   });
 
-  const inventory: InventoryItem[] = itemData.inventory.map((inv) => ({
+  // 合并背包: char_gen 自产优先
+  const charInv = charData.inventory ?? [];
+  const itemGenInv = itemData.inventory ?? [];
+  const charInvNames = new Set(charInv.map(i => i.name));
+  const mergedInv = [...itemGenInv.filter(i => !charInvNames.has(i.name)), ...charInv];
+
+  const inventory: InventoryItem[] = mergedInv.map((inv) => ({
     id: crypto.randomUUID(),
     name: inv.name,
     description: inv.description,
@@ -301,11 +323,26 @@ export function assembleCharacterState(
     maxSp: calcSP(charData.tier, charData.attributes.spi),
     ascension: {
       enabled: charData.ascension.enabled,
-      elements: {},
-      authority: {},
-      law: {},
-      deityPosition: '',
-      divineKingdom: { name: '', description: '' },
+      elements: Object.fromEntries(
+        (charData.ascension.elements ?? []).map((e, i) => [
+          `el_${i}`,
+          { name: e.name, description: e.description, effects: e.effects },
+        ]),
+      ),
+      authority: Object.fromEntries(
+        (charData.ascension.authorities ?? []).map((a, i) => [
+          `au_${i}`,
+          { name: a.name, description: a.description, effects: a.effects, costDescription: a.costDescription },
+        ]),
+      ),
+      law: Object.fromEntries(
+        (charData.ascension.laws ?? []).map((l, i) => [
+          `law_${i}`,
+          { name: l.name, description: l.description, effects: [...(l.passiveEffects ?? []), ...(l.activeEffects ?? [])], costDescription: l.costDescription },
+        ]),
+      ),
+      deityPosition: charData.ascension.deityPosition || '',
+      divineKingdom: charData.ascension.divineKingdom || { name: '', description: '' },
     },
     equipment,
     skills,
@@ -314,6 +351,10 @@ export function assembleCharacterState(
       background: charData.background,
       appearance: charData.appearance,
       personality: charData.personality,
+      gender: charData.gender,
+      likes: charData.likes,
+      clothing: charData.clothing,
+      faction: charData.faction,
       ascensionPath: charData.ascension.path,
       ascensionDescription: charData.ascension.description,
     },
@@ -447,12 +488,24 @@ function parseCharGenOutput(raw: string): CharGenOutput {
       occupation: data.occupation ?? [],
       background: data.background ?? '',
       appearance: data.appearance ?? '',
+      clothing: data.clothing ?? '',
       personality: data.personality ?? '',
+      likes: data.likes ?? '',
+      gender: data.gender ?? '其他',
+      faction: data.faction,
       ascension: {
         enabled: data.ascension?.enabled ?? false,
         path: data.ascension?.path ?? '',
         description: data.ascension?.description ?? '',
+        elements: data.ascension?.elements ?? [],
+        authorities: data.ascension?.authorities ?? [],
+        laws: data.ascension?.laws ?? [],
+        deityPosition: data.ascension?.deityPosition ?? '',
+        divineKingdom: data.ascension?.divineKingdom ?? { name: '', description: '' },
       },
+      skills: data.skills ?? [],
+      equipment: data.equipment ?? [],
+      inventory: data.inventory ?? [],
     };
   } catch {
     throw new Error(`char_gen 输出无法解析 (JSON+XML 均失败): ${raw.slice(0, 200)}`);
@@ -461,9 +514,63 @@ function parseCharGenOutput(raw: string): CharGenOutput {
 
 /** 从 XML <char_result> 中解析角色数据 */
 function parseCharGenXML(xml: string): CharGenOutput {
+  // ascension 子结构
+  const ascXML = extractTagBlock(xml, 'ascension');
+  const ascElements: CharGenOutput['ascension']['elements'] = [];
+  const ascAuthorities: CharGenOutput['ascension']['authorities'] = [];
+  const ascLaws: CharGenOutput['ascension']['laws'] = [];
+
+  if (ascXML) {
+    // 解析 <element> 子标签
+    const elMatches = ascXML.matchAll(/<element\b([^>]*?)>([\s\S]*?)<\/element>/g);
+    for (const m of elMatches) {
+      const attrs = parseAttrsStr(m[1]);
+      ascElements.push({
+        name: attrs['name'] ?? '',
+        description: attrs['description'] ?? '',
+        effects: m[2]?.trim().split('\n').filter(s => s.trim()).map(s => s.trim()) ?? [],
+      });
+    }
+    // 解析 <authority> 子标签
+    const auMatches = ascXML.matchAll(/<authority\b([^>]*?)>([\s\S]*?)<\/authority>/g);
+    for (const m of auMatches) {
+      const attrs = parseAttrsStr(m[1]);
+      ascAuthorities.push({
+        name: attrs['name'] ?? '',
+        description: attrs['description'] ?? '',
+        effects: m[2]?.trim().split('\n').filter(s => s.trim()).map(s => s.trim()) ?? [],
+        costDescription: attrs['cost'] ?? '',
+      });
+    }
+    // 解析 <law> 子标签
+    const lawMatches = ascXML.matchAll(/<law\b([^>]*?)>([\s\S]*?)<\/law>/g);
+    for (const m of lawMatches) {
+      const attrs = parseAttrsStr(m[1]);
+      const innerText = m[2]?.trim() ?? '';
+      ascLaws.push({
+        name: attrs['name'] ?? '',
+        description: attrs['description'] ?? '',
+        passiveEffects: attrs['passive']?.split(',').map(s => s.trim()).filter(Boolean) ?? [],
+        activeEffects: attrs['active']?.split(',').map(s => s.trim()).filter(Boolean) ?? [],
+        costDescription: attrs['cost'] ?? '',
+      });
+    }
+  }
+
+  // 技能/装备/物品 子结构 (char_gen 自行生成)
+  const skillsXML = extractTagBlock(xml, 'skills');
+  const equipmentXML = extractTagBlock(xml, 'equipment');
+  const inventoryXML = extractTagBlock(xml, 'inventory');
+
+  const skills = skillsXML ? parseSkillsXML(skillsXML) : [];
+  const equipment = equipmentXML ? parseEquipmentXML(equipmentXML) : [];
+  const inventory = inventoryXML ? parseInventoryXML(inventoryXML) : [];
+
   return {
     name: extractTag(xml, 'name') ?? '未命名',
     race: extractTag(xml, 'race') ?? '人类',
+    gender: extractTag(xml, 'gender') ?? '其他',
+    faction: extractTag(xml, 'faction') ?? undefined,
     tier: parseInt(extractTag(xml, 'tier') ?? '1') || 1,
     level: parseInt(extractTag(xml, 'level') ?? '1') || 1,
     attributes: {
@@ -477,12 +584,29 @@ function parseCharGenXML(xml: string): CharGenOutput {
     occupation: extractTag(xml, 'occupation')?.split(',').map(s => s.trim()).filter(Boolean) ?? [],
     background: extractTag(xml, 'background') ?? '',
     appearance: extractTag(xml, 'appearance') ?? '',
+    clothing: extractTag(xml, 'clothing') ?? '',
     personality: extractTag(xml, 'personality') ?? extractAttr(xml, 'personality', 'code') ?? '',
+    likes: extractTag(xml, 'likes') ?? '',
     ascension: {
       enabled: (extractAttr(xml, 'ascension', 'enabled') ?? 'false') === 'true',
       path: extractAttr(xml, 'ascension', 'path') ?? '',
       description: extractAttr(xml, 'ascension', 'description') ?? '',
+      elements: ascElements,
+      authorities: ascAuthorities,
+      laws: ascLaws,
+      deityPosition: ascXML ? (extractTag(ascXML, 'deity_position') ?? '') : '',
+      divineKingdom: (() => {
+        if (!ascXML) return { name: '', description: '' };
+        const kdXML = extractTagBlock(ascXML, 'kingdom');
+        return {
+          name: kdXML ? (extractAttr(kdXML, 'kingdom', 'name') ?? extractTag(kdXML, 'name') ?? '') : '',
+          description: kdXML ? (extractAttr(kdXML, 'kingdom', 'description') ?? extractTag(kdXML, 'description') ?? '') : '',
+        };
+      })(),
     },
+    skills,
+    equipment,
+    inventory,
   };
 }
 
