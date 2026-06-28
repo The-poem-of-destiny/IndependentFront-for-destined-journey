@@ -38,9 +38,9 @@ function makeCharacter(overrides: Partial<CharacterState> = {}): CharacterState 
     sp: 30, maxSp: 50,
     ascension: {
       enabled: false,
-      elements: {},
-      authority: {},
-      law: {},
+      elements: [],
+      authority: [],
+      law: [],
       deityPosition: '',
       divineKingdom: { name: '', description: '' },
     },
@@ -99,6 +99,8 @@ function makeCharacter(overrides: Partial<CharacterState> = {}): CharacterState 
 function makeMemory(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
   return {
     id: 'MEM0001',
+    saveId: 'save_001',
+    createdAt: Date.now(),
     content: '主角首次抵达白曜城，通过城门守卫登记了冒险者身份。',
     hiddenLine: '暗线: 守卫注意到了主角的异样配剑',
     keywords: ['白曜城', '冒险者公会', '城门'],
@@ -124,6 +126,8 @@ function makePlotEvent(overrides: Partial<PlotEvent> = {}): PlotEvent {
     relatedCharacterIds: ['npc_001'],
     depth: 1,
     worldLineChanged: false,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
     ...overrides,
   };
 }
@@ -443,9 +447,9 @@ describe('filterZoneContent — NARRATIVE', () => {
     const char = makeCharacter({
       ascension: {
         enabled: true,
-        elements: { '炎之要素': {} as any },
-        authority: { '锻冶权能': {} as any },
-        law: {},
+        elements: [{ name: '炎之要素', description: '火之要素', effects: [] }],
+        authority: [{ name: '锻冶权能', description: '锻冶', effects: [], costDescription: '' }],
+        law: [],
         deityPosition: '',
         divineKingdom: { name: '', description: '' },
       },

@@ -145,19 +145,19 @@ export function hasAscension(char: CharacterState): boolean {
 /** 获取角色的要素列表 */
 export function getElements(char: CharacterState): string[] {
   if (!char.ascension?.elements) return [];
-  return Object.keys(char.ascension.elements);
+  return char.ascension.elements.map(e => e.name);
 }
 
 /** 获取角色的权能列表 */
 export function getAuthorities(char: CharacterState): string[] {
   if (!char.ascension?.authority) return [];
-  return Object.keys(char.ascension.authority);
+  return char.ascension.authority.map(a => a.name);
 }
 
 /** 获取角色的法则列表 */
 export function getLaws(char: CharacterState): string[] {
   if (!char.ascension?.law) return [];
-  return Object.keys(char.ascension.law);
+  return char.ascension.law.map(l => l.name);
 }
 
 // ========== $char Namespace ==========

@@ -837,88 +837,20 @@ ${formatVariables(ctx)}`,
     },
   },
 
-  // ---- item_gen: 物品生成 (Phase 6e) ----
-  // 🔗 Phase 8.5 Agentic: 基于 char_gen 输出，通过 tools 生成技能/装备/道具，输出 <item_result> XML
+  // ---- item_gen: 物品生成 (Phase 9) ----
+  // 🔗 Phase 9: 基于 char_gen 输出，通过 tools 生成技能/装备/道具，输出 <item_result> XML。完整 system prompt 由 agent-config.json 注入。
   item_gen: {
-    fixedSystem:
-`你是一个物品生成 AI。你可以调用 **function calling 工具** 来获取真实数据。
+    fixedSystem: `你是一个物品与脚本编写 AI（item_gen）。完整的系统提示词已通过 agent-config.json 的 systemPrompt 字段注入。`,
 
-**可用工具:**
-- roll_d20/roll_d100/roll_dice: 掷骰（用于品质随机/数量随机）
-- craft_get_base_dc: 查询品质基准 DC（参考品质级别）
-- get_character: 查询已有角色数据
+    fixedExamples: `
+**输出格式示例 (严格 XML):**
 
----
-# 核心原则 — 背景一致性
-
-你必须**完整阅读理解 char_gen 的角色数据**（name, race, tier, level, identity, occupation, background, appearance, personality, attributes）后再设计技能和装备。生成的所有内容必须与角色的背景故事、职业身份、性格特征保持一致。
-
-**角色背景中提到战斗经验的** → 至少1个战斗技能
-**角色职业是工匠/生产类** → 至少1个生产/生活技能
-**角色身份含贵族/皇室/高层** → 装备品质+1级
-**角色 personality 偏进攻（w+,a+,z+）** → 技能多为主动攻击型
-**角色 personality 偏防守（w-,a-,G-）** → 技能多为被动/生存/逃逸型
-**正文中有特殊描述（如"独臂""伤疤""变异血脉"）** → 技能设计需呼应这些特征
-
----
-# 思考深度要求
-
-在生成之前，你必须进行充足的思考（至少300字中文），分析：
-1. char_gen 输出中的关键信息（身份/职业/背景/性格/属性）如何映射到技能设计
-2. 该角色的战斗定位是什么？在团队中的作用？
-3. 为什么选择这些技能/装备/物品？它们如何体现角色的背景故事？
-
----
-# Tier 匹配表（对齐世界书 #261442 + #265160）
-
-| Tier | 技能数 | 装备数 | 品质上限 | 装备品质 |
-|------|--------|--------|---------|---------|
-| T1   | 1-2    | 1-2    | 优良    | 普通~优良 |
-| T2   | 2-3    | 2      | 稀有    | 优良~稀有 |
-| T3   | 3-4    | 2-3    | 史诗    | 稀有~史诗 |
-| T4   | 3-5    | 3-4    | 传说    | 史诗~传说 |
-| T5   | 4-5    | 4-5    | 神话    | 传说~神话 |
-| T6   | 5-7    | 5+     | 神话+   | 传说~神话 |
-| T7   | 完整技能树 | 全部   | 唯一    | 神话~唯一 |
-
-**数量必须用 roll_dice 确定，禁止自己编造。**
-**品质必须参照上表，禁止跨越 tier 限制。**
-
----
-# 技能质量要求
-
-- **主动技能**: 必须明确消耗类型和数值(HP/MP/SP)、冷却回合数。效果描述必须具体，不能写"造成伤害"或"提升攻击力"这种模糊描述
-- **被动技能**: 必须明确常驻效果的具体数值或触发条件
-- **每个技能的效果描述 ≥2句话**：第一句说明机制，第二句说明场景或限制
-- **技能命名**: 必须与角色背景/职业/文化一致。精灵弓箭手叫"精准射击"，矮人铁匠叫"锻打强化"
-- 🆕 **effects 子元素**: 重要的词条效果用 <effect name="词条名">效果描述</effect> 标注，供前端展示
-- 🆕 **scripts 子元素**: 需要引擎执行逻辑的技能用 <script name="init|cast|tick|cleanup">代码</script> 标注（主动技能用 cast，被动技能用 init，需清理的加 cleanup）
-
----
-# 装备质量要求
-
-- **武器必须有明确的 stats**（至少攻击力），有特殊效果的用 <effect> 标注
-- **护甲必须有 stats**（至少防御力）
-- **装备与角色身份匹配**: 贵族给精致武器，铁匠给锻打大锤，猎人给轻便皮甲
-- **slot 必须是有效槽位**: 武器, 护甲, 头部, 身体, 饰品, 腰带, 鞋子, 主手, 副手, 惯用手
-
----
-# 工作流程:
-
-1. 先进行至少300字中文思考（见上方要求）
-2. 调用 roll_dice 确定技能/装备数量
-3. （可选）调用 craft_get_base_dc 查询品质级别
-4. 生成具体的技能/装备/物品列表
-5. 输出最终 <item_result> XML
-
----
-**输出格式 (严格 XML):**
 <item_result>
 <skills>
 <skill name="技能名" type="active|passive" cost_type="MP" cost_amount="10" cooldown="2">
   技能效果描述（≥2句话）。第一句说明机制，第二句说明场景或限制。
   <effect name="词条名">词条中文描述（可选，前端展示用）</effect>
-  <script name="init">$event.on(...)/* 对应引擎 API */</script>
+  <script name="init">/* 对应引擎 API */</script>
 </skill>
 </skills>
 <equipment>
@@ -926,87 +858,6 @@ ${formatVariables(ctx)}`,
 </equipment>
 <inventory>
 <item name="物品名" quantity="1" type="消耗品|材料|任务物品" rarity="普通">描述</item>
-</inventory>
-</item_result>`,
-
-    fixedExamples:
-`---
-
-**示例 1: 精灵弓箭手（与 char_gen 示例对应的背景一致性）**
-
-角色数据 (char_gen 输出):
-{ "name":"艾琳·月影", "race":"精灵", "tier":2, "level":8, "identity":["巡林者","北方游侠"], "occupation":["弓箭手","侦察兵"], "background":"艾琳出身于北方森林的精灵部落，从小接受巡林者训练。成年后离开部落云游四方，以佣兵身份赚取旅费。她正在追查一个与北境古墓有关的黑暗势力线索...", "personality":"冷静果断，对陌生人保持警惕，但对认可的朋友极为忠诚" }
-
-思考:
-- tier:2 → T2 2-3技能, 2装备, 品质上限稀有
-- 职业: 弓箭手+侦察兵 → 至少1个远程战斗技能 + 1个侦察/感知技能
-- 背景: 北方森林巡林者 → 装备以轻便皮甲为主，武器为精灵长弓
-- 性格: 冷静果断 → 技能偏进攻型
-- attribution: dex=10 敏捷突出 → 技能与敏捷属性匹配
-
-步骤1 — 调用 roll_dice({formula:"1d2+1",reason:"技能数量"}) → 确定技能数量=2
-步骤2 — 调用 craft_get_base_dc({quality:"优良"}) → {baseDC:10}
-
-<item_result>
-<skills>
-<skill name="精准射击" type="active" cost_type="SP" cost_amount="15" cooldown="3">
-  进行一次精准的瞄准射击，将感知集中在目标上，使本次攻击命中率额外+20%，且造成的伤害提升至120%。
-  适合用于在远距离开启战斗或对付高回避的敌人。施放后进入3回合冷却。
-  <effect name="精准瞄准">命中率+20%，伤害120%</effect>
-</skill>
-<skill name="自然感知" type="passive">
-  被动提升对周围环境的感知能力，依靠精灵与生俱来的敏锐听觉和嗅觉察觉隐藏的敌人和陷阱。
-  闪避率+10%，进入新区域后自动感知3米范围内的隐藏单位。
-  <effect name="警觉">闪避率+10%，3米内感知隐藏单位</effect>
-</skill>
-</skills>
-<equipment>
-<equip slot="武器" name="精灵长弓" quality="优良" durability="120" stats="攻击力:18,敏捷:2">由精灵工匠打造的轻量化长弓，射程和精准度远超普通木弓。弓身雕刻着精灵族的森林图腾。</equip>
-<equip slot="护甲" name="巡林者皮甲" quality="普通" durability="100" stats="防御力:8,敏捷:1">轻便的皮质护甲，多层皮革叠压缝制，不限制行动，适合需要灵活移动的斥候和弓箭手。</equip>
-</equipment>
-<inventory>
-<item name="猎人箭袋" quantity="1" type="消耗品" rarity="普通">装有30支精制箭矢的箭袋，箭杆上刻有精灵族的标记</item>
-<item name="草药包" quantity="3" type="消耗品" rarity="普通">装有基础疗伤草药的布袋，巡林者的标准配置</item>
-</inventory>
-</item_result>
-
----
-
-**示例 2: 独臂老兵铁匠（展示背景深度如何指导技能设计）**
-
-角色数据 (char_gen 输出):
-{ "name":"格雷厄姆·铁砧", "race":"人类", "tier":2, "level":7, "identity":["白曜城铁匠","退役老兵"], "occupation":["铁匠","武器匠人"], "background":"格雷厄姆在帝国边境战争中服役十五年...失去左臂...凭着打铁手艺开了铁匠铺。十年的锻打生涯让他的独臂变得异常强壮...", "personality":"极度沉默寡言...对武器有近乎偏执的追求" }
-
-思考:
-- tier:2 → T2 2-3技能, 2装备, 品质上限稀有
-- 职业: 铁匠 + 退役老兵 → 至少1个生产技能 + 1个战斗技能
-- background: "独臂老兵""打铁十年" → 技能体现独臂锻打的特殊性 + 武器修复能力
-- 性格: 沉默寡言+武器偏执 → 被动技能突出武器的使用
-- attributes: str=11 力量突出 → 装备重型武器
-
-步骤1 — 调用 roll_dice({formula:"1d2+1",reason:"技能数量"}) → 确定技能数量=2
-
-<item_result>
-<skills>
-<skill name="锻打强化" type="active" cost_type="SP" cost_amount="20" cooldown="0">
-  花费20SP，用锻锤敲击对一件装备的破损处进行紧急修补。目标装备恢复50%的耐久度，并获得"锻火余温"效果——接下来的3回合内该装备的防御力或攻击力临时+10%。
-  无法在战斗外施放。可重复对同一装备使用，但每次效果递减5%。
-  <effect name="紧急修补">恢复目标装备50%耐久度</effect>
-  <effect name="锻火余温">3回合内装备数值+10%</effect>
-</skill>
-<skill name="武器专精·锤" type="passive">
-  格雷厄姆一生打过最多的武器就是锤子，对锤类武器的重量分布和打击点有着近乎本能的掌握。
-  装备锤类武器时攻击力+15%。如果武器是锻铁大锤，额外获得10%暴击伤害。
-  <effect name="锤类精通">装备锤类武器时攻击力+15%</effect>
-</skill>
-</skills>
-<equipment>
-<equip slot="武器" name="锻铁大锤" quality="优良" durability="150" stats="攻击力:22,力量:3">一把沉重得离谱的铁锤。格雷厄姆在失去左臂后专门为自己打造的——他用独臂也能挥出致命一击。锤头经过反复折叠锻打，纹理如流水般致密。</equip>
-<equip slot="身体" name="老兵的皮围裙" quality="普通" durability="80" stats="防御力:10">一件被火星烫得千疮百孔的厚皮革围裙，上面还残留着多年前被刀锋划过的痕迹。它不仅挡火花，也是一件沉默的勋章。</equip>
-</equipment>
-<inventory>
-<item name="精炼铁矿石" quantity="15" type="材料" rarity="优良">上好的铁矿石，来自诺斯加德联盟的矿产</item>
-<item name="磨刀石" quantity="1" type="消耗品" rarity="普通">专业级磨刀石，格雷厄姆自己打磨用的</item>
 </inventory>
 </item_result>`,
 
@@ -1076,9 +927,18 @@ export function buildAgentMessages(
   // 模板函数 (variableContext/variableInstruction/formatHistory/buildZoneSection) 经此 ctx 读 per-agent 设置.
   const tplCtx: AgentContext = config ? { ...ctx, agentConfig: config } : ctx;
 
+  // Part 0: systemPrompt override (Phase 9) — 如果 agent config 里有 systemPrompt 字段，优先使用
+  // 这允许 item_gen 等 agent 的完整提示词从 agent-config.json 注入，而不是塞在模板代码里
+  let systemPromptOverride = '';
+  if (config?.systemPrompt) {
+    systemPromptOverride = config.systemPrompt;
+  }
+
   // Part 1: 预设 (固定部分)
   let presetSection = '';
-  if (presets && configs) {
+  if (systemPromptOverride) {
+    presetSection = systemPromptOverride;
+  } else if (presets && configs) {
     if (config?.presetId) {
       const preset = getPreset(config.presetId, presets);
       if (preset) {
@@ -1086,7 +946,7 @@ export function buildAgentMessages(
       }
     }
   }
-  // 无预设时回退到旧的 fixedSystem + fixedExamples（保持兼容）
+  // 无预设且无 systemPrompt 时回退到旧的 fixedSystem + fixedExamples（保持兼容）
   if (!presetSection) {
     presetSection = [tpl.fixedSystem, tpl.fixedExamples].filter(Boolean).join('\n\n');
   }

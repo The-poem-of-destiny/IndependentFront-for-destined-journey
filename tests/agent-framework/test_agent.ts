@@ -171,6 +171,15 @@ function buildContextFromSave(backup: any, overrideUserInput?: string): AgentCon
     ? messages.slice(0, messages.indexOf(lastUserMsg))
     : messages.slice(0, -1);
 
+  // Support injectedCharGenOutput for item_gen tests
+  const agentOutputs = new Map<string, string>();
+  if (backup.injectedCharGenOutput) {
+    agentOutputs.set('char_gen', backup.injectedCharGenOutput);
+  } else {
+    const lastAsst = [...messages].reverse().find((x: any) => x.role === 'assistant');
+    if (lastAsst) agentOutputs.set('story', lastAsst.content);
+  }
+
   return {
     userInput,
     history: history.map((m: any) => ({ role: m.role, content: m.content })),
@@ -180,7 +189,7 @@ function buildContextFromSave(backup: any, overrideUserInput?: string): AgentCon
     variables: chat.variables || {},
     plotEvents: backup.plotEvents || [],
     memories: backup.memories || [],
-    agentOutputs: (function(){ const m=new Map(); const lastAsst=[...messages].reverse().find(function(x){return x.role==="assistant"}); if(lastAsst)m.set("story",lastAsst.content); return m; })(),
+    agentOutputs,
     saveId: backup.saves?.[0]?.id || 'test-save',
   };
 }
@@ -241,25 +250,7 @@ async function main() {
     return;
   }
 
-  // 3b. --upstream: 先跑 story
-  if (DO_UPSTREAM) {
-    const upstreamId = AGENT_ID === 'vars_update' || AGENT_ID === 'char_update' || AGENT_ID === 'memory_summary' ? 'story'
-      : AGENT_ID === 'item_gen' ? 'char_gen' : null;
-    if (upstreamId) {
-      log(VERBOSE, `[upstream] Running ${upstreamId} first...`);
-      const upClient = new AgentClient({ endpoint: { baseUrl: apiUrl, apiKey, defaultModel: model, id: 'up', name: 'up', provider: 'custom', models: [model], timeout: 120 }, agentId: upstreamId, saveId: ctx.saveId || 'test' });
-      const upMsgs = buildAgentMessages(upstreamId, ctx, [agentConfig], worldBooks);
-      if (upMsgs) {
-        const upReq: ChatRequest = { messages: upMsgs, temperature: 0.7, maxTokens: 4096 };
-        const upResult = await upClient.chat(upReq);
-        if (upResult.output) {
-          ctx.agentOutputs!.set(upstreamId, upResult.output);
-          log(VERBOSE, `[upstream] ${upstreamId}: tokens=${upResult.tokensUsed} cache=${upResult.cacheHit} duration=${upResult.duration}ms`);
-          if (VERBOSE) console.log(`[upstream output, ${upResult.output.length} chars]:\n${upResult.output.substring(0, 500)}\n...`);
-        }
-      }
-    }
-  }
+  // note: upstream moved below detectProvider
 
   // 4. 构建目标 Agent 的消息
   log(VERBOSE, `Agent: ${AGENT_ID} | API: ${model} @ ${apiUrl}`);
@@ -278,6 +269,8 @@ async function main() {
           if (ag.maxTokens !== undefined) cfg.maxTokens = ag.maxTokens;
           if (ag.model) cfg.model = ag.model;
           cfg.presetId = ag.presetId || "";
+          // Phase 9: 把 agent-config 里的 systemPrompt 也传进去
+          if (ag.systemPrompt) cfg.systemPrompt = ag.systemPrompt;
         }
       }
     } catch(e) {}
@@ -305,6 +298,56 @@ async function main() {
 
   // 5. 创建 client 并调用
   const detectProvider = (url: string) => url.includes('deepseek.com') ? 'deepseek' : url.includes('openai.com') ? 'openai' : 'custom';
+
+  // Move upstream block here, after detectProvider is defined
+  if (DO_UPSTREAM) {
+    const upstreamId = AGENT_ID === 'vars_update' || AGENT_ID === 'char_update' || AGENT_ID === 'memory_summary' ? 'story'
+      : AGENT_ID === 'item_gen' ? 'char_gen' : null;
+    if (upstreamId) {
+      log(VERBOSE, `[upstream] Running ${upstreamId} first with Agentic tools...`);
+      let upCfg: any = { agentId: upstreamId, enabled: true, worldBookIds: [], presetId: '', toolsEnabled: true };
+      try {
+        const ac = JSON.parse(fs.readFileSync("data/defaults/agent-config.json", "utf-8"));
+        const ag = (ac.agents || {})[upstreamId];
+        if (ag) {
+          upCfg.worldBookIds = ag.worldBookIds || [];
+          upCfg.presetId = ag.presetId || '';
+        }
+      } catch(e) {}
+      const upWbs: any[] = [];
+      for (const wbId of upCfg.worldBookIds) {
+        const wbPath = "data/worldbooks/" + wbId + ".json";
+        if (fs.existsSync(wbPath)) {
+          try { const wb = JSON.parse(fs.readFileSync(wbPath, "utf-8")); upWbs.push({ id: wbId, name: wbId, entries: Array.isArray(wb) ? wb : (wb.entries || []) }); } catch(e) {}
+        }
+      }
+      const upMsgs = buildAgentMessages(upstreamId, ctx, [upCfg], upWbs);
+      if (upMsgs) {
+        const upClient = new AgentClient({ endpoint: { baseUrl: apiUrl, apiKey, defaultModel: model, id: 'up', name: 'up', provider: detectProvider(apiUrl), models: [model], timeout: 120 }, agentId: upstreamId, saveId: ctx.saveId || 'test' });
+        // Use Agentic path if upstream agent has tools
+        const upTools = getToolsForAgent(upstreamId);
+        let upResult: any;
+        if (upTools.length > 0 && upClient.chatWithTools) {
+          const upToolCtx: ToolExecutionContext = { characters: ctx.characters, variables: ctx.variables, saveId: ctx.saveId || 'test-save' };
+          upResult = await upClient.chatWithTools(
+            { messages: upMsgs, tools: upTools, tool_choice: 'auto' },
+            async (name: string, args: Record<string, any>) => {
+              const tr = await executeToolCall(name, args, upToolCtx);
+              return tr;
+            },
+            { maxRounds: 10 },
+          );
+        } else {
+          upResult = await upClient.chat({ messages: upMsgs, temperature: 0.7, maxTokens: 16384 });
+        }
+        if (upResult?.output) {
+          ctx.agentOutputs!.set(upstreamId, upResult.output);
+          log(VERBOSE, `[upstream] ${upstreamId}: tokens=${upResult.tokensUsed} cache=${upResult.cacheHit} duration=${upResult.duration}ms`);
+          if (VERBOSE) console.log(`[upstream output, ${upResult.output.length} chars]:\n${upResult.output.substring(0, 500)}\n...`);
+        }
+      }
+    }
+  }
   const client = new AgentClient({
     endpoint: { id: 'test', name: 'test', baseUrl: apiUrl, apiKey, defaultModel: model, provider: detectProvider(apiUrl), models: [model], timeout: 120 },
     agentId: AGENT_ID,

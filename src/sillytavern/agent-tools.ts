@@ -333,18 +333,17 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
-      name: 'call_item_gen',
-      description: '异步派发物品生成子 Agent（item_gen）。传入角色摘要数据后立即返回 ack，不等待 item_gen 完成。char_gen 应在生成完技能/装备/道具后，调用此工具将摘要派发给 item_gen 做进一步细化和异步持久化。不要阻塞等待 item_gen 结果。',
+      name: 'get_script_reference',
+      description: '查询脚本沙盒中可用的 $ API 签名、变量路径约定、生命周期hook 列表。当需要编写 skill/equipment/item/element/authority 的 scripts 时调用此工具获取正确的 API 文档。返回 Markdown 格式的参考文本。',
       parameters: {
         type: 'object',
         properties: {
-          characterName: { type: 'string', description: '角色名' },
-          tier: { type: 'integer', description: '生命层级 (1-7)' },
-          skillsSummary: { type: 'string', description: '技能摘要 — 每个技能的名称+效果一句话' },
-          equipmentSummary: { type: 'string', description: '装备摘要 — 每件装备的名称+属性一句话' },
-          inventorySummary: { type: 'string', description: '物品摘要 — 每个物品的名称+用途一句话' },
+          query: {
+            type: 'string',
+            description: '查询分类 — "all"=全部参考, "events"=事件系统($event.on/off/emit), "resources"=资源操作($resource), "status"=状态效果($status), "dice"=骰子($dice), "paths"=变量路径+跨对象引用($call/@语法)',
+            enum: ['all', 'events', 'resources', 'status', 'dice', 'paths'],
+          },
         },
-        required: ['characterName'],
       },
     },
   },
@@ -365,11 +364,9 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
     'random_name', 'random_hair_color', 'random_eye_color',
     'random_personality', 'random_appearance', 'roll_attributes',
     'get_character', 'get_inventory',
-    'call_item_gen',
   ],
   item_gen: [
-    'roll_d20', 'roll_d100', 'roll_dice',
-    'craft_get_base_dc',
+    'get_script_reference',
     'get_character', 'get_inventory',
   ],
 };
@@ -636,15 +633,61 @@ export async function executeToolCall(
       };
     }
 
-    // ── Async dispatch: call_item_gen ──
-    case 'call_item_gen': {
-      // item_gen 异步运行中，返回即时 ack
-      // char_gen 不应阻塞等待 — 直接继续生成其他 XML 标签
-      return {
-        status: 'dispatched',
-        message: `item_gen 已收到 ${args.characterName || '角色'} 的摘要，正在异步生成中。请继续完成 char_gen 的其余输出。`,
+    // ── Script Reference (Phase 9) ──
+    case 'get_script_reference': {
+      const query = args.query ?? 'all';
+
+      const SCRIPT_REF = {
+        events: `## 事件系统 (持久订阅)
+$event.on(eventType, scriptKey) → handle  // 订阅事件，返回句柄
+$event.off(handleOrType)                 // 取消订阅
+
+事件类型示例: 'combat_round_start' | 'combat_round_end' | 'hp_below_50' | 'skill_cast' | 'on_hit' | 'on_kill'
+生命周期约定: init=装备/获得时执行一次 | cast=主动使用时执行 | tick=每回合/时间单位执行 | cleanup=移除/卸下时执行`,
+        resources: `## 资源操作
+$resource.modifyHp(charId, amount)       // amount: 正数=恢复, 负数=伤害
+$resource.modifyStat(charId, stat, amount) // stat: 'str'|'dex'|'con'|'int'|'spi'
+$resource.getHp(charId) → number
+$resource.getMaxHp(charId) → number`,
+        status: `## 状态效果
+$status.add(charId, { name, description, category, stacks, maxStacks, remainingTime, timeUnit, effects, effectDescriptions, scripts })
+$status.remove(charId, effectId)
+$status.setStacks(charId, effectId, stacks)
+$status.getStacks(charId, effectId) → number
+timeUnit: '回合' | '分钟' | '小时'
+category: '增益' | '减益' | '特殊'`,
+        dice: `## 骰子系统 (脚本内可用)
+$dice.d20() → number
+$dice.d100() → number
+$dice.roll(formula) → number  // formula: '2d6+3', '4d8' 等`,
+        paths: `## 变量路径命名空间约定
+sys.<path>     — 引擎管理变量 (如 sys.世界.地点.城市)
+char.<id>.<path> — 按角色ID分组 (如 char.player_1.hp)
+user.<path>    — 玩家变量 (如 user.settings.language)
+world.<path>   — 世界设定 (如 world.历史.纪元)
+temp.<path>    — 会话临时 (不持久化)
+
+## 跨对象脚本引用 ($call)
+@parent.<scriptKey>        — 引用父级对象的脚本
+@skill.<技能名>.<scriptKey> — 引用指定技能的脚本
+@item.<物品名>.<scriptKey>  — 引用指定物品的脚本
+@status.<效果名>.<scriptKey> — 引用指定状态效果的脚本
+@ascension.<要素名>.<scriptKey> — 引用登神要素的脚本`,
       };
+
+      if (query === 'all') {
+        const allParts = Object.entries(SCRIPT_REF).map(([key, text]) => text).join('\n\n');
+        return { query: 'all', reference: allParts };
+      }
+      if (SCRIPT_REF[query as keyof typeof SCRIPT_REF]) {
+        return { query, reference: SCRIPT_REF[query as keyof typeof SCRIPT_REF] };
+      }
+      return { query, error: `未知分类 "${query}"，可用: ${Object.keys(SCRIPT_REF).join(', ')}` };
     }
+
+    // ── Async dispatch: call_item_gen (Phase 9 removed — orchest now calls item_gen directly) ──
+    // call_item_gen has been removed from the registry. char_gen no longer dispatches item_gen
+    // asynchronously; the orchestrator calls item_gen directly after char_gen completes.
 
     default:
       throw new Error(`未知工具: ${functionName}`);

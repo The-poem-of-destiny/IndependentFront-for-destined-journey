@@ -62,9 +62,9 @@ describe('createDefaultCharacterState', () => {
   it('登神长阶默认 disabled', () => {
     const c = createDefaultCharacterState();
     expect(c.ascension.enabled).toBe(false);
-    expect(c.ascension.elements).toEqual({});
-    expect(c.ascension.authority).toEqual({});
-    expect(c.ascension.law).toEqual({});
+    expect(c.ascension.elements).toEqual([]);
+    expect(c.ascension.authority).toEqual([]);
+    expect(c.ascension.law).toEqual([]);
     expect(c.ascension.deityPosition).toBe('');
     expect(c.ascension.divineKingdom).toEqual({ name: '', description: '' });
   });

@@ -62,7 +62,7 @@ function makeChar(overrides: Partial<CharacterState> = {}): CharacterState {
     maxHp: 200,
     identity: ['冒险者', '剑士'],
     occupation: ['战士'],
-    ascension: { enabled: false, elements: {}, authority: {}, law: {}, deityPosition: '', divineKingdom: { name: '', description: '' } },
+    ascension: { enabled: false, elements: [], authority: [], law: [], deityPosition: '', divineKingdom: { name: '', description: '' } },
     ...overrides,
   });
 }
@@ -351,7 +351,7 @@ describe('hasIdentity', () => {
 describe('hasAscension', () => {
   it('登神长阶启用时返回 true', () => {
     const c = makeChar({
-      ascension: { enabled: true, elements: { fire: { name: '火', description: '火焰要素', effects: [] } }, authority: {}, law: {}, deityPosition: '', divineKingdom: { name: '', description: '' } },
+      ascension: { enabled: true, elements: [{ name: '火', description: '火焰要素', effects: [] }], authority: [], law: [], deityPosition: '', divineKingdom: { name: '', description: '' } },
     });
     expect(hasAscension(c)).toBe(true);
   });
@@ -367,14 +367,14 @@ describe('getElements', () => {
     const c = makeChar({
       ascension: {
         enabled: true,
-        elements: { fire: { name: '火', description: '炎之要素', effects: [] }, water: { name: '水', description: '水之要素', effects: [] } },
-        authority: {},
-        law: {},
+        elements: [{ name: '火', description: '炎之要素', effects: [] }, { name: '水', description: '水之要素', effects: [] }],
+        authority: [],
+        law: [],
         deityPosition: '',
         divineKingdom: { name: '', description: '' },
       },
     });
-    expect(getElements(c)).toEqual(['fire', 'water']);
+    expect(getElements(c)).toEqual(['火', '水']);
   });
 
   it('无要素时返回空数组', () => {
@@ -388,14 +388,14 @@ describe('getAuthorities', () => {
     const c = makeChar({
       ascension: {
         enabled: true,
-        elements: {},
-        authority: { combat: { name: '战斗', description: '战斗权能', effects: [], costDescription: '消耗SP' } },
-        law: {},
+        elements: [],
+        authority: [{ name: '战斗', description: '战斗权能', effects: [], costDescription: '消耗SP' }],
+        law: [],
         deityPosition: '',
         divineKingdom: { name: '', description: '' },
       },
     });
-    expect(getAuthorities(c)).toEqual(['combat']);
+    expect(getAuthorities(c)).toEqual(['战斗']);
   });
 });
 
@@ -404,14 +404,14 @@ describe('getLaws', () => {
     const c = makeChar({
       ascension: {
         enabled: true,
-        elements: {},
-        authority: {},
-        law: { gravity: { name: '重力', description: '重力法则', effects: [], costDescription: '消耗MP+SP' } },
+        elements: [],
+        authority: [],
+        law: [{ name: '重力', description: '重力法则', effects: [], costDescription: '消耗MP+SP' }],
         deityPosition: '',
         divineKingdom: { name: '', description: '' },
       },
     });
-    expect(getLaws(c)).toEqual(['gravity']);
+    expect(getLaws(c)).toEqual(['重力']);
   });
 });
 

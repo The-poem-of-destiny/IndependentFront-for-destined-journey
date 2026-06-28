@@ -571,9 +571,9 @@ export const useCreateStore = defineStore('create', () => {
       maxSp: spPreview.value,
       ascension: {
         enabled: false,
-        elements: {},
-        authority: {},
-        law: {},
+        elements: [],
+        authority: [],
+        law: [],
         deityPosition: '',
         divineKingdom: { name: '', description: '' },
       },

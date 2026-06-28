@@ -323,24 +323,21 @@ export function assembleCharacterState(
     maxSp: calcSP(charData.tier, charData.attributes.spi),
     ascension: {
       enabled: charData.ascension.enabled,
-      elements: Object.fromEntries(
-        (charData.ascension.elements ?? []).map((e, i) => [
-          `el_${i}`,
-          { name: e.name, description: e.description, effects: e.effects },
-        ]),
-      ),
-      authority: Object.fromEntries(
-        (charData.ascension.authorities ?? []).map((a, i) => [
-          `au_${i}`,
-          { name: a.name, description: a.description, effects: a.effects, costDescription: a.costDescription },
-        ]),
-      ),
-      law: Object.fromEntries(
-        (charData.ascension.laws ?? []).map((l, i) => [
-          `law_${i}`,
-          { name: l.name, description: l.description, effects: [...(l.passiveEffects ?? []), ...(l.activeEffects ?? [])], costDescription: l.costDescription },
-        ]),
-      ),
+      elements: (charData.ascension.elements ?? []).map((e, i) => ({
+        name: e.name, description: e.description, effects: e.effects,
+        effectDescriptions: itemData.elements?.[i]?.effectDescriptions,
+        scripts: itemData.elements?.[i]?.scripts,
+      })),
+      authority: (charData.ascension.authorities ?? []).map((a, i) => ({
+        name: a.name, description: a.description, effects: a.effects, costDescription: a.costDescription,
+        effectDescriptions: itemData.authorities?.[i]?.effectDescriptions,
+        scripts: itemData.authorities?.[i]?.scripts,
+      })),
+      law: (charData.ascension.laws ?? []).map((l) => ({
+        name: l.name, description: l.description,
+        effects: [...(l.passiveEffects ?? []), ...(l.activeEffects ?? [])],
+        costDescription: l.costDescription,
+      })),
       deityPosition: charData.ascension.deityPosition || '',
       divineKingdom: charData.ascension.divineKingdom || { name: '', description: '' },
     },
@@ -405,6 +402,51 @@ export function buildCharGenPatches(character: CharacterState): StatePatch[] {
       value: equip,
       metadata: { source: 'item_gen' },
     });
+  }
+
+  // 5. 登神长阶数据 (写入变量空间)
+  if (character.ascension.enabled) {
+    const asc = character.ascension;
+    if (asc.elements.length > 0) {
+      patches.push({
+        op: 'set_variable',
+        target: `characters.${character.id}.ascension.elements`,
+        value: asc.elements,
+        metadata: { source: 'item_gen' },
+      });
+    }
+    if (asc.authority.length > 0) {
+      patches.push({
+        op: 'set_variable',
+        target: `characters.${character.id}.ascension.authority`,
+        value: asc.authority,
+        metadata: { source: 'item_gen' },
+      });
+    }
+    if (asc.law.length > 0) {
+      patches.push({
+        op: 'set_variable',
+        target: `characters.${character.id}.ascension.law`,
+        value: asc.law,
+        metadata: { source: 'item_gen' },
+      });
+    }
+    if (asc.deityPosition) {
+      patches.push({
+        op: 'set_variable',
+        target: `characters.${character.id}.ascension.deityPosition`,
+        value: asc.deityPosition,
+        metadata: { source: 'char_gen' },
+      });
+    }
+    if (asc.divineKingdom.name) {
+      patches.push({
+        op: 'set_variable',
+        target: `characters.${character.id}.ascension.divineKingdom`,
+        value: asc.divineKingdom,
+        metadata: { source: 'char_gen' },
+      });
+    }
   }
 
   return patches;
@@ -644,12 +686,23 @@ function parseItemGenXML(xml: string): ItemGenOutput {
   const skillsXML = extractTagBlock(xml, 'skills');
   const equipmentXML = extractTagBlock(xml, 'equipment');
   const inventoryXML = extractTagBlock(xml, 'inventory');
+  const ascensionXML = extractTagBlock(xml, 'ascension');
 
   const skills = skillsXML ? parseSkillsXML(skillsXML) : [];
   const equipment = equipmentXML ? parseEquipmentXML(equipmentXML) : [];
   const inventory = inventoryXML ? parseInventoryXML(inventoryXML) : [];
 
-  return { skills, equipment, inventory };
+  // ascension 可能不存在（非登神角色）
+  let elements: ItemGenOutput['elements'] | undefined;
+  let authorities: ItemGenOutput['authorities'] | undefined;
+  if (ascensionXML) {
+    const elementsXML = extractTagBlock(ascensionXML, 'elements');
+    const authoritiesXML = extractTagBlock(ascensionXML, 'authorities');
+    if (elementsXML) elements = parseElementsXML(elementsXML);
+    if (authoritiesXML) authorities = parseAuthoritiesXML(authoritiesXML);
+  }
+
+  return { skills, equipment, inventory, elements, authorities };
 }
 
 function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
@@ -723,6 +776,85 @@ function parseInventoryXML(xml: string): ItemGenOutput['inventory'] {
       quantity: parseInt(attrs['quantity'] ?? '1') || 1,
       type: attrs['type'] ?? '消耗品',
       rarity: attrs['rarity'],
+    });
+  }
+  return results;
+}
+
+/**
+ * Phase 9: 解析 <elements> 块内的 <element> 子标签。
+ * 格式同 parseSkillsXML: 属性来自开标签, effect/script 子元素解析, 描述为纯文本部分。
+ */
+function parseElementsXML(xml: string): NonNullable<ItemGenOutput['elements']> {
+  const matches = xml.matchAll(/<element\s+([^>]*?)>([\s\S]*?)<\/element>/g);
+  const results: NonNullable<ItemGenOutput['elements']> = [];
+  for (const m of matches) {
+    const attrs = parseAttrsStr(m[1]);
+    const innerContent = m[2]?.trim() ?? '';
+
+    // 提取 <effect name="...">content</effect> 子元素 → effectDescriptions
+    const effectDescriptions: Record<string, string> = {};
+    const effectMatches = innerContent.matchAll(/<effect\s+name="([^"]*)">([\s\S]*?)<\/effect>/g);
+    for (const em of effectMatches) {
+      effectDescriptions[em[1]] = em[2]?.trim() ?? '';
+    }
+
+    // 提取 <script name="...">code</script> 子元素 → scripts
+    const scripts: Record<string, string> = {};
+    const scriptMatches = innerContent.matchAll(/<script\s+name="([^"]*)">([\s\S]*?)<\/script>/g);
+    for (const sm of scriptMatches) {
+      scripts[sm[1]] = sm[2]?.trim() ?? '';
+    }
+
+    // 描述 = innerContent 中去除 effect/script 标签后的纯文本
+    const description = innerContent.replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/g, '').trim();
+
+    results.push({
+      name: attrs['name'] ?? '未命名要素',
+      description: description || innerContent,
+      effects: [],
+      ...(Object.keys(effectDescriptions).length > 0 ? { effectDescriptions } : {}),
+      ...(Object.keys(scripts).length > 0 ? { scripts } : {}),
+    });
+  }
+  return results;
+}
+
+/**
+ * Phase 9: 解析 <authorities> 块内的 <authority> 子标签。
+ * 与 parseElementsXML 相同模式，多了 cost_description 属性。
+ */
+function parseAuthoritiesXML(xml: string): NonNullable<ItemGenOutput['authorities']> {
+  const matches = xml.matchAll(/<authority\s+([^>]*?)>([\s\S]*?)<\/authority>/g);
+  const results: NonNullable<ItemGenOutput['authorities']> = [];
+  for (const m of matches) {
+    const attrs = parseAttrsStr(m[1]);
+    const innerContent = m[2]?.trim() ?? '';
+
+    // 提取 <effect name="...">content</effect> 子元素 → effectDescriptions
+    const effectDescriptions: Record<string, string> = {};
+    const effectMatches = innerContent.matchAll(/<effect\s+name="([^"]*)">([\s\S]*?)<\/effect>/g);
+    for (const em of effectMatches) {
+      effectDescriptions[em[1]] = em[2]?.trim() ?? '';
+    }
+
+    // 提取 <script name="...">code</script> 子元素 → scripts
+    const scripts: Record<string, string> = {};
+    const scriptMatches = innerContent.matchAll(/<script\s+name="([^"]*)">([\s\S]*?)<\/script>/g);
+    for (const sm of scriptMatches) {
+      scripts[sm[1]] = sm[2]?.trim() ?? '';
+    }
+
+    // 描述 = innerContent 中去除 effect/script 标签后的纯文本
+    const description = innerContent.replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/g, '').trim();
+
+    results.push({
+      name: attrs['name'] ?? '未命名权能',
+      description: description || innerContent,
+      effects: [],
+      costDescription: attrs['cost_description'] ?? '',
+      ...(Object.keys(effectDescriptions).length > 0 ? { effectDescriptions } : {}),
+      ...(Object.keys(scripts).length > 0 ? { scripts } : {}),
     });
   }
   return results;

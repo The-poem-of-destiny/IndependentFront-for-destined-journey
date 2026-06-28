@@ -375,9 +375,9 @@ function formatCharacterNarrative(char: CharacterState): string {
   if (char.ascension?.enabled) {
     lines.push('');
     lines.push('  登神长阶:');
-    const elementNames = Object.keys(char.ascension.elements ?? {});
-    const authorityNames = Object.keys(char.ascension.authority ?? {});
-    const lawNames = Object.keys(char.ascension.law ?? {});
+    const elementNames = (char.ascension.elements ?? []).map(e => e.name);
+    const authorityNames = (char.ascension.authority ?? []).map(a => a.name);
+    const lawNames = (char.ascension.law ?? []).map(l => l.name);
     if (elementNames.length) lines.push(`    要素: ${elementNames.join(', ')}`);
     if (authorityNames.length) lines.push(`    权能: ${authorityNames.join(', ')}`);
     if (lawNames.length) lines.push(`    法则: ${lawNames.join(', ')}`);

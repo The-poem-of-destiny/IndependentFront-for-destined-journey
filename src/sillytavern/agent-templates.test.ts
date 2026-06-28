@@ -210,7 +210,7 @@ describe('buildAgentMessages', () => {
           hp: 80, maxHp: 100,
           mp: 30, maxMp: 50,
           sp: 30, maxSp: 50,
-          ascension: { enabled: false, elements: {}, authority: {}, law: {}, deityPosition: '', divineKingdom: { name: '', description: '' } },
+          ascension: { enabled: false, elements: [], authority: [], law: [], deityPosition: '', divineKingdom: { name: '', description: '' } },
           equipment: [],
           skills: [],
           inventory: [],
@@ -232,8 +232,8 @@ describe('buildAgentMessages', () => {
 
 // ========== Template Quality Checks ==========
 
-// Skip v3 compat stubs — they're intentionally minimal
-const STUB_IDS = new Set(['plot_check', 'plot_correct']);
+// Skip v3 compat stubs + templates with system prompt externalized to agent-config.json — they're intentionally minimal
+const STUB_IDS = new Set(['plot_check', 'plot_correct', 'item_gen']);
 const activeTemplates = Object.entries(AGENT_TEMPLATES)
   .filter(([id]) => !STUB_IDS.has(id));
 

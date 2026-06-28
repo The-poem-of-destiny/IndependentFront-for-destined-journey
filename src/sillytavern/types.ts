@@ -244,6 +244,9 @@ export interface AgentConfig {
   historyLayers?: number;
   /** 🆕 Phase 8.6: 每条历史正文截断字数（不填=按 agent 类别默认，长正文 agent 默认更大） */
   historySlice?: number;
+  /** 🆕 Phase 9: 覆盖模板中的 fixedSystem（agent-config.json 的 systemPrompt 字段）。
+   * 如果设置了此字段，buildAgentMessages 将优先使用它，而不是模板中的 fixedSystem+fixedExamples。 */
+  systemPrompt?: string;
 }
 
 // ========== Preset (Phase 8) ==========
@@ -637,6 +640,10 @@ export interface ElementDetail {
   name: string;
   description: string;
   effects: string[];             // 被动效果列表
+  /** 🆕 Phase 9: 词条名→中文描述 (AI 编写, 前端展示, 与 Skill.effects 对齐) */
+  effectDescriptions?: Record<string, string>;
+  /** 🆕 Phase 9: 脚本注册表: lifecycle→JS code (AI 编写, 引擎执行, 与 Skill.scripts 对齐) */
+  scripts?: Record<string, string>;
 }
 
 /** 权能 (Lv.17-20, 3要素→1权能) */
@@ -645,6 +652,10 @@ export interface AuthorityDetail {
   description: string;
   effects: string[];
   costDescription: string;      // 消耗描述 (如 '25% 最大MP+SP+攻击+动作')
+  /** 🆕 Phase 9: 词条名→中文描述 */
+  effectDescriptions?: Record<string, string>;
+  /** 🆕 Phase 9: 脚本注册表 */
+  scripts?: Record<string, string>;
 }
 
 /** 法则 (Lv.21-24) */
@@ -653,6 +664,10 @@ export interface LawDetail {
   description: string;
   effects: string[];
   costDescription: string;
+  /** 🆕 Phase 9: 词条名→中文描述 */
+  effectDescriptions?: Record<string, string>;
+  /** 🆕 Phase 9: 脚本注册表 */
+  scripts?: Record<string, string>;
 }
 
 /** 统一角色状态 — NPC/主角/怪物/召唤物 共用 */
@@ -687,9 +702,9 @@ export interface CharacterState {
   // ===== 登神长阶 (Lv.13+) =====
   ascension: {
     enabled: boolean;              // 是否开启登神长阶
-    elements: Record<string, ElementDetail>;    // 要素
-    authority: Record<string, AuthorityDetail>; // 权能
-    law: Record<string, LawDetail>;             // 法则
+    elements: ElementDetail[];     // 要素 (Array, 有序, Phase 9: Record→Array)
+    authority: AuthorityDetail[];  // 权能 (Array, 有序, Phase 9: Record→Array)
+    law: LawDetail[];              // 法则 (Array, 有序, Phase 9: Record→Array)
     deityPosition: string;                       // 神位 (Lv.25)
     divineKingdom: {                             // 神国 (Lv.25巅峰)
       name: string;
@@ -744,9 +759,9 @@ export function createDefaultCharacterState(overrides: Partial<CharacterState> =
     sp: 50, maxSp: 50,
     ascension: {
       enabled: false,
-      elements: {},
-      authority: {},
-      law: {},
+      elements: [],
+      authority: [],
+      law: [],
       deityPosition: '',
       divineKingdom: { name: '', description: '' },
     },
@@ -2402,10 +2417,10 @@ export interface CharGenOutput {
     /** 登神路径描述 */
     path: string;
     description: string;
-    /** 要素 (Lv.13-16, 1-3个) */
-    elements: Array<{ name: string; description: string; effects: string[] }>;
-    /** 权能 (Lv.17-20, 1个) */
-    authorities: Array<{ name: string; description: string; effects: string[]; costDescription: string }>;
+    /** 要素 (Lv.13-16, 1-3个) — 使用 ElementDetail 统一类型 */
+    elements: Array<Pick<ElementDetail, 'name' | 'description' | 'effects'>>;
+    /** 权能 (Lv.17-20, 1个) — 使用 AuthorityDetail 统一类型 */
+    authorities: Array<Pick<AuthorityDetail, 'name' | 'description' | 'effects' | 'costDescription'>>;
     /** 法则 (Lv.21-24, 1-2个) */
     laws: Array<{ name: string; description: string; passiveEffects: string[]; activeEffects: string[]; costDescription: string }>;
     /** 神位 (Lv.25) */
@@ -2484,6 +2499,10 @@ export interface ItemGenOutput {
     /** 稀有度 (可选) */
     rarity?: string;
   }>;
+  /** 🆕 Phase 9: 登神要素 (含 scripts + effectDescriptions) */
+  elements?: Array<Pick<ElementDetail, 'name' | 'description' | 'effects' | 'effectDescriptions' | 'scripts'>>;
+  /** 🆕 Phase 9: 权能 (含 scripts + effectDescriptions) */
+  authorities?: Array<Pick<AuthorityDetail, 'name' | 'description' | 'effects' | 'costDescription' | 'effectDescriptions' | 'scripts'>>;
 }
 
 /** Char Gen 链的最终结果 — char_gen → item_gen → 完整 CharacterState + Patches */

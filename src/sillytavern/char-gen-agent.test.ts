@@ -78,6 +78,7 @@ function makeCharGenOutput(overrides: Partial<CharGenOutput> = {}): CharGenOutpu
   return {
     name: '艾琳',
     race: '精灵',
+    gender: '女',
     tier: 2,
     level: 8,
     attributes: { str: 4, dex: 10, con: 5, int: 7, spi: 8 },
@@ -85,8 +86,17 @@ function makeCharGenOutput(overrides: Partial<CharGenOutput> = {}): CharGenOutpu
     occupation: ['弓箭手'],
     background: '精灵巡林者背景故事',
     appearance: '银发精灵外貌',
+    clothing: '绿色斗篷与皮甲',
     personality: '冷静果断',
-    ascension: { enabled: false, path: '', description: '' },
+    likes: '森林、弓箭',
+    skills: [],
+    equipment: [],
+    inventory: [],
+    ascension: {
+      enabled: false, path: '', description: '',
+      elements: [], authorities: [], laws: [],
+      deityPosition: '', divineKingdom: { name: '', description: '' },
+    },
     ...overrides,
   };
 }
@@ -314,7 +324,11 @@ describe('assembleCharacterState', () => {
     const charData = makeCharGenOutput({
       tier: 5,
       level: 15,
-      ascension: { enabled: true, path: '火焰之道', description: '掌控火之要素' },
+      ascension: {
+        enabled: true, path: '火焰之道', description: '掌控火之要素',
+        elements: [], authorities: [], laws: [],
+        deityPosition: '', divineKingdom: { name: '', description: '' },
+      },
     });
     const result = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] });
     expect(result.ascension.enabled).toBe(true);
@@ -623,6 +637,13 @@ function makeAgenticMockClient(
   finalOutput: string,
 ): CharGenClient {
   return {
+    chat: vi.fn().mockResolvedValue({
+      output: 'mock chat response',
+      rawResponse: 'mock chat response',
+      tokensUsed: 0,
+      cacheHit: false,
+      duration: 0,
+    }),
     chatWithTools: vi.fn().mockImplementation(
       async (request, toolExecutor, _options) => {
         const conversation = [...request.messages];
@@ -756,6 +777,13 @@ describe('callCharGenAgent (Agentic 路径)', () => {
 
   it('Agentic 路径失败应抛出异常', async () => {
     const mockClient: CharGenClient = {
+      chat: vi.fn().mockResolvedValue({
+        output: 'mock chat response',
+        rawResponse: 'mock chat response',
+        tokensUsed: 0,
+        cacheHit: false,
+        duration: 0,
+      }),
       chatWithTools: vi.fn().mockResolvedValue({
         output: null,
         rawResponse: '',
@@ -827,6 +855,13 @@ describe('callItemGenAgent (Agentic 路径)', () => {
 
   it('Agentic 路径失败应返回空物品（不阻断流程）', async () => {
     const mockClient: CharGenClient = {
+      chat: vi.fn().mockResolvedValue({
+        output: 'mock chat response',
+        rawResponse: 'mock chat response',
+        tokensUsed: 0,
+        cacheHit: false,
+        duration: 0,
+      }),
       chatWithTools: vi.fn().mockResolvedValue({
         output: null,
         rawResponse: '',
