@@ -639,27 +639,44 @@ export async function executeToolCall(
 
       const SCRIPT_REF = {
         events: `## 事件系统 (持久订阅)
-$event.on(eventType, scriptKey) → handle  // 订阅事件，返回句柄
-$event.off(handleOrType)                 // 取消订阅
+$event.on(eventType, scriptKey) → handle  // 订阅事件，返回句柄。scriptKey 必须是字符串 key（当前对象 scripts 池中的键名），不能传内联函数
+$event.off(handleOrType)                 // 取消订阅，传入 handle 字符串或 eventType
 
-事件类型示例: 'combat_round_start' | 'combat_round_end' | 'hp_below_50' | 'skill_cast' | 'on_hit' | 'on_kill'
+⚠️ 事件类型是自定义字符串，不存在预定义的系统事件。
+  你可以使用 'combat_round_start' | 'combat_round_end' | 'hp_below_50' | 'skill_cast' | 'on_hit' | 'on_kill' 等作为示例参考，但这些都是你**自己定义和 emit 的**，不是系统自带的。
+❌ 不存在 $event.getTargets()，不要编造。
+❌ $event.on(eventType, function() {...}) — 第二个参数必须传字符串 key，不能传内联代码。
 生命周期约定: init=装备/获得时执行一次 | cast=主动使用时执行 | tick=每回合/时间单位执行 | cleanup=移除/卸下时执行`,
         resources: `## 资源操作
 $resource.modifyHp(charId, amount)       // amount: 正数=恢复, 负数=伤害
 $resource.modifyStat(charId, stat, amount) // stat: 'str'|'dex'|'con'|'int'|'spi'
 $resource.getHp(charId) → number
-$resource.getMaxHp(charId) → number`,
+$resource.getMaxHp(charId) → number
+
+⚠️ 沙盒行为说明:
+- $resource.getHp / getMaxHp 在脚本执行时**始终返回 0**（stub），不能用于条件判断。如需 HP 阈值逻辑，改用事件 payload 传值给脚本。
+- $resource.modifyHp / modifyStat 正常工作，是产生 Side Effect 的主要方式。
+- ❌ 不存在 $resource.getTargets() / getEnemies() 等查询函数。`,
         status: `## 状态效果
 $status.add(charId, { name, description, category, stacks, maxStacks, remainingTime, timeUnit, effects, effectDescriptions, scripts })
 $status.remove(charId, effectId)
 $status.setStacks(charId, effectId, stacks)
 $status.getStacks(charId, effectId) → number
 timeUnit: '回合' | '分钟' | '小时'
-category: '增益' | '减益' | '特殊'`,
+category: '增益' | '减益' | '特殊'
+
+⚠️ 沙盒行为说明:
+- $status.getStacks 在脚本执行时**始终返回 0**（stub），不能用于条件判断。改用 self.stacks 读取自身层数（self 是自身状态快照，真实值）。
+- $status.add 的第一个参数必须是 charId 字符串（owner 或 target），不是地点名如 '战场'。
+- $status.remove 的第二个参数是 effectId（效果名的小写蛇形，如 'burn_seal'），不是分类名。`,
         dice: `## 骰子系统 (脚本内可用)
 $dice.d20() → number
 $dice.d100() → number
-$dice.roll(formula) → number  // formula: '2d6+3', '4d8' 等`,
+$dice.roll(formula) → number  // formula: '2d6+3', '4d8' 等
+
+⚠️ 沙盒行为说明:
+- $dice 函数每次调用生成**新鲜随机数**（不是游戏状态快照），可用于概率型条件判断（如随机触发效果）。
+- 骰值结果用于传给 $resource.modifyHp / $status.add 的参数，决定实际数值。`,
         paths: `## 变量路径命名空间约定
 sys.<path>     — 引擎管理变量 (如 sys.世界.地点.城市)
 char.<id>.<path> — 按角色ID分组 (如 char.player_1.hp)
@@ -672,7 +689,12 @@ temp.<path>    — 会话临时 (不持久化)
 @skill.<技能名>.<scriptKey> — 引用指定技能的脚本
 @item.<物品名>.<scriptKey>  — 引用指定物品的脚本
 @status.<效果名>.<scriptKey> — 引用指定状态效果的脚本
-@ascension.<要素名>.<scriptKey> — 引用登神要素的脚本`,
+@ascension.<要素名>.<scriptKey> — 引用登神要素的脚本
+
+⚠️ 沙盒行为说明:
+- 变量读写只能用于写入 Side Effect 参数，不能用于读取状态做条件分支。
+- 脚本中 owner 和 target 是纯 string（charId），不是对象引用。owner.tier / target.hp 会报错。
+- self 对象是自身状态快照，可读：self.stacks / self.remainingTime / self.name。`,
       };
 
       if (query === 'all') {

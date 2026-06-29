@@ -253,8 +253,14 @@ function selectAgent(agentId: string) {
   if (custom) {
     agentPromptDraft.value = custom
   } else {
-    const tpl = getAgentTemplate(agentId)
-    agentPromptDraft.value = tpl ? (tpl.fixedSystem + '\n\n' + (tpl.fixedExamples || '')).trim() : ''
+    // Phase 9: 优先从 agent-config.json 读 systemPrompt，否则回退到 agent-templates.ts 的 fixedSystem+fixedExamples
+    const pd = cfg.projectAgentDefaults?.agents?.[agentId]
+    if (pd?.systemPrompt) {
+      agentPromptDraft.value = pd.systemPrompt
+    } else {
+      const tpl = getAgentTemplate(agentId)
+      agentPromptDraft.value = tpl ? (tpl.fixedSystem + '\n\n' + (tpl.fixedExamples || '')).trim() : ''
+    }
   }
   s.agentPromptEdited = false
 }

@@ -229,7 +229,9 @@ async function main() {
     // 加载 agent 配置和世界书
     let acfg: any = {};
     try { const ac = JSON.parse(fs.readFileSync("data/defaults/agent-config.json", "utf-8")); acfg = (ac.agents || {})[AGENT_ID] || {}; } catch {}
-    const _agentConfig = { agentId: AGENT_ID, enabled: true, worldBookIds: acfg.worldBookIds || [], model: acfg.model || "", presetId: acfg.presetId || "" };
+    const _agentConfig: any = { agentId: AGENT_ID, enabled: true, worldBookIds: acfg.worldBookIds || [], model: acfg.model || "", presetId: acfg.presetId || "" };
+    // Phase 9: dry-run 也需要注入 systemPrompt
+    if (acfg.systemPrompt) _agentConfig.systemPrompt = acfg.systemPrompt;
     const _worldBooks: any[] = [];
     for (const wbId of _agentConfig.worldBookIds) {
       const wbPath = "data/worldbooks/" + wbId + ".json";
