@@ -247,6 +247,9 @@ export interface AgentConfig {
   /** 🆕 Phase 9: 覆盖模板中的 fixedSystem（agent-config.json 的 systemPrompt 字段）。
    * 如果设置了此字段，buildAgentMessages 将优先使用它，而不是模板中的 fixedSystem+fixedExamples。 */
   systemPrompt?: string;
+  /** 🆕 Phase 10: Custom template string with {{PLACEHOLDER}} references.
+   *  If not set, the default template from placeholder-registry.ts is used. */
+  template?: string;
 }
 
 // ========== Preset (Phase 8) ==========
@@ -264,15 +267,32 @@ export interface AgentPreset {
   presencePenalty?: number;
 }
 
-/** Agent Prompt 模板（运行时使用） */
+/**
+ * Agent Prompt 模板（运行时使用）
+ * @deprecated Phase 10: Replaced by placeholder-based template system.
+ *   fixedSystem/fixedExamples kept as fallback for agents without agent-config.json entries.
+ *   variableContext/variableInstruction are no longer used.
+ */
 export interface AgentPromptTemplate {
   /** 固定部分（缓存敏感 — 不变则命中） */
   fixedSystem: string;
   fixedExamples: string;
-  /** 可变部分（每轮变化 — 不影响缓存前缀） */
+  /** 可变部分（每轮变化 — 不影响缓存前缀）
+   * @deprecated Use {{PLACEHOLDER}} template instead */
   variableContext: (ctx: AgentContext) => string;
+  /** @deprecated Use {{PLACEHOLDER}} template instead */
   variableInstruction: (ctx: AgentContext) => string;
 }
+
+/** Phase 10: Placeholder resolver function signature */
+export type PlaceholderResolver = (
+  ctx: AgentContext,
+  config: AgentConfig,
+  params?: Record<string, string>,
+) => string;
+
+/** Phase 10: Local params injected by chain orchestrators (story→craft→item) */
+export type LocalParams = Record<string, string>;
 
 export interface PipelineStage {
   agents: string[];             // 本阶段运行的 Agent ID（同阶段可并行）

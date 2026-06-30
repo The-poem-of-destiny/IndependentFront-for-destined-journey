@@ -57,6 +57,8 @@ export interface AgentDefaultEntry {
   historyLayers?: number
   /** Phase 8.6: 每条历史正文截断字数（不填=按 agent 类别默认） */
   historySlice?: number
+  /** Phase 10: Custom template string with {{PLACEHOLDER}} references */
+  template?: string
 }
 
 export interface AgentProjectDefaults {
