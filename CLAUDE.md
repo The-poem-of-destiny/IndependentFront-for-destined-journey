@@ -34,9 +34,10 @@ docs/
 │   │   └── game_page_design.md  # 游戏页设计规划 + 引擎支撑审计（7e 必读）
 │   └── phase8/                  # Phase 8 Agent 上下文可见性
 │       └── phase8_plan.md       # Agent 可见性模型 + 世界书分区 + 预设系统
-├── reference/                   # 参考页面架构分析
-│   ├── status_page_architecture.md  # 状态栏页面架构（7e 必读）
-│   └── effect_script_system.md      # 词条效果 & 脚本系统架构（引擎必读）
+├── reference/                   # 参考文档
+│   ├── status_page_architecture.md     # 状态栏页面架构（7e 必读）
+│   ├── effect_script_system.md         # 词条效果 & 脚本系统架构（引擎必读）
+│   └── agent_system_prompt_guide.md    # 🆕 Agent System Prompt 配置流程（架构/步骤/踩坑/检查清单）
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
@@ -202,12 +203,13 @@ src/sillytavern/                    ← 核心引擎（30+ 模块，含 Phase 1-
   │   ├── 自动重试+指数退避 / 超时控制 / AbortSignal 外部取消
   │   └── 缓存命中检测: cache_hit / prompt_cache_hit_tokens / x-ds-cache-hit header
   │
-  ├── agent-templates.ts            ← [Phase 3+6e] Prompt 模板系统
+  ├── agent-templates.ts            ← [Phase 3+6e+9] Prompt 模板系统
   │   ├── 10+3 Agent 模板: memory_recall / plot_pre_check / story / vars_update
   │   │   char_update / memory_summary / plot_post_check / plot_outline
   │   │   craft_gen / char_gen / item_gen (Phase 6e → 8.5 Agentic)
-  │   ├── 每个模板: fixedSystem + fixedExamples (缓存敏感) + variableContext + variableInstruction (每轮动态)
-  │   └── buildAgentMessages() / getAgentTemplate()
+  │   ├── fixedSystem 已迁移到 agent-config.json（仅保留 1-2 行 stub）
+  │   ├── 保留 variableContext + variableInstruction（每轮动态上下文）
+  │   └── buildAgentMessages(): systemPrompt override (agent-config.json) > 预设 > fixedSystem 兜底
   │
   ├── agent-tools.ts                 ← [Phase 8.5] Agentic 工具注册表 (17 tools)
   │   ├── OpenAI 兼容 function schemas: roll_d20 / craft_check / random_name 等
@@ -348,6 +350,7 @@ Layer 1  原语级 状态读写        StateManager.commitChatState() / $validat
 | EventBus 引入时机 | Phase 7e+8（已完成） | 与 Script 系统同步上线 |
 | Agentic 模式 | OpenAI function calling (Phase 8.5) | craft_gen/char_gen/item_gen 通过 tools 调用真实 Code 函数，禁止 AI 编造数值 |
 | craft_request 时序 | 延迟型 (对齐 combat_trigger) | Stage 1 暂存 → Stage 2 统一执行，避免阻塞叙事 |
+| System Prompt 管理 (Phase 9) | agent-config.json 唯一来源 | 所有 Agent 的完整 systemPrompt 存在 agent-config.json；agent-templates.ts 只留 stub + 动态上下文函数 |
 
 ## v4 三层子系统分流 (ADR-24/25/26, 2026-06-15)
 
@@ -411,7 +414,8 @@ SubSystem-CharGen 角色 → Stage2 vars_update 异步检测新NPC
 | 7g | 衔接 & 测试 | ⬜ |
 | 8 | Agent 上下文可见性 & Prompt 体系 | ✅ |
 | 8.5 | Agentic Agent 系统 (function calling + 工具注册表 + F1-F7 修复) | ✅ |
-| 9 | 集成测试 & 交付 | ⬜ |
+| 9 | Agent System Prompt 迁移 (10 Agent 全量迁入 agent-config.json + item_gen 对标 char_gen 增强 + 文档) | ✅ |
+| 9b | 集成测试 & 交付 | ⬜ |
 
 ## 前端架构 (Phase 7, 2026-06-17)
 
