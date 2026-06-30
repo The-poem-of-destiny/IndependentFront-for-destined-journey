@@ -272,6 +272,9 @@ src/sillytavern/                    ← 核心引擎（30+ 模块，含 Phase 1-
   │   └── 纯函数模块，无副作用
   │
   ├── char-gen-agent.ts              ← [Phase 6e] 角色生成编排 (char_gen→item_gen链)
+  ├── craft-gen-chain.ts             ← [Phase 9b] 制作生成编排 (craft_gen→item_gen链)
+  │   ├── runCraftGenChain / callCraftGenAgent / callItemGenForCraft
+  │   └── parseCraftResultXML / buildCraftPatches
   │   ├── detectNewCharacters / runCharGenChain / assembleCharacterState
   │   ├── callCharGenAgent / callItemGenAgent / buildCharGenPatches
   │   └── $chargen API: { detect, generate, assemble }
@@ -415,7 +418,8 @@ SubSystem-CharGen 角色 → Stage2 vars_update 异步检测新NPC
 | 8 | Agent 上下文可见性 & Prompt 体系 | ✅ |
 | 8.5 | Agentic Agent 系统 (function calling + 工具注册表 + F1-F7 修复) | ✅ |
 | 9 | Agent System Prompt 迁移 (10 Agent 全量迁入 agent-config.json + item_gen 对标 char_gen 增强 + 文档) | ✅ |
-| 9b | 集成测试 & 交付 | ⬜ |
+| 9b | craft_gen 深度细化 (systemPrompt 重写 → ~200行/12节 + craft-gen-chain.ts + item_gen 协作 + craft_check 准备阶段反馈修复 + remove_item 材料消耗) | ✅ 核心完成 |
+| 9c | 集成测试 & 交付 | ⬜ |
 
 ## 前端架构 (Phase 7, 2026-06-17)
 

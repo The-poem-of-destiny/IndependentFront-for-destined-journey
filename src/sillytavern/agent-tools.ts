@@ -357,7 +357,7 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
   craft_gen: [
     'roll_d20', 'roll_d100', 'roll_dice',
     'craft_check', 'craft_settle', 'craft_get_base_dc', 'craft_get_production_bonus',
-    'get_character', 'get_hp_percent', 'get_inventory',
+    'get_character', 'get_inventory',
   ],
   char_gen: [
     'roll_d20', 'roll_d100', 'roll_dice',
@@ -467,6 +467,10 @@ export async function executeToolCall(
         d20Rolls: [], // Will be rolled inside craftResolver
       };
 
+      // 先跑 validate 获取准备阶段的问题（品质继承/层级封顶/管制物等）
+      const validation = $craft.validate(request);
+      const prepIssues = validation.issues;
+
       // Only run the check phase (not the full startProject)
       const checkResult = $craft.check(request);
       return {
@@ -478,6 +482,9 @@ export async function executeToolCall(
         diceRolls: checkResult.breakdown.diceRolls,
         totalValue: checkResult.breakdown.totalValue,
         rating: checkResult.breakdown.rating,
+        // 准备阶段问题 — AI 据此调整材料或品质，而不是盲目重试
+        prepPassed: prepIssues.length === 0,
+        prepIssues: prepIssues.length > 0 ? prepIssues : undefined,
       };
     }
     case 'craft_get_base_dc': {

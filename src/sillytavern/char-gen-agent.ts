@@ -658,7 +658,7 @@ function parseCharGenXML(xml: string): CharGenOutput {
  * 1. JSON（旧格式，向后兼容）
  * 2. XML <item_result>（新 Agentic 格式，Phase 8.5）
  */
-function parseItemGenOutput(raw: string): ItemGenOutput {
+export function parseItemGenOutput(raw: string): ItemGenOutput {
   // 先尝试 XML
   const xml = extractXML(raw, 'item_result');
   if (xml) {

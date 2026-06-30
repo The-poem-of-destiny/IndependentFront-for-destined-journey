@@ -46,13 +46,11 @@ describe('AGENT_TEMPLATES', () => {
     'memory_summary',
     'plot_post_check',
     'plot_outline',
-    'craft_gen',
     'char_gen',
-    'item_gen',
   ];
 
-  // v3 兼容别名（短模板，仅保留接口兼容）
-  const stubAgents = ['plot_check', 'plot_correct'];
+  // v3 兼容别名 + systemPrompt 迁移到 agent-config.json 的 agent（短模板，仅保留接口兼容）
+  const stubAgents = ['plot_check', 'plot_correct', 'craft_gen', 'item_gen'];
 
   for (const agentId of fullAgents) {
     describe(`${agentId}`, () => {
@@ -233,7 +231,7 @@ describe('buildAgentMessages', () => {
 // ========== Template Quality Checks ==========
 
 // Skip v3 compat stubs + templates with system prompt externalized to agent-config.json — they're intentionally minimal
-const STUB_IDS = new Set(['plot_check', 'plot_correct', 'item_gen']);
+const STUB_IDS = new Set(['plot_check', 'plot_correct', 'item_gen', 'craft_gen']);
 const activeTemplates = Object.entries(AGENT_TEMPLATES)
   .filter(([id]) => !STUB_IDS.has(id));
 

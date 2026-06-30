@@ -1,0 +1,148 @@
+{
+  "version": 7,
+  "exportedAt": 1782535003178,
+  "characters": [
+    {
+      "id": "char-player-001",
+      "type": "player",
+      "name": "柠萌茶",
+      "race": "人类",
+      "identity": ["B级冒险者", "炼金专家"],
+      "occupation": ["炼金术师"],
+      "tier": 3,
+      "tierName": "精英",
+      "level": 9,
+      "totalExp": 0,
+      "expToNext": 100,
+      "attributes": {
+        "str": 5,
+        "dex": 5,
+        "con": 5,
+        "int": 12,
+        "spi": 8
+      },
+      "freeAttrPoints": 0,
+      "hp": 20,
+      "maxHp": 20,
+      "mp": 72,
+      "maxMp": 72,
+      "sp": 48,
+      "maxSp": 48,
+      "ascension": {
+        "enabled": false,
+        "elements": {},
+        "authority": {},
+        "law": {},
+        "deityPosition": "",
+        "divineKingdom": { "name": "", "description": "" }
+      },
+      "equipment": [
+        {
+          "slot": "腰部",
+          "itemId": "eq-belt-001",
+          "name": "制式次元腰包",
+          "description": "冒险者标配的空间储物装备",
+          "stats": {},
+          "durability": 100,
+          "maxDurability": 100,
+          "effects": { "便携空间": "提供额外储存空间" }
+        },
+        {
+          "slot": "身体",
+          "itemId": "eq-robe-001",
+          "name": "奥术导师法袍",
+          "description": "绣有星辰图案的深蓝色华美法袍",
+          "stats": { "防御力": 45, "智力": 4 },
+          "durability": 120,
+          "maxDurability": 120,
+          "effects": { "奥术亲和": "提升奥术法术伤害20%" }
+        }
+      ],
+      "inventory": [
+        {
+          "id": "mat-silverleaf-001",
+          "name": "银叶草",
+          "description": "富含魔力的银色草药，炼金基础材料",
+          "quantity": 5,
+          "type": "material",
+          "rarity": "普通"
+        },
+        {
+          "id": "mat-moondust-001",
+          "name": "月光粉尘",
+          "description": "在满月之夜采集的魔法粉末，品质优良",
+          "quantity": 3,
+          "type": "material",
+          "rarity": "优良"
+        },
+        {
+          "id": "mat-moondust-002",
+          "name": "月光粉尘",
+          "description": "另一批满月采集的魔法粉末",
+          "quantity": 2,
+          "type": "material",
+          "rarity": "优良"
+        },
+        {
+          "id": "mat-crystal-001",
+          "name": "魔力水晶碎片",
+          "description": "破碎的水晶碎片，蕴含着残存的魔力",
+          "quantity": 2,
+          "type": "material",
+          "rarity": "优良"
+        },
+        {
+          "id": "mat-phoenix-001",
+          "name": "凤凰羽毛",
+          "description": "一根燃烧过的凤凰羽毛，稀有材料，需许可",
+          "quantity": 1,
+          "type": "material",
+          "rarity": "稀有"
+        }
+      ],
+      "skills": [],
+      "statusEffects": [],
+      "money": 500,
+      "location": "瓦伦蒂亚-炼金工坊",
+      "customFields": {}
+    }
+  ],
+  "chats": [
+    {
+      "id": "chat-craft-test",
+      "name": "制作测试: 炼金制作回复药水 (1轮)",
+      "messages": [
+        {
+          "role": "user",
+          "content": "柠萌茶的魔力药剂快用完了。他走进自己的炼金工坊，从次元腰包里取出银叶草和月光粉尘，准备制作一批回复药水——这个配方他再熟悉不过了。",
+          "id": "msg-craft-1",
+          "timestamp": 1782535003178
+        },
+        {
+          "role": "assistant",
+          "content": "柠萌茶推开炼金工坊的木门，干燥的药草香气混合着矿物粉尘的味道扑面而来。工作台上，玻璃瓶和坩埚整齐地排列着，蒸馏器在角落发出微弱的嗡鸣。\n\n他从腰间取下制式次元腰包，将银叶草和月光粉尘一一摆开。银叶草的叶片在魔法灯光下泛着淡淡的银辉，而月光粉尘则像凝固的星光一样安静地躺在小瓶中。\n\n<craft_request characterId=\"char-player-001\" industry=\"炼金\" productName=\"回复药水\" targetQuality=\"优良\" expects=\"快速恢复HP，口感不苦涩\">用银叶草和月光粉尘炼制一批回复药水</craft_request>\n\n他挽起袖子，点燃了坩埚下方的魔法炉火。蓝色的火焰在锅底跳跃，他知道，今晚又会是一个漫长的炼金之夜。",
+          "id": "msg-craft-2",
+          "timestamp": 1782535033178
+        }
+      ]
+    }
+  ],
+  "lorebooks": [],
+  "presets": [],
+  "memories": [],
+  "plotEvents": [],
+  "snapshots": [],
+  "apiEndpoints": [],
+  "plotOutlines": [],
+  "saveProfiles": [
+    {
+      "saveId": "craft-test-save",
+      "fp": 100,
+      "totalFpEarned": 100
+    }
+  ],
+  "settings": {
+    "activeApiEndpointIndex": 0,
+    "embeddingEnabled": false
+  }
+}

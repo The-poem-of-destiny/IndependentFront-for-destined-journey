@@ -330,6 +330,18 @@ export function resolveCraft(request: CraftActionRequest): CraftActionResult {
 
   // Build patches
   const patches: StatePatch[] = [];
+
+  // 材料消耗 — 从背包中扣除（用 remove_item 而非 delta_variable）
+  // remove_item 内部逻辑: qty -= amount, quantity ≤ 0 则 splice 删除
+  for (const mat of request.materials) {
+    patches.push({
+      op: 'remove_item',
+      target: `characters.${request.characterId}`,
+      value: mat.itemId,
+      amount: mat.quantity,
+    });
+  }
+
   if (settleResult.breakdown.resourceCost) {
     patches.push({
       op: 'delta_hp',

@@ -514,76 +514,12 @@ ${formatVariables(ctx)}`,
   },
 
   // ---- craft_gen: 制作效果生成 (Phase 6e) ----
-  // 🚩 Phase 8.5 Agentic: 延迟型，AI 通过 tools 调用真实工具获取数值，最终输出 <craft_result> XML
+  // 🚩 Phase 8.5 Agentic: 延迟型，AI 通过 tools 调用真实工具获取数值
+  // 🆕 Phase 9b: 完整提示词已迁移到 agent-config.json 的 systemPrompt 字段
+  //   输出格式: <craft_result> XML（含 <item_requests> 派发 item_gen）
   craft_gen: {
-    fixedSystem:
-`你是一个制作系统 AI。你可以调用 **function calling 工具** 来获取真实数据。
-
-**可用工具:**
-- roll_d20: 掷d20检定骰（加值/优势/劣势）
-- roll_d100: 掷d100百分比骰
-- roll_dice: 掷任意骰子公式（如 2d6）
-- craft_check: 执行完整制作检定 — 输入角色/行业/品质/材料，返回真实DC+骰值+评级
-- craft_get_base_dc: 查询某品质的基准 DC
-- craft_get_production_bonus: 查询某品质的产能加成
-- get_character: 查询角色属性/装备/资源
-- get_hp_percent: 查询角色 HP 百分比
-
-**工作流程:**
-1. 调用 get_character 获取制作者数据
-2. 调用 craft_check 获取真实检定结果（禁止自己编造 DC 值/d20 值）
-3. 解读检定结果（大失败/失败/成功/精益求精）
-4. 成功时根据 expects 需求 brainstorm 创意效果词条
-5. 生成制作叙事片段
-6. 输出最终 <craft_result> XML
-
-**⚠️ 绝对禁止: 编造任何数值。DC、骰值、评级必须来自工具返回。**
-
-**输出格式 (严格 XML):**
-<craft_result>
-<success>true/false</success>
-<product_name>制品名称</product_name>
-<quality>品质</quality>
-<check_summary>检定简述（如"DC12，d20=15+5=20，精益求精"）</check_summary>
-<creative_effects>
-<effect name="词条名" type="增益|减益|特殊" atk="0" def="0" hp="0" mp="0" sp="0" dot="0" dotType="" duration="" durationUnit="回合" stackable="false" maxStacks="1" dc="0" dcAttr="" appliesStatus="" scripts="">效果描述</effect>
-</creative_effects>
-<narrative>制作叙事（200-400字，第二人称"你"，注入回正文）</narrative>
-<craft_params>
-<industry>行业</industry>
-<target_quality>品质</target_quality>
-<quantity>数量</quantity>
-<materials>材料列表</materials>
-</craft_params>
-</craft_result>`,
-
-    fixedExamples:
-`**示例:**
-上下文: Lv.5 锻造师(T1)，精炼铁矿石×3。
-<craft_request expects="锋利到能斩断树枝">制作一把锋利的长剑</craft_request>
-
-步骤1 — 调用 get_character({characterId:"player_1"}) → 获取角色属性
-步骤2 — 调用 craft_check({characterId:"player_1",industry:"锻造",targetQuality:"普通",productName:"长剑",materials:[...]})
-       → 返回: {baseDC:6,materialDCModifier:0,finalDC:6,diceValue:15,totalValue:20,rating:"精益求精"}
-步骤3 — 输出最终 XML:
-
-<craft_result>
-<success>true</success>
-<product_name>精铁长剑</product_name>
-<quality>普通</quality>
-<check_summary>DC6，d20掷出15+5(力量)=20，总检定值20，评级: 精益求精</check_summary>
-<creative_effects>
-<effect name="精铁刃" type="增益" atk="5" def="0" hp="0" mp="0" sp="0" dot="0" dotType="" duration="" durationUnit="回合" stackable="false" maxStacks="1" dc="0" dcAttr="" appliesStatus="">剑刃经过反复锻打与精细研磨，切削力出众，能轻易斩断细枝</effect>
-<effect name="锻火余温" type="特殊" atk="0" def="0" hp="0" mp="0" sp="0" dot="0" dotType="" duration="" durationUnit="回合" stackable="false" maxStacks="1" dc="0" dcAttr="" appliesStatus="">剑身隐约残留着锻炉的余温，触碰时有微弱的暖意</effect>
-</creative_effects>
-<narrative>你握紧铁锤，将烧红的铁块放在铁砧上。火星四溅，叮叮当当的锻打声回荡在铁匠铺中。你反复折叠锻打，让剑刃的纹理如流水般致密。淬火时白雾升腾，一把闪烁着寒光的长剑在水中逐渐成型。最后用磨石细细打磨，剑刃锋利得能吹毛断发。</narrative>
-<craft_params>
-<industry>锻造</industry>
-<target_quality>普通</target_quality>
-<quantity>1</quantity>
-<materials>精炼铁矿石×3</materials>
-</craft_params>
-</craft_result>`,
+    fixedSystem: `制作效果生成 (Agentic) — 完整提示词已通过 agent-config.json 的 systemPrompt 字段注入。`,
+    fixedExamples: '',
 
     variableContext: (ctx: AgentContext) => {
       let prompt = '';
@@ -597,7 +533,7 @@ ${formatVariables(ctx)}`,
     variableInstruction: (ctx: AgentContext) => {
       const storyOutput = ctx.agentOutputs?.get('story') ?? '';
       // Phase 8.6: 默认注入 1 轮历史, 辅助判断制作意图的连续性 (可配 historyLayers=0 关闭)
-      return `${recentHistoryBlock(ctx)}**正文输出 (含 <craft_request> 标记):**\n${storyOutput}\n\n请调用工具获取真实数据（不要编造数值），然后输出 craft_result。`;
+      return `${recentHistoryBlock(ctx)}**正文输出 (含 <craft_request> 标记):**\n${storyOutput}\n\n请调用工具获取真实数据（不要编造数值），然后输出 <craft_result> XML。`;
     },
   },
 

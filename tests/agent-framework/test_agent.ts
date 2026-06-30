@@ -133,8 +133,16 @@ function validateOutput(agentId: string, output: string): ValidationResult {
       break;
     case 'craft_gen':
       if (!/<craft_result>/.test(text)) errors.push('未找到 <craft_result>');
-      else for (const tag of ['success', 'product_name', 'quality', 'check_summary', 'creative_effects', 'narrative']) {
+      else for (const tag of ['success', 'product_name', 'quality', 'rating', 'check_summary', 'narrative', 'craft_params']) {
         if (!new RegExp(`<${tag}>`).test(text)) errors.push(`缺 <${tag}> 标签`);
+      }
+      // 成功时应该有 <item_requests>（替代旧版 <creative_effects>）
+      if (/<success>true<\/success>/.test(text) && !/<item_requests>/.test(text)) {
+        errors.push('成功但缺 <item_requests> 标签（Phase 9b: 已取代 <creative_effects>）');
+      }
+      // 失败时不应有 <item_requests>
+      if (/<success>false<\/success>/.test(text) && /<item_requests>/.test(text)) {
+        errors.push('失败时不应有 <item_requests> 标签');
       }
       break;
     case 'char_gen':
