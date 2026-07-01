@@ -182,6 +182,11 @@ function insertPlaceholder(key: string) {
   })
 }
 
+/** 渲染占位符标签文本 — 避免 Vue 模板中 {{ 转义问题 */
+function phLabel(key: string): string {
+  return '{' + '{ ' + key + ' }' + '}';
+}
+
 // Get the default template for non-story agents (from placeholder-registry)
 function getDefaultTemplateForAgent(agentId: string | null): string {
   if (!agentId) return ''
@@ -922,7 +927,7 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
                   :style="{ background: ph.color + '22', color: ph.color, border: '1px solid ' + ph.color + '44' }"
                   @click="insertPlaceholder(ph.key)"
                   :title="ph.desc"
-                >{{ '{{' }}{{ ph.key }}{{ '}}' }}</span>
+                >{{ phLabel(ph.key) }}</span>
               </div>
             </div>
 

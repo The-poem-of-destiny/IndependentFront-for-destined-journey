@@ -167,6 +167,11 @@ const FALLBACK_META: PlaceholderMeta = {
 // ============================================================
 const PLACEHOLDER_RE = /\{\{([A-Z_][A-Z0-9_.]*)(?::([^{}]*))?\}\}/g
 
+/** 渲染占位符显示文本 — 避免 Vue 模板中 {{ 被解析为表达式 */
+function badgeText(seg: { name: string; params?: string }): string {
+  return '{' + '{' + seg.name + (seg.params ? ':' + seg.params : '') + '}' + '}';
+}
+
 const segments = computed<TemplateSegment[]>(() => {
   const result: TemplateSegment[] = []
   const tpl = props.template
@@ -244,9 +249,7 @@ const segments = computed<TemplateSegment[]>(() => {
           class="template-badge"
           :style="{ '--badge-color': seg.color }"
         >
-          <span class="badge-text">
-            {{ '{' + '{' + seg.name + (seg.params ? ':' + seg.params : '') + '}' + '}' }}
-          </span>
+          <span class="badge-text">{{ badgeText(seg) }}</span>
           <span v-if="showLabels" class="badge-label text-xs">{{ seg.label }}</span>
         </span>
       </template>
