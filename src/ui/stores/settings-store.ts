@@ -81,6 +81,8 @@ function getDefaults(): Record<string, any> {
     agentWorldbookEnabled: {} as Record<string, boolean>,
     agentWorldbookIds: {} as Record<string, string[]>,
     agentPrompts: {} as Record<string, string>,
+    /** Phase 10: 用户自定义的 Agent 上下文模板 ({{PLACEHOLDER}} 字符串) */
+    agentTemplates: {} as Record<string, string>,
     agentPromptEdited: false,
     agentDirty: {} as Record<string, boolean>,
 
@@ -219,6 +221,10 @@ export const useSettingsStore = defineStore('settings', () => {
       if (!(agentId in (settings.value.agentPrompts as Record<string, string>))) {
         settings.value.agentPrompts[agentId] = entry.systemPrompt ?? ''
       }
+      // Phase 10: 从项目默认加载上下文模板
+      if (entry.template && !(agentId in (settings.value.agentTemplates as Record<string, string>))) {
+        settings.value.agentTemplates[agentId] = entry.template
+      }
       // LLM 参数（缺省使用合理默认值）
       if (!(agentId in (settings.value.agentTemperature as Record<string, number>))) {
         settings.value.agentTemperature[agentId] = entry.temperature ?? 0.7
@@ -241,6 +247,10 @@ export const useSettingsStore = defineStore('settings', () => {
       }
       if (entry.historySlice !== undefined && !(agentId in (settings.value.agentHistorySlice as Record<string, number>))) {
         settings.value.agentHistorySlice[agentId] = entry.historySlice
+      }
+      // Phase 10: 从项目默认加载 Agent 上下文模板
+      if (entry.template && !(agentId in (settings.value.agentTemplates as Record<string, string>))) {
+        settings.value.agentTemplates[agentId] = entry.template
       }
       // 预设：如果项目默认有预设且用户本地没有，插入 presets 数组
       if (entry.preset && entry.presetId) {

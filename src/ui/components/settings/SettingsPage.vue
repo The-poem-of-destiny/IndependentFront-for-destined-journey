@@ -77,6 +77,7 @@ const activeWorldBook = ref<WorldBook | null>(null)
 
 // Agent 配置全部从 settings-store 读写，自动持久化
 const agentPromptDraft = ref('')
+const agentTemplateDraft = ref('')
 // 初始化时从 store 恢复 agent 提示词
 if (activeAgent.value && s.agentPrompts[activeAgent.value]) {
   agentPromptDraft.value = s.agentPrompts[activeAgent.value]
@@ -164,22 +165,23 @@ const availablePlaceholders = computed(() => {
   return allPlaceholders
 })
 
-// Insert a placeholder at cursor position in the textarea
+// Insert a placeholder at cursor position in the template textarea
 function insertPlaceholder(key: string) {
-  const textarea = document.querySelector('.prompt-editor') as HTMLTextAreaElement
-  if (!textarea) return
-  const start = textarea.selectionStart
-  const end = textarea.selectionEnd
-  const text = agentPromptDraft.value
-  const before = text.substring(0, start)
-  const after = text.substring(end)
-  agentPromptDraft.value = before + `{{${key}}}` + after
-  s.agentPromptEdited = true
-  // Restore cursor position after Vue re-render
+  // Find the template textarea (second .prompt-editor in the non-story card)
+  const textareas = document.querySelectorAll('.prompt-editor');
+  const textarea = textareas[textareas.length - 1] as HTMLTextAreaElement; // last one = template
+  if (!textarea) return;
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const text = agentTemplateDraft.value;
+  const before = text.substring(0, start);
+  const after = text.substring(end);
+  agentTemplateDraft.value = before + `{{${key}}}` + after;
+  s.agentPromptEdited = true;
   nextTick(() => {
-    textarea.selectionStart = textarea.selectionEnd = start + key.length + 4
-    textarea.focus()
-  })
+    textarea.selectionStart = textarea.selectionEnd = start + key.length + 4;
+    textarea.focus();
+  });
 }
 
 /** 渲染占位符标签文本 — 避免 Vue 模板中 {{ 转义问题 */
@@ -400,6 +402,19 @@ function selectAgent(agentId: string) {
     }
   }
   s.agentPromptEdited = false
+
+  // Load template from user custom, agent-config, or default
+  const customTemplate = s.agentTemplates[agentId]
+  if (customTemplate) {
+    agentTemplateDraft.value = customTemplate
+  } else {
+    const pd2 = cfg.projectAgentDefaults?.agents?.[agentId]
+    if (pd2?.template) {
+      agentTemplateDraft.value = pd2.template
+    } else {
+      agentTemplateDraft.value = getDefaultTemplateForAgent(agentId)
+    }
+  }
 }
 
 function confirmPrompt() { if(!activeAgent.value)return; s.agentPrompts[activeAgent.value]=agentPromptDraft.value; s.agentPromptEdited=false; s.agentDirty[activeAgent.value]=true; ui.toast('提示词已保存','success') }
@@ -433,9 +448,12 @@ async function saveAsDefault() {
       entry.preset = JSON.parse(JSON.stringify(activePreset.value))
     }
   } else {
-    // 其他 Agent：提交 System Prompt draft
+    // 其他 Agent：提交 System Prompt + Template
     s.agentPrompts[agentId] = agentPromptDraft.value
     entry.systemPrompt = agentPromptDraft.value || ''
+    // Save template
+    s.agentTemplates[agentId] = agentTemplateDraft.value
+    entry.template = agentTemplateDraft.value || ''
   }
 
   // 读取现有文件，更新当前 Agent，写回
@@ -457,9 +475,10 @@ async function saveAsDefault() {
 
 function saveAgentSettings() {
   if(!activeAgent.value)return
-  // 非 story Agent：提交 System Prompt draft 到持久化
+  // 非 story Agent：提交 System Prompt + Template 到持久化
   if (activeAgent.value !== 'story') {
     s.agentPrompts[activeAgent.value] = agentPromptDraft.value
+    s.agentTemplates[activeAgent.value] = agentTemplateDraft.value
   }
   s.agentDirty[activeAgent.value]=true
   ui.toast('Agent 设置已保存','success')
@@ -500,6 +519,14 @@ function restoreAgentDefaults() {
     } else {
       s.agentPrompts[agentId] = pd.systemPrompt || ''
       agentPromptDraft.value = pd.systemPrompt || ''
+      // Restore template from project default
+      if (pd.template) {
+        s.agentTemplates[agentId] = pd.template
+        agentTemplateDraft.value = pd.template
+      } else {
+        agentTemplateDraft.value = ''
+        delete s.agentTemplates[agentId]
+      }
     }
     s.agentTemperature[agentId] = pd.temperature ?? 0.7
     s.agentTopP[agentId] = pd.topP ?? 1.0
@@ -524,6 +551,8 @@ function restoreAgentDefaults() {
   s.agentPrompts[agentId] = ''
   s.activePresetId = ''
   agentPromptDraft.value = ''
+  agentTemplateDraft.value = ''
+  delete s.agentTemplates[agentId]
   s.agentTemperature[agentId] = 0.7
   s.agentTopP[agentId] = 1.0
   s.agentFreqPen[agentId] = 0
@@ -902,21 +931,34 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
           </AppCard>
 
           <AppCard v-else padding="md" class="detail-card">
-            <h4>模板编辑器</h4>
-            <p class="form-hint">
-              使用 <code v-pre>{{PLACEHOLDER}}</code> 占位符管理上下文注入。占位符运行时会被替换为实际内容。
-            </p>
 
-            <!-- Template textarea -->
+            <!-- Section 1: System Prompt -->
+            <h4>System Prompt</h4>
+            <p class="form-hint">核心指令——正文 AI 的人格、叙事准则、输出格式等。"System Prompt" 里请不要写占位符。</p>
             <textarea
               v-model="agentPromptDraft"
               class="form-textarea prompt-editor"
-              rows="12"
-              placeholder="输入模板，使用 {{SYS_PROMPT}} 等占位符..."
+              rows="10"
+              placeholder="编写核心指令，如叙事准则、输出格式、示例等..."
               @input="s.agentPromptEdited=true"
             />
 
-            <!-- Available placeholders for this agent -->
+            <hr style="margin: 18px 0; border-color: var(--theme-card-border);" />
+
+            <!-- Section 2: Context Template -->
+            <h4>上下文模板</h4>
+            <p class="form-hint">
+              使用 <code v-pre>{{PLACEHOLDER}}</code> 占位符管理上下文注入。占位符运行时会被替换为实际内容。
+            </p>
+            <textarea
+              v-model="agentTemplateDraft"
+              class="form-textarea prompt-editor"
+              rows="8"
+              placeholder="输入模板，使用 {{NARRATIVE}} 等占位符..."
+              @input="s.agentPromptEdited=true"
+            />
+
+            <!-- Placeholder badges -->
             <div class="placeholder-badges" style="margin-top: 10px;">
               <span class="text-xs text-muted">可用占位符 (点击插入):</span>
               <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
@@ -931,16 +973,14 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
               </div>
             </div>
 
-            <!-- Template preview toggle -->
+            <!-- Section 3: Template Preview -->
             <div style="margin-top:12px;">
               <AppButton variant="ghost" size="sm" @click="showTemplatePreview = !showTemplatePreview">
                 {{ showTemplatePreview ? '收起预览' : '模板预览' }}
               </AppButton>
             </div>
-
-            <!-- Template preview panel -->
             <div v-if="showTemplatePreview" class="template-preview-panel" style="margin-top:10px;padding:12px;background:var(--color-surface);border-radius:8px;border:1px solid var(--color-border);">
-              <TemplatePreview :template="agentPromptDraft || getDefaultTemplateForAgent(activeAgent)" :agent-id="activeAgent || undefined" />
+              <TemplatePreview :template="agentTemplateDraft || getDefaultTemplateForAgent(activeAgent)" :agent-id="activeAgent || undefined" />
             </div>
           </AppCard>
 
