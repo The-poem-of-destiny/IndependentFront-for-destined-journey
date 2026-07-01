@@ -103,13 +103,37 @@
 6. 保存 → 🔍模板预览 查看效果
 7. **保存为默认** → 写入 `agent-config.json`
 
-### B. 修改其他 Agent 的模板
+### B. 修改其他 Agent 的模板（Phase 10 结构化模板）
+
+**Phase 10 推荐格式**：用 XML 标签分区 + 注释替代裸占位符拼接。
+
+```
+{{SYS_PROMPT}}                     ← 裸放，不加包装
+
+<世界设定>                          ← XML 分区标签
+{{LORE_BOOK}}
+</世界设定>
+<!-- 注释说明: 数据来源、AI 应该怎么用、不够怎么办 -->   ← 必需的注释
+
+<当前需求>
+{{CRAFT_REQUEST}}
+</当前需求>                         ← 动态数据放最下面，提高缓存命中率
+```
+
+**缓存优化规则**：`{{SYS_PROMPT}}` 最上 → 静态数据上半 → 高频动态数据最底部。
+
+**注释三要素**：
+- 数据来源和含义
+- AI 应该如何理解和使用
+- Agentic Agent 需补充：如果区块数据不够，调用什么工具
 
 1. 设置页 → Agent 配置 → 选择对应 Agent
-2. 在模板编辑区的 textarea 里直接编辑
-3. 点击下方彩色 badge 插入占位符
+2. 在模板编辑区的 textarea 里直接编辑（或直接改 `agent-config.json`）
+3. 点击下方彩色 badge 插入占位符，用 XML 标签包裹
 4. 🔍模板预览 确认
 5. **保存为默认** → 写入 `agent-config.json` 的 `template` 字段
+
+**⚠️ 联动修改提醒**：如果新增/重命名了 XML 分区标签，必须同步更新该 Agent 的 systemPrompt —— 工作流程中引用对应的标签名。详见 `agent_system_prompt_guide.md` 的「结构化模板设计规范」。
 
 ### C. 直接编辑 agent-config.json
 
@@ -208,3 +232,5 @@ console.log(result);
 3. **修改 resolver 后必须跑测试**——`npm run test -- --run placeholder-registry` 确保 80 tests 通过
 4. **SYS_PROMPT 是特殊的**——Story Agent 通过 `localParams['SYS_PROMPT']` 注入（预设拼接结果），绕过 registry。其他 Agent 走 registry
 5. **TemplatePreview 渲染 `{{ }}` 用 `badgeText()` / `phLabel()` 函数**——不要在 Vue 模板里直接写 `{{ '{' + '{'`，会触发解析错误
+6. **模板改完要联动 systemPrompt**——如果模板中新增/重命名了 XML 分区标签（如 `<制作者状态>`），对应 Agent 的 systemPrompt 必须引用这些标签名
+7. **缓存排序是模板设计的一部分**——`SYS_PROMPT` → 静态数据 → 半稳定数据 → 高频动态数据。每次改模板顺序时都要考虑缓存命中率

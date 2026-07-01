@@ -114,7 +114,7 @@ data/defaults/agent-config.json
   "agents": {
     "craft_gen": {
       "systemPrompt": "你是一个制作系统 AI。你可以调用 function calling 工具……（核心指令全文）",
-      "template": "{{SYS_PROMPT}}\n{{CRAFT_REQUEST}}\n{{INVENTORY}}\n{{CHARACTER_STATE}}\n{{LORE_BOOK}}\n{{NARRATIVE:layers=1:slice=800}}"
+      "template": "{{SYS_PROMPT}}\n\n<世界设定>\n{{LORE_BOOK}}\n</世界设定>\n\n<制作者状态>\n{{CHARACTER_STATE}}\n</制作者状态>\n\n<可用材料>\n{{INVENTORY}}\n</可用材料>\n\n<本次制作需求>\n{{CRAFT_REQUEST}}\n</本次制作需求>\n\n<当前剧情>\n{{NARRATIVE:layers=1:slice=800}}\n</当前剧情>"
     }
   }
 }
@@ -151,18 +151,107 @@ data/defaults/agent-config.json
 | **memory_summary** | `{{SYS_PROMPT}}` `{{AGENT.STORY}}` `{{NARRATIVE:layers=4:slice=1500}}` |
 | **plot_post_check** | `{{SYS_PROMPT}}` `{{AGENT.STORY}}` `{{AGENT.MEMORY_SUMMARY}}` `{{PLOT_EVENTS}}` `{{CHARACTER_STATE}}` `{{NARRATIVE:layers=4:slice=1000}}` |
 | **plot_outline** | `{{SYS_PROMPT}}` `{{PLOT_EVENTS}}` `{{NARRATIVE:layers=3:slice=1000}}` |
-| **craft_gen** | `{{SYS_PROMPT}}` `{{CRAFT_REQUEST}}` `{{INVENTORY}}` `{{CHARACTER_STATE}}` `{{LORE_BOOK}}` `{{NARRATIVE:layers=1:slice=800}}` |
-| **char_gen** | `{{SYS_PROMPT}}` `{{CHAR_DETECT}}` `{{CHARACTER_STATE}}` `{{LORE_BOOK}}` `{{NARRATIVE:layers=1:slice=800}}` |
-| **item_gen** | `{{SYS_PROMPT}}` `{{ITEM_REQUEST}}` `{{CHAR_GEN_RESULT}}` `{{CRAFT_RESULT}}` `{{INVENTORY}}` |
+| **craft_gen** | `<世界设定>` `{{LORE_BOOK}}` → `<制作者状态>` `{{CHARACTER_STATE}}` → `<可用材料>` `{{INVENTORY}}` → `<本次制作需求>` `{{CRAFT_REQUEST}}` → `<当前剧情>` `{{NARRATIVE}}` ★ |
+| **char_gen** | `<世界设定>` `{{LORE_BOOK}}` → `<已有角色>` `{{CHARACTER_STATE}}` → `<当前剧情场景>` `{{NARRATIVE}}` → `<新角色描述>` `{{CHAR_DETECT}}` ★ |
+| **item_gen** | `<可用物品库>` `{{INVENTORY}}` → `<角色生成结果>` `{{CHAR_GEN_RESULT}}` → `<制作结果>` `{{CRAFT_RESULT}}` → `<物品需求>` `{{ITEM_REQUEST}}` ★ |
+
+> ★ 标记的为 Phase 10 模板系统已完成结构化的 Agent（含 XML 分区标签 + 注释）。占位符按缓存优化顺序排列：稳定在上、高频动态在下。
 
 ---
 
-## 流程：编写一个 Agent 的 System Prompt
+## 结构化模板设计规范（Phase 10 新增）
 
-### Step 1: 确定职责与输出格式
+### 设计原则
 
-1. **这个 Agent 做什么？**
-2. **输入是什么？** 从上游 Agent 读什么（对应 `{{AGENT.xxx}}` 占位符）
+模板不只是占位符的简单拼接。一个结构良好的模板 = **XML 分区标签** + **注释** + **缓存优化排序**。
+
+### 规则 1: `{{SYS_PROMPT}}` 不加任何包装
+
+```
+{{SYS_PROMPT}}        ← 裸放。systemPrompt 本身就是完整的操作手册。
+```
+
+### 规则 2: 其他所有占位符用 XML 标签分区 + 注释
+
+```xml
+<数据区块名>
+{{PLACEHOLDER}}
+</数据区块名>
+<!-- 注释说明三要素:
+     ① 这是什么数据，从哪来的
+     ② AI 应该怎么用它
+     ③ 如果不够怎么办（是否需要调用工具补充）
+-->
+```
+
+**注释必须包含**：
+- **源头**：数据来源（世界书 / 角色状态 / 上游 Agent 输出 / 正文标记）
+- **用途**：AI 应该怎么理解和使用这些数据
+- **补充策略**：Agentic Agent 如果有工具，说明"优先查阅这里，不够再调 xxx"
+
+### 规则 3: 缓存优化排序
+
+LLM API 的 prompt caching 从头部做前缀匹配。把**不常变**的放上层、**每轮必变**的放底层：
+
+| 层级 | 占位符类型 | 变化频率 | 示例 |
+|------|-----------|:---:|------|
+| 🟢 顶部稳定层 | `SYS_PROMPT`、`LORE_BOOK` | 几乎不变 | 系统指令、世界设定 |
+| 🟡 中部半稳定层 | `CHARACTER_STATE`、`INVENTORY` | 战斗中偶尔变 | 角色属性、背包内容 |
+| 🔴 底部高频层 | `CRAFT_REQUEST`、`CHAR_DETECT`、`ITEM_REQUEST`、`NARRATIVE` | 每轮都变 | 制作需求、新角色描述、对话历史 |
+
+### 规则 4: systemPrompt 联动
+
+模板的 XML 分区标签名 **必须在 systemPrompt 中被引用**。如果模板里有一个 `<制作者状态>` 分区，systemPrompt 的工作流程中就应该写"查阅上方的 **<制作者状态>** 区块"。
+
+**检视清单**：
+- systemPrompt 的「条件判断 / 数据来源」→ 列出上下文区块作为优先数据源
+- systemPrompt 的「工作流程」→ 前几步改为"先查区块，不完整再调工具"
+
+### 完整示例：craft_gen 模板
+
+```
+{{SYS_PROMPT}}
+
+<!-- ────────────────────────────────────────────── -->
+<!-- 以下各区块是你完成制作任务所需的完整上下文数据。-->
+<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->
+<!-- ────────────────────────────────────────────── -->
+
+<世界设定>
+{{LORE_BOOK}}
+</世界设定>
+<!-- 当前场景激活的世界书条目。涵盖世界观设定、种族特性、势力关系、地理信息、行业规范等。
+     制作产物的外观描述、材质选择、工艺风格应与当前世界观保持一致。-->
+
+<制作者状态>
+{{CHARACTER_STATE}}
+</制作者状态>
+<!-- [用途] 准备阶段优先查阅此处获取核心属性值 → 不够再调 get_character -->
+
+<可用材料>
+{{INVENTORY}}
+</可用材料>
+<!-- [用途] 确认材料种类数量 → 不完整再调 get_inventory -->
+
+<本次制作需求>
+{{CRAFT_REQUEST}}
+</本次制作需求>        ← 🔴 高频变化
+
+<当前剧情>
+{{NARRATIVE:layers=1:slice=800}}
+</当前剧情>           ← 🔴 高频变化
+```
+
+### 已完成结构化的 Agent
+
+| Agent | 状态 | 分区数 |
+|-------|:---:|:---:|
+| craft_gen | ✅ 完成 | 5 区 (<世界设定>/<制作者状态>/<可用材料>/<本次制作需求>/<当前剧情>) |
+| char_gen | ✅ 完成 | 4 区 (<世界设定>/<已有角色>/<当前剧情场景>/<新角色描述>) |
+| item_gen | ✅ 完成 | 4 区 (<可用物品库>/<角色生成结果>/<制作结果>/<物品需求>) |
+| 其他 8 个 | ⬜ 待迁移 | 仍为裸占位符拼接 |
+
+---
 3. **输出格式？** XML / JSON / 纯文本？
 4. **是否 Agentic？** 需要 function calling 工具？
 
