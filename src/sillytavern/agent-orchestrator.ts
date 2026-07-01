@@ -329,6 +329,7 @@ export class AgentOrchestrator {
       configsArr,
       this.worldBooks,
       this.presets,
+      undefined, // localParams: main pipeline agents don't need chain params
     );
     if (!messages) {
       return {
@@ -382,6 +383,7 @@ export class AgentOrchestrator {
       configsArr,
       this.worldBooks,
       this.presets,
+      undefined, // localParams: main pipeline agents don't need chain params
     );
     if (!messages) {
       return {
@@ -562,6 +564,9 @@ export class AgentOrchestrator {
    * 延迟理由: 制作可能依赖 char_gen 生成的 NPC（如铁匠），且统一在 Stage 2 执行可并行 batched。
    */
   private async processStageMarkers(stageIndex: number): Promise<void> {
+    // Phase 10: Chain agents that need localParams (craft_gen, char_gen, item_gen)
+    // receive them via the chain orchestrators (craft-gen-chain.ts, char-gen-agent.ts).
+    // The orchestrator callbacks pass localParams directly to buildAgentMessages().
     // Stage 1 (story): 暂存 craft markers + combat markers
     if (this.isStoryStage(stageIndex)) {
       const storyOutput = this.getAgentOutputText('story');

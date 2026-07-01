@@ -10,7 +10,7 @@ import {
   defaultHistoryLayers,
   defaultHistorySlice,
 } from './agent-templates';
-import type { AgentContext, AgentConfig } from './types';
+import type { AgentContext, AgentConfig, WorldBook, WorldBookEntry } from './types';
 
 // ========== Test Context ==========
 
@@ -111,24 +111,25 @@ describe('getAgentTemplate', () => {
 // ========== buildAgentMessages ==========
 
 describe('buildAgentMessages', () => {
-  it('应返回 system + user 两条消息', () => {
+  it('应返回 1 条 system 消息 (Phase 10: 统一模板解析)', () => {
     const ctx = makeContext({
       userInput: '去铁匠铺',
       agentOutputs: new Map([['story', '正文内容']]),
     });
     const messages = buildAgentMessages('memory_recall', ctx);
-    expect(messages).toHaveLength(2);
+    expect(messages).toHaveLength(1);
     expect(messages![0].role).toBe('system');
-    expect(messages![1].role).toBe('user');
   });
 
-  it('system 应包含 fixedSystem', () => {
+  it('system 应包含 fixedSystem (fallback, 无模板)', () => {
+    // plot_check has no default template → uses buildFallbackMessages which returns 2 messages
     const ctx = makeContext();
     const messages = buildAgentMessages('plot_check', ctx);
     expect(messages![0].content).toContain(AGENT_TEMPLATES.plot_check.fixedSystem);
   });
 
-  it('system 应包含 fixedExamples (当有预设时)', () => {
+  it('system 应包含 fixedExamples (Phase 10: SYS_PROMPT fallback via template)', () => {
+    // memory_recall has a default template; SYS_PROMPT falls back to fixedSystem+fixedExamples
     const ctx = makeContext();
     const messages = buildAgentMessages('memory_recall', ctx);
     expect(messages![0].content).toContain(AGENT_TEMPLATES.memory_recall.fixedExamples);
@@ -141,17 +142,17 @@ describe('buildAgentMessages', () => {
     expect(result).toBe('');
   });
 
-  it('variableInstruction 应包含用户输入', () => {
+  it('用户输入应出现在模板解析结果中 (Phase 10: via {{USER_INPUT}})', () => {
     const ctx = makeContext({ userInput: '独特输入ABC123' });
     const messages = buildAgentMessages('memory_recall', ctx);
-    // user message = variableInstruction, should contain user input
-    expect(messages![1].content).toContain('独特输入ABC123');
+    // Phase 10: user input resolved via {{USER_INPUT}} into the single system message
+    expect(messages![0].content).toContain('独特输入ABC123');
   });
 
-  it('user 消息应包含 variableInstruction 输出', () => {
+  it('story 模板解析结果应包含用户输入 (Phase 10: via {{USER_INPUT}})', () => {
     const ctx = makeContext({ userInput: '测试指令' });
     const messages = buildAgentMessages('story', ctx);
-    expect(messages![1].content).toContain('测试指令');
+    expect(messages![0].content).toContain('测试指令');
   });
 
   it('无效 agentId 返回 null', () => {
@@ -159,35 +160,35 @@ describe('buildAgentMessages', () => {
     expect(buildAgentMessages('invalid_agent', ctx)).toBeNull();
   });
 
-  it('story agent 应注入世界书内容', () => {
+  it('story agent 应注入世界书内容 (Phase 10: via {{LORE_BOOK}} with configs+worldBooks)', () => {
     const ctx = makeContext({
       userInput: '探索古墓',
-      lorebookMatches: [
-        {
-          entry: {
-            id: 'lb_1',
-            keys: ['古墓'],
-            secondaryKeys: [],
-            content: '**北境古墓**: 位于诺斯加德北部的古老墓穴，传说埋藏着远古帝王的宝藏。',
-            order: 0,
-            position: 'before_char',
-            selective: false,
-            selectiveLogic: 'and_any',
-            constant: false,
-            probability: 100,
-            addMemo: false,
-          },
-          score: 1,
-          matchedKeywords: ['古墓'],
-        },
-      ],
       agentOutputs: new Map([['story', '正文']]),
     });
-    const messages = buildAgentMessages('story', ctx);
+    const cfg = makeCfg('story', { worldBookIds: ['wb_test'] });
+    const entry: WorldBookEntry = {
+      uid: 1,
+      name: '北境古墓',
+      content: '**北境古墓**: 位于诺斯加德北部的古老墓穴，传说埋藏着远古帝王的宝藏。',
+      enabled: true,
+      constant: true,
+      key: ['古墓'],
+      keysecondary: [],
+      selectiveLogic: 0,
+      order: 0,
+      position: 1,
+    };
+    const wb: WorldBook = {
+      id: 'wb_test',
+      name: '测试书',
+      partition: 'character',
+      entries: [entry],
+    };
+    const messages = buildAgentMessages('story', ctx, [cfg], [wb]);
     expect(messages![0].content).toContain('北境古墓');
   });
 
-  it('story agent 应注入角色状态 (Phase 10: via variableContext → lorebook, 角色由 placeholder 注入)', () => {
+  it('story agent 应注入角色状态和用户输入 (Phase 10: template resolves all)', () => {
     const ctx = makeContext({
       userInput: '查看状态',
       characters: [
@@ -223,11 +224,11 @@ describe('buildAgentMessages', () => {
       agentOutputs: new Map([['story', '正文']]),
     });
     const messages = buildAgentMessages('story', ctx);
-    // Phase 10: variableContext 仅返回 lorebook，角色/记忆/剧情/变量由 placeholder 系统注入
-    // system 消息应包含 fixedSystem (via fallback) 和 fixedExamples
+    // Phase 10: template resolves all placeholders into single system message
+    // system 消息应包含 fixedSystem (via SYS_PROMPT fallback)
     expect(messages![0].content).toContain('命定之诗叙事引擎');
-    // user 消息应包含角色信息 (via variableInstruction → formatHistory)
-    expect(messages![1].content).toContain('查看状态');
+    // user input resolved via {{USER_INPUT}}
+    expect(messages![0].content).toContain('查看状态');
   });
 });
 
@@ -305,56 +306,57 @@ describe('formatHistory 读取 per-agent 配置', () => {
     const ctx = makeContext({ history: makeHistory(8) });   // 8 条历史 < 12
     const cfg = makeCfg('story');
     const msgs = buildAgentMessages('story', ctx, [cfg]);
-    expect(countHistoryEntries(msgs![1].content)).toBe(8);  // 全部 8 条
+    // Phase 10: NARRATIVE resolved into single system message via defaultHistoryLayers(6)
+    expect(countHistoryEntries(msgs![0].content)).toBe(8);  // 全部 8 条
   });
-  it('vars_update 默认(1层)注入最近 2 条历史, 在 story 输出之前', () => {
+  it('memory_summary 默认(4层)注入最近 8 条历史 (Phase 10: via {{NARRATIVE:layers=4:slice=1500}})', () => {
     const ctx = makeContext({
-      history: makeHistory(8),
+      history: makeHistory(10),
       agentOutputs: new Map([['story', 'SOME_STORY_OUTPUT']]),
     });
-    const cfg = makeCfg('vars_update');
-    const msgs = buildAgentMessages('vars_update', ctx, [cfg]);
-    const u = msgs![1].content;
-    expect(u).toContain('**最近对话:**');
-    expect(countHistoryEntries(u)).toBe(2);
-    expect(u.indexOf('**最近对话:**')).toBeLessThan(u.indexOf('**正文 AI 输出:**'));
+    const cfg = makeCfg('memory_summary');
+    const msgs = buildAgentMessages('memory_summary', ctx, [cfg]);
+    const u = msgs![0].content;
+    // NARRATIVE placeholder resolves into system message; params in template dictate layers/slice
+    expect(countHistoryEntries(u)).toBe(8); // 4 layers * 2 = 8
   });
-  it('historyLayers=0 → 不注入历史, 回退到只看 story', () => {
+  it('vars_update template does not include NARRATIVE (Phase 10: template-driven)', () => {
+    // vars_update default template has no {{NARRATIVE}} → config historyLayers is not used
     const ctx = makeContext({
       history: makeHistory(8),
       agentOutputs: new Map([['story', 'SOME_STORY_OUTPUT']]),
     });
     const cfg = makeCfg('vars_update', { historyLayers: 0 });
     const msgs = buildAgentMessages('vars_update', ctx, [cfg]);
-    const u = msgs![1].content;
-    expect(u).not.toContain('**最近对话:**');
-    expect(u.trimStart().startsWith('**正文 AI 输出:**')).toBe(true);
+    const u = msgs![0].content;
+    expect(countHistoryEntries(u)).toBe(0);
   });
-  it('historyLayers=3 → 注入最近 6 条', () => {
+  it('plot_pre_check 默认注入最近 6 条 (Phase 10: via {{NARRATIVE:layers=3:slice=1000}})', () => {
     const ctx = makeContext({
       history: makeHistory(10),
       agentOutputs: new Map([['story', 'X']]),
     });
-    const cfg = makeCfg('vars_update', { historyLayers: 3 });
-    const msgs = buildAgentMessages('vars_update', ctx, [cfg]);
-    expect(countHistoryEntries(msgs![1].content)).toBe(6);
+    const cfg = makeCfg('plot_pre_check');
+    const msgs = buildAgentMessages('plot_pre_check', ctx, [cfg]);
+    expect(countHistoryEntries(msgs![0].content)).toBe(6);
   });
-  it('historySlice 限制每条正文截断字数', () => {
+  it('story 默认 historySlice=1500 限制正文截断字数', () => {
     const long = '长'.repeat(2000);
     const ctx = makeContext({
       history: [{ role: 'user', content: long }, { role: 'assistant', content: long }],
       agentOutputs: new Map([['story', 'X']]),
     });
-    const cfg = makeCfg('vars_update', { historyLayers: 1, historySlice: 200 });
-    const msgs = buildAgentMessages('vars_update', ctx, [cfg]);
-    const u = msgs![1].content;
-    // 截断后正文中"长"字符应 ≤ 200/条 (两条各 200, 总 400)
-    expect((u.match(/长/g) || []).length).toBe(400);
+    const cfg = makeCfg('story');
+    const msgs = buildAgentMessages('story', ctx, [cfg]);
+    const u = msgs![0].content;
+    // story NARRATIVE uses defaultHistorySlice(1500); 2000-char content truncated to 1500
+    // 2 entries * 1500 chars = 3000 '长' chars
+    expect((u.match(/长/g) || []).length).toBe(3000);
   });
   it('不传 config (测试/非 orchestrator 路径) → 走类别默认不报错', () => {
     const ctx = makeContext({ history: makeHistory(4) });
     const msgs = buildAgentMessages('story', ctx);
-    expect(countHistoryEntries(msgs![1].content)).toBe(4);
+    expect(countHistoryEntries(msgs![0].content)).toBe(4);
   });
   it('buildAgentMessages 不会 mutate 共享 ctx.agentConfig (并行安全)', () => {
     const ctx = makeContext({ history: makeHistory(2) });

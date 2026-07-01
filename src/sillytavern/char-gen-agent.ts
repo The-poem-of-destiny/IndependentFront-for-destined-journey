@@ -125,10 +125,14 @@ export async function callCharGenAgent(
   request: CharGenRequest,
   deps: CharGenAgentDeps,
 ): Promise<CharGenOutput> {
+  const charLocalParams: Record<string, string> = {
+    CHAR_DETECT: (request.detection as any).content || request.detection.bodyText || request.detection.rawContent, // The <char_detect> content
+  };
+
   const messages = buildAgentMessages('char_gen', {
     ...request.context,
     agentOutputs: new Map([['story', request.detection.rawContent]]),
-  });
+  }, undefined, undefined, undefined, charLocalParams);
 
   if (!messages) {
     throw new Error('char_gen 模板未找到 — 请检查 AGENT_TEMPLATES 注册');
@@ -188,7 +192,18 @@ export async function callItemGenAgent(
     ]),
   };
 
-  const messages = buildAgentMessages('item_gen', contextWithCharData);
+  // Phase 10: Build localParams from char_gen's output for item_gen template resolution
+  const charGenOutputJson = JSON.stringify(charData);
+  const charItemLocalParams: Record<string, string> = {
+    CHAR_GEN_RESULT: charGenOutputJson,
+  };
+  // Extract <item_requests> from char_gen output JSON if present
+  const charItemReqMatch = charGenOutputJson.match(/<item_requests>([\s\S]*?)<\/item_requests>/);
+  if (charItemReqMatch) {
+    charItemLocalParams.ITEM_REQUEST = charItemReqMatch[1].trim();
+  }
+
+  const messages = buildAgentMessages('item_gen', contextWithCharData, undefined, undefined, undefined, charItemLocalParams);
 
   if (!messages) {
     throw new Error('item_gen 模板未找到 — 请检查 AGENT_TEMPLATES 注册');

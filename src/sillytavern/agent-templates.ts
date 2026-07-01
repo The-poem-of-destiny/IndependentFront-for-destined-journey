@@ -18,6 +18,8 @@ import type { AgentPromptTemplate, AgentContext, AgentConfig, AgentPreset, World
 import { getEntriesForAgent, filterActiveEntries, formatWorldBookEntries } from './worldbook-loader';
 import { getPreset, assemblePresetContent } from './preset-loader';
 import { buildZoneSection, buildZoneContext } from './context-visibility';
+import { resolveTemplateWithGlobals } from './template-resolver';
+import { getDefaultTemplate } from './placeholder-registry';
 
 // ========== 通用工具 ==========
 
@@ -281,8 +283,8 @@ export function getAgentTemplate(agentId: string): AgentPromptTemplate | undefin
  * For Story Agent: systemPrompt is assembled from preset entries via assemblePresetContent().
  * For other agents: systemPrompt comes from agent-config.json or fixedSystem fallback.
  *
- * system 消息 = 预设/模板 + 世界书 + 变量区
- * user 消息 = 正文/用户输入（variableInstruction）
+ * The template system replaces old manual assembly (worldBookSection, variableSection, bodySection).
+ * All content is resolved through {{PLACEHOLDER}} references in a unified template string.
  *
  * @param localParams - Phase 10: Local overrides for placeholders (chain callers pass {{CRAFT_REQUEST}}, etc.)
  */
@@ -302,6 +304,73 @@ export function buildAgentMessages(
   // 关键: 不可 mutate 原 ctx (orchestrator 同 stage 多 agent 共享), 用浅拷贝注入 agentConfig
   const tplCtx: AgentContext = config ? { ...ctx, agentConfig: config } : ctx;
 
+  // Step 1: Get the template string
+  // Priority: 1) agent-config.json template field  2) getDefaultTemplate from placeholder-registry  3) empty string
+  let template = config?.template || '';
+  if (!template) {
+    // Fall back to default template from placeholder-registry
+    template = getDefaultTemplate(agentId);
+  }
+  if (!template) {
+    // Fallback: old-style assembly for agents with no template
+    return buildFallbackMessages(agentId, tplCtx, tpl, config, configs, worldBooks, presets, localParams);
+  }
+
+  // Step 2: Assemble SYS_PROMPT content (Story uses preset, others use systemPrompt)
+  let sysPromptContent = '';
+
+  if (agentId === 'story' && presets && config?.presetId) {
+    // Story Agent: assemble from preset
+    const preset = getPreset(config.presetId, presets);
+    if (preset) {
+      sysPromptContent = assemblePresetContent(preset);
+    }
+  }
+
+  if (!sysPromptContent && config?.systemPrompt) {
+    // Other agents: use systemPrompt from agent-config.json
+    sysPromptContent = config.systemPrompt;
+  }
+
+  if (!sysPromptContent) {
+    // Fallback to old fixedSystem + fixedExamples (backward compatibility)
+    sysPromptContent = [tpl.fixedSystem, tpl.fixedExamples].filter(Boolean).join('\n\n');
+  }
+
+  // Step 3: Set globals and resolve
+  const wbs = worldBooks ?? [];
+  const cfgs = configs ?? [];
+
+  // Build localParams with SYS_PROMPT override (the assembled preset/systemPrompt)
+  const allLocalParams: Record<string, string> = {
+    'SYS_PROMPT': sysPromptContent,
+    ...(localParams ?? {}),
+  };
+
+  const resolved = resolveTemplateWithGlobals(
+    template,
+    agentId,
+    tplCtx,
+    config ?? { agentId } as AgentConfig,
+    wbs,
+    cfgs,
+    allLocalParams,
+  );
+
+  return [{ role: 'system', content: resolved }];
+}
+
+/** Legacy fallback for agents without templates (backward compatibility) */
+function buildFallbackMessages(
+  agentId: string,
+  tplCtx: AgentContext,
+  tpl: AgentPromptTemplate,
+  config: AgentConfig | undefined,
+  configs: AgentConfig[] | undefined,
+  worldBooks: WorldBook[] | undefined,
+  presets: AgentPreset[] | undefined,
+  _localParams: Record<string, string> | undefined,
+): Array<{ role: string; content: string }> | null {
   // Step 1: Assemble SYS_PROMPT (preset > systemPrompt > fixedSystem fallback)
   let sysPromptContent = '';
 

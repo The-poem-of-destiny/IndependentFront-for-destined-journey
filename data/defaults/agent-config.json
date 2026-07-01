@@ -1874,6 +1874,20 @@
               "injection_order": 100,
               "injection_trigger": [],
               "forbid_overrides": false
+            },
+            {
+              "identifier": "auto-dynamic-inject",
+              "name": "📥 动态注入",
+              "enabled": true,
+              "injection_position": 0,
+              "injection_depth": 4,
+              "injection_order": 999,
+              "role": "system",
+              "content": "{{AGENT.MEMORY_RECALL}}\n{{AGENT.PLOT_PRE_CHECK}}\n{{LORE_BOOK}}\n{{CHARACTER_STATE}}\n{{GAME_TIME}}\n{{NARRATIVE}}\n{{USER_INPUT}}",
+              "system_prompt": false,
+              "marker": false,
+              "forbid_overrides": false,
+              "injection_trigger": []
             }
           ],
           "prompt_order": [
@@ -2291,7 +2305,8 @@
       "presPen": 0,
       "maxTokens": 16384,
       "historyLayers": 6,
-      "historySlice": 1500
+      "historySlice": 1500,
+      "template": "{{SYS_PROMPT}}\n{{AGENT.MEMORY_RECALL}}\n{{AGENT.PLOT_PRE_CHECK}}\n{{LORE_BOOK}}\n{{CHARACTER_STATE}}\n{{GAME_TIME}}\n{{NARRATIVE}}\n{{USER_INPUT}}"
     },
     "memory_recall": {
       "worldBookEnabled": false,
@@ -2306,7 +2321,8 @@
       "presPen": 0,
       "maxTokens": 16384,
       "historyLayers": 3,
-      "historySlice": 1000
+      "historySlice": 1000,
+      "template": "{{SYS_PROMPT}}\n{{MEMORY_ENTRIES}}\n{{NARRATIVE:layers=3:slice=800}}\n{{USER_INPUT}}"
     },
     "plot_pre_check": {
       "worldBookEnabled": false,
@@ -2321,7 +2337,8 @@
       "presPen": 0,
       "maxTokens": 16384,
       "historyLayers": 2,
-      "historySlice": 1000
+      "historySlice": 1000,
+      "template": "{{SYS_PROMPT}}\n{{PLOT_EVENTS}}\n{{AGENT.MEMORY_RECALL}}\n{{NARRATIVE:layers=3:slice=1000}}\n{{USER_INPUT}}"
     },
     "craft_gen": {
       "worldBookEnabled": true,
@@ -2339,7 +2356,8 @@
       "presPen": 0,
       "maxTokens": 16384,
       "historyLayers": 1,
-      "historySlice": 800
+      "historySlice": 800,
+      "template": "{{SYS_PROMPT}}\n{{CRAFT_REQUEST}}\n{{INVENTORY}}\n{{CHARACTER_STATE}}\n{{LORE_BOOK}}\n{{NARRATIVE:layers=1:slice=800}}"
     },
     "vars_update": {
       "worldBookEnabled": true,
@@ -2357,7 +2375,8 @@
       "presPen": 0,
       "maxTokens": 16384,
       "historyLayers": 1,
-      "historySlice": 800
+      "historySlice": 800,
+      "template": "{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{CHARACTER_STATE}}\n{{LORE_BOOK}}"
     },
     "char_update": {
       "worldBookEnabled": true,
@@ -2377,7 +2396,8 @@
       "presPen": 0,
       "maxTokens": 16384,
       "historyLayers": 1,
-      "historySlice": 800
+      "historySlice": 800,
+      "template": "{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{AGENT.VARS_UPDATE}}\n{{CHARACTER_STATE}}\n{{NARRATIVE:layers=1:slice=800}}"
     },
     "char_gen": {
       "worldBookEnabled": true,
@@ -2399,7 +2419,8 @@
       "presPen": 0,
       "maxTokens": 16384,
       "historyLayers": 1,
-      "historySlice": 800
+      "historySlice": 800,
+      "template": "{{SYS_PROMPT}}\n{{CHAR_DETECT}}\n{{CHARACTER_STATE}}\n{{LORE_BOOK}}\n{{NARRATIVE:layers=1:slice=800}}"
     },
     "item_gen": {
       "worldBookEnabled": false,
@@ -2419,7 +2440,8 @@
       "presPen": 0,
       "maxTokens": 16384,
       "historyLayers": 1,
-      "historySlice": 800
+      "historySlice": 800,
+      "template": "{{SYS_PROMPT}}\n{{ITEM_REQUEST}}\n{{CHAR_GEN_RESULT}}\n{{CRAFT_RESULT}}\n{{INVENTORY}}"
     },
     "memory_summary": {
       "worldBookEnabled": true,
@@ -2436,7 +2458,8 @@
       "presPen": 0,
       "maxTokens": 16384,
       "historyLayers": 4,
-      "historySlice": 1500
+      "historySlice": 1500,
+      "template": "{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{NARRATIVE:layers=4:slice=1500}}"
     },
     "plot_post_check": {
       "worldBookEnabled": true,
@@ -2461,7 +2484,8 @@
       "presPen": 0,
       "maxTokens": 16384,
       "historyLayers": 4,
-      "historySlice": 1000
+      "historySlice": 1000,
+      "template": "{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{AGENT.MEMORY_SUMMARY}}\n{{PLOT_EVENTS}}\n{{CHARACTER_STATE}}\n{{NARRATIVE:layers=4:slice=1000}}"
     },
     "plot_outline": {
       "worldBookEnabled": true,
@@ -2487,7 +2511,8 @@
       "presPen": 0,
       "maxTokens": 16384,
       "historyLayers": 3,
-      "historySlice": 1000
+      "historySlice": 1000,
+      "template": "{{SYS_PROMPT}}\n{{PLOT_EVENTS}}\n{{NARRATIVE:layers=3:slice=1000}}"
     }
   }
 }

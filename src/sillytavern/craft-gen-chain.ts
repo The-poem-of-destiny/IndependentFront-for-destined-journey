@@ -152,7 +152,11 @@ export async function callCraftGenAgent(
     ]),
   };
 
-  const messages = buildAgentMessages('craft_gen', ctxWithStory);
+  const craftLocalParams: Record<string, string> = {
+    CRAFT_REQUEST: (request.marker as any).content || request.marker.bodyText || request.storyOutput, // The <craft_request> content from Story
+  };
+
+  const messages = buildAgentMessages('craft_gen', ctxWithStory, undefined, undefined, undefined, craftLocalParams);
 
   if (!messages) {
     throw new Error('craft_gen 模板未找到 — 请检查 AGENT_TEMPLATES 注册');
@@ -243,6 +247,16 @@ export async function callItemGenForCraft(
     `</craft_output>`,
   ].join('\n');
 
+  // Phase 10: Build localParams from craft_gen's output for item_gen template resolution
+  const craftItemLocalParams: Record<string, string> = {};
+  // Extract <item_requests> from craftDataXML if present
+  const craftItemReqMatch = craftDataXML.match(/<item_requests>([\s\S]*?)<\/item_requests>/);
+  if (craftItemReqMatch) {
+    craftItemLocalParams.ITEM_REQUEST = craftItemReqMatch[1].trim();
+  }
+  // Pass craft result
+  craftItemLocalParams.CRAFT_RESULT = craftDataXML;
+
   try {
     // 构建 item_gen 上下文 — 对标 char_gen→item_gen: agentOutputs['char_gen'] 传角色数据
     const contextWithCraftData: AgentContext = {
@@ -253,7 +267,7 @@ export async function callItemGenForCraft(
       ]),
     };
 
-    const messages = buildAgentMessages('item_gen', contextWithCraftData);
+    const messages = buildAgentMessages('item_gen', contextWithCraftData, undefined, undefined, undefined, craftItemLocalParams);
     if (!messages) {
       // item_gen 模板找不到时，返回空，不阻塞主流程
       return { skills: [], equipment: [], inventory: [] };

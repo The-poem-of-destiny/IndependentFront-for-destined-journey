@@ -2,9 +2,9 @@
   "metadata": {
     "created": "2026-06-17T19:29:40.719534",
     "seeded": true,
-    "total_successes": 3,
+    "total_successes": 8,
     "total_failures": 0,
-    "last_success": "2026-06-17T23:38:19.208249"
+    "last_success": "2026-06-30T19:59:54.125863"
   },
   "bullets": [
     {
@@ -123,6 +123,51 @@
       "harmful_count": 0,
       "source_endpoint": "database getCharacters",
       "created": "2026-06-17T23:38:18.278738"
+    },
+    {
+      "id": "S-c826d4",
+      "content": "craft_gen 细化模式: systemPrompt 遵循 agent_system_prompt_guide.md 的12节模板(角色描述/核心原则/数值对照表/行业绑定/三种类型/品质约束/API清单/条件判断/禁止事项/思考深度/工作流程/自检清单), 输出格式从旧版<creative_effects>改为<item_requests>派发item_gen写数值, craft-gen-chain.ts 全链路封装对标char-gen-agent.ts的 runCraftGenChain/callCraftGenAgent/callItemGenForCraft/parseCraftResultXML/buildCraftPatches 模式, 测试用DeepSeek API dry-run验证prompt注入+live测试验证工具调用链",
+      "category": "strategy",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": null,
+      "created": "2026-06-30T19:59:26.753714"
+    },
+    {
+      "id": "P-a5c4b2",
+      "content": "craft_check 工具需要返回准备阶段校验结果: 在 agent-tools.ts 的 craft_check case 中先跑 .validate() 获取品质继承/层级封顶/管制物/资源等问题清单, 返回 prepPassed+prepIssues 字段, 避免AI看到全零结果时盲目重试(实测中AI重试了4次才自己摸索出需要两种同品质材料)",
+      "category": "pitfall",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": null,
+      "created": "2026-06-30T19:59:34.908006"
+    },
+    {
+      "id": "C-af4849",
+      "content": "材料消耗使用 remove_item(op) 而非 delta_variable: craft-resolver.ts 的 resolveCraft() 中对每个材料生成 {op:'remove_item', value:itemId, amount:quantity} 的 patch, remove_item 内部逻辑 quantity≤0 时自动 splice 删除物品, 比 delta_variable 操作变量路径更安全可靠",
+      "category": "code",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": null,
+      "created": "2026-06-30T19:59:41.633683"
+    },
+    {
+      "id": "P-1ec528",
+      "content": "Agent系统提示词从agent-templates.ts搬运到agent-config.json后, 必须同步更新: (1)测试的STUB_IDS列表加入该agent ID (2)fullAgents列表移除该agent加入stubAgents (3)验证器(如test_agent.ts)适配新的输出格式标签 (4)干跑和实跑模式都注入systemPrompt字段",
+      "category": "pitfall",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": null,
+      "created": "2026-06-30T19:59:47.396359"
+    },
+    {
+      "id": "D-5c6c72",
+      "content": "craft_gen 测试存档构建: 用角色含炼金术师/背包含多种品质材料/chat消息嵌入<craft_request marker>的JSON存档, 配合--dry-run验证提示词拼接和工具加载, 再用-v实跑DeepSeek验证5轮工具调用链(get_character→get_inventory→craft_get_base_dc→craft_get_production_bonus→craft_check→craft_settle)",
+      "category": "domain",
+      "helpful_count": 1,
+      "harmful_count": 0,
+      "source_endpoint": null,
+      "created": "2026-06-30T19:59:54.125863"
     }
   ]
 }
