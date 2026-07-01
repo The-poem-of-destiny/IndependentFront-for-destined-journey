@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { useThemeStore } from '../../stores/theme-store'
 import { useUIStore } from '../../stores/ui-store'
 import { useSettingsStore, type ApiEntry, type PresetItem } from '../../stores/settings-store'
@@ -7,9 +7,11 @@ import AppButton from '../shared/AppButton.vue'
 import AppCard from '../shared/AppCard.vue'
 import AppModal from '../shared/AppModal.vue'
 import WorldBookEditor from './WorldBookEditor.vue'
+import TemplatePreview from './TemplatePreview.vue'
 import type { WorldBook } from '@engine/types'
 import { VERSION } from '@engine/index'
 import { getAgentTemplate } from '@engine/agent-templates'
+import { getDefaultTemplate } from '@engine/placeholder-registry'
 
 const theme = useThemeStore()
 const ui = useUIStore()
@@ -78,6 +80,136 @@ const agentPromptDraft = ref('')
 // 初始化时从 store 恢复 agent 提示词
 if (activeAgent.value && s.agentPrompts[activeAgent.value]) {
   agentPromptDraft.value = s.agentPrompts[activeAgent.value]
+}
+
+// ============================================================
+// Phase 10e: Template System
+// ============================================================
+
+interface PlaceholderBadge {
+  key: string
+  color: string
+  desc: string
+  category: string
+}
+
+// All registered placeholders with metadata
+const ALL_PLACEHOLDER_META: PlaceholderBadge[] = [
+  { key: 'SYS_PROMPT', color: '#4a9eff', desc: '核心指令 — 预设/agent-config systemPrompt', category: '自身' },
+  { key: 'LORE_BOOK', color: '#4caf50', desc: '世界书 — keyword 激活条目', category: '世界' },
+  { key: 'NARRATIVE', color: '#ab47bc', desc: '对话历史 — 最近 N 轮消息', category: '叙事' },
+  { key: 'USER_INPUT', color: '#ab47bc', desc: '用户输入 — 当前轮输入', category: '叙事' },
+  { key: 'CHARACTER_STATE', color: '#ff9800', desc: '角色状态 — 属性/装备/技能', category: '角色' },
+  { key: 'INVENTORY', color: '#ff9800', desc: '背包 — 角色物品列表', category: '角色' },
+  { key: 'GAME_TIME', color: '#4caf50', desc: '世界状态 — 时间/位置/天气', category: '世界' },
+  { key: 'ACTIVE_EFFECTS', color: '#ff9800', desc: '活跃效果 — Buff/Debuff', category: '角色' },
+  { key: 'MEMORY_ENTRIES', color: '#ff7043', desc: '记忆条目 — embedding 召回', category: '记忆' },
+  { key: 'PLOT_EVENTS', color: '#ff7043', desc: '剧情事件 — 活跃+待处理', category: '剧情' },
+  { key: 'AGENT.MEMORY_RECALL', color: '#ef5350', desc: 'memory_recall 输出', category: 'Agent通信' },
+  { key: 'AGENT.PLOT_PRE_CHECK', color: '#ef5350', desc: 'plot_pre_check 输出', category: 'Agent通信' },
+  { key: 'AGENT.STORY', color: '#ef5350', desc: 'story 正文AI 输出', category: 'Agent通信' },
+  { key: 'AGENT.VARS_UPDATE', color: '#ef5350', desc: 'vars_update 输出', category: 'Agent通信' },
+  { key: 'AGENT.MEMORY_SUMMARY', color: '#ef5350', desc: 'memory_summary 输出', category: 'Agent通信' },
+  { key: 'AGENT.CHAR_UPDATE', color: '#ef5350', desc: 'char_update 输出', category: 'Agent通信' },
+  { key: 'CRAFT_REQUEST', color: '#9e9e9e', desc: '<craft_request> 标记', category: '链调用' },
+  { key: 'CHAR_DETECT', color: '#9e9e9e', desc: '<char_detect> 检测标记', category: '链调用' },
+  { key: 'ITEM_REQUEST', color: '#9e9e9e', desc: '<item_requests> 物品请求', category: '链调用' },
+  { key: 'CHAR_GEN_RESULT', color: '#9e9e9e', desc: 'char_gen NPC生成结果', category: '链调用' },
+  { key: 'CRAFT_RESULT', color: '#9e9e9e', desc: 'craft_gen 制作结果', category: '链调用' },
+]
+
+// Filter available placeholders by agent type
+function getPlaceholdersForAgent(agentId: string): PlaceholderBadge[] {
+  // Chain-only placeholders — only shown for specific agents
+  const chainOnly: Record<string, string[]> = {
+    craft_gen: ['CRAFT_REQUEST', 'ITEM_REQUEST', 'CRAFT_RESULT'],
+    char_gen: ['CHAR_DETECT', 'CHAR_GEN_RESULT'],
+    item_gen: ['ITEM_REQUEST', 'CHAR_GEN_RESULT', 'CRAFT_RESULT'],
+  }
+
+  // Agent-to-agent: determine which upstream agents' outputs are available
+  const agentOutputs: Record<string, string[]> = {
+    story: ['AGENT.MEMORY_RECALL', 'AGENT.PLOT_PRE_CHECK'],
+    plot_pre_check: ['AGENT.MEMORY_RECALL'],
+    vars_update: ['AGENT.STORY'],
+    char_update: ['AGENT.STORY', 'AGENT.VARS_UPDATE'],
+    memory_summary: ['AGENT.STORY'],
+    plot_post_check: ['AGENT.STORY', 'AGENT.MEMORY_SUMMARY'],
+  }
+
+  const allowedChain = chainOnly[agentId] || []
+  const allowedAgentOutputs = agentOutputs[agentId] || []
+  const allowed = new Set([...allowedChain, ...allowedAgentOutputs])
+
+  return ALL_PLACEHOLDER_META.filter(p => {
+    // Always show these common placeholders
+    const commonKeys = ['SYS_PROMPT', 'LORE_BOOK', 'NARRATIVE', 'USER_INPUT',
+                        'CHARACTER_STATE', 'INVENTORY', 'GAME_TIME', 'ACTIVE_EFFECTS',
+                        'MEMORY_ENTRIES', 'PLOT_EVENTS']
+    if (commonKeys.includes(p.key)) return true
+    // Show agent-specific placeholders
+    if (allowed.has(p.key)) return true
+    return false
+  })
+}
+
+const showTemplatePreview = ref(false)
+const showStoryPreview = ref(false)
+
+// Available placeholders for the current agent (filtered by agent type)
+const availablePlaceholders = computed(() => {
+  const agentId = activeAgent.value
+  if (!agentId) return []
+  const allPlaceholders = getPlaceholdersForAgent(agentId)
+  return allPlaceholders
+})
+
+// Insert a placeholder at cursor position in the textarea
+function insertPlaceholder(key: string) {
+  const textarea = document.querySelector('.prompt-editor') as HTMLTextAreaElement
+  if (!textarea) return
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const text = agentPromptDraft.value
+  const before = text.substring(0, start)
+  const after = text.substring(end)
+  agentPromptDraft.value = before + `{{${key}}}` + after
+  s.agentPromptEdited = true
+  // Restore cursor position after Vue re-render
+  nextTick(() => {
+    textarea.selectionStart = textarea.selectionEnd = start + key.length + 4
+    textarea.focus()
+  })
+}
+
+// Get the default template for non-story agents (from placeholder-registry)
+function getDefaultTemplateForAgent(agentId: string | null): string {
+  if (!agentId) return ''
+  try {
+    return getDefaultTemplate(agentId)
+  } catch {
+    return ''
+  }
+}
+
+// Get the context template for Story agent (from injected entries or default block)
+function getStoryContextTemplate(): string {
+  const preset = activePreset.value
+  if (!preset?.settings?.prompts) return ''
+  const dynamicEntry = preset.settings.prompts.find(
+    (p: any) => p.name === '📥 动态注入' && p.enabled !== false
+  )
+  if (dynamicEntry?.content) return dynamicEntry.content
+  // Fallback: the default block
+  return [
+    '{{AGENT.MEMORY_RECALL}}',
+    '{{AGENT.PLOT_PRE_CHECK}}',
+    '{{LORE_BOOK}}',
+    '{{CHARACTER_STATE}}',
+    '{{GAME_TIME}}',
+    '{{NARRATIVE}}',
+    '{{USER_INPUT}}',
+  ].join('\n')
 }
 
 // ============================================================
@@ -747,12 +879,64 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
             <div v-else class="preset-empty">
               <p class="text-muted">选择一个预设或新建/导入预设来配置正文 Agent</p>
             </div>
+
+            <!-- Phase 10e: Story Agent template preview -->
+            <div style="margin-top:12px;">
+              <AppButton variant="ghost" size="sm" @click="showStoryPreview = !showStoryPreview">
+                {{ showStoryPreview ? '收起模板预览' : '模板预览' }}
+              </AppButton>
+            </div>
+
+            <div v-if="showStoryPreview" class="template-preview-panel" style="margin-top:10px;padding:12px;background:var(--color-surface);border-radius:8px;border:1px solid var(--color-border);">
+              <p class="form-hint">以下为运行时 <code>📥 动态注入</code> 条目或默认上下文块的内容。占位符最终会被替换。</p>
+              <TemplatePreview
+                :template="getStoryContextTemplate()"
+                agent-id="story"
+              />
+            </div>
           </AppCard>
 
           <AppCard v-else padding="md" class="detail-card">
-            <h4>System Prompt</h4>
-            <p class="form-hint">编辑此 Agent 的固定系统提示词。留空则使用引擎默认模板。</p>
-            <textarea v-model="agentPromptDraft" class="form-textarea prompt-editor" rows="10" placeholder="当前显示引擎内置模板。修改后保存即覆盖默认。清空后恢复使用内置模板。" @input="s.agentPromptEdited=true" />
+            <h4>模板编辑器</h4>
+            <p class="form-hint">
+              使用 <code v-pre>{{PLACEHOLDER}}</code> 占位符管理上下文注入。占位符运行时会被替换为实际内容。
+            </p>
+
+            <!-- Template textarea -->
+            <textarea
+              v-model="agentPromptDraft"
+              class="form-textarea prompt-editor"
+              rows="12"
+              placeholder="输入模板，使用 {{SYS_PROMPT}} 等占位符..."
+              @input="s.agentPromptEdited=true"
+            />
+
+            <!-- Available placeholders for this agent -->
+            <div class="placeholder-badges" style="margin-top: 10px;">
+              <span class="text-xs text-muted">可用占位符 (点击插入):</span>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
+                <span
+                  v-for="ph in availablePlaceholders"
+                  :key="ph.key"
+                  class="placeholder-badge"
+                  :style="{ background: ph.color + '22', color: ph.color, border: '1px solid ' + ph.color + '44' }"
+                  @click="insertPlaceholder(ph.key)"
+                  :title="ph.desc"
+                >{{ '{{' }}{{ ph.key }}{{ '}}' }}</span>
+              </div>
+            </div>
+
+            <!-- Template preview toggle -->
+            <div style="margin-top:12px;">
+              <AppButton variant="ghost" size="sm" @click="showTemplatePreview = !showTemplatePreview">
+                {{ showTemplatePreview ? '收起预览' : '模板预览' }}
+              </AppButton>
+            </div>
+
+            <!-- Template preview panel -->
+            <div v-if="showTemplatePreview" class="template-preview-panel" style="margin-top:10px;padding:12px;background:var(--color-surface);border-radius:8px;border:1px solid var(--color-border);">
+              <TemplatePreview :template="agentPromptDraft || getDefaultTemplateForAgent(activeAgent)" :agent-id="activeAgent || undefined" />
+            </div>
           </AppCard>
 
           <!-- 操作按钮 -->
@@ -1130,4 +1314,32 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 .about-table{display:flex;flex-direction:column;gap:6px}
 .about-row{display:flex;justify-content:space-between;font-size:0.85rem;color:var(--theme-text-primary)}
 .about-row span:first-child{color:var(--theme-text-muted)}
+
+/* Phase 10e: Placeholder badges */
+.placeholder-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--theme-radius-full, 999px);
+  font-family: 'Monaco', 'Menlo', 'Cascadia Code', monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--theme-transition-fast);
+  white-space: nowrap;
+}
+.placeholder-badge:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+}
+
+/* Phase 10e: Template preview panel */
+.template-preview-panel {
+  animation: template-preview-in 0.2s ease;
+}
+@keyframes template-preview-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 </style>
