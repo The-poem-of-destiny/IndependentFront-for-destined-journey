@@ -10,7 +10,8 @@ import {
   defaultHistoryLayers,
   defaultHistorySlice,
 } from './agent-templates';
-import type { AgentContext, AgentConfig, WorldBook, WorldBookEntry } from './types';
+import { getDefaultTemplate } from './placeholder-registry';
+import type { AgentContext, AgentConfig, AgentPreset, WorldBook, WorldBookEntry } from './types';
 
 // ========== Test Context ==========
 
@@ -27,6 +28,12 @@ function makeContext(overrides: Partial<AgentContext> = {}): AgentContext {
     agentOutputs: new Map(),
     ...overrides,
   };
+}
+
+function makeCfg(agentId: string, overrides: Partial<AgentConfig> = {}): AgentConfig {
+  return { agentId, enabled: true, apiEndpointId: '', model: '', temperature: 0.7,
+    maxTokens: 4096, topP: 1, frequencyPenalty: 0, presencePenalty: 0, retryOnFail: false, timeout: 0,
+    userId: '', promptTemplate: { fixedSystem: '', fixedExamples: '' }, worldBookIds: [], ...overrides };
 }
 
 // ========== Template Existence ==========
@@ -62,18 +69,16 @@ describe('AGENT_TEMPLATES', () => {
         expect(AGENT_TEMPLATES[agentId].fixedSystem.length).toBeGreaterThan(0);
       });
 
-      it('variableContext 应返回字符串', () => {
+      it('variableContext 应返回字符串 (Phase 10: 可为空)', () => {
         const ctx = makeContext();
         const result = AGENT_TEMPLATES[agentId].variableContext(ctx);
         expect(typeof result).toBe('string');
       });
 
-      it('variableInstruction 应返回字符串', () => {
+      it('variableInstruction 应返回字符串 (Phase 10: 可为空)', () => {
         const ctx = makeContext({ agentOutputs: new Map([['story', '测试正文输出']]) });
         const result = AGENT_TEMPLATES[agentId].variableInstruction(ctx);
         expect(typeof result).toBe('string');
-        // Phase 10: variableInstruction 仍然必须非空（用户消息）
-        expect(result.length).toBeGreaterThan(0);
       });
     });
   }
@@ -232,6 +237,156 @@ describe('buildAgentMessages', () => {
   });
 });
 
+// ========== Phase 10: localParams 注入 (链式 Agent 数据注入) ==========
+
+describe('buildAgentMessages — Phase 10 localParams', () => {
+  it('craft_gen 模板解析 {{CRAFT_REQUEST}} from localParams', () => {
+    const ctx = makeContext();
+    const cfg = makeCfg('craft_gen', { systemPrompt: 'Craft AI' });
+    const messages = buildAgentMessages('craft_gen', ctx, [cfg], [], undefined, {
+      CRAFT_REQUEST: '<craft_request expects="sword">forge a blade</craft_request>',
+    });
+    expect(messages).not.toBeNull();
+    expect(messages![0].content).toContain('forge a blade');
+  });
+
+  it('char_gen 模板解析 {{CHAR_DETECT}} from localParams', () => {
+    const ctx = makeContext();
+    const cfg = makeCfg('char_gen', { systemPrompt: 'Char Gen AI' });
+    const messages = buildAgentMessages('char_gen', ctx, [cfg], [], undefined, {
+      CHAR_DETECT: '<char_detect characterName="NPC">a mysterious figure</char_detect>',
+    });
+    expect(messages).not.toBeNull();
+    expect(messages![0].content).toContain('a mysterious figure');
+  });
+
+  it('item_gen 模板解析 {{ITEM_REQUEST}} + {{CHAR_GEN_RESULT}} from localParams', () => {
+    const ctx = makeContext();
+    const cfg = makeCfg('item_gen', { systemPrompt: 'Item Gen AI' });
+    const messages = buildAgentMessages('item_gen', ctx, [cfg], [], undefined, {
+      ITEM_REQUEST: '<request type="equipment" slot="武器">a sharp sword</request>',
+      CHAR_GEN_RESULT: '<char_result><name>Test</name></char_result>',
+    });
+    expect(messages).not.toBeNull();
+    expect(messages![0].content).toContain('a sharp sword');
+    expect(messages![0].content).toContain('char_result');
+  });
+
+  it('链占位符未传 localParams 时保持空 (不回退到错误值)', () => {
+    const ctx = makeContext();
+    const cfg = makeCfg('craft_gen', { systemPrompt: 'Craft AI' });
+    const messages = buildAgentMessages('craft_gen', ctx, [cfg]);
+    expect(messages).not.toBeNull();
+    // {{CRAFT_REQUEST}} stays empty (registry returns '')
+    // The template should still resolve successfully, just without craft_request content
+    expect(messages![0].content).toContain('Craft AI');
+  });
+});
+
+// ========== Phase 10: config.template 优先级 ==========
+
+describe('buildAgentMessages — template priority', () => {
+  it('传入 config.template 时优先使用 (而非 getDefaultTemplate)', () => {
+    const ctx = makeContext({ userInput: 'hello' });
+    const cfg = makeCfg('story', {
+      systemPrompt: 'Custom sys prompt',
+      template: '{{SYS_PROMPT}}\n{{USER_INPUT}}',
+    });
+    const messages = buildAgentMessages('story', ctx, [cfg]);
+    expect(messages).not.toBeNull();
+    expect(messages![0].content).toContain('Custom sys prompt');
+    expect(messages![0].content).toContain('hello');
+    // 不应包含默认模板里的占位符
+    expect(messages![0].content).not.toContain('{{NARRATIVE}}');
+  });
+
+  it('未传 template 时回退到 getDefaultTemplate(agentId)', () => {
+    const ctx = makeContext({ userInput: 'test' });
+    const cfg = makeCfg('vars_update', {
+      systemPrompt: 'VARS_AI_PROMPT',
+      template: undefined,
+    });
+    const messages = buildAgentMessages('vars_update', ctx, [cfg]);
+    expect(messages).not.toBeNull();
+    // default vars_update template has AGENT.STORY, CHARACTER_STATE, LORE_BOOK
+    expect(messages![0].content).toContain('VARS_AI_PROMPT');
+  });
+
+  it('memory_recall 默认模板包含 NARRATIVE 占位符内容 (Phase 10 replaced)', () => {
+    const ctx = makeContext({
+      userInput: '去古墓探险',
+      history: [{ role: 'user', content: '上次去了铁匠铺' } as any],
+    });
+    const cfg = makeCfg('memory_recall', { systemPrompt: 'Memory recall system' });
+    const messages = buildAgentMessages('memory_recall', ctx, [cfg]);
+    expect(messages).not.toBeNull();
+    // NARRATIVE placeholder should resolve to formatted history
+    expect(messages![0].content).toContain('铁匠铺');
+  });
+});
+
+// ========== Phase 10: SYS_PROMPT 组装 ==========
+
+describe('buildAgentMessages — SYS_PROMPT assembly', () => {
+  it('非 story Agent 使用 config.systemPrompt', () => {
+    const ctx = makeContext();
+    const cfg = makeCfg('vars_update', { systemPrompt: 'VARS_UPDATE_SYSPROMPT' });
+    const messages = buildAgentMessages('vars_update', ctx, [cfg]);
+    expect(messages).not.toBeNull();
+    expect(messages![0].content).toContain('VARS_UPDATE_SYSPROMPT');
+  });
+
+  it('无 systemPrompt + 无 template 时回退到 fixedSystem+fixedExamples', () => {
+    const ctx = makeContext();
+    const cfg = makeCfg('memory_recall', { systemPrompt: '' });
+    const messages = buildAgentMessages('memory_recall', ctx, [cfg]);
+    expect(messages).not.toBeNull();
+    // 应包含 AGENT_TEMPLATES.memory_recall.fixedSystem 或 fixedExamples fallback
+    expect(messages![0].content).toContain('记忆召回系统');
+  });
+
+  it('story agent + presets 时使用 assemblePresetContent()', () => {
+    const ctx = makeContext({ userInput: 'test' });
+    const cfg = makeCfg('story', {
+      systemPrompt: 'should-not-be-used',
+      presetId: 'test-preset',
+    });
+    const presets: AgentPreset[] = [{
+      id: 'test-preset',
+      name: 'Test Preset',
+      fixedSystem: 'PRESET_CONTENT',
+      fixedExamples: '',
+    } as AgentPreset];
+    const messages = buildAgentMessages('story', ctx, [cfg], [], presets);
+    expect(messages).not.toBeNull();
+    // 预设内容应出现在结果中
+    expect(messages![0].content).toContain('PRESET_CONTENT');
+  });
+});
+
+// ========== Phase 10: 单消息返回格式 ==========
+
+describe('buildAgentMessages — return format (Phase 10 single system msg)', () => {
+  const agentsWithTemplates = [
+    'story', 'memory_recall', 'plot_pre_check',
+    'vars_update', 'char_update', 'memory_summary', 'plot_post_check',
+    'plot_outline', 'craft_gen', 'char_gen', 'item_gen',
+  ];
+
+  for (const agentId of agentsWithTemplates) {
+    it(`${agentId} 返回单条 system 消息`, () => {
+      const ctx = makeContext({ userInput: 'test' });
+      const cfg = makeCfg(agentId, { systemPrompt: 'Test prompt' });
+      const messages = buildAgentMessages(agentId, ctx, [cfg]);
+      expect(messages).toBeDefined();
+      expect(messages!.length).toBeGreaterThanOrEqual(1);
+      for (const m of messages!) {
+        expect(m.role).toBe('system');
+      }
+    });
+  }
+});
+
 // ========== Template Quality Checks (Phase 10: relaxed for externalized prompts) ==========
 
 // Phase 10: craft_gen/char_gen/item_gen have prompts in agent-config.json, not here
@@ -264,14 +419,14 @@ describe('模板质量 (Phase 10)', () => {
 function makeHistory(n: number): AgentContext['history'] {
   const h: AgentContext['history'] = [];
   for (let i = 0; i < n; i++) {
-    h.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: `消息${i}内容`.repeat(20) });
+    h.push({
+      id: `hist-${i}`,
+      timestamp: Date.now() + i * 1000,
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: `消息${i}内容`.repeat(20),
+    } as any);
   }
   return h;
-}
-function makeCfg(agentId: string, overrides: Partial<AgentConfig> = {}): AgentConfig {
-  return { agentId, enabled: true, apiEndpointId: '', model: '', temperature: 0.7,
-    maxTokens: 4096, topP: 1, frequencyPenalty: 0, presencePenalty: 0, retryOnFail: false, timeout: 0,
-    userId: '', promptTemplate: { fixedSystem: '', fixedExamples: '' }, worldBookIds: [], ...overrides };
 }
 function countHistoryEntries(userContent: string): number {
   return (userContent.match(/^\[(user|assistant)\]:/gm) || []).length;
@@ -343,7 +498,7 @@ describe('formatHistory 读取 per-agent 配置', () => {
   it('story 默认 historySlice=1500 限制正文截断字数', () => {
     const long = '长'.repeat(2000);
     const ctx = makeContext({
-      history: [{ role: 'user', content: long }, { role: 'assistant', content: long }],
+      history: [{ role: 'user', content: long } as any, { role: 'assistant', content: long } as any],
       agentOutputs: new Map([['story', 'X']]),
     });
     const cfg = makeCfg('story');

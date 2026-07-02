@@ -114,8 +114,8 @@ qll.customFields = {
 };
 qll.ascension = {
   enabled: true,
-  elements: { '频率': { name: '共鸣', description: '精神伤害攻击时10%几率与目标灵魂产生共鸣，无视20%精神抗性', effects: ['精神伤害共鸣', '抗性穿透20%'] } },
-  authority: {}, law: {}, deityPosition: '', divineKingdom: { name: '', description: '' },
+  elements: [{ name: '共鸣', description: '精神伤害攻击时10%几率与目标灵魂产生共鸣，无视20%精神抗性', effects: ['精神伤害共鸣', '抗性穿透20%'] }],
+  authority: [], law: [], deityPosition: '', divineKingdom: { name: '', description: '' },
 };
 qll.equipment = [
   { slot: '武器', itemId: 'eq-qll-staff', name: '彼岸花法杖', description: '猩红水晶与未知枯木制成的法杖，顶端盛开永不凋零的彼岸花', stats: { '攻击力': 520, '精神': 8 }, durability: 999, maxDurability: 999,
@@ -289,9 +289,28 @@ const saveSlot = {
 };
 
 // ===== FullBackup =====
+// Phase 10: 从 agent-config.json 加载 story preset 数据 (确保 test_agent 的 story 测试可用)
+function loadStoryPresets(): any[] {
+  try {
+    const acPath = 'data/defaults/agent-config.json';
+    if (fs.existsSync(acPath)) {
+      const ac = JSON.parse(fs.readFileSync(acPath, 'utf-8'));
+      const storyAgent = (ac.agents || {})['story'];
+      if (storyAgent?.preset) {
+        const p = storyAgent.preset;
+        if (!p.id) p.id = storyAgent.presetId || 'story-preset';
+        return [p];
+      }
+    }
+  } catch {}
+  return [];
+}
+
 const backup = {
   version: 7, exportedAt: NOW,
-  lorebooks: loadWorldBooks(['system_core', 'race', 'faction', 'character', 'variable', 'world_setting']), presets: [], settings: [],
+  lorebooks: loadWorldBooks(['system_core', 'race', 'faction', 'character', 'variable', 'world_setting']),
+  presets: loadStoryPresets(),
+  settings: [],
   chats: [chatSession], memories, plotEvents: [], characters, snapshots,
   saves: [saveSlot], apiEndpoints: [], plotOutlines: [],
   saveProfiles: [saveProfile], createPresets: [],

@@ -411,8 +411,8 @@ SubSystem-CharGen 角色 → Stage2 vars_update 异步检测新NPC
 | 7a | 工程搭建 (Vite + Vue 3 + Pinia + Router) | ✅ |
 | 7b | 主题系统 + 通用组件 (10主题/15组件) | ✅ |
 | 7c | 首页 (标题画面风格) + 设置页 (8分区) | ✅ |
-| 7d | 捏人页 `/create` | ✅ (暂结，后续继续改) |
-| 7e | 游戏页 + 状态栏 HUD + 脚本引擎(init自注册+@parent跨对象引用+subscription-manager) | ✅ 脚本系统完成 |
+| 7d | 捏人页 `/create` | 🔄 部分完成，后续继续改 |
+| 7e | 游戏页 + 状态栏 HUD + 脚本引擎(init自注册+@parent跨对象引用+subscription-manager) | 🔄 脚本系统完成，游戏页 UI 未完成 |
 | 7f | 创意工坊 `/workshop` | ⬜ |
 | 7g | 衔接 & 测试 | ⬜ |
 | 8 | Agent 上下文可见性 & Prompt 体系 | ✅ |
