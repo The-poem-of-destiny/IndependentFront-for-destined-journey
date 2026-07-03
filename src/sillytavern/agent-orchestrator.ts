@@ -612,52 +612,57 @@ export class AgentOrchestrator {
       const varsOutput = this.getAgentOutputText('vars_update');
       if (!varsOutput) return;
 
-      // Step A: scanMarkers 从 varsUpdate 提取所有标签 + cleanText (JSON)
+      // Step A: 从 varsOutput 提取 <json> 块内容（正则直接提取，不依赖 scanMarkers）
+      const jsonMatch = varsOutput.match(/<json>([\s\S]*?)<\/json>/);
+      const jsonText = jsonMatch ? jsonMatch[1].trim() : '';
+
+      // Step B: scanMarkers 提取所有 request 标签
       const scanResult = scanMarkers(varsOutput);
       const markers = scanResult.markers;
-      const jsonText = scanResult.cleanText.trim();
 
-      // Step B: 解析 <json> 块中的全局变量 → StatePatch（先执行）
-      try {
-        const parsed = JSON.parse(jsonText);
-        const { createStateManager } = await import('./state-manager');
-        const sm = createStateManager(this.saveId);
-        const patches: import('./types').StatePatch[] = [];
+      // Step C: 解析 <json> 块中的全局变量 → StatePatch（先执行）
+      if (jsonText) {
+        try {
+          const parsed = JSON.parse(jsonText.trim());
+          const { createStateManager } = await import('./state-manager');
+          const sm = createStateManager(this.saveId);
+          const patches: import('./types').StatePatch[] = [];
 
-        for (const r of (parsed.replace ?? [])) {
-          patches.push({
-            op: 'set_variable',
-            target: `variables.${r.path}`,
-            value: r.value,
-            metadata: { source: 'vars_update', operation: 'replace' },
-          });
-        }
-        for (const d of (parsed.delta ?? [])) {
-          patches.push({
-            op: 'delta_variable',
-            target: `variables.${d.path}`,
-            amount: d.amount,
-            metadata: { source: 'vars_update', operation: 'delta' },
-          });
-        }
-        for (const ins of (parsed.insert ?? [])) {
-          patches.push({
-            op: 'insert_variable',
-            target: `variables.${ins.path}`,
-            value: ins.value,
-            metadata: { source: 'vars_update', operation: 'insert', index: ins.index },
-          });
-        }
+          for (const r of (parsed.replace ?? [])) {
+            patches.push({
+              op: 'set_variable',
+              target: `variables.${r.path}`,
+              value: r.value,
+              metadata: { source: 'vars_update', operation: 'replace' },
+            });
+          }
+          for (const d of (parsed.delta ?? [])) {
+            patches.push({
+              op: 'delta_variable',
+              target: `variables.${d.path}`,
+              amount: d.amount,
+              metadata: { source: 'vars_update', operation: 'delta' },
+            });
+          }
+          for (const ins of (parsed.insert ?? [])) {
+            patches.push({
+              op: 'insert_variable',
+              target: `variables.${ins.path}`,
+              value: ins.value,
+              metadata: { source: 'vars_update', operation: 'insert', index: ins.index },
+            });
+          }
 
-        if (patches.length > 0) {
-          await sm.commitChatState(patches);
-        }
+          if (patches.length > 0) {
+            await sm.commitChatState(patches);
+          }
 
-        if (parsed.delta_time && typeof parsed.delta_time === 'number' && parsed.delta_time > 0) {
-          await sm.applyTimeAdvance(parsed.delta_time);
+          if (parsed.delta_time && typeof parsed.delta_time === 'number' && parsed.delta_time > 0) {
+            await sm.applyTimeAdvance(parsed.delta_time);
+          }
+        } catch {
+          console.warn('[Orchestrator] vars_update <json> 解析失败，跳过全局变量更新');
         }
-      } catch {
-        console.warn('[Orchestrator] vars_update <json> 解析失败，跳过全局变量更新');
       }
 
       // Step C: 旧格式 char_detect（向后兼容）— 从 story 扫描

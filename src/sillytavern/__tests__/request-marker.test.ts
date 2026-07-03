@@ -107,11 +107,8 @@ describe('scanMarkers with new vars_update format', () => {
   it('should produce cleanText with vars_update JSON-like format', () => {
     const text = '<json>{"delta_time": 30}</json>\n<char_gen_request characterName="汉斯">铁匠铺主人</char_gen_request>\n<item_update_request target="药水" operation="consume">用掉一瓶</item_update_request>';
     const result = scanMarkers(text);
-    // Expect markers for char_gen_request + item_update_request
-    // <json> should also be stripped by scanMarkers once registered
-    expect(result.markers).toHaveLength(3); // json + char_gen_request + item_update_request
-    // Verify json marker is detected
-    const jsonMarkers = result.markers.filter(m => m.type === ('json' as any));
-    expect(jsonMarkers).toHaveLength(1);
+    // <json> is NOT in MARKER_TAGS, so it's not stripped by scanMarkers
+    // It's handled separately in the orchestrator via regex
+    expect(result.markers).toHaveLength(2); // char_gen_request + item_update_request only
   });
 });

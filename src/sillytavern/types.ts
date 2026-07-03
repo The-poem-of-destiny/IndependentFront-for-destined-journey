@@ -2279,8 +2279,7 @@ export interface CombatUnitTurn {
 export type MarkerType = 'craft_request' | 'combat_trigger' | 'char_detect'  // 旧（保留向后兼容）
   | 'char_gen_request' | 'char_update_request'                              // 角色调度
   | 'item_gen_request' | 'item_update_request'                              // 物品调度
-  | 'craft_gen_request'                                                     // 制作调度（统一 _request 后缀）
-  | 'json';                                                                 // 全局变量块（用于 strip）
+  | 'craft_gen_request';                                                    // 制作调度（统一 _request 后缀）
 
 /** 所有标记的公共字段 */
 export interface DetectedMarkerBase {
