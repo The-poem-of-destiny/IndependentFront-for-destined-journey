@@ -20,6 +20,7 @@ import type {
   AgentContext,
   ApiEndpoint,
   CharDetectMarker,
+  CharGenRequestMarker,
   CharGenOutput,
   CharGenChainResult,
   ItemGenOutput,
@@ -41,7 +42,10 @@ import type { ToolExecutionContext } from './types';
 
 export interface CharGenRequest {
   saveId: string;
-  detection: CharDetectMarker;
+  /** @deprecated 旧字段，新流程使用 marker (CharGenRequestMarker) */
+  detection?: CharDetectMarker;
+  /** 新流程：vars_update 输出的 char_gen_request marker */
+  marker?: CharGenRequestMarker;
   context: AgentContext;
   endpoint: ApiEndpoint;
 }
@@ -125,13 +129,19 @@ export async function callCharGenAgent(
   request: CharGenRequest,
   deps: CharGenAgentDeps,
 ): Promise<CharGenOutput> {
+  // 新格式优先: CharGenRequestMarker (vars_update 输出)
+  // 旧格式兼容: CharDetectMarker (Story Agent 输出的 char_detect)
+  const markerOrDetect = request.marker ?? request.detection;
+  const requestContent = markerOrDetect?.bodyText ?? markerOrDetect?.rawContent ?? '';
+  const localParamKey = request.marker ? 'CHAR_GEN_REQUEST' : 'CHAR_DETECT';
+
   const charLocalParams: Record<string, string> = {
-    CHAR_DETECT: (request.detection as any).content || request.detection.bodyText || request.detection.rawContent, // The <char_detect> content
+    [localParamKey]: requestContent,
   };
 
   const messages = buildAgentMessages('char_gen', {
     ...request.context,
-    agentOutputs: new Map([['story', request.detection.rawContent]]),
+    agentOutputs: new Map([['story', requestContent]]),
   }, undefined, undefined, undefined, charLocalParams);
 
   if (!messages) {
@@ -188,7 +198,7 @@ export async function callItemGenAgent(
     ...request.context,
     agentOutputs: new Map([
       ['char_gen', JSON.stringify(charData)],
-      ['story', request.detection.rawContent],
+      ['story', request.marker?.rawContent ?? request.detection?.rawContent ?? ''],
     ]),
   };
 

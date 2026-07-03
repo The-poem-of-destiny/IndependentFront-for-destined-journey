@@ -23,6 +23,7 @@ import type {
   AgentContext,
   ApiEndpoint,
   CraftRequestMarker,
+  CraftGenRequestMarker,
   ItemGenOutput,
   StatePatch,
   QualityLevel,
@@ -38,10 +39,26 @@ import type { ToolExecutionContext } from './types';
 
 export interface CraftGenRequest {
   saveId: string;
-  marker: CraftRequestMarker;
+  marker: CraftRequestMarker | CraftGenRequestMarker;  // 兼容新旧
   storyOutput: string;
   context: AgentContext;
   endpoint: ApiEndpoint;
+}
+
+/** Helper: extract attributes from old or new marker shape */
+function getMarkerAttr(marker: CraftRequestMarker | CraftGenRequestMarker, key: string): string | undefined {
+  if (marker.type === 'craft_gen_request') {
+    return (marker as CraftGenRequestMarker).attributes[key as keyof CraftGenRequestMarker['attributes']] as string | undefined;
+  }
+  return (marker as any)[key] as string | undefined;
+}
+
+/** Helper: get body text from old or new marker */
+function getMarkerBody(marker: CraftRequestMarker | CraftGenRequestMarker): string {
+  if (marker.type === 'craft_gen_request') {
+    return (marker as CraftGenRequestMarker).bodyText || '';
+  }
+  return (marker as CraftRequestMarker).bodyText || '';
 }
 
 export interface CraftGenDeps {
@@ -136,13 +153,13 @@ export async function callCraftGenAgent(
   request: CraftGenRequest,
   deps: CraftGenDeps,
 ): Promise<CraftGenOutput> {
-  // 构建上下文: 将 story 输出（含 <craft_request>）和 marker 信息注入 agentOutputs
+  // 构建上下文: 兼容新旧 marker 格式
+  const markerBody = getMarkerBody(request.marker);
   const markerContext = [
-    `一般制作请求: ${request.marker.bodyText ?? request.marker.rawContent}`,
-    request.marker.industry ? `行业: ${request.marker.industry}` : '',
-    request.marker.productName ? `产物名: ${request.marker.productName}` : '',
-    request.marker.targetQuality ? `目标品质: ${request.marker.targetQuality}` : '',
-    request.marker.expects ? `期望效果: ${request.marker.expects}` : '',
+    `一般制作请求: ${markerBody || request.marker.rawContent}`,
+    getMarkerAttr(request.marker, 'industry') ? `行业: ${getMarkerAttr(request.marker, 'industry')}` : '',
+    getMarkerAttr(request.marker, 'productName') ? `产物名: ${getMarkerAttr(request.marker, 'productName')}` : '',
+    getMarkerAttr(request.marker, 'targetQuality') ? `目标品质: ${getMarkerAttr(request.marker, 'targetQuality')}` : '',
   ].filter(Boolean).join('\n');
 
   const ctxWithStory: AgentContext = {
@@ -153,7 +170,7 @@ export async function callCraftGenAgent(
   };
 
   const craftLocalParams: Record<string, string> = {
-    CRAFT_REQUEST: (request.marker as any).content || request.marker.bodyText || request.storyOutput, // The <craft_request> content from Story
+    CRAFT_REQUEST: markerBody || request.storyOutput,
   };
 
   const messages = buildAgentMessages('craft_gen', ctxWithStory, undefined, undefined, undefined, craftLocalParams);
@@ -488,7 +505,7 @@ export async function runCraftGenChain(
   }
 
   // Step 3: build patches
-  const characterId = request.marker.characterId ?? 'player_1';
+  const characterId = getMarkerAttr(request.marker, 'characterId') ?? 'player_1';
   const patches = buildCraftPatches(craftOutput, itemOutput, characterId);
 
   // Step 4: optional persistence
