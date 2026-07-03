@@ -13,6 +13,7 @@ import type {
   Pipeline, PipelineStage, AgentContext, AgentResult,
   OrchestratorRun, AgentConfig, ApiEndpoint, AgentDefinition,
   CraftRequestMarker, CombatTriggerMarker, CharDetectMarker, CombatSummaryResult,
+  CharGenRequestMarker, ItemGenRequestMarker, ItemUpdateRequestMarker, CraftGenRequestMarker,
   ToolExecutionContext,
 } from './types';
 import { AgentClient } from './agent-client';
@@ -50,7 +51,7 @@ export interface OrchestratorEvents {
   onAgentError?: (agentId: string, error: string) => void;
   onStageComplete?: (stageIndex: number) => void;
 
-  // ===== Phase 6e: Marker Protocol 回调 =====
+  // ===== Phase 6e: Marker Protocol 回调 (旧格式，向后兼容) =====
 
   /**
    * 🛑 Craft Request: Stage 1 正文中检测到 <craft_request> 后触发。
@@ -69,8 +70,23 @@ export interface OrchestratorEvents {
   /**
    * 👤 Char Detect: Stage 2 vars_update 后检测到 <char_detect> 后触发。
    * 调用方应运行 char_gen → item_gen 链生成新角色数据。
+   * @deprecated 新流程使用 onCharGenRequest 处理 <char_gen_request>
    */
   onCharDetect?: (markers: CharDetectMarker[], storyOutput: string, context: AgentContext) => Promise<void>;
+
+  // ===== Phase 10: vars_update 调度器回调 =====
+
+  /** Stage 2: vars_update 输出中的 <char_gen_request> → char_gen→item_gen 链 */
+  onCharGenRequest?: (markers: CharGenRequestMarker[], varsOutput: string, context: AgentContext) => Promise<void>;
+
+  /** Stage 2: vars_update 输出中的 <item_gen_request> → item_gen 独立调用 */
+  onItemGenRequest?: (markers: ItemGenRequestMarker[], varsOutput: string, context: AgentContext) => Promise<void>;
+
+  /** Stage 2: vars_update 输出中的 <item_update_request> → item_update */
+  onItemUpdateRequest?: (markers: ItemUpdateRequestMarker[], varsOutput: string, context: AgentContext) => Promise<void>;
+
+  /** Stage 2: vars_update 输出中的 <craft_gen_request> → craft_gen→item_gen 链 */
+  onCraftGenRequest?: (markers: CraftGenRequestMarker[], varsOutput: string, context: AgentContext) => Promise<void>;
 
   /** Phase 8.5: Agentic Agent 发出工具调用时触发 */
   onToolCall?: (agentId: string, toolName: string, args: any, result: any) => void;
@@ -97,10 +113,10 @@ export class AgentOrchestrator {
   private worldBooks: WorldBook[];
   private presets: AgentPreset[];
 
-  /** Phase 6e: Stage 1 检测到的 combat markers — 延迟到 Stage 2 char_gen 后执行 */
+  /** @deprecated Phase 10: 旧格式 pendingCombatMarkers，新流程从 vars_update 输出直接扫描 */
   private pendingCombatMarkers: CombatTriggerMarker[] = [];
 
-  /** Phase 8.5: Stage 1 检测到的 craft markers — 延迟到 Stage 2 统一执行 */
+  /** @deprecated Phase 10: 旧格式 pendingCraftMarkers，新流程从 vars_update 输出直接扫描 */
   private pendingCraftMarkers: CraftRequestMarker[] = [];
 
   constructor(options: OrchestratorOptions, events: OrchestratorEvents = {}) {
@@ -567,14 +583,14 @@ export class AgentOrchestrator {
     // Phase 10: Chain agents that need localParams (craft_gen, char_gen, item_gen)
     // receive them via the chain orchestrators (craft-gen-chain.ts, char-gen-agent.ts).
     // The orchestrator callbacks pass localParams directly to buildAgentMessages().
-    // Stage 1 (story): 暂存 craft markers + combat markers
+    // Stage 1 (story): 暂存旧格式 markers + 向后兼容
     if (this.isStoryStage(stageIndex)) {
       const storyOutput = this.getAgentOutputText('story');
       if (!storyOutput) return;
 
       const scanResult = scanMarkers(storyOutput);
 
-      // 🛑→🚩 Craft markers: 改为暂存，Stage 2 统一执行
+      // 旧格式 craft_request（仍从 story 扫描，向后兼容）
       const craftMarkers = scanResult.markers.filter(
         (m): m is CraftRequestMarker => m.type === 'craft_request',
       );
@@ -582,7 +598,7 @@ export class AgentOrchestrator {
         this.pendingCraftMarkers.push(...craftMarkers);
       }
 
-      // 🚩 Combat markers: 暂存
+      // 旧格式 combat_trigger（仍从 story 扫描，向后兼容）
       const combatMarkers = scanResult.markers.filter(
         (m): m is CombatTriggerMarker => m.type === 'combat_trigger',
       );
@@ -591,24 +607,99 @@ export class AgentOrchestrator {
       }
     }
 
-    // Stage 2 (vars_update): 先 char_detect → 再 craft → 最后 combat
+    // Stage 2 (vars_update): 扫描 vars_update 输出 + 处理所有 request
     if (this.isVarsUpdateStage(stageIndex)) {
-      const storyOutput = this.getAgentOutputText('story');
-      if (!storyOutput) return;
+      const varsOutput = this.getAgentOutputText('vars_update');
+      if (!varsOutput) return;
 
-      const scanResult = scanMarkers(storyOutput);
+      // Step A: scanMarkers 从 varsUpdate 提取所有标签 + cleanText (JSON)
+      const scanResult = scanMarkers(varsOutput);
+      const markers = scanResult.markers;
+      const jsonText = scanResult.cleanText.trim();
 
-      // 👤 Char detect: 先生成新角色
-      const charMarkers = scanResult.markers.filter(
-        (m): m is CharDetectMarker => m.type === 'char_detect',
-      );
-      if (charMarkers.length > 0 && this.events.onCharDetect) {
-        await this.events.onCharDetect(charMarkers, storyOutput, this.context);
+      // Step B: 解析 <json> 块中的全局变量 → StatePatch（先执行）
+      try {
+        const parsed = JSON.parse(jsonText);
+        const { createStateManager } = await import('./state-manager');
+        const sm = createStateManager(this.saveId);
+        const patches: import('./types').StatePatch[] = [];
+
+        for (const r of (parsed.replace ?? [])) {
+          patches.push({
+            op: 'set_variable',
+            target: `variables.${r.path}`,
+            value: r.value,
+            metadata: { source: 'vars_update', operation: 'replace' },
+          });
+        }
+        for (const d of (parsed.delta ?? [])) {
+          patches.push({
+            op: 'delta_variable',
+            target: `variables.${d.path}`,
+            amount: d.amount,
+            metadata: { source: 'vars_update', operation: 'delta' },
+          });
+        }
+        for (const ins of (parsed.insert ?? [])) {
+          patches.push({
+            op: 'insert_variable',
+            target: `variables.${ins.path}`,
+            value: ins.value,
+            metadata: { source: 'vars_update', operation: 'insert', index: ins.index },
+          });
+        }
+
+        if (patches.length > 0) {
+          await sm.commitChatState(patches);
+        }
+
+        if (parsed.delta_time && typeof parsed.delta_time === 'number' && parsed.delta_time > 0) {
+          await sm.applyTimeAdvance(parsed.delta_time);
+        }
+      } catch {
+        console.warn('[Orchestrator] vars_update <json> 解析失败，跳过全局变量更新');
       }
 
-      // 🛑 Craft: 执行暂存的 craft markers，结果注入 story output
+      // Step C: 旧格式 char_detect（向后兼容）— 从 story 扫描
+      const storyOutput = this.getAgentOutputText('story');
+      if (storyOutput) {
+        const storyScan = scanMarkers(storyOutput);
+        const oldCharMarkers = storyScan.markers.filter(
+          (m): m is CharDetectMarker => m.type === 'char_detect',
+        );
+        if (oldCharMarkers.length > 0 && this.events.onCharDetect) {
+          await this.events.onCharDetect(oldCharMarkers, storyOutput, this.context);
+        }
+      }
+
+      // Step D: 新格式 request 标签 → 并行回调
+      const charGenMarkers = markers.filter((m): m is CharGenRequestMarker => m.type === 'char_gen_request');
+      const itemGenMarkers = markers.filter((m): m is ItemGenRequestMarker => m.type === 'item_gen_request');
+      const itemUpdateMarkers = markers.filter((m): m is ItemUpdateRequestMarker => m.type === 'item_update_request');
+      const craftGenMarkers = markers.filter((m): m is CraftGenRequestMarker => m.type === 'craft_gen_request');
+
+      const promises: Promise<void>[] = [];
+
+      if (charGenMarkers.length > 0 && this.events.onCharGenRequest) {
+        promises.push(this.events.onCharGenRequest(charGenMarkers, varsOutput, this.context));
+      }
+      if (itemGenMarkers.length > 0 && this.events.onItemGenRequest) {
+        promises.push(this.events.onItemGenRequest(itemGenMarkers, varsOutput, this.context));
+      }
+      if (itemUpdateMarkers.length > 0 && this.events.onItemUpdateRequest) {
+        promises.push(this.events.onItemUpdateRequest(itemUpdateMarkers, varsOutput, this.context));
+      }
+      if (craftGenMarkers.length > 0 && this.events.onCraftGenRequest) {
+        promises.push(this.events.onCraftGenRequest(craftGenMarkers, varsOutput, this.context));
+      }
+
+      if (promises.length > 0) {
+        await Promise.all(promises);
+      }
+
+      // Step E: 旧格式 craft/combat（向后兼容）
       if (this.pendingCraftMarkers.length > 0 && this.events.onCraftRequest) {
-        let modifiedOutput = storyOutput;
+        let modifiedOutput = storyOutput ?? '';
         for (const marker of this.pendingCraftMarkers) {
           const craftResult = await this.events.onCraftRequest(marker, modifiedOutput);
           if (craftResult) {
@@ -630,65 +721,11 @@ export class AgentOrchestrator {
         this.pendingCraftMarkers = [];
       }
 
-      // 🚩 Combat: 执行暂存的 combat markers
       if (this.pendingCombatMarkers.length > 0 && this.events.onCombatTrigger) {
         for (const marker of this.pendingCombatMarkers) {
-          await this.events.onCombatTrigger(marker, storyOutput);
+          await this.events.onCombatTrigger(marker, storyOutput ?? '');
         }
         this.pendingCombatMarkers = [];
-      }
-
-      // 🆕 Phase 8.5: vars_update 结构化输出 → StatePatch
-      const varsOutput = this.getAgentOutputText('vars_update');
-      if (varsOutput) {
-        try {
-          const parsed = JSON.parse(varsOutput.trim());
-          const { createStateManager } = await import('./state-manager');
-          const sm = createStateManager(this.saveId);
-          const patches: import('./types').StatePatch[] = [];
-
-          // replace → set_variable
-          for (const r of (parsed.replace ?? [])) {
-            patches.push({
-              op: 'set_variable',
-              target: `variables.${r.path}`,
-              value: r.value,
-              metadata: { source: 'vars_update', operation: 'replace' },
-            });
-          }
-
-          // delta → delta_variable
-          for (const d of (parsed.delta ?? [])) {
-            patches.push({
-              op: 'delta_variable',
-              target: `variables.${d.path}`,
-              amount: d.amount,
-              metadata: { source: 'vars_update', operation: 'delta' },
-            });
-          }
-
-          // insert → insert_variable
-          for (const ins of (parsed.insert ?? [])) {
-            patches.push({
-              op: 'insert_variable',
-              target: `variables.${ins.path}`,
-              value: ins.value,
-              metadata: { source: 'vars_update', operation: 'insert', index: ins.index },
-            });
-          }
-
-          // Submit patches (if any)
-          if (patches.length > 0) {
-            await sm.commitChatState(patches);
-          }
-
-          // delta_time → 时间推进
-          if (parsed.delta_time && typeof parsed.delta_time === 'number' && parsed.delta_time > 0) {
-            await sm.applyTimeAdvance(parsed.delta_time);
-          }
-        } catch {
-          // vars_update 输出不是 JSON，忽略
-        }
       }
     }
   }

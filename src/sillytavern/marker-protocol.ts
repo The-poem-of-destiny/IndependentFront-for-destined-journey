@@ -1,10 +1,17 @@
 /**
  * Marker Protocol — XML 标记检测与解析 (ADR-25)
  *
- * Phase 6e 核心模块。正文 AI 通过三种 XML 标记与引擎通信:
+ * Phase 6e 核心模块。正文 AI 通过 XML 标记与引擎通信:
  *   <craft_request>  — 🛑 阻塞型: Story 暂停 → 执行制作 → 结果注入正文
  *   <combat_trigger> — 🚩 独立型: Stage 1 后唤起独立战斗页面
  *   <char_detect>    — 👤 隐式型: vars_update 扫描后异步触发角色生成链
+ *
+ * Phase 10 新增 (vars_update 调度器):
+ *   <char_gen_request>    — vars_update 发现新角色
+ *   <char_update_request> — vars_update 发现已有角色变更
+ *   <item_gen_request>    — vars_update 发现新物品
+ *   <item_update_request> — vars_update 发现已有物品变更
+ *   <craft_gen_request>   — vars_update 发现制作场景 (统一 _request 后缀)
  *
  * 设计决策:
  * - 纯函数模块，无副作用，无外部依赖
@@ -18,6 +25,11 @@ import type {
   CraftRequestMarker,
   CombatTriggerMarker,
   CharDetectMarker,
+  CharGenRequestMarker,
+  CharUpdateRequestMarker,
+  ItemGenRequestMarker,
+  ItemUpdateRequestMarker,
+  CraftGenRequestMarker,
   MarkerScanResult,
 } from './types';
 
@@ -28,6 +40,12 @@ export const MARKER_TAGS: readonly MarkerType[] = [
   'craft_request',
   'combat_trigger',
   'char_detect',
+  // Phase 10 新增: vars_update 调度器 request 标签
+  'char_gen_request',
+  'char_update_request',
+  'item_gen_request',
+  'item_update_request',
+  'craft_gen_request',
 ] as const;
 
 /** 标记标签名 Set (O(1) 成员检查) */
@@ -173,8 +191,133 @@ export function scanCharDetects(text: string): CharDetectMarker[] {
   return markers;
 }
 
+// ========== Phase 10: vars_update 调度器标签扫描 ==========
+
 /**
- * 主入口: 扫描文本中的全部三种标记。
+ * 扫描文本中的 <char_gen_request> 标记。
+ */
+export function scanCharGenRequests(text: string): CharGenRequestMarker[] {
+  const markers: CharGenRequestMarker[] = [];
+  const regex = buildMarkerRegex('char_gen_request');
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const attrs = parseTagAttributes(match[1] || '');
+    markers.push({
+      type: 'char_gen_request',
+      rawContent: match[0],
+      position: match.index,
+      attributes: {
+        characterName: attrs['characterName'],
+        race: attrs['race'],
+        tier: attrs['tier'],
+        characterType: attrs['characterType'],
+        faction: attrs['faction'],
+      },
+      bodyText: match[2]?.trim() || '',
+    });
+  }
+  return markers;
+}
+
+/**
+ * 扫描文本中的 <char_update_request> 标记。
+ */
+export function scanCharUpdateRequests(text: string): CharUpdateRequestMarker[] {
+  const markers: CharUpdateRequestMarker[] = [];
+  const regex = buildMarkerRegex('char_update_request');
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const attrs = parseTagAttributes(match[1] || '');
+    markers.push({
+      type: 'char_update_request',
+      rawContent: match[0],
+      position: match.index,
+      attributes: {
+        target: attrs['target'] || '',
+      },
+      bodyText: match[2]?.trim() || '',
+    });
+  }
+  return markers;
+}
+
+/**
+ * 扫描文本中的 <item_gen_request> 标记。
+ */
+export function scanItemGenRequests(text: string): ItemGenRequestMarker[] {
+  const markers: ItemGenRequestMarker[] = [];
+  const regex = buildMarkerRegex('item_gen_request');
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const attrs = parseTagAttributes(match[1] || '');
+    markers.push({
+      type: 'item_gen_request',
+      rawContent: match[0],
+      position: match.index,
+      attributes: {
+        itemType: attrs['itemType'] || '',
+        source: attrs['source'],
+        owner: attrs['owner'],
+      },
+      bodyText: match[2]?.trim() || '',
+    });
+  }
+  return markers;
+}
+
+/**
+ * 扫描文本中的 <item_update_request> 标记。
+ */
+export function scanItemUpdateRequests(text: string): ItemUpdateRequestMarker[] {
+  const markers: ItemUpdateRequestMarker[] = [];
+  const regex = buildMarkerRegex('item_update_request');
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const attrs = parseTagAttributes(match[1] || '');
+    markers.push({
+      type: 'item_update_request',
+      rawContent: match[0],
+      position: match.index,
+      attributes: {
+        target: attrs['target'] || '',
+        operation: attrs['operation'] || '',
+        quantity: attrs['quantity'],
+        owner: attrs['owner'],
+      },
+      bodyText: match[2]?.trim() || '',
+    });
+  }
+  return markers;
+}
+
+/**
+ * 扫描文本中的 <craft_gen_request> 标记。
+ * 与旧 <craft_request> 语义相同，统一 _request 后缀。
+ */
+export function scanCraftGenRequests(text: string): CraftGenRequestMarker[] {
+  const markers: CraftGenRequestMarker[] = [];
+  const regex = buildMarkerRegex('craft_gen_request');
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const attrs = parseTagAttributes(match[1] || '');
+    markers.push({
+      type: 'craft_gen_request',
+      rawContent: match[0],
+      position: match.index,
+      attributes: {
+        characterId: attrs['characterId'],
+        industry: attrs['industry'],
+        productName: attrs['productName'],
+        targetQuality: attrs['targetQuality'],
+      },
+      bodyText: match[2]?.trim() || '',
+    });
+  }
+  return markers;
+}
+
+/**
+ * 主入口: 扫描文本中的全部 8 种标记。
  *
  * 返回:
  * - markers: 所有检测到的标记，按 position 升序排列
@@ -187,12 +330,23 @@ export function scanMarkers(text: string): MarkerScanResult {
   const craftMarkers = scanCraftRequests(text);
   const combatMarkers = scanCombatTriggers(text);
   const charMarkers = scanCharDetects(text);
+  // Phase 10: vars_update 调度器标签
+  const charGenMarkers = scanCharGenRequests(text);
+  const charUpdateMarkers = scanCharUpdateRequests(text);
+  const itemGenMarkers = scanItemGenRequests(text);
+  const itemUpdateMarkers = scanItemUpdateRequests(text);
+  const craftGenMarkers = scanCraftGenRequests(text);
 
   // 合并并按位置排序
   const allMarkers: DetectedMarker[] = [
     ...craftMarkers,
     ...combatMarkers,
     ...charMarkers,
+    ...charGenMarkers,
+    ...charUpdateMarkers,
+    ...itemGenMarkers,
+    ...itemUpdateMarkers,
+    ...craftGenMarkers,
   ].sort((a, b) => a.position - b.position);
 
   // 生成 cleanText: 按位置倒序替换 (从后往前避免偏移)

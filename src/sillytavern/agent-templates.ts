@@ -41,6 +41,7 @@ export function defaultHistoryLayers(agentId: string): number {
     case 'char_gen':
     case 'item_gen':
     case 'craft_gen':        return 1;
+    case 'item_update':      return 0;
     default:                 return 2;
   }
 }
@@ -62,6 +63,7 @@ export function defaultHistorySlice(agentId: string): number {
     case 'char_gen':
     case 'item_gen':
     case 'craft_gen':        return 800;
+    case 'item_update':      return 0;
     default:                 return 800;
   }
 }
@@ -181,6 +183,17 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
     variableInstruction: (ctx: AgentContext) => {
       const storyOutput = ctx.agentOutputs?.get('story') ?? '';
       return `${recentHistoryBlock(ctx)}**正文 AI 输出:**\n${storyOutput}\n\n请提取所有角色状态变化。`;
+    },
+  },
+
+  // ---- item_update: 物品变更 ----
+  item_update: {
+    fixedSystem: '物品状态更新系统。根据 vars_update 调度器的物品变更请求更新物品状态（消耗/转移/装备/卸下）。完整提示词见 agent-config.json 和模板系统。',
+    fixedExamples: '{"items": [{"target": "治疗药水", "operation": "consume", "quantity": 1, "owner": "player_1"}]}',
+    variableContext: (ctx: AgentContext) => '',
+    variableInstruction: (ctx: AgentContext) => {
+      const varsOutput = ctx.agentOutputs?.get('vars_update') ?? '';
+      return `**vars_update 输出:**\n${varsOutput}\n\n请提取所有物品变更。`;
     },
   },
 

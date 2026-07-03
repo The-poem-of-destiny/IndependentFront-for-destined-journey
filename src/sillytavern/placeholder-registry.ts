@@ -239,6 +239,11 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     return ctx.agentOutputs?.get('char_update') || '';
   },
 
+  /** {{AGENT.ITEM_UPDATE}} */
+  'AGENT.ITEM_UPDATE': (ctx, _config, _params) => {
+    return ctx.agentOutputs?.get('item_update') || '';
+  },
+
   // ---- Chain Communication Placeholders (5) (localParams injected) ----
   'CRAFT_REQUEST': (_ctx, _config, _params) => '',
   'CHAR_DETECT': (_ctx, _config, _params) => '',
@@ -263,8 +268,9 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   story: '{{SYS_PROMPT}}\n{{AGENT.MEMORY_RECALL}}\n{{AGENT.PLOT_PRE_CHECK}}\n{{LORE_BOOK}}\n{{CHARACTER_STATE}}\n{{GAME_TIME}}\n{{NARRATIVE}}\n{{USER_INPUT}}',
   memory_recall: '{{SYS_PROMPT}}\n{{MEMORY_ENTRIES}}\n{{NARRATIVE:layers=3:slice=800}}\n{{USER_INPUT}}',
   plot_pre_check: '{{SYS_PROMPT}}\n{{PLOT_EVENTS}}\n{{AGENT.MEMORY_RECALL}}\n{{NARRATIVE:layers=3:slice=1000}}\n{{USER_INPUT}}',
-  vars_update: '{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{CHARACTER_STATE}}\n{{LORE_BOOK}}',
+  vars_update: '{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{CHARACTER_STATE}}\n{{INVENTORY}}\n{{LORE_BOOK}}',
   char_update: '{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{AGENT.VARS_UPDATE}}\n{{CHARACTER_STATE}}\n{{NARRATIVE:layers=1:slice=800}}',
+  item_update: '{{SYS_PROMPT}}\n{{AGENT.VARS_UPDATE}}\n{{INVENTORY}}\n{{CHARACTER_STATE}}',
   memory_summary: '{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{NARRATIVE:layers=4:slice=1500}}',
   plot_post_check: '{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{AGENT.MEMORY_SUMMARY}}\n{{PLOT_EVENTS}}\n{{CHARACTER_STATE}}\n{{NARRATIVE:layers=4:slice=1000}}',
   plot_outline: '{{SYS_PROMPT}}\n{{PLOT_EVENTS}}\n{{NARRATIVE:layers=3:slice=1000}}',

@@ -2366,7 +2366,7 @@
         "race"
       ],
       "model": "",
-      "systemPrompt": "你是一个变量提取系统。根据正文 AI 的输出，提取需要更新的变量。\r\n\r\n**支持的变量操作:**\r\n- replace: 设置新值 {\"path\": \"变量名\", \"value\": 新值}\r\n- delta: 数值增减 {\"path\": \"变量名\", \"amount\": +10 或 -5}\r\n- insert: 数组插入 {\"path\": \"数组变量名\", \"value\": 新元素, \"index\": 可选}\r\n  - delta_time: 时间推进 (分钟) {\"delta_time\": 180}\r\n\r\n**注意:**\r\n- 只提取正文中明确发生的变量变化\r\n- 数值变化要精确（HP减少多少、金钱增减多少）\r\n- 位置变化每次都要更新\r\n- 新获得的物品/技能要 insert\r\n  - 时间流逝用 delta_time 表示（分钟），如 \"过了一小时\" → delta_time: 60\r\n\r\n**输出格式 (严格 JSON):**\r\n{\"replace\": [{\"path\": \"位置\", \"value\": \"北方-诺斯加德-白曜城-铁匠铺\"}], \"delta\": [{\"path\": \"金钱\", \"amount\": -50}], \"insert\": [{\"path\": \"背包\", \"value\": {\"name\": \"铁剑\", \"quantity\": 1}}]}\n\n**示例:**\r\n当前变量: {\"金钱\": 200, \"HP\": 85, \"背包\": [\"药水\"], \"位置\": \"北方-诺斯加德-白曜城-市集\"}\r\n正文: \"你花了50G从铁匠那里买了一把新的铁剑，休息了一小时后继续上路。\"\r\n\r\n输出:\r\n{\"replace\": [{\"path\": \"位置\", \"value\": \"北方-诺斯加德-白曜城-五馆街-铁匠铺\"}], \"delta\": [{\"path\": \"金钱\", \"amount\": -50}], \"delta_time\": 60, \"insert\": [{\"path\": \"背包\", \"value\": {\"name\": \"铁剑\", \"quantity\": 1, \"type\": \"weapon\"}}]}",
+      "systemPrompt": "你是一个变量调度系统。根据正文 AI 的输出，完成三件事：\r\n① 用 <json> 标签输出全局变量更新（时间推进/天气变化/世界新闻）\r\n② 用 request 标签将角色/物品变更委托给下游 Agent\r\n③ 判断正文中的角色/物品是\"新出现\"还是\"已存在\"\r\n\r\n---\r\n# 一、<json> — 全局变量更新（每轮必须输出）\r\n\r\n只更新不归属任何角色的全局状态。\r\n\r\n<json>\r\n{\"delta_time\": 60,\r\n \"replace\": [{\"path\": \"天气\", \"value\": \"阴转小雨\"}],\r\n \"insert\": [{\"path\": \"世界新闻\", \"value\": \"白曜城铁匠铺发生火灾\"}]}\r\n</json>\r\n\r\n<json> 支持的全局变量路径:\r\n- 时间/天气/季节/月相/纪元 — world 变量\r\n- 世界新闻 — user.news 数组\r\n- 势力关系/区域状态 — sys.* 变量\r\n- delta_time — 时间推进（分钟）\r\n\r\n**禁止在 <json> 中操作角色属性（HP/MP/SP/金钱/位置/装备/技能/背包），这些必须走 request 标签。**\r\n\r\n---\r\n# 二、Request 标签 — 委托下游 Agent\r\n\r\n根据已有角色表和已有物品判断\"新出现 vs 已存在\"。没有变化就不输出。\r\n\r\n## 判断规则\r\n- 角色名不在已有角色表中 → 新角色 → <char_gen_request>\r\n- 角色名在已有角色表中 → 已存在 → <char_update_request>\r\n- 物品名不在已有角色背包中 → 新物品 → <item_gen_request>\r\n- 物品名在已有角色背包中 → 已存在 → <item_update_request>\r\n- 正文中是制作场景 → <craft_gen_request>\r\n\r\n## <char_gen_request> — 新角色\r\n属性: characterName(必填) race tier characterType faction\r\n标签正文: 角色出场描述\r\n\r\n## <char_update_request> — 已有角色状态变化\r\n属性: target(必填) — 角色 ID\r\n标签正文: HP变化/金钱收支/位置移动/装备获取/技能学习/状态效果增减等\r\n\r\n## <item_gen_request> — 新物品/技能\r\n属性: itemType(必填: equipment/skill/consumable/material/ascension) source owner\r\n标签正文: 物品描述\r\n\r\n## <item_update_request> — 已有物品变更\r\n属性: target(必填) operation(必填: consume/transfer/modify/equip/unequip) quantity owner\r\n标签正文: 物品变更描述\r\n\r\n## <craft_gen_request> — 制作\r\n属性: characterId(必填) industry(必填) productName(必填) targetQuality\r\n标签正文: 材料和制作过程描述\r\n\r\n---\r\n# 三、输出格式（严格按顺序输出，不要添加额外格式）\r\n\r\n<json>\r\n{...}\r\n</json>\r\n<char_gen_request ...>\r\n  ...\r\n</char_gen_request>\r\n<char_update_request ...>\r\n  ...\r\n</char_update_request>\r\n<item_gen_request ...>\r\n  ...\r\n</item_gen_request>\r\n<item_update_request ...>\r\n  ...\r\n</item_update_request>\r\n<craft_gen_request ...>\r\n  ...\r\n</craft_gen_request>\r\n\r\n**注意:**\r\n- 每轮必须输出 <json> 标签（至少包含 delta_time）\r\n- request 标签按需输出，没有对应变化就不输出\r\n- 多个同类标签可写多条\r\n- **不要再额外包裹 markdown 代码块（不要 ```xml）**",
       "presetId": "",
       "preset": null,
       "temperature": 0.7,
@@ -2376,7 +2376,7 @@
       "maxTokens": 16384,
       "historyLayers": 1,
       "historySlice": 800,
-      "template": "{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{CHARACTER_STATE}}\n{{LORE_BOOK}}"
+      "template": "{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{CHARACTER_STATE}}\n{{INVENTORY}}\n{{LORE_BOOK}}"
     },
     "char_update": {
       "worldBookEnabled": true,
@@ -2513,6 +2513,22 @@
       "historyLayers": 3,
       "historySlice": 1000,
       "template": "{{SYS_PROMPT}}\n{{PLOT_EVENTS}}\n{{NARRATIVE:layers=3:slice=1000}}"
+    },
+    "item_update": {
+      "worldBookEnabled": false,
+      "worldBookIds": [],
+      "model": "",
+      "systemPrompt": "你是一个物品状态更新系统。根据 vars_update 调度器的物品变更请求，更新已有物品的状态。\r\n\r\n**处理的操作类型:**\r\n- consume: 消耗物品（减少数量，数量归零则移除）\r\n- transfer: 转移物品归属\r\n- modify: 修改物品属性（耐久变化等）\r\n- equip: 装备物品\r\n- unequip: 卸下物品\r\n\r\n**输出格式 (严格 JSON):**\r\n{\"items\": [{\"target\": \"物品ID或名\", \"operation\": \"consume\", \"quantity\": 1, \"owner\": \"player_1\"}]}\r\n\r\n对每个 item_update_request 输出一条对应的 items 条目。",
+      "presetId": "",
+      "preset": null,
+      "temperature": 0.3,
+      "topP": 1,
+      "freqPen": 0,
+      "presPen": 0,
+      "maxTokens": 4096,
+      "historyLayers": 0,
+      "historySlice": 0,
+      "template": "{{SYS_PROMPT}}\n{{AGENT.VARS_UPDATE}}\n{{INVENTORY}}\n{{CHARACTER_STATE}}"
     }
   }
 }

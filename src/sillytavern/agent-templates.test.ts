@@ -39,8 +39,8 @@ function makeCfg(agentId: string, overrides: Partial<AgentConfig> = {}): AgentCo
 // ========== Template Existence ==========
 
 describe('AGENT_TEMPLATES', () => {
-  it('应注册全部 13 个 Agent (含 Phase 4+6e 新增)', () => {
-    expect(REGISTERED_AGENT_IDS).toHaveLength(13);
+  it('应注册全部 14 个 Agent (含 Phase 10 item_update 新增)', () => {
+    expect(REGISTERED_AGENT_IDS).toHaveLength(14);
   });
 
   // Phase 3-6e 完整模板 Agent

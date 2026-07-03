@@ -48,6 +48,10 @@ export const VISIBILITY_MATRIX: Record<string, ZoneVisibilityMatrix> = {
     memory: 'NONE', npc: 'FULL', world: 'FULL', quest: 'NONE',
     craft: 'KEYS', combat: 'FULL', outline: 'NONE', variable: 'NONE',
   },
+  item_update: {
+    memory: 'NONE', npc: 'KEYS', world: 'NONE', quest: 'NONE',
+    craft: 'NONE', combat: 'NONE', outline: 'NONE', variable: 'NONE',
+  },
   memory_summary: {
     memory: 'SUMMARY', npc: 'KEYS', world: 'SUMMARY', quest: 'KEYS',
     craft: 'NONE', combat: 'KEYS', outline: 'NONE', variable: 'NONE',

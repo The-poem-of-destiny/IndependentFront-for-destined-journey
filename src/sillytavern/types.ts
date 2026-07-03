@@ -2276,7 +2276,10 @@ export interface CombatUnitTurn {
 // ========== Phase 6e: Marker Protocol + SubAgent Types ==========
 
 /** 已知 XML 标记标签名 — 正文与引擎的通信协议 (ADR-25) */
-export type MarkerType = 'craft_request' | 'combat_trigger' | 'char_detect';
+export type MarkerType = 'craft_request' | 'combat_trigger' | 'char_detect'  // 旧（保留向后兼容）
+  | 'char_gen_request' | 'char_update_request'                              // 角色调度
+  | 'item_gen_request' | 'item_update_request'                              // 物品调度
+  | 'craft_gen_request';                                                    // 制作调度（统一 _request 后缀）
 
 /** 所有标记的公共字段 */
 export interface DetectedMarkerBase {
@@ -2337,7 +2340,82 @@ export interface CharDetectMarker extends DetectedMarkerBase {
 }
 
 /** 三种标记的联合类型 */
-export type DetectedMarker = CraftRequestMarker | CombatTriggerMarker | CharDetectMarker;
+export type DetectedMarker = CraftRequestMarker | CombatTriggerMarker | CharDetectMarker   // 旧（保留）
+  | CharGenRequestMarker | CharUpdateRequestMarker
+  | ItemGenRequestMarker | ItemUpdateRequestMarker
+  | CraftGenRequestMarker;
+
+/**
+ * <char_gen_request> 标记 — vars_update 检测到新角色时输出。
+ * 触发 char_gen → item_gen 链，为新角色生成完整状态。
+ */
+export interface CharGenRequestMarker extends DetectedMarkerBase {
+  type: 'char_gen_request';
+  attributes: {
+    characterName?: string;
+    race?: string;
+    tier?: string;
+    characterType?: string;
+    faction?: string;
+  };
+  bodyText: string;
+}
+
+/**
+ * <char_update_request> 标记 — vars_update 检测到已有角色状态变化时输出。
+ * 保留在 vars_update 输出中，由 Stage 3 char_update 读取处理。
+ */
+export interface CharUpdateRequestMarker extends DetectedMarkerBase {
+  type: 'char_update_request';
+  attributes: {
+    target: string;  // 必填：角色 ID
+  };
+  bodyText: string;
+}
+
+/**
+ * <item_gen_request> 标记 — vars_update 检测到新物品/技能时输出。
+ * 触发独立 item_gen 调用。
+ */
+export interface ItemGenRequestMarker extends DetectedMarkerBase {
+  type: 'item_gen_request';
+  attributes: {
+    itemType: string;  // equipment | skill | consumable | material | ascension
+    source?: string;   // craft | loot | gift | story
+    owner?: string;    // 归属角色 ID
+  };
+  bodyText: string;
+}
+
+/**
+ * <item_update_request> 标记 — vars_update 检测到已存在物品变更时输出。
+ * 触发 item_update 回调 → Code 直接处理。
+ */
+export interface ItemUpdateRequestMarker extends DetectedMarkerBase {
+  type: 'item_update_request';
+  attributes: {
+    target: string;    // 物品 ID 或名
+    operation: string; // consume | transfer | modify | equip | unequip
+    quantity?: string;
+    owner?: string;
+  };
+  bodyText: string;
+}
+
+/**
+ * <craft_gen_request> 标记 — vars_update 检测到制作场景时输出。
+ * 触发 craft_gen → item_gen 链。与旧 <craft_request> 语义相同，统一后缀。
+ */
+export interface CraftGenRequestMarker extends DetectedMarkerBase {
+  type: 'craft_gen_request';
+  attributes: {
+    characterId?: string;
+    industry?: string;
+    productName?: string;
+    targetQuality?: string;
+  };
+  bodyText: string;
+}
 
 /** 扫描文本后的标记检测结果 */
 export interface MarkerScanResult {
