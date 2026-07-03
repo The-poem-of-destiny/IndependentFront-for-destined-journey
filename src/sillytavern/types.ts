@@ -216,7 +216,7 @@ export interface ApiEndpoint {
 
 /** 单个 Agent 的配置 */
 export interface AgentConfig {
-  agentId: string;              // 'story' | 'memory_recall' | 'plot_check' | 'vars_update' | 'char_update' | 'memory_summary' | 'plot_correct'
+  agentId: string;              // 'story' | 'memory_recall' | 'plot_check' | 'request_dispatcher' | 'vars_update' | 'memory_summary' | 'plot_correct'
   enabled: boolean;             // 是否启用
   apiEndpointId: string;        // 指向 ApiEndpoint.id
   model: string;                // 覆盖 endpoint 的默认 model
@@ -305,7 +305,7 @@ export interface Pipeline {
   retryOnFail: boolean;         // 失败重试策略
 }
 
-/** 默认 7-Agent 管线 (Phase 4 更新) */
+/** 默认 Agent 管线 (Phase 10 更新) */
 export const DEFAULT_AGENT_PIPELINE: Pipeline = {
   timeout: 120000,
   retryOnFail: true,
@@ -314,10 +314,10 @@ export const DEFAULT_AGENT_PIPELINE: Pipeline = {
     { agents: ['memory_recall', 'plot_pre_check'], waitFor: [] },
     // Stage 1: 正文 AI
     { agents: ['story'], waitFor: ['memory_recall', 'plot_pre_check'] },
-    // Stage 2: 变量更新
-    { agents: ['vars_update'], waitFor: ['story'] },
-    // Stage 3: 角色更新（并行 × N）
-    { agents: ['char_update'], waitFor: ['story', 'vars_update'] },
+    // Stage 2: 请求调度（原 vars_update，判断新-vs-已有，分派 request 标签）
+    { agents: ['request_dispatcher'], waitFor: ['story'] },
+    // Stage 3: 变量更新（合并原 char_update + item_update，执行状态写入 + 可选环境效果 script）
+    { agents: ['vars_update'], waitFor: ['story', 'request_dispatcher'] },
     // Stage 4: 记忆总结
     { agents: ['memory_summary'], waitFor: ['story'] },
     // Stage 5: 剧情修正 + 大纲更新 + 世界线变动
@@ -1082,7 +1082,7 @@ export interface AgentContext {
   // --- Phase 8: Variable Zone 可见性系统 ---
   /** 8-zone 变量区（由 buildZoneContext() 组装） */
   zones?: Record<ZoneId, VariableZone>;
-  /** per-call 过滤 — char_update 并行时指定当前目标角色 ID */
+  /** per-call 过滤 — vars_update 并行时指定当前目标角色 ID */
   targetCharacterId?: string;
 
   // --- Phase 8.6: per-Agent 可调上下文（由 buildAgentMessages 注入，读 AgentConfig） ---
@@ -2346,7 +2346,7 @@ export type DetectedMarker = CraftRequestMarker | CombatTriggerMarker | CharDete
   | CraftGenRequestMarker;
 
 /**
- * <char_gen_request> 标记 — vars_update 检测到新角色时输出。
+ * <char_gen_request> 标记 — request_dispatcher 检测到新角色时输出。
  * 触发 char_gen → item_gen 链，为新角色生成完整状态。
  */
 export interface CharGenRequestMarker extends DetectedMarkerBase {
@@ -2362,8 +2362,8 @@ export interface CharGenRequestMarker extends DetectedMarkerBase {
 }
 
 /**
- * <char_update_request> 标记 — vars_update 检测到已有角色状态变化时输出。
- * 保留在 vars_update 输出中，由 Stage 3 char_update 读取处理。
+ * <char_update_request> 标记 — request_dispatcher 检测到已有角色状态变化时输出。
+ * 保留在调度器输出中，由 Stage 3 vars_update 读取处理。
  */
 export interface CharUpdateRequestMarker extends DetectedMarkerBase {
   type: 'char_update_request';
@@ -2374,7 +2374,7 @@ export interface CharUpdateRequestMarker extends DetectedMarkerBase {
 }
 
 /**
- * <item_gen_request> 标记 — vars_update 检测到新物品/技能时输出。
+ * <item_gen_request> 标记 — request_dispatcher 检测到新物品/技能时输出。
  * 触发独立 item_gen 调用。
  */
 export interface ItemGenRequestMarker extends DetectedMarkerBase {
@@ -2388,8 +2388,8 @@ export interface ItemGenRequestMarker extends DetectedMarkerBase {
 }
 
 /**
- * <item_update_request> 标记 — vars_update 检测到已存在物品变更时输出。
- * 触发 item_update 回调 → Code 直接处理。
+ * <item_update_request> 标记 — request_dispatcher 检测到已存在物品变更时输出。
+ * 由 Stage 3 vars_update 读取处理。
  */
 export interface ItemUpdateRequestMarker extends DetectedMarkerBase {
   type: 'item_update_request';
@@ -2403,7 +2403,7 @@ export interface ItemUpdateRequestMarker extends DetectedMarkerBase {
 }
 
 /**
- * <craft_gen_request> 标记 — vars_update 检测到制作场景时输出。
+ * <craft_gen_request> 标记 — request_dispatcher 检测到制作场景时输出。
  * 触发 craft_gen → item_gen 链。与旧 <craft_request> 语义相同，统一后缀。
  */
 export interface CraftGenRequestMarker extends DetectedMarkerBase {

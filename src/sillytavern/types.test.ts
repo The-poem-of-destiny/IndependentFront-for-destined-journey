@@ -241,17 +241,17 @@ describe('DEFAULT_AGENT_PIPELINE', () => {
     expect(s.waitFor).toContain('plot_pre_check');
   });
 
-  it('第三阶段 (vars_update) 依赖 story', () => {
+  it('第三阶段 (request_dispatcher) 依赖 story', () => {
     const s = DEFAULT_AGENT_PIPELINE.stages[2];
-    expect(s.agents).toEqual(['vars_update']);
+    expect(s.agents).toEqual(['request_dispatcher']);
     expect(s.waitFor).toEqual(['story']);
   });
 
-  it('第四阶段 (char_update) 依赖 story + vars_update', () => {
+  it('第四阶段 (vars_update) 依赖 story + request_dispatcher', () => {
     const s = DEFAULT_AGENT_PIPELINE.stages[3];
-    expect(s.agents).toEqual(['char_update']);
+    expect(s.agents).toEqual(['vars_update']);
     expect(s.waitFor).toContain('story');
-    expect(s.waitFor).toContain('vars_update');
+    expect(s.waitFor).toContain('request_dispatcher');
   });
 
   it('第五阶段 (memory_summary) 依赖 story', () => {

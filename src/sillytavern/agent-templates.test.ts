@@ -39,8 +39,8 @@ function makeCfg(agentId: string, overrides: Partial<AgentConfig> = {}): AgentCo
 // ========== Template Existence ==========
 
 describe('AGENT_TEMPLATES', () => {
-  it('应注册全部 14 个 Agent (含 Phase 10 item_update 新增)', () => {
-    expect(REGISTERED_AGENT_IDS).toHaveLength(14);
+  it('应注册全部 13 个 Agent (含 Phase 10 重命名)', () => {
+    expect(REGISTERED_AGENT_IDS).toHaveLength(13);
   });
 
   // Phase 3-6e 完整模板 Agent
@@ -48,8 +48,8 @@ describe('AGENT_TEMPLATES', () => {
     'memory_recall',
     'plot_pre_check',
     'story',
-    'vars_update',
-    'char_update',
+    'request_dispatcher',
+    'request_dispatcher',
     'memory_summary',
     'plot_post_check',
     'plot_outline',
@@ -142,8 +142,8 @@ describe('buildAgentMessages', () => {
 
   it('variableContext 可返回空字符串 (Phase 10: 模板已外部化)', () => {
     const ctx = makeContext({ variables: { HP: 80, MP: 50, 位置: '白曜城' } });
-    // vars_update has empty variableContext in Phase 10
-    const result = AGENT_TEMPLATES.vars_update.variableContext(ctx);
+    // request_dispatcher has empty variableContext in Phase 10
+    const result = AGENT_TEMPLATES.request_dispatcher.variableContext(ctx);
     expect(result).toBe('');
   });
 
@@ -302,11 +302,11 @@ describe('buildAgentMessages — template priority', () => {
 
   it('未传 template 时回退到 getDefaultTemplate(agentId)', () => {
     const ctx = makeContext({ userInput: 'test' });
-    const cfg = makeCfg('vars_update', {
+    const cfg = makeCfg('request_dispatcher', {
       systemPrompt: 'VARS_AI_PROMPT',
       template: undefined,
     });
-    const messages = buildAgentMessages('vars_update', ctx, [cfg]);
+    const messages = buildAgentMessages('request_dispatcher', ctx, [cfg]);
     expect(messages).not.toBeNull();
     // default vars_update template has AGENT.STORY, CHARACTER_STATE, LORE_BOOK
     expect(messages![0].content).toContain('VARS_AI_PROMPT');
@@ -330,10 +330,10 @@ describe('buildAgentMessages — template priority', () => {
 describe('buildAgentMessages — SYS_PROMPT assembly', () => {
   it('非 story Agent 使用 config.systemPrompt', () => {
     const ctx = makeContext();
-    const cfg = makeCfg('vars_update', { systemPrompt: 'VARS_UPDATE_SYSPROMPT' });
-    const messages = buildAgentMessages('vars_update', ctx, [cfg]);
+    const cfg = makeCfg('request_dispatcher', { systemPrompt: 'REQUEST_DISP_SYSPROMPT' });
+    const messages = buildAgentMessages('request_dispatcher', ctx, [cfg]);
     expect(messages).not.toBeNull();
-    expect(messages![0].content).toContain('VARS_UPDATE_SYSPROMPT');
+    expect(messages![0].content).toContain('REQUEST_DISP_SYSPROMPT');
   });
 
   it('无 systemPrompt + 无 template 时回退到 fixedSystem+fixedExamples', () => {
@@ -369,7 +369,7 @@ describe('buildAgentMessages — SYS_PROMPT assembly', () => {
 describe('buildAgentMessages — return format (Phase 10 single system msg)', () => {
   const agentsWithTemplates = [
     'story', 'memory_recall', 'plot_pre_check',
-    'vars_update', 'char_update', 'memory_summary', 'plot_post_check',
+    'request_dispatcher', 'request_dispatcher', 'memory_summary', 'plot_post_check',
     'plot_outline', 'craft_gen', 'char_gen', 'item_gen',
   ];
 
@@ -438,7 +438,8 @@ describe('默认历史层数 defaultHistoryLayers', () => {
     expect(defaultHistoryLayers('memory_summary')).toBe(4);
     expect(defaultHistoryLayers('plot_post_check')).toBe(4);
     expect(defaultHistoryLayers('memory_recall')).toBe(3);
-    expect(defaultHistoryLayers('vars_update')).toBe(1);
+    expect(defaultHistoryLayers('request_dispatcher')).toBe(1);
+    expect(defaultHistoryLayers('request_dispatcher')).toBe(1);
     expect(defaultHistoryLayers('char_gen')).toBe(1);
     expect(defaultHistoryLayers('item_gen')).toBe(1);
   });
@@ -451,7 +452,8 @@ describe('默认截断字数 defaultHistorySlice', () => {
   it('长正文 agent 大、后置型小', () => {
     expect(defaultHistorySlice('story')).toBe(1500);
     expect(defaultHistorySlice('memory_summary')).toBe(1500);
-    expect(defaultHistorySlice('vars_update')).toBe(800);
+    expect(defaultHistorySlice('request_dispatcher')).toBe(800);
+    expect(defaultHistorySlice('request_dispatcher')).toBe(800);
     expect(defaultHistorySlice('char_gen')).toBe(800);
   });
 });
@@ -475,14 +477,14 @@ describe('formatHistory 读取 per-agent 配置', () => {
     // NARRATIVE placeholder resolves into system message; params in template dictate layers/slice
     expect(countHistoryEntries(u)).toBe(8); // 4 layers * 2 = 8
   });
-  it('vars_update template does not include NARRATIVE (Phase 10: template-driven)', () => {
-    // vars_update default template has no {{NARRATIVE}} → config historyLayers is not used
+  it('request_dispatcher template does not include NARRATIVE (Phase 10: template-driven)', () => {
+    // request_dispatcher default template has no {{NARRATIVE}} → config historyLayers is not used
     const ctx = makeContext({
       history: makeHistory(8),
       agentOutputs: new Map([['story', 'SOME_STORY_OUTPUT']]),
     });
-    const cfg = makeCfg('vars_update', { historyLayers: 0 });
-    const msgs = buildAgentMessages('vars_update', ctx, [cfg]);
+    const cfg = makeCfg('request_dispatcher', { historyLayers: 0 });
+    const msgs = buildAgentMessages('request_dispatcher', ctx, [cfg]);
     const u = msgs![0].content;
     expect(countHistoryEntries(u)).toBe(0);
   });

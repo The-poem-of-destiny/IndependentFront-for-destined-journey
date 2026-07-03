@@ -159,8 +159,8 @@ function makeAgentContext(overrides: Partial<AgentContext> = {}): AgentContext {
 describe('Visibility Matrix', () => {
   it('covers all registered agents', () => {
     const registered = [
-      'memory_recall', 'plot_pre_check', 'story', 'vars_update',
-      'char_update', 'memory_summary', 'plot_post_check', 'plot_outline',
+      'memory_recall', 'plot_pre_check', 'story', 'request_dispatcher',
+      'request_dispatcher', 'memory_summary', 'plot_post_check', 'plot_outline',
       'craft_gen', 'char_gen', 'item_gen',
       'plot_check', 'plot_correct', // v3 stubs
     ];
@@ -536,10 +536,10 @@ describe('buildZoneSection backward compatibility', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 10. char_update per-call filtering
+// 10. vars_update per-call filtering
 // ═══════════════════════════════════════════════════════════
 
-describe('char_update per-call filtering', () => {
+describe('vars_update per-call filtering', () => {
   it('target character gets FULL format, others get KEYS', () => {
     const ctx = makeAgentContext({
       characters: [
@@ -549,7 +549,7 @@ describe('char_update per-call filtering', () => {
       targetCharacterId: 'player',
     });
     ctx.zones = buildZoneContext(ctx);
-    const result = buildZoneSection('char_update', ctx);
+    const result = buildZoneSection('request_dispatcher', ctx);
 
     // Target (player) gets FULL — should see attributes
     expect(result).toContain('目标角色: player');
@@ -565,7 +565,7 @@ describe('char_update per-call filtering', () => {
       ],
     });
     ctx.zones = buildZoneContext(ctx);
-    const result = buildZoneSection('char_update', ctx);
+    const result = buildZoneSection('request_dispatcher', ctx);
     // All characters should be present
     expect(result).toContain('凯恩');
     expect(result).toContain('老铁匠');

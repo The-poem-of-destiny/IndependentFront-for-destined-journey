@@ -4,14 +4,14 @@
  * Phase 6e 核心模块。正文 AI 通过 XML 标记与引擎通信:
  *   <craft_request>  — 🛑 阻塞型: Story 暂停 → 执行制作 → 结果注入正文
  *   <combat_trigger> — 🚩 独立型: Stage 1 后唤起独立战斗页面
- *   <char_detect>    — 👤 隐式型: vars_update 扫描后异步触发角色生成链
+ *   <char_detect>    — 👤 隐式型: request_dispatcher 扫描后异步触发角色生成链
  *
- * Phase 10 新增 (vars_update 调度器):
- *   <char_gen_request>    — vars_update 发现新角色
- *   <char_update_request> — vars_update 发现已有角色变更
- *   <item_gen_request>    — vars_update 发现新物品
- *   <item_update_request> — vars_update 发现已有物品变更
- *   <craft_gen_request>   — vars_update 发现制作场景 (统一 _request 后缀)
+ * Phase 10 新增 (request_dispatcher 调度器):
+ *   <char_gen_request>    — request_dispatcher 发现新角色
+ *   <char_update_request> — request_dispatcher 发现已有角色变更
+ *   <item_gen_request>    — request_dispatcher 发现新物品
+ *   <item_update_request> — request_dispatcher 发现已有物品变更
+ *   <craft_gen_request>   — request_dispatcher 发现制作场景 (统一 _request 后缀)
  *
  * 设计决策:
  * - 纯函数模块，无副作用，无外部依赖

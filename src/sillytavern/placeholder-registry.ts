@@ -234,14 +234,9 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     return ctx.agentOutputs?.get('memory_summary') || '';
   },
 
-  /** {{AGENT.CHAR_UPDATE}} */
-  'AGENT.CHAR_UPDATE': (ctx, _config, _params) => {
-    return ctx.agentOutputs?.get('char_update') || '';
-  },
-
-  /** {{AGENT.ITEM_UPDATE}} */
-  'AGENT.ITEM_UPDATE': (ctx, _config, _params) => {
-    return ctx.agentOutputs?.get('item_update') || '';
+  /** {{AGENT.REQUEST_DISPATCHER}} — request_dispatcher 调度器输出 */
+  'AGENT.REQUEST_DISPATCHER': (ctx, _config, _params) => {
+    return ctx.agentOutputs?.get('request_dispatcher') || '';
   },
 
   // ---- Chain Communication Placeholders (5) (localParams injected) ----
@@ -268,9 +263,8 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   story: '{{SYS_PROMPT}}\n{{AGENT.MEMORY_RECALL}}\n{{AGENT.PLOT_PRE_CHECK}}\n{{LORE_BOOK}}\n{{CHARACTER_STATE}}\n{{GAME_TIME}}\n{{NARRATIVE}}\n{{USER_INPUT}}',
   memory_recall: '{{SYS_PROMPT}}\n{{MEMORY_ENTRIES}}\n{{NARRATIVE:layers=3:slice=800}}\n{{USER_INPUT}}',
   plot_pre_check: '{{SYS_PROMPT}}\n{{PLOT_EVENTS}}\n{{AGENT.MEMORY_RECALL}}\n{{NARRATIVE:layers=3:slice=1000}}\n{{USER_INPUT}}',
-  vars_update: '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你完成变量调度所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖世界观设定、种族特性、势力文化、地理信息等。\n     判断角色种族和势力归属时参考此处。——稳定数据，优先查阅。-->\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n<!-- 当前存档中所有已有角色的列表（ID/Name/Race/Type/Tier/Location）。\n     这是你判断\"新角色 vs 已有角色\"的唯一依据——\n     角色名不在此表中 → 新角色 → <char_gen_request>；\n     角色名在此表中 → 已有角色 → <char_update_request>。-->\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n<!-- 所有角色背包中的物品、装备、材料清单。\n     这是你判断\"新物品 vs 已有物品\"的唯一依据——\n     物品名不在背包中 → 新物品 → <item_gen_request>；\n     物品名在背包中 → 已有物品 → <item_update_request>。-->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n<!-- 🔴 高频变化：本回合 Story Agent 生成的叙事正文。\n     仔细阅读全文，从中提取所有变量变化、新角色/物品出现、制作场景。——这是你的核心输入。-->',
-  char_update: '{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{AGENT.VARS_UPDATE}}\n{{CHARACTER_STATE}}\n{{NARRATIVE:layers=1:slice=800}}',
-  item_update: '{{SYS_PROMPT}}\n{{AGENT.VARS_UPDATE}}\n{{INVENTORY}}\n{{CHARACTER_STATE}}',
+  request_dispatcher: '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你完成变量调度所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖世界观设定、种族特性、势力文化、地理信息等。\n     判断角色种族和势力归属时参考此处。——稳定数据，优先查阅。-->\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n<!-- 当前存档中所有已有角色的列表（ID/Name/Race/Type/Tier/Location）。\n     这是你判断\"新角色 vs 已有角色\"的唯一依据——\n     角色名不在此表中 → 新角色 → <char_gen_request>；\n     角色名在此表中 → 已有角色 → <char_update_request>。-->\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n<!-- 所有角色背包中的物品、装备、材料清单。\n     这是你判断\"新物品 vs 已有物品\"的唯一依据——\n     物品名不在背包中 → 新物品 → <item_gen_request>；\n     物品名在背包中 → 已有物品 → <item_update_request>。-->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n<!-- 🔴 高频变化：本回合 Story Agent 生成的叙事正文。\n     仔细阅读全文，从中提取所有变量变化、新角色/物品出现、制作场景。——这是你的核心输入。-->',
+  vars_update: '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你更新角色/物品状态的完整上下文数据。       -->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。         -->\n<!-- ⚠️ 需要写脚本时调用 get_script_reference 工具。     -->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK}}\n</世界设定>\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n\n<调度器输出>\n{{AGENT.REQUEST_DISPATCHER}}\n</调度器输出>\n<!-- request_dispatcher 的完整输出，包含 <char_update_request> 和 <item_update_request> 标签。\n     逐条读取每个标签，这是你需要处理的变更清单。-->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n\n<最近对话>\n{{NARRATIVE:layers=1:slice=800}}\n</最近对话>',
   memory_summary: '{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{NARRATIVE:layers=4:slice=1500}}',
   plot_post_check: '{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{AGENT.MEMORY_SUMMARY}}\n{{PLOT_EVENTS}}\n{{CHARACTER_STATE}}\n{{NARRATIVE:layers=4:slice=1000}}',
   plot_outline: '{{SYS_PROMPT}}\n{{PLOT_EVENTS}}\n{{NARRATIVE:layers=3:slice=1000}}',

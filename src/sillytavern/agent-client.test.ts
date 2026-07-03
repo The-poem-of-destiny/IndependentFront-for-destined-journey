@@ -38,7 +38,7 @@ describe('buildUserId', () => {
 
   it('应支持各种 agentId', () => {
     expect(buildUserId('s1', 'memory_recall')).toBe('fp|s1|memory_recall');
-    expect(buildUserId('s1', 'char_update')).toBe('fp|s1|char_update');
+    expect(buildUserId('s1', 'request_dispatcher')).toBe('fp|s1|request_dispatcher');
   });
 });
 

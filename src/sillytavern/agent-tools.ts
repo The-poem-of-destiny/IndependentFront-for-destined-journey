@@ -369,6 +369,10 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
     'get_script_reference',
     'get_character', 'get_inventory',
   ],
+  vars_update: [
+    'get_script_reference',
+    'get_character', 'get_inventory',
+  ],
 };
 
 // ═══════════════════════════════════════════════════════════

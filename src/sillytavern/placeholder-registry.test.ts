@@ -595,7 +595,7 @@ describe('CHARACTER_STATE', () => {
   it('does not throw on various agentIds', () => {
     const char = makeChar();
     const ctx = mockCtx({ characters: [char] });
-    const agentIds = ['story', 'memory_recall', 'vars_update', 'char_update', 'char_gen', 'craft_gen'];
+    const agentIds = ['story', 'memory_recall', 'request_dispatcher', 'request_dispatcher', 'char_gen', 'craft_gen'];
     for (const id of agentIds) {
       expect(() => PLACEHOLDER_REGISTRY['CHARACTER_STATE'](ctx, mockConfig({ agentId: id }))).not.toThrow();
     }
@@ -667,13 +667,13 @@ describe('AGENT output placeholders', () => {
 
   it('AGENT.CHAR_UPDATE returns output', () => {
     const ctx = mockCtx();
-    ctx.agentOutputs.set('char_update', '{"characters":[]}');
-    const result = PLACEHOLDER_REGISTRY['AGENT.CHAR_UPDATE'](ctx, mockConfig());
+    ctx.agentOutputs.set('vars_update', '{"characters":[]}');
+    const result = PLACEHOLDER_REGISTRY['AGENT.VARS_UPDATE'](ctx, mockConfig());
     expect(result).toBe('{"characters":[]}');
   });
 
   it('AGENT.CHAR_UPDATE returns empty when missing', () => {
-    const result = PLACEHOLDER_REGISTRY['AGENT.CHAR_UPDATE'](mockCtx(), mockConfig());
+    const result = PLACEHOLDER_REGISTRY['AGENT.VARS_UPDATE'](mockCtx(), mockConfig());
     expect(result).toBe('');
   });
 });
@@ -853,19 +853,19 @@ describe('getDefaultTemplate', () => {
     expect(tmpl).toContain('{{AGENT.MEMORY_RECALL}}');
   });
 
-  it('returns non-empty template for vars_update', () => {
-    const tmpl = getDefaultTemplate('vars_update');
+  it('returns non-empty template for request_dispatcher', () => {
+    const tmpl = getDefaultTemplate('request_dispatcher');
     expect(tmpl).toContain('{{SYS_PROMPT}}');
     expect(tmpl).toContain('{{AGENT.STORY}}');
     expect(tmpl).toContain('{{CHARACTER_STATE}}');
     expect(tmpl).toContain('{{LORE_BOOK}}');
   });
 
-  it('returns non-empty template for char_update', () => {
-    const tmpl = getDefaultTemplate('char_update');
+  it('returns non-empty template for vars_update', () => {
+    const tmpl = getDefaultTemplate('vars_update');
     expect(tmpl).toContain('{{SYS_PROMPT}}');
     expect(tmpl).toContain('{{AGENT.STORY}}');
-    expect(tmpl).toContain('{{AGENT.VARS_UPDATE}}');
+    expect(tmpl).toContain('{{AGENT.REQUEST_DISPATCHER}}');
     expect(tmpl).toContain('{{CHARACTER_STATE}}');
   });
 
@@ -955,8 +955,8 @@ describe('resolveTemplate for chain placeholders', () => {
   it('resolves AGENT.* placeholders', () => {
     const ctx = mockCtx();
     ctx.agentOutputs.set('story', '<maintext>story content here</maintext>');
-    const config = mockConfig({ agentId: 'vars_update' });
-    const result = resolveTemplate('{{AGENT.STORY}}', 'vars_update', ctx, config);
+    const config = mockConfig({ agentId: 'request_dispatcher' });
+    const result = resolveTemplate('{{AGENT.STORY}}', 'request_dispatcher', ctx, config);
     expect(result).toContain('story content here');
   });
 

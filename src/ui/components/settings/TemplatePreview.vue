@@ -100,17 +100,17 @@ const PLACEHOLDER_META: Record<string, PlaceholderMeta> = {
     category: 'agent',
   },
   'AGENT.VARS_UPDATE': {
-    label: 'vars_update 的输出',
+    label: 'vars_update 执行器的输出',
+    color: 'var(--color-danger, var(--theme-error))',
+    category: 'agent',
+  },
+  'AGENT.REQUEST_DISPATCHER': {
+    label: 'request_dispatcher 调度器的输出',
     color: 'var(--color-danger, var(--theme-error))',
     category: 'agent',
   },
   'AGENT.MEMORY_SUMMARY': {
     label: 'memory_summary 的输出',
-    color: 'var(--color-danger, var(--theme-error))',
-    category: 'agent',
-  },
-  'AGENT.CHAR_UPDATE': {
-    label: 'char_update 的输出',
     color: 'var(--color-danger, var(--theme-error))',
     category: 'agent',
   },

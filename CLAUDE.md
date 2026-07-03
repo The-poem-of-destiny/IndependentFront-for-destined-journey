@@ -81,7 +81,7 @@ reference/agent流程测试/要求.md            # 测试需求说明
 - 可用工具 Schema（Agentic 类型）及参数/返回值
 - 完整输出追踪（思维链 → 工具调用序列 → 最终输出）
 - 下游解析链路（代码路径和函数调用链）
-- 🔴 已知缺口（ItemGenOutput 缺 effects/scripts、parseSkillsXML 不解析子元素、assembleCharacterState 不传递、char_update 无人消费等）
+- 🔴 已知缺口（ItemGenOutput 缺 effects/scripts、parseSkillsXML 不解析子元素、assembleCharacterState 不传递、vars_update 状态写入已布线等）
 
 ## 前端 UI 参考（Phase 7 必读）
 
@@ -204,8 +204,8 @@ src/sillytavern/                    ← 核心引擎（30+ 模块，含 Phase 1-
   │   └── 缓存命中检测: cache_hit / prompt_cache_hit_tokens / x-ds-cache-hit header
   │
   ├── agent-templates.ts            ← [Phase 3+6e+9] Prompt 模板系统
-  │   ├── 10+3 Agent 模板: memory_recall / plot_pre_check / story / vars_update
-  │   │   char_update / memory_summary / plot_post_check / plot_outline
+  │   ├── 10+3 Agent 模板: memory_recall / plot_pre_check / story / request_dispatcher
+  │   │   vars_update / memory_summary / plot_post_check / plot_outline
   │   │   craft_gen / char_gen / item_gen (Phase 6e → 8.5 Agentic)
   │   ├── fixedSystem 已迁移到 agent-config.json（仅保留 1-2 行 stub）
   │   ├── 保留 variableContext + variableInstruction（每轮动态上下文）
@@ -365,11 +365,11 @@ SubSystem-Craft  制作  → 🚩 延迟型 (Phase 8.5): Story 输出 <craft_req
                           → 结果注入正文 + StatePatch 提交
 
 SubSystem-Combat 战斗  → Stage1后检测 <combat_trigger> → 暂存
-                          Stage2 vars_update 完成 char_gen 后唤起
+                          Stage2 request_dispatcher 完成 char_gen 后唤起
                           独立战斗窗口 (Code循环 + AI摘要)
                           → 摘要回注正文 + 批量StatePatch
 
-SubSystem-CharGen 角色 → Stage2 vars_update 异步检测新NPC
+SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC
                           char_gen Agent: 调 tools (random_name/hair/eye/personality/roll_attributes)
                           → 输出 <char_result> XML
                           → 调 item_gen Agent (仅1次, ADR-26)
@@ -420,6 +420,10 @@ SubSystem-CharGen 角色 → Stage2 vars_update 异步检测新NPC
 | 9 | Agent System Prompt 迁移 (10 Agent 全量迁入 agent-config.json + item_gen 对标 char_gen 增强 + 文档) | ✅ |
 | 9b | craft_gen 深度细化 (systemPrompt 重写 → ~200行/12节 + craft-gen-chain.ts + item_gen 协作 + craft_check 准备阶段反馈修复 + remove_item 材料消耗) | ✅ 核心完成 |
 | 9c | 集成测试 & 交付 | ⬜ |
+| 10a | Agent 模板系统基础设施 + preset 自动补全 + store 模板字段 | ✅ |
+| 10b/c/d | buildAgentMessages 全面切换到 resolveTemplate + 前端模板编辑器 | ✅ |
+| 10e | vars_update 调度器重构 → request_dispatcher + char_update→vars_update 合并 item_update（Agentic + script 写作 + 状态写入布线） | ✅ |
+| 10f | request_dispatcher systemPrompt 保持 + vars_update systemPrompt 全面重写（~300行/8节/3示例） | ✅ |
 
 ## 前端架构 (Phase 7, 2026-06-17)
 

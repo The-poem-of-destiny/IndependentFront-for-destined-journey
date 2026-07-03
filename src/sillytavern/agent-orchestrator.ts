@@ -74,18 +74,18 @@ export interface OrchestratorEvents {
    */
   onCharDetect?: (markers: CharDetectMarker[], storyOutput: string, context: AgentContext) => Promise<void>;
 
-  // ===== Phase 10: vars_update 调度器回调 =====
+  // ===== Phase 10: request_dispatcher 调度器回调 =====
 
-  /** Stage 2: vars_update 输出中的 <char_gen_request> → char_gen→item_gen 链 */
+  /** Stage 2: request_dispatcher 输出中的 <char_gen_request> → char_gen→item_gen 链 */
   onCharGenRequest?: (markers: CharGenRequestMarker[], varsOutput: string, context: AgentContext) => Promise<void>;
 
-  /** Stage 2: vars_update 输出中的 <item_gen_request> → item_gen 独立调用 */
+  /** Stage 2: request_dispatcher 输出中的 <item_gen_request> → item_gen 独立调用 */
   onItemGenRequest?: (markers: ItemGenRequestMarker[], varsOutput: string, context: AgentContext) => Promise<void>;
 
-  /** Stage 2: vars_update 输出中的 <item_update_request> → item_update */
+  /** Stage 2: request_dispatcher 输出中的 <item_update_request> → 已合并到 Stage 3 vars_update，此回调仅作兼容 */
   onItemUpdateRequest?: (markers: ItemUpdateRequestMarker[], varsOutput: string, context: AgentContext) => Promise<void>;
 
-  /** Stage 2: vars_update 输出中的 <craft_gen_request> → craft_gen→item_gen 链 */
+  /** Stage 2: request_dispatcher 输出中的 <craft_gen_request> → craft_gen→item_gen 链 */
   onCraftGenRequest?: (markers: CraftGenRequestMarker[], varsOutput: string, context: AgentContext) => Promise<void>;
 
   /** Phase 8.5: Agentic Agent 发出工具调用时触发 */
@@ -520,8 +520,8 @@ export class AgentOrchestrator {
     const errors: string[] = [];
     const knownAgents = new Set(this.agentConfigs.keys());
 
-    // 注册内置 Agent（即使未配置，含 Phase 6e 新增）
-    for (const id of ['memory_recall', 'plot_pre_check', 'story', 'vars_update', 'char_update', 'memory_summary', 'plot_post_check', 'plot_outline', 'plot_check', 'plot_correct', 'craft_gen', 'char_gen', 'item_gen', 'combat_summary']) {
+    // 注册内置 Agent（即使未配置，含 Phase 6e 新增 + Phase 10 重命名）
+    for (const id of ['memory_recall', 'plot_pre_check', 'story', 'request_dispatcher', 'vars_update', 'memory_summary', 'plot_post_check', 'plot_outline', 'plot_check', 'plot_correct', 'craft_gen', 'char_gen', 'item_gen', 'combat_summary']) {
       knownAgents.add(id);
     }
 
@@ -607,9 +607,9 @@ export class AgentOrchestrator {
       }
     }
 
-    // Stage 2 (vars_update): 扫描 vars_update 输出 + 处理所有 request
-    if (this.isVarsUpdateStage(stageIndex)) {
-      const varsOutput = this.getAgentOutputText('vars_update');
+    // Stage 2 (request_dispatcher): 扫描调度器输出 + 处理所有 request
+    if (this.isDispatcherStage(stageIndex)) {
+      const varsOutput = this.getAgentOutputText('request_dispatcher');
       if (!varsOutput) return;
 
       // Step A: 从 varsOutput 提取 <json> 块内容（正则直接提取，不依赖 scanMarkers）
@@ -633,7 +633,7 @@ export class AgentOrchestrator {
               op: 'set_variable',
               target: `variables.${r.path}`,
               value: r.value,
-              metadata: { source: 'vars_update', operation: 'replace' },
+              metadata: { source: 'request_dispatcher', operation: 'replace' },
             });
           }
           for (const d of (parsed.delta ?? [])) {
@@ -661,7 +661,7 @@ export class AgentOrchestrator {
             await sm.applyTimeAdvance(parsed.delta_time);
           }
         } catch {
-          console.warn('[Orchestrator] vars_update <json> 解析失败，跳过全局变量更新');
+          console.warn('[Orchestrator] request_dispatcher <json> 解析失败，跳过全局变量更新');
         }
       }
 
@@ -733,6 +733,125 @@ export class AgentOrchestrator {
         this.pendingCombatMarkers = [];
       }
     }
+
+    // Stage 3 (vars_update): 解析执行器输出 → StatePatch
+    if (this.isVarsUpdateStage(stageIndex)) {
+      const varsOutput = this.getAgentOutputText('vars_update');
+      if (!varsOutput) return;
+
+      // Step A: 提取 <json> 块 → 解析 char ops + item ops → StatePatch
+      const jsonMatch = varsOutput.match(/<json>([\s\S]*?)<\/json>/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[1].trim());
+          const { createStateManager } = await import('./state-manager');
+          const sm = createStateManager(this.saveId);
+          const patches: import('./types').StatePatch[] = [];
+
+          // --- characters.replace → set_hp/set_mp/set_sp/set_location/update_character ---
+          for (const r of (parsed.characters?.replace ?? [])) {
+            const { id, path, value } = r;
+            switch (path) {
+              case 'hp': patches.push({ op: 'set_hp', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
+              case 'mp': patches.push({ op: 'set_mp', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
+              case 'sp': patches.push({ op: 'set_sp', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
+              case 'location':
+              case 'currentAction':
+                patches.push({ op: 'set_location', target: `characters.${id}`, value: r, metadata: { source: 'vars_update' } }); break;
+              default:
+                patches.push({ op: 'update_character', target: `characters.${id}`, value: { [path]: value }, metadata: { source: 'vars_update', path } });
+            }
+          }
+
+          // --- characters.delta → delta_hp/delta_mp/delta_sp ---
+          for (const d of (parsed.characters?.delta ?? [])) {
+            const { id, path, amount } = d;
+            switch (path) {
+              case 'hp': patches.push({ op: 'delta_hp', target: `characters.${id}`, amount, metadata: { source: 'vars_update' } }); break;
+              case 'mp': patches.push({ op: 'delta_mp', target: `characters.${id}`, amount, metadata: { source: 'vars_update' } }); break;
+              case 'sp': patches.push({ op: 'delta_sp', target: `characters.${id}`, amount, metadata: { source: 'vars_update' } }); break;
+              default:
+                patches.push({ op: 'update_character', target: `characters.${id}`, value: { [path]: amount }, metadata: { source: 'vars_update', path, delta: true } });
+            }
+          }
+
+          // --- characters.add → add_status_effect/add_skill/equip_item ---
+          for (const a of (parsed.characters?.add ?? [])) {
+            const { id, path, value } = a;
+            switch (path) {
+              case 'statusEffects': patches.push({ op: 'add_status_effect', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
+              case 'skills': patches.push({ op: 'add_skill', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
+              case 'equipment': patches.push({ op: 'equip_item', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
+              default: patches.push({ op: 'update_character', target: `characters.${id}`, value: { [path]: value }, metadata: { source: 'vars_update', path, add: true } });
+            }
+          }
+
+          // --- characters.remove → remove_status_effect/unequip_item ---
+          for (const rm of (parsed.characters?.remove ?? [])) {
+            const { id, path, target: rmTarget } = rm;
+            switch (path) {
+              case 'statusEffects': patches.push({ op: 'remove_status_effect', target: `characters.${id}`, value: rmTarget, metadata: { source: 'vars_update' } }); break;
+              case 'equipment': patches.push({ op: 'unequip_item', target: `characters.${id}`, value: rmTarget, metadata: { source: 'vars_update' } }); break;
+              case 'skills': patches.push({ op: 'update_character', target: `characters.${id}`, value: { removeSkill: rmTarget }, metadata: { source: 'vars_update', path, remove: true } }); break;
+            }
+          }
+
+          // --- items.consume → remove_item ---
+          for (const c of (parsed.items?.consume ?? [])) {
+            patches.push({ op: 'remove_item', target: `characters.${c.owner}`, value: { name: c.target, quantity: c.quantity ?? 1 }, metadata: { source: 'vars_update', operation: 'consume' } });
+          }
+
+          // --- items.equip → equip_item ---
+          for (const e of (parsed.items?.equip ?? [])) {
+            patches.push({ op: 'equip_item', target: `characters.${e.owner}`, value: { itemId: e.target, slot: e.slot }, metadata: { source: 'vars_update', operation: 'equip' } });
+          }
+
+          // --- items.unequip → unequip_item ---
+          for (const u of (parsed.items?.unequip ?? [])) {
+            patches.push({ op: 'unequip_item', target: `characters.${u.owner}`, value: u.target, metadata: { source: 'vars_update', operation: 'unequip' } });
+          }
+
+          // --- items.transfer → remove_item + add_item ---
+          for (const t of (parsed.items?.transfer ?? [])) {
+            patches.push({ op: 'remove_item', target: `characters.${t.from}`, value: { name: t.target, quantity: t.quantity ?? 1 }, metadata: { source: 'vars_update', operation: 'transfer_out' } });
+            patches.push({ op: 'add_item', target: `characters.${t.to}`, value: { name: t.target, quantity: t.quantity ?? 1 }, metadata: { source: 'vars_update', operation: 'transfer_in' } });
+          }
+
+          // --- items.modify → update_character ---
+          for (const m of (parsed.items?.modify ?? [])) {
+            patches.push({ op: 'update_character', target: `characters.${m.owner}`, value: { itemUpdate: { target: m.target, changes: m.changes } }, metadata: { source: 'vars_update', operation: 'modify' } });
+          }
+
+          if (patches.length > 0) {
+            await sm.commitChatState(patches);
+          }
+        } catch {
+          console.warn('[Orchestrator] vars_update <json> 解析失败，跳过状态更新');
+        }
+      }
+
+      // Step B: 提取 <status_effects> 块 → 解析效果定义 → apply
+      const seMatch = varsOutput.match(/<status_effects>([\s\S]*?)<\/status_effects>/);
+      if (seMatch) {
+        try {
+          const { parseStatusEffectsXML } = await import('./char-gen-agent');
+          const effects = parseStatusEffectsXML(seMatch[1].trim());
+          if (effects.length > 0) {
+            const { createStateManager } = await import('./state-manager');
+            const sm = createStateManager(this.saveId);
+            const patches: import('./types').StatePatch[] = effects.map(e => ({
+              op: 'add_status_effect' as const,
+              target: `characters.${e.owner}`,
+              value: e,
+              metadata: { source: 'vars_update' },
+            }));
+            await sm.commitChatState(patches);
+          }
+        } catch (e) {
+          console.warn('[Orchestrator] vars_update <status_effects> 解析失败:', e);
+        }
+      }
+    }
   }
 
   /** 判断当前 stage 是否包含 story agent */
@@ -741,7 +860,13 @@ export class AgentOrchestrator {
     return stage?.agents.includes('story') ?? false;
   }
 
-  /** 判断当前 stage 是否包含 vars_update agent */
+  /** 判断当前 stage 是否包含 request_dispatcher agent */
+  private isDispatcherStage(stageIndex: number): boolean {
+    const stage = this.pipeline.stages[stageIndex];
+    return stage?.agents.includes('request_dispatcher') ?? false;
+  }
+
+  /** 判断当前 stage 是否包含 vars_update agent（执行器） */
   private isVarsUpdateStage(stageIndex: number): boolean {
     const stage = this.pipeline.stages[stageIndex];
     return stage?.agents.includes('vars_update') ?? false;

@@ -94,8 +94,8 @@ const ALL_AGENT_CONFIGS: AgentConfig[] = [
   makeAgentConfig({ agentId: 'memory_recall' }),
   makeAgentConfig({ agentId: 'plot_check' }),
   makeAgentConfig({ agentId: 'story' }),
+  makeAgentConfig({ agentId: 'request_dispatcher' }),
   makeAgentConfig({ agentId: 'vars_update' }),
-  makeAgentConfig({ agentId: 'char_update' }),
   makeAgentConfig({ agentId: 'memory_summary' }),
   makeAgentConfig({ agentId: 'plot_correct' }),
 ];
@@ -507,7 +507,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       retryOnFail: false,
       stages: [
         { agents: ['story'], waitFor: [] },
-        { agents: ['vars_update'], waitFor: ['story'] },
+        { agents: ['request_dispatcher'], waitFor: ['story'] },
       ],
     };
 
@@ -517,7 +517,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
         context: makeContext(),
         agentConfigs: [
           makeAgentConfig({ agentId: 'story' }),
-          makeAgentConfig({ agentId: 'vars_update' }),
+          makeAgentConfig({ agentId: 'request_dispatcher' }),
         ],
         endpoints: [makeEndpoint()],
         saveId: 'test',
@@ -555,7 +555,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       retryOnFail: false,
       stages: [
         { agents: ['story'], waitFor: [] },
-        { agents: ['vars_update'], waitFor: ['story'] },
+        { agents: ['request_dispatcher'], waitFor: ['story'] },
       ],
     };
 
@@ -566,7 +566,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
         context,
         agentConfigs: [
           makeAgentConfig({ agentId: 'story' }),
-          makeAgentConfig({ agentId: 'vars_update' }),
+          makeAgentConfig({ agentId: 'request_dispatcher' }),
         ],
         endpoints: [makeEndpoint()],
         saveId: 'test',
@@ -602,7 +602,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       retryOnFail: false,
       stages: [
         { agents: ['story'], waitFor: [] },
-        { agents: ['vars_update'], waitFor: ['story'] },
+        { agents: ['request_dispatcher'], waitFor: ['story'] },
       ],
     };
 
@@ -613,7 +613,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
         context,
         agentConfigs: [
           makeAgentConfig({ agentId: 'story' }),
-          makeAgentConfig({ agentId: 'vars_update' }),
+          makeAgentConfig({ agentId: 'request_dispatcher' }),
         ],
         endpoints: [makeEndpoint()],
         saveId: 'test',
@@ -651,7 +651,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       retryOnFail: false,
       stages: [
         { agents: ['story'], waitFor: [] },
-        { agents: ['vars_update'], waitFor: ['story'] },
+        { agents: ['request_dispatcher'], waitFor: ['story'] },
       ],
     };
 
@@ -661,7 +661,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
         context: makeContext(),
         agentConfigs: [
           makeAgentConfig({ agentId: 'story' }),
-          makeAgentConfig({ agentId: 'vars_update' }),
+          makeAgentConfig({ agentId: 'request_dispatcher' }),
         ],
         endpoints: [makeEndpoint()],
         saveId: 'test',
@@ -702,7 +702,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       retryOnFail: false,
       stages: [
         { agents: ['story'], waitFor: [] },
-        { agents: ['vars_update'], waitFor: ['story'] },
+        { agents: ['request_dispatcher'], waitFor: ['story'] },
       ],
     };
 
@@ -712,7 +712,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
         context: makeContext(),
         agentConfigs: [
           makeAgentConfig({ agentId: 'story' }),
-          makeAgentConfig({ agentId: 'vars_update' }),
+          makeAgentConfig({ agentId: 'request_dispatcher' }),
         ],
         endpoints: [makeEndpoint()],
         saveId: 'test',
@@ -825,7 +825,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       retryOnFail: false,
       stages: [
         { agents: ['story'], waitFor: [] },
-        { agents: ['vars_update'], waitFor: ['story'] },
+        { agents: ['request_dispatcher'], waitFor: ['story'] },
       ],
     };
 
@@ -835,7 +835,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
         context: makeContext(),
         agentConfigs: [
           makeAgentConfig({ agentId: 'story' }),
-          makeAgentConfig({ agentId: 'vars_update' }),
+          makeAgentConfig({ agentId: 'request_dispatcher' }),
         ],
         endpoints: [makeEndpoint()],
         saveId: 'test',
@@ -877,7 +877,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       retryOnFail: false,
       stages: [
         { agents: ['story'], waitFor: [] },
-        { agents: ['vars_update'], waitFor: ['story'] },
+        { agents: ['request_dispatcher'], waitFor: ['story'] },
       ],
     };
 
@@ -888,7 +888,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
         context,
         agentConfigs: [
           makeAgentConfig({ agentId: 'story' }),
-          makeAgentConfig({ agentId: 'vars_update' }),
+          makeAgentConfig({ agentId: 'request_dispatcher' }),
         ],
         endpoints: [makeEndpoint()],
         saveId: 'test',

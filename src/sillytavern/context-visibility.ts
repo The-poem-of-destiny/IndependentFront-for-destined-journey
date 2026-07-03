@@ -40,17 +40,13 @@ export const VISIBILITY_MATRIX: Record<string, ZoneVisibilityMatrix> = {
     memory: 'SUMMARY', npc: 'NARRATIVE', world: 'FULL', quest: 'SUMMARY',
     craft: 'SUMMARY', combat: 'FULL', outline: 'SUMMARY', variable: 'NONE',
   },
-  vars_update: {
+  request_dispatcher: {
     memory: 'NONE', npc: 'KEYS', world: 'FULL', quest: 'NONE',
     craft: 'KEYS', combat: 'KEYS', outline: 'NONE', variable: 'FULL',
   },
-  char_update: {
+  vars_update: {
     memory: 'NONE', npc: 'FULL', world: 'FULL', quest: 'NONE',
     craft: 'KEYS', combat: 'FULL', outline: 'NONE', variable: 'NONE',
-  },
-  item_update: {
-    memory: 'NONE', npc: 'KEYS', world: 'NONE', quest: 'NONE',
-    craft: 'NONE', combat: 'NONE', outline: 'NONE', variable: 'NONE',
   },
   memory_summary: {
     memory: 'SUMMARY', npc: 'KEYS', world: 'SUMMARY', quest: 'KEYS',
@@ -677,9 +673,9 @@ export function buildZoneSection(
     const zone = ctx.zones[zoneId];
     if (!zone) continue;
 
-    // char_update per-call 过滤
+    // vars_update per-call 过滤
     let filteredContent = zone.content;
-    if (zoneId === 'npc' && agentId === 'char_update' && ctx.targetCharacterId) {
+    if (zoneId === 'npc' && agentId === 'vars_update' && ctx.targetCharacterId) {
       filteredContent = filterNpcForTarget(zone.content, ctx.targetCharacterId);
       const formatted = filterZoneContent(zoneId, filteredContent, 'FULL', agentId, ctx);
       if (formatted) {

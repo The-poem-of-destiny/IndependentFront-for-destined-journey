@@ -885,6 +885,81 @@ function parseAuthoritiesXML(xml: string): NonNullable<ItemGenOutput['authoritie
   return results;
 }
 
+/**
+ * 解析 vars_update 输出的 <status_effects> XML 块。
+ * 返回 StatusEffect 数组，供 StateManager.applyAddStatusEffect 使用。
+ */
+export function parseStatusEffectsXML(xmlBody: string): Array<{
+  owner: string;
+  name: string;
+  category: '增益' | '减益' | '特殊';
+  description: string;
+  stacks: number;
+  maxStacks: number;
+  remainingTime: number;
+  timeUnit: '回合' | '分钟' | '小时';
+  effects?: Record<string, string>;
+  effectDescriptions?: Record<string, string>;
+  scripts?: Record<string, string>;
+}> {
+  const results: any[] = [];
+  const effectRegex = /<effect\s+([^>]*)>([\s\S]*?)((?:<effect\b[^>]*>[\s\S]*?<\/effect>\s*)*)((?:<script\b[^>]*>[\s\S]*?<\/script>\s*)*)<\/effect>/gi;
+  let match: RegExpExecArray | null;
+
+  // eslint-disable-next-line no-cond-assign
+  while ((match = effectRegex.exec(xmlBody)) !== null) {
+    const attrsStr = match[1].trim();
+    const description = match[2].trim();
+    const innerEffectsBlock = match[3];
+    const scriptsBlock = match[4];
+
+    const attrs = parseAttrsStr(attrsStr);
+    const owner = attrs.owner || '';
+    const name = attrs.name || '';
+    const category = attrs.category as '增益' | '减益' | '特殊' || '减益';
+    const stacks = parseInt(attrs.stacks || '1', 10);
+    const maxStacks = parseInt(attrs.maxStacks || attrs.stacks || '1', 10);
+    const remainingTime = parseInt(attrs.remainingTime || '60', 10);
+    const timeUnit = attrs.timeUnit as '回合' | '分钟' | '小时' || '回合';
+
+    const effects: Record<string, string> = {};
+    const effectDescriptions: Record<string, string> = {};
+    if (innerEffectsBlock) {
+      const innerRegex = /<effect\s+name="([^"]*)"[^>]*>([\s\S]*?)<\/effect>/gi;
+      let innerMatch: RegExpExecArray | null;
+      // eslint-disable-next-line no-cond-assign
+      while ((innerMatch = innerRegex.exec(innerEffectsBlock)) !== null) {
+        const efName = innerMatch[1].trim();
+        const efDesc = innerMatch[2].trim();
+        effects[efName] = efDesc;
+        effectDescriptions[efName] = efDesc;
+      }
+    }
+
+    const scripts: Record<string, string> = {};
+    if (scriptsBlock) {
+      const scriptRegex = /<script\s+name="([^"]*)"[^>]*>([\s\S]*?)<\/script>/gi;
+      let scriptMatch: RegExpExecArray | null;
+      // eslint-disable-next-line no-cond-assign
+      while ((scriptMatch = scriptRegex.exec(scriptsBlock)) !== null) {
+        const scriptName = scriptMatch[1].trim();
+        const scriptCode = scriptMatch[2].trim();
+        scripts[scriptName] = scriptCode;
+      }
+    }
+
+    results.push({
+      owner, name, category, description,
+      stacks, maxStacks, remainingTime, timeUnit,
+      ...(Object.keys(effects).length > 0 ? { effects } : {}),
+      ...(Object.keys(effectDescriptions).length > 0 ? { effectDescriptions } : {}),
+      ...(Object.keys(scripts).length > 0 ? { scripts } : {}),
+    });
+  }
+
+  return results;
+}
+
 // ── XML helpers ──
 
 /** 从文本中提取指定 XML 标签的内容块 */
