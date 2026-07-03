@@ -46,6 +46,9 @@ export const MARKER_TAGS: readonly MarkerType[] = [
   'item_gen_request',
   'item_update_request',
   'craft_gen_request',
+  // Phase 10: <json> 不是严格意义上的调度器 request 标签，
+  // 但需要在 scanMarkers 中被 strip 以提取 cleanText 用于 JSON.parse
+  'json',
 ] as const;
 
 /** 标记标签名 Set (O(1) 成员检查) */

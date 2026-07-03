@@ -348,15 +348,15 @@ describe('MARKER_TAGS', () => {
     expect(MARKER_TAGS).toContain('char_detect');
   });
 
-  it('长度应为 8 (Phase 10 新增 5 种 request 标签)', () => {
-    expect(MARKER_TAGS).toHaveLength(8);
+  it('长度应为 9 (Phase 10 新增 5 种 request 标签 + json)', () => {
+    expect(MARKER_TAGS).toHaveLength(9);
   });
 });
 
 // ========== MARKER_TAG_SET 常量 ==========
 
 describe('MARKER_TAG_SET', () => {
-  it('应包含全部 8 种标记类型', () => {
+  it('应包含全部 9 种标记类型', () => {
     expect(MARKER_TAG_SET.has('craft_request')).toBe(true);
     expect(MARKER_TAG_SET.has('combat_trigger')).toBe(true);
     expect(MARKER_TAG_SET.has('char_detect')).toBe(true);
@@ -366,10 +366,11 @@ describe('MARKER_TAG_SET', () => {
     expect(MARKER_TAG_SET.has('item_gen_request')).toBe(true);
     expect(MARKER_TAG_SET.has('item_update_request')).toBe(true);
     expect(MARKER_TAG_SET.has('craft_gen_request')).toBe(true);
+    expect(MARKER_TAG_SET.has('json')).toBe(true);
   });
 
-  it('大小应为 8 (Phase 10 新增 5 种 request 标签)', () => {
-    expect(MARKER_TAG_SET.size).toBe(8);
+  it('大小应为 9 (Phase 10 新增 6 种标签)', () => {
+    expect(MARKER_TAG_SET.size).toBe(9);
   });
 
   it('不应包含非标记标签', () => {
