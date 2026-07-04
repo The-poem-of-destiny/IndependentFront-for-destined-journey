@@ -854,7 +854,7 @@ export interface MemoryRecord {
   keywords: string[];
   /** 关联的角色 ID */
   relatedCharacterIds: string[];
-  /** 关联的剧情事件 ID */
+  /** @deprecated Phase 10g: 由 keywords + embedding 召回替代，不再要求 AI 输出 */
   relatedPlotEventId?: string;
   /** 重要度 (0-10) */
   importance: number;
@@ -1077,6 +1077,8 @@ export interface AgentContext {
   variables: Record<string, any>;
   plotEvents: PlotEvent[];
   memories: MemoryRecord[];
+  /** 用户任务列表 (Phase 10g) */
+  quests?: Record<string, Quest>;
   agentOutputs: Map<string, any>;  // 上游 Agent 的输出
 
   // --- Phase 8: Variable Zone 可见性系统 ---
@@ -1134,6 +1136,7 @@ export type GameEventType =
   | 'item_use'
   | 'skill_use'
   | 'location_change'
+  | 'quest_update'
   | 'system';
 
 /** 游戏事件 — 结构化的事件记录 */
@@ -1181,7 +1184,10 @@ export type StatePatchOp =
   // Phase 4.6: RFC 6902 JSON Patch ops
   | 'remove_variable'
   | 'move_variable'
-  | 'insert_variable';
+  | 'insert_variable'
+  // Phase 10g: Quest ops
+  | 'update_quest'
+  | 'remove_quest';
 
 /** 原子状态补丁 — StateManager 的唯一输入格式 */
 export interface StatePatch {

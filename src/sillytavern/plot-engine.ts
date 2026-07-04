@@ -395,7 +395,6 @@ export function eventToMemory(
     hiddenLine,
     keywords: [event.title, isFailure ? '失败' : '完成', '剧情事件'],
     relatedCharacterIds: event.relatedCharacterIds,
-    relatedPlotEventId: event.id,
     importance,
   };
 }

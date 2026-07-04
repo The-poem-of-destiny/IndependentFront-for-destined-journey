@@ -439,7 +439,6 @@ describe('summarizeAndSave', () => {
       agentRawOutput: validOutput,
       embeddingEndpoint,
       relatedCharacterIds: ['char_a', 'char_b'],
-      relatedPlotEventId: 'plot_1',
       gameTimeRange: { start: '015-06-01', end: '015-06-10' },
     });
 
@@ -451,7 +450,6 @@ describe('summarizeAndSave', () => {
     expect(result!.keywords).toEqual(['冒险', '觉醒', '龙', '遗迹']);
     expect(result!.importance).toBe(7);
     expect(result!.relatedCharacterIds).toEqual(['char_a', 'char_b']);
-    expect(result!.relatedPlotEventId).toBe('plot_1');
     expect(result!.embedding).toBeDefined();
     expect(result!.embedding).toHaveLength(128);
 

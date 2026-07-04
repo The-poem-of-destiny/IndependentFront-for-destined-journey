@@ -208,6 +208,12 @@ export class StateManager {
       case 'update_plot_event':
         event = await this.applyUpdatePlotEvent(patch);
         break;
+      case 'update_quest':
+        event = await this.applyUpdateQuest(patch);
+        break;
+      case 'remove_quest':
+        event = await this.applyRemoveQuest(patch);
+        break;
       case 'remove_variable':
         event = await this.applyRemoveVariable(patch);
         break;
@@ -241,6 +247,7 @@ export class StateManager {
     // set 操作必须有 value
     const setOps: StatePatchOp[] = [
       'set_variable', 'set_hp', 'set_mp', 'set_sp', 'set_location',
+      'update_quest', 'remove_quest',
     ];
     if (setOps.includes(patch.op) && patch.value === undefined) {
       return `${patch.op} 需要 value 字段`;
@@ -594,6 +601,29 @@ export class StateManager {
     await savePlotEvents([event]);
 
     return this.createEvent('plot_trigger', patch);
+  }
+
+  private async applyUpdateQuest(patch: StatePatch): Promise<GameEvent> {
+    const questData = patch.value as { name: string } & Record<string, any>;
+    const questName = questData.name;
+    if (!questName) throw new Error('缺少任务名称');
+    const { getProfile, updateProfile, setQuest } = await import('./save-profile');
+    const profile = await getProfile(this.saveId);
+    if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { name: _name, ...questFields } = questData;
+    await setQuest(profile, questName, questFields);
+    return this.createEvent('quest_update', patch);
+  }
+
+  private async applyRemoveQuest(patch: StatePatch): Promise<GameEvent> {
+    const questName = patch.value as string;
+    if (!questName) throw new Error('缺少任务名称');
+    const { getProfile, updateProfile, removeQuest } = await import('./save-profile');
+    const profile = await getProfile(this.saveId);
+    if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
+    await removeQuest(profile, questName);
+    return this.createEvent('quest_update', patch);
   }
 
   // ========== 辅助 ==========

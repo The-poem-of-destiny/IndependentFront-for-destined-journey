@@ -352,7 +352,6 @@ describe('eventToMemory', () => {
     expect(mem.content).toContain('商队护送');
     expect(mem.hiddenLine).toContain('剧情事件完成');
     expect(mem.relatedCharacterIds).toEqual(['char-1']);
-    expect(mem.relatedPlotEventId).toBe('evt-complete');
   });
 
   it('failed 事件应生成 importance=9 的记忆（更高重要度）', () => {
@@ -844,8 +843,6 @@ describe('autoGenerateMemoriesFromEvents', () => {
 
     const memories = await autoGenerateMemoriesFromEvents('save-1');
     expect(memories).toHaveLength(2);
-    expect(memories[0].relatedPlotEventId).toBe('evt-1');
-    expect(memories[1].relatedPlotEventId).toBe('evt-2');
     // 跳过 pending 和 active
   });
 

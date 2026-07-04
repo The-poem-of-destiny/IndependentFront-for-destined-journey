@@ -151,6 +151,23 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     return lines.join('\n');
   },
 
+  /** {{QUEST_STATE}} — 当前所有任务 (Phase 10g) */
+  'QUEST_STATE': (ctx, _config, _params) => {
+    const quests = ctx.quests ?? {};
+    const entries = Object.entries(quests);
+    if (entries.length === 0) return '(无任务)';
+    const lines: string[] = [];
+    for (const [name, q] of entries as [string, any][]) {
+      const parts: string[] = [`  [${name}]`, `状态:${q.status || '—'}`, `优先级:${q.priority || '—'}`];
+      if (q.objective) parts.push(`目标:${q.objective}`);
+      if (q.progress) parts.push(`进度:${q.progress}`);
+      if (q.detail) parts.push(`详情:${q.detail}`);
+      if (q.reward) parts.push(`奖励:${q.reward}`);
+      lines.push(parts.join(' | '));
+    }
+    return lines.join('\n');
+  },
+
   /** {{GAME_TIME}} — 从 variables 中提取时间/位置/天气/纪元等世界键 */
   'GAME_TIME': (ctx, _config, _params) => {
     const vars = ctx.variables ?? {};

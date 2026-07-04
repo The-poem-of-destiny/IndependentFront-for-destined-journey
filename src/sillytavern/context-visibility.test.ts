@@ -253,13 +253,13 @@ describe('buildZoneContext', () => {
     expect(zones.world.content['user_count']).toBeUndefined();
   });
 
-  it('quest zone contains plot events with status', () => {
+  it('quest zone contains quests from AgentContext', () => {
     const ctx = makeAgentContext({
-      plotEvents: [makePlotEvent({ id: 'evt_001', status: 'active' })],
+      quests: { '追查失踪商队': { status: '进行中', priority: '高', progress: '', detail: '', objective: '找到商队', reward: '' } },
     });
     const zones = buildZoneContext(ctx);
-    expect(zones.quest.content.events).toHaveLength(1);
-    expect(zones.quest.content.events[0].status).toBe('active');
+    expect(zones.quest.content.quests).toBeDefined();
+    expect(Object.keys(zones.quest.content.quests)).toHaveLength(1);
   });
 
   it('variable zone partitions user/sys namespaces', () => {
@@ -307,17 +307,17 @@ describe('filterZoneContent — SUMMARY', () => {
     expect(result).not.toContain('暗线内容');
   });
 
-  it('quest SUMMARY only shows active events', () => {
+  it('quest SUMMARY only shows active quests', () => {
     const content = {
-      events: [
-        { id: 'evt_001', title: '活跃任务', status: 'active', description: '进行中' },
-        { id: 'evt_002', title: '待触发任务', status: 'pending', description: '等待中' },
-      ],
+      quests: {
+        '追查失踪商队': { status: '进行中', priority: '高', progress: '发现了线索', objective: '找到商队', detail: '', reward: '50金币' },
+        '清理地下室': { status: '已完成', priority: '中', progress: '已完成', objective: '', detail: '', reward: '' },
+      },
     };
     const result = filterZoneContent('quest', content, 'SUMMARY', 'test');
     expect(result).not.toBeNull();
-    expect(result).toContain('活跃任务');
-    expect(result).not.toContain('待触发任务');
+    expect(result).toContain('追查失踪商队');
+    expect(result).not.toContain('清理地下室');
   });
 
   it('outline SUMMARY only shows current chapter', () => {

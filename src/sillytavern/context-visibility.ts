@@ -114,7 +114,6 @@ export function buildZoneContext(ctx: AgentContext): Record<ZoneId, VariableZone
         importance: m.importance,
         timeRange: m.timeRange,
         relatedCharacterIds: m.relatedCharacterIds,
-        relatedPlotEventId: m.relatedPlotEventId,
       })),
     },
   };
@@ -145,21 +144,12 @@ export function buildZoneContext(ctx: AgentContext): Record<ZoneId, VariableZone
   };
 
   // --- quest zone ---
+  // Phase 10g: 从 SaveProfile.quests 读取，而非旧的 plotEvents
   zones.quest = {
     config: { injectAs: 'list' },
     visibility: [],
     content: {
-      events: (ctx.plotEvents ?? []).map(e => ({
-        id: e.id,
-        title: e.title,
-        description: e.description,
-        status: e.status,
-        triggerCondition: e.triggerCondition,
-        chapterGoal: e.description?.slice(0, 100),
-        depth: e.depth,
-        parentId: e.parentId,
-        relatedCharacterIds: e.relatedCharacterIds,
-      })),
+      quests: ctx.quests ?? {},
     },
   };
 
@@ -465,15 +455,17 @@ function formatNpcSummary(content: Record<string, any>): string {
 }
 
 function formatQuestSummary(content: Record<string, any>): string {
-  const events = (content.events ?? []).filter((e: any) => e.status === 'active');
-  if (events.length === 0) return '';
-  const lines = ['📖 活跃剧情'];
-  for (const e of events) {
-    const chapterGoal = e.chapterGoal ?? e.description?.slice(0, 100);
-    lines.push(`[${e.id}] ${e.title} (${e.status})`);
-    if (chapterGoal) lines.push(`  目标: ${chapterGoal}`);
+  const quests: Record<string, any> = content.quests ?? {};
+  const entries = Object.entries(quests);
+  if (entries.length === 0) return '';
+  const activeEntries = entries.filter(([, q]: [string, any]) => q.status !== '已完成' && q.status !== '失败');
+  if (activeEntries.length === 0) return '';
+  const lines = ['📖 活跃任务'];
+  for (const [name, q] of activeEntries as [string, any][]) {
+    lines.push(`  [${name}] ${q.status || '进行中'} | 优先级:${q.priority || '中'}`);
+    if (q.objective) lines.push(`    目标: ${q.objective}`);
+    if (q.progress) lines.push(`    进度: ${q.progress}`);
   }
-  // 排除 pending 事件、triggerCondition
   return lines.join('\n');
 }
 
@@ -595,11 +587,12 @@ function formatWorldKeys(content: Record<string, any>): string {
 }
 
 function formatQuestKeys(content: Record<string, any>): string {
-  const events = content.events ?? [];
-  if (events.length === 0) return '';
-  const lines = ['📖 剧情事件索引'];
-  for (const e of events) {
-    lines.push(`[${e.id}] ${e.title} | ${e.status}`);
+  const quests: Record<string, any> = content.quests ?? {};
+  const entries = Object.entries(quests);
+  if (entries.length === 0) return '';
+  const lines = ['📖 任务索引'];
+  for (const [name, q] of entries as [string, any][]) {
+    lines.push(`  [${name}] ${q.status || '—'} | ${q.priority || '—'}`);
   }
   return lines.join('\n');
 }

@@ -110,8 +110,6 @@ export interface SummarizeAndSaveOptions {
   saveId: string;
   /** memory_summary Agent 的原始输出文本 */
   agentRawOutput: string;
-  /** 关联的剧情事件 ID（可选） */
-  relatedPlotEventId?: string;
   /** 关联的角色 ID 列表 */
   relatedCharacterIds?: string[];
   /** Embedding API 端点（可选，不提供则不计算 embedding） */
@@ -132,7 +130,6 @@ export async function summarizeAndSave(options: SummarizeAndSaveOptions): Promis
   const {
     saveId,
     agentRawOutput,
-    relatedPlotEventId,
     relatedCharacterIds = [],
     embeddingEndpoint,
     gameTimeRange,
@@ -167,7 +164,6 @@ export async function summarizeAndSave(options: SummarizeAndSaveOptions): Promis
     hiddenLine: parsed.hiddenLine,
     keywords: parsed.keywords,
     relatedCharacterIds,
-    relatedPlotEventId,
     importance: parsed.importance,
   };
 

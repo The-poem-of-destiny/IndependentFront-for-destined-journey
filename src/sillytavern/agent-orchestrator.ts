@@ -851,6 +851,44 @@ export class AgentOrchestrator {
           console.warn('[Orchestrator] vars_update <status_effects> 解析失败:', e);
         }
       }
+
+      // Step C: 提取 <json> 中 quests 块 → StatePatch (Phase 10g)
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[1].trim());
+          if (parsed.quests) {
+            const { createStateManager } = await import('./state-manager');
+            const sm = createStateManager(this.saveId);
+            const patches: import('./types').StatePatch[] = [];
+
+            for (const q of (parsed.quests.upsert ?? [])) {
+              const { name, ...questFields } = q;
+              if (!name) continue;
+              patches.push({
+                op: 'update_quest',
+                target: `quests.${name}`,
+                value: { name, ...questFields },
+                metadata: { source: 'vars_update', operation: 'upsert' },
+              });
+            }
+
+            for (const q of (parsed.quests.remove ?? [])) {
+              patches.push({
+                op: 'remove_quest',
+                target: `quests.${q.name}`,
+                value: q.name,
+                metadata: { source: 'vars_update', operation: 'remove' },
+              });
+            }
+
+            if (patches.length > 0) {
+              await sm.commitChatState(patches);
+            }
+          }
+        } catch {
+          console.warn('[Orchestrator] vars_update <json> quests 解析失败，跳过 quest 更新');
+        }
+      }
     }
   }
 
