@@ -232,6 +232,23 @@ function toggleEntry(presetId: string, idx: number) {
   else expandedEntries.value.add(key)
 }
 
+// 条目启用/禁用开关 — 自动保存
+async function togglePresetEntryEnabled(presetId: string, idx: number) {
+  const p = s.presets.find((x: PresetItem) => x.id === presetId)
+  if (!p?.settings?.prompts) return
+  const prompts = [...p.settings.prompts]
+  if (!prompts[idx]) return
+  prompts[idx] = { ...prompts[idx], enabled: !(prompts[idx].enabled !== false) }
+  const updated = { ...p, settings: { ...p.settings, prompts }, updatedAt: Date.now() }
+  // 直接替换 s.presets 中对应的预设（避免闪动后再等 DB 回读）
+  const pi = s.presets.findIndex((x: PresetItem) => x.id === presetId)
+  if (pi >= 0) s.presets[pi] = updated
+  try {
+    const { savePreset } = await import('@engine/database')
+    await savePreset(updated as any)
+  } catch { /* DB 写入失败时 UI 已经乐观更新 */ }
+}
+
 // 条目编辑弹窗
 const showEntryEditor = ref(false)
 const editingEntryIdx = ref(-1)
@@ -888,8 +905,8 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
                 <div v-for="(sp, idx) in (activePreset.settings?.prompts || [])" :key="sp.identifier || idx" class="subprompt-item" :class="{ 'subprompt-disabled': sp.enabled === false }">
                   <div class="subprompt-header" @click="toggleEntry(s.activePresetId, idx)">
                     <div class="subprompt-info">
-                      <label class="subprompt-toggle" @click.stop>
-                        <input type="checkbox" :checked="sp.enabled !== false" disabled class="toggle-input" />
+                      <label class="subprompt-toggle" @click.stop.prevent="togglePresetEntryEnabled(s.activePresetId, idx)">
+                        <input type="checkbox" :checked="sp.enabled !== false" class="toggle-input" />
                         <span class="toggle-slider toggle-sm"></span>
                       </label>
                       <span class="subprompt-name">{{ sp.name || `条目 #${idx + 1}` }}</span>

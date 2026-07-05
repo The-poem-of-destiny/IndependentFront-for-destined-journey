@@ -425,6 +425,7 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC
 | 10e | vars_update 调度器重构 → request_dispatcher + char_update→vars_update 合并 item_update（Agentic + script 写作 + 状态写入布线） | ✅ |
 | 10f | request_dispatcher systemPrompt 保持 + vars_update systemPrompt 全面重写（~300行/8节/3示例） | ✅ |
 | 10g | Quest 委托管线 (request_dispatcher→vars_update quest_update_request) + relatedPlotEventId 清理 + memory_summary 全面重写 (6911字/6 XML区块/hiddenLine 新定义) | ✅ |
+| 10h | ST 预设占位符适配：{{setvar}}/{{getvar}}/{{random}} 解析替换管线 + 前端条目开关可点自动保存 | ✅ |
 
 ## 前端架构 (Phase 7, 2026-06-17)
 
