@@ -12,6 +12,7 @@ import type { WorldBook } from '@engine/types'
 import { VERSION } from '@engine/index'
 import { getAgentTemplate } from '@engine/agent-templates'
 import { getDefaultTemplate } from '@engine/placeholder-registry'
+import { preprocessPresetForPreview } from '@engine/preset-loader'
 
 const theme = useThemeStore()
 const ui = useUIStore()
@@ -156,6 +157,14 @@ function getPlaceholdersForAgent(agentId: string): PlaceholderBadge[] {
 
 const showTemplatePreview = ref(false)
 const showStoryPreview = ref(false)
+const showStoryResolvedPreview = ref(false)
+
+// Phase 10h: 预设解析预览 — setvar/getvar 展开，系统占位符/random/char/user 保留
+const resolvedPresetTemplate = computed(() => {
+  const preset = activePreset.value
+  if (!preset) return ''
+  return preprocessPresetForPreview(preset as any)
+})
 
 // Available placeholders for the current agent (filtered by agent type)
 const availablePlaceholders = computed(() => {
@@ -239,13 +248,13 @@ async function togglePresetEntryEnabled(presetId: string, idx: number) {
   const prompts = [...p.settings.prompts]
   if (!prompts[idx]) return
   prompts[idx] = { ...prompts[idx], enabled: !(prompts[idx].enabled !== false) }
-  const updated = { ...p, settings: { ...p.settings, prompts }, updatedAt: Date.now() }
+  const raw = JSON.parse(JSON.stringify({ ...p, settings: { ...p.settings, prompts }, updatedAt: Date.now() }))
   // 直接替换 s.presets 中对应的预设（避免闪动后再等 DB 回读）
   const pi = s.presets.findIndex((x: PresetItem) => x.id === presetId)
-  if (pi >= 0) s.presets[pi] = updated
+  if (pi >= 0) s.presets[pi] = raw
   try {
     const { savePreset } = await import('@engine/database')
-    await savePreset(updated as any)
+    await savePreset(raw)
   } catch { /* DB 写入失败时 UI 已经乐观更新 */ }
 }
 
@@ -275,11 +284,11 @@ async function saveEntry() {
   const prompts = [...(p.settings.prompts || [])]
   if (prompts[idx]) {
     prompts[idx] = { ...prompts[idx], name: entryEditForm.name, content: entryEditForm.content, enabled: entryEditForm.enabled, role: entryEditForm.role }
-    const updated = { ...p, settings: { ...p.settings, prompts }, updatedAt: Date.now() }
+    const raw = JSON.parse(JSON.stringify({ ...p, settings: { ...p.settings, prompts }, updatedAt: Date.now() }))
     const { savePreset } = await import('@engine/database')
-    await savePreset(updated as any)
+    await savePreset(raw)
     await loadPresets()
-    s.activePresetId = updated.id
+    s.activePresetId = raw.id
     showEntryEditor.value = false
     ui.toast('条目已保存', 'success')
   }
@@ -932,9 +941,12 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
             </div>
 
             <!-- Phase 10e: Story Agent template preview -->
-            <div style="margin-top:12px;">
+            <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
               <AppButton variant="ghost" size="sm" @click="showStoryPreview = !showStoryPreview">
                 {{ showStoryPreview ? '收起模板预览' : '模板预览' }}
+              </AppButton>
+              <AppButton variant="ghost" size="sm" @click="showStoryResolvedPreview = !showStoryResolvedPreview">
+                {{ showStoryResolvedPreview ? '收起解析预览' : '🔍 解析预览' }}
               </AppButton>
             </div>
 
@@ -942,6 +954,14 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
               <p class="form-hint">以下为运行时 <code>📥 动态注入</code> 条目或默认上下文块的内容。占位符最终会被替换。</p>
               <TemplatePreview
                 :template="getStoryContextTemplate()"
+                agent-id="story"
+              />
+            </div>
+
+            <div v-if="showStoryResolvedPreview" class="template-preview-panel" style="margin-top:10px;padding:12px;background:var(--color-surface);border-radius:8px;border:1px solid var(--color-border);">
+              <p class="form-hint">以下为预设完整内容：<code>setvar/getvar</code> 已展开为实际值，<code>random/char/user</code> 及系统占位符保留为彩色 badge。</p>
+              <TemplatePreview
+                :template="resolvedPresetTemplate"
                 agent-id="story"
               />
             </div>

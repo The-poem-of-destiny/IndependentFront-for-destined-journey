@@ -300,6 +300,76 @@ export const DEFAULT_STORY_CONTEXT_BLOCK = [
  * 将预设格式化为 Prompt 的「预设」部分
  * 拼接 fixedSystem + fixedExamples
  */
+/**
+ * Phase 10: 预设预览预处理
+ *
+ * 与 assemblePresetContent 的完整预处理不同，此函数仅解析确定性的宏
+ * （setvar → 剥离、getvar → 替换），但保留运行时才知道的占位符：
+ *   - {{random::...}} → 原样保留
+ *   - {{char}} / {{user}} → 原样保留
+ *   - {{//注释}} / {{roll ...}} → 剥离
+ *   - 系统占位符 → 原样保留
+ *
+ * 用于前端模板预览面板，让用户看到"预设内容 + setvar/getvar 展开"
+ * 同时还能看到系统占位符 badge。
+ */
+export function preprocessPresetForPreview(
+  preset: AgentPreset,
+  opts?: { characterName?: string; userName?: string },
+): string {
+  const prompts = (preset as any).settings?.prompts;
+  if (!prompts || !Array.isArray(prompts)) return '';
+
+  const sorted = [...prompts]
+    .filter((p: any) => p.enabled !== false)
+    .sort((a: any, b: any) => (a.injection_order ?? 0) - (b.injection_order ?? 0));
+
+  // Pass 1: 收集所有 setvar → 变量表 (后者覆盖)
+  const vars: SetvarMap = {};
+  for (const p of sorted) {
+    const raw = p.content || '';
+    Object.assign(vars, parseSetvars(raw).variables);
+  }
+
+  // Pass 2: 逐条目处理 — 只做确定性替换，保留运行时占位符
+  const processed: string[] = [];
+  for (const p of sorted) {
+    let content = p.content || '';
+    if (!content.trim()) continue;
+
+    // 1. 不替换 {{char}}/{{user}} — 原样保留
+
+    // 2. 替换 {{getvar::name}} → 查表
+    content = resolveGetvars(content, vars);
+
+    // 3. 不替换 {{random::...}} — 原样保留
+
+    // 4. 剥离 {{setvar::...}}
+    content = content.replace(/\{\{setvar::[^}]*\}\}/g, '');
+
+    // 5. 剥离 {{//注释}}
+    content = content.replace(/\{\{\/\/[^}]*\}\}/g, '');
+
+    // 6. 剥离 {{roll ...}}
+    content = content.replace(/\{\{roll\s+[^}]*\}\}/gi, '');
+
+    // 7. 剥离未知占位符，但保留已知系统占位符 + random + char + user
+    const SYSTEM_RE = /\{\{(?:SYS_PROMPT|NARRATIVE|USER_INPUT|LORE_BOOK|CHARACTER_STATE|AGENT\.\w+|INVENTORY|GAME_TIME|ACTIVE_EFFECTS|MEMORY_ENTRIES|PLOT_EVENTS|CRAFT_REQUEST|CHAR_DETECT|CHAR_GEN_RESULT|CRAFT_RESULT|ITEM_REQUEST|USER_NAME|CHARACTER_NAME)\}\}/;
+    const PRESERVE_RE = /\{\{(?:random::|char\}\}|user\}\})/i;
+    content = content.replace(/\{\{([^}]+)\}\}/g, (match: string) => {
+      if (SYSTEM_RE.test(match)) return match;
+      if (PRESERVE_RE.test(match)) return match;
+      return '';
+    });
+
+    if (content.trim()) {
+      processed.push(content);
+    }
+  }
+
+  return processed.join('\n');
+}
+
 export function buildPresetSection(preset: AgentPreset): string {
   const parts: string[] = [];
 
