@@ -37,7 +37,8 @@ docs/
 ├── reference/                   # 参考文档
 │   ├── status_page_architecture.md     # 状态栏页面架构（7e 必读）
 │   ├── effect_script_system.md         # 词条效果 & 脚本系统架构（引擎必读）
-│   └── agent_system_prompt_guide.md    # 🆕 Agent System Prompt 配置流程（架构/步骤/踩坑/检查清单）
+│   ├── agent_system_prompt_guide.md    # 🆕 Agent System Prompt 配置流程（架构/步骤/踩坑/检查清单）
+└── story_preset_format.md          # 🆕 Story Agent 预设编写指南（输出标签顺序 + 占位符排列 + 可用宏）
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
