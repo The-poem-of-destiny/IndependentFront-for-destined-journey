@@ -191,14 +191,182 @@ if (!hasOurPlaceholders) {
 - 删除 `📥 动态注入` 条目 → 引擎自动补回默认块
 
 ---
+---
 
-## ST `{{setvar}}` 语法的处理
+## Story Agent 预设中的 ST 占位符（正文 AI 专用）
 
-ST 预设中使用的 `{{setvar::VOID2::}}`、`{{char}}`、`{{user}}` 等**小写开头**的占位符 **不会被我们的解析引擎处理** —— 它们原样保留在最终 prompt 中，由 ST 的正则脚本在另一端处理。
+Story Agent 从旧的 SillyTavern 导入的预设中，条目内容里大量使用 `{{...}}` 格式的 **ST 专属占位符**。这些占位符在引擎运行时会被预处理——在 Code 层完成替换/剥离，使发往 LLM 的 prompt 是干净的纯文本。
 
-我们的 regex 只匹配以**大写字母开头**的占位符（`/[A-Z][A-Z_.]*/`），因此两种语法不冲突。
+### 预处理管线
+
+两遍扫描，在 `preset-loader.ts` 的 `assemblePresetContent()` 中执行：
+
+```
+Pass 1 — 收集 setvar 变量表
+  遍历所有 enabled 条目 → parseSetvars() → {key: value} map (同名后者覆盖)
+
+Pass 2 — 逐条目替换/剥离
+  ① {{char}}/{{user}} → 替换为角色名/用户名
+  ② {{getvar::name}} → 查变量表替换
+  ③ {{random::A,B,C}} → 运行时随机选一个
+  ④ {{setvar::...}} → 剥离标签
+  ⑤ {{//注释}} / {{roll ...}} / 未知 {{...}} → 剥离
+  ⑥ 系统+EJS 保留原样
+```
+
+### 占位符详细说明
+
+#### 1. `{{setvar::变量名::变量值}}` — 变量声明/赋值
+
+**无值声明**：`{{setvar::抢话::}}` — 声明变量但暂不赋值。被剥离，不写入变量表。
+
+**有值赋值**：`{{setvar::抢话::允许代替<user>做选择和行动}}` — 将变量"抢话"设为右值。**写入变量表（同名后者覆盖），标签本身被剥离**（setvar 是 ST 内部机制，LLM 不需要看到它）。
+
+```plaintext
+条目 0  🛑宏(不要关):  {{setvar::抢话::}}{{setvar::转述::}}
+                        ↑ 声明两个变量，初始无值，标签全部剥离
+
+条目 2  ⚙️抢话:         {{setvar::抢话::允许代替<user>进行选择、对话与行动}}
+                        ↑ 赋值"抢话"，变量表 → {抢话: "允许代替..."}，标签剥离
+
+条目 3  ⚙️不抢话弱:      {{setvar::抢话::禁止替<user>做重要决定}}
+                        ↑ 同名覆盖 → {抢话: "禁止替..."}
+```
+
+**互斥条目语义**：同一组里只开一个，后开的覆盖前面的值。用户在前端开关条目来控制。
+
+**多行值**：setvar 的值可以跨多行：
+
+```plaintext
+{{setvar::防全知g::
+生成前，强制执行以下分步排查：
+
+0. 隐藏身份绝罚排查...
+1. 旁白全知排查...
+   ...
+}}
+```
+
+#### 2. `{{getvar::变量名}}` — 读取变量值
+
+在条目内容中引用之前 setvar 声明的变量。**引擎运行时替换为变量表中对应的值。**
+
+```plaintext
+条目 54 ⚙️思维预算:   {{setvar::思维预算c::No more than 4096 words.}}
+                       {{setvar::思维预算d::3000字以上}}
+
+COT 条目:             思维链预算: {{getvar::思维预算c}}
+                       ↓ 替换后 ↓
+                      思维链预算: No more than 4096 words.
+```
+
+**表里找不到的 key** → 替换为空字符串。
+
+**尾双冒号** → `{{getvar::转述::}}` 也正常匹配，key 为"转述"。
+
+#### 3. `{{random::选项A,选项B,选项C}}` — 随机选择
+
+逗号分隔选项，运行时 `Math.random()` 随机选一个替换整个标签。
+
+```plaintext
+{{random::1,2,3,4,5,6,7,8,9}}   → 可能是 "5"
+{{random::A,B,C,D,E,F}}          → 可能是 "C"
+```
+
+#### 4. `{{//注释内容}}` — ST 注释
+
+被**完整剥离**，不写入最终 prompt。用于在预设中给人类看说明。
+
+```plaintext
+{{//c是claude，g是Gemini，d是ds，不是越多越好}}  → 剥离
+{{//可以自己改，改用其他文字系统}}                → 剥离
+```
+
+#### 5. `{{char}}` / `{{user}}` — 角色/用户占位符
+
+替换为具体的角色名/用户名（由引擎运行时传入），或如果未提供则替换为占位符 `{{CHARACTER_NAME}}` / `{{USER_NAME}}`。
+
+```plaintext
+{{char}} talks to {{user}}  →  艾丽莎 talks to 冒险者
+```
+
+#### 6. `{{roll NdM+X}}` — 骰子声明
+
+ST 原生的骰子声明。**剥离**。引擎有自己的骰子系统（`$dice`），不需要在 prompt 里声明。
+
+```plaintext
+{{roll 1d99999+1000}}  →  剥离
+```
+
+#### 7. 其他未知 `{{...}}` — 通用剥离
+
+不属于以上任何类型、也不是系统占位符的 `{{...}}` 全部剥离。
+
+```plaintext
+{{生成菜单美化，用<style>包裹css，用<item_info>包裹菜单内容}}  → 剥离
+{{lastUsermessage}}                                            → 剥离
+```
+
+#### 8. `<%...%>` EJS 模板块 — 原样保留
+
+ST 预设中 COT（思维链）条目大量使用 EJS 条件模板来控制不同 AI 模型的行为：
+
+```ejs
+<%_ if (getvar('ai模型') === 'Gemini') { _%>
+  <think_format>...</think_format>
+<%_ } else if (getvar('ai模型') === 'Deepseek') { _%>
+   thinking...
+<%_ } else if (getvar('ai模型') === 'Claude') { _%>
+  ...
+<%_ } _%>
+```
+
+引擎**不执行 EJS**（这不是我们的职责），但会先做 setvar/getvar 文本替换。所以如果 `ai模型` 被 setvar 设为 `Deepseek`，COT 中的 `getvar('ai模型')` 在 EJS 代码块内也会被替换为 `Deepseek`，AI 看到的就是已替换过的条件分支。
+
+#### 9. 系统占位符 — 保留不动
+
+`{{NARRATIVE}}`、`{{USER_INPUT}}`、`{{AGENT.MEMORY_RECALL}}` 等我们自己的系统占位符完整保留，由后续的 `placeholder-registry.ts` 处理。
+
+### 编辑指南
+
+用户在设置页 → Story Agent → 预设管理 → 展开条目 → ✎ 编辑，可以自由使用上述占位符。常用的模式：
+
+**声明一组互斥选项**：
+```
+条目A: {{setvar::抢话::允许扮演<user>}}      ← 只开这个 → 允许扮演
+条目B: {{setvar::抢话::禁止替<user>做决定}}   ← 或只开这个 → 禁止扮演
+```
+
+**在 COT 或指令条目中引用**：
+```
+根据设定：{{getvar::抢话}}
+当前字数要求：{{getvar::字数}}
+```
+
+**随机注入**：
+```
+今天的天气：{{random::晴朗,多云,小雨,暴风雨}}
+```
+
+### 实现文件
+
+| 函数 | 文件 | 行数 |
+|------|------|------|
+| `parseSetvars()` | `preset-loader.ts` | ~49 |
+| `resolveGetvars()` | `preset-loader.ts` | ~68 |
+| `resolveRandoms()` | `preset-loader.ts` | ~87 |
+| `replaceCharUser()` | `preset-loader.ts` | ~139 |
+| `preprocessEntry()` | `preset-loader.ts` | ~155 |
+| `assemblePresetContent()` | `preset-loader.ts` | ~206 |
+
+### 测试
+
+```bash
+npx vitest run src/sillytavern/preset-loader.test.ts  # 48 tests，覆盖所有占位符类型
+```
 
 ---
+
 
 ## 调试技巧
 
