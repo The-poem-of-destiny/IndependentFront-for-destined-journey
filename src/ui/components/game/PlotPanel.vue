@@ -44,15 +44,15 @@ const pendingEvents = computed(() => events.value.filter(e => e.status === 'pend
 
 <style scoped>
 .plot-panel { display: flex; flex-direction: column; height: 100%; padding: 8px; overflow-y: auto; gap: 10px; }
-.panel-title { font-size: 13px; font-weight: 600; color: var(--theme-text-primary); }
-.section-title { font-size: 11px; color: var(--theme-text-muted); text-transform: uppercase; margin-bottom: 4px; }
+.panel-title { font-size: 0.8125rem; font-weight: 600; color: var(--theme-text-primary); }
+.section-title { font-size: 0.6875rem; color: var(--theme-text-muted); text-transform: uppercase; margin-bottom: 4px; }
 .outline-card { background: var(--theme-card-bg); padding: 8px; border-radius: var(--theme-radius-sm, 4px); border: 1px solid var(--theme-card-border); }
-.outline-title { font-weight: 600; font-size: 14px; color: var(--theme-text-primary); }
-.outline-summary { font-size: 12px; color: var(--theme-text-secondary); margin-top: 4px; }
+.outline-title { font-weight: 600; font-size: 0.875rem; color: var(--theme-text-primary); }
+.outline-summary { font-size: 0.75rem; color: var(--theme-text-secondary); margin-top: 4px; }
 .event-card { background: var(--theme-card-bg); padding: 6px 8px; border-radius: var(--theme-radius-sm, 4px); margin-bottom: 4px; }
 .event-card.active { border-left: 3px solid var(--theme-success); }
 .event-card.pending { border-left: 3px solid var(--theme-warning); }
-.event-title { font-weight: 600; font-size: 13px; color: var(--theme-text-primary); }
-.event-desc { font-size: 11px; color: var(--theme-text-secondary); margin-top: 2px; }
-.empty { padding: 24px; text-align: center; color: var(--theme-text-muted); font-size: 13px; }
+.event-title { font-weight: 600; font-size: 0.8125rem; color: var(--theme-text-primary); }
+.event-desc { font-size: 0.6875rem; color: var(--theme-text-secondary); margin-top: 2px; }
+.empty { padding: 24px; text-align: center; color: var(--theme-text-muted); font-size: 0.8125rem; }
 </style>

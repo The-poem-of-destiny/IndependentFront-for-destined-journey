@@ -99,10 +99,10 @@ function formatTime(ts?: number): string {
   justify-content: center;
   height: 100%;
   color: var(--theme-text-muted);
-  font-size: 16px;
+  font-size: 1rem;
 }
 .chat-empty-hint {
-  font-size: 13px;
+  font-size: 0.8125rem;
   margin-top: 8px;
 }
 .bubble-row {
@@ -121,7 +121,7 @@ function formatTime(ts?: number): string {
   max-width: 75%;
   padding: 10px 14px;
   border-radius: var(--theme-radius-md, 8px);
-  font-size: 14px;
+  font-size: 0.875rem;
   line-height: 1.6;
 }
 .bubble-player {
@@ -137,26 +137,26 @@ function formatTime(ts?: number): string {
   background: var(--theme-content-bg);
   border-left: 3px solid var(--theme-primary);
   color: var(--theme-text-secondary);
-  font-size: 13px;
+  font-size: 0.8125rem;
   max-width: 85%;
 }
 .bubble-prefix {
   font-weight: 600;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--theme-text-muted);
   margin-right: 6px;
   font-family: system-ui, sans-serif;
 }
 .bubble-time {
   display: block;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--theme-text-muted);
   margin-top: 4px;
 }
 .chat-loading {
   text-align: center;
   color: var(--theme-text-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   padding: 8px;
 }
 .loading-dot {

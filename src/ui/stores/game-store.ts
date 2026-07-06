@@ -30,6 +30,7 @@ export const useGameStore = defineStore('game', () => {
   // === 元数据 ===
   const saveProfile = ref<SaveProfile | null>(null)
   const fp = computed(() => saveProfile.value?.fp || 0)
+  const gameTime = computed(() => saveProfile.value?.gameTime ?? null)
 
   // === UI 布局状态 (Phase 7e) ===
   const sidebarCollapsed = ref(false)
@@ -90,7 +91,7 @@ export const useGameStore = defineStore('game', () => {
     messages, isGenerating,
     recentMemories, activePlotEvents, plotOutline,
     activeCombat, isInCombat,
-    saveProfile, fp,
+    saveProfile, fp, gameTime,
     sidebarCollapsed, activeModal, fullscreenStatus,
     toggleSidebar, showModal, closeModal, toggleFullscreen,
     loadSaves, loadSave, clearActive,

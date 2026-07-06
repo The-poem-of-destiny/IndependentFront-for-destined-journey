@@ -94,11 +94,11 @@ function handleToolClick(id: string) {
   overflow: hidden;
 }
 .placeholder-panel {
-  padding: 40px;
+  padding: 2.5rem;
   text-align: center;
   color: var(--theme-text-muted);
-  font-size: 14px;
-  min-height: 200px;
+  font-size: 0.875rem;
+  min-height: 12.5rem;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -71,12 +71,12 @@ function handleSend() {
 }
 .input-btn {
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 2.25rem;
+  height: 2.25rem;
   border: none;
   background: var(--theme-surface-muted);
   color: var(--theme-text-secondary);
-  font-size: 16px;
+  font-size: 1rem;
   border-radius: var(--theme-radius-sm, 6px);
   cursor: pointer;
   display: flex;
@@ -98,7 +98,7 @@ function handleSend() {
   border-radius: var(--theme-radius-sm, 6px);
   background: var(--theme-card-bg);
   color: var(--theme-text-primary);
-  font-size: 14px;
+  font-size: 0.875rem;
   font-family: inherit;
   outline: none;
   transition: border-color 150ms;
@@ -113,7 +113,7 @@ function handleSend() {
   position: absolute;
   bottom: 100%;
   left: 12px;
-  width: 280px;
+  width: 17.5rem;
   background: var(--theme-card-bg);
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-md, 8px);
@@ -123,7 +123,7 @@ function handleSend() {
   z-index: 10;
 }
 .options-title {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--theme-text-secondary);
   padding: 4px 8px;
@@ -137,7 +137,7 @@ function handleSend() {
   border: none;
   background: none;
   color: var(--theme-text-primary);
-  font-size: 13px;
+  font-size: 0.8125rem;
   cursor: pointer;
   border-radius: var(--theme-radius-sm, 4px);
   font-family: inherit;
@@ -155,7 +155,7 @@ function handleSend() {
   border-top: 1px solid var(--theme-card-border);
   background: none;
   color: var(--theme-text-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   cursor: pointer;
   font-family: inherit;
   margin-top: 4px;

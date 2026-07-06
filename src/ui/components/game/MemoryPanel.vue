@@ -30,14 +30,14 @@ const memories = computed(() => {
 
 <style scoped>
 .memory-panel { display: flex; flex-direction: column; height: 100%; padding: 8px; }
-.panel-title { font-size: 13px; font-weight: 600; color: var(--theme-text-primary); margin-bottom: 8px; }
+.panel-title { font-size: 0.8125rem; font-weight: 600; color: var(--theme-text-primary); margin-bottom: 8px; }
 .memory-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .memory-card { background: var(--theme-card-bg); padding: 8px; border-radius: var(--theme-radius-sm, 4px); border: 1px solid var(--theme-card-border); }
 .memory-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-.memory-id { font-size: 10px; color: var(--theme-text-muted); font-family: monospace; }
-.memory-importance { font-size: 11px; color: #f59e0b; }
-.memory-content { font-size: 12px; color: var(--theme-text-secondary); line-height: 1.5; }
+.memory-id { font-size: 0.625rem; color: var(--theme-text-muted); font-family: monospace; }
+.memory-importance { font-size: 0.6875rem; color: #f59e0b; }
+.memory-content { font-size: 0.75rem; color: var(--theme-text-secondary); line-height: 1.5; }
 .memory-keywords { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.keyword { font-size: 10px; padding: 1px 6px; background: var(--theme-surface-muted); color: var(--theme-text-muted); border-radius: 3px; }
-.empty { padding: 24px; text-align: center; color: var(--theme-text-muted); font-size: 13px; }
+.keyword { font-size: 0.625rem; padding: 1px 6px; background: var(--theme-surface-muted); color: var(--theme-text-muted); border-radius: 3px; }
+.empty { padding: 24px; text-align: center; color: var(--theme-text-muted); font-size: 0.8125rem; }
 </style>

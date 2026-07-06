@@ -1,1 +1,3 @@
 /* Obsidian (黑曜石) — 默认深色主题已在 variables.css 中定义 */
+--theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
+--theme-primary-text: var(--theme-text-primary);

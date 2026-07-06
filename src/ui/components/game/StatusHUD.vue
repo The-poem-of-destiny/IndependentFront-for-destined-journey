@@ -10,7 +10,7 @@ import StatusOverview from './StatusOverview.vue'
 
 <style scoped>
 .status-hud {
-  width: 320px;
+  width: 20rem;
   flex-shrink: 0;
   background: var(--theme-content-bg);
   border-left: 1px solid var(--theme-card-border);

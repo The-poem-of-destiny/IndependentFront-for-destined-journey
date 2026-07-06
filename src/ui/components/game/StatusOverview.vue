@@ -266,14 +266,14 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   color: var(--theme-text-primary);
 }
 .section-title {
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--theme-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 .section-header i {
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--theme-text-muted);
   transition: transform 0.2s;
 }
@@ -295,12 +295,12 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 }
 .summary-name {
   font-family: var(--theme-font-title, 'Cinzel', serif);
-  font-size: 17px;
+  font-size: 1.0625rem;
   font-weight: 700;
   color: var(--theme-text-primary);
 }
 .summary-location {
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--theme-text-muted);
   display: flex;
   align-items: center;
@@ -325,16 +325,16 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   gap: 2px;
 }
 .kv-label {
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--theme-text-muted);
 }
 .kv-value {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--theme-text-primary);
 }
 .kv-long {
-  font-size: 11px;
+  font-size: 0.6875rem;
   word-break: break-all;
 }
 .tier-text { color: var(--theme-quality-epic, #9A79CC); }
@@ -343,18 +343,18 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 .attr-section { margin-top: 4px; }
 
 /* ═══ 状态效果 ═══ */
-.buff-scroll { max-height: 120px; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 6px; }
+.buff-scroll { max-height: 7.5rem; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 6px; }
 .buff-row { display: flex; align-items: center; gap: 4px; cursor: pointer; }
-.buff-time { font-size: 10px; color: var(--theme-text-muted); }
+.buff-time { font-size: 0.625rem; color: var(--theme-text-muted); }
 .buff-detail { margin: 0 12px 8px; padding: 8px 10px; background: var(--theme-surface-muted); border-radius: 6px; border-left: 3px solid var(--theme-primary); }
-.bd-name { font-size: 13px; font-weight: 700; color: var(--theme-text-primary); }
-.bd-desc { font-size: 12px; color: var(--theme-text-secondary); margin-top: 2px; }
-.bd-meta { display: flex; gap: 12px; margin-top: 6px; font-size: 11px; color: var(--theme-text-muted); }
+.bd-name { font-size: 0.8125rem; font-weight: 700; color: var(--theme-text-primary); }
+.bd-desc { font-size: 0.75rem; color: var(--theme-text-secondary); margin-top: 2px; }
+.bd-meta { display: flex; gap: 12px; margin-top: 6px; font-size: 0.6875rem; color: var(--theme-text-muted); }
 
 /* ═══ 持有物 ═══ */
 .equip-sub { margin-bottom: 4px; }
 .sub-label {
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--theme-text-muted);
   text-transform: uppercase;
   margin-bottom: 4px;
@@ -371,15 +371,15 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   gap: 6px;
   padding: 4px 6px;
   border-radius: 3px;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 .item-row:hover {
   background: var(--theme-surface-muted);
 }
 .item-icon {
-  width: 16px;
+  width: 1rem;
   text-align: center;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--theme-text-muted);
   flex-shrink: 0;
 }
@@ -392,7 +392,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   white-space: nowrap;
 }
 .item-tag {
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--theme-text-muted);
   background: var(--theme-surface-muted);
   padding: 1px 5px;
@@ -400,13 +400,13 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   flex-shrink: 0;
 }
 .item-count {
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--theme-text-secondary);
   flex-shrink: 0;
 }
 .item-footer {
   text-align: center;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--theme-text-muted);
   padding: 6px 0 2px;
   cursor: pointer;
@@ -416,7 +416,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   gap: 4px;
 }
 .item-footer:hover { color: var(--theme-text-secondary); }
-.item-footer i { font-size: 9px; }
+.item-footer i { font-size: 0.5625rem; }
 
 /* ═══ 任务追踪 ═══ */
 .quest-item {
@@ -433,12 +433,12 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 }
 .quest-name {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--theme-text-primary);
   flex: 1;
 }
 .quest-prio {
-  font-size: 10px;
+  font-size: 0.625rem;
   padding: 1px 5px;
   border-radius: 3px;
   font-weight: 600;
@@ -447,12 +447,12 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 .pri-中 { background: rgba(217,119,6,0.18); color: #f59e0b; }
 .pri-低 { background: rgba(107,114,128,0.18); color: #9ca3af; }
 .quest-obj {
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--theme-text-secondary);
   margin-top: 3px;
 }
 .quest-prog {
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--theme-success);
   margin-top: 2px;
 }
@@ -496,14 +496,14 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   padding: 16px;
   text-align: center;
 }
-.error-icon { font-size: 28px; color: var(--theme-error); }
+.error-icon { font-size: 1.75rem; color: var(--theme-error); }
 .retry-btn {
   padding: 6px 16px;
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-sm, 4px);
   background: var(--theme-surface-muted);
   color: var(--theme-text-primary);
-  font-size: 13px;
+  font-size: 0.8125rem;
   cursor: pointer;
   font-family: inherit;
 }

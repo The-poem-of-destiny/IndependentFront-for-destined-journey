@@ -33,7 +33,8 @@
 
   /* 语义色 */
   --theme-primary: #8f9fff;
-  --theme-primary-text: #10131a;
+  
+  --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
   --theme-color-primary: var(--theme-primary); /* 别名：所有 create 组件引用此名 */
   --theme-success: #35c98a;
   --theme-warning: #f0b84b;

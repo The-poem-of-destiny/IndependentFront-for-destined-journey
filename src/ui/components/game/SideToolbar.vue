@@ -45,7 +45,7 @@ function handleClick(id: string) {
 .side-toolbar {
   display: flex;
   flex-direction: column;
-  width: 140px;
+  width: 8.75rem;
   flex-shrink: 0;
   background: var(--theme-tab-bar-bg);
   border-right: 1px solid var(--theme-card-border);
@@ -55,7 +55,7 @@ function handleClick(id: string) {
   transition: width 150ms;
 }
 .side-toolbar.collapsed {
-  width: 44px;
+  width: 2.75rem;
 }
 .tool-btn {
   display: flex;
@@ -65,7 +65,7 @@ function handleClick(id: string) {
   border: none;
   background: none;
   color: var(--theme-tab-text);
-  font-size: 14px;
+  font-size: 0.875rem;
   cursor: pointer;
   font-family: inherit;
   text-align: left;
@@ -78,9 +78,9 @@ function handleClick(id: string) {
   color: var(--theme-tab-active-text);
 }
 .tool-btn i {
-  width: 20px;
+  width: 1.25rem;
   text-align: center;
-  font-size: 16px;
+  font-size: 1rem;
   flex-shrink: 0;
 }
 .tool-label {
@@ -95,7 +95,7 @@ function handleClick(id: string) {
   background: none;
   color: var(--theme-text-muted);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-family: inherit;
 }
 .collapse-toggle:hover {

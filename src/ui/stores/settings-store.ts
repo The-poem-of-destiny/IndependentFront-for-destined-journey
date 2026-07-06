@@ -23,6 +23,7 @@ export interface ApiEntry {
   maskedKey: string
   model: string
   models: string[]
+  apiType: 'chat' | 'embedding'
 }
 
 export interface PresetItem {

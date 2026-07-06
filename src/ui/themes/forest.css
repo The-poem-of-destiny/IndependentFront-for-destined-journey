@@ -23,7 +23,8 @@
   --theme-text-muted: #587860;
 
   --theme-primary: #4ade80;
-  --theme-primary-text: #0d1a12;
+  
+  --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
   --theme-success: #4ade80;
   --theme-warning: #d4a834;
   --theme-error: #e85555;

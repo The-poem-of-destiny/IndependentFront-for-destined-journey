@@ -134,6 +134,17 @@ export class AgentOrchestrator {
       this.agentConfigs.set(c.agentId, c);
     }
 
+    // Phase 10: plotSettings.mode === 'off' → 禁用三个剧情 Agent
+    const plotMode = options.context.plotSettings?.mode
+    if (plotMode === 'off') {
+      for (const plotAgentId of ['plot_pre_check', 'plot_post_check', 'plot_outline']) {
+        const cfg = this.agentConfigs.get(plotAgentId)
+        if (cfg) {
+          cfg.enabled = false
+        }
+      }
+    }
+
     this.endpoints = new Map();
     for (const ep of options.endpoints) {
       this.endpoints.set(ep.id, ep);

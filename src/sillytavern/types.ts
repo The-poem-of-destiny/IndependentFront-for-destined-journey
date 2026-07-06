@@ -1081,6 +1081,10 @@ export interface AgentContext {
   quests?: Record<string, Quest>;
   agentOutputs: Map<string, any>;  // 上游 Agent 的输出
 
+  // --- Phase 10: Plot mode ---
+  /** 剧情模式配置（用于 orchestrator 决定是否跳过 plot_* agent） */
+  plotSettings?: PlotSettings;
+
   // --- Phase 8: Variable Zone 可见性系统 ---
   /** 8-zone 变量区（由 buildZoneContext() 组装） */
   zones?: Record<ZoneId, VariableZone>;
