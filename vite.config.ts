@@ -115,7 +115,7 @@ export default defineConfig({
     port: 5173,
     open: true,
     watch: {
-      ignored: ['**/data/worldbooks/**', '**/data/defaults/**'],
+      ignored: ['**/data/worldbooks/**'],
     },
   },
   build: {

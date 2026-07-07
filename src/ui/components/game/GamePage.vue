@@ -13,6 +13,7 @@ import CharacterListPanel from './CharacterListPanel.vue'
 import QuestsPanel from './QuestsPanel.vue'
 import PlotPanel from './PlotPanel.vue'
 import MemoryPanel from './MemoryPanel.vue'
+import MapPanel from './MapPanel.vue'
 
 const game = useGameStore()
 const ui = useUIStore()
@@ -72,8 +73,8 @@ function handleToolClick(id: string) {
     <AppModal title="快照" :open="game.activeModal === 'snapshots'" @close="game.closeModal()" @update:open="(v: boolean) => { if (!v) game.closeModal() }" size="md" closable>
       <div class="placeholder-panel">快照管理 — 后续实现</div>
     </AppModal>
-    <AppModal title="地图" :open="game.activeModal === 'map'" @close="game.closeModal()" @update:open="(v: boolean) => { if (!v) game.closeModal() }" size="lg" closable>
-      <div class="placeholder-panel">地图查看 — 后续实现</div>
+    <AppModal title="🗺 地图" :open="game.activeModal === 'map'" @close="game.closeModal()" @update:open="(v: boolean) => { if (!v) game.closeModal() }" size="xxl" closable>
+      <MapPanel />
     </AppModal>
   </div>
 </template>
