@@ -436,6 +436,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 ├── App.vue                          ← 根组件 (<router-view> + ToastContainer)
 ├── env.d.ts                         ← .vue 类型声明
 │
+├── composables/                     ← Vue 3 Composables (可复用逻辑)
+│   ├── useMapViewer.ts              ← OpenSeadragon 生命周期 (创建/加载/销毁)
+│   └── useMapMarkers.ts             ← 地图标记 CRUD + Overlay 同步
+│
 ├── themes/                          ← 10 主题 CSS 系统
 │   ├── variables.css                ← 默认主题 (obsidian) 变量定义 + 间距/圆角/阴影
 │   ├── parchment.css / obsidian.css / crimson.css / indigo.css
@@ -464,7 +468,20 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │   ├── home/HomePage.vue            ← 游戏标题画面 (40vh 标题 + 4 按钮 + 风味文字)
 │   ├── settings/SettingsPage.vue    ← 设置页 (左侧导航 + 8 分区 + 预设系统)
 │   ├── create/CreatePage.vue        ← [占位] 捏人页
-│   ├── game/GamePage.vue            ← [占位] 游戏页
+│   ├── game/
+│   │   ├── GamePage.vue             ← 游戏页主布局 (三栏 + 6 弹窗)
+│   │   ├── MapPanel.vue             ← 地图查看器 (OSD + 91 预设标记 + 工作台)
+│   │   ├── TopBar.vue               ← 顶部栏 (首页/时间/全屏)
+│   │   ├── SideToolbar.vue          ← 左侧工具栏 (8 按钮)
+│   │   ├── ChatFlow.vue             ← 对话流 (气泡)
+│   │   ├── InputBar.vue             ← 输入栏
+│   │   ├── StatusHUD.vue            ← 右侧状态栏容器
+│   │   ├── StatusOverview.vue       ← 角色状态详览
+│   │   ├── ItemsPanel.vue           ← 背包面板
+│   │   ├── CharacterListPanel.vue   ← 角色列表面板
+│   │   ├── QuestsPanel.vue          ← 任务面板
+│   │   ├── PlotPanel.vue            ← 剧情面板
+│   │   └── MemoryPanel.vue          ← 记忆面板
 │   └── workshop/WorkshopPage.vue    ← [占位] 创意工坊
 │
 └── styles/                          ← base.css / transitions.css / utilities.css
