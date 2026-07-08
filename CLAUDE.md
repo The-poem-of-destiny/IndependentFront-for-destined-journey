@@ -470,7 +470,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │   ├── create/CreatePage.vue        ← [占位] 捏人页
 │   ├── game/
 │   │   ├── GamePage.vue             ← 游戏页主布局 (三栏 + 6 弹窗)
-│   │   ├── MapPanel.vue             ← 地图查看器 (OSD + 91 预设标记 + 工作台)
+│   │   ├── MapPanel.vue             ← 地图查看器 (OSD + 91 标记 + 浮动信息卡片 + 角色位置匹配 + 工作台)
 │   │   ├── TopBar.vue               ← 顶部栏 (首页/时间/全屏)
 │   │   ├── SideToolbar.vue          ← 左侧工具栏 (8 按钮)
 │   │   ├── ChatFlow.vue             ← 对话流 (气泡)

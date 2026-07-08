@@ -51,6 +51,89 @@ export function useMapMarkers(viewerRef: Ref<OpenSeadragon.Viewer | null>) {
 
   const overlayMap = new Map<string, HTMLElement>()
 
+  // ═══ 浮动信息卡片位置 ═══
+  const activeMarkerCardPosition = ref<{
+    left: number
+    top: number
+    visible: boolean
+  }>({
+    left: 0,
+    top: 0,
+    visible: false,
+  })
+
+  /**
+   * 同步浮动卡片位置 — 根据 activeMarker 的归一化坐标计算像素位置。
+   * 照抄原版 MapTab.syncActiveMarkerCardPosition。
+   */
+  function syncActiveMarkerCardPosition() {
+    const viewer = viewerRef.value
+    if (!viewer || viewer.isDestroyed()) {
+      activeMarkerCardPosition.value = { ...activeMarkerCardPosition.value, visible: false }
+      return
+    }
+
+    const marker = activeMarker.value
+    if (!marker || markerAddMode.value) {
+      activeMarkerCardPosition.value = { ...activeMarkerCardPosition.value, visible: false }
+      return
+    }
+
+    const image = viewer.world.getItemAt(0)
+    if (!image) {
+      activeMarkerCardPosition.value = { ...activeMarkerCardPosition.value, visible: false }
+      return
+    }
+
+    const size = image.getContentSize()
+    const container = viewer.element
+    if (!size.x || !size.y || !container) {
+      activeMarkerCardPosition.value = { ...activeMarkerCardPosition.value, visible: false }
+      return
+    }
+
+    const imagePoint = new OpenSeadragon.Point(
+      marker.position.nx * size.x,
+      marker.position.ny * size.y,
+    )
+    const viewerPoint = viewer.viewport.imageToViewerElementCoordinates(imagePoint)
+    const containerRect = container.getBoundingClientRect()
+
+    const horizontalPadding = 12
+    const topPadding = 12
+    const bottomPadding = 18
+    const pointerGap = 18
+    const fallbackCardWidth = window.innerWidth <= 768 ? 280 : 360
+    const fallbackCardHeight = 220
+    const cardWidth = fallbackCardWidth
+    const cardHeight = fallbackCardHeight
+
+    let left = viewerPoint.x
+    const minLeft = horizontalPadding + cardWidth / 2
+    const maxLeft = containerRect.width - horizontalPadding - cardWidth / 2
+    if (minLeft <= maxLeft) {
+      left = Math.min(Math.max(left, minLeft), maxLeft)
+    } else {
+      left = containerRect.width / 2
+    }
+
+    let top = viewerPoint.y - pointerGap
+    const cardTop = top - cardHeight
+    if (cardTop < topPadding) {
+      // 卡片超出上方，翻转到标记下方
+      top = viewerPoint.y + pointerGap + cardHeight
+    }
+    if (top > containerRect.height - bottomPadding) {
+      top = containerRect.height - bottomPadding
+    }
+
+    activeMarkerCardPosition.value = {
+      left,
+      top,
+      visible: true,
+    }
+  }
+
   // ========== 派生状态 ==========
   const activeMarker = computed(() =>
     markers.value.find(m => m.id === activeMarkerId.value) ?? null
@@ -153,13 +236,23 @@ export function useMapMarkers(viewerRef: Ref<OpenSeadragon.Viewer | null>) {
     label.textContent = marker.name || '未命名'
     el.appendChild(label)
 
-    // 点击选中标记
+    // 点击选中标记 + 阻止事件冒泡到 OSD（pointer 事件阻止拖拽，click 触发选中）
+    el.addEventListener('pointerdown', (e: PointerEvent) => {
+      e.stopPropagation()
+    })
+    el.addEventListener('pointerup', (e: PointerEvent) => {
+      e.stopPropagation()
+    })
     new OpenSeadragon.MouseTracker({
       element: el,
       clickHandler: (event: any) => {
         event.originalEvent.preventDefault()
         event.originalEvent.stopPropagation()
         activeMarkerId.value = marker.id
+        // 延迟一帧等 OSD viewport 稳定后同步卡片位置
+        requestAnimationFrame(() => {
+          syncActiveMarkerCardPosition()
+        })
       },
     })
 
@@ -238,6 +331,7 @@ export function useMapMarkers(viewerRef: Ref<OpenSeadragon.Viewer | null>) {
     markerAddMode,
     searchQuery,
     filteredMarkers,
+    activeMarkerCardPosition,
     // 操作
     setMarkers,
     updateMarker,
@@ -248,6 +342,7 @@ export function useMapMarkers(viewerRef: Ref<OpenSeadragon.Viewer | null>) {
     // Overlay
     syncOverlays,
     clearOverlays,
+    syncActiveMarkerCardPosition,
     // 工具
     generateId,
   }

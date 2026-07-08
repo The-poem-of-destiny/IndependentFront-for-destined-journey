@@ -8,6 +8,7 @@
  */
 
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import OpenSeadragon from 'openseadragon'
 import { useGameStore } from '../../stores/game-store'
 import { useMapViewer, MAP_SOURCES } from '../../composables/useMapViewer'
 import {
@@ -26,6 +27,76 @@ import presetMarkersJson from '../../../../data/defaults/map-marker-presets.json
 // ═══ Stores ═══
 const game = useGameStore()
 
+// ═══ 位置→标记模糊匹配 ═══
+/**
+ * 把角色 location 字段（如 "city_windmill"、"风车镇"）匹配到预设标记。
+ *
+ * 匹配策略（按优先级）:
+ * 1. 精确匹配: location === marker.name
+ * 2. 包含匹配: marker.name 包含 location 或 location 包含 marker.name
+ * 3. location-db 桥接: location 是 location-db 的 id → 通过 getLocationNode 取中文名 → 再走 1/2
+ *
+ * 返回匹配到的标记的归一化坐标，否则 null。
+ */
+function matchLocationToMarker(
+  location: string,
+  markers: MapMarker[],
+): MapMarker | null {
+  if (!location) return null
+
+  // 去括号/空格
+  const q = location.trim().toLowerCase()
+
+  // 尝试 location-db 解析 → 中文名
+  let tryNames = [location]
+  const node = getLocationNode(DEFAULT_LOCATIONS, location)
+  if (node && node.name) {
+    tryNames.push(node.name)
+  }
+
+  for (const name of tryNames) {
+    const qn = name.trim().toLowerCase()
+    // 精确匹配
+    let m = markers.find(mk => mk.name.toLowerCase() === qn)
+    if (m) return m
+    // 双向包含
+    m = markers.find(mk => {
+      const mn = mk.name.toLowerCase()
+      return mn.includes(qn) || qn.includes(mn)
+    })
+    if (m) return m
+  }
+
+  return null
+}
+
+/** 玩家在地图上的位置标记 */
+const playerMarker = computed<MapMarker | null>(() => {
+  if (!game.player?.location) return null
+  return matchLocationToMarker(game.player.location, markers.value)
+})
+
+/** NPC 们的位置标记 (去重，同位置只显示一个) */
+const npcLocationMarkers = computed(() => {
+  const npcs = game.npcs || []
+  const seen = new Set<string>()
+  const result: { name: string; marker: MapMarker; npcNames: string[] }[] = []
+  for (const npc of npcs) {
+    if (!npc.location) continue
+    const m = matchLocationToMarker(npc.location, markers.value)
+    if (!m) continue
+    if (seen.has(m.id)) {
+      // 同一位置的不同 NPC，合并到已有条目
+      const existing = result.find(r => r.marker.id === m.id)
+      if (existing) existing.npcNames.push(npc.name)
+      continue
+    }
+    seen.add(m.id)
+    result.push({ name: m.name, marker: m, npcNames: [npc.name] })
+  }
+  return result
+})
+
 // ═══ Refs ═══
 const containerRef = ref<HTMLDivElement | null>(null)
 const workbenchOpen = ref(false)
@@ -35,8 +106,19 @@ const activeTab = ref<'list' | 'editor'>('list')
 const editingName = ref('')
 const editingGroup = ref('')
 const editingDescription = ref('')
+const editingImageUrls = ref<string[]>([])
 const editingIcon = ref<string>(DEFAULT_MARKER_ICON)
 const editingColor = ref(DEFAULT_MARKER_COLOR)
+
+// 浮动卡片图片轮播
+const activeImageIndex = ref(0)
+
+// ═══ 当前标记的图片列表 ═══
+const activeMarkerImages = computed(() =>
+  (activeMarker.value?.imageUrls ?? []).filter(u => u.trim()),
+)
+const activeMarkerImage = computed(() => activeMarkerImages.value[activeImageIndex.value] ?? null)
+const hasMultipleImages = computed(() => activeMarkerImages.value.length > 1)
 
 // ═══ Composables ═══
 const {
@@ -57,6 +139,7 @@ const {
   markerAddMode,
   searchQuery,
   filteredMarkers,
+  activeMarkerCardPosition,
   setMarkers,
   updateMarker,
   deleteMarker: removeMarker,
@@ -65,9 +148,13 @@ const {
   focusMarker,
   syncOverlays,
   clearOverlays,
+  syncActiveMarkerCardPosition,
 } = useMapMarkers(viewerRef)
 
 // ═══ 角色当前位置 =========
+// (上面的 playerMarker 和 npcLocationMarkers 已替代旧的 playerLocationNode)
+
+// 玩家位置对应的预设标记
 const playerLocationId = computed(() => game.player?.location ?? null)
 const playerLocationNode = computed(() => {
   const locId = playerLocationId.value
@@ -105,21 +192,39 @@ function handleAddMarker(nx: number, ny: number) {
   addMarkerAt(nx, ny)
 }
 
+// ═══ 标记选中/取消 ═══
 function handleSelectMarker(id: string | null) {
+  // 切换选中：点击同一标记 → 取消
+  if (id && id === activeMarkerId.value) {
+    selectMarker(null)
+    return
+  }
   selectMarker(id)
+  // 填入编辑表单
   if (id) {
-    activeTab.value = 'editor'
     const m = markers.value.find(mm => mm.id === id)
     if (m) {
       editingName.value = m.name
       editingGroup.value = m.group ?? ''
       editingDescription.value = m.description ?? ''
+      editingImageUrls.value = m.imageUrls ?? []
       editingIcon.value = m.icon ?? DEFAULT_MARKER_ICON
       editingColor.value = m.color ?? DEFAULT_MARKER_COLOR
     }
-  } else {
-    activeTab.value = 'list'
   }
+  // unselect 时清空表单
+  if (!id) {
+    editingName.value = ''
+    editingGroup.value = ''
+    editingDescription.value = ''
+    editingImageUrls.value = []
+  }
+}
+
+/** 工作台列表中点击 → 选中标记并切换到编辑 tab */
+function handleWorkbenchSelect(id: string) {
+  handleSelectMarker(id)
+  activeTab.value = 'editor'
 }
 
 function handleSaveEditor() {
@@ -134,29 +239,89 @@ function handleSaveEditor() {
   })
 }
 
-// ═══ 地图点击 → 添加标记 ═══
-function onMapClick(event: MouseEvent) {
-  if (!markerAddMode.value) return
-  const target = event.target as HTMLElement
-  if (target.closest('.osd-marker')) return
+// ═══ 地图点击 → 添加标记/取消选中（见下方 onMapClick）
 
-  const point = clientPointToNormalized(event.clientX, event.clientY)
-  if (!point) return
-  handleAddMarker(point.nx, point.ny)
-  markerAddMode.value = false
+// ═══ 地图点击 → 添加标记/取消选中（见下方 onMapClick） (位于下方 onMapClick)
+
+// ═══ 图片轮播 ═══
+function handlePrevImage() {
+  const len = activeMarkerImages.value.length
+  if (!len) return
+  activeImageIndex.value = (activeImageIndex.value - 1 + len) % len
+}
+function handleNextImage() {
+  const len = activeMarkerImages.value.length
+  if (!len) return
+  activeImageIndex.value = (activeImageIndex.value + 1) % len
 }
 
-// ═══ Viewer 就绪后同步 overlays ═══
+// ═══ Viewer 事件 — 缩放/平移后同步卡片位置 ═══
+function setupViewerAnimationSync(viewer: OpenSeadragon.Viewer) {
+  viewer.addHandler('animation', () => {
+    requestAnimationFrame(() => {
+      syncActiveMarkerCardPosition()
+    })
+  })
+}
+
+// ═══ 地图点击 → 添加标记/取消选中（见下方 onMapClick）
+function onMapClick(event: MouseEvent) {
+  // 新增标记模式
+  if (markerAddMode.value) {
+    const target = event.target as HTMLElement
+    if (target.closest('.osd-marker')) return
+    const point = clientPointToNormalized(event.clientX, event.clientY)
+    if (!point) return
+    handleAddMarker(point.nx, point.ny)
+    return
+  }
+  // 浏览模式：点击地图空白 → 取消选中
+  const target = event.target as HTMLElement
+  if (target.closest('.osd-marker') || target.closest('.map-marker-card')) return
+  selectMarker(null)
+}
+
+// ═══ Viewer 就绪后同步 overlays + 卡片 ═══
 watch(status, (s) => {
   if (s === 'ready') {
     nextTick(() => {
-      setTimeout(() => syncOverlays(), 300)
+      setTimeout(() => {
+        syncOverlays()
+        syncActiveMarkerCardPosition()
+        // 绑定动画同步
+        const v = viewerRef.value
+        if (v) setupViewerAnimationSync(v)
+      }, 300)
     })
   }
 })
 
+// activeMarker 变化 → 同步 overlays 高亮 + 卡片位置 + 重置轮播
 watch(activeMarkerId, () => {
   syncOverlays()
+  activeImageIndex.value = 0
+  requestAnimationFrame(() => {
+    syncActiveMarkerCardPosition()
+  })
+})
+
+// 地图源切换后重新同步
+watch(currentSourceKey, () => {
+  nextTick(() => {
+    setTimeout(() => {
+      syncOverlays()
+      syncActiveMarkerCardPosition()
+    }, 500)
+  })
+})
+
+// markerAddMode 关闭时更新卡片显隐
+watch(markerAddMode, (v) => {
+  if (!v) {
+    requestAnimationFrame(() => {
+      syncActiveMarkerCardPosition()
+    })
+  }
 })
 
 // ═══ 生命周期 ═══
@@ -247,6 +412,74 @@ onBeforeUnmount(() => {
           :style="{ cursor: markerAddMode ? 'crosshair' : '' }"
         />
 
+        <!-- ═══ 浮动信息卡片 ═══ -->
+        <Teleport :to="containerRef" :disabled="!containerRef">
+          <article
+            v-if="activeMarker && activeMarkerCardPosition.visible"
+            class="map-marker-card"
+            :style="{
+              left: activeMarkerCardPosition.left + 'px',
+              top: activeMarkerCardPosition.top + 'px',
+            }"
+          >
+            <!-- 图片区域 -->
+            <div v-if="activeMarkerImage" class="card-media">
+              <button
+                v-if="hasMultipleImages"
+                class="card-carousel-btn card-carousel-prev"
+                @click.stop="handlePrevImage"
+                aria-label="上一张"
+              >
+                <i class="fa-solid fa-chevron-left" />
+              </button>
+              <img
+                :src="activeMarkerImage"
+                :alt="activeMarker.name + ' 主视觉'"
+                class="card-hero-image"
+                @error="(e: Event) => { (e.target as HTMLImageElement).style.display = 'none' }"
+              />
+              <button
+                v-if="hasMultipleImages"
+                class="card-carousel-btn card-carousel-next"
+                @click.stop="handleNextImage"
+                aria-label="下一张"
+              >
+                <i class="fa-solid fa-chevron-right" />
+              </button>
+              <!-- 轮播点 -->
+              <div v-if="hasMultipleImages" class="card-carousel-dots">
+                <button
+                  v-for="(_, idx) in activeMarkerImages"
+                  :key="idx"
+                  class="card-dot"
+                  :class="{ 'card-dot-active': idx === activeImageIndex }"
+                  @click.stop="activeImageIndex = idx"
+                  :aria-label="'第 ' + (idx + 1) + ' 张图片'"
+                />
+              </div>
+            </div>
+
+            <!-- Header -->
+            <div class="card-header">
+              <div class="card-title-block">
+                <span
+                  class="card-dot"
+                  :style="{ backgroundColor: activeMarker.color ?? DEFAULT_MARKER_COLOR }"
+                />
+                <div class="card-heading">
+                  <div class="card-title">{{ activeMarker.name || '未命名标记' }}</div>
+                  <div class="card-meta">{{ activeMarker.group || '未分组' }}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Body -->
+            <div class="card-body">
+              <p class="card-description">{{ activeMarker.description || '暂无说明' }}</p>
+            </div>
+          </article>
+        </Teleport>
+
         <!-- 角色位置指示 -->
         <div
           v-if="playerLocationNode"
@@ -254,6 +487,22 @@ onBeforeUnmount(() => {
         >
           <i class="fa-solid fa-location-dot" />
           <span>当前：{{ playerLocationNode.name }}</span>
+          <span v-if="playerMarker" class="loc-matched">✓ 已定位</span>
+          <span v-else class="loc-unmatched">（无地图标记）</span>
+        </div>
+
+        <!-- NPC 位置汇总 -->
+        <div v-if="npcLocationMarkers.length > 0" class="npc-location-bar">
+          <i class="fa-solid fa-users" />
+          <span>NPC：</span>
+          <span
+            v-for="loc in npcLocationMarkers"
+            :key="loc.marker.id"
+            class="npc-loc-tag"
+            @click="focusMarker(loc.marker)"
+          >
+            {{ loc.name }}（{{ loc.npcNames[0] }}{{ loc.npcNames.length > 1 ? ' +' + (loc.npcNames.length - 1) : '' }}）
+          </span>
         </div>
       </div>
 
@@ -292,7 +541,7 @@ onBeforeUnmount(() => {
               :key="m.id"
               class="marker-item"
               :class="{ 'marker-item-active': m.id === activeMarkerId }"
-              @click="handleSelectMarker(m.id)"
+              @click="handleWorkbenchSelect(m.id)"
             >
               <span class="mi-dot" :style="{ backgroundColor: m.color ?? DEFAULT_MARKER_COLOR }" />
               <span class="mi-name">{{ m.name }}</span>
@@ -557,6 +806,51 @@ onBeforeUnmount(() => {
 .player-location-bar i {
   color: var(--theme-primary-bg);
 }
+.loc-matched {
+  font-size: 0.625rem;
+  color: var(--theme-success, #22c55e);
+  margin-left: auto;
+}
+.loc-unmatched {
+  font-size: 0.625rem;
+  color: var(--theme-text-muted);
+  margin-left: auto;
+}
+
+/* NPC 位置汇总 */
+.npc-location-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  margin-top: 6px;
+  background: var(--theme-surface-muted);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  font-size: 0.6875rem;
+  color: var(--theme-text-secondary);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.npc-location-bar i {
+  color: var(--theme-text-muted);
+}
+.npc-loc-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--theme-card-bg);
+  border: 1px solid var(--theme-card-border);
+  color: var(--theme-text-secondary);
+  cursor: pointer;
+  font-size: 0.625rem;
+  transition: border-color 100ms, color 100ms;
+}
+.npc-loc-tag:hover {
+  border-color: var(--theme-primary);
+  color: var(--theme-text-primary);
+}
 
 /* ═══ 标记工作台 ═══ */
 .marker-workbench {
@@ -781,6 +1075,202 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: flex-end;
 }
+
+/* ═══ 浮动信息卡片 ═══ */
+.map-marker-card {
+  position: absolute;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(460px, calc(100% - 32px));
+  min-width: min(320px, calc(100% - 32px));
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--theme-card-border) 82%, rgba(255,255,255,0.18));
+  border-radius: 8px;
+  background: color-mix(in srgb, rgba(9,13,24,0.96) 88%, var(--theme-window-bg));
+  backdrop-filter: blur(12px);
+  box-shadow: 0 18px 40px rgba(0,0,0,0.34);
+  max-height: calc(100% - 24px);
+  overflow: hidden;
+  transform: translate(-50%, -100%);
+  transform-origin: center bottom;
+  pointer-events: auto;
+  user-select: text;
+}
+.map-marker-card::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  background: color-mix(in srgb, rgba(9,13,24,0.94) 86%, var(--theme-window-bg));
+  border-right: 1px solid color-mix(in srgb, var(--theme-card-border) 82%, rgba(255,255,255,0.18));
+  border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border) 82%, rgba(255,255,255,0.18));
+  transform: translateX(-50%) rotate(45deg);
+}
+
+/* 图片区域 */
+.card-media {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 180px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.card-hero-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.card-carousel-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.45);
+  color: rgba(255,255,255,0.85);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background 120ms;
+}
+.card-carousel-btn:hover {
+  background: rgba(0,0,0,0.65);
+}
+.card-carousel-prev {
+  left: 10px;
+}
+.card-carousel-next {
+  right: 10px;
+}
+.card-carousel-dots {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(0,0,0,0.35);
+  border-radius: 999px;
+}
+.card-dot {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.35);
+  cursor: pointer;
+  transition: background 100ms;
+}
+.card-dot-active {
+  background: rgba(255,255,255,0.88);
+}
+
+/* Header */
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.card-title-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.card-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+.card-heading {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.card-title {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #fff;
+}
+.card-meta {
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(255,255,255,0.72);
+}
+
+/* Body */
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  max-height: 150px;
+  overflow-y: auto;
+}
+.card-description {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: rgba(255,255,255,0.9);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .map-marker-card {
+    width: min(360px, calc(100% - 16px));
+    min-width: min(280px, calc(100% - 16px));
+    max-height: calc(100% - 12px);
+    padding: 10px 8px;
+  }
+  .card-media {
+    min-height: 150px;
+  }
+  .card-carousel-btn {
+    width: 30px;
+    height: 30px;
+  }
+  .card-carousel-dots {
+    bottom: 8px;
+    padding: 4px 8px;
+  }
+  .card-header {
+    flex-direction: column;
+  }
+  .card-title {
+    font-size: 14px;
+  }
+  .card-description {
+    font-size: 12px;
+    line-height: 1.55;
+  }
+}
 </style>
 
 <!-- ═══ 全局样式（非 scoped — 用于 OSD overlay 元素） ═══ -->
@@ -788,12 +1278,14 @@ onBeforeUnmount(() => {
 /* OSD marker overlay 样式 */
 .osd-marker {
   position: relative;
-  width: 18px;
-  height: 18px;
-  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   cursor: pointer;
   pointer-events: auto;
   z-index: 3;
+  transform: translate(-50%, -100%);
+  /* 图标锚点对准地图坐标，文字在图标下方 */
 }
 .osd-marker-active {
   z-index: 5;
@@ -812,12 +1304,10 @@ onBeforeUnmount(() => {
   color: #ffcc66;
   text-shadow: 0 0 6px rgba(0, 0, 0, 0.35);
   transition: transform 100ms;
+  flex-shrink: 0;
 }
 .osd-marker-label {
-  position: absolute;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
+  margin-top: 2px;
   background: var(--theme-card-bg, #1a1a2e);
   border: 1px solid var(--theme-card-border, #333);
   border-radius: 10px;
@@ -826,5 +1316,9 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   color: var(--theme-text-primary, #eee);
   pointer-events: none;
+  user-select: none;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>
