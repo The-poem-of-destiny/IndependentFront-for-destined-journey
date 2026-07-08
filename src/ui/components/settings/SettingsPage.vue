@@ -298,7 +298,21 @@ const presetForm = reactive({ name: '', description: '', mainPrompt: '', tempera
 const editingPresetId = ref<string | null>(null)
 
 async function loadPresets() {
-  try { const { getPresets } = await import('@engine/database'); const p = await getPresets(); if (p) s.presets = p as PresetItem[] } catch {}
+  try {
+    const { getPresets } = await import('@engine/database')
+    const p = await getPresets()
+    if (p) {
+      // IndexedDB 有数据 → 直接用；为空 → 保留内存已有的（来自 agent-config.json seed）
+      if (p.length > 0) s.presets = p as PresetItem[]
+    }
+    // 确保自动选中：如果还没选中且有可用预设，优先项目默认
+    if (!s.activePresetId && (s.presets as PresetItem[]).length > 0) {
+      const pd = cfg.projectAgentDefaults?.agents?.story
+      if (pd?.presetId && (s.presets as PresetItem[]).find(p => p.id === pd.presetId)) {
+        s.activePresetId = pd.presetId
+      }
+    }
+  } catch {}
 }
 function selectPreset(id: string) {
   s.activePresetId = id
@@ -540,7 +554,11 @@ function restoreAgentDefaults() {
       s.activePresetId = pd.presetId || ''
       if (pd.preset) {
         const existing = (s.presets as PresetItem[]).find(p => p.id === pd.preset!.id)
-        if (!existing) s.presets.push(pd.preset)
+        if (!existing) {
+          s.presets.push(pd.preset)
+          // 同步写入 IndexedDB，让 loadPresets() 能读到
+          import('@engine/database').then(({ savePreset }) => savePreset(pd.preset as any)).catch(() => {})
+        }
       }
     } else {
       s.agentPrompts[agentId] = pd.systemPrompt || ''

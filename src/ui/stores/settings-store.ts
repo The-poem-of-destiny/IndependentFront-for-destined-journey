@@ -253,8 +253,16 @@ export const useSettingsStore = defineStore('settings', () => {
       if (entry.template && !(agentId in (settings.value.agentTemplates as Record<string, string>))) {
         settings.value.agentTemplates[agentId] = entry.template
       }
-      // 预设：如果项目默认有预设且用户本地没有，插入 presets 数组
+      // 预设：项目默认预设首次 seed 到 IndexedDB，之后由用户管理
       if (entry.preset && entry.presetId) {
+        try {
+          const { getPresets, savePreset } = await import('@engine/database')
+          const existing = await getPresets()
+          if ((!existing || existing.length === 0) && entry.preset) {
+            // JSON 序列化去 proxy（否则 IndexedDB put 报 DataCloneError）
+            await savePreset(JSON.parse(JSON.stringify(entry.preset)))
+          }
+        } catch { /* IndexedDB 不可用时静默跳过 */ }
         const existingPreset = (settings.value.presets as PresetItem[]).find(p => p.id === entry.presetId)
         if (!existingPreset && entry.preset) {
           ;(settings.value.presets as PresetItem[]).push(entry.preset)
