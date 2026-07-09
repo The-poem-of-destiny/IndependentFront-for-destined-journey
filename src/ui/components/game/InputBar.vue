@@ -8,7 +8,6 @@ const emit = defineEmits<{
 const input = ref('')
 const showOptions = ref(false)
 
-// 🧪 静态占位选项，后续 AI 生成
 const mockOptions = [
   '向酒馆老板打听商队失踪的消息',
   '前往近郊森林搜寻线索',
@@ -31,7 +30,7 @@ function handleSend() {
 <template>
   <div class="input-bar">
     <div class="options-popup" v-if="showOptions">
-      <div class="options-title">📋 可选行动</div>
+      <div class="options-title">可选行动</div>
       <button
         v-for="(opt, i) in mockOptions"
         :key="i"
@@ -40,10 +39,10 @@ function handleSend() {
       >
         {{ opt }}
       </button>
-      <button class="option-custom" @click="showOptions = false">✍️ 自定义...</button>
+      <button class="option-custom" @click="showOptions = false">自定义输入...</button>
     </div>
-    <button class="input-btn" @click="showOptions = !showOptions" title="选项">
-      📋
+    <button class="input-btn" @click="showOptions = !showOptions" title="可选行动">
+      <i class="fa-solid fa-list-ul" />
     </button>
     <input
       v-model="input"
@@ -53,7 +52,7 @@ function handleSend() {
       @keydown.enter="handleSend"
     />
     <button class="input-btn send-btn" @click="handleSend" title="发送">
-      📨
+      <i class="fa-solid fa-paper-plane" />
     </button>
   </div>
 </template>
@@ -76,7 +75,7 @@ function handleSend() {
   border: none;
   background: var(--theme-surface-muted);
   color: var(--theme-text-secondary);
-  font-size: 1rem;
+  font-size: 0.875rem;
   border-radius: var(--theme-radius-sm, 6px);
   cursor: pointer;
   display: flex;

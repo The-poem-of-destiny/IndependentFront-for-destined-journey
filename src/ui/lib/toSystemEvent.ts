@@ -20,17 +20,17 @@ export function toSystemMessage(event: SystemEvent): ChatMessage {
 // ========== Convenience helpers — 各类型 event 构造 + 自动生成 narrative ==========
 
 import type {
-  CraftAgentOutput, CharGenOutput, ItemGenOutput, CombatSummaryResult,
+  CraftGenOutput, CharGenOutput, ItemGenOutput, CombatSummaryResult,
   QualityLevel, CraftRating,
 } from '@engine/types';
 
-export function craftToEvent(output: CraftAgentOutput): SystemEvent {
+export function craftToEvent(output: CraftGenOutput): SystemEvent {
   return {
     type: 'craft',
-    productName: output.craftToolCall.productName,
-    quality: output.craftToolCall.targetQuality as QualityLevel,
-    rating: '成功' as CraftRating,
-    narrative: `[制作] ${output.craftToolCall.targetQuality}级 ${output.craftToolCall.productName}`,
+    productName: output.productName,
+    quality: output.quality,
+    rating: output.rating,
+    narrative: `[制作] ${output.quality}级 ${output.productName}`,
     details: output,
   };
 }

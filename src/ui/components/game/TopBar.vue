@@ -23,7 +23,8 @@ const timeDisplay = computed(() => {
     <span class="top-time" v-if="timeDisplay">{{ timeDisplay }}</span>
     <span class="top-time dim" v-else>--</span>
     <button class="top-btn" @click="game.toggleFullscreen()" title="全屏">
-      {{ game.fullscreenStatus ? '⛶ 退出' : '⛶ 全屏' }}
+      <i :class="game.fullscreenStatus ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" />
+      {{ game.fullscreenStatus ? '退出' : '全屏' }}
     </button>
   </div>
 </template>

@@ -3,6 +3,7 @@ import { onMounted, onUnmounted } from 'vue'
 import { useGameStore } from '../../stores/game-store'
 import { useUIStore } from '../../stores/ui-store'
 import { useSettingsStore } from '../../stores/settings-store'
+import { injectTestData } from '../../lib/test-fixtures'
 import TopBar from './TopBar.vue'
 import SideToolbar from './SideToolbar.vue'
 import ChatFlow from './ChatFlow.vue'
@@ -21,14 +22,50 @@ const settings = useSettingsStore()
 const s = settings.settings
 
 onMounted(async () => {
+  window.addEventListener('keydown', onKeyDown)
   if (ui.activeSaveId) {
     await game.loadSave(ui.activeSaveId)
   }
 })
 
+// ===== 🧪 ChatFlow 测试注入 =====
+/** 注入覆盖全 7 种卡片 + 对话流的测试数据 */
+function injectChatFlowTest() {
+  // 确保所有系统事件类型都可见
+  s.systemEventsVisible = true
+  s.systemEventFilters = {
+    craft: true,
+    char_gen: true,
+    item_gen: true,
+    combat: true,
+    character_update: true,
+    item_update: true,
+    quest_update: true,
+  }
+  // 先清空再注入
+  injectTestData({
+    messages: game.messages,
+    isGenerating: game.isGenerating,
+  })
+}
+
+// 暴露到全局，方便控制台调用: window.__injectChatFlowTest__()
+if (typeof window !== 'undefined') {
+  ;(window as any).__injectChatFlowTest__ = injectChatFlowTest
+}
+
+// Ctrl+Shift+T 快捷键注入
+function onKeyDown(e: KeyboardEvent) {
+  if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+    e.preventDefault()
+    injectChatFlowTest()
+  }
+}
+
 let mockTimer: ReturnType<typeof setTimeout> | null = null
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', onKeyDown)
   if (mockTimer !== null) {
     clearTimeout(mockTimer)
     mockTimer = null

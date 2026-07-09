@@ -1,60 +1,273 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { CraftSystemEvent } from '@engine/types'
+import { qualityVar } from '../../../lib/quality-colors'
 
 defineProps<{ event: CraftSystemEvent }>()
 
-const qualityColors: Record<string, string> = {
-  '普通': '#c4cad3', '优良': '#7be495', '稀有': '#62bbff',
-  '史诗': '#cf95ff', '传说': '#ffc46b', '神话': '#ff78c5', '唯一': '#00ffff',
-}
+const expanded = ref(false)
 
-const ratingIcons: Record<string, string> = {
-  '大失败': '❌', '失败': '⚠️', '成功': '✅', '精益求精': '⭐',
+// Industry icon mapping
+const industryIcons: Record<string, string> = {
+  '锻造': 'fa-solid fa-hammer',
+  '炼金': 'fa-solid fa-flask',
+  '烹饪': 'fa-solid fa-utensils',
+  '裁缝': 'fa-solid fa-scissors',
+}
+const industryIconsDefault = 'fa-solid fa-hammer'
+
+// Rating icon + color
+const ratingMeta: Record<string, { icon: string; color: string }> = {
+  '大失败':     { icon: 'fa-regular fa-circle-xmark',       color: '#e53e3e' },
+  '失败':       { icon: 'fa-solid fa-triangle-exclamation', color: '#fc8181' },
+  '成功':       { icon: 'fa-regular fa-circle-check',      color: '#68d391' },
+  '精益求精': { icon: 'fa-solid fa-star',                color: '#ffd700' },
 }
 </script>
 
 <template>
-  <div class="craft-card">
-    <div class="card-top" :style="{ background: qualityColors[event.quality] || '#c4cad3' }">
-      <span class="card-icon">🛠️</span>
-      <span class="card-label">{{ event.quality }} · {{ event.productName }}</span>
+  <div class="sys-card" :style="{ borderLeft: `4px solid ${qualityVar(event.quality)}` }">
+    <!-- Header -->
+    <div class="sys-card-header" @click="expanded = !expanded">
+      <i :class="'fa-solid ' + (industryIcons[event.details.craftParams.industry] ?? industryIconsDefault) + ' sys-card-icon'" />
+      <span class="sys-card-title">{{ event.quality }} · {{ event.productName }}</span>
+      <span v-if="!event.details.success" class="sys-card-fail">失败</span>
+      <i class="fa-solid sys-card-chevron" :class="expanded ? 'fa-chevron-down' : 'fa-chevron-right'" />
     </div>
-    <div class="card-body">
-      <div class="craft-summary">
-        {{ ratingIcons[event.rating] }} {{ event.rating }}
-        <span v-if="event.details.checkSummary" class="check-detail">
-          — {{ event.details.checkSummary }}
-        </span>
+
+    <!-- Body -->
+    <div v-show="expanded" class="sys-card-body">
+      <!-- A. Rating -->
+      <div class="card-section craft-rating">
+        <i :class="ratingMeta[event.rating]?.icon ?? 'fa-regular fa-circle-question'" class="rating-icon" :style="{ color: ratingMeta[event.rating]?.color ?? 'var(--theme-text-muted)' }" />
+        <span class="rating-text" :style="{ color: ratingMeta[event.rating]?.color }">{{ event.rating }}</span>
+        <span v-if="event.details.perfectionBonus" class="perfection-bonus">— {{ event.details.perfectionBonus }}</span>
       </div>
-      <div v-if="event.details.craftParams?.materials" class="craft-materials">
-        <span class="label">材料:</span> {{ event.details.craftParams.materials }}
+
+      <!-- B. Check summary -->
+      <div class="card-section">
+        <span class="section-label"><i class="fa-solid fa-dice" /> 检定</span>
+        <p class="check-text">{{ event.details.checkSummary }}</p>
       </div>
-      <div v-if="event.details.itemRequests?.length" class="craft-effects">
-        <div v-for="req in event.details.itemRequests" :key="req.quality + req.type" class="craft-req">
-          <span class="req-type">{{ req.type === 'equipment' ? '🗡️' : '🎒' }}</span>
-          <span>{{ req.quality }} {{ req.type === 'equipment' ? '装备' : '物品' }}</span>
-          <span class="req-desc" v-if="req.description">: {{ req.description.slice(0, 80) }}</span>
+
+      <!-- C. Materials -->
+      <div v-if="event.details.craftParams.materials" class="card-section">
+        <span class="section-label"><i class="fa-solid fa-cubes" /> 材料</span>
+        <div class="material-chips">
+          <span v-for="(mat, idx) in event.details.craftParams.materials.split(/[,，、]/)" :key="idx" class="material-chip">{{ mat.trim() }}</span>
         </div>
       </div>
-      <div class="craft-footer">
-        <span v-if="event.details.craftParams?.expGained" class="stat-badge">EXP +{{ event.details.craftParams.expGained }}</span>
-        <span v-if="event.details.craftParams?.fpGained" class="stat-badge">FP +{{ event.details.craftParams.fpGained }}</span>
+
+      <!-- D. Item requests -->
+      <div v-if="event.details.itemRequests?.length" class="card-section">
+        <span class="section-label"><i class="fa-solid fa-gift" /> 制品</span>
+        <div v-for="req in event.details.itemRequests" :key="req.quality + req.type + (req.slot ?? '')" class="item-request">
+          <i :class="req.type === 'equipment' ? 'fa-solid fa-shield-halved' : 'fa-solid fa-flask'" class="req-type" />
+          <span class="req-quality" :style="{ color: qualityVar(req.quality) }">{{ req.quality }}</span>
+          <span v-if="req.slot" class="req-slot">{{ req.slot }}</span>
+          <span class="req-desc">{{ req.description.slice(0, 100) }}</span>
+        </div>
+      </div>
+
+      <!-- E. Footer: meta info -->
+      <div class="card-section craft-footer">
+        <span class="stat-badge">
+          <i :class="'fa-solid ' + (industryIcons[event.details.craftParams.industry] ?? industryIconsDefault)" />
+          {{ event.details.craftParams.industry }}
+        </span>
+        <span class="stat-badge" v-if="event.details.craftParams.stage !== '成品'">
+          <i class="fa-solid fa-gears" /> {{ event.details.craftParams.stage }}
+        </span>
+        <span class="stat-badge" v-if="event.details.craftParams.quantity > 1">
+          <i class="fa-solid fa-layer-group" /> ×{{ event.details.craftParams.quantity }}
+        </span>
+        <span class="stat-badge" v-if="event.details.craftParams.expGained > 0">
+          <i class="fa-solid fa-bolt" /> EXP +{{ event.details.craftParams.expGained }}
+        </span>
+        <span class="stat-badge" v-if="event.details.craftParams.fpGained > 0">
+          <i class="fa-solid fa-star" /> FP +{{ event.details.craftParams.fpGained }}
+        </span>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.craft-card { border-radius: 6px; overflow: hidden; }
-.card-top { padding: 8px 12px; font-weight: 600; font-size: 0.875rem; color: #1a1a2e; display: flex; align-items: center; gap: 8px; }
-.card-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 0.8125rem; color: var(--theme-text-primary); }
-.craft-summary { font-weight: 600; }
-.check-detail { font-weight: 400; opacity: 0.7; }
-.craft-materials .label { font-weight: 600; opacity: 0.6; margin-right: 4px; }
-.craft-effects { display: flex; flex-direction: column; gap: 4px; }
-.craft-req { display: flex; align-items: center; gap: 6px; font-size: 0.8125rem; }
-.req-type { font-size: 0.75rem; }
-.req-desc { opacity: 0.65; font-size: 0.75rem; }
-.craft-footer { display: flex; gap: 8px; margin-top: 4px; }
-.stat-badge { background: var(--theme-surface-muted); padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+.sys-card {
+  border-radius: var(--theme-radius-md, 8px);
+  overflow: hidden;
+  background: var(--theme-card-bg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* Header */
+.sys-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--theme-surface-muted);
+  cursor: pointer;
+  user-select: none;
+  color: var(--theme-text-primary);
+}
+.sys-card-header:hover {
+  background: var(--theme-surface-hover, var(--theme-card-bg));
+}
+
+.sys-card-icon {
+  font-size: 0.8125rem;
+  opacity: 0.7;
+}
+
+.sys-card-title {
+  flex: 1;
+  font-size: 0.875rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sys-card-chevron {
+  font-size: 0.625rem;
+  opacity: 0.5;
+  transition: transform 0.15s ease;
+}
+
+/* Body */
+.sys-card-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.8125rem;
+  color: var(--theme-text-primary);
+}
+
+/* Sections with dashed dividers */
+.card-section {
+  padding-top: 8px;
+}
+.card-section + .card-section {
+  border-top: 1px dashed var(--theme-card-border, var(--theme-border, rgba(255,255,255,0.08)));
+}
+
+/* A. Rating row */
+.craft-rating {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  padding-top: 0;
+}
+
+.rating-icon {
+  font-size: 0.875rem;
+}
+
+.rating-text {
+  font-size: 0.875rem;
+}
+
+/* Section label */
+.section-label {
+  font-weight: 600;
+  opacity: 0.6;
+  color: var(--theme-text-muted);
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Materials */
+.material-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.material-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--theme-radius-sm, 4px);
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+  background: var(--theme-surface-muted);
+  border: 1px solid var(--theme-border, rgba(255,255,255,0.06));
+}
+
+/* Item requests */
+.item-request {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.75rem;
+  margin-bottom: 4px;
+}
+
+.req-type {
+  font-size: 0.75rem;
+  color: var(--theme-text-muted);
+}
+
+.req-quality {
+  font-weight: 600;
+}
+
+.req-slot {
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.625rem;
+  background: var(--theme-primary);
+  color: #fff;
+}
+
+.req-desc {
+  opacity: 0.65;
+  font-size: 0.75rem;
+}
+
+/* Footer */
+.craft-footer {
+  display: flex;
+  gap: 8px;
+}
+
+.stat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--theme-surface-muted);
+  padding: 2px 8px;
+  border-radius: var(--theme-radius-sm, 4px);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--theme-text-secondary);
+}
+
+/* New classes */
+.sys-card-fail {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--theme-error);
+  padding: 2px 6px;
+  border: 1px solid var(--theme-error);
+  border-radius: 3px;
+}
+
+.perfection-bonus {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: #ffd700;
+}
+
+.check-text {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  line-height: 1.5;
+  color: var(--theme-text-secondary);
+  margin: 0;
+}
 </style>

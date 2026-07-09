@@ -2440,6 +2440,7 @@ export interface MarkerScanResult {
 // ========== SubAgent 输出类型 ==========
 
 /** Craft Agent (craft_gen) 的输出 — 制作创意效果 + 叙事注入 */
+/** @deprecated 请使用 CraftGenOutput（定义在下方或 craft-gen-chain.ts） */
 export interface CraftAgentOutput {
   /** 难度判定 */
   difficultyJudgment: {
@@ -2487,6 +2488,40 @@ export interface CraftAgentOutput {
     /** 🆕 用户对该制品的期望需求 / 特殊效果要求 */
     expects?: string;
   };
+}
+
+/**
+ * craft_gen 解析后的结构化输出（与 craft-gen-chain.ts 中的定义保持一致）
+ * 这是制作系统的真实输出类型，用于 CraftSystemEvent.details
+ */
+export interface CraftGenOutput {
+  success: boolean;
+  productName: string;
+  quality: QualityLevel;
+  rating: CraftRating;
+  checkSummary: string;
+  perfectionBonus?: string;
+  itemRequests: ItemRequest[];
+  narrative: string;
+  craftParams: {
+    industry: CraftIndustry;
+    targetQuality: QualityLevel;
+    stage: string;
+    quantity: number;
+    materials: string;
+    expGained: number;
+    fpGained: number;
+  };
+}
+
+/**
+ * craft_gen 的 <request> 子元素 — 派发给 item_gen 的制品需求
+ */
+export interface ItemRequest {
+  type: 'equipment' | 'inventory';
+  slot?: string;   // equipment: 武器/头部/身体/腿部/脚部/首饰/戒指/项链
+  quality: string;
+  description: string;  // 纯自然语言，不含数值
 }
 
 /** Char Gen Agent (char_gen) 的输出 — 新 NPC 完整数据 (对齐世界书 #865613) */
@@ -2666,7 +2701,7 @@ export interface CraftSystemEvent {
   quality: QualityLevel;
   rating: CraftRating;
   narrative: string;
-  details: CraftAgentOutput;
+  details: CraftGenOutput;
 }
 
 export interface CharGenSystemEvent {

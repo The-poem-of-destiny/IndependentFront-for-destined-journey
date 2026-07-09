@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useGameStore } from '../../stores/game-store'
+import { qualityVar } from '../../lib/quality-colors'
 
 const game = useGameStore()
 
@@ -12,12 +13,7 @@ const showScripts = ref(false)
 
 const player = computed(() => game.player)
 
-// ═══ 品质色 ═══
-const qualityColors: Record<string, string> = {
-  '普通': '#9ca3af', '优良': '#22c55e', '稀有': '#3b82f6',
-  '史诗': '#8b5cf6', '传说': '#f59e0b', '神话': '#ef4444', '唯一': '#f97316',
-}
-
+// ═══ 品质推断 ═══
 function inferQuality(stats?: Record<string, number>): string {
   if (!stats) return '普通'
   const total = Object.values(stats).reduce((s, v) => s + Math.abs(v), 0)
@@ -136,8 +132,8 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
         <div v-if="sortedItems.length === 0" class="empty-list">暂无物品</div>
         <div v-for="(item, i) in sortedItems" :key="(item as any).id || (item as any).itemId || i"
           class="item-row" :class="{ selected: i === selectedIdx }" @click="selectedIdx = i">
-          <span class="dot" :style="{ background: qualityColors[(item as any).rarity || inferQuality((item as any).stats)] || '#9ca3af' }" />
-          <span class="i-name" :style="{ color: qualityColors[(item as any).rarity || inferQuality((item as any).stats)] || 'var(--theme-text-primary)' }">{{ (item as any).name }}</span>
+          <span class="dot" :style="{ background: qualityVar((item as any).rarity || inferQuality((item as any).stats)) }" />
+          <span class="i-name" :style="{ color: qualityVar((item as any).rarity || inferQuality((item as any).stats)) }">{{ (item as any).name }}</span>
           <span class="i-tag">{{ activeCategory === 'equipment' ? ((item as any).slot) : activeCategory === 'skills' ? ((item as any).type === 'active' ? '主动' : '被动') : ((item as any).type) }}</span>
           <span class="i-extra" v-if="activeCategory === 'inventory'">×{{ (item as any).quantity }}</span>
           <span class="i-extra" v-else-if="activeCategory === 'equipment'">[{{ (item as any).slot }}]</span>
@@ -148,8 +144,8 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
       <!-- 右: 详情 -->
       <div class="detail" v-if="selected">
         <div class="d-header">
-          <span class="d-name" :style="{ color: qualityColors[selQuality] || 'var(--theme-text-primary)' }">{{ (selected as any).name }}</span>
-          <span class="d-quality" :style="{ color: qualityColors[selQuality], borderColor: qualityColors[selQuality] }">{{ selQuality }}</span>
+          <span class="d-name" :style="{ color: qualityVar(selQuality) }">{{ (selected as any).name }}</span>
+          <span class="d-quality" :style="{ color: qualityVar(selQuality), borderColor: qualityVar(selQuality) }">{{ selQuality }}</span>
         </div>
         <div class="d-meta"><span>{{ selTypeLabel }}</span><span>{{ selExtra }}</span></div>
 

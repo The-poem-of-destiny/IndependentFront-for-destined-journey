@@ -2,17 +2,13 @@
 import { ref, computed, watch } from 'vue'
 import { useGameStore } from '../../stores/game-store'
 import { getAffectionLabel } from '@engine/affection-system'
+import { qualityVar } from '../../lib/quality-colors'
 import ResourceBar from '../shared/ResourceBar.vue'
 import BuffChip from '../shared/BuffChip.vue'
 
 const game = useGameStore()
 
-// ═══ 品质色 ═══
-const qualityColors: Record<string, string> = {
-  '普通': '#9ca3af', '优良': '#22c55e', '稀有': '#3b82f6',
-  '史诗': '#8b5cf6', '传说': '#f59e0b', '神话': '#ef4444', '唯一': '#f97316',
-}
-
+// ═══ 品质推断 ═══
 function inferQuality(stats?: Record<string, number>): string {
   if (!stats) return '普通'
   const total = Object.values(stats).reduce((s, v) => s + Math.abs(v), 0)
@@ -242,7 +238,7 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
             <div v-if="selEquipment.length === 0" class="empty-tab">暂无装备</div>
             <div v-for="eq in selEquipment" :key="eq.itemId" class="equip-card">
               <div class="eq-header">
-                <span class="eq-name" :style="{ color: qualityColors[inferQuality(eq.stats)] }">{{ eq.name }}</span>
+                <span class="eq-name" :style="{ color: qualityVar(inferQuality(eq.stats)) }">{{ eq.name }}</span>
                 <span class="eq-slot">[{{ eq.slot === 'weapon' ? '武器' : eq.slot === 'armor' ? '防具' : '饰品' }}]</span>
               </div>
               <div class="eq-desc" v-if="eq.description">{{ eq.description }}</div>

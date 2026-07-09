@@ -1,50 +1,230 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { ItemGenSystemEvent } from '@engine/types'
-defineProps<{ event: ItemGenSystemEvent }>()
+import { qualityVar } from '../../../lib/quality-colors'
 
-const qualityColors: Record<string, string> = {
-  '普通': '#c4cad3', '优良': '#7be495', '稀有': '#62bbff',
-  '史诗': '#cf95ff', '传说': '#ffc46b', '神话': '#ff78c5', '唯一': '#00ffff',
+const props = defineProps<{ event: ItemGenSystemEvent }>()
+
+const expanded = ref(false)
+
+function toggle() {
+  expanded.value = !expanded.value
+}
+
+function typeIcon(itemType: string): string {
+  if (itemType === '装备') return 'fa-solid fa-shield-halved'
+  if (itemType === '技能') return 'fa-solid fa-wand-magic-sparkles'
+  return 'fa-solid fa-flask'
 }
 </script>
 
 <template>
-  <div class="item-card">
-    <div class="card-top" :style="{ borderColor: qualityColors[event.quality] || '#c4cad3' }">
-      <span class="item-type">{{ event.itemType === '装备' ? '🗡️' : event.itemType === '技能' ? '✨' : '🎒' }}</span>
-      <span class="item-name">{{ event.itemName }}</span>
-      <span class="item-quality" :style="{ color: qualityColors[event.quality] || '#c4cad3' }">{{ event.quality }}</span>
+  <div class="sys-card" :style="{ borderLeftColor: qualityVar(event.quality) }">
+    <div class="sys-card-header" @click="toggle">
+      <i :class="'sys-card-icon ' + typeIcon(event.itemType)" />
+      <span class="sys-card-title">{{ event.itemName }}</span>
+      <span class="sys-card-quality" :style="{ color: qualityVar(event.quality) }">{{ event.quality }}</span>
+      <span class="sys-card-chevron">{{ expanded ? '▼' : '▶' }}</span>
     </div>
-    <div v-if="event.details.equipment?.length" class="card-body">
-      <div v-for="eq in event.details.equipment" :key="eq.name" class="equip-line">
-        <span class="equip-slot">{{ eq.slot }}</span>
-        <span>{{ eq.description?.slice(0, 120) }}</span>
+
+    <div v-if="expanded" class="sys-card-body">
+      <!-- 装备列表 -->
+      <div v-if="event.details.equipment?.length" class="section">
+        <div v-for="eq in event.details.equipment" :key="eq.name" class="equip-line">
+          <span class="equip-slot">{{ eq.slot }}</span>
+          <span class="equip-name">{{ eq.name }}</span>
+          <span class="equip-desc" v-if="eq.description">{{ eq.description.slice(0, 120) }}{{ eq.description.length > 120 ? '...' : '' }}</span>
+          <span v-if="eq.stats && Object.keys(eq.stats).length" class="equip-stats">
+            <span v-for="(v, k) in eq.stats" :key="k" class="stat-kv">{{ k }}+{{ v }}</span>
+          </span>
+        </div>
       </div>
-    </div>
-    <div v-if="event.details.skills?.length" class="card-body">
-      <div v-for="sk in event.details.skills" :key="sk.name" class="skill-line">
-        <span class="skill-name">{{ sk.name }}</span>
-        <span>{{ sk.description?.slice(0, 120) }}</span>
+
+      <!-- 技能列表 -->
+      <div
+        v-if="event.details.skills?.length"
+        :class="['section', { 'section-divider': event.details.equipment?.length }]"
+      >
+        <div v-for="sk in event.details.skills" :key="sk.name" class="skill-line">
+          <span class="skill-name">{{ sk.name }}</span>
+          <span v-if="sk.type" class="skill-type-badge">{{ sk.type === 'active' ? '主动' : '被动' }}</span>
+          <span class="skill-desc" v-if="sk.description">{{ sk.description.slice(0, 120) }}{{ sk.description.length > 120 ? '...' : '' }}</span>
+          <span v-if="sk.cost" class="skill-cost">{{ sk.cost.type }} {{ sk.cost.amount }}</span>
+          <span v-if="sk.cooldown" class="skill-cd">CD {{ sk.cooldown }}回合</span>
+        </div>
       </div>
-    </div>
-    <div v-if="event.details.inventory?.length" class="card-body">
-      <div v-for="inv in event.details.inventory" :key="inv.name" class="inv-line">
-        <span>{{ inv.name }} ×{{ inv.quantity }}</span>
-        <span class="inv-desc" v-if="inv.description">: {{ inv.description.slice(0, 100) }}</span>
+
+      <!-- 背包物品列表 -->
+      <div
+        v-if="event.details.inventory?.length"
+        :class="['section', { 'section-divider': (event.details.equipment?.length || event.details.skills?.length) }]"
+      >
+        <div v-for="inv in event.details.inventory" :key="inv.name" class="inv-line">
+          <span class="inv-name">{{ inv.name }} &times;{{ inv.quantity }}</span>
+          <span v-if="inv.description" class="inv-desc">: {{ inv.description.slice(0, 100) }}{{ inv.description.length > 100 ? '...' : '' }}</span>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.item-card { border-radius: 6px; overflow: hidden; }
-.card-top { padding: 8px 12px; border-left: 4px solid; background: var(--theme-surface-muted); display: flex; align-items: center; gap: 8px; }
-.item-name { font-weight: 700; font-size: 0.875rem; }
-.item-quality { font-size: 0.75rem; font-weight: 600; }
-.item-type { font-size: 0.75rem; }
-.card-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 0.8125rem; }
-.equip-line, .skill-line, .inv-line { display: flex; gap: 8px; align-items: baseline; }
-.equip-slot { background: var(--theme-primary); color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 0.625rem; font-weight: 600; }
-.skill-name { color: #90cdf4; font-weight: 600; }
-.inv-desc { opacity: 0.6; font-size: 0.75rem; }
+.sys-card {
+  border-radius: 4px;
+  overflow: hidden;
+  border-left: 4px solid;
+}
+
+.sys-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--theme-surface-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.sys-card-header:hover {
+  background: var(--theme-card-bg);
+}
+
+.sys-card-icon {
+  font-size: 0.75rem;
+  opacity: 0.6;
+  width: 1rem;
+  text-align: center;
+}
+
+.sys-card-title {
+  flex: 1;
+  font-weight: 700;
+  font-size: 0.875rem;
+  color: var(--theme-text-primary);
+}
+
+.sys-card-quality {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.sys-card-chevron {
+  font-size: 0.625rem;
+  opacity: 0.5;
+  color: var(--theme-text-secondary);
+}
+
+.sys-card-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.8125rem;
+  color: var(--theme-text-primary);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.section-divider {
+  border-top: 1px dashed var(--theme-border, rgba(255,255,255,0.08));
+  padding-top: 8px;
+}
+
+/* 装备行 */
+.equip-line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.equip-slot {
+  background: var(--theme-primary);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.625rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.equip-name {
+  font-weight: 600;
+}
+
+.equip-desc {
+  opacity: 0.65;
+  font-size: 0.75rem;
+  flex: 1 1 100%;
+}
+
+.equip-stats {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.stat-kv {
+  font-size: 0.6875rem;
+  color: var(--theme-success);
+  font-weight: 600;
+}
+
+/* 技能行 */
+.skill-line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.skill-name {
+  color: #90cdf4;
+  font-weight: 600;
+}
+
+.skill-type-badge {
+  background: var(--theme-surface-muted);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.625rem;
+  font-weight: 600;
+  color: var(--theme-text-secondary);
+}
+
+.skill-desc {
+  opacity: 0.65;
+  font-size: 0.75rem;
+  flex: 1 1 100%;
+}
+
+.skill-cost {
+  font-size: 0.6875rem;
+  color: var(--theme-mp);
+}
+
+.skill-cd {
+  font-size: 0.6875rem;
+  opacity: 0.6;
+}
+
+/* 背包物品行 */
+.inv-line {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.inv-name {
+  font-weight: 600;
+}
+
+.inv-desc {
+  opacity: 0.6;
+  font-size: 0.75rem;
+}
 </style>

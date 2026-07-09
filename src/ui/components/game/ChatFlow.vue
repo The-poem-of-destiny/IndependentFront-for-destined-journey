@@ -54,17 +54,17 @@ function isEventVisible(ev: SystemEvent): boolean {
   return true // 未知类型默认显示
 }
 
-function eventIcon(type: string): string {
+function eventIconClass(type: string): string {
   const icons: Record<string, string> = {
-    craft: '\u{1F6E0}️',
-    char_gen: '\u{1F464}',
-    item_gen: '\u{1F392}',
-    combat: '⚔️',
-    character_update: '\u{1F4CA}',
-    item_update: '\u{1F4E6}',
-    quest_update: '\u{1F4DD}',
+    craft: 'fa-solid fa-hammer',
+    char_gen: 'fa-solid fa-user-plus',
+    item_gen: 'fa-solid fa-gift',
+    combat: 'fa-solid fa-swords',          /* Font Awesome 6 pro — 降级为 fa-hand-fist */
+    character_update: 'fa-solid fa-arrow-trend-up',
+    item_update: 'fa-solid fa-boxes-stacked',
+    quest_update: 'fa-solid fa-list-check',
   }
-  return icons[type] ?? 'ℹ️'
+  return icons[type] ?? 'fa-solid fa-circle-info'
 }
 </script>
 
@@ -106,40 +106,33 @@ function eventIcon(type: string): string {
             :class="`system-notif-${msg.systemEvent.type}`"
             @click="toggleExpand(msg.id)"
           >
-            <span class="system-notif-icon">{{ eventIcon(msg.systemEvent.type) }}</span>
+            <i :class="'system-notif-icon fa-solid ' + eventIconClass(msg.systemEvent.type)" />
             <span class="system-notif-text">{{ msg.content }}</span>
             <span class="system-notif-chevron">▶</span>
           </div>
 
-          <!-- 展开的系统卡片 -->
+          <!-- 展开的系统卡片 — 组件自带折叠交互 -->
           <div v-else class="system-card-wrapper">
-            <div class="system-card-header" @click="toggleExpand(msg.id)">
-              <span class="system-card-icon">{{ eventIcon(msg.systemEvent.type) }}</span>
-              <span class="system-card-title">{{ msg.content }}</span>
-              <span class="system-card-chevron">▼</span>
-            </div>
-            <div class="system-card-body">
-              <CraftSystemCard
-                v-if="msg.systemEvent.type === 'craft'"
-                :event="msg.systemEvent"
-              />
-              <CharGenSystemCard
-                v-else-if="msg.systemEvent.type === 'char_gen'"
-                :event="msg.systemEvent"
-              />
-              <CombatSystemCard
-                v-else-if="msg.systemEvent.type === 'combat'"
-                :event="msg.systemEvent"
-              />
-              <ItemSystemCard
-                v-else-if="msg.systemEvent.type === 'item_gen'"
-                :event="msg.systemEvent"
-              />
-              <SystemNotifBar
-                v-else
-                :event="msg.systemEvent"
-              />
-            </div>
+            <CraftSystemCard
+              v-if="msg.systemEvent.type === 'craft'"
+              :event="msg.systemEvent"
+            />
+            <CharGenSystemCard
+              v-else-if="msg.systemEvent.type === 'char_gen'"
+              :event="msg.systemEvent"
+            />
+            <CombatSystemCard
+              v-else-if="msg.systemEvent.type === 'combat'"
+              :event="msg.systemEvent"
+            />
+            <ItemSystemCard
+              v-else-if="msg.systemEvent.type === 'item_gen'"
+              :event="msg.systemEvent"
+            />
+            <SystemNotifBar
+              v-else
+              :event="msg.systemEvent"
+            />
           </div>
         </div>
       </template>
@@ -166,7 +159,7 @@ function eventIcon(type: string): string {
   padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 20px;
 }
 .chat-empty {
   display: flex;
@@ -174,6 +167,8 @@ function eventIcon(type: string): string {
   align-items: center;
   justify-content: center;
   height: 100%;
+  max-width: 800px;
+  margin: 0 auto;
   color: var(--theme-text-muted);
   font-size: 1rem;
 }
@@ -184,14 +179,13 @@ function eventIcon(type: string): string {
 .bubble-row {
   display: flex;
 }
-.bubble-row-player {
-  justify-content: flex-end;
-}
+.bubble-row-player,
 .bubble-row-narrative {
-  justify-content: flex-start;
+  justify-content: center;
 }
 .bubble {
-  max-width: 75%;
+  width: 100%;
+  max-width: 800px;
   padding: 10px 14px;
   border-radius: var(--theme-radius-md, 8px);
   font-size: 0.875rem;
@@ -200,11 +194,15 @@ function eventIcon(type: string): string {
 .bubble-player {
   background: var(--theme-surface-muted);
   color: var(--theme-text-primary);
+  text-align: left;
+  border-left: 3px solid var(--theme-primary);
 }
 .bubble-narrative {
   background: var(--theme-card-bg);
   color: var(--theme-text-primary);
   font-family: var(--theme-font-title, 'Cinzel', serif);
+  text-align: left;
+  border-left: 3px solid var(--theme-text-muted);
 }
 .bubble-prefix {
   font-weight: 600;
@@ -249,7 +247,8 @@ function eventIcon(type: string): string {
   background: var(--theme-surface-muted);
   border-left: 3px solid var(--theme-primary);
   cursor: pointer;
-  max-width: 85%;
+  max-width: 800px;
+  width: 100%;
   font-size: 0.8125rem;
   color: var(--theme-text-secondary);
   transition: background 0.15s;
@@ -259,7 +258,10 @@ function eventIcon(type: string): string {
   background: var(--theme-surface-hover, var(--theme-card-bg));
 }
 .system-notif-icon {
-  font-size: 1rem;
+  font-size: 0.8125rem;
+  opacity: 0.7;
+  width: 1.125rem;
+  text-align: center;
 }
 .system-notif-text {
   flex: 1;
@@ -275,11 +277,8 @@ function eventIcon(type: string): string {
 
 /* 展开卡片 */
 .system-card-wrapper {
-  max-width: 90%;
-  background: var(--theme-card-bg);
-  border-radius: var(--theme-radius-md, 8px);
-  overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  max-width: 800px;
+  width: 100%;
 }
 .system-card-header {
   display: flex;

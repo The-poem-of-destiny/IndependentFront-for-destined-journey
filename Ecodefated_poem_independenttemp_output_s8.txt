@@ -1,0 +1,348 @@
+=== SCRIPT [8]: 命运抽卡 ===
+findRegex: <state_bar>([\s\S]+?)</state_bar>
+replaceString:
+```html
+<!DOCTYPE html>
+<html>
+<head>
+<title>命运的启封</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Mate+SC&family=Cinzel+Decorative:wght@700&display=swap" rel="stylesheet">
+<style>
+    :root {
+        --color-blue-dark: #0a192f;
+        --color-blue-light: #172a45;
+        --color-orange: #ff8c00;
+        --color-gold: #ffd700;
+        --color-text: #e6f1ff;
+        --color-button-main: #3f1318;
+        --color-button-dark: #2a0d0f;
+    }
+    body {
+        background-color: var(--color-blue-dark);
+        font-family: 'Mate SC', serif;
+        color: var(--color-text);
+        margin: 0;
+        padding: 20px;
+        overflow: hidden;
+    }
+    .gacha-container {
+        width: 95%;
+        max-width: 800px;
+        margin: 20px auto;
+        padding: 30px;
+        background: radial-gradient(ellipse at center, var(--color-blue-light) 0%, var(--color-blue-dark) 100%);
+        border: 3px solid transparent;
+        border-image: linear-gradient(to bottom right, var(--color-gold), var(--color-orange), var(--color-gold));
+        border-image-slice: 1;
+        box-shadow: 0 0 20px rgba(255, 215, 0, 0.5), 0 0 40px rgba(255, 140, 0, 0.3) inset;
+        border-radius: 15px;
+        position: relative;
+        min-height: 450px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    .gacha-container::before, .gacha-container::after {
+        content: '';
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--color-gold), transparent);
+    }
+    .gacha-container::before { top: 10px; }
+    .gacha-container::after { bottom: 10px; }
+    .draw-button {
+        padding: 18px 40px;
+        font-size: 28px;
+        font-family: 'Cinzel Decorative', cursive;
+        color: var(--color-gold);
+        background: linear-gradient(145deg, #5a1d22, var(--color-button-main));
+        border: 2px solid var(--color-gold);
+        border-radius: 5px;
+        cursor: pointer;
+        text-shadow: 2px 2px 5px rgba(0,0,0,0.5);
+        box-shadow: 0 0 12px var(--color-orange), 0 0 25px var(--color-button-main) inset;
+        transition: all 0.3s ease-in-out;
+        animation: pulse-button 2.5s infinite ease-in-out;
+        z-index: 10;
+    }
+    .draw-button:hover {
+        transform: scale(1.05) rotate(-1deg);
+        box-shadow: 0 0 20px var(--color-gold), 0 0 40px var(--color-button-main) inset;
+        color: white;
+    }
+    .animation-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: var(--color-blue-dark);
+        z-index: 20;
+        display: none;
+        opacity: 0;
+        overflow: hidden;
+    }
+    .animation-overlay.active {
+        display: block;
+        animation: fade-in-overlay 0.2s forwards;
+    }
+    .particle {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background-color: var(--color-gold);
+        box-shadow: 0 0 10px var(--color-gold), 0 0 20px var(--color-orange);
+        animation: burst 2s ease-out forwards;
+    }
+    .central-burst {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 500px;
+        height: 500px;
+        background: radial-gradient(circle, rgba(255,215,0,0.8) 0%, rgba(255,140,0,0.4) 40%, rgba(23,42,69,0) 70%);
+        border-radius: 50%;
+        animation: central-flash 2s ease-out forwards;
+    }
+    .item-list {
+        width: 100%;
+        display: none;
+        flex-direction: column;
+        gap: 12px;
+        z-index: 5;
+        animation: fade-in-list 1s forwards;
+    }
+    .item-button {
+        width: 100%;
+        padding: 15px 20px;
+        background: linear-gradient(90deg, rgba(63, 19, 24, 0.85), rgba(42, 13, 15, 0.95));
+        border: 1px solid var(--color-orange);
+        border-left: 6px solid var(--color-orange);
+        color: var(--color-text);
+        text-align: left;
+        cursor: pointer;
+        font-size: 18px;
+        transition: all 0.3s ease;
+        box-sizing: border-box;
+        font-family: 'Mate SC', serif;
+        letter-spacing: 1px;
+    }
+    .item-button:hover {
+        background: linear-gradient(90deg, rgba(255, 140, 0, 0.4), rgba(42, 13, 15, 0.95));
+        border-left-color: var(--color-gold);
+        transform: translateX(5px);
+    }
+    .item-rarity {
+        font-weight: bold;
+        margin-left: 10px;
+        text-shadow: 1px 1px 3px black;
+    }
+    .rarity-普通 { color: #B0C4DE; }
+    .rarity-稀有 { color: #6495ED; }
+    .rarity-史诗 { color: #BA55D3; }
+    .rarity-传说 { color: #FFD700; }
+    .modal-backdrop {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(10, 25, 47, 0.8);
+        backdrop-filter: blur(5px);
+        z-index: 99;
+        display: none;
+        align-items: center;
+        justify-content: center;
+    }
+    .modal-content {
+        position: relative;
+        width: 90%;
+        max-width: 500px;
+        padding: 30px;
+        background: linear-gradient(160deg, var(--color-blue-dark), #050c18);
+        border: 2px solid;
+        border-image: linear-gradient(to bottom right, var(--color-gold), var(--color-orange)) 1;
+        box-shadow: 0 0 30px rgba(255, 215, 0, 0.4);
+        border-radius: 10px;
+        animation: zoom-in 0.5s cubic-bezier(0.165, 0.84, 0.44, 1) forwards;
+    }
+    .modal-close {
+        position: absolute;
+        top: 10px;
+        right: 15px;
+        font-size: 35px;
+        font-weight: bold;
+        color: var(--color-orange);
+        cursor: pointer;
+        transition: transform 0.2s, color 0.2s;
+    }
+    .modal-close:hover {
+        transform: scale(1.2) rotate(90deg);
+        color: var(--color-gold);
+    }
+    .modal-title {
+        font-size: 26px;
+        font-family: 'Cinzel Decorative', cursive;
+        margin: 0 0 15px 0;
+        border-bottom: 1px solid;
+        border-image: linear-gradient(to right, var(--color-orange), transparent) 1;
+        padding-bottom: 10px;
+        color: var(--color-gold);
+    }
+    .modal-body p { margin: 12px 0; line-height: 1.7; }
+    .modal-body strong { color: var(--color-orange); font-weight: normal; }
+    .modal-comment {
+        margin-top: 20px;
+        padding: 15px;
+        border-top: 1px dashed rgba(255, 215, 0, 0.3);
+        font-style: italic;
+        color: #a8b2d1;
+        background: rgba(23, 42, 69, 0.3);
+        border-radius: 5px;
+    }
+    @keyframes pulse-button {
+        0%, 100% { transform: scale(1); box-shadow: 0 0 12px var(--color-orange), 0 0 25px var(--color-button-main) inset; }
+        50% { transform: scale(1.02); box-shadow: 0 0 20px var(--color-gold), 0 0 35px var(--color-button-main) inset; }
+    }
+    @keyframes fade-in-overlay { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes burst {
+        0% { transform: translate(0, 0) scale(1); opacity: 1; }
+        100% { transform: var(--transform-val) scale(0); opacity: 0; }
+    }
+    @keyframes central-flash {
+        0% { transform: translate(-50%, -50%) scale(0); opacity: 0.5; }
+        50% { opacity: 1; }
+        100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+    }
+    @keyframes fade-in-list { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes zoom-in { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: scale(1); } }
+</style>
+</head>
+<body>
+
+<div class="gacha-container" id="gacha-container">
+    <button class="draw-button" id="draw-button">命运启封</button>
+    <div class="animation-overlay" id="animation-overlay">
+        <div class="central-burst"></div>
+        <div id="particle-container"></div>
+    </div>
+    <div class="item-list" id="item-list"></div>
+</div>
+
+<div class="modal-backdrop" id="modal-backdrop">
+    <div class="modal-content">
+        <span class="modal-close" id="modal-close">&times;</span>
+        <h2 class="modal-title" id="modal-title"></h2>
+        <div class="modal-body">
+            <p><strong>品质:</strong> <span id="modal-rarity"></span></p>
+            <p><strong>类型:</strong> <span id="modal-type"></span></p>
+            <p><strong>简介:</strong> <span id="modal-desc"></span></p>
+            <p class="modal-comment" id="modal-comment"></p>
+        </div>
+    </div>
+</div>
+
+<script>
+    const xmlString = `$1`;
+    const itemsData = [];
+
+    function parseXML() {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(`<root>${xmlString.trim()}</root>`, "text/xml");
+        const itemNodes = xmlDoc.getElementsByTagName("物品");
+        for (let i = 0; i < itemNodes.length; i++) {
+            const node = itemNodes[i];
+            itemsData.push({
+                name: node.getElementsByTagName("名称")[0].textContent,
+                rarity: node.getElementsByTagName("品质")[0].textContent,
+                type: node.getElementsByTagName("类型")[0].textContent,
+                desc: node.getElementsByTagName("物品简介")[0].textContent,
+                comment: node.getElementsByTagName("吐槽")[0].textContent,
+            });
+        }
+    }
+
+    function displayItems() {
+        const itemList = document.getElementById('item-list');
+        itemList.innerHTML = '';
+        itemsData.forEach((item, index) => {
+            const rarityClass = `rarity-${item.rarity}`;
+            const button = document.createElement('button');
+            button.className = 'item-button';
+            button.innerHTML = `${item.name} <span class="item-rarity ${rarityClass}">[${item.rarity}]</span>`;
+            button.onclick = () => openModal(index);
+            itemList.appendChild(button);
+        });
+        itemList.style.display = 'flex';
+    }
+
+    function createParticles() {
+        const container = document.getElementById('particle-container');
+        container.innerHTML = '';
+        const particleCount = 80;
+        for (let i = 0; i < particleCount; i++) {
+            const particle = document.createElement('div');
+            particle.className = 'particle';
+            const angle = Math.random() * 360;
+            const distance = Math.random() * 250 + 50;
+            const x = Math.cos(angle * Math.PI / 180) * distance;
+            const y = Math.sin(angle * Math.PI / 180) * distance;
+            particle.style.setProperty('--transform-val', `translate(${x}px, ${y}px)`);
+            particle.style.animationDelay = `${Math.random() * 0.2}s`;
+            container.appendChild(particle);
+        }
+    }
+
+    function openModal(index) {
+        const item = itemsData[index];
+        document.getElementById('modal-title').textContent = item.name;
+        const raritySpan = document.getElementById('modal-rarity');
+        raritySpan.textContent = item.rarity;
+        raritySpan.className = `item-rarity rarity-${item.rarity}`;
+        document.getElementById('modal-type').textContent = item.type;
+        document.getElementById('modal-desc').textContent = item.desc;
+        document.getElementById('modal-comment').textContent = item.comment;
+        document.getElementById('modal-backdrop').style.display = 'flex';
+    }
+
+    document.getElementById('draw-button').addEventListener('click', () => {
+        const drawButton = document.getElementById('draw-button');
+        const animationOverlay = document.getElementById('animation-overlay');
+        
+        drawButton.style.display = 'none';
+        animationOverlay.classList.add('active');
+        createParticles();
+
+        setTimeout(() => {
+            animationOverlay.style.display = 'none';
+            displayItems();
+        }, 2000);
+    });
+
+    document.getElementById('modal-close').addEventListener('click', () => {
+        document.getElementById('modal-backdrop').style.display = 'none';
+    });
+    
+    document.getElementById('modal-backdrop').addEventListener('click', (event) => {
+        if (event.target === event.currentTarget) {
+            document.getElementById('modal-backdrop').style.display = 'none';
+        }
+    });
+
+    parseXML();
+</script>
+
+</body>
+</html>
+```

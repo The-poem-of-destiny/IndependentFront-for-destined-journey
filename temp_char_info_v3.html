@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>角色查看器v3.0.2</title>
+  <script type="module">import { createPinia as e } from 'https://testingcf.jsdelivr.net/npm/pinia/+esm'; import { load as t } from 'https://testingcf.jsdelivr.net/npm/js-yaml/+esm'; var n = { 502(e, t) { t.A = (e, t) => { const n = e.__vccOpts || e; for (const [e, a] of t) n[e] = a; return n } } }, a = {}; const r = Vue; function l(e) { if (!e) return !1; const t = String(e).trim().toLowerCase(); return '' !== t && 'null' !== t && 'none' !== t && '[]' !== t } function o(e) { return Array.isArray(e) && e.length > 0 } function c(e) { if (null == e) return 0; const t = String(e).trim(); if (t.includes('=')) { const e = t.split('='), n = e[e.length - 1].trim(); return parseInt(n, 10) || 0 } return parseInt(t, 10) || 0 } function i(e) { if (null == e) return []; if (Array.isArray(e)) return e.map(e => String(e ?? '').trim()).filter(Boolean); const t = String(e).trim(); if (!t || 'null' === t.toLowerCase() || 'none' === t.toLowerCase()) return []; let n = t.replace(/\]\s*\[/g, '], ['); n = n.replace(/^[\s\["']+|[\s\]"']+$/g, ''); return n.split(/[,;|，；、]/).map(e => e.trim().replace(/^["'\[\(]+|["'\]\)]+$/g, '')).filter(e => e && 'null' !== e) } const s = { 名字: '姓名', 名稱: '名称', 等級: '等级', 種族: '种族', 生命層級: '生命层级', 身分: '身份', 職業: '职业', 喜愛: '喜爱', 外貌特質: '外貌特质', 外貌特徵: '外貌特质', 外貌特征: '外貌特质', 衣物裝飾: '衣物装饰', 屬性: '属性', 資源: '资源', 體質: '体质', 裝備: '装备', 登神長階: '登神长阶', 神國: '神国', 權能: '权能', 法則: '法则', 標籤: '标签', 品質: '品质', 類型: '类型', 分類: '分类', 被動效果: '被动效果', 主動效果: '主动效果' }; function d(e) { return String(e ?? '').replace(/\t/g, '⇥').replace(/\u00A0/g, '⍽') } function u(e) { if (Array.isArray(e)) return e.map(e => u(e)); if (!e || 'object' != typeof e) return e; const t = e, n = {}; return Object.entries(t).forEach(([e, t]) => { const a = (r = String(e), s[r] || r); var r; const l = u(t); a in n && e !== a || (n[a] = l) }), n } function m(e) { return u(e) } function p(e, t, n) { const a = e, r = a?.mark, l = String(a?.reason || a?.message || String(e)); if (!r || 'number' != typeof r.line) return { message: l }; const o = r.line, c = 'number' == typeof r.column ? r.column : 0, i = String(t ?? '').split('\n'), s = String(n ?? '').split('\n'), u = i[o] ?? '', m = d(s[o] ?? ''); return { message: l, line: o, column: c, cleanedLine: m, originalLine: d(u), caretLine: `${' '.repeat(Math.max(0, Math.min(c, m.length)))}^` } } function f() { return window.TavernHelper || window.parent?.TavernHelper || window } function y(e) { return Array.isArray(e) ? e.join(', ') : e ? String(e) : '' } function v(e) { return i(e) } function k(e, t) { const n = {}; return Array.isArray(e) ? (e.forEach(e => { if (!e || 'object' != typeof e) return; const a = e, r = y(a.名称 || a.名稱).trim(); if (!r) return; const { 名称: l, 名稱: o, ...c } = a, i = { ...c }, s = i.标签 ?? i.標籤; s ? i.标签 = v(s) : 'skill' !== t && 'equip' !== t || (i.标签 = []), delete i.標籤, 'divinity' !== t && (i.效果 = function (e) { if (e && 'object' == typeof e && !Array.isArray(e)) { const t = e; return Object.fromEntries(Object.entries(t).map(([e, t]) => [String(e).trim(), y(t).trim()]).filter(([e, t]) => e.length > 0 && t.length > 0)) } const t = y(e).replace(/\r\n/g, '\n').trim(); if (!t) return {}; const n = t.split('\n').map(e => e.trim()).filter(Boolean), a = {}, r = []; return n.forEach(e => { const t = e.match(/^\[([^\]]+)\]\s*[：:]\s*(.*)$/); if (t) { const e = String(t[1] || '').trim(), n = String(t[2] || '').trim(); return void (e && n && (a[e] = n)) } const n = e.match(/^([^[\]：:]+?)\s*[：:]\s*(.+)$/); if (n) { const e = String(n[1] || '').trim(), t = String(n[2] || '').trim(); if (e && t) return void (a[e] = t) } r.push(e) }), Object.keys(a).length > 0 ? (r.length > 0 && (a.描述 = r.join('\n')), a) : { 描述: t } }(i.效果)), 'equip' === t ? (i.品质 = i.品质 || i.品質 || '未知', i.类型 = i.分类 || i.分類 || i.类型 || i.類型 || '未知', i.描述 = i.描述 || '', i.位置 = i.位置 || '') : 'skill' === t && (i.品质 = i.品质 || i.品質 || '未知', i.类型 = i.类型 || i.類型 || '未知', i.消耗 = i.消耗 ? y(i.消耗) : '', i.描述 = i.描述 || ''), n[r] = i }), n) : n } const g = { 神祗: '#FFFFFF', 龙族: '#FFD700', 龙姬: '#FFD700', 龙裔: '#FFA500', 巨龙: '#FFD700', 古龙: '#FFD700', 亚龙: '#FFAE42', 血姬: '#FF0000', 血族: '#DC143C', 亡灵种族: '#32CD32', 不死生物: '#32CD32', 翼民: '#00BFFF', 翼族: '#00BFFF', 堕羽民: '#9370DB', 女妖: '#FF1493', 人类: '#FFDAB9', 矮人: '#D2691E', 半身人: '#FFD700', 精灵: '#00FF7F', 光翅妖精: '#FFFF00', 汐海妖精: '#00FFFF', 妖精: '#FF00FF', 宁芙: '#FF00FF', 兽族: '#FF4500', 黑角民: '#00CED1', 蛇女: '#00FF7F', 半人马: '#FF8C00', 人鱼: '#00FFFF', 地精: '#32CD32', 魔物: '#8A2BE2', 深渊魔族: '#9400D3', 异域生物: '#FF00FF', 巨人: '#D2691E', 半巨人: '#D2691E', 小巨人: '#D2691E', 霜巨人: '#00BFFF', 泰坦人族: '#FFD700', 山妖: '#DAA520', 食人魔: '#7CFC00', 巨魔: '#7CFC00', 雪怪: '#E0FFFF', 诗灵: '#EE82EE', 英灵: '#00BFFF', 从者: '#00BFFF', 构装体: '#00CED1', 人造生物: '#00FF7F', 元素生物: '#FF0000', 植物生物: '#00FF00', 不定形生物: '#7CFC00', 其他: '#E0E0E0' }, h = { 1: '#57595D', 2: '#50C878', 3: '#2196F3', 4: '#9932CC', 5: '#FFD700', 6: '#DC143C', 7: '#00FFFF' }, E = { 人類: '人类', 其它: '其他', 詩靈: '诗灵', 器靈: '器灵', 鑄魂: '铸魂', 願靈: '愿灵', 聖靈: '圣灵', 英靈: '英灵', 從者: '从者', 構裝: '构装', 史萊姆: '史莱姆', 異域: '异域', 異界: '异界', 精靈: '精灵', 木靈: '木灵', 天舞龍: '天舞龙', 魔紋龍: '魔纹龙', 亞龍: '亚龙', 北境龍裔: '北境龙裔', 東方後裔: '东方后裔', 花靈: '花灵', 人馬: '人马', 蠑螈: '蝾螈', 墮翼: '堕翼', 墮羽: '堕羽', 深淵: '深渊', 小惡魔: '小恶魔', 惡魔: '恶魔', 龍: '龙', 亞: '亚', 靈: '灵', 詩: '诗', 異: '异', 體: '体', 構: '构', 裝: '装', 祇: '祗', 魚: '鱼', 獸: '兽', 種: '种', 寧: '宁', 墮: '堕', 聖: '圣', 惡: '恶', 從: '从', 願: '愿', 鑄: '铸', 機: '机', 鳥: '鸟', 馬: '马' }; function B(e) { let t = (e || '#808080').replace(/^#/, ''); 3 === t.length && (t = `${t[0]}${t[0]}${t[1]}${t[1]}${t[2]}${t[2]}`); const n = parseInt(t.substring(0, 2), 16), a = parseInt(t.substring(2, 4), 16), r = parseInt(t.substring(4, 6), 16); return { r: Number.isFinite(n) ? n : 128, g: Number.isFinite(a) ? a : 128, b: Number.isFinite(r) ? r : 128 } } function V(e) { const { r: t, g: n, b: a } = B(e); return `${t}, ${n}, ${a}` } function b(e, t = '#94a3b8', n = .48, a = 92, r = 188) { const l = B(e), o = B(t); let c = l.r * (1 - n) + o.r * n, i = l.g * (1 - n) + o.g * n, s = l.b * (1 - n) + o.b * n; const d = () => .299 * c + .587 * i + .114 * s; let u = d(); if (u < a) { const e = (a - u) / 255; c += (255 - c) * e, i += (255 - i) * e, s += (255 - s) * e, u = d() } if (u > r) { const e = (u - r) / 255; c *= 1 - e, i *= 1 - e, s *= 1 - e } return function (e, t, n) { const a = e => Math.max(0, Math.min(255, Math.round(e))).toString(16).padStart(2, '0'); return `#${a(e)}${a(t)}${a(n)}` }(c, i, s) } function N(e) { const t = function (e) { let t = e; return Object.entries(E).sort((e, t) => t[0].length - e[0].length).forEach(([e, n]) => { t.includes(e) && (t = t.split(e).join(n)) }), t }(e); let n = '其他'; for (const a of Object.keys(g)) if (e.includes(a) || t.includes(a)) { n = a; break } return n } function F(e) { const t = function (e) { const t = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7 }, n = String(e || '').trim(), a = n.match(/第\s*([一二三四五六七1-7])\s*[层層][级級]/); if (a) { const e = a[1]; return t[e] || parseInt(e, 10) || 1 } const r = n.match(/[1-7]/); if (r) return parseInt(r[0], 10) || 1; const l = n.match(/[一二三四五六七]/); return l ? t[l[0]] || 1 : parseInt(n, 10) || 1 }(e.生命层级), n = N(e.种族 || '其他'), a = h[t] || h[1], r = b(g[n] || g.其他, '#808080', .1, 84, 198), l = a; return { tier: t, raceKey: n, raceHex: r, tierHex: l, raceRgb: V(r), tierRgb: V(l) } } const S = { class: 'viewer-root' }, C = { key: 0, class: 'error-card' }, w = { class: 'error-body' }, D = { class: 'yaml-error-row yaml-error-sub' }, x = { key: 0, class: 'yaml-error-row' }, A = { key: 1, class: 'yaml-fix-box' }, L = { class: 'yaml-fix-list' }, M = { class: 'yaml-error-pre' }, j = { key: 3, class: 'yaml-error-details' }, I = { class: 'yaml-error-pre alt' }, O = { class: 'sheet-content-wrapper' }, T = { class: 'sheet-header' }, q = { class: 'level-badge' }, P = { class: 'char-name' }, H = { class: 'char-meta-row' }, R = { class: 'tier-name' }, W = { class: 'sheet-body' }, Y = { class: 'attributes-grid' }, U = ['onClick'], G = { class: 'attribute-name' }, K = { class: 'attribute-total' }, Z = { key: 0, class: 'attribute-formula' }, J = { class: 'tab-nav' }, Q = ['onClick'], X = { class: 'tab-content' }, ee = { key: 0, class: 'profile-grid' }, te = { class: 'profile-row' }, ne = { class: 'profile-cell' }, ae = { class: 'story profile-panel' }, re = { class: 'profile-cell' }, le = { class: 'story profile-panel' }, oe = { class: 'profile-row' }, ce = { class: 'profile-cell' }, ie = { class: 'story profile-panel' }, se = { class: 'profile-cell' }, de = { class: 'story profile-panel' }, ue = { class: 'card-header' }, me = { class: 'card-body' }, pe = { key: 0, class: 'card-tags' }, fe = { key: 1 }, ye = { key: 2 }, ve = { class: 'effect-list' }, ke = { key: 0, class: 'effect-name' }, ge = { class: 'effect-text' }, he = { key: 4 }, Ee = { key: 5, class: 'card-description' }, Be = { class: 'card-header' }, Ve = { class: 'card-body' }, be = { key: 0, class: 'card-tags' }, Ne = { key: 1 }, Fe = { class: 'effect-list' }, Se = { key: 0, class: 'effect-name' }, $e = { class: 'effect-text' }, Ce = { key: 3 }, we = { key: 4, class: 'card-description' }, De = { class: 'subsection-title' }, xe = { class: 'card-header' }, Ae = { class: 'card-body' }, Le = { key: 0, class: 'card-tags' }, Me = { key: 1 }, je = { class: 'effect-list' }, _e = { key: 0, class: 'effect-name' }, Ie = { class: 'effect-text' }, Oe = { key: 3 }, ze = { key: 4, class: 'card-description' }, Te = { key: 0, class: 'subsection-title divinity-main-title' }, qe = { key: 1, class: 'card divinity-card' }, Pe = { class: 'card-header' }, He = { class: 'card-title' }, Re = { class: 'card-body' }, We = { class: 'card-header' }, Ye = { class: 'card-title' }, Ue = { class: 'card-body' }, Ge = { class: 'card-header' }, Ke = { class: 'card-title' }, Ze = { class: 'card-body' }, Je = { class: 'card-header' }, Qe = { class: 'card-title' }, Xe = { class: 'card-body' }, et = { key: 0 }, tt = { key: 1 }, nt = { key: 2 }, at = { key: 5, class: 'story' }, rt = ['disabled'], lt = ['disabled'], ot = ['disabled'], ct = { key: 2, class: 'loading-card' }, it = (0, r.defineComponent)({ __name: 'App', setup(e) { const n = [{ key: 'profile', label: '档案' }, { key: 'skills', label: '技能' }, { key: 'equipment', label: '装备' }, { key: 'inventory', label: '物品' }, { key: 'divinity', label: '登神长阶' }, { key: 'backstory', label: '背景故事' }], a = (0, r.ref)(null), s = (0, r.ref)(null), d = (0, r.ref)(''), u = (0, r.ref)(null), g = (0, r.ref)('profile'), h = (0, r.ref)(null), E = (0, r.ref)(null); let B = null; const V = (0, r.ref)(!1), b = (0, r.ref)(!1), N = (0, r.ref)('📥'), it = ((0, r.computed)(() => { const e = String(s.value?.message || '').toLowerCase(); return e.includes('indent') ? '这一行的前置空格层级不对（缩进错误）' : e.includes('mapping') ? '“键: 值”的格式有问题（通常是冒号或内容写法不对）' : e.includes('unexpected') || e.includes('end of the stream') ? '内容可能缺少引号、括号，或上一行没有正确结束。' : '格式不符合要求，请按定位行号检查' }), (0, r.computed)(() => ['1. 先看这行里小箭头 ^ 指着哪里，就改那里', '2. 看"键: 值"的格式有沒有问题（通常是多了个冒号或内容写法不对）', '3. 看这一行开头前面的空格，尽量和附近长得像的行保持一样多（缩进错误）', '4. 内容可能缺少引号、括号，或上一行没有正确结束'])), st = { 力量: '力', 敏捷: '敏', 体质: '体', 智力: '智', 精神: '精' }, dt = (0, r.computed)(() => u.value?.tier ?? 1), ut = (0, r.computed)(() => ({ 'card-wrapper': !0, [`tier-${dt.value}`]: !0, 'high-tier': dt.value >= 5 })); function mt(e, ...t) { if (!e || 'object' != typeof e) return; const n = e; for (const e of t) { const t = n[e]; if (null != t) return t } } const pt = (0, r.computed)(() => String(mt(a.value, '姓名') || 'Unknown')), ft = (0, r.computed)(() => String(mt(a.value, '等级', '等级') ?? '?')), yt = (0, r.computed)(() => String(mt(a.value, '种族', '种族') || '其他')), vt = (0, r.computed)(() => String(mt(a.value, '生命层级', '生命层级') || 'Unknown')), kt = (0, r.computed)(() => i(mt(a.value, '身份')).join(' / ') || '-'), gt = (0, r.computed)(() => i(mt(a.value, '职业', '职业')).join(' / ') || '-'), ht = (0, r.computed)(() => { const e = mt(a.value, '性格'); return e ? Array.isArray(e) ? e.join('，') : String(e) : '' }), Et = (0, r.computed)(() => i(mt(a.value, '喜爱', '喜爱')).map(e => e.trim().replace(/。+$/g, '').trim()).filter(Boolean).join('，')), Bt = (0, r.computed)(() => String(mt(a.value, '外貌特质', '外貌特质') || '').trim()), Vt = (0, r.computed)(() => String(mt(a.value, '衣物装饰', '衣物装饰') || '').trim()), bt = (0, r.computed)(() => String(mt(a.value, '背景故事') || '').trim()), Nt = (0, r.ref)({}); function Ft(e) { if (null == e) return { total: '0', formula: '' }; const t = String(e).trim(); if (!t) return { total: '0', formula: '' }; if (!t.includes('=')) return { total: String(c(t)), formula: '' }; const n = t.split('='), a = n.slice(0, -1).join('=').trim(); return { total: n[n.length - 1]?.trim() || '' || String(c(t)), formula: a } } const St = { 力量: ['力量'], 敏捷: ['敏捷'], 体质: ['体质', '体质'], 智力: ['智力'], 精神: ['精神'] }; function $t(e, t) { const n = St[t] || [t]; for (const t of n) { const n = e[t]; if (null != n) return n } } const Ct = (0, r.computed)(() => { const e = mt(a.value, '属性', '属性') || {}; return ['力量', '敏捷', '体质', '智力', '精神'].map(t => { const n = Ft($t(e, t)); return { key: t, short: st[t] || t, total: n.total, formula: n.formula, showFormula: !!n.formula && !!Nt.value[t] } }) }); function wt(e) { return Array.isArray(e) ? e.filter(e => e && 'object' == typeof e) : [] } function Dt(e) { if (null == e) return ''; if ('string' == typeof e) return e.trim(); if ('number' == typeof e || 'boolean' == typeof e) return String(e); if (Array.isArray(e)) return e.map(e => Dt(e)).filter(Boolean).join(' / '); if ('object' == typeof e) { return Object.entries(e).map(([e, t]) => { const n = Dt(t); return n ? `${e}: ${n}` : '' }).filter(Boolean).join('； ') } return String(e) } function xt(e) { const t = String(e || '').replace(/\r\n/g, '\n').trim(); if (!t) return []; const n = t.split('\n').map(e => e.trim()).filter(Boolean), a = [], r = []; return n.forEach(e => { const t = function (e) { const t = String(e || '').trim(); if (!t) return null; const n = t.match(/^\[([^\]]+)\]\s*[：:]\s*(.*)$/); if (n) { const e = String(n[1] || '').trim(), t = String(n[2] || '').trim(); return e && t ? { name: e, content: t, fallback: !1 } : null } const a = t.search(/[：:]/); if (a <= 0) return null; const r = t.slice(0, a).trim(), l = t.slice(a + 1).trim(); return r && l ? { name: r, content: l, fallback: !1 } : null }(e); t ? a.push(t) : r.push(e) }), 0 === a.length ? [{ name: '描述', content: t, fallback: !0 }] : (r.length > 0 && a.push({ name: '描述', content: r.join('\n'), fallback: !0 }), a) } function At(e) { if (0 === e.length) return '无'; if (1 === e.length) { const t = e[0]; return t.fallback ? t.content : `${t.name}: ${t.content}` } return e.map(e => e.fallback ? e.content : `${e.name}: ${e.content}`).join('\n') } function Lt(e) { return t = e?.效果, t && 'object' == typeof t && !Array.isArray(t) ? Object.entries(t).map(([e, t]) => { const n = String(e || '').trim() || '描述'; return { name: n, content: Dt(t).trim(), fallback: '描述' === n } }).filter(e => e.content.length > 0) : xt(Dt(t)); var t } function Mt(e) { const t = Lt(e); if (t.length > 0) return t; const n = zt(e); return n ? [{ name: '描述', content: n, fallback: !0 }] : [] } function jt(e) { return Dt(e?.名称) || '未命名' } function _t(e) { return Dt(e?.品质 || e?.稀有度) } function It(e) { const t = _t(e).toLowerCase(); return t ? t.includes('神话') || t.includes('神話') || t.includes('myth') ? 'quality-mythic' : t.includes('传说') || t.includes('傳說') || t.includes('legend') ? 'quality-legendary' : t.includes('史诗') || t.includes('史詩') || t.includes('epic') ? 'quality-epic' : t.includes('稀有') || t.includes('rare') ? 'quality-rare' : t.includes('优良') || t.includes('優良') || t.includes('优秀') || t.includes('優秀') || t.includes('精良') || t.includes('uncommon') ? 'quality-uncommon' : t.includes('普通') || t.includes('common') ? 'quality-common' : '' : '' } function Ot(e) { return Dt(e?.类型 || e?.分类) } function zt(e) { return Dt(e?.描述) } function Tt(e) { return At(Mt(e)) } function qt(e) { return i(e?.标签) } function Pt(e) { const t = i(e?.消耗).join(' / '); return t || Dt(e?.消耗) } function Ht(e) { return Dt(e?.被动效果) } function Rt(e) { return Dt(e?.主动效果) } const Wt = (0, r.computed)(() => wt(a.value?.技能)), Yt = (0, r.computed)(() => wt(a.value?.装备)), Ut = (0, r.computed)(() => [{ key: 'props', title: '道具', items: wt(a.value?.道具) }, { key: 'special', title: '特殊物品', items: wt(a.value?.特殊物品) }, { key: 'items', title: '物品', items: wt(a.value?.物品) }].filter(e => e.items.length > 0)), Gt = (0, r.computed)(() => { const e = a.value?.登神长阶; return e && 'object' == typeof e ? e : {} }), Kt = (0, r.computed)(() => { const e = Dt(Gt.value?.神位); if (l(e)) return e; const t = Dt(a.value?.神位); return l(t) ? t : '' }), Zt = (0, r.computed)(() => { const e = Gt.value?.神国 || a.value?.神国; if (!e || 'object' != typeof e) return null; const t = e, n = Dt(t?.名称), r = Dt(t?.描述); return l(n) || l(r) ? { name: n || '神国', description: r } : null }), Jt = (0, r.computed)(() => wt(Gt.value?.要素 || a.value?.要素)), Qt = (0, r.computed)(() => wt(Gt.value?.权能 || a.value?.权能)), Xt = (0, r.computed)(() => wt(Gt.value?.法则 || a.value?.法则)), en = (0, r.computed)(() => Ut.value.length > 0), tn = (0, r.computed)(() => l(Kt.value) || !!Zt.value || o(Jt.value) || o(Qt.value) || o(Xt.value)), nn = (0, r.computed)(() => n.filter(e => 'profile' === e.key || ('skills' === e.key ? Wt.value.length > 0 : 'equipment' === e.key ? Yt.value.length > 0 : 'inventory' === e.key ? en.value : 'divinity' === e.key ? tn.value : 'backstory' === e.key && l(bt.value)))); function an() { const e = navigator.userAgent || '', t = /iPad|iPhone|iPod/.test(e) || 'MacIntel' === navigator.platform && navigator.maxTouchPoints > 1, n = /Safari/i.test(e) && !/CriOS|FxiOS|EdgiOS|OPiOS/i.test(e); return t && n } function rn() { h.value && E.value && u.value && (B?.destroy(), B = function (e) { const { canvas: t, host: n, tier: a, colorHex: r, isIOSSafari: l = !1 } = e, o = t.getContext('2d'); if (!o) return { start: () => { }, stop: () => { }, destroy: () => { } }; const c = o; let i = 0; const s = parseInt(String(a), 10); 3 === s || 4 === s ? i = 1 : 5 === s ? i = 2 : 6 === s ? i = 3 : s >= 7 && (i = 4), 0 === i && (i = 1); const d = window.innerWidth < 600 ? 15 : 30, u = s <= 2 ? Math.max(8, Math.floor(.55 * d)) : d; let m = 255, p = 255, f = 255; const y = (r || '#ffffff').replace(/^#/, ''); 6 === y.length && (m = parseInt(y.substring(0, 2), 16), p = parseInt(y.substring(2, 4), 16), f = parseInt(y.substring(4, 6), 16)); let v = 0, k = !1, g = !0; class h { x = 0; y = 0; size = 2; speedY = .2; sway = .2; opacity = .2; constructor() { this.reset(!0) } reset(e = !1) { this.x = Math.random() * t.width, this.opacity = .4 * Math.random() + .1, l && (this.opacity = Math.min(.9, this.opacity + .18)), 1 === i ? (this.y = e ? Math.random() * t.height : t.height + 20, this.size = 4 * Math.random() + 2, this.speedY = .4 * Math.random() + .1, this.sway = .2 * Math.random()) : 2 === i ? (this.y = e ? Math.random() * t.height : -10, this.size = 5 * Math.random() + 3, this.speedY = 1 * Math.random() + .5, this.sway = .5 * Math.random()) : 3 === i ? (this.y = e ? Math.random() * t.height : t.height + 20, this.size = 4 * Math.random() + 2, this.speedY = .8 * Math.random() + .2, this.sway = .1 * Math.random()) : (this.y = e ? Math.random() * t.height : t.height + 20, this.size = 8 * Math.random() + 4, this.speedY = 1 * Math.random() + .5, this.sway = .2 * Math.random()) } update() { 2 === i ? (this.y += this.speedY, this.x += Math.sin(.02 * this.y) * this.sway, this.y > t.height && this.reset(!1)) : (this.y -= this.speedY, this.x += Math.sin(.01 * this.y) * (this.sway || .2), this.y < -50 && this.reset(!1)) } draw() { const e = c.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size); 4 === i || 1 === i ? (e.addColorStop(0, `rgba(${m}, ${p}, ${f}, ${this.opacity})`), e.addColorStop(.4, `rgba(${m}, ${p}, ${f}, ${.5 * this.opacity})`), e.addColorStop(1, `rgba(${m}, ${p}, ${f}, 0)`)) : (e.addColorStop(0, `rgba(${m}, ${p}, ${f}, ${this.opacity})`), e.addColorStop(.7, `rgba(${m}, ${p}, ${f}, ${.5 * this.opacity})`), e.addColorStop(1, `rgba(${m}, ${p}, ${f}, 0)`)), c.fillStyle = e, c.beginPath(), c.arc(this.x, this.y, this.size, 0, 2 * Math.PI), c.fill() } } const E = Array.from({ length: u }, () => new h), B = () => { t.width = n.offsetWidth, t.height = n.offsetHeight }, V = new ResizeObserver(() => B()); V.observe(n), B(); const b = new IntersectionObserver(e => { e.forEach(e => { g = e.isIntersecting, g && k && N() }) }, { rootMargin: '50px' }); b.observe(n); const N = () => { k && g && (o.clearRect(0, 0, t.width, t.height), E.forEach(e => { e.update(), e.draw() }), v = requestAnimationFrame(N)) }; return { start() { k || (k = !0, N()) }, stop() { k = !1, v && cancelAnimationFrame(v) }, destroy() { this.stop(), V.disconnect(), b.disconnect(), o.clearRect(0, 0, t.width, t.height) } } }({ canvas: h.value, host: E.value, tier: u.value.tier, colorHex: u.value.tierHex, isIOSSafari: an() }), B.start()) } function ln() { const e = document.getElementById('data-source'), n = e?.textContent?.trim() || ''; if (d.value = n, !n) return void (s.value = { message: '未检测到 YAML 数据（#data-source 为空）。' }); const l = function (e) { const n = function (e) { if (!e) return ''; const t = e.replace(/\u00A0/g, ' ').replace(/\t/g, '  ').replace(/】/g, ']').replace(/【/g, '[').split('\n'), n = ['身份', '身分', '职业', '職業', '性格', '喜爱', '喜愛', '外貌特质', '外貌特質', '外貌特征', '外貌特徵', '衣物装饰', '衣物裝飾', '背景故事', '描述', '效果', '标签', '標籤', '消耗', '类型', '類型', '品质', '品質', '神位', '名称', '名稱', '姓名', '名字', '种族', '種族', '等级', '等級', '生命层级', '生命層級'], a = ['力量', '敏捷', '体质', '體質', '智力', '精神']; return t.map(e => { e = e.replace(/^(\s*)(-\s*)?([-\w\u4e00-\u9fa5]+)\s*：/, (e, t, n, a) => `${t}${n || ''}${a}:`); const t = e.match(/^(\s*)(-\s*)?([-\w\u4e00-\u9fa5]+)\s*:\s*(.*)$/); if (!t) return e; const r = t[1], l = t[2] || '', o = t[3]; let c = t[4].trim(); if (!c) return e; if (c.startsWith('|') || c.startsWith('>')) return e; if (a.some(e => o.includes(e)) && (/[+=]/.test(c) || c.includes('{')) && !/^["'].*["']$/.test(c)) return c = c.replace(/"/g, '\\"'), `${r}${l}${o}: "${c}"`; const i = n.some(e => o.includes(e)), s = /[{}[\]]/.test(c), d = c.includes('"'), u = /^["'].*["']$/.test(c); return (i || s || d) && !u ? (c = c.replace(/"/g, '\\"'), `${r}${l}${o}: "${c}"`) : e }).join('\n') }(e); try { const e = t(n); if (!e) throw new Error('解析结果为空'); return { success: !0, data: m(e) } } catch (t) { return { success: !1, error: p(t, e, n) } } }(n); l.success ? (s.value = null, a.value = l.data, u.value = F(l.data), function (e, t = document.documentElement) { t.style.setProperty('--race-color', e.raceHex), t.style.setProperty('--race-color-rgb', e.raceRgb), t.style.setProperty('--tier-color', e.tierHex), t.style.setProperty('--tier-color-rgb', e.tierRgb) }(u.value), (0, r.nextTick)(() => rn())) : s.value = l.error } function on() { V.value = !V.value } function cn() { V.value = !1 } function sn(e, t = 1200) { const n = N.value; N.value = e, setTimeout(() => { N.value = n }, t) } async function dn() { if (a.value && !b.value) { b.value = !0, cn(); try { if (!window.confirm(`确定要将角色 "${a.value.姓名 || 'Unknown'}" 导入到 MVU 变量系统(命定系统.关系列表)吗？\n如果已存在同名角色，将会覆盖其数据。`)) return; N.value = '⏳', await async function (e) { const t = f(); if ('function' != typeof t.getVariables || 'function' != typeof t.insertOrAssignVariables) throw new Error('未检测到 TavernHelper API (getVariables / insertOrAssignVariables)。'); const n = m(e), a = n.姓名 || 'Unknown', r = { type: 'message', message_id: 'latest' }, l = { 在场: !0, 生命层级: n.生命层级 || '第一层级/普通层级', 等级: parseInt(String(n.等级 ?? '1'), 10) || 1, 种族: n.种族 || '未知', 身份: v(n.身份), 职业: v(n.职业), 性格: y(n.性格).trim(), 喜爱: y(n.喜爱).trim(), 外貌: y(n.外貌特质).trim(), 着装: y(n.衣物装饰).trim(), 属性: { 力量: c(n.属性?.力量), 敏捷: c(n.属性?.敏捷), 体质: c(n.属性?.体质), 智力: c(n.属性?.智力), 精神: c(n.属性?.精神) }, 技能: k(n.技能, 'skill'), 装备: k(n.装备, 'equip'), 登神长阶: { 是否开启: !!(n.登神长阶 || n.生命层级 && String(n.生命层级).includes('神')), 神位: n.登神长阶?.神位 || n.神位 || '', 神国: { 名称: n.登神长阶?.神国?.名称 || n.神国?.名称 || '', 描述: n.登神长阶?.神国?.描述 || n.神国?.描述 || '' }, 要素: k(n.登神长阶?.要素 || n.要素, 'divinity'), 权能: k(n.登神长阶?.权能 || n.权能, 'divinity'), 法则: k(n.登神长阶?.法则 || n.法则, 'divinity') }, 命定契约: !1, 好感度: 0, 心里话: '', 背景故事: n.背景故事 || '' }; let o = 'stat_data.', i = null; try { i = await t.getVariables(r), i?.命定系统 ? o = '' : i?.stat_data && (o = 'stat_data.') } catch { o = 'stat_data.' } const s = e => null == e ? void 0 : e, d = []; let u, p; 'stat_data.' === o ? (d.push(i?.stat_data?.命定系统?.关系列表?.[a]), d.push(i?.stat_data?.[a]), d.push(i?.stat_data?.ThatNPC)) : d.push(i?.命定系统?.关系列表?.[a]); for (const e of d) e && (void 0 === u && (u = s(e?.好感度)), void 0 === p && (p = s(e?.心里话))); void 0 !== u && (l.好感度 = u), void 0 !== p && (l.心里话 = p); const g = {}; 'stat_data.' === o ? g.stat_data = { 命定系统: { 关系列表: { [a]: l } } } : g.命定系统 = { 关系列表: { [a]: l } }, await t.insertOrAssignVariables(g, r) }(a.value), sn('✅', 1600) } catch (e) { console.error('MVU Import Error:', e), sn('❌', 1800), window.alert(`导入失败: ${e?.message || String(e)}`) } finally { b.value = !1 } } } async function un() { if (a.value && !b.value) { b.value = !0, cn(); try { N.value = '⏳', await async function (e, t) { const n = f(); if ('function' != typeof n.getOrCreateChatWorldbook || 'function' != typeof n.createWorldbookEntries) throw new Error('未检测到 Worldbook API。'); const a = m(e).姓名 || 'Unknown', r = a.split(/[·\s]/)[0], l = r && r.trim().length > 0 ? r : a; let o = null; if ('function' == typeof n.getChatWorldbookName && (o = await n.getChatWorldbookName('current')), !o) { const e = new Date, t = `命定之诗-charinfo-Chat_Book_${e.getFullYear()}_${String(e.getMonth() + 1).padStart(2, '0')}_${String(e.getDate()).padStart(2, '0')}_${e.getHours()}h_${e.getMinutes()}m_${e.getSeconds()}s`; o = await n.getOrCreateChatWorldbook('current', t) } const c = { name: a, enabled: !0, strategy: { type: 'selective', keys: [l] }, position: { type: 'after_character_definition', order: 152 }, content: t }; await n.createWorldbookEntries(o, [c]) }(a.value, d.value), sn('✅', 1200) } catch (e) { console.error('Worldbook Save Error:', e), sn('❌', 1800), window.alert(`保存失败: ${e?.message || String(e)}`) } finally { b.value = !1 } } } function mn() { V.value && cn() } function pn(e) { 'Escape' === e.key && cn() } return (0, r.watchEffect)(() => { nn.value.some(e => e.key === g.value) || (g.value = nn.value[0]?.key || 'profile') }), (0, r.onMounted)(() => { ln(), document.addEventListener('click', mn), document.addEventListener('keydown', pn) }), (0, r.onBeforeUnmount)(() => { B?.destroy(), B = null, document.removeEventListener('click', mn), document.removeEventListener('keydown', pn) }), (e, t) => ((0, r.openBlock)(), (0, r.createElementBlock)('div', S, [s.value ? ((0, r.openBlock)(), (0, r.createElementBlock)('div', C, [t[5] || (t[5] = (0, r.createElementVNode)('h3', null, '⚠️ YAML 解析失败', -1)), (0, r.createElementVNode)('div', w, [(0, r.createElementVNode)('div', D, [t[0] || (t[0] = (0, r.createElementVNode)('b', null, '技术信息：', -1)), (0, r.createTextVNode)((0, r.toDisplayString)(s.value.message), 1)]), void 0 !== s.value.line ? ((0, r.openBlock)(), (0, r.createElementBlock)('div', x, [t[1] || (t[1] = (0, r.createElementVNode)('b', null, '定位：', -1)), (0, r.createTextVNode)('第 ' + (0, r.toDisplayString)((s.value.line ?? 0) + 1) + ' 行，第 ' + (0, r.toDisplayString)((s.value.column ?? 0) + 1) + ' 列 ', 1)])) : (0, r.createCommentVNode)('v-if', !0), it.value.length > 0 ? ((0, r.openBlock)(), (0, r.createElementBlock)('div', A, [t[2] || (t[2] = (0, r.createElementVNode)('div', { class: 'yaml-fix-title' }, '宝宝别急，三角老师带你一步步排查', -1)), (0, r.createElementVNode)('ul', L, [((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, null, (0, r.renderList)(it.value, e => ((0, r.openBlock)(), (0, r.createElementBlock)('li', { key: e }, (0, r.toDisplayString)(e), 1))), 128))])])) : (0, r.createCommentVNode)('v-if', !0), s.value.cleanedLine ? ((0, r.openBlock)(), (0, r.createElementBlock)(r.Fragment, { key: 2 }, [t[3] || (t[3] = (0, r.createElementVNode)('div', { class: 'yaml-error-title' }, '系统定位到的出错行（请重点检查）', -1)), (0, r.createElementVNode)('pre', M, (0, r.toDisplayString)(s.value.cleanedLine) + '\n' + (0, r.toDisplayString)(s.value.caretLine), 1)], 64)) : (0, r.createCommentVNode)('v-if', !0), s.value.originalLine ? ((0, r.openBlock)(), (0, r.createElementBlock)('details', j, [t[4] || (t[4] = (0, r.createElementVNode)('summary', null, '查看你输入的原始内容（可选）', -1)), (0, r.createElementVNode)('pre', I, (0, r.toDisplayString)(s.value.originalLine), 1)])) : (0, r.createCommentVNode)('v-if', !0)])])) : a.value ? ((0, r.openBlock)(), (0, r.createElementBlock)('div', { key: 1, class: (0, r.normalizeClass)(ut.value) }, [(0, r.createElementVNode)('div', { class: (0, r.normalizeClass)(['frame-layer', { show: dt.value >= 5 }]), 'aria-hidden': 'true' }, [...t[6] || (t[6] = [(0, r.createStaticVNode)('<svg class="frame-svg frame-top" viewBox="0 0 400 100" preserveAspectRatio="none" data-v-8484ad1c><path d="M 5,100 A 195,80 0 0,1 395,100" data-v-8484ad1c></path><path d="M 15,100 A 185,70 0 0,1 385,100" stroke-width="1" opacity="0.6" data-v-8484ad1c></path><line x1="60" y1="60" x2="60" y2="90" stroke-width="1" data-v-8484ad1c></line><line x1="340" y1="60" x2="340" y2="90" stroke-width="1" data-v-8484ad1c></line><circle cx="60" cy="92" r="3" fill="var(--tier-color)" stroke="none" data-v-8484ad1c></circle><circle cx="340" cy="92" r="3" fill="var(--tier-color)" stroke="none" data-v-8484ad1c></circle><path d="M 200,2 L 205,15 L 220,20 L 205,25 L 200,38 L 195,25 L 180,20 L 195,15 Z" fill="var(--tier-color)" stroke="none" data-v-8484ad1c></path></svg><svg class="frame-svg frame-body" viewBox="0 0 400 100" preserveAspectRatio="none" data-v-8484ad1c><line x1="5" y1="0" x2="5" y2="100" data-v-8484ad1c></line><line x1="395" y1="0" x2="395" y2="100" data-v-8484ad1c></line><line x1="15" y1="0" x2="15" y2="98" stroke-width="1" opacity="0.6" data-v-8484ad1c></line><line x1="385" y1="0" x2="385" y2="98" stroke-width="1" opacity="0.6" data-v-8484ad1c></line><line x1="5" y1="100" x2="395" y2="100" data-v-8484ad1c></line></svg>', 2)])], 2), (0, r.createElementVNode)('div', { ref_key: 'bgLayerRef', ref: E, class: 'card-background-layer' }, [(0, r.createElementVNode)('canvas', { id: 'particle-canvas', ref_key: 'canvasRef', ref: h }, null, 512)], 512), (0, r.createElementVNode)('div', O, [(0, r.createElementVNode)('header', T, [(0, r.createElementVNode)('span', q, 'Lv.' + (0, r.toDisplayString)(ft.value), 1), (0, r.createElementVNode)('h1', P, (0, r.toDisplayString)(pt.value), 1), (0, r.createElementVNode)('div', H, [(0, r.createElementVNode)('span', null, (0, r.toDisplayString)(yt.value), 1), t[7] || (t[7] = (0, r.createElementVNode)('span', { class: 'meta-separator' }, '◆', -1)), (0, r.createElementVNode)('span', null, (0, r.toDisplayString)(kt.value), 1), t[8] || (t[8] = (0, r.createElementVNode)('span', { class: 'meta-separator' }, '◆', -1)), (0, r.createElementVNode)('span', null, (0, r.toDisplayString)(gt.value), 1), t[9] || (t[9] = (0, r.createElementVNode)('span', { class: 'meta-separator' }, '◆', -1)), (0, r.createElementVNode)('span', R, (0, r.toDisplayString)(vt.value), 1)])]), (0, r.createElementVNode)('div', W, [(0, r.createElementVNode)('div', Y, [((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, null, (0, r.renderList)(Ct.value, e => ((0, r.openBlock)(), (0, r.createElementBlock)('div', { key: e.key, class: (0, r.normalizeClass)(['attribute-item', { 'show-formula': e.showFormula, 'has-formula': !!e.formula }]), onClick: t => { return n = e.key, void (Ft($t(mt(a.value, '属性', '属性') || {}, n)).formula && (Nt.value = { ...Nt.value, [n]: !Nt.value[n] })); var n } }, [(0, r.createElementVNode)('span', G, (0, r.toDisplayString)(e.short), 1), (0, r.createElementVNode)('span', K, (0, r.toDisplayString)(e.total), 1), e.formula ? ((0, r.openBlock)(), (0, r.createElementBlock)('span', Z, (0, r.toDisplayString)(e.formula), 1)) : (0, r.createCommentVNode)('v-if', !0)], 10, U))), 128))]), (0, r.createElementVNode)('div', J, [((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, null, (0, r.renderList)(nn.value, e => ((0, r.openBlock)(), (0, r.createElementBlock)('button', { key: e.key, class: (0, r.normalizeClass)(['tab-button', { active: g.value === e.key }]), onClick: t => g.value = e.key }, (0, r.toDisplayString)(e.label), 11, Q))), 128))]), (0, r.createElementVNode)('section', X, ['profile' === g.value ? ((0, r.openBlock)(), (0, r.createElementBlock)('div', ee, [(0, r.createElementVNode)('div', te, [(0, r.createElementVNode)('div', ne, [ht.value ? ((0, r.openBlock)(), (0, r.createElementBlock)(r.Fragment, { key: 0 }, [t[10] || (t[10] = (0, r.createElementVNode)('h3', { class: 'subsection-title' }, '性格', -1)), (0, r.createElementVNode)('div', ae, (0, r.toDisplayString)(ht.value), 1)], 64)) : (0, r.createCommentVNode)('v-if', !0)]), (0, r.createElementVNode)('div', re, [Bt.value ? ((0, r.openBlock)(), (0, r.createElementBlock)(r.Fragment, { key: 0 }, [t[11] || (t[11] = (0, r.createElementVNode)('h3', { class: 'subsection-title' }, '外貌特质', -1)), (0, r.createElementVNode)('div', le, (0, r.toDisplayString)(Bt.value), 1)], 64)) : (0, r.createCommentVNode)('v-if', !0)])]), (0, r.createElementVNode)('div', oe, [(0, r.createElementVNode)('div', ce, [Et.value ? ((0, r.openBlock)(), (0, r.createElementBlock)(r.Fragment, { key: 0 }, [t[12] || (t[12] = (0, r.createElementVNode)('h3', { class: 'subsection-title' }, '喜爱', -1)), (0, r.createElementVNode)('div', ie, (0, r.toDisplayString)(Et.value), 1)], 64)) : (0, r.createCommentVNode)('v-if', !0)]), (0, r.createElementVNode)('div', se, [Vt.value ? ((0, r.openBlock)(), (0, r.createElementBlock)(r.Fragment, { key: 0 }, [t[13] || (t[13] = (0, r.createElementVNode)('h3', { class: 'subsection-title' }, '衣物装饰', -1)), (0, r.createElementVNode)('div', de, (0, r.toDisplayString)(Vt.value), 1)], 64)) : (0, r.createCommentVNode)('v-if', !0)])])])) : 'skills' === g.value ? ((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, { key: 1 }, (0, r.renderList)(Wt.value, (e, n) => ((0, r.openBlock)(), (0, r.createElementBlock)('article', { key: `skill-${n}-${jt(e)}`, class: 'card' }, [(0, r.createElementVNode)('div', ue, [(0, r.createElementVNode)('h3', { class: (0, r.normalizeClass)(['card-title', It(e)]) }, (0, r.toDisplayString)(jt(e)), 3), _t(e) ? ((0, r.openBlock)(), (0, r.createElementBlock)('span', { key: 0, class: (0, r.normalizeClass)(['card-subtitle', It(e)]) }, (0, r.toDisplayString)(_t(e)), 3)) : (0, r.createCommentVNode)('v-if', !0)]), (0, r.createElementVNode)('div', me, [qt(e).length > 0 ? ((0, r.openBlock)(), (0, r.createElementBlock)('div', pe, [((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, null, (0, r.renderList)(qt(e), e => ((0, r.openBlock)(), (0, r.createElementBlock)('span', { key: `skill-tag-${n}-${e}`, class: 'card-tag' }, (0, r.toDisplayString)(e), 1))), 128))])) : (0, r.createCommentVNode)('v-if', !0), Ot(e) ? ((0, r.openBlock)(), (0, r.createElementBlock)('p', fe, [t[14] || (t[14] = (0, r.createElementVNode)('span', { class: 'card-label' }, '类型:', -1)), (0, r.createTextVNode)((0, r.toDisplayString)(Ot(e)), 1)])) : (0, r.createCommentVNode)('v-if', !0), Pt(e) ? ((0, r.openBlock)(), (0, r.createElementBlock)('p', ye, [t[15] || (t[15] = (0, r.createElementVNode)('span', { class: 'card-label' }, '消耗:', -1)), (0, r.createTextVNode)((0, r.toDisplayString)(Pt(e)), 1)])) : (0, r.createCommentVNode)('v-if', !0), Lt(e).length > 0 ? ((0, r.openBlock)(), (0, r.createElementBlock)(r.Fragment, { key: 3 }, [t[16] || (t[16] = (0, r.createElementVNode)('p', null, [(0, r.createElementVNode)('span', { class: 'card-label' }, '效果:')], -1)), (0, r.createElementVNode)('ul', ve, [((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, null, (0, r.renderList)(Lt(e), (e, t) => ((0, r.openBlock)(), (0, r.createElementBlock)('li', { key: `skill-effect-${n}-${t}-${e.name}`, class: 'effect-item' }, [e.fallback ? (0, r.createCommentVNode)('v-if', !0) : ((0, r.openBlock)(), (0, r.createElementBlock)('span', ke, (0, r.toDisplayString)(e.name), 1)), (0, r.createElementVNode)('span', ge, (0, r.toDisplayString)(e.content), 1)]))), 128))])], 64)) : ((0, r.openBlock)(), (0, r.createElementBlock)('p', he, [...t[17] || (t[17] = [(0, r.createElementVNode)('span', { class: 'card-label' }, '效果:', -1), (0, r.createTextVNode)('无', -1)])])), zt(e) ? ((0, r.openBlock)(), (0, r.createElementBlock)('p', Ee, (0, r.toDisplayString)(zt(e)), 1)) : (0, r.createCommentVNode)('v-if', !0)])]))), 128)) : 'equipment' === g.value ? ((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, { key: 2 }, (0, r.renderList)(Yt.value, (e, n) => ((0, r.openBlock)(), (0, r.createElementBlock)('article', { key: `equip-${n}-${jt(e)}`, class: 'card' }, [(0, r.createElementVNode)('div', Be, [(0, r.createElementVNode)('h3', { class: (0, r.normalizeClass)(['card-title', It(e)]) }, (0, r.toDisplayString)(jt(e)), 3), _t(e) ? ((0, r.openBlock)(), (0, r.createElementBlock)('span', { key: 0, class: (0, r.normalizeClass)(['card-subtitle', It(e)]) }, (0, r.toDisplayString)(_t(e)), 3)) : (0, r.createCommentVNode)('v-if', !0)]), (0, r.createElementVNode)('div', Ve, [qt(e).length > 0 ? ((0, r.openBlock)(), (0, r.createElementBlock)('div', be, [((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, null, (0, r.renderList)(qt(e), e => ((0, r.openBlock)(), (0, r.createElementBlock)('span', { key: `equip-tag-${n}-${e}`, class: 'card-tag' }, (0, r.toDisplayString)(e), 1))), 128))])) : (0, r.createCommentVNode)('v-if', !0), Ot(e) ? ((0, r.openBlock)(), (0, r.createElementBlock)('p', Ne, [t[18] || (t[18] = (0, r.createElementVNode)('span', { class: 'card-label' }, '类型:', -1)), (0, r.createTextVNode)((0, r.toDisplayString)(Ot(e)), 1)])) : (0, r.createCommentVNode)('v-if', !0), Lt(e).length > 0 ? ((0, r.openBlock)(), (0, r.createElementBlock)(r.Fragment, { key: 2 }, [t[19] || (t[19] = (0, r.createElementVNode)('p', null, [(0, r.createElementVNode)('span', { class: 'card-label' }, '效果:')], -1)), (0, r.createElementVNode)('ul', Fe, [((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, null, (0, r.renderList)(Lt(e), (e, t) => ((0, r.openBlock)(), (0, r.createElementBlock)('li', { key: `equip-effect-${n}-${t}-${e.name}`, class: 'effect-item' }, [e.fallback ? (0, r.createCommentVNode)('v-if', !0) : ((0, r.openBlock)(), (0, r.createElementBlock)('span', Se, (0, r.toDisplayString)(e.name), 1)), (0, r.createElementVNode)('span', $e, (0, r.toDisplayString)(e.content), 1)]))), 128))])], 64)) : ((0, r.openBlock)(), (0, r.createElementBlock)('p', Ce, [...t[20] || (t[20] = [(0, r.createElementVNode)('span', { class: 'card-label' }, '效果:', -1), (0, r.createTextVNode)('无', -1)])])), zt(e) ? ((0, r.openBlock)(), (0, r.createElementBlock)('p', we, (0, r.toDisplayString)(zt(e)), 1)) : (0, r.createCommentVNode)('v-if', !0)])]))), 128)) : 'inventory' === g.value ? ((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, { key: 3 }, (0, r.renderList)(Ut.value, e => ((0, r.openBlock)(), (0, r.createElementBlock)(r.Fragment, { key: e.key }, [(0, r.createElementVNode)('h3', De, (0, r.toDisplayString)(e.title), 1), ((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, null, (0, r.renderList)(e.items, (n, a) => ((0, r.openBlock)(), (0, r.createElementBlock)('article', { key: `${e.key}-${a}-${jt(n)}`, class: 'card' }, [(0, r.createElementVNode)('div', xe, [(0, r.createElementVNode)('h3', { class: (0, r.normalizeClass)(['card-title', It(n)]) }, (0, r.toDisplayString)(jt(n)), 3), _t(n) ? ((0, r.openBlock)(), (0, r.createElementBlock)('span', { key: 0, class: (0, r.normalizeClass)(['card-subtitle', It(n)]) }, (0, r.toDisplayString)(_t(n)), 3)) : (0, r.createCommentVNode)('v-if', !0)]), (0, r.createElementVNode)('div', Ae, [qt(n).length > 0 ? ((0, r.openBlock)(), (0, r.createElementBlock)('div', Le, [((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, null, (0, r.renderList)(qt(n), t => ((0, r.openBlock)(), (0, r.createElementBlock)('span', { key: `${e.key}-${a}-${t}`, class: 'card-tag' }, (0, r.toDisplayString)(t), 1))), 128))])) : (0, r.createCommentVNode)('v-if', !0), Ot(n) ? ((0, r.openBlock)(), (0, r.createElementBlock)('p', Me, [t[21] || (t[21] = (0, r.createElementVNode)('span', { class: 'card-label' }, '类型:', -1)), (0, r.createTextVNode)((0, r.toDisplayString)(Ot(n)), 1)])) : (0, r.createCommentVNode)('v-if', !0), Mt(n).length > 0 ? ((0, r.openBlock)(), (0, r.createElementBlock)(r.Fragment, { key: 2 }, [t[22] || (t[22] = (0, r.createElementVNode)('p', null, [(0, r.createElementVNode)('span', { class: 'card-label' }, '效果:')], -1)), (0, r.createElementVNode)('ul', je, [((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, null, (0, r.renderList)(Mt(n), (t, n) => ((0, r.openBlock)(), (0, r.createElementBlock)('li', { key: `${e.key}-${a}-${n}-${t.name}`, class: 'effect-item' }, [t.fallback ? (0, r.createCommentVNode)('v-if', !0) : ((0, r.openBlock)(), (0, r.createElementBlock)('span', _e, (0, r.toDisplayString)(t.name), 1)), (0, r.createElementVNode)('span', Ie, (0, r.toDisplayString)(t.content), 1)]))), 128))])], 64)) : ((0, r.openBlock)(), (0, r.createElementBlock)('p', Oe, [...t[23] || (t[23] = [(0, r.createElementVNode)('span', { class: 'card-label' }, '效果:', -1), (0, r.createTextVNode)('无', -1)])])), zt(n) && Lt(n).length > 0 ? ((0, r.openBlock)(), (0, r.createElementBlock)('p', ze, (0, r.toDisplayString)(zt(n)), 1)) : (0, r.createCommentVNode)('v-if', !0)])]))), 128))], 64))), 128)) : 'divinity' === g.value ? ((0, r.openBlock)(), (0, r.createElementBlock)(r.Fragment, { key: 4 }, [Kt.value ? ((0, r.openBlock)(), (0, r.createElementBlock)('h3', Te, (0, r.toDisplayString)(Kt.value), 1)) : (0, r.createCommentVNode)('v-if', !0), Zt.value ? ((0, r.openBlock)(), (0, r.createElementBlock)('article', qe, [(0, r.createElementVNode)('div', Pe, [(0, r.createElementVNode)('h3', He, (0, r.toDisplayString)(Zt.value.name), 1)]), (0, r.createElementVNode)('div', Re, [(0, r.createElementVNode)('p', null, (0, r.toDisplayString)(Zt.value.description || '无'), 1)])])) : (0, r.createCommentVNode)('v-if', !0), Jt.value.length > 0 ? ((0, r.openBlock)(), (0, r.createElementBlock)(r.Fragment, { key: 2 }, [t[24] || (t[24] = (0, r.createElementVNode)('h3', { class: 'subsection-title' }, '要素', -1)), ((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, null, (0, r.renderList)(Jt.value, (e, t) => ((0, r.openBlock)(), (0, r.createElementBlock)('article', { key: `elem-${t}-${jt(e)}`, class: 'card divinity-card' }, [(0, r.createElementVNode)('div', We, [(0, r.createElementVNode)('h3', Ye, (0, r.toDisplayString)(jt(e)), 1)]), (0, r.createElementVNode)('div', Ue, [(0, r.createElementVNode)('p', null, (0, r.toDisplayString)(Tt(e)), 1)])]))), 128))], 64)) : (0, r.createCommentVNode)('v-if', !0), Qt.value.length > 0 ? ((0, r.openBlock)(), (0, r.createElementBlock)(r.Fragment, { key: 3 }, [t[25] || (t[25] = (0, r.createElementVNode)('h3', { class: 'subsection-title' }, '权能', -1)), ((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, null, (0, r.renderList)(Qt.value, (e, t) => ((0, r.openBlock)(), (0, r.createElementBlock)('article', { key: `power-${t}-${jt(e)}`, class: 'card divinity-card' }, [(0, r.createElementVNode)('div', Ge, [(0, r.createElementVNode)('h3', Ke, (0, r.toDisplayString)(jt(e)), 1)]), (0, r.createElementVNode)('div', Ze, [(0, r.createElementVNode)('p', null, (0, r.toDisplayString)(Tt(e)), 1)])]))), 128))], 64)) : (0, r.createCommentVNode)('v-if', !0), Xt.value.length > 0 ? ((0, r.openBlock)(), (0, r.createElementBlock)(r.Fragment, { key: 4 }, [t[28] || (t[28] = (0, r.createElementVNode)('h3', { class: 'subsection-title' }, '法则', -1)), ((0, r.openBlock)(!0), (0, r.createElementBlock)(r.Fragment, null, (0, r.renderList)(Xt.value, (e, n) => ((0, r.openBlock)(), (0, r.createElementBlock)('article', { key: `law-${n}-${jt(e)}`, class: 'card divinity-card' }, [(0, r.createElementVNode)('div', Je, [(0, r.createElementVNode)('h3', Qe, (0, r.toDisplayString)(jt(e)), 1)]), (0, r.createElementVNode)('div', Xe, [zt(e) ? ((0, r.openBlock)(), (0, r.createElementBlock)('p', et, (0, r.toDisplayString)(zt(e)), 1)) : (0, r.createCommentVNode)('v-if', !0), Ht(e) ? ((0, r.openBlock)(), (0, r.createElementBlock)('p', tt, [t[26] || (t[26] = (0, r.createElementVNode)('span', { class: 'card-label' }, '被动:', -1)), (0, r.createTextVNode)((0, r.toDisplayString)(Ht(e)), 1)])) : (0, r.createCommentVNode)('v-if', !0), Rt(e) ? ((0, r.openBlock)(), (0, r.createElementBlock)('p', nt, [t[27] || (t[27] = (0, r.createElementVNode)('span', { class: 'card-label' }, '主动:', -1)), (0, r.createTextVNode)((0, r.toDisplayString)(Rt(e)), 1)])) : (0, r.createCommentVNode)('v-if', !0)])]))), 128))], 64)) : (0, r.createCommentVNode)('v-if', !0)], 64)) : ((0, r.openBlock)(), (0, r.createElementBlock)('div', at, (0, r.toDisplayString)(bt.value || '暂无故事'), 1))])]), (0, r.createElementVNode)('button', { id: 'import-action-btn', disabled: b.value, onClick: (0, r.withModifiers)(on, ['stop']) }, (0, r.toDisplayString)(N.value), 9, rt), (0, r.createElementVNode)('div', { id: 'import-action-menu', class: (0, r.normalizeClass)({ show: V.value }) }, [(0, r.createElementVNode)('button', { type: 'button', disabled: b.value, onClick: dn }, '导入到 MVU 变量', 8, lt), (0, r.createElementVNode)('button', { type: 'button', disabled: b.value, onClick: un }, '导入到 聊天世界书', 8, ot)], 2)])], 2)) : ((0, r.openBlock)(), (0, r.createElementBlock)('div', ct, '等待 YAML 数据...'))])) } }); var st = function e(t) { var r = a[t]; if (void 0 !== r) return r.exports; var l = a[t] = { exports: {} }; return n[t](l, l.exports, e), l.exports }(502); const dt = (0, st.A)(it, [['__scopeId', 'data-v-8484ad1c']]); $(() => { const t = (0, r.createApp)(dt).use(e()); t.mount('#app'), $(window).on('pagehide', () => t.unmount()) });
+    //# sourceMappingURL=index.js.map</script>
+  <style>
+    [data-v-8484ad1c]:root {
+      --race-color: #ffffff;
+      --race-color-rgb: 255, 255, 255;
+      --tier-color: #808080;
+      --tier-color-rgb: 128, 128, 128;
+      --name-font-stack: 'Noto Serif SC', 'Source Han Serif SC', 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+      --name-shadow: rgba(0, 0, 0, 0.58);
+      --name-glow: rgba(var(--tier-color-rgb), 0.12);
+      --tier-label-fg: #f3f6ff
+    }
+
+    .viewer-root[data-v-8484ad1c] {
+      min-height: 100vh;
+      padding: 24px 12px 48px;
+      color: #f0f0f0;
+      font-family: 'Noto Sans SC', sans-serif
+    }
+
+    .loading-card[data-v-8484ad1c],
+    .error-card[data-v-8484ad1c] {
+      max-width: 720px;
+      margin: 0 auto;
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 16px
+    }
+
+    .error-body[data-v-8484ad1c] {
+      margin-top: 10px;
+      font-size: 0.9rem
+    }
+
+    .yaml-error-row[data-v-8484ad1c] {
+      margin-bottom: 6px
+    }
+
+    .yaml-error-title[data-v-8484ad1c] {
+      font-weight: 700;
+      margin-bottom: 6px
+    }
+
+    .yaml-error-pre[data-v-8484ad1c] {
+      margin: 0;
+      padding: 10px;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      white-space: pre;
+      overflow: auto
+    }
+
+    .yaml-error-pre.alt[data-v-8484ad1c] {
+      margin-top: 8px;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.1)
+    }
+
+    .yaml-error-details[data-v-8484ad1c] {
+      margin-top: 10px
+    }
+
+    .yaml-error-details summary[data-v-8484ad1c] {
+      cursor: pointer;
+      -webkit-user-select: none;
+      user-select: none
+    }
+
+    .card-wrapper[data-v-8484ad1c] {
+      position: relative;
+      width: 100%;
+      max-width: 900px;
+      margin: 0 auto;
+      border-radius: 16px;
+      overflow: visible;
+      z-index: 1
+    }
+
+    .card-wrapper[data-v-8484ad1c]::before {
+      content: '';
+      position: absolute;
+      inset: -10px;
+      border-radius: 24px;
+      pointer-events: none;
+      z-index: -1;
+      background: radial-gradient(120% 75% at 50% -5%, rgba(var(--tier-color-rgb), 0.34) 0%, rgba(var(--tier-color-rgb), 0.14) 38%, transparent 74%), linear-gradient(180deg, rgba(var(--tier-color-rgb), 0.22) 0%, rgba(var(--tier-color-rgb), 0.06) 30%, transparent 62%);
+      box-shadow: 0 0 0 1px rgba(var(--tier-color-rgb), 0.2), 0 0 24px rgba(var(--tier-color-rgb), 0.22);
+      filter: blur(8px)
+    }
+
+    .frame-layer[data-v-8484ad1c] {
+      position: absolute;
+      top: -25px;
+      left: -5px;
+      width: calc(100% + 10px);
+      height: calc(100% + 50px);
+      z-index: 4;
+      pointer-events: none;
+      display: none;
+      flex-direction: column
+    }
+
+    .frame-layer.show[data-v-8484ad1c] {
+      display: flex
+    }
+
+    .frame-svg[data-v-8484ad1c] {
+      width: 100%;
+      fill: none;
+      stroke: var(--tier-color);
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+      filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8)) drop-shadow(0 0 5px rgba(var(--tier-color-rgb), 0.8))
+    }
+
+    .frame-top[data-v-8484ad1c] {
+      width: 100%;
+      height: 100px;
+      flex-shrink: 0
+    }
+
+    .frame-body[data-v-8484ad1c] {
+      width: 100%;
+      flex-grow: 1
+    }
+
+    .card-background-layer[data-v-8484ad1c] {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      border-radius: 16px;
+      overflow: hidden;
+      background: linear-gradient(180deg, rgba(16, 21, 32, 0.9) 0%, rgba(13, 18, 29, 0.92) 56%, rgba(10, 14, 23, 0.94) 100%);
+      border: 1px solid rgba(var(--tier-color-rgb), 0.72);
+      border-top: 2px solid rgba(var(--tier-color-rgb), 1);
+      box-shadow: 0 14px 36px rgba(0, 0, 0, 0.78), 0 0 28px rgba(var(--tier-color-rgb), 0.24), 0 -2px 30px rgba(var(--tier-color-rgb), 0.42), inset 0 0 30px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(var(--tier-color-rgb), 0.75);
+      backdrop-filter: blur(2px) saturate(136%);
+      -webkit-backdrop-filter: blur(2px) saturate(136%)
+    }
+
+    .card-background-layer[data-v-8484ad1c]::before,
+    .card-background-layer[data-v-8484ad1c]::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none
+    }
+
+    .card-background-layer[data-v-8484ad1c]::before {
+      z-index: 1;
+      mix-blend-mode: screen;
+      background-image: radial-gradient(140% 95% at 50% -8%, rgba(var(--tier-color-rgb), 0.66) 0%, rgba(var(--tier-color-rgb), 0.3) 32%, rgba(var(--tier-color-rgb), 0.08) 58%, transparent 78%), linear-gradient(180deg, rgba(var(--tier-color-rgb), 0.48) 0%, rgba(var(--tier-color-rgb), 0.16) 26%, transparent 56%)
+    }
+
+    .card-background-layer[data-v-8484ad1c]::after {
+      z-index: 1;
+      opacity: 0.92;
+      background-image: radial-gradient(circle at 50% 82%, rgba(var(--race-color-rgb), 0.26) 0%, transparent 74%), radial-gradient(circle at 50% 48%, transparent 58%, rgba(0, 0, 0, 0.33) 100%)
+    }
+
+    #particle-canvas[data-v-8484ad1c] {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      pointer-events: none;
+      mix-blend-mode: normal;
+      opacity: 0.78
+    }
+
+    .card-wrapper.high-tier .card-background-layer[data-v-8484ad1c] {
+      border: 1px solid rgba(var(--tier-color-rgb), 0.95);
+      border-top: 3px solid rgba(var(--tier-color-rgb), 1)
+    }
+
+    .sheet-content-wrapper[data-v-8484ad1c] {
+      position: relative;
+      z-index: 3
+    }
+
+    .sheet-header[data-v-8484ad1c] {
+      padding: 50px 20px 25px;
+      text-align: center;
+      position: relative;
+      margin-bottom: 10px;
+      border-bottom: 1px solid rgba(var(--tier-color-rgb), 0.2);
+      background: radial-gradient(ellipse at 50% 0%, rgba(var(--tier-color-rgb), 0.15) 0%, transparent 80%)
+    }
+
+    .sheet-header[data-v-8484ad1c]::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: -1;
+      background-image: linear-gradient(90deg, transparent 95%, rgba(var(--tier-color-rgb), 0.1) 95%), linear-gradient(0deg, transparent 95%, rgba(var(--tier-color-rgb), 0.1) 95%);
+      background-size: 40px 40px;
+      mask-image: linear-gradient(to bottom, rgba(148, 148, 148, 0.72) 0%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, rgba(148, 148, 148, 0.72) 0%, transparent 100%)
+    }
+
+    .level-badge[data-v-8484ad1c] {
+      display: inline-block;
+      padding: 4px 16px;
+      border-radius: 50px;
+      border: 1px solid var(--tier-color);
+      color: var(--tier-color);
+      font-weight: 700;
+      margin-bottom: 15px;
+      background: rgba(0, 0, 0, 0.7);
+      box-shadow: 0 0 15px rgba(var(--tier-color-rgb), 0.2);
+      text-shadow: 0 0 8px rgba(var(--tier-color-rgb), 0.6)
+    }
+
+    .char-name[data-v-8484ad1c] {
+      margin: 0 0 10px;
+      font-size: 3rem;
+      color: #ffffff;
+      font-family: var(--name-font-stack);
+      font-weight: 700;
+      letter-spacing: 0.25px;
+      line-height: 1.08;
+      text-shadow: 0 1px 2px var(--name-shadow), 0 0 4px var(--name-glow)
+    }
+
+    .char-meta-row[data-v-8484ad1c] {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      align-items: center;
+      font-size: 0.95rem
+    }
+
+    .meta-separator[data-v-8484ad1c] {
+      color: rgba(242, 247, 255, 0.78);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.86), 0 0 3px rgba(var(--tier-color-rgb), 0.22)
+    }
+
+    .tier-name[data-v-8484ad1c] {
+      display: inline-flex;
+      align-items: center;
+      padding: 1px 11px;
+      border-radius: 999px;
+      border: 1px solid rgba(var(--tier-color-rgb), 0.9);
+      color: var(--tier-label-fg);
+      background: linear-gradient(180deg, rgba(8, 10, 16, 0.84) 0%, rgba(10, 12, 18, 0.68) 100%);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.52), 0 0 10px rgba(var(--tier-color-rgb), 0.34);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+      font-weight: 700;
+      letter-spacing: 0.12px;
+      line-height: 1.2
+    }
+
+    .sheet-body[data-v-8484ad1c] {
+      padding: 20px 30px 90px
+    }
+
+    .attributes-grid[data-v-8484ad1c] {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 30px;
+      --flag-width: 96px;
+      --flag-min-height: 118px;
+      --flag-top-padding: 15px;
+      --flag-bottom-padding: 30px;
+      --flag-name-size: clamp(1rem, calc(var(--flag-width) * 0.2), 1.08rem);
+      --flag-total-size: clamp(2rem, calc(var(--flag-width) * 0.4), 2.45rem);
+      --flag-formula-size: clamp(0.76rem, calc(var(--flag-width) * 0.115), 0.86rem);
+      --flag-total-offset: 0px
+    }
+
+    .attribute-item[data-v-8484ad1c] {
+      flex: 0 0 var(--flag-width);
+      width: var(--flag-width);
+      min-width: var(--flag-width);
+      max-width: var(--flag-width);
+      min-height: var(--flag-min-height);
+      box-sizing: border-box;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-top: 2px solid var(--race-color);
+      clip-path: polygon(0% 0%, 100% 0%, 100% 85%, 50% 100%, 0% 85%);
+      padding: var(--flag-top-padding) 5px var(--flag-bottom-padding);
+      text-align: center;
+      cursor: default;
+      transition: transform 0.2s, background 0.2s, border-color 0.2s, box-shadow 0.2s
+    }
+
+    .attribute-item.has-formula[data-v-8484ad1c] {
+      cursor: pointer
+    }
+
+    .attribute-item[data-v-8484ad1c]:hover {
+      transform: translateY(-3px);
+      background: rgba(var(--race-color-rgb), 0.1);
+      box-shadow: 0 5px 20px rgba(var(--race-color-rgb), 0.15);
+      border-color: rgba(var(--race-color-rgb), 0.4)
+    }
+
+    .attribute-name[data-v-8484ad1c] {
+      display: block;
+      font-size: var(--flag-name-size);
+      color: #fff;
+      margin-bottom: 6px;
+      font-weight: 700;
+      line-height: 1.05;
+      opacity: 0.96
+    }
+
+    .attribute-total[data-v-8484ad1c] {
+      display: block;
+      margin-top: var(--flag-total-offset, 0px);
+      font-family: 'Cinzel', 'Times New Roman', serif;
+      font-size: var(--flag-total-size);
+      line-height: 1;
+      font-weight: 700;
+      text-shadow: 0 2px 15px rgba(var(--race-color-rgb), 0.45)
+    }
+
+    .attribute-formula[data-v-8484ad1c] {
+      display: none;
+      margin-top: 6px;
+      font-size: var(--flag-formula-size);
+      color: var(--race-color);
+      font-weight: 700;
+      line-height: 1.2
+    }
+
+    .attribute-item.show-formula .attribute-total[data-v-8484ad1c] {
+      display: none
+    }
+
+    .attribute-item.show-formula .attribute-formula[data-v-8484ad1c] {
+      display: block
+    }
+
+    .tab-nav[data-v-8484ad1c] {
+      display: flex;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      margin-bottom: 14px;
+      overflow-x: auto;
+      scrollbar-width: none
+    }
+
+    .tab-nav[data-v-8484ad1c]::-webkit-scrollbar {
+      display: none
+    }
+
+    .tab-button[data-v-8484ad1c] {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: #9a9a9a;
+      padding: 12px 16px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: color 0.2s ease, border-color 0.2s ease
+    }
+
+    .tab-button.active[data-v-8484ad1c] {
+      color: var(--race-color);
+      border-bottom: 2px solid var(--race-color);
+      font-weight: 700
+    }
+
+    .tab-content[data-v-8484ad1c] {
+      display: block
+    }
+
+    .profile-grid[data-v-8484ad1c] {
+      display: grid;
+      gap: 8px
+    }
+
+    .profile-row[data-v-8484ad1c] {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      align-items: stretch
+    }
+
+    .profile-cell[data-v-8484ad1c] {
+      min-width: 0;
+      display: flex;
+      flex-direction: column
+    }
+
+    .profile-panel[data-v-8484ad1c] {
+      height: 100%;
+      box-sizing: border-box
+    }
+
+    .subsection-title[data-v-8484ad1c] {
+      font-size: 1.08rem;
+      margin: 0 0 8px;
+      padding-left: 8px;
+      border-left: 3px solid var(--race-color);
+      color: var(--race-color)
+    }
+
+    .divinity-main-title[data-v-8484ad1c] {
+      text-align: center;
+      border-left: none;
+      color: var(--tier-color)
+    }
+
+    .story[data-v-8484ad1c] {
+      white-space: pre-line;
+      line-height: 1.58;
+      margin-bottom: 12px;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      padding: 12px
+    }
+
+    .tags-box[data-v-8484ad1c] {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 12px;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      padding: 10px
+    }
+
+    .card[data-v-8484ad1c] {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-left: 3px solid var(--race-color);
+      padding: 12px;
+      margin-bottom: 12px;
+      border-radius: 6px
+    }
+
+    .divinity-card[data-v-8484ad1c] {
+      border-left-color: var(--tier-color)
+    }
+
+    .card-header[data-v-8484ad1c] {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 10px;
+      margin-bottom: 8px;
+      padding-bottom: 5px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08)
+    }
+
+    .card-title[data-v-8484ad1c] {
+      margin: 0;
+      font-size: 1.05rem;
+      color: #fff;
+      font-weight: 700
+    }
+
+    .card-subtitle[data-v-8484ad1c] {
+      font-size: 0.85rem;
+      color: #bbb
+    }
+
+    .card-title.quality-common[data-v-8484ad1c],
+    .card-subtitle.quality-common[data-v-8484ad1c] {
+      color: #c4cad3
+    }
+
+    .card-title.quality-uncommon[data-v-8484ad1c],
+    .card-subtitle.quality-uncommon[data-v-8484ad1c] {
+      color: #7be495;
+      text-shadow: 0 0 10px rgba(123, 228, 149, 0.28)
+    }
+
+    .card-title.quality-rare[data-v-8484ad1c],
+    .card-subtitle.quality-rare[data-v-8484ad1c] {
+      color: #62bbff;
+      text-shadow: 0 0 10px rgba(98, 187, 255, 0.3)
+    }
+
+    .card-title.quality-epic[data-v-8484ad1c],
+    .card-subtitle.quality-epic[data-v-8484ad1c] {
+      color: #cf95ff;
+      text-shadow: 0 0 10px rgba(207, 149, 255, 0.3)
+    }
+
+    .card-title.quality-legendary[data-v-8484ad1c],
+    .card-subtitle.quality-legendary[data-v-8484ad1c] {
+      color: #ffc46b;
+      text-shadow: 0 0 10px rgba(255, 196, 107, 0.3)
+    }
+
+    .card-title.quality-mythic[data-v-8484ad1c],
+    .card-subtitle.quality-mythic[data-v-8484ad1c] {
+      color: #ff78c5;
+      text-shadow: 0 0 10px rgba(255, 120, 197, 0.3)
+    }
+
+    .card-body p[data-v-8484ad1c] {
+      margin: 5px 0;
+      white-space: pre-line;
+      line-height: 1.5
+    }
+
+    .card-label[data-v-8484ad1c] {
+      color: var(--race-color);
+      font-weight: 700;
+      margin-right: 4px
+    }
+
+    .effect-list[data-v-8484ad1c] {
+      margin: 4px 0 8px;
+      padding: 0;
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px
+    }
+
+    .effect-item[data-v-8484ad1c] {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 6px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.04)
+    }
+
+    .effect-name[data-v-8484ad1c] {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      border: 1px solid rgba(var(--race-color-rgb), 0.5);
+      background: rgba(var(--race-color-rgb), 0.12);
+      color: var(--race-color);
+      font-weight: 700;
+      font-size: 0.78rem;
+      line-height: 1;
+      padding: 3px 8px
+    }
+
+    .effect-text[data-v-8484ad1c] {
+      flex: 1;
+      min-width: 0;
+      white-space: pre-line;
+      line-height: 1.45
+    }
+
+    .card-description[data-v-8484ad1c] {
+      margin-top: 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      padding-top: 8px;
+      opacity: 0.9
+    }
+
+    .card-tags[data-v-8484ad1c] {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px
+    }
+
+    .card-tag[data-v-8484ad1c] {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.82rem;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.05)
+    }
+
+    #import-action-btn[data-v-8484ad1c] {
+      position: absolute;
+      bottom: 15px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(30, 30, 30, 0.82);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      z-index: 60;
+      font-size: 1.2rem;
+      transition: all 0.2s;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5)
+    }
+
+    #import-action-btn[data-v-8484ad1c]:disabled {
+      opacity: 0.7;
+      cursor: wait
+    }
+
+    #import-action-btn[data-v-8484ad1c]:hover:not(:disabled) {
+      background: rgba(60, 60, 60, 0.92);
+      box-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+      border-color: #fff
+    }
+
+    #import-action-menu[data-v-8484ad1c] {
+      position: absolute;
+      bottom: 55px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(20, 20, 20, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 10px;
+      padding: 6px;
+      z-index: 70;
+      min-width: 190px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: none
+    }
+
+    #import-action-menu.show[data-v-8484ad1c] {
+      display: block
+    }
+
+    #import-action-menu button[data-v-8484ad1c] {
+      width: 100%;
+      background: transparent;
+      border: 1px solid transparent;
+      color: #eee;
+      padding: 10px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      text-align: left;
+      font-size: 0.95rem
+    }
+
+    #import-action-menu button[data-v-8484ad1c]:disabled {
+      opacity: 0.6;
+      cursor: wait
+    }
+
+    #import-action-menu button[data-v-8484ad1c]:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.12)
+    }
+
+    @media (min-width:900px) {
+      .attributes-grid[data-v-8484ad1c] {
+        justify-content: center;
+        gap: 12px;
+        --flag-width: 140px;
+        --flag-min-height: 150px;
+        --flag-top-padding: 20px;
+        --flag-bottom-padding: 38px;
+        --flag-total-offset: 10px
+      }
+    }
+
+    @media (max-width:820px) {
+      .viewer-root[data-v-8484ad1c] {
+        padding: 18px 10px 36px
+      }
+
+      .sheet-body[data-v-8484ad1c] {
+        padding: 16px 18px 84px
+      }
+
+      .sheet-header[data-v-8484ad1c] {
+        padding: 40px 16px 20px
+      }
+
+      .char-name[data-v-8484ad1c] {
+        font-size: 2.2rem;
+        letter-spacing: 0.2px;
+        text-shadow: 0 1px 2px var(--name-shadow), 0 0 3px rgba(var(--tier-color-rgb), 0.12)
+      }
+
+      .tab-button[data-v-8484ad1c] {
+        flex: 0 0 auto;
+        min-width: 82px;
+        padding: 10px 12px
+      }
+    }
+
+    @media (max-width:640px) {
+      .card-wrapper[data-v-8484ad1c] {
+        max-width: 100%;
+        border-radius: 14px
+      }
+
+      .card-background-layer[data-v-8484ad1c] {
+        border-radius: 14px
+      }
+
+      .sheet-header[data-v-8484ad1c] {
+        padding: 34px 12px 16px;
+        margin-bottom: 6px
+      }
+
+      .level-badge[data-v-8484ad1c] {
+        margin-bottom: 10px;
+        padding: 3px 12px;
+        font-size: 0.9rem
+      }
+
+      .char-name[data-v-8484ad1c] {
+        font-size: 1.8rem;
+        margin-bottom: 8px;
+        letter-spacing: 0.1px;
+        text-shadow: 0 1px 2px var(--name-shadow), 0 0 2px rgba(var(--tier-color-rgb), 0.1)
+      }
+
+      .char-meta-row[data-v-8484ad1c] {
+        gap: 6px;
+        font-size: 0.82rem
+      }
+
+      .tier-name[data-v-8484ad1c] {
+        padding: 1px 8px;
+        border-width: 1px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 5px rgba(var(--tier-color-rgb), 0.16)
+      }
+
+      .sheet-body[data-v-8484ad1c] {
+        padding: 12px 10px 80px
+      }
+
+      .attributes-grid[data-v-8484ad1c] {
+        gap: 8px 10px;
+        margin-bottom: 16px;
+        --flag-width: calc((100% - 20px) / 3);
+        --flag-min-height: calc(var(--flag-width) * 1.18);
+        --flag-top-padding: 12px;
+        --flag-bottom-padding: 26px;
+        --flag-name-size: clamp(0.98rem, calc(var(--flag-width) * 0.16), 1.08rem);
+        --flag-total-size: clamp(2.05rem, calc(var(--flag-width) * 0.34), 2.45rem);
+        --flag-formula-size: clamp(0.72rem, calc(var(--flag-width) * 0.105), 0.82rem)
+      }
+
+      .attribute-item[data-v-8484ad1c] {
+        flex: 0 0 var(--flag-width);
+        width: var(--flag-width);
+        max-width: var(--flag-width);
+        min-width: 0;
+        min-height: var(--flag-min-height);
+        padding: var(--flag-top-padding) 5px var(--flag-bottom-padding)
+      }
+
+      .profile-row[data-v-8484ad1c] {
+        grid-template-columns: 1fr;
+        gap: 0
+      }
+
+      .subsection-title[data-v-8484ad1c] {
+        font-size: 1rem
+      }
+
+      .story[data-v-8484ad1c],
+      .card[data-v-8484ad1c],
+      .tags-box[data-v-8484ad1c] {
+        padding: 10px
+      }
+
+      #import-action-btn[data-v-8484ad1c] {
+        bottom: 10px;
+        font-size: 1.05rem;
+        padding: 7px 10px
+      }
+
+      #import-action-menu[data-v-8484ad1c] {
+        bottom: 46px;
+        min-width: 170px
+      }
+
+      #import-action-menu button[data-v-8484ad1c] {
+        padding: 8px;
+        font-size: 0.9rem
+      }
+    }
+
+
+    /*# sourceMappingURL=main.css.map*/
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+  <script id="data-source" type="text/yaml">$1</script>
+</body>
+</html>
