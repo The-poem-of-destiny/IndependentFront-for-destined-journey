@@ -18,17 +18,6 @@ export const useGameStore = defineStore('game', () => {
   const messages = ref<ChatMessage[]>([])
   const isGenerating = ref(false)
 
-  // === 系统事件可见性 ===
-  const systemEventsVisible = ref(true)
-  const systemEventFilters = ref<Record<string, boolean>>({
-    craft: true,
-    char_gen: true,
-    item_gen: true,
-    combat: true,
-    character_update: false,
-    item_update: false,
-    quest_update: false,
-  })
   const recentMemories = ref<MemoryRecord[]>([])
   const activePlotEvents = ref<PlotEvent[]>([])
   const plotOutline = ref<PlotOutline | null>(null)
@@ -106,6 +95,7 @@ export const useGameStore = defineStore('game', () => {
 
   function clearActive() {
     activeSaveId.value = null
+    isGenerating.value = false
     characters.value = []
     messages.value = []
     recentMemories.value = []
@@ -119,7 +109,6 @@ export const useGameStore = defineStore('game', () => {
     saves, activeSaveId, activeSave,
     characters, player, npcs,
     messages, isGenerating,
-    systemEventsVisible, systemEventFilters,
     recentMemories, activePlotEvents, plotOutline,
     activeCombat, isInCombat,
     saveProfile, fp, gameTime,

@@ -21,7 +21,7 @@ const emit = defineEmits<{
 }>()
 
 const container = ref<HTMLDivElement>()
-const expandedIds = ref<Set<string>>(new Set())
+const expandedIds = ref<Record<string, boolean>>({})
 
 watch(() => props.messages?.length, () => {
   nextTick(() => {
@@ -38,10 +38,10 @@ function formatTime(ts?: number): string {
 }
 
 function toggleExpand(id: string) {
-  if (expandedIds.value.has(id)) {
-    expandedIds.value.delete(id)
+  if (expandedIds.value[id]) {
+    delete expandedIds.value[id]
   } else {
-    expandedIds.value.add(id)
+    expandedIds.value[id] = true
   }
 }
 
@@ -101,7 +101,7 @@ function eventIcon(type: string): string {
         >
           <!-- 折叠通知条 -->
           <div
-            v-if="!expandedIds.has(msg.id)"
+            v-if="!expandedIds[msg.id]"
             class="system-notif"
             :class="`system-notif-${msg.systemEvent.type}`"
             @click="toggleExpand(msg.id)"

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { useGameStore } from '../../stores/game-store'
 import { useUIStore } from '../../stores/ui-store'
+import { useSettingsStore } from '../../stores/settings-store'
 import TopBar from './TopBar.vue'
 import SideToolbar from './SideToolbar.vue'
 import ChatFlow from './ChatFlow.vue'
@@ -16,6 +17,8 @@ import MapPanel from './MapPanel.vue'
 
 const game = useGameStore()
 const ui = useUIStore()
+const settings = useSettingsStore()
+const s = settings.settings
 
 onMounted(async () => {
   if (ui.activeSaveId) {
@@ -23,13 +26,25 @@ onMounted(async () => {
   }
 })
 
+let mockTimer: ReturnType<typeof setTimeout> | null = null
+
+onUnmounted(() => {
+  if (mockTimer !== null) {
+    clearTimeout(mockTimer)
+    mockTimer = null
+  }
+  game.isGenerating = false
+})
+
 function handleSend(content: string) {
+  if (game.isGenerating) return
   game.addMessage(content, 'user')
   // TODO: Phase 7e-3 — 接入 AgentOrchestrator，移除 mock
   game.isGenerating = true
-  setTimeout(() => {
+  mockTimer = setTimeout(() => {
     game.addMessage('[AI 回复将在 Phase 7e-3 接入引擎后生效]', 'assistant')
     game.isGenerating = false
+    mockTimer = null
   }, 500)
 }
 
@@ -50,8 +65,8 @@ function handleToolClick(id: string) {
       <ChatFlow
         :messages="game.messages"
         :is-generating="game.isGenerating"
-        :system-events-visible="game.systemEventsVisible"
-        :system-event-filters="game.systemEventFilters"
+        :system-events-visible="s.systemEventsVisible"
+        :system-event-filters="s.systemEventFilters"
         @send="handleSend"
       />
       <StatusHUD />
