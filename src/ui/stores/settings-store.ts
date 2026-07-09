@@ -120,6 +120,18 @@ function getDefaults(): Record<string, any> {
     memoryCompressionThreshold: 100,
     memorySnapshotLimit: 30,
     memoryCacheStrategy: 'balanced' as string,
+
+    // 消息 & 系统事件可见性
+    systemEventsVisible: true,
+    systemEventFilters: {
+      craft: true,
+      char_gen: true,
+      item_gen: true,
+      combat: true,
+      character_update: false,
+      item_update: false,
+      quest_update: false,
+    } as Record<string, boolean>,
   }
 }
 

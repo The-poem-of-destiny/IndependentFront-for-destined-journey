@@ -22,7 +22,7 @@ const s = cfg.settings  // 短别名，模板里用 s.xxx
 // ============================================================
 // 主导航
 // ============================================================
-type Section = 'api' | 'agent' | 'worldbook' | 'plot' | 'memory' | 'theme' | 'data' | 'about'
+type Section = 'api' | 'agent' | 'worldbook' | 'plot' | 'memory' | 'theme' | 'messages' | 'data' | 'about'
 const activeSection = ref<Section>('api')
 
 const navItems: { key: Section; label: string; icon: string }[] = [
@@ -32,6 +32,7 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'plot', label: '剧情系统', icon: 'fa-solid fa-scroll' },
   { key: 'memory', label: '记忆 & 缓存', icon: 'fa-solid fa-brain' },
   { key: 'theme', label: '外观主题', icon: 'fa-solid fa-palette' },
+  { key: 'messages', label: '消息显示', icon: 'fa-solid fa-message' },
   { key: 'data', label: '存档数据', icon: 'fa-solid fa-database' },
   { key: 'about', label: '关于', icon: 'fa-solid fa-circle-info' },
 ]
@@ -721,6 +722,18 @@ const plotDifficultyOptions = [
 // 主题 & 数据 & 关于
 // ============================================================
 function selectTheme(id:string){theme.apply(id);ui.toast(`主题：${theme.currentTheme?.nameZh}`,'success')}
+function eventFilterLabel(key: string): string {
+  const labels: Record<string, string> = {
+    craft: '制作完成',
+    char_gen: '新角色加入',
+    item_gen: '新物品获得',
+    combat: '战斗结果',
+    character_update: '角色微调',
+    item_update: '物品变动',
+    quest_update: '任务进度',
+  }
+  return labels[key] ?? key
+}
 const showClearConfirm = ref(false)
 const storageInfo = ref<{ used: number; quota: number; pct: number } | null>(null)
 async function loadStorageUsage() {
@@ -1161,6 +1174,37 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
           <AppCard padding="md" style="margin-top:16px"><div class="form-grid"><label class="form-label">字体风格<p class="form-hint">衬线体更有古典文学感，无衬线体更适合长时间阅读</p><select class="form-input" :value="theme.fonts" @change="theme.setFonts(($event.target as HTMLSelectElement).value as any)"><option value="sans">无衬线 (Noto Sans SC)</option><option value="serif">衬线 (Noto Serif SC)</option><option value="mixed">混合</option></select></label><label class="form-label">字体大小<p class="form-hint">调整所有界面文字大小</p><select class="form-input" :value="theme.fontSize" @change="theme.setFontSize(($event.target as HTMLSelectElement).value)"><option value="14">小 (14px)</option><option value="16" selected>默认 (16px)</option><option value="18">大 (18px)</option><option value="20">特大 (20px)</option></select></label></div></AppCard>
         </section>
 
+        <!-- ========== 消息显示 ========== -->
+        <section v-if="activeSection === 'messages'" class="section centered">
+          <h3>消息显示</h3>
+          <p class="section-desc">控制对话流中系统通知的可见性。关闭后对应类型的消息将不在正文中渲染。</p>
+
+          <AppCard padding="md" style="margin-top: 16px">
+            <h4>全局开关</h4>
+            <div class="toggle-row">
+              <span>显示系统通知</span>
+              <label class="toggle-label">
+                <input type="checkbox" v-model="s.systemEventsVisible" class="toggle-input" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </AppCard>
+
+          <AppCard padding="md" style="margin-top: 12px">
+            <h4>分类控制</h4>
+            <p class="text-muted text-sm" style="margin-bottom: 12px">选择哪些类型的系统事件在对话流中展示</p>
+            <div class="event-filter-grid">
+              <div class="toggle-row" v-for="(enabled, key) in s.systemEventFilters" :key="key">
+                <span>{{ eventFilterLabel(key) }}</span>
+                <label class="toggle-label">
+                  <input type="checkbox" v-model="s.systemEventFilters[key]" class="toggle-input" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+          </AppCard>
+        </section>
+
         <!-- ========== 存档数据 ========== -->
         <section v-if="activeSection === 'data'" class="section centered">
           <h3>存档数据管理</h3><p class="section-desc">导出、导入或清除所有数据。建议定期导出备份。</p>
@@ -1441,5 +1485,18 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 @keyframes template-preview-in {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+.event-filter-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--theme-border, rgba(255,255,255,0.04));
 }
 </style>
