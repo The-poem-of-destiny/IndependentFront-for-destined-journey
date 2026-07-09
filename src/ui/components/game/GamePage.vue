@@ -5,7 +5,6 @@ import { useUIStore } from '../../stores/ui-store'
 import TopBar from './TopBar.vue'
 import SideToolbar from './SideToolbar.vue'
 import ChatFlow from './ChatFlow.vue'
-import type { FlowMessage } from './ChatFlow.vue'
 import StatusHUD from './StatusHUD.vue'
 import AppModal from '../shared/AppModal.vue'
 import ItemsPanel from './ItemsPanel.vue'
@@ -24,16 +23,13 @@ onMounted(async () => {
   }
 })
 
-const flowMessages: FlowMessage[] = []
-
 function handleSend(content: string) {
-  flowMessages.push({ role: 'player', content, timestamp: Date.now() })
+  game.addMessage(content, 'user')
+  // TODO: Phase 7e-3 — 接入 AgentOrchestrator，移除 mock
+  game.isGenerating = true
   setTimeout(() => {
-    flowMessages.push({
-      role: 'assistant',
-      content: '[AI 回复将在 Phase 7e-3 接入引擎后生效]',
-      timestamp: Date.now(),
-    })
+    game.addMessage('[AI 回复将在 Phase 7e-3 接入引擎后生效]', 'assistant')
+    game.isGenerating = false
   }, 500)
 }
 
@@ -51,7 +47,13 @@ function handleToolClick(id: string) {
     <TopBar />
     <div class="game-body">
       <SideToolbar @tool-click="handleToolClick" />
-      <ChatFlow :messages="flowMessages" :is-generating="game.isGenerating" @send="handleSend" />
+      <ChatFlow
+        :messages="game.messages"
+        :is-generating="game.isGenerating"
+        :system-events-visible="game.systemEventsVisible"
+        :system-event-filters="game.systemEventFilters"
+        @send="handleSend"
+      />
       <StatusHUD />
     </div>
 
