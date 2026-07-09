@@ -467,6 +467,8 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
   timestamp: number;
+  /** 🆕 系统事件数据 — 仅 role='system' 时有值，供前端渲染卡片 */
+  systemEvent?: SystemEvent;
   variables?: Record<string, string | number>;
   metadata?: {
     tokenCount?: number;
@@ -2644,6 +2646,72 @@ export interface CombatSummaryResult {
   rounds: number;
   /** 胜负结果 */
   outcome: 'ally_win' | 'enemy_win' | 'draw' | 'fled';
+}
+
+// ========== ChatFlow 系统事件类型 (Phase 7e) ==========
+
+/** 系统事件联合类型 — 前端根据 type 渲染不同卡片 */
+export type SystemEvent =
+  | CraftSystemEvent
+  | CharGenSystemEvent
+  | ItemGenSystemEvent
+  | CombatSystemEvent
+  | CharacterUpdateEvent
+  | ItemUpdateEvent
+  | QuestUpdateEvent;
+
+export interface CraftSystemEvent {
+  type: 'craft';
+  productName: string;
+  quality: QualityLevel;
+  rating: CraftRating;
+  narrative: string;
+  details: CraftAgentOutput;
+}
+
+export interface CharGenSystemEvent {
+  type: 'char_gen';
+  characterName: string;
+  race: string;
+  tier: number;
+  narrative: string;
+  details: CharGenOutput;
+}
+
+export interface ItemGenSystemEvent {
+  type: 'item_gen';
+  itemName: string;
+  quality: QualityLevel;
+  itemType: string;
+  narrative: string;
+  details: ItemGenOutput;
+}
+
+export interface CombatSystemEvent {
+  type: 'combat';
+  outcome: 'ally_win' | 'enemy_win' | 'draw' | 'fled';
+  narrative: string;
+  details: CombatSummaryResult;
+}
+
+export interface CharacterUpdateEvent {
+  type: 'character_update';
+  characterName: string;
+  narrative: string;
+}
+
+export interface ItemUpdateEvent {
+  type: 'item_update';
+  itemName: string;
+  operation: string;
+  narrative: string;
+}
+
+export interface QuestUpdateEvent {
+  type: 'quest_update';
+  questName: string;
+  status: string;
+  narrative: string;
 }
 
 // ========== Geography Types (Phase G) ==========
