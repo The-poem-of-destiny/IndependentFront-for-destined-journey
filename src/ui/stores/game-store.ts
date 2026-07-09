@@ -18,7 +18,17 @@ export const useGameStore = defineStore('game', () => {
   const messages = ref<ChatMessage[]>([])
   const isGenerating = ref(false)
 
-  // === 记忆 & 剧情 ===
+  // === 系统事件可见性 ===
+  const systemEventsVisible = ref(true)
+  const systemEventFilters = ref<Record<string, boolean>>({
+    craft: true,
+    char_gen: true,
+    item_gen: true,
+    combat: true,
+    character_update: false,
+    item_update: false,
+    quest_update: false,
+  })
   const recentMemories = ref<MemoryRecord[]>([])
   const activePlotEvents = ref<PlotEvent[]>([])
   const plotOutline = ref<PlotOutline | null>(null)
@@ -41,6 +51,26 @@ export const useGameStore = defineStore('game', () => {
   function showModal(id: string) { activeModal.value = id }
   function closeModal() { activeModal.value = null }
   function toggleFullscreen() { fullscreenStatus.value = !fullscreenStatus.value }
+
+  // === 消息管理 ===
+  function addMessage(content: string, role: 'user' | 'assistant'): void {
+    messages.value.push({
+      id: crypto.randomUUID(),
+      role,
+      content,
+      timestamp: Date.now(),
+    })
+  }
+
+  function addSystemMessage(systemEvent: import('@engine/types').SystemEvent): void {
+    messages.value.push({
+      id: crypto.randomUUID(),
+      role: 'system',
+      content: systemEvent.narrative,
+      timestamp: Date.now(),
+      systemEvent,
+    })
+  }
 
   // === 动作 ===
   async function loadSaves() {
@@ -89,11 +119,13 @@ export const useGameStore = defineStore('game', () => {
     saves, activeSaveId, activeSave,
     characters, player, npcs,
     messages, isGenerating,
+    systemEventsVisible, systemEventFilters,
     recentMemories, activePlotEvents, plotOutline,
     activeCombat, isInCombat,
     saveProfile, fp, gameTime,
     sidebarCollapsed, activeModal, fullscreenStatus,
     toggleSidebar, showModal, closeModal, toggleFullscreen,
+    addMessage, addSystemMessage,
     loadSaves, loadSave, clearActive,
   }
 })
