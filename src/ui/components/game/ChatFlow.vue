@@ -3,12 +3,11 @@ import { ref, watch, nextTick } from 'vue'
 import InputBar from './InputBar.vue'
 import type { ChatMessage, SystemEvent } from '@engine/types'
 
-// Placeholder imports for card components (Task 5 will provide these)
-// import CraftSystemCard from './cards/CraftSystemCard.vue'
-// import CharGenSystemCard from './cards/CharGenSystemCard.vue'
-// import CombatSystemCard from './cards/CombatSystemCard.vue'
-// import ItemSystemCard from './cards/ItemSystemCard.vue'
-// import SystemNotifBar from './cards/SystemNotifBar.vue'
+import CraftSystemCard from './cards/CraftSystemCard.vue'
+import CharGenSystemCard from './cards/CharGenSystemCard.vue'
+import CombatSystemCard from './cards/CombatSystemCard.vue'
+import ItemSystemCard from './cards/ItemSystemCard.vue'
+import SystemNotifBar from './cards/SystemNotifBar.vue'
 
 const props = defineProps<{
   messages?: ChatMessage[]
@@ -120,9 +119,6 @@ function eventIcon(type: string): string {
               <span class="system-card-chevron">▼</span>
             </div>
             <div class="system-card-body">
-              <!-- 根据 type 渲染对应卡片组件 -->
-              <!-- TODO: 取消注释当 Task 5 创建卡片组件后 -->
-              <!--
               <CraftSystemCard
                 v-if="msg.systemEvent.type === 'craft'"
                 :event="msg.systemEvent"
@@ -143,7 +139,6 @@ function eventIcon(type: string): string {
                 v-else
                 :event="msg.systemEvent"
               />
-              -->
             </div>
           </div>
         </div>
