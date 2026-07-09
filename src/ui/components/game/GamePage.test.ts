@@ -73,3 +73,51 @@ describe('GamePage', () => {
     expect(mockLoadSave).toHaveBeenCalledWith('test-save-123')
   })
 })
+
+/* ===== ChatFlow 三源消息渲染测试 ===== */
+describe('ChatFlow — 三源消息渲染', () => {
+  it('应渲染用户消息（右对齐）', async () => {
+    const ChatFlow = (await import('./ChatFlow.vue')).default
+    const msgs: import('@engine/types').ChatMessage[] = [
+      { id: '1', role: 'user', content: '你好', timestamp: 0 },
+    ]
+    const wrapper = mount(ChatFlow, { props: { messages: msgs } })
+    expect(wrapper.find('.bubble-player').exists()).toBe(true)
+    expect(wrapper.find('.bubble-player .bubble-text').text()).toBe('你好')
+  })
+
+  it('应渲染 AI 叙事消息（左对齐）', async () => {
+    const ChatFlow = (await import('./ChatFlow.vue')).default
+    const msgs: import('@engine/types').ChatMessage[] = [
+      { id: '1', role: 'assistant', content: '冒险开始了', timestamp: 0 },
+    ]
+    const wrapper = mount(ChatFlow, { props: { messages: msgs } })
+    expect(wrapper.find('.bubble-narrative').exists()).toBe(true)
+  })
+
+  it('应渲染系统消息为折叠通知条', async () => {
+    const ChatFlow = (await import('./ChatFlow.vue')).default
+    const msgs = [
+      {
+        id: '1',
+        role: 'system' as const,
+        content: '[制作] 成功 — 传说级 霜月之刃',
+        timestamp: 0,
+        systemEvent: { type: 'craft' as const, narrative: '成功打造传说级武器', productName: '霜月之刃', quality: '传说' as const, rating: '成功' as const, details: {} as any },
+      },
+    ]
+    const wrapper = mount(ChatFlow, {
+      props: { messages: msgs, systemEventsVisible: true, systemEventFilters: {} },
+    })
+    // system 消息在 systemEventsVisible=true 且有 systemEvent 时渲染为折叠通知条
+    expect(wrapper.find('.chat-messages').exists()).toBe(true)
+    expect(wrapper.find('.system-notif').exists()).toBe(true)
+  })
+
+  it('空消息列表应显示占位文案', async () => {
+    const ChatFlow = (await import('./ChatFlow.vue')).default
+    const wrapper = mount(ChatFlow, { props: { messages: [] } })
+    expect(wrapper.find('.chat-empty').exists()).toBe(true)
+    expect(wrapper.text()).toContain('等待冒险开始')
+  })
+})
