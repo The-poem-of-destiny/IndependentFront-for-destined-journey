@@ -78,7 +78,10 @@ function formatHistory(ctx: AgentContext): string {
   if (layers <= 0) return '';                        // 0 层 = 不注入
   const maxMessages = layers * 2;                    // user/ai 一对算一层
   return ctx.history.slice(-maxMessages)
-    .map(m => `[${m.role}]: ${m.content.slice(0, slice)}`)
+    .map(m => {
+      const displayRole = m.role === 'system' ? 'assistant' : m.role;
+      return `[${displayRole}]: ${m.content.slice(0, slice)}`;
+    })
     .join('\n');
 }
 
