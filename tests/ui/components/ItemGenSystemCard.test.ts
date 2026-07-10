@@ -72,34 +72,30 @@ describe('ItemSystemCard', () => {
     expect(mount(ItemSystemCard, { props: { event: mockEquip } }).text()).toContain('稀有')
   })
 
-  it('shows equipment section with slot', async () => {
+  it('shows equipment section with slot', () => {
     const w = mount(ItemSystemCard, { props: { event: mockEquip } })
-    // Expand first
-    await w.find('.sys-card-header').trigger('click')
     expect(w.text()).toContain('头部')
   })
 
-  it('shows skill section', async () => {
+  it('shows skill section', () => {
     const w = mount(ItemSystemCard, { props: { event: mockSkill } })
-    await w.find('.sys-card-header').trigger('click')
     expect(w.text()).toContain('极光闪现')
   })
 
-  it('shows inventory with quantity', async () => {
+  it('shows inventory with quantity', () => {
     const w = mount(ItemSystemCard, { props: { event: mockInv } })
-    await w.find('.sys-card-header').trigger('click')
     expect(w.text()).toContain('远古魔力水晶')
     expect(w.text()).toContain('×1')
   })
 
-  it('starts collapsed', () => {
+  it('starts expanded', () => {
     const w = mount(ItemSystemCard, { props: { event: mockEquip } })
-    expect(w.find('.sys-card-body').exists()).toBe(false)
+    expect(w.find('.sys-card-body').exists()).toBe(true)
   })
 
-  it('click header to expand', async () => {
+  it('click collapse button emits collapse', async () => {
     const w = mount(ItemSystemCard, { props: { event: mockEquip } })
-    await w.find('.sys-card-header').trigger('click')
-    expect(w.find('.sys-card-body').exists()).toBe(true)
+    await w.find('.sys-card-collapse').trigger('click')
+    expect(w.emitted('collapse')).toBeTruthy()
   })
 })

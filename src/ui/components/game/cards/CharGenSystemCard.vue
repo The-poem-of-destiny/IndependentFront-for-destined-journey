@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import type { CharGenSystemEvent } from '@engine/types'
 
 const props = defineProps<{ event: CharGenSystemEvent }>()
-
-const expanded = ref(false)
+const emit = defineEmits<{ collapse: [] }>()
 
 // ═══ 色彩常量（原版精确值） ═══
 
@@ -91,7 +90,7 @@ const inventoryGroups = computed(() => {
 <template>
   <div class="ci-card" :style="{ borderColor: tierColor }">
     <!-- ═══ Header: 名字 + 等级 + 层级 ─ 参照原版 sheet-header ═══ -->
-    <div class="ci-header" @click="expanded = !expanded">
+    <div class="ci-header" @click="emit('collapse')">
       <div class="ci-header-main">
         <span v-if="event.details.level" class="ci-level-badge" :style="{ borderColor: tierColor, color: tierColor }">
           Lv.{{ event.details.level }}
@@ -101,12 +100,12 @@ const inventoryGroups = computed(() => {
       <div class="ci-header-meta">
         <span class="ci-race" :style="{ color: raceColor }">{{ event.race }}</span>
         <span class="ci-tier-badge" :style="{ background: tierColor }">T{{ event.tier }}</span>
-        <i class="fa-solid ci-chevron" :class="expanded ? 'fa-chevron-up' : 'fa-chevron-down'" />
+        <i class="fa-solid fa-chevron-up ci-collapse-btn" title="收起" />
       </div>
     </div>
 
-    <!-- ═══ Body: 展开后显示 ═══ -->
-    <div v-show="expanded" class="ci-body">
+    <!-- ═══ Body: 始终显示 ═══ -->
+    <div class="ci-body">
       <!-- A. 五维属性 — 参照原版 attributes-grid -->
       <div v-if="event.details.attributes" class="ci-attrs">
         <div v-for="(val, key) in event.details.attributes" :key="key" class="ci-attr" :style="{ color: ATTR_COLORS[key] ?? '#fff' }">
@@ -391,8 +390,14 @@ const inventoryGroups = computed(() => {
   font-weight: 700;
 }
 
-/* Chevron */
-.ci-chevron { font-size: 0.625rem; opacity: 0.4; }
+/* Collapse button */
+.ci-collapse-btn {
+  font-size: 0.625rem;
+  opacity: 0.4;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.ci-collapse-btn:hover { opacity: 0.8; }
 
 /* ═══ Body ═══ */
 .ci-body {

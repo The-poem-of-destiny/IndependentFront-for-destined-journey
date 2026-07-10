@@ -70,39 +70,33 @@ describe('CraftSystemCard', () => {
 
   it('renders perfection bonus', async () => {
     const w = mount(CraftSystemCard, { props: { event: mockSuccess } })
-    await w.find('.sys-card-header').trigger('click')
     expect(w.text()).toContain('锻火余温')
   })
 
   it('renders check summary', async () => {
     const w = mount(CraftSystemCard, { props: { event: mockSuccess } })
-    await w.find('.sys-card-header').trigger('click')
     expect(w.text()).toContain('DC16')
     expect(w.text()).toContain('d20')
   })
 
   it('renders materials split from comma-separated string', async () => {
     const w = mount(CraftSystemCard, { props: { event: mockSuccess } })
-    await w.find('.sys-card-header').trigger('click')
     expect(w.text()).toContain('精炼铁矿石×3')
     expect(w.text()).toContain('火龙鳞片×1')
   })
 
   it('renders item requests with slot and quality', async () => {
     const w = mount(CraftSystemCard, { props: { event: mockSuccess } })
-    await w.find('.sys-card-header').trigger('click')
     expect(w.text()).toContain('武器')
   })
 
   it('renders industry in footer', async () => {
     const w = mount(CraftSystemCard, { props: { event: mockSuccess } })
-    await w.find('.sys-card-header').trigger('click')
     expect(w.text()).toContain('锻造')
   })
 
   it('renders EXP and FP in footer', async () => {
     const w = mount(CraftSystemCard, { props: { event: mockSuccess } })
-    await w.find('.sys-card-header').trigger('click')
     expect(w.text()).toContain('4000')
     expect(w.text()).toContain('20')
   })
@@ -114,29 +108,23 @@ describe('CraftSystemCard', () => {
 
   it('hides item requests on failure', async () => {
     const w = mount(CraftSystemCard, { props: { event: mockFail } })
-    await w.find('.sys-card-header').trigger('click')
     expect(w.text()).not.toContain('制品')
   })
 
   it('hides EXP/FP when zero', async () => {
     const w = mount(CraftSystemCard, { props: { event: mockFail } })
-    await w.find('.sys-card-header').trigger('click')
     // Should not show 0 EXP/FP badges
     expect(w.findAll('.stat-badge').filter(el => el.text().includes('EXP')).length).toBe(0)
   })
 
-  it('body hidden by default', () => {
+  it('body visible by default', () => {
     const w = mount(CraftSystemCard, { props: { event: mockSuccess } })
-    expect(w.find('.sys-card-body').isVisible()).toBe(false)
+    expect(w.find('.sys-card-body').isVisible()).toBe(true)
   })
 
-  it('click header to toggle', async () => {
+  it('click collapse button emits collapse', async () => {
     const w = mount(CraftSystemCard, { props: { event: mockSuccess } })
-    await w.find('.sys-card-header').trigger('click')
-    expect(w.find('.sys-card-body').isVisible()).toBe(true)
-    await w.find('.sys-card-header').trigger('click')
-    // After collapsing, v-show hides the body
-    const body = w.find('.sys-card-body')
-    expect(body.attributes('style')).toContain('display: none')
+    await w.find('.sys-card-collapse').trigger('click')
+    expect(w.emitted('collapse')).toBeTruthy()
   })
 })

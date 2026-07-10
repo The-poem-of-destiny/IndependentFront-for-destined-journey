@@ -116,42 +116,37 @@ describe('CharGenSystemCard', () => {
     expect(w.text()).toContain('T3')
   })
 
-  // ── 折叠 ──
-  it('starts collapsed (body hidden)', () => {
+  // ── 收起按钮 ──
+  it('starts expanded (body visible)', () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    expect(w.find('.ci-body').isVisible()).toBe(false)
-  })
-  it('click header to expand', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.find('.ci-body').isVisible()).toBe(true)
+  })
+  it('click collapse button emits collapse', async () => {
+    const w = mount(CharGenSystemCard, { props: { event: mockFull } })
+    await w.find('.ci-collapse-btn').trigger('click')
+    expect(w.emitted('collapse')).toBeTruthy()
   })
 
   // ── 展开内容 ──
   it('renders all 5 attributes', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('5')  // STR
     expect(w.text()).toContain('10') // SPI
   })
   it('renders identity chips', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('霜语者')
   })
   it('renders faction', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('诺斯加德联盟')
   })
   it('renders background excerpt', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('霜语氏族')
   })
   it('renders skill names and types', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('冰霜箭矢')
     expect(w.text()).toContain('主动')
     expect(w.text()).toContain('寒冰护体')
@@ -159,13 +154,11 @@ describe('CharGenSystemCard', () => {
   })
   it('renders equipment slot and name', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('主手')
     expect(w.text()).toContain('霜语法杖')
   })
   it('renders ascension when enabled', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('登神长阶')
     expect(w.text()).toContain('冰霜之道')
   })
@@ -173,49 +166,41 @@ describe('CharGenSystemCard', () => {
   // ── 防御性渲染 ──
   it('hides background when empty', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockMinimal } })
-    await w.find('.ci-header').trigger('click')
     const bg = w.find('.ci-bg')
     expect(bg.exists()).toBe(false)
   })
   it('hides skills section when empty', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockMinimal } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).not.toContain('技能')
   })
   it('hides ascension when disabled', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockMinimal } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).not.toContain('登神长阶')
   })
 
   // ── Profile grid ──
   it('renders personality in profile grid', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('性格')
     expect(w.text()).toContain('冷静理智')
   })
   it('renders appearance', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('外貌特质')
     expect(w.text()).toContain('银白长发')
   })
   it('renders likes', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('喜爱')
     expect(w.text()).toContain('冰霜魔法')
   })
   it('renders clothing', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('衣物装饰')
     expect(w.text()).toContain('冰蓝色法师长袍')
   })
   it('hides profile grid when all fields empty', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockMinimal } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).not.toContain('性格')
     expect(w.text()).not.toContain('外貌特质')
     expect(w.text()).not.toContain('喜爱')
@@ -223,7 +208,6 @@ describe('CharGenSystemCard', () => {
   })
   it('renders only non-empty profile cells', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockProfileOnly } })
-    await w.find('.ci-header').trigger('click')
     // personality and appearance should render
     expect(w.text()).toContain('性格')
     expect(w.text()).toContain('外貌特质')
@@ -235,7 +219,6 @@ describe('CharGenSystemCard', () => {
   // ── Inventory ──
   it('renders inventory items grouped by type', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('持有物')
     expect(w.text()).toContain('冰霜符文石')
     expect(w.text()).toContain('x3')
@@ -244,39 +227,33 @@ describe('CharGenSystemCard', () => {
   })
   it('hides inventory when empty', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockMinimal } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).not.toContain('持有物')
   })
 
   // ── Ascension full ──
   it('renders ascension deity position', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('冰霜之神')
   })
   it('renders ascension divine kingdom', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('永冻圣域')
     expect(w.text()).toContain('永远冰封')
   })
   it('renders ascension elements', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('要素')
     expect(w.text()).toContain('极寒元素')
     expect(w.text()).toContain('凛冬之风')
   })
   it('renders ascension authorities', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('权能')
     expect(w.text()).toContain('冰封纪元')
     expect(w.text()).toContain('消耗100 MP')
   })
   it('renders ascension laws with passive and active effects', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('法则')
     expect(w.text()).toContain('绝对零度法则')
     expect(w.text()).toContain('冰霜抗性+50%')
@@ -286,7 +263,6 @@ describe('CharGenSystemCard', () => {
   // ── Skill effects ──
   it('renders skill effects', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('伤害')
     expect(w.text()).toContain('80')
     expect(w.text()).toContain('减速')
@@ -296,7 +272,6 @@ describe('CharGenSystemCard', () => {
   // ── Equipment ──
   it('renders equipment quality subtitle', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     // "稀有" appears twice: once as quality class, once as subtitle text
     const subtitles = w.findAll('.ci-item-subtitle')
     expect(subtitles.length).toBeGreaterThanOrEqual(1)
@@ -306,7 +281,6 @@ describe('CharGenSystemCard', () => {
   })
   it('renders equipment effects', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } })
-    await w.find('.ci-header').trigger('click')
     expect(w.text()).toContain('冰抗')
     expect(w.text()).toContain('+20%')
   })

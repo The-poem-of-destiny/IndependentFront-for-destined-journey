@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import type { CombatSystemEvent } from '@engine/types'
 
 defineProps<{ event: CombatSystemEvent }>()
-
-const expanded = ref(false)
+const emit = defineEmits<{ collapse: [] }>()
 
 const outcomeConfig: Record<string, { label: string; icon: string; borderColor: string }> = {
   ally_win:   { label: '胜利', icon: 'fa-solid fa-trophy', borderColor: 'var(--theme-quality-uncommon)' },
@@ -19,12 +17,13 @@ const outcomeConfig: Record<string, { label: string; icon: string; borderColor: 
     class="sys-card"
     :style="{ borderLeftColor: outcomeConfig[event.outcome]?.borderColor ?? 'var(--theme-text-muted)' }"
   >
-    <div class="sys-card-header" @click="expanded = !expanded">
+    <div class="sys-card-header" @click="emit('collapse')">
       <i :class="'sys-card-icon ' + (outcomeConfig[event.outcome]?.icon ?? 'fa-solid fa-hand-fist')" />
       <span class="sys-card-label">{{ outcomeConfig[event.outcome]?.label ?? event.outcome }}</span>
       <span class="sys-card-rounds">{{ event.details.rounds }} 回合</span>
+      <i class="fa-solid fa-chevron-up sys-card-collapse" title="收起" />
     </div>
-    <div v-show="expanded" class="sys-card-body">
+    <div class="sys-card-body">
       <div class="combat-summary">{{ event.details.narrativeSummary }}</div>
       <div v-if="event.details.loot?.length" class="combat-loot section-divider">
         <span class="section-label">
@@ -85,6 +84,16 @@ const outcomeConfig: Record<string, { label: string; icon: string; borderColor: 
   opacity: 0.5;
   margin-left: auto;
 }
+
+.sys-card-collapse {
+  font-size: 0.625rem;
+  opacity: 0.4;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  padding: 2px;
+  margin-left: 4px;
+}
+.sys-card-collapse:hover { opacity: 0.8; }
 
 .sys-card-body {
   padding: 10px 12px;

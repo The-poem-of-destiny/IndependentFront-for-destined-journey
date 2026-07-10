@@ -1,15 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import type { ItemGenSystemEvent } from '@engine/types'
 import { qualityVar } from '../../../lib/quality-colors'
 
 const props = defineProps<{ event: ItemGenSystemEvent }>()
-
-const expanded = ref(false)
-
-function toggle() {
-  expanded.value = !expanded.value
-}
+const emit = defineEmits<{ collapse: [] }>()
 
 function typeIcon(itemType: string): string {
   if (itemType === '装备') return 'fa-solid fa-shield-halved'
@@ -20,14 +14,14 @@ function typeIcon(itemType: string): string {
 
 <template>
   <div class="sys-card" :style="{ borderLeftColor: qualityVar(event.quality) }">
-    <div class="sys-card-header" @click="toggle">
+    <div class="sys-card-header" @click="emit('collapse')">
       <i :class="'sys-card-icon ' + typeIcon(event.itemType)" />
       <span class="sys-card-title">{{ event.itemName }}</span>
       <span class="sys-card-quality" :style="{ color: qualityVar(event.quality) }">{{ event.quality }}</span>
-      <span class="sys-card-chevron">{{ expanded ? '▼' : '▶' }}</span>
+      <i class="fa-solid fa-chevron-up sys-card-collapse" title="收起" />
     </div>
 
-    <div v-if="expanded" class="sys-card-body">
+    <div class="sys-card-body">
       <!-- 装备列表 -->
       <div v-if="event.details.equipment?.length" class="section">
         <div v-for="eq in event.details.equipment" :key="eq.name" class="equip-line">
@@ -107,11 +101,14 @@ function typeIcon(itemType: string): string {
   font-weight: 600;
 }
 
-.sys-card-chevron {
+.sys-card-collapse {
   font-size: 0.625rem;
-  opacity: 0.5;
-  color: var(--theme-text-secondary);
+  opacity: 0.4;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  padding: 2px;
 }
+.sys-card-collapse:hover { opacity: 0.8; }
 
 .sys-card-body {
   padding: 10px 12px;

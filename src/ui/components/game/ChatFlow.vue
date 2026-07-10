@@ -39,10 +39,23 @@ function formatTime(ts?: number): string {
 
 function toggleExpand(id: string) {
   if (expandedIds.value[id]) {
-    delete expandedIds.value[id]
+    collapseCard(id)
   } else {
-    expandedIds.value[id] = true
+    expandedIds.value = { ...expandedIds.value, [id]: true }
   }
+}
+
+function collapseCard(id: string) {
+  // 整体替换对象确保 Vue 3 响应式追踪
+  const next: Record<string, boolean> = {}
+  for (const key of Object.keys(expandedIds.value)) {
+    if (key !== id) next[key] = expandedIds.value[key]
+  }
+  expandedIds.value = next
+}
+
+function isComplexEvent(type: string): boolean {
+  return type === 'craft' || type === 'char_gen' || type === 'combat' || type === 'item_gen'
 }
 
 /** 该系统事件是否应该显示 */
@@ -94,7 +107,15 @@ function eventIconClass(type: string): string {
           </div>
         </div>
 
-        <!-- 系统事件消息 -->
+        <!-- 系统事件消息 — 简单类型：纯通知条，无折叠 -->
+        <div
+          v-else-if="msg.role === 'system' && msg.systemEvent && isEventVisible(msg.systemEvent) && !isComplexEvent(msg.systemEvent.type)"
+          class="bubble-row bubble-row-system"
+        >
+          <SystemNotifBar :event="msg.systemEvent" />
+        </div>
+
+        <!-- 系统事件消息 — 复杂类型：通知条 ⇄ 卡片 -->
         <div
           v-else-if="msg.role === 'system' && msg.systemEvent && isEventVisible(msg.systemEvent)"
           class="bubble-row bubble-row-system"
@@ -111,27 +132,27 @@ function eventIconClass(type: string): string {
             <span class="system-notif-chevron">▶</span>
           </div>
 
-          <!-- 展开的系统卡片 — 组件自带折叠交互 -->
+          <!-- 展开卡片 -->
           <div v-else class="system-card-wrapper">
             <CraftSystemCard
               v-if="msg.systemEvent.type === 'craft'"
               :event="msg.systemEvent"
+              @collapse="collapseCard(msg.id)"
             />
             <CharGenSystemCard
               v-else-if="msg.systemEvent.type === 'char_gen'"
               :event="msg.systemEvent"
+              @collapse="collapseCard(msg.id)"
             />
             <CombatSystemCard
               v-else-if="msg.systemEvent.type === 'combat'"
               :event="msg.systemEvent"
+              @collapse="collapseCard(msg.id)"
             />
             <ItemSystemCard
               v-else-if="msg.systemEvent.type === 'item_gen'"
               :event="msg.systemEvent"
-            />
-            <SystemNotifBar
-              v-else
-              :event="msg.systemEvent"
+              @collapse="collapseCard(msg.id)"
             />
           </div>
         </div>

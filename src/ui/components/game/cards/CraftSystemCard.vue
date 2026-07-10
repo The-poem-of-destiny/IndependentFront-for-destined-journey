@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import type { CraftSystemEvent } from '@engine/types'
 import { qualityVar } from '../../../lib/quality-colors'
 
 defineProps<{ event: CraftSystemEvent }>()
-
-const expanded = ref(false)
+const emit = defineEmits<{ collapse: [] }>()
 
 // Industry icon mapping
 const industryIcons: Record<string, string> = {
@@ -28,15 +26,15 @@ const ratingMeta: Record<string, { icon: string; color: string }> = {
 <template>
   <div class="sys-card" :style="{ borderLeft: `4px solid ${qualityVar(event.quality)}` }">
     <!-- Header -->
-    <div class="sys-card-header" @click="expanded = !expanded">
+    <div class="sys-card-header" @click="emit('collapse')">
       <i :class="'fa-solid ' + (industryIcons[event.details.craftParams.industry] ?? industryIconsDefault) + ' sys-card-icon'" />
       <span class="sys-card-title">{{ event.quality }} · {{ event.productName }}</span>
       <span v-if="!event.details.success" class="sys-card-fail">失败</span>
-      <i class="fa-solid sys-card-chevron" :class="expanded ? 'fa-chevron-down' : 'fa-chevron-right'" />
+      <i class="fa-solid fa-chevron-up sys-card-collapse" title="收起" />
     </div>
 
     <!-- Body -->
-    <div v-show="expanded" class="sys-card-body">
+    <div class="sys-card-body">
       <!-- A. Rating -->
       <div class="card-section craft-rating">
         <i :class="ratingMeta[event.rating]?.icon ?? 'fa-regular fa-circle-question'" class="rating-icon" :style="{ color: ratingMeta[event.rating]?.color ?? 'var(--theme-text-muted)' }" />
@@ -129,11 +127,14 @@ const ratingMeta: Record<string, { icon: string; color: string }> = {
   white-space: nowrap;
 }
 
-.sys-card-chevron {
+.sys-card-collapse {
   font-size: 0.625rem;
-  opacity: 0.5;
-  transition: transform 0.15s ease;
+  opacity: 0.4;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  padding: 2px;
 }
+.sys-card-collapse:hover { opacity: 0.8; }
 
 /* Body */
 .sys-card-body {

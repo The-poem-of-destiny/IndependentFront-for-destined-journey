@@ -54,14 +54,14 @@ describe('CombatSystemCard', () => {
     expect(w.text()).not.toContain('战利品')
   })
 
-  it('starts collapsed', () => {
+  it('starts expanded', () => {
     const w = mount(CombatSystemCard, { props: { event: mockWin } })
-    expect(w.find('.sys-card-body').isVisible()).toBe(false)
+    expect(w.find('.sys-card-body').isVisible()).toBe(true)
   })
 
-  it('click header to expand', async () => {
+  it('click collapse button emits collapse', async () => {
     const w = mount(CombatSystemCard, { props: { event: mockWin } })
-    await w.find('.sys-card-header').trigger('click')
-    expect(w.find('.sys-card-body').isVisible()).toBe(true)
+    await w.find('.sys-card-collapse').trigger('click')
+    expect(w.emitted('collapse')).toBeTruthy()
   })
 })
