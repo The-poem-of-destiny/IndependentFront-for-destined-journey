@@ -92,7 +92,7 @@ describe('ChatFlow — 三源消息渲染', () => {
       { id: '1', role: 'assistant', content: '冒险开始了', timestamp: 0 },
     ]
     const wrapper = mount(ChatFlow, { props: { messages: msgs } })
-    expect(wrapper.find('.bubble-narrative').exists()).toBe(true)
+    expect(wrapper.find('.bubble-narrative-full').exists()).toBe(true)
   })
 
   it('应渲染系统消息为折叠通知条', async () => {

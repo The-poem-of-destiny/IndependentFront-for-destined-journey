@@ -13,6 +13,7 @@ import { VERSION } from '@engine/index'
 import { getAgentTemplate } from '@engine/agent-templates'
 import { getDefaultTemplate } from '@engine/placeholder-registry'
 import { preprocessPresetForPreview } from '@engine/preset-loader'
+import BeautifierSection from './BeautifierSection.vue'
 
 const theme = useThemeStore()
 const ui = useUIStore()
@@ -22,7 +23,7 @@ const s = cfg.settings  // 短别名，模板里用 s.xxx
 // ============================================================
 // 主导航
 // ============================================================
-type Section = 'api' | 'agent' | 'worldbook' | 'plot' | 'memory' | 'theme' | 'messages' | 'data' | 'about'
+type Section = 'api' | 'agent' | 'worldbook' | 'plot' | 'memory' | 'theme' | 'messages' | 'beautifier' | 'data' | 'about'
 const activeSection = ref<Section>('api')
 
 const navItems: { key: Section; label: string; icon: string }[] = [
@@ -33,6 +34,7 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'memory', label: '记忆 & 缓存', icon: 'fa-solid fa-brain' },
   { key: 'theme', label: '外观主题', icon: 'fa-solid fa-palette' },
   { key: 'messages', label: '消息显示', icon: 'fa-solid fa-message' },
+  { key: 'beautifier', label: '输出美化', icon: 'fa-solid fa-wand-magic-sparkles' },
   { key: 'data', label: '存档数据', icon: 'fa-solid fa-database' },
   { key: 'about', label: '关于', icon: 'fa-solid fa-circle-info' },
 ]
@@ -1204,6 +1206,9 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
             </div>
           </AppCard>
         </section>
+
+        <!-- ========== 输出美化 ========== -->
+        <BeautifierSection v-if="activeSection === 'beautifier'" />
 
         <!-- ========== 存档数据 ========== -->
         <section v-if="activeSection === 'data'" class="section centered">

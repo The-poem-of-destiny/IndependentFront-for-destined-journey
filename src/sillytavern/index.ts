@@ -12,5 +12,6 @@ export * from './marker-protocol';
 export * from './char-gen-agent';
 export * from './agent-tools';
 export * from './random-tables';
+export * from './beautifier';
 
 export const VERSION = '4.0.0';

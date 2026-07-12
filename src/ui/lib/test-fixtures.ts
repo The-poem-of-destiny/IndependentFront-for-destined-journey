@@ -310,12 +310,21 @@ function makeItemGenOutputHybrid(): ItemGenOutput {
 export function buildTestMessages(): ChatMessage[] {
   const msgs: ChatMessage[] = []
 
-  // 开场：AI 叙事
+  // 开场：AI 叙事 — 使用 dialogue format [角色名]{sprite}("对话")
   msgs.push({
     id: 'test-intro',
     role: 'assistant',
-    content: '风雪呼啸着掠过冰狼谷的峭壁，你紧了紧斗篷，脚下的积雪已经没过了膝盖。远处，一座孤零零的石塔矗立在风雪之中——那是霜语者最后的据点。你的同伴艾琳·霜语停下脚步，冰蓝色的瞳孔中倒映着塔尖的微光。"到了。"她的声音轻得几乎被风吞没。',
+    content: '风雪呼啸着掠过冰狼谷的峭壁，你紧了紧斗篷，脚下的积雪已经没过了膝盖。远处，一座孤零零的石塔矗立在风雪之中——那是霜语者最后的据点。\n\n[艾琳·霜语]{sprite:ice_elf}("到了。")',
     timestamp: Date.now() - 120000,
+    parsed: {
+      thinking: '场景在极北冰原，需要营造寒冷孤寂的氛围。艾琳作为引路人，先让玩家感受到环境和同伴的压迫感。',
+      maintext: '风雪呼啸着掠过冰狼谷的峭壁，你紧了紧斗篷，脚下的积雪已经没过了膝盖。远处，一座孤零零的石塔矗立在风雪之中——那是霜语者最后的据点。\n\n[艾琳·霜语]{sprite:ice_elf}("到了。")',
+      options: ['推开塔门，环顾四周', '先问艾琳关于霜语者的事', '在塔外观察一下再进入'],
+      sum: '抵达霜语者据点，艾琳轻声提醒到了',
+      varsRaw: '',
+      varsCommands: { merge: {} },
+      unknown: {},
+    },
   })
 
   // 用户行动
@@ -326,12 +335,21 @@ export function buildTestMessages(): ChatMessage[] {
     timestamp: Date.now() - 110000,
   })
 
-  // AI 叙事 + 引入战斗
+  // AI 叙事 + 战斗前兆 — 更多对话
   msgs.push({
     id: 'test-narr-1',
     role: 'assistant',
-    content: '沉重的石门在刺耳的嘎吱声中缓缓打开。塔内出人意料地温暖——大厅中央的地面上刻着一个复杂的霜蓝色魔法阵，阵中悬浮着三颗缓缓旋转的冰晶。就在你迈步进入的瞬间，墙角的阴影中突然扑出三头冰原狼，它们的眼睛闪烁着饥饿的绿光！',
+    content: '沉重的石门在刺耳的嘎吱声中缓缓打开。塔内出人意料地温暖——大厅中央的地面上刻着一个复杂的霜蓝色魔法阵，阵中悬浮着三颗缓缓旋转的冰晶。\n\n[艾琳·霜语]{sprite:alert}("小心——有什么东西在盯着我们。")',
     timestamp: Date.now() - 100000,
+    parsed: {
+      thinking: '引入战斗前兆。艾琳的冰元素感知在提醒危险。',
+      maintext: '沉重的石门在刺耳的嘎吱声中缓缓打开。塔内出人意料地温暖——大厅中央的地面上刻着一个复杂的霜蓝色魔法阵，阵中悬浮着三颗缓缓旋转的冰晶。\n\n[艾琳·霜语]{sprite:alert}("小心——有什么东西在盯着我们。")',
+      options: ['拔剑准备战斗', '先观察魔法阵的图案', '让艾琳用冰元素探测'],
+      sum: '进入冰塔大厅，发现有魔法阵和冰晶悬浮',
+      varsRaw: '',
+      varsCommands: { merge: {} },
+      unknown: {},
+    },
   })
 
   // 战斗卡片 — ally_win

@@ -2,7 +2,8 @@
 import { ref, watch, nextTick } from 'vue'
 import InputBar from './InputBar.vue'
 import type { ChatMessage, SystemEvent } from '@engine/types'
-
+import { beautify, escapeHtml } from '@engine/beautifier'
+import { useSettingsStore } from '../../stores/settings-store'
 import CraftSystemCard from './cards/CraftSystemCard.vue'
 import CharGenSystemCard from './cards/CharGenSystemCard.vue'
 import CombatSystemCard from './cards/CombatSystemCard.vue'
@@ -18,7 +19,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   send: [content: string]
+  'select-option': [text: string]
 }>()
+
+const settings = useSettingsStore()
+const s = settings.settings
 
 const container = ref<HTMLDivElement>()
 const expandedIds = ref<Record<string, boolean>>({})
@@ -79,6 +84,19 @@ function eventIconClass(type: string): string {
   }
   return icons[type] ?? 'fa-solid fa-circle-info'
 }
+
+/**
+ * 美化助手文本 — 使用 settings 中配置的规则管道
+ */
+function beautifyText(msg: ChatMessage): string {
+  const raw = msg.parsed?.maintext ?? msg.content
+  if (!s.beautifierEnabled) {
+    return escapeHtml(raw)
+  }
+  const rules = (s.beautifierRules ?? []) as import('@engine/types').BeautifierRule[]
+  const builtinDisabled: string[] = s.beautifierBuiltinDisabled ?? []
+  return beautify(raw, 'maintext', rules, builtinDisabled)
+}
 </script>
 
 <template>
@@ -99,10 +117,10 @@ function eventIconClass(type: string): string {
           </div>
         </div>
 
-        <!-- AI 叙事消息 -->
+        <!-- AI 叙事消息 — 只渲染美化正文 -->
         <div v-else-if="msg.role === 'assistant'" class="bubble-row bubble-row-narrative">
-          <div class="bubble bubble-narrative">
-            <span class="bubble-text">{{ msg.content }}</span>
+          <div class="bubble bubble-narrative-full">
+            <div class="narrative-body" v-html="beautifyText(msg)" />
             <span class="bubble-time" v-if="msg.timestamp">{{ formatTime(msg.timestamp) }}</span>
           </div>
         </div>
@@ -225,6 +243,68 @@ function eventIconClass(type: string): string {
   text-align: left;
   border-left: 3px solid var(--theme-text-muted);
 }
+.bubble-narrative-full {
+  width: 100%;
+  max-width: 800px;
+  padding: 12px 16px;
+  border-radius: var(--theme-radius-md, 8px);
+  background: var(--theme-card-bg);
+  color: var(--theme-text-primary);
+  font-size: 0.875rem;
+  line-height: 1.7;
+  text-align: left;
+  border-left: 3px solid var(--theme-text-muted);
+}
+
+/* ===== 叙事正文 ===== */
+.narrative-body {
+  font-family: var(--theme-font-title, 'Cinzel', serif);
+  color: var(--theme-text-primary);
+  line-height: 1.7;
+}
+
+/* ===== 对话卡片 (Discord 风格) ===== */
+.narrative-body :deep(.dialogue-card) {
+  margin: 10px 0;
+  padding: 10px 14px;
+  border-radius: var(--theme-radius-md, 8px);
+  background: var(--theme-surface-muted);
+  border-left: 4px solid var(--theme-primary);
+}
+.narrative-body :deep(.dialogue-header) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.narrative-body :deep(.dialogue-avatar) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--theme-primary);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: system-ui, sans-serif;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.narrative-body :deep(.dialogue-name) {
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--theme-accent, var(--theme-primary));
+  font-family: system-ui, sans-serif;
+}
+.narrative-body :deep(.dialogue-body) {
+  font-size: 0.9rem;
+  color: var(--theme-text-primary);
+  line-height: 1.6;
+  padding-left: 36px;
+}
+
 .bubble-prefix {
   font-weight: 600;
   font-size: 0.75rem;

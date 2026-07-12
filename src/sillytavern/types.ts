@@ -411,6 +411,9 @@ export interface AppSettings {
   embeddingDimension: number;
   /** Phase 4: 多少轮后触发记忆压缩 (默认 100) */
   memoryCompressionThreshold: number;
+  /** Phase 7e: 输出美化 */
+  beautifierEnabled: boolean;
+  beautifierRules: BeautifierRule[];
 }
 
 export const DEFAULT_FORMAT_PROMPT = `你必须严格按照以下 XML 标签格式输出回复，不要使用 Markdown 包裹：
@@ -458,6 +461,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   embeddingModel: 'Qwen/Qwen3-VL-Embedding-8B',
   embeddingDimension: 4096,
   memoryCompressionThreshold: 100,
+  /** Phase 7e: 输出美化 */
+  beautifierEnabled: true,
+  beautifierRules: [],
 };
 
 // ========== Chat Types ==========
@@ -557,6 +563,19 @@ export interface ParsedTags {
   varsRaw: string;
   varsCommands: VarsPatch;
   unknown: Record<string, string>;
+}
+
+/** 输出美化规则 — 正则替换管道 */
+export interface BeautifierRule {
+  id: string;
+  name: string;
+  scope: 'maintext' | 'options' | 'summary' | 'thinking' | 'global';
+  pattern: string;
+  flags: string;
+  replacement: string;
+  enabled: boolean;
+  order: number;
+  isBuiltin: boolean;
 }
 
 /** 变量更新补丁 — 支持 mvu_update 协议的 replace/delta/insert */

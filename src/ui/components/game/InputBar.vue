@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import { useGameStore } from '../../stores/game-store'
 
 const emit = defineEmits<{
   send: [content: string]
 }>()
 
+const game = useGameStore()
 const input = ref('')
 const showOptions = ref(false)
 
@@ -13,6 +15,14 @@ const mockOptions = [
   '前往近郊森林搜寻线索',
   '先去冒险者公会了解情况',
 ]
+
+// 监听 ChatFlow 选项点击 → 填入输入框
+watch(() => game.pendingInput, (v) => {
+  if (v) {
+    input.value = v
+    game.clearPendingInput()
+  }
+})
 
 function selectOption(option: string) {
   input.value = option

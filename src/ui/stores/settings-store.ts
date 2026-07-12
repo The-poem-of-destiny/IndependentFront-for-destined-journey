@@ -132,6 +132,11 @@ function getDefaults(): Record<string, any> {
       item_update: false,
       quest_update: false,
     } as Record<string, boolean>,
+
+    // 输出美化
+    beautifierEnabled: true,
+    beautifierRules: [] as any[],
+    beautifierBuiltinDisabled: [] as string[],
   }
 }
 

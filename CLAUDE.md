@@ -413,7 +413,7 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC
 | 7b | 主题系统 + 通用组件 (10主题/15组件) | ✅ |
 | 7c | 首页 (标题画面风格) + 设置页 (8分区) | ✅ |
 | 7d | 捏人页 `/create` | 🔄 部分完成，后续继续改 |
-| 7e | 游戏页 + 状态栏 HUD + 脚本引擎(init自注册+@parent跨对象引用+subscription-manager) + ChatFlow 三源消息系统 | 🔄 脚本系统完成，游戏页 UI 部分完成（消息流+系统卡片），Orchestrator 接入待做 |
+| 7e | 游戏页 + 状态栏 HUD + 脚本引擎(init自注册+@parent跨对象引用+subscription-manager) + ChatFlow 三源消息系统 + 输出美化框架(beautifier正则管道/对话卡片/场景面板) | 🔄 输出美化完成，场景面板完成，ChatFlow精简完成，Orchestrator 接入待做 |
 | 7f | 创意工坊 `/workshop` | ⬜ |
 | 7g | 衔接 & 测试 | ⬜ |
 | 8 | Agent 上下文可见性 & Prompt 体系 | ✅ |
@@ -473,7 +473,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │   │   ├── MapPanel.vue             ← 地图查看器 (OSD + 91 标记 + 浮动信息卡片 + 角色位置匹配 + 工作台)
 │   │   ├── TopBar.vue               ← 顶部栏 (首页/时间/全屏)
 │   │   ├── SideToolbar.vue          ← 左侧工具栏 (8 按钮)
-│   │   ├── ChatFlow.vue             ← 对话流 (三源消息: AI/用户/系统 + 折叠卡片)
+│   │   ├── ScenePanel.vue           ← 场景面板 (时间/位置/天气/在场NPC/思维链)
+│   │   ├── ChatFlow.vue             ← 对话流 (三源消息: AI/用户/系统 + 美化正文 + 系统卡片)
 │   │   ├── InputBar.vue             ← 输入栏
 │   │   ├── StatusHUD.vue            ← 右侧状态栏容器
 │   │   ├── StatusOverview.vue       ← 角色状态详览
@@ -487,7 +488,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 └── styles/                          ← base.css / transitions.css / utilities.css
 ```
 
-### 设置页 8 分区
+### 设置页 9 分区
 
 | 分区 | 内容 |
 |------|------|
@@ -497,6 +498,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 | 📖 剧情系统 | 8 种剧情偏向卡片多选、模式/年份/难度层级/外部NPC/自定义偏好、大纲预览(高斯模糊防剧透) |
 | 🧠 记忆 & 缓存 | 召回数/压缩阈值/快照上限/缓存策略 |
 | 🎨 外观主题 | 10 主题预览网格、字体风格(衬线/无衬线/混合)、字体大小(14/16/18/20px) |
+| 💬 消息显示 | 系统通知全局开关 + 7 种事件类型独立过滤 |
+| ✨ 输出美化 | 正则替换管道：内置规则(对话卡片/杀增殖)可禁用、用户规则 CRUD + 实时预览 + 导入/导出 JSON |
 | 💾 存档数据 | 导出/导入/清除 (含确认弹窗) |
 | ℹ 关于 | 引擎版本/技术栈/统计 |
 

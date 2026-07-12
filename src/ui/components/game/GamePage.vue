@@ -7,6 +7,7 @@ import { injectTestData } from '../../lib/test-fixtures'
 import TopBar from './TopBar.vue'
 import SideToolbar from './SideToolbar.vue'
 import ChatFlow from './ChatFlow.vue'
+import ScenePanel from './ScenePanel.vue'
 import StatusHUD from './StatusHUD.vue'
 import AppModal from '../shared/AppModal.vue'
 import ItemsPanel from './ItemsPanel.vue'
@@ -92,6 +93,10 @@ function handleToolClick(id: string) {
   }
   game.showModal(id)
 }
+
+function handleSelectOption(text: string) {
+  game.fillInput(text)
+}
 </script>
 
 <template>
@@ -99,12 +104,14 @@ function handleToolClick(id: string) {
     <TopBar />
     <div class="game-body">
       <SideToolbar @tool-click="handleToolClick" />
+      <ScenePanel />
       <ChatFlow
         :messages="game.messages"
         :is-generating="game.isGenerating"
         :system-events-visible="s.systemEventsVisible"
         :system-event-filters="s.systemEventFilters"
         @send="handleSend"
+        @select-option="handleSelectOption"
       />
       <StatusHUD />
     </div>

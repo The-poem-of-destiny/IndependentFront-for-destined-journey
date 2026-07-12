@@ -36,6 +36,12 @@ export const useGameStore = defineStore('game', () => {
   const activeModal = ref<string | null>(null)
   const fullscreenStatus = ref(false)
 
+  // 选项填充 — ChatFlow 点击选项 → InputBar 填入
+  const pendingInput = ref('')
+
+  function fillInput(text: string) { pendingInput.value = text }
+  function clearPendingInput() { pendingInput.value = '' }
+
   function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value }
   function showModal(id: string) { activeModal.value = id }
   function closeModal() { activeModal.value = null }
@@ -116,5 +122,6 @@ export const useGameStore = defineStore('game', () => {
     toggleSidebar, showModal, closeModal, toggleFullscreen,
     addMessage, addSystemMessage,
     loadSaves, loadSave, clearActive,
+    pendingInput, fillInput, clearPendingInput,
   }
 })
