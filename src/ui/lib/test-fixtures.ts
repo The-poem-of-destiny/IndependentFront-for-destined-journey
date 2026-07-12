@@ -550,12 +550,72 @@ export function buildTestMessages(): ChatMessage[] {
  * 注入测试数据到指定 store。
  * 调用前确保 settings.systemEventFilters 包含所有类型。
  * 注意: Pinia store 在组件中已自动解包 ref，所以这里接收的是原始值。
+ *
+ * 可选参数 characters / saveProfile：用于预览 ScenePanel 中段(在场 NPC + 心里话) 与下段(新闻)。
+ * 通过(store.hydratePreview 或 store 字段直接赋值) 注入即可。
  */
 export function injectTestData(store: {
   messages: ChatMessage[]
   isGenerating: boolean
+  characters?: any[]
+  saveProfile?: any
 }) {
   // 直接用 splice + push 替换，避免直接赋值覆盖 Pinia 的 getter/setter
   store.messages.splice(0, store.messages.length, ...buildTestMessages())
   store.isGenerating = false
+
+  // 给最后一条 assistant 消息塞一份 variablesAfter，演示"心里话路径 A"（运行时流变）
+  // 生产中 src/ 暂无环节写入此字段，此处仅供 Ctrl+Shift+T 预览双路径展示。
+  const lastAssistant = [...store.messages].reverse().find(m => m.role === 'assistant')
+  if (lastAssistant) {
+    ;(lastAssistant as any).variablesAfter = {
+      天气: '薄暮微光洒落森林边缘',
+      关系列表: {
+        '艾莉丝': { 心里话: '...那个蒙面人上周又来打听商队的事了，总觉得哪里不对劲。' },
+      },
+    }
+  }
+}
+
+// ========== ScenePanel 预览 Mock ==========
+
+/**
+ * 构造 ScenePanel 预览用的在场 NPC + 新闻 mock。
+ * 返回的对象可直接喂给 store.hydratePreview()。
+ *
+ * 设计:
+ * - 3 个在场 NPC，每个带 customFields.thoughts (路径B)，配合不同 tier/tierName 走 tier 徽章色映射
+ * - 2 条 NewsItem 覆盖未读/已读、不同 publishedAt
+ *
+ * 注意: 此 mock 仅供 Ctrl+Shift+T 注入预览，不写入 IndexedDB。
+ */
+export function buildScenePreviewMock(): { characters: any[]; saveProfile: any } {
+  return {
+    characters: [
+      { id: 'preview-npc-1', type: 'npc', name: '艾莉丝', race: '精灵', tier: 1, tierName: '普通',
+        location: '大陆中东部-奥古斯提姆-艾瑟嘉德',
+        customFields: { thoughts: '最近商队失踪的事让人不安...卡尔的盗贼团越来越嚣张了。' } },
+      { id: 'preview-npc-2', type: 'npc', name: '暗影盗贼·卡尔', race: '暗精灵', tier: 3, tierName: '稀有',
+        location: '大陆中东部-奥古斯提姆-艾瑟嘉德',
+        customFields: { thoughts: '亚瑟...那个帝国走狗。他以为自己在伸张正义。' } },
+      { id: 'preview-npc-3', type: 'npc', name: '大法师·梅林', race: '人类', tier: 5, tierName: '神话',
+        location: '大陆中东部-奥古斯提姆-艾瑟嘉德',
+        customFields: { thoughts: '草药的事不急，但那孩子的剑术还得再练练...帝国边境在集结兵力，不是好兆头。' } },
+      // 这里也强制设一个 player，确保 presentChars 能基于 player.location 过滤
+      { id: 'preview-player', type: 'player', name: '亚瑟', race: '人类', tier: 2, tierName: '优良',
+        location: '大陆中东部-奥古斯提姆-艾瑟嘉德' },
+    ],
+    saveProfile: {
+      gameTime: { era: '复兴纪元', year: 3, month: 3, day: 14, weekday: 3, hour: 9, minute: 30 },
+      news: [
+        { id: 'preview-news-1', title: '商队失踪事件',
+          content: '近日艾瑟嘉德近郊频繁发生商队失踪事件，帝国已派遣调查队前往。',
+          category: '阿斯塔利亚快讯', publishedAt: Date.now() - 5 * 60_000, read: false },
+        { id: 'preview-news-2', title: '冒险者公会新委托',
+          content: '冒险者公会发布了一批新委托，包括讨伐近郊森林中的盗贼团。',
+          category: '公会公告', publishedAt: Date.now() - 3 * 3_600_000, read: true },
+      ],
+      worldFlags: {},
+    },
+  }
 }

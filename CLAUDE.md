@@ -413,7 +413,7 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC
 | 7b | 主题系统 + 通用组件 (10主题/15组件) | ✅ |
 | 7c | 首页 (标题画面风格) + 设置页 (8分区) | ✅ |
 | 7d | 捏人页 `/create` | 🔄 部分完成，后续继续改 |
-| 7e | 游戏页 + 状态栏 HUD + 脚本引擎(init自注册+@parent跨对象引用+subscription-manager) + ChatFlow 三源消息系统 + 输出美化框架(beautifier正则管道/对话卡片/场景面板) | 🔄 输出美化完成，场景面板完成，ChatFlow精简完成，Orchestrator 接入待做 |
+| 7e | 游戏页 + 状态栏 HUD + 脚本引擎(init自注册+@parent跨对象引用+subscription-manager) + ChatFlow 三源消息系统 + 输出美化框架(beautifier正则管道/对话卡片/场景面板) + ScenePanel 三段式重构(时间视觉/在场NPC心声气泡/世界消息) | 🔄 输出美化完成，场景面板三段式完成，ChatFlow精简完成，Orchestrator 接入待做 |
 | 7f | 创意工坊 `/workshop` | ⬜ |
 | 7g | 衔接 & 测试 | ⬜ |
 | 8 | Agent 上下文可见性 & Prompt 体系 | ✅ |
@@ -471,9 +471,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │   ├── game/
 │   │   ├── GamePage.vue             ← 游戏页主布局 (三栏 + 6 弹窗)
 │   │   ├── MapPanel.vue             ← 地图查看器 (OSD + 91 标记 + 浮动信息卡片 + 角色位置匹配 + 工作台)
-│   │   ├── TopBar.vue               ← 顶部栏 (首页/时间/全屏)
+│   │   ├── TopBar.vue               ← 顶部栏 (首页/存档名/全屏，时间已下沉 ScenePanel)
 │   │   ├── SideToolbar.vue          ← 左侧工具栏 (8 按钮)
-│   │   ├── ScenePanel.vue           ← 场景面板 (时间/位置/天气/在场NPC/思维链)
+│   │   ├── ScenePanel.vue           ← 场景面板三段式 (上:时间氛围色+位置+天气 / 中:在场NPC心声气泡 / 下:世界消息)
 │   │   ├── ChatFlow.vue             ← 对话流 (三源消息: AI/用户/系统 + 美化正文 + 系统卡片)
 │   │   ├── InputBar.vue             ← 输入栏
 │   │   ├── StatusHUD.vue            ← 右侧状态栏容器

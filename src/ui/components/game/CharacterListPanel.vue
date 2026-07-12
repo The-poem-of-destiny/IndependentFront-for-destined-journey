@@ -148,10 +148,10 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
               </div>
             </div>
 
-            <!-- 心里话卡片 -->
-            <div class="ov-card" v-if="(selected as any).customFields?.thoughts">
+            <!-- 心里话卡片 — 经 store.getThoughts 双路径(运行时关系列表→存档 customFields.thoughts) 读取 -->
+            <div class="ov-card" v-if="game.getThoughts(selected.name, selected)">
               <div class="ov-card-title">心里话</div>
-              <p class="ov-thoughts">{{ (selected as any).customFields.thoughts }}</p>
+              <p class="ov-thoughts">{{ game.getThoughts(selected.name, selected) }}</p>
             </div>
 
             <!-- 基础信息卡片 -->
