@@ -3,7 +3,7 @@ import { onMounted, onUnmounted } from 'vue'
 import { useGameStore } from '../../stores/game-store'
 import { useUIStore } from '../../stores/ui-store'
 import { useSettingsStore } from '../../stores/settings-store'
-import { injectTestData } from '../../lib/test-fixtures'
+import { injectTestData, buildScenePreviewMock } from '../../lib/test-fixtures'
 import TopBar from './TopBar.vue'
 import SideToolbar from './SideToolbar.vue'
 import ChatFlow from './ChatFlow.vue'
@@ -30,7 +30,7 @@ onMounted(async () => {
 })
 
 // ===== 🧪 ChatFlow 测试注入 =====
-/** 注入覆盖全 7 种卡片 + 对话流的测试数据 */
+/** 注入覆盖全 7 种卡片 + 对话流 + ScenePanel 中下段(在场NPC/心里话/新闻) 的测试数据 */
 function injectChatFlowTest() {
   // 确保所有系统事件类型都可见
   s.systemEventsVisible = true
@@ -43,7 +43,11 @@ function injectChatFlowTest() {
     item_update: true,
     quest_update: true,
   }
-  // 先清空再注入
+  // 注入 ScenePanel 中段(在场NPC + customFields.thoughts) 与下段(新闻) 预览数据
+  // 经 store.latestVariables → getThoughts 双路径、saveProfile.news 读取
+  const preview = buildScenePreviewMock()
+  game.hydratePreview(preview)
+  // 先清空再注入 ChatFlow 消息(含末条 variablesAfter 演示心里话路径A)
   injectTestData({
     messages: game.messages,
     isGenerating: game.isGenerating,

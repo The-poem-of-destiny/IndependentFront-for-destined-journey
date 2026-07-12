@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useGameStore } from '../../stores/game-store'
 import { useSettingsStore } from '../../stores/settings-store'
 import { MONTH_NAMES, WEEKDAY_NAMES, getTimeOfDay } from '@engine/time-system'
+import { nameColorVar, initialsOf } from '../../utils/name-color'
+import { formatRel } from '../../utils/time-format'
 import type { CharacterState } from '@engine/types'
 
 const game = useGameStore()
@@ -21,6 +23,29 @@ const timeInfo = computed(() => {
   }
 })
 
+/**
+ * 时段 → 图标 + 氛围色 token
+ *
+ * 7 档时段分到 4 个视觉氛围 (凌晨/深夜→夜 / 早晨/上午→昼前 / 中午/下午→昼 / 傍晚→夕)
+ * 氛围色用主题语义 token，不引入硬编码 hex，双模式下都能呼吸。
+ */
+const TOD_META: Record<string, { icon: string; colorVar: string }> = {
+  凌晨: { icon: 'fa-solid fa-moon', colorVar: '--theme-quality-rare' },       // 静谧蓝
+  早晨: { icon: 'fa-solid fa-sun', colorVar: '--theme-quality-uncommon' },   // 晨光绿
+  上午: { icon: 'fa-solid fa-sun', colorVar: '--theme-quality-uncommon' },
+  中午: { icon: 'fa-solid fa-sun', colorVar: '--theme-warning' },             // 正午金
+  下午: { icon: 'fa-solid fa-sun', colorVar: '--theme-warning' },
+  傍晚: { icon: 'fa-solid fa-cloud-sun', colorVar: '--theme-quality-mythic' }, // 黄昏赤
+  深夜: { icon: 'fa-solid fa-moon', colorVar: '--theme-quality-rare' },
+}
+
+const todMeta = computed(() => {
+  const t = game.gameTime
+  if (!t) return null
+  const tod = getTimeOfDay(t)
+  return TOD_META[tod] ?? { icon: 'fa-solid fa-clock', colorVar: '--theme-text-muted' }
+})
+
 // ═══ 位置 ═══
 const locationDisplay = computed(() => {
   const loc = game.player?.location
@@ -28,31 +53,16 @@ const locationDisplay = computed(() => {
   return loc.replace(/-/g, ' · ')
 })
 
-// ═══ 天气 — 从游戏变量读取（由 request_dispatcher → vars_update 更新到 chat.variables） ═══
-//
-// 数据路线:
-// 1. Story Agent 在正文中描写环境天气
-// 2. request_dispatcher 读取正文，检测到天气变化
-// 3. request_dispatcher 输出 <json> {"replace": [{"path": "天气", "value": "xxx"}]}
-// 4. vars_update 处理 <json>，调用 applyVarsPatch → 写入 chat.variables["天气"]
-// 5. 前端 reactively 从 game.variables 读取
-//
-// 当前获取优先级:
-//   1. game.variables (chat.variables) — request_dispatcher + vars_update 写入
-//   2. saveProfile.worldFlags — 存档级变量兜底
-//   3. 空字符串 — 无天气数据
+// ═══ 天气 —— 统一数据源到 store.latestVariables ═══
+// 优先级同前: chat.variables(天气/weather) → saveProfile.worldFlags 兜底。
 const weather = computed(() => {
-  // 从最新消息的 variablesAfter 获取（vars_update 写入后的快照）
-  const msgs = game.messages
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const v = msgs[i].variablesAfter
-    if (v && v['天气']) return v['天气'] as string
-    if (v && v['weather']) return v['weather'] as string
+  const v = game.latestVariables
+  if (v) {
+    const w = v['天气'] ?? v['weather']
+    if (typeof w === 'string' && w) return w
   }
-  // fallback: worldFlags 存档级
-  return (game.saveProfile?.worldFlags?.['天气'] as string)
-    ?? (game.saveProfile?.worldFlags?.['weather'] as string)
-    ?? ''
+  const wf = game.saveProfile?.worldFlags
+  return (wf?.['天气'] as string) ?? (wf?.['weather'] as string) ?? ''
 })
 
 // ═══ 在场角色 — 同地点前缀匹配 ═══
@@ -67,78 +77,157 @@ const presentChars = computed(() => {
   })
 })
 
-// ═══ 思维链 ═══
-const thinkingDisplay = computed(() => (s.thinkingDisplay as string) || 'fold')
+// ═══ 中段：单选展开心声 ═══
+const expandedId = ref<string | null>(null)
 
-const latestThinking = computed(() => {
-  if (thinkingDisplay.value === 'hide') return ''
-  const msgs = game.messages
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].role === 'assistant' && msgs[i].parsed?.thinking) {
-      return msgs[i].parsed!.thinking.slice(0, 500)
-    }
+/** tier 名 → CSS 变量描边色；tierName 未在品质池时降级默认色。 */
+const TIER_COLOR: Record<string, string> = {
+  普通: 'var(--theme-quality-common)',
+  优良: 'var(--theme-quality-uncommon)',
+  稀有: 'var(--theme-quality-rare)',
+  史诗: 'var(--theme-quality-epic)',
+  传说: 'var(--theme-quality-legendary)',
+  神话: 'var(--theme-quality-mythic)',
+}
+function tierColor(tierName?: string): string {
+  if (tierName && TIER_COLOR[tierName]) return TIER_COLOR[tierName]
+  return 'var(--theme-text-muted)'
+}
+
+// 展开行的 DOM 引用，用于 scrollIntoView 跟随
+const rowRefs = new Map<string, HTMLDivElement>()
+function setRowRef(id: string, el: HTMLDivElement | null) {
+  if (el) rowRefs.set(id, el)
+  else rowRefs.delete(id)
+}
+
+function toggleExpand(char: CharacterState) {
+  if (expandedId.value === char.id) {
+    expandedId.value = null
+    return
   }
-  return ''
-})
+  expandedId.value = char.id
+  nextTick(() => {
+    const el = rowRefs.get(char.id)
+    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  })
+}
 
-// ═══ 动作 ═══
-function openChar(_char: CharacterState) {
+function thoughtsOf(char: CharacterState): string {
+  return game.getThoughts(char.name, char)
+}
+
+// ═══ 下段：新闻单选展开 ═══
+const expandedNewsId = ref<string | null>(null)
+function toggleNews(id: string) {
+  expandedNewsId.value = expandedNewsId.value === id ? null : id
+}
+
+function openCharList() {
   game.showModal('characters')
 }
 </script>
 
 <template>
   <div class="scene-panel" v-if="game.activeSaveId">
-    <!-- ═══════ 时间 ═══════ -->
-    <div class="scene-section">
-      <div class="scene-section-title">时间</div>
-      <template v-if="timeInfo">
-        <div class="scene-time-era">{{ timeInfo.era }}</div>
-        <div class="scene-time-date">{{ timeInfo.date }}</div>
-        <div class="scene-time-tod">{{ timeInfo.timeOfDay }} {{ timeInfo.time }}</div>
-      </template>
-      <div class="scene-empty" v-else>时间未同步</div>
-    </div>
+    <!-- ═══════ 上段：场景 (时间 + 位置 + 天气) ═══════ -->
+    <div class="scene-top">
+      <!-- 时间 -->
+      <div class="scene-section scene-time">
+        <div class="scene-section-title">时间</div>
+        <template v-if="timeInfo">
+          <div class="scene-tod-line" :style="{ '--tod-color': `var(${todMeta?.colorVar ?? '--theme-text-muted'})` }">
+            <i :class="'scene-tod-icon ' + (todMeta?.icon ?? 'fa-solid fa-clock')" />
+            <span class="scene-tod-name">{{ timeInfo.timeOfDay }}</span>
+            <span class="scene-tod-clock">{{ timeInfo.time }}</span>
+          </div>
+          <div class="scene-time-era">{{ timeInfo.era }}</div>
+          <div class="scene-time-date">{{ timeInfo.date }}</div>
+        </template>
+        <div class="scene-empty" v-else>时间未同步</div>
+      </div>
 
-    <!-- ═══════ 位置 ═══════ -->
-    <div class="scene-section">
-      <div class="scene-section-title">位置</div>
-      <div class="scene-location">{{ locationDisplay }}</div>
-    </div>
+      <!-- 位置 -->
+      <div class="scene-section">
+        <div class="scene-section-title">位置</div>
+        <div class="scene-location">{{ locationDisplay }}</div>
+      </div>
 
-    <!-- ═══════ 天气 ═══════ -->
-    <div class="scene-section" v-if="weather">
-      <div class="scene-section-title">天气</div>
-      <div class="scene-weather">{{ weather }}</div>
-    </div>
-
-    <!-- ═══════ 在场角色 ═══════ -->
-    <div class="scene-section">
-      <div class="scene-section-title">在场 ({{ presentChars.length }})</div>
-      <div class="scene-npc-list">
-        <div
-          v-for="char in presentChars"
-          :key="char.id"
-          class="scene-npc-item"
-          :class="'npc-type-' + (char.type || 'npc')"
-          @click="openChar(char)"
-        >
-          <span class="npc-dot" />
-          <span class="npc-name">{{ char.name }}</span>
-          <span class="npc-tier" v-if="char.tier">T{{ char.tier }}</span>
-        </div>
-        <div v-if="presentChars.length === 0" class="scene-npc-empty">
-          暂无其他角色
-        </div>
+      <!-- 天气 -->
+      <div class="scene-section" v-if="weather">
+        <div class="scene-section-title">天气</div>
+        <div class="scene-weather">{{ weather }}</div>
       </div>
     </div>
 
-    <!-- ═══════ 思维链 ═══════ -->
-    <div class="scene-section" v-if="latestThinking">
-      <details class="scene-thinking" :open="thinkingDisplay === 'inline'">
-        <summary class="scene-section-title scene-thinking-toggle">思维链</summary>
-        <div class="scene-thinking-content">{{ latestThinking }}</div>
-      </details>
+    <!-- ═══════ 中段：在场 NPC（可滚动，点击出心里话） ═══════ -->
+    <div class="scene-mid">
+      <div class="scene-section-title scene-mid-title">
+        <span>在场 ({{ presentChars.length }})</span>
+        <button class="scene-title-action" @click="openCharList" title="查看完整角色列表">›</button>
+      </div>
+
+      <div class="scene-npc-list" v-if="presentChars.length">
+        <template v-for="char in presentChars" :key="char.id">
+          <div
+            :ref="(el) => setRowRef(char.id, el as HTMLDivElement)"
+            class="scene-npc-item"
+            :class="{ expanded: expandedId === char.id }"
+            @click="toggleExpand(char)"
+          >
+            <span class="npc-avatar" :style="{ background: nameColorVar(char.name) }">
+              {{ initialsOf(char.name) }}
+            </span>
+            <span class="npc-name">{{ char.name }}</span>
+            <span
+              class="npc-tier"
+              v-if="char.tier"
+              :style="{ color: tierColor((char as any).tierName), borderColor: tierColor((char as any).tierName) }"
+            >
+              T{{ char.tier }}
+            </span>
+          </div>
+
+          <!-- 心声气泡（v-if 不用 v-show，overflow 滚动容器内更稳） -->
+          <div v-if="expandedId === char.id" class="npc-thought">
+            <span class="npc-thought-quote">"</span>
+            <span class="npc-thought-text">{{ thoughtsOf(char) || '此刻风平浪静，无声可闻…' }}</span>
+            <span class="npc-thought-quote">"</span>
+          </div>
+        </template>
+      </div>
+
+      <div class="scene-empty-block" v-else>暂无其他角色在场</div>
+    </div>
+
+    <!-- ═══════ 下段：新闻 ═══════ -->
+    <div class="scene-bot">
+      <div class="scene-section-title">世界消息</div>
+
+      <div class="scene-news-list" v-if="game.news.length">
+        <div
+          v-for="item in game.news"
+          :key="item.id"
+          class="news-item"
+          :class="{ expanded: expandedNewsId === item.id, read: item.read }"
+          @click="toggleNews(item.id)"
+        >
+          <span class="news-dot" v-if="!item.read" />
+          <i class="news-icon fa-solid fa-newspaper" v-else />
+          <div class="news-main">
+            <div class="news-title-row">
+              <span class="news-title">{{ item.title }}</span>
+              <span class="news-time">{{ formatRel(item.publishedAt) }}</span>
+            </div>
+            <div v-if="expandedNewsId === item.id" class="news-content">
+              <span class="news-category" v-if="item.category">{{ item.category }}</span>
+              {{ item.content }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="scene-empty-block" v-else>暂无新消息</div>
     </div>
   </div>
 
@@ -149,172 +238,302 @@ function openChar(_char: CharacterState) {
 </template>
 
 <style scoped>
-/* ═══ 根容器 ═══ */
+/* ═══ 根容器 — 三段式 flex column，外层不滚 ═══ */
 .scene-panel {
-  width: 190px;
+  width: 240px;
   flex-shrink: 0;
-  overflow-y: auto;
+  overflow: hidden;                      /* 外层不滚， scrolls 委托给 mid/bot */
   background: var(--theme-content-bg);
   border-right: 1px solid var(--theme-card-border);
-  padding: 12px 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
   font-size: 0.75rem;
   color: var(--theme-text-secondary);
 }
 
 .scene-panel-empty {
+  height: 100%;
   align-items: center;
   justify-content: center;
 }
 
-/* ═══ Section 区块 ═══ */
-.scene-section {
-  padding-bottom: 8px;
+/* ═══ 三段 ═══ */
+.scene-top {
+  flex-shrink: 0;
+  padding: 12px 12px 6px;
   border-bottom: 1px solid var(--theme-border, rgba(255, 255, 255, 0.04));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.scene-section:last-child {
-  border-bottom: none;
+.scene-mid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--theme-border, rgba(255, 255, 255, 0.04));
+  display: flex;
+  flex-direction: column;
+}
+.scene-bot {
+  flex-shrink: 0;
+  min-height: 30%;       /* 兜底：世界消息块至少占面板 1/3，不被中段挤窄贴底 */
+  max-height: 40%;       /* 上限放宽：让多条新闻有展开空间 */
+  overflow-y: auto;
+  padding: 10px 12px;
 }
 
+/* ═══ 区块标题 ═══ */
+.scene-section {
+  padding-bottom: 4px;
+}
 .scene-section-title {
   font-size: 0.65rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--theme-text-muted);
-  margin-bottom: 4px;
+  margin-bottom: 5px;
   font-family: system-ui, sans-serif;
+  display: flex;
+  align-items: center;
+}
+.scene-mid-title {
+  justify-content: space-between;
+}
+.scene-title-action {
+  background: none;
+  border: none;
+  color: var(--theme-text-muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  font-family: inherit;
+  transition: color 150ms;
+}
+.scene-title-action:hover {
+  color: var(--theme-text-secondary);
 }
 
 /* ═══ 时间 ═══ */
+.scene-time {
+  padding-top: 2px;
+}
+.scene-tod-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 6px;
+  color: var(--tod-color, var(--theme-text-secondary));
+}
+.scene-tod-icon {
+  font-size: 0.85rem;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--tod-color, var(--theme-text-muted)) 55%, transparent));
+}
+.scene-tod-name {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-family: system-ui, sans-serif;
+}
+.scene-tod-clock {
+  margin-left: auto;
+  font-family: var(--theme-font-body, system-ui, sans-serif);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--theme-text-primary);
+  opacity: 0.85;
+}
 .scene-time-era {
   font-family: var(--theme-font-title, serif);
-  font-size: 0.85rem;
+  font-size: 0.95rem;
   color: var(--theme-text-primary);
   font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
 }
 .scene-time-date {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--theme-text-secondary);
-}
-.scene-time-tod {
-  font-size: 0.68rem;
-  color: var(--theme-accent, var(--theme-primary));
+  margin-top: 1px;
 }
 
-/* ═══ 位置 ═══ */
+/* ═══ 位置 / 天气 ═══ */
 .scene-location {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   color: var(--theme-text-secondary);
   line-height: 1.4;
 }
-
-/* ═══ 天气 ═══ */
 .scene-weather {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   color: var(--theme-text-secondary);
   font-style: italic;
 }
 
-/* ═══ 在场角色 ═══ */
+/* ═══ 中段 NPC 行 ═══ */
 .scene-npc-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-height: 200px;
-  overflow-y: auto;
+  gap: 4px;
 }
-
 .scene-npc-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border-radius: var(--theme-radius-sm, 4px);
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: var(--theme-radius-md, 6px);
   cursor: pointer;
-  transition: background 0.1s;
+  transition: background 120ms;
+  user-select: none;
 }
 .scene-npc-item:hover {
   background: var(--theme-tab-hover-bg);
 }
+.scene-npc-item.expanded {
+  background: var(--theme-primary-bg);
+}
 
-.npc-dot {
-  width: 6px;
-  height: 6px;
+.npc-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   flex-shrink: 0;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-family: system-ui, sans-serif;
+  letter-spacing: -0.02em;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+  overflow: hidden;
+  white-space: nowrap;
 }
-.npc-type-player .npc-dot {
-  background: #4caf50;
-}
-.npc-type-npc .npc-dot {
-  background: #42a5f5;
-}
-.npc-type-ally .npc-dot,
-.npc-type-summon .npc-dot {
-  background: #66bb6a;
-}
-.npc-type-monster .npc-dot {
-  background: #ef5350;
-}
-
 .npc-name {
   flex: 1;
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   color: var(--theme-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .npc-tier {
-  font-size: 0.6rem;
+  font-size: 0.62rem;
+  font-weight: 600;
   color: var(--theme-text-muted);
   background: var(--theme-surface-muted);
-  padding: 1px 4px;
-  border-radius: 2px;
+  padding: 1px 5px;
+  border-radius: var(--theme-radius-sm, 4px);
+  border: 1px solid transparent;
   flex-shrink: 0;
 }
 
-.scene-npc-empty {
-  font-size: 0.65rem;
-  color: var(--theme-text-muted);
+/* ═══ 心声气泡 ═══ */
+.npc-thought {
+  margin: 2px 6px 8px 42px;
+  padding: 8px 10px;
+  border-radius: var(--theme-radius-md, 6px);
+  background: color-mix(in srgb, var(--theme-surface-muted) 70%, transparent);
+  border-left: 2px solid var(--theme-primary);
+  font-size: 0.72rem;
   font-style: italic;
-  padding: 4px 6px;
+  color: var(--theme-text-secondary);
+  line-height: 1.55;
+  position: relative;
+}
+.npc-thought-quote {
+  color: var(--theme-primary);
+  opacity: 0.55;
+  font-weight: 700;
+  font-style: normal;
+}
+.npc-thought-text {
+  margin: 0 2px;
 }
 
-/* ═══ 思维链 ═══ */
-.scene-thinking {
-  margin: 0;
+/* ═══ 下段新闻 ═══ */
+.scene-news-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.scene-thinking-toggle {
+.news-item {
+  display: flex;
+  gap: 8px;
+  padding: 6px 7px;
+  border-radius: var(--theme-radius-md, 6px);
   cursor: pointer;
-  list-style: none;
-  margin-bottom: 0;
+  transition: background 120ms;
 }
-.scene-thinking-toggle::-webkit-details-marker {
-  display: none;
+.news-item:hover {
+  background: var(--theme-tab-hover-bg);
 }
-.scene-thinking-toggle::before {
-  content: '\25B6';
-  display: inline-block;
-  margin-right: 4px;
-  font-size: 0.55rem;
-  transition: transform 0.15s;
-  vertical-align: middle;
+.news-item.expanded {
+  background: var(--theme-primary-bg);
 }
-details[open] .scene-thinking-toggle::before {
-  transform: rotate(90deg);
-}
-.scene-thinking-content {
+
+.news-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
   margin-top: 4px;
-  font-size: 0.68rem;
+  flex-shrink: 0;
+  background: var(--theme-quality-mythic);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--theme-quality-mythic) 60%, transparent);
+}
+.news-icon {
+  font-size: 0.72rem;
+  margin-top: 3px;
   color: var(--theme-text-muted);
-  line-height: 1.4;
-  max-height: 160px;
-  overflow-y: auto;
-  white-space: pre-wrap;
+  flex-shrink: 0;
+}
+.news-main {
+  flex: 1;
+  min-width: 0;
+}
+.news-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.news-title {
+  flex: 1;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.news-item.read .news-title {
+  color: var(--theme-text-secondary);
+  font-weight: 500;
+}
+.news-time {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  color: var(--theme-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.news-content {
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: var(--theme-text-secondary);
+  line-height: 1.5;
+}
+.news-category {
+  display: inline-block;
+  font-size: 0.6rem;
+  color: var(--theme-primary);
+  background: var(--theme-primary-bg);
+  padding: 0 5px;
+  border-radius: 2px;
+  margin-right: 5px;
+  font-style: normal;
 }
 
 /* ═══ 空态 ═══ */
@@ -322,6 +541,13 @@ details[open] .scene-thinking-toggle::before {
   font-size: 0.65rem;
   color: var(--theme-text-muted);
   font-style: italic;
+}
+.scene-empty-block {
+  font-size: 0.7rem;
+  color: var(--theme-text-muted);
+  font-style: italic;
+  padding: 6px 2px;
+  text-align: center;
 }
 .scene-empty-msg {
   font-size: 0.75rem;

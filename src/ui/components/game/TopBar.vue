@@ -1,18 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useUIStore } from '../../stores/ui-store'
 import { useGameStore } from '../../stores/game-store'
-import { MONTH_NAMES, WEEKDAY_NAMES } from '@engine/time-system'
 
 const ui = useUIStore()
 const game = useGameStore()
-
-const timeDisplay = computed(() => {
-  const t = game.gameTime
-  if (!t) return null
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${t.era} ${pad(t.year)} 年 · ${MONTH_NAMES[t.month - 1]} · ${t.day} 日 · ${WEEKDAY_NAMES[t.weekday - 1]} · ${pad(t.hour)}:${pad(t.minute)}`
-})
 </script>
 
 <template>
@@ -20,8 +11,10 @@ const timeDisplay = computed(() => {
     <button class="top-btn" @click="ui.navigate('home')" title="回到首页">
       ← 首页
     </button>
-    <span class="top-time" v-if="timeDisplay">{{ timeDisplay }}</span>
-    <span class="top-time dim" v-else>--</span>
+
+    <!-- 时间展示职责已下沉到左侧 ScenePanel，顶栏只保留窗口级控制 -->
+    <span class="top-title">{{ game.activeSave?.name ?? '冒险之途' }}</span>
+
     <button class="top-btn" @click="game.toggleFullscreen()" title="全屏">
       <i :class="game.fullscreenStatus ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" />
       {{ game.fullscreenStatus ? '退出' : '全屏' }}
@@ -54,13 +47,16 @@ const timeDisplay = computed(() => {
 .top-btn:hover {
   background: var(--theme-title-bar-btn-hover);
 }
-.top-time {
+.top-title {
   font-family: var(--theme-font-title, 'Cinzel', serif);
   font-size: 0.875rem;
+  font-weight: 600;
   color: var(--theme-text-secondary);
-  letter-spacing: 0.02em;
-}
-.top-time.dim {
-  color: var(--theme-text-muted);
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 50vw;
 }
 </style>
