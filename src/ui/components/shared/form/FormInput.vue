@@ -13,7 +13,7 @@ const emit = defineEmits<{
 }>()
 
 function onInput(e: Event) {
-  emit('update:modelValue', (e.target as HTMLInputElement).value)
+  emit('update:modelValue', (e.target as HTMLInputElement | HTMLTextAreaElement).value)
 }
 </script>
 
@@ -22,7 +22,18 @@ function onInput(e: Event) {
     <label v-if="label || $slots.label" class="form-label">
       {{ label }}<slot name="label" />
     </label>
+    <textarea
+      v-if="type === 'textarea'"
+      class="form-input form-textarea"
+      :value="modelValue"
+      :placeholder="placeholder"
+      :disabled="disabled"
+      :readonly="readonly"
+      rows="2"
+      @input="onInput"
+    />
     <input
+      v-else
       class="form-input"
       :type="type || 'text'"
       :value="modelValue"
@@ -39,7 +50,7 @@ function onInput(e: Event) {
 .form-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--theme-spacing-xs);
 }
 .form-label {
   font-size: 0.85rem;
@@ -47,7 +58,7 @@ function onInput(e: Event) {
   color: var(--theme-text-secondary);
 }
 .form-input {
-  padding: 8px 12px;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-md);
   background: var(--theme-content-bg);
@@ -63,6 +74,11 @@ function onInput(e: Event) {
 }
 .form-input:disabled {
   opacity: 0.5;
+}
+.form-textarea {
+  resize: vertical;
+  min-height: 3em;
+  line-height: 1.5;
 }
 .form-hint {
   font-size: 0.75rem;

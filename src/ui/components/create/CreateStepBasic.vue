@@ -30,10 +30,10 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
         <FormInput v-if="store.identity === '自定义'" v-model="store.customIdentity" label="自定义身份" placeholder="输入身份名称" class="custom-field" />
         <FormSelect v-model="store.startLocation" label="起始地点" :options="store.flatLocationOptions" placeholder="选择起始地点" />
         <FormInput v-if="store.startLocation === '自定义'" v-model="store.customStartLocation" label="自定义地点" placeholder="输入地点名称" class="custom-field" />
-        <FormInput v-model="store.personality" label="性格" placeholder="描述角色的性格特点" />
-        <FormInput v-model="store.physics" label="身材" placeholder="描述角色的身材外貌" />
-        <FormInput v-model="store.backstory" label="身世" placeholder="简述角色的身世来历" />
-        <FormInput v-model="store.extra" label="补充" placeholder="其他需要补充的信息" />
+        <FormInput v-model="store.personality" label="性格" placeholder="描述角色的性格特点" type="textarea" />
+        <FormInput v-model="store.physics" label="身材" placeholder="描述角色的身材外貌" type="textarea" />
+        <FormInput v-model="store.backstory" label="身世" placeholder="简述角色的身世来历" type="textarea" />
+        <FormInput v-model="store.extra" label="补充" placeholder="其他需要补充的信息" type="textarea" />
       </div>
 
       <!-- 右列: 等级 + 属性面板 -->

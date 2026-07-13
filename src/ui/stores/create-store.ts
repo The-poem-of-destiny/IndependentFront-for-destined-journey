@@ -324,8 +324,8 @@ export const useCreateStore = defineStore('create', () => {
     }
   }
 
-  /** 单选命定核心 */
-  function selectSystemCoreEntry(uid: number) {
+  /** 单选命定核心（传 null 取消选择） */
+  function selectSystemCoreEntry(uid: number | null) {
     selectedSystemCoreEntryUid.value = uid
   }
 

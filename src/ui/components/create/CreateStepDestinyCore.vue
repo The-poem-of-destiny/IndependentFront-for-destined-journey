@@ -33,17 +33,20 @@ function summary(content: string, maxLen = 200): string {
       正在加载命定核心列表…
     </div>
 
-    <!-- 选中条目的详情卡片（始终显示在列表上方） -->
+    <!-- 选中条目的详情卡片 -->
     <div v-if="store.selectedSystemCoreEntry" class="selected-detail">
       <div class="sd-header">
         <span class="sd-dot" />
         <h3>{{ store.selectedSystemCoreEntry.name }}</h3>
+        <button class="sd-deselect" @click="store.selectSystemCoreEntry(null as any)" title="取消选择">
+          ✕
+        </button>
       </div>
       <div class="sd-desc">{{ summary(store.selectedSystemCoreEntry.content, 500) }}</div>
     </div>
 
-    <!-- 紧凑单选列表 -->
-    <div v-else class="core-list">
+    <!-- 紧凑单选列表（始终显示所有条目） -->
+    <div class="core-list">
       <div
         v-for="entry in store.systemCoreEntries"
         :key="entry.uid"
@@ -143,6 +146,25 @@ function summary(content: string, maxLen = 200): string {
   color: var(--theme-quality-epic);
   margin: 0;
   font-size: 0.95rem;
+  flex: 1;
+}
+.sd-deselect {
+  background: none;
+  border: 1px solid var(--theme-card-border);
+  color: var(--theme-text-muted);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: color var(--theme-transition-fast), border-color var(--theme-transition-fast);
+}
+.sd-deselect:hover {
+  color: var(--theme-text-primary);
+  border-color: var(--theme-text-muted);
 }
 .sd-desc {
   font-size: 0.8rem;
