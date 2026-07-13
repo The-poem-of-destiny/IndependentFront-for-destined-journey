@@ -60,6 +60,36 @@ function summary(content: string, maxLen = 200): string {
 .core-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--theme-spacing-sm); }
 @media (max-width: 640px) { .core-grid { grid-template-columns: repeat(2, 1fr); } }
 
+.core-card {
+  padding: var(--theme-spacing-md);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm, 6px);
+  background: var(--theme-card-bg);
+  cursor: pointer;
+}
+.core-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+}
+.core-card.selected {
+  border-color: var(--theme-quality-epic) !important;
+  box-shadow: 0 0 0 1px var(--theme-quality-epic),
+              0 4px 20px color-mix(in srgb, var(--theme-quality-epic) 20%, transparent);
+}
+.core-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--theme-text-primary);
+  font-family: var(--theme-font-title, serif);
+  margin-bottom: 4px;
+}
+.core-summary {
+  font-size: 0.75rem;
+  color: var(--theme-text-secondary);
+  line-height: 1.5;
+}
+
 .core-loading {
   text-align: center;
   padding: 2rem;
