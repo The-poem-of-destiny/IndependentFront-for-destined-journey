@@ -61,19 +61,20 @@ function summary(content: string, maxLen = 160): string {
 .step-title {
   font-size: 1.125rem;
   font-weight: 600;
-  margin: 0 0 0.25rem;
+  margin: 0 0 var(--theme-spacing-xs);
 }
 
 .step-desc {
   font-size: 0.8125rem;
   color: var(--theme-text-secondary);
-  margin: 0 0 1rem;
+  margin: 0 0 var(--theme-spacing-md);
 }
 
 .chars-loading {
   text-align: center;
-  padding: 2rem;
+  padding: var(--theme-spacing-xl);
   color: var(--theme-text-muted);
+  font-size: 0.875rem;
 }
 
 .chars-grid {
@@ -81,20 +82,20 @@ function summary(content: string, maxLen = 160): string {
   overflow-y: auto;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 8px;
+  gap: var(--theme-spacing-sm);
   align-content: start;
 }
 
 .char-card {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: var(--theme-spacing-sm);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-sm, 6px);
+  border-radius: var(--theme-radius-sm);
   background: var(--theme-card-bg);
   cursor: pointer;
-  transition: border-color 150ms;
+  transition: border-color var(--theme-transition-fast);
 }
 
 .char-card:hover {
@@ -107,7 +108,7 @@ function summary(content: string, maxLen = 160): string {
 }
 
 .char-checkbox {
-  margin-top: 2px;
+  margin-top: var(--theme-spacing-xs);
   flex-shrink: 0;
   accent-color: var(--theme-primary);
 }
@@ -119,7 +120,7 @@ function summary(content: string, maxLen = 160): string {
 .char-name {
   font-size: 0.875rem;
   font-weight: 600;
-  margin-bottom: 2px;
+  margin-bottom: var(--theme-spacing-xs);
 }
 
 .char-summary {
@@ -133,11 +134,11 @@ function summary(content: string, maxLen = 160): string {
 }
 
 .chars-count {
-  padding-top: 8px;
+  padding-top: var(--theme-spacing-sm);
   font-size: 0.8125rem;
   color: var(--theme-text-secondary);
   text-align: right;
   border-top: 1px solid var(--theme-card-border);
-  margin-top: 8px;
+  margin-top: var(--theme-spacing-sm);
 }
 </style>

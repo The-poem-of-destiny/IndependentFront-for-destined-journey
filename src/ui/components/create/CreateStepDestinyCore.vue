@@ -82,7 +82,7 @@ function summary(content: string, maxLen = 200): string {
   font-size: 0.95rem;
   color: var(--theme-text-primary);
   font-family: var(--theme-font-title, serif);
-  margin-bottom: 4px;
+  margin-bottom: var(--theme-spacing-xs);
 }
 .core-summary {
   font-size: 0.75rem;
@@ -105,8 +105,8 @@ function summary(content: string, maxLen = 200): string {
   border-radius: var(--theme-radius-md);
   border-left: 3px solid var(--theme-quality-epic);
 }
-.sd-header { display: flex; align-items: center; gap: 8px; margin-bottom: var(--theme-spacing-xs); }
-.sd-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--theme-quality-epic); flex-shrink: 0; }
+.sd-header { display: flex; align-items: center; gap: var(--theme-spacing-sm); margin-bottom: var(--theme-spacing-xs); }
+.sd-dot { width: var(--theme-spacing-sm); height: var(--theme-spacing-sm); border-radius: 50%; background: var(--theme-quality-epic); flex-shrink: 0; }
 .sd-header h3 { color: var(--theme-quality-epic); margin: 0; font-size: 0.95rem; }
 .sd-desc { font-size: 0.8rem; color: var(--theme-text-secondary); line-height: 1.5; margin: var(--theme-spacing-xs) 0 0; }
 </style>
