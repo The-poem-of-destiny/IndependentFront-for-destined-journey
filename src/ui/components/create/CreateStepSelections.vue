@@ -12,7 +12,6 @@ import CategoryTabs from './CategoryTabs.vue'
 import QualityFilter from './QualityFilter.vue'
 import SelectableCard from './SelectableCard.vue'
 import SelectedPanel from './SelectedPanel.vue'
-import PartnerWorldBookPanel from './PartnerWorldBookPanel.vue'
 import CustomItemForm from './CustomItemForm.vue'
 import AppButton from '../shared/AppButton.vue'
 
@@ -140,9 +139,6 @@ const visiblePool = computed(() => {
     </div>
 
     <!-- ====== 下部: 伙伴 (独立区域, 后面做自己的滚动) ====== -->
-    <div class="partner-section">
-      <PartnerWorldBookPanel />
-    </div>
 
     <!-- 自定义 Modal -->
     <CustomItemForm :visible="showCustomForm" @save="handleCustomSave" @close="showCustomForm = false" />
@@ -269,17 +265,6 @@ const visiblePool = computed(() => {
 .selected-sidebar :deep(.selected-panel) {
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-lg, 12px);
-}
-
-/* ================================================
-   卡片框 ②: 伙伴区
-   ================================================ */
-.partner-section {
-  flex-shrink: 0;
-  background: var(--theme-card-bg);
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-lg, 12px);
-  padding: var(--theme-spacing-md);
 }
 
 /* ===== 空状态 ===== */
