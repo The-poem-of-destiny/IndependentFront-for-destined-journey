@@ -9,7 +9,7 @@ import Dexie, { Table } from 'dexie';
 import type {
   Lorebook, ChatPreset, AppSettings, ChatSession,
   MemoryRecord, PlotEvent, CharacterState, Snapshot, SaveSlot, ApiEndpoint,
-  PlotOutline, SaveProfile,
+  PlotOutline, SaveProfile, ChatMessage,
 } from './types';
 import type { CreatePreset } from '../ui/stores/create-store';
 import { DEFAULT_SETTINGS } from './types';
@@ -24,7 +24,7 @@ export interface CreatePresetRecord {
 }
 
 const DB_NAME = 'SillyTavernWebDB';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 class AppDatabase extends Dexie {
   // v1-v3 tables
@@ -49,6 +49,9 @@ class AppDatabase extends Dexie {
 
   // v7 new table (Phase 7d)
   createPresets!: Table<CreatePresetRecord>;
+
+  // v8 new table (Phase 10h)
+  messages!: Table<ChatMessage>;
 
   constructor() {
     super(DB_NAME);
@@ -178,6 +181,24 @@ class AppDatabase extends Dexie {
       saveProfiles: 'saveId, updatedAt',
       createPresets: 'id, name, updatedAt',
     });
+
+    // v8: Phase 10h — 消息持久化表
+    this.version(8).stores({
+      lorebooks: 'id, name, updatedAt',
+      presets: 'id, name, updatedAt',
+      settings: 'key',
+      chats: 'id, name, updatedAt',
+      memories: 'id, saveId, createdAt, realTimestamp',
+      plotEvents: 'id, saveId, parentId, status, updatedAt',
+      characters: 'id, type',
+      snapshots: 'id, saveId, index, timestamp',
+      saves: 'id, slot, updatedAt',
+      apiEndpoints: 'id, name',
+      plotOutlines: 'id, saveId, updatedAt',
+      saveProfiles: 'saveId, updatedAt',
+      createPresets: 'id, name, updatedAt',
+      messages: 'id, saveId, [saveId+turn]',
+    });
   }
 }
 
@@ -239,6 +260,8 @@ export interface FullBackup {
   saveProfiles: SaveProfile[];
   // v7 Phase 7d
   createPresets: CreatePresetRecord[];
+  // v8 Phase 10h
+  messages: ChatMessage[];
 }
 
 export async function exportAllData(): Promise<FullBackup> {
@@ -246,6 +269,7 @@ export async function exportAllData(): Promise<FullBackup> {
   const [
     lorebooks, presets, settings, chats,
     memories, plotEvents, characters, snapshots, saves, apiEndpoints, plotOutlines, saveProfiles, createPresets,
+    messages,
   ] = await Promise.all([
     db.lorebooks.toArray(),
     db.presets.toArray(),
@@ -260,12 +284,14 @@ export async function exportAllData(): Promise<FullBackup> {
     db.plotOutlines.toArray(),
     db.saveProfiles.toArray(),
     db.createPresets.toArray(),
+    db.messages.toArray(),
   ]);
   return {
     version: DB_VERSION,
     exportedAt: Date.now(),
     lorebooks, presets, settings, chats,
     memories, plotEvents, characters, snapshots, saves, apiEndpoints, plotOutlines, saveProfiles, createPresets,
+    messages,
   };
 }
 
@@ -316,6 +342,11 @@ export async function importAllData(backup: FullBackup): Promise<void> {
   await db.transaction('rw', db.createPresets, async () => {
     await db.createPresets.clear();
     if (Array.isArray(backup.createPresets)) await db.createPresets.bulkPut(backup.createPresets);
+  });
+
+  await db.transaction('rw', db.messages, async () => {
+    await db.messages.clear();
+    if (Array.isArray(backup.messages)) await db.messages.bulkPut(backup.messages);
   });
 }
 
@@ -540,6 +571,8 @@ export async function deleteSaveSlot(id: string): Promise<void> {
   await db.plotEvents.bulkDelete(plotEvents.map(p => p.id));
   const plotOutlines = await db.plotOutlines.where('saveId').equals(id).toArray();
   await db.plotOutlines.bulkDelete(plotOutlines.map(o => o.id));
+  const messagesToDelete = await db.messages.where('saveId').equals(id).toArray();
+  await db.messages.bulkDelete(messagesToDelete.map(m => m.id));
   await db.saveProfiles.where('saveId').equals(id).delete();
   await db.saves.delete(id);
 }
@@ -645,4 +678,31 @@ export async function saveCreatePreset(preset: CreatePresetRecord): Promise<stri
 
 export async function deleteCreatePreset(id: string): Promise<void> {
   await getDatabase().createPresets.delete(id);
+}
+
+// ═══════════════════════════════════════════════════════════
+// Phase 10h — 消息持久化 CRUD
+// ═══════════════════════════════════════════════════════════
+
+/** 保存单条消息 */
+export async function saveMessage(message: ChatMessage): Promise<string> {
+  await getDatabase().messages.put(message);
+  return message.id;
+}
+
+/** 批量保存消息 */
+export async function saveMessages(messages: ChatMessage[]): Promise<void> {
+  await getDatabase().messages.bulkPut(messages);
+}
+
+/** 按存档 ID 获取全部消息，按时间戳升序排列 */
+export async function getMessages(saveId: string): Promise<ChatMessage[]> {
+  return getDatabase().messages
+    .where('saveId').equals(saveId)
+    .sortBy('timestamp');
+}
+
+/** 按存档 ID 删除所有消息 */
+export async function deleteMessagesBySaveId(saveId: string): Promise<void> {
+  await getDatabase().messages.where('saveId').equals(saveId).delete();
 }
