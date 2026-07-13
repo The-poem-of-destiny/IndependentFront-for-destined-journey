@@ -61,6 +61,11 @@ export interface CreatePreset {
   /** Phase 10h: 世界书驱动字段 */
   systemCoreEntryUid?: number | null
   enabledCharacterEntryUids?: number[]
+  /** 角色补充信息 */
+  personality?: string
+  physics?: string
+  backstory?: string
+  extra?: string
 }
 
 // ===== 原版常量 (custom_start_index.html) =====
@@ -132,6 +137,14 @@ export const useCreateStore = defineStore('create', () => {
   const customIdentity = ref('')
   const startLocation = ref('大陆中东部区域-奥古斯提姆帝国-艾瑟嘉德')
   const customStartLocation = ref('')
+  /** 角色性格描述 */
+  const personality = ref('')
+  /** 角色身材描述 */
+  const physics = ref('')
+  /** 角色身世简述 */
+  const backstory = ref('')
+  /** 补充说明 */
+  const extra = ref('')
 
   // 扁平化地点列表（从级联树提取）
   function flattenLocations(nodes: typeof START_LOCATIONS, prefix = ''): { label: string; value: string }[] {
@@ -669,6 +682,10 @@ export const useCreateStore = defineStore('create', () => {
         age: age.value,
         destinyCoreId: destinyCore.value?.id ?? null,
         destinyPoints: destinyPoints.value,
+        personality: personality.value.trim(),
+        physics: physics.value.trim(),
+        backstory: backstory.value.trim(),
+        extra: extra.value.trim(),
       },
     }
   }
@@ -712,6 +729,16 @@ export const useCreateStore = defineStore('create', () => {
 
     if (destinyCore.value) {
       parts.push(`【命定之灵】\n${JSON.stringify({ name: destinyCore.value.name, author: destinyCore.value.author, theme: destinyCore.value.theme })}`)
+    }
+
+    // 角色补充信息
+    const extraProfile: Record<string, string> = {}
+    if (personality.value.trim()) extraProfile['性格'] = personality.value.trim()
+    if (physics.value.trim()) extraProfile['身材'] = physics.value.trim()
+    if (backstory.value.trim()) extraProfile['身世'] = backstory.value.trim()
+    if (extra.value.trim()) extraProfile['补充'] = extra.value.trim()
+    if (Object.keys(extraProfile).length > 0) {
+      parts.push(`【角色设定】\n${JSON.stringify(extraProfile)}`)
     }
 
     return parts.join('\n\n')
@@ -791,6 +818,10 @@ export const useCreateStore = defineStore('create', () => {
       plotSettings: plotSettings.value,
       systemCoreEntryUid: selectedSystemCoreEntryUid.value,
       enabledCharacterEntryUids: [...enabledCharacterEntryUids.value],
+      personality: personality.value,
+      physics: physics.value,
+      backstory: backstory.value,
+      extra: extra.value,
     }
   }
 
@@ -822,6 +853,10 @@ export const useCreateStore = defineStore('create', () => {
     if (data.enabledCharacterEntryUids) {
       enabledCharacterEntryUids.value = new Set(data.enabledCharacterEntryUids)
     }
+    personality.value = data.personality || ''
+    physics.value = data.physics || ''
+    backstory.value = data.backstory || ''
+    extra.value = data.extra || ''
     if (data.plotSettings) {
       plotMode.value = data.plotSettings.mode
       if (data.plotSettings.main) {
@@ -878,6 +913,8 @@ export const useCreateStore = defineStore('create', () => {
     identity, customIdentity, identityOptions,
     startLocation, customStartLocation, START_LOCATIONS, flatLocationOptions,
     GENDER_OPTIONS,
+    // 角色补充信息
+    personality, physics, backstory, extra,
     // 属性 (→ 变量)
     level, basePoints, attributePoints,
     tier, tierName, tierBonus, finalAttributes,

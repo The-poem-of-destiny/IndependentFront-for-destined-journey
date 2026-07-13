@@ -49,14 +49,28 @@ const currentBg = computed({
 
       <!-- 右侧: 背景卡片列表 -->
       <template #content>
-        <BackgroundList
-          :backgrounds="store.filteredBackgrounds"
-          v-model="currentBg"
-          :character-race="store.race"
-          :character-identity="store.identity"
-          :character-location="store.startLocation"
-          :destiny-core-name="store.destinyCore?.name ?? ''"
-        />
+        <div class="bg-content">
+          <BackgroundList
+            :backgrounds="store.filteredBackgrounds"
+            v-model="currentBg"
+            :character-race="store.race"
+            :character-identity="store.identity"
+            :character-location="store.startLocation"
+            :destiny-core-name="store.destinyCore?.name ?? ''"
+          />
+          <!-- 自定义背景输入（独立于预设背景，始终可见） -->
+          <div class="custom-bg-section">
+            <h3 class="custom-bg-title">自定义背景故事</h3>
+            <p class="custom-bg-hint">上述预设背景与自定义背景择一使用。填写自定义背景后预设背景将被忽略。</p>
+            <textarea
+              :value="store.customBackgroundText"
+              @input="store.customBackgroundText = ($event.target as HTMLTextAreaElement).value"
+              placeholder="在此自由书写你的角色背景故事…"
+              rows="6"
+              class="custom-bg-textarea"
+            ></textarea>
+          </div>
+        </div>
       </template>
     </CategorySelectionLayout>
   </section>
@@ -76,5 +90,43 @@ const currentBg = computed({
   color: var(--theme-text-secondary);
   font-size: 0.85rem;
   margin-bottom: var(--theme-spacing-lg);
+}
+.bg-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-md);
+}
+.custom-bg-section {
+  padding: var(--theme-spacing-md);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: var(--theme-card-bg);
+}
+.custom-bg-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+  margin: 0 0 var(--theme-spacing-xs);
+}
+.custom-bg-hint {
+  font-size: 0.75rem;
+  color: var(--theme-text-muted);
+  margin: 0 0 var(--theme-spacing-sm);
+}
+.custom-bg-textarea {
+  width: 100%;
+  padding: var(--theme-spacing-sm);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: var(--theme-bg-primary);
+  color: var(--theme-text-primary);
+  font-size: 0.82em;
+  line-height: 1.6;
+  resize: vertical;
+  font-family: inherit;
+}
+.custom-bg-textarea:focus {
+  outline: none;
+  border-color: var(--theme-color-primary);
 }
 </style>
