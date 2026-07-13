@@ -429,8 +429,8 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC
 | 7a | 工程搭建 (Vite + Vue 3 + Pinia + Router) | ✅ |
 | 7b | 主题系统 + 通用组件 (10主题/15组件) | ✅ |
 | 7c | 首页 (标题画面风格) + 设置页 (8分区) | ✅ |
-| 7d | 捏人页 `/create` | 🔄 部分完成，后续继续改 |
-| 7e | 游戏页 + 状态栏 HUD + 脚本引擎(init自注册+@parent跨对象引用+subscription-manager) + ChatFlow 三源消息系统 + 输出美化框架(beautifier正则管道/对话卡片/场景面板) + ScenePanel 三段式重构(时间视觉/在场NPC心声气泡/世界消息) | 🔄 输出美化完成，场景面板三段式完成，ChatFlow精简完成，Orchestrator 接入待做 |
+| 7d | 捏人页 `/create` | 🔄 世界书驱动改造中 (命运核心 + 角色启用 + 四字段 + 预设 UI) |
+| 7e | 游戏页 + 状态栏 HUD + 脚本引擎 + ChatFlow + 输出美化 + ScenePanel 三段式 | 🔄 DB v8 messages 表完成，GamePipeline 桥接待做 |
 | 7f | 创意工坊 `/workshop` | ⬜ |
 | 7g | 衔接 & 测试 | ⬜ |
 | 8 | Agent 上下文可见性 & Prompt 体系 | ✅ |
