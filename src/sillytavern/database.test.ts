@@ -48,8 +48,14 @@ import {
   // Settings
   getSettings,
   saveSettings,
+  // Messages
+  saveMessage,
+  saveMessages,
+  getMessages,
+  deleteMessagesBySaveId,
 } from './database';
 import type {
+  ChatMessage,
   MemoryRecord,
   PlotEvent,
   CharacterState,
@@ -519,7 +525,7 @@ describe('exportAllData / importAllData', () => {
     await saveApiEndpoint(makeApiEndpoint({ id: 'exp_api' }));
 
     const backup = await exportAllData();
-    expect(backup.version).toBe(7);
+    expect(backup.version).toBe(8);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -531,6 +537,7 @@ describe('exportAllData / importAllData', () => {
     expect(Array.isArray(backup.saves)).toBe(true);
     expect(Array.isArray(backup.apiEndpoints)).toBe(true);
     expect(Array.isArray(backup.createPresets)).toBe(true);
+    expect(Array.isArray(backup.messages)).toBe(true);
   });
 
   it('importAllData 应还原数据', async () => {
@@ -580,5 +587,87 @@ describe('Settings Persistence', () => {
     const all = await getDatabase().settings.toArray();
     expect(all).toHaveLength(1);
     expect(all[0].key).toBe('settings');
+  });
+});
+
+// ========== Messages CRUD (Phase 10h) ==========
+
+describe('Messages CRUD (Phase 10h)', () => {
+  const SAVE_ID = 'msg-test-save';
+
+  function makeMsg(overrides: Partial<ChatMessage> = {}): ChatMessage {
+    return {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '测试消息',
+      timestamp: Date.now(),
+      saveId: SAVE_ID,
+      ...overrides,
+    };
+  }
+
+  beforeEach(async () => {
+    await deleteMessagesBySaveId(SAVE_ID);
+  });
+
+  it('saveMessage: 写入单条消息并可读取', async () => {
+    const msg = makeMsg({ content: 'AI 回复正文' });
+    await saveMessage(msg);
+
+    const msgs = await getMessages(SAVE_ID);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].content).toBe('AI 回复正文');
+    expect(msgs[0].role).toBe('assistant');
+  });
+
+  it('saveMessages: 批量写入多条消息', async () => {
+    const msgs = [
+      makeMsg({ role: 'user', content: '你好' }),
+      makeMsg({ role: 'assistant', content: '你好啊冒险者' }),
+    ];
+    await saveMessages(msgs);
+
+    const loaded = await getMessages(SAVE_ID);
+    expect(loaded).toHaveLength(2);
+  });
+
+  it('getMessages: 按 saveId 隔离，不同存档消息不混淆', async () => {
+    await saveMessage(makeMsg({ content: '存档A的消息' }));
+    await saveMessage(makeMsg({
+      id: crypto.randomUUID(),
+      content: '存档B的消息',
+      saveId: 'other-save',
+      role: 'assistant',
+    }));
+
+    const loaded = await getMessages(SAVE_ID);
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].content).toBe('存档A的消息');
+
+    const other = await getMessages('other-save');
+    expect(other).toHaveLength(1);
+    expect(other[0].content).toBe('存档B的消息');
+  });
+
+  it('deleteMessagesBySaveId: 清空指定存档全部消息', async () => {
+    await saveMessage(makeMsg());
+    await saveMessage(makeMsg({ id: crypto.randomUUID() }));
+    expect((await getMessages(SAVE_ID)).length).toBe(2);
+
+    await deleteMessagesBySaveId(SAVE_ID);
+    expect((await getMessages(SAVE_ID)).length).toBe(0);
+  });
+
+  it('getMessages: 返回结果按时间戳升序排列', async () => {
+    const base = Date.now();
+    await saveMessage(makeMsg({ id: crypto.randomUUID(), timestamp: base + 100, content: '第二条' }));
+    await saveMessage(makeMsg({ id: crypto.randomUUID(), timestamp: base, content: '第一条' }));
+    await saveMessage(makeMsg({ id: crypto.randomUUID(), timestamp: base + 200, content: '第三条' }));
+
+    const msgs = await getMessages(SAVE_ID);
+    expect(msgs).toHaveLength(3);
+    expect(msgs[0].content).toBe('第一条');
+    expect(msgs[1].content).toBe('第二条');
+    expect(msgs[2].content).toBe('第三条');
   });
 });
