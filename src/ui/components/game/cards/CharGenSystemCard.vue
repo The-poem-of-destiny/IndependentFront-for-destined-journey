@@ -108,7 +108,7 @@ const inventoryGroups = computed(() => {
     <div class="ci-body">
       <!-- A. 五维属性 — 参照原版 attributes-grid -->
       <div v-if="event.details.attributes" class="ci-attrs">
-        <div v-for="(val, key) in event.details.attributes" :key="key" class="ci-attr" :style="{ color: ATTR_COLORS[key] ?? '#fff' }">
+        <div v-for="(val, key) in event.details.attributes" :key="key" class="ci-attr" :style="{ color: ATTR_COLORS[key] ?? 'var(--theme-text-primary)' }">
           <i :class="ATTR_ICONS[key] ?? 'fa-solid fa-circle'" class="ci-attr-icon" />
           <span class="ci-attr-name">{{ key.toUpperCase() }}</span>
           <span class="ci-attr-val">{{ val }}</span>
@@ -370,7 +370,7 @@ const inventoryGroups = computed(() => {
   font-family: 'Cinzel', 'Noto Serif SC', serif;
   font-size: 1.0625rem;
   font-weight: 700;
-  color: #fff;
+  color: var(--theme-text-primary);
   text-shadow: 0 0 10px rgba(255,255,255,0.15);
 }
 
@@ -385,7 +385,7 @@ const inventoryGroups = computed(() => {
 .ci-tier-badge {
   padding: 2px 8px;
   border-radius: 3px;
-  color: #fff;
+  color: var(--theme-text-primary);
   font-size: 0.6875rem;
   font-weight: 700;
 }

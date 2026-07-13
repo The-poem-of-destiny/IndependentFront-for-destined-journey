@@ -62,24 +62,15 @@ function typeIcon(itemType: string): string {
   </div>
 </template>
 
-<style scoped>
-.sys-card {
-  border-radius: 4px;
-  overflow: hidden;
-  border-left: 4px solid;
-}
+<style>
+@import '../../../styles/cards-shared.css';
+</style>
 
-.sys-card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--theme-surface-muted);
-  cursor: pointer;
-  user-select: none;
-}
-.sys-card-header:hover {
-  background: var(--theme-card-bg);
+<style scoped>
+/* Override: Item card has no box-shadow background */
+.sys-card {
+  border-left: 4px solid;
+  box-shadow: none;
 }
 
 .sys-card-icon {
@@ -99,24 +90,6 @@ function typeIcon(itemType: string): string {
 .sys-card-quality {
   font-size: 0.75rem;
   font-weight: 600;
-}
-
-.sys-card-collapse {
-  font-size: 0.625rem;
-  opacity: 0.4;
-  cursor: pointer;
-  transition: opacity 0.15s;
-  padding: 2px;
-}
-.sys-card-collapse:hover { opacity: 0.8; }
-
-.sys-card-body {
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 0.8125rem;
-  color: var(--theme-text-primary);
 }
 
 .section {

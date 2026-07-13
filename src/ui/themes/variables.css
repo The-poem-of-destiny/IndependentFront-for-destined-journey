@@ -102,3 +102,12 @@
   --theme-transition-fast: 0.15s ease;
   --theme-transition-normal: 0.25s ease;
 }
+
+/* ===== 无障碍: 减少动态效果 ===== */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

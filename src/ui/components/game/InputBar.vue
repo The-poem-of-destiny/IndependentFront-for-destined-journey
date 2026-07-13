@@ -6,6 +6,8 @@ const emit = defineEmits<{
   send: [content: string]
 }>()
 
+const props = defineProps<{ disabled?: boolean }>()
+
 const game = useGameStore()
 const input = ref('')
 const showOptions = ref(false)
@@ -39,19 +41,20 @@ function handleSend() {
 
 <template>
   <div class="input-bar">
-    <div class="options-popup" v-if="showOptions">
+    <div class="options-popup" v-if="showOptions" role="listbox">
       <div class="options-title">可选行动</div>
       <button
         v-for="(opt, i) in mockOptions"
         :key="i"
         class="option-item"
+        role="option"
         @click="selectOption(opt)"
       >
         {{ opt }}
       </button>
       <button class="option-custom" @click="showOptions = false">自定义输入...</button>
     </div>
-    <button class="input-btn" @click="showOptions = !showOptions" title="可选行动">
+    <button class="input-btn" @click="showOptions = !showOptions" title="可选行动" :aria-expanded="showOptions" aria-haspopup="listbox">
       <i class="fa-solid fa-list-ul" />
     </button>
     <input
@@ -59,9 +62,10 @@ function handleSend() {
       class="input-field"
       type="text"
       placeholder="输入你的行动..."
+      :disabled="props.disabled"
       @keydown.enter="handleSend"
     />
-    <button class="input-btn send-btn" @click="handleSend" title="发送">
+    <button class="input-btn send-btn" :disabled="props.disabled" @click="handleSend" title="发送">
       <i class="fa-solid fa-paper-plane" />
     </button>
   </div>
@@ -142,7 +146,7 @@ function handleSend() {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border: none;
   background: none;
   color: var(--theme-text-primary);

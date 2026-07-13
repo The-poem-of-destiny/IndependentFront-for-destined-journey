@@ -30,12 +30,19 @@ function handleClick(id: string) {
       :key="tool.id"
       class="tool-btn"
       :title="tool.label"
+      :aria-label="tool.label"
       @click="handleClick(tool.id)"
     >
       <i :class="tool.icon" />
       <span class="tool-label" v-show="!game.sidebarCollapsed">{{ tool.label }}</span>
     </button>
-    <button class="collapse-toggle" @click="game.toggleSidebar()" title="折叠">
+    <button
+      class="collapse-toggle"
+      @click="game.toggleSidebar()"
+      :title="game.sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
+      :aria-expanded="!game.sidebarCollapsed"
+      :aria-label="game.sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
+    >
       {{ game.sidebarCollapsed ? '▶' : '◀' }}
     </button>
   </nav>
@@ -45,7 +52,7 @@ function handleClick(id: string) {
 .side-toolbar {
   display: flex;
   flex-direction: column;
-  width: 8.75rem;
+  width: 6rem;
   flex-shrink: 0;
   background: var(--theme-tab-bar-bg);
   border-right: 1px solid var(--theme-card-border);
@@ -60,8 +67,8 @@ function handleClick(id: string) {
 .tool-btn {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
+  gap: 8px;
+  padding: 10px 10px;
   border: none;
   background: none;
   color: var(--theme-tab-text);
@@ -78,9 +85,9 @@ function handleClick(id: string) {
   color: var(--theme-tab-active-text);
 }
 .tool-btn i {
-  width: 1.25rem;
+  width: 1rem;
   text-align: center;
-  font-size: 1rem;
+  font-size: 0.9rem;
   flex-shrink: 0;
 }
 .tool-label {

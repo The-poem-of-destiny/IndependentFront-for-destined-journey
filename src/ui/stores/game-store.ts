@@ -79,10 +79,35 @@ export const useGameStore = defineStore('game', () => {
   function closeModal() { activeModal.value = null }
   function toggleFullscreen() { fullscreenStatus.value = !fullscreenStatus.value }
 
-  /** 预览/测试注入：供 Ctrl+Shift+T 直接灌入 characters 与 saveProfile，不绕 IndexedDB。 */
+  /** 预览/测试注入：供 Ctrl+Shift+T 直接灌入 characters 与 saveProfile，不绕 IndexedDB。
+   *  采用合并语义而非替换，避免覆盖从 IndexedDB 加载的真实存档数据。 */
   function hydratePreview(payload: { characters?: any[]; saveProfile?: any }) {
-    if (payload.characters) characters.value = payload.characters as CharacterState[]
-    if (payload.saveProfile) saveProfile.value = payload.saveProfile as SaveProfile
+    if (payload.characters) {
+      const existingMap = new Map(characters.value.map(c => [c.id, c]))
+      for (const c of payload.characters) {
+        const existing = existingMap.get(c.id)
+        if (existing) {
+          // 已有角色 → 合并覆盖字段（mock 只带 id/name/race/tier/location/customFields，不会破坏属性/装备/背包）
+          Object.assign(existing, c)
+        } else if (c.type === 'player') {
+          // Mock 玩家：只更新真实玩家的 location，不添加假玩家
+          const realPlayer = characters.value.find(rp => rp.type === 'player')
+          if (realPlayer) {
+            if (c.location) realPlayer.location = c.location
+            if (c.customFields) {
+              realPlayer.customFields = { ...realPlayer.customFields, ...c.customFields }
+            }
+          }
+        } else {
+          // 新 NPC → 追加
+          characters.value.push(c as CharacterState)
+        }
+      }
+    }
+    if (payload.saveProfile) {
+      // 浅合并：保留真实 fp/quests 等字段，只覆盖 mock 提供的 gameTime/news/worldFlags
+      saveProfile.value = { ...saveProfile.value, ...payload.saveProfile } as SaveProfile
+    }
   }
 
   // === 消息管理 ===

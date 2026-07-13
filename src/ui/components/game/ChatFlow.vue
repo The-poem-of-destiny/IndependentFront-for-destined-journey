@@ -9,6 +9,14 @@ import CharGenSystemCard from './cards/CharGenSystemCard.vue'
 import CombatSystemCard from './cards/CombatSystemCard.vue'
 import ItemSystemCard from './cards/ItemSystemCard.vue'
 import SystemNotifBar from './cards/SystemNotifBar.vue'
+import type { Component } from 'vue'
+
+const CARD_COMPONENTS: Record<string, Component> = {
+  craft: CraftSystemCard,
+  char_gen: CharGenSystemCard,
+  combat: CombatSystemCard,
+  item_gen: ItemSystemCard,
+}
 
 const props = defineProps<{
   messages?: ChatMessage[]
@@ -87,6 +95,9 @@ function eventIconClass(type: string): string {
 
 /**
  * 美化助手文本 — 使用 settings 中配置的规则管道
+ *
+ * 段落处理: \n\n 分隔的文本段落包裹为 &lt;p&gt; 标签，
+ * 使 CSS 的 text-indent 和段间距生效，实现「读小说」而非「读聊天」的排版。
  */
 function beautifyText(msg: ChatMessage): string {
   const raw = msg.parsed?.maintext ?? msg.content
@@ -95,13 +106,37 @@ function beautifyText(msg: ChatMessage): string {
   }
   const rules = (s.beautifierRules ?? []) as import('@engine/types').BeautifierRule[]
   const builtinDisabled: string[] = s.beautifierBuiltinDisabled ?? []
-  return beautify(raw, 'maintext', rules, builtinDisabled)
+  let html = beautify(raw, 'maintext', rules, builtinDisabled)
+  // 将双换行分隔的文本段落包裹成 &lt;p&gt;，跳过已有 HTML 标签块（dialogue-card 等）
+  html = wrapParagraphs(html)
+  return html
+}
+
+/** 将双换行分隔的纯文本块包裹成 &lt;p&gt;，保留已有 HTML 标签不变 */
+function wrapParagraphs(html: string): string {
+  // 把 HTML 标签临时替换为占位符，避免被拆分
+  const tags: string[] = []
+  const placeholder = html.replace(/<[^>]+>/g, (match) => {
+    tags.push(match)
+    return `\x00TAG${tags.length - 1}\x00`
+  })
+  // 按双换行拆分
+  const parts = placeholder.split(/\n\n+/)
+  const wrapped = parts.map((part) => {
+    const trimmed = part.trim()
+    if (!trimmed) return ''
+    // 纯 HTML 标签块（如 dialogue-card）不包裹 &lt;p&gt;，避免 block-in-inline 非法嵌套
+    if (/^\x00TAG(\d+)\x00$/.test(trimmed)) return trimmed
+    return `<p>${trimmed}</p>`
+  }).join('')
+  // 还原 HTML 标签
+  return wrapped.replace(/\x00TAG(\d+)\x00/g, (_, i) => tags[Number(i)])
 }
 </script>
 
 <template>
   <div class="chat-flow">
-    <div ref="container" class="chat-messages">
+    <div ref="container" class="chat-messages" tabindex="0">
       <div v-if="!messages || messages.length === 0" class="chat-empty">
         <p>等待冒险开始...</p>
         <p class="chat-empty-hint">在下方输入你的行动来推进故事</p>
@@ -143,7 +178,12 @@ function beautifyText(msg: ChatMessage): string {
             v-if="!expandedIds[msg.id]"
             class="system-notif"
             :class="`system-notif-${msg.systemEvent.type}`"
+            role="button"
+            tabindex="0"
+            :aria-expanded="false"
             @click="toggleExpand(msg.id)"
+            @keydown.enter="toggleExpand(msg.id)"
+            @keydown.space.prevent="toggleExpand(msg.id)"
           >
             <i :class="'system-notif-icon fa-solid ' + eventIconClass(msg.systemEvent.type)" />
             <span class="system-notif-text">{{ msg.content }}</span>
@@ -152,23 +192,8 @@ function beautifyText(msg: ChatMessage): string {
 
           <!-- 展开卡片 -->
           <div v-else class="system-card-wrapper">
-            <CraftSystemCard
-              v-if="msg.systemEvent.type === 'craft'"
-              :event="msg.systemEvent"
-              @collapse="collapseCard(msg.id)"
-            />
-            <CharGenSystemCard
-              v-else-if="msg.systemEvent.type === 'char_gen'"
-              :event="msg.systemEvent"
-              @collapse="collapseCard(msg.id)"
-            />
-            <CombatSystemCard
-              v-else-if="msg.systemEvent.type === 'combat'"
-              :event="msg.systemEvent"
-              @collapse="collapseCard(msg.id)"
-            />
-            <ItemSystemCard
-              v-else-if="msg.systemEvent.type === 'item_gen'"
+            <component
+              :is="CARD_COMPONENTS[msg.systemEvent.type]"
               :event="msg.systemEvent"
               @collapse="collapseCard(msg.id)"
             />
@@ -181,7 +206,7 @@ function beautifyText(msg: ChatMessage): string {
       </div>
     </div>
 
-    <InputBar @send="(c) => emit('send', c)" />
+    <InputBar :disabled="isGenerating" @send="(c) => emit('send', c)" />
   </div>
 </template>
 
@@ -217,6 +242,22 @@ function beautifyText(msg: ChatMessage): string {
 }
 .bubble-row {
   display: flex;
+  animation: msg-enter 0.35s ease both;
+}
+@keyframes msg-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bubble-row {
+    animation: none;
+  }
 }
 .bubble-row-player,
 .bubble-row-narrative {
@@ -261,6 +302,19 @@ function beautifyText(msg: ChatMessage): string {
   font-family: var(--theme-font-title, 'Cinzel', serif);
   color: var(--theme-text-primary);
   line-height: 1.7;
+}
+
+/* 叙事正文段落排版 */
+.narrative-body :deep(p) {
+  text-indent: 2em;
+  margin: 0 0 0.6em;
+}
+.narrative-body :deep(p:last-child) {
+  margin-bottom: 0;
+}
+/* 对话卡片内的段落不缩进（对话格式不需要首行缩进） */
+.narrative-body :deep(.dialogue-body p) {
+  text-indent: 0;
 }
 
 /* ===== 对话卡片 (Discord 风格) ===== */
@@ -343,7 +397,7 @@ function beautifyText(msg: ChatMessage): string {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
+  padding: 10px 14px;
   border-radius: var(--theme-radius-md, 8px);
   background: var(--theme-surface-muted);
   border-left: 3px solid var(--theme-primary);
@@ -380,37 +434,5 @@ function beautifyText(msg: ChatMessage): string {
 .system-card-wrapper {
   max-width: 800px;
   width: 100%;
-}
-.system-card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  background: var(--theme-surface-muted);
-  border-bottom: 1px solid var(--theme-border, rgba(255,255,255,0.06));
-  cursor: pointer;
-  user-select: none;
-}
-.system-card-header:hover {
-  background: var(--theme-surface-hover, var(--theme-card-bg));
-}
-.system-card-icon {
-  font-size: 1rem;
-}
-.system-card-title {
-  flex: 1;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--theme-text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.system-card-chevron {
-  font-size: 0.625rem;
-  opacity: 0.5;
-}
-.system-card-body {
-  padding: 12px;
 }
 </style>

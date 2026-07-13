@@ -71,7 +71,12 @@ const barColor = computed(() => props.color || 'var(--theme-hp)')
   justify-content: center;
   font-size: 0.7rem;
   font-weight: 700;
-  color: var(--theme-resource-text, var(--theme-text-primary));
+  /* 固定白字 + 双层暗影：
+     无论叠在深色血条上还是浅色空轨上、无论深色主题还是亮色主题，都能看清 */
+  color: #fff;
+  text-shadow:
+    0 0 4px rgba(0,0,0,0.8),
+    0 1px 2px rgba(0,0,0,0.6);
   z-index: 1;
 }
 </style>

@@ -15,11 +15,11 @@ const industryIcons: Record<string, string> = {
 const industryIconsDefault = 'fa-solid fa-hammer'
 
 // Rating icon + color
-const ratingMeta: Record<string, { icon: string; color: string }> = {
-  '大失败':     { icon: 'fa-regular fa-circle-xmark',       color: '#e53e3e' },
-  '失败':       { icon: 'fa-solid fa-triangle-exclamation', color: '#fc8181' },
-  '成功':       { icon: 'fa-regular fa-circle-check',      color: '#68d391' },
-  '精益求精': { icon: 'fa-solid fa-star',                color: '#ffd700' },
+const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
+  '大失败':     { icon: 'fa-regular fa-circle-xmark',       colorVar: '--theme-error' },
+  '失败':       { icon: 'fa-solid fa-triangle-exclamation', colorVar: '--theme-warning' },
+  '成功':       { icon: 'fa-regular fa-circle-check',      colorVar: '--theme-success' },
+  '精益求精': { icon: 'fa-solid fa-star',                colorVar: '--theme-quality-legendary' },
 }
 </script>
 
@@ -37,8 +37,8 @@ const ratingMeta: Record<string, { icon: string; color: string }> = {
     <div class="sys-card-body">
       <!-- A. Rating -->
       <div class="card-section craft-rating">
-        <i :class="ratingMeta[event.rating]?.icon ?? 'fa-regular fa-circle-question'" class="rating-icon" :style="{ color: ratingMeta[event.rating]?.color ?? 'var(--theme-text-muted)' }" />
-        <span class="rating-text" :style="{ color: ratingMeta[event.rating]?.color }">{{ event.rating }}</span>
+        <i :class="ratingMeta[event.rating]?.icon ?? 'fa-regular fa-circle-question'" class="rating-icon" :style="{ color: `var(${ratingMeta[event.rating]?.colorVar ?? '--theme-text-muted'})` }" />
+        <span class="rating-text" :style="{ color: `var(${ratingMeta[event.rating]?.colorVar ?? '--theme-text-muted'})` }">{{ event.rating }}</span>
         <span v-if="event.details.perfectionBonus" class="perfection-bonus">— {{ event.details.perfectionBonus }}</span>
       </div>
 
@@ -90,27 +90,15 @@ const ratingMeta: Record<string, { icon: string; color: string }> = {
   </div>
 </template>
 
-<style scoped>
-.sys-card {
-  border-radius: var(--theme-radius-md, 8px);
-  overflow: hidden;
-  background: var(--theme-card-bg);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-}
+<style>
+@import '../../../styles/cards-shared.css';
+</style>
 
-/* Header */
+<style scoped>
+/* Header overrides: Craft header uses slightly larger padding */
 .sys-card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   padding: 8px 14px;
-  background: var(--theme-surface-muted);
-  cursor: pointer;
-  user-select: none;
   color: var(--theme-text-primary);
-}
-.sys-card-header:hover {
-  background: var(--theme-surface-hover, var(--theme-card-bg));
 }
 
 .sys-card-icon {
@@ -125,33 +113,6 @@ const ratingMeta: Record<string, { icon: string; color: string }> = {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.sys-card-collapse {
-  font-size: 0.625rem;
-  opacity: 0.4;
-  cursor: pointer;
-  transition: opacity 0.15s;
-  padding: 2px;
-}
-.sys-card-collapse:hover { opacity: 0.8; }
-
-/* Body */
-.sys-card-body {
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 0.8125rem;
-  color: var(--theme-text-primary);
-}
-
-/* Sections with dashed dividers */
-.card-section {
-  padding-top: 8px;
-}
-.card-section + .card-section {
-  border-top: 1px dashed var(--theme-card-border, var(--theme-border, rgba(255,255,255,0.08)));
 }
 
 /* A. Rating row */
@@ -169,17 +130,6 @@ const ratingMeta: Record<string, { icon: string; color: string }> = {
 
 .rating-text {
   font-size: 0.875rem;
-}
-
-/* Section label */
-.section-label {
-  font-weight: 600;
-  opacity: 0.6;
-  color: var(--theme-text-muted);
-  font-size: 0.75rem;
-  display: flex;
-  align-items: center;
-  gap: 4px;
 }
 
 /* Materials */
@@ -236,18 +186,6 @@ const ratingMeta: Record<string, { icon: string; color: string }> = {
   gap: 8px;
 }
 
-.stat-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--theme-surface-muted);
-  padding: 2px 8px;
-  border-radius: var(--theme-radius-sm, 4px);
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--theme-text-secondary);
-}
-
 /* New classes */
 .sys-card-fail {
   font-size: 0.6875rem;
@@ -261,7 +199,7 @@ const ratingMeta: Record<string, { icon: string; color: string }> = {
 .perfection-bonus {
   font-size: 0.6875rem;
   font-weight: 600;
-  color: #ffd700;
+  color: var(--theme-quality-legendary);
 }
 
 .check-text {

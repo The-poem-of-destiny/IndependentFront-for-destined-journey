@@ -49,24 +49,14 @@ const outcomeConfig: Record<string, { label: string; icon: string; borderColor: 
   </div>
 </template>
 
+<style>
+@import '../../../styles/cards-shared.css';
+</style>
+
 <style scoped>
+/* Header overrides */
 .sys-card {
   border-left: 4px solid var(--theme-text-muted);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.sys-card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--theme-surface-muted);
-  cursor: pointer;
-  user-select: none;
-}
-.sys-card-header:hover {
-  background: var(--theme-card-bg);
 }
 
 .sys-card-icon {
@@ -85,23 +75,9 @@ const outcomeConfig: Record<string, { label: string; icon: string; borderColor: 
   margin-left: auto;
 }
 
+/* Override collapse chevron with extra margin */
 .sys-card-collapse {
-  font-size: 0.625rem;
-  opacity: 0.4;
-  cursor: pointer;
-  transition: opacity 0.15s;
-  padding: 2px;
   margin-left: 4px;
-}
-.sys-card-collapse:hover { opacity: 0.8; }
-
-.sys-card-body {
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 0.8125rem;
-  color: var(--theme-text-primary);
 }
 
 .combat-summary {
@@ -121,11 +97,8 @@ const outcomeConfig: Record<string, { label: string; icon: string; borderColor: 
   align-items: center;
 }
 
+/* Combat has its own section-label override with margin-right */
 .section-label {
-  font-weight: 600;
-  opacity: 0.6;
-  color: var(--theme-text-muted);
-  font-size: 0.75rem;
   margin-right: 4px;
 }
 
@@ -140,17 +113,5 @@ const outcomeConfig: Record<string, { label: string; icon: string; borderColor: 
 .combat-footer {
   display: flex;
   gap: 8px;
-}
-
-.stat-badge {
-  background: var(--theme-surface-muted);
-  padding: 2px 8px;
-  border-radius: var(--theme-radius-sm, 4px);
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--theme-text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 4px;
 }
 </style>

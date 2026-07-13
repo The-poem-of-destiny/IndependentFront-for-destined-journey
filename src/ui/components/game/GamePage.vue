@@ -101,6 +101,10 @@ function handleToolClick(id: string) {
 function handleSelectOption(text: string) {
   game.fillInput(text)
 }
+
+function onModalOpenChange(v: boolean) {
+  if (!v) game.closeModal()
+}
 </script>
 
 <template>
@@ -120,25 +124,25 @@ function handleSelectOption(text: string) {
       <StatusHUD />
     </div>
 
-    <AppModal title="背包 / 装备 / 技能" :open="game.activeModal === 'items'" @close="game.closeModal()" @update:open="(v: boolean) => { if (!v) game.closeModal() }" size="xxl" closable>
+    <AppModal title="背包 / 装备 / 技能" :open="game.activeModal === 'items'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
       <ItemsPanel />
     </AppModal>
-    <AppModal title="角色列表" :open="game.activeModal === 'characters'" @close="game.closeModal()" @update:open="(v: boolean) => { if (!v) game.closeModal() }" size="xxl" closable>
+    <AppModal title="角色列表" :open="game.activeModal === 'characters'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
       <CharacterListPanel />
     </AppModal>
-    <AppModal title="任务" :open="game.activeModal === 'quests'" @close="game.closeModal()" @update:open="(v: boolean) => { if (!v) game.closeModal() }" size="xxl" closable>
+    <AppModal title="任务" :open="game.activeModal === 'quests'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
       <QuestsPanel />
     </AppModal>
-    <AppModal title="剧情规划" :open="game.activeModal === 'plot'" @close="game.closeModal()" @update:open="(v: boolean) => { if (!v) game.closeModal() }" size="lg" closable>
+    <AppModal title="剧情规划" :open="game.activeModal === 'plot'" @close="game.closeModal()" @update:open="onModalOpenChange" size="lg" closable>
       <PlotPanel />
     </AppModal>
-    <AppModal title="记忆" :open="game.activeModal === 'memory'" @close="game.closeModal()" @update:open="(v: boolean) => { if (!v) game.closeModal() }" size="lg" closable>
+    <AppModal title="记忆" :open="game.activeModal === 'memory'" @close="game.closeModal()" @update:open="onModalOpenChange" size="lg" closable>
       <MemoryPanel />
     </AppModal>
-    <AppModal title="快照" :open="game.activeModal === 'snapshots'" @close="game.closeModal()" @update:open="(v: boolean) => { if (!v) game.closeModal() }" size="md" closable>
+    <AppModal title="快照" :open="game.activeModal === 'snapshots'" @close="game.closeModal()" @update:open="onModalOpenChange" size="md" closable>
       <div class="placeholder-panel">快照管理 — 后续实现</div>
     </AppModal>
-    <AppModal title="🗺 地图" :open="game.activeModal === 'map'" @close="game.closeModal()" @update:open="(v: boolean) => { if (!v) game.closeModal() }" size="xxl" closable>
+    <AppModal title="🗺 地图" :open="game.activeModal === 'map'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
       <MapPanel />
     </AppModal>
   </div>
@@ -150,6 +154,7 @@ function handleSelectOption(text: string) {
   flex-direction: column;
   height: 100vh;
   width: 100vw;
+  min-width: 900px;
   background: var(--theme-window-bg);
   color: var(--theme-text-primary);
   overflow: hidden;

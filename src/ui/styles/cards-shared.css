@@ -1,0 +1,81 @@
+/* ============================================
+   系统卡片共享样式 — 被 Craft/Combat/Item 卡片引用
+   所有颜色使用 CSS 变量，不硬编码
+   ============================================ */
+
+/* 卡片骨架 */
+.sys-card {
+  border-left: 4px solid var(--theme-text-muted);
+  border-radius: var(--theme-radius-md, 6px);
+  overflow: hidden;
+  background: var(--theme-card-bg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* 卡片头部 */
+.sys-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--theme-surface-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.sys-card-header:hover {
+  background: var(--theme-surface-hover, var(--theme-card-bg));
+}
+
+/* 卡片正文 */
+.sys-card-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.8125rem;
+  color: var(--theme-text-primary);
+}
+
+/* 子区块——虚线分隔 */
+.card-section {
+  padding-top: 8px;
+}
+.card-section + .card-section {
+  border-top: 1px dashed var(--theme-card-border, var(--theme-border, rgba(255,255,255,0.08)));
+}
+
+/* Section label */
+.section-label {
+  font-weight: 600;
+  opacity: 0.6;
+  color: var(--theme-text-muted);
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 统计徽章 */
+.stat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--theme-surface-muted);
+  padding: 2px 8px;
+  border-radius: var(--theme-radius-sm, 4px);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--theme-text-secondary);
+}
+
+/* 折叠图标 */
+.sys-card-collapse {
+  font-size: 0.625rem;
+  opacity: 0.4;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  padding: 2px;
+}
+.sys-card-collapse:hover {
+  opacity: 0.8;
+}

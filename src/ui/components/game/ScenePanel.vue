@@ -164,7 +164,7 @@ function openCharList() {
     <div class="scene-mid">
       <div class="scene-section-title scene-mid-title">
         <span>在场 ({{ presentChars.length }})</span>
-        <button class="scene-title-action" @click="openCharList" title="查看完整角色列表">›</button>
+        <button class="scene-title-action" @click="openCharList" title="查看完整角色列表" aria-label="查看完整角色列表">›</button>
       </div>
 
       <div class="scene-npc-list" v-if="presentChars.length">
@@ -173,7 +173,12 @@ function openCharList() {
             :ref="(el) => setRowRef(char.id, el as HTMLDivElement)"
             class="scene-npc-item"
             :class="{ expanded: expandedId === char.id }"
+            role="button"
+            tabindex="0"
+            :aria-expanded="expandedId === char.id"
             @click="toggleExpand(char)"
+            @keydown.enter="toggleExpand(char)"
+            @keydown.space.prevent="toggleExpand(char)"
           >
             <span class="npc-avatar" :style="{ background: nameColorVar(char.name) }">
               {{ initialsOf(char.name) }}
@@ -202,7 +207,7 @@ function openCharList() {
 
     <!-- ═══════ 下段：新闻 ═══════ -->
     <div class="scene-bot">
-      <div class="scene-section-title">世界消息</div>
+      <div class="scene-section-title">世界消息 · {{ timeInfo?.date || '' }} {{ timeInfo?.time || '' }}</div>
 
       <div class="scene-news-list" v-if="game.news.length">
         <div
@@ -210,14 +215,18 @@ function openCharList() {
           :key="item.id"
           class="news-item"
           :class="{ expanded: expandedNewsId === item.id, read: item.read }"
+          role="button"
+          tabindex="0"
+          :aria-expanded="expandedNewsId === item.id"
           @click="toggleNews(item.id)"
+          @keydown.enter="toggleNews(item.id)"
+          @keydown.space.prevent="toggleNews(item.id)"
         >
           <span class="news-dot" v-if="!item.read" />
           <i class="news-icon fa-solid fa-newspaper" v-else />
           <div class="news-main">
             <div class="news-title-row">
               <span class="news-title">{{ item.title }}</span>
-              <span class="news-time">{{ formatRel(item.publishedAt) }}</span>
             </div>
             <div v-if="expandedNewsId === item.id" class="news-content">
               <span class="news-category" v-if="item.category">{{ item.category }}</span>
@@ -365,7 +374,9 @@ function openCharList() {
 .scene-location {
   font-size: 0.78rem;
   color: var(--theme-text-secondary);
-  line-height: 1.4;
+  line-height: 1.45;
+  word-break: break-all;
+  overflow-wrap: break-word;
 }
 .scene-weather {
   font-size: 0.78rem;
@@ -383,7 +394,7 @@ function openCharList() {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 6px;
+  padding: 7px 8px;
   border-radius: var(--theme-radius-md, 6px);
   cursor: pointer;
   transition: background 120ms;

@@ -82,11 +82,12 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 
     <!-- ═══════ 个人信息 ═══════ -->
     <div class="section">
-      <div class="section-header clickable" @click="personalOpen = !personalOpen">
+      <div class="section-header clickable" @click="personalOpen = !personalOpen" role="button" tabindex="0" :aria-expanded="personalOpen" @keydown.enter="personalOpen = !personalOpen" @keydown.space.prevent="personalOpen = !personalOpen">
         <span class="section-title">个人信息</span>
         <i class="fa-solid" :class="personalOpen ? 'fa-chevron-up' : 'fa-chevron-down'" />
       </div>
-      <div class="section-body" v-show="personalOpen">
+      <Transition name="collapse">
+        <div class="section-body" v-if="personalOpen">
         <div class="kv-row kv-3col">
           <div class="kv-item"><span class="kv-label">种族</span><span class="kv-value">{{ player.race }}</span></div>
           <div class="kv-item"><span class="kv-label">职业</span><span class="kv-value">{{ player.occupation?.[0] || '冒险者' }}</span></div>
@@ -113,15 +114,17 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
           <div class="kv-item"><span class="kv-label">金钱</span><span class="kv-value">{{ player.money }} G</span></div>
         </div>
       </div>
+      </Transition>
     </div>
 
     <!-- ═══════ 属性 ═══════ -->
     <div class="section">
-      <div class="section-header clickable" @click="daoOpen = !daoOpen">
+      <div class="section-header clickable" @click="daoOpen = !daoOpen" role="button" tabindex="0" :aria-expanded="daoOpen" @keydown.enter="daoOpen = !daoOpen" @keydown.space.prevent="daoOpen = !daoOpen">
         <span class="section-title">属性</span>
         <i class="fa-solid" :class="daoOpen ? 'fa-chevron-up' : 'fa-chevron-down'" />
       </div>
-      <div class="section-body" v-show="daoOpen">
+      <Transition name="collapse">
+        <div class="section-body" v-if="daoOpen">
         <ResourceBar label="HP" :current="player.hp" :max="player.maxHp" color="color-mix(in srgb, var(--theme-hp) 65%, #000)" :height="20" :showValues="true" />
         <ResourceBar label="MP" :current="player.mp" :max="player.maxMp" color="color-mix(in srgb, var(--theme-mp) 65%, #000)" :height="20" :showValues="true" />
         <ResourceBar label="SP" :current="player.sp" :max="player.maxSp" color="color-mix(in srgb, var(--theme-sp) 65%, #000)" :height="20" :showValues="true" />
@@ -136,6 +139,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         </div>
 
       </div>
+      </Transition>
     </div>
 
     <!-- ═══════ 状态效果 ═══════ -->
@@ -144,11 +148,11 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         <span class="section-title">状态效果</span>
       </div>
       <div class="buff-scroll">
-        <div v-for="fx in player.statusEffects" :key="fx.id" class="buff-row" @click="inspectedBuff = (inspectedBuff === fx.id ? null : fx.id)">
+        <button v-for="fx in player.statusEffects" :key="fx.id" class="buff-row" :aria-expanded="inspectedBuff === fx.id" @click="inspectedBuff = (inspectedBuff === fx.id ? null : fx.id)">
           <BuffChip :name="fx.name" :type="buffType(fx.category)" :stacks="fx.stacks" />
           <span class="buff-time" v-if="fx.remainingTime === null">永久</span>
           <span class="buff-time" v-else-if="fx.remainingTime !== null && fx.remainingTime < 999">{{ fx.remainingTime }}{{ fx.timeUnit }}</span>
-        </div>
+        </button>
       </div>
       <!-- Buff 详情 -->
       <div class="buff-detail" v-if="inspectedBuff && player.statusEffects.find(f => f.id === inspectedBuff)">
@@ -164,11 +168,12 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 
     <!-- ═══════ 储物袋预览 ═══════ -->
     <div class="section">
-      <div class="section-header clickable" @click="inventoryOpen = !inventoryOpen">
+      <div class="section-header clickable" @click="inventoryOpen = !inventoryOpen" role="button" tabindex="0" :aria-expanded="inventoryOpen" @keydown.enter="inventoryOpen = !inventoryOpen" @keydown.space.prevent="inventoryOpen = !inventoryOpen">
         <span class="section-title">持有物</span>
         <i class="fa-solid" :class="inventoryOpen ? 'fa-chevron-up' : 'fa-chevron-down'" />
       </div>
-      <div class="section-body" v-show="inventoryOpen">
+      <Transition name="collapse">
+        <div class="section-body" v-if="inventoryOpen">
 
         <!-- 装备列表 -->
         <div class="equip-sub" v-if="equipmentList.length">
@@ -199,6 +204,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
           </div>
         </div>
       </div>
+      </Transition>
     </div>
 
     <!-- ═══════ 任务追踪 ═══════ -->
@@ -344,7 +350,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 
 /* ═══ 状态效果 ═══ */
 .buff-scroll { max-height: 7.5rem; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 6px; }
-.buff-row { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.buff-row { display: flex; align-items: center; gap: 4px; cursor: pointer; border: none; background: none; padding: 0; font-family: inherit; font-size: inherit; color: inherit; width: auto; }
 .buff-time { font-size: 0.625rem; color: var(--theme-text-muted); }
 .buff-detail { margin: 0 12px 8px; padding: 8px 10px; background: var(--theme-surface-muted); border-radius: 6px; border-left: 3px solid var(--theme-primary); }
 .bd-name { font-size: 0.8125rem; font-weight: 700; color: var(--theme-text-primary); }
@@ -508,4 +514,21 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   font-family: inherit;
 }
 .retry-btn:hover { background: var(--theme-tab-hover-bg); }
+
+/* ═══ 折叠动画 ═══ */
+.collapse-enter-active,
+.collapse-leave-active {
+  transition: max-height 0.25s ease, opacity 0.2s ease;
+  overflow: hidden;
+}
+.collapse-enter-from,
+.collapse-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+.collapse-enter-to,
+.collapse-leave-from {
+  max-height: 800px;
+  opacity: 1;
+}
 </style>
