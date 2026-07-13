@@ -473,6 +473,10 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
   timestamp: number;
+  /** 🆕 Phase 10h: 消息所属存档 ID（持久化到 messages 表时设置） */
+  saveId?: string;
+  /** 🆕 Phase 10h: 消息轮次编号（持久化到 messages 表时设置） */
+  turn?: number;
   /** 🆕 系统事件数据 — 仅 role='system' 时有值，供前端渲染卡片 */
   systemEvent?: SystemEvent;
   variables?: Record<string, string | number>;
@@ -970,6 +974,8 @@ export interface Snapshot {
   turnNumber: number;
   /** 快照描述 */
   label?: string;
+  /** Phase 10h: 快照时关联的消息 ID 列表（预留，后继实现） */
+  messageIds?: string[];
 }
 
 /** 存档槽 — 10 槽，每槽最多 30 快照 */
@@ -990,6 +996,12 @@ export interface SaveSlot {
     gameStartTime: string;
     totalTurns: number;
     description?: string;
+    /** Phase 10h: 存档级启用的世界书条目 ID (如 'system_core:408', 'character:313') */
+    enabledWorldBookEntries?: string[];
+    /** Phase 10h: 创角时的开场提示词文本 */
+    openingPrompt?: string;
+    /** Phase 10h: 开场 Prompt 是否已发送给 AI */
+    openingPromptConsumed?: boolean;
   };
 }
 
