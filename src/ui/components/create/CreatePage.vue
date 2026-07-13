@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from 'vue'
+import { computed, defineAsyncComponent, onMounted } from 'vue'
 import { useCreateStore } from '../../stores/create-store'
 import { useUIStore } from '../../stores/ui-store'
 import CreateSteps from './CreateSteps.vue'
@@ -14,22 +14,23 @@ const ui = useUIStore()
 const Step0 = defineAsyncComponent(() => import('./CreateStepDifficulty.vue'))
 const Step1 = defineAsyncComponent(() => import('./CreateStepBasic.vue'))
 const Step2 = defineAsyncComponent(() => import('./CreateStepDestinyCore.vue'))
-const Step3 = defineAsyncComponent(() => import('./CreateStepSelections.vue'))
-const Step4 = defineAsyncComponent(() => import('./CreateStepBackground.vue'))
-const Step5 = defineAsyncComponent(() => import('./CreateStepPlot.vue'))
-const Step6 = defineAsyncComponent(() => import('./CreateStepConfirm.vue'))
+const Step3 = defineAsyncComponent(() => import('./CreateStepCharacters.vue'))
+const Step4 = defineAsyncComponent(() => import('./CreateStepSelections.vue'))
+const Step5 = defineAsyncComponent(() => import('./CreateStepBackground.vue'))
+const Step6 = defineAsyncComponent(() => import('./CreateStepPlot.vue'))
+const Step7 = defineAsyncComponent(() => import('./CreateStepConfirm.vue'))
 
-const stepComponents = [Step0, Step1, Step2, Step3, Step4, Step5, Step6] as const
+const stepComponents = [Step0, Step1, Step2, Step3, Step4, Step5, Step6, Step7] as const
 
 const currentComponent = computed(() => stepComponents[store.currentStep])
 
 const nextLabel = computed(() =>
-  store.currentStep === 6 ? '✦ 开始命运之旅 ✦' : '下一步 →'
+  store.currentStep === 7 ? '✦ 开始命运之旅 ✦' : '下一步 →'
 )
 
-// Step 6 特殊处理: 点击"下一步" → 执行 startJourney
+// Step 7 特殊处理: 点击"下一步" → 执行 startJourney
 async function handleNext() {
-  if (store.currentStep === 6) {
+  if (store.currentStep === 7) {
     try {
       const saveId = await store.startJourney()
       ui.navigate('game', saveId)
@@ -40,13 +41,17 @@ async function handleNext() {
     store.nextStep()
   }
 }
+
+onMounted(() => {
+  store.loadWorldBookEntries()
+})
 </script>
 
 <template>
   <div class="create-page">
     <button class="back-btn" @click="ui.navigate('home')" title="返回首页">← 首页</button>
 
-    <CreateSteps :current="store.currentStep" :total="7" />
+    <CreateSteps :current="store.currentStep" :total="8" />
 
     <PointsBar
       :total="store.reincarnationPoints"
