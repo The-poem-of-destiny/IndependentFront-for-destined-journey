@@ -550,15 +550,17 @@ describe('stepValid 步骤验证', () => {
 
   it('Step 2: 未选命定核心时无效', () => {
     expect(store.stepValid[2]).toBe(false)
-    store.selectDestinyCore(DEFAULT_DESTINY_CORES[0]?.id || '')
-    expect(store.stepValid[2]).toBe(!!DEFAULT_DESTINY_CORES[0])
+    // 新的世界书驱动 API：selectedSystemCoreEntryUid 控制 step 2 验证
+    store.selectSystemCoreEntry(1001)
+    expect(store.stepValid[2]).toBe(true)
   })
 
-  it('Steps 3-6: 应始终有效(无强制要求)', () => {
+  it('Steps 3-7: 应始终有效(无强制要求)', () => {
     expect(store.stepValid[3]).toBe(true)
     expect(store.stepValid[4]).toBe(true)
     expect(store.stepValid[5]).toBe(true)
     expect(store.stepValid[6]).toBe(true)
+    expect(store.stepValid[7]).toBe(true)
   })
 })
 

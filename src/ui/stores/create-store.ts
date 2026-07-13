@@ -31,6 +31,8 @@ import {
   ATTRIBUTE_NAMES,
   ATTR_CN_TO_EN,
 } from '@engine/start-catalog'
+import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks'
+import type { WorldBook, WorldBookEntry } from '@engine/types'
 
 // ===== 类型 =====
 
@@ -56,6 +58,9 @@ export interface CreatePreset {
   customBackgroundText: string
   destinyCoreId: string | null
   plotSettings: PlotSettings | null
+  /** Phase 10h: 世界书驱动字段 */
+  systemCoreEntryUid?: number | null
+  enabledCharacterEntryUids?: number[]
 }
 
 // ===== 原版常量 (custom_start_index.html) =====
@@ -85,15 +90,16 @@ export const useCreateStore = defineStore('create', () => {
   const stepValid = computed<Record<number, boolean>>(() => ({
     0: difficulty.value !== null,
     1: name.value.trim().length > 0 && race.value !== '' && remainingBP.value >= 0 && remainingAP.value >= 0,
-    2: destinyCore.value !== null,
-    3: true,
-    4: true,
-    5: true,
-    6: true,
+    2: selectedSystemCoreEntryUid.value !== null,  // 命定核心
+    3: true,  // 角色启用（可选）
+    4: true,  // 装备选择
+    5: true,  // 背景故事
+    6: true,  // 剧情规划
+    7: true,  // 确认提交
   }))
 
   function nextStep() {
-    if (currentStep.value < 6 && stepValid.value[currentStep.value]) currentStep.value++
+    if (currentStep.value < 7 && stepValid.value[currentStep.value]) currentStep.value++
   }
   function prevStep() {
     if (currentStep.value > 0) currentStep.value--
@@ -264,6 +270,78 @@ export const useCreateStore = defineStore('create', () => {
   function selectDestinyCore(coreId: string) {
     const core = DEFAULT_DESTINY_CORES.find(c => c.id === coreId)
     destinyCore.value = core ?? null
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // Phase 10h: 世界书驱动的命定核心 + 角色启用
+  // ═══════════════════════════════════════════════════════
+
+  /** system_core 世界书条目列表（命定核心候选） */
+  const systemCoreEntries = ref<WorldBookEntry[]>([])
+
+  /** character 世界书条目列表（可启用角色） */
+  const characterEntries = ref<WorldBookEntry[]>([])
+
+  /** 选中的命定核心 entry uid */
+  const selectedSystemCoreEntryUid = ref<number | null>(null)
+
+  /** 选中的命定核心条目 */
+  const selectedSystemCoreEntry = computed<WorldBookEntry | null>(() => {
+    if (selectedSystemCoreEntryUid.value === null) return null
+    return systemCoreEntries.value.find(e => e.uid === selectedSystemCoreEntryUid.value) ?? null
+  })
+
+  /** 勾选的 character entry uids */
+  const enabledCharacterEntryUids = ref<Set<number>>(new Set())
+
+  /** 从内置世界书加载 system_core 和 character 条目 */
+  async function loadWorldBookEntries() {
+    try {
+      const books = await loadBuiltInWorldBooks()
+      systemCoreEntries.value = books
+        .filter(b => b.partition === 'system_core')
+        .flatMap(b => b.entries)
+      characterEntries.value = books
+        .filter(b => b.partition === 'character')
+        .flatMap(b => b.entries)
+    } catch {
+      // fetch 不可用时静默跳过，保持空数组
+      systemCoreEntries.value = []
+      characterEntries.value = []
+    }
+  }
+
+  /** 单选命定核心 */
+  function selectSystemCoreEntry(uid: number) {
+    selectedSystemCoreEntryUid.value = uid
+  }
+
+  /** toggle 勾选角色 */
+  function toggleCharacterEntry(uid: number) {
+    const next = new Set(enabledCharacterEntryUids.value)
+    if (next.has(uid)) {
+      next.delete(uid)
+    } else {
+      next.add(uid)
+    }
+    enabledCharacterEntryUids.value = next
+  }
+
+  /** 构建存档用的世界书条目 ID 列表（partition:uid 格式） */
+  function buildEnabledWorldBookEntries(): string[] {
+    const ids: string[] = []
+
+    // 命定核心 → system_core:uid
+    if (selectedSystemCoreEntryUid.value !== null) {
+      ids.push(`system_core:${selectedSystemCoreEntryUid.value}`)
+    }
+
+    // 启用角色 → character:uid
+    for (const uid of enabledCharacterEntryUids.value) {
+      ids.push(`character:${uid}`)
+    }
+
+    return ids
   }
 
   // ═══════════════════════════════════════════════════════
@@ -671,6 +749,9 @@ export const useCreateStore = defineStore('create', () => {
           difficulty: difficulty.value?.id ?? 'normal',
           remainingPoints: remainingPoints.value,
         }),
+        enabledWorldBookEntries: buildEnabledWorldBookEntries(),  // 🆕
+        openingPrompt: openingPrompt,                              // 🆕
+        openingPromptConsumed: false,                              // 🆕
       },
     })
 
@@ -708,6 +789,8 @@ export const useCreateStore = defineStore('create', () => {
       customBackgroundText: customBackgroundText.value,
       destinyCoreId: destinyCore.value?.id ?? null,
       plotSettings: plotSettings.value,
+      systemCoreEntryUid: selectedSystemCoreEntryUid.value,
+      enabledCharacterEntryUids: [...enabledCharacterEntryUids.value],
     }
   }
 
@@ -735,6 +818,10 @@ export const useCreateStore = defineStore('create', () => {
     selectedBackground.value = data.background
     customBackgroundText.value = data.customBackgroundText || ''
     if (data.destinyCoreId) selectDestinyCore(data.destinyCoreId)
+    if ((data as any).systemCoreEntryUid) selectSystemCoreEntry((data as any).systemCoreEntryUid)
+    if ((data as any).enabledCharacterEntryUids) {
+      enabledCharacterEntryUids.value = new Set((data as any).enabledCharacterEntryUids)
+    }
     if (data.plotSettings) {
       plotMode.value = data.plotSettings.mode
       if (data.plotSettings.main) {
@@ -774,6 +861,10 @@ export const useCreateStore = defineStore('create', () => {
     plotGenrePreference.value = ['combat']; plotCustomPreference.value = ''
     plotFocusRegion.value = ''; plotYearlyGeneration.value = true
     showPresetModal.value = false
+    selectedSystemCoreEntryUid.value = null
+    enabledCharacterEntryUids.value = new Set()
+    systemCoreEntries.value = []
+    characterEntries.value = []
   }
 
   return {
@@ -799,6 +890,12 @@ export const useCreateStore = defineStore('create', () => {
     moneyCost, destinyCost, totalCost, remainingPoints,
     // 命定核心
     destinyCore, destinyCorePool, selectDestinyCore,
+    // Phase 10h: 世界书驱动
+    systemCoreEntries, characterEntries,
+    selectedSystemCoreEntryUid, selectedSystemCoreEntry,
+    enabledCharacterEntryUids,
+    loadWorldBookEntries, selectSystemCoreEntry, toggleCharacterEntry,
+    buildEnabledWorldBookEntries,
     // 选择 (→ 开场提示词)
     selectedEquipments, selectedItems, selectedSkills,
     activeCategory, rarityFilter, typeFilter, subCategoryFilter, subCategories, filteredPool,
