@@ -9,7 +9,7 @@ import {
   DEFAULT_SETTINGS,
   DEFAULT_AGENT_PIPELINE as pipeline,
 } from './types';
-import type { PlotEvent, PlotEventNode } from './types';
+import type { PlotEvent, PlotEventNode, SaveSlot, Snapshot } from './types';
 
 // ========== createDefaultCharacterState ==========
 
@@ -337,5 +337,57 @@ describe('createDefaultPreset', () => {
     // 不应有 id（由调用方添加）
     expect('id' in preset).toBe(false);
     expect('createdAt' in preset).toBe(false);
+  });
+});
+
+// ========== SaveSlot metadata (Phase 10h) ==========
+
+describe('SaveSlot metadata (Phase 10h)', () => {
+  it('metadata.enabledWorldBookEntries 应为可选字符串数组', () => {
+    const slot: SaveSlot = {
+      id: 's1', name: 'test', slot: 0,
+      createdAt: 0, updatedAt: 0,
+      activeSnapshotId: null, snapshots: [],
+      metadata: {
+        characterName: 'test',
+        userName: 'player',
+        gameStartTime: '2026-01-01',
+        totalTurns: 0,
+        enabledWorldBookEntries: ['system_core:408', 'character:313'],
+      },
+    };
+    expect(slot.metadata.enabledWorldBookEntries).toHaveLength(2);
+    expect(slot.metadata.enabledWorldBookEntries![0]).toBe('system_core:408');
+  });
+
+  it('metadata.openingPrompt 和 openingPromptConsumed 应为可选项', () => {
+    const slot: SaveSlot = {
+      id: 's2', name: 'test', slot: 1,
+      createdAt: 0, updatedAt: 0,
+      activeSnapshotId: null, snapshots: [],
+      metadata: {
+        characterName: 'test',
+        userName: 'player',
+        gameStartTime: '2026-01-01',
+        totalTurns: 0,
+        openingPrompt: '你是冒险者...',
+        openingPromptConsumed: false,
+      },
+    };
+    expect(slot.metadata.openingPrompt).toBe('你是冒险者...');
+    expect(slot.metadata.openingPromptConsumed).toBe(false);
+  });
+});
+
+describe('Snapshot messageIds 预留 (Phase 10h)', () => {
+  it('Snapshot 应有可选的 messageIds 字段', () => {
+    const snap: Snapshot = {
+      id: 'snap1', saveId: 's1', index: 0,
+      timestamp: Date.now(), gameTime: '春-1日',
+      variables: {}, characters: [], plotEvents: [],
+      memoryIds: [], turnNumber: 0,
+      messageIds: ['msg1', 'msg2'],
+    };
+    expect(snap.messageIds).toHaveLength(2);
   });
 });
