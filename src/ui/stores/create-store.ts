@@ -818,9 +818,9 @@ export const useCreateStore = defineStore('create', () => {
     selectedBackground.value = data.background
     customBackgroundText.value = data.customBackgroundText || ''
     if (data.destinyCoreId) selectDestinyCore(data.destinyCoreId)
-    if ((data as any).systemCoreEntryUid) selectSystemCoreEntry((data as any).systemCoreEntryUid)
-    if ((data as any).enabledCharacterEntryUids) {
-      enabledCharacterEntryUids.value = new Set((data as any).enabledCharacterEntryUids)
+    if (data.systemCoreEntryUid) selectSystemCoreEntry(data.systemCoreEntryUid)
+    if (data.enabledCharacterEntryUids) {
+      enabledCharacterEntryUids.value = new Set(data.enabledCharacterEntryUids)
     }
     if (data.plotSettings) {
       plotMode.value = data.plotSettings.mode
