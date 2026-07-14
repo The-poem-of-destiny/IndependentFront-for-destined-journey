@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useGameStore } from '../../stores/game-store'
 import { useUIStore } from '../../stores/ui-store'
 import { useSettingsStore } from '../../stores/settings-store'
 import { injectTestData, buildScenePreviewMock } from '../../lib/test-fixtures'
+import { GamePipeline } from '../../lib/game-pipeline'
 import TopBar from './TopBar.vue'
 import SideToolbar from './SideToolbar.vue'
 import ChatFlow from './ChatFlow.vue'
@@ -22,10 +23,22 @@ const ui = useUIStore()
 const settings = useSettingsStore()
 const s = settings.settings
 
+let pipeline: GamePipeline | null = null
+
 onMounted(async () => {
   window.addEventListener('keydown', onKeyDown)
   if (ui.activeSaveId) {
     await game.loadSave(ui.activeSaveId)
+    // 创建 pipeline 实例
+    pipeline = new GamePipeline({
+      gameStore: game,
+      settingsStore: settings,
+      saveId: ui.activeSaveId,
+    })
+    // 首次加载 → 自动发送开场 Prompt
+    if (!game.hasOpeningPromptConsumed && game.openingPrompt) {
+      await pipeline.sendOpeningPrompt()
+    }
   }
 })
 
@@ -65,29 +78,24 @@ function onKeyDown(e: KeyboardEvent) {
     e.preventDefault()
     injectChatFlowTest()
   }
+  // Alt+Shift+D 切换调试面板
+  if (e.altKey && e.shiftKey && e.key === 'D') {
+    e.preventDefault()
+    showDebug.value = !showDebug.value
+  }
 }
 
-let mockTimer: ReturnType<typeof setTimeout> | null = null
+// ===== 调试面板 =====
+const showDebug = ref(false)
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown)
-  if (mockTimer !== null) {
-    clearTimeout(mockTimer)
-    mockTimer = null
-  }
   game.isGenerating = false
 })
 
-function handleSend(content: string) {
-  if (game.isGenerating) return
-  game.addMessage(content, 'user')
-  // TODO: Phase 7e-3 — 接入 AgentOrchestrator，移除 mock
-  game.isGenerating = true
-  mockTimer = setTimeout(() => {
-    game.addMessage('[AI 回复将在 Phase 7e-3 接入引擎后生效]', 'assistant')
-    game.isGenerating = false
-    mockTimer = null
-  }, 500)
+async function handleSend(content: string) {
+  if (game.isGenerating || !pipeline) return
+  await pipeline.run(content)
 }
 
 function handleToolClick(id: string) {
@@ -145,6 +153,32 @@ function onModalOpenChange(v: boolean) {
     <AppModal title="🗺 地图" :open="game.activeModal === 'map'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
       <MapPanel />
     </AppModal>
+
+    <!-- 调试面板 (Alt+Shift+D) -->
+    <Teleport to="body">
+      <div v-if="showDebug" class="debug-panel">
+        <div class="debug-header">
+          <span>🔧 Debug Panel</span>
+          <button @click="showDebug = false">✕</button>
+        </div>
+        <div class="debug-section">
+          <h4>Messages ({{ game.messages.length }})</h4>
+          <pre>{{ JSON.stringify(game.messages.slice(-5), null, 2) }}</pre>
+        </div>
+        <div class="debug-section">
+          <h4>Save Profile</h4>
+          <pre>{{ JSON.stringify(game.saveProfile, null, 2) }}</pre>
+        </div>
+        <div class="debug-section">
+          <h4>Characters ({{ game.characters.length }})</h4>
+          <pre>{{ JSON.stringify(game.characters.map(c => ({ id: c.id, name: c.name, type: c.type })), null, 2) }}</pre>
+        </div>
+        <div class="debug-section">
+          <h4>Pending Options</h4>
+          <pre>{{ JSON.stringify(game.pendingOptions, null, 2) }}</pre>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -178,5 +212,61 @@ function onModalOpenChange(v: boolean) {
 :deep(.modal-body) > :first-child {
   max-height: 55vh;
   overflow-y: auto;
+}
+
+/* ===== 调试面板 ===== */
+.debug-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 420px;
+  max-width: 90vw;
+  height: 100vh;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  border-left: 2px solid #ffd700;
+  z-index: 9999;
+  overflow-y: auto;
+  padding: 16px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.75rem;
+}
+.debug-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #333;
+}
+.debug-header span {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #ffd700;
+}
+.debug-header button {
+  background: none;
+  border: 1px solid #555;
+  color: #aaa;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.debug-section {
+  margin-bottom: 16px;
+}
+.debug-section h4 {
+  font-size: 0.75rem;
+  color: #8ab4f8;
+  margin: 0 0 4px;
+}
+.debug-section pre {
+  background: #0d0d1a;
+  padding: 8px;
+  border-radius: 4px;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>

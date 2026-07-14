@@ -5,7 +5,7 @@
   "main": "dist/sillytavern/index.js",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "dev.bat",
     "build": "vite build",
     "build:engine": "tsc",
     "typecheck": "tsc --noEmit",

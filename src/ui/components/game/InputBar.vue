@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useGameStore } from '../../stores/game-store'
 
 const emit = defineEmits<{
@@ -12,11 +12,8 @@ const game = useGameStore()
 const input = ref('')
 const showOptions = ref(false)
 
-const mockOptions = [
-  '向酒馆老板打听商队失踪的消息',
-  '前往近郊森林搜寻线索',
-  '先去冒险者公会了解情况',
-]
+/** vars_update 解析出的动态行动选项 */
+const dynamicOptions = computed(() => game.pendingOptions)
 
 // 监听 ChatFlow 选项点击 → 填入输入框
 watch(() => game.pendingInput, (v) => {
@@ -44,7 +41,7 @@ function handleSend() {
     <div class="options-popup" v-if="showOptions" role="listbox">
       <div class="options-title">可选行动</div>
       <button
-        v-for="(opt, i) in mockOptions"
+        v-for="(opt, i) in dynamicOptions"
         :key="i"
         class="option-item"
         role="option"
@@ -54,7 +51,7 @@ function handleSend() {
       </button>
       <button class="option-custom" @click="showOptions = false">自定义输入...</button>
     </div>
-    <button class="input-btn" @click="showOptions = !showOptions" title="可选行动" :aria-expanded="showOptions" aria-haspopup="listbox">
+    <button v-if="dynamicOptions.length > 0" class="input-btn" @click="showOptions = !showOptions" title="可选行动" :aria-expanded="showOptions" aria-haspopup="listbox">
       <i class="fa-solid fa-list-ul" />
     </button>
     <input

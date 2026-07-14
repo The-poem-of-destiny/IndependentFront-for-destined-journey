@@ -365,7 +365,36 @@ Stage 5: plot_post_check
 - 待完善: 更多捏人细节留到 Phase 8 之后迭代
 
 ---
-*Last updated: 2026-06-17*
+*Last updated: 2026-07-14*
+
+## Session: 2026-07-14
+
+### Plan 3: GamePipeline + GamePage — 前端↔引擎桥接层
+- **Status:** 🔄 in_progress
+- **Started:** 2026-07-14
+
+### Task 5: 全局测试回归
+- **Status:** complete ✅
+- Actions taken:
+  - ✅ `npm run test -- --run` — **2582 tests PASS | 64 files**
+  - ✅ `npm run typecheck` — 0 errors
+  - ✅ `npm run build` — 成功
+  - ✅ GamePage.test.ts mock 更新: 添加 `pendingOptions` / `hasOpeningPromptConsumed` / `openingPrompt`
+- Files created/modified:
+  - src/ui/stores/game-store.ts (修改: +persistMessage/restoreMessages/hasOpeningPromptConsumed/openingPrompt/pendingOptions)
+  - src/ui/lib/game-pipeline.ts (新建: ~240 行)
+  - src/ui/components/game/GamePage.vue (修改: 接入 GamePipeline + 调试面板)
+  - src/ui/components/game/InputBar.vue (修改: mockOptions → dynamicOptions)
+  - src/ui/components/game/GamePage.test.ts (修改: mock 补全新字段)
+
+## Plan 3 Summary
+- **Status:** complete ✅
+- **Results:** 2582 tests PASS | typecheck 0 errors | build 成功
+- **Deliverables:**
+  - `game-store.ts` — 消息持久化(DB write/restore) + 开场 Prompt 管理 + pendingOptions 选项管理
+  - `game-pipeline.ts` — 前端↔引擎桥接层, AgentConfig 组装/AgentContext 构建/编排器创建/回调处理
+  - `GamePage.vue` — 接入 GamePipeline, handleSend 切换真实管线, 调试面板(Alt+Shift+D)
+  - `InputBar.vue` — mockOptions 替换为 game.pendingOptions computed, 无选项时隐藏按钮
 
 ## Session: 2026-06-17
 

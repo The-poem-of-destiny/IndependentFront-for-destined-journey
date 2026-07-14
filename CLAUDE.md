@@ -168,6 +168,7 @@ npm run build          # 编译 TypeScript (tsc) → dist/
 npm run typecheck      # 仅类型检查，不输出文件 (tsc --noEmit)
 npm run test           # 运行 Vitest 测试套件（watch 模式）
 npm run test -- --run  # 单次运行（非 watch 模式）
+npm run dev            # 开发服务器（dev.bat：自动杀残留进程 + 固定 5173 端口）
 ```
 
 ## Workflows
@@ -430,7 +431,7 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC
 | 7b | 主题系统 + 通用组件 (10主题/15组件) | ✅ |
 | 7c | 首页 (标题画面风格) + 设置页 (8分区) | ✅ |
 | 7d | 捏人页 `/create` | 🔄 世界书驱动改造中 (命运核心 + 角色启用 + 四字段 + 预设 UI) |
-| 7e | 游戏页 + 状态栏 HUD + 脚本引擎 + ChatFlow + 输出美化 + ScenePanel 三段式 | 🔄 DB v8 messages 表完成，GamePipeline 桥接待做 |
+| 7e | 游戏页 + 状态栏 HUD + 脚本引擎 + ChatFlow + 输出美化 + ScenePanel 三段式 | 🔄 GamePipeline 桥接层完成，待集成验证 (Plan 4) |
 | 7f | 创意工坊 `/workshop` | ⬜ |
 | 7g | 衔接 & 测试 | ⬜ |
 | 8 | Agent 上下文可见性 & Prompt 体系 | ✅ |
@@ -457,7 +458,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │   ├── useMapViewer.ts              ← OpenSeadragon 生命周期 (创建/加载/销毁)
 │   └── useMapMarkers.ts             ← 地图标记 CRUD + Overlay 同步
 │
-├── themes/                          ← 10 主题 CSS 系统
+├── lib/                              ← 前端↔引擎桥接层
+│   ├── game-pipeline.ts              ← GamePipeline: AgentConfig组装/上下文构建/编排器/回调处理
+│   ├── quality-colors.ts             ← 品质色映射
+│   ├── test-fixtures.ts              ← 测试数据注入
+│   └── toSystemEvent.ts              ← 系统事件类型转换
+│
 │   ├── variables.css                ← 默认主题 (obsidian) 变量定义 + 间距/圆角/阴影
 │   ├── parchment.css / obsidian.css / crimson.css / indigo.css
 │   ├── bronze.css / sakura.css / ivory.css / misty-lilac.css

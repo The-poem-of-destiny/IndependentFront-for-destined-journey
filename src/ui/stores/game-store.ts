@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SaveSlot, CharacterState, ChatMessage, MemoryRecord, PlotEvent, PlotOutline, CombatState, SaveProfile } from '@engine/types'
 import { getSave, getSaves, getCharacters, getMemories, getPlotEvents, getSaveProfile } from '@engine/database'
+import { saveMessage, getMessages, saveSaveSlot } from '@engine/database'
 
 export const useGameStore = defineStore('game', () => {
   // === 存档 ===
@@ -74,6 +75,37 @@ export const useGameStore = defineStore('game', () => {
   function fillInput(text: string) { pendingInput.value = text }
   function clearPendingInput() { pendingInput.value = '' }
 
+  // === 开场 Prompt 管理 ===
+  /** 是否已消费开场 Prompt（未消费 → 需要自动发送） */
+  const hasOpeningPromptConsumed = computed(() => {
+    return activeSave.value?.metadata?.openingPromptConsumed === true || messages.value.length > 0
+  })
+
+  /** 获取开场 Prompt 文本 */
+  const openingPrompt = computed(() => {
+    return activeSave.value?.metadata?.openingPrompt ?? null
+  })
+
+  /** 标记开场 Prompt 已消费 */
+  async function markOpeningPromptConsumed() {
+    if (!activeSave.value) return
+    activeSave.value.metadata.openingPromptConsumed = true
+    try {
+      await saveSaveSlot(activeSave.value)
+    } catch (err) {
+      console.error('[game-store] 标记开场 Prompt 失败:', err)
+    }
+  }
+
+  // === 选项管理 ===
+  /** vars_update 解析出的行动选项 */
+  const pendingOptions = ref<string[]>([])
+
+  /** 设置行动选项（供 GamePipeline 回调使用） */
+  function setPendingOptions(options: string[]) {
+    pendingOptions.value = options
+  }
+
   function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value }
   function showModal(id: string) { activeModal.value = id }
   function closeModal() { activeModal.value = null }
@@ -111,23 +143,56 @@ export const useGameStore = defineStore('game', () => {
   }
 
   // === 消息管理 ===
+  let turnCounter = 0
+
+  /** 持久化单条消息到 IndexedDB */
+  async function persistMessage(msg: ChatMessage) {
+    try {
+      await saveMessage({ ...msg, saveId: activeSaveId.value! })
+    } catch (err) {
+      console.error('[game-store] 消息持久化失败:', err)
+    }
+  }
+
+  /** 从 IndexedDB 恢复消息到内存 */
+  async function restoreMessages() {
+    if (!activeSaveId.value) return
+    try {
+      const msgs = await getMessages(activeSaveId.value)
+      if (msgs.length > 0) {
+        messages.value = msgs
+      }
+    } catch (err) {
+      console.error('[game-store] 恢复消息失败:', err)
+    }
+  }
+
   function addMessage(content: string, role: 'user' | 'assistant'): void {
-    messages.value.push({
+    const msg: ChatMessage = {
       id: crypto.randomUUID(),
       role,
       content,
       timestamp: Date.now(),
-    })
+      saveId: activeSaveId.value ?? undefined,
+      turn: role === 'user' ? ++turnCounter : turnCounter,
+    }
+    messages.value.push(msg)
+    // 异步持久化（不阻塞 UI）
+    persistMessage(msg)
   }
 
   function addSystemMessage(systemEvent: import('@engine/types').SystemEvent): void {
-    messages.value.push({
+    const msg: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'system',
       content: systemEvent.narrative,
       timestamp: Date.now(),
+      saveId: activeSaveId.value ?? undefined,
+      turn: turnCounter,
       systemEvent,
-    })
+    }
+    messages.value.push(msg)
+    persistMessage(msg)
   }
 
   // === 动作 ===
@@ -160,6 +225,13 @@ export const useGameStore = defineStore('game', () => {
         if (snap.characters) characters.value = snap.characters as CharacterState[]
       }
     }
+
+    // 从 messages 表恢复对话历史
+    await restoreMessages()
+
+    // 恢复 turnCounter（取最后一条 user/assistant 消息的 turn）
+    const lastMsg = messages.value.filter(m => m.role === 'user' || m.role === 'assistant').pop()
+    turnCounter = lastMsg?.turn ?? 0
   }
 
   function clearActive() {
@@ -188,5 +260,8 @@ export const useGameStore = defineStore('game', () => {
     addMessage, addSystemMessage,
     loadSaves, loadSave, clearActive,
     pendingInput, fillInput, clearPendingInput,
+    hasOpeningPromptConsumed, openingPrompt, markOpeningPromptConsumed,
+    pendingOptions, setPendingOptions,
+    persistMessage, restoreMessages,
   }
 })

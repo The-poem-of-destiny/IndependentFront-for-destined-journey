@@ -27,6 +27,10 @@ vi.mock('../../stores/game-store', () => ({
     toggleSidebar: vi.fn(),
     setRightPanel: vi.fn(),
     toggleFullscreen: vi.fn(),
+    /** Plan 3: dynamic options */
+    pendingOptions: [] as string[],
+    hasOpeningPromptConsumed: true,
+    openingPrompt: null as string | null,
   })),
 }))
 
@@ -66,6 +70,7 @@ describe('GamePage', () => {
       plotOutline: null, activeCombat: null,
       sidebarCollapsed: false, rightPanelMode: 'status', fullscreenStatus: false,
       loadSave: mockLoadSave, toggleSidebar: vi.fn(), setRightPanel: vi.fn(), toggleFullscreen: vi.fn(),
+      pendingOptions: [] as string[], hasOpeningPromptConsumed: true, openingPrompt: null as string | null,
     })
     ;(useUIStore as any).mockReturnValue({ activeSaveId: 'test-save-123', navigate: vi.fn() })
 
