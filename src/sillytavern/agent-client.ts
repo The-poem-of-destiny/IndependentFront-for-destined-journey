@@ -311,7 +311,8 @@ export class AgentClient {
         body.tool_choice = request.tool_choice ?? 'auto';
       }
 
-      if (request.reasoning && this.endpoint.provider === 'deepseek') {
+      // 🆕 DeepSeek 思考模式：按 endpoint 配置决定是否开启（与非流式 callOnce 对齐）
+      if (this.endpoint.enableThinking) {
         body.thinking = { type: 'enabled' };
         body.reasoning_effort = 'high';
       }
@@ -511,8 +512,8 @@ export class AgentClient {
         body.tool_choice = request.tool_choice ?? 'auto';
       }
 
-      // 🆕 DeepSeek 思考模式：按 endpoint 配置决定是否开启
-      if (this.endpoint.enableThinking && this.endpoint.provider === 'deepseek') {
+      // 🆕 DeepSeek 思考模式：仅按 endpoint.enableThinking 开关，不再卡 provider（中转/官方均支持）
+      if (this.endpoint.enableThinking) {
         body.thinking = { type: 'enabled' };
         body.reasoning_effort = 'high';
       }

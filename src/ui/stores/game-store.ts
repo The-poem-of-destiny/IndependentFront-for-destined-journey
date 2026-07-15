@@ -14,6 +14,8 @@ export interface DebugAgentEntry {
   model: string
   messages: Array<{ role: string; content: string | null }>
   rawResponse: string
+  /** 🆕 DeepSeek 思维链（reasoning_content），可能为空 */
+  reasoning?: string
   error?: string
   tokensUsed: number
   cacheHit: boolean

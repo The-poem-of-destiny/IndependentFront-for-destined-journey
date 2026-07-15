@@ -43,6 +43,21 @@ export interface GamePipelineDeps {
 /** 流式回调 — 由 GamePage 提供实时渲染 */
 export type StoryChunkCallback = (chunk: string) => void
 
+/** 各 Agent 的中文标签（供调试日志 / DebugPanel 显示） */
+const AGENT_LABELS: Record<string, string> = {
+  memory_recall: '记忆召回',
+  story: '叙事生成',
+  request_dispatcher: '请求调度',
+  vars_update: '状态更新',
+  memory_summary: '记忆摘要',
+  plot_pre_check: '剧情预检',
+  plot_post_check: '剧情复检',
+  craft_gen: '制作生成',
+  char_gen: '角色生成',
+  item_gen: '物品生成',
+  plot_outline: '剧情大纲',
+}
+
 export class GamePipeline {
   private game: ReturnType<typeof useGameStore>
   private settings: ReturnType<typeof useSettingsStore>
@@ -328,11 +343,81 @@ export class GamePipeline {
     return this.buildEndpoints()[0]
   }
 
-  /** 创建 AgentClient 工厂 —— 供 craft_gen / char_gen / item_gen 链使用 */
+  /** 创建 AgentClient 工厂 —— 供 craft_gen / char_gen / item_gen 链使用。
+   *  🆕 包裹一层 LogClient：拦截 chat / chatWithTools，自动写 agentLog，
+   *  让侧链 Agent 在 DebugPanel 可见（否则绕过 orchestrator 时无日志）。 */
   private getClientFactory() {
     const saveId = this.saveId
+    const game = this.game
     return (agentId: string, endpoint: ApiEndpoint, _saveId: string) => {
-      return new AgentClient({ endpoint, agentId, saveId }) as any
+      const real = new AgentClient({ endpoint, agentId, saveId })
+      const label = AGENT_LABELS[agentId] ?? agentId
+      let callSeq = 0
+
+      const record = (
+        messages: Array<{ role: string; content: string | null }>,
+        result: { rawResponse?: string; output?: string | null; reasoning?: string; tokensUsed?: number; cacheHit?: boolean; error?: string; duration?: number } | undefined,
+        duration: number,
+      ) => {
+        callSeq += 1
+        // 同一 Agent 一轮内被多次调用时（如 2 个新角色 → char_gen 跑 2 次），
+        // addAgentLogEntry 按 agentId 覆盖同名条目，故给 agentId/label 加序号后缀避免互相覆盖。
+        const seqId = callSeq > 1 ? `${agentId}#${callSeq}` : agentId
+        game.addAgentLogEntry({
+          agentId: seqId,
+          label: callSeq > 1 ? `${label} #${callSeq}` : label,
+          endpointId: endpoint.id,
+          endpointName: endpoint.name || '',
+          baseUrl: endpoint.baseUrl || '',
+          model: endpoint.defaultModel || '',
+          messages: (messages ?? []).map(m => ({ role: m.role, content: m.content })),
+          rawResponse: result?.rawResponse ?? result?.output ?? '',
+          reasoning: result?.reasoning,
+          error: result?.error,
+          tokensUsed: result?.tokensUsed ?? 0,
+          cacheHit: result?.cacheHit ?? false,
+          duration: result?.duration ?? duration,
+        })
+      }
+
+      const startTs = () => Date.now()
+
+      // 从 chat 方法入参提取 messages：chat(messages, signal) 入参是数组本身，
+      // chatWithTools(request, ...) 入参是 { messages, ... } 对象 —— 两者形状不同，需兼容。
+      const extractMessages = (arg: any): Array<{ role: string; content: string | null }> =>
+        Array.isArray(arg) ? arg : (arg?.messages ?? [])
+
+      // 包裹对象：与 AgentClient 同形状，拦截关键方法
+      return {
+        get agentId() { return agentId },
+        get endpoint() { return endpoint },
+        chat: async (request: any, signal?: any) => {
+          const t0 = startTs()
+          let result: any
+          try {
+            result = await real.chat(request, signal)
+          } catch (err: any) {
+            record(extractMessages(request), { error: String(err?.message ?? err) }, Date.now() - t0)
+            throw err
+          }
+          record(extractMessages(request), result, Date.now() - t0)
+          return result
+        },
+        chatWithTools: async (request: any, toolExecutor: any, options?: any) => {
+          const t0 = startTs()
+          let result: any
+          try {
+            result = await real.chatWithTools(request, toolExecutor, options)
+          } catch (err: any) {
+            record(extractMessages(request), { error: String(err?.message ?? err) }, Date.now() - t0)
+            throw err
+          }
+          record(extractMessages(request), result, Date.now() - t0)
+          return result
+        },
+        // chatStream 不常用（侧链不走流式），直接透传
+        chatStream: (request: any, callbacks: any, signal?: any) => real.chatStream(request, callbacks, signal),
+      } as any
     }
   }
 
@@ -345,20 +430,6 @@ export class GamePipeline {
   }
 
   private buildEventHandlers(): OrchestratorEvents {
-    const AGENT_LABELS: Record<string, string> = {
-      memory_recall: '记忆召回',
-      story: '叙事生成',
-      request_dispatcher: '请求调度',
-      vars_update: '状态更新',
-      memory_summary: '记忆摘要',
-      plot_pre_check: '剧情预检',
-      plot_post_check: '剧情复检',
-      craft_gen: '制作生成',
-      char_gen: '角色生成',
-      item_gen: '物品生成',
-      plot_outline: '剧情大纲',
-    }
-
     return {
       // === Stage 回调 ===
       onAgentStart: (agentId, config) => {
@@ -392,6 +463,7 @@ export class GamePipeline {
           model: prev?.model ?? '',
           messages: result.requestMessages ?? prev?.messages ?? [],
           rawResponse: result.rawResponse,
+          reasoning: result.reasoning,
           error: result.error,
           tokensUsed: result.tokensUsed,
           cacheHit: result.cacheHit,
