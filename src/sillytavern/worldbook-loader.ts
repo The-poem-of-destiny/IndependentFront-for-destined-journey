@@ -103,8 +103,10 @@ export function filterActiveEntries(
   text: string,
 ): WorldBookEntry[] {
   return entries.filter(entry => {
-    if (!entry.enabled) return false;
+    // constant 条目始终激活，无论 enabled 状态
+    // （enabled=false 只影响 keyword 匹配，constant 条目不受此限制）
     if (entry.constant) return true;
+    if (!entry.enabled) return false;
     if (entry.key.length > 0) {
       return matchKeyword(entry, text);
     }
@@ -172,6 +174,60 @@ function matchSingleKeyword(text: string, keyword: string): boolean {
 
   // 普通字符串匹配（大小写不敏感）
   return text.toLowerCase().includes(trimmed.toLowerCase());
+}
+
+// ========== 格式化 ==========
+
+/**
+ * 按存档级 enabledWorldBookEntries 精确过滤世界书条目。
+ *
+ * 规则:
+ * - `enabledEntries` 格式: `"partition:uid"`（如 `"system_core:413"`）
+ * - partition 在 enabledEntries 中有记录的 → 只保留 uid 命中条目，其余移除
+ * - partition 不在 enabledEntries 中的 → 整本原样通过（走 keyword 激活）
+ * - enabledEntries 为空 → 所有书原样通过
+ * - 非原始 entry（缺少 `:` 或无有效 uid）→ 静默跳过
+ *
+ * 纯函数，不修改入参。
+ */
+export function filterBooksByEnabledEntries(
+  books: WorldBook[],
+  enabledEntries: string[],
+): WorldBook[] {
+  if (!enabledEntries || enabledEntries.length === 0) return books;
+
+  // Build lookup: partition → Set<uid>
+  const enabledByPartition = new Map<string, Set<number>>();
+  for (const entry of enabledEntries) {
+    const colonIdx = entry.indexOf(':');
+    if (colonIdx <= 0 || colonIdx >= entry.length - 1) continue;
+    const partition = entry.slice(0, colonIdx);
+    const uid = parseInt(entry.slice(colonIdx + 1), 10);
+    if (isNaN(uid)) continue;
+    let set = enabledByPartition.get(partition);
+    if (!set) {
+      set = new Set<number>();
+      enabledByPartition.set(partition, set);
+    }
+    set.add(uid);
+  }
+
+  // If no valid entries could be parsed, the user intended filtering but
+  // nothing matched → apply the filter (which will remove all entries for
+  // partitions that appear in enabledEntries). If enabledEntries was non-empty
+  // but none had valid partition:uid form, we can't tell which partition was
+  // meant, so we pass books through unchanged.
+  // For safety: always apply when we have valid parsed data.
+  if (enabledByPartition.size === 0) return books;
+
+  return books.map(book => {
+    const allowedUids = enabledByPartition.get(book.partition);
+    if (!allowedUids) return book; // partition 未在存档中收录 → 整本原样通过
+    return {
+      ...book,
+      entries: book.entries.filter(e => allowedUids.has(e.uid)),
+    };
+  });
 }
 
 // ========== 格式化 ==========

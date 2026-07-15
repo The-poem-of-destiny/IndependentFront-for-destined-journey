@@ -133,16 +133,20 @@ export async function callCharGenAgent(
   // 旧格式兼容: CharDetectMarker (Story Agent 输出的 char_detect)
   const markerOrDetect = request.marker ?? request.detection;
   const requestContent = markerOrDetect?.bodyText ?? markerOrDetect?.rawContent ?? '';
-  const localParamKey = request.marker ? 'CHAR_GEN_REQUEST' : 'CHAR_DETECT';
 
-  const charLocalParams: Record<string, string> = {
-    [localParamKey]: requestContent,
-  };
+  // Bug fix 1: Set BOTH keys so templates with {{CHAR_DETECT}} or {{CHAR_GEN_REQUEST}} both resolve.
+  // The char_gen template in agent-config.json uses {{CHAR_DETECT}}, but Phase 10 flows
+  // via request_dispatcher may produce {{CHAR_GEN_REQUEST}} in newer template variants.
+  const charLocalParams: Record<string, string> = {};
+  if (requestContent) {
+    charLocalParams['CHAR_DETECT'] = requestContent;
+    charLocalParams['CHAR_GEN_REQUEST'] = requestContent;
+  }
 
-  const messages = buildAgentMessages('char_gen', {
-    ...request.context,
-    agentOutputs: new Map([['story', requestContent]]),
-  }, undefined, undefined, undefined, charLocalParams);
+  // Bug fix 2: Do NOT overwrite agentOutputs with a tiny Map containing only the marker body.
+  // The original context already has the full story output from the upstream agent.
+  // The marker body is passed via charLocalParams (CHAR_DETECT / CHAR_GEN_REQUEST).
+  const messages = buildAgentMessages('char_gen', request.context, undefined, undefined, undefined, charLocalParams);
 
   if (!messages) {
     throw new Error('char_gen 模板未找到 — 请检查 AGENT_TEMPLATES 注册');

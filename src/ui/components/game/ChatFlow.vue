@@ -23,11 +23,13 @@ const props = defineProps<{
   isGenerating?: boolean
   systemEventsVisible?: boolean
   systemEventFilters?: Record<string, boolean>
+  streamingText?: string
 }>()
 
 const emit = defineEmits<{
   send: [content: string]
   'select-option': [text: string]
+  stop: []
 }>()
 
 const settings = useSettingsStore()
@@ -101,8 +103,9 @@ function eventIconClass(type: string): string {
  */
 function beautifyText(msg: ChatMessage): string {
   const raw = msg.parsed?.maintext ?? msg.content
+  // 未启用美化时：走纯文本 + 换行转 &lt;br&gt;，不做段落包裹
   if (!s.beautifierEnabled) {
-    return escapeHtml(raw)
+    return escapeHtml(raw).replace(/\n/g, '<br>')
   }
   const rules = (s.beautifierRules ?? []) as import('@engine/types').BeautifierRule[]
   const builtinDisabled: string[] = s.beautifierBuiltinDisabled ?? []
@@ -127,10 +130,23 @@ function wrapParagraphs(html: string): string {
     if (!trimmed) return ''
     // 纯 HTML 标签块（如 dialogue-card）不包裹 &lt;p&gt;，避免 block-in-inline 非法嵌套
     if (/^\x00TAG(\d+)\x00$/.test(trimmed)) return trimmed
-    return `<p>${trimmed}</p>`
+    // 段内换行 → <br>（浏览器不渲染 \n，必须显式转换）
+    return `<p>${trimmed.replace(/\n/g, '<br>')}</p>`
   }).join('')
   // 还原 HTML 标签
   return wrapped.replace(/\x00TAG(\d+)\x00/g, (_, i) => tags[Number(i)])
+}
+
+/** 对流式文本实时应用美化（与 beautifyText 逻辑一致，但跳过最终的 wrapParagraphs 以避免边界闪烁） */
+function beautifyStreamingText(raw: string): string {
+  if (!raw) return ''
+  if (!s.beautifierEnabled) {
+    return escapeHtml(raw).replace(/\n/g, '<br>')
+  }
+  const rules = (s.beautifierRules ?? []) as import('@engine/types').BeautifierRule[]
+  const builtinDisabled: string[] = s.beautifierBuiltinDisabled ?? []
+  // 美化后单换行转 <br>（浏览器不渲染裸 \n）
+  return beautify(raw, 'maintext', rules, builtinDisabled).replace(/\n/g, '<br>')
 }
 </script>
 
@@ -147,7 +163,7 @@ function wrapParagraphs(html: string): string {
         <div v-if="msg.role === 'user'" class="bubble-row bubble-row-player">
           <div class="bubble bubble-player">
             <span class="bubble-prefix">你:</span>
-            <span class="bubble-text">{{ msg.content }}</span>
+            <span class="bubble-text" v-html="escapeHtml(msg.content).replace(/\n/g, '<br>')" />
             <span class="bubble-time" v-if="msg.timestamp">{{ formatTime(msg.timestamp) }}</span>
           </div>
         </div>
@@ -204,9 +220,16 @@ function wrapParagraphs(html: string): string {
       <div v-if="isGenerating" class="chat-loading">
         <span class="loading-dot">●</span> AI 正在生成...
       </div>
+
+      <!-- 🆕 流式正文实时渲染 -->
+      <div v-if="isGenerating && streamingText" class="bubble-row bubble-row-narrative">
+        <div class="bubble bubble-narrative-full">
+          <div class="narrative-body streaming-content" v-html="beautifyStreamingText(streamingText)" />
+        </div>
+      </div>
     </div>
 
-    <InputBar :disabled="isGenerating" @send="(c) => emit('send', c)" />
+    <InputBar :disabled="isGenerating" @send="(c) => emit('send', c)" @stop="emit('stop')" />
   </div>
 </template>
 
@@ -385,6 +408,22 @@ function wrapParagraphs(html: string): string {
 @keyframes pulse {
   0%, 100% { opacity: 0.3; }
   50% { opacity: 1; }
+}
+
+/* ===== 流式正文 ===== */
+.streaming-content {
+  /* 流式渲染时使用闪烁光标提示正在输出 */
+  position: relative;
+}
+.streaming-content::after {
+  content: '▍';
+  animation: cursor-blink 1s steps(1) infinite;
+  color: var(--theme-primary);
+  opacity: 0.8;
+}
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 /* ===== 系统消息 ===== */

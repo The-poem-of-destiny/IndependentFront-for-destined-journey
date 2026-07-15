@@ -458,12 +458,7 @@ export const useCreateStore = defineStore('create', () => {
 
   function addEquipment(item: CatalogItem) {
     if (isSelected(item)) return
-    if (item.type !== '武器') {
-      const existing = selectedEquipments.value.find(e => e.type === item.type)
-      if (existing) {
-        selectedEquipments.value = selectedEquipments.value.filter(e => e.type !== item.type)
-      }
-    }
+    // 允许同一个 type 选多个装备（不强制替换）
     selectedEquipments.value = [...selectedEquipments.value, item]
   }
 
@@ -633,7 +628,7 @@ export const useCreateStore = defineStore('create', () => {
   // 提交: 变量路径
   // ═══════════════════════════════════════════════════════
 
-  function buildCharacterState(): CharacterState {
+  function buildCharacterState(saveId: string): CharacterState {
     const charId = crypto.randomUUID()
     const englishAttrs: Record<string, number> = {}
     for (const attr of ATTRIBUTE_NAMES) {
@@ -678,6 +673,7 @@ export const useCreateStore = defineStore('create', () => {
       currentAction: '',
       bloodlineIds: [],
       customFields: {
+        saveId,                                                 // 🔧 关联存档，缺了这个 getCharacters 匹配不到
         gender: gender.value === '自定义' ? customGender.value : gender.value,
         age: age.value,
         destinyCoreId: destinyCore.value?.id ?? null,
@@ -691,57 +687,117 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   // ═══════════════════════════════════════════════════════
-  // 提交: 开场提示词路径 (JSON 结构化注入 AI)
+  // 提交: 开场提示词 — 组装自然语言叙事，作为首条用户消息注入管线
   // ═══════════════════════════════════════════════════════
+  // 原则：
+  // - name / LV / 五维 / HP / race / identity / location → 写死在 CharacterState 字段
+  //   → {{CHARACTER_STATE}} system prompt 占位符自动格式化注入
+  // - 装备 / 技能 / 物品 / 背景 / 命定核心 / 性格身材身世 → 下游 Agent 需要处理
+  //   → 组装为自然语言，作为开场 user 消息注入，走 story→request_dispatcher→vars_update 链路
 
   function buildOpeningPrompt(): string {
-    const parts: string[] = []
+    const charName = name.value.trim() || '未命名'
+    const lines: string[] = []
 
+    lines.push(`【创角完成，${charName} 的初始数据】`)
+
+    // 装备
     if (selectedEquipments.value.length > 0) {
-      const eq = selectedEquipments.value.map(e => ({
-        name: e.name, type: e.type, rarity: e.rarity,
-        tag: e.tag, effect: e.effect, description: e.description,
-      }))
-      parts.push(`【初始装备】\n${JSON.stringify(eq)}`)
+      lines.push('')
+      lines.push('--- 初始装备 ---')
+      for (const e of selectedEquipments.value) {
+        const desc = e.description ? `：${e.description}` : ''
+        const effects = e.effect && Object.keys(e.effect).length > 0
+          ? ` [${Object.entries(e.effect).map(([k, v]) => `${k}:${v}`).join(', ')}]`
+          : ''
+        const tags = e.tag?.length ? ` (${e.tag.join(', ')})` : ''
+        lines.push(`  ${e.name}（${e.type}·${e.rarity}${tags}）${desc}${effects}`)
+      }
     }
 
+    // 技能
     if (selectedSkills.value.length > 0) {
-      const sk = selectedSkills.value.map(s => ({
-        name: s.name, type: s.type, rarity: s.rarity,
-        tag: s.tag, effect: s.effect, consume: s.consume, description: s.description,
-      }))
-      parts.push(`【初始技能】\n${JSON.stringify(sk)}`)
+      lines.push('')
+      lines.push('--- 初始技能 ---')
+      for (const s of selectedSkills.value) {
+        const desc = s.description ? `：${s.description}` : ''
+        const effects = s.effect && Object.keys(s.effect).length > 0
+          ? ` [${Object.entries(s.effect).map(([k, v]) => `${k}:${v}`).join(', ')}]`
+          : ''
+        const consume = s.consume ? ` · 消耗:${s.consume}` : ''
+        const tags = s.tag?.length ? ` (${s.tag.join(', ')})` : ''
+        lines.push(`  ${s.name}（${s.type}·${s.rarity}${tags}）${desc}${effects}${consume}`)
+      }
     }
 
+    // 背包物品
     if (selectedItems.value.length > 0) {
-      const it = selectedItems.value.map(i => ({
-        name: i.name, type: i.type, rarity: i.rarity, quantity: i.quantity,
-        tag: i.tag, effect: i.effect, description: i.description,
-      }))
-      parts.push(`【背包物品】\n${JSON.stringify(it)}`)
+      lines.push('')
+      lines.push('--- 背包物品 ---')
+      for (const i of selectedItems.value) {
+        const desc = i.description ? `：${i.description}` : ''
+        const effects = i.effect && Object.keys(i.effect).length > 0
+          ? ` [${Object.entries(i.effect).map(([k, v]) => `${k}:${v}`).join(', ')}]`
+          : ''
+        const tags = i.tag?.length ? ` (${i.tag.join(', ')})` : ''
+        lines.push(`  ${i.name} ×${i.quantity || 1}（${i.type}·${i.rarity}${tags}）${desc}${effects}`)
+      }
     }
 
+    // 开局剧情（已发生的既成事实：不要复述背景，从当前时间地点直接叙事）
     if (selectedBackground.value) {
-      parts.push(`【角色背景】\n${JSON.stringify({ name: selectedBackground.value.name, text: substituteUser(selectedBackground.value.fullText) })}`)
+      lines.push('')
+      lines.push(`--- 开局剧情：「${selectedBackground.value.name}」---`)
+      lines.push(substituteUser(selectedBackground.value.fullText))
     } else if (customBackgroundText.value.trim()) {
-      parts.push(`【角色背景】\n${JSON.stringify({ name: '自定义背景', text: substituteUser(customBackgroundText.value.trim()) })}`)
+      lines.push('')
+      lines.push('--- 开局剧情：自定义 ---')
+      lines.push(substituteUser(customBackgroundText.value.trim()))
     }
 
-    if (destinyCore.value) {
-      parts.push(`【命定之灵】\n${JSON.stringify({ name: destinyCore.value.name, author: destinyCore.value.author, theme: destinyCore.value.theme })}`)
+    // 开局时间（首次开局固定为复兴纪元001年01月01日，供 memory_summary 等下游 Agent 作为时间锚点）
+    lines.push('')
+    lines.push('--- 开局时间 ---')
+    lines.push('复兴纪元001年01月01日')
+
+    // 命定核心
+    // 优先用 UI 捏人选中的 system_core 世界书条目（selectedSystemCoreEntry）；
+    // 兼容旧的 destinyCore 对象（DestinyCore Pool，保留兜底）。
+    if (selectedSystemCoreEntry.value) {
+      const core = selectedSystemCoreEntry.value
+      lines.push('')
+      lines.push(`--- 命定之灵：「${core.name}」---`)
+      lines.push(`命定核心「${core.name}」已激活，详细内容参见世界书。`)
+    } else if (destinyCore.value) {
+      lines.push('')
+      lines.push(`--- 命定之灵：「${destinyCore.value.name}」---`)
+      lines.push(`命定核心「${destinyCore.value.name}」已激活，详细内容参见世界书。`)
     }
 
     // 角色补充信息
-    const extraProfile: Record<string, string> = {}
-    if (personality.value.trim()) extraProfile['性格'] = personality.value.trim()
-    if (physics.value.trim()) extraProfile['身材'] = physics.value.trim()
-    if (backstory.value.trim()) extraProfile['身世'] = backstory.value.trim()
-    if (extra.value.trim()) extraProfile['补充'] = extra.value.trim()
-    if (Object.keys(extraProfile).length > 0) {
-      parts.push(`【角色设定】\n${JSON.stringify(extraProfile)}`)
+    if (personality.value.trim()) {
+      lines.push('')
+      lines.push(`--- 性格 ---\n${personality.value.trim()}`)
+    }
+    if (physics.value.trim()) {
+      lines.push('')
+      lines.push(`--- 身材 ---\n${physics.value.trim()}`)
+    }
+    if (backstory.value.trim()) {
+      lines.push('')
+      lines.push(`--- 身世 ---\n${backstory.value.trim()}`)
+    }
+    if (extra.value.trim()) {
+      lines.push('')
+      lines.push(`--- 补充 ---\n${extra.value.trim()}`)
     }
 
-    return parts.join('\n\n')
+    // 收尾
+    lines.push('')
+    lines.push('---')
+    lines.push(`以上是${charName}的角色设定与开局剧情。开局剧情是已经发生的事实，请从当前时间地点直接开始叙事，不要复述或回顾。`)
+
+    return lines.join('\n')
   }
 
   // ═══════════════════════════════════════════════════════
@@ -749,17 +805,24 @@ export const useCreateStore = defineStore('create', () => {
   // ═══════════════════════════════════════════════════════
 
   async function startJourney(): Promise<string> {
-    const charState = buildCharacterState()
+    const saveId = crypto.randomUUID()
+    const charState = buildCharacterState(saveId)
     const openingPrompt = buildOpeningPrompt()
+    console.log('[create-store] startJourney — openingPrompt:', openingPrompt.slice(0, 200))
+    console.log('[create-store] startJourney — openingPrompt length:', openingPrompt.length)
 
     const { saveCharacter, saveSaveSlot } = await import('@engine/database')
 
     await saveCharacter(charState)
 
-    const saveId = crypto.randomUUID()
+    // 存档名：主角名 + 层级 + 日期
+    const now = new Date()
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    const saveName = `${charState.name} · ${charState.tierName} · ${dateStr}`
+
     await saveSaveSlot({
       id: saveId,
-      name: charState.name,
+      name: saveName,
       slot: 0,  // TODO: 自动分配空闲槽位
       createdAt: Date.now(),
       updatedAt: Date.now(),

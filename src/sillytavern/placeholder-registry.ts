@@ -225,35 +225,49 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
   },
 
   // ---- Agent Communication Placeholders (6) ----
+  // 多 Agent 间通过 agentOutputs Map 传递输出。输出可能是字符串或对象（如 memory_recall embedding 路径返回 { memories: [...] }）。
+  // 对象 → JSON.stringify，字符串 → 原样返回，避免隐式 String(obj) 产生 "[object Object]"。
 
   /** {{AGENT.MEMORY_RECALL}} */
   'AGENT.MEMORY_RECALL': (ctx, _config, _params) => {
-    return ctx.agentOutputs?.get('memory_recall') || '';
+    const v = ctx.agentOutputs?.get('memory_recall');
+    if (!v) return '';
+    return typeof v === 'string' ? v : JSON.stringify(v);
   },
 
   /** {{AGENT.PLOT_PRE_CHECK}} */
   'AGENT.PLOT_PRE_CHECK': (ctx, _config, _params) => {
-    return ctx.agentOutputs?.get('plot_pre_check') || '';
+    const v = ctx.agentOutputs?.get('plot_pre_check');
+    if (!v) return '';
+    return typeof v === 'string' ? v : JSON.stringify(v);
   },
 
   /** {{AGENT.STORY}} */
   'AGENT.STORY': (ctx, _config, _params) => {
-    return ctx.agentOutputs?.get('story') || '';
+    const v = ctx.agentOutputs?.get('story');
+    if (!v) return '';
+    return typeof v === 'string' ? v : JSON.stringify(v);
   },
 
   /** {{AGENT.VARS_UPDATE}} */
   'AGENT.VARS_UPDATE': (ctx, _config, _params) => {
-    return ctx.agentOutputs?.get('vars_update') || '';
+    const v = ctx.agentOutputs?.get('vars_update');
+    if (!v) return '';
+    return typeof v === 'string' ? v : JSON.stringify(v);
   },
 
   /** {{AGENT.MEMORY_SUMMARY}} */
   'AGENT.MEMORY_SUMMARY': (ctx, _config, _params) => {
-    return ctx.agentOutputs?.get('memory_summary') || '';
+    const v = ctx.agentOutputs?.get('memory_summary');
+    if (!v) return '';
+    return typeof v === 'string' ? v : JSON.stringify(v);
   },
 
   /** {{AGENT.REQUEST_DISPATCHER}} — request_dispatcher 调度器输出 */
   'AGENT.REQUEST_DISPATCHER': (ctx, _config, _params) => {
-    return ctx.agentOutputs?.get('request_dispatcher') || '';
+    const v = ctx.agentOutputs?.get('request_dispatcher');
+    if (!v) return '';
+    return typeof v === 'string' ? v : JSON.stringify(v);
   },
 
   // ---- Chain Communication Placeholders (5) (localParams injected) ----
@@ -263,12 +277,16 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
 
   /** {{CHAR_GEN_RESULT}} — char_gen 输出 (从 agentOutputs 读取) */
   'CHAR_GEN_RESULT': (ctx, _config, _params) => {
-    return ctx.agentOutputs?.get('char_gen') || '';
+    const v = ctx.agentOutputs?.get('char_gen');
+    if (!v) return '';
+    return typeof v === 'string' ? v : JSON.stringify(v);
   },
 
   /** {{CRAFT_RESULT}} — craft_gen 输出 (从 agentOutputs 读取) */
   'CRAFT_RESULT': (ctx, _config, _params) => {
-    return ctx.agentOutputs?.get('craft_gen') || '';
+    const v = ctx.agentOutputs?.get('craft_gen');
+    if (!v) return '';
+    return typeof v === 'string' ? v : JSON.stringify(v);
   },
 };
 

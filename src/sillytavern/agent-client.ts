@@ -18,6 +18,7 @@ type InternalAgentResult = AgentResult & { _toolCalls?: any[] };
 // ========== Types ==========
 
 export interface ChatRequest {
+  model?: string;
   messages: Array<{
     role: string;
     content: string | null;
@@ -53,6 +54,27 @@ export interface ChatWithToolsOptions {
   signal?: AbortSignal;
 }
 
+// ========== Streaming Types ==========
+
+/** 流式响应回调集合 */
+export interface StreamCallbacks {
+  /** 增量文本块（delta），isComplete 在最后一块为 true */
+  onChunk: (text: string, isComplete: boolean) => void;
+  /** 工具调用增量（name + 当前已累积的 arguments JSON 字符串） */
+  onToolCall?: (toolCall: { id: string; name: string; arguments: string }) => void;
+  /** 流式完成，携带最终累积状态 */
+  onComplete: (result: {
+    fullText: string;
+    toolCalls: Array<{ id: string; name: string; arguments: Record<string, any> }>;
+    reasoning: string;
+    tokensUsed: number;
+    cacheHit: boolean;
+    duration: number;
+  }) => void;
+  /** 流式传输中的错误 */
+  onError: (error: string) => void;
+}
+
 // ========== AgentClient ==========
 
 export class AgentClient {
@@ -68,6 +90,11 @@ export class AgentClient {
     this.saveId = options.saveId;
     this.timeout = options.timeout ?? 60000;
     this.maxRetries = options.maxRetries ?? 1;
+  }
+
+  /** 标准化 baseUrl：去掉尾斜杠，避免拼接时出现双斜杠 */
+  private get baseUrl(): string {
+    return this.endpoint.baseUrl.trim().replace(/\/$/, '');
   }
 
   /** 每 Agent 独立 userId — DeepSeek 缓存隔离的关键 */
@@ -237,6 +264,221 @@ export class AgentClient {
     };
   }
 
+  /**
+   * 流式 chat completion 请求。
+   *
+   * 发送 `stream: true`，通过 ReadableStream 解析 SSE 块，
+   * 逐块回调 onChunk / onToolCall，最终回调 onComplete。
+   *
+   * @param request ChatRequest（messages/temperature/tools 等）
+   * @param callbacks StreamCallbacks（onChunk / onToolCall / onComplete / onError）
+   * @param signal 可选的 AbortSignal 用于外部取消
+   */
+  async chatStream(
+    request: ChatRequest,
+    callbacks: StreamCallbacks,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const startTime = Date.now();
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    const onExternalAbort = () => controller.abort();
+    if (signal?.aborted) {
+      controller.abort();
+    } else {
+      signal?.addEventListener('abort', onExternalAbort, { once: true });
+    }
+
+    try {
+      const model = request.model || this.endpoint.defaultModel;
+      const body: Record<string, any> = {
+        model,
+        messages: request.messages,
+        temperature: request.temperature ?? 0.7,
+        max_tokens: request.maxTokens ?? 2048,
+        top_p: request.topP ?? 1.0,
+        frequency_penalty: request.frequencyPenalty ?? 0,
+        presence_penalty: request.presencePenalty ?? 0,
+        stream: true,
+        stop: request.stop,
+        user_id: this.userId,
+      };
+
+      if (request.tools && request.tools.length > 0) {
+        body.tools = request.tools;
+        body.tool_choice = request.tool_choice ?? 'auto';
+      }
+
+      if (request.reasoning && this.endpoint.provider === 'deepseek') {
+        body.thinking = { type: 'enabled' };
+        body.reasoning_effort = 'high';
+      }
+
+      const res = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.endpoint.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => '');
+        console.error('[AgentClient] API error — status:', res.status, 'body:', errorText.slice(0, 500))
+        console.error('[AgentClient] Request model:', body.model, 'has model:', !!body.model)
+        throw new Error(`HTTP ${res.status}: ${errorText.slice(0, 200)}`);
+      }
+
+      // Parse SSE stream
+      const reader = res.body?.getReader();
+      if (!reader) {
+        throw new Error('Response body is not readable (no ReadableStream)');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let fullText = '';
+      let fullReasoning = '';
+      let tokensUsed = 0;
+      let cacheHit = false;
+
+      // Accumulate tool calls by index
+      const toolCallAccum: Map<number, { id: string; name: string; arguments: string }> = new Map();
+
+      try {
+        while (true) {
+          // Check for external abort between reads
+          if (signal?.aborted) {
+            throw new DOMException('Aborted by external signal', 'AbortError');
+          }
+
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Split on double-newline (SSE event boundary)
+          const events = buffer.split('\n\n');
+          // The last element may be incomplete — keep it in buffer
+          buffer = events.pop() ?? '';
+
+          for (const event of events) {
+            if (!event.trim()) continue;
+
+            for (const line of event.split('\n')) {
+              if (!line.startsWith('data: ')) continue;
+
+              const dataStr = line.slice(6); // strip "data: "
+              if (dataStr === '[DONE]') continue;
+
+              try {
+                const chunk = JSON.parse(dataStr);
+
+                // Track usage if present
+                if (chunk.usage?.total_tokens) {
+                  tokensUsed = chunk.usage.total_tokens;
+                }
+
+                // Detect cache hit from chunk headers (DeepSeek)
+                if (chunk.cache_hit === true || chunk.usage?.prompt_cache_hit_tokens > 0) {
+                  cacheHit = true;
+                }
+
+                const delta = chunk.choices?.[0]?.delta;
+                const finishReason = chunk.choices?.[0]?.finish_reason;
+
+                if (delta) {
+                  // Text content delta
+                  if (delta.content) {
+                    fullText += delta.content;
+                    callbacks.onChunk(delta.content, false);
+                  }
+
+                  // Reasoning content delta (DeepSeek)
+                  if (delta.reasoning_content) {
+                    fullReasoning += delta.reasoning_content;
+                  }
+
+                  // Tool call deltas
+                  if (delta.tool_calls) {
+                    for (const tc of delta.tool_calls) {
+                      const idx: number = tc.index ?? 0;
+
+                      let acc = toolCallAccum.get(idx);
+                      if (!acc) {
+                        acc = { id: '', name: '', arguments: '' };
+                        toolCallAccum.set(idx, acc);
+                      }
+
+                      if (tc.id) acc.id = tc.id;
+                      if (tc.function?.name) acc.name = tc.function.name;
+                      if (tc.function?.arguments) {
+                        acc.arguments += tc.function.arguments;
+                      }
+
+                      // Notify with current accumulated args
+                      callbacks.onToolCall?.({
+                        id: acc.id,
+                        name: acc.name,
+                        arguments: acc.arguments,
+                      });
+                    }
+                  }
+                }
+
+                // Check finish_reason
+                if (finishReason !== null && finishReason !== undefined) {
+                  // Build final tool calls array
+                  const toolCalls: Array<{ id: string; name: string; arguments: Record<string, any> }> = [];
+                  for (const [, acc] of toolCallAccum) {
+                    let parsedArgs: Record<string, any> = {};
+                    try {
+                      parsedArgs = JSON.parse(acc.arguments || '{}');
+                    } catch {
+                      parsedArgs = {};
+                    }
+                    toolCalls.push({
+                      id: acc.id,
+                      name: acc.name,
+                      arguments: parsedArgs,
+                    });
+                  }
+
+                  callbacks.onChunk(fullText, true);
+                  callbacks.onComplete({
+                    fullText,
+                    toolCalls,
+                    reasoning: fullReasoning,
+                    tokensUsed,
+                    cacheHit,
+                    duration: Date.now() - startTime,
+                  });
+                }
+              } catch {
+                // Skip unparseable chunks gracefully
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        callbacks.onError('Request aborted');
+      } else {
+        callbacks.onError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener('abort', onExternalAbort);
+    }
+  }
+
   private async callOnce(request: ChatRequest, signal?: AbortSignal): Promise<InternalAgentResult> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
@@ -249,8 +491,9 @@ export class AgentClient {
     }
 
     try {
+      const model = request.model || this.endpoint.defaultModel;
       const body: Record<string, any> = {
-        model: this.endpoint.defaultModel,
+        model,
         messages: request.messages,
         temperature: request.temperature ?? 0.7,
         max_tokens: request.maxTokens ?? 2048,
@@ -268,12 +511,13 @@ export class AgentClient {
         body.tool_choice = request.tool_choice ?? 'auto';
       }
 
-      // 🆕 DeepSeek 思考模式
-      if (request.reasoning && this.endpoint.provider === 'deepseek') {
+      // 🆕 DeepSeek 思考模式：按 endpoint 配置决定是否开启
+      if (this.endpoint.enableThinking && this.endpoint.provider === 'deepseek') {
         body.thinking = { type: 'enabled' };
+        body.reasoning_effort = 'high';
       }
 
-      const res = await fetch(`${this.endpoint.baseUrl}/chat/completions`, {
+      const res = await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -285,6 +529,8 @@ export class AgentClient {
 
       if (!res.ok) {
         const errorText = await res.text().catch(() => '');
+        console.error('[AgentClient] API error — status:', res.status, 'body:', errorText.slice(0, 500))
+        console.error('[AgentClient] Request model:', body.model, 'has model:', !!body.model)
         throw new Error(`HTTP ${res.status}: ${errorText.slice(0, 200)}`);
       }
 

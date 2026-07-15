@@ -17,7 +17,7 @@ import type {
   ToolExecutionContext,
 } from './types';
 import { AgentClient } from './agent-client';
-import type { ChatRequest } from './agent-client';
+import type { ChatRequest, StreamCallbacks } from './agent-client';
 import { buildAgentMessages, getAgentTemplate } from './agent-templates';
 import { scanMarkers } from './marker-protocol';
 import { recallMemories } from './memory-store';
@@ -46,7 +46,7 @@ export interface OrchestratorOptions {
 
 export interface OrchestratorEvents {
   onStageStart?: (stageIndex: number, agents: string[]) => void;
-  onAgentStart?: (agentId: string) => void;
+  onAgentStart?: (agentId: string, config: AgentConfig) => void;
   onAgentComplete?: (result: AgentResult) => void;
   onAgentError?: (agentId: string, error: string) => void;
   onStageComplete?: (stageIndex: number) => void;
@@ -228,7 +228,7 @@ export class AgentOrchestrator {
       };
     }
 
-    this.events.onAgentStart?.(agentId);
+    this.events.onAgentStart?.(agentId, config);
     const result = await this.callAgent(config);
     this.results.set(agentId, result);
 
@@ -320,7 +320,7 @@ export class AgentOrchestrator {
       };
     }
 
-    this.events.onAgentStart?.(agentId);
+    this.events.onAgentStart?.(agentId, config);
     return this.callAgent(config);
   }
 
@@ -338,8 +338,11 @@ export class AgentOrchestrator {
       };
     }
 
-    // 🆕 自动检测：memory_recall 模型名含 "embedding" → 走向量召回路径
-    if (config.agentId === 'memory_recall' && /embedding/i.test(config.model)) {
+    // 🆕 自动检测：memory_recall 模型名含 "embedding" 或 apiType 为 embedding → 走向量召回路径
+    if (config.agentId === 'memory_recall' && (
+      /embedding/i.test(config.model) ||
+      (endpoint as any).apiType === 'embedding'
+    )) {
       return this.callMemoryRecallEmbedding(endpoint, config);
     }
 
@@ -380,6 +383,7 @@ export class AgentOrchestrator {
 
     const request: ChatRequest = {
       messages,
+      model: config.model || endpoint.defaultModel,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
       topP: config.topP,
@@ -387,7 +391,62 @@ export class AgentOrchestrator {
       presencePenalty: config.presencePenalty,
     };
 
-    return client.chat(request);
+    let result: AgentResult
+
+    // 🆕 流式路径: 如果配置了 streamCallbacks，使用 chatStream() 逐块输出
+    if (config.streamCallbacks) {
+      result = await this.callAgentStreaming(client, request, config);
+    } else {
+      result = await client.chat(request, config.abortSignal);
+    }
+
+    // 🆕 注入请求消息供 debug 面板使用
+    result.requestMessages = messages
+
+    return result
+  }
+
+  /**
+   * 🆕 流式 Agent 调用 — 使用 chatStream() 逐块回调，
+   * 最终组装完整输出为 AgentResult 返回给管线。
+   */
+  private async callAgentStreaming(
+    client: AgentClient,
+    request: ChatRequest,
+    config: AgentConfig,
+  ): Promise<AgentResult> {
+    const startTime = Date.now();
+    const callbacks = config.streamCallbacks!;
+
+    return new Promise((resolve) => {
+      client.chatStream(request, {
+        onChunk: (text, isComplete) => {
+          callbacks.onChunk(text, isComplete);
+        },
+        onComplete: (streamResult) => {
+          resolve({
+            agentId: config.agentId,
+            output: streamResult.fullText,
+            rawResponse: streamResult.fullText,
+            reasoning: streamResult.reasoning,
+            tokensUsed: streamResult.tokensUsed,
+            cacheHit: streamResult.cacheHit,
+            duration: streamResult.duration,
+          });
+        },
+        onError: (error) => {
+          resolve({
+            agentId: config.agentId,
+            output: null,
+            rawResponse: '',
+            tokensUsed: 0,
+            cacheHit: false,
+            duration: Date.now() - startTime,
+            error,
+          });
+        },
+      }, config.abortSignal);
+    });
   }
 
   /**
@@ -440,6 +499,7 @@ export class AgentOrchestrator {
 
     const request: ChatRequest = {
       messages,
+      model: config.model || endpoint.defaultModel,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
       topP: config.topP,
@@ -458,7 +518,7 @@ export class AgentOrchestrator {
         }
         return toolResult;
       },
-      { maxRounds: config.maxToolCallRounds ?? 5 },
+      { maxRounds: config.maxToolCallRounds ?? 5, signal: config.abortSignal },
     );
 
     result.duration = Date.now() - startTime;
@@ -767,8 +827,9 @@ export class AgentOrchestrator {
               case 'mp': patches.push({ op: 'set_mp', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
               case 'sp': patches.push({ op: 'set_sp', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
               case 'location':
+                patches.push({ op: 'set_location', target: `characters.${id}`, value: value, metadata: { source: 'vars_update' } }); break;
               case 'currentAction':
-                patches.push({ op: 'set_location', target: `characters.${id}`, value: r, metadata: { source: 'vars_update' } }); break;
+                patches.push({ op: 'set_location', target: `characters.${id}`, value: value, metadata: { source: 'vars_update' } }); break;
               default:
                 patches.push({ op: 'update_character', target: `characters.${id}`, value: { [path]: value }, metadata: { source: 'vars_update', path } });
             }

@@ -44,18 +44,19 @@ const navItems: { key: Section; label: string; icon: string }[] = [
 // ============================================================
 const hasApi = computed(() => s.apiPool.length > 0)
 const showAddApi = ref(false)
-const apiForm = reactive({ name: '', baseUrl: '', apiKey: '', model: '', apiType: 'chat' as 'chat' | 'embedding' })
+const apiForm = reactive({ name: '', baseUrl: '', apiKey: '', model: '', apiType: 'chat' as 'chat' | 'embedding', enableThinking: false, _realKey: '' as string, _masked: false })
 const apiModels = ref<string[]>([])
+const showAdvancedApi = ref(false)
 const apiFormTesting = ref(false)
 const apiFormFetchingModels = ref(false)
 const editingApiId = ref<string | null>(null)
 
 function maskKey(key: string): string { if (!key || key.length < 8) return key ? key.slice(0,3)+'***' : ''; return key.slice(0,3)+'***'+key.slice(-4) }
-	async function testApiAndFetch() { if(!apiForm.baseUrl||!apiForm.apiKey)return; apiFormTesting.value=true; const realKey=apiForm.apiKey; try{const testPath=apiForm.apiType==='embedding'?'/embeddings':'/chat/completions';const testBody=apiForm.apiType==='embedding'?JSON.stringify({model:apiForm.model||'default',input:'test'}):JSON.stringify({model:apiForm.model||'default',messages:[{role:'user',content:'hi'}],max_tokens:1});const r=await new Promise((ok,rej)=>{const x=new XMLHttpRequest();x.open('POST','/api/proxy/'+encodeURIComponent(apiForm.baseUrl+testPath));x.setRequestHeader('Content-Type','application/json');x.setRequestHeader('Authorization','Bearer '+realKey);x.timeout=15000;x.onload=()=>{if(x.status>=200&&x.status<300)ok(x);else rej(new Error(x.status+' '+x.responseText.slice(0,100)))};x.onerror=()=>rej(new Error('network error'));x.ontimeout=()=>rej(new Error('timeout'));x.send(testBody)});apiForm.apiKey=maskKey(realKey);apiForm._realKey=realKey;ui.toast('ok','success');await fetchModelList()}catch(e){ui.toast('fail: '+(e.message||'').slice(0,60),'error')} apiFormTesting.value=false }
-	async function fetchModelList() { apiFormFetchingModels.value=true; const rk=apiForm._realKey||apiForm.apiKey; try{const r=await new Promise((ok,rej)=>{const x=new XMLHttpRequest();x.open("GET","/api/proxy/"+encodeURIComponent(apiForm.baseUrl+"/models"));x.setRequestHeader("Authorization","Bearer "+rk);x.timeout=10000;x.onload=()=>{if(x.status>=200&&x.status<300)ok(x);else rej(new Error(x.status+" "+x.responseText.slice(0,100)))};x.onerror=()=>rej(new Error("network error"));x.ontimeout=()=>rej(new Error("timeout"));x.send()});const d=JSON.parse(r.responseText);apiModels.value=(d.data||[]).map(function(m){return m.id}).filter(Boolean);if(apiModels.value.length>0)apiForm.model=apiModels.value[0];ui.toast("got "+apiModels.value.length+" models","success")}catch(e){ui.toast("err: "+(e.message||"").slice(0,60),"error")} apiFormFetchingModels.value=false }
-function openAddApi() { editingApiId.value=null; apiForm.name='';apiForm.baseUrl='';apiForm.apiKey='';apiForm.model='';apiForm.apiType='chat';apiModels.value=[];showAddApi.value=true }
-function openEditApi(ep: ApiEntry) { editingApiId.value=ep.id;apiForm.name=ep.name;apiForm.baseUrl=ep.baseUrl;apiForm.apiKey=ep.apiKey||'';apiForm.model=ep.model;apiForm.apiType=ep.apiType||'chat';apiModels.value=ep.models?.length?ep.models:[ep.model].filter(Boolean);showAddApi.value=true }
-	function saveApi() { const realKey=apiForm._realKey||apiForm.apiKey; const e: ApiEntry = {id:editingApiId.value||crypto.randomUUID(),name:apiForm.name,baseUrl:apiForm.baseUrl,apiKey:realKey,maskedKey:maskKey(realKey),model:apiForm.model,models:apiModels.value.length>0?apiModels.value:[apiForm.model].filter(Boolean),apiType:apiForm.apiType};if(editingApiId.value){const i=s.apiPool.findIndex(x=>x.id===editingApiId.value);if(i>=0)s.apiPool[i]=e}else s.apiPool.push(e);showAddApi.value=false;editingApiId.value=null;ui.toast(editingApiId.value?"API updated":"API added","success") }
+	async function testApiAndFetch() { if(!apiForm.baseUrl||!apiForm.apiKey)return; apiFormTesting.value=true; const realKey=apiForm._realKey||apiForm.apiKey; try{const testPath=apiForm.apiType==='embedding'?'/embeddings':'/chat/completions';const testBody=apiForm.apiType==='embedding'?JSON.stringify({model:apiForm.model||'default',input:'test'}):JSON.stringify({model:apiForm.model||'default',messages:[{role:'user',content:'hi'}],max_tokens:1});const r=await new Promise((ok,rej)=>{const x=new XMLHttpRequest();x.open('POST','/api/proxy/'+encodeURIComponent(apiForm.baseUrl+testPath));x.setRequestHeader('Content-Type','application/json');x.setRequestHeader('Authorization','Bearer '+realKey);x.timeout=15000;x.onload=()=>{if(x.status>=200&&x.status<300)ok(x);else rej(new Error(x.status+' '+x.responseText.slice(0,100)))};x.onerror=()=>rej(new Error('network error'));x.ontimeout=()=>rej(new Error('timeout'));x.send(testBody)});apiForm._realKey=realKey; apiForm.apiKey=maskKey(realKey); apiForm._masked=true; ui.toast('ok','success');await fetchModelList()}catch(e){ui.toast('fail: '+(e.message||'').slice(0,60),'error')} apiFormTesting.value=false }
+	async function fetchModelList() { apiFormFetchingModels.value=true; const rk=apiForm._realKey||apiForm.apiKey; try{const r=await new Promise((ok,rej)=>{const x=new XMLHttpRequest();x.open("GET","/api/proxy/"+encodeURIComponent(apiForm.baseUrl+"/models"));x.setRequestHeader("Authorization","Bearer "+rk);x.timeout=10000;x.onload=()=>{if(x.status>=200&&x.status<300)ok(x);else rej(new Error(x.status+" "+x.responseText.slice(0,100)))};x.onerror=()=>rej(new Error("network error"));x.ontimeout=()=>rej(new Error("timeout"));x.send()});const d=JSON.parse(r.responseText);apiModels.value=(d.data||[]).map(function(m){return m.id}).filter(Boolean);if(apiModels.value.length>0 && !apiForm.model)apiForm.model=apiModels.value[0];ui.toast("got "+apiModels.value.length+" models","success")}catch(e){ui.toast("err: "+(e.message||"").slice(0,60),"error")} apiFormFetchingModels.value=false }
+function openAddApi() { editingApiId.value=null; apiForm.name='';apiForm.baseUrl='';apiForm.apiKey='';apiForm.model='';apiForm.apiType='chat';apiForm.enableThinking=false;apiForm._realKey=''; apiForm._masked=false; apiModels.value=[];showAddApi.value=true }
+function openEditApi(ep: ApiEntry) { editingApiId.value=ep.id;apiForm.name=ep.name;apiForm.baseUrl=ep.baseUrl;const key=ep.apiKey||'';apiForm.apiKey=key;apiForm._realKey=key;apiForm._masked=key ? true : false;apiForm.model=ep.model;apiForm.apiType=ep.apiType||'chat';apiForm.enableThinking=ep.enableThinking??false;apiModels.value=ep.models?.length?[...ep.models]:[ep.model].filter(Boolean);showAddApi.value=true }
+	function saveApi() { const realKey=apiForm._realKey||apiForm.apiKey; const e: ApiEntry = {id:editingApiId.value||crypto.randomUUID(),name:apiForm.name,baseUrl:apiForm.baseUrl,apiKey:realKey,maskedKey:maskKey(realKey),model:apiForm.model,models:apiModels.value.length>0?apiModels.value:[apiForm.model].filter(Boolean),apiType:apiForm.apiType,enableThinking:apiForm.enableThinking};if(editingApiId.value){const i=s.apiPool.findIndex(x=>x.id===editingApiId.value);if(i>=0)s.apiPool[i]=e}else s.apiPool.push(e);showAddApi.value=false;editingApiId.value=null;ui.toast(editingApiId.value?"API updated":"API added","success") }
 function deleteApi(id:string) { s.apiPool = s.apiPool.filter(e=>e.id!==id);ui.toast('API 已删除','info') }
 
 // ============================================================
@@ -775,7 +776,8 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
           <span class="sub-nav-name">{{ ag.name }}</span>
           <!-- 未配置 API 标红 -->
           <span v-if="!hasApi" class="sub-nav-badge sub-nav-bad">!</span>
-          <span v-else-if="s.agentDirty[ag.id]" class="sub-nav-badge sub-nav-ok">✓</span>
+          <span v-else-if="!s.agentModels[ag.id]" class="sub-nav-badge sub-nav-bad">&#10005;</span>
+          <span v-else class="sub-nav-badge sub-nav-ok">&#10003;</span>
         </button>
       </nav>
 
@@ -809,15 +811,15 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
             <span class="text-sm text-muted">{{ agentList.find(a=>a.id===activeAgent)?.desc }}</span>
           </div>
 
-          <!-- 模型选择 — 默认必须为空 -->
+          <!-- 模型选择 — 从 API 池中选择 -->
           <AppCard padding="md" class="detail-card">
-            <h4>模型选择</h4>
-            <p class="form-hint">从 API 池中为此 Agent 选择模型。必须选择，留空则此 Agent 无法运行。</p>
+            <h4>API 池选择</h4>
+            <p class="form-hint">为此 Agent 指定一个已配置好的 API 池（含端点地址、密钥和默认模型）。</p>
             <div class="key-row">
               <select class="form-input" :value="s.agentModels[activeAgent] || ''"
                 @change="s.agentModels[activeAgent] = ($event.target as HTMLSelectElement).value; s.agentDirty[activeAgent] = true">
-                <option value="">— 请选择模型 —</option>
-                <option v-for="m in availableApiModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+                <option value="">— 请选择 API 池 —</option>
+                <option v-for="ep in s.apiPool" :key="ep.id" :value="ep.id">{{ ep.name }} — {{ ep.model || '未选择模型' }}</option>
               </select>
               <span v-if="!s.agentModels[activeAgent] && !hasApi" class="api-warn">⚠ 请先配置 API</span>
               <span v-else-if="!s.agentModels[activeAgent]" class="api-warn">⚠ 未选择</span>
@@ -1282,7 +1284,24 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 
     <!-- 添加/编辑 API 弹窗 -->
     <AppModal :open="showAddApi" :title="editingApiId?'编辑 API':'添加 API'" size="md" @update:open="showAddApi=$event">
-      <div class="api-form"><label class="form-label">名称<input v-model="apiForm.name" class="form-input" placeholder="如: DeepSeek 生产" /></label><label class="form-label">类型<select v-model="apiForm.apiType" class="form-input"><option value="chat">文本补全 (Chat)</option><option value="embedding">向量嵌入 (Embedding)</option></select><p class="form-hint">Chat 模型用 /chat/completions 测试；Embedding 模型用 /embeddings 测试</p></label><label class="form-label">主链接<input v-model="apiForm.baseUrl" class="form-input" placeholder="https://api.deepseek.com/v1" /></label><label class="form-label">API Key<div class="key-row"><input v-model="apiForm.apiKey" class="form-input" :type="apiForm.apiKey.length>10&&!apiForm.apiKey.includes('***')?'text':'password'" placeholder="sk-..." /><AppButton variant="secondary" size="sm" :disabled="apiFormTesting" @click="testApiAndFetch">{{ apiFormTesting?'测试中...':'测试连接' }}</AppButton></div><p class="form-hint">点击测试连接后密钥会被立即隐藏，仅保留前几位</p></label><label class="form-label">模型列表<div class="key-row"><select v-model="apiForm.model" class="form-input"><option v-for="m in apiModels" :key="m" :value="m">{{ m }}</option><option v-if="apiModels.length===0" value="" disabled>请先测试连接获取模型</option></select><AppButton variant="secondary" size="sm" :disabled="apiFormFetchingModels" @click="fetchModelList">{{ apiFormFetchingModels?'获取中...':'获取模型' }}</AppButton></div><p class="form-hint">点击获取模型从 API 端点拉取可用模型列表</p></label></div>
+      <div class="api-form"><label class="form-label">名称<input v-model="apiForm.name" class="form-input" placeholder="如: DeepSeek 生产" /></label><label class="form-label">类型<select v-model="apiForm.apiType" class="form-input"><option value="chat">文本补全 (Chat)</option><option value="embedding">向量嵌入 (Embedding)</option></select><p class="form-hint">Chat 模型用 /chat/completions 测试；Embedding 模型用 /embeddings 测试</p></label><label class="form-label">主链接<input v-model="apiForm.baseUrl" class="form-input" placeholder="https://api.deepseek.com/v1" /></label><label class="form-label">API Key<div class="key-row"><input v-model="apiForm.apiKey" class="form-input" :type="(editingApiId && apiForm._masked && (!apiForm._realKey || apiForm.apiKey.length > 10 && apiForm.apiKey.includes('***'))) ? 'password' : (apiForm.apiKey.length>10&&!apiForm.apiKey.includes('***')?'text':'password')" placeholder="sk-..." /><AppButton variant="secondary" size="sm" :disabled="apiFormTesting" @click="testApiAndFetch">{{ apiFormTesting?'测试中...':'测试连接' }}</AppButton></div><p class="form-hint">编辑已有 API 时密钥默认隐藏。点击测试连接验证密钥并获取模型列表。</p></label><label class="form-label">模型列表<div class="key-row"><select v-model="apiForm.model" class="form-input"><option v-for="m in apiModels" :key="m" :value="m">{{ m }}</option><option v-if="apiModels.length===0" value="" disabled>请先测试连接获取模型</option></select><AppButton variant="secondary" size="sm" :disabled="apiFormFetchingModels" @click="fetchModelList">{{ apiFormFetchingModels?'获取中...':'获取模型' }}</AppButton></div><p class="form-hint">点击获取模型从 API 端点拉取可用模型列表</p></label>
+        <!-- 高级设置（可折叠） -->
+        <div class="advanced-section">
+          <button class="advanced-toggle" type="button" @click="showAdvancedApi = !showAdvancedApi">
+            <i class="fa-solid" :class="showAdvancedApi ? 'fa-chevron-up' : 'fa-chevron-down'" />
+            高级设置
+          </button>
+          <div class="advanced-body" v-if="showAdvancedApi">
+            <label class="form-label" style="margin-top:8px">
+              <span class="form-check-row">
+                <input type="checkbox" v-model="apiForm.enableThinking" />
+                开启思维链 (DeepSeek thinking)
+              </span>
+            </label>
+            <p class="form-hint">启用后每次调用该 API 池的请求都会携带 <code>thinking: {"{"} type: 'enabled' {"}"}</code> + <code>reasoning_effort: 'high'</code>，让模型在输出前先进行深度思考。</p>
+          </div>
+        </div>
+      </div>
       <template #footer><AppButton variant="ghost" size="sm" @click="showAddApi=false">取消</AppButton><AppButton variant="primary" size="sm" @click="saveApi">{{ editingApiId?'保存修改':'添加' }}</AppButton></template>
     </AppModal>
   </div>
@@ -1355,6 +1374,16 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 .embedding-hint{background:color-mix(in srgb,var(--theme-primary) 8%,var(--theme-card-bg))}
 .api-warn{color:var(--theme-error);font-size:0.8rem;font-weight:600;white-space:nowrap}
 .api-ok{color:var(--theme-success);font-size:0.9rem;font-weight:700}
+
+/* 高级设置折叠 */
+.advanced-section{margin-top:2px}
+.advanced-toggle{display:flex;align-items:center;gap:6px;padding:6px 0;border:none;background:transparent;color:var(--theme-text-secondary);font-family:inherit;font-size:0.82rem;cursor:pointer;transition:color var(--theme-transition-fast)}
+.advanced-toggle:hover{color:var(--theme-text-primary)}
+.advanced-toggle i{font-size:0.7rem;width:14px;text-align:center}
+.advanced-body{padding-left:4px}
+.advanced-body .form-hint code{background:var(--theme-surface-muted);color:var(--theme-primary);padding:1px 4px;border-radius:3px;font-size:0.68rem}
+.form-check-row{display:flex;align-items:center;gap:8px;color:var(--theme-text-secondary);font-size:0.85rem}
+.form-check-row input[type='checkbox']{accent-color:var(--theme-primary)}
 
 /* Agent */
 .agent-detail-head{margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--theme-card-border)}

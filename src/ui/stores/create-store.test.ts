@@ -353,13 +353,12 @@ describe('装备选择', () => {
     }
   })
 
-  it('同类型防具应替换而非叠加', () => {
+  it('同类型防具应允许多选', () => {
     const armors = DEFAULT_EQUIPMENT_POOL.filter(e => e.type === '防具')
     if (armors.length >= 2) {
       store.addEquipment(armors[0])
       store.addEquipment(armors[1])
-      expect(store.selectedEquipments).toHaveLength(1)
-      expect(store.selectedEquipments[0].id).toBe(armors[1].id)
+      expect(store.selectedEquipments).toHaveLength(2)
     }
   })
 
@@ -604,7 +603,7 @@ describe('buildCharacterState', () => {
   })
 
   it('应生成合法的 CharacterState', () => {
-    const state = store.buildCharacterState()
+    const state = store.buildCharacterState('test-save-id')
     expect(state.name).toBe('测试')
     expect(state.race).toBe('人类')
     expect(state.level).toBe(5)
@@ -615,19 +614,19 @@ describe('buildCharacterState', () => {
   it('自定义种族应写入 customRace', () => {
     store.race = '自定义'
     store.customRace = '精灵混血'
-    const state = store.buildCharacterState()
+    const state = store.buildCharacterState('test-save-id')
     expect(state.race).toBe('精灵混血')
   })
 
   it('equipment/skills/inventory 应置空', () => {
-    const state = store.buildCharacterState()
+    const state = store.buildCharacterState('test-save-id')
     expect(state.equipment).toEqual([])
     expect(state.skills).toEqual([])
     expect(state.inventory).toEqual([])
   })
 
   it('HP/MP/SP 应正确写入', () => {
-    const state = store.buildCharacterState()
+    const state = store.buildCharacterState('test-save-id')
     expect(state.hp).toBe(store.hpPreview)
     expect(state.maxHp).toBe(store.hpPreview)
   })
@@ -643,29 +642,49 @@ describe('buildOpeningPrompt', () => {
     store.selectDifficulty('creative')
   })
 
-  it('空选择时应返回空字符串', () => {
+  it('空选择时返回仅包含标题头的开场', () => {
     const prompt = store.buildOpeningPrompt()
-    expect(prompt).toBe('')
+    expect(prompt).toContain('创角完成')
+    expect(prompt).toContain('测试')
+    // 没有选择任何装备/技能/物品 → 不应有 --- 初始* --- 标签
+    expect(prompt).not.toContain('--- 初始装备 ---')
+    expect(prompt).not.toContain('--- 初始技能 ---')
+    expect(prompt).not.toContain('--- 背包物品 ---')
+    // 开局时间总是存在
+    expect(prompt).toContain('--- 开局时间 ---')
+    expect(prompt).toContain('复兴纪元001年01月01日')
   })
 
-  it('有装备应输出【初始装备】JSON', () => {
+  it('有装备应输出装备信息', () => {
     const eq = DEFAULT_EQUIPMENT_POOL[0]
     if (eq) {
       store.addEquipment(eq)
       const prompt = store.buildOpeningPrompt()
-      expect(prompt).toContain('【初始装备】')
+      expect(prompt).toContain('--- 初始装备 ---')
       expect(prompt).toContain(eq.name)
     }
   })
 
-  it('有命定核心应输出【命定之灵】', () => {
+  it('有命定核心应输出命定之灵', () => {
     const core = DEFAULT_DESTINY_CORES[0]
     if (core) {
       store.selectDestinyCore(core.id)
       const prompt = store.buildOpeningPrompt()
-      expect(prompt).toContain('【命定之灵】')
+      expect(prompt).toContain('--- 命定之灵')
       expect(prompt).toContain(core.name)
     }
+  })
+
+  it('选中 system_core 世界书条目时应输出该条目内容（命定之灵）', () => {
+    // 新的 UI 命定核心选择走 selectedSystemCoreEntry（system_core 世界书条目）
+    store.systemCoreEntries = [
+      { uid: 413, name: '裂命之灵', content: '寄宿于灵魂深处的命运之灵，影响叙事风格。', enabled: true, constant: false, key: [], keysecondary: [], selectiveLogic: 0, order: 0, position: 0 } as any,
+    ]
+    store.selectSystemCoreEntry(413)
+    const prompt = store.buildOpeningPrompt()
+    expect(prompt).toContain('--- 命定之灵：')
+    expect(prompt).toContain('裂命之灵')
+    expect(prompt).toContain('寄宿于灵魂深处的命运之灵')
   })
 })
 

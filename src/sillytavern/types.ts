@@ -212,6 +212,8 @@ export interface ApiEndpoint {
   defaultModel: string;
   models: string[];             // 可用模型列表
   timeout: number;
+  /** DeepSeek 思考模式：设 true 后所有走这个 endpoint 的请求都会开启 thinking */
+  enableThinking?: boolean;
 }
 
 /** 单个 Agent 的配置 */
@@ -250,6 +252,10 @@ export interface AgentConfig {
   /** 🆕 Phase 10: Custom template string with {{PLACEHOLDER}} references.
    *  If not set, the default template from placeholder-registry.ts is used. */
   template?: string;
+  /** 🆕 Phase 7e: AbortSignal for external cancellation（用于 GamePipeline abort） */
+  abortSignal?: AbortSignal;
+  /** 🆕 Phase 7e: 流式回调 — 设置后编排器使用 chatStream() 替代 chat() */
+  streamCallbacks?: import('./agent-client').StreamCallbacks;
 }
 
 // ========== Preset (Phase 8) ==========
@@ -1142,6 +1148,8 @@ export interface AgentResult {
   error?: string;
   /** 🆕 Agentic: 本 Agent 产生的所有工具调用记录 */
   toolCalls?: Array<{ name: string; arguments: any; result: any }>;
+  /** 🆕 Debug: 发送给 AI 的完整请求消息（含系统提示词+上下文），用于调试面板导出 */
+  requestMessages?: Array<{ role: string; content: string | null }>;
 }
 
 /** 编排器运行记录 */

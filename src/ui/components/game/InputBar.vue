@@ -4,6 +4,7 @@ import { useGameStore } from '../../stores/game-store'
 
 const emit = defineEmits<{
   send: [content: string]
+  stop: []
 }>()
 
 const props = defineProps<{ disabled?: boolean }>()
@@ -34,6 +35,10 @@ function handleSend() {
   emit('send', text)
   input.value = ''
 }
+
+function handleStop() {
+  emit('stop')
+}
 </script>
 
 <template>
@@ -51,9 +56,12 @@ function handleSend() {
       </button>
       <button class="option-custom" @click="showOptions = false">自定义输入...</button>
     </div>
-    <button v-if="dynamicOptions.length > 0" class="input-btn" @click="showOptions = !showOptions" title="可选行动" :aria-expanded="showOptions" aria-haspopup="listbox">
+
+    <!-- 非生成态：显示选项按钮 -->
+    <button v-if="!props.disabled && dynamicOptions.length > 0" class="input-btn" @click="showOptions = !showOptions" title="可选行动" :aria-expanded="showOptions" aria-haspopup="listbox">
       <i class="fa-solid fa-list-ul" />
     </button>
+
     <input
       v-model="input"
       class="input-field"
@@ -62,8 +70,15 @@ function handleSend() {
       :disabled="props.disabled"
       @keydown.enter="handleSend"
     />
-    <button class="input-btn send-btn" :disabled="props.disabled" @click="handleSend" title="发送">
+
+    <!-- 非生成态：发送按钮 -->
+    <button v-if="!props.disabled" class="input-btn send-btn" @click="handleSend" title="发送">
       <i class="fa-solid fa-paper-plane" />
+    </button>
+
+    <!-- 生成态：停止按钮 -->
+    <button v-if="props.disabled" class="input-btn stop-btn" @click="handleStop" title="停止生成">
+      <i class="fa-solid fa-stop" />
     </button>
   </div>
 </template>
@@ -100,6 +115,15 @@ function handleSend() {
 }
 .send-btn {
   color: var(--theme-primary);
+}
+.stop-btn {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.stop-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
 }
 .input-field {
   flex: 1;

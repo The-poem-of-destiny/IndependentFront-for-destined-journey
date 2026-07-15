@@ -4,6 +4,22 @@ import type { SaveSlot, CharacterState, ChatMessage, MemoryRecord, PlotEvent, Pl
 import { getSave, getSaves, getCharacters, getMemories, getPlotEvents, getSaveProfile } from '@engine/database'
 import { saveMessage, getMessages, saveSaveSlot } from '@engine/database'
 
+/** 单条 Agent 调试日志（含完整请求/响应上下文） */
+export interface DebugAgentEntry {
+  agentId: string
+  label: string
+  endpointId: string
+  endpointName: string
+  baseUrl: string
+  model: string
+  messages: Array<{ role: string; content: string | null }>
+  rawResponse: string
+  error?: string
+  tokensUsed: number
+  cacheHit: boolean
+  duration: number
+}
+
 export const useGameStore = defineStore('game', () => {
   // === 存档 ===
   const saves = ref<SaveSlot[]>([])
@@ -64,6 +80,52 @@ export const useGameStore = defineStore('game', () => {
     return ''
   }
 
+  // === Agent 管线状态（供 AgentStatusPanel 读取） ===
+  interface AgentStatusEntry {
+    agentId: string
+    label: string
+    startedAt: number
+  }
+  const agentStatus = ref<{ agentId: string; label: string; startedAt: number } | null>(null)
+  const agentDurations = ref<{ agentId: string; label: string; elapsed: number }[]>([])
+
+  const AGENT_LABELS: Record<string, string> = {
+    memory_recall: '检索记忆',
+    plot_pre_check: '剧情检查',
+    story: '生成正文',
+    request_dispatcher: '请求调度',
+    vars_update: '更新状态',
+    memory_summary: '压缩记忆',
+    plot_post_check: '剧情修正',
+    craft_gen: '制作中',
+    char_gen: '角色生成',
+    item_gen: '物品生成',
+  }
+
+  function updateAgentStatus(agentId: string) {
+    agentStatus.value = {
+      agentId,
+      label: AGENT_LABELS[agentId] ?? agentId,
+      startedAt: Date.now(),
+    }
+  }
+
+  function clearAgentStatus(agentId: string, _error?: string) {
+    if (agentStatus.value && agentStatus.value.agentId === agentId) {
+      const elapsed = Date.now() - agentStatus.value.startedAt
+      agentDurations.value = [
+        ...agentDurations.value.slice(-9), // keep last 9 to avoid overflow
+        { agentId, label: agentStatus.value.label, elapsed },
+      ]
+      agentStatus.value = null
+    }
+  }
+
+  function clearAllAgentStatus() {
+    agentStatus.value = null
+    agentDurations.value = []
+  }
+
   // === UI 布局状态 (Phase 7e) ===
   const sidebarCollapsed = ref(false)
   const activeModal = ref<string | null>(null)
@@ -75,10 +137,11 @@ export const useGameStore = defineStore('game', () => {
   function fillInput(text: string) { pendingInput.value = text }
   function clearPendingInput() { pendingInput.value = '' }
 
-  // === 开场 Prompt 管理 ===
-  /** 是否已消费开场 Prompt（未消费 → 需要自动发送） */
+  /** 是否已消费开场 Prompt（未消费 → 需要自动发送）
+   *  注意：仅以 openingPromptConsumed 元数据为准，messages 长度不作为消费判定。
+   *  因为创角流程可能会预先插入一条消息，但开场 prompt 仍应自动发送。 */
   const hasOpeningPromptConsumed = computed(() => {
-    return activeSave.value?.metadata?.openingPromptConsumed === true || messages.value.length > 0
+    return activeSave.value?.metadata?.openingPromptConsumed === true
   })
 
   /** 获取开场 Prompt 文本 */
@@ -86,12 +149,31 @@ export const useGameStore = defineStore('game', () => {
     return activeSave.value?.metadata?.openingPrompt ?? null
   })
 
+  /** Agent 调用日志 — 每轮管线追加 */
+  const agentLog = ref<DebugAgentEntry[]>([])
+
+  /** 追加一条 Agent 调试日志 (idempotent: 同名 agent 替换) */
+  function addAgentLogEntry(entry: DebugAgentEntry) {
+    const existing = agentLog.value.findIndex(e => e.agentId === entry.agentId)
+    if (existing >= 0) {
+      agentLog.value[existing] = entry
+    } else {
+      agentLog.value.push(entry)
+    }
+  }
+
+  /** 清除本轮所有调试日志 (新一轮开始时调用) */
+  function clearAgentLog() {
+    agentLog.value = []
+  }
+
   /** 标记开场 Prompt 已消费 */
   async function markOpeningPromptConsumed() {
     if (!activeSave.value) return
-    activeSave.value.metadata.openingPromptConsumed = true
+    const clean = JSON.parse(JSON.stringify(activeSave.value))
+    clean.metadata.openingPromptConsumed = true
     try {
-      await saveSaveSlot(activeSave.value)
+      await saveSaveSlot(clean)
     } catch (err) {
       console.error('[game-store] 标记开场 Prompt 失败:', err)
     }
@@ -154,16 +236,14 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
-  /** 从 IndexedDB 恢复消息到内存 */
+  /** 从 IndexedDB 恢复消息到内存（始终覆写，无消息时清空） */
   async function restoreMessages() {
     if (!activeSaveId.value) return
     try {
-      const msgs = await getMessages(activeSaveId.value)
-      if (msgs.length > 0) {
-        messages.value = msgs
-      }
+      messages.value = await getMessages(activeSaveId.value)
     } catch (err) {
       console.error('[game-store] 恢复消息失败:', err)
+      messages.value = []
     }
   }
 
@@ -203,9 +283,21 @@ export const useGameStore = defineStore('game', () => {
   async function loadSave(saveId: string) {
     const save = await getSave(saveId)
     if (!save) throw new Error(`Save ${saveId} not found`)
-    activeSaveId.value = saveId
 
-    // 加载关联数据
+    // 🔴 关键：先清空旧存档的所有内存状态，避免 DB 无数据时旧值残留
+    clearActive()
+    activeSaveId.value = saveId
+    saves.value = [save]
+
+    // 关键：先设置 activeSaveId，让 activeSave computed 能正确引用到 save
+    console.log('[game-store] activeSave after set:', JSON.stringify({
+      id: activeSave.value?.id,
+      hasMetadata: !!activeSave.value?.metadata,
+      hasOpeningPrompt: !!activeSave.value?.metadata?.openingPrompt,
+      openingPromptConsumed: activeSave.value?.metadata?.openingPromptConsumed,
+    }))
+
+    // 加载关联数据（始终覆写，DB 返回 undefined 时写默认空值）
     const [chars, mems, events, profile] = await Promise.all([
       getCharacters(saveId),
       getMemories(saveId),
@@ -213,10 +305,12 @@ export const useGameStore = defineStore('game', () => {
       getSaveProfile(saveId),
     ])
 
-    if (chars) characters.value = chars as CharacterState[]
-    if (mems) recentMemories.value = mems as MemoryRecord[]
-    if (events) activePlotEvents.value = events as PlotEvent[]
-    if (profile) saveProfile.value = profile as SaveProfile
+    characters.value = (chars as CharacterState[]) ?? []
+    recentMemories.value = (mems as MemoryRecord[]) ?? []
+    activePlotEvents.value = (events as PlotEvent[]) ?? []
+    plotOutline.value = null
+    activeCombat.value = null
+    saveProfile.value = (profile as SaveProfile) ?? null
 
     // 从 Snapshot 恢复角色状态
     if (save.activeSnapshotId && save.snapshots) {
@@ -226,7 +320,7 @@ export const useGameStore = defineStore('game', () => {
       }
     }
 
-    // 从 messages 表恢复对话历史
+    // 从 messages 表恢复对话历史（始终覆写，无消息时为空数组）
     await restoreMessages()
 
     // 恢复 turnCounter（取最后一条 user/assistant 消息的 turn）
@@ -235,6 +329,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function clearActive() {
+    clearAllAgentStatus()
     activeSaveId.value = null
     isGenerating.value = false
     characters.value = []
@@ -262,6 +357,8 @@ export const useGameStore = defineStore('game', () => {
     pendingInput, fillInput, clearPendingInput,
     hasOpeningPromptConsumed, openingPrompt, markOpeningPromptConsumed,
     pendingOptions, setPendingOptions,
+    agentStatus, agentDurations, updateAgentStatus, clearAgentStatus, clearAllAgentStatus,
+    agentLog, addAgentLogEntry, clearAgentLog,
     persistMessage, restoreMessages,
   }
 })

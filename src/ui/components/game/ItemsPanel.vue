@@ -30,11 +30,15 @@ const equipmentItems = computed(() => player.value?.equipment || [])
 const skillItems = computed(() => player.value?.skills || [])
 
 const currentItems = computed<any[]>(() => {
+  const inv = Array.isArray(player.value?.inventory) ? player.value.inventory : []
+  const equip = Array.isArray(player.value?.equipment) ? player.value.equipment : []
+  const skills = Array.isArray(player.value?.skills) ? player.value.skills : []
   switch (activeCategory.value) {
-    case 'inventory': return inventoryItems.value
-    case 'equipment': return equipmentItems.value
-    case 'skills': return skillItems.value
+    case 'inventory': return inv
+    case 'equipment': return equip
+    case 'skills': return skills
   }
+  return []  // ← 防御
 })
 
 const filterOptions = computed(() => {

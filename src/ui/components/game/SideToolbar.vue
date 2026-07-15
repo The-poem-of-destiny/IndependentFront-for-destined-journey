@@ -11,10 +11,9 @@ const tools = [
   { id: 'items', label: '背包', icon: 'fa-solid fa-box' },
   { id: 'characters', label: '角色', icon: 'fa-solid fa-users' },
   { id: 'quests', label: '任务', icon: 'fa-solid fa-scroll' },
-  { id: 'plot', label: '剧情', icon: 'fa-solid fa-book' },
   { id: 'map', label: '地图', icon: 'fa-solid fa-map' },
   { id: 'memory', label: '记忆', icon: 'fa-solid fa-brain' },
-  { id: 'snapshots', label: '快照', icon: 'fa-solid fa-camera' },
+  { id: 'debug', label: '调试', icon: 'fa-solid fa-bug' },
   { id: 'settings', label: '设置', icon: 'fa-solid fa-gear' },
 ]
 

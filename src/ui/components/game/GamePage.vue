@@ -17,6 +17,8 @@ import QuestsPanel from './QuestsPanel.vue'
 import PlotPanel from './PlotPanel.vue'
 import MemoryPanel from './MemoryPanel.vue'
 import MapPanel from './MapPanel.vue'
+import AgentStatusPanel from './AgentStatusPanel.vue'
+import DebugPanel from './DebugPanel.vue'
 
 const game = useGameStore()
 const ui = useUIStore()
@@ -24,11 +26,15 @@ const settings = useSettingsStore()
 const s = settings.settings
 
 let pipeline: GamePipeline | null = null
+const streamingText = ref('')
 
 onMounted(async () => {
   window.addEventListener('keydown', onKeyDown)
+  console.log('[GamePage] onMounted, activeSaveId:', ui.activeSaveId)
   if (ui.activeSaveId) {
+    console.log('[GamePage] loading save...')
     await game.loadSave(ui.activeSaveId)
+    console.log('[GamePage] save loaded, hasOpeningPromptConsumed:', game.hasOpeningPromptConsumed, 'openingPrompt exists:', !!game.openingPrompt)
     // 创建 pipeline 实例
     pipeline = new GamePipeline({
       gameStore: game,
@@ -37,8 +43,15 @@ onMounted(async () => {
     })
     // 首次加载 → 自动发送开场 Prompt
     if (!game.hasOpeningPromptConsumed && game.openingPrompt) {
-      await pipeline.sendOpeningPrompt()
+      console.log('[GamePage] sending opening prompt...')
+      await pipeline.sendOpeningPrompt((chunk: string) => {
+        streamingText.value += chunk
+      })
+    } else {
+      console.log('[GamePage] NOT sending opening prompt. consumed:', game.hasOpeningPromptConsumed, 'prompt empty:', !game.openingPrompt)
     }
+  } else {
+    console.log('[GamePage] no activeSaveId, skipping')
   }
 })
 
@@ -95,7 +108,15 @@ onUnmounted(() => {
 
 async function handleSend(content: string) {
   if (game.isGenerating || !pipeline) return
-  await pipeline.run(content)
+  streamingText.value = ''
+  await pipeline.run(content, (chunk: string) => {
+    streamingText.value += chunk
+  })
+}
+
+function handleStop() {
+  pipeline?.abort()
+  streamingText.value = ''
 }
 
 function handleToolClick(id: string) {
@@ -126,10 +147,13 @@ function onModalOpenChange(v: boolean) {
         :is-generating="game.isGenerating"
         :system-events-visible="s.systemEventsVisible"
         :system-event-filters="s.systemEventFilters"
+        :streaming-text="streamingText"
         @send="handleSend"
         @select-option="handleSelectOption"
+        @stop="handleStop"
       />
       <StatusHUD />
+      <AgentStatusPanel />
     </div>
 
     <AppModal title="背包 / 装备 / 技能" :open="game.activeModal === 'items'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
@@ -152,6 +176,9 @@ function onModalOpenChange(v: boolean) {
     </AppModal>
     <AppModal title="🗺 地图" :open="game.activeModal === 'map'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
       <MapPanel />
+    </AppModal>
+    <AppModal title="🐛 调试 & 导出" :open="game.activeModal === 'debug'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
+      <DebugPanel />
     </AppModal>
 
     <!-- 调试面板 (Alt+Shift+D) -->

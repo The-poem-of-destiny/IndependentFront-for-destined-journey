@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useCreateStore, type CreatePreset } from '../../stores/create-store'
 import { getCreatePresets, saveCreatePreset, deleteCreatePreset } from '@engine/database'
 import type { CreatePresetRecord } from '@engine/database'
@@ -23,6 +23,7 @@ async function loadPresets() {
 }
 
 onMounted(() => { if (props.visible) loadPresets() })
+watch(() => props.visible, (v) => { if (v) loadPresets() })
 
 function toggleExpand(id: string) {
   expandedId.value = expandedId.value === id ? null : id
@@ -39,25 +40,32 @@ async function handleSave() {
     return
   }
 
-  const now = Date.now()
-  const record: CreatePresetRecord = {
-    id: existing?.id ?? crypto.randomUUID(),
-    name,
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
-    data: {
-      id: existing?.id ?? '',
+  try {
+    const now = Date.now()
+    // JSON 序列化去 Vue reactive proxy，否则 IndexedDB 放不进去 (DataCloneError)
+    const cleanData = JSON.parse(JSON.stringify(store.getCurrentPresetData()))
+    const record: CreatePresetRecord = {
+      id: existing?.id ?? crypto.randomUUID(),
       name,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
-      ...store.getCurrentPresetData(),
-    } as CreatePreset,
-  }
+      data: {
+        id: existing?.id ?? '',
+        name,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        ...cleanData,
+      } as CreatePreset,
+    }
 
-  await saveCreatePreset(record)
-  confirmName.value = null
-  presetName.value = ''
-  await loadPresets()
+    await saveCreatePreset(record)
+    confirmName.value = null
+    presetName.value = ''
+    await loadPresets()
+  } catch (err) {
+    console.error('[PresetModal] 保存预设失败:', err)
+    alert('保存预设失败，请检查浏览器存储空间。')
+  }
 }
 
 async function handleLoad(preset: CreatePresetRecord) {
@@ -76,7 +84,8 @@ async function handleDelete(id: string) {
 }
 
 function handleExport(preset: CreatePresetRecord) {
-  const blob = new Blob([JSON.stringify(preset, null, 2)], { type: 'application/json;charset=utf-8' })
+  // 导出扁平的 CreatePreset 数据（不包 DB 外壳），与导入格式对齐
+  const blob = new Blob([JSON.stringify(preset.data, null, 2)], { type: 'application/json;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url; a.download = `destiny_${preset.name}.preset.json`
@@ -85,7 +94,9 @@ function handleExport(preset: CreatePresetRecord) {
 
 function handleExportAll() {
   if (presets.value.length === 0) return
-  const blob = new Blob([JSON.stringify(presets.value, null, 2)], { type: 'application/json;charset=utf-8' })
+  // 导出扁平的 CreatePreset[] 数组（不包 DB 外壳），与导入格式对齐
+  const exportData = presets.value.map(p => p.data)
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url; a.download = `destiny_all_${new Date().toISOString().slice(0, 10)}.presets.json`
@@ -100,8 +111,14 @@ async function handleImport() {
     if (!file) return
     const text = await file.text()
     try {
-      const data = JSON.parse(text)
-      const imported: CreatePreset[] = Array.isArray(data) ? data : [data]
+      const raw = JSON.parse(text)
+      const rawArray = Array.isArray(raw) ? raw : [raw]
+      // 兼容两种格式:
+      //   旧: CreatePresetRecord[] (有顶层 id/name/data 壳，数据在 .data 里)
+      //   新: CreatePreset[]     (直接就是预设数据，有 .difficulty/.character 等)
+      const imported: CreatePreset[] = rawArray.map(r =>
+        r.data ? { ...r.data, name: r.name || r.data.name, id: r.id || r.data.id } : r
+      )
       const conflicts = imported.filter(p => presets.value.some(ep => ep.name === p.name)).length
       if (conflicts > 0) {
         importConflict.value = { presets: imported, conflicts }

@@ -40,9 +40,11 @@ const equipmentList = computed(() =>
 )
 
 // ═══ 背包预览 (前 5 件) ═══
-const inventoryPreview = computed(() =>
-  (player.value?.inventory ?? []).slice(0, 5)
-)
+const inventoryPreview = computed(() => {
+  const inv = player.value?.inventory
+  if (!Array.isArray(inv)) return []
+  return inv.slice(0, 5)
+})
 
 // ═══ 焦点任务 ═══
 const questEntries = computed(() => {

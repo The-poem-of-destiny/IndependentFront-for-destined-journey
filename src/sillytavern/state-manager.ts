@@ -202,6 +202,9 @@ export class StateManager {
       case 'set_location':
         event = await this.applySetLocation(patch);
         break;
+      case 'add_character':
+        event = await this.applyAddCharacter(patch);
+        break;
       case 'add_memory':
         event = await this.applyAddMemory(patch);
         break;
@@ -578,6 +581,14 @@ export class StateManager {
     await saveCharacter(char);
 
     return this.createEvent('location_change', patch);
+  }
+
+  private async applyAddCharacter(patch: StatePatch): Promise<GameEvent> {
+    const character = patch.value as CharacterState;
+    if (!character?.id) throw new Error('缺少角色数据');
+
+    await saveCharacter(character);
+    return this.createEvent('system', patch);
   }
 
   private async applyAddMemory(patch: StatePatch): Promise<GameEvent> {

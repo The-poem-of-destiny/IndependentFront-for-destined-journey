@@ -24,6 +24,7 @@ export interface ApiEntry {
   model: string
   models: string[]
   apiType: 'chat' | 'embedding'
+  enableThinking?: boolean
 }
 
 export interface PresetItem {

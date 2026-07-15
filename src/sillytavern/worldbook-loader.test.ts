@@ -7,6 +7,7 @@ import {
   loadWorldBooksSync,
   getEntriesForAgent,
   filterActiveEntries,
+  filterBooksByEnabledEntries,
   matchKeyword,
   formatWorldBookEntries,
 } from './worldbook-loader';
@@ -118,9 +119,16 @@ describe('getEntriesForAgent', () => {
 // ========== filterActiveEntries ==========
 
 describe('filterActiveEntries', () => {
-  it('filters disabled entries', () => {
+  it('always returns constant entries even when disabled', () => {
+    // constant 条目始终激活，enabled=false 只影响 keyword 匹配
     const entries = [makeEntry({ uid: 1, enabled: false, constant: true })];
     const result = filterActiveEntries(entries, 'any text');
+    expect(result).toHaveLength(1);
+  });
+
+  it('filters disabled non-constant entries', () => {
+    const entries = [makeEntry({ uid: 1, enabled: false, constant: false, key: ['白曜城'] })];
+    const result = filterActiveEntries(entries, '你来到了白曜城');
     expect(result).toHaveLength(0);
   });
 
@@ -206,5 +214,91 @@ describe('formatWorldBookEntries', () => {
     ];
     const result = formatWorldBookEntries(entries);
     expect(result).toBe('第一条\n\n第二条\n\n第三条');
+  });
+});
+
+// ========== filterBooksByEnabledEntries ==========
+
+describe('filterBooksByEnabledEntries', () => {
+  it('returns all books unchanged when enabledEntries is empty', () => {
+    const books = [
+      makeBook({ id: 'system_core', partition: 'system_core', entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 })] }),
+    ];
+    const result = filterBooksByEnabledEntries(books, []);
+    expect(result).toHaveLength(1);
+    expect(result[0].entries).toHaveLength(2);
+  });
+
+  it('returns all books unchanged when enabledEntries is undefined/empty array', () => {
+    const books = [makeBook({ partition: 'system_core', entries: [makeEntry({ uid: 1 })] })];
+    expect(filterBooksByEnabledEntries(books, []).length).toBe(1);
+  });
+
+  it('keeps only matching uids for partitions in enabledEntries', () => {
+    const books = [
+      makeBook({
+        id: 'system_core', partition: 'system_core',
+        entries: [makeEntry({ uid: 413, content: '命运之轮' }), makeEntry({ uid: 414, content: '星辰指引' }), makeEntry({ uid: 415, content: '暗影低语' })],
+      }),
+    ];
+    const result = filterBooksByEnabledEntries(books, ['system_core:413']);
+    expect(result).toHaveLength(1);
+    expect(result[0].entries).toHaveLength(1);
+    expect(result[0].entries[0].uid).toBe(413);
+    expect(result[0].entries[0].content).toBe('命运之轮');
+  });
+
+  it('passes through books whose partition is not in enabledEntries', () => {
+    const books = [
+      makeBook({ id: 'system_core', partition: 'system_core', entries: [makeEntry({ uid: 413 })] }),
+      makeBook({ id: 'race', partition: 'race', entries: [makeEntry({ uid: 1 }), makeEntry({ uid: 2 })] }),
+    ];
+    const result = filterBooksByEnabledEntries(books, ['system_core:413']);
+    expect(result).toHaveLength(2);
+    // system_core: filtered
+    expect(result[0].entries).toHaveLength(1);
+    // race: untouched (not in enabledEntries)
+    expect(result[1].entries).toHaveLength(2);
+  });
+
+  it('filters multiple books by their respective enabled entries', () => {
+    const books = [
+      makeBook({ partition: 'system_core', entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 })] }),
+      makeBook({ partition: 'character', entries: [makeEntry({ uid: 301 }), makeEntry({ uid: 302 })] }),
+    ];
+    const result = filterBooksByEnabledEntries(books, ['system_core:413', 'character:301']);
+    expect(result[0].entries.map(e => e.uid)).toEqual([413]);
+    expect(result[1].entries.map(e => e.uid)).toEqual([301]);
+  });
+
+  it('removes all entries for a partition when no uid matches', () => {
+    const books = [
+      makeBook({ partition: 'system_core', entries: [makeEntry({ uid: 413 })], name: '核心' }),
+    ];
+    const result = filterBooksByEnabledEntries(books, ['system_core:999']);
+    expect(result[0].entries).toHaveLength(0);
+  });
+
+  it('handles multiple uids for same partition', () => {
+    const books = [
+      makeBook({ partition: 'system_core', entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 }), makeEntry({ uid: 415 })] }),
+    ];
+    const result = filterBooksByEnabledEntries(books, ['system_core:413', 'system_core:415']);
+    expect(result[0].entries).toHaveLength(2);
+    expect(result[0].entries.map(e => e.uid).sort()).toEqual([413, 415]);
+  });
+
+  it('skips malformed enabledEntry values', () => {
+    const books = [makeBook({ partition: 'system_core', entries: [makeEntry({ uid: 413 })] })];
+    // mixed: one valid pair with non-matching uid, others malformed
+    const result = filterBooksByEnabledEntries(books, ['system_core:999', 'system_core:abc', '', ':']);
+    expect(result[0].entries).toHaveLength(0); // only system_core:999 parsed, uid 999 doesn't match 413
+  });
+
+  it('does not mutate input books', () => {
+    const books = [makeBook({ partition: 'system_core', entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 })] })];
+    const originalLength = books[0].entries.length;
+    filterBooksByEnabledEntries(books, ['system_core:413']);
+    expect(books[0].entries).toHaveLength(originalLength);
   });
 });

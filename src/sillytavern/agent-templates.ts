@@ -326,7 +326,10 @@ export function buildAgentMessages(
     // Story Agent: assemble from preset
     const preset = getPreset(config.presetId, presets);
     if (preset) {
-      sysPromptContent = assemblePresetContent(preset);
+      // 传 '' 阻止 DEFAULT_STORY_CONTEXT_BLOCK 注入 —
+      // 外层 template 已包含 {{LORE_BOOK}}/{{NARRATIVE}} 等占位符，会正确解析。
+      // 若注入到 SYS_PROMPT 内则不会递归解析，变成字面文本。
+      sysPromptContent = assemblePresetContent(preset, '');
     }
   }
 

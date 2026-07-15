@@ -451,7 +451,7 @@ describe('AgentOrchestrator — 事件回调', () => {
 
     await orch.run();
     expect(stageStart).toHaveBeenCalledTimes(1);
-    expect(agentStart).toHaveBeenCalledWith('story');
+    expect(agentStart).toHaveBeenCalledWith('story', expect.any(Object));
     expect(agentComplete).toHaveBeenCalledTimes(1);
     expect(stageComplete).toHaveBeenCalledTimes(1);
   });
