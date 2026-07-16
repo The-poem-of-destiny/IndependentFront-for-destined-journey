@@ -587,6 +587,10 @@ export class StateManager {
     const character = patch.value as CharacterState;
     if (!character?.id) throw new Error('缺少角色数据');
 
+    // 铁律3: saveId 是账务字段，由 Code 注入，不信任上游 patch 构造方 (#8)
+    if (!character.saveId) character.saveId = this.saveId;
+    if (character.customFields && !character.customFields.saveId) character.customFields.saveId = this.saveId;  // 双写，M6 删
+
     await saveCharacter(character);
     return this.createEvent('system', patch);
   }

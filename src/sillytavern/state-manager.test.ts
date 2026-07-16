@@ -15,6 +15,7 @@ import { createDefaultCharacterState } from './types';
 // Hoisted mock — replaces ./database for all consumers
 vi.mock('./database', () => ({
   getCharacter: vi.fn(),
+  getCharacters: vi.fn(),
   saveCharacter: vi.fn(),
   saveCharacters: vi.fn(),
   saveMemory: vi.fn(),
@@ -101,7 +102,16 @@ describe('StateManager', () => {
 
     // Default mock returns (all safe no-ops)
     vi.mocked(db.getCharacter).mockResolvedValue(undefined);
-    vi.mocked(db.saveCharacter).mockResolvedValue('saved');
+    // In-memory character store for integration-style verification
+    const charStore = new Map<string, CharacterState>();
+    vi.mocked(db.getCharacters).mockImplementation(async (saveId?: string) => {
+      const all = Array.from(charStore.values());
+      return saveId ? all.filter(c => c.saveId === saveId) : all;
+    });
+    vi.mocked(db.saveCharacter).mockImplementation(async (char: any) => {
+      charStore.set(char.id, char);
+      return 'saved';
+    });
     vi.mocked(db.saveCharacters).mockResolvedValue(undefined);
     vi.mocked(db.saveMemory).mockResolvedValue('mem-id');
     vi.mocked(db.getMemories).mockResolvedValue([]);
@@ -917,6 +927,21 @@ describe('StateManager', () => {
       expect(vi.mocked(db.saveMemory)).toHaveBeenCalledWith(memory);
       expect(result.eventsGenerated).toHaveLength(1);
       expect(result.eventsGenerated[0].type).toBe('system');
+    });
+  });
+
+  // ===================================================================
+  // 12b. add_character — saveId injection (#8)
+  // ===================================================================
+  describe('commitChatState — add_character saveId injection', () => {
+    it('add_character 落库时自动注入 saveId（修 #8 孤儿 NPC）', async () => {
+      const sm = createStateManager('save_inject');
+      const npc = createDefaultCharacterState({ id: 'npc_x', name: '妲丽安' });
+      npc.saveId = '';   // 模拟 char_gen 链未填
+      await sm!.commitChatState([{ op: 'add_character', target: 'characters.妲丽安', value: npc }]);
+      const got = await db.getCharacters('save_inject');
+      expect(got.map((c: CharacterState) => c.name)).toContain('妲丽安');
+      expect(got.find((c: CharacterState) => c.name === '妲丽安')!.saveId).toBe('save_inject');
     });
   });
 
