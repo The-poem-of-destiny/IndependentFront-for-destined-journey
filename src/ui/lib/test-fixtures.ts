@@ -316,15 +316,6 @@ export function buildTestMessages(): ChatMessage[] {
     role: 'assistant',
     content: '风雪呼啸着掠过冰狼谷的峭壁，你紧了紧斗篷，脚下的积雪已经没过了膝盖。远处，一座孤零零的石塔矗立在风雪之中——那是霜语者最后的据点。\n\n[艾琳·霜语]{sprite:ice_elf}("到了。")',
     timestamp: Date.now() - 120000,
-    parsed: {
-      thinking: '场景在极北冰原，需要营造寒冷孤寂的氛围。艾琳作为引路人，先让玩家感受到环境和同伴的压迫感。',
-      maintext: '风雪呼啸着掠过冰狼谷的峭壁，你紧了紧斗篷，脚下的积雪已经没过了膝盖。远处，一座孤零零的石塔矗立在风雪之中——那是霜语者最后的据点。\n\n[艾琳·霜语]{sprite:ice_elf}("到了。")',
-      options: ['推开塔门，环顾四周', '先问艾琳关于霜语者的事', '在塔外观察一下再进入'],
-      sum: '抵达霜语者据点，艾琳轻声提醒到了',
-      varsRaw: '',
-      varsCommands: { merge: {} },
-      unknown: {},
-    },
   })
 
   // 用户行动
@@ -341,15 +332,6 @@ export function buildTestMessages(): ChatMessage[] {
     role: 'assistant',
     content: '沉重的石门在刺耳的嘎吱声中缓缓打开。塔内出人意料地温暖——大厅中央的地面上刻着一个复杂的霜蓝色魔法阵，阵中悬浮着三颗缓缓旋转的冰晶。\n\n[艾琳·霜语]{sprite:alert}("小心——有什么东西在盯着我们。")',
     timestamp: Date.now() - 100000,
-    parsed: {
-      thinking: '引入战斗前兆。艾琳的冰元素感知在提醒危险。',
-      maintext: '沉重的石门在刺耳的嘎吱声中缓缓打开。塔内出人意料地温暖——大厅中央的地面上刻着一个复杂的霜蓝色魔法阵，阵中悬浮着三颗缓缓旋转的冰晶。\n\n[艾琳·霜语]{sprite:alert}("小心——有什么东西在盯着我们。")',
-      options: ['拔剑准备战斗', '先观察魔法阵的图案', '让艾琳用冰元素探测'],
-      sum: '进入冰塔大厅，发现有魔法阵和冰晶悬浮',
-      varsRaw: '',
-      varsCommands: { merge: {} },
-      unknown: {},
-    },
   })
 
   // 战斗卡片 — ally_win
@@ -563,18 +545,6 @@ export function injectTestData(store: {
   // 直接用 splice + push 替换，避免直接赋值覆盖 Pinia 的 getter/setter
   store.messages.splice(0, store.messages.length, ...buildTestMessages())
   store.isGenerating = false
-
-  // 给最后一条 assistant 消息塞一份 variablesAfter，演示"心里话路径 A"（运行时流变）
-  // 生产中 src/ 暂无环节写入此字段，此处仅供 Ctrl+Shift+T 预览双路径展示。
-  const lastAssistant = [...store.messages].reverse().find(m => m.role === 'assistant')
-  if (lastAssistant) {
-    ;(lastAssistant as any).variablesAfter = {
-      天气: '薄暮微光洒落森林边缘',
-      关系列表: {
-        '艾莉丝': { 心里话: '...那个蒙面人上周又来打听商队的事了，总觉得哪里不对劲。' },
-      },
-    }
-  }
 }
 
 // ========== ScenePanel 预览 Mock ==========

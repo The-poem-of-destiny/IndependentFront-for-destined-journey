@@ -274,7 +274,7 @@ export class GamePipeline {
       lorebookMatches: [],
       worldBooks: [],
       characters: this.game.characters,
-      variables: this.game.latestVariables ?? {},
+      variables: {},   // M5: 改读 saveProfile.variables（规范 §12）
       plotEvents: this.game.activePlotEvents,
       memories: this.game.recentMemories,
       quests: this.game.saveProfile?.quests,

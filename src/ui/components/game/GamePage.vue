@@ -69,11 +69,11 @@ function injectChatFlowTest() {
     item_update: true,
     quest_update: true,
   }
-  // 注入 ScenePanel 中段(在场NPC + customFields.thoughts) 与下段(新闻) 预览数据
-  // 经 store.latestVariables → getThoughts 双路径、saveProfile.news 读取
+  // 注入 ScenePanel 中段(在场NPC + thoughts 心里话) 与下段(新闻) 预览数据
+  // 经 store.getThoughts(正式字段/customFields 兜底)、saveProfile.news 读取
   const preview = buildScenePreviewMock()
   game.hydratePreview(preview)
-  // 先清空再注入 ChatFlow 消息(含末条 variablesAfter 演示心里话路径A)
+  // 先清空再注入 ChatFlow 消息
   injectTestData({
     messages: game.messages,
     isGenerating: game.isGenerating,

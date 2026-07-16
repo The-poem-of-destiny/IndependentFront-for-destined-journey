@@ -102,7 +102,7 @@ function eventIconClass(type: string): string {
  * 使 CSS 的 text-indent 和段间距生效，实现「读小说」而非「读聊天」的排版。
  */
 function beautifyText(msg: ChatMessage): string {
-  const raw = msg.parsed?.maintext ?? msg.content
+  const raw = msg.content
   // 未启用美化时：走纯文本 + 换行转 &lt;br&gt;，不做段落包裹
   if (!s.beautifierEnabled) {
     return escapeHtml(raw).replace(/\n/g, '<br>')

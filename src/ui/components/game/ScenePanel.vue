@@ -53,14 +53,8 @@ const locationDisplay = computed(() => {
   return loc.replace(/-/g, ' · ')
 })
 
-// ═══ 天气 —— 统一数据源到 store.latestVariables ═══
-// 优先级同前: chat.variables(天气/weather) → saveProfile.worldFlags 兜底。
+// ═══ 天气 —— worldFlags 单源（variablesAfter 路径已死，变量真源 M5 迁入 saveProfile.variables 后再接） ═══
 const weather = computed(() => {
-  const v = game.latestVariables
-  if (v) {
-    const w = v['天气'] ?? v['weather']
-    if (typeof w === 'string' && w) return w
-  }
   const wf = game.saveProfile?.worldFlags
   return (wf?.['天气'] as string) ?? (wf?.['weather'] as string) ?? ''
 })

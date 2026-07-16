@@ -2,9 +2,8 @@
  * Variable System Utilities
  */
 
-import type { ChatSession, ParsedTags } from './types';
-import type { ParserEvent } from './stream-parser';
-import { parseVarsBlock, applyVarsPatch } from './vars-merger';
+import type { ParsedTags } from './types';
+import { applyVarsPatch } from './vars-merger';
 
 export function extractVariables(text: string): { cleanedText: string; updates: Record<string, string | number> } {
   const updates: Record<string, string | number> = {};
@@ -35,73 +34,8 @@ export function formatVariablesForPrompt(variables: Record<string, string | numb
 
 export const USER_ROLE = 'user' as const;
 
-/** Truncate chat at message index and restore variables from the last remaining message (or provided snapshot). */
-export function truncateChatAt(
-  chat: ChatSession,
-  index: number,
-  variables?: Record<string, string | number>
-): ChatSession {
-  const truncated = chat.messages.slice(0, index);
-  const restoredVars = variables ?? truncated[truncated.length - 1]?.variables ?? {};
-  return { ...chat, messages: truncated, variables: restoredVars, updatedAt: Date.now() };
-}
-
-/** Create a branched chat session from a message index (inclusive). */
-export function branchChat(
-  source: ChatSession,
-  index: number,
-  options: {
-    name: string;
-    presetId: string | null;
-    lorebookIds: string[];
-    variables?: Record<string, string | number>;
-  }
-): ChatSession {
-  return {
-    id: crypto.randomUUID(),
-    name: options.name,
-    messages: source.messages.slice(0, index + 1).map(m => ({ ...m })),
-    characterName: source.characterName,
-    userName: source.userName,
-    presetId: options.presetId,
-    lorebookIds: [...options.lorebookIds],
-    variables: options.variables ?? source.messages[index].variables ?? {},
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  };
-}
-
-// ========== v3: stream parser event aggregation ==========
-
-export function aggregateEvents(events: ParserEvent[]): ParsedTags {
-  const parsed: ParsedTags = {
-    thinking: '',
-    maintext: '',
-    options: [],
-    sum: '',
-    varsRaw: '',
-    varsCommands: { merge: {} },
-    unknown: {},
-  };
-  for (const ev of events) {
-    if (ev.type === 'tag-close') {
-      if (ev.tag === 'thinking' || ev.tag === 'think') parsed.thinking = ev.full;
-      else if (ev.tag === 'maintext') parsed.maintext = ev.full;
-      else if (ev.tag === 'sum') parsed.sum = ev.full;
-      else if (ev.tag === 'vars') {
-        parsed.varsRaw = ev.full;
-        parsed.varsCommands = parseVarsBlock(ev.full);
-      } else if (ev.tag === 'option') {
-        // option-line events accumulate options below
-      } else {
-        parsed.unknown[ev.tag] = ev.full;
-      }
-    } else if (ev.type === 'option-line') {
-      parsed.options.push(ev.line);
-    }
-  }
-  return parsed;
-}
+// v3 遗留的 truncateChatAt / branchChat / aggregateEvents（ChatMessage.variables / .parsed 生产链）
+// 已随 M1 #48/#33 死字段删除一并移除（生产零调用，仅 index.ts 桶导出）。
 
 export function applyParsedToChat(
   current: Record<string, any>,

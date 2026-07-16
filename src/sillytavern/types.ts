@@ -485,15 +485,6 @@ export interface ChatMessage {
   turn?: number;
   /** 🆕 系统事件数据 — 仅 role='system' 时有值，供前端渲染卡片 */
   systemEvent?: SystemEvent;
-  variables?: Record<string, string | number>;
-  metadata?: {
-    tokenCount?: number;
-    lorebookEntries?: string[];
-    processingTime?: number;
-  };
-  parsed?: ParsedTags;
-  variablesAfter?: Record<string, any>;
-  apiUsed?: ApiTarget;
 }
 
 /** @deprecated v3 遗留，chats 表已删（M1 #46），类型仅为历史 import 兼容保留（variables.ts 纯函数仍引用），M6 删除 */

@@ -50,33 +50,15 @@ export const useGameStore = defineStore('game', () => {
   const fp = computed(() => saveProfile.value?.fp || 0)
   const gameTime = computed(() => saveProfile.value?.gameTime ?? null)
 
-  // === 变量快照（v3 关系层 / 天气 / 心里话 路径 A 读取入口） ===
-  // 取 messages 末尾首个带 variablesAfter 的快照，不合并历史（覆盖式语义）。
-  // 生产中 src/ 暂无环节写入 variablesAfter，此 getter 常为 null；引擎层接 vars_update 后生效。
-  const latestVariables = computed<Record<string, any> | null>(() => {
-    for (let i = messages.value.length - 1; i >= 0; i--) {
-      const v = messages.value[i].variablesAfter
-      if (v && typeof v === 'object') return v
-    }
-    return null
-  })
-
   // === 新闻（存档级，守护非可选字段的运行时缺失与坏数据） ===
   const news = computed(() =>
     (saveProfile.value?.news ?? []).filter((n: any) => n && n.id != null),
   )
 
   // === 心里话 ===
-  // 路径 A：latestVariables.关系列表[<角色名>].心里话 —— 运行时流变（引擎未接时不可用，预埋）
-  //   兼容三种 key 形态：顶层 `关系列表` / `stat_data.关系列表` 包裹 / engine `sys.relationships`
-  // 路径 B（本任务常亮）：CharacterState.customFields.thoughts —— 存档固化
+  // 唯一真源: CharacterState.thoughts 正式字段（规范 §7），customFields.thoughts 兜底（M6 删）
   function getThoughts(charName: string, char?: CharacterState): string {
-    const v = latestVariables.value
-    const rel =
-      v?.['关系列表']?.[charName] ??
-      v?.['stat_data']?.['关系列表']?.[charName] ??
-      v?.['sys']?.['relationships']?.[charName]
-    if (rel && typeof rel['心里话'] === 'string' && rel['心里话']) return rel['心里话']
+    if (char?.thoughts) return char.thoughts
     const cf = (char as any)?.customFields
     if (cf && typeof cf.thoughts === 'string' && cf.thoughts) return cf.thoughts
     return ''
@@ -386,7 +368,7 @@ export const useGameStore = defineStore('game', () => {
     recentMemories, activePlotEvents, plotOutline,
     activeCombat, isInCombat,
     saveProfile, fp, gameTime,
-    latestVariables, news, getThoughts,
+    news, getThoughts,
     sidebarCollapsed, activeModal, fullscreenStatus,
     toggleSidebar, showModal, closeModal, toggleFullscreen,
     hydratePreview,
