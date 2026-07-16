@@ -637,6 +637,7 @@ export const useCreateStore = defineStore('create', () => {
 
     return {
       id: charId,
+      saveId,
       type: 'player',
       name: name.value.trim(),
       race: race.value === '自定义' ? customRace.value || '人类' : race.value,
@@ -672,6 +673,11 @@ export const useCreateStore = defineStore('create', () => {
       adventurerRank: '未评级',
       currentAction: '',
       bloodlineIds: [],
+      // 🆕 正式字段（规范 §2.1；customFields 同步保留旧 key 双写，M6 切换读方后再删）
+      gender: gender.value === '自定义' ? customGender.value : gender.value,
+      personality: personality.value.trim(),
+      appearance: physics.value.trim(),
+      background: backstory.value.trim(),
       customFields: {
         saveId,                                                 // 🔧 关联存档，缺了这个 getCharacters 匹配不到
         gender: gender.value === '自定义' ? customGender.value : gender.value,

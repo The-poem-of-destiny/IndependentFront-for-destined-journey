@@ -66,6 +66,7 @@ export async function createTestSave(): Promise<string> {
   // ═══ 2. Player Character ═══
   const player: CharacterState = createDefaultCharacterState({
     id: playerId,
+    saveId,
     type: 'player',
     name: '亚瑟',
     race: '人类',
@@ -73,6 +74,7 @@ export async function createTestSave(): Promise<string> {
     occupation: ['战士'],
     tier: 4,
     tierName: '史诗',
+    gender: '男',
     customFields: { saveId, gender: '男', age: 28 },
     level: 12,
     totalExp: 8500,
@@ -180,6 +182,7 @@ export async function createTestSave(): Promise<string> {
   const npcs: CharacterState[] = [
     createDefaultCharacterState({
       id: crypto.randomUUID(),
+      saveId,
       type: 'npc',
       name: '艾莉丝',
       race: '精灵',
@@ -189,6 +192,11 @@ export async function createTestSave(): Promise<string> {
       attributes: { str: 8, dex: 14, con: 8, int: 13, spi: 12 },
       money: 300,
       location: '大陆中东部区域-奥古斯提姆帝国-艾瑟嘉德',
+      gender: '女',
+      appearance: '银白长发如月光般垂至腰际，翠绿色的眼眸透着精灵族特有的灵气。五官精致而柔和，举手投足间带着千年寿命沉淀的优雅。',
+      outfit: '一袭墨绿色的旅者长袍，袖口和领口绣有精灵族的藤蔓纹样。腰间系着一条深棕色皮革围裙，上面还沾着些许麦粉。',
+      thoughts: '"最近商队失踪的事让人不安...卡尔的盗贼团越来越嚣张了。希望亚瑟能平安无事地查清真相。不过，那个蒙面人上周又来打听商队的事了，总觉得哪里不对劲..."',
+      background: '原是翡翠之心的精灵贵族之女，百年前因厌倦宫廷生活而离开故乡。辗转各地后定居艾瑟嘉德，开了这家"精灵之息"酒馆。虽表面与世无争，实则暗中帮助过许多冒险者。',
       customFields: {
         saveId, gender: '女', age: 120, role: 'innkeeper',
         appearance: '银白长发如月光般垂至腰际，翠绿色的眼眸透着精灵族特有的灵气。五官精致而柔和，举手投足间带着千年寿命沉淀的优雅。',
@@ -200,6 +208,7 @@ export async function createTestSave(): Promise<string> {
     }),
     createDefaultCharacterState({
       id: crypto.randomUUID(),
+      saveId,
       type: 'npc',
       name: '暗影盗贼·卡尔',
       race: '暗精灵',
@@ -208,6 +217,11 @@ export async function createTestSave(): Promise<string> {
       tier: 3, level: 8,
       attributes: { str: 10, dex: 18, con: 10, int: 12, spi: 8 },
       location: '大陆中东部区域-奥古斯提姆帝国-艾瑟嘉德-近郊森林',
+      gender: '男',
+      appearance: '暗紫色的皮肤是暗精灵血统的标记，猩红的双眼在黑暗中微微发光。削瘦的脸颊上有一道从额头斜跨至下颌的旧刀疤。',
+      outfit: '一身漆黑的皮甲，表面经过特殊处理不会反光。腰间挂满了淬毒匕首和工具袋，行动时几乎不发出声响。',
+      thoughts: '"亚瑟...那个帝国走狗。他以为自己在伸张正义，殊不知那些商队运送的是帝国的军需物资。等我再劫一票，就有足够的钱雇更多人...到时候，艾瑟嘉德就是我的了。"',
+      background: '曾是暗精灵地下城邦的影刃特工，因一次任务失败被流放。流落到地表后在近郊森林建立了盗贼团，专门劫掠奥古斯提姆帝国的商队。与翡翠之心的某些势力有秘密联系。',
       customFields: {
         saveId, gender: '男', age: 95, role: 'enemy',
         appearance: '暗紫色的皮肤是暗精灵血统的标记，猩红的双眼在黑暗中微微发光。削瘦的脸颊上有一道从额头斜跨至下颌的旧刀疤。',
@@ -234,6 +248,7 @@ export async function createTestSave(): Promise<string> {
     }),
     createDefaultCharacterState({
       id: crypto.randomUUID(),
+      saveId,
       type: 'npc',
       name: '大法师·梅林',
       race: '人类',
@@ -242,6 +257,11 @@ export async function createTestSave(): Promise<string> {
       tier: 5, level: 18,
       attributes: { str: 8, dex: 10, con: 8, int: 20, spi: 18 },
       location: '翡翠之心-林歌城',
+      gender: '男',
+      appearance: '满头银发整齐地束在脑后，深邃的蓝色眼眸仿佛能看透人心。虽然年过六旬，但面容依然硬朗，只是眼角和额头的皱纹记录着岁月的痕迹。右手的食指上有一枚镶嵌着蓝宝石的秘银戒指。',
+      outfit: '深蓝色的法师长袍，袍面上绣着银色的星座图案，随着魔力波动微微闪烁。肩披一件暗红色的天鹅绒斗篷，斗篷内侧缝满了各种防护符文。手持一根古朴的橡木法杖，杖头嵌着一颗拳头大小的魔力水晶。',
+      thoughts: '"草药的事不急，但那孩子的剑术还得再练练...帝国最近在边境集结兵力，不是什么好兆头。还有那个失踪的商队，我总觉得背后有更大的阴谋，不仅仅是盗贼团这么简单。也许我该找人调查一下近郊森林里的那个废弃神殿..."',
+      background: '奥古斯提姆帝国的前任宫廷首席法师，因不满帝国日益扩张的军国主义政策而辞官隐居。现居于翡翠之心的林歌城，偶尔接受冒险者公会的委托，为有潜力的年轻冒险者提供指导。暗中在研究和对抗一个古老的预言。',
       customFields: {
         saveId, gender: '男', age: 62, role: 'mentor',
         appearance: '满头银发整齐地束在脑后，深邃的蓝色眼眸仿佛能看透人心。虽然年过六旬，但面容依然硬朗，只是眼角和额头的皱纹记录着岁月的痕迹。右手的食指上有一枚镶嵌着蓝宝石的秘银戒指。',
@@ -327,6 +347,7 @@ export async function createTestSave(): Promise<string> {
       },
     } as Record<string, Quest>,
     gameTime: createDefaultTime(),
+    variables: {},
     worldFlags: {
       mapMarkers: [],
     },

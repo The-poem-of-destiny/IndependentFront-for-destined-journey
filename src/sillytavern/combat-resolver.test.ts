@@ -421,6 +421,7 @@ describe('characterToCombatParticipant', () => {
   it('从 CharacterState 创建 CombatParticipant', () => {
     const char: CharacterState = {
       id: 'char1',
+      saveId: 'test',
       type: 'player',
       name: '勇者',
       race: '人类',
@@ -474,6 +475,7 @@ describe('characterToCombatParticipant', () => {
   it('HP=0 的角色 canAct=false', () => {
     const char: CharacterState = {
       id: 'char2',
+      saveId: 'test',
       type: 'monster',
       name: '濒死哥布林',
       race: '兽族',
@@ -515,6 +517,7 @@ describe('characterToCombatParticipant', () => {
   it('overrides 可以覆盖转换值', () => {
     const char: CharacterState = {
       id: 'char3',
+      saveId: 'test',
       type: 'npc',
       name: '佣兵',
       race: '人类',

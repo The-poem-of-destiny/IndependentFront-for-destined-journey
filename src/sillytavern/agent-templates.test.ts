@@ -199,6 +199,7 @@ describe('buildAgentMessages', () => {
       characters: [
         {
           id: 'c1',
+          saveId: 'test',
           type: 'player',
           name: '阿尔萨斯',
           race: '人类',

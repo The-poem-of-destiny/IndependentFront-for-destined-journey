@@ -58,6 +58,7 @@ function mockConfig(overrides?: Partial<AgentConfig>): AgentConfig {
 function makeChar(overrides?: Partial<CharacterState>): CharacterState {
   return {
     id: 'char_001',
+    saveId: 'test',
     type: 'npc',
     name: '测试角色',
     race: '人类',

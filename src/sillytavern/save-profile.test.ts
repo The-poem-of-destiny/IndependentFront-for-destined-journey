@@ -50,6 +50,7 @@ function makeProfile(overrides: Partial<SaveProfile> = {}): SaveProfile {
     focusQuest: '',
     affections: {},
     gameTime: createDefaultTime(),
+    variables: {},
     worldFlags: {},
     updatedAt: Date.now(),
     ...overrides,
@@ -68,6 +69,7 @@ function makeDefaultProfile(saveId: string): SaveProfile {
     focusQuest: '',
     affections: {},
     gameTime: createDefaultTime(),
+    variables: {},
     worldFlags: {},
     updatedAt: Date.now(),
   };

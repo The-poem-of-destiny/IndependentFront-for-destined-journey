@@ -655,6 +655,7 @@ export function createDefaultSaveProfile(saveId: string): SaveProfile {
     focusQuest: '',
     affections: {},
     gameTime: createDefaultTime(),
+    variables: {},
     worldFlags: {},
     updatedAt: Date.now(),
   };

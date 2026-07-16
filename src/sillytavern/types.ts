@@ -646,6 +646,8 @@ export interface InventoryItem {
   name: string;
   description?: string;
   quantity: number;
+  /** 🆕 穿戴槽位（EQUIP_SLOTS 枚举值）；null/undefined = 躺背包。装备不是独立实体，是物品的状态（规范 §3） */
+  equippedSlot?: string | null;
   type?: string;                 // 'weapon' | 'armor' | 'consumable' | 'material' | 'quest'
   rarity?: '普通' | '优良' | '稀有' | '史诗' | '传说' | '神话' | '唯一';
   data?: Record<string, any>;
@@ -725,6 +727,8 @@ export interface LawDetail {
 export interface CharacterState {
   // ===== 基础信息 =====
   id: string;
+  /** 🆕 归属存档（一等字段，数据字段规范 铁律1/第1.2节；替代 customFields.saveId） */
+  saveId: string;
   type: 'player' | 'npc' | 'monster' | 'summon';
   name: string;
   race: string;
@@ -785,6 +789,21 @@ export interface CharacterState {
   /** 血脉 ID 列表 — AI 通过世界书演绎具体效果 */
   bloodlineIds?: string[];
 
+  /** 🆕 怪物/召唤物集群数量（哥布林 ×3 = 一条记录）。仅 type='monster'|'summon' 使用，缺省 1（规范 §2.2） */
+  quantity?: number;
+  /** 🆕 外貌描述（从 customFields.physics/appearance 升正式字段，规范 §2.1） */
+  appearance?: string;
+  /** 🆕 背景故事（从 customFields.backstory/background 升正式字段） */
+  background?: string;
+  /** 🆕 性格（从 customFields.personality 升正式字段） */
+  personality?: string;
+  /** 🆕 性别（从 customFields.gender 升正式字段） */
+  gender?: string;
+  /** 🆕 服装（从 customFields.clothing/outfit 升正式字段） */
+  outfit?: string;
+  /** 🆕 心里话（从 customFields.thoughts 升正式字段，好感度系统的叙事侧数据） */
+  thoughts?: string;
+
   // ===== 扩展字段 =====
   customFields: Record<string, any>;
 }
@@ -793,6 +812,7 @@ export interface CharacterState {
 export function createDefaultCharacterState(overrides: Partial<CharacterState> = {}): CharacterState {
   return {
     id: crypto.randomUUID(),
+    saveId: '',
     type: 'npc',
     name: '',
     race: '人类',
@@ -2100,6 +2120,8 @@ export interface SaveProfile {
   affections: Record<string, number>;
   /** 🆕 存档级全局游戏时间 */
   gameTime: GameTime;
+  /** 🆕 叙事变量唯一真源（user./sys. 命名空间；从快照寄生迁出，规范 §12。M5 接管读写） */
+  variables: Record<string, any>;
   worldFlags: Record<string, any>;
   updatedAt: number;
 }
