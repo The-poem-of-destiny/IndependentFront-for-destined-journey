@@ -496,6 +496,7 @@ export interface ChatMessage {
   apiUsed?: ApiTarget;
 }
 
+/** @deprecated v3 遗留，chats 表已删（M1 #46），类型仅为历史 import 兼容保留（variables.ts 纯函数仍引用），M6 删除 */
 export interface ChatSession {
   id: string;
   name: string;

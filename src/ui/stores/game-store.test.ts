@@ -58,7 +58,7 @@ function makeProfile(overrides: Partial<SaveProfile> = {}): SaveProfile {
 
 function makeChar(overrides: Partial<CharacterState> = {}): CharacterState {
   return createDefaultCharacterState({
-    customFields: { saveId: SAVE_ID },
+    saveId: SAVE_ID,   // v9: 一等字段（M1 #43，替代 customFields.saveId）
     ...overrides,
   })
 }
@@ -120,7 +120,7 @@ describe('refreshFromDb', () => {
 
     await saveCharacter(makeChar({
       id: 'other1', name: '别人家的NPC',
-      customFields: { saveId: 'other-save' },
+      saveId: 'other-save',
     }))
     await saveSaveSlot(makeSaveSlot())
 

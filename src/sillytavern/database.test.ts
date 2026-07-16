@@ -525,11 +525,10 @@ describe('exportAllData / importAllData', () => {
     await saveApiEndpoint(makeApiEndpoint({ id: 'exp_api' }));
 
     const backup = await exportAllData();
-    expect(backup.version).toBe(8);
+    expect(backup.version).toBe(9);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
-    expect(Array.isArray(backup.chats)).toBe(true);
     expect(Array.isArray(backup.memories)).toBe(true);
     expect(Array.isArray(backup.plotEvents)).toBe(true);
     expect(Array.isArray(backup.characters)).toBe(true);
@@ -669,5 +668,24 @@ describe('Messages CRUD (Phase 10h)', () => {
     expect(msgs[0].content).toBe('第一条');
     expect(msgs[1].content).toBe('第二条');
     expect(msgs[2].content).toBe('第三条');
+  });
+});
+
+// ========== v9: characters saveId 一等索引 (M1 #43) ==========
+
+describe('v9: characters saveId 一等索引', () => {
+  it('getCharacters(saveId) 按一等字段过滤（不再读 customFields）', async () => {
+    const a = createDefaultCharacterState({ id: 'ca', name: '甲', saveId: 'save_A' });
+    const b = createDefaultCharacterState({ id: 'cb', name: '乙', saveId: 'save_B' });
+    await saveCharacters([a, b]);
+    const got = await getCharacters('save_A');
+    expect(got.map(c => c.id)).toEqual(['ca']);
+  });
+
+  it('customFields.saveId 不再参与过滤', async () => {
+    const c = createDefaultCharacterState({ id: 'cc', name: '丙', saveId: '', customFields: { saveId: 'save_A' } });
+    await saveCharacter(c);
+    const got = await getCharacters('save_A');
+    expect(got.find(x => x.id === 'cc')).toBeUndefined();
   });
 });

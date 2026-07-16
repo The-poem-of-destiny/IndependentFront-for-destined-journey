@@ -338,7 +338,7 @@ export const useGameStore = defineStore('game', () => {
     try {
       const [save, allChars, profile] = await Promise.all([
         getSave(activeSaveId.value),
-        getCharacters(),   // 不带 saveId：侧链新 NPC 可能没写 customFields.saveId，带过滤会漏
+        getCharacters(),   // 全量取后按一等 saveId 过滤追加（Task 4 起侧链 NPC 由 applyAddCharacter 注入 saveId）
         getSaveProfile(activeSaveId.value),
       ])
 
@@ -355,7 +355,7 @@ export const useGameStore = defineStore('game', () => {
       characters.value = characters.value.map(c => dbById.get(c.id) ?? c)
       const memIds = new Set(characters.value.map(c => c.id))
       for (const c of allChars as CharacterState[]) {
-        if (!memIds.has(c.id) && (c as any).customFields?.saveId === activeSaveId.value) {
+        if (!memIds.has(c.id) && c.saveId === activeSaveId.value) {
           characters.value.push(c)
         }
       }

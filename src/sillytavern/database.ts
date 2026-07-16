@@ -1,13 +1,14 @@
 /**
  * IndexedDB Database Layer — v4 多 Agent 引擎
  *
- * Tables: lorebooks, presets, settings, chats (v1-v3)
+ * Tables: lorebooks, presets, settings (v1-v3)
  *         memories, plot_events, characters, snapshots, saves, api_endpoints (v4 new)
+ *         （v9 起 chats 表已删除，消息持久化走 messages 表）
  */
 
 import Dexie, { Table } from 'dexie';
 import type {
-  Lorebook, ChatPreset, AppSettings, ChatSession,
+  Lorebook, ChatPreset, AppSettings,
   MemoryRecord, PlotEvent, CharacterState, Snapshot, SaveSlot, ApiEndpoint,
   PlotOutline, SaveProfile, ChatMessage,
 } from './types';
@@ -24,14 +25,13 @@ export interface CreatePresetRecord {
 }
 
 const DB_NAME = 'SillyTavernWebDB';
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 
 class AppDatabase extends Dexie {
-  // v1-v3 tables
+  // v1-v3 tables (chats 已于 v9 删除)
   lorebooks!: Table<Lorebook>;
   presets!: Table<ChatPreset>;
   settings!: Table<AppSettings>;
-  chats!: Table<ChatSession>;
 
   // v4 new tables
   memories!: Table<MemoryRecord>;
@@ -199,6 +199,33 @@ class AppDatabase extends Dexie {
       createPresets: 'id, name, updatedAt',
       messages: 'id, saveId, [saveId+turn]',
     });
+
+    // v9: 数据字段规范 M1 — characters saveId 一等索引 (#43)；chats v3 遗留表删除 (#46)
+    this.version(9).stores({
+      lorebooks: 'id, name, updatedAt',
+      presets: 'id, name, updatedAt',
+      settings: 'key',
+      chats: null,   // 删表
+      memories: 'id, saveId, createdAt, realTimestamp',
+      plotEvents: 'id, saveId, parentId, status, updatedAt',
+      characters: 'id, saveId, type',
+      snapshots: 'id, saveId, index, timestamp',
+      saves: 'id, slot, updatedAt',
+      apiEndpoints: 'id, name',
+      plotOutlines: 'id, saveId, updatedAt',
+      saveProfiles: 'saveId, updatedAt',
+      createPresets: 'id, name, updatedAt',
+      messages: 'id, saveId, [saveId+turn]',
+    }).upgrade(async tx => {
+      // 开发期迁移: 把 customFields.saveId 回填为一等字段（老数据仅开发自用）
+      const chars = await tx.table('characters').toCollection().toArray();
+      for (const c of chars) {
+        if (!c.saveId) {
+          c.saveId = c.customFields?.saveId ?? '';
+          await tx.table('characters').put(c);
+        }
+      }
+    });
   }
 }
 
@@ -246,7 +273,6 @@ export interface FullBackup {
   lorebooks: Lorebook[];
   presets: ChatPreset[];
   settings: AppSettings[];
-  chats: ChatSession[];
   // v4
   memories: MemoryRecord[];
   plotEvents: PlotEvent[];
@@ -267,14 +293,13 @@ export interface FullBackup {
 export async function exportAllData(): Promise<FullBackup> {
   const db = getDatabase();
   const [
-    lorebooks, presets, settings, chats,
+    lorebooks, presets, settings,
     memories, plotEvents, characters, snapshots, saves, apiEndpoints, plotOutlines, saveProfiles, createPresets,
     messages,
   ] = await Promise.all([
     db.lorebooks.toArray(),
     db.presets.toArray(),
     db.settings.toArray(),
-    db.chats.toArray(),
     db.memories.toArray(),
     db.plotEvents.toArray(),
     db.characters.toArray(),
@@ -289,7 +314,7 @@ export async function exportAllData(): Promise<FullBackup> {
   return {
     version: DB_VERSION,
     exportedAt: Date.now(),
-    lorebooks, presets, settings, chats,
+    lorebooks, presets, settings,
     memories, plotEvents, characters, snapshots, saves, apiEndpoints, plotOutlines, saveProfiles, createPresets,
     messages,
   };
@@ -302,15 +327,13 @@ export async function importAllData(backup: FullBackup): Promise<void> {
   const db = getDatabase();
 
   // Split into 3 transactions — Dexie overload limit (~5 tables per call)
-  await db.transaction('rw', db.lorebooks, db.presets, db.settings, db.chats, async () => {
+  await db.transaction('rw', db.lorebooks, db.presets, db.settings, async () => {
     await db.lorebooks.clear();
     await db.presets.clear();
     await db.settings.clear();
-    await db.chats.clear();
     if (Array.isArray(backup.lorebooks)) await db.lorebooks.bulkPut(backup.lorebooks);
     if (Array.isArray(backup.presets)) await db.presets.bulkPut(backup.presets);
     if (Array.isArray(backup.settings)) await db.settings.bulkPut(backup.settings);
-    if (Array.isArray(backup.chats)) await db.chats.bulkPut(backup.chats);
   });
 
   await db.transaction('rw', db.memories, db.plotEvents, db.characters, async () => {
@@ -387,27 +410,8 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
   await getDatabase().settings.put({ ...settings, key: 'settings' });
 }
 
-export async function getChats(): Promise<ChatSession[]> {
-  return getDatabase().chats.toArray();
-}
-
-export async function saveChat(chat: ChatSession): Promise<string> {
-  await getDatabase().chats.put(chat);
-  return chat.id;
-}
-
-export async function deleteChat(id: string): Promise<void> {
-  await getDatabase().chats.delete(id);
-}
-
-export async function setVariables(chatId: string, variables: Record<string, any>): Promise<void> {
-  const db = getDatabase();
-  const chat = await db.chats.get(chatId);
-  if (!chat) return;
-  chat.variables = variables;
-  chat.updatedAt = Date.now();
-  await db.chats.put(chat);
-}
+// v9: chats 表已删除 (M1 #46)，getChats/saveChat/deleteChat/setVariables 一并移除。
+// 消息持久化走 messages 表（saveMessage/getMessages），状态写入走 StateManager.commitChatState()。
 
 // ========== v4 新表 CRUD ==========
 
@@ -471,9 +475,8 @@ export async function deletePlotEvent(id: string): Promise<void> {
 
 export async function getCharacters(saveId?: string): Promise<CharacterState[]> {
   if (saveId) {
-    // Filter by saveId stored in customFields
-    const all = await getDatabase().characters.toArray();
-    return all.filter(c => c.customFields?.saveId === saveId);
+    // v9: saveId 一等索引查询（规范 §1.2；替代 customFields 全表扫描）
+    return getDatabase().characters.where('saveId').equals(saveId).toArray();
   }
   return getDatabase().characters.toArray();
 }
