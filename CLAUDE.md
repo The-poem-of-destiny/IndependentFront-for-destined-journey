@@ -60,6 +60,17 @@ docs/
 docs/design.md  # 完整前端设计规范（排版/间距/组件/装饰/动画/检查清单）
 ```
 
+## 游戏数据字段规范（必读）
+
+**涉及游戏数据实体（角色/物品/技能/状态效果/任务/存档/快照/变量）的字段定义、StatePatch 契约、AI 输出格式、翻译层（orchestrator/侧链 buildPatches）的任何改动，必须先查阅：**
+
+```bash
+docs/superpowers/specs/2026-07-16-data-field-conventions-design.md  # 数据字典规范 v1.0（五条铁律 + 12 实体章 + SSOT 总表 + M1-M6 迁移批次）
+docs/superpowers/specs/2026-07-16-entity-field-audit.md             # 52 项现状偏差审计归档（规范附录 B 编号对应此文件）
+```
+
+核心铁律速记：逻辑键=名字（AI 永不产 id）· 名字解析唯一入口 · AI 填叙事字段 Code 补账务字段 · 每类数据唯一真源 · 枚举中文集中定义（field-enums.ts）。新增实体照规范附录 C 模板补一章。
+
 ## 世界观数据参考（必读）
 
 **涉及所有游戏内部改动（数值/地理/种族/品质/战斗/制作/剧情/角色/物品/技能等）时，必须先查阅 `reference/world_book_index.md`。**
