@@ -35,7 +35,7 @@ function makeSaveSlot(overrides: Partial<SaveSlot> = {}): SaveSlot {
       totalTurns: 0,
     },
     ...overrides,
-  } as SaveSlot
+  }
 }
 
 function makeProfile(overrides: Partial<SaveProfile> = {}): SaveProfile {
@@ -50,10 +50,11 @@ function makeProfile(overrides: Partial<SaveProfile> = {}): SaveProfile {
     focusQuest: '',
     affections: {},
     gameTime: { era: '复兴纪元', year: 1, month: 1, day: 1, weekday: 1, hour: 8, minute: 0 },
+    variables: {},
     worldFlags: {},
     updatedAt: Date.now(),
     ...overrides,
-  } as SaveProfile
+  }
 }
 
 function makeChar(overrides: Partial<CharacterState> = {}): CharacterState {

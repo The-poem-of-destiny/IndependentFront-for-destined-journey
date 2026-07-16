@@ -225,6 +225,14 @@ class AppDatabase extends Dexie {
           await tx.table('characters').put(c);
         }
       }
+      // SaveProfile.variables 为 v9 新必填字段，存量记录回填空对象
+      const profiles = await tx.table('saveProfiles').toCollection().toArray();
+      for (const p of profiles) {
+        if (p.variables === undefined) {
+          p.variables = {};
+          await tx.table('saveProfiles').put(p);
+        }
+      }
     });
   }
 }
@@ -342,7 +350,14 @@ export async function importAllData(backup: FullBackup): Promise<void> {
     await db.characters.clear();
     if (Array.isArray(backup.memories)) await db.memories.bulkPut(backup.memories);
     if (Array.isArray(backup.plotEvents)) await db.plotEvents.bulkPut(backup.plotEvents);
-    if (Array.isArray(backup.characters)) await db.characters.bulkPut(backup.characters);
+    if (Array.isArray(backup.characters)) {
+      // v9: 旧备份（pre-v9）角色只有 customFields.saveId，回填一等字段，否则索引查询查不到
+      const normalizedChars = backup.characters.map((c: any) => ({
+        ...c,
+        saveId: c.saveId ?? c.customFields?.saveId ?? '',
+      }));
+      await db.characters.bulkPut(normalizedChars);
+    }
   });
 
   await db.transaction('rw', db.snapshots, db.saves, db.apiEndpoints, async () => {
@@ -358,7 +373,14 @@ export async function importAllData(backup: FullBackup): Promise<void> {
     await db.plotOutlines.clear();
     await db.saveProfiles.clear();
     if (Array.isArray(backup.plotOutlines)) await db.plotOutlines.bulkPut(backup.plotOutlines);
-    if (Array.isArray(backup.saveProfiles)) await db.saveProfiles.bulkPut(backup.saveProfiles);
+    if (Array.isArray(backup.saveProfiles)) {
+      // v9: SaveProfile.variables 现为必填字段，旧备份缺失时回填空对象
+      const normalizedProfiles = backup.saveProfiles.map((p: any) => ({
+        ...p,
+        variables: p.variables ?? {},
+      }));
+      await db.saveProfiles.bulkPut(normalizedProfiles);
+    }
   });
 
   // v7 transaction

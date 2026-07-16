@@ -528,7 +528,7 @@ describe('API Endpoints CRUD', () => {
 // ========== Full Backup ==========
 
 describe('exportAllData / importAllData', () => {
-  it('exportAllData 应包含所有 10 表', async () => {
+  it('exportAllData 应包含所有表数据', async () => {
     await saveMemory(makeMemory({ id: 'exp_mem' }));
     await savePlotEvent(makePlotEvent({ id: 'exp_plot' }));
     await saveApiEndpoint(makeApiEndpoint({ id: 'exp_api' }));
@@ -571,6 +571,35 @@ describe('exportAllData / importAllData', () => {
   it('importAllData 无效格式应抛错', async () => {
     await expect(importAllData(null as any)).rejects.toThrow('备份格式无效');
     await expect(importAllData('string' as any)).rejects.toThrow('备份格式无效');
+  });
+
+  it('importAllData 导入 pre-v9 备份应回填角色一等 saveId（getCharacters 可查到）', async () => {
+    const backup = await exportAllData();
+    // 构造 pre-v9 形状角色：无一等 saveId，只有 customFields.saveId
+    const legacyChar: any = createDefaultCharacterState({ id: 'legacy_1', name: '旧备份角色' });
+    delete legacyChar.saveId;
+    legacyChar.customFields = { saveId: 'save_legacy' };
+    backup.characters = [legacyChar];
+    // pre-v9 SaveProfile：无 variables 字段
+    const legacyProfile: any = {
+      saveId: 'save_legacy', fp: 0, fpHistory: [], contracts: [], achievements: [],
+      news: [], quests: {}, focusQuest: '', affections: {},
+      gameTime: { era: '复兴纪元', year: 1, month: 1, day: 1, weekday: 1, hour: 8, minute: 0 },
+      worldFlags: {}, updatedAt: Date.now(),
+    };
+    backup.saveProfiles = [legacyProfile];
+
+    await importAllData(backup);
+
+    const chars = await getCharacters('save_legacy');
+    expect(chars).toHaveLength(1);
+    expect(chars[0].id).toBe('legacy_1');
+    expect(chars[0].saveId).toBe('save_legacy');
+
+    const db = getDatabase();
+    const profile = await db.saveProfiles.get('save_legacy');
+    expect(profile).toBeDefined();
+    expect(profile!.variables).toEqual({});
   });
 });
 
