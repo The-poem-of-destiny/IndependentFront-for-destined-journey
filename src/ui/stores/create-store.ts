@@ -833,18 +833,11 @@ export const useCreateStore = defineStore('create', () => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       activeSnapshotId: null,
-      snapshots: [],
       metadata: {
         characterName: charState.name,
         userName: '玩家',
         gameStartTime: new Date().toISOString(),
         totalTurns: 0,
-        description: JSON.stringify({
-          openingPrompt,
-          destinyCoreId: destinyCore.value?.id ?? null,
-          difficulty: difficulty.value?.id ?? 'normal',
-          remainingPoints: remainingPoints.value,
-        }),
         enabledWorldBookEntries: buildEnabledWorldBookEntries(),  // 🆕
         openingPrompt: openingPrompt,                              // 🆕
         openingPromptConsumed: false,                              // 🆕

@@ -347,7 +347,7 @@ describe('SaveSlot metadata (Phase 10h)', () => {
     const slot: SaveSlot = {
       id: 's1', name: 'test', slot: 0,
       createdAt: 0, updatedAt: 0,
-      activeSnapshotId: null, snapshots: [],
+      activeSnapshotId: null,
       metadata: {
         characterName: 'test',
         userName: 'player',
@@ -364,7 +364,7 @@ describe('SaveSlot metadata (Phase 10h)', () => {
     const slot: SaveSlot = {
       id: 's2', name: 'test', slot: 1,
       createdAt: 0, updatedAt: 0,
-      activeSnapshotId: null, snapshots: [],
+      activeSnapshotId: null,
       metadata: {
         characterName: 'test',
         userName: 'player',

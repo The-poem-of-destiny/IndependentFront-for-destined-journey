@@ -1012,17 +1012,14 @@ export interface SaveSlot {
   slot: number;                  // 0-9
   createdAt: number;
   updatedAt: number;
-  /** 当前活跃快照 ID */
+  /** 当前活跃快照 ID（指向 snapshots 表记录；恢复机制 M5 重建） */
   activeSnapshotId: string | null;
-  /** 快照列表（按 index 排序） */
-  snapshots: Snapshot[];
   /** 存档级元数据 */
   metadata: {
     characterName: string;
     userName: string;
     gameStartTime: string;
     totalTurns: number;
-    description?: string;
     /** Phase 10h: 存档级启用的世界书条目 ID (如 'system_core:408', 'character:313') */
     enabledWorldBookEntries?: string[];
     /** Phase 10h: 创角时的开场提示词文本 */

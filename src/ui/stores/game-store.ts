@@ -319,13 +319,7 @@ export const useGameStore = defineStore('game', () => {
     activeCombat.value = null
     saveProfile.value = (profile as SaveProfile) ?? null
 
-    // 从 Snapshot 恢复角色状态
-    if (save.activeSnapshotId && save.snapshots) {
-      const snap = save.snapshots.find((s: any) => s.id === save.activeSnapshotId)
-      if (snap) {
-        if (snap.characters) characters.value = snap.characters as CharacterState[]
-      }
-    }
+    // 快照恢复走 snapshots 表（规范 §11.2），机制在 M5 重建 (#2)
 
     // 从 messages 表恢复对话历史（始终覆写，无消息时为空数组）
     await restoreMessages()

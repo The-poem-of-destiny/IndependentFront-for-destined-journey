@@ -28,7 +28,6 @@ function makeSaveSlot(overrides: Partial<SaveSlot> = {}): SaveSlot {
     createdAt: Date.now(),
     updatedAt: Date.now(),
     activeSnapshotId: null,
-    snapshots: [],
     metadata: {
       characterName: '理查德',
       userName: 'Tester',

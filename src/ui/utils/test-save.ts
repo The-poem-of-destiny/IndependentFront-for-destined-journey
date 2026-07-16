@@ -53,7 +53,6 @@ export async function createTestSave(): Promise<string> {
     createdAt: Date.now(),
     updatedAt: Date.now(),
     activeSnapshotId: null,
-    snapshots: [],
     metadata: {
       characterName: '亚瑟',
       userName: '玩家',
