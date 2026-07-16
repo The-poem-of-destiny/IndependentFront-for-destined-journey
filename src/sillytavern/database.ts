@@ -576,6 +576,7 @@ export async function deleteSaveSlot(id: string): Promise<void> {
   await db.plotOutlines.bulkDelete(plotOutlines.map(o => o.id));
   const messagesToDelete = await db.messages.where('saveId').equals(id).toArray();
   await db.messages.bulkDelete(messagesToDelete.map(m => m.id));
+  await db.characters.where('saveId').equals(id).delete();
   await db.saveProfiles.where('saveId').equals(id).delete();
   await db.saves.delete(id);
 }

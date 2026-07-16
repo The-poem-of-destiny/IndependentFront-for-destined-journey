@@ -490,6 +490,16 @@ describe('SaveSlots CRUD', () => {
     expect(await getPlotEvents(saveId)).toHaveLength(0);
     expect(await getSnapshots(saveId)).toHaveLength(0);
   });
+
+  it('deleteSaveSlot 级联删除该存档的 characters（修 #9 删档残留）', async () => {
+    await saveSaveSlot(makeSaveSlot({ id: 'save_del' }));
+    await saveCharacter(createDefaultCharacterState({ id: 'cd1', name: '将删', saveId: 'save_del' }));
+    await saveCharacter(createDefaultCharacterState({ id: 'cd2', name: '留下', saveId: 'save_other' }));
+    await deleteSaveSlot('save_del');
+    const all = await getCharacters();
+    expect(all.map(c => c.id)).not.toContain('cd1');
+    expect(all.map(c => c.id)).toContain('cd2');
+  });
 });
 
 // ========== API Endpoints CRUD ==========
