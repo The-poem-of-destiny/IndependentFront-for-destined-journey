@@ -260,6 +260,7 @@ src/sillytavern/                    ← 核心引擎（30+ 模块，含 Phase 1-
   │   │     + processStageMarkers (craft延迟到Stage2 / combat延迟到Stage2 / char触发chain)
   │   └── [8.5] callAgenticAgent(): toolsEnabled=true → chatWithTools() 多轮循环
   │
+  ├── field-enums.ts                ← [M1] 中文枚举集中定义 + 归一化 (铁律5)
   ├── tier-constants.ts             ← [Phase 5] 核心数值表 (世界书 #417617)
   ├── bloodlines.ts                 ← [Phase 5] 血脉系统 (23 种族)
   ├── death-system.ts               ← [Phase 5] 死亡检测

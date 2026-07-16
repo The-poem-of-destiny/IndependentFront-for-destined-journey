@@ -325,6 +325,8 @@ interface Snapshot {
 | 批次 | 内容 | 覆盖问题 |
 |------|------|---------|
 | M1 类型与库 | types.ts 字段增删（equippedSlot/quantity/saveId 一等/死字段删除）+ field-enums.ts + database v9（characters 索引、级联删除、chats 删表、$char.getNpcs 等 saveId 参数真正生效）+ 开发期清库重建 | #8 #9 #13 #30 #43 #46 #47 #48 |
+
+> **M1 执行注记（2026-07-16）**: M1 已按"每批次编译绿灯"原则重校准——物品/技能/状态效果 id 退役与 EquipmentSlot 删除移至 M2/M3（随消费者 StateManager/翻译层重写同批）；Snapshot 类型重定义移至 M5（随快照机制重建同批）；新正式字段采用双写策略，读方 M6 切换。M1 实际完成: field-enums.ts、CharacterState.saveId 一等化(#8 #43)、Dexie v9(#46)、级联删除(#9)、char-query 隔离(#30)、persistMessage 校验(#13)、SaveSlot 清理(#47)、ChatMessage 死字段(#48 #33 前半)。
 | M2 StateManager 重写 | 名字解析入口 + 全部 apply* 按名字契约重写 + 新 op（remove/rename_character, transfer_item, update_item, remove_skill, set/delta_affection, add_news）+ 枚举归一化（quest.status 等）+ 验证失败进 errors[]（修 #35 风格分裂 + 深坑"验证失败不进 errors"） | #4 #5 #10 #19 #20 #21 #22 #23 #24 #32 #35 #40 |
 | M3 翻译层重写 | orchestrator Stage2/3 + item/char/craft 三链 buildPatches 按新契约 + 'player_1' 兜底删除 + craft 双 Date.now 等 id 逻辑整体退役 + assembleCharacterState 无损映射（effects/scripts 全字段传递） | #6 #7 #11 #12 #26 #37 #38 #39 #41 #45 |
 | M4 AI prompt 对齐 | 第 14 章全部（agent-config.json + agent-templates.ts） | #25 及示例毒化源头 |
