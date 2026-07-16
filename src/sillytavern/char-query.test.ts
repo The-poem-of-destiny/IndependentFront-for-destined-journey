@@ -11,16 +11,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createDefaultCharacterState } from './types';
 import type { CharacterState } from './types';
 
+// ---- 注意: getNpcs/getMonsters saveId 真实 DB 集成测试在 char-query.integration.test.ts ----
+
 // ---- Mocks ----
+// 仅 mock getCharacter/getCharacters/getCharactersByType；其余函数透传真实实现
 const mockGetCharacter = vi.fn();
 const mockGetCharacters = vi.fn();
 const mockGetCharactersByType = vi.fn();
 
-vi.mock('./database', () => ({
-  getCharacter: (...args: any[]) => mockGetCharacter(...args),
-  getCharacters: (...args: any[]) => mockGetCharacters(...args),
-  getCharactersByType: (...args: any[]) => mockGetCharactersByType(...args),
-}));
+vi.mock('./database', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./database')>();
+  return {
+    ...actual,
+    getCharacter: (...args: any[]) => mockGetCharacter(...args),
+    getCharacters: (...args: any[]) => mockGetCharacters(...args),
+    getCharactersByType: (...args: any[]) => mockGetCharactersByType(...args),
+  };
+});
 
 import {
   getChar,
@@ -110,18 +117,18 @@ describe('getChars', () => {
 describe('getCharsByType', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it('按 npc 类型过滤', async () => {
+  it('按 npc 类型过滤，不传 saveId', async () => {
     const npcs = [makeChar({ type: 'npc' }), makeChar({ type: 'npc' })];
     mockGetCharactersByType.mockResolvedValue(npcs);
     await expect(getCharsByType('npc')).resolves.toBe(npcs);
-    expect(mockGetCharactersByType).toHaveBeenCalledWith('npc');
+    expect(mockGetCharactersByType).toHaveBeenCalledWith('npc', undefined);
   });
 
   it('按 monster 类型过滤', async () => {
     const monsters = [makeChar({ type: 'monster' })];
     mockGetCharactersByType.mockResolvedValue(monsters);
     await expect(getCharsByType('monster')).resolves.toBe(monsters);
-    expect(mockGetCharactersByType).toHaveBeenCalledWith('monster');
+    expect(mockGetCharactersByType).toHaveBeenCalledWith('monster', undefined);
   });
 });
 
@@ -145,22 +152,36 @@ describe('getPlayer', () => {
 describe('getNpcs', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it('返回所有 NPC', async () => {
+  it('不传 saveId 时返回所有 NPC', async () => {
     const npcs = [makeChar({ type: 'npc' }), makeChar({ type: 'npc' })];
     mockGetCharactersByType.mockResolvedValue(npcs);
     await expect(getNpcs()).resolves.toBe(npcs);
-    expect(mockGetCharactersByType).toHaveBeenCalledWith('npc');
+    expect(mockGetCharactersByType).toHaveBeenCalledWith('npc', undefined);
+  });
+
+  it('传入 saveId 时透传给 getCharactersByType', async () => {
+    const npcs = [makeChar({ type: 'npc', saveId: 'save_1' })];
+    mockGetCharactersByType.mockResolvedValue(npcs);
+    await expect(getNpcs('save_1')).resolves.toBe(npcs);
+    expect(mockGetCharactersByType).toHaveBeenCalledWith('npc', 'save_1');
   });
 });
 
 describe('getMonsters', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it('返回所有怪物', async () => {
+  it('不传 saveId 时返回所有怪物', async () => {
     const monsters = [makeChar({ type: 'monster' }), makeChar({ type: 'monster' })];
     mockGetCharactersByType.mockResolvedValue(monsters);
     await expect(getMonsters()).resolves.toBe(monsters);
-    expect(mockGetCharactersByType).toHaveBeenCalledWith('monster');
+    expect(mockGetCharactersByType).toHaveBeenCalledWith('monster', undefined);
+  });
+
+  it('传入 saveId 时透传给 getCharactersByType', async () => {
+    const monsters = [makeChar({ type: 'monster', saveId: 'save_2' })];
+    mockGetCharactersByType.mockResolvedValue(monsters);
+    await expect(getMonsters('save_2')).resolves.toBe(monsters);
+    expect(mockGetCharactersByType).toHaveBeenCalledWith('monster', 'save_2');
   });
 });
 

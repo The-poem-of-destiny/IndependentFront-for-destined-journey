@@ -26,8 +26,8 @@ export async function getChars(saveId?: string): Promise<CharacterState[]> {
 }
 
 /** 按类型过滤 */
-export async function getCharsByType(type: CharacterState['type']): Promise<CharacterState[]> {
-  return getCharactersByType(type);
+export async function getCharsByType(type: CharacterState['type'], saveId?: string): Promise<CharacterState[]> {
+  return getCharactersByType(type, saveId);
 }
 
 /** 获取玩家角色 */
@@ -38,12 +38,12 @@ export async function getPlayer(saveId?: string): Promise<CharacterState | undef
 
 /** 获取所有 NPC */
 export async function getNpcs(saveId?: string): Promise<CharacterState[]> {
-  return getCharactersByType('npc');
+  return getCharactersByType('npc', saveId);
 }
 
 /** 获取所有怪物 */
 export async function getMonsters(saveId?: string): Promise<CharacterState[]> {
-  return getCharactersByType('monster');
+  return getCharactersByType('monster', saveId);
 }
 
 // ========== 纯函数查询 ==========

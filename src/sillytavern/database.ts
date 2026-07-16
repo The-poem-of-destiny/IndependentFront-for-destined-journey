@@ -485,7 +485,10 @@ export async function getCharacter(id: string): Promise<CharacterState | undefin
   return getDatabase().characters.get(id);
 }
 
-export async function getCharactersByType(type: CharacterState['type']): Promise<CharacterState[]> {
+export async function getCharactersByType(type: CharacterState['type'], saveId?: string): Promise<CharacterState[]> {
+  if (saveId) {
+    return getDatabase().characters.where('saveId').equals(saveId).and(c => c.type === type).toArray();
+  }
   return getDatabase().characters.where('type').equals(type).toArray();
 }
 
