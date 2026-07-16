@@ -5,6 +5,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AgentOrchestrator } from './agent-orchestrator';
 import type { AgentContext, AgentConfig, ApiEndpoint, Pipeline } from './types';
 
+// state-manager mock: 捕获 commitChatState 收到的 patches（Stage3 <json> 解析测试用）
+const { commitChatStateMock } = vi.hoisted(() => ({
+  commitChatStateMock: vi.fn(async (patches: any[]) => ({
+    success: true, patchesApplied: patches.length, eventsGenerated: [], errors: [] as string[],
+  })),
+}));
+vi.mock('./state-manager', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('./state-manager')>();
+  return {
+    ...orig,
+    createStateManager: vi.fn(() => ({
+      commitChatState: commitChatStateMock,
+      applyTimeAdvance: vi.fn(),
+    })),
+  };
+});
+
 // ========== Helpers ==========
 
 function mockFetch(content: string, tokens = 50, cacheHit = false) {
@@ -927,5 +944,130 @@ describe('AgentOrchestrator — OrchestratorRun', () => {
     expect(run.pipeline.stages).toHaveLength(1);
     // AgentResults should be in the run
     expect(run.agentResults.has('story')).toBe(true);
+  });
+});
+
+// ========== Stage 3 vars_update <json> characters.add 解析 ==========
+
+function varsJsonOutput(json: object): string {
+  return `<json>\n${JSON.stringify(json)}\n</json>`;
+}
+
+/** 跑一个单 stage vars_update 管线，返回 commitChatState 收到的全部 patches */
+async function runVarsUpdateWithJson(
+  json: object,
+  events: Record<string, any> = {},
+): Promise<any[]> {
+  globalThis.fetch = mockFetch(varsJsonOutput(json));
+  const orch = new AgentOrchestrator(
+    {
+      pipeline: makeSimplePipeline(['vars_update']),
+      context: makeContext(),
+      agentConfigs: [makeAgentConfig({ agentId: 'vars_update' })],
+      endpoints: [makeEndpoint()],
+      saveId: 'save_1',
+    },
+    events,
+  );
+  await orch.run();
+  return commitChatStateMock.mock.calls.flatMap(c => c[0]);
+}
+
+describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
+  beforeEach(() => {
+    commitChatStateMock.mockClear();
+    commitChatStateMock.mockImplementation(async (patches: any[]) => ({
+      success: true, patchesApplied: patches.length, eventsGenerated: [], errors: [],
+    }));
+  });
+
+  it('path=inventory → add_item 且补生成 id（不再产生损坏数组的 update_character）', async () => {
+    const patches = await runVarsUpdateWithJson({
+      characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'inventory', value: { name: '金色钥匙挂坠', description: '表面有刻文', quantity: 1 } }], remove: [] },
+      items: {},
+    });
+    const p = patches.find(x => x.op === 'add_item');
+    expect(p).toBeDefined();
+    expect(p.target).toBe('characters.c1');
+    expect(p.value.id).toMatch(/^varsupd_inv_/);
+    expect(p.value.name).toBe('金色钥匙挂坠');
+    expect(p.value.quantity).toBe(1);
+    // 防回归: 不能再出现携带 inventory 键的 update_character（会被 Object.assign 整体替换数组）
+    expect(patches.some(x => x.op === 'update_character' && x.value?.inventory)).toBe(false);
+  });
+
+  it('path=equipment 无 itemId → add_item + equip_item 两步同 id', async () => {
+    const patches = await runVarsUpdateWithJson({
+      characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'equipment', value: { name: '法师长袍', type: '防具', slot: '身体' } }], remove: [] },
+      items: {},
+    });
+    const addP = patches.find(x => x.op === 'add_item');
+    const eqP = patches.find(x => x.op === 'equip_item');
+    expect(addP).toBeDefined();
+    expect(eqP).toBeDefined();
+    expect(addP.value.id).toMatch(/^varsupd_eq_/);
+    expect(eqP.value.itemId).toBe(addP.value.id);
+    expect(eqP.value.slot).toBe('身体');
+    expect(eqP.value.name).toBe('法师长袍');
+  });
+
+  it('path=equipment 有 itemId（装备背包已有物品）→ 单个 equip_item', async () => {
+    const patches = await runVarsUpdateWithJson({
+      characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'equipment', value: { itemId: 'item_9', slot: '武器', name: '白橡木法杖' } }], remove: [] },
+      items: {},
+    });
+    expect(patches.filter(x => x.op === 'add_item')).toHaveLength(0);
+    expect(patches.filter(x => x.op === 'equip_item')).toHaveLength(1);
+    expect(patches[0].value.itemId).toBe('item_9');
+  });
+
+  it('path=skills / statusEffects 原有分支不受影响', async () => {
+    const patches = await runVarsUpdateWithJson({
+      characters: {
+        replace: [], delta: [],
+        add: [
+          { id: 'c1', path: 'skills', value: { name: '火球术' } },
+          { id: 'c1', path: 'statusEffects', value: { name: '灼烧' } },
+        ],
+        remove: [],
+      },
+      items: {},
+    });
+    expect(patches.some(x => x.op === 'add_skill')).toBe(true);
+    expect(patches.some(x => x.op === 'add_status_effect')).toBe(true);
+  });
+});
+
+// ========== onStateCommitError 上浮 ==========
+
+describe('AgentOrchestrator — onStateCommitError 上浮', () => {
+  beforeEach(() => {
+    commitChatStateMock.mockClear();
+  });
+
+  it('commit errors 非空时应触发回调（source=vars_update）', async () => {
+    commitChatStateMock.mockImplementation(async () => ({
+      success: false, patchesApplied: 0, eventsGenerated: [], errors: ['角色不存在: x'],
+    }));
+    const onStateCommitError = vi.fn();
+    await runVarsUpdateWithJson(
+      { characters: { replace: [{ id: 'x', path: 'hp', value: 10 }], delta: [], add: [], remove: [] }, items: {} },
+      { onStateCommitError },
+    );
+    expect(onStateCommitError).toHaveBeenCalled();
+    expect(onStateCommitError.mock.calls[0][0]).toBe('vars_update');
+    expect(onStateCommitError.mock.calls[0][1]).toContain('角色不存在: x');
+  });
+
+  it('errors 为空时不触发回调', async () => {
+    commitChatStateMock.mockImplementation(async (patches: any[]) => ({
+      success: true, patchesApplied: patches.length, eventsGenerated: [], errors: [],
+    }));
+    const onStateCommitError = vi.fn();
+    await runVarsUpdateWithJson(
+      { characters: { replace: [{ id: 'x', path: 'hp', value: 10 }], delta: [], add: [], remove: [] }, items: {} },
+      { onStateCommitError },
+    );
+    expect(onStateCommitError).not.toHaveBeenCalled();
   });
 });

@@ -200,7 +200,8 @@ export async function callCraftGenAgent(
       async (name: string, args: Record<string, any>) => {
         return executeToolCall(name, args, toolContext);
       },
-      { maxRounds: 8 },
+      // maxRounds=10 统一三条链口径 (item/char/craft)，craft_gen 需 get_inventory→craft_check→craft_settle 多轮往返
+      { maxRounds: 10 },
     );
 
     if (result.error) {
@@ -306,7 +307,8 @@ export async function callItemGenForCraft(
         async (name: string, args: Record<string, any>) => {
           return executeToolCall(name, args, toolContext);
         },
-        { maxRounds: 5 },
+        // maxRounds=10 对齐独立 item_gen 链：equipment 类工具序列 5 轮会触顶
+        { maxRounds: 10 },
       );
 
       if (result.output) {

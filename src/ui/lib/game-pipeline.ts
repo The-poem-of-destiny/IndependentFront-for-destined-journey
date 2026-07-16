@@ -133,6 +133,10 @@ export class GamePipeline {
       this.game.addMessage('[系统] AI 调用失败，请检查 API 配置后重试。', 'assistant')
       return false
     } finally {
+      // 🆕 管线中 StateManager / 侧链 (char_gen/item_gen/craft_gen) 直接写 Dexie，
+      // 这里统一回读，让 Pinia 内存态（characters/metadata/saveProfile）与 DB 对齐，
+      // DebugPanel 导出和右侧状态栏才能拿到最新数据。abort/报错时部分 patch 可能已提交，同样需要回读。
+      await this.game.refreshFromDb()
       this.game.isGenerating = false
       this.abortController = null
     }
@@ -425,7 +429,15 @@ export class GamePipeline {
   private getStateManager() {
     const sm = createStateManager(this.saveId)
     return sm ? {
-      commitChatState: async (patches: any[]) => { await sm.commitChatState(patches) },
+      commitChatState: async (patches: any[]) => {
+        const result = await sm.commitChatState(patches)
+        if (result.errors.length > 0) {
+          console.error(`[GamePipeline] 状态提交失败 ${result.errors.length}/${patches.length} 条:`, result.errors)
+          this.game.addMessage(`[系统] 部分状态未能写入 (${result.errors.length} 条): ${result.errors.join('；')}`, 'assistant')
+        } else if (result.patchesApplied < patches.length) {
+          console.warn(`[GamePipeline] 部分 patch 验证失败未生效: ${result.patchesApplied}/${patches.length}`)
+        }
+      },
     } : undefined
   }
 
@@ -490,6 +502,11 @@ export class GamePipeline {
           cacheHit: false,
           duration: 0,
         })
+      },
+
+      onStateCommitError: (source, errors) => {
+        console.error(`[GamePipeline] ${source} 状态提交失败:`, errors)
+        this.game.addMessage(`[系统] ${source} 部分状态未能写入: ${errors.join('；')}`, 'assistant')
       },
 
       // === Marker 回调 ===
@@ -632,12 +649,12 @@ export class GamePipeline {
           context: ctx,
           endpoint,
         }
-        const result = await runItemGenChain(request, {
+        await runItemGenChain(request, {
           clientFactory,
           stateManager,
         })
-        // 生成结果暂不回注正文（物品数据已落库，前端面板会刷新显示）
-        void result
+        // 物品数据已由 stateManager 落库；run() finally 的 refreshFromDb() 会把
+        // 最新 characters（含新物品/装备）回读进 Pinia，前端面板随之刷新。
       }
     } catch (err) {
       console.error('[GamePipeline] item_gen 链失败:', err)

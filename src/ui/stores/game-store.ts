@@ -330,6 +330,43 @@ export const useGameStore = defineStore('game', () => {
     turnCounter = lastMsg?.turn ?? 0
   }
 
+  /** 🆕 轻量回读：管线跑完后 StateManager / 侧链直接写了 Dexie，
+   *  把 DB 里更新后的 save.metadata / characters / saveProfile 同步回内存。
+   *  不动 messages / agentLog / combat 等 UI 态（与 loadSave 的全量重载区分开）。 */
+  async function refreshFromDb() {
+    if (!activeSaveId.value) return
+    try {
+      const [save, allChars, profile] = await Promise.all([
+        getSave(activeSaveId.value),
+        getCharacters(),   // 不带 saveId：侧链新 NPC 可能没写 customFields.saveId，带过滤会漏
+        getSaveProfile(activeSaveId.value),
+      ])
+
+      // 1. save.metadata（totalTurns / openingPromptConsumed 等）
+      if (save) {
+        const idx = saves.value.findIndex((s: SaveSlot) => s.id === save.id)
+        if (idx >= 0) saves.value[idx] = save
+        else saves.value.push(save)
+      }
+
+      // 2. characters：合并语义 —— DB 版本覆盖同 id 内存版本（拿到最新背包/装备/资源），
+      //    DB 里属于本存档但内存没有的角色追加；内存独有的（预览注入等）保留。
+      const dbById = new Map((allChars as CharacterState[]).map(c => [c.id, c]))
+      characters.value = characters.value.map(c => dbById.get(c.id) ?? c)
+      const memIds = new Set(characters.value.map(c => c.id))
+      for (const c of allChars as CharacterState[]) {
+        if (!memIds.has(c.id) && (c as any).customFields?.saveId === activeSaveId.value) {
+          characters.value.push(c)
+        }
+      }
+
+      // 3. saveProfile（gameTime / fp / quests / news）
+      if (profile) saveProfile.value = profile as SaveProfile
+    } catch (err) {
+      console.error('[game-store] refreshFromDb 失败:', err)
+    }
+  }
+
   function clearActive() {
     clearAllAgentStatus()
     activeSaveId.value = null
@@ -355,7 +392,7 @@ export const useGameStore = defineStore('game', () => {
     toggleSidebar, showModal, closeModal, toggleFullscreen,
     hydratePreview,
     addMessage, addSystemMessage,
-    loadSaves, loadSave, clearActive,
+    loadSaves, loadSave, refreshFromDb, clearActive,
     pendingInput, fillInput, clearPendingInput,
     hasOpeningPromptConsumed, openingPrompt, markOpeningPromptConsumed,
     pendingOptions, setPendingOptions,

@@ -50,6 +50,8 @@ export interface OrchestratorEvents {
   onAgentComplete?: (result: AgentResult) => void;
   onAgentError?: (agentId: string, error: string) => void;
   onStageComplete?: (stageIndex: number) => void;
+  /** StatePatch 提交后存在失败项时触发（source = 'request_dispatcher' | 'vars_update' 等） */
+  onStateCommitError?: (source: string, errors: string[]) => void;
 
   // ===== Phase 6e: Marker Protocol 回调 (旧格式，向后兼容) =====
 
@@ -725,7 +727,8 @@ export class AgentOrchestrator {
           }
 
           if (patches.length > 0) {
-            await sm.commitChatState(patches);
+            const r = await sm.commitChatState(patches);
+            this.reportCommitResult(r, patches.length, 'request_dispatcher');
           }
 
           if (parsed.delta_time && typeof parsed.delta_time === 'number' && parsed.delta_time > 0) {
@@ -847,13 +850,53 @@ export class AgentOrchestrator {
             }
           }
 
-          // --- characters.add → add_status_effect/add_skill/equip_item ---
+          // --- characters.add → add_status_effect/add_skill/add_item/equip_item ---
           for (const a of (parsed.characters?.add ?? [])) {
             const { id, path, value } = a;
             switch (path) {
               case 'statusEffects': patches.push({ op: 'add_status_effect', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
               case 'skills': patches.push({ op: 'add_skill', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
-              case 'equipment': patches.push({ op: 'equip_item', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
+              case 'inventory': {
+                // applyAddItem 要求 value.id (按 id 去重叠加)，AI 输出不含 id → 补生成 (对齐 item-gen-chain 约定)
+                const itemId = `varsupd_inv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                patches.push({
+                  op: 'add_item',
+                  target: `characters.${id}`,
+                  value: {
+                    id: itemId,
+                    name: value?.name ?? '未知物品',
+                    description: value?.description,
+                    quantity: value?.quantity ?? 1,
+                    type: value?.type,
+                    rarity: value?.rarity,
+                  },
+                  metadata: { source: 'vars_update', path, add: true },
+                });
+                break;
+              }
+              case 'equipment': {
+                if (value?.itemId) {
+                  // AI 给了 itemId（装备背包内已有物品）→ 直接 equip
+                  patches.push({ op: 'equip_item', target: `characters.${id}`, value, metadata: { source: 'vars_update' } });
+                } else {
+                  // AI 只给 {name, type, slot} → 两步: add_item 写背包 + equip_item 同 id 搬进装备栏
+                  // (对齐 item-gen-chain.ts buildItemGenPatches 的装备两步落库约定)
+                  const itemId = `varsupd_eq_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                  patches.push({
+                    op: 'add_item',
+                    target: `characters.${id}`,
+                    value: { id: itemId, name: value?.name ?? '未知装备', description: value?.description, quantity: 1, type: 'equipment', rarity: value?.rarity },
+                    metadata: { source: 'vars_update', path, add: true },
+                  });
+                  patches.push({
+                    op: 'equip_item',
+                    target: `characters.${id}`,
+                    value: { itemId, slot: value?.slot ?? value?.type ?? '未知', name: value?.name ?? '未知装备', stats: value?.stats },
+                    metadata: { source: 'vars_update', path, add: true },
+                  });
+                }
+                break;
+              }
               default: patches.push({ op: 'update_character', target: `characters.${id}`, value: { [path]: value }, metadata: { source: 'vars_update', path, add: true } });
             }
           }
@@ -895,7 +938,8 @@ export class AgentOrchestrator {
           }
 
           if (patches.length > 0) {
-            await sm.commitChatState(patches);
+            const r = await sm.commitChatState(patches);
+            this.reportCommitResult(r, patches.length, 'vars_update');
           }
         } catch {
           console.warn('[Orchestrator] vars_update <json> 解析失败，跳过状态更新');
@@ -917,7 +961,8 @@ export class AgentOrchestrator {
               value: e,
               metadata: { source: 'vars_update' },
             }));
-            await sm.commitChatState(patches);
+            const r = await sm.commitChatState(patches);
+            this.reportCommitResult(r, patches.length, 'vars_update:status_effects');
           }
         } catch (e) {
           console.warn('[Orchestrator] vars_update <status_effects> 解析失败:', e);
@@ -954,13 +999,29 @@ export class AgentOrchestrator {
             }
 
             if (patches.length > 0) {
-              await sm.commitChatState(patches);
+              const r = await sm.commitChatState(patches);
+              this.reportCommitResult(r, patches.length, 'vars_update:quests');
             }
           }
         } catch {
           console.warn('[Orchestrator] vars_update <json> quests 解析失败，跳过 quest 更新');
         }
       }
+    }
+  }
+
+  /** 检查 commitChatState 结果，失败项 console.error + 上浮回调 */
+  private reportCommitResult(
+    result: import('./types').StateCommitResult,
+    patchCount: number,
+    source: string,
+  ): void {
+    if (result.errors.length > 0) {
+      console.error(`[Orchestrator] ${source} 状态提交失败 ${result.errors.length}/${patchCount} 条:`, result.errors);
+      this.events.onStateCommitError?.(source, result.errors);
+    } else if (result.patchesApplied < patchCount) {
+      // applyPatch 验证失败走 return 不 throw、不进 errors[]，用数量差兜底
+      console.warn(`[Orchestrator] ${source} 部分 patch 验证失败未生效: ${result.patchesApplied}/${patchCount}`);
     }
   }
 

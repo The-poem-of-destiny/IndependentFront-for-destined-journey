@@ -537,7 +537,10 @@ export async function executeToolCall(
       // 提交产生的 StatePatch（HP/MP/SP 消耗、EXP、FP）
       if (result.patches && result.patches.length > 0) {
         const sm = createStateManager(context.saveId);
-        await sm.commitChatState(result.patches);
+        const commitResult = await sm.commitChatState(result.patches);
+        if (commitResult.errors.length > 0) {
+          console.error('[AgentTools] craft patches 提交失败:', commitResult.errors);
+        }
       }
 
       return {

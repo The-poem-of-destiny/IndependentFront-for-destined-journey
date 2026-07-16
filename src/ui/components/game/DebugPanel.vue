@@ -7,7 +7,10 @@ const game = useGameStore()
 const settings = useSettingsStore()
 
 /** 组装完整导出数据 */
-function buildExportData() {
+async function buildExportData() {
+  // 🆕 导出前先把 Dexie 最新的 characters / save.metadata / saveProfile 回读进内存，
+  // 避免导出开局快照（inventory=[] / totalTurns=0 假象）
+  await game.refreshFromDb()
   const sysSettings = settings.settings
   return {
     exportedAt: new Date().toISOString(),
@@ -56,8 +59,8 @@ function buildExportData() {
   }
 }
 
-function downloadJson() {
-  const data = buildExportData()
+async function downloadJson() {
+  const data = await buildExportData()
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -70,7 +73,7 @@ function downloadJson() {
 }
 
 async function copyJson() {
-  const data = buildExportData()
+  const data = await buildExportData()
   try {
     await navigator.clipboard.writeText(JSON.stringify(data, null, 2))
   } catch {
