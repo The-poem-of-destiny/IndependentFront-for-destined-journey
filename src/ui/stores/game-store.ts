@@ -231,8 +231,13 @@ export const useGameStore = defineStore('game', () => {
 
   /** 持久化单条消息到 IndexedDB */
   async function persistMessage(msg: ChatMessage) {
+    if (!activeSaveId.value) {
+      // 规范 §10: 消息 saveId 必填；无活跃存档时拒绝写入，避免产生永不召回的孤儿消息 (#13)
+      console.error('[game-store] persistMessage 拒绝: activeSaveId 为空，消息未持久化:', msg.content.slice(0, 50))
+      return
+    }
     try {
-      await saveMessage({ ...msg, saveId: activeSaveId.value! })
+      await saveMessage({ ...msg, saveId: activeSaveId.value })
     } catch (err) {
       console.error('[game-store] 消息持久化失败:', err)
     }

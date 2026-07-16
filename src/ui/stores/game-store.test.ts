@@ -11,6 +11,7 @@ import { useGameStore } from './game-store'
 import {
   initializeDatabase, clearAllData,
   saveSaveSlot, saveCharacter, saveSaveProfile,
+  getDatabase,
 } from '@engine/database'
 import { createDefaultCharacterState } from '@engine/types'
 import type { SaveSlot, SaveProfile, CharacterState } from '@engine/types'
@@ -157,5 +158,25 @@ describe('refreshFromDb', () => {
     expect(store.activeSave?.metadata?.totalTurns).toBe(3)
     expect(store.saveProfile?.fp).toBe(5)
     expect(store.saveProfile?.gameTime?.minute).toBe(10)
+  })
+})
+
+// ===== persistMessage 前置校验 (#13) =====
+
+describe('persistMessage 前置校验', () => {
+  beforeEach(async () => {
+    try { await clearAllData() } catch { /* db may not exist yet */ }
+    await initializeDatabase()
+  })
+
+  it('activeSaveId 为 null 时拒绝持久化（不产生孤儿消息）', async () => {
+    const store = makeStore()
+    // activeSaveId 默认 null
+    store.addMessage('测试内容', 'user')
+    await new Promise(r => setTimeout(r, 20))   // addMessage 内部异步持久化
+    // getMessages(undefined) 会被 Dexie 的 where().equals(undefined) 拒绝，
+    // 改为直接查全表：库里不应出现这条孤儿消息
+    const all = await getDatabase().messages.toArray()
+    expect(all.filter(m => m.content === '测试内容')).toHaveLength(0)
   })
 })
