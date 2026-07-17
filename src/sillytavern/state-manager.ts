@@ -686,59 +686,80 @@ export class StateManager {
     return this.createEvent('item_use', patch);
   }
 
+  /**
+   * equip_item — M2 equippedSlot 单真源 (#10 #23 #24, 规范 §3)
+   *
+   * value = { name(必), slot(必) }
+   * 装备不是独立实体，是物品的状态: 穿=设 inventory[].equippedSlot，零数据搬运。
+   * slot 过 normalizeSlot（铁律5），无法识别 → throw 进 errors[]。
+   * quantity>1 拒绝直接穿（堆叠穿戴互斥，提示先拆分）。
+   * 同槽已有穿戴者 → 自动脱下（仅清其 equippedSlot，字段无损）。
+   */
   private async applyEquipItem(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    const equipData = patch.value as { itemId: string; slot: string; name: string; stats?: Record<string, number> };
-    if (!equipData?.itemId) throw new Error('缺少装备数据');
+    const value = patch.value as { name?: string; slot?: string };
+    if (!value?.name) throw new Error('equip_item 需要 value.name');
+    if (!value.slot) throw new Error('equip_item 需要 value.slot');
 
-    const existing = char.equipment.find(e => e.slot === equipData.slot);
-    if (existing) {
-      // 卸下旧装备（加入背包）
-      char.inventory.push({
-        id: existing.itemId,
-        name: existing.name,
-        quantity: 1,
-        type: equipData.slot === 'weapon' ? 'weapon' : 'armor',
-      });
+    const slot = normalizeSlot(value.slot);
+    if (!slot) throw new Error(`无法识别的装备槽位: ${value.slot}`);
+
+    const item = findByName(char.inventory, value.name);
+    if (!item) throw new Error(`物品不存在: ${value.name}`);
+
+    // 堆叠穿戴互斥: 堆叠物品穿上后 quantity 语义会撕裂（穿 1 件还是 5 件？）
+    if (item.quantity > 1) {
+      throw new Error(`堆叠物品不可直接穿戴: ${value.name}（数量 ${item.quantity}），请先拆分为单件`);
     }
 
-    // 装备新物品
-    char.equipment = char.equipment.filter(e => e.slot !== equipData.slot);
-    char.equipment.push({
-      slot: equipData.slot,
-      itemId: equipData.itemId,
-      name: equipData.name,
-      stats: equipData.stats,
-    });
-
-    // 从背包中移除
-    const invIdx = char.inventory.findIndex(i => i.id === equipData.itemId);
-    if (invIdx >= 0) {
-      char.inventory[invIdx].quantity -= 1;
-      if (char.inventory[invIdx].quantity <= 0) {
-        char.inventory.splice(invIdx, 1);
+    // 同槽顶替: 仅清旧穿戴者的 equippedSlot，物品留在背包字段无损（杀 #10 有损穿脱）
+    for (const other of char.inventory) {
+      if (other !== item && other.equippedSlot === slot) {
+        other.equippedSlot = null;
       }
     }
 
+    item.equippedSlot = slot;
     await saveCharacter(char);
+
     return this.createEvent('item_use', patch);
   }
 
+  /**
+   * unequip_item — M2 equippedSlot 单真源 (#10 #23 #24, 规范 §3)
+   *
+   * value = { name } 或 { slot }（按 slot 找当前穿戴者，slot 先归一化）
+   * 或裸字符串（先按 slot 解释找穿戴者，再按 name 兜底，兼容翻译层现行发法）// 过渡: M3 删
+   * 脱=清 equippedSlot，零数据搬运。找不到（无此物品 / 该槽无穿戴）→ throw 进 errors[]。
+   */
   private async applyUnequipItem(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    const slot = patch.value as string;
-    const equipped = char.equipment.find(e => e.slot === slot);
-    if (equipped) {
-      char.inventory.push({
-        id: equipped.itemId,
-        name: equipped.name,
-        quantity: 1,
-        type: slot === 'weapon' ? 'weapon' : 'armor',
-      });
-      char.equipment = char.equipment.filter(e => e.slot !== slot);
+    const value = patch.value as { name?: string; slot?: string } | string;
+    let item: InventoryItem | undefined;
+
+    if (typeof value === 'string') {
+      // 过渡: M3 删 — 裸字符串先按 slot 解释（旧语义 value=slot），再按 name 兜底
+      const slot = normalizeSlot(value);
+      item = (slot ? char.inventory.find(i => i.equippedSlot === slot) : undefined)
+        ?? findByName(char.inventory, value);
+      if (!item) throw new Error(`该槽位无穿戴且物品不存在: ${value}`);
+    } else if (value?.name) {
+      // 按名脱
+      item = findByName(char.inventory, value.name);
+      if (!item) throw new Error(`物品不存在: ${value.name}`);
+    } else if (value?.slot) {
+      // 按槽脱: slot 先归一化再匹配穿戴者（铁律5）
+      const slot = normalizeSlot(value.slot);
+      if (!slot) throw new Error(`无法识别的装备槽位: ${value.slot}`);
+      item = char.inventory.find(i => i.equippedSlot === slot);
+      if (!item) throw new Error(`该槽位无穿戴: ${slot}`);
+    } else {
+      throw new Error('unequip_item 需要 value.name 或 value.slot');
     }
+
+    item.equippedSlot = null;
     await saveCharacter(char);
 
     return this.createEvent('item_use', patch);

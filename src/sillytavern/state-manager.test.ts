@@ -1141,101 +1141,191 @@ describe('StateManager', () => {
   });
 
   // ===================================================================
-  // 9. equipment
+  // 9. equipment — M2 equippedSlot 单真源 (#10 #23 #24, 规范 §3)
   // ===================================================================
-  describe('commitChatState — equip / unequip', () => {
-    it('should equip item and remove it from inventory', async () => {
+  describe('commitChatState — equip / unequip (equippedSlot 单真源)', () => {
+    it('equip: 设 inventory 物品的 equippedSlot，effects/scripts/rarity 原地未动（零搬运）', async () => {
       const char = buildMockCharacter({
-        id: 'char-001',
-        inventory: [{ id: 'wood_sword', name: 'Wooden Sword', quantity: 1, type: 'weapon' }],
-        equipment: [],
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{
+          name: '木剑', quantity: 1, type: '装备', rarity: '优良',
+          effects: { '锋利': '攻击时附加 1 点伤害' },
+          scripts: { onHit: 'return 1;' },
+        }],
       });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      await db.saveCharacter(char);
 
-      const sm = new StateManager({ saveId: 'save-001' });
+      const sm = new StateManager({ saveId: 's1' });
       const result = await sm.commitChatState([
-        {
-          op: 'equip_item',
-          target: 'characters.char-001',
-          value: { itemId: 'wood_sword', slot: 'weapon', name: 'Wooden Sword', stats: { atk: 5 } },
-        },
+        { op: 'equip_item', target: 'characters.理查德', value: { name: '木剑', slot: '武器' } },
       ]);
 
       expect(result.success).toBe(true);
-      expect(char.equipment).toHaveLength(1);
-      expect(char.equipment[0].slot).toBe('weapon');
-      expect(char.equipment[0].itemId).toBe('wood_sword');
-      expect(char.inventory).toHaveLength(0); // removed
+      expect(char.inventory).toHaveLength(1);                    // 物品留在背包，不搬运
+      expect(char.inventory[0].equippedSlot).toBe('武器');       // 穿=状态位
+      expect(char.inventory[0].rarity).toBe('优良');             // 字段原地未动
+      expect(char.inventory[0].effects).toEqual({ '锋利': '攻击时附加 1 点伤害' });
+      expect(char.inventory[0].scripts).toEqual({ onHit: 'return 1;' });
       expect(result.eventsGenerated[0].type).toBe('item_use');
     });
 
-    it('should unequip old item from same slot and move to inventory', async () => {
+    it('equip 同槽顶替: 旧装备 equippedSlot=null 且字段无损，不 splice 不搬运（杀 #10）', async () => {
       const char = buildMockCharacter({
-        id: 'char-001',
-        inventory: [{ id: 'iron_sword', name: 'Iron Sword', quantity: 1, type: 'weapon' }],
-        equipment: [
-          { slot: 'weapon', itemId: 'wood_sword', name: 'Wooden Sword', stats: { atk: 3 } },
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [
+          { name: '木剑', quantity: 1, equippedSlot: '武器', rarity: '普通', effects: { '旧词条': '保留' } },
+          { name: '铁剑', quantity: 1, rarity: '稀有' },
         ],
       });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      await db.saveCharacter(char);
 
-      const sm = new StateManager({ saveId: 'save-001' });
-      await sm.commitChatState([
-        {
-          op: 'equip_item',
-          target: 'characters.char-001',
-          value: { itemId: 'iron_sword', slot: 'weapon', name: 'Iron Sword', stats: { atk: 10 } },
-        },
-      ]);
-
-      // Old weapon moved to inventory
-      const oldInInv = char.inventory.find(i => i.id === 'wood_sword');
-      expect(oldInInv).toBeDefined();
-      expect(oldInInv!.quantity).toBe(1);
-      // New weapon equipped
-      expect(char.equipment).toHaveLength(1);
-      expect(char.equipment[0].itemId).toBe('iron_sword');
-      // Iron sword removed from inventory
-      expect(char.inventory.filter(i => i.id === 'iron_sword')).toHaveLength(0);
-    });
-
-    it('should unequip item and move back to inventory', async () => {
-      const char = buildMockCharacter({
-        id: 'char-001',
-        inventory: [],
-        equipment: [
-          { slot: 'armor', itemId: 'leather_armor', name: 'Leather Armor', stats: { def: 5 } },
-        ],
-      });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
-
-      const sm = new StateManager({ saveId: 'save-001' });
-      await sm.commitChatState([
-        { op: 'unequip_item', target: 'characters.char-001', value: 'armor' },
-      ]);
-
-      expect(char.equipment).toHaveLength(0);
-      expect(char.inventory).toHaveLength(1);
-      expect(char.inventory[0].id).toBe('leather_armor');
-      expect(char.inventory[0].type).toBe('armor');
-    });
-
-    it('should be no-op when unequipping empty slot', async () => {
-      const char = buildMockCharacter({
-        id: 'char-001',
-        inventory: [],
-        equipment: [],
-      });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
-
-      const sm = new StateManager({ saveId: 'save-001' });
+      const sm = new StateManager({ saveId: 's1' });
       const result = await sm.commitChatState([
-        { op: 'unequip_item', target: 'characters.char-001', value: 'weapon' },
+        { op: 'equip_item', target: 'characters.理查德', value: { name: '铁剑', slot: '武器' } },
       ]);
 
       expect(result.success).toBe(true);
-      expect(char.equipment).toHaveLength(0);
-      expect(char.inventory).toHaveLength(0);
+      expect(char.inventory).toHaveLength(2);                    // 零搬运，两件都在
+      const old = char.inventory.find(i => i.name === '木剑')!;
+      expect(old.equippedSlot).toBeNull();                       // 旧装备自动脱下
+      expect(old.rarity).toBe('普通');                           // 字段无损
+      expect(old.effects).toEqual({ '旧词条': '保留' });
+      expect(char.inventory.find(i => i.name === '铁剑')!.equippedSlot).toBe('武器');
+    });
+
+    it('equip: quantity>1 堆叠物品拒穿 → 进 errors[]（堆叠穿戴互斥，提示先拆分）', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '飞刀', quantity: 5, type: '装备' }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'equip_item', target: 'characters.理查德', value: { name: '飞刀', slot: '武器' } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('先拆分');
+      expect(char.inventory[0].equippedSlot ?? null).toBeNull(); // 未穿上
+    });
+
+    it('equip: slot=weapon 英文别名归一为 武器（铁律5）', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '铁剑', quantity: 1 }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'equip_item', target: 'characters.理查德', value: { name: '铁剑', slot: 'weapon' } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.inventory[0].equippedSlot).toBe('武器');
+    });
+
+    it('equip: 无法识别的 slot / 缺 slot / 物品不在背包 → 各自进 errors[]', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '铁剑', quantity: 1 }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'equip_item', target: 'characters.理查德', value: { name: '铁剑', slot: '不存在的槽位' } },
+        { op: 'equip_item', target: 'characters.理查德', value: { name: '铁剑' } },
+        { op: 'equip_item', target: 'characters.理查德', value: { name: '幽灵剑', slot: '武器' } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(3);
+      expect(result.errors[0]).toContain('槽位');
+      expect(result.errors[1]).toContain('slot');
+      expect(result.errors[2]).toContain('物品不存在');
+      expect(char.inventory[0].equippedSlot ?? null).toBeNull(); // 全部失败，未穿上
+    });
+
+    it('unequip 按 name: 清 equippedSlot，物品留在背包字段无损（零搬运）', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '皮甲', quantity: 1, equippedSlot: '身体', rarity: '优良', stats: { def: 5 } }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'unequip_item', target: 'characters.理查德', value: { name: '皮甲' } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.inventory).toHaveLength(1);
+      expect(char.inventory[0].equippedSlot).toBeNull();
+      expect(char.inventory[0].rarity).toBe('优良');
+      expect(char.inventory[0].stats).toEqual({ def: 5 });
+    });
+
+    it('unequip 按 slot: 找当前穿戴者清 equippedSlot；slot 英文别名先归一', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [
+          { name: '木剑', quantity: 1, equippedSlot: '武器' },
+          { name: '皮甲', quantity: 1, equippedSlot: '身体' },
+        ],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'unequip_item', target: 'characters.理查德', value: { slot: 'weapon' } },  // 英文别名 → 武器
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.inventory.find(i => i.name === '木剑')!.equippedSlot).toBeNull();
+      expect(char.inventory.find(i => i.name === '皮甲')!.equippedSlot).toBe('身体');  // 别的槽不受影响
+    });
+
+    it('unequip 找不到（无此物品 / 该槽无穿戴）→ 进 errors[] 不静默', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'unequip_item', target: 'characters.理查德', value: { name: '不存在的装备' } },
+        { op: 'unequip_item', target: 'characters.理查德', value: { slot: '武器' } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(2);
+      expect(result.errors[0]).toContain('物品不存在');
+      expect(result.errors[1]).toContain('无穿戴');
+    });
+
+    it('unequip 裸字符串: 先按 slot 解释、再按 name 兜底（过渡: M3 删）', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [
+          { name: '木剑', quantity: 1, equippedSlot: '武器' },
+          { name: '幸运吊坠', quantity: 1, equippedSlot: '饰品' },
+        ],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'unequip_item', target: 'characters.理查德', value: 'weapon' },      // 按 slot（英文别名归一）
+        { op: 'unequip_item', target: 'characters.理查德', value: '幸运吊坠' },    // 非槽位词 → 按 name 兜底
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.inventory.find(i => i.name === '木剑')!.equippedSlot).toBeNull();
+      expect(char.inventory.find(i => i.name === '幸运吊坠')!.equippedSlot).toBeNull();
     });
   });
 
