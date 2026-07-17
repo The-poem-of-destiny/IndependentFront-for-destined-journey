@@ -179,7 +179,7 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
   // ---- vars_update: 变量更新（合并原 char_update + item_update，可选 Agentic）----
   vars_update: {
     fixedSystem: '角色/物品状态更新系统。根据请求调度器的标签更新角色状态和物品状态，必要时调用工具编写状态效果脚本。完整提示词见 agent-config.json 和模板系统。',
-    fixedExamples: '{"characters": {"replace": [{"id": "player_1", "path": "hp", "value": 88}]}, "items": {"consume": [{"owner": "player_1", "target": "治疗药水", "quantity": 1}]}}',
+    fixedExamples: '{"characters": {"replace": [{"name": "理查德", "path": "hp", "value": 88}]}, "items": {"consume": [{"owner": "理查德", "target": "治疗药水", "quantity": 1}]}}',
     variableContext: (ctx: AgentContext) => '',
     variableInstruction: (ctx: AgentContext) => {
       const dispatcherOutput = ctx.agentOutputs?.get('request_dispatcher') ?? '';
