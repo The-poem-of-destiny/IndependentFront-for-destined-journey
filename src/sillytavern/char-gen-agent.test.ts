@@ -1166,3 +1166,38 @@ describe('parseCharGenOutput — <char_result> 内嵌 JSON 兜底', () => {
     expect(out.attributes.int).toBe(5);
   });
 });
+
+// ========== parseItemGenOutput — skill 嵌套 description 子标签（真机 2026-07-18） ==========
+
+describe('parseSkillsXML — 嵌套 description 子标签 + 中文 type 归一', () => {
+  it('AI 在 <skill> 里嵌 <description> 子标签 + type="主动" → 纯文本 + active', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result>',
+      '<skills>',
+      '<skill name="幻书召来" type="主动" cost_type="MP" cost_amount="5">',
+      '  <description>',
+      '    妲丽安以钥匙轻叩虚空，从壶中之天召来一册幻书。',
+      '  </description>',
+      '  <effect name="召来">从书库中召唤一册幻书临时使用</effect>',
+      '</skill>',
+      '<skill name="书库的智慧" type="被动">',
+      '  <description>壶中之天的九十万册藏书赋予的知识。</description>',
+      '</skill>',
+      '</skills>',
+      '</item_result>',
+    ].join('\n');
+
+    const out = parseItemGenOutput(raw);
+    expect(out.skills).toHaveLength(2);
+    // description 纯文本无标签
+    expect(out.skills[0].description).toContain('妲丽安以钥匙轻叩');
+    expect(out.skills[0].description).not.toMatch(/<[a-z_]+/i);
+    expect(out.skills[1].description).toBe('壶中之天的九十万册藏书赋予的知识。');
+    // 中文 type 归一
+    expect(out.skills[0].type).toBe('active');
+    expect(out.skills[1].type).toBe('passive');
+    // effects 提取不受影响
+    expect(out.skills[0].effects?.['召来']).toContain('召唤');
+  });
+});

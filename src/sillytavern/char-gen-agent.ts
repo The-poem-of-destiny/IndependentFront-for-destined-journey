@@ -830,13 +830,21 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
       scripts[sm[1]] = sm[2]?.trim() ?? '';
     }
 
-    // 描述 = 技能内容中的纯文本部分（去除 effect/script 标签）
-    const description = innerContent.replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/g, '').trim();
+    // 描述 = 纯文本部分（去除所有嵌套子标签，包括 AI 自造的 <description>/<notes>/<ability> 等）
+    // 优先取 <description> 子标签的文本内容，若无则剥所有标签留纯文本
+    const descSubTag = innerContent.match(/<description\b[^>]*>([\s\S]*?)<\/description>/);
+    const description = descSubTag
+      ? descSubTag[1].trim()
+      : innerContent.replace(/<\/?[a-z_][\w-]*[^>]*>/gi, '').trim();
+    // 中文 type 归一（真机实测 AI 产 '主动'/'被动' 直接落库 → UI 不识别）
+    const skillType = (attrs['type'] ?? '').trim();
+    const normalizedType: 'active' | 'passive' =
+      (skillType === '被动' || skillType === 'passive') ? 'passive' : 'active';
 
     results.push({
       name: attrs['name'] ?? '未命名技能',
-      description: description || innerContent,
-      type: (attrs['type'] as 'active' | 'passive') ?? 'active',
+      description: description || (descSubTag ? '' : innerContent.replace(/<[^>]+>/g, '').trim()),
+      type: normalizedType,
       cost: attrs['cost_type'] ? { type: attrs['cost_type'] as 'HP' | 'MP' | 'SP', amount: parseInt(attrs['cost_amount'] ?? '0') } : undefined,
       cooldown: attrs['cooldown'] ? parseInt(attrs['cooldown']) : undefined,
       effects: Object.keys(effects).length > 0 ? effects : undefined,
@@ -860,7 +868,7 @@ function parseEquipmentXML(xml: string): ItemGenOutput['equipment'] {
     results.push({
       slot: attrs['slot'] ?? '饰品',
       name: attrs['name'] ?? '未命名装备',
-      description: m[2]?.trim() ?? '',
+      description: stripInnerTags(m[2]?.trim() ?? ''),  // 真机修: AI 可能嵌套子标签
       stats,
       durability: attrs['durability'] ? parseInt(attrs['durability']) : undefined,
       quality: attrs['quality'],
@@ -876,7 +884,7 @@ function parseInventoryXML(xml: string): ItemGenOutput['inventory'] {
     const attrs = parseAttrsStr(m[1]);
     results.push({
       name: attrs['name'] ?? '未命名物品',
-      description: m[2]?.trim() ?? '',
+      description: stripInnerTags(m[2]?.trim() ?? ''),  // 真机修: AI 可能嵌套子标签
       quantity: parseInt(attrs['quantity'] ?? '1') || 1,
       type: attrs['type'] ?? '消耗品',
       rarity: attrs['rarity'],
