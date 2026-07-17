@@ -876,7 +876,7 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
 
   it('path=inventory → add_item（M3: 无 id 生成，含 equippedSlot）', async () => {
     const patches = await runVarsUpdateWithJson({
-      characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'inventory', value: { name: '金色钥匙挂坠', description: '表面有刻文', quantity: 1 } }], remove: [] },
+      characters: { replace: [], delta: [], add: [{ name: 'c1', path: 'inventory', value: { name: '金色钥匙挂坠', description: '表面有刻文', quantity: 1 } }], remove: [] },
       items: {},
     });
     const p = patches.find(x => x.op === 'add_item');
@@ -894,7 +894,7 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
 
   it('path=equipment 无 itemId → 单 add_item + equippedSlot（M3: 不再 add+equip 两步）', async () => {
     const patches = await runVarsUpdateWithJson({
-      characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'equipment', value: { name: '法师长袍', type: '防具', slot: '身体' } }], remove: [] },
+      characters: { replace: [], delta: [], add: [{ name: 'c1', path: 'equipment', value: { name: '法师长袍', type: '防具', slot: '身体' } }], remove: [] },
       items: {},
     });
     const addP = patches.find(x => x.op === 'add_item');
@@ -910,9 +910,9 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
     expect(patches.filter(x => x.op === 'equip_item')).toHaveLength(0);
   });
 
-  it('path=equipment 有 itemId → 单 add_item + equippedSlot（M3: 不再走 equip_item）', async () => {
+  it('path=equipment 夹带 itemId → 忽略 itemId 按 name 落库（M4: itemId 过渡读已拆）', async () => {
     const patches = await runVarsUpdateWithJson({
-      characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'equipment', value: { itemId: 'item_9', slot: '武器', name: '白橡木法杖' } }], remove: [] },
+      characters: { replace: [], delta: [], add: [{ name: 'c1', path: 'equipment', value: { itemId: 'item_9', slot: '武器', name: '白橡木法杖' } }], remove: [] },
       items: {},
     });
     // M3: 装备统一走 add_item（含 equippedSlot），不再走 equip_item
@@ -927,7 +927,7 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
 
   it('path=equipment slot 未知 → 只 add_item 不发 equip_item（物品留背包）', async () => {
     const patches = await runVarsUpdateWithJson({
-      characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'equipment', value: { name: '神秘披风' } }], remove: [] },
+      characters: { replace: [], delta: [], add: [{ name: 'c1', path: 'equipment', value: { name: '神秘披风' } }], remove: [] },
       items: {},
     });
     // M2: slot 未知不再发 '未知' 垃圾值（normalizeSlot 会拒 → throw），跳过 equip
@@ -938,7 +938,7 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
   // M2 T14 评审修复: type='防具'（非 slot 名）→ normalizeSlot 拒，不发 equip_item // M3 重写
   it('path=equipment type=防具 非槽位 → 不发 equip_item（防具在背包,不 throw）', async () => {
     const patches = await runVarsUpdateWithJson({
-      characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'equipment', value: { name: '铁甲', type: '防具' } }], remove: [] },
+      characters: { replace: [], delta: [], add: [{ name: 'c1', path: 'equipment', value: { name: '铁甲', type: '防具' } }], remove: [] },
       items: {},
     });
     expect(patches.filter(x => x.op === 'add_item')).toHaveLength(1);
@@ -950,8 +950,8 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
       characters: {
         replace: [], delta: [],
         add: [
-          { id: 'c1', path: 'skills', value: { name: '火球术' } },
-          { id: 'c1', path: 'statusEffects', value: { name: '灼烧' } },
+          { name: 'c1', path: 'skills', value: { name: '火球术' } },
+          { name: 'c1', path: 'statusEffects', value: { name: '灼烧' } },
         ],
         remove: [],
       },
@@ -963,7 +963,7 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
 
   it('characters.remove path=skills → remove_skill {name}（M2: removeSkill 假字段已废）', async () => {
     const patches = await runVarsUpdateWithJson({
-      characters: { replace: [], delta: [], add: [], remove: [{ id: 'c1', path: 'skills', target: '火球术' }] },
+      characters: { replace: [], delta: [], add: [], remove: [{ name: 'c1', path: 'skills', target: '火球术' }] },
       items: {},
     });
     const p = patches.find(x => x.op === 'remove_skill');
@@ -972,6 +972,19 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
     expect(p.value).toEqual({ name: '火球术' });
     // 防回归: 不能再出现 removeSkill 假字段的 update_character（白名单会 throw）
     expect(patches.some(x => x.op === 'update_character' && x.value?.removeSkill)).toBe(false);
+  });
+
+  it('M4 名字寻址唯一化: 条目只有 id 无 name → 全部跳过不产 patch', async () => {
+    const patches = await runVarsUpdateWithJson({
+      characters: {
+        replace: [{ id: 'uuid-1', path: 'hp', value: 10 }],
+        delta: [{ id: 'uuid-1', path: 'hp', amount: -5 }],
+        add: [{ id: 'uuid-1', path: 'skills', value: { name: '火球术' } }],
+        remove: [{ id: 'uuid-1', path: 'skills', target: '火球术' }],
+      },
+      items: {},
+    });
+    expect(patches).toHaveLength(0);
   });
 
   it('items.modify → update_item {name, changes}（M2: itemUpdate 假字段已废，禁改键剥离）', async () => {
@@ -1015,7 +1028,7 @@ describe('AgentOrchestrator — onStateCommitError 上浮', () => {
     }));
     const onStateCommitError = vi.fn();
     await runVarsUpdateWithJson(
-      { characters: { replace: [{ id: 'x', path: 'hp', value: 10 }], delta: [], add: [], remove: [] }, items: {} },
+      { characters: { replace: [{ name: 'x', path: 'hp', value: 10 }], delta: [], add: [], remove: [] }, items: {} },
       { onStateCommitError },
     );
     expect(onStateCommitError).toHaveBeenCalled();
@@ -1029,7 +1042,7 @@ describe('AgentOrchestrator — onStateCommitError 上浮', () => {
     }));
     const onStateCommitError = vi.fn();
     await runVarsUpdateWithJson(
-      { characters: { replace: [{ id: 'x', path: 'hp', value: 10 }], delta: [], add: [], remove: [] }, items: {} },
+      { characters: { replace: [{ name: 'x', path: 'hp', value: 10 }], delta: [], add: [], remove: [] }, items: {} },
       { onStateCommitError },
     );
     expect(onStateCommitError).not.toHaveBeenCalled();

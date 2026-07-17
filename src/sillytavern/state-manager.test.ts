@@ -299,18 +299,18 @@ describe('StateManager', () => {
   // 4. update_character
   // ===================================================================
   describe('commitChatState — update_character', () => {
-    it('should call getCharacter and saveCharacter with correct id', async () => {
+    it('should resolve character by name and call saveCharacter (M4 名字寻址)', async () => {
       const char = buildMockCharacter({ id: 'char-001' });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'update_character', target: 'characters.char-001', value: { race: '精灵' } },
+        { op: 'update_character', target: 'characters.Test Hero', value: { race: '精灵' } },
       ]);
 
       expect(result.success).toBe(true);
       expect(result.patchesApplied).toBe(1);
-      expect(vi.mocked(db.getCharacter)).toHaveBeenCalledWith('char-001');
+      expect(vi.mocked(db.getCharacters)).toHaveBeenCalledWith('save-001');
       expect(vi.mocked(db.saveCharacter)).toHaveBeenCalledTimes(1);
       expect(char.race).toBe('精灵');
     });
@@ -331,11 +331,11 @@ describe('StateManager', () => {
 
     it('should apply value object to character fields', async () => {
       const char = buildMockCharacter({ id: 'char-001', race: 'Elf', money: 10 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'update_character', target: 'characters.char-001', value: { race: 'Human', money: 200 } },
+        { op: 'update_character', target: 'characters.Test Hero', value: { race: 'Human', money: 200 } },
       ]);
 
       expect(char.race).toBe('Human');
@@ -344,13 +344,13 @@ describe('StateManager', () => {
 
     it('should set currentAction from metadata.action', async () => {
       const char = buildMockCharacter({ id: 'char-001', currentAction: 'old_action' });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
         {
           op: 'update_character',
-          target: 'characters.char-001',
+          target: 'characters.Test Hero',
           value: { hp: 90 },
           metadata: { action: 'new_action' },
         },
@@ -361,11 +361,11 @@ describe('StateManager', () => {
 
     it('should keep existing currentAction when metadata has no action', async () => {
       const char = buildMockCharacter({ id: 'char-001', currentAction: 'existing_action' });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'update_character', target: 'characters.char-001', value: { hp: 90 } },
+        { op: 'update_character', target: 'characters.Test Hero', value: { hp: 90 } },
       ]);
 
       expect(char.currentAction).toBe('existing_action');
@@ -375,13 +375,13 @@ describe('StateManager', () => {
 
     it('① 禁数组字段: value 含 inventory → errors 且角色对象无污染（原子拒绝）', async () => {
       const char = buildMockCharacter({ id: 'char-001', race: 'Elf', money: 100 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
         {
           op: 'update_character',
-          target: 'characters.char-001',
+          target: 'characters.Test Hero',
           // 合法键 money 与非法键 inventory 混合 → 整个 patch 必须原子拒绝
           value: { money: 999, inventory: [{ name: '伪造物品' }] } as any,
         },
@@ -398,11 +398,11 @@ describe('StateManager', () => {
 
     it('② 禁 name: value 含 name → errors', async () => {
       const char = buildMockCharacter({ id: 'char-001', name: '原名' });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'update_character', target: 'characters.char-001', value: { name: '新名' } },
+        { op: 'update_character', target: 'characters.原名', value: { name: '新名' } },
       ]);
 
       expect(result.success).toBe(false);
@@ -413,11 +413,11 @@ describe('StateManager', () => {
 
     it('禁账务字段: value 含 saveId → errors', async () => {
       const char = buildMockCharacter({ id: 'char-001', saveId: 'save-001' });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'update_character', target: 'characters.char-001', value: { saveId: 'hacked' } as any },
+        { op: 'update_character', target: 'characters.Test Hero', value: { saveId: 'hacked' } as any },
       ]);
 
       expect(result.success).toBe(false);
@@ -427,13 +427,13 @@ describe('StateManager', () => {
 
     it('③ delta 真加法: {money:-50, delta:true} 在 money=100 时结果 50', async () => {
       const char = buildMockCharacter({ id: 'char-001', money: 100 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
         {
           op: 'update_character',
-          target: 'characters.char-001',
+          target: 'characters.Test Hero',
           value: { money: -50 },
           metadata: { delta: true },
         },
@@ -447,13 +447,13 @@ describe('StateManager', () => {
       const char = buildMockCharacter({ id: 'char-001' });
       // 强制该字段为 undefined 模拟脏数据
       (char as any).money = undefined;
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
         {
           op: 'update_character',
-          target: 'characters.char-001',
+          target: 'characters.Test Hero',
           value: { money: 30 },
           metadata: { delta: true },
         },
@@ -464,13 +464,13 @@ describe('StateManager', () => {
 
     it('delta 非数值字段 → errors（loud 拒绝）', async () => {
       const char = buildMockCharacter({ id: 'char-001', race: 'Elf' });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
         {
           op: 'update_character',
-          target: 'characters.char-001',
+          target: 'characters.Test Hero',
           value: { race: 'Human' },
           metadata: { delta: true },
         },
@@ -483,11 +483,11 @@ describe('StateManager', () => {
 
     it('未知键 → errors（疑似 AI 拼写错误，loud 拒绝）', async () => {
       const char = buildMockCharacter({ id: 'char-001' });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'update_character', target: 'characters.char-001', value: { hpp: 90 } as any },
+        { op: 'update_character', target: 'characters.Test Hero', value: { hpp: 90 } as any },
       ]);
 
       expect(result.success).toBe(false);
@@ -496,11 +496,11 @@ describe('StateManager', () => {
 
     it('④ currentAction 正常写入且不顶掉 location', async () => {
       const char = buildMockCharacter({ id: 'char-001', location: 'village_square', currentAction: '' });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'update_character', target: 'characters.char-001', value: { currentAction: '锻造武器' } },
+        { op: 'update_character', target: 'characters.Test Hero', value: { currentAction: '锻造武器' } },
       ]);
 
       expect(result.success).toBe(true);
@@ -512,11 +512,11 @@ describe('StateManager', () => {
 
     it('⑤ 钳制: {hp: 9999} 在 maxHp=100 时落地为 100（与 set_hp 语义一致）', async () => {
       const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 100 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'update_character', target: 'characters.char-001', value: { hp: 9999 } },
+        { op: 'update_character', target: 'characters.Test Hero', value: { hp: 9999 } },
       ]);
 
       expect(result.success).toBe(true);
@@ -525,12 +525,12 @@ describe('StateManager', () => {
 
     it('钳制: delta hp 超上限被钳到 maxHp，负穿透钳到 0', async () => {
       const char = buildMockCharacter({ id: 'char-001', hp: 90, maxHp: 100, mp: 10, maxMp: 50 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'update_character', target: 'characters.char-001', value: { hp: 50 }, metadata: { delta: true } },
-        { op: 'update_character', target: 'characters.char-001', value: { mp: -999 }, metadata: { delta: true } },
+        { op: 'update_character', target: 'characters.Test Hero', value: { hp: 50 }, metadata: { delta: true } },
+        { op: 'update_character', target: 'characters.Test Hero', value: { mp: -999 }, metadata: { delta: true } },
       ]);
 
       expect(result.success).toBe(true);
@@ -540,11 +540,11 @@ describe('StateManager', () => {
 
     it('钳制: 同 patch 写 hp+maxHp 时以写后 maxHp 为准', async () => {
       const char = buildMockCharacter({ id: 'char-001', hp: 100, maxHp: 100 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'update_character', target: 'characters.char-001', value: { hp: 180, maxHp: 200 } },
+        { op: 'update_character', target: 'characters.Test Hero', value: { hp: 180, maxHp: 200 } },
       ]);
 
       expect(result.success).toBe(true);
@@ -557,11 +557,11 @@ describe('StateManager', () => {
         id: 'char-001',
         attributes: { str: 10, dex: 11, con: 12, int: 13, spi: 14 } as any,
       });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'update_character', target: 'characters.char-001', value: { attributes: { str: 20 } } },
+        { op: 'update_character', target: 'characters.Test Hero', value: { attributes: { str: 20 } } },
       ]);
 
       expect(result.success).toBe(true);
@@ -570,13 +570,13 @@ describe('StateManager', () => {
 
     it('attributes + delta=true → errors（attributes 非数值字段，既有规则覆盖）', async () => {
       const char = buildMockCharacter({ id: 'char-001' });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
         {
           op: 'update_character',
-          target: 'characters.char-001',
+          target: 'characters.Test Hero',
           value: { attributes: { str: 5 } },
           metadata: { delta: true },
         },
@@ -593,11 +593,11 @@ describe('StateManager', () => {
   describe('commitChatState — set_hp / set_mp / set_sp', () => {
     it('should clamp set_hp to maxHp', async () => {
       const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 100 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'set_hp', target: 'characters.char-001', value: 150 },
+        { op: 'set_hp', target: 'characters.Test Hero', value: 150 },
       ]);
 
       expect(result.success).toBe(true);
@@ -607,11 +607,11 @@ describe('StateManager', () => {
 
     it('should clamp set_hp to 0 (lower bound)', async () => {
       const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 100 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'set_hp', target: 'characters.char-001', value: -10 },
+        { op: 'set_hp', target: 'characters.Test Hero', value: -10 },
       ]);
 
       expect(char.hp).toBe(0);
@@ -619,11 +619,11 @@ describe('StateManager', () => {
 
     it('should clamp set_mp to maxMp', async () => {
       const char = buildMockCharacter({ id: 'char-001', mp: 20, maxMp: 50 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'set_mp', target: 'characters.char-001', value: 80 },
+        { op: 'set_mp', target: 'characters.Test Hero', value: 80 },
       ]);
 
       expect(char.mp).toBe(50);
@@ -631,11 +631,11 @@ describe('StateManager', () => {
 
     it('should clamp set_sp to maxSp', async () => {
       const char = buildMockCharacter({ id: 'char-001', sp: 10, maxSp: 50 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'set_sp', target: 'characters.char-001', value: 60 },
+        { op: 'set_sp', target: 'characters.Test Hero', value: 60 },
       ]);
 
       expect(char.sp).toBe(50);
@@ -643,11 +643,11 @@ describe('StateManager', () => {
 
     it('should set resource to exact value when within bounds', async () => {
       const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 100 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'set_hp', target: 'characters.char-001', value: 75 },
+        { op: 'set_hp', target: 'characters.Test Hero', value: 75 },
       ]);
 
       expect(char.hp).toBe(75);
@@ -660,11 +660,11 @@ describe('StateManager', () => {
   describe('commitChatState — delta_hp / delta_mp / delta_sp', () => {
     it('should apply positive delta to hp', async () => {
       const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 100 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'delta_hp', target: 'characters.char-001', amount: 20 },
+        { op: 'delta_hp', target: 'characters.Test Hero', amount: 20 },
       ]);
 
       expect(result.success).toBe(true);
@@ -674,11 +674,11 @@ describe('StateManager', () => {
 
     it('should apply negative delta to hp', async () => {
       const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 100 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'delta_hp', target: 'characters.char-001', amount: -30 },
+        { op: 'delta_hp', target: 'characters.Test Hero', amount: -30 },
       ]);
 
       expect(char.hp).toBe(20);
@@ -686,11 +686,11 @@ describe('StateManager', () => {
 
     it('should clamp delta_hp result at 0 (lower bound)', async () => {
       const char = buildMockCharacter({ id: 'char-001', hp: 20, maxHp: 100 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'delta_hp', target: 'characters.char-001', amount: -50 },
+        { op: 'delta_hp', target: 'characters.Test Hero', amount: -50 },
       ]);
 
       expect(char.hp).toBe(0);
@@ -698,11 +698,11 @@ describe('StateManager', () => {
 
     it('should clamp delta_hp result at maxHp (upper bound)', async () => {
       const char = buildMockCharacter({ id: 'char-001', hp: 90, maxHp: 100 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'delta_hp', target: 'characters.char-001', amount: 30 },
+        { op: 'delta_hp', target: 'characters.Test Hero', amount: 30 },
       ]);
 
       expect(char.hp).toBe(100);
@@ -710,11 +710,11 @@ describe('StateManager', () => {
 
     it('should apply delta_mp correctly', async () => {
       const char = buildMockCharacter({ id: 'char-001', mp: 30, maxMp: 50 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'delta_mp', target: 'characters.char-001', amount: -15 },
+        { op: 'delta_mp', target: 'characters.Test Hero', amount: -15 },
       ]);
 
       expect(char.mp).toBe(15);
@@ -722,11 +722,11 @@ describe('StateManager', () => {
 
     it('should apply delta_sp correctly', async () => {
       const char = buildMockCharacter({ id: 'char-001', sp: 40, maxSp: 50 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'delta_sp', target: 'characters.char-001', amount: 10 },
+        { op: 'delta_sp', target: 'characters.Test Hero', amount: 10 },
       ]);
 
       expect(char.sp).toBe(50); // clamped
@@ -739,7 +739,7 @@ describe('StateManager', () => {
   describe('commitChatState — status effects', () => {
     it('should add new status effect to character', async () => {
       const char = buildMockCharacter({ id: 'char-001', statusEffects: [] });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       // M2: 无 id — 逻辑键=名字（铁律1）
       const effect: StatusEffect = {
@@ -755,7 +755,7 @@ describe('StateManager', () => {
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'add_status_effect', target: 'characters.char-001', value: effect },
+        { op: 'add_status_effect', target: 'characters.Test Hero', value: effect },
       ]);
 
       expect(result.success).toBe(true);
@@ -778,7 +778,7 @@ describe('StateManager', () => {
         effects: { hpPerTurn: -3 },
       };
       const char = buildMockCharacter({ id: 'char-001', statusEffects: [existing] });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const newStack: StatusEffect = {
         name: 'Poison',
@@ -793,7 +793,7 @@ describe('StateManager', () => {
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'add_status_effect', target: 'characters.char-001', value: newStack },
+        { op: 'add_status_effect', target: 'characters.Test Hero', value: newStack },
       ]);
 
       expect(char.statusEffects).toHaveLength(1);
@@ -807,11 +807,11 @@ describe('StateManager', () => {
         { name: 'Poison', description: '', stacks: 1, remainingTime: 3, source: 'snake', category: '减益' as const, timeUnit: '回合' as const, effects: {} },
       ];
       const char = buildMockCharacter({ id: 'char-001', statusEffects: [...effects] });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'remove_status_effect', target: 'characters.char-001', value: { name: 'Burn' } },
+        { op: 'remove_status_effect', target: 'characters.Test Hero', value: { name: 'Burn' } },
       ]);
 
       expect(result.success).toBe(true);
@@ -821,11 +821,11 @@ describe('StateManager', () => {
 
     it('should not error when removing non-existent status effect', async () => {
       const char = buildMockCharacter({ id: 'char-001', statusEffects: [] });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'remove_status_effect', target: 'characters.char-001', value: { name: 'nonexistent' } },
+        { op: 'remove_status_effect', target: 'characters.Test Hero', value: { name: 'nonexistent' } },
       ]);
 
       expect(result.success).toBe(true);
@@ -1712,11 +1712,11 @@ describe('StateManager', () => {
   describe('commitChatState — set_location', () => {
     it('should update character location and generate location_change event', async () => {
       const char = buildMockCharacter({ id: 'char-001', location: 'old_place' });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'set_location', target: 'characters.char-001', value: 'dark_forest' },
+        { op: 'set_location', target: 'characters.Test Hero', value: 'dark_forest' },
       ]);
 
       expect(result.success).toBe(true);
@@ -1728,11 +1728,11 @@ describe('StateManager', () => {
 
     it('should coerce non-string value to string', async () => {
       const char = buildMockCharacter({ id: 'char-001', location: '' });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'set_location', target: 'characters.char-001', value: 12345 },
+        { op: 'set_location', target: 'characters.Test Hero', value: 12345 },
       ]);
 
       expect(char.location).toBe('12345');
@@ -1894,7 +1894,7 @@ describe('StateManager', () => {
       });
 
       const char = buildMockCharacter({ id: 'char-001' });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const result = await sm.commitChatState([
         { op: 'set_variable', target: 'variables.gold', value: 100 },
@@ -2048,13 +2048,13 @@ describe('StateManager', () => {
   describe('commitChatState — multiple patches & partial success', () => {
     it('should apply multiple valid patches in one commit', async () => {
       const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 100 });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
         { op: 'set_variable', target: 'variables.gold', value: 100 },
-        { op: 'delta_hp', target: 'characters.char-001', amount: 20 },
-        { op: 'set_location', target: 'characters.char-001', value: 'forest' },
+        { op: 'delta_hp', target: 'characters.Test Hero', amount: 20 },
+        { op: 'set_location', target: 'characters.Test Hero', value: 'forest' },
       ]);
 
       expect(result.success).toBe(true);
@@ -2065,12 +2065,9 @@ describe('StateManager', () => {
     });
 
     it('should not block subsequent patches when one fails (partial success)', async () => {
-      // Conditional mock: returns char only for char-001, otherwise undefined
+      // 只有 Test Hero 在本存档内，characters.missing 解析失败
       const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 100 });
-      vi.mocked(db.getCharacter).mockImplementation(async (id: any) => {
-        if (id === 'char-001') return char;
-        return undefined;
-      });
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
@@ -2081,7 +2078,7 @@ describe('StateManager', () => {
         // This one throws — character missing → caught, in errors[]
         { op: 'delta_hp', target: 'characters.missing', amount: -10 },
         // This one succeeds
-        { op: 'delta_hp', target: 'characters.char-001', amount: -10 },
+        { op: 'delta_hp', target: 'characters.Test Hero', amount: -10 },
       ]);
 
       // M2 语义修正: 验证失败 + 角色缺失都进 errors → errors.length = 2 → success = false
@@ -2144,9 +2141,10 @@ describe('StateManager', () => {
       expect(char.hp).toBe(70);
     });
 
-    it('UUID 兜底仍可用（过渡期）', async () => {
-      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'npc', saveId: 'OTHER_SAVE', hp: 100, maxHp: 100 });
-      // 不在本存档（saveId 不匹配）→ 名字/别名都查不到 → 走 UUID 兜底 getCharacter
+    it('按 id 寻址不再解析（M4 铁律1 收口）→ 角色不存在', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'npc', saveId: 's1', hp: 100, maxHp: 100 });
+      await db.saveCharacter(char);
+      // 即使按 id 能查到库记录，resolveCharacter 也不得命中（名字寻址唯一化）
       vi.mocked(db.getCharacter).mockImplementation(async (id: any) => (id === 'uuid-1' ? char : undefined));
 
       const sm = new StateManager({ saveId: 's1' });
@@ -2154,8 +2152,11 @@ describe('StateManager', () => {
         { op: 'set_hp', target: 'characters.uuid-1', value: 30 },
       ]);
 
-      expect(result.success).toBe(true);
-      expect(char.hp).toBe(30);
+      expect(result.success).toBe(false);
+      expect(result.errors[0]).toContain('角色不存在: uuid-1');
+      expect(char.hp).toBe(100);
+      // 兜底分支已拆除: getCharacter 不再被调用
+      expect(vi.mocked(db.getCharacter)).not.toHaveBeenCalled();
     });
 
     it('解析失败进 errors[] 不静默', async () => {
@@ -2230,11 +2231,11 @@ describe('StateManager', () => {
 
     it('例外: update_character 允许 value 为空（metadata.action-only）', async () => {
       const char = buildMockCharacter({ id: 'char-001', currentAction: 'old' });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'update_character', target: 'characters.char-001', metadata: { action: 'new_action' } },
+        { op: 'update_character', target: 'characters.Test Hero', metadata: { action: 'new_action' } },
       ]);
 
       expect(result.success).toBe(true);
@@ -2521,8 +2522,8 @@ describe('StateManager', () => {
       expect(remaining.find(c => c.name === '哥布林斥候')).toBeUndefined();
     });
 
-    it('remove UUID 兜底命中跨存档角色 → 拒绝进 errors[]，不删除（终审修复 F9）', async () => {
-      // 名字在本存档查不到 → 走 UUID 兜底命中他档角色 → 守卫拒绝
+    it('remove 按 id 寻址跨存档角色 → 角色不存在进 errors[]，不删除（M4 铁律1 收口）', async () => {
+      // 名字在本存档查不到；M4 后不再按 id 查库 → 直接角色不存在，跨档角色无法触及
       const foreign = buildMockCharacter({ id: 'uuid-foreign', name: '他档NPC', saveId: 'save-OTHER' });
       vi.mocked(db.getCharacter).mockResolvedValue(foreign);
 
@@ -2532,11 +2533,11 @@ describe('StateManager', () => {
       ]);
 
       expect(result.success).toBe(false);
-      expect(result.errors[0]).toContain('跨存档操作被拒绝');
+      expect(result.errors[0]).toContain('角色不存在: uuid-foreign');
       expect(vi.mocked(db.deleteCharacter)).not.toHaveBeenCalled();
     });
 
-    it('rename UUID 兜底命中跨存档角色 → 拒绝进 errors[]，名字不动（终审修复 F9）', async () => {
+    it('rename 按 id 寻址跨存档角色 → 角色不存在进 errors[]，名字不动（M4 铁律1 收口）', async () => {
       const foreign = buildMockCharacter({ id: 'uuid-foreign2', name: '他档NPC', saveId: 'save-OTHER' });
       vi.mocked(db.getCharacter).mockResolvedValue(foreign);
 
@@ -2546,7 +2547,7 @@ describe('StateManager', () => {
       ]);
 
       expect(result.success).toBe(false);
-      expect(result.errors[0]).toContain('跨存档操作被拒绝');
+      expect(result.errors[0]).toContain('角色不存在: uuid-foreign2');
       expect(foreign.name).toBe('他档NPC');
     });
 

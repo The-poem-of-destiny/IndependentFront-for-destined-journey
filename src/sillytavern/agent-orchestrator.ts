@@ -798,10 +798,10 @@ export class AgentOrchestrator {
           const patches: import('./types').StatePatch[] = [];
 
           // --- characters.replace → set_hp/set_mp/set_sp/set_location/update_character ---
-          // M3: key = a.name ?? a.id（过渡读，M4 改 prompt 后删 ?? a.id）
+          // M4: 名字寻址唯一化（铁律1）— key 只认 name，缺 name 跳过
           for (const r of (parsed.characters?.replace ?? [])) {
-            const key = r.name ?? r.id;
-            if (!key) { console.warn('[Orchestrator] characters.replace 条目缺 name/id，跳过'); continue; }
+            const key = r.name;
+            if (!key) { console.warn('[Orchestrator] characters.replace 条目缺 name，跳过'); continue; }
             const { path, value } = r;
             switch (path) {
               case 'hp': patches.push({ op: 'set_hp', target: `characters.${key}`, value, metadata: { source: 'vars_update' } }); break;
@@ -818,10 +818,10 @@ export class AgentOrchestrator {
           }
 
           // --- characters.delta → delta_hp/delta_mp/delta_sp/update_character(delta) ---
-          // M3: key = d.name ?? d.id（过渡读，M4 改 prompt 后删 ?? d.id）
+          // M4: 名字寻址唯一化（铁律1）— key 只认 name，缺 name 跳过
           for (const d of (parsed.characters?.delta ?? [])) {
-            const key = d.name ?? d.id;
-            if (!key) { console.warn('[Orchestrator] characters.delta 条目缺 name/id，跳过'); continue; }
+            const key = d.name;
+            if (!key) { console.warn('[Orchestrator] characters.delta 条目缺 name，跳过'); continue; }
             const { path, amount } = d;
             switch (path) {
               case 'hp': patches.push({ op: 'delta_hp', target: `characters.${key}`, amount, metadata: { source: 'vars_update' } }); break;
@@ -836,10 +836,10 @@ export class AgentOrchestrator {
           }
 
           // --- characters.add → add_status_effect/add_skill/add_item（M3: 零 id 生成，装备单 patch） ---
-          // M3: key = a.name ?? a.id（过渡读，M4 改 prompt 后删 ?? a.id）
+          // M4: 名字寻址唯一化（铁律1）— key 只认 name，缺 name 跳过
           for (const a of (parsed.characters?.add ?? [])) {
-            const key = a.name ?? a.id;
-            if (!key) { console.warn('[Orchestrator] characters.add 条目缺 name/id，跳过'); continue; }
+            const key = a.name;
+            if (!key) { console.warn('[Orchestrator] characters.add 条目缺 name，跳过'); continue; }
             const { path, value } = a;
             switch (path) {
               case 'statusEffects': patches.push({ op: 'add_status_effect', target: `characters.${key}`, value, metadata: { source: 'vars_update' } }); break;
@@ -863,7 +863,8 @@ export class AgentOrchestrator {
               }
               case 'equipment': {
                 // M3: 装备=带 equippedSlot 的物品，单 add_item 落库（不再 add_item+equip_item 两步）
-                const eqName = value?.name ?? value?.itemId ?? '未知装备';
+                // M4: itemId 过渡读拆除（原 itemId 语义已废，只认 name）
+                const eqName = value?.name ?? '未知装备';
                 const eqSlot = normalizeSlot(value?.slot ?? '');
                 patches.push({
                   op: 'add_item',
@@ -885,10 +886,10 @@ export class AgentOrchestrator {
           }
 
           // --- characters.remove → remove_status_effect/unequip_item/remove_skill（M3: 统一 {name} 对象形态） ---
-          // M3: key = rm.name ?? rm.id（过渡读，M4 改 prompt 后删 ?? rm.id）
+          // M4: 名字寻址唯一化（铁律1）— key 只认 name，缺 name 跳过
           for (const rm of (parsed.characters?.remove ?? [])) {
-            const key = rm.name ?? rm.id;
-            if (!key) { console.warn('[Orchestrator] characters.remove 条目缺 name/id，跳过'); continue; }
+            const key = rm.name;
+            if (!key) { console.warn('[Orchestrator] characters.remove 条目缺 name，跳过'); continue; }
             const { path, target: rmTarget } = rm;
             switch (path) {
               case 'statusEffects': patches.push({ op: 'remove_status_effect', target: `characters.${key}`, value: { name: rmTarget }, metadata: { source: 'vars_update' } }); break;

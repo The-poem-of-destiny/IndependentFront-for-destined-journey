@@ -17,7 +17,7 @@ import type {
   StatusEffect, Skill, InventoryItem,
 } from './types';
 import {
-  getCharacter, getCharacters, saveCharacter, saveCharacters, deleteCharacter,
+  getCharacters, saveCharacter, saveCharacters, deleteCharacter,
   getMemories, saveMemory,
   getPlotEvents, savePlotEvents,
   getSave, saveSaveSlot,
@@ -348,11 +348,10 @@ export class StateManager {
   /**
    * 按名字解析角色 — 所有角色类 handler 的唯一寻址入口
    *
-   * 解析顺序:
+   * 解析顺序 (M4: 名字寻址唯一化，铁律1 收口 — 不再按 id 查库):
    * ① 本存档内按 name 精确匹配
    * ② '主角'/'玩家' 别名 → 本存档 type='player' 的角色
-   * ③ UUID 兜底（按 id 查库）  // 过渡: M4 删
-   * ④ 找不到 → throw
+   * ③ 找不到 → throw
    */
   private async resolveCharacter(key: string): Promise<CharacterState> {
     const chars = await getCharacters(this.saveId);
@@ -367,11 +366,7 @@ export class StateManager {
       if (player) return player;
     }
 
-    // ③ UUID 兜底 // 过渡: M4 删
-    const byId = await getCharacter(key);
-    if (byId) return byId;
-
-    // ④ 找不到
+    // ③ 找不到
     throw new Error(`角色不存在: ${key}`);
   }
 
@@ -989,11 +984,8 @@ export class StateManager {
    * 找不到 → resolveCharTarget throw 进 errors[]（不静默）。
    */
   private async applyRemoveCharacter(patch: StatePatch): Promise<GameEvent> {
+    // M4: resolveCharTarget 仅在本存档内按名解析，跨档命中已无可能（旧守卫随之拆除）
     const char = await this.resolveCharTarget(patch.target);
-    // UUID 兜底过渡期防跨档破坏，M4 删兜底后此守卫自然死路径
-    if (char.saveId && char.saveId !== this.saveId) {
-      throw new Error(`跨存档操作被拒绝: ${char.name}`);
-    }
     await deleteCharacter(char.id);
     return this.createEvent('system', patch);
   }
@@ -1017,11 +1009,8 @@ export class StateManager {
     const newName = patch.value.trim();
     if (!newName) throw new Error('rename_character 新名不能为空');
 
+    // M4: resolveCharTarget 仅在本存档内按名解析，跨档命中已无可能（旧守卫随之拆除）
     const char = await this.resolveCharTarget(patch.target);
-    // UUID 兜底过渡期防跨档破坏，M4 删兜底后此守卫自然死路径
-    if (char.saveId && char.saveId !== this.saveId) {
-      throw new Error(`跨存档操作被拒绝: ${char.name}`);
-    }
     const oldName = char.name;
 
     // 幂等: 新名等于旧名 → no-op 成功
