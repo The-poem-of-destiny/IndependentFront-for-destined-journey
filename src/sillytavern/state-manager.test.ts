@@ -2158,7 +2158,173 @@ describe('StateManager', () => {
   });
 
   // ===================================================================
-  // 20. createStateManager factory
+  // 20. set_affection / delta_affection / add_news — SaveProfile 写入 (M2 T10, #15 #16)
+  // ===================================================================
+  describe('好感度/新闻 op — set_affection / delta_affection / add_news', () => {
+    function buildMockProfile(overrides: Record<string, any> = {}) {
+      return {
+        saveId: 'save-001',
+        affections: {},
+        news: [],
+        quests: {},
+        ...overrides,
+      } as any;
+    }
+
+    it('set_affection 150 被 clamp 到 100（上限）', async () => {
+      const profile = buildMockProfile();
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'set_affection', target: 'affections.艾莉丝', value: 150 },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(profile.affections['艾莉丝']).toBe(100);
+      expect(vi.mocked(saveProfile.updateProfile)).toHaveBeenCalledWith(profile);
+    });
+
+    it('set_affection -150 被 clamp 到 -100（下限）', async () => {
+      const profile = buildMockProfile();
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'set_affection', target: 'affections.艾莉丝', value: -150 },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(profile.affections['艾莉丝']).toBe(-100);
+    });
+
+    it('set_affection value 非数字 → errors[]', async () => {
+      const profile = buildMockProfile();
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'set_affection', target: 'affections.艾莉丝', value: '很高' as any },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(profile.affections['艾莉丝']).toBeUndefined();
+    });
+
+    it('delta_affection 无现有记录时从 0 起算', async () => {
+      const profile = buildMockProfile();
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'delta_affection', target: 'affections.雷恩', amount: 30 },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(profile.affections['雷恩']).toBe(30);
+    });
+
+    it('delta_affection 双向 clamp：上限 100 / 下限 -100', async () => {
+      const profile = buildMockProfile({ affections: { 上限者: 90, 下限者: -90 } });
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'delta_affection', target: 'affections.上限者', amount: 50 },
+        { op: 'delta_affection', target: 'affections.下限者', amount: -50 },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(profile.affections['上限者']).toBe(100);
+      expect(profile.affections['下限者']).toBe(-100);
+    });
+
+    it('好感度 target 非 affections.<名> 格式 → errors[]', async () => {
+      const profile = buildMockProfile();
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'set_affection', target: 'characters.艾莉丝', value: 50 },
+        { op: 'delta_affection', target: 'affections.', amount: 10 },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(2);
+      expect(result.patchesApplied).toBe(0);
+    });
+
+    it('add_news 自动补齐三账务字段 id/publishedAt/read', async () => {
+      const profile = buildMockProfile();
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'add_news', target: 'news', value: { title: '商队失踪', content: '艾瑟嘉德近郊商队接连失踪。', category: '阿斯塔利亚快讯' } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(profile.news).toHaveLength(1);
+      const item = profile.news[0];
+      expect(item.title).toBe('商队失踪');
+      expect(item.content).toBe('艾瑟嘉德近郊商队接连失踪。');
+      expect(item.category).toBe('阿斯塔利亚快讯');
+      // Code 补账务字段（AI 永不产）
+      expect(typeof item.id).toBe('string');
+      expect(item.id.length).toBeGreaterThan(0);
+      expect(typeof item.publishedAt).toBe('number');
+      expect(item.read).toBe(false);
+      expect(vi.mocked(saveProfile.updateProfile)).toHaveBeenCalledWith(profile);
+    });
+
+    it('add_news category 可选，缺省为空字符串', async () => {
+      const profile = buildMockProfile();
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'add_news', target: 'news', value: { title: '无分类新闻', content: '正文' } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(profile.news[0].category).toBe('');
+    });
+
+    it('add_news 缺 title 或 content → errors[]', async () => {
+      const profile = buildMockProfile();
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'add_news', target: 'news', value: { content: '没标题' } },
+        { op: 'add_news', target: 'news', value: { title: '没正文' } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(2);
+      expect(profile.news).toHaveLength(0);
+    });
+
+    it('三 op 均发出 system 类型 GameEvent（GameEventType 不扩容）', async () => {
+      const profile = buildMockProfile();
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      await sm.commitChatState([
+        { op: 'set_affection', target: 'affections.艾莉丝', value: 10 },
+        { op: 'delta_affection', target: 'affections.艾莉丝', amount: 5 },
+        { op: 'add_news', target: 'news', value: { title: 'T', content: 'C' } },
+      ]);
+
+      const events = sm.getEvents();
+      expect(events).toHaveLength(3);
+      for (const e of events) expect(e.type).toBe('system');
+    });
+  });
+
+  // ===================================================================
+  // 21. createStateManager factory
   // ===================================================================
   describe('createStateManager factory', () => {
     it('should create a StateManager instance with saveId', () => {

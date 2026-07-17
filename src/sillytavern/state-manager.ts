@@ -266,6 +266,13 @@ export class StateManager {
       case 'remove_quest':
         event = await this.applyRemoveQuest(patch);
         break;
+      case 'set_affection':
+      case 'delta_affection':
+        event = await this.applyAffection(patch);
+        break;
+      case 'add_news':
+        event = await this.applyAddNews(patch);
+        break;
       case 'remove_variable':
         event = await this.applyRemoveVariable(patch);
         break;
@@ -1004,6 +1011,75 @@ export class StateManager {
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
     await removeQuest(profile, questName);
     return this.createEvent('quest_update', patch);
+  }
+
+  // ========== 好感度 / 新闻 (M2 T10, #15 #16 — 写 SaveProfile，非 CharacterState) ==========
+
+  /**
+   * set_affection / delta_affection — 好感度写入 (规范 §7)
+   *
+   * target 形态: `affections.<角色名>` — 名字是 profile.affections 的自由键，
+   * 不经 resolveCharacter（好感度键无需角色实体存在）。
+   * clamp 到 [-100, +100]（复用 affection-system 的 clampAffection）。
+   */
+  private async applyAffection(patch: StatePatch): Promise<GameEvent> {
+    // 解析 target: 必须是 affections.<名> 且名字非空
+    const AFFECTION_PREFIX = 'affections.';
+    if (!patch.target.startsWith(AFFECTION_PREFIX)) {
+      throw new Error(`${patch.op} target 必须为 affections.<角色名> 格式: ${patch.target}`);
+    }
+    const charName = patch.target.slice(AFFECTION_PREFIX.length).trim();
+    if (!charName) throw new Error(`${patch.op} target 缺少角色名: ${patch.target}`);
+
+    const { clampAffection } = await import('./affection-system');
+    const { getProfile, updateProfile } = await import('./save-profile');
+    const profile = await getProfile(this.saveId);
+    if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
+
+    if (patch.op === 'set_affection') {
+      // 绝对值设置 — value 必须是数字
+      if (typeof patch.value !== 'number' || Number.isNaN(patch.value)) {
+        throw new Error(`set_affection value 必须是数字: ${JSON.stringify(patch.value)}`);
+      }
+      profile.affections[charName] = clampAffection(patch.value);
+    } else {
+      // 增量 — 现值缺省 0 起算，加完再 clamp（双向）
+      const current = profile.affections[charName] ?? 0;
+      profile.affections[charName] = clampAffection(current + (patch.amount ?? 0));
+    }
+
+    await updateProfile(profile);
+    // GameEventType 无 affection 成员（M1 实测），走 'system'
+    return this.createEvent('system', patch);
+  }
+
+  /**
+   * add_news — 追加世界新闻 (规范 §8)
+   *
+   * AI 只填叙事字段 {title(必), content(必), category?}；
+   * Code 补账务字段 id / publishedAt / read（铁律3）。
+   */
+  private async applyAddNews(patch: StatePatch): Promise<GameEvent> {
+    const newsData = patch.value as { title?: string; content?: string; category?: string };
+    if (!newsData?.title) throw new Error('add_news 缺少 title');
+    if (!newsData.content) throw new Error('add_news 缺少 content');
+
+    const { getProfile, updateProfile } = await import('./save-profile');
+    const profile = await getProfile(this.saveId);
+    if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
+
+    profile.news.push({
+      title: newsData.title,
+      content: newsData.content,
+      category: newsData.category ?? '',
+      // Code 补账务字段
+      id: crypto.randomUUID(),
+      publishedAt: Date.now(),
+      read: false,
+    });
+
+    await updateProfile(profile);
+    return this.createEvent('system', patch);
   }
 
   // ========== 辅助 ==========
