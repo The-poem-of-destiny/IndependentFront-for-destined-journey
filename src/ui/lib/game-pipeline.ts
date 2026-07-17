@@ -221,7 +221,12 @@ export class GamePipeline {
       // 从已加载的 agentDefaults 取 presetId/systemPrompt/template
       // （loadPresets 已自 fetch agent-config.json，不依赖 store.projectAgentDefaults 异步初始化）
       const defaults = agentDefaults[agentId] ?? {}
-      const presetId: string | undefined = defaults.presetId || undefined
+      // 真机修(2026-07-17): story 预设尊重设置页选中项（s.activePresetId）——
+      // 此前硬绑 agent-config.json 出厂 presetId，用户导入/另存的预设（新 id）在设置页编辑得再对，
+      // 运行时也永远用旧的那份（"我保存了第二人称但 agent 没拿到"根因）。
+      const presetId: string | undefined = (agentId === 'story' && (s.activePresetId as string))
+        ? (s.activePresetId as string)
+        : (defaults.presetId || undefined)
       const systemPrompt: string | undefined = defaults.systemPrompt || undefined
       const template: string | undefined = defaults.template || undefined
 
