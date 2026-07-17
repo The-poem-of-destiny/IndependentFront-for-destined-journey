@@ -1090,3 +1090,79 @@ describe('parseCharGenOutput — 叙事字段嵌套 XML 剥离', () => {
     expect(out.background).toBe('在钥匙中沉睡了不知多久。');
   });
 });
+
+// ========== parseCharGenOutput — JSON 兜底（真机 2026-07-17 妲丽安形状） ==========
+
+describe('parseCharGenOutput — <char_result> 内嵌 JSON 兜底', () => {
+  it('AI 在 <char_result> 里塞 JSON（真机妲丽安形状）→ 结构化归一而非全兜底未命名', async () => {
+    const { parseCharGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '好的，数据已生成完毕。现在输出完整的角色卡。',
+      '',
+      '<char_result>',
+      JSON.stringify({
+        name: '妲丽安',
+        race: '愿灵（物灵）',
+        type: 'npc',
+        tier: 1,
+        level: 1,
+        faction: '无',
+        description: '寄宿在理查德脑海中的意识体。',
+        appearance: {
+          summary: '无实体形态。意识空间中呈现为古典长裙少女虚影。',
+          hair_color: '银灰色',
+          eye_color: '琥珀金',
+        },
+        personality: {
+          code: 'WOary(F)',
+          summary: '傲慢且傲娇，对贡品有强烈执念。',
+        },
+        attributes: { str: 0, dex: 0, con: 0, int: 3, spi: 1 },
+        abilities: [],
+        equipment: [],
+        inventory: [],
+        lore: {
+          identity: '通往壶中之天的大门',
+          origin: '来历不明，寄宿于理查德脑海。',
+        },
+      }),
+      '</char_result>',
+    ].join('\n');
+
+    const out = parseCharGenOutput(raw);
+    expect(out.name).toBe('妲丽安');
+    expect(out.race).toBe('愿灵（物灵）');
+    // 0 属性保留（意识体无实体），不被 ||10 打回默认
+    expect(out.attributes.str).toBe(0);
+    expect(out.attributes.dex).toBe(0);
+    expect(out.attributes.int).toBe(3);
+    expect(out.attributes.spi).toBe(1);
+    // appearance/personality 对象 → 取 summary 纯文本
+    expect(out.appearance).toContain('无实体形态');
+    expect(out.appearance).not.toMatch(/\{|\[object/);
+    expect(out.personality).toContain('傲慢且傲娇');
+    // background 从 lore.origin 兜底
+    expect(out.background).toContain('寄宿');
+  });
+
+  it('XML 子元素 0 属性不再被 ||10 打回默认（回归）', async () => {
+    const { parseCharGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<char_result>',
+      '<name>幽灵</name>',
+      '<race>灵体</race>',
+      '<gender>女</gender>',
+      '<tier>1</tier>',
+      '<level>1</level>',
+      '<attributes str="0" dex="0" con="0" int="5" spi="2" />',
+      '<identity>幽魂</identity>',
+      '<occupation>无</occupation>',
+      '<background>无实体的幽灵。</background>',
+      '</char_result>',
+    ].join('\n');
+    const out = parseCharGenOutput(raw);
+    expect(out.attributes.str).toBe(0);
+    expect(out.attributes.con).toBe(0);
+    expect(out.attributes.int).toBe(5);
+  });
+});

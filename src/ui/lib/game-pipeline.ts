@@ -331,6 +331,10 @@ export class GamePipeline {
           // 提取内嵌预设（story 等依赖 ST 预设的 Agent）
           if (e.preset && !presets.some(p => p.id === (e.preset as any).id)) {
             presets.push(e.preset as unknown as AgentPreset)
+          } else if (e.preset) {
+            // 真机诊断(2026-07-17): DB 版预设（设置页编辑过的）优先于 agent-config.json 内嵌版 — 设计行为。
+            // 直接改 agent-config.json 不会生效于已存在的 DB 记录；要么在设置页编辑，要么删除 DB 预设回落出厂版。
+            console.warn(`[GamePipeline] 预设 "${(e.preset as any).name ?? (e.preset as any).id}" 使用 DB 版本（设置页编辑优先），agent-config.json 内嵌版被忽略`)
           }
           // 提取各 agent 默认配置（供 buildAgentConfigs 使用）
           agentDefaults[agentId] = {

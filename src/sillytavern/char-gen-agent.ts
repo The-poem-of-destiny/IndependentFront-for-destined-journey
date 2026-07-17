@@ -485,55 +485,91 @@ export function parseCharGenOutput(raw: string): CharGenOutput {
   // 先尝试 XML
   const xml = extractXML(raw, 'char_result');
   if (xml) {
-    return parseCharGenXML(xml);
+    const parsed = parseCharGenXML(xml);
+    // 真机兜底（2026-07-17）: AI 输出 JSON（非 XML），parseCharGenXML 全字段兜底为 '未命名'
+    // → 名字 = 默认值时回退 JSON 宽容归一（同 parseItemGenOutput 逻辑）
+    if (parsed.name === '未命名' || parsed.name.startsWith('未命名')) {
+      const jsonFallback = parseCharGenJSONLoose(xml);
+      if (jsonFallback) return jsonFallback;
+    }
+    return parsed;
   }
 
   // 回退到 JSON
   try {
     const json = extractJSON(raw);
     const data = JSON.parse(json);
-
-    if (!data.name) throw new Error('char_gen 输出缺少 name 字段');
-    if (!data.race) throw new Error('char_gen 输出缺少 race 字段');
-
-    return {
-      name: data.name,
-      race: data.race,
-      tier: data.tier ?? 1,
-      level: data.level ?? 1,
-      attributes: {
-        str: data.attributes?.str ?? 10,
-        dex: data.attributes?.dex ?? 10,
-        con: data.attributes?.con ?? 10,
-        int: data.attributes?.int ?? 10,
-        spi: data.attributes?.spi ?? 10,
-      },
-      identity: data.identity ?? [],
-      occupation: data.occupation ?? [],
-      background: data.background ?? '',
-      appearance: data.appearance ?? '',
-      clothing: data.clothing ?? '',
-      personality: data.personality ?? '',
-      likes: data.likes ?? '',
-      gender: data.gender ?? '其他',
-      faction: data.faction,
-      ascension: {
-        enabled: data.ascension?.enabled ?? false,
-        path: data.ascension?.path ?? '',
-        description: data.ascension?.description ?? '',
-        elements: data.ascension?.elements ?? [],
-        authorities: data.ascension?.authorities ?? [],
-        laws: data.ascension?.laws ?? [],
-        deityPosition: data.ascension?.deityPosition ?? '',
-        divineKingdom: data.ascension?.divineKingdom ?? { name: '', description: '' },
-      },
-      skills: data.skills ?? [],
-      equipment: data.equipment ?? [],
-      inventory: data.inventory ?? [],
-    };
+    if (!data?.name) throw new Error('缺少 name');
+    return charGenFromJSON(data);
   } catch {
+    // 失败上浮（不静默产'未命名'默认角色）— handleCharGen per-marker catch 打日志跳过
     throw new Error(`char_gen 输出无法解析 (JSON+XML 均失败): ${raw.slice(0, 200)}`);
   }
+}
+
+/**
+ * <char_result> 体内 JSON 宽容归一（真机兜底，同 parseItemGenJSONLoose）。
+ * 接受: 对象 {name, race, tier, level, attributes, appearance, personality, ...}
+ * appearance/personality 可以是对象（取 summary 字段）或字符串。
+ */
+function parseCharGenJSONLoose(text: string): CharGenOutput | null {
+  const json = extractJSON(text);
+  if (!json) return null;
+  let data: any;
+  try { data = JSON.parse(json); } catch { return null; }
+  if (!data || typeof data !== 'object' || !data.name) return null;
+  return charGenFromJSON(data);
+}
+
+function charGenFromJSON(data: any): CharGenOutput {
+  const attrs: Record<string, number> = {};
+  if (data.attributes && typeof data.attributes === 'object') {
+    for (const k of ['str', 'dex', 'con', 'int', 'spi']) {
+      attrs[k] = typeof data.attributes[k] === 'number' ? data.attributes[k] : (parseInt(data.attributes[k]) || 0);
+    }
+  }
+  // 空对象 → 用默认值（但 0 保留）
+  if (!Object.keys(attrs).length) { for (const k of ['str', 'dex', 'con', 'int', 'spi']) attrs[k] = 10; }
+
+  const appearance = data.appearance;
+  const personality = data.personality;
+
+  return {
+    name: data.name,
+    race: data.race ?? '人类',
+    gender: data.gender,
+    faction: data.faction,
+    tier: typeof data.tier === 'number' ? data.tier : 1,
+    level: typeof data.level === 'number' ? data.level : 1,
+    attributes: {
+      str: attrs.str,
+      dex: attrs.dex,
+      con: attrs.con,
+      int: attrs.int,
+      spi: attrs.spi,
+    },
+    identity: Array.isArray(data.identity) ? data.identity : (typeof data.identity === 'string' ? [data.identity] : []),
+    occupation: Array.isArray(data.occupation) ? data.occupation : (typeof data.occupation === 'string' ? [data.occupation] : []),
+    // appearance/personality: 对象取 summary 纯文本，字符串直用
+    background: data.background ?? data.lore?.origin ?? data.description ?? '',
+    appearance: typeof appearance === 'object' && appearance ? (appearance.summary ?? appearance.description ?? JSON.stringify(appearance)) : (typeof appearance === 'string' ? appearance : ''),
+    clothing: data.clothing ?? data.outfit ?? '',
+    personality: typeof personality === 'object' && personality ? (personality.summary ?? personality.description ?? JSON.stringify(personality)) : (typeof personality === 'string' ? personality : ''),
+    likes: data.likes ?? '',
+    ascension: {
+      enabled: false,
+      path: '',
+      description: '',
+      elements: [],
+      authorities: [],
+      laws: [],
+      deityPosition: '',
+      divineKingdom: { name: '', description: '' },
+    },
+    skills: data.skills ?? [],
+    equipment: data.equipment ?? [],
+    inventory: data.inventory ?? [],
+  };
 }
 
 /** 从 XML <char_result> 中解析角色数据 */
@@ -598,11 +634,12 @@ function parseCharGenXML(xml: string): CharGenOutput {
     tier: parseInt(extractTag(xml, 'tier') ?? '1') || 1,
     level: parseInt(extractTag(xml, 'level') ?? '1') || 1,
     attributes: {
-      str: parseInt(extractAttr(xml, 'attributes', 'str') ?? '10') || 10,
-      dex: parseInt(extractAttr(xml, 'attributes', 'dex') ?? '10') || 10,
-      con: parseInt(extractAttr(xml, 'attributes', 'con') ?? '10') || 10,
-      int: parseInt(extractAttr(xml, 'attributes', 'int') ?? '10') || 10,
-      spi: parseInt(extractAttr(xml, 'attributes', 'spi') ?? '10') || 10,
+      // 真机修(2026-07-17): `|| 10` 会把 0 打回 10 — 意识体/灵体的 0 属性是合法值，改 NaN 检查
+      str: parseAttrIntKeepZero(xml, 'attributes', 'str', 10),
+      dex: parseAttrIntKeepZero(xml, 'attributes', 'dex', 10),
+      con: parseAttrIntKeepZero(xml, 'attributes', 'con', 10),
+      int: parseAttrIntKeepZero(xml, 'attributes', 'int', 10),
+      spi: parseAttrIntKeepZero(xml, 'attributes', 'spi', 10),
     },
     identity: extractTag(xml, 'identity')?.split(',').map(s => s.trim()).filter(Boolean) ?? [],
     occupation: extractTag(xml, 'occupation')?.split(',').map(s => s.trim()).filter(Boolean) ?? [],
@@ -1049,6 +1086,12 @@ function extractTagBlock(xml: string, tagName: string): string | null {
   const regex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, 'i');
   const match = xml.match(regex);
   return match ? match[1].trim() : null;
+}
+
+/** 提取属性并转 int — 缺失/非法用缺省值，但显式的 0 保留（真机修: 意识体 0 属性合法） */
+function parseAttrIntKeepZero(xml: string, tag: string, attr: string, dflt: number): number {
+  const v = parseInt(extractAttr(xml, tag, attr) ?? '');
+  return Number.isNaN(v) ? dflt : v;
 }
 
 /** 解析属性字符串 key="val" key2="val2" */
