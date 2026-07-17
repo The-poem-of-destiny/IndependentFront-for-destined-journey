@@ -59,6 +59,7 @@ import type {
   ChatMessage,
   MemoryRecord,
   PlotEvent,
+  PlotOutline,
   CharacterState,
   Snapshot,
   SaveSlot,
@@ -66,7 +67,7 @@ import type {
   AppSettings,
 } from './types';
 import { createDefaultCharacterState } from './types';
-import { createDefaultSaveProfile } from './database';
+import { createDefaultSaveProfile, saveSaveProfile, savePlotOutline } from './database';
 import { createStateManager } from './state-manager';
 
 // ========== Helpers ==========
@@ -512,6 +513,102 @@ describe('SaveSlots CRUD', () => {
     const all = await getCharacters();
     expect(all.map(c => c.id)).not.toContain('cd1');
     expect(all.map(c => c.id)).toContain('cd2');
+  });
+});
+
+// ========== deleteSaveSlot 事务化 (M6 Task 4, M1 终审 Minor 遗留) ==========
+
+describe('deleteSaveSlot 事务化 (M6 Task 4)', () => {
+  const TARGET = 'save_tx_target';
+  const OTHER = 'save_tx_other';
+
+  function makeOutlineFor(saveId: string): PlotOutline {
+    return {
+      id: `outline_${saveId}`,
+      saveId,
+      mode: 'main',
+      content: '测试大纲内容',
+      confirmed: true,
+      version: 1,
+      timeRange: { start: '001-01-01', end: '001-02-01' },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  }
+
+  function makeMessageFor(saveId: string): ChatMessage {
+    return {
+      id: `msg_${saveId}`,
+      role: 'assistant',
+      content: '一段测试正文',
+      timestamp: Date.now(),
+      saveId,
+      turn: 1,
+    };
+  }
+
+  /** 给一个存档在全部 8 张关联表各播 1 条数据 */
+  async function seedSave(saveId: string, slot: number): Promise<void> {
+    await saveSaveSlot(makeSaveSlot({ id: saveId, slot }));
+    await saveMemory(makeMemory({ id: `mem_${saveId}`, saveId }));
+    await savePlotEvent(makePlotEvent({ id: `plot_${saveId}`, saveId }));
+    await savePlotOutline(makeOutlineFor(saveId));
+    await saveSnapshot(makeSnapshot({ id: `snap_${saveId}`, saveId }));
+    await saveMessage(makeMessageFor(saveId));
+    await saveCharacter(createDefaultCharacterState({ id: `char_${saveId}`, name: `角色_${saveId}`, saveId }));
+    await saveSaveProfile(createDefaultSaveProfile(saveId));
+  }
+
+  /** 该存档在 8 张表中的记录数（表名 → 条数） */
+  async function countAll(saveId: string): Promise<Record<string, number>> {
+    const db = getDatabase();
+    return {
+      saves: (await db.saves.get(saveId)) ? 1 : 0,
+      memories: await db.memories.where('saveId').equals(saveId).count(),
+      plotEvents: await db.plotEvents.where('saveId').equals(saveId).count(),
+      plotOutlines: await db.plotOutlines.where('saveId').equals(saveId).count(),
+      snapshots: await db.snapshots.where('saveId').equals(saveId).count(),
+      messages: await db.messages.where('saveId').equals(saveId).count(),
+      characters: await db.characters.where('saveId').equals(saveId).count(),
+      saveProfiles: (await db.saveProfiles.get(saveId)) ? 1 : 0,
+    };
+  }
+
+  it('8 表全清 + 其他存档数据不受影响', async () => {
+    await seedSave(TARGET, 7);
+    await seedSave(OTHER, 8);
+
+    await deleteSaveSlot(TARGET);
+
+    const targetCounts = await countAll(TARGET);
+    for (const [table, count] of Object.entries(targetCounts)) {
+      expect(count, `目标存档 ${table} 表应清空`).toBe(0);
+    }
+    const otherCounts = await countAll(OTHER);
+    for (const [table, count] of Object.entries(otherCounts)) {
+      expect(count, `其他存档 ${table} 表不应被误删`).toBe(1);
+    }
+  });
+
+  it('事务原子性：末步 saves 删除失败 → 前置 7 表删除整体回滚（不留半删存档）', async () => {
+    await seedSave(TARGET, 9);
+    const db = getDatabase();
+
+    // own property 遮蔽原型方法，让最后一步 saves.delete 抛错
+    (db.saves as any).delete = () => {
+      throw new Error('模拟 saves 表删除失败');
+    };
+    try {
+      await expect(deleteSaveSlot(TARGET)).rejects.toThrow();
+    } finally {
+      delete (db.saves as any).delete;
+    }
+
+    // Dexie 事务回滚：8 张表数据全部保留
+    const counts = await countAll(TARGET);
+    for (const [table, count] of Object.entries(counts)) {
+      expect(count, `${table} 表应随事务回滚保留`).toBe(1);
+    }
   });
 });
 

@@ -2,6 +2,7 @@
 import { computed, nextTick, ref } from 'vue'
 import { useGameStore } from '../../stores/game-store'
 import { useSettingsStore } from '../../stores/settings-store'
+import { markNewsRead } from '@engine/save-profile'
 import { MONTH_NAMES, WEEKDAY_NAMES, getTimeOfDay } from '@engine/time-system'
 import { nameColorVar, initialsOf } from '../../utils/name-color'
 import { formatRel } from '../../utils/time-format'
@@ -113,8 +114,28 @@ function thoughtsOf(char: CharacterState): string {
 
 // ═══ 下段：新闻单选展开 ═══
 const expandedNewsId = ref<string | null>(null)
-function toggleNews(id: string) {
-  expandedNewsId.value = expandedNewsId.value === id ? null : id
+
+/**
+ * M6 #36: 展开新闻时标记已读并持久化。
+ * 先改内存 reactive（红点即时消失、其他面板即时可见），再传 JSON 克隆给 markNewsRead 落库
+ * （Dexie 结构化克隆吃不下 Vue Proxy，同 QuestsPanel focusQuest 回写的做法）。
+ */
+async function toggleNews(id: string) {
+  const opening = expandedNewsId.value !== id
+  expandedNewsId.value = opening ? id : null
+  if (!opening) return
+
+  const profile = game.saveProfile
+  if (!profile) return
+  const item = profile.news?.find(n => n.id === id)
+  if (!item || item.read) return // 只标未读项
+
+  item.read = true
+  try {
+    await markNewsRead(JSON.parse(JSON.stringify(profile)), id)
+  } catch (err) {
+    console.error('[ScenePanel] 新闻已读标记持久化失败:', err)
+  }
 }
 
 function openCharList() {

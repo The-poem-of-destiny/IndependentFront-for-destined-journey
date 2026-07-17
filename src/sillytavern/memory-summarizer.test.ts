@@ -5,7 +5,7 @@
  * - validateMemoryContent: 空字符串 / 短内容 / 有效内容 / 自定义 minChars
  * - parseMemorySummaryOutput: 有效 JSON / 部分缺失 JSON / 嵌入文本中的 JSON / 无效文本
  * - generateMemoryId: 无已有记忆 / 有记忆 / 有间隔 / 混入非 MEM ID
- * - createCompressionSummaryMemory: 字段验证 / 时间范围从 oldest/newest 提取
+ * - createCompressionSummaryMemory: 字段验证 / 时间范围从 oldest/newest 提取 / 内部生成 MEM id（M6 #50）
  * - summarizeAndSave: 完整管线（mocked 依赖） / 解析失败 / 校验失败 / 有/无 embedding endpoint
  */
 
@@ -325,8 +325,13 @@ describe('createCompressionSummaryMemory', () => {
     }),
   ];
 
-  it('应正确设置 saveId、content、hiddenLine、keywords、importance', () => {
-    const result = createCompressionSummaryMemory(
+  beforeEach(() => {
+    // M6 #50: createCompressionSummaryMemory 内部经 generateMemoryId 查询已有记忆
+    mockGetMemories.mockResolvedValue(oldMemories);
+  });
+
+  it('应正确设置 saveId、content、hiddenLine、keywords、importance', async () => {
+    const result = await createCompressionSummaryMemory(
       'save_cmp',
       oldMemories,
       '这是压缩后的摘要正文，长度超过200字符，用于验证字段正确性。'.repeat(6),
@@ -343,8 +348,8 @@ describe('createCompressionSummaryMemory', () => {
     expect(result.relatedCharacterIds).toEqual([]);
   });
 
-  it('createdAt 应取最早记忆的时间戳', () => {
-    const result = createCompressionSummaryMemory(
+  it('createdAt 应取最早记忆的时间戳', async () => {
+    const result = await createCompressionSummaryMemory(
       'save_cmp',
       oldMemories,
       longContent('压缩'),
@@ -355,8 +360,8 @@ describe('createCompressionSummaryMemory', () => {
     expect(result.createdAt).toBe(1000000); // oldest memory's createdAt
   });
 
-  it('timeRange.start 应取第一条记忆的 start', () => {
-    const result = createCompressionSummaryMemory(
+  it('timeRange.start 应取第一条记忆的 start', async () => {
+    const result = await createCompressionSummaryMemory(
       'save_cmp',
       oldMemories,
       longContent('压缩'),
@@ -367,8 +372,8 @@ describe('createCompressionSummaryMemory', () => {
     expect(result.timeRange.start).toBe('001-01-01');
   });
 
-  it('timeRange.end 应取最后一条记忆的 end', () => {
-    const result = createCompressionSummaryMemory(
+  it('timeRange.end 应取最后一条记忆的 end', async () => {
+    const result = await createCompressionSummaryMemory(
       'save_cmp',
       oldMemories,
       longContent('压缩'),
@@ -379,8 +384,9 @@ describe('createCompressionSummaryMemory', () => {
     expect(result.timeRange.end).toBe('001-03-15');
   });
 
-  it('空记忆列表时应使用默认值', () => {
-    const result = createCompressionSummaryMemory(
+  it('空记忆列表时应使用默认值', async () => {
+    mockGetMemories.mockResolvedValue([]);
+    const result = await createCompressionSummaryMemory(
       'save_empty',
       [],
       longContent('空'),
@@ -391,10 +397,11 @@ describe('createCompressionSummaryMemory', () => {
     expect(result.createdAt).toBeGreaterThan(0);
     expect(result.timeRange.start).toBe('未知');
     expect(result.timeRange.end).toBe('未知');
+    expect(result.id).toBe('MEM000001');
   });
 
-  it('不应包含 id 和 embedding 字段', () => {
-    const result = createCompressionSummaryMemory(
+  it('应内部生成 MEM 格式 id 返回完整记录，embedding 仍不包含（M6 #50）', async () => {
+    const result = await createCompressionSummaryMemory(
       'save_cmp',
       oldMemories,
       longContent('压缩'),
@@ -402,7 +409,8 @@ describe('createCompressionSummaryMemory', () => {
       ['k'],
       5,
     );
-    expect('id' in result).toBe(false);
+    // oldMemories 最大编号 MEM000003 → 下一个 MEM000004
+    expect(result.id).toBe('MEM000004');
     expect('embedding' in result).toBe(false);
   });
 });

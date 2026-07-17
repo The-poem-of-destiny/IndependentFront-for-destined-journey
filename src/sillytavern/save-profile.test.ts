@@ -641,6 +641,36 @@ describe('markNewsRead', () => {
     expect(mockSaveSaveProfile).toHaveBeenCalledWith(profile);
     expect(mockSaveSaveProfile).toHaveBeenCalledTimes(1);
   });
+
+  // M6 Task 4 (#36): 持久化路径 — 落库 payload 必须已带已读标记
+  it('persisted payload carries read=true (持久化路径闭环)', async () => {
+    const news: NewsItem[] = [
+      { id: 'n1', title: '未读新闻', content: '内容', category: 'world', publishedAt: 100, read: false },
+    ];
+    const profile = makeProfile({ news });
+    mockSaveSaveProfile.mockResolvedValue(undefined);
+
+    await markNewsRead(profile, 'n1');
+
+    expect(mockSaveSaveProfile).toHaveBeenCalledTimes(1);
+    const persisted = mockSaveSaveProfile.mock.calls[0][0] as SaveProfile;
+    expect(persisted.news.find(n => n.id === 'n1')!.read).toBe(true);
+  });
+
+  // M6 Task 4 (#36): ScenePanel 接线流 — 传入 JSON 克隆（Dexie 吃不下 Vue Proxy）仍能定位并持久化
+  it('works on a JSON-cloned profile (ScenePanel 克隆落库流)', async () => {
+    const profile = makeProfile({
+      news: [{ id: 'n1', title: '克隆新闻', content: '内容', category: 'world', publishedAt: 100, read: false }],
+    });
+    const clone = JSON.parse(JSON.stringify(profile)) as SaveProfile;
+    mockSaveSaveProfile.mockResolvedValue(undefined);
+
+    const result = await markNewsRead(clone, 'n1');
+
+    expect(result.news[0].read).toBe(true);
+    expect(mockSaveSaveProfile).toHaveBeenCalledWith(clone);
+    expect(profile.news[0].read).toBe(false); // 原件不受影响 — 克隆隔离
+  });
 });
 
 // ---- Integration-like: multiple operations on same profile ----

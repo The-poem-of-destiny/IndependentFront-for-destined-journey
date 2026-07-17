@@ -487,20 +487,6 @@ export interface ChatMessage {
   systemEvent?: SystemEvent;
 }
 
-/** @deprecated v3 遗留，chats 表已删（M1 #46），类型仅为历史 import 兼容保留（variables.ts 纯函数仍引用），M6 删除 */
-export interface ChatSession {
-  id: string;
-  name: string;
-  messages: ChatMessage[];
-  characterName: string;
-  userName: string;
-  presetId: string | null;
-  lorebookIds: string[];
-  variables: Record<string, any>;
-  createdAt: number;
-  updatedAt: number;
-}
-
 // ========== Constants ==========
 
 /** Common SillyTavern prompt_order identifiers used in OpenAI presets. */
@@ -894,8 +880,6 @@ export interface MemoryRecord {
   keywords: string[];
   /** 关联的角色 ID */
   relatedCharacterIds: string[];
-  /** @deprecated Phase 10g: 由 keywords + embedding 召回替代，不再要求 AI 输出 */
-  relatedPlotEventId?: string;
   /** 重要度 (0-10) */
   importance: number;
   /** Embedding 向量（Phase 4 — 用于语义召回，维度取决于 embedding 模型） */

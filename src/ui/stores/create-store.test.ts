@@ -676,7 +676,7 @@ describe('buildOpeningPrompt', () => {
     }
   })
 
-  it('选中 system_core 世界书条目时应输出该条目内容（命定之灵）', () => {
+  it('选中 system_core 世界书条目时应输出激活指针而非条目全文（命定之灵）', () => {
     // 新的 UI 命定核心选择走 selectedSystemCoreEntry（system_core 世界书条目）
     store.systemCoreEntries = [
       { uid: 413, name: '裂命之灵', content: '寄宿于灵魂深处的命运之灵，影响叙事风格。', enabled: true, constant: false, key: [], keysecondary: [], selectiveLogic: 0, order: 0, position: 0 } as any,
@@ -685,7 +685,11 @@ describe('buildOpeningPrompt', () => {
     const prompt = store.buildOpeningPrompt()
     expect(prompt).toContain('--- 命定之灵：')
     expect(prompt).toContain('裂命之灵')
-    expect(prompt).toContain('寄宿于灵魂深处的命运之灵')
+    // e42f971 起开场白仅输出激活指针；条目全文由世界书通道注入
+    // （buildEnabledWorldBookEntries → SaveSlot.metadata.enabledWorldBookEntries → worldbook-loader），
+    // 避免同一内容在开场 user 消息中重复占用 token。
+    expect(prompt).toContain('命定核心「裂命之灵」已激活，详细内容参见世界书。')
+    expect(prompt).not.toContain('寄宿于灵魂深处的命运之灵')
   })
 })
 

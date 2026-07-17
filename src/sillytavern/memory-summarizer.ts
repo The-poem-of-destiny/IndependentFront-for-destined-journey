@@ -188,15 +188,18 @@ export async function summarizeAndSave(options: SummarizeAndSaveOptions): Promis
 /**
  * 为压缩操作生成摘要记忆
  * 用于压缩 N 条旧记忆为 1 条摘要
+ *
+ * M6 #50: 内部通过 generateMemoryId() 补全 id，直接返回完整 MemoryRecord（不再要求调用方补 id）
  */
-export function createCompressionSummaryMemory(
+export async function createCompressionSummaryMemory(
   saveId: string,
   oldMemories: MemoryRecord[],
   summaryText: string,
   hiddenLine: string,
   keywords: string[],
   importance: number,
-): Omit<MemoryRecord, 'id' | 'embedding'> {
+): Promise<MemoryRecord> {
+  const id = await generateMemoryId(saveId);
   const now = Date.now();
   const earliestTime = oldMemories.reduce(
     (min, m) => m.createdAt < min ? m.createdAt : min,
@@ -204,6 +207,7 @@ export function createCompressionSummaryMemory(
   );
 
   return {
+    id,
     saveId,
     createdAt: earliestTime,
     realTimestamp: now,

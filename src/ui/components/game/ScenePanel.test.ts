@@ -1,0 +1,115 @@
+/**
+ * ScenePanel 新闻已读接线测试 (M6 Task 4, #36)
+ *
+ * 验证: 展开未读新闻 → 本地 reactive 标记 read=true → markNewsRead(JSON 克隆) 持久化。
+ * 跟随 QuestsPanel focusQuest 回写模式（M5）: 先改内存 reactive，再 JSON 克隆落库。
+ * @vitest-environment jsdom
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import { reactive } from 'vue'
+import ScenePanel from './ScenePanel.vue'
+
+// ---- Mocks ----
+
+const mockMarkNewsRead = vi.fn(async (profile: any, _newsId: string) => profile)
+vi.mock('@engine/save-profile', () => ({
+  markNewsRead: (...args: any[]) => (mockMarkNewsRead as any)(...args),
+}))
+
+let mockProfile: any
+let mockStore: any
+
+vi.mock('../../stores/game-store', () => ({
+  useGameStore: () => mockStore,
+}))
+vi.mock('../../stores/settings-store', () => ({
+  useSettingsStore: () => ({ settings: {} }),
+}))
+
+function makeNews(id: string, read: boolean) {
+  return { id, title: `新闻${id}`, content: `内容${id}`, category: 'world', publishedAt: 100, read }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mockProfile = reactive({
+    saveId: 'save_1',
+    fp: 0,
+    fpHistory: [],
+    contracts: [],
+    achievements: [],
+    news: [makeNews('n1', false), makeNews('n2', true)],
+    quests: {},
+    focusQuest: '',
+    affections: {},
+    gameTime: null,
+    variables: {},
+    worldFlags: {},
+    updatedAt: 0,
+  })
+  mockStore = {
+    activeSaveId: 'save_1',
+    gameTime: null,
+    player: null,
+    characters: [],
+    saveProfile: mockProfile,
+    get news() { return mockProfile.news },
+    getThoughts: vi.fn(() => ''),
+    showModal: vi.fn(),
+  }
+})
+
+describe('ScenePanel — 新闻展开标记已读 (M6 #36)', () => {
+  it('展开未读新闻 → 本地 read=true + markNewsRead(JSON 克隆, id) 持久化', async () => {
+    const wrapper = mount(ScenePanel)
+    const items = wrapper.findAll('.news-item')
+    expect(items).toHaveLength(2)
+
+    await items[0].trigger('click')
+    await flushPromises()
+
+    // reactive 即时标记（未读红点消失、其他面板即时可见）
+    expect(mockProfile.news[0].read).toBe(true)
+    // 持久化路径: markNewsRead 收到 JSON 克隆（Dexie 吃不下 Vue Proxy）+ 正确 newsId
+    expect(mockMarkNewsRead).toHaveBeenCalledTimes(1)
+    const [persistedProfile, newsId] = mockMarkNewsRead.mock.calls[0]
+    expect(newsId).toBe('n1')
+    expect(persistedProfile).not.toBe(mockProfile)
+    expect(persistedProfile.news.find((n: any) => n.id === 'n1').read).toBe(true)
+  })
+
+  it('展开已读新闻不调用 markNewsRead（只标未读项）', async () => {
+    const wrapper = mount(ScenePanel)
+
+    await wrapper.findAll('.news-item')[1].trigger('click') // n2 已读
+    await flushPromises()
+
+    expect(mockMarkNewsRead).not.toHaveBeenCalled()
+    expect(mockProfile.news[1].read).toBe(true)
+  })
+
+  it('收起不触发标记；再次展开已标记项也不重复调用', async () => {
+    const wrapper = mount(ScenePanel)
+    const first = () => wrapper.findAll('.news-item')[0]
+
+    await first().trigger('click') // 展开 → 标记
+    await flushPromises()
+    await first().trigger('click') // 收起
+    await flushPromises()
+    await first().trigger('click') // 再展开（此时已读）
+    await flushPromises()
+
+    expect(mockMarkNewsRead).toHaveBeenCalledTimes(1)
+  })
+
+  it('未读红点随标记消失', async () => {
+    const wrapper = mount(ScenePanel)
+    expect(wrapper.findAll('.news-dot')).toHaveLength(1)
+
+    await wrapper.findAll('.news-item')[0].trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('.news-dot')).toHaveLength(0)
+  })
+})

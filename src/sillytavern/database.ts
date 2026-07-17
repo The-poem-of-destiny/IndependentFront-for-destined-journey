@@ -611,20 +611,22 @@ export async function saveSaveSlot(saveSlot: SaveSlot): Promise<string> {
 
 export async function deleteSaveSlot(id: string): Promise<void> {
   const db = getDatabase();
-  // 级联删除关联数据
-  const snapshots = await db.snapshots.where('saveId').equals(id).toArray();
-  await db.snapshots.bulkDelete(snapshots.map(s => s.id));
-  const memories = await db.memories.where('saveId').equals(id).toArray();
-  await db.memories.bulkDelete(memories.map(m => m.id));
-  const plotEvents = await db.plotEvents.where('saveId').equals(id).toArray();
-  await db.plotEvents.bulkDelete(plotEvents.map(p => p.id));
-  const plotOutlines = await db.plotOutlines.where('saveId').equals(id).toArray();
-  await db.plotOutlines.bulkDelete(plotOutlines.map(o => o.id));
-  const messagesToDelete = await db.messages.where('saveId').equals(id).toArray();
-  await db.messages.bulkDelete(messagesToDelete.map(m => m.id));
-  await db.characters.where('saveId').equals(id).delete();
-  await db.saveProfiles.where('saveId').equals(id).delete();
-  await db.saves.delete(id);
+  // 级联删除关联数据 — M6 Task 4: Dexie 事务包裹（M1 终审 Minor 遗留），
+  // 任一步失败整体回滚，杜绝半删存档（如部分表已删但 saves/characters 残留）。
+  await db.transaction(
+    'rw',
+    [db.snapshots, db.memories, db.plotEvents, db.plotOutlines, db.messages, db.characters, db.saveProfiles, db.saves],
+    async () => {
+      await db.snapshots.where('saveId').equals(id).delete();
+      await db.memories.where('saveId').equals(id).delete();
+      await db.plotEvents.where('saveId').equals(id).delete();
+      await db.plotOutlines.where('saveId').equals(id).delete();
+      await db.messages.where('saveId').equals(id).delete();
+      await db.characters.where('saveId').equals(id).delete();
+      await db.saveProfiles.where('saveId').equals(id).delete();
+      await db.saves.delete(id);
+    },
+  );
 }
 
 // --- API Endpoints ---
@@ -659,10 +661,11 @@ export async function getPlotOutline(id: string): Promise<PlotOutline | undefine
 }
 
 export async function getLatestPlotOutline(saveId: string): Promise<PlotOutline | undefined> {
+  // M6 #51: version 为原地覆盖递增（同 id put），按 version 排序形同虚设 — 改按 updatedAt 取最新
   const outlines = await getDatabase().plotOutlines
     .where('saveId').equals(saveId)
     .reverse()
-    .sortBy('version');
+    .sortBy('updatedAt');
   return outlines[0];
 }
 
