@@ -10,6 +10,7 @@
 > 4. **装备=物品状态**（规范 §3）: equipment[] 已退役，装备落库为单 `add_item` 带 `equippedSlot`（8 中文槽位枚举），两步 add+equip 模式废除。
 > 5. **char_detect 已死**（M3/M4）: story 不再输出该标记，角色检测统一走 request_dispatcher 的 `<char_gen_request>`；char_gen 输入占位符 `{{CHAR_DETECT}}`/`{{CHAR_GEN_REQUEST}}` 双通道保留。
 > 6. **枚举中文集中定义**（铁律5）: slot/type/rarity/quest.status/category 以 `field-enums.ts` 为唯一真源，AI 提名值写入前归一化。
+> 7. **真机迭代解析兜底（2026-07-17/18）**: AI 实测常无视 XML 子元素教学（在 `<char_result>`/`<item_result>` 里塞 markdown JSON、嵌套 `<description>`/`<physical>` 等自造子标签、产 `type="主动"` 中文枚举）。解析入口已全部宽容化: parseCharGenOutput/parseItemGenOutput JSON 兜底 + stripInnerTags 嵌套剥离 + 中文 type 归一 + 0 属性保留（意识体合法）。侧链 systemPrompt/世界书注入（configs/worldBooks/presets 透传）与 maxTokens 兜底 16384 亦已修复——本文各 Agent 追踪的"预期输出格式"仍是教学目标，但解析层不再依赖 AI 守格式。
 
 ---
 
