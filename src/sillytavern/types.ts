@@ -1267,7 +1267,7 @@ export type StatePatchOp =
 /** 原子状态补丁 — StateManager 的唯一输入格式 */
 export interface StatePatch {
   op: StatePatchOp;
-  /** 目标路径: 'characters.<id>' | 'variables.<path>' | 'plotEvents.<id>' */
+  /** 目标路径: 'characters.<名字>' | 'variables.<path>' | 'plotEvents.<id>' */
   target: string;
   value?: any;
   amount?: number;

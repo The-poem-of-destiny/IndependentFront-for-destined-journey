@@ -31,8 +31,17 @@ vi.mock('./database', () => ({
   getSettings: vi.fn(),
 }));
 
+// save-profile 也 mock（quest 双 op 测试用；state-manager 对其为动态 import，vitest 同样拦截）
+vi.mock('./save-profile', () => ({
+  getProfile: vi.fn(),
+  updateProfile: vi.fn(),
+  setQuest: vi.fn(),
+  removeQuest: vi.fn(),
+}));
+
 import { StateManager, createStateManager } from './state-manager';
 import * as db from './database';
+import * as saveProfile from './save-profile';
 
 // ========== Helpers ==========
 
@@ -183,8 +192,11 @@ describe('StateManager', () => {
       const result = await sm.commitChatState([
         { op: '' as any, target: 'variables.gold' },
       ]);
-      // Validation error returned by applyPatch; no throw → errors[] stays empty.
+      // M2 语义修正: 验证失败 throw → 进 errors[]，success=false
       expect(result.patchesApplied).toBe(0);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('缺少 op 字段');
+      expect(result.success).toBe(false);
     });
 
     it('should reject patch with missing target field', async () => {
@@ -193,6 +205,8 @@ describe('StateManager', () => {
         { op: 'set_variable', target: '' },
       ]);
       expect(result.patchesApplied).toBe(0);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('缺少 target 字段');
     });
 
     it('should reject delta_variable without amount field', async () => {
@@ -201,6 +215,8 @@ describe('StateManager', () => {
         { op: 'delta_variable', target: 'variables.gold' },
       ]);
       expect(result.patchesApplied).toBe(0);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('delta_variable 需要 amount 字段');
     });
 
     it('should reject delta_hp without amount field', async () => {
@@ -209,6 +225,7 @@ describe('StateManager', () => {
         { op: 'delta_hp', target: 'characters.c1' },
       ]);
       expect(result.patchesApplied).toBe(0);
+      expect(result.errors).toHaveLength(1);
     });
 
     it('should reject set_variable without value field', async () => {
@@ -217,6 +234,8 @@ describe('StateManager', () => {
         { op: 'set_variable', target: 'variables.gold' },
       ]);
       expect(result.patchesApplied).toBe(0);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('set_variable 需要 value 字段');
     });
 
     it('should reject set_hp without value field', async () => {
@@ -225,6 +244,7 @@ describe('StateManager', () => {
         { op: 'set_hp', target: 'characters.c1' },
       ]);
       expect(result.patchesApplied).toBe(0);
+      expect(result.errors).toHaveLength(1);
     });
 
     it('should reject unknown op', async () => {
@@ -232,7 +252,9 @@ describe('StateManager', () => {
       const result = await sm.commitChatState([
         { op: 'unknown_op' as any, target: 'variables.gold', value: 100 },
       ]);
+      // 未知 op 通过验证但落 dispatch default 分支 → 不进 errors（Task 5-11 的 8 个新 op 落此）
       expect(result.patchesApplied).toBe(0);
+      expect(result.errors).toHaveLength(0);
     });
   });
 
@@ -1189,7 +1211,7 @@ describe('StateManager', () => {
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        // This one fails validation — missing op → not applied, no throw
+        // This one fails validation — missing op → M2: throw → 进 errors[]
         { op: '' as any, target: 'variables.bad' },
         // This one succeeds
         { op: 'set_variable', target: 'variables.good', value: 42 },
@@ -1199,11 +1221,12 @@ describe('StateManager', () => {
         { op: 'delta_hp', target: 'characters.char-001', amount: -10 },
       ]);
 
-      // One patch threw → errors.length = 1 → success = false
+      // M2 语义修正: 验证失败 + 角色缺失都进 errors → errors.length = 2 → success = false
       expect(result.success).toBe(false);
       expect(result.patchesApplied).toBe(2); // 2 succeeded
-      expect(result.errors).toHaveLength(1); // only the thrown one
-      expect(result.errors[0]).toContain('角色不存在: missing');
+      expect(result.errors).toHaveLength(2); // validation throw + missing character
+      expect(result.errors[0]).toContain('缺少 op 字段');
+      expect(result.errors[1]).toContain('角色不存在: missing');
       expect(result.eventsGenerated).toHaveLength(2); // from the 2 successful patches
       expect(char.hp).toBe(40); // successful delta was applied
     });
@@ -1223,7 +1246,206 @@ describe('StateManager', () => {
   });
 
   // ===================================================================
-  // 17. createStateManager factory
+  // 17. resolveCharacter — 名字解析唯一入口 (M2 铁律2)
+  // ===================================================================
+  describe('resolveCharacter 名字解析唯一入口', () => {
+    it('按名字解析角色', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', hp: 100, maxHp: 100 });
+      await db.saveCharacter(char); // 放入 in-memory charStore
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'set_hp', target: 'characters.理查德', value: 50 },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(result.patchesApplied).toBe(1);
+      expect(char.hp).toBe(50);
+    });
+
+    it('主角/玩家 别名解析到 player', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', hp: 100, maxHp: 100 });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const r1 = await sm.commitChatState([
+        { op: 'set_hp', target: 'characters.主角', value: 60 },
+      ]);
+      expect(r1.success).toBe(true);
+      expect(char.hp).toBe(60);
+
+      const r2 = await sm.commitChatState([
+        { op: 'set_hp', target: 'characters.玩家', value: 70 },
+      ]);
+      expect(r2.success).toBe(true);
+      expect(char.hp).toBe(70);
+    });
+
+    it('UUID 兜底仍可用（过渡期）', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'npc', saveId: 'OTHER_SAVE', hp: 100, maxHp: 100 });
+      // 不在本存档（saveId 不匹配）→ 名字/别名都查不到 → 走 UUID 兜底 getCharacter
+      vi.mocked(db.getCharacter).mockImplementation(async (id: any) => (id === 'uuid-1' ? char : undefined));
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'set_hp', target: 'characters.uuid-1', value: 30 },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.hp).toBe(30);
+    });
+
+    it('解析失败进 errors[] 不静默', async () => {
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'set_hp', target: 'characters.不存在的人', value: 50 },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.patchesApplied).toBe(0);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('角色不存在: 不存在的人');
+    });
+
+    it('子路径 target (characters.X.skills) 只取第一段解析到角色 X (#11 防御)', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', hp: 100, maxHp: 100 });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'set_hp', target: 'characters.理查德.skills', value: 40 },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.hp).toBe(40);
+    });
+  });
+
+  // ===================================================================
+  // 18. validatePatch 语义修正 — 验证失败进 errors[]
+  // ===================================================================
+  describe('validatePatch 语义修正 — 验证失败进 errors[]', () => {
+    it('缺 op/target 的 patch 进 errors 且 success=false', async () => {
+      const sm = new StateManager({ saveId: 'save-001' });
+      const r = await sm.commitChatState([{ op: 'set_hp' } as any]);
+      expect(r.errors.length).toBe(1);
+      expect(r.patchesApplied).toBe(0);
+      expect(r.success).toBe(false);
+    });
+
+    it('value 必填矩阵: M2 新 op 缺 value 全部进 errors', async () => {
+      const sm = new StateManager({ saveId: 'save-001' });
+      const ops = ['rename_character', 'update_item', 'transfer_item', 'remove_skill', 'set_affection', 'add_news'] as const;
+      const result = await sm.commitChatState(
+        ops.map(op => ({ op, target: 'characters.X' } as any)),
+      );
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(ops.length);
+      expect(result.patchesApplied).toBe(0);
+      for (const op of ops) {
+        expect(result.errors.some(e => e.includes(`${op} 需要 value 字段`))).toBe(true);
+      }
+    });
+
+    it('amount 必填: delta_affection 缺 amount 进 errors', async () => {
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'delta_affection', target: 'characters.X' } as any,
+      ]);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('delta_affection 需要 amount 字段');
+    });
+
+    it('move_variable 缺 metadata.toPath 进 errors', async () => {
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'move_variable', target: 'variables.a' },
+      ]);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('move_variable 需要 metadata.toPath');
+    });
+
+    it('例外: update_character 允许 value 为空（metadata.action-only）', async () => {
+      const char = buildMockCharacter({ id: 'char-001', currentAction: 'old' });
+      vi.mocked(db.getCharacter).mockResolvedValue(char);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'update_character', target: 'characters.char-001', metadata: { action: 'new_action' } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(result.patchesApplied).toBe(1);
+      expect(char.currentAction).toBe('new_action');
+    });
+
+    it('无额外要求: remove_variable 无 value 也通过验证', async () => {
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'remove_variable', target: 'variables.gold' },
+      ]);
+      expect(result.errors).toHaveLength(0);
+      expect(result.patchesApplied).toBe(1);
+    });
+
+    it('无额外要求: remove_character 通过验证（handler 未实现 → 走 default 分支不进 errors）', async () => {
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'remove_character', target: 'characters.X' },
+      ]);
+      // 验证通过（不进 errors）；但 dispatch switch 无 handler → success:false 结果、patchesApplied=0
+      expect(result.errors).toHaveLength(0);
+      expect(result.patchesApplied).toBe(0);
+    });
+  });
+
+  // ===================================================================
+  // 19. update_quest / remove_quest — 顺带修 (#32 / #40)
+  // ===================================================================
+  describe('update_quest status 归一化 & remove_quest {name} 形态', () => {
+    it('update_quest 写入前 status 走 normalizeQuestStatus (#32)', async () => {
+      const profile = { saveId: 'save-001', quests: {} } as any;
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+      vi.mocked(saveProfile.setQuest).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'update_quest', target: 'quests.试炼', value: { name: '试炼', status: 'active', progress: '第一步' } },
+      ]);
+
+      expect(result.success).toBe(true);
+      // 'active' 是自由字符串 → 别名归一化为 '进行中'
+      expect(vi.mocked(saveProfile.setQuest)).toHaveBeenCalledWith(
+        profile, '试炼', expect.objectContaining({ status: '进行中', progress: '第一步' }),
+      );
+    });
+
+    it('remove_quest value 为 {name} 对象 (#40)', async () => {
+      const profile = { saveId: 'save-001', quests: {} } as any;
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+      vi.mocked(saveProfile.removeQuest).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'remove_quest', target: 'quests.试炼', value: { name: '试炼' } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(vi.mocked(saveProfile.removeQuest)).toHaveBeenCalledWith(profile, '试炼');
+    });
+
+    it('remove_quest value 缺 name 报"缺少任务名称"', async () => {
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'remove_quest', target: 'quests.试炼', value: {} },
+      ]);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('缺少任务名称');
+    });
+  });
+
+  // ===================================================================
+  // 20. createStateManager factory
   // ===================================================================
   describe('createStateManager factory', () => {
     it('should create a StateManager instance with saveId', () => {

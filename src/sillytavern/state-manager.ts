@@ -17,7 +17,7 @@ import type {
   StatusEffect, EquipmentSlot, Skill, InventoryItem,
 } from './types';
 import {
-  getCharacter, saveCharacter, saveCharacters,
+  getCharacter, getCharacters, saveCharacter, saveCharacters,
   getMemories, saveMemory,
   getPlotEvents, savePlotEvents,
   getSave, saveSaveSlot,
@@ -26,6 +26,7 @@ import {
 } from './database';
 import type { SaveSlot } from './types';
 import { getVar, setVar, delVar, insertVar } from './var-resolver';
+import { normalizeQuestStatus } from './field-enums';
 
 // ========== Types ==========
 
@@ -146,11 +147,8 @@ export class StateManager {
   // ========== Patch 应用 ==========
 
   private async applyPatch(patch: StatePatch): Promise<PatchApplicationResult> {
-    // 验证
-    const validationError = this.validatePatch(patch);
-    if (validationError) {
-      return { patch, success: false, error: validationError };
-    }
+    // 验证 — 失败直接 throw → 被 commitChatState 的 try/catch 收进 errors[]（M2 语义修正）
+    this.validatePatch(patch);
 
     // 分发
     let event: GameEvent | undefined;
@@ -235,28 +233,94 @@ export class StateManager {
 
   // ========== 验证 ==========
 
-  private validatePatch(patch: StatePatch): string | null {
-    if (!patch.op) return '缺少 op 字段';
-    if (!patch.target) return '缺少 target 字段';
+  /**
+   * Patch 验证 — 失败即 throw（M2 语义修正）
+   *
+   * 需求矩阵（M2 规范附录 A）:
+   * - value 必填: set/add/update/remove/equip/rename 类（见 VALUE_REQUIRED_OPS）
+   * - amount 必填: delta 类（见 AMOUNT_REQUIRED_OPS）
+   * - 无额外要求: remove_character / remove_variable
+   * - move_variable: 需要 metadata.toPath
+   * - 例外: update_character 允许 value 为空（metadata.action-only 场景）
+   */
+  private validatePatch(patch: StatePatch): void {
+    if (!patch.op) throw new Error('缺少 op 字段');
+    if (!patch.target) throw new Error('缺少 target 字段');
 
-    // 数值操作必须有 amount
-    const numericOps: StatePatchOp[] = [
-      'delta_variable', 'delta_hp', 'delta_mp', 'delta_sp',
+    // amount 必填
+    const AMOUNT_REQUIRED_OPS: StatePatchOp[] = [
+      'delta_variable', 'delta_hp', 'delta_mp', 'delta_sp', 'delta_affection',
     ];
-    if (numericOps.includes(patch.op) && patch.amount === undefined) {
-      return `${patch.op} 需要 amount 字段`;
+    if (AMOUNT_REQUIRED_OPS.includes(patch.op) && patch.amount === undefined) {
+      throw new Error(`${patch.op} 需要 amount 字段`);
     }
 
-    // set 操作必须有 value
-    const setOps: StatePatchOp[] = [
-      'set_variable', 'set_hp', 'set_mp', 'set_sp', 'set_location',
+    // value 必填
+    const VALUE_REQUIRED_OPS: StatePatchOp[] = [
+      'set_variable', 'insert_variable',
+      'set_hp', 'set_mp', 'set_sp', 'set_location',
       'update_quest', 'remove_quest',
+      'add_item', 'remove_item', 'update_item', 'transfer_item',
+      'equip_item', 'unequip_item',
+      'add_skill', 'update_skill', 'remove_skill',
+      'add_status_effect', 'remove_status_effect',
+      'add_character', 'rename_character',
+      'add_memory', 'update_plot_event',
+      'set_affection', 'add_news',
     ];
-    if (setOps.includes(patch.op) && patch.value === undefined) {
-      return `${patch.op} 需要 value 字段`;
+    if (VALUE_REQUIRED_OPS.includes(patch.op) && patch.value === undefined) {
+      throw new Error(`${patch.op} 需要 value 字段`);
     }
 
-    return null;
+    // move_variable 需要目标路径
+    if (patch.op === 'move_variable' && !patch.metadata?.toPath) {
+      throw new Error('move_variable 需要 metadata.toPath');
+    }
+  }
+
+  // ========== 名字解析 (M2 铁律2: 名字解析唯一入口) ==========
+
+  /**
+   * 按名字解析角色 — 所有角色类 handler 的唯一寻址入口
+   *
+   * 解析顺序:
+   * ① 本存档内按 name 精确匹配
+   * ② '主角'/'玩家' 别名 → 本存档 type='player' 的角色
+   * ③ UUID 兜底（按 id 查库）  // 过渡: M4 删
+   * ④ 找不到 → throw
+   */
+  private async resolveCharacter(key: string): Promise<CharacterState> {
+    const chars = await getCharacters(this.saveId);
+
+    // ① 名字精确匹配
+    const byName = chars.find(c => c.name === key);
+    if (byName) return byName;
+
+    // ② 主角别名
+    if (key === '主角' || key === '玩家') {
+      const player = chars.find(c => c.type === 'player');
+      if (player) return player;
+    }
+
+    // ③ UUID 兜底 // 过渡: M4 删
+    const byId = await getCharacter(key);
+    if (byId) return byId;
+
+    // ④ 找不到
+    throw new Error(`角色不存在: ${key}`);
+  }
+
+  /**
+   * 从 patch.target 解析角色 — 剥离 'characters.' 前缀后只取第一段
+   * （防御子路径写法 'characters.X.skills'，#11 Code 侧防御）
+   */
+  private async resolveCharTarget(target: string): Promise<CharacterState> {
+    const raw = target.startsWith('characters.')
+      ? target.slice('characters.'.length)
+      : target;
+    const key = raw.split('.')[0];
+    if (!key) throw new Error(`无效的 character target: ${target}`);
+    return this.resolveCharacter(key);
   }
 
   // ========== Patch Handlers ==========
@@ -327,11 +391,7 @@ export class StateManager {
   }
 
   private async applyUpdateCharacter(patch: StatePatch): Promise<GameEvent> {
-    const charId = this.extractId(patch.target, 'characters');
-    if (!charId) throw new Error(`无效的 character target: ${patch.target}`);
-
-    const char = await getCharacter(charId);
-    if (!char) throw new Error(`角色不存在: ${charId}`);
+    const char = await this.resolveCharTarget(patch.target);
 
     if (patch.value && typeof patch.value === 'object') {
       Object.assign(char, patch.value);
@@ -343,10 +403,7 @@ export class StateManager {
   }
 
   private async applySetResource(patch: StatePatch): Promise<GameEvent> {
-    const charId = this.extractId(patch.target, 'characters');
-    if (!charId) throw new Error(`无效的 character target: ${patch.target}`);
-    const char = await getCharacter(charId);
-    if (!char) throw new Error(`角色不存在: ${charId}`);
+    const char = await this.resolveCharTarget(patch.target);
 
     const resource = patch.op.replace('set_', '') as 'hp' | 'mp' | 'sp';
     const maxField = `max${resource.charAt(0).toUpperCase()}${resource.slice(1)}` as 'maxHp' | 'maxMp' | 'maxSp';
@@ -359,10 +416,7 @@ export class StateManager {
   }
 
   private async applyDeltaResource(patch: StatePatch): Promise<GameEvent> {
-    const charId = this.extractId(patch.target, 'characters');
-    if (!charId) throw new Error(`无效的 character target: ${patch.target}`);
-    const char = await getCharacter(charId);
-    if (!char) throw new Error(`角色不存在: ${charId}`);
+    const char = await this.resolveCharTarget(patch.target);
 
     const resource = patch.op.replace('delta_', '') as 'hp' | 'mp' | 'sp';
     const maxField = `max${resource.charAt(0).toUpperCase()}${resource.slice(1)}` as 'maxHp' | 'maxMp' | 'maxSp';
@@ -377,10 +431,7 @@ export class StateManager {
   }
 
   private async applyAddStatusEffect(patch: StatePatch): Promise<GameEvent> {
-    const charId = this.extractId(patch.target, 'characters');
-    if (!charId) throw new Error(`无效的 character target: ${patch.target}`);
-    const char = await getCharacter(charId);
-    if (!char) throw new Error(`角色不存在: ${charId}`);
+    const char = await this.resolveCharTarget(patch.target);
 
     const effect = patch.value as StatusEffect;
     if (!effect?.id) throw new Error('缺少 status effect 数据');
@@ -421,10 +472,7 @@ export class StateManager {
   }
 
   private async applyRemoveStatusEffect(patch: StatePatch): Promise<GameEvent> {
-    const charId = this.extractId(patch.target, 'characters');
-    if (!charId) throw new Error(`无效的 character target: ${patch.target}`);
-    const char = await getCharacter(charId);
-    if (!char) throw new Error(`角色不存在: ${charId}`);
+    const char = await this.resolveCharTarget(patch.target);
 
     const effectId = patch.value as string;
     char.statusEffects = char.statusEffects.filter(e => e.id !== effectId);
@@ -434,10 +482,7 @@ export class StateManager {
   }
 
   private async applyAddItem(patch: StatePatch): Promise<GameEvent> {
-    const charId = this.extractId(patch.target, 'characters');
-    if (!charId) throw new Error(`无效的 character target: ${patch.target}`);
-    const char = await getCharacter(charId);
-    if (!char) throw new Error(`角色不存在: ${charId}`);
+    const char = await this.resolveCharTarget(patch.target);
 
     const item = patch.value as InventoryItem;
     if (!item?.id) throw new Error('缺少物品数据');
@@ -454,10 +499,7 @@ export class StateManager {
   }
 
   private async applyRemoveItem(patch: StatePatch): Promise<GameEvent> {
-    const charId = this.extractId(patch.target, 'characters');
-    if (!charId) throw new Error(`无效的 character target: ${patch.target}`);
-    const char = await getCharacter(charId);
-    if (!char) throw new Error(`角色不存在: ${charId}`);
+    const char = await this.resolveCharTarget(patch.target);
 
     const itemId = patch.value as string;
     const qty = patch.amount ?? 1;
@@ -475,10 +517,7 @@ export class StateManager {
   }
 
   private async applyEquipItem(patch: StatePatch): Promise<GameEvent> {
-    const charId = this.extractId(patch.target, 'characters');
-    if (!charId) throw new Error(`无效的 character target: ${patch.target}`);
-    const char = await getCharacter(charId);
-    if (!char) throw new Error(`角色不存在: ${charId}`);
+    const char = await this.resolveCharTarget(patch.target);
 
     const equipData = patch.value as { itemId: string; slot: string; name: string; stats?: Record<string, number> };
     if (!equipData?.itemId) throw new Error('缺少装备数据');
@@ -517,10 +556,7 @@ export class StateManager {
   }
 
   private async applyUnequipItem(patch: StatePatch): Promise<GameEvent> {
-    const charId = this.extractId(patch.target, 'characters');
-    if (!charId) throw new Error(`无效的 character target: ${patch.target}`);
-    const char = await getCharacter(charId);
-    if (!char) throw new Error(`角色不存在: ${charId}`);
+    const char = await this.resolveCharTarget(patch.target);
 
     const slot = patch.value as string;
     const equipped = char.equipment.find(e => e.slot === slot);
@@ -539,10 +575,7 @@ export class StateManager {
   }
 
   private async applyAddSkill(patch: StatePatch): Promise<GameEvent> {
-    const charId = this.extractId(patch.target, 'characters');
-    if (!charId) throw new Error(`无效的 character target: ${patch.target}`);
-    const char = await getCharacter(charId);
-    if (!char) throw new Error(`角色不存在: ${charId}`);
+    const char = await this.resolveCharTarget(patch.target);
 
     const skill = patch.value as Skill;
     if (!skill?.id) throw new Error('缺少技能数据');
@@ -556,10 +589,7 @@ export class StateManager {
   }
 
   private async applyUpdateSkill(patch: StatePatch): Promise<GameEvent> {
-    const charId = this.extractId(patch.target, 'characters');
-    if (!charId) throw new Error(`无效的 character target: ${patch.target}`);
-    const char = await getCharacter(charId);
-    if (!char) throw new Error(`角色不存在: ${charId}`);
+    const char = await this.resolveCharTarget(patch.target);
 
     const update = patch.value as { skillId: string; changes: Partial<Skill> };
     const skill = char.skills.find(s => s.id === update.skillId);
@@ -572,10 +602,7 @@ export class StateManager {
   }
 
   private async applySetLocation(patch: StatePatch): Promise<GameEvent> {
-    const charId = this.extractId(patch.target, 'characters');
-    if (!charId) throw new Error(`无效的 character target: ${patch.target}`);
-    const char = await getCharacter(charId);
-    if (!char) throw new Error(`角色不存在: ${charId}`);
+    const char = await this.resolveCharTarget(patch.target);
 
     char.location = String(patch.value);
     await saveCharacter(char);
@@ -622,19 +649,24 @@ export class StateManager {
     const questData = patch.value as { name: string } & Record<string, any>;
     const questName = questData.name;
     if (!questName) throw new Error('缺少任务名称');
-    const { getProfile, updateProfile, setQuest } = await import('./save-profile');
+    const { getProfile, setQuest } = await import('./save-profile');
     const profile = await getProfile(this.saveId);
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { name: _name, ...questFields } = questData;
+    // #32: status 自由字符串归一化（'active'/'done' 等别名 → 中文枚举）
+    if (questFields.status !== undefined) {
+      questFields.status = normalizeQuestStatus(questFields.status);
+    }
     await setQuest(profile, questName, questFields);
     return this.createEvent('quest_update', patch);
   }
 
   private async applyRemoveQuest(patch: StatePatch): Promise<GameEvent> {
-    const questName = patch.value as string;
+    // #40: value 形态统一为 {name} 对象（与 update_quest 对齐）
+    const questName = (patch.value as { name?: string })?.name;
     if (!questName) throw new Error('缺少任务名称');
-    const { getProfile, updateProfile, removeQuest } = await import('./save-profile');
+    const { getProfile, removeQuest } = await import('./save-profile');
     const profile = await getProfile(this.saveId);
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
     await removeQuest(profile, questName);
@@ -652,15 +684,6 @@ export class StateManager {
       data: { op: patch.op, target: patch.target, value: patch.value, amount: patch.amount },
       processed: true,
     };
-  }
-
-  /** 从 target 中提取 ID: "characters.xxx" → "xxx" */
-  private extractId(target: string, prefix: string): string | null {
-    const parts = target.split('.');
-    if (parts[0] === prefix && parts.length >= 2) {
-      return parts.slice(1).join('.');
-    }
-    return null;
   }
 
   // ========== 快照 ==========
@@ -795,6 +818,14 @@ export function createStateManager(saveId: string, config?: Partial<StateManager
 // ═══════════════════════════════════════════════════════════
 // 辅助
 // ═══════════════════════════════════════════════════════════
+
+/**
+ * 集合内按名字查找 — M2 铁律1（逻辑键=名字）的集合级辅助
+ * 供各 op handler 在 inventory/skills/statusEffects 等列表中按名寻址。
+ */
+export function findByName<T extends { name: string }>(list: T[], name: string): T | undefined {
+  return list.find(item => item.name === name);
+}
 
 import type { ScriptEffects } from './script-executor';
 

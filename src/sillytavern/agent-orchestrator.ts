@@ -993,7 +993,7 @@ export class AgentOrchestrator {
               patches.push({
                 op: 'remove_quest',
                 target: `quests.${q.name}`,
-                value: q.name,
+                value: { name: q.name },  // #40: 形态统一为 {name} 对象
                 metadata: { source: 'vars_update', operation: 'remove' },
               });
             }
