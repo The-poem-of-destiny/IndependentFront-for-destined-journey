@@ -618,7 +618,8 @@ export interface EquipmentSlot {
 
 /** 技能 */
 export interface Skill {
-  id: string;
+  /** @deprecated 逻辑键=name（规范铁律1）。M2 起引擎不再读写，M3 后翻译层不再生成，仅为旧存档数据兼容保留字段位 */
+  id?: string;
   name: string;
   description: string;
   type: 'active' | 'passive';
@@ -634,7 +635,8 @@ export interface Skill {
 
 /** 背包物品 */
 export interface InventoryItem {
-  id: string;
+  /** @deprecated 逻辑键=name（规范铁律1）。M2 起引擎不再读写，M3 后翻译层不再生成，仅为旧存档数据兼容保留字段位 */
+  id?: string;
   name: string;
   description?: string;
   quantity: number;
@@ -642,6 +644,12 @@ export interface InventoryItem {
   equippedSlot?: string | null;
   type?: string;                 // 'weapon' | 'armor' | 'consumable' | 'material' | 'quest'
   rarity?: '普通' | '优良' | '稀有' | '史诗' | '传说' | '神话' | '唯一';
+  /** 🆕 M2: 装备数值加成（装备并入物品后归物品所有，规范 §3.1） */
+  stats?: Record<string, number>;
+  /** 🆕 M2: 当前耐久（规范 §3.1） */
+  durability?: number;
+  /** 🆕 M2: 最大耐久（规范 §3.1） */
+  maxDurability?: number;
   data?: Record<string, any>;
   /** 🆕 效果词条: 词条名→中文描述 (AI写, 前端展示) */
   effects?: Record<string, string>;
@@ -651,7 +659,8 @@ export interface InventoryItem {
 
 /** 状态效果 */
 export interface StatusEffect {
-  id: string;
+  /** @deprecated 逻辑键=name（规范铁律1）。M2 起引擎不再读写，M3 后翻译层不再生成，仅为旧存档数据兼容保留字段位 */
+  id?: string;
   name: string;
   description: string;
   category: '增益' | '减益' | '特殊';   // 世界书三分类
@@ -1218,14 +1227,22 @@ export type StatePatchOp =
   | 'delta_variable'
   | 'add_character'
   | 'update_character'
+  // M2: 按名寻址角色 ops (规范章节: characters §2)
+  | 'remove_character'  // 删除角色（按名）— 死亡/离场清理 (规范 §2)
+  | 'rename_character'  // 角色改名 — 逻辑键=名字，改名需专用 op 迁移键 (规范 §2)
   | 'add_status_effect'
   | 'remove_status_effect'
   | 'add_item'
   | 'remove_item'
+  // M2: 按名寻址物品 ops (规范章节: items §3)
+  | 'update_item'       // 更新物品字段（按名）— 描述/词条/耐久等 (规范 §3)
+  | 'transfer_item'     // 物品转移（按名）— 角色间背包移动 (规范 §3)
   | 'equip_item'
   | 'unequip_item'
   | 'add_skill'
   | 'update_skill'
+  // M2: 按名寻址技能 ops (规范章节: skills §4)
+  | 'remove_skill'      // 删除技能（按名）— 遗忘/替换 (规范 §4)
   | 'set_location'
   | 'set_hp'
   | 'set_mp'
@@ -1241,7 +1258,11 @@ export type StatePatchOp =
   | 'insert_variable'
   // Phase 10g: Quest ops
   | 'update_quest'
-  | 'remove_quest';
+  | 'remove_quest'
+  // M2: 好感度/新闻 ops (规范章节: affections §7 / news §8)
+  | 'set_affection'     // 设置好感度绝对值（按角色名） (规范 §7)
+  | 'delta_affection'   // 好感度增量（按角色名） (规范 §7)
+  | 'add_news';         // 追加世界新闻条目 (规范 §8)
 
 /** 原子状态补丁 — StateManager 的唯一输入格式 */
 export interface StatePatch {
