@@ -23,6 +23,7 @@ import { scanMarkers } from './marker-protocol';
 import { recallMemories } from './memory-store';
 import { buildZoneContext } from './context-visibility';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
+import { normalizeSlot } from './field-enums';
 
 // ========== Types ==========
 
@@ -877,8 +878,9 @@ export class AgentOrchestrator {
               case 'equipment': {
                 if (value?.itemId) {
                   // M2: 旧 itemId 值本来就是名字 → {name, slot}；slot 未知则不发 equip（物品留背包）// M3 重写
-                  if (value?.slot) {
-                    patches.push({ op: 'equip_item', target: `characters.${id}`, value: { name: value.name ?? value.itemId, slot: value.slot }, metadata: { source: 'vars_update' } });
+                  const eqSlotA = normalizeSlot(value?.slot ?? '');
+                  if (eqSlotA) {
+                    patches.push({ op: 'equip_item', target: `characters.${id}`, value: { name: value.name ?? value.itemId, slot: eqSlotA }, metadata: { source: 'vars_update' } });
                   }
                 } else {
                   // AI 只给 {name, type, slot} → 两步: add_item 写背包 + equip_item 按名穿上 // M3 重写
@@ -890,13 +892,14 @@ export class AgentOrchestrator {
                     value: { id: itemId /* M3 删 */, name: eqName, description: value?.description, quantity: 1, type: 'equipment', rarity: value?.rarity },
                     metadata: { source: 'vars_update', path, add: true },
                   });
-                  // slot 未知（normalizeSlot 会拒 '未知' 类垃圾值）→ 不发 equip，物品留背包 // M3 重写
-                  const slot = value?.slot ?? value?.type;
-                  if (slot) {
+                  // slot 经 normalizeSlot 归一化，不可识别则不发 equip，物品留背包 // M3 重写
+                  const rawSlot = value?.slot ?? value?.type;
+                  const eqSlotB = rawSlot ? normalizeSlot(rawSlot) : null;
+                  if (eqSlotB) {
                     patches.push({
                       op: 'equip_item',
                       target: `characters.${id}`,
-                      value: { name: eqName, slot },
+                      value: { name: eqName, slot: eqSlotB },
                       metadata: { source: 'vars_update', path, add: true },
                     });
                   }

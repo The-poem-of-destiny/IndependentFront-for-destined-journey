@@ -1034,6 +1034,16 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
     expect(patches.filter(x => x.op === 'equip_item')).toHaveLength(0);
   });
 
+  // M2 T14 评审修复: type='防具'（非 slot 名）→ normalizeSlot 拒，不发 equip_item // M3 重写
+  it('path=equipment type=防具 非槽位 → 不发 equip_item（防具在背包,不 throw）', async () => {
+    const patches = await runVarsUpdateWithJson({
+      characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'equipment', value: { name: '铁甲', type: '防具' } }], remove: [] },
+      items: {},
+    });
+    expect(patches.filter(x => x.op === 'add_item')).toHaveLength(1);
+    expect(patches.filter(x => x.op === 'equip_item')).toHaveLength(0);
+  });
+
   it('path=skills / statusEffects 原有分支不受影响', async () => {
     const patches = await runVarsUpdateWithJson({
       characters: {
