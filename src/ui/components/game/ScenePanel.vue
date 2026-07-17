@@ -54,10 +54,11 @@ const locationDisplay = computed(() => {
   return loc.replace(/-/g, ' · ')
 })
 
-// ═══ 天气 —— worldFlags 单源（variablesAfter 路径已死，变量真源 M5 迁入 saveProfile.variables 后再接） ═══
+// ═══ 天气 —— 变量真源 SaveProfile.variables（M5 §12；dispatcher 的 天气 变量落 sys 命名空间），worldFlags 兜底旧数据 ═══
 const weather = computed(() => {
+  const sys = (game.saveProfile?.variables as any)?.sys
   const wf = game.saveProfile?.worldFlags
-  return (wf?.['天气'] as string) ?? (wf?.['weather'] as string) ?? ''
+  return (sys?.['天气'] as string) ?? (wf?.['天气'] as string) ?? (wf?.['weather'] as string) ?? ''
 })
 
 // ═══ 在场角色 — 同地点前缀匹配 ═══
