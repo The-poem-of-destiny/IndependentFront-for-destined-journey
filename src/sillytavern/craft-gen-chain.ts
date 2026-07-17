@@ -404,7 +404,7 @@ export function buildCraftPatches(
     op: 'add_item',
     target: `characters.${characterId}`,
     value: {
-      id: `craft_${Date.now()}`,
+      id: `craft_${Date.now()}`,  // M3 删 — 仅占 value.id 可选位，apply 忽略
       name: productName,
       description: craftOutput.checkSummary,
       quantity: craftOutput.craftParams.quantity,
@@ -422,7 +422,7 @@ export function buildCraftPatches(
         op: 'add_item',
         target: `characters.${characterId}`,
         value: {
-          id: `craft_eq_${equip.slot}_${Date.now()}`,
+          id: `craft_eq_${equip.slot}_${Date.now()}`,  // M3 删 — 仅占 value.id 可选位，apply 忽略
           name: equip.name,
           description: equip.description,
           quantity: 1,
@@ -434,9 +434,9 @@ export function buildCraftPatches(
         op: 'equip_item',
         target: `characters.${characterId}`,
         value: {
-          slot: equip.slot,
-          itemId: `craft_eq_${equip.slot}_${Date.now()}`,
+          // M2 契约: 按 name+slot 寻址（slot 别名由 normalizeSlot 归一）// M3 重写
           name: equip.name,
+          slot: equip.slot,
         },
         metadata: {
           stats: equip.stats,
@@ -451,7 +451,7 @@ export function buildCraftPatches(
         op: 'add_item',
         target: `characters.${characterId}`,
         value: {
-          id: `craft_inv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          id: `craft_inv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,  // M3 删 — 仅占 value.id 可选位，apply 忽略
           name: inv.name,
           description: inv.description,
           quantity: inv.quantity,

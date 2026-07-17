@@ -996,7 +996,7 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
     expect(patches.some(x => x.op === 'update_character' && x.value?.inventory)).toBe(false);
   });
 
-  it('path=equipment 无 itemId → add_item + equip_item 两步同 id', async () => {
+  it('path=equipment 无 itemId → add_item + equip_item 两步按名寻址', async () => {
     const patches = await runVarsUpdateWithJson({
       characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'equipment', value: { name: '法师长袍', type: '防具', slot: '身体' } }], remove: [] },
       items: {},
@@ -1005,20 +1005,33 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
     const eqP = patches.find(x => x.op === 'equip_item');
     expect(addP).toBeDefined();
     expect(eqP).toBeDefined();
-    expect(addP.value.id).toMatch(/^varsupd_eq_/);
-    expect(eqP.value.itemId).toBe(addP.value.id);
-    expect(eqP.value.slot).toBe('身体');
+    expect(addP.value.id).toMatch(/^varsupd_eq_/);  // M3 删 — id 仅占 value.id 可选位
+    // M2 契约: equip_item 按 name+slot 寻址
     expect(eqP.value.name).toBe('法师长袍');
+    expect(eqP.value.slot).toBe('身体');
+    expect(eqP.value.name).toBe(addP.value.name);
   });
 
-  it('path=equipment 有 itemId（装备背包已有物品）→ 单个 equip_item', async () => {
+  it('path=equipment 有 itemId（装备背包已有物品）→ 单个 equip_item 按名寻址', async () => {
     const patches = await runVarsUpdateWithJson({
       characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'equipment', value: { itemId: 'item_9', slot: '武器', name: '白橡木法杖' } }], remove: [] },
       items: {},
     });
     expect(patches.filter(x => x.op === 'add_item')).toHaveLength(0);
     expect(patches.filter(x => x.op === 'equip_item')).toHaveLength(1);
-    expect(patches[0].value.itemId).toBe('item_9');
+    // M2 契约: {name, slot}，优先取 value.name（itemId 兜底）
+    expect(patches[0].value.name).toBe('白橡木法杖');
+    expect(patches[0].value.slot).toBe('武器');
+  });
+
+  it('path=equipment slot 未知 → 只 add_item 不发 equip_item（物品留背包）', async () => {
+    const patches = await runVarsUpdateWithJson({
+      characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'equipment', value: { name: '神秘披风' } }], remove: [] },
+      items: {},
+    });
+    // M2: slot 未知不再发 '未知' 垃圾值（normalizeSlot 会拒 → throw），跳过 equip
+    expect(patches.filter(x => x.op === 'add_item')).toHaveLength(1);
+    expect(patches.filter(x => x.op === 'equip_item')).toHaveLength(0);
   });
 
   it('path=skills / statusEffects 原有分支不受影响', async () => {
@@ -1035,6 +1048,46 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
     });
     expect(patches.some(x => x.op === 'add_skill')).toBe(true);
     expect(patches.some(x => x.op === 'add_status_effect')).toBe(true);
+  });
+
+  it('characters.remove path=skills → remove_skill {name}（M2: removeSkill 假字段已废）', async () => {
+    const patches = await runVarsUpdateWithJson({
+      characters: { replace: [], delta: [], add: [], remove: [{ id: 'c1', path: 'skills', target: '火球术' }] },
+      items: {},
+    });
+    const p = patches.find(x => x.op === 'remove_skill');
+    expect(p).toBeDefined();
+    expect(p.target).toBe('characters.c1');
+    expect(p.value).toEqual({ name: '火球术' });
+    // 防回归: 不能再出现 removeSkill 假字段的 update_character（白名单会 throw）
+    expect(patches.some(x => x.op === 'update_character' && x.value?.removeSkill)).toBe(false);
+  });
+
+  it('items.modify → update_item {name, changes}（M2: itemUpdate 假字段已废，禁改键剥离）', async () => {
+    const patches = await runVarsUpdateWithJson({
+      characters: { replace: [], delta: [], add: [], remove: [] },
+      items: { modify: [{ owner: 'c1', target: '铁剑', changes: { description: '缺了口', name: '不许改名', quantity: 99 } }] },
+    });
+    const p = patches.find(x => x.op === 'update_item');
+    expect(p).toBeDefined();
+    expect(p.target).toBe('characters.c1');
+    expect(p.value.name).toBe('铁剑');
+    expect(p.value.changes).toEqual({ description: '缺了口' });  // name/quantity 禁改键已剥离
+    expect(patches.some(x => x.op === 'update_character' && x.value?.itemUpdate)).toBe(false);
+  });
+
+  it('items.equip / items.unequip → 按名对象形态', async () => {
+    const patches = await runVarsUpdateWithJson({
+      characters: { replace: [], delta: [], add: [], remove: [] },
+      items: {
+        equip: [{ owner: 'c1', target: '白橡木法杖', slot: '武器' }],
+        unequip: [{ owner: 'c1', target: '旧皮甲' }],
+      },
+    });
+    const eq = patches.find(x => x.op === 'equip_item');
+    const uneq = patches.find(x => x.op === 'unequip_item');
+    expect(eq.value).toEqual({ name: '白橡木法杖', slot: '武器' });
+    expect(uneq.value).toEqual({ name: '旧皮甲' });
   });
 });
 

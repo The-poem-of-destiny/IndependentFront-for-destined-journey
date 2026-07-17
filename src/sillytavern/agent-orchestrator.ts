@@ -857,13 +857,13 @@ export class AgentOrchestrator {
               case 'statusEffects': patches.push({ op: 'add_status_effect', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
               case 'skills': patches.push({ op: 'add_skill', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
               case 'inventory': {
-                // applyAddItem 要求 value.id (按 id 去重叠加)，AI 输出不含 id → 补生成 (对齐 item-gen-chain 约定)
-                const itemId = `varsupd_inv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                // M2 契约: add_item 按 value.name 寻址；id 仅占 value.id 可选位（apply 忽略）
+                const itemId = `varsupd_inv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;  // M3 删
                 patches.push({
                   op: 'add_item',
                   target: `characters.${id}`,
                   value: {
-                    id: itemId,
+                    id: itemId,  // M3 删
                     name: value?.name ?? '未知物品',
                     description: value?.description,
                     quantity: value?.quantity ?? 1,
@@ -876,24 +876,30 @@ export class AgentOrchestrator {
               }
               case 'equipment': {
                 if (value?.itemId) {
-                  // AI 给了 itemId（装备背包内已有物品）→ 直接 equip
-                  patches.push({ op: 'equip_item', target: `characters.${id}`, value, metadata: { source: 'vars_update' } });
+                  // M2: 旧 itemId 值本来就是名字 → {name, slot}；slot 未知则不发 equip（物品留背包）// M3 重写
+                  if (value?.slot) {
+                    patches.push({ op: 'equip_item', target: `characters.${id}`, value: { name: value.name ?? value.itemId, slot: value.slot }, metadata: { source: 'vars_update' } });
+                  }
                 } else {
-                  // AI 只给 {name, type, slot} → 两步: add_item 写背包 + equip_item 同 id 搬进装备栏
-                  // (对齐 item-gen-chain.ts buildItemGenPatches 的装备两步落库约定)
-                  const itemId = `varsupd_eq_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                  // AI 只给 {name, type, slot} → 两步: add_item 写背包 + equip_item 按名穿上 // M3 重写
+                  const itemId = `varsupd_eq_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;  // M3 删
+                  const eqName = value?.name ?? '未知装备';
                   patches.push({
                     op: 'add_item',
                     target: `characters.${id}`,
-                    value: { id: itemId, name: value?.name ?? '未知装备', description: value?.description, quantity: 1, type: 'equipment', rarity: value?.rarity },
+                    value: { id: itemId /* M3 删 */, name: eqName, description: value?.description, quantity: 1, type: 'equipment', rarity: value?.rarity },
                     metadata: { source: 'vars_update', path, add: true },
                   });
-                  patches.push({
-                    op: 'equip_item',
-                    target: `characters.${id}`,
-                    value: { itemId, slot: value?.slot ?? value?.type ?? '未知', name: value?.name ?? '未知装备', stats: value?.stats },
-                    metadata: { source: 'vars_update', path, add: true },
-                  });
+                  // slot 未知（normalizeSlot 会拒 '未知' 类垃圾值）→ 不发 equip，物品留背包 // M3 重写
+                  const slot = value?.slot ?? value?.type;
+                  if (slot) {
+                    patches.push({
+                      op: 'equip_item',
+                      target: `characters.${id}`,
+                      value: { name: eqName, slot },
+                      metadata: { source: 'vars_update', path, add: true },
+                    });
+                  }
                 }
                 break;
               }
@@ -906,8 +912,8 @@ export class AgentOrchestrator {
             const { id, path, target: rmTarget } = rm;
             switch (path) {
               case 'statusEffects': patches.push({ op: 'remove_status_effect', target: `characters.${id}`, value: rmTarget, metadata: { source: 'vars_update' } }); break;
-              case 'equipment': patches.push({ op: 'unequip_item', target: `characters.${id}`, value: rmTarget, metadata: { source: 'vars_update' } }); break;
-              case 'skills': patches.push({ op: 'update_character', target: `characters.${id}`, value: { removeSkill: rmTarget }, metadata: { source: 'vars_update', path, remove: true } }); break;
+              case 'equipment': patches.push({ op: 'unequip_item', target: `characters.${id}`, value: rmTarget, metadata: { source: 'vars_update' } }); break;  // rmTarget 语义不明（名字/槽位皆可能），裸字符串走过渡分支双解释 // M3 重写
+              case 'skills': patches.push({ op: 'remove_skill', target: `characters.${id}`, value: { name: rmTarget }, metadata: { source: 'vars_update', path, remove: true } }); break;  // M2: removeSkill 假字段被白名单拒 → 改专用 op // M3 重写
             }
           }
 
@@ -918,12 +924,14 @@ export class AgentOrchestrator {
 
           // --- items.equip → equip_item ---
           for (const e of (parsed.items?.equip ?? [])) {
-            patches.push({ op: 'equip_item', target: `characters.${e.owner}`, value: { itemId: e.target, slot: e.slot }, metadata: { source: 'vars_update', operation: 'equip' } });
+            // M2: e.target 本来就是物品名 → {name, slot}（杀 #23）// M3 重写
+            patches.push({ op: 'equip_item', target: `characters.${e.owner}`, value: { name: e.target, slot: e.slot }, metadata: { source: 'vars_update', operation: 'equip' } });
           }
 
           // --- items.unequip → unequip_item ---
           for (const u of (parsed.items?.unequip ?? [])) {
-            patches.push({ op: 'unequip_item', target: `characters.${u.owner}`, value: u.target, metadata: { source: 'vars_update', operation: 'unequip' } });
+            // M2: u.target 是物品名 → {name} 对象形态（applyUnequipItem 按名脱）// M3 重写
+            patches.push({ op: 'unequip_item', target: `characters.${u.owner}`, value: { name: u.target }, metadata: { source: 'vars_update', operation: 'unequip' } });
           }
 
           // --- items.transfer → remove_item + add_item ---
@@ -932,9 +940,12 @@ export class AgentOrchestrator {
             patches.push({ op: 'add_item', target: `characters.${t.to}`, value: { name: t.target, quantity: t.quantity ?? 1 }, metadata: { source: 'vars_update', operation: 'transfer_in' } });
           }
 
-          // --- items.modify → update_character ---
+          // --- items.modify → update_item ---
           for (const m of (parsed.items?.modify ?? [])) {
-            patches.push({ op: 'update_character', target: `characters.${m.owner}`, value: { itemUpdate: { target: m.target, changes: m.changes } }, metadata: { source: 'vars_update', operation: 'modify' } });
+            // M2: itemUpdate 假字段被 update_character 白名单拒 → 改专用 op update_item {name, changes} // M3 重写
+            // changes 里的 name/quantity/id 是 update_item 禁改键 → 剥离（防 AI 夹带触发 throw）
+            const { name: _n, quantity: _q, id: _i, ...changes } = (m.changes ?? {}) as Record<string, any>;
+            patches.push({ op: 'update_item', target: `characters.${m.owner}`, value: { name: m.target, changes }, metadata: { source: 'vars_update', operation: 'modify' } });
           }
 
           if (patches.length > 0) {

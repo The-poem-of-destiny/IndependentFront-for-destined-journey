@@ -242,12 +242,23 @@ export class EffectRuntime {
       drop: 'remove_item',
       transfer: 'remove_item',
     };
+    const op = opMap[payload.action] ?? 'remove_item';
+
+    // M2 契约: 按名寻址对象形态（payload.itemId 在效果定义里本来就是名字）// M3 重写
+    let value: unknown;
+    if (op === 'remove_item') {
+      value = { name: payload.itemId, quantity: payload.quantity ?? 1 };
+    } else if (op === 'unequip_item') {
+      value = { name: payload.itemId };
+    } else {
+      // equip_item: payload 无 slot 字段，applyEquipItem 缺 slot 会 throw 进 errors[]（loud 失败优于静默）// M3 重写
+      value = { name: payload.itemId };
+    }
 
     return [{
-      op: opMap[payload.action] ?? 'remove_item',
+      op,
       target: `characters.${payload.characterId}`,
-      value: payload.itemId,
-      amount: payload.quantity,
+      value,
     }];
   }
 
@@ -258,11 +269,16 @@ export class EffectRuntime {
       learn: 'add_skill',
       forget: 'update_skill',
     };
+    const op = opMap[payload.action] ?? 'update_skill';
 
+    // M2 契约: 按名寻址（payload.skillId 在效果定义里本来就是名字）；targetId 挪进 metadata // M3 重写
     return [{
-      op: opMap[payload.action] ?? 'update_skill',
+      op,
       target: `characters.${payload.characterId}`,
-      value: { skillId: payload.skillId, targetId: payload.targetId },
+      value: op === 'add_skill'
+        ? { name: payload.skillId }
+        : { name: payload.skillId, changes: {} },
+      metadata: payload.targetId ? { targetId: payload.targetId } : undefined,
     }];
   }
 

@@ -333,12 +333,12 @@ export function resolveCraft(request: CraftActionRequest): CraftActionResult {
 
   // 材料消耗 — 从背包中扣除（用 remove_item 而非 delta_variable）
   // remove_item 内部逻辑: qty -= amount, quantity ≤ 0 则 splice 删除
+  // M2: mat.itemId 是生成 id（agent-tools 造 'mat_0'），非名字 → 改用 itemName 对象形态 // M3 重写
   for (const mat of request.materials) {
     patches.push({
       op: 'remove_item',
       target: `characters.${request.characterId}`,
-      value: mat.itemId,
-      amount: mat.quantity,
+      value: { name: mat.itemName, quantity: mat.quantity },
     });
   }
 

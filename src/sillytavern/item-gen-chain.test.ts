@@ -106,7 +106,7 @@ function makeRequest(marker: ItemGenRequestMarker) {
 // ========== buildItemGenPatches (纯函数) ==========
 
 describe('buildItemGenPatches', () => {
-  it('装备生成 add_item + equip_item 两步，且共用同一 itemId', () => {
+  it('装备生成 add_item + equip_item 两步，equip 按 name+slot 寻址', () => {
     const itemOutput: ItemGenOutput = {
       skills: [],
       equipment: [
@@ -130,9 +130,10 @@ describe('buildItemGenPatches', () => {
 
     const addItem = addPatches[0].value as any;
     const equipItem = equipPatches[0].value as any;
-    // 两步同 id（applyEquipItem 按 id 从背包搬）
-    expect(addItem.id).toBe(equipItem.itemId);
+    // M2 契约: equip_item 按 name+slot 寻址；add_item 的 id 仅占可选位 // M3 删
     expect(addItem.id).toBeTruthy();
+    expect(equipItem.name).toBe(addItem.name);
+    expect(equipItem.name).toBe('法师长袍');
     expect(equipItem.slot).toBe('身体');
   });
 

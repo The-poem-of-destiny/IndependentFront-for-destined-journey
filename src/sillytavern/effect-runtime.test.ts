@@ -456,8 +456,8 @@ describe('EffectRuntime', () => {
       expect(result.patches[0]).toMatchObject({
         op: 'remove_item',
         target: 'characters.c1',
-        value: 'potion_01',
-        amount: 1,
+        // M2 契约: 按名寻址对象形态
+        value: { name: 'potion_01', quantity: 1 },
       });
     });
 
@@ -474,7 +474,8 @@ describe('EffectRuntime', () => {
       expect(result.patches[0]).toMatchObject({
         op: 'equip_item',
         target: 'characters.c1',
-        value: 'iron_sword',
+        // M2 契约: 按名寻址（payload 无 slot，apply 阶段 loud 失败）// M3 重写
+        value: { name: 'iron_sword' },
       });
     });
 
@@ -491,7 +492,8 @@ describe('EffectRuntime', () => {
       expect(result.patches[0]).toMatchObject({
         op: 'unequip_item',
         target: 'characters.c1',
-        value: 'broken_shield',
+        // M2 契约: 按名脱对象形态
+        value: { name: 'broken_shield' },
       });
     });
   });
@@ -514,7 +516,9 @@ describe('EffectRuntime', () => {
       expect(result.patches[0]).toMatchObject({
         op: 'update_skill',
         target: 'characters.c1',
-        value: { skillId: 'fireball', targetId: 'enemy_1' },
+        // M2 契约: {name, changes}；targetId 挪进 metadata
+        value: { name: 'fireball', changes: {} },
+        metadata: { targetId: 'enemy_1' },
       });
     });
 
@@ -531,7 +535,8 @@ describe('EffectRuntime', () => {
       expect(result.patches[0]).toMatchObject({
         op: 'add_skill',
         target: 'characters.c1',
-        value: { skillId: 'heal', targetId: undefined },
+        // M2 契约: add_skill 要求 value.name
+        value: { name: 'heal' },
       });
     });
   });
