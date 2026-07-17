@@ -942,6 +942,15 @@ describe('StateManager', () => {
       expect(got.map((c: CharacterState) => c.name)).toContain('妲丽安');
       expect(got.find((c: CharacterState) => c.name === '妲丽安')!.saveId).toBe('save_inject');
     });
+
+    it('add_character 携带非空但错误的 saveId 时也被覆写（铁律3: 不信任上游）', async () => {
+      const sm = createStateManager('save_right');
+      const npc = createDefaultCharacterState({ id: 'npc_y', name: '串档NPC' });
+      npc.saveId = 'save_WRONG';
+      await sm!.commitChatState([{ op: 'add_character', target: 'characters.串档NPC', value: npc }]);
+      const got = await db.getCharacters('save_right');
+      expect(got.find((c: CharacterState) => c.name === '串档NPC')?.saveId).toBe('save_right');
+    });
   });
 
   // ===================================================================
