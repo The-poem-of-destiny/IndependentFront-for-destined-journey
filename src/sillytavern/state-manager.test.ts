@@ -300,14 +300,14 @@ describe('StateManager', () => {
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'update_character', target: 'characters.char-001', value: { name: 'New Name' } },
+        { op: 'update_character', target: 'characters.char-001', value: { race: '精灵' } },
       ]);
 
       expect(result.success).toBe(true);
       expect(result.patchesApplied).toBe(1);
       expect(vi.mocked(db.getCharacter)).toHaveBeenCalledWith('char-001');
       expect(vi.mocked(db.saveCharacter)).toHaveBeenCalledTimes(1);
-      expect(char.name).toBe('New Name');
+      expect(char.race).toBe('精灵');
     });
 
     it('should return error when character not found', async () => {
@@ -315,7 +315,7 @@ describe('StateManager', () => {
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'update_character', target: 'characters.missing', value: { name: 'X' } },
+        { op: 'update_character', target: 'characters.missing', value: { race: 'X' } },
       ]);
 
       expect(result.success).toBe(false);
@@ -325,16 +325,16 @@ describe('StateManager', () => {
     });
 
     it('should apply value object to character fields', async () => {
-      const char = buildMockCharacter({ id: 'char-001', name: 'Old', race: 'Elf' });
+      const char = buildMockCharacter({ id: 'char-001', race: 'Elf', money: 10 });
       vi.mocked(db.getCharacter).mockResolvedValue(char);
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'update_character', target: 'characters.char-001', value: { name: 'New', race: 'Human' } },
+        { op: 'update_character', target: 'characters.char-001', value: { race: 'Human', money: 200 } },
       ]);
 
-      expect(char.name).toBe('New');
       expect(char.race).toBe('Human');
+      expect(char.money).toBe(200);
     });
 
     it('should set currentAction from metadata.action', async () => {
@@ -364,6 +364,143 @@ describe('StateManager', () => {
       ]);
 
       expect(char.currentAction).toBe('existing_action');
+    });
+
+    // ===== M2 T9: 白名单 + delta 真加法 + currentAction 归位 (#19 #20 #21) =====
+
+    it('① 禁数组字段: value 含 inventory → errors 且角色对象无污染（原子拒绝）', async () => {
+      const char = buildMockCharacter({ id: 'char-001', race: 'Elf', money: 100 });
+      vi.mocked(db.getCharacter).mockResolvedValue(char);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        {
+          op: 'update_character',
+          target: 'characters.char-001',
+          // 合法键 money 与非法键 inventory 混合 → 整个 patch 必须原子拒绝
+          value: { money: 999, inventory: [{ name: '伪造物品' }] } as any,
+        },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('inventory');
+      // 原子拒绝: 合法键也不能落地
+      expect(char.money).toBe(100);
+      expect((char as any).inventory).toEqual([]);
+      expect(vi.mocked(db.saveCharacter)).not.toHaveBeenCalled();
+    });
+
+    it('② 禁 name: value 含 name → errors', async () => {
+      const char = buildMockCharacter({ id: 'char-001', name: '原名' });
+      vi.mocked(db.getCharacter).mockResolvedValue(char);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'update_character', target: 'characters.char-001', value: { name: '新名' } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('name');
+      expect(char.name).toBe('原名');
+    });
+
+    it('禁账务字段: value 含 saveId → errors', async () => {
+      const char = buildMockCharacter({ id: 'char-001', saveId: 'save-001' });
+      vi.mocked(db.getCharacter).mockResolvedValue(char);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'update_character', target: 'characters.char-001', value: { saveId: 'hacked' } as any },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors[0]).toContain('saveId');
+      expect(char.saveId).toBe('save-001');
+    });
+
+    it('③ delta 真加法: {money:-50, delta:true} 在 money=100 时结果 50', async () => {
+      const char = buildMockCharacter({ id: 'char-001', money: 100 });
+      vi.mocked(db.getCharacter).mockResolvedValue(char);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        {
+          op: 'update_character',
+          target: 'characters.char-001',
+          value: { money: -50 },
+          metadata: { delta: true },
+        },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.money).toBe(50);
+    });
+
+    it('delta 真加法: 起始 undefined 数值字段从 0 开始', async () => {
+      const char = buildMockCharacter({ id: 'char-001' });
+      // 强制该字段为 undefined 模拟脏数据
+      (char as any).money = undefined;
+      vi.mocked(db.getCharacter).mockResolvedValue(char);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      await sm.commitChatState([
+        {
+          op: 'update_character',
+          target: 'characters.char-001',
+          value: { money: 30 },
+          metadata: { delta: true },
+        },
+      ]);
+
+      expect(char.money).toBe(30);
+    });
+
+    it('delta 非数值字段 → errors（loud 拒绝）', async () => {
+      const char = buildMockCharacter({ id: 'char-001', race: 'Elf' });
+      vi.mocked(db.getCharacter).mockResolvedValue(char);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        {
+          op: 'update_character',
+          target: 'characters.char-001',
+          value: { race: 'Human' },
+          metadata: { delta: true },
+        },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors[0]).toContain('race');
+      expect(char.race).toBe('Elf');
+    });
+
+    it('未知键 → errors（疑似 AI 拼写错误，loud 拒绝）', async () => {
+      const char = buildMockCharacter({ id: 'char-001' });
+      vi.mocked(db.getCharacter).mockResolvedValue(char);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'update_character', target: 'characters.char-001', value: { hpp: 90 } as any },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors[0]).toContain('hpp');
+    });
+
+    it('④ currentAction 正常写入且不顶掉 location', async () => {
+      const char = buildMockCharacter({ id: 'char-001', location: 'village_square', currentAction: '' });
+      vi.mocked(db.getCharacter).mockResolvedValue(char);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'update_character', target: 'characters.char-001', value: { currentAction: '锻造武器' } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.currentAction).toBe('锻造武器');
+      expect(char.location).toBe('village_square');
     });
   });
 

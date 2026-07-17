@@ -48,6 +48,48 @@ interface PatchApplicationResult {
   event?: GameEvent;
 }
 
+// ========== update_character 白名单 (M2 T9, #19 #20 #21) ==========
+
+/**
+ * update_character value 白名单 — 从 CharacterState (types.ts) 逐字段推导:
+ * 全部字段 MINUS 禁止项（数组实体 / name / 账务字段）。
+ * 白名单外的未知键一律 loud 拒绝（大概率 AI 拼写错误）。
+ */
+const UPDATE_CHAR_WHITELIST = new Set<string>([
+  // 基础信息（name 除外 — 改名走 rename_character）
+  'type', 'race', 'identity', 'occupation',
+  // 生命层级
+  'tier', 'tierName', 'level', 'totalExp', 'expToNext',
+  // 五维属性
+  'attributes', 'freeAttrPoints',
+  // 资源
+  'hp', 'maxHp', 'mp', 'maxMp', 'sp', 'maxSp',
+  // 登神长阶
+  'ascension',
+  // 经济 / 位置 / 冒险者等级 / 当前行为
+  'money', 'location', 'adventurerRank', 'currentAction',
+  // 血脉 / 集群数量 / 叙事字段
+  'bloodlineIds', 'quantity',
+  'appearance', 'background', 'personality', 'gender', 'outfit', 'thoughts',
+  // 扩展字段
+  'customFields',
+]);
+
+/** 禁止的数组实体字段 → 必须走各自专用 op（杀 #21 假字段污染） */
+const UPDATE_CHAR_FORBIDDEN_ARRAY_FIELDS = new Set<string>([
+  'inventory', 'skills', 'statusEffects', 'equipment', // equipment 在 M2 T12 删除前同样禁止
+]);
+
+/** 禁止的账务字段 — 仅 Code 层维护（铁律3） */
+const UPDATE_CHAR_FORBIDDEN_LEDGER_FIELDS = new Set<string>(['id', 'saveId']);
+
+/** 可 delta 加法的数值字段（metadata.delta=true 时仅允许这些键，杀 #20 delta 变替换） */
+const UPDATE_CHAR_NUMERIC_FIELDS = new Set<string>([
+  'tier', 'level', 'totalExp', 'expToNext', 'freeAttrPoints',
+  'hp', 'maxHp', 'mp', 'maxMp', 'sp', 'maxSp',
+  'money', 'quantity',
+]);
+
 // ========== StateManager ==========
 
 export class StateManager {
@@ -403,8 +445,53 @@ export class StateManager {
     const char = await this.resolveCharTarget(patch.target);
 
     if (patch.value && typeof patch.value === 'object') {
-      Object.assign(char, patch.value);
+      const value = patch.value as Record<string, any>;
+      const keys = Object.keys(value);
+      const isDelta = patch.metadata?.delta === true;
+
+      // ===== 白名单校验（先验证后赋值 — 原子拒绝，任一非法键则整个 value 不落地）=====
+      for (const k of keys) {
+        if (UPDATE_CHAR_FORBIDDEN_ARRAY_FIELDS.has(k)) {
+          // #21: 数组实体禁走 update_character，防假字段污染
+          throw new Error(
+            `update_character 禁止写数组字段 "${k}" — 请使用专用 op（add/update/remove_status_effect、add/update/remove_skill、add/update/remove_item、equip/unequip_item）`
+          );
+        }
+        if (k === 'name') {
+          // 改名唯一途径 rename_character（名字是逻辑键，铁律1）
+          throw new Error(`update_character 禁止改 name — 改名请使用 rename_character`);
+        }
+        if (UPDATE_CHAR_FORBIDDEN_LEDGER_FIELDS.has(k)) {
+          // 账务字段仅 Code 层维护（铁律3）
+          throw new Error(`update_character 禁止写账务字段 "${k}"（仅引擎内部维护）`);
+        }
+        if (!UPDATE_CHAR_WHITELIST.has(k)) {
+          // 未知键 = 大概率 AI 拼写错误，loud 拒绝优于静默吞掉
+          throw new Error(`update_character 不认识的字段 "${k}" — 白名单外的键一律拒绝`);
+        }
+        if (isDelta) {
+          // delta 模式: 仅数值字段可加法，且传入值必须是 number
+          if (!UPDATE_CHAR_NUMERIC_FIELDS.has(k)) {
+            throw new Error(`update_character delta=true 仅支持数值字段，"${k}" 不是数值字段`);
+          }
+          if (typeof value[k] !== 'number') {
+            throw new Error(`update_character delta=true 要求 "${k}" 的值为 number，实际为 ${typeof value[k]}`);
+          }
+        }
+      }
+
+      // ===== 全部合法 → 落地 =====
+      if (isDelta) {
+        // #20: delta 真加法（缺省/脏数据从 0 起加），不再退化为替换
+        for (const k of keys) {
+          const current = (char as any)[k];
+          (char as any)[k] = (typeof current === 'number' ? current : 0) + value[k];
+        }
+      } else {
+        Object.assign(char, value);
+      }
     }
+    // metadata.action 保留原行为: 有则覆盖 currentAction（可与 value.currentAction 并存，metadata 优先）
     char.currentAction = patch.metadata?.action ?? char.currentAction;
     await saveCharacter(char);
 
