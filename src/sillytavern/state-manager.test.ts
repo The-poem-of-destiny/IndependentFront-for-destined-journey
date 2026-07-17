@@ -962,60 +962,137 @@ describe('StateManager', () => {
   });
 
   // ===================================================================
-  // 10. skills
+  // 10. skills — M2 按名寻址 + remove_skill (#4)
   // ===================================================================
-  describe('commitChatState — skills', () => {
-    it('should add skill if not exists', async () => {
-      const char = buildMockCharacter({ id: 'char-001', skills: [] });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+  describe('commitChatState — 技能按名寻址 (M2)', () => {
+    it('#4: add_skill 无 id 成功落库', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', skills: [] });
+      await db.saveCharacter(char);
 
-      const skill: Skill = { id: 'slash', name: 'Slash', description: 'A sharp slash', type: 'active' };
-
-      const sm = new StateManager({ saveId: 'save-001' });
+      const sm = new StateManager({ saveId: 's1' });
       const result = await sm.commitChatState([
-        { op: 'add_skill', target: 'characters.char-001', value: skill },
-      ]);
-
-      expect(result.success).toBe(true);
-      expect(char.skills).toHaveLength(1);
-      expect(char.skills[0].id).toBe('slash');
-      expect(result.eventsGenerated[0].type).toBe('skill_use');
-    });
-
-    it('should skip duplicate skill (same id)', async () => {
-      const existing: Skill = { id: 'slash', name: 'Slash', description: 'A sharp slash', type: 'active' };
-      const char = buildMockCharacter({ id: 'char-001', skills: [existing] });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
-
-      const duplicate: Skill = { id: 'slash', name: 'Slash V2', description: 'Better', type: 'active', level: 2 };
-
-      const sm = new StateManager({ saveId: 'save-001' });
-      await sm.commitChatState([
-        { op: 'add_skill', target: 'characters.char-001', value: duplicate },
-      ]);
-
-      expect(char.skills).toHaveLength(1);
-      // Should keep the original, not overwrite
-      expect(char.skills[0].name).toBe('Slash');
-      expect(char.skills[0].level).toBeUndefined();
-    });
-
-    it('should update existing skill', async () => {
-      const skill: Skill = { id: 'slash', name: 'Slash', description: 'Basic slash', type: 'active', level: 1 };
-      const char = buildMockCharacter({ id: 'char-001', skills: [skill] });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
-
-      const sm = new StateManager({ saveId: 'save-001' });
-      await sm.commitChatState([
         {
-          op: 'update_skill',
-          target: 'characters.char-001',
-          value: { skillId: 'slash', changes: { level: 3, name: 'Advanced Slash' } },
+          op: 'add_skill',
+          target: 'characters.理查德',
+          value: { name: '斩击', description: '凌厉的一斩', type: 'active', level: 1 },
         },
       ]);
 
+      expect(result.success).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(char.skills).toHaveLength(1);
+      expect(char.skills[0].name).toBe('斩击');
+      expect(char.skills[0].id).toBeUndefined(); // 不为新技能写 id（铁律1）
+      expect(result.eventsGenerated[0].type).toBe('skill_use');
+    });
+
+    it('同名 add_skill = 覆盖升级：提供的字段覆盖，未提供的保留，不重复插入（规范 §4）', async () => {
+      const existing: Skill = {
+        name: '斩击', description: '凌厉的一斩', type: 'active', level: 1,
+        cost: { type: 'SP', amount: 10 },
+      };
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', skills: [existing] });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        {
+          op: 'add_skill',
+          target: 'characters.理查德',
+          value: { name: '斩击', level: 2, description: '更凌厉的一斩' },
+        },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.skills).toHaveLength(1);          // 不重复插入
+      expect(char.skills[0].level).toBe(2);          // 提供的字段覆盖
+      expect(char.skills[0].description).toBe('更凌厉的一斩');
+      expect(char.skills[0].cost).toEqual({ type: 'SP', amount: 10 }); // 未提供的字段保留
+      expect(char.skills[0].type).toBe('active');
+    });
+
+    it('update_skill value={name, changes} 按名修改', async () => {
+      const skill: Skill = { name: '斩击', description: '基础斩击', type: 'active', level: 1 };
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', skills: [skill] });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        {
+          op: 'update_skill',
+          target: 'characters.理查德',
+          value: { name: '斩击', changes: { level: 3, description: '进阶斩击' } },
+        },
+      ]);
+
+      expect(result.success).toBe(true);
       expect(char.skills[0].level).toBe(3);
-      expect(char.skills[0].name).toBe('Advanced Slash');
+      expect(char.skills[0].description).toBe('进阶斩击');
+    });
+
+    it('update_skill 不存在的技能 → 进 errors[]', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', skills: [] });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'update_skill', target: 'characters.理查德', value: { name: '不存在的技能', changes: { level: 2 } } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('技能不存在');
+    });
+
+    it('remove_skill value={name} 按名删除', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        skills: [
+          { name: '斩击', description: '', type: 'active' },
+          { name: '格挡', description: '', type: 'passive' },
+        ],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'remove_skill', target: 'characters.理查德', value: { name: '斩击' } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(char.skills).toHaveLength(1);
+      expect(char.skills[0].name).toBe('格挡');
+      expect(result.eventsGenerated[0].type).toBe('skill_use');
+    });
+
+    it('remove_skill 删除不存在的技能 → 进 errors[]', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', skills: [] });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'remove_skill', target: 'characters.理查德', value: { name: '幻影步' } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('技能不存在');
+      expect(char.skills).toHaveLength(0);
+    });
+
+    it('add_skill 缺 name → 进 errors[]', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', skills: [] });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'add_skill', target: 'characters.理查德', value: { description: '无名技能', type: 'active' } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(char.skills).toHaveLength(0);
     });
   });
 

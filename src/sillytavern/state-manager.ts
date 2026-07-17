@@ -197,6 +197,9 @@ export class StateManager {
       case 'update_skill':
         event = await this.applyUpdateSkill(patch);
         break;
+      case 'remove_skill':
+        event = await this.applyRemoveSkill(patch);
+        break;
       case 'set_location':
         event = await this.applySetLocation(patch);
         break;
@@ -614,28 +617,83 @@ export class StateManager {
     return this.createEvent('item_use', patch);
   }
 
+  /**
+   * add_skill — M2 按名寻址 (#4)
+   *
+   * value = { name(必), ... } — 不要求 id（AI 永不产 id，铁律1/3）
+   * 同名 = 覆盖升级（规范 §4）: 提供的字段逐一覆盖既有技能，
+   * 未提供的字段保留原值（merge 语义，不整体替换、不重复插入）。
+   */
   private async applyAddSkill(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    const skill = patch.value as Skill;
-    if (!skill?.id) throw new Error('缺少技能数据');
+    const value = patch.value as Partial<Skill>;
+    if (!value?.name) throw new Error('add_skill 需要 value.name');
 
-    if (!char.skills.find(s => s.id === skill.id)) {
-      char.skills.push(skill);
+    // 剥离 id: 无论上游是否夹带，引擎不再读写技能 id（铁律1，id @deprecated）
+    const { id: _ignoredId, ...fields } = value;
+
+    const existing = findByName(char.skills, value.name);
+    if (existing) {
+      // 同名覆盖升级: 只覆盖提供的字段，未提供的保留
+      Object.assign(existing, fields);
+    } else {
+      // 新技能: 不写 id，补账务缺省
+      char.skills.push({
+        name: value.name,
+        description: value.description ?? '',
+        type: value.type ?? 'active',
+        cost: value.cost,
+        cooldown: value.cooldown,
+        maxCooldown: value.maxCooldown,
+        level: value.level,
+        effects: value.effects,
+        scripts: value.scripts,
+      });
     }
     await saveCharacter(char);
 
     return this.createEvent('skill_use', patch);
   }
 
+  /**
+   * update_skill — M2 按名寻址 (#4)
+   *
+   * value = { name, changes } — 旧 { skillId, changes } 形状不再支持。
+   * 技能不存在 → throw 进 errors[]。
+   */
   private async applyUpdateSkill(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    const update = patch.value as { skillId: string; changes: Partial<Skill> };
-    const skill = char.skills.find(s => s.id === update.skillId);
-    if (skill) {
-      Object.assign(skill, update.changes);
-    }
+    const update = patch.value as { name?: string; changes?: Partial<Skill> };
+    if (!update?.name) throw new Error('update_skill 需要 value.name');
+
+    const skill = findByName(char.skills, update.name);
+    if (!skill) throw new Error(`技能不存在: ${update.name}`);
+
+    // changes 里的 id 同样剥离（铁律1）
+    const { id: _ignoredId, ...changes } = update.changes ?? {};
+    Object.assign(skill, changes);
+    await saveCharacter(char);
+
+    return this.createEvent('skill_use', patch);
+  }
+
+  /**
+   * remove_skill — M2 新增，按名删除 (#4 #21)
+   *
+   * value = { name } — 删除不存在的技能 throw 进 errors[]
+   * （替代旧世界的 removeSkill 假字段路径，#21）。
+   */
+  private async applyRemoveSkill(patch: StatePatch): Promise<GameEvent> {
+    const char = await this.resolveCharTarget(patch.target);
+
+    const name = (patch.value as { name?: string })?.name;
+    if (!name) throw new Error('remove_skill 需要 value.name');
+
+    if (!findByName(char.skills, name)) throw new Error(`技能不存在: ${name}`);
+
+    char.skills = char.skills.filter(s => s.name !== name);
     await saveCharacter(char);
 
     return this.createEvent('skill_use', patch);
