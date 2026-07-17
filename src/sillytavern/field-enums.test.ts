@@ -102,3 +102,23 @@ describe('normalizeStatusCategory', () => {
   });
   it('无法识别兜底为特殊', () => { expect(normalizeStatusCategory('未知')).toBe('特殊'); });
 });
+
+describe('原型键安全（M2 硬前置: AI 提名值可能是任意字符串）', () => {
+  it('normalizeSlot 对原型键返回 null 而非原型成员', () => {
+    expect(normalizeSlot('constructor')).toBeNull();
+    expect(normalizeSlot('toString')).toBeNull();
+    expect(normalizeSlot('__proto__')).toBeNull();
+  });
+  it('normalizeItemType/normalizeRarity 对原型键返回 undefined', () => {
+    expect(normalizeItemType('constructor')).toBeUndefined();
+    expect(normalizeRarity('valueOf')).toBeUndefined();
+  });
+  it('normalizeQuestStatus/normalizeStatusCategory 对原型键走兜底', () => {
+    expect(normalizeQuestStatus('constructor')).toBe('进行中');
+    expect(normalizeStatusCategory('toString')).toBe('特殊');
+  });
+  it('normalizeItemType 的 special/道具 别名（M1 测试缺口）', () => {
+    expect(normalizeItemType('special')).toBe('特殊');
+    expect(normalizeItemType('道具')).toBe('特殊');
+  });
+});
