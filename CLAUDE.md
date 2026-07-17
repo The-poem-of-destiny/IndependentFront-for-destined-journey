@@ -251,12 +251,12 @@ src/sillytavern/                    ← 核心引擎（30+ 模块，含 Phase 1-
   │   ├── randomName / randomHairColor / randomEyeColor / randomPersonality
   │   └── rollAttributes: 三池分配 [基础]+[层级]+{等级}
   │
-  ├── agent-orchestrator.ts         ← [Phase 3+6e+8.5] DAG 编排引擎
+  ├── agent-orchestrator.ts         ← [Phase 3+6e+8.5] DAG 编排引擎 (M3: 翻译层按名寻址/零id/单patch)
   │   ├── AgentOrchestrator 类: 阶段串行 + 同阶段 Agent 并行
   │   ├── 流程单向性: 上游输出 → context.agentOutputs → 下游读取 (不可回写)
   │   ├── regenerateAgent() 手动重生成 / onlyAgents 过滤器
   │   ├── 事件回调: onStageStart / onAgentStart / onAgentComplete / onAgentError / onToolCall
-  │   ├── [6e] Marker回调: onCraftRequest / onCombatTrigger / onCharDetect
+  │   ├── [6e] Marker回调: onCraftRequest / onCombatTrigger / onCharGenRequest（onCharDetect 已删 M3）
   │   │     + processStageMarkers (craft延迟到Stage2 / combat延迟到Stage2 / char触发chain)
   │   └── [8.5] callAgenticAgent(): toolsEnabled=true → chatWithTools() 多轮循环
   │
@@ -276,7 +276,7 @@ src/sillytavern/                    ← 核心引擎（30+ 模块，含 Phase 1-
   ├── effect-parser.ts              ← [Phase 4.6] 效果声明解析器
   ├── effect-runtime.ts             ← [Phase 4.5] 声明式效果引擎
   ├── game-event.ts                 ← [Phase 4.5] EventBus 按存档隔离
-  ├── state-manager.ts              ← [Phase 4.5] 唯一状态写入入口 (M2: 按名寻址)
+  ├── state-manager.ts              ← [Phase 4.5] 唯一状态写入入口 (M2: 按名寻址; M3: 拆 string-value 过渡桥)
   ├── dice.ts                       ← [Phase 4.5] 骰子系统
   ├── memory-store.ts               ← [Phase 4] 记忆存储+Embedding召回
   ├── memory-summarizer.ts          ← [Phase 4] 记忆压缩
@@ -303,8 +303,8 @@ src/sillytavern/                    ← 核心引擎（30+ 模块，含 Phase 1-
   │   ├── stripMarkers / classifyMarker / parseTagAttributes / isMarkerTag
   │   └── 纯函数模块，无副作用
   │
-  ├── char-gen-agent.ts              ← [Phase 6e] 角色生成编排 (char_gen→item_gen链)
-  ├── craft-gen-chain.ts             ← [Phase 9b] 制作生成编排 (craft_gen→item_gen链)
+  ├── char-gen-agent.ts              ← [Phase 6e] 角色生成编排 (M3: 单patch落库/正式字段直写/零id)
+  ├── craft-gen-chain.ts             ← [Phase 9b] 制作生成编排 (M3: 零id/type归一化/单patch/owner解析)
   │   ├── runCraftGenChain / callCraftGenAgent / callItemGenForCraft
   │   └── parseCraftResultXML / buildCraftPatches
   │   ├── detectNewCharacters / runCharGenChain / assembleCharacterState
