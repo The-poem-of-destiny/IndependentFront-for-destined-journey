@@ -37,6 +37,7 @@ import type {
 } from './types';
 import { buildAgentMessages } from './agent-templates';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
+import { normalizeSlot } from './field-enums';
 import type { ToolExecutionContext } from './types';
 
 // ========== Types ==========
@@ -111,8 +112,14 @@ export async function runItemGenChain(
   // Step 1: 调 item_gen Agent
   const itemOutput = await callItemGenForRequest(request, deps);
 
-  // Step 2: 转成 patches (owner 来自 marker.attributes.owner，缺省兜底 player_1)
-  const characterId = request.marker.attributes.owner ?? 'player_1';
+  // Step 2: 转成 patches（owner 来自 marker.attributes.owner，缺省取 context 玩家名；#6 player_1 灭绝）
+  const ownerFromMarker = request.marker.attributes.owner;
+  const playerName = request.context.characters?.find(c => c.type === 'player')?.name;
+  const characterId = ownerFromMarker ?? playerName;
+  if (!characterId) {
+    console.warn('[item-gen-chain] 无 owner 且无玩家角色，跳过该 item_gen_request:', request.marker.bodyText.slice(0, 50));
+    return { patches: [], itemOutput: { skills: [], equipment: [], inventory: [] } };
+  }
   const patches = buildItemGenPatches(itemOutput, characterId);
 
   // Step 3: optional persistence
@@ -217,47 +224,38 @@ async function callItemGenForRequest(
 }
 
 /**
- * 从 ItemGenOutput 构建 StatePatch 列表 (补 id)。
+ * 从 ItemGenOutput 构建 StatePatch 列表（M3: 零 id 生成，装备单 add_item 含 equippedSlot）。
  *
  * 生成的 patches:
- * - add_item: inventory 物品 + equipment 装备 (先写进背包)
- * - equip_item: equipment 装备 (按 name+slot 穿上，M2 契约)
+ * - add_item: inventory 物品 + equipment 装备（直接带 equippedSlot，不再两步落库）
  * - add_skill: skills
  *
- * 注意: 装备要先 add_item 再 equip_item —— applyEquipItem 按 name 从背包查找。
- * value.id 仍在生成，仅占可选位（apply 忽略）。// M3 删
+ * M3 重写要点:
+ * - 废除 add_item+equip_item 两步模式 — 装备直接产 add_item {..., equippedSlot: normalizeSlot(slot)}
+ * - 废除 id 生成（itemgen_eq_/inv_/skill_ 前缀）
+ * - owner 解析: marker.attributes.owner ?? context 玩家名（'player_1' 假 id 灭绝 #6）
  */
 export function buildItemGenPatches(
   itemOutput: ItemGenOutput,
   characterId: string,
 ): StatePatch[] {
   const patches: StatePatch[] = [];
-  const ts = Date.now();
 
-  // 1. 装备 → add_item + equip_item (按名两步)
-  // M3 重写: equipment 是 ItemGenOutput 的 AI 输出结构（M3 处理语义）；equip_item 按 name+slot 寻址
+  // 1. 装备 → add_item（M3: 带 equippedSlot 单 patch 落库，不再 add+equip 两步）
   for (const equip of itemOutput.equipment) {
-    const itemId = `itemgen_eq_${ts}_${Math.random().toString(36).slice(2, 8)}`;  // M3 删
     patches.push({
       op: 'add_item',
       target: `characters.${characterId}`,
       value: {
-        id: itemId,  // M3 删 — 仅占 value.id 可选位，apply 忽略
         name: equip.name,
         description: equip.description,
         quantity: 1,
-        type: 'equipment',
+        type: '装备',
         rarity: equip.quality,
-      },
-      metadata: { source: 'item_gen', kind: 'equipment' },
-    });
-    patches.push({
-      op: 'equip_item',
-      target: `characters.${characterId}`,
-      value: {
-        // M2 契约: 按 name+slot 寻址（slot 来自 AI XML，别名由 normalizeSlot 归一）// M3 重写
-        name: equip.name,
-        slot: equip.slot,
+        equippedSlot: normalizeSlot(equip.slot),  // M3: slot 归一化，null=留背包
+        stats: equip.stats,
+        durability: equip.durability,
+        maxDurability: equip.durability,
       },
       metadata: { source: 'item_gen', kind: 'equipment' },
     });
@@ -265,12 +263,10 @@ export function buildItemGenPatches(
 
   // 2. 背包物品 → add_item
   for (const inv of itemOutput.inventory) {
-    const itemId = `itemgen_inv_${ts}_${Math.random().toString(36).slice(2, 8)}`;  // M3 删
     patches.push({
       op: 'add_item',
       target: `characters.${characterId}`,
       value: {
-        id: itemId,  // M3 删 — 仅占 value.id 可选位，apply 忽略
         name: inv.name,
         description: inv.description,
         quantity: inv.quantity,
@@ -283,12 +279,10 @@ export function buildItemGenPatches(
 
   // 3. 技能 → add_skill
   for (const skill of itemOutput.skills) {
-    const skillId = `itemgen_skill_${ts}_${Math.random().toString(36).slice(2, 8)}`;  // M3 删
     patches.push({
       op: 'add_skill',
       target: `characters.${characterId}`,
       value: {
-        id: skillId,  // M3 删 — 仅占 value.id 可选位，apply 剥离
         name: skill.name,
         description: skill.description,
         type: skill.type,

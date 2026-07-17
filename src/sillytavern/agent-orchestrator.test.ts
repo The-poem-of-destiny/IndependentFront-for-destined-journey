@@ -694,57 +694,6 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
     expect(onCombatTrigger.mock.calls[0][0].combatType).toBe('死斗');
   });
 
-  it('onCharDetect 应在 vars_update stage 后触发', async () => {
-    const storyOutput = '前文<char_detect characterName="小明">新角色</char_detect>后文';
-    const varsOutput = '{"vars": "updated"}';
-
-    globalThis.fetch = vi.fn()
-      // Stage 1: story
-      .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: storyOutput } }], usage: { total_tokens: 50 } }),
-        text: async () => '',
-      })
-      // Stage 2: vars_update
-      .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: varsOutput } }], usage: { total_tokens: 30 } }),
-        text: async () => '',
-      });
-
-    const onCharDetect = vi.fn().mockResolvedValue(undefined);
-
-    const pipeline: Pipeline = {
-      timeout: 30000,
-      retryOnFail: false,
-      stages: [
-        { agents: ['story'], waitFor: [] },
-        { agents: ['request_dispatcher'], waitFor: ['story'] },
-      ],
-    };
-
-    const orch = new AgentOrchestrator(
-      {
-        pipeline,
-        context: makeContext(),
-        agentConfigs: [
-          makeAgentConfig({ agentId: 'story' }),
-          makeAgentConfig({ agentId: 'request_dispatcher' }),
-        ],
-        endpoints: [makeEndpoint()],
-        saveId: 'test',
-      },
-      { onCharDetect },
-    );
-
-    await orch.run();
-
-    expect(onCharDetect).toHaveBeenCalledTimes(1);
-    expect(onCharDetect.mock.calls[0][0]).toHaveLength(1);
-    expect(onCharDetect.mock.calls[0][0][0].type).toBe('char_detect');
-    expect(onCharDetect.mock.calls[0][0][0].characterName).toBe('小明');
-  });
-
   it('无回调时不应报错 (向后兼容)', async () => {
     const storyContent = '正文<craft_request>制作</craft_request><combat_trigger>战斗</combat_trigger><char_detect>角色</char_detect>结束';
     globalThis.fetch = vi.fn().mockResolvedValue({
@@ -812,63 +761,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
     expect(onCraftRequest).not.toHaveBeenCalled();
   });
 
-  it('执行顺序: char_detect 应在 combat_trigger 之前触发', async () => {
-    const storyContent = '前面<char_detect characterName="Boss">怪物</char_detect>中间<combat_trigger combatType="死斗">战斗</combat_trigger>后面';
-    const varsContent = '{"vars": "ok"}';
-
-    const callOrder: string[] = [];
-
-    globalThis.fetch = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 80 } }),
-        text: async () => '',
-      })
-      .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: varsContent } }], usage: { total_tokens: 30 } }),
-        text: async () => '',
-      });
-
-    const onCharDetect = vi.fn().mockImplementation(async () => {
-      callOrder.push('char_detect');
-    });
-    const onCombatTrigger = vi.fn().mockImplementation(async () => {
-      callOrder.push('combat_trigger');
-    });
-
-    const pipeline: Pipeline = {
-      timeout: 30000,
-      retryOnFail: false,
-      stages: [
-        { agents: ['story'], waitFor: [] },
-        { agents: ['request_dispatcher'], waitFor: ['story'] },
-      ],
-    };
-
-    const orch = new AgentOrchestrator(
-      {
-        pipeline,
-        context: makeContext(),
-        agentConfigs: [
-          makeAgentConfig({ agentId: 'story' }),
-          makeAgentConfig({ agentId: 'request_dispatcher' }),
-        ],
-        endpoints: [makeEndpoint()],
-        saveId: 'test',
-      },
-      { onCharDetect, onCombatTrigger },
-    );
-
-    await orch.run();
-
-    // char_detect MUST fire before combat_trigger
-    // (new enemies need to be generated before combat starts)
-    expect(onCharDetect).toHaveBeenCalledTimes(1);
-    expect(onCombatTrigger).toHaveBeenCalledTimes(1);
-    expect(callOrder).toEqual(['char_detect', 'combat_trigger']);
-  });
-
+  // M3: char_detect 死路径已删除 — 角色检测统一走 request_dispatcher 的 char_gen_request
   it('多个 craft_request 应依次处理 (延迟到 Stage 2)', async () => {
     const storyContent = '<craft_request>第一件</craft_request>和<craft_request>第二件</craft_request>';
     globalThis.fetch = vi.fn()
@@ -981,7 +874,7 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
     }));
   });
 
-  it('path=inventory → add_item 且补生成 id（不再产生损坏数组的 update_character）', async () => {
+  it('path=inventory → add_item（M3: 无 id 生成，含 equippedSlot）', async () => {
     const patches = await runVarsUpdateWithJson({
       characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'inventory', value: { name: '金色钥匙挂坠', description: '表面有刻文', quantity: 1 } }], remove: [] },
       items: {},
@@ -989,39 +882,47 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
     const p = patches.find(x => x.op === 'add_item');
     expect(p).toBeDefined();
     expect(p.target).toBe('characters.c1');
-    expect(p.value.id).toMatch(/^varsupd_inv_/);
+    // M3: 不再生成 id（无 varsupd_inv_ 前缀）
+    expect('id' in (p.value as Record<string, unknown>)).toBe(false);
     expect(p.value.name).toBe('金色钥匙挂坠');
+    expect(p.value.description).toBe('表面有刻文');
     expect(p.value.quantity).toBe(1);
+    expect(p.value.equippedSlot).toBeNull();
     // 防回归: 不能再出现携带 inventory 键的 update_character（会被 Object.assign 整体替换数组）
     expect(patches.some(x => x.op === 'update_character' && x.value?.inventory)).toBe(false);
   });
 
-  it('path=equipment 无 itemId → add_item + equip_item 两步按名寻址', async () => {
+  it('path=equipment 无 itemId → 单 add_item + equippedSlot（M3: 不再 add+equip 两步）', async () => {
     const patches = await runVarsUpdateWithJson({
       characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'equipment', value: { name: '法师长袍', type: '防具', slot: '身体' } }], remove: [] },
       items: {},
     });
     const addP = patches.find(x => x.op === 'add_item');
-    const eqP = patches.find(x => x.op === 'equip_item');
     expect(addP).toBeDefined();
-    expect(eqP).toBeDefined();
-    expect(addP.value.id).toMatch(/^varsupd_eq_/);  // M3 删 — id 仅占 value.id 可选位
-    // M2 契约: equip_item 按 name+slot 寻址
-    expect(eqP.value.name).toBe('法师长袍');
-    expect(eqP.value.slot).toBe('身体');
-    expect(eqP.value.name).toBe(addP.value.name);
+    // M3: 不再生成 id
+    expect('id' in (addP.value as Record<string, unknown>)).toBe(false);
+    // M3: 单 add_item，type 强制为 '装备'，equippedSlot 直传
+    expect(addP.value.name).toBe('法师长袍');
+    expect(addP.value.type).toBe('装备');
+    expect(addP.value.quantity).toBe(1);
+    expect(addP.value.equippedSlot).toBe('身体');
+    // M3: 不再产生 equip_item patch（单 add_item 一步到位）
+    expect(patches.filter(x => x.op === 'equip_item')).toHaveLength(0);
   });
 
-  it('path=equipment 有 itemId（装备背包已有物品）→ 单个 equip_item 按名寻址', async () => {
+  it('path=equipment 有 itemId → 单 add_item + equippedSlot（M3: 不再走 equip_item）', async () => {
     const patches = await runVarsUpdateWithJson({
       characters: { replace: [], delta: [], add: [{ id: 'c1', path: 'equipment', value: { itemId: 'item_9', slot: '武器', name: '白橡木法杖' } }], remove: [] },
       items: {},
     });
-    expect(patches.filter(x => x.op === 'add_item')).toHaveLength(0);
-    expect(patches.filter(x => x.op === 'equip_item')).toHaveLength(1);
-    // M2 契约: {name, slot}，优先取 value.name（itemId 兜底）
-    expect(patches[0].value.name).toBe('白橡木法杖');
-    expect(patches[0].value.slot).toBe('武器');
+    // M3: 装备统一走 add_item（含 equippedSlot），不再走 equip_item
+    expect(patches.filter(x => x.op === 'add_item')).toHaveLength(1);
+    expect(patches.filter(x => x.op === 'equip_item')).toHaveLength(0);
+    const addP = patches[0];
+    expect('id' in (addP.value as Record<string, unknown>)).toBe(false);
+    expect(addP.value.name).toBe('白橡木法杖');
+    expect(addP.value.type).toBe('装备');
+    expect(addP.value.equippedSlot).toBe('武器');
   });
 
   it('path=equipment slot 未知 → 只 add_item 不发 equip_item（物品留背包）', async () => {

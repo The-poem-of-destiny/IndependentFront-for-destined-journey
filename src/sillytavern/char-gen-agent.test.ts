@@ -313,16 +313,20 @@ describe('assembleCharacterState', () => {
     expect(result.inventory).toHaveLength(0);
   });
 
-  it('应存储背景/外貌/性格到 customFields', () => {
+  it('应存储背景/外貌/性格到正式字段（非customFields）', () => {
     const charData = makeCharGenOutput({
       background: '测试背景故事',
       appearance: '测试外貌',
       personality: '测试性格',
     });
     const result = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] });
-    expect(result.customFields.background).toBe('测试背景故事');
-    expect(result.customFields.appearance).toBe('测试外貌');
-    expect(result.customFields.personality).toBe('测试性格');
+    // M3: 这些是正式字段，不在 customFields
+    expect(result.background).toBe('测试背景故事');
+    expect(result.appearance).toBe('测试外貌');
+    expect(result.personality).toBe('测试性格');
+    expect(result.customFields.background).toBeUndefined();
+    expect(result.customFields.appearance).toBeUndefined();
+    expect(result.customFields.personality).toBeUndefined();
   });
 
   it('应处理登神长阶', () => {
@@ -372,12 +376,12 @@ describe('buildCharGenPatches', () => {
     const addCharPatch = patches.find((p) => p.op === 'add_character');
     expect(addCharPatch).toBeDefined();
     if (addCharPatch) {
-      expect(addCharPatch.target).toBe(`characters.${character.id}`);
+      expect(addCharPatch.target).toBe(`characters.${character.name}`);
       expect(addCharPatch.metadata?.source).toBe('char_gen');
     }
   });
 
-  it('应生成 add_skill patches', () => {
+  it('M3: 应无独立 add_skill patch（技能嵌入 add_character value）', () => {
     const charData = makeCharGenOutput();
     const itemData = makeItemGenOutput({
       skills: [
@@ -388,12 +392,16 @@ describe('buildCharGenPatches', () => {
     const character = assembleCharacterState(charData, itemData);
     const patches = buildCharGenPatches(character);
 
-    const skillPatches = patches.filter((p) => p.op === 'add_skill');
-    expect(skillPatches).toHaveLength(2);
-    expect(skillPatches[0].metadata?.source).toBe('item_gen');
+    // M3: 所有数据内嵌在 add_character value，无独立 add_skill patch
+    expect(patches).toHaveLength(1);
+    expect(patches[0].op).toBe('add_character');
+    const addCharPatch = patches[0];
+    expect(addCharPatch.value.skills).toHaveLength(2);
+    expect(addCharPatch.value.skills[0].name).toBe('技能1');
+    expect(addCharPatch.value.skills[1].name).toBe('技能2');
   });
 
-  it('应生成 add_item patches', () => {
+  it('M3: 应无独立 add_item patch（物品嵌入 add_character value）', () => {
     const charData = makeCharGenOutput();
     const itemData = makeItemGenOutput({
       inventory: [
@@ -404,14 +412,16 @@ describe('buildCharGenPatches', () => {
     const character = assembleCharacterState(charData, itemData);
     const patches = buildCharGenPatches(character);
 
-    const itemPatches = patches.filter((p) => p.op === 'add_item');
-    // M2: 装备也是物品 — 2 个背包物品 + 默认 itemData 的 1 件装备（精灵长弓）都走 add_item（规范 §3）
-    expect(itemPatches).toHaveLength(3);
-    const looseItemPatches = itemPatches.filter((p) => !(p.value as { equippedSlot?: string | null }).equippedSlot);
-    expect(looseItemPatches).toHaveLength(2);
+    // M3: 所有数据内嵌在 add_character value，无独立 add_item patch
+    expect(patches).toHaveLength(1);
+    expect(patches[0].op).toBe('add_character');
+    const addCharPatch = patches[0];
+    // 背包物品 + 默认装备 都并入 inventory
+    const looseItems = addCharPatch.value.inventory.filter((i: any) => !i.equippedSlot);
+    expect(looseItems.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('应生成 equip_item patches', () => {
+  it('M3: 应无独立 equip_item patch（装备嵌入 add_character value）', () => {
     const charData = makeCharGenOutput();
     const itemData = makeItemGenOutput({
       equipment: [
@@ -422,8 +432,12 @@ describe('buildCharGenPatches', () => {
     const character = assembleCharacterState(charData, itemData);
     const patches = buildCharGenPatches(character);
 
-    const equipPatches = patches.filter((p) => p.op === 'equip_item');
-    expect(equipPatches).toHaveLength(2);
+    // M3: 所有数据内嵌在 add_character value，无独立 equip_item patch
+    expect(patches).toHaveLength(1);
+    expect(patches[0].op).toBe('add_character');
+    const addCharPatch = patches[0];
+    const equipped = addCharPatch.value.inventory.filter((i: any) => i.equippedSlot);
+    expect(equipped.length).toBeGreaterThanOrEqual(2);
   });
 
   it('空物品数据时应只有 add_character patch', () => {

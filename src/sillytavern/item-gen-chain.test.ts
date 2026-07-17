@@ -106,7 +106,7 @@ function makeRequest(marker: ItemGenRequestMarker) {
 // ========== buildItemGenPatches (纯函数) ==========
 
 describe('buildItemGenPatches', () => {
-  it('装备生成 add_item + equip_item 两步，equip 按 name+slot 寻址', () => {
+  it('装备生成单 add_item 含 equippedSlot，M3 废除两步落库', () => {
     const itemOutput: ItemGenOutput = {
       skills: [],
       equipment: [
@@ -126,18 +126,21 @@ describe('buildItemGenPatches', () => {
     const addPatches = patches.filter((p) => p.op === 'add_item');
     const equipPatches = patches.filter((p) => p.op === 'equip_item');
     expect(addPatches).toHaveLength(1);
-    expect(equipPatches).toHaveLength(1);
+    // M3: 不再有 equip_item — 装备直接通过 add_item 的 equippedSlot 落库
+    expect(equipPatches).toHaveLength(0);
 
     const addItem = addPatches[0].value as any;
-    const equipItem = equipPatches[0].value as any;
-    // M2 契约: equip_item 按 name+slot 寻址；add_item 的 id 仅占可选位 // M3 删
-    expect(addItem.id).toBeTruthy();
-    expect(equipItem.name).toBe(addItem.name);
-    expect(equipItem.name).toBe('法师长袍');
-    expect(equipItem.slot).toBe('身体');
+    // M3: 废除 id 生成，不再断言 id
+    expect(addItem.name).toBe('法师长袍');
+    expect(addItem.equippedSlot).toBe('身体');
+    expect(addItem.type).toBe('装备');
+    expect(addItem.rarity).toBe('优良');
+    expect(addItem.quantity).toBe(1);
+    expect(addItem.stats).toEqual({ 防御: 60 });
+    expect(addItem.durability).toBe(80);
   });
 
-  it('背包物品生成 add_item 且补 id', () => {
+  it('背包物品生成 add_item，M3 不再补 id', () => {
     const itemOutput: ItemGenOutput = {
       skills: [],
       equipment: [],
@@ -148,12 +151,14 @@ describe('buildItemGenPatches', () => {
     const patches = buildItemGenPatches(itemOutput, 'char-001');
     const addPatches = patches.filter((p) => p.op === 'add_item');
     expect(addPatches).toHaveLength(1);
-    expect((addPatches[0].value as any).id).toBeTruthy();
+    // M3: 废除 id 生成，不再断言 id
     expect((addPatches[0].value as any).quantity).toBe(1);
     expect((addPatches[0].value as any).name).toBe('磨损铜币');
+    expect((addPatches[0].value as any).type).toBe('材料');
+    expect((addPatches[0].value as any).rarity).toBe('普通');
   });
 
-  it('技能生成 add_skill 且补 id', () => {
+  it('技能生成 add_skill，M3 不再补 id', () => {
     const itemOutput: ItemGenOutput = {
       skills: [
         {
@@ -170,8 +175,10 @@ describe('buildItemGenPatches', () => {
     const patches = buildItemGenPatches(itemOutput, 'char-001');
     const skillPatches = patches.filter((p) => p.op === 'add_skill');
     expect(skillPatches).toHaveLength(1);
-    expect((skillPatches[0].value as any).id).toBeTruthy();
+    // M3: 废除 id 生成，不再断言 id
     expect((skillPatches[0].value as any).name).toBe('灼热射线');
+    expect((skillPatches[0].value as any).type).toBe('active');
+    expect((skillPatches[0].value as any).cost).toEqual({ type: 'MP', amount: 100 });
   });
 
   it('空输出返回空 patches', () => {
@@ -191,16 +198,18 @@ describe('buildItemGenPatches', () => {
 // ========== runItemGenChain (集成) ==========
 
 describe('runItemGenChain', () => {
-  it('应从 item_gen XML 输出生成 patches', async () => {
+  it('应从 item_gen XML 输出生成 patches（M3: 装备单 add_item 含 equippedSlot）', async () => {
     const client = makeMockClient(makeItemGenXML());
     const deps: ItemGenChainDeps = { clientFactory: () => client };
     const result = await runItemGenChain(makeRequest(makeMarker()), deps);
 
-    // 1 技能 + 1 装备 (add_item+equip 两步) + 1 物品 = 4 patches
-    expect(result.patches.length).toBe(4);
+    // M3: 1 技能 + 1 装备(add_item with equippedSlot) + 1 物品 = 3 patches
+    expect(result.patches.length).toBe(3);
     expect(result.patches.some((p) => p.op === 'add_skill')).toBe(true);
+    // 2 add_item: 1 equipment + 1 inventory
     expect(result.patches.filter((p) => p.op === 'add_item')).toHaveLength(2);
-    expect(result.patches.some((p) => p.op === 'equip_item')).toBe(true);
+    // M3: 废除 equip_item 两步模式
+    expect(result.patches.filter((p) => p.op === 'equip_item')).toHaveLength(0);
   });
 
   it('应调用 stateManager.commitChatState', async () => {
@@ -254,11 +263,27 @@ describe('runItemGenChain', () => {
     );
   });
 
-  it('owner 缺省时 target 兜底 player_1', async () => {
+  it('owner 缺省时 target 兜底 context 玩家名（M3: 不再用 player_1）', async () => {
     const client = makeMockClient(makeItemGenXML());
     const deps: ItemGenChainDeps = { clientFactory: () => client };
     const marker = makeMarker({ attributes: { itemType: 'equipment', source: 'story' } } as any);
+    // M3: owner 解析链路 — marker.attributes.owner ?? context.characters 中 type='player' 的 name
+    // marker 无 owner，context 无 player 角色 → 返回空 patches
     const result = await runItemGenChain(makeRequest(marker), deps);
-    expect(result.patches.every((p) => p.target === 'characters.player_1')).toBe(true);
+    expect(result.patches).toEqual([]);
+  });
+
+  it('owner 缺省时若 context 有玩家角色则 target 用玩家名', async () => {
+    const client = makeMockClient(makeItemGenXML());
+    const deps: ItemGenChainDeps = { clientFactory: () => client };
+    const marker = makeMarker({ attributes: { itemType: 'equipment', source: 'story' } } as any);
+    // M3: 有玩家角色时应兜底用玩家名，非 'player_1'
+    const contextWithPlayer = makeContext();
+    (contextWithPlayer as any).characters = [{ type: 'player', name: '阿尔萨斯' }];
+    const request = makeRequest(marker);
+    (request as any).context = contextWithPlayer;
+    const result = await runItemGenChain(request, deps);
+    expect(result.patches.length).toBeGreaterThan(0);
+    expect(result.patches.every((p) => p.target === 'characters.阿尔萨斯')).toBe(true);
   });
 });

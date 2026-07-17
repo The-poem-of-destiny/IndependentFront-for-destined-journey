@@ -33,6 +33,7 @@ import type {
 } from './types';
 import { buildAgentMessages } from './agent-templates';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
+import { normalizeSlot, normalizeItemType } from './field-enums';
 import type { ToolExecutionContext } from './types';
 
 // ========== Types ==========
@@ -400,9 +401,8 @@ export function buildCraftPatches(
   const productName = craftOutput.productName;
 
   // 1. 产物写入背包 (add_item)
-  // 终审修复: item_gen equipment 里若已细化同名产物，跳过产物自身的 add_item —
-  // 否则 M2 同名合并会把 quantity 累到 ≥2，随后 equip_item 触发"堆叠拒穿" throw。
-  // equipment 条目字段更全（stats/durability），以它为准。// M3 重写
+  // M3: item_gen equipment 已细化同名产物时跳过 — 以 item_gen 的完整数据为准
+  // 不再两步落库；stats/durability/maxDurability 直写 value（#7）
   const productElaboratedByItemGen =
     itemOutput?.equipment.some(e => e.name === productName) ?? false;
   if (!productElaboratedByItemGen) {
@@ -410,44 +410,31 @@ export function buildCraftPatches(
       op: 'add_item',
       target: `characters.${characterId}`,
       value: {
-        id: `craft_${Date.now()}`,  // M3 删 — 仅占 value.id 可选位，apply 忽略
         name: productName,
         description: craftOutput.checkSummary,
         quantity: craftOutput.craftParams.quantity,
-        type: 'equipment',
+        type: normalizeItemType('equipment') ?? '装备',
         rarity: craftOutput.quality,
       },
     });
   }
 
-  // 2. 合并 item_gen 产出的物品数据
+  // 2. 合并 item_gen 产出的物品数据（M3: 装备单 add_item 带 equippedSlot，不再两步）
   if (itemOutput) {
-    // 装备 → add_item + equip_item
-    // M3 重写: equipment 是 ItemGenOutput 的 AI 输出结构（M3 处理语义）；equip_item 按 name+slot 寻址
     for (const equip of itemOutput.equipment) {
       patches.push({
         op: 'add_item',
         target: `characters.${characterId}`,
         value: {
-          id: `craft_eq_${equip.slot}_${Date.now()}`,  // M3 删 — 仅占 value.id 可选位，apply 忽略
           name: equip.name,
           description: equip.description,
           quantity: 1,
-          type: 'equipment',
+          type: '装备',
           rarity: equip.quality ?? craftOutput.quality,
-        },
-      });
-      patches.push({
-        op: 'equip_item',
-        target: `characters.${characterId}`,
-        value: {
-          // M2 契约: 按 name+slot 寻址（slot 别名由 normalizeSlot 归一）// M3 重写
-          name: equip.name,
-          slot: equip.slot,
-        },
-        metadata: {
-          stats: equip.stats,
-          durability: equip.durability,
+          equippedSlot: normalizeSlot(equip.slot),  // M3: slot 归一化
+          stats: equip.stats,                        // M3: stats 归位 value（#7）
+          durability: equip.durability,              // M3: durability 归位 value（#7）
+          maxDurability: equip.durability,
         },
       });
     }
@@ -458,27 +445,26 @@ export function buildCraftPatches(
         op: 'add_item',
         target: `characters.${characterId}`,
         value: {
-          id: `craft_inv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,  // M3 删 — 仅占 value.id 可选位，apply 忽略
           name: inv.name,
           description: inv.description,
           quantity: inv.quantity,
-          type: inv.type,
+          type: normalizeItemType(inv.type) ?? inv.type,  // M3: type 归一化（#38）
           rarity: inv.rarity,
         },
       });
     }
-  } else {
-    // 没有 item_gen 输出: 只记录产物名称，后续可补
   }
 
-  // 3. 经验 & FP 奖励
+  // 3. 经验奖励 → update_character delta（M3: 不再走 delta_variable，#12 exp 侧）
   if (craftOutput.craftParams.expGained > 0) {
     patches.push({
-      op: 'delta_variable',
-      target: `characters.${characterId}.exp`,
-      amount: craftOutput.craftParams.expGained,
+      op: 'update_character',
+      target: `characters.${characterId}`,
+      value: { totalExp: craftOutput.craftParams.expGained },
+      metadata: { source: 'craft_gen', delta: true },
     });
   }
+  // 4. FP 奖励 → delta_variable profile.fp（M5 改 FP op 前保持现状）
   if (craftOutput.craftParams.fpGained > 0) {
     patches.push({
       op: 'delta_variable',
@@ -514,8 +500,14 @@ export async function runCraftGenChain(
     itemOutput = await callItemGenForCraft(craftOutput, request, deps);
   }
 
-  // Step 3: build patches
-  const characterId = getMarkerAttr(request.marker, 'characterId') ?? 'player_1';
+  // Step 3: build patches（M3: owner 优先 marker attribute，缺省取 context 玩家名；#6 player_1 灭绝）
+  const characterId = getMarkerAttr(request.marker, 'characterId')
+    ?? request.context.characters?.find(c => c.type === 'player')?.name
+    ?? '';
+  if (!characterId) {
+    console.warn('[craft-gen-chain] 无 owner 且无玩家角色，craft patches 将跳过角色目标');
+    return { narrative: craftOutput.narrative, patches: [], craftOutput, itemOutput };
+  }
   const patches = buildCraftPatches(craftOutput, itemOutput, characterId);
 
   // Step 4: optional persistence

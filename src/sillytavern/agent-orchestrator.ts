@@ -12,7 +12,7 @@
 import type {
   Pipeline, PipelineStage, AgentContext, AgentResult,
   OrchestratorRun, AgentConfig, ApiEndpoint, AgentDefinition,
-  CraftRequestMarker, CombatTriggerMarker, CharDetectMarker, CombatSummaryResult,
+  CraftRequestMarker, CombatTriggerMarker, CombatSummaryResult,
   CharGenRequestMarker, ItemGenRequestMarker, ItemUpdateRequestMarker, CraftGenRequestMarker,
   ToolExecutionContext,
 } from './types';
@@ -69,13 +69,6 @@ export interface OrchestratorEvents {
    * 返回 null 跳过此标记。
    */
   onCombatTrigger?: (marker: CombatTriggerMarker, storyOutput: string) => Promise<CombatSummaryResult | null>;
-
-  /**
-   * 👤 Char Detect: Stage 2 vars_update 后检测到 <char_detect> 后触发。
-   * 调用方应运行 char_gen → item_gen 链生成新角色数据。
-   * @deprecated 新流程使用 onCharGenRequest 处理 <char_gen_request>
-   */
-  onCharDetect?: (markers: CharDetectMarker[], storyOutput: string, context: AgentContext) => Promise<void>;
 
   // ===== Phase 10: request_dispatcher 调度器回调 =====
 
@@ -710,20 +703,12 @@ export class AgentOrchestrator {
               metadata: { source: 'request_dispatcher', operation: 'replace' },
             });
           }
-          for (const d of (parsed.delta ?? [])) {
-            patches.push({
-              op: 'delta_variable',
-              target: `variables.${d.path}`,
-              amount: d.amount,
-              metadata: { source: 'vars_update', operation: 'delta' },
-            });
-          }
           for (const ins of (parsed.insert ?? [])) {
             patches.push({
               op: 'insert_variable',
               target: `variables.${ins.path}`,
               value: ins.value,
-              metadata: { source: 'vars_update', operation: 'insert', index: ins.index },
+              metadata: { source: 'request_dispatcher', operation: 'insert', index: ins.index },
             });
           }
 
@@ -740,19 +725,7 @@ export class AgentOrchestrator {
         }
       }
 
-      // Step C: 旧格式 char_detect（向后兼容）— 从 story 扫描
-      const storyOutput = this.getAgentOutputText('story');
-      if (storyOutput) {
-        const storyScan = scanMarkers(storyOutput);
-        const oldCharMarkers = storyScan.markers.filter(
-          (m): m is CharDetectMarker => m.type === 'char_detect',
-        );
-        if (oldCharMarkers.length > 0 && this.events.onCharDetect) {
-          await this.events.onCharDetect(oldCharMarkers, storyOutput, this.context);
-        }
-      }
-
-      // Step D: 新格式 request 标签 → 并行回调
+      // Step C: 新格式 request 标签 → 并行回调
       const charGenMarkers = markers.filter((m): m is CharGenRequestMarker => m.type === 'char_gen_request');
       const itemGenMarkers = markers.filter((m): m is ItemGenRequestMarker => m.type === 'item_gen_request');
       const itemUpdateMarkers = markers.filter((m): m is ItemUpdateRequestMarker => m.type === 'item_update_request');
@@ -777,9 +750,10 @@ export class AgentOrchestrator {
         await Promise.all(promises);
       }
 
-      // Step E: 旧格式 craft/combat（向后兼容）
+      // Step D: 旧格式 craft/combat（向后兼容）
+      const dispatcherStoryOutput = this.getAgentOutputText('story') ?? '';
       if (this.pendingCraftMarkers.length > 0 && this.events.onCraftRequest) {
-        let modifiedOutput = storyOutput ?? '';
+        let modifiedOutput = dispatcherStoryOutput;
         for (const marker of this.pendingCraftMarkers) {
           const craftResult = await this.events.onCraftRequest(marker, modifiedOutput);
           if (craftResult) {
@@ -803,7 +777,7 @@ export class AgentOrchestrator {
 
       if (this.pendingCombatMarkers.length > 0 && this.events.onCombatTrigger) {
         for (const marker of this.pendingCombatMarkers) {
-          await this.events.onCombatTrigger(marker, storyOutput ?? '');
+          await this.events.onCombatTrigger(marker, dispatcherStoryOutput);
         }
         this.pendingCombatMarkers = [];
       }
@@ -824,99 +798,102 @@ export class AgentOrchestrator {
           const patches: import('./types').StatePatch[] = [];
 
           // --- characters.replace → set_hp/set_mp/set_sp/set_location/update_character ---
+          // M3: key = a.name ?? a.id（过渡读，M4 改 prompt 后删 ?? a.id）
           for (const r of (parsed.characters?.replace ?? [])) {
-            const { id, path, value } = r;
+            const key = r.name ?? r.id;
+            if (!key) { console.warn('[Orchestrator] characters.replace 条目缺 name/id，跳过'); continue; }
+            const { path, value } = r;
             switch (path) {
-              case 'hp': patches.push({ op: 'set_hp', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
-              case 'mp': patches.push({ op: 'set_mp', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
-              case 'sp': patches.push({ op: 'set_sp', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
+              case 'hp': patches.push({ op: 'set_hp', target: `characters.${key}`, value, metadata: { source: 'vars_update' } }); break;
+              case 'mp': patches.push({ op: 'set_mp', target: `characters.${key}`, value, metadata: { source: 'vars_update' } }); break;
+              case 'sp': patches.push({ op: 'set_sp', target: `characters.${key}`, value, metadata: { source: 'vars_update' } }); break;
               case 'location':
-                patches.push({ op: 'set_location', target: `characters.${id}`, value: value, metadata: { source: 'vars_update' } }); break;
+                patches.push({ op: 'set_location', target: `characters.${key}`, value: value, metadata: { source: 'vars_update' } }); break;
               case 'currentAction':
-                patches.push({ op: 'set_location', target: `characters.${id}`, value: value, metadata: { source: 'vars_update' } }); break;
+                // M3: currentAction 走 update_character，不再顶掉 location（#19 翻译侧收口）
+                patches.push({ op: 'update_character', target: `characters.${key}`, value: { currentAction: value }, metadata: { source: 'vars_update', path } }); break;
               default:
-                patches.push({ op: 'update_character', target: `characters.${id}`, value: { [path]: value }, metadata: { source: 'vars_update', path } });
+                patches.push({ op: 'update_character', target: `characters.${key}`, value: { [path]: value }, metadata: { source: 'vars_update', path } });
             }
           }
 
-          // --- characters.delta → delta_hp/delta_mp/delta_sp ---
+          // --- characters.delta → delta_hp/delta_mp/delta_sp/update_character(delta) ---
+          // M3: key = d.name ?? d.id（过渡读，M4 改 prompt 后删 ?? d.id）
           for (const d of (parsed.characters?.delta ?? [])) {
-            const { id, path, amount } = d;
+            const key = d.name ?? d.id;
+            if (!key) { console.warn('[Orchestrator] characters.delta 条目缺 name/id，跳过'); continue; }
+            const { path, amount } = d;
             switch (path) {
-              case 'hp': patches.push({ op: 'delta_hp', target: `characters.${id}`, amount, metadata: { source: 'vars_update' } }); break;
-              case 'mp': patches.push({ op: 'delta_mp', target: `characters.${id}`, amount, metadata: { source: 'vars_update' } }); break;
-              case 'sp': patches.push({ op: 'delta_sp', target: `characters.${id}`, amount, metadata: { source: 'vars_update' } }); break;
+              case 'hp': patches.push({ op: 'delta_hp', target: `characters.${key}`, amount, metadata: { source: 'vars_update' } }); break;
+              case 'mp': patches.push({ op: 'delta_mp', target: `characters.${key}`, amount, metadata: { source: 'vars_update' } }); break;
+              case 'sp': patches.push({ op: 'delta_sp', target: `characters.${key}`, amount, metadata: { source: 'vars_update' } }); break;
+              case 'money':
+                // M3: money delta 走 update_character + metadata.delta=true（M2 Task 9 真加法承接 #20）
+                patches.push({ op: 'update_character', target: `characters.${key}`, value: { money: amount }, metadata: { source: 'vars_update', path, delta: true } }); break;
               default:
-                patches.push({ op: 'update_character', target: `characters.${id}`, value: { [path]: amount }, metadata: { source: 'vars_update', path, delta: true } });
+                patches.push({ op: 'update_character', target: `characters.${key}`, value: { [path]: amount }, metadata: { source: 'vars_update', path, delta: true } });
             }
           }
 
-          // --- characters.add → add_status_effect/add_skill/add_item/equip_item ---
+          // --- characters.add → add_status_effect/add_skill/add_item（M3: 零 id 生成，装备单 patch） ---
+          // M3: key = a.name ?? a.id（过渡读，M4 改 prompt 后删 ?? a.id）
           for (const a of (parsed.characters?.add ?? [])) {
-            const { id, path, value } = a;
+            const key = a.name ?? a.id;
+            if (!key) { console.warn('[Orchestrator] characters.add 条目缺 name/id，跳过'); continue; }
+            const { path, value } = a;
             switch (path) {
-              case 'statusEffects': patches.push({ op: 'add_status_effect', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
-              case 'skills': patches.push({ op: 'add_skill', target: `characters.${id}`, value, metadata: { source: 'vars_update' } }); break;
+              case 'statusEffects': patches.push({ op: 'add_status_effect', target: `characters.${key}`, value, metadata: { source: 'vars_update' } }); break;
+              case 'skills': patches.push({ op: 'add_skill', target: `characters.${key}`, value, metadata: { source: 'vars_update' } }); break;
               case 'inventory': {
-                // M2 契约: add_item 按 value.name 寻址；id 仅占 value.id 可选位（apply 忽略）
-                const itemId = `varsupd_inv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;  // M3 删
+                // M3: 单 add_item，无 id 生成，equippedSlot 直传
                 patches.push({
                   op: 'add_item',
-                  target: `characters.${id}`,
+                  target: `characters.${key}`,
                   value: {
-                    id: itemId,  // M3 删
                     name: value?.name ?? '未知物品',
                     description: value?.description,
                     quantity: value?.quantity ?? 1,
                     type: value?.type,
                     rarity: value?.rarity,
+                    equippedSlot: value?.equippedSlot ?? null,
                   },
                   metadata: { source: 'vars_update', path, add: true },
                 });
                 break;
               }
               case 'equipment': {
-                if (value?.itemId) {
-                  // M2: 旧 itemId 值本来就是名字 → {name, slot}；slot 未知则不发 equip（物品留背包）// M3 重写
-                  const eqSlotA = normalizeSlot(value?.slot ?? '');
-                  if (eqSlotA) {
-                    patches.push({ op: 'equip_item', target: `characters.${id}`, value: { name: value.name ?? value.itemId, slot: eqSlotA }, metadata: { source: 'vars_update' } });
-                  }
-                } else {
-                  // AI 只给 {name, type, slot} → 两步: add_item 写背包 + equip_item 按名穿上 // M3 重写
-                  const itemId = `varsupd_eq_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;  // M3 删
-                  const eqName = value?.name ?? '未知装备';
-                  patches.push({
-                    op: 'add_item',
-                    target: `characters.${id}`,
-                    value: { id: itemId /* M3 删 */, name: eqName, description: value?.description, quantity: 1, type: 'equipment', rarity: value?.rarity },
-                    metadata: { source: 'vars_update', path, add: true },
-                  });
-                  // slot 经 normalizeSlot 归一化，不可识别则不发 equip，物品留背包 // M3 重写
-                  const rawSlot = value?.slot ?? value?.type;
-                  const eqSlotB = rawSlot ? normalizeSlot(rawSlot) : null;
-                  if (eqSlotB) {
-                    patches.push({
-                      op: 'equip_item',
-                      target: `characters.${id}`,
-                      value: { name: eqName, slot: eqSlotB },
-                      metadata: { source: 'vars_update', path, add: true },
-                    });
-                  }
-                }
+                // M3: 装备=带 equippedSlot 的物品，单 add_item 落库（不再 add_item+equip_item 两步）
+                const eqName = value?.name ?? value?.itemId ?? '未知装备';
+                const eqSlot = normalizeSlot(value?.slot ?? '');
+                patches.push({
+                  op: 'add_item',
+                  target: `characters.${key}`,
+                  value: {
+                    name: eqName,
+                    description: value?.description,
+                    quantity: 1,
+                    type: '装备',
+                    rarity: value?.rarity,
+                    equippedSlot: eqSlot,  // null = 槽位不可识别，留背包
+                  },
+                  metadata: { source: 'vars_update', path, add: true },
+                });
                 break;
               }
-              default: patches.push({ op: 'update_character', target: `characters.${id}`, value: { [path]: value }, metadata: { source: 'vars_update', path, add: true } });
+              default: patches.push({ op: 'update_character', target: `characters.${key}`, value: { [path]: value }, metadata: { source: 'vars_update', path, add: true } });
             }
           }
 
-          // --- characters.remove → remove_status_effect/unequip_item ---
+          // --- characters.remove → remove_status_effect/unequip_item/remove_skill（M3: 统一 {name} 对象形态） ---
+          // M3: key = rm.name ?? rm.id（过渡读，M4 改 prompt 后删 ?? rm.id）
           for (const rm of (parsed.characters?.remove ?? [])) {
-            const { id, path, target: rmTarget } = rm;
+            const key = rm.name ?? rm.id;
+            if (!key) { console.warn('[Orchestrator] characters.remove 条目缺 name/id，跳过'); continue; }
+            const { path, target: rmTarget } = rm;
             switch (path) {
-              case 'statusEffects': patches.push({ op: 'remove_status_effect', target: `characters.${id}`, value: rmTarget, metadata: { source: 'vars_update' } }); break;
-              case 'equipment': patches.push({ op: 'unequip_item', target: `characters.${id}`, value: rmTarget, metadata: { source: 'vars_update' } }); break;  // rmTarget 语义不明（名字/槽位皆可能），裸字符串走过渡分支双解释 // M3 重写
-              case 'skills': patches.push({ op: 'remove_skill', target: `characters.${id}`, value: { name: rmTarget }, metadata: { source: 'vars_update', path, remove: true } }); break;  // M2: removeSkill 假字段被白名单拒 → 改专用 op // M3 重写
+              case 'statusEffects': patches.push({ op: 'remove_status_effect', target: `characters.${key}`, value: { name: rmTarget }, metadata: { source: 'vars_update' } }); break;
+              case 'equipment': patches.push({ op: 'unequip_item', target: `characters.${key}`, value: { name: rmTarget }, metadata: { source: 'vars_update' } }); break;
+              case 'skills': patches.push({ op: 'remove_skill', target: `characters.${key}`, value: { name: rmTarget }, metadata: { source: 'vars_update', path, remove: true } }); break;
             }
           }
 
@@ -937,10 +914,9 @@ export class AgentOrchestrator {
             patches.push({ op: 'unequip_item', target: `characters.${u.owner}`, value: { name: u.target }, metadata: { source: 'vars_update', operation: 'unequip' } });
           }
 
-          // --- items.transfer → remove_item + add_item ---
+          // --- items.transfer → transfer_item（M3: 单 patch 原子转移，杀 #5 transfer 断裂） ---
           for (const t of (parsed.items?.transfer ?? [])) {
-            patches.push({ op: 'remove_item', target: `characters.${t.from}`, value: { name: t.target, quantity: t.quantity ?? 1 }, metadata: { source: 'vars_update', operation: 'transfer_out' } });
-            patches.push({ op: 'add_item', target: `characters.${t.to}`, value: { name: t.target, quantity: t.quantity ?? 1 }, metadata: { source: 'vars_update', operation: 'transfer_in' } });
+            patches.push({ op: 'transfer_item', target: `characters.${t.from}`, value: { name: t.target, to: t.to, quantity: t.quantity ?? 1 }, metadata: { source: 'vars_update', operation: 'transfer' } });
           }
 
           // --- items.modify → update_item ---

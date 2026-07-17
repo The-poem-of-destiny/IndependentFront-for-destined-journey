@@ -825,7 +825,7 @@ describe('StateManager', () => {
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'remove_status_effect', target: 'characters.char-001', value: 'nonexistent' },
+        { op: 'remove_status_effect', target: 'characters.char-001', value: { name: 'nonexistent' } },
       ]);
 
       expect(result.success).toBe(true);
@@ -892,7 +892,7 @@ describe('StateManager', () => {
       expect(char.statusEffects).toHaveLength(1); // 不重复插入
     });
 
-    it('#22: remove_status_effect value=字符串 按名删除', async () => {
+    it('#22: remove_status_effect 按 name 对象形态删除', async () => {
       const char = buildMockCharacter({
         id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
         statusEffects: [
@@ -904,7 +904,7 @@ describe('StateManager', () => {
 
       const sm = new StateManager({ saveId: 's1' });
       const result = await sm.commitChatState([
-        { op: 'remove_status_effect', target: 'characters.理查德', value: '轻伤' },
+        { op: 'remove_status_effect', target: 'characters.理查德', value: { name: '轻伤' } },
       ]);
 
       expect(result.success).toBe(true);
@@ -1145,7 +1145,7 @@ describe('StateManager', () => {
       expect(result.errors[0]).toContain('物品不存在');
     });
 
-    it('remove_item 裸字符串过渡形态: value 按 name 解释 + patch.amount 当 quantity（craft-resolver 现行发法）', async () => {
+    it('remove_item 按 {name, quantity} 对象形态扣减', async () => {
       const char = buildMockCharacter({
         id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
         inventory: [{ name: '铁锭', quantity: 5, type: '材料' }],
@@ -1154,7 +1154,7 @@ describe('StateManager', () => {
 
       const sm = new StateManager({ saveId: 's1' });
       const result = await sm.commitChatState([
-        { op: 'remove_item', target: 'characters.理查德', value: '铁锭', amount: 3 },
+        { op: 'remove_item', target: 'characters.理查德', value: { name: '铁锭', quantity: 3 } },
       ]);
 
       expect(result.success).toBe(true);
@@ -1549,7 +1549,7 @@ describe('StateManager', () => {
       expect(result.errors[1]).toContain('无穿戴');
     });
 
-    it('unequip 裸字符串: 先按 slot 解释、再按 name 兜底（过渡: M3 删）', async () => {
+    it('unequip 按 {name} / {slot} 对象形态脱装（M3 统一）', async () => {
       const char = buildMockCharacter({
         id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
         inventory: [
@@ -1561,8 +1561,8 @@ describe('StateManager', () => {
 
       const sm = new StateManager({ saveId: 's1' });
       const result = await sm.commitChatState([
-        { op: 'unequip_item', target: 'characters.理查德', value: 'weapon' },      // 按 slot（英文别名归一）
-        { op: 'unequip_item', target: 'characters.理查德', value: '幸运吊坠' },    // 非槽位词 → 按 name 兜底
+        { op: 'unequip_item', target: 'characters.理查德', value: { slot: '武器' } },     // 按 slot
+        { op: 'unequip_item', target: 'characters.理查德', value: { name: '幸运吊坠' } }, // 按 name
       ]);
 
       expect(result.success).toBe(true);

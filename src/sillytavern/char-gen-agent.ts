@@ -288,7 +288,6 @@ export function assembleCharacterState(
   const mergedSkills = [...itemGenSkills.filter(s => !charSkillNames.has(s.name)), ...charSkills];
 
   const skills = mergedSkills.map((s) => ({
-    id: crypto.randomUUID(),
     name: s.name,
     description: s.description,
     type: s.type,
@@ -300,7 +299,7 @@ export function assembleCharacterState(
   }));
 
   // 合并装备: char_gen 自产优先
-  // M2: 装备不是独立实体 — 装备产物直接写成带 equippedSlot 的 InventoryItem（规范 §3）// M3 重写
+  // M3: 装备产物直接写成带 equippedSlot 的 InventoryItem（规范 §3），scripts 无损传递（#45）
   const charEquip = charData.equipment ?? [];
   const itemGenEquip = itemData.equipment ?? [];
   const charEquipNames = new Set(charEquip.map(e => e.name));
@@ -316,9 +315,11 @@ export function assembleCharacterState(
     durability: e.durability,
     maxDurability: e.durability,
     effects: (e as any).effects,
+    scripts: (e as any).scripts,           // M3: scripts 无损传递（#45）
   }));
 
   // 合并背包: char_gen 自产优先
+  // M3: inventory 物品 effects/scripts 无损传递，废除 id 生成（#45）
   const charInv = charData.inventory ?? [];
   const itemGenInv = itemData.inventory ?? [];
   const charInvNames = new Set(charInv.map(i => i.name));
@@ -326,14 +327,15 @@ export function assembleCharacterState(
 
   const inventory: InventoryItem[] = [
     ...mergedInv.map((inv) => ({
-      id: crypto.randomUUID(),
       name: inv.name,
       description: inv.description,
       type: inv.type,
       quantity: inv.quantity,
       rarity: (inv.rarity as QualityLevel) || undefined,
+      effects: (inv as any).effects,        // M3: effects 无损传递（#45）
+      scripts: (inv as any).scripts,        // M3: scripts 无损传递（#45）
     })),
-    // M2: 装备产物并入 inventory（equippedSlot 非空 = 已穿戴）// M3 重写
+    // M3: 装备产物并入 inventory（equippedSlot 非空 = 已穿戴）
     ...equippedItems,
   ];
 
@@ -375,13 +377,14 @@ export function assembleCharacterState(
     },
     skills,
     inventory,
+    // M3: 正式字段直写（规范 §2.1），customFields 只保留真扩展数据（双写到 M6）
+    appearance: charData.appearance,
+    background: charData.background,
+    personality: charData.personality,
+    gender: charData.gender,
+    outfit: charData.clothing,
     customFields: {
-      background: charData.background,
-      appearance: charData.appearance,
-      personality: charData.personality,
-      gender: charData.gender,
       likes: charData.likes,
-      clothing: charData.clothing,
       faction: charData.faction,
       ascensionPath: charData.ascension.path,
       ascensionDescription: charData.ascension.description,
@@ -391,94 +394,24 @@ export function assembleCharacterState(
 }
 
 /**
- * 为生成的 CharacterState 构建 StatePatch[]。
- * 产出: add_character + add_skill × N + add_item × N + equip_item × N
+ * 为生成的 CharacterState 构建 StatePatch[]（M3: 单 add_character 落库，零附属 patch）。
+ *
+ * M3 重写要点:
+ * - 附属 add_skill/add_item/equip_item 整体删除 — 全部数据内嵌在 add_character value 里一次落库
+ *   （旧行为: 附属 patch 恒 errors，靠 add_character 兜底；删掉即修 #11 且防 target 修好后的二次叠加）
+ * - ascension 数据已嵌入 add_character value 本体，删除 set_variable patch（#12 杀）
+ * - target 用 character.name（铁律1: 名字寻址）
  */
 export function buildCharGenPatches(character: CharacterState): StatePatch[] {
   const patches: StatePatch[] = [];
 
-  // 1. 添加角色
+  // 1. 添加角色 — 单 patch，所有数据内嵌（skills/inventory/ascension 已在 value 体内）
   patches.push({
     op: 'add_character',
-    target: `characters.${character.id}`,
+    target: `characters.${character.name}`,
     value: character,
     metadata: { source: 'char_gen', phase: '6e' },
   });
-
-  // 2. 添加技能
-  for (const skill of character.skills) {
-    patches.push({
-      op: 'add_skill',
-      target: `characters.${character.id}.skills`,
-      value: skill,
-      metadata: { source: 'item_gen' },
-    });
-  }
-
-  // 3. 添加背包物品
-  for (const item of character.inventory) {
-    patches.push({
-      op: 'add_item',
-      target: `characters.${character.id}.inventory`,
-      value: item,
-      metadata: { source: 'item_gen' },
-    });
-  }
-
-  // 4. 装备物品 — M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）// M3 重写
-  for (const equip of character.inventory.filter(i => i.equippedSlot)) {
-    patches.push({
-      op: 'equip_item',
-      target: `characters.${character.id}`,
-      value: { name: equip.name, slot: equip.equippedSlot },
-      metadata: { source: 'item_gen' },
-    });
-  }
-
-  // 5. 登神长阶数据 (写入变量空间)
-  if (character.ascension.enabled) {
-    const asc = character.ascension;
-    if (asc.elements.length > 0) {
-      patches.push({
-        op: 'set_variable',
-        target: `characters.${character.id}.ascension.elements`,
-        value: asc.elements,
-        metadata: { source: 'item_gen' },
-      });
-    }
-    if (asc.authority.length > 0) {
-      patches.push({
-        op: 'set_variable',
-        target: `characters.${character.id}.ascension.authority`,
-        value: asc.authority,
-        metadata: { source: 'item_gen' },
-      });
-    }
-    if (asc.law.length > 0) {
-      patches.push({
-        op: 'set_variable',
-        target: `characters.${character.id}.ascension.law`,
-        value: asc.law,
-        metadata: { source: 'item_gen' },
-      });
-    }
-    if (asc.deityPosition) {
-      patches.push({
-        op: 'set_variable',
-        target: `characters.${character.id}.ascension.deityPosition`,
-        value: asc.deityPosition,
-        metadata: { source: 'char_gen' },
-      });
-    }
-    if (asc.divineKingdom.name) {
-      patches.push({
-        op: 'set_variable',
-        target: `characters.${character.id}.ascension.divineKingdom`,
-        value: asc.divineKingdom,
-        metadata: { source: 'char_gen' },
-      });
-    }
-  }
 
   return patches;
 }

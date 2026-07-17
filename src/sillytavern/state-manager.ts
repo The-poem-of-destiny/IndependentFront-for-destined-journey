@@ -636,16 +636,12 @@ export class StateManager {
   }
 
   /**
-   * remove_status_effect — M2 按名删除 (#22)
-   *
-   * value = { name } 或裸字符串（按 name 解释）  // 过渡: M3 删裸字符串形态
+   * remove_status_effect — M2 按名删除 (#22) / M3 统一 {name} 对象形态
    */
   private async applyRemoveStatusEffect(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    const name = typeof patch.value === 'string'
-      ? patch.value  // 过渡: M3 删
-      : (patch.value as { name?: string })?.name;
+    const name = (patch.value as { name?: string })?.name;
     if (!name) throw new Error('remove_status_effect 需要 value.name');
 
     char.statusEffects = char.statusEffects.filter(e => e.name !== name);
@@ -698,26 +694,16 @@ export class StateManager {
   }
 
   /**
-   * remove_item — M2 按名寻址 (#5 #35)
+   * remove_item — M2 按名寻址 / M3 统一 {name, quantity?} 对象形态 (#5 #35)
    *
-   * value = { name(必), quantity?=1 }
-   * 或裸字符串（按 name 解释、patch.amount 当 quantity，兼容 craft-resolver 现行发法）// 过渡: M3 删
    * 扣减 ≤0 时 splice 删除条目；找不到 → throw 进 errors[]（杀静默失败）。
    */
   private async applyRemoveItem(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    let name: string | undefined;
-    let qty: number;
-    if (typeof patch.value === 'string') {
-      // 过渡: M3 删 — 裸字符串按 name 解释，patch.amount 当 quantity
-      name = patch.value;
-      qty = patch.amount ?? 1;
-    } else {
-      const value = patch.value as { name?: string; quantity?: number };
-      name = value?.name;
-      qty = value?.quantity ?? 1;
-    }
+    const value = patch.value as { name?: string; quantity?: number };
+    const name = value?.name;
+    const qty = value?.quantity ?? 1;
     if (!name) throw new Error('remove_item 需要 value.name');
 
     const idx = char.inventory.findIndex(i => i.name === name);
@@ -851,25 +837,18 @@ export class StateManager {
   }
 
   /**
-   * unequip_item — M2 equippedSlot 单真源 (#10 #23 #24, 规范 §3)
+   * unequip_item — M2/M3 equippedSlot 单真源 (#10 #23 #24, 规范 §3)
    *
    * value = { name } 或 { slot }（按 slot 找当前穿戴者，slot 先归一化）
-   * 或裸字符串（先按 slot 解释找穿戴者，再按 name 兜底，兼容翻译层现行发法）// 过渡: M3 删
    * 脱=清 equippedSlot，零数据搬运。找不到（无此物品 / 该槽无穿戴）→ throw 进 errors[]。
    */
   private async applyUnequipItem(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    const value = patch.value as { name?: string; slot?: string } | string;
+    const value = patch.value as { name?: string; slot?: string };
     let item: InventoryItem | undefined;
 
-    if (typeof value === 'string') {
-      // 过渡: M3 删 — 裸字符串先按 slot 解释（旧语义 value=slot），再按 name 兜底
-      const slot = normalizeSlot(value);
-      item = (slot ? char.inventory.find(i => i.equippedSlot === slot) : undefined)
-        ?? findByName(char.inventory, value);
-      if (!item) throw new Error(`该槽位无穿戴且物品不存在: ${value}`);
-    } else if (value?.name) {
+    if (value?.name) {
       // 按名脱
       item = findByName(char.inventory, value.name);
       if (!item) throw new Error(`物品不存在: ${value.name}`);

@@ -59,14 +59,20 @@ describe('buildCraftPatches', () => {
     // 无装备细化 → 不发 equip_item
     expect(ops(patches, 'equip_item')).toHaveLength(0);
 
-    // 奖励
+    // 奖励: 经验走 update_character delta（M3），FP 走 delta_variable
     const deltas = ops(patches, 'delta_variable');
-    expect(deltas).toHaveLength(2);
-    expect(deltas.find(p => p.target === 'characters.理查德.exp')?.amount).toBe(50);
-    expect(deltas.find(p => p.target === 'profile.fp')?.amount).toBe(2);
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0].target).toBe('profile.fp');
+    expect(deltas[0].amount).toBe(2);
+
+    const charUpdates = ops(patches, 'update_character');
+    expect(charUpdates).toHaveLength(1);
+    expect(charUpdates[0].target).toBe('characters.理查德');
+    expect(charUpdates[0].value).toEqual({ totalExp: 50 });
+    expect(charUpdates[0].metadata).toEqual({ source: 'craft_gen', delta: true });
   });
 
-  it('② item_gen equipment 与产物同名 → 不重复 add_item（同名恰好 1 条），equip_item 按 name+slot 寻址', () => {
+  it('② item_gen equipment 与产物同名 → 不重复 add_item（同名恰好 1 条），单 add_item 带 equippedSlot（M3）', () => {
     const itemOutput: ItemGenOutput = {
       skills: [],
       equipment: [
@@ -90,10 +96,9 @@ describe('buildCraftPatches', () => {
     expect(sameNameAdds).toHaveLength(1);
     expect((sameNameAdds[0].value as any).description).toBe('剑身流转着秘银纹路');
 
-    // equip_item 存在且按 {name, slot} 寻址（M2 契约）
-    const equips = ops(patches, 'equip_item');
-    expect(equips).toHaveLength(1);
-    expect(equips[0].value).toMatchObject({ name: '精钢长剑', slot: '武器' });
+    // M3: 装备单 add_item 带 equippedSlot，不再两步（无单独 equip_item）
+    expect(ops(patches, 'equip_item')).toHaveLength(0);
+    expect(sameNameAdds[0].value).toHaveProperty('equippedSlot', '武器');
   });
 
   it('③ item_gen 产出异名装备/散件 → 产物 + 装备 + 散件各自 add_item', () => {
