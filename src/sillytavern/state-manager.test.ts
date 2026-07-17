@@ -2,7 +2,7 @@
  * StateManager 测试套件
  *
  * 覆盖: 构造/配置默认值, Patch 验证, 各类 patch 操作,
- *       自动快照, 事件管理, 批量提交, 部分成功
+ *       快照打/恢复 (M5 §11.2), 事件管理, 批量提交, 部分成功
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -26,10 +26,12 @@ vi.mock('./database', () => ({
   getSave: vi.fn(),
   saveSaveSlot: vi.fn(),
   getSnapshots: vi.fn(),
+  getSnapshot: vi.fn(),
   getLatestSnapshot: vi.fn(),
   saveSnapshot: vi.fn(),
   trimSnapshots: vi.fn(),
   getSettings: vi.fn(),
+  deleteMessagesAfterTurn: vi.fn(),
 }));
 
 // save-profile 也 mock（quest 双 op 测试用；state-manager 对其为动态 import，vitest 同样拦截）
@@ -123,7 +125,9 @@ describe('StateManager', () => {
     vi.mocked(db.deleteCharacter).mockImplementation(async (id: string) => {
       charStore.delete(id);
     });
-    vi.mocked(db.saveCharacters).mockResolvedValue(undefined);
+    vi.mocked(db.saveCharacters).mockImplementation(async (chars: any[]) => {
+      for (const c of chars) charStore.set(c.id, c);
+    });
     vi.mocked(db.saveMemory).mockResolvedValue('mem-id');
     vi.mocked(db.getMemories).mockResolvedValue([]);
     vi.mocked(db.getPlotEvents).mockResolvedValue([]);
@@ -131,10 +135,27 @@ describe('StateManager', () => {
     vi.mocked(db.getSave).mockResolvedValue(undefined);
     vi.mocked(db.saveSaveSlot).mockResolvedValue('saved');
     vi.mocked(db.getSnapshots).mockResolvedValue([]);
+    vi.mocked(db.getSnapshot).mockResolvedValue(undefined);
     vi.mocked(db.getLatestSnapshot).mockResolvedValue(undefined);
     vi.mocked(db.saveSnapshot).mockResolvedValue('snap-id');
     vi.mocked(db.trimSnapshots).mockResolvedValue(undefined);
     vi.mocked(db.getSettings).mockResolvedValue(undefined);
+    vi.mocked(db.deleteMessagesAfterTurn).mockResolvedValue(undefined);
+
+    // M5 Task 1: 变量真源迁 profile — in-memory profile store（变量/quest/affection op 共用缺省 mock）
+    const profileStore = new Map<string, any>();
+    vi.mocked(saveProfile.getProfile).mockImplementation(async (saveId: string) => {
+      if (!profileStore.has(saveId)) {
+        profileStore.set(saveId, {
+          saveId, fp: 0, fpHistory: [], contracts: [], achievements: [], news: [],
+          quests: {}, affections: {}, mapMarkers: [], variables: {}, worldFlags: {},
+        });
+      }
+      return profileStore.get(saveId);
+    });
+    vi.mocked(saveProfile.updateProfile).mockImplementation(async (profile: any) => {
+      profileStore.set(profile.saveId, profile);
+    });
   });
 
   // ===================================================================
@@ -146,32 +167,11 @@ describe('StateManager', () => {
       expect((sm as any).saveId).toBe('save-001');
     });
 
-    it('should use default maxSnapshots (30) when not provided', () => {
+    it('M5: 自动快照配置字段已删除（快照改由 createSnapshot 显式触发, #28）', () => {
       const sm = new StateManager({ saveId: 'save-001' });
-      expect((sm as any).maxSnapshots).toBe(30);
-    });
-
-    it('should use default autoSnapshot (true) when not provided', () => {
-      const sm = new StateManager({ saveId: 'save-001' });
-      expect((sm as any).autoSnapshot).toBe(true);
-    });
-
-    it('should use default autoSnapshotInterval (5) when not provided', () => {
-      const sm = new StateManager({ saveId: 'save-001' });
-      expect((sm as any).autoSnapshotInterval).toBe(5);
-    });
-
-    it('should accept custom config values', () => {
-      const sm = new StateManager({
-        saveId: 'save-002',
-        maxSnapshots: 10,
-        autoSnapshot: false,
-        autoSnapshotInterval: 3,
-      });
-      expect((sm as any).saveId).toBe('save-002');
-      expect((sm as any).maxSnapshots).toBe(10);
-      expect((sm as any).autoSnapshot).toBe(false);
-      expect((sm as any).autoSnapshotInterval).toBe(3);
+      expect((sm as any).autoSnapshot).toBeUndefined();
+      expect((sm as any).autoSnapshotInterval).toBeUndefined();
+      expect((sm as any).maxSnapshots).toBeUndefined();
     });
   });
 
@@ -292,6 +292,75 @@ describe('StateManager', () => {
       expect(result.eventsGenerated[0].type).toBe('variable_change');
       expect(result.eventsGenerated[0].data.op).toBe('delta_variable');
       expect(result.eventsGenerated[0].data.amount).toBe(-50);
+    });
+  });
+
+  // ===================================================================
+  // 3b. M5 Task 1: 变量唯一真源迁入 SaveProfile.variables (#1 #33)
+  // 注: 无命名空间前缀的路径默认归入 sys（var-resolver parseVarPath 兼容旧格式）
+  // ===================================================================
+  describe('commitChatState — 变量真源 SaveProfile.variables (M5)', () => {
+    it('set_variable 后 profile.variables 可读（不再依赖快照存在）', async () => {
+      const sm = new StateManager({ saveId: 'save-m5' });
+      const result = await sm.commitChatState([
+        { op: 'set_variable', target: 'variables.主线进度', value: '第二章' },
+      ]);
+      expect(result.success).toBe(true);
+      const profile = await saveProfile.getProfile('save-m5');
+      expect(profile.variables.sys?.['主线进度']).toBe('第二章');
+    });
+
+    it('无快照时写入不丢（#1 静默丢弃反例转正例）', async () => {
+      // getLatestSnapshot 缺省 mock 返回 undefined = 无快照场景
+      vi.mocked(db.getLatestSnapshot).mockResolvedValue(undefined);
+      const sm = new StateManager({ saveId: 'save-m5-nosnap' });
+      await sm.commitChatState([
+        { op: 'set_variable', target: 'variables.gold', value: 999 },
+      ]);
+      const profile = await saveProfile.getProfile('save-m5-nosnap');
+      expect(profile.variables.sys?.gold).toBe(999);
+      // 旧实现写快照：无快照时静默丢弃 → 现在必须落 profile
+      expect(vi.mocked(db.saveSnapshot)).not.toHaveBeenCalledWith(
+        expect.objectContaining({ variables: expect.objectContaining({ gold: 999 }) }),
+      );
+    });
+
+    it('delta_variable 在 profile 上累加', async () => {
+      const sm = new StateManager({ saveId: 'save-m5-delta' });
+      await sm.commitChatState([
+        { op: 'set_variable', target: 'variables.gold', value: 100 },
+        { op: 'delta_variable', target: 'variables.gold', amount: 50 },
+      ]);
+      const profile = await saveProfile.getProfile('save-m5-delta');
+      expect(profile.variables.sys?.gold).toBe(150);
+    });
+
+    it('user./sys. 命名空间路径不变', async () => {
+      const sm = new StateManager({ saveId: 'save-m5-ns' });
+      await sm.commitChatState([
+        { op: 'set_variable', target: 'variables.user.偏好.语言', value: '中文' },
+        { op: 'set_variable', target: 'variables.sys.世界.天气', value: '暴雨' },
+      ]);
+      const profile = await saveProfile.getProfile('save-m5-ns');
+      expect(profile.variables.user?.偏好?.语言).toBe('中文');
+      expect(profile.variables.sys?.世界?.天气).toBe('暴雨');
+    });
+
+    it('remove/move/insert_variable 同样落 profile', async () => {
+      const sm = new StateManager({ saveId: 'save-m5-ops' });
+      await sm.commitChatState([
+        { op: 'set_variable', target: 'variables.a', value: 1 },
+        { op: 'move_variable', target: 'variables.a', metadata: { toPath: 'b' } },
+        { op: 'insert_variable', target: 'variables.list', value: 'x' },
+      ]);
+      const profile = await saveProfile.getProfile('save-m5-ops');
+      expect(profile.variables.sys?.a).toBeUndefined();
+      expect(profile.variables.sys?.b).toBe(1);
+      expect(profile.variables.sys?.list).toEqual(['x']);
+      // remove
+      await sm.commitChatState([{ op: 'remove_variable', target: 'variables.b' }]);
+      const profile2 = await saveProfile.getProfile('save-m5-ops');
+      expect(profile2.variables.sys?.b).toBeUndefined();
     });
   });
 
@@ -1882,100 +1951,204 @@ describe('StateManager', () => {
   });
 
   // ===================================================================
-  // 14. Auto-snapshot
+  // 14. 快照 — createSnapshot 整份深拷贝 (M5 §11.2, #2 #28)
   // ===================================================================
-  describe('commitChatState — auto-snapshot', () => {
-    it('should create snapshot when patchCount reaches autoSnapshotInterval', async () => {
-      // Interval = 1: every patch triggers a snapshot
-      const sm = new StateManager({
-        saveId: 'save-001',
-        autoSnapshot: true,
-        autoSnapshotInterval: 1,
+  describe('createSnapshot — 整份深拷贝 (M5)', () => {
+    it('createSnapshot: characters 非空、saveProfile.variables 随行、activeSnapshotId 指向', async () => {
+      const char = buildMockCharacter({ id: 'char-001', saveId: 'save-001', hp: 80 });
+      await db.saveCharacter(char);
+      const profile = await saveProfile.getProfile('save-001');
+      profile.fp = 5;
+      profile.variables = { sys: { gold: 42 } };
+      await saveProfile.updateProfile(profile);
+      const save = buildMockSaveSlot({ id: 'save-001' });
+      vi.mocked(db.getSave).mockResolvedValue(save);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const snap = await sm.createSnapshot('manual', 3);
+
+      expect(snap.id).toBeTruthy();
+      expect(snap.saveId).toBe('save-001');
+      expect(snap.reason).toBe('manual');
+      expect(snap.turn).toBe(3);
+      expect(typeof snap.createdAt).toBe('number');
+      expect(snap.characters).toHaveLength(1);
+      expect(snap.characters[0].hp).toBe(80);
+      expect(snap.saveProfile.fp).toBe(5);
+      expect(snap.saveProfile.variables).toEqual({ sys: { gold: 42 } });
+      // 落库 + activeSnapshotId 指向
+      expect(vi.mocked(db.saveSnapshot)).toHaveBeenCalledWith(snap);
+      expect(save.activeSnapshotId).toBe(snap.id);
+      expect(vi.mocked(db.saveSaveSlot)).toHaveBeenCalled();
+    });
+
+    it('深拷贝隔离: 打快照后篡改原对象不影响快照', async () => {
+      const char = buildMockCharacter({
+        id: 'char-001', saveId: 'save-001', hp: 80,
+        inventory: [{ name: '铁剑', quantity: 1 }] as any,
       });
+      await db.saveCharacter(char);
+      const profile = await saveProfile.getProfile('save-001');
+      profile.variables = { sys: { gold: 42 } };
+      await saveProfile.updateProfile(profile);
 
-      const char = buildMockCharacter({ id: 'char-001' });
-      vi.mocked(db.getCharacters).mockResolvedValue([char]);
+      const sm = new StateManager({ saveId: 'save-001' });
+      const snap = await sm.createSnapshot('turn', 1);
 
-      const result = await sm.commitChatState([
-        { op: 'set_variable', target: 'variables.gold', value: 100 },
-      ]);
+      // 篡改原对象（嵌套层级也篡改）
+      char.hp = 1;
+      char.inventory[0].name = '木棍';
+      profile.variables.sys.gold = 0;
+
+      expect(snap.characters[0].hp).toBe(80);
+      expect(snap.characters[0].inventory[0].name).toBe('铁剑');
+      expect(snap.saveProfile.variables.sys.gold).toBe(42);
+    });
+
+    it('滚动上限读 settings.maxSnapshotsPerSave（settings 缺失时缺省 30）', async () => {
+      const sm = new StateManager({ saveId: 'save-001' });
+
+      vi.mocked(db.getSettings).mockResolvedValue({ maxSnapshotsPerSave: 5 } as any);
+      await sm.createSnapshot('turn', 1);
+      expect(vi.mocked(db.trimSnapshots)).toHaveBeenLastCalledWith('save-001', 5);
+
+      vi.mocked(db.getSettings).mockResolvedValue(undefined);
+      await sm.createSnapshot('turn', 2);
+      expect(vi.mocked(db.trimSnapshots)).toHaveBeenLastCalledWith('save-001', 30);
+    });
+
+    it('commitChatState 不再自动产生快照（杀 #28 patchCount%N 即建即抛）', async () => {
+      const sm = new StateManager({ saveId: 'save-001' });
+      // 连续 6 次提交（旧世界 patchCount%5===0 会在第 5 次触发自动快照）
+      for (let i = 1; i <= 6; i++) {
+        const result = await sm.commitChatState([
+          { op: 'set_variable', target: 'variables.gold', value: i },
+        ]);
+        expect(result.snapshotId).toBeUndefined();
+      }
+      expect(vi.mocked(db.saveSnapshot)).not.toHaveBeenCalled();
+      expect(vi.mocked(db.trimSnapshots)).not.toHaveBeenCalled();
+    });
+  });
+
+  // ===================================================================
+  // 14b. 快照恢复 — restoreSnapshot 覆写 + 对话回滚 (M5 §11.2, #2 #49)
+  // ===================================================================
+  describe('restoreSnapshot — 覆写 + 对话回滚 (M5)', () => {
+    it('恢复: 角色整体覆写 + profile 覆写 + 按 turn 截断消息 + activeSnapshotId 指向', async () => {
+      // 当前世界: 主角 hp=30 + 一个快照之后才加入的 NPC
+      const hero = buildMockCharacter({ id: 'hero-1', name: '主角', saveId: 'save-001', hp: 30 });
+      const lateNpc = buildMockCharacter({ id: 'npc-late', name: '后来者', type: 'npc', saveId: 'save-001' });
+      await db.saveCharacter(hero);
+      await db.saveCharacter(lateNpc);
+      const profile = await saveProfile.getProfile('save-001');
+      profile.fp = 9;
+      profile.variables = { sys: { 进度: '第三章' } };
+      await saveProfile.updateProfile(profile);
+      const save = buildMockSaveSlot({ id: 'save-001' });
+      vi.mocked(db.getSave).mockResolvedValue(save);
+
+      // 快照(打于 turn 2): 只有主角 hp=80，fp=5，变量为第一章
+      const snapshot = {
+        id: 'snap-1', saveId: 'save-001', createdAt: Date.now(), reason: 'turn' as const, turn: 2,
+        characters: [{ ...structuredClone(hero), hp: 80 }],
+        saveProfile: { ...structuredClone(profile), fp: 5, variables: { sys: { 进度: '第一章' } } },
+      };
+      vi.mocked(db.getSnapshot).mockResolvedValue(snapshot as any);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.restoreSnapshot('snap-1');
 
       expect(result.success).toBe(true);
-      expect(vi.mocked(db.getSnapshots)).toHaveBeenCalledWith('save-001');
+      expect(result.errors).toEqual([]);
+      // 角色: 整体覆写语义（后来的 NPC 消失，主角 hp 回 80）
+      const chars = await db.getCharacters('save-001');
+      expect(chars).toHaveLength(1);
+      expect(chars[0].id).toBe('hero-1');
+      expect(chars[0].hp).toBe(80);
+      // profile: fp 回 5、variables 随 saveProfile 回滚
+      const restored = await saveProfile.getProfile('save-001');
+      expect(restored.fp).toBe(5);
+      expect(restored.variables).toEqual({ sys: { 进度: '第一章' } });
+      // 对话按快照 turn 截断
+      expect(vi.mocked(db.deleteMessagesAfterTurn)).toHaveBeenCalledWith('save-001', 2);
+      // activeSnapshotId 指向
+      expect(save.activeSnapshotId).toBe('snap-1');
+      // 恢复写入与快照引用隔离: 改库内对象不影响快照（可重复恢复）
+      chars[0].hp = 1;
+      expect(snapshot.characters[0].hp).toBe(80);
+    });
+
+    it('快照不存在 → errors[] 且不动任何状态', async () => {
+      vi.mocked(db.getSnapshot).mockResolvedValue(undefined);
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.restoreSnapshot('missing-snap');
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('快照不存在');
+      expect(vi.mocked(db.deleteMessagesAfterTurn)).not.toHaveBeenCalled();
+      expect(vi.mocked(db.saveCharacters)).not.toHaveBeenCalled();
+    });
+
+    it('快照 saveId 不属于当前存档 → errors[]（防跨档恢复）', async () => {
+      vi.mocked(db.getSnapshot).mockResolvedValue({
+        id: 'snap-x', saveId: 'other-save', createdAt: 1, reason: 'turn', turn: 1,
+        characters: [], saveProfile: {},
+      } as any);
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.restoreSnapshot('snap-x');
+      expect(result.success).toBe(false);
+      expect(result.errors[0]).toContain('不属于当前存档');
+      expect(vi.mocked(db.deleteMessagesAfterTurn)).not.toHaveBeenCalled();
+    });
+  });
+
+  // ===================================================================
+  // 14c. advanceTurn — 回合推进 + 每轮一拍快照 (M5 Task 4, #27)
+  // ===================================================================
+  describe('advanceTurn — totalTurns 每轮 +1 + turn 快照 (M5)', () => {
+    it('advanceTurn: totalTurns +1 并产生 1 个 reason=turn 快照（turn=新回合数）', async () => {
+      const save = buildMockSaveSlot({
+        id: 'save-001',
+        metadata: { characterName: 'T', userName: 'P', gameStartTime: '', totalTurns: 4 },
+      });
+      vi.mocked(db.getSave).mockResolvedValue(save);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      await sm.advanceTurn();
+
+      expect(save.metadata.totalTurns).toBe(5);
       expect(vi.mocked(db.saveSnapshot)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(db.trimSnapshots)).toHaveBeenCalledWith('save-001', 30); // default max
-      expect(result.snapshotId).toBeDefined();
-      expect(typeof result.snapshotId).toBe('string');
+      const snap = vi.mocked(db.saveSnapshot).mock.calls[0][0] as any;
+      expect(snap.reason).toBe('turn');
+      expect(snap.turn).toBe(5);
     });
 
-    it('should not create snapshot when autoSnapshot is disabled', async () => {
-      const sm = new StateManager({
-        saveId: 'save-001',
-        autoSnapshot: false,
-        autoSnapshotInterval: 1,
-      });
+    it('一次管线（多次 commit）后 totalTurns 恰 +1（commit 不加，advanceTurn 加）', async () => {
+      const save = buildMockSaveSlot({ id: 'save-001' });
+      vi.mocked(db.getSave).mockResolvedValue(save);
 
-      await sm.commitChatState([
-        { op: 'set_variable', target: 'variables.gold', value: 100 },
-      ]);
+      const sm = new StateManager({ saveId: 'save-001' });
+      // 模拟一轮管线内的多次提交（orchestrator Stage2/Stage3 + 侧链均各自 commit）
+      await sm.commitChatState([{ op: 'set_variable', target: 'variables.a', value: 1 }]);
+      await sm.commitChatState([{ op: 'set_variable', target: 'variables.b', value: 2 }]);
+      expect(save.metadata.totalTurns).toBe(0);
 
-      expect(vi.mocked(db.saveSnapshot)).not.toHaveBeenCalled();
+      await sm.advanceTurn();
+      expect(save.metadata.totalTurns).toBe(1);
     });
 
-    it('should not create snapshot before interval is reached', async () => {
-      const sm = new StateManager({
-        saveId: 'save-001',
-        autoSnapshot: true,
-        autoSnapshotInterval: 3,
-      });
+    it('commitChatState 单独调用不改 totalTurns 也不产快照（杀 #27 每 commit 虚高）', async () => {
+      const save = buildMockSaveSlot({ id: 'save-001' });
+      vi.mocked(db.getSave).mockResolvedValue(save);
 
-      // First commit: patchCount becomes 1, 1 % 3 !== 0
-      await sm.commitChatState([
-        { op: 'set_variable', target: 'variables.gold', value: 100 },
-      ]);
-      expect(vi.mocked(db.saveSnapshot)).not.toHaveBeenCalled();
-
-      // Second commit: patchCount becomes 2, 2 % 3 !== 0
-      await sm.commitChatState([
-        { op: 'set_variable', target: 'variables.gold', value: 200 },
-      ]);
-      expect(vi.mocked(db.saveSnapshot)).not.toHaveBeenCalled();
-    });
-
-    it('should create snapshot exactly at the interval boundary', async () => {
-      const sm = new StateManager({
-        saveId: 'save-001',
-        autoSnapshot: true,
-        autoSnapshotInterval: 2,
-      });
-
-      // First commit (1 patch): patchCount=1, no snapshot
-      await sm.commitChatState([
-        { op: 'set_variable', target: 'variables.gold', value: 100 },
-      ]);
-      expect(vi.mocked(db.saveSnapshot)).not.toHaveBeenCalled();
-
-      // Second commit (1 patch): patchCount=2, 2%2=0 → snapshot!
+      const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'set_variable', target: 'variables.gold', value: 200 },
-      ]);
-      expect(vi.mocked(db.saveSnapshot)).toHaveBeenCalledTimes(1);
-      expect(result.snapshotId).toBeDefined();
-    });
-
-    it('should use custom maxSnapshots for trimming', async () => {
-      const sm = new StateManager({
-        saveId: 'save-001',
-        autoSnapshot: true,
-        autoSnapshotInterval: 1,
-        maxSnapshots: 5,
-      });
-
-      await sm.commitChatState([
         { op: 'set_variable', target: 'variables.gold', value: 100 },
       ]);
-
-      expect(vi.mocked(db.trimSnapshots)).toHaveBeenCalledWith('save-001', 5);
+      expect(result.success).toBe(true);
+      expect(save.metadata.totalTurns).toBe(0);
+      expect(vi.mocked(db.saveSnapshot)).not.toHaveBeenCalled();
     });
   });
 
@@ -2717,12 +2890,6 @@ describe('StateManager', () => {
       const sm = createStateManager('save-001');
       expect(sm).toBeInstanceOf(StateManager);
       expect((sm as any).saveId).toBe('save-001');
-    });
-
-    it('should pass config overrides to StateManager', () => {
-      const sm = createStateManager('save-002', { maxSnapshots: 15, autoSnapshot: false });
-      expect((sm as any).maxSnapshots).toBe(15);
-      expect((sm as any).autoSnapshot).toBe(false);
     });
   });
 });

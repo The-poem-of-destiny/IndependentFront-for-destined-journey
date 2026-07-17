@@ -50,8 +50,9 @@ export const FLAT_TO_ENGINE: Record<string, string> = {
   'stat_data.事件.标题': 'sys.events.title',
   'stat_data.事件.阶段': 'sys.events.phase',
   'stat_data.事件.已完成事件': 'sys.events.completed',
-  'stat_data.关系列表': 'sys.relationships',
-  'stat_data.新闻': 'sys.news',
+  // 'stat_data.关系列表' / 'stat_data.新闻' 映射已删除 — M5 双轨退役（#16 #44）:
+  // 新闻唯一真源 = SaveProfile.news（add_news op），好感度唯一真源 = SaveProfile.affections
+  // （set/delta_affection op）。变量命名空间写点已拆除，旧存档残留变量不迁移，接受陈旧。
 };
 
 // ========== 转换函数 ==========

@@ -7,24 +7,23 @@
  * 职责:
  * 1. 接收 StatePatch[] → 验证 → 应用 → 持久化
  * 2. 自动生成 GameEvent 记录变更
- * 3. 快照管理（自动创建检查点）
+ * 3. 快照管理（M5 §11.2: createSnapshot 整份深拷贝 / restoreSnapshot 覆写 + 对话回滚）
  * 4. 事务性提交（全部成功或全部回滚）
  */
 
 import type {
   StatePatch, StatePatchOp, StateCommitResult,
   GameEvent, CharacterState, MemoryRecord, PlotEvent,
-  StatusEffect, Skill, InventoryItem,
+  StatusEffect, Skill, InventoryItem, Snapshot,
 } from './types';
 import {
   getCharacters, saveCharacter, saveCharacters, deleteCharacter,
-  getMemories, saveMemory,
+  saveMemory,
   getPlotEvents, savePlotEvents,
   getSave, saveSaveSlot,
-  getSnapshots, saveSnapshot, trimSnapshots,
-  getSettings, getLatestSnapshot,
+  getSnapshot, saveSnapshot, trimSnapshots,
+  getSettings, deleteMessagesAfterTurn,
 } from './database';
-import type { SaveSlot } from './types';
 import { getVar, setVar, delVar, insertVar } from './var-resolver';
 import { normalizeQuestStatus, normalizeStatusCategory, normalizeItemType, normalizeRarity, normalizeSlot } from './field-enums';
 
@@ -32,12 +31,6 @@ import { normalizeQuestStatus, normalizeStatusCategory, normalizeItemType, norma
 
 export interface StateManagerConfig {
   saveId: string;
-  /** 最大快照数 */
-  maxSnapshots?: number;
-  /** 是否自动创建快照 */
-  autoSnapshot?: boolean;
-  /** 每 N 个 patch 自动创建快照 */
-  autoSnapshotInterval?: number;
 }
 
 /** 单个 Patch 的应用结果 */
@@ -94,17 +87,10 @@ const UPDATE_CHAR_NUMERIC_FIELDS = new Set<string>([
 
 export class StateManager {
   private saveId: string;
-  private maxSnapshots: number;
-  private autoSnapshot: boolean;
-  private autoSnapshotInterval: number;
-  private patchCount: number = 0;
   private events: GameEvent[] = [];
 
   constructor(config: StateManagerConfig) {
     this.saveId = config.saveId;
-    this.maxSnapshots = config.maxSnapshots ?? 30;
-    this.autoSnapshot = config.autoSnapshot ?? true;
-    this.autoSnapshotInterval = config.autoSnapshotInterval ?? 5;
   }
 
   // ========== 主入口 ==========
@@ -115,8 +101,10 @@ export class StateManager {
    * 流程:
    * 1. 验证所有 patches
    * 2. 依次应用每个 patch（读写数据库）
-   * 3. 自动创建快照（如果达到间隔）
-   * 4. 返回结果
+   * 3. 返回结果
+   *
+   * M5: 不再自动创建快照（杀 #28 patchCount%N 即建即抛），
+   * 快照由 createSnapshot()/advanceTurn() 显式触发（GamePipeline 每轮一拍）。
    */
   async commitChatState(patches: StatePatch[]): Promise<StateCommitResult> {
     if (!patches.length) {
@@ -140,27 +128,11 @@ export class StateManager {
       }
     }
 
-    this.patchCount += patches.length;
-
-    // 自动快照
-    let snapshotId: string | undefined;
-    if (this.autoSnapshot && this.patchCount % this.autoSnapshotInterval === 0) {
-      try {
-        snapshotId = await this.createAutoSnapshot();
-      } catch {
-        // 快照失败不阻塞主流程
-      }
-    }
-
-    // 更新 SaveSlot
+    // 更新 SaveSlot 触碰时间（saveSaveSlot 内部刷新 updatedAt）
+    // M5 #27: totalTurns 不再随每次 commit 虚高，回合推进统一走 advanceTurn()
     try {
       const save = await getSave(this.saveId);
       if (save) {
-        save.metadata.totalTurns = (save.metadata.totalTurns ?? 0) + 1;
-        save.updatedAt = Date.now();
-        if (snapshotId) {
-          save.activeSnapshotId = snapshotId;
-        }
         await saveSaveSlot(save);
       }
     } catch {
@@ -171,7 +143,6 @@ export class StateManager {
       success: errors.length === 0,
       patchesApplied: results.filter(r => r.success).length,
       eventsGenerated: [...this.events],
-      snapshotId,
       errors,
     };
   }
@@ -386,7 +357,7 @@ export class StateManager {
   // ========== Patch Handlers ==========
 
   private async applySetVariable(patch: StatePatch): Promise<GameEvent> {
-    // 读取当前 save 的 variables（从最新快照）
+    // 读取当前 save 的 variables（真源: SaveProfile.variables，M5）
     const vars = await this.getCurrentVariables();
     const path = patch.target.startsWith('variables.') ? patch.target.slice('variables.'.length) : patch.target;
     const newVars = setVar(vars, path, patch.value);
@@ -433,21 +404,22 @@ export class StateManager {
   }
 
   // ========== Variable Persistence ==========
+  // M5 Task 1: 变量唯一真源 = SaveProfile.variables（规范 §12，杀 #1 静默丢弃 + #33 双轨）
+  // 寄生快照路径已删——快照恢复时 variables 随 saveProfile 深拷贝整体回滚（M5 Task 2/3）。
 
-  /** 获取当前变量快照 */
+  /** 获取当前变量（真源: SaveProfile.variables） */
   private async getCurrentVariables(): Promise<Record<string, any>> {
-    const snapshot = await getLatestSnapshot(this.saveId);
-    if (snapshot?.variables) return snapshot.variables;
-    return {};
+    const { getProfile } = await import('./save-profile');
+    const profile = await getProfile(this.saveId);
+    return profile.variables ?? {};
   }
 
-  /** 持久化变量到当前快照 */
+  /** 持久化变量到 SaveProfile */
   private async persistVariables(variables: Record<string, any>): Promise<void> {
-    const snapshot = await getLatestSnapshot(this.saveId);
-    if (snapshot) {
-      snapshot.variables = variables;
-      await saveSnapshot(snapshot);
-    }
+    const { getProfile, updateProfile } = await import('./save-profile');
+    const profile = await getProfile(this.saveId);
+    profile.variables = variables;
+    await updateProfile(profile);
   }
 
   private async applyUpdateCharacter(patch: StatePatch): Promise<GameEvent> {
@@ -1177,34 +1149,117 @@ export class StateManager {
     };
   }
 
-  // ========== 快照 ==========
+  // ========== 快照 (M5 规范 §11.2: 打快照 = 整份深拷贝) ==========
 
-  private async createAutoSnapshot(): Promise<string> {
-    const snapshots = await getSnapshots(this.saveId);
-    const nextIndex = snapshots.length > 0
-      ? Math.max(...snapshots.map(s => s.index)) + 1
-      : 0;
+  /**
+   * 打快照 — characters + saveProfile 整份深拷贝落 snapshots 表
+   *
+   * - 变量/任务/时间/好感随 saveProfile 深拷贝随行（不再单独寄生存 variables，杀 #2 双轨）
+   * - save.activeSnapshotId 指向新快照
+   * - 超上限滚动删除最旧（上限读 settings.maxSnapshotsPerSave，缺省 30 — 杀 #28 私藏常量）
+   *
+   * @param reason 触发原因: turn=每轮一拍 / manual=手动 / pre-combat=战斗前
+   * @param turn   对话回合游标（恢复时截断 messages 用）
+   */
+  async createSnapshot(reason: Snapshot['reason'], turn: number): Promise<Snapshot> {
+    const { getProfile } = await import('./save-profile');
+    const characters = await getCharacters(this.saveId);
+    const profile = await getProfile(this.saveId);
 
-    const snapshot = {
+    const snapshot: Snapshot = {
       id: crypto.randomUUID(),
       saveId: this.saveId,
-      index: nextIndex,
-      timestamp: Date.now(),
-      gameTime: new Date().toISOString(),
-      variables: {},
-      characters: [],
-      plotEvents: [],
-      memoryIds: [],
-      turnNumber: this.patchCount,
-      label: `auto_${nextIndex}`,
+      createdAt: Date.now(),
+      reason,
+      turn,
+      characters: structuredClone(characters),
+      saveProfile: structuredClone(profile),
     };
 
     await saveSnapshot(snapshot);
 
-    // 清理超限快照
-    await trimSnapshots(this.saveId, this.maxSnapshots);
+    // activeSnapshotId 指向最新快照
+    const save = await getSave(this.saveId);
+    if (save) {
+      save.activeSnapshotId = snapshot.id;
+      await saveSaveSlot(save);
+    }
 
-    return snapshot.id;
+    // 滚动上限（读 settings，缺省 30）
+    const maxSnapshots = (await getSettings())?.maxSnapshotsPerSave ?? 30;
+    await trimSnapshots(this.saveId, maxSnapshots);
+
+    return snapshot;
+  }
+
+  /**
+   * 回合推进 — GamePipeline 每轮管线成功后调用 (M5 Task 4, 杀 #27)
+   *
+   * totalTurns 语义 = 已完成的对话回合数（每轮管线恰 +1，不再随每次 commit 虚高），
+   * 随后打一张 reason='turn' 的回合快照（turn = 新回合数，恢复时按此截断消息）。
+   */
+  async advanceTurn(): Promise<void> {
+    let newTotalTurns = 1;
+    const save = await getSave(this.saveId);
+    if (save) {
+      newTotalTurns = (save.metadata.totalTurns ?? 0) + 1;
+      save.metadata.totalTurns = newTotalTurns;
+      await saveSaveSlot(save);
+    }
+    await this.createSnapshot('turn', newTotalTurns);
+  }
+
+  /**
+   * 恢复快照 — 整体覆写 + 对话回滚 (M5 规范 §11.2, #2 恢复死路径根治)
+   *
+   * ① 按 id 读快照 + saveId 校验（防跨档恢复）
+   * ② characters: 当前存档全删后重写快照副本（整体覆写语义 — 快照后新增的角色一并消失）
+   * ③ saveProfile 覆写（任务/时间/好感/变量随行回滚）
+   * ④ deleteMessagesAfterTurn(saveId, snapshot.turn) — 对话截断回滚 (#49 复合索引启用)
+   * ⑤ save.activeSnapshotId 指向该快照
+   * ⑥ 任何失败进 errors[]（返回 StateCommitResult，与 commitChatState 口径一致）
+   */
+  async restoreSnapshot(snapshotId: string): Promise<StateCommitResult> {
+    const errors: string[] = [];
+    try {
+      // ① 读快照 + 防跨档校验
+      const snapshot = await getSnapshot(snapshotId);
+      if (!snapshot) throw new Error(`快照不存在: ${snapshotId}`);
+      if (snapshot.saveId !== this.saveId) {
+        throw new Error(`快照不属于当前存档: ${snapshot.saveId}（当前 ${this.saveId}）`);
+      }
+
+      // ② characters 整体覆写: 全删 → 写入快照副本
+      //    structuredClone 防库内对象与快照对象引用共享（快照需保持不可变，可重复恢复）
+      const current = await getCharacters(this.saveId);
+      for (const c of current) {
+        await deleteCharacter(c.id);
+      }
+      await saveCharacters(structuredClone(snapshot.characters));
+
+      // ③ saveProfile 覆写（变量/任务/时间/好感随行回滚）
+      const { updateProfile } = await import('./save-profile');
+      await updateProfile(structuredClone(snapshot.saveProfile));
+
+      // ④ 对话回滚: 删除快照 turn 之后的消息
+      await deleteMessagesAfterTurn(this.saveId, snapshot.turn);
+
+      // ⑤ activeSnapshotId 指向
+      const save = await getSave(this.saveId);
+      if (save) {
+        save.activeSnapshotId = snapshot.id;
+        await saveSaveSlot(save);
+      }
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : String(err));
+    }
+
+    return {
+      success: errors.length === 0,
+      patchesApplied: 0,
+      eventsGenerated: [],
+      errors,
+    };
   }
 
   // ═══════════════════════════════════════════════════════════

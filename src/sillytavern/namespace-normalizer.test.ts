@@ -38,6 +38,11 @@ describe('FLAT_TO_ENGINE mapping table', () => {
     expect(FLAT_TO_ENGINE['stat_data.命运点数']).toBe('sys.fp');
     expect(FLAT_TO_ENGINE['stat_data.任务列表']).toBe('sys.quests');
   });
+
+  it('M5: 新闻/关系列表 专用映射已退役（#16 #44 — 新闻走 add_news，好感走 affections op）', () => {
+    expect(FLAT_TO_ENGINE['stat_data.新闻']).toBeUndefined();
+    expect(FLAT_TO_ENGINE['stat_data.关系列表']).toBeUndefined();
+  });
 });
 
 // ========== flatToEngine ==========

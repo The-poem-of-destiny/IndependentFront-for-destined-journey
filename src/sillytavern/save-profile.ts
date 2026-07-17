@@ -12,7 +12,11 @@ import { getSaveProfile, saveSaveProfile, createDefaultSaveProfile } from './dat
 
 export async function getProfile(saveId: string): Promise<SaveProfile> {
   const existing = await getSaveProfile(saveId);
-  if (existing) return existing;
+  if (existing) {
+    // M5: 存量记录归一化 — M1 加的 variables 字段在旧 profile 上可能缺失（M1 终审备忘履约）
+    if (existing.variables === undefined) existing.variables = {};
+    return existing;
+  }
   const created = createDefaultSaveProfile(saveId);
   await saveSaveProfile(created);
   return created;

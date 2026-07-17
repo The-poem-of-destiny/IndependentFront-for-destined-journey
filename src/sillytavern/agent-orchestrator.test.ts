@@ -1015,6 +1015,141 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
   });
 });
 
+// ========== Stage 3 vars_update <json> affections 解析 (M5 #15 #44) ==========
+
+describe('AgentOrchestrator — Stage3 affections 解析', () => {
+  beforeEach(() => {
+    commitChatStateMock.mockClear();
+    commitChatStateMock.mockImplementation(async (patches: any[]) => ({
+      success: true, patchesApplied: patches.length, eventsGenerated: [], errors: [],
+    }));
+  });
+
+  it('affections.set → set_affection patch（target=affections.角色名, value 直传）', async () => {
+    const patches = await runVarsUpdateWithJson({
+      affections: { set: [{ name: '雷娜', value: 50 }], delta: [] },
+    });
+    const p = patches.find(x => x.op === 'set_affection');
+    expect(p).toBeDefined();
+    expect(p.target).toBe('affections.雷娜');
+    expect(p.value).toBe(50);
+    expect(p.metadata?.source).toBe('vars_update');
+  });
+
+  it('affections.delta → delta_affection patch（amount 直传）', async () => {
+    const patches = await runVarsUpdateWithJson({
+      affections: { set: [], delta: [{ name: '汉斯', amount: 5 }] },
+    });
+    const p = patches.find(x => x.op === 'delta_affection');
+    expect(p).toBeDefined();
+    expect(p.target).toBe('affections.汉斯');
+    expect(p.amount).toBe(5);
+    expect(p.metadata?.source).toBe('vars_update');
+  });
+
+  it('affections 条目缺 name → 跳过不产 patch（M4 名字寻址纪律对齐）', async () => {
+    const patches = await runVarsUpdateWithJson({
+      affections: { set: [{ value: 30 }], delta: [{ amount: -10 }] },
+    });
+    expect(patches.filter(x => x.op === 'set_affection' || x.op === 'delta_affection')).toHaveLength(0);
+  });
+
+  it('affections 与 characters/items 同批提交（同一 patches batch）', async () => {
+    const patches = await runVarsUpdateWithJson({
+      characters: { replace: [{ name: 'c1', path: 'hp', value: 42 }], delta: [], add: [], remove: [] },
+      affections: { set: [{ name: '雷娜', value: 20 }], delta: [] },
+    });
+    expect(patches.some(x => x.op === 'set_hp')).toBe(true);
+    expect(patches.some(x => x.op === 'set_affection')).toBe(true);
+  });
+});
+
+// ========== Stage 2 request_dispatcher <json> 世界新闻 → add_news (M5 #16) ==========
+
+/** 跑一个单 stage request_dispatcher 管线，返回 commitChatState 收到的全部 patches */
+async function runDispatcherWithJson(
+  json: object,
+  events: Record<string, any> = {},
+): Promise<any[]> {
+  globalThis.fetch = mockFetch(varsJsonOutput(json));
+  const orch = new AgentOrchestrator(
+    {
+      pipeline: makeSimplePipeline(['request_dispatcher']),
+      context: makeContext(),
+      agentConfigs: [makeAgentConfig({ agentId: 'request_dispatcher' })],
+      endpoints: [makeEndpoint()],
+      saveId: 'save_1',
+    },
+    events,
+  );
+  await orch.run();
+  return commitChatStateMock.mock.calls.flatMap(c => c[0]);
+}
+
+describe('AgentOrchestrator — Stage2 世界新闻 → add_news', () => {
+  beforeEach(() => {
+    commitChatStateMock.mockClear();
+    commitChatStateMock.mockImplementation(async (patches: any[]) => ({
+      success: true, patchesApplied: patches.length, eventsGenerated: [], errors: [],
+    }));
+  });
+
+  it('replace path=世界新闻(字符串值) → add_news patch，不再产 set_variable 世界新闻', async () => {
+    const patches = await runDispatcherWithJson({
+      delta_time: 30,
+      replace: [
+        { path: '天气', value: '小雨' },
+        { path: '世界新闻', value: '帝国边境爆发兽潮，北境商路中断。' },
+      ],
+    });
+    const news = patches.find(x => x.op === 'add_news');
+    expect(news).toBeDefined();
+    expect(news.value.content).toBe('帝国边境爆发兽潮，北境商路中断。');
+    expect(typeof news.value.title).toBe('string');
+    expect(news.value.title.length).toBeGreaterThan(0);
+    expect(news.metadata?.source).toBe('request_dispatcher');
+    // 世界新闻不再走 set_variable 双轨（#16 退役）
+    expect(patches.some(x => x.op === 'set_variable' && String(x.target).includes('世界新闻'))).toBe(false);
+    // 其他全局变量（天气）不受影响
+    const weather = patches.find(x => x.op === 'set_variable');
+    expect(weather).toBeDefined();
+    expect(weather.target).toBe('variables.天气');
+  });
+
+  it('insert path=世界新闻(对象值) → add_news 直用 title/content/category，不产 insert_variable', async () => {
+    const patches = await runDispatcherWithJson({
+      delta_time: 10,
+      insert: [{ path: '世界新闻', value: { title: '兽潮警报', content: '北境商路因兽潮中断', category: '军事' } }],
+    });
+    const news = patches.find(x => x.op === 'add_news');
+    expect(news).toBeDefined();
+    expect(news.value).toEqual({ title: '兽潮警报', content: '北境商路因兽潮中断', category: '军事' });
+    expect(patches.some(x => x.op === 'insert_variable')).toBe(false);
+  });
+
+  it('世界新闻值为数组 → 逐条产 add_news', async () => {
+    const patches = await runDispatcherWithJson({
+      delta_time: 5,
+      replace: [{ path: '世界新闻', value: ['帝都举行丰收祭。', { title: '王室公告', content: '王储将巡视北境' }] }],
+    });
+    const newsPatches = patches.filter(x => x.op === 'add_news');
+    expect(newsPatches).toHaveLength(2);
+    expect(newsPatches[0].value.content).toBe('帝都举行丰收祭。');
+    expect(newsPatches[1].value).toEqual({ title: '王室公告', content: '王储将巡视北境' });
+    expect(patches.some(x => x.op === 'set_variable')).toBe(false);
+  });
+
+  it('世界新闻值为空串/null → 跳过不产 patch 也不落变量', async () => {
+    const patches = await runDispatcherWithJson({
+      delta_time: 5,
+      replace: [{ path: '世界新闻', value: '' }],
+      insert: [{ path: '世界新闻', value: null }],
+    });
+    expect(patches.filter(x => x.op === 'add_news')).toHaveLength(0);
+    expect(patches.some(x => String(x.target ?? '').includes('世界新闻'))).toBe(false);
+  });
+});
+
 // ========== onStateCommitError 上浮 ==========
 
 describe('AgentOrchestrator — onStateCommitError 上浮', () => {

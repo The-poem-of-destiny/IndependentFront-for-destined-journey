@@ -349,7 +349,16 @@ interface Snapshot {
 > **代码侧**: ⑥ resolveCharacter UUID 兜底删除（解析收敛为: 名字精确匹配 → 主角/玩家别名 → throw 角色不存在；getCharacter 依赖清除；remove/rename_character 跨存档守卫随兜底拆除转死路径同批移除）⑦ agent-orchestrator Stage3 characters.replace/delta/add/remove 四处 `key = name ?? id` 过渡读删除（实际四处非规划六处，dispatcher 侧无此形态；缺 name warn+跳过），equipment 分支 `?? value.itemId` 过渡读同批拆除 ⑧ agent-templates.ts fixedExamples 的 player_1→理查德（id→name）+ char_gen variableInstruction 的 char_detect→char_gen_request 措辞 ⑨ agent-tools.ts 脚本路径教学 `char.player_1.hp`→`char.player.hp`（对齐 namespace-normalizer 真实映射）。
 > **测试**: state-manager.test 37 处按 id mock 改按名寻址，3 个兜底用例改负向断言（id 寻址必报 角色不存在）；orchestrator.test 数据 id→name 键 + id-only 条目全跳过回归用例。typecheck 0 错误，2754/2755 通过（仅既有 create-store 命定之灵 1 失败）。
 > **文档**: agent_tools_reference（player_1 示例 + char_detect 废除标注 + 流程图）、agent预期分析（顶部 M4 契约同步注记 + 1/2 节历史标注）同步。
-> **M5 待接线登记**: vars_update prompt 已教 affections 输出形状，但 orchestrator 尚无 `parsed.affections` 翻译 handler（M5 Task 5 接线，勿在 M5 前误判为 bug）。
+> **M5 待接线登记**: vars_update prompt 已教 affections 输出形状，但 orchestrator 尚无 `parsed.affections` 翻译 handler（M5 Task 5 接线，勿在 M5 前误判为 bug）。→ ✅ M5 已接线。
+>
+> **M5 执行注记（2026-07-17）**: SSOT（铁律4）全面落地，13 项问题收口。
+> **① 变量迁家（#1 #33）**: 变量唯一真源迁入 `SaveProfile.variables`——state-manager getCurrentVariables/persistVariables 从"读写最新快照"改为读写 profile，寄生快照路径全删，**无快照时写入不再静默丢弃**；getProfile 加载归一化 `variables ??= {}`（M1 终审备忘履约）。注: 无前缀路径默认归 sys 命名空间（var-resolver parseVarPath 既有语义）。
+> **② Snapshot 重定义（#2 写侧 #28）**: Snapshot 接口整体替换为 §11.2 形态 `{id, saveId, createdAt, reason: 'turn'|'manual'|'pre-combat', turn, characters, saveProfile}`（旧 index/timestamp/variables/messageIds/memoryIds/plotEvents/gameTime 全删）；`createSnapshot(reason, turn)` = getCharacters+getProfile 各 structuredClone 整份深拷贝落表 + activeSnapshotId 指向 + trimSnapshots 上限读 `settings.maxSnapshotsPerSave ?? 30`；StateManager 的 patchCount%N 自动快照与 maxSnapshots/autoSnapshot/autoSnapshotInterval 配置字段全删（StateManagerConfig 缩为 {saveId}）；Dexie v10: snapshots schema `'id, saveId, createdAt'` + upgrade clear 旧快照。
+> **③ restoreSnapshot（#2 恢复侧 #49）**: 按 id 读快照 + saveId 防跨档 → characters 全删后整体覆写（快照后新增 NPC 消失）→ saveProfile 覆写（variables/quests/affections/news 随行回滚）→ `deleteMessagesAfterTurn(saveId, turn)` 对话截断（启用 `[saveId+turn]` 死复合索引，边界 turn 保留）→ activeSnapshotId 更新；含 fake-indexeddb 全链路集成测试。
+> **④ 每轮一拍（#27）**: commitChatState 的 totalTurns+1 删除（每 commit 虚高根治）；新增 `advanceTurn()` = totalTurns+1 + createSnapshot('turn', 新回合数)，由 GamePipeline.run() 成功路径调用（try/catch 不阻塞）；HomePage 的 `Lv.{{totalTurns}}` 误用改为 `第 N 回合`。
+> **⑤ 新闻/好感接线（#15 #16 #44）**: dispatcher 无专用 news 键——新闻实为 replace/insert 的 `世界新闻` 变量路径，翻译层拦截（isWorldNewsPath）转产 add_news（字符串→首句 title/对象→title/content 互备/数组→逐条/空值→warn 丢弃），从变量循环排除；vars_update 的 `parsed.affections.set/delta` → set/delta_affection patch（M4 教学项闭环，好感度恒 0 根治）；namespace-normalizer 的 sys.news/sys.relationships 映射退役（旧存档残留变量不迁移，接受陈旧）。
+> **⑥ 杂修四连（#14 #31 #42）**: weekday 双约定混用根治（parse 用 ISO 序、format 用 WEEKDAY_NAMES 序）——统一 1=周日…7=周六 对齐现有消费方，parse 侧从 WEEKDAY_NAMES.indexOf()+1 推导结构性杜绝漂移，约定写死在常量注释；QuestsPanel focusQuest 双向 watch 回写 profile（JSON 克隆过 Dexie）；test-save gameStartTime 改现实 ISO；SaveSlot 注释指向 AppSettings.maxSnapshotsPerSave。
+> **SSOT 总表状态**: 变量→SaveProfile.variables ✅ / 快照→snapshots 表（打=深拷贝/恢复=覆写+回滚）✅ / 新闻→profile.news ✅ / 好感→profile.affections ✅ 全部单源。测试: typecheck 0 错误，2777/2778 通过（仅既有 create-store 命定之灵 1 失败）。
 
 ## 附录 B 现状偏差清单
 

@@ -1,12 +1,32 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useGameStore } from '../../stores/game-store'
+import { updateProfile } from '@engine/save-profile'
 
 const game = useGameStore()
 
 const activeFilter = ref('全部')
 const focusQuest = ref(game.saveProfile?.focusQuest || '')
 const inspectQuest = ref<string | null>(null)
+
+// #14: 焦点任务选择回写 SaveProfile 持久化（此前仅存于本地 ref，刷新即丢）。
+// 先改内存 reactive（其他面板即时可见），再 JSON 克隆落库
+// （Dexie 结构化克隆吃不下 Vue Proxy，同 game-store.markOpeningPromptConsumed 的做法）。
+watch(focusQuest, async (v) => {
+  const profile = game.saveProfile
+  if (!profile || profile.focusQuest === v) return
+  profile.focusQuest = v
+  try {
+    await updateProfile(JSON.parse(JSON.stringify(profile)))
+  } catch (err) {
+    console.error('[QuestsPanel] focusQuest 持久化失败:', err)
+  }
+})
+
+// profile 整体被替换（loadSave / refreshFromDb）时，从档案回填选择，避免面板存活期间脱钩
+watch(() => game.saveProfile?.focusQuest, (v) => {
+  if (v !== undefined && v !== focusQuest.value) focusQuest.value = v
+})
 
 const inspected = computed(() => {
   if (!inspectQuest.value) return null

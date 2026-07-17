@@ -122,6 +122,15 @@ export class GamePipeline {
 
       // 4. 运行管线
       await this.orch.run()
+
+      // 5. 回合推进（M5 每轮一拍）: totalTurns +1 + 打 reason='turn' 快照。
+      //    放在 finally 的 refreshFromDb 之前，Pinia 能立即读到新 totalTurns/activeSnapshotId。
+      try {
+        await createStateManager(this.saveId).advanceTurn()
+      } catch (err) {
+        console.warn('[GamePipeline] advanceTurn 失败（不阻塞本轮）:', err)
+      }
+
       return true
     } catch (err) {
       // Abort 错误不视为真正的失败

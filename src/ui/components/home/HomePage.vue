@@ -242,7 +242,8 @@ function formatTime(ts: number) {
                     <div class="save-info">
                       <span class="save-name">{{ save.name || '未命名存档' }}</span>
                       <span class="save-meta text-muted">
-                        {{ save.metadata?.characterName || '未知角色' }} · Lv.{{ save.metadata?.totalTurns || '?' }}
+                        <!-- M5 #27 语义修正: totalTurns 是对话回合数（每轮管线 +1），不是等级 -->
+                        {{ save.metadata?.characterName || '未知角色' }} · 第 {{ save.metadata?.totalTurns ?? 0 }} 回合
                       </span>
                       <span class="save-meta text-muted text-xs">{{ formatTime(save.updatedAt) }}</span>
                     </div>

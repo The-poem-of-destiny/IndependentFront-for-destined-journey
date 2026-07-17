@@ -16,7 +16,7 @@ export interface GameTime {
   year: number;              // 1-based
   month: number;             // 1-12
   day: number;               // 1-30 (统一每月30天)
-  weekday: number;           // 1-7
+  weekday: number;           // 1-7 (1=周日 … 7=周六，对齐 WEEKDAY_NAMES[weekday-1]，见常量注释)
   hour: number;              // 0-23
   minute: number;            // 0-59
 }
@@ -27,7 +27,12 @@ export const MONTH_NAMES = [
   '七月', '八月', '九月', '十月', '十一月', '十二月',
 ] as const;
 
-/** 星期名 */
+/**
+ * 星期名 — weekday 数值约定（写死，#31）:
+ * weekday 1-7 与本数组下标对齐，即 weekday=1 → WEEKDAY_NAMES[0]='周日' … weekday=7 → WEEKDAY_NAMES[6]='周六'。
+ * parseGameTime / formatGameTime 均以 `WEEKDAY_NAMES[weekday-1]` 为唯一映射，
+ * 禁止再引入 1=周一…7=周日 的 ISO 序（曾导致 parse(format(t)) 往返漂移: 周日→7→'周六'）。
+ */
 export const WEEKDAY_NAMES = [
   '周日', '周一', '周二', '周三', '周四', '周五', '周六',
 ] as const;
@@ -64,17 +69,16 @@ export function parseGameTime(timeStr: string): GameTime | null {
   const match = timeStr.match(regex);
   if (!match) return null;
 
-  const weekdayMap: Record<string, number> = {
-    '周一': 1, '周二': 2, '周三': 3, '周四': 4,
-    '周五': 5, '周六': 6, '周日': 7,
-  };
+  // #31: 名字 → 数值映射直接从 WEEKDAY_NAMES 推导（1=周日 … 7=周六），
+  // 与 formatGameTime 的 WEEKDAY_NAMES[weekday-1] 结构性对齐，杜绝双约定漂移。
+  const weekdayIdx = WEEKDAY_NAMES.indexOf(match[5] as (typeof WEEKDAY_NAMES)[number]);
 
   return {
     era: match[1],
     year: parseInt(match[2], 10),
     month: parseInt(match[3], 10),
     day: parseInt(match[4], 10),
-    weekday: weekdayMap[match[5]] ?? 7,
+    weekday: weekdayIdx >= 0 ? weekdayIdx + 1 : 1,
     hour: parseInt(match[6], 10),
     minute: parseInt(match[7], 10),
   };

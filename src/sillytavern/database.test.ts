@@ -53,6 +53,7 @@ import {
   saveMessages,
   getMessages,
   deleteMessagesBySaveId,
+  deleteMessagesAfterTurn,
 } from './database';
 import type {
   ChatMessage,
@@ -65,6 +66,8 @@ import type {
   AppSettings,
 } from './types';
 import { createDefaultCharacterState } from './types';
+import { createDefaultSaveProfile } from './database';
+import { createStateManager } from './state-manager';
 
 // ========== Helpers ==========
 
@@ -112,17 +115,15 @@ function makeCharacter(overrides: Partial<CharacterState> = {}): CharacterState 
 }
 
 function makeSnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
+  // M5 规范 §11.2: 快照 = characters + saveProfile 整份深拷贝
   return {
     id: crypto.randomUUID(),
     saveId: 'save_test',
-    index: 0,
-    timestamp: Date.now(),
-    gameTime: '001-01-01-12:00',
-    variables: { HP: 100, MP: 50 },
+    createdAt: Date.now(),
+    reason: 'turn',
+    turn: 1,
     characters: [],
-    plotEvents: [],
-    memoryIds: [],
-    turnNumber: 1,
+    saveProfile: createDefaultSaveProfile('save_test'),
     ...overrides,
   };
 }
@@ -389,22 +390,22 @@ describe('Snapshots CRUD', () => {
     expect(id).toBe(s.id);
   });
 
-  it('getSnapshots 应按 index 排序', async () => {
-    await saveSnapshot(makeSnapshot({ id: 's0', index: 0 }));
-    await saveSnapshot(makeSnapshot({ id: 's1', index: 1 }));
-    await saveSnapshot(makeSnapshot({ id: 's2', index: 2 }));
+  it('getSnapshots 应按 createdAt 升序排序', async () => {
+    await saveSnapshot(makeSnapshot({ id: 's1', createdAt: 2000 }));
+    await saveSnapshot(makeSnapshot({ id: 's0', createdAt: 1000 }));
+    await saveSnapshot(makeSnapshot({ id: 's2', createdAt: 3000 }));
 
     const all = await getSnapshots('save_test');
-    expect(all.map(s => s.index)).toEqual([0, 1, 2]);
+    expect(all.map(s => s.id)).toEqual(['s0', 's1', 's2']);
   });
 
-  it('getLatestSnapshot 应返回 index 最大的快照', async () => {
-    await saveSnapshot(makeSnapshot({ id: 's0', index: 0 }));
-    await saveSnapshot(makeSnapshot({ id: 's5', index: 5 }));
+  it('getLatestSnapshot 应返回 createdAt 最大的快照', async () => {
+    await saveSnapshot(makeSnapshot({ id: 's0', createdAt: 1000 }));
+    await saveSnapshot(makeSnapshot({ id: 's5', createdAt: 5000 }));
 
     const latest = await getLatestSnapshot('save_test');
     expect(latest).toBeDefined();
-    expect(latest!.index).toBe(5);
+    expect(latest!.id).toBe('s5');
   });
 
   it('getLatestSnapshot 无快照时返回 undefined', async () => {
@@ -412,25 +413,38 @@ describe('Snapshots CRUD', () => {
     expect(latest).toBeUndefined();
   });
 
-  it('trimSnapshots 应删除超出上限的旧快照', async () => {
+  it('trimSnapshots 应按 createdAt 删除超出上限的旧快照（保留最新 N 个）', async () => {
     for (let i = 0; i < 10; i++) {
-      await saveSnapshot(makeSnapshot({ id: `s${i}`, index: i }));
+      await saveSnapshot(makeSnapshot({ id: `s${i}`, createdAt: 1000 + i }));
     }
 
     await trimSnapshots('save_test', 5);
     const remaining = await getSnapshots('save_test');
     expect(remaining).toHaveLength(5);
-    // 应保留最新的 5 个 (index 5-9)
-    const indices = remaining.map(s => s.index).sort();
-    expect(indices).toEqual([5, 6, 7, 8, 9]);
+    // 应保留 createdAt 最新的 5 个 (s5-s9)
+    expect(remaining.map(s => s.id).sort()).toEqual(['s5', 's6', 's7', 's8', 's9']);
   });
 
   it('trimSnapshots 数量不超上限时不过删除', async () => {
     for (let i = 0; i < 3; i++) {
-      await saveSnapshot(makeSnapshot({ id: `s${i}`, index: i }));
+      await saveSnapshot(makeSnapshot({ id: `s${i}`, createdAt: 1000 + i }));
     }
     await trimSnapshots('save_test', 10);
     expect(await getSnapshots('save_test')).toHaveLength(3);
+  });
+
+  it('快照 characters/saveProfile 整份落库可读回（M5 §11.2）', async () => {
+    const hero = createDefaultCharacterState({ id: 'h1', name: '主角', saveId: 'save_test', hp: 77 });
+    const profile = createDefaultSaveProfile('save_test');
+    profile.fp = 9;
+    profile.variables = { sys: { 进度: '第二章' } };
+    await saveSnapshot(makeSnapshot({ id: 'snap_full', characters: [hero], saveProfile: profile }));
+
+    const loaded = await getSnapshot('snap_full');
+    expect(loaded).toBeDefined();
+    expect(loaded!.characters[0].hp).toBe(77);
+    expect(loaded!.saveProfile.fp).toBe(9);
+    expect(loaded!.saveProfile.variables).toEqual({ sys: { 进度: '第二章' } });
   });
 });
 
@@ -534,7 +548,7 @@ describe('exportAllData / importAllData', () => {
     await saveApiEndpoint(makeApiEndpoint({ id: 'exp_api' }));
 
     const backup = await exportAllData();
-    expect(backup.version).toBe(9);
+    expect(backup.version).toBe(10);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -725,5 +739,101 @@ describe('v9: characters saveId 一等索引', () => {
     await saveCharacter(c);
     const got = await getCharacters('save_A');
     expect(got.find(x => x.id === 'cc')).toBeUndefined();
+  });
+});
+
+// ========== deleteMessagesAfterTurn (M5 #49 复合索引启用) ==========
+
+describe('deleteMessagesAfterTurn — [saveId+turn] 复合索引 (M5 #49)', () => {
+  const SID = 'save_turncut';
+  function mk(id: string, turn: number, saveId = SID): ChatMessage {
+    return { id, role: 'assistant', content: id, timestamp: turn, saveId, turn };
+  }
+
+  it('删除 turn 大于给定值的消息，边界 turn 本身保留', async () => {
+    await saveMessages([mk('t1', 1), mk('t2a', 2), mk('t2b', 2), mk('t3', 3), mk('t4', 4)]);
+    await deleteMessagesAfterTurn(SID, 2);
+    const rest = await getMessages(SID);
+    expect(rest.map(m => m.id).sort()).toEqual(['t1', 't2a', 't2b']);
+  });
+
+  it('不同存档的消息不受影响', async () => {
+    await saveMessages([mk('a3', 3), mk('other3', 3, 'save_other')]);
+    await deleteMessagesAfterTurn(SID, 0);
+    expect(await getMessages(SID)).toHaveLength(0);
+    const other = await getMessages('save_other');
+    expect(other.map(m => m.id)).toEqual(['other3']);
+  });
+});
+
+// ========== restoreSnapshot 集成 (M5 Task 3: 覆写 + 对话回滚) ==========
+
+describe('restoreSnapshot 集成 — 真实 DB (M5 §11.2)', () => {
+  it('restoreSnapshot: 状态覆写 + 对话回滚到快照 turn', async () => {
+    const saveId = 'save_restore';
+    await saveSaveSlot(makeSaveSlot({ id: saveId }));
+
+    // 角色 hp=80 + profile fp=5 + 变量第一章
+    const hero = createDefaultCharacterState({ id: 'hero-1', name: '主角', type: 'player', saveId, hp: 80, maxHp: 100 });
+    await saveCharacter(hero);
+    const { getProfile, updateProfile } = await import('./save-profile');
+    const p1 = await getProfile(saveId);
+    p1.fp = 5;
+    p1.variables = { sys: { 进度: '第一章' } };
+    await updateProfile(p1);
+
+    // 造 3 轮对话消息(turn 1/2/3)，前两轮在快照前
+    const mkMsg = (id: string, turn: number, content: string): ChatMessage =>
+      ({ id, role: 'user', content, timestamp: turn, saveId, turn });
+    await saveMessage(mkMsg('m1', 1, '第一轮'));
+    await saveMessage(mkMsg('m2', 2, '第二轮'));
+
+    // turn2 时打快照(角色 hp=80, fp=5)
+    const sm = createStateManager(saveId);
+    const snap = await sm.createSnapshot('turn', 2);
+
+    // → turn3 后: 角色 hp=30、fp=9、变量第三章、新增消息、新增 NPC
+    hero.hp = 30;
+    await saveCharacter(hero);
+    await saveCharacter(createDefaultCharacterState({ id: 'npc-late', name: '路人', type: 'npc', saveId }));
+    const p2 = await getProfile(saveId);
+    p2.fp = 9;
+    p2.variables = { sys: { 进度: '第三章' } };
+    await updateProfile(p2);
+    await saveMessage(mkMsg('m3', 3, '第三轮'));
+
+    // → restoreSnapshot
+    const result = await sm.restoreSnapshot(snap.id);
+    expect(result.success).toBe(true);
+    expect(result.errors).toEqual([]);
+
+    // 断言: hp 回 80 + 整体覆写（快照后加入的 NPC 消失）
+    const chars = await getCharacters(saveId);
+    expect(chars).toHaveLength(1);
+    expect(chars[0].id).toBe('hero-1');
+    expect(chars[0].hp).toBe(80);
+
+    // fp 回 5、variables 随 profile 回滚
+    const restored = await getProfile(saveId);
+    expect(restored.fp).toBe(5);
+    expect(restored.variables).toEqual({ sys: { 进度: '第一章' } });
+
+    // turn3 消息已删、turn1/2 消息还在
+    const msgs = await getMessages(saveId);
+    expect(msgs.map(m => m.id).sort()).toEqual(['m1', 'm2']);
+
+    // activeSnapshotId 指向该快照
+    const slot = await getSave(saveId);
+    expect(slot?.activeSnapshotId).toBe(snap.id);
+  });
+
+  it('跨存档快照恢复被拒: snapshot.saveId ≠ 当前 saveId → errors[]', async () => {
+    await saveSaveSlot(makeSaveSlot({ id: 'save_a', slot: 0 }));
+    await saveSaveSlot(makeSaveSlot({ id: 'save_b', slot: 1 }));
+    const snapA = await createStateManager('save_a').createSnapshot('manual', 1);
+
+    const result = await createStateManager('save_b').restoreSnapshot(snapA.id);
+    expect(result.success).toBe(false);
+    expect(result.errors[0]).toContain('不属于当前存档');
   });
 });

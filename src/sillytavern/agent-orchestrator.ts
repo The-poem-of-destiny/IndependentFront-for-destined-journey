@@ -696,6 +696,11 @@ export class AgentOrchestrator {
           const patches: import('./types').StatePatch[] = [];
 
           for (const r of (parsed.replace ?? [])) {
+            // M5: 世界新闻 → add_news（#16 双轨退役）— 不再写 variables.世界新闻，改落 profile.news
+            if (isWorldNewsPath(r.path)) {
+              patches.push(...buildNewsPatches(r.value, 'replace'));
+              continue;
+            }
             patches.push({
               op: 'set_variable',
               target: `variables.${r.path}`,
@@ -704,6 +709,11 @@ export class AgentOrchestrator {
             });
           }
           for (const ins of (parsed.insert ?? [])) {
+            // M5: 世界新闻 → add_news（#16 双轨退役）— insert 路径同样拦截
+            if (isWorldNewsPath(ins.path)) {
+              patches.push(...buildNewsPatches(ins.value, 'insert'));
+              continue;
+            }
             patches.push({
               op: 'insert_variable',
               target: `variables.${ins.path}`,
@@ -928,6 +938,17 @@ export class AgentOrchestrator {
             patches.push({ op: 'update_item', target: `characters.${m.owner}`, value: { name: m.target, changes }, metadata: { source: 'vars_update', operation: 'modify' } });
           }
 
+          // --- affections.set/delta → set_affection/delta_affection（M5: #15 #44 好感度接线，写 profile.affections） ---
+          // M4 prompt 教的键格式: {"affections":{"set":[{name,value}],"delta":[{name,amount}]}}
+          for (const s of (parsed.affections?.set ?? [])) {
+            if (!s.name) { console.warn('[Orchestrator] affections.set 条目缺 name，跳过'); continue; }
+            patches.push({ op: 'set_affection', target: `affections.${s.name}`, value: s.value, metadata: { source: 'vars_update' } });
+          }
+          for (const d of (parsed.affections?.delta ?? [])) {
+            if (!d.name) { console.warn('[Orchestrator] affections.delta 条目缺 name，跳过'); continue; }
+            patches.push({ op: 'delta_affection', target: `affections.${d.name}`, amount: d.amount, metadata: { source: 'vars_update' } });
+          }
+
           if (patches.length > 0) {
             const r = await sm.commitChatState(patches);
             this.reportCommitResult(r, patches.length, 'vars_update');
@@ -1066,6 +1087,65 @@ export class AgentOrchestrator {
   getStatus(): 'idle' | 'running' | 'completed' | 'failed' {
     return this.status;
   }
+}
+
+// ========== 世界新闻翻译 (M5 #16) ==========
+
+/** dispatcher <json> 的变量路径是否为世界新闻（含子路径，如 世界新闻.0） */
+function isWorldNewsPath(path: unknown): boolean {
+  return typeof path === 'string' && (path === '世界新闻' || path.startsWith('世界新闻.'));
+}
+
+/**
+ * 世界新闻值 → add_news StatePatch 列表（#16 双轨退役: 变量路径退役，唯一真源 profile.news）
+ *
+ * AI 只填叙事字段 {title(必), content(必), category?}（铁律3，id/publishedAt/read 由 Code 补）。
+ * 兼容 dispatcher 的三种输出形态:
+ * - 字符串 → 作 content，标题取首句截断，category 兜底 '世界'
+ * - 对象 {title?, content?, category?} → 直用，缺失侧互补
+ * - 数组 → 逐条按上述规则展开
+ * 空串/null/不可识别值 → 丢弃（不产 patch，也不落变量）。
+ */
+function buildNewsPatches(raw: unknown, operation: 'replace' | 'insert'): import('./types').StatePatch[] {
+  const items = Array.isArray(raw) ? raw : [raw];
+  const patches: import('./types').StatePatch[] = [];
+
+  for (const item of items) {
+    let title = '';
+    let content = '';
+    let category: string | undefined;
+
+    if (typeof item === 'string') {
+      content = item.trim();
+      category = '世界';
+    } else if (item && typeof item === 'object') {
+      const obj = item as Record<string, any>;
+      if (typeof obj.title === 'string') title = obj.title.trim();
+      if (typeof obj.content === 'string') content = obj.content.trim();
+      if (typeof obj.category === 'string' && obj.category) category = obj.category;
+    }
+
+    // title/content 互补（applyAddNews 两者必填）
+    if (!content && title) content = title;
+    if (!title && content) {
+      // 短标题: 取首句，截断 20 字
+      const firstSentence = content.split(/[。！？!?\n]/)[0] || content;
+      title = firstSentence.slice(0, 20);
+    }
+    if (!title || !content) {
+      console.warn('[Orchestrator] 世界新闻条目缺 title/content，跳过:', item);
+      continue;
+    }
+
+    patches.push({
+      op: 'add_news',
+      target: 'news',  // M2 约定: applyAddNews 落 profile.news，target 仅作标识
+      value: category ? { title, content, category } : { title, content },
+      metadata: { source: 'request_dispatcher', operation },
+    });
+  }
+
+  return patches;
 }
 
 // ========== 管线预设 ==========

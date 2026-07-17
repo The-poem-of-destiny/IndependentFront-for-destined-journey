@@ -25,7 +25,7 @@ export interface CreatePresetRecord {
 }
 
 const DB_NAME = 'SillyTavernWebDB';
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 
 class AppDatabase extends Dexie {
   // v1-v3 tables (chats 已于 v9 删除)
@@ -233,6 +233,26 @@ class AppDatabase extends Dexie {
           await tx.table('saveProfiles').put(p);
         }
       }
+    });
+
+    // v10: 数据字段规范 M5 — Snapshot 重定义（规范 §11.2）: 索引 index/timestamp → createdAt
+    this.version(10).stores({
+      lorebooks: 'id, name, updatedAt',
+      presets: 'id, name, updatedAt',
+      settings: 'key',
+      memories: 'id, saveId, createdAt, realTimestamp',
+      plotEvents: 'id, saveId, parentId, status, updatedAt',
+      characters: 'id, saveId, type',
+      snapshots: 'id, saveId, createdAt',
+      saves: 'id, slot, updatedAt',
+      apiEndpoints: 'id, name',
+      plotOutlines: 'id, saveId, updatedAt',
+      saveProfiles: 'saveId, updatedAt',
+      createPresets: 'id, name, updatedAt',
+      messages: 'id, saveId, [saveId+turn]',
+    }).upgrade(async tx => {
+      // 旧快照开发数据直接清弃（结构不兼容: index/timestamp/寄生 variables → reason/turn/整份深拷贝）
+      await tx.table('snapshots').clear();
     });
   }
 }
@@ -530,9 +550,10 @@ export async function deleteCharacter(id: string): Promise<void> {
 // --- Snapshots ---
 
 export async function getSnapshots(saveId: string): Promise<Snapshot[]> {
+  // M5: 按 createdAt 升序（旧 index 序号字段已随 §11.2 重定义删除）
   return getDatabase().snapshots
     .where('saveId').equals(saveId)
-    .sortBy('index');
+    .sortBy('createdAt');
 }
 
 export async function getSnapshot(id: string): Promise<Snapshot | undefined> {
@@ -543,7 +564,7 @@ export async function getLatestSnapshot(saveId: string): Promise<Snapshot | unde
   const snapshots = await getDatabase().snapshots
     .where('saveId').equals(saveId)
     .reverse()
-    .sortBy('index');
+    .sortBy('createdAt');
   return snapshots[0];
 }
 
@@ -556,12 +577,12 @@ export async function deleteSnapshot(id: string): Promise<void> {
   await getDatabase().snapshots.delete(id);
 }
 
-/** 删除超出上限的旧快照（保留最新的 maxCount 个） */
+/** 删除超出上限的旧快照（按 createdAt 保留最新的 maxCount 个） */
 export async function trimSnapshots(saveId: string, maxCount: number): Promise<void> {
   const snapshots = await getDatabase().snapshots
     .where('saveId').equals(saveId)
     .reverse()
-    .sortBy('index');
+    .sortBy('createdAt');
   if (snapshots.length > maxCount) {
     const toDelete = snapshots.slice(maxCount);
     await getDatabase().snapshots.bulkDelete(toDelete.map(s => s.id));
@@ -735,4 +756,18 @@ export async function getMessages(saveId: string): Promise<ChatMessage[]> {
 /** 按存档 ID 删除所有消息 */
 export async function deleteMessagesBySaveId(saveId: string): Promise<void> {
   await getDatabase().messages.where('saveId').equals(saveId).delete();
+}
+
+/**
+ * 删除指定存档中 turn 大于给定值的消息 — 快照恢复的对话回滚 (M5 §11.2, #49 复合索引启用)
+ *
+ * 使用 [saveId+turn] 复合索引做范围删除：下界 [saveId, turn] 开区间（保留 turn 及之前的消息），
+ * 上界 [saveId, Dexie.maxKey] 封住本存档（防越界扫到其他 saveId）。
+ * 注: turn 为 undefined 的遗留消息不在复合索引内，不受本删除影响。
+ */
+export async function deleteMessagesAfterTurn(saveId: string, turn: number): Promise<void> {
+  await getDatabase().messages
+    .where('[saveId+turn]')
+    .between([saveId, turn], [saveId, Dexie.maxKey], false, true)
+    .delete();
 }

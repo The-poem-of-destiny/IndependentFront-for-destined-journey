@@ -380,15 +380,24 @@ describe('SaveSlot metadata (Phase 10h)', () => {
   });
 });
 
-describe('Snapshot messageIds 预留 (Phase 10h)', () => {
-  it('Snapshot 应有可选的 messageIds 字段', () => {
+describe('Snapshot 重定义 (M5 规范 §11.2)', () => {
+  it('Snapshot = 整份深拷贝形态（reason/turn/characters/saveProfile）', () => {
     const snap: Snapshot = {
-      id: 'snap1', saveId: 's1', index: 0,
-      timestamp: Date.now(), gameTime: '春-1日',
-      variables: {}, characters: [], plotEvents: [],
-      memoryIds: [], turnNumber: 0,
-      messageIds: ['msg1', 'msg2'],
+      id: 'snap1',
+      saveId: 's1',
+      createdAt: Date.now(),
+      reason: 'turn',
+      turn: 3,
+      characters: [],
+      saveProfile: {
+        saveId: 's1', fp: 0, fpHistory: [], contracts: [], achievements: [],
+        news: [], quests: {}, focusQuest: '', affections: {},
+        gameTime: { era: '复兴纪元', year: 1, month: 1, day: 1, weekday: 1, hour: 8, minute: 0 },
+        variables: {}, worldFlags: {}, updatedAt: Date.now(),
+      },
     };
-    expect(snap.messageIds).toHaveLength(2);
+    expect(snap.reason).toBe('turn');
+    expect(snap.turn).toBe(3);
+    expect(snap.saveProfile.variables).toEqual({});
   });
 });

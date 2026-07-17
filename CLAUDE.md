@@ -270,13 +270,13 @@ src/sillytavern/                    ← 核心引擎（30+ 模块，含 Phase 1-
   ├── var-resolver.ts               ← [Phase 5] 变量命名空间隔离
   ├── namespace-normalizer.ts       ← [Phase 5] 命名空间双向映射
   ├── time-system.ts                ← [Phase 5] 游戏时间系统
-  ├── save-profile.ts               ← [Phase 4.6] 存档级 FP 元货币
+  ├── save-profile.ts               ← [Phase 4.6] 存档级 FP 元货币 (M5: +variables 变量唯一真源)
   ├── fp-system.ts                  ← [Phase 4.6] FP 计算函数
   ├── ejs-runtime.ts                ← [Phase 4.6] EJS 沙盒评估器
   ├── effect-parser.ts              ← [Phase 4.6] 效果声明解析器
   ├── effect-runtime.ts             ← [Phase 4.5] 声明式效果引擎
   ├── game-event.ts                 ← [Phase 4.5] EventBus 按存档隔离
-  ├── state-manager.ts              ← [Phase 4.5] 唯一状态写入入口 (M2: 按名寻址; M3: 拆 string-value 过渡桥; M4: 名字寻址唯一化)
+  ├── state-manager.ts              ← [Phase 4.5] 唯一状态写入入口 (M2按名寻址 M4名字唯一化 M5变量迁profile+快照重建)
   ├── dice.ts                       ← [Phase 4.5] 骰子系统
   ├── memory-store.ts               ← [Phase 4] 记忆存储+Embedding召回
   ├── memory-summarizer.ts          ← [Phase 4] 记忆压缩

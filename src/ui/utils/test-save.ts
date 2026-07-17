@@ -56,7 +56,7 @@ export async function createTestSave(): Promise<string> {
     metadata: {
       characterName: '亚瑟',
       userName: '玩家',
-      gameStartTime: '复兴纪元·丰收之月·第15日',
+      gameStartTime: new Date().toISOString(), // #42: 现实开档时间（ISO），游戏内时间走 SaveProfile.gameTime
       totalTurns: 3,
     },
   };

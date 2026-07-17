@@ -970,30 +970,25 @@ export function resolvePlotTree(flatEvents: PlotEvent[]): PlotEventNode[] {
 
 // ========== 存档系统 (Save System) ==========
 
-/** 快照 — 存档内的状态检查点 */
+/** 快照 — 存档内的状态检查点（M5 规范 §11.2: 打快照 = 整份深拷贝 / 恢复 = 覆写 + 对话回滚） */
 export interface Snapshot {
+  /** Code 生成 UUID */
   id: string;
+  /** 所属存档（一等字段） */
   saveId: string;
-  index: number;                 // 快照序号 (0-29)
-  timestamp: number;             // 真实时间戳
-  gameTime: string;              // 游戏内时间字符串
-  /** 全量变量快照 */
-  variables: Record<string, any>;
-  /** 角色状态快照 */
+  /** 现实时间戳 */
+  createdAt: number;
+  /** 触发原因: turn=每轮一拍 / manual=手动 / pre-combat=战斗前 */
+  reason: 'turn' | 'manual' | 'pre-combat';
+  /** 对话回合游标（恢复时截断 messages 用） */
+  turn: number;
+  /** 角色状态深拷贝 */
   characters: CharacterState[];
-  /** 当前剧情事件状态 */
-  plotEvents: PlotEvent[];
-  /** 当前记忆索引（指向 MemoryRecord.id 列表） */
-  memoryIds: string[];
-  /** 快照时的聊天轮次 */
-  turnNumber: number;
-  /** 快照描述 */
-  label?: string;
-  /** Phase 10h: 快照时关联的消息 ID 列表（预留，后继实现） */
-  messageIds?: string[];
+  /** 存档档案深拷贝（任务/时间/好感/变量随行） */
+  saveProfile: SaveProfile;
 }
 
-/** 存档槽 — 10 槽，每槽最多 30 快照 */
+/** 存档槽 — 10 槽，快照上限见 AppSettings.maxSnapshotsPerSave */
 export interface SaveSlot {
   id: string;
   name: string;
@@ -1267,6 +1262,7 @@ export interface StateCommitResult {
   success: boolean;
   patchesApplied: number;
   eventsGenerated: GameEvent[];
+  /** M5 起 commitChatState 不再产快照（#28），字段保留供未来快照类操作回传 */
   snapshotId?: string;
   errors: string[];
 }

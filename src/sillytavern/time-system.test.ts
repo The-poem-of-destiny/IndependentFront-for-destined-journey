@@ -65,7 +65,7 @@ describe('parseGameTime', () => {
     expect(t!.year).toBe(1);
     expect(t!.month).toBe(5);
     expect(t!.day).toBe(24);
-    expect(t!.weekday).toBe(3); // 周三
+    expect(t!.weekday).toBe(4); // 周三 = WEEKDAY_NAMES[3] → weekday 4（约定 1=周日…7=周六）
     expect(t!.hour).toBe(15);
     expect(t!.minute).toBe(30);
   });
@@ -84,7 +84,7 @@ describe('parseGameTime', () => {
     expect(t!.year).toBe(1500);
     expect(t!.month).toBe(12);
     expect(t!.day).toBe(30);
-    expect(t!.weekday).toBe(6);
+    expect(t!.weekday).toBe(7); // 周六 = WEEKDAY_NAMES[6] → weekday 7
     expect(t!.hour).toBe(23);
     expect(t!.minute).toBe(59);
   });
@@ -111,7 +111,7 @@ describe('formatGameTime', () => {
     original.year = 42;
     original.month = 7;
     original.day = 15;
-    original.weekday = 5; // 周五
+    original.weekday = 5; // 周四 (WEEKDAY_NAMES[4])
     original.hour = 14;
     original.minute = 30;
 
@@ -122,6 +122,7 @@ describe('formatGameTime', () => {
     expect(parsed!.year).toBe(original.year);
     expect(parsed!.month).toBe(original.month);
     expect(parsed!.day).toBe(original.day);
+    expect(parsed!.weekday).toBe(original.weekday); // #31: weekday 也必须往返保真
     expect(parsed!.hour).toBe(original.hour);
     expect(parsed!.minute).toBe(original.minute);
   });
@@ -493,6 +494,44 @@ describe('MONTH_NAMES and WEEKDAY_NAMES', () => {
 
   it('WEEKDAY_NAMES starts with 周日', () => {
     expect(WEEKDAY_NAMES[0]).toBe('周日');
+  });
+});
+
+// ========== weekday 往返约定 (#31) ==========
+// 约定（唯一）: weekday 1-7 对齐 WEEKDAY_NAMES 下标 —— weekday=1 → '周日' … weekday=7 → '周六'。
+// 回归背景: parseGameTime 曾采用 1=周一…7=周日 的 ISO 序，与 formatGameTime 的
+// WEEKDAY_NAMES[weekday-1] 混用，导致 parse(format(t)) 往返漂移（周日→7→'周六'）。
+
+describe('weekday 往返一致性 (#31)', () => {
+  it('parseGameTime(formatGameTime(t)) 对 weekday 1-7 全部保真', () => {
+    for (let wd = 1; wd <= 7; wd++) {
+      const t: GameTime = { ...createDefaultTime(), weekday: wd };
+      const roundtripped = parseGameTime(formatGameTime(t));
+      expect(roundtripped).not.toBeNull();
+      expect(roundtripped!.weekday).toBe(wd);
+    }
+  });
+
+  it('周日不漂移 (回归: 周日→7→周六)', () => {
+    const t: GameTime = { ...createDefaultTime(), weekday: 1 }; // 1 = 周日
+    const formatted = formatGameTime(t);
+    expect(formatted).toContain('周日');
+    const parsed = parseGameTime(formatted);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.weekday).toBe(1);
+  });
+
+  it('parse 与 format 均对齐 WEEKDAY_NAMES 下标 (weekday-1)', () => {
+    for (let wd = 1; wd <= 7; wd++) {
+      const name = WEEKDAY_NAMES[wd - 1];
+      // format 方向: weekday 数值 → 名字
+      const t: GameTime = { ...createDefaultTime(), weekday: wd };
+      expect(formatGameTime(t)).toContain(name);
+      // parse 方向: 名字 → weekday 数值
+      const parsed = parseGameTime(`复兴纪元0001年-01月-01日-${name}-08:00`);
+      expect(parsed).not.toBeNull();
+      expect(parsed!.weekday).toBe(wd);
+    }
   });
 });
 
