@@ -968,3 +968,86 @@ describe('runCharGenChain (Agentic 路径)', () => {
     expect(itemClient.chatWithTools).toHaveBeenCalledTimes(1);
   });
 });
+
+// ========== parseItemGenOutput — JSON 兜底（真机 2026-07-17 形状） ==========
+
+describe('parseItemGenOutput — <item_result> 内嵌 JSON 兜底', () => {
+  it('AI 在 <item_result> 里塞 markdown JSON 单对象（真机实测形状）→ 归一到 equipment', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '我已经查询了角色和脚本参考。现在开始设计。',
+      '',
+      '## 物品生成结果',
+      '',
+      '<item_result>',
+      '',
+      '```json',
+      JSON.stringify({
+        name: '暮星纹章长袍',
+        type: 'equipment',
+        slot: '身体',
+        quality: '史诗',
+        description: '深蓝色天鹅绒裁制的长袍。',
+        stats: { defense: 12, magicDefense: 18 },
+        scripts: { init: "$event.on('combat_round_start', '__tick__');", cleanup: "$event.off('combat_round_start');" },
+        tags: ['神秘', '防具'],
+        flavorText: '它一直在等你。',
+      }),
+      '```',
+      '',
+      '</item_result>',
+      '',
+      '### 设计说明',
+      '| 维度 | 说明 |',
+    ].join('\n');
+
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment).toHaveLength(1);
+    expect(out.equipment[0].name).toBe('暮星纹章长袍');
+    expect(out.equipment[0].slot).toBe('身体');
+    expect(out.equipment[0].quality).toBe('史诗');
+    expect(out.equipment[0].stats).toEqual({ defense: 12, magicDefense: 18 });
+    expect((out.equipment[0] as any).scripts?.init).toContain('$event.on');
+    expect(out.skills).toHaveLength(0);
+    expect(out.inventory).toHaveLength(0);
+  });
+
+  it('JSON 数组混合类型 → 按 type/slot 分组归一', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result>',
+      '```json',
+      JSON.stringify([
+        { name: '铁剑', type: '装备', slot: '武器', rarity: '普通', stats: { atk: 10 } },
+        { name: '火球术', type: 'active', description: '一颗火球', cost: { type: 'MP', amount: 10 }, cooldown: 2 },
+        { name: '治疗药水', type: '消耗品', quantity: 3, description: '恢复少量生命' },
+      ]),
+      '```',
+      '</item_result>',
+    ].join('\n');
+
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment).toHaveLength(1);
+    expect(out.equipment[0].slot).toBe('武器');
+    expect(out.equipment[0].quality).toBe('普通');  // rarity→quality 映射
+    expect(out.skills).toHaveLength(1);
+    expect(out.skills[0].name).toBe('火球术');
+    expect(out.skills[0].cost).toEqual({ type: 'MP', amount: 10 });
+    expect(out.inventory).toHaveLength(1);
+    expect(out.inventory[0].quantity).toBe(3);
+  });
+
+  it('标准 XML 子元素路径不受影响（回归）', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result>',
+      '<equipment>',
+      '<equip slot="武器" name="精铁长剑" quality="优良" durability="80">锋利的长剑<stat name="atk">15</stat></equip>',
+      '</equipment>',
+      '</item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment).toHaveLength(1);
+    expect(out.equipment[0].name).toBe('精铁长剑');
+  });
+});

@@ -1100,9 +1100,10 @@ function isWorldNewsPath(path: unknown): boolean {
  * 世界新闻值 → add_news StatePatch 列表（#16 双轨退役: 变量路径退役，唯一真源 profile.news）
  *
  * AI 只填叙事字段 {title(必), content(必), category?}（铁律3，id/publishedAt/read 由 Code 补）。
- * 兼容 dispatcher 的三种输出形态:
+ * 兼容 dispatcher 的输出形态（AI 实际形状不可控，宽容解析）:
  * - 字符串 → 作 content，标题取首句截断，category 兜底 '世界'
  * - 对象 {title?, content?, category?} → 直用，缺失侧互补
+ * - 对象 {date?, event?/text?/news?} → 真机实测形状（2026-07-17）: event 作 content，date 拼前缀
  * - 数组 → 逐条按上述规则展开
  * 空串/null/不可识别值 → 丢弃（不产 patch，也不落变量）。
  */
@@ -1121,15 +1122,21 @@ function buildNewsPatches(raw: unknown, operation: 'replace' | 'insert'): import
     } else if (item && typeof item === 'object') {
       const obj = item as Record<string, any>;
       if (typeof obj.title === 'string') title = obj.title.trim();
-      if (typeof obj.content === 'string') content = obj.content.trim();
+      // content 候选键宽容: content > event > text > news（真机实测 AI 产 {date, event} 形状）
+      const contentRaw = [obj.content, obj.event, obj.text, obj.news].find(v => typeof v === 'string' && v.trim());
+      if (contentRaw) content = String(contentRaw).trim();
       if (typeof obj.category === 'string' && obj.category) category = obj.category;
+      // 游戏内日期是叙事信息 → 拼 content 前缀（publishedAt 是 Code 补的现实时间戳，两者语义不同）
+      const dateStr = typeof obj.date === 'string' ? obj.date.trim() : '';
+      if (dateStr && content && !content.startsWith('【')) content = `【${dateStr}】${content}`;
     }
 
     // title/content 互补（applyAddNews 两者必填）
     if (!content && title) content = title;
     if (!title && content) {
-      // 短标题: 取首句，截断 20 字
-      const firstSentence = content.split(/[。！？!?\n]/)[0] || content;
+      // 短标题: 取首句，截断 20 字（剥掉日期前缀再取）
+      const bare = content.replace(/^【[^】]*】/, '');
+      const firstSentence = bare.split(/[。！？!?\n]/)[0] || bare;
       title = firstSentence.slice(0, 20);
     }
     if (!title || !content) {

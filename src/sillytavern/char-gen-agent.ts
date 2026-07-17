@@ -626,7 +626,14 @@ export function parseItemGenOutput(raw: string): ItemGenOutput {
   // 先尝试 XML
   const xml = extractXML(raw, 'item_result');
   if (xml) {
-    return parseItemGenXML(xml);
+    const parsed = parseItemGenXML(xml);
+    // 真机兜底（2026-07-17）: AI 无视 XML 子元素教学、在 <item_result> 里塞 markdown JSON
+    // → 子元素全空时回退 JSON 宽容归一（AI 输出形状不可控，翻译层宽容；杜绝静默零落库）
+    if (!parsed.skills.length && !parsed.equipment.length && !parsed.inventory.length) {
+      const jsonFallback = parseItemGenJSONLoose(xml);
+      if (jsonFallback) return jsonFallback;
+    }
+    return parsed;
   }
 
   // 回退到 JSON
@@ -643,6 +650,82 @@ export function parseItemGenOutput(raw: string): ItemGenOutput {
     // 不阻断流程
     return { skills: [], equipment: [], inventory: [] };
   }
+}
+
+/**
+ * <item_result> 体内 JSON 宽容归一（真机兜底）。
+ * 接受: 单对象 / 对象数组 / 已分组 {skills, equipment, inventory}。
+ * 分类规则: 有 slot 或 type 判装备 → equipment；type=active/passive/技能 或有 cost/cooldown → skills；其余 → inventory。
+ * 字段映射: rarity↔quality 互备（ItemGenOutput.equipment 用 quality，inventory 用 rarity）。
+ */
+function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
+  const json = extractJSON(text);
+  if (!json) return null;
+  let data: any;
+  try {
+    data = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!data || typeof data !== 'object') return null;
+
+  // 已分组形状直接映射
+  if (Array.isArray(data.skills) || Array.isArray(data.equipment) || Array.isArray(data.inventory)) {
+    return {
+      skills: data.skills ?? [],
+      equipment: data.equipment ?? [],
+      inventory: data.inventory ?? [],
+    };
+  }
+
+  const items: any[] = Array.isArray(data) ? data : [data];
+  const out: ItemGenOutput = { skills: [], equipment: [], inventory: [] };
+  const EQUIP_TYPES = new Set(['equipment', '装备', 'weapon', 'armor', '武器', '防具', '饰品']);
+  const SKILL_TYPES = new Set(['skill', '技能', 'active', 'passive']);
+
+  for (const it of items) {
+    if (!it || typeof it !== 'object' || !it.name) continue;
+    const typeStr = String(it.type ?? '').toLowerCase();
+    const isSkill = SKILL_TYPES.has(typeStr) || (!it.slot && (it.cost !== undefined || it.cooldown !== undefined));
+    const isEquip = !isSkill && (Boolean(it.slot) || EQUIP_TYPES.has(typeStr));
+
+    if (isSkill) {
+      out.skills.push({
+        name: it.name,
+        description: it.description ?? '',
+        type: typeStr === 'passive' ? 'passive' : 'active',
+        cost: it.cost,
+        cooldown: it.cooldown,
+        effects: it.effects,
+        scripts: it.scripts,
+      });
+    } else if (isEquip) {
+      out.equipment.push({
+        slot: it.slot ?? '',
+        name: it.name,
+        description: it.description ?? '',
+        stats: it.stats ?? {},
+        durability: it.durability,
+        quality: it.quality ?? it.rarity,
+        // effects/scripts 透传（M3 无损映射，buildItemGenPatches/assembleCharacterState 消费）
+        ...(it.effects ? { effects: it.effects } : {}),
+        ...(it.scripts ? { scripts: it.scripts } : {}),
+      } as ItemGenOutput['equipment'][number]);
+    } else {
+      out.inventory.push({
+        name: it.name,
+        description: it.description ?? '',
+        quantity: typeof it.quantity === 'number' ? it.quantity : 1,
+        type: it.type ?? '特殊',
+        rarity: it.rarity ?? it.quality,
+        ...(it.effects ? { effects: it.effects } : {}),
+        ...(it.scripts ? { scripts: it.scripts } : {}),
+      } as ItemGenOutput['inventory'][number]);
+    }
+  }
+
+  if (!out.skills.length && !out.equipment.length && !out.inventory.length) return null;
+  return out;
 }
 
 /** 从 XML <item_result> 中解析物品数据 */

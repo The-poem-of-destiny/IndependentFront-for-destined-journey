@@ -618,12 +618,49 @@ describe('buildCharacterState', () => {
     expect(state.race).toBe('精灵混血')
   })
 
-  it('equipment/skills/inventory 应置空', () => {
+  it('未选择任何装备/技能/道具时 skills/inventory 为空', () => {
     const state = store.buildCharacterState('test-save-id')
-    // M2: equipment[] 已删除 — 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
-    expect(state.inventory.filter(i => i.equippedSlot)).toEqual([])
     expect(state.skills).toEqual([])
     expect(state.inventory).toEqual([])
+  })
+
+  it('真机修: 创角选中的装备/道具/技能直接结构化落库（不再依赖 AI 从开场白回写）', () => {
+    store.selectDifficulty('creative')
+    const sword = DEFAULT_EQUIPMENT_POOL.find(e => e.type === '武器')!
+    const armor = DEFAULT_EQUIPMENT_POOL.find(e => e.type === '防具')!
+    const potion = DEFAULT_ITEM_POOL[0]
+    // DEFAULT_SKILL_POOL 为空数组（运行时从 baseInfo 加载），测试用手工条目
+    const skill = {
+      id: 'sk_test', name: '灼热射线', category: 'skill' as const, type: '主动',
+      rarity: 'uncommon' as const, tag: [], effect: { '灼烧': '造成持续伤害' },
+      consume: '', description: '一道炽热凝练的能量射线', cost: 100,
+    }
+    store.addEquipment(sword)
+    store.addEquipment(armor)
+    store.addItem(potion)
+    store.addSkill(skill)
+
+    const state = store.buildCharacterState('test-save-id')
+
+    // 装备 → inventory 带 equippedSlot（武器→武器槽，防具→身体槽，开局即穿）
+    const swordItem = state.inventory.find(i => i.name === sword.name)
+    expect(swordItem).toBeDefined()
+    expect(swordItem!.equippedSlot).toBe('武器')
+    expect(swordItem!.type).toBe('装备')
+    expect(swordItem!.effects).toEqual(sword.effect)
+    const armorItem = state.inventory.find(i => i.name === armor.name)
+    expect(armorItem!.equippedSlot).toBe('身体')
+    // 道具 → inventory 无 equippedSlot
+    const potionItem = state.inventory.find(i => i.name === potion.name)
+    expect(potionItem).toBeDefined()
+    expect(potionItem!.equippedSlot ?? null).toBeNull()
+    expect(potionItem!.quantity).toBeGreaterThanOrEqual(1)
+    // 技能 → skills
+    expect(state.skills).toHaveLength(1)
+    expect(state.skills[0].name).toBe(skill.name)
+    expect(state.skills[0].effects).toEqual(skill.effect)
+    // rarity 英文池值归一为中文
+    expect(['普通', '优良', '稀有', '史诗', '传说', '神话', '唯一']).toContain(swordItem!.rarity)
   })
 
   it('HP/MP/SP 应正确写入', () => {

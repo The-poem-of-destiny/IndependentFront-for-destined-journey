@@ -1148,6 +1148,18 @@ describe('AgentOrchestrator — Stage2 世界新闻 → add_news', () => {
     expect(patches.filter(x => x.op === 'add_news')).toHaveLength(0);
     expect(patches.some(x => String(x.target ?? '').includes('世界新闻'))).toBe(false);
   });
+
+  it('世界新闻 {date, event} 形状（真机实测 2026-07-17）→ event 作 content + date 拼前缀', async () => {
+    const patches = await runDispatcherWithJson({
+      delta_time: 5,
+      insert: [{ path: '世界新闻', value: { date: '复兴纪元001年01月02日', event: '一座古老召唤阵被激活，六人被召唤至此。幸存者苏醒于废弃古堡。' } }],
+    });
+    const news = patches.find(x => x.op === 'add_news');
+    expect(news).toBeDefined();
+    expect(news.value.content).toBe('【复兴纪元001年01月02日】一座古老召唤阵被激活，六人被召唤至此。幸存者苏醒于废弃古堡。');
+    // 标题从剥掉日期前缀的首句截断
+    expect(news.value.title).toBe('一座古老召唤阵被激活，六人被召唤至此');
+  });
 });
 
 // ========== onStateCommitError 上浮 ==========

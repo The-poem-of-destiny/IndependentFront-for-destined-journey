@@ -33,7 +33,7 @@ export type StatusCategory = typeof STATUS_CATEGORIES[number];
 /** slot 别名表（中文变体 + 英文遗留，修 #37 slot 中英双轨） */
 const SLOT_ALIASES = Object.assign(Object.create(null) as Record<string, EquipSlot>, {
   '主手': '武器', '惯用手': '武器', '副武器': '副手',
-  '护甲': '身体', '胸甲': '身体', '衣服': '身体',
+  '护甲': '身体', '胸甲': '身体', '衣服': '身体', '防具': '身体',
   '鞋子': '脚部', '靴子': '脚部', '手套': '手部', '头盔': '头部',
   weapon: '武器', offhand: '副手', head: '头部', armor: '身体',
   hands: '手部', feet: '脚部', belt: '腰带', accessory: '饰品',
@@ -64,6 +64,7 @@ export function normalizeItemType(raw: string): ItemType | undefined {
 const RARITY_ALIASES = Object.assign(Object.create(null) as Record<string, Rarity>, {
   common: '普通', uncommon: '优良', rare: '稀有',
   epic: '史诗', legendary: '传说', mythic: '神话', unique: '唯一',
+  only: '唯一',  // start-catalog 池的第七级英文名（CDN 数据遗留）
 } satisfies Record<string, Rarity>);
 
 /** 归一化品质。无法识别返回 undefined */

@@ -13,6 +13,7 @@ import { ref, computed, watch } from 'vue'
 import type { CharacterState, PlotSettings, PlotOutline } from '@engine/types'
 import { TIER_CONFIGS } from '@engine/tier-constants'
 import { getBloodlineList } from '@engine/bloodlines'
+import { normalizeSlot, normalizeItemType, normalizeRarity } from '@engine/field-enums'
 import {
   type CatalogItem,
   type BackgroundTemplate,
@@ -635,6 +636,36 @@ export const useCreateStore = defineStore('create', () => {
       englishAttrs[ATTR_CN_TO_EN[attr]] = finalAttributes.value[attr]
     }
 
+    // ═══ 真机修（2026-07-17）: 选中的装备/道具/技能直接结构化落库 ═══
+    // 池条目是完整结构化数据，不依赖 AI 从开场白文本回写（ADR-11: 确定性逻辑归 Code）。
+    // 装备: equippedSlot 经 normalizeSlot(type) 归一（武器/防具/饰品→槽位），不可识别躺背包。
+    const startInventory = [
+      ...selectedEquipments.value.map(e => ({
+        name: e.name,
+        description: e.description,
+        quantity: 1,
+        type: '装备',
+        rarity: normalizeRarity(e.rarity),
+        equippedSlot: normalizeSlot(e.type),  // 开局即穿；null=躺背包
+        effects: e.effect && Object.keys(e.effect).length ? { ...e.effect } : undefined,
+      })),
+      ...selectedItems.value.map(i => ({
+        name: i.name,
+        description: i.description,
+        quantity: i.quantity ?? 1,
+        type: normalizeItemType(i.type) ?? '特殊',
+        rarity: normalizeRarity(i.rarity),
+        effects: i.effect && Object.keys(i.effect).length ? { ...i.effect } : undefined,
+      })),
+    ]
+    const startSkills = selectedSkills.value.map(s => ({
+      name: s.name,
+      description: s.description,
+      type: (s.type === '被动' ? 'passive' : 'active') as 'active' | 'passive',
+      level: 1,
+      effects: s.effect && Object.keys(s.effect).length ? { ...s.effect } : undefined,
+    }))
+
     return {
       id: charId,
       saveId,
@@ -664,9 +695,9 @@ export const useCreateStore = defineStore('create', () => {
         deityPosition: '',
         divineKingdom: { name: '', description: '' },
       },
-      // M2: equipment[] 已删除 — 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
-      skills: [],
-      inventory: [],
+      // 真机修: 创角选中项结构化落库（equippedSlot 非空 = 开局已穿，规范 §3）
+      skills: startSkills,
+      inventory: startInventory,
       statusEffects: [],
       money: money.value,
       location: startLocation.value === '自定义' ? customStartLocation.value : startLocation.value,
