@@ -656,6 +656,11 @@ export class StateManager {
 
     // ── 校验阶段: 任一失败在此 throw，尚未发生任何变更 ──
     const to = await this.resolveCharacter(value.to);   // 乙不存在 → throw，甲不动
+
+    // 自转移防复制: 甲乙为同一角色时 bulkPut 同主键后写覆盖前写，会凭空复制物品
+    if (to.id === from.id) {
+      throw new Error(`transfer_item 不允许自我转移: ${from.name}`);
+    }
     const idx = from.inventory.findIndex(i => i.name === value.name);
     if (idx < 0) throw new Error(`物品不存在: ${value.name}`);
     if (from.inventory[idx].quantity < qty) {

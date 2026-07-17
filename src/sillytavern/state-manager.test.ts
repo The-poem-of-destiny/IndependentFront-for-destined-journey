@@ -1097,6 +1097,47 @@ describe('StateManager', () => {
       expect(result.errors).toHaveLength(1);
       expect(alice.inventory[0].quantity).toBe(5);
     });
+
+    // ── Finding 1: 自转移防复制 ──
+    it('transfer_item 自转移防复制: 甲===乙时 reject 进 errors[] 数量不变', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-r', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '铁剑', quantity: 1 }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'transfer_item', target: 'characters.理查德', value: { name: '铁剑', to: '理查德', quantity: 1 } },
+      ]);
+
+      // 自转移必须进 errors[]，而非静默复制物品
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('不允许自我转移');
+      expect(char.inventory).toHaveLength(1);
+      expect(char.inventory[0].quantity).toBe(1);
+    });
+
+    // ── Finding 2: 同名合并丢弃来值字段 ──
+    it('add_item 同名合并时 quantity 累加，既有字段不被来值覆盖（含 rarity）', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '铁剑', quantity: 1, type: '装备', rarity: '普通', description: '一把普通的铁剑' }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'add_item', target: 'characters.理查德', value: { name: '铁剑', quantity: 2, rarity: '史诗', description: '史诗铁剑（不应覆盖）' } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.inventory).toHaveLength(1);
+      expect(char.inventory[0].quantity).toBe(3);       // 数量累加
+      expect(char.inventory[0].rarity).toBe('普通');     // 既有字段（含 rarity）不覆盖
+      expect(char.inventory[0].description).toBe('一把普通的铁剑'); // description 也不覆盖
+    });
   });
 
   // ===================================================================
