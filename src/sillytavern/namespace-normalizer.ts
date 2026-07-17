@@ -28,7 +28,8 @@ export const FLAT_TO_ENGINE: Record<string, string> = {
   'stat_data.主角.位置': 'char.player.location',
   'stat_data.主角.背包': 'char.player.inventory',
   'stat_data.主角.技能': 'char.player.skills',
-  'stat_data.主角.装备': 'char.player.equipment',
+  // 'stat_data.主角.装备' 映射已删除 — CharacterState.equipment[] 于 M2 退役（#41），
+  // 装备状态 = inventory[].equippedSlot 单真源，扁平旧路径无对应引擎命名空间（终审修复）
   'stat_data.主角.状态效果': 'char.player.statusEffects',
   'stat_data.主角.种族': 'char.player.race',
   'stat_data.主角.身份': 'char.player.identity',

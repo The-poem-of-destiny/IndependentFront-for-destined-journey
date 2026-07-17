@@ -224,11 +224,12 @@ describe('normalizeVariables', () => {
   it('preserves object values (deeply nested — not recursed into by normalizeVariables)', () => {
     // normalizeVariables does NOT recurse into values; it only maps top-level keys.
     // Object values are placed as-is at the resolved engine path.
+    // '装备' 专用映射行已删（equipment[] M2 退役）→ 走 stat_data.主角.* 前缀兜底，键名原样保留
     const flat = {
       'stat_data.主角.装备': { 武器: '铁剑', 防具: '皮甲' },
     };
     const result = normalizeVariables(flat);
-    expect(result.char.player.equipment).toEqual({ 武器: '铁剑', 防具: '皮甲' });
+    expect(result.char.player['装备']).toEqual({ 武器: '铁剑', 防具: '皮甲' });
   });
 
   it('handles mixed namespaces in single input', () => {

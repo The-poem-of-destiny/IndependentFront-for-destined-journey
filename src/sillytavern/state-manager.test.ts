@@ -255,9 +255,11 @@ describe('StateManager', () => {
       const result = await sm.commitChatState([
         { op: 'unknown_op' as any, target: 'variables.gold', value: 100 },
       ]);
-      // 未知 op 通过验证但落 dispatch default 分支 → 不进 errors（Task 5-11 的 8 个新 op 落此）
+      // 终审修复: 未知 op 落 dispatch default 分支 throw → 进 errors[]（旧行为静默成功已废）
       expect(result.patchesApplied).toBe(0);
-      expect(result.errors).toHaveLength(0);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('未知操作');
+      expect(result.success).toBe(false);
     });
   });
 
@@ -504,6 +506,84 @@ describe('StateManager', () => {
       expect(result.success).toBe(true);
       expect(char.currentAction).toBe('锻造武器');
       expect(char.location).toBe('village_square');
+    });
+
+    // ===== 终审修复: hp/mp/sp 钳制 + attributes 深合并 =====
+
+    it('⑤ 钳制: {hp: 9999} 在 maxHp=100 时落地为 100（与 set_hp 语义一致）', async () => {
+      const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 100 });
+      vi.mocked(db.getCharacter).mockResolvedValue(char);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'update_character', target: 'characters.char-001', value: { hp: 9999 } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.hp).toBe(100);
+    });
+
+    it('钳制: delta hp 超上限被钳到 maxHp，负穿透钳到 0', async () => {
+      const char = buildMockCharacter({ id: 'char-001', hp: 90, maxHp: 100, mp: 10, maxMp: 50 });
+      vi.mocked(db.getCharacter).mockResolvedValue(char);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'update_character', target: 'characters.char-001', value: { hp: 50 }, metadata: { delta: true } },
+        { op: 'update_character', target: 'characters.char-001', value: { mp: -999 }, metadata: { delta: true } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.hp).toBe(100);   // 90+50=140 → 钳 100
+      expect(char.mp).toBe(0);     // 10-999 → 钳 0
+    });
+
+    it('钳制: 同 patch 写 hp+maxHp 时以写后 maxHp 为准', async () => {
+      const char = buildMockCharacter({ id: 'char-001', hp: 100, maxHp: 100 });
+      vi.mocked(db.getCharacter).mockResolvedValue(char);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'update_character', target: 'characters.char-001', value: { hp: 180, maxHp: 200 } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.hp).toBe(180);   // 新 maxHp=200 内，不钳
+      expect(char.maxHp).toBe(200);
+    });
+
+    it('⑥ attributes 深合并: 只发 {力量:12} 不抹掉其余维度（终审修复）', async () => {
+      const char = buildMockCharacter({
+        id: 'char-001',
+        attributes: { str: 10, dex: 11, con: 12, int: 13, spi: 14 } as any,
+      });
+      vi.mocked(db.getCharacter).mockResolvedValue(char);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'update_character', target: 'characters.char-001', value: { attributes: { str: 20 } } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.attributes).toEqual({ str: 20, dex: 11, con: 12, int: 13, spi: 14 });
+    });
+
+    it('attributes + delta=true → errors（attributes 非数值字段，既有规则覆盖）', async () => {
+      const char = buildMockCharacter({ id: 'char-001' });
+      vi.mocked(db.getCharacter).mockResolvedValue(char);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        {
+          op: 'update_character',
+          target: 'characters.char-001',
+          value: { attributes: { str: 5 } },
+          metadata: { delta: true },
+        },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors[0]).toContain('attributes');
     });
   });
 
@@ -881,6 +961,28 @@ describe('StateManager', () => {
       expect(char.statusEffects).toHaveLength(1);
       expect(char.statusEffects[0].stacks).toBe(1);          // 不叠层
       expect(char.statusEffects[0].remainingTime).toBe(20);  // 刷新时长 max(5, 20)
+    });
+
+    it('遗留效果 remainingTime=undefined 再施加 → 直接取来值，不产 NaN（终审修复）', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        statusEffects: [{
+          // 遗留数据形态: 缺 remainingTime 字段（undefined）
+          name: '旧祝福', description: '', category: '增益', stacks: 1,
+          stackable: false, timeUnit: '分钟', source: '古老仪式', effects: {},
+        } as any],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'add_status_effect', target: 'characters.理查德', value: { name: '旧祝福', category: '增益', remainingTime: 10, timeUnit: '分钟' } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.statusEffects).toHaveLength(1);
+      expect(char.statusEffects[0].remainingTime).toBe(10);   // 非 NaN
+      expect(Number.isNaN(char.statusEffects[0].remainingTime)).toBe(false);
     });
   });
 
@@ -1689,6 +1791,51 @@ describe('StateManager', () => {
       const got = await db.getCharacters('save_right');
       expect(got.find((c: CharacterState) => c.name === '串档NPC')?.saveId).toBe('save_right');
     });
+
+    it('add_character 缺 name（空/纯空白）→ errors[]，不落库（终审修复: 名字是逻辑键）', async () => {
+      const sm = createStateManager('save_noname');
+      const npc = createDefaultCharacterState({ id: 'npc_noname', name: '   ' });
+      const result = await sm.commitChatState([
+        { op: 'add_character', target: 'characters.无名', value: npc },
+      ]);
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('name');
+      const got = await db.getCharacters('save_noname');
+      expect(got).toHaveLength(0);
+    });
+
+    it('add_character 同存档同名 → errors[]，库里仍只有一条（终审修复: 与 rename 查重一致）', async () => {
+      const sm = createStateManager('save_dup');
+      const first = createDefaultCharacterState({ id: 'npc_a', name: '妲丽安' });
+      const second = createDefaultCharacterState({ id: 'npc_b', name: '妲丽安' });
+      const r1 = await sm.commitChatState([
+        { op: 'add_character', target: 'characters.妲丽安', value: first },
+      ]);
+      expect(r1.success).toBe(true);
+      const r2 = await sm.commitChatState([
+        { op: 'add_character', target: 'characters.妲丽安', value: second },
+      ]);
+      expect(r2.success).toBe(false);
+      expect(r2.errors[0]).toContain('同名角色已存在: 妲丽安');
+      const got = await db.getCharacters('save_dup');
+      expect(got.filter((c: CharacterState) => c.name === '妲丽安')).toHaveLength(1);
+      expect(got[0].id).toBe('npc_a');
+    });
+
+    it('add_character 同 id 重放（幂等覆盖）不算撞名，正常成功', async () => {
+      const sm = createStateManager('save_idem');
+      const npc = createDefaultCharacterState({ id: 'npc_same', name: '重放者' });
+      await sm.commitChatState([{ op: 'add_character', target: 'characters.重放者', value: npc }]);
+      const again = createDefaultCharacterState({ id: 'npc_same', name: '重放者', money: 500 });
+      const r2 = await sm.commitChatState([
+        { op: 'add_character', target: 'characters.重放者', value: again },
+      ]);
+      expect(r2.success).toBe(true);
+      const got = await db.getCharacters('save_idem');
+      expect(got).toHaveLength(1);
+      expect(got[0].money).toBe(500);
+    });
   });
 
   // ===================================================================
@@ -2244,6 +2391,21 @@ describe('StateManager', () => {
       expect(profile.affections['下限者']).toBe(-100);
     });
 
+    it('delta_affection amount 非数字 → errors[]（与 set_affection 守卫一致，终审修复）', async () => {
+      const profile = buildMockProfile({ affections: { 艾莉丝: 40 } });
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'delta_affection', target: 'affections.艾莉丝', amount: '很多' as any },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('必须是数字');
+      expect(profile.affections['艾莉丝']).toBe(40);   // 现值不动
+    });
+
     it('好感度 target 非 affections.<名> 格式 → errors[]', async () => {
       const profile = buildMockProfile();
       vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
@@ -2357,6 +2519,35 @@ describe('StateManager', () => {
       expect(vi.mocked(db.deleteCharacter)).toHaveBeenCalledWith('uuid-goblin');
       const remaining = await db.getCharacters('save-001');
       expect(remaining.find(c => c.name === '哥布林斥候')).toBeUndefined();
+    });
+
+    it('remove UUID 兜底命中跨存档角色 → 拒绝进 errors[]，不删除（终审修复 F9）', async () => {
+      // 名字在本存档查不到 → 走 UUID 兜底命中他档角色 → 守卫拒绝
+      const foreign = buildMockCharacter({ id: 'uuid-foreign', name: '他档NPC', saveId: 'save-OTHER' });
+      vi.mocked(db.getCharacter).mockResolvedValue(foreign);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'remove_character', target: 'characters.uuid-foreign' },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors[0]).toContain('跨存档操作被拒绝');
+      expect(vi.mocked(db.deleteCharacter)).not.toHaveBeenCalled();
+    });
+
+    it('rename UUID 兜底命中跨存档角色 → 拒绝进 errors[]，名字不动（终审修复 F9）', async () => {
+      const foreign = buildMockCharacter({ id: 'uuid-foreign2', name: '他档NPC', saveId: 'save-OTHER' });
+      vi.mocked(db.getCharacter).mockResolvedValue(foreign);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'rename_character', target: 'characters.uuid-foreign2', value: '改名企图' },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors[0]).toContain('跨存档操作被拒绝');
+      expect(foreign.name).toBe('他档NPC');
     });
 
     it('remove 不存在的名字 → errors[]', async () => {

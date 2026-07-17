@@ -400,18 +400,25 @@ export function buildCraftPatches(
   const productName = craftOutput.productName;
 
   // 1. 产物写入背包 (add_item)
-  patches.push({
-    op: 'add_item',
-    target: `characters.${characterId}`,
-    value: {
-      id: `craft_${Date.now()}`,  // M3 删 — 仅占 value.id 可选位，apply 忽略
-      name: productName,
-      description: craftOutput.checkSummary,
-      quantity: craftOutput.craftParams.quantity,
-      type: 'equipment',
-      rarity: craftOutput.quality,
-    },
-  });
+  // 终审修复: item_gen equipment 里若已细化同名产物，跳过产物自身的 add_item —
+  // 否则 M2 同名合并会把 quantity 累到 ≥2，随后 equip_item 触发"堆叠拒穿" throw。
+  // equipment 条目字段更全（stats/durability），以它为准。// M3 重写
+  const productElaboratedByItemGen =
+    itemOutput?.equipment.some(e => e.name === productName) ?? false;
+  if (!productElaboratedByItemGen) {
+    patches.push({
+      op: 'add_item',
+      target: `characters.${characterId}`,
+      value: {
+        id: `craft_${Date.now()}`,  // M3 删 — 仅占 value.id 可选位，apply 忽略
+        name: productName,
+        description: craftOutput.checkSummary,
+        quantity: craftOutput.craftParams.quantity,
+        type: 'equipment',
+        rarity: craftOutput.quality,
+      },
+    });
+  }
 
   // 2. 合并 item_gen 产出的物品数据
   if (itemOutput) {

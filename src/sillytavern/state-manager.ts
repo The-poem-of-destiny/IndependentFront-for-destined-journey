@@ -289,7 +289,8 @@ export class StateManager {
         event = await this.applyInsertVariable(patch);
         break;
       default:
-        return { patch, success: false, error: `未知操作: ${patch.op}` };
+        // 未知 op 必须 loud 失败 → commitChatState 收进 errors[]（终审修复: 旧 return 形态被上层当成功吞掉）
+        throw new Error(`未知操作: ${patch.op}`);
     }
 
     return { patch, success: true, event };
@@ -501,7 +502,25 @@ export class StateManager {
           (char as any)[k] = (typeof current === 'number' ? current : 0) + value[k];
         }
       } else {
-        Object.assign(char, value);
+        // attributes 深合并: AI 只发 {attributes:{力量:12}} 不得抹掉其余维度（终审修复）
+        const { attributes: incomingAttrs, ...rest } = value;
+        Object.assign(char, rest);
+        if (incomingAttrs && typeof incomingAttrs === 'object') {
+          char.attributes = { ...char.attributes, ...incomingAttrs };
+        }
+      }
+
+      // ===== hp/mp/sp 钳制: 与 set_hp 语义一致 [0, 对应 max]（终审修复）=====
+      // 仅在本次 patch 涉及资源或其 max 时钳制（若本次也写了 max* 则以写后值为准）
+      for (const res of ['hp', 'mp', 'sp'] as const) {
+        const maxField = `max${res.charAt(0).toUpperCase()}${res.slice(1)}` as 'maxHp' | 'maxMp' | 'maxSp';
+        if (keys.includes(res) || keys.includes(maxField)) {
+          const cur = (char as any)[res];
+          const max = (char as any)[maxField];
+          if (typeof cur === 'number' && typeof max === 'number') {
+            (char as any)[res] = Math.max(0, Math.min(cur, max));
+          }
+        }
       }
     }
     // metadata.action 保留原行为: 有则覆盖 currentAction（可与 value.currentAction 并存，metadata 优先）
@@ -561,10 +580,15 @@ export class StateManager {
       if (value.remainingTime === undefined) return;
       if (value.remainingTime === null) {
         existing.remainingTime = null;
-      } else if (existing.remainingTime !== null) {
+      } else if (existing.remainingTime == null) {
+        // 遗留数据 remainingTime === undefined → 直接取来值，防 Math.max(undefined, n) 产 NaN（终审修复）
+        // existing 已是永久(null) → 保持永久不覆盖
+        if (existing.remainingTime === undefined) {
+          existing.remainingTime = value.remainingTime;
+        }
+      } else {
         existing.remainingTime = Math.max(existing.remainingTime, value.remainingTime);
       }
-      // existing 已是永久 → 保持永久
     };
 
     const existing = findByName(char.statusEffects, value.name);
@@ -960,6 +984,15 @@ export class StateManager {
     const character = patch.value as CharacterState;
     if (!character?.id) throw new Error('缺少角色数据');
 
+    // 名字是逻辑键（铁律1）: 非空必填（终审修复）
+    const name = typeof character.name === 'string' ? character.name.trim() : '';
+    if (!name) throw new Error('add_character 需要非空 name（名字是逻辑键，铁律1）');
+
+    // 同存档同名查重（排除同 id 重放 — Dexie put 幂等覆盖无害），与 rename_character 查重口径一致（终审修复）
+    const chars = await getCharacters(this.saveId);
+    const clash = chars.find(c => c.name === name && c.id !== character.id);
+    if (clash) throw new Error(`同名角色已存在: ${name}`);
+
     // 铁律3: saveId 是账务字段，由 Code 无条件注入，不信任上游 patch 构造方 (#8/M2硬前置②)
     character.saveId = this.saveId;
     if (character.customFields) character.customFields.saveId = this.saveId;  // 双写，M6 删
@@ -978,6 +1011,10 @@ export class StateManager {
    */
   private async applyRemoveCharacter(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
+    // UUID 兜底过渡期防跨档破坏，M4 删兜底后此守卫自然死路径
+    if (char.saveId && char.saveId !== this.saveId) {
+      throw new Error(`跨存档操作被拒绝: ${char.name}`);
+    }
     await deleteCharacter(char.id);
     return this.createEvent('system', patch);
   }
@@ -1002,6 +1039,10 @@ export class StateManager {
     if (!newName) throw new Error('rename_character 新名不能为空');
 
     const char = await this.resolveCharTarget(patch.target);
+    // UUID 兜底过渡期防跨档破坏，M4 删兜底后此守卫自然死路径
+    if (char.saveId && char.saveId !== this.saveId) {
+      throw new Error(`跨存档操作被拒绝: ${char.name}`);
+    }
     const oldName = char.name;
 
     // 幂等: 新名等于旧名 → no-op 成功
@@ -1113,9 +1154,12 @@ export class StateManager {
       }
       profile.affections[charName] = clampAffection(patch.value);
     } else {
-      // 增量 — 现值缺省 0 起算，加完再 clamp（双向）
+      // 增量 — amount 必须是数字（与 set_affection 守卫一致，终审修复），现值缺省 0 起算，加完再 clamp（双向）
+      if (typeof patch.amount !== 'number' || Number.isNaN(patch.amount)) {
+        throw new Error(`delta_affection amount 必须是数字: ${JSON.stringify(patch.amount)}`);
+      }
       const current = profile.affections[charName] ?? 0;
-      profile.affections[charName] = clampAffection(current + (patch.amount ?? 0));
+      profile.affections[charName] = clampAffection(current + patch.amount);
     }
 
     await updateProfile(profile);
