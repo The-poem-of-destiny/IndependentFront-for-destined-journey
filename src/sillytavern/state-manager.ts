@@ -26,7 +26,7 @@ import {
 } from './database';
 import type { SaveSlot } from './types';
 import { getVar, setVar, delVar, insertVar } from './var-resolver';
-import { normalizeQuestStatus, normalizeStatusCategory } from './field-enums';
+import { normalizeQuestStatus, normalizeStatusCategory, normalizeItemType, normalizeRarity, normalizeSlot } from './field-enums';
 
 // ========== Types ==========
 
@@ -184,6 +184,12 @@ export class StateManager {
         break;
       case 'remove_item':
         event = await this.applyRemoveItem(patch);
+        break;
+      case 'update_item':
+        event = await this.applyUpdateItem(patch);
+        break;
+      case 'transfer_item':
+        event = await this.applyTransferItem(patch);
         break;
       case 'equip_item':
         event = await this.applyEquipItem(patch);
@@ -524,37 +530,153 @@ export class StateManager {
     return this.createEvent('status_effect', patch);
   }
 
+  /**
+   * add_item — M2 按名寻址 + 同名合并 (#5)
+   *
+   * value = { name(必), quantity?=1, type?, rarity?, description?, stats?,
+   *           effects?, scripts?, equippedSlot?, durability?, maxDurability?, data? }
+   * 同名合并: 只累加 quantity，既有字段不覆盖（改字段走 update_item）。
+   * 归一化（铁律5）: type→normalizeItemType / rarity→normalizeRarity / equippedSlot→normalizeSlot
+   * （equippedSlot 无法识别 → null，不 throw，物品视作躺背包）。
+   */
   private async applyAddItem(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    const item = patch.value as InventoryItem;
-    if (!item?.id) throw new Error('缺少物品数据');
+    const value = patch.value as Partial<InventoryItem>;
+    if (!value?.name) throw new Error('add_item 需要 value.name');
 
-    const existing = char.inventory.find(i => i.id === item.id);
+    const quantity = typeof value.quantity === 'number' && value.quantity > 0 ? value.quantity : 1;
+
+    const existing = findByName(char.inventory, value.name);
     if (existing) {
-      existing.quantity += (item.quantity ?? 1);
+      // 同名合并: 只累加数量，不动既有字段
+      existing.quantity += quantity;
     } else {
-      char.inventory.push({ ...item, quantity: item.quantity ?? 1 });
+      // 新物品: 不写 id（铁律1，id @deprecated），枚举字段归一
+      char.inventory.push({
+        name: value.name,
+        quantity,
+        description: value.description,
+        type: value.type !== undefined ? normalizeItemType(value.type) : undefined,
+        rarity: value.rarity !== undefined ? normalizeRarity(value.rarity) : undefined,
+        equippedSlot: value.equippedSlot != null ? normalizeSlot(value.equippedSlot) : value.equippedSlot,
+        stats: value.stats,
+        durability: value.durability,
+        maxDurability: value.maxDurability,
+        data: value.data,
+        effects: value.effects,
+        scripts: value.scripts,
+      });
     }
     await saveCharacter(char);
 
     return this.createEvent('item_use', patch);
   }
 
+  /**
+   * remove_item — M2 按名寻址 (#5 #35)
+   *
+   * value = { name(必), quantity?=1 }
+   * 或裸字符串（按 name 解释、patch.amount 当 quantity，兼容 craft-resolver 现行发法）// 过渡: M3 删
+   * 扣减 ≤0 时 splice 删除条目；找不到 → throw 进 errors[]（杀静默失败）。
+   */
   private async applyRemoveItem(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    const itemId = patch.value as string;
-    const qty = patch.amount ?? 1;
+    let name: string | undefined;
+    let qty: number;
+    if (typeof patch.value === 'string') {
+      // 过渡: M3 删 — 裸字符串按 name 解释，patch.amount 当 quantity
+      name = patch.value;
+      qty = patch.amount ?? 1;
+    } else {
+      const value = patch.value as { name?: string; quantity?: number };
+      name = value?.name;
+      qty = value?.quantity ?? 1;
+    }
+    if (!name) throw new Error('remove_item 需要 value.name');
 
-    const idx = char.inventory.findIndex(i => i.id === itemId);
-    if (idx >= 0) {
-      char.inventory[idx].quantity -= qty;
-      if (char.inventory[idx].quantity <= 0) {
-        char.inventory.splice(idx, 1);
-      }
+    const idx = char.inventory.findIndex(i => i.name === name);
+    if (idx < 0) throw new Error(`物品不存在: ${name}`);
+
+    char.inventory[idx].quantity -= qty;
+    if (char.inventory[idx].quantity <= 0) {
+      char.inventory.splice(idx, 1);
     }
     await saveCharacter(char);
+
+    return this.createEvent('item_use', patch);
+  }
+
+  /**
+   * update_item — M2 新增，按名修改 (#5 #21)
+   *
+   * value = { name(必), changes: Partial<InventoryItem> }
+   * changes 白名单禁 name/quantity（改名走删加，数量走 add/remove）→ throw 进 errors[]。
+   * changes 里的 id 剥离（铁律1）；type/rarity/equippedSlot 归一化（铁律5）。
+   */
+  private async applyUpdateItem(patch: StatePatch): Promise<GameEvent> {
+    const char = await this.resolveCharTarget(patch.target);
+
+    const update = patch.value as { name?: string; changes?: Partial<InventoryItem> };
+    if (!update?.name) throw new Error('update_item 需要 value.name');
+
+    const item = findByName(char.inventory, update.name);
+    if (!item) throw new Error(`物品不存在: ${update.name}`);
+
+    const rawChanges = update.changes ?? {};
+    if ('name' in rawChanges) throw new Error('update_item 禁止改 name（改名走 remove_item + add_item）');
+    if ('quantity' in rawChanges) throw new Error('update_item 禁止改 quantity（数量走 add_item / remove_item）');
+
+    // id 剥离（铁律1）+ 枚举字段归一化（铁律5）
+    const { id: _ignoredId, ...changes } = rawChanges;
+    if (changes.type !== undefined) changes.type = normalizeItemType(changes.type);
+    if (changes.rarity !== undefined) changes.rarity = normalizeRarity(changes.rarity);
+    if (changes.equippedSlot != null) changes.equippedSlot = normalizeSlot(changes.equippedSlot);
+    Object.assign(item, changes);
+    await saveCharacter(char);
+
+    return this.createEvent('item_use', patch);
+  }
+
+  /**
+   * transfer_item — M2 新增，原子转移 (#5)
+   *
+   * target = characters.<甲>  value = { name(必), to: '<乙名>', quantity?=1 }
+   * 原子性: 先全部校验（甲乙都解析成功 + 甲有该物品且数量足够）再变更，
+   * 任一校验失败整体不动 → throw 进 errors[]；双方通过 saveCharacters 一次事务落库。
+   */
+  private async applyTransferItem(patch: StatePatch): Promise<GameEvent> {
+    const from = await this.resolveCharTarget(patch.target);
+
+    const value = patch.value as { name?: string; to?: string; quantity?: number };
+    if (!value?.name) throw new Error('transfer_item 需要 value.name');
+    if (!value.to) throw new Error('transfer_item 需要 value.to（接收方名字）');
+    const qty = typeof value.quantity === 'number' && value.quantity > 0 ? value.quantity : 1;
+
+    // ── 校验阶段: 任一失败在此 throw，尚未发生任何变更 ──
+    const to = await this.resolveCharacter(value.to);   // 乙不存在 → throw，甲不动
+    const idx = from.inventory.findIndex(i => i.name === value.name);
+    if (idx < 0) throw new Error(`物品不存在: ${value.name}`);
+    if (from.inventory[idx].quantity < qty) {
+      throw new Error(`物品数量不足: ${value.name}（持有 ${from.inventory[idx].quantity}，需 ${qty}）`);
+    }
+
+    // ── 变更阶段: 校验全过后才动内存，双方一次事务落库 ──
+    const source = from.inventory[idx];
+    const received = findByName(to.inventory, value.name);
+    if (received) {
+      received.quantity += qty;   // 乙同名合并
+    } else {
+      // 乙新增: 物品字段随转移带过去，剥离 id（铁律1）
+      const { id: _ignoredId, ...fields } = source;
+      to.inventory.push({ ...fields, quantity: qty, equippedSlot: null });
+    }
+    source.quantity -= qty;
+    if (source.quantity <= 0) {
+      from.inventory.splice(idx, 1);
+    }
+    await saveCharacters([from, to]);   // Dexie bulkPut 单事务，避免半持久化
 
     return this.createEvent('item_use', patch);
   }

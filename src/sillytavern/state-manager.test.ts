@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type {
   CharacterState, SaveSlot, PlotEvent, MemoryRecord,
-  StatusEffect, InventoryItem, Skill, EquipmentSlot,
+  StatusEffect, Skill, EquipmentSlot,
 } from './types';
 import { createDefaultCharacterState } from './types';
 
@@ -745,120 +745,357 @@ describe('StateManager', () => {
   });
 
   // ===================================================================
-  // 8. items
+  // 8. items — M2 按名寻址 + 同名合并 + update/transfer (#5 #35)
   // ===================================================================
-  describe('commitChatState — items', () => {
-    it('should add new item to inventory', async () => {
-      const char = buildMockCharacter({ id: 'char-001', inventory: [] });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+  describe('commitChatState — 物品按名寻址 (M2)', () => {
+    // ---------- add_item ----------
+    it('add_item 无 id 成功落库，quantity 缺省为 1，不写 id（铁律1）', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', inventory: [] });
+      await db.saveCharacter(char);
 
-      const item: InventoryItem = { id: 'potion', name: 'Health Potion', quantity: 1, type: 'consumable' };
-
-      const sm = new StateManager({ saveId: 'save-001' });
+      const sm = new StateManager({ saveId: 's1' });
       const result = await sm.commitChatState([
-        { op: 'add_item', target: 'characters.char-001', value: item },
+        { op: 'add_item', target: 'characters.理查德', value: { name: '生命药水', description: '恢复生命' } },
       ]);
 
       expect(result.success).toBe(true);
+      expect(result.errors).toHaveLength(0);
       expect(char.inventory).toHaveLength(1);
-      expect(char.inventory[0].id).toBe('potion');
+      expect(char.inventory[0].name).toBe('生命药水');
       expect(char.inventory[0].quantity).toBe(1);
+      expect(char.inventory[0].id).toBeUndefined(); // 不为新物品写 id（铁律1）
       expect(result.eventsGenerated[0].type).toBe('item_use');
     });
 
-    it('should default item quantity to 1 when missing', async () => {
-      const char = buildMockCharacter({ id: 'char-001', inventory: [] });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+    it('add_item 缺 name → 进 errors[]', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', inventory: [] });
+      await db.saveCharacter(char);
 
-      const item: InventoryItem = { id: 'sword', name: 'Iron Sword', quantity: 0 } as any;
-      // quantity is 0 but the code does: item.quantity ?? 1 → still 0 since 0 is not nullish
-      // Let me test with quantity undefined
-      const itemNoQty = { id: 'sword', name: 'Iron Sword' } as InventoryItem;
-
-      const sm = new StateManager({ saveId: 'save-001' });
-      await sm.commitChatState([
-        { op: 'add_item', target: 'characters.char-001', value: itemNoQty },
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'add_item', target: 'characters.理查德', value: { description: '无名物品' } },
       ]);
 
-      expect(char.inventory[0].quantity).toBe(1);
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(char.inventory).toHaveLength(0);
     });
 
-    it('should stack existing item quantity', async () => {
+    it('add_item 同名合并累加 quantity，不覆盖既有字段（#5）', async () => {
       const char = buildMockCharacter({
-        id: 'char-001',
-        inventory: [{ id: 'arrow', name: 'Arrow', quantity: 10, type: 'consumable' }],
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '箭矢', quantity: 10, type: '消耗品', rarity: '优良', description: '精制箭矢' }],
       });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      await db.saveCharacter(char);
 
-      const item: InventoryItem = { id: 'arrow', name: 'Arrow', quantity: 5, type: 'consumable' };
-
-      const sm = new StateManager({ saveId: 'save-001' });
-      await sm.commitChatState([
-        { op: 'add_item', target: 'characters.char-001', value: item },
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'add_item', target: 'characters.理查德', value: { name: '箭矢', quantity: 5 } },
       ]);
 
-      expect(char.inventory).toHaveLength(1);
-      expect(char.inventory[0].quantity).toBe(15);
+      expect(result.success).toBe(true);
+      expect(char.inventory).toHaveLength(1);          // 不重复插入
+      expect(char.inventory[0].quantity).toBe(15);      // 数量累加
+      expect(char.inventory[0].rarity).toBe('优良');    // 既有字段不被抹掉
+      expect(char.inventory[0].description).toBe('精制箭矢');
     });
 
-    it('should reduce item quantity on remove_item', async () => {
-      const char = buildMockCharacter({
-        id: 'char-001',
-        inventory: [{ id: 'potion', name: 'Health Potion', quantity: 5, type: 'consumable' }],
-      });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+    it('add_item 归一化: type/rarity 英文别名 → 中文枚举（铁律5）', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', inventory: [] });
+      await db.saveCharacter(char);
 
-      const sm = new StateManager({ saveId: 'save-001' });
-      await sm.commitChatState([
-        { op: 'remove_item', target: 'characters.char-001', value: 'potion', amount: 2 },
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'add_item', target: 'characters.理查德', value: { name: '铁剑', type: 'weapon', rarity: 'rare' } },
       ]);
 
+      expect(result.success).toBe(true);
+      expect(char.inventory[0].type).toBe('装备');
+      expect(char.inventory[0].rarity).toBe('稀有');
+    });
+
+    it('add_item equippedSlot 归一化: 别名 → 枚举；无法识别 → null 不 throw', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', inventory: [] });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'add_item', target: 'characters.理查德', value: { name: '铁剑', equippedSlot: '主手' } },
+        { op: 'add_item', target: 'characters.理查德', value: { name: '怪异挂坠', equippedSlot: '不存在的槽位' } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(char.inventory[0].equippedSlot).toBe('武器');   // 别名归一
+      expect(char.inventory[1].equippedSlot ?? null).toBeNull(); // 无法识别 → 躺背包
+    });
+
+    it('add_item 角色不存在 → 进 errors[]', async () => {
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'add_item', target: 'characters.不存在的人', value: { name: '生命药水' } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('角色不存在');
+    });
+
+    // ---------- remove_item ----------
+    it('remove_item value={name, quantity} 按名扣减', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '生命药水', quantity: 5, type: '消耗品' }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'remove_item', target: 'characters.理查德', value: { name: '生命药水', quantity: 2 } },
+      ]);
+
+      expect(result.success).toBe(true);
       expect(char.inventory[0].quantity).toBe(3);
+      expect(result.eventsGenerated[0].type).toBe('item_use');
     });
 
-    it('should remove item entirely when quantity reaches 0', async () => {
+    it('remove_item quantity 缺省为 1', async () => {
       const char = buildMockCharacter({
-        id: 'char-001',
-        inventory: [{ id: 'potion', name: 'Health Potion', quantity: 2, type: 'consumable' }],
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '生命药水', quantity: 3 }],
       });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
+      await db.saveCharacter(char);
 
-      const sm = new StateManager({ saveId: 'save-001' });
+      const sm = new StateManager({ saveId: 's1' });
       await sm.commitChatState([
-        { op: 'remove_item', target: 'characters.char-001', value: 'potion', amount: 2 },
-      ]);
-
-      expect(char.inventory).toHaveLength(0);
-    });
-
-    it('should remove item when quantity goes below 0', async () => {
-      const char = buildMockCharacter({
-        id: 'char-001',
-        inventory: [{ id: 'potion', name: 'Health Potion', quantity: 1, type: 'consumable' }],
-      });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
-
-      const sm = new StateManager({ saveId: 'save-001' });
-      await sm.commitChatState([
-        { op: 'remove_item', target: 'characters.char-001', value: 'potion', amount: 5 },
-      ]);
-
-      expect(char.inventory).toHaveLength(0);
-    });
-
-    it('should default remove_item amount to 1', async () => {
-      const char = buildMockCharacter({
-        id: 'char-001',
-        inventory: [{ id: 'potion', name: 'Health Potion', quantity: 3, type: 'consumable' }],
-      });
-      vi.mocked(db.getCharacter).mockResolvedValue(char);
-
-      const sm = new StateManager({ saveId: 'save-001' });
-      await sm.commitChatState([
-        { op: 'remove_item', target: 'characters.char-001', value: 'potion' },
+        { op: 'remove_item', target: 'characters.理查德', value: { name: '生命药水' } },
       ]);
 
       expect(char.inventory[0].quantity).toBe(2);
+    });
+
+    it('remove_item 扣减到 ≤0 时 splice 删除条目', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '生命药水', quantity: 2 }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      await sm.commitChatState([
+        { op: 'remove_item', target: 'characters.理查德', value: { name: '生命药水', quantity: 5 } },
+      ]);
+
+      expect(char.inventory).toHaveLength(0);
+    });
+
+    it('remove_item 找不到物品 → 进 errors[] 不静默（#5 #35）', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', inventory: [] });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'remove_item', target: 'characters.理查德', value: { name: '不存在的物品' } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('物品不存在');
+    });
+
+    it('remove_item 裸字符串过渡形态: value 按 name 解释 + patch.amount 当 quantity（craft-resolver 现行发法）', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '铁锭', quantity: 5, type: '材料' }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'remove_item', target: 'characters.理查德', value: '铁锭', amount: 3 },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.inventory[0].quantity).toBe(2);
+    });
+
+    // ---------- update_item ----------
+    it('update_item value={name, changes} 按名修改 + 归一化生效', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '铁剑', quantity: 1, type: '装备', durability: 50 }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        {
+          op: 'update_item',
+          target: 'characters.理查德',
+          value: { name: '铁剑', changes: { durability: 30, rarity: 'epic', description: '有些破损的铁剑' } },
+        },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.inventory[0].durability).toBe(30);
+      expect(char.inventory[0].rarity).toBe('史诗');   // 归一化生效
+      expect(char.inventory[0].description).toBe('有些破损的铁剑');
+      expect(result.eventsGenerated[0].type).toBe('item_use');
+    });
+
+    it('update_item 不存在的物品 → 进 errors[]', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1', inventory: [] });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'update_item', target: 'characters.理查德', value: { name: '幽灵剑', changes: { durability: 1 } } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('物品不存在');
+    });
+
+    it('update_item changes 禁 name/quantity（改名走删加、数量走 add/remove）→ 进 errors[]', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '铁剑', quantity: 1 }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'update_item', target: 'characters.理查德', value: { name: '铁剑', changes: { name: '钢剑' } } },
+        { op: 'update_item', target: 'characters.理查德', value: { name: '铁剑', changes: { quantity: 99 } } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(2);
+      expect(char.inventory[0].name).toBe('铁剑');     // 未被改名
+      expect(char.inventory[0].quantity).toBe(1);      // 未被改量
+    });
+
+    it('update_item changes 里的 id 剥离不写入（铁律1）', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '铁剑', quantity: 1 }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'update_item', target: 'characters.理查德', value: { name: '铁剑', changes: { id: 'evil-id', durability: 10 } } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.inventory[0].id).toBeUndefined();
+      expect(char.inventory[0].durability).toBe(10);
+    });
+
+    // ---------- transfer_item ----------
+    it('transfer_item 原子转移: 扣甲加乙，乙同名合并', async () => {
+      const alice = buildMockCharacter({
+        id: 'uuid-a', name: '爱丽丝', type: 'player', saveId: 's1',
+        inventory: [{ name: '生命药水', quantity: 5, type: '消耗品', rarity: '优良' }],
+      });
+      const bob = buildMockCharacter({
+        id: 'uuid-b', name: '鲍勃', type: 'npc', saveId: 's1',
+        inventory: [{ name: '生命药水', quantity: 1, type: '消耗品' }],
+      });
+      await db.saveCharacter(alice);
+      await db.saveCharacter(bob);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'transfer_item', target: 'characters.爱丽丝', value: { name: '生命药水', to: '鲍勃', quantity: 2 } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(alice.inventory[0].quantity).toBe(3);
+      expect(bob.inventory).toHaveLength(1);          // 同名合并不重复插入
+      expect(bob.inventory[0].quantity).toBe(3);
+      expect(result.eventsGenerated[0].type).toBe('item_use');
+    });
+
+    it('transfer_item quantity 缺省 1；甲扣完 splice；乙无同名则新增（不带 id）', async () => {
+      const alice = buildMockCharacter({
+        id: 'uuid-a', name: '爱丽丝', type: 'player', saveId: 's1',
+        inventory: [{ name: '古老怀表', quantity: 1, rarity: '稀有', description: '滴答作响' }],
+      });
+      const bob = buildMockCharacter({ id: 'uuid-b', name: '鲍勃', type: 'npc', saveId: 's1', inventory: [] });
+      await db.saveCharacter(alice);
+      await db.saveCharacter(bob);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'transfer_item', target: 'characters.爱丽丝', value: { name: '古老怀表', to: '鲍勃' } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(alice.inventory).toHaveLength(0);        // 扣完删除条目
+      expect(bob.inventory).toHaveLength(1);
+      expect(bob.inventory[0].name).toBe('古老怀表');
+      expect(bob.inventory[0].quantity).toBe(1);
+      expect(bob.inventory[0].rarity).toBe('稀有');   // 物品字段随转移带过去
+      expect(bob.inventory[0].id).toBeUndefined();
+    });
+
+    it('transfer_item 原子性: 乙不存在 → 整体不动，甲的数量不变，进 errors[]', async () => {
+      const alice = buildMockCharacter({
+        id: 'uuid-a', name: '爱丽丝', type: 'player', saveId: 's1',
+        inventory: [{ name: '生命药水', quantity: 5 }],
+      });
+      await db.saveCharacter(alice);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'transfer_item', target: 'characters.爱丽丝', value: { name: '生命药水', to: '不存在的人', quantity: 2 } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('角色不存在');
+      expect(alice.inventory[0].quantity).toBe(5);    // 甲的数量不变（原子性）
+    });
+
+    it('transfer_item 原子性: 甲没有该物品/数量不足 → 整体不动，进 errors[]', async () => {
+      const alice = buildMockCharacter({
+        id: 'uuid-a', name: '爱丽丝', type: 'player', saveId: 's1',
+        inventory: [{ name: '生命药水', quantity: 1 }],
+      });
+      const bob = buildMockCharacter({ id: 'uuid-b', name: '鲍勃', type: 'npc', saveId: 's1', inventory: [] });
+      await db.saveCharacter(alice);
+      await db.saveCharacter(bob);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'transfer_item', target: 'characters.爱丽丝', value: { name: '不存在的物品', to: '鲍勃' } },
+        { op: 'transfer_item', target: 'characters.爱丽丝', value: { name: '生命药水', to: '鲍勃', quantity: 3 } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(2);
+      expect(alice.inventory[0].quantity).toBe(1);    // 数量不足时不做部分转移
+      expect(bob.inventory).toHaveLength(0);          // 乙也未收到任何东西
+    });
+
+    it('transfer_item 缺 to → 进 errors[]', async () => {
+      const alice = buildMockCharacter({
+        id: 'uuid-a', name: '爱丽丝', type: 'player', saveId: 's1',
+        inventory: [{ name: '生命药水', quantity: 5 }],
+      });
+      await db.saveCharacter(alice);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'transfer_item', target: 'characters.爱丽丝', value: { name: '生命药水' } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(alice.inventory[0].quantity).toBe(5);
     });
   });
 
