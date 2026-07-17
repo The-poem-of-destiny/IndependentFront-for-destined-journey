@@ -149,10 +149,10 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
               </div>
             </div>
 
-            <!-- 心里话卡片 — 经 store.getThoughts 双路径(运行时关系列表→存档 customFields.thoughts) 读取 -->
-            <div class="ov-card" v-if="game.getThoughts(selected.name, selected)">
+            <!-- 心里话卡片 — 唯一真源 CharacterState.thoughts 正式字段（M6 T1） -->
+            <div class="ov-card" v-if="game.getThoughts(selected)">
               <div class="ov-card-title">心里话</div>
-              <p class="ov-thoughts">{{ game.getThoughts(selected.name, selected) }}</p>
+              <p class="ov-thoughts">{{ game.getThoughts(selected) }}</p>
             </div>
 
             <!-- 基础信息卡片 -->
@@ -163,7 +163,7 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
                 <div class="ov-kv"><span>身份</span><span>{{ selected.identity?.join(' / ') || '—' }}</span></div>
                 <div class="ov-kv"><span>职业</span><span>{{ selected.occupation?.join(' / ') || '—' }}</span></div>
                 <div class="ov-kv"><span>所在地</span><span class="ov-long">{{ selected.location || '未知' }}</span></div>
-                <div class="ov-kv" v-if="(selected as any).customFields?.gender"><span>性别</span><span>{{ (selected as any).customFields.gender }}</span></div>
+                <div class="ov-kv" v-if="selected.gender"><span>性别</span><span>{{ selected.gender }}</span></div>
                 <div class="ov-kv" v-if="(selected as any).customFields?.age"><span>年龄</span><span>{{ (selected as any).customFields.age }}</span></div>
               </div>
             </div>
@@ -187,26 +187,26 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
               </div>
             </div>
 
-            <!-- 详情列表: 外观/着装 → 特征/背景 -->
+            <!-- 详情列表: 外观/着装 → 性格/背景（M6 T1: 读正式字段，trait→personality） -->
             <div class="ov-detail-list">
-              <template v-if="(selected as any).customFields?.appearance || (selected as any).customFields?.outfit">
-                <div class="ov-dl-item" v-if="(selected as any).customFields?.appearance">
+              <template v-if="selected.appearance || selected.outfit">
+                <div class="ov-dl-item" v-if="selected.appearance">
                   <span class="ov-dl-label">外貌</span>
-                  <span class="ov-dl-text">{{ (selected as any).customFields.appearance }}</span>
+                  <span class="ov-dl-text">{{ selected.appearance }}</span>
                 </div>
-                <div class="ov-dl-item" v-if="(selected as any).customFields?.outfit">
+                <div class="ov-dl-item" v-if="selected.outfit">
                   <span class="ov-dl-label">着装</span>
-                  <span class="ov-dl-text">{{ (selected as any).customFields.outfit }}</span>
+                  <span class="ov-dl-text">{{ selected.outfit }}</span>
                 </div>
                 <div class="ov-dl-divider" />
               </template>
-              <div class="ov-dl-item" v-if="(selected as any).customFields?.trait">
+              <div class="ov-dl-item" v-if="selected.personality">
                 <span class="ov-dl-label">特征</span>
-                <span class="ov-dl-text">{{ (selected as any).customFields.trait }}</span>
+                <span class="ov-dl-text">{{ selected.personality }}</span>
               </div>
-              <div class="ov-dl-item" v-if="(selected as any).customFields?.background || selected.description">
+              <div class="ov-dl-item" v-if="selected.background || selected.description">
                 <span class="ov-dl-label">背景</span>
-                <span class="ov-dl-text">{{ (selected as any).customFields?.background || selected.description }}</span>
+                <span class="ov-dl-text">{{ selected.background || selected.description }}</span>
               </div>
             </div>
           </template>

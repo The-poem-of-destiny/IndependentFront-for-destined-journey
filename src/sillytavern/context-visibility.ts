@@ -286,9 +286,13 @@ function formatCharacterNarrative(char: CharacterState): string {
   const tierLabel = `T${char.tier} ${char.tierName || ''}`;
   const occupationStr = char.occupation?.length ? ` · 职业: ${char.occupation.join(', ')}` : '';
   const identityStr = char.identity?.length ? `  身份: ${char.identity.join(', ')}${occupationStr}` : '';
-  const backgroundStr = cf.background ? `  背景: ${cf.background}` : '';
-  const personalityStr = cf.personality ? `  性格: ${cf.personality}` : '';
-  const appearanceStr = cf.appearance ? `  外貌: ${cf.appearance}` : '';
+  // M6 T1: 读方切正式字段（规范 §2.1）；customFields 兜底 Task 2 停写后删
+  const background = char.background ?? cf.background;
+  const personality = char.personality ?? cf.personality;
+  const appearance = char.appearance ?? cf.appearance;
+  const backgroundStr = background ? `  背景: ${background}` : '';
+  const personalityStr = personality ? `  性格: ${personality}` : '';
+  const appearanceStr = appearance ? `  外貌: ${appearance}` : '';
 
   lines.push(`[${typeLabel}] ${char.name} · ${char.race} · ${tierLabel} · Lv.${char.level}`);
 

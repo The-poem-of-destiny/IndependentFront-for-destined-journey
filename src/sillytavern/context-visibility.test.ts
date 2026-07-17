@@ -475,6 +475,21 @@ describe('filterZoneContent — NARRATIVE', () => {
     expect(result).toContain('内向但心地善良'); // personality
   });
 
+  it('M6 T1: 角色只有一等 appearance/background/personality（customFields 无）时上下文包含叙事字段', () => {
+    const char = makeCharacter();
+    // 只留正式字段，customFields 清空对应 key（模拟 M6 停写后的新数据）
+    (char as any).appearance = '一头银发的高挑女性';
+    (char as any).background = '来自诺斯加德的佣兵';
+    (char as any).personality = '沉默寡言但值得信赖';
+    char.customFields = {};
+    const content = { characters: [char] };
+    const result = filterZoneContent('npc', content, 'NARRATIVE', 'story', ctx);
+    expect(result).not.toBeNull();
+    expect(result).toContain('一头银发的高挑女性');
+    expect(result).toContain('来自诺斯加德的佣兵');
+    expect(result).toContain('沉默寡言但值得信赖');
+  });
+
   it('includes relationships with affinity values', () => {
     const content = { characters: [makeCharacter()] };
     const result = filterZoneContent('npc', content, 'NARRATIVE', 'story', ctx);

@@ -108,7 +108,7 @@ function toggleExpand(char: CharacterState) {
 }
 
 function thoughtsOf(char: CharacterState): string {
-  return game.getThoughts(char.name, char)
+  return game.getThoughts(char)
 }
 
 // ═══ 下段：新闻单选展开 ═══

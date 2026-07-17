@@ -56,12 +56,9 @@ export const useGameStore = defineStore('game', () => {
   )
 
   // === 心里话 ===
-  // 唯一真源: CharacterState.thoughts 正式字段（规范 §7），customFields.thoughts 兜底（M6 删）
-  function getThoughts(charName: string, char?: CharacterState): string {
-    if (char?.thoughts) return char.thoughts
-    const cf = (char as any)?.customFields
-    if (cf && typeof cf.thoughts === 'string' && cf.thoughts) return cf.thoughts
-    return ''
+  // 唯一真源: CharacterState.thoughts 正式字段（规范 §7，M6 T1 切读收口）
+  function getThoughts(char?: CharacterState): string {
+    return char?.thoughts ?? ''
   }
 
   // === Agent 管线状态（供 AgentStatusPanel 读取） ===
@@ -317,9 +314,9 @@ export const useGameStore = defineStore('game', () => {
   async function refreshFromDb() {
     if (!activeSaveId.value) return
     try {
-      const [save, allChars, profile] = await Promise.all([
+      const [save, dbChars, profile] = await Promise.all([
         getSave(activeSaveId.value),
-        getCharacters(),   // 全量取后按一等 saveId 过滤追加（Task 4 起侧链 NPC 由 applyAddCharacter 注入 saveId）
+        getCharacters(activeSaveId.value),   // M6: saveId 索引查询（M1 建索引；侧链 NPC 由 applyAddCharacter 注入 saveId）
         getSaveProfile(activeSaveId.value),
       ])
 
@@ -331,12 +328,12 @@ export const useGameStore = defineStore('game', () => {
       }
 
       // 2. characters：合并语义 —— DB 版本覆盖同 id 内存版本（拿到最新背包/装备/资源），
-      //    DB 里属于本存档但内存没有的角色追加；内存独有的（预览注入等）保留。
-      const dbById = new Map((allChars as CharacterState[]).map(c => [c.id, c]))
+      //    DB 里属于本存档但内存没有的角色追加（查询已按 saveId 索引预过滤）；内存独有的（预览注入等）保留。
+      const dbById = new Map((dbChars as CharacterState[]).map(c => [c.id, c]))
       characters.value = characters.value.map(c => dbById.get(c.id) ?? c)
       const memIds = new Set(characters.value.map(c => c.id))
-      for (const c of allChars as CharacterState[]) {
-        if (!memIds.has(c.id) && c.saveId === activeSaveId.value) {
+      for (const c of dbChars as CharacterState[]) {
+        if (!memIds.has(c.id)) {
           characters.value.push(c)
         }
       }

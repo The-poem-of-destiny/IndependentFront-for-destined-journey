@@ -70,7 +70,7 @@ function injectChatFlowTest() {
     quest_update: true,
   }
   // 注入 ScenePanel 中段(在场NPC + thoughts 心里话) 与下段(新闻) 预览数据
-  // 经 store.getThoughts(正式字段/customFields 兜底)、saveProfile.news 读取
+  // 经 store.getThoughts(CharacterState.thoughts 正式字段，M6 单源)、saveProfile.news 读取
   const preview = buildScenePreviewMock()
   game.hydratePreview(preview)
   // 先清空再注入 ChatFlow 消息
