@@ -521,8 +521,8 @@ describe('StateManager', () => {
       const char = buildMockCharacter({ id: 'char-001', statusEffects: [] });
       vi.mocked(db.getCharacter).mockResolvedValue(char);
 
+      // M2: 无 id — 逻辑键=名字（铁律1）
       const effect: StatusEffect = {
-        id: 'burn',
         name: 'Burn',
         description: 'Burning',
         stacks: 1,
@@ -540,11 +540,12 @@ describe('StateManager', () => {
 
       expect(result.success).toBe(true);
       expect(char.statusEffects).toHaveLength(1);
-      expect(char.statusEffects[0].id).toBe('burn');
+      expect(char.statusEffects[0].name).toBe('Burn');
       expect(result.eventsGenerated[0].type).toBe('status_effect');
     });
 
     it('should stack existing status effect (stacks + remainingTime)', async () => {
+      // 旧数据带 id（可选字段兼容），叠层按 name 匹配
       const existing: StatusEffect = {
         id: 'poison',
         name: 'Poison',
@@ -560,7 +561,6 @@ describe('StateManager', () => {
       vi.mocked(db.getCharacter).mockResolvedValue(char);
 
       const newStack: StatusEffect = {
-        id: 'poison',
         name: 'Poison',
         description: 'Poisoned',
         stacks: 3,
@@ -581,22 +581,22 @@ describe('StateManager', () => {
       expect(char.statusEffects[0].remainingTime).toBe(4); // max(4, 2)
     });
 
-    it('should remove status effect by id', async () => {
+    it('should remove status effect by name', async () => {
       const effects: StatusEffect[] = [
-        { id: 'burn', name: 'Burn', description: '', stacks: 1, remainingTime: 2, source: 'fire', category: '减益' as const, timeUnit: '回合' as const, effects: {} },
-        { id: 'poison', name: 'Poison', description: '', stacks: 1, remainingTime: 3, source: 'snake', category: '减益' as const, timeUnit: '回合' as const, effects: {} },
+        { name: 'Burn', description: '', stacks: 1, remainingTime: 2, source: 'fire', category: '减益' as const, timeUnit: '回合' as const, effects: {} },
+        { name: 'Poison', description: '', stacks: 1, remainingTime: 3, source: 'snake', category: '减益' as const, timeUnit: '回合' as const, effects: {} },
       ];
       const char = buildMockCharacter({ id: 'char-001', statusEffects: [...effects] });
       vi.mocked(db.getCharacter).mockResolvedValue(char);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'remove_status_effect', target: 'characters.char-001', value: 'burn' },
+        { op: 'remove_status_effect', target: 'characters.char-001', value: { name: 'Burn' } },
       ]);
 
       expect(result.success).toBe(true);
       expect(char.statusEffects).toHaveLength(1);
-      expect(char.statusEffects[0].id).toBe('poison');
+      expect(char.statusEffects[0].name).toBe('Poison');
     });
 
     it('should not error when removing non-existent status effect', async () => {
@@ -610,6 +610,137 @@ describe('StateManager', () => {
 
       expect(result.success).toBe(true);
       expect(result.patchesApplied).toBe(1);
+    });
+  });
+
+  // ===================================================================
+  // 7b. status effects — M2 按名寻址 (#4 #22)
+  // ===================================================================
+  describe('commitChatState — 状态效果按名寻址 (M2)', () => {
+    it('#4: add_status_effect 不带 id 成功落库', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1' });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        {
+          op: 'add_status_effect',
+          target: 'characters.理查德',
+          value: {
+            name: '轻伤',
+            description: '手臂上有一道浅浅的伤口',
+            category: '减益',
+            remainingTime: 120,
+            timeUnit: '分钟',
+            source: '战斗-哥布林',
+            effects: {},
+          },
+        },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(char.statusEffects).toHaveLength(1);
+      expect(char.statusEffects[0].name).toBe('轻伤');
+      expect(char.statusEffects[0].id).toBeUndefined(); // 不为新效果写 id
+      expect(char.statusEffects[0].stacks).toBe(1);     // 缺省 stacks=1
+    });
+
+    it('同名再施加 stackable=true → stacks+1，超 maxStacks 封顶', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        statusEffects: [{
+          name: '中毒', description: '', category: '减益', stacks: 2, maxStacks: 3,
+          stackable: true, remainingTime: 10, timeUnit: '分钟', source: '蛇咬', effects: {},
+        }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      // 第一次再施加（不带 stacks → 缺省视作 1 层）: 2+1=3
+      const r1 = await sm.commitChatState([
+        { op: 'add_status_effect', target: 'characters.理查德', value: { name: '中毒', category: '减益' } },
+      ]);
+      expect(r1.success).toBe(true);
+      expect(char.statusEffects[0].stacks).toBe(3);
+
+      // 第二次再施加: 3+1=4 > maxStacks=3 → 封顶 3
+      await sm.commitChatState([
+        { op: 'add_status_effect', target: 'characters.理查德', value: { name: '中毒', category: '减益' } },
+      ]);
+      expect(char.statusEffects[0].stacks).toBe(3);
+      expect(char.statusEffects).toHaveLength(1); // 不重复插入
+    });
+
+    it('#22: remove_status_effect value=字符串 按名删除', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        statusEffects: [
+          { name: '轻伤', description: '', category: '减益', stacks: 1, remainingTime: 120, timeUnit: '分钟', source: '战斗', effects: {} },
+          { name: '鼓舞', description: '', category: '增益', stacks: 1, remainingTime: 30, timeUnit: '分钟', source: '战吼', effects: {} },
+        ],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'remove_status_effect', target: 'characters.理查德', value: '轻伤' },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.statusEffects).toHaveLength(1);
+      expect(char.statusEffects[0].name).toBe('鼓舞');
+    });
+
+    it("category 传 'buff' 归一为 '增益'", async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1' });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        {
+          op: 'add_status_effect',
+          target: 'characters.理查德',
+          value: { name: '鼓舞', description: '士气高昂', category: 'buff', remainingTime: 30, timeUnit: '分钟', source: '战吼', effects: {} },
+        },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.statusEffects[0].category).toBe('增益');
+    });
+
+    it('add_status_effect 缺 name → 进 errors[]', async () => {
+      const char = buildMockCharacter({ id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1' });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'add_status_effect', target: 'characters.理查德', value: { description: '无名效果' } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(char.statusEffects).toHaveLength(0);
+    });
+
+    it('同名再施加 stackable=false → 保持 1 层，只刷新时长', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        statusEffects: [{
+          name: '护盾', description: '', category: '增益', stacks: 1,
+          stackable: false, remainingTime: 5, timeUnit: '分钟', source: '法术', effects: {},
+        }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      await sm.commitChatState([
+        { op: 'add_status_effect', target: 'characters.理查德', value: { name: '护盾', category: '增益', remainingTime: 20, timeUnit: '分钟' } },
+      ]);
+
+      expect(char.statusEffects).toHaveLength(1);
+      expect(char.statusEffects[0].stacks).toBe(1);          // 不叠层
+      expect(char.statusEffects[0].remainingTime).toBe(20);  // 刷新时长 max(5, 20)
     });
   });
 

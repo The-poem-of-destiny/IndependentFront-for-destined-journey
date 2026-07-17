@@ -26,7 +26,7 @@ import {
 } from './database';
 import type { SaveSlot } from './types';
 import { getVar, setVar, delVar, insertVar } from './var-resolver';
-import { normalizeQuestStatus } from './field-enums';
+import { normalizeQuestStatus, normalizeStatusCategory } from './field-enums';
 
 // ========== Types ==========
 
@@ -430,37 +430,68 @@ export class StateManager {
     return this.createEvent('character_action', patch);
   }
 
+  /**
+   * add_status_effect — M2 按名寻址 (#4)
+   *
+   * value = { name(必), ... } — 不要求 id（AI 永不产 id，铁律1/3）
+   * 同名叠层规则:
+   * - stackable=false: 永远 1 层，只刷新时长（取 max；新效果永久则覆盖为永久）
+   * - 其他（含缺省）: stacks 累加（缺省视作 1 层），有 maxStacks 则封顶
+   * category 过 normalizeStatusCategory 归一（'buff' → '增益' 等，铁律5）
+   */
   private async applyAddStatusEffect(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    const effect = patch.value as StatusEffect;
-    if (!effect?.id) throw new Error('缺少 status effect 数据');
+    const value = patch.value as Partial<StatusEffect>;
+    if (!value?.name) throw new Error('add_status_effect 需要 value.name');
 
-    // 检查是否已存在同 ID 效果 → 叠加层数
-    const existing = char.statusEffects.find(e => e.id === effect.id);
+    const incomingStacks = typeof value.stacks === 'number' && value.stacks > 0 ? value.stacks : 1;
+
+    // 刷新时长: 双方有限取 max；新效果永久(null) 覆盖为永久；未提供(undefined) 不动
+    const refreshTime = (existing: StatusEffect): void => {
+      if (value.remainingTime === undefined) return;
+      if (value.remainingTime === null) {
+        existing.remainingTime = null;
+      } else if (existing.remainingTime !== null) {
+        existing.remainingTime = Math.max(existing.remainingTime, value.remainingTime);
+      }
+      // existing 已是永久 → 保持永久
+    };
+
+    const existing = findByName(char.statusEffects, value.name);
     if (existing) {
-      // 🆕 不可叠加: 永远1层，只刷新时间
       if (existing.stackable === false) {
+        // 不可叠加: 同名再施加不重复插入，保持 1 层，只刷新时长
         existing.stacks = 1;
-        if (existing.remainingTime !== null && effect.remainingTime !== null) {
-          existing.remainingTime = Math.max(existing.remainingTime, effect.remainingTime);
-        } else if (effect.remainingTime === null) {
-          existing.remainingTime = null; // 新效果永久, 覆盖为永久
-        }
+        refreshTime(existing);
       } else {
-        // 可叠加: 累加层数，有上限则 clamp
-        existing.stacks += effect.stacks;
+        // 可叠加（含缺省）: 累加层数，有上限则封顶
+        existing.stacks += incomingStacks;
         if (existing.maxStacks && existing.maxStacks > 0) {
           existing.stacks = Math.min(existing.stacks, existing.maxStacks);
         }
-        if (existing.remainingTime !== null && effect.remainingTime !== null) {
-          existing.remainingTime = Math.max(existing.remainingTime, effect.remainingTime);
-        } else if (effect.remainingTime === null) {
-          existing.remainingTime = null;
-        }
+        refreshTime(existing);
       }
     } else {
-      // 新效果: 初始层数 clamp 到 maxStacks
+      // 新效果: 不写 id（铁律1，id 字段 @deprecated），category 归一，缺省补账务字段
+      const effect: StatusEffect = {
+        name: value.name,
+        description: value.description ?? '',
+        category: normalizeStatusCategory(value.category ?? ''),
+        stacks: incomingStacks,
+        maxStacks: value.maxStacks,
+        stackable: value.stackable,
+        remainingTime: value.remainingTime ?? null,
+        timeUnit: value.timeUnit ?? '分钟',
+        source: value.source ?? '',
+        effects: value.effects ?? {},
+        effectDescriptions: value.effectDescriptions,
+        scripts: value.scripts,
+        onApply: value.onApply,
+        onTick: value.onTick,
+        onRemove: value.onRemove,
+        onTrigger: value.onTrigger,
+      };
       if (effect.maxStacks && effect.maxStacks > 0) {
         effect.stacks = Math.min(effect.stacks, effect.maxStacks);
       }
@@ -471,11 +502,20 @@ export class StateManager {
     return this.createEvent('status_effect', patch);
   }
 
+  /**
+   * remove_status_effect — M2 按名删除 (#22)
+   *
+   * value = { name } 或裸字符串（按 name 解释）  // 过渡: M3 删裸字符串形态
+   */
   private async applyRemoveStatusEffect(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    const effectId = patch.value as string;
-    char.statusEffects = char.statusEffects.filter(e => e.id !== effectId);
+    const name = typeof patch.value === 'string'
+      ? patch.value  // 过渡: M3 删
+      : (patch.value as { name?: string })?.name;
+    if (!name) throw new Error('remove_status_effect 需要 value.name');
+
+    char.statusEffects = char.statusEffects.filter(e => e.name !== name);
     await saveCharacter(char);
 
     return this.createEvent('status_effect', patch);
@@ -744,10 +784,9 @@ export class StateManager {
 
     for (const char of characters) {
       let changed = false;
+      const expired: StatusEffect[] = [];
 
-      for (let i = char.statusEffects.length - 1; i >= 0; i--) {
-        const fx = char.statusEffects[i];
-
+      for (const fx of char.statusEffects) {
         // 永久效果跳过
         if (fx.remainingTime === null) continue;
 
@@ -760,36 +799,38 @@ export class StateManager {
         } else {
           fx.remainingTime -= minutes;
         }
+        changed = true;
 
-        // 过期移除
         if (fx.remainingTime <= 0) {
-          // 执行 onRemove 脚本
-          if (fx.onRemove && fx.scripts) {
-            const { executeScript } = await import('./script-executor');
-            const result = executeScript(fx.scripts[fx.onRemove]!, {
-              owner: char.id,
-              self: { stacks: fx.stacks, remainingTime: 0, name: fx.name },
-            });
-            patches.push(...convertScriptEffects(result));
-          }
-
-          char.statusEffects.splice(i, 1);
-          changed = true;
-
-          patches.push({
-            op: 'remove_status_effect',
-            target: `characters.${char.id}`,
-            value: fx.id,
-          });
-
-          this.createEvent('status_effect', {
-            op: 'remove_status_effect',
-            target: `characters.${char.id}`,
-            value: fx.id,
-          });
-        } else {
-          changed = true;
+          expired.push(fx);
         }
+      }
+
+      // 过期移除 — M2 按名删除（#22，旧数据带 id 也按 name 过滤，不受影响）
+      for (const fx of expired) {
+        // 执行 onRemove 脚本
+        if (fx.onRemove && fx.scripts) {
+          const { executeScript } = await import('./script-executor');
+          const result = executeScript(fx.scripts[fx.onRemove]!, {
+            owner: char.id,
+            self: { stacks: fx.stacks, remainingTime: 0, name: fx.name },
+          });
+          patches.push(...convertScriptEffects(result));
+        }
+
+        char.statusEffects = char.statusEffects.filter(e => e.name !== fx.name);
+
+        patches.push({
+          op: 'remove_status_effect',
+          target: `characters.${char.name}`,
+          value: { name: fx.name },
+        });
+
+        this.createEvent('status_effect', {
+          op: 'remove_status_effect',
+          target: `characters.${char.name}`,
+          value: { name: fx.name },
+        });
       }
 
       if (changed) {
@@ -831,7 +872,9 @@ import type { ScriptEffects } from './script-executor';
 
 function convertScriptEffects(se: ScriptEffects): StatePatch[] {
   const patches: StatePatch[] = [];
-  for (const a of se.adds) patches.push({ op: 'add_status_effect', target: `characters.${a.charId}`, value: a.effect as any });
+  // M2: add_status_effect 不再要求 id → Partial<StatusEffect> 直接透传（handler 内按 name 寻址+补缺省）
+  for (const a of se.adds) patches.push({ op: 'add_status_effect', target: `characters.${a.charId}`, value: a.effect });
+  // M2: effectId 字符串按 name 解释（remove handler 的裸字符串过渡形态）
   for (const r of se.removes) patches.push({ op: 'remove_status_effect', target: `characters.${r.charId}`, value: r.effectId });
   for (const s of se.stackSets) patches.push({ op: 'set_variable', target: `characters.${s.charId}.statusEffects`, value: { id: s.effectId, stacks: s.stacks } });
   for (const h of se.hpChanges) patches.push({ op: 'delta_variable', target: `characters.${h.charId}.hp`, amount: h.amount });
