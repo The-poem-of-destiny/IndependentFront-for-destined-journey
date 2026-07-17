@@ -48,6 +48,10 @@ export interface CharGenRequest {
   marker?: CharGenRequestMarker;
   context: AgentContext;
   endpoint: ApiEndpoint;
+  /** 真机修(2026-07-17): 侧链 buildAgentMessages 需要完整配置才能拿到 systemPrompt + 世界书 */
+  configs?: import('./types').AgentConfig[];
+  worldBooks?: import('./types').WorldBook[];
+  presets?: import('./types').AgentPreset[];
 }
 
 export interface CharGenAgentDeps {
@@ -132,7 +136,19 @@ export async function callCharGenAgent(
   // 新格式优先: CharGenRequestMarker (vars_update 输出)
   // 旧格式兼容: CharDetectMarker (Story Agent 输出的 char_detect)
   const markerOrDetect = request.marker ?? request.detection;
-  const requestContent = markerOrDetect?.bodyText ?? markerOrDetect?.rawContent ?? '';
+  const bodyText = markerOrDetect?.bodyText ?? markerOrDetect?.rawContent ?? '';
+
+  // 真机修(2026-07-17): bodyText 不含标签属性 → characterName/race/tier 等指定信息丢失，
+  // char_gen 自造名字（dispatcher 要"妲丽安"产出"薇拉"）。把属性拼成指定信息行注入。
+  const attrs = (request.marker?.attributes ?? {}) as Record<string, string | undefined>;
+  const attrLines = [
+    attrs.characterName ? `指定名称: ${attrs.characterName}（正文已出现的名字必须沿用；若这是描述性称呼而正文里有真名，用真名）` : '',
+    attrs.race && attrs.race !== '未知' ? `种族: ${attrs.race}` : '',
+    attrs.tier && attrs.tier !== '未知' ? `层级: ${attrs.tier}` : '',
+    attrs.characterType ? `类型: ${attrs.characterType}` : '',
+    attrs.faction && attrs.faction !== '未知' ? `势力: ${attrs.faction}` : '',
+  ].filter(Boolean).join('\n');
+  const requestContent = [attrLines, bodyText].filter(Boolean).join('\n');
 
   // Bug fix 1: Set BOTH keys so templates with {{CHAR_DETECT}} or {{CHAR_GEN_REQUEST}} both resolve.
   // The char_gen template in agent-config.json uses {{CHAR_DETECT}}, but Phase 10 flows
@@ -146,7 +162,9 @@ export async function callCharGenAgent(
   // Bug fix 2: Do NOT overwrite agentOutputs with a tiny Map containing only the marker body.
   // The original context already has the full story output from the upstream agent.
   // The marker body is passed via charLocalParams (CHAR_DETECT / CHAR_GEN_REQUEST).
-  const messages = buildAgentMessages('char_gen', request.context, undefined, undefined, undefined, charLocalParams);
+  // 真机修(2026-07-17): configs/worldBooks/presets 透传 — 此前恒 undefined，
+  // char_gen 的 systemPrompt 退化为一行 stub + {{LORE_BOOK}} 恒空（命名/格式纪律全失效）。
+  const messages = buildAgentMessages('char_gen', request.context, request.configs, request.worldBooks, request.presets, charLocalParams);
 
   if (!messages) {
     throw new Error('char_gen 模板未找到 — 请检查 AGENT_TEMPLATES 注册');
@@ -217,7 +235,7 @@ export async function callItemGenAgent(
     charItemLocalParams.ITEM_REQUEST = charItemReqMatch[1].trim();
   }
 
-  const messages = buildAgentMessages('item_gen', contextWithCharData, undefined, undefined, undefined, charItemLocalParams);
+  const messages = buildAgentMessages('item_gen', contextWithCharData, request.configs, request.worldBooks, request.presets, charItemLocalParams);
 
   if (!messages) {
     throw new Error('item_gen 模板未找到 — 请检查 AGENT_TEMPLATES 注册');
@@ -463,7 +481,7 @@ export async function runCharGenChain(
  * 1. JSON（旧格式，向后兼容）
  * 2. XML <char_result>（新 Agentic 格式，Phase 8.5）
  */
-function parseCharGenOutput(raw: string): CharGenOutput {
+export function parseCharGenOutput(raw: string): CharGenOutput {
   // 先尝试 XML
   const xml = extractXML(raw, 'char_result');
   if (xml) {
@@ -588,11 +606,13 @@ function parseCharGenXML(xml: string): CharGenOutput {
     },
     identity: extractTag(xml, 'identity')?.split(',').map(s => s.trim()).filter(Boolean) ?? [],
     occupation: extractTag(xml, 'occupation')?.split(',').map(s => s.trim()).filter(Boolean) ?? [],
-    background: extractTag(xml, 'background') ?? '',
-    appearance: extractTag(xml, 'appearance') ?? '',
-    clothing: extractTag(xml, 'clothing') ?? '',
-    personality: extractTag(xml, 'personality') ?? extractAttr(xml, 'personality', 'code') ?? '',
-    likes: extractTag(xml, 'likes') ?? '',
+    // 真机修(2026-07-17): AI 可能在叙事字段内嵌套子标签（<appearance>→<physical>/<voice>等），
+    // extractTag 原样返回 → 落库带 XML 污染前端渲染。stripInnerTags 剥子标签留纯文本。
+    background: stripInnerTags(extractTag(xml, 'background') ?? ''),
+    appearance: stripInnerTags(extractTag(xml, 'appearance') ?? ''),
+    clothing: stripInnerTags(extractTag(xml, 'clothing') ?? ''),
+    personality: stripInnerTags(extractTag(xml, 'personality') ?? extractAttr(xml, 'personality', 'code') ?? ''),
+    likes: stripInnerTags(extractTag(xml, 'likes') ?? ''),
     ascension: {
       enabled: (extractAttr(xml, 'ascension', 'enabled') ?? 'false') === 'true',
       path: extractAttr(xml, 'ascension', 'path') ?? '',
@@ -996,6 +1016,21 @@ function extractTag(xml: string, tagName: string): string | null {
   const regex = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i');
   const match = xml.match(regex);
   return match ? match[1].trim() : null;
+}
+
+/**
+ * 剥离字段值内 AI 自作主张的嵌套 XML 标签（真机修 2026-07-17）。
+ * 如 <appearance> 内嵌 <physical>/<voice>/<presence>、<personality> 内嵌 <code>/<description>。
+ * 成对标签 → 保留内容（换行拼接）；孤立/残缺标签 → 删除。最多展开 3 层嵌套。
+ */
+function stripInnerTags(s: string): string {
+  if (!s || !/<[a-z_]/i.test(s)) return s;
+  let out = s;
+  for (let i = 0; i < 3 && /<([a-z_][\w-]*)\b[^>]*>[\s\S]*?<\/\1>/i.test(out); i++) {
+    out = out.replace(/<([a-z_][\w-]*)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_m, _t, inner) => `${String(inner).trim()}\n`);
+  }
+  out = out.replace(/<\/?[a-z_][\w-]*[^>]*>/gi, '');  // 残留孤立标签清除
+  return out.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /** 提取 XML 标签中的属性值 */

@@ -48,6 +48,10 @@ export interface ItemGenChainRequest {
   storyOutput: string;
   context: AgentContext;
   endpoint: ApiEndpoint;
+  /** 真机修(2026-07-17): 侧链 buildAgentMessages 需要完整配置才能拿到 systemPrompt + 世界书 */
+  configs?: import('./types').AgentConfig[];
+  worldBooks?: import('./types').WorldBook[];
+  presets?: import('./types').AgentPreset[];
 }
 
 export interface ItemGenChainDeps {
@@ -172,7 +176,8 @@ async function callItemGenForRequest(
   };
 
   try {
-    const messages = buildAgentMessages('item_gen', contextWithStory, undefined, undefined, undefined, itemLocalParams);
+    // 真机修(2026-07-17): configs/worldBooks/presets 透传 — 此前恒 undefined（systemPrompt 退化 stub）
+    const messages = buildAgentMessages('item_gen', contextWithStory, request.configs, request.worldBooks, request.presets, itemLocalParams);
     if (!messages || messages.length === 0) {
       // item_gen 模板找不到 / 产出空 messages 时返回空，不阻塞主流程
       // （避免空 messages 打 API 触发 HTTP 400 "missing field messages"）

@@ -44,6 +44,10 @@ export interface CraftGenRequest {
   storyOutput: string;
   context: AgentContext;
   endpoint: ApiEndpoint;
+  /** 真机修(2026-07-17): 侧链 buildAgentMessages 需要完整配置才能拿到 systemPrompt + 世界书 */
+  configs?: import('./types').AgentConfig[];
+  worldBooks?: import('./types').WorldBook[];
+  presets?: import('./types').AgentPreset[];
 }
 
 /** Helper: extract attributes from old or new marker shape */
@@ -174,7 +178,8 @@ export async function callCraftGenAgent(
     CRAFT_REQUEST: markerBody || request.storyOutput,
   };
 
-  const messages = buildAgentMessages('craft_gen', ctxWithStory, undefined, undefined, undefined, craftLocalParams);
+  // 真机修(2026-07-17): configs/worldBooks/presets 透传
+  const messages = buildAgentMessages('craft_gen', ctxWithStory, request.configs, request.worldBooks, request.presets, craftLocalParams);
 
   if (!messages) {
     throw new Error('craft_gen 模板未找到 — 请检查 AGENT_TEMPLATES 注册');
@@ -286,7 +291,8 @@ export async function callItemGenForCraft(
       ]),
     };
 
-    const messages = buildAgentMessages('item_gen', contextWithCraftData, undefined, undefined, undefined, craftItemLocalParams);
+    // 真机修(2026-07-17): configs/worldBooks/presets 透传
+    const messages = buildAgentMessages('item_gen', contextWithCraftData, request.configs, request.worldBooks, request.presets, craftItemLocalParams);
     if (!messages) {
       // item_gen 模板找不到时，返回空，不阻塞主流程
       return { skills: [], equipment: [], inventory: [] };

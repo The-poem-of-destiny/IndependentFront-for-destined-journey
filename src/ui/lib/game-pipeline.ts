@@ -64,6 +64,8 @@ export class GamePipeline {
   private saveId: string
   private orch: AgentOrchestrator | null = null
   private abortController: AbortController | null = null
+  /** 真机修(2026-07-17): run() 加载的配置/世界书/预设，供侧链 buildAgentMessages 使用（此前恒 undefined → systemPrompt 退化 stub + 世界书恒空） */
+  private chainData: { agentConfigs: AgentConfig[]; worldBooks: WorldBook[]; presets: AgentPreset[] } | null = null
 
   constructor(deps: GamePipelineDeps) {
     this.game = deps.gameStore
@@ -106,6 +108,11 @@ export class GamePipeline {
 
       // 2.6 构建 Agent 配置（用已加载的 agentDefaults 替代 projectAgentDefaults）
       const agentConfigs = this.buildAgentConfigs(agentDefaults, onStoryChunk)
+
+      // 真机修(2026-07-17): 侧链 (char/item/craft) 调用 buildAgentMessages 时需要
+      // configs/worldBooks/presets 才能拿到完整 systemPrompt + 世界书上下文，
+      // 把这三个值挂实例传给事件回调（回调通过闭包捕获 run() 局部变量）。
+      this.chainData = { agentConfigs, worldBooks, presets }
 
       // 3. 创建编排器
       const options: OrchestratorOptions = {
@@ -574,6 +581,9 @@ export class GamePipeline {
           storyOutput: ctx.agentOutputs?.get('story') ?? '',
           context: ctx,
           endpoint,
+          configs: this.chainData?.agentConfigs,
+          worldBooks: this.chainData?.worldBooks,
+          presets: this.chainData?.presets,
         } as any
         const result = await runCraftGenChain(request, {
           clientFactory,
@@ -611,6 +621,10 @@ export class GamePipeline {
           marker,
           context: ctx,
           endpoint,
+          // 真机修: 完整 systemPrompt/世界书/预设注入（此前 undefined → stub 裸奔）
+          configs: this.chainData?.agentConfigs,
+          worldBooks: this.chainData?.worldBooks,
+          presets: this.chainData?.presets,
         } as any
         const result = await runCharGenChain(charGenRequest, {
           clientFactory,
@@ -660,6 +674,10 @@ export class GamePipeline {
           storyOutput,
           context: ctx,
           endpoint,
+          // 真机修: 完整 systemPrompt/世界书注入
+          configs: this.chainData?.agentConfigs,
+          worldBooks: this.chainData?.worldBooks,
+          presets: this.chainData?.presets,
         }
         await runItemGenChain(request, {
           clientFactory,

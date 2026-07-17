@@ -1051,3 +1051,42 @@ describe('parseItemGenOutput — <item_result> 内嵌 JSON 兜底', () => {
     expect(out.equipment[0].name).toBe('精铁长剑');
   });
 });
+
+// ========== parseCharGenOutput — 嵌套标签剥离（真机 2026-07-17 薇拉形状） ==========
+
+describe('parseCharGenOutput — 叙事字段嵌套 XML 剥离', () => {
+  it('AI 在 appearance/personality 里自作主张嵌套子标签 → 落库前剥为纯文本', async () => {
+    const { parseCharGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<char_result>',
+      '<name>薇拉</name>',
+      '<race>灵体</race>',
+      '<gender>女</gender>',
+      '<tier>2</tier>',
+      '<level>8</level>',
+      '<attributes str="1" dex="4" con="3" int="5" spi="2" />',
+      '<identity>幻书管理者</identity>',
+      '<occupation>管理者</occupation>',
+      '<appearance>',
+      '  <physical>无物理实体。仅能以少女声音在意识中回响。</physical>',
+      '  <voice>清亮中带着书卷气的慵懒。</voice>',
+      '</appearance>',
+      '<personality>',
+      '  <code>wHlRY(A)（底层参考）</code>',
+      '  <description>表层性格完全傲娇化，内心孤独。</description>',
+      '</personality>',
+      '<background>在钥匙中沉睡了不知多久。</background>',
+      '</char_result>',
+    ].join('\n');
+
+    const out = parseCharGenOutput(raw);
+    expect(out.name).toBe('薇拉');
+    // 嵌套标签剥离：内容保留、标签消失
+    expect(out.appearance).not.toMatch(/<[a-z_]+/i);
+    expect(out.appearance).toContain('无物理实体');
+    expect(out.appearance).toContain('清亮中带着书卷气');
+    expect(out.personality).not.toMatch(/<[a-z_]+/i);
+    expect(out.personality).toContain('傲娇');
+    expect(out.background).toBe('在钥匙中沉睡了不知多久。');
+  });
+});
