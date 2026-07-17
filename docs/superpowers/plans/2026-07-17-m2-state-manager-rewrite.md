@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** StateManager 全部 apply* 从"按 id 寻址"重写为"按名字寻址"（铁律1/2），新增 9 个 op，退役物品/技能/状态效果 id 与 equipment[] 数组，接入 field-enums 归一化。
+**Goal:** StateManager 全部 apply* 从"按 id 寻址"重写为"按名字寻址"（铁律1/2），新增 8 个 op，退役物品/技能/状态效果 id 与 equipment[] 数组，接入 field-enums 归一化。
 
 **Architecture:** 先做两项硬前置与类型扩展（不破坏），再建名字解析唯一入口 `resolveCharacter` + 重写 validatePatch（验证失败进 errors[]），然后逐实体重写 op 契约，最后集中执行 equipment[]/EquipmentSlot 删除大手术（编译报错清单驱动）。过渡期兼容原则：**只为"让既有测试绿"服务**（真机游玩已冻结到 M6 后）——resolveCharacter 保留 UUID 兜底（M4 删）、remove_item/remove_status_effect 接受 string value（M3 删）。
 
