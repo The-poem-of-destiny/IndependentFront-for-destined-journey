@@ -42,14 +42,15 @@ function getTags(npc: any): string[] {
 }
 
 // ═══ 好感度 ═══
-function getAffection(npcId: string): number { return affections.value[npcId] ?? 0 }
-function getAffectionLabelText(npcId: string): string {
-  const v = getAffection(npcId)
+// M6 收官修: profile.affections 自 M2/M5 起按角色名 key（rename_character 随迁），UUID 索引恒 0（#15 读点收口）
+function getAffection(npcName: string): number { return affections.value[npcName] ?? 0 }
+function getAffectionLabelText(npcName: string): string {
+  const v = getAffection(npcName)
   if (v === 0) return ''
   return getAffectionLabel(v)
 }
-function affectionPercent(npcId: string): number {
-  const v = getAffection(npcId)
+function affectionPercent(npcName: string): number {
+  const v = getAffection(npcName)
   return ((v + 100) / 200) * 100  // -100→0%, 0→50%, 100→100%
 }
 
@@ -100,9 +101,9 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
               <span v-for="t in getTags(npc)" :key="t" class="tag">{{ t }}</span>
             </div>
           </div>
-          <div class="npc-affection" v-if="getAffection(npc.id) !== 0">
-            <div class="aff-bar"><div class="aff-fill" :style="{ width: affectionPercent(npc.id) + '%' }" /></div>
-            <div class="aff-text" :class="{ positive: getAffection(npc.id) > 0, negative: getAffection(npc.id) < 0 }">{{ getAffectionLabelText(npc.id) }} {{ getAffection(npc.id) }}</div>
+          <div class="npc-affection" v-if="getAffection(npc.name) !== 0">
+            <div class="aff-bar"><div class="aff-fill" :style="{ width: affectionPercent(npc.name) + '%' }" /></div>
+            <div class="aff-text" :class="{ positive: getAffection(npc.name) > 0, negative: getAffection(npc.name) < 0 }">{{ getAffectionLabelText(npc.name) }} {{ getAffection(npc.name) }}</div>
           </div>
         </div>
       </div>
@@ -121,8 +122,8 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
         <!-- 标签 + 好感度 -->
         <div class="d-tags-row">
           <span v-for="t in getTags(selected)" :key="t" class="dtag">{{ t }}</span>
-          <span v-if="getAffection(selected.id) !== 0" class="d-aff-label" :class="{ positive: getAffection(selected.id) > 0, negative: getAffection(selected.id) < 0 }">
-            {{ getAffectionLabelText(selected.id) }} {{ getAffection(selected.id) }}
+          <span v-if="getAffection(selected.name) !== 0" class="d-aff-label" :class="{ positive: getAffection(selected.name) > 0, negative: getAffection(selected.name) < 0 }">
+            {{ getAffectionLabelText(selected.name) }} {{ getAffection(selected.name) }}
           </span>
         </div>
 
@@ -140,12 +141,12 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
           <!-- 属性 -->
           <template v-if="detailTab === 'overview'">
             <!-- 好感度卡片 -->
-            <div class="ov-card" v-if="getAffection(selected.id) !== 0">
+            <div class="ov-card" v-if="getAffection(selected.name) !== 0">
               <div class="ov-card-title">好感度</div>
               <div class="aff-bar-row">
-                <div class="aff-track"><div class="aff-track-fill" :style="{ width: affectionPercent(selected.id) + '%' }" /></div>
-                <span class="aff-num" :class="{ positive: getAffection(selected.id) > 0, negative: getAffection(selected.id) < 0 }">{{ getAffection(selected.id) }}</span>
-                <span class="aff-label-text" :class="{ positive: getAffection(selected.id) > 0, negative: getAffection(selected.id) < 0 }">{{ getAffectionLabelText(selected.id) }}</span>
+                <div class="aff-track"><div class="aff-track-fill" :style="{ width: affectionPercent(selected.name) + '%' }" /></div>
+                <span class="aff-num" :class="{ positive: getAffection(selected.name) > 0, negative: getAffection(selected.name) < 0 }">{{ getAffection(selected.name) }}</span>
+                <span class="aff-label-text" :class="{ positive: getAffection(selected.name) > 0, negative: getAffection(selected.name) < 0 }">{{ getAffectionLabelText(selected.name) }}</span>
               </div>
             </div>
 

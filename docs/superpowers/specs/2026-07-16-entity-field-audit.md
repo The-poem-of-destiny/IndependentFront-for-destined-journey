@@ -112,3 +112,71 @@
 | C7 | GameTime weekday 往返 bug | 仅报告2提出，其他报告未涉及，需验证 | **属实**。time-system.ts:50 默认 weekday=1 注释'周日'；:90 format 用 `WEEKDAY_NAMES[weekday-1]`（1→'周日'）；:67-70 parse 把 '周日'→**7** → 再 format 时 `WEEKDAY_NAMES[6]`='周六'。format→parse→format 周日漂移成周六，确认 |
 | C8 | craft equip 两步 id 是否真的两次 Date.now() | 报告1/5 均断言，交叉验证 | **属实**。craft-gen-chain.ts:424 add_item 与 :437 equip_item 各自模板字符串内独立调用 `Date.now()`，跨毫秒即断链。顺带确认 :411 主产物 type 硬编码 'equipment'（即使产物是药剂），而 :457 inventory 分支用 inv.type——报告5 #18 的"非装备产物也标 equipment"属实 |
 | C9 | focusQuest 是否回写 | 仅报告2提出 | **属实**。QuestsPanel.vue:8 `focusQuest = ref(game.saveProfile?.focusQuest || '')` 本地 ref，:59 v-model 只改本地；全文件无任何持久化调用 → 刷新即丢 |
+
+---
+
+## 收官核对（M6, 2026-07-17）
+
+> M1-M6 全批次完成后的逐项状态。状态含义:
+> ✅ 已修复/验证通过（有单测覆盖）· 🟡 已修复/待观察（真机验证后转 ✅）· 📦 范围外留档（数据形状已锁定，接线属功能开发另立项）
+>
+> 批次引用: M1=2026-07-16-m1-types-and-db · M2=m2-state-manager-rewrite · M3=m3-translation-layer · M4=m4-prompt-alignment · M5=m5-ssot · M6=m6-ui-cleanup（Tn 为各计划 Task 号）。执行细节见规范附录 A 各批次执行注记。
+
+| # | 问题摘要 | 修复批次 | 状态 |
+|---|----------|----------|------|
+| 1 | 变量寄生快照双重丢失（persistVariables 静默丢弃 + 空自动快照遮蔽）→ 变量迁 SaveProfile.variables 单源 | M5 T1 | ✅ |
+| 2 | Snapshot 双轨分裂，恢复走恒空内嵌数组死路径 → 快照重定义 + restoreSnapshot 全链路（含 fake-indexeddb 集成测试） | M5 T2·T3 | ✅ |
+| 3 | memory_summary 输出无人持久化，memories 表生产恒空（orchestrator 无 Stage4 翻译点） | 范围外（M6 T5 留档） | 📦 |
+| 4 | 新增状态效果/技能缺 id 必 throw（三条供给链全不带 id）→ id 退役、按名寻址 Code 补账务 | M2 T5·T6（M3 供给链收口） | ✅ |
+| 5 | items.consume/transfer 契约断裂，物品消耗不掉、转移报错 → remove_item {name,quantity} + transfer_item 原子转移 | M2 T7 + M3 T2 | 🟡 |
+| 6 | 'player_1' 假 id 兜底与 prompt 示例毒化，整链 patch 失败 → owner=角色名解析 + 全量示例改名 | M3 T4·T6 + M4 T1·T2·T4 | 🟡 |
+| 7 | craft 装备 stats 放错位置全丢 + 两步 Date.now id 断链 → 单 add_item 带 equippedSlot+stats、id 生成废除 | M3 T6 | 🟡 |
+| 8 | char_gen 侧链 NPC 缺 saveId 成孤儿角色 → saveId 一等化 + applyAddCharacter 无条件覆写 | M1 T4 + M2 T2 | ✅ |
+| 9 | deleteSaveSlot 不级联 characters，删档残留 → 级联删除 + 8 表 Dexie 事务化 | M1 T5 + M6 T4 | ✅ |
+| 10 | equip/unequip 搬运丢 effects/scripts 等字段（有损穿脱）→ equippedSlot 单真源、穿脱零搬运 | M2 T8 | ✅ |
+| 11 | buildCharGenPatches target 带子路径，附属 patch 全 throw → 附属 patch 删除全量内嵌 + resolveCharTarget 防御 | M2 T4 + M3 T5 | ✅ |
+| 12 | ascension/exp/fp 写进变量快照而非角色/Profile 记录 → ascension 进 add_character 本体、exp 走 update_character delta | M3 T5·T6 | 🟡 |
+| 13 | persistMessage 非空断言产生孤儿消息风险 → 前置校验 | M1 T7 | ✅ |
+| 14 | focusQuest 只读不回写，刷新即丢 → QuestsPanel 双向 watch 回写 profile | M5 T6 | 🟡 |
+| 15 | affections 完全断链恒 0（无 op/无 case/UI 读不到）→ set/delta_affection op + prompt 教学 + orchestrator 接线 | M2 T10 + M4 T1 + M5 T5 | 🟡 |
+| 16 | news 双写歧义，ScenePanel 新闻恒空 → add_news op + 世界新闻变量路径拦截转产、变量双轨退役 | M2 T10 + M5 T5 | 🟡 |
+| 17 | FP/契约/成就管线未接，SaveProfile.fp 恒 0（玩法触发点未接线） | 范围外（M6 T5 留档） | 📦 |
+| 18 | PlotEvent/PlotOutline 生产恒空（mode:'off' 硬编码 + 占位空实现） | 范围外（M6 T5 留档） | 📦 |
+| 19 | currentAction 被翻成 set_location 顶掉所在地 → update_character 白名单承接 + 翻译改道 | M2 T9 + M3 T1 | ✅ |
+| 20 | characters.delta 非资源字段变整值替换（money -50 变 =-50）→ metadata.delta=true 真加法 | M2 T9 + M3 T1 | ✅ |
+| 21 | items.modify/remove skills 经 Object.assign 污染角色对象 → update_item/remove_skill 专用 op + 白名单拒收 | M2 T6·T7·T9 + M3 T2 | ✅ |
+| 22 | remove_status_effect 按名删、按 id 匹配，静默删不掉 → 按名寻址 | M2 T5 | ✅ |
+| 23 | items.equip 拿物品名当 itemId，扣除失配且丢 name → equip_item {name,slot} 名字契约 | M2 T8·T14 + M3 T2 | ✅ |
+| 24 | unequip 语义双关，传物品名静默 no-op → {name} 或 {slot} 双形态受理 | M2 T8 + M3 T2 | ✅ |
+| 25 | vars_update prompt 未教 quests 键，链路靠 AI 悟性 → quests/affections 教学块 + 枚举取值表 | M4 T1 | 🟡 |
+| 26 | Stage2 delta 死分支 + metadata.source 错标 → 分支删除 + source 归位 | M3 T3 | ✅ |
+| 27 | totalTurns 每 commit +1 虚高，还被当 Lv. 显示 → advanceTurn 每轮一拍 + HomePage 改"第 N 回合" | M5 T4 | ✅ |
+| 28 | StateManager 即建即抛，自动快照间隔失真 → patchCount%5 逻辑删除，快照显式触发 | M5 T2·T4 | ✅ |
+| 29 | EventBus/SubscriptionManager/EffectRuntime 三件套未接线（管线完成后批量执行时序未接入） | 范围外（M6 T5 留档） | 📦 |
+| 30 | $char.getNpcs/getMonsters saveId 参数假隔离 → 参数真正生效 + refreshFromDb 索引查询 | M1 T6 + M6 T3 | ✅ |
+| 31 | GameTime weekday format/parse 往返漂移（周日变周六）→ 统一 1=周日…7=周六，parse 从 WEEKDAY_NAMES 推导 | M5 T6 | ✅ |
+| 32 | Quest.status 自由字符串，变体误判活跃 → normalizeQuestStatus 4 态归一 | M2 T4 | ✅ |
+| 33 | variablesAfter 零写入，两套变量存储互不同步 → 死字段删除 + 变量单源 profile | M1 T9 + M5 T1 | ✅ |
+| 34 | 玩家创角 customFields 同义 key 分裂无人读 → 读方切一等字段（trait→personality）+ 双写退役 | M6 T1·T2 | ✅ |
+| 35 | applyRemoveItem 静默 vs applyAddItem throw 风格分裂 → 验证失败统一 throw 进 errors[] | M2 T7 | ✅ |
+| 36 | markNewsRead 死代码，read 标志永不翻转 → ScenePanel 展开接线（仅未读项） | M6 T4 | ✅ |
+| 37 | slot 中英双轨，中文槽位回背包误标 armor → normalizeSlot 门禁 + 8 中文槽位统一 + 搬运逻辑删除 | M2 T8·T14 + M3 T4·T6 + M4 T3 | ✅ |
+| 38 | InventoryItem.type 三套取值并存 → field-enums 5 值中文枚举 + 翻译层归一化 | M1 T1 + M3 T6 + M4 T3 | ✅ |
+| 39 | quality vs rarity 双名绕过 7 级字面量联合 → rarity 统一入口 + craft quality→rarity 映射归一 | M1 T1 + M3 T6 | ✅ |
+| 40 | Quest 主键双轨（target 装饰 + remove 裸字符串形态不一致）→ 名字即主键锁定 + remove_quest {name} 形态统一 | M2 T4·T13 | ✅ |
+| 41 | 装备两种落库表示并存（直写 equipment[] vs add+equip 两步）→ equipment[]/EquipmentSlot 全工程退役，单 add_item 带 equippedSlot | M2 T8·T12 + M3 T4·T5 | ✅ |
+| 42 | gameStartTime/Snapshot.gameTime 双语义（现实时间 vs 游戏时间）→ 统一现实 ISO + Snapshot.gameTime 随重定义删除 | M5 T2·T6 | ✅ |
+| 43 | characters 表无 saveId 一等字段/索引，全表扫描过滤 → saveId 一等化 + Dexie v9 索引 | M1 T2·T3 | ✅ |
+| 44 | 叙事层关系数据 vs affections key 语义分裂（名字 vs id）→ 关系列表退役，affections 按角色名单源 | M2 T10 + M5 T5 | ✅ |
+| 45 | assembleCharacterState 有损映射（effects/scripts/level/maxDurability）→ 无损映射全字段传递 | M3 T5 | ✅ |
+| 46 | chats(ChatSession) v3 遗留表与 messages 并存 → Dexie v9 删表 + ChatSession 接口删除全 src 清零 | M1 T3 + M6 T3 | ✅ |
+| 47 | SaveSlot metadata.description 塞 JSON 字符串双份冗余 → 删除 | M1 T8 | ✅ |
+| 48 | ChatMessage metadata/apiUsed/parsed 死字段 → 删除 | M1 T9 | ✅ |
+| 49 | messages [saveId+turn] 复合索引无查询使用 → deleteMessagesAfterTurn 启用（快照恢复对话截断） | M5 T3（M6 T3 确认） | ✅ |
+| 50 | Snapshot.messageIds/relatedPlotEventId 死声明 + 压缩记忆缺 id → 随快照重定义删除 + 类型删除 + 内部补 id | M5 T2 + M6 T3 | ✅ |
+| 51 | SaveSlot.slot 恒 0 + PlotOutline version 覆盖使排序失效 → getLatestPlotOutline 按 updatedAt；多槽位裁决为产品功能保留 TODO | M6 T3 | ✅ |
+| 52 | 杂项（未用解构/26 op 口径/maxSnapshots 不读 settings）→ 解构清理 + 口径修正 + trimSnapshots 读 settings | M5 T2 + M6 T3 | ✅ |
+
+**统计**: ✅ 40 · 🟡 8（#5 #6 #7 #12 #14 #15 #16 #25）· 📦 4（#3 #17 #18 #29），合计 52。
+
+**备注**: 真机 debug loop 验证待执行（清 IndexedDB → 创角 → 对话数轮覆盖物品/装备/技能/状态/任务/好感/新角色 → DebugPanel 导出按手册五维度分析）；🟡 项在真机轮通过后转 ✅。🟡 集中在两类: AI 契约依赖项（#6 #7 #15 #16 #25 及 #5 的 consume/transfer 真实输出形态——单测只能用 mock 锁翻译端）与无测试覆盖的 UI 接线（#14 QuestsPanel watch 回写）。收官核对时复核到的三处残留，供真机轮顺手处置: ① #15 读点残留——CharacterListPanel.vue getAffection 仍按 `npc.id` 索引，而 affections 键已是角色名（好感条恒 0 风险，真机轮首查项）；② #12 残留——convertScriptEffects 的 hp/属性 与 craft FP 奖励（`profile.fp`）仍走 delta_variable（分属 #29/#17 接线范围，数据现落 profile.variables 不再丢失）；③ M2 过渡拆除清单 ④——resource-calc hasItem/hasSkill 的 `|| id` 读侧容忍未拆（无害兜底，建议随真机轮清理）。

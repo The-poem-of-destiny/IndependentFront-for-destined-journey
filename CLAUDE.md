@@ -458,6 +458,7 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC
 | 10f | request_dispatcher systemPrompt 保持 + vars_update systemPrompt 全面重写（~300行/8节/3示例） | ✅ |
 | 10g | Quest 委托管线 (request_dispatcher→vars_update quest_update_request) + relatedPlotEventId 清理 + memory_summary 全面重写 (6911字/6 XML区块/hiddenLine 新定义) | ✅ |
 | 10h | ST 预设占位符适配：{{setvar}}/{{getvar}}/{{random}} 解析替换管线 + 前端条目开关可点自动保存 | ✅ |
+| M1-M6 | 数据字段规范迁移（52 项收口）: M1 类型库层 / M2 StateManager 按名寻址 / M3 翻译层零id / M4 Prompt 契约对齐+过渡拆除 / M5 SSOT（变量迁家+快照重建+新闻好感接线）/ M6 读方切换+双写退役+收官（2787 tests 首次 100% 全绿） | ✅ 待真机验证 |
 
 ## 前端架构 (Phase 7, 2026-06-17)
 

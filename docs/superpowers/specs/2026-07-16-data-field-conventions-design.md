@@ -359,6 +359,20 @@ interface Snapshot {
 > **⑤ 新闻/好感接线（#15 #16 #44）**: dispatcher 无专用 news 键——新闻实为 replace/insert 的 `世界新闻` 变量路径，翻译层拦截（isWorldNewsPath）转产 add_news（字符串→首句 title/对象→title/content 互备/数组→逐条/空值→warn 丢弃），从变量循环排除；vars_update 的 `parsed.affections.set/delta` → set/delta_affection patch（M4 教学项闭环，好感度恒 0 根治）；namespace-normalizer 的 sys.news/sys.relationships 映射退役（旧存档残留变量不迁移，接受陈旧）。
 > **⑥ 杂修四连（#14 #31 #42）**: weekday 双约定混用根治（parse 用 ISO 序、format 用 WEEKDAY_NAMES 序）——统一 1=周日…7=周六 对齐现有消费方，parse 侧从 WEEKDAY_NAMES.indexOf()+1 推导结构性杜绝漂移，约定写死在常量注释；QuestsPanel focusQuest 双向 watch 回写 profile（JSON 克隆过 Dexie）；test-save gameStartTime 改现实 ISO；SaveSlot 注释指向 AppSettings.maxSnapshotsPerSave。
 > **SSOT 总表状态**: 变量→SaveProfile.variables ✅ / 快照→snapshots 表（打=深拷贝/恢复=覆写+回滚）✅ / 新闻→profile.news ✅ / 好感→profile.affections ✅ 全部单源。测试: typecheck 0 错误，2777/2778 通过（仅既有 create-store 命定之灵 1 失败）。
+>
+> **M6 执行注记（2026-07-17）**: 迁移收官批次完成。
+> **① 读方切正式字段（dbcb209, #34 前半）**: context-visibility formatCharacterNarrative 的 appearance/background/personality 一等字段优先；CharacterListPanel 6 处读点切正式字段（trait→personality 映射）；getThoughts 签名改 `(char?: CharacterState)` 删 charName 死参数 + 删 customFields 兜底（thoughts 单源）；test-save 补 3 个 NPC 一等 personality。
+> **② 双写退役（8c39993, #34 后半）**: create-store buildCharacterState 停写 saveId/gender/personality/physics/backstory（customFields 只留 age/destinyCoreId/destinyPoints/extra）；test-save 4 处同式收缩（只留 age/role）；applyAddCharacter 的 customFields.saveId 双写行删除。先切读、再停写，两 commit 分离（回滚粒度铁律）。
+> **③ 查询/类型清理（a98233d, #46 #50 #51 #52）**: refreshFromDb 改 getCharacters(saveId) 索引查询（合并语义保持）；ChatSession 接口删除（全 src 清零）；MemoryRecord.relatedPlotEventId 删除；createCompressionSummaryMemory 内部补 id 返回完整记录；getLatestPlotOutline 改按 updatedAt 排序（version 递增语义保留）；applyUpdateQuest 未用解构清理。
+> **④ UI 死功能裁决（a98233d, #36 + M1 终审遗留）**: ScenePanel toggleNews 展开时 markNewsRead 接线（仅未读项，reactive 先行 + JSON 克隆落库）；deleteSaveSlot 8 表级联包进 Dexie 事务（含原子性回滚测试）。
+> **⑤ 命定之灵用例排查**: 根因 = e42f971 有意改指针形式（配合 worldbook constant 激活修复），测试同 commit 未同步（commit message 自证）；测试改为锁定指针行为。**测试套件首次 2787/2787 全绿（100%）**。
+> **⑥ 装备 UI 验收**: StatusOverview（8 槽位图标映射）/ItemsPanel（中文槽位直展）/CharacterListPanel（[槽位] 标签）三组件 equippedSlot 渲染逻辑核查无破损，M2 T12 filter 惯用式够用，纯样式优化不做。
+>
+> **范围外接线待办（M6 T5 留档移交，数据形状已锁定，接线属功能开发另立项）**:
+> - **#17 FP/契约/成就管线**: SaveProfile.fp/fpHistory/contracts/achievements 字段与 fp-system.ts 计算函数就位，但无游戏流程写入点（FP 获取/消费的玩法触发、契约签订、成就解锁判定均未接线）。
+> - **#29 EventBus 三件套**: game-event.ts EventBus + effect-runtime 声明式效果 + subscription-manager 持久订阅基础设施完备，GamePipeline 管线完成后的批量效果执行时序（ADR: 管线完成后批量执行）未接入 run() 主流程。
+> - **#3 memory_summary 落库**: memory_summary Agent 输出解析后的 MemoryRecord 写入（含 hiddenLine 新定义）在 orchestrator 无 Stage4 翻译点。
+> - **#18 plot 双检接线**: plot_pre_check/plot_post_check 输出目前只进 context 不产 update_plot_event patch；plotEvents 状态推进依赖手动。
 
 ## 附录 B 现状偏差清单
 
