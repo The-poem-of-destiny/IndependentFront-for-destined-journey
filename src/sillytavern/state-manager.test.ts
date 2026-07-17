@@ -18,6 +18,7 @@ vi.mock('./database', () => ({
   getCharacters: vi.fn(),
   saveCharacter: vi.fn(),
   saveCharacters: vi.fn(),
+  deleteCharacter: vi.fn(),
   saveMemory: vi.fn(),
   getMemories: vi.fn(),
   getPlotEvents: vi.fn(),
@@ -119,6 +120,9 @@ describe('StateManager', () => {
     vi.mocked(db.saveCharacter).mockImplementation(async (char: any) => {
       charStore.set(char.id, char);
       return 'saved';
+    });
+    vi.mocked(db.deleteCharacter).mockImplementation(async (id: string) => {
+      charStore.delete(id);
     });
     vi.mocked(db.saveCharacters).mockResolvedValue(undefined);
     vi.mocked(db.saveMemory).mockResolvedValue('mem-id');
@@ -2101,13 +2105,14 @@ describe('StateManager', () => {
       expect(result.patchesApplied).toBe(1);
     });
 
-    it('无额外要求: remove_character 通过验证（handler 未实现 → 走 default 分支不进 errors）', async () => {
+    it('无额外要求: remove_character 无 value 通过验证（M2 T11 起有 handler → 角色不存在进 errors 而非静默）', async () => {
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
         { op: 'remove_character', target: 'characters.X' },
       ]);
-      // 验证通过（不进 errors）；但 dispatch switch 无 handler → success:false 结果、patchesApplied=0
-      expect(result.errors).toHaveLength(0);
+      // 验证层通过（无 value 要求）；handler 内 resolveCharTarget 找不到角色 → throw 进 errors[]
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('角色不存在: X');
       expect(result.patchesApplied).toBe(0);
     });
   });
@@ -2324,7 +2329,197 @@ describe('StateManager', () => {
   });
 
   // ===================================================================
-  // 21. createStateManager factory
+  // 21. remove_character / rename_character — 怪物生命周期 + 改名迁移 (M2 T11, 规范 §2.2)
+  // ===================================================================
+  describe('remove_character / rename_character (M2 T11)', () => {
+    function buildMockProfile(overrides: Record<string, any> = {}) {
+      return {
+        saveId: 'save-001',
+        affections: {},
+        news: [],
+        quests: {},
+        ...overrides,
+      } as any;
+    }
+
+    // ---------- remove_character ----------
+
+    it('remove 后 getCharacters 查不到该角色', async () => {
+      const goblin = buildMockCharacter({ id: 'uuid-goblin', name: '哥布林斥候', type: 'npc', saveId: 'save-001' });
+      await db.saveCharacter(goblin);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'remove_character', target: 'characters.哥布林斥候' },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(result.patchesApplied).toBe(1);
+      expect(vi.mocked(db.deleteCharacter)).toHaveBeenCalledWith('uuid-goblin');
+      const remaining = await db.getCharacters('save-001');
+      expect(remaining.find(c => c.name === '哥布林斥候')).toBeUndefined();
+    });
+
+    it('remove 不存在的名字 → errors[]', async () => {
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'remove_character', target: 'characters.不存在的怪物' },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.patchesApplied).toBe(0);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('角色不存在: 不存在的怪物');
+      expect(vi.mocked(db.deleteCharacter)).not.toHaveBeenCalled();
+    });
+
+    it('remove_character 发出 system 类型 GameEvent', async () => {
+      const goblin = buildMockCharacter({ id: 'uuid-goblin', name: '哥布林斥候', type: 'npc', saveId: 'save-001' });
+      await db.saveCharacter(goblin);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      await sm.commitChatState([
+        { op: 'remove_character', target: 'characters.哥布林斥候' },
+      ]);
+
+      const events = sm.getEvents();
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('system');
+    });
+
+    // ---------- rename_character ----------
+
+    it('rename 后旧名查不到、新名可查、affections 键随迁', async () => {
+      const npc = buildMockCharacter({ id: 'uuid-npc', name: '神秘旅人', type: 'npc', saveId: 'save-001' });
+      await db.saveCharacter(npc);
+      const profile = buildMockProfile({ affections: { 神秘旅人: 42, 艾莉丝: 10 } });
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'rename_character', target: 'characters.神秘旅人', value: '雷恩' },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(result.patchesApplied).toBe(1);
+      // 旧名查不到、新名可查
+      const chars = await db.getCharacters('save-001');
+      expect(chars.find(c => c.name === '神秘旅人')).toBeUndefined();
+      expect(chars.find(c => c.name === '雷恩')).toBeDefined();
+      expect(npc.name).toBe('雷恩');
+      // affections 键随迁: 旧键删、值保留在新键、无关键不动
+      expect(profile.affections['神秘旅人']).toBeUndefined();
+      expect(profile.affections['雷恩']).toBe(42);
+      expect(profile.affections['艾莉丝']).toBe(10);
+      expect(vi.mocked(saveProfile.updateProfile)).toHaveBeenCalledWith(profile);
+    });
+
+    it('rename 撞已有名 → errors[]，双方均不动', async () => {
+      const a = buildMockCharacter({ id: 'uuid-a', name: '甲', type: 'npc', saveId: 'save-001' });
+      const b = buildMockCharacter({ id: 'uuid-b', name: '乙', type: 'npc', saveId: 'save-001' });
+      await db.saveCharacter(a);
+      await db.saveCharacter(b);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'rename_character', target: 'characters.甲', value: '乙' },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.patchesApplied).toBe(0);
+      expect(result.errors).toHaveLength(1);
+      expect(a.name).toBe('甲');
+      expect(b.name).toBe('乙');
+    });
+
+    it('rename 目标不存在 → errors[]', async () => {
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'rename_character', target: 'characters.查无此人', value: '新名' },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors[0]).toContain('角色不存在: 查无此人');
+    });
+
+    it('rename value 非字符串 → errors[]', async () => {
+      const npc = buildMockCharacter({ id: 'uuid-npc', name: '旅人', type: 'npc', saveId: 'save-001' });
+      await db.saveCharacter(npc);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'rename_character', target: 'characters.旅人', value: { name: '雷恩' } as any },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(npc.name).toBe('旅人');
+    });
+
+    it('rename 新名空白 → errors[]', async () => {
+      const npc = buildMockCharacter({ id: 'uuid-npc', name: '旅人', type: 'npc', saveId: 'save-001' });
+      await db.saveCharacter(npc);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'rename_character', target: 'characters.旅人', value: '   ' },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(npc.name).toBe('旅人');
+    });
+
+    it('rename 新名带首尾空白会被 trim', async () => {
+      const npc = buildMockCharacter({ id: 'uuid-npc', name: '旅人', type: 'npc', saveId: 'save-001' });
+      await db.saveCharacter(npc);
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(buildMockProfile());
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'rename_character', target: 'characters.旅人', value: '  雷恩  ' },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(npc.name).toBe('雷恩');
+    });
+
+    it('rename 新名等于旧名 → no-op 成功（幂等）', async () => {
+      const npc = buildMockCharacter({ id: 'uuid-npc', name: '旅人', type: 'npc', saveId: 'save-001' });
+      await db.saveCharacter(npc);
+      vi.mocked(db.saveCharacter).mockClear();
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'rename_character', target: 'characters.旅人', value: '旅人' },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(result.patchesApplied).toBe(1);
+      expect(npc.name).toBe('旅人');
+      expect(vi.mocked(db.saveCharacter)).not.toHaveBeenCalled();
+    });
+
+    it('rename 时 affections 无旧键 → 迁移安静跳过，改名照常成功', async () => {
+      const npc = buildMockCharacter({ id: 'uuid-npc', name: '旅人', type: 'npc', saveId: 'save-001' });
+      await db.saveCharacter(npc);
+      const profile = buildMockProfile({ affections: { 艾莉丝: 10 } });
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'rename_character', target: 'characters.旅人', value: '雷恩' },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(npc.name).toBe('雷恩');
+      expect(profile.affections['艾莉丝']).toBe(10);
+      expect(profile.affections['雷恩']).toBeUndefined();
+    });
+  });
+
+  // ===================================================================
+  // 22. createStateManager factory
   // ===================================================================
   describe('createStateManager factory', () => {
     it('should create a StateManager instance with saveId', () => {

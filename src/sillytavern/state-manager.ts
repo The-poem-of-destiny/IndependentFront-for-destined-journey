@@ -17,7 +17,7 @@ import type {
   StatusEffect, EquipmentSlot, Skill, InventoryItem,
 } from './types';
 import {
-  getCharacter, getCharacters, saveCharacter, saveCharacters,
+  getCharacter, getCharacters, saveCharacter, saveCharacters, deleteCharacter,
   getMemories, saveMemory,
   getPlotEvents, savePlotEvents,
   getSave, saveSaveSlot,
@@ -253,6 +253,12 @@ export class StateManager {
         break;
       case 'add_character':
         event = await this.applyAddCharacter(patch);
+        break;
+      case 'remove_character':
+        event = await this.applyRemoveCharacter(patch);
+        break;
+      case 'rename_character':
+        event = await this.applyRenameCharacter(patch);
         break;
       case 'add_memory':
         event = await this.applyAddMemory(patch);
@@ -959,6 +965,70 @@ export class StateManager {
     if (character.customFields) character.customFields.saveId = this.saveId;  // 双写，M6 删
 
     await saveCharacter(character);
+    return this.createEvent('system', patch);
+  }
+
+  /**
+   * remove_character — M2 新增，怪物生命周期 (规范 §2.2)
+   *
+   * target = characters.<名> — resolveCharTarget 解析后整条删除 Dexie 记录。
+   * 规范 §2.2: 怪物/召唤物死亡或战斗结束即整条删除。
+   * op 本身不按 type 限制（任何角色都可删），type 级生命周期策略在上游（翻译层/Prompt）。
+   * 找不到 → resolveCharTarget throw 进 errors[]（不静默）。
+   */
+  private async applyRemoveCharacter(patch: StatePatch): Promise<GameEvent> {
+    const char = await this.resolveCharTarget(patch.target);
+    await deleteCharacter(char.id);
+    return this.createEvent('system', patch);
+  }
+
+  /**
+   * rename_character — M2 新增，改名兜底 (规范 §2.2)
+   *
+   * target = characters.<旧名>  value = '<新名>'（裸字符串，非对象）
+   * ① 新名 trim 后非空校验，非字符串 → throw
+   * ② 同存档新名查重（排除自身）→ 撞名 throw 进 errors[]
+   * ③ char.name = 新名 落库
+   * ④ 按名引用迁移: profile.affections[旧名] 键迁到新名（值保留，旧键删）
+   *    ⚠️ 当前按名引用仅 affections；M5/M6 新增按名引用时必须回来扩这里。
+   *    quests 的叙事文本字段不迁移（接受陈旧）。
+   * 新名 === 旧名 → no-op 成功（幂等改名无害，不落库不迁移）。
+   */
+  private async applyRenameCharacter(patch: StatePatch): Promise<GameEvent> {
+    if (typeof patch.value !== 'string') {
+      throw new Error(`rename_character value 必须是新名字符串: ${JSON.stringify(patch.value)}`);
+    }
+    const newName = patch.value.trim();
+    if (!newName) throw new Error('rename_character 新名不能为空');
+
+    const char = await this.resolveCharTarget(patch.target);
+    const oldName = char.name;
+
+    // 幂等: 新名等于旧名 → no-op 成功
+    if (newName === oldName) {
+      return this.createEvent('system', patch);
+    }
+
+    // 同存档新名查重（排除自身 — 自己改自己的名不算撞名，上面已 no-op 短路）
+    const chars = await getCharacters(this.saveId);
+    const clash = chars.find(c => c.name === newName && c.id !== char.id);
+    if (clash) {
+      throw new Error(`rename_character 新名已被占用: ${newName}`);
+    }
+
+    // 改名落库
+    char.name = newName;
+    await saveCharacter(char);
+
+    // 按名引用迁移 — 当前仅 affections（M5/M6 新增按名引用时必须回来扩这里）
+    const { getProfile, updateProfile } = await import('./save-profile');
+    const profile = await getProfile(this.saveId);
+    if (profile?.affections && Object.prototype.hasOwnProperty.call(profile.affections, oldName)) {
+      profile.affections[newName] = profile.affections[oldName];
+      delete profile.affections[oldName];
+      await updateProfile(profile);
+    }
+
     return this.createEvent('system', patch);
   }
 
