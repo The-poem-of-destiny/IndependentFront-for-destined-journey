@@ -276,7 +276,7 @@ src/sillytavern/                    ← 核心引擎（30+ 模块，含 Phase 1-
   ├── effect-parser.ts              ← [Phase 4.6] 效果声明解析器
   ├── effect-runtime.ts             ← [Phase 4.5] 声明式效果引擎
   ├── game-event.ts                 ← [Phase 4.5] EventBus 按存档隔离
-  ├── state-manager.ts              ← [Phase 4.5] 唯一状态写入入口
+  ├── state-manager.ts              ← [Phase 4.5] 唯一状态写入入口 (M2: 按名寻址)
   ├── dice.ts                       ← [Phase 4.5] 骰子系统
   ├── memory-store.ts               ← [Phase 4] 记忆存储+Embedding召回
   ├── memory-summarizer.ts          ← [Phase 4] 记忆压缩
