@@ -239,7 +239,7 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
     variableContext: (ctx: AgentContext) => '',
     variableInstruction: (ctx: AgentContext) => {
       const storyOutput = ctx.agentOutputs?.get('story') ?? '';
-      return `${recentHistoryBlock(ctx)}**正文输出 (含 <char_detect> 标记):**\n${storyOutput}\n\n请调用工具获取随机值，只输出 <char_result> XML。如果没有 <char_detect> 标记，输出 <char_result><error>no char_detect found</error></char_result>。`;
+      return `${recentHistoryBlock(ctx)}**正文输出:**\n${storyOutput}\n\n请调用工具获取随机值，只输出 <char_result> XML。如果上文没有角色生成请求（<char_gen_request>），输出 <char_result><error>no char_gen_request found</error></char_result>。`;
     },
   },
 

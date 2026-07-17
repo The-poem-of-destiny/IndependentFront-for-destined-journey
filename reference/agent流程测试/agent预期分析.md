@@ -3,6 +3,14 @@
 > 设计目的: 作为 debug 工具的参考基准，每个 Agent 记录从输入到最终输出的完整链路。
 > 排除: story、memory_recall、plot_pre_check、plot_post_check、plot_outline、plot_check、plot_correct
 
+> ⚠️ **M4 契约同步注记（2026-07-17）**: 本文的输出追踪采集于 M1-M4 数据字段规范迁移之前，属**历史记录**。当前权威契约以 `data/defaults/agent-config.json` 各 Agent systemPrompt + `docs/superpowers/specs/2026-07-16-data-field-conventions-design.md` 为准。与本文差异的要点：
+> 1. **角色寻址一律用 `"name"` 键**（铁律1）— 旧追踪里的 `"id": "protagonist"` / `player_1` / `npc_*` 形态已全部退役，代码侧 `name ?? id` 过渡读与 UUID 兜底已在 M4 拆除（缺 name 的条目直接跳过）。
+> 2. **AI 永不产 id**（铁律3）— Skill/InventoryItem/StatusEffect 的 id 字段已 @deprecated，翻译层零 id 生成，同名合并/覆盖由 StateManager 按 name 处理。
+> 3. **职责重划（10e + M3）**: 全局变量（replace/insert/delta_time）归 request_dispatcher（Stage 2）；characters/items/quests/affections 归 vars_update（Stage 3），形态为 `{"characters":{"replace":[{"name","path","value"}],"delta":[...],"add":[...],"remove":[...]}, "items":{...}, "quests":{...}, "affections":{...}}`。本文第 1/2 节的旧划分（vars_update 管变量、char_update 管角色）已合并重命名。
+> 4. **装备=物品状态**（规范 §3）: equipment[] 已退役，装备落库为单 `add_item` 带 `equippedSlot`（8 中文槽位枚举），两步 add+equip 模式废除。
+> 5. **char_detect 已死**（M3/M4）: story 不再输出该标记，角色检测统一走 request_dispatcher 的 `<char_gen_request>`；char_gen 输入占位符 `{{CHAR_DETECT}}`/`{{CHAR_GEN_REQUEST}}` 双通道保留。
+> 6. **枚举中文集中定义**（铁律5）: slot/type/rarity/quest.status/category 以 `field-enums.ts` 为唯一真源，AI 提名值写入前归一化。
+
 ---
 
 ## 通用架构说明
@@ -22,6 +30,8 @@ agent-client.ts: chatWithTools()
 ---
 
 ## 1. vars_update Agent — 变量更新
+
+> ⚠️ **M4 注记**: 本节的"全局变量 replace/delta/insert/delta_time"职责在 10e 重构后归 **request_dispatcher**（Stage 2）；现在的 vars_update（Stage 3）负责 characters/items/quests（形态见顶部注记 3）。以下追踪为历史记录。
 
 ### 模板格式规范
 
@@ -115,6 +125,10 @@ agent-client.ts: chatWithTools()
 ---
 
 ## 2. char_update Agent — 角色状态更新
+
+> ⚠️ **M4 注记**: char_update 已在 10e 合并进 vars_update。角色寻址键 `"id"` 已退役 → 一律 `"name"`（M4 起缺 name 的条目直接跳过）；`equipment` 字段已退役 → 装备走 `add_item {equippedSlot}` / `equip_item {name, slot}`。当前格式:
+> `{"characters":{"replace":[{"name":"理查德","path":"hp","value":88}],"delta":[{"name":"理查德","path":"money","amount":-50}],"add":[{"name":"理查德","path":"inventory","value":{...}}],"remove":[{"name":"理查德","path":"statusEffects","target":"轻伤"}]}}`
+> 以下追踪为历史记录。
 
 ### 模板格式规范
 

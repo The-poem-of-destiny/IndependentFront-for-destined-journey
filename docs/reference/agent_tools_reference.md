@@ -834,13 +834,13 @@ Layer 1  原语级  StateManager.commitChatState()                   ← 仅引�
 |------|------|----------|------|
 | `<craft_request>` | 🛑 阻塞 | Stage 1 立即 | 叙事暂停，制作完成后结果注入正文 |
 | `<combat_trigger>` | 🚩 独立 | Stage 2 延迟 | 等 char_gen 完成（新敌人就绪），再打开战斗页 |
-| `<char_detect>` | 👤 隐式 | Stage 2 扫描 | vars_update 扫描后触发 char_gen → item_gen 链 |
+| `<char_detect>` | ❌ 已废除 | — | M3 删除死路径；角色检测统一走 request_dispatcher 的 `<char_gen_request>` |
 
 ### 标记格式
 
 **craft_request:**
 ```xml
-<craft_request industry="锻造" productName="长剑" targetQuality="稀有" characterId="player_1">
+<craft_request industry="锻造" productName="长剑" targetQuality="稀有" characterId="理查德">
 制作一把锋利的长剑，使用精炼铁矿石在铁匠铺锻造...
 </craft_request>
 ```
@@ -852,12 +852,7 @@ Layer 1  原语级  StateManager.commitChatState()                   ← 仅引�
 </combat_trigger>
 ```
 
-**char_detect:**
-```xml
-<char_detect characterName="艾琳" characterType="npc">
-一位银发的精灵少女走进铁匠铺，她背着长弓，腰间挂着箭袋...
-</char_detect>
-```
+**char_detect:** ❌ M3 已废除 — story 不再输出该标记，角色检测统一由 request_dispatcher 输出 `<char_gen_request>`。
 
 ### 处理流程
 
@@ -865,9 +860,11 @@ Layer 1  原语级  StateManager.commitChatState()                   ← 仅引�
 Story 输出 → scanMarkers()
   ├── craft_request → onCraftRequest() → $craft.startProject() + craft_gen Agent
   │   └── 制作结果叙事注入 story output
-  ├── combat_trigger → 暂存到 pendingCombatMarkers
-  │   └── Stage 2 char_detect 处理完 → onCombatTrigger() → 战斗页
-  └── char_detect → Stage 2 扫描 → onCharDetect()
+  └── combat_trigger → 暂存到 pendingCombatMarkers
+      └── Stage 2 处理完 → onCombatTrigger() → 战斗页
+
+request_dispatcher 输出 → scanMarkers()
+  └── char_gen_request → onCharGenRequest()
       └── char_gen Agent → item_gen Agent → 新角色存入数据库
 ```
 

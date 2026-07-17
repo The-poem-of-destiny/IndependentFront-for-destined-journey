@@ -693,7 +693,7 @@ $dice.roll(formula) → number  // formula: '2d6+3', '4d8' 等
 - 骰值结果用于传给 $resource.modifyHp / $status.add 的参数，决定实际数值。`,
         paths: `## 变量路径命名空间约定
 sys.<path>     — 引擎管理变量 (如 sys.世界.地点.城市)
-char.<id>.<path> — 按角色ID分组 (如 char.player_1.hp)
+char.<角色>.<path> — 按角色分组 (如 char.player.hp；玩家固定用 player，见 namespace-normalizer 映射)
 user.<path>    — 玩家变量 (如 user.settings.language)
 world.<path>   — 世界设定 (如 world.历史.纪元)
 temp.<path>    — 会话临时 (不持久化)
