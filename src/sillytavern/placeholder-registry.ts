@@ -21,6 +21,7 @@
 
 import type { AgentContext, AgentConfig, WorldBook, CharacterState, PlaceholderResolver } from './types';
 import { getEntriesForAgent, filterActiveEntries, formatWorldBookEntries } from './worldbook-loader';
+import { parseSetvars, resolveGetvars, resolveRandoms } from './preset-loader';
 import { buildZoneContext, filterZoneContent, getAgentZoneVisibility } from './context-visibility';
 import { defaultHistoryLayers, defaultHistorySlice } from './agent-templates';
 
@@ -94,7 +95,12 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     if (entries.length === 0) return '';
     const text = (ctx.userInput || '') + '\n' + (ctx.history?.slice(-5).map(m => m.content).join('\n') || '');
     const activeEntries = filterActiveEntries(entries, text);
-    const formatted = formatWorldBookEntries(activeEntries);
+    let formatted = formatWorldBookEntries(activeEntries);
+    // 真机修(2026-07-18): 原 ST 角色卡世界书正文自带 {{setvar/getvar/random}} 宏（MVU 机制遗留）
+    // → 注入前收集 setvar 变量表并剥离定义、替换 getvar 引用、解析 random——
+    //   世界书内自洽的 setvar/getvar 对仍正常工作，孤立宏不再作为噪音喂给 AI（实测 story 系统消息含 25+36 处残留）
+    const { variables: wbVars, stripped } = parseSetvars(formatted);
+    formatted = resolveRandoms(resolveGetvars(stripped, wbVars));
     if (params?.limit) {
       const limit = parseInt(params.limit, 10);
       if (!isNaN(limit) && limit > 0) {
