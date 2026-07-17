@@ -235,6 +235,7 @@ export function buildItemGenPatches(
   const ts = Date.now();
 
   // 1. 装备 → add_item + equip_item (同 id 两步)
+  // M3 重写: equipment 是 ItemGenOutput 的 AI 输出结构（M3 处理语义）；equip_item 按 name+slot 寻址
   for (const equip of itemOutput.equipment) {
     const itemId = `itemgen_eq_${ts}_${Math.random().toString(36).slice(2, 8)}`;
     patches.push({

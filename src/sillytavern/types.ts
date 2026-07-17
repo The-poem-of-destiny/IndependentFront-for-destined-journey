@@ -601,20 +601,8 @@ export type ApiTarget = 'primary' | 'secondary';
 
 // ========== 角色系统 (Character System) ==========
 
-/** 装备槽 */
-export interface EquipmentSlot {
-  slot: string;                  // 槽位名: 'weapon' | 'armor' | 'accessory' | ...
-  itemId: string;
-  name: string;
-  description?: string;
-  stats?: Record<string, number>;
-  durability?: number;
-  maxDurability?: number;
-  /** 🆕 效果词条: 词条名→中文描述 (AI写, 前端展示) */
-  effects?: Record<string, string>;
-  /** 🆕 脚本注册表: 脚本名→可执行代码 (AI写, 引擎执行) */
-  scripts?: Record<string, string>;
-}
+// M2: EquipmentSlot 接口已删除 — 装备不是独立实体，是物品的状态。
+// 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）。
 
 /** 技能 */
 export interface Skill {
@@ -769,7 +757,7 @@ export interface CharacterState {
   };
 
   // ===== 装备/技能/背包 =====
-  equipment: EquipmentSlot[];
+  // M2: equipment[] 已删除 — 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
   skills: Skill[];
   inventory: InventoryItem[];
   statusEffects: StatusEffect[];
@@ -837,7 +825,6 @@ export function createDefaultCharacterState(overrides: Partial<CharacterState> =
       deityPosition: '',
       divineKingdom: { name: '', description: '' },
     },
-    equipment: [],
     skills: [],
     inventory: [],
     statusEffects: [],
@@ -876,7 +863,8 @@ export interface CharacterCard {
     gameSettings: {
       initialLevel: number;
       initialAttributes: Record<string, number>;
-      initialEquipment: EquipmentSlot[];
+      // M2: initialEquipment 改为带 equippedSlot 的物品（装备=物品的状态，规范 §3）
+      initialEquipment: InventoryItem[];
       initialSkills: Skill[];
     };
     displayConfig: {
@@ -1344,7 +1332,6 @@ export interface CharacterUpdatePayload {
     attributes: Record<string, number>;
     location: string;
     statusEffects: StatusEffect[];
-    equipment: EquipmentSlot[];
     skills: Skill[];
     inventory: InventoryItem[];
     money: number;

@@ -445,12 +445,12 @@ describe('characterToCombatParticipant', () => {
         deityPosition: '',
         divineKingdom: { name: '', description: '' },
       },
-      equipment: [
-        { slot: 'weapon', itemId: 'w1', name: '长剑', stats: { atk: 25, hit: 3 } },
-        { slot: 'armor', itemId: 'a1', name: '皮甲', stats: { defense: 200, dr: 0.1 } },
-      ],
+      // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3，中文槽位）
       skills: [],
-      inventory: [],
+      inventory: [
+        { name: '长剑', quantity: 1, equippedSlot: '武器', stats: { atk: 25, hit: 3 } },
+        { name: '皮甲', quantity: 1, equippedSlot: '身体', stats: { defense: 200, dr: 0.1 } },
+      ],
       statusEffects: [],
       money: 100,
       location: '城镇',
@@ -499,7 +499,6 @@ describe('characterToCombatParticipant', () => {
         deityPosition: '',
         divineKingdom: { name: '', description: '' },
       },
-      equipment: [],
       skills: [],
       inventory: [],
       statusEffects: [],
@@ -541,7 +540,6 @@ describe('characterToCombatParticipant', () => {
         deityPosition: '',
         divineKingdom: { name: '', description: '' },
       },
-      equipment: [],
       skills: [],
       inventory: [],
       statusEffects: [],

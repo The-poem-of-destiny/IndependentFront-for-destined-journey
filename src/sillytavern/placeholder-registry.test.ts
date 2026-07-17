@@ -82,7 +82,6 @@ function makeChar(overrides?: Partial<CharacterState>): CharacterState {
       deityPosition: '',
       divineKingdom: { name: '', description: '' },
     },
-    equipment: [],
     skills: [],
     inventory: [],
     statusEffects: [],

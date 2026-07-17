@@ -54,7 +54,8 @@ function affectionPercent(npcId: string): number {
 }
 
 // ═══ 详情 Tab 数据 ═══
-const selEquipment = computed(() => (selected.value as any)?.equipment || [])
+// M6 完整重构: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3），最小适配 filter 惯用式
+const selEquipment = computed(() => ((selected.value as any)?.inventory || []).filter((i: any) => i.equippedSlot))
 const selSkills = computed(() => (selected.value as any)?.skills || [])
 const selEffects = computed(() => {
   const tab = detailTab.value
@@ -236,10 +237,10 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
           <!-- 装备 -->
           <template v-if="detailTab === 'equipment'">
             <div v-if="selEquipment.length === 0" class="empty-tab">暂无装备</div>
-            <div v-for="eq in selEquipment" :key="eq.itemId" class="equip-card">
+            <div v-for="eq in selEquipment" :key="eq.name" class="equip-card">
               <div class="eq-header">
                 <span class="eq-name" :style="{ color: qualityVar(inferQuality(eq.stats)) }">{{ eq.name }}</span>
-                <span class="eq-slot">[{{ eq.slot === 'weapon' ? '武器' : eq.slot === 'armor' ? '防具' : '饰品' }}]</span>
+                <span class="eq-slot">[{{ eq.equippedSlot }}]</span>
               </div>
               <div class="eq-desc" v-if="eq.description">{{ eq.description }}</div>
               <div class="fx-list" v-if="eq.effects && Object.keys(eq.effects).length">

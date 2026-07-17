@@ -11,7 +11,6 @@ import {
   clampSp,
   validateCharacterState,
   validateStatePatch,
-  validateEquipment,
   validateSkill,
   validateItem,
   validateVarsPatch,
@@ -29,7 +28,6 @@ import {
 import { createDefaultCharacterState } from './types';
 import type {
   CharacterState,
-  EquipmentSlot,
   Skill,
   InventoryItem,
   StatusEffect,
@@ -350,28 +348,8 @@ describe('validateStatePatch', () => {
 });
 
 // ========== validateEquipment ==========
-
-describe('validateEquipment', () => {
-  it('有效装备通过校验', () => {
-    const equip: EquipmentSlot = { slot: 'weapon', itemId: 'sword_01', name: '铁剑' };
-    const r = validateEquipment(equip);
-    expect(r.valid).toBe(true);
-  });
-
-  it('缺少 slot 应报错', () => {
-    const equip = { itemId: 'sword_01', name: '铁剑' } as unknown as EquipmentSlot;
-    const r = validateEquipment(equip);
-    expect(r.valid).toBe(false);
-    expect(r.errors).toContain('装备缺少 slot');
-  });
-
-  it('缺少 itemId 应报错', () => {
-    const equip = { slot: 'weapon', name: '铁剑' } as unknown as EquipmentSlot;
-    const r = validateEquipment(equip);
-    expect(r.valid).toBe(false);
-    expect(r.errors).toContain('装备缺少 itemId');
-  });
-});
+// M2: validateEquipment 测试组已删除 — 被测函数随 EquipmentSlot 退役
+// （装备不是独立实体，装备校验并入 validateItem，规范 §3）
 
 // ========== validateSkill ==========
 
@@ -560,7 +538,7 @@ describe('$validate namespace', () => {
   it('应包含所有校验函数', () => {
     expect($validate.validateCharacterState).toBe(validateCharacterState);
     expect($validate.validateStatePatch).toBe(validateStatePatch);
-    expect($validate.validateEquipment).toBe(validateEquipment);
+    // M2: validateEquipment 已随 EquipmentSlot 退役（装备校验并入 validateItem，规范 §3）
     expect($validate.validateSkill).toBe(validateSkill);
     expect($validate.validateItem).toBe(validateItem);
     expect($validate.validateVarsPatch).toBe(validateVarsPatch);

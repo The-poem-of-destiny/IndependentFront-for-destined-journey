@@ -71,7 +71,8 @@ describe('createDefaultCharacterState', () => {
 
   it('装备/技能/背包/状态 默认空数组', () => {
     const c = createDefaultCharacterState();
-    expect(c.equipment).toEqual([]);
+    // M2: equipment[] 已删除 — 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
+    expect(c.inventory.filter(i => i.equippedSlot)).toEqual([]);
     expect(c.skills).toEqual([]);
     expect(c.inventory).toEqual([]);
     expect(c.statusEffects).toEqual([]);

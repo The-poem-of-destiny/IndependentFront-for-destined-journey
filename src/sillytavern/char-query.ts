@@ -89,8 +89,10 @@ export function summarizeChar(char: CharacterState): string {
     parts.push(`状态:[${effects}]`);
   }
 
-  if (char.equipment.length > 0) {
-    const equip = char.equipment.map(e => e.name).join(', ');
+  // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
+  const equipped = char.inventory.filter(i => i.equippedSlot);
+  if (equipped.length > 0) {
+    const equip = equipped.map(e => e.name).join(', ');
     parts.push(`装备:[${equip}]`);
   }
 

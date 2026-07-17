@@ -25,13 +25,14 @@ function inferQuality(stats?: Record<string, number>): string {
 }
 
 // ═══ 数据 ═══
+// M6 完整重构: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3），最小适配 filter 惯用式
 const inventoryItems = computed(() => player.value?.inventory || [])
-const equipmentItems = computed(() => player.value?.equipment || [])
+const equipmentItems = computed(() => (player.value?.inventory ?? []).filter(i => i.equippedSlot))
 const skillItems = computed(() => player.value?.skills || [])
 
 const currentItems = computed<any[]>(() => {
   const inv = Array.isArray(player.value?.inventory) ? player.value.inventory : []
-  const equip = Array.isArray(player.value?.equipment) ? player.value.equipment : []
+  const equip = inv.filter(i => i.equippedSlot)
   const skills = Array.isArray(player.value?.skills) ? player.value.skills : []
   switch (activeCategory.value) {
     case 'inventory': return inv
@@ -45,7 +46,7 @@ const filterOptions = computed(() => {
   const types = new Set<string>()
   for (const item of currentItems.value) {
     const t = activeCategory.value === 'equipment'
-      ? item.slot
+      ? item.equippedSlot
       : activeCategory.value === 'skills'
         ? (item.type === 'active' ? '主动' : '被动')
         : item.type
@@ -58,7 +59,7 @@ const filteredItems = computed(() => {
   if (activeFilter.value === '全部') return currentItems.value
   return currentItems.value.filter(item => {
     const t = activeCategory.value === 'equipment'
-      ? item.slot : activeCategory.value === 'skills'
+      ? item.equippedSlot : activeCategory.value === 'skills'
         ? (item.type === 'active' ? '主动' : '被动') : item.type
     return t === activeFilter.value
   })
@@ -90,7 +91,8 @@ const selTypeLabel = computed(() => {
   const item: any = selected.value
   if (!item) return ''
   if (activeCategory.value === 'equipment') {
-    return item.slot === 'weapon' ? '武器' : item.slot === 'armor' ? '防具' : '饰品'
+    // M6 完整重构: equippedSlot 已是中文槽位枚举，直接展示
+    return item.equippedSlot || '装备'
   }
   if (activeCategory.value === 'skills') return item.type === 'active' ? '主动技能' : '被动技能'
   return item.type || '物品'
@@ -138,9 +140,9 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
           class="item-row" :class="{ selected: i === selectedIdx }" @click="selectedIdx = i">
           <span class="dot" :style="{ background: qualityVar((item as any).rarity || inferQuality((item as any).stats)) }" />
           <span class="i-name" :style="{ color: qualityVar((item as any).rarity || inferQuality((item as any).stats)) }">{{ (item as any).name }}</span>
-          <span class="i-tag">{{ activeCategory === 'equipment' ? ((item as any).slot) : activeCategory === 'skills' ? ((item as any).type === 'active' ? '主动' : '被动') : ((item as any).type) }}</span>
+          <span class="i-tag">{{ activeCategory === 'equipment' ? ((item as any).equippedSlot) : activeCategory === 'skills' ? ((item as any).type === 'active' ? '主动' : '被动') : ((item as any).type) }}</span>
           <span class="i-extra" v-if="activeCategory === 'inventory'">×{{ (item as any).quantity }}</span>
-          <span class="i-extra" v-else-if="activeCategory === 'equipment'">[{{ (item as any).slot }}]</span>
+          <span class="i-extra" v-else-if="activeCategory === 'equipment'">[{{ (item as any).equippedSlot }}]</span>
           <span class="i-extra" v-else>Lv.{{ (item as any).level }}</span>
         </div>
       </div>

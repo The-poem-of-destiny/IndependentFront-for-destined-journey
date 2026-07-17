@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type {
   CharacterState, SaveSlot, PlotEvent, MemoryRecord,
-  StatusEffect, Skill, EquipmentSlot,
+  StatusEffect, Skill,
 } from './types';
 import { createDefaultCharacterState } from './types';
 
@@ -58,7 +58,6 @@ function buildMockCharacter(overrides: Partial<CharacterState> = {}): CharacterS
     sp: 50,
     maxSp: 50,
     inventory: [],
-    equipment: [],
     skills: [],
     statusEffects: [],
     location: 'village_square',

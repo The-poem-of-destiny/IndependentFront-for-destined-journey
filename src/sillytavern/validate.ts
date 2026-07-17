@@ -11,7 +11,7 @@
  */
 
 import type {
-  CharacterState, StatusEffect, EquipmentSlot, Skill, InventoryItem,
+  CharacterState, StatusEffect, Skill, InventoryItem,
   VarsPatch, StatePatch,
 } from './types';
 
@@ -153,13 +153,7 @@ export function validateStatePatch(patch: StatePatch): ValidationResult {
 }
 
 // ========== 装备/技能/物品校验 ==========
-
-export function validateEquipment(equip: EquipmentSlot): ValidationResult {
-  const errors: string[] = [];
-  if (!equip.slot) errors.push('装备缺少 slot');
-  if (!equip.itemId) errors.push('装备缺少 itemId');
-  return { valid: errors.length === 0, errors, warnings: [] };
-}
+// M2: validateEquipment 已删除 — 装备不是独立实体（规范 §3），装备校验并入物品校验 validateItem
 
 export function validateSkill(skill: Skill): ValidationResult {
   const errors: string[] = [];
@@ -226,7 +220,6 @@ export const $validate = {
   // 校验函数
   validateCharacterState,
   validateStatePatch,
-  validateEquipment,
   validateSkill,
   validateItem,
   validateVarsPatch,

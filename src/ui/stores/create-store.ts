@@ -664,7 +664,7 @@ export const useCreateStore = defineStore('create', () => {
         deityPosition: '',
         divineKingdom: { name: '', description: '' },
       },
-      equipment: [],
+      // M2: equipment[] 已删除 — 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
       skills: [],
       inventory: [],
       statusEffects: [],

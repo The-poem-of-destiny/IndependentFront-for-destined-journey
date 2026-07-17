@@ -216,7 +216,6 @@ describe('buildAgentMessages', () => {
           mp: 30, maxMp: 50,
           sp: 30, maxSp: 50,
           ascension: { enabled: false, elements: [], authority: [], law: [], deityPosition: '', divineKingdom: { name: '', description: '' } },
-          equipment: [],
           skills: [],
           inventory: [],
           statusEffects: [],

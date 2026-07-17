@@ -27,7 +27,6 @@ import type {
   CharacterState,
   StatePatch,
   QualityLevel,
-  EquipmentSlot,
   InventoryItem,
   ToolDefinition,
 } from './types';
@@ -36,6 +35,7 @@ import { scanCharDetects } from './marker-protocol';
 import { buildAgentMessages } from './agent-templates';
 import { getTierConfig, calcHP, calcMP, calcSP } from './tier-constants';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
+import { normalizeSlot } from './field-enums';
 import type { ToolExecutionContext } from './types';
 
 // ========== Types ==========
@@ -300,24 +300,23 @@ export function assembleCharacterState(
   }));
 
   // 合并装备: char_gen 自产优先
+  // M2: 装备不是独立实体 — 装备产物直接写成带 equippedSlot 的 InventoryItem（规范 §3）// M3 重写
   const charEquip = charData.equipment ?? [];
   const itemGenEquip = itemData.equipment ?? [];
   const charEquipNames = new Set(charEquip.map(e => e.name));
   const mergedEquip = [...itemGenEquip.filter(e => !charEquipNames.has(e.name)), ...charEquip];
 
-  const equipment: EquipmentSlot[] = mergedEquip.map((e) => {
-    const itemId = crypto.randomUUID();
-    return {
-      slot: e.slot,
-      itemId,
-      name: e.name,
-      description: e.description,
-      stats: e.stats,
-      durability: e.durability,
-      maxDurability: e.durability,
-      effects: (e as any).effects,
-    };
-  });
+  const equippedItems: InventoryItem[] = mergedEquip.map((e) => ({
+    name: e.name,
+    description: e.description,
+    quantity: 1,
+    type: '装备',
+    equippedSlot: normalizeSlot(e.slot),   // 无法识别 → null（躺背包），铁律5
+    stats: e.stats,
+    durability: e.durability,
+    maxDurability: e.durability,
+    effects: (e as any).effects,
+  }));
 
   // 合并背包: char_gen 自产优先
   const charInv = charData.inventory ?? [];
@@ -325,14 +324,18 @@ export function assembleCharacterState(
   const charInvNames = new Set(charInv.map(i => i.name));
   const mergedInv = [...itemGenInv.filter(i => !charInvNames.has(i.name)), ...charInv];
 
-  const inventory: InventoryItem[] = mergedInv.map((inv) => ({
-    id: crypto.randomUUID(),
-    name: inv.name,
-    description: inv.description,
-    type: inv.type,
-    quantity: inv.quantity,
-    rarity: (inv.rarity as QualityLevel) || undefined,
-  }));
+  const inventory: InventoryItem[] = [
+    ...mergedInv.map((inv) => ({
+      id: crypto.randomUUID(),
+      name: inv.name,
+      description: inv.description,
+      type: inv.type,
+      quantity: inv.quantity,
+      rarity: (inv.rarity as QualityLevel) || undefined,
+    })),
+    // M2: 装备产物并入 inventory（equippedSlot 非空 = 已穿戴）// M3 重写
+    ...equippedItems,
+  ];
 
   return createDefaultCharacterState({
     type: 'npc',
@@ -370,7 +373,6 @@ export function assembleCharacterState(
       deityPosition: charData.ascension.deityPosition || '',
       divineKingdom: charData.ascension.divineKingdom || { name: '', description: '' },
     },
-    equipment,
     skills,
     inventory,
     customFields: {
@@ -423,12 +425,12 @@ export function buildCharGenPatches(character: CharacterState): StatePatch[] {
     });
   }
 
-  // 4. 装备物品
-  for (const equip of character.equipment) {
+  // 4. 装备物品 — M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）// M3 重写
+  for (const equip of character.inventory.filter(i => i.equippedSlot)) {
     patches.push({
       op: 'equip_item',
-      target: `characters.${character.id}.equipment`,
-      value: equip,
+      target: `characters.${character.id}`,
+      value: { name: equip.name, slot: equip.equippedSlot },
       metadata: { source: 'item_gen' },
     });
   }

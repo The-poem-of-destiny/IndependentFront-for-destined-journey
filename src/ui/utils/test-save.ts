@@ -88,41 +88,7 @@ export async function createTestSave(): Promise<string> {
     adventurerRank: 'A',
     currentAction: '',
     bloodlineIds: ['human_imperial'],
-    equipment: [
-      {
-        slot: 'weapon', itemId: crypto.randomUUID(), name: '精钢长剑',
-        description: '帝国军工厂出品的长剑，剑身上刻有奥古斯提姆的鹰徽。',
-        stats: { atk: 24, str: 3 },
-        durability: 80, maxDurability: 80,
-        effects: {
-          '锐利': '攻击力 +24',
-          '力量加持': '力量 +3',
-        },
-        scripts: {},
-      },
-      {
-        slot: 'armor', itemId: crypto.randomUUID(), name: '秘银锁子甲',
-        description: '轻便而坚固的秘银甲，以精灵工艺锻造的秘银丝编织而成。',
-        stats: { def: 18, con: 1 },
-        durability: 65, maxDurability: 65,
-        effects: {
-          '坚韧': '防御 +18',
-          '体质增幅': '体质 +1',
-        },
-        scripts: {},
-      },
-      {
-        slot: 'accessory', itemId: crypto.randomUUID(), name: '冒险者徽章',
-        description: 'A级冒险者的身份象征，蕴含着微弱的魔力。',
-        stats: { int: 1, spi: 1 },
-        durability: 100, maxDurability: 100,
-        effects: {
-          '智慧启迪': '智力 +1',
-          '精神凝聚': '精神 +1',
-        },
-        scripts: {},
-      },
-    ],
+    // M2: 装备并入 inventory（equippedSlot 非空 = 已穿戴，规范 §3）
     skills: [
       {
         id: crypto.randomUUID(), name: '十字斩', type: 'active', level: 3,
@@ -145,6 +111,43 @@ export async function createTestSave(): Promise<string> {
       },
     ],
     inventory: [
+      // ═══ 已穿戴装备（equippedSlot 非空，规范 §3）═══
+      {
+        id: crypto.randomUUID(), name: '精钢长剑', type: '装备',
+        description: '帝国军工厂出品的长剑，剑身上刻有奥古斯提姆的鹰徽。',
+        quantity: 1, equippedSlot: '武器',
+        stats: { atk: 24, str: 3 },
+        durability: 80, maxDurability: 80,
+        effects: {
+          '锐利': '攻击力 +24',
+          '力量加持': '力量 +3',
+        },
+        scripts: {},
+      },
+      {
+        id: crypto.randomUUID(), name: '秘银锁子甲', type: '装备',
+        description: '轻便而坚固的秘银甲，以精灵工艺锻造的秘银丝编织而成。',
+        quantity: 1, equippedSlot: '身体',
+        stats: { def: 18, con: 1 },
+        durability: 65, maxDurability: 65,
+        effects: {
+          '坚韧': '防御 +18',
+          '体质增幅': '体质 +1',
+        },
+        scripts: {},
+      },
+      {
+        id: crypto.randomUUID(), name: '冒险者徽章', type: '装备',
+        description: 'A级冒险者的身份象征，蕴含着微弱的魔力。',
+        quantity: 1, equippedSlot: '饰品',
+        stats: { int: 1, spi: 1 },
+        durability: 100, maxDurability: 100,
+        effects: {
+          '智慧启迪': '智力 +1',
+          '精神凝聚': '精神 +1',
+        },
+        scripts: {},
+      },
       {
         id: crypto.randomUUID(), name: '治疗药水', type: '消耗品',
         description: '冒险者公会的标准配给品，能快速愈合轻伤。恢复 50 HP。',
@@ -229,10 +232,12 @@ export async function createTestSave(): Promise<string> {
         thoughts: '"亚瑟...那个帝国走狗。他以为自己在伸张正义，殊不知那些商队运送的是帝国的军需物资。等我再劫一票，就有足够的钱雇更多人...到时候，艾瑟嘉德就是我的了。"',
         background: '曾是暗精灵地下城邦的影刃特工，因一次任务失败被流放。流落到地表后在近郊森林建立了盗贼团，专门劫掠奥古斯提姆帝国的商队。与翡翠之心的某些势力有秘密联系。',
       },
-      equipment: [
+      // M2: 装备并入 inventory（equippedSlot 非空 = 已穿戴，规范 §3）
+      inventory: [
         {
-          slot: 'weapon', itemId: crypto.randomUUID(), name: '淬毒匕首',
+          id: crypto.randomUUID(), name: '淬毒匕首', type: '装备',
           description: '涂了暗精灵特制毒药的匕首，刀刃泛着幽绿色的光泽。',
+          quantity: 1, equippedSlot: '武器',
           stats: { atk: 16, dex: 2 },
           durability: 50, maxDurability: 50,
           effects: {

@@ -620,7 +620,8 @@ describe('buildCharacterState', () => {
 
   it('equipment/skills/inventory 应置空', () => {
     const state = store.buildCharacterState('test-save-id')
-    expect(state.equipment).toEqual([])
+    // M2: equipment[] 已删除 — 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
+    expect(state.inventory.filter(i => i.equippedSlot)).toEqual([])
     expect(state.skills).toEqual([])
     expect(state.inventory).toEqual([])
   })

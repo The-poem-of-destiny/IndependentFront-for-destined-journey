@@ -283,8 +283,10 @@ describe('assembleCharacterState', () => {
       ],
     });
     const result = assembleCharacterState(charData, itemData);
-    expect(result.equipment).toHaveLength(1);
-    expect(result.equipment[0].slot).toBe('武器');
+    // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
+    const equipped = result.inventory.filter(i => i.equippedSlot);
+    expect(equipped).toHaveLength(1);
+    expect(equipped[0].equippedSlot).toBe('武器');
   });
 
   it('应合并背包物品', () => {
@@ -295,16 +297,19 @@ describe('assembleCharacterState', () => {
       ],
     });
     const result = assembleCharacterState(charData, itemData);
-    expect(result.inventory).toHaveLength(1);
-    expect(result.inventory[0].name).toBe('药水');
-    expect(result.inventory[0].quantity).toBe(5);
+    // M2: 装备也是物品 — 默认 itemData 的 精灵长弓 以 equippedSlot 非空形式并入 inventory（规范 §3）
+    const looseItems = result.inventory.filter(i => !i.equippedSlot);
+    expect(looseItems).toHaveLength(1);
+    expect(looseItems[0].name).toBe('药水');
+    expect(looseItems[0].quantity).toBe(5);
   });
 
   it('应处理空物品数据', () => {
     const charData = makeCharGenOutput();
     const result = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] });
     expect(result.skills).toHaveLength(0);
-    expect(result.equipment).toHaveLength(0);
+    // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
+    expect(result.inventory.filter(i => i.equippedSlot)).toHaveLength(0);
     expect(result.inventory).toHaveLength(0);
   });
 
@@ -400,7 +405,10 @@ describe('buildCharGenPatches', () => {
     const patches = buildCharGenPatches(character);
 
     const itemPatches = patches.filter((p) => p.op === 'add_item');
-    expect(itemPatches).toHaveLength(2);
+    // M2: 装备也是物品 — 2 个背包物品 + 默认 itemData 的 1 件装备（精灵长弓）都走 add_item（规范 §3）
+    expect(itemPatches).toHaveLength(3);
+    const looseItemPatches = itemPatches.filter((p) => !(p.value as { equippedSlot?: string | null }).equippedSlot);
+    expect(looseItemPatches).toHaveLength(2);
   });
 
   it('应生成 equip_item patches', () => {

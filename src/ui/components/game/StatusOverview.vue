@@ -29,13 +29,16 @@ const attrEntries = computed(() =>
 )
 
 // ═══ 装备列表 ═══
+// M6 完整重构: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3），槽位为中文枚举
 const EQUIP_ICONS: Record<string, string> = {
-  weapon: 'fa-solid fa-sword', armor: 'fa-solid fa-shield-halved', accessory: 'fa-regular fa-gem',
+  '武器': 'fa-solid fa-sword', '副手': 'fa-solid fa-shield-halved', '头部': 'fa-solid fa-helmet-safety',
+  '身体': 'fa-solid fa-shirt', '手部': 'fa-solid fa-mitten', '脚部': 'fa-solid fa-shoe-prints',
+  '腰带': 'fa-solid fa-ring', '饰品': 'fa-regular fa-gem',
 }
 const equipmentList = computed(() =>
-  (player.value?.equipment ?? []).map(e => ({
+  (player.value?.inventory ?? []).filter(i => i.equippedSlot).map(e => ({
     ...e,
-    icon: EQUIP_ICONS[e.slot] || 'fa-solid fa-circle',
+    icon: EQUIP_ICONS[e.equippedSlot!] || 'fa-solid fa-circle',
   }))
 )
 
@@ -181,10 +184,10 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         <div class="equip-sub" v-if="equipmentList.length">
           <div class="sub-label">装备</div>
           <div class="item-list">
-            <div v-for="eq in equipmentList" :key="eq.itemId" class="item-row">
+            <div v-for="eq in equipmentList" :key="eq.name" class="item-row">
               <i :class="eq.icon" class="item-icon" />
               <span class="item-name">{{ eq.name }}</span>
-              <span class="item-tag">{{ eq.slot === 'weapon' ? '武器' : eq.slot === 'armor' ? '防具' : '饰品' }}</span>
+              <span class="item-tag">{{ eq.equippedSlot }}</span>
             </div>
           </div>
         </div>

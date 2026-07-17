@@ -319,13 +319,15 @@ function formatCharacterNarrative(char: CharacterState): string {
   if (char.money != null) lines.push(`  金钱: ${char.money}G`);
 
   // 装备 — 剥离 stats 数值，保留 effects 描述
-  if (char.equipment?.length) {
+  // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
+  const equippedItems = (char.inventory ?? []).filter(i => i.equippedSlot);
+  if (equippedItems.length) {
     lines.push('');
     lines.push('  装备:');
-    for (const eq of char.equipment) {
+    for (const eq of equippedItems) {
       const desc = eq.description ? ` — ${eq.description}` : '';
       const effs = eq.effects ? ` [${Object.entries(eq.effects).map(([k, v]) => `${k}: ${v}`).join(', ')}]` : '';
-      lines.push(`    [${eq.slot}] ${eq.name}${desc}${effs}`);
+      lines.push(`    [${eq.equippedSlot}] ${eq.name}${desc}${effs}`);
       // 不显示 eq.stats (数值设计)
       // 不显示 eq.scripts (JS 代码)
     }

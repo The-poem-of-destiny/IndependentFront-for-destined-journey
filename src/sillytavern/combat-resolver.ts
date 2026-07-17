@@ -456,8 +456,9 @@ export function characterToCombatParticipant(
   side: 'ally' | 'enemy',
   overrides?: Partial<CombatParticipant>,
 ): CombatParticipant {
-  const weapon = char.equipment.find(e => e.slot === 'weapon');
-  const armor = char.equipment.find(e => e.slot === 'armor');
+  // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3，槽位为中文枚举 EQUIP_SLOTS）
+  const weapon = char.inventory.find(i => i.equippedSlot === '武器');
+  const armor = char.inventory.find(i => i.equippedSlot === '身体');
 
   return {
     characterId: char.id,

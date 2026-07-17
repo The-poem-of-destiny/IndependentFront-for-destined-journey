@@ -45,14 +45,7 @@ function makeCharacter(overrides: Partial<CharacterState> = {}): CharacterState 
       deityPosition: '',
       divineKingdom: { name: '', description: '' },
     },
-    equipment: [
-      {
-        slot: 'weapon', itemId: 'eq_001', name: '铁剑',
-        description: '一把朴素但保养良好的铁剑',
-        stats: { 攻击力: 15 }, effects: { '锋刃': '攻击时附带轻微出血效果' },
-        scripts: { onHit: '$resource.modifyHp(target, -5);' },
-      },
-    ],
+    // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
     skills: [
       {
         id: 'sk_001', name: '重击', description: '集中力量进行一次势大力沉的斩击',
@@ -62,6 +55,13 @@ function makeCharacter(overrides: Partial<CharacterState> = {}): CharacterState 
       },
     ],
     inventory: [
+      {
+        id: 'eq_001', name: '铁剑',
+        description: '一把朴素但保养良好的铁剑',
+        quantity: 1, equippedSlot: '武器',
+        stats: { 攻击力: 15 }, effects: { '锋刃': '攻击时附带轻微出血效果' },
+        scripts: { onHit: '$resource.modifyHp(target, -5);' },
+      },
       {
         id: 'inv_001', name: '治疗药水', description: '散发草药香气的红色液体',
         quantity: 2, type: 'consumable', rarity: '普通',
@@ -583,9 +583,11 @@ describe('Integration: story Agent NARRATIVE output', () => {
       characters: [
         makeCharacter({
           id: 'player', type: 'player', name: '凯恩',
-          equipment: [{
-            slot: 'weapon', itemId: 'eq_001', name: '精铁长剑',
+          // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
+          inventory: [{
+            id: 'eq_001', name: '精铁长剑',
             description: '剑刃闪烁着冷冽的寒光',
+            quantity: 1, equippedSlot: '武器',
             stats: { 攻击力: 25, 暴击率: 5 },
             effects: { '锋刃': '攻击时附带轻微出血' },
             scripts: { onCrit: '$resource.modifyHp(target, -30);' },

@@ -14,7 +14,7 @@
 import type {
   StatePatch, StatePatchOp, StateCommitResult,
   GameEvent, CharacterState, MemoryRecord, PlotEvent,
-  StatusEffect, EquipmentSlot, Skill, InventoryItem,
+  StatusEffect, Skill, InventoryItem,
 } from './types';
 import {
   getCharacter, getCharacters, saveCharacter, saveCharacters, deleteCharacter,

@@ -416,6 +416,7 @@ export function buildCraftPatches(
   // 2. 合并 item_gen 产出的物品数据
   if (itemOutput) {
     // 装备 → add_item + equip_item
+    // M3 重写: equipment 是 ItemGenOutput 的 AI 输出结构（M3 处理语义）；equip_item 按 name+slot 寻址
     for (const equip of itemOutput.equipment) {
       patches.push({
         op: 'add_item',
