@@ -377,7 +377,7 @@ export function assembleCharacterState(
     },
     skills,
     inventory,
-    // M3: 正式字段直写（规范 §2.1），customFields 只保留真扩展数据（双写到 M6）
+    // M3/M6: 正式字段直写（规范 §2.1），customFields 只留真扩展数据（双写退役完成）
     appearance: charData.appearance,
     background: charData.background,
     personality: charData.personality,

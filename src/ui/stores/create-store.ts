@@ -673,20 +673,16 @@ export const useCreateStore = defineStore('create', () => {
       adventurerRank: '未评级',
       currentAction: '',
       bloodlineIds: [],
-      // 🆕 正式字段（规范 §2.1；customFields 同步保留旧 key 双写，M6 切换读方后再删）
+      // 正式字段（规范 §2.1；M6 T2 双写退役完成，customFields 只留真扩展数据）
       gender: gender.value === '自定义' ? customGender.value : gender.value,
       personality: personality.value.trim(),
       appearance: physics.value.trim(),
       background: backstory.value.trim(),
       customFields: {
-        saveId,                                                 // 🔧 关联存档，缺了这个 getCharacters 匹配不到
-        gender: gender.value === '自定义' ? customGender.value : gender.value,
+        // M6 T2: saveId/gender/personality/physics/backstory 已升一等字段停写
         age: age.value,
         destinyCoreId: destinyCore.value?.id ?? null,
         destinyPoints: destinyPoints.value,
-        personality: personality.value.trim(),
-        physics: physics.value.trim(),
-        backstory: backstory.value.trim(),
         extra: extra.value.trim(),
       },
     }
@@ -829,7 +825,7 @@ export const useCreateStore = defineStore('create', () => {
     await saveSaveSlot({
       id: saveId,
       name: saveName,
-      slot: 0,  // TODO: 自动分配空闲槽位
+      slot: 0,  // TODO: 自动分配空闲槽位（多槽位属产品功能非字段规范）
       createdAt: Date.now(),
       updatedAt: Date.now(),
       activeSnapshotId: null,

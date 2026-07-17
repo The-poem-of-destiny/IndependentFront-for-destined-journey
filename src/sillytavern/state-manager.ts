@@ -940,8 +940,8 @@ export class StateManager {
     if (clash) throw new Error(`同名角色已存在: ${name}`);
 
     // 铁律3: saveId 是账务字段，由 Code 无条件注入，不信任上游 patch 构造方 (#8/M2硬前置②)
+    // M6 T2: customFields.saveId 双写已退役 — saveId 单源一等字段
     character.saveId = this.saveId;
-    if (character.customFields) character.customFields.saveId = this.saveId;  // 双写，M6 删
 
     await saveCharacter(character);
     return this.createEvent('system', patch);
@@ -1043,8 +1043,9 @@ export class StateManager {
     const { getProfile, setQuest } = await import('./save-profile');
     const profile = await getProfile(this.saveId);
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { name: _name, ...questFields } = questData;
+    // M6 #52: 用 delete 剔除寻址键，替代 `{ name: _name, ...rest }` 的未用解构 + eslint-disable
+    const questFields: Record<string, any> = { ...questData };
+    delete questFields.name;
     // #32: status 自由字符串归一化（'active'/'done' 等别名 → 中文枚举）
     if (questFields.status !== undefined) {
       questFields.status = normalizeQuestStatus(questFields.status);
