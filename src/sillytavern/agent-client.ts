@@ -297,7 +297,7 @@ export class AgentClient {
         model,
         messages: request.messages,
         temperature: request.temperature ?? 0.7,
-        max_tokens: request.maxTokens ?? 2048,
+        max_tokens: request.maxTokens ?? 16384,  // 真机修(2026-07-17): 侧链 request 不带 maxTokens，2048 兜底会截断 char_gen 思考链+XML → 静默解析失败
         top_p: request.topP ?? 1.0,
         frequency_penalty: request.frequencyPenalty ?? 0,
         presence_penalty: request.presencePenalty ?? 0,
@@ -497,7 +497,7 @@ export class AgentClient {
         model,
         messages: request.messages,
         temperature: request.temperature ?? 0.7,
-        max_tokens: request.maxTokens ?? 2048,
+        max_tokens: request.maxTokens ?? 16384,  // 真机修(2026-07-17): 侧链 request 不带 maxTokens，2048 兜底会截断 char_gen 思考链+XML → 静默解析失败
         top_p: request.topP ?? 1.0,
         frequency_penalty: request.frequencyPenalty ?? 0,
         presence_penalty: request.presencePenalty ?? 0,

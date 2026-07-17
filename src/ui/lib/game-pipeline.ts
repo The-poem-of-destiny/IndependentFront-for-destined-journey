@@ -561,12 +561,13 @@ export class GamePipeline {
       return
     }
 
-    try {
-      const { runCraftGenChain } = await import('@engine/craft-gen-chain')
-      const clientFactory = this.getClientFactory()
-      const stateManager = this.getStateManager()
+    const { runCraftGenChain } = await import('@engine/craft-gen-chain')
+    const clientFactory = this.getClientFactory()
+    const stateManager = this.getStateManager()
 
-      for (const marker of markers) {
+    // 真机修(2026-07-17): try/catch 进循环 — 单制作链失败不阻断后续
+    for (const marker of markers) {
+      try {
         const request = {
           saveId: this.saveId,
           marker,
@@ -581,9 +582,9 @@ export class GamePipeline {
         if (result.narrative) {
           this.game.addMessage(result.narrative, 'assistant')
         }
+      } catch (err) {
+        console.error('[GamePipeline] craft_gen 链失败，继续处理剩余请求:', err)
       }
-    } catch (err) {
-      console.error('[GamePipeline] craft_gen 链失败:', err)
     }
   }
 
@@ -598,12 +599,13 @@ export class GamePipeline {
       return
     }
 
-    try {
-      const { runCharGenChain } = await import('@engine/char-gen-agent')
-      const clientFactory = this.getClientFactory()
-      const stateManager = this.getStateManager()
+    const { runCharGenChain } = await import('@engine/char-gen-agent')
+    const clientFactory = this.getClientFactory()
+    const stateManager = this.getStateManager()
 
-      for (const marker of markers) {
+    // 真机修(2026-07-17): try/catch 进循环 — 单 NPC 链失败(如输出截断)不再连锁抛弃后续请求
+    for (const marker of markers) {
+      try {
         const charGenRequest = {
           saveId: this.saveId,
           marker,
@@ -627,9 +629,9 @@ export class GamePipeline {
             details: result.character as any,
           })
         }
+      } catch (err) {
+        console.error(`[GamePipeline] char_gen 链失败 (${marker.attributes?.characterName ?? '未知角色'})，继续处理剩余请求:`, err)
       }
-    } catch (err) {
-      console.error('[GamePipeline] char_gen 链失败:', err)
     }
   }
 
@@ -644,13 +646,14 @@ export class GamePipeline {
       return
     }
 
-    try {
-      const { runItemGenChain } = await import('@engine/item-gen-chain')
-      const clientFactory = this.getClientFactory()
-      const stateManager = this.getStateManager()
-      const storyOutput = ctx.agentOutputs?.get('story') ?? ''
+    const { runItemGenChain } = await import('@engine/item-gen-chain')
+    const clientFactory = this.getClientFactory()
+    const stateManager = this.getStateManager()
+    const storyOutput = ctx.agentOutputs?.get('story') ?? ''
 
-      for (const marker of markers) {
+    // 真机修(2026-07-17): try/catch 进循环 — 单物品链失败不阻断后续
+    for (const marker of markers) {
+      try {
         const request = {
           saveId: this.saveId,
           marker,
@@ -664,9 +667,9 @@ export class GamePipeline {
         })
         // 物品数据已由 stateManager 落库；run() finally 的 refreshFromDb() 会把
         // 最新 characters（含新物品/装备）回读进 Pinia，前端面板随之刷新。
+      } catch (err) {
+        console.error('[GamePipeline] item_gen 链失败，继续处理剩余请求:', err)
       }
-    } catch (err) {
-      console.error('[GamePipeline] item_gen 链失败:', err)
     }
   }
 }
