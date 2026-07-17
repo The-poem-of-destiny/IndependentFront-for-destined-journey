@@ -1315,7 +1315,8 @@ function convertScriptEffects(se: ScriptEffects): StatePatch[] {
   for (const a of se.adds) patches.push({ op: 'add_status_effect', target: `characters.${a.charId}`, value: a.effect });
   // M2: effectId 字符串按 name 解释（remove handler 的裸字符串过渡形态）
   for (const r of se.removes) patches.push({ op: 'remove_status_effect', target: `characters.${r.charId}`, value: r.effectId });
-  for (const s of se.stackSets) patches.push({ op: 'set_variable', target: `characters.${s.charId}.statusEffects`, value: { id: s.effectId, stacks: s.stacks } });
+  // M2: 逻辑键=name（铁律1）— stackSets 的 effectId 按 name 解释（脚本层 $status.setStacks 过渡形态，M3 收敛）
+  for (const s of se.stackSets) patches.push({ op: 'set_variable', target: `characters.${s.charId}.statusEffects`, value: { name: s.effectId, stacks: s.stacks } });
   for (const h of se.hpChanges) patches.push({ op: 'delta_variable', target: `characters.${h.charId}.hp`, amount: h.amount });
   for (const st of se.statChanges) patches.push({ op: 'delta_variable', target: `characters.${st.charId}.attributes.${st.stat}`, amount: st.amount });
   return patches;

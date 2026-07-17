@@ -75,15 +75,15 @@ export function canAffordMoney(char: CharacterState, amount: number): boolean {
   return char.money >= amount;
 }
 
-/** 检查是否有物品 */
-export function hasItem(char: CharacterState, itemId: string, quantity: number = 1): boolean {
-  const item = char.inventory.find(i => i.id === itemId);
+/** 检查是否有物品 — M2 按名寻址（铁律1，逻辑键=name）；`|| id` 为旧存档过渡容忍 */
+export function hasItem(char: CharacterState, name: string, quantity: number = 1): boolean {
+  const item = char.inventory.find(i => i.name === name || i.id === name);
   return item ? item.quantity >= quantity : false;
 }
 
-/** 检查是否有技能 */
-export function hasSkill(char: CharacterState, skillId: string): boolean {
-  return char.skills.some(s => s.id === skillId);
+/** 检查是否有技能 — M2 按名寻址（铁律1，逻辑键=name）；`|| id` 为旧存档过渡容忍 */
+export function hasSkill(char: CharacterState, name: string): boolean {
+  return char.skills.some(s => s.name === name || s.id === name);
 }
 
 /** 检查是否有某个状态效果 */

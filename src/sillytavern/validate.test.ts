@@ -366,11 +366,11 @@ describe('validateSkill', () => {
     expect(r.valid).toBe(true);
   });
 
-  it('缺少 id 应报错', () => {
+  it('M2: 缺少 id 不再报错（逻辑键=name）', () => {
     const skill = { name: '火球术', description: '', type: 'active' as const } as unknown as Skill;
     const r = validateSkill(skill);
-    expect(r.valid).toBe(false);
-    expect(r.errors).toContain('技能缺少 id');
+    expect(r.valid).toBe(true);
+    expect(r.errors).not.toContain('技能缺少 id');
   });
 
   it('缺少 name 应报错', () => {
@@ -414,11 +414,11 @@ describe('validateItem', () => {
     expect(r.valid).toBe(true);
   });
 
-  it('缺少 id 应报错', () => {
+  it('M2: 缺少 id 不再报错（逻辑键=name）', () => {
     const item = { name: '回复药', quantity: 3 } as unknown as InventoryItem;
     const r = validateItem(item);
-    expect(r.valid).toBe(false);
-    expect(r.errors).toContain('物品缺少 id');
+    expect(r.valid).toBe(true);
+    expect(r.errors).not.toContain('物品缺少 id');
   });
 
   it('缺少 name 应报错', () => {

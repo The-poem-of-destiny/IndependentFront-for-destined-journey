@@ -215,14 +215,14 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
           <template v-if="detailTab === 'status'">
             <div v-if="!((selected as any)?.statusEffects?.length)" class="empty-tab">该角色暂无状态效果</div>
             <div v-else class="status-list">
-              <div v-for="fx in (selected as any).statusEffects" :key="fx.id" class="status-row" @click="selStatusInspected = (selStatusInspected === fx.id ? null : fx.id)">
+              <div v-for="fx in (selected as any).statusEffects" :key="fx.name" class="status-row" @click="selStatusInspected = (selStatusInspected === fx.name ? null : fx.name)">
                 <BuffChip :name="fx.name" :type="fx.category === '增益' ? 'buff' : fx.category === '减益' ? 'debuff' : 'special'" :stacks="fx.stacks" />
                 <span class="st-time" v-if="fx.remainingTime === null">永久</span>
                 <span class="st-time" v-else-if="fx.remainingTime < 999">{{ fx.remainingTime }}{{ fx.timeUnit }}</span>
               </div>
             </div>
-            <div class="st-detail" v-if="selStatusInspected && (selected as any)?.statusEffects?.find((f:any) => f.id === selStatusInspected)">
-              <template v-for="fx in [(selected as any).statusEffects.find((f:any) => f.id === selStatusInspected)]" :key="fx.id">
+            <div class="st-detail" v-if="selStatusInspected && (selected as any)?.statusEffects?.find((f:any) => f.name === selStatusInspected)">
+              <template v-for="fx in [(selected as any).statusEffects.find((f:any) => f.name === selStatusInspected)]" :key="fx.name">
                 <div class="st-d-name">{{ fx.name }}</div>
                 <div class="st-d-desc">{{ fx.description }}</div>
                 <div class="st-d-meta">
@@ -253,7 +253,7 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
           <!-- 技能 -->
           <template v-if="detailTab === 'skills'">
             <div v-if="selSkills.length === 0" class="empty-tab">暂无技能</div>
-            <div v-for="sk in selSkills" :key="sk.id" class="skill-card">
+            <div v-for="sk in selSkills" :key="sk.name" class="skill-card">
               <div class="sk-header">
                 <span class="sk-name">{{ sk.name }}</span>
                 <span class="sk-tag">{{ sk.type === 'active' ? '主动' : '被动' }} Lv.{{ sk.level }}</span>

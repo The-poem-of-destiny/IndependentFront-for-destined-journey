@@ -153,20 +153,20 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         <span class="section-title">状态效果</span>
       </div>
       <div class="buff-scroll">
-        <button v-for="fx in player.statusEffects" :key="fx.id" class="buff-row" :aria-expanded="inspectedBuff === fx.id" @click="inspectedBuff = (inspectedBuff === fx.id ? null : fx.id)">
+        <button v-for="fx in player.statusEffects" :key="fx.name" class="buff-row" :aria-expanded="inspectedBuff === fx.name" @click="inspectedBuff = (inspectedBuff === fx.name ? null : fx.name)">
           <BuffChip :name="fx.name" :type="buffType(fx.category)" :stacks="fx.stacks" />
           <span class="buff-time" v-if="fx.remainingTime === null">永久</span>
           <span class="buff-time" v-else-if="fx.remainingTime !== null && fx.remainingTime < 999">{{ fx.remainingTime }}{{ fx.timeUnit }}</span>
         </button>
       </div>
       <!-- Buff 详情 -->
-      <div class="buff-detail" v-if="inspectedBuff && player.statusEffects.find(f => f.id === inspectedBuff)">
-        <div class="bd-name">{{ player.statusEffects.find(f => f.id === inspectedBuff)!.name }}</div>
-        <div class="bd-desc">{{ player.statusEffects.find(f => f.id === inspectedBuff)!.description }}</div>
+      <div class="buff-detail" v-if="inspectedBuff && player.statusEffects.find(f => f.name === inspectedBuff)">
+        <div class="bd-name">{{ player.statusEffects.find(f => f.name === inspectedBuff)!.name }}</div>
+        <div class="bd-desc">{{ player.statusEffects.find(f => f.name === inspectedBuff)!.description }}</div>
         <div class="bd-meta">
-          <span>层数: {{ player.statusEffects.find(f => f.id === inspectedBuff)!.stacks }}</span>
-          <span>剩余: {{ player.statusEffects.find(f => f.id === inspectedBuff)!.remainingTime === null ? '永久' : player.statusEffects.find(f => f.id === inspectedBuff)!.remainingTime + player.statusEffects.find(f => f.id === inspectedBuff)!.timeUnit }}</span>
-          <span>来源: {{ player.statusEffects.find(f => f.id === inspectedBuff)!.source }}</span>
+          <span>层数: {{ player.statusEffects.find(f => f.name === inspectedBuff)!.stacks }}</span>
+          <span>剩余: {{ player.statusEffects.find(f => f.name === inspectedBuff)!.remainingTime === null ? '永久' : player.statusEffects.find(f => f.name === inspectedBuff)!.remainingTime + player.statusEffects.find(f => f.name === inspectedBuff)!.timeUnit }}</span>
+          <span>来源: {{ player.statusEffects.find(f => f.name === inspectedBuff)!.source }}</span>
         </div>
       </div>
     </div>
@@ -196,7 +196,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         <div class="equip-sub" v-if="inventoryPreview.length">
           <div class="sub-label">背包</div>
           <div class="item-list">
-            <div v-for="inv in inventoryPreview" :key="inv.id" class="item-row">
+            <div v-for="inv in inventoryPreview" :key="inv.name" class="item-row">
               <i class="fa-solid fa-cube item-icon" />
               <span class="item-name">{{ inv.name }}</span>
               <span class="item-tag">{{ inv.type }}</span>

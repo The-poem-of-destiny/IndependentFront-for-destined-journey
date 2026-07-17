@@ -136,7 +136,7 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
       <!-- 左: 列表 -->
       <div class="item-list">
         <div v-if="sortedItems.length === 0" class="empty-list">暂无物品</div>
-        <div v-for="(item, i) in sortedItems" :key="(item as any).id || (item as any).itemId || i"
+        <div v-for="(item, i) in sortedItems" :key="(item as any).name || i"
           class="item-row" :class="{ selected: i === selectedIdx }" @click="selectedIdx = i">
           <span class="dot" :style="{ background: qualityVar((item as any).rarity || inferQuality((item as any).stats)) }" />
           <span class="i-name" :style="{ color: qualityVar((item as any).rarity || inferQuality((item as any).stats)) }">{{ (item as any).name }}</span>

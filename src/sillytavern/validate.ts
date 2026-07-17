@@ -157,7 +157,7 @@ export function validateStatePatch(patch: StatePatch): ValidationResult {
 
 export function validateSkill(skill: Skill): ValidationResult {
   const errors: string[] = [];
-  if (!skill.id) errors.push('技能缺少 id');
+  // M2: 逻辑键=name（铁律1），id @deprecated → 不再校验 id 存在性
   if (!skill.name) errors.push('技能缺少 name');
   if (skill.cost && skill.cost.amount < 0) errors.push('技能消耗不能为负');
   return { valid: errors.length === 0, errors, warnings: [] };
@@ -165,7 +165,7 @@ export function validateSkill(skill: Skill): ValidationResult {
 
 export function validateItem(item: InventoryItem): ValidationResult {
   const errors: string[] = [];
-  if (!item.id) errors.push('物品缺少 id');
+  // M2: 逻辑键=name（铁律1），id @deprecated → 不再校验 id 存在性
   if (!item.name) errors.push('物品缺少 name');
   if (item.quantity < 0) errors.push(`物品 ${item.name} 数量为负`);
   return { valid: errors.length === 0, errors, warnings: [] };

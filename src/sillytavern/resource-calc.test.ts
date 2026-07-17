@@ -292,9 +292,14 @@ describe('hasItem', () => {
 });
 
 describe('hasSkill', () => {
-  it('技能存在应返回 true', () => {
+  it('技能存在应返回 true（按 id 过渡容忍）', () => {
     const c = makeChar({ skills: [{ id: 'fireball', name: '火球术', description: '发射火球', type: 'active' } as Skill] });
     expect(hasSkill(c, 'fireball')).toBe(true);
+  });
+
+  it('M2: 技能按 name 命中应返回 true（逻辑键=name）', () => {
+    const c = makeChar({ skills: [{ name: '火球术', description: '发射火球', type: 'active' } as Skill] });
+    expect(hasSkill(c, '火球术')).toBe(true);
   });
 
   it('技能不存在应返回 false', () => {
