@@ -35,7 +35,7 @@ function formatElapsed(ms: number): string {
 <template>
   <Teleport to="body">
     <transition name="slide-up">
-      <div v-if="game.agentStatus" class="agent-status-panel">
+      <div v-if="game.isGenerating || game.agentStatus" class="agent-status-panel">
         <!-- 当前 Agent -->
         <div class="agent-current">
           <div class="agent-spinner" />

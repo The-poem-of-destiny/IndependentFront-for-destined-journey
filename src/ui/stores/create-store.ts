@@ -708,7 +708,7 @@ export const useCreateStore = defineStore('create', () => {
       gender: gender.value === '自定义' ? customGender.value : gender.value,
       personality: personality.value.trim(),
       appearance: physics.value.trim(),
-      background: backstory.value.trim(),
+      background: [backstory.value.trim(), extra.value.trim()].filter(Boolean).join('\n\n'),
       customFields: {
         // M6 T2: saveId/gender/personality/physics/backstory 已升一等字段停写
         age: age.value,
@@ -816,13 +816,9 @@ export const useCreateStore = defineStore('create', () => {
       lines.push('')
       lines.push(`--- 身材 ---\n${physics.value.trim()}`)
     }
-    if (backstory.value.trim()) {
+    if (backstory.value.trim() || extra.value.trim()) {
       lines.push('')
-      lines.push(`--- 身世 ---\n${backstory.value.trim()}`)
-    }
-    if (extra.value.trim()) {
-      lines.push('')
-      lines.push(`--- 补充 ---\n${extra.value.trim()}`)
+      lines.push(`--- 身世 ---\n${[backstory.value.trim(), extra.value.trim()].filter(Boolean).join('\n\n')}`)
     }
 
     // 收尾

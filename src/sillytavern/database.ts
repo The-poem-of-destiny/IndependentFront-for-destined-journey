@@ -592,7 +592,9 @@ export async function trimSnapshots(saveId: string, maxCount: number): Promise<v
 // --- Saves ---
 
 export async function getSaves(): Promise<SaveSlot[]> {
-  return getDatabase().saves.orderBy('slot').toArray();
+  const saves = await getDatabase().saves.orderBy('slot').toArray();
+  // 按更新时间倒序：越新的存档越靠前
+  return saves.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 }
 
 export async function getSave(id: string): Promise<SaveSlot | undefined> {

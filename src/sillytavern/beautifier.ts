@@ -2,7 +2,7 @@
  * 输出美化器 — 正则替换管道 (Beautifier)
  *
  * Phase 7e: 对 AI 生成的叙事文本进行基于正则的后处理美化。
- * 内置规则（对话卡片 + 杀增殖）在引擎层定义，用户规则从设置 Store 加载。
+ * Phase 10i: 预设规则库 (beautifier-rules.json) + 世界书/角色绑定 auto-enable。
  *
  * 设计决策:
  * - 纯函数模块，无副作用，无外部依赖
@@ -27,15 +27,17 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, '&#039;');
 }
 
-// ========== Built-in Rules ==========
+// ========== Built-in Rules (Legacy) ==========
 
 /**
  * 返回内置美化规则列表。
- * 内置规则在运行时与用户规则合并，ID 冲突时用户规则覆盖。
+ *
+ * @deprecated Phase 10i: 内置规则已迁移到 data/defaults/beautifier-rules.json。
+ *   请使用 loadPresetRules() + mergeRules() 获取完整规则列表。
+ *   此函数保留仅用于向后兼容，未来版本将移除。
  */
 export function getBuiltinRules(): BeautifierRule[] {
   return [
-    // Rule 1 — 对话卡片: [角色名]{额外信息}("对话内容")
     {
       id: 'builtin-dialogue-card',
       name: '对话卡片',
@@ -54,8 +56,6 @@ export function getBuiltinRules(): BeautifierRule[] {
       order: 0,
       isBuiltin: true,
     },
-
-    // Rule 2 — 杀增殖: 移除 AI 过度使用的连接词
     {
       id: 'builtin-kill-proliferation',
       name: '杀增殖',
@@ -68,6 +68,145 @@ export function getBuiltinRules(): BeautifierRule[] {
       isBuiltin: true,
     },
   ];
+}
+
+// ========== Preset Rules ==========
+
+/**
+ * 从 beautifier-rules.json 加载预设规则库。
+ *
+ * @returns 预设规则列表（含内置 + 远程导入的规则）
+ */
+export async function loadPresetRules(): Promise<BeautifierRule[]> {
+  try {
+    const resp = await fetch('/data/defaults/beautifier-rules.json');
+    if (!resp.ok) {
+      console.warn('[Beautifier] 预设规则加载失败，回退到 getBuiltinRules():', resp.status);
+      return getBuiltinRules();
+    }
+    const data = await resp.json();
+    const raw: any[] = data?.rules ?? [];
+    return raw.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      scope: r.scope ?? 'maintext',
+      pattern: r.pattern,
+      flags: r.flags ?? 'g',
+      replacement: r.replacement,
+      enabled: r.defaultEnabled ?? false,
+      order: r.order ?? 99,
+      isBuiltin: r.isBuiltin ?? true,
+      autoEnable: r.autoEnable,
+      group: r.group,
+      locked: false,
+    } satisfies BeautifierRule));
+  } catch (err) {
+    console.warn('[Beautifier] 预设规则加载异常，回退到 getBuiltinRules():', err);
+    return getBuiltinRules();
+  }
+}
+
+// ========== Auto-Enable Resolution ==========
+
+/**
+ * 根据活跃世界书和角色，自动启用匹配的预设规则。
+ *
+ * 匹配逻辑:
+ * - worldBookIds: 任一条目 ID 在活跃世界书集合中 → 匹配
+ * - worldBookEntryUids: 任一条目 UID 已启用 → 匹配
+ * - characterNames: 任一名字在活跃角色集合中 → 匹配
+ * - 以上条件为 OR：任意一个维度匹配即启用
+ *
+ * 纯函数，不修改原数组。
+ *
+ * @param rules            预设规则列表
+ * @param activeWorldBookIds 活跃世界书的 ID 集合
+ * @param activeWorldBookEntryUids 活跃世界书条目的 UID 集合
+ * @param activeCharacterNames 活跃角色名集合
+ * @returns 处理后的规则列表（locked 字段已置位）
+ */
+export function resolveAutoEnable(
+  rules: BeautifierRule[],
+  activeWorldBookIds: Set<string>,
+  activeWorldBookEntryUids: Set<number>,
+  activeCharacterNames: Set<string>,
+): BeautifierRule[] {
+  return rules.map(rule => {
+    const ae = rule.autoEnable;
+    if (!ae) return rule;
+
+    let matched = false;
+
+    // 检查 worldBookIds
+    if (ae.worldBookIds?.length) {
+      for (const id of ae.worldBookIds) {
+        if (activeWorldBookIds.has(id)) { matched = true; break; }
+      }
+    }
+
+    // 检查 worldBookEntryUids
+    if (!matched && ae.worldBookEntryUids?.length) {
+      for (const uid of ae.worldBookEntryUids) {
+        if (activeWorldBookEntryUids.has(uid)) { matched = true; break; }
+      }
+    }
+
+    // 检查 characterNames
+    if (!matched && ae.characterNames?.length) {
+      for (const name of ae.characterNames) {
+        if (activeCharacterNames.has(name)) { matched = true; break; }
+      }
+    }
+
+    if (matched) {
+      return { ...rule, enabled: true, locked: true };
+    }
+    return rule;
+  });
+}
+
+// ========== Rule Merging ==========
+
+/**
+ * 合并预设规则、用户规则和禁用列表，返回最终的规则列表。
+ *
+ * 合并逻辑:
+ * 1. 预设规则默认状态 → 应用 auto-enable 覆盖
+ * 2. 用户在 builtinDisabled 中禁掉的规则 → enabled = false（除非 locked）
+ * 3. 用户自定义规则追加（同名 ID 用户优先）
+ *
+ * @param presetRules      loadPresetRules() 返回的预设规则
+ * @param userRules        用户自定义规则
+ * @param builtinDisabled  用户手动禁用的规则 ID 列表
+ * @param activeWorldBookIds 活跃世界书 ID 集合
+ * @param activeWorldBookEntryUids 活跃世界书条目 UID 集合
+ * @param activeCharacterNames 活跃角色名集合
+ * @returns 合并后的规则列表
+ */
+export function mergeRules(
+  presetRules: BeautifierRule[],
+  userRules: BeautifierRule[],
+  builtinDisabled: string[],
+  activeWorldBookIds: Set<string>,
+  activeWorldBookEntryUids: Set<number>,
+  activeCharacterNames: Set<string>,
+): BeautifierRule[] {
+  // Step 1: 解析 auto-enable
+  const resolved = resolveAutoEnable(presetRules, activeWorldBookIds, activeWorldBookEntryUids, activeCharacterNames);
+
+  // Step 2: 应用用户禁用列表（locked 的规则不受影响）
+  const disabledSet = new Set(builtinDisabled);
+  const merged = resolved.map(r => {
+    if (r.locked) return r;
+    if (disabledSet.has(r.id)) return { ...r, enabled: false };
+    return r;
+  });
+
+  // Step 3: 追加用户规则（同名 ID 覆盖预设）
+  const presetIds = new Set(merged.map(r => r.id));
+  const uniqueUserRules = userRules.filter(r => !presetIds.has(r.id));
+
+  return [...merged, ...uniqueUserRules];
 }
 
 // ========== Processing Pipeline ==========
@@ -100,8 +239,6 @@ export function processRules(text: string, scope: string, rules: BeautifierRule[
       const re = new RegExp(rule.pattern, rule.flags);
       if (rule.isBuiltin) {
         result = result.replace(re, (...args: (string | number | undefined)[]) => {
-          // args: [match, ...groups, offset, string]
-          // groupCount 推算: 忽略最后两个参数 (offset, string)
           const groupCount = args.length > 2 ? args.length - 3 : 0;
           let html = rule.replacement;
           for (let i = 1; i <= groupCount; i++) {
@@ -122,9 +259,7 @@ export function processRules(text: string, scope: string, rules: BeautifierRule[
 }
 
 /**
- * 美化文本的便捷入口。
- *
- * 合并内置规则与用户规则（同名 ID 用户优先），然后执行 processRules。
+ * 美化文本的便捷入口（兼容旧接口）。
  *
  * @param text        原始文本
  * @param scope       当前作用域

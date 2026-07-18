@@ -15,6 +15,8 @@
  */
 
 import type { AgentPromptTemplate, AgentContext, AgentConfig, AgentPreset, WorldBook } from './types';
+import type { GameTime } from './time-system';
+import { MONTH_NAMES } from './time-system';
 import { getEntriesForAgent, filterActiveEntries, formatWorldBookEntries } from './worldbook-loader';
 import { getPreset, assemblePresetContent } from './preset-loader';
 import { buildZoneSection, buildZoneContext } from './context-visibility';
@@ -131,6 +133,12 @@ function formatLorebook(ctx: AgentContext): string {
     .join('\n\n');
 }
 
+function formatGameTime(gt?: GameTime): string {
+  if (!gt) return '';
+  return `${gt.era}${gt.year}年${MONTH_NAMES[gt.month - 1]}${gt.day}日 ` +
+    `${String(gt.hour).padStart(2, '0')}:${String(gt.minute).padStart(2, '0')}`;
+}
+
 // ========== Agent Templates (Phase 10: Minimal Stubs) ==========
 // 完整提示词存放位置:
 //   - Story Agent: agent-config.json 的 preset → assemblePresetContent()
@@ -191,7 +199,17 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
   memory_summary: {
     fixedSystem: '记忆压缩系统。每轮对话结束后将重要事件总结为结构化记忆（content/hiddenLine/keywords/importance）。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples: '{"content": "详细记忆正文(>=200字)", "hiddenLine": "暗线线索", "keywords": ["关键词1", "关键词2"], "importance": 5}',
-    variableContext: (ctx: AgentContext) => '',
+    variableContext: (ctx: AgentContext) => {
+      const parts: string[] = [];
+      const time = formatGameTime(ctx.gameTime);
+      if (time) parts.push(`<当前时间>\n${time}\n</当前时间>`);
+      else parts.push('<当前时间>\n(无记录)\n</当前时间>');
+      const plots = formatPlotEvents(ctx);
+      if (plots && plots !== '暂无活跃剧情事件') parts.push(`<活跃剧情事件>\n${plots}\n</活跃剧情事件>`);
+      const chars = formatCharacters(ctx);
+      if (chars && chars !== '无角色数据') parts.push(`<角色状态>\n${chars}\n</角色状态>`);
+      return parts.join('\n\n');
+    },
     variableInstruction: (ctx: AgentContext) => {
       const storyOutput = ctx.agentOutputs?.get('story') ?? '';
       return `**本轮正文 AI 输出:**\n${storyOutput}\n\n**用户输入:** ${ctx.userInput}\n\n请为本轮对话生成一条记忆记录。`;

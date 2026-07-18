@@ -25,6 +25,7 @@ import type {
   CraftGenRequestMarker,
   CharGenRequestMarker,
   ItemGenRequestMarker,
+  MemoryRecord,
 } from '@engine/types'
 import { AgentClient } from '@engine/agent-client'
 import type { StreamCallbacks } from '@engine/agent-client'
@@ -40,8 +41,8 @@ export interface GamePipelineDeps {
   saveId: string
 }
 
-/** 流式回调 — 由 GamePage 提供实时渲染 */
-export type StoryChunkCallback = (chunk: string) => void
+/** 流式回调 — 由 GamePage 提供实时渲染。isComplete=true 表示流式传输已结束 */
+export type StoryChunkCallback = (chunk: string, isComplete: boolean) => void
 
 /** 各 Agent 的中文标签（供调试日志 / DebugPanel 显示） */
 const AGENT_LABELS: Record<string, string> = {
@@ -97,6 +98,7 @@ export class GamePipeline {
         this.game.addMessage(userInput, 'user')
       }
       this.game.clearAgentLog()
+      this.game.clearAllAgentStatus()
 
       // 2. 构建 endpoints & context
       const endpoints = this.buildEndpoints()
@@ -181,6 +183,9 @@ export class GamePipeline {
       'memory_summary',
       'plot_pre_check',
       'plot_post_check',  // Phase 10g: quest 委托管线需要
+      'craft_gen',        // 侧链: 制作生成，需完整 systemPrompt (真机 fix 2026-07-18)
+      'char_gen',         // 侧链: 角色生成，需完整 systemPrompt
+      'item_gen',         // 侧链: 物品生成，需完整 systemPrompt + {{ITEM_REQUEST}} 占位符
     ]
 
     // 复用 buildEndpoints() 的映射结果（ApiEntry.model → ApiEndpoint.defaultModel）
@@ -206,8 +211,8 @@ export class GamePipeline {
       let streamCallbacks: StreamCallbacks | undefined
       if (isStory && onStoryChunk) {
         streamCallbacks = {
-          onChunk: (text: string, _isComplete: boolean) => {
-            onStoryChunk(text)
+          onChunk: (text: string, isComplete: boolean) => {
+            onStoryChunk(text, isComplete)
           },
           onComplete: () => {
             // 流式完成 — 最终结果由 handleAgentResult 处理
@@ -301,6 +306,7 @@ export class GamePipeline {
       quests: this.game.saveProfile?.quests,
       agentOutputs: new Map(),
       plotSettings: { mode: 'off' },  // 禁用所有剧情 Agent
+      gameTime: this.game.gameTime ?? undefined,
     }
   }
 
@@ -549,7 +555,7 @@ export class GamePipeline {
   }
 
   /** 处理单个 Agent 完成 */
-  private handleAgentResult(result: AgentResult) {
+  private async handleAgentResult(result: AgentResult) {
     switch (result.agentId) {
       case 'story': {
         // rawResponse 直接就是 AI 返回的字符串正文（流式模式下也是完整文本）
@@ -563,6 +569,53 @@ export class GamePipeline {
         // vars_update 本身输出的是 JSON Patch，不包含 options
         break
       }
+      case 'memory_summary': {
+        await this.persistMemorySummary(result)
+        break
+      }
+    }
+  }
+
+  /** 解析 memory_summary 输出并持久化到 IndexedDB */
+  private async persistMemorySummary(result: AgentResult) {
+    try {
+      const raw = result.rawResponse || ''
+      // 兼容 <json>...</json> 和裸 JSON 两种格式
+      const jsonMatch = raw.match(/<json>([\s\S]*?)<\/json>/)
+      const jsonStr = jsonMatch ? jsonMatch[1].trim() : raw
+      const parsed = JSON.parse(jsonStr)
+
+      if (!parsed.content || parsed.content.length < 50) {
+        console.warn('[GamePipeline] memory_summary content 过短，跳过落库:', parsed.content?.length)
+        return
+      }
+
+      const { saveMemory } = await import('@engine/database')
+      const now = Date.now()
+      const id = `MEM${now.toString(36).toUpperCase()}`
+
+      const memory: MemoryRecord = {
+        id,
+        saveId: this.saveId,
+        createdAt: now,
+        realTimestamp: now,
+        content: parsed.content || '',
+        hiddenLine: parsed.hiddenLine || '',
+        keywords: parsed.keywords || [],
+        relatedCharacterIds: parsed.relatedCharacterIds || [],
+        importance: typeof parsed.importance === 'number' ? parsed.importance : 5,
+        timeRange: {
+          start: parsed.timeRangeStart || '',
+          end: parsed.timeRangeEnd || '',
+        },
+      }
+
+      await saveMemory(memory)
+      // 更新本地 recentMemories 供下一轮召回
+      this.game.recentMemories = [...(this.game.recentMemories || []), memory]
+      console.log(`[GamePipeline] memory_summary 落库成功: ${id} importance=${memory.importance} keywords=${memory.keywords.join(',')}`)
+    } catch (e) {
+      console.error('[GamePipeline] memory_summary 解析/存储失败:', e)
     }
   }
 
@@ -584,6 +637,7 @@ export class GamePipeline {
     // 真机修(2026-07-17): try/catch 进循环 — 单制作链失败不阻断后续
     for (const marker of markers) {
       try {
+        this.game.updateAgentStatus('craft_gen')
         const request = {
           saveId: this.saveId,
           marker,
@@ -598,10 +652,12 @@ export class GamePipeline {
           clientFactory,
           stateManager,
         })
+        this.game.clearAgentStatus('craft_gen')
         if (result.narrative) {
           this.game.addMessage(result.narrative, 'assistant')
         }
       } catch (err) {
+        this.game.clearAgentStatus('craft_gen', String(err))
         console.error('[GamePipeline] craft_gen 链失败，继续处理剩余请求:', err)
       }
     }
@@ -625,6 +681,7 @@ export class GamePipeline {
     // 真机修(2026-07-17): try/catch 进循环 — 单 NPC 链失败(如输出截断)不再连锁抛弃后续请求
     for (const marker of markers) {
       try {
+        this.game.updateAgentStatus('char_gen')
         const charGenRequest = {
           saveId: this.saveId,
           marker,
@@ -639,6 +696,7 @@ export class GamePipeline {
           clientFactory,
           stateManager,
         })
+        this.game.clearAgentStatus('char_gen')
         if (result.character) {
           // 添加新角色到 store
           this.game.characters.push(result.character)
@@ -653,6 +711,7 @@ export class GamePipeline {
           })
         }
       } catch (err) {
+        this.game.clearAgentStatus('char_gen', String(err))
         console.error(`[GamePipeline] char_gen 链失败 (${marker.attributes?.characterName ?? '未知角色'})，继续处理剩余请求:`, err)
       }
     }
@@ -677,6 +736,7 @@ export class GamePipeline {
     // 真机修(2026-07-17): try/catch 进循环 — 单物品链失败不阻断后续
     for (const marker of markers) {
       try {
+        this.game.updateAgentStatus('item_gen')
         const request = {
           saveId: this.saveId,
           marker,
@@ -692,9 +752,11 @@ export class GamePipeline {
           clientFactory,
           stateManager,
         })
+        this.game.clearAgentStatus('item_gen')
         // 物品数据已由 stateManager 落库；run() finally 的 refreshFromDb() 会把
         // 最新 characters（含新物品/装备）回读进 Pinia，前端面板随之刷新。
       } catch (err) {
+        this.game.clearAgentStatus('item_gen', String(err))
         console.error('[GamePipeline] item_gen 链失败，继续处理剩余请求:', err)
       }
     }

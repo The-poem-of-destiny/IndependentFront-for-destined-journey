@@ -155,7 +155,7 @@ agent-client.ts: chatWithTools()
 {"characters": [{"id": "角色ID", "changes": {"hp": 80, "statusEffects": [...], ...}}]}
 ```
 
-`changes` 对象是 `CharacterState` 的部分映射，仅包含有变化的字段。可行字段: `hp`, `maxHp`, `mp`, `maxMp`, `sp`, `maxSp`, `level`, `tier`, `totalExp`, `statusEffects`, `equipment`, `skills`, `inventory`, `money`, `location`, `currentAction`, `attributes`, `freeAttrPoints`, `ascension`, `bloodlineIds`, `customFields`。
+`changes` 对象是 `CharacterState` 的部分映射，仅包含有变化的字段。可行字段: `hp`, `maxHp`, `mp`, `maxMp`, `sp`, `maxSp`, `level`, `tier`, `totalExp`, `statusEffects`, `equipment`, `skills`, `inventory`, `money`, `location`, `currentAction`, `attributes`, `freeAttrPoints`, `ascension`, `bloodlineIds`, `customFields`, `personality`, `appearance`, `background`, `outfit`, `gender`, `thoughts`。
 
 ### 上下文注入
 
@@ -491,6 +491,7 @@ agent-client.ts: chatWithTools()
 <background>角色背景故事（100-200字）</background>
 <appearance>外貌描述（含发色/瞳色/体型等，50-100字）</appearance>
 <personality code="wOaGz(A)">性格描述</personality>
+<thoughts>心里话（40-80字，内心独白/真实想法）</thoughts>
 <ascension enabled="false" path="" description=""/>
 </char_result>
 ```
@@ -558,7 +559,7 @@ agent-client.ts: chatWithTools()
 ### 下游解析链路
 
 `char-gen-agent.ts`:
-1. `parseCharGenXML(xml)` → `CharGenOutput` 对象（name, race, tier, level, attributes, identity, occupation, background, appearance, personality, ascension）
+1. `parseCharGenXML(xml)` → `CharGenOutput` 对象（name, race, tier, level, attributes, identity, occupation, background, appearance, personality, thoughts, ascension）
 2. `assembleCharacterState(charData, itemData)` → 合并 char_gen + item_gen 输出为完整 `CharacterState`
 3. `buildCharGenPatches(character)` → 生成 `StatePatch[]`（add_character + add_skill×N + add_item×N + equip_item×N）
 4. 通过 `stateManager.commitChatState(patches)` 写入

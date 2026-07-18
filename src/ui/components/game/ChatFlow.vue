@@ -2,7 +2,7 @@
 import { ref, watch, nextTick } from 'vue'
 import InputBar from './InputBar.vue'
 import type { ChatMessage, SystemEvent } from '@engine/types'
-import { beautify, escapeHtml } from '@engine/beautifier'
+import { processRules, escapeHtml } from '@engine/beautifier'
 import { useSettingsStore } from '../../stores/settings-store'
 import CraftSystemCard from './cards/CraftSystemCard.vue'
 import CharGenSystemCard from './cards/CharGenSystemCard.vue'
@@ -101,15 +101,22 @@ function eventIconClass(type: string): string {
  * 段落处理: \n\n 分隔的文本段落包裹为 &lt;p&gt; 标签，
  * 使 CSS 的 text-indent 和段间距生效，实现「读小说」而非「读聊天」的排版。
  */
+/** 合并预设规则 + 用户规则，返回完整美化规则列表 */
+function getBeautifierRules(): import('@engine/types').BeautifierRule[] {
+  const preset = (s.beautifierPresetRules ?? []) as import('@engine/types').BeautifierRule[]
+  const user = (s.beautifierRules ?? []) as import('@engine/types').BeautifierRule[]
+  const presetIds = new Set(preset.map(r => r.id))
+  return [...preset, ...user.filter(r => !presetIds.has(r.id))]
+}
+
 function beautifyText(msg: ChatMessage): string {
   const raw = msg.content
   // 未启用美化时：走纯文本 + 换行转 &lt;br&gt;，不做段落包裹
   if (!s.beautifierEnabled) {
     return escapeHtml(raw).replace(/\n/g, '<br>')
   }
-  const rules = (s.beautifierRules ?? []) as import('@engine/types').BeautifierRule[]
-  const builtinDisabled: string[] = s.beautifierBuiltinDisabled ?? []
-  let html = beautify(raw, 'maintext', rules, builtinDisabled)
+  const rules = getBeautifierRules()
+  let html = processRules(raw, 'maintext', rules)
   // 将双换行分隔的文本段落包裹成 &lt;p&gt;，跳过已有 HTML 标签块（dialogue-card 等）
   html = wrapParagraphs(html)
   return html
@@ -143,10 +150,9 @@ function beautifyStreamingText(raw: string): string {
   if (!s.beautifierEnabled) {
     return escapeHtml(raw).replace(/\n/g, '<br>')
   }
-  const rules = (s.beautifierRules ?? []) as import('@engine/types').BeautifierRule[]
-  const builtinDisabled: string[] = s.beautifierBuiltinDisabled ?? []
+  const rules = getBeautifierRules()
   // 美化后单换行转 <br>（浏览器不渲染裸 \n）
-  return beautify(raw, 'maintext', rules, builtinDisabled).replace(/\n/g, '<br>')
+  return processRules(raw, 'maintext', rules).replace(/\n/g, '<br>')
 }
 </script>
 

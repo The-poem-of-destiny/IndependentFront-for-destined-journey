@@ -459,6 +459,7 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC
 | 10g | Quest 委托管线 (request_dispatcher→vars_update quest_update_request) + relatedPlotEventId 清理 + memory_summary 全面重写 (6911字/6 XML区块/hiddenLine 新定义) | ✅ |
 | 10h | ST 预设占位符适配：{{setvar}}/{{getvar}}/{{random}} 解析替换管线 + 前端条目开关可点自动保存 | ✅ |
 | M1-M6 | 数据字段规范迁移（52 项收口）: M1 类型库层 / M2 StateManager 按名寻址 / M3 翻译层零id / M4 Prompt 契约对齐+过渡拆除 / M5 SSOT（变量迁家+快照重建+新闻好感接线）/ M6 读方切换+双写退役+收官（2787 tests 首次 100% 全绿） | ✅ |
+| 10i | 输出美化规则库: beautifier-rules.json 预设规则(22条) + 世界书/角色 auto-enable 绑定 + BeautifierSection 三段式 UI + ChatFlow 合并规则渲染 + 远程 regex.json 导入脚本 | ✅ |
 | 真机迭代 | debug loop 5 轮修复: 物品/角色零落库根因链（AI 输出 JSON 形状漂移 → 解析器 XML+JSON 双兜底）/ 侧链 systemPrompt+世界书注入根治（此前恒 stub 裸奔）/ maxTokens 2048 兜底截断 / 创角初始装备结构化落库 / characterName 属性传递 / 嵌套标签剥离 / activePresetId 运行时尊重 / 世界书 ST 宏噪音清理。ST 预设 setvar/getvar 配对机制排查经验见 debug 记录 | 🔄 持续验证中 |
 
 ## 前端架构 (Phase 7, 2026-06-17)
@@ -537,7 +538,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 | 🧠 记忆 & 缓存 | 召回数/压缩阈值/快照上限/缓存策略 |
 | 🎨 外观主题 | 10 主题预览网格、字体风格(衬线/无衬线/混合)、字体大小(14/16/18/20px) |
 | 💬 消息显示 | 系统通知全局开关 + 7 种事件类型独立过滤 |
-| ✨ 输出美化 | 正则替换管道：内置规则(对话卡片/杀增殖)可禁用、用户规则 CRUD + 实时预览 + 导入/导出 JSON |
+| ✨ 输出美化 | 预设规则库 beautifier-rules.json (22条: 2内置+20远程) + 世界书/角色 auto-enable 绑定 + 三段式UI(自动管理/已启用/可用规则库折叠)。用户规则 CRUD + 实时预览 + 导入/导出 JSON |
 | 💾 存档数据 | 导出/导入/清除 (含确认弹窗) |
 | ℹ 关于 | 引擎版本/技术栈/统计 |
 

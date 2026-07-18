@@ -137,6 +137,7 @@ function getDefaults(): Record<string, any> {
     // 输出美化
     beautifierEnabled: true,
     beautifierRules: [] as any[],
+    beautifierPresetRules: [] as any[],
     beautifierBuiltinDisabled: [] as string[],
   }
 }

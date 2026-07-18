@@ -2,12 +2,12 @@
 /**
  * 输出美化设置分区 — 管理正则替换规则
  *
- * 内置规则（对话卡片/杀增殖）仅可禁用，用户规则可自由增删改。
- * 规则数据存于 settings-store，自动持久化 localStorage。
+ * Phase 10i: 三段式布局 — 自动管理 / 已启用 / 可用规则库(折叠)。
+ * 预设规则从 beautifier-rules.json 加载，用户规则完全可控。
  */
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useSettingsStore } from '../../stores/settings-store'
-import { getBuiltinRules } from '@engine/beautifier'
+import { loadPresetRules, mergeRules } from '@engine/beautifier'
 import type { BeautifierRule } from '@engine/types'
 import AppButton from '../shared/AppButton.vue'
 import AppCard from '../shared/AppCard.vue'
@@ -21,20 +21,84 @@ const s = cfg.settings
 const expanded = ref<Record<string, boolean>>({})
 const showEditor = ref(false)
 const editingRule = ref<BeautifierRule | null>(null)
+const libraryExpanded = ref(false)
+const presetRules = ref<BeautifierRule[]>([])
+const loading = ref(true)
 
-// 内置规则禁用列表 — 存在 settings 里
+// 内置规则禁用列表
 const builtinDisabled = computed<string[]>(() => s.beautifierBuiltinDisabled ?? [])
-
-// 内置规则 — 来自引擎 + 禁用状态覆盖
-const builtinRules = computed(() =>
-  getBuiltinRules().map(r => ({
-    ...r,
-    enabled: !builtinDisabled.value.includes(r.id),
-  }))
-)
 
 // 用户规则
 const userRules = computed<BeautifierRule[]>(() => s.beautifierRules ?? [])
+
+// ===== 加载预设规则 =====
+
+/** 从 settings.worldBooks 中收集活跃的世界书 ID 和条目 UID */
+function getActiveWorldBookState(): {
+  activeWorldBookIds: Set<string>
+  activeEntryUids: Set<number>
+} {
+  const activeWorldBookIds = new Set<string>()
+  const activeEntryUids = new Set<number>()
+  const books: any[] = (s as any).worldBooks ?? []
+  for (const book of books) {
+    const entries: any[] = book.entries ?? []
+    const hasEnabledEntry = entries.some((e: any) => e.enabled)
+    if (hasEnabledEntry) {
+      activeWorldBookIds.add(book.id)
+      for (const e of entries) {
+        if (e.enabled && e.uid != null) {
+          activeEntryUids.add(e.uid)
+        }
+      }
+    }
+  }
+  return { activeWorldBookIds, activeEntryUids }
+}
+
+onMounted(async () => {
+  try {
+    const { activeWorldBookIds, activeEntryUids } = getActiveWorldBookState()
+    const merged = mergeRules(
+      await loadPresetRules(),
+      userRules.value,
+      builtinDisabled.value,
+      activeWorldBookIds,
+      activeEntryUids,
+      new Set(),  // characterNames — 后续从 game store 获取
+    )
+    presetRules.value = merged.filter(r => r.isBuiltin)
+    s.beautifierPresetRules = merged.filter(r => r.isBuiltin) as any[]
+  } catch {
+    // 加载失败静默，UI 空态
+  }
+  loading.value = false
+})
+
+// ===== Computed =====
+
+const autoManagedRules = computed(() =>
+  presetRules.value.filter(r => r.locked)
+)
+
+const manualEnabledRules = computed(() =>
+  presetRules.value.filter(r => r.enabled && !r.locked)
+)
+
+const disabledRules = computed(() =>
+  presetRules.value.filter(r => !r.enabled)
+)
+
+/** 按 group 分组 */
+const disabledGrouped = computed(() => {
+  const groups: Record<string, BeautifierRule[]> = {}
+  for (const r of disabledRules.value) {
+    const g = r.group || '其他'
+    if (!groups[g]) groups[g] = []
+    groups[g].push(r)
+  }
+  return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b))
+})
 
 // ===== Helpers =====
 
@@ -53,6 +117,10 @@ function toggleExpand(id: string) {
   expanded.value = { ...expanded.value, [id]: !expanded.value[id] }
 }
 
+function toggleLibrary() {
+  libraryExpanded.value = !libraryExpanded.value
+}
+
 // ===== Actions =====
 
 function toggleBuiltinRule(ruleId: string) {
@@ -64,6 +132,7 @@ function toggleBuiltinRule(ruleId: string) {
     list.push(ruleId)
   }
   s.beautifierBuiltinDisabled = list
+  refreshPresetRules()
 }
 
 function toggleUserRule(rule: BeautifierRule) {
@@ -84,11 +153,9 @@ function openEdit(rule: BeautifierRule) {
 function saveRule(rule: BeautifierRule) {
   const list = [...(s.beautifierRules as BeautifierRule[])]
   if (editingRule.value) {
-    // 编辑已有规则
     const idx = list.findIndex(r => r.id === editingRule.value!.id)
     if (idx >= 0) list[idx] = rule
   } else {
-    // 新建规则
     list.push(rule)
   }
   s.beautifierRules = list
@@ -97,6 +164,24 @@ function saveRule(rule: BeautifierRule) {
 
 function deleteRule(rule: BeautifierRule) {
   s.beautifierRules = (s.beautifierRules as BeautifierRule[]).filter(r => r.id !== rule.id)
+}
+
+function refreshPresetRules() {
+  const { activeWorldBookIds, activeEntryUids } = getActiveWorldBookState()
+  const merged = mergeRules(
+    presetRules.value.map(r => {
+      // 从 beautifierPresetRules 中恢复原始 autoEnable 状态
+      const orig = (s.beautifierPresetRules as any[])?.find((pr: any) => pr.id === r.id)
+      return { ...r, autoEnable: orig?.autoEnable ?? r.autoEnable }
+    }),
+    userRules.value,
+    builtinDisabled.value,
+    activeWorldBookIds,
+    activeEntryUids,
+    new Set(),
+  )
+  presetRules.value = merged.filter(r => r.isBuiltin)
+  s.beautifierPresetRules = merged.filter(r => r.isBuiltin) as any[]
 }
 
 function exportRules() {
@@ -149,83 +234,140 @@ function importRules() {
   <section class="section centered">
     <h3>输出美化</h3>
     <p class="section-desc">
-      用正则表达式美化 AI 输出内容。内置规则可禁用但保留原始逻辑，自定义规则完全可控。
+      用正则表达式美化 AI 输出内容。自动管理规则由世界书/角色自动激活，自定义规则完全可控。
     </p>
 
-    <!-- 全局开关 -->
-    <AppCard padding="md" style="margin-top: 16px">
-      <h4>全局开关</h4>
-      <div class="toggle-row">
-        <span>启用输出美化</span>
-        <label class="toggle-label">
-          <input type="checkbox" v-model="s.beautifierEnabled" class="toggle-input" />
-          <span class="toggle-slider" />
-        </label>
-      </div>
-    </AppCard>
+    <!-- 加载态 -->
+    <div v-if="loading" class="loading-placeholder">加载规则库中…</div>
 
-    <!-- 内置规则 -->
-    <AppCard padding="md" style="margin-top: 12px">
-      <h4>内置规则</h4>
-      <p class="text-muted text-sm" style="margin-bottom: 12px">
-        系统预设规则，仅可启用/禁用，不能编辑或删除。
-      </p>
-      <div v-if="builtinRules.length === 0" class="text-muted text-sm" style="text-align:center;padding:16px">
-        暂无内置规则
-      </div>
-      <div v-for="rule in builtinRules" :key="rule.id" class="rule-item">
-        <div class="rule-header">
+    <template v-else>
+      <!-- 全局开关 -->
+      <AppCard padding="md" style="margin-top: 16px">
+        <h4>全局开关</h4>
+        <div class="toggle-row">
+          <span>启用输出美化</span>
           <label class="toggle-label">
-            <input type="checkbox" :checked="rule.enabled" @change="toggleBuiltinRule(rule.id)" class="toggle-input" />
+            <input type="checkbox" v-model="s.beautifierEnabled" class="toggle-input" />
             <span class="toggle-slider" />
           </label>
-          <span class="rule-name">{{ rule.name }}</span>
-          <span class="rule-scope text-xs text-muted">{{ scopeLabel(rule.scope) }}</span>
-          <span v-if="!rule.enabled" class="rule-disabled-tag">已禁用</span>
-          <button class="rule-expand-btn" @click="toggleExpand(rule.id)">
-            {{ expanded[rule.id] ? '收起' : '查看' }}
-          </button>
         </div>
-        <div v-if="expanded[rule.id]" class="rule-detail">
-          <div class="rule-field"><span>正则:</span><code>{{ rule.pattern }}</code></div>
-          <div class="rule-field"><span>替换:</span><code>{{ rule.replacement.slice(0, 200) }}{{ rule.replacement.length > 200 ? '...' : '' }}</code></div>
-        </div>
-      </div>
-    </AppCard>
+      </AppCard>
 
-    <!-- 用户规则 -->
-    <AppCard padding="md" style="margin-top: 12px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <h4 style="margin:0">自定义规则</h4>
-        <AppButton variant="primary" size="sm" @click="openAdd">＋ 添加规则</AppButton>
-      </div>
-      <p v-if="userRules.length === 0" class="text-muted text-sm" style="text-align:center;padding:24px">
-        暂无自定义规则<br />
-        <span style="font-size:0.75rem">点击右上角添加，用正则表达式自定义输出美化</span>
-      </p>
-      <div v-for="rule in userRules" :key="rule.id" class="rule-item">
-        <div class="rule-header">
-          <label class="toggle-label">
-            <input type="checkbox" :checked="rule.enabled" @change="toggleUserRule(rule)" class="toggle-input" />
-            <span class="toggle-slider" />
-          </label>
-          <span class="rule-name">{{ rule.name }}</span>
-          <span class="rule-scope text-xs text-muted">{{ scopeLabel(rule.scope) }}</span>
-          <button class="rule-action-btn" @click="openEdit(rule)" title="编辑">✎</button>
-          <button class="rule-action-btn rule-delete-btn" @click="deleteRule(rule)" title="删除">🗑</button>
+      <!-- 🔗 自动管理 -->
+      <AppCard v-if="autoManagedRules.length > 0" padding="md" style="margin-top: 12px">
+        <h4>🔗 自动管理</h4>
+        <p class="text-muted text-sm" style="margin-bottom: 12px">
+          由世界书或角色自动激活，不可手动操作。
+        </p>
+        <div v-for="rule in autoManagedRules" :key="rule.id" class="rule-item rule-locked">
+          <div class="rule-header">
+            <span class="rule-lock-icon">🔒</span>
+            <span class="rule-name">{{ rule.name }}</span>
+            <span class="rule-scope text-xs text-muted">{{ scopeLabel(rule.scope) }}</span>
+            <span class="rule-source-tag">{{ rule.group }}</span>
+          </div>
         </div>
-        <div v-if="expanded[rule.id]" class="rule-detail">
-          <div class="rule-field"><span>正则:</span><code>{{ rule.pattern }}</code></div>
-          <div class="rule-field"><span>替换:</span><code>{{ rule.replacement.slice(0, 200) }}{{ rule.replacement.length > 200 ? '...' : '' }}</code></div>
-        </div>
-      </div>
-    </AppCard>
+      </AppCard>
 
-    <!-- 导入/导出 -->
-    <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
-      <AppButton variant="secondary" size="sm" @click="exportRules">📤 导出规则</AppButton>
-      <AppButton variant="secondary" size="sm" @click="importRules">📥 导入规则</AppButton>
-    </div>
+      <!-- ✅ 已启用 -->
+      <AppCard v-if="manualEnabledRules.length > 0" padding="md" style="margin-top: 12px">
+        <h4>✅ 已启用</h4>
+        <p class="text-muted text-sm" style="margin-bottom: 12px">
+          当前生效的规则，可手动启用/禁用。
+        </p>
+        <div v-for="rule in manualEnabledRules" :key="rule.id" class="rule-item">
+          <div class="rule-header">
+            <label class="toggle-label">
+              <input type="checkbox" :checked="rule.enabled" @change="toggleBuiltinRule(rule.id)" class="toggle-input" />
+              <span class="toggle-slider" />
+            </label>
+            <span class="rule-name">{{ rule.name }}</span>
+            <span class="rule-scope text-xs text-muted">{{ scopeLabel(rule.scope) }}</span>
+            <button class="rule-expand-btn" @click="toggleExpand(rule.id)">
+              {{ expanded[rule.id] ? '收起' : '查看' }}
+            </button>
+          </div>
+          <div v-if="expanded[rule.id]" class="rule-detail">
+            <div class="rule-field"><span>正则:</span><code>{{ rule.pattern }}</code></div>
+            <div class="rule-field"><span>替换:</span><code>{{ rule.replacement.slice(0, 200) }}{{ rule.replacement.length > 200 ? '...' : '' }}</code></div>
+          </div>
+        </div>
+      </AppCard>
+
+      <!-- 📦 可用规则库 -->
+      <AppCard padding="md" style="margin-top: 12px">
+        <div class="library-header" @click="toggleLibrary">
+          <h4 style="margin:0;cursor:pointer">
+            📦 可用规则库 · {{ disabledRules.length }} 条未启用
+          </h4>
+          <span class="library-arrow">{{ libraryExpanded ? '▼' : '▶' }}</span>
+        </div>
+        <p v-if="!libraryExpanded" class="text-muted text-sm" style="margin-top:6px">
+          <template v-for="([group, rules], i) in disabledGrouped" :key="group">
+            {{ group }} ({{ rules.length }}){{ i < disabledGrouped.length - 1 ? ' · ' : '' }}
+          </template>
+        </p>
+        <template v-if="libraryExpanded && disabledGrouped.length > 0">
+          <div v-for="[group, rules] in disabledGrouped" :key="group" class="group-section">
+            <div class="group-label">{{ group }} · {{ rules.length }} 条</div>
+            <div v-for="rule in rules" :key="rule.id" class="rule-item rule-disabled-item">
+              <div class="rule-header">
+                <label class="toggle-label">
+                  <input type="checkbox" :checked="false" @change="toggleBuiltinRule(rule.id)" class="toggle-input" />
+                  <span class="toggle-slider" />
+                </label>
+                <span class="rule-name rule-name-dim">{{ rule.name }}</span>
+                <span class="rule-scope text-xs text-muted">{{ scopeLabel(rule.scope) }}</span>
+                <button class="rule-expand-btn" @click="toggleExpand(rule.id)">
+                  {{ expanded[rule.id] ? '收起' : '查看' }}
+                </button>
+              </div>
+              <div v-if="expanded[rule.id]" class="rule-detail">
+                <div class="rule-field"><span>正则:</span><code>{{ rule.pattern }}</code></div>
+                <div class="rule-field"><span>替换:</span><code>{{ rule.replacement.slice(0, 200) }}{{ rule.replacement.length > 200 ? '...' : '' }}</code></div>
+              </div>
+            </div>
+          </div>
+        </template>
+        <div v-if="libraryExpanded && disabledGrouped.length === 0" class="text-muted text-sm" style="text-align:center;padding:16px">
+          暂无可用规则
+        </div>
+      </AppCard>
+
+      <!-- 🛠 自定义规则 -->
+      <AppCard padding="md" style="margin-top: 12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h4 style="margin:0">🛠 自定义规则</h4>
+          <AppButton variant="primary" size="sm" @click="openAdd">＋ 添加规则</AppButton>
+        </div>
+        <p v-if="userRules.length === 0" class="text-muted text-sm" style="text-align:center;padding:24px">
+          暂无自定义规则<br />
+          <span style="font-size:0.75rem">点击右上角添加，用正则表达式自定义输出美化</span>
+        </p>
+        <div v-for="rule in userRules" :key="rule.id" class="rule-item">
+          <div class="rule-header">
+            <label class="toggle-label">
+              <input type="checkbox" :checked="rule.enabled" @change="toggleUserRule(rule)" class="toggle-input" />
+              <span class="toggle-slider" />
+            </label>
+            <span class="rule-name">{{ rule.name }}</span>
+            <span class="rule-scope text-xs text-muted">{{ scopeLabel(rule.scope) }}</span>
+            <button class="rule-action-btn" @click="openEdit(rule)" title="编辑">✎</button>
+            <button class="rule-action-btn rule-delete-btn" @click="deleteRule(rule)" title="删除">🗑</button>
+          </div>
+          <div v-if="expanded[rule.id]" class="rule-detail">
+            <div class="rule-field"><span>正则:</span><code>{{ rule.pattern }}</code></div>
+            <div class="rule-field"><span>替换:</span><code>{{ rule.replacement.slice(0, 200) }}{{ rule.replacement.length > 200 ? '...' : '' }}</code></div>
+          </div>
+        </div>
+      </AppCard>
+
+      <!-- 导入/导出 -->
+      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
+        <AppButton variant="secondary" size="sm" @click="exportRules">📤 导出规则</AppButton>
+        <AppButton variant="secondary" size="sm" @click="importRules">📥 导入规则</AppButton>
+      </div>
+    </template>
   </section>
 
   <!-- 规则编辑弹窗 -->
@@ -238,6 +380,14 @@ function importRules() {
 </template>
 
 <style scoped>
+.loading-placeholder {
+  text-align: center;
+  padding: 32px;
+  color: var(--theme-text-muted);
+  font-size: 0.875rem;
+}
+
+/* ═══ 规则行 ═══ */
 .rule-item {
   border-bottom: 1px solid var(--theme-border, rgba(255,255,255,0.04));
   padding: 8px 0;
@@ -245,10 +395,25 @@ function importRules() {
 .rule-item:last-child {
   border-bottom: none;
 }
+.rule-locked {
+  background: var(--theme-surface-muted);
+  border-radius: var(--theme-radius-sm, 4px);
+  padding: 8px;
+  margin-bottom: 4px;
+  border-bottom: none;
+  opacity: 0.85;
+}
+.rule-disabled-item {
+  opacity: 0.6;
+}
 .rule-header {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+.rule-lock-icon {
+  font-size: 0.8rem;
+  flex-shrink: 0;
 }
 .rule-name {
   font-size: 0.85rem;
@@ -256,17 +421,61 @@ function importRules() {
   color: var(--theme-text-primary);
   flex: 1;
 }
+.rule-name-dim {
+  color: var(--theme-text-muted);
+}
 .rule-scope {
   opacity: 0.7;
   white-space: nowrap;
 }
-.rule-disabled-tag {
-  font-size: 0.65rem;
-  padding: 2px 6px;
-  border-radius: 3px;
-  background: rgba(255,0,0,0.15);
-  color: var(--theme-error);
+.rule-source-tag {
+  font-size: 0.625rem;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--theme-primary) 15%, transparent);
+  color: var(--theme-primary);
+  font-weight: 500;
+  white-space: nowrap;
 }
+
+/* ═══ 规则库折叠 ═══ */
+.library-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--theme-transition-fast, 0.15s);
+}
+.library-header:hover {
+  color: var(--theme-text-primary);
+}
+.library-arrow {
+  font-size: 0.75rem;
+  color: var(--theme-text-muted);
+  transition: transform var(--theme-transition-fast, 0.15s);
+}
+
+/* ═══ 分组 ═══ */
+.group-section {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--theme-card-border);
+}
+.group-section:first-child {
+  margin-top: 16px;
+}
+.group-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--theme-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+  padding-left: 2px;
+}
+
+/* ═══ 详情折叠 ═══ */
 .rule-expand-btn,
 .rule-action-btn {
   background: none;
@@ -277,7 +486,7 @@ function importRules() {
   border-radius: var(--theme-radius-sm, 4px);
   cursor: pointer;
   font-family: inherit;
-  transition: all var(--theme-transition-fast);
+  transition: all var(--theme-transition-fast, 0.15s);
 }
 .rule-expand-btn:hover,
 .rule-action-btn:hover {
@@ -312,5 +521,53 @@ function importRules() {
   font-size: 0.72rem;
   color: var(--theme-text-secondary);
   word-break: break-all;
+}
+
+/* ═══ 全局开关 ═══ */
+.toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+.toggle-row span {
+  font-size: 0.85rem;
+}
+.toggle-label {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  cursor: pointer;
+}
+.toggle-input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggle-slider {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--theme-surface-muted);
+  border-radius: 22px;
+  transition: background var(--theme-transition-fast, 0.15s);
+}
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background: var(--theme-text-muted);
+  border-radius: 50%;
+  transition: transform var(--theme-transition-fast, 0.15s);
+}
+.toggle-input:checked + .toggle-slider {
+  background: var(--theme-primary);
+}
+.toggle-input:checked + .toggle-slider::before {
+  transform: translateX(18px);
+  background: #fff;
 }
 </style>

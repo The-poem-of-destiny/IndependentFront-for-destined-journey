@@ -44,8 +44,12 @@ onMounted(async () => {
     // 首次加载 → 自动发送开场 Prompt
     if (!game.hasOpeningPromptConsumed && game.openingPrompt) {
       console.log('[GamePage] sending opening prompt...')
-      await pipeline.sendOpeningPrompt((chunk: string) => {
-        streamingText.value += chunk
+      await pipeline.sendOpeningPrompt((chunk: string, isComplete: boolean) => {
+        if (isComplete) {
+          streamingText.value = ''
+        } else {
+          streamingText.value += chunk
+        }
       })
     } else {
       console.log('[GamePage] NOT sending opening prompt. consumed:', game.hasOpeningPromptConsumed, 'prompt empty:', !game.openingPrompt)
@@ -109,8 +113,12 @@ onUnmounted(() => {
 async function handleSend(content: string) {
   if (game.isGenerating || !pipeline) return
   streamingText.value = ''
-  await pipeline.run(content, (chunk: string) => {
-    streamingText.value += chunk
+  await pipeline.run(content, (chunk: string, isComplete: boolean) => {
+    if (isComplete) {
+      streamingText.value = ''
+    } else {
+      streamingText.value += chunk
+    }
   })
 }
 

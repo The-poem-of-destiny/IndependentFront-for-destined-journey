@@ -192,7 +192,9 @@ export async function callCharGenAgent(
     }
 
     const rawOutput = result.output ?? result.rawResponse;
-    return parseCharGenOutput(rawOutput);
+    const parsed = parseCharGenOutput(rawOutput);
+    parsed.rawXml = rawOutput;
+    return parsed;
   }
 
   // 回退: 旧路径（无工具，直接 chat）
@@ -203,7 +205,9 @@ export async function callCharGenAgent(
   }
 
   const rawOutput = result.output ?? result.rawResponse;
-  return parseCharGenOutput(rawOutput);
+  const fallbackParsed = parseCharGenOutput(rawOutput);
+  fallbackParsed.rawXml = rawOutput;
+  return fallbackParsed;
 }
 
 /**
@@ -229,10 +233,16 @@ export async function callItemGenAgent(
   const charItemLocalParams: Record<string, string> = {
     CHAR_GEN_RESULT: charGenOutputJson,
   };
-  // Extract <item_requests> from char_gen output JSON if present
-  const charItemReqMatch = charGenOutputJson.match(/<item_requests>([\s\S]*?)<\/item_requests>/);
-  if (charItemReqMatch) {
-    charItemLocalParams.ITEM_REQUEST = charItemReqMatch[1].trim();
+  // 真机 fix(2026-07-18): 从 char_gen 原始 XML 提取 <item_requests>/<skill_requests>/<equipment_requests>
+  // 旧代码在 JSON.stringify 输出里搜 XML 标签 → 永远搜不到 → ITEM_REQUEST 恒空
+  const rawXml = charData.rawXml;
+  if (rawXml) {
+    const itemReqMatch = rawXml.match(/<item_requests>([\s\S]*?)<\/item_requests>/);
+    const skillReqMatch = rawXml.match(/<skill_requests>([\s\S]*?)<\/skill_requests>/);
+    const equipReqMatch = rawXml.match(/<equipment_requests>([\s\S]*?)<\/equipment_requests>/);
+    if (itemReqMatch) charItemLocalParams.ITEM_REQUEST = itemReqMatch[1].trim();
+    if (skillReqMatch) charItemLocalParams.SKILL_REQUEST = skillReqMatch[1].trim();
+    if (equipReqMatch) charItemLocalParams.EQUIP_REQUEST = equipReqMatch[1].trim();
   }
 
   const messages = buildAgentMessages('item_gen', contextWithCharData, request.configs, request.worldBooks, request.presets, charItemLocalParams);
@@ -401,6 +411,7 @@ export function assembleCharacterState(
     personality: charData.personality,
     gender: charData.gender,
     outfit: charData.clothing,
+    thoughts: charData.thoughts,
     customFields: {
       likes: charData.likes,
       faction: charData.faction,
@@ -556,6 +567,7 @@ function charGenFromJSON(data: any): CharGenOutput {
     clothing: data.clothing ?? data.outfit ?? '',
     personality: typeof personality === 'object' && personality ? (personality.summary ?? personality.description ?? JSON.stringify(personality)) : (typeof personality === 'string' ? personality : ''),
     likes: data.likes ?? '',
+    thoughts: data.thoughts ?? '',
     ascension: {
       enabled: false,
       path: '',
@@ -650,6 +662,7 @@ function parseCharGenXML(xml: string): CharGenOutput {
     clothing: stripInnerTags(extractTag(xml, 'clothing') ?? ''),
     personality: stripInnerTags(extractTag(xml, 'personality') ?? extractAttr(xml, 'personality', 'code') ?? ''),
     likes: stripInnerTags(extractTag(xml, 'likes') ?? ''),
+    thoughts: stripInnerTags(extractTag(xml, 'thoughts') ?? ''),
     ascension: {
       enabled: (extractAttr(xml, 'ascension', 'enabled') ?? 'false') === 'true',
       path: extractAttr(xml, 'ascension', 'path') ?? '',
@@ -833,9 +846,12 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
     // 描述 = 纯文本部分（去除所有嵌套子标签，包括 AI 自造的 <description>/<notes>/<ability> 等）
     // 优先取 <description> 子标签的文本内容，若无则剥所有标签留纯文本
     const descSubTag = innerContent.match(/<description\b[^>]*>([\s\S]*?)<\/description>/);
+    // 真机 fix(2026-07-18): 预剥离 <effect>/<script> 块（含内容），防止子标签文本泄漏进 description
+    // 对齐 parseElementsXML:922 的正确写法
+    const descText = innerContent.replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '');
     const description = descSubTag
       ? descSubTag[1].trim()
-      : innerContent.replace(/<\/?[a-z_][\w-]*[^>]*>/gi, '').trim();
+      : descText.replace(/<\/?[a-z_][\w-]*[^>]*>/gi, '').trim();
     // 中文 type 归一（真机实测 AI 产 '主动'/'被动' 直接落库 → UI 不识别）
     const skillType = (attrs['type'] ?? '').trim();
     const normalizedType: 'active' | 'passive' =
@@ -843,7 +859,7 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
 
     results.push({
       name: attrs['name'] ?? '未命名技能',
-      description: description || (descSubTag ? '' : innerContent.replace(/<[^>]+>/g, '').trim()),
+      description: description || (descSubTag ? '' : descText.replace(/<[^>]+>/g, '').trim()),
       type: normalizedType,
       cost: attrs['cost_type'] ? { type: attrs['cost_type'] as 'HP' | 'MP' | 'SP', amount: parseInt(attrs['cost_amount'] ?? '0') } : undefined,
       cooldown: attrs['cooldown'] ? parseInt(attrs['cooldown']) : undefined,
@@ -859,19 +875,32 @@ function parseEquipmentXML(xml: string): ItemGenOutput['equipment'] {
   const results: ItemGenOutput['equipment'] = [];
   for (const m of matches) {
     const attrs = parseAttrsStr(m[1]);
+    const innerContent = m[2]?.trim() ?? '';
     const statsStr = attrs['stats'] ?? '';
     const stats: Record<string, number> = {};
     for (const pair of statsStr.split(',')) {
       const [k, v] = pair.split(':').map(s => s.trim());
       if (k && v) stats[k] = parseFloat(v) || 0;
     }
+    // 真机 fix(2026-07-18): 提取 <effect>/<script> 子标签，防止文本泄漏进 description
+    const effects: Record<string, string> = {};
+    const scripts: Record<string, string> = {};
+    const em = innerContent.matchAll(/<effect\s[^>]*?name="([^"]*)"[^>]*>([\s\S]*?)<\/effect>/g);
+    for (const em2 of em) { effects[em2[1]] = em2[2]?.trim() ?? ''; }
+    const sm = innerContent.matchAll(/<script\s[^>]*?name="([^"]*)"[^>]*>([\s\S]*?)<\/script>/g);
+    for (const sm2 of sm) { scripts[sm2[1]] = sm2[2]?.trim() ?? ''; }
+    // 预剥离 effect/script 块，再 stripInnerTags 取纯文本描述
+    const descText = innerContent.replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '');
+    const qualityRaw = attrs['quality'];
     results.push({
       slot: attrs['slot'] ?? '饰品',
       name: attrs['name'] ?? '未命名装备',
-      description: stripInnerTags(m[2]?.trim() ?? ''),  // 真机修: AI 可能嵌套子标签
+      description: stripInnerTags(descText || innerContent),
       stats,
       durability: attrs['durability'] ? parseInt(attrs['durability']) : undefined,
-      quality: attrs['quality'],
+      quality: qualityRaw && qualityRaw !== '?' ? qualityRaw : undefined,
+      ...(Object.keys(effects).length > 0 ? { effects } : {}),
+      ...(Object.keys(scripts).length > 0 ? { scripts } : {}),
     });
   }
   return results;
@@ -882,12 +911,25 @@ function parseInventoryXML(xml: string): ItemGenOutput['inventory'] {
   const results: ItemGenOutput['inventory'] = [];
   for (const m of matches) {
     const attrs = parseAttrsStr(m[1]);
+    const innerContent = m[2]?.trim() ?? '';
+    // 真机 fix(2026-07-18): 提取 <effect>/<script> 子标签，防止文本泄漏进 description
+    const effects: Record<string, string> = {};
+    const scripts: Record<string, string> = {};
+    const em = innerContent.matchAll(/<effect\s[^>]*?name="([^"]*)"[^>]*>([\s\S]*?)<\/effect>/g);
+    for (const em2 of em) { effects[em2[1]] = em2[2]?.trim() ?? ''; }
+    const sm = innerContent.matchAll(/<script\s[^>]*?name="([^"]*)"[^>]*>([\s\S]*?)<\/script>/g);
+    for (const sm2 of sm) { scripts[sm2[1]] = sm2[2]?.trim() ?? ''; }
+    // 预剥离 effect/script 块，再 stripInnerTags 取纯文本描述
+    const descText = innerContent.replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '');
+    const rarityRaw = attrs['rarity'];
     results.push({
       name: attrs['name'] ?? '未命名物品',
-      description: stripInnerTags(m[2]?.trim() ?? ''),  // 真机修: AI 可能嵌套子标签
+      description: stripInnerTags(descText || innerContent),
       quantity: parseInt(attrs['quantity'] ?? '1') || 1,
       type: attrs['type'] ?? '消耗品',
-      rarity: attrs['rarity'],
+      rarity: rarityRaw && rarityRaw !== '?' ? rarityRaw : undefined,
+      ...(Object.keys(effects).length > 0 ? { effects } : {}),
+      ...(Object.keys(scripts).length > 0 ? { scripts } : {}),
     });
   }
   return results;

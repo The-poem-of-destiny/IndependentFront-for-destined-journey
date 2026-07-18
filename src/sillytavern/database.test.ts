@@ -458,13 +458,17 @@ describe('SaveSlots CRUD', () => {
     expect(id).toBe(s.id);
   });
 
-  it('getSaves 应按 slot 排序', async () => {
+  it('getSaves 应按更新时间倒序排列（越新越靠前）', async () => {
+    // saveSaveSlot 内部会设置 updatedAt = Date.now()
     await saveSaveSlot(makeSaveSlot({ id: 'save_1', slot: 1 }));
+    await new Promise(r => setTimeout(r, 2)); // 确保不同毫秒
     await saveSaveSlot(makeSaveSlot({ id: 'save_0', slot: 0 }));
+    await new Promise(r => setTimeout(r, 2));
     await saveSaveSlot(makeSaveSlot({ id: 'save_2', slot: 2 }));
 
     const all = await getSaves();
-    expect(all.map(s => s.slot)).toEqual([0, 1, 2]);
+    // 倒序：最后创建的 save_2(slot=2) → save_0(slot=0) → save_1(slot=1)
+    expect(all.map(s => s.slot)).toEqual([2, 0, 1]);
   });
 
   it('getSaveBySlot 应按槽号查找', async () => {

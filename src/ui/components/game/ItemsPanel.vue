@@ -82,7 +82,8 @@ const selected = computed(() => sortedItems.value[selectedIdx.value] || null)
 const selQuality = computed(() => {
   const item: any = selected.value
   if (!item) return '普通'
-  if (activeCategory.value === 'inventory') return item.rarity || '普通'
+  // 所有分类优先使用存储的 rarity 字段，只有缺失时才回退到推断
+  if (item.rarity) return item.rarity
   if (activeCategory.value === 'skills') return '史诗'
   return inferQuality(item.stats)
 })

@@ -420,6 +420,8 @@ export interface AppSettings {
   /** Phase 7e: 输出美化 */
   beautifierEnabled: boolean;
   beautifierRules: BeautifierRule[];
+  /** Phase 10i: 预设规则（从 beautifier-rules.json 加载，含 autoEnable 计算后的 enabled/locked 状态） */
+  beautifierPresetRules: BeautifierRule[];
 }
 
 export const DEFAULT_FORMAT_PROMPT = `你必须严格按照以下 XML 标签格式输出回复，不要使用 Markdown 包裹：
@@ -470,6 +472,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   /** Phase 7e: 输出美化 */
   beautifierEnabled: true,
   beautifierRules: [],
+  beautifierPresetRules: [],
 };
 
 // ========== Chat Types ==========
@@ -564,6 +567,19 @@ export interface BeautifierRule {
   enabled: boolean;
   order: number;
   isBuiltin: boolean;
+  /** 自动启用绑定 — 匹配时规则自动 enable 且不可手动关 */
+  autoEnable?: {
+    /** 世界书 ID 集合（如 ['system_core']） */
+    worldBookIds?: string[];
+    /** 具体条目 UID（如 [413] 妲丽安核心） */
+    worldBookEntryUids?: number[];
+    /** 角色名集合（如 ['妲丽安']） */
+    characterNames?: string[];
+  };
+  /** 分组标签 — UI 折叠区按来源分组 */
+  group?: string;
+  /** 🔒 系统自动管理标记（运行时计算，不持久化） */
+  locked?: boolean;
 }
 
 /** 变量更新补丁 — 支持 mvu_update 协议的 replace/delta/insert */
@@ -1118,6 +1134,9 @@ export interface AgentContext {
   // --- Phase 8.6: per-Agent 可调上下文（由 buildAgentMessages 注入，读 AgentConfig） ---
   /** 当前 Agent 的配置（含 historyLayers/historySlice 等），模板函数借此读 per-agent 设置 */
   agentConfig?: AgentConfig;
+
+  /** 存档级游戏时间（供 memory_summary 等 Agent 注入时间上下文） */
+  gameTime?: GameTime;
 }
 
 /** 单个 Agent 的运行结果 */
@@ -2594,6 +2613,8 @@ export interface CharGenOutput {
   personality: string;
   /** 喜爱/偏好 (20-50 tokens) */
   likes: string;
+  /** 🆕 心里话（40-80 tokens，角色内心独白/当前真实想法） */
+  thoughts?: string;
   /** 登神长阶 (Lv.13+ 可用) */
   ascension: {
     enabled: boolean;
@@ -2639,6 +2660,8 @@ export interface CharGenOutput {
     type: string;
     rarity?: string;
   }>;
+  /** 🆕 真机 fix(2026-07-18): char_gen 原始 XML 输出，供 item_gen 提取 <item_requests>/<skill_requests>/<equipment_requests> */
+  rawXml?: string;
 }
 
 /** Item Gen Agent (item_gen) 的输出 — 角色装备/技能/道具 (对齐世界书 #261442 + #265160) */
@@ -2672,6 +2695,10 @@ export interface ItemGenOutput {
     durability?: number;
     /** 品质 (可选) */
     quality?: string;
+    /** 🆕 真机 fix(2026-07-18): 词条效果 <effect name="...">...</effect> */
+    effects?: Record<string, string>;
+    /** 🆕 真机 fix(2026-07-18): 脚本 <script name="...">code</script> */
+    scripts?: Record<string, string>;
   }>;
   /** 背包物品列表 */
   inventory: Array<{
@@ -2681,6 +2708,10 @@ export interface ItemGenOutput {
     type: string;
     /** 稀有度 (可选) */
     rarity?: string;
+    /** 🆕 真机 fix(2026-07-18): 词条效果 <effect name="...">...</effect> */
+    effects?: Record<string, string>;
+    /** 🆕 真机 fix(2026-07-18): 脚本 <script name="...">code</script> */
+    scripts?: Record<string, string>;
   }>;
   /** 🆕 Phase 9: 登神要素 (含 scripts + effectDescriptions) */
   elements?: Array<Pick<ElementDetail, 'name' | 'description' | 'effects' | 'effectDescriptions' | 'scripts'>>;
