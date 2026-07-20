@@ -13,6 +13,7 @@ const tools = [
   { id: 'quests', label: '任务', icon: 'fa-solid fa-scroll' },
   { id: 'map', label: '地图', icon: 'fa-solid fa-map' },
   { id: 'memory', label: '记忆', icon: 'fa-solid fa-brain' },
+  { id: 'plot', label: '剧情', icon: 'fa-solid fa-book-open' },
   { id: 'debug', label: '调试', icon: 'fa-solid fa-bug' },
   { id: 'settings', label: '设置', icon: 'fa-solid fa-gear' },
 ]

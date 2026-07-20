@@ -10,10 +10,18 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import type { CharacterState, PlotSettings, PlotOutline } from '@engine/types'
+import type { CharacterState, PlotSettings, PlotOutline, ApiEndpoint, AgentConfig } from '@engine/types'
 import { TIER_CONFIGS } from '@engine/tier-constants'
 import { getBloodlineList } from '@engine/bloodlines'
 import { normalizeSlot, normalizeItemType, normalizeRarity } from '@engine/field-enums'
+import { AgentClient } from '@engine/agent-client'
+import {
+  tryParseOutline,
+  createOutlineFromAgent,
+  type ParsedOutlineOutput,
+} from '@engine/plot-outline'
+import type { AgentContext } from '@engine/types'
+import { useSettingsStore } from './settings-store'
 import {
   type CatalogItem,
   type BackgroundTemplate,
@@ -33,6 +41,7 @@ import {
   ATTR_CN_TO_EN,
 } from '@engine/start-catalog'
 import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks'
+import { filterBooksByEnabledEntries } from '@engine/worldbook-loader'
 import type { WorldBook, WorldBookEntry } from '@engine/types'
 
 // ===== 类型 =====
@@ -218,9 +227,11 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   // 原版: 等级变化时重置 AP
+  // flush: 'sync' 确保预设加载时 level 赋值后 watch 立即执行完毕，
+  // 再由后续 attributePoints = {...} 恢复预设值，不被异步 flush 覆盖。
   watch(level, () => {
     attributePoints.value = { 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 }
-  })
+  }, { flush: 'sync' })
 
   const finalAttributes = computed(() => {
     const result: Record<string, number> = {}
@@ -505,7 +516,8 @@ export const useCreateStore = defineStore('create', () => {
 
   function selectBackground(bg: BackgroundTemplate | null) {
     selectedBackground.value = bg
-    if (bg) customBackgroundText.value = ''
+    // 不再清空 customBackgroundText — 用户可能在预设和自定义之间切换，
+    // buildOpeningPrompt 优先用预设，所以保留自定义文本不影响正确性。
   }
 
   // ═══════════════════════════════════════════════════════
@@ -584,12 +596,28 @@ export const useCreateStore = defineStore('create', () => {
   const plotGenrePreference = ref<Array<'combat' | 'mystery' | 'social' | 'romance' | 'exploration' | 'politics' | 'survival' | 'tragedy'>>(['combat'])
   const plotCustomPreference = ref('')
   const plotFocusRegion = ref('')
-  const plotYearlyGeneration = ref(true)
+  const plotChapterCount = ref(0)
+  const plotEventsPerChapter = ref(0)
+  const plotTabooContent = ref('')
   const plotOutline = ref<PlotOutline | null>(null)
+  /** 结构化章节（含 keyEvents）— startJourney 时经 outlineToEvents 生成事件树 */
+  const plotOutlineChapters = ref<ParsedOutlineOutput['chapters']>([])
   const isPlotGenerating = ref(false)
+  const plotGenerationError = ref<string | null>(null)
+  /** 最近一次大纲生成的完整 AI 数据（供导出） */
+  const lastPlotGenerationMeta = ref<{
+    messages: Array<{ role: string; content: string }>;
+    rawResponse: string;
+    reasoning?: string;
+    model: string;
+    timestamp: number;
+  } | null>(null)
+  /** 会话内大纲历史（最多 5 版，重新生成/修改时旧版入栈，可回退） */
+  const outlineHistory = ref<PlotOutline[]>([])
+  const chaptersHistory = ref<ParsedOutlineOutput['chapters'][]>([])
 
   const plotSettings = computed<PlotSettings>(() => {
-    const ps: PlotSettings = { mode: plotMode.value }
+    const ps: PlotSettings = { mode: plotMode.value, tabooContent: plotTabooContent.value.trim() }
     if (plotMode.value === 'main') {
       const tier = plotDifficultyTier.value === 'adaptive' ? undefined : plotDifficultyTier.value
       ps.main = {
@@ -599,20 +627,396 @@ export const useCreateStore = defineStore('create', () => {
         genrePreference: plotGenrePreference.value,
         customPreference: plotCustomPreference.value.trim() || '',
       }
+      if (plotChapterCount.value > 0) ps.main.chapterCount = plotChapterCount.value
+      if (plotEventsPerChapter.value > 0) ps.main.eventsPerChapter = plotEventsPerChapter.value
     } else if (plotMode.value === 'side') {
       ps.side = {
-        yearlyGeneration: plotYearlyGeneration.value,
         focusRegion: plotFocusRegion.value.trim() || '',
       }
+      if (plotChapterCount.value > 0) ps.side.chapterCount = plotChapterCount.value
+      if (plotEventsPerChapter.value > 0) ps.side.eventsPerChapter = plotEventsPerChapter.value
     }
     return ps
   })
 
-  // 剧情大纲生成 — 在捏人页为占位，实际 AI 调用在游戏页首回合执行
-  function generatePlotOutline() {
-    // 标记已请求生成，实际生成在 startJourney → game page 首回合
-    isPlotGenerating.value = false  // 捏人页不做真实 AI 调用
-    console.log('[create-store] 剧情大纲将在游戏开始后自动生成')
+  // ═══════════════════════════════════════════════════════
+  // localStorage 草稿 key — 必须定义在 initPlotDefaultsFromSettings
+  // （会调用 tryRestoreDraft）之前，避免 TDZ 报错
+  // ═══════════════════════════════════════════════════════
+  const DRAFT_KEY = 'plotOutlineDraft_v1'
+
+  // ═══════════════════════════════════════════════════════
+  // 剧情设置默认值 — 从设置页（settings-store）读入新档默认值
+  // ═══════════════════════════════════════════════════════
+
+  function initPlotDefaultsFromSettings() {
+    try {
+      const s = useSettingsStore().settings
+      const mode = s.plotMode
+      if (mode === 'off' || mode === 'side' || mode === 'main') plotMode.value = mode
+      const dur = Number(s.plotDurationYears)
+      if (Number.isFinite(dur) && dur > 0) plotDurationYears.value = dur
+      const tier = s.plotDifficultyTier
+      plotDifficultyTier.value = (tier === 'adaptive' || tier === undefined || tier === null || tier === '')
+        ? 'adaptive'
+        : Number(tier)
+      plotAllowNonWorldbookNpc.value = s.plotAllowNonWorldbookNpc !== false
+      if (Array.isArray(s.plotGenrePreference) && s.plotGenrePreference.length > 0) {
+        plotGenrePreference.value = [...s.plotGenrePreference] as typeof plotGenrePreference.value
+      }
+      plotCustomPreference.value = typeof s.plotCustomPreference === 'string' ? s.plotCustomPreference : ''
+      plotFocusRegion.value = typeof s.plotFocusRegion === 'string' ? s.plotFocusRegion : ''
+      plotTabooContent.value = typeof s.plotTabooContent === 'string' ? s.plotTabooContent : ''
+const cc = Number(s.plotChapterCount)
+      plotChapterCount.value = Number.isFinite(cc) && cc > 0 ? cc : 0
+      const ec = Number(s.plotEventsPerChapter)
+      plotEventsPerChapter.value = Number.isFinite(ec) && ec > 0 ? ec : 0
+    } catch { /* settings 不可用时保持内置默认 */ }
+  }
+
+  initPlotDefaultsFromSettings()
+  // 尝试恢复之前保存的大纲草稿（仅浏览器环境，Node 测试环境跳过）
+  if (typeof localStorage !== 'undefined') tryRestoreDraft()
+
+  // ═══════════════════════════════════════════════════════
+  // 剧情大纲生成 — 捏人页走模板系统 (buildAgentMessages)
+  // ═══════════════════════════════════════════════════════
+
+  /** 端点解析（对齐 game-pipeline.buildEndpoints: agentModels 存 API 池 id，ApiEntry.model → defaultModel） */
+  function resolvePlotOutlineEndpoint(): ApiEndpoint | null {
+    try {
+      const s = useSettingsStore().settings
+      const pool = ((s.apiPool ?? []) as any[]).map((entry: any) => ({
+        id: entry.id || '',
+        name: entry.name || '',
+        provider: entry.provider || entry.apiType || 'custom',
+        baseUrl: entry.baseUrl || '',
+        apiKey: entry.apiKey || '',
+        defaultModel: entry.defaultModel || entry.model || '',
+        models: entry.models || [],
+        timeout: entry.timeout ?? 60000,
+        enableThinking: entry.enableThinking ?? false,
+      })) as ApiEndpoint[]
+      const poolId = ((s.agentModels ?? {}) as Record<string, string>)['plot_outline'] || ''
+      return pool.find(ep => ep.id === poolId) || pool[0] || null
+    } catch {
+      return null
+    }
+  }
+
+  /** 角色信息 → 最小 CharacterState（供模板系统 {{CHARACTER_STATE}} 占位符） */
+  function buildOutlineCharacterState(): CharacterState {
+    return buildCharacterState('create-outline')
+  }
+
+  /** 剧情配置文本（含雷点，通过 localParams['PLOT_EVENTS'] 覆盖模板占位符） */
+  function buildOutlinePlotSettingsText(): string {
+    const ps = plotSettings.value
+    const parts: string[] = []
+    parts.push('') // 前导空行使合并后分隔清晰
+    parts.push('# 剧情配置')
+    parts.push(`模式: ${ps.mode}`)
+    if (ps.main) {
+      parts.push(`持续年份: ${ps.main.durationYears}`)
+      parts.push(`难度层级: ${ps.main.difficultyTier ?? '自适应'}`)
+      parts.push(`允许世界书外NPC: ${ps.main.allowNonWorldbookNpc ? '是' : '否'}`)
+      parts.push(`剧情偏向: ${ps.main.genrePreference.join('、')}`)
+      if (ps.main.customPreference) parts.push(`自定义偏好: ${ps.main.customPreference}`)
+      if (ps.main.chapterCount) parts.push(`章节数量: ${ps.main.chapterCount} 章`)
+      if (ps.main.eventsPerChapter) parts.push(`每章事件: ${ps.main.eventsPerChapter} 个`)
+    }
+    if (ps.side) {
+      if (ps.side.focusRegion) parts.push(`专注区域: ${ps.side.focusRegion}`)
+      if (ps.side.chapterCount) parts.push(`章节数量: ${ps.side.chapterCount} 章`)
+      if (ps.side.eventsPerChapter) parts.push(`每章事件: ${ps.side.eventsPerChapter} 个`)
+    }
+    if (ps.tabooContent) {
+      parts.push('')
+      parts.push('雷点（绝对禁止出现的内容，优先级高于一切偏好）:')
+      parts.push(ps.tabooContent)
+    }
+    return parts.join('\n')
+  }
+
+  /** 加载 agent-config.json 中的 Agent 配置 */
+  async function loadOutlineAgentConfigs(): Promise<AgentConfig[]> {
+    try {
+      const resp = await fetch('/data/defaults/agent-config.json')
+      if (!resp.ok) return []
+      const json = await resp.json()
+      if (!json.agents) return []
+      const result: AgentConfig[] = []
+      for (const [id, cfg] of Object.entries(json.agents) as [string, any][]) {
+        result.push({ ...cfg, agentId: id } as AgentConfig)
+      }
+      return result
+    } catch {
+      return []
+    }
+  }
+
+  /** 加载剧情大纲 Agent 可见的世界书（走 agent-config.json 的 worldBookIds 过滤 + 用户捏人勾选） */
+  async function loadPlotOutlineWorldBooks(agentConfigs: AgentConfig[]): Promise<WorldBook[]> {
+    try {
+      const all = await loadBuiltInWorldBooks()
+      const cfg = agentConfigs.find(c => c.agentId === 'plot_outline')
+      let filtered = all
+      if (cfg && cfg.worldBookIds?.length) {
+        filtered = all.filter(wb => cfg.worldBookIds!.includes(wb.id))
+      }
+      // 对齐游戏页面：只注入用户在捏人页勾选的角色 + 命定核心
+      const enabledEntries = buildEnabledWorldBookEntries()
+      return filterBooksByEnabledEntries(filtered, enabledEntries)
+    } catch {
+      return []
+    }
+  }
+
+  function buildOutlineTimeRange(): { start: string; end: string } {
+    const years = plotMode.value === 'main' ? plotDurationYears.value : 1
+    const endYear = String(Math.max(1, years)).padStart(3, '0')
+    return { start: '复兴纪元001年01月01日', end: `复兴纪元${endYear}年12月30日` }
+  }
+
+  /** 历史入栈（最多 5 版，超出丢最旧） */
+  function pushOutlineHistory() {
+    if (!plotOutline.value) return
+    outlineHistory.value = [...outlineHistory.value, plotOutline.value].slice(-5)
+    chaptersHistory.value = [...chaptersHistory.value, plotOutlineChapters.value].slice(-5)
+  }
+
+  /** 从原始输出提取结构化自检（score/weaknesses/suggestions） */
+  function extractSelfCritique(raw: string): { score: number; weaknesses: string[]; suggestions: string[] } | null {
+    const m = raw.match(/\{[\s\S]*\}/)
+    if (!m) return null
+    try {
+      const parsed = JSON.parse(m[0])
+      const sc = parsed?.selfCritique
+      if (!sc || typeof sc.score !== 'number') return null
+      return {
+        score: sc.score,
+        weaknesses: Array.isArray(sc.weaknesses) ? sc.weaknesses : [],
+        suggestions: Array.isArray(sc.suggestions) ? sc.suggestions : [],
+      }
+    } catch {
+      return null
+    }
+  }
+
+  /** 核心生成循环: 通过模板系统 buildAgentMessages 构建上下文，selfCritique.score < 6 时重试（最多 2 次调用） */
+  async function runOutlineGeneration(initialUserMessage: string): Promise<boolean> {
+    plotGenerationError.value = null
+    const endpoint = resolvePlotOutlineEndpoint()
+    if (!endpoint || !endpoint.defaultModel) {
+      plotGenerationError.value = '未配置 API 端点或模型，请在设置页为「大纲生成」Agent 配置 API'
+      return false
+    }
+
+    isPlotGenerating.value = true
+    try {
+      const settings = useSettingsStore().settings
+
+      // 加载模板系统依赖: Agent 配置 + 世界书
+      const { buildAgentMessages } = await import('@engine/agent-templates')
+      const agentConfigs = await loadOutlineAgentConfigs()
+      const worldBooks = await loadPlotOutlineWorldBooks(agentConfigs)
+
+      // 构建 AgentContext
+      const ctx: AgentContext = {
+        userInput: initialUserMessage,
+        history: [],
+        characters: [buildOutlineCharacterState()],
+        memories: [],
+        plotEvents: [],
+        plotSettings: plotSettings.value,
+        variables: {},
+        agentOutputs: new Map(),
+        lorebookMatches: [],
+        worldBooks: [],
+      }
+
+      // localParams: 用剧情配置文本覆盖模板中的 {{PLOT_EVENTS}}
+      const localParams: Record<string, string> = {
+        'PLOT_EVENTS': buildOutlinePlotSettingsText(),
+      }
+
+      const baseMessages = buildAgentMessages('plot_outline', ctx, agentConfigs, worldBooks, undefined, localParams)
+      const messages: Array<{ role: string; content: string }> = baseMessages
+        ? [...baseMessages]
+        : [{ role: 'system', content: '' }]
+
+      const client = new AgentClient({
+        endpoint,
+        agentId: 'plot_outline',
+        saveId: 'create',
+        timeout: 120000,
+      })
+      const llmParams = {
+        model: endpoint.defaultModel,
+        temperature: ((settings.agentTemperature ?? {}) as Record<string, number>)['plot_outline'] ?? 0.7,
+        maxTokens: ((settings.agentMaxTokens ?? {}) as Record<string, number>)['plot_outline'] ?? 16384,
+        topP: ((settings.agentTopP ?? {}) as Record<string, number>)['plot_outline'] ?? 1.0,
+      }
+
+      let best: { parsed: ParsedOutlineOutput; raw: string } | null = null
+      let userMessage = initialUserMessage
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        // 替换最后一条 user 消息为当前 userMessage（首次用 initialUserMessage，重试带弱点）
+        // 如果 baseMessages 最后一条是 user，替换它；否则追加
+        const lastMsg = messages[messages.length - 1]
+        if (lastMsg && lastMsg.role === 'user') {
+          messages[messages.length - 1] = { role: 'user', content: userMessage }
+        } else {
+          messages.push({ role: 'user', content: userMessage })
+        }
+        const result = await client.chat({ ...llmParams, messages })
+        if (result.error || !result.rawResponse) {
+          if (best) break
+          plotGenerationError.value = `大纲生成失败: ${result.error ?? 'AI 返回为空'}`
+          return false
+        }
+        const parsed = tryParseOutline(result.rawResponse)
+        if (!parsed) {
+          if (best) break
+          plotGenerationError.value = '大纲输出解析失败，请重试'
+          return false
+        }
+        best = { parsed, raw: result.rawResponse }
+      // 保存本轮完整 AI 数据，供导出调试用
+      lastPlotGenerationMeta.value = {
+        messages: messages.map(m => ({ ...m })),
+        rawResponse: best.raw,
+        reasoning: (result as any).reasoning ?? undefined,
+        model: llmParams.model,
+        timestamp: Date.now(),
+      }
+
+        const critique = extractSelfCritique(result.rawResponse)
+        if (!critique || critique.score >= 6) break
+        userMessage = [
+          initialUserMessage,
+          '',
+          `# 上一版大纲（自检评分 ${critique.score}/10，未达标，需重写）`,
+          result.rawResponse,
+          '# 待改进点',
+          ...(critique.weaknesses.length ? critique.weaknesses : ['（未给出）']),
+          '# 改进建议',
+          ...(critique.suggestions.length ? critique.suggestions : ['（未给出）']),
+          '请针对以上不足重写大纲，输出完整大纲 XML（<outline>...</outline>）。',
+        ].join('\n')
+      }
+
+      if (!best) {
+        plotGenerationError.value = '大纲生成失败'
+        return false
+      }
+
+      const outline = createOutlineFromAgent(
+        '',
+        plotMode.value,
+        best.raw,
+        buildOutlineTimeRange(),
+        (plotOutline.value?.version ?? 0) + 1,
+      )
+      if (!outline) {
+        plotGenerationError.value = '大纲输出解析失败，请重试'
+        return false
+      }
+      pushOutlineHistory()
+      plotOutline.value = outline
+      plotOutlineChapters.value = best.parsed.chapters
+      autoSaveDraft()
+      return true
+    } catch (err) {
+      plotGenerationError.value = `大纲生成失败: ${err instanceof Error ? err.message : String(err)}`
+      return false
+    } finally {
+      isPlotGenerating.value = false
+    }
+  }
+
+  /** 导出本轮 AI 调试数据（系统提示词 + 思维链 + 正文输出） */
+  function exportAIDebugDump(): boolean {
+    if (!lastPlotGenerationMeta.value) return false
+    const m = lastPlotGenerationMeta.value
+    const data = {
+      exportedAt: new Date().toISOString(),
+      model: m.model,
+      timestamp: m.timestamp,
+      systemPrompt: m.messages.find(msg => msg.role === 'system')?.content ?? '',
+      userMessage: m.messages.find(msg => msg.role === 'user')?.content ?? '',
+      allMessages: m.messages,
+      reasoning: m.reasoning,
+      rawResponse: m.rawResponse,
+      parsedOutline: plotOutline.value ? {
+        title: plotOutline.value.title,
+        summary: plotOutline.value.summary,
+        content: plotOutline.value.content,
+        timeRange: plotOutline.value.timeRange,
+      } : null,
+      plotSettings: plotSettings.value,
+    }
+    try {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `AI调试数据-${new Date().toISOString().slice(0, 10)}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      return true
+    } catch { return false }
+  }
+
+  /** 生成剧情大纲（重新生成时旧版入栈 history 可回退） */
+  async function generatePlotOutline(): Promise<boolean> {
+    if (isPlotGenerating.value) return false
+    // 简单的初始 user 消息 — 模板系统的 systemPrompt 已包含完整指令
+    const message = '# 剧情大纲生成请求\n\n请根据角色背景和剧情配置，生成完整剧情大纲。'
+    return runOutlineGeneration(message)
+  }
+
+  /** 大纲重 roll（修改模式）: 带上一版完整 JSON + 用户修改要求让 AI 重写 */
+  async function reviseOutline(userRequest: string): Promise<boolean> {
+    if (isPlotGenerating.value) return false
+    if (!plotOutline.value) {
+      plotGenerationError.value = '尚无大纲可修改，请先生成大纲'
+      return false
+    }
+    const previousJson = JSON.stringify({
+      title: plotOutline.value.title,
+      summary: plotOutline.value.summary,
+      content: plotOutline.value.content,
+      chapters: plotOutlineChapters.value,
+    }, null, 2)
+    const message = [
+      '# 修改模式',
+      '',
+      '## 上一版大纲（完整 JSON）',
+      previousJson,
+      '',
+      '## 用户的修改要求',
+      userRequest.trim(),
+      '',
+      '请根据以上要求重写大纲。修改要求与雷点冲突时雷点优先。输出完整大纲 XML（<outline>...</outline>）。',
+    ].join('\n')
+    return runOutlineGeneration(message)
+  }
+
+  /** 回退到上一版大纲 */
+  function rollbackOutline(): boolean {
+    if (outlineHistory.value.length === 0) return false
+    const prev = outlineHistory.value[outlineHistory.value.length - 1]
+    outlineHistory.value = outlineHistory.value.slice(0, -1)
+    const prevChapters = chaptersHistory.value[chaptersHistory.value.length - 1] ?? []
+    chaptersHistory.value = chaptersHistory.value.slice(0, -1)
+    plotOutline.value = prev
+    plotOutlineChapters.value = prevChapters
+    autoSaveDraft()
+    return true
   }
 
   // ═══════════════════════════════════════════════════════
@@ -866,15 +1270,74 @@ export const useCreateStore = defineStore('create', () => {
         enabledWorldBookEntries: buildEnabledWorldBookEntries(),  // 🆕
         openingPrompt: openingPrompt,                              // 🆕
         openingPromptConsumed: false,                              // 🆕
-      },
+        plotSettings: JSON.parse(JSON.stringify(plotSettings.value)),  // §5.2: 本档剧情配置随档落库（含雷点）
+      } as any,
     })
 
-    if (plotOutline.value) {
+    // §5.2: 主线/支线已生成大纲 → 落库确认版 + 结构化事件树（全部 hidden）；历史版本不落库
+    if ((plotMode.value === 'main' || plotMode.value === 'side') && plotOutline.value) {
+      const { savePlotOutline, savePlotEvents } = await import('@engine/database')
+      const { outlineToEvents } = await import('@engine/plot-outline')
+      const confirmed: PlotOutline = { ...JSON.parse(JSON.stringify(plotOutline.value)), saveId, confirmed: true }
+      await savePlotOutline(confirmed)
+      const events = outlineToEvents(JSON.parse(JSON.stringify(plotOutlineChapters.value)), saveId)
+      if (events.length > 0) await savePlotEvents(events)
+    } else if (plotOutline.value) {
       const { savePlotOutline } = await import('@engine/database')
-      await savePlotOutline({ ...plotOutline.value, saveId })
+      await savePlotOutline({ ...JSON.parse(JSON.stringify(plotOutline.value)), saveId })
     }
 
     return saveId
+  }
+
+  /** 成功开局后清除草稿 */
+  async function startJourneyAndClearDraft(): Promise<string> {
+    const saveId = await startJourney()
+    clearDraft()
+    return saveId
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // localStorage 草稿 — 大纲自动保存/恢复/清除
+  // ═══════════════════════════════════════════════════════
+
+  /** 自动保存草稿（大纲生成/修改/回退后调用） */
+  function autoSaveDraft() {
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        outline: plotOutline.value,
+        chapters: plotOutlineChapters.value,
+        outlineHistory: outlineHistory.value.slice(-5),
+        chaptersHistory: chaptersHistory.value.slice(-5),
+        savedAt: Date.now(),
+      }))
+    } catch { /* localStorage full — silently skip */ }
+  }
+
+  /** 尝试恢复草稿，成功返回 true */
+  function tryRestoreDraft(): boolean {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY)
+      if (!raw) return false
+      const draft = JSON.parse(raw)
+      if (!draft.outline?.title || !draft.chapters?.length) {
+        localStorage.removeItem(DRAFT_KEY)
+        return false
+      }
+      plotOutline.value = draft.outline
+      plotOutlineChapters.value = draft.chapters
+      outlineHistory.value = Array.isArray(draft.outlineHistory) ? draft.outlineHistory : []
+      chaptersHistory.value = Array.isArray(draft.chaptersHistory) ? draft.chaptersHistory : []
+      return true
+    } catch {
+      localStorage.removeItem(DRAFT_KEY)
+      return false
+    }
+  }
+
+  /** 清除草稿（开局成功后调用） */
+  function clearDraft() {
+    try { localStorage.removeItem(DRAFT_KEY) } catch { /* silent */ }
   }
 
   // ═══════════════════════════════════════════════════════
@@ -946,16 +1409,20 @@ export const useCreateStore = defineStore('create', () => {
     extra.value = data.extra || ''
     if (data.plotSettings) {
       plotMode.value = data.plotSettings.mode
+      plotTabooContent.value = data.plotSettings.tabooContent ?? ''
       if (data.plotSettings.main) {
         plotDurationYears.value = data.plotSettings.main.durationYears
         plotAllowNonWorldbookNpc.value = data.plotSettings.main.allowNonWorldbookNpc
         plotDifficultyTier.value = (data.plotSettings.main.difficultyTier ?? 'adaptive') as typeof plotDifficultyTier.value
         plotGenrePreference.value = data.plotSettings.main.genrePreference as typeof plotGenrePreference.value
         plotCustomPreference.value = data.plotSettings.main.customPreference
+        if (data.plotSettings.main.chapterCount) plotChapterCount.value = data.plotSettings.main.chapterCount
+        if (data.plotSettings.main.eventsPerChapter) plotEventsPerChapter.value = data.plotSettings.main.eventsPerChapter
       }
       if (data.plotSettings.side) {
-        plotYearlyGeneration.value = data.plotSettings.side.yearlyGeneration
         plotFocusRegion.value = data.plotSettings.side.focusRegion
+        if (data.plotSettings.side.chapterCount) plotChapterCount.value = data.plotSettings.side.chapterCount
+        if (data.plotSettings.side.eventsPerChapter) plotEventsPerChapter.value = data.plotSettings.side.eventsPerChapter
       }
     }
   }
@@ -978,10 +1445,15 @@ export const useCreateStore = defineStore('create', () => {
     destinyCore.value = null
     selectedBackground.value = null; customBackgroundText.value = ''
     plotOutline.value = null; isPlotGenerating.value = false
+    plotOutlineChapters.value = []
+    outlineHistory.value = []; chaptersHistory.value = []
+    plotGenerationError.value = null
     plotMode.value = 'off'; plotDurationYears.value = 5
     plotAllowNonWorldbookNpc.value = true; plotDifficultyTier.value = 'adaptive'
     plotGenrePreference.value = ['combat']; plotCustomPreference.value = ''
-    plotFocusRegion.value = ''; plotYearlyGeneration.value = true
+    plotFocusRegion.value = ''; plotTabooContent.value = ''
+    plotChapterCount.value = 0; plotEventsPerChapter.value = 0
+    initPlotDefaultsFromSettings()
     showPresetModal.value = false
     selectedSystemCoreEntryUid.value = null
     enabledCharacterEntryUids.value = new Set()
@@ -1031,13 +1503,20 @@ export const useCreateStore = defineStore('create', () => {
     // 剧情
     plotMode, plotDurationYears, plotAllowNonWorldbookNpc,
     plotDifficultyTier, plotGenrePreference, plotCustomPreference,
-    plotFocusRegion, plotYearlyGeneration,
-    plotSettings, plotOutline, isPlotGenerating,
-    generatePlotOutline,
+    plotFocusRegion, plotTabooContent,
+    plotChapterCount, plotEventsPerChapter,
+    plotSettings, plotOutline, plotOutlineChapters, isPlotGenerating,
+    plotGenerationError, outlineHistory,
+    exportAIDebugDump,
+    lastPlotGenerationMeta,
+    generatePlotOutline, reviseOutline, rollbackOutline,
+    initPlotDefaultsFromSettings,
     // 提交
-    buildCharacterState, buildOpeningPrompt, startJourney,
+    buildCharacterState, buildOpeningPrompt, startJourney: startJourneyAndClearDraft,
     // 模板
     substituteUser,
+    // localStorage 草稿
+    autoSaveDraft, tryRestoreDraft, clearDraft,
     // 预设
     showPresetModal, presets, getCurrentPresetData, applyPresetData,
     // 重置

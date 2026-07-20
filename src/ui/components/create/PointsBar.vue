@@ -12,11 +12,11 @@ const percent = computed(() => {
   return Math.min(100, Math.max(0, ((props.total - props.used) / props.total) * 100))
 })
 
-const barStyle = computed(() => {
-  // 用品质色渐变：剩余多→绿，剩余中→金，剩余少→红
-  if (percent.value > 50) return 'linear-gradient(90deg, #22c55e, #16a34a)'
-  if (percent.value > 25) return 'linear-gradient(90deg, #f59e0b, #d97706)'
-  return 'linear-gradient(90deg, #ef4444, #dc2626)'
+const barColor = computed(() => {
+  // 剩余多→绿，剩余中→金，剩余少→红
+  if (percent.value > 50) return 'var(--theme-success)'
+  if (percent.value > 25) return 'var(--theme-warning)'
+  return 'var(--theme-error)'
 })
 </script>
 
@@ -25,7 +25,7 @@ const barStyle = computed(() => {
     <div class="points-track">
       <div
         class="points-fill"
-        :style="{ width: percent + '%', background: barStyle }"
+        :style="{ transform: `scaleX(${percent / 100})`, background: barColor }"
       />
       <span class="points-text">
         <span class="points-label">转生点数</span>
@@ -57,9 +57,14 @@ const barStyle = computed(() => {
 .points-fill {
   position: absolute;
   left: 0; top: 0; bottom: 0;
-  transition: width 0.4s ease;
+  width: 100%;
+  transform-origin: left center;
+  transition: transform 0.4s ease, background 0.4s ease;
   opacity: 0.4;
   border-radius: var(--theme-radius-md, 8px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .points-fill { transition: none; }
 }
 .points-text {
   position: relative;

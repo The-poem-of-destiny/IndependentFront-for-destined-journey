@@ -11,29 +11,18 @@ defineEmits<{ select: [item: CatalogItem]; remove: [item: CatalogItem] }>()
 
 const qualityLabel = computed(() => RARITY_TO_QUALITY[props.item.rarity] as QualityLevel)
 
-// 稀有度 → 左边框颜色映射
-const RARITY_BORDER: Record<string, string> = {
-  common:    '#9e9e9e',
-  uncommon:  '#4caf50',
-  rare:      '#2196f3',
-  epic:      '#9c27b0',
-  legendary: '#ff9800',
-  mythic:    '#f44336',
-  only:      '#00bcd4',
+// 稀有度 → 主题品质令牌（色点 + 名字着色）
+const RARITY_QUALITY_VAR: Record<string, string> = {
+  common:    '--theme-quality-common',
+  uncommon:  '--theme-quality-uncommon',
+  rare:      '--theme-quality-rare',
+  epic:      '--theme-quality-epic',
+  legendary: '--theme-quality-legendary',
+  mythic:    '--theme-quality-mythic',
+  only:      '--theme-quality-unique',
 }
 
-const borderColor = computed(() => RARITY_BORDER[props.item.rarity] || '#9e9e9e')
-
-function handleClick() {
-  if (props.disabled) return
-  if (props.selected) {
-    // 整卡点击 → 移除 (需二次确认的感觉)
-  }
-  // 但为了避免误操作，整卡点击 = 选中，移除仍需要按钮
-  if (!props.selected) {
-    // 直接 emit select，不做移除
-  }
-}
+const qualityColor = computed(() => `var(${RARITY_QUALITY_VAR[props.item.rarity] ?? '--theme-quality-common'})`)
 </script>
 
 <template>
@@ -44,13 +33,14 @@ function handleClick() {
       disabled,
       ['rarity-' + item.rarity]: true,
     }"
-    :style="{ borderLeftColor: borderColor }"
+    :style="{ '--q-color': qualityColor }"
     @click="!disabled && !selected ? $emit('select', item) : undefined"
   >
     <div class="card-body">
-      <!-- 头部: 名称 + 稀有度 + 类型 -->
+      <!-- 头部: 色点 + 名称 + 稀有度 + 类型 -->
       <div class="card-header">
-        <span class="item-name">{{ item.name }}</span>
+        <span class="quality-dot" :style="{ color: qualityColor }" />
+        <span class="item-name" :style="{ color: qualityColor }">{{ item.name }}</span>
         <QualityBadge :quality="qualityLabel" size="sm" />
         <span class="item-type">{{ item.type }}</span>
       </div>
@@ -69,7 +59,7 @@ function handleClick() {
 
       <!-- Consume 消耗 (MP/SP) — 原版有此字段，当前缺失 -->
       <div class="card-consume" v-if="item.consume">
-        ⚡ {{ item.consume }}
+        {{ item.consume }}
       </div>
 
       <!-- 描述 (截断) -->
@@ -99,8 +89,7 @@ function handleClick() {
   align-items: flex-start;
   gap: var(--theme-spacing-sm);
   padding: var(--theme-spacing-sm) var(--theme-spacing-sm) var(--theme-spacing-sm) var(--theme-spacing-md);
-  border: 1px solid var(--theme-card-border);
-  border-left: 3px solid var(--theme-card-border);
+  border: 1px solid color-mix(in srgb, var(--q-color, var(--theme-card-border)) 35%, var(--theme-card-border));
   border-radius: var(--theme-radius-md);
   background: var(--theme-card-bg);
   transition: all var(--theme-transition-normal);
@@ -108,15 +97,17 @@ function handleClick() {
 }
 .selectable-card:not(.disabled):not(.selected):hover {
   transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--theme-shadow-md);
   border-color: var(--theme-color-primary);
 }
 
-/* 选中态 */
+/* 选中态 — 整圈主色描边 + 微光 */
 .selectable-card.selected {
   border-color: var(--theme-color-primary);
-  border-left-width: 3px;
-  background: var(--theme-card-border);
+  background: color-mix(in srgb, var(--theme-color-primary) 8%, var(--theme-card-bg));
+  box-shadow:
+    0 0 0 1px var(--theme-color-primary),
+    0 0 12px color-mix(in srgb, var(--theme-color-primary) 25%, transparent);
 }
 
 /* 禁用态 */

@@ -44,6 +44,22 @@ export interface GamePipelineDeps {
 /** 流式回调 — 由 GamePage 提供实时渲染。isComplete=true 表示流式传输已结束 */
 export type StoryChunkCallback = (chunk: string, isComplete: boolean) => void
 
+/**
+ * 从 story 正文中提取 <options> 行动选项块。
+ * 格式约定（story systemPrompt <option_format>）: <options> 内每行 "数字. 内容"。
+ * 返回剥离选项块后的正文 + 选项列表。
+ */
+export function extractStoryOptions(raw: string): { content: string; options: string[] } {
+  const match = raw.match(/<options>([\s\S]*?)<\/options>/i)
+  if (!match) return { content: raw, options: [] }
+  const options = match[1]
+    .split('\n')
+    .map(line => line.trim().match(/^\d+\s*[.、)．]\s*(.+)$/)?.[1]?.trim())
+    .filter((s): s is string => !!s)
+  const content = raw.replace(/<options>[\s\S]*?<\/options>/gi, '').replace(/\n{3,}/g, '\n\n').trim()
+  return { content, options }
+}
+
 /** 各 Agent 的中文标签（供调试日志 / DebugPanel 显示） */
 const AGENT_LABELS: Record<string, string> = {
   memory_recall: '记忆召回',
@@ -67,6 +83,10 @@ export class GamePipeline {
   private abortController: AbortController | null = null
   /** 真机修(2026-07-17): run() 加载的配置/世界书/预设，供侧链 buildAgentMessages 使用（此前恒 undefined → systemPrompt 退化 stub + 世界书恒空） */
   private chainData: { agentConfigs: AgentConfig[]; worldBooks: WorldBook[]; presets: AgentPreset[] } | null = null
+  /** 步5: 本轮共享 context 引用 — pre_check 剧情导演区块注入 / post_check 年度大纲检测需要 */
+  private currentContext: AgentContext | null = null
+  /** 步5: 剧情异步落库任务（preCheckPlot/postCheckPlot），run() 末尾统一 await 避免 refreshFromDb 读到中间态 */
+  private pendingPlotTasks: Promise<void>[] = []
 
   constructor(deps: GamePipelineDeps) {
     this.game = deps.gameStore
@@ -97,12 +117,16 @@ export class GamePipeline {
       if (isUserMessage) {
         this.game.addMessage(userInput, 'user')
       }
+      this.game.setPendingOptions([])  // 新一轮开始，清掉上一轮的行动选项
       this.game.clearAgentLog()
       this.game.clearAllAgentStatus()
 
       // 2. 构建 endpoints & context
       const endpoints = this.buildEndpoints()
       const context = this.buildContext(userInput)
+      this.currentContext = context
+      this.pendingPlotTasks = []
+      await this.loadPlotData(context)
 
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
       const { presets, agentDefaults } = await this.loadPresets()
@@ -131,6 +155,12 @@ export class GamePipeline {
 
       // 4. 运行管线
       await this.orch.run()
+
+      // 4.5 步5: 等待剧情落库任务（preCheckPlot/postCheckPlot/年度大纲）完成
+      if (this.pendingPlotTasks.length > 0) {
+        await Promise.all(this.pendingPlotTasks)
+        this.pendingPlotTasks = []
+      }
 
       // 5. 回合推进（M5 每轮一拍）: totalTurns +1 + 打 reason='turn' 快照。
       //    放在 finally 的 refreshFromDb 之前，Pinia 能立即读到新 totalTurns/activeSnapshotId。
@@ -294,6 +324,10 @@ export class GamePipeline {
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map(m => ({ ...m }))
 
+    // 步5: 读存档级剧情配置（捏人页 startJourney 落 metadata.plotSettings）；老存档无字段 → off 兜底
+    const meta = this.game.activeSave?.metadata as Record<string, any> | undefined
+    const plotSettings = meta?.plotSettings ?? { mode: 'off', tabooContent: '' }
+
     return {
       userInput,
       history,
@@ -305,8 +339,24 @@ export class GamePipeline {
       memories: this.game.recentMemories,
       quests: this.game.saveProfile?.quests,
       agentOutputs: new Map(),
-      plotSettings: { mode: 'off' },  // 禁用所有剧情 Agent
+      plotSettings,
       gameTime: this.game.gameTime ?? undefined,
+    }
+  }
+
+  /** 步5: mode≠off 时从 DB 加载大纲 + 全量剧情事件（Pinia 的 activePlotEvents 可能滞后）挂到 context */
+  private async loadPlotData(context: AgentContext): Promise<void> {
+    if (context.plotSettings?.mode === 'off') return
+    try {
+      const { getLatestPlotOutline, getPlotEvents } = await import('@engine/database')
+      const [outline, events] = await Promise.all([
+        getLatestPlotOutline(this.saveId),
+        getPlotEvents(this.saveId),
+      ])
+      if (outline) (context as any).plotOutline = outline
+      if (events?.length) context.plotEvents = events
+    } catch (err) {
+      console.warn('[GamePipeline] 剧情数据加载失败（不阻塞本轮）:', err)
     }
   }
 
@@ -362,10 +412,18 @@ export class GamePipeline {
     return { presets, agentDefaults }
   }
 
-  /** 加载启用世界书：内置书 + 存档级条目过滤 */
+  /** 加载启用世界书：settings store 优先（含用户编辑 + 自建书），首次空时兜底 fetch 本地 JSON */
   private async loadActiveWorldBooks(): Promise<WorldBook[]> {
     try {
-      const all = await loadBuiltInWorldBooks()
+      // 从 settings store 读取（含用户修改的 toggle/内容 + 用户自建书）
+      const storeBooks = (this.settings.settings.worldBooks as WorldBook[]) || []
+      let all = storeBooks
+
+      // 兜底：首次启动 store 尚未由 setTimeout 填充内置书时
+      if (all.length === 0) {
+        all = await loadBuiltInWorldBooks()
+      }
+
       const enabledEntries = this.game.activeSave?.metadata?.enabledWorldBookEntries ?? []
       return filterBooksByEnabledEntries(all, enabledEntries)
     } catch {
@@ -560,19 +618,101 @@ export class GamePipeline {
       case 'story': {
         // rawResponse 直接就是 AI 返回的字符串正文（流式模式下也是完整文本）
         if (result.rawResponse) {
-          this.game.addMessage(result.rawResponse, 'assistant')
+          const { content, options } = extractStoryOptions(result.rawResponse)
+          this.game.setPendingOptions(options)
+          this.game.addMessage(content, 'assistant')
         }
-        break
-      }
-      case 'vars_update': {
-        // 从 request_dispatcher 输出或 story 输出中提取 <option> 标签
-        // vars_update 本身输出的是 JSON Patch，不包含 options
         break
       }
       case 'memory_summary': {
         await this.persistMemorySummary(result)
         break
       }
+      case 'plot_pre_check': {
+        this.handlePlotPreCheck(result)
+        break
+      }
+      case 'plot_post_check': {
+        const task = this.persistPlotPostCheck(result)
+        this.pendingPlotTasks.push(task)
+        await task
+        break
+      }
+    }
+  }
+
+  /** 步5: 从 rawResponse 提取 <json> 块内容（兼容裸 JSON） */
+  private static extractJsonBlock(raw: string): string {
+    const match = raw.match(/<json>([\s\S]*?)<\/json>/)
+    return match ? match[1].trim() : raw
+  }
+
+  /**
+   * 步5: pre_check 完成 →
+   * 1. 同步解析 directive/relevantBackground 并注入剧情导演区块到 context.agentOutputs
+   *    （story 在 Stage 1 经 {{AGENT.PLOT_PRE_CHECK}} 占位符读取，必须在 story 启动前同步写入）
+   * 2. 异步 preCheckPlot() 落库事件激活（pending→active + visibility→revealed）
+   */
+  private handlePlotPreCheck(result: AgentResult) {
+    const raw = result.rawResponse || ''
+    if (!raw) return
+    const jsonStr = GamePipeline.extractJsonBlock(raw)
+
+    try {
+      const jsonMatch = jsonStr.match(/\{[\s\S]*\}/)
+      const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : jsonStr)
+      const background: string = parsed.relevantBackground || ''
+      const directive: string = parsed.directive || parsed.outlineRelevance || ''
+      const blocks: string[] = []
+      if (background) blocks.push(`**剧情背景（须自然编织进正文）:**\n${background}`)
+      if (directive) blocks.push(`**本轮推进建议:**\n${directive}`)
+      if (blocks.length > 0) {
+        this.currentContext?.agentOutputs.set('plot_pre_check', `<剧情导演>\n${blocks.join('\n\n')}\n</剧情导演>`)
+      }
+    } catch (err) {
+      console.warn('[GamePipeline] plot_pre_check 解析失败（不阻塞本轮）:', err)
+    }
+
+    const task = (async () => {
+      try {
+        const { preCheckPlot } = await import('@engine/plot-engine')
+        const { triggeredEvents } = await preCheckPlot(this.saveId, jsonStr, this.currentContext?.variables ?? {})
+        if (triggeredEvents.length > 0) {
+          console.log(`[GamePipeline] plot_pre_check 激活事件: ${triggeredEvents.map(e => e.title).join('、')}`)
+        }
+      } catch (err) {
+        console.warn('[GamePipeline] preCheckPlot 落库失败（不阻塞本轮）:', err)
+      }
+    })()
+    this.pendingPlotTasks.push(task)
+  }
+
+  /** 步5: post_check 完成 → postCheckPlot() 落库（事件状态/新子事件/大纲版本）→ 完成/失败事件转记忆 → 年度大纲检测 */
+  private async persistPlotPostCheck(result: AgentResult): Promise<void> {
+    const raw = result.rawResponse || ''
+    if (!raw) return
+    try {
+      const { postCheckPlot, eventToMemory } = await import('@engine/plot-engine')
+      const jsonStr = GamePipeline.extractJsonBlock(raw)
+      const outcome = await postCheckPlot(this.saveId, jsonStr)
+
+      // 完成/失败事件 → 高重要度记忆
+      const terminal = outcome.eventsUpdated.filter(e => e.status === 'completed' || e.status === 'failed')
+      if (terminal.length > 0) {
+        const { saveMemory } = await import('@engine/database')
+        const gt = this.currentContext?.gameTime
+        const timeStr = gt ? `${gt.era}${gt.year}年${gt.month}月${gt.day}日` : '未知'
+        for (const event of terminal) {
+          const mem = eventToMemory(event, this.saveId, { start: timeStr, end: timeStr })
+          await saveMemory({ ...mem, id: `MEM${Date.now().toString(36).toUpperCase()}${Math.floor(Math.random() * 100)}` } as MemoryRecord)
+        }
+        console.log(`[GamePipeline] plot_post_check 事件转记忆: ${terminal.map(e => e.title).join('、')}`)
+      }
+      if (outcome.worldLineChanged) {
+        console.log(`[GamePipeline] 世界线变动: level=${outcome.changeLevel} outlineUpdated=${outcome.outlineUpdated}`)
+      }
+    } catch (err) {
+      console.warn('[GamePipeline] plot_post_check 落库失败（不阻塞本轮）:', err)
     }
   }
 

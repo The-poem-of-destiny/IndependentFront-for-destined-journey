@@ -29,16 +29,16 @@ const bgSnippet = computed(() => {
       <p class="pp-bg-desc">{{ bgSnippet }}</p>
       <div class="pp-bg-meta">
         <span v-if="store.selectedBackground?.requiredRace" class="pp-meta-tag met">
-          🧬 {{ store.selectedBackground?.requiredRace }}
+          {{ store.selectedBackground?.requiredRace }}
         </span>
         <span v-if="store.selectedBackground?.requiredIdentity" class="pp-meta-tag met">
-          🎭 {{ store.selectedBackground?.requiredIdentity }}
+          {{ store.selectedBackground?.requiredIdentity }}
         </span>
         <span v-if="store.selectedBackground?.requiredLocation" class="pp-meta-tag met">
-          📍 {{ store.selectedBackground?.requiredLocation }}
+          {{ store.selectedBackground?.requiredLocation }}
         </span>
         <span v-if="store.selectedBackground?.requiredDestinyCore" class="pp-meta-tag met">
-          ⭐ {{ store.selectedBackground?.requiredDestinyCore }}
+          {{ store.selectedBackground?.requiredDestinyCore }}
         </span>
         <span v-if="!store.selectedBackground?.requiredRace && !store.selectedBackground?.requiredIdentity && !store.selectedBackground?.requiredLocation && !store.selectedBackground?.requiredDestinyCore" class="pp-meta-tag universal">
           通用开局
@@ -75,9 +75,9 @@ const bgSnippet = computed(() => {
 /* ===== 已选背景 ===== */
 .pp-bg-info {
   padding: var(--theme-spacing-sm);
-  border-left: 3px solid var(--theme-color-primary);
-  background: color-mix(in srgb, var(--theme-color-primary) 5%, transparent);
-  border-radius: 0 var(--theme-radius-sm) var(--theme-radius-sm) 0;
+  background: color-mix(in srgb, var(--theme-color-primary) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-color-primary) 25%, var(--theme-card-border));
+  border-radius: var(--theme-radius-sm);
 }
 .pp-bg-name {
   color: var(--theme-text-primary);
@@ -104,12 +104,12 @@ const bgSnippet = computed(() => {
   border: 1px solid;
 }
 .pp-meta-tag.met {
-  background: rgba(76, 175, 80, 0.08);
-  color: #4caf50;
-  border-color: rgba(76, 175, 80, 0.25);
+  background: color-mix(in srgb, var(--theme-success) 8%, transparent);
+  color: var(--theme-success);
+  border-color: color-mix(in srgb, var(--theme-success) 25%, transparent);
 }
 .pp-meta-tag.universal {
-  background: rgba(158, 158, 158, 0.08);
+  background: var(--theme-surface-muted);
   color: var(--theme-text-muted);
   border-color: var(--theme-card-border);
 }

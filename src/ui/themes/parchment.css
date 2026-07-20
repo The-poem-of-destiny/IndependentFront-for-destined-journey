@@ -22,8 +22,9 @@
   --theme-text-secondary: #666666;
   --theme-text-muted: #9d8873;
 
-  --theme-primary: #d4af37;
-  
+  --theme-primary: #b8942e;
+  --theme-primary-text: #fdfaf3;
+
   --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
   --theme-success: #388e3c;
   --theme-warning: #e67e22;
@@ -58,7 +59,7 @@
   --theme-ascension-power: rgba(255,152,0,0.1);
   --theme-ascension-law: rgba(156,39,176,0.1);
 
-  --theme-font-title: 'Cinzel', serif;
+  --theme-font-title: 'Noto Serif SC', serif;
   --theme-font-body: 'Noto Serif SC', serif;
 
   --theme-shadow-sm: 0 1px 3px rgba(139,115,85,0.12);

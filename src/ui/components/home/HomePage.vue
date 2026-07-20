@@ -183,14 +183,14 @@ function formatTime(ts: number) {
           ✦ 新 建 存 档
         </AppButton>
         <AppButton variant="secondary" size="lg" block class="btn-load" @click="showSaveModal = true">
-          <span class="btn-icon">📖</span> 读 取 存 档
+          <span class="btn-icon"></span> 读 取 存 档
         </AppButton>
         <div class="btn-row">
           <AppButton variant="ghost" size="md" class="btn-ghost" @click="ui.navigate('settings')">
-            <span class="btn-icon">⚙</span> 设 置
+            <span class="btn-icon"></span> 设 置
           </AppButton>
           <AppButton variant="ghost" size="md" class="btn-ghost" @click="showCreditsModal = true">
-            <span class="btn-icon">♫</span> 制 作 人 员
+            <span class="btn-icon"></span> 制 作 人 员
           </AppButton>
         </div>
         <!-- 🧪 开发用 — 悬停显示 -->
@@ -227,7 +227,7 @@ function formatTime(ts: number) {
               <!-- 左边存档列表 -->
               <div class="save-panel-left">
                 <div v-if="game.saves.length === 0" class="empty-saves">
-                  <div class="empty-icon">📜</div>
+                  <div class="empty-icon"></div>
                   <p class="text-muted">还没有存档</p>
                   <AppButton variant="primary" size="sm" @click="newGame">创建第一个存档</AppButton>
                 </div>
@@ -289,11 +289,11 @@ function formatTime(ts: number) {
                     </span>
                   </div>
                   <AppButton variant="primary" size="md" class="btn-enter-game" @click="loadGame(selectedSave.id)">
-                    <span class="btn-icon">⚔</span> 进入游戏
+                    进入游戏
                   </AppButton>
                 </template>
                 <div v-else class="save-preview-empty">
-                  <div class="empty-icon">👈</div>
+                  <div class="empty-icon"></div>
                   <p class="text-muted">选择一个存档查看详情</p>
                 </div>
               </div>
@@ -935,6 +935,39 @@ function formatTime(ts: number) {
   margin: 0 0 4px;
   font-size: 0.95rem;
   color: var(--theme-text-primary);
+}
+
+/* ═══ 无障碍：减弱动效 ═══ */
+@media (prefers-reduced-motion: reduce) {
+  .bg-glow,
+  .star,
+  .main-title,
+  .sub-title,
+  .quote-container,
+  .action-section {
+    animation: none;
+  }
+  .quote-fade-enter-active,
+  .quote-fade-leave-active,
+  .fade-enter-active,
+  .fade-leave-active,
+  .save-slide-enter-active,
+  .save-slide-leave-active {
+    transition: none;
+  }
+  .save-slide-enter-from .save-panel {
+    transform: none;
+  }
+  .btn-new-game,
+  .btn-load,
+  .btn-ghost {
+    transition: none;
+  }
+  .btn-new-game:hover,
+  .btn-load:hover,
+  .btn-ghost:hover {
+    transform: none;
+  }
 }
 
 /* ═══ 滚动条美化 ═══ */

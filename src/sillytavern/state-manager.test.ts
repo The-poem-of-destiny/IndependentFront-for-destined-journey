@@ -97,6 +97,7 @@ function buildMockPlotEvent(overrides: Partial<PlotEvent> = {}): PlotEvent {
     order: 0,
     relatedCharacterIds: [],
     worldLineChanged: false,
+    visibility: 'revealed',
     depth: 0,
     createdAt: Date.now(),
     updatedAt: Date.now(),

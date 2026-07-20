@@ -34,6 +34,8 @@ function makeEvent(overrides: Partial<PlotEvent> = {}): PlotEvent {
     order: overrides.order ?? 0,
     relatedCharacterIds: overrides.relatedCharacterIds ?? [],
     worldLineChanged: overrides.worldLineChanged ?? false,
+    visibility: overrides.visibility ?? 'hidden',
+    chapterTitle: overrides.chapterTitle,
     depth: overrides.depth ?? 0,
     createdAt: overrides.createdAt ?? Date.now(),
     updatedAt: overrides.updatedAt ?? Date.now(),
@@ -51,7 +53,10 @@ function makeOutline(overrides: Partial<PlotOutline> = {}): PlotOutline {
     id: overrides.id ?? crypto.randomUUID(),
     saveId: overrides.saveId ?? 'save-1',
     mode: overrides.mode ?? 'main',
+    title: overrides.title ?? '测试大纲',
+    summary: overrides.summary ?? '一句话摘要',
     content: overrides.content ?? '# 第一章\n章节内容',
+    chapters: overrides.chapters ?? [],
     confirmed: overrides.confirmed ?? true,
     version: overrides.version ?? 1,
     timeRange: overrides.timeRange ?? { start: '第1年', end: '第5年' },
@@ -170,8 +175,8 @@ describe('parsePreCheckOutput', () => {
   it('应正确解析标准 JSON 输出', () => {
     const raw = JSON.stringify({
       triggeredEvents: [
-        { id: 'evt-1', reason: '玩家到达白曜城' },
-        { id: 'evt-2', reason: '触发商队事件' },
+        { title: '白曜城异变', reason: '玩家到达白曜城' },
+        { title: '商队袭击', reason: '触发商队事件' },
       ],
       relevantBackground: '白曜城是北境最大的贸易中心',
       outlineRelevance: '符合主线剧情第三章',
@@ -179,23 +184,23 @@ describe('parsePreCheckOutput', () => {
     const result = parsePreCheckOutput(raw);
     expect(result).not.toBeNull();
     expect(result!.triggeredEvents).toHaveLength(2);
-    expect(result!.triggeredEvents[0].id).toBe('evt-1');
+    expect(result!.triggeredEvents[0].title).toBe('白曜城异变');
     expect(result!.triggeredEvents[0].reason).toBe('玩家到达白曜城');
     expect(result!.relevantBackground).toContain('北境');
     expect(result!.outlineRelevance).toBe('符合主线剧情第三章');
   });
 
-  it('应过滤掉没有 id 的触发事件', () => {
+  it('应过滤掉没有 title 的触发事件', () => {
     const raw = JSON.stringify({
       triggeredEvents: [
-        { id: '', reason: '无效' },
-        { id: 'evt-valid', reason: '有效' },
+        { title: '', reason: '无效' },
+        { title: '有效事件', reason: '有效' },
       ],
     });
     const result = parsePreCheckOutput(raw);
     expect(result).not.toBeNull();
     expect(result!.triggeredEvents).toHaveLength(1);
-    expect(result!.triggeredEvents[0].id).toBe('evt-valid');
+    expect(result!.triggeredEvents[0].title).toBe('有效事件');
   });
 
   it('missing triggeredEvents 时应返回空数组', () => {
@@ -211,7 +216,7 @@ describe('parsePreCheckOutput', () => {
 \`\`\`json
 {
   "triggeredEvents": [
-    { "id": "evt-embed", "reason": "文本内嵌" }
+    { "title": "内嵌事件", "reason": "文本内嵌" }
   ],
   "relevantBackground": "嵌入的背景信息"
 }
@@ -220,7 +225,7 @@ describe('parsePreCheckOutput', () => {
     const result = parsePreCheckOutput(raw);
     expect(result).not.toBeNull();
     expect(result!.triggeredEvents).toHaveLength(1);
-    expect(result!.triggeredEvents[0].id).toBe('evt-embed');
+    expect(result!.triggeredEvents[0].title).toBe('内嵌事件');
   });
 
   it('无效文本应返回 null', () => {
@@ -253,11 +258,11 @@ describe('parsePostCheckOutput', () => {
         changes: '新增一章关于北境秘密结社的内容',
       },
       eventUpdates: [
-        { id: 'evt-1', action: 'complete', changes: {} },
-        { id: 'evt-2', action: 'fail', changes: {} },
+        { title: '事件一', action: 'complete', changes: {} },
+        { title: '事件二', action: 'fail', changes: {} },
       ],
       newChildEvents: [
-        { title: '潜入结社', description: '深入北境秘密结社调查', depth: 2 },
+        { title: '潜入结社', description: '深入北境秘密结社调查', parentTitle: '事件一', depth: 2 },
       ],
     });
     const result = parsePostCheckOutput(raw);
@@ -266,8 +271,10 @@ describe('parsePostCheckOutput', () => {
     expect(result!.changeLevel).toBe('moderate');
     expect(result!.outlineChanges.action).toBe('addChapter');
     expect(result!.eventUpdates).toHaveLength(2);
+    expect(result!.eventUpdates[0].title).toBe('事件一');
     expect(result!.newChildEvents).toHaveLength(1);
     expect(result!.newChildEvents[0].title).toBe('潜入结社');
+    expect(result!.newChildEvents[0].parentTitle).toBe('事件一');
   });
 
   it('应正确处理最小有效 JSON（无变化）', () => {
@@ -302,7 +309,7 @@ describe('parsePostCheckOutput', () => {
   "worldLineChanged": true,
   "changeLevel": "major",
   "outlineChanges": { "action": "update", "changes": "世界线大幅偏移" },
-  "eventUpdates": [{ "id": "evt-major", "action": "update", "changes": { "description": "修改后的描述" } }],
+  "eventUpdates": [{ "title": "主线事件", "action": "update", "changes": { "description": "修改后的描述" } }],
   "newChildEvents": []
 }
 \`\`\`
@@ -488,12 +495,12 @@ describe('preCheckPlot', () => {
   });
 
   it('应触发符合条件的 pending 事件', async () => {
-    const event = makeEvent({ id: 'evt-1', status: 'pending', triggerCondition: '{{hp}} < 50' });
+    const event = makeEvent({ id: 'evt-1', title: '濒死觉醒', status: 'pending', triggerCondition: '{{hp}} < 50' });
     vi.mocked(getPlotEvents).mockResolvedValue([event]);
     vi.mocked(savePlotEvent).mockResolvedValue('evt-1');
 
     const agentOutput = JSON.stringify({
-      triggeredEvents: [{ id: 'evt-1', reason: '血量低触发事件' }],
+      triggeredEvents: [{ title: '濒死觉醒', reason: '血量低触发事件' }],
       relevantBackground: '角色濒死',
     });
     const vars = { hp: 30 };
@@ -506,12 +513,27 @@ describe('preCheckPlot', () => {
     expect(savePlotEvent).toHaveBeenCalledTimes(1);
   });
 
+  it('触发事件时应同步置 visibility 为 revealed', async () => {
+    const event = makeEvent({ id: 'evt-vis', title: '隐藏事件', status: 'pending', visibility: 'hidden' });
+    vi.mocked(getPlotEvents).mockResolvedValue([event]);
+    vi.mocked(savePlotEvent).mockResolvedValue('evt-vis');
+
+    const agentOutput = JSON.stringify({
+      triggeredEvents: [{ title: '隐藏事件', reason: '触发' }],
+      relevantBackground: '',
+    });
+
+    const result = await preCheckPlot('save-1', agentOutput, {});
+    expect(result.triggeredEvents).toHaveLength(1);
+    expect(result.triggeredEvents[0].visibility).toBe('revealed');
+  });
+
   it('应跳过非 pending 状态的事件', async () => {
-    const event = makeEvent({ id: 'evt-1', status: 'completed' });
+    const event = makeEvent({ id: 'evt-1', title: '已完成事件', status: 'completed' });
     vi.mocked(getPlotEvents).mockResolvedValue([event]);
 
     const agentOutput = JSON.stringify({
-      triggeredEvents: [{ id: 'evt-1', reason: '尝试触发已完成事件' }],
+      triggeredEvents: [{ title: '已完成事件', reason: '尝试触发已完成事件' }],
       relevantBackground: '',
     });
 
@@ -523,13 +545,14 @@ describe('preCheckPlot', () => {
   it('应跳过条件不满足的 pending 事件', async () => {
     const event = makeEvent({
       id: 'evt-1',
+      title: '低血量事件',
       status: 'pending',
       triggerCondition: '{{hp}} < 30',
     });
     vi.mocked(getPlotEvents).mockResolvedValue([event]);
 
     const agentOutput = JSON.stringify({
-      triggeredEvents: [{ id: 'evt-1', reason: '不会触发' }],
+      triggeredEvents: [{ title: '低血量事件', reason: '不会触发' }],
       relevantBackground: '',
     });
     const vars = { hp: 100 };
@@ -560,25 +583,42 @@ describe('preCheckPlot', () => {
     expect(result.background).toBe('仅背景信息，无触发事件');
   });
 
-  it('事件不在数据库中时应跳过', async () => {
+  it('事件标题匹配不到时应 warn 并跳过', async () => {
     vi.mocked(getPlotEvents).mockResolvedValue([]);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const agentOutput = JSON.stringify({
-      triggeredEvents: [{ id: 'missing-evt', reason: '不存在' }],
+      triggeredEvents: [{ title: '不存在的事件', reason: '不存在' }],
       relevantBackground: '',
     });
     const result = await preCheckPlot('save-1', agentOutput, {});
     expect(result.triggeredEvents).toHaveLength(0);
     expect(savePlotEvent).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('不存在的事件'));
+    warnSpy.mockRestore();
+  });
+
+  it('标题大小写敏感精确匹配', async () => {
+    const event = makeEvent({ id: 'evt-case', title: 'The Quest', status: 'pending' });
+    vi.mocked(getPlotEvents).mockResolvedValue([event]);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const agentOutput = JSON.stringify({
+      triggeredEvents: [{ title: 'the quest', reason: '大小写不同' }],
+      relevantBackground: '',
+    });
+    const result = await preCheckPlot('save-1', agentOutput, {});
+    expect(result.triggeredEvents).toHaveLength(0);
+    warnSpy.mockRestore();
   });
 
   it('无触发条件的 pending 事件应直接激活', async () => {
-    const event = makeEvent({ id: 'evt-no-cond', status: 'pending', triggerCondition: undefined });
+    const event = makeEvent({ id: 'evt-no-cond', title: '无条件事件', status: 'pending', triggerCondition: undefined });
     vi.mocked(getPlotEvents).mockResolvedValue([event]);
     vi.mocked(savePlotEvent).mockResolvedValue('evt-no-cond');
 
     const agentOutput = JSON.stringify({
-      triggeredEvents: [{ id: 'evt-no-cond', reason: '无条件触发' }],
+      triggeredEvents: [{ title: '无条件事件', reason: '无条件触发' }],
       relevantBackground: '',
     });
 
@@ -600,9 +640,9 @@ describe('postCheckPlot', () => {
   });
 
   it('应处理 complete/fail/skip 状态更新', async () => {
-    const evt1 = makeEvent({ id: 'evt-1', status: 'active' });
-    const evt2 = makeEvent({ id: 'evt-2', status: 'active' });
-    const evt3 = makeEvent({ id: 'evt-3', status: 'active' });
+    const evt1 = makeEvent({ id: 'evt-1', title: '事件一', status: 'active' });
+    const evt2 = makeEvent({ id: 'evt-2', title: '事件二', status: 'active' });
+    const evt3 = makeEvent({ id: 'evt-3', title: '事件三', status: 'active' });
 
     vi.mocked(getPlotEvents).mockResolvedValue([evt1, evt2, evt3]);
 
@@ -611,9 +651,9 @@ describe('postCheckPlot', () => {
       changeLevel: 'none',
       outlineChanges: { action: 'none', changes: '' },
       eventUpdates: [
-        { id: 'evt-1', action: 'complete', changes: {} },
-        { id: 'evt-2', action: 'fail', changes: {} },
-        { id: 'evt-3', action: 'skip', changes: {} },
+        { title: '事件一', action: 'complete', changes: {} },
+        { title: '事件二', action: 'fail', changes: {} },
+        { title: '事件三', action: 'skip', changes: {} },
       ],
       newChildEvents: [],
     });
@@ -646,14 +686,59 @@ describe('postCheckPlot', () => {
     expect(result.newEvents[0].title).toBe('新支线1');
     expect(result.newEvents[0].status).toBe('pending');
     expect(result.newEvents[0].saveId).toBe('save-1');
+    expect(result.newEvents[0].visibility).toBe('hidden');
     expect(result.newEvents[1].triggerCondition).toBe('{{flag}} == 1');
     expect(result.newEvents[1].depth).toBe(2);
     expect(savePlotEvents).toHaveBeenCalled();
   });
 
+  it('新子事件的 parentTitle 应解析为 parentId 并继承 chapterTitle', async () => {
+    const parent = makeEvent({ id: 'parent-uuid', title: '父事件', status: 'active', chapterTitle: '第一章 血色纹章' });
+    vi.mocked(getPlotEvents).mockResolvedValue([parent]);
+
+    const agentOutput = JSON.stringify({
+      worldLineChanged: false,
+      changeLevel: 'none',
+      outlineChanges: { action: 'none', changes: '' },
+      eventUpdates: [],
+      newChildEvents: [
+        { title: '子事件', description: '描述', parentTitle: '父事件', depth: 2 },
+      ],
+    });
+
+    const result = await postCheckPlot('save-1', agentOutput);
+    expect(result.newEvents).toHaveLength(1);
+    expect(result.newEvents[0].parentId).toBe('parent-uuid');
+    expect(result.newEvents[0].chapterTitle).toBe('第一章 血色纹章');
+    expect(result.newEvents[0].id).not.toBe('父事件');
+    expect(parent.childrenIds).toContain(result.newEvents[0].id);
+  });
+
+  it('新子事件 parentTitle 匹配不到时应 warn 且 parentId 为空', async () => {
+    vi.mocked(getPlotEvents).mockResolvedValue([]);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const agentOutput = JSON.stringify({
+      worldLineChanged: false,
+      changeLevel: 'none',
+      outlineChanges: { action: 'none', changes: '' },
+      eventUpdates: [],
+      newChildEvents: [
+        { title: '孤儿事件', description: '描述', parentTitle: '不存在的父事件', depth: 1 },
+      ],
+    });
+
+    const result = await postCheckPlot('save-1', agentOutput);
+    expect(result.newEvents).toHaveLength(1);
+    expect(result.newEvents[0].parentId).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('不存在的父事件'));
+    warnSpy.mockRestore();
+  });
+
   it('世界线变动 + moderate 级别应触发大纲更新和级联传播', async () => {
     const event = makeEvent({
       id: 'evt-wl',
+      title: '世界线事件',
       status: 'active',
       childrenIds: [],
       worldLineChanged: false,
@@ -669,7 +754,7 @@ describe('postCheckPlot', () => {
       changeLevel: 'moderate',
       outlineChanges: { action: 'update', changes: '某角色提前死亡' },
       eventUpdates: [
-        { id: 'evt-wl', action: 'update', changes: { worldLineChanged: true } },
+        { title: '世界线事件', action: 'update', changes: { worldLineChanged: true } },
       ],
       newChildEvents: [],
     });
@@ -683,7 +768,7 @@ describe('postCheckPlot', () => {
   });
 
   it('minor 级别世界线变动不应触发大纲更新', async () => {
-    const event = makeEvent({ id: 'evt-minor', status: 'active', childrenIds: [] });
+    const event = makeEvent({ id: 'evt-minor', title: '次要事件', status: 'active', childrenIds: [] });
     vi.mocked(getPlotEvents).mockResolvedValue([event]);
 
     const outline = makeOutline();
@@ -694,7 +779,7 @@ describe('postCheckPlot', () => {
       changeLevel: 'minor',
       outlineChanges: { action: 'none', changes: '' },
       eventUpdates: [
-        { id: 'evt-minor', action: 'complete', changes: {} },
+        { title: '次要事件', action: 'complete', changes: {} },
       ],
       newChildEvents: [],
     });
@@ -720,6 +805,7 @@ describe('postCheckPlot', () => {
   it('update action 应合并 changes 字段', async () => {
     const event = makeEvent({
       id: 'evt-update',
+      title: '待更新事件',
       status: 'active',
       description: '原始描述',
     });
@@ -731,7 +817,7 @@ describe('postCheckPlot', () => {
       outlineChanges: { action: 'none', changes: '' },
       eventUpdates: [
         {
-          id: 'evt-update',
+          title: '待更新事件',
           action: 'update',
           changes: { status: 'completed', description: '修改后描述', worldLineChanged: false },
         },
@@ -745,8 +831,28 @@ describe('postCheckPlot', () => {
     expect(event.description).toBe('修改后描述');
   });
 
+  it('eventUpdates 标题匹配不到时应 warn 并跳过', async () => {
+    vi.mocked(getPlotEvents).mockResolvedValue([]);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const agentOutput = JSON.stringify({
+      worldLineChanged: false,
+      changeLevel: 'none',
+      outlineChanges: { action: 'none', changes: '' },
+      eventUpdates: [
+        { title: '幽灵事件', action: 'complete', changes: {} },
+      ],
+      newChildEvents: [],
+    });
+
+    const result = await postCheckPlot('save-1', agentOutput);
+    expect(result.eventsUpdated).toHaveLength(0);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('幽灵事件'));
+    warnSpy.mockRestore();
+  });
+
   it('worldLineChanged 但 outlineChanges action 为 none 时不更新大纲', async () => {
-    const event = makeEvent({ id: 'evt-none', status: 'active' });
+    const event = makeEvent({ id: 'evt-none', title: '无变更事件', status: 'active' });
     vi.mocked(getPlotEvents).mockResolvedValue([event]);
 
     const outline = makeOutline();
@@ -757,7 +863,7 @@ describe('postCheckPlot', () => {
       changeLevel: 'moderate',
       outlineChanges: { action: 'none', changes: '' },
       eventUpdates: [
-        { id: 'evt-none', action: 'complete', changes: {} },
+        { title: '无变更事件', action: 'complete', changes: {} },
       ],
       newChildEvents: [],
     });
@@ -767,7 +873,7 @@ describe('postCheckPlot', () => {
   });
 
   it('worldLineChanged 但无活跃大纲时不应报错', async () => {
-    const event = makeEvent({ id: 'evt-no-outline', status: 'active' });
+    const event = makeEvent({ id: 'evt-no-outline', title: '无大纲事件', status: 'active' });
     vi.mocked(getPlotEvents).mockResolvedValue([event]);
     vi.mocked(getActiveOutline).mockResolvedValue(undefined);
 
@@ -776,7 +882,7 @@ describe('postCheckPlot', () => {
       changeLevel: 'moderate',
       outlineChanges: { action: 'update', changes: '无大纲时的变动' },
       eventUpdates: [
-        { id: 'evt-no-outline', action: 'complete', changes: {} },
+        { title: '无大纲事件', action: 'complete', changes: {} },
       ],
       newChildEvents: [],
     });

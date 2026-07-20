@@ -88,10 +88,11 @@ const inventoryGroups = computed(() => {
 </script>
 
 <template>
-  <div class="ci-card" :style="{ borderColor: tierColor }">
+  <div class="ci-card" :style="{ '--ci-tier': tierColor, '--ci-race': raceColor }">
     <!-- ═══ Header: 名字 + 等级 + 层级 ─ 参照原版 sheet-header ═══ -->
     <div class="ci-header" @click="emit('collapse')">
       <div class="ci-header-main">
+        <span class="ci-tier-dot" />
         <span v-if="event.details.level" class="ci-level-badge" :style="{ borderColor: tierColor, color: tierColor }">
           Lv.{{ event.details.level }}
         </span>
@@ -172,10 +173,10 @@ const inventoryGroups = computed(() => {
 
       <!-- G. 背包 Inventory — 按类型分组 -->
       <div v-if="inventoryGroups.length" class="ci-section ci-section-divider">
-        <h4 class="ci-sec-title" :style="{ borderColor: raceColor }">持有物</h4>
+        <h4 class="ci-sec-title">持有物</h4>
         <div v-for="group in inventoryGroups" :key="group.type">
           <h5 class="ci-sub-title" :style="{ color: raceColor }">{{ group.type }}</h5>
-          <div v-for="inv in group.items" :key="inv.name" class="ci-item-card" :style="{ borderColor: raceColor }">
+          <div v-for="inv in group.items" :key="inv.name" class="ci-item-card ci-accent-race">
             <div class="ci-item-header">
               <span class="ci-item-name" :class="qualityGlowClass(inv.rarity)">{{ inv.name }}</span>
               <span class="ci-item-count">x{{ inv.quantity }}</span>
@@ -190,8 +191,8 @@ const inventoryGroups = computed(() => {
 
       <!-- H. 技能列表 — 参照原版 card 结构 -->
       <div v-if="event.details.skills?.length" class="ci-section ci-section-divider">
-        <h4 class="ci-sec-title" :style="{ borderColor: raceColor }">技能</h4>
-        <div v-for="sk in event.details.skills" :key="sk.name" class="ci-item-card" :style="{ borderColor: raceColor }">
+        <h4 class="ci-sec-title">技能</h4>
+        <div v-for="sk in event.details.skills" :key="sk.name" class="ci-item-card ci-accent-race">
           <div class="ci-item-header">
             <span class="ci-item-name">{{ sk.name }}</span>
             <span class="ci-item-type-badge">{{ sk.type === 'active' ? '主动' : '被动' }}</span>
@@ -212,8 +213,8 @@ const inventoryGroups = computed(() => {
 
       <!-- I. 装备列表 -->
       <div v-if="event.details.equipment?.length" class="ci-section ci-section-divider">
-        <h4 class="ci-sec-title" :style="{ borderColor: raceColor }">装备</h4>
-        <div v-for="eq in event.details.equipment" :key="eq.name" class="ci-item-card ci-equip" :style="{ borderColor: raceColor }">
+        <h4 class="ci-sec-title">装备</h4>
+        <div v-for="eq in event.details.equipment" :key="eq.name" class="ci-item-card ci-equip ci-accent-race">
           <div class="ci-item-header">
             <span class="ci-equip-slot">{{ eq.slot }}</span>
             <span class="ci-item-name" :class="qualityGlowClass(eq.quality)">{{ eq.name }}</span>
@@ -236,7 +237,7 @@ const inventoryGroups = computed(() => {
 
       <!-- J. 登神长阶 — 参照原版 divinity-card -->
       <div v-if="event.details.ascension?.enabled" class="ci-section ci-section-divider">
-        <h4 class="ci-sec-title ci-sec-dao" :style="{ borderColor: tierColor, color: tierColor }">登神长阶</h4>
+        <h4 class="ci-sec-title ci-sec-dao" :style="{ color: tierColor }">登神长阶</h4>
 
         <!-- 神位 deityPosition -->
         <p v-if="event.details.ascension.deityPosition" class="ci-dao-deity" :style="{ color: tierColor }">
@@ -248,7 +249,7 @@ const inventoryGroups = computed(() => {
         <p v-if="event.details.ascension.description" class="ci-item-desc">{{ event.details.ascension.description.slice(0, 150) }}</p>
 
         <!-- 神国 divineKingdom -->
-        <div v-if="event.details.ascension.divineKingdom?.name" class="ci-item-card" :style="{ borderColor: tierColor }">
+        <div v-if="event.details.ascension.divineKingdom?.name" class="ci-item-card ci-accent-tier">
           <div class="ci-item-header">
             <span class="ci-item-name" :style="{ color: tierColor }">{{ event.details.ascension.divineKingdom.name }}</span>
           </div>
@@ -260,7 +261,7 @@ const inventoryGroups = computed(() => {
         <!-- 要素 elements -->
         <template v-if="event.details.ascension.elements?.length">
           <h5 class="ci-sub-title" :style="{ color: raceColor }">要素</h5>
-          <div v-for="el in event.details.ascension.elements" :key="el.name" class="ci-item-card" :style="{ borderColor: tierColor }">
+          <div v-for="el in event.details.ascension.elements" :key="el.name" class="ci-item-card ci-accent-tier">
             <div class="ci-item-header">
               <span class="ci-item-name">{{ el.name }}</span>
             </div>
@@ -279,7 +280,7 @@ const inventoryGroups = computed(() => {
         <!-- 权能 authorities -->
         <template v-if="event.details.ascension.authorities?.length">
           <h5 class="ci-sub-title" :style="{ color: raceColor }">权能</h5>
-          <div v-for="au in event.details.ascension.authorities" :key="au.name" class="ci-item-card" :style="{ borderColor: tierColor }">
+          <div v-for="au in event.details.ascension.authorities" :key="au.name" class="ci-item-card ci-accent-tier">
             <div class="ci-item-header">
               <span class="ci-item-name">{{ au.name }}</span>
             </div>
@@ -299,7 +300,7 @@ const inventoryGroups = computed(() => {
         <!-- 法则 laws -->
         <template v-if="event.details.ascension.laws?.length">
           <h5 class="ci-sub-title" :style="{ color: raceColor }">法则</h5>
-          <div v-for="law in event.details.ascension.laws" :key="law.name" class="ci-item-card" :style="{ borderColor: tierColor }">
+          <div v-for="law in event.details.ascension.laws" :key="law.name" class="ci-item-card ci-accent-tier">
             <div class="ci-item-header">
               <span class="ci-item-name">{{ law.name }}</span>
             </div>
@@ -331,11 +332,20 @@ const inventoryGroups = computed(() => {
 .ci-card {
   border-radius: 6px;
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(16,21,32,0.92), rgba(10,14,23,0.95));
-  border: 1px solid var(--theme-card-border);
-  border-left: 4px solid; /* 层级色驱动 */
-  box-shadow: 0 0 16px rgba(0,0,0,0.3),
-              0 0 32px rgba(var(--tier-glow), 0.08); /* 微弱的层级色外围发光 */
+  background: var(--theme-card-bg);
+  border: 1px solid color-mix(in srgb, var(--ci-tier, var(--theme-card-border)) 50%, var(--theme-card-border));
+  box-shadow: var(--paper-stack, 0 0 16px rgba(0,0,0,0.3));
+}
+
+/* 层级色点 — 头部强调 */
+.ci-tier-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ci-tier);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--ci-tier) 50%, transparent);
+  flex-shrink: 0;
+  align-self: center;
 }
 
 /* ═══ Header ─ 参照原版 sheet-header ═══ */
@@ -367,11 +377,10 @@ const inventoryGroups = computed(() => {
 
 /* 名字 ─ 参照原版 char-name（缩小版） */
 .ci-name {
-  font-family: 'Cinzel', 'Noto Serif SC', serif;
+  font-family: var(--theme-font-title);
   font-size: 1.0625rem;
   font-weight: 700;
   color: var(--theme-text-primary);
-  text-shadow: 0 0 10px rgba(255,255,255,0.15);
 }
 
 /* 种族 ─ 种族色文字 */
@@ -429,7 +438,7 @@ const inventoryGroups = computed(() => {
 .ci-section { padding: 10px 0; }
 .ci-section-divider { border-top: 1px dashed rgba(255,255,255,0.08); }
 
-/* Section 标题 ─ 参照原版 subsection-title（左下3px种族色边框） */
+/* Section 标题 ─ 色点前缀（种族色/层级色由 --ci-race / --ci-tier 驱动） */
 .ci-sec-title {
   font-size: 0.75rem;
   font-weight: 600;
@@ -437,10 +446,21 @@ const inventoryGroups = computed(() => {
   letter-spacing: 0.5px;
   color: var(--theme-text-secondary);
   margin: 0 0 8px;
-  padding-left: 8px;
-  border-left: 3px solid;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ci-sec-title::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ci-race, var(--theme-text-muted));
+  box-shadow: 0 0 5px color-mix(in srgb, var(--ci-race, transparent) 50%, transparent);
+  flex-shrink: 0;
 }
 .ci-sec-dao { color: inherit; } /* 登神标题用层级色 */
+.ci-sec-dao::before { background: var(--ci-tier, var(--theme-text-muted)); box-shadow: 0 0 5px color-mix(in srgb, var(--ci-tier, transparent) 50%, transparent); }
 
 /* ═══ Chip ─ 参照原版 card-tag ═══ */
 .ci-chips { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -476,14 +496,16 @@ const inventoryGroups = computed(() => {
   color: var(--theme-text-secondary);
 }
 
-/* ═══ 技能/装备卡片 ─ 参照原版 .card ═══ */
+/* ═══ 技能/装备卡片 ─ 整圈边框色调（种族色/层级色） ═══ */
 .ci-item-card {
-  border-left: 3px solid; /* 种族色 */
+  border: 1px solid var(--theme-card-border);
   background: rgba(255,255,255,0.02);
   border-radius: 4px;
   padding: 8px 10px;
   margin-bottom: 6px;
 }
+.ci-accent-race { border-color: color-mix(in srgb, var(--ci-race, var(--theme-card-border)) 40%, var(--theme-card-border)); }
+.ci-accent-tier { border-color: color-mix(in srgb, var(--ci-tier, var(--theme-card-border)) 40%, var(--theme-card-border)); }
 .ci-item-card:last-child { margin-bottom: 0; }
 
 /* item header ─ 参照原版 card-header */
@@ -498,13 +520,13 @@ const inventoryGroups = computed(() => {
   font-size: 0.8125rem;
   color: var(--theme-text-primary);
 }
-/* 品质色发光 ─ 参照原版 quality-* classes */
-.ql-mythic { color: #ff78c5 !important; text-shadow: 0 0 8px rgba(255,120,197,0.3); }
-.ql-legendary { color: #ffc46b !important; text-shadow: 0 0 8px rgba(255,196,107,0.3); }
-.ql-epic { color: #cf95ff !important; text-shadow: 0 0 8px rgba(207,149,255,0.3); }
-.ql-rare { color: #62bbff !important; text-shadow: 0 0 8px rgba(98,187,255,0.3); }
-.ql-uncommon { color: #7be495 !important; text-shadow: 0 0 8px rgba(123,228,149,0.28); }
-.ql-common { color: #c4cad3 !important; }
+/* 品质色 ─ 统一走主题品质令牌 */
+.ql-mythic { color: var(--theme-quality-mythic) !important; }
+.ql-legendary { color: var(--theme-quality-legendary) !important; }
+.ql-epic { color: var(--theme-quality-epic) !important; }
+.ql-rare { color: var(--theme-quality-rare) !important; }
+.ql-uncommon { color: var(--theme-quality-uncommon) !important; }
+.ql-common { color: var(--theme-quality-common) !important; }
 
 /* item type badge */
 .ci-item-type-badge {
@@ -536,7 +558,7 @@ const inventoryGroups = computed(() => {
   font-size: 0.625rem;
   font-weight: 600;
   background: var(--theme-primary);
-  color: #fff;
+  color: var(--theme-primary-text);
 }
 
 /* 数值 stat */
@@ -586,8 +608,6 @@ const inventoryGroups = computed(() => {
   font-size: 0.75rem;
   font-weight: 600;
   margin: 4px 0 4px;
-  padding-left: 6px;
-  border-left: 2px solid;
 }
 .ci-item-count {
   font-size: 0.6875rem;

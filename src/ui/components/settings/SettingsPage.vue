@@ -9,6 +9,7 @@ import AppModal from '../shared/AppModal.vue'
 import WorldBookEditor from './WorldBookEditor.vue'
 import TemplatePreview from './TemplatePreview.vue'
 import type { WorldBook } from '@engine/types'
+import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks'
 import { VERSION } from '@engine/index'
 import { getAgentTemplate } from '@engine/agent-templates'
 import { getDefaultTemplate } from '@engine/placeholder-registry'
@@ -217,7 +218,7 @@ function getStoryContextTemplate(): string {
   const preset = activePreset.value
   if (!preset?.settings?.prompts) return ''
   const dynamicEntry = preset.settings.prompts.find(
-    (p: any) => p.name === '📥 动态注入' && p.enabled !== false
+    (p: any) => p.name === '动态注入' && p.enabled !== false
   )
   if (dynamicEntry?.content) return dynamicEntry.content
   // Fallback: the default block
@@ -551,7 +552,7 @@ function restoreAgentDefaults() {
   // 优先查项目默认
   const pd = cfg.projectAgentDefaults?.agents?.[agentId]
   if (pd) {
-    s.agentModels[agentId] = pd.model ?? ''
+    // 不恢复模型选择 — 用户自己选的 API 和模型不应该被默认值覆盖
     s.agentWorldbookEnabled[agentId] = pd.worldBookEnabled ?? false
     s.agentWorldbookIds[agentId] = [...(pd.worldBookIds || [])]
     if (agentId === 'story') {
@@ -614,6 +615,47 @@ function restoreAgentDefaults() {
 }
 
 // Phase 8: 世界书管理
+/** 保存内置世界书 → 写回 data/worldbooks/{id}.json（需要开发服务器运行） */
+async function saveWorldBookAsDefault(book: WorldBook) {
+  if (!book.builtIn) {
+    ui.toast('只有内置世界书可以保存为默认', 'warning')
+    return
+  }
+  try {
+    const payload = { ...book, builtIn: true }
+    const res = await fetch(`/api/worldbooks/${book.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload, null, 2),
+    })
+    if (res.ok) {
+      ui.toast(`已将"${book.name}"保存为项目默认`, 'success')
+    } else {
+      ui.toast(`保存失败 (${res.status})`, 'error')
+    }
+  } catch {
+    ui.toast('保存失败，请确认开发服务器正在运行', 'error')
+  }
+}
+
+/** 重置单本内置世界书 → 删除用户副本，重新从本地 JSON 加载 */
+async function resetSingleWorldBook(id: string) {
+  const book = s.worldBooks.find(b => b.id === id)
+  if (!book?.builtIn) return
+  if (!confirm(`确定将"${book.name}"恢复为默认吗？\n\n您对该书的所有修改将被清除。`)) return
+  try {
+    s.worldBooks = s.worldBooks.filter(b => b.id !== id)
+    const builtIn = await loadBuiltInWorldBooks()
+    const fresh = builtIn.find(b => b.id === id)
+    if (fresh) {
+      s.worldBooks.push(fresh)
+    }
+    ui.toast(`"${book.name}"已恢复为默认`, 'success')
+  } catch {
+    ui.toast('恢复失败', 'error')
+  }
+}
+
 async function importWorldBook() {
   const input = document.createElement('input'); input.type = 'file'; input.accept = '.json'
   input.onchange = async (e) => {
@@ -715,9 +757,9 @@ const genreOptions = [
   { value:'exploration', label:'探索', desc:'侧重地图探索与未知发现' }, { value:'politics', label:'权谋', desc:'侧重政治斗争与权力更迭' },
   { value:'survival', label:'生存', desc:'侧重资源管理与逆境求生' }, { value:'tragedy', label:'悲剧', desc:'侧重命运无常与英雄陨落' },
 ]
-function toggleGenre(g:string){const i=s.plotGenres.indexOf(g);if(i>=0)s.plotGenres.splice(i,1);else s.plotGenres.push(g)}
+function toggleGenre(g:string){const i=s.plotGenrePreference.indexOf(g);if(i>=0)s.plotGenrePreference.splice(i,1);else s.plotGenrePreference.push(g)}
 const plotDifficultyOptions = [
-  { value:'dynamic', label:'动态（根据玩家层级）' }, { value:'1', label:'T1 普通' }, { value:'2', label:'T2 中坚' },
+  { value:'adaptive', label:'动态（根据玩家层级）' }, { value:'1', label:'T1 普通' }, { value:'2', label:'T2 中坚' },
   { value:'3', label:'T3 精英' }, { value:'4', label:'T4 史诗' }, { value:'5', label:'T5 传说' }, { value:'6', label:'T6 神话' }, { value:'7', label:'T7 神祇' },
 ]
 
@@ -765,7 +807,6 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
           @click="activeSection = item.key; activeAgent = null">
           <span class="nav-icon"><i :class="item.icon" aria-hidden="true"></i></span>
           <span class="nav-label">{{ item.label }}</span>
-          <span class="nav-indicator" v-if="activeSection === item.key" />
         </button>
       </nav>
 
@@ -798,7 +839,7 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
           </div>
           <!-- 模型推荐 -->
           <AppCard padding="md" class="embedding-hint" style="margin-top:16px">
-            <p class="text-sm text-muted" style="margin:0 0 6px">💡 <strong>模型推荐</strong></p>
+            <p class="text-sm text-muted" style="margin:0 0 6px"><strong>模型推荐</strong></p>
             <p class="text-sm text-muted" style="margin:0 0 4px">对话模型：推荐 <strong>DeepSeek V4 Flash</strong>（快速便宜）或 <strong>DeepSeek V4 Pro</strong>（质量优先）。</p>
             <p class="text-sm text-muted" style="margin:0">Embedding 模型：推荐 <strong>硅基流动 (SiliconFlow)</strong> 的 <strong>Qwen3-VL-Embedding-8B</strong>，充个五块钱能玩到天荒地老。</p>
           </AppCard>
@@ -821,8 +862,8 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
                 <option value="">— 请选择 API 池 —</option>
                 <option v-for="ep in s.apiPool" :key="ep.id" :value="ep.id">{{ ep.name }} — {{ ep.model || '未选择模型' }}</option>
               </select>
-              <span v-if="!s.agentModels[activeAgent] && !hasApi" class="api-warn">⚠ 请先配置 API</span>
-              <span v-else-if="!s.agentModels[activeAgent]" class="api-warn">⚠ 未选择</span>
+              <span v-if="!s.agentModels[activeAgent] && !hasApi" class="api-warn">请先配置 API</span>
+              <span v-else-if="!s.agentModels[activeAgent]" class="api-warn">未选择</span>
               <span v-else class="api-ok">✓</span>
             </div>
           </AppCard>
@@ -924,7 +965,7 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
                 <option value="">— 选择预设 —</option>
                 <option v-for="p in s.presets" :key="p.id" :value="p.id">{{ p.name }}</option>
               </select>
-              <AppButton variant="ghost" size="sm" @click="importStPreset">📥 导入</AppButton>
+              <AppButton variant="ghost" size="sm" @click="importStPreset">导入</AppButton>
               <AppButton variant="primary" size="sm" @click="openNewPreset">+ 新建</AppButton>
             </div>
 
@@ -936,15 +977,15 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
                   <span v-if="activePreset.description" class="text-xs text-muted">{{ activePreset.description }}</span>
                 </div>
                 <div class="preset-viewer-actions">
-                  <AppButton variant="ghost" size="sm" @click="exportPresetDynamic(activePreset!)">📤 导出</AppButton>
-                  <AppButton variant="ghost" size="sm" @click="deletePreset(s.activePresetId)">🗑 删除</AppButton>
+                  <AppButton variant="ghost" size="sm" @click="exportPresetDynamic(activePreset!)">导出</AppButton>
+                  <AppButton variant="ghost" size="sm" @click="deletePreset(s.activePresetId)">删除</AppButton>
                 </div>
               </div>
 
               <!-- 条目列表（子提示词） -->
               <div class="preset-prompts-list">
                 <h4 class="text-sm text-muted" style="margin:0 0 8px;padding:0 16px">
-                  📝 条目列表（{{ activePreset.settings?.prompts?.length || 0 }} 个）
+                  条目列表（{{ activePreset.settings?.prompts?.length || 0 }} 个）
                 </h4>
                 <div v-for="(sp, idx) in (activePreset.settings?.prompts || [])" :key="sp.identifier || idx" class="subprompt-item" :class="{ 'subprompt-disabled': sp.enabled === false }">
                   <div class="subprompt-header" @click="toggleEntry(s.activePresetId, idx)">
@@ -981,12 +1022,12 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
                 {{ showStoryPreview ? '收起模板预览' : '模板预览' }}
               </AppButton>
               <AppButton variant="ghost" size="sm" @click="showStoryResolvedPreview = !showStoryResolvedPreview">
-                {{ showStoryResolvedPreview ? '收起解析预览' : '🔍 解析预览' }}
+                {{ showStoryResolvedPreview ? '收起解析预览' : '解析预览' }}
               </AppButton>
             </div>
 
             <div v-if="showStoryPreview" class="template-preview-panel" style="margin-top:10px;padding:12px;background:var(--color-surface);border-radius:8px;border:1px solid var(--color-border);">
-              <p class="form-hint">以下为运行时 <code>📥 动态注入</code> 条目或默认上下文块的内容。占位符最终会被替换。</p>
+              <p class="form-hint">以下为运行时 <code>动态注入</code> 条目或默认上下文块的内容。占位符最终会被替换。</p>
               <TemplatePreview
                 :template="getStoryContextTemplate()"
                 agent-id="story"
@@ -1078,7 +1119,7 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
           <WorldBookEditor
             v-if="activeWorldBook"
             :book="activeWorldBook"
-            :readonly="(activeWorldBook.builtIn && !s.disableWorldBookProtection) || false"
+            :readonly="(activeWorldBook.builtIn && !s.allowEditBuiltInBooks) || false"
             @back="closeWorldBookEditor"
             @update="handleWorldBookUpdate"
           />
@@ -1087,15 +1128,17 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
           <template v-else>
             <div class="section-head">
               <div><h3>世界书管理</h3><p class="section-desc">管理世界书条目，为 Agent 提供世界观上下文。</p></div>
-              <div style="display:flex;gap:8px;align-items:center">
-                <label class="toggle-label" style="margin-right:8px" title="关闭后内置世界书恢复只读保护">
-                  <span class="text-xs text-muted">编辑保护</span>
-                  <input type="checkbox" class="toggle-input" v-model="s.disableWorldBookProtection" />
+              <div class="worldbook-toolbar">
+                <label class="toggle-label protection-toggle" :title="s.allowEditBuiltInBooks ? '内置书当前可编辑，点击恢复只读保护' : '内置书当前受只读保护，点击允许编辑'">
+                  <span class="toggle-label-text">{{ s.allowEditBuiltInBooks ? '可编辑' : '只读保护' }}</span>
+                  <input type="checkbox" class="toggle-input" v-model="s.allowEditBuiltInBooks" />
                   <span class="toggle-slider"></span>
                 </label>
-                <AppButton variant="secondary" size="sm" @click="importWorldBook">导入ST世界书</AppButton>
-                <AppButton variant="primary" size="sm" @click="newWorldBook">+ 新建世界书</AppButton>
-                <AppButton variant="ghost" size="sm" @click="resetWorldBooks" style="color:var(--color-warning)">⟳ 恢复默认</AppButton>
+                <div class="worldbook-actions">
+                  <AppButton variant="secondary" size="sm" @click="importWorldBook">导入ST世界书</AppButton>
+                  <AppButton variant="primary" size="sm" @click="newWorldBook">+ 新建世界书</AppButton>
+                  <AppButton variant="ghost" size="sm" @click="resetWorldBooks" style="color:var(--color-warning)">⟳ 恢复默认</AppButton>
+                </div>
               </div>
             </div>
 
@@ -1120,6 +1163,12 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
                   <AppButton v-if="!book.builtIn" variant="danger" size="sm" @click="deleteWorldBook(book.id)">
                     <i class="fa-solid fa-trash" aria-hidden="true"></i>
                   </AppButton>
+                  <AppButton v-if="book.builtIn && s.allowEditBuiltInBooks" variant="ghost" size="sm" @click="saveWorldBookAsDefault(book)">
+                    保存为默认
+                  </AppButton>
+                  <AppButton v-if="book.builtIn" variant="ghost" size="sm" style="color:var(--color-warning)" @click="resetSingleWorldBook(book.id)">
+                    重置
+                  </AppButton>
                   <AppButton variant="secondary" size="sm" @click="activeWorldBook = book">
                     <i class="fa-solid fa-eye" v-if="book.builtIn" aria-hidden="true" style="margin-right:4px"></i>
                     浏览 <i class="fa-solid fa-arrow-right" aria-hidden="true" style="margin-left:4px"></i>
@@ -1134,23 +1183,34 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
         <section v-if="activeSection === 'plot'" class="section centered">
           <h3>剧情系统</h3>
           <p class="section-desc">控制剧情生成模式、大纲和事件参数。对应 Agent：剧情预检 / 剧情修正 / 大纲生成</p>
+          <p class="plot-defaults-note">此处为「新档默认值」——每个存档可在捏人页「剧情规划」步骤单独调整，互不影响。</p>
           <!-- 剧情偏向 — 最上面 -->
-          <AppCard padding="md" class="detail-card"><h4>剧情偏向</h4><p class="form-hint">选择一个或多个你喜欢的剧情方向，AI 会优先往这些方向发展。</p><div class="genre-grid"><label v-for="g in genreOptions" :key="g.value" class="genre-chip" :class="{'genre-active':s.plotGenres.includes(g.value)}" @click="toggleGenre(g.value)"><span class="genre-chip-label">{{ g.label }}</span><span class="genre-chip-desc">{{ g.desc }}</span></label></div></AppCard>
+          <AppCard padding="md" class="detail-card"><h4>剧情偏向</h4><p class="form-hint">选择一个或多个你喜欢的剧情方向，AI 会优先往这些方向发展。</p><div class="genre-grid"><label v-for="g in genreOptions" :key="g.value" class="genre-chip" :class="{'genre-active':s.plotGenrePreference.includes(g.value)}" @click="toggleGenre(g.value)"><span class="genre-chip-label">{{ g.label }}</span><span class="genre-chip-desc">{{ g.desc }}</span></label></div></AppCard>
           <!-- 模式 & 参数 -->
           <AppCard padding="md" class="detail-card" style="margin-top:16px"><h4>剧情模式 & 参数</h4>
             <div class="form-grid">
               <label class="form-label">剧情模式<p class="form-hint">选择剧情系统的运行模式</p><select v-model="s.plotMode" class="form-input"><option value="off">完全关闭 — 不生成任何剧情事件</option><option value="side">仅支线 — 每年自动生成地区冲突事件</option><option value="main">主线模式 — 按大纲推进完整主线剧情</option></select></label>
-              <label class="form-label">主线持续年份<p class="form-hint">主线剧情覆盖的游戏年份数</p><input v-model.number="s.plotDuration" type="number" min="1" max="50" class="form-input" /></label>
-              <label class="form-label">事件难度层级<p class="form-hint">动态 = 根据玩家当前层级自动调整</p><select v-model="s.plotDifficulty" class="form-input"><option v-for="o in plotDifficultyOptions" :key="o.value" :value="o.value">{{ o.label }}</option></select></label>
-              <label class="form-label">引入外部 NPC<p class="form-hint">允许 AI 在世界书之外创造新角色</p><select v-model="s.plotAllowExternalNPC" class="form-input"><option :value="true">允许 — 剧情更丰富但可能偏离设定</option><option :value="false">禁止 — 仅使用世界书内角色</option></select></label>
-              <label class="form-label" style="grid-column:1/-1">自定义偏好<p class="form-hint">用自然语言描述你想要的剧情风格</p><textarea v-model="s.plotCustomPref" class="form-input form-textarea" rows="2" placeholder="例如：希望主角经历一场背叛后重新振作..." /></label>
+              <template v-if="s.plotMode === 'main'">
+                <label class="form-label">主线持续年份<p class="form-hint">主线剧情覆盖的游戏年份数</p><input v-model.number="s.plotDurationYears" type="number" min="1" max="50" class="form-input" /></label>
+                <label class="form-label">事件难度层级<p class="form-hint">动态 = 根据玩家当前层级自动调整</p><select v-model="s.plotDifficultyTier" class="form-input"><option v-for="o in plotDifficultyOptions" :key="o.value" :value="o.value">{{ o.label }}</option></select></label>
+                <label class="form-label">引入外部 NPC<p class="form-hint">允许 AI 在世界书之外创造新角色</p><select v-model="s.plotAllowNonWorldbookNpc" class="form-input"><option :value="true">允许 — 剧情更丰富但可能偏离设定</option><option :value="false">禁止 — 仅使用世界书内角色</option></select></label>
+                <label class="form-label" style="grid-column:1/-1">自定义偏好<p class="form-hint">用自然语言描述你想要的剧情风格</p><textarea v-model="s.plotCustomPreference" class="form-input form-textarea" rows="2" placeholder="例如：希望主角经历一场背叛后重新振作..." /></label>
+                <label class="form-label">章节数量<p class="form-hint">主线推荐 3~5 章，0 = AI 自行判断</p><input v-model.number="s.plotChapterCount" type="number" min="0" max="20" class="form-input" /></label>
+                <label class="form-label">每章事件数<p class="form-hint">主线推荐 3~5 个，0 = AI 自行判断</p><input v-model.number="s.plotEventsPerChapter" type="number" min="0" max="20" class="form-input" /></label>
+              </template>
+              <template v-if="s.plotMode === 'side'">
+                <label class="form-label">专注区域<p class="form-hint">支线剧情优先围绕此区域生成，留空 = 当前区域</p><input v-model="s.plotFocusRegion" class="form-input" placeholder="留空=当前区域" /></label>
+                <label class="form-label">章节数量<p class="form-hint">支线推荐 1~3 章，0 = AI 自行判断</p><input v-model.number="s.plotChapterCount" type="number" min="0" max="20" class="form-input" /></label>
+                <label class="form-label">每章事件数<p class="form-hint">支线推荐 2~4 个，0 = AI 自行判断</p><input v-model.number="s.plotEventsPerChapter" type="number" min="0" max="20" class="form-input" /></label>
+              </template>
+              <label class="form-label" style="grid-column:1/-1" v-if="s.plotMode !== 'off'">雷点（绝对禁止生成的内容）<p class="form-hint">仅在生成剧情大纲时生效，优先级高于一切剧情偏好</p><textarea v-model="s.plotTabooContent" class="form-input form-textarea" rows="2" placeholder="例如：不要出现重要角色永久死亡、不要虐待动物的情节..." /></label>
             </div>
           </AppCard>
           <!-- 大纲预览 -->
           <AppCard padding="md" class="detail-card plot-preview-card" :class="{'plot-revealed':showPlotPreview}" style="margin-top:16px">
             <div class="plot-preview-header"><h4>剧情大纲预览</h4><AppButton variant="ghost" size="sm" @click="showPlotPreview=!showPlotPreview">{{ showPlotPreview?'隐藏':'点击查看（防剧透）' }}</AppButton></div>
             <div class="plot-preview-body" :class="{'plot-blur':!showPlotPreview}"><p class="text-muted text-sm"><strong>第一年 — 序章：命定之始</strong></p><p class="text-muted text-sm">主角在起始地点觉醒命运之力，遭遇第一次重大抉择...</p><p class="text-muted text-sm"><strong>第二年 — 崛起：风云际会</strong></p><p class="text-muted text-sm">与各大势力接触，逐步揭开世界背后的真相...</p><p class="text-muted text-sm"><strong>第三年 — 转折：命运分叉</strong></p><p class="text-muted text-sm">关键盟友背叛/牺牲，主线走向出现重大分支...</p><p class="text-muted text-sm"><strong>第四年 — 高潮：诸神黄昏</strong></p><p class="text-muted text-sm">最终决战前夕，所有伏笔回收，各方势力集结...</p><p class="text-muted text-sm"><strong>第五年 — 终章：命定之诗</strong></p><p class="text-muted text-sm">完成主线任务，世界线尘埃落定，角色结局生成...</p></div>
-            <p class="text-xs text-muted" style="margin-top:8px">⚠ 以上为示例大纲。实际内容由 AI 在游戏开始时生成。点击可切换模糊/清晰。</p>
+            <p class="text-xs text-muted" style="margin-top:8px">以上为示例大纲。实际内容由 AI 在游戏开始时生成。点击可切换模糊/清晰。</p>
           </AppCard>
         </section>
 
@@ -1215,7 +1275,7 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
         <!-- ========== 存档数据 ========== -->
         <section v-if="activeSection === 'data'" class="section centered">
           <h3>存档数据管理</h3><p class="section-desc">导出、导入或清除所有数据。建议定期导出备份。</p>
-          <div class="data-actions"><AppCard padding="md"><h4>导出数据</h4><p class="text-muted text-sm">将所有存档、角色、记忆、剧情导出为 JSON 文件</p><AppButton variant="secondary" size="sm" @click="exportAll" style="margin-top:8px">导出全部数据</AppButton></AppCard><AppCard padding="md"><h4>导入数据</h4><p class="text-muted text-sm">从 JSON 文件恢复数据，将合并到现有数据库</p><AppButton variant="secondary" size="sm" @click="importAll" style="margin-top:8px">导入数据</AppButton></AppCard><AppCard padding="md"><h4>📊 浏览器存储用量</h4><div v-if="storageInfo"><div class="storage-bar-track"><div class="storage-bar-fill" :style="{width:storageInfo.pct+'%'}"></div></div><p class="text-sm" style="margin:6px 0 0">{{ fmtBytes(storageInfo.used) }} / {{ fmtBytes(storageInfo.quota) }}（{{ storageInfo.pct.toFixed(1) }}%）</p><p class="text-xs text-muted">IndexedDB + localStorage</p></div><p v-else class="text-muted text-sm">获取中…</p></AppCard><AppCard padding="md" class="data-danger"><h4>清除所有数据</h4><p class="text-muted text-sm">永久删除所有存档、角色、记忆和设置。不可撤销。</p><AppButton variant="danger" size="sm" @click="showClearConfirm=true" style="margin-top:8px">清除所有数据</AppButton></AppCard></div>
+          <div class="data-actions"><AppCard padding="md"><h4>导出数据</h4><p class="text-muted text-sm">将所有存档、角色、记忆、剧情导出为 JSON 文件</p><AppButton variant="secondary" size="sm" @click="exportAll" style="margin-top:8px">导出全部数据</AppButton></AppCard><AppCard padding="md"><h4>导入数据</h4><p class="text-muted text-sm">从 JSON 文件恢复数据，将合并到现有数据库</p><AppButton variant="secondary" size="sm" @click="importAll" style="margin-top:8px">导入数据</AppButton></AppCard><AppCard padding="md"><h4>浏览器存储用量</h4><div v-if="storageInfo"><div class="storage-bar-track"><div class="storage-bar-fill" :style="{transform:'scaleX('+(storageInfo.pct/100)+')'}"></div></div><p class="text-sm" style="margin:6px 0 0">{{ fmtBytes(storageInfo.used) }} / {{ fmtBytes(storageInfo.quota) }}（{{ storageInfo.pct.toFixed(1) }}%）</p><p class="text-xs text-muted">IndexedDB + localStorage</p></div><p v-else class="text-muted text-sm">获取中…</p></AppCard><AppCard padding="md" class="data-danger"><h4>清除所有数据</h4><p class="text-muted text-sm">永久删除所有存档、角色、记忆和设置。不可撤销。</p><AppButton variant="danger" size="sm" @click="showClearConfirm=true" style="margin-top:8px">清除所有数据</AppButton></AppCard></div>
           <AppModal :open="showClearConfirm" title="确认清除" size="sm" @update:open="showClearConfirm=$event"><p>确定要删除所有数据吗？此操作<strong style="color:var(--theme-error)">不可撤销</strong>。</p><template #footer><AppButton variant="ghost" size="sm" @click="showClearConfirm=false">取消</AppButton><AppButton variant="danger" size="sm" @click="clearAll">确认清除</AppButton></template></AppModal>
         </section>
 
@@ -1317,24 +1377,23 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 
 /* 主导航 */
 .main-nav{width:180px;flex-shrink:0;background:var(--theme-title-bar-bg);border-right:1px solid var(--theme-card-border);padding:12px 8px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
-.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:none;border-radius:var(--theme-radius-md);background:transparent;color:var(--theme-tab-text);font-family:inherit;font-size:0.88rem;cursor:pointer;transition:all var(--theme-transition-fast);text-align:left;position:relative}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid transparent;border-radius:var(--theme-radius-md);background:transparent;color:var(--theme-tab-text);font-family:inherit;font-size:0.88rem;cursor:pointer;transition:background var(--theme-transition-fast),color var(--theme-transition-fast),border-color var(--theme-transition-fast);text-align:left}
 .nav-item:hover{background:var(--theme-tab-hover-bg);color:var(--theme-text-primary)}
-.nav-active{background:var(--theme-surface-muted);color:var(--theme-text-primary);font-weight:600}
+.nav-active{background:color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));color:var(--theme-text-primary);font-weight:600;border-color:color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border))}
 .nav-icon{font-size:1rem;line-height:1;flex-shrink:0;width:24px;text-align:center;opacity:0.7;display:flex;align-items:center;justify-content:center}
 .nav-icon i{font-size:1rem}
-.nav-active .nav-icon{opacity:1}
+.nav-active .nav-icon{opacity:1;color:var(--theme-primary)}
 .nav-label{flex:1}
-.nav-indicator{width:3px;height:16px;border-radius:2px;background:var(--theme-primary);position:absolute;left:-8px;top:50%;transform:translateY(-50%)}
 
 /* Agent 子导航 */
 .sub-nav{width:170px;flex-shrink:0;background:var(--theme-content-bg);border-right:1px solid var(--theme-card-border);padding:10px 8px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
 .sub-nav-item{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border:none;border-radius:var(--theme-radius-sm);background:transparent;color:var(--theme-tab-text);font-family:inherit;font-size:0.8rem;cursor:pointer;transition:all var(--theme-transition-fast);text-align:left}
 .sub-nav-item:hover{background:var(--theme-tab-hover-bg);color:var(--theme-text-primary)}
-.sub-nav-active{background:var(--theme-surface-muted);color:var(--theme-text-primary);font-weight:600;border-left:2px solid var(--theme-primary)}
+.sub-nav-active{background:color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));color:var(--theme-primary);font-weight:600}
 .sub-nav-name{flex:1}
 .sub-nav-badge{font-size:0.65rem;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.sub-nav-bad{background:var(--theme-error);color:#fff}
-.sub-nav-ok{background:var(--theme-success);color:#fff}
+.sub-nav-bad{background:color-mix(in srgb, var(--theme-error) 15%, var(--theme-card-bg));color:var(--theme-error);border:1px solid color-mix(in srgb, var(--theme-error) 40%, var(--theme-card-border))}
+.sub-nav-ok{background:color-mix(in srgb, var(--theme-success) 15%, var(--theme-card-bg));color:var(--theme-success);border:1px solid color-mix(in srgb, var(--theme-success) 40%, var(--theme-card-border))}
 
 /* 内容区 */
 .settings-content{flex:1;overflow-y:auto;padding:32px 40px}
@@ -1351,10 +1410,16 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 .centered{max-width:780px;margin:0 auto}
 
 /* 通用 */
-.section>h3{font-family:var(--theme-font-title);font-size:1.4rem;color:var(--theme-text-primary);margin:0 0 4px;padding-left:12px;border-left:3px solid var(--theme-primary)}
-.section-desc{margin:0 0 20px;font-size:0.85rem;color:var(--theme-text-muted)}
+.section>h3{font-family:var(--theme-font-title);font-size:1.4rem;color:var(--theme-text-primary);margin:0 0 4px}
+.section-desc{margin:0 0 20px;padding-bottom:12px;font-size:0.85rem;color:var(--theme-text-muted);border-bottom:1px solid var(--theme-card-border)}
+.plot-defaults-note{margin:-8px 0 16px;font-size:0.75rem;font-style:italic;color:var(--theme-text-muted)}
 .section-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;gap:16px}
 .section-head h3{font-family:var(--theme-font-title);font-size:1.3rem;color:var(--theme-text-primary);margin:0 0 4px}
+/* 世界书工具栏: 编辑保护 + 操作按钮分行 */
+.worldbook-toolbar{display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex-shrink:0}
+.protection-toggle{display:flex;align-items:center;gap:8px;padding:4px 12px;border:1px solid var(--theme-card-border);border-radius:var(--theme-radius-md);background:var(--theme-card-bg)}
+.toggle-label-text{font-size:0.8rem;font-weight:500;color:var(--theme-text-secondary);white-space:nowrap}
+.worldbook-actions{display:flex;gap:8px;align-items:center}
 .form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
 .form-label{display:flex;flex-direction:column;gap:2px;font-size:0.85rem;font-weight:500;color:var(--theme-text-secondary)}
 .form-input{padding:8px 12px;border:1px solid var(--theme-card-border);border-radius:var(--theme-radius-md);background:var(--theme-content-bg);color:var(--theme-text-primary);font-family:inherit;font-size:0.9rem;transition:border-color var(--theme-transition-fast),box-shadow 0.15s;width:100%}
@@ -1438,20 +1503,20 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 .worldbook-select-list{border:1px solid var(--theme-card-border);border-radius:var(--theme-radius-md);min-height:60px;padding:8px;display:flex;flex-direction:column;gap:2px}
 .worldbook-checkbox{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;min-height:44px;transition:background 0.15s}
 .worldbook-checkbox:hover{background:var(--theme-tab-hover-bg)}
-.worldbook-checkbox input[type=checkbox]{width:18px;height:18px;cursor:pointer;margin:0;accent-color:var(--theme-color-primary,#15803D)}
+.worldbook-checkbox input[type=checkbox]{width:18px;height:18px;cursor:pointer;margin:0;accent-color:var(--theme-primary)}
 .wb-check-label{flex:1;font-size:14px;font-weight:500}
 .worldbook-list{display:flex;flex-direction:column;gap:10px}
 .worldbook-card{display:flex;align-items:center;justify-content:space-between;gap:16px;transition:all 0.15s;border:1px solid var(--theme-card-border);border-radius:var(--theme-radius-lg, 12px)}
 .worldbook-card:hover{border-color:color-mix(in srgb, var(--theme-primary) 25%, var(--theme-card-border));transform:translateY(-1px);box-shadow:0 2px 8px rgba(0,0,0,0.12)}
 .wb-info{flex:1;min-width:0}
 .wb-info h4{font-size:15px;margin:0 0 4px;display:flex;align-items:center;gap:8px}
-.builtin-badge{font-size:11px;font-weight:500;padding:2px 8px;border-radius:10px;background:rgba(34,197,94,0.15);color:#22c55e;border:1px solid rgba(34,197,94,0.3)}
+.builtin-badge{font-size:11px;font-weight:500;padding:2px 8px;border-radius:10px;background:color-mix(in srgb, var(--theme-success) 12%, transparent);color:var(--theme-success);border:1px solid color-mix(in srgb, var(--theme-success) 30%, transparent)}
 
 /* Toggle */
 .toggle-label{display:flex;align-items:center;gap:10px;cursor:pointer}
 .toggle-input{display:none}
 .toggle-slider{width:40px;height:22px;border-radius:11px;background:var(--theme-card-border);transition:background var(--theme-transition-fast);position:relative}
-.toggle-slider::after{content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform var(--theme-transition-fast)}
+.toggle-slider::after{content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--theme-text-primary);transition:transform var(--theme-transition-fast)}
 .toggle-input:checked+.toggle-slider{background:var(--theme-success)}
 .toggle-input:checked+.toggle-slider::after{transform:translateX(18px)}
 
@@ -1476,7 +1541,7 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 .theme-option:hover{transform:translateY(-3px);box-shadow:0 6px 20px color-mix(in srgb, #000 25%, transparent);border-color:color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border))}
 .theme-selected{border-color:var(--theme-primary) !important;box-shadow:0 0 16px color-mix(in srgb,var(--theme-primary) 25%,transparent)}
 .theme-name{font-size:0.75rem;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,0.6);letter-spacing:0.5px}
-.theme-check{position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:var(--theme-primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;box-shadow:0 0 8px color-mix(in srgb, var(--theme-primary) 40%, transparent)}
+.theme-check{position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:var(--theme-primary);color:var(--theme-primary-text);display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;box-shadow:0 0 8px color-mix(in srgb, var(--theme-primary) 40%, transparent)}
 
 /* Data */
 .data-actions{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
@@ -1484,7 +1549,8 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
 .data-danger{border-color:color-mix(in srgb,var(--theme-error) 25%,transparent) !important;background:color-mix(in srgb,var(--theme-error) 3%,transparent)}
 .data-danger:hover{border-color:color-mix(in srgb,var(--theme-error) 45%,transparent) !important}
 .storage-bar-track{height:8px;border-radius:4px;background:var(--theme-card-border);overflow:hidden}
-.storage-bar-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--theme-quality-common),var(--theme-quality-rare));transition:width 0.5s ease}
+.storage-bar-fill{height:100%;border-radius:4px;background:var(--theme-quality-rare);width:100%;transform-origin:left;transition:transform 0.5s ease}
+@media (prefers-reduced-motion: reduce){.storage-bar-fill{transition:none}.section-fade-enter-active,.section-fade-leave-active{transition:none}.template-preview-panel{animation:none}}
 
 /* About */
 .about-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
@@ -1531,6 +1597,6 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
   justify-content: space-between;
   align-items: center;
   padding: 6px 0;
-  border-bottom: 1px solid var(--theme-border, rgba(255,255,255,0.04));
+  border-bottom: 1px solid var(--theme-card-border);
 }
 </style>

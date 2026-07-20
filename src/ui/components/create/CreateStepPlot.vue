@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useCreateStore } from '../../stores/create-store'
 import FormSelect from '../shared/form/FormSelect.vue'
 import FormStepper from '../shared/form/FormStepper.vue'
@@ -6,6 +7,93 @@ import AppButton from '../shared/AppButton.vue'
 import PlotOutlinePreview from './PlotOutlinePreview.vue'
 
 const store = useCreateStore()
+
+const showReviseBox = ref(false)
+const reviseText = ref('')
+const importInput = ref<HTMLInputElement | null>(null)
+const exportError = ref('')
+
+async function submitRevise() {
+  const text = reviseText.value.trim()
+  if (!text) return
+  const ok = await store.reviseOutline(text)
+  if (ok) {
+    reviseText.value = ''
+    showReviseBox.value = false
+  }
+}
+
+function handleExportOutline() {
+  try {
+    const data = {
+      title: store.plotOutline?.title ?? '',
+      summary: store.plotOutline?.summary ?? '',
+      content: store.plotOutline?.content ?? '',
+      chapters: JSON.parse(JSON.stringify(store.plotOutlineChapters)),
+      plotSettings: JSON.parse(JSON.stringify(store.plotSettings)),
+      exportedAt: new Date().toISOString(),
+      version: 1,
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${data.title || '剧情大纲'}-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    exportError.value = '导出失败'
+    console.error('导出大纲失败:', err)
+  }
+}
+
+function triggerImportOutline() {
+  importInput.value?.click()
+}
+
+async function handleImportOutline(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  try {
+    const text = await file.text()
+    const data = JSON.parse(text)
+
+    if (!data.title && !data.content) {
+      throw new Error('文件格式不正确：缺少 title 或 content')
+    }
+    if (!data.chapters || !Array.isArray(data.chapters) || data.chapters.length === 0) {
+      throw new Error('文件格式不正确：缺少 chapters 或 chapters 为空')
+    }
+
+    store.plotOutline = {
+      id: '',
+      saveId: '',
+      mode: data.plotSettings?.mode ?? store.plotSettings.mode,
+      title: data.title,
+      summary: data.summary ?? '',
+      content: data.content ?? '',
+      chapters: data.chapters,
+      confirmed: false,
+      version: 1,
+      timeRange: { start: '', end: '' },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    } as any
+
+    store.plotOutlineChapters = data.chapters
+
+    input.value = ''
+    exportError.value = ''
+  } catch (err) {
+    exportError.value = err instanceof Error ? err.message : '导入失败'
+    console.error('导入大纲失败:', err)
+    input.value = ''
+  }
+}
 
 const GENRE_OPTIONS = [
   { label: '战斗', value: 'combat', desc: '侧重战斗冲突与力量成长' },
@@ -23,8 +111,6 @@ const DIFFICULTY_OPTIONS = [
   { label: 'T2 中坚', value: 2 as const },
   { label: 'T3 精英', value: 3 as const },
   { label: 'T4 史诗', value: 4 as const },
-  { label: 'T5 传说', value: 5 as const },
-  { label: 'T6 神话', value: 6 as const },
   { label: 'T7 神祇', value: 7 as const },
 ]
 </script>
@@ -41,10 +127,22 @@ const DIFFICULTY_OPTIONS = [
       ]" />
 
       <template v-if="store.plotMode === 'main'">
-        <div class="field-group">
-          <label class="field-label">持续年份</label>
-          <FormStepper v-model="store.plotDurationYears" :min="1" :max="20" />
-          <p class="field-hint">AI 会往后规划多少年的剧情</p>
+        <div class="field-row field-row-triple">
+          <div class="field-group">
+            <label class="field-label">持续年份</label>
+            <FormStepper v-model="store.plotDurationYears" :min="1" :max="20" />
+            <p class="field-hint">推荐 1~20</p>
+          </div>
+          <div class="field-group">
+            <label class="field-label">章节数量</label>
+            <FormStepper v-model="store.plotChapterCount" :min="1" :max="20" />
+            <p class="field-hint">推荐 3~5 章</p>
+          </div>
+          <div class="field-group">
+            <label class="field-label">每章事件数</label>
+            <FormStepper v-model="store.plotEventsPerChapter" :min="1" :max="20" />
+            <p class="field-hint">推荐 3~5 个</p>
+          </div>
         </div>
 
         <div class="field-group">
@@ -97,16 +195,32 @@ const DIFFICULTY_OPTIONS = [
           <label class="field-label">专注区域</label>
           <input v-model="store.plotFocusRegion" placeholder="留空=当前区域" />
         </div>
-        <FormSelect v-model="store.plotYearlyGeneration" label="每年自动生成" :options="[
-          { label: '是', value: true }, { label: '否', value: false },
-        ]" />
+        <div class="field-row field-row-triple">
+          <div class="field-group">
+            <label class="field-label">章节数量</label>
+            <FormStepper v-model="store.plotChapterCount" :min="1" :max="20" />
+            <p class="field-hint">推荐 1~3 章</p>
+          </div>
+          <div class="field-group">
+            <label class="field-label">每章事件数</label>
+            <FormStepper v-model="store.plotEventsPerChapter" :min="1" :max="20" />
+            <p class="field-hint">推荐 2~4 个</p>
+          </div>
+        </div>
       </template>
+
+      <div class="field-group" v-if="store.plotMode !== 'off'">
+        <label class="field-label">雷点（绝对禁止生成的内容）</label>
+        <p class="field-hint">仅在生成剧情大纲时生效，优先级高于一切剧情偏好</p>
+        <textarea v-model="store.plotTabooContent" rows="2" placeholder="例如：不要出现重要角色永久死亡、不要虐待动物的情节..." />
+      </div>
     </div>
 
     <section class="outline-section">
       <h3>大纲预览</h3>
       <PlotOutlinePreview
         :outline="store.plotOutline"
+        :chapters="store.plotOutlineChapters"
         :is-generating="store.isPlotGenerating"
         :revealed="store.plotOutlineRevealed"
         @reveal="store.plotOutlineRevealed = true"
@@ -114,14 +228,87 @@ const DIFFICULTY_OPTIONS = [
     </section>
 
     <div class="generate-row">
-      <AppButton
-        variant="secondary"
-        :disabled="store.isPlotGenerating"
-        @click="store.generatePlotOutline()"
-      >
-        🤖 生成剧情大纲
-      </AppButton>
-      <p class="warning">⚠ 此操作将调用 AI，可能需要等待较长时间</p>
+      <template v-if="!store.plotOutline">
+        <AppButton
+          variant="secondary"
+          :disabled="store.isPlotGenerating"
+          @click="store.generatePlotOutline()"
+        >
+          生成剧情大纲
+        </AppButton>
+      </template>
+      <template v-else>
+        <div class="reroll-btns">
+          <AppButton
+            variant="secondary"
+            :disabled="store.isPlotGenerating"
+            @click="store.generatePlotOutline()"
+          >
+            重新生成
+          </AppButton>
+          <AppButton
+            variant="secondary"
+            :disabled="store.isPlotGenerating"
+            @click="showReviseBox = !showReviseBox"
+          >
+            按要求修改
+          </AppButton>
+          <AppButton
+            v-if="store.outlineHistory.length > 0"
+            variant="ghost"
+            :disabled="store.isPlotGenerating"
+            @click="store.rollbackOutline()"
+          >
+            回退上一版
+          </AppButton>
+        </div>
+        <div class="revise-box" :class="{ open: showReviseBox }">
+          <div class="revise-inner">
+            <textarea
+              v-model="reviseText"
+              rows="3"
+              placeholder="你希望怎么改这份大纲？如：第二章反派动机太俗套，改成和主角命定核心有关联"
+              :disabled="store.isPlotGenerating"
+            />
+            <AppButton
+              variant="primary"
+              size="sm"
+              :disabled="store.isPlotGenerating || !reviseText.trim()"
+              @click="submitRevise()"
+            >
+              提交修改
+            </AppButton>
+          </div>
+        </div>
+        <div class="outline-io-btns">
+          <button
+            class="io-btn"
+            :disabled="store.isPlotGenerating"
+            @click="handleExportOutline"
+            title="导出大纲为 JSON 文件"
+          >
+            导出大纲
+          </button>
+          <button
+            class="io-btn"
+            :disabled="store.isPlotGenerating"
+            @click="triggerImportOutline"
+            title="从 JSON 文件导入大纲"
+          >
+            导入大纲
+          </button>
+        </div>
+        <input
+          ref="importInput"
+          type="file"
+          accept=".json"
+          style="display:none"
+          @change="handleImportOutline"
+        />
+        <p class="error-msg" v-if="exportError">{{ exportError }}</p>
+      </template>
+      <p class="error-msg" v-if="store.plotGenerationError">{{ store.plotGenerationError }}</p>
+      <p class="warning">此操作将调用 AI，可能需要等待较长时间</p>
     </div>
   </section>
 </template>
@@ -135,6 +322,11 @@ const DIFFICULTY_OPTIONS = [
 .field-group { margin-bottom: var(--theme-spacing-xs); }
 .field-label { display: block; font-size: 0.75rem; font-weight: 600; color: var(--theme-text-secondary); margin-bottom: 2px; }
 .field-hint { font-size: 0.68rem; color: var(--theme-text-muted); margin: 2px 0 6px; line-height: 1.4; }
+
+/* ===== 行内多控件 ===== */
+.field-row { display: flex; gap: var(--theme-spacing-sm); }
+.field-row .field-group { flex: 1; min-width: 0; margin-bottom: 0; }
+.field-row-triple { flex-wrap: wrap; }
 
 /* ===== 难度层级单选按钮 ===== */
 .difficulty-options { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -223,4 +415,65 @@ const DIFFICULTY_OPTIONS = [
 .outline-section h3 { font-size: 0.85rem; color: var(--theme-text-secondary); margin-bottom: var(--theme-spacing-xs); }
 .generate-row { margin-top: var(--theme-spacing-md); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .warning { margin: 0; font-size: 0.7rem; color: var(--theme-quality-legendary); }
+.error-msg { margin: 0; font-size: 0.75rem; color: var(--theme-error); }
+.reroll-btns { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--theme-spacing-sm); }
+.revise-box {
+  width: 100%;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease;
+}
+.revise-box.open { grid-template-rows: 1fr; }
+.revise-inner {
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--theme-spacing-sm);
+}
+.revise-box.open .revise-inner { padding-top: var(--theme-spacing-xs); }
+.revise-inner textarea {
+  width: 100%;
+  padding: var(--theme-spacing-sm);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  background: var(--theme-card-bg);
+  color: var(--theme-text-primary);
+  font-size: 0.8rem;
+  font-family: inherit;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+  resize: vertical;
+}
+.revise-inner textarea:focus { outline: none; border-color: var(--theme-primary); }
+@media (prefers-reduced-motion: reduce) {
+  .revise-box { transition: none; }
+}
+
+/* ===== 导入/导出 ===== */
+.outline-io-btns {
+  display: flex;
+  gap: var(--theme-spacing-sm, 8px);
+  margin-top: var(--theme-spacing-sm, 8px);
+}
+.io-btn {
+  background: none;
+  border: 1px solid var(--color-border, #444);
+  color: var(--color-text-muted, #999);
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-family: inherit;
+  transition: border-color 0.2s, color 0.2s;
+}
+.io-btn:hover:not(:disabled) {
+  border-color: var(--color-accent, #888);
+  color: var(--color-text, #ccc);
+}
+.io-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 </style>

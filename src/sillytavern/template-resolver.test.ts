@@ -186,10 +186,10 @@ describe('findNextPlaceholder', () => {
   });
 
   it('should find a placeholder with params', () => {
-    const result = findNextPlaceholder('{{NARRATIVE:layers=3:slice=500}}');
+    const result = findNextPlaceholder('{{NARRATIVE:layers=3}}');
     expect(result).not.toBeNull();
     expect(result![1]).toBe('NARRATIVE');
-    expect(result![2]).toBe('layers=3:slice=500');
+    expect(result![2]).toBe('layers=3');
   });
 
   it('should return null when no placeholder exists', () => {
@@ -262,7 +262,7 @@ describe('resolveTemplate — basic resolution', () => {
     registerPlaceholder('NARRATIVE', resolver);
 
     resolveTemplate(
-      '{{NARRATIVE:layers=3:slice=500}}',
+      '{{NARRATIVE:layers=3}}',
       'story',
       makeCtx(),
       makeConfig(),
@@ -271,7 +271,7 @@ describe('resolveTemplate — basic resolution', () => {
     expect(resolver).toHaveBeenCalledTimes(1);
     const callArgs = resolver.mock.calls[0];
     // First arg is AgentContext, second is AgentConfig, third is params
-    expect(callArgs[2]).toEqual({ layers: '3', slice: '500' });
+    expect(callArgs[2]).toEqual({ layers: '3' });
   });
 
   it('should resolve multiple placeholders in one template', () => {
@@ -911,19 +911,19 @@ describe('resolveTemplate — NARRATIVE placeholder', () => {
     clearRegistry();
   });
 
-  it('should call NARRATIVE resolver with layers and slice params', () => {
+  it('should call NARRATIVE resolver with layers param', () => {
     const resolver = vi.fn().mockReturnValue('narrative text');
     registerPlaceholder('NARRATIVE', resolver);
 
     resolveTemplate(
-      '{{NARRATIVE:layers=3:slice=500}}',
+      '{{NARRATIVE:layers=3}}',
       'story',
       makeCtx(),
       makeConfig(),
     );
 
     expect(resolver).toHaveBeenCalledTimes(1);
-    expect(resolver.mock.calls[0][2]).toEqual({ layers: '3', slice: '500' });
+    expect(resolver.mock.calls[0][2]).toEqual({ layers: '3' });
   });
 
   it('should call NARRATIVE resolver with only layers param', () => {
@@ -944,7 +944,7 @@ describe('resolveTemplate — NARRATIVE placeholder', () => {
     registerPlaceholder('NARRATIVE', vi.fn().mockReturnValue('从前有一座白曜城...'));
 
     const result = resolveTemplate(
-      '背景: {{NARRATIVE:layers=2:slice=300}}',
+      '背景: {{NARRATIVE:layers=2}}',
       'story',
       makeCtx(),
       makeConfig(),
@@ -1114,7 +1114,7 @@ describe('resolveTemplate — integration-style scenarios', () => {
 
 **当前角色:** {{CHAR.NAME}} ({{CHAR.RACE}}, T{{CHAR.TIER}})
 **当前位置:** {{WORLD.LOCATION}}
-**上一轮叙事:** {{NARRATIVE:layers=3:slice=500}}
+**上一轮叙事:** {{NARRATIVE:layers=3}}
 **相关记忆:** {{AGENT.MEMORY_RECALL}}
 
 请生成下一段剧情。`;

@@ -22,8 +22,9 @@
   --theme-text-secondary: #685878;
   --theme-text-muted: #9888a8;
 
-  --theme-primary: #9a72f8;
-  
+  --theme-primary: #8a5fe8;
+  --theme-primary-text: #fdfbff;
+
   --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
   --theme-success: #4a9e6c;
   --theme-warning: #d4983c;
@@ -49,7 +50,7 @@
   --theme-currency-silver: #b0a8b8;
   --theme-currency-copper: #c88050;
 
-  --theme-font-title: 'Cinzel', serif;
+  --theme-font-title: 'Noto Serif SC', serif;
   --theme-font-body: 'Noto Sans SC', sans-serif;
 
   --theme-shadow-sm: 0 1px 3px rgba(100,60,130,0.08);

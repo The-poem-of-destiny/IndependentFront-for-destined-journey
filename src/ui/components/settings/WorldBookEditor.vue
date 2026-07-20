@@ -163,21 +163,9 @@ function markDirty() {
   // automatic save via watch
 }
 
-let saveTimer: ReturnType<typeof setTimeout> | null = null
-
 function onToggleChange() {
-  if (!props.book.builtIn) return
-
-  // 内置书：直接写回本地 JSON 文件
-  const updatedBook = { ...props.book, entries: entries.value }
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    fetch(`/api/worldbooks/${props.book.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatedBook),
-    }).catch(() => {})
-  }, 600)
+  // 条目启用/禁用的切换直接走 saveBook → Pinia → localStorage 持久化链路
+  saveBook()
 }
 
 function addEntry() {

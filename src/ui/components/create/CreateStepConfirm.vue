@@ -54,7 +54,7 @@ const store = useCreateStore()
         <span>技能 ×{{ store.selectedSkills.length }}</span>
         <span>道具 ×{{ store.selectedItems.length }}</span>
         <span>背景: {{ store.selectedBackground?.name || (store.customBackgroundText ? '自定义背景' : '无') }}</span>
-        <span>大纲: {{ store.plotOutline ? '✅ 已生成' : '⚠ 未生成' }}</span>
+        <span>大纲: {{ store.plotOutline ? '已生成' : '未生成' }}</span>
       </div>
 
       <!-- 已选物品摘要 -->
@@ -79,7 +79,7 @@ const store = useCreateStore()
     </div>
 
     <p class="points-remaining">
-      💡 剩余转生点数: {{ store.remainingPoints }} (未使用的点数将保留在存档中)
+      剩余转生点数: {{ store.remainingPoints }} (未使用的点数将保留在存档中)
     </p>
   </section>
 </template>

@@ -36,10 +36,9 @@ export default defineConfig({
             try {
               const worldbooksDir = resolve(dataDir, 'worldbooks')
               const filePath = resolve(worldbooksDir, `${id}.json`)
-              if (!fs.existsSync(filePath)) {
-                res.statusCode = 404
-                res.end(JSON.stringify({ error: 'not found' }))
-                return
+              // 对齐 /api/defaults 行为：允许新建文件
+              if (!fs.existsSync(worldbooksDir)) {
+                fs.mkdirSync(worldbooksDir, { recursive: true })
               }
               fs.writeFileSync(filePath, body, 'utf-8')
               res.statusCode = 200

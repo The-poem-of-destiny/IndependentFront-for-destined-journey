@@ -459,13 +459,13 @@ function openCharList() {
   flex-shrink: 0;
 }
 
-/* ═══ 心声气泡 ═══ */
+/* ═══ 心声气泡 — 手稿引文样式 ═══ */
 .npc-thought {
   margin: 2px 6px 8px 42px;
   padding: 8px 10px;
   border-radius: var(--theme-radius-md, 6px);
-  background: color-mix(in srgb, var(--theme-surface-muted) 70%, transparent);
-  border-left: 2px solid var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 20%, var(--theme-card-border));
   font-size: 0.72rem;
   font-style: italic;
   color: var(--theme-text-secondary);

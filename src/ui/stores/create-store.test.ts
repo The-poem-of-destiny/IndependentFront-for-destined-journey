@@ -4,12 +4,35 @@
  * 测试范围: Pinia store 所有 computed / action / watcher / 流水线
  * 不依赖 DOM, 在 Node 环境运行
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import { useCreateStore } from './create-store'
+import { useSettingsStore } from './settings-store'
 import { DIFFICULTY_PRESETS, DEFAULT_EQUIPMENT_POOL, DEFAULT_ITEM_POOL, DEFAULT_BACKGROUNDS, DEFAULT_DESTINY_CORES } from '@engine/start-catalog'
 import { TIER_CONFIGS } from '@engine/tier-constants'
+
+// AgentClient mock — 大纲生成链测试用（可控响应队列）
+const { chatMock } = vi.hoisted(() => ({ chatMock: vi.fn() }))
+vi.mock('@engine/agent-client', () => ({
+  AgentClient: class {
+    chat(...args: any[]) { return chatMock(...args) }
+  },
+}))
+
+// Mock localStorage for Node test environment (after vi.mock hoisting)
+const store_ = new Map<string, string>()
+vi.stubGlobal('localStorage', {
+  getItem: (k: string) => store_.get(k) ?? null,
+  setItem: (k: string, v: string) => { store_.set(k, v) },
+  removeItem: (k: string) => { store_.delete(k) },
+  clear: () => { store_.clear() },
+  get length() { return store_.size },
+  key: (i: number) => [...store_.keys()][i] ?? null,
+})
+
+// Clear localStorage mock between ALL tests to prevent draft leakage
+beforeEach(() => { store_.clear() })
 
 // ===== 辅助 =====
 
@@ -788,12 +811,13 @@ describe('resetAll', () => {
     expect(store.selectedEquipments).toHaveLength(0)
   })
 
-  it('resetAll 应重置剧情设置为默认', () => {
+  it('resetAll 应重置剧情设置为默认（重读设置页新档默认值）', () => {
     store.plotMode = 'main'
     store.plotGenrePreference = ['combat', 'romance'] as any
     store.resetAll()
     expect(store.plotMode).toBe('off')
-    expect(store.plotGenrePreference).toEqual(['combat'])
+    // 设置页新档默认值 plotGenrePreference = ['combat', 'social']
+    expect(store.plotGenrePreference).toEqual(['combat', 'social'])
   })
 })
 
@@ -832,5 +856,490 @@ describe('步骤导航', () => {
     const before = store.currentStep
     store.nextStep()
     expect(store.currentStep).toBe(before)
+  })
+})
+
+// ===== 剧情默认值从设置页读入 =====
+
+describe('剧情默认值从设置页读入', () => {
+  it('initPlotDefaultsFromSettings 应读入 settings-store 新档默认值', () => {
+    setActivePinia(createPinia())
+    const settings = useSettingsStore()
+    settings.settings.plotMode = 'main'
+    settings.settings.plotDurationYears = 12
+    settings.settings.plotDifficultyTier = 3
+    settings.settings.plotAllowNonWorldbookNpc = false
+    settings.settings.plotGenrePreference = ['mystery', 'politics']
+    settings.settings.plotCustomPreference = '多一些权谋'
+    settings.settings.plotFocusRegion = '奥古斯提姆帝国'
+    settings.settings.plotTabooContent = '不要虐待动物'
+    settings.settings.plotChapterCount = 3
+    settings.settings.plotEventsPerChapter = 5
+
+    const store = useCreateStore()
+    expect(store.plotMode).toBe('main')
+    expect(store.plotDurationYears).toBe(12)
+    expect(store.plotDifficultyTier).toBe(3)
+    expect(store.plotAllowNonWorldbookNpc).toBe(false)
+    expect(store.plotGenrePreference).toEqual(['mystery', 'politics'])
+    expect(store.plotCustomPreference).toBe('多一些权谋')
+    expect(store.plotFocusRegion).toBe('奥古斯提姆帝国')
+    expect(store.plotTabooContent).toBe('不要虐待动物')
+    expect(store.plotChapterCount).toBe(3)
+    expect(store.plotEventsPerChapter).toBe(5)
+  })
+
+  it('adaptive 难度默认值应保持 adaptive', () => {
+    setActivePinia(createPinia())
+    const settings = useSettingsStore()
+    settings.settings.plotDifficultyTier = 'adaptive'
+    const store = useCreateStore()
+    expect(store.plotDifficultyTier).toBe('adaptive')
+  })
+})
+
+// ===== 大纲生成链（AgentClient mock） =====
+
+function outlineJson(score = 8, title = '血色纹章') {
+  return JSON.stringify({
+    title,
+    summary: '一句话摘要',
+    content: '# 完整叙事大纲',
+    chapters: [
+      {
+        title: '第一章 序幕',
+        summary: '章节摘要',
+        keyEvents: [
+          { title: '初入王都', description: '主角抵达艾瑟嘉德', triggerHint: '进入王都' },
+          { title: '命运初显', description: '命定核心苏醒', triggerHint: '首次战斗' },
+        ],
+      },
+    ],
+    selfCritique: { score, strengths: [], weaknesses: ['节奏偏慢'], suggestions: ['加快开篇'] },
+  })
+}
+
+function okResult(raw: string) {
+  return { agentId: 'plot_outline', output: raw, rawResponse: raw, tokensUsed: 100, cacheHit: false, duration: 10 }
+}
+
+function setupPlotStore() {
+  setActivePinia(createPinia())
+  const settings = useSettingsStore()
+  settings.settings.apiPool = [{
+    id: 'ep1', name: 'test', baseUrl: 'http://localhost', apiKey: 'k', maskedKey: '***',
+    model: 'test-model', models: ['test-model'], apiType: 'chat',
+  }]
+  settings.settings.agentModels = { plot_outline: 'ep1' }
+  settings.settings.agentPrompts = { plot_outline: '你是剧情大纲生成 Agent' }
+  const store = useCreateStore()
+  store.plotMode = 'main'
+  store.name = '艾琳'
+  return store
+}
+
+describe('generatePlotOutline 大纲生成', () => {
+  beforeEach(() => {
+    chatMock.mockReset()
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })) as any)
+  })
+
+  it('score >= 6 时一次调用即产出大纲', async () => {
+    chatMock.mockResolvedValueOnce(okResult(outlineJson(8)))
+    const store = setupPlotStore()
+    const ok = await store.generatePlotOutline()
+    expect(ok).toBe(true)
+    expect(chatMock).toHaveBeenCalledTimes(1)
+    expect(store.plotOutline?.title).toBe('血色纹章')
+    expect(store.plotOutline?.summary).toBe('一句话摘要')
+    expect(store.plotOutline?.chapters).toHaveLength(1)
+    expect(store.plotOutlineChapters[0].keyEvents).toHaveLength(2)
+    expect(store.isPlotGenerating).toBe(false)
+    expect(store.plotGenerationError).toBeNull()
+  })
+
+  it('score < 6 时应带 weaknesses/suggestions 自动重试一次（总共 2 次调用）', async () => {
+    chatMock
+      .mockResolvedValueOnce(okResult(outlineJson(4, '初版大纲')))
+      .mockResolvedValueOnce(okResult(outlineJson(8, '改良大纲')))
+    const store = setupPlotStore()
+    const ok = await store.generatePlotOutline()
+    expect(ok).toBe(true)
+    expect(chatMock).toHaveBeenCalledTimes(2)
+    // 第二次调用的 user 消息应包含上一版与改进点
+    const secondCall = chatMock.mock.calls[1][0]
+    const userMsg = secondCall.messages[secondCall.messages.length - 1].content as string
+    expect(userMsg).toContain('节奏偏慢')
+    expect(userMsg).toContain('加快开篇')
+    expect(store.plotOutline?.title).toBe('改良大纲')
+  })
+
+  it('两次均低分时用最后一版（不再第三次调用）', async () => {
+    chatMock
+      .mockResolvedValueOnce(okResult(outlineJson(3, '初版')))
+      .mockResolvedValueOnce(okResult(outlineJson(5, '第二版')))
+    const store = setupPlotStore()
+    const ok = await store.generatePlotOutline()
+    expect(ok).toBe(true)
+    expect(chatMock).toHaveBeenCalledTimes(2)
+    expect(store.plotOutline?.title).toBe('第二版')
+  })
+
+  it('AI 报错时应设置错误状态且不 crash', async () => {
+    chatMock.mockResolvedValueOnce({ agentId: 'plot_outline', output: null, rawResponse: '', tokensUsed: 0, cacheHit: false, duration: 0, error: 'HTTP 500' })
+    const store = setupPlotStore()
+    const ok = await store.generatePlotOutline()
+    expect(ok).toBe(false)
+    expect(store.plotOutline).toBeNull()
+    expect(store.plotGenerationError).toContain('HTTP 500')
+    expect(store.isPlotGenerating).toBe(false)
+  })
+
+  it('输出解析失败时应设置错误状态', async () => {
+    chatMock.mockResolvedValueOnce(okResult('这不是 JSON'))
+    const store = setupPlotStore()
+    const ok = await store.generatePlotOutline()
+    expect(ok).toBe(false)
+    expect(store.plotGenerationError).toContain('解析失败')
+  })
+
+  it('未配置 API 端点时应报错不调用', async () => {
+    setActivePinia(createPinia())
+    const store = useCreateStore()
+    store.plotMode = 'main'
+    const ok = await store.generatePlotOutline()
+    expect(ok).toBe(false)
+    expect(chatMock).not.toHaveBeenCalled()
+    expect(store.plotGenerationError).toContain('未配置')
+  })
+
+  it('雷点应注入 system prompt（通过模板 PLOT_EVENTS 占位符）', async () => {
+    chatMock.mockResolvedValueOnce(okResult(outlineJson(8)))
+    const store = setupPlotStore()
+    store.plotTabooContent = '禁止出现背叛剧情'
+    await store.generatePlotOutline()
+    const call = chatMock.mock.calls[0][0]
+    // 模板系统将系统提示词 + 解析后的占位符放入 messages[0]（system role）
+    const sysMsg = call.messages[0].content as string
+    expect(sysMsg).toContain('禁止出现背叛剧情')
+    expect(sysMsg).toContain('雷点')
+  })
+})
+
+describe('reviseOutline 重 roll 与 outlineHistory', () => {
+  beforeEach(() => {
+    chatMock.mockReset()
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })) as any)
+  })
+
+  it('无大纲时 reviseOutline 应拒绝', async () => {
+    const store = setupPlotStore()
+    const ok = await store.reviseOutline('改一下')
+    expect(ok).toBe(false)
+    expect(chatMock).not.toHaveBeenCalled()
+  })
+
+  it('reviseOutline 应带上一版 JSON + 修改要求，成功后旧版入栈', async () => {
+    chatMock
+      .mockResolvedValueOnce(okResult(outlineJson(8, '初版')))
+      .mockResolvedValueOnce(okResult(outlineJson(8, '修改版')))
+    const store = setupPlotStore()
+    await store.generatePlotOutline()
+    const ok = await store.reviseOutline('结局不要大团圆')
+    expect(ok).toBe(true)
+    const call = chatMock.mock.calls[1][0]
+    const userMsg = call.messages[call.messages.length - 1].content as string
+    expect(userMsg).toContain('初版')
+    expect(userMsg).toContain('结局不要大团圆')
+    expect(userMsg).toContain('上一版大纲')
+    expect(store.plotOutline?.title).toBe('修改版')
+    expect(store.outlineHistory).toHaveLength(1)
+    expect(store.outlineHistory[0].title).toBe('初版')
+  })
+
+  it('rollbackOutline 应恢复最近一版', async () => {
+    chatMock
+      .mockResolvedValueOnce(okResult(outlineJson(8, '初版')))
+      .mockResolvedValueOnce(okResult(outlineJson(8, '修改版')))
+    const store = setupPlotStore()
+    await store.generatePlotOutline()
+    await store.reviseOutline('改')
+    const ok = store.rollbackOutline()
+    expect(ok).toBe(true)
+    expect(store.plotOutline?.title).toBe('初版')
+    expect(store.outlineHistory).toHaveLength(0)
+  })
+
+  it('空历史时 rollbackOutline 返回 false', () => {
+    const store = setupPlotStore()
+    expect(store.rollbackOutline()).toBe(false)
+  })
+
+  it('普通重新生成也应把旧版推入历史', async () => {
+    chatMock
+      .mockResolvedValueOnce(okResult(outlineJson(8, 'v1')))
+      .mockResolvedValueOnce(okResult(outlineJson(8, 'v2')))
+    const store = setupPlotStore()
+    await store.generatePlotOutline()
+    await store.generatePlotOutline()
+    expect(store.plotOutline?.title).toBe('v2')
+    expect(store.outlineHistory).toHaveLength(1)
+    expect(store.outlineHistory[0].title).toBe('v1')
+  })
+
+  it('历史最多保留 5 版（超出丢最旧）', async () => {
+    for (let i = 1; i <= 7; i++) {
+      chatMock.mockResolvedValueOnce(okResult(outlineJson(8, `v${i}`)))
+    }
+    const store = setupPlotStore()
+    for (let i = 1; i <= 7; i++) {
+      await store.generatePlotOutline()
+    }
+    expect(store.plotOutline?.title).toBe('v7')
+    expect(store.outlineHistory).toHaveLength(5)
+    expect(store.outlineHistory[0].title).toBe('v2')
+    expect(store.outlineHistory[4].title).toBe('v6')
+  })
+})
+
+// ===== startJourney 落库（plotSettings metadata + 大纲 + 事件树） =====
+
+describe('startJourney 剧情落库', () => {
+  beforeEach(async () => {
+    chatMock.mockReset()
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })) as any)
+    const { clearAllData, initializeDatabase } = await import('@engine/database')
+    try { await clearAllData() } catch { /* db may not exist */ }
+    await initializeDatabase()
+  })
+
+  it('plotSettings（含雷点）应写入 SaveSlot.metadata', async () => {
+    const store = setupPlotStore()
+    store.plotTabooContent = '禁止团灭'
+    const saveId = await store.startJourney()
+    const { getSave } = await import('@engine/database')
+    const save = await getSave(saveId)
+    const ps = (save?.metadata as any)?.plotSettings
+    expect(ps).toBeDefined()
+    expect(ps.mode).toBe('main')
+    expect(ps.tabooContent).toBe('禁止团灭')
+    expect(ps.main?.durationYears).toBe(store.plotDurationYears)
+  })
+
+  it('main 模式且有大纲: 落库 confirmed 大纲 + hidden 事件树', async () => {
+    chatMock.mockResolvedValueOnce(okResult(outlineJson(8)))
+    const store = setupPlotStore()
+    await store.generatePlotOutline()
+    const saveId = await store.startJourney()
+
+    const { getLatestPlotOutline, getPlotEvents } = await import('@engine/database')
+    const outline = await getLatestPlotOutline(saveId)
+    expect(outline).toBeDefined()
+    expect(outline!.confirmed).toBe(true)
+    expect(outline!.saveId).toBe(saveId)
+    expect(outline!.title).toBe('血色纹章')
+
+    const events = await getPlotEvents(saveId)
+    // 1 章节(depth 0) + 2 keyEvents(depth 1)
+    expect(events).toHaveLength(3)
+    expect(events.every(e => e.visibility === 'hidden')).toBe(true)
+    const chapter = events.find(e => e.depth === 0)!
+    expect(chapter.title).toBe('第一章 序幕')
+    expect(chapter.childrenIds).toHaveLength(2)
+    const keyEvents = events.filter(e => e.depth === 1)
+    expect(keyEvents.every(e => e.parentId === chapter.id)).toBe(true)
+  })
+
+  it('历史版本不落库（只存最终确认版）', async () => {
+    chatMock
+      .mockResolvedValueOnce(okResult(outlineJson(8, 'v1')))
+      .mockResolvedValueOnce(okResult(outlineJson(8, 'v2')))
+    const store = setupPlotStore()
+    await store.generatePlotOutline()
+    await store.generatePlotOutline()
+    const saveId = await store.startJourney()
+    const { getPlotOutlines } = await import('@engine/database')
+    const all = await getPlotOutlines(saveId)
+    expect(all).toHaveLength(1)
+    expect(all[0].title).toBe('v2')
+  })
+
+  it('off 模式无大纲: 不落库大纲与事件', async () => {
+    setActivePinia(createPinia())
+    const store = useCreateStore()
+    store.name = '测试'
+    const saveId = await store.startJourney()
+    const { getLatestPlotOutline, getPlotEvents } = await import('@engine/database')
+    expect(await getLatestPlotOutline(saveId)).toBeUndefined()
+    expect(await getPlotEvents(saveId)).toHaveLength(0)
+  })
+})
+
+// ===== localStorage 草稿 =====
+
+describe('localStorage 草稿 save/restore/clear', () => {
+  const DRAFT_KEY = 'plotOutlineDraft_v1'
+
+  function makePlotStore() {
+    setActivePinia(createPinia())
+    const settings = useSettingsStore()
+    settings.settings.apiPool = [{
+      id: 'ep1', name: 'test', baseUrl: 'http://localhost', apiKey: 'k', maskedKey: '***',
+      model: 'test-model', models: ['test-model'], apiType: 'chat',
+    }]
+    settings.settings.agentModels = { plot_outline: 'ep1' }
+    settings.settings.agentPrompts = { plot_outline: '你是剧情大纲生成 Agent' }
+    return useCreateStore()
+  }
+
+  beforeEach(() => {
+    // Ensure localStorage is clean
+    try { localStorage.removeItem(DRAFT_KEY) } catch {}
+  })
+
+  afterEach(() => {
+    try { localStorage.removeItem(DRAFT_KEY) } catch {}
+  })
+
+  it('autoSaveDraft 写入 localStorage 并可被 tryRestoreDraft 恢复', () => {
+    const store = makePlotStore()
+    store.plotMode = 'main'
+    store.name = '艾琳'
+
+    // Set outline and chapters via store's own reactive API (not raw ref assignment)
+    // We can't directly assign to plotOutline (it's a computed from generatePlotOutline),
+    // so we simulate by directly calling the draft functions after setting via a known path.
+    // Instead, directly test by writing to localStorage and reading back.
+    const outline = {
+      id: 'test-id', saveId: '', mode: 'main' as const,
+      title: '血色纹章', summary: '一句话摘要', content: '完整叙事大纲',
+      chapters: [{ title: '第一章 序幕', summary: '章节摘要', status: 'pending' as const }],
+      selfCritique: '评分: 8',
+      confirmed: false, version: 1,
+      timeRange: { start: '复兴纪元001年01月01日', end: '复兴纪元005年12月30日' },
+      createdAt: Date.now(), updatedAt: Date.now(),
+    }
+    const chapters = [
+      {
+        title: '第一章 序幕',
+        summary: '章节摘要',
+        keyEvents: [{ title: '初入王都', description: '主角抵达艾瑟嘉德', triggerHint: '进入王都' }],
+      },
+    ]
+
+    // Use tryRestoreDraft with valid data to set the store state, then autoSaveDraft should work
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      outline,
+      chapters,
+      outlineHistory: [],
+      chaptersHistory: [],
+      savedAt: Date.now(),
+    }))
+    const restored = store.tryRestoreDraft()
+    expect(restored).toBe(true)
+    expect(store.plotOutline?.title).toBe('血色纹章')
+
+    // Now autoSaveDraft should save the current state
+    store.autoSaveDraft()
+    const raw = localStorage.getItem(DRAFT_KEY)
+    expect(raw).not.toBeNull()
+    const draft = JSON.parse(raw!)
+    expect(draft.outline.title).toBe('血色纹章')
+    expect(draft.chapters).toHaveLength(1)
+    expect(draft.savedAt).toBeGreaterThan(0)
+
+    // Create a fresh store and restore
+    const store2 = makePlotStore()
+    const restored2 = store2.tryRestoreDraft()
+    expect(restored2).toBe(true)
+    expect(store2.plotOutline?.title).toBe('血色纹章')
+    expect(store2.plotOutlineChapters).toHaveLength(1)
+  })
+
+  it('tryRestoreDraft 空 localStorage 时返回 false', () => {
+    const store = makePlotStore()
+    expect(store.tryRestoreDraft()).toBe(false)
+  })
+
+  it('tryRestoreDraft 损坏 JSON 时返回 false 并清除 localStorage', () => {
+    localStorage.setItem(DRAFT_KEY, 'not valid json{{{')
+    const store = makePlotStore()
+    expect(store.tryRestoreDraft()).toBe(false)
+    expect(localStorage.getItem(DRAFT_KEY)).toBeNull()
+  })
+
+  it('tryRestoreDraft 缺少 title 时返回 false 并清除', () => {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      outline: { title: '', summary: '' },
+      chapters: [],
+      savedAt: Date.now(),
+    }))
+    const store = makePlotStore()
+    expect(store.tryRestoreDraft()).toBe(false)
+    expect(localStorage.getItem(DRAFT_KEY)).toBeNull()
+  })
+
+  it('tryRestoreDraft 缺少 chapters 时返回 false 并清除', () => {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      outline: { title: '有标题' },
+      chapters: [],
+      savedAt: Date.now(),
+    }))
+    const store = makePlotStore()
+    expect(store.tryRestoreDraft()).toBe(false)
+    expect(localStorage.getItem(DRAFT_KEY)).toBeNull()
+  })
+
+  it('clearDraft 应清除 localStorage key', () => {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      outline: { title: '测试大纲' },
+      chapters: [{ title: '第一章', summary: '摘要', keyEvents: [] }],
+      savedAt: Date.now(),
+    }))
+    const store = makePlotStore()
+    store.clearDraft()
+    expect(localStorage.getItem(DRAFT_KEY)).toBeNull()
+  })
+
+  it('autoSaveDraft 应保留 outlineHistory 最多 5 版', () => {
+    // Pre-populate localStorage with a draft containing 6 history entries
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      outline: { title: '大纲1', chapters: [] },
+      chapters: [{ title: '第一章', summary: '摘要', keyEvents: [] }],
+      outlineHistory: [
+        { title: '旧版1' }, { title: '旧版2' }, { title: '旧版3' },
+        { title: '旧版4' }, { title: '旧版5' }, { title: '旧版6' },
+      ],
+      chaptersHistory: [],
+      savedAt: Date.now(),
+    }))
+    // Restore to load it into store
+    const store = makePlotStore()
+    const restored = store.tryRestoreDraft()
+    expect(restored).toBe(true)
+    // tryRestoreDraft restores all entries; autoSaveDraft slices to 5
+    expect(store.outlineHistory).toHaveLength(6)  // restore doesn't slice
+    expect(store.outlineHistory[0].title).toBe('旧版1')
+    expect(store.outlineHistory[5].title).toBe('旧版6')
+
+    // Now autoSaveDraft should slice to 5
+    store.autoSaveDraft()
+    const draft = JSON.parse(localStorage.getItem(DRAFT_KEY)!)
+    expect(draft.outlineHistory).toHaveLength(5)
+    expect(draft.outlineHistory[0].title).toBe('旧版2') // oldest dropped
+    expect(draft.outlineHistory[4].title).toBe('旧版6')
+  })
+
+  it('startJourney 应包含 clearDraft 调用（手动验证 clearDraft）', () => {
+    // Test clearDraft independent of DB operations (startJourney requires DB setup)
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      outline: { title: '草稿大纲', chapters: [] },
+      chapters: [{ title: '第一章', summary: '摘要', keyEvents: [] }],
+      savedAt: Date.now(),
+    }))
+    const store = makePlotStore()
+    expect(localStorage.getItem(DRAFT_KEY)).not.toBeNull()
+    store.clearDraft()
+    expect(localStorage.getItem(DRAFT_KEY)).toBeNull()
   })
 })

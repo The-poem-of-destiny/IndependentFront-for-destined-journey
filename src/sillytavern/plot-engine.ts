@@ -68,9 +68,9 @@ function resolveVariablePath(path: string, vars: Record<string, any>): any {
 
 // ========== Pre-Check 结果类型 ==========
 
-/** plot_pre_check Agent 的输出解析结果 */
+/** plot_pre_check Agent 的输出解析结果（铁律1: 事件寻址用标题，AI 永不产/引 id） */
 export interface PreCheckResult {
-  triggeredEvents: Array<{ id: string; reason: string }>;
+  triggeredEvents: Array<{ title: string; reason: string }>;
   relevantBackground: string;
   outlineRelevance: string;
 }
@@ -81,7 +81,7 @@ export function parsePreCheckOutput(rawOutput: string): PreCheckResult | null {
     const parsed = JSON.parse(rawOutput) as PreCheckResult;
     if (!Array.isArray(parsed.triggeredEvents)) return null;
     return {
-      triggeredEvents: parsed.triggeredEvents.filter(e => e.id),
+      triggeredEvents: parsed.triggeredEvents.filter(e => e.title),
       relevantBackground: parsed.relevantBackground || '',
       outlineRelevance: parsed.outlineRelevance || '',
     };
@@ -91,7 +91,7 @@ export function parsePreCheckOutput(rawOutput: string): PreCheckResult | null {
     try {
       const parsed = JSON.parse(jsonMatch[0]) as PreCheckResult;
       return {
-        triggeredEvents: parsed.triggeredEvents?.filter(e => e.id) || [],
+        triggeredEvents: parsed.triggeredEvents?.filter(e => e.title) || [],
         relevantBackground: parsed.relevantBackground || '',
         outlineRelevance: parsed.outlineRelevance || '',
       };
@@ -99,6 +99,19 @@ export function parsePreCheckOutput(rawOutput: string): PreCheckResult | null {
       return null;
     }
   }
+}
+
+/** 按标题在本存档事件中唯一匹配（精确匹配优先，匹配不到返回 undefined 并 warn） */
+function resolveEventByTitle(events: PlotEvent[], title: string, source: string): PlotEvent | undefined {
+  const exact = events.filter(e => e.title === title);
+  if (exact.length >= 1) {
+    if (exact.length > 1) {
+      console.warn(`[plot-engine] ${source}: 标题 "${title}" 匹配到 ${exact.length} 个事件，取第一个`);
+    }
+    return exact[0];
+  }
+  console.warn(`[plot-engine] ${source}: 找不到标题为 "${title}" 的剧情事件，跳过`);
+  return undefined;
 }
 
 /**
@@ -121,12 +134,11 @@ export async function preCheckPlot(
   }
 
   const allEvents = await getPlotEvents(saveId);
-  const eventMap = new Map(allEvents.map(e => [e.id, e]));
 
   const triggered: PlotEvent[] = [];
 
   for (const trigger of parsed.triggeredEvents) {
-    const event = eventMap.get(trigger.id);
+    const event = resolveEventByTitle(allEvents, trigger.title, 'preCheckPlot');
     if (!event) continue;
 
     // 只有 pending 的事件可以被触发
@@ -137,8 +149,9 @@ export async function preCheckPlot(
       continue;
     }
 
-    // 激活事件
+    // 激活事件 + 揭示给玩家
     event.status = 'active';
+    event.visibility = 'revealed';
     event.updatedAt = Date.now();
     await savePlotEvent(event);
     triggered.push(event);
@@ -152,7 +165,7 @@ export async function preCheckPlot(
 
 // ========== Post-Check 结果类型 ==========
 
-/** plot_post_check Agent 的输出解析结果 */
+/** plot_post_check Agent 的输出解析结果（铁律1: 事件寻址用标题） */
 export interface PostCheckResult {
   worldLineChanged: boolean;
   changeLevel: 'none' | 'minor' | 'moderate' | 'major';
@@ -161,15 +174,16 @@ export interface PostCheckResult {
     changes: string;
   };
   eventUpdates: Array<{
-    id: string;
-    action: 'update' | 'addChild' | 'skip' | 'fail' | 'complete';
-    changes: Record<string, any>;
+    title: string;
+    action: 'complete' | 'fail' | 'skip' | 'update';
+    changes?: Record<string, unknown>;
   }>;
   newChildEvents: Array<{
     title: string;
     description: string;
+    parentTitle?: string;
     triggerCondition?: string;
-    depth: number;
+    depth?: number;
   }>;
 }
 
@@ -222,14 +236,13 @@ export async function postCheckPlot(
   }
 
   const allEvents = await getPlotEvents(saveId);
-  const eventMap = new Map(allEvents.map(e => [e.id, e]));
 
   const eventsUpdated: PlotEvent[] = [];
   const now = Date.now();
 
-  // 1. 处理事件状态更新
+  // 1. 处理事件状态更新（按标题寻址，铁律1）
   for (const update of parsed.eventUpdates) {
-    const event = eventMap.get(update.id);
+    const event = resolveEventByTitle(allEvents, update.title, 'postCheckPlot');
     if (!event) continue;
 
     switch (update.action) {
@@ -242,16 +255,13 @@ export async function postCheckPlot(
       case 'skip':
         event.status = 'skipped';
         break;
-      case 'addChild':
-        // 添加子事件引用会在 newChildEvents 处理
-        break;
       case 'update':
         // 合并 changes 中的字段
         if (update.changes) {
-          if (update.changes.status) event.status = update.changes.status;
-          if (update.changes.description) event.description = update.changes.description;
+          if (update.changes.status) event.status = update.changes.status as PlotEvent['status'];
+          if (update.changes.description) event.description = String(update.changes.description);
           if (update.changes.worldLineChanged !== undefined) {
-            event.worldLineChanged = update.changes.worldLineChanged;
+            event.worldLineChanged = Boolean(update.changes.worldLineChanged);
           }
         }
         break;
@@ -261,9 +271,16 @@ export async function postCheckPlot(
     eventsUpdated.push(event);
   }
 
-  // 2. 处理新建子事件
+  // 2. 处理新建子事件（parentTitle → parentId 由 Code 解析，id 由 Code 生成）
   const newEvents: PlotEvent[] = [];
   for (const child of parsed.newChildEvents) {
+    let parentId: string | undefined;
+    let chapterTitle: string | undefined;
+    if (child.parentTitle) {
+      const parent = resolveEventByTitle(allEvents, child.parentTitle, 'postCheckPlot.newChildEvents');
+      parentId = parent?.id;
+      chapterTitle = parent?.chapterTitle;
+    }
     const newEvent: PlotEvent = {
       id: crypto.randomUUID(),
       saveId,
@@ -272,15 +289,25 @@ export async function postCheckPlot(
       status: 'pending',
       triggerCondition: child.triggerCondition,
       childrenIds: [],
-      parentId: undefined, // 由调用方指定
+      parentId,
       order: eventsUpdated.length * 10,
       relatedCharacterIds: [],
       worldLineChanged: false,
+      visibility: 'hidden',
+      chapterTitle,
       depth: child.depth || 1,
       createdAt: now,
       updatedAt: now,
     };
     newEvents.push(newEvent);
+    if (parentId) {
+      const parent = allEvents.find(e => e.id === parentId);
+      if (parent && !parent.childrenIds.includes(newEvent.id)) {
+        parent.childrenIds.push(newEvent.id);
+        parent.updatedAt = now;
+        if (!eventsUpdated.includes(parent)) eventsUpdated.push(parent);
+      }
+    }
   }
 
   // 3. 保存所有变更

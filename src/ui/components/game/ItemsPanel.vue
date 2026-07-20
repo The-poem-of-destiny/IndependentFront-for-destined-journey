@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useGameStore } from '../../stores/game-store'
 import { qualityVar } from '../../lib/quality-colors'
 
@@ -75,6 +75,21 @@ const sortedItems = computed(() => {
 })
 
 watch([activeCategory, activeFilter], () => { selectedIdx.value = 0; showScripts.value = false })
+
+// ═══ 外部聚焦 — StatusOverview 点击持有物 → 切类目并选中该物品 ═══
+function applyItemFocus() {
+  const focus = game.pendingItemFocus
+  if (!focus) return
+  activeCategory.value = focus.category
+  activeFilter.value = '全部'
+  nextTick(() => {
+    const idx = sortedItems.value.findIndex((i: any) => i.name === focus.itemName)
+    if (idx >= 0) selectedIdx.value = idx
+    game.clearItemFocus()
+  })
+}
+watch(() => game.pendingItemFocus, applyItemFocus)
+onMounted(applyItemFocus)
 
 // ═══ 选中物品 ═══
 const selected = computed(() => sortedItems.value[selectedIdx.value] || null)
@@ -173,7 +188,7 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
 
         <!-- 脚本 -->
         <div class="script-section">
-          <button class="script-toggle" @click="showScripts = !showScripts">📜 {{ showScripts ? '收起脚本' : '查看脚本' }}</button>
+          <button class="script-toggle" @click="showScripts = !showScripts">{{ showScripts ? '收起脚本' : '查看脚本' }}</button>
           <div class="script-body" v-if="showScripts">
             <template v-if="hasScripts">
               <div v-for="(code, name) in selScripts" :key="name" class="script-block">
@@ -324,13 +339,13 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
   border-radius: var(--theme-radius-sm, 4px);
   cursor: pointer;
   font-size: 0.8125rem;
-  border-left: 3px solid transparent;
+  border: 1px solid transparent;
   transition: background 0.12s, border-color 0.12s;
 }
 .item-row:hover { background: var(--theme-surface-muted); }
 .item-row.selected {
-  background: var(--theme-tab-hover-bg);
-  border-left-color: var(--item-quality, var(--theme-text-muted));
+  background: color-mix(in srgb, var(--item-quality, var(--theme-primary)) 8%, var(--theme-card-bg));
+  border-color: color-mix(in srgb, var(--item-quality, var(--theme-text-muted)) 45%, var(--theme-card-border));
 }
 .dot {
   width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;

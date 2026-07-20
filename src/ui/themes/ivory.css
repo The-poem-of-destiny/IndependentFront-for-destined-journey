@@ -22,8 +22,9 @@
   --theme-text-secondary: #6b5d50;
   --theme-text-muted: #9d9080;
 
-  --theme-primary: #c0a060;
-  
+  --theme-primary: #a8863e;
+  --theme-primary-text: #fffdf8;
+
   --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
   --theme-success: #4a9e5c;
   --theme-warning: #d4883c;
@@ -54,7 +55,7 @@
   --theme-tag-contract-bg: rgba(208,72,104,0.1);
   --theme-tag-contract-text: #a03050;
 
-  --theme-font-title: 'Cinzel', serif;
+  --theme-font-title: 'Noto Serif SC', serif;
   --theme-font-body: 'Noto Serif SC', serif;
 
   --theme-shadow-sm: 0 1px 3px rgba(0,0,0,0.06);

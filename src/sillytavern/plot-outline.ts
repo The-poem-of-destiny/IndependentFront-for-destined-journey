@@ -28,35 +28,343 @@ export interface GenerateOutlineInput {
   userInput?: string;
 }
 
-/** 解析 plot_outline Agent 的输出 */
-export function parseOutlineAgentOutput(rawOutput: string): {
+/** plot_outline Agent 输出的结构化 JSON/XML 形状（chapters[].keyEvents 用于 Code 层生成事件树） */
+export interface ParsedOutlineOutput {
+  title: string;
+  summary: string;
   content: string;
+  chapters: Array<{
+    title: string;
+    summary: string;
+    keyEvents: Array<{
+      title: string;
+      description: string;
+      triggerHint?: string;
+      /** 事件时间窗口（季节性，如 "512-春" 到 "512-夏"） */
+      timeWindow?: { start: string; end: string };
+      /** 完成条件提示 */
+      completeHint?: string;
+      /** 失败条件提示 */
+      failHint?: string;
+    }>;
+  }>;
   selfCritique?: string;
-} | null {
+}
+
+function formatSelfCritique(sc?: { score: number; strengths?: string[]; weaknesses?: string[]; suggestions?: string[] }): string | undefined {
+  if (!sc) return undefined;
+  return `评分: ${sc.score}/10\n优点: ${sc.strengths?.join('; ')}\n不足: ${sc.weaknesses?.join('; ')}\n建议: ${sc.suggestions?.join('; ')}`;
+}
+
+interface RawOutlineJson {
+  title?: string;
+  summary?: string;
+  content: string;
+  chapters?: Array<{
+    title?: string;
+    summary?: string;
+    keyEvents?: Array<{
+      title?: string;
+      description?: string;
+      triggerHint?: string;
+      timeWindow?: { start: string; end: string };
+      completeHint?: string;
+      failHint?: string;
+    }>;
+  }>;
+  selfCritique?: { score: number; strengths?: string[]; weaknesses?: string[]; suggestions?: string[] };
+}
+
+function normalizeOutlineJson(parsed: RawOutlineJson): ParsedOutlineOutput | null {
+  if (!parsed.content) return null;
+  return {
+    title: parsed.title || '',
+    summary: parsed.summary || '',
+    content: parsed.content,
+    chapters: Array.isArray(parsed.chapters)
+      ? parsed.chapters
+          .filter(ch => ch && ch.title)
+          .map(ch => ({
+            title: ch.title!,
+            summary: ch.summary || '',
+            keyEvents: Array.isArray(ch.keyEvents)
+              ? ch.keyEvents
+                  .filter(ke => ke && ke.title)
+                  .map(ke => ({
+                    title: ke.title!,
+                    description: ke.description || '',
+                    triggerHint: ke.triggerHint,
+                    timeWindow: ke.timeWindow,
+                    completeHint: ke.completeHint,
+                    failHint: ke.failHint,
+                  }))
+              : [],
+          }))
+      : [],
+    selfCritique: formatSelfCritique(parsed.selfCritique),
+  };
+}
+
+/** 解析 plot_outline Agent 的 JSON 输出 */
+export function parseOutlineJson(rawOutput: string): ParsedOutlineOutput | null {
   try {
-    const parsed = JSON.parse(rawOutput) as {
-      content: string;
-      selfCritique?: { score: number; strengths: string[]; weaknesses: string[]; suggestions: string[] };
-    };
-
-    if (!parsed.content) return null;
-
-    return {
-      content: parsed.content,
-      selfCritique: parsed.selfCritique
-        ? `评分: ${parsed.selfCritique.score}/10\n优点: ${parsed.selfCritique.strengths?.join('; ')}\n不足: ${parsed.selfCritique.weaknesses?.join('; ')}\n建议: ${parsed.selfCritique.suggestions?.join('; ')}`
-        : undefined,
-    };
+    return normalizeOutlineJson(JSON.parse(rawOutput) as RawOutlineJson);
   } catch {
     const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
     try {
-      const parsed = JSON.parse(jsonMatch[0]) as { content: string };
-      return parsed.content ? { content: parsed.content } : null;
+      return normalizeOutlineJson(JSON.parse(jsonMatch[0]) as RawOutlineJson);
     } catch {
       return null;
     }
   }
+}
+
+/** @deprecated 使用 parseOutlineJson 或 tryParseOutline */
+export const parseOutlineAgentOutput = parseOutlineJson;
+
+// ========== XML 解析 ==========
+
+/** 用非贪婪正则提取一对 XML 标签的内容（不含标签本身） */
+function extractXmlTag(content: string, tag: string): { text: string; rest: string } {
+  const regex = new RegExp(`<\\s*${tag}\\s*>([\\s\\S]*?)<\\/\\s*${tag}\\s*>`, 'i');
+  const match = content.match(regex);
+  if (!match) return { text: '', rest: content };
+  return { text: match[1], rest: content.replace(regex, '') };
+}
+
+/** 用非贪婪正则提取带属性的 XML 标签内容 */
+function extractXmlTagWithAttrs(
+  content: string,
+  tag: string,
+  attrs: string[],
+): { text: string; attrs: Record<string, string>; rest: string } {
+  const attrPattern = attrs.map(a => `\\s+${a}\\s*=\\s*"([^"]*)"`).join('') || '\\s*';
+  const regex = new RegExp(`<\\s*${tag}${attrPattern}\\s*>([\\s\\S]*?)<\\/\\s*${tag}\\s*>`, 'i');
+  const match = content.match(regex);
+  if (!match) return { text: '', attrs: {}, rest: content };
+  const result: Record<string, string> = {};
+  for (let i = 0; i < attrs.length; i++) {
+    result[attrs[i]] = match[i + 1] || '';
+  }
+  return { text: match[attrs.length + 1], attrs: result, rest: content.replace(regex, '') };
+}
+
+/** 提取自闭合标签的属性（如 <timerange start="..." end="..." />） */
+function extractSelfClosingAttrs(
+  content: string,
+  tag: string,
+  attrs: string[],
+): { attrs: Record<string, string>; rest: string } | null {
+  const attrPattern = attrs.map(a => `\\s+${a}\\s*=\\s*"([^"]*)"`).join('');
+  const regex = new RegExp(`<\\s*${tag}${attrPattern}\\s*\\/>`, 'i');
+  const match = content.match(regex);
+  if (!match) return null;
+  const result: Record<string, string> = {};
+  for (let i = 0; i < attrs.length; i++) {
+    result[attrs[i]] = match[i + 1] || '';
+  }
+  return { attrs: result, rest: content.replace(regex, '') };
+}
+
+/** 提取非贪婪匹配的正则 — 提取指定模式后的剩余文本 */
+function extractPattern(content: string, regex: RegExp): { match: RegExpExecArray | null; rest: string } {
+  const m = regex.exec(content);
+  if (!m) return { match: null, rest: content };
+  return { match: m, rest: content.replace(regex, '') };
+}
+
+/**
+ * 解析 plot_outline Agent 的 XML 输出
+ *
+ * 期望结构:
+ * <outline>
+ *   <title>大纲标题</title>
+ *   <summary>一句话摘要</summary>
+ *   <timerange start="512-春" end="513-秋" />
+ *   <content>大纲正文 (Markdown, 保留原样)</content>
+ *   <chapter title="第一章" summary="..." start="..." end="...">
+ *     <event title="事件标题">
+ *       <time start="512-春" end="512-夏" />
+ *       <desc>事件描述</desc>
+ *       <trigger>触发条件提示</trigger>
+ *       <complete>完成条件提示</complete>
+ *       <fail>失败条件提示</fail>
+ *     </event>
+ *   </chapter>
+ *   <self_critique score="8">
+ *     <strength>优点1</strength>
+ *     <weakness>不足1</weakness>
+ *     <suggestion>建议1</suggestion>
+ *   </self_critique>
+ * </outline>
+ */
+export function parseOutlineXml(raw: string): ParsedOutlineOutput | null {
+  // 提取 <outline>...</outline> 块
+  const outlineMatch = raw.match(/<\s*outline\s*>([\s\S]*?)<\/\s*outline\s*>/i);
+  if (!outlineMatch) return null;
+  let inner = outlineMatch[1];
+
+  // title
+  const titleResult = extractXmlTag(inner, 'title');
+  inner = titleResult.rest;
+  const title = titleResult.text.trim() || '';
+
+  // summary
+  const summaryResult = extractXmlTag(inner, 'summary');
+  inner = summaryResult.rest;
+  const summary = summaryResult.text.trim() || '';
+
+  // timerange (self-closing)
+  const trResult = extractSelfClosingAttrs(inner, 'timerange', ['start', 'end']);
+  let timeRange: { parseStart: string; parseEnd: string } | undefined;
+  if (trResult) {
+    inner = trResult.rest;
+    timeRange = { parseStart: trResult.attrs.start || '', parseEnd: trResult.attrs.end || '' };
+  }
+
+  // content (preserve markdown, no escaping)
+  const contentResult = extractXmlTag(inner, 'content');
+  inner = contentResult.rest;
+  const content = contentResult.text;
+
+  if (!content) {
+    // content is required — but we'll check chapters later before returning null
+  }
+
+  // chapters — parse each <chapter> with attrs
+  const chapters: ParsedOutlineOutput['chapters'] = [];
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const chRegex = /<\s*chapter\s+title\s*=\s*"([^"]*)"(?:\s+summary\s*=\s*"([^"]*)")?(?:\s+start\s*=\s*"([^"]*)")?(?:\s+end\s*=\s*"([^"]*)")?\s*>([\s\S]*?)<\/\s*chapter\s*>/i;
+    const chExec = chRegex.exec(inner);
+    if (!chExec) break;
+    inner = inner.replace(chRegex, '');
+
+    const chTitle = chExec[1] || '';
+    const chSummary = chExec[2] || '';
+    let chInner = chExec[5];
+
+    const keyEvents: ParsedOutlineOutput['chapters'][number]['keyEvents'] = [];
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const evRegex = /<\s*event\s+title\s*=\s*"([^"]*)"\s*>([\s\S]*?)<\/\s*event\s*>/i;
+      const evExec = evRegex.exec(chInner);
+      if (!evExec) break;
+      chInner = chInner.replace(evRegex, '');
+
+      const evTitle = evExec[1] || '';
+      let evInner = evExec[2];
+
+      // time (self-closing inside event)
+      let timeWindow: { start: string; end: string } | undefined;
+      const twResult = extractSelfClosingAttrs(evInner, 'time', ['start', 'end']);
+      if (twResult) {
+        evInner = twResult.rest;
+        if (twResult.attrs.start || twResult.attrs.end) {
+          timeWindow = { start: twResult.attrs.start || '', end: twResult.attrs.end || '' };
+        }
+      }
+
+      // desc
+      const descResult = extractXmlTag(evInner, 'desc');
+      evInner = descResult.rest;
+      const description = descResult.text.trim() || '';
+
+      // trigger
+      const triggerResult = extractXmlTag(evInner, 'trigger');
+      evInner = triggerResult.rest;
+      const triggerHint = triggerResult.text.trim() || undefined;
+
+      // complete
+      const completeResult = extractXmlTag(evInner, 'complete');
+      evInner = completeResult.rest;
+      const completeHint = completeResult.text.trim() || undefined;
+
+      // fail
+      const failResult = extractXmlTag(evInner, 'fail');
+      evInner = failResult.rest;
+      const failHint = failResult.text.trim() || undefined;
+
+      keyEvents.push({
+        title: evTitle,
+        description,
+        triggerHint,
+        timeWindow,
+        completeHint,
+        failHint,
+      });
+    }
+
+    chapters.push({
+      title: chTitle,
+      summary: chSummary,
+      keyEvents,
+    });
+  }
+
+  // If no chapters and no content → invalid
+  if (chapters.length === 0 && !content) return null;
+
+  // self_critique
+  const scResult = extractXmlTagWithAttrs(inner, 'self_critique', ['score']);
+  let selfCritique: string | undefined;
+  if (scResult.text) {
+    inner = scResult.rest;
+    const score = scResult.attrs.score || '?';
+    const strengths: string[] = [];
+    const weaknesses: string[] = [];
+    const suggestions: string[] = [];
+
+    // Parse strength/weakness/suggestion within self_critique
+    let scInner = scResult.text;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const strResult = extractXmlTag(scInner, 'strength');
+      if (!strResult.text) break;
+      scInner = strResult.rest;
+      strengths.push(strResult.text.trim());
+    }
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const weakResult = extractXmlTag(scInner, 'weakness');
+      if (!weakResult.text) break;
+      scInner = weakResult.rest;
+      weaknesses.push(weakResult.text.trim());
+    }
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const sugResult = extractXmlTag(scInner, 'suggestion');
+      if (!sugResult.text) break;
+      scInner = sugResult.rest;
+      suggestions.push(sugResult.text.trim());
+    }
+
+    selfCritique = formatSelfCritique({
+      score: parseInt(score, 10) || 0,
+      strengths: strengths.length > 0 ? strengths : undefined,
+      weaknesses: weaknesses.length > 0 ? weaknesses : undefined,
+      suggestions: suggestions.length > 0 ? suggestions : undefined,
+    });
+  }
+
+  return {
+    title,
+    summary,
+    content,
+    chapters,
+    selfCritique,
+    ...(timeRange ? { timeRange } : {}),
+  } as ParsedOutlineOutput & { timeRange?: { parseStart: string; parseEnd: string } };
+}
+
+/**
+ * 统一解析入口：先尝试 XML，失败则回退 JSON
+ */
+export function tryParseOutline(raw: string): ParsedOutlineOutput | null {
+  const xmlResult = parseOutlineXml(raw);
+  if (xmlResult) return xmlResult;
+  return parseOutlineJson(raw);
 }
 
 /**
@@ -70,7 +378,7 @@ export function createOutlineFromAgent(
   timeRange: { start: string; end: string },
   version: number = 1,
 ): PlotOutline | null {
-  const parsed = parseOutlineAgentOutput(agentOutput);
+  const parsed = tryParseOutline(agentOutput);
   if (!parsed) return null;
 
   const now = Date.now();
@@ -78,7 +386,10 @@ export function createOutlineFromAgent(
     id: crypto.randomUUID(),
     saveId,
     mode,
+    title: parsed.title,
+    summary: parsed.summary,
     content: parsed.content,
+    chapters: parsed.chapters.map(ch => ({ title: ch.title, summary: ch.summary, status: 'pending' as const })),
     selfCritique: parsed.selfCritique,
     confirmed: false,
     version,
@@ -121,51 +432,14 @@ export async function confirmOutline(outline: PlotOutline): Promise<PlotOutline>
 
 // ========== 大纲 → 事件树 ==========
 
-/** 解析大纲内容为章节结构 */
-export function parseOutlineChapters(content: string): Array<{
-  title: string;
-  summary: string;
-}> {
-  const chapters: Array<{ title: string; summary: string }> = [];
-  const lines = content.split('\n');
-
-  let currentTitle = '';
-  let currentSummary = '';
-
-  for (const line of lines) {
-    // 匹配章节标题（# 或 ## 开头，或 "第X章"）
-    const chapterMatch = line.match(/^#{1,3}\s*(.+)/) || line.match(/^(第[一二三四五六七八九十\d]+[章节部].*)/);
-    if (chapterMatch) {
-      if (currentTitle) {
-        chapters.push({ title: currentTitle, summary: currentSummary.trim() });
-      }
-      currentTitle = chapterMatch[1];
-      currentSummary = '';
-    } else if (currentTitle && line.trim()) {
-      currentSummary += line + '\n';
-    }
-  }
-
-  // 最后一个章节
-  if (currentTitle) {
-    chapters.push({ title: currentTitle, summary: currentSummary.trim() });
-  }
-
-  return chapters;
-}
-
 /**
- * 将大纲转换为 PlotEvent 列表
- * 大纲的每个章节成为一个顶层事件，关键节点成为子事件
+ * 将结构化章节（chapters[].keyEvents[]）转换为 PlotEvent 树
+ * 章节=depth 0，keyEvent=depth 1（parentId 指向章节事件），全部 visibility='hidden'
  */
 export function outlineToEvents(
-  outline: PlotOutline,
+  chapters: ParsedOutlineOutput['chapters'],
   saveId: string,
-  depth: number = 0,
 ): PlotEvent[] {
-  const chapters = parseOutlineChapters(outline.content);
-  if (chapters.length === 0) return [];
-
   const now = Date.now();
   const events: PlotEvent[] = [];
 
@@ -182,12 +456,40 @@ export function outlineToEvents(
       order: i * 10,
       relatedCharacterIds: [],
       worldLineChanged: false,
-      depth,
+      visibility: 'hidden',
+      chapterTitle: ch.title,
+      depth: 0,
       createdAt: now,
       updatedAt: now,
     };
-
     events.push(chapterEvent);
+
+    for (let j = 0; j < ch.keyEvents.length; j++) {
+      const ke = ch.keyEvents[j];
+      const keyEvent: PlotEvent = {
+        id: crypto.randomUUID(),
+        saveId,
+        title: ke.title,
+        description: ke.description.slice(0, 500),
+        status: 'pending',
+        triggerCondition: ke.triggerHint,
+        completeCondition: ke.completeHint,
+        failCondition: ke.failHint,
+        timeWindow: ke.timeWindow,
+        childrenIds: [],
+        parentId: chapterEvent.id,
+        order: j * 10,
+        relatedCharacterIds: [],
+        worldLineChanged: false,
+        visibility: 'hidden',
+        chapterTitle: ch.title,
+        depth: 1,
+        createdAt: now,
+        updatedAt: now,
+      };
+      chapterEvent.childrenIds.push(keyEvent.id);
+      events.push(keyEvent);
+    }
   }
 
   return events;

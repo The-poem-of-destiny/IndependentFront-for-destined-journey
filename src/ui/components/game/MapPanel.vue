@@ -401,7 +401,7 @@ onBeforeUnmount(() => {
 
         <!-- 模式提示 -->
         <div v-if="markerAddMode" class="map-mode-hint">
-          📍 点击地图任意位置放置标记
+          点击地图任意位置放置标记
         </div>
 
         <!-- OSD Viewer 容器 -->

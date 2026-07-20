@@ -97,32 +97,32 @@ function truncate(str: string, max: number): string {
   <div class="debug-panel">
     <!-- 操作区 -->
     <div class="debug-actions">
-      <button class="debug-btn" @click="downloadJson">📥 导出 JSON</button>
-      <button class="debug-btn" @click="copyJson">📋 复制到剪贴板</button>
+      <button class="debug-btn" @click="downloadJson">导出 JSON</button>
+      <button class="debug-btn" @click="copyJson">复制到剪贴板</button>
     </div>
 
     <!-- 存档摘要 -->
     <div class="debug-section">
-      <h4>📁 存档</h4>
+      <h4>存档</h4>
       <pre>{{ game.activeSave?.name ?? '—' }} | slot={{ game.activeSave?.slot }} | id={{ game.activeSaveId }}</pre>
     </div>
 
     <!-- Agent 调用日志 -->
     <div class="debug-section">
-      <h4>🤖 本轮 Agent 调用 ({{ game.agentLog.length }})</h4>
+      <h4>本轮 Agent 调用 ({{ game.agentLog.length }})</h4>
       <div v-if="game.agentLog.length === 0" class="debug-empty">暂无日志（等待下一轮管线触发）</div>
       <div v-for="entry in game.agentLog" :key="entry.agentId" class="debug-agent-entry" :class="{ 'has-error': entry.error }">
         <div class="debug-agent-head">
           <span class="debug-agent-label">{{ entry.label }}</span>
           <span class="debug-agent-model">{{ entry.model || '无模型' }}</span>
-          <span v-if="entry.error" class="debug-agent-err">❌ {{ entry.error }}</span>
-          <span v-else class="debug-agent-ok">✅ {{ entry.tokensUsed }}t / {{ entry.duration }}ms</span>
+          <span v-if="entry.error" class="debug-agent-err">{{ entry.error }}</span>
+          <span v-else class="debug-agent-ok">{{ entry.tokensUsed }}t / {{ entry.duration }}ms</span>
         </div>
         <details class="debug-agent-details">
           <summary>请求 ({{ entry.messages.length }} 条消息) / 响应</summary>
           <div class="debug-section-split">
             <div class="debug-half">
-              <h5>📤 请求</h5>
+              <h5>请求</h5>
               <div v-for="(m, i) in entry.messages" :key="i" class="debug-msg">
                 <span class="debug-role">{{ m.role }}</span>
                 <pre>{{ truncate(m.content ?? '', 500) }}</pre>
@@ -130,10 +130,10 @@ function truncate(str: string, max: number): string {
               <div v-if="entry.messages.length === 0" class="debug-empty-sub">消息未捕获（流式模式下请求由编排器内部构造）</div>
             </div>
             <div class="debug-half">
-              <h5>📥 响应 @ {{ entry.baseUrl || '—' }}</h5>
+              <h5>响应 @ {{ entry.baseUrl || '—' }}</h5>
               <pre>{{ truncate(entry.rawResponse, 1000) || '（空响应）' }}</pre>
               <template v-if="entry.reasoning">
-                <h6 class="debug-reasoning-h">🧠 思维链</h6>
+                <h6 class="debug-reasoning-h">思维链</h6>
                 <pre class="debug-reasoning-pre">{{ truncate(entry.reasoning, 2000) }}</pre>
               </template>
             </div>
@@ -206,7 +206,7 @@ function truncate(str: string, max: number): string {
   margin-bottom: 6px;
 }
 .debug-agent-entry.has-error {
-  border-left: 3px solid #e74c3c;
+  border: 1px solid color-mix(in srgb, var(--theme-error) 55%, var(--theme-card-border));
 }
 .debug-agent-head {
   display: flex;

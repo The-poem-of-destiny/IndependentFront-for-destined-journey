@@ -124,10 +124,9 @@ function summary(content: string, maxLen = 200): string {
 .selected-detail {
   margin-bottom: var(--theme-spacing-lg);
   padding: var(--theme-spacing-md);
-  background: var(--theme-card-bg);
-  border: 1px solid var(--theme-quality-epic);
+  background: color-mix(in srgb, var(--theme-quality-epic) 6%, var(--theme-card-bg));
+  border: 1px solid color-mix(in srgb, var(--theme-quality-epic) 45%, var(--theme-card-border));
   border-radius: var(--theme-radius-md);
-  border-left: 3px solid var(--theme-quality-epic);
 }
 .sd-header {
   display: flex;
@@ -260,21 +259,28 @@ function summary(content: string, maxLen = 200): string {
   transform: rotate(90deg);
 }
 
-/* ── 可展开预览（CSS transition） ── */
+/* ── 可展开预览（grid-rows 展开，不动 max-height） ── */
 .core-preview {
   width: 100%;
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.25s ease, padding 0.25s ease;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease;
 }
 .core-preview.open {
-  max-height: 300px;        /* 撑开后的上限，由内边距限制实际高度 */
+  grid-template-rows: 1fr;
 }
 .core-preview-inner {
-  padding-top: var(--theme-spacing-sm);
+  overflow: hidden;
+  min-height: 0;
   font-size: 0.78rem;
   color: var(--theme-text-secondary);
   line-height: 1.6;
+}
+.core-preview.open .core-preview-inner {
+  padding-top: var(--theme-spacing-sm);
   border-top: 1px solid var(--theme-card-border);
+}
+@media (prefers-reduced-motion: reduce) {
+  .core-preview { transition: none; }
 }
 </style>

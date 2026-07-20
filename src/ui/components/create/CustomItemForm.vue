@@ -201,6 +201,6 @@ function onCategoryChange(cat: 'equipment' | 'item' | 'skill') {
   color: var(--theme-text-secondary);
   cursor: pointer;
 }
-.chip:hover { background: var(--theme-quality-唯一); color: #fff; }
+.chip:hover { background: color-mix(in srgb, var(--theme-error) 15%, var(--theme-card-border)); color: var(--theme-text-primary); }
 .form-footer { display: flex; justify-content: center; gap: var(--theme-spacing-sm); margin-top: var(--theme-spacing-sm); }
 </style>

@@ -60,3 +60,15 @@
 .quality-legendary { color: var(--theme-quality-legendary); }
 .quality-mythic { color: var(--theme-quality-mythic); }
 .quality-unique { color: var(--theme-quality-unique); }
+
+/* 品质色点 — 与 .quality-* 文字色类组合使用: <span class="quality-dot quality-rare"> */
+.quality-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px color-mix(in srgb, currentColor 45%, transparent);
+  flex-shrink: 0;
+  vertical-align: middle;
+}

@@ -17,7 +17,7 @@ defineEmits<{
 <template>
   <footer class="create-footer">
     <AppButton variant="ghost" size="sm" @click="$emit('openPreset')">
-      <span class="btn-icon">📋</span> 角色预设
+      <span class="btn-icon"></span> 角色预设
     </AppButton>
 
     <div class="footer-nav">

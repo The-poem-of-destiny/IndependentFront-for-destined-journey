@@ -4,7 +4,7 @@ import { useUIStore } from '../../stores/ui-store'
 const ui = useUIStore()
 
 const iconMap: Record<string, string> = {
-  info: 'ℹ',
+  info: 'i',
   success: '✓',
   warning: '⚠',
   error: '✕',

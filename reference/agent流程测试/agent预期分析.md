@@ -3,6 +3,8 @@
 > 设计目的: 作为 debug 工具的参考基准，每个 Agent 记录从输入到最终输出的完整链路。
 > 排除: story、memory_recall、plot_pre_check、plot_post_check、plot_outline、plot_check、plot_correct
 
+> 📌 **剧情 Agent 接线注记（2026-07-20, 10j）**: plot_outline / plot_pre_check / plot_post_check 三个 Agent 的 systemPrompt 已在 agent-config.json 全量重写并接入管线（此前恒禁用）。契约要点: 输出统一 `<json>` 区块；事件寻址一律用 **title**（铁律1，零 id）— pre_check 输出 `triggeredEvents[{title,reason}]`+relevantBackground+directive，post_check 输出 `eventUpdates[{title,action,changes}]`+`newChildEvents[{..,parentTitle}]`+worldLineChanged/changeLevel；plot_outline 输出 title/summary/content/chapters[].keyEvents[]/selfCritique，支持「修改模式」（上一版大纲+用户要求重写）与雷点 tabooContent（仅大纲生成时注入）。解析入口: plot-engine.ts / plot-outline.ts（ParsedOutlineOutput）。追踪样本待真机采集后补录。
+
 > ⚠️ **M4 契约同步注记（2026-07-17）**: 本文的输出追踪采集于 M1-M4 数据字段规范迁移之前，属**历史记录**。当前权威契约以 `data/defaults/agent-config.json` 各 Agent systemPrompt + `docs/superpowers/specs/2026-07-16-data-field-conventions-design.md` 为准。与本文差异的要点：
 > 1. **角色寻址一律用 `"name"` 键**（铁律1）— 旧追踪里的 `"id": "protagonist"` / `player_1` / `npc_*` 形态已全部退役，代码侧 `name ?? id` 过渡读与 UUID 兜底已在 M4 拆除（缺 name 的条目直接跳过）。
 > 2. **AI 永不产 id**（铁律3）— Skill/InventoryItem/StatusEffect 的 id 字段已 @deprecated，翻译层零 id 生成，同名合并/覆盖由 StateManager 按 name 处理。

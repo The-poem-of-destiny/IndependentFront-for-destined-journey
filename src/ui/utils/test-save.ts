@@ -362,6 +362,7 @@ export async function createTestSave(): Promise<string> {
     relatedCharacterIds: [playerId, npcs[0].id, npcs[1].id],
     location: '艾瑟嘉德近郊',
     worldLineChanged: false,
+    visibility: 'revealed',
     depth: 0,
     createdAt: Date.now(),
     updatedAt: Date.now(),

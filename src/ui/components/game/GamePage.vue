@@ -182,10 +182,10 @@ function onModalOpenChange(v: boolean) {
     <AppModal title="快照" :open="game.activeModal === 'snapshots'" @close="game.closeModal()" @update:open="onModalOpenChange" size="md" closable>
       <div class="placeholder-panel">快照管理 — 后续实现</div>
     </AppModal>
-    <AppModal title="🗺 地图" :open="game.activeModal === 'map'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
+    <AppModal title="地图" :open="game.activeModal === 'map'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
       <MapPanel />
     </AppModal>
-    <AppModal title="🐛 调试 & 导出" :open="game.activeModal === 'debug'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
+    <AppModal title="调试 & 导出" :open="game.activeModal === 'debug'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
       <DebugPanel />
     </AppModal>
 
@@ -193,7 +193,7 @@ function onModalOpenChange(v: boolean) {
     <Teleport to="body">
       <div v-if="showDebug" class="debug-panel">
         <div class="debug-header">
-          <span>🔧 Debug Panel</span>
+          <span>Debug Panel</span>
           <button @click="showDebug = false">✕</button>
         </div>
         <div class="debug-section">
@@ -257,10 +257,10 @@ function onModalOpenChange(v: boolean) {
   width: 420px;
   max-width: 90vw;
   height: 100vh;
-  background: #1a1a2e;
-  color: #e0e0e0;
-  border-left: 2px solid #ffd700;
-  z-index: 9999;
+  background: var(--theme-content-bg);
+  color: var(--theme-text-primary);
+  border-left: 1px solid var(--theme-card-border);
+  z-index: var(--z-tooltip, 500);
   overflow-y: auto;
   padding: 16px;
   font-family: 'Consolas', 'Courier New', monospace;
@@ -272,17 +272,17 @@ function onModalOpenChange(v: boolean) {
   align-items: center;
   margin-bottom: 12px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--theme-card-border);
 }
 .debug-header span {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #ffd700;
+  color: var(--theme-primary);
 }
 .debug-header button {
   background: none;
-  border: 1px solid #555;
-  color: #aaa;
+  border: 1px solid var(--theme-card-border);
+  color: var(--theme-text-muted);
   padding: 2px 8px;
   border-radius: 4px;
   cursor: pointer;
@@ -292,11 +292,11 @@ function onModalOpenChange(v: boolean) {
 }
 .debug-section h4 {
   font-size: 0.75rem;
-  color: #8ab4f8;
+  color: var(--theme-text-secondary);
   margin: 0 0 4px;
 }
 .debug-section pre {
-  background: #0d0d1a;
+  background: var(--theme-window-bg);
   padding: 8px;
   border-radius: 4px;
   max-height: 240px;

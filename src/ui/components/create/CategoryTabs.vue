@@ -75,25 +75,24 @@ defineEmits<{ 'update:modelValue': [key: string] }>()
   width: 100%;
   min-height: 2.4em;
   padding: 0.5em 0.8em;
-  border: none;
-  border-left: 3px solid transparent;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--theme-text-secondary);
   font-size: 0.9em;
   font-weight: 600;
   cursor: pointer;
   text-align: left;
-  border-radius: 0 var(--theme-radius-sm) var(--theme-radius-sm) 0;
-  transition: all var(--theme-transition-fast);
+  border-radius: var(--theme-radius-sm);
+  transition: background var(--theme-transition-fast), color var(--theme-transition-fast), border-color var(--theme-transition-fast);
 }
 .tabs-vertical .tab-btn:hover {
   background: var(--theme-card-bg);
   color: var(--theme-text-primary);
 }
 .tabs-vertical .tab-btn.active {
-  background: var(--theme-card-bg);
+  background: color-mix(in srgb, var(--theme-color-primary) 8%, var(--theme-card-bg));
   color: var(--theme-color-primary);
-  border-left-color: var(--theme-color-primary);
+  border-color: color-mix(in srgb, var(--theme-color-primary) 35%, var(--theme-card-border));
 }
 
 /* Badge 计数 */
@@ -113,7 +112,7 @@ defineEmits<{ 'update:modelValue': [key: string] }>()
 }
 .tab-btn.active .tab-count {
   background: var(--theme-color-primary);
-  color: #fff;
+  color: var(--theme-primary-text);
 }
 
 /* ===== 响应式: 垂直模式在手机端变水平 ===== */
@@ -125,13 +124,14 @@ defineEmits<{ 'update:modelValue': [key: string] }>()
   .tabs-vertical .tab-btn {
     flex: 1;
     justify-content: center;
-    border-left: none;
+    border: none;
     border-bottom: 2px solid transparent;
     border-radius: 0;
     padding: var(--theme-spacing-xs) var(--theme-spacing-sm);
     font-size: 0.8rem;
   }
   .tabs-vertical .tab-btn.active {
+    background: transparent;
     border-bottom-color: var(--theme-color-primary);
   }
 }

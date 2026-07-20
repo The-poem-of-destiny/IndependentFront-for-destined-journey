@@ -59,8 +59,9 @@ function summary(content: string, maxLen = 160): string {
 }
 
 .step-title {
-  font-size: 1.125rem;
-  font-weight: 600;
+  font-family: var(--theme-font-title, serif);
+  color: var(--theme-text-primary);
+  font-size: 1.3rem;
   margin: 0 0 var(--theme-spacing-xs);
 }
 
@@ -104,7 +105,7 @@ function summary(content: string, maxLen = 160): string {
 
 .char-card.checked {
   border-color: var(--theme-primary);
-  background: var(--theme-primary-muted, rgba(var(--theme-primary-rgb), 0.08));
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
 }
 
 .char-checkbox {

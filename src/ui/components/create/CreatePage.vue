@@ -84,7 +84,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--theme-bg-primary);
+  background: var(--theme-window-bg);
 }
 .back-btn {
   position: absolute;

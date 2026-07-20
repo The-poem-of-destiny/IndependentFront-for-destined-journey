@@ -1,0 +1,793 @@
+ [Vue warn]: Invalid prop: type check failed for prop "revealed". Expected Boolean, got Undefined  
+  at <PlotOutlinePreview outline=null is-generating=false revealed=undefined  ... > 
+  at <CreateStepPlot key=6 > 
+  at <AsyncComponentWrapper key=6 > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="step-fade" mode="out-in" > 
+  at <CreatePage key="create" > 
+  at <AsyncComponentWrapper key="create" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+ [create-store] startJourney — openingPrompt: 【创角完成，理查德 的初始数据】
+
+--- 初始装备 ---
+  法师长袍（防具·uncommon (布甲, 防御: 60)）：厚实的蓝色天鹅绒制成，袖口和衣边绣有银线魔法纹路，能微弱提升法术效果。 [法力增幅:降低8%MP的消耗。]
+  白橡木法杖（武器·uncommon (法杖, 攻击: 75)）：百年白橡木树心雕琢的法杖，杖身修长纤细，能帮助施法者更好地集中精神。 [法力节约:施法时降低8%
+ [create-store] startJourney — openingPrompt length: 1417
+ [GamePage] onMounted, activeSaveId: 96ea7560-b58d-48c1-bbea-52cd871e5f02
+ [GamePage] loading save...
+ [game-store] activeSave after set: {"id":"96ea7560-b58d-48c1-bbea-52cd871e5f02","hasMetadata":true,"hasOpeningPrompt":true,"openingPromptConsumed":false}
+ [GamePage] save loaded, hasOpeningPromptConsumed: false openingPrompt exists: true
+ [GamePage] sending opening prompt...
+ [GamePipeline] run() called — userInput length: 1417 isUserMessage: true
+ [GamePipeline] userInput preview: 【创角完成，理查德 的初始数据】
+
+--- 初始装备 ---
+  法师长袍（防具·uncommon (布甲, 防御: 60)）：厚实的蓝色天鹅绒制成，袖口和衣边绣有银线魔法纹路，能微弱提升法术效果。 [法力增幅:降低8%MP的消耗。]
+  白橡木法杖（武器·uncommon (法杖, 攻击: 75)）：百年白橡木树心雕琢的法杖，杖身修长纤细，能帮助施法者更好地集中精神。 [法力节约:施法时降低8%MP消耗]
+  旅者皮衣套装（防具·uncommon (轻甲, 防御: 70)）：硬质皮革缝制，内侧有柔软衬垫，能减轻长途跋涉带来的疲劳。 [耐力加成:最大SP上限提升150点。]
+
+--- 初始技能
+ [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+ [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+game-pipeline.ts:348 [GamePipeline] 预设 "导入的预设" 使用 DB 版本（设置页编辑优先），agent-config.json 内嵌版被忽略
+（匿名） @ game-pipeline.ts:348
+game-pipeline.ts:208 [GamePipeline] agent: memory_recall endpoint: 66f59be5-135d-49c8-9a3c-2b4d207556da model: Qwen/Qwen3-Embedding-8B
+game-pipeline.ts:208 [GamePipeline] agent: story endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: request_dispatcher endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: vars_update endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: memory_summary endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: plot_pre_check endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: plot_post_check endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: craft_gen endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: char_gen endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: item_gen endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:479 [GamePipeline] Agent 开始: memory_recall
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+game-pipeline.ts:479 [GamePipeline] Agent 开始: story
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+game-pipeline.ts:479 [GamePipeline] Agent 开始: request_dispatcher
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+game-pipeline.ts:479 [GamePipeline] Agent 开始: vars_update
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+game-pipeline.ts:479 [GamePipeline] Agent 开始: memory_summary
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+game-pipeline.ts:616 [GamePipeline] memory_summary 落库成功: MEMMRRKG5UC importance=2 keywords=废弃古堡,召唤法阵,血族美少女,命定核心,苏醒
+create-store.ts?t=1784386540200:629 [create-store] startJourney — openingPrompt: 【创角完成，理查德 的初始数据】
+
+--- 初始装备 ---
+  法师长袍（防具·uncommon (布甲, 防御: 60)）：厚实的蓝色天鹅绒制成，袖口和衣边绣有银线魔法纹路，能微弱提升法术效果。 [法力增幅:降低8%MP的消耗。]
+  白橡木法杖（武器·uncommon (法杖, 攻击: 75)）：百年白橡木树心雕琢的法杖，杖身修长纤细，能帮助施法者更好地集中精神。 [法力节约:施法时降低8%
+create-store.ts?t=1784386540200:630 [create-store] startJourney — openingPrompt length: 1417
+GamePage.vue:33 [GamePage] onMounted, activeSaveId: 2e3c5024-9c2f-44f1-a7e3-f5f97ebb13b1
+GamePage.vue:35 [GamePage] loading save...
+game-store.ts:279 [game-store] activeSave after set: {"id":"2e3c5024-9c2f-44f1-a7e3-f5f97ebb13b1","hasMetadata":true,"hasOpeningPrompt":true,"openingPromptConsumed":false}
+GamePage.vue:37 [GamePage] save loaded, hasOpeningPromptConsumed: false openingPrompt exists: true
+GamePage.vue:46 [GamePage] sending opening prompt...
+game-pipeline.ts:90 [GamePipeline] run() called — userInput length: 1417 isUserMessage: true
+game-pipeline.ts:91 [GamePipeline] userInput preview: 【创角完成，理查德 的初始数据】
+
+--- 初始装备 ---
+  法师长袍（防具·uncommon (布甲, 防御: 60)）：厚实的蓝色天鹅绒制成，袖口和衣边绣有银线魔法纹路，能微弱提升法术效果。 [法力增幅:降低8%MP的消耗。]
+  白橡木法杖（武器·uncommon (法杖, 攻击: 75)）：百年白橡木树心雕琢的法杖，杖身修长纤细，能帮助施法者更好地集中精神。 [法力节约:施法时降低8%MP消耗]
+  旅者皮衣套装（防具·uncommon (轻甲, 防御: 70)）：硬质皮革缝制，内侧有柔软衬垫，能减轻长途跋涉带来的疲劳。 [耐力加成:最大SP上限提升150点。]
+
+--- 初始技能
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+game-pipeline.ts:348 [GamePipeline] 预设 "导入的预设" 使用 DB 版本（设置页编辑优先），agent-config.json 内嵌版被忽略
+（匿名） @ game-pipeline.ts:348
+game-pipeline.ts:208 [GamePipeline] agent: memory_recall endpoint: 66f59be5-135d-49c8-9a3c-2b4d207556da model: Qwen/Qwen3-Embedding-8B
+game-pipeline.ts:208 [GamePipeline] agent: story endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: request_dispatcher endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: vars_update endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: memory_summary endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: plot_pre_check endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: plot_post_check endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: craft_gen endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: char_gen endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: item_gen endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:479 [GamePipeline] Agent 开始: memory_recall
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+game-pipeline.ts:479 [GamePipeline] Agent 开始: story
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+game-pipeline.ts:479 [GamePipeline] Agent 开始: request_dispatcher
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+game-pipeline.ts:479 [GamePipeline] Agent 开始: vars_update
+game-pipeline.ts:518 [GamePipeline] Agent 错误: vars_update signal is aborted without reason
+（匿名） @ game-pipeline.ts:518
+game-pipeline.ts:479 [GamePipeline] Agent 开始: memory_summary
+game-pipeline.ts:518 [GamePipeline] Agent 错误: memory_summary signal is aborted without reason
+（匿名） @ game-pipeline.ts:518
+create-store.ts?t=1784386540200:629 [create-store] startJourney — openingPrompt: 【创角完成，理查德 的初始数据】
+
+--- 初始装备 ---
+  法师长袍（防具·uncommon (布甲, 防御: 60)）：厚实的蓝色天鹅绒制成，袖口和衣边绣有银线魔法纹路，能微弱提升法术效果。 [法力增幅:降低8%MP的消耗。]
+  白橡木法杖（武器·uncommon (法杖, 攻击: 75)）：百年白橡木树心雕琢的法杖，杖身修长纤细，能帮助施法者更好地集中精神。 [法力节约:施法时降低8%
+create-store.ts?t=1784386540200:630 [create-store] startJourney — openingPrompt length: 1417
+GamePage.vue:33 [GamePage] onMounted, activeSaveId: 993e83f4-73e1-4f95-947f-2eab0ff7ae26
+GamePage.vue:35 [GamePage] loading save...
+game-store.ts:279 [game-store] activeSave after set: {"id":"993e83f4-73e1-4f95-947f-2eab0ff7ae26","hasMetadata":true,"hasOpeningPrompt":true,"openingPromptConsumed":false}
+GamePage.vue:37 [GamePage] save loaded, hasOpeningPromptConsumed: false openingPrompt exists: true
+GamePage.vue:46 [GamePage] sending opening prompt...
+game-pipeline.ts:90 [GamePipeline] run() called — userInput length: 1417 isUserMessage: true
+game-pipeline.ts:91 [GamePipeline] userInput preview: 【创角完成，理查德 的初始数据】
+
+--- 初始装备 ---
+  法师长袍（防具·uncommon (布甲, 防御: 60)）：厚实的蓝色天鹅绒制成，袖口和衣边绣有银线魔法纹路，能微弱提升法术效果。 [法力增幅:降低8%MP的消耗。]
+  白橡木法杖（武器·uncommon (法杖, 攻击: 75)）：百年白橡木树心雕琢的法杖，杖身修长纤细，能帮助施法者更好地集中精神。 [法力节约:施法时降低8%MP消耗]
+  旅者皮衣套装（防具·uncommon (轻甲, 防御: 70)）：硬质皮革缝制，内侧有柔软衬垫，能减轻长途跋涉带来的疲劳。 [耐力加成:最大SP上限提升150点。]
+
+--- 初始技能
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+game-pipeline.ts:348 [GamePipeline] 预设 "导入的预设" 使用 DB 版本（设置页编辑优先），agent-config.json 内嵌版被忽略
+（匿名） @ game-pipeline.ts:348
+game-pipeline.ts:208 [GamePipeline] agent: memory_recall endpoint: 66f59be5-135d-49c8-9a3c-2b4d207556da model: Qwen/Qwen3-Embedding-8B
+game-pipeline.ts:208 [GamePipeline] agent: story endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: request_dispatcher endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: vars_update endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: memory_summary endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: plot_pre_check endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: plot_post_check endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: craft_gen endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: char_gen endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: item_gen endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:479 [GamePipeline] Agent 开始: memory_recall
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+game-pipeline.ts:479 [GamePipeline] Agent 开始: story
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+game-pipeline.ts:479 [GamePipeline] Agent 开始: request_dispatcher
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+game-pipeline.ts:518 [GamePipeline] Agent 错误: request_dispatcher signal is aborted without reason
+（匿名） @ game-pipeline.ts:518
+game-pipeline.ts:479 [GamePipeline] Agent 开始: memory_summary
+game-pipeline.ts:518 [GamePipeline] Agent 错误: memory_summary signal is aborted without reason
+（匿名） @ game-pipeline.ts:518
+GamePage.vue:33 [GamePage] onMounted, activeSaveId: 993e83f4-73e1-4f95-947f-2eab0ff7ae26
+GamePage.vue:35 [GamePage] loading save...
+game-store.ts:279 [game-store] activeSave after set: {"id":"993e83f4-73e1-4f95-947f-2eab0ff7ae26","hasMetadata":true,"hasOpeningPrompt":true,"openingPromptConsumed":true}
+GamePage.vue:37 [GamePage] save loaded, hasOpeningPromptConsumed: true openingPrompt exists: true
+GamePage.vue:55 [GamePage] NOT sending opening prompt. consumed: true prompt empty: false
+create-store.ts?t=1784386540200:629 [create-store] startJourney — openingPrompt: 【创角完成，理查德 的初始数据】
+
+--- 初始装备 ---
+  法师长袍（防具·uncommon (布甲, 防御: 60)）：厚实的蓝色天鹅绒制成，袖口和衣边绣有银线魔法纹路，能微弱提升法术效果。 [法力增幅:降低8%MP的消耗。]
+  白橡木法杖（武器·uncommon (法杖, 攻击: 75)）：百年白橡木树心雕琢的法杖，杖身修长纤细，能帮助施法者更好地集中精神。 [法力节约:施法时降低8%
+create-store.ts?t=1784386540200:630 [create-store] startJourney — openingPrompt length: 1417
+GamePage.vue:33 [GamePage] onMounted, activeSaveId: 4e085e0f-e44e-43cc-a5b9-1e03f939be6b
+GamePage.vue:35 [GamePage] loading save...
+game-store.ts:279 [game-store] activeSave after set: {"id":"4e085e0f-e44e-43cc-a5b9-1e03f939be6b","hasMetadata":true,"hasOpeningPrompt":true,"openingPromptConsumed":false}
+GamePage.vue:37 [GamePage] save loaded, hasOpeningPromptConsumed: false openingPrompt exists: true
+GamePage.vue:46 [GamePage] sending opening prompt...
+game-pipeline.ts:90 [GamePipeline] run() called — userInput length: 1417 isUserMessage: true
+game-pipeline.ts:91 [GamePipeline] userInput preview: 【创角完成，理查德 的初始数据】
+
+--- 初始装备 ---
+  法师长袍（防具·uncommon (布甲, 防御: 60)）：厚实的蓝色天鹅绒制成，袖口和衣边绣有银线魔法纹路，能微弱提升法术效果。 [法力增幅:降低8%MP的消耗。]
+  白橡木法杖（武器·uncommon (法杖, 攻击: 75)）：百年白橡木树心雕琢的法杖，杖身修长纤细，能帮助施法者更好地集中精神。 [法力节约:施法时降低8%MP消耗]
+  旅者皮衣套装（防具·uncommon (轻甲, 防御: 70)）：硬质皮革缝制，内侧有柔软衬垫，能减轻长途跋涉带来的疲劳。 [耐力加成:最大SP上限提升150点。]
+
+--- 初始技能
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+game-pipeline.ts:348 [GamePipeline] 预设 "导入的预设" 使用 DB 版本（设置页编辑优先），agent-config.json 内嵌版被忽略
+（匿名） @ game-pipeline.ts:348
+game-pipeline.ts:208 [GamePipeline] agent: memory_recall endpoint: 66f59be5-135d-49c8-9a3c-2b4d207556da model: Qwen/Qwen3-Embedding-8B
+game-pipeline.ts:208 [GamePipeline] agent: story endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: request_dispatcher endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: vars_update endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: memory_summary endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: plot_pre_check endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: plot_post_check endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: craft_gen endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: char_gen endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:208 [GamePipeline] agent: item_gen endpoint: 42f7ea15-09ee-4349-8567-8da90ec0f555 model: deepseek-v4-flash
+game-pipeline.ts:479 [GamePipeline] Agent 开始: memory_recall
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+game-pipeline.ts:479 [GamePipeline] Agent 开始: story
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+game-pipeline.ts:479 [GamePipeline] Agent 开始: request_dispatcher
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+game-pipeline.ts:715 [GamePipeline] char_gen 链失败 (妲丽安)，继续处理剩余请求: Error: char_gen 输出无法解析 (JSON+XML 均失败): 现在让我根据获取的数据构建完整的角色面板。
+
+**思考过程回顾：**
+
+1. ✅ **已有角色检查**：已调用get_character查重，不存在同名"妲丽安"，为新角色生成
+2. ✅ **角色定位**：黑之读姬，壶中之天的管理员与守护者，命定之书的人格化身。在场景中作为理查德的契约引导者登场，地位超越了常规生命层级体系——她是来自虚海的未知存在，连诸神也无法察觉。
+3. ✅ **正文已明确的信
+    at parseCharGenOutput (char-gen-agent.ts:517:11)
+    at callCharGenAgent (char-gen-agent.ts:195:20)
+    at async runCharGenChain (char-gen-agent.ts:465:20)
+    at async GamePipeline.handleCharGen (game-pipeline.ts:695:24)
+    at async Object.onCharGenRequest (game-pipeline.ts:549:9)
+    at async Promise.all (:5173/index 0)
+    at async AgentOrchestrator.processStageMarkers (agent-orchestrator.ts:760:9)
+    at async AgentOrchestrator.run (agent-orchestrator.ts:197:9)
+    at async GamePipeline.run (game-pipeline.ts:133:7)
+    at async GamePipeline.sendOpeningPrompt (game-pipeline.ts:82:16)
+（匿名） @ game-pipeline.ts:715
+game-pipeline.ts:479 [GamePipeline] Agent 开始: vars_update
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+agent-orchestrator.ts:957 [Orchestrator] vars_update <json> 解析失败，跳过状态更新
+（匿名） @ agent-orchestrator.ts:957
+agent-orchestrator.ts:1019 [Orchestrator] vars_update <json> quests 解析失败，跳过 quest 更新
+（匿名） @ agent-orchestrator.ts:1019
+game-pipeline.ts:479 [GamePipeline] Agent 开始: memory_summary
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of render function 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+chunk-5G6OTI3J.js?v=9b7d8c81:2226 [Vue warn]: Unhandled error during execution of component update 
+  at <BaseTransition appear=false persisted=false mode=undefined  ... > 
+  at <Transition name="slide-up" > 
+  at <AgentStatusPanel> 
+  at <GamePage key="game" > 
+  at <AsyncComponentWrapper key="game" > 
+  at <BaseTransition mode="out-in" appear=false persisted=false  ... > 
+  at <Transition name="fade" mode="out-in" > 
+  at <App>
+warn$1 @ chunk-5G6OTI3J.js?v=9b7d8c81:2226
+AgentStatusPanel.vue:42 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'label')
+    at AgentStatusPanel.vue:42:57
+    at Proxy.renderFnWithContext (chunk-5G6OTI3J.js?v=9b7d8c81:2884:13)
+    at Proxy.<anonymous> (chunk-5G6OTI3J.js?v=9b7d8c81:3549:79)
+    at renderComponentRoot (chunk-5G6OTI3J.js?v=9b7d8c81:6764:17)
+    at ReactiveEffect.componentUpdateFn [as fn] (chunk-5G6OTI3J.js?v=9b7d8c81:8415:26)
+    at ReactiveEffect.run (chunk-5G6OTI3J.js?v=9b7d8c81:528:19)
+    at ReactiveEffect.runIfDirty (chunk-5G6OTI3J.js?v=9b7d8c81:566:12)
+    at callWithErrorHandling (chunk-5G6OTI3J.js?v=9b7d8c81:2373:33)
+    at flushJobs (chunk-5G6OTI3J.js?v=9b7d8c81:2581:9)
+game-pipeline.ts:616 [GamePipeline] memory_summary 落库成功: MEMMRRKP9HX importance=2 keywords=废弃古堡,召唤法阵,血族觉醒,妲丽安,命定核心

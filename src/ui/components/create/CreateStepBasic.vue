@@ -187,9 +187,10 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
 }
 .custom-field {
   margin-top: -6px;
-  padding-left: 2px;
-  border-left: 2px solid var(--theme-color-primary);
-  padding-left: var(--theme-spacing-sm);
+  padding: var(--theme-spacing-xs) var(--theme-spacing-sm);
+  background: color-mix(in srgb, var(--theme-color-primary) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-color-primary) 25%, var(--theme-card-border));
+  border-radius: var(--theme-radius-sm);
 }
 
 /* ===== 右侧 ===== */
@@ -212,10 +213,10 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
   align-items: center;
   padding: 5px 18px;
   border-radius: var(--theme-radius-md);
-  background: linear-gradient(135deg, var(--theme-quality-epic) 0%, color-mix(in srgb, var(--theme-quality-epic) 60%, #000) 100%);
-  color: #fff;
+  background: color-mix(in srgb, var(--theme-quality-epic) 10%, var(--theme-card-bg));
+  border: 1px solid color-mix(in srgb, var(--theme-quality-epic) 45%, var(--theme-card-border));
+  color: var(--theme-quality-epic);
   margin-bottom: 4px;
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--theme-quality-epic) 25%, transparent);
 }
 .tier-name {
   font-family: var(--theme-font-title, serif);
@@ -225,7 +226,7 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
 }
 .tier-range {
   font-size: 0.6rem;
-  opacity: 0.85;
+  color: var(--theme-text-muted);
 }
 
 /* ===== 属性表格 ===== */

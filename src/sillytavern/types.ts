@@ -336,6 +336,8 @@ export const DEFAULT_AGENT_PIPELINE: Pipeline = {
 /** 剧情配置 — 存入 AppSettings */
 export interface PlotSettings {
   mode: 'off' | 'side' | 'main';
+  /** 雷点 — 生成剧情大纲时的绝对禁区（所有模式通用，仅 plot_outline 生成/重写时注入；空串=无雷点） */
+  tabooContent: string;
   /** 主线专属 */
   main?: {
     durationYears: number;                          // 主线持续年份
@@ -343,16 +345,20 @@ export interface PlotSettings {
     difficultyTier?: number;                        // 事件难度层级 (1-7, 对应生命层级; 不填=自适应)
     genrePreference: Array<'combat' | 'mystery' | 'social' | 'romance' | 'exploration' | 'politics' | 'survival' | 'tragedy'>;
     customPreference: string;                       // 自定义偏好输入框
+    chapterCount?: number;                            // 章节数量（用户输入的数字，空=AI 自己判断）
+    eventsPerChapter?: number;                       // 每章事件数（用户输入的数字，空=AI 自己判断）
   };
   /** 支线专属 */
   side?: {
-    yearlyGeneration: boolean;                      // 每年自动生成
     focusRegion: string;                            // 专注区域（空=当前区域）
+    chapterCount?: number;                            // 章节数量（用户输入的数字，0=AI 自己判断）
+    eventsPerChapter?: number;                       // 每章事件数（用户输入的数字，0=AI 自己判断）
   };
 }
 
 export const DEFAULT_PLOT_SETTINGS: PlotSettings = {
   mode: 'off',
+  tabooContent: '',
 };
 
 // ========== 剧情大纲 (Phase 4) ==========
@@ -362,8 +368,14 @@ export interface PlotOutline {
   id: string;
   saveId: string;
   mode: 'off' | 'side' | 'main';
+  /** 大纲标题（AI 生成，如"血色纹章"）— PlotPanel 头部显示 */
+  title: string;
+  /** 一句话摘要（≤80字，防剧透层下的可见部分） */
+  summary: string;
   /** 大纲正文（AI 生成的叙事大纲） */
   content: string;
+  /** 章节结构化存储（不再每次从 content 正则重新解析） */
+  chapters: Array<{ title: string; summary: string; status: 'pending' | 'active' | 'completed' }>;
   /** 自检结果（AI 对大纲的评价） */
   selfCritique?: string;
   /** 是否已确认 */
@@ -932,6 +944,10 @@ export interface PlotEvent {
   location?: string;
   /** 世界线变动标记 */
   worldLineChanged: boolean;
+  /** 玩家可见性: hidden=未揭示(面板不显示) / revealed=已揭示（pre_check 触发时翻转） */
+  visibility: 'hidden' | 'revealed';
+  /** 所属章节标题（逻辑键=名字，铁律1） */
+  chapterTitle?: string;
   /** 剧情层级深度 */
   depth: number;
   createdAt: number;

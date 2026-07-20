@@ -114,9 +114,10 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
             <span class="kv-value kv-long">{{ player.location || '未知' }}</span>
           </div>
         </div>
-        <div class="kv-row kv-2col">
+        <div class="kv-row kv-3col">
           <div class="kv-item"><span class="kv-label">等级</span><span class="kv-value">Lv.{{ player.level }}</span></div>
           <div class="kv-item"><span class="kv-label">金钱</span><span class="kv-value">{{ player.money }} G</span></div>
+          <div class="kv-item"><span class="kv-label">命运点</span><span class="kv-value fp-value">{{ game.fp }} FP</span></div>
         </div>
       </div>
       </Transition>
@@ -184,11 +185,11 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         <div class="equip-sub" v-if="equipmentList.length">
           <div class="sub-label">装备</div>
           <div class="item-list">
-            <div v-for="eq in equipmentList" :key="eq.name" class="item-row">
+            <button v-for="eq in equipmentList" :key="eq.name" class="item-row" @click="game.focusItem('equipment', eq.name)" :title="`查看 ${eq.name}`">
               <i :class="eq.icon" class="item-icon" />
               <span class="item-name">{{ eq.name }}</span>
               <span class="item-tag">{{ eq.equippedSlot }}</span>
-            </div>
+            </button>
           </div>
         </div>
 
@@ -196,14 +197,14 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         <div class="equip-sub" v-if="inventoryPreview.length">
           <div class="sub-label">背包</div>
           <div class="item-list">
-            <div v-for="inv in inventoryPreview" :key="inv.name" class="item-row">
+            <button v-for="inv in inventoryPreview" :key="inv.name" class="item-row" @click="game.focusItem('inventory', inv.name)" :title="`查看 ${inv.name}`">
               <i class="fa-solid fa-cube item-icon" />
               <span class="item-name">{{ inv.name }}</span>
               <span class="item-tag">{{ inv.type }}</span>
               <span class="item-count">×{{ inv.quantity }}</span>
-            </div>
+            </button>
           </div>
-          <div class="item-footer" v-if="(player.inventory?.length || 0) > 5">
+          <div class="item-footer" v-if="(player.inventory?.length || 0) > 5" role="button" tabindex="0" @click="game.showModal('items')" @keydown.enter="game.showModal('items')">
             查看全部持有物 · 共 {{ player.inventory?.length }} 件
             <i class="fa-solid fa-chevron-right" />
           </div>
@@ -305,7 +306,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   gap: 6px;
 }
 .summary-name {
-  font-family: var(--theme-font-title, 'Cinzel', serif);
+  font-family: var(--theme-font-title, 'Noto Serif SC', serif);
   font-size: 1.0625rem;
   font-weight: 700;
   color: var(--theme-text-primary);
@@ -349,6 +350,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   word-break: break-all;
 }
 .tier-text { color: var(--theme-quality-epic, #9A79CC); }
+.fp-value { color: var(--theme-primary); }
 
 /* ═══ 属性区 ═══ */
 .attr-section { margin-top: 4px; }
@@ -357,7 +359,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 .buff-scroll { max-height: 7.5rem; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 6px; }
 .buff-row { display: flex; align-items: center; gap: 4px; cursor: pointer; border: none; background: none; padding: 0; font-family: inherit; font-size: inherit; color: inherit; width: auto; }
 .buff-time { font-size: 0.625rem; color: var(--theme-text-muted); }
-.buff-detail { margin: 0 12px 8px; padding: 8px 10px; background: var(--theme-surface-muted); border-radius: 6px; border-left: 3px solid var(--theme-primary); }
+.buff-detail { margin: 0 12px 8px; padding: 8px 10px; background: color-mix(in srgb, var(--theme-primary) 6%, var(--theme-surface-muted)); border-radius: 6px; border: 1px solid color-mix(in srgb, var(--theme-primary) 25%, var(--theme-card-border)); }
 .bd-name { font-size: 0.8125rem; font-weight: 700; color: var(--theme-text-primary); }
 .bd-desc { font-size: 0.75rem; color: var(--theme-text-secondary); margin-top: 2px; }
 .bd-meta { display: flex; gap: 12px; margin-top: 6px; font-size: 0.6875rem; color: var(--theme-text-muted); }
@@ -383,6 +385,13 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   padding: 4px 6px;
   border-radius: 3px;
   font-size: 0.75rem;
+  border: none;
+  background: none;
+  font-family: inherit;
+  color: inherit;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
 }
 .item-row:hover {
   background: var(--theme-surface-muted);
@@ -434,7 +443,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   padding: 6px 8px;
   background: var(--theme-surface-muted);
   border-radius: var(--theme-radius-sm, 4px);
-  border-left: 3px solid var(--theme-primary);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 22%, var(--theme-card-border));
 }
 .quest-item + .quest-item { margin-top: 4px; }
 .quest-top {
@@ -454,9 +463,9 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   border-radius: 3px;
   font-weight: 600;
 }
-.pri-高 { background: rgba(220,38,38,0.18); color: #ef4444; }
-.pri-中 { background: rgba(217,119,6,0.18); color: #f59e0b; }
-.pri-低 { background: rgba(107,114,128,0.18); color: #9ca3af; }
+.pri-高 { background: color-mix(in srgb, var(--theme-error) 18%, transparent); color: var(--theme-error); }
+.pri-中 { background: color-mix(in srgb, var(--theme-warning) 18%, transparent); color: var(--theme-warning); }
+.pri-低 { background: var(--theme-surface-muted); color: var(--theme-text-muted); }
 .quest-obj {
   font-size: 0.6875rem;
   color: var(--theme-text-secondary);
@@ -520,20 +529,24 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 }
 .retry-btn:hover { background: var(--theme-tab-hover-bg); }
 
-/* ═══ 折叠动画 ═══ */
-.collapse-enter-active,
-.collapse-leave-active {
-  transition: max-height 0.25s ease, opacity 0.2s ease;
-  overflow: hidden;
+/* ═══ 折叠动画 — 只动 opacity/transform，不动布局属性 ═══ */
+.collapse-enter-active {
+  transition: opacity 0.2s ease-out, transform 0.2s ease-out;
 }
-.collapse-enter-from,
+.collapse-leave-active {
+  transition: opacity 0.12s ease-in;
+}
+.collapse-enter-from {
+  opacity: 0;
+  transform: translateY(-4px);
+}
 .collapse-leave-to {
-  max-height: 0;
   opacity: 0;
 }
-.collapse-enter-to,
-.collapse-leave-from {
-  max-height: 800px;
-  opacity: 1;
+@media (prefers-reduced-motion: reduce) {
+  .collapse-enter-active,
+  .collapse-leave-active {
+    transition: none;
+  }
 }
 </style>

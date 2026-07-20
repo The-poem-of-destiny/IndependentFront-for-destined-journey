@@ -117,13 +117,13 @@ function handleStop() {
   color: var(--theme-primary);
 }
 .stop-btn {
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--theme-error);
+  background: color-mix(in srgb, var(--theme-error) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-error) 30%, transparent);
 }
 .stop-btn:hover {
-  background: rgba(239, 68, 68, 0.2);
-  color: #f87171;
+  background: color-mix(in srgb, var(--theme-error) 20%, transparent);
+  color: var(--theme-error);
 }
 .input-field {
   flex: 1;
@@ -154,7 +154,7 @@ function handleStop() {
   padding: 8px;
   margin-bottom: 4px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-  z-index: 10;
+  z-index: var(--z-dropdown, 100);
 }
 .options-title {
   font-size: 0.8125rem;

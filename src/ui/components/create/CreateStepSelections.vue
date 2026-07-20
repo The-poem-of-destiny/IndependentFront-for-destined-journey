@@ -192,8 +192,7 @@ const visiblePool = computed(() => {
   width: 100%;
   min-height: 2em;
   padding: 0.5em 0.8em;
-  border: none;
-  border-left: 2px solid transparent;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--theme-text-secondary);
   font-size: 0.85em;
@@ -203,8 +202,8 @@ const visiblePool = computed(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  border-radius: 0 var(--theme-radius-sm) var(--theme-radius-sm) 0;
-  transition: all var(--theme-transition-fast);
+  border-radius: var(--theme-radius-sm);
+  transition: background var(--theme-transition-fast), color var(--theme-transition-fast), border-color var(--theme-transition-fast);
 }
 .sub-btn:hover {
   color: var(--theme-text-primary);
@@ -213,7 +212,7 @@ const visiblePool = computed(() => {
 .sub-btn.active {
   color: var(--theme-primary);
   background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
-  border-left-color: var(--theme-primary);
+  border-color: color-mix(in srgb, var(--theme-primary) 35%, var(--theme-card-border));
   font-weight: 700;
 }
 
@@ -281,7 +280,6 @@ const visiblePool = computed(() => {
   .selected-sidebar { width: 100%; overflow: visible; }
   .sidebar-nav { max-height: none; overflow: visible; }
   .sub-nav { flex-direction: row; flex-wrap: wrap; overflow-y: visible; flex: none; }
-  .sub-btn { width: auto; font-size: 0.82em; padding: 0.4em 0.7em; min-height: 1.8em; border-left: none; border-bottom: 2px solid transparent; border-radius: 0; }
-  .sub-btn.active { border-left: none; border-bottom-color: var(--theme-primary); }
+  .sub-btn { width: auto; font-size: 0.82em; padding: 0.4em 0.7em; min-height: 1.8em; }
 }
 </style>

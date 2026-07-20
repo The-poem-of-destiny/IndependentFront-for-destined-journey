@@ -11,7 +11,7 @@ export interface ThemeDefinition {
 
 export const THEME_LIST: ThemeDefinition[] = [
   { id: 'parchment', name: 'Parchment', nameZh: '羊皮纸', type: 'warm', preview: 'linear-gradient(135deg, #f5efe6, #d7c8b6)' },
-  { id: 'obsidian', name: 'Obsidian', nameZh: '黑曜石', type: 'dark', preview: 'linear-gradient(135deg, #15171c, #323846)' },
+  { id: 'obsidian', name: 'Obsidian', nameZh: '玄墨', type: 'dark', preview: 'linear-gradient(135deg, #191512, #c9a86a)' },
   { id: 'crimson', name: 'Crimson', nameZh: '深红', type: 'dark', preview: 'linear-gradient(135deg, #1a1015, #3d1f28)' },
   { id: 'indigo', name: 'Indigo', nameZh: '靛蓝', type: 'dark', preview: 'linear-gradient(135deg, #111827, #1e3a5f)' },
   { id: 'bronze', name: 'Bronze', nameZh: '古铜', type: 'dark', preview: 'linear-gradient(135deg, #1a1510, #4a3520)' },

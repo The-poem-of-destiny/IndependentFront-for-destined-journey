@@ -4,78 +4,83 @@
    使用 color-mix() 做动态透明度计算
    ============================================================ */
 
-/* ===== 默认主题 (obsidian — 深色 HUD) ===== */
+/* ===== 默认主题 (obsidian — 玄墨 · 暖墨底 + 古金) =====
+   场景：深夜暖光台灯下翻开一部命运之书 */
 :root, [data-theme="obsidian"] {
-  /* 基础背景 */
-  --theme-window-bg: #15171c;
-  --theme-window-border: #323846;
-  --theme-content-bg: #12151b;
-  --theme-card-bg: #1b1f27;
-  --theme-card-border: #2c3340;
-  --theme-surface-muted: color-mix(in srgb, #15171c 72%, #1b1f27 28%);
-  --theme-overlay-bg: color-mix(in srgb, #15171c 58%, transparent);
+  /* 基础背景 — 暖墨色阶（褐黑，微暖色相） */
+  --theme-window-bg: #191512;
+  --theme-window-border: #3a3128;
+  --theme-content-bg: #14110d;
+  --theme-card-bg: #211c16;
+  --theme-card-border: #362e23;
+  --theme-surface-muted: color-mix(in srgb, #191512 72%, #211c16 28%);
+  --theme-overlay-bg: color-mix(in srgb, #14110d 62%, transparent);
 
   /* 标题栏/导航 */
-  --theme-title-bar-bg: #1a1d24;
-  --theme-title-bar-text: #f3f5f8;
-  --theme-title-bar-icon: #b9c0cc;
-  --theme-title-bar-btn-hover: rgba(255,255,255,0.08);
-  --theme-tab-bar-bg: #171a21;
-  --theme-tab-text: #a6afbd;
-  --theme-tab-active-text: #f4f7fb;
-  --theme-tab-indicator: #8f9fff;
-  --theme-tab-hover-bg: rgba(255,255,255,0.06);
+  --theme-title-bar-bg: #1e1914;
+  --theme-title-bar-text: #f0e9db;
+  --theme-title-bar-icon: #b5a88f;
+  --theme-title-bar-btn-hover: rgba(230,200,150,0.08);
+  --theme-tab-bar-bg: #1b1712;
+  --theme-tab-text: #a3977f;
+  --theme-tab-active-text: #f2ebdd;
+  --theme-tab-indicator: #c9a86a;
+  --theme-tab-hover-bg: rgba(230,200,150,0.06);
 
-  /* 文字 */
-  --theme-text-primary: #f3f5f8;
-  --theme-text-secondary: #c1c8d4;
-  --theme-text-muted: #8f98a8;
+  /* 文字 — 暖白阶 */
+  --theme-text-primary: #f0e9db;
+  --theme-text-secondary: #cfc4ad;
+  --theme-text-muted: #9a8e76;
 
-  /* 语义色 */
-  --theme-primary: #8f9fff;
-  
-  --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
+  /* 语义色 — 主色为古金（烫金点缀：饰线/选中态/主按钮） */
+  --theme-primary: #c9a86a;
+  --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 18%, transparent);
+  --theme-primary-text: #1c150c;
   --theme-color-primary: var(--theme-primary); /* 别名：所有 create 组件引用此名 */
-  --theme-success: #35c98a;
-  --theme-warning: #f0b84b;
-  --theme-error: #ff6d6d;
+  --theme-success: #58b083;
+  --theme-warning: #d9a441;
+  --theme-error: #e0685c;
 
-  /* 资源色 */
-  --theme-hp: #ff5f57;
-  --theme-mp: #5b8cff;
-  --theme-sp: #35c98a;
-  --theme-exp: #f0b84b;
-  --theme-affection: #ff6f91;
-  --theme-affection-bg: rgba(255,111,145,0.18);
-  --theme-affection-text: #ffb2c1;
+  /* 资源色 — 降饱和配暖底 */
+  --theme-hp: #e2685c;
+  --theme-mp: #6f8fd9;
+  --theme-sp: #58b083;
+  --theme-exp: #d9b45c;
+  --theme-affection: #d97b93;
+  --theme-affection-bg: rgba(217,123,147,0.16);
+  --theme-affection-text: #efb4c2;
 
-  /* 品质色 (7级) */
-  --theme-quality-common: #e2e8f0;
-  --theme-quality-uncommon: #56bf7b;
-  --theme-quality-rare: #5d97ff;
-  --theme-quality-epic: #9a72f8;
-  --theme-quality-legendary: #e5c166;
-  --theme-quality-mythic: #e4587d;
-  --theme-quality-unique: #f09f4d;
+  /* 品质色 (7级) — 微暖校色 */
+  --theme-quality-common: #ded5c4;
+  --theme-quality-uncommon: #7fb36f;
+  --theme-quality-rare: #6f9edb;
+  --theme-quality-epic: #a586e0;
+  --theme-quality-legendary: #d9b45c;
+  --theme-quality-mythic: #d3688a;
+  --theme-quality-unique: #e0904f;
 
   /* 货币 */
-  --theme-currency-gold: #f5c24f;
-  --theme-currency-silver: #d4dae4;
-  --theme-currency-copper: #d18b62;
+  --theme-currency-gold: #d9b45c;
+  --theme-currency-silver: #cfc8ba;
+  --theme-currency-copper: #c58a62;
 
   /* 标签 */
-  --theme-tag-present-bg: rgba(53,201,138,0.16);
-  --theme-tag-present-text: #7ce3b4;
-  --theme-tag-contract-bg: rgba(255,111,145,0.16);
-  --theme-tag-contract-text: #ffb0c0;
+  --theme-tag-present-bg: rgba(88,176,131,0.15);
+  --theme-tag-present-text: #8fd4b0;
+  --theme-tag-contract-bg: rgba(217,123,147,0.15);
+  --theme-tag-contract-text: #efb4c2;
 
   /* 登神长阶 */
-  --theme-ascension-element: rgba(91,140,255,0.12);
-  --theme-ascension-power: rgba(240,184,75,0.12);
-  --theme-ascension-law: rgba(154,114,248,0.12);
+  --theme-ascension-element: rgba(111,143,217,0.12);
+  --theme-ascension-power: rgba(217,164,65,0.12);
+  --theme-ascension-law: rgba(165,134,224,0.12);
 
-  /* 排版 */
-  --theme-font-title: 'Cinzel', serif;
+  /* 排版
+     font-title:   标题/叙事衬线 — 中文古籍感的真正来源（思源宋体）
+     font-display: 纯装饰衬线 — 仅用于英文副标/章节数字（Cinzel 无中文字形）
+     font-body:    UI 标签/正文无衬线 */
+  --theme-font-title: 'Noto Serif SC', serif;
+  --theme-font-display: 'Cinzel', 'Noto Serif SC', serif;
   --theme-font-body: 'Noto Sans SC', sans-serif;
 
   /* 间距 */
@@ -94,13 +99,25 @@
   --theme-radius-full: 999px;
 
   /* 阴影 */
-  --theme-shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
+  --theme-shadow-sm: 0 1px 3px rgba(0,0,0,0.22);
   --theme-shadow-md: 0 2px 8px rgba(0,0,0,0.3);
   --theme-shadow-lg: 0 4px 16px rgba(0,0,0,0.4);
+
+  /* 叠纸阴影 — 卡片统一外壳 */
+  --paper-stack: 0 1px 0 0 color-mix(in srgb, var(--theme-card-border) 40%, transparent),
+                 0 4px 12px rgba(0,0,0,0.1);
 
   /* 过渡 */
   --theme-transition-fast: 0.15s ease;
   --theme-transition-normal: 0.25s ease;
+
+  /* z-index 语义阶 */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal-backdrop: 300;
+  --z-modal: 310;
+  --z-toast: 400;
+  --z-tooltip: 500;
 }
 
 /* ===== 无障碍: 减少动态效果 ===== */

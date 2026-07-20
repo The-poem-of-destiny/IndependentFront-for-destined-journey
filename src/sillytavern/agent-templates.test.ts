@@ -466,7 +466,7 @@ describe('formatHistory 读取 per-agent 配置', () => {
     // Phase 10: NARRATIVE resolved into single system message via defaultHistoryLayers(6)
     expect(countHistoryEntries(msgs![0].content)).toBe(8);  // 全部 8 条
   });
-  it('memory_summary 默认(4层)注入最近 8 条历史 (Phase 10: via {{NARRATIVE:layers=4:slice=1500}})', () => {
+  it('memory_summary 默认(4层)注入最近 8 条历史 (Phase 10: via {{NARRATIVE:layers=4}})', () => {
     const ctx = makeContext({
       history: makeHistory(10),
       agentOutputs: new Map([['story', 'SOME_STORY_OUTPUT']]),
@@ -488,7 +488,7 @@ describe('formatHistory 读取 per-agent 配置', () => {
     const u = msgs![0].content;
     expect(countHistoryEntries(u)).toBe(0);
   });
-  it('plot_pre_check 默认注入最近 6 条 (Phase 10: via {{NARRATIVE:layers=3:slice=1000}})', () => {
+  it('plot_pre_check 默认注入最近 6 条 (Phase 10: via {{NARRATIVE:layers=3}})', () => {
     const ctx = makeContext({
       history: makeHistory(10),
       agentOutputs: new Map([['story', 'X']]),
@@ -497,7 +497,8 @@ describe('formatHistory 读取 per-agent 配置', () => {
     const msgs = buildAgentMessages('plot_pre_check', ctx, [cfg]);
     expect(countHistoryEntries(msgs![0].content)).toBe(6);
   });
-  it('story 默认 historySlice=1500 限制正文截断字数', () => {
+  // :slice 已退役，NARRATIVE 不再截断正文
+  it('story 默认不再截断正文（:slice 已退役）', () => {
     const long = '长'.repeat(2000);
     const ctx = makeContext({
       history: [{ role: 'user', content: long } as any, { role: 'assistant', content: long } as any],
@@ -506,9 +507,8 @@ describe('formatHistory 读取 per-agent 配置', () => {
     const cfg = makeCfg('story');
     const msgs = buildAgentMessages('story', ctx, [cfg]);
     const u = msgs![0].content;
-    // story NARRATIVE uses defaultHistorySlice(1500); 2000-char content truncated to 1500
-    // 2 entries * 1500 chars = 3000 '长' chars
-    expect((u.match(/长/g) || []).length).toBe(3000);
+    // :slice retired — full 2000-char content is preserved
+    expect((u.match(/长/g) || []).length).toBe(4000);
   });
   it('不传 config (测试/非 orchestrator 路径) → 走类别默认不报错', () => {
     const ctx = makeContext({ history: makeHistory(4) });

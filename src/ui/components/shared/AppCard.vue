@@ -45,14 +45,17 @@ defineProps<{
 .card-selected {
   border-color: var(--theme-primary);
   background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+  box-shadow:
+    0 0 0 1px var(--theme-primary),
+    0 0 12px color-mix(in srgb, var(--theme-primary) 25%, transparent);
 }
 
-/* Quality borders */
+/* 品质表达：整圈边框色调（配合品质色点/名字着色，禁用左侧色条） */
 .card-common { border-color: var(--theme-card-border); }
-.card-uncommon { border-left: 3px solid var(--theme-quality-uncommon); }
-.card-rare { border-left: 3px solid var(--theme-quality-rare); }
-.card-epic { border-left: 3px solid var(--theme-quality-epic); }
-.card-legendary { border-left: 3px solid var(--theme-quality-legendary); }
-.card-mythic { border-left: 3px solid var(--theme-quality-mythic); }
-.card-unique { border-left: 3px solid var(--theme-quality-unique); }
+.card-uncommon { border-color: color-mix(in srgb, var(--theme-quality-uncommon) 45%, var(--theme-card-border)); }
+.card-rare { border-color: color-mix(in srgb, var(--theme-quality-rare) 45%, var(--theme-card-border)); }
+.card-epic { border-color: color-mix(in srgb, var(--theme-quality-epic) 45%, var(--theme-card-border)); }
+.card-legendary { border-color: color-mix(in srgb, var(--theme-quality-legendary) 45%, var(--theme-card-border)); }
+.card-mythic { border-color: color-mix(in srgb, var(--theme-quality-mythic) 45%, var(--theme-card-border)); }
+.card-unique { border-color: color-mix(in srgb, var(--theme-quality-unique) 45%, var(--theme-card-border)); }
 </style>

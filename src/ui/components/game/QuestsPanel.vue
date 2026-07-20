@@ -208,11 +208,11 @@ const focusQuestData = computed(() => {
 .qc-name { font-weight: 700; font-size: 0.9375rem; color: var(--theme-text-primary); flex: 1; }
 .qc-prio { font-size: 0.625rem; padding: 2px 8px; border-radius: 10px; font-weight: 700; }
 .qc-status { font-size: 0.6875rem; color: var(--theme-text-muted); }
-.p-高 { background: rgba(220,38,38,0.18); color: #ef4444; }
-.p-中 { background: rgba(217,119,6,0.18); color: #f59e0b; }
-.p-低 { background: rgba(107,114,128,0.18); color: #9ca3af; }
+.p-高 { background: color-mix(in srgb, var(--theme-error) 18%, transparent); color: var(--theme-error); }
+.p-中 { background: color-mix(in srgb, var(--theme-warning) 18%, transparent); color: var(--theme-warning); }
+.p-低 { background: var(--theme-surface-muted); color: var(--theme-text-muted); }
 
-.qc-progress { background: var(--theme-surface-muted); border-left: 3px solid var(--theme-primary); padding: 8px 10px; border-radius: 0 4px 4px 0; font-size: 0.8125rem; color: var(--theme-text-secondary); line-height: 1.5; }
+.qc-progress { background: color-mix(in srgb, var(--theme-primary) 6%, var(--theme-surface-muted)); border: 1px solid color-mix(in srgb, var(--theme-primary) 22%, var(--theme-card-border)); padding: 8px 10px; border-radius: var(--theme-radius-sm, 4px); font-size: 0.8125rem; color: var(--theme-text-secondary); line-height: 1.5; }
 .qc-detail { font-size: 0.8125rem; color: var(--theme-text-secondary); line-height: 1.6; }
 .qc-meta { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; border-top: 1px solid var(--theme-card-border); }
 .qc-row { display: flex; gap: 12px; font-size: 0.75rem; }

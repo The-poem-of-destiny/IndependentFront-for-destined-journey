@@ -102,7 +102,7 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
             </div>
           </div>
           <div class="npc-affection" v-if="getAffection(npc.name) !== 0">
-            <div class="aff-bar"><div class="aff-fill" :style="{ width: affectionPercent(npc.name) + '%' }" /></div>
+            <div class="aff-bar"><div class="aff-fill" :style="{ transform: `scaleX(${affectionPercent(npc.name) / 100})` }" /></div>
             <div class="aff-text" :class="{ positive: getAffection(npc.name) > 0, negative: getAffection(npc.name) < 0 }">{{ getAffectionLabelText(npc.name) }} {{ getAffection(npc.name) }}</div>
           </div>
         </div>
@@ -144,7 +144,7 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
             <div class="ov-card" v-if="getAffection(selected.name) !== 0">
               <div class="ov-card-title">好感度</div>
               <div class="aff-bar-row">
-                <div class="aff-track"><div class="aff-track-fill" :style="{ width: affectionPercent(selected.name) + '%' }" /></div>
+                <div class="aff-track"><div class="aff-track-fill" :style="{ transform: `scaleX(${affectionPercent(selected.name) / 100})` }" /></div>
                 <span class="aff-num" :class="{ positive: getAffection(selected.name) > 0, negative: getAffection(selected.name) < 0 }">{{ getAffection(selected.name) }}</span>
                 <span class="aff-label-text" :class="{ positive: getAffection(selected.name) > 0, negative: getAffection(selected.name) < 0 }">{{ getAffectionLabelText(selected.name) }}</span>
               </div>
@@ -292,7 +292,7 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
 
         <!-- 脚本 (装备/技能 tab 时显示) -->
         <div class="script-section" v-if="detailTab === 'equipment' || detailTab === 'skills'">
-          <button class="script-toggle" @click="showScripts = !showScripts">📜 {{ showScripts ? '收起脚本' : '查看脚本' }}</button>
+          <button class="script-toggle" @click="showScripts = !showScripts">{{ showScripts ? '收起脚本' : '查看脚本' }}</button>
           <div class="script-body" v-if="showScripts">
             <template v-if="hasScripts">
               <div v-for="(code, name) in selScripts" :key="name" class="script-block">
@@ -374,21 +374,20 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
   padding: 10px;
   border-radius: var(--theme-radius-sm, 4px);
   cursor: pointer;
-  border: 1px solid transparent;
-  border-left: 3px solid var(--theme-card-border);
+  border: 1px solid var(--theme-card-border);
   background: var(--theme-card-bg);
   align-items: flex-start;
   transition: background 0.12s, border-color 0.15s, box-shadow 0.15s;
 }
 .npc-card:hover {
   background: var(--theme-surface-muted);
-  border-left-color: var(--theme-text-muted);
+  border-color: color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
 }
 .npc-card.selected {
-  border-left-color: var(--theme-primary);
-  background: var(--theme-tab-hover-bg);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-primary) 25%, transparent),
-              0 2px 8px rgba(0,0,0,0.06);
+  border-color: var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+  box-shadow: 0 0 0 1px var(--theme-primary),
+              0 0 12px color-mix(in srgb, var(--theme-primary) 25%, transparent);
 }
 .npc-avatar {
   width: 2.5rem; height: 2.5rem;
@@ -419,10 +418,10 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
 }
 .npc-affection { margin-top: 4px; width: 5rem; flex-shrink: 0; }
 .aff-bar { height: 4px; background: var(--theme-surface-muted); border-radius: 2px; overflow: hidden; margin-bottom: 2px; }
-.aff-fill { height: 100%; background: #c084fc; border-radius: 2px; transition: width 0.3s; }
+.aff-fill { width: 100%; height: 100%; background: var(--theme-quality-epic); border-radius: 2px; transform-origin: left; transition: transform 0.3s ease-out; }
 .aff-text { font-size: 0.5625rem; text-align: right; white-space: nowrap; }
-.aff-text.positive { color: #a78bfa; }
-.aff-text.negative { color: #ef4444; }
+.aff-text.positive { color: var(--theme-quality-epic); }
+.aff-text.negative { color: var(--theme-error); }
 
 /* ═══ 右: 角色详情 — 书卷内页 ═══ */
 .detail {
@@ -509,10 +508,10 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
 /* 好感度 */
 .aff-bar-row { display: flex; align-items: center; gap: 8px; }
 .aff-track { flex: 1; height: 6px; background: var(--theme-surface-muted); border-radius: 3px; overflow: hidden; }
-.aff-track-fill { height: 100%; background: linear-gradient(to right, #a78bfa, #c084fc); border-radius: 3px; transition: width 0.3s; }
+.aff-track-fill { width: 100%; height: 100%; background: var(--theme-quality-epic); border-radius: 3px; transform-origin: left; transition: transform 0.3s ease-out; }
 .aff-num { font-size: 1rem; font-weight: 700; }
-.aff-num.positive { color: #a78bfa; }
-.aff-num.negative { color: #ef4444; }
+.aff-num.positive { color: var(--theme-quality-epic); }
+.aff-num.negative { color: var(--theme-error); }
 .aff-label-text { font-size: 0.75rem; font-weight: 600; }
 .aff-label-text.positive { color: #a78bfa; }
 .aff-label-text.negative { color: #ef4444; }
@@ -561,7 +560,7 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
   background: var(--theme-surface-muted);
   border-radius: var(--theme-radius-sm, 4px);
   margin-bottom: 6px;
-  border-left: 3px solid var(--theme-card-border);
+  border: 1px solid var(--theme-card-border);
 }
 .eq-header, .sk-header { display: flex; align-items: center; gap: 8px; }
 .eq-name, .sk-name {
@@ -643,8 +642,9 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
 .st-time { font-size: 0.625rem; color: var(--theme-text-muted); }
 .st-detail {
   margin-top: 8px; padding: 10px 12px;
-  background: var(--theme-surface-muted); border-radius: var(--theme-radius-md, 6px);
-  border-left: 3px solid var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 6%, var(--theme-surface-muted));
+  border-radius: var(--theme-radius-md, 6px);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 25%, var(--theme-card-border));
 }
 .st-d-name { font-size: 0.8125rem; font-weight: 700; color: var(--theme-text-primary); }
 .st-d-desc { font-size: 0.75rem; color: var(--theme-text-secondary); margin-top: 4px; line-height: 1.5; }

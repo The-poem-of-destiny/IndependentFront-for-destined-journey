@@ -14,12 +14,14 @@ const STEP_LABELS = [
   '剧情规划',
   '确认提交',
 ]
+
+const CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八']
 </script>
 
 <template>
   <nav class="create-steps" aria-label="角色创建步骤">
     <template v-for="(label, i) in STEP_LABELS" :key="i">
-      <!-- 步骤间连线 -->
+      <!-- 章节间丝线 -->
       <div v-if="i > 0" class="step-connector" :class="{ 'connector-done': i <= current }" aria-hidden="true" />
 
       <button
@@ -33,7 +35,7 @@ const STEP_LABELS = [
       >
         <span class="step-num">
           <span v-if="i < current" class="step-check">✓</span>
-          <span v-else>{{ i + 1 }}</span>
+          <span v-else class="step-cn">{{ CN_NUM[i] }}</span>
         </span>
         <span class="step-label">{{ label }}</span>
       </button>
@@ -53,19 +55,19 @@ const STEP_LABELS = [
   overflow-x: auto;
 }
 
-/* ===== 步骤间连線 ===== */
+/* ===== 章节间丝线 ===== */
 .step-connector {
   width: 24px;
-  height: 2px;
+  height: 1px;
   background: var(--theme-card-border);
   flex-shrink: 0;
   transition: background 0.3s ease;
 }
 .connector-done {
-  background: var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 55%, var(--theme-card-border));
 }
 
-/* ===== 步骤点 ===== */
+/* ===== 章节印记 ===== */
 .step-dot {
   display: flex;
   flex-direction: column;
@@ -76,7 +78,6 @@ const STEP_LABELS = [
   cursor: default;
   padding: 4px var(--theme-spacing-sm);
   border-radius: var(--theme-radius-sm);
-  transition: all var(--theme-transition-fast);
   min-width: 64px;
 }
 .step-dot.active,
@@ -91,23 +92,25 @@ const STEP_LABELS = [
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.75rem;
-  font-weight: 700;
+  font-size: 0.8rem;
   background: transparent;
   color: var(--theme-text-muted);
-  border: 2px solid var(--theme-card-border);
-  transition: all var(--theme-transition-fast);
+  border: 1px solid var(--theme-card-border);
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+.step-cn {
+  font-family: var(--theme-font-title, 'Noto Serif SC', serif);
+  font-weight: 700;
 }
 .active .step-num {
-  background: var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 14%, var(--theme-card-bg));
   border-color: var(--theme-primary);
-  color: var(--theme-primary-text);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--theme-primary) 30%, transparent);
+  color: var(--theme-primary);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--theme-primary) 25%, transparent);
 }
 .done .step-num {
-  background: var(--theme-success);
-  border-color: var(--theme-success);
-  color: #fff;
+  border-color: color-mix(in srgb, var(--theme-primary) 55%, var(--theme-card-border));
+  color: color-mix(in srgb, var(--theme-primary) 75%, var(--theme-text-muted));
 }
 .step-check {
   font-size: 0.8rem;
@@ -126,5 +129,12 @@ const STEP_LABELS = [
 }
 .done .step-label {
   color: var(--theme-text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-connector,
+  .step-num {
+    transition: none;
+  }
 }
 </style>

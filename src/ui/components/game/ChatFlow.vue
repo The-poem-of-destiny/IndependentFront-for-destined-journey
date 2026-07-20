@@ -160,6 +160,7 @@ function beautifyStreamingText(raw: string): string {
   <div class="chat-flow">
     <div ref="container" class="chat-messages" tabindex="0">
       <div v-if="!messages || messages.length === 0" class="chat-empty">
+        <span class="chat-empty-glyph" aria-hidden="true">❦</span>
         <p>等待冒险开始...</p>
         <p class="chat-empty-hint">在下方输入你的行动来推进故事</p>
       </div>
@@ -209,7 +210,7 @@ function beautifyStreamingText(raw: string): string {
           >
             <i :class="'system-notif-icon fa-solid ' + eventIconClass(msg.systemEvent.type)" />
             <span class="system-notif-text">{{ msg.content }}</span>
-            <span class="system-notif-chevron">▶</span>
+            <span class="system-notif-chevron">▸</span>
           </div>
 
           <!-- 展开卡片 -->
@@ -224,7 +225,7 @@ function beautifyStreamingText(raw: string): string {
       </template>
 
       <div v-if="isGenerating" class="chat-loading">
-        <span class="loading-dot">●</span> AI 正在生成...
+        <span class="loading-dot">·</span> AI 正在生成...
       </div>
 
       <!-- 🆕 流式正文实时渲染 -->
@@ -249,10 +250,10 @@ function beautifyStreamingText(raw: string): string {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 24px 20px 32px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 22px;
 }
 .chat-empty {
   display: flex;
@@ -260,10 +261,16 @@ function beautifyStreamingText(raw: string): string {
   align-items: center;
   justify-content: center;
   height: 100%;
-  max-width: 800px;
+  max-width: 70ch;
   margin: 0 auto;
   color: var(--theme-text-muted);
   font-size: 1rem;
+  font-family: var(--theme-font-title, serif);
+}
+.chat-empty-glyph {
+  font-size: 1.5rem;
+  color: color-mix(in srgb, var(--theme-primary) 55%, transparent);
+  margin-bottom: 12px;
 }
 .chat-empty-hint {
   font-size: 0.8125rem;
@@ -294,43 +301,36 @@ function beautifyStreamingText(raw: string): string {
 }
 .bubble {
   width: 100%;
-  max-width: 800px;
+  max-width: 72ch;
   padding: 10px 14px;
   border-radius: var(--theme-radius-md, 8px);
   font-size: 0.875rem;
   line-height: 1.6;
 }
+/* 玩家发言 — 手稿旁注: 淡金底 + 整圈细描边 */
 .bubble-player {
-  background: var(--theme-surface-muted);
+  background: color-mix(in srgb, var(--theme-primary) 6%, var(--theme-card-bg));
   color: var(--theme-text-primary);
   text-align: left;
-  border-left: 3px solid var(--theme-primary);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
 }
-.bubble-narrative {
-  background: var(--theme-card-bg);
-  color: var(--theme-text-primary);
-  font-family: var(--theme-font-title, 'Cinzel', serif);
-  text-align: left;
-  border-left: 3px solid var(--theme-text-muted);
-}
+/* 叙事正文 — 书页而非卡片: 无边框无底色，靠留白与衬线成页 */
 .bubble-narrative-full {
   width: 100%;
-  max-width: 800px;
-  padding: 12px 16px;
-  border-radius: var(--theme-radius-md, 8px);
-  background: var(--theme-card-bg);
+  max-width: 70ch;
+  padding: 4px 8px;
   color: var(--theme-text-primary);
-  font-size: 0.875rem;
-  line-height: 1.7;
+  font-size: 0.9375rem;
+  line-height: 1.8;
   text-align: left;
-  border-left: 3px solid var(--theme-text-muted);
 }
 
 /* ===== 叙事正文 ===== */
 .narrative-body {
-  font-family: var(--theme-font-title, 'Cinzel', serif);
+  font-family: var(--theme-font-title, 'Noto Serif SC', serif);
   color: var(--theme-text-primary);
-  line-height: 1.7;
+  line-height: 1.8;
+  text-wrap: pretty;
 }
 
 /* 叙事正文段落排版 */
@@ -346,13 +346,13 @@ function beautifyStreamingText(raw: string): string {
   text-indent: 0;
 }
 
-/* ===== 对话卡片 (Discord 风格) ===== */
+/* ===== 对话卡片 ===== */
 .narrative-body :deep(.dialogue-card) {
   margin: 10px 0;
   padding: 10px 14px;
   border-radius: var(--theme-radius-md, 8px);
-  background: var(--theme-surface-muted);
-  border-left: 4px solid var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-surface-muted) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 22%, var(--theme-card-border));
 }
 .narrative-body :deep(.dialogue-header) {
   display: flex;
@@ -442,20 +442,21 @@ function beautifyStreamingText(raw: string): string {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 14px;
   border-radius: var(--theme-radius-md, 8px);
-  background: var(--theme-surface-muted);
-  border-left: 3px solid var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-surface-muted) 70%, transparent);
+  border: 1px solid var(--theme-card-border);
   cursor: pointer;
-  max-width: 800px;
+  max-width: 72ch;
   width: 100%;
   font-size: 0.8125rem;
   color: var(--theme-text-secondary);
-  transition: background 0.15s;
+  transition: background 0.15s, border-color 0.15s;
   user-select: none;
 }
 .system-notif:hover {
   background: var(--theme-surface-hover, var(--theme-card-bg));
+  border-color: color-mix(in srgb, var(--theme-primary) 35%, var(--theme-card-border));
 }
 .system-notif-icon {
   font-size: 0.8125rem;
@@ -477,7 +478,7 @@ function beautifyStreamingText(raw: string): string {
 
 /* 展开卡片 */
 .system-card-wrapper {
-  max-width: 800px;
+  max-width: 72ch;
   width: 100%;
 }
 </style>

@@ -15,9 +15,10 @@ const outcomeConfig: Record<string, { label: string; icon: string; borderColor: 
 <template>
   <div
     class="sys-card"
-    :style="{ borderLeftColor: outcomeConfig[event.outcome]?.borderColor ?? 'var(--theme-text-muted)' }"
+    :style="{ '--sys-accent': outcomeConfig[event.outcome]?.borderColor ?? 'var(--theme-text-muted)' }"
   >
     <div class="sys-card-header" @click="emit('collapse')">
+      <span class="sys-card-dot" />
       <i :class="'sys-card-icon ' + (outcomeConfig[event.outcome]?.icon ?? 'fa-solid fa-hand-fist')" />
       <span class="sys-card-label">{{ outcomeConfig[event.outcome]?.label ?? event.outcome }}</span>
       <span class="sys-card-rounds">{{ event.details.rounds }} 回合</span>
@@ -54,11 +55,6 @@ const outcomeConfig: Record<string, { label: string; icon: string; borderColor: 
 </style>
 
 <style scoped>
-/* Header overrides */
-.sys-card {
-  border-left: 4px solid var(--theme-text-muted);
-}
-
 .sys-card-icon {
   font-size: 0.875rem;
 }

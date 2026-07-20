@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SaveSlot, CharacterState, ChatMessage, MemoryRecord, PlotEvent, PlotOutline, CombatState, SaveProfile } from '@engine/types'
-import { getSave, getSaves, getCharacters, getMemories, getPlotEvents, getSaveProfile } from '@engine/database'
+import { getSave, getSaves, getCharacters, getMemories, getPlotEvents, getSaveProfile, getLatestPlotOutline } from '@engine/database'
 import { saveMessage, getMessages, saveSaveSlot } from '@engine/database'
 
 /** 单条 Agent 调试日志（含完整请求/响应上下文） */
@@ -169,6 +169,15 @@ export const useGameStore = defineStore('game', () => {
     pendingOptions.value = options
   }
 
+  // === 背包聚焦 — 持有物点击 → 打开背包并选中该物品 ===
+  const pendingItemFocus = ref<{ category: 'inventory' | 'equipment' | 'skills'; itemName: string } | null>(null)
+
+  function focusItem(category: 'inventory' | 'equipment' | 'skills', itemName: string) {
+    pendingItemFocus.value = { category, itemName }
+    activeModal.value = 'items'
+  }
+  function clearItemFocus() { pendingItemFocus.value = null }
+
   function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value }
   function showModal(id: string) { activeModal.value = id }
   function closeModal() { activeModal.value = null }
@@ -284,17 +293,18 @@ export const useGameStore = defineStore('game', () => {
     }))
 
     // 加载关联数据（始终覆写，DB 返回 undefined 时写默认空值）
-    const [chars, mems, events, profile] = await Promise.all([
+    const [chars, mems, events, profile, outline] = await Promise.all([
       getCharacters(saveId),
       getMemories(saveId),
       getPlotEvents(saveId),
       getSaveProfile(saveId),
+      getLatestPlotOutline(saveId),
     ])
 
     characters.value = (chars as CharacterState[]) ?? []
     recentMemories.value = (mems as MemoryRecord[]) ?? []
     activePlotEvents.value = (events as PlotEvent[]) ?? []
-    plotOutline.value = null
+    plotOutline.value = (outline as PlotOutline) ?? null
     activeCombat.value = null
     saveProfile.value = (profile as SaveProfile) ?? null
 
@@ -314,10 +324,12 @@ export const useGameStore = defineStore('game', () => {
   async function refreshFromDb() {
     if (!activeSaveId.value) return
     try {
-      const [save, dbChars, profile] = await Promise.all([
+      const [save, dbChars, profile, outline, dbPlotEvents] = await Promise.all([
         getSave(activeSaveId.value),
         getCharacters(activeSaveId.value),   // M6: saveId 索引查询（M1 建索引；侧链 NPC 由 applyAddCharacter 注入 saveId）
         getSaveProfile(activeSaveId.value),
+        getLatestPlotOutline(activeSaveId.value),
+        getPlotEvents(activeSaveId.value),
       ])
 
       // 1. save.metadata（totalTurns / openingPromptConsumed 等）
@@ -340,6 +352,10 @@ export const useGameStore = defineStore('game', () => {
 
       // 3. saveProfile（gameTime / fp / quests / news）
       if (profile) saveProfile.value = profile as SaveProfile
+
+      // 4. 剧情大纲 + 事件回读（post_check 落库后 PlotPanel 需要最新态）
+      if (outline) plotOutline.value = outline as PlotOutline
+      if (dbPlotEvents) activePlotEvents.value = dbPlotEvents as PlotEvent[]
     } catch (err) {
       console.error('[game-store] refreshFromDb 失败:', err)
     }
@@ -374,6 +390,7 @@ export const useGameStore = defineStore('game', () => {
     pendingInput, fillInput, clearPendingInput,
     hasOpeningPromptConsumed, openingPrompt, markOpeningPromptConsumed,
     pendingOptions, setPendingOptions,
+    pendingItemFocus, focusItem, clearItemFocus,
     agentStatus, agentDurations, updateAgentStatus, clearAgentStatus, clearAllAgentStatus,
     agentLog, addAgentLogEntry, clearAgentLog,
     persistMessage, restoreMessages,

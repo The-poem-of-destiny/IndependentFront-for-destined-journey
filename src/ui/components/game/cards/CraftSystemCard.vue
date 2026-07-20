@@ -24,9 +24,10 @@ const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
 </script>
 
 <template>
-  <div class="sys-card" :style="{ borderLeft: `4px solid ${qualityVar(event.quality)}` }">
+  <div class="sys-card" :style="{ '--sys-accent': qualityVar(event.quality) }">
     <!-- Header -->
     <div class="sys-card-header" @click="emit('collapse')">
+      <span class="sys-card-dot" />
       <i :class="'fa-solid ' + (industryIcons[event.details.craftParams.industry] ?? industryIconsDefault) + ' sys-card-icon'" />
       <span class="sys-card-title">{{ event.quality }} · {{ event.productName }}</span>
       <span v-if="!event.details.success" class="sys-card-fail">失败</span>
@@ -172,7 +173,7 @@ const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
   border-radius: 3px;
   font-size: 0.625rem;
   background: var(--theme-primary);
-  color: #fff;
+  color: var(--theme-primary-text);
 }
 
 .req-desc {

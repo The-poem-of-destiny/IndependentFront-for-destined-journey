@@ -139,6 +139,66 @@ function formatGameTime(gt?: GameTime): string {
     `${String(gt.hour).padStart(2, '0')}:${String(gt.minute).padStart(2, '0')}`;
 }
 
+// ========== 剧情 Agent 动态上下文 (步5 每轮管线接线) ==========
+
+/** 大纲摘要块: 标题/版本/摘要 + 当前章节 + 正文（截断）。大纲由 game-pipeline buildContext 挂到 ctx.plotOutline */
+function formatPlotOutline(ctx: AgentContext): string {
+  const o = (ctx as any).plotOutline as {
+    title?: string; summary?: string; content?: string; version?: number;
+    chapters?: Array<{ title: string; summary: string; status: string }>;
+  } | undefined | null;
+  if (!o) return '';
+  const lines: string[] = [];
+  lines.push(`《${o.title || '未命名大纲'}》(v${o.version ?? 1})${o.summary ? ` — ${o.summary}` : ''}`);
+  const current = o.chapters?.find(c => c.status === 'active') ?? o.chapters?.find(c => c.status === 'pending');
+  if (current) lines.push(`当前章节: ${current.title}${current.summary ? ` — ${current.summary}` : ''}`);
+  if (o.chapters?.length) {
+    lines.push(`章节进度: ${o.chapters.map(c => `${c.title}[${c.status}]`).join(' → ')}`);
+  }
+  if (o.content) lines.push(o.content.slice(0, 2000));
+  return lines.join('\n');
+}
+
+/** 活跃/待触发事件全量列表（含 visibility=hidden——防剧透只在 UI 层，对 AI 必须可见）: 标题+描述+触发条件 */
+function formatPlotEventsFull(ctx: AgentContext): string {
+  const events = (ctx.plotEvents ?? []).filter(e => e.status === 'active' || e.status === 'pending');
+  if (!events.length) return '';
+  return events.map(e => {
+    const cond = e.triggerCondition ? `\n触发条件: ${e.triggerCondition}` : '';
+    return `《${e.title}》(${e.status})\n${e.description.slice(0, 300)}${cond}`;
+  }).join('\n---\n');
+}
+
+/** 角色状态摘要（位置/时间/主角层级） */
+function formatStateSummary(ctx: AgentContext): string {
+  const parts: string[] = [];
+  const time = formatGameTime(ctx.gameTime);
+  if (time) parts.push(`时间: ${time}`);
+  const player = ctx.characters?.find(c => c.type === 'player') ?? ctx.characters?.[0];
+  if (player?.location) parts.push(`位置: ${player.location}`);
+  if (player) parts.push(`主角: ${player.name} Lv.${player.level} ${player.tierName}`);
+  return parts.join(' | ');
+}
+
+/** plot_outline 动态注入: 剧情配置（含雷点/偏向）+ 位置/时间 + 近期剧情摘要 */
+function formatPlotSettingsContext(ctx: AgentContext): string {
+  const ps = ctx.plotSettings;
+  if (!ps) return '';
+  const lines: string[] = [`模式: ${ps.mode}`];
+  if (ps.tabooContent) lines.push(`雷点（绝对禁止生成的内容，优先级高于一切偏好）: ${ps.tabooContent}`);
+  if (ps.mode === 'main' && ps.main) {
+    lines.push(`主线持续年份: ${ps.main.durationYears}`);
+    lines.push(`世界书外NPC: ${ps.main.allowNonWorldbookNpc ? '允许' : '禁止'}`);
+    if (ps.main.difficultyTier) lines.push(`难度层级: T${ps.main.difficultyTier}`);
+    if (ps.main.genrePreference?.length) lines.push(`剧情偏向: ${ps.main.genrePreference.join('/')}`);
+    if (ps.main.customPreference) lines.push(`自定义偏好: ${ps.main.customPreference}`);
+  }
+  if (ps.mode === 'side' && ps.side) {
+    if (ps.side.focusRegion) lines.push(`专注区域: ${ps.side.focusRegion}`);
+  }
+  return lines.join('\n');
+}
+
 // ========== Agent Templates (Phase 10: Minimal Stubs) ==========
 // 完整提示词存放位置:
 //   - Story Agent: agent-config.json 的 preset → assemblePresetContent()
@@ -160,9 +220,22 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
   // ---- plot_pre_check: 剧情触发检查（正文前，Phase 4） ----
   plot_pre_check: {
     fixedSystem: '剧情触发检查系统。根据剧情大纲和当前状况，判断需要触发哪些剧情事件、需要召回哪些剧情背景信息。完整提示词见 agent-config.json 和模板系统。',
-    fixedExamples: '{"triggeredEvents": [{"id": "evt_01", "reason": "触发原因"}], "relevantBackground": "剧情背景摘要"}',
-    variableContext: (ctx: AgentContext) => formatPlotEvents(ctx) ? `**活跃剧情事件:**\n${formatPlotEvents(ctx)}` : '',
-    variableInstruction: (ctx: AgentContext) => `**用户输入:** ${ctx.userInput}\n\n请根据剧情大纲和当前状况，判断需要触发哪些剧情事件。`,
+    fixedExamples: '{"triggeredEvents": [{"title": "事件标题", "reason": "触发原因"}], "relevantBackground": "剧情背景摘要", "directive": "本轮推进建议"}',
+    variableContext: (ctx: AgentContext) => {
+      const parts: string[] = [];
+      const outline = formatPlotOutline(ctx);
+      if (outline) parts.push(`<剧情大纲>\n${outline}\n</剧情大纲>`);
+      const events = formatPlotEventsFull(ctx);
+      if (events) parts.push(`<剧情事件列表>\n${events}\n</剧情事件列表>`);
+      const state = formatStateSummary(ctx);
+      if (state) parts.push(`<当前状态>\n${state}\n</当前状态>`);
+      const history = ctx.history.slice(-4)
+        .map(m => `[${m.role === 'system' ? 'assistant' : m.role}]: ${m.content.slice(0, 1000)}`)
+        .join('\n');
+      if (history) parts.push(`<最近对话>\n${history}\n</最近对话>`);
+      return parts.join('\n\n');
+    },
+    variableInstruction: (ctx: AgentContext) => `**用户输入:** ${ctx.userInput}\n\n请根据剧情大纲和当前状况，判断需要触发哪些剧情事件（事件寻址只用标题）。`,
   },
 
   // ---- story: 正文 AI (核心) ----
@@ -219,19 +292,41 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
   // ---- plot_post_check: 剧情修正（正文后，Phase 4） ----
   plot_post_check: {
     fixedSystem: '世界线修正系统。分析剧情发展是否导致世界线变动，判断是否需要修改剧情大纲和事件状态（minor/moderate/major）。完整提示词见 agent-config.json 和模板系统。',
-    fixedExamples: '{"worldLineChanged": false, "changeLevel": "none", "outlineChanges": {"action": "none"}, "eventUpdates": []}',
-    variableContext: (ctx: AgentContext) => formatPlotEvents(ctx) ? `**活跃剧情事件:**\n${formatPlotEvents(ctx)}` : '',
+    fixedExamples: '{"worldLineChanged": false, "changeLevel": "none", "outlineChanges": {"action": "none", "changes": ""}, "eventUpdates": [{"title": "事件标题", "action": "complete"}], "newChildEvents": []}',
+    variableContext: (ctx: AgentContext) => {
+      const parts: string[] = [];
+      const outline = formatPlotOutline(ctx);
+      if (outline) parts.push(`<剧情大纲>\n${outline}\n</剧情大纲>`);
+      const events = formatPlotEventsFull(ctx);
+      if (events) parts.push(`<剧情事件列表>\n${events}\n</剧情事件列表>`);
+      const state = formatStateSummary(ctx);
+      if (state) parts.push(`<当前状态>\n${state}\n</当前状态>`);
+      return parts.join('\n\n');
+    },
     variableInstruction: (ctx: AgentContext) => {
       const storyOutput = ctx.agentOutputs?.get('story') ?? '';
-      return `**本轮正文 AI 输出:**\n${storyOutput}\n\n**用户输入:** ${ctx.userInput}\n\n请分析是否有世界线变动。`;
+      return `**本轮正文 AI 输出:**\n${storyOutput}\n\n**用户输入:** ${ctx.userInput}\n\n请分析是否有世界线变动，更新剧情事件状态（事件寻址只用标题）。`;
     },
   },
 
   // ---- plot_outline: 大纲生成（Phase 4） ----
   plot_outline: {
     fixedSystem: '大纲生成系统。根据剧情配置、世界观设定和角色信息生成完整剧情大纲（含章节划分和自检报告JSON）。完整提示词见 agent-config.json 和模板系统。',
-    fixedExamples: '{"content": "# 大纲内容...", "chapters": [{"title": "章节标题", "summary": "章节摘要"}], "selfCritique": {"score": 7}}',
-    variableContext: (ctx: AgentContext) => formatCharacters(ctx) !== '无角色数据' ? `**角色信息:**\n${formatCharacters(ctx)}` : '',
+    fixedExamples: '{"title": "大纲标题", "summary": "一句话摘要", "content": "# 大纲内容...", "chapters": [{"title": "章节标题", "summary": "章节摘要", "keyEvents": [{"title": "", "description": "", "triggerHint": ""}]}], "selfCritique": {"score": 7}}',
+    variableContext: (ctx: AgentContext) => {
+      const parts: string[] = [];
+      const settings = formatPlotSettingsContext(ctx);
+      if (settings) parts.push(`<剧情配置>\n${settings}\n</剧情配置>`);
+      const state = formatStateSummary(ctx);
+      if (state) parts.push(`<当前状态>\n${state}\n</当前状态>`);
+      const chars = formatCharacters(ctx);
+      if (chars && chars !== '无角色数据') parts.push(`<角色信息>\n${chars}\n</角色信息>`);
+      const memories = ctx.memories?.slice(-5)
+        .map(m => `${m.timeRange.start}~${m.timeRange.end}: ${m.content.slice(0, 200)}`)
+        .join('\n');
+      if (memories) parts.push(`<近期剧情摘要>\n${memories}\n</近期剧情摘要>`);
+      return parts.join('\n\n');
+    },
     variableInstruction: (ctx: AgentContext) => `**用户输入:** ${ctx.userInput}\n\n请根据以上信息生成一份剧情大纲。`,
   },
 
@@ -297,6 +392,28 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
 export function getAgentTemplate(agentId: string): AgentPromptTemplate | undefined {
   return AGENT_TEMPLATES[agentId];
 }
+
+/**
+ * 步5: 剧情 Agent 的富上下文块 — 覆盖模板里的 {{PLOT_EVENTS}} 占位符。
+ * 默认占位符只给 [id]+标题+截断描述，剧情 Agent 需要大纲/触发条件/状态摘要。
+ * hidden 事件对 AI 必须可见（防剧透只在 UI 层）。
+ */
+export function buildPlotContextBlock(agentId: string, ctx: AgentContext): string {
+  const parts: string[] = [];
+  if (agentId === 'plot_outline') {
+    const settings = formatPlotSettingsContext(ctx);
+    if (settings) parts.push(`<剧情配置>\n${settings}\n</剧情配置>`);
+  }
+  const outline = formatPlotOutline(ctx);
+  if (outline) parts.push(`<剧情大纲>\n${outline}\n</剧情大纲>`);
+  const events = formatPlotEventsFull(ctx);
+  if (events) parts.push(`<剧情事件列表>\n${events}\n</剧情事件列表>`);
+  const state = formatStateSummary(ctx);
+  if (state) parts.push(`<当前状态>\n${state}\n</当前状态>`);
+  return parts.join('\n\n');
+}
+
+const PLOT_AGENT_IDS = new Set(['plot_pre_check', 'plot_post_check', 'plot_outline']);
 
 /**
  * Phase 10: Build agent messages using the placeholder template system.
@@ -370,6 +487,12 @@ export function buildAgentMessages(
     'SYS_PROMPT': sysPromptContent,
     ...(localParams ?? {}),
   };
+
+  // 步5: 剧情 Agent 用富上下文块覆盖 {{PLOT_EVENTS}}（大纲+触发条件+hidden事件+状态摘要）
+  if (PLOT_AGENT_IDS.has(agentId) && !('PLOT_EVENTS' in allLocalParams)) {
+    const plotBlock = buildPlotContextBlock(agentId, tplCtx);
+    if (plotBlock) allLocalParams['PLOT_EVENTS'] = plotBlock;
+  }
 
   const resolved = resolveTemplateWithGlobals(
     template,

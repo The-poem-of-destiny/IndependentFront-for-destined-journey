@@ -184,8 +184,8 @@ const skCost = computed(() => props.skillCost ?? roundCost(props.skills))
   flex-shrink: 0;
 }
 .remove-btn:hover {
-  color: #f44336;
-  background: rgba(244, 67, 54, 0.1);
+  color: var(--theme-error);
+  background: color-mix(in srgb, var(--theme-error) 10%, transparent);
 }
 
 /* ===== 空状态 ===== */

@@ -106,15 +106,19 @@ function getDefaults(): Record<string, any> {
     worldBooks: [] as WorldBook[],
     activeWorldBookId: null as string | null,
     worldBookDirty: false,
-    disableWorldBookProtection: false,  // 取消内置书只读保护
+    allowEditBuiltInBooks: false,  // 允许编辑内置世界书（默认只读保护）
 
-    // 剧情系统
+    // 剧情系统（新档默认值 — 捏人页初始化时读入，字段形状对齐 create-store / types.ts PlotSettings）
     plotMode: 'off' as string,
-    plotDuration: 5,
-    plotDifficulty: 'dynamic' as string,
-    plotAllowExternalNPC: true,
-    plotGenres: ['combat', 'social'] as string[],
-    plotCustomPref: '',
+    plotDurationYears: 5,
+    plotDifficultyTier: 'adaptive' as string | number,
+    plotAllowNonWorldbookNpc: true,
+    plotGenrePreference: ['combat', 'social'] as string[],
+    plotCustomPreference: '',
+    plotFocusRegion: '',
+    plotTabooContent: '',
+    plotChapterCount: 0 as number,
+    plotEventsPerChapter: 0 as number,
 
     // 记忆 & 缓存
     memoryRecallCount: 20,
@@ -165,11 +169,8 @@ export const useSettingsStore = defineStore('settings', () => {
       for (const book of builtIn) {
         if (!existingIds.has(book.id)) {
           existing.push(book)
-        } else {
-          // 更新内置书条目（用户可能通过开关修改了 enabled/constant）
-          const idx = existing.findIndex(b => b.id === book.id)
-          if (idx >= 0) existing[idx] = book
         }
+        // 已有 → 保留 localStorage 版本（用户编辑不丢）
       }
       settings.value.worldBooks = [...existing]
     } catch {

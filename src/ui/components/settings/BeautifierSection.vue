@@ -253,15 +253,15 @@ function importRules() {
         </div>
       </AppCard>
 
-      <!-- 🔗 自动管理 -->
+      <!-- 自动管理 -->
       <AppCard v-if="autoManagedRules.length > 0" padding="md" style="margin-top: 12px">
-        <h4>🔗 自动管理</h4>
+        <h4>自动管理</h4>
         <p class="text-muted text-sm" style="margin-bottom: 12px">
           由世界书或角色自动激活，不可手动操作。
         </p>
         <div v-for="rule in autoManagedRules" :key="rule.id" class="rule-item rule-locked">
           <div class="rule-header">
-            <span class="rule-lock-icon">🔒</span>
+            <span class="rule-lock-icon">—</span>
             <span class="rule-name">{{ rule.name }}</span>
             <span class="rule-scope text-xs text-muted">{{ scopeLabel(rule.scope) }}</span>
             <span class="rule-source-tag">{{ rule.group }}</span>
@@ -269,9 +269,9 @@ function importRules() {
         </div>
       </AppCard>
 
-      <!-- ✅ 已启用 -->
+      <!-- 已启用 -->
       <AppCard v-if="manualEnabledRules.length > 0" padding="md" style="margin-top: 12px">
-        <h4>✅ 已启用</h4>
+        <h4>已启用</h4>
         <p class="text-muted text-sm" style="margin-bottom: 12px">
           当前生效的规则，可手动启用/禁用。
         </p>
@@ -294,13 +294,13 @@ function importRules() {
         </div>
       </AppCard>
 
-      <!-- 📦 可用规则库 -->
+      <!-- 可用规则库 -->
       <AppCard padding="md" style="margin-top: 12px">
         <div class="library-header" @click="toggleLibrary">
           <h4 style="margin:0;cursor:pointer">
-            📦 可用规则库 · {{ disabledRules.length }} 条未启用
+            可用规则库 · {{ disabledRules.length }} 条未启用
           </h4>
-          <span class="library-arrow">{{ libraryExpanded ? '▼' : '▶' }}</span>
+          <span class="library-arrow">{{ libraryExpanded ? '▼' : '▸' }}</span>
         </div>
         <p v-if="!libraryExpanded" class="text-muted text-sm" style="margin-top:6px">
           <template v-for="([group, rules], i) in disabledGrouped" :key="group">
@@ -334,10 +334,10 @@ function importRules() {
         </div>
       </AppCard>
 
-      <!-- 🛠 自定义规则 -->
+      <!-- 自定义规则 -->
       <AppCard padding="md" style="margin-top: 12px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <h4 style="margin:0">🛠 自定义规则</h4>
+          <h4 style="margin:0">自定义规则</h4>
           <AppButton variant="primary" size="sm" @click="openAdd">＋ 添加规则</AppButton>
         </div>
         <p v-if="userRules.length === 0" class="text-muted text-sm" style="text-align:center;padding:24px">
@@ -353,7 +353,7 @@ function importRules() {
             <span class="rule-name">{{ rule.name }}</span>
             <span class="rule-scope text-xs text-muted">{{ scopeLabel(rule.scope) }}</span>
             <button class="rule-action-btn" @click="openEdit(rule)" title="编辑">✎</button>
-            <button class="rule-action-btn rule-delete-btn" @click="deleteRule(rule)" title="删除">🗑</button>
+            <button class="rule-action-btn rule-delete-btn" @click="deleteRule(rule)" title="删除"></button>
           </div>
           <div v-if="expanded[rule.id]" class="rule-detail">
             <div class="rule-field"><span>正则:</span><code>{{ rule.pattern }}</code></div>
@@ -364,8 +364,8 @@ function importRules() {
 
       <!-- 导入/导出 -->
       <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
-        <AppButton variant="secondary" size="sm" @click="exportRules">📤 导出规则</AppButton>
-        <AppButton variant="secondary" size="sm" @click="importRules">📥 导入规则</AppButton>
+        <AppButton variant="secondary" size="sm" @click="exportRules">导出规则</AppButton>
+        <AppButton variant="secondary" size="sm" @click="importRules">导入规则</AppButton>
       </div>
     </template>
   </section>
@@ -389,7 +389,7 @@ function importRules() {
 
 /* ═══ 规则行 ═══ */
 .rule-item {
-  border-bottom: 1px solid var(--theme-border, rgba(255,255,255,0.04));
+  border-bottom: 1px solid var(--theme-card-border);
   padding: 8px 0;
 }
 .rule-item:last-child {
@@ -568,6 +568,6 @@ function importRules() {
 }
 .toggle-input:checked + .toggle-slider::before {
   transform: translateX(18px);
-  background: #fff;
+  background: var(--theme-primary-text);
 }
 </style>

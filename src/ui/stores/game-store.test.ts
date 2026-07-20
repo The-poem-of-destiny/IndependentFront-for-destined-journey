@@ -11,10 +11,11 @@ import { useGameStore } from './game-store'
 import {
   initializeDatabase, clearAllData,
   saveSaveSlot, saveCharacter, saveSaveProfile,
+  savePlotOutline, savePlotEvents,
   getDatabase,
 } from '@engine/database'
 import { createDefaultCharacterState } from '@engine/types'
-import type { SaveSlot, SaveProfile, CharacterState } from '@engine/types'
+import type { SaveSlot, SaveProfile, CharacterState, PlotOutline, PlotEvent } from '@engine/types'
 
 // ===== 辅助 =====
 
@@ -67,6 +68,43 @@ function makeChar(overrides: Partial<CharacterState> = {}): CharacterState {
 function makeStore() {
   setActivePinia(createPinia())
   return useGameStore()
+}
+
+function makeOutline(overrides: Partial<PlotOutline> = {}): PlotOutline {
+  return {
+    id: crypto.randomUUID(),
+    saveId: SAVE_ID,
+    mode: 'main',
+    title: '血色纹章',
+    summary: '一句话摘要',
+    content: '# 大纲正文',
+    chapters: [{ title: '第一章', summary: '章节摘要', status: 'pending' }],
+    confirmed: true,
+    version: 1,
+    timeRange: { start: '复兴纪元001年01月01日', end: '复兴纪元005年12月30日' },
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    ...overrides,
+  }
+}
+
+function makePlotEvent(overrides: Partial<PlotEvent> = {}): PlotEvent {
+  return {
+    id: crypto.randomUUID(),
+    saveId: SAVE_ID,
+    title: '初入王都',
+    description: '主角抵达艾瑟嘉德',
+    status: 'pending',
+    childrenIds: [],
+    order: 0,
+    relatedCharacterIds: [],
+    worldLineChanged: false,
+    visibility: 'hidden',
+    depth: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    ...overrides,
+  }
 }
 
 // ===== refreshFromDb =====
@@ -158,6 +196,56 @@ describe('refreshFromDb', () => {
     expect(store.activeSave?.metadata?.totalTurns).toBe(3)
     expect(store.saveProfile?.fp).toBe(5)
     expect(store.saveProfile?.gameTime?.minute).toBe(10)
+  })
+
+  it('剧情大纲与事件应回读最新值（post_check 落库后 PlotPanel 可见）', async () => {
+    store.activeSaveId = SAVE_ID
+    await saveSaveSlot(makeSaveSlot())
+
+    await savePlotOutline(makeOutline({ title: '血色纹章' }))
+    const chapter = makePlotEvent({ id: 'ch1', depth: 0, childrenIds: ['ke1'] })
+    const keyEvent = makePlotEvent({ id: 'ke1', title: '命运初显', depth: 1, parentId: 'ch1' })
+    await savePlotEvents([chapter, keyEvent])
+
+    await store.refreshFromDb()
+    expect(store.plotOutline?.title).toBe('血色纹章')
+    expect(store.plotOutline?.confirmed).toBe(true)
+    expect(store.activePlotEvents).toHaveLength(2)
+    expect(store.activePlotEvents.map(e => e.title)).toContain('命运初显')
+  })
+})
+
+// ===== loadSave 剧情回读 =====
+
+describe('loadSave 剧情回读', () => {
+  beforeEach(async () => {
+    try { await clearAllData() } catch { /* db may not exist yet */ }
+    await initializeDatabase()
+  })
+
+  it('loadSave 应并行回读最新大纲与事件树', async () => {
+    await saveSaveSlot(makeSaveSlot())
+    await savePlotOutline(makeOutline({ title: '旧版', version: 1, updatedAt: Date.now() - 1000 }))
+    await savePlotOutline(makeOutline({ title: '确认版', version: 2 }))
+    await savePlotEvents([
+      makePlotEvent({ id: 'ch1', title: '第一章 序幕', depth: 0, childrenIds: ['ke1'] }),
+      makePlotEvent({ id: 'ke1', title: '初入王都', depth: 1, parentId: 'ch1' }),
+    ])
+
+    const store = makeStore()
+    await store.loadSave(SAVE_ID)
+
+    expect(store.plotOutline?.title).toBe('确认版')
+    expect(store.activePlotEvents).toHaveLength(2)
+    expect(store.activePlotEvents.every(e => e.visibility === 'hidden')).toBe(true)
+  })
+
+  it('无大纲的存档 loadSave 后 plotOutline 应为 null', async () => {
+    await saveSaveSlot(makeSaveSlot())
+    const store = makeStore()
+    await store.loadSave(SAVE_ID)
+    expect(store.plotOutline).toBeNull()
+    expect(store.activePlotEvents).toHaveLength(0)
   })
 })
 

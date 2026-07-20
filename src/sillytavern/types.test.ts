@@ -136,6 +136,7 @@ describe('resolvePlotTree', () => {
       relatedCharacterIds: [],
       location: undefined,
       worldLineChanged: false,
+      visibility: 'hidden',
       depth: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),

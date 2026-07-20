@@ -127,6 +127,7 @@ function makePlotEvent(overrides: Partial<PlotEvent> = {}): PlotEvent {
     relatedCharacterIds: ['npc_001'],
     depth: 1,
     worldLineChanged: false,
+    visibility: 'revealed',
     createdAt: Date.now(),
     updatedAt: Date.now(),
     ...overrides,

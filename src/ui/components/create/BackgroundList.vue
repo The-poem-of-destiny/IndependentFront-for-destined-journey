@@ -136,7 +136,7 @@ const selectedId = computed(() => props.modelValue?.id ?? null)
 
       <!-- 不满足条件警告 -->
       <div v-if="!checkConditions(bg).valid" class="bg-warning">
-        ⚠️ 不满足限定条件：
+        不满足限定条件：
         <ul class="bg-missing">
           <li v-for="m in checkConditions(bg).missing" :key="m">{{ m }}</li>
         </ul>
@@ -223,7 +223,7 @@ const selectedId = computed(() => props.modelValue?.id ?? null)
   justify-content: center;
   border-radius: 50%;
   background: var(--theme-color-primary);
-  color: #fff;
+  color: var(--theme-primary-text);
   font-size: 0.75em;
   font-weight: 700;
 }
@@ -244,14 +244,14 @@ const selectedId = computed(() => props.modelValue?.id ?? null)
   line-height: 1.4;
 }
 .req-tag.met {
-  background: rgba(76, 175, 80, 0.12);
-  color: #4caf50;
-  border-color: rgba(76, 175, 80, 0.3);
+  background: color-mix(in srgb, var(--theme-success) 12%, transparent);
+  color: var(--theme-success);
+  border-color: color-mix(in srgb, var(--theme-success) 30%, transparent);
 }
 .req-tag.unmet {
-  background: rgba(244, 67, 54, 0.1);
-  color: #f44336;
-  border-color: rgba(244, 67, 54, 0.25);
+  background: color-mix(in srgb, var(--theme-error) 10%, transparent);
+  color: var(--theme-error);
+  border-color: color-mix(in srgb, var(--theme-error) 25%, transparent);
 }
 
 /* ===== 描述 ===== */
@@ -274,10 +274,10 @@ const selectedId = computed(() => props.modelValue?.id ?? null)
 .bg-warning {
   margin-top: 0.5em;
   padding: 0.4em 0.6em;
-  border-left: 3px solid #f44336;
-  background: rgba(244, 67, 54, 0.06);
-  border-radius: 0 var(--theme-radius-sm) var(--theme-radius-sm) 0;
-  color: #e57373;
+  background: color-mix(in srgb, var(--theme-error) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-error) 30%, var(--theme-card-border));
+  border-radius: var(--theme-radius-sm);
+  color: var(--theme-error);
   font-size: 0.72em;
   font-weight: 600;
 }
@@ -300,7 +300,7 @@ const selectedId = computed(() => props.modelValue?.id ?? null)
   padding: var(--theme-spacing-sm);
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-md);
-  background: var(--theme-bg-primary);
+  background: var(--theme-content-bg);
   color: var(--theme-text-primary);
   font-size: 0.82em;
   line-height: 1.6;

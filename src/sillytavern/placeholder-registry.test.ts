@@ -178,7 +178,8 @@ describe('NARRATIVE', () => {
     expect(lines[1]).toContain('[assistant]: f');
   });
 
-  it('respects slice param', () => {
+  // :slice 已退役，不再截断正文
+  it('does not truncate content (slice retired)', () => {
     const ctx = mockCtx({
       history: [
         { id: '1', role: 'user', content: 'a very long message that should be truncated', timestamp: 1 },
@@ -186,9 +187,9 @@ describe('NARRATIVE', () => {
       ],
     });
     const config = mockConfig({ agentId: 'story' });
-    const result = PLACEHOLDER_REGISTRY['NARRATIVE'](ctx, config, { layers: '1', slice: '5' });
-    expect(result).toContain('[user]: a ver');
-    expect(result).not.toContain('truncated');
+    const result = PLACEHOLDER_REGISTRY['NARRATIVE'](ctx, config, { layers: '1' });
+    expect(result).toContain('[user]: a very long message that should be truncated');
+    expect(result).toContain('truncated');
   });
 
   it('handles empty history', () => {
@@ -316,6 +317,7 @@ describe('PLOT_EVENTS', () => {
         childrenIds: [],
         relatedCharacterIds: [],
         worldLineChanged: false,
+        visibility: 'revealed',
         depth: 0, order: 1,
         createdAt: 1, updatedAt: 2,
       },
@@ -326,6 +328,7 @@ describe('PLOT_EVENTS', () => {
         childrenIds: [],
         relatedCharacterIds: [],
         worldLineChanged: false,
+        visibility: 'revealed',
         depth: 0, order: 2,
         createdAt: 1, updatedAt: 2,
       },
@@ -348,6 +351,7 @@ describe('PLOT_EVENTS', () => {
         childrenIds: [],
         relatedCharacterIds: [],
         worldLineChanged: false,
+        visibility: 'revealed',
         depth: 0, order: 1,
         createdAt: 1, updatedAt: 2,
       },
@@ -358,6 +362,7 @@ describe('PLOT_EVENTS', () => {
         childrenIds: [],
         relatedCharacterIds: [],
         worldLineChanged: false,
+        visibility: 'revealed',
         depth: 0, order: 2,
         createdAt: 1, updatedAt: 2,
       },
@@ -377,6 +382,7 @@ describe('PLOT_EVENTS', () => {
         childrenIds: [],
         relatedCharacterIds: [],
         worldLineChanged: false,
+        visibility: 'revealed',
         depth: 0, order: 1,
         createdAt: 1, updatedAt: 2,
       },
@@ -387,6 +393,7 @@ describe('PLOT_EVENTS', () => {
         childrenIds: [],
         relatedCharacterIds: [],
         worldLineChanged: false,
+        visibility: 'revealed',
         depth: 0, order: 2,
         createdAt: 1, updatedAt: 2,
       },
@@ -842,7 +849,7 @@ describe('getDefaultTemplate', () => {
     const tmpl = getDefaultTemplate('memory_recall');
     expect(tmpl).toContain('{{SYS_PROMPT}}');
     expect(tmpl).toContain('{{MEMORY_ENTRIES}}');
-    expect(tmpl).toContain('{{NARRATIVE:layers=3:slice=800}}');
+    expect(tmpl).toContain('{{NARRATIVE:layers=3}}');
     expect(tmpl).toContain('{{USER_INPUT}}');
   });
 
@@ -873,7 +880,7 @@ describe('getDefaultTemplate', () => {
     const tmpl = getDefaultTemplate('memory_summary');
     expect(tmpl).toContain('{{SYS_PROMPT}}');
     expect(tmpl).toContain('{{AGENT.STORY}}');
-    expect(tmpl).toContain('{{NARRATIVE:layers=4:slice=1500}}');
+    expect(tmpl).toContain('{{NARRATIVE:layers=4}}');
   });
 
   it('returns non-empty template for plot_post_check', () => {
@@ -888,7 +895,16 @@ describe('getDefaultTemplate', () => {
   it('returns non-empty template for plot_outline', () => {
     const tmpl = getDefaultTemplate('plot_outline');
     expect(tmpl).toContain('{{SYS_PROMPT}}');
+    expect(tmpl).toContain('<角色背景>');
+    expect(tmpl).toContain('{{CHARACTER_STATE}}');
+    expect(tmpl).toContain('<剧情配置>');
     expect(tmpl).toContain('{{PLOT_EVENTS}}');
+    expect(tmpl).toContain('<世界设定>');
+    expect(tmpl).toContain('{{LORE_BOOK}}');
+    expect(tmpl).toContain('<用户指令>');
+    expect(tmpl).toContain('{{USER_INPUT}}');
+    expect(tmpl).toContain('<!--');
+    // 大纲纯捏人页生成，模板使用 XML 分区结构化格式
   });
 
   it('returns non-empty template for craft_gen', () => {
@@ -944,7 +960,7 @@ describe('resolveTemplate for chain placeholders', () => {
       ],
     });
     const config = mockConfig({ agentId: 'story' });
-    const result = resolveTemplate('{{NARRATIVE:layers=1:slice=4}}', 'story', ctx, config);
+    const result = resolveTemplate('{{NARRATIVE:layers=1}}', 'story', ctx, config);
     // 1 layer = 2 messages, each truncated to 4 chars
     const lines = result.split('\n');
     expect(lines.length).toBe(2);

@@ -1,24 +1,46 @@
 # 命定之诗 — 前端设计规范
 
-> **最后更新:** 2026-07-13
+> **最后更新:** 2026-07-19（玄墨深度重设计同步）
 > **适用范围:** 所有 `src/ui/` 下的页面和组件
-> **状态:** Phase 7e 打磨中 — 本文档持续更新
+> **状态:** 玄墨（古籍/手稿沉浸奇幻风）体系已落地 — 本文档持续更新
 
 ---
 
 ## 1. 设计理念
 
-命定之诗是一款**文字 RPG 沉浸式叙事游戏**。UI 的目标是让玩家感觉自己在**读一本精美的小说**，而不是在使用一个工具。
+命定之诗是一款**文字 RPG 沉浸式叙事游戏**。UI 的目标是让玩家感觉自己在**读一本精美的古籍手稿**，而不是在使用一个工具。视觉锚点：BG3 日志面板、Fallen London、Disco Elysium。
 
 ### 核心原则
 
 | 原则 | 说明 |
 |------|------|
 | **叙事优先** | 正文区是视觉主角，所有面板退后服务于叙事 |
+| **玄墨基调** | 暖墨深底（`--theme-window-bg` #191512）+ 古金强调（`--theme-primary` #c9a86a），暖色由强调色与字体承载 |
 | **纸面层次** | 用 `box-shadow` + `border-radius` 模拟纸张叠层，避免扁平化 |
-| **品质可见** | 每个物品/角色/卡片都有品质色标识（边框/光晕/色点） |
-| **衬线叙事** | 叙事正文和标题使用 `var(--theme-font-title)`（Cinzel 衬线），UI 标签使用系统无衬线 |
+| **品质可见** | 品质用**色点 + 名字着色**表达（见 5.3），禁止品质色左边条 |
+| **衬线叙事** | 叙事正文和标题使用 `var(--theme-font-title)`（Noto Serif SC 衬线），UI 标签使用系统无衬线 |
 | **主题无关** | 所有颜色来自 CSS 变量，不从特定主题色调出发设计 |
+
+### 绝对禁令（design hook 强制扫描）
+
+| 禁令 | 替代方案 |
+|------|---------|
+| **侧边条强调**：`border-left/right` > 1px 的彩色强调条（卡片/列表项/callout） | 全边 1px `color-mix(强调色 25-55%, var(--theme-card-border))` 边框 + 6-15% 染底 |
+| **渐变文字**：`background-clip: text` + 渐变 | 单色 + 字重/字号表达强调 |
+| **布局属性过渡**：`transition: width/height/max-height/padding` | `transform: scaleX()` / opacity / `grid-template-rows` |
+| **硬编码 `#fff` 于 primary 底上** | `var(--theme-primary-text)`（金底墨字 #1c150c） |
+| **不存在的 token**：`--theme-border` / `--theme-bg-primary` / `--theme-primary-rgb` 等 | 查 `variables.css` 确认后再引用；边框统一 `--theme-card-border` |
+
+**激活态/强调徽章通用配方：**
+```css
+/* 激活态：染底 + 混合边框 */
+background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+border-color: color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
+/* 语义徽章：success/error/warning 同理 */
+background: color-mix(in srgb, var(--theme-success) 12%, transparent);
+color: var(--theme-success);
+border: 1px solid color-mix(in srgb, var(--theme-success) 30%, transparent);
+```
 
 ---
 
@@ -28,9 +50,13 @@
 
 | 用途 | 字体 | CSS 变量 | 示例 |
 |------|------|---------|------|
-| 叙事正文 | Cinzel, serif | `var(--theme-font-title)` | 对话流正文、物品名、角色名 |
+| 叙事正文/标题 | Noto Serif SC, serif | `var(--theme-font-title)` | 对话流正文、页面标题、物品名、角色名 |
 | UI 标签/辅助文字 | system-ui, sans-serif | (默认) | 按钮、标签、提示文字 |
-| 代码/脚本 | 'Cascadia Code', monospace | — | 脚本展示区 |
+| 英文副标题（装饰） | Palatino Linotype, serif | — | 首页英文副标 |
+| 风味引文（装饰） | KaiTi/楷体 | — | 首页风味文字 |
+| 代码/脚本 | 'Cascadia Code', monospace | — | 脚本展示区、正则预览 |
+
+**层级约定**：分区大标题（设置页 section h3 等）用 `var(--theme-font-title)` + `1.3-1.4rem`，正文与列表保持无衬线，形成"手稿标题 + 工整正文"的古籍对比。
 
 ### 2.2 字号层级
 
@@ -131,11 +157,11 @@
                0 4px 12px rgba(0,0,0,0.08);
 ```
 
-**品质色边条：** 物品/装备卡片左侧使用 `border-left: 3px solid` + 品质色 CSS 变量，通过 `qualityVar()` 函数获取 `var(--theme-quality-xxx)` 值。
+**品质色点 + 名字着色（项目统一方案）：** 物品/装备/角色列表项在名字前放一个品质色圆点（`8px` 圆形，`background: qualityVar(...)`），名字本身着品质色。**禁止 `border-left: 3px solid` 品质色左边条。**
 
 **品质光晕：** 详情面板通过 CSS 自定义属性 `--item-detail-glow` 传递品质色，在 `.d-header` 底部用 `box-shadow` 实现微弱光晕。
 
-**选中态：** 选中卡片使用 `border-left-color: var(--theme-primary)` + `box-shadow: 0 0 0 1px color-mix(in srgb, primary 25%, transparent)` 环绕光晕环。
+**选中态：** 选中卡片使用 8% 染底（`color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg))`）+ `box-shadow: 0 0 0 1px var(--theme-color-primary)` 环绕光晕环。
 
 ### 4.3 导航 Tab
 
@@ -175,7 +201,7 @@
 
 ### 4.6 系统通知条 / 折叠卡片
 
-- 折叠态通知条：窄条 + 左边框品质色 + 右箭头 `▶`
+- 折叠态通知条：窄条 + 名字前品质色点 + 右箭头 `▶`（不使用品质色左边框）
 - 展开态：完整卡片（参考 cards-shared.css）
 - 过渡：卡片展开用 `<Transition>` 内的 `v-if`
 
@@ -234,11 +260,11 @@ CSS：
 ```ts
 import { qualityVar } from '../../lib/quality-colors'
 // 用法：内联 style 绑定
-:style="{ color: qualityVar(item.rarity) }"
-:style="{ borderLeftColor: qualityVar(selQuality) }"
+:style="{ color: qualityVar(item.rarity) }"        // 名字着色
+:style="{ background: qualityVar(item.rarity) }"   // 品质色点
 ```
 
-**禁止在组件中硬编码品质色 hex。**
+**表达形式统一为"色点 + 名字着色"**，禁止品质色左边条。**禁止在组件中硬编码品质色 hex。**
 
 ---
 
@@ -250,7 +276,7 @@ import { qualityVar } from '../../lib/quality-colors'
 |------|------|------|
 | 按钮 hover | `0.15s ease` | 背景色/边框色过渡 |
 | Tab 切换 | `0.15-0.2s ease` | 颜色 + 下划线过渡 |
-| 卡片展开/折叠 | `0.25s ease` | max-height + opacity |
+| 卡片展开/折叠 | `0.25s ease` | `grid-template-rows: 0fr→1fr` + opacity（禁止 max-height 过渡） |
 | 消息入场 | `0.35s ease` | opacity + translateY(12px) |
 
 ### 6.2 面板切换
@@ -288,7 +314,7 @@ Modal 打开：`<Transition name="modal">` — fade + scale(0.97→1)
 
 ### 7.3 装备/技能列表
 
-每项用独立卡片：`padding: 10px` + `border-left: 3px solid --theme-card-border` + 效果行用虚线分隔。
+每项用独立卡片：`padding: 10px` + `border: 1px solid var(--theme-card-border)` + 名字前品质色点 + 效果行用虚线分隔。
 
 ---
 
@@ -296,8 +322,12 @@ Modal 打开：`<Transition name="modal">` — fade + scale(0.97→1)
 
 每个新页面/组件交付前应确认：
 
-- [ ] 所有颜色来自 CSS 变量，无硬编码 hex
-- [ ] 叙事/标题文字使用 `var(--theme-font-title)`
+- [ ] 所有颜色来自 CSS 变量，无硬编码 hex（primary 底上文字用 `--theme-primary-text`，不用 `#fff`）
+- [ ] 没有引用不存在的 token（`--theme-border` / `--theme-bg-primary` 等）
+- [ ] 没有 >1px 的彩色侧边条（border-left/right），品质用色点 + 名字着色
+- [ ] 没有渐变文字（`background-clip: text`）
+- [ ] 过渡不使用布局属性（width/height/max-height/padding）
+- [ ] 叙事/标题文字使用 `var(--theme-font-title)`（Noto Serif SC）
 - [ ] 间距使用 `--theme-spacing-*` 变量
 - [ ] 卡片使用 `--paper-stack` 阴影或等效纸叠效果
 - [ ] 空态有装饰符 + 斜体说明文字

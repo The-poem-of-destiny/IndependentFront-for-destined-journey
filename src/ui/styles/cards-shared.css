@@ -1,15 +1,28 @@
 /* ============================================
    系统卡片共享样式 — 被 Craft/Combat/Item 卡片引用
    所有颜色使用 CSS 变量，不硬编码
+   强调色机制: 消费方设置 --sys-accent（品质色/结局色），
+   骨架以整圈边框色调 + 头部色点表达，禁用左侧色条
    ============================================ */
 
 /* 卡片骨架 */
 .sys-card {
-  border-left: 4px solid var(--theme-text-muted);
+  --sys-accent: var(--theme-text-muted);
+  border: 1px solid color-mix(in srgb, var(--sys-accent) 40%, var(--theme-card-border));
   border-radius: var(--theme-radius-md, 6px);
   overflow: hidden;
   background: var(--theme-card-bg);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--paper-stack, 0 2px 8px rgba(0, 0, 0, 0.15));
+}
+
+/* 头部强调色点 */
+.sys-card-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sys-accent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--sys-accent) 45%, transparent);
+  flex-shrink: 0;
 }
 
 /* 卡片头部 */

@@ -13,8 +13,9 @@ function typeIcon(itemType: string): string {
 </script>
 
 <template>
-  <div class="sys-card" :style="{ borderLeftColor: qualityVar(event.quality) }">
+  <div class="sys-card" :style="{ '--sys-accent': qualityVar(event.quality) }">
     <div class="sys-card-header" @click="emit('collapse')">
+      <span class="sys-card-dot" />
       <i :class="'sys-card-icon ' + typeIcon(event.itemType)" />
       <span class="sys-card-title">{{ event.itemName }}</span>
       <span class="sys-card-quality" :style="{ color: qualityVar(event.quality) }">{{ event.quality }}</span>
@@ -69,7 +70,6 @@ function typeIcon(itemType: string): string {
 <style scoped>
 /* Override: Item card has no box-shadow background */
 .sys-card {
-  border-left: 4px solid;
   box-shadow: none;
 }
 
@@ -113,7 +113,7 @@ function typeIcon(itemType: string): string {
 
 .equip-slot {
   background: var(--theme-primary);
-  color: #fff;
+  color: var(--theme-primary-text);
   padding: 1px 6px;
   border-radius: 3px;
   font-size: 0.625rem;
@@ -152,7 +152,7 @@ function typeIcon(itemType: string): string {
 }
 
 .skill-name {
-  color: #90cdf4;
+  color: var(--theme-quality-rare);
   font-weight: 600;
 }
 
