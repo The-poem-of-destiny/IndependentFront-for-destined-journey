@@ -145,27 +145,32 @@ function formatGameTime(gt?: GameTime): string {
 function formatPlotOutline(ctx: AgentContext): string {
   const o = (ctx as any).plotOutline as {
     title?: string; summary?: string; content?: string; version?: number;
+    directionAnchors?: string;
     chapters?: Array<{ title: string; summary: string; status: string }>;
   } | undefined | null;
   if (!o) return '';
   const lines: string[] = [];
   lines.push(`《${o.title || '未命名大纲'}》(v${o.version ?? 1})${o.summary ? ` — ${o.summary}` : ''}`);
+  if (o.directionAnchors) lines.push(`大方向锚: ${o.directionAnchors}`);
   const current = o.chapters?.find(c => c.status === 'active') ?? o.chapters?.find(c => c.status === 'pending');
-  if (current) lines.push(`当前章节: ${current.title}${current.summary ? ` — ${current.summary}` : ''}`);
+  if (current) lines.push(`当前大事件: ${current.title}${current.summary ? ` — ${current.summary}` : ''}`);
   if (o.chapters?.length) {
-    lines.push(`章节进度: ${o.chapters.map(c => `${c.title}[${c.status}]`).join(' → ')}`);
+    lines.push(`大事件进度: ${o.chapters.map(c => `${c.title}[${c.status}]`).join(' → ')}`);
   }
   if (o.content) lines.push(o.content.slice(0, 2000));
   return lines.join('\n');
 }
 
-/** 活跃/待触发事件全量列表（含 visibility=hidden——防剧透只在 UI 层，对 AI 必须可见）: 标题+描述+触发条件 */
+/** 活跃/待触发事件全量列表（含 visibility=hidden——防剧透只在 UI 层，对 AI 必须可见）: 标题+描述+触发条件 + 大事件级 NPC议程/反事实基线 */
 function formatPlotEventsFull(ctx: AgentContext): string {
   const events = (ctx.plotEvents ?? []).filter(e => e.status === 'active' || e.status === 'pending');
   if (!events.length) return '';
   return events.map(e => {
     const cond = e.triggerCondition ? `\n触发条件: ${e.triggerCondition}` : '';
-    return `《${e.title}》(${e.status})\n${e.description.slice(0, 300)}${cond}`;
+    // 大事件（depth 0）附带 NPC 议程 + 反事实基线，供 post_check 做议程级演化判断
+    const agendas = e.depth === 0 && e.npcAgendas ? `\nNPC议程: ${e.npcAgendas}` : '';
+    const absent = e.depth === 0 && e.ifAbsent ? `\n不介入演化: ${e.ifAbsent}` : '';
+    return `《${e.title}》(${e.status})\n${e.description.slice(0, 300)}${cond}${agendas}${absent}`;
   }).join('\n---\n');
 }
 
