@@ -849,7 +849,10 @@ const cc = Number(s.plotChapterCount)
         endpoint,
         agentId: 'plot_outline',
         saveId: 'create',
-        timeout: 120000,
+        // 真机修(2026-07-21): plot_outline 一次性重操作 — 大 systemPrompt(世界书注入 ~40 万字符)
+        // + 复杂产出(先 if_absent 再切 event + 多事件 desc/trigger/complete/fail) + 自检重试，
+        // AI 生成稳定 >120s。提至 300s。配合 agent-client 的 AbortError 友好化。
+        timeout: 300000,
       })
       const llmParams = {
         model: endpoint.defaultModel,

@@ -482,7 +482,8 @@ export class AgentClient {
 
   private async callOnce(request: ChatRequest, signal?: AbortSignal): Promise<InternalAgentResult> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+    let abortedByTimeout = false;
+    const timeoutId = setTimeout(() => { abortedByTimeout = true; controller.abort(); }, this.timeout);
 
     const onExternalAbort = () => controller.abort();
     if (signal?.aborted) {
@@ -561,6 +562,16 @@ export class AgentClient {
         duration: 0,
         _toolCalls: toolCalls,
       };
+    } catch (e) {
+      // 真机修(2026-07-21): 非流式路径原先只有 try/finally 无 catch，浏览器原生
+      // "The user aborted a request." 直接冒泡 → 用户看不懂。翻译成友好信息（区分超时/外部取消）。
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        if (abortedByTimeout) {
+          throw new Error(`请求超时（${Math.round(this.timeout / 1000)}秒内未收到完整响应），请重试或减少上下文注入`);
+        }
+        throw new Error('请求已取消');
+      }
+      throw e;
     } finally {
       clearTimeout(timeoutId);
       signal?.removeEventListener('abort', onExternalAbort);
