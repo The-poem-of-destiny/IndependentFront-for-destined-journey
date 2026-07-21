@@ -1340,6 +1340,17 @@ const cc = Number(s.plotChapterCount)
     try { localStorage.removeItem(DRAFT_KEY) } catch { /* silent */ }
   }
 
+  /** 清除当前大纲（回到未生成状态）+ 清草稿；不动角色捏人数据 */
+  function clearOutline() {
+    plotOutline.value = null
+    plotOutlineChapters.value = []
+    outlineHistory.value = []
+    chaptersHistory.value = []
+    plotGenerationError.value = null
+    isPlotGenerating.value = false
+    clearDraft()
+  }
+
   // ═══════════════════════════════════════════════════════
   // 预设系统
   // ═══════════════════════════════════════════════════════
@@ -1516,7 +1527,7 @@ const cc = Number(s.plotChapterCount)
     // 模板
     substituteUser,
     // localStorage 草稿
-    autoSaveDraft, tryRestoreDraft, clearDraft,
+    autoSaveDraft, tryRestoreDraft, clearDraft, clearOutline,
     // 预设
     showPresetModal, presets, getCurrentPresetData, applyPresetData,
     // 重置

@@ -36,7 +36,7 @@ const store = useCreateStore()
 
 <style scoped>
 .step-difficulty {
-  max-width: 520px;
+  max-width: 800px;
   margin: 0 auto;
 }
 .step-title {

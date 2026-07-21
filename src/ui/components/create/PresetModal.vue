@@ -15,6 +15,7 @@ const presetName = ref('')
 const confirmName = ref<string | null>(null)
 const presets = ref<CreatePresetRecord[]>([])
 const deleteConfirmId = ref<string | null>(null)
+const overwriteConfirmId = ref<string | null>(null)
 const importConflict = ref<{ presets: CreatePreset[]; conflicts: number } | null>(null)
 const expandedId = ref<string | null>(null)
 
@@ -75,12 +76,47 @@ async function handleLoad(preset: CreatePresetRecord) {
 
 async function handleDelete(id: string) {
   if (deleteConfirmId.value !== id) {
+    overwriteConfirmId.value = null
     deleteConfirmId.value = id
     return
   }
   await deleteCreatePreset(id)
   deleteConfirmId.value = null
   await loadPresets()
+}
+
+/** 用当前捏人配置覆盖指定预设（二次确认，与删除确认互斥） */
+async function handleOverwrite(preset: CreatePresetRecord) {
+  if (overwriteConfirmId.value !== preset.id) {
+    deleteConfirmId.value = null
+    overwriteConfirmId.value = preset.id
+    return
+  }
+  try {
+    busy.value = true
+    const now = Date.now()
+    const cleanData = JSON.parse(JSON.stringify(store.getCurrentPresetData()))
+    await saveCreatePreset({
+      id: preset.id,
+      name: preset.name,
+      createdAt: preset.createdAt,
+      updatedAt: now,
+      data: {
+        ...cleanData,
+        id: preset.id,
+        name: preset.name,
+        createdAt: preset.createdAt,
+        updatedAt: now,
+      } as CreatePreset,
+    })
+    overwriteConfirmId.value = null
+    await loadPresets()
+  } catch (err) {
+    console.error('[PresetModal] 覆盖预设失败:', err)
+    alert('覆盖预设失败，请检查浏览器存储空间。')
+  } finally {
+    busy.value = false
+  }
 }
 
 function handleExport(preset: CreatePresetRecord) {
@@ -246,8 +282,13 @@ const busy = ref(false)
             <AppButton size="sm" variant="danger" @click="handleDelete(p.id)" :disabled="busy">确认删除</AppButton>
             <AppButton size="sm" variant="ghost" @click="deleteConfirmId = null">取消</AppButton>
           </template>
+          <template v-else-if="overwriteConfirmId === p.id">
+            <AppButton size="sm" variant="danger" @click="handleOverwrite(p)" :disabled="busy">确认覆盖</AppButton>
+            <AppButton size="sm" variant="ghost" @click="overwriteConfirmId = null">取消</AppButton>
+          </template>
           <template v-else>
             <AppButton size="sm" @click="handleLoad(p)" :disabled="busy">加载</AppButton>
+            <AppButton size="sm" variant="ghost" @click="handleOverwrite(p)" :disabled="busy" title="用当前配置覆盖此预设">覆盖</AppButton>
             <AppButton size="sm" variant="ghost" @click="handleExport(p)">导出</AppButton>
             <AppButton size="sm" variant="ghost" @click="deleteConfirmId = p.id">删除</AppButton>
           </template>
@@ -295,7 +336,7 @@ const busy = ref(false)
 
 /* ── 列表容器 ── */
 .preset-list {
-  max-height: 360px;
+  max-height: 440px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;

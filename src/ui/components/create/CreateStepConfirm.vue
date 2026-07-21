@@ -3,7 +3,6 @@ import { useCreateStore } from '../../stores/create-store'
 import { ATTRIBUTE_NAMES, RARITY_TO_QUALITY } from '@engine/start-catalog'
 import type { QualityLevel } from '@engine/types'
 import AvatarPanel from '../shared/AvatarPanel.vue'
-import ResourceBar from '../shared/ResourceBar.vue'
 import QualityBadge from '../shared/QualityBadge.vue'
 
 const store = useCreateStore()
@@ -36,9 +35,27 @@ const store = useCreateStore()
 
       <!-- HP/MP/SP -->
       <div class="resource-row">
-        <ResourceBar label="HP" :current="store.hpPreview" :max="store.hpPreview" color="var(--theme-hp, #e74c3c)" />
-        <ResourceBar label="MP" :current="store.mpPreview" :max="store.mpPreview" color="var(--theme-mp, #3498db)" />
-        <ResourceBar label="SP" :current="store.spPreview" :max="store.spPreview" color="var(--theme-sp, #f1c40f)" />
+        <div class="resource-item">
+          <span class="res-tag" style="color: var(--theme-hp, #e74c3c)">HP</span>
+          <div class="res-track">
+            <div class="res-fill" style="width: 100%; background: var(--theme-hp, #e74c3c)" />
+          </div>
+          <span class="res-num">{{ store.hpPreview }}</span>
+        </div>
+        <div class="resource-item">
+          <span class="res-tag" style="color: var(--theme-mp, #3498db)">MP</span>
+          <div class="res-track">
+            <div class="res-fill" style="width: 100%; background: var(--theme-mp, #3498db)" />
+          </div>
+          <span class="res-num">{{ store.mpPreview }}</span>
+        </div>
+        <div class="resource-item">
+          <span class="res-tag" style="color: var(--theme-sp, #f1c40f)">SP</span>
+          <div class="res-track">
+            <div class="res-fill" style="width: 100%; background: var(--theme-sp, #f1c40f)" />
+          </div>
+          <span class="res-num">{{ store.spPreview }}</span>
+        </div>
       </div>
 
       <!-- 属性 -->
@@ -85,7 +102,7 @@ const store = useCreateStore()
 </template>
 
 <style scoped>
-.step-confirm { max-width: 600px; margin: 0 auto; }
+.step-confirm { max-width: 800px; margin: 0 auto; }
 .step-title { font-family: var(--theme-font-title, serif); color: var(--theme-text-primary); font-size: 1.3rem; margin-bottom: var(--theme-spacing-md); }
 .confirm-card {
   background: var(--theme-card-bg);
@@ -101,7 +118,44 @@ const store = useCreateStore()
 .hero-tier { font-size: 0.75rem; color: var(--theme-quality-epic); font-weight: 600; }
 .hero-location { font-size: 0.7rem; color: var(--theme-text-muted); }
 .hero-core { font-size: 0.7rem; color: var(--theme-primary); font-weight: 500; }
-.resource-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: var(--theme-spacing-md); padding-bottom: var(--theme-spacing-md); border-bottom: 1px solid var(--theme-card-border); }
+.resource-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-sm);
+  margin-bottom: var(--theme-spacing-md);
+  padding-bottom: var(--theme-spacing-md);
+  border-bottom: 1px solid var(--theme-card-border);
+}
+.resource-item {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  gap: var(--theme-spacing-sm);
+  align-items: center;
+}
+.res-tag {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 0.5px;
+}
+.res-track {
+  height: 14px;
+  background: var(--theme-surface-muted);
+  border-radius: var(--theme-radius-full);
+  overflow: hidden;
+}
+.res-fill {
+  height: 100%;
+  border-radius: var(--theme-radius-full);
+}
+.res-num {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--theme-text-primary);
+  min-width: 3.5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .attr-row { display: flex; gap: var(--theme-spacing-md); font-size: 0.8rem; color: var(--theme-text-secondary); margin-bottom: var(--theme-spacing-sm); padding-bottom: var(--theme-spacing-sm); border-bottom: 1px solid var(--theme-card-border); }
 .attr-row strong { color: var(--theme-primary); }
 .stats-row { display: flex; flex-wrap: wrap; gap: var(--theme-spacing-sm) var(--theme-spacing-lg); font-size: 0.75rem; color: var(--theme-text-muted); margin-bottom: var(--theme-spacing-sm); }

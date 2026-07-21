@@ -12,6 +12,7 @@ const showReviseBox = ref(false)
 const reviseText = ref('')
 const importInput = ref<HTMLInputElement | null>(null)
 const exportError = ref('')
+const showClearConfirm = ref(false)
 
 async function submitRevise() {
   const text = reviseText.value.trim()
@@ -93,6 +94,18 @@ async function handleImportOutline(e: Event) {
     console.error('导入大纲失败:', err)
     input.value = ''
   }
+}
+
+function handleClearOutline() {
+  store.clearOutline()
+  showClearConfirm.value = false
+}
+
+function handleExportDebug() {
+  const ok = store.exportAIDebugDump()
+  exportError.value = ok
+    ? ''
+    : 'AI 调试数据已失效（页面刷新后会丢失），请重新生成大纲后再导出'
 }
 
 const GENRE_OPTIONS = [
@@ -297,6 +310,31 @@ const DIFFICULTY_OPTIONS = [
           >
             导入大纲
           </button>
+          <button
+            class="io-btn io-btn-danger"
+            :disabled="store.isPlotGenerating"
+            @click="showClearConfirm = !showClearConfirm"
+            title="清除当前大纲，回到未生成状态"
+          >
+            清除大纲
+          </button>
+          <button
+            class="io-btn"
+            :disabled="store.isPlotGenerating"
+            @click="handleExportDebug"
+            title="导出本次生成的 AI 调试数据（提示词/思维链/正文/参数）为 JSON"
+          >
+            导出AI调试
+          </button>
+        </div>
+        <div class="clear-confirm" :class="{ open: showClearConfirm }">
+          <div class="clear-confirm-inner">
+            <p class="clear-confirm-text">确定清除大纲吗？大纲与修改历史将被删除（角色捏人数据不受影响），操作不可撤销。</p>
+            <div class="clear-confirm-btns">
+              <button class="io-btn io-btn-danger" @click="handleClearOutline">确认清除</button>
+              <button class="io-btn" @click="showClearConfirm = false">取消</button>
+            </div>
+          </div>
         </div>
         <input
           ref="importInput"
@@ -314,7 +352,7 @@ const DIFFICULTY_OPTIONS = [
 </template>
 
 <style scoped>
-.step-plot { max-width: 560px; margin: 0 auto; }
+.step-plot { max-width: 800px; margin: 0 auto; }
 .step-title { font-family: var(--theme-font-title, serif); color: var(--theme-text-primary); font-size: 1.3rem; margin-bottom: var(--theme-spacing-md); }
 .plot-form { display: flex; flex-direction: column; gap: var(--theme-spacing-sm); }
 
@@ -451,29 +489,72 @@ const DIFFICULTY_OPTIONS = [
   .revise-box { transition: none; }
 }
 
-/* ===== 导入/导出 ===== */
+/* ===== 导入/导出/清除 ===== */
 .outline-io-btns {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--theme-spacing-sm, 8px);
   margin-top: var(--theme-spacing-sm, 8px);
+  justify-content: center;
 }
 .io-btn {
-  background: none;
-  border: 1px solid var(--color-border, #444);
-  color: var(--color-text-muted, #999);
+  background: var(--theme-card-bg);
+  border: 1px solid var(--theme-card-border);
+  color: var(--theme-text-secondary);
   padding: 4px 12px;
-  border-radius: 4px;
+  border-radius: var(--theme-radius-sm);
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-family: inherit;
-  transition: border-color 0.2s, color 0.2s;
+  transition: border-color var(--theme-transition-fast), color var(--theme-transition-fast);
 }
 .io-btn:hover:not(:disabled) {
-  border-color: var(--color-accent, #888);
-  color: var(--color-text, #ccc);
+  border-color: var(--theme-primary);
+  color: var(--theme-primary);
 }
 .io-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.io-btn-danger {
+  color: var(--theme-error);
+  border-color: color-mix(in srgb, var(--theme-error) 45%, var(--theme-card-border));
+}
+.io-btn-danger:hover:not(:disabled) {
+  border-color: var(--theme-error);
+  color: var(--theme-error);
+}
+
+/* ===== 清除确认折叠（同 revise-box 模式） ===== */
+.clear-confirm {
+  width: 100%;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease;
+}
+.clear-confirm.open { grid-template-rows: 1fr; }
+.clear-confirm-inner {
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--theme-spacing-xs);
+  padding-top: 0;
+}
+.clear-confirm.open .clear-confirm-inner { padding-top: var(--theme-spacing-xs); }
+.clear-confirm-text {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--theme-text-muted);
+  text-align: center;
+  line-height: 1.5;
+}
+.clear-confirm-btns {
+  display: flex;
+  gap: var(--theme-spacing-sm, 8px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .clear-confirm { transition: none; }
 }
 </style>
