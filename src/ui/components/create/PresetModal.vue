@@ -356,6 +356,9 @@ const busy = ref(false)
   background: var(--theme-card-bg);
   overflow: hidden;
   transition: border-color var(--theme-transition-fast);
+  /* 父级 .preset-list 是 flex column + max-height，必须禁止收缩，
+     否则预设多了会被等比压扁（只剩标题、操作栏被挤出），滚动条永不触发 */
+  flex-shrink: 0;
 }
 .preset-card:hover { border-color: var(--theme-primary); }
 .preset-card.delete-pending {
@@ -395,13 +398,23 @@ const busy = ref(false)
 }
 .detail-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0,1fr) 让两列允许收缩，避免某一列 nowrap 长文本撑爆另一列、把 label 挤剩一个字 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--theme-spacing-sm);
 }
-.detail-col { display: flex; flex-direction: column; gap: var(--theme-spacing-xs); }
+.detail-col { display: flex; flex-direction: column; gap: var(--theme-spacing-xs); min-width: 0; }
 .detail-row { display: flex; gap: var(--theme-spacing-xs); font-size: 0.75rem; }
 .detail-label { color: var(--theme-text-muted); flex-shrink: 0; min-width: 3.5em; font-weight: 500; }
-.detail-row span:last-child { color: var(--theme-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-row span:last-child {
+  color: var(--theme-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* flex 子项默认 min-width:auto 会等于整段 nowrap 文本宽度从而撑爆列；
+     min-width:0 + flex:1 让它收缩并占满剩余空间，省略号才真正生效 */
+  min-width: 0;
+  flex: 1;
+}
 
 /* ── 操作栏 ── */
 .preset-actions {
