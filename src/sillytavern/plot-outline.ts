@@ -33,9 +33,15 @@ export interface ParsedOutlineOutput {
   title: string;
   summary: string;
   content: string;
+  /** 大方向锚（核心张力 / 主角主题 / 关键关系人）— post_check 演化时的「不偏离」判据 */
+  directionAnchors?: string;
   chapters: Array<{
     title: string;
     summary: string;
+    /** 此大事件涉及的关键 NPC 议程（去中心化行动线索，自然语言多议程描述；主要 depth 0 大事件用） */
+    npcAgendas?: string;
+    /** 主角不介入时，该态势的世界默认演化（反事实基线；主要 depth 0 大事件用） */
+    ifAbsent?: string;
     keyEvents: Array<{
       title: string;
       description: string;
@@ -60,9 +66,12 @@ interface RawOutlineJson {
   title?: string;
   summary?: string;
   content: string;
+  directionAnchors?: string;
   chapters?: Array<{
     title?: string;
     summary?: string;
+    npcAgendas?: string;
+    ifAbsent?: string;
     keyEvents?: Array<{
       title?: string;
       description?: string;
@@ -81,12 +90,15 @@ function normalizeOutlineJson(parsed: RawOutlineJson): ParsedOutlineOutput | nul
     title: parsed.title || '',
     summary: parsed.summary || '',
     content: parsed.content,
+    directionAnchors: parsed.directionAnchors,
     chapters: Array.isArray(parsed.chapters)
       ? parsed.chapters
           .filter(ch => ch && ch.title)
           .map(ch => ({
             title: ch.title!,
             summary: ch.summary || '',
+            npcAgendas: ch.npcAgendas,
+            ifAbsent: ch.ifAbsent,
             keyEvents: Array.isArray(ch.keyEvents)
               ? ch.keyEvents
                   .filter(ke => ke && ke.title)
@@ -223,6 +235,11 @@ export function parseOutlineXml(raw: string): ParsedOutlineOutput | null {
     timeRange = { parseStart: trResult.attrs.start || '', parseEnd: trResult.attrs.end || '' };
   }
 
+  // direction_anchors (optional)
+  const daResult = extractXmlTag(inner, 'direction_anchors');
+  inner = daResult.rest;
+  const directionAnchors = daResult.text.trim() || undefined;
+
   // content (preserve markdown, no escaping)
   const contentResult = extractXmlTag(inner, 'content');
   inner = contentResult.rest;
@@ -244,6 +261,16 @@ export function parseOutlineXml(raw: string): ParsedOutlineOutput | null {
     const chTitle = chExec[1] || '';
     const chSummary = chExec[2] || '';
     let chInner = chExec[5];
+
+    // npc_agendas (optional, before event parsing)
+    const naResult = extractXmlTag(chInner, 'npc_agendas');
+    chInner = naResult.rest;
+    const npcAgendas = naResult.text.trim() || undefined;
+
+    // if_absent (optional, before event parsing)
+    const iaResult = extractXmlTag(chInner, 'if_absent');
+    chInner = iaResult.rest;
+    const ifAbsent = iaResult.text.trim() || undefined;
 
     const keyEvents: ParsedOutlineOutput['chapters'][number]['keyEvents'] = [];
     // eslint-disable-next-line no-constant-condition
@@ -299,6 +326,8 @@ export function parseOutlineXml(raw: string): ParsedOutlineOutput | null {
     chapters.push({
       title: chTitle,
       summary: chSummary,
+      npcAgendas,
+      ifAbsent,
       keyEvents,
     });
   }
@@ -355,6 +384,7 @@ export function parseOutlineXml(raw: string): ParsedOutlineOutput | null {
     chapters,
     selfCritique,
     ...(timeRange ? { timeRange } : {}),
+    ...(directionAnchors ? { directionAnchors } : {}),
   } as ParsedOutlineOutput & { timeRange?: { parseStart: string; parseEnd: string } };
 }
 
@@ -394,6 +424,7 @@ export function createOutlineFromAgent(
     confirmed: false,
     version,
     timeRange,
+    directionAnchors: parsed.directionAnchors,
     createdAt: now,
     updatedAt: now,
   };
@@ -458,6 +489,8 @@ export function outlineToEvents(
       worldLineChanged: false,
       visibility: 'hidden',
       chapterTitle: ch.title,
+      ...(ch.npcAgendas ? { npcAgendas: ch.npcAgendas } : {}),
+      ...(ch.ifAbsent ? { ifAbsent: ch.ifAbsent } : {}),
       depth: 0,
       createdAt: now,
       updatedAt: now,

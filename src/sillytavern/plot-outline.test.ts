@@ -817,6 +817,29 @@ describe('parseOutlineXml', () => {
     expect(result).not.toBeNull();
     expect(result!.content).toBe('C');
   });
+
+  it('应解析 direction_anchors/npc_agendas/if_absent 新标签', () => {
+    const xml = `<outline>
+<title>开放世界测试</title>
+<summary>摘要</summary>
+<timerange start="512-春" end="513-冬" />
+<direction_anchors>核心张力：帝国与教会的权力斗争；主角主题：寻求真相；关键关系人：失踪的公主</direction_anchors>
+<content>正文</content>
+<chapter title="第一章" summary="章节摘要">
+  <npc_agendas>帝国宰相计划借刀杀人；教会暗中调查皇室秘密；公主试图传递情报</npc_agendas>
+  <if_absent>主角若未介入，公主将在三日后被捕处决，帝国与教会关系恶化</if_absent>
+  <event title="事件A">
+    <desc>描述</desc>
+  </event>
+</chapter>
+</outline>`;
+
+    const result = parseOutlineXml(xml);
+    expect(result).not.toBeNull();
+    expect(result!.directionAnchors).toBe('核心张力：帝国与教会的权力斗争；主角主题：寻求真相；关键关系人：失踪的公主');
+    expect(result!.chapters[0].npcAgendas).toBe('帝国宰相计划借刀杀人；教会暗中调查皇室秘密；公主试图传递情报');
+    expect(result!.chapters[0].ifAbsent).toBe('主角若未介入，公主将在三日后被捕处决，帝国与教会关系恶化');
+  });
 });
 
 // ========== tryParseOutline ==========
@@ -925,6 +948,32 @@ describe('parseOutlineJson', () => {
     expect(result!.chapters[0].keyEvents[0].completeHint).toBe('完成任务');
     expect(result!.chapters[0].keyEvents[0].failHint).toBe('任务失败');
   });
+
+  it('应解析 JSON 中的 directionAnchors/npcAgendas/ifAbsent 新字段', () => {
+    const json = JSON.stringify({
+      title: '开放世界测试',
+      summary: '摘要',
+      content: '正文',
+      directionAnchors: '核心张力：帝国与教会的权力斗争；主角主题：寻求真相；关键关系人：失踪的公主',
+      chapters: [
+        {
+          title: '第一章',
+          summary: '章节摘要',
+          npcAgendas: '帝国宰相计划借刀杀人；教会暗中调查皇室秘密；公主试图传递情报',
+          ifAbsent: '主角若未介入，公主将在三日后被捕处决，帝国与教会关系恶化',
+          keyEvents: [
+            { title: '事件A', description: '描述' },
+          ],
+        },
+      ],
+    });
+
+    const result = parseOutlineJson(json);
+    expect(result).not.toBeNull();
+    expect(result!.directionAnchors).toBe('核心张力：帝国与教会的权力斗争；主角主题：寻求真相；关键关系人：失踪的公主');
+    expect(result!.chapters[0].npcAgendas).toBe('帝国宰相计划借刀杀人；教会暗中调查皇室秘密；公主试图传递情报');
+    expect(result!.chapters[0].ifAbsent).toBe('主角若未介入，公主将在三日后被捕处决，帝国与教会关系恶化');
+  });
 });
 
 // ========== outlineToEvents (new fields) ==========
@@ -973,5 +1022,43 @@ describe('outlineToEvents with new fields', () => {
     expect(ke.completeCondition).toBeUndefined();
     expect(ke.failCondition).toBeUndefined();
     expect(ke.timeWindow).toBeUndefined();
+  });
+
+  it('outlineToEvents 应透传 npcAgendas/ifAbsent 到 depth 0 事件', () => {
+    const chapters = [
+      {
+        title: '第一章',
+        summary: '章节摘要',
+        npcAgendas: '帝国宰相计划借刀杀人；教会暗中调查',
+        ifAbsent: '主角若未介入，公主将被捕处决',
+        keyEvents: [
+          { title: '事件A', description: '描述' },
+        ],
+      },
+    ];
+
+    const events = outlineToEvents(chapters, 'save-1');
+    const chapterEvent = events.find(e => e.depth === 0)!;
+    expect(chapterEvent.npcAgendas).toBe('帝国宰相计划借刀杀人；教会暗中调查');
+    expect(chapterEvent.ifAbsent).toBe('主角若未介入，公主将被捕处决');
+  });
+
+  it('outlineToEvents: depth 1 的 keyEvent 不带 npcAgendas/ifAbsent', () => {
+    const chapters = [
+      {
+        title: '第一章',
+        summary: '章节摘要',
+        npcAgendas: 'NPC 议程',
+        ifAbsent: '反事实基线',
+        keyEvents: [
+          { title: '事件A', description: '描述' },
+        ],
+      },
+    ];
+
+    const events = outlineToEvents(chapters, 'save-1');
+    const keyEvent = events.find(e => e.depth === 1)!;
+    expect(keyEvent.npcAgendas).toBeUndefined();
+    expect(keyEvent.ifAbsent).toBeUndefined();
   });
 });

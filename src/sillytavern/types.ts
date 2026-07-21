@@ -374,7 +374,7 @@ export interface PlotOutline {
   summary: string;
   /** 大纲正文（AI 生成的叙事大纲） */
   content: string;
-  /** 章节结构化存储（不再每次从 content 正则重新解析） */
+  /** 大事件结构化存储（不再每次从 content 正则重新解析） */
   chapters: Array<{ title: string; summary: string; status: 'pending' | 'active' | 'completed' }>;
   /** 自检结果（AI 对大纲的评价） */
   selfCritique?: string;
@@ -384,6 +384,8 @@ export interface PlotOutline {
   version: number;
   /** 大纲覆盖的时间范围 */
   timeRange: { start: string; end: string };
+  /** 大方向锚（核心张力 / 主角主题 / 关键关系人）— post_check 演化时的「不偏离」判据 */
+  directionAnchors?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -924,11 +926,11 @@ export interface PlotEvent {
   description: string;
   /** 事件状态 */
   status: 'pending' | 'active' | 'completed' | 'skipped' | 'failed';
-  /** 触发条件（EJS 表达式，由 code 层评估） */
+  /** 触发条件（世界演化/收束条件的自然语言提示） */
   triggerCondition?: string;
-  /** 完成条件 */
+  /** 完成条件（世界演化/收束条件的自然语言提示） */
   completeCondition?: string;
-  /** 失败条件 */
+  /** 失败条件（世界演化/收束条件的自然语言提示） */
   failCondition?: string;
   /** 时间范围 */
   timeWindow?: { start: string; end: string };
@@ -946,8 +948,12 @@ export interface PlotEvent {
   worldLineChanged: boolean;
   /** 玩家可见性: hidden=未揭示(面板不显示) / revealed=已揭示（pre_check 触发时翻转） */
   visibility: 'hidden' | 'revealed';
-  /** 所属章节标题（逻辑键=名字，铁律1） */
+  /** 所属大事件标题（逻辑键=名字，铁律1） */
   chapterTitle?: string;
+  /** 此大事件涉及的关键 NPC 议程（去中心化行动线索，自然语言多议程描述；主要 depth 0 大事件用） */
+  npcAgendas?: string;
+  /** 主角不介入时，该态势的世界默认演化（反事实基线；主要 depth 0 大事件用） */
+  ifAbsent?: string;
   /** 剧情层级深度 */
   depth: number;
   createdAt: number;
