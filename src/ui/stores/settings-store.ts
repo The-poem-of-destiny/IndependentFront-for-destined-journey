@@ -12,6 +12,7 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import type { WorldBook } from '@engine/types'
 import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks'
+import { loadPresetRules, mergeRules } from '@engine/beautifier'
 
 // ===== 类型 =====
 
@@ -178,6 +179,25 @@ export const useSettingsStore = defineStore('settings', () => {
     }
     // 加载项目默认 Agent 配置
     await loadAgentProjectDefaults()
+
+    // 🆕 初始化美化预设规则（含 autoEnable 解析）—— 修复开局游戏页读到空规则导致正则不生效。
+    // 此前仅 BeautifierSection.onMounted 加载（要打开设置→输出美化才触发），现提到全局启动。
+    // autoEnable 信号来自存档（命定核心选择），启动时无存档上下文 → 传空信号；
+    // 规则定义加载即可，locked 由游戏页/设置页按存档 enabledWorldBookEntries 重算。
+    try {
+      const presetRules = await loadPresetRules()
+      const merged = mergeRules(
+        presetRules,
+        (settings.value.beautifierRules as any[]) ?? [],
+        (settings.value.beautifierBuiltinDisabled as string[]) ?? [],
+        new Set(),
+        new Set(),
+        new Set(),
+      )
+      settings.value.beautifierPresetRules = merged.filter((r: any) => r.isBuiltin)
+    } catch {
+      // 加载失败静默（BeautifierSection 打开时会兜底重算）
+    }
   }, 0)
 
   const settings = ref<Record<string, any>>(merged)

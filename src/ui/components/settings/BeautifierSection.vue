@@ -7,7 +7,8 @@
  */
 import { ref, computed, onMounted } from 'vue'
 import { useSettingsStore } from '../../stores/settings-store'
-import { loadPresetRules, mergeRules } from '@engine/beautifier'
+import { useGameStore } from '../../stores/game-store'
+import { loadPresetRules, mergeRules, collectActiveSignalsFromEntries } from '@engine/beautifier'
 import type { BeautifierRule } from '@engine/types'
 import AppButton from '../shared/AppButton.vue'
 import AppCard from '../shared/AppCard.vue'
@@ -15,6 +16,7 @@ import RuleEditorModal from './RuleEditorModal.vue'
 
 const cfg = useSettingsStore()
 const s = cfg.settings
+const game = useGameStore()
 
 // ===== State =====
 
@@ -33,27 +35,12 @@ const userRules = computed<BeautifierRule[]>(() => s.beautifierRules ?? [])
 
 // ===== 加载预设规则 =====
 
-/** 从 settings.worldBooks 中收集活跃的世界书 ID 和条目 UID */
-function getActiveWorldBookState(): {
-  activeWorldBookIds: Set<string>
-  activeEntryUids: Set<number>
-} {
-  const activeWorldBookIds = new Set<string>()
-  const activeEntryUids = new Set<number>()
-  const books: any[] = (s as any).worldBooks ?? []
-  for (const book of books) {
-    const entries: any[] = book.entries ?? []
-    const hasEnabledEntry = entries.some((e: any) => e.enabled)
-    if (hasEnabledEntry) {
-      activeWorldBookIds.add(book.id)
-      for (const e of entries) {
-        if (e.enabled && e.uid != null) {
-          activeEntryUids.add(e.uid)
-        }
-      }
-    }
-  }
-  return { activeWorldBookIds, activeEntryUids }
+/** 从当前存档的 enabledWorldBookEntries 提取激活信号（命定核心 + 启用角色）。
+ *  命定核心选择走独立 uid（不改 worldBooks 条目 enabled），须以存档为准；
+ *  worldBooks.enabled 是「是否注入 prompt」的开关，核心书里几乎全 enabled，不能作为 autoEnable 信号。 */
+function getActiveWorldBookState() {
+  const entries: string[] = (game.activeSave?.metadata as any)?.enabledWorldBookEntries ?? []
+  return collectActiveSignalsFromEntries(entries)
 }
 
 onMounted(async () => {

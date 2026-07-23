@@ -37,9 +37,6 @@
       "isBuiltin": true,
       "group": "长颈鹿通用",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           423
         ]
@@ -57,9 +54,6 @@
       "isBuiltin": true,
       "group": "长颈鹿通用",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           423
         ]
@@ -77,9 +71,6 @@
       "isBuiltin": true,
       "group": "长颈鹿通用",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           423
         ]
@@ -97,9 +88,6 @@
       "isBuiltin": true,
       "group": "长颈鹿通用",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           423
         ]
@@ -117,9 +105,6 @@
       "isBuiltin": true,
       "group": "长颈鹿通用",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           423
         ]
@@ -137,9 +122,6 @@
       "isBuiltin": true,
       "group": "命定核心「奥托」",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           411
         ],
@@ -160,9 +142,6 @@
       "isBuiltin": true,
       "group": "命定核心「类脑娘」",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           416
         ],
@@ -183,9 +162,6 @@
       "isBuiltin": true,
       "group": "命定核心「薇洛」",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           420
         ],
@@ -206,9 +182,6 @@
       "isBuiltin": true,
       "group": "命定核心「阿比盖尔」",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           424
         ],
@@ -229,9 +202,6 @@
       "isBuiltin": true,
       "group": "命定核心「阿比盖尔」",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           425
         ],
@@ -252,9 +222,6 @@
       "isBuiltin": true,
       "group": "命定核心「阿比盖尔」",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           424,
           425
@@ -276,9 +243,6 @@
       "isBuiltin": true,
       "group": "命定核心「妲丽安」",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           413
         ],
@@ -299,9 +263,6 @@
       "isBuiltin": true,
       "group": "命定核心「妲丽安」",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           413
         ],
@@ -322,10 +283,6 @@
       "isBuiltin": true,
       "group": "命定核心「奶龙」",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core",
-          "race"
-        ],
         "worldBookEntryUids": [
           412,
           27
@@ -347,9 +304,6 @@
       "isBuiltin": true,
       "group": "命定核心「小夜莺」",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           414
         ],
@@ -370,9 +324,6 @@
       "isBuiltin": true,
       "group": "命定核心「艾莉亚」",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           417
         ],
@@ -393,9 +344,6 @@
       "isBuiltin": true,
       "group": "命定核心「艾莉亚」",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           417
         ],
@@ -429,9 +377,6 @@
       "isBuiltin": true,
       "group": "命定核心「莉莉丝」",
       "autoEnable": {
-        "worldBookIds": [
-          "system_core"
-        ],
         "worldBookEntryUids": [
           419
         ],

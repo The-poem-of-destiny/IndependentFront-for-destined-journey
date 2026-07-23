@@ -427,6 +427,9 @@ export class AgentOrchestrator {
             reasoning: streamResult.reasoning,
             tokensUsed: streamResult.tokensUsed,
             cacheHit: streamResult.cacheHit,
+            cacheHitTokens: streamResult.cacheHitTokens,
+            cacheMissTokens: streamResult.cacheMissTokens,
+            completionTokens: streamResult.completionTokens,
             duration: streamResult.duration,
           });
         },

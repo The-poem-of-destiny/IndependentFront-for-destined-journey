@@ -1,10 +1,24 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useGameStore, type DebugAgentEntry } from '../../stores/game-store'
 import { useSettingsStore } from '../../stores/settings-store'
 import AppModal from '../shared/AppModal.vue'
 
 const game = useGameStore()
 const settings = useSettingsStore()
+
+/** 本轮 token 汇总（排除 memory_recall 记忆召回，只看正文链路的缓存效率） */
+const tokenSummary = computed(() => {
+  const entries = game.agentLog.filter(e => !e.agentId.startsWith('memory_recall'))
+  const sum = (sel: (e: DebugAgentEntry) => number | undefined) =>
+    entries.reduce((s, e) => s + (sel(e) ?? 0), 0)
+  return {
+    hit: sum(e => e.cacheHitTokens),
+    miss: sum(e => e.cacheMissTokens),
+    completion: sum(e => e.completionTokens),
+    count: entries.length,
+  }
+})
 
 /** 组装完整导出数据 */
 async function buildExportData() {
@@ -39,6 +53,9 @@ async function buildExportData() {
       duration: e.duration,
       tokensUsed: e.tokensUsed,
       cacheHit: e.cacheHit,
+      cacheHitTokens: e.cacheHitTokens,
+      cacheMissTokens: e.cacheMissTokens,
+      completionTokens: e.completionTokens,
       error: e.error,
       rawResponse: e.rawResponse,
       reasoning: e.reasoning,
@@ -111,12 +128,18 @@ function truncate(str: string, max: number): string {
     <div class="debug-section">
       <h4>本轮 Agent 调用 ({{ game.agentLog.length }})</h4>
       <div v-if="game.agentLog.length === 0" class="debug-empty">暂无日志（等待下一轮管线触发）</div>
+      <div v-else class="debug-token-summary">
+        本轮汇总（排除记忆召回 · {{ tokenSummary.count }} 个 Agent）:
+        命中 <strong>{{ tokenSummary.hit }}</strong> /
+        未命中 <strong>{{ tokenSummary.miss }}</strong> /
+        输出 <strong>{{ tokenSummary.completion }}</strong>
+      </div>
       <div v-for="entry in game.agentLog" :key="entry.agentId" class="debug-agent-entry" :class="{ 'has-error': entry.error }">
         <div class="debug-agent-head">
           <span class="debug-agent-label">{{ entry.label }}</span>
           <span class="debug-agent-model">{{ entry.model || '无模型' }}</span>
           <span v-if="entry.error" class="debug-agent-err">{{ entry.error }}</span>
-          <span v-else class="debug-agent-ok">{{ entry.tokensUsed }}t / {{ entry.duration }}ms</span>
+          <span v-else class="debug-agent-ok">命中 {{ entry.cacheHitTokens ?? 0 }} / 未命中 {{ entry.cacheMissTokens ?? 0 }} / 输出 {{ entry.completionTokens ?? 0 }} · {{ entry.duration }}ms</span>
         </div>
         <details class="debug-agent-details">
           <summary>请求 ({{ entry.messages.length }} 条消息) / 响应</summary>
@@ -191,6 +214,18 @@ function truncate(str: string, max: number): string {
   font-size: 0.75rem;
   color: var(--theme-text-muted);
   font-style: italic;
+}
+.debug-token-summary {
+  font-size: 0.72rem;
+  color: var(--theme-text-secondary);
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  background: color-mix(in srgb, var(--theme-primary) 6%, var(--theme-surface-muted));
+  border-radius: var(--theme-radius-sm, 4px);
+}
+.debug-token-summary strong {
+  color: var(--theme-primary);
+  font-weight: 700;
 }
 .debug-empty-sub {
   font-size: 0.6875rem;

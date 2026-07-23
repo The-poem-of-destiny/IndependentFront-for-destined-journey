@@ -19,6 +19,9 @@ export interface DebugAgentEntry {
   error?: string
   tokensUsed: number
   cacheHit: boolean
+  cacheHitTokens?: number
+  cacheMissTokens?: number
+  completionTokens?: number
   duration: number
 }
 

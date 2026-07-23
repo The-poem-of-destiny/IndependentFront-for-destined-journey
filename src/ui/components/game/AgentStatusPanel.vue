@@ -37,7 +37,7 @@ function formatElapsed(ms: number): string {
     <transition name="slide-up">
       <div v-if="game.isGenerating || game.agentStatus" class="agent-status-panel">
         <!-- 当前 Agent -->
-        <div class="agent-current">
+        <div class="agent-current" v-if="game.agentStatus">
           <div class="agent-spinner" />
           <span class="agent-label">{{ game.agentStatus.label }}</span>
           <span class="agent-timer">{{ formatElapsed(currentElapsedMs) }}</span>

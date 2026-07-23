@@ -69,6 +69,9 @@ export interface StreamCallbacks {
     reasoning: string;
     tokensUsed: number;
     cacheHit: boolean;
+    cacheHitTokens: number;
+    cacheMissTokens: number;
+    completionTokens: number;
     duration: number;
   }) => void;
   /** 流式传输中的错误 */
@@ -129,6 +132,9 @@ export class AgentClient {
       rawResponse: '',
       tokensUsed: 0,
       cacheHit: false,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
+      completionTokens: 0,
       duration: Date.now() - startTime,
       error: lastError?.message ?? 'Unknown error',
     };
@@ -159,6 +165,9 @@ export class AgentClient {
     // 复制消息列表（后续轮次会追加 assistant + tool 消息）
     const conversation = [...request.messages];
     let totalTokens = 0;
+    let totalCacheHitTokens = 0;
+    let totalCacheMissTokens = 0;
+    let totalCompletionTokens = 0;
     const allReasoning: string[] = [];  // 跨轮次收集 reasoning
 
     for (let round = 0; round < maxRounds; round++) {
@@ -171,6 +180,9 @@ export class AgentClient {
 
       const innerResult = await this.chat(roundRequest, options.signal);
       totalTokens += innerResult.tokensUsed;
+      totalCacheHitTokens += innerResult.cacheHitTokens ?? 0;
+      totalCacheMissTokens += innerResult.cacheMissTokens ?? 0;
+      totalCompletionTokens += innerResult.completionTokens ?? 0;
 
       // 收集每轮的 reasoning（不会被子调用覆盖）
       if (innerResult.reasoning) {
@@ -183,6 +195,9 @@ export class AgentClient {
           reasoning: allReasoning.join('\n'),
           toolCalls: toolCallHistory,
           tokensUsed: totalTokens,
+          cacheHitTokens: totalCacheHitTokens,
+          cacheMissTokens: totalCacheMissTokens,
+          completionTokens: totalCompletionTokens,
           duration: Date.now() - startTime,
         };
       }
@@ -245,6 +260,9 @@ export class AgentClient {
         reasoning: allReasoning.join('\n'),
         tokensUsed: totalTokens,
         cacheHit: innerResult.cacheHit,
+        cacheHitTokens: totalCacheHitTokens,
+        cacheMissTokens: totalCacheMissTokens,
+        completionTokens: totalCompletionTokens,
         duration: Date.now() - startTime,
         toolCalls: toolCallHistory,
       };
@@ -258,6 +276,9 @@ export class AgentClient {
       reasoning: allReasoning.join('\n'),
       tokensUsed: totalTokens,
       cacheHit: false,
+      cacheHitTokens: totalCacheHitTokens,
+      cacheMissTokens: totalCacheMissTokens,
+      completionTokens: totalCompletionTokens,
       duration: Date.now() - startTime,
       error: `Exceeded max tool-calling rounds (${maxRounds})`,
       toolCalls: toolCallHistory,
@@ -302,6 +323,7 @@ export class AgentClient {
         frequency_penalty: request.frequencyPenalty ?? 0,
         presence_penalty: request.presencePenalty ?? 0,
         stream: true,
+        stream_options: { include_usage: true },  // 🆕 让流式末尾 chunk 返回 usage（DeepSeek 命中/未命中/输出 token），否则流式永远拿不到 usage
         stop: request.stop,
         user_id: this.userId,
       };
@@ -346,6 +368,9 @@ export class AgentClient {
       let fullReasoning = '';
       let tokensUsed = 0;
       let cacheHit = false;
+      let cacheHitTokens = 0;
+      let cacheMissTokens = 0;
+      let completionTokens = 0;
 
       // Accumulate tool calls by index
       const toolCallAccum: Map<number, { id: string; name: string; arguments: string }> = new Map();
@@ -382,6 +407,15 @@ export class AgentClient {
                 // Track usage if present
                 if (chunk.usage?.total_tokens) {
                   tokensUsed = chunk.usage.total_tokens;
+                }
+                if (chunk.usage?.prompt_cache_hit_tokens) {
+                  cacheHitTokens = chunk.usage.prompt_cache_hit_tokens;
+                }
+                if (chunk.usage?.prompt_cache_miss_tokens) {
+                  cacheMissTokens = chunk.usage.prompt_cache_miss_tokens;
+                }
+                if (chunk.usage?.completion_tokens) {
+                  completionTokens = chunk.usage.completion_tokens;
                 }
 
                 // Detect cache hit from chunk headers (DeepSeek)
@@ -456,6 +490,9 @@ export class AgentClient {
                     reasoning: fullReasoning,
                     tokensUsed,
                     cacheHit,
+                    cacheHitTokens,
+                    cacheMissTokens,
+                    completionTokens,
                     duration: Date.now() - startTime,
                   });
                 }
@@ -542,6 +579,10 @@ export class AgentClient {
       const rawResponse: string = message?.content ?? '';
       const reasoningContent: string = message?.reasoning_content ?? '';
       const tokensUsed: number = data.usage?.total_tokens ?? 0;
+      // 🆕 缓存命中/未命中/输出 token 明细（缺失当 0）
+      const cacheHitTokens: number = data.usage?.prompt_cache_hit_tokens ?? 0;
+      const cacheMissTokens: number = data.usage?.prompt_cache_miss_tokens ?? 0;
+      const completionTokens: number = data.usage?.completion_tokens ?? 0;
 
       // 提取 tool_calls（如果存在）
       const toolCalls = message?.tool_calls;
@@ -559,6 +600,9 @@ export class AgentClient {
         reasoning: reasoningContent || undefined,
         tokensUsed,
         cacheHit,
+        cacheHitTokens,
+        cacheMissTokens,
+        completionTokens,
         duration: 0,
         _toolCalls: toolCalls,
       };

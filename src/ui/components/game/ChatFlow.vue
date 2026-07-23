@@ -2,8 +2,9 @@
 import { ref, watch, nextTick } from 'vue'
 import InputBar from './InputBar.vue'
 import type { ChatMessage, SystemEvent } from '@engine/types'
-import { processRules, escapeHtml } from '@engine/beautifier'
+import { processRules, escapeHtml, collectActiveSignalsFromEntries } from '@engine/beautifier'
 import { useSettingsStore } from '../../stores/settings-store'
+import { useGameStore } from '../../stores/game-store'
 import CraftSystemCard from './cards/CraftSystemCard.vue'
 import CharGenSystemCard from './cards/CharGenSystemCard.vue'
 import CombatSystemCard from './cards/CombatSystemCard.vue'
@@ -34,6 +35,7 @@ const emit = defineEmits<{
 
 const settings = useSettingsStore()
 const s = settings.settings
+const game = useGameStore()
 
 const container = ref<HTMLDivElement>()
 const expandedIds = ref<Record<string, boolean>>({})
@@ -101,12 +103,31 @@ function eventIconClass(type: string): string {
  * 段落处理: \n\n 分隔的文本段落包裹为 &lt;p&gt; 标签，
  * 使 CSS 的 text-indent 和段间距生效，实现「读小说」而非「读聊天」的排版。
  */
-/** 合并预设规则 + 用户规则，返回完整美化规则列表 */
+/**
+ * 合并预设规则 + 用户规则，返回完整美化规则列表。
+ *
+ * 🆕 autoEnable 解析以当前存档为准：命定核心选择走独立 uid（不改世界书条目 enabled），
+ * 存于 save.metadata.enabledWorldBookEntries（格式 'system_core:413'）。只有玩家本局
+ * 选了妲丽安核心(413)，妲丽安美化规则才激活——而非所有绑核心书的规则恒亮。
+ * 无 autoEnable 的规则（对话卡片等）保持 settings-store 预设状态。
+ */
 function getBeautifierRules(): import('@engine/types').BeautifierRule[] {
   const preset = (s.beautifierPresetRules ?? []) as import('@engine/types').BeautifierRule[]
   const user = (s.beautifierRules ?? []) as import('@engine/types').BeautifierRule[]
   const presetIds = new Set(preset.map(r => r.id))
-  return [...preset, ...user.filter(r => !presetIds.has(r.id))]
+
+  // 从存档启用条目提取 uid 集合（命定核心 system_core:uid + 启用角色 character:uid）
+  const enabledEntries: string[] = (game.activeSave?.metadata as any)?.enabledWorldBookEntries ?? []
+  const { activeEntryUids: activeUids } = collectActiveSignalsFromEntries(enabledEntries)
+
+  const resolved = preset.map(r => {
+    const uids = r.autoEnable?.worldBookEntryUids
+    if (!uids?.length) return r  // 无 autoEnable → 保持预设 enabled 状态
+    const matched = uids.some(u => activeUids.has(u))
+    return { ...r, enabled: matched, locked: matched }
+  })
+
+  return [...resolved, ...user.filter(r => !presetIds.has(r.id))]
 }
 
 function beautifyText(msg: ChatMessage): string {

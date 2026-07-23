@@ -442,7 +442,7 @@ export class GamePipeline {
 
       const record = (
         messages: Array<{ role: string; content: string | null }>,
-        result: { rawResponse?: string; output?: string | null; reasoning?: string; tokensUsed?: number; cacheHit?: boolean; error?: string; duration?: number } | undefined,
+        result: { rawResponse?: string; output?: string | null; reasoning?: string; tokensUsed?: number; cacheHit?: boolean; cacheHitTokens?: number; cacheMissTokens?: number; completionTokens?: number; error?: string; duration?: number } | undefined,
         duration: number,
       ) => {
         callSeq += 1
@@ -462,6 +462,9 @@ export class GamePipeline {
           error: result?.error,
           tokensUsed: result?.tokensUsed ?? 0,
           cacheHit: result?.cacheHit ?? false,
+          cacheHitTokens: result?.cacheHitTokens,
+          cacheMissTokens: result?.cacheMissTokens,
+          completionTokens: result?.completionTokens,
           duration: result?.duration ?? duration,
         })
       }
@@ -561,6 +564,9 @@ export class GamePipeline {
           error: result.error,
           tokensUsed: result.tokensUsed,
           cacheHit: result.cacheHit,
+          cacheHitTokens: result.cacheHitTokens,
+          cacheMissTokens: result.cacheMissTokens,
+          completionTokens: result.completionTokens,
           duration: result.duration,
         })
         this.handleAgentResult(result)

@@ -109,6 +109,34 @@ export async function loadPresetRules(): Promise<BeautifierRule[]> {
 // ========== Auto-Enable Resolution ==========
 
 /**
+ * 从存档的 enabledWorldBookEntries（格式 'system_core:413'）提取 autoEnable 信号。
+ *
+ * 这是 autoEnable 的正确信号源 —— 命定核心/启用角色是**存档级**选择
+ * （存于 save.metadata.enabledWorldBookEntries），不等于 worldBooks 条目的 enabled
+ * （后者是「是否注入 prompt」的开关，核心书里几乎全 enabled，用它会让所有绑核心的规则恒亮）。
+ *
+ * @param enabledEntries 存档启用的条目 ID 列表（partition:uid）
+ */
+export function collectActiveSignalsFromEntries(enabledEntries: string[]): {
+  activeWorldBookIds: Set<string>
+  activeEntryUids: Set<number>
+} {
+  const activeWorldBookIds = new Set<string>()
+  const activeEntryUids = new Set<number>()
+  for (const id of enabledEntries) {
+    const i = id.indexOf(':')
+    if (i < 0) continue
+    const partition = id.slice(0, i)
+    const uid = Number(id.slice(i + 1))
+    if (!Number.isNaN(uid)) {
+      activeEntryUids.add(uid)
+      activeWorldBookIds.add(partition)
+    }
+  }
+  return { activeWorldBookIds, activeEntryUids }
+}
+
+/**
  * 根据活跃世界书和角色，自动启用匹配的预设规则。
  *
  * 匹配逻辑:
