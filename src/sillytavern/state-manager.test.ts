@@ -20,9 +20,11 @@ vi.mock('./database', () => ({
   saveCharacters: vi.fn(),
   deleteCharacter: vi.fn(),
   saveMemory: vi.fn(),
+  deleteMemoriesAfter: vi.fn(),
   getMemories: vi.fn(),
   getPlotEvents: vi.fn(),
   savePlotEvents: vi.fn(),
+  deletePlotEvent: vi.fn(),
   getSave: vi.fn(),
   saveSaveSlot: vi.fn(),
   getSnapshots: vi.fn(),
@@ -133,6 +135,8 @@ describe('StateManager', () => {
     vi.mocked(db.getMemories).mockResolvedValue([]);
     vi.mocked(db.getPlotEvents).mockResolvedValue([]);
     vi.mocked(db.savePlotEvents).mockResolvedValue(undefined);
+    vi.mocked(db.deletePlotEvent).mockResolvedValue(undefined);
+    vi.mocked(db.deleteMemoriesAfter).mockResolvedValue(0);
     vi.mocked(db.getSave).mockResolvedValue(undefined);
     vi.mocked(db.saveSaveSlot).mockResolvedValue('saved');
     vi.mocked(db.getSnapshots).mockResolvedValue([]);
@@ -2011,11 +2015,11 @@ describe('StateManager', () => {
 
       vi.mocked(db.getSettings).mockResolvedValue({ maxSnapshotsPerSave: 5 } as any);
       await sm.createSnapshot('turn', 1);
-      expect(vi.mocked(db.trimSnapshots)).toHaveBeenLastCalledWith('save-001', 5);
+      expect(vi.mocked(db.trimSnapshots)).toHaveBeenLastCalledWith('save-001', 5, 'tiered');
 
       vi.mocked(db.getSettings).mockResolvedValue(undefined);
       await sm.createSnapshot('turn', 2);
-      expect(vi.mocked(db.trimSnapshots)).toHaveBeenLastCalledWith('save-001', 30);
+      expect(vi.mocked(db.trimSnapshots)).toHaveBeenLastCalledWith('save-001', 30, 'tiered');
     });
 
     it('commitChatState 不再自动产生快照（杀 #28 patchCount%N 即建即抛）', async () => {
@@ -2075,9 +2079,47 @@ describe('StateManager', () => {
       expect(vi.mocked(db.deleteMessagesAfterTurn)).toHaveBeenCalledWith('save-001', 2);
       // activeSnapshotId 指向
       expect(save.activeSnapshotId).toBe('snap-1');
+      // 🆕 plotEvents 覆写（快照无 plotEvents → 写空数组）+ memories 清理 + totalTurns 对齐
+      expect(vi.mocked(db.savePlotEvents)).toHaveBeenCalledWith([]);
+      expect(vi.mocked(db.deleteMemoriesAfter)).toHaveBeenCalledWith('save-001', snapshot.createdAt);
+      expect(save.metadata.totalTurns).toBe(2);
       // 恢复写入与快照引用隔离: 改库内对象不影响快照（可重复恢复）
       chars[0].hp = 1;
       expect(snapshot.characters[0].hp).toBe(80);
+    });
+
+    it('🆕 plotEvents 随快照覆写恢复（全删当前→写快照副本）+ 清理未来记忆 + totalTurns 对齐', async () => {
+      // 当前 2 个剧情事件（应被全删）
+      vi.mocked(db.getPlotEvents).mockResolvedValue([
+        { id: 'evt-old', saveId: 'save-001' } as any,
+        { id: 'evt-late', saveId: 'save-001' } as any,
+      ]);
+      const profile = await saveProfile.getProfile('save-001');
+      const snapshot = {
+        id: 'snap-pe', saveId: 'save-001', createdAt: 5000, reason: 'turn' as const, turn: 3,
+        characters: [],
+        saveProfile: structuredClone(profile),
+        plotEvents: [{ id: 'evt-snap', saveId: 'save-001', status: 'active' } as any],
+      };
+      vi.mocked(db.getSnapshot).mockResolvedValue(snapshot as any);
+      const save = buildMockSaveSlot({ id: 'save-001' });
+      vi.mocked(db.getSave).mockResolvedValue(save);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.restoreSnapshot('snap-pe');
+
+      expect(result.success).toBe(true);
+      // 当前剧情事件全删
+      expect(vi.mocked(db.deletePlotEvent)).toHaveBeenCalledWith('evt-old');
+      expect(vi.mocked(db.deletePlotEvent)).toHaveBeenCalledWith('evt-late');
+      // 写入快照里的剧情事件副本
+      expect(vi.mocked(db.savePlotEvents)).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'evt-snap' }),
+      ]);
+      // 清理 realTimestamp > 快照 createdAt 的未来记忆
+      expect(vi.mocked(db.deleteMemoriesAfter)).toHaveBeenCalledWith('save-001', 5000);
+      // totalTurns 对齐快照 turn 游标
+      expect(save.metadata.totalTurns).toBe(3);
     });
 
     it('快照不存在 → errors[] 且不动任何状态', async () => {

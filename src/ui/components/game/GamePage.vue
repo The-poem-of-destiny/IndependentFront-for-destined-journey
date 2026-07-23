@@ -16,6 +16,7 @@ import CharacterListPanel from './CharacterListPanel.vue'
 import QuestsPanel from './QuestsPanel.vue'
 import PlotPanel from './PlotPanel.vue'
 import MemoryPanel from './MemoryPanel.vue'
+import SnapshotPanel from './SnapshotPanel.vue'
 import MapPanel from './MapPanel.vue'
 import AgentStatusPanel from './AgentStatusPanel.vue'
 import DebugPanel from './DebugPanel.vue'
@@ -180,7 +181,7 @@ function onModalOpenChange(v: boolean) {
       <MemoryPanel />
     </AppModal>
     <AppModal title="快照" :open="game.activeModal === 'snapshots'" @close="game.closeModal()" @update:open="onModalOpenChange" size="md" closable>
-      <div class="placeholder-panel">快照管理 — 后续实现</div>
+      <SnapshotPanel />
     </AppModal>
     <AppModal title="地图" :open="game.activeModal === 'map'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
       <MapPanel />

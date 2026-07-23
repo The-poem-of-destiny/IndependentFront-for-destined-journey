@@ -435,6 +435,48 @@ describe('Snapshots CRUD', () => {
     expect(await getSnapshots('save_test')).toHaveLength(3);
   });
 
+  it('🆕 trimSnapshots(tiered) 阶梯淘汰：最近5全留 + 旧层稀疏化（40回合→11档）', async () => {
+    // turn 1..40 各打一张 turn 快照
+    for (let t = 1; t <= 40; t++) {
+      await saveSnapshot(makeSnapshot({ id: `turn-${t}`, turn: t, createdAt: 1000 + t }));
+    }
+    await trimSnapshots('save_test', 30, 'tiered');
+    const remaining = (await getSnapshots('save_test')).map(s => s.turn).sort((a, b) => a - b);
+    // tier0(36-40 全留) + tier1 每4(32,28,24,20,16) + tier2 每8(8)
+    expect(remaining).toEqual([8, 16, 20, 24, 28, 32, 36, 37, 38, 39, 40]);
+  });
+
+  it('🆕 trimSnapshots(tiered) 铁律：最近5个 turn 档永不淘汰（即使上限<5）', async () => {
+    for (let t = 1; t <= 10; t++) {
+      await saveSnapshot(makeSnapshot({ id: `turn-${t}`, turn: t, createdAt: 1000 + t }));
+    }
+    // maxCount=3，但最近5(turn 6-10)必须全保留
+    await trimSnapshots('save_test', 3, 'tiered');
+    const remaining = (await getSnapshots('save_test')).map(s => s.turn).sort((a, b) => a - b);
+    expect(remaining).toEqual([6, 7, 8, 9, 10]);
+  });
+
+  it('🆕 trimSnapshots(tiered) 非 turn 档(manual/pre-combat)受保护永不淘汰', async () => {
+    await saveSnapshot(makeSnapshot({ id: 'manual-1', turn: 5, reason: 'manual', createdAt: 500 }));
+    await saveSnapshot(makeSnapshot({ id: 'combat-1', turn: 7, reason: 'pre-combat', createdAt: 700 }));
+    for (let t = 1; t <= 40; t++) {
+      await saveSnapshot(makeSnapshot({ id: `turn-${t}`, turn: t, createdAt: 1000 + t }));
+    }
+    await trimSnapshots('save_test', 30, 'tiered');
+    const remaining = await getSnapshots('save_test');
+    expect(remaining.find(s => s.id === 'manual-1')).toBeDefined();
+    expect(remaining.find(s => s.id === 'combat-1')).toBeDefined();
+  });
+
+  it('🆕 trimSnapshots(dense) 向后兼容：保留最新 N 个（FIFO）', async () => {
+    for (let t = 1; t <= 10; t++) {
+      await saveSnapshot(makeSnapshot({ id: `turn-${t}`, turn: t, createdAt: 1000 + t }));
+    }
+    await trimSnapshots('save_test', 5, 'dense');
+    const remaining = (await getSnapshots('save_test')).map(s => s.turn).sort((a, b) => a - b);
+    expect(remaining).toEqual([6, 7, 8, 9, 10]);
+  });
+
   it('快照 characters/saveProfile 整份落库可读回（M5 §11.2）', async () => {
     const hero = createDefaultCharacterState({ id: 'h1', name: '主角', saveId: 'save_test', hp: 77 });
     const profile = createDefaultSaveProfile('save_test');

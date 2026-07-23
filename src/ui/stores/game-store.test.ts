@@ -11,6 +11,7 @@ import { useGameStore } from './game-store'
 import {
   initializeDatabase, clearAllData,
   saveSaveSlot, saveCharacter, saveSaveProfile,
+  saveSnapshot, saveMessage,
   savePlotOutline, savePlotEvents,
   getDatabase,
 } from '@engine/database'
@@ -266,5 +267,99 @@ describe('persistMessage 前置校验', () => {
     // 改为直接查全表：库里不应出现这条孤儿消息
     const all = await getDatabase().messages.toArray()
     expect(all.filter(m => m.content === '测试内容')).toHaveLength(0)
+  })
+})
+
+// ===== rollbackOneTurn / restoreToSnapshot =====
+
+describe('rollbackOneTurn / restoreToSnapshot', () => {
+  let store: ReturnType<typeof useGameStore>
+
+  beforeEach(async () => {
+    try { await clearAllData() } catch { /* db may not exist yet */ }
+    await initializeDatabase()
+    store = makeStore()
+  })
+
+  /** 种入两回合：存档当前在 turn2，并有一张 turn1 快照(上一轮状态) */
+  async function seedTwoTurns() {
+    await saveSaveSlot(makeSaveSlot({
+      metadata: { characterName: '理查德', userName: 'Tester', gameStartTime: '001-01-01', totalTurns: 2 } as any,
+    }))
+    // 当前角色 (turn2 状态 hp=30) + profile (fp=9)
+    await saveCharacter(makeChar({ id: 'hero', name: '理查德', type: 'player', hp: 30, maxHp: 100 }))
+    await saveSaveProfile(makeProfile({ fp: 9 }))
+    // turn1 快照 (上一轮): 角色 hp=80 / profile fp=5
+    await saveSnapshot({
+      id: 'snap-turn1', saveId: SAVE_ID, createdAt: 1000, reason: 'turn', turn: 1,
+      characters: [makeChar({ id: 'hero', name: '理查德', type: 'player', hp: 80, maxHp: 100 })],
+      saveProfile: makeProfile({ fp: 5 }),
+      plotEvents: [],
+    })
+    // 消息: turn1(user+assistant) + turn2(user+assistant)
+    const base = Date.now()
+    await saveMessage({ id: 'u1', role: 'user', content: '第一轮输入', timestamp: base, saveId: SAVE_ID, turn: 1 })
+    await saveMessage({ id: 'a1', role: 'assistant', content: '第一轮正文', timestamp: base + 1, saveId: SAVE_ID, turn: 1 })
+    await saveMessage({ id: 'u2', role: 'user', content: '第二轮输入(待回填)', timestamp: base + 2, saveId: SAVE_ID, turn: 2 })
+    await saveMessage({ id: 'a2', role: 'assistant', content: '第二轮正文', timestamp: base + 3, saveId: SAVE_ID, turn: 2 })
+    await store.loadSave(SAVE_ID)
+  }
+
+  it('rollbackOneTurn: 回退到上一轮 → 输入回填 + turn2消息删除 + 状态恢复 + totalTurns对齐', async () => {
+    await seedTwoTurns()
+    expect(store.messages.map(m => m.id)).toContain('a2')
+
+    const result = await store.rollbackOneTurn()
+
+    expect(result.ok).toBe(true)
+    // 输入框回填 turn2 的玩家输入
+    expect(store.pendingInput).toBe('第二轮输入(待回填)')
+    // turn2 消息删除，turn1 保留
+    const ids = store.messages.map(m => m.id)
+    expect(ids).not.toContain('u2')
+    expect(ids).not.toContain('a2')
+    expect(ids).toContain('u1')
+    // 状态恢复到 turn1 快照: hp 80 / fp 5
+    expect(store.characters.find(c => c.id === 'hero')?.hp).toBe(80)
+    expect(store.saveProfile?.fp).toBe(5)
+    // totalTurns 对齐到快照 turn
+    expect(store.activeSave?.metadata?.totalTurns).toBe(1)
+  })
+
+  it('rollbackOneTurn: 战斗中拒绝回退', async () => {
+    await seedTwoTurns()
+    store.activeCombat = { status: 'ongoing' } as any
+    expect(store.isInCombat).toBe(true)
+    const result = await store.rollbackOneTurn()
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('战斗')
+    // 未回退：turn2 消息仍在
+    expect(store.messages.map(m => m.id)).toContain('a2')
+  })
+
+  it('rollbackOneTurn: 已是最早回合(turn1)拒绝', async () => {
+    await saveSaveSlot(makeSaveSlot())
+    await saveCharacter(makeChar({ id: 'hero', name: '理查德', type: 'player' }))
+    await saveSaveProfile(makeProfile())
+    const base = Date.now()
+    await saveMessage({ id: 'u1', role: 'user', content: '唯一一轮', timestamp: base, saveId: SAVE_ID, turn: 1 })
+    await saveMessage({ id: 'a1', role: 'assistant', content: '正文', timestamp: base + 1, saveId: SAVE_ID, turn: 1 })
+    await store.loadSave(SAVE_ID)
+    const result = await store.rollbackOneTurn()
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('最早回合')
+  })
+
+  it('restoreToSnapshot: 恢复到指定历史快照(不回填输入) + 状态恢复', async () => {
+    await seedTwoTurns()
+    const result = await store.restoreToSnapshot('snap-turn1')
+    expect(result.ok).toBe(true)
+    // 不回填输入
+    expect(store.pendingInput).toBe('')
+    // turn2 消息删除
+    expect(store.messages.map(m => m.id)).not.toContain('a2')
+    // 状态恢复到 turn1 快照
+    expect(store.characters.find(c => c.id === 'hero')?.hp).toBe(80)
+    expect(store.activeSave?.metadata?.totalTurns).toBe(1)
   })
 })

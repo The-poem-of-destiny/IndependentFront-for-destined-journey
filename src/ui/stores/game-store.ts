@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SaveSlot, CharacterState, ChatMessage, MemoryRecord, PlotEvent, PlotOutline, CombatState, SaveProfile } from '@engine/types'
-import { getSave, getSaves, getCharacters, getMemories, getPlotEvents, getSaveProfile, getLatestPlotOutline } from '@engine/database'
+import { getSave, getSaves, getCharacters, getMemories, getPlotEvents, getSaveProfile, getLatestPlotOutline, getSnapshots } from '@engine/database'
 import { saveMessage, getMessages, saveSaveSlot } from '@engine/database'
+import { createStateManager } from '@engine/state-manager'
 
 /** 单条 Agent 调试日志（含完整请求/响应上下文） */
 export interface DebugAgentEntry {
@@ -377,6 +378,59 @@ export const useGameStore = defineStore('game', () => {
     saveProfile.value = null
   }
 
+  // === 快照回退 (快照面板 + 右键回退重发) ===
+
+  /** 右键「回退」：撤回当前回合 → 恢复上一轮快照 + 把这轮玩家输入回填输入框。
+   *  回退后原样发送 = 重新生成；编辑后发送 = 编辑重发。
+   *  不可回退（最早回合/战斗中/无存档/无快照）时返回 {ok:false,error}。 */
+  async function rollbackOneTurn(): Promise<{ ok: boolean; error?: string }> {
+    if (!activeSaveId.value) return { ok: false, error: '无活跃存档' }
+    if (isInCombat.value) return { ok: false, error: '战斗进行中，无法回退' }
+
+    // 当前回合 = 最新一条 user 消息（删除前先捕获其输入）
+    const userMsgs = messages.value.filter(m => m.role === 'user')
+    const currentUserMsg = userMsgs[userMsgs.length - 1]
+    if (!currentUserMsg) return { ok: false, error: '已是最早回合，无可回退' }
+    const currentTurn = currentUserMsg.turn ?? 0
+    const capturedInput = currentUserMsg.content
+
+    // 找上一轮快照（turn <= currentTurn-1 中最新者；快照 turn = 已完成回合数）
+    const prevTargetTurn = currentTurn - 1
+    if (prevTargetTurn < 1) return { ok: false, error: '已是最早回合，无可回退' }
+    const snapshots = await getSnapshots(activeSaveId.value)
+    const prevSnapshot = snapshots
+      .filter(s => s.turn <= prevTargetTurn)
+      .sort((a, b) => b.turn - a.turn)[0]
+    if (!prevSnapshot) return { ok: false, error: '找不到上一轮快照' }
+
+    // 恢复快照（characters/saveProfile/plotEvents/memories/messages 全回滚 + totalTurns 对齐）
+    const sm = createStateManager(activeSaveId.value)
+    const result = await sm.restoreSnapshot(prevSnapshot.id)
+    if (!result.success) return { ok: false, error: result.errors.join('; ') || '恢复快照失败' }
+
+    // 回填这轮玩家输入 + 同步内存 + turnCounter 对齐（防重发后 turn 编号错位）
+    fillInput(capturedInput)
+    await refreshFromDb()
+    await restoreMessages()
+    const lastMsg = messages.value.filter(m => m.role === 'user' || m.role === 'assistant').pop()
+    turnCounter = lastMsg?.turn ?? 0
+    return { ok: true }
+  }
+
+  /** 快照面板「恢复」：恢复到指定历史快照（不回填输入，从该点继续游戏）。 */
+  async function restoreToSnapshot(snapshotId: string): Promise<{ ok: boolean; error?: string }> {
+    if (!activeSaveId.value) return { ok: false, error: '无活跃存档' }
+    if (isInCombat.value) return { ok: false, error: '战斗进行中，无法恢复' }
+    const sm = createStateManager(activeSaveId.value)
+    const result = await sm.restoreSnapshot(snapshotId)
+    if (!result.success) return { ok: false, error: result.errors.join('; ') || '恢复快照失败' }
+    await refreshFromDb()
+    await restoreMessages()
+    const lastMsg = messages.value.filter(m => m.role === 'user' || m.role === 'assistant').pop()
+    turnCounter = lastMsg?.turn ?? 0
+    return { ok: true }
+  }
+
   return {
     saves, activeSaveId, activeSave,
     characters, player, npcs,
@@ -397,5 +451,6 @@ export const useGameStore = defineStore('game', () => {
     agentStatus, agentDurations, updateAgentStatus, clearAgentStatus, clearAllAgentStatus,
     agentLog, addAgentLogEntry, clearAgentLog,
     persistMessage, restoreMessages,
+    rollbackOneTurn, restoreToSnapshot,
   }
 })

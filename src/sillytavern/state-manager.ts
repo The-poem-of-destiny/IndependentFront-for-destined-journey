@@ -18,8 +18,8 @@ import type {
 } from './types';
 import {
   getCharacters, saveCharacter, saveCharacters, deleteCharacter,
-  saveMemory,
-  getPlotEvents, savePlotEvents,
+  saveMemory, deleteMemoriesAfter,
+  getPlotEvents, savePlotEvents, deletePlotEvent,
   getSave, saveSaveSlot,
   getSnapshot, saveSnapshot, trimSnapshots,
   getSettings, deleteMessagesAfterTurn,
@@ -1166,6 +1166,7 @@ export class StateManager {
     const { getProfile } = await import('./save-profile');
     const characters = await getCharacters(this.saveId);
     const profile = await getProfile(this.saveId);
+    const plotEvents = await getPlotEvents(this.saveId);
 
     const snapshot: Snapshot = {
       id: crypto.randomUUID(),
@@ -1175,6 +1176,7 @@ export class StateManager {
       turn,
       characters: structuredClone(characters),
       saveProfile: structuredClone(profile),
+      plotEvents: structuredClone(plotEvents),
     };
 
     await saveSnapshot(snapshot);
@@ -1186,9 +1188,11 @@ export class StateManager {
       await saveSaveSlot(save);
     }
 
-    // 滚动上限（读 settings，缺省 30）
-    const maxSnapshots = (await getSettings())?.maxSnapshotsPerSave ?? 30;
-    await trimSnapshots(this.saveId, maxSnapshots);
+    // 滚动上限 + 保留模式（读 settings；缺省 30 / tiered）
+    const settings = await getSettings();
+    const maxSnapshots = settings?.maxSnapshotsPerSave ?? 30;
+    const retentionMode = settings?.snapshotRetentionMode ?? 'tiered';
+    await trimSnapshots(this.saveId, maxSnapshots, retentionMode);
 
     return snapshot;
   }
@@ -1216,8 +1220,10 @@ export class StateManager {
    * ① 按 id 读快照 + saveId 校验（防跨档恢复）
    * ② characters: 当前存档全删后重写快照副本（整体覆写语义 — 快照后新增的角色一并消失）
    * ③ saveProfile 覆写（任务/时间/好感/变量随行回滚）
+   * ③.b plotEvents 覆写（🆕 剧情事件随快照回滚；旧快照无此字段→清空）
    * ④ deleteMessagesAfterTurn(saveId, snapshot.turn) — 对话截断回滚 (#49 复合索引启用)
-   * ⑤ save.activeSnapshotId 指向该快照
+   * ④.b 清理"未来"记忆 realTimestamp > snapshot.createdAt（🆕 记忆 append-only，按时间清理安全）
+   * ⑤ save.activeSnapshotId 指向该快照 + totalTurns 对齐快照 turn 游标（防重发后 turn 编号错位）
    * ⑥ 任何失败进 errors[]（返回 StateCommitResult，与 commitChatState 口径一致）
    */
   async restoreSnapshot(snapshotId: string): Promise<StateCommitResult> {
@@ -1242,13 +1248,24 @@ export class StateManager {
       const { updateProfile } = await import('./save-profile');
       await updateProfile(structuredClone(snapshot.saveProfile));
 
+      // ③.b plotEvents 覆写：全删 → 写入快照副本（旧快照无 plotEvents → 写空数组=清空）
+      const currentEvents = await getPlotEvents(this.saveId);
+      for (const e of currentEvents) {
+        await deletePlotEvent(e.id);
+      }
+      await savePlotEvents(structuredClone(snapshot.plotEvents ?? []));
+
       // ④ 对话回滚: 删除快照 turn 之后的消息
       await deleteMessagesAfterTurn(this.saveId, snapshot.turn);
 
-      // ⑤ activeSnapshotId 指向
+      // ④.b 清理"未来"记忆（realTimestamp > 快照创建时间；记忆 append-only 安全）
+      await deleteMemoriesAfter(this.saveId, snapshot.createdAt);
+
+      // ⑤ activeSnapshotId 指向 + totalTurns 对齐快照 turn（防重发后 turn 编号错位）
       const save = await getSave(this.saveId);
       if (save) {
         save.activeSnapshotId = snapshot.id;
+        save.metadata.totalTurns = snapshot.turn;
         await saveSaveSlot(save);
       }
     } catch (err) {

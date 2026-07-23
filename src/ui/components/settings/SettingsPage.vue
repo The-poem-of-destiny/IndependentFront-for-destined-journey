@@ -1222,6 +1222,7 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
             <label class="form-label">每轮最大召回记忆数<p class="form-hint">每次对话时从记忆库中召回的最多条目数</p><input type="number" v-model.number="s.memoryRecallCount" min="5" max="50" class="form-input" /></label>
             <label class="form-label">压缩阈值（轮）<p class="form-hint">超过此轮数后，早期记忆会被压缩为摘要</p><input type="number" v-model.number="s.memoryCompressionThreshold" min="50" max="500" class="form-input" /></label>
             <label class="form-label">每存档最大快照数<p class="form-hint">超过上限后最旧的快照会被自动删除</p><input type="number" v-model.number="s.memorySnapshotLimit" min="10" max="50" class="form-input" /></label>
+            <label class="form-label">快照保留模式<p class="form-hint">阶梯式=最近5回合每轮留档 + 更早的按 4/8/10 回合稀疏保留（推荐）；密集=每轮都留，更早的优先淘汰</p><select v-model="s.snapshotRetentionMode" class="form-input"><option value="tiered">阶梯式（推荐）</option><option value="dense">密集（每轮都留）</option></select></label>
             <label class="form-label">缓存策略<p class="form-hint">影响 API 调用的 Prompt 缓存利用率</p><select v-model="s.memoryCacheStrategy" class="form-input"><option value="aggressive">激进 — 尽可能缓存，高命中率</option><option value="balanced">平衡 — 兼顾缓存命中与资源消耗</option><option value="conservative">保守 — 最小缓存，适合低内存设备</option></select></label>
           </div></AppCard>
         </section>

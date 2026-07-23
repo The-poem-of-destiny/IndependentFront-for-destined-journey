@@ -476,6 +476,17 @@ export async function deleteMemory(id: string): Promise<void> {
   await getDatabase().memories.delete(id);
 }
 
+/** 删除 realTimestamp 严格大于给定值的记忆（快照恢复时清理"未来"记忆用；记忆 append-only，按时间清理安全） */
+export async function deleteMemoriesAfter(saveId: string, realTimestamp: number): Promise<number> {
+  const db = getDatabase();
+  const ids = await db.memories
+    .where('saveId').equals(saveId)
+    .and(m => m.realTimestamp > realTimestamp)
+    .primaryKeys();
+  if (ids.length > 0) await db.memories.bulkDelete(ids);
+  return ids.length;
+}
+
 export async function getRecentMemories(saveId: string, limit: number): Promise<MemoryRecord[]> {
   return getDatabase().memories
     .where('saveId').equals(saveId)
@@ -577,16 +588,66 @@ export async function deleteSnapshot(id: string): Promise<void> {
   await getDatabase().snapshots.delete(id);
 }
 
-/** 删除超出上限的旧快照（按 createdAt 保留最新的 maxCount 个） */
-export async function trimSnapshots(saveId: string, maxCount: number): Promise<void> {
-  const snapshots = await getDatabase().snapshots
+/** 删除超出上限的旧快照
+ *  - mode='dense'(默认): 按 createdAt 保留最新 maxCount 个（FIFO，向后兼容）
+ *  - mode='tiered': 阶梯淘汰——最近5轮全留，再往前每4轮留1，更早每8/10轮留1；
+ *    非 turn 档(manual/pre-combat)受保护永不淘汰；最近5个 turn 档铁律保护。
+ */
+export async function trimSnapshots(saveId: string, maxCount: number, mode: 'tiered' | 'dense' = 'dense'): Promise<void> {
+  const all = await getDatabase().snapshots
     .where('saveId').equals(saveId)
     .reverse()
-    .sortBy('createdAt');
-  if (snapshots.length > maxCount) {
-    const toDelete = snapshots.slice(maxCount);
+    .sortBy('createdAt'); // 最新在前
+
+  if (all.length <= maxCount) return;
+
+  // 非 turn 档(manual/pre-combat)受保护，永不淘汰
+  const protectedIds = new Set(all.filter(s => s.reason !== 'turn').map(s => s.id));
+  const turnSnaps = all.filter(s => s.reason === 'turn'); // 继承 all 顺序（最新在前）
+
+  let keepTurnIds: Set<string>;
+  if (mode === 'tiered') {
+    keepTurnIds = selectTieredTurnSnapshots(turnSnaps);
+  } else {
+    const turnKeep = Math.max(0, maxCount - protectedIds.size);
+    keepTurnIds = new Set(turnSnaps.slice(0, turnKeep).map(s => s.id));
+  }
+
+  // 最近 5 个 turn 档铁律保护（回退依赖"上一轮档"必须存在）
+  const recentTurnIds = new Set(turnSnaps.slice(0, 5).map(s => s.id));
+  const kept = new Set<string>([...protectedIds, ...keepTurnIds, ...recentTurnIds]);
+
+  // 绝对上限兜底：总数仍超 maxCount → 从最旧可淘汰 turn 档砍起（跳过最近5与非turn）
+  if (kept.size > maxCount) {
+    const droppable = turnSnaps.filter(s => kept.has(s.id) && !recentTurnIds.has(s.id)); // 最新在前
+    for (let i = droppable.length - 1; i >= 0 && kept.size > maxCount; i--) {
+      kept.delete(droppable[i].id);
+    }
+  }
+
+  const toDelete = all.filter(s => !kept.has(s.id));
+  if (toDelete.length > 0) {
     await getDatabase().snapshots.bulkDelete(toDelete.map(s => s.id));
   }
+}
+
+/** 阶梯选择要保留的 turn 快照（turnSnaps 最新在前；按"年龄"=最新turn-snap.turn 决定保留间隔） */
+function selectTieredTurnSnapshots(turnSnaps: Snapshot[]): Set<string> {
+  const keep = new Set<string>();
+  if (turnSnaps.length === 0) return keep;
+  const sorted = [...turnSnaps].sort((a, b) => b.turn - a.turn); // turn 降序兜底
+  const newestTurn = sorted[0].turn;
+  let lastKeptTurn = Number.POSITIVE_INFINITY;
+  for (const s of sorted) {
+    const age = newestTurn - s.turn;
+    // 最近5轮每轮留 / 接下来每4轮 / 更早每8轮 / 最远每10轮
+    const gap = age <= 4 ? 1 : age <= 24 ? 4 : age <= 64 ? 8 : 10;
+    if (lastKeptTurn - s.turn >= gap) {
+      keep.add(s.id);
+      lastKeptTurn = s.turn;
+    }
+  }
+  return keep;
 }
 
 // --- Saves ---

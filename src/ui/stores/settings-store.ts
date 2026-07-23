@@ -125,6 +125,7 @@ function getDefaults(): Record<string, any> {
     memoryRecallCount: 20,
     memoryCompressionThreshold: 100,
     memorySnapshotLimit: 30,
+    snapshotRetentionMode: 'tiered' as 'tiered' | 'dense',
     memoryCacheStrategy: 'balanced' as string,
 
     // 消息 & 系统事件可见性

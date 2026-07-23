@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import InputBar from './InputBar.vue'
 import type { ChatMessage, SystemEvent } from '@engine/types'
 import { processRules, escapeHtml, collectActiveSignalsFromEntries } from '@engine/beautifier'
@@ -175,6 +175,60 @@ function beautifyStreamingText(raw: string): string {
   // 美化后单换行转 <br>（浏览器不渲染裸 \n）
   return processRules(raw, 'maintext', rules).replace(/\n/g, '<br>')
 }
+
+// ===== 右键菜单（最新一回合 回退/复制）=====
+const ctxMenu = ref<{ x: number; y: number; msgId: string } | null>(null)
+
+/** 最新一条 assistant 消息（右键菜单仅对它生效） */
+const latestAssistantMsg = computed<ChatMessage | undefined>(() => {
+  const list = props.messages ?? []
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i].role === 'assistant') return list[i]
+  }
+  return undefined
+})
+
+function onContextMenu(e: MouseEvent, msg: ChatMessage) {
+  // 仅最新一条 assistant 消息启用自定义菜单；其余走浏览器默认右键
+  if (!latestAssistantMsg.value || msg.id !== latestAssistantMsg.value.id) return
+  if (game.isInCombat || props.isGenerating) return
+  e.preventDefault()
+  // 视口夹紧，避免菜单溢出屏幕
+  const x = Math.min(e.clientX, window.innerWidth - 200)
+  const y = Math.min(e.clientY, window.innerHeight - 96)
+  ctxMenu.value = { x, y, msgId: msg.id }
+}
+
+function closeCtxMenu() { ctxMenu.value = null }
+
+async function ctxRollback() {
+  const result = await game.rollbackOneTurn()
+  closeCtxMenu()
+  if (!result.ok && result.error) console.warn('[ChatFlow] 回退失败:', result.error)
+}
+
+async function ctxCopy() {
+  const msgId = ctxMenu.value?.msgId
+  closeCtxMenu()
+  const msg = (props.messages ?? []).find(m => m.id === msgId)
+  if (!msg) return
+  try { await navigator.clipboard.writeText(msg.content) } catch (e) { console.warn('[ChatFlow] 复制失败:', e) }
+}
+
+function handleGlobalClick() { closeCtxMenu() }
+function handleEsc(e: KeyboardEvent) { if (e.key === 'Escape') closeCtxMenu() }
+function handleScrollClose() { closeCtxMenu() }
+
+onMounted(() => {
+  window.addEventListener('click', handleGlobalClick)
+  window.addEventListener('keydown', handleEsc)
+  window.addEventListener('scroll', handleScrollClose, true) // capture：捕获容器内滚动
+})
+onUnmounted(() => {
+  window.removeEventListener('click', handleGlobalClick)
+  window.removeEventListener('keydown', handleEsc)
+  window.removeEventListener('scroll', handleScrollClose, true)
+})
 </script>
 
 <template>
@@ -197,7 +251,12 @@ function beautifyStreamingText(raw: string): string {
         </div>
 
         <!-- AI 叙事消息 — 只渲染美化正文 -->
-        <div v-else-if="msg.role === 'assistant'" class="bubble-row bubble-row-narrative">
+        <div
+          v-else-if="msg.role === 'assistant'"
+          class="bubble-row bubble-row-narrative"
+          :title="latestAssistantMsg?.id === msg.id && !game.isInCombat && !isGenerating ? '右键：回退本轮 / 复制' : ''"
+          @contextmenu="onContextMenu($event, msg)"
+        >
           <div class="bubble bubble-narrative-full">
             <div class="narrative-body" v-html="beautifyText(msg)" />
             <span class="bubble-time" v-if="msg.timestamp">{{ formatTime(msg.timestamp) }}</span>
@@ -258,6 +317,18 @@ function beautifyStreamingText(raw: string): string {
     </div>
 
     <InputBar :disabled="isGenerating" @send="(c) => emit('send', c)" @stop="emit('stop')" />
+
+    <!-- 右键菜单（最新一回合 回退/复制） -->
+    <Teleport to="body">
+      <div v-if="ctxMenu" class="ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }">
+        <button class="ctx-item" :disabled="game.isInCombat" @click.stop="ctxRollback">
+          <i class="fa-solid fa-rotate-left" /> 回退本轮
+        </button>
+        <button class="ctx-item" @click.stop="ctxCopy">
+          <i class="fa-solid fa-copy" /> 复制
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -501,5 +572,47 @@ function beautifyStreamingText(raw: string): string {
 .system-card-wrapper {
   max-width: 72ch;
   width: 100%;
+}
+
+/* ===== 右键菜单 ===== */
+.ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 160px;
+  background: var(--theme-content-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm, 4px);
+  box-shadow: var(--theme-shadow-md, 0 4px 12px rgba(0, 0, 0, 0.25));
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: system-ui, sans-serif;
+}
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  color: var(--theme-text-primary);
+  font-size: 0.8125rem;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: var(--theme-radius-sm, 4px);
+  text-align: left;
+}
+.ctx-item:hover:not(:disabled) {
+  background: var(--theme-surface-hover, var(--theme-card-bg));
+}
+.ctx-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ctx-item i {
+  width: 1rem;
+  text-align: center;
+  opacity: 0.8;
 }
 </style>

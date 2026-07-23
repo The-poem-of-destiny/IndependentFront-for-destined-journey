@@ -418,6 +418,8 @@ export interface AppSettings {
   cacheStrategy: 'disabled' | 'userid_isolated' | 'aggressive';
   /** 快照保留数上限 */
   maxSnapshotsPerSave: number;
+  /** 快照保留模式：tiered=阶梯淘汰(最近5全留+旧层稀疏化) / dense=每轮都留(FIFO) */
+  snapshotRetentionMode: 'tiered' | 'dense';
   /** 记忆召回上限 */
   maxMemoriesRecall: number;
   /** Phase 4: 剧情模式配置 */
@@ -475,6 +477,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agentPipeline: DEFAULT_AGENT_PIPELINE,
   cacheStrategy: 'userid_isolated',
   maxSnapshotsPerSave: 30,
+  snapshotRetentionMode: 'tiered',
   maxMemoriesRecall: 20,
   // Phase 4 新增
   plotSettings: DEFAULT_PLOT_SETTINGS,
@@ -1007,6 +1010,8 @@ export interface Snapshot {
   characters: CharacterState[];
   /** 存档档案深拷贝（任务/时间/好感/变量随行） */
   saveProfile: SaveProfile;
+  /** 剧情事件深拷贝（🆕 回退时覆写恢复；可选=兼容旧快照，恢复时空数组兜底） */
+  plotEvents?: PlotEvent[];
 }
 
 /** 存档槽 — 10 槽，快照上限见 AppSettings.maxSnapshotsPerSave */

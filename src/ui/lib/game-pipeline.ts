@@ -94,6 +94,24 @@ export class GamePipeline {
     this.saveId = deps.saveId
   }
 
+  /** 把 settings-store 的快照配置同步到数据库 AppSettings
+   *  （createSnapshot/restoreSnapshot 读数据库 AppSettings 而非 settings-store → 此处搭桥，
+   *   让用户的「快照上限 / 保留模式」选择真正生效；顺带修活原本装饰性的 memorySnapshotLimit）。
+   *  每轮 run 开始时调用，未变更则跳过写入。 */
+  private async syncSnapshotSettings(): Promise<void> {
+    try {
+      const { getSettings, saveSettings } = await import('@engine/database')
+      const current = await getSettings()
+      if (!current) return
+      const limit = this.settings.settings.memorySnapshotLimit ?? 30
+      const mode = (this.settings.settings.snapshotRetentionMode ?? 'tiered') as 'tiered' | 'dense'
+      if (current.maxSnapshotsPerSave === limit && current.snapshotRetentionMode === mode) return
+      await saveSettings({ ...current, maxSnapshotsPerSave: limit, snapshotRetentionMode: mode })
+    } catch (err) {
+      console.warn('[GamePipeline] 同步快照设置失败（不阻塞）:', err)
+    }
+  }
+
   /** 发送开场 Prompt（首次加载存档时调用），作为首条用户消息注入管线 */
   async sendOpeningPrompt(onStoryChunk?: StoryChunkCallback): Promise<void> {
     const prompt = this.game.openingPrompt
@@ -120,6 +138,9 @@ export class GamePipeline {
       this.game.setPendingOptions([])  // 新一轮开始，清掉上一轮的行动选项
       this.game.clearAgentLog()
       this.game.clearAllAgentStatus()
+
+      // 同步快照设置（上限/保留模式）到数据库，供本轮 advanceTurn→createSnapshot 读取
+      await this.syncSnapshotSettings()
 
       // 2. 构建 endpoints & context
       const endpoints = this.buildEndpoints()
