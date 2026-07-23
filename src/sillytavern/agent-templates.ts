@@ -421,6 +421,13 @@ export function buildPlotContextBlock(agentId: string, ctx: AgentContext): strin
 const PLOT_AGENT_IDS = new Set(['plot_pre_check', 'plot_post_check', 'plot_outline']);
 
 /**
+ * 检测 story 预设是否自带系统占位符区块（规范预设）。
+ * 命中 → 预设内部已有 {{LORE_BOOK}}/{{USER_INPUT}} 等占位符，需预解析 + 简化 template（去重）。
+ * 未命中（纯 ST 预设 / 测试桩）→ 走默认 template 追加兜底。
+ */
+const STORY_PRESET_PLACEHOLDER_RE = /\{\{(?:LORE_BOOK|USER_INPUT|CHARACTER_STATE|GAME_TIME|NARRATIVE|AGENT\.MEMORY_RECALL|AGENT\.PLOT_PRE_CHECK)\}\}/;
+
+/**
  * Phase 10: Build agent messages using the placeholder template system.
  *
  * For Story Agent: systemPrompt is assembled from preset entries via assemblePresetContent().
@@ -461,15 +468,39 @@ export function buildAgentMessages(
 
   // Step 2: Assemble SYS_PROMPT content (Story uses preset, others use systemPrompt)
   let sysPromptContent = '';
+  // 真机修(2026-07-23): story 规范预设自带 <本次任务信息参考> 区块（含全套系统占位符）时，
+  // 预解析预设内部占位符 + 简化 template，避免与默认 template 的追加占位符重复渲染同一段数据。
+  let storyPresetHasPlaceholders = false;
 
   if (agentId === 'story' && presets && config?.presetId) {
     // Story Agent: assemble from preset
     const preset = getPreset(config.presetId, presets);
     if (preset) {
-      // 传 '' 阻止 DEFAULT_STORY_CONTEXT_BLOCK 注入 —
-      // 外层 template 已包含 {{LORE_BOOK}}/{{NARRATIVE}} 等占位符，会正确解析。
-      // 若注入到 SYS_PROMPT 内则不会递归解析，变成字面文本。
-      sysPromptContent = assemblePresetContent(preset, '');
+      // 传 '' 阻止 DEFAULT_STORY_CONTEXT_BLOCK 注入 — 数据由预设内部占位符或外层 template 提供。
+      const presetContent = assemblePresetContent(preset, '');
+      storyPresetHasPlaceholders = STORY_PRESET_PLACEHOLDER_RE.test(presetContent);
+      if (storyPresetHasPlaceholders) {
+        // 规范预设内部写满 {{LORE_BOOK}}/{{CHARACTER_STATE}}/{{AGENT.MEMORY_RECALL}}/
+        // {{NARRATIVE}}/{{USER_INPUT}} 等系统占位符。但 resolveTemplate 单层扫描只解析
+        // template 原文、不递归解析 SYS_PROMPT 展开值内部（见 template-resolver.ts），
+        // 这里对预设内容预跑一次 resolveTemplate，把内部占位符就地渲染成数据。
+        // 收益: 数据在预设中部 <本次任务信息参考> 原地渲染一次（不重复），预设前半段
+        // 静态内容保持稳定 → 缓存友好（动态字节仅落在预设中部的 MEMORY/NARRATIVE/INPUT 处，
+        // 而非像旧实现那样动态 memory 排在 25 万字世界书之前导致整段 miss）。
+        // 安全: 占位符正则 [A-Z] 开头，不会误伤小写 ST 宏（getvar/char/user 已由
+        // assemblePresetContent 处理完毕）。
+        sysPromptContent = resolveTemplateWithGlobals(
+          presetContent,
+          agentId,
+          tplCtx,
+          config ?? { agentId } as AgentConfig,
+          worldBooks ?? [],
+          configs ?? [],
+          localParams ?? {},
+        );
+      } else {
+        sysPromptContent = presetContent;
+      }
     }
   }
 
@@ -481,6 +512,13 @@ export function buildAgentMessages(
   if (!sysPromptContent) {
     // Fallback to old fixedSystem + fixedExamples (backward compatibility)
     sysPromptContent = [tpl.fixedSystem, tpl.fixedExamples].filter(Boolean).join('\n\n');
+  }
+
+  // story + 规范预设（已预解析内部占位符）+ 未自定义 template → 简化为 {{SYS_PROMPT}}，
+  // 避免默认 template 追加的 {{LORE_BOOK}} 等与预设内部占位符重复渲染同一段数据。
+  // 无预设 / 预设无占位符 / 自定义 template 场景仍走完整 template 兜底。
+  if (agentId === 'story' && storyPresetHasPlaceholders && !config?.template) {
+    template = '{{SYS_PROMPT}}';
   }
 
   // Step 3: Set globals and resolve

@@ -361,6 +361,34 @@ describe('buildAgentMessages — SYS_PROMPT assembly', () => {
     // 预设内容应出现在结果中
     expect(messages![0].content).toContain('PRESET_CONTENT');
   });
+
+  // 真机修(2026-07-23): story 走 ST 预设路径，预设内部 <本次任务信息参考> 区块含全套系统占位符。
+  // resolveTemplate 单层不递归 SYS_PROMPT 内部 → 预解析预设内容把占位符就地渲染 + 简化 template 去重。
+  it('story + 规范预设(含系统占位符) → 预解析内部占位符 + template 简化去重(不裸奔/不重复)', () => {
+    const ctx = makeContext({
+      userInput: '探索古墓',
+      agentOutputs: new Map([['memory_recall', '{"memories":[{"id":"M1"}]}']]),
+    });
+    const cfg = makeCfg('story', { presetId: 'spec-preset' });
+    const presets: AgentPreset[] = [{
+      id: 'spec-preset',
+      name: 'Spec Preset',
+      fixedSystem: 'VOID 核心提示词。\n<本次任务信息参考>\n<LORE_BOOK>{{LORE_BOOK}}</LORE_BOOK>\n<USER_INPUT>{{USER_INPUT}}</USER_INPUT>\n<MEMORY>{{AGENT.MEMORY_RECALL}}</MEMORY>\n</本次任务信息参考>',
+      fixedExamples: '',
+    } as AgentPreset];
+    const messages = buildAgentMessages('story', ctx, [cfg], [], presets);
+    expect(messages).not.toBeNull();
+    const content = messages![0].content;
+    // 预设内部占位符已被预解析渲染 — 不残留裸占位符（旧实现会全部裸奔）
+    expect(content).not.toContain('{{LORE_BOOK}}');
+    expect(content).not.toContain('{{USER_INPUT}}');
+    expect(content).not.toContain('{{AGENT.MEMORY_RECALL}}');
+    // 用户输入/memory 输出通过预设内部占位符原地渲染
+    expect(content).toContain('探索古墓');
+    expect(content).toContain('{"memories":[{"id":"M1"}]}');
+    // 去重: template 已简化为 {{SYS_PROMPT}}，不再追加重复的 {{USER_INPUT}} → 用户输入只出现一次
+    expect(content.split('探索古墓').length - 1).toBe(1);
+  });
 });
 
 // ========== Phase 10: 单消息返回格式 ==========
