@@ -548,10 +548,7 @@ function buildFallbackMessages(
   let worldBookSection = '';
   if (configs && worldBooks) {
     const entries = getEntriesForAgent(agentId, configs, worldBooks);
-    const activeEntries = filterActiveEntries(
-      entries,
-      tplCtx.userInput + '\n' + (tplCtx.history.slice(-5).map(m => m.content).join('\n')),
-    );
+    const activeEntries = filterActiveEntries(entries);
     worldBookSection = formatWorldBookEntries(activeEntries);
   }
 

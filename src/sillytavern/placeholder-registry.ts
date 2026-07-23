@@ -93,8 +93,7 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     const agentId = config.agentId || '';
     const entries = getEntriesForAgent(agentId, _configs, _worldBooks);
     if (entries.length === 0) return '';
-    const text = (ctx.userInput || '') + '\n' + (ctx.history?.slice(-5).map(m => m.content).join('\n') || '');
-    const activeEntries = filterActiveEntries(entries, text);
+    const activeEntries = filterActiveEntries(entries);
     let formatted = formatWorldBookEntries(activeEntries);
     // 真机修(2026-07-18): 原 ST 角色卡世界书正文自带 {{setvar/getvar/random}} 宏（MVU 机制遗留）
     // → 注入前收集 setvar 变量表并剥离定义、替换 getvar 引用、解析 random——

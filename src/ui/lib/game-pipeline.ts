@@ -30,7 +30,7 @@ import type {
 import { AgentClient } from '@engine/agent-client'
 import type { StreamCallbacks } from '@engine/agent-client'
 import { createStateManager } from '@engine/state-manager'
-import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks'
+import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks'
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader'
 import type { useGameStore } from '../stores/game-store'
 import type { useSettingsStore } from '../stores/settings-store'
@@ -412,18 +412,11 @@ export class GamePipeline {
     return { presets, agentDefaults }
   }
 
-  /** 加载启用世界书：settings store 优先（含用户编辑 + 自建书），首次空时兜底 fetch 本地 JSON */
+  /** 加载启用世界书：统一数据源（store 优先 + 文件兜底），与 plot_outline 共用 */
   private async loadActiveWorldBooks(): Promise<WorldBook[]> {
     try {
-      // 从 settings store 读取（含用户修改的 toggle/内容 + 用户自建书）
-      const storeBooks = (this.settings.settings.worldBooks as WorldBook[]) || []
-      let all = storeBooks
-
-      // 兜底：首次启动 store 尚未由 setTimeout 填充内置书时
-      if (all.length === 0) {
-        all = await loadBuiltInWorldBooks()
-      }
-
+      // 统一数据源：store 优先（含用户在 WorldBookEditor 的 enabled 修改 + 自建书）+ 文件兜底
+      const all = await loadWorldBooksWithFallback(this.settings.settings.worldBooks as WorldBook[] | undefined)
       const enabledEntries = this.game.activeSave?.metadata?.enabledWorldBookEntries ?? []
       return filterBooksByEnabledEntries(all, enabledEntries)
     } catch {

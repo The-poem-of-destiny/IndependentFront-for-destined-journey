@@ -711,9 +711,9 @@ describe('buildOpeningPrompt', () => {
     expect(prompt).not.toContain('--- 初始装备 ---')
     expect(prompt).not.toContain('--- 初始技能 ---')
     expect(prompt).not.toContain('--- 背包物品 ---')
-    // 开局时间总是存在
+    // 开局时间总是存在（纪元基准 488 年）
     expect(prompt).toContain('--- 开局时间 ---')
-    expect(prompt).toContain('复兴纪元001年01月01日')
+    expect(prompt).toContain('复兴纪元0488年')
   })
 
   it('有装备应输出装备信息', () => {

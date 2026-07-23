@@ -21,6 +21,7 @@ import {
   type ParsedOutlineOutput,
 } from '@engine/plot-outline'
 import type { AgentContext } from '@engine/types'
+import { createDefaultTime, formatGameTime, GAME_EPOCH_YEAR } from '@engine/time-system'
 import { useSettingsStore } from './settings-store'
 import {
   type CatalogItem,
@@ -30,8 +31,6 @@ import {
   type Rarity,
   DIFFICULTY_PRESETS,
   DEFAULT_DESTINY_CORES,
-  DEFAULT_EQUIPMENT_POOL,
-  DEFAULT_ITEM_POOL,
   DEFAULT_BACKGROUNDS,
   DEFAULT_RACE_COSTS,
   DEFAULT_IDENTITY_COSTS,
@@ -40,7 +39,7 @@ import {
   ATTRIBUTE_NAMES,
   ATTR_CN_TO_EN,
 } from '@engine/start-catalog'
-import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks'
+import { loadBuiltInWorldBooks, loadWorldBooksWithFallback } from '@engine/builtin-worldbooks'
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader'
 import type { WorldBook, WorldBookEntry } from '@engine/types'
 
@@ -380,73 +379,94 @@ export const useCreateStore = defineStore('create', () => {
   const rarityFilter = ref<Rarity | 'all'>('all')
   const typeFilter = ref<string>('all')
 
-  const skillPool = ref<CatalogItem[]>([])
-  // 异步加载 CDN 技能
-  ;(async () => {
+  // ═══ 装备/道具/技能 — 运行时从仓库 fetch，保留分组结构 ═══
+  // 对齐参考仓库 Selections: 数据是 { 外层分组key: [物品] } 结构，
+  // 外层 key（剑类武器/头部防具/戒指…）就是子分类。旧实现爬取时丢了外层 key，
+  // 只留了对象内 type(武器/防具) 与 tag[0](单手剑)，导致分类粒度错位。
+  const REPO_DATA_BASE = 'https://testingcf.jsdelivr.net/gh/The-poem-of-destiny/FrontEnd-for-destined-journey@1.8.2/public/assets/data'
+
+  const equipmentGroups = ref<Record<string, CatalogItem[]>>({})
+  const itemGroups = ref<Record<string, CatalogItem[]>>({})
+  const skillGroups = ref<Record<string, CatalogItem[]>>({})
+
+  /** 仓库原始对象 → CatalogItem */
+  function parseCatalogItem(raw: any, category: 'equipment' | 'item' | 'skill', group: string): CatalogItem {
+    return {
+      id: `${category[0]}_${group}_${(raw.name || '').replace(/[^a-zA-Z一-鿿]/g, '_')}`,
+      name: raw.name || '',
+      category,
+      type: raw.type || '',
+      rarity: raw.rarity || 'common',
+      tag: raw.tag || [],
+      effect: raw.effect || {},
+      consume: raw.consume || '',
+      description: raw.description || '',
+      cost: raw.cost ?? 30,
+      ...(category === 'item' ? { quantity: raw.quantity ?? 1 } : {}),
+    }
+  }
+
+  /** fetch 仓库 JSON 并保留 {分组: [物品]} 结构（清洗注释/尾逗号） */
+  async function loadGroupedCatalog(file: string, category: 'equipment' | 'item' | 'skill'): Promise<Record<string, CatalogItem[]>> {
     try {
-      const resp = await fetch('https://testingcf.jsdelivr.net/gh/The-poem-of-destiny/FrontEnd-for-destined-journey@1.8.2/public/assets/data/skills.json')
+      const resp = await fetch(`${REPO_DATA_BASE}/${file}.json`)
       const text = await resp.text()
       const cleaned = text.replace(/\/\/.*$/gm, '').replace(/,\s*}/g, '}').replace(/,\s*]/g, ']')
       const data = JSON.parse(cleaned)
-      const items: CatalogItem[] = []
-      for (const [, skills] of Object.entries(data)) {
-        if (!Array.isArray(skills)) continue
-        for (const s of skills as any[]) {
-          items.push({
-            id: 'sk_' + (s.name || '').replace(/[^a-zA-Z一-鿿]/g, '_'),
-            name: s.name || '', category: 'skill',
-            type: s.type || '主动', rarity: s.rarity || 'common',
-            tag: s.tag || [], effect: s.effect || {},
-            consume: s.consume || '', description: s.description || '',
-            cost: s.cost || 30,
-          })
-        }
+      const result: Record<string, CatalogItem[]> = {}
+      for (const [group, list] of Object.entries(data)) {
+        if (!Array.isArray(list)) continue
+        result[group] = (list as any[]).map(raw => parseCatalogItem(raw, category, group))
       }
-      skillPool.value = items
-    } catch { skillPool.value = [] }
-  })()
+      return result
+    } catch { return {} }
+  }
+
+  // 三类并行加载（Node 测试环境 fetch 失败则保持空 {}，筛选相关测试见空跳过）
+  Promise.all([
+    loadGroupedCatalog('equipments', 'equipment'),
+    loadGroupedCatalog('items', 'item'),
+    loadGroupedCatalog('skills', 'skill'),
+  ]).then(([eq, it, sk]) => {
+    equipmentGroups.value = eq
+    itemGroups.value = it
+    skillGroups.value = sk
+  })
+
+  /** 当前大分类对应的分组数据 */
+  const activeGroups = computed<Record<string, CatalogItem[]>>(() => {
+    switch (activeCategory.value) {
+      case 'equipment': return equipmentGroups.value
+      case 'item': return itemGroups.value
+      case 'skill': return skillGroups.value
+    }
+  })
 
   const filteredPool = computed(() => {
+    const groups = activeGroups.value
+    // typeFilter 现存的是「分组 key」（剑类武器/头部防具…），'all' = 跨组全部
     let pool: CatalogItem[]
-    switch (activeCategory.value) {
-      case 'equipment': pool = DEFAULT_EQUIPMENT_POOL; break
-      case 'item': pool = DEFAULT_ITEM_POOL; break
-      case 'skill': pool = skillPool.value; break
+    if (typeFilter.value !== 'all' && groups[typeFilter.value]) {
+      pool = groups[typeFilter.value]
+    } else {
+      pool = Object.values(groups).flat()
     }
     if (rarityFilter.value !== 'all') {
       pool = pool.filter(i => i.rarity === rarityFilter.value)
     }
-    if (typeFilter.value !== 'all') {
-      pool = pool.filter(i => i.type === typeFilter.value)
-    }
     return pool
   })
 
-  watch(activeCategory, () => { typeFilter.value = 'all'; subCategoryFilter.value = 'all' })
+  watch(activeCategory, () => { typeFilter.value = 'all' })
 
-  /** 从原始池 (不受稀有度/类型过滤影响) 提取 tag[0] 去重作为子分类 */
-  const subCategoryFilter = ref<string>('all')
-  const subCategories = computed(() => {
-    // 使用未过滤的原始池，确保子分类始终可见
-    let rawPool: CatalogItem[]
-    switch (activeCategory.value) {
-      case 'equipment': rawPool = DEFAULT_EQUIPMENT_POOL; break
-      case 'item': rawPool = DEFAULT_ITEM_POOL; break
-      case 'skill': rawPool = skillPool.value; break
-    }
-    const seen = new Set<string>()
-    const result: string[] = []
-    for (const item of rawPool) {
-      const firstTag = item.tag?.[0]
-      if (firstTag && !seen.has(firstTag)) {
-        seen.add(firstTag)
-        result.push(firstTag)
-      }
-    }
-    // 按中文排序
-    result.sort((a, b) => a.localeCompare(b, 'zh'))
-    return result
-  })
+  /**
+   * 子分类 = 当前大分类下仓库的分组 key
+   * 装备 → 剑类武器/斧锤类武器/头部防具/戒指… · 技能 → 主动/被动…
+   * 完全对齐参考仓库 Selections 的 Object.keys(data) 语义
+   */
+  const subCategories = computed(() =>
+    Object.keys(activeGroups.value).sort((a, b) => a.localeCompare(b, 'zh'))
+  )
 
   function isSelected(item: CatalogItem): boolean {
     switch (item.category) {
@@ -755,10 +775,11 @@ const cc = Number(s.plotChapterCount)
     }
   }
 
-  /** 加载剧情大纲 Agent 可见的世界书（走 agent-config.json 的 worldBookIds 过滤 + 用户捏人勾选） */
+  /** 加载剧情大纲 Agent 可见的世界书（统一数据源：store 优先 + 文件兜底；worldBookIds + 捏人勾选过滤） */
   async function loadPlotOutlineWorldBooks(agentConfigs: AgentConfig[]): Promise<WorldBook[]> {
     try {
-      const all = await loadBuiltInWorldBooks()
+      // 统一数据源：读 store（含用户在 WorldBookEditor 的 enabled 修改），不再绕过 store 读原始文件
+      const all = await loadWorldBooksWithFallback(useSettingsStore().settings.worldBooks as WorldBook[] | undefined)
       const cfg = agentConfigs.find(c => c.agentId === 'plot_outline')
       let filtered = all
       if (cfg && cfg.worldBookIds?.length) {
@@ -772,10 +793,12 @@ const cc = Number(s.plotChapterCount)
     }
   }
 
+  /** AI 未输出 timerange 时的兜底区间（基准 = 纪元年 488；正常路径由 createOutlineFromAgent 用 AI 的 parsed.timeRange） */
   function buildOutlineTimeRange(): { start: string; end: string } {
     const years = plotMode.value === 'main' ? plotDurationYears.value : 1
-    const endYear = String(Math.max(1, years)).padStart(3, '0')
-    return { start: '复兴纪元001年01月01日', end: `复兴纪元${endYear}年12月30日` }
+    const startYear = String(GAME_EPOCH_YEAR).padStart(4, '0')
+    const endYear = String(GAME_EPOCH_YEAR + Math.max(1, years)).padStart(4, '0')
+    return { start: `复兴纪元${startYear}年01月01日`, end: `复兴纪元${endYear}年12月30日` }
   }
 
   /** 历史入栈（最多 5 版，超出丢最旧） */
@@ -785,8 +808,31 @@ const cc = Number(s.plotChapterCount)
     chaptersHistory.value = [...chaptersHistory.value, plotOutlineChapters.value].slice(-5)
   }
 
-  /** 从原始输出提取结构化自检（score/weaknesses/suggestions） */
+  /** 从原始输出提取结构化自检（score/weaknesses/suggestions）。
+   *  主路径：XML `<self_critique score="N">...<weakness>..</weakness><suggestion>..</suggestion></self_critique>`（v2 prompt 实际输出）
+   *  兜底：legacy JSON `{ selfCritique: { score, weaknesses, suggestions } }`（旧格式/测试 fixture） */
   function extractSelfCritique(raw: string): { score: number; weaknesses: string[]; suggestions: string[] } | null {
+    // 1. XML 主路径：定位 self_critique 块（自闭合 <self_critique score="N" /> 也走属性匹配）
+    const blockMatch = raw.match(/<self_critique\b[^>]*>[\s\S]*?<\/self_critique\s*>/i)
+    const block = blockMatch ? blockMatch[0] : ''
+    const scoreMatch = (block || raw).match(/<self_critique\b[^>]*\bscore\s*=\s*"?(\d+)/i)
+    if (scoreMatch) {
+      const score = parseInt(scoreMatch[1], 10)
+      const extractTags = (src: string, tag: string): string[] => {
+        const re = new RegExp(`<\\s*${tag}\\s*>([\\s\\S]*?)<\\/\\s*${tag}\\s*>`, 'gi')
+        const out: string[] = []
+        let m: RegExpExecArray | null
+        while ((m = re.exec(src))) out.push(m[1].trim())
+        return out
+      }
+      const scope = block || raw
+      return {
+        score,
+        weaknesses: extractTags(scope, 'weakness'),
+        suggestions: extractTags(scope, 'suggestion'),
+      }
+    }
+    // 2. legacy JSON 兜底
     const m = raw.match(/\{[\s\S]*\}/)
     if (!m) return null
     try {
@@ -1195,10 +1241,10 @@ const cc = Number(s.plotChapterCount)
       lines.push(substituteUser(customBackgroundText.value.trim()))
     }
 
-    // 开局时间（首次开局固定为复兴纪元001年01月01日，供 memory_summary 等下游 Agent 作为时间锚点）
+    // 开局时间（时间戳基准 = 复兴纪元488年01月01日，开局时刻 08:00；供 memory_summary 等 Agent 作为时间锚点）
     lines.push('')
     lines.push('--- 开局时间 ---')
-    lines.push('复兴纪元001年01月01日')
+    lines.push(formatGameTime(createDefaultTime()))
 
     // 命定核心
     // 优先用 UI 捏人选中的 system_core 世界书条目（selectedSystemCoreEntry）；
@@ -1508,7 +1554,7 @@ const cc = Number(s.plotChapterCount)
     buildEnabledWorldBookEntries,
     // 选择 (→ 开场提示词)
     selectedEquipments, selectedItems, selectedSkills,
-    activeCategory, rarityFilter, typeFilter, subCategoryFilter, subCategories, filteredPool,
+    activeCategory, rarityFilter, typeFilter, subCategories, filteredPool,
     isSelected, canSelect, addEquipment, removeEquipment,
     addItem, removeItem, addSkill, removeSkill, clearAllSelections,
     // 背景

@@ -95,23 +95,16 @@ export function getEntriesForAgent(
 }
 
 /**
- * 过滤应激活的条目
- * enabled + (constant || keyword 命中)
+ * 过滤应激活的条目。
+ *
+ * 简化语义（2026-07-22）：废弃 ST 的 constant/keyword 双维度激活——
+ * enabled=true 即注入，enabled=false 一律不注入，对所有 agent 一致。
+ * 原因：内置世界书全量 constant=true（keyword 从未实际参与判定），
+ * 且 enabled 开关本就该是"是否注入"的唯一主宰；旧逻辑里 constant 绕过 enabled，
+ * 导致用户在 UI 禁用条目完全不生效。
  */
-export function filterActiveEntries(
-  entries: WorldBookEntry[],
-  text: string,
-): WorldBookEntry[] {
-  return entries.filter(entry => {
-    // constant 条目始终激活，无论 enabled 状态
-    // （enabled=false 只影响 keyword 匹配，constant 条目不受此限制）
-    if (entry.constant) return true;
-    if (!entry.enabled) return false;
-    if (entry.key.length > 0) {
-      return matchKeyword(entry, text);
-    }
-    return false;
-  });
+export function filterActiveEntries(entries: WorldBookEntry[]): WorldBookEntry[] {
+  return entries.filter(entry => entry.enabled);
 }
 
 // ========== 关键词匹配 ==========

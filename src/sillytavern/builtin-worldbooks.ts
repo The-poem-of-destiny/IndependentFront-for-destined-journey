@@ -43,3 +43,17 @@ export async function loadBuiltInWorldBooks(): Promise<WorldBook[]> {
   }
   return books;
 }
+
+/**
+ * 统一世界书数据源（所有 agent 共用）：Pinia store 优先（含用户在 WorldBookEditor 的
+ * enabled 修改 + 自建书），store 尚未填充时兜底 fetch 本地 JSON。
+ *
+ * 消除"plot_outline 读文件、game-pipeline 读 store"的分裂——用户的条目级 enabled 修改
+ * 对所有 agent 一致生效，不再有 agent 绕过 store 直接读原始文件。
+ */
+export async function loadWorldBooksWithFallback(
+  storeBooks: WorldBook[] | undefined | null,
+): Promise<WorldBook[]> {
+  if (storeBooks && storeBooks.length > 0) return storeBooks;
+  return loadBuiltInWorldBooks();
+}

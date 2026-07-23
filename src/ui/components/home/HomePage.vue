@@ -183,14 +183,14 @@ function formatTime(ts: number) {
           ✦ 新 建 存 档
         </AppButton>
         <AppButton variant="secondary" size="lg" block class="btn-load" @click="showSaveModal = true">
-          <span class="btn-icon"></span> 读 取 存 档
+          <i class="btn-icon fa-solid fa-folder-open" aria-hidden="true"></i>读 取 存 档
         </AppButton>
         <div class="btn-row">
           <AppButton variant="ghost" size="md" class="btn-ghost" @click="ui.navigate('settings')">
-            <span class="btn-icon"></span> 设 置
+            <i class="btn-icon fa-solid fa-gear" aria-hidden="true"></i>设 置
           </AppButton>
           <AppButton variant="ghost" size="md" class="btn-ghost" @click="showCreditsModal = true">
-            <span class="btn-icon"></span> 制 作 人 员
+            <i class="btn-icon fa-solid fa-users" aria-hidden="true"></i>制 作 人 员
           </AppButton>
         </div>
         <!-- 🧪 开发用 — 悬停显示 -->

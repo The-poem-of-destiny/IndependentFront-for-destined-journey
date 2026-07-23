@@ -10,6 +10,14 @@
         <i class="fa-solid fa-plus" aria-hidden="true"></i>
         <span>新建条目</span>
       </button>
+      <button v-if="!readonly" class="batch-btn" @click="enableAllEntries" :disabled="sortedEntries.length === 0" title="将本书所有条目设为启用">
+        <i class="fa-solid fa-check-double" aria-hidden="true"></i>
+        <span>全部启用</span>
+      </button>
+      <button v-if="!readonly" class="batch-btn" @click="disableAllEntries" :disabled="sortedEntries.length === 0" title="将本书所有条目设为禁用">
+        <i class="fa-solid fa-ban" aria-hidden="true"></i>
+        <span>全部禁用</span>
+      </button>
       <span v-else class="builtin-notice"><i class="fa-solid fa-lock" aria-hidden="true"></i> 内置世界书 · 只读</span>
     </div>
 
@@ -27,7 +35,6 @@
         <span class="col-num">#</span>
         <span class="col-name">名称</span>
         <span class="col-toggle">启用</span>
-        <span class="col-toggle">永久</span>
         <span class="col-order">排序</span>
         <span class="col-actions">操作</span>
       </div>
@@ -36,7 +43,7 @@
         v-for="(entry, idx) in sortedEntries"
         :key="entry.uid"
         class="entry-row"
-        :class="{ disabled: !entry.enabled }"
+        :class="{ 'entry-disabled': !entry.enabled }"
         :tabindex="0"
         @keydown.enter="editEntry(idx)"
       >
@@ -46,10 +53,6 @@
         </span>
         <label class="col-toggle toggle-label-inline" :title="entry.enabled ? '已启用' : '已禁用'">
           <input type="checkbox" v-model="entry.enabled" @change="onToggleChange" :aria-label="`启用 ${entry.name}`" />
-          <span class="toggle-slider-sm"></span>
-        </label>
-        <label class="col-toggle toggle-label-inline" :title="entry.constant ? '永久注入中' : '关键词触发'">
-          <input type="checkbox" v-model="entry.constant" @change="onToggleChange" :aria-label="`${entry.name} 永久注入`" />
           <span class="toggle-slider-sm"></span>
         </label>
         <span class="col-order">
@@ -94,11 +97,6 @@
               <option :value="2">NOT_ANY — 未命中任何辅助关键词</option>
               <option :value="3">AND_ALL — 命中所有辅助关键词</option>
             </select>
-          </label>
-
-          <label class="form-label checkbox-label">
-            <input type="checkbox" v-model="editForm.constant" :disabled="readonly" />
-            <span>永久注入</span>
           </label>
 
           <label class="form-label" for="edit-order">排序
@@ -146,7 +144,6 @@ const editForm = ref({
   keys: '',
   keysecondary: '',
   selectiveLogic: 0 as number,
-  constant: false,
   order: 100,
   content: '',
 })
@@ -168,13 +165,24 @@ function onToggleChange() {
   saveBook()
 }
 
+// ===== 批量启停（整书级） =====
+
+function enableAllEntries() {
+  entries.value.forEach(e => { e.enabled = true })
+  saveBook()
+}
+
+function disableAllEntries() {
+  entries.value.forEach(e => { e.enabled = false })
+  saveBook()
+}
+
 function addEntry() {
   const newEntry: WorldBookEntry = {
     uid: Date.now(),
     name: '新条目',
     content: '',
     enabled: true,
-    constant: false,
     key: [],
     keysecondary: [],
     selectiveLogic: 0,
@@ -195,7 +203,6 @@ async function editEntry(idx: number) {
     keys: entry.key.join(', '),
     keysecondary: entry.keysecondary.join(', '),
     selectiveLogic: entry.selectiveLogic,
-    constant: entry.constant,
     order: entry.order,
     content: entry.content,
   }
@@ -210,7 +217,6 @@ function saveEdit() {
     entry.key = editForm.value.keys.split(',').map(k => k.trim()).filter(Boolean)
     entry.keysecondary = editForm.value.keysecondary.split(',').map(k => k.trim()).filter(Boolean)
     entry.selectiveLogic = editForm.value.selectiveLogic
-    entry.constant = editForm.value.constant
     entry.order = editForm.value.order
     entry.content = editForm.value.content
     saveBook()
@@ -259,10 +265,11 @@ function saveBook() {
   })
 }
 
-// Sync with external book changes
-watch(() => props.book, (newBook) => {
-  entries.value = JSON.parse(JSON.stringify(newBook.entries))
-}, { deep: true })
+// 只在切换书（book.id 变化）时重置本地副本；同书编辑的 emit 回流不触发重置，
+// 否则 deep watch 会把本地修改（如启用开关）冲掉，导致"禁用后点不开"。
+watch(() => props.book?.id, () => {
+  entries.value = JSON.parse(JSON.stringify(props.book.entries))
+})
 </script>
 
 <style scoped>
@@ -302,7 +309,7 @@ watch(() => props.book, (newBook) => {
   color: var(--theme-text-primary);
 }
 
-.back-btn, .add-btn {
+.back-btn, .add-btn, .batch-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -317,10 +324,10 @@ watch(() => props.book, (newBook) => {
   min-height: 36px;
   transition: all 0.15s;
 }
-.back-btn:hover, .add-btn:hover {
+.back-btn:hover, .add-btn:hover, .batch-btn:hover {
   filter: brightness(1.1);
 }
-.back-btn:active, .add-btn:active {
+.back-btn:active, .add-btn:active, .batch-btn:active {
   transform: scale(0.97);
 }
 
@@ -407,8 +414,10 @@ watch(() => props.book, (newBook) => {
   border-bottom: 2px solid var(--theme-card-border);
 }
 
-/* 禁用行 */
-.entry-row.disabled {
+/* 禁用行 — 用专属 class 避开全局 .disabled 工具类
+   (utilities.css 的 .disabled 带 pointer-events:none，会让禁用行内所有按钮/开关失效，
+    连重新启用都点不了；这里只做视觉降级，不阻断交互) */
+.entry-row.entry-disabled {
   opacity: 0.4;
   text-decoration: line-through;
 }

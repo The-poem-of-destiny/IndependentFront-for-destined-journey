@@ -709,7 +709,6 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
             name: '白曜城',
             content: '白曜城是北方重镇。',
             enabled: true,
-            constant: true,
             key: [],
             keysecondary: [],
             selectiveLogic: 0,
@@ -735,11 +734,11 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
         partition: 'world_setting',
         entries: [
           {
-            uid: 1, name: '条目A', content: 'AAA', enabled: true, constant: true,
+            uid: 1, name: '条目A', content: 'AAA', enabled: true,
             key: [], keysecondary: [], selectiveLogic: 0, order: 1, position: 0,
           },
           {
-            uid: 2, name: '条目B', content: 'BBB', enabled: true, constant: true,
+            uid: 2, name: '条目B', content: 'BBB', enabled: true,
             key: [], keysecondary: [], selectiveLogic: 0, order: 2, position: 0,
           },
         ],
@@ -761,7 +760,7 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
       {
         id: 'wb1', name: '测试', partition: 'world_setting',
         entries: [
-          { uid: 1, name: 'e1', content: 'content', enabled: true, constant: true, key: [], keysecondary: [], selectiveLogic: 0, order: 1, position: 0 },
+          { uid: 1, name: 'e1', content: 'content', enabled: true, key: [], keysecondary: [], selectiveLogic: 0, order: 1, position: 0 },
         ],
       },
     ];

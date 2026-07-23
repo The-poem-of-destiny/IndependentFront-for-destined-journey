@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { watch, onMounted, onUnmounted } from 'vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   open: boolean
   title?: string
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'xxl'
   closable?: boolean
-}>()
+}>(), {
+  closable: true,
+})
 
 const emit = defineEmits<{
   'update:open': [value: boolean]

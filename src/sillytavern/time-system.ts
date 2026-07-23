@@ -53,16 +53,31 @@ const HOURS_PER_DAY = 24;
 const DAYS_PER_MONTH = 30;
 const MONTHS_PER_YEAR = 12;
 
+// ========== 时间戳纪元（Unix time_t 模型，最小粒度 1 分钟）==========
+/**
+ * 纪元基准年：复兴纪元488年01月01日 00:00 = 第 0 分钟（时间戳 0）。
+ * 仿 Unix epoch（1970-01-01），最小粒度 1 分钟。所有比较/推进经 toEpochMinutes 归一为整数。
+ */
+export const GAME_EPOCH_YEAR = 488;
+/** 纪元日（488-01-01）是周几：1=周日 … 7=周六。幻想日历无外部基准，声明值。 */
+const EPOCH_WEEKDAY = 1; // 周日
+const MINUTES_PER_DAY = HOURS_PER_DAY * MINUTES_PER_HOUR;       // 1440
+const MINUTES_PER_MONTH = DAYS_PER_MONTH * MINUTES_PER_DAY;     // 43200
+const MINUTES_PER_YEAR = MONTHS_PER_YEAR * MINUTES_PER_MONTH;   // 518400
+
 // ========== 默认时间 ==========
 
-/** 创建默认起始时间 */
+/**
+ * 创建默认起始时间（游戏开局时刻）= 复兴纪元488年01月01日 08:00（epoch 第 480 分钟）。
+ * 纪元 0 点定义在 488-01-01 00:00；开局时刻 08:00 与纪元定义分离（同 Unix epoch=00:00 不代表程序 00:00 启动）。
+ */
 export function createDefaultTime(era: string = '复兴纪元'): GameTime {
   return {
     era,
-    year: 1,
+    year: GAME_EPOCH_YEAR,
     month: 1,
     day: 1,
-    weekday: 1, // 周日
+    weekday: EPOCH_WEEKDAY, // 周日
     hour: 8,
     minute: 0,
   };
@@ -113,63 +128,13 @@ export function formatGameTimeShort(time: GameTime): string {
 
 // ========== 时间推进 ==========
 
-/** 推进指定分钟 */
+/**
+ * 推进指定分钟 — 仿 Unix：时间戳相加再拆回。
+ * toEpochMinutes(time) + minutes → fromEpochMinutes，保留原 era 标签。负数合法（可回拨/纪元前）。
+ */
 export function advanceTime(time: GameTime, minutes: number): GameTime {
-  let totalMinutes = time.minute + minutes;
-
-  let { hour, day, month, year, weekday } = time;
-
-  // 进位到小时
-  while (totalMinutes >= MINUTES_PER_HOUR) {
-    totalMinutes -= MINUTES_PER_HOUR;
-    hour++;
-  }
-  while (totalMinutes < 0) {
-    totalMinutes += MINUTES_PER_HOUR;
-    hour--;
-  }
-
-  // 进位到天
-  while (hour >= HOURS_PER_DAY) {
-    hour -= HOURS_PER_DAY;
-    day++;
-    weekday = (weekday % 7) + 1;
-  }
-  while (hour < 0) {
-    hour += HOURS_PER_DAY;
-    day--;
-    weekday = ((weekday + 5) % 7) + 1;
-  }
-
-  // 进位到月
-  while (day > DAYS_PER_MONTH) {
-    day -= DAYS_PER_MONTH;
-    month++;
-  }
-  while (day < 1) {
-    day += DAYS_PER_MONTH;
-    month--;
-  }
-
-  // 进位到年
-  while (month > MONTHS_PER_YEAR) {
-    month -= MONTHS_PER_YEAR;
-    year++;
-  }
-  while (month < 1) {
-    month += MONTHS_PER_YEAR;
-    year--;
-  }
-
-  return {
-    era: time.era,
-    year: Math.max(1, year),
-    month: Math.max(1, Math.min(MONTHS_PER_YEAR, month)),
-    day: Math.max(1, Math.min(DAYS_PER_MONTH, day)),
-    weekday: ((weekday - 1 + 7) % 7) + 1,
-    hour: Math.max(0, Math.min(HOURS_PER_DAY - 1, hour)),
-    minute: Math.max(0, Math.min(MINUTES_PER_HOUR - 1, totalMinutes)),
-  };
+  const advanced = fromEpochMinutes(toEpochMinutes(time) + minutes);
+  return { ...advanced, era: time.era };
 }
 
 /** 推进小时 */
@@ -182,37 +147,71 @@ export function advanceDays(time: GameTime, days: number): GameTime {
   return advanceTime(time, days * HOURS_PER_DAY * MINUTES_PER_HOUR);
 }
 
-// ========== 时间比较 ==========
+// ========== 时间戳转换（mktime / gmtime 对偶）==========
 
-/** 转换为总分钟数（用于比较） */
-export function toTotalMinutes(time: GameTime): number {
+/**
+ * GameTime → 时间戳（分钟数）。仿 Unix mktime。
+ * 纪元：复兴纪元488年01月01日 00:00 = 0。weekday 不参与（派生量，非独立时间维度）。
+ * 负值合法（纪元前/回拨），同 Unix time_t 允许负数。
+ */
+export function toEpochMinutes(time: GameTime): number {
   return (
-    time.year * MONTHS_PER_YEAR * DAYS_PER_MONTH * HOURS_PER_DAY * MINUTES_PER_HOUR +
-    (time.month - 1) * DAYS_PER_MONTH * HOURS_PER_DAY * MINUTES_PER_HOUR +
-    (time.day - 1) * HOURS_PER_DAY * MINUTES_PER_HOUR +
+    (time.year - GAME_EPOCH_YEAR) * MINUTES_PER_YEAR +
+    (time.month - 1) * MINUTES_PER_MONTH +
+    (time.day - 1) * MINUTES_PER_DAY +
     time.hour * MINUTES_PER_HOUR +
     time.minute
   );
 }
 
+/**
+ * 时间戳（分钟数）→ GameTime。仿 Unix gmtime。
+ * weekday 由纪元日起算（每 1440 分钟进一日，7 日一循环），非存储独立量。
+ */
+export function fromEpochMinutes(em: number): GameTime {
+  let rem = em;
+  const yearOffset = Math.floor(rem / MINUTES_PER_YEAR);
+  rem -= yearOffset * MINUTES_PER_YEAR;
+  const month = Math.floor(rem / MINUTES_PER_MONTH) + 1;
+  rem -= (month - 1) * MINUTES_PER_MONTH;
+  const day = Math.floor(rem / MINUTES_PER_DAY) + 1;
+  rem -= (day - 1) * MINUTES_PER_DAY;
+  const hour = Math.floor(rem / MINUTES_PER_HOUR);
+  rem -= hour * MINUTES_PER_HOUR;
+  const minute = rem;
+  const daysSinceEpoch = Math.floor(em / MINUTES_PER_DAY);
+  const weekday = (((daysSinceEpoch + EPOCH_WEEKDAY - 1) % 7) + 7) % 7 + 1;
+  return {
+    era: '复兴纪元',
+    year: yearOffset + GAME_EPOCH_YEAR,
+    month,
+    day,
+    weekday,
+    hour,
+    minute,
+  };
+}
+
+// ========== 时间比较 ==========
+
 /** a 是否在 b 之前 */
 export function isBefore(a: GameTime, b: GameTime): boolean {
-  return toTotalMinutes(a) < toTotalMinutes(b);
+  return toEpochMinutes(a) < toEpochMinutes(b);
 }
 
 /** a 是否在 b 之后 */
 export function isAfter(a: GameTime, b: GameTime): boolean {
-  return toTotalMinutes(a) > toTotalMinutes(b);
+  return toEpochMinutes(a) > toEpochMinutes(b);
 }
 
 /** 两个时间的分钟差 (a - b) */
 export function diffMinutes(a: GameTime, b: GameTime): number {
-  return toTotalMinutes(a) - toTotalMinutes(b);
+  return toEpochMinutes(a) - toEpochMinutes(b);
 }
 
 /** 两个时间的天数差 */
 export function diffDays(a: GameTime, b: GameTime): number {
-  return Math.floor(diffMinutes(a, b) / (HOURS_PER_DAY * MINUTES_PER_HOUR));
+  return Math.floor(diffMinutes(a, b) / MINUTES_PER_DAY);
 }
 
 // ========== 时间段 ==========
@@ -300,7 +299,10 @@ export function compareSeasonalTime(a: SeasonalTime, b: SeasonalTime): number {
 
 /** AI 可读的 $time API */
 export const $time = {
+  GAME_EPOCH_YEAR,
   createDefaultTime,
+  toEpochMinutes,
+  fromEpochMinutes,
   parseGameTime,
   formatGameTime,
   formatGameTimeShort,

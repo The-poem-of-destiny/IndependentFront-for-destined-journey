@@ -48,10 +48,8 @@ const subCategoryOptions = computed(() => [
 const searchText = ref('')
 
 const visiblePool = computed(() => {
+  // filteredPool 已按 activeCategory(大分类) + rarityFilter(品质) + typeFilter(子分类) 三层过滤
   let pool = store.filteredPool
-  if (store.subCategoryFilter !== 'all') {
-    pool = pool.filter(item => item.tag?.[0] === store.subCategoryFilter)
-  }
   if (searchText.value.trim()) {
     const q = searchText.value.trim().toLowerCase()
     pool = pool.filter(item =>
@@ -81,8 +79,8 @@ const visiblePool = computed(() => {
               <button
                 v-for="sc in subCategoryOptions" :key="sc.key"
                 class="sub-btn"
-                :class="{ active: store.subCategoryFilter === sc.key }"
-                @click="store.subCategoryFilter = sc.key"
+                :class="{ active: store.typeFilter === sc.key }"
+                @click="store.typeFilter = sc.key"
               >
                 {{ sc.label }}
               </button>

@@ -21,7 +21,6 @@ function makeEntry(overrides: Partial<WorldBookEntry> = {}): WorldBookEntry {
     name: '测试条目',
     content: '测试内容',
     enabled: true,
-    constant: false,
     key: [],
     keysecondary: [],
     selectiveLogic: 0,
@@ -119,41 +118,27 @@ describe('getEntriesForAgent', () => {
 // ========== filterActiveEntries ==========
 
 describe('filterActiveEntries', () => {
-  it('always returns constant entries even when disabled', () => {
-    // constant 条目始终激活，enabled=false 只影响 keyword 匹配
-    const entries = [makeEntry({ uid: 1, enabled: false, constant: true })];
-    const result = filterActiveEntries(entries, 'any text');
+  it('returns enabled entries', () => {
+    const entries = [makeEntry({ uid: 1, enabled: true })];
+    const result = filterActiveEntries(entries);
     expect(result).toHaveLength(1);
   });
 
-  it('filters disabled non-constant entries', () => {
-    const entries = [makeEntry({ uid: 1, enabled: false, constant: false, key: ['白曜城'] })];
-    const result = filterActiveEntries(entries, '你来到了白曜城');
+  it('filters out disabled entries (enabled 绝对优先)', () => {
+    const entries = [makeEntry({ uid: 1, enabled: false })];
+    const result = filterActiveEntries(entries);
     expect(result).toHaveLength(0);
   });
 
-  it('always returns constant entries', () => {
-    const entries = [makeEntry({ uid: 1, constant: true })];
-    const result = filterActiveEntries(entries, 'any text');
-    expect(result).toHaveLength(1);
-  });
-
-  it('returns keyword-matched entries', () => {
-    const entries = [makeEntry({ uid: 1, constant: false, key: ['白曜城'] })];
-    const result = filterActiveEntries(entries, '你来到了白曜城的铁匠铺');
-    expect(result).toHaveLength(1);
-  });
-
-  it('skips entries with no keyword match', () => {
-    const entries = [makeEntry({ uid: 1, constant: false, key: ['白曜城'] })];
-    const result = filterActiveEntries(entries, '你来到了林歌城');
-    expect(result).toHaveLength(0);
-  });
-
-  it('skips entries with empty keys and constant=false', () => {
-    const entries = [makeEntry({ uid: 1, constant: false, key: [] })];
-    const result = filterActiveEntries(entries, 'any text');
-    expect(result).toHaveLength(0);
+  it('mix: 只保留 enabled 的条目', () => {
+    const entries = [
+      makeEntry({ uid: 1, enabled: true }),
+      makeEntry({ uid: 2, enabled: false }),
+      makeEntry({ uid: 3, enabled: true }),
+    ];
+    const result = filterActiveEntries(entries);
+    expect(result).toHaveLength(2);
+    expect(result.map(e => e.uid)).toEqual([1, 3]);
   });
 });
 

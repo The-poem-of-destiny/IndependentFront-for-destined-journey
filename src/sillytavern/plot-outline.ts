@@ -32,6 +32,8 @@ export interface GenerateOutlineInput {
 export interface ParsedOutlineOutput {
   title: string;
   summary: string;
+  /** 大纲覆盖的时间范围（AI 的 SeasonalTime 格式，如 "488-春"；createOutlineFromAgent 优先用它，入参作兜底） */
+  timeRange?: { start: string; end: string };
   content: string;
   /** 大方向锚（核心张力 / 主角主题 / 关键关系人）— post_check 演化时的「不偏离」判据 */
   directionAnchors?: string;
@@ -66,6 +68,7 @@ interface RawOutlineJson {
   title?: string;
   summary?: string;
   content: string;
+  timeRange?: { start: string; end: string };
   directionAnchors?: string;
   chapters?: Array<{
     title?: string;
@@ -90,6 +93,7 @@ function normalizeOutlineJson(parsed: RawOutlineJson): ParsedOutlineOutput | nul
     title: parsed.title || '',
     summary: parsed.summary || '',
     content: parsed.content,
+    timeRange: parsed.timeRange,
     directionAnchors: parsed.directionAnchors,
     chapters: Array.isArray(parsed.chapters)
       ? parsed.chapters
@@ -229,10 +233,10 @@ export function parseOutlineXml(raw: string): ParsedOutlineOutput | null {
 
   // timerange (self-closing)
   const trResult = extractSelfClosingAttrs(inner, 'timerange', ['start', 'end']);
-  let timeRange: { parseStart: string; parseEnd: string } | undefined;
+  let timeRange: { start: string; end: string } | undefined;
   if (trResult) {
     inner = trResult.rest;
-    timeRange = { parseStart: trResult.attrs.start || '', parseEnd: trResult.attrs.end || '' };
+    timeRange = { start: trResult.attrs.start || '', end: trResult.attrs.end || '' };
   }
 
   // direction_anchors (optional)
@@ -385,7 +389,7 @@ export function parseOutlineXml(raw: string): ParsedOutlineOutput | null {
     selfCritique,
     ...(timeRange ? { timeRange } : {}),
     ...(directionAnchors ? { directionAnchors } : {}),
-  } as ParsedOutlineOutput & { timeRange?: { parseStart: string; parseEnd: string } };
+  };
 }
 
 /**
@@ -423,7 +427,7 @@ export function createOutlineFromAgent(
     selfCritique: parsed.selfCritique,
     confirmed: false,
     version,
-    timeRange,
+    timeRange: parsed.timeRange ?? timeRange,
     directionAnchors: parsed.directionAnchors,
     createdAt: now,
     updatedAt: now,

@@ -15,7 +15,9 @@ import {
   advanceTime,
   advanceHours,
   advanceDays,
-  toTotalMinutes,
+  toEpochMinutes,
+  fromEpochMinutes,
+  GAME_EPOCH_YEAR,
   isBefore,
   isAfter,
   diffMinutes,
@@ -35,10 +37,11 @@ import {
 // ========== createDefaultTime ==========
 
 describe('createDefaultTime', () => {
-  it('returns correct defaults with default era', () => {
+  it('returns correct defaults with default era (epoch year 488)', () => {
     const t = createDefaultTime();
     expect(t.era).toBe('复兴纪元');
-    expect(t.year).toBe(1);
+    expect(t.year).toBe(GAME_EPOCH_YEAR);
+    expect(t.year).toBe(488);
     expect(t.month).toBe(1);
     expect(t.day).toBe(1);
     expect(t.weekday).toBe(1);
@@ -49,14 +52,14 @@ describe('createDefaultTime', () => {
   it('accepts a custom era name', () => {
     const t = createDefaultTime('混沌纪元');
     expect(t.era).toBe('混沌纪元');
-    expect(t.year).toBe(1);
+    expect(t.year).toBe(488);
   });
 
   it('produces immutable-seeming copies (structurally independent)', () => {
     const a = createDefaultTime();
     const b = createDefaultTime();
     a.year = 99;
-    expect(b.year).toBe(1);
+    expect(b.year).toBe(488);
   });
 });
 
@@ -176,7 +179,7 @@ describe('formatGameTimeShort', () => {
 // ========== advanceTime ==========
 
 describe('advanceTime', () => {
-  const baseTime: GameTime = createDefaultTime(); // y=1,m=1,d=1,wd=1,h=8,m=0
+  const baseTime: GameTime = createDefaultTime(); // y=488,m=1,d=1,wd=1,h=8,m=0
 
   it('advances +30 minutes', () => {
     const t = advanceTime(baseTime, 30);
@@ -210,7 +213,7 @@ describe('advanceTime', () => {
 
   it('advances +12 months (crosses year boundary)', () => {
     const t = advanceTime(baseTime, 12 * 30 * 24 * 60);
-    expect(t.year).toBe(2);
+    expect(t.year).toBe(489);
     expect(t.month).toBe(1);
     expect(t.day).toBe(1);
     expect(t.hour).toBe(8);
@@ -222,17 +225,17 @@ describe('advanceTime', () => {
     expect(t.hour).toBe(7);
     expect(t.minute).toBe(30);
     expect(t.day).toBe(1);
-    expect(t.year).toBe(1);
+    expect(t.year).toBe(488);
   });
 
-  it('handles negative hours (rewind across midnight)', () => {
-    // -10h from y1/m1/d1 8:00 — wraps day/month to prev year, clamped at year=1
+  it('handles negative hours (rewind across midnight into previous year)', () => {
+    // -10h from 488-01-01 08:00 → 487-12-30 22:00（epoch 模型允许纪元前/回拨，不夹断）
     const t = advanceTime(baseTime, -600);
     expect(t.hour).toBe(22);
     expect(t.minute).toBe(0);
     expect(t.day).toBe(30); // wraps to day 30 of previous month
     expect(t.month).toBe(12); // wraps to month 12
-    expect(t.year).toBe(1); // clamped to min 1 by advanceTime
+    expect(t.year).toBe(487); // 回拨到纪元前一年（epoch 模型，不夹断）
   });
 
   it('preserves era unchanged', () => {
@@ -241,12 +244,13 @@ describe('advanceTime', () => {
     expect(t.era).toBe('混沌纪元');
   });
 
-  it('clamps year to minimum 1', () => {
+  it('大负数回拨仍产生合法年份（epoch 模型允许纪元前）', () => {
     const t = advanceTime(baseTime, -9999999);
+    expect(t.year).toBeLessThan(488);
     expect(t.year).toBeGreaterThanOrEqual(1);
   });
 
-  it('clamps values within valid ranges on large advance', () => {
+  it('大正数推进仍在合法字段范围内', () => {
     const t = advanceTime(baseTime, 9999999);
     expect(t.month).toBeGreaterThanOrEqual(1);
     expect(t.month).toBeLessThanOrEqual(12);
@@ -277,28 +281,68 @@ describe('advanceHours and advanceDays', () => {
   });
 });
 
-// ========== toTotalMinutes ==========
+// ========== toEpochMinutes / fromEpochMinutes（mktime / gmtime 对偶）==========
 
-describe('toTotalMinutes', () => {
+describe('toEpochMinutes', () => {
   it('is monotonic with advanceTime', () => {
     const t0 = createDefaultTime();
     const t1 = advanceTime(t0, 1);
     const t2 = advanceTime(t0, 100);
     const t3 = advanceTime(t0, 9999);
-    expect(toTotalMinutes(t0)).toBeLessThan(toTotalMinutes(t1));
-    expect(toTotalMinutes(t1)).toBeLessThan(toTotalMinutes(t2));
-    expect(toTotalMinutes(t2)).toBeLessThan(toTotalMinutes(t3));
+    expect(toEpochMinutes(t0)).toBeLessThan(toEpochMinutes(t1));
+    expect(toEpochMinutes(t1)).toBeLessThan(toEpochMinutes(t2));
+    expect(toEpochMinutes(t2)).toBeLessThan(toEpochMinutes(t3));
   });
 
-  it('returns 0 for epoch start (year=0 offset)', () => {
-    const t: GameTime = { era: '零', year: 0, month: 1, day: 1, weekday: 1, hour: 0, minute: 0 };
-    expect(toTotalMinutes(t)).toBe(0);
+  it('returns 0 at epoch start (488-01-01 00:00)', () => {
+    const t: GameTime = { era: '复兴纪元', year: 488, month: 1, day: 1, weekday: 1, hour: 0, minute: 0 };
+    expect(toEpochMinutes(t)).toBe(0);
   });
 
-  it('returns expected value for known time', () => {
-    // year=1 contributes 1*12*30*24*60 = 518400, plus hour:minute = 1:1 → 61
-    const t: GameTime = { era: 'test', year: 1, month: 1, day: 1, weekday: 1, hour: 1, minute: 1 };
-    expect(toTotalMinutes(t)).toBe(518400 + 61);
+  it('returns 480 at game start (488-01-01 08:00)', () => {
+    expect(toEpochMinutes(createDefaultTime())).toBe(480);
+  });
+
+  it('returns expected value for known time (488-01-01 01:01 = 61)', () => {
+    const t: GameTime = { era: 'test', year: 488, month: 1, day: 1, weekday: 1, hour: 1, minute: 1 };
+    expect(toEpochMinutes(t)).toBe(61);
+  });
+
+  it('negative before epoch (487-12-30 22:00 = -120)', () => {
+    const t: GameTime = { era: '复兴纪元', year: 487, month: 12, day: 30, weekday: 7, hour: 22, minute: 0 };
+    expect(toEpochMinutes(t)).toBe(-120);
+  });
+});
+
+describe('fromEpochMinutes', () => {
+  it('epoch 0 → 488-01-01 00:00 周日', () => {
+    const t = fromEpochMinutes(0);
+    expect(t.year).toBe(488);
+    expect(t.month).toBe(1);
+    expect(t.day).toBe(1);
+    expect(t.hour).toBe(0);
+    expect(t.minute).toBe(0);
+    expect(t.weekday).toBe(1); // 周日
+  });
+
+  it('roundtrips: fromEpochMinutes(toEpochMinutes(t)) 深等于 t（复兴纪元）', () => {
+    const t: GameTime = { era: '复兴纪元', year: 495, month: 6, day: 15, weekday: 9, hour: 14, minute: 30 };
+    // weekday 会被 epoch 重算（9 非法→重算为合法值），其余字段往返保真
+    const rt = fromEpochMinutes(toEpochMinutes(t));
+    expect(rt.year).toBe(495);
+    expect(rt.month).toBe(6);
+    expect(rt.day).toBe(15);
+    expect(rt.hour).toBe(14);
+    expect(rt.minute).toBe(30);
+    expect(rt.era).toBe('复兴纪元');
+  });
+
+  it('handles negative epoch (pre-488)', () => {
+    const t = fromEpochMinutes(-120);
+    expect(t.year).toBe(487);
+    expect(t.month).toBe(12);
+    expect(t.day).toBe(30);
+    expect(t.hour).toBe(22);
   });
 });
 

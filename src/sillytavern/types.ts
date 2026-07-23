@@ -32,8 +32,7 @@ export interface WorldBookEntry {
   uid: number;                        // 唯一标识（来自原版世界书 UID）
   name: string;                       // 条目名称（对应 ST 的 comment）
   content: string;                    // 注入正文
-  enabled: boolean;                   // 开关
-  constant: boolean;                  // 永久注入（跳过关键词扫描）
+  enabled: boolean;                   // 开关（false 时该条目对所有 agent 都不注入）
   key: string[];                      // 关键词
   keysecondary: string[];             // 辅助关键词
   selectiveLogic: 0 | 1 | 2 | 3;     // AND_ANY / NOT_ALL / NOT_ANY / AND_ALL

@@ -176,7 +176,6 @@ describe('buildAgentMessages', () => {
       name: '北境古墓',
       content: '**北境古墓**: 位于诺斯加德北部的古老墓穴，传说埋藏着远古帝王的宝藏。',
       enabled: true,
-      constant: true,
       key: ['古墓'],
       keysecondary: [],
       selectiveLogic: 0,
