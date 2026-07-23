@@ -1173,6 +1173,32 @@ describe('startJourney 剧情落库', () => {
     expect(await getLatestPlotOutline(saveId)).toBeUndefined()
     expect(await getPlotEvents(saveId)).toHaveLength(0)
   })
+
+  it('开局兑换的命运点应写入存档级 SaveProfile.fp（修 FP 丢失 bug）', async () => {
+    setActivePinia(createPinia())
+    const store = useCreateStore()
+    store.name = '测试'
+    store.destinyPoints = 100
+    const saveId = await store.startJourney()
+    const { getSaveProfile } = await import('@engine/database')
+    const profile = await getSaveProfile(saveId)
+    expect(profile).toBeDefined()
+    expect(profile!.fp).toBe(100)
+    expect(profile!.fpHistory).toHaveLength(1)
+    expect(profile!.fpHistory[0].amount).toBe(100)
+    expect(profile!.fpHistory[0].reason).toContain('开局')
+  })
+
+  it('未兑换命运点时不强制创建 SaveProfile（保持 lazy 初始化语义）', async () => {
+    setActivePinia(createPinia())
+    const store = useCreateStore()
+    store.name = '测试'
+    // destinyPoints 默认 0
+    const saveId = await store.startJourney()
+    const { getSaveProfile } = await import('@engine/database')
+    const profile = await getSaveProfile(saveId)
+    expect(profile).toBeUndefined()
+  })
 })
 
 // ===== localStorage 草稿 =====

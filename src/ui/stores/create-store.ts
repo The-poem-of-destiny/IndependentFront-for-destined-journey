@@ -1323,6 +1323,15 @@ const cc = Number(s.plotChapterCount)
       } as any,
     })
 
+    // 真机修(2026-07-23): 开局兑换的命运点 → 初始化到存档级 SaveProfile.fp
+    // ADR-22: FP 是存档级元货币，独立于 CharacterState。此前 destinyPoints 只写进
+    // customFields.destinyPoints，游戏内 FP(SaveProfile.fp) 从未拿到这笔，开局兑换的 FP 丢失。
+    if (destinyPoints.value > 0) {
+      const { getProfile, addFP } = await import('@engine/save-profile')
+      const profile = await getProfile(saveId)
+      await addFP(profile, destinyPoints.value, '开局兑换的命运点', 'other')
+    }
+
     // §5.2: 主线/支线已生成大纲 → 落库确认版 + 结构化事件树（全部 hidden）；历史版本不落库
     if ((plotMode.value === 'main' || plotMode.value === 'side') && plotOutline.value) {
       const { savePlotOutline, savePlotEvents } = await import('@engine/database')
