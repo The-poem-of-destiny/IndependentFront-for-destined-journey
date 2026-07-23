@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { CatalogItem, Rarity } from '@engine/start-catalog'
 import { RARITY_LABELS, RARITY_TO_QUALITY } from '@engine/start-catalog'
 import AppModal from '../shared/AppModal.vue'
@@ -8,7 +8,7 @@ import FormInput from '../shared/form/FormInput.vue'
 import FormSelect from '../shared/form/FormSelect.vue'
 import FormStepper from '../shared/form/FormStepper.vue'
 
-const props = defineProps<{ visible: boolean }>()
+const props = defineProps<{ visible: boolean; editItem?: CatalogItem | null }>()
 const emit = defineEmits<{
   save: [item: CatalogItem]
   close: []
@@ -45,6 +45,17 @@ const itemDescription = ref('')
 const itemQuantity = ref(1)
 const itemCost = ref(50)
 
+// 装备战斗数值（英文键对齐 combat-resolver，确保战斗里 weaponAtk/defense 等读得到）
+const EQUIPMENT_STATS = [
+  { key: 'atk', label: '攻击力' },
+  { key: 'defense', label: '防御' },
+  { key: 'penetration', label: '穿透' },
+  { key: 'hit', label: '命中' },
+  { key: 'dodge', label: '闪避' },
+  { key: 'dr', label: '减伤(%)' },
+] as const
+const itemStats = ref<Record<string, number>>({})
+
 function addTag() {
   const t = itemTag.value.trim()
   if (t && !itemTagList.value.includes(t)) {
@@ -70,7 +81,7 @@ function removeEffect(k: string) {
 
 function handleSave() {
   if (!itemName.value.trim()) return
-  const id = `custom_${category.value}_${crypto.randomUUID().slice(0, 8)}`
+  const id = props.editItem?.id ?? `custom_${category.value}_${crypto.randomUUID().slice(0, 8)}`
   const item: CatalogItem = {
     id,
     name: itemName.value.trim(),
@@ -83,6 +94,9 @@ function handleSave() {
     description: itemDescription.value.trim() || itemName.value.trim(),
     cost: itemCost.value,
     quantity: category.value === 'item' ? itemQuantity.value : undefined,
+    stats: category.value === 'equipment'
+      ? Object.fromEntries(Object.entries(itemStats.value).filter(([, v]) => v && v > 0))
+      : undefined,
   }
   emit('save', item)
   resetForm()
@@ -94,6 +108,7 @@ function resetForm() {
   itemTag.value = ''; itemTagList.value = []
   effectKey.value = ''; effectVal.value = ''; effectMap.value = {}
   itemConsume.value = ''; itemDescription.value = ''; itemQuantity.value = 1; itemCost.value = 50
+  itemStats.value = {}
 }
 
 // 分类切换时重置类型
@@ -101,11 +116,27 @@ function onCategoryChange(cat: 'equipment' | 'item' | 'skill') {
   category.value = cat
   itemType.value = subtypeOptions.value[0]?.value ?? ''
 }
+
+// 编辑模式：editItem 传入时预填表单（新建时 editItem=null 保持空表单）
+watch(() => props.editItem, (item) => {
+  if (!item) return
+  category.value = item.category
+  itemName.value = item.name
+  itemType.value = item.type
+  itemRarity.value = item.rarity
+  itemTagList.value = [...(item.tag || [])]
+  effectMap.value = { ...(item.effect || {}) }
+  itemConsume.value = item.consume || ''
+  itemDescription.value = item.description || ''
+  itemQuantity.value = item.quantity ?? 1
+  itemCost.value = item.cost ?? 50
+  itemStats.value = { ...(item.stats || {}) }
+}, { immediate: true })
 </script>
 
 <template>
   <AppModal :open="visible" @close="emit('close')">
-    <template #header>自定义物品</template>
+    <template #header>{{ props.editItem ? '编辑物品' : '自定义物品' }}</template>
 
     <div class="custom-form">
       <!-- 分类 -->
@@ -142,6 +173,21 @@ function onCategoryChange(cat: 'equipment' | 'item' | 'skill') {
         </div>
         <div class="effect-list">
           <span v-for="(v, k) in effectMap" :key="k" class="chip" @click="removeEffect(k)">{{ k }}: {{ v }} ✕</span>
+        </div>
+      </div>
+
+      <!-- 装备战斗数值（英文键 → 战斗直接生效） -->
+      <div v-if="category === 'equipment'" class="stats-section">
+        <label class="field-label">战斗数值（决定战斗攻防，留空=0）</label>
+        <div class="stats-grid">
+          <div v-for="s in EQUIPMENT_STATS" :key="s.key" class="stat-item">
+            <span class="stat-label">{{ s.label }}</span>
+            <input
+              :value="itemStats[s.key] ?? ''"
+              type="number" min="0" class="field-input stat-input" placeholder="0"
+              @input="itemStats[s.key] = Number(($event.target as HTMLInputElement).value) || 0"
+            />
+          </div>
         </div>
       </div>
 
@@ -189,6 +235,10 @@ function onCategoryChange(cat: 'equipment' | 'item' | 'skill') {
   font-family: inherit;
 }
 .tag-row, .effect-row { display: flex; gap: 4px; }
+.stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 2px; }
+.stat-item { display: flex; flex-direction: column; gap: 1px; }
+.stat-label { font-size: 0.65rem; color: var(--theme-text-secondary); }
+.stat-input { padding: 2px var(--theme-spacing-xs); font-size: 0.75rem; }
 .tag-chips, .effect-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .chip {
   display: inline-flex;

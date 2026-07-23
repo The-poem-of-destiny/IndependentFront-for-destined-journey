@@ -13,7 +13,6 @@ import { ref, computed, watch } from 'vue'
 import type { CharacterState, PlotSettings, PlotOutline, ApiEndpoint, AgentConfig } from '@engine/types'
 import { TIER_CONFIGS } from '@engine/tier-constants'
 import { getBloodlineList } from '@engine/bloodlines'
-import { normalizeSlot, normalizeItemType, normalizeRarity } from '@engine/field-enums'
 import { AgentClient } from '@engine/agent-client'
 import {
   tryParseOutline,
@@ -520,6 +519,17 @@ export const useCreateStore = defineStore('create', () => {
 
   function removeSkill(skillId: string) {
     selectedSkills.value = selectedSkills.value.filter(s => s.id !== skillId)
+  }
+
+  /** 编辑自定义物品（按 id 原地替换，供 SelectedPanel 编辑入口） */
+  function updateEquipment(item: CatalogItem) {
+    selectedEquipments.value = selectedEquipments.value.map(e => e.id === item.id ? item : e)
+  }
+  function updateItem(item: CatalogItem) {
+    selectedItems.value = selectedItems.value.map(i => i.id === item.id ? item : i)
+  }
+  function updateSkill(item: CatalogItem) {
+    selectedSkills.value = selectedSkills.value.map(s => s.id === item.id ? item : s)
   }
 
   function clearAllSelections() {
@@ -1089,35 +1099,12 @@ const cc = Number(s.plotChapterCount)
       englishAttrs[ATTR_CN_TO_EN[attr]] = finalAttributes.value[attr]
     }
 
-    // ═══ 真机修（2026-07-17）: 选中的装备/道具/技能直接结构化落库 ═══
-    // 池条目是完整结构化数据，不依赖 AI 从开场白文本回写（ADR-11: 确定性逻辑归 Code）。
-    // 装备: equippedSlot 经 normalizeSlot(type) 归一（武器/防具/饰品→槽位），不可识别躺背包。
-    const startInventory = [
-      ...selectedEquipments.value.map(e => ({
-        name: e.name,
-        description: e.description,
-        quantity: 1,
-        type: '装备',
-        rarity: normalizeRarity(e.rarity),
-        equippedSlot: normalizeSlot(e.type),  // 开局即穿；null=躺背包
-        effects: e.effect && Object.keys(e.effect).length ? { ...e.effect } : undefined,
-      })),
-      ...selectedItems.value.map(i => ({
-        name: i.name,
-        description: i.description,
-        quantity: i.quantity ?? 1,
-        type: normalizeItemType(i.type) ?? '特殊',
-        rarity: normalizeRarity(i.rarity),
-        effects: i.effect && Object.keys(i.effect).length ? { ...i.effect } : undefined,
-      })),
-    ]
-    const startSkills = selectedSkills.value.map(s => ({
-      name: s.name,
-      description: s.description,
-      type: (s.type === '被动' ? 'passive' : 'active') as 'active' | 'passive',
-      level: 1,
-      effects: s.effect && Object.keys(s.effect).length ? { ...s.effect } : undefined,
-    }))
+    // ═══ 真机修（2026-07-23）: 开局装备/道具/技能不再直接结构化落库 ═══
+    // 此前直接落库的 inventory 只有 effects(描述字符串) 没有 stats(战斗数值)，且会让
+    // request_dispatcher 误判为「已有物品」→ 永不触发 item_gen → 战斗数值全 0。
+    // 现在改为：选中项全部写进 buildOpeningPrompt 开场正文 → request_dispatcher 从
+    // history(开场白) 识别为新物品 → <item_gen_request> → item_gen 正式生成 stats+effects
+    // 落库（ADR: AI 填叙事字段，Code 补账务字段）。HP/MP/SP/五维等基础属性仍在此 Code 计算。
 
     return {
       id: charId,
@@ -1148,9 +1135,9 @@ const cc = Number(s.plotChapterCount)
         deityPosition: '',
         divineKingdom: { name: '', description: '' },
       },
-      // 真机修: 创角选中项结构化落库（equippedSlot 非空 = 开局已穿，规范 §3）
-      skills: startSkills,
-      inventory: startInventory,
+      // 开局 inventory/skills 留空 — 装备/道具/技能由开场正文经 item_gen 链正式生成落库
+      skills: [],
+      inventory: [],
       statusEffects: [],
       money: money.value,
       location: startLocation.value === '自定义' ? customStartLocation.value : startLocation.value,
@@ -1191,13 +1178,17 @@ const cc = Number(s.plotChapterCount)
     if (selectedEquipments.value.length > 0) {
       lines.push('')
       lines.push('--- 初始装备 ---')
+      const STATS_CN: Record<string, string> = { atk: '攻击力', defense: '防御', penetration: '穿透', hit: '命中', dodge: '闪避', dr: '减伤' }
       for (const e of selectedEquipments.value) {
         const desc = e.description ? `：${e.description}` : ''
         const effects = e.effect && Object.keys(e.effect).length > 0
           ? ` [${Object.entries(e.effect).map(([k, v]) => `${k}:${v}`).join(', ')}]`
           : ''
         const tags = e.tag?.length ? ` (${e.tag.join(', ')})` : ''
-        lines.push(`  ${e.name}（${e.type}·${e.rarity}${tags}）${desc}${effects}`)
+        const statsStr = e.stats && Object.keys(e.stats).length > 0
+          ? ` 「${Object.entries(e.stats).map(([k, v]) => `${STATS_CN[k] ?? k}:${v}`).join(', ')}」`
+          : ''
+        lines.push(`  ${e.name}（${e.type}·${e.rarity}${tags}）${desc}${effects}${statsStr}`)
       }
     }
 
@@ -1565,7 +1556,8 @@ const cc = Number(s.plotChapterCount)
     selectedEquipments, selectedItems, selectedSkills,
     activeCategory, rarityFilter, typeFilter, subCategories, filteredPool,
     isSelected, canSelect, addEquipment, removeEquipment,
-    addItem, removeItem, addSkill, removeSkill, clearAllSelections,
+    addItem, removeItem, addSkill, removeSkill,
+    updateEquipment, updateItem, updateSkill, clearAllSelections,
     // 背景
     selectedBackground, customBackgroundText, selectBackground,
     activeBackgroundCategory, backgroundCategories, filteredBackgrounds, checkBackgroundConditions,

@@ -23,6 +23,9 @@ defineEmits<{
   'remove-equipment': [item: CatalogItem]
   'remove-item': [item: CatalogItem]
   'remove-skill': [item: CatalogItem]
+  'edit-equipment': [item: CatalogItem]
+  'edit-item': [item: CatalogItem]
+  'edit-skill': [item: CatalogItem]
 }>()
 
 function qualityLabel(item: CatalogItem): QualityLevel {
@@ -57,6 +60,7 @@ const skCost = computed(() => props.skillCost ?? roundCost(props.skills))
       <div v-for="item in equipments" :key="item.id" class="selected-item">
         <span class="item-name">{{ item.name }}</span>
         <QualityBadge :quality="qualityLabel(item)" size="sm" />
+        <button v-if="item.id.startsWith('custom_')" class="edit-btn" @click="$emit('edit-equipment', item)" title="编辑">✎</button>
         <button class="remove-btn" @click="$emit('remove-equipment', item)" title="移除">✕</button>
       </div>
     </div>
@@ -71,6 +75,7 @@ const skCost = computed(() => props.skillCost ?? roundCost(props.skills))
         <span class="item-name">{{ item.name }}</span>
         <span v-if="item.quantity && item.quantity > 1" class="item-qty">×{{ item.quantity }}</span>
         <QualityBadge :quality="qualityLabel(item)" size="sm" />
+        <button v-if="item.id.startsWith('custom_')" class="edit-btn" @click="$emit('edit-item', item)" title="编辑">✎</button>
         <button class="remove-btn" @click="$emit('remove-item', item)" title="移除">✕</button>
       </div>
     </div>
@@ -84,6 +89,7 @@ const skCost = computed(() => props.skillCost ?? roundCost(props.skills))
       <div v-for="item in skills" :key="item.id" class="selected-item">
         <span class="item-name">{{ item.name }}</span>
         <QualityBadge :quality="qualityLabel(item)" size="sm" />
+        <button v-if="item.id.startsWith('custom_')" class="edit-btn" @click="$emit('edit-skill', item)" title="编辑">✎</button>
         <button class="remove-btn" @click="$emit('remove-skill', item)" title="移除">✕</button>
       </div>
     </div>
@@ -186,6 +192,22 @@ const skCost = computed(() => props.skillCost ?? roundCost(props.skills))
 .remove-btn:hover {
   color: var(--theme-error);
   background: color-mix(in srgb, var(--theme-error) 10%, transparent);
+}
+
+.edit-btn {
+  border: none;
+  background: transparent;
+  color: var(--theme-text-muted);
+  cursor: pointer;
+  font-size: 0.8em;
+  padding: 0.15em 0.3em;
+  border-radius: var(--theme-radius-sm);
+  transition: all var(--theme-transition-fast);
+  flex-shrink: 0;
+}
+.edit-btn:hover {
+  color: var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 10%, transparent);
 }
 
 /* ===== 空状态 ===== */

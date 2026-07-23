@@ -641,13 +641,17 @@ describe('buildCharacterState', () => {
     expect(state.race).toBe('精灵混血')
   })
 
-  it('未选择任何装备/技能/道具时 skills/inventory 为空', () => {
+  it('开局 inventory/skills 始终为空（装备/道具/技能交 item_gen 链经开场正文生成，不直接落库）', () => {
+    store.selectDifficulty('creative')
+    // 即使选了装备/道具，buildCharacterState 也不再直接落库
+    store.addEquipment(DEFAULT_EQUIPMENT_POOL.find(e => e.type === '武器')!)
+    store.addItem(DEFAULT_ITEM_POOL[0])
     const state = store.buildCharacterState('test-save-id')
-    expect(state.skills).toEqual([])
     expect(state.inventory).toEqual([])
+    expect(state.skills).toEqual([])
   })
 
-  it('真机修: 创角选中的装备/道具/技能直接结构化落库（不再依赖 AI 从开场白回写）', () => {
+  it('真机修(2026-07-23): 选中项写进开场正文而非直接落库（交 item_gen 生成 stats）', () => {
     store.selectDifficulty('creative')
     const sword = DEFAULT_EQUIPMENT_POOL.find(e => e.type === '武器')!
     const armor = DEFAULT_EQUIPMENT_POOL.find(e => e.type === '防具')!
@@ -663,27 +667,17 @@ describe('buildCharacterState', () => {
     store.addItem(potion)
     store.addSkill(skill)
 
+    // 不直接落库 — inventory/skills 为空，交下游 item_gen 经开场正文生成
     const state = store.buildCharacterState('test-save-id')
+    expect(state.inventory).toEqual([])
+    expect(state.skills).toEqual([])
 
-    // 装备 → inventory 带 equippedSlot（武器→武器槽，防具→身体槽，开局即穿）
-    const swordItem = state.inventory.find(i => i.name === sword.name)
-    expect(swordItem).toBeDefined()
-    expect(swordItem!.equippedSlot).toBe('武器')
-    expect(swordItem!.type).toBe('装备')
-    expect(swordItem!.effects).toEqual(sword.effect)
-    const armorItem = state.inventory.find(i => i.name === armor.name)
-    expect(armorItem!.equippedSlot).toBe('身体')
-    // 道具 → inventory 无 equippedSlot
-    const potionItem = state.inventory.find(i => i.name === potion.name)
-    expect(potionItem).toBeDefined()
-    expect(potionItem!.equippedSlot ?? null).toBeNull()
-    expect(potionItem!.quantity).toBeGreaterThanOrEqual(1)
-    // 技能 → skills
-    expect(state.skills).toHaveLength(1)
-    expect(state.skills[0].name).toBe(skill.name)
-    expect(state.skills[0].effects).toEqual(skill.effect)
-    // rarity 英文池值归一为中文
-    expect(['普通', '优良', '稀有', '史诗', '传说', '神话', '唯一']).toContain(swordItem!.rarity)
+    // 装备/道具/技能信息写进开场正文（供 request_dispatcher 识别 → item_gen_request）
+    const prompt = store.buildOpeningPrompt()
+    expect(prompt).toContain(sword.name)
+    expect(prompt).toContain(armor.name)
+    expect(prompt).toContain(potion.name)
+    expect(prompt).toContain(skill.name)
   })
 
   it('HP/MP/SP 应正确写入', () => {
@@ -780,6 +774,47 @@ describe('预设系统', () => {
     expect(store2.name).toBe('预设测试')
     expect(store2.level).toBe(5)
     expect(store2.difficulty?.id).toBe('normal')
+  })
+})
+
+// ===== 自定义物品编辑（updateXxx，捏人页内编辑入口） =====
+
+describe('自定义物品编辑 updateXxx', () => {
+  let store: ReturnType<typeof useCreateStore>
+  beforeEach(() => { store = makeStore() })
+
+  it('updateEquipment 按 id 原地替换装备（含 stats）', () => {
+    const eq = { id: 'custom_equipment_abc', name: '原剑', category: 'equipment' as const, type: '武器', rarity: 'common' as const, tag: [], effect: {}, consume: '', description: 'd', cost: 30, stats: { atk: 10 } }
+    store.addEquipment(eq)
+    store.updateEquipment({ ...eq, name: '改名校', stats: { atk: 99 } })
+    expect(store.selectedEquipments).toHaveLength(1)
+    expect(store.selectedEquipments[0].name).toBe('改名校')
+    expect(store.selectedEquipments[0].stats).toEqual({ atk: 99 })
+  })
+
+  it('updateItem 按 id 原地替换道具', () => {
+    const it = { id: 'custom_item_abc', name: '原药', category: 'item' as const, type: '消耗品', rarity: 'common' as const, tag: [], effect: {}, consume: '', description: 'd', cost: 30, quantity: 3 }
+    store.addItem(it)
+    store.updateItem({ ...it, name: '改名药', quantity: 5 })
+    expect(store.selectedItems).toHaveLength(1)
+    expect(store.selectedItems[0].name).toBe('改名药')
+    expect(store.selectedItems[0].quantity).toBe(5)
+  })
+
+  it('updateSkill 按 id 原地替换技能', () => {
+    const sk = { id: 'custom_skill_abc', name: '原技', category: 'skill' as const, type: '主动', rarity: 'common' as const, tag: [], effect: {}, consume: '', description: 'd', cost: 30 }
+    store.addSkill(sk)
+    store.updateSkill({ ...sk, name: '改名技' })
+    expect(store.selectedSkills).toHaveLength(1)
+    expect(store.selectedSkills[0].name).toBe('改名技')
+  })
+
+  it('update 未匹配 id 时不新增不删除（幂等）', () => {
+    const eq = { id: 'custom_equipment_abc', name: '剑', category: 'equipment' as const, type: '武器', rarity: 'common' as const, tag: [], effect: {}, consume: '', description: 'd', cost: 30 }
+    store.addEquipment(eq)
+    store.updateEquipment({ ...eq, id: 'custom_equipment_nope', name: '不存在的' })
+    expect(store.selectedEquipments).toHaveLength(1)
+    expect(store.selectedEquipments[0].name).toBe('剑')
   })
 })
 

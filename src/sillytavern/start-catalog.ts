@@ -10,6 +10,8 @@ export interface CatalogItem {
   id: string; name: string; category: 'equipment' | 'item' | 'skill';
   type: string; rarity: Rarity; tag: string[]; effect: Record<string, string>;
   consume: string; description: string; cost: number; quantity?: number;
+  /** 🆕 装备战斗数值（英文键，对齐 combat-resolver: atk/defense/dr/penetration/hit/dodge） */
+  stats?: Record<string, number>;
 }
 
 export interface BackgroundTemplate {

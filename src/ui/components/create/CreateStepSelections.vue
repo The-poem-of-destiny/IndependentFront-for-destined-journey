@@ -18,10 +18,27 @@ import AppButton from '../shared/AppButton.vue'
 const store = useCreateStore()
 const showCustomForm = ref(false)
 
+const editingItem = ref<CatalogItem | null>(null)
+
 function handleCustomSave(item: CatalogItem) {
-  if (item.category === 'equipment') store.addEquipment(item)
-  else if (item.category === 'item') store.addItem(item)
-  else store.addSkill(item)
+  if (editingItem.value) {
+    if (item.category === 'equipment') store.updateEquipment(item)
+    else if (item.category === 'item') store.updateItem(item)
+    else store.updateSkill(item)
+    editingItem.value = null
+  } else {
+    if (item.category === 'equipment') store.addEquipment(item)
+    else if (item.category === 'item') store.addItem(item)
+    else store.addSkill(item)
+  }
+}
+function handleEditItem(item: CatalogItem) {
+  editingItem.value = item
+  showCustomForm.value = true
+}
+function handleCustomClose() {
+  showCustomForm.value = false
+  editingItem.value = null
 }
 function handleSelect(item: CatalogItem) {
   if (item.category === 'equipment') store.addEquipment(item)
@@ -132,6 +149,9 @@ const visiblePool = computed(() => {
           @remove-equipment="(e) => store.removeEquipment(e.id)"
           @remove-item="(i) => store.removeItem(i.id)"
           @remove-skill="(s) => store.removeSkill(s.id)"
+          @edit-equipment="handleEditItem"
+          @edit-item="handleEditItem"
+          @edit-skill="handleEditItem"
         />
       </div>
     </div>
@@ -139,7 +159,7 @@ const visiblePool = computed(() => {
     <!-- ====== 下部: 伙伴 (独立区域, 后面做自己的滚动) ====== -->
 
     <!-- 自定义 Modal -->
-    <CustomItemForm :visible="showCustomForm" @save="handleCustomSave" @close="showCustomForm = false" />
+    <CustomItemForm :visible="showCustomForm" :edit-item="editingItem" @save="handleCustomSave" @close="handleCustomClose" />
   </section>
 </template>
 
