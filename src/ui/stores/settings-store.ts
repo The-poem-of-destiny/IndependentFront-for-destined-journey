@@ -311,6 +311,14 @@ export const useSettingsStore = defineStore('settings', () => {
         if (!settings.value.activePresetId) {
           settings.value.activePresetId = entry.presetId
         }
+        // Fix D：如果 activePresetId 指向的预设不存在于内存中，回落至项目默认
+        if (entry.presetId && settings.value.activePresetId !== entry.presetId) {
+          const currentId = settings.value.activePresetId as string
+          const exists = (settings.value.presets as PresetItem[]).find(p => p.id === currentId)
+          if (!exists) {
+            settings.value.activePresetId = entry.presetId
+          }
+        }
       }
     }
   }
