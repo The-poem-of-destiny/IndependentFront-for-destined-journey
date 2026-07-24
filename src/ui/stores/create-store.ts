@@ -11,7 +11,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { CharacterState, PlotSettings, PlotOutline, ApiEndpoint, AgentConfig } from '@engine/types'
-import { TIER_CONFIGS } from '@engine/tier-constants'
+import { TIER_CONFIGS, calcResources } from '@engine/tier-constants'
 import { getBloodlineList } from '@engine/bloodlines'
 import { AgentClient } from '@engine/agent-client'
 import {
@@ -239,21 +239,16 @@ export const useCreateStore = defineStore('create', () => {
     return result
   })
 
-  const hpPreview = computed(() => {
-    const cfg = TIER_CONFIGS[tier.value - 1]
-    if (!cfg) return 100
-    return Math.floor((finalAttributes.value['体质'] || 5) * cfg.hpMultiplier * 10)
-  })
-  const mpPreview = computed(() => {
-    const cfg = TIER_CONFIGS[tier.value - 1]
-    if (!cfg) return 50
-    return Math.floor((finalAttributes.value['智力'] || 5) * cfg.mpMultiplier * 10)
-  })
-  const spPreview = computed(() => {
-    const cfg = TIER_CONFIGS[tier.value - 1]
-    if (!cfg) return 50
-    return Math.floor((finalAttributes.value['精神'] || 5) * cfg.spMultiplier * 10)
-  })
+  const resourcesPreview = computed(() => {
+    const a = finalAttributes.value;
+    return calcResources(tier.value, {
+      str: a['力量'] || 5, dex: a['敏捷'] || 5, con: a['体质'] || 5,
+      int: a['智力'] || 5, spi: a['精神'] || 5,
+    });
+  });
+  const hpPreview = computed(() => resourcesPreview.value.hp);
+  const mpPreview = computed(() => resourcesPreview.value.mp);
+  const spPreview = computed(() => resourcesPreview.value.sp);
 
   // ═══════════════════════════════════════════════════════
   // 经济 — 对齐原版消耗公式
@@ -1141,6 +1136,7 @@ const cc = Number(s.plotChapterCount)
       statusEffects: [],
       money: money.value,
       location: startLocation.value === '自定义' ? customStartLocation.value : startLocation.value,
+      present: true,
       adventurerRank: '未评级',
       currentAction: '',
       bloodlineIds: [],

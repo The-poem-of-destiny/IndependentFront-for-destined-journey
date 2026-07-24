@@ -280,32 +280,35 @@ describe('HP/MP/SP 资源预览', () => {
   let store: ReturnType<typeof useCreateStore>
   beforeEach(() => { store = makeStore() })
 
-  it('T1 Lv.1 体质=0 时公式兜底为5 → 最低 HP=50', () => {
+  it('T1 Lv.1 体质=0 时公式兜底为5 → 最低 HP=525（世界书公式）', () => {
     store.level = 1
-    // 体质=0 (falsy), 公式用 || 5 兜底: floor(5 × 1 × 10) = 50
-    expect(store.hpPreview).toBe(50)
+    // 体质=0 (falsy), finalAttributes 用 || 0 兜底为 0；但默认属性全 5
+    // 五维和 = 5+5+5+5+5 = 25；HP = 5×100×1 + 25 = 525
+    expect(store.hpPreview).toBe(525)
   })
 
-  it('HP = floor(体质 × hpMultiplier × 10)', () => {
+  it('HP = 体 × 100 × hpMul + 五维和（世界书公式）', () => {
     store.level = 1 // T1, hpMultiplier=1
     store.addBasePoint('体质')
     store.addBasePoint('体质')
     store.addBasePoint('体质')
-    // 体质=3, hpMultiplier=1 → 30
-    expect(store.hpPreview).toBe(30)
+    // 体质=3, 其他默认 5；五维和 = 3+5+5+5+5 = 23
+    // HP = 3×100×1 + 23 = 323
+    expect(store.hpPreview).toBe(323)
   })
 
-  it('T3 HP 计算正确', () => {
-    store.level = 10 // T3, hpMultiplier=4
+  it('T3 HP 计算正确（世界书公式）', () => {
+    store.level = 10 // T3, hpMultiplier=4, tierBonus=2
     store.addBasePoint('体质')
     store.addBasePoint('体质')
     store.addBasePoint('体质')
     store.addBasePoint('体质')
     store.addBasePoint('体质')
-    // 体质=5, T3 hpMultiplier=4, tierBonus=2 → 体质final=7
-    // hpPreview = floor(7 × 4 × 10) = 280
+    // 体质=5, tierBonus=2 → 体质final=7；其他属性 = 0+tierBonus2=2
+    // 五维和 = 7+2+2+2+2 = 15
+    // HP = 7×100×4 + 15 = 2815
     expect(store.finalAttributes['体质']).toBe(7)
-    expect(store.hpPreview).toBe(280)
+    expect(store.hpPreview).toBe(2815)
   })
 })
 

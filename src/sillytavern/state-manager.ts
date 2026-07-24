@@ -60,7 +60,7 @@ const UPDATE_CHAR_WHITELIST = new Set<string>([
   // 登神长阶
   'ascension',
   // 经济 / 位置 / 冒险者等级 / 当前行为
-  'money', 'location', 'adventurerRank', 'currentAction',
+  'money', 'location', 'present', 'adventurerRank', 'currentAction',
   // 血脉 / 集群数量 / 叙事字段
   'bloodlineIds', 'quantity',
   'appearance', 'background', 'personality', 'gender', 'outfit', 'thoughts',

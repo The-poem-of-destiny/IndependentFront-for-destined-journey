@@ -33,7 +33,7 @@ import type {
 import { createDefaultCharacterState } from './types';
 import { scanCharDetects } from './marker-protocol';
 import { buildAgentMessages } from './agent-templates';
-import { getTierConfig, calcHP, calcMP, calcSP } from './tier-constants';
+import { getTierConfig, calcResources } from './tier-constants';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
 import { normalizeSlot } from './field-enums';
 import type { ToolExecutionContext } from './types';
@@ -304,9 +304,6 @@ export function assembleCharacterState(
 ): CharacterState {
   const tierConfig = getTierConfig(charData.tier);
   const tierName = tierConfig?.name ?? '普通';
-  const hpMultiplier = tierConfig?.hpMultiplier ?? 1;
-  const mpMultiplier = tierConfig?.mpMultiplier ?? 1;
-  const spMultiplier = tierConfig?.spMultiplier ?? 1;
 
   // 合并技能: char_gen 自产优先，item_gen 补充（去重+合并）
   const charSkills = charData.skills ?? [];
@@ -377,12 +374,8 @@ export function assembleCharacterState(
     tierName,
     level: charData.level,
     attributes: charData.attributes,
-    hp: calcHP(charData.tier, charData.attributes.con),
-    maxHp: calcHP(charData.tier, charData.attributes.con),
-    mp: calcMP(charData.tier, charData.attributes.int),
-    maxMp: calcMP(charData.tier, charData.attributes.int),
-    sp: calcSP(charData.tier, charData.attributes.spi),
-    maxSp: calcSP(charData.tier, charData.attributes.spi),
+    ...calcResources(charData.tier, charData.attributes),
+    expToNext: tierConfig?.expCap ?? 100,
     ascension: {
       enabled: charData.ascension.enabled,
       elements: (charData.ascension.elements ?? []).map((e, i) => ({
@@ -468,7 +461,11 @@ export async function runCharGenChain(
   const itemData = await callItemGenAgent(charData, request, deps);
 
   // Step 3: 组装完整 CharacterState
-  const character = assembleCharacterState(charData, itemData);
+  const playerLocation = resolvePlayerLocation(request);
+  const character = assembleCharacterState(charData, itemData, {
+    ...(playerLocation ? { location: playerLocation } : {}),
+    present: true,
+  });
 
   // Step 4: 生成 StatePatch[]
   const patches = buildCharGenPatches(character);
@@ -1180,6 +1177,15 @@ function extractJSON(text: string): string {
   }
 
   return text;
+}
+
+/**
+ * 从 AgentContext 中解析玩家角色的 location。
+ * 用于新登场 NPC 默认继承玩家当前位置（避免生成在「空串」位置）。
+ */
+function resolvePlayerLocation(request: CharGenRequest): string {
+  const player = request.context.characters?.find(c => c.type === 'player');
+  return player?.location ?? '';
 }
 
 // ========== $chargen API ==========

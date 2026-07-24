@@ -40,6 +40,7 @@ import {
   filterByLocation,
   filterByTier,
   filterByRank,
+  isPresent,
   getPresentCharacters,
   summarizeChar,
   summarizeChars,
@@ -244,24 +245,39 @@ describe('filterByRank', () => {
 describe('getPresentCharacters', () => {
   const reference = makePlayer({ location: '地下城·第一层' });
 
-  it('包含同位置的其它角色', () => {
-    const ally = makeChar({ location: '地下城·第一层' });
-    const chars = [reference, ally, makeChar({ location: '酒馆' })];
+  it('包含 present=true 的其它角色', () => {
+    const ally = makeChar({ location: '地下城·第一层', present: true });
+    const chars = [reference, ally, makeChar({ location: '酒馆', present: false })];
     expect(getPresentCharacters(chars, reference)).toEqual([ally]);
   });
 
   it('排除自己', () => {
-    const sameName = makeChar({ id: reference.id, location: '地下城·第一层', type: 'player' });
+    const sameName = makeChar({ id: reference.id, location: '地下城·第一层', type: 'player', present: true });
     const chars = [reference, sameName];
     const result = getPresentCharacters(chars, reference);
     // 两者 id 相同，都会被排除（只排除 reference.id）
     expect(result.find(c => c.id === reference.id)).toBeUndefined();
   });
 
-  it('不同位置的角色不计入', () => {
-    const other = makeChar({ location: '酒馆' });
+  it('present=false 的角色不计入', () => {
+    const other = makeChar({ location: '地下城·第一层', present: false });
     const chars = [reference, other];
     expect(getPresentCharacters(chars, reference)).toEqual([]);
+  });
+
+  it('present=undefined 的角色不计入', () => {
+    const other = makeChar({ location: '地下城·第一层', present: undefined });
+    const chars = [reference, other];
+    expect(getPresentCharacters(chars, reference)).toEqual([]);
+  });
+});
+
+describe('isPresent', () => {
+  it('严格 === true 判断', () => {
+    expect(isPresent(makeChar({ present: true }))).toBe(true);
+    expect(isPresent(makeChar({ present: false }))).toBe(false);
+    expect(isPresent(makeChar({ present: undefined }))).toBe(false);
+    expect(isPresent(makeChar({ present: null as any }))).toBe(false);
   });
 });
 

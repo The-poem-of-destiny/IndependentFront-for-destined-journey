@@ -354,14 +354,28 @@ describe('assembleCharacterState', () => {
     expect(result.location).toBe('白曜城');
   });
 
-  it('高层级角色应有更高的 HP（体质×层级乘数）', () => {
+  it('默认 present=true 且可被 overrides 覆盖', () => {
+    const charData = makeCharGenOutput();
+    const defaultResult = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] });
+    expect(defaultResult.present).toBe(true);
+
+    const customResult = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] }, {
+      present: false,
+    });
+    expect(customResult.present).toBe(false);
+  });
+
+  it('高层级角色应有更高的 HP（世界书公式）', () => {
     const charData = makeCharGenOutput({ tier: 5, level: 15, attributes: { str: 8, dex: 8, con: 10, int: 8, spi: 8 } });
     const result = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] });
-    // T5: hpMultiplier=20, mpMultiplier=35, spMultiplier=35
-    // con=10 → 20*10=200, int=8 → 35*8=280, spi=8 → 35*8=280
-    expect(result.maxHp).toBe(200);
-    expect(result.maxMp).toBe(280);
-    expect(result.maxSp).toBe(280);
+    // T5: hpMul=20, mpMul=35, spMul=35; 五维和=42
+    // HP = 10×100×20 + 42 = 20042
+    // MP = (8+8)×50×35 = 28000
+    // SP = (8+8)×50×35 = 28000
+    expect(result.maxHp).toBe(20042);
+    expect(result.maxMp).toBe(28000);
+    expect(result.maxSp).toBe(28000);
+    expect(result.expToNext).toBe(25000); // T5 expCap
   });
 });
 

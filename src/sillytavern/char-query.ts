@@ -68,9 +68,14 @@ export function filterByRank(chars: CharacterState[], rank: string): CharacterSt
   return chars.filter(c => c.adventurerRank === rank);
 }
 
-/** 获取在场角色（与指定角色同一位置） */
+/** 角色是否在场（在主角附近/同场景）。严格 === true 判断。 */
+export function isPresent(c: CharacterState): boolean {
+  return c.present === true;
+}
+
+/** 获取在场角色（在主角附近/同场景） */
 export function getPresentCharacters(chars: CharacterState[], reference: CharacterState): CharacterState[] {
-  return chars.filter(c => c.location === reference.location && c.id !== reference.id);
+  return chars.filter(c => c.id !== reference.id && c.present === true);
 }
 
 // ========== 状态摘要 ==========
@@ -82,7 +87,7 @@ export function summarizeChar(char: CharacterState): string {
   parts.push(`[${char.type}:${char.name}]`);
   parts.push(`Lv.${char.level} ${char.tierName}`);
   parts.push(`HP:${char.hp}/${char.maxHp} MP:${char.mp}/${char.maxMp} SP:${char.sp}/${char.maxSp}`);
-  parts.push(`位置:${char.location || '未知'}`);
+  parts.push(`位置:${char.location || '未知'}[${char.present === true ? '在场' : '离场'}]`);
 
   if (char.statusEffects.length > 0) {
     const effects = char.statusEffects.map(s => `${s.name}(${s.stacks}层)`).join(', ');
@@ -178,6 +183,7 @@ export const $char = {
   filterByLocation,
   filterByTier,
   filterByRank,
+  isPresent,
   getPresentCharacters,
   summarizeChar,
   summarizeChars,

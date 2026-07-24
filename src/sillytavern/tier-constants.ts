@@ -77,25 +77,22 @@ export function getTierConfig(tier: number): TierConfig | undefined {
 
 // ========== 资源计算 ==========
 
-/** 基础 HP = 体质 × tier乘数（世界书纯乘数公式） */
-export function calcHP(tier: number, con: number, _level?: number): number {
-  const cfg = getTierConfig(tier);
-  if (!cfg) return 100;
-  return Math.floor(cfg.hpMultiplier * con);
-}
+/** 资源值容器 */
+export interface ResourceValues { hp: number; maxHp: number; mp: number; maxMp: number; sp: number; maxSp: number; }
 
-/** 基础 MP = 智力 × tier乘数 */
-export function calcMP(tier: number, int: number, _level?: number): number {
+/** 世界书 [角色生成] 资源推演公式（[核心数值表] 乘数表）。
+ *  HP = 体 × 100 × hpMul + 五维和；MP = (智+精) × 50 × mpMul；SP = (力+敏) × 50 × spMul。 */
+export function calcResources(
+  tier: number,
+  attrs: { str: number; dex: number; con: number; int: number; spi: number },
+): ResourceValues {
   const cfg = getTierConfig(tier);
-  if (!cfg) return 50;
-  return Math.floor(cfg.mpMultiplier * int);
-}
-
-/** 基础 SP = 精神 × tier乘数 */
-export function calcSP(tier: number, spi: number, _level?: number): number {
-  const cfg = getTierConfig(tier);
-  if (!cfg) return 50;
-  return Math.floor(cfg.spMultiplier * spi);
+  if (!cfg) return { hp: 100, maxHp: 100, mp: 50, maxMp: 50, sp: 50, maxSp: 50 };
+  const sum = attrs.str + attrs.dex + attrs.con + attrs.int + attrs.spi;
+  const hp = Math.floor(attrs.con * 100 * cfg.hpMultiplier + sum);
+  const mp = Math.floor((attrs.int + attrs.spi) * 50 * cfg.mpMultiplier);
+  const sp = Math.floor((attrs.str + attrs.dex) * 50 * cfg.spMultiplier);
+  return { hp, maxHp: hp, mp, maxMp: mp, sp, maxSp: sp };
 }
 
 // ========== 经验计算 ==========

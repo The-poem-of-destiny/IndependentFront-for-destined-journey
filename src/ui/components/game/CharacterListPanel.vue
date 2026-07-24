@@ -27,7 +27,6 @@ const npcs = computed(() => game.npcs || [])
 const fp = computed(() => game.fp)
 const affections = computed(() => game.saveProfile?.affections || {})
 const contracts = computed(() => game.saveProfile?.contracts || [])
-const playerLoc = computed(() => game.player?.location || '')
 
 const selected = computed(() => npcs.value[selectedIdx.value] || null)
 
@@ -36,7 +35,7 @@ watch(() => npcs.value.length, () => { selectedIdx.value = 0; showScripts.value 
 // ═══ NPC 标签 ═══
 function getTags(npc: any): string[] {
   const tags: string[] = []
-  if (npc.location && playerLoc.value.startsWith(npc.location.split('-').slice(0, 2).join('-'))) { tags.push('在场') }
+  if (npc.present === true) { tags.push('在场') }
   if (contracts.value.some((c: any) => c.targetId === npc.id)) { tags.push('契约') }
   return tags
 }

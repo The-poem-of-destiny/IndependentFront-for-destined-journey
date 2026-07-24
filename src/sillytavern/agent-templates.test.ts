@@ -220,6 +220,7 @@ describe('buildAgentMessages', () => {
           statusEffects: [],
           money: 100,
           location: '白曜城',
+          present: true,
           adventurerRank: 'D',
           currentAction: '探索中',
           customFields: {},

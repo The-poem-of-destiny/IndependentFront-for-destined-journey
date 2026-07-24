@@ -83,6 +83,7 @@ function makeCharacter(overrides: Partial<CharacterState> = {}): CharacterState 
     ],
     money: 50,
     location: '白曜城-铁匠铺',
+    present: true,
     adventurerRank: 'D',
     currentAction: '正在锻造',
     customFields: {

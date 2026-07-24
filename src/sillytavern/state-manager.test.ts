@@ -582,6 +582,19 @@ describe('StateManager', () => {
       expect(char.location).toBe('village_square');
     });
 
+    it('④-1 present 字段正常写入（白名单生效）', async () => {
+      const char = buildMockCharacter({ id: 'char-001', location: 'village_square', present: true });
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        { op: 'update_character', target: 'characters.Test Hero', value: { present: false } },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.present).toBe(false);
+    });
+
     // ===== 终审修复: hp/mp/sp 钳制 + attributes 深合并 =====
 
     it('⑤ 钳制: {hp: 9999} 在 maxHp=100 时落地为 100（与 set_hp 语义一致）', async () => {

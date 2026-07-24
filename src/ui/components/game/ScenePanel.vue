@@ -61,15 +61,12 @@ const weather = computed(() => {
   return (sys?.['天气'] as string) ?? (wf?.['天气'] as string) ?? (wf?.['weather'] as string) ?? ''
 })
 
-// ═══ 在场角色 — 同地点前缀匹配 ═══
+// ═══ 在场角色 — present 字段判断 ═══
 const presentChars = computed(() => {
   const all = game.characters
-  const playerLoc = game.player?.location ?? ''
-  if (!playerLoc) return []
-  const locPrefix = playerLoc.split('-').slice(0, 2).join('-')
   return all.filter(c => {
     if (c.type === 'player') return false
-    return (c.location || '').startsWith(locPrefix)
+    return c.present === true
   })
 })
 

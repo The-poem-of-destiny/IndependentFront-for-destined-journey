@@ -79,7 +79,7 @@
 | ~~equipment[]~~ | — | — | — | ⚰️ **退役**（EquipmentSlot 类型删除） |
 | skills[] | Skill[] | ✅ | 见第 4 章 | |
 | statusEffects[] | StatusEffect[] | ✅ | 见第 5 章 | |
-| location / currentAction / adventurerRank | string | ✅ | AI | location 与 currentAction 各归各位（修 #19） |
+| location / present / currentAction / adventurerRank | string/boolean | ✅ | AI | location(地理)与present(在场)分离；present严格===true判断；角色进出场景由vars_update切换 |
 | bloodlineIds[] | string[] | 可选 | Code | |
 | appearance / background / personality / gender | string | 可选 | AI/玩家 | 🆕 **从 customFields 升正式字段**。同义分裂裁决: physics→appearance、backstory→background、clothing→outfit（见下） |
 | outfit / thoughts | string | 可选 | AI | 🆕 升正式字段（服装/心里话） |

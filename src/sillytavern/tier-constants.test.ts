@@ -6,9 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   TIER_CONFIGS,
   getTierConfig,
-  calcHP,
-  calcMP,
-  calcSP,
+  calcResources,
   calcExpToNext,
   totalExpForLevel,
   calcAttributePoints,
@@ -104,88 +102,52 @@ describe('getTierConfig', () => {
   });
 });
 
-// ========== calcHP 基础 HP 计算 ==========
+// ========== calcResources 资源计算（世界书公式） ==========
 
-describe('calcHP', () => {
-  it('T1, con=10 → floor(1×10) = 10 (世界书纯乘数公式)', () => {
-    // 公式: floor(hpMultiplier × con)
-    // T1 hpMultiplier=1: floor(1×10) = 10
-    expect(calcHP(1, 10)).toBe(10);
+describe('calcResources', () => {
+  it('T1, 全属性 10（五维和 50）→ HP=1050, MP=1000, SP=1000', () => {
+    // HP = 10×100×1 + 50 = 1050
+    // MP = (10+10)×50×1 = 1000
+    // SP = (10+10)×50×1 = 1000
+    const result = calcResources(1, { str: 10, dex: 10, con: 10, int: 10, spi: 10 });
+    expect(result.hp).toBe(1050);
+    expect(result.mp).toBe(1000);
+    expect(result.sp).toBe(1000);
   });
 
-  it('T4, con=15 → floor(10×15) = 150', () => {
-    // T4 hpMultiplier=10: floor(10×15) = 150
-    expect(calcHP(4, 15)).toBe(150);
+  it('T3, str8/dex9/con6/int9/spi10（五维和 42）→ HP=2442, MP=5700, SP=5100', () => {
+    // HP = 6×100×4 + 42 = 2442
+    // MP = (9+10)×50×6 = 5700
+    // SP = (8+9)×50×6 = 5100
+    const result = calcResources(3, { str: 8, dex: 9, con: 6, int: 9, spi: 10 });
+    expect(result.hp).toBe(2442);
+    expect(result.mp).toBe(5700);
+    expect(result.sp).toBe(5100);
   });
 
-  it('T7, con=20 → floor(100×20) = 2000', () => {
-    // T7 hpMultiplier=100: floor(100×20) = 2000
-    expect(calcHP(7, 20)).toBe(2000);
+  it('T2, str6/dex6/con8/int9/spi5（五维和 34）→ HP=1634, MP=1750, SP=1500', () => {
+    // HP = 8×100×2 + 34 = 1634
+    // MP = (9+5)×50×2.5 = 1750
+    // SP = (6+6)×50×2.5 = 1500
+    const result = calcResources(2, { str: 6, dex: 6, con: 8, int: 9, spi: 5 });
+    expect(result.hp).toBe(1634);
+    expect(result.mp).toBe(1750);
+    expect(result.sp).toBe(1500);
   });
 
-  it('无效 tier 应返回默认值 100', () => {
-    expect(calcHP(0, 10)).toBe(100);
-    expect(calcHP(99, 10)).toBe(100);
+  it('无效 tier (99 或 0) 应返回兜底值 {hp:100, maxHp:100, mp:50, maxMp:50, sp:50, maxSp:50}', () => {
+    expect(calcResources(99, { str: 10, dex: 10, con: 10, int: 10, spi: 10 })).toEqual({ hp: 100, maxHp: 100, mp: 50, maxMp: 50, sp: 50, maxSp: 50 });
+    expect(calcResources(0, { str: 10, dex: 10, con: 10, int: 10, spi: 10 })).toEqual({ hp: 100, maxHp: 100, mp: 50, maxMp: 50, sp: 50, maxSp: 50 });
   });
 
-  it('con=0 时 HP=0', () => {
-    // 纯乘数公式: 乘数×0=0
-    expect(calcHP(1, 0)).toBe(0);
-    expect(calcHP(3, 0)).toBe(0);
-  });
-
-  it('level 参数应被忽略（世界书无等级项）', () => {
-    // 传入不同 level 应得到相同结果
-    expect(calcHP(1, 10, 1)).toBe(calcHP(1, 10, 25));
-    expect(calcHP(3, 12)).toBe(calcHP(3, 12, 99));
-  });
-});
-
-// ========== calcMP 基础 MP 计算 ==========
-
-describe('calcMP', () => {
-  it('T1, int=10 → floor(1×10) = 10', () => {
-    // T1 mpMultiplier=1: floor(1×10) = 10
-    expect(calcMP(1, 10)).toBe(10);
-  });
-
-  it('T4, int=18 → floor(15×18) = 270', () => {
-    // T4 mpMultiplier=15: floor(15×18) = 270
-    expect(calcMP(4, 18)).toBe(270);
-  });
-
-  it('T7, int=20 → floor(160×20) = 3200', () => {
-    // T7 mpMultiplier=160: floor(160×20) = 3200
-    expect(calcMP(7, 20)).toBe(3200);
-  });
-
-  it('无效 tier 应返回默认值 50', () => {
-    expect(calcMP(0, 10)).toBe(50);
-    expect(calcMP(-5, 10)).toBe(50);
-  });
-});
-
-// ========== calcSP 基础 SP 计算 ==========
-
-describe('calcSP', () => {
-  it('T1, spi=10 → floor(1×10) = 10', () => {
-    // T1 spMultiplier=1: floor(1×10) = 10
-    expect(calcSP(1, 10)).toBe(10);
-  });
-
-  it('T5, spi=16 → floor(35×16) = 560', () => {
-    // T5 spMultiplier=35: floor(35×16) = 560
-    expect(calcSP(5, 16)).toBe(560);
-  });
-
-  it('T7, spi=20 → floor(160×20) = 3200', () => {
-    // T7 spMultiplier=160: floor(160×20) = 3200
-    expect(calcSP(7, 20)).toBe(3200);
-  });
-
-  it('无效 tier 应返回默认值 50', () => {
-    expect(calcSP(0, 10)).toBe(50);
-    expect(calcSP(99, 10)).toBe(50);
+  it('T7, 极限属性 20（五维和 100）→ HP=200100, MP=320000, SP=320000', () => {
+    // HP = 20×100×100 + 100 = 200100
+    // MP = (20+20)×50×160 = 320000
+    // SP = (20+20)×50×160 = 320000
+    const result = calcResources(7, { str: 20, dex: 20, con: 20, int: 20, spi: 20 });
+    expect(result.hp).toBe(200100);
+    expect(result.mp).toBe(320000);
+    expect(result.sp).toBe(320000);
   });
 });
 

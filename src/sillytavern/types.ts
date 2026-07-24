@@ -784,7 +784,10 @@ export interface CharacterState {
   money: number;                 // G
 
   // ===== 位置 =====
-  location: string;              // 当前详细位置路径
+  location: string;              // 当前详细位置路径（地理）
+  /** 是否在主角附近/同场景（在场）。true=可被叙事直接互动；false=离场/远处/退场。
+   *  AI 通过 vars_update 在角色进场/离场时切换。严格 === true 判断。 */
+  present: boolean;
 
   // ===== 冒险者等级 =====
   adventurerRank: string;        // '未评级' | 'D' | 'C' | 'B' | 'A' | 'S'
@@ -848,6 +851,7 @@ export function createDefaultCharacterState(overrides: Partial<CharacterState> =
     statusEffects: [],
     money: 0,
     location: '',
+    present: true,
     adventurerRank: '未评级',
     currentAction: '',
     customFields: {},

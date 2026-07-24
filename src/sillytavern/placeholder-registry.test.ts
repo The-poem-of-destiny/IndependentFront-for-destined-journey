@@ -87,6 +87,7 @@ function makeChar(overrides?: Partial<CharacterState>): CharacterState {
     statusEffects: [],
     money: 50,
     location: '白曜城',
+    present: true,
     adventurerRank: '未评级',
     currentAction: '待机中',
     customFields: {},

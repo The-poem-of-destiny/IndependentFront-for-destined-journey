@@ -84,6 +84,12 @@ describe('createDefaultCharacterState', () => {
     expect(c.adventurerRank).toBe('未评级');
   });
 
+  it('位置默认空串，present 默认 true', () => {
+    const c = createDefaultCharacterState();
+    expect(c.location).toBe('');
+    expect(c.present).toBe(true);
+  });
+
   it('overrides 应覆盖默认值', () => {
     const c = createDefaultCharacterState({
       type: 'player',
