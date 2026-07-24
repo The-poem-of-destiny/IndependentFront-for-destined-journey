@@ -260,6 +260,8 @@ src/sillytavern/                    ← 核心引擎（30+ 模块，含 Phase 1-
   │   │     + processStageMarkers (craft延迟到Stage2 / combat延迟到Stage2 / char触发chain)
   │   └── [8.5] callAgenticAgent(): toolsEnabled=true → chatWithTools() 多轮循环
   │
+  ├── story-rescue.ts               ← [真机修] Story 正文救援: "正文吞思维链"(raw空→从reasoning抠)/"思维链泄漏正文"(raw含前导→截maintext前) AI 缺陷兜底 (空门控+取最后maintext+story守卫)
+  │
   ├── field-enums.ts                ← [M1] 中文枚举集中定义 + 归一化 (铁律5)
   ├── tier-constants.ts             ← [Phase 5] 核心数值表 (世界书 #417617)
   ├── bloodlines.ts                 ← [Phase 5] 血脉系统 (23 种族)
@@ -462,7 +464,7 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC
 | 10i | 输出美化规则库: beautifier-rules.json 预设规则(22条) + 世界书/角色 auto-enable 绑定 + BeautifierSection 三段式 UI + ChatFlow 合并规则渲染 + 远程 regex.json 导入脚本 | ✅ |
 | 10j | 剧情系统接线（9 断点收口）... 三 Agent systemPrompt 重写（含雷点注入+修改模式）。计划: docs/planning/2026-07-19-plot-system-plan.md；大纲仅捏人页生成（main+side），游戏内零生成，演化归 post_check.outlineChanges；plotYearlyGeneration 退役 | ✅ 待真机验证 |
 | 10k | 快照面板 + 右键回退重发: 左侧 SideToolbar「快照」按钮(SnapshotPanel 历史快照恢复) + 最新 AI 消息右键「回退本轮/复制」(回退=restoreSnapshot 上一轮+回填本轮输入→重发即重生成/编辑重发) + Snapshot 阶梯保留(trimSnapshots tiered: 最近5全留+旧层4/8/10稀疏, 非turn档受保护) + restoreSnapshot 增强(plotEvents 捕获+覆写/memories 清理/totalTurns 对齐) + 设置「快照保留模式」可配置(pipeline 搭桥同步 AppSettings)。计划: docs/planning/2026-07-23-snapshot-rollback-plan.md | ✅ 待真机验证 |
-| 真机迭代 | debug loop 5 轮修复: 物品/角色零落库根因链（AI 输出 JSON 形状漂移 → 解析器 XML+JSON 双兜底）/ 侧链 systemPrompt+世界书注入根治（此前恒 stub 裸奔）/ maxTokens 2048 兜底截断 / 创角初始装备改走 item_gen 链(不直接落库,交 item_gen 生成 stats)+自定义装备战斗数值输入+自定义物品编辑管理 / characterName 属性传递 / 嵌套标签剥离 / activePresetId 运行时尊重 / 世界书 ST 宏噪音清理。ST 预设 setvar/getvar 配对机制排查经验见 debug 记录 | 🔄 持续验证中 |
+| 真机迭代 | debug loop 5 轮修复: 物品/角色零落库根因链（AI 输出 JSON 形状漂移 → 解析器 XML+JSON 双兜底）/ 侧链 systemPrompt+世界书注入根治（此前恒 stub 裸奔）/ maxTokens 2048 兜底截断 / 创角初始装备改走 item_gen 链(不直接落库,交 item_gen 生成 stats)+自定义装备战斗数值输入+自定义物品编辑管理 / characterName 属性传递 / 嵌套标签剥离 / activePresetId 运行时尊重 / 世界书 ST 宏噪音清理。ST 预设 setvar/getvar 配对机制排查经验见 debug 记录。story 正文救援兜底(rescueStoryOutput: 正文吞思维链 raw 空→从 reasoning 抠 / 思维链泄漏正文→截 maintext 前; 空门控+取最后 maintext+story 守卫) | 🔄 持续验证中 |
 
 ## 前端架构 (Phase 7, 2026-06-17)
 

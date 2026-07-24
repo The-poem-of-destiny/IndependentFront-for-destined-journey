@@ -24,6 +24,7 @@ import { recallMemories } from './memory-store';
 import { buildZoneContext } from './context-visibility';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
 import { normalizeSlot } from './field-enums';
+import { rescueStoryOutput } from './story-rescue';
 
 // ========== Types ==========
 
@@ -398,6 +399,11 @@ export class AgentOrchestrator {
 
     // 🆕 注入请求消息供 debug 面板使用
     result.requestMessages = messages
+
+    // 🆕 Story 正文救援：修正"正文吞进思维链"(raw 空) 与"思维链泄漏进正文"(raw 含前导思维链) 两类 AI 缺陷
+    if (config.agentId === 'story') {
+      rescueStoryOutput(result);
+    }
 
     return result
   }
