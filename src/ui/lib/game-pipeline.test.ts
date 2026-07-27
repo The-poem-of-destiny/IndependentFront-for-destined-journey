@@ -262,3 +262,130 @@ describe('handleAgentResult — plot_post_check (步5)', () => {
       expect(ctx).toBeDefined()
     })
   })
+
+// ═══════════════════════════════════════════════════════════
+// 🎵 场景配乐：地点变化触发 + AI 标记优先 + 开关
+// ═══════════════════════════════════════════════════════════
+
+const audioCalls: any[] = []
+const audioStopCalls = { n: 0 }
+
+vi.mock('../stores/audio-store', () => ({
+  useAudioStore: () => ({
+    playByScene: vi.fn(async (q: any) => { audioCalls.push(q); return null }),
+    stop: vi.fn(() => { audioStopCalls.n += 1 }),
+    init: vi.fn(async () => {}),
+  }),
+}))
+
+describe('GamePipeline — 场景配乐触发', () => {
+  function player(location: string) {
+    return { id: 'p', name: '主角', type: 'player', location, present: true }
+  }
+
+  function pipelineAt(location: string, chars: any[] = [], sceneAutoPlay = true) {
+    const p = makePipeline({
+      characters: [player(location), ...chars],
+      player: player(location),
+    })
+    ;(p as any).settings.settings.audioSceneAutoPlay = sceneAutoPlay
+    return p
+  }
+
+  beforeEach(() => {
+    audioCalls.length = 0
+    audioStopCalls.n = 0
+  })
+
+  it('地点变了 → 自动按地点选曲（这是场景配乐的主路径）', async () => {
+    const p = pipelineAt('大陆中东部-奥古斯提姆帝国-艾瑟嘉德')
+    ;(p as any).flushPendingAudio()
+    await Promise.resolve()
+    expect(audioCalls).toHaveLength(1)
+    expect(audioCalls[0].location).toBe('大陆中东部-奥古斯提姆帝国-艾瑟嘉德')
+  })
+
+  it('地点没变 → 不重选（同一地点里走动/翻面板不该反复触发）', async () => {
+    const p = pipelineAt('龙脊山脉-熔火裂谷')
+    ;(p as any).flushPendingAudio()
+    await Promise.resolve()
+    ;(p as any).flushPendingAudio()
+    await Promise.resolve()
+    expect(audioCalls).toHaveLength(1)
+  })
+
+  it('在场角色一并带上 —— 有专属主题的角色在场时打分器才可能让人物主题接管', async () => {
+    const p = pipelineAt('龙脊山脉', [
+      { id: 'n1', name: '傲雪', type: 'npc', present: true },
+      { id: 'n2', name: '不在场的人', type: 'npc', present: false },
+    ])
+    ;(p as any).flushPendingAudio()
+    await Promise.resolve()
+    expect(audioCalls[0].characters).toEqual(['傲雪'])
+  })
+
+  it('AI 标记优先于地点变化 —— 它知道戏剧意图，比"地点变了"这个事实更准', async () => {
+    const p = pipelineAt('龙脊山脉')
+    ;(p as any).pendingAudioMarker = { type: 'play_audio', rawContent: '', position: 0, situation: '战斗', mood: '紧张' }
+    ;(p as any).flushPendingAudio()
+    await Promise.resolve()
+    expect(audioCalls).toHaveLength(1)
+    expect(audioCalls[0].situations).toContain('战斗')
+    expect(audioCalls[0].moods).toContain('紧张')
+  })
+
+  it('标记消费后清空，同一个标记不会在下一轮再播一次', async () => {
+    const p = pipelineAt('龙脊山脉')
+    ;(p as any).pendingAudioMarker = { type: 'play_audio', rawContent: '', position: 0, situation: '战斗' }
+    ;(p as any).flushPendingAudio()
+    await Promise.resolve()
+    expect((p as any).pendingAudioMarker).toBeNull()
+    ;(p as any).flushPendingAudio() // 地点也没变
+    await Promise.resolve()
+    expect(audioCalls).toHaveLength(1)
+  })
+
+  it('关掉开关 → 两条来源都不生效', async () => {
+    const p = pipelineAt('龙脊山脉', [], /* sceneAutoPlay */ false)
+    ;(p as any).pendingAudioMarker = { type: 'play_audio', rawContent: '', position: 0, situation: '战斗' }
+    ;(p as any).flushPendingAudio()
+    await Promise.resolve()
+    expect(audioCalls).toHaveLength(0)
+  })
+
+  it('关掉开关期间照样记住地点 —— 重新打开时不会为"早就待着的地点"补播一次', async () => {
+    const p = pipelineAt('龙脊山脉', [], false)
+    ;(p as any).flushPendingAudio()
+    await Promise.resolve()
+    ;(p as any).settings.settings.audioSceneAutoPlay = true
+    ;(p as any).flushPendingAudio()
+    await Promise.resolve()
+    expect(audioCalls).toHaveLength(0)
+  })
+
+  it('primeSceneAudio: 进场就起一次，并让紧接着的第一轮不再重选', async () => {
+    const p = pipelineAt('索伦蒂斯王国-潮汐王座')
+    await (p as any).primeSceneAudio()
+    expect(audioCalls).toHaveLength(1)
+    ;(p as any).flushPendingAudio()
+    await Promise.resolve()
+    expect(audioCalls).toHaveLength(1)
+  })
+
+  it('地点为空时什么都不做', async () => {
+    const p = pipelineAt('')
+    ;(p as any).flushPendingAudio()
+    await Promise.resolve()
+    await (p as any).primeSceneAudio()
+    expect(audioCalls).toHaveLength(0)
+  })
+
+  it('action="stop" 停止播放而不是选曲', async () => {
+    const p = pipelineAt('龙脊山脉')
+    ;(p as any).pendingAudioMarker = { type: 'play_audio', rawContent: '', position: 0, action: 'stop' }
+    ;(p as any).flushPendingAudio()
+    await Promise.resolve()
+    expect(audioStopCalls.n).toBe(1)
+    expect(audioCalls).toHaveLength(0)
+  })
+})

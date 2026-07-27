@@ -12,7 +12,7 @@
 import type {
   Pipeline, PipelineStage, AgentContext, AgentResult,
   OrchestratorRun, AgentConfig, ApiEndpoint, AgentDefinition,
-  CraftRequestMarker, CombatTriggerMarker, CombatSummaryResult,
+  CraftRequestMarker, CombatTriggerMarker, CombatSummaryResult, PlayAudioMarker,
   CharGenRequestMarker, ItemGenRequestMarker, ItemUpdateRequestMarker, CraftGenRequestMarker,
   ToolExecutionContext,
 } from './types';
@@ -70,6 +70,15 @@ export interface OrchestratorEvents {
    * 返回 null 跳过此标记。
    */
   onCombatTrigger?: (marker: CombatTriggerMarker, storyOutput: string) => Promise<CombatSummaryResult | null>;
+
+  /**
+   * 🎵 Play Audio: Stage 1 正文中检测到 <play_audio> 后触发，切换 BGM。
+   *
+   * **不 await、不阻塞管线** —— 配乐是旁路氛围，换不换歌都不该影响这一轮叙事
+   * 的产出；抛错也只吞掉。多个标记时**只取最后一个**（AI 一轮里改主意了，
+   * 以它最后的判断为准；连着切两首歌只会听见后一首的开头）。
+   */
+  onPlayAudio?: (marker: PlayAudioMarker, storyOutput: string) => void | Promise<void>;
 
   // ===== Phase 10: request_dispatcher 调度器回调 =====
 
@@ -680,6 +689,19 @@ export class AgentOrchestrator {
       );
       if (combatMarkers.length > 0) {
         this.pendingCombatMarkers.push(...combatMarkers);
+      }
+
+      // 🎵 play_audio: 就地触发，不暂存也不 await —— 配乐是旁路，不进管线时序
+      const audioMarkers = scanResult.markers.filter(
+        (m): m is PlayAudioMarker => m.type === 'play_audio',
+      );
+      const lastAudio = audioMarkers[audioMarkers.length - 1];
+      if (lastAudio && this.events.onPlayAudio) {
+        try {
+          void Promise.resolve(this.events.onPlayAudio(lastAudio, storyOutput)).catch(() => {});
+        } catch {
+          // 换歌失败不该让这一轮叙事失败
+        }
       }
     }
 

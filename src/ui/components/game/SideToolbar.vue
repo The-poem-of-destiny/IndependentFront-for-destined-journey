@@ -1,7 +1,13 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useGameStore } from '../../stores/game-store'
+import { useAudioStore } from '../../stores/audio-store'
 
 const game = useGameStore()
+const audio = useAudioStore()
+
+/** 播放中给音乐图标一点低幅呼吸（仅 opacity，不碰布局属性） */
+const musicPlaying = computed(() => audio.state.music.status === 'playing')
 
 const emit = defineEmits<{
   toolClick: [id: string]
@@ -15,6 +21,7 @@ const tools = [
   { id: 'memory', label: '记忆', icon: 'fa-solid fa-brain' },
   { id: 'plot', label: '剧情', icon: 'fa-solid fa-book-open' },
   { id: 'snapshots', label: '快照', icon: 'fa-solid fa-clock-rotate-left' },
+  { id: 'audio', label: '音乐', icon: 'fa-solid fa-music' },
   { id: 'debug', label: '调试', icon: 'fa-solid fa-bug' },
   { id: 'settings', label: '设置', icon: 'fa-solid fa-gear' },
 ]
@@ -30,11 +37,12 @@ function handleClick(id: string) {
       v-for="tool in tools"
       :key="tool.id"
       class="tool-btn"
+      :data-tool="tool.id"
       :title="tool.label"
       :aria-label="tool.label"
       @click="handleClick(tool.id)"
     >
-      <i :class="tool.icon" />
+      <i :class="[tool.icon, { breathing: tool.id === 'audio' && musicPlaying }]" />
       <span class="tool-label" v-show="!game.sidebarCollapsed">{{ tool.label }}</span>
     </button>
     <button
@@ -90,6 +98,21 @@ function handleClick(id: string) {
   text-align: center;
   font-size: 0.9rem;
   flex-shrink: 0;
+}
+/* 播放中的低幅呼吸 — 只动 opacity，不动布局 */
+.tool-btn i.breathing {
+  color: var(--theme-primary);
+  animation: mini-breathe 2.4s ease-in-out infinite;
+}
+@keyframes mini-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tool-btn i.breathing {
+    animation: none;
+    opacity: 1;
+  }
 }
 .tool-label {
   white-space: nowrap;

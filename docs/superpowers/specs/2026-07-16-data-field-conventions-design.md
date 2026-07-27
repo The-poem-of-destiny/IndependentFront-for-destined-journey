@@ -37,6 +37,7 @@
 | `plotEvents` / `plotOutlines` | 存档私有 | id | ✅ 一等+索引 | 剧情 |
 | `snapshots` | 存档私有 | id | ✅ 一等+索引 | 快照唯一真源 |
 | `lorebooks` / `presets` / `settings` / `apiEndpoints` / `createPresets` | **全局共享** | id/key | ❌ 不设 | 世界书/预设/设置/API 池 |
+| `audioTracks` / `audioBlobs` / `audioPlaylists` / `audioHandles` | **全局共享** | id | ❌ 不设 | 音频资源（见第 15 章）。非存档状态，不入 StatePatch，**不进备份格式**（`audioHandles` 另有一层原因：目录句柄只对本机有效） |
 | `chats` | ⚰️ v3 遗留 | id | — | 标记废弃，迁移批次中删除 |
 
 ### 1.2 隔离三规则
@@ -307,6 +308,7 @@ interface Snapshot {
 | 快照 | `snapshots` 表 | SaveSlot.snapshots 内嵌数组 |
 | 记忆 / 剧情 | `memories` / `plotEvents` / `plotOutlines` 表 | — |
 | 全局配置 | `settings` / `lorebooks` / `presets` / `apiEndpoints` | — |
+| 音频资源 | `audioTracks`（元数据）/ `audioBlobs`（`source='blob'` 的字节）/ `audioPlaylists` / `audioHandles`（音乐文件夹目录句柄） | 音量等混音设置归 `settings`，不重复存在音轨上；`source='file'` 的字节唯一真源是用户磁盘上的文件夹，库里只存目录不存拷贝 |
 
 ---
 
@@ -317,6 +319,96 @@ interface Snapshot {
 3. item_gen `<item_result>` XML 维持无 id 设计 ✅（现状正确），slot/type 枚举与 field-enums.ts 对齐。
 4. request_dispatcher: 删除死掉的 delta 分支约定或补教（裁决: **删除**，orchestrator 同步删 #26 死分支）；`<item_gen_request>` 的 owner 属性写**角色名**。
 5. 翻译层（orchestrator/三条侧链）按第 2-8 章 StatePatch 速查表重写，Code 负责: 名字解析、枚举归一、quantity 缺省、saveId 注入。
+
+---
+
+## 第 15 章 音频资源 AudioTrack / AudioBlobRecord / AudioPlaylist / AudioHandleRecord
+
+> 新增于 2026-07-26（音频系统 v1）。设计原文见 `docs/planning/2026-07-26-audio-system-design.md`。
+> 增补于 2026-07-27（本地音乐文件夹）：`docs/planning/2026-07-27-audio-local-files-addendum.md`。
+> **定位**: 这是 **UI / 资源实体**，不是游戏状态——它既不进 StatePatch，也不是存档状态。
+> 因此它不受"逻辑键 = 名字"（铁律 1）约束，仍用 id 作主键；而这与铁律 3「**AI 永不产 id**」
+> 并不冲突: AI 侧唯一的寻址方式是**标签**（`playByTag(tag)`），AI 从头到尾看不到也写不出音轨 id。
+
+**键规则**: `id`（string，纯内部物理主键）。内置音轨的 id 来自 `public/audio/manifest.json`，用户上传音轨的 id 由 Code 生成。`AudioBlobRecord.id` 与 `source='blob'` 的 `AudioTrack.id` 一一对应（`'file'` / `'builtin'` 音轨无 blob 行）。音轨改名不影响 id。`AudioHandleRecord` 另用固定字面量键，不与音轨 id 同名空间。
+
+**存储**: 四张表，身份均为**全局共享**（不设 saveId）：
+
+| 表 | 内容 | 为什么分开 |
+|----|------|-----------|
+| `audioTracks` | 元数据，KB 级 | IndexedDB **无列投影**——字节若与元数据同行，`toArray()`（画音频库列表的那个查询）会把整库音频拉进内存。5 首无感，50 首灾难，且随库增长静默劣化 |
+| `audioBlobs` | 纯 `id → blob` | 只在**播放时**读取；仅 `source='blob'` 的音轨有行 |
+| `audioPlaylists` | 有序 trackIds | 播放列表是音序器概念，只收 `kind === 'music'` 的音轨 |
+| `audioHandles` | 持久化的 `FileSystemDirectoryHandle`（🆕 v12） | 句柄是可结构化克隆但**非 JSON**，只能存 IndexedDB，进不了 `settings`/`localStorage` |
+
+上传/删除是**同一事务内的两表写**，删除时清理孤儿 blob 并从各播放列表剔除悬挂 id。
+
+**三种字节后端并存**（Store 的 `loadBlob` 按 `source` 分流，引擎侧只见一个注入缝）：
+
+| `source` | 字节住在 | 何时使用 |
+|----------|---------|---------|
+| `'file'` | 用户磁盘上的音乐文件夹 | 浏览器支持 File System Access（仅 Chromium） |
+| `'blob'` | `audioBlobs` 表 | 无 File System Access 的兜底路径；既有音轨永不迁移、永不删除 |
+| `'builtin'` | `public/audio/` | 内置 manifest 条目（不变） |
+
+**字段表 — AudioTrack**
+
+| 字段 | 类型 | 必填 | 谁填 | 说明 |
+|------|------|-----|------|------|
+| id | string | ✅ | Code / manifest | 物理主键，不出现在任何 AI 契约 |
+| name | string | ✅ | 玩家 / manifest | 显示名 |
+| kind | `'music'\|'sfx'` | ✅ | 玩家 / manifest | 决定走音序通道还是声池；**可能填错**，故体积门禁独立于本字段兜底 |
+| source | `'blob'\|'builtin'\|'file'` | ✅ | Code | `'file'` 🆕 2026-07-27；仍无 `'url'`（远程音源整类砍掉，见设计 §13）；日后新增纯属加法 |
+| url | string | — | Code | 仅 `source='builtin'`: manifest 中的相对路径 |
+| relativePath | string | — | Code | 🆕 仅 `source='file'`: 音乐文件夹内的文件名（目录句柄另存 `audioHandles`，不挂在音轨行上） |
+| missing | boolean | — | Code | 🆕 仅 `source='file'`: 上次扫描时文件已不在。**标记而非删除**——标签/`kind`/播放列表位是玩家的整理成果，必须挺过文件临时移动或硬盘拔出 |
+| mimeType / size | string / number | — | Code | 压缩后字节数 |
+| duration | number | — | Code | 秒，首次加载后回填 |
+| tags | string[] | ✅ | 玩家 / manifest | 场景标签。**AI 侧唯一寻址方式** |
+| builtin | boolean | — | Code | true = 不可删除，只可隐藏 |
+| createdAt / updatedAt | number | ✅ | Code | 账务字段 |
+
+**字段表 — AudioBlobRecord**
+
+| 字段 | 类型 | 必填 | 谁填 | 说明 |
+|------|------|-----|------|------|
+| id | string | ✅ | Code | `=== AudioTrack.id` |
+| blob | Blob | ✅ | 玩家（上传） | 原始压缩字节；仅播放时读；仅 `source='blob'` 的音轨有此行 |
+
+**字段表 — AudioHandleRecord**（🆕 2026-07-27）
+
+| 字段 | 类型 | 必填 | 谁填 | 说明 |
+|------|------|-----|------|------|
+| id | string | ✅ | Code | 固定字面量键，当前只有一行 `'library-root'`（模型是**一个**音乐文件夹，非按文件发句柄） |
+| handle | FileSystemDirectoryHandle | ✅ | 玩家（选择目录） | 结构化克隆存库。权限**不跨浏览器重启**：启动后 `queryPermission()` 通常回 `'prompt'`，重新授权需用户手势，不可在 `onMounted` 里静默重试 |
+| addedAt | number | ✅ | Code | 账务字段 |
+
+**字段表 — AudioPlaylist**
+
+| 字段 | 类型 | 必填 | 谁填 | 说明 |
+|------|------|-----|------|------|
+| id | string | ✅ | Code | 物理主键 |
+| name | string | ✅ | 玩家 | 显示名 |
+| trackIds | string[] | ✅ | 玩家 | **有序**；音轨删除时剔除悬挂 id。随机播放在副本上洗牌，存储顺序永不被改写 |
+| createdAt / updatedAt | number | ✅ | Code | 账务字段 |
+
+**引用关系**: `AudioPlaylist.trackIds` → `AudioTrack.id`；`AudioBlobRecord.id` → `AudioTrack.id`；`AudioTrack.relativePath` → `audioHandles['library-root']` 目录下的文件名（跨表软引用，解析不到即置 `missing`）。音轨改名（改 `name`）**不需要迁移任何引用**——引用一律走 id，这正是本实体不适用铁律 1 的原因：它没有"按名寻址"的消费方。
+
+**StatePatch 速查**: **无**。音频资源不产生任何 StatePatch op，不经 StateManager，不进快照，不进 `SaveProfile`。AudioManager 本身也**从不碰 Dexie**——CRUD 归 `database.ts`，Manager 只消费内存数组、被喂入 blob。
+
+**混音设置的家**: 主/通道音量、静音、循环、随机、上次播放列表等属于**环境属性而非虚构状态**，唯一真源是全局 `settings`（`audioMasterVolume` / `audioMusicVolume` / `audioSfxVolume` / `audioRepeat` / `audioShuffle` / `audioLastPlaylistId` 等），不重复存在音轨或存档里。
+
+**备份**: 音频四表**整体缺席** `FullBackup`（v1 无导出/导入）。`audioHandles` 还多一层理由——目录句柄是**本机私有**的，导到别的机器上既指不到目录也拿不到权限，导出等于导一坨垃圾。两个必须在 UI 里说清的后果——导入存档备份**不会动**音频库；`clearAllData()` 走 `db.delete()`，所以「清除全部数据」**会销毁音频库**，必须在确认弹窗里点名。
+
+**禁止**:
+- ❌ 把音轨 id / 播放列表 id 写进任何 prompt、AI 输出契约、StatePatch target——AI 只认标签
+- ❌ 把音频字节挂回 `audioTracks` 行（列表查询会拉全库进内存）
+- ❌ 按存档复制音频库（全局共享一份；按档复制等于白烧配额）
+- ❌ 把音量/静音存进存档或音轨（环境属性归 `settings`，双轨即 bug）
+- ❌ 把播放进度塞进广播状态（`subscribe` 只发离散变化；进度按需采样 `positionSec`）
+- ❌ 扫描时删除文件已消失的音轨行（只置 `missing`；玩家的标签/`kind`/播放列表位必须活下来）
+- ❌ 在无用户手势的时机（如 `onMounted`）静默请求文件夹权限（必失败，且看起来像 bug——必须走显式按钮）
+- ❌ 让引擎（`audio-manager.ts` / `audio-channels.ts`）感知存储后端（字节来源全部收在 Store 的 `loadBlob` 注入缝背后；本地文件夹后端就是靠这条缝做到引擎零改动的）
 
 ---
 

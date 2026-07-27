@@ -6,6 +6,12 @@
 
 import type { GameTime } from './time-system';
 
+// 音频子系统的接口/seam 类型拆分在 types-audio.ts（本文件已逾 800 行）。
+// 从这里统一再导出，「types.ts 是唯一类型来源」这条 import 路径依然成立。
+// 注意: 音频**数据模型**类型 (AudioTrack / AudioPlaylist / ...) 仍定义在本文件下方，
+// 不在 types-audio.ts 里 —— 避免第二个真相来源。
+export * from './types-audio';
+
 // ========== World Book (Lorebook) Types (v3, deprecated) ==========
 // Phase 8 用新 WorldBook 类型替代，旧 Lorebook/LorebookEntry 保留兼容导入
 
@@ -2384,7 +2390,8 @@ export interface CombatUnitTurn {
 export type MarkerType = 'craft_request' | 'combat_trigger' | 'char_detect'  // 旧（保留向后兼容）
   | 'char_gen_request' | 'char_update_request'                              // 角色调度
   | 'item_gen_request' | 'item_update_request'                              // 物品调度
-  | 'craft_gen_request';                                                    // 制作调度（统一 _request 后缀）
+  | 'craft_gen_request'                                                     // 制作调度（统一 _request 后缀）
+  | 'play_audio';                                                           // 场景配乐（Story 直接输出，非阻塞）
 
 /** 所有标记的公共字段 */
 export interface DetectedMarkerBase {
@@ -2444,11 +2451,38 @@ export interface CharDetectMarker extends DetectedMarkerBase {
   bodyText?: string;
 }
 
+/**
+ * <play_audio> 标记 — Story AI 在场景/氛围发生转折时输出，切换 BGM。
+ *
+ * **地点不由 AI 提供**：位置已经在游戏状态里（`player.location`），让 AI 再写一遍
+ * 只会多一处漂移源。AI 只负责它独有的判断——此刻是什么情绪、什么情境。
+ *
+ * 自闭合与成对写法都认：
+ *   `<play_audio situation="战斗" mood="紧张"/>`
+ *   `<play_audio>战斗, 紧张</play_audio>`（正文按逗号拆成自由词，喂给情绪与情境两维）
+ */
+export interface PlayAudioMarker extends DetectedMarkerBase {
+  type: 'play_audio';
+  /** 情境词（探索/战斗/潜行/仪式…），逗号或顿号分隔 */
+  situation?: string;
+  /** 情绪词（紧张/平静/悲壮…），逗号或顿号分隔 */
+  mood?: string;
+  /** 指定人物主题曲（可选；缺省由调用方按在场角色填） */
+  character?: string;
+  /** 氛围变体 A/B */
+  variant?: string;
+  /** `stop` = 停止当前 BGM，不再选曲 */
+  action?: string;
+  /** 标签内部正文：自由词，逗号分隔 */
+  bodyText?: string;
+}
+
 /** 三种标记的联合类型 */
 export type DetectedMarker = CraftRequestMarker | CombatTriggerMarker | CharDetectMarker   // 旧（保留）
   | CharGenRequestMarker | CharUpdateRequestMarker
   | ItemGenRequestMarker | ItemUpdateRequestMarker
-  | CraftGenRequestMarker;
+  | CraftGenRequestMarker
+  | PlayAudioMarker;
 
 /**
  * <char_gen_request> 标记 — request_dispatcher 检测到新角色时输出。
@@ -2911,4 +2945,90 @@ export interface MapMarker {
   color?: string;
   /** OSD 归一化坐标 (0-1)，原点左上角 */
   position: { nx: number; ny: number };
+}
+
+// ═══════════════════════════════════════════════════════════
+// Audio System — 音频子系统 (Dexie v11)
+// 设计: docs/planning/2026-07-26-audio-system-design.md §2
+// ═══════════════════════════════════════════════════════════
+
+/** Where the audio bytes come from. 'url' was cut from v1 — re-adding it is purely additive. */
+export type AudioSourceKind = 'blob' | 'builtin' | 'file';
+
+/** What the track is for. Drives decode policy; the size guard (§4.4) is the rail when it's wrong. */
+export type AudioTrackKind = 'music' | 'sfx';
+
+/** Track metadata — cheap to list, holds no audio bytes (§3.2) */
+export interface AudioTrack {
+  id: string;
+  name: string;
+  kind: AudioTrackKind;
+  source: AudioSourceKind;
+  url?: string;               // source='builtin': the manifest path
+  mimeType?: string;
+  size?: number;              // compressed bytes
+  duration?: number;          // seconds, backfilled after first load
+  tags: string[];             // scene tags — the AI hook's only addressing scheme (§8)
+  builtin?: boolean;          // cannot be deleted, only hidden
+  /** source='file': filename within the library folder. The folder handle is stored separately. */
+  relativePath?: string;
+  /** source='file': the file was gone at last scan. Row is kept so tags/playlist slots survive. */
+  missing?: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Audio bytes, stored apart from metadata and read only at play time */
+export interface AudioBlobRecord {
+  id: string;                 // === AudioTrack.id
+  blob: Blob;
+}
+
+/**
+ * Persisted File System Access handle for the user's music library folder.
+ * Handles are structured-cloneable, so IndexedDB stores them directly —
+ * they cannot go in localStorage; they are not JSON.
+ */
+export interface AudioHandleRecord {
+  id: string;                          // 'library-root' — one row today
+  handle: FileSystemDirectoryHandle;
+  addedAt: number;
+}
+
+/** Playlists are a sequencer concept — music tracks only (§4.3) */
+export interface AudioPlaylist {
+  id: string;
+  name: string;
+  trackIds: string[];         // ordered; dangling ids pruned on track delete
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type AudioRepeatMode = 'off' | 'all' | 'one';
+
+/**
+ * Discrete playback state. Deliberately excludes position — that is a getter
+ * sampled on demand, never broadcast (§6.3).
+ */
+export interface AudioPlaybackState {
+  music: {
+    status: 'idle' | 'playing' | 'paused';
+    trackId: string | null;
+    playlistId: string | null;
+    index: number;
+    durationSec: number;
+    volume: number;           // 0..1, channel gain
+    muted: boolean;
+    repeat: AudioRepeatMode;
+    shuffle: boolean;
+  };
+  sfx: {
+    volume: number;
+    muted: boolean;
+    liveVoices: number;
+  };
+  masterVolume: number;
+  masterMuted: boolean;
+  /** AudioContext resumed by a user gesture yet (§7) */
+  unlocked: boolean;
 }

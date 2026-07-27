@@ -15,6 +15,7 @@ import { getAgentTemplate } from '@engine/agent-templates'
 import { getDefaultTemplate } from '@engine/placeholder-registry'
 import { preprocessPresetForPreview } from '@engine/preset-loader'
 import BeautifierSection from './BeautifierSection.vue'
+import AudioSection from './AudioSection.vue'
 
 const theme = useThemeStore()
 const ui = useUIStore()
@@ -24,7 +25,7 @@ const s = cfg.settings  // 短别名，模板里用 s.xxx
 // ============================================================
 // 主导航
 // ============================================================
-type Section = 'api' | 'agent' | 'worldbook' | 'plot' | 'memory' | 'theme' | 'messages' | 'beautifier' | 'data' | 'about'
+type Section = 'api' | 'agent' | 'worldbook' | 'plot' | 'memory' | 'theme' | 'messages' | 'beautifier' | 'audio' | 'data' | 'about'
 const activeSection = ref<Section>('api')
 
 const navItems: { key: Section; label: string; icon: string }[] = [
@@ -36,6 +37,7 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'theme', label: '外观主题', icon: 'fa-solid fa-palette' },
   { key: 'messages', label: '消息显示', icon: 'fa-solid fa-message' },
   { key: 'beautifier', label: '输出美化', icon: 'fa-solid fa-wand-magic-sparkles' },
+  { key: 'audio', label: '音频', icon: 'fa-solid fa-music' },
   { key: 'data', label: '存档数据', icon: 'fa-solid fa-database' },
   { key: 'about', label: '关于', icon: 'fa-solid fa-circle-info' },
 ]
@@ -1273,11 +1275,14 @@ async function clearAll(){const{deleteDatabase}=await import('@engine/database')
         <!-- ========== 输出美化 ========== -->
         <BeautifierSection v-if="activeSection === 'beautifier'" />
 
+        <!-- ========== 音频 ========== -->
+        <AudioSection v-if="activeSection === 'audio'" />
+
         <!-- ========== 存档数据 ========== -->
         <section v-if="activeSection === 'data'" class="section centered">
           <h3>存档数据管理</h3><p class="section-desc">导出、导入或清除所有数据。建议定期导出备份。</p>
-          <div class="data-actions"><AppCard padding="md"><h4>导出数据</h4><p class="text-muted text-sm">将所有存档、角色、记忆、剧情导出为 JSON 文件</p><AppButton variant="secondary" size="sm" @click="exportAll" style="margin-top:8px">导出全部数据</AppButton></AppCard><AppCard padding="md"><h4>导入数据</h4><p class="text-muted text-sm">从 JSON 文件恢复数据，将合并到现有数据库</p><AppButton variant="secondary" size="sm" @click="importAll" style="margin-top:8px">导入数据</AppButton></AppCard><AppCard padding="md"><h4>浏览器存储用量</h4><div v-if="storageInfo"><div class="storage-bar-track"><div class="storage-bar-fill" :style="{transform:'scaleX('+(storageInfo.pct/100)+')'}"></div></div><p class="text-sm" style="margin:6px 0 0">{{ fmtBytes(storageInfo.used) }} / {{ fmtBytes(storageInfo.quota) }}（{{ storageInfo.pct.toFixed(1) }}%）</p><p class="text-xs text-muted">IndexedDB + localStorage</p></div><p v-else class="text-muted text-sm">获取中…</p></AppCard><AppCard padding="md" class="data-danger"><h4>清除所有数据</h4><p class="text-muted text-sm">永久删除所有存档、角色、记忆和设置。不可撤销。</p><AppButton variant="danger" size="sm" @click="showClearConfirm=true" style="margin-top:8px">清除所有数据</AppButton></AppCard></div>
-          <AppModal :open="showClearConfirm" title="确认清除" size="sm" @update:open="showClearConfirm=$event"><p>确定要删除所有数据吗？此操作<strong style="color:var(--theme-error)">不可撤销</strong>。</p><template #footer><AppButton variant="ghost" size="sm" @click="showClearConfirm=false">取消</AppButton><AppButton variant="danger" size="sm" @click="clearAll">确认清除</AppButton></template></AppModal>
+          <div class="data-actions"><AppCard padding="md"><h4>导出数据</h4><p class="text-muted text-sm">将所有存档、角色、记忆、剧情导出为 JSON 文件</p><AppButton variant="secondary" size="sm" @click="exportAll" style="margin-top:8px">导出全部数据</AppButton></AppCard><AppCard padding="md"><h4>导入数据</h4><p class="text-muted text-sm">从 JSON 文件恢复数据，将合并到现有数据库</p><AppButton variant="secondary" size="sm" @click="importAll" style="margin-top:8px">导入数据</AppButton></AppCard><AppCard padding="md"><h4>浏览器存储用量</h4><div v-if="storageInfo"><div class="storage-bar-track"><div class="storage-bar-fill" :style="{transform:'scaleX('+(storageInfo.pct/100)+')'}"></div></div><p class="text-sm" style="margin:6px 0 0">{{ fmtBytes(storageInfo.used) }} / {{ fmtBytes(storageInfo.quota) }}（{{ storageInfo.pct.toFixed(1) }}%）</p><p class="text-xs text-muted">IndexedDB + localStorage</p></div><p v-else class="text-muted text-sm">获取中…</p></AppCard><AppCard padding="md" class="data-danger"><h4>清除所有数据</h4><p class="text-muted text-sm">永久删除所有存档、角色、记忆、设置，以及上传的音频曲库与播放列表。不可撤销。</p><AppButton variant="danger" size="sm" @click="showClearConfirm=true" style="margin-top:8px">清除所有数据</AppButton></AppCard></div>
+          <AppModal :open="showClearConfirm" title="确认清除" size="sm" @update:open="showClearConfirm=$event"><p>确定要删除所有数据吗？此操作<strong style="color:var(--theme-error)">不可撤销</strong>。</p><p class="text-muted text-sm">包括存档、角色、记忆、剧情，以及<strong>上传的音频曲库与播放列表</strong>（音频不包含在存档导出中，删除后无法通过导入恢复）。</p><template #footer><AppButton variant="ghost" size="sm" @click="showClearConfirm=false">取消</AppButton><AppButton variant="danger" size="sm" @click="clearAll">确认清除</AppButton></template></AppModal>
         </section>
 
         <!-- ========== 关于 ========== -->

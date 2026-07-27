@@ -30,6 +30,7 @@ import type {
   ItemGenRequestMarker,
   ItemUpdateRequestMarker,
   CraftGenRequestMarker,
+  PlayAudioMarker,
   MarkerScanResult,
 } from './types';
 
@@ -46,6 +47,7 @@ export const MARKER_TAGS: readonly MarkerType[] = [
   'item_gen_request',
   'item_update_request',
   'craft_gen_request',
+  'play_audio',
 ] as const;
 
 /** 标记标签名 Set (O(1) 成员检查) */
@@ -326,6 +328,59 @@ export function scanCraftGenRequests(text: string): CraftGenRequestMarker[] {
  * 非标记 XML 标签 (如 <maintext>, <thinking>) 保留在 cleanText 中。
  * 畸形 XML (缺闭合标签) 被忽略，不崩溃。
  */
+/**
+ * 扫描文本中的 <play_audio> 标记。
+ *
+ * 与其它标记不同，这里**自闭合与成对写法都要认**: 配乐标记没有必须包裹的正文，
+ * AI 十有八九会写成 `<play_audio situation="战斗"/>`。只认成对写法的话，自闭合
+ * 的那些既不会触发播放、也不会被 stripMarkers 清掉——直接漏进正文给玩家看见。
+ */
+export function scanPlayAudioMarkers(text: string): PlayAudioMarker[] {
+  const markers: PlayAudioMarker[] = [];
+  // 三种写法都认，按此顺序尝试:
+  //   ① 自闭合 `<play_audio .../>`
+  //   ② 成对   `<play_audio ...>body</play_audio>`
+  //   ③ 只有开标签、没写闭合 —— AI 漏写闭合标签是常事，不认它就等于
+  //      「既不换歌、也剥不掉」，那行尖括号会直接漏到玩家眼前
+  // 属性段用 `"…"|'…'|[^>"']` 逐段吞，于是属性值里的 `>` 不会被当成标签结束；
+  // `i` 标志兼容 AI 写成大写的情况。
+  const regex =
+    /<play_audio((?:"[^"]*"|'[^']*'|[^>"'])*?)\/>|<play_audio((?:"[^"]*"|'[^']*'|[^>"'])*?)>([\s\S]*?)<\/play_audio\s*>|<play_audio((?:"[^"]*"|'[^']*'|[^>"'])*?)>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const attrs = parseTagAttributes(match[1] ?? match[2] ?? match[4] ?? '');
+    markers.push({
+      type: 'play_audio',
+      rawContent: match[0],
+      position: match.index,
+      situation: attrs['situation'],
+      mood: attrs['mood'],
+      character: attrs['character'],
+      variant: attrs['variant'],
+      action: attrs['action'],
+      bodyText: match[3]?.trim() || undefined,
+    });
+  }
+  return markers;
+}
+
+/**
+ * 只剥 `<play_audio>` 标记，其余标记原样保留。
+ *
+ * 为什么不用 `stripMarkers`: 正文渲染路径目前**刻意**保留 craft/combat 等标记
+ * （美化规则与下游链路都还在读它们），一把全剥会改掉这些既有行为。配乐标记
+ * 没有任何渲染意义，漏出去就是玩家眼前的一行尖括号，所以单独剥它。
+ */
+export function stripPlayAudioMarkers(text: string): string {
+  const markers = scanPlayAudioMarkers(text);
+  let out = text;
+  for (let i = markers.length - 1; i >= 0; i -= 1) {
+    const m = markers[i];
+    out = out.slice(0, m.position) + out.slice(m.position + m.rawContent.length);
+  }
+  return out;
+}
+
 export function scanMarkers(text: string): MarkerScanResult {
   const craftMarkers = scanCraftRequests(text);
   const combatMarkers = scanCombatTriggers(text);
@@ -336,6 +391,7 @@ export function scanMarkers(text: string): MarkerScanResult {
   const itemGenMarkers = scanItemGenRequests(text);
   const itemUpdateMarkers = scanItemUpdateRequests(text);
   const craftGenMarkers = scanCraftGenRequests(text);
+  const playAudioMarkers = scanPlayAudioMarkers(text);
 
   // 合并并按位置排序
   const allMarkers: DetectedMarker[] = [
@@ -347,6 +403,7 @@ export function scanMarkers(text: string): MarkerScanResult {
     ...itemGenMarkers,
     ...itemUpdateMarkers,
     ...craftGenMarkers,
+    ...playAudioMarkers,
   ].sort((a, b) => a.position - b.position);
 
   // 生成 cleanText: 按位置倒序替换 (从后往前避免偏移)

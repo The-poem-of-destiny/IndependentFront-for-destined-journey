@@ -25,15 +25,18 @@ import type {
   CraftGenRequestMarker,
   CharGenRequestMarker,
   ItemGenRequestMarker,
+  PlayAudioMarker,
   MemoryRecord,
 } from '@engine/types'
 import { AgentClient } from '@engine/agent-client'
 import type { StreamCallbacks } from '@engine/agent-client'
 import { createStateManager } from '@engine/state-manager'
+import { stripPlayAudioMarkers } from '@engine/marker-protocol'
 import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks'
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader'
 import type { useGameStore } from '../stores/game-store'
 import type { useSettingsStore } from '../stores/settings-store'
+import { useAudioStore } from '../stores/audio-store'
 
 export interface GamePipelineDeps {
   gameStore: ReturnType<typeof useGameStore>
@@ -87,6 +90,16 @@ export class GamePipeline {
   private currentContext: AgentContext | null = null
   /** 步5: 剧情异步落库任务（preCheckPlot/postCheckPlot），run() 末尾统一 await 避免 refreshFromDb 读到中间态 */
   private pendingPlotTasks: Promise<void>[] = []
+  /**
+   * 🎵 本轮待播的配乐标记。Stage 1 只暂存，等状态落库+回读之后才真正选曲 ——
+   * 理由见 run() 末尾。一轮多个标记时后者覆盖前者（以 AI 最后的判断为准）。
+   */
+  private pendingAudioMarker: PlayAudioMarker | null = null
+  /**
+   * 上次据以选曲的地点。用来判断"地点变没变" —— 没变就不重选，
+   * 同一地点里来回走动不该反复触发。空串表示还没选过。
+   */
+  private lastAudioLocation = ''
 
   constructor(deps: GamePipelineDeps) {
     this.game = deps.gameStore
@@ -147,6 +160,7 @@ export class GamePipeline {
       const context = this.buildContext(userInput)
       this.currentContext = context
       this.pendingPlotTasks = []
+      this.pendingAudioMarker = null
       await this.loadPlotData(context)
 
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
@@ -206,8 +220,92 @@ export class GamePipeline {
       // 这里统一回读，让 Pinia 内存态（characters/metadata/saveProfile）与 DB 对齐，
       // DebugPanel 导出和右侧状态栏才能拿到最新数据。abort/报错时部分 patch 可能已提交，同样需要回读。
       await this.game.refreshFromDb()
+      // 🎵 配乐放在**回读之后**才触发。
+      //
+      // story 在 Stage 1 就写下了标记，但那时 player.location / character.present
+      // 还是上一轮的值 —— 它们要等 Stage 2 的 request_dispatcher / vars_update 落库、
+      // 再经这里的 refreshFromDb 才更新。而**转场恰恰是唯一真正该换歌的时刻**：
+      // 在 Stage 1 播，正文已经进了熔火裂谷，BGM 还在放上一座城的曲子。
+      this.flushPendingAudio()
       this.game.isGenerating = false
       this.abortController = null
+    }
+  }
+
+  /**
+   * 🎵 本轮配乐的唯一出口。两条来源，**AI 标记优先**:
+   *
+   * 1. story 写了 `<play_audio>` —— 它知道这一刻的戏剧意图（要打起来了 / 气氛转冷），
+   *    比"地点变了"这个纯事实更准；
+   * 2. 否则看地点有没有变 —— 这是场景配乐的主路径，绝大多数换歌都由它触发。
+   *
+   * 地点**没变就不动音乐**：同一个地点里来回走动、翻面板不该反复重选曲子。
+   * （即便重选出同一首，store 那层的"同曲不重播"也会挡住，这里只是不做无用功。）
+   *
+   * 不 await —— 配乐是旁路氛围，出问题不该影响这一轮。管线被 abort / 报错时同样
+   * 会走到这里：正文可能已经产出，该换的歌照换。
+   */
+  private flushPendingAudio(): void {
+    const marker = this.pendingAudioMarker
+    this.pendingAudioMarker = null
+
+    // 用户关掉了场景配乐 → 两条来源都不生效，音乐完全交回给用户
+    if (this.settings.settings.audioSceneAutoPlay === false) {
+      this.lastAudioLocation = this.game.player?.location ?? ''
+      return
+    }
+
+    if (marker) {
+      this.lastAudioLocation = this.game.player?.location ?? ''
+      void this.handlePlayAudio(marker).catch((err) => {
+        console.warn('[GamePipeline] 场景配乐失败（不阻塞本轮）:', err)
+      })
+      return
+    }
+
+    const location = this.game.player?.location ?? ''
+    if (!location || location === this.lastAudioLocation) return
+    this.lastAudioLocation = location
+    void this.playForLocation(location).catch((err) => {
+      console.warn('[GamePipeline] 场景配乐失败（不阻塞本轮）:', err)
+    })
+  }
+
+  /**
+   * 按当前地点选曲。在场角色一并带上 —— 有专属主题曲的角色在场时，
+   * 打分器会在"地点已经泛到势力一级"时让人物主题接管（见说明书第八节的权重表）。
+   */
+  private async playForLocation(location: string): Promise<void> {
+    const audio = useAudioStore()
+    await audio.playByScene({
+      location,
+      characters: this.presentCharacterNames(),
+    })
+  }
+
+  /** 在场 NPC 的名字（player 不算） */
+  private presentCharacterNames(): string[] {
+    return this.game.characters
+      .filter((c) => c.type !== 'player' && c.present === true)
+      .map((c) => c.name)
+  }
+
+  /**
+   * 🎵 进场配乐。装好存档、进入游戏页时调一次 —— 「进入某个地点就该响起它的曲子」
+   * 对读档回来的第一眼同样成立，不该非要等玩家先说一句话。
+   *
+   * 同时把 lastAudioLocation 定下来，于是紧接着的第一轮不会为同一个地点再选一次。
+   * 曲库装载（init）由调用方负责，这里只管选曲。
+   */
+  async primeSceneAudio(): Promise<void> {
+    if (this.settings.settings.audioSceneAutoPlay === false) return
+    const location = this.game.player?.location ?? ''
+    if (!location || location === this.lastAudioLocation) return
+    this.lastAudioLocation = location
+    try {
+      await this.playForLocation(location)
+    } catch (err) {
+      console.warn('[GamePipeline] 进场配乐失败（不阻塞）:', err)
     }
   }
 
@@ -547,8 +645,55 @@ export class GamePipeline {
     } : undefined
   }
 
+  /**
+   * 🎵 <play_audio> → 场景选曲。
+   *
+   * **地点与在场角色不从标记读，从游戏状态读** —— 它们已经是状态里的事实
+   * （`player.location` / `character.present`），让 AI 再写一遍只会多一处漂移源。
+   * 标记只提供 AI 独有的判断：此刻是什么情绪、什么情境。
+   *
+   * 整条路径不抛错：配乐是旁路氛围，音频出问题不该影响这一轮叙事。
+   */
+  private async handlePlayAudio(marker: PlayAudioMarker): Promise<void> {
+    const audio = useAudioStore()
+
+    if ((marker.action ?? '').trim().toLowerCase() === 'stop') {
+      audio.stop()
+      return
+    }
+
+    // 逗号 / 顿号 / 空白分隔的自由词
+    const words = (raw?: string): string[] =>
+      (raw ?? '')
+        .split(/[,，、;；\s]+/)
+        .map((w) => w.trim())
+        .filter(Boolean)
+
+    // 正文里的自由词不知道属于哪一维，情绪与情境都试一遍（与"无类型标签"同理）
+    const body = words(marker.bodyText)
+    const situations = [...words(marker.situation), ...body]
+    const moods = [...words(marker.mood), ...body]
+
+    const characters = marker.character ? words(marker.character) : this.presentCharacterNames()
+
+    const variant = marker.variant?.trim().toUpperCase()
+
+    await audio.playByScene({
+      location: this.game.player?.location || undefined,
+      characters,
+      moods,
+      situations,
+      variant: variant === 'A' || variant === 'B' ? variant : undefined,
+    })
+  }
+
   private buildEventHandlers(): OrchestratorEvents {
     return {
+      // 🎵 配乐：只暂存，**不在 Stage 1 就播** —— 见 run() 末尾的说明
+      onPlayAudio: (marker) => {
+        this.pendingAudioMarker = marker
+      },
+
       // === Stage 回调 ===
       onAgentStart: (agentId, config) => {
         console.log(`[GamePipeline] Agent 开始: ${agentId}`)
@@ -640,7 +785,8 @@ export class GamePipeline {
         if (result.rawResponse) {
           const { content, options } = extractStoryOptions(result.rawResponse)
           this.game.setPendingOptions(options)
-          this.game.addMessage(content, 'assistant')
+          // 配乐标记没有渲染意义，漏出去就是玩家眼前的一行尖括号
+          this.game.addMessage(stripPlayAudioMarkers(content).trim(), 'assistant')
         }
         break
       }

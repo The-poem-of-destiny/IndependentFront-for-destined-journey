@@ -11,6 +11,7 @@ import type {
   Lorebook, ChatPreset, AppSettings,
   MemoryRecord, PlotEvent, CharacterState, Snapshot, SaveSlot, ApiEndpoint,
   PlotOutline, SaveProfile, ChatMessage,
+  AudioTrack, AudioBlobRecord, AudioPlaylist, AudioHandleRecord,
 } from './types';
 import type { CreatePreset } from '../ui/stores/create-store';
 import { DEFAULT_SETTINGS } from './types';
@@ -25,7 +26,7 @@ export interface CreatePresetRecord {
 }
 
 const DB_NAME = 'SillyTavernWebDB';
-const DB_VERSION = 10;
+const DB_VERSION = 12;
 
 class AppDatabase extends Dexie {
   // v1-v3 tables (chats 已于 v9 删除)
@@ -52,6 +53,14 @@ class AppDatabase extends Dexie {
 
   // v8 new table (Phase 10h)
   messages!: Table<ChatMessage>;
+
+  // v11 new tables (Audio System) — 元数据 / 字节 分表存储（设计 §3.2）
+  audioTracks!: Table<AudioTrack>;
+  audioBlobs!: Table<AudioBlobRecord>;
+  audioPlaylists!: Table<AudioPlaylist>;
+
+  // v12 new table (Audio 本地文件夹) — File System Access 目录句柄（结构化克隆存储）
+  audioHandles!: Table<AudioHandleRecord>;
 
   constructor() {
     super(DB_NAME);
@@ -253,6 +262,48 @@ class AppDatabase extends Dexie {
     }).upgrade(async tx => {
       // 旧快照开发数据直接清弃（结构不兼容: index/timestamp/寄生 variables → reason/turn/整份深拷贝）
       await tx.table('snapshots').clear();
+    });
+
+    // v11: 音频子系统 — 新增 3 表（纯增量，无 upgrade 回调）
+    this.version(11).stores({
+      lorebooks: 'id, name, updatedAt',
+      presets: 'id, name, updatedAt',
+      settings: 'key',
+      memories: 'id, saveId, createdAt, realTimestamp',
+      plotEvents: 'id, saveId, parentId, status, updatedAt',
+      characters: 'id, saveId, type',
+      snapshots: 'id, saveId, createdAt',
+      saves: 'id, slot, updatedAt',
+      apiEndpoints: 'id, name',
+      plotOutlines: 'id, saveId, updatedAt',
+      saveProfiles: 'saveId, updatedAt',
+      createPresets: 'id, name, updatedAt',
+      messages: 'id, saveId, [saveId+turn]',
+      audioTracks: 'id, name, kind, *tags, updatedAt',
+      audioBlobs: 'id',
+      audioPlaylists: 'id, name, updatedAt',
+    });
+
+    // v12: 音频本地文件夹 — 新增 audioHandles 表（纯增量，无 upgrade 回调）
+    // 注意: Dexie 要求每版重述完整 schema，漏写任一表即为删表（静默毁数据）。
+    this.version(12).stores({
+      lorebooks: 'id, name, updatedAt',
+      presets: 'id, name, updatedAt',
+      settings: 'key',
+      memories: 'id, saveId, createdAt, realTimestamp',
+      plotEvents: 'id, saveId, parentId, status, updatedAt',
+      characters: 'id, saveId, type',
+      snapshots: 'id, saveId, createdAt',
+      saves: 'id, slot, updatedAt',
+      apiEndpoints: 'id, name',
+      plotOutlines: 'id, saveId, updatedAt',
+      saveProfiles: 'saveId, updatedAt',
+      createPresets: 'id, name, updatedAt',
+      messages: 'id, saveId, [saveId+turn]',
+      audioTracks: 'id, name, kind, *tags, updatedAt',
+      audioBlobs: 'id',
+      audioPlaylists: 'id, name, updatedAt',
+      audioHandles: 'id',
     });
   }
 }
@@ -836,4 +887,103 @@ export async function deleteMessagesAfterTurn(saveId: string, turn: number): Pro
     .where('[saveId+turn]')
     .between([saveId, turn], [saveId, Dexie.maxKey], false, true)
     .delete();
+}
+
+// ========== Audio (v11) ==========
+// 音频库全局共享，不随存档隔离（设计 §3.3）；音频表不进 FullBackup（设计 §12）。
+
+/** 获取全部音轨元数据（不含音频字节 — 字节在 audioBlobs 表，仅播放时读取） */
+export async function getAudioTracks(): Promise<AudioTrack[]> {
+  const tracks = await getDatabase().audioTracks.toArray();
+  return tracks;
+}
+
+export async function getAudioTrack(id: string): Promise<AudioTrack | undefined> {
+  const track = await getDatabase().audioTracks.get(id);
+  return track;
+}
+
+/**
+ * 保存音轨；传入 blob 时同时写入音频字节。
+ *
+ * 偏离本文件"单行 CRUD"惯例改用显式事务：元数据与字节分表存储，
+ * 两写必须原子 —— 半成功会留下有元数据却无字节（播放即哑）或孤儿 blob 的记录。
+ */
+export async function saveAudioTrack(track: AudioTrack, blob?: Blob): Promise<string> {
+  const db = getDatabase();
+  track.updatedAt = Date.now();
+  if (blob) {
+    await db.transaction('rw', db.audioTracks, db.audioBlobs, async () => {
+      await db.audioTracks.put(track);
+      await db.audioBlobs.put({ id: track.id, blob });
+    });
+  } else {
+    await db.audioTracks.put(track);
+  }
+  return track.id;
+}
+
+/**
+ * 删除音轨：元数据 + 孤儿字节一并清理，并从所有播放列表的 trackIds 中剔除该 id
+ * （设计 §2 "dangling ids pruned on track delete"）。三表同事务。
+ */
+export async function deleteAudioTrack(id: string): Promise<void> {
+  const db = getDatabase();
+  await db.transaction('rw', db.audioTracks, db.audioBlobs, db.audioPlaylists, async () => {
+    await db.audioTracks.delete(id);
+    await db.audioBlobs.delete(id);
+    const lists = await db.audioPlaylists.toArray();
+    const pruned = lists
+      .filter(l => l.trackIds.includes(id))
+      .map(l => ({ ...l, trackIds: l.trackIds.filter(t => t !== id), updatedAt: Date.now() }));
+    if (pruned.length > 0) await db.audioPlaylists.bulkPut(pruned);
+  });
+}
+
+/** 读取音频字节 — 仅播放时调用 */
+export async function getAudioBlob(id: string): Promise<Blob | undefined> {
+  const record = await getDatabase().audioBlobs.get(id);
+  return record?.blob;
+}
+
+export async function getAudioPlaylists(): Promise<AudioPlaylist[]> {
+  const lists = await getDatabase().audioPlaylists.toArray();
+  return lists;
+}
+
+export async function getAudioPlaylist(id: string): Promise<AudioPlaylist | undefined> {
+  const list = await getDatabase().audioPlaylists.get(id);
+  return list;
+}
+
+export async function saveAudioPlaylist(list: AudioPlaylist): Promise<string> {
+  list.updatedAt = Date.now();
+  await getDatabase().audioPlaylists.put(list);
+  return list.id;
+}
+
+/** 删除播放列表 — 不级联删除音轨（列表只是音轨的有序引用） */
+export async function deleteAudioPlaylist(id: string): Promise<void> {
+  await getDatabase().audioPlaylists.delete(id);
+}
+
+// ========== Audio 本地文件夹句柄 (v12) ==========
+// 目录句柄只对本机有意义，因此同样不进 FullBackup（附录见 addendum "Storage"）。
+
+/** 读取已持久化的目录句柄（当前仅 'library-root' 一行） */
+export async function getAudioHandle(id: string): Promise<AudioHandleRecord | undefined> {
+  const record = await getDatabase().audioHandles.get(id);
+  return record;
+}
+
+/** 保存目录句柄；未带 addedAt 时补当前时间戳 */
+export async function saveAudioHandle(record: AudioHandleRecord): Promise<string> {
+  if (!record.addedAt) record.addedAt = Date.now();
+  await getDatabase().audioHandles.put(record);
+  return record.id;
+}
+
+/** 取消关联音乐文件夹 — 只删句柄，音轨目录保留（missing 由重扫标记） */
+export async function deleteAudioHandle(id: string): Promise<void> {
+  await getDatabase().audioHandles.delete(id);
 }
