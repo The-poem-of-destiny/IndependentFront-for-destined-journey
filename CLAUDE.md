@@ -223,15 +223,18 @@ src/sillytavern/                    ← 核心引擎（30+ 模块，含 Phase 1-
   │   ├── v4 新增: CharacterState / MemoryRecord / PlotEvent / Snapshot / SaveSlot
   │   │           ApiEndpoint / AgentConfig / AgentDefinition / Pipeline / AgentContext
   │   │           AgentResult / OrchestratorRun / MapTopology / VarsPatch(扩展)
-  │   ├── Audio 新增: AudioSourceKind / AudioTrackKind / AudioTrack / AudioBlobRecord
+  │   ├── Audio 新增: AudioSourceKind ('blob'|'builtin'|'file') / AudioTrackKind / AudioTrack
+  │   │           (+relativePath / missing) / AudioBlobRecord / AudioHandleRecord
   │   │           AudioPlaylist / AudioRepeatMode / AudioPlaybackState
   │   └── 辅助: createDefaultCharacterState() / resolvePlotTree()
   │
-  ├── database.ts                   ← Dexie/IndexedDB v11
+  ├── database.ts                   ← Dexie/IndexedDB v12
   │   ├── v1-v3: lorebooks / presets / settings / chats
   │   ├── v4 新增: memories / plotEvents / characters / snapshots / saves / apiEndpoints
-  │   └── v11 新增: audioTracks (元数据) / audioBlobs (字节) / audioPlaylists
-  │       — 全局共享，不随存档隔离；刻意排除在 FullBackup 之外 (v1 不做导出/导入)
+  │   ├── v11 新增: audioTracks (元数据) / audioBlobs (字节) / audioPlaylists
+  │   └── v12 新增: audioHandles (持久化的 FileSystemDirectoryHandle，id='library-root')
+  │       — 全部音频表全局共享，不随存档隔离；刻意排除在 FullBackup 之外
+  │       (音频 v1 不做导出/导入；目录句柄仅对本机有效，跨机器导出无意义)
   │
   ├── agent-client.ts               ← [Phase 3] API 客户端
   │   ├── AgentClient 类: 每 Agent 独立 userId (fp|saveId|agentId)
@@ -336,7 +339,8 @@ src/sillytavern/                    ← 核心引擎（30+ 模块，含 Phase 1-
   ├── audio-manager.ts               ← [Audio] AudioManager: 音轨库注册表 + 主音量 + 手势解锁
   │   ├── setTracks/setPlaylists: 库由 Store 从 DB 喂入，Manager 永不碰 Dexie
   │   ├── playByTag(): 🔮 AI 播放钩子 (已实现已测，暂无生产调用方)
-  │   └── subscribe(): 仅广播离散状态变化；播放进度按需采样 (positionSec)，从不广播
+  │   ├── subscribe(): 仅广播离散状态变化；播放进度按需采样 (positionSec)，从不广播
+  │   └── loadBlob 注入缝: 字节来源全归 Store；本地音乐文件夹后端整体接入时引擎零改动
   │
   ├── audio-fakes.ts                 ← [Audio] 共享测试替身 (伪 AudioContext / AudioElement)
   │
@@ -480,7 +484,7 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC
 | 10i | 输出美化规则库: beautifier-rules.json 预设规则(22条) + 世界书/角色 auto-enable 绑定 + BeautifierSection 三段式 UI + ChatFlow 合并规则渲染 + 远程 regex.json 导入脚本 | ✅ |
 | 10j | 剧情系统接线（9 断点收口）... 三 Agent systemPrompt 重写（含雷点注入+修改模式）。计划: docs/planning/2026-07-19-plot-system-plan.md；大纲仅捏人页生成（main+side），游戏内零生成，演化归 post_check.outlineChanges；plotYearlyGeneration 退役 | ✅ 待真机验证 |
 | 10k | 快照面板 + 右键回退重发: 左侧 SideToolbar「快照」按钮(SnapshotPanel 历史快照恢复) + 最新 AI 消息右键「回退本轮/复制」(回退=restoreSnapshot 上一轮+回填本轮输入→重发即重生成/编辑重发) + Snapshot 阶梯保留(trimSnapshots tiered: 最近5全留+旧层4/8/10稀疏, 非turn档受保护) + restoreSnapshot 增强(plotEvents 捕获+覆写/memories 清理/totalTurns 对齐) + 设置「快照保留模式」可配置(pipeline 搭桥同步 AppSettings)。计划: docs/planning/2026-07-23-snapshot-rollback-plan.md | ✅ 待真机验证 |
-| Audio | 音频系统: audio-channels.ts (MusicChannel 音序器 + SfxChannel 声池, 61 tests) + audio-manager.ts (音轨库注册表/主音量/手势解锁/playByTag AI 钩子, 51 tests) + audio-fakes.ts 测试替身 + Dexie v11 三表 (audioTracks/audioBlobs/audioPlaylists, 全局非存档级, 排除于 FullBackup) + types.ts 7 类型 + audio-singleton.ts/audio-store.ts 桥接 + AudioSection.vue/MiniPlayer.vue。v1 不做远程 URL 音源/解码缓存/真交叉淡入；**SFX 基建完备但刻意无触发方**(playSfx/playByTag 无生产调用)；`public/audio/manifest.json` 内置库刻意空载(授权未清)。设计: docs/planning/2026-07-26-audio-system-design.md | ✅ |
+| Audio | 音频系统: audio-channels.ts (MusicChannel 音序器 + SfxChannel 声池, 61 tests) + audio-manager.ts (音轨库注册表/主音量/手势解锁/playByTag AI 钩子, 51 tests) + audio-fakes.ts 测试替身 + Dexie 三表 (audioTracks/audioBlobs/audioPlaylists, 全局非存档级, 排除于 FullBackup) + types.ts 7 类型 + audio-singleton.ts/audio-store.ts 桥接 + AudioSection.vue/MiniPlayer.vue。v1 不做远程 URL 音源/解码缓存/真交叉淡入；**SFX 基建完备但刻意无触发方**(playSfx/playByTag 无生产调用)；`public/audio/manifest.json` 内置库刻意空载(授权未清)。设计: docs/planning/2026-07-26-audio-system-design.md<br>**本地音乐文件夹增补 (2026-07-27)**: audio-folder.ts (File System Access 唯一接触点, 27 tests) + Dexie v12 audioHandles 表 (持久化目录句柄, id='library-root') + AudioSourceKind 增 `'file'` + AudioTrack 增 relativePath/missing + store 文件夹状态与扫描对账 + audio-singleton setBlobResolver + AudioSection 文件夹条。三后端并存 (file 磁盘 / blob IndexedDB 兜底 / builtin 内置)；权限不跨浏览器重启需每会话一次手势授权；扫描永不删行。**引擎零改动**——整个新存储后端由既有 loadBlob 注入缝吸收。增补: docs/planning/2026-07-27-audio-local-files-addendum.md | ✅ |
 | 真机迭代 | debug loop 5 轮修复: 物品/角色零落库根因链（AI 输出 JSON 形状漂移 → 解析器 XML+JSON 双兜底）/ 侧链 systemPrompt+世界书注入根治（此前恒 stub 裸奔）/ maxTokens 2048 兜底截断 / 创角初始装备改走 item_gen 链(不直接落库,交 item_gen 生成 stats)+自定义装备战斗数值输入+自定义物品编辑管理 / characterName 属性传递 / 嵌套标签剥离 / activePresetId 运行时尊重 / 世界书 ST 宏噪音清理。ST 预设 setvar/getvar 配对机制排查经验见 debug 记录。story 正文救援兜底(rescueStoryOutput: 正文吞思维链 raw 空→从 reasoning 抠 / 思维链泄漏正文→截 maintext 前; 空门控+取最后 maintext+story 守卫) | 🔄 持续验证中 |
 
 ## 前端架构 (Phase 7, 2026-06-17)
@@ -497,7 +501,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │
 ├── lib/                              ← 前端↔引擎桥接层
 │   ├── game-pipeline.ts              ← GamePipeline: AgentConfig组装/上下文构建/编排器/回调处理
-│   ├── audio-singleton.ts            ← AudioManager 应用级单例 (懒创建；无 Web Audio 时降级为静默 stub)
+│   ├── audio-singleton.ts            ← AudioManager 应用级单例 (懒创建；无 Web Audio 时降级为静默 stub + setBlobResolver 可换字节解析器)
+│   ├── audio-folder.ts               ← 本地音乐文件夹 (File System Access 唯一接触点: 选择/持久化/权限/扫描/解析，仅 Chromium)
 │   ├── quality-colors.ts             ← 品质色映射
 │   ├── test-fixtures.ts              ← 测试数据注入
 │   └── toSystemEvent.ts              ← 系统事件类型转换
@@ -513,7 +518,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │   ├── settings-store.ts            ← 设置持久化 (通用 KV, deep watch → localStorage, 扩展零改动)
 │   ├── create-store.ts              ← 捏人页 (属性联动 computed: tier/tierBonus/BP/AP)
 │   ├── game-store.ts                ← 游戏状态 (存档/角色/对话/战斗/FP)
-│   └── audio-store.ts               ← 音频状态 (Pinia 薄壳，桥接 AudioManager 单例 + 音轨库 CRUD)
+│   └── audio-store.ts               ← 音频状态 (Pinia 薄壳，桥接 AudioManager 单例 + 音轨库 CRUD + 音乐文件夹状态/扫描对账/loadBlob 三后端分流)
 │
 ├── components/
 │   ├── shared/                      ← 15 个通用组件
@@ -529,7 +534,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │   │   └── form/ (5 files)          ← Input/Select/Stepper/Cascader/KeyValue
 │   ├── home/HomePage.vue            ← 游戏标题画面 (40vh 标题 + 4 按钮 + 风味文字)
 │   ├── settings/SettingsPage.vue    ← 设置页 (左侧导航 + 10 分区 + 预设系统)
-│   ├── settings/AudioSection.vue    ← 音频分区 (混音台 / 播放列表 / 音轨库三段式)
+│   ├── settings/AudioSection.vue    ← 音频分区 (混音台 / 播放列表 / 音轨库三段式 + 音乐文件夹条)
 │   ├── create/CreatePage.vue        ← [占位] 捏人页
 │   ├── game/
 │   │   ├── GamePage.vue             ← 游戏页主布局 (三栏 + 6 弹窗)
@@ -565,7 +570,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 | 🎨 外观主题 | 10 主题预览网格、字体风格(衬线/无衬线/混合)、字体大小(14/16/18/20px) |
 | 💬 消息显示 | 系统通知全局开关 + 7 种事件类型独立过滤 |
 | ✨ 输出美化 | 预设规则库 beautifier-rules.json (22条: 2内置+20远程) + 世界书/角色 auto-enable 绑定 + 三段式UI(自动管理/已启用/可用规则库折叠)。用户规则 CRUD + 实时预览 + 导入/导出 JSON |
-| 🎵 音频 | 三段式: ①混音台(主/音乐/音效 音量+静音 + 播放控制/进度/循环/随机) ②播放列表(仅音乐音轨，左选单右曲目排序) ③音轨库(上传/搜索/按类型与标签过滤/试听/编辑/删除 + 占用配额显示)。音频库全局共享不随存档；**不参与存档导出/导入**，但「清除全部数据」会一并销毁 |
+| 🎵 音频 | 三段式: ①混音台(主/音乐/音效 音量+静音 + 播放控制/进度/循环/随机) ②播放列表(仅音乐音轨，左选单右曲目排序) ③音轨库(音乐文件夹条 + 上传/搜索/按类型与标签过滤/试听/编辑/删除 + 占用配额显示)。音乐文件夹: 选择目录一次→文件留在磁盘只存目录，「授权访问」每次开浏览器点一次，「重新扫描」增量对账(文件消失只标 `文件已移除` 不删行)；仅 Chromium 支持，其他浏览器走上传入 IndexedDB 的兜底路径。音频库全局共享不随存档；**不参与存档导出/导入**，但「清除全部数据」会一并销毁 |
 | 💾 存档数据 | 导出/导入/清除 (含确认弹窗) |
 | ℹ 关于 | 引擎版本/技术栈/统计 |
 

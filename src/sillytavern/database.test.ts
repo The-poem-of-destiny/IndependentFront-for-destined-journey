@@ -64,6 +64,10 @@ import {
   getAudioPlaylist,
   saveAudioPlaylist,
   deleteAudioPlaylist,
+  // Audio 本地文件夹句柄 (v12)
+  getAudioHandle,
+  saveAudioHandle,
+  deleteAudioHandle,
 } from './database';
 import type {
   ChatMessage,
@@ -77,6 +81,7 @@ import type {
   AppSettings,
   AudioTrack,
   AudioPlaylist,
+  AudioHandleRecord,
 } from './types';
 import { createDefaultCharacterState } from './types';
 import { createDefaultSaveProfile, saveSaveProfile, savePlotOutline } from './database';
@@ -196,6 +201,19 @@ function makeAudioPlaylist(overrides: Partial<AudioPlaylist> = {}): AudioPlaylis
     trackIds: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    ...overrides,
+  };
+}
+
+/**
+ * 目录句柄夹具：fake-indexeddb 走结构化克隆，普通对象即可往返。
+ * 不要尝试构造真实 FileSystemDirectoryHandle —— node 环境下不存在该 API。
+ */
+function makeAudioHandle(overrides: Partial<AudioHandleRecord> = {}): AudioHandleRecord {
+  return {
+    id: 'library-root',
+    handle: { kind: 'directory', name: '我的音乐' } as unknown as FileSystemDirectoryHandle,
+    addedAt: Date.now(),
     ...overrides,
   };
 }
@@ -733,7 +751,7 @@ describe('exportAllData / importAllData', () => {
     await saveApiEndpoint(makeApiEndpoint({ id: 'exp_api' }));
 
     const backup = await exportAllData();
-    expect(backup.version).toBe(11);
+    expect(backup.version).toBe(12);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -1138,5 +1156,65 @@ describe('Audio CRUD (v11)', () => {
     await deleteAudioPlaylist(list.id);
     all = await getAudioPlaylists();
     expect(all).toHaveLength(0);
+  });
+
+  // ---------- 本地文件夹 (v12) ----------
+
+  it('source=file 的音轨应无 blob 往返（文件夹路径不存字节）', async () => {
+    const track = makeAudioTrack({
+      name: '外部曲目',
+      source: 'file',
+      relativePath: 'bgm/序曲.mp3',
+      missing: false,
+      mimeType: undefined,
+      size: undefined,
+    });
+    await saveAudioTrack(track);
+
+    const loaded = await getAudioTrack(track.id);
+    expect(loaded).toBeDefined();
+    expect(loaded!.source).toBe('file');
+    expect(loaded!.relativePath).toBe('bgm/序曲.mp3');
+    expect(loaded!.missing).toBe(false);
+    // 文件夹路径不存字节
+    expect(await getAudioBlob(track.id)).toBeUndefined();
+  });
+
+  it('missing=true 的音轨行应保留（曲目丢失不删行，保住 tags/歌单槽位）', async () => {
+    const track = makeAudioTrack({ source: 'file', relativePath: 'gone.mp3', missing: true });
+    await saveAudioTrack(track);
+    const loaded = await getAudioTrack(track.id);
+    expect(loaded!.missing).toBe(true);
+    expect(loaded!.tags).toEqual(['战斗']);
+  });
+
+  it('目录句柄保存/读取应往返一致', async () => {
+    const record = makeAudioHandle();
+    const id = await saveAudioHandle(record);
+    expect(id).toBe('library-root');
+
+    const loaded = await getAudioHandle('library-root');
+    expect(loaded).toBeDefined();
+    expect(loaded!.addedAt).toBe(record.addedAt);
+    expect((loaded!.handle as any).name).toBe('我的音乐');
+  });
+
+  it('saveAudioHandle 未带 addedAt 时应补时间戳', async () => {
+    const before = Date.now();
+    const record = makeAudioHandle({ addedAt: 0 });
+    await saveAudioHandle(record);
+    const loaded = await getAudioHandle('library-root');
+    expect(loaded!.addedAt).toBeGreaterThanOrEqual(before);
+  });
+
+  it('删除目录句柄后应读不到', async () => {
+    await saveAudioHandle(makeAudioHandle());
+    await deleteAudioHandle('library-root');
+    expect(await getAudioHandle('library-root')).toBeUndefined();
+  });
+
+  it('不存在的目录句柄应返回 undefined', async () => {
+    expect(await getAudioHandle('library-root')).toBeUndefined();
+    expect(await getAudioHandle('不存在的id')).toBeUndefined();
   });
 });

@@ -26,8 +26,20 @@ import {
   getAudioPlaylists,
   saveAudioPlaylist,
   deleteAudioPlaylist as dbDeleteAudioPlaylist,
+  getAudioBlob,
 } from '@engine/database'
-import { getAudioManager, installUnlockListener } from '../lib/audio-singleton'
+import { getAudioManager, installUnlockListener, setBlobResolver } from '../lib/audio-singleton'
+import {
+  isFolderSupported,
+  pickLibraryFolder,
+  getStoredFolder,
+  forgetFolder as forgetStoredFolder,
+  checkPermission,
+  requestPermission,
+  scanFolder,
+  resolveFile,
+  type ScannedFile,
+} from '../lib/audio-folder'
 import { useSettingsStore } from './settings-store'
 
 // ===== 常量 =====
@@ -48,6 +60,15 @@ interface AudioManifestEntry {
   credit?: string
   license?: string
 }
+
+/**
+ * 音乐文件夹的授权状态 (addendum §权限生命周期)
+ * - unsupported: 浏览器没有 File System Access
+ * - none: 支持，但用户还没选文件夹
+ * - prompt: 有句柄但本次会话尚未授权（浏览器重启后的常态）
+ * - granted / denied: 授权结果
+ */
+export type AudioFolderPermission = 'unsupported' | 'none' | 'prompt' | 'granted' | 'denied'
 
 function idleState(): AudioPlaybackState {
   return {
@@ -99,6 +120,14 @@ export const useAudioStore = defineStore('audio', () => {
 
   /** 按需采样的播放位置(秒)，仅在有人轮询时更新 (§6.3) */
   const positionSec = ref(0)
+
+  // ── 音乐文件夹 (addendum) ───────────────────────────────
+  const folderPermission = ref<AudioFolderPermission>('unsupported')
+  const folderName = ref('')
+  const scanning = ref(false)
+
+  /** 目录句柄不进响应式状态：它是不可克隆语义的宿主对象，只被动作读写 */
+  let folderHandle: FileSystemDirectoryHandle | null = null
 
   let initialized = false
   let unsubscribe: (() => void) | null = null
@@ -170,6 +199,179 @@ export const useAudioStore = defineStore('audio', () => {
     manager.setPlaylists(playlists.value)
   }
 
+  // ═══ 字节读取 seam (addendum §Store changes) ═══════════
+
+  /** 把某条曲目标记为「文件已移除」并落库；已是 missing 则空转 */
+  async function markMissing(track: AudioTrack): Promise<void> {
+    if (track.missing) return
+    try {
+      await saveAudioTrack({ ...track, missing: true })
+      await refreshTracks()
+    } catch {
+      // IndexedDB 不可用时不该连播放路径一起炸
+    }
+  }
+
+  /**
+   * AudioManager 的唯一字节来源，按 source 分派:
+   * - 'file'   → 从用户音乐文件夹取；文件没了就标 missing 并返回 undefined（不抛）
+   * - 'blob'   → IndexedDB（原路径不变）
+   * - 'builtin'→ 同上返回 undefined；音乐声道直接用 track.url，不会走到这里
+   */
+  async function loadBlob(trackId: string): Promise<Blob | undefined> {
+    const track = findTrack(trackId)
+    if (!track || track.source !== 'file') return getAudioBlob(trackId)
+
+    if (!folderHandle || !track.relativePath) {
+      await markMissing(track)
+      return undefined
+    }
+    let file: File | null = null
+    try {
+      file = await resolveFile(folderHandle, track.relativePath)
+    } catch {
+      file = null
+    }
+    if (!file) {
+      await markMissing(track)
+      return undefined
+    }
+    return file
+  }
+
+  // ═══ 音乐文件夹 (addendum) ═════════════════════════════
+
+  /**
+   * 启动期恢复文件夹状态。**绝不调用 requestPermission** —— 它需要用户手势，
+   * 无手势调用会静默失败，看起来就像 bug。授权按钮由 UI 提供。
+   */
+  async function initFolder(): Promise<void> {
+    if (!isFolderSupported()) {
+      folderPermission.value = 'unsupported'
+      return
+    }
+    let handle: FileSystemDirectoryHandle | null = null
+    try {
+      handle = await getStoredFolder()
+    } catch {
+      handle = null
+    }
+    if (!handle) {
+      folderHandle = null
+      folderName.value = ''
+      folderPermission.value = 'none'
+      return
+    }
+    folderHandle = handle
+    folderName.value = handle.name ?? ''
+    folderPermission.value = await checkPermission(handle)
+    if (folderPermission.value === 'granted') await rescanFolder()
+  }
+
+  /** 用户手势：弹目录选择器。成功即视为已授权并立即扫描。 */
+  async function pickFolder(): Promise<boolean> {
+    if (!isFolderSupported()) return false
+    const handle = await pickLibraryFolder()
+    if (!handle) return false
+    folderHandle = handle
+    folderName.value = handle.name ?? ''
+    folderPermission.value = 'granted'
+    await rescanFolder()
+    return true
+  }
+
+  /** 用户手势：对已存句柄重新申请读权限（浏览器重启后每会话一次） */
+  async function grantFolderPermission(): Promise<boolean> {
+    if (!folderHandle) return false
+    const ok = await requestPermission(folderHandle)
+    folderPermission.value = ok ? 'granted' : 'denied'
+    if (ok) await rescanFolder()
+    return ok
+  }
+
+  /**
+   * 目录 ↔ 曲目目录的对账（按 relativePath 匹配）:
+   * - 磁盘新增 → 建曲目
+   * - 两边都有 → 清 missing，刷新 size/mimeType
+   * - 目录里有但磁盘没了 → 标 missing
+   *
+   * **扫描期间绝不删行** —— 标签、kind、播放列表位次是用户的整理成果，
+   * 文件被挪走或硬盘没插不该把它们毁掉。
+   */
+  async function rescanFolder(): Promise<void> {
+    if (!folderHandle || scanning.value) return
+    scanning.value = true
+    try {
+      let scanned: ScannedFile[] = []
+      try {
+        scanned = await scanFolder(folderHandle)
+      } catch {
+        return
+      }
+      const onDisk = new Map(scanned.map((f) => [f.name, f]))
+      const seen = new Set<string>()
+
+      for (const track of tracks.value.filter((t) => t.source === 'file')) {
+        const path = track.relativePath ?? ''
+        const hit = path ? onDisk.get(path) : undefined
+        if (hit) {
+          seen.add(path)
+          if (track.missing || track.size !== hit.size || track.mimeType !== hit.mimeType) {
+            await saveAudioTrack({ ...track, missing: false, size: hit.size, mimeType: hit.mimeType })
+          }
+        } else if (!track.missing) {
+          await saveAudioTrack({ ...track, missing: true })
+        }
+      }
+
+      const now = Date.now()
+      for (const f of scanned) {
+        if (seen.has(f.name)) continue
+        await saveAudioTrack({
+          id: newId('audio'),
+          name: stripExt(f.name),
+          kind: 'music',
+          source: 'file',
+          mimeType: f.mimeType,
+          size: f.size,
+          relativePath: f.name,
+          tags: [],
+          missing: false,
+          createdAt: now,
+          updatedAt: now,
+        })
+      }
+
+      await refreshTracks()
+    } finally {
+      scanning.value = false
+    }
+  }
+
+  /**
+   * 取消关联：只删句柄，**不删任何曲目行**。曲目全部变成 missing（字节暂时够不着），
+   * 重新选回同一个文件夹时按文件名原样恢复，标签与播放列表位次都还在。
+   */
+  async function forgetFolder(): Promise<void> {
+    try {
+      await forgetStoredFolder()
+    } catch {
+      // 句柄删不掉也要把内存态清干净
+    }
+    folderHandle = null
+    folderName.value = ''
+    folderPermission.value = isFolderSupported() ? 'none' : 'unsupported'
+
+    for (const track of tracks.value.filter((t) => t.source === 'file' && !t.missing)) {
+      try {
+        await saveAudioTrack({ ...track, missing: true })
+      } catch {
+        break
+      }
+    }
+    await refreshTracks()
+  }
+
   // ═══ 初始化 ═══════════════════════════════════════════
 
   /** 幂等；组件在 onMounted 里调用 */
@@ -178,11 +380,13 @@ export const useAudioStore = defineStore('audio', () => {
     initialized = true
 
     unsubscribe = manager.subscribe((s) => { state.value = s })
+    setBlobResolver(loadBlob)
     installUnlockListener()
 
     restoreSettings()
     await loadManifest()
     await loadLibrary()
+    await initFolder()
 
     state.value = manager.state as AudioPlaybackState
   }
@@ -203,6 +407,7 @@ export const useAudioStore = defineStore('audio', () => {
 
   function dispose(): void {
     stopPositionPolling(true)
+    setBlobResolver(null)
     unsubscribe?.()
     unsubscribe = null
     initialized = false
@@ -418,6 +623,9 @@ export const useAudioStore = defineStore('audio', () => {
     builtinTracks,
     loading,
     positionSec,
+    folderPermission,
+    folderName,
+    scanning,
     // lifecycle
     init,
     dispose,
@@ -440,6 +648,12 @@ export const useAudioStore = defineStore('audio', () => {
     addTrackToPlaylist,
     removeTrackFromPlaylist,
     reorderPlaylist,
+    // folder
+    loadBlob,
+    pickFolder,
+    grantFolderPermission,
+    rescanFolder,
+    forgetFolder,
     // transport
     playTrack,
     playPlaylist,

@@ -11,7 +11,7 @@ import type {
   Lorebook, ChatPreset, AppSettings,
   MemoryRecord, PlotEvent, CharacterState, Snapshot, SaveSlot, ApiEndpoint,
   PlotOutline, SaveProfile, ChatMessage,
-  AudioTrack, AudioBlobRecord, AudioPlaylist,
+  AudioTrack, AudioBlobRecord, AudioPlaylist, AudioHandleRecord,
 } from './types';
 import type { CreatePreset } from '../ui/stores/create-store';
 import { DEFAULT_SETTINGS } from './types';
@@ -26,7 +26,7 @@ export interface CreatePresetRecord {
 }
 
 const DB_NAME = 'SillyTavernWebDB';
-const DB_VERSION = 11;
+const DB_VERSION = 12;
 
 class AppDatabase extends Dexie {
   // v1-v3 tables (chats 已于 v9 删除)
@@ -58,6 +58,9 @@ class AppDatabase extends Dexie {
   audioTracks!: Table<AudioTrack>;
   audioBlobs!: Table<AudioBlobRecord>;
   audioPlaylists!: Table<AudioPlaylist>;
+
+  // v12 new table (Audio 本地文件夹) — File System Access 目录句柄（结构化克隆存储）
+  audioHandles!: Table<AudioHandleRecord>;
 
   constructor() {
     super(DB_NAME);
@@ -279,6 +282,28 @@ class AppDatabase extends Dexie {
       audioTracks: 'id, name, kind, *tags, updatedAt',
       audioBlobs: 'id',
       audioPlaylists: 'id, name, updatedAt',
+    });
+
+    // v12: 音频本地文件夹 — 新增 audioHandles 表（纯增量，无 upgrade 回调）
+    // 注意: Dexie 要求每版重述完整 schema，漏写任一表即为删表（静默毁数据）。
+    this.version(12).stores({
+      lorebooks: 'id, name, updatedAt',
+      presets: 'id, name, updatedAt',
+      settings: 'key',
+      memories: 'id, saveId, createdAt, realTimestamp',
+      plotEvents: 'id, saveId, parentId, status, updatedAt',
+      characters: 'id, saveId, type',
+      snapshots: 'id, saveId, createdAt',
+      saves: 'id, slot, updatedAt',
+      apiEndpoints: 'id, name',
+      plotOutlines: 'id, saveId, updatedAt',
+      saveProfiles: 'saveId, updatedAt',
+      createPresets: 'id, name, updatedAt',
+      messages: 'id, saveId, [saveId+turn]',
+      audioTracks: 'id, name, kind, *tags, updatedAt',
+      audioBlobs: 'id',
+      audioPlaylists: 'id, name, updatedAt',
+      audioHandles: 'id',
     });
   }
 }
@@ -936,4 +961,24 @@ export async function saveAudioPlaylist(list: AudioPlaylist): Promise<string> {
 /** 删除播放列表 — 不级联删除音轨（列表只是音轨的有序引用） */
 export async function deleteAudioPlaylist(id: string): Promise<void> {
   await getDatabase().audioPlaylists.delete(id);
+}
+
+// ========== Audio 本地文件夹句柄 (v12) ==========
+// 目录句柄只对本机有意义，因此同样不进 FullBackup（附录见 addendum "Storage"）。
+
+/** 读取已持久化的目录句柄（当前仅 'library-root' 一行） */
+export async function getAudioHandle(id: string): Promise<AudioHandleRecord | undefined> {
+  return getDatabase().audioHandles.get(id);
+}
+
+/** 保存目录句柄；未带 addedAt 时补当前时间戳 */
+export async function saveAudioHandle(record: AudioHandleRecord): Promise<string> {
+  if (!record.addedAt) record.addedAt = Date.now();
+  await getDatabase().audioHandles.put(record);
+  return record.id;
+}
+
+/** 取消关联音乐文件夹 — 只删句柄，音轨目录保留（missing 由重扫标记） */
+export async function deleteAudioHandle(id: string): Promise<void> {
+  await getDatabase().audioHandles.delete(id);
 }

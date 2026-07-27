@@ -15,12 +15,14 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAudioStore } from '../../stores/audio-store'
 import { useSettingsStore } from '../../stores/settings-store'
+import { useUIStore } from '../../stores/ui-store'
 import type { AudioTrack, AudioTrackKind, AudioRepeatMode } from '@engine/types'
 import AppButton from '../shared/AppButton.vue'
 import AppCard from '../shared/AppCard.vue'
 
 const audio = useAudioStore()
 const cfg = useSettingsStore()
+const ui = useUIStore()
 const s = cfg.settings
 
 // ===== 生命周期 =====
@@ -206,6 +208,66 @@ function pickFiles(): void {
   fileInput.value?.click()
 }
 
+// ===== ③-A 音乐文件夹（addendum §UI changes） =====
+
+/** 已收录在曲库里的「磁盘文件」曲目数（含暂时失联的） */
+const fileTrackCount = computed(() => audio.tracks.filter((t) => t.source === 'file').length)
+
+/**
+ * 选择文件夹。用户取消时 store 静默返回 false（不是错误，不弹 toast）；
+ * 但 picker 的其他异常会往外抛，这里兜住并提示，避免炸到组件外。
+ */
+async function chooseFolder(): Promise<void> {
+  try {
+    await audio.pickFolder()
+  } catch {
+    ui.toast('无法打开文件夹选择器，请检查浏览器权限设置。', 'error')
+  }
+}
+
+async function grantFolder(): Promise<void> {
+  try {
+    const ok = await audio.grantFolderPermission()
+    if (!ok) ui.toast('浏览器拒绝了音乐文件夹的访问授权。', 'warning')
+  } catch {
+    ui.toast('申请文件夹访问授权失败。', 'error')
+  }
+}
+
+async function rescanFolder(): Promise<void> {
+  try {
+    await audio.rescanFolder()
+  } catch {
+    ui.toast('扫描音乐文件夹失败。', 'error')
+  }
+}
+
+/** 取消关联只丢句柄；曲目行与播放列表位次都留着（addendum §forgetFolder） */
+async function forgetFolder(): Promise<void> {
+  const name = audio.folderName || '音乐文件夹'
+  if (!window.confirm(
+    `取消关联「${name}」？曲库记录与播放列表位次都会保留，重新选回同一个文件夹即可恢复播放。`,
+  )) return
+  try {
+    await audio.forgetFolder()
+  } catch {
+    ui.toast('取消关联失败。', 'error')
+  }
+}
+
+/** 曲目字节来源的低调标注（不是徽章，只是一行 meta 文字） */
+function sourceLabel(t: AudioTrack): string {
+  if (t.source === 'file') return '磁盘'
+  if (t.source === 'builtin') return '内置'
+  return '浏览器'
+}
+
+function sourceHint(t: AudioTrack): string {
+  if (t.source === 'file') return '从音乐文件夹读取'
+  if (t.source === 'builtin') return '随应用附带'
+  return '存放在浏览器存储中'
+}
+
 /** 上传超过 20MB 给一次软确认（§3.5），不做任何自动清理 */
 const SOFT_LIMIT_BYTES = 20 * 1024 * 1024
 
@@ -243,12 +305,16 @@ async function saveEdit(t: AudioTrack): Promise<void> {
 }
 
 async function removeTrack(t: AudioTrack): Promise<void> {
-  if (!window.confirm(`删除曲目「${t.name}」？此操作不可撤销。`)) return
+  const msg = t.source === 'file'
+    ? `删除曲目「${t.name}」？只移除曲库记录，磁盘上的文件不会被删除。`
+    : `删除曲目「${t.name}」？此操作不可撤销。`
+  if (!window.confirm(msg)) return
   await audio.deleteTrack(t.id)
   storageInfo.value = await cfg.getStorageUsage()
 }
 
 async function audition(t: AudioTrack): Promise<void> {
+  if (t.missing) return
   if (t.kind === 'sfx') await audio.playSfx(t.id)
   else await audio.playTrack(t.id)
 }
@@ -422,6 +488,43 @@ function fmtDuration(sec?: number): string {
         音频与存档共用同一份浏览器配额；「清除所有数据」会一并删除曲库。
       </p>
 
+      <!-- 音乐文件夹 -->
+      <div class="folder-strip" :class="{ 'folder-strip-on': audio.folderPermission === 'granted' }">
+        <template v-if="audio.folderPermission === 'unsupported'">
+          <span class="folder-name">音乐文件夹</span>
+          <span class="folder-note">
+            当前浏览器不支持 File System Access，无法直接读取本地文件夹；上传的音频会存进浏览器存储。
+          </span>
+        </template>
+
+        <template v-else-if="audio.folderPermission === 'none'">
+          <span class="folder-name">音乐文件夹</span>
+          <span class="folder-note">指定一个文件夹，音频留在原处，曲库只记录目录。</span>
+          <AppButton variant="secondary" size="sm" @click="chooseFolder">选择音乐文件夹</AppButton>
+        </template>
+
+        <template v-else-if="audio.folderPermission === 'prompt'">
+          <span class="folder-name">{{ audio.folderName || '音乐文件夹' }}</span>
+          <span class="folder-note">浏览器每次启动后需要重新确认一次访问权限。</span>
+          <AppButton variant="primary" size="sm" @click="grantFolder">授权访问音乐文件夹</AppButton>
+        </template>
+
+        <template v-else-if="audio.folderPermission === 'granted'">
+          <span class="folder-name">{{ audio.folderName || '音乐文件夹' }}</span>
+          <span class="folder-note">已收录 {{ fileTrackCount }} 首本地曲目。</span>
+          <AppButton variant="secondary" size="sm" :disabled="audio.scanning" @click="rescanFolder">
+            {{ audio.scanning ? '扫描中…' : '重新扫描' }}
+          </AppButton>
+          <AppButton variant="ghost" size="sm" @click="forgetFolder">取消关联</AppButton>
+        </template>
+
+        <template v-else>
+          <span class="folder-name">{{ audio.folderName || '音乐文件夹' }}</span>
+          <span class="folder-note">浏览器拒绝了访问该文件夹，本地曲目暂时无法播放。</span>
+          <AppButton variant="secondary" size="sm" @click="grantFolder">重新授权</AppButton>
+        </template>
+      </div>
+
       <!-- 工具条 -->
       <div class="lib-toolbar">
         <select v-model="uploadKind" class="mini-select" aria-label="上传类型">
@@ -459,13 +562,25 @@ function fmtDuration(sec?: number): string {
       <div v-else-if="filteredTracks.length === 0" class="empty-tab">
         {{ audio.tracks.length === 0 ? '曲库尚空，上传音频以开始…' : '没有符合条件的曲目…' }}
       </div>
-      <div v-for="t in filteredTracks" :key="t.id" class="track-row track-row-lib" :class="{ 'track-muted': isHidden(t) }">
+      <div
+        v-for="t in filteredTracks"
+        :key="t.id"
+        class="track-row track-row-lib"
+        :class="{ 'track-muted': isHidden(t) || t.missing }"
+      >
         <span class="kind-dot" :class="`dot-${t.kind}`" />
         <span class="track-name">{{ t.name }}</span>
+        <span v-if="t.missing" class="missing-badge">文件已移除</span>
         <span v-for="tag in t.tags" :key="tag" class="tag-chip">{{ tag }}</span>
+        <span class="src-text" :title="sourceHint(t)" :aria-label="sourceHint(t)">{{ sourceLabel(t) }}</span>
         <span class="meta-text">{{ fmtDuration(t.duration) }}</span>
         <span class="meta-text">{{ fmtBytes(t.size) }}</span>
-        <button class="icon-btn" aria-label="试听" @click="audition(t)">▶</button>
+        <button
+          class="icon-btn"
+          :aria-label="t.missing ? '文件已移除，无法试听' : '试听'"
+          :disabled="!!t.missing"
+          @click="audition(t)"
+        >▶</button>
         <template v-if="t.builtin">
           <button class="icon-btn" :aria-label="isHidden(t) ? '取消隐藏' : '隐藏内置曲目'" @click="toggleHideBuiltin(t)">
             {{ isHidden(t) ? '👁' : '🚫' }}
@@ -818,6 +933,50 @@ function fmtDuration(sec?: number): string {
   font-size: 0.6875rem;
   color: var(--theme-text-muted);
 }
+/* ═══ 音乐文件夹条 ═══ */
+.folder-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+  flex-wrap: wrap;
+  margin-bottom: var(--theme-spacing-md);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  background: var(--theme-content-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  transition: background var(--theme-transition-fast), border-color var(--theme-transition-fast);
+}
+.folder-strip-on {
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+  border-color: color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
+}
+.folder-name {
+  font-family: var(--theme-font-title);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+}
+.folder-note {
+  flex: 1;
+  min-width: 12rem;
+  font-size: 0.75rem;
+  color: var(--theme-text-muted);
+  line-height: 1.55;
+}
+.src-text {
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+  cursor: help;
+}
+.missing-badge {
+  font-size: 0.6875rem;
+  padding: 1px 8px;
+  border-radius: var(--theme-radius-full);
+  background: color-mix(in srgb, var(--theme-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-warning) 30%, transparent);
+  color: var(--theme-warning);
+}
+
 .lib-toolbar {
   display: flex;
   align-items: center;

@@ -2919,7 +2919,7 @@ export interface MapMarker {
 // ═══════════════════════════════════════════════════════════
 
 /** Where the audio bytes come from. 'url' was cut from v1 — re-adding it is purely additive. */
-export type AudioSourceKind = 'blob' | 'builtin';
+export type AudioSourceKind = 'blob' | 'builtin' | 'file';
 
 /** What the track is for. Drives decode policy; the size guard (§4.4) is the rail when it's wrong. */
 export type AudioTrackKind = 'music' | 'sfx';
@@ -2936,6 +2936,10 @@ export interface AudioTrack {
   duration?: number;          // seconds, backfilled after first load
   tags: string[];             // scene tags — the AI hook's only addressing scheme (§8)
   builtin?: boolean;          // cannot be deleted, only hidden
+  /** source='file': filename within the library folder. The folder handle is stored separately. */
+  relativePath?: string;
+  /** source='file': the file was gone at last scan. Row is kept so tags/playlist slots survive. */
+  missing?: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -2944,6 +2948,17 @@ export interface AudioTrack {
 export interface AudioBlobRecord {
   id: string;                 // === AudioTrack.id
   blob: Blob;
+}
+
+/**
+ * Persisted File System Access handle for the user's music library folder.
+ * Handles are structured-cloneable, so IndexedDB stores them directly —
+ * they cannot go in localStorage; they are not JSON.
+ */
+export interface AudioHandleRecord {
+  id: string;                          // 'library-root' — one row today
+  handle: FileSystemDirectoryHandle;
+  addedAt: number;
 }
 
 /** Playlists are a sequencer concept — music tracks only (§4.3) */

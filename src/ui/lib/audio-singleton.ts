@@ -134,6 +134,22 @@ function revokeObjectURL(url: string): void {
 
 let instance: AudioManager | null = null
 
+/**
+ * 字节读取 seam 的可替换实现。
+ *
+ * 默认直读 IndexedDB blob；audio-store 在 init() 里装入自己的按 source 分派版本
+ * （'file' 走磁盘，'blob' 走 IndexedDB）。放在这里是因为 AudioManager 在构造期
+ * 就捕获 loadBlob，单例又先于 store 创建 —— 用一层间接把两者解耦。
+ */
+export type BlobResolver = (trackId: string) => Promise<Blob | undefined>
+
+let blobResolver: BlobResolver | null = null
+
+/** 装入/卸下自定义字节读取实现；传 null 恢复默认的 IndexedDB 直读 */
+export function setBlobResolver(fn: BlobResolver | null): void {
+  blobResolver = fn
+}
+
 /** 惰性构造并记忆化的应用级 AudioManager。仅 import 本模块不构造任何东西。 */
 export function getAudioManager(): AudioManager {
   if (!instance) {
@@ -143,7 +159,7 @@ export function getAudioManager(): AudioManager {
       createObjectURL,
       revokeObjectURL,
       fadeMs: AUDIO_DEFAULT_FADE_MS,
-      loadBlob: (trackId) => getAudioBlob(trackId),
+      loadBlob: (trackId) => (blobResolver ?? getAudioBlob)(trackId),
     })
   }
   return instance
@@ -155,6 +171,7 @@ export function resetAudioManager(): void {
     try { instance.dispose() } catch { /* 静默 */ }
   }
   instance = null
+  blobResolver = null
   unlockInstalled = false
 }
 
