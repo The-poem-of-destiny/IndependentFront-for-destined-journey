@@ -12,6 +12,7 @@ import type {
   AudioBufferLike,
   AudioBufferSourceLike,
   AudioContextLike,
+  AudioElementEvent,
   AudioElementLike,
   AudioGainLike,
   AudioNodeLike,
@@ -187,7 +188,9 @@ export class FakeAudioContext implements AudioContextLike {
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 假 audio 元素。测试通过 `fireEnded()` 手动触发曲目播放完毕。
+ * 假 audio 元素。测试通过 `fireEnded()` 手动触发曲目播放完毕，
+ * 通过 `emitMetadata(sec)` 模拟浏览器解析出时长。
+ * 监听器**按事件类型分桶**，`listenerCountFor` 可断言解绑与绑定成对。
  * `playRejection` 用于模拟 autoplay 被浏览器拦截。
  */
 export class FakeAudioElement implements AudioElementLike {
@@ -201,7 +204,7 @@ export class FakeAudioElement implements AudioElementLike {
   readonly srcHistory: string[] = [];
   playRejection: unknown = null;
 
-  private listeners: Array<() => void> = [];
+  private readonly listeners = new Map<AudioElementEvent, Array<() => void>>();
 
   play(): Promise<void> {
     this.playCount += 1;
@@ -215,20 +218,46 @@ export class FakeAudioElement implements AudioElementLike {
     this.paused = true;
   }
 
-  addEventListener(_type: 'ended', listener: () => void): void {
-    this.listeners.push(listener);
+  addEventListener(type: AudioElementEvent, listener: () => void): void {
+    const bucket = this.listeners.get(type);
+    if (bucket) bucket.push(listener);
+    else this.listeners.set(type, [listener]);
   }
 
-  removeEventListener(_type: 'ended', listener: () => void): void {
-    this.listeners = this.listeners.filter((l) => l !== listener);
+  removeEventListener(type: AudioElementEvent, listener: () => void): void {
+    const bucket = this.listeners.get(type);
+    if (!bucket) return;
+    this.listeners.set(type, bucket.filter((l) => l !== listener));
   }
 
   /** 手动触发 ended 事件 */
-  fireEnded(): void {
-    for (const l of this.listeners.slice()) l();
+  fireEnded(): void { this.fire('ended'); }
+
+  fireLoadedMetadata(): void { this.fire('loadedmetadata'); }
+
+  fireDurationChange(): void { this.fire('durationchange'); }
+
+  /** 设定时长并触发 loadedmetadata —— 模拟浏览器解析出元数据 */
+  emitMetadata(durationSec: number): void {
+    this.duration = durationSec;
+    this.fire('loadedmetadata');
   }
 
-  get listenerCount(): number { return this.listeners.length; }
+  /** 全部事件类型的监听器总数 */
+  get listenerCount(): number {
+    let n = 0;
+    for (const bucket of this.listeners.values()) n += bucket.length;
+    return n;
+  }
+
+  /** 单一事件类型的监听器数 —— 断言"绑几个解几个" */
+  listenerCountFor(type: AudioElementEvent): number {
+    return this.listeners.get(type)?.length ?? 0;
+  }
+
+  private fire(type: AudioElementEvent): void {
+    for (const l of (this.listeners.get(type) ?? []).slice()) l();
+  }
 }
 
 /** src 被赋值时同步记入 srcHistory —— 用 Proxy 免去改写 setter 的样板 */
@@ -344,6 +373,12 @@ export function makeTrack(id: string, overrides: Partial<AudioTrack> = {}): Audi
   };
 }
 
+/** 一次挂起中的 loadBlob —— `deferLoads` 打开后由测试决定完成顺序 */
+export interface PendingLoad {
+  trackId: string;
+  resolve: () => void;
+}
+
 export interface FakeLibrary {
   tracks: Map<string, AudioTrack>;
   blobs: Map<string, FakeBlob>;
@@ -351,6 +386,15 @@ export interface FakeLibrary {
   loadBlob: (id: string) => Promise<Blob | undefined>;
   /** loadBlob 被调用的 trackId 序列 */
   loadCalls: string[];
+  /**
+   * true 时 loadBlob 挂起，由 resolveLoad 决定完成顺序 ——
+   * 让"旧请求比新请求慢"这种竞态成为可测场景 (对齐 FakeAudioContext.deferDecodes)
+   */
+  deferLoads: boolean;
+  /** 挂起中的 loadBlob，按调用序 */
+  pendingLoads: PendingLoad[];
+  /** 完成第 index 个挂起的 loadBlob */
+  resolveLoad: (index: number) => void;
   add: (track: AudioTrack, blobSize?: number) => AudioTrack;
   remove: (id: string) => void;
   /** 让 loadBlob 对该 id 返回 undefined（模拟字节缺失） */
@@ -362,16 +406,28 @@ export function createFakeLibrary(initial: AudioTrack[] = []): FakeLibrary {
   const tracks = new Map<string, AudioTrack>();
   const blobs = new Map<string, FakeBlob>();
   const loadCalls: string[] = [];
+  const pendingLoads: PendingLoad[] = [];
 
   const lib: FakeLibrary = {
     tracks,
     blobs,
     loadCalls,
+    deferLoads: false,
+    pendingLoads,
     resolveTrack: (id) => tracks.get(id),
     loadBlob: async (id) => {
       loadCalls.push(id);
       const b = blobs.get(id);
-      return b ? asBlob(b) : undefined;
+      const value = b ? asBlob(b) : undefined;
+      if (!lib.deferLoads) return value;
+      return new Promise<Blob | undefined>((resolve) => {
+        pendingLoads.push({ trackId: id, resolve: () => { resolve(value); } });
+      });
+    },
+    resolveLoad: (index) => {
+      const p = pendingLoads[index];
+      if (!p) throw new Error(`no pending load at index ${index}`);
+      p.resolve();
     },
     add: (track, blobSize = 1024) => {
       tracks.set(track.id, track);

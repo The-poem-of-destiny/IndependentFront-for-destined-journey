@@ -15,123 +15,55 @@
  *   URL.createObjectURL，注入是**测试套件存在的前提**，不是风格偏好 (§1)
  */
 
-import type { AudioTrack, AudioRepeatMode } from './types';
+import type { AudioRepeatMode } from './types';
+import type {
+  AudioBufferLike,
+  AudioBufferSourceLike,
+  AudioContextLike,
+  AudioElementLike,
+  AudioGainLike,
+  AudioNodeLike,
+  LoadBlobFn,
+  MusicChannelOptions,
+  MusicChannelState,
+  ResolveTrackFn,
+  SfxChannelOptions,
+  SfxChannelState,
+} from './types-audio';
 
 // ═══════════════════════════════════════════════════════════
-// 注入 seam 接口 (§4.6)
-// 刻意做到最小 —— 只声明实际用到的成员。Manager 波次从本文件 import。
+// 类型再导出 (§4.6)
+// 注入 seam 接口与 state/options 形状已收拢到 types-audio.ts (唯一类型来源的音频分册)；
+// 此处按原样 re-export，历史 import 路径保持不变 —— Manager 波次仍可从本文件 import。
 // ═══════════════════════════════════════════════════════════
 
-/** Web Audio AudioParam 的最小面 */
-export interface AudioParamLike {
-  value: number;
-  setValueAtTime(value: number, startTime: number): void;
-  linearRampToValueAtTime(value: number, endTime: number): void;
-  cancelScheduledValues(startTime: number): void;
-}
-
-/** 任何可连接的音频节点 */
-export interface AudioNodeLike {
-  connect(destination: AudioNodeLike): void;
-  disconnect(): void;
-}
-
-/** GainNode 的最小面 */
-export interface AudioGainLike extends AudioNodeLike {
-  gain: AudioParamLike;
-}
-
-/** decodeAudioData 的产物；只有 duration 被引擎读取 */
-export interface AudioBufferLike {
-  duration: number;
-}
-
-/** AudioBufferSourceNode 的最小面 —— 一次性节点，播完即弃 */
-export interface AudioBufferSourceLike extends AudioNodeLike {
-  buffer: AudioBufferLike | null;
-  onended: (() => void) | null;
-  start(when?: number): void;
-  stop(when?: number): void;
-}
-
-/** AudioContext 的最小面 */
-export interface AudioContextLike {
-  readonly currentTime: number;
-  createGain(): AudioGainLike;
-  createBufferSource(): AudioBufferSourceLike;
-  createMediaElementSource(element: AudioElementLike): AudioNodeLike;
-  decodeAudioData(data: ArrayBuffer): Promise<AudioBufferLike>;
-}
-
-/** HTMLAudioElement 的最小面 */
-export interface AudioElementLike {
-  src: string;
-  currentTime: number;
-  readonly duration: number;
-  play(): Promise<void>;
-  pause(): void;
-  addEventListener(type: 'ended', listener: () => void): void;
-  removeEventListener(type: 'ended', listener: () => void): void;
-}
-
-/** 曲目元数据解析回调 —— 曲库住在 Manager 里 */
-export type ResolveTrackFn = (trackId: string) => AudioTrack | undefined;
-
-/** 音频字节读取回调 —— 存储层住在 database.ts 里 */
-export type LoadBlobFn = (trackId: string) => Promise<Blob | undefined>;
+export type {
+  AudioParamLike,
+  AudioNodeLike,
+  AudioGainLike,
+  AudioBufferLike,
+  AudioBufferSourceLike,
+  AudioContextLike,
+  AudioElementEvent,
+  AudioElementLike,
+  ResolveTrackFn,
+  LoadBlobFn,
+  MusicChannelState,
+  MusicChannelOptions,
+  SfxChannelState,
+  SfxChannelOptions,
+} from './types-audio';
 
 // ═══════════════════════════════════════════════════════════
 // MusicChannel — 序列器
 // ═══════════════════════════════════════════════════════════
 
-/** MusicChannel 离散播放状态 (对齐 AudioPlaybackState['music'])，**不含 position** (§6.3) */
-export interface MusicChannelState {
-  status: 'idle' | 'playing' | 'paused';
-  trackId: string | null;
-  playlistId: string | null;
-  index: number;
-  queueLength: number;
-  durationSec: number;
-  volume: number;
-  muted: boolean;
-  repeat: AudioRepeatMode;
-  shuffle: boolean;
-}
-
-export interface MusicChannelOptions {
-  /** 共享 AudioContext */
-  context: AudioContextLike;
-  /** 本声道 gain 接入的目标节点 (通常是 master gain)；声道不持有 master */
-  destination: AudioNodeLike;
-  /** 唯一的流式播放元素 */
-  element: AudioElementLike;
-  /** 曲目元数据解析 */
-  resolveTrack: ResolveTrackFn;
-  /** 音频字节读取 (source==='blob' 时使用) */
-  loadBlob: LoadBlobFn;
-  /** Blob → URL；environment:'node' 下必须注入 */
-  createObjectURL?: (blob: Blob) => string;
-  /** URL 回收；换曲必须调用，否则泄漏 */
-  revokeObjectURL?: (url: string) => void;
-  /** shuffle 随机源，注入以求确定性 */
-  random?: () => number;
-  /** 换曲淡入淡出时长；**0 表示完全同步**(无 timer 无 await)，测试用 0，UI 用 300 */
-  fadeMs?: number;
-  /** 定时器 seam，仅在 fadeMs > 0 时被调用 */
-  scheduleTimeout?: (fn: () => void, ms: number) => void;
-  /** 离散状态变更广播；**positionSec 永不经由此回调** */
-  onChange?: (state: MusicChannelState) => void;
-  /** 初始音量 0..1 */
-  volume?: number;
-  /** 初始静音 */
-  muted?: boolean;
-  /** 初始循环模式 */
-  repeat?: AudioRepeatMode;
-  /** 初始随机模式 */
-  shuffle?: boolean;
-}
-
-function clamp01(v: number): number {
+/**
+ * 音量归一化 —— 钳制到 0..1，NaN/Infinity 一律落到 0。
+ * 音频子系统内唯一一份实现，AudioManager 的 master 音量也复用它
+ * (`validate.ts` 的 `clamp` 不处理非有限值，不能替代)。
+ */
+export function clamp01(v: number): number {
   if (!Number.isFinite(v)) return 0;
   if (v < 0) return 0;
   if (v > 1) return 1;
@@ -167,7 +99,19 @@ export class MusicChannel {
   private _shuffle: boolean;
   private objectUrl: string | null = null;
   private disposed = false;
+  /**
+   * 加载世代号。每次 loadCurrent 入口自增并被本次加载捕获；加载链路上**每个 await 之后**
+   * 都比对一次，对不上就立刻收手 —— 换曲/停止不能被在飞的旧加载在稍后覆盖或"补出声"。
+   */
+  private loadGeneration = 0;
+  /** 上次广播出去的 durationSec —— 元素报同一个值时不重复扇出 */
+  private lastDurationSec = -1;
+  /** 在飞加载的目标曲目 id；null 表示当前没有加载在途 */
+  private pendingLoadTrackId: string | null = null;
+  /** 选中曲目尚未真正装进元素 —— pause 掐掉在飞加载后置位，下次 play() 必须重新加载 */
+  private needsReload = false;
   private readonly endedListener: () => void;
+  private readonly durationListener: () => void;
 
   constructor(opts: MusicChannelOptions) {
     this.ctx = opts.context;
@@ -192,6 +136,11 @@ export class MusicChannel {
 
     this.endedListener = () => { void this.handleEnded(); };
     this.element.addEventListener('ended', this.endedListener);
+
+    // 监听器只在构造时绑一次、dispose 时解一次 —— 换曲不重绑，绝不累积
+    this.durationListener = () => { this.handleDurationChange(); };
+    this.element.addEventListener('loadedmetadata', this.durationListener);
+    this.element.addEventListener('durationchange', this.durationListener);
   }
 
   // ── 观察 ────────────────────────────────────────────────
@@ -265,16 +214,33 @@ export class MusicChannel {
 
   async play(): Promise<void> {
     if (this.queue.length === 0) return;
-    if (this.currentTrackId === null) {
+    // needsReload: 选中曲目还没装进元素(pause 掐掉了它的加载)，必须重新走一遍加载
+    if (this.currentTrackId === null || this.needsReload) {
       await this.loadCurrent(true);
       return;
     }
-    await this.startElement();
+    // 捕获当前世代 —— element.play() 期间被 stop()/换曲打断时不得把 status 写回 playing
+    const gen = this.loadGeneration;
+    await this.startElement(gen);
+    if (this.isStale(gen)) return;
     this.emit();
   }
 
+  /**
+   * 暂停。加载期间被调用时同样作废在飞加载 —— 否则加载完成后会自顾自地出声，
+   * 从用户视角这和"停止后又响起来"是同一个 bug。
+   *
+   * 与 stop() 的语义差别: stop 丢弃当前曲目与播放位置，pause **保留选中曲目** ——
+   * 落到"已选中这首、但未装进元素"的暂停态，随后 play() 会把它重新加载起来。
+   */
   pause(): void {
-    if (this.status !== 'playing') return;
+    const loadingId = this.pendingLoadTrackId;
+    if (this.status !== 'playing' && loadingId === null) return;
+    if (loadingId !== null) {
+      this.invalidateLoad();
+      this.currentTrackId = loadingId;
+      this.needsReload = true;
+    }
     this.element.pause();
     this.status = 'paused';
     this.emit();
@@ -287,6 +253,8 @@ export class MusicChannel {
 
   /** 停止 —— 暂停并回到 0，状态 idle。队列保留，play() 可重新开始 */
   stop(): void {
+    // 在飞的加载必须作废，否则它会在稍后自顾自地出声
+    this.invalidateLoad();
     this.element.pause();
     this.element.currentTime = 0;
     this.status = 'idle';
@@ -359,6 +327,7 @@ export class MusicChannel {
     const currentDropped = currentId !== null && !existingIds.has(currentId);
     this.queue = kept;
     if (currentDropped || kept.length === 0) {
+      this.invalidateLoad();
       this.element.pause();
       this.element.currentTime = 0;
       this.index = 0;
@@ -373,7 +342,10 @@ export class MusicChannel {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.invalidateLoad();
     this.element.removeEventListener('ended', this.endedListener);
+    this.element.removeEventListener('loadedmetadata', this.durationListener);
+    this.element.removeEventListener('durationchange', this.durationListener);
     this.element.pause();
     this.clearCurrent();
     this.gainNode.disconnect();
@@ -397,6 +369,36 @@ export class MusicChannel {
     this.onChange?.(this.state);
   }
 
+  /**
+   * 作废在飞的加载并返回新世代号。
+   * 任何会更换当前曲目或停止播放的入口都要经过它: loadCurrent(即 playTrack /
+   * playPlaylist / next / prev / handleEnded) / stop / pruneTracks 掉当前曲。
+   */
+  private invalidateLoad(): number {
+    this.loadGeneration += 1;
+    this.pendingLoadTrackId = null;
+    return this.loadGeneration;
+  }
+
+  /** 本次加载是否已被后来者(或 dispose)作废 —— 每个 await 之后都要问一次 */
+  private isStale(gen: number): boolean {
+    return this.disposed || gen !== this.loadGeneration;
+  }
+
+  /**
+   * 元素报出时长时刷新离散状态 (§6.3)。
+   * 暂停态换曲**不会**自动播放，没有这条通路 durationSec 会一直停在旧值/0。
+   * 注意只有 durationSec 走广播 —— positionSec 依旧是按需 getter，广播它等于把
+   * 高频扇出请回来。
+   */
+  private handleDurationChange(): void {
+    if (this.disposed) return;
+    const d = this.durationSec;
+    if (d === this.lastDurationSec) return;
+    this.lastDurationSec = d;
+    this.emit();
+  }
+
   private shuffleQueue(): void {
     // Fisher–Yates on the channel's own copy
     for (let i = this.queue.length - 1; i > 0; i--) {
@@ -418,6 +420,8 @@ export class MusicChannel {
     this.releaseObjectUrl();
     this.currentTrackId = null;
     this.element.src = '';
+    this.lastDurationSec = -1;
+    this.needsReload = false;
   }
 
   private fadeOut(): void {
@@ -444,64 +448,100 @@ export class MusicChannel {
     return new Promise<void>((resolve) => { this.scheduleTimeout(resolve, this.fadeMs); });
   }
 
-  private async startElement(): Promise<void> {
+  /** gen 失效时收手 —— 加载/恢复期间被 stop() 打断的元素不得在稍后出声 */
+  private async startElement(gen: number): Promise<void> {
     try {
       await this.element.play();
+      if (this.isStale(gen)) {
+        this.element.pause();
+        return;
+      }
       this.status = 'playing';
     } catch {
       // autoplay 被拦截等 —— 不抛出，落到 paused 由上层 unlock 兑现
+      if (this.isStale(gen)) return;
       this.status = 'paused';
     }
   }
 
+  /**
+   * 加载并（可选）播放当前索引指向的曲目。
+   *
+   * 全程受世代号看护: 淡出等待、字节读取、element.play() 三处 await 之后各校验一次，
+   * 失效即刻返回 —— **不写任何状态**，并回收本次自己造出来的 object URL。
+   * 上一段 URL 的回收刻意推迟到提交那一刻: 中途作废时旧 URL 仍是元素正在用的那个。
+   */
   private async loadCurrent(autoplay: boolean): Promise<void> {
     if (this.disposed) return;
+    const gen = this.invalidateLoad();
+    this.needsReload = false;
     const id = this.queue[this.index];
     if (id === undefined) {
+      this.pendingLoadTrackId = null;
       this.clearCurrent();
       this.status = 'idle';
       this.emit();
       return;
     }
+    // 在飞标记 —— pause() 靠它判断"有加载在途"，并据此保留选中曲目
+    this.pendingLoadTrackId = id;
 
     this.fadeOut();
     const wait = this.waitFade();
-    if (wait) await wait;
+    if (wait) {
+      await wait;
+      if (this.isStale(gen)) return; // 尚未造出任何资源，直接收手
+    }
 
     const track = this.resolveTrack(id);
     if (!track) {
+      this.pendingLoadTrackId = null;
       this.clearCurrent();
       this.status = 'idle';
       this.emit();
       return;
     }
 
-    // 换曲即回收上一段 object URL —— 泄漏防线
-    this.releaseObjectUrl();
-
+    let createdUrl: string | null = null;
     let src: string;
     if (track.source === 'builtin') {
       src = track.url ?? '';
     } else {
       const blob = await this.loadBlob(id);
+      if (this.isStale(gen)) return; // 已解析的 blob 引用直接丢弃
       if (!blob) {
-        this.currentTrackId = null;
-        this.element.src = '';
+        this.pendingLoadTrackId = null;
+        this.clearCurrent();
         this.status = 'idle';
         this.emit();
         return;
       }
-      this.objectUrl = this.createObjectURL(blob);
-      src = this.objectUrl;
+      createdUrl = this.createObjectURL(blob);
+      if (this.isStale(gen)) {
+        // 兜底: 作废发生在造 URL 的同一拍时也不留垃圾
+        this.revokeObjectURL(createdUrl);
+        return;
+      }
+      src = createdUrl;
     }
 
+    // 提交点 —— 到这一步才回收上一段 object URL (泄漏防线)
+    this.releaseObjectUrl();
+    this.objectUrl = createdUrl;
     this.element.src = src;
     this.element.currentTime = 0;
     this.currentTrackId = id;
+    this.lastDurationSec = this.durationSec;
     this.fadeIn();
 
-    if (autoplay) await this.startElement();
-    else this.status = 'paused';
+    if (autoplay) {
+      // 标记留到 startElement 之后才清 —— play() 期间按暂停同样要能掐住
+      await this.startElement(gen);
+      if (this.isStale(gen)) return;
+    } else {
+      this.status = 'paused';
+    }
+    this.pendingLoadTrackId = null;
     this.emit();
   }
 
@@ -516,7 +556,9 @@ export class MusicChannel {
 
     if (this._repeat === 'one') {
       this.element.currentTime = 0;
-      await this.startElement();
+      const gen = this.loadGeneration;
+      await this.startElement(gen);
+      if (this.isStale(gen)) return;
       this.emit();
       return;
     }
@@ -545,30 +587,7 @@ export class MusicChannel {
 // SfxChannel — 声部池
 // ═══════════════════════════════════════════════════════════
 
-export interface SfxChannelState {
-  volume: number;
-  muted: boolean;
-  liveVoices: number;
-}
-
-export interface SfxChannelOptions {
-  context: AudioContextLike;
-  destination: AudioNodeLike;
-  resolveTrack: ResolveTrackFn;
-  loadBlob: LoadBlobFn;
-  /** 同时存活声部上限，超出则掐掉最久的那个 (默认 8) */
-  maxVoices?: number;
-  /** 同时在途 decode 上限，超出则**直接拒绝**并返回 false (默认 4) */
-  maxConcurrentDecodes?: number;
-  /** 时长护栏(秒)，与 kind 无关 —— kind 可能是错的 (默认 30) */
-  maxDurationSec?: number;
-  /** 体积护栏(字节)，与 kind 无关 (默认 5MB) */
-  maxBytes?: number;
-  onChange?: (state: SfxChannelState) => void;
-  volume?: number;
-  muted?: boolean;
-}
-
+/** 内部声部记账结构 —— 不属于对外形状，故留在实现文件里 */
 interface Voice {
   id: number;
   source: AudioBufferSourceLike;

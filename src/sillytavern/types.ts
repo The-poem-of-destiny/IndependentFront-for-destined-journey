@@ -6,6 +6,12 @@
 
 import type { GameTime } from './time-system';
 
+// 音频子系统的接口/seam 类型拆分在 types-audio.ts（本文件已逾 800 行）。
+// 从这里统一再导出，「types.ts 是唯一类型来源」这条 import 路径依然成立。
+// 注意: 音频**数据模型**类型 (AudioTrack / AudioPlaylist / ...) 仍定义在本文件下方，
+// 不在 types-audio.ts 里 —— 避免第二个真相来源。
+export * from './types-audio';
+
 // ========== World Book (Lorebook) Types (v3, deprecated) ==========
 // Phase 8 用新 WorldBook 类型替代，旧 Lorebook/LorebookEntry 保留兼容导入
 

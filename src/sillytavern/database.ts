@@ -894,11 +894,13 @@ export async function deleteMessagesAfterTurn(saveId: string, turn: number): Pro
 
 /** 获取全部音轨元数据（不含音频字节 — 字节在 audioBlobs 表，仅播放时读取） */
 export async function getAudioTracks(): Promise<AudioTrack[]> {
-  return getDatabase().audioTracks.toArray();
+  const tracks = await getDatabase().audioTracks.toArray();
+  return tracks;
 }
 
 export async function getAudioTrack(id: string): Promise<AudioTrack | undefined> {
-  return getDatabase().audioTracks.get(id);
+  const track = await getDatabase().audioTracks.get(id);
+  return track;
 }
 
 /**
@@ -945,11 +947,13 @@ export async function getAudioBlob(id: string): Promise<Blob | undefined> {
 }
 
 export async function getAudioPlaylists(): Promise<AudioPlaylist[]> {
-  return getDatabase().audioPlaylists.toArray();
+  const lists = await getDatabase().audioPlaylists.toArray();
+  return lists;
 }
 
 export async function getAudioPlaylist(id: string): Promise<AudioPlaylist | undefined> {
-  return getDatabase().audioPlaylists.get(id);
+  const list = await getDatabase().audioPlaylists.get(id);
+  return list;
 }
 
 export async function saveAudioPlaylist(list: AudioPlaylist): Promise<string> {
@@ -968,7 +972,8 @@ export async function deleteAudioPlaylist(id: string): Promise<void> {
 
 /** 读取已持久化的目录句柄（当前仅 'library-root' 一行） */
 export async function getAudioHandle(id: string): Promise<AudioHandleRecord | undefined> {
-  return getDatabase().audioHandles.get(id);
+  const record = await getDatabase().audioHandles.get(id);
+  return record;
 }
 
 /** 保存目录句柄；未带 addedAt 时补当前时间戳 */

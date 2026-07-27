@@ -317,10 +317,119 @@ describe('MusicChannel — Sources', () => {
   it('dispose 回收 objectURL 并摘掉 ended 监听', async () => {
     const { channel, urls, element } = musicSetup();
     await channel.playTrack('a');
-    expect(element.listenerCount).toBe(1);
+    expect(element.listenerCountFor('ended')).toBe(1);
     channel.dispose();
     expect(urls.live).toHaveLength(0);
     expect(element.listenerCount).toBe(0);
+  });
+});
+
+describe('MusicChannel — 加载竞态（世代号）', () => {
+  it('加载期间 stop(): 最终不出声，且不留下未回收的 objectURL', async () => {
+    const { channel, element, lib, urls } = musicSetup();
+    lib.deferLoads = true;
+
+    const loading = channel.playTrack('a');
+    channel.stop();
+    lib.resolveLoad(0); // 字节在 stop 之后才到
+    await loading;
+    await flush();
+
+    expect(element.playCount).toBe(0);
+    expect(element.paused).toBe(true);
+    expect(element.src).toBe('');
+    expect(channel.state.status).toBe('idle');
+    expect(channel.state.trackId).toBeNull();
+    expect(urls.live).toEqual([]);
+  });
+
+  it('连续切歌: 旧加载解析更慢也不得覆盖新曲，且 URL 无泄漏', async () => {
+    const { channel, element, lib, urls } = musicSetup();
+    await channel.playPlaylist('p', ['a', 'b', 'c']);
+    const firstUrl = urls.created[0];
+
+    lib.deferLoads = true;
+    const toB = channel.next(); // 先发: b
+    const toC = channel.next(); // 后发: c
+
+    expect(lib.pendingLoads.map((p) => p.trackId)).toEqual(['b', 'c']);
+    lib.resolveLoad(1); // c 先完成
+    await toC;
+    lib.resolveLoad(0); // b 后完成 —— 已作废
+    await toB;
+    await flush();
+
+    expect(channel.state.trackId).toBe('c');
+    expect(urls.created).toHaveLength(2);
+    expect(element.src).toBe(urls.created[1]);
+    expect(urls.revoked).toContain(firstUrl);
+    expect(urls.live).toEqual([urls.created[1]]);
+  });
+
+  it('加载期间 pause(): 不自动出声，但保留选中曲目，play() 能把它放出来', async () => {
+    const { channel, element, lib, urls } = musicSetup();
+    lib.deferLoads = true;
+
+    const loading = channel.playTrack('a');
+    channel.pause();
+    lib.resolveLoad(0); // 字节在 pause 之后才到
+    await loading;
+    await flush();
+
+    expect(element.playCount).toBe(0);
+    expect(channel.state.status).toBe('paused');
+    expect(channel.state.trackId).toBe('a'); // 与 stop 的差别: 曲目保留
+    expect(urls.live).toEqual([]);
+
+    // 恢复播放 —— 这首必须还放得出来，不能"暂停一次就再也放不出"
+    lib.deferLoads = false;
+    await channel.play();
+    expect(channel.state.status).toBe('playing');
+    expect(channel.state.trackId).toBe('a');
+    expect(element.playCount).toBe(1);
+    expect(element.src).toBe(urls.created[0]);
+    expect(urls.live).toEqual([urls.created[0]]);
+  });
+
+  it('切歌加载期间 pause(): 停在新曲上不自动播放，play() 接着放新曲', async () => {
+    const { channel, element, lib, urls } = musicSetup();
+    await channel.playPlaylist('pl', ['a', 'b']);
+    const firstUrl = urls.created[0];
+
+    lib.deferLoads = true;
+    const toB = channel.next();
+    channel.pause();
+    lib.resolveLoad(0);
+    await toB;
+    await flush();
+
+    expect(channel.state.status).toBe('paused');
+    expect(channel.state.trackId).toBe('b');
+    expect(element.playCount).toBe(1); // 只有 a 播过
+    expect(urls.created).toHaveLength(1);
+
+    lib.deferLoads = false;
+    await channel.play();
+    expect(channel.state.status).toBe('playing');
+    expect(channel.state.trackId).toBe('b');
+    expect(element.src).toBe(urls.created[1]);
+    expect(urls.revoked).toContain(firstUrl);
+    expect(urls.live).toEqual([urls.created[1]]);
+  });
+
+  it('加载期间 dispose(): 作废的加载不再造 objectURL', async () => {
+    const { channel, element, lib, urls } = musicSetup();
+    lib.deferLoads = true;
+
+    const loading = channel.playTrack('a');
+    channel.dispose();
+    lib.resolveLoad(0);
+    await loading;
+    await flush();
+
+    expect(urls.created).toHaveLength(0);
+    expect(urls.live).toEqual([]);
+    expect(element.playCount).toBe(0);
   });
 });
 
@@ -369,6 +478,50 @@ describe('MusicChannel — Mixing & Observation', () => {
     lib.add(makeTrack('d', { duration: 123 }));
     await channel.playTrack('d');
     expect(channel.durationSec).toBe(123);
+  });
+
+  it('暂停态 next() 后，loadedmetadata 触发即广播新的 durationSec', async () => {
+    const { channel, element, changes } = musicSetup();
+    await channel.playPlaylist('pl', ['a', 'b']);
+    channel.pause();
+    await channel.next();
+    expect(channel.state.status).toBe('paused');
+
+    const n = changes.length;
+    element.emitMetadata(180); // 元数据在换曲之后才到位
+    expect(changes).toHaveLength(n + 1);
+    expect(changes[changes.length - 1].durationSec).toBe(180);
+    expect(channel.state.durationSec).toBe(180);
+  });
+
+  it('durationchange 修正时长后重新广播，同值不重复扇出', async () => {
+    const { channel, element, changes } = musicSetup();
+    await channel.playTrack('a');
+
+    element.duration = 90;
+    element.fireDurationChange();
+    const n = changes.length;
+    expect(changes[n - 1].durationSec).toBe(90);
+
+    element.fireDurationChange(); // 同值 —— 不再广播
+    expect(changes).toHaveLength(n);
+  });
+
+  it('元素监听器不累积: 多次换曲后总数不变，dispose 后清零', async () => {
+    const { channel, element } = musicSetup();
+    const initial = element.listenerCount;
+    expect(initial).toBe(3); // ended + loadedmetadata + durationchange
+
+    await channel.playPlaylist('pl', ['a', 'b', 'c']);
+    await channel.next();
+    await channel.next();
+    await channel.prev();
+    expect(element.listenerCount).toBe(initial);
+
+    channel.dispose();
+    expect(element.listenerCount).toBe(0);
+    expect(element.listenerCountFor('loadedmetadata')).toBe(0);
+    expect(element.listenerCountFor('durationchange')).toBe(0);
   });
 });
 

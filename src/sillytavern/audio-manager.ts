@@ -18,15 +18,16 @@
  *   把整个引擎测试套件炸掉
  */
 
-import {
-  MusicChannel,
-  SfxChannel,
-  type AudioContextLike,
-  type AudioElementLike,
-  type AudioGainLike,
-  type AudioNodeLike,
-  type LoadBlobFn,
-} from './audio-channels';
+import { MusicChannel, SfxChannel, clamp01 } from './audio-channels';
+import type {
+  AudioElementLike,
+  AudioGainLike,
+  AudioManagerOptions,
+  AudioTagFallback,
+  ChannelName,
+  LoadBlobFn,
+  ManagerAudioContextLike,
+} from './types-audio';
 import type {
   AudioPlaybackState,
   AudioPlaylist,
@@ -35,50 +36,19 @@ import type {
 } from './types';
 
 // ═══════════════════════════════════════════════════════════
-// 注入 seam (§4.6)
+// 类型再导出 (§4.6)
+// 定义已收拢到 types-audio.ts；此处按原样 re-export，历史 import 路径保持不变。
 // ═══════════════════════════════════════════════════════════
 
-/**
- * Manager 需要的 AudioContext 面比声道更宽一点:
- * 它要 `destination` 接 master gain，要 `resume()` 解锁，要 `close()` 释放。
- */
-export interface ManagerAudioContextLike extends AudioContextLike {
-  readonly destination: AudioNodeLike;
-  resume(): Promise<void>;
-  close?(): Promise<void>;
-}
-
-export type ChannelName = 'music' | 'sfx';
-
-/** playByTag 未命中时的处置 —— 默认 keep: 场景中途绝不切到静音 (§8) */
-export type AudioTagFallback = 'keep' | 'stop';
-
-export interface AudioManagerOptions {
-  /** AudioContext 工厂；environment:'node' 下必须注入 */
-  createContext?: () => ManagerAudioContextLike;
-  /** 流式播放元素工厂；environment:'node' 下必须注入 */
-  createElement?: () => AudioElementLike;
-  /** Blob → URL */
-  createObjectURL?: (blob: Blob) => string;
-  /** URL 回收 */
-  revokeObjectURL?: (url: string) => void;
-  /** shuffle / playByTag 多命中的随机源，注入以求确定性 */
-  random?: () => number;
-  /** 换曲淡入淡出时长；测试用 0，UI 用 300 */
-  fadeMs?: number;
-  /** 存储 seam —— 音频字节读取 */
-  loadBlob?: LoadBlobFn;
-}
+export type {
+  ManagerAudioContextLike,
+  ChannelName,
+  AudioTagFallback,
+  AudioManagerOptions,
+} from './types-audio';
 
 /** UI 用的默认淡入淡出时长 (§4.2) */
 export const AUDIO_DEFAULT_FADE_MS = 300;
-
-function clamp01(v: number): number {
-  if (!Number.isFinite(v)) return 0;
-  if (v < 0) return 0;
-  if (v > 1) return 1;
-  return v;
-}
 
 /** 惰性引用全局构造器 —— 顶层绝不触碰，否则 node 下 import 即崩 */
 function defaultCreateContext(): ManagerAudioContextLike {

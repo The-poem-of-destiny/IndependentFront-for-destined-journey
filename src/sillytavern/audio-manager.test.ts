@@ -253,6 +253,59 @@ describe('AudioManager — 曲库同步 (§9 Library sync)', () => {
   });
 });
 
+describe('AudioManager — 加载竞态', () => {
+  let h: Harness;
+  beforeEach(async () => {
+    h = setup();
+    seed(h, [makeTrack('a'), makeTrack('b')]);
+    await h.mgr.unlock();
+  });
+
+  it('stop() 作废在飞的加载 —— 字节晚到也不会补出声', async () => {
+    h.lib.deferLoads = true;
+    const loading = h.mgr.playTrack('a');
+    h.mgr.stop();
+    h.lib.resolveLoad(0);
+    await loading;
+
+    expect(h.el.playCount).toBe(0);
+    expect(h.mgr.state.music.status).toBe('idle');
+    expect(h.mgr.state.music.trackId).toBeNull();
+    expect(h.urls.live).toEqual([]);
+  });
+
+  it('pause() 作废在飞的加载 —— 不补出声，但曲目保留且 play() 可恢复', async () => {
+    h.lib.deferLoads = true;
+    const loading = h.mgr.playTrack('a');
+    h.mgr.pause();
+    h.lib.resolveLoad(0);
+    await loading;
+
+    expect(h.el.playCount).toBe(0);
+    expect(h.mgr.state.music.status).toBe('paused');
+    expect(h.mgr.state.music.trackId).toBe('a');
+
+    h.lib.deferLoads = false;
+    await h.mgr.play();
+    expect(h.mgr.state.music.status).toBe('playing');
+    expect(h.mgr.state.music.trackId).toBe('a');
+    expect(h.urls.live).toHaveLength(1);
+  });
+
+  it('切歌期间旧请求晚到 —— 最终播放后发的曲目', async () => {
+    h.lib.deferLoads = true;
+    const first = h.mgr.playTrack('a');
+    const second = h.mgr.playTrack('b');
+    h.lib.resolveLoad(1);
+    await second;
+    h.lib.resolveLoad(0);
+    await first;
+
+    expect(h.mgr.state.music.trackId).toBe('b');
+    expect(h.urls.live).toHaveLength(1);
+  });
+});
+
 describe('AudioManager — AI 钩子 playByTag (§8 / §9 AI hook)', () => {
   let h: Harness;
   beforeEach(async () => {
