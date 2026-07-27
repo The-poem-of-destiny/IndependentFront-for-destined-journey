@@ -93,7 +93,14 @@ UI 桥接层  audio-store.ts (Pinia)  ← 应用的唯一入口
 **`pause()` 与 `stop()` 的语义不同**，差别正在这里：
 
 - `pause()` 撞上在飞加载时，作废之后**把在飞的那首记为当前曲目**并置 `needsReload`——落到「已选中这首、但还没装进元素」的暂停态；随后 `play()` 发现 `needsReload` 会重新走一遍完整加载。
-- `stop()` 只作废、回到 0、状态 `idle`，**不接管在飞的那首**（它还没提交，也就没有被选中过）。队列保留，`play()` 可以重新开始。
+- `stop()` 只作废、回到 0、状态 `idle`，**不接管在飞的那首**（它还没提交，也就没有被选中过），并且**丢弃当前曲目**（`currentTrackId = null` + `needsReload`）。队列保留，`play()` 按队列重新加载。
+  最后这半句是补上的防线：不丢的话元素里还留着上一首的 `src`，而队列早已指向另一首，「选了 A → 停止 → 再播」会放回旧的那首，且 `trackId` 与 `queue[index]` 自相矛盾。
+
+#### 取不到字节时跳过，而不是停住整个队列
+
+当前曲目的行没了、或字节读不出来时，`skipUnavailable()` 会**跳到下一首继续**。30 首的列表里坏一首就把后面 29 首全废掉、而且是毫无征兆地静音，比"跳过一首"糟糕得多。
+
+连锁跳过的次数封顶为队列长度——整条队列都坏掉时必须收敛到 `idle`，不能绕着队列无限转。只在 `autoplay`（用户确实想听）时跳；预载 / 暂停态换曲就地停下，免得悄悄把选中曲目挪走。
 
 #### 时长广播
 
@@ -142,6 +149,8 @@ UI 桥接层  audio-store.ts (Pinia)  ← 应用的唯一入口
 - 磁盘有、表里没有 → 新建曲目行；
 - 两边都有 → 清除 `missing` 标记，刷新 `size` / `mimeType`；
 - 表里有、磁盘没有 → 标 `missing: true`。
+
+**未授权不等于文件不见了**。`loadBlob` 在读盘前先看 `folderPermission`：不是 `granted` 就只提示一次「需要授权」并返回 `undefined`，**绝不写 `missing`**。浏览器重启后权限退回 `prompt` 是常态（启动期刻意不 `requestPermission`，那需要用户手势），此时每点一首就标一首的话，会把整个曲库逐首污染成"文件已移除"，而磁盘上的文件好好的。同理，`resolveFile` 抛出的异常属于权限被撤销这类**临时**故障，也不作数——只有它明确返回"找不到"才标记。
 
 **扫描期间永不删行**。理由：标签、`kind` 分类、播放列表里的位次都是用户的整理成果。硬盘没插、文件临时挪走、U 盘没插——任何一次误判都会毁掉这些成果，而它们无法自动恢复。标记 `missing` 是可逆的，删行不是。
 
@@ -388,7 +397,7 @@ ${大陆方位}-${区域}-${势力}-${子级势力}-${聚落/地标}-${区位}-$
 `buildLocationChain(location, nodes?)` 产出 `{ name, depth }[]`：
 
 1. **路径段**：最细一段 `depth 0`，往左每退一段深一级；
-2. **`location-db` 补充**：由细到粗逐段模糊定位，取**第一个**能定位到的段，把它的 `parentId` 祖先接在路径段之后。定位到的规范名本身算 `depth 0`（「铁炉堡的地下锻炉」和「铁炉堡」指的是同一个地方，谁命中都不算回退）；
+2. **`location-db` 补充**：由细到粗逐段模糊定位，取**第一个**能定位到的段，把它的 `parentId` 祖先接在**它**之后。规范名的深度 = **命中它的那一段的深度**——输入本身就是那个地方时（「铁炉堡的地下锻炉」→「铁炉堡」）那就是 `depth 0`，谁命中都不算回退；但定位发生在较粗的段上时（`永夜领-诺克瓦罗斯城-地穴` 里最细的「地穴」查不到，是「诺克瓦罗斯城」才接上地图的）就不能提到 0，否则城市级曲子会跟区位级曲子平起平坐，最具体的那首反而要靠 `createdAt` 兜底才分胜负；
 3. 全链按 depth 稳定排序——选曲按 depth 分组短路，链必须有序。
 
 **为什么路径优先于 `location-db`**：`location-db` 只有三十来个节点，「大陆中东部」这类方位段、「龙脊山脉」这类地貌名它根本没有；而路径里每一段都是现成的层级。`location-db` 退居补充，真正的价值是**路径只写到城市时把势力和大陆补上**，以及「白曜城中央广场」这种没写路径的单段输入——这时它是唯一的层级来源。一条规则同时照顾两种形状。
@@ -506,19 +515,20 @@ story Agent  输出 <play_audio situation="战斗" mood="紧张"/>
    │           ⚠️ 约定尚未写进任何 prompt —— 这一段是空的
    ▼
 marker-protocol.ts  scanPlayAudioMarkers() → PlayAudioMarker
-   │           自闭合与成对写法都认；scanMarkers 一并收录
+   │           自闭合 / 成对 / 只有开标签没闭合，三种写法都认；scanMarkers 一并收录
    ▼
 agent-orchestrator.ts  processStageMarkers() Stage 1 → events.onPlayAudio
-   │           就地触发，**不暂存也不 await**
+   │           编排器不 await；一轮多个标记只取最后一个
    ▼
-game-pipeline.ts  handlePlayAudio() → audioStore.playByScene()
+game-pipeline.ts  Stage 1 只**暂存**标记；run() 末尾 refreshFromDb() 之后才
+               flushPendingAudio() → handlePlayAudio() → playByScene()
                地点取 player.location、角色取 present === true 的 NPC
 ```
 
 四个设计取舍，每个都有具体理由：
 
 - **AI 不写地点，也不写在场角色**。这两样已经是游戏状态里的事实（`player.location` / `character.present`），让 AI 再写一遍只会多一处漂移源——它写的地点和状态里的地点对不上时，你没有第三方可以裁决。AI 只负责它独有的判断：此刻是什么情绪、什么情境。
-- **不进管线时序**。`onPlayAudio` 既不暂存到 Stage 2（像 `craft_request` 那样），编排器也不 `await` 它。配乐是旁路氛围，换不换歌都不该影响这一轮叙事的产出；抛错也只 `console.warn` 吞掉。
+- **不阻塞管线，但必须等状态落库**。编排器不 `await` 配乐，抛错也只 `console.warn` 吞掉——配乐是旁路氛围，换不换歌都不该影响这一轮叙事的产出。但触发点**不能留在 Stage 1**：story 在那时就写下了标记，而 `player.location` / `character.present` 要等 Stage 2 的 `request_dispatcher` / `vars_update` 落库、再经 `refreshFromDb()` 才更新。**转场恰恰是唯一真正该换歌的时刻**，在 Stage 1 播就等于正文已经进了熔火裂谷、BGM 还在放上一座城的曲子。所以 Stage 1 只暂存，`run()` 末尾回读之后才 flush（abort / 报错路径同样 flush——正文都产出了，该换的歌照换）。
 - **一轮多个标记时只取最后一个**。AI 在一轮里改主意是常事，以它最后的判断为准；连着切两首歌只会让玩家听见两个开头。
 - **标记必须从正文里剥掉**。`stripPlayAudioMarkers()` 在 story 消息入库前剥它——漏出去就是玩家眼前的一行尖括号。这里**刻意不用 `stripMarkers`**：正文渲染路径目前保留着 craft/combat 等标记（美化规则与下游链路还在读），一把全剥会改掉既有行为。
 

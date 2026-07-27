@@ -257,6 +257,11 @@ export class MusicChannel {
     this.invalidateLoad();
     this.element.pause();
     this.element.currentTime = 0;
+    // 必须**丢弃选中曲目**: 否则元素里还留着上一首的 src，而队列早已指向另一首，
+    // 「选了 A → 停止 → 再播」会放回旧的那首，且 trackId 与 queue[index] 自相矛盾。
+    // 置 needsReload 让 play() 老老实实按队列重新加载一遍。
+    this.currentTrackId = null;
+    this.needsReload = true;
     this.status = 'idle';
     this.emit();
   }
@@ -471,7 +476,7 @@ export class MusicChannel {
    * 失效即刻返回 —— **不写任何状态**，并回收本次自己造出来的 object URL。
    * 上一段 URL 的回收刻意推迟到提交那一刻: 中途作废时旧 URL 仍是元素正在用的那个。
    */
-  private async loadCurrent(autoplay: boolean): Promise<void> {
+  private async loadCurrent(autoplay: boolean, attempt = 0): Promise<void> {
     if (this.disposed) return;
     const gen = this.invalidateLoad();
     this.needsReload = false;
@@ -495,10 +500,7 @@ export class MusicChannel {
 
     const track = this.resolveTrack(id);
     if (!track) {
-      this.pendingLoadTrackId = null;
-      this.clearCurrent();
-      this.status = 'idle';
-      this.emit();
+      await this.skipUnavailable(autoplay, attempt);
       return;
     }
 
@@ -510,10 +512,7 @@ export class MusicChannel {
       const blob = await this.loadBlob(id);
       if (this.isStale(gen)) return; // 已解析的 blob 引用直接丢弃
       if (!blob) {
-        this.pendingLoadTrackId = null;
-        this.clearCurrent();
-        this.status = 'idle';
-        this.emit();
+        await this.skipUnavailable(autoplay, attempt);
         return;
       }
       createdUrl = this.createObjectURL(blob);
@@ -542,6 +541,29 @@ export class MusicChannel {
       this.status = 'paused';
     }
     this.pendingLoadTrackId = null;
+    this.emit();
+  }
+
+  /**
+   * 当前曲目取不到（曲目行没了 / 字节读不出）时的去向。
+   *
+   * **跳到下一首继续，而不是停住整个队列** —— 30 首的列表里坏一首就把后面 29 首
+   * 全废掉，而且是毫无征兆地静音，用户完全不知道发生了什么。
+   *
+   * `attempt` 是本次连锁跳过已经试过的曲目数，上限为队列长度: 整条队列都坏掉时
+   * 必须收敛到 idle，不能绕着队列无限转。只在 autoplay（用户确实想听）时跳；
+   * 非自动播放（预载/暂停态换曲）就地停下，免得悄悄把选中曲目挪走。
+   */
+  private async skipUnavailable(autoplay: boolean, attempt: number): Promise<void> {
+    this.pendingLoadTrackId = null;
+    const canSkip = autoplay && this.queue.length > 1 && attempt + 1 < this.queue.length;
+    if (canSkip) {
+      this.index = (this.index + 1) % this.queue.length;
+      await this.loadCurrent(autoplay, attempt + 1);
+      return;
+    }
+    this.clearCurrent();
+    this.status = 'idle';
     this.emit();
   }
 

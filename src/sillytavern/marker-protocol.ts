@@ -337,11 +337,18 @@ export function scanCraftGenRequests(text: string): CraftGenRequestMarker[] {
  */
 export function scanPlayAudioMarkers(text: string): PlayAudioMarker[] {
   const markers: PlayAudioMarker[] = [];
-  // 自闭合 `<play_audio .../>` 或成对 `<play_audio ...>body</play_audio>`
-  const regex = /<play_audio([^>]*?)\/>|<play_audio([^>]*?)>([\s\S]*?)<\/play_audio>/g;
+  // 三种写法都认，按此顺序尝试:
+  //   ① 自闭合 `<play_audio .../>`
+  //   ② 成对   `<play_audio ...>body</play_audio>`
+  //   ③ 只有开标签、没写闭合 —— AI 漏写闭合标签是常事，不认它就等于
+  //      「既不换歌、也剥不掉」，那行尖括号会直接漏到玩家眼前
+  // 属性段用 `"…"|'…'|[^>"']` 逐段吞，于是属性值里的 `>` 不会被当成标签结束；
+  // `i` 标志兼容 AI 写成大写的情况。
+  const regex =
+    /<play_audio((?:"[^"]*"|'[^']*'|[^>"'])*?)\/>|<play_audio((?:"[^"]*"|'[^']*'|[^>"'])*?)>([\s\S]*?)<\/play_audio\s*>|<play_audio((?:"[^"]*"|'[^']*'|[^>"'])*?)>/gi;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {
-    const attrs = parseTagAttributes(match[1] ?? match[2] ?? '');
+    const attrs = parseTagAttributes(match[1] ?? match[2] ?? match[4] ?? '');
     markers.push({
       type: 'play_audio',
       rawContent: match[0],

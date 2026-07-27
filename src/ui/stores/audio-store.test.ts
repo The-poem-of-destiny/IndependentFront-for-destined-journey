@@ -108,6 +108,21 @@ function fakeDirHandle(files: FakeFile[], opts: { permission?: string; name?: st
 
 const MP3 = (name: string, size = 100): FakeFile => ({ name, size, type: 'audio/mpeg' })
 
+/**
+ * 「扫描时列得出、播放时读不到」的目录句柄 —— 文件在扫描之后被移走的真实情形。
+ * 用它才能在**已授权**的前提下验证 markMissing：未授权时 loadBlob 刻意不标 missing
+ * （那是权限问题不是文件问题），拿未授权路径去测 markMissing 等于在测一个 bug。
+ */
+function fakeDirHandleUnreadable(files: FakeFile[]) {
+  const h = fakeDirHandle(files) as unknown as Record<string, unknown>
+  h.getFileHandle = async () => {
+    const err = new Error('not found')
+    err.name = 'NotFoundError'
+    throw err
+  }
+  return h as unknown as FileSystemDirectoryHandle
+}
+
 function fileTrack(over: Partial<AudioTrack> = {}): AudioTrack {
   return {
     id: 'tf1',
@@ -214,9 +229,9 @@ describe('audio-store · loadBlob 分派', () => {
   })
 
   it('markMissing 落库失败 → 不装作没事：如实提示，且同一曲目只提示一次', async () => {
-    // permission='prompt' → init 不扫描，曲目保持 missing:false（库里写着"可播放"）
-    trackRows.set('tf1', fileTrack({ relativePath: 'gone.mp3', missing: false }))
-    storedHandle(fakeDirHandle([MP3('night.mp3')], { permission: 'prompt' }))
+    // 扫描时 night.mp3 在（曲目保持 missing:false，库里写着"可播放"），播放时读不到
+    trackRows.set('tf1', fileTrack({ relativePath: 'night.mp3', missing: false }))
+    storedHandle(fakeDirHandleUnreadable([MP3('night.mp3')]))
 
     const store = useAudioStore()
     await store.init()
@@ -237,8 +252,8 @@ describe('audio-store · loadBlob 分派', () => {
   })
 
   it('markMissing 成功后不产生任何错误提示', async () => {
-    trackRows.set('tf1', fileTrack({ relativePath: 'gone.mp3', missing: false }))
-    storedHandle(fakeDirHandle([MP3('night.mp3')], { permission: 'prompt' }))
+    trackRows.set('tf1', fileTrack({ relativePath: 'night.mp3', missing: false }))
+    storedHandle(fakeDirHandleUnreadable([MP3('night.mp3')]))
 
     const store = useAudioStore()
     await store.init()
@@ -882,5 +897,42 @@ describe('audio-store · playByScene', () => {
 
     expect(await store.playByScene({ characters: ['查无此人'] })).toBeNull()
     expect(play).not.toHaveBeenCalled()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
+// 回归: 未授权 ≠ 文件不见了（审查发现 ②）
+// ═══════════════════════════════════════════════════════════
+
+describe('audio-store · 未授权时不写 missing', () => {
+  it("permission='prompt' 时播放 file 曲目：提示授权，**不**把曲目标成已移除", async () => {
+    trackRows.set('tf1', fileTrack({ relativePath: 'night.mp3', missing: false }))
+    storedHandle(fakeDirHandle([MP3('night.mp3')], { permission: 'prompt' }))
+
+    const store = useAudioStore()
+    await store.init()
+    const ui = useUIStore()
+
+    expect(await store.loadBlob('tf1')).toBeUndefined()
+    // 磁盘上文件好好的 —— 库里绝不能写成"文件已移除"
+    expect(trackRows.get('tf1')?.missing).toBe(false)
+    const errors = ui.toasts.filter((t) => t.type === 'error')
+    expect(errors).toHaveLength(1)
+    expect(errors[0].message).toContain('授权')
+  })
+
+  it('整会话只提示一次授权 —— 播放路径会被反复触发', async () => {
+    trackRows.set('a', fileTrack({ id: 'a', relativePath: 'night.mp3' }))
+    trackRows.set('b', fileTrack({ id: 'b', name: '别的曲', relativePath: 'other.mp3' }))
+    storedHandle(fakeDirHandle([MP3('night.mp3'), MP3('other.mp3')], { permission: 'prompt' }))
+
+    const store = useAudioStore()
+    await store.init()
+    const ui = useUIStore()
+
+    await store.loadBlob('a')
+    await store.loadBlob('b')
+    await store.loadBlob('a')
+    expect(ui.toasts.filter((t) => t.type === 'error')).toHaveLength(1)
   })
 })

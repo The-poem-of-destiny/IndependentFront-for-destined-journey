@@ -67,6 +67,12 @@ async function renameSelectedPlaylist(): Promise<void> {
     const name = await dialogs.askPrompt({ title: '重命名播放列表', label: '播放列表名称', value: draft })
     if (!name) return
     if (await audio.renamePlaylist(p.id, name)) return
+    // store 返回 false 有两种原因：撞名、或这一条已经不存在了（在别处被删）。
+    // 一律归因撞名的话，列表被删时用户换十个名字都出不去，只能取消。
+    if (!audio.findPlaylist(p.id)) {
+      ui.toast('这个播放列表已经不存在了（可能在别处被删除）。', 'error')
+      return
+    }
     draft = name
     ui.toast(`已有名为「${name}」的播放列表，请换一个名字。`, 'error')
   }

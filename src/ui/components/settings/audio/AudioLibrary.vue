@@ -246,10 +246,12 @@ async function batchAddToPlaylist(): Promise<void> {
   const ids = selectedTracks.value.filter((t) => t.kind === 'music').map((t) => t.id)
   if (ids.length === 0 || !batchPlaylistId.value) return
   const res = await audio.addTracksToPlaylist(batchPlaylistId.value, ids)
-  clearSelection()
-  emit('announce', res.skipped > 0
-    ? `已加入 ${res.ok} 首曲目，${res.skipped} 首已在列表中，已跳过。`
-    : `已加入 ${res.ok} 首曲目。`)
+  // 失败时**保住选中集合**：清空等于逼用户重勾一遍才能重试
+  if (res.ok > 0 || res.failed === 0) clearSelection()
+  const parts: string[] = [`已加入 ${res.ok} 首曲目`]
+  if (res.skipped > 0) parts.push(`${res.skipped} 首已在列表中，已跳过`)
+  if (res.failed > 0) parts.push(`${res.failed} 首没能加入（选择已保留，可重试）`)
+  emit('announce', `${parts.join('，')}。`)
 }
 
 function toggleHideBuiltin(t: AudioTrack): void {
@@ -287,8 +289,14 @@ async function onFilesPicked(e: Event): Promise<void> {
   }
   try {
     const created = await audio.uploadFiles(files, uploadKind.value)
-    ui.toast(`已添加 ${created.length} 个音频`, 'success')
-    emit('announce', `已添加 ${created.length} 个音频`)
+    // uploadFiles 自己会就失败弹一条 error；这里再弹 success 就是两条打架，
+    // 且成功色调那条在后 —— 一个都没导入进来时绝不能报成功。
+    if (created.length > 0) {
+      ui.toast(`已添加 ${created.length} 个音频`, 'success')
+    }
+    emit('announce', created.length > 0
+      ? `已添加 ${created.length} 个音频`
+      : '没有音频被导入。')
   } catch (err) {
     if (isQuotaError(err)) {
       ui.toast(
@@ -324,8 +332,19 @@ function cancelEdit(): void {
 
 async function saveEdit(t: AudioTrack): Promise<void> {
   const name = editName.value.trim()
+  // 空名字：以前会静默跳过改名，但标签/类型照存、面板照关，用户以为改名生效了
+  if (!name) {
+    ui.toast('曲目名称不能为空。', 'error')
+    return
+  }
   // 撞名 → store 拒绝。行内编辑面板原样留着（用户填的名字/标签都还在），改个名再存。
-  if (name && name !== t.name && !(await audio.renameTrack(t.id, name))) {
+  if (name !== t.name && !(await audio.renameTrack(t.id, name))) {
+    // false 的两种原因要分开说，否则曲目已被删时用户换多少个名字都出不去
+    if (!audio.findTrack(t.id)) {
+      ui.toast('这首曲目已经不存在了（可能在别处被删除）。', 'error')
+      editingId.value = ''
+      return
+    }
     ui.toast(`已有名为「${name}」的曲目，请换一个名字。`, 'error')
     return
   }

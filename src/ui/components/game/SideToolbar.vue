@@ -37,6 +37,7 @@ function handleClick(id: string) {
       v-for="tool in tools"
       :key="tool.id"
       class="tool-btn"
+      :data-tool="tool.id"
       :title="tool.label"
       :aria-label="tool.label"
       @click="handleClick(tool.id)"

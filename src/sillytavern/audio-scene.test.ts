@@ -72,9 +72,23 @@ describe('nameSimilarity', () => {
   });
 
   it('纯字形相似压在包含档之下 —— 共享字不该冒充包含', () => {
-    const shape = nameSimilarity('碎星群岛', '碎冕冰脊');
-    expect(shape).toBeLessThan(0.6);
-    expect(shape).toBeLessThan(nameSimilarity('碎星群岛外海', '碎星群岛'));
+    // 样本必须**真的有共享二元组**，否则 Dice 恒为 0，这条断言就成了空转:
+    // 「龙脊山脉北」与「龙脊之脉北」共享 {龙脊, 脉北}，落在字形档
+    const shape = nameSimilarity('龙脊山脉北', '龙脊之脉北');
+    expect(shape).toBeGreaterThan(0);            // 确实走到了 Dice 分支
+    expect(shape).toBeLessThan(0.6);             // 且被压在包含档之下
+    expect(shape).toBeLessThan(nameSimilarity('龙脊山脉北麓', '龙脊山脉'));
+  });
+
+  it('字形档整体不超过 0.55 —— 这条上限是"档间不重叠"的全部依据', () => {
+    // 构造一个 Dice 尽可能高的样本: 只差一个字，共享绝大多数二元组
+    const almost = nameSimilarity('碎星群岛外', '碎星群岛内');
+    expect(almost).toBeGreaterThan(0.3);         // 字形上已经很像了
+    expect(almost).toBeLessThanOrEqual(0.55);    // 仍然进不了包含档
+  });
+
+  it('毫无共享字形时归零', () => {
+    expect(nameSimilarity('碎星群岛', '碎冕冰脊')).toBe(0); // 二元组零交集
   });
 
   it('毫不相干的名字达不到门槛', () => {
@@ -90,8 +104,9 @@ describe('buildLocationChain', () => {
       { name: '艾瑟嘉德', depth: 0 },
       { name: '奥古斯提姆帝国', depth: 1 },
       { name: '大陆中东部区域', depth: 2 },
-      // 帝国段在 location-db 里定位得到，它的大陆父级接在路径之后
-      { name: '阿斯塔利亚大陆', depth: 3 },
+      // 帝国段(depth 1)在 location-db 里定位得到，它的大陆父级接在**它**之后 → depth 2，
+      // 与路径里同为大陆级的「大陆中东部区域」平级，而不是被压到更深一层
+      { name: '阿斯塔利亚大陆', depth: 2 },
     ]);
   });
 
@@ -359,5 +374,32 @@ describe('resolveSceneByTags · 边界', () => {
     const r = resolveSceneByTags(LIB, { location: '金谷城' });
     expect(r?.resolvedLocation).toBe('奥古斯提姆帝国');
     expect(r?.fallbackDepth).toBe(1);
+  });
+});
+
+// ═══ 回归: 规范名深度（审查发现 ⑫）═══════════════════════
+
+describe('buildLocationChain · 规范名深度', () => {
+  const DEEP: LocationNode[] = [
+    { id: 'r', name: '永夜盟约', type: 'region', parentId: null, tier: 2, description: '', neighbors: [] },
+    { id: 'c', name: '诺克瓦罗斯', type: 'city', parentId: 'r', tier: 3, description: '', neighbors: [] },
+  ];
+
+  it('命中发生在较粗的段上时，规范名不得被提升到 depth 0', () => {
+    // 最细段「地穴」地图上查不到，是「诺克瓦罗斯城」(depth 1) 才接上地图的
+    const chain = buildLocationChain('永夜领-诺克瓦罗斯城-地穴', DEEP);
+    const byName = new Map(chain.map((l) => [l.name, l.depth]));
+    expect(byName.get('地穴')).toBe(0);
+    expect(byName.get('诺克瓦罗斯')).toBe(1); // 规范名跟着命中段，不是 0
+    expect(byName.get('诺克瓦罗斯')).toBeGreaterThan(byName.get('地穴')!);
+  });
+
+  it('最具体地点的专属曲不会输给城市级曲子', () => {
+    const cave = track('cave', '地穴', ['地点:地穴'], { createdAt: 9 });
+    const city = track('city', '诺克瓦罗斯', ['地点:诺克瓦罗斯'], { createdAt: 1 });
+    const r = resolveSceneByTags([city, cave], { location: '永夜领-诺克瓦罗斯城-地穴' }, { nodes: DEEP });
+    // 修复前两者同为 1.00，靠 createdAt 兜底 → 城市曲赢；修复后地穴 depth 0 胜出
+    expect(r?.track.id).toBe('cave');
+    expect(r?.fallbackDepth).toBe(0);
   });
 });

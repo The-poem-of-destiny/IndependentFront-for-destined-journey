@@ -191,10 +191,20 @@ export function installUnlockListener(): void {
   if (!doc || typeof doc.addEventListener !== 'function') return
   unlockInstalled = true
 
+  // 监听**只在真的解锁成功之后**才摘。
+  //
+  // 先摘再解锁的写法有个致命洞: AudioManager.unlock() 在 resume() 失败时静默
+  // 保持锁定（Safari/iOS 上首次手势被判定已消耗是常事），而此时监听已经没了、
+  // unlockInstalled 又挡着重装、全项目也没有任何 UI 调 unlock() —— 音频就永久
+  // 锁死，只能刷新页面。文档写的是"下一次手势再试"，那就得真的留住下一次手势。
   const handler = (): void => {
-    doc.removeEventListener('pointerdown', handler)
-    doc.removeEventListener('keydown', handler)
-    void getAudioManager().unlock()
+    void getAudioManager()
+      .unlock()
+      .then(() => {
+        if (!getAudioManager().state.unlocked) return // 失败: 留着监听等下一次手势
+        doc.removeEventListener('pointerdown', handler)
+        doc.removeEventListener('keydown', handler)
+      })
   }
   doc.addEventListener('pointerdown', handler)
   doc.addEventListener('keydown', handler)

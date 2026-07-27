@@ -169,23 +169,31 @@ export function buildLocationChain(
   // 路径最细的一段常常是 location-db 里没有的区位（「贵族区」），
   // 真正能接上地图的是稍粗的那段（「艾瑟嘉德」）—— 卡在第一段就白补了。
   let node: LocationNode | undefined;
-  for (const seg of segments) {
+  let matchedDepth = 0;
+  for (let d = 0; d < segments.length; d += 1) {
     let best = SCENE_MATCH_THRESHOLD;
     for (const n of nodes) {
-      const score = nameSimilarity(seg, n.name);
+      const score = nameSimilarity(segments[d], n.name);
       if (score > best) {
         best = score;
         node = n;
       }
     }
-    if (node) break;
+    if (node) {
+      matchedDepth = d;
+      break;
+    }
   }
   if (!node) return links;
 
-  push(node.name, 0);
+  // 规范名的深度 = **命中它的那一段的深度**，不是 0。
+  // 定位可能发生在较粗的段上（`永夜领-诺克瓦罗斯城-地穴` 里最细的「地穴」查不到，
+  // 是「诺克瓦罗斯城」才接上地图的），无条件提到 0 会让城市级曲子跟区位级曲子平起
+  // 平坐，最具体的那首反而要靠 createdAt 兜底才分胜负。
+  push(node.name, matchedDepth);
 
-  // ③ 沿 parentId 上溯，接在路径段之后
-  const tailBase = segments.length - 1;
+  // ③ 沿 parentId 上溯，接在命中段之后
+  const tailBase = matchedDepth;
   let cursor: LocationNode | undefined = node;
   for (let step = 1; step <= MAX_CHAIN_DEPTH; step += 1) {
     const parentId: string | null = cursor?.parentId ?? null;

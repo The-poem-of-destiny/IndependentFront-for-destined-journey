@@ -85,6 +85,9 @@ async function forgetFolder(): Promise<void> {
       <span class="folder-name">{{ audio.folderName || '音乐文件夹' }}</span>
       <span class="folder-note">浏览器每次启动后需要重新确认一次访问权限。</span>
       <AppButton variant="primary" size="sm" @click="grantFolder">授权访问音乐文件夹</AppButton>
+      <!-- 换个文件夹 / 取消关联必须在这里也给出口，否则未授权态是个死胡同 -->
+      <AppButton variant="secondary" size="sm" @click="chooseFolder">改选文件夹</AppButton>
+      <AppButton variant="ghost" size="sm" @click="forgetFolder">取消关联</AppButton>
     </template>
 
     <template v-else-if="audio.folderPermission === 'granted'">
@@ -93,13 +96,19 @@ async function forgetFolder(): Promise<void> {
       <AppButton variant="secondary" size="sm" :disabled="audio.scanning" @click="rescanFolder">
         {{ audio.scanning ? '扫描中…' : '重新扫描' }}
       </AppButton>
-      <AppButton variant="ghost" size="sm" @click="forgetFolder">取消关联</AppButton>
+      <!-- 扫描中同样要禁用：在飞的对账循环会把刚标上的 missing 又写回可播放 -->
+      <AppButton variant="ghost" size="sm" :disabled="audio.scanning" @click="forgetFolder">
+        取消关联
+      </AppButton>
     </template>
 
     <template v-else>
       <span class="folder-name">{{ audio.folderName || '音乐文件夹' }}</span>
       <span class="folder-note">浏览器拒绝了访问该文件夹，本地曲目暂时无法播放。</span>
       <AppButton variant="secondary" size="sm" @click="grantFolder">重新授权</AppButton>
+      <!-- 浏览器里被永久阻止时重新授权是无效的，必须留下改选/取消两条出路 -->
+      <AppButton variant="secondary" size="sm" @click="chooseFolder">改选文件夹</AppButton>
+      <AppButton variant="ghost" size="sm" @click="forgetFolder">取消关联</AppButton>
     </template>
   </div>
 </template>

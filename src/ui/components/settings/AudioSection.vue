@@ -45,14 +45,28 @@ provide(audioDialogsKey, {
 
 // ===== 生命周期 =====
 
+/**
+ * 轮询的本地配对标志。init() 是异步的（manifest fetch + Dexie + 文件夹扫描，
+ * 可达数秒），用户完全可能在它兑现之前就切走分区 —— 那时 onUnmounted 已经跑过、
+ * 引用计数还是 0（被 Math.max 夹住），随后 start 才执行，计数从此**永远减不回去**，
+ * 定时器一路跑到刷新页面。对齐 MiniPlayer 的 polling 守卫。
+ */
+let polling = false
+let unmounted = false
+
 onMounted(async () => {
   await audio.init()
   await audio.loadLibrary()
+  if (unmounted) return // 已经切走了，不要再把计数抬起来
   // 进度条只在本分区打开时可见 → 轮询随挂载/卸载起停（引用计数，§6.3）
+  polling = true
   audio.startPositionPolling()
 })
 
 onUnmounted(() => {
+  unmounted = true
+  if (!polling) return
+  polling = false
   audio.stopPositionPolling()
 })
 

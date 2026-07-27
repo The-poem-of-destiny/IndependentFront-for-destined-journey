@@ -55,8 +55,16 @@ function onCycleRepeat() {
 function onToggleShuffle() { audio.setShuffle(!music.value.shuffle) }
 
 function onSelectPlaylist(e: Event) {
-  const id = (e.target as HTMLSelectElement).value
-  if (id) void audio.playPlaylist(id)
+  const el = e.target as HTMLSelectElement
+  const id = el.value
+  if (id) {
+    void audio.playPlaylist(id)
+    return
+  }
+  // 选了「— 未选择 —」：store 里没有"取消选择列表"这一动作，于是 playlistId 不变，
+  // Vue 下次 patch 因绑定值未变而跳过，DOM 的 value 就卡在空串上 ——
+  // 音乐还在放列表 A，下拉框却一直显示"未选择"。手动写回，保持受控。
+  el.value = music.value.playlistId ?? ''
 }
 
 // ── 进度条 ──────────────────────────────────────────────────
@@ -105,7 +113,13 @@ function onDocKeydown(e: KeyboardEvent) {
 
 function onDocPointerDown(e: Event) {
   const el = cardRef.value
-  if (el && e.target instanceof Node && !el.contains(e.target)) close()
+  if (!el || !(e.target instanceof Node)) return
+  if (el.contains(e.target)) return
+  // 侧栏「音乐」按钮本身是 toggle：pointerdown 先到 document 把卡片关掉，
+  // 随后同一次点击的 click 又把它打开 —— 结果这个按钮只能开不能关。
+  // 把触发它的那个按钮排除在"外部点击"之外，让 toggle 自己决定开关。
+  if (e.target instanceof Element && e.target.closest('[data-tool="audio"]')) return
+  close()
 }
 
 let listening = false

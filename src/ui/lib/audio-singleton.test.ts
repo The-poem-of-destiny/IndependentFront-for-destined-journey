@@ -55,6 +55,9 @@ class FakeAudioContext implements ManagerAudioContextLike {
   static constructed = 0
   static closed = 0
   static throwOnConstruct = false
+  /** resume() 必失败 —— Safari/iOS 上首次手势被判定已消耗的情形 */
+  static failResume = false
+  static resumeCalls = 0
 
   readonly currentTime = 0
   readonly destination: AudioNodeLike = { connect() {}, disconnect() {} }
@@ -68,7 +71,10 @@ class FakeAudioContext implements ManagerAudioContextLike {
   createBufferSource(): AudioBufferSourceLike { return fakeBufferSource() }
   createMediaElementSource(): AudioNodeLike { return { connect() {}, disconnect() {} } }
   async decodeAudioData(): Promise<AudioBufferLike> { return { duration: 1 } }
-  async resume(): Promise<void> {}
+  async resume(): Promise<void> {
+    FakeAudioContext.resumeCalls += 1
+    if (FakeAudioContext.failResume) throw new Error('resume 被浏览器拒绝')
+  }
   async close(): Promise<void> { FakeAudioContext.closed += 1 }
 }
 
@@ -276,7 +282,35 @@ describe('installUnlockListener', () => {
     expect(getAudioManager().state.unlocked).toBe(true)
   })
 
-  it('首次手势后两个监听都自摘，重复事件不再解锁', async () => {
+  it('resume() 失败时**留住监听**，下一次手势还能再试（不自摘）', async () => {
+    // 必须用真的会拒绝的 ctx：不 stub 的话走静默桩，桩的 resume() 永远成功
+    vi.stubGlobal('AudioContext', FakeAudioContext)
+    resetAudioManager() // 前一条用例可能已经解锁过同一个单例
+    FakeAudioContext.failResume = true
+    FakeAudioContext.resumeCalls = 0
+    try {
+      installUnlockListener()
+      document.dispatchEvent(new Event('pointerdown'))
+      await flush()
+      expect(getAudioManager().state.unlocked).toBe(false)
+      expect(FakeAudioContext.resumeCalls).toBe(1)
+
+      // 第二次手势必须还能打到 —— 先摘监听的话这里永远是 1，音频就此永久锁死
+      document.dispatchEvent(new Event('pointerdown'))
+      await flush()
+      expect(FakeAudioContext.resumeCalls).toBe(2)
+
+      // 一旦浏览器肯放行，同一套监听就把它解开
+      FakeAudioContext.failResume = false
+      document.dispatchEvent(new Event('keydown'))
+      await flush()
+      expect(getAudioManager().state.unlocked).toBe(true)
+    } finally {
+      FakeAudioContext.failResume = false
+    }
+  })
+
+  it('解锁成功后两个监听都自摘，重复事件不再解锁', async () => {
     const remove = vi.spyOn(document, 'removeEventListener')
     installUnlockListener()
     document.dispatchEvent(new Event('pointerdown'))

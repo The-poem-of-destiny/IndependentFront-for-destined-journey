@@ -90,6 +90,11 @@ export class GamePipeline {
   private currentContext: AgentContext | null = null
   /** 步5: 剧情异步落库任务（preCheckPlot/postCheckPlot），run() 末尾统一 await 避免 refreshFromDb 读到中间态 */
   private pendingPlotTasks: Promise<void>[] = []
+  /**
+   * 🎵 本轮待播的配乐标记。Stage 1 只暂存，等状态落库+回读之后才真正选曲 ——
+   * 理由见 run() 末尾。一轮多个标记时后者覆盖前者（以 AI 最后的判断为准）。
+   */
+  private pendingAudioMarker: PlayAudioMarker | null = null
 
   constructor(deps: GamePipelineDeps) {
     this.game = deps.gameStore
@@ -150,6 +155,7 @@ export class GamePipeline {
       const context = this.buildContext(userInput)
       this.currentContext = context
       this.pendingPlotTasks = []
+      this.pendingAudioMarker = null
       await this.loadPlotData(context)
 
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
@@ -209,9 +215,29 @@ export class GamePipeline {
       // 这里统一回读，让 Pinia 内存态（characters/metadata/saveProfile）与 DB 对齐，
       // DebugPanel 导出和右侧状态栏才能拿到最新数据。abort/报错时部分 patch 可能已提交，同样需要回读。
       await this.game.refreshFromDb()
+      // 🎵 配乐放在**回读之后**才触发。
+      //
+      // story 在 Stage 1 就写下了标记，但那时 player.location / character.present
+      // 还是上一轮的值 —— 它们要等 Stage 2 的 request_dispatcher / vars_update 落库、
+      // 再经这里的 refreshFromDb 才更新。而**转场恰恰是唯一真正该换歌的时刻**：
+      // 在 Stage 1 播，正文已经进了熔火裂谷，BGM 还在放上一座城的曲子。
+      this.flushPendingAudio()
       this.game.isGenerating = false
       this.abortController = null
     }
+  }
+
+  /**
+   * 🎵 播放本轮暂存的配乐标记。不 await —— 配乐是旁路氛围，出问题不该影响这一轮。
+   * 管线被 abort / 报错时同样会走到这里：正文可能已经产出，该换的歌照换。
+   */
+  private flushPendingAudio(): void {
+    const marker = this.pendingAudioMarker
+    this.pendingAudioMarker = null
+    if (!marker) return
+    void this.handlePlayAudio(marker).catch((err) => {
+      console.warn('[GamePipeline] 场景配乐失败（不阻塞本轮）:', err)
+    })
   }
 
   /** 中止当前管线运行 */
@@ -596,11 +622,9 @@ export class GamePipeline {
 
   private buildEventHandlers(): OrchestratorEvents {
     return {
-      // 🎵 配乐：不 await，编排器也不等它
+      // 🎵 配乐：只暂存，**不在 Stage 1 就播** —— 见 run() 末尾的说明
       onPlayAudio: (marker) => {
-        void this.handlePlayAudio(marker).catch((err) => {
-          console.warn('[GamePipeline] 场景配乐失败（不阻塞本轮）:', err)
-        })
+        this.pendingAudioMarker = marker
       },
 
       // === Stage 回调 ===

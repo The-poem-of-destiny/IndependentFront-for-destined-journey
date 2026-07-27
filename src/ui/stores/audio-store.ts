@@ -292,17 +292,37 @@ export const useAudioStore = defineStore('audio', () => {
       await markMissing(track)
       return undefined
     }
+
+    // 没授权 ≠ 文件不见了。浏览器重启后权限退回 'prompt'（initFolder 刻意不主动
+    // requestPermission，那需要用户手势），此时**每点一首就标一首 missing** 会把整个
+    // 曲库逐首污染成"文件已移除"，而磁盘上的文件好好的。只提示、不写库。
+    if (folderPermission.value !== 'granted') {
+      notifyPermissionNeeded()
+      return undefined
+    }
+
     let file: File | null = null
     try {
       file = await resolveFile(folderHandle, track.relativePath)
     } catch {
-      file = null
+      // resolveFile 只把"确实找不到"转成 null，抛出来的是权限被撤销之类的**临时**故障。
+      // 拿临时故障去标 missing 同样是在写假信息。
+      notifyPermissionNeeded()
+      return undefined
     }
     if (!file) {
       await markMissing(track)
       return undefined
     }
     return file
+  }
+
+  /** 「需要授权」整会话只提示一次；一旦真授权成功就把记号清掉，之后再断还会再提醒 */
+  let permissionWarned = false
+  function notifyPermissionNeeded(): void {
+    if (permissionWarned) return
+    permissionWarned = true
+    notify('音乐文件夹尚未授权访问，无法读取曲目。请在设置→音频里点「授权访问」。', 'error')
   }
 
   // ═══ 音乐文件夹 (addendum) ═════════════════════════════
@@ -342,6 +362,7 @@ export const useAudioStore = defineStore('audio', () => {
     folderHandle = handle
     folderName.value = handle.name ?? ''
     folderPermission.value = 'granted'
+    permissionWarned = false
     await rescanFolder()
     return true
   }
@@ -351,6 +372,7 @@ export const useAudioStore = defineStore('audio', () => {
     if (!folderHandle) return false
     const ok = await requestPermission(folderHandle)
     folderPermission.value = ok ? 'granted' : 'denied'
+    if (ok) permissionWarned = false
     if (ok) await rescanFolder()
     return ok
   }
