@@ -72,6 +72,20 @@ interface AudioManifestEntry {
  */
 export type AudioFolderPermission = 'unsupported' | 'none' | 'prompt' | 'granted' | 'denied'
 
+/**
+ * 批量操作的如实回执（对齐 forgetFolder / rescanFolder / uploadFiles 的「尽力做完」模式）：
+ * 单条失败不中断其余，结束后由 store 汇总提示一次，调用方拿到分项计数即可。
+ *
+ * - ok      成功处理的条数
+ * - skipped 有意跳过的条数（已在列表中 / 内置曲目 / 曲目不存在）
+ * - failed  尝试了但没成功的条数
+ */
+export interface AudioBatchResult {
+  ok: number
+  skipped: number
+  failed: number
+}
+
 function idleState(): AudioPlaybackState {
   return {
     music: {
@@ -110,10 +124,24 @@ function stripExt(filename: string): string {
  */
 function notifyAutoRenamed(count: number): void {
   if (count <= 0) return
+  notify(`${count} 个文件重名，已自动编号`, 'info')
+}
+
+/**
+ * 是否是「浏览器存储配额耗尽」。标准浏览器抛 DOMException('QuotaExceededError')，
+ * 老 Firefox 用 NS_ERROR_DOM_QUOTA_REACHED；Dexie 会原样透传底层错误。
+ */
+function isQuotaError(e: unknown): boolean {
+  const name = (e as { name?: unknown } | null)?.name
+  return name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED'
+}
+
+/** 提示的唯一出口；无 Pinia 上下文（测试 / 早期启动）时不该因为一条提示炸掉调用方 */
+function notify(message: string, type: 'info' | 'error'): void {
   try {
-    useUIStore().toast(`${count} 个文件重名，已自动编号`, 'info')
+    useUIStore().toast(message, type)
   } catch {
-    // 无 Pinia 上下文（测试 / 早期启动）时不该因为一条提示炸掉导入
+    // 静默：提示失败不能影响主流程的结果
   }
 }
 
@@ -216,14 +244,35 @@ export const useAudioStore = defineStore('audio', () => {
 
   // ═══ 字节读取 seam (addendum §Store changes) ═══════════
 
-  /** 把某条曲目标记为「文件已移除」并落库；已是 missing 则空转 */
+  /**
+   * 已经就「标记失败」提示过的曲目 id。落库失败会在每次播放尝试时重现，
+   * 而这条路径在播放中被反复触发 —— 不去重就是一屏 toast。
+   */
+  const missingWarned = new Set<string>()
+
+  /**
+   * 把某条曲目标记为「文件已移除」并落库；已是 missing 则空转。
+   *
+   * 落库失败 = 库里它仍写着「可播放」，用户下次打开照样点、照样失败。
+   * 这里在播放路径上，不能弹打断性的错误刷屏，所以**同一曲目只提示一次**；
+   * 等哪次真标上了就把记号清掉，之后再坏还会再提醒。
+   */
   async function markMissing(track: AudioTrack): Promise<void> {
     if (track.missing) return
     try {
       await saveAudioTrack({ ...track, missing: true })
+      missingWarned.delete(track.id)
       await refreshTracks()
     } catch {
-      // IndexedDB 不可用时不该连播放路径一起炸
+      // IndexedDB 不可用时不该连播放路径一起炸，但也不能装作没事发生
+      if (missingWarned.has(track.id)) return
+      missingWarned.add(track.id)
+      notify(
+        `曲目「${track.name}」的文件读不到，且「文件已移除」标记没能写入曲库，` +
+        '它在列表里仍会显示为可播放，播放会一直失败。' +
+        '重新关联音乐文件夹或「重新扫描」可以修正；曲目行与磁盘文件都没有被删除。',
+        'error',
+      )
     }
   }
 
@@ -326,16 +375,23 @@ export const useAudioStore = defineStore('audio', () => {
       const onDisk = new Map(scanned.map((f) => [f.name, f]))
       const seen = new Set<string>()
 
+      // 尽力做完：单条落库失败不能中断对账，否则表现成「扫描完了，但一半文件没进来」。
+      let failed = 0
+
       for (const track of tracks.value.filter((t) => t.source === 'file')) {
         const path = track.relativePath ?? ''
         const hit = path ? onDisk.get(path) : undefined
-        if (hit) {
-          seen.add(path)
-          if (track.missing || track.size !== hit.size || track.mimeType !== hit.mimeType) {
-            await saveAudioTrack({ ...track, missing: false, size: hit.size, mimeType: hit.mimeType })
+        try {
+          if (hit) {
+            seen.add(path)
+            if (track.missing || track.size !== hit.size || track.mimeType !== hit.mimeType) {
+              await saveAudioTrack({ ...track, missing: false, size: hit.size, mimeType: hit.mimeType })
+            }
+          } else if (!track.missing) {
+            await saveAudioTrack({ ...track, missing: true })
           }
-        } else if (!track.missing) {
-          await saveAudioTrack({ ...track, missing: true })
+        } catch {
+          failed += 1
         }
       }
 
@@ -352,23 +408,36 @@ export const useAudioStore = defineStore('audio', () => {
         if (name !== desired) renamed += 1
         const id = newId('audio')
         namePool.push({ id, name })
-        await saveAudioTrack({
-          id,
-          name,
-          kind: 'music',
-          source: 'file',
-          mimeType: f.mimeType,
-          size: f.size,
-          relativePath: f.name,
-          tags: [],
-          missing: false,
-          createdAt: now,
-          updatedAt: now,
-        })
+        try {
+          await saveAudioTrack({
+            id,
+            name,
+            kind: 'music',
+            source: 'file',
+            mimeType: f.mimeType,
+            size: f.size,
+            relativePath: f.name,
+            tags: [],
+            missing: false,
+            createdAt: now,
+            updatedAt: now,
+          })
+        } catch {
+          failed += 1
+          if (name !== desired) renamed -= 1 // 没建成的行不该算进「已自动编号」
+        }
       }
 
       await refreshTracks()
       notifyAutoRenamed(renamed)
+      if (failed > 0) {
+        // 一条汇总，不是每条一个 —— 一屏 toast 等于没有 toast。
+        notify(
+          `扫描完成，但有 ${failed} 首曲目没能写入曲库，它们的状态可能不准确（缺失的没被标出，` +
+          '或新文件没有收录）。其余曲目已完成对账；曲目行与磁盘文件都没有被删除，可以再扫描一次重试。',
+          'error',
+        )
+      }
     } finally {
       scanning.value = false
     }
@@ -377,25 +446,52 @@ export const useAudioStore = defineStore('audio', () => {
   /**
    * 取消关联：只删句柄，**不删任何曲目行**。曲目全部变成 missing（字节暂时够不着），
    * 重新选回同一个文件夹时按文件名原样恢复，标签与播放列表位次都还在。
+   *
+   * 铁律：**界面呈现的状态必须等于持久层的真实状态**。所以这里分两段，各自如实汇报：
+   * 1. 句柄删不掉 → 关联其实还在，整个中止，内存态一个字都不改（改了就是撒谎）；
+   * 2. 句柄删掉了但个别曲目标不上 missing → 部分成功，逐条尽力做完后汇总报一次。
+   *
+   * 返回是否完全成功；失败已通过 toast 说明爆炸半径，调用方无需再报。
    */
-  async function forgetFolder(): Promise<void> {
+  async function forgetFolder(): Promise<boolean> {
     try {
       await forgetStoredFolder()
     } catch {
-      // 句柄删不掉也要把内存态清干净
+      // 句柄还躺在库里，重启浏览器后关联会「复活」。此时谎称已取消才是最坏结果。
+      notify(
+        '取消关联失败：文件夹的授权记录没能删除，音乐文件夹仍处于关联状态。' +
+        '磁盘文件与曲库记录都没有改动，可以稍后重试。',
+        'error',
+      )
+      return false
     }
+
     folderHandle = null
     folderName.value = ''
     folderPermission.value = isFolderSupported() ? 'none' : 'unsupported'
 
+    // 尽力做完：单条落库失败不能连累后面的曲目，否则曲库会留下一半错的状态。
+    let failed = 0
     for (const track of tracks.value.filter((t) => t.source === 'file' && !t.missing)) {
       try {
         await saveAudioTrack({ ...track, missing: true })
       } catch {
-        break
+        failed += 1
       }
     }
     await refreshTracks()
+
+    if (failed > 0) {
+      // 一条汇总，不是每条一个 —— 一屏 toast 等于没有 toast。
+      notify(
+        `已取消关联音乐文件夹，但有 ${failed} 首曲目没能标记为「文件已移除」，` +
+        '它们在曲库里仍显示为可播放，实际播放会失败。' +
+        '重新关联该文件夹后再「重新扫描」即可修正。曲目行与磁盘文件都没有被删除。',
+        'error',
+      )
+      return false
+    }
+    return true
   }
 
   // ═══ 初始化 ═══════════════════════════════════════════
@@ -444,11 +540,20 @@ export const useAudioStore = defineStore('audio', () => {
   /**
    * 每个文件建一条曲目 + 一条 blob 记录；名字取文件名去扩展名。
    * 撞名自动编号（导入路径永不因重名失败），最后汇总提示一次。
+   *
+   * 逐条尽力做完：一批里某个文件写不进去，不能连累后面的文件 ——
+   * 「选了 10 个只进来 3 个」而且毫无解释，是这条路径上最常见的糟糕体验。
+   * 不做事务回滚：已建成的行如实留着，部分成功就如实呈现部分成功。
+   *
+   * 配额耗尽是唯一的例外：它不是个案，而是说明后面的文件基本也没戏，
+   * 继续硬试只是让用户多等，所以就地停下并给出「改用音乐文件夹」的出路。
    */
   async function uploadFiles(files: File[], kind: AudioTrackKind = 'music'): Promise<AudioTrack[]> {
     const created: AudioTrack[] = []
     const namePool = tracks.value.map((t) => ({ id: t.id, name: t.name }))
     let renamed = 0
+    let failed = 0
+    let quotaHit = false
     for (const file of files) {
       const now = Date.now()
       const desired = stripExt(file.name)
@@ -467,11 +572,37 @@ export const useAudioStore = defineStore('audio', () => {
         createdAt: now,
         updatedAt: now,
       }
-      await saveAudioTrack(track, file)
-      created.push(track)
+      try {
+        await saveAudioTrack(track, file)
+        created.push(track)
+      } catch (e) {
+        failed += 1
+        if (name !== desired) renamed -= 1 // 没建成的行不该算进「已自动编号」
+        if (isQuotaError(e)) {
+          quotaHit = true
+          break
+        }
+      }
     }
     await refreshTracks()
     notifyAutoRenamed(renamed)
+
+    if (quotaHit) {
+      const missed = files.length - created.length
+      notify(
+        `浏览器存储空间已满，${missed} 个文件没能导入（已导入 ${created.length} 个）。` +
+        '上传会把音频字节存进浏览器配额，几百 MB 的曲库很容易撑满；' +
+        '建议改用「音乐文件夹」直接读取本机文件，不占配额。已导入的曲目不受影响。',
+        'error',
+      )
+    } else if (failed > 0) {
+      // 一条汇总，不是每条一个 —— 一屏 toast 等于没有 toast。
+      notify(
+        `有 ${failed} 个文件没能导入（已导入 ${created.length} 个）。` +
+        '已导入的曲目都已保留，重新上传失败的文件即可补齐。',
+        'error',
+      )
+    }
     return created
   }
 
@@ -526,6 +657,44 @@ export const useAudioStore = defineStore('audio', () => {
     await refreshPlaylists()
   }
 
+  /**
+   * 批量删除（曲库多选）。**尽力做完**：单条删不掉不连累其余，
+   * 否则表现成「选了 12 首，删了 3 首就不动了」而且毫无解释。
+   *
+   * 内置曲目不可删（§2: builtin 只能隐藏）与查无此曲一律算 skipped，不算失败 ——
+   * 它们不是错误，只是不适用。结束后一条汇总，不是每条一个。
+   */
+  async function deleteTracks(ids: string[]): Promise<AudioBatchResult> {
+    const res: AudioBatchResult = { ok: 0, skipped: 0, failed: 0 }
+    for (const id of ids) {
+      const t = findTrack(id)
+      if (!t || t.builtin) {
+        res.skipped += 1
+        continue
+      }
+      try {
+        await dbDeleteAudioTrack(id)
+        res.ok += 1
+      } catch {
+        res.failed += 1
+      }
+    }
+    // 删除会顺带剪掉播放列表里的悬挂引用 → 两边都刷
+    await refreshTracks()
+    await refreshPlaylists()
+
+    if (res.failed > 0) {
+      notify(
+        `已删除 ${res.ok} 首曲目，但有 ${res.failed} 首没能删除，它们仍留在曲库里。` +
+        '可以再删一次重试；磁盘上的文件不会被删除。',
+        'error',
+      )
+    } else if (res.ok > 0) {
+      notify(`已删除 ${res.ok} 首曲目。`, 'info')
+    }
+    return res
+  }
+
   // ═══ 播放列表 CRUD ════════════════════════════════════
 
   function findPlaylist(id: string): AudioPlaylist | undefined {
@@ -570,6 +739,57 @@ export const useAudioStore = defineStore('audio', () => {
     if (!p || p.trackIds.includes(trackId)) return
     await saveAudioPlaylist({ ...p, trackIds: [...p.trackIds, trackId] })
     await refreshPlaylists()
+  }
+
+  /**
+   * 批量加入播放列表（曲库多选）。已在列表中的曲目**静默跳过**（对齐单条
+   * addTrackToPlaylist 的既有行为），但汇总提示要如实说出跳过了几首 ——
+   * 报成「全部成功」等于骗人。
+   *
+   * 这里只落一次库（播放列表是一条记录的整序覆盖），所以写入失败就是整批没进去，
+   * 如实计入 failed，不谎称部分成功。
+   */
+  async function addTracksToPlaylist(playlistId: string, trackIds: string[]): Promise<AudioBatchResult> {
+    const p = findPlaylist(playlistId)
+    if (!p) {
+      notify('目标播放列表已不存在，没有任何曲目被加入。', 'error')
+      return { ok: 0, skipped: 0, failed: trackIds.length }
+    }
+    const seen = new Set(p.trackIds)
+    const toAdd: string[] = []
+    let skipped = 0
+    for (const id of trackIds) {
+      if (seen.has(id)) {
+        skipped += 1
+        continue
+      }
+      seen.add(id)
+      toAdd.push(id)
+    }
+
+    if (toAdd.length === 0) {
+      if (skipped > 0) notify(`选中的 ${skipped} 首曲目都已在「${p.name}」中，已跳过。`, 'info')
+      return { ok: 0, skipped, failed: 0 }
+    }
+
+    try {
+      await saveAudioPlaylist({ ...p, trackIds: [...p.trackIds, ...toAdd] })
+    } catch {
+      notify(
+        `有 ${toAdd.length} 首曲目没能加入「${p.name}」，播放列表未被改动，可以再试一次。`,
+        'error',
+      )
+      return { ok: 0, skipped, failed: toAdd.length }
+    }
+    await refreshPlaylists()
+
+    notify(
+      skipped > 0
+        ? `已加入 ${toAdd.length} 首到「${p.name}」，另有 ${skipped} 首已在列表中，已跳过。`
+        : `已加入 ${toAdd.length} 首到「${p.name}」。`,
+      'info',
+    )
+    return { ok: toAdd.length, skipped, failed: 0 }
   }
 
   async function removeTrackFromPlaylist(playlistId: string, trackId: string): Promise<void> {
@@ -720,11 +940,13 @@ export const useAudioStore = defineStore('audio', () => {
     setTrackTags,
     setTrackKind,
     deleteTrack,
+    deleteTracks,
     findPlaylist,
     createPlaylist,
     renamePlaylist,
     deletePlaylist,
     addTrackToPlaylist,
+    addTracksToPlaylist,
     removeTrackFromPlaylist,
     reorderPlaylist,
     // folder
