@@ -2912,3 +2912,74 @@ export interface MapMarker {
   /** OSD 归一化坐标 (0-1)，原点左上角 */
   position: { nx: number; ny: number };
 }
+
+// ═══════════════════════════════════════════════════════════
+// Audio System — 音频子系统 (Dexie v11)
+// 设计: docs/planning/2026-07-26-audio-system-design.md §2
+// ═══════════════════════════════════════════════════════════
+
+/** Where the audio bytes come from. 'url' was cut from v1 — re-adding it is purely additive. */
+export type AudioSourceKind = 'blob' | 'builtin';
+
+/** What the track is for. Drives decode policy; the size guard (§4.4) is the rail when it's wrong. */
+export type AudioTrackKind = 'music' | 'sfx';
+
+/** Track metadata — cheap to list, holds no audio bytes (§3.2) */
+export interface AudioTrack {
+  id: string;
+  name: string;
+  kind: AudioTrackKind;
+  source: AudioSourceKind;
+  url?: string;               // source='builtin': the manifest path
+  mimeType?: string;
+  size?: number;              // compressed bytes
+  duration?: number;          // seconds, backfilled after first load
+  tags: string[];             // scene tags — the AI hook's only addressing scheme (§8)
+  builtin?: boolean;          // cannot be deleted, only hidden
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Audio bytes, stored apart from metadata and read only at play time */
+export interface AudioBlobRecord {
+  id: string;                 // === AudioTrack.id
+  blob: Blob;
+}
+
+/** Playlists are a sequencer concept — music tracks only (§4.3) */
+export interface AudioPlaylist {
+  id: string;
+  name: string;
+  trackIds: string[];         // ordered; dangling ids pruned on track delete
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type AudioRepeatMode = 'off' | 'all' | 'one';
+
+/**
+ * Discrete playback state. Deliberately excludes position — that is a getter
+ * sampled on demand, never broadcast (§6.3).
+ */
+export interface AudioPlaybackState {
+  music: {
+    status: 'idle' | 'playing' | 'paused';
+    trackId: string | null;
+    playlistId: string | null;
+    index: number;
+    durationSec: number;
+    volume: number;           // 0..1, channel gain
+    muted: boolean;
+    repeat: AudioRepeatMode;
+    shuffle: boolean;
+  };
+  sfx: {
+    volume: number;
+    muted: boolean;
+    liveVoices: number;
+  };
+  masterVolume: number;
+  masterMuted: boolean;
+  /** AudioContext resumed by a user gesture yet (§7) */
+  unlocked: boolean;
+}

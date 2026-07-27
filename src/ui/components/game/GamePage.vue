@@ -20,6 +20,7 @@ import SnapshotPanel from './SnapshotPanel.vue'
 import MapPanel from './MapPanel.vue'
 import AgentStatusPanel from './AgentStatusPanel.vue'
 import DebugPanel from './DebugPanel.vue'
+import MiniPlayer from './MiniPlayer.vue'
 
 const game = useGameStore()
 const ui = useUIStore()
@@ -133,8 +134,16 @@ function handleToolClick(id: string) {
     ui.navigate('settings')
     return
   }
+  // 迷你播放器是浮动卡片，不走 activeModal（§6.2），必须先于 showModal 拦下
+  if (id === 'audio') {
+    showMiniPlayer.value = !showMiniPlayer.value
+    return
+  }
   game.showModal(id)
 }
+
+/** 迷你播放器开合（浮动卡片，非 Modal） */
+const showMiniPlayer = ref(false)
 
 function handleSelectOption(text: string) {
   game.fillInput(text)
@@ -164,6 +173,8 @@ function onModalOpenChange(v: boolean) {
       <StatusHUD />
       <AgentStatusPanel />
     </div>
+
+    <MiniPlayer :open="showMiniPlayer" @close="showMiniPlayer = false" />
 
     <AppModal title="背包 / 装备 / 技能" :open="game.activeModal === 'items'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
       <ItemsPanel />

@@ -513,4 +513,4 @@ a desktop-only target needs approximately one (unlock). Its global-singleton sha
 injectable seams the project's `environment: 'node'` test setup requires. Ready-made Vue player
 components were rejected on a different ground: each owns its own playback engine and scopes its own
 CSS, so it could neither participate in the channel design nor inherit the `--theme-*` tokens that
-keep the other nine settings sections coherent.
+keep the other settings sections coherent.

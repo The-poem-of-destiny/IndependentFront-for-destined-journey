@@ -140,6 +140,19 @@ function getDefaults(): Record<string, any> {
       quest_update: false,
     } as Record<string, boolean>,
 
+    // 音频系统（全局环境属性，不属于存档状态 — 设计 §4.1）
+    audioMasterVolume: 0.7,
+    audioMasterMuted: false,
+    audioMusicVolume: 0.7,
+    audioMusicMuted: false,
+    audioSfxVolume: 0.7,
+    audioSfxMuted: false,
+    audioRepeat: 'all' as 'off' | 'all' | 'one',
+    audioShuffle: false,
+    audioLastPlaylistId: '',
+    /** 内置曲目不可删，只能隐藏（设计 §2）— 对齐 beautifierBuiltinDisabled 先例 */
+    audioHiddenBuiltinIds: [] as string[],
+
     // 输出美化
     beautifierEnabled: true,
     beautifierRules: [] as any[],
