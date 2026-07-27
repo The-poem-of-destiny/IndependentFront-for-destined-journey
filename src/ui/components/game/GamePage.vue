@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import { useGameStore } from '../../stores/game-store'
 import { useUIStore } from '../../stores/ui-store'
 import { useSettingsStore } from '../../stores/settings-store'
+import { useAudioStore } from '../../stores/audio-store'
 import { injectTestData, buildScenePreviewMock } from '../../lib/test-fixtures'
 import { GamePipeline } from '../../lib/game-pipeline'
 import TopBar from './TopBar.vue'
@@ -25,6 +26,7 @@ import MiniPlayer from './MiniPlayer.vue'
 const game = useGameStore()
 const ui = useUIStore()
 const settings = useSettingsStore()
+const audio = useAudioStore()
 const s = settings.settings
 
 let pipeline: GamePipeline | null = null
@@ -43,6 +45,13 @@ onMounted(async () => {
       settingsStore: settings,
       saveId: ui.activeSaveId,
     })
+    // 🎵 曲库必须在这里装 —— 此前只有设置页音频分区和迷你播放器会 init()，
+    // 没打开过它们的会话曲库是空的，选曲永远命中不了任何东西。
+    // 装完按当前地点起一次场景配乐（读档回来的第一眼也该有音乐）。
+    void audio
+      .init()
+      .then(() => pipeline?.primeSceneAudio())
+      .catch((err) => console.warn('[GamePage] 音频初始化失败（不影响游戏）:', err))
     // 首次加载 → 自动发送开场 Prompt
     if (!game.hasOpeningPromptConsumed && game.openingPrompt) {
       console.log('[GamePage] sending opening prompt...')

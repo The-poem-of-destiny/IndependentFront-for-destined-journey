@@ -22,7 +22,8 @@ v1.0 交付的能力边界：
 | 播放上传进 IndexedDB 的音频 | 音频格式转码 |
 | 播放列表（顺序 / 单曲 / 全部循环 / 随机） | 真正的交叉淡入（A、B 两条流同时出声） |
 | 一次性音效（声池、并发上限） | 音效解码缓存 |
-| 按场景选曲：地点/人物/情绪/情境四维加权 | 音效由游戏事件触发（**仍未接线**） |
+| 进入新地点自动换 BGM（可在设置里关） | 音效由游戏事件触发（**仍未接线**） |
+| 按场景选曲：地点/人物/情绪/情境四维加权 | 战斗/制作等**非地点**事件自动换歌（要靠 AI 标记，prompt 侧未接） |
 | 解析 `<play_audio>` 并切换 BGM（Code 侧已接线） | 让 AI 产出该标记（**prompt 侧刻意留空**） |
 | 按名称寻址曲目与播放列表 | 全角/半角折叠、拼音匹配 |
 | 播放列表拖拽排序 | 跨列表拖拽、拖拽到列表外、键盘排序 |
@@ -498,17 +499,33 @@ await audio.playByLocation('铁炉堡', { variant: 'A' })
 
 ## 九、AI 集成现状（诚实版）
 
-**结论先行：BGM 的 Code 侧链路已接通，但 prompt 侧刻意留空——AI 现在不会输出 `<play_audio>`，所以实际上一次也不会触发。音效全链仍未接线。**
+**结论先行：地点变化触发的场景配乐已全线接通并可用；AI 标记那条链路 Code 侧就绪、prompt 侧刻意留空（AI 不会输出 `<play_audio>`）。音效全链仍未接线。**
 
 | 能力 | 实现 | 测试 | 生产调用方 |
 |------|------|------|-----------|
-| `playByScene` / `playByLocation` | ✅ | ✅ | ⚠️ `GamePipeline.handlePlayAudio` 已接，但**没有输入**——story 预设里没有 `<play_audio>` 的输出约定 |
+| `playByScene` / `playByLocation` | ✅ | ✅ | ✅ `GamePipeline` 的地点变化触发 + `primeSceneAudio`；AI 标记那条仍无输入（见下） |
 | `playByTag` | ✅ | ✅ | ❌ **零**（保留为单标签精确入口） |
 | `playSfx` | ✅ | ✅ | ⚠️ 唯一调用方是设置页曲库的试听按钮（`settings/audio/AudioLibrary.vue`），游戏内无任何音效触发点 |
 | `playTrackByName` / `playPlaylistByName` | ✅ | ✅ | ⚠️ 仅 UI |
 | `public/audio/manifest.json` | ✅ 57 首内置曲目 | — | 授权 `UNVERIFIED`，见 `public/audio/README.md` |
 
-### BGM 链路：Code 侧四段是怎么接的
+### 谁来触发换歌：两条来源，AI 标记优先
+
+```
+① 地点变化（主路径）  player.location 与上次选曲时不同 → 自动按地点选曲
+② AI 标记（可选）     story 输出 <play_audio> → 按它给的情境/情绪选曲
+```
+
+两条都收口在 `GamePipeline.flushPendingAudio()`，都在 `refreshFromDb()` 之后执行：
+
+- **有标记时标记赢**。story 知道这一刻的戏剧意图（要打起来了 / 气氛转冷），比"地点变了"这个纯事实更准。
+- **没标记就看地点变没变**。**没变就不动音乐** —— 同一个地点里来回走动、翻面板不该反复重选曲子。
+- 进入游戏页时 `primeSceneAudio()` 起一次（读档回来的第一眼也该有音乐），并把 `lastAudioLocation` 定下来，于是紧接着的第一轮不会为同一个地点再选一遍。
+- 用户在设置里关掉「场景配乐」后**两条来源都不生效**，音乐完全交回手动控制。关闭期间照样记录地点，重新打开时不会为"早就待着的地点"补播一次。
+
+**曲库由游戏页负责装载**：`GamePage` 挂载时调 `audio.init()`。在此之前只有设置页音频分区与迷你播放器会 init，没打开过它们的会话曲库是空的 —— 选曲永远命中不了任何东西，而且是静悄悄地命中不了。
+
+### AI 标记链路：Code 侧四段是怎么接的
 
 ```
 story Agent  输出 <play_audio situation="战斗" mood="紧张"/>
@@ -536,7 +553,7 @@ game-pipeline.ts  Stage 1 只**暂存**标记；run() 末尾 refreshFromDb() 之
 
 ### 还没接的
 
-**prompt 侧（刻意）**：story 的 systemPrompt / 预设里**没有** `<play_audio>` 的输出约定，所以 AI 不会产出这个标记，整条链路目前是"通了电但没人按开关"。这是有意为之——先把 API 接口稳定下来，prompt 怎么写、什么时候该换歌是独立的一次调整。
+**AI 标记的 prompt 侧（刻意）**：story 的 systemPrompt / 预设里**没有** `<play_audio>` 的输出约定，所以 AI 不会产出这个标记。**这不影响场景配乐本身** —— 地点变化那条主路径不经过 AI。加上它只是让 AI 能在"地点没变但气氛变了"（战斗爆发、气氛转冷）时额外插一手。这是有意为之——先把 API 接口稳定下来，prompt 怎么写、什么时候该换歌是独立的一次调整。
 
 要启用时只需在 story 预设里加一个条目，说明标记格式与"只在场景转折时输出"的克制原则。**Code 侧一行都不用改。**
 

@@ -8,10 +8,18 @@
  */
 import { ref, computed, onUnmounted } from 'vue'
 import { useAudioStore } from '../../../stores/audio-store'
+import { useSettingsStore } from '../../../stores/settings-store'
 import type { AudioTrack, AudioRepeatMode } from '@engine/types'
 import { fmtDuration } from './format'
 
 const audio = useAudioStore()
+const settings = useSettingsStore()
+
+/** 场景自动配乐开关（写进 settings-store，deep watch 自动持久化） */
+const sceneAutoPlay = computed({
+  get: () => settings.settings.audioSceneAutoPlay !== false,
+  set: (v: boolean) => { settings.settings.audioSceneAutoPlay = v },
+})
 
 // ===== 通道 =====
 
@@ -211,8 +219,21 @@ onUnmounted(() => {
           aria-label="随机播放"
           @click="audio.setShuffle(!audio.state.music.shuffle)"
         ><i class="fa-solid fa-shuffle" aria-hidden="true" /> 随机</button>
+        <button
+          class="chip-btn"
+          :class="{ 'chip-on': sceneAutoPlay }"
+          :aria-pressed="sceneAutoPlay"
+          aria-label="进入新地点时自动换背景音乐"
+          title="进入新地点时，按地点/人物/情绪/情境自动挑一首 BGM"
+          @click="sceneAutoPlay = !sceneAutoPlay"
+        ><i class="fa-solid fa-location-dot" aria-hidden="true" /> 场景配乐</button>
       </div>
     </div>
+    <p class="hint-text">
+      {{ sceneAutoPlay
+        ? '进入新地点时会自动换背景音乐；曲库里没有合适的曲子时保持当前播放，不会突然静音。'
+        : '已关闭：地点变化不再自动换歌，音乐完全由你手动控制。' }}
+    </p>
     <p v-if="!audio.state.unlocked" class="hint-text">浏览器需要一次点击才能开始播放。</p>
   </div>
 </template>

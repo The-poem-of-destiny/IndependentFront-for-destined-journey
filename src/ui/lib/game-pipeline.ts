@@ -95,6 +95,11 @@ export class GamePipeline {
    * 理由见 run() 末尾。一轮多个标记时后者覆盖前者（以 AI 最后的判断为准）。
    */
   private pendingAudioMarker: PlayAudioMarker | null = null
+  /**
+   * 上次据以选曲的地点。用来判断"地点变没变" —— 没变就不重选，
+   * 同一地点里来回走动不该反复触发。空串表示还没选过。
+   */
+  private lastAudioLocation = ''
 
   constructor(deps: GamePipelineDeps) {
     this.game = deps.gameStore
@@ -228,16 +233,80 @@ export class GamePipeline {
   }
 
   /**
-   * 🎵 播放本轮暂存的配乐标记。不 await —— 配乐是旁路氛围，出问题不该影响这一轮。
-   * 管线被 abort / 报错时同样会走到这里：正文可能已经产出，该换的歌照换。
+   * 🎵 本轮配乐的唯一出口。两条来源，**AI 标记优先**:
+   *
+   * 1. story 写了 `<play_audio>` —— 它知道这一刻的戏剧意图（要打起来了 / 气氛转冷），
+   *    比"地点变了"这个纯事实更准；
+   * 2. 否则看地点有没有变 —— 这是场景配乐的主路径，绝大多数换歌都由它触发。
+   *
+   * 地点**没变就不动音乐**：同一个地点里来回走动、翻面板不该反复重选曲子。
+   * （即便重选出同一首，store 那层的"同曲不重播"也会挡住，这里只是不做无用功。）
+   *
+   * 不 await —— 配乐是旁路氛围，出问题不该影响这一轮。管线被 abort / 报错时同样
+   * 会走到这里：正文可能已经产出，该换的歌照换。
    */
   private flushPendingAudio(): void {
     const marker = this.pendingAudioMarker
     this.pendingAudioMarker = null
-    if (!marker) return
-    void this.handlePlayAudio(marker).catch((err) => {
+
+    // 用户关掉了场景配乐 → 两条来源都不生效，音乐完全交回给用户
+    if (this.settings.settings.audioSceneAutoPlay === false) {
+      this.lastAudioLocation = this.game.player?.location ?? ''
+      return
+    }
+
+    if (marker) {
+      this.lastAudioLocation = this.game.player?.location ?? ''
+      void this.handlePlayAudio(marker).catch((err) => {
+        console.warn('[GamePipeline] 场景配乐失败（不阻塞本轮）:', err)
+      })
+      return
+    }
+
+    const location = this.game.player?.location ?? ''
+    if (!location || location === this.lastAudioLocation) return
+    this.lastAudioLocation = location
+    void this.playForLocation(location).catch((err) => {
       console.warn('[GamePipeline] 场景配乐失败（不阻塞本轮）:', err)
     })
+  }
+
+  /**
+   * 按当前地点选曲。在场角色一并带上 —— 有专属主题曲的角色在场时，
+   * 打分器会在"地点已经泛到势力一级"时让人物主题接管（见说明书第八节的权重表）。
+   */
+  private async playForLocation(location: string): Promise<void> {
+    const audio = useAudioStore()
+    await audio.playByScene({
+      location,
+      characters: this.presentCharacterNames(),
+    })
+  }
+
+  /** 在场 NPC 的名字（player 不算） */
+  private presentCharacterNames(): string[] {
+    return this.game.characters
+      .filter((c) => c.type !== 'player' && c.present === true)
+      .map((c) => c.name)
+  }
+
+  /**
+   * 🎵 进场配乐。装好存档、进入游戏页时调一次 —— 「进入某个地点就该响起它的曲子」
+   * 对读档回来的第一眼同样成立，不该非要等玩家先说一句话。
+   *
+   * 同时把 lastAudioLocation 定下来，于是紧接着的第一轮不会为同一个地点再选一次。
+   * 曲库装载（init）由调用方负责，这里只管选曲。
+   */
+  async primeSceneAudio(): Promise<void> {
+    if (this.settings.settings.audioSceneAutoPlay === false) return
+    const location = this.game.player?.location ?? ''
+    if (!location || location === this.lastAudioLocation) return
+    this.lastAudioLocation = location
+    try {
+      await this.playForLocation(location)
+    } catch (err) {
+      console.warn('[GamePipeline] 进场配乐失败（不阻塞）:', err)
+    }
   }
 
   /** 中止当前管线运行 */
@@ -605,9 +674,7 @@ export class GamePipeline {
     const situations = [...words(marker.situation), ...body]
     const moods = [...words(marker.mood), ...body]
 
-    const characters = marker.character
-      ? words(marker.character)
-      : this.game.characters.filter((c) => c.type !== 'player' && c.present === true).map((c) => c.name)
+    const characters = marker.character ? words(marker.character) : this.presentCharacterNames()
 
     const variant = marker.variant?.trim().toUpperCase()
 
