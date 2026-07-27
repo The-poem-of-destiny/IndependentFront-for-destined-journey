@@ -6,7 +6,6 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { queryForView } from './view-audio';
 import { resolveSceneByTags } from '@engine/audio-scene';
 import type { AudioTrack } from '@engine/types';
@@ -38,10 +37,22 @@ describe('queryForView', () => {
 // 映射写得再漂亮，选不出曲子也是白搭。这里直接拿 public/audio/manifest.json
 // 跑一遍打分，确保这两个界面在**当前随应用分发的曲库**上真的有曲可选。
 
+interface ManifestEntry {
+  id: string;
+  name: string;
+  kind?: string;
+  file: string;
+  tags?: string[];
+}
+
+/**
+ * 读随应用分发的真实 manifest。走 Vite 的 `?raw` 而不是 `node:fs` ——
+ * 这个文件在 UI 的 tsconfig 覆盖范围内，那里没有 node 类型。
+ */
+const MANIFEST_RAW = (await import('../../../public/audio/manifest.json?raw')).default as string;
+
 function builtinTracks(): AudioTrack[] {
-  const raw = JSON.parse(
-    readFileSync('public/audio/manifest.json', 'utf8'),
-  ) as Array<{ id: string; name: string; kind?: string; file: string; tags?: string[] }>;
+  const raw = JSON.parse(MANIFEST_RAW) as ManifestEntry[];
   return raw.map((e) => ({
     id: e.id,
     name: e.name,

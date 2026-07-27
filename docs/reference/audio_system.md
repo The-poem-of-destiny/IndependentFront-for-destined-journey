@@ -507,7 +507,7 @@ await audio.playByLocation('铁炉堡', { variant: 'A' })
 | `playByTag` | ✅ | ✅ | ❌ **零**（保留为单标签精确入口） |
 | `playSfx` | ✅ | ✅ | ⚠️ 唯一调用方是设置页曲库的试听按钮（`settings/audio/AudioLibrary.vue`），游戏内无任何音效触发点 |
 | `playTrackByName` / `playPlaylistByName` | ✅ | ✅ | ⚠️ 仅 UI |
-| `public/audio/manifest.json` | ✅ 57 首内置曲目 | — | 授权 `UNVERIFIED`，见 `public/audio/README.md` |
+| `public/audio/manifest.json` | ✅ 57 首内置曲目（作者 Aoo） | — | 测试占位素材，正式发布前需复核，见 `public/audio/README.md` |
 
 ### 谁来触发换歌：三条来源
 
@@ -577,7 +577,7 @@ game-pipeline.ts  Stage 1 只**暂存**标记；run() 末尾 refreshFromDb() 之
 
 **音效全链空白**：需要在战斗结算、制作成功、状态效果触发等处埋 `playSfx` 调用点。基建（声池 / 并发上限 / 体积门禁）早就完备，缺的只是触发方。
 
-**真机验证**：整条链路的测试都跑在注入替身上（jsdom 没有可用音频后端），浏览器里到底出不出声**尚未验证过**。
+**真机验证**：地点变化换歌、界面切换换歌、设置页试听出声、手势解锁时机**均已在浏览器里人工验证**；音效与 AI 标记两条路因为没有触发方 / prompt 侧空着，**无从验起**。完整对照表见 §十。
 
 ### 为什么给 AI 的是标签而不是 id
 
@@ -634,7 +634,7 @@ game-pipeline.ts  Stage 1 只**暂存**标记；run() 末尾 refreshFromDb() 之
 | 播放列表排序仅支持拖拽，键盘用户不可用 | 原生 HTML5 拖放需要指针，而原先每行的 ▲▼ 兜底**已按需求移除**，且刻意不提供任何键盘替代路径（Alt+方向键、隐藏按钮等一律不加）。键盘/辅助技术用户无法调整播放列表次序；排序结果的 `aria-live` 播报仍在，但那只是结果播报，不构成操作入口 |
 | 排序按**可见行**下标索引 | `moveTrack` 拿到的是渲染行的位次，而写回的是 `trackIds` 的整序覆盖。列表里若有解析不出曲目的悬挂 id（渲染时被滤掉），下标会错位。属**既有行为**：`deleteAudioTrack` 会在同一事务里剪掉悬挂引用，正常路径下不会留下这种 id |
 | 无法免手势自动播放 | 浏览器自动播放策略所致，**非缺陷**。零交互直达游戏页时首曲进 `pending`，等第一次点击/按键兑现。详见上文 |
-| **从未在真实浏览器里跑过** | 见下 |
+| 部分路径尚未真机验证 | 音效 / AI 标记 / 本机文件夹 / 非 Chromium 浏览器；已验证的部分见下 |
 
 #### 踩坑记录：勾选框不能靠 `@click.prevent` 回滚
 
@@ -648,11 +648,22 @@ game-pipeline.ts  Stage 1 只**暂存**标记；run() 末尾 refreshFromDb() 之
 真值（全选框还要一并写 `indeterminate`，浏览器点击时会把它清掉）。这样无论 Vue 补不补
 这个 prop（值没变时它会跳过），DOM 与状态都已经一致。
 
-### ⚠️ 最重要的一条
+### 真机验证状态（2026-07-27）
 
-**整套系统的所有测试都跑在注入的测试替身上**（`audio-fakes.ts` 的伪 `AudioContext` / 伪 `AudioElement`、`audio-folder.ts` 的 `__setFolderTestHooks`）。这意味着：Web Audio 图的连接是否真的出声、`MediaElementSource` 与 blob URL 的兼容性、真实 `showDirectoryPicker` 的行为、各浏览器的自动播放策略差异——**全部未经真机验证**。
+**自动化测试全部跑在注入的测试替身上**（`audio-fakes.ts` 的伪 `AudioContext` / 伪 `AudioElement`、`audio-folder.ts` 的 `__setFolderTestHooks`），因此以下几条只能靠真机确认，且**已经在浏览器里人工走过**：
 
-真机联调时优先怀疑：解锁时机、`crossOrigin` 与 `MediaElementSource` 的相互作用、大文件夹扫描耗时、`revokeObjectURL` 的时序。
+| 路径 | 状态 |
+|------|------|
+| 设置页曲库试听出声（Web Audio 图 → 内置音源） | ✅ 已验证 |
+| 游戏内地点变化换歌 | ✅ 已验证 |
+| 界面切换换歌（首页 / 捏人页） | ✅ 已验证 |
+| 手势解锁时机 | ✅ 已验证 —— 正是它暴露出"监听装在 `audio.init()` 里会错过进游戏那一下手势"，修复见 §十 |
+| 音效播放 | ❌ 未验证：游戏内**没有任何触发方**，无从验起 |
+| AI 标记 `<play_audio>` | ❌ 未验证：prompt 侧刻意留空，AI 不会产出该标记 |
+| 本机音乐文件夹（`showDirectoryPicker` / 大目录扫描 / 权限跨会话） | ❌ 未验证 |
+| 非 Chromium 浏览器 | ❌ 未验证 |
+
+仍未覆盖的部分，联调时优先怀疑：`crossOrigin` 与 `MediaElementSource` 的相互作用、大文件夹扫描耗时、`revokeObjectURL` 的时序。
 
 ---
 
