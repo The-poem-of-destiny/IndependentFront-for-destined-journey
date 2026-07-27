@@ -111,9 +111,27 @@ const someFilteredSelected = computed(
 )
 
 /**
+ * 勾选框的受控闭环。
+ *
+ * 千万别用 `@click.prevent` 让浏览器把勾「回滚」掉 —— 那条路在真机上是坏的：
+ * 浏览器先翻转 checked → 调监听器 → 监听器返回时 JS 栈已空，微任务检查点触发，
+ * **Vue 在这一刻打完 DOM 补丁** → 浏览器这才执行「取消激活恢复」，把刚打上的勾
+ * 又抹回点击前的值。结果就是选中集合、计数、染底全对，唯独这一行的勾永远打不上。
+ *
+ * 所以放手让浏览器翻转，由处理函数在同一帧把 DOM 写回集合的真值：之后无论 Vue
+ * 补不补这个 prop（值没变时它会跳过），DOM 与状态都已经一致。
+ */
+function syncBox(target: EventTarget | null, checked: boolean, indeterminate = false): void {
+  const el = target as HTMLInputElement | null
+  if (!el) return
+  el.checked = checked
+  el.indeterminate = indeterminate
+}
+
+/**
  * 行勾选。shift + 点击 → 从锚点到本行的连续区间一并选中（区间只加不减，
  * 这是列表多选的通用预期）；否则就是单纯的切换。
- * 模板用 @click.prevent 接管，勾选态完全由这里的集合驱动，不让 DOM 自己跑偏。
+ * 勾选态完全由这里的集合驱动，末尾把 DOM 写回真值（见 syncBox）。
  */
 function onRowSelect(t: AudioTrack, e: MouseEvent): void {
   const next = new Set(selectedIds.value)
@@ -130,10 +148,11 @@ function onRowSelect(t: AudioTrack, e: MouseEvent): void {
   }
   anchorId.value = t.id
   selectedIds.value = next
+  syncBox(e.target, next.has(t.id))
 }
 
 /** 全选/取消全选 —— **只作用于当前筛选结果**，不碰筛选之外的曲目 */
-function toggleSelectAllFiltered(): void {
+function toggleSelectAllFiltered(e: MouseEvent): void {
   const next = new Set(selectedIds.value)
   const all = allFilteredSelected.value
   for (const t of filteredTracks.value) {
@@ -142,6 +161,8 @@ function toggleSelectAllFiltered(): void {
   }
   anchorId.value = ''
   selectedIds.value = next
+  // 全选框还多一个 indeterminate：浏览器在点击时会把它清掉，同样得写回真值
+  syncBox(e.target, allFilteredSelected.value, someFilteredSelected.value)
 }
 
 function clearSelection(): void {
@@ -411,7 +432,7 @@ async function audition(t: AudioTrack): Promise<void> {
         :checked="allFilteredSelected"
         :indeterminate="someFilteredSelected"
         :disabled="filteredTracks.length === 0"
-        @click.prevent="toggleSelectAllFiltered"
+        @click="toggleSelectAllFiltered"
       />
       <span>全选当前筛选结果（{{ filteredTracks.length }} 首）</span>
     </label>
@@ -455,7 +476,7 @@ async function audition(t: AudioTrack): Promise<void> {
         class="row-check"
         :checked="isSelected(t)"
         :aria-label="`选择「${t.name}」`"
-        @click.prevent="onRowSelect(t, $event)"
+        @click="onRowSelect(t, $event)"
       />
     </label>
     <span

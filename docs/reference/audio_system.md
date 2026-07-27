@@ -24,7 +24,7 @@ v1.0 交付的能力边界：
 | 一次性音效（声池、并发上限） | 音效解码缓存 |
 | 按标签播放（为 AI 预留的钩子） | 由 AI 实际触发播放（**尚未接线**） |
 | 按名称寻址曲目与播放列表 | 全角/半角折叠、拼音匹配 |
-| 播放列表拖拽排序（▲▼ 为键盘路径） | 跨列表拖拽、拖拽到列表外 |
+| 播放列表拖拽排序 | 跨列表拖拽、拖拽到列表外、键盘排序 |
 | 曲库多选（shift 区间 / 全选筛选结果）+ 批量加入列表 / 批量删除 | 批量改标签、批量改类型 |
 
 ---
@@ -245,7 +245,7 @@ Dexie（IndexedDB 封装）v12，四张表：
 | `deletePlaylist` | `(id: string) => Promise<void>` | 不级联删曲目 |
 | `addTrackToPlaylist` / `removeTrackFromPlaylist` | `(playlistId: string, trackId: string) => Promise<void>` | 重复添加空转 |
 | `addTracksToPlaylist` | `(playlistId: string, trackIds: string[]) => Promise<AudioBatchResult>` | 曲库多选批量加入。已在列表中的计 `skipped`；**只落一次库**（整序覆盖），写失败即整批 `failed`，不谎称部分成功；列表已不存在时全额 `failed` |
-| `reorderPlaylist` | `(playlistId: string, trackIds: string[]) => Promise<void>` | 整序覆盖（拖拽与 ▲▼ 共用的唯一写路径） |
+| `reorderPlaylist` | `(playlistId: string, trackIds: string[]) => Promise<void>` | 整序覆盖（拖拽排序的唯一写路径） |
 
 ### 6.5 音乐文件夹
 
@@ -401,9 +401,21 @@ async function onPickFolder() {
 | 名称归一化不做拼音/罗马化 | `战斗` 与 `zhandou` 视为不同名 |
 | 名称归一化不做 NFC/NFKC | Unicode 等价字符视为不同名 |
 | 目录扫描不递归 | 只扫目录**顶层**，子文件夹里的文件不会被发现 |
-| 播放列表拖拽对键盘用户不可用 | 原生 HTML5 拖放需要指针；键盘路径是每行的 ▲▼ 按钮，两者走同一条写路径（`moveTrack` → `reorderPlaylist`），只有「怎么选出 from/to」不同，功能不缺失 |
+| 播放列表排序仅支持拖拽，键盘用户不可用 | 原生 HTML5 拖放需要指针，而原先每行的 ▲▼ 兜底**已按需求移除**，且刻意不提供任何键盘替代路径（Alt+方向键、隐藏按钮等一律不加）。键盘/辅助技术用户无法调整播放列表次序；排序结果的 `aria-live` 播报仍在，但那只是结果播报，不构成操作入口 |
 | 排序按**可见行**下标索引 | `moveTrack` 拿到的是渲染行的位次，而写回的是 `trackIds` 的整序覆盖。列表里若有解析不出曲目的悬挂 id（渲染时被滤掉），下标会错位。属**既有行为**：`deleteAudioTrack` 会在同一事务里剪掉悬挂引用，正常路径下不会留下这种 id |
 | **从未在真实浏览器里跑过** | 见下 |
+
+#### 踩坑记录：勾选框不能靠 `@click.prevent` 回滚
+
+曲库多选的勾选框曾写成 `:checked` + `@click.prevent`（指望浏览器把翻转「取消」掉，
+状态全由选中集合驱动）。**真机上这条路是坏的**：浏览器先翻转 `checked` → 调监听器 →
+监听器返回时 JS 栈已空，微任务检查点触发，**Vue 在这一刻打完 DOM 补丁** → 浏览器这才
+执行「取消激活恢复」，把刚打上的勾抹回点击前的值。表现为选中集合、计数、行染底全对，
+唯独那一行的勾永远打不上。jsdom 的补丁排在恢复之后，所以旧测试全绿也没拦住。
+
+现行做法是**受控闭环**：放手让浏览器翻转，处理函数末尾用 `syncBox()` 把 DOM 写回集合的
+真值（全选框还要一并写 `indeterminate`，浏览器点击时会把它清掉）。这样无论 Vue 补不补
+这个 prop（值没变时它会跳过），DOM 与状态都已经一致。
 
 ### ⚠️ 最重要的一条
 
@@ -423,7 +435,7 @@ async function onPickFolder() {
 | `src/ui/lib/audio-folder.test.ts` | 27 | 能力探测、句柄持久化、权限归一化、扫描过滤/排序/单文件容错、`resolveFile` NotFound |
 | `src/ui/lib/audio-singleton.test.ts` | 26 | 惰性单例、无 Web Audio 时的静默桩、`setBlobResolver`、首次手势解锁监听与自摘 |
 | `src/ui/stores/audio-store.test.ts` | 40 | 库加载、上传编号与配额中止、CRUD 拒绝路径、**批量删除/批量加入的分项计数**、文件夹对账与部分失败汇总、按名播放 |
-| `src/ui/components/settings/AudioSection.test.ts` | 32 | 设置页三段式交互（拆分后仍从壳层挂载整棵子树）、拖拽排序、曲库多选与批量动作 |
+| `src/ui/components/settings/AudioSection.test.ts` | 35 | 设置页三段式交互（拆分后仍从壳层挂载整棵子树）、拖拽排序、曲库多选与批量动作 |
 | `src/ui/components/game/MiniPlayer.test.ts` | 12 | 迷你播放器交互与轮询配对 |
 
 ### 为什么引擎层必须有注入缝

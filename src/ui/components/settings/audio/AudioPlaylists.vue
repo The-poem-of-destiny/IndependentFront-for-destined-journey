@@ -94,12 +94,8 @@ async function addSelectedTrack(): Promise<void> {
 }
 
 // ===== 排序 =====
-// ▲▼ 与拖拽走同一条写路径（moveTrack → store.reorderPlaylist），
-// 只有「怎么选出 from/to」不同。拖拽是增强，▲▼ 才是键盘可达的那条路。
-
-async function movePlaylistTrack(index: number, delta: number): Promise<void> {
-  await moveTrack(index, index + delta)
-}
+// 排序只有拖拽这一条路（按需求移除了 ▲▼ 兜底），写路径唯一：
+// moveTrack → store.reorderPlaylist。
 
 /** 把第 from 位挪到第 to 位；越界或原地一律不写库 */
 async function moveTrack(from: number, to: number): Promise<void> {
@@ -192,7 +188,7 @@ function resetDrag(): void {
           <AppButton variant="secondary" size="sm" :disabled="playlistTracks.length === 0" @click="audio.playPlaylist(selectedPlaylist.id, 0)"><i class="fa-solid fa-play" aria-hidden="true" /> 播放</AppButton>
         </div>
         <div v-if="playlistTracks.length === 0" class="empty-tab">此列表尚无曲目…</div>
-        <p v-else class="reorder-hint text-muted">可拖动曲目调整顺序，也可用 ▲▼ 按钮逐格移动。</p>
+        <p v-else class="reorder-hint text-muted">可拖动曲目调整顺序。</p>
         <div
           v-for="(t, i) in playlistTracks"
           :key="t.id + '_' + i"
@@ -204,7 +200,7 @@ function resetDrag(): void {
           @drop="onDrop(i, $event)"
           @dragend="resetDrag"
         >
-          <!-- 拖拽把手：纯装饰的可供性提示，键盘路径走右侧 ▲▼ -->
+          <!-- 拖拽把手：纯装饰的可供性提示，真正可拖的是整行 -->
           <span class="drag-grip" aria-hidden="true"><i class="fa-solid fa-grip-vertical" aria-hidden="true" /></span>
           <span
             class="kind-dot"
@@ -213,12 +209,6 @@ function resetDrag(): void {
             :aria-label="t.kind === 'sfx' ? '音效' : '音乐'"
           />
           <span class="track-name">{{ t.name }}</span>
-          <button class="icon-btn" aria-label="上移" :disabled="i === 0" @click="movePlaylistTrack(i, -1)">
-            <i class="fa-solid fa-chevron-up" aria-hidden="true" />
-          </button>
-          <button class="icon-btn" aria-label="下移" :disabled="i === playlistTracks.length - 1" @click="movePlaylistTrack(i, 1)">
-            <i class="fa-solid fa-chevron-down" aria-hidden="true" />
-          </button>
           <button class="icon-btn icon-danger" aria-label="移出列表" @click="audio.removeTrackFromPlaylist(selectedPlaylist!.id, t.id)">
             <i class="fa-solid fa-xmark" aria-hidden="true" />
           </button>
@@ -423,15 +413,12 @@ function resetDrag(): void {
   font-size: 0.875rem;
   line-height: 1;
 }
-.icon-btn:hover:not(:disabled) {
+/* 本段只剩「移出列表」一枚图标按钮，且它从不禁用 —— 故无 :disabled 分支 */
+.icon-btn:hover {
   background: var(--theme-tab-hover-bg);
   color: var(--theme-text-primary);
 }
-.icon-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-.icon-danger:hover:not(:disabled) {
+.icon-danger:hover {
   color: var(--theme-error);
   border-color: color-mix(in srgb, var(--theme-error) 45%, var(--theme-card-border));
 }

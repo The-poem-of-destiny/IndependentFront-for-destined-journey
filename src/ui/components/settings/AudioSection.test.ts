@@ -277,7 +277,7 @@ describe('AudioSection', () => {
 
   // ═══ 播放列表拖拽排序 ═══
   // 原生 HTML5 拖放：整行 draggable，落点语义是「放到目标行所在的位次」。
-  // ▲▼ 是键盘可达的兜底路径，两者共用同一条写路径（reorderPlaylist）。
+  // 排序只有拖拽这一条路（▲▼ 兜底已按需求移除），写路径唯一：reorderPlaylist。
 
   const musicTrack = (id: string, name: string) => ({
     id, name, kind: 'music', source: 'blob', tags: [], createdAt: 0, updatedAt: 0,
@@ -348,17 +348,12 @@ describe('AudioSection', () => {
     wrapper.unmount()
   })
 
-  it('▲▼ 按钮仍然可用，并与拖拽共用同一条写路径', async () => {
-    const { wrapper, store } = await mountWithPlaylist()
-    const spy = vi.spyOn(store, 'reorderPlaylist').mockResolvedValue()
-    const down = playlistRows(wrapper)[0].findAll('button')
-      .find((b: any) => b.attributes('aria-label') === '下移')
-    await down!.trigger('click')
-    expect(spy).toHaveBeenCalledWith('p1', ['b', 'a', 'c'])
-    // 首行的「上移」仍然 disabled（既有可达性不得退化）
-    const up = playlistRows(wrapper)[0].findAll('button')
-      .find((b: any) => b.attributes('aria-label') === '上移')
-    expect(up!.attributes('disabled')).toBeDefined()
+  it('曲目行上只留「移出列表」，不再提供 ▲▼ 逐格移动', async () => {
+    const { wrapper } = await mountWithPlaylist()
+    const labels = playlistRows(wrapper)[0].findAll('button')
+      .map((b: any) => b.attributes('aria-label'))
+    expect(labels).toEqual(['移出列表'])
+    expect(wrapper.find('.playlist-tracks .reorder-hint').text()).toBe('可拖动曲目调整顺序。')
     wrapper.unmount()
   })
 
@@ -518,6 +513,67 @@ describe('AudioSection', () => {
     store.tracks = [libTrack('a', '甲')] as any
     await flushPromises()
     expect(wrapper.find('.batch-count').text()).toBe('已选 1 首')
+    wrapper.unmount()
+  })
+
+  /**
+   * 按**真实浏览器**的时序点一次勾选框。
+   *
+   * 浏览器：① 派发前先翻转 checked ② 调监听器 ③ 监听器返回时 JS 栈已空 →
+   * 微任务检查点 → Vue 在这一刻打完 DOM 补丁 ④ **之后**才执行「取消激活恢复」。
+   * jsdom 的第 ③ 步与真机不同（补丁排在恢复之后），所以这里手工补出第 ④ 步 ——
+   * 只要监听器 preventDefault，勾就会在 Vue 打完之后被抹回点击前的值。
+   */
+  async function browserClick(el: HTMLInputElement, init: MouseEventInit = {}) {
+    const before = el.checked
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true, ...init })
+    el.dispatchEvent(ev)
+    await flushPromises()
+    if (ev.defaultPrevented) el.checked = before
+    await flushPromises()
+  }
+
+  it('行勾选框的勾随选中状态变化（不靠 preventDefault 回滚）', async () => {
+    const { wrapper } = await mountWithLibrary([libTrack('a', '甲'), libTrack('b', '乙')])
+    const box = wrapper.find('.row-check').element as HTMLInputElement
+    await browserClick(box)
+    expect(wrapper.find('.batch-count').text()).toBe('已选 1 首')
+    expect(box.checked).toBe(true)
+    await browserClick(box)
+    expect(wrapper.find('.batch-count').text()).toBe('已选 0 首')
+    expect(box.checked).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('区间重选已选行时，那一行的勾不会被抹掉', async () => {
+    // 绑定值前后都是 true（区间只加不减），Vue 会跳过这枚 prop 的补丁 ——
+    // DOM 状态必须由处理函数自己写回，否则这一行的勾会掉。
+    const { wrapper } = await mountWithLibrary([
+      libTrack('a', '甲'), libTrack('b', '乙'), libTrack('c', '丙'),
+    ])
+    const boxes = wrapper.findAll('.row-check').map((b: any) => b.element as HTMLInputElement)
+    await browserClick(boxes[0])
+    await browserClick(boxes[2], { shiftKey: true })
+    expect(wrapper.find('.batch-count').text()).toBe('已选 3 首')
+    await browserClick(boxes[1], { shiftKey: true }) // 已在选中区间内，仍应保持勾选
+    expect(wrapper.find('.batch-count').text()).toBe('已选 3 首')
+    expect(boxes.map((el) => el.checked)).toEqual([true, true, true])
+    wrapper.unmount()
+  })
+
+  it('全选框的勾与 indeterminate 也随状态变化', async () => {
+    const { wrapper } = await mountWithLibrary([libTrack('a', '甲'), libTrack('b', '乙')])
+    const all = wrapper.find('.batch-all-box').element as HTMLInputElement
+    await browserClick(all)
+    expect(wrapper.find('.batch-count').text()).toBe('已选 2 首')
+    expect(all.checked).toBe(true)
+    expect(all.indeterminate).toBe(false)
+    await browserClick(all)
+    expect(all.checked).toBe(false)
+    // 只选一行 → 全选框进入半选态
+    await browserClick(wrapper.find('.row-check').element as HTMLInputElement)
+    expect(all.checked).toBe(false)
+    expect(all.indeterminate).toBe(true)
     wrapper.unmount()
   })
 
