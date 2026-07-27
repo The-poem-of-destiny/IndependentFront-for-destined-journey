@@ -12,13 +12,14 @@
  * 内置曲目不可改名/改标签/删除（store 拒绝），只能隐藏 —— 隐藏名单存
  * settings.audioHiddenBuiltinIds（对齐 beautifierBuiltinDisabled 先例）。
  */
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useAudioStore } from '../../stores/audio-store'
 import { useSettingsStore } from '../../stores/settings-store'
 import { useUIStore } from '../../stores/ui-store'
 import type { AudioTrack, AudioTrackKind, AudioRepeatMode } from '@engine/types'
 import AppButton from '../shared/AppButton.vue'
 import AppCard from '../shared/AppCard.vue'
+import AppModal from '../shared/AppModal.vue'
 
 const audio = useAudioStore()
 const cfg = useSettingsStore()
@@ -38,8 +39,73 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  // 卸载时把悬着的 Promise 收干净，避免调用方永远 await 不到
+  closeConfirm(false)
+  closePrompt(null)
+  clearSeekSettle() // 别让安定计时器烧到已拆掉的组件上
   audio.stopPositionPolling()
 })
+
+// ===== 确认 / 输入 弹窗（取代 window.confirm / window.prompt） =====
+// 只在本组件内做，不引入全局服务；一次只有一个弹窗在场。
+
+const confirmDialog = ref({ open: false, title: '', message: '', confirmLabel: '确认', danger: false })
+let confirmResolve: ((ok: boolean) => void) | null = null
+
+function askConfirm(
+  opts: { title: string; message: string; confirmLabel?: string; danger?: boolean },
+): Promise<boolean> {
+  closeConfirm(false) // 保险：清掉任何残留的上一轮
+  return new Promise<boolean>((resolve) => {
+    confirmResolve = resolve
+    confirmDialog.value = {
+      open: true,
+      title: opts.title,
+      message: opts.message,
+      confirmLabel: opts.confirmLabel ?? '确认',
+      danger: opts.danger ?? false,
+    }
+  })
+}
+
+/** 唯一出口 —— 取消 / Esc / 遮罩 / 确认 都走这里，保证 resolve 只兑现一次 */
+function closeConfirm(ok: boolean): void {
+  const resolve = confirmResolve
+  confirmResolve = null
+  confirmDialog.value.open = false
+  resolve?.(ok)
+}
+
+const promptDialog = ref({ open: false, title: '', label: '', value: '' })
+const promptInput = ref<HTMLInputElement | null>(null)
+let promptResolve: ((value: string | null) => void) | null = null
+
+/** 解析为 trim 后的非空字符串；取消返回 null（对齐 window.prompt 的语义） */
+function askPrompt(opts: { title: string; label: string; value: string }): Promise<string | null> {
+  closePrompt(null)
+  return new Promise<string | null>((resolve) => {
+    promptResolve = resolve
+    promptDialog.value = { open: true, title: opts.title, label: opts.label, value: opts.value }
+    void nextTick(() => {
+      promptInput.value?.focus()
+      promptInput.value?.select()
+    })
+  })
+}
+
+function closePrompt(value: string | null): void {
+  const resolve = promptResolve
+  promptResolve = null
+  promptDialog.value.open = false
+  resolve?.(value)
+}
+
+const promptValid = computed(() => promptDialog.value.value.trim().length > 0)
+
+function submitPrompt(): void {
+  if (!promptValid.value) return
+  closePrompt(promptDialog.value.value.trim())
+}
 
 // ===== ① 混音台 =====
 
@@ -71,11 +137,73 @@ const currentTrack = computed<AudioTrack | undefined>(() => {
 
 const durationSec = computed(() => audio.state.music.durationSec || currentTrack.value?.duration || 0)
 
+// ── 进度滑块：提交式 seek ────────────────────────────────
+// store 以 ~4Hz 轮询回写 positionSec。若滑块直接绑定它，拖动时轮询会把把手
+// 从手里抢回去（每 250ms 跳一次）。所以拖动期间显示值走本地草稿，只有 change
+// （松手 / 方向键 / Home-End）才真的 seek。音量滑块不受影响 —— 那里需要
+// input 的连续反馈。
+//
+// 冻结范围刻意收得很窄：**只在真的有交互时**冻结。单纯把焦点停在进度条上
+// 不冻结任何东西 —— 否则用户 Tab 过来听歌，进度条和时钟就一起僵住，界面
+// 等于在撒谎。提交后再压一个极短的安定窗口，挡掉那一两拍还在路上的陈旧
+// 轮询值，随后无论焦点在哪都放开跟随真实播放位置。
+
+/** 提交后的安定窗口(ms)：够盖住 1-2 拍 250ms 轮询，短到用户察觉不到 */
+const SEEK_SETTLE_MS = 500
+
+const seekDragging = ref(false)
+const seekSettling = ref(false)
+const seekDraft = ref(0)
+
+let seekSettleTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearSeekSettle(): void {
+  if (seekSettleTimer !== null) {
+    clearTimeout(seekSettleTimer)
+    seekSettleTimer = null
+  }
+  seekSettling.value = false
+}
+
+/** 用户正在操纵进度条（或刚松手） → 冻结轮询对显示值的写入 */
+const seekHeld = computed(() => seekDragging.value || seekSettling.value)
+
+/** 进度条把手与时间文字共用的显示值，保证两者永远一致 */
+const displayPositionSec = computed(() => (seekHeld.value ? seekDraft.value : audio.positionSec))
+
+/** 拖动过程中只更新草稿，不真的 seek */
+function onSeekInput(raw: string | number): void {
+  clearSeekSettle() // 新交互作废上一次的安定窗口
+  seekDragging.value = true
+  seekDraft.value = Number(raw)
+}
+
+/** 提交才 seek —— 松手、方向键、Home/End 都会触发 change */
+function onSeekCommit(raw: string | number): void {
+  const sec = Number(raw)
+  clearSeekSettle()
+  seekDraft.value = sec
+  seekDragging.value = false
+  audio.seek(sec)
+  seekSettling.value = true
+  seekSettleTimer = setTimeout(() => {
+    seekSettleTimer = null
+    seekSettling.value = false
+  }, SEEK_SETTLE_MS)
+}
+
+/** 松手时值没变则不会有 change —— 兜住这条路径，别把冻结态留在原地 */
+function onSeekPointerUp(): void {
+  if (!seekDragging.value) return
+  seekDragging.value = false
+  clearSeekSettle()
+}
+
 /** 0..1 —— 进度条用 scaleX，绝不过渡 width（design.md §1 禁令） */
 const progressRatio = computed(() => {
   const d = durationSec.value
   if (d <= 0) return 0
-  return Math.min(1, Math.max(0, audio.positionSec / d))
+  return Math.min(1, Math.max(0, displayPositionSec.value / d))
 })
 
 const isPlaying = computed(() => audio.state.music.status === 'playing')
@@ -91,9 +219,27 @@ function cycleRepeat(): void {
   audio.setRepeat(order[(i + 1) % order.length])
 }
 
-function onSeek(raw: string | number): void {
-  audio.seek(Number(raw))
-}
+// ===== 状态播报（唯一 aria-live 区域） =====
+// 只播报离散的、用户会关心的转变：播放/暂停、曲库与文件夹的忙碌态、上传结果。
+// 绝不播报进度或音量这类连续值 —— 那会把屏幕阅读器淹掉。
+
+const liveMessage = ref('')
+
+watch(
+  () => [isPlaying.value, currentTrack.value?.name] as const,
+  ([playing, name]) => {
+    liveMessage.value = name ? `${playing ? '正在播放' : '已暂停'}：${name}` : ''
+  },
+)
+
+// 忙碌态结束必须改写这行字：留着「正在扫描…」既是骗人，也会让下一次扫描
+// 因为字符串没变而彻底不播报。有结果的报结果（沿用文件夹条的措辞），没有的清空。
+watch(() => audio.scanning, (on) => {
+  liveMessage.value = on ? '正在扫描音乐文件夹…' : `已收录 ${fileTrackCount.value} 首本地曲目。`
+})
+watch(() => audio.loading, (on) => {
+  liveMessage.value = on ? '正在翻检曲库…' : ''
+})
 
 // ===== ② 播放列表 =====
 
@@ -115,24 +261,30 @@ const playlistTracks = computed<AudioTrack[]>(() => {
 const addTrackId = ref<string>('')
 
 async function createPlaylist(): Promise<void> {
-  const name = window.prompt('新建播放列表名称', '新播放列表')
+  const name = await askPrompt({ title: '新建播放列表', label: '新建播放列表名称', value: '新播放列表' })
   if (!name) return
-  const list = await audio.createPlaylist(name.trim())
+  const list = await audio.createPlaylist(name)
   selectedPlaylistId.value = list.id
 }
 
 async function renameSelectedPlaylist(): Promise<void> {
   const p = selectedPlaylist.value
   if (!p) return
-  const name = window.prompt('重命名播放列表', p.name)
+  const name = await askPrompt({ title: '重命名播放列表', label: '播放列表名称', value: p.name })
   if (!name) return
-  await audio.renamePlaylist(p.id, name.trim())
+  await audio.renamePlaylist(p.id, name)
 }
 
 async function deleteSelectedPlaylist(): Promise<void> {
   const p = selectedPlaylist.value
   if (!p) return
-  if (!window.confirm(`删除播放列表「${p.name}」？曲目本身不会被删除。`)) return
+  const ok = await askConfirm({
+    title: '删除播放列表',
+    message: `删除播放列表「${p.name}」？曲目本身不会被删除。`,
+    confirmLabel: '删除',
+    danger: true,
+  })
+  if (!ok) return
   await audio.deletePlaylist(p.id)
   selectedPlaylistId.value = ''
 }
@@ -245,9 +397,13 @@ async function rescanFolder(): Promise<void> {
 /** 取消关联只丢句柄；曲目行与播放列表位次都留着（addendum §forgetFolder） */
 async function forgetFolder(): Promise<void> {
   const name = audio.folderName || '音乐文件夹'
-  if (!window.confirm(
-    `取消关联「${name}」？曲库记录与播放列表位次都会保留，重新选回同一个文件夹即可恢复播放。`,
-  )) return
+  const ok = await askConfirm({
+    title: '取消关联音乐文件夹',
+    message: `取消关联「${name}」？曲库记录与播放列表位次都会保留，重新选回同一个文件夹即可恢复播放。`,
+    confirmLabel: '取消关联',
+    danger: true,
+  })
+  if (!ok) return
   try {
     await audio.forgetFolder()
   } catch {
@@ -277,11 +433,38 @@ async function onFilesPicked(e: Event): Promise<void> {
   input.value = ''
   if (files.length === 0) return
   const total = files.reduce((n, f) => n + f.size, 0)
-  if (total > SOFT_LIMIT_BYTES && !window.confirm(
-    `本次上传约 ${fmtBytes(total)}，会占用浏览器存储配额（与存档共用）。继续吗？`,
-  )) return
-  await audio.uploadFiles(files, uploadKind.value)
+  // 软确认要拿新鲜的配额说话 —— 缓存值可能是几分钟前的
+  if (total > SOFT_LIMIT_BYTES) {
+    storageInfo.value = await cfg.getStorageUsage()
+    const ok = await askConfirm({
+      title: '上传音频',
+      message: `本次上传约 ${fmtBytes(total)}，会占用浏览器存储配额（与存档共用）。继续吗？`,
+      confirmLabel: '继续上传',
+    })
+    if (!ok) return
+  }
+  try {
+    const created = await audio.uploadFiles(files, uploadKind.value)
+    ui.toast(`已添加 ${created.length} 个音频`, 'success')
+    liveMessage.value = `已添加 ${created.length} 个音频`
+  } catch (err) {
+    if (isQuotaError(err)) {
+      ui.toast(
+        '存储空间不足，无法保存音频。可改用「音乐文件夹」，文件将留在磁盘上不占用浏览器空间。',
+        'error',
+      )
+    } else {
+      const detail = err instanceof Error ? err.message : String(err)
+      ui.toast(`上传失败：${detail}`, 'error')
+    }
+  }
   storageInfo.value = await cfg.getStorageUsage()
+}
+
+/** 配额耗尽在各浏览器里的两种名字 */
+function isQuotaError(err: unknown): boolean {
+  const name = (err as { name?: unknown } | null)?.name
+  return name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED'
 }
 
 function startEdit(t: AudioTrack): void {
@@ -304,19 +487,38 @@ async function saveEdit(t: AudioTrack): Promise<void> {
   editingId.value = ''
 }
 
+/** 删除会顺带把该曲目剪出所有播放列表 —— 先数清楚，写进确认文案 */
+function playlistUseCount(trackId: string): number {
+  return audio.playlists.filter((p) => p.trackIds.includes(trackId)).length
+}
+
 async function removeTrack(t: AudioTrack): Promise<void> {
-  const msg = t.source === 'file'
+  const base = t.source === 'file'
     ? `删除曲目「${t.name}」？只移除曲库记录，磁盘上的文件不会被删除。`
     : `删除曲目「${t.name}」？此操作不可撤销。`
-  if (!window.confirm(msg)) return
+  const n = playlistUseCount(t.id)
+  const msg = n > 0
+    ? `${base}\n该曲目在 ${n} 个播放列表中，删除后将一并移出。`
+    : base
+  const ok = await askConfirm({ title: '删除曲目', message: msg, confirmLabel: '删除', danger: true })
+  if (!ok) return
   await audio.deleteTrack(t.id)
   storageInfo.value = await cfg.getStorageUsage()
 }
 
 async function audition(t: AudioTrack): Promise<void> {
   if (t.missing) return
-  if (t.kind === 'sfx') await audio.playSfx(t.id)
-  else await audio.playTrack(t.id)
+  if (t.kind === 'sfx') {
+    const ok = await audio.playSfx(t.id)
+    if (!ok) {
+      ui.toast(
+        audio.state.unlocked ? '播放失败。' : '浏览器尚未解锁音频，请先点击页面任意处再试听。',
+        'warning',
+      )
+    }
+    return
+  }
+  await audio.playTrack(t.id)
 }
 
 // ===== 格式化 =====
@@ -345,8 +547,11 @@ function fmtDuration(sec?: number): string {
       管理背景音乐与音效。曲库为全局资源，所有存档共用，不随存档导入导出。
     </p>
 
+    <!-- 唯一状态播报区：播放/暂停、扫描、上传结果。视觉隐藏，只给辅助技术 -->
+    <p class="sr-only" role="status" aria-live="polite">{{ liveMessage }}</p>
+
     <!-- ═══ ① 混音台 ═══ -->
-    <AppCard padding="md" class="audio-card" style="margin-top: 16px">
+    <AppCard padding="md" class="audio-card">
       <h4 class="band-title">混音台</h4>
 
       <div v-for="ch in channels" :key="ch.key" class="mix-row">
@@ -357,7 +562,7 @@ function fmtDuration(sec?: number): string {
           :aria-label="ch.muted ? `取消静音：${ch.label}` : `静音：${ch.label}`"
           :aria-pressed="ch.muted"
           @click="toggleMute(ch.key, ch.muted)"
-        >{{ ch.muted ? '🔇' : '🔊' }}</button>
+        ><i class="fa-solid" :class="ch.muted ? 'fa-volume-xmark' : 'fa-volume-high'" aria-hidden="true" /></button>
         <div class="slider" :class="{ 'slider-off': ch.muted }">
           <div class="slider-track">
             <div class="slider-fill" :style="{ transform: `scaleX(${ch.volume})` }" />
@@ -370,6 +575,7 @@ function fmtDuration(sec?: number): string {
             step="1"
             :value="Math.round(ch.volume * 100)"
             :aria-label="`${ch.label}音量`"
+            :aria-valuetext="`${Math.round(ch.volume * 100)}%`"
             @input="setVolume(ch.key, ($event.target as HTMLInputElement).value)"
           />
         </div>
@@ -381,7 +587,7 @@ function fmtDuration(sec?: number): string {
         <div class="transport-title">
           {{ currentTrack ? currentTrack.name : '未在播放' }}
         </div>
-        <div class="slider progress" >
+        <div class="slider progress">
           <div class="slider-track">
             <div class="slider-fill" :style="{ transform: `scaleX(${progressRatio})` }" />
           </div>
@@ -391,33 +597,41 @@ function fmtDuration(sec?: number): string {
             min="0"
             :max="Math.max(1, Math.floor(durationSec))"
             step="1"
-            :value="Math.floor(audio.positionSec)"
+            :value="Math.floor(displayPositionSec)"
             :disabled="durationSec <= 0"
             aria-label="播放进度"
-            @input="onSeek(($event.target as HTMLInputElement).value)"
+            :aria-valuetext="`${fmtDuration(displayPositionSec)} / ${fmtDuration(durationSec)}`"
+            @input="onSeekInput(($event.target as HTMLInputElement).value)"
+            @change="onSeekCommit(($event.target as HTMLInputElement).value)"
+            @pointerup="onSeekPointerUp"
+            @pointercancel="onSeekPointerUp"
           />
         </div>
         <div class="transport-row">
-          <span class="time-text">{{ fmtDuration(audio.positionSec) }} / {{ fmtDuration(durationSec) }}</span>
+          <span class="time-text">{{ fmtDuration(displayPositionSec) }} / {{ fmtDuration(durationSec) }}</span>
           <div class="transport-btns">
-            <button class="icon-btn" aria-label="上一曲" @click="audio.prev()">⏮</button>
-            <button class="icon-btn" :aria-label="isPlaying ? '暂停' : '播放'" @click="audio.toggle()">
-              {{ isPlaying ? '⏸' : '▶' }}
+            <button class="icon-btn" aria-label="上一曲" @click="audio.prev()">
+              <i class="fa-solid fa-backward-step" aria-hidden="true" />
             </button>
-            <button class="icon-btn" aria-label="下一曲" @click="audio.next()">⏭</button>
+            <button class="icon-btn" :aria-label="isPlaying ? '暂停' : '播放'" @click="audio.toggle()">
+              <i class="fa-solid" :class="isPlaying ? 'fa-pause' : 'fa-play'" aria-hidden="true" />
+            </button>
+            <button class="icon-btn" aria-label="下一曲" @click="audio.next()">
+              <i class="fa-solid fa-forward-step" aria-hidden="true" />
+            </button>
             <button
               class="chip-btn"
               :class="{ 'chip-on': audio.state.music.repeat !== 'off' }"
               :aria-label="`循环模式：${repeatLabel}`"
               @click="cycleRepeat()"
-            >🔁 {{ repeatLabel }}</button>
+            ><i class="fa-solid fa-repeat" aria-hidden="true" /> {{ repeatLabel }}</button>
             <button
               class="chip-btn"
               :class="{ 'chip-on': audio.state.music.shuffle }"
               :aria-pressed="audio.state.music.shuffle"
               aria-label="随机播放"
               @click="audio.setShuffle(!audio.state.music.shuffle)"
-            >🔀 随机</button>
+            ><i class="fa-solid fa-shuffle" aria-hidden="true" /> 随机</button>
           </div>
         </div>
         <p v-if="!audio.state.unlocked" class="hint-text">浏览器需要一次点击才能开始播放。</p>
@@ -425,14 +639,14 @@ function fmtDuration(sec?: number): string {
     </AppCard>
 
     <!-- ═══ ② 播放列表 ═══ -->
-    <AppCard padding="md" class="audio-card" style="margin-top: 12px">
+    <AppCard padding="md" class="audio-card">
       <h4 class="band-title">播放列表</h4>
 
       <div class="playlist-grid">
         <!-- 选择器 -->
         <div class="playlist-picker">
           <div class="picker-actions">
-            <AppButton variant="primary" size="sm" @click="createPlaylist">＋ 新建</AppButton>
+            <AppButton variant="primary" size="sm" @click="createPlaylist"><i class="fa-solid fa-plus" aria-hidden="true" /> 新建</AppButton>
             <AppButton variant="secondary" size="sm" :disabled="!selectedPlaylist" @click="renameSelectedPlaylist">重命名</AppButton>
             <AppButton variant="secondary" size="sm" :disabled="!selectedPlaylist" @click="deleteSelectedPlaylist">删除</AppButton>
           </div>
@@ -459,15 +673,26 @@ function fmtDuration(sec?: number): string {
                 <option v-for="t in musicTracks" :key="t.id" :value="t.id">{{ t.name }}</option>
               </select>
               <AppButton variant="secondary" size="sm" :disabled="!addTrackId" @click="addSelectedTrack">加入</AppButton>
-              <AppButton variant="secondary" size="sm" :disabled="playlistTracks.length === 0" @click="audio.playPlaylist(selectedPlaylist.id, 0)">▶ 播放</AppButton>
+              <AppButton variant="secondary" size="sm" :disabled="playlistTracks.length === 0" @click="audio.playPlaylist(selectedPlaylist.id, 0)"><i class="fa-solid fa-play" aria-hidden="true" /> 播放</AppButton>
             </div>
             <div v-if="playlistTracks.length === 0" class="empty-tab">此列表尚无曲目…</div>
             <div v-for="(t, i) in playlistTracks" :key="t.id + '_' + i" class="track-row">
-              <span class="kind-dot" :class="`dot-${t.kind}`" />
+              <span
+                class="kind-dot"
+                :class="`dot-${t.kind}`"
+                role="img"
+                :aria-label="t.kind === 'sfx' ? '音效' : '音乐'"
+              />
               <span class="track-name">{{ t.name }}</span>
-              <button class="icon-btn" aria-label="上移" :disabled="i === 0" @click="movePlaylistTrack(i, -1)">▲</button>
-              <button class="icon-btn" aria-label="下移" :disabled="i === playlistTracks.length - 1" @click="movePlaylistTrack(i, 1)">▼</button>
-              <button class="icon-btn icon-danger" aria-label="移出列表" @click="audio.removeTrackFromPlaylist(selectedPlaylist!.id, t.id)">✕</button>
+              <button class="icon-btn" aria-label="上移" :disabled="i === 0" @click="movePlaylistTrack(i, -1)">
+                <i class="fa-solid fa-chevron-up" aria-hidden="true" />
+              </button>
+              <button class="icon-btn" aria-label="下移" :disabled="i === playlistTracks.length - 1" @click="movePlaylistTrack(i, 1)">
+                <i class="fa-solid fa-chevron-down" aria-hidden="true" />
+              </button>
+              <button class="icon-btn icon-danger" aria-label="移出列表" @click="audio.removeTrackFromPlaylist(selectedPlaylist!.id, t.id)">
+                <i class="fa-solid fa-xmark" aria-hidden="true" />
+              </button>
             </div>
           </template>
           <div v-else class="empty-tab">先在左侧选择一个播放列表…</div>
@@ -476,15 +701,15 @@ function fmtDuration(sec?: number): string {
     </AppCard>
 
     <!-- ═══ ③ 曲库 ═══ -->
-    <AppCard padding="md" class="audio-card" style="margin-top: 12px">
+    <AppCard padding="md" class="audio-card">
       <div class="library-head">
-        <h4 class="band-title" style="margin:0">曲库</h4>
+        <h4 class="band-title">曲库</h4>
         <span v-if="storageInfo" class="usage-text">
           浏览器存储 {{ fmtBytes(storageInfo.used) }} / {{ fmtBytes(storageInfo.quota) }}
           （{{ storageInfo.pct.toFixed(1) }}%）
         </span>
       </div>
-      <p class="text-muted text-sm" style="margin: 4px 0 12px">
+      <p class="library-note text-muted text-sm">
         音频与存档共用同一份浏览器配额；「清除所有数据」会一并删除曲库。
       </p>
 
@@ -525,13 +750,14 @@ function fmtDuration(sec?: number): string {
         </template>
       </div>
 
-      <!-- 工具条 -->
-      <div class="lib-toolbar">
+      <!-- 上传（输入）：单独成组，避免上传类型被误读为列表过滤器 -->
+      <div class="lib-upload">
+        <span class="upload-label">上传为</span>
         <select v-model="uploadKind" class="mini-select" aria-label="上传类型">
           <option value="music">音乐</option>
           <option value="sfx">音效</option>
         </select>
-        <AppButton variant="primary" size="sm" @click="pickFiles">＋ 上传音频</AppButton>
+        <AppButton variant="primary" size="sm" @click="pickFiles"><i class="fa-solid fa-plus" aria-hidden="true" /> 上传音频</AppButton>
         <input
           ref="fileInput"
           class="file-input"
@@ -541,6 +767,11 @@ function fmtDuration(sec?: number): string {
           aria-label="选择音频文件"
           @change="onFilesPicked"
         />
+        <span class="upload-hint">决定接下来上传的文件如何归类，上传后可在曲目编辑中更改。</span>
+      </div>
+
+      <!-- 工具条（查看筛选） -->
+      <div class="lib-toolbar">
         <input v-model="search" class="mini-input" type="search" placeholder="搜索曲名…" aria-label="搜索曲名" />
         <select v-model="kindFilter" class="mini-select" aria-label="按类型过滤">
           <option value="all">全部类型</option>
@@ -568,11 +799,17 @@ function fmtDuration(sec?: number): string {
         class="track-row track-row-lib"
         :class="{ 'track-muted': isHidden(t) || t.missing }"
       >
-        <span class="kind-dot" :class="`dot-${t.kind}`" />
+        <span
+          class="kind-dot"
+          :class="`dot-${t.kind}`"
+          role="img"
+          :aria-label="t.kind === 'sfx' ? '音效' : '音乐'"
+        />
         <span class="track-name">{{ t.name }}</span>
         <span v-if="t.missing" class="missing-badge">文件已移除</span>
         <span v-for="tag in t.tags" :key="tag" class="tag-chip">{{ tag }}</span>
-        <span class="src-text" :title="sourceHint(t)" :aria-label="sourceHint(t)">{{ sourceLabel(t) }}</span>
+        <!-- 提示语做成可见标签 + 视觉隐藏的补充文本；不再只靠 title/aria-label 撑着 -->
+        <span class="src-text" :title="sourceHint(t)">{{ sourceLabel(t) }} <span class="sr-only">{{ sourceHint(t) }}</span></span>
         <span class="meta-text">{{ fmtDuration(t.duration) }}</span>
         <span class="meta-text">{{ fmtBytes(t.size) }}</span>
         <button
@@ -580,15 +817,19 @@ function fmtDuration(sec?: number): string {
           :aria-label="t.missing ? '文件已移除，无法试听' : '试听'"
           :disabled="!!t.missing"
           @click="audition(t)"
-        >▶</button>
+        ><i class="fa-solid fa-play" aria-hidden="true" /></button>
         <template v-if="t.builtin">
           <button class="icon-btn" :aria-label="isHidden(t) ? '取消隐藏' : '隐藏内置曲目'" @click="toggleHideBuiltin(t)">
-            {{ isHidden(t) ? '👁' : '🚫' }}
+            <i class="fa-solid" :class="isHidden(t) ? 'fa-eye' : 'fa-eye-slash'" aria-hidden="true" />
           </button>
         </template>
         <template v-else>
-          <button class="icon-btn" aria-label="编辑曲目" @click="startEdit(t)">✎</button>
-          <button class="icon-btn icon-danger" aria-label="删除曲目" @click="removeTrack(t)">🗑</button>
+          <button class="icon-btn" aria-label="编辑曲目" @click="startEdit(t)">
+            <i class="fa-solid fa-pen" aria-hidden="true" />
+          </button>
+          <button class="icon-btn icon-danger" aria-label="删除曲目" @click="removeTrack(t)">
+            <i class="fa-solid fa-trash" aria-hidden="true" />
+          </button>
         </template>
 
         <!-- 行内编辑 -->
@@ -604,10 +845,57 @@ function fmtDuration(sec?: number): string {
         </div>
       </div>
     </AppCard>
+
+    <!-- ═══ 确认弹窗（取代 window.confirm） ═══ -->
+    <AppModal
+      :open="confirmDialog.open"
+      :title="confirmDialog.title"
+      size="sm"
+      @update:open="closeConfirm(false)"
+    >
+      <p class="dialog-text">{{ confirmDialog.message }}</p>
+      <template #footer>
+        <AppButton variant="ghost" size="sm" @click="closeConfirm(false)">取消</AppButton>
+        <AppButton
+          :variant="confirmDialog.danger ? 'danger' : 'primary'"
+          size="sm"
+          @click="closeConfirm(true)"
+        >{{ confirmDialog.confirmLabel }}</AppButton>
+      </template>
+    </AppModal>
+
+    <!-- ═══ 输入弹窗（取代 window.prompt） ═══ -->
+    <AppModal
+      :open="promptDialog.open"
+      :title="promptDialog.title"
+      size="sm"
+      @update:open="closePrompt(null)"
+    >
+      <label class="dialog-label">
+        {{ promptDialog.label }}
+        <input
+          ref="promptInput"
+          v-model="promptDialog.value"
+          class="mini-input dialog-input"
+          type="text"
+          @keydown.enter.prevent="submitPrompt"
+        />
+      </label>
+      <template #footer>
+        <AppButton variant="ghost" size="sm" @click="closePrompt(null)">取消</AppButton>
+        <AppButton variant="primary" size="sm" :disabled="!promptValid" @click="submitPrompt">确定</AppButton>
+      </template>
+    </AppModal>
   </section>
 </template>
 
 <style scoped>
+/*
+ * 分区标题 / 描述：值与 SettingsPage 的 `.section>h3` / `.section-desc` 一致
+ * （1.4rem 落在 design.md §排版「设置页 section h3 = 1.3-1.4rem」区间内）。
+ * 不能删掉靠继承 —— SettingsPage 的样式是 scoped 的，只能命中本组件的根节点，
+ * 命不到根节点里面的 h3/p，删了这里标题就退回浏览器默认样式了。
+ */
 .audio-section > h3 {
   font-family: var(--theme-font-title);
   font-size: 1.4rem;
@@ -622,7 +910,12 @@ function fmtDuration(sec?: number): string {
   border-bottom: 1px solid var(--theme-card-border);
 }
 .audio-card {
+  margin-top: var(--theme-spacing-lg);
   box-shadow: var(--paper-stack);
+}
+/* 三段之间比首段与分区描述之间收一档，让三张卡读起来是一组 */
+.audio-card + .audio-card {
+  margin-top: var(--theme-spacing-md);
 }
 
 /* ═══ 分段标题 + 装饰线 ═══ */
@@ -631,7 +924,7 @@ function fmtDuration(sec?: number): string {
   align-items: center;
   gap: var(--theme-spacing-sm);
   font-family: var(--theme-font-title);
-  font-size: 0.95rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--theme-text-primary);
   margin: 0 0 var(--theme-spacing-md);
@@ -678,10 +971,12 @@ function fmtDuration(sec?: number): string {
   font-variant-numeric: tabular-nums;
 }
 
-/* ═══ 滑块（手搓轨/填充，对齐 ResourceBar；交互层是透明 range） ═══ */
+/* ═══ 滑块（手搓轨/填充，对齐 ResourceBar；交互层是原生 range） ═══
+ * 视觉轨保持 6px 的纤细感，但交互层撑到 36px 命中区（design.md §8 触摸目标）。
+ * range 自身只保留把手可见 —— 轨道与进度都交给下面的 .slider-track/.slider-fill。 */
 .slider {
   position: relative;
-  height: 24px;
+  height: 36px;
   display: flex;
   align-items: center;
 }
@@ -689,6 +984,7 @@ function fmtDuration(sec?: number): string {
   position: absolute;
   left: 0;
   right: 0;
+  top: calc(50% - 3px);
   height: 6px;
   background: var(--theme-surface-muted);
   border-radius: var(--theme-radius-full);
@@ -705,20 +1001,93 @@ function fmtDuration(sec?: number): string {
 .slider-input {
   position: relative;
   width: 100%;
-  height: 24px;
+  height: 36px;
   margin: 0;
-  opacity: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
   cursor: pointer;
 }
 .slider-input:disabled {
   cursor: default;
 }
+
+/* 原生轨道让位给手搓轨；把手是 range 唯一可见的部分 */
+.slider-input::-webkit-slider-runnable-track {
+  height: 36px;
+  background: transparent;
+  border: none;
+}
+.slider-input::-moz-range-track {
+  height: 36px;
+  background: transparent;
+  border: none;
+}
+.slider-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  /* webkit 把手相对 runnable-track 顶部定位，手动居中：(36 - 16) / 2 */
+  margin-top: 10px;
+  border-radius: 50%;
+  background: var(--theme-primary);
+  border: 2px solid var(--theme-card-bg);
+  box-shadow: var(--theme-shadow-sm);
+  cursor: pointer;
+}
+.slider-input::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--theme-primary);
+  border: 2px solid var(--theme-card-bg);
+  box-shadow: var(--theme-shadow-sm);
+  cursor: pointer;
+}
+/* 三条各写各的 —— 选择器列表里混入厂商伪元素会让整条规则被另一引擎整体丢弃 */
 .slider-off .slider-fill {
   background: var(--theme-text-muted);
 }
-.slider-input:focus-visible + .slider-track,
-.slider:focus-within .slider-track {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 30%, transparent);
+.slider-off .slider-input::-webkit-slider-thumb {
+  background: var(--theme-text-muted);
+}
+.slider-off .slider-input::-moz-range-thumb {
+  background: var(--theme-text-muted);
+}
+/* 没有时长时进度条无意义 —— 把手收起来，不给假的可拖动暗示 */
+.slider-input:disabled::-webkit-slider-thumb {
+  opacity: 0;
+}
+.slider-input:disabled::-moz-range-thumb {
+  opacity: 0;
+}
+
+/* 悬停：轨道一圈中性描边（轻） */
+.slider:hover .slider-track {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-text-muted) 45%, transparent);
+}
+/*
+ * 键盘焦点：轨道加粗成主色环 + 把手外扩光晕，与 hover / 鼠标按下明显区分。
+ * 旧写法 `.slider-input:focus-visible + .slider-track` 永远不可能命中 ——
+ * `.slider-track` 是 range 的**前**一个兄弟，`+` 只能往后选；退守的
+ * `:focus-within` 又会在鼠标按下时误触发。改用外层 `:has()` 一次解决。
+ */
+.slider:has(.slider-input:focus-visible) .slider-track {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 40%, transparent);
+}
+.slider-input:focus {
+  outline: none;
+}
+.slider-input:focus-visible::-webkit-slider-thumb {
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-primary) 40%, transparent);
+}
+.slider-input:focus-visible::-moz-range-thumb {
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-primary) 40%, transparent);
 }
 
 /* ═══ 传输 ═══ */
@@ -762,7 +1131,28 @@ function fmtDuration(sec?: number): string {
   color: var(--theme-text-muted);
 }
 
+/* ═══ 无障碍：视觉隐藏（保留在无障碍树里） ═══ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ═══ 按钮 ═══ */
+/* 统一的键盘焦点环 —— 这片区域按钮最密，没有焦点提示等于让人闭眼穿行 */
+.icon-btn:focus-visible,
+.chip-btn:focus-visible,
+.picker-item:focus-visible {
+  outline: none;
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 40%, transparent);
+}
 .icon-btn {
   min-width: 36px;
   height: 36px;
@@ -778,6 +1168,11 @@ function fmtDuration(sec?: number): string {
   cursor: pointer;
   transition: background var(--theme-transition-fast), color var(--theme-transition-fast),
     border-color var(--theme-transition-fast);
+}
+/* 图标字体的视觉重量与 emoji 不同，单独给一档字号找回平衡（按钮尺寸不变） */
+.icon-btn i {
+  font-size: 0.875rem;
+  line-height: 1;
 }
 .icon-btn:hover:not(:disabled) {
   background: var(--theme-tab-hover-bg);
@@ -806,6 +1201,10 @@ function fmtDuration(sec?: number): string {
   cursor: pointer;
   transition: background var(--theme-transition-fast), color var(--theme-transition-fast),
     border-color var(--theme-transition-fast);
+}
+.chip-btn i {
+  font-size: 0.8125rem;
+  line-height: 1;
 }
 .chip-btn:hover {
   background: var(--theme-tab-hover-bg);
@@ -884,17 +1283,33 @@ function fmtDuration(sec?: number): string {
 .track-row:last-child {
   border-bottom: none;
 }
-.track-muted {
-  opacity: 0.55;
+/*
+ * 隐藏 / 失联的行只压曲名与类型点，**不整行降透明度**。
+ * 原来的 `opacity: .55` 把 meta 文字压到约 2.5:1、「文件已移除」徽章压到约 3.2:1 ——
+ * 偏偏这些正是用户最需要读清楚的信息（出了什么事、文件多大、来源在哪）。
+ */
+.track-muted .track-name {
+  color: var(--theme-text-muted);
+  font-weight: 400;
+}
+.track-muted .kind-dot {
+  opacity: 0.5;
 }
 .kind-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
   flex-shrink: 0;
 }
-.dot-music { background: var(--theme-primary); }
-.dot-sfx { background: var(--theme-success); }
+/* 类型不能只靠颜色区分（WCAG 1.4.1）：音乐=圆点，音效=菱形，另有可读名字 */
+.dot-music {
+  background: var(--theme-primary);
+  border-radius: 50%;
+}
+.dot-sfx {
+  background: var(--theme-success);
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
 .track-name {
   flex: 1;
   min-width: 8rem;
@@ -929,34 +1344,52 @@ function fmtDuration(sec?: number): string {
   gap: var(--theme-spacing-md);
   flex-wrap: wrap;
 }
+/*
+ * 表头里的标题不再另加下边距；并要撑开成弹性项 —— 否则它收缩到文字宽度，
+ * `::after` 那条 flex:1 的装饰线就只剩 0 宽，三段里唯独曲库少一条线。
+ */
+.library-head .band-title {
+  flex: 1;
+  margin: 0;
+}
 .usage-text {
   font-size: 0.6875rem;
   color: var(--theme-text-muted);
 }
-/* ═══ 音乐文件夹条 ═══ */
-.folder-strip {
+.library-note {
+  margin: var(--theme-spacing-xs) 0 var(--theme-spacing-md);
+}
+/* ═══ 条状分组：音乐文件夹 / 上传组 / 行内编辑共用同一副外壳 ═══ */
+.folder-strip,
+.lib-upload,
+.edit-panel {
   display: flex;
   align-items: center;
   gap: var(--theme-spacing-sm);
   flex-wrap: wrap;
-  margin-bottom: var(--theme-spacing-md);
   padding: var(--theme-spacing-sm) var(--theme-spacing-md);
   background: var(--theme-content-bg);
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-md);
+}
+.folder-strip {
+  margin-bottom: var(--theme-spacing-md);
   transition: background var(--theme-transition-fast), border-color var(--theme-transition-fast);
 }
 .folder-strip-on {
   background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
   border-color: color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
 }
-.folder-name {
+/* 文件夹条与上传组是同一种「条」，标题与说明共用一套排版 */
+.folder-name,
+.upload-label {
   font-family: var(--theme-font-title);
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--theme-text-primary);
 }
-.folder-note {
+.folder-note,
+.upload-hint {
   flex: 1;
   min-width: 12rem;
   font-size: 0.75rem;
@@ -975,6 +1408,11 @@ function fmtDuration(sec?: number): string {
   background: color-mix(in srgb, var(--theme-warning) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--theme-warning) 30%, transparent);
   color: var(--theme-warning);
+}
+
+/* 上传组：输入模式，独立成组，与下方的查看筛选区分开 */
+.lib-upload {
+  margin-bottom: var(--theme-spacing-sm);
 }
 
 .lib-toolbar {
@@ -1002,7 +1440,7 @@ function fmtDuration(sec?: number): string {
 .mini-select:focus {
   outline: none;
   border-color: var(--theme-primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 15%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 40%, transparent);
 }
 .mini-input {
   min-width: 9rem;
@@ -1018,14 +1456,26 @@ function fmtDuration(sec?: number): string {
 }
 .edit-panel {
   flex-basis: 100%;
-  display: flex;
-  align-items: center;
-  gap: var(--theme-spacing-sm);
-  flex-wrap: wrap;
   margin-top: var(--theme-spacing-sm);
-  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
-  background: var(--theme-content-bg);
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-md);
+}
+
+/* ═══ 确认 / 输入弹窗 ═══ */
+.dialog-text {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--theme-text-secondary);
+  /* 删除曲目的第二句用 \n 换行，保留原文的断句 */
+  white-space: pre-line;
+}
+.dialog-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-xs);
+  font-size: 0.8125rem;
+  color: var(--theme-text-secondary);
+}
+.dialog-input {
+  width: 100%;
 }
 </style>
