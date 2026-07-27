@@ -8,16 +8,18 @@
  * 4. 扫描保住用户整理成果 (tags / kind)
  * 5. init() 绝不调用 requestPermission（无用户手势）
  * 6. forgetFolder 保留曲目行，只把它们标成 missing
+ * 7. 名字唯一性: 导入自动编号 / 手工命名拒绝 / 按名寻址
  *
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import type { AudioTrack } from '@engine/types'
+import type { AudioPlaylist, AudioTrack } from '@engine/types'
 
 // ── @engine/database: Dexie 在 import 期就构造，整层替掉 ──
 const trackRows = new Map<string, AudioTrack>()
 const blobRows = new Map<string, Blob>()
+const playlistRows = new Map<string, AudioPlaylist>()
 
 vi.mock('@engine/database', () => ({
   getAudioTracks: vi.fn(async () => [...trackRows.values()]),
@@ -26,9 +28,12 @@ vi.mock('@engine/database', () => ({
     return t.id
   }),
   deleteAudioTrack: vi.fn(async (id: string) => { trackRows.delete(id) }),
-  getAudioPlaylists: vi.fn(async () => []),
-  saveAudioPlaylist: vi.fn(async () => {}),
-  deleteAudioPlaylist: vi.fn(async () => {}),
+  getAudioPlaylists: vi.fn(async () => [...playlistRows.values()]),
+  saveAudioPlaylist: vi.fn(async (p: AudioPlaylist) => {
+    playlistRows.set(p.id, { ...p })
+    return p.id
+  }),
+  deleteAudioPlaylist: vi.fn(async (id: string) => { playlistRows.delete(id) }),
   getAudioBlob: vi.fn(async (id: string) => blobRows.get(id)),
   getAudioHandle: vi.fn(async () => undefined),
   saveAudioHandle: vi.fn(async () => 'library-root'),
@@ -117,6 +122,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   trackRows.clear()
   blobRows.clear()
+  playlistRows.clear()
   for (const k of Object.keys(mockSettings)) delete mockSettings[k]
   Object.assign(mockSettings, {
     audioMasterVolume: 0.7, audioMusicVolume: 0.7, audioSfxVolume: 0.7,
@@ -328,5 +334,102 @@ describe('audio-store · 文件夹生命周期', () => {
     expect(trackRows.get('tf1')?.tags).toEqual(['夜'])
     expect(store.folderName).toBe('')
     expect(store.folderPermission).toBe('none')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
+// 名字唯一性 & 按名寻址
+// ═══════════════════════════════════════════════════════════
+
+const audioFile = (name: string) => new File(['x'], name, { type: 'audio/mpeg' })
+
+describe('audio-store · 名字唯一性（仅新写入）', () => {
+  it('上传撞名自动编号，绝不失败', async () => {
+    trackRows.set('t0', { id: 't0', name: '夜行曲', kind: 'music', source: 'blob', tags: [], createdAt: 0, updatedAt: 0 })
+    const store = useAudioStore()
+    await store.init()
+
+    // 同一批里两个同名文件也要各自拿到号（池子随建随长）
+    const created = await store.uploadFiles([audioFile('夜行曲.mp3'), audioFile('夜行曲.mp3')])
+    expect(created).toHaveLength(2)
+    expect(created.map((t) => t.name)).toEqual(['夜行曲 (2)', '夜行曲 (3)'])
+    expect(trackRows.size).toBe(3)
+  })
+
+  it('文件夹扫描撞名自动编号，两行都在', async () => {
+    // 磁盘上 night.mp3 与 night.wav 去扩展名后同名
+    storedHandle(fakeDirHandle([MP3('night.mp3'), { name: 'night.wav', size: 20, type: 'audio/wav' }]))
+    const store = useAudioStore()
+    await store.init()
+
+    const names = [...trackRows.values()].map((t) => t.name).sort()
+    expect(names).toEqual(['night', 'night (2)'])
+    // 扫描永不跳过文件
+    expect([...trackRows.values()].map((t) => t.relativePath).sort()).toEqual(['night.mp3', 'night.wav'])
+  })
+
+  it('renameTrack 撞名拒绝；改成自己现在的名字仍然成功', async () => {
+    trackRows.set('a', { id: 'a', name: '晨曦', kind: 'music', source: 'blob', tags: [], createdAt: 0, updatedAt: 0 })
+    trackRows.set('b', { id: 'b', name: '暮色', kind: 'music', source: 'blob', tags: [], createdAt: 0, updatedAt: 0 })
+    const store = useAudioStore()
+    await store.init()
+
+    expect(await store.renameTrack('b', '晨曦')).toBe(false)
+    expect(trackRows.get('b')?.name).toBe('暮色')
+    // 归一化比较：大小写/尾部扩展名/多余空白都算同一个名字
+    expect(await store.renameTrack('b', ' 晨曦.mp3 ')).toBe(false)
+    // 改成自己现在的名字不算冲突
+    expect(await store.renameTrack('b', '暮色')).toBe(true)
+    expect(await store.renameTrack('b', '黄昏')).toBe(true)
+    expect(trackRows.get('b')?.name).toBe('黄昏')
+  })
+
+  it('播放列表与曲目是两个命名空间', async () => {
+    trackRows.set('a', { id: 'a', name: '战斗', kind: 'music', source: 'blob', tags: [], createdAt: 0, updatedAt: 0 })
+    const store = useAudioStore()
+    await store.init()
+
+    const list = await store.createPlaylist('战斗')
+    expect(list).toBeTruthy()
+    // 同名的第二个播放列表才算冲突
+    expect(await store.createPlaylist('战斗')).toBeNull()
+    expect(await store.renamePlaylist(list!.id, '战斗')).toBe(true)
+  })
+
+  it('renamePlaylist 撞名拒绝', async () => {
+    const store = useAudioStore()
+    await store.init()
+    const a = await store.createPlaylist('清晨')
+    const b = await store.createPlaylist('深夜')
+    expect(await store.renamePlaylist(b!.id, '清晨')).toBe(false)
+    expect(store.findPlaylist(b!.id)?.name).toBe('深夜')
+    expect(a).toBeTruthy()
+  })
+})
+
+describe('audio-store · 按名寻址', () => {
+  it('findTrackByName 归一化匹配；历史重名取最早的一条', async () => {
+    trackRows.set('new', { id: 'new', name: '夜行曲', kind: 'music', source: 'blob', tags: [], createdAt: 500, updatedAt: 0 })
+    trackRows.set('old', { id: 'old', name: '夜行曲', kind: 'music', source: 'blob', tags: [], createdAt: 100, updatedAt: 0 })
+    const store = useAudioStore()
+    await store.init()
+
+    expect(store.findTrackByName('夜行曲.mp3')?.id).toBe('old')
+    expect(store.findTrackByName('不存在')).toBeUndefined()
+  })
+
+  it('playTrackByName 找不到时返回 false 且不改变当前播放', async () => {
+    trackRows.set('a', { id: 'a', name: '晨曦', kind: 'music', source: 'blob', tags: [], createdAt: 0, updatedAt: 0 })
+    const store = useAudioStore()
+    await store.init()
+    const before = store.state.music.trackId
+    expect(await store.playTrackByName('查无此曲')).toBe(false)
+    expect(store.state.music.trackId).toBe(before)
+  })
+
+  it('playPlaylistByName 找不到时返回 false', async () => {
+    const store = useAudioStore()
+    await store.init()
+    expect(await store.playPlaylistByName('查无此单')).toBe(false)
   })
 })

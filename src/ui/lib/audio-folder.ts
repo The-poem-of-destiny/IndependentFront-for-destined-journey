@@ -22,6 +22,7 @@ import {
   deleteAudioHandle,
 } from '@engine/database'
 import type { AudioHandleRecord } from '@engine/types'
+import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names'
 
 /** 扫描结果 —— 磁盘上的一个音频文件的最小描述 */
 export interface ScannedFile {
@@ -191,18 +192,7 @@ export async function requestPermission(handle: FileSystemDirectoryHandle): Prom
 // 扫描
 // ═══════════════════════════════════════════════════════════
 
-/** 认可的音频扩展名 → MIME */
-const AUDIO_MIME: Record<string, string> = {
-  mp3: 'audio/mpeg',
-  ogg: 'audio/ogg',
-  oga: 'audio/ogg',
-  wav: 'audio/wav',
-  m4a: 'audio/mp4',
-  aac: 'audio/aac',
-  flac: 'audio/flac',
-  opus: 'audio/opus',
-  webm: 'audio/webm',
-}
+// 扩展名 → MIME 的唯一来源在 @engine/audio-names（名字归一化要剥同一份扩展名）
 
 function extensionOf(name: string): string {
   const dot = name.lastIndexOf('.')
@@ -222,7 +212,7 @@ export async function scanFolder(handle: FileSystemDirectoryHandle): Promise<Sca
   for await (const entry of dir.values()) {
     try {
       if (!entry || entry.kind !== 'file') continue
-      const mimeType = AUDIO_MIME[extensionOf(entry.name)]
+      const mimeType = AUDIO_MIME_BY_EXTENSION[extensionOf(entry.name)]
       if (!mimeType) continue
       const file = await (entry as FileSystemFileHandle).getFile()
       out.push({

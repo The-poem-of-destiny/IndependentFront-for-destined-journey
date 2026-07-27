@@ -28,6 +28,7 @@ import {
   deleteAudioPlaylist as dbDeleteAudioPlaylist,
   getAudioBlob,
 } from '@engine/database'
+import { findByName, isNameTaken, uniqueAudioName } from '@engine/audio-names'
 import { getAudioManager, installUnlockListener, setBlobResolver } from '../lib/audio-singleton'
 import {
   isFolderSupported,
@@ -41,6 +42,7 @@ import {
   type ScannedFile,
 } from '../lib/audio-folder'
 import { useSettingsStore } from './settings-store'
+import { useUIStore } from './ui-store'
 
 // ===== 常量 =====
 
@@ -100,6 +102,19 @@ function newId(prefix: string): string {
 function stripExt(filename: string): string {
   const i = filename.lastIndexOf('.')
   return i > 0 ? filename.slice(0, i) : filename
+}
+
+/**
+ * 导入路径（上传 / 文件夹扫描）撞名时自动编号后汇总播报一次。
+ * 一个文件一条 toast 会把界面淹掉，所以只报总数。
+ */
+function notifyAutoRenamed(count: number): void {
+  if (count <= 0) return
+  try {
+    useUIStore().toast(`${count} 个文件重名，已自动编号`, 'info')
+  } catch {
+    // 无 Pinia 上下文（测试 / 早期启动）时不该因为一条提示炸掉导入
+  }
 }
 
 // ===== Store =====
@@ -324,12 +339,22 @@ export const useAudioStore = defineStore('audio', () => {
         }
       }
 
+      // 名字唯一性: 扫描**永不因为重名跳过文件**，撞名自动编号后汇总提示一次。
+      // 池子随建随长，同一次扫描里的两个同名文件也能各自拿到号。
+      const namePool = tracks.value.map((t) => ({ id: t.id, name: t.name }))
+      let renamed = 0
+
       const now = Date.now()
       for (const f of scanned) {
         if (seen.has(f.name)) continue
+        const desired = stripExt(f.name)
+        const name = uniqueAudioName(namePool, desired)
+        if (name !== desired) renamed += 1
+        const id = newId('audio')
+        namePool.push({ id, name })
         await saveAudioTrack({
-          id: newId('audio'),
-          name: stripExt(f.name),
+          id,
+          name,
           kind: 'music',
           source: 'file',
           mimeType: f.mimeType,
@@ -343,6 +368,7 @@ export const useAudioStore = defineStore('audio', () => {
       }
 
       await refreshTracks()
+      notifyAutoRenamed(renamed)
     } finally {
       scanning.value = false
     }
@@ -415,14 +441,24 @@ export const useAudioStore = defineStore('audio', () => {
 
   // ═══ 上传 ═════════════════════════════════════════════
 
-  /** 每个文件建一条曲目 + 一条 blob 记录；名字取文件名去扩展名 */
+  /**
+   * 每个文件建一条曲目 + 一条 blob 记录；名字取文件名去扩展名。
+   * 撞名自动编号（导入路径永不因重名失败），最后汇总提示一次。
+   */
   async function uploadFiles(files: File[], kind: AudioTrackKind = 'music'): Promise<AudioTrack[]> {
     const created: AudioTrack[] = []
+    const namePool = tracks.value.map((t) => ({ id: t.id, name: t.name }))
+    let renamed = 0
     for (const file of files) {
       const now = Date.now()
+      const desired = stripExt(file.name)
+      const name = uniqueAudioName(namePool, desired)
+      if (name !== desired) renamed += 1
+      const id = newId('audio')
+      namePool.push({ id, name })
       const track: AudioTrack = {
-        id: newId('audio'),
-        name: stripExt(file.name),
+        id,
+        name,
         kind,
         source: 'blob',
         mimeType: file.type || undefined,
@@ -435,6 +471,7 @@ export const useAudioStore = defineStore('audio', () => {
       created.push(track)
     }
     await refreshTracks()
+    notifyAutoRenamed(renamed)
     return created
   }
 
@@ -444,11 +481,25 @@ export const useAudioStore = defineStore('audio', () => {
     return tracks.value.find((t) => t.id === id)
   }
 
-  async function renameTrack(id: string, name: string): Promise<void> {
+  /**
+   * 按名字找曲目（归一化比较）。多命中取最早建立的那条 —— 历史重名行刻意保留，
+   * 答案必须稳定 (@engine/audio-names)。
+   */
+  function findTrackByName(name: string): AudioTrack | undefined {
+    return findByName(tracks.value, name)
+  }
+
+  /**
+   * 手工改名: 重名**拒绝**而不是自动编号（用户是有意在起名，替他改反而是骗人）。
+   * 改成自己现在的名字不算冲突（exceptId）。返回是否落库。
+   */
+  async function renameTrack(id: string, name: string): Promise<boolean> {
     const t = findTrack(id)
-    if (!t || t.builtin) return
+    if (!t || t.builtin) return false
+    if (isNameTaken(tracks.value, name, id)) return false
     await saveAudioTrack({ ...t, name })
     await refreshTracks()
+    return true
   }
 
   async function setTrackTags(id: string, tags: string[]): Promise<void> {
@@ -481,7 +532,14 @@ export const useAudioStore = defineStore('audio', () => {
     return playlists.value.find((p) => p.id === id)
   }
 
-  async function createPlaylist(name: string): Promise<AudioPlaylist> {
+  /** 播放列表与曲目是**两个命名空间**：同名的一首曲子和一个列表可以并存 */
+  function findPlaylistByName(name: string): AudioPlaylist | undefined {
+    return findByName(playlists.value, name)
+  }
+
+  /** 手工命名 → 重名拒绝，返回 null（不抛） */
+  async function createPlaylist(name: string): Promise<AudioPlaylist | null> {
+    if (isNameTaken(playlists.value, name)) return null
     const now = Date.now()
     const list: AudioPlaylist = { id: newId('plist'), name, trackIds: [], createdAt: now, updatedAt: now }
     await saveAudioPlaylist(list)
@@ -489,11 +547,14 @@ export const useAudioStore = defineStore('audio', () => {
     return list
   }
 
-  async function renamePlaylist(id: string, name: string): Promise<void> {
+  /** 手工改名 → 重名拒绝；改成自己现在的名字不算冲突 */
+  async function renamePlaylist(id: string, name: string): Promise<boolean> {
     const p = findPlaylist(id)
-    if (!p) return
+    if (!p) return false
+    if (isNameTaken(playlists.value, name, id)) return false
     await saveAudioPlaylist({ ...p, name })
     await refreshPlaylists()
+    return true
   }
 
   async function deletePlaylist(id: string): Promise<void> {
@@ -533,6 +594,22 @@ export const useAudioStore = defineStore('audio', () => {
   async function playPlaylist(playlistId: string, startIndex = 0): Promise<void> {
     useSettingsStore().settings.audioLastPlaylistId = playlistId
     await manager.playPlaylist(playlistId, startIndex)
+  }
+
+  /** 按名字播放曲目；找不到返回 false，**不动当前播放** */
+  async function playTrackByName(name: string): Promise<boolean> {
+    const t = findTrackByName(name)
+    if (!t) return false
+    await playTrack(t.id)
+    return true
+  }
+
+  /** 按名字播放播放列表；找不到返回 false，**不动当前播放** */
+  async function playPlaylistByName(name: string, startIndex = 0): Promise<boolean> {
+    const p = findPlaylistByName(name)
+    if (!p) return false
+    await playPlaylist(p.id, startIndex)
+    return true
   }
 
   async function play(): Promise<void> { await manager.play() }
@@ -637,6 +714,8 @@ export const useAudioStore = defineStore('audio', () => {
     // library
     uploadFiles,
     findTrack,
+    findTrackByName,
+    findPlaylistByName,
     renameTrack,
     setTrackTags,
     setTrackKind,
@@ -657,6 +736,8 @@ export const useAudioStore = defineStore('audio', () => {
     // transport
     playTrack,
     playPlaylist,
+    playTrackByName,
+    playPlaylistByName,
     play,
     pause,
     toggle,

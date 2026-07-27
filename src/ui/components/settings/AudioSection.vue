@@ -260,19 +260,36 @@ const playlistTracks = computed<AudioTrack[]>(() => {
 
 const addTrackId = ref<string>('')
 
+/**
+ * 手工命名撞名时 store 拒绝写入。这里不把用户刚打的字丢掉 —— 说清是哪个名字
+ * 被占了，然后带着原文重新弹出输入框，让人改一个字就能继续。取消才退出。
+ */
 async function createPlaylist(): Promise<void> {
-  const name = await askPrompt({ title: '新建播放列表', label: '新建播放列表名称', value: '新播放列表' })
-  if (!name) return
-  const list = await audio.createPlaylist(name)
-  selectedPlaylistId.value = list.id
+  let draft = '新播放列表'
+  for (;;) {
+    const name = await askPrompt({ title: '新建播放列表', label: '新建播放列表名称', value: draft })
+    if (!name) return
+    const list = await audio.createPlaylist(name)
+    if (list) {
+      selectedPlaylistId.value = list.id
+      return
+    }
+    draft = name
+    ui.toast(`已有名为「${name}」的播放列表，请换一个名字。`, 'error')
+  }
 }
 
 async function renameSelectedPlaylist(): Promise<void> {
   const p = selectedPlaylist.value
   if (!p) return
-  const name = await askPrompt({ title: '重命名播放列表', label: '播放列表名称', value: p.name })
-  if (!name) return
-  await audio.renamePlaylist(p.id, name)
+  let draft = p.name
+  for (;;) {
+    const name = await askPrompt({ title: '重命名播放列表', label: '播放列表名称', value: draft })
+    if (!name) return
+    if (await audio.renamePlaylist(p.id, name)) return
+    draft = name
+    ui.toast(`已有名为「${name}」的播放列表，请换一个名字。`, 'error')
+  }
 }
 
 async function deleteSelectedPlaylist(): Promise<void> {
@@ -480,7 +497,11 @@ function cancelEdit(): void {
 
 async function saveEdit(t: AudioTrack): Promise<void> {
   const name = editName.value.trim()
-  if (name && name !== t.name) await audio.renameTrack(t.id, name)
+  // 撞名 → store 拒绝。行内编辑面板原样留着（用户填的名字/标签都还在），改个名再存。
+  if (name && name !== t.name && !(await audio.renameTrack(t.id, name))) {
+    ui.toast(`已有名为「${name}」的曲目，请换一个名字。`, 'error')
+    return
+  }
   const tags = editTags.value.split(/[,，]/).map((x) => x.trim()).filter(Boolean)
   await audio.setTrackTags(t.id, tags)
   if (editKind.value !== t.kind) await audio.setTrackKind(t.id, editKind.value)
