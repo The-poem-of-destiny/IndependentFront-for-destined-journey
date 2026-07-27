@@ -577,7 +577,9 @@ game-pipeline.ts  Stage 1 只**暂存**标记；run() 末尾 refreshFromDb() 之
 
 浏览器的自动播放策略要求：`AudioContext` 出生即 `suspended`，必须在**用户手势的调用栈里** `resume()` 才能出声。
 
-系统的处理：`installUnlockListener()` 挂一次性的 `pointerdown` / `keydown` 监听，首次手势时调 `manager.unlock()` 并自摘。锁定期内的播放请求**不抛错**，而是记进 `pending`（`playTrack` 会把 id 存进 `pendingTrackId`，UI 用它显示「点击页面任意处即可开始播放音乐」），解锁后自动兑现。
+系统的处理：`installUnlockListener()` 挂 `pointerdown` / `keydown` 监听，手势到来时调 `manager.unlock()`，**解锁成功才自摘**（`resume()` 被拒时留着监听等下一次手势——先摘再解锁的话，一次拒绝就让音频永久锁死）。锁定期内的播放请求**不抛错**，而是记进 `pending`（`playTrack` 会把 id 存进 `pendingTrackId`，UI 用它显示「点击页面任意处即可开始播放音乐」），解锁后自动兑现。
+
+**监听必须在 `main.ts` 应用启动时就装**，不能等到音频用起来（`audio.init()`）才装。"点某个按钮进游戏"这一下手势发生在 `GamePage` 挂载**之前**，等挂载后才装监听就白白错过了它——进场配乐只能落进 `pending`，玩家得**再随便点一下**才出声，表现为"进去没声音，点一下音乐按钮就有了"。装监听本身不构造 `AudioContext`（`getAudioManager()` 只在手势回调里调），所以从不碰音频的会话也不会平白多出一个 ctx。
 
 注意锁定期的 `playSfx` **直接返回 false**，不排 pending——音效是即时反馈，迟到几秒的爆炸声毫无意义。
 

@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import { useThemeStore } from './stores/theme-store'
+import { installUnlockListener } from './lib/audio-singleton'
 import './styles/base.css'
 import './styles/transitions.css'
 import './styles/utilities.css'
@@ -28,5 +29,15 @@ app.use(pinia)
 const themeStore = useThemeStore()
 themeStore.init()
 themeStore.initFontSize()
+
+// 首次手势解锁监听 —— 必须在**应用启动时**就装，不能等到音频用起来才装。
+//
+// 浏览器要求 AudioContext 在用户手势的调用栈里 resume()。而"点某个按钮进游戏"
+// 这一下手势发生在 GamePage 挂载之前：等挂载后才装监听，那一下就白白错过了，
+// 进场配乐只能落进 pending 队列，得等用户**再随便点一下**才出声。
+//
+// 装监听本身不构造 AudioContext（getAudioManager() 只在手势回调里调），
+// 所以从不碰音频的会话也不会平白多出一个 AudioContext。
+installUnlockListener()
 
 app.mount('#app')

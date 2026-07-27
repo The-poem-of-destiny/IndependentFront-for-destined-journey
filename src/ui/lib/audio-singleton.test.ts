@@ -328,6 +328,14 @@ describe('installUnlockListener', () => {
     expect(getAudioManager().state.unlocked).toBe(false)
   })
 
+  it('装监听本身不构造 AudioContext —— 从不碰音频的会话不该平白多一个 ctx', () => {
+    vi.stubGlobal('AudioContext', FakeAudioContext)
+    resetAudioManager()
+    FakeAudioContext.constructed = 0
+    installUnlockListener()
+    expect(FakeAudioContext.constructed).toBe(0) // 只有第一次手势才构造
+  })
+
   it('幂等：重复调用只注册一对监听', () => {
     const add = vi.spyOn(document, 'addEventListener')
     installUnlockListener()
