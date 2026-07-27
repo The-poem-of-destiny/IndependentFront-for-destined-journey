@@ -29,6 +29,8 @@ import {
   getAudioBlob,
 } from '@engine/database'
 import { findByName, isNameTaken, uniqueAudioName } from '@engine/audio-names'
+import { resolveSceneByTags } from '@engine/audio-scene'
+import type { SceneTagQuery, SceneTagResult, SceneVariant } from '@engine/audio-scene'
 import { getAudioManager, installUnlockListener, setBlobResolver } from '../lib/audio-singleton'
 import {
   isFolderSupported,
@@ -851,6 +853,33 @@ export const useAudioStore = defineStore('audio', () => {
     return manager.playByTag(tag, { fallback })
   }
 
+  /**
+   * 按场景选曲并播放：地点 / 人物 / 情绪 / 情境四个维度**加权累计**，总分最高者胜出。
+   *
+   * 同一首曲子已在播时**不重来一遍** —— 场景里换个动作、翻个面板都会重复调到
+   * 这里，每次都从头播会让 BGM 变成一段永远放不完的开头。
+   *
+   * 未命中返回 null 并**保持当前播放**（对齐 playByTag 的 keep 语义）:
+   * 换场景时突然静音，比继续放着上一场的曲子更突兀。
+   */
+  async function playByScene(query: SceneTagQuery): Promise<SceneTagResult | null> {
+    const hit = resolveSceneByTags(tracks.value, query)
+    if (!hit) return null
+    const m = state.value.music
+    // status !== 'idle' 包含 paused: 用户手动暂停后，场景变化不该把音乐顶回来
+    if (m.trackId === hit.track.id && m.status !== 'idle') return hit
+    await playTrack(hit.track.id)
+    return hit
+  }
+
+  /** 只给地点的便捷入口；与 playByScene 是同一套累计打分，不是另一种语义 */
+  async function playByLocation(
+    location: string,
+    opts: { variant?: SceneVariant } = {},
+  ): Promise<SceneTagResult | null> {
+    return playByScene({ location, variant: opts.variant })
+  }
+
   function setRepeat(mode: AudioRepeatMode): void {
     manager.setRepeat(mode)
     useSettingsStore().settings.audioRepeat = mode
@@ -970,6 +999,8 @@ export const useAudioStore = defineStore('audio', () => {
     playSfx,
     stopAllSfx,
     playByTag,
+    playByScene,
+    playByLocation,
     setRepeat,
     setShuffle,
     unlock,

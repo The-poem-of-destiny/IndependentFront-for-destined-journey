@@ -22,7 +22,8 @@ v1.0 交付的能力边界：
 | 播放上传进 IndexedDB 的音频 | 音频格式转码 |
 | 播放列表（顺序 / 单曲 / 全部循环 / 随机） | 真正的交叉淡入（A、B 两条流同时出声） |
 | 一次性音效（声池、并发上限） | 音效解码缓存 |
-| 按标签播放（为 AI 预留的钩子） | 由 AI 实际触发播放（**尚未接线**） |
+| 按场景选曲：地点/人物/情绪/情境四维加权 | 音效由游戏事件触发（**仍未接线**） |
+| 解析 `<play_audio>` 并切换 BGM（Code 侧已接线） | 让 AI 产出该标记（**prompt 侧刻意留空**） |
 | 按名称寻址曲目与播放列表 | 全角/半角折叠、拼音匹配 |
 | 播放列表拖拽排序 | 跨列表拖拽、拖拽到列表外、键盘排序 |
 | 曲库多选（shift 区间 / 全选筛选结果）+ 批量加入列表 / 批量删除 | 批量改标签、批量改类型 |
@@ -271,8 +272,12 @@ Dexie（IndexedDB 封装）v12，四张表：
 | 方法 | 签名 | 返回值语义 |
 |------|------|-----------|
 | `playByTag` | `(tag: string, fallback?: 'keep' \| 'stop') => Promise<boolean>` | **`false` = 无曲目带此标签**。未命中时 `keep`（默认）保持当前曲继续播，`stop` 停止 |
+| `playByScene` | `(query: SceneTagQuery) => Promise<SceneTagResult \| null>` | **`null` = 没有任何维度达标**，此时**保持当前播放**。命中时返回命中详情与逐维度得分（见第八节） |
+| `playByLocation` | `(location: string, opts?: { variant?: 'A' \| 'B' }) => Promise<SceneTagResult \| null>` | `playByScene({ location, variant })` 的便捷入口，**同一套打分**，不是另一种语义 |
 
-只匹配 `kind === 'music'` 的曲目；多命中时用注入的随机源挑一首。
+`playByTag` 只匹配 `kind === 'music'` 的曲目；多命中时用注入的随机源挑一首。它是**单标签精确匹配**，适合"我就要这一首/这一组"。
+
+`playByScene` 是场景化上层：地点/人物/情绪/情境四维加权累计，地名不必与标签字面相等，地点无曲时沿层级回退。详见**第八节**。
 
 ### 6.8 观察状态
 
@@ -349,37 +354,197 @@ async function onPickFolder() {
 
 ---
 
-## 八、AI 集成现状（诚实版）
+## 八、场景选曲：标签分类 + 多维度累计打分
 
-**结论先行：v1.0 的 AI 集成是"接口就绪，尚未接线"。**
+`audio-tags.ts`（标签分类）与 `audio-scene.ts`（选曲打分）是与 `audio-names.ts` 同级的纯函数模块（无 I/O、无 Dexie、无 Vue、无 AudioContext），一起解决 `playByTag` 解决不了的问题。
 
-| 能力 | 实现 | 测试 | 生产调用方 |
-|------|------|------|-----------|
-| `playByTag` | ✅ | ✅ | ❌ **零** |
-| `playSfx` | ✅ | ✅ | ⚠️ 唯一调用方是设置页曲库的试听按钮（`settings/audio/AudioLibrary.vue`），游戏内无任何音效触发点 |
-| `playTrackByName` / `playPlaylistByName` | ✅ | ✅ | ⚠️ 仅 UI |
-| `public/audio/manifest.json` | 文件存在，内容是 `[]` | — | 内置曲库**空载**（授权未清） |
+**为什么需要它**：正典位置是一条**七段连字符路径**（`agent-config.json` 的 `<tp_format>`）：
 
-### 接线还差什么
+```
+${大陆方位}-${区域}-${势力}-${子级势力}-${聚落/地标}-${区位}-${详细位置}
+大陆中东部-帝国平原-奥古斯提姆帝国-北境行省-艾瑟嘉德-贵族区-锻炉大厅
+```
 
-要让 AI 真正切换 BGM，需要补齐这条链路（**四段全部尚未实现**）：
+曲库标签却只有几十个固定词。整条路径永远不会等于任何一个标签，`playByTag` 这种整串精确匹配一个都点不着。而路径本身就写明了层级——最细那段没配曲，就该往左退一段用更粗的地点顶上。
 
-1. **story Agent 产出标记** —— 在 `agent-config.json` 的 story systemPrompt 里加输出约定，例如 `<bgm tag="战斗"/>`；
-2. **`marker-protocol.ts` 扫描** —— 当前 `MARKER_TAGS` 只有 8 个（`craft_request` / `combat_trigger` / `char_detect` / 5 个 `*_request`），**没有 `bgm`**。需要新增标记类型与 `scanBgmMarkers()`；
-3. **`GamePipeline` 回调** —— 编排器的 marker 处理阶段把扫到的标签透出来；
-4. **调 `playByTag(tag)`** —— UI 层收到回调后调用 store。
+### 三档相似度
 
-音效同理：需要在战斗结算、制作成功、状态效果触发等处埋 `playSfx` 调用点。
+`nameSimilarity(a, b) → [0, 1]`，档与档之间**刻意不重叠**：
 
-### 为什么给 AI 的是标签而不是 id
+| 档 | 条件 | 取值 |
+|----|------|------|
+| 相等 | 归一化后相同（复用 `normalizeAudioName`） | `1` |
+| 包含 | 一方是另一方的子串 | `0.6 + 0.4 × 长度比`，落在 `(0.6, 1)` |
+| 字形 | 二元组 Dice 系数 | `× 0.55`，上限 `0.55` |
 
-对齐「AI 永不产 id」铁律。`AudioTrack.tags` 是场景标签（如 `战斗` / `酒馆` / `雨夜`），由用户在设置页给自己的曲子打上。AI 只需要说"现在该放战斗音乐"，由 Code 层在打了该标签的曲目里挑一首。用户的曲库内容与 AI 的 prompt 完全解耦——换一批音乐不需要改任何 prompt。
+低于 `SCENE_MATCH_THRESHOLD`（`0.5`）一律不算命中。
 
-`fallback` 默认 `'keep'` 也是同一个考虑：如果用户没给任何曲子打 `雨夜` 标签，AI 提到雨夜时不该让音乐**突然静音**——那比"音乐不贴合"糟糕得多。
+**为什么包含档必须整体压过字形档**：中文地名共享字太多。「碎星群岛」与「碎冕冰脊」共享「碎」，纯 Dice 会给出不低的分数；如果两档区间重叠，一次字形巧合就能压过一次真正的包含匹配。分档之后，「碎星群岛外海」永远赢过「碎冕冰脊」。
+
+### 回退链：层级的首要来源是路径本身
+
+`splitLocationPath(location)` 按 `-－—–/／>＞` 拆段并反转，得到「由细到粗」的序列。**刻意不拿 `·` 分段**——地名自己就带间隔号（`诺瓦·瓦伦蒂亚城`、`拜特·纳尔`、`达尔·苏克`），拿它分段会把一个地名劈成两半。
+
+`buildLocationChain(location, nodes?)` 产出 `{ name, depth }[]`：
+
+1. **路径段**：最细一段 `depth 0`，往左每退一段深一级；
+2. **`location-db` 补充**：由细到粗逐段模糊定位，取**第一个**能定位到的段，把它的 `parentId` 祖先接在路径段之后。定位到的规范名本身算 `depth 0`（「铁炉堡的地下锻炉」和「铁炉堡」指的是同一个地方，谁命中都不算回退）；
+3. 全链按 depth 稳定排序——选曲按 depth 分组短路，链必须有序。
+
+**为什么路径优先于 `location-db`**：`location-db` 只有三十来个节点，「大陆中东部」这类方位段、「龙脊山脉」这类地貌名它根本没有；而路径里每一段都是现成的层级。`location-db` 退居补充，真正的价值是**路径只写到城市时把势力和大陆补上**，以及「白曜城中央广场」这种没写路径的单段输入——这时它是唯一的层级来源。一条规则同时照顾两种形状。
+
+补充定位必须**逐段上试**而不是只看最细段：路径最细的一段常常是地图上没有的区位（「贵族区」），卡在第一段就白补了。
+
+`parentId` 断链就地停止，成环靠去重与深度上限（8）收敛，都不抛异常。
+
+### 标签分类：`类型:值`
+
+标签写成 `地点:龙脊山脉`、`人物:傲雪`、`情绪:紧张`、`情境:战斗`。四个维度与打分维度一一对应。
+
+**为什么用前缀而不是新字段**：`AudioTrack` 的形状、Dexie 三张表、设置页的标签 UI、`playByTag` 全都不用动。加一个 `taxonomy` 字段要改 schema + 迁移 + UI，代价大得多，收益一样。
+
+- 读取时认别名：`角色:` / `位置:` / `氛围:` / `场景:` 以及 `location:` `character:` `mood:` `situation:`，半角与全角冒号都行；写入只产规范前缀（`formatAudioTag`）。
+- **只在第一个冒号处切分**，`情境:战斗:决战` 的值是 `战斗:决战`。
+- **无类型标签参与所有维度**。用户手打的 `雨夜` 不知道属于哪一维，就每一维都试——宁可多算，也不要把用户自己打的标签变成死标签。
+
+### 选曲：多维度累计打分
+
+`resolveSceneByTags(tracks, query, opts?) → SceneTagResult | null`
+
+```ts
+type SceneTagQuery = {
+  location?: string          // 位置路径
+  characters?: string[]      // 在场角色
+  moods?: string[]           // 情绪
+  situations?: string[]      // 情境
+  variant?: 'A' | 'B'
+  kind?: AudioTrackKind      // 缺省 'music'
+}
+```
+
+**总分 = 各维度加权分之和**：
+
+| 维度 | 权重 | 说明 |
+|------|------|------|
+| `location` | `1.00` | 再乘 `LOCATION_DEPTH_DECAY ** fallbackDepth`（`0.8 ** depth`） |
+| `situation` | `0.75` | |
+| `character` | `0.55` | |
+| `mood` | `0.35` | 独木难支，用来在同分里挑边 |
+| `variant` | `0.20` | **加分项**，自己不足以让一首曲子入选 |
+
+地点分随回退深度衰减，于是跨维度的强弱是**可推算**的：
+
+| 对比 | 结果 |
+|------|------|
+| 地点 depth 0 (1.00) vs 情境 (0.75) | 站在有专属曲的地点上，地点曲赢 |
+| 地点 depth 2 (0.64) vs 情境 (0.75) | 只能回退两级时，战斗/潜行曲接管 |
+| 地点 depth 3 (0.51) vs 人物 (0.55) | 地点已经很泛，在场角色的主题曲接管 |
+
+**这组权重是起始值，不是真理**——什么时候该让战斗曲盖过地点曲、人物主题该多强势，是配乐口味问题。改 `SCENE_TAG_WEIGHTS` 即可，也可以按次传 `opts.weights` 覆盖。
+
+返回值：
+
+| 字段 | 说明 |
+|------|------|
+| `track` / `score` | 选中的音轨与总分 |
+| `breakdown` | 逐维度得分，便于排查"为什么选了这首" |
+| `resolvedLocation` / `fallbackDepth` | 地点维命中的地点名与回退深度；地点维没命中时为 `null` |
+| `matchedTags` | 各维度命中的标签值 |
+
+五条关键语义：
+
+- **门槛看单维度原始相似度，不看总分**。至少一个维度的原始相似度达到 `SCENE_MATCH_THRESHOLD` 才算命中；拿加权总分当门槛会让权重低的维度天然出局。
+- **每一维只跟自己那一维的标签比**。查询里的人物名不会去撞地点标签（无类型标签除外，见上）。
+- **多个查询词取最佳单项，不累加**。否则标签打得多的曲子平白占便宜。
+- **曲名参与地点维**的比对——曲名常常就是地点名，没打标签的曲子不至于点不着。
+- **排除 `missing`**：文件已移除的曲目直接出局，选中它等于选了一次必然失败的播放。
+
+全同分时按 `createdAt` → `id` 兜底，保证答案与数组顺序无关（与 `findByName` 的稳定性口径一致）。
+
+> **为什么没有「逐级短路」了**：早先有过一版只看地点、本级有曲就定下来的 `resolveSceneAudio`。短路与累计分是互斥的两套语义——短路下地点分不可比，就算不出「地点很泛但在场角色很准」这种情况。同时留着会让"为什么选了这首"有两个答案，所以它已撤除，`playByLocation` 现在只是 `playByScene` 的便捷入口。
+
+### store 侧：`playByScene` / `playByLocation`
+
+```ts
+// 直接把 <tp> 里 `@` 之后的位置串喂进去即可，不需要预处理
+const hit = await audio.playByScene({
+  location: '大陆中东部-帝国平原-奥古斯提姆帝国-北境行省-艾瑟嘉德-贵族区-锻炉大厅',
+  characters: ['傲雪'],
+  situations: ['战斗'],
+  moods: ['紧张'],
+  variant: 'B',
+})
+console.log(hit?.breakdown) // 排查为什么选了这首
+
+// 只有地点时的便捷入口，走的是同一套打分
+await audio.playByLocation('铁炉堡', { variant: 'A' })
+```
+
+两条只有 store 层才有的行为：
+
+- **同一首已在播时不重播**。在同一地点内走动、翻面板都会重复调到这里，每次都从头播会让 BGM 变成一段永远放不完的开头。判据是 `status !== 'idle'`，因此**用户手动暂停后也不会被地点重新唤醒**。
+- **未命中保持当前播放**（对齐 `playByTag` 的 `keep` 语义）。换场景时突然静音，比继续放着上一场的曲子更突兀。
 
 ---
 
-## 九、限制与已知问题
+## 九、AI 集成现状（诚实版）
+
+**结论先行：BGM 的 Code 侧链路已接通，但 prompt 侧刻意留空——AI 现在不会输出 `<play_audio>`，所以实际上一次也不会触发。音效全链仍未接线。**
+
+| 能力 | 实现 | 测试 | 生产调用方 |
+|------|------|------|-----------|
+| `playByScene` / `playByLocation` | ✅ | ✅ | ⚠️ `GamePipeline.handlePlayAudio` 已接，但**没有输入**——story 预设里没有 `<play_audio>` 的输出约定 |
+| `playByTag` | ✅ | ✅ | ❌ **零**（保留为单标签精确入口） |
+| `playSfx` | ✅ | ✅ | ⚠️ 唯一调用方是设置页曲库的试听按钮（`settings/audio/AudioLibrary.vue`），游戏内无任何音效触发点 |
+| `playTrackByName` / `playPlaylistByName` | ✅ | ✅ | ⚠️ 仅 UI |
+| `public/audio/manifest.json` | ✅ 57 首内置曲目 | — | 授权 `UNVERIFIED`，见 `public/audio/README.md` |
+
+### BGM 链路：Code 侧四段是怎么接的
+
+```
+story Agent  输出 <play_audio situation="战斗" mood="紧张"/>
+   │           ⚠️ 约定尚未写进任何 prompt —— 这一段是空的
+   ▼
+marker-protocol.ts  scanPlayAudioMarkers() → PlayAudioMarker
+   │           自闭合与成对写法都认；scanMarkers 一并收录
+   ▼
+agent-orchestrator.ts  processStageMarkers() Stage 1 → events.onPlayAudio
+   │           就地触发，**不暂存也不 await**
+   ▼
+game-pipeline.ts  handlePlayAudio() → audioStore.playByScene()
+               地点取 player.location、角色取 present === true 的 NPC
+```
+
+四个设计取舍，每个都有具体理由：
+
+- **AI 不写地点，也不写在场角色**。这两样已经是游戏状态里的事实（`player.location` / `character.present`），让 AI 再写一遍只会多一处漂移源——它写的地点和状态里的地点对不上时，你没有第三方可以裁决。AI 只负责它独有的判断：此刻是什么情绪、什么情境。
+- **不进管线时序**。`onPlayAudio` 既不暂存到 Stage 2（像 `craft_request` 那样），编排器也不 `await` 它。配乐是旁路氛围，换不换歌都不该影响这一轮叙事的产出；抛错也只 `console.warn` 吞掉。
+- **一轮多个标记时只取最后一个**。AI 在一轮里改主意是常事，以它最后的判断为准；连着切两首歌只会让玩家听见两个开头。
+- **标记必须从正文里剥掉**。`stripPlayAudioMarkers()` 在 story 消息入库前剥它——漏出去就是玩家眼前的一行尖括号。这里**刻意不用 `stripMarkers`**：正文渲染路径目前保留着 craft/combat 等标记（美化规则与下游链路还在读），一把全剥会改掉既有行为。
+
+`<play_audio action="stop"/>` 走 `audio.stop()`；`variant="A"/"B"` 透传给打分器。正文形式 `<play_audio>探索, 平静</play_audio>` 的自由词**同时喂给情绪与情境两维**——与"无类型标签参与所有维度"同一个道理。
+
+### 还没接的
+
+**prompt 侧（刻意）**：story 的 systemPrompt / 预设里**没有** `<play_audio>` 的输出约定，所以 AI 不会产出这个标记，整条链路目前是"通了电但没人按开关"。这是有意为之——先把 API 接口稳定下来，prompt 怎么写、什么时候该换歌是独立的一次调整。
+
+要启用时只需在 story 预设里加一个条目，说明标记格式与"只在场景转折时输出"的克制原则。**Code 侧一行都不用改。**
+
+在此之前，`playByScene` 仍可由 UI 或调试面板手动调用来验证选曲效果。
+
+**音效全链空白**：需要在战斗结算、制作成功、状态效果触发等处埋 `playSfx` 调用点。基建（声池 / 并发上限 / 体积门禁）早就完备，缺的只是触发方。
+
+**真机验证**：整条链路的测试都跑在注入替身上（jsdom 没有可用音频后端），浏览器里到底出不出声**尚未验证过**。
+
+### 为什么给 AI 的是标签而不是 id
+
+对齐「AI 永不产 id」铁律。AI 只需要说"现在是战斗、气氛紧张"，由 Code 层按标签维度打分选曲。用户的曲库内容与 AI 的 prompt 完全解耦——换一批音乐不需要改任何 prompt。
+
+未命中时**保持当前播放**也是同一个考虑：如果曲库里没有任何曲子配得上此刻的场景，不该让音乐**突然静音**——那比"音乐不贴合"糟糕得多。
+
+---
+
+## 十、限制与已知问题
 
 ### 手势解锁
 
@@ -425,7 +590,7 @@ async function onPickFolder() {
 
 ---
 
-## 十、测试
+## 十一、测试
 
 | 文件 | 用例数 | 覆盖范围 |
 |------|-------|----------|

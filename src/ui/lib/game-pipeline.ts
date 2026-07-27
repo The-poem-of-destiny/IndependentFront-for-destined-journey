@@ -25,15 +25,18 @@ import type {
   CraftGenRequestMarker,
   CharGenRequestMarker,
   ItemGenRequestMarker,
+  PlayAudioMarker,
   MemoryRecord,
 } from '@engine/types'
 import { AgentClient } from '@engine/agent-client'
 import type { StreamCallbacks } from '@engine/agent-client'
 import { createStateManager } from '@engine/state-manager'
+import { stripPlayAudioMarkers } from '@engine/marker-protocol'
 import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks'
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader'
 import type { useGameStore } from '../stores/game-store'
 import type { useSettingsStore } from '../stores/settings-store'
+import { useAudioStore } from '../stores/audio-store'
 
 export interface GamePipelineDeps {
   gameStore: ReturnType<typeof useGameStore>
@@ -547,8 +550,59 @@ export class GamePipeline {
     } : undefined
   }
 
+  /**
+   * 🎵 <play_audio> → 场景选曲。
+   *
+   * **地点与在场角色不从标记读，从游戏状态读** —— 它们已经是状态里的事实
+   * （`player.location` / `character.present`），让 AI 再写一遍只会多一处漂移源。
+   * 标记只提供 AI 独有的判断：此刻是什么情绪、什么情境。
+   *
+   * 整条路径不抛错：配乐是旁路氛围，音频出问题不该影响这一轮叙事。
+   */
+  private async handlePlayAudio(marker: PlayAudioMarker): Promise<void> {
+    const audio = useAudioStore()
+
+    if ((marker.action ?? '').trim().toLowerCase() === 'stop') {
+      audio.stop()
+      return
+    }
+
+    // 逗号 / 顿号 / 空白分隔的自由词
+    const words = (raw?: string): string[] =>
+      (raw ?? '')
+        .split(/[,，、;；\s]+/)
+        .map((w) => w.trim())
+        .filter(Boolean)
+
+    // 正文里的自由词不知道属于哪一维，情绪与情境都试一遍（与"无类型标签"同理）
+    const body = words(marker.bodyText)
+    const situations = [...words(marker.situation), ...body]
+    const moods = [...words(marker.mood), ...body]
+
+    const characters = marker.character
+      ? words(marker.character)
+      : this.game.characters.filter((c) => c.type !== 'player' && c.present === true).map((c) => c.name)
+
+    const variant = marker.variant?.trim().toUpperCase()
+
+    await audio.playByScene({
+      location: this.game.player?.location || undefined,
+      characters,
+      moods,
+      situations,
+      variant: variant === 'A' || variant === 'B' ? variant : undefined,
+    })
+  }
+
   private buildEventHandlers(): OrchestratorEvents {
     return {
+      // 🎵 配乐：不 await，编排器也不等它
+      onPlayAudio: (marker) => {
+        void this.handlePlayAudio(marker).catch((err) => {
+          console.warn('[GamePipeline] 场景配乐失败（不阻塞本轮）:', err)
+        })
+      },
+
       // === Stage 回调 ===
       onAgentStart: (agentId, config) => {
         console.log(`[GamePipeline] Agent 开始: ${agentId}`)
@@ -640,7 +694,8 @@ export class GamePipeline {
         if (result.rawResponse) {
           const { content, options } = extractStoryOptions(result.rawResponse)
           this.game.setPendingOptions(options)
-          this.game.addMessage(content, 'assistant')
+          // 配乐标记没有渲染意义，漏出去就是玩家眼前的一行尖括号
+          this.game.addMessage(stripPlayAudioMarkers(content).trim(), 'assistant')
         }
         break
       }

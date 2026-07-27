@@ -68,7 +68,7 @@ vi.mock('./settings-store', () => ({
 
 import { useAudioStore } from './audio-store'
 import { useUIStore } from './ui-store'
-import { resetAudioManager } from '../lib/audio-singleton'
+import { getAudioManager, resetAudioManager } from '../lib/audio-singleton'
 import { __setFolderTestHooks, __resetFolderTestHooks } from '../lib/audio-folder'
 import type { AudioHandleRecord } from '@engine/types'
 
@@ -745,5 +745,142 @@ describe('audio-store · 按名寻址', () => {
     const store = useAudioStore()
     await store.init()
     expect(await store.playPlaylistByName('查无此单')).toBe(false)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
+// 按地点播放（模糊检索 + 父级回退）
+// ═══════════════════════════════════════════════════════════
+
+describe('audio-store · playByLocation', () => {
+  function locTrack(id: string, name: string, tags: string[]): AudioTrack {
+    return { id, name, kind: 'music', source: 'blob', tags, createdAt: 0, updatedAt: 0 }
+  }
+
+  /**
+   * 断言点是「有没有叫 Manager 播」而不是「Manager 事后是什么状态」——
+   * jsdom 里没有可用的音频后端，播放不会真的落地，事后状态恒为初始值。
+   */
+  function spyPlay() {
+    return vi.spyOn(getAudioManager(), 'playTrack').mockResolvedValue(undefined)
+  }
+
+  it('子地点无曲目时回退到父级势力并播放', async () => {
+    trackRows.set('emp', locTrack('emp', '奥古斯提姆帝国（平静）', ['奥古斯提姆帝国', 'A']))
+    const store = useAudioStore()
+    await store.init()
+    const play = spyPlay()
+
+    const hit = await store.playByLocation('铁炉堡')
+    expect(hit?.track.id).toBe('emp')
+    expect(hit?.fallbackDepth).toBe(1)
+    expect(play).toHaveBeenCalledWith('emp')
+  })
+
+  it('同一首已在播时不重播 —— 同地点内走动不该把 BGM 打回开头', async () => {
+    trackRows.set('drg', locTrack('drg', '龙脊山脉（平静）', ['龙脊山脉', 'A']))
+    const store = useAudioStore()
+    await store.init()
+    store.state.music.trackId = 'drg'
+    store.state.music.status = 'playing'
+    const play = spyPlay()
+
+    const hit = await store.playByLocation('龙脊山脉深处')
+    expect(hit?.track.id).toBe('drg')
+    expect(play).not.toHaveBeenCalled()
+  })
+
+  it('用户手动暂停后不被地点重新唤醒（status=paused 同样算「在播」）', async () => {
+    trackRows.set('drg', locTrack('drg', '龙脊山脉（平静）', ['龙脊山脉', 'A']))
+    const store = useAudioStore()
+    await store.init()
+    store.state.music.trackId = 'drg'
+    store.state.music.status = 'paused'
+    const play = spyPlay()
+
+    await store.playByLocation('龙脊山脉')
+    expect(play).not.toHaveBeenCalled()
+  })
+
+  it('全链未命中 → 返回 null 且不碰当前播放（不静音）', async () => {
+    trackRows.set('drg', locTrack('drg', '龙脊山脉（平静）', ['龙脊山脉', 'A']))
+    const store = useAudioStore()
+    await store.init()
+    const play = spyPlay()
+
+    expect(await store.playByLocation('某个曲库里没有的地方')).toBeNull()
+    expect(play).not.toHaveBeenCalled()
+  })
+
+  it('variant 选择同地点的不同氛围变体', async () => {
+    trackRows.set('a', locTrack('a', '悲鸣沼泽（平静）', ['悲鸣沼泽', 'A', '平静']))
+    trackRows.set('b', locTrack('b', '悲鸣沼泽（不安）', ['悲鸣沼泽', 'B', '夜晚']))
+    const store = useAudioStore()
+    await store.init()
+    spyPlay()
+
+    expect((await store.playByLocation('悲鸣沼泽', { variant: 'B' }))?.track.id).toBe('b')
+    expect((await store.playByLocation('悲鸣沼泽', { variant: 'A' }))?.track.id).toBe('a')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
+// 按场景播放（多维度累计打分）
+// ═══════════════════════════════════════════════════════════
+
+describe('audio-store · playByScene', () => {
+  function t(id: string, name: string, tags: string[]): AudioTrack {
+    return { id, name, kind: 'music', source: 'blob', tags, createdAt: 0, updatedAt: 0 }
+  }
+
+  function spyPlay() {
+    return vi.spyOn(getAudioManager(), 'playTrack').mockResolvedValue(undefined)
+  }
+
+  it('地点很准时地点曲胜出', async () => {
+    trackRows.set('drg', t('drg', '龙脊山脉', ['地点:龙脊山脉']))
+    trackRows.set('battle', t('battle', '战斗', ['情境:战斗']))
+    const store = useAudioStore()
+    await store.init()
+    const play = spyPlay()
+
+    const hit = await store.playByScene({ location: '龙脊山脉', situations: ['战斗'] })
+    expect(hit?.track.id).toBe('drg')
+    expect(play).toHaveBeenCalledWith('drg')
+  })
+
+  it('地点泛到第 2 级时战斗曲接管', async () => {
+    trackRows.set('emp', t('emp', '帝国', ['地点:奥古斯提姆帝国']))
+    trackRows.set('battle', t('battle', '战斗', ['情境:战斗']))
+    const store = useAudioStore()
+    await store.init()
+    spyPlay()
+
+    const hit = await store.playByScene({
+      location: '奥古斯提姆帝国-艾瑟嘉德-贵族区',
+      situations: ['战斗'],
+    })
+    expect(hit?.track.id).toBe('battle')
+  })
+
+  it('playByLocation 是 playByScene 的便捷入口（同一套打分）', async () => {
+    trackRows.set('emp', t('emp', '帝国', ['地点:奥古斯提姆帝国']))
+    const store = useAudioStore()
+    await store.init()
+    spyPlay()
+
+    const hit = await store.playByLocation('铁炉堡')
+    expect(hit?.track.id).toBe('emp')
+    expect(hit?.fallbackDepth).toBe(1)
+  })
+
+  it('未命中 → null 且不碰当前播放', async () => {
+    trackRows.set('drg', t('drg', '龙脊山脉', ['地点:龙脊山脉']))
+    const store = useAudioStore()
+    await store.init()
+    const play = spyPlay()
+
+    expect(await store.playByScene({ characters: ['查无此人'] })).toBeNull()
+    expect(play).not.toHaveBeenCalled()
   })
 })

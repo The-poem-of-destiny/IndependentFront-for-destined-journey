@@ -1,1 +1,805 @@
-[]
+[
+  {
+    "id": "bgm-beryl-ring-federation-mistcrystal-port-a",
+    "name": "伯伦斯法环联邦（平静）",
+    "kind": "music",
+    "file": "bgm/Beryl_Ring_Federation_Mistcrystal_Port_A.mp3",
+    "tags": [
+      "地点:伯伦斯法环联邦",
+      "地点:雾晶港",
+      "地点:伯伦斯法环",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-beryl-ring-federation-mistcrystal-port-b",
+    "name": "伯伦斯法环联邦（不安）",
+    "kind": "music",
+    "file": "bgm/Beryl_Ring_Federation_Mistcrystal_Port_B.mp3",
+    "tags": [
+      "地点:伯伦斯法环联邦",
+      "地点:雾晶港",
+      "地点:伯伦斯法环",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-whispering-taiga-belt-a",
+    "name": "低语针叶林带（平静）",
+    "kind": "music",
+    "file": "bgm/Whispering_Taiga_Belt_A.mp3",
+    "tags": [
+      "地点:低语针叶林带",
+      "地点:针叶林",
+      "地点:泰加林",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-whispering-taiga-belt-b",
+    "name": "低语针叶林带（不安）",
+    "kind": "music",
+    "file": "bgm/Whispering_Taiga_Belt_B.mp3",
+    "tags": [
+      "地点:低语针叶林带",
+      "地点:针叶林",
+      "地点:泰加林",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-sky-sanctum-a",
+    "name": "天空圣域（平静）",
+    "kind": "music",
+    "file": "bgm/Sky_Sanctum_A.mp3",
+    "tags": [
+      "地点:天空圣域",
+      "地点:翼民圣都梵尼亚",
+      "地点:圣都梵尼亚",
+      "地点:翼民圣域",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-sky-sanctum-b",
+    "name": "天空圣域（不安）",
+    "kind": "music",
+    "file": "bgm/Sky_Sanctum_B.mp3",
+    "tags": [
+      "地点:天空圣域",
+      "地点:翼民圣都梵尼亚",
+      "地点:圣都梵尼亚",
+      "地点:翼民圣域",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-tianjing-lake-wetlands-a",
+    "name": "天镜湖湿地（平静）",
+    "kind": "music",
+    "file": "bgm/Tianjing_Lake_Wetlands_A.mp3",
+    "tags": [
+      "地点:天镜湖湿地",
+      "地点:天镜湖",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-tianjing-lake-wetlands-b",
+    "name": "天镜湖湿地（不安）",
+    "kind": "music",
+    "file": "bgm/Tianjing_Lake_Wetlands_B.mp3",
+    "tags": [
+      "地点:天镜湖湿地",
+      "地点:天镜湖",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-augustim-empire-a",
+    "name": "奥古斯提姆帝国（平静）",
+    "kind": "music",
+    "file": "bgm/Augustim_Empire_A.mp3",
+    "tags": [
+      "地点:奥古斯提姆帝国",
+      "地点:帝国",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-augustim-empire-b",
+    "name": "奥古斯提姆帝国（不安）",
+    "kind": "music",
+    "file": "bgm/Augustim_Empire_B.mp3",
+    "tags": [
+      "地点:奥古斯提姆帝国",
+      "地点:帝国",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-everwind-grassland-a",
+    "name": "恒风草原（平静）",
+    "kind": "music",
+    "file": "bgm/Everwind_Grassland_A.mp3",
+    "tags": [
+      "地点:恒风草原",
+      "地点:兽族联盟",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-everwind-grassland-b",
+    "name": "恒风草原（不安）",
+    "kind": "music",
+    "file": "bgm/Everwind_Grassland_B.mp3",
+    "tags": [
+      "地点:恒风草原",
+      "地点:兽族联盟",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-wailing-marsh-a",
+    "name": "悲鸣沼泽（平静）",
+    "kind": "music",
+    "file": "bgm/Wailing_Marsh_A.mp3",
+    "tags": [
+      "地点:悲鸣沼泽",
+      "地点:永夜盟约",
+      "地点:骸响之都",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-wailing-marsh-b",
+    "name": "悲鸣沼泽（不安）",
+    "kind": "music",
+    "file": "bgm/Wailing_Marsh_B.mp3",
+    "tags": [
+      "地点:悲鸣沼泽",
+      "地点:永夜盟约",
+      "地点:骸响之都",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-endless-tree-sea-a",
+    "name": "无尽树海（平静）",
+    "kind": "music",
+    "file": "bgm/Endless_Tree_Sea_A.mp3",
+    "tags": [
+      "地点:无尽树海",
+      "地点:魔法雨林",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-permafrost-wastes-a",
+    "name": "永冻冰原（平静）",
+    "kind": "music",
+    "file": "bgm/Permafrost_Wastes_A.mp3",
+    "tags": [
+      "地点:永冻冰原",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-permafrost-wastes-b",
+    "name": "永冻冰原（不安）",
+    "kind": "music",
+    "file": "bgm/Permafrost_Wastes_B.mp3",
+    "tags": [
+      "地点:永冻冰原",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-deep-sea-maelstrom-a",
+    "name": "深海大漩涡（平静）",
+    "kind": "music",
+    "file": "bgm/Deep_Sea_Maelstrom_A.mp3",
+    "tags": [
+      "地点:深海大漩涡",
+      "地点:大漩涡",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-deep-sea-maelstrom-b",
+    "name": "深海大漩涡（不安）",
+    "kind": "music",
+    "file": "bgm/Deep_Sea_Maelstrom_B.mp3",
+    "tags": [
+      "地点:深海大漩涡",
+      "地点:大漩涡",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-shattered-crown-ice-ridge-a",
+    "name": "碎冕冰脊（平静）",
+    "kind": "music",
+    "file": "bgm/Shattered_Crown_Ice_Ridge_A.mp3",
+    "tags": [
+      "地点:碎冕冰脊",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-shattered-crown-ice-ridge-b",
+    "name": "碎冕冰脊（不安）",
+    "kind": "music",
+    "file": "bgm/Shattered_Crown_Ice_Ridge_B.mp3",
+    "tags": [
+      "地点:碎冕冰脊",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-shattered-star-isles-a",
+    "name": "碎星群岛（平静）",
+    "kind": "music",
+    "file": "bgm/Shattered_Star_Isles_A.mp3",
+    "tags": [
+      "地点:碎星群岛",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-shattered-star-isles-b",
+    "name": "碎星群岛（不安）",
+    "kind": "music",
+    "file": "bgm/Shattered_Star_Isles_B.mp3",
+    "tags": [
+      "地点:碎星群岛",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-solentis-kingdom-a",
+    "name": "索伦蒂斯王国（平静）",
+    "kind": "music",
+    "file": "bgm/Solentis_Kingdom_A.mp3",
+    "tags": [
+      "地点:索伦蒂斯王国",
+      "地点:潮汐王座",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-solentis-kingdom-b",
+    "name": "索伦蒂斯王国（不安）",
+    "kind": "music",
+    "file": "bgm/Solentis_Kingdom_B.mp3",
+    "tags": [
+      "地点:索伦蒂斯王国",
+      "地点:潮汐王座",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-heart-of-emerald-a",
+    "name": "翡翠之心（平静）",
+    "kind": "music",
+    "file": "bgm/Heart_of_Emerald_A.mp3",
+    "tags": [
+      "地点:翡翠之心",
+      "地点:璀璨之心",
+      "地点:阿塔兰希尔",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-heart-of-emerald-b",
+    "name": "翡翠之心（不安）",
+    "kind": "music",
+    "file": "bgm/Heart_of_Emerald_B.mp3",
+    "tags": [
+      "地点:翡翠之心",
+      "地点:璀璨之心",
+      "地点:阿塔兰希尔",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-northsgard-league-a",
+    "name": "诺斯加德联盟（平静）",
+    "kind": "music",
+    "file": "bgm/Northsgard_League_A.mp3",
+    "tags": [
+      "地点:诺斯加德联盟",
+      "地点:北境",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-northsgard-league-b",
+    "name": "诺斯加德联盟（不安）",
+    "kind": "music",
+    "file": "bgm/Northsgard_League_B.mp3",
+    "tags": [
+      "地点:诺斯加德联盟",
+      "地点:北境",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-crimson-sand-sea-a",
+    "name": "赤金沙海（平静）",
+    "kind": "music",
+    "file": "bgm/Crimson_Sand_Sea_A.mp3",
+    "tags": [
+      "地点:赤金沙海",
+      "地点:萨赫拉联邦",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-crimson-sand-sea-b",
+    "name": "赤金沙海（不安）",
+    "kind": "music",
+    "file": "bgm/Crimson_Sand_Sea_B.mp3",
+    "tags": [
+      "地点:赤金沙海",
+      "地点:萨赫拉联邦",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-windwhisper-grassland-a",
+    "name": "风语草原（平静）",
+    "kind": "music",
+    "file": "bgm/Windwhisper_Grassland_A.mp3",
+    "tags": [
+      "地点:风语草原",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-windwhisper-grassland-b",
+    "name": "风语草原（不安）",
+    "kind": "music",
+    "file": "bgm/Windwhisper_Grassland_B.mp3",
+    "tags": [
+      "地点:风语草原",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-dragonspine-mountains-a",
+    "name": "龙脊山脉（平静）",
+    "kind": "music",
+    "file": "bgm/Dragonspine_Mountains_A.mp3",
+    "tags": [
+      "地点:龙脊山脉",
+      "情绪:平静",
+      "情绪:白天",
+      "情境:探索"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-dragonspine-mountains-b",
+    "name": "龙脊山脉（不安）",
+    "kind": "music",
+    "file": "bgm/Dragonspine_Mountains_B.mp3",
+    "tags": [
+      "地点:龙脊山脉",
+      "情绪:不安",
+      "情绪:夜晚",
+      "情境:活动"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-battle-standard-01",
+    "name": "战斗·常规 一",
+    "kind": "music",
+    "file": "bgm/Battle_Standard_01.mp3",
+    "tags": [
+      "情境:战斗",
+      "情境:常规战斗",
+      "情绪:激昂"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-battle-standard-02",
+    "name": "战斗·常规 二",
+    "kind": "music",
+    "file": "bgm/Battle_Standard_02.mp3",
+    "tags": [
+      "情境:战斗",
+      "情境:常规战斗",
+      "情绪:激昂"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-battle-standard-03",
+    "name": "战斗·常规 三",
+    "kind": "music",
+    "file": "bgm/Battle_Standard_03.mp3",
+    "tags": [
+      "情境:战斗",
+      "情境:常规战斗",
+      "情绪:激昂",
+      "情绪:铁血"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-battle-high-pressure-01",
+    "name": "战斗·高压 一",
+    "kind": "music",
+    "file": "bgm/Battle_High_Pressure_01.mp3",
+    "tags": [
+      "情境:战斗",
+      "情境:决战",
+      "情绪:紧张",
+      "情绪:悲壮"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-battle-high-pressure-02",
+    "name": "战斗·高压 二",
+    "kind": "music",
+    "file": "bgm/Battle_High_Pressure_02.mp3",
+    "tags": [
+      "情境:战斗",
+      "情境:决战",
+      "情绪:紧张",
+      "情绪:激昂"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-travel-traverse-01",
+    "name": "旅途·行进 一",
+    "kind": "music",
+    "file": "bgm/Travel_Traverse_01.mp3",
+    "tags": [
+      "情境:旅途",
+      "情境:行进",
+      "情境:赶路",
+      "情绪:轻快"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-travel-traverse-02",
+    "name": "旅途·行进 二",
+    "kind": "music",
+    "file": "bgm/Travel_Traverse_02.mp3",
+    "tags": [
+      "情境:旅途",
+      "情境:行进",
+      "情境:赶路",
+      "情绪:沉稳"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-stealth-shadow-01",
+    "name": "潜行·阴影",
+    "kind": "music",
+    "file": "bgm/Stealth_Shadow_01.mp3",
+    "tags": [
+      "情境:潜行",
+      "情境:暗中行动",
+      "情绪:冷静",
+      "情绪:不安"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-sacred-rite-01",
+    "name": "神圣·仪式 一",
+    "kind": "music",
+    "file": "bgm/Sacred_Rite_01.mp3",
+    "tags": [
+      "情境:仪式",
+      "情绪:庄严",
+      "情绪:神圣"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-sacred-rite-02",
+    "name": "神圣·仪式 二",
+    "kind": "music",
+    "file": "bgm/Sacred_Rite_02.mp3",
+    "tags": [
+      "情境:仪式",
+      "情境:宣告",
+      "情绪:肃穆",
+      "情绪:神圣"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-system-menu-01",
+    "name": "系统·菜单",
+    "kind": "music",
+    "file": "bgm/System_Menu_01.mp3",
+    "tags": [
+      "情境:系统",
+      "情境:菜单",
+      "情境:界面",
+      "情绪:平静"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-looming-threat-01",
+    "name": "紧张·危险逼近 一",
+    "kind": "music",
+    "file": "bgm/Looming_Threat_01.mp3",
+    "tags": [
+      "情境:潜伏",
+      "情绪:紧张",
+      "情绪:压抑"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-looming-threat-02",
+    "name": "紧张·危险逼近 二",
+    "kind": "music",
+    "file": "bgm/Looming_Threat_02.mp3",
+    "tags": [
+      "情境:潜伏",
+      "情绪:紧张",
+      "情绪:不安"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-wu-yaya",
+    "name": "乌雅娅·人物主题",
+    "kind": "music",
+    "file": "bgm/Wu_Yaya.mp3",
+    "tags": [
+      "人物:乌雅娅"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-aoxue",
+    "name": "傲雪·人物主题",
+    "kind": "music",
+    "file": "bgm/Aoxue.mp3",
+    "tags": [
+      "人物:傲雪"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-youlu",
+    "name": "幽露·人物主题",
+    "kind": "music",
+    "file": "bgm/Youlu.mp3",
+    "tags": [
+      "人物:幽露"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-liu-bihaka",
+    "name": "柳比哈卡·人物主题",
+    "kind": "music",
+    "file": "bgm/Liu_Bihaka.mp3",
+    "tags": [
+      "人物:柳比哈卡"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-solhiera-huan",
+    "name": "索尔希艾拉·人物主题",
+    "kind": "music",
+    "file": "bgm/Solhiera_Huan.mp3",
+    "tags": [
+      "人物:索尔希艾拉"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-xianyu",
+    "name": "羡愚·人物主题",
+    "kind": "music",
+    "file": "bgm/Xianyu.mp3",
+    "tags": [
+      "人物:羡愚"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-lilia-lysander",
+    "name": "莉利亚·利桑德·人物主题",
+    "kind": "music",
+    "file": "bgm/Lilia_Lysander.mp3",
+    "tags": [
+      "人物:莉利亚·利桑德"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-weiwila",
+    "name": "薇薇拉·人物主题",
+    "kind": "music",
+    "file": "bgm/Weiwila.mp3",
+    "tags": [
+      "人物:薇薇拉"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  },
+  {
+    "id": "bgm-yin-shiluo-aurelia",
+    "name": "银莳萝·奥雷利亚·人物主题",
+    "kind": "music",
+    "file": "bgm/Yin_Shiluo_Aurelia.mp3",
+    "tags": [
+      "人物:银莳萝·奥雷利亚"
+    ],
+    "credit": "来源未确认（SillyTavern 角色卡社群分发，原 catbox 直链）",
+    "license": "UNVERIFIED"
+  }
+]

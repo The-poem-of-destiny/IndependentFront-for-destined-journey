@@ -2390,7 +2390,8 @@ export interface CombatUnitTurn {
 export type MarkerType = 'craft_request' | 'combat_trigger' | 'char_detect'  // 旧（保留向后兼容）
   | 'char_gen_request' | 'char_update_request'                              // 角色调度
   | 'item_gen_request' | 'item_update_request'                              // 物品调度
-  | 'craft_gen_request';                                                    // 制作调度（统一 _request 后缀）
+  | 'craft_gen_request'                                                     // 制作调度（统一 _request 后缀）
+  | 'play_audio';                                                           // 场景配乐（Story 直接输出，非阻塞）
 
 /** 所有标记的公共字段 */
 export interface DetectedMarkerBase {
@@ -2450,11 +2451,38 @@ export interface CharDetectMarker extends DetectedMarkerBase {
   bodyText?: string;
 }
 
+/**
+ * <play_audio> 标记 — Story AI 在场景/氛围发生转折时输出，切换 BGM。
+ *
+ * **地点不由 AI 提供**：位置已经在游戏状态里（`player.location`），让 AI 再写一遍
+ * 只会多一处漂移源。AI 只负责它独有的判断——此刻是什么情绪、什么情境。
+ *
+ * 自闭合与成对写法都认：
+ *   `<play_audio situation="战斗" mood="紧张"/>`
+ *   `<play_audio>战斗, 紧张</play_audio>`（正文按逗号拆成自由词，喂给情绪与情境两维）
+ */
+export interface PlayAudioMarker extends DetectedMarkerBase {
+  type: 'play_audio';
+  /** 情境词（探索/战斗/潜行/仪式…），逗号或顿号分隔 */
+  situation?: string;
+  /** 情绪词（紧张/平静/悲壮…），逗号或顿号分隔 */
+  mood?: string;
+  /** 指定人物主题曲（可选；缺省由调用方按在场角色填） */
+  character?: string;
+  /** 氛围变体 A/B */
+  variant?: string;
+  /** `stop` = 停止当前 BGM，不再选曲 */
+  action?: string;
+  /** 标签内部正文：自由词，逗号分隔 */
+  bodyText?: string;
+}
+
 /** 三种标记的联合类型 */
 export type DetectedMarker = CraftRequestMarker | CombatTriggerMarker | CharDetectMarker   // 旧（保留）
   | CharGenRequestMarker | CharUpdateRequestMarker
   | ItemGenRequestMarker | ItemUpdateRequestMarker
-  | CraftGenRequestMarker;
+  | CraftGenRequestMarker
+  | PlayAudioMarker;
 
 /**
  * <char_gen_request> 标记 — request_dispatcher 检测到新角色时输出。

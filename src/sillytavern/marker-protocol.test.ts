@@ -11,8 +11,10 @@ import {
   scanCraftRequests,
   scanCombatTriggers,
   scanCharDetects,
+  scanPlayAudioMarkers,
   classifyMarker,
   stripMarkers,
+  stripPlayAudioMarkers,
   parseTagAttributes,
   isMarkerTag,
   MARKER_TAGS,
@@ -348,8 +350,9 @@ describe('MARKER_TAGS', () => {
     expect(MARKER_TAGS).toContain('char_detect');
   });
 
-  it('长度应为 8 (Phase 10 新增 5 种 request 标签 + json)', () => {
-    expect(MARKER_TAGS).toHaveLength(8);
+  it('长度应为 9 (Phase 10 的 5 种 request + play_audio)', () => {
+    expect(MARKER_TAGS).toHaveLength(9);
+    expect(MARKER_TAGS).toContain('play_audio');
   });
 });
 
@@ -368,12 +371,72 @@ describe('MARKER_TAG_SET', () => {
     expect(MARKER_TAG_SET.has('craft_gen_request')).toBe(true);
   });
 
-  it('大小应为 8 (Phase 10 新增 6 种标签)', () => {
-    expect(MARKER_TAG_SET.size).toBe(8);
+  it('大小应为 9 (Phase 10 的 5 种 request + play_audio)', () => {
+    expect(MARKER_TAG_SET.size).toBe(9);
+    expect(MARKER_TAG_SET.has('play_audio')).toBe(true);
   });
 
   it('不应包含非标记标签', () => {
     expect(MARKER_TAG_SET.has('maintext')).toBe(false);
     expect(MARKER_TAG_SET.has('thinking')).toBe(false);
+  });
+});
+
+// ========== play_audio ==========
+
+describe('scanPlayAudioMarkers', () => {
+  it('认自闭合写法 —— AI 十有八九这么写', () => {
+    const m = scanPlayAudioMarkers('前文<play_audio situation="战斗" mood="紧张"/>后文');
+    expect(m).toHaveLength(1);
+    expect(m[0].type).toBe('play_audio');
+    expect(m[0].situation).toBe('战斗');
+    expect(m[0].mood).toBe('紧张');
+    expect(m[0].bodyText).toBeUndefined();
+  });
+
+  it('也认成对写法，正文进 bodyText', () => {
+    const m = scanPlayAudioMarkers('<play_audio>探索, 平静</play_audio>');
+    expect(m).toHaveLength(1);
+    expect(m[0].bodyText).toBe('探索, 平静');
+  });
+
+  it('解析 character / variant / action', () => {
+    const m = scanPlayAudioMarkers('<play_audio character="傲雪" variant="B"/><play_audio action="stop"/>');
+    expect(m).toHaveLength(2);
+    expect(m[0].character).toBe('傲雪');
+    expect(m[0].variant).toBe('B');
+    expect(m[1].action).toBe('stop');
+  });
+
+  it('无标记时返回空数组，畸形标签不崩', () => {
+    expect(scanPlayAudioMarkers('普通正文')).toEqual([]);
+    expect(scanPlayAudioMarkers('<play_audio situation="战斗"')).toEqual([]);
+  });
+
+  it('position 指向标记起点，供剥离使用', () => {
+    const text = 'abc<play_audio/>def';
+    const m = scanPlayAudioMarkers(text);
+    expect(text.slice(m[0].position, m[0].position + m[0].rawContent.length)).toBe('<play_audio/>');
+  });
+});
+
+describe('scanMarkers 收录 play_audio', () => {
+  it('与其它标记一起按位置排序，并从 cleanText 中剥离', () => {
+    const text = '<play_audio situation="战斗"/>正文<combat_trigger>狼群</combat_trigger>';
+    const r = scanMarkers(text);
+    expect(r.markers.map((m) => m.type)).toEqual(['play_audio', 'combat_trigger']);
+    expect(r.cleanText).toBe('正文');
+  });
+});
+
+describe('stripPlayAudioMarkers', () => {
+  it('只剥配乐标记，其余标记原样保留', () => {
+    const text = 'A<play_audio mood="紧张"/>B<craft_request>剑</craft_request>C';
+    expect(stripPlayAudioMarkers(text)).toBe('AB<craft_request>剑</craft_request>C');
+  });
+
+  it('多个标记全部剥掉；没有标记时原样返回', () => {
+    expect(stripPlayAudioMarkers('<play_audio/>x<play_audio>探索</play_audio>y')).toBe('xy');
+    expect(stripPlayAudioMarkers('干净正文')).toBe('干净正文');
   });
 });
