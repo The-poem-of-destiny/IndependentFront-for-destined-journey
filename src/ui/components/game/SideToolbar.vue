@@ -58,36 +58,41 @@ function handleClick(id: string) {
 </template>
 
 <style scoped>
+/* 宽度由 GamePage 的 --rail-w 统一供给（展开 4.2rem / 折叠 1.925rem，较原先各收窄 30%），
+   ScenePanel 读同一个变量补足左侧 25%，两边不会算岔。
+   刻意不做 width 过渡 —— design.md §1 禁止布局属性过渡，且渐变宽度会与
+   ScenePanel 的 calc 瞬时值脱节，折叠瞬间出现缝。 */
 .side-toolbar {
   display: flex;
   flex-direction: column;
-  width: 6rem;
+  width: var(--rail-w, 4.2rem);
   flex-shrink: 0;
   background: var(--theme-tab-bar-bg);
   border-right: 1px solid var(--theme-card-border);
   padding: 24px 0 8px;
   gap: 4px;
   overflow-y: auto;
-  transition: width 150ms;
 }
-.side-toolbar.collapsed {
-  width: 2.75rem;
-}
+/* 收窄后横排放不下「图标 + 两字标签」，改为图标在上标签在下 */
 .tool-btn {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 10px 10px;
+  gap: 4px;
+  padding: 7px 2px;
   border: none;
   background: none;
   color: var(--theme-tab-text);
   font-size: 0.875rem;
   cursor: pointer;
   font-family: inherit;
-  text-align: left;
   border-radius: 6px;
-  margin: 0 6px;
+  margin: 0 4px;
   transition: background 100ms, color 100ms;
+}
+.side-toolbar.collapsed .tool-btn {
+  padding: 8px 2px;
+  margin: 0 2px;
 }
 .tool-btn:hover {
   background: var(--theme-tab-hover-bg);
@@ -119,8 +124,8 @@ function handleClick(id: string) {
   overflow: hidden;
 }
 .collapse-toggle {
-  margin: auto 6px 0;
-  padding: 10px;
+  margin: auto 4px 0;
+  padding: 8px 2px;
   border: none;
   border-top: 1px solid var(--theme-card-border);
   background: none;

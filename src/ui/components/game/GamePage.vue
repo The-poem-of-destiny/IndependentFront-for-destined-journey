@@ -166,7 +166,7 @@ function onModalOpenChange(v: boolean) {
 <template>
   <div class="game-page-layout">
     <TopBar />
-    <div class="game-body">
+    <div class="game-body" :class="{ 'rail-collapsed': game.sidebarCollapsed }">
       <SideToolbar @tool-click="handleToolClick" />
       <ScenePanel />
       <ChatFlow
@@ -249,10 +249,17 @@ function onModalOpenChange(v: boolean) {
   color: var(--theme-text-primary);
   overflow: hidden;
 }
+/* 三分屏比例（PC 16:9）: 左 25% (工具栏 + 场景栏) | 正文 50% | 状态栏 25%
+   --rail-w 是工具栏实宽，ScenePanel 用 calc(25% - var(--rail-w)) 补足左侧那 25%，
+   所以侧栏折叠时场景栏自动吃掉让出的宽度，左块恒为 25%。 */
 .game-body {
+  --rail-w: 4.2rem;
   display: flex;
   flex: 1;
   overflow: hidden;
+}
+.game-body.rail-collapsed {
+  --rail-w: 1.925rem;
 }
 .placeholder-panel {
   padding: 2.5rem;

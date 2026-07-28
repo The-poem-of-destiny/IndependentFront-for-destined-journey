@@ -391,9 +391,11 @@ onUnmounted(() => {
 .bubble-row-narrative {
   justify-content: center;
 }
+/* 正文列已经是屏宽 50%，宽度由布局决定而非 ch 上限 ——
+   原先 72ch 会在宽屏上把正文钉在中间、两侧留出大片空白。 */
 .bubble {
   width: 100%;
-  max-width: 72ch;
+  max-width: 100%;
   padding: 10px 14px;
   border-radius: var(--theme-radius-md, 8px);
   font-size: 0.875rem;
@@ -409,7 +411,7 @@ onUnmounted(() => {
 /* 叙事正文 — 书页而非卡片: 无边框无底色，靠留白与衬线成页 */
 .bubble-narrative-full {
   width: 100%;
-  max-width: 70ch;
+  max-width: 100%;
   padding: 4px 8px;
   color: var(--theme-text-primary);
   font-size: 0.9375rem;
@@ -539,7 +541,7 @@ onUnmounted(() => {
   background: color-mix(in srgb, var(--theme-surface-muted) 70%, transparent);
   border: 1px solid var(--theme-card-border);
   cursor: pointer;
-  max-width: 72ch;
+  max-width: 100%;
   width: 100%;
   font-size: 0.8125rem;
   color: var(--theme-text-secondary);
@@ -570,7 +572,7 @@ onUnmounted(() => {
 
 /* 展开卡片 */
 .system-card-wrapper {
-  max-width: 72ch;
+  max-width: 100%;
   width: 100%;
 }
 

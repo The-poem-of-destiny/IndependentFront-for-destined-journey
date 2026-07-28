@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useGameStore } from '../../stores/game-store'
+import { useHoverPopup } from '../../composables/useHoverPopup'
 import { useSettingsStore } from '../../stores/settings-store'
 import { markNewsRead } from '@engine/save-profile'
+import { getAffectionLabel } from '@engine/affection-system'
 import { MONTH_NAMES, WEEKDAY_NAMES, getTimeOfDay } from '@engine/time-system'
 import { nameColorVar, initialsOf } from '../../utils/name-color'
 import { formatRel } from '../../utils/time-format'
-import type { CharacterState } from '@engine/types'
+import AppTabs from '../shared/AppTabs.vue'
 
 const game = useGameStore()
 const settings = useSettingsStore()
@@ -63,15 +65,68 @@ const weather = computed(() => {
 
 // ═══ 在场角色 — present 字段判断 ═══
 const presentChars = computed(() => {
-  const all = game.characters
+  // 兜 undefined：心声气泡的 popChar 计算在 activeSaveId 分支之外，
+  // 未加载存档时也会求值一次，characters 还没就位就会炸。
+  const all = game.characters ?? []
   return all.filter(c => {
     if (c.type === 'player') return false
     return c.present === true
   })
 })
 
-// ═══ 中段：单选展开心声 ═══
-const expandedId = ref<string | null>(null)
+// ═══ 页签 ═══
+type SceneTab = 'chars' | 'quests' | 'world' | 'misc'
+/** 默认落在「角色」—— 在场者是场景栏最即时的信息，不该藏在页签后面 */
+const activeTab = ref<SceneTab>('chars')
+
+/** 未读世界消息数 —— 只有它配得上 AppTabs 的红色 badge（真提醒，不是纯计数） */
+const unreadNews = computed(() => game.news.filter(n => !n.read).length)
+
+const sceneTabs = computed(() => [
+  { key: 'chars' as SceneTab, label: '角色' },
+  { key: 'quests' as SceneTab, label: '任务' },
+  { key: 'world' as SceneTab, label: '世界', badge: unreadNews.value || undefined },
+  { key: 'misc' as SceneTab, label: '万象' },
+])
+
+// ═══ 任务（原在右侧状态栏「任务追踪」，M6 起改挂左栏页签） ═══
+const questEntries = computed(() => {
+  const quests = game.saveProfile?.quests
+  if (!quests) return []
+  const order: Record<string, number> = { '高': 0, '中': 1, '低': 2 }
+  return Object.entries(quests).sort(
+    ([, a], [, b]) => (order[a.priority] ?? 2) - (order[b.priority] ?? 2)
+  )
+})
+
+function openQuests() {
+  game.showModal('quests')
+}
+
+/** 任务就地展开详情（对齐右栏持有物条目的交互） */
+const expandedQuest = ref<string | null>(null)
+function toggleQuest(name: string) {
+  expandedQuest.value = expandedQuest.value === name ? null : name
+}
+
+// ═══ 角色页签：悬停弹出心声气泡（延迟走全局设置 settings.hoverDelayMs） ═══
+// 挂在行的右侧 —— 场景栏在最左，气泡向右展开不会盖住角色列表本身
+const thoughtPop = useHoverPopup({
+  // 气泡同样 zoom:1.1（它 Teleport 到 body，不在面板内拿不到面板的 zoom），
+  // 故传给夹紧计算的是**渲染后**尺寸：260×1.1=286 / 120×1.1=132
+  width: 286,
+  estHeight: 132,
+  zoom: 1.1,
+  placement: 'right-bottom',
+  gap: 6,
+  anchorSelector: '.npc-portrait',   // 气泡左下角贴头像右上角
+})
+const popChar = computed(() =>
+  presentChars.value.find(c => c.id === thoughtPop.key.value) ?? null
+)
+const popThought = computed(() =>
+  popChar.value ? (game.getThoughts(popChar.value) || '此刻风平浪静，无声可闻…') : ''
+)
 
 /** tier 名 → CSS 变量描边色；tierName 未在品质池时降级默认色。 */
 const TIER_COLOR: Record<string, string> = {
@@ -87,27 +142,18 @@ function tierColor(tierName?: string): string {
   return 'var(--theme-text-muted)'
 }
 
-// 展开行的 DOM 引用，用于 scrollIntoView 跟随
-const rowRefs = new Map<string, HTMLDivElement>()
-function setRowRef(id: string, el: HTMLDivElement | null) {
-  if (el) rowRefs.set(id, el)
-  else rowRefs.delete(id)
+// ═══ 好感度 ═══
+// 真源是 saveProfile.affections，按**角色名**索引（M2/M5 起，rename_character 随迁）
+function affectionOf(name: string): number {
+  return game.saveProfile?.affections?.[name] ?? 0
 }
-
-function toggleExpand(char: CharacterState) {
-  if (expandedId.value === char.id) {
-    expandedId.value = null
-    return
-  }
-  expandedId.value = char.id
-  nextTick(() => {
-    const el = rowRefs.get(char.id)
-    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  })
+/** [-100,100] → 单边填充比例 [0,1]；符号决定往左还是往右长 */
+function affectionRatio(name: string): number {
+  return Math.min(1, Math.abs(affectionOf(name)) / 100)
 }
-
-function thoughtsOf(char: CharacterState): string {
-  return game.getThoughts(char)
+function affectionText(name: string): string {
+  const v = affectionOf(name)
+  return `${getAffectionLabel(v)} ${v > 0 ? '+' : ''}${v}`
 }
 
 // ═══ 下段：新闻单选展开 ═══
@@ -145,17 +191,15 @@ function openCharList() {
   <div class="scene-panel" v-if="game.activeSaveId">
     <!-- ═══════ 上段：场景 (时间 + 位置 + 天气) ═══════ -->
     <div class="scene-top">
-      <!-- 时间 -->
-      <div class="scene-section scene-time">
-        <div class="scene-section-title">时间</div>
+      <!-- 时间 —— 无标题：纪元年 + 月日周合并一行，时段/时刻置于其下 -->
+      <div class="scene-section scene-datetime">
         <template v-if="timeInfo">
+          <div class="scene-date-line">{{ timeInfo.era }} {{ timeInfo.date }}</div>
           <div class="scene-tod-line" :style="{ '--tod-color': `var(${todMeta?.colorVar ?? '--theme-text-muted'})` }">
             <i :class="'scene-tod-icon ' + (todMeta?.icon ?? 'fa-solid fa-clock')" />
             <span class="scene-tod-name">{{ timeInfo.timeOfDay }}</span>
             <span class="scene-tod-clock">{{ timeInfo.time }}</span>
           </div>
-          <div class="scene-time-era">{{ timeInfo.era }}</div>
-          <div class="scene-time-date">{{ timeInfo.date }}</div>
         </template>
         <div class="scene-empty" v-else>时间未同步</div>
       </div>
@@ -173,53 +217,122 @@ function openCharList() {
       </div>
     </div>
 
-    <!-- ═══════ 中段：在场 NPC（可滚动，点击出心里话） ═══════ -->
-    <div class="scene-mid">
-      <div class="scene-section-title scene-mid-title">
+    <!-- ═══════ 页签：任务 / 角色 / 世界 / 万象 ═══════ -->
+    <AppTabs :tabs="sceneTabs" :active="activeTab" @select="activeTab = $event" />
+
+    <div class="scene-tab-body">
+      <!-- ─── 任务 ─── -->
+      <template v-if="activeTab === 'quests'">
+        <div class="scene-section-title scene-pane-title">
+          <span>任务 ({{ questEntries.length }})</span>
+          <button class="scene-title-action" @click="openQuests" title="打开任务面板" aria-label="打开任务面板">›</button>
+        </div>
+
+        <div class="quest-list" v-if="questEntries.length">
+          <div
+            v-for="[name, q] in questEntries"
+            :key="name"
+            class="quest-item"
+            :class="{ open: expandedQuest === name }"
+            role="button"
+            tabindex="0"
+            :aria-expanded="expandedQuest === name"
+            @click="toggleQuest(name)"
+            @keydown.enter="toggleQuest(name)"
+            @keydown.space.prevent="toggleQuest(name)"
+          >
+            <div class="quest-top">
+              <span class="quest-name">{{ name }}</span>
+              <span class="quest-prio" :class="'pri-' + q.priority">{{ q.priority }}</span>
+              <i class="fa-solid quest-chevron" :class="expandedQuest === name ? 'fa-chevron-up' : 'fa-chevron-down'" />
+            </div>
+            <div class="quest-obj" v-if="q.objective">{{ q.objective }}</div>
+
+            <div class="quest-detail" v-if="expandedQuest === name">
+              <div class="qd-row" v-if="q.progress">
+                <span class="qd-label">进展</span>
+                <span class="qd-value qd-prog">{{ q.progress }}</span>
+              </div>
+              <div class="qd-row" v-if="q.detail">
+                <span class="qd-label">详情</span>
+                <span class="qd-value">{{ q.detail }}</span>
+              </div>
+              <div class="qd-row" v-if="q.reward">
+                <span class="qd-label">奖励</span>
+                <span class="qd-value qd-reward">{{ q.reward }}</span>
+              </div>
+              <div class="qd-row" v-if="q.status">
+                <span class="qd-label">状态</span>
+                <span class="qd-value">{{ q.status }}</span>
+              </div>
+              <div class="qd-empty" v-if="!q.progress && !q.detail && !q.reward && !q.status">暂无更多记载</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="empty-tab" v-else>尚无在办之事…</div>
+      </template>
+
+      <!-- ─── 角色 ─── -->
+      <template v-else-if="activeTab === 'chars'">
+      <div class="scene-section-title scene-pane-title">
         <span>在场 ({{ presentChars.length }})</span>
         <button class="scene-title-action" @click="openCharList" title="查看完整角色列表" aria-label="查看完整角色列表">›</button>
       </div>
 
       <div class="scene-npc-list" v-if="presentChars.length">
-        <template v-for="char in presentChars" :key="char.id">
-          <div
-            :ref="(el) => setRowRef(char.id, el as HTMLDivElement)"
-            class="scene-npc-item"
-            :class="{ expanded: expandedId === char.id }"
-            role="button"
-            tabindex="0"
-            :aria-expanded="expandedId === char.id"
-            @click="toggleExpand(char)"
-            @keydown.enter="toggleExpand(char)"
-            @keydown.space.prevent="toggleExpand(char)"
-          >
-            <span class="npc-avatar" :style="{ background: nameColorVar(char.name) }">
-              {{ initialsOf(char.name) }}
-            </span>
-            <span class="npc-name">{{ char.name }}</span>
-            <span
-              class="npc-tier"
-              v-if="char.tier"
-              :style="{ color: tierColor((char as any).tierName), borderColor: tierColor((char as any).tierName) }"
-            >
-              T{{ char.tier }}
-            </span>
-          </div>
+        <button
+          v-for="char in presentChars"
+          :key="char.id"
+          class="scene-npc-item"
+          :class="{ hovered: thoughtPop.key.value === char.id }"
+          :aria-describedby="thoughtPop.key.value === char.id ? 'npc-thought-pop' : undefined"
+          @mouseenter="thoughtPop.onEnter($event, char.id)"
+          @mouseleave="thoughtPop.hide"
+          @focus="thoughtPop.onFocus($event, char.id)"
+          @blur="thoughtPop.hide"
+        >
+          <span class="npc-portrait" :style="{ background: nameColorVar(char.name) }">
+            {{ initialsOf(char.name) }}
+          </span>
 
-          <!-- 心声气泡（v-if 不用 v-show，overflow 滚动容器内更稳） -->
-          <div v-if="expandedId === char.id" class="npc-thought">
-            <span class="npc-thought-quote">"</span>
-            <span class="npc-thought-text">{{ thoughtsOf(char) || '此刻风平浪静，无声可闻…' }}</span>
-            <span class="npc-thought-quote">"</span>
-          </div>
-        </template>
+          <span class="npc-main">
+            <span class="npc-line">
+              <span class="npc-name">{{ char.name }}</span>
+              <span
+                class="npc-tier"
+                v-if="char.tier"
+                :style="{ color: tierColor((char as any).tierName), borderColor: tierColor((char as any).tierName) }"
+              >
+                T{{ char.tier }}
+              </span>
+            </span>
+
+            <span class="npc-lv">Lv.{{ char.level ?? 1 }}</span>
+
+            <!-- 好感度 [-100,100]：中线为 0，正向右生长、负向左生长 -->
+            <span class="npc-aff">
+              <span class="aff-track">
+                <span
+                  class="aff-fill"
+                  :class="affectionOf(char.name) < 0 ? 'neg' : 'pos'"
+                  :style="{ transform: `scaleX(${affectionRatio(char.name)})` }"
+                />
+                <span class="aff-zero" aria-hidden="true" />
+              </span>
+              <span class="aff-text" :class="affectionOf(char.name) < 0 ? 'neg' : 'pos'">
+                {{ affectionText(char.name) }}
+              </span>
+            </span>
+          </span>
+        </button>
       </div>
 
-      <div class="scene-empty-block" v-else>暂无其他角色在场</div>
-    </div>
+      <div class="empty-tab" v-else>此处别无他人…</div>
+      </template>
 
-    <!-- ═══════ 下段：新闻 ═══════ -->
-    <div class="scene-bot">
+      <!-- ─── 世界 ─── -->
+      <template v-else-if="activeTab === 'world'">
       <div class="scene-section-title">世界消息 · {{ timeInfo?.date || '' }} {{ timeInfo?.time || '' }}</div>
 
       <div class="scene-news-list" v-if="game.news.length">
@@ -249,7 +362,17 @@ function openCharList() {
         </div>
       </div>
 
-      <div class="scene-empty-block" v-else>暂无新消息</div>
+      <div class="empty-tab" v-else>四方无声，暂无新讯…</div>
+      </template>
+
+      <!-- ─── 万象 ───
+           占位：日后收纳「资产」一类条目 —— 需要具体信息、但不隶属于世界本身的记载 -->
+      <div class="empty-tab misc-placeholder" v-else>
+        <div>万象未启，此页尚空…</div>
+        <div class="misc-note">
+          此处日后收纳资产等条目 —— 需要具体信息、却独立于世界之外的记载。
+        </div>
+      </div>
     </div>
   </div>
 
@@ -257,12 +380,32 @@ function openCharList() {
   <div class="scene-panel scene-panel-empty" v-else>
     <div class="scene-empty-msg">未选择存档</div>
   </div>
+
+  <!-- ═══ 心声气泡（Teleport 出滚动容器，否则会被 overflow 裁掉） ═══ -->
+  <Teleport to="body">
+    <Transition name="thought-pop">
+      <div
+        v-if="popChar && thoughtPop.style.value"
+        id="npc-thought-pop"
+        class="thought-bubble"
+        role="tooltip"
+        :style="thoughtPop.style.value"
+      >
+        <div class="tb-who">{{ popChar.name }}·心声</div>
+        <div class="tb-text">{{ popThought }}</div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
 /* ═══ 根容器 — 三段式 flex column，外层不滚 ═══ */
 .scene-panel {
-  width: 240px;
+  /* 内容整体放大 10%。zoom 只放大内容，不改元素自身已解析的宽度
+     （实测：面板仍占屏宽 25% − 工具栏），所以宽度无需补偿。 */
+  zoom: 1.1;
+  width: calc(25% - var(--rail-w, 4.2rem));
+  min-width: 200px;
   flex-shrink: 0;
   overflow: hidden;                      /* 外层不滚， scrolls 委托给 mid/bot */
   background: var(--theme-content-bg);
@@ -279,30 +422,23 @@ function openCharList() {
   justify-content: center;
 }
 
-/* ═══ 三段 ═══ */
+/* ═══ 场景头 + 页签体 ═══ */
 .scene-top {
   flex-shrink: 0;
-  padding: 12px 12px 6px;
-  border-bottom: 1px solid var(--theme-border, rgba(255, 255, 255, 0.04));
+  padding: 12px 12px 10px;
+  border-bottom: 1px solid var(--theme-card-border);
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
-.scene-mid {
+/* 页签内容区独占剩余高度并自行滚动，外层不滚 */
+.scene-tab-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--theme-border, rgba(255, 255, 255, 0.04));
   display: flex;
   flex-direction: column;
-}
-.scene-bot {
-  flex-shrink: 0;
-  min-height: 30%;       /* 兜底：世界消息块至少占面板 1/3，不被中段挤窄贴底 */
-  max-height: 40%;       /* 上限放宽：让多条新闻有展开空间 */
-  overflow-y: auto;
-  padding: 10px 12px;
 }
 
 /* ═══ 区块标题 ═══ */
@@ -320,7 +456,7 @@ function openCharList() {
   display: flex;
   align-items: center;
 }
-.scene-mid-title {
+.scene-pane-title {
   justify-content: space-between;
 }
 .scene-title-action {
@@ -338,15 +474,24 @@ function openCharList() {
   color: var(--theme-text-secondary);
 }
 
-/* ═══ 时间 ═══ */
-.scene-time {
+/* ═══ 时间 —— 日期一行在上，时段/时刻在下 ═══ */
+.scene-datetime {
   padding-top: 2px;
+  padding-bottom: 0;
+}
+.scene-date-line {
+  font-family: var(--theme-font-title, serif);
+  font-size: 0.95rem;
+  color: var(--theme-text-primary);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
 }
 .scene-tod-line {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 2px 0 6px;
+  margin: 4px 0 0;
   color: var(--tod-color, var(--theme-text-secondary));
 }
 .scene-tod-icon {
@@ -369,18 +514,92 @@ function openCharList() {
   color: var(--theme-text-primary);
   opacity: 0.85;
 }
-.scene-time-era {
-  font-family: var(--theme-font-title, serif);
-  font-size: 0.95rem;
-  color: var(--theme-text-primary);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  line-height: 1.25;
+/* ═══ 任务页签 ═══ */
+.quest-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.scene-time-date {
-  font-size: 0.7rem;
+.quest-item {
+  padding: 6px 8px;
+  background: var(--theme-surface-muted);
+  border-radius: var(--theme-radius-sm, 4px);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 22%, var(--theme-card-border));
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+.quest-item:hover {
+  border-color: color-mix(in srgb, var(--theme-primary) 40%, var(--theme-card-border));
+}
+.quest-item.open {
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-surface-muted));
+  border-color: color-mix(in srgb, var(--theme-primary) 40%, var(--theme-card-border));
+}
+.quest-chevron {
+  flex-shrink: 0;
+  font-size: 0.5rem;
+  color: var(--theme-text-muted);
+  opacity: 0.55;
+}
+.quest-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.quest-name {
+  flex: 1;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  color: var(--theme-text-primary);
+}
+.quest-prio {
+  font-size: 0.625rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.pri-高 { background: color-mix(in srgb, var(--theme-error) 18%, transparent); color: var(--theme-error); }
+.pri-中 { background: color-mix(in srgb, var(--theme-warning) 18%, transparent); color: var(--theme-warning); }
+.pri-低 { background: var(--theme-surface-muted); color: var(--theme-text-muted); }
+.quest-obj {
+  font-size: 0.6875rem;
   color: var(--theme-text-secondary);
-  margin-top: 1px;
+  margin-top: 3px;
+  line-height: 1.5;
+}
+/* 任务展开详情 */
+.quest-detail {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--theme-card-border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.qd-row {
+  display: flex;
+  gap: 6px;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
+.qd-label {
+  flex-shrink: 0;
+  width: 2.2em;
+  color: var(--theme-text-muted);
+}
+.qd-value {
+  flex: 1;
+  min-width: 0;
+  color: var(--theme-text-secondary);
+  overflow-wrap: break-word;
+}
+.qd-prog { color: var(--theme-success); }
+.qd-reward { color: var(--theme-currency-gold); }
+.qd-empty {
+  font-size: 0.6875rem;
+  font-style: italic;
+  color: var(--theme-text-muted);
 }
 
 /* ═══ 位置 / 天气 ═══ */
@@ -403,42 +622,72 @@ function openCharList() {
   flex-direction: column;
   gap: 4px;
 }
+/* 行本身不再可点（心声改悬停）—— cursor: help，别再用手型骗人说"可点" */
+/* 整行右对齐：画像在右，文字靠右排 —— 画像右缘贴近面板右缘，
+   心声气泡从那里向右上方冒出，正好朝着正文区 */
 .scene-npc-item {
   display: flex;
+  flex-direction: row-reverse;
   align-items: center;
-  gap: 8px;
-  padding: 7px 8px;
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  text-align: left;
   border-radius: var(--theme-radius-md, 6px);
-  cursor: pointer;
+  cursor: help;
   transition: background 120ms;
   user-select: none;
 }
-.scene-npc-item:hover {
+.scene-npc-item:hover,
+.scene-npc-item.hovered {
   background: var(--theme-tab-hover-bg);
 }
-.scene-npc-item.expanded {
-  background: var(--theme-primary-bg);
-}
 
-.npc-avatar {
+/* 矩形画像框 —— 4:5 竖构图，走 design.md §4.2 的卡片外壳 */
+.npc-portrait {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
+  width: 46px;
+  height: 58px;
   flex-shrink: 0;
-  color: #fff;
-  font-size: 0.68rem;
+  border-radius: var(--theme-radius-sm, 4px);
+  border: 1px solid var(--theme-card-border);
+  box-shadow: var(--paper-stack);
+  color: var(--theme-primary-text);
+  font-size: 0.95rem;
   font-weight: 700;
-  font-family: system-ui, sans-serif;
+  font-family: var(--theme-font-title, serif);
   letter-spacing: -0.02em;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
   overflow: hidden;
   white-space: nowrap;
 }
+.npc-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;   /* 文字块整体靠右 */
+  gap: 3px;
+}
+/* 同样反向：品质徽章在左、名字紧挨画像 */
+.npc-line {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  align-self: stretch;
+}
 .npc-name {
   flex: 1;
+  text-align: right;
   font-size: 0.78rem;
   color: var(--theme-text-primary);
   overflow: hidden;
@@ -455,28 +704,123 @@ function openCharList() {
   border: 1px solid transparent;
   flex-shrink: 0;
 }
+.npc-lv {
+  font-size: 0.65rem;
+  color: var(--theme-text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
 
-/* ═══ 心声气泡 — 手稿引文样式 ═══ */
-.npc-thought {
-  margin: 2px 6px 8px 42px;
-  padding: 8px 10px;
-  border-radius: var(--theme-radius-md, 6px);
-  background: color-mix(in srgb, var(--theme-primary) 6%, transparent);
-  border: 1px solid color-mix(in srgb, var(--theme-primary) 20%, var(--theme-card-border));
-  font-size: 0.72rem;
-  font-style: italic;
-  color: var(--theme-text-secondary);
-  line-height: 1.55;
+/* ═══ 好感度条 —— 零点居中，双向生长 ═══ */
+.npc-aff {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-self: stretch;   /* 好感度条要占满，不能被 align-items:flex-end 收成内容宽 */
+}
+.aff-track {
   position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--theme-surface-muted);
+  overflow: hidden;
 }
-.npc-thought-quote {
-  color: var(--theme-primary);
-  opacity: 0.55;
-  font-weight: 700;
-  font-style: normal;
+/* 用 transform: scaleX 而非 width —— design.md §1 禁止布局属性过渡 */
+.aff-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  border-radius: 2px;
+  transition: transform 0.3s ease-out;
 }
-.npc-thought-text {
-  margin: 0 2px;
+.aff-fill.pos {
+  left: 50%;
+  transform-origin: left;
+  background: var(--theme-affection);
+}
+.aff-fill.neg {
+  left: 0;
+  transform-origin: right;
+  background: var(--theme-error);
+}
+.aff-zero {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--theme-text-muted) 55%, transparent);
+}
+.aff-text {
+  font-size: 0.6rem;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.aff-text.pos { color: var(--theme-affection-text); }
+.aff-text.neg { color: var(--theme-error); }
+
+@media (prefers-reduced-motion: reduce) {
+  .aff-fill { transition: none; }
+}
+
+/* ═══ 心声气泡 —— 云朵造型的 thought bubble ═══
+   左下角锚定在角色行上（见 useHoverPopup 的 'right-bottom'），
+   两颗递减的小圆点自左下角向下、向左延伸，指回发出心声的角色 */
+.thought-bubble {
+  position: fixed;
+  z-index: var(--z-tooltip, 500);
+  zoom: 1.1;              /* 与场景栏同步放大 —— 它在面板外，继承不到 */
+  width: 260px;
+  padding: 11px 14px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--theme-primary) 7%, var(--theme-card-bg));
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 28%, var(--theme-card-border));
+  box-shadow: var(--theme-shadow-lg);
+  pointer-events: none;   /* 气泡不吃鼠标，避免盖住行造成进出闪烁 */
+}
+/* 思绪尾巴：两颗圆点，越靠近角色越小 */
+.thought-bubble::before,
+.thought-bubble::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--theme-primary) 7%, var(--theme-card-bg));
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 28%, var(--theme-card-border));
+}
+.thought-bubble::before {
+  width: 10px;
+  height: 10px;
+  left: -5px;
+  bottom: -6px;
+}
+.thought-bubble::after {
+  width: 6px;
+  height: 6px;
+  left: -15px;
+  bottom: -15px;
+}
+.tb-who {
+  font-size: 0.625rem;
+  color: var(--theme-text-muted);
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.tb-text {
+  font-size: 0.75rem;
+  font-style: italic;
+  line-height: 1.6;
+  color: var(--theme-text-secondary);
+}
+
+.thought-pop-enter-active { transition: opacity 0.14s ease-out; }
+.thought-pop-leave-active { transition: opacity 0.1s ease-in; }
+.thought-pop-enter-from, .thought-pop-leave-to { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .thought-pop-enter-active, .thought-pop-leave-active { transition: none; }
 }
 
 /* ═══ 下段新闻 ═══ */
@@ -566,12 +910,31 @@ function openCharList() {
   color: var(--theme-text-muted);
   font-style: italic;
 }
-.scene-empty-block {
-  font-size: 0.7rem;
-  color: var(--theme-text-muted);
-  font-style: italic;
-  padding: 6px 2px;
+/* 空态 —— design.md §5.2 统一配方：装饰符 + 斜体说明 */
+.empty-tab {
+  padding: 32px 0;
   text-align: center;
+  color: var(--theme-text-muted);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+.empty-tab::before {
+  content: '—';
+  display: block;
+  margin-bottom: 8px;
+  font-size: 1.25rem;
+  opacity: 0.3;
+}
+.misc-placeholder {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.misc-note {
+  margin-top: 10px;
+  font-size: 0.6875rem;
+  font-style: normal;
+  line-height: 1.6;
+  color: color-mix(in srgb, var(--theme-text-muted) 80%, transparent);
 }
 .scene-empty-msg {
   font-size: 0.75rem;
