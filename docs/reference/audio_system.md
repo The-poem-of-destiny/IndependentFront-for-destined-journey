@@ -507,7 +507,16 @@ await audio.playByLocation('铁炉堡', { variant: 'A' })
 | `playByTag` | ✅ | ✅ | ❌ **零**（保留为单标签精确入口） |
 | `playSfx` | ✅ | ✅ | ⚠️ 唯一调用方是设置页曲库的试听按钮（`settings/audio/AudioLibrary.vue`），游戏内无任何音效触发点 |
 | `playTrackByName` / `playPlaylistByName` | ✅ | ✅ | ⚠️ 仅 UI |
-| `public/audio/manifest.json` | ✅ 57 首内置曲目（作者 Aoo） | — | 测试占位素材，正式发布前需复核，见 `public/audio/README.md` |
+| `public/audio/manifest.json` | ✅ 57 首内置曲目（作者 Aoo） | — | 测试占位素材，正式发布前需复核，见 `public/audio/README.md`。⚠️ **mp3 字节本身不在仓库里**（见下） |
+
+> ⚠️ **内置 mp3 不随仓库分发（2026-07-28）**
+>
+> `manifest.json` 里的 57 条清单继续 tracked，但 `public/audio/bgm/*.mp3` 已 `git rm --cached`
+> 并写进 `.gitignore` —— 那批字节共 267MB，是**授权待复核的测试占位素材**，不该随代码走。
+>
+> 后果：**全新 clone 的曲库会列出 57 首但点不响**（文件 404）。这不是 bug，是刻意取舍。
+> 要在新机器上恢复，把 mp3 放回 `public/audio/bgm/`（文件名须与 `manifest.json` 的 `file` 字段一致）即可，
+> 不需要改任何代码。开发机上文件仍在原处，行为不变。
 
 ### 谁来触发换歌：三条来源
 

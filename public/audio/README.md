@@ -60,6 +60,17 @@
 （均据 `location-db.ts` 中各 region 的 description 核实）。子地点选曲靠 `audio-scene.ts` 的父级回退（分数随回退深度衰减），
 不需要给每座城市单独配曲——见 `docs/reference/audio_system.md` 第八节。
 
+### ⚠️ mp3 文件不在仓库里（2026-07-28）
+
+这 57 首的**字节本身已移出 git**——`public/audio/bgm/*.mp3` 已取消追踪并写进 `.gitignore`
+（共 267MB，且是下面说的授权待复核素材，不该随代码分发）。
+
+留在仓库里的只有 `manifest.json`（清单）和本文件（格式说明）。所以：
+
+- **全新 clone 的曲库会列出 57 首，但一首都点不响**（文件 404）。这是刻意取舍，不是 bug
+- 要恢复：把 mp3 放回 `public/audio/bgm/`，文件名与 `manifest.json` 的 `file` 字段对上即可，**不需要改代码**
+- 已有开发机上文件仍在原处，行为不变
+
 ### 素材状态：测试占位，正式发布前需复核
 
 作者 **Aoo**（`credit` 字段已署名）。
