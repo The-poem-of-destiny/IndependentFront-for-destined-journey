@@ -40,3 +40,11 @@ tmp/
 # 真机调试实时导出（preset.json 已 tracked 继续保留；debug 导出/日志不追踪）
 tests/realtime_export/*.json
 tests/realtime_export/log.txt
+
+# 内置音频素材（测试占位素材，体积大且授权未定，不进仓库）
+# manifest.json / README.md 继续 tracked —— 曲库清单与格式说明是代码的一部分
+public/audio/**/*.mp3
+public/audio/**/*.ogg
+public/audio/**/*.wav
+public/audio/**/*.m4a
+public/audio/**/*.flac
