@@ -179,6 +179,27 @@ M2 全 10 任务完成。方案 B：主线组 A（types.ts 加 3 字段 + Divini
 - 新增 `dice-event.ts`
 - 154 测试迁移 + 新增覆盖
 
+### ✅ 实施结果（2026-07-28）
+
+M3 全 10 任务完成。方案 C：主线核心管道（combat-pipeline.ts + combat-damage modifier 注入缝 + 骨架/stub）+ 4 code-writer agent 并行周边子功能（文件零重叠）。
+
+| 任务 | 产出 | 测试 |
+|------|------|------|
+| 4.1 管道化 | 新建 `combat-pipeline.ts` resolveAttackPipeline（async），legacy combat-resolver 保留 | 7（端到端） |
+| 4.2 19 event | COMBAT_EVENTS 常量集中 + 管道各步骤 emitChain | 含 4.1 |
+| 4.3 骰子事件化 | combat.dice.roll emitChain（脚本可改骰值） | 含 4.1 |
+| 4.4 modifier 注入 | combat-damage.ts +DamagePipelineInput.modifiers? + combat-modifier-inject foldMods | 26（agent1）|
+| 4.5 登神压制 | combat-modifier-inject.ts foldMods 时调 resolveDivinityConflict（压制率当穿透+削减DR） | 含 4.4 |
+| 4.6 HP 红线 | combat-pipeline clamp≥0 + 强制 isDead | 含 4.1 |
+| 4.7 $combat 扩展 | combat-actions-pipeline.ts（useSkill/Item/block/move/focus） | 12（agent4）|
+| 4.8 战意接线 | combat-morale-pipeline.ts（morale.check/result emitChain + checkMorale 兜底） | 16（agent2）|
+| 4.9 结算管线 | combat-settlement-pipeline.ts（end→EXP→loot→complete） | 19（agent3）|
+| 4.10 集群适配 | combat-pipeline 守方 clusterCount≥3 → finalDamage×1.5 | 含 4.1 |
+
+**关键决策落地**: legacy combat-resolver 保留（193 测试零破坏，D1）；runDamagePipeline 加可选 modifiers 字段（61 damage 测试不破坏，D3）；agent 各自发现 emitChain 不触发 subscribeAll（M1 分离注册表的正确行为）。
+
+**验收**: M3 新增 ~80 tests passed；全量 3544/3546（2 失败均预存/flaky：SelectableCard CSS 变量 + game-store.loadSave 并行时序，均与 M3 无关）。
+
 ---
 
 ## 5. M4：Agent 层改造

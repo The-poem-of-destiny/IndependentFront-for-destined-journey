@@ -1,0 +1,1 @@
+- [EventBus 两套订阅坑](feedback-eventbus-chain-vs-publish.md) — emitChain 只触发 chainHandlers 不触发 subscribeAll；监听链式事件必须用 subscribeChain
