@@ -163,4 +163,14 @@ describe('SubscriptionManager', () => {
   it('unregisterAll on unknown owner does not throw', () => {
     expect(() => manager.unregisterAll('nonexistent:owner:key')).not.toThrow();
   });
+
+  // ═══════════════════════════════════════════════════════════
+  // 🆕 任务 1.4: setMaxDepth 运行时配置（战斗场景收紧到 5）
+  // ═══════════════════════════════════════════════════════════
+  it('setMaxDepth 方法就位且可运行时调整（真递归拦截待 M3 emit 接通）', () => {
+    expect(typeof manager.setMaxDepth).toBe('function');
+    expect(() => manager.setMaxDepth(5)).not.toThrow();
+    // 收紧到 5 后可恢复到 10
+    expect(() => manager.setMaxDepth(10)).not.toThrow();
+  });
 });
