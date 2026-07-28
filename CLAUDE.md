@@ -497,7 +497,7 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC
 | 7b | 主题系统 + 通用组件 (10主题/15组件) | ✅ |
 | 7c | 首页 (标题画面风格) + 设置页 (8分区) | ✅ |
 | 7d | 捏人页 `/create` | 🔄 世界书驱动改造中 (命运核心 + 角色启用 + 四字段 + 预设 UI) |
-| 7e | 游戏页 + 状态栏 HUD + 脚本引擎 + ChatFlow + 输出美化 + ScenePanel 三段式 | 🔄 GamePipeline 桥接层完成，待集成验证 (Plan 4) |
+| 7e | 游戏页 + 状态栏 HUD + 脚本引擎 + ChatFlow + 输出美化 + ScenePanel | 🔄 GamePipeline 桥接层完成，待集成验证 (Plan 4)<br>**UI 改版 v1 (2026-07-28)**: 三栏定比 (正文 50% / 左 25% = 工具栏+场景栏 / 右 25%，左块由 GamePage 的 `--rail-w` 统一扣减)、工具栏收窄 30%、左右面板 `zoom: 1.1`；任务下沉左面板，左右各四页签；条目一律就地展开不弹 Modal（`store.focusItem`/ItemsPanel **保留未删**，仅摘掉调用点）；悬停浮层统一走 useHoverPopup（状态效果详情 / NPC 云朵思绪气泡）。⚠️ 已知问题见 design.md §7.4（主题切换会覆盖字体设置） |
 | 7f | 创意工坊 `/workshop` | ⬜ |
 | 7g | 衔接 & 测试 | ⬜ |
 | 8 | Agent 上下文可见性 & Prompt 体系 | ✅ |
@@ -529,7 +529,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │
 ├── composables/                     ← Vue 3 Composables (可复用逻辑)
 │   ├── useMapViewer.ts              ← OpenSeadragon 生命周期 (创建/加载/销毁)
-│   └── useMapMarkers.ts             ← 地图标记 CRUD + Overlay 同步
+│   ├── useMapMarkers.ts             ← 地图标记 CRUD + Overlay 同步
+│   └── useHoverPopup.ts             ← 悬停浮层唯一实现 (延迟读 settings.hoverDelayMs / 定位 below·right·right-bottom
+│                                       / 键盘 focus 不吃延迟 / zoom 坐标回除 / 滚动即隐)
 │
 ├── lib/                              ← 前端↔引擎桥接层
 │   ├── game-pipeline.ts              ← GamePipeline: AgentConfig组装/上下文构建/编排器/回调处理
@@ -561,7 +563,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │   │   ├── ResourceBar.vue          ← HP/MP/SP/EXP 资源条 (grid + 动画填充)
 │   │   ├── QualityBadge.vue         ← 7 级品质徽章
 │   │   ├── BuffChip.vue             ← Buff/Debuff/Special 药丸
-│   │   ├── AvatarPanel.vue          ← 圆形头像 (3 尺寸)
+│   │   ├── AvatarPanel.vue          ← 头像 (4 尺寸 sm/md/lg/xl × 形状 circle/square，默认圆形不破坏既有调用)
 │   │   ├── ToastContainer.vue       ← 全局通知 (4 类型 + 动画)
 │   │   └── form/ (5 files)          ← Input/Select/Stepper/Cascader/KeyValue
 │   ├── home/HomePage.vue            ← 游戏标题画面 (40vh 标题 + 4 按钮 + 风味文字)
@@ -569,15 +571,18 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │   ├── settings/AudioSection.vue    ← 音频分区 (混音台 / 播放列表 / 音轨库三段式 + 音乐文件夹条)
 │   ├── create/CreatePage.vue        ← [占位] 捏人页
 │   ├── game/
-│   │   ├── GamePage.vue             ← 游戏页主布局 (三栏 + 6 弹窗)
+│   │   ├── GamePage.vue             ← 游戏页主布局 (三栏 + 6 弹窗；持有 --rail-w 变量，保证左块恰好 25%)
 │   │   ├── MapPanel.vue             ← 地图查看器 (OSD + 91 标记 + 浮动信息卡片 + 角色位置匹配 + 工作台)
 │   │   ├── TopBar.vue               ← 顶部栏 (首页/存档名/全屏，时间已下沉 ScenePanel)
-│   │   ├── SideToolbar.vue          ← 左侧工具栏 (8 按钮)
-│   │   ├── ScenePanel.vue           ← 场景面板三段式 (上:时间氛围色+位置+天气 / 中:在场NPC心声气泡 / 下:世界消息)
+│   │   ├── SideToolbar.vue          ← 左侧工具栏 (8 按钮，宽度收窄 30% → 图标在上文字在下)
+│   │   ├── ScenePanel.vue           ← 场景面板 (顶:日期年份同行+具体时刻+位置+天气 / 四页签: 角色(默认)·任务·世界·万象)
+│   │   │                               角色条目右对齐(方形立绘在右)+好感度双向条+等级，悬停出云朵思绪气泡；任务就地展开
 │   │   ├── ChatFlow.vue             ← 对话流 (三源消息: AI/用户/系统 + 美化正文 + 系统卡片)
 │   │   ├── InputBar.vue             ← 输入栏
 │   │   ├── StatusHUD.vue            ← 右侧状态栏容器
-│   │   ├── StatusOverview.vue       ← 角色状态详览
+│   │   ├── StatusOverview.vue       ← 角色状态详览 (方形立绘 + 身份单行文本 / HP·MP·SP·EXP 条 / 等级+五维 6 等宽格
+│   │   │                               / 状态效果徽章与标题同行·悬停出详情 / 持有物四页签 装备·背包·消耗品·技能，
+│   │   │                               金钱与 FP 常驻标题行、条目就地展开不弹 Modal)
 │   │   ├── ItemsPanel.vue           ← 背包面板
 │   │   ├── CharacterListPanel.vue   ← 角色列表面板
 │   │   ├── QuestsPanel.vue          ← 任务面板
@@ -599,7 +604,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 | 📚 世界书 | [占位] 导入/新建按钮 |
 | 📖 剧情系统 | 8 种剧情偏向卡片多选、模式/年份/难度层级/外部NPC/自定义偏好、大纲预览(高斯模糊防剧透) |
 | 🧠 记忆 & 缓存 | 召回数/压缩阈值/快照上限/缓存策略 |
-| 🎨 外观主题 | 10 主题预览网格、字体风格(衬线/无衬线/混合)、字体大小(14/16/18/20px) |
+| 🎨 外观主题 | 10 主题预览网格、字体风格(衬线/无衬线/混合)、字体大小(14/16/18/20px)、悬停延迟(`hoverDelayMs` 立即/快/默认200/慢/很慢，全站 hover-to-display 统一读它) |
 | 💬 消息显示 | 系统通知全局开关 + 7 种事件类型独立过滤 |
 | ✨ 输出美化 | 预设规则库 beautifier-rules.json (22条: 2内置+20远程) + 世界书/角色 auto-enable 绑定 + 三段式UI(自动管理/已启用/可用规则库折叠)。用户规则 CRUD + 实时预览 + 导入/导出 JSON |
 | 🎵 音频 | 三段式: ①混音台(主/音乐/音效 音量+静音 + 播放控制/进度/循环/随机 + **场景配乐开关**) ②播放列表(仅音乐音轨，左选单右曲目排序) ③音轨库(音乐文件夹条 + 上传/搜索/按类型与标签过滤/试听/编辑/删除 + 占用配额显示)。音乐文件夹: 选择目录一次→文件留在磁盘只存目录，「授权访问」每次开浏览器点一次，「重新扫描」增量对账(文件消失只标 `文件已移除` 不删行)；仅 Chromium 支持，其他浏览器走上传入 IndexedDB 的兜底路径。音频库全局共享不随存档；**不参与存档导出/导入**，但「清除全部数据」会一并销毁 |
