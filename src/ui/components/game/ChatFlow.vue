@@ -2,7 +2,8 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import InputBar from './InputBar.vue'
 import type { ChatMessage, SystemEvent } from '@engine/types'
-import { processRules, escapeHtml, collectActiveSignalsFromEntries } from '@engine/beautifier'
+import { escapeHtml } from '@engine/beautifier'
+import { useBeautify } from '../../composables/useBeautify'
 import { useSettingsStore } from '../../stores/settings-store'
 import { useGameStore } from '../../stores/game-store'
 import CraftSystemCard from './cards/CraftSystemCard.vue'
@@ -97,84 +98,9 @@ function eventIconClass(type: string): string {
   return icons[type] ?? 'fa-solid fa-circle-info'
 }
 
-/**
- * 美化助手文本 — 使用 settings 中配置的规则管道
- *
- * 段落处理: \n\n 分隔的文本段落包裹为 &lt;p&gt; 标签，
- * 使 CSS 的 text-indent 和段间距生效，实现「读小说」而非「读聊天」的排版。
- */
-/**
- * 合并预设规则 + 用户规则，返回完整美化规则列表。
- *
- * 🆕 autoEnable 解析以当前存档为准：命定核心选择走独立 uid（不改世界书条目 enabled），
- * 存于 save.metadata.enabledWorldBookEntries（格式 'system_core:413'）。只有玩家本局
- * 选了妲丽安核心(413)，妲丽安美化规则才激活——而非所有绑核心书的规则恒亮。
- * 无 autoEnable 的规则（对话卡片等）保持 settings-store 预设状态。
- */
-function getBeautifierRules(): import('@engine/types').BeautifierRule[] {
-  const preset = (s.beautifierPresetRules ?? []) as import('@engine/types').BeautifierRule[]
-  const user = (s.beautifierRules ?? []) as import('@engine/types').BeautifierRule[]
-  const presetIds = new Set(preset.map(r => r.id))
+// 美化逻辑抽到 composable（CombatMessageFlow 复用）
+const { beautifyText, beautifyStreamingText } = useBeautify()
 
-  // 从存档启用条目提取 uid 集合（命定核心 system_core:uid + 启用角色 character:uid）
-  const enabledEntries: string[] = (game.activeSave?.metadata as any)?.enabledWorldBookEntries ?? []
-  const { activeEntryUids: activeUids } = collectActiveSignalsFromEntries(enabledEntries)
-
-  const resolved = preset.map(r => {
-    const uids = r.autoEnable?.worldBookEntryUids
-    if (!uids?.length) return r  // 无 autoEnable → 保持预设 enabled 状态
-    const matched = uids.some(u => activeUids.has(u))
-    return { ...r, enabled: matched, locked: matched }
-  })
-
-  return [...resolved, ...user.filter(r => !presetIds.has(r.id))]
-}
-
-function beautifyText(msg: ChatMessage): string {
-  const raw = msg.content
-  // 未启用美化时：走纯文本 + 换行转 &lt;br&gt;，不做段落包裹
-  if (!s.beautifierEnabled) {
-    return escapeHtml(raw).replace(/\n/g, '<br>')
-  }
-  const rules = getBeautifierRules()
-  let html = processRules(raw, 'maintext', rules)
-  // 将双换行分隔的文本段落包裹成 &lt;p&gt;，跳过已有 HTML 标签块（dialogue-card 等）
-  html = wrapParagraphs(html)
-  return html
-}
-
-/** 将双换行分隔的纯文本块包裹成 &lt;p&gt;，保留已有 HTML 标签不变 */
-function wrapParagraphs(html: string): string {
-  // 把 HTML 标签临时替换为占位符，避免被拆分
-  const tags: string[] = []
-  const placeholder = html.replace(/<[^>]+>/g, (match) => {
-    tags.push(match)
-    return `\x00TAG${tags.length - 1}\x00`
-  })
-  // 按双换行拆分
-  const parts = placeholder.split(/\n\n+/)
-  const wrapped = parts.map((part) => {
-    const trimmed = part.trim()
-    if (!trimmed) return ''
-    // 纯 HTML 标签块（如 dialogue-card）不包裹 &lt;p&gt;，避免 block-in-inline 非法嵌套
-    if (/^\x00TAG(\d+)\x00$/.test(trimmed)) return trimmed
-    // 段内换行 → <br>（浏览器不渲染 \n，必须显式转换）
-    return `<p>${trimmed.replace(/\n/g, '<br>')}</p>`
-  }).join('')
-  // 还原 HTML 标签
-  return wrapped.replace(/\x00TAG(\d+)\x00/g, (_, i) => tags[Number(i)])
-}
-
-/** 对流式文本实时应用美化（与 beautifyText 逻辑一致，但跳过最终的 wrapParagraphs 以避免边界闪烁） */
-function beautifyStreamingText(raw: string): string {
-  if (!raw) return ''
-  if (!s.beautifierEnabled) {
-    return escapeHtml(raw).replace(/\n/g, '<br>')
-  }
-  const rules = getBeautifierRules()
-  // 美化后单换行转 <br>（浏览器不渲染裸 \n）
-  return processRules(raw, 'maintext', rules).replace(/\n/g, '<br>')
-}
 
 // ===== 右键菜单（最新一回合 回退/复制）=====
 const ctxMenu = ref<{ x: number; y: number; msgId: string } | null>(null)

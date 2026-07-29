@@ -4,6 +4,7 @@ import type { SaveSlot, CharacterState, ChatMessage, MemoryRecord, PlotEvent, Pl
 import { getSave, getSaves, getCharacters, getMemories, getPlotEvents, getSaveProfile, getLatestPlotOutline, getSnapshots } from '@engine/database'
 import { saveMessage, getMessages, saveSaveSlot } from '@engine/database'
 import { createStateManager } from '@engine/state-manager'
+import type { CombatEvent } from '@engine/combat-runner'
 
 /** 单条 Agent 调试日志（含完整请求/响应上下文） */
 export interface DebugAgentEntry {
@@ -24,6 +25,18 @@ export interface DebugAgentEntry {
   cacheMissTokens?: number
   completionTokens?: number
   duration: number
+}
+
+/** 战斗消息流条目（CombatMessageFlow 渲染） */
+export interface CombatLogEntry {
+  id: string
+  kind: 'round_divider' | 'narrative' | 'action'
+  round?: number
+  /** narrative 文本 */
+  text?: string
+  /** action: 工具返回结果（CombatActionResult 或其他动作工具） */
+  result?: Record<string, any>
+  toolName?: string
 }
 
 export const useGameStore = defineStore('game', () => {
@@ -48,6 +61,73 @@ export const useGameStore = defineStore('game', () => {
   // === 战斗 & 制作 ===
   const activeCombat = ref<CombatState | null>(null)
   const isInCombat = computed(() => activeCombat.value !== null && activeCombat.value.status !== 'ended')
+
+  // === M5 战斗面板状态 ===
+  /** 战斗消息流条目（叙事 + 动作结果卡片 + 回合分隔） */
+  const combatLog = ref<CombatLogEntry[]>([])
+  /** 当前等玩家输入的我方单位（null = 不在等输入） */
+  const combatAwaitingInput = ref<{ unit: string; unitId: string; round: number } | null>(null)
+  /** 当前行动者 characterId（turn_started 事件更新，单位卡片高亮用） */
+  const combatCurrentUnitId = ref<string | null>(null)
+  /** runner 注册的玩家文本提交器（pipeline 通过 registerSubmitter 挂入；runner emit 时持有 pendingResolver） */
+  const combatSubmitter = ref<((text: string) => void) | null>(null)
+
+  /** 战斗开始：清空面板状态（activeCombat 由 combat_started 事件填） */
+  function enterCombat() {
+    combatLog.value = []
+    combatAwaitingInput.value = null
+    combatCurrentUnitId.value = null
+    combatSubmitter.value = null
+  }
+
+  /** 应用 runner 事件流 → 更新面板状态（combat_started / action_resolved / 回合事件 / awaiting） */
+  function applyCombatEvent(evt: CombatEvent) {
+    const id = crypto.randomUUID()
+    switch (evt.type) {
+      case 'combat_started':
+        activeCombat.value = evt.state
+        break
+      case 'action_resolved':
+        combatLog.value.push({ id, kind: 'action', result: evt.result, toolName: evt.toolName })
+        break
+      case 'round_narrative':
+        if (evt.text) combatLog.value.push({ id, kind: 'narrative', text: evt.text, round: evt.round })
+        break
+      case 'round_started':
+        combatLog.value.push({ id, kind: 'round_divider', round: evt.round })
+        break
+      case 'awaiting_player_input':
+        combatAwaitingInput.value = { unit: evt.unit, unitId: evt.unitId, round: evt.round }
+        break
+      case 'turn_started':
+        combatCurrentUnitId.value = evt.unitId
+        break
+      // combat_ended（exitCombat 收尾）
+    }
+  }
+
+  /** pipeline 收到 runner registerSubmitter → 挂入 store */
+  function setCombatSubmitter(submit: (text: string) => void) {
+    combatSubmitter.value = submit
+  }
+
+  /** 玩家发送战斗指令（CombatActionBar 调用）→ 转发 runner → resolve pendingResolver */
+  function submitCombatInput(text: string) {
+    const s = combatSubmitter.value
+    if (s) {
+      s(text)
+      combatAwaitingInput.value = null
+    }
+  }
+
+  /** 战斗结束：清空面板（activeCombat=null → isInCombat=false） */
+  function exitCombat() {
+    activeCombat.value = null
+    combatLog.value = []
+    combatAwaitingInput.value = null
+    combatCurrentUnitId.value = null
+    combatSubmitter.value = null
+  }
 
   // === 元数据 ===
   const saveProfile = ref<SaveProfile | null>(null)
@@ -437,6 +517,8 @@ export const useGameStore = defineStore('game', () => {
     messages, isGenerating,
     recentMemories, activePlotEvents, plotOutline,
     activeCombat, isInCombat,
+    combatLog, combatAwaitingInput, combatCurrentUnitId,
+    enterCombat, applyCombatEvent, setCombatSubmitter, submitCombatInput, exitCombat,
     saveProfile, fp, gameTime,
     news, getThoughts,
     sidebarCollapsed, activeModal, fullscreenStatus,

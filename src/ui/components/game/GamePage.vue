@@ -22,6 +22,7 @@ import MapPanel from './MapPanel.vue'
 import AgentStatusPanel from './AgentStatusPanel.vue'
 import DebugPanel from './DebugPanel.vue'
 import MiniPlayer from './MiniPlayer.vue'
+import CombatPanel from './combat/CombatPanel.vue'
 
 const game = useGameStore()
 const ui = useUIStore()
@@ -184,6 +185,9 @@ function onModalOpenChange(v: boolean) {
     </div>
 
     <MiniPlayer :open="showMiniPlayer" @close="showMiniPlayer = false" />
+
+    <!-- M5 战斗面板（isInCombat 驱动，覆盖层） -->
+    <CombatPanel />
 
     <AppModal title="背包 / 装备 / 技能" :open="game.activeModal === 'items'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
       <ItemsPanel />

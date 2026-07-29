@@ -944,6 +944,8 @@ export class GamePipeline {
       const { getEventBus } = await import('@engine/game-event')
       const context = this.currentContext ?? this.buildContext('')
       this.game.updateAgentStatus('combat')
+      // M5: 激活战斗面板（isInCombat=true → 覆盖层挂起）+ 清空面板状态
+      this.game.enterCombat()
       const result = await runCombat(
         {
           saveId: this.saveId,
@@ -961,10 +963,16 @@ export class GamePipeline {
           eventBus: getEventBus(this.saveId),
           characters: this.game.characters,
           variables: context.variables,
-          // readHooks 暂不传（M4 阶段无脚本订阅；物品/buff modifier 订阅留后续）
+          // M5: runner 注册玩家文本提交器 → store，前端 CombatActionBar 发送时调
+          registerSubmitter: (submit) => this.game.setCombatSubmitter(submit),
+          // readHooks 暂不传（物品/buff modifier 订阅留后续）
         },
+        // M5: 事件流 → store（消息流 + 单位卡片 + 伤害面板数据源）
+        (evt) => this.game.applyCombatEvent(evt),
       )
       this.game.clearAgentStatus('combat')
+      // M5: 关闭战斗面板（isInCombat=false → 覆盖层滑出）
+      this.game.exitCombat()
       // 摘要回注正文（架构 §12：战斗摘要注入对话流，Story 下一轮据此自然接续战斗后剧情）
       // 前缀【战斗摘要】帮 Story Agent 识别这是已结束战斗的总结
       if (result.narrativeSummary) {
@@ -973,6 +981,8 @@ export class GamePipeline {
       return result
     } catch (err) {
       this.game.clearAgentStatus('combat', String(err))
+      // M5: 出错也要关面板，否则覆盖层卡住
+      this.game.exitCombat()
       console.error('[GamePipeline] combat 失败:', err)
       return null
     }
