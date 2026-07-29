@@ -202,9 +202,10 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
     </div>
 
     <!-- ═══════ 属性 ═══════ -->
-    <div class="section">
+    <div class="section attribute-section">
       <div class="section-header clickable" @click="daoOpen = !daoOpen" role="button" tabindex="0" :aria-expanded="daoOpen" @keydown.enter="daoOpen = !daoOpen" @keydown.space.prevent="daoOpen = !daoOpen">
         <span class="section-title">属性</span>
+        <span class="attr-level">Lv.{{ player.level }}</span>
         <i class="fa-solid" :class="daoOpen ? 'fa-chevron-up' : 'fa-chevron-down'" />
       </div>
       <Transition name="collapse">
@@ -213,17 +214,13 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         <ResourceBar label="MP" :current="player.mp" :max="player.maxMp" color="color-mix(in srgb, var(--theme-mp) 65%, #000)" :height="20" :showValues="true" />
         <ResourceBar label="SP" :current="player.sp" :max="player.maxSp" color="color-mix(in srgb, var(--theme-sp) 65%, #000)" :height="20" :showValues="true" />
 
-        <!-- 经验条 —— 与 HP/MP/SP 同宽同形；等级下沉到属性格，不再单独挂在条子左边
+        <!-- 经验条 —— 与 HP/MP/SP 同宽同形
              totalExp = 本层级已积累，expToNext = 距上限还差多少，两者之和 = 该层级 EXP 上限
              （实测 8500 + 1500 = 10000，正是核心数值表 T4 的 expCap；创角时 0 + expCap 亦自洽） -->
         <ResourceBar label="EXP" :current="player.totalExp" :max="player.totalExp + player.expToNext" color="color-mix(in srgb, var(--theme-exp) 65%, #000)" :height="20" :showValues="true" />
 
-        <!-- 等级 + 五维 —— 6 个等宽格，整齐 3×2，等级居首 -->
+        <!-- 五维属性保持单行 -->
         <div class="attr-grid">
-          <div class="kv-item">
-            <span class="kv-label">等级</span>
-            <span class="kv-value lv-value">Lv.{{ player.level }}</span>
-          </div>
           <div v-for="attr in attrEntries" :key="attr.key" class="kv-item">
             <span class="kv-label">{{ attr.label }}</span>
             <span class="kv-value">{{ attr.value }}</span>
@@ -274,7 +271,12 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
           <AppTabs :tabs="holdTabs" :active="holdTab" @select="holdTab = $event" />
 
           <div class="item-list">
-            <template v-for="row in holdRows.slice(0, HOLD_PREVIEW)" :key="row.name">
+            <div
+              v-for="row in holdRows.slice(0, HOLD_PREVIEW)"
+              :key="row.name"
+              class="item-entry"
+              :class="{ open: isHoldOpen(row.name) }"
+            >
               <button
                 class="item-row"
                 :class="{ open: isHoldOpen(row.name) }"
@@ -304,7 +306,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
                   暂无更多记载
                 </div>
               </div>
-            </template>
+            </div>
 
             <div class="empty-tab" v-if="!holdRows.length">囊中空空…</div>
           </div>
@@ -460,19 +462,34 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 }
 .tier-text { color: var(--theme-quality-epic); }
 
-/* ═══ 五维 + 等级 —— 6 个等宽格，3 列 × 2 行 ═══ */
+/* ═══ 五维属性 —— 紧凑单行 ═══ */
+.attr-level {
+  margin-left: auto;
+  margin-right: 10px;
+  color: var(--theme-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
 .attr-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
   margin-top: 4px;
 }
 .attr-grid .kv-item {
   align-items: center;
   text-align: center;
+  min-width: 0;
+  padding: 5px 2px;
 }
-.lv-value {
-  color: var(--theme-primary);
+.attr-grid .kv-label {
+  font-size: 0.5625rem;
+  line-height: 1.2;
+}
+.attr-grid .kv-value {
+  font-size: 0.75rem;
+  line-height: 1.25;
   font-variant-numeric: tabular-nums;
 }
 

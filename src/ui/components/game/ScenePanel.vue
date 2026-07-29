@@ -292,7 +292,7 @@ function openCharList() {
           @focus="thoughtPop.onFocus($event, char.id)"
           @blur="thoughtPop.hide"
         >
-          <span class="npc-portrait" :style="{ background: nameColorVar(char.name) }">
+          <span class="npc-portrait" :style="{ '--npc-avatar-color': nameColorVar(char.name) }">
             {{ initialsOf(char.name) }}
           </span>
 
@@ -658,6 +658,7 @@ function openCharList() {
   flex-shrink: 0;
   border-radius: var(--theme-radius-sm, 4px);
   border: 1px solid var(--theme-card-border);
+  background: var(--npc-avatar-color, var(--theme-quality-common));
   box-shadow: var(--paper-stack);
   color: var(--theme-primary-text);
   font-size: 0.95rem;

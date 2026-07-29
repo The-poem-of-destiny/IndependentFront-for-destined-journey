@@ -1,51 +1,437 @@
-/* ===== Indigo (靛蓝) — 深邃蓝紫风格 ===== */
+/* ===== Qinghua Porcelain (青花瓷) ===== */
 [data-theme="indigo"] {
-  --theme-window-bg: #111827;
-  --theme-window-border: #1e3a5f;
-  --theme-content-bg: #0d1320;
-  --theme-card-bg: #1a2440;
-  --theme-card-border: #1e3a5f;
-  --theme-surface-muted: color-mix(in srgb, #111827 72%, #1a2440 28%);
-  --theme-overlay-bg: color-mix(in srgb, #111827 58%, transparent);
+  --theme-window-bg: #f1efeb;
+  --theme-window-border: #d3d0ca;
+  --theme-content-bg: #f7f5f1;
+  --theme-card-bg: #faf8f4;
+  --theme-card-border: #d8d4cd;
+  --theme-surface-muted: #eeece8;
+  --theme-overlay-bg: rgba(247, 245, 241, 0.94);
 
-  --theme-title-bar-bg: #151e33;
-  --theme-title-bar-text: #e0e8f8;
-  --theme-title-bar-icon: #a0b8d8;
-  --theme-title-bar-btn-hover: rgba(255,255,255,0.06);
-  --theme-tab-bar-bg: #131b2e;
-  --theme-tab-text: #8098b8;
-  --theme-tab-active-text: #d8e4f8;
-  --theme-tab-indicator: #6b8cff;
-  --theme-tab-hover-bg: rgba(255,255,255,0.04);
+  --theme-title-bar-bg: #f5f3ef;
+  --theme-title-bar-text: #2a3d5f;
+  --theme-title-bar-icon: #244b8e;
+  --theme-title-bar-btn-hover: rgba(11, 64, 136, 0.06);
+  --theme-tab-bar-bg: #f5f2ee;
+  --theme-tab-text: #626d80;
+  --theme-tab-active-text: #0b4088;
+  --theme-tab-indicator: #164c8a;
+  --theme-tab-hover-bg: rgba(11, 64, 136, 0.055);
 
-  --theme-text-primary: #e0e8f8;
-  --theme-text-secondary: #a0b8d8;
-  --theme-text-muted: #687890;
+  --theme-text-primary: #2a3d5f;
+  --theme-text-secondary: #566279;
+  --theme-text-muted: #7b8190;
 
-  --theme-primary: #6b8cff;
-  
-  --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
-  --theme-success: #4ade80;
-  --theme-warning: #fbbf24;
-  --theme-error: #f87171;
+  --theme-primary: #164c8a;
+  --theme-primary-bg: rgba(11, 64, 136, 0.075);
+  --theme-primary-text: #fbfaf7;
+  --theme-success: #4e7769;
+  --theme-warning: #9f742c;
+  --theme-error: #a04b4b;
 
-  --theme-hp: #f87171;
-  --theme-mp: #6b8cff;
-  --theme-sp: #4ade80;
-  --theme-exp: #fbbf24;
-  --theme-affection: #f472b6;
-  --theme-affection-bg: rgba(244,114,182,0.18);
-  --theme-affection-text: #fda4d4;
+  --theme-hp: #a1656a;
+  --theme-mp: #4a7093;
+  --theme-sp: #668672;
+  --theme-exp: #a0824d;
+  --theme-affection: #6f5d83;
+  --theme-affection-bg: rgba(111, 93, 131, 0.1);
+  --theme-affection-text: #594a6b;
 
-  --theme-quality-common: #c0c8d8;
-  --theme-quality-uncommon: #4ade80;
-  --theme-quality-rare: #6b8cff;
-  --theme-quality-epic: #a78bfa;
-  --theme-quality-legendary: #fbbf24;
-  --theme-quality-mythic: #f472b6;
-  --theme-quality-unique: #fbbf24;
+  --theme-quality-common: #6f7f89;
+  --theme-quality-uncommon: #4e7769;
+  --theme-quality-rare: #245b98;
+  --theme-quality-epic: #725a95;
+  --theme-quality-legendary: #9f742c;
+  --theme-quality-mythic: #756083;
+  --theme-quality-unique: #aa633f;
 
-  --theme-currency-gold: #fbbf24;
-  --theme-currency-silver: #c0c8d8;
-  --theme-currency-copper: #d08860;
+  --theme-currency-gold: #96702a;
+  --theme-currency-silver: #747a84;
+  --theme-currency-copper: #956752;
+  --theme-fate-gold: #b8862d;
+
+  --theme-structural-surface: rgba(246, 244, 240, 0.9);
+  --theme-control-surface: rgba(250, 248, 244, 0.94);
+  --theme-popover-surface: rgba(250, 248, 245, 0.985);
+  --theme-porcelain-line: rgba(22, 76, 138, 0.18);
+  --theme-popover-shadow: 0 4px 8px rgba(42, 61, 95, 0.11);
+  --theme-frosted-element: rgba(246, 244, 240, 0.58);
+  --theme-frosted-element-hover: rgba(242, 240, 237, 0.74);
+  --theme-frosted-float: rgba(246, 244, 240, 0.86);
+  --theme-frosted-border: rgba(255, 255, 255, 0.48);
+  --theme-frosted-shadow: 0 2px 6px rgba(42, 61, 95, 0.075);
+  --theme-liquid-glass: rgba(246, 244, 240, 0.34);
+  --theme-liquid-glass-active: rgba(248, 247, 244, 0.56);
+  --theme-liquid-glass-edge: rgba(255, 255, 255, 0.68);
+  --theme-liquid-glass-low-edge: rgba(22, 76, 138, 0.08);
+
+  --theme-shadow-sm: 0 1px 2px rgba(42, 61, 95, 0.045);
+  --theme-shadow-md: 0 2px 5px rgba(42, 61, 95, 0.065);
+  --theme-shadow-lg: 0 4px 8px rgba(42, 61, 95, 0.09);
+  --paper-stack: none;
+}
+
+/* Large underglaze composition lives behind the interface, not on every control. */
+:root[data-theme="indigo"] body .game-page-layout {
+  position: relative;
+  isolation: isolate;
+  background:
+    linear-gradient(115deg, rgba(239, 236, 231, 0.98), rgba(248, 246, 242, 0.99) 44%, rgba(241, 238, 233, 0.98)),
+    #f1efeb;
+}
+
+:root[data-theme="indigo"] body .game-page-layout::before,
+:root[data-theme="indigo"] body .game-page-layout::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+}
+
+:root[data-theme="indigo"] body .game-page-layout::before {
+  top: -15vh;
+  left: -10vw;
+  width: 52vw;
+  height: 74vh;
+  opacity: 0.68;
+  background:
+    radial-gradient(circle at 31% 38%, transparent 0 24%, rgba(11, 64, 136, 0.17) 24.4% 25.1%, transparent 25.5%),
+    radial-gradient(ellipse at 36% 44%, rgba(36, 75, 142, 0.16), transparent 49%),
+    radial-gradient(ellipse at 12% 70%, rgba(55, 92, 151, 0.13), transparent 38%);
+  filter: blur(11px);
+  transform: rotate(-11deg);
+}
+
+:root[data-theme="indigo"] body .game-page-layout::after {
+  right: -10vw;
+  bottom: -24vh;
+  width: 54vw;
+  height: 76vh;
+  opacity: 0.52;
+  background:
+    radial-gradient(circle at 56% 52%, transparent 0 30%, rgba(11, 64, 136, 0.16) 30.4% 31%, transparent 31.5%),
+    radial-gradient(ellipse at 63% 58%, rgba(36, 75, 142, 0.14), transparent 50%),
+    radial-gradient(ellipse at 88% 24%, rgba(55, 92, 151, 0.11), transparent 37%);
+  filter: blur(13px);
+  transform: rotate(14deg);
+}
+
+:root[data-theme="indigo"] body .game-page-layout > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Structural panels stay quiet and nearly opaque. */
+:root[data-theme="indigo"] body .game-page-layout .top-bar,
+:root[data-theme="indigo"] body .game-page-layout .side-toolbar,
+:root[data-theme="indigo"] body .game-page-layout .scene-panel,
+:root[data-theme="indigo"] body .game-page-layout .status-hud,
+:root[data-theme="indigo"] body .game-page-layout .input-bar {
+  background: var(--theme-structural-surface);
+  border-color: var(--theme-porcelain-line);
+  backdrop-filter: blur(21px) saturate(104%);
+  -webkit-backdrop-filter: blur(21px) saturate(104%);
+  box-shadow: none;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .scene-panel {
+  border-right-color: rgba(22, 76, 138, 0.22);
+}
+
+:root[data-theme="indigo"] body .game-page-layout .chat-flow,
+:root[data-theme="indigo"] body .game-page-layout .chat-messages {
+  background: rgba(248, 246, 242, 0.975);
+}
+
+/* Frosted controls borrow the panel colour and float with one restrained shadow. */
+:root[data-theme="indigo"] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger),
+:root[data-theme="indigo"] body .game-page-layout .input-btn,
+:root[data-theme="indigo"] body .game-page-layout .input-field,
+:root[data-theme="indigo"] body .game-page-layout .send-btn,
+:root[data-theme="indigo"] body .game-page-layout .form-select,
+:root[data-theme="indigo"] body .game-page-layout .form-input,
+:root[data-theme="indigo"] body .game-page-layout .mini-select,
+:root[data-theme="indigo"] body .game-page-layout .focus-select,
+:root[data-theme="indigo"] body .game-page-layout .cascader-trigger,
+:root[data-theme="indigo"] body .game-page-layout select {
+  background: var(--theme-frosted-element);
+  border-color: var(--theme-frosted-border);
+  backdrop-filter: blur(16px) saturate(106%);
+  -webkit-backdrop-filter: blur(16px) saturate(106%);
+  box-shadow: var(--theme-frosted-shadow);
+}
+
+:root[data-theme="indigo"] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger):hover,
+:root[data-theme="indigo"] body .game-page-layout .input-btn:hover,
+:root[data-theme="indigo"] body .game-page-layout .cascader-trigger:hover,
+:root[data-theme="indigo"] body .game-page-layout select:hover {
+  background: var(--theme-frosted-element-hover);
+  border-color: rgba(22, 76, 138, 0.18);
+}
+
+:root[data-theme="indigo"] body .game-page-layout .tab-item,
+:root[data-theme="indigo"] body .game-page-layout .top-btn,
+:root[data-theme="indigo"] body .game-page-layout .tool-btn {
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .hold-body .tab-bar {
+  padding: 6px 10px 0;
+  background: transparent;
+  border-bottom: 0;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .hold-body .tab-list {
+  gap: 3px;
+  padding: 3px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.04) 58%),
+    var(--theme-liquid-glass);
+  border: 1px solid var(--theme-liquid-glass-edge);
+  border-radius: 8px;
+  backdrop-filter: blur(18px) saturate(112%) brightness(102%);
+  -webkit-backdrop-filter: blur(18px) saturate(112%) brightness(102%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    inset 0 -1px 0 var(--theme-liquid-glass-low-edge);
+}
+
+:root[data-theme="indigo"] body .game-page-layout .hold-body .tab-item {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .hold-body .tab-item::after {
+  display: none;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .hold-body .tab-item:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+:root[data-theme="indigo"] body .game-page-layout .hold-body .tab-active {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08) 62%),
+    var(--theme-liquid-glass-active);
+  border-color: rgba(255, 255, 255, 0.58);
+  box-shadow:
+    0 1px 3px rgba(42, 61, 95, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(22, 76, 138, 0.06);
+  color: var(--theme-tab-active-text);
+}
+
+:root[data-theme="indigo"] body .game-page-layout .input-field {
+  border-radius: 4px;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .input-field:focus {
+  border-color: rgba(11, 64, 136, 0.52);
+  box-shadow: 0 0 0 2px rgba(11, 64, 136, 0.065);
+}
+
+:root[data-theme="indigo"] body .game-page-layout .input-btn,
+:root[data-theme="indigo"] body .game-page-layout .send-btn {
+  border: 1px solid var(--theme-porcelain-line);
+  border-radius: 4px;
+}
+
+/* Compact attribute lenses remain on one line. */
+:root[data-theme="indigo"] body .game-page-layout .attr-grid {
+  gap: 3px;
+  border-block: 0;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .attr-grid .kv-item {
+  background: var(--theme-frosted-element);
+  border: 1px solid var(--theme-frosted-border);
+  border-radius: 4px;
+  backdrop-filter: blur(15px) saturate(104%);
+  -webkit-backdrop-filter: blur(15px) saturate(104%);
+  box-shadow: var(--theme-frosted-shadow);
+}
+
+:root[data-theme="indigo"] body .game-page-layout .quest-item {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(22, 76, 138, 0.14);
+  border-radius: 0;
+  padding-inline: 4px;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .quest-item:hover,
+:root[data-theme="indigo"] body .game-page-layout .item-row:hover,
+:root[data-theme="indigo"] body .game-page-layout .scene-npc-item:hover,
+:root[data-theme="indigo"] body .game-page-layout .scene-npc-item.hovered {
+  background: rgba(11, 64, 136, 0.05);
+  border-color: rgba(22, 76, 138, 0.18);
+}
+
+:root[data-theme="indigo"] body .game-page-layout .quest-item.open {
+  background: var(--theme-frosted-element);
+  border-color: var(--theme-frosted-border);
+  box-shadow: var(--theme-frosted-shadow);
+}
+
+:root[data-theme="indigo"] body .game-page-layout .item-row {
+  border-radius: 0;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .item-list {
+  gap: 5px;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .item-entry {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.035) 60%),
+    var(--theme-liquid-glass);
+  border: 1px solid var(--theme-liquid-glass-edge);
+  border-radius: 6px;
+  backdrop-filter: blur(16px) saturate(110%) brightness(102%);
+  -webkit-backdrop-filter: blur(16px) saturate(110%) brightness(102%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 -1px 0 var(--theme-liquid-glass-low-edge);
+  transition:
+    background 180ms ease-out,
+    border-color 180ms ease-out,
+    box-shadow 180ms ease-out;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .item-entry:hover {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.36), rgba(255, 255, 255, 0.055) 60%),
+    rgba(246, 244, 240, 0.44);
+  border-color: rgba(255, 255, 255, 0.76);
+}
+
+:root[data-theme="indigo"] body .game-page-layout .item-entry .item-row:hover {
+  background: transparent;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .item-entry.open {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.06) 60%),
+    var(--theme-liquid-glass-active);
+  border-color: rgba(255, 255, 255, 0.74);
+  box-shadow:
+    0 1px 3px rgba(42, 61, 95, 0.075),
+    inset 0 1px 0 rgba(255, 255, 255, 0.46),
+    inset 0 -1px 0 var(--theme-liquid-glass-low-edge);
+}
+
+:root[data-theme="indigo"] body .game-page-layout .item-entry.open .item-row {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .item-entry.open .item-detail {
+  margin: 0;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid rgba(22, 76, 138, 0.12);
+  border-radius: 0;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .det-chip {
+  background: transparent;
+  border-color: rgba(22, 76, 138, 0.19);
+  border-radius: 2px;
+}
+
+/* The right portrait remains porcelain; left portraits use one continuous gold frame. */
+:root[data-theme="indigo"] body .game-page-layout .avatar-shape-square,
+:root[data-theme="indigo"] body .game-page-layout .npc-portrait {
+  background: rgba(239, 237, 233, 0.78);
+  border-color: rgba(22, 76, 138, 0.2);
+  border-radius: 3px;
+  box-shadow: none;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .scene-panel .npc-portrait {
+  background: rgba(35, 78, 123, 0.9);
+  border: 1px solid rgba(184, 134, 45, 0.78);
+  box-shadow: none;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .attribute-section {
+  border-bottom: 0;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .summary-name {
+  letter-spacing: 0.055em;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .res-track {
+  background: rgba(42, 61, 95, 0.09);
+  border: 1px solid rgba(22, 76, 138, 0.13);
+  border-radius: 3px;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .res-fill {
+  border-radius: 2px;
+  opacity: 0.92;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .res-values {
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.48);
+}
+
+/* Floating surfaces are opaque enough for text and use one short shadow. */
+:root[data-theme="indigo"] body .options-popup,
+:root[data-theme="indigo"] body .cascader-dropdown,
+:root[data-theme="indigo"] body .modal-content,
+:root[data-theme="indigo"] body .thought-bubble,
+:root[data-theme="indigo"] body .buff-pop {
+  background: var(--theme-frosted-float);
+  border-color: var(--theme-frosted-border);
+  border-radius: 5px;
+  backdrop-filter: blur(20px) saturate(106%);
+  -webkit-backdrop-filter: blur(20px) saturate(106%);
+  box-shadow: var(--theme-popover-shadow);
+}
+
+:root[data-theme="indigo"] body select option {
+  color: var(--theme-text-primary);
+  background: #f7f5f1;
+}
+
+/* The shared fate seam appears once, as a restrained title rule. */
+:root[data-theme="indigo"] body .game-page-layout .top-title-rule {
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in srgb, var(--theme-fate-gold) 54%, transparent),
+    transparent
+  );
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme="indigo"] body .game-page-layout .top-bar,
+  :root[data-theme="indigo"] body .game-page-layout .side-toolbar,
+  :root[data-theme="indigo"] body .game-page-layout .scene-panel,
+  :root[data-theme="indigo"] body .game-page-layout .status-hud,
+  :root[data-theme="indigo"] body .game-page-layout .input-bar,
+  :root[data-theme="indigo"] body .game-page-layout .hold-body .tab-list,
+  :root[data-theme="indigo"] body .game-page-layout .item-entry {
+    background: #f5f2ee;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme="indigo"] body .game-page-layout .item-entry {
+    transition: none;
+  }
 }
