@@ -57,6 +57,18 @@ export class SubscriptionManager {
     this.maxRecursionDepth = maxRecursionDepth;
   }
 
+  /** 运行时调整最大递归深度。
+   *
+   *  战斗场景收紧到 5（套娃爆炸兜底），非战斗保持默认 10。
+   *  - per-chain 细粒度由 `EventBus.emitChain` 的 `ctx.maxDepth` 管（链式 handler 侧）
+   *  - 本方法管的是 `$event.on` 持久订阅触发的脚本递归（SubscriptionManager 侧）
+   *
+   *  注：真正的递归拦截验证需 `$event.emit` 接通（M3），当前 emit 收集后未 re-emit，
+   *  故递归保护尚未通电；此方法先就位，供 M3 战斗管道开启战斗模式时调用。 */
+  setMaxDepth(depth: number): void {
+    this.maxRecursionDepth = depth;
+  }
+
   // ========== 注册 ==========
 
   /**

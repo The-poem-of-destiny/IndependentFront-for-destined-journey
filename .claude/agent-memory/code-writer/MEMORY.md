@@ -1,0 +1,3 @@
+- [EventBus 两套订阅坑](feedback-eventbus-chain-vs-publish.md) — emitChain 只触发 chainHandlers 不触发 subscribeAll；监听链式事件必须用 subscribeChain
+- [combat 工具独立通道](combat-tool-independent-channel.md) — M4 5.2: combat 工具走 executeCombatToolCall+CombatToolContext（B方案），旧 executeToolCall 占位 throw 刻意保留作引导；按名寻址+patches不落库
+- [item_gen modifier 解析接入](combat-v2-itemgen-modifiers.md) — M4 5.5b: <modifiers> 子元素→parse→validate→patch 全链路；buff 不独立产出（附加效果类 modifier 带）；divinity 取 max；违规 warn 不中断

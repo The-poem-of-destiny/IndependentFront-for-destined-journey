@@ -31,11 +31,14 @@ import type {
   ToolDefinition,
 } from './types';
 import { createDefaultCharacterState } from './types';
+import type { Modifier } from './effect-types';
+import type { DivinityLevel } from './types';
 import { scanCharDetects } from './marker-protocol';
 import { buildAgentMessages } from './agent-templates';
 import { getTierConfig, calcResources } from './tier-constants';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
 import { normalizeSlot } from './field-enums';
+import { validateItemOutput } from './combat-item-validator';
 import type { ToolExecutionContext } from './types';
 
 // ========== Types ==========
@@ -341,6 +344,10 @@ export function assembleCharacterState(
     maxDurability: e.durability,
     effects: (e as any).effects,
     scripts: (e as any).scripts,           // M3: scripts 无损传递（#45）
+    // 战斗 v2 (M4 5.5b): modifiers/buffs/divinity 透传到 InventoryItem（战斗管线 collect_mods 消费）
+    ...(e.modifiers ? { modifiers: e.modifiers } : {}),
+    ...(e.buffs ? { buffs: e.buffs } : {}),
+    ...(e.divinity !== undefined ? { divinity: e.divinity } : {}),
   }));
 
   // 合并背包: char_gen 自产优先
@@ -359,6 +366,10 @@ export function assembleCharacterState(
       rarity: (inv.rarity as QualityLevel) || undefined,
       effects: (inv as any).effects,        // M3: effects 无损传递（#45）
       scripts: (inv as any).scripts,        // M3: scripts 无损传递（#45）
+      // 战斗 v2 (M4 5.5b): modifiers/buffs/divinity 透传
+      ...(inv.modifiers ? { modifiers: inv.modifiers } : {}),
+      ...(inv.buffs ? { buffs: inv.buffs } : {}),
+      ...(inv.divinity !== undefined ? { divinity: inv.divinity } : {}),
     })),
     // M3: 装备产物并入 inventory（equippedSlot 非空 = 已穿戴）
     ...equippedItems,
@@ -482,6 +493,139 @@ export async function runCharGenChain(
 }
 
 // ========== Internal Helpers ==========
+
+// ── 战斗 v2 (M4 5.5b): <modifiers> 子元素解析 + 校验接入 ──
+
+/**
+ * 战斗物品产出校验结果（parse <modifiers> 后接入 validateItemOutput，违规 warn 不中断）。
+ *
+ * 设计: 本函数是「parse → 校验 → 收集」三合一，返回合规的 modifiers 数组 + 聚合 divinity。
+ * 违规的 modifier 不进结果（避免一个坏 modifier 污染战斗管线），但只 console.warn 不抛，
+ * 保证单件坏装备 modifier 不会让整条 item_gen 链失败（§6.6 校验规则接入点）。
+ *
+ * @param itemName 该元素的名字（装备/技能/物品名，用于 warn 日志溯源）
+ * @param modifiers 从 <modifiers> 子元素 parse 出的全部 modifier（含可能违规的）
+ * @param buffs 该元素附带的 buff（含可能违规的）
+ * @returns { modifiers: 合规 Modifier[], divinity: 聚合登神等级 }
+ */
+function validateAndCollectCombatEffects(
+  itemName: string,
+  modifiers: Modifier[],
+  buffs: ItemGenOutput['equipment'][number]['buffs'],
+): { modifiers: Modifier[]; buffs: NonNullable<typeof buffs>; divinity?: DivinityLevel } {
+  if (modifiers.length === 0 && (!buffs || buffs.length === 0)) {
+    return { modifiers: [], buffs: [] as NonNullable<typeof buffs> };
+  }
+
+  const result = validateItemOutput({ modifiers, buffs: buffs ?? [] });
+
+  // 收集合规 modifier（违规的丢弃 + warn）
+  const validModifiers: Modifier[] = [];
+  result.modifierErrors.forEach((errs, i) => {
+    if (errs.length === 0) {
+      validModifiers.push(modifiers[i]);
+    } else {
+      console.warn(
+        `[item_gen] 元素「${itemName}」第 ${i + 1} 个 modifier 违规（已丢弃，不中断链路）:\n  ${errs.join('\n  ')}\n  原始: ${JSON.stringify(modifiers[i])}`,
+      );
+    }
+  });
+
+  // 收集合规 buff
+  const validBuffs: NonNullable<typeof buffs> = [];
+  if (buffs) {
+    result.buffErrors.forEach((errs, i) => {
+      if (errs.length === 0) {
+        validBuffs.push(buffs[i]);
+      } else {
+        console.warn(
+          `[item_gen] 元素「${itemName}」第 ${i + 1} 个 buff 违规（已丢弃，不中断链路）:\n  ${errs.join('\n  ')}\n  原始: ${JSON.stringify(buffs[i])}`,
+        );
+      }
+    });
+  }
+
+  // 聚合 divinity：取合规 modifier 中最大的（§6.2「挂整件装备，不挂单个 modifier」——
+  // AI 可能在每个 modifier 上都写 divinity 继承值，聚合取 max 作为装备级登神等级）
+  let divinity: DivinityLevel | undefined;
+  for (const m of validModifiers) {
+    if (typeof m.divinity === 'number') {
+      if (divinity === undefined || m.divinity > divinity) divinity = m.divinity;
+    }
+  }
+
+  return { modifiers: validModifiers, buffs: validBuffs, ...(divinity !== undefined ? { divinity } : {}) };
+}
+
+/**
+ * 从元素 innerContent 提取 <modifiers> 子元素，按行 parse JSON 成 Modifier[]。
+ *
+ * 格式（item_gen systemPrompt §输出格式）:
+ *   <modifiers>
+ *     {"category":"检定","source":"剑","checkType":"命中","bonus":5}
+ *     {"category":"附加效果","source":"毒刃","buffName":"流血","sourceKey":"毒刃","stacks":1}
+ *   </modifiers>
+ *
+ * 容错:
+ * - 支持 <modifiers/> 自闭合（视为空）
+ * - 跳过空行 / `<!-- 注释 -->` / `// 注释` 行
+ * - 单行 parse 失败 → console.warn 跳过该行，不抛（AI 输出形状不可控，宽容归一）
+ * - 裸 JSON 行（无 `category` 字段）→ 跳过并 warn（非 modifier 形状）
+ *
+ * @param innerContent 元素内部文本（<equip>/<skill>/<item> 的 innerContent）
+ * @returns parse 出的 Modifier[]（未校验，校验由 validateAndCollectCombatEffects 做）
+ */
+function parseModifiersXML(innerContent: string): Modifier[] {
+  // 提取 <modifiers>...</modifiers> 块（不支持嵌套，modifier 是叶子元素）
+  const blockMatch = innerContent.match(/<modifiers\b[^>]*>([\s\S]*?)<\/modifiers>/i);
+  if (!blockMatch) {
+    // 自闭合 <modifiers/> 视为空
+    if (/<modifiers\b[^>]*\/>/i.test(innerContent)) return [];
+    return [];
+  }
+  const block = blockMatch[1];
+
+  const modifiers: Modifier[] = [];
+  const lines = block.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i].trim();
+    if (!raw) continue;
+    // 跳过注释行
+    if (raw.startsWith('<!--') || raw.startsWith('//') || raw.startsWith('/*')) continue;
+    // 去掉行尾注释（AI 可能写 `{"..."} // 注释`）
+    const commentIdx = raw.indexOf('//');
+    const jsonCandidate = commentIdx > 0 ? raw.slice(0, commentIdx).trim() : raw;
+
+    // 找行内的 JSON 对象（{ ... }）
+    const braceStart = jsonCandidate.indexOf('{');
+    const braceEnd = jsonCandidate.lastIndexOf('}');
+    if (braceStart < 0 || braceEnd <= braceStart) {
+      console.warn(`[item_gen] <modifiers> 第 ${i + 1} 行非 JSON 对象，跳过: ${raw.slice(0, 100)}`);
+      continue;
+    }
+    const jsonStr = jsonCandidate.slice(braceStart, braceEnd + 1);
+
+    let obj: unknown;
+    try {
+      obj = JSON.parse(jsonStr);
+    } catch (e) {
+      console.warn(`[item_gen] <modifiers> 第 ${i + 1} 行 JSON parse 失败，跳过: ${(e as Error).message} | 原文: ${raw.slice(0, 120)}`);
+      continue;
+    }
+
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      console.warn(`[item_gen] <modifiers> 第 ${i + 1} 行非对象，跳过: ${raw.slice(0, 100)}`);
+      continue;
+    }
+    // 必须有 category 字段才算 modifier 形状（判别字段，对齐 effect-types ModifierBase）
+    if (!('category' in obj)) {
+      console.warn(`[item_gen] <modifiers> 第 ${i + 1} 行缺 category 字段，跳过: ${raw.slice(0, 100)}`);
+      continue;
+    }
+    modifiers.push(obj as Modifier);
+  }
+  return modifiers;
+}
 
 /**
  * 解析 char_gen Agent 的输出。
@@ -756,6 +900,17 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
     const isSkill = SKILL_TYPES.has(typeStr) || (!it.slot && (it.cost !== undefined || it.cooldown !== undefined));
     const isEquip = !isSkill && (Boolean(it.slot) || EQUIP_TYPES.has(typeStr));
 
+    // 战斗 v2 (M4 5.5b): JSON 兜底路径也校验 modifiers/buffs（AI 偶尔直出 JSON，同样要守铁律）
+    const itModifiers: unknown[] = Array.isArray(it.modifiers) ? it.modifiers : [];
+    const itBuffs: unknown[] = Array.isArray(it.buffs) ? it.buffs : [];
+    const combat: { modifiers: Modifier[]; buffs: NonNullable<ItemGenOutput['equipment'][number]['buffs']>; divinity?: DivinityLevel } =
+      itModifiers.length > 0 || itBuffs.length > 0
+        ? validateAndCollectCombatEffects(it.name, itModifiers as Modifier[], itBuffs as ItemGenOutput['equipment'][number]['buffs'])
+        : { modifiers: [], buffs: [] };
+    // 聚合 divinity：优先取元素顶层 divinity，否则取 modifier 聚合
+    const elemDivinity: DivinityLevel | undefined =
+      typeof it.divinity === 'number' ? it.divinity : combat.divinity;
+
     if (isSkill) {
       out.skills.push({
         name: it.name,
@@ -765,6 +920,9 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
         cooldown: it.cooldown,
         effects: it.effects,
         scripts: it.scripts,
+        ...(combat.modifiers.length > 0 ? { modifiers: combat.modifiers } : {}),
+        ...(combat.buffs.length > 0 ? { buffs: combat.buffs } : {}),
+        ...(elemDivinity !== undefined ? { divinity: elemDivinity } : {}),
       });
     } else if (isEquip) {
       out.equipment.push({
@@ -777,6 +935,9 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
         // effects/scripts 透传（M3 无损映射，buildItemGenPatches/assembleCharacterState 消费）
         ...(it.effects ? { effects: it.effects } : {}),
         ...(it.scripts ? { scripts: it.scripts } : {}),
+        ...(combat.modifiers.length > 0 ? { modifiers: combat.modifiers } : {}),
+        ...(combat.buffs.length > 0 ? { buffs: combat.buffs } : {}),
+        ...(elemDivinity !== undefined ? { divinity: elemDivinity } : {}),
       } as ItemGenOutput['equipment'][number]);
     } else {
       out.inventory.push({
@@ -787,6 +948,9 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
         rarity: it.rarity ?? it.quality,
         ...(it.effects ? { effects: it.effects } : {}),
         ...(it.scripts ? { scripts: it.scripts } : {}),
+        ...(combat.modifiers.length > 0 ? { modifiers: combat.modifiers } : {}),
+        ...(combat.buffs.length > 0 ? { buffs: combat.buffs } : {}),
+        ...(elemDivinity !== undefined ? { divinity: elemDivinity } : {}),
       } as ItemGenOutput['inventory'][number]);
     }
   }
@@ -840,12 +1004,19 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
       scripts[sm[1]] = sm[2]?.trim() ?? '';
     }
 
+    // 战斗 v2 (M4 5.5b): 提取 <modifiers> 子元素 → Modifier[]，再校验接入（违规 warn 不中断）
+    const rawModifiers = parseModifiersXML(innerContent);
+    const combat = validateAndCollectCombatEffects(attrs['name'] ?? '未命名技能', rawModifiers, undefined);
+
     // 描述 = 纯文本部分（去除所有嵌套子标签，包括 AI 自造的 <description>/<notes>/<ability> 等）
     // 优先取 <description> 子标签的文本内容，若无则剥所有标签留纯文本
     const descSubTag = innerContent.match(/<description\b[^>]*>([\s\S]*?)<\/description>/);
     // 真机 fix(2026-07-18): 预剥离 <effect>/<script> 块（含内容），防止子标签文本泄漏进 description
-    // 对齐 parseElementsXML:922 的正确写法
-    const descText = innerContent.replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '');
+    // 战斗 v2: 同步剥离 <modifiers> 块
+    const descText = innerContent
+      .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '')
+      .replace(/<modifiers\b[^>]*>[\s\S]*?<\/modifiers>/gi, '')
+      .replace(/<modifiers\b[^>]*\/>/gi, '');
     const description = descSubTag
       ? descSubTag[1].trim()
       : descText.replace(/<\/?[a-z_][\w-]*[^>]*>/gi, '').trim();
@@ -862,6 +1033,9 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
       cooldown: attrs['cooldown'] ? parseInt(attrs['cooldown']) : undefined,
       effects: Object.keys(effects).length > 0 ? effects : undefined,
       scripts: Object.keys(scripts).length > 0 ? scripts : undefined,
+      ...(combat.modifiers.length > 0 ? { modifiers: combat.modifiers } : {}),
+      ...(combat.buffs.length > 0 ? { buffs: combat.buffs } : {}),
+      ...(combat.divinity !== undefined ? { divinity: combat.divinity } : {}),
     });
   }
   return results;
@@ -886,8 +1060,14 @@ function parseEquipmentXML(xml: string): ItemGenOutput['equipment'] {
     for (const em2 of em) { effects[em2[1]] = em2[2]?.trim() ?? ''; }
     const sm = innerContent.matchAll(/<script\s[^>]*?name="([^"]*)"[^>]*>([\s\S]*?)<\/script>/g);
     for (const sm2 of sm) { scripts[sm2[1]] = sm2[2]?.trim() ?? ''; }
-    // 预剥离 effect/script 块，再 stripInnerTags 取纯文本描述
-    const descText = innerContent.replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '');
+    // 战斗 v2 (M4 5.5b): 提取 <modifiers> 子元素 → Modifier[]，再校验接入（违规 warn 不中断）
+    const rawModifiers = parseModifiersXML(innerContent);
+    const combat = validateAndCollectCombatEffects(attrs['name'] ?? '未命名装备', rawModifiers, undefined);
+    // 预剥离 effect/script/modifiers 块，再 stripInnerTags 取纯文本描述
+    const descText = innerContent
+      .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '')
+      .replace(/<modifiers\b[^>]*>[\s\S]*?<\/modifiers>/gi, '')
+      .replace(/<modifiers\b[^>]*\/>/gi, '');
     const qualityRaw = attrs['quality'];
     results.push({
       slot: attrs['slot'] ?? '饰品',
@@ -898,6 +1078,9 @@ function parseEquipmentXML(xml: string): ItemGenOutput['equipment'] {
       quality: qualityRaw && qualityRaw !== '?' ? qualityRaw : undefined,
       ...(Object.keys(effects).length > 0 ? { effects } : {}),
       ...(Object.keys(scripts).length > 0 ? { scripts } : {}),
+      ...(combat.modifiers.length > 0 ? { modifiers: combat.modifiers } : {}),
+      ...(combat.buffs.length > 0 ? { buffs: combat.buffs } : {}),
+      ...(combat.divinity !== undefined ? { divinity: combat.divinity } : {}),
     });
   }
   return results;
@@ -916,8 +1099,14 @@ function parseInventoryXML(xml: string): ItemGenOutput['inventory'] {
     for (const em2 of em) { effects[em2[1]] = em2[2]?.trim() ?? ''; }
     const sm = innerContent.matchAll(/<script\s[^>]*?name="([^"]*)"[^>]*>([\s\S]*?)<\/script>/g);
     for (const sm2 of sm) { scripts[sm2[1]] = sm2[2]?.trim() ?? ''; }
-    // 预剥离 effect/script 块，再 stripInnerTags 取纯文本描述
-    const descText = innerContent.replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '');
+    // 战斗 v2 (M4 5.5b): 提取 <modifiers> 子元素 → Modifier[]，再校验接入（违规 warn 不中断）
+    const rawModifiers = parseModifiersXML(innerContent);
+    const combat = validateAndCollectCombatEffects(attrs['name'] ?? '未命名物品', rawModifiers, undefined);
+    // 预剥离 effect/script/modifiers 块，再 stripInnerTags 取纯文本描述
+    const descText = innerContent
+      .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '')
+      .replace(/<modifiers\b[^>]*>[\s\S]*?<\/modifiers>/gi, '')
+      .replace(/<modifiers\b[^>]*\/>/gi, '');
     const rarityRaw = attrs['rarity'];
     results.push({
       name: attrs['name'] ?? '未命名物品',
@@ -927,6 +1116,9 @@ function parseInventoryXML(xml: string): ItemGenOutput['inventory'] {
       rarity: rarityRaw && rarityRaw !== '?' ? rarityRaw : undefined,
       ...(Object.keys(effects).length > 0 ? { effects } : {}),
       ...(Object.keys(scripts).length > 0 ? { scripts } : {}),
+      ...(combat.modifiers.length > 0 ? { modifiers: combat.modifiers } : {}),
+      ...(combat.buffs.length > 0 ? { buffs: combat.buffs } : {}),
+      ...(combat.divinity !== undefined ? { divinity: combat.divinity } : {}),
     });
   }
   return results;

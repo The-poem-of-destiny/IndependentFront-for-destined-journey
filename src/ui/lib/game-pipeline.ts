@@ -21,6 +21,8 @@ import type {
   ApiEndpoint,
   AgentResult,
   AgentPreset,
+  CombatTriggerMarker,
+  CombatSummaryResult,
   WorldBook,
   CraftGenRequestMarker,
   CharGenRequestMarker,
@@ -764,7 +766,9 @@ export class GamePipeline {
       },
 
       // === Marker 回调 ===
-      onCombatTrigger: async () => null,  // 跳过战斗
+      onCombatTrigger: async (marker, storyOutput) => {
+        return await this.handleCombatTrigger(marker, storyOutput)
+      },
       onCraftGenRequest: async (markers, _varsOutput, ctx) => {
         await this.handleCraftGen(markers, ctx)
       },
@@ -922,6 +926,65 @@ export class GamePipeline {
       console.log(`[GamePipeline] memory_summary 落库成功: ${id} importance=${memory.importance} keywords=${memory.keywords.join(',')}`)
     } catch (e) {
       console.error('[GamePipeline] memory_summary 解析/存储失败:', e)
+    }
+  }
+
+  /** 处理战斗触发 — 唤起 combat agent 独立循环 (M4 任务 5.7) */
+  private async handleCombatTrigger(
+    marker: CombatTriggerMarker,
+    storyOutput: string,
+  ): Promise<CombatSummaryResult | null> {
+    const endpoint = this.getDefaultEndpoint()
+    if (!endpoint) {
+      console.warn('[GamePipeline] combat 跳过: 未配置 API endpoint')
+      return null
+    }
+    try {
+      const { runCombat } = await import('@engine/combat-runner')
+      const { getEventBus } = await import('@engine/game-event')
+      const context = this.currentContext ?? this.buildContext('')
+      this.game.updateAgentStatus('combat')
+      // M5: 激活战斗面板（isInCombat=true → 覆盖层挂起）+ 清空面板状态
+      this.game.enterCombat()
+      const result = await runCombat(
+        {
+          saveId: this.saveId,
+          marker,
+          storyOutput,
+          context,
+          endpoint,
+          configs: this.chainData?.agentConfigs,
+          worldBooks: this.chainData?.worldBooks,
+          presets: this.chainData?.presets,
+        },
+        {
+          clientFactory: this.getClientFactory(),
+          stateManager: this.getStateManager(),
+          eventBus: getEventBus(this.saveId),
+          characters: this.game.characters,
+          variables: context.variables,
+          // M5: runner 注册玩家文本提交器 → store，前端 CombatActionBar 发送时调
+          registerSubmitter: (submit) => this.game.setCombatSubmitter(submit),
+          // readHooks 暂不传（物品/buff modifier 订阅留后续）
+        },
+        // M5: 事件流 → store（消息流 + 单位卡片 + 伤害面板数据源）
+        (evt) => this.game.applyCombatEvent(evt),
+      )
+      this.game.clearAgentStatus('combat')
+      // M5: 关闭战斗面板（isInCombat=false → 覆盖层滑出）
+      this.game.exitCombat()
+      // 摘要回注正文（架构 §12：战斗摘要注入对话流，Story 下一轮据此自然接续战斗后剧情）
+      // 前缀【战斗摘要】帮 Story Agent 识别这是已结束战斗的总结
+      if (result.narrativeSummary) {
+        this.game.addMessage(`【战斗摘要】${result.narrativeSummary}`, 'assistant')
+      }
+      return result
+    } catch (err) {
+      this.game.clearAgentStatus('combat', String(err))
+      // M5: 出错也要关面板，否则覆盖层卡住
+      this.game.exitCombat()
+      console.error('[GamePipeline] combat 失败:', err)
+      return null
     }
   }
 

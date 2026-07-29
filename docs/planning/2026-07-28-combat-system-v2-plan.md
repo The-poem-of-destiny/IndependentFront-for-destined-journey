@@ -73,6 +73,25 @@ M6 集成测试与交付（单元 + 集成 + Agent + 真机）
 - `subscription-manager.ts` 增强
 - `script-executor.test.ts` 补充链式/在场/套娃测试
 
+### ✅ 实施结果（2026-07-28）
+
+M1 全 6 任务完成。方案 B：主线预备 `ReadonlyHookSet` → 两 code-writer agent 并行 1.1/1.5 → 主线串行 1.4/1.3/1.6。
+
+| 任务 | 产出 | 测试 |
+|------|------|------|
+| 1.1 emitChain | `EventBus.emitChain/subscribeChain` 链式返回值，分离注册表 `chainHandlers`，稳定排序+错误隔离 | 19 |
+| 1.2 在场过滤 | emitChain 入口 `ctx.combatants` 过滤 `owner`（1.1 顺手交付） | 含 1.1 |
+| 1.3 声明式 registry | `script-registry.ts`（register/registerAll/unregisterOwner/clear，按 ownerKey 分组） | 11 |
+| 1.4 套娃深度 | emitChain per-chain `ctx.maxDepth`（内层继承）+ SubscriptionManager `setMaxDepth` | 4 |
+| 1.5 ctx 只读 API | ScriptContext `readHooks`（$resource/$char 只读，缺省 0 兼容旧测试） | 9 |
+| 1.6 兼容层 | 分离注册表保证（声明式 emitChain ↔ 命令式 publish 互不串台） | 含 1.3 |
+
+**类型新增**（types.ts）：`AttributeName`（str/dex/con/int/spi）、`ReadonlyHookSet`（10 只读方法）。
+
+**D2 实施修正**：RFC 原推荐「统一注册表」，实施改「分离注册表」（选项 A）——现有测试断言 handler 收完整 GameEvent，链式 handler 收 params+ctx 签名差异大，分离零破坏。
+
+**验收**：M1 四件套 130 tests passed；全量 3376/3377（唯一失败 SelectableCard 是预存 CSS 变量问题，与 M1 无关）。生产代码零调用 EventBus，M1 为「未通电基础设施」，端到端验证在 M3/M6。
+
 ---
 
 ## 3. M2：效果与 Buff 系统
@@ -104,6 +123,27 @@ M6 集成测试与交付（单元 + 集成 + Agent + 真机）
 - 新增 `effect-types.ts` / `modifier-collector.ts` / `buff-registry.ts` / `status-api.ts`
 - `types.ts` StatusEffect 重构
 - 完整单元测试覆盖
+
+### ✅ 实施结果（2026-07-28）
+
+M2 全 10 任务完成。方案 B：主线组 A（types.ts 加 3 字段 + DivinityLevel + effect-types.ts）→ 两 code-writer agent 并行组 B（buff 引擎）+ 组 C（modifier collect）。
+
+| 任务 | 产出 | 测试 |
+|------|------|------|
+| 3.1 modifier 6 大类 | `effect-types.ts`（EffectCategory + 6 接口 + Modifier 联合） | 17 |
+| 3.2 登神 divinity | `effect-types.ts` DivinityLevel + resolveDivinityConflict（差值压制表） | 含上 |
+| 3.3 collect_mods | `modifier-collector.ts`（collectAttackerMods/collectDefenderMods，复用 emitChain） | 11 |
+| 3.4 modifier 分发 | `effect-types.ts` classifyModifier + 聚合工具（sumFixedDamage/sumPercentages/collectChecks/...） | 含 3.1 |
+| 3.5 buff 6 字段 | `types.ts` StatusEffect +3 可选字段（sourceKey/lifecycle/divinity） | 类型 |
+| 3.6 buff id 去重 | `buff-registry.ts`（buffIdOf/applyBuff：同源刷新+增层/异源独立） | 35 |
+| 3.7 buff 4 生命周期 | `buff-registry.ts` lifecycleOf + tick（战斗型递减/持续型不动） | 含上 |
+| 3.8 结算时机 | `buff-registry.ts` tick（round.start 增益/round.end 减益） | 含上 |
+| 3.9 layer 自由参数 | `$status.apply` 透传 stacks 给 handler | 含 3.10 |
+| 3.10 $status API | `status-api.ts`（applyStatusIntents/removeStatusIntents）+ 沙盒 $status 扩展 | 13+22 |
+
+**关键降风险**：StatusEffect **未重构现有字段**（D5 选 A，只加 3 可选字段）；craft/morale/affection **实际不在引用面**（grep 实测，计划风险栏过虑）。
+
+**验收**：M2 五件套 ~140 tests passed；全量 3465/3466（唯一失败 SelectableCard 预存 CSS 变量问题，与 M2 无关）。runDamagePipeline **未接入**（M3 任务 4.4）。
 
 ---
 
@@ -138,6 +178,27 @@ M6 集成测试与交付（单元 + 集成 + Agent + 真机）
 - `combat-damage.ts` v2（modifier 注入）
 - 新增 `dice-event.ts`
 - 154 测试迁移 + 新增覆盖
+
+### ✅ 实施结果（2026-07-28）
+
+M3 全 10 任务完成。方案 C：主线核心管道（combat-pipeline.ts + combat-damage modifier 注入缝 + 骨架/stub）+ 4 code-writer agent 并行周边子功能（文件零重叠）。
+
+| 任务 | 产出 | 测试 |
+|------|------|------|
+| 4.1 管道化 | 新建 `combat-pipeline.ts` resolveAttackPipeline（async），legacy combat-resolver 保留 | 7（端到端） |
+| 4.2 19 event | COMBAT_EVENTS 常量集中 + 管道各步骤 emitChain | 含 4.1 |
+| 4.3 骰子事件化 | combat.dice.roll emitChain（脚本可改骰值） | 含 4.1 |
+| 4.4 modifier 注入 | combat-damage.ts +DamagePipelineInput.modifiers? + combat-modifier-inject foldMods | 26（agent1）|
+| 4.5 登神压制 | combat-modifier-inject.ts foldMods 时调 resolveDivinityConflict（压制率当穿透+削减DR） | 含 4.4 |
+| 4.6 HP 红线 | combat-pipeline clamp≥0 + 强制 isDead | 含 4.1 |
+| 4.7 $combat 扩展 | combat-actions-pipeline.ts（useSkill/Item/block/move/focus） | 12（agent4）|
+| 4.8 战意接线 | combat-morale-pipeline.ts（morale.check/result emitChain + checkMorale 兜底） | 16（agent2）|
+| 4.9 结算管线 | combat-settlement-pipeline.ts（end→EXP→loot→complete） | 19（agent3）|
+| 4.10 集群适配 | combat-pipeline 守方 clusterCount≥3 → finalDamage×1.5 | 含 4.1 |
+
+**关键决策落地**: legacy combat-resolver 保留（193 测试零破坏，D1）；runDamagePipeline 加可选 modifiers 字段（61 damage 测试不破坏，D3）；agent 各自发现 emitChain 不触发 subscribeAll（M1 分离注册表的正确行为）。
+
+**验收**: M3 新增 ~80 tests passed；全量 3544/3546（2 失败均预存/flaky：SelectableCard CSS 变量 + game-store.loadSave 并行时序，均与 M3 无关）。
 
 ---
 

@@ -5,6 +5,8 @@
  */
 
 import type { GameTime } from './time-system';
+// type-only 循环安全：effect-types 反向 import 本文件的 AttributeName/DivinityLevel/DamageType 也是 type-only
+import type { Modifier } from './effect-types';
 
 // 音频子系统的接口/seam 类型拆分在 types-audio.ts（本文件已逾 800 行）。
 // 从这里统一再导出，「types.ts 是唯一类型来源」这条 import 路径依然成立。
@@ -667,6 +669,13 @@ export interface InventoryItem {
   effects?: Record<string, string>;
   /** 🆕 脚本注册表: 脚本名→可执行代码 (AI写, 引擎执行) */
   scripts?: Record<string, string>;
+  /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier，来自 item_gen <modifiers> 子元素）。
+   *  装备进入战斗时由 collect_mods event 收集，注入 8 步伤害管线（架构 §4.1） */
+  modifiers?: Modifier[];
+  /** 🆕 战斗 v2 (M4 5.5b): 该物品/装备附带的 buff 定义（由附加效果类 modifier 转 buff 或 AI 直接声明） */
+  buffs?: StatusEffect[];
+  /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备，缺省=0；§6.2 决策 d，冲突仲裁见 resolveDivinityConflict） */
+  divinity?: DivinityLevel;
 }
 
 /** 状态效果 */
@@ -697,6 +706,13 @@ export interface StatusEffect {
   onRemove?: string;
   /** 🆕 条件触发时执行的脚本引用 */
   onTrigger?: string;
+  /** 🆕 M2: buff id 前缀 —— 施加该 buff 的物品/技能名（"幽怨之剑"）。
+   *  buff id = sourceKey ? `${sourceKey}.${name}` : name。与 source 展示串正交（source 承载"[分类]-[施加者];[解除方式]"） */
+  sourceKey?: string;
+  /** 🆕 M2: 生命周期类型（对齐 [状态规则] 4 种）。缺省=按 timeUnit 推导（'回合'→战斗型；remainingTime=null→持续型） */
+  lifecycle?: '战斗' | '持续' | '触发' | '条件';
+  /** 🆕 M2: 登神等级（大部分 buff 无；缺省=普通 0）。神位级 buff 才带 */
+  divinity?: DivinityLevel;
 }
 
 // ===== 登神长阶 (Ascension) 子类型 =====
@@ -1557,6 +1573,54 @@ export interface IntentionResult {
 
 /** @deprecated 使用 IntentionLevel 代替 */
 export type IntentionTier = IntentionLevel;
+
+// ========== Readonly Hooks (M1 事件管道注入缝) ==========
+
+/** 五维属性键: str=力量 / dex=敏捷 / con=体质 / int=智力 / spi=精神
+ *  代码内统一用英文键（对齐 CharacterState.attributes），叙事/AI 输出用中文。 */
+export type AttributeName = 'str' | 'dex' | 'con' | 'int' | 'spi';
+
+/** 登神长阶强度 9 级（世界书 #265160 + 架构 §4.2）。
+ *  冲突仲裁: 高阶压低阶（§13 决策 c 差值压制表，见 effect-types.resolveDivinityConflict） */
+export type DivinityLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+
+/** 登神等级 → 中文名（展示用） */
+export const DIVINITY_LEVEL_NAMES: Record<DivinityLevel, string> = {
+  0: '普通',
+  1: '微弱要素',
+  2: '完整要素',
+  3: '微弱权能',
+  4: '完整权能',
+  5: '微弱法则',
+  6: '完整法则',
+  7: '神位',
+  8: '神国',
+};
+
+/** 角色只读查询钩子集 — 注入给 ScriptContext（脚本沙盒 $resource/$char）
+ *  与 ChainContext.readHooks（emitChain 链上 handler），供其读取角色状态。
+ *
+ *  - 缺省实现返回 0 / false（兼容未注入场景，现有测试无需改）
+ *  - 写入不经过此处 — HP/属性修改仍走 ScriptEffects 收集器，由 state-manager 统一 apply
+ *  - 红线：脚本不得通过此钩子直接动 HP（getHp 只读，无 setHp） */
+export interface ReadonlyHookSet {
+  getHp(charId: string): number;
+  getMaxHp(charId: string): number;
+  getMp(charId: string): number;
+  getMaxMp(charId: string): number;
+  getSp(charId: string): number;
+  getMaxSp(charId: string): number;
+  getHpPercent(charId: string): number;
+  getAttr(charId: string, attr: AttributeName): number;
+  getTier(charId: string): number;
+  isPresent(charId: string): boolean;
+  /** 🆕 M2: 读角色现有状态效果列表（供 $status.query/has/getStacks） */
+  getStatusEffects(charId: string): StatusEffect[];
+  /** 🆕 M2: 查角色是否持有某 buff（按 buffId 或裸 name 匹配） */
+  hasStatus(charId: string, buffIdOrName: string): boolean;
+  /** 🆕 M2: 查角色某 buff 的层数（未持有返回 0） */
+  getBuffStacks(charId: string, buffIdOrName: string): number;
+}
 
 // ========== Combat Participant ==========
 
@@ -2424,8 +2488,8 @@ export interface CraftRequestMarker extends DetectedMarkerBase {
 }
 
 /**
- * <combat_trigger> 标记 — Story AI 触发战斗场景时输出。
- * 🚩 独立型: Stage 1 正文结束后，UI 层打开独立战斗页面，不影响正文上下文。
+ * <combat_trigger> 标记 — request_dispatcher 读叙事判定"交战"后输出（M5.1: 原 Story 直接输出，现统一到调度器）。
+ * 🚩 独立型: dispatcher 输出后唤起独立战斗面板，不影响正文上下文。
  */
 export interface CombatTriggerMarker extends DetectedMarkerBase {
   type: 'combat_trigger';
@@ -2711,6 +2775,12 @@ export interface CharGenOutput {
     cooldown?: number;
     effects?: Record<string, string>;
     scripts?: Record<string, string>;
+    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier） */
+    modifiers?: Modifier[];
+    /** 🆕 战斗 v2 (M4 5.5b): 该技能附带的 buff 定义 */
+    buffs?: StatusEffect[];
+    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8 */
+    divinity?: DivinityLevel;
   }>;
   /** 🆕 char_gen 自身生成的装备 */
   equipment: Array<{
@@ -2721,6 +2791,12 @@ export interface CharGenOutput {
     durability?: number;
     quality?: string;
     effects?: Record<string, string>;
+    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier） */
+    modifiers?: Modifier[];
+    /** 🆕 战斗 v2 (M4 5.5b): 该装备附带的 buff 定义 */
+    buffs?: StatusEffect[];
+    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备） */
+    divinity?: DivinityLevel;
   }>;
   /** 🆕 char_gen 自身生成的背包物品 */
   inventory: Array<{
@@ -2729,6 +2805,12 @@ export interface CharGenOutput {
     quantity: number;
     type: string;
     rarity?: string;
+    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier） */
+    modifiers?: Modifier[];
+    /** 🆕 战斗 v2 (M4 5.5b): 该物品附带的 buff 定义 */
+    buffs?: StatusEffect[];
+    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备） */
+    divinity?: DivinityLevel;
   }>;
   /** 🆕 真机 fix(2026-07-18): char_gen 原始 XML 输出，供 item_gen 提取 <item_requests>/<skill_requests>/<equipment_requests> */
   rawXml?: string;
@@ -2752,6 +2834,12 @@ export interface ItemGenOutput {
     effects?: Record<string, string>;
     /** 🆕 Phase 8.5: 脚本 <script name="init|cast|tick|cleanup">code</script> */
     scripts?: Record<string, string>;
+    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明，来自 <modifiers> 子元素（6 大类，对齐 effect-types.ts Modifier 联合） */
+    modifiers?: Modifier[];
+    /** 🆕 战斗 v2 (M4 5.5b): 该元素附带的 buff 定义（由附加效果类 modifier 转换或 AI 直接声明） */
+    buffs?: StatusEffect[];
+    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（神位级技能才填，缺省=0） */
+    divinity?: DivinityLevel;
   }>;
   /** 装备列表 */
   equipment: Array<{
@@ -2769,6 +2857,12 @@ export interface ItemGenOutput {
     effects?: Record<string, string>;
     /** 🆕 真机 fix(2026-07-18): 脚本 <script name="...">code</script> */
     scripts?: Record<string, string>;
+    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明，来自 <modifiers> 子元素（6 大类，对齐 effect-types.ts Modifier 联合） */
+    modifiers?: Modifier[];
+    /** 🆕 战斗 v2 (M4 5.5b): 该元素附带的 buff 定义（由附加效果类 modifier 转换或 AI 直接声明） */
+    buffs?: StatusEffect[];
+    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备，缺省=0；§6.2 决策 d） */
+    divinity?: DivinityLevel;
   }>;
   /** 背包物品列表 */
   inventory: Array<{
@@ -2782,6 +2876,12 @@ export interface ItemGenOutput {
     effects?: Record<string, string>;
     /** 🆕 真机 fix(2026-07-18): 脚本 <script name="...">code</script> */
     scripts?: Record<string, string>;
+    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明，来自 <modifiers> 子元素（6 大类，对齐 effect-types.ts Modifier 联合） */
+    modifiers?: Modifier[];
+    /** 🆕 战斗 v2 (M4 5.5b): 该元素附带的 buff 定义（由附加效果类 modifier 转换或 AI 直接声明） */
+    buffs?: StatusEffect[];
+    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备，缺省=0；§6.2 决策 d） */
+    divinity?: DivinityLevel;
   }>;
   /** 🆕 Phase 9: 登神要素 (含 scripts + effectDescriptions) */
   elements?: Array<Pick<ElementDetail, 'name' | 'description' | 'effects' | 'effectDescriptions' | 'scripts'>>;

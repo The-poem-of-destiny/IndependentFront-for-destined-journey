@@ -19,6 +19,11 @@ import {
   destroyAllEventBuses,
 } from './game-event';
 import type {
+  ChainContext,
+  ChainSubscription,
+  ChainHandler,
+} from './game-event';
+import type {
   GameEvent,
   GameEventType,
   CombatActionRequest,
@@ -601,6 +606,449 @@ describe('EventBus Registry', () => {
 
     expect(alphaHandler).toHaveBeenCalledTimes(1);
     expect(betaHandler).toHaveBeenCalledTimes(0);
+  });
+});
+
+// ========== emitChain（M1 战斗 v2 链式事件管道） ==========
+
+describe('emitChain', () => {
+  let bus: EventBus;
+
+  beforeEach(() => {
+    bus = new EventBus();
+  });
+
+  // ---------- 基础链式语义 ----------
+
+  it('单个 handler 直接返回 params（无修改），最终值 = 初始值', async () => {
+    const initial = { baseDamage: 100 };
+    bus.subscribeChain({
+      type: 'combat.attack.collect',
+      handler: (p) => p,
+    });
+
+    const result = await bus.emitChain('combat.attack.collect', initial);
+
+    expect(result).toEqual({ baseDamage: 100 });
+  });
+
+  it('3 个 handler 链式累加，最终 baseDamage 正确', async () => {
+    const initial = { baseDamage: 100 };
+    // 三个 handler 各加 100
+    bus.subscribeChain({
+      type: 'combat.attack.collect',
+      handler: (p) => ({ ...p, baseDamage: p.baseDamage + 100 }),
+    });
+    bus.subscribeChain({
+      type: 'combat.attack.collect',
+      handler: (p) => ({ ...p, baseDamage: p.baseDamage + 100 }),
+    });
+    bus.subscribeChain({
+      type: 'combat.attack.collect',
+      handler: (p) => ({ ...p, baseDamage: p.baseDamage + 100 }),
+    });
+
+    const result = await bus.emitChain('combat.attack.collect', initial);
+
+    expect(result.baseDamage).toBe(400);
+  });
+
+  // ---------- 排序 ----------
+
+  it('priority 排序：注册顺序乱但低 priority（数字小）先执行', async () => {
+    const order: string[] = [];
+    // 故意高 priority 先注册、低 priority 后注册
+    bus.subscribeChain({
+      type: 'test.order',
+      priority: 10,
+      handler: () => { order.push('high'); return {}; },
+    });
+    bus.subscribeChain({
+      type: 'test.order',
+      priority: 1,
+      handler: () => { order.push('low'); return {}; },
+    });
+    bus.subscribeChain({
+      type: 'test.order',
+      priority: 5,
+      handler: () => { order.push('mid'); return {}; },
+    });
+
+    await bus.emitChain('test.order', {});
+
+    // 期望按 priority 升序：low(1) → mid(5) → high(10)
+    expect(order).toEqual(['low', 'mid', 'high']);
+  });
+
+  it('order 在同 priority 内升序排序', async () => {
+    const seq: number[] = [];
+    // 同 priority=5，order 乱序注册
+    bus.subscribeChain({
+      type: 'test.order',
+      priority: 5,
+      order: 3,
+      handler: () => { seq.push(3); return {}; },
+    });
+    bus.subscribeChain({
+      type: 'test.order',
+      priority: 5,
+      order: 1,
+      handler: () => { seq.push(1); return {}; },
+    });
+    bus.subscribeChain({
+      type: 'test.order',
+      priority: 5,
+      order: 2,
+      handler: () => { seq.push(2); return {}; },
+    });
+
+    await bus.emitChain('test.order', {});
+
+    expect(seq).toEqual([1, 2, 3]);
+  });
+
+  it('priority+order 全相同时，按注册序执行（稳定排序）', async () => {
+    const seq: string[] = [];
+    bus.subscribeChain({
+      type: 'test.stable',
+      handler: () => { seq.push('first'); return {}; },
+    });
+    bus.subscribeChain({
+      type: 'test.stable',
+      handler: () => { seq.push('second'); return {}; },
+    });
+    bus.subscribeChain({
+      type: 'test.stable',
+      handler: () => { seq.push('third'); return {}; },
+    });
+
+    await bus.emitChain('test.stable', {});
+
+    expect(seq).toEqual(['first', 'second', 'third']);
+  });
+
+  // ---------- 在场过滤 ----------
+
+  it('owner 不在 ctx.combatants 的订阅被跳过', async () => {
+    const seen: string[] = [];
+    bus.subscribeChain({
+      type: 'combat.attack.collect',
+      owner: 'char_hero',
+      handler: (p) => { seen.push('hero'); return p; },
+    });
+    bus.subscribeChain({
+      type: 'combat.attack.collect',
+      owner: 'char_absent',
+      handler: (p) => { seen.push('absent'); return p; },
+    });
+
+    // combatants 只含 hero，不含 absent
+    await bus.emitChain(
+      'combat.attack.collect',
+      { dmg: 0 },
+      { combatants: ['char_hero', 'char_sidekick'] },
+    );
+
+    expect(seen).toEqual(['hero']);
+  });
+
+  it('owner 缺省的订阅（系统/环境 buff）不受在场过滤影响', async () => {
+    const seen: string[] = [];
+    bus.subscribeChain({
+      type: 'combat.attack.collect',
+      // owner 缺省 = 永在场
+      handler: (p) => { seen.push('global'); return p; },
+    });
+    bus.subscribeChain({
+      type: 'combat.attack.collect',
+      owner: 'char_hero',
+      handler: (p) => { seen.push('hero'); return p; },
+    });
+
+    await bus.emitChain(
+      'combat.attack.collect',
+      { dmg: 0 },
+      { combatants: ['char_hero'] },
+    );
+
+    expect(seen).toEqual(['global', 'hero']);
+  });
+
+  it('ctx.combatants 缺省时所有订阅都执行（不过滤）', async () => {
+    const seen: string[] = [];
+    bus.subscribeChain({
+      type: 'combat.attack.collect',
+      owner: 'char_a',
+      handler: (p) => { seen.push('a'); return p; },
+    });
+    bus.subscribeChain({
+      type: 'combat.attack.collect',
+      owner: 'char_b',
+      handler: (p) => { seen.push('b'); return p; },
+    });
+
+    // 不传 combatants
+    await bus.emitChain('combat.attack.collect', { dmg: 0 });
+
+    expect(seen).toEqual(['a', 'b']);
+  });
+
+  // ---------- 条件过滤 ----------
+
+  it('condition 返回 false 的订阅被跳过', async () => {
+    const seen: string[] = [];
+    bus.subscribeChain({
+      type: 'test.cond',
+      condition: () => false,
+      handler: (p) => { seen.push('skipped'); return p; },
+    });
+    bus.subscribeChain({
+      type: 'test.cond',
+      condition: () => true,
+      handler: (p) => { seen.push('executed'); return p; },
+    });
+
+    await bus.emitChain('test.cond', {});
+
+    expect(seen).toEqual(['executed']);
+  });
+
+  it('condition 收到的 params 是链中当前的 params（不是初始值）', async () => {
+    let condSawBaseDamage = -1;
+    bus.subscribeChain({
+      type: 'test.cond.params',
+      handler: (p) => ({ ...p, baseDamage: p.baseDamage + 50 }),
+    });
+    bus.subscribeChain({
+      type: 'test.cond.params',
+      // 第二个 handler 的 condition 应该看到 +50 后的值
+      condition: (p) => { condSawBaseDamage = p.baseDamage; return true; },
+      handler: (p) => p,
+    });
+
+    await bus.emitChain('test.cond.params', { baseDamage: 100 });
+
+    expect(condSawBaseDamage).toBe(150);
+  });
+
+  // ---------- 错误隔离 ----------
+
+  it('中间 handler 抛错不阻塞链，console.warn 告警且最终值沿用抛错前 params', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const seen: string[] = [];
+
+    bus.subscribeChain({
+      type: 'test.err',
+      handler: (p) => { seen.push('first'); return { ...p, value: 1 }; },
+    });
+    bus.subscribeChain({
+      type: 'test.err',
+      handler: () => { seen.push('boom'); throw new Error('BOOM'); },
+    });
+    bus.subscribeChain({
+      type: 'test.err',
+      handler: (p) => { seen.push('third'); return { ...p, value: p.value + 10 }; },
+    });
+
+    const result = await bus.emitChain('test.err', { value: 0 });
+
+    expect(seen).toEqual(['first', 'boom', 'third']); // 三者都执行了
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    // 抛错的 handler 没有返回值，沿用上一个 params（value:1），third 在此基础上 +10
+    expect(result.value).toBe(11);
+    warnSpy.mockRestore();
+  });
+
+  // ---------- async handler ----------
+
+  it('async handler 链式（每个 handler async，await 后 params 正确传递）', async () => {
+    bus.subscribeChain({
+      type: 'test.async',
+      handler: async (p) => {
+        await new Promise((r) => setTimeout(r, 5));
+        return { ...p, total: p.total + 1 };
+      },
+    });
+    bus.subscribeChain({
+      type: 'test.async',
+      handler: async (p) => {
+        await new Promise((r) => setTimeout(r, 5));
+        return { ...p, total: p.total + 2 };
+      },
+    });
+    bus.subscribeChain({
+      type: 'test.async',
+      handler: async (p) => {
+        await new Promise((r) => setTimeout(r, 5));
+        return { ...p, total: p.total + 3 };
+      },
+    });
+
+    const result = await bus.emitChain('test.async', { total: 0 });
+
+    expect(result.total).toBe(6); // 0+1+2+3
+  });
+
+  // ---------- 历史记录 ----------
+
+  it('emitChain 入历史，getLatest 能查到（type 与 data 对应）', async () => {
+    bus.subscribeChain({
+      type: 'combat.attack.collect',
+      handler: (p) => p,
+    });
+
+    await bus.emitChain(
+      'combat.attack.collect',
+      { baseDamage: 250 },
+      { source: 'combat_resolver' },
+    );
+
+    const latest = bus.getLatest();
+    expect(latest).toBeDefined();
+    expect(latest!.type).toBe('combat.attack.collect');
+    expect(latest!.data).toEqual({ baseDamage: 250 });
+    expect(latest!.source).toBe('combat_resolver');
+  });
+
+  it('emitChain 受 maxHistory 截断（与 publish 同一 history）', async () => {
+    const smallBus = new EventBus({ maxHistory: 3 });
+    smallBus.subscribeChain({ type: 'test.limit', handler: (p) => p });
+
+    for (let i = 0; i < 5; i++) {
+      await smallBus.emitChain('test.limit', { idx: i });
+    }
+
+    expect(smallBus.size).toBe(3);
+    const history = smallBus.getHistory();
+    expect(history[0].data.idx).toBe(2);
+    expect(history[2].data.idx).toBe(4);
+  });
+
+  // ---------- 注销 ----------
+
+  it('subscribeChain 返回的注销函数调用后，该订阅不再被触发', async () => {
+    const handler = vi.fn((p: any) => p);
+    const unsubscribe = bus.subscribeChain({
+      type: 'test.unsub',
+      handler,
+    });
+
+    await bus.emitChain('test.unsub', { n: 1 });
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+
+    await bus.emitChain('test.unsub', { n: 2 });
+    expect(handler).toHaveBeenCalledTimes(1); // 未再触发
+  });
+
+  it('clearHandlers 应同时清空链式订阅', async () => {
+    const handler = vi.fn((p: any) => p);
+    bus.subscribeChain({ type: 'test.clear', handler });
+
+    bus.clearHandlers();
+
+    await bus.emitChain('test.clear', {});
+    expect(handler).toHaveBeenCalledTimes(0);
+  });
+
+  // ---------- 互不干扰（publish 与 emitChain 两套注册表） ----------
+
+  it('互不干扰：同一 type 上 subscribe(h1) + subscribeChain(sub2)，publish 触发 h1、emitChain 触发 sub2', async () => {
+    const publishHandler = vi.fn();
+    const chainHandler = vi.fn((p: any) => p);
+
+    // 同一 type 上分别注册
+    bus.subscribe('combat_action', publishHandler);
+    bus.subscribeChain({ type: 'combat_action', handler: chainHandler });
+
+    // publish 触发 publishHandler，不触发 chainHandler
+    await bus.publish(createGameEvent('combat_action', { from: 'publish' }));
+    expect(publishHandler).toHaveBeenCalledTimes(1);
+    expect(chainHandler).toHaveBeenCalledTimes(0);
+
+    // emitChain 触发 chainHandler，不触发 publishHandler
+    await bus.emitChain('combat_action', { from: 'emitChain' });
+    expect(publishHandler).toHaveBeenCalledTimes(1); // 仍只触发 1 次
+    expect(chainHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it('emitChain 对无订阅的 type 返回原 params 不抛错', async () => {
+    const result = await bus.emitChain('no.such.type', { untouched: true });
+    expect(result).toEqual({ untouched: true });
+  });
+
+  it('ChainHandler 类型可以保留 params 引用并就地修改后返回', async () => {
+    // 验证返回新对象的常见用法 + 同引用修改也兼容（链只看返回值）
+    bus.subscribeChain({
+      type: 'test.mutate',
+      handler: (p) => { (p as any).touched = true; return p; },
+    });
+
+    const result = await bus.emitChain('test.mutate', { v: 1 });
+
+    expect(result).toEqual({ v: 1, touched: true });
+  });
+});
+
+// ========== emitChain 递归深度保护（任务 1.4） ==========
+
+describe('emitChain 递归深度保护', () => {
+  it('ctx.maxDepth 限定链及其内部递归，超限拦截', async () => {
+    const bus = new EventBus();
+    let count = 0;
+    bus.subscribeChain({
+      type: 'recurse',
+      handler: async (params, ctx) => {
+        count++;
+        await bus.emitChain('recurse', params, ctx);
+        return params;
+      },
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await bus.emitChain('recurse', { n: 0 }, { maxDepth: 5 });
+    // maxDepth=5：chainDepth 1→5 各执行 handler（count=5），第 6 次入口拦截
+    expect(count).toBe(5);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('不传 maxDepth 时不限制（缺省 Infinity，由 handler 自行停止）', async () => {
+    const bus = new EventBus();
+    let count = 0;
+    bus.subscribeChain({
+      type: 'recurse',
+      handler: async (params, ctx) => {
+        count++;
+        if (count < 3) {
+          await bus.emitChain('recurse', params, ctx);
+        }
+        return params;
+      },
+    });
+    await bus.emitChain('recurse', { n: 0 });
+    expect(count).toBe(3);
+  });
+
+  it('内层递归继承外层 maxDepth（内层不传则沿用）', async () => {
+    const bus = new EventBus();
+    const seen: number[] = [];
+    let depth = 0;
+    bus.subscribeChain({
+      type: 'recurse',
+      handler: async (params, ctx) => {
+        depth++;
+        seen.push(depth);
+        // 内层调用刻意不带 ctx.maxDepth（只传 combatants），应继承外层 3
+        await bus.emitChain('recurse', params, { combatants: ctx.combatants });
+        return params;
+      },
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await bus.emitChain('recurse', { n: 0 }, { maxDepth: 3 });
+    expect(seen).toEqual([1, 2, 3]); // 第 4 次入口拦截
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });
 

@@ -1215,3 +1215,247 @@ describe('parseSkillsXML — 嵌套 description 子标签 + 中文 type 归一',
     expect(out.skills[0].effects?.['召来']).toContain('召唤');
   });
 });
+
+// ========== 战斗 v2 (M4 5.5b): <modifiers> 子元素解析 + 校验接入 ==========
+
+describe('parseItemGenOutput — <modifiers> 子元素解析（6 大类 modifier 正例）', () => {
+  it('应解析 <equip> 内 <modifiers> 的 6 类 modifier，填进元素', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result>',
+      '<equipment>',
+      '<equip slot="武器" name="幽怨之剑" quality="传说" stats="攻击力:50">',
+      '  一把散发着幽怨气息的长剑。',
+      '  <modifiers>',
+      '    {"category":"固伤","source":"幽怨之剑","amount":200,"damageType":"物理"}',
+      '    {"category":"百分比","source":"幽怨之剑","coefficient":0.2,"target":"damage"}',
+      '    {"category":"资源","source":"幽怨之剑","resource":"hp","amount":-50}',
+      '    {"category":"检定","source":"幽怨之剑","checkType":"命中","bonus":5}',
+      '    {"category":"附加效果","source":"幽怨之剑","buffName":"流血","sourceKey":"幽怨之剑","stacks":1,"duration":3,"lifecycle":"战斗"}',
+      '    {"category":"特殊机制","source":"幽怨之剑","mechanism":"穿透","value":20}',
+      '  </modifiers>',
+      '</equip>',
+      '</equipment>',
+      '</item_result>',
+    ].join('\n');
+
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment).toHaveLength(1);
+    const mods = out.equipment[0].modifiers;
+    expect(mods).toBeDefined();
+    expect(mods).toHaveLength(6);
+    // 6 类各一个
+    const cats = mods!.map(m => m.category);
+    expect(cats).toEqual(expect.arrayContaining(['固伤', '百分比', '资源', '检定', '附加效果', '特殊机制']));
+    // 描述不被 modifiers JSON 污染（stripInnerTags 可能留尾部空白，用 trim + contains 校验）
+    expect(out.equipment[0].description.trim()).toBe('一把散发着幽怨气息的长剑。');
+    expect(out.equipment[0].description).not.toContain('category');
+  });
+
+  it('检定类 attribute 模式应正确解析', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><equipment>',
+      '<equip slot="饰品" name="巨力指环" stats="攻击力:5">',
+      '  <modifiers>',
+      '    {"category":"检定","source":"巨力指环","checkType":"属性","attribute":"str","bonus":3}',
+      '  </modifiers>',
+      '</equip>',
+      '</equipment></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    const mod = out.equipment[0].modifiers![0];
+    expect(mod.category).toBe('检定');
+    if (mod.category === '检定') {
+      expect(mod.checkType).toBe('属性');
+      expect(mod.attribute).toBe('str');
+      expect(mod.bonus).toBe(3);
+    }
+  });
+
+  it('<skill> 和 <item> 内的 <modifiers> 也应解析', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result>',
+      '<skills><skill name="烈焰斩" type="active">',
+      '  烈焰斩击。',
+      '  <modifiers>{"category":"固伤","source":"烈焰斩","amount":80,"damageType":"能量"}</modifiers>',
+      '</skill></skills>',
+      '<inventory><item name="血瓶" quantity="3" type="消耗品">',
+      '  恢复生命。',
+      '  <modifiers>{"category":"资源","source":"血瓶","resource":"hp","amount":500}</modifiers>',
+      '</item></inventory>',
+      '</item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.skills[0].modifiers).toHaveLength(1);
+    expect(out.skills[0].modifiers![0].category).toBe('固伤');
+    expect(out.inventory[0].modifiers).toHaveLength(1);
+    expect(out.inventory[0].modifiers![0].category).toBe('资源');
+  });
+
+  it('无 <modifiers> 子元素时元素 modifiers 为 undefined（纯叙事物品）', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><equipment>',
+      '<equip slot="武器" name="木棍" stats="攻击力:2">一根普通木棍。</equip>',
+      '</equipment></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment[0].modifiers).toBeUndefined();
+  });
+
+  it('自闭合 <modifiers/> 视为空', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><equipment>',
+      '<equip slot="武器" name="测试剑" stats="攻击力:2">测试。<modifiers/></equip>',
+      '</equipment></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment[0].modifiers).toBeUndefined();
+  });
+});
+
+describe('parseItemGenOutput — 校验接入（违规 warn 不中断）', () => {
+  it('非检定类直接改五维（铁律 #265160）→ 违规 modifier 被丢弃，合规的留下，链路不中断', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const raw = [
+      '<item_result><equipment>',
+      '<equip slot="武器" name="违规剑" stats="攻击力:10">',
+      '  <modifiers>',
+      '    {"category":"固伤","source":"违规剑","amount":100}',
+      '    {"category":"固伤","source":"违规剑","amount":50,"str":5}',
+      '  </modifiers>',
+      '</equip>',
+      '</equipment></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    // 链路不中断
+    expect(out.equipment).toHaveLength(1);
+    // 违规的（含 str:5）被丢弃，只剩 1 个合规
+    expect(out.equipment[0].modifiers).toHaveLength(1);
+    expect(out.equipment[0].modifiers![0]).not.toHaveProperty('str');
+    // 有 warn 日志
+    expect(warnSpy).toHaveBeenCalled();
+    const warnMsg = warnSpy.mock.calls[0][0] as string;
+    expect(warnMsg).toContain('违规剑');
+    expect(warnMsg).toContain('五维');
+    warnSpy.mockRestore();
+  });
+
+  it('category 非法 → 该 modifier 丢弃，其余保留', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const raw = [
+      '<item_result><equipment>',
+      '<equip slot="武器" name="混杂剑" stats="攻击力:10">',
+      '  <modifiers>',
+      '    {"category":"神秘类","source":"混杂剑","amount":100}',
+      '    {"category":"百分比","source":"混杂剑","coefficient":0.1,"target":"damage"}',
+      '  </modifiers>',
+      '</equip>',
+      '</equipment></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment[0].modifiers).toHaveLength(1);
+    expect(out.equipment[0].modifiers![0].category).toBe('百分比');
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('JSON 行 parse 失败 → 跳过该行不中断', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const raw = [
+      '<item_result><equipment>',
+      '<equip slot="武器" name="坏 JSON 剑" stats="攻击力:10">',
+      '  <modifiers>',
+      '    {这不是合法 JSON',
+      '    {"category":"固伤","source":"坏 JSON 剑","amount":100}',
+      '  </modifiers>',
+      '</equip>',
+      '</equipment></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment[0].modifiers).toHaveLength(1);
+    warnSpy.mockRestore();
+  });
+});
+
+describe('parseItemGenOutput — divinity 聚合（§6.2 挂整件装备）', () => {
+  it('多个 modifier 带 divinity → 取 max 作为装备级登神等级', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><equipment>',
+      '<equip slot="武器" name="神位剑" quality="神话" stats="攻击力:100">',
+      '  <modifiers>',
+      '    {"category":"固伤","source":"神位剑","amount":200,"divinity":3}',
+      '    {"category":"检定","source":"神位剑","checkType":"命中","bonus":5,"divinity":7}',
+      '  </modifiers>',
+      '</equip>',
+      '</equipment></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment[0].divinity).toBe(7);
+  });
+
+  it('modifier 全无 divinity → 装备 divinity undefined（缺省=0 由下游补）', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><equipment>',
+      '<equip slot="武器" name="普通剑" stats="攻击力:5">',
+      '  <modifiers>{"category":"固伤","source":"普通剑","amount":10}</modifiers>',
+      '</equip>',
+      '</equipment></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment[0].divinity).toBeUndefined();
+  });
+});
+
+describe('parseItemGenOutput — JSON 兜底路径 modifiers 透传', () => {
+  it('AI 直出 JSON（含 modifiers）→ 校验后透传到 ItemGenOutput', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result>',
+      '```json',
+      '{"name":"吸血剑","slot":"武器","type":"装备","stats":{"攻击力":20},"modifiers":[{"category":"资源","source":"吸血剑","resource":"hp","amount":50}]}',
+      '```',
+      '</item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment).toHaveLength(1);
+    expect(out.equipment[0].modifiers).toHaveLength(1);
+    expect(out.equipment[0].modifiers![0].category).toBe('资源');
+  });
+});
+
+describe('assembleCharacterState — modifiers/buffs/divinity 透传到 InventoryItem', () => {
+  it('item_gen 装备的 modifiers/buffs/divinity 应透传到 character.inventory', () => {
+    const baseChar = {
+      name: '测试角色', race: '人类', tier: 1, level: 1,
+      attributes: { str: 10, dex: 10, con: 10, int: 10, spi: 10 },
+      identity: [], occupation: [], background: '', appearance: '',
+      clothing: '', personality: '', likes: '', thoughts: '',
+      ascension: { enabled: false, path: '', description: '', elements: [], authorities: [], laws: [], deityPosition: '', divineKingdom: { name: '', description: '' } },
+      skills: [], equipment: [], inventory: [],
+    };
+    const itemData = {
+      skills: [],
+      equipment: [{
+        slot: '武器', name: '神剑', description: '神剑', stats: { 攻击力: 50 },
+        modifiers: [{ category: '固伤' as const, source: '神剑', amount: 100 }],
+        divinity: 5 as 5,
+      }],
+      inventory: [],
+    };
+    const char = assembleCharacterState(baseChar as any, itemData as any);
+    const weapon = char.inventory.find(i => i.name === '神剑');
+    expect(weapon).toBeDefined();
+    expect(weapon!.modifiers).toHaveLength(1);
+    expect(weapon!.modifiers![0].category).toBe('固伤');
+    expect(weapon!.divinity).toBe(5);
+  });
+});

@@ -29,6 +29,11 @@ import { getCombatCoefficient } from './tier-constants';
 // Re-export for convenience
 export { getHitRating } from './types';
 
+/** 🆕 M3: clamp 到 [0, 1]（modifier 累加后兜底，防止穿透/DR 超界） */
+function clamp01(v: number): number {
+  return Math.min(1, Math.max(0, v));
+}
+
 // ========== Step 1: 初始伤害 ==========
 
 /** 计算初始伤害 = 关联属性×10×层级系数 + 技能威力 + 武器攻击力 (世界书公式) */
@@ -215,6 +220,29 @@ export interface DamagePipelineInput {
   currentHp: number;
   /** 额外固定伤害 (武器附魔/品质固伤等, 默认 0) */
   fixedDamageBonus?: number;
+  /** 🆕 M3: 管道版折叠出的 modifier 注入（固伤/百分比/穿透/DR/检定）。缺省=无修正，现有测试不受影响 */
+  modifiers?: PipelineModifiers;
+}
+
+/** 🆕 M3: 管线修正注入（管道版 collect mods + 登神压制折叠后产出，runDamagePipeline 在对应 step 应用）。
+ *
+ *  - fixedDamageBonus / damageMultiplier / penetrationRateBonus / drRateBonus 由 runDamagePipeline 消费
+ *  - hitBonus / dodgeBonus 由管道版的 performAttackCheck 消费（runDamagePipeline 不处理）
+ *
+ *  对齐架构 §4.4（modifier 按类分发到管线）+ §十三 决策 c（登神压制率当穿透、削减守方 DR） */
+export interface PipelineModifiers {
+  /** Step 6a 累加固伤 */
+  fixedDamageBonus?: number;
+  /** Step 6 额外 ×(1 + this)；增伤正值、减伤负值 */
+  damageMultiplier?: number;
+  /** Step 3 累加进穿透率（登神压制率当穿透，见 resolveDivinityConflict） */
+  penetrationRateBonus?: number;
+  /** Step 7 累加进 DR（可负 —— 登神压制削减守方 DR） */
+  drRateBonus?: number;
+  /** 检定·命中加成（管道版 performAttackCheck 用，runDamagePipeline 不处理） */
+  hitBonus?: number;
+  /** 检定·闪避加成（管道版用） */
+  dodgeBonus?: number;
 }
 
 /**
@@ -234,8 +262,11 @@ export function runDamagePipeline(input: DamagePipelineInput): CombatDamageBreak
   const multiSplit = applyMultiSplit(initial.damage, input.multiHitCount);
   const afterSplit = multiSplit.perHitDamage;
 
-  // Step 3: 穿透修正
-  const penetration = applyPenetration(input.defenderDefense, input.penetrationRate);
+  // Step 3: 穿透修正 (M3: + modifier 穿透，含登神压制率)
+  const penetration = applyPenetration(
+    input.defenderDefense,
+    clamp01(input.penetrationRate + (input.modifiers?.penetrationRateBonus ?? 0)),
+  );
 
   // Step 4: 装备减免
   const equipReduction = applyEquipmentReduction(afterSplit, penetration.effectiveDef);
@@ -244,22 +275,29 @@ export function runDamagePipeline(input: DamagePipelineInput): CombatDamageBreak
   const typeReduction = calcDamageTypeReduction(input.damageType, input.defenderAttributes);
   const typeApplied = applyTypeReduction(equipReduction.afterReduction, typeReduction.reductionRate);
 
-  // Step 6: 评级系数 × 意图系数
-  const afterRating = applyRatingAndIntention(
+  // Step 6: 评级系数 × 意图系数 (M3: × modifier 乘算)
+  let afterRating = applyRatingAndIntention(
     typeApplied.afterReduction,
     input.ratingCoefficient,
     input.intentionCoefficient,
   );
+  const damageMultiplier = input.modifiers?.damageMultiplier ?? 0;
+  if (damageMultiplier !== 0) {
+    afterRating = Math.floor(afterRating * (1 + damageMultiplier));
+  }
 
-  // Step 6a: + 额外固定伤害 (世界书: 武器附魔/品质固伤等)
-  const fixedBonus = input.fixedDamageBonus ?? 0;
+  // Step 6a: + 额外固定伤害 (世界书: 武器附魔/品质固伤等 + M3 modifier 固伤)
+  const fixedBonus = (input.fixedDamageBonus ?? 0) + (input.modifiers?.fixedDamageBonus ?? 0);
   const afterFixed = afterRating + fixedBonus;
 
   // Step 6b: × 攻击次数 (世界书: 多段/连击恢复总伤害)
   const afterAttackCount = afterFixed * input.multiHitCount;
 
-  // Step 7: DR 修正
-  const drApplied = applyDR(afterAttackCount, input.drRate);
+  // Step 7: DR 修正 (M3: + modifier DR，登神压制时为负削减守方 DR)
+  const drApplied = applyDR(
+    afterAttackCount,
+    clamp01(input.drRate + (input.modifiers?.drRateBonus ?? 0)),
+  );
 
   // Step 8: 集群修正 → 最终伤害
   const finalDamage = applyClusterMultiplier(drApplied.afterDR, input.isClusterTarget);

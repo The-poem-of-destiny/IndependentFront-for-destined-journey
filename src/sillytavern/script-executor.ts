@@ -14,7 +14,7 @@
  * 📖 脚本编写规范详见: docs/reference/effect_script_system.md
  */
 
-import type { StatusEffect } from './types';
+import type { StatusEffect, ReadonlyHookSet, AttributeName } from './types';
 
 // ═══════════════════════════════════════════════════════════
 // 类型
@@ -38,6 +38,9 @@ export interface ScriptContext {
   };
   /** 🆕 父对象的 scripts 池 — $status.add() 时自动从创建者继承 */
   parentScripts?: Record<string, string>;
+  /** 🆕 只读查询钩子（缺省=未注入，$resource/$char 只读 API 返回 0/false）。
+   *  写入仍走收集器（modifyHp/modifyStat → ScriptEffects），此字段仅服务读取。 */
+  readHooks?: ReadonlyHookSet;
 }
 
 /** $ API 注入接口 */
@@ -48,20 +51,54 @@ export interface ScriptSandbox {
     roll: (formula: string) => number;
   };
   $resource: {
+    /** 当前 HP（只读，缺省返回 0） */
     getHp: (charId: string) => number;
+    /** 最大 HP（只读，缺省返回 0） */
     getMaxHp: (charId: string) => number;
+    /** 当前 MP（只读，缺省返回 0） */
+    getMp: (charId: string) => number;
+    /** 最大 MP（只读，缺省返回 0） */
+    getMaxMp: (charId: string) => number;
+    /** 当前 SP（只读，缺省返回 0） */
+    getSp: (charId: string) => number;
+    /** 最大 SP（只读，缺省返回 0） */
+    getMaxSp: (charId: string) => number;
+    /** HP 百分比 0~1（只读，缺省返回 0） */
+    getHpPercent: (charId: string) => number;
+    /** 修改 HP（写入收集器，由 state-manager 统一 apply） */
     modifyHp: (charId: string, amount: number) => void;
+    /** 修改属性（写入收集器，由 state-manager 统一 apply） */
     modifyStat: (charId: string, stat: string, amount: number) => void;
   };
+  /** 🆕 $char 只读查询 namespace —— 五维属性 / tier / 在场判断 */
+  $char: {
+    /** 五维属性值（英文键 str/dex/con/int/spi，只读，缺省返回 0） */
+    getAttr: (charId: string, attr: AttributeName) => number;
+    /** 层级 tier（1~7，只读，缺省返回 0） */
+    getTier: (charId: string) => number;
+    /** 是否在场（配合 emitChain 在场过滤，缺省返回 false） */
+    isPresent: (charId: string) => boolean;
+  };
   $status: {
-    /** 添加状态效果 */
+    /** 添加状态效果（直接加，不去重 —— 兼容旧脚本） */
     add: (charId: string, effect: Partial<StatusEffect>) => void;
-    /** 移除状态效果 */
-    remove: (charId: string, effectId: string) => void;
-    /** 修改层数 */
+    /** 🆕 M2: 智能添加状态效果（走 BuffRegistry 去重 —— 同源刷新时间+增层，异源共存）。
+     *  收集到 statusApplies，由调用方用 buff-registry 执行 → StatePatch。 */
+    apply: (
+      target: string,
+      buffDef: Partial<StatusEffect> & { name: string; category: StatusEffect['category'] },
+    ) => void;
+    /** 移除状态效果（按 buffId 或裸 name 匹配 —— M2 新语义）。
+     *  收集到 statusRemoves，由调用方执行 → remove_status_effect patch。 */
+    remove: (target: string, buffIdOrName: string) => void;
+    /** 修改层数（旧 API，直接收集到 stackSets） */
     setStacks: (charId: string, effectId: string, stacks: number) => void;
-    /** 获取层数 */
-    getStacks: (charId: string, effectId: string) => number;
+    /** 🆕 M2: 获取层数（走 readHooks.getBuffStacks，缺省返回 0） */
+    getStacks: (charId: string, buffIdOrName: string) => number;
+    /** 🆕 M2: 查询是否持有某 buff（走 readHooks.hasStatus，缺省返回 false） */
+    has: (charId: string, buffIdOrName: string) => boolean;
+    /** 🆕 M2: 查询角色所有状态效果（走 readHooks.getStatusEffects，缺省返回 []） */
+    query: (charId: string) => StatusEffect[];
   };
   $event: {
     /** 触发事件 (可以被其他状态/物品的 onTrigger 捕获) */
@@ -87,11 +124,30 @@ export interface ScriptEffects {
   subscriptions: Array<{ eventType: string; scriptKey: string }>;
   /** 🆕 $event.off: handle 字符串或 eventType — 脚本执行后由引擎取消订阅 */
   unsubscriptions: Array<string>;
+  /** 🆕 M2: $status.apply 收集的意图（调用方用 buff-registry 执行去重 → StatePatch）。
+   *  apply 与旧 add 的区别：apply 走 BuffRegistry 去重（同源刷新+增层），add 是直接加（不去重）。 */
+  statusApplies: Array<{
+    target: string;
+    buffDef: Partial<StatusEffect> & { name: string; category: StatusEffect['category'] };
+  }>;
+  /** 🆕 M2: $status.remove 收集的意图（按 buffId 或裸 name 匹配） */
+  statusRemoves: Array<{ target: string; buffIdOrName: string }>;
 }
 
 /** 创建空的 ScriptEffects */
 export function createScriptEffects(): ScriptEffects {
-  return { adds: [], removes: [], stackSets: [], events: [], hpChanges: [], statChanges: [], subscriptions: [], unsubscriptions: [] };
+  return {
+    adds: [],
+    removes: [],
+    stackSets: [],
+    events: [],
+    hpChanges: [],
+    statChanges: [],
+    subscriptions: [],
+    unsubscriptions: [],
+    statusApplies: [],
+    statusRemoves: [],
+  };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -170,6 +226,12 @@ export function executeHook(
     allEffects.events.push(...result.events);
     allEffects.hpChanges.push(...result.hpChanges);
     allEffects.statChanges.push(...result.statChanges);
+    // 🆕 M1: 持久订阅
+    allEffects.subscriptions.push(...result.subscriptions);
+    allEffects.unsubscriptions.push(...result.unsubscriptions);
+    // 🆕 M2: $status.apply/remove 意图
+    allEffects.statusApplies.push(...result.statusApplies);
+    allEffects.statusRemoves.push(...result.statusRemoves);
   }
 
   return allEffects;
@@ -259,10 +321,15 @@ function buildSandbox(effects: ScriptEffects, ctx: ScriptContext): Record<string
       },
     },
 
-    // $resource API
+    // $resource API — 只读查询走 readHooks（缺省返回 0），写入走收集器
     $resource: {
-      getHp: (_charId: string) => 0,     // 调用方负责处理
-      getMaxHp: (_charId: string) => 0,
+      getHp: (charId: string) => ctx.readHooks?.getHp(charId) ?? 0,
+      getMaxHp: (charId: string) => ctx.readHooks?.getMaxHp(charId) ?? 0,
+      getMp: (charId: string) => ctx.readHooks?.getMp(charId) ?? 0,
+      getMaxMp: (charId: string) => ctx.readHooks?.getMaxMp(charId) ?? 0,
+      getSp: (charId: string) => ctx.readHooks?.getSp(charId) ?? 0,
+      getMaxSp: (charId: string) => ctx.readHooks?.getMaxSp(charId) ?? 0,
+      getHpPercent: (charId: string) => ctx.readHooks?.getHpPercent(charId) ?? 0,
       modifyHp: (charId: string, amount: number) => {
         effects.hpChanges.push({ charId, amount });
       },
@@ -271,7 +338,14 @@ function buildSandbox(effects: ScriptEffects, ctx: ScriptContext): Record<string
       },
     },
 
-    // $status API (套娃核心)
+    // 🆕 $char API — 只读查询 namespace（缺省返回 0/false）
+    $char: {
+      getAttr: (charId: string, attr: AttributeName) => ctx.readHooks?.getAttr(charId, attr) ?? 0,
+      getTier: (charId: string) => ctx.readHooks?.getTier(charId) ?? 0,
+      isPresent: (charId: string) => ctx.readHooks?.isPresent(charId) ?? false,
+    },
+
+    // $status API (套娃核心 + M2 buff 去重)
     $status: {
       add: (charId: string, effect: Partial<StatusEffect>) => {
         // 🆕 自动将当前对象的 scripts 作为 parentScripts 传给子 StatusEffect
@@ -280,13 +354,30 @@ function buildSandbox(effects: ScriptEffects, ctx: ScriptContext): Record<string
         }
         effects.adds.push({ charId, effect });
       },
-      remove: (charId: string, effectId: string) => {
-        effects.removes.push({ charId, effectId });
+      // 🆕 M2: 智能添加（走 BuffRegistry 去重 —— 同源刷新+增层，异源共存）
+      apply: (
+        target: string,
+        buffDef: Partial<StatusEffect> & { name: string; category: StatusEffect['category'] },
+      ) => {
+        // 自动继承 parentScripts（与 add 一致行为）
+        if (ownScripts && Object.keys(ownScripts).length > 0) {
+          (buffDef as any)._parentScripts = ownScripts;
+        }
+        effects.statusApplies.push({ target, buffDef });
+      },
+      // 🆕 M2: remove 改走 statusRemoves（按 buffId 或裸 name 匹配的新语义）
+      remove: (target: string, buffIdOrName: string) => {
+        effects.statusRemoves.push({ target, buffIdOrName });
       },
       setStacks: (charId: string, effectId: string, stacks: number) => {
         effects.stackSets.push({ charId, effectId, stacks });
       },
-      getStacks: (_charId: string, _effectId: string) => 0,
+      // 🆕 M2: getStacks/has/query 走 readHooks（缺省返回 0/false/[]）
+      getStacks: (charId: string, buffIdOrName: string) =>
+        ctx.readHooks?.getBuffStacks(charId, buffIdOrName) ?? 0,
+      has: (charId: string, buffIdOrName: string) =>
+        ctx.readHooks?.hasStatus(charId, buffIdOrName) ?? false,
+      query: (charId: string) => ctx.readHooks?.getStatusEffects(charId) ?? [],
     },
 
     // 🆕 $call API — 跨对象脚本调用
@@ -304,6 +395,9 @@ function buildSandbox(effects: ScriptEffects, ctx: ScriptContext): Record<string
       effects.statChanges.push(...subResult.statChanges);
       effects.subscriptions.push(...subResult.subscriptions);
       effects.unsubscriptions.push(...subResult.unsubscriptions);
+      // 🆕 M2: $status.apply/remove 意图
+      effects.statusApplies.push(...subResult.statusApplies);
+      effects.statusRemoves.push(...subResult.statusRemoves);
       return undefined; // 无返回值（效果通过 effects 收集传递）
     },
 
