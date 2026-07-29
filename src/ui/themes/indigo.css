@@ -69,6 +69,9 @@
   --theme-shadow-md: 0 2px 5px rgba(42, 61, 95, 0.065);
   --theme-shadow-lg: 0 4px 8px rgba(42, 61, 95, 0.09);
   --paper-stack: none;
+
+  --indigo-left-shanshui: url("../assets/themes/indigo/porcelain-left-shanshui-alpha-v4.png");
+  --indigo-right-birds: url("../assets/themes/indigo/porcelain-right-birds-alpha-v5.png");
 }
 
 /* Large underglaze composition lives behind the interface, not on every control. */
@@ -136,6 +139,32 @@
 
 :root[data-theme="indigo"] body .game-page-layout .scene-panel {
   border-right-color: rgba(22, 76, 138, 0.22);
+}
+
+/* The rail and scene ledger reveal one continuous underglaze painting. */
+:root[data-theme="indigo"] body .game-page-layout .game-body {
+  background-color: var(--theme-window-bg);
+  background-image: var(--indigo-left-shanshui);
+  background-repeat: no-repeat;
+  background-position: left bottom;
+  background-size: 25% auto;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .side-toolbar,
+:root[data-theme="indigo"] body .game-page-layout .scene-panel {
+  background-color: rgba(246, 244, 240, 0.54);
+  background-image: none;
+  backdrop-filter: blur(1.5px) saturate(102%);
+  -webkit-backdrop-filter: blur(1.5px) saturate(102%);
+}
+
+/* The status ledger keeps its own quiet, bottom-right underglaze accent. */
+:root[data-theme="indigo"] body .game-page-layout .status-hud {
+  background-color: var(--theme-structural-surface);
+  background-image: var(--indigo-right-birds);
+  background-repeat: no-repeat;
+  background-position: right bottom;
+  background-size: auto 100%;
 }
 
 :root[data-theme="indigo"] body .game-page-layout .chat-flow,
@@ -427,6 +456,19 @@
     background: #f5f2ee;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+  }
+
+  :root[data-theme="indigo"] body .game-page-layout .side-toolbar,
+  :root[data-theme="indigo"] body .game-page-layout .scene-panel {
+    background: transparent;
+  }
+
+  :root[data-theme="indigo"] body .game-page-layout .status-hud {
+    background-color: #f5f2ee;
+    background-image: var(--indigo-right-birds);
+    background-repeat: no-repeat;
+    background-position: right bottom;
+    background-size: auto 100%;
   }
 }
 

@@ -201,6 +201,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
       </div>
     </div>
 
+    <div class="status-glass">
     <!-- ═══════ 属性 ═══════ -->
     <div class="section attribute-section">
       <div class="section-header clickable" @click="daoOpen = !daoOpen" role="button" tabindex="0" :aria-expanded="daoOpen" @keydown.enter="daoOpen = !daoOpen" @keydown.space.prevent="daoOpen = !daoOpen">
@@ -318,6 +319,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         </div>
       </Transition>
     </div>
+    </div>
 
   </div>
 
@@ -373,6 +375,11 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   border-bottom: 1px solid var(--theme-card-border);
 }
 .section:last-child { border-bottom: none; }
+
+.status-glass {
+  display: flex;
+  flex-direction: column;
+}
 
 .section-header {
   display: flex;
