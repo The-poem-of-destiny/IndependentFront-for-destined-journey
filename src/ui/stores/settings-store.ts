@@ -312,14 +312,24 @@ export const useSettingsStore = defineStore('settings', () => {
       if (entry.template && !(agentId in (settings.value.agentTemplates as Record<string, string>))) {
         settings.value.agentTemplates[agentId] = entry.template
       }
-      // 预设：项目默认预设首次 seed 到 IndexedDB，之后由用户管理
+      // 预设：DB 空 → seed 出厂预设；DB 有同 id → 同步出厂 name（保留用户 prompts 编辑）
       if (entry.preset && entry.presetId) {
         try {
           const { getPresets, savePreset } = await import('@engine/database')
           const existing = await getPresets()
-          if ((!existing || existing.length === 0) && entry.preset) {
-            // JSON 序列化去 proxy（否则 IndexedDB put 报 DataCloneError）
-            await savePreset(JSON.parse(JSON.stringify(entry.preset)))
+          const embedded: any = JSON.parse(JSON.stringify(entry.preset))
+          if (!existing || existing.length === 0) {
+            await savePreset(embedded)
+          } else {
+            // M5.1: 出厂预设改名同步 —— id 匹配时把 DB 预设 name 更新为出厂版
+            // （prompts/settings 保留用户编辑；仅 name 跟随 agent-config.json）
+            const dbMatch = existing.find((p: any) => p.id === embedded.id)
+            if (dbMatch && dbMatch.name !== embedded.name) {
+              const updated = { ...dbMatch, name: embedded.name }
+              await savePreset(updated)
+              const idx = (settings.value.presets as PresetItem[]).findIndex((p) => p.id === embedded.id)
+              if (idx >= 0) (settings.value.presets as PresetItem[])[idx] = updated as PresetItem
+            }
           }
         } catch { /* IndexedDB 不可用时静默跳过 */ }
         const existingPreset = (settings.value.presets as PresetItem[]).find(p => p.id === entry.presetId)
