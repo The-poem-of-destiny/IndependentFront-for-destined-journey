@@ -21,6 +21,8 @@ import type {
   ApiEndpoint,
   AgentResult,
   AgentPreset,
+  CombatTriggerMarker,
+  CombatSummaryResult,
   WorldBook,
   CraftGenRequestMarker,
   CharGenRequestMarker,
@@ -764,7 +766,9 @@ export class GamePipeline {
       },
 
       // === Marker 回调 ===
-      onCombatTrigger: async () => null,  // 跳过战斗
+      onCombatTrigger: async (marker, storyOutput) => {
+        return await this.handleCombatTrigger(marker, storyOutput)
+      },
       onCraftGenRequest: async (markers, _varsOutput, ctx) => {
         await this.handleCraftGen(markers, ctx)
       },
@@ -922,6 +926,54 @@ export class GamePipeline {
       console.log(`[GamePipeline] memory_summary 落库成功: ${id} importance=${memory.importance} keywords=${memory.keywords.join(',')}`)
     } catch (e) {
       console.error('[GamePipeline] memory_summary 解析/存储失败:', e)
+    }
+  }
+
+  /** 处理战斗触发 — 唤起 combat agent 独立循环 (M4 任务 5.7) */
+  private async handleCombatTrigger(
+    marker: CombatTriggerMarker,
+    storyOutput: string,
+  ): Promise<CombatSummaryResult | null> {
+    const endpoint = this.getDefaultEndpoint()
+    if (!endpoint) {
+      console.warn('[GamePipeline] combat 跳过: 未配置 API endpoint')
+      return null
+    }
+    try {
+      const { runCombat } = await import('@engine/combat-runner')
+      const { getEventBus } = await import('@engine/game-event')
+      const context = this.currentContext ?? this.buildContext('')
+      this.game.updateAgentStatus('combat')
+      const result = await runCombat(
+        {
+          saveId: this.saveId,
+          marker,
+          storyOutput,
+          context,
+          endpoint,
+          configs: this.chainData?.agentConfigs,
+          worldBooks: this.chainData?.worldBooks,
+          presets: this.chainData?.presets,
+        },
+        {
+          clientFactory: this.getClientFactory(),
+          stateManager: this.getStateManager(),
+          eventBus: getEventBus(this.saveId),
+          characters: this.game.characters,
+          variables: context.variables,
+          // readHooks 暂不传（M4 阶段无脚本订阅；物品/buff modifier 订阅留后续）
+        },
+      )
+      this.game.clearAgentStatus('combat')
+      // 摘要回注正文（作为 assistant 消息，对齐 craft narrative 回注方式）
+      if (result.narrativeSummary) {
+        this.game.addMessage(result.narrativeSummary, 'assistant')
+      }
+      return result
+    } catch (err) {
+      this.game.clearAgentStatus('combat', String(err))
+      console.error('[GamePipeline] combat 失败:', err)
+      return null
     }
   }
 

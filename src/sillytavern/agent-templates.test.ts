@@ -39,8 +39,8 @@ function makeCfg(agentId: string, overrides: Partial<AgentConfig> = {}): AgentCo
 // ========== Template Existence ==========
 
 describe('AGENT_TEMPLATES', () => {
-  it('应注册全部 13 个 Agent (含 Phase 10 重命名)', () => {
-    expect(REGISTERED_AGENT_IDS).toHaveLength(13);
+  it('应注册全部 14 个 Agent (含 Phase 10 重命名 + M4 combat)', () => {
+    expect(REGISTERED_AGENT_IDS).toHaveLength(14);
   });
 
   // Phase 3-6e 完整模板 Agent
@@ -418,7 +418,7 @@ describe('buildAgentMessages — return format (Phase 10 single system msg)', ()
 // ========== Template Quality Checks (Phase 10: relaxed for externalized prompts) ==========
 
 // Phase 10: craft_gen/char_gen/item_gen have prompts in agent-config.json, not here
-const EXTERNALIZED_IDS = new Set(['plot_check', 'plot_correct', 'item_gen', 'craft_gen', 'char_gen']);
+const EXTERNALIZED_IDS = new Set(['plot_check', 'plot_correct', 'item_gen', 'craft_gen', 'char_gen', 'combat']);
 const activeTemplates = Object.entries(AGENT_TEMPLATES)
   .filter(([id]) => !EXTERNALIZED_IDS.has(id));
 

@@ -375,6 +375,16 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
     },
   },
 
+  // ---- combat: 战斗主持人 (M4 战斗 v2) ----
+  // 完整提示词在 agent-config.json 的 systemPrompt 字段
+  // 输出格式: 每回合战斗叙事 + 结束时 <combat_summary>
+  combat: {
+    fixedSystem: '战斗主持人系统。通过 tools 调用执行战斗动作（数值由代码计算），每回合输出战斗叙事，结束时输出 <combat_summary>。完整提示词见 agent-config.json 和模板系统。',
+    fixedExamples: '',
+    variableContext: (ctx: AgentContext) => '',
+    variableInstruction: (ctx: AgentContext) => '',
+  },
+
   // ---- v3 兼容别名: plot_check / plot_correct ----
   plot_check: {
     fixedSystem: '剧情规划系统。完整提示词见 agent-config.json 和模板系统。',
