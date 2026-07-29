@@ -644,20 +644,21 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
     expect(context.agentOutputs!.get('story')).toBe(storyContent);
   });
 
-  it('onCombatTrigger 应在 vars_update stage 后触发 (延迟执行)', async () => {
-    const storyContent = '战斗开始！<combat_trigger combatType="死斗">Boss战</combat_trigger>';
-    const varsContent = '{"vars": "ok"}';
+  it('onCombatTrigger 应在 request_dispatcher 输出 combat_trigger 时触发', async () => {
+    // M5.1: combat_trigger 改由 request_dispatcher 输出（story 只叙事，停在开战前）
+    const storyContent = '英雄与魔王对峙，剑拔弩张，战斗一触即发。';
+    const dispatcherContent = '<combat_trigger combatType="死斗">英雄 vs 魔王</combat_trigger>';
     globalThis.fetch = vi.fn()
-      // Stage 1: story
+      // Stage 1: story（纯叙事）
       .mockResolvedValueOnce({
         ok: true, status: 200, headers: new Headers(),
         json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 80 } }),
         text: async () => '',
       })
-      // Stage 2: vars_update
+      // Stage 2: request_dispatcher（输出 combat_trigger）
       .mockResolvedValueOnce({
         ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: varsContent } }], usage: { total_tokens: 30 } }),
+        json: async () => ({ choices: [{ message: { content: dispatcherContent } }], usage: { total_tokens: 30 } }),
         text: async () => '',
       });
 

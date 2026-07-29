@@ -119,9 +119,6 @@ export class AgentOrchestrator {
   private worldBooks: WorldBook[];
   private presets: AgentPreset[];
 
-  /** @deprecated Phase 10: 旧格式 pendingCombatMarkers，新流程从 vars_update 输出直接扫描 */
-  private pendingCombatMarkers: CombatTriggerMarker[] = [];
-
   /** @deprecated Phase 10: 旧格式 pendingCraftMarkers，新流程从 vars_update 输出直接扫描 */
   private pendingCraftMarkers: CraftRequestMarker[] = [];
 
@@ -683,13 +680,7 @@ export class AgentOrchestrator {
         this.pendingCraftMarkers.push(...craftMarkers);
       }
 
-      // 旧格式 combat_trigger（仍从 story 扫描，向后兼容）
-      const combatMarkers = scanResult.markers.filter(
-        (m): m is CombatTriggerMarker => m.type === 'combat_trigger',
-      );
-      if (combatMarkers.length > 0) {
-        this.pendingCombatMarkers.push(...combatMarkers);
-      }
+      // M5.1: combat_trigger 改由 request_dispatcher 输出（Stage 2 扫描），story 不再输出战斗标记
 
       // 🎵 play_audio: 就地触发，不暂存也不 await —— 配乐是旁路，不进管线时序
       const audioMarkers = scanResult.markers.filter(
@@ -816,11 +807,15 @@ export class AgentOrchestrator {
         this.pendingCraftMarkers = [];
       }
 
-      if (this.pendingCombatMarkers.length > 0 && this.events.onCombatTrigger) {
-        for (const marker of this.pendingCombatMarkers) {
+      // M5.1: combat_trigger 现从 dispatcher 输出扫描（与其他 request 标签同源）
+      const combatMarkers = markers.filter(
+        (m): m is CombatTriggerMarker => m.type === 'combat_trigger',
+      );
+      if (combatMarkers.length > 0 && this.events.onCombatTrigger) {
+        // char/item/craft 的 promises 已在上方 Promise.all 完成，保证参战方新角色先生成再开战
+        for (const marker of combatMarkers) {
           await this.events.onCombatTrigger(marker, dispatcherStoryOutput);
         }
-        this.pendingCombatMarkers = [];
       }
     }
 

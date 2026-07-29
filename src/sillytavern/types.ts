@@ -2488,8 +2488,8 @@ export interface CraftRequestMarker extends DetectedMarkerBase {
 }
 
 /**
- * <combat_trigger> 标记 — Story AI 触发战斗场景时输出。
- * 🚩 独立型: Stage 1 正文结束后，UI 层打开独立战斗页面，不影响正文上下文。
+ * <combat_trigger> 标记 — request_dispatcher 读叙事判定"交战"后输出（M5.1: 原 Story 直接输出，现统一到调度器）。
+ * 🚩 独立型: dispatcher 输出后唤起独立战斗面板，不影响正文上下文。
  */
 export interface CombatTriggerMarker extends DetectedMarkerBase {
   type: 'combat_trigger';

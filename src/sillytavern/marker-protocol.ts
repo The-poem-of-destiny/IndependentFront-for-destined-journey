@@ -3,7 +3,7 @@
  *
  * Phase 6e 核心模块。正文 AI 通过 XML 标记与引擎通信:
  *   <craft_request>  — 🛑 阻塞型: Story 暂停 → 执行制作 → 结果注入正文
- *   <combat_trigger> — 🚩 独立型: Stage 1 后唤起独立战斗页面
+ *   <combat_trigger> — 🚩 独立型: request_dispatcher 输出后唤起独立战斗面板（M5.1 统一到调度器，原 Stage 1 story 输出已退役）
  *   <char_detect>    — 👤 隐式型: request_dispatcher 扫描后异步触发角色生成链
  *
  * Phase 10 新增 (request_dispatcher 调度器):
