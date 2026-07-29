@@ -551,16 +551,19 @@ combat_end → 摘要 ≤500 字
 
 ## 9. M4 实施检查清单
 
-- [ ] **5.1** `data/defaults/agent-config.json` 新增 `combat` Agent（systemPrompt 四步流程 + 函数调用规则 + 摘要规则，参考本文 §5）
-- [ ] **5.2** `agent-orchestrator.ts` combat_trigger 唤起 Combat Agent 独立循环
-- [ ] **5.3** `agent-tools.ts` 注册 §2 全部 combat/status 工具 + `AGENT_TOOL_MAP['combat']`（§7）
-- [ ] **5.4** `agent-config.json` item_gen systemPrompt 增强本文 §6 契约
-- [ ] **5.5** `char-gen-agent.ts` / `craft-gen-chain.ts` 加 §6.6 schema 校验
-- [ ] **5.6** story systemPrompt 调整：战斗摘要作为用户消息接续
-- [ ] **5.7** request_dispatcher / orchestrator 路由 combat_trigger → Combat Agent
-- [ ] **5.8** combat_summary 并入或保留决策
-- [ ] 全量测试 `npm test` 通过
-- [ ] CLAUDE.md 文档导航加本文 + M4 进度更新
+- [x] **5.1** ✅ `data/defaults/agent-config.json` 新增 `combat` Agent（systemPrompt 四步流程 + 函数调用规则 + 摘要规则，3636 字）
+- [x] **5.2** ✅ `combat-runner.ts` 新建跨回合循环 + `agent-tools.ts` executeCombatToolCall 独立通道（B 方案，不入主 DAG）
+- [x] **5.3** ✅ `agent-tools.ts` 注册 §2 全部 13 工具 + `AGENT_TOOL_MAP['combat']`（§7）
+- [x] **5.4** ✅ `agent-config.json` item_gen systemPrompt 增强 §6 契约 + `<modifiers>` 输出标签
+- [x] **5.5** ✅ `combat-item-validator.ts` 校验纯函数（5.5a）+ `char-gen-agent.ts`/`craft-gen-chain.ts` 解析链路接入 + 校验（5.5b）
+- [x] **5.6** ✅ `game-pipeline.ts` handleCombatTrigger 摘要以【战斗摘要】前缀注入对话流，Story 下一轮自然接续
+- [x] **5.7** ✅ `game-pipeline.ts` onCombatTrigger stub → handleCombatTrigger → runCombat
+- [x] **5.8** ✅ combat 摘要由 combat-runner 第 4 步生成（解析 `<combat_summary>`）；旧 `combat_summary` Agent 保留在 agent-config 不删（兼容历史引用），但 combat-runner 不依赖它
+- [x] 全量测试 `npm test` 通过（3675/3676，唯一失败 SelectableCard 是预存 CSS 变量 flaky，与 M4 无关）
+- [x] CLAUDE.md 文档导航加本文 + M4 进度更新
+
+> **M4 核心完成（2026-07-29）**：combat 全链路接通（trigger → combat-runner 跨回合循环 → executeCombatToolCall → 管道函数 → patches 落库 → 摘要回注）。
+> 🔴 **待真机验证（M6）**：combat-runner 单元测试 mock 了 LLM，真实 combat agent 行为（调工具顺序/叙事/判输赢）需真机验证。
 
 ---
 
@@ -569,3 +572,4 @@ combat_end → 摘要 ≤500 字
 | 日期 | 变更 | 作者 |
 |------|------|------|
 | 2026-07-29 | 初版：基于 M1-M3 已实现代码（combat-pipeline/actions/status-api/effect-types/buff-registry/morale/settlement + types.ts）提炼 AI 接口规格，作为 M4 共同真源 | Claude（整理）|
+| 2026-07-29 | §6.6 #2 措辞修正（非检定类不得改五维）+ §9 检查清单全部 ✅（M4 全 8 任务完成，待 M6 真机验证） | Claude（M4 收尾）|

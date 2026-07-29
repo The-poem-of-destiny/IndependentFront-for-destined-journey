@@ -965,9 +965,10 @@ export class GamePipeline {
         },
       )
       this.game.clearAgentStatus('combat')
-      // 摘要回注正文（作为 assistant 消息，对齐 craft narrative 回注方式）
+      // 摘要回注正文（架构 §12：战斗摘要注入对话流，Story 下一轮据此自然接续战斗后剧情）
+      // 前缀【战斗摘要】帮 Story Agent 识别这是已结束战斗的总结
       if (result.narrativeSummary) {
-        this.game.addMessage(result.narrativeSummary, 'assistant')
+        this.game.addMessage(`【战斗摘要】${result.narrativeSummary}`, 'assistant')
       }
       return result
     } catch (err) {

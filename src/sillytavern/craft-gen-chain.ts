@@ -441,6 +441,10 @@ export function buildCraftPatches(
           stats: equip.stats,                        // M3: stats 归位 value（#7）
           durability: equip.durability,              // M3: durability 归位 value（#7）
           maxDurability: equip.durability,
+          // 战斗 v2 (M4 5.5b): modifiers/buffs/divinity 写进 patch value（战斗管线 collect_mods 消费）
+          ...(equip.modifiers ? { modifiers: equip.modifiers } : {}),
+          ...(equip.buffs ? { buffs: equip.buffs } : {}),
+          ...(equip.divinity !== undefined ? { divinity: equip.divinity } : {}),
         },
       });
     }
@@ -456,6 +460,10 @@ export function buildCraftPatches(
           quantity: inv.quantity,
           type: normalizeItemType(inv.type) ?? inv.type,  // M3: type 归一化（#38）
           rarity: inv.rarity,
+          // 战斗 v2 (M4 5.5b): modifiers/buffs/divinity 写进 patch value
+          ...(inv.modifiers ? { modifiers: inv.modifiers } : {}),
+          ...(inv.buffs ? { buffs: inv.buffs } : {}),
+          ...(inv.divinity !== undefined ? { divinity: inv.divinity } : {}),
         },
       });
     }

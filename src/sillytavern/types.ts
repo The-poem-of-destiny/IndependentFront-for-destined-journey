@@ -5,6 +5,8 @@
  */
 
 import type { GameTime } from './time-system';
+// type-only 循环安全：effect-types 反向 import 本文件的 AttributeName/DivinityLevel/DamageType 也是 type-only
+import type { Modifier } from './effect-types';
 
 // 音频子系统的接口/seam 类型拆分在 types-audio.ts（本文件已逾 800 行）。
 // 从这里统一再导出，「types.ts 是唯一类型来源」这条 import 路径依然成立。
@@ -667,6 +669,13 @@ export interface InventoryItem {
   effects?: Record<string, string>;
   /** 🆕 脚本注册表: 脚本名→可执行代码 (AI写, 引擎执行) */
   scripts?: Record<string, string>;
+  /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier，来自 item_gen <modifiers> 子元素）。
+   *  装备进入战斗时由 collect_mods event 收集，注入 8 步伤害管线（架构 §4.1） */
+  modifiers?: Modifier[];
+  /** 🆕 战斗 v2 (M4 5.5b): 该物品/装备附带的 buff 定义（由附加效果类 modifier 转 buff 或 AI 直接声明） */
+  buffs?: StatusEffect[];
+  /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备，缺省=0；§6.2 决策 d，冲突仲裁见 resolveDivinityConflict） */
+  divinity?: DivinityLevel;
 }
 
 /** 状态效果 */
@@ -2766,6 +2775,12 @@ export interface CharGenOutput {
     cooldown?: number;
     effects?: Record<string, string>;
     scripts?: Record<string, string>;
+    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier） */
+    modifiers?: Modifier[];
+    /** 🆕 战斗 v2 (M4 5.5b): 该技能附带的 buff 定义 */
+    buffs?: StatusEffect[];
+    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8 */
+    divinity?: DivinityLevel;
   }>;
   /** 🆕 char_gen 自身生成的装备 */
   equipment: Array<{
@@ -2776,6 +2791,12 @@ export interface CharGenOutput {
     durability?: number;
     quality?: string;
     effects?: Record<string, string>;
+    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier） */
+    modifiers?: Modifier[];
+    /** 🆕 战斗 v2 (M4 5.5b): 该装备附带的 buff 定义 */
+    buffs?: StatusEffect[];
+    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备） */
+    divinity?: DivinityLevel;
   }>;
   /** 🆕 char_gen 自身生成的背包物品 */
   inventory: Array<{
@@ -2784,6 +2805,12 @@ export interface CharGenOutput {
     quantity: number;
     type: string;
     rarity?: string;
+    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier） */
+    modifiers?: Modifier[];
+    /** 🆕 战斗 v2 (M4 5.5b): 该物品附带的 buff 定义 */
+    buffs?: StatusEffect[];
+    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备） */
+    divinity?: DivinityLevel;
   }>;
   /** 🆕 真机 fix(2026-07-18): char_gen 原始 XML 输出，供 item_gen 提取 <item_requests>/<skill_requests>/<equipment_requests> */
   rawXml?: string;
@@ -2807,6 +2834,12 @@ export interface ItemGenOutput {
     effects?: Record<string, string>;
     /** 🆕 Phase 8.5: 脚本 <script name="init|cast|tick|cleanup">code</script> */
     scripts?: Record<string, string>;
+    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明，来自 <modifiers> 子元素（6 大类，对齐 effect-types.ts Modifier 联合） */
+    modifiers?: Modifier[];
+    /** 🆕 战斗 v2 (M4 5.5b): 该元素附带的 buff 定义（由附加效果类 modifier 转换或 AI 直接声明） */
+    buffs?: StatusEffect[];
+    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（神位级技能才填，缺省=0） */
+    divinity?: DivinityLevel;
   }>;
   /** 装备列表 */
   equipment: Array<{
@@ -2824,6 +2857,12 @@ export interface ItemGenOutput {
     effects?: Record<string, string>;
     /** 🆕 真机 fix(2026-07-18): 脚本 <script name="...">code</script> */
     scripts?: Record<string, string>;
+    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明，来自 <modifiers> 子元素（6 大类，对齐 effect-types.ts Modifier 联合） */
+    modifiers?: Modifier[];
+    /** 🆕 战斗 v2 (M4 5.5b): 该元素附带的 buff 定义（由附加效果类 modifier 转换或 AI 直接声明） */
+    buffs?: StatusEffect[];
+    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备，缺省=0；§6.2 决策 d） */
+    divinity?: DivinityLevel;
   }>;
   /** 背包物品列表 */
   inventory: Array<{
@@ -2837,6 +2876,12 @@ export interface ItemGenOutput {
     effects?: Record<string, string>;
     /** 🆕 真机 fix(2026-07-18): 脚本 <script name="...">code</script> */
     scripts?: Record<string, string>;
+    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明，来自 <modifiers> 子元素（6 大类，对齐 effect-types.ts Modifier 联合） */
+    modifiers?: Modifier[];
+    /** 🆕 战斗 v2 (M4 5.5b): 该元素附带的 buff 定义（由附加效果类 modifier 转换或 AI 直接声明） */
+    buffs?: StatusEffect[];
+    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备，缺省=0；§6.2 决策 d） */
+    divinity?: DivinityLevel;
   }>;
   /** 🆕 Phase 9: 登神要素 (含 scripts + effectDescriptions) */
   elements?: Array<Pick<ElementDetail, 'name' | 'description' | 'effects' | 'effectDescriptions' | 'scripts'>>;
