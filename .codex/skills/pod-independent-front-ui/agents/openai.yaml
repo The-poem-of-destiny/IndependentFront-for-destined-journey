@@ -1,0 +1,4 @@
+interface:
+  display_name: "POD Independent Front UI"
+  short_description: "Polish the RPG game UI with disciplined visual iteration"
+  default_prompt: "Use $pod-independent-front-ui to polish this IndependentFront game UI without losing the established theme language."
