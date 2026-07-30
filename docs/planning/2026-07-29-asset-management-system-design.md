@@ -43,6 +43,7 @@ reason is recorded.
 | D20 | **Two type-fallback chains, picked by slot *shape*.** `ASSET_TYPE_FALLBACK_CHAIN` (`立绘 → 立绘bg → 头像`) for standee-shaped slots, and still the default; `ASSET_TYPE_AVATAR_CHAIN` (`头像 → 立绘 → 立绘bg`) for face-shaped ones. A single `AssetType` still means exact match with **no** degradation | §15.9. One chain cannot serve both shapes: a full-body standee cropped into a 2.5rem circle shows a torso, not a face. Both chains end at an acceptable last resort, so neither shape leaves a hole in a half-finished pack — which is the entire value of having a chain in the first place. Exactness stays reachable because *writes* (import, set-primary) address one specific cell; only **reads** degrade. |
 | D21 | **The manifest also carries `framing`** — display metadata, clamped through `clampAssetFraming` on the way in. It still may never carry `name` or `type` | 2026-07-29. D10 protects **identity**: name and type come from the filename and nothing else. Framing is not identity — it is display metadata exactly like `credit`/`license`, and a filename cannot carry it. Without this, one export→import round-trip silently resets every frame the user hand-tuned. A non-object `framing` is **dropped**, not clamped: clamping it would translate `"framing": "centred"` into a default frame that reads as if the manifest had said something. Manifest framing lands only on **newly created** rows — a byte-identical duplicate is skipped before the manifest is read, so an existing row's framing is never overwritten. |
 | D22 | **`importPortraitPair` takes a three-state spec per type**: a rect (crop) / `'whole'` / `'skip'`. Both fields are **required** — omission is a compile error, not a default | 2026-07-29. The old `{ portrait?, avatar? }` read omission as "use the whole image", so **no** call could express "don't write this type" and every re-crop of a 立绘 minted another 头像 variant — the library grew by click count. A `null`-means-skip patch would fix behaviour but `undefined` and `null` are too easy to conflate in JS (`?.`, destructuring defaults, `JSON.parse`); string literals cannot be confused, and a typo is a type error. Two `'skip'` stays the `'no-crops'` programmer error. |
+| D23 | **A write must target the type the reading slot will actually land on.** Concretely: the player portrait slot writes mp4 to **`立绘bg`**, not `头像` — and after any slot-targeted write, success is claimed only if **the slot's resolved row is the row just written** | §15.11. D7 permits mp4 on both `头像` and `立绘bg`, so the original `头像` choice was legal and still wrong: **writes address one cell, reads walk a chain** (D20), and `头像` is *last* on the standee chain. Any character with an existing 立绘 got a correct write, an unchanged picture, and a toast saying 「已设为画像」 — the worst combination, because the user's only recourse is to click again. `立绘bg` sits above `头像` on that chain, so the write is visible unless a真 `立绘` shadows it — and shadowing is **not** fixable by writing, since D11 forbids the import path from deleting the row on top. So the honest outcome is a warning naming *what* shadows it and *where* to change it. The general rule is the second half: a store returning `'ok'` says the bytes landed, never that the user can see them. |
 
 ---
 
@@ -57,8 +58,15 @@ A settings section that lets a user build and curate a media library:
 - see quota usage
 - export the whole library back to a zip that round-trips through the importer
 
-**What it does not do:** render anything in the game. `AvatarPanel`, `ScenePanel`, `CharacterListPanel`,
-`StatusOverview` are untouched. See §11.
+**What it did not do — ~~render anything in the game~~ — was reversed on 2026-07-29 (§15.9).**
+As originally shipped, `AvatarPanel`, `ScenePanel`, `CharacterListPanel` and `StatusOverview` were untouched
+and nothing an import produced was ever visible in-game. That clause no longer holds: five render sites are
+wired, the right-hand status panel shows a large 立绘 with pan/zoom framing, and a crop editor turns one
+source image into a 立绘 + 头像 pair (§15.9, §15.10, §15.11).
+
+Left as struck-through rather than deleted, because the *scope* it describes is what the rest of this section
+was written against — and because two defects (§15.9) existed precisely **because** nothing rendered, which is
+only legible if the original boundary is still visible. See §11 for what remains genuinely out of scope.
 
 ---
 
@@ -1132,15 +1140,39 @@ its contract before its only consumer, the tests pin the contract as written, no
 
 ### 15.10 The large portrait, the framing dial, and the crop editor
 
-**✅ The main path IS now verified on real hardware** (Chromium, dev server, 2026-07-29). Walked end-to-end in a live
-browser against save 「测试冒险」/亚瑟: clicking the player portrait opened the editor titled 裁剪 · 亚瑟 with **no name
-field** (§7.3 holding in practice, not just in tests); the 立绘 rect defaulted to the whole 1200×1600 source and the
-头像 rect to `533 × 533 自 (334, 0)` — horizontally centred, pinned to the top, and landing **on the head**, which the
-circular preview confirmed; confirming wrote exactly **two rows under one name** (`亚瑟/头像`, `亚瑟/立绘`) from one
-source file named `IMG_9999.png`, proving the filename contributed nothing but its extension; the large portrait then
-appeared top-aligned without a reload; the dial opened with the correct defaults (水平 50%, 垂直 0%, 缩放 1.00×), moved
-the image live (`object-position: 50% 70%` + `matrix(2,0,0,2,0,0)`), persisted `{x:50,y:70,scale:2}` to the **立绘 row
-only** after the debounce, and 复位 restored `{x:50,y:0,scale:1}` and persisted that too.
+> 🔴 **This section describes the UI as of commit `e818b61`. The framing *dial* it walks through no longer
+> exists** — `ad612d5` stripped every control off the portrait and moved them into `PortraitSettingsDialog`
+> (§15.11). The section is kept as written, and corrected here rather than rewritten, because the *reasoning*
+> below (why a lone 头像 gets no large portrait; why framing is display metadata; why the crop editor has no
+> name field) survived the change intact — only the control's location moved. Read the verification claim
+> below with both caveats attached.
+
+**✅ Verified on real hardware — but on `e818b61`, and with two discounts.** Walked end-to-end in a live browser
+(Chromium, dev server, 2026-07-29) against save 「测试冒险」/亚瑟: clicking the player portrait opened the editor
+titled 裁剪 · 亚瑟 with **no name field** (§7.3 holding in practice, not just in tests); the 立绘 rect defaulted to the
+whole 1200×1600 source and the 头像 rect to `533 × 533 自 (334, 0)` — horizontally centred, pinned to the top, and
+landing **on the head**, which the circular preview confirmed; confirming wrote exactly **two rows under one name**
+(`亚瑟/头像`, `亚瑟/立绘`) from one source file named `IMG_9999.png`, proving the filename contributed nothing but its
+extension; the large portrait then appeared top-aligned without a reload; the dial opened with the correct defaults
+(水平 50%, 垂直 0%, 缩放 1.00×), moved the image live (`object-position: 50% 70%` + `matrix(2,0,0,2,0,0)`), persisted
+`{x:50,y:70,scale:2}` to the **立绘 row only** after the debounce, and 复位 restored `{x:50,y:0,scale:1}` and persisted
+that too.
+
+**🔴 Discount 1 — the last four clauses vouch for deleted code.** Everything from "the dial opened" onward describes
+the on-image dial that `ad612d5` removed. The *behaviour* was re-hosted rather than rewritten — `PortraitSettingsDialog`
+calls the same `clampAssetFraming` and the same debounced `setAssetFraming`, and has its own unit tests — but
+**nobody has walked the dialog on real hardware.** The checkmark does not transfer. Treat the shipped framing UI as
+test-only until someone repeats this walk against it, and note that the dialog added a genuinely new failure mode the
+dial never had (the debt-with-id ledger of §15.11, whose whole job is that closing or switching characters mid-drag
+does not write one character's framing onto another's row).
+
+**🔴 Discount 2 — the session ran on top of a live database-wiping bug.** The walk was performed inside the 「测试冒险」
+save, and at that time the 🧪 快速测试 button called `clearAllData()`, which is `db.delete()` — it destroyed the
+**entire** IndexedDB including the deliberately-global asset and audio libraries (found and fixed later; `96b87ce`,
+§15.11). The steps above remain trustworthy **because the assets were imported after entering the save**, so nothing
+they assert depended on pre-existing rows surviving. But **any same-session observation of the form "the stuff I
+imported earlier is still there" is worthless from this session**, and this walk must never be cited as evidence that
+the library survives across sessions. That property is still unverified on hardware.
 
 **🔴 Still unverified on real hardware**, and the list matters more than the pass above: no zip carrying `framing`
 has been round-tripped through a real file; the mp4 path has never been exercised (neither the bypass-the-editor
@@ -1175,9 +1207,11 @@ extension, the same reason `isVideo` has always come from the row).
 
 A large portrait immediately raises a question a small circle never did: the character's face is a third of the way
 down a 2:3 standee, and the slot is 3:4. Something has to decide what is visible. That is `AssetFraming` — a focal
-point plus a scale, stored on the asset row, adjusted with a dial that opens off the portrait.
+point plus a scale, stored on the asset row, adjusted with a dial that opens off the portrait. *(The dial moved into
+`PortraitSettingsDialog` in `ad612d5`; everything below is unaffected — where the control lives changed, what it
+writes did not.)*
 
-The dial writes through `setAssetFraming` (debounced), and every read passes `clampAssetFraming` first. The clamp
+The control writes through `setAssetFraming` (debounced), and every read passes `clampAssetFraming` first. The clamp
 is not defensive hygiene: a single `NaN` makes the browser discard the whole `object-position` / `transform`
 declaration, so the symptom is "this picture is *sometimes* misaligned" — the worst class of style bug to trace.
 Legacy rows have no `framing` at all, an older build could have written an out-of-range scale, and a drag divided
@@ -1230,3 +1264,106 @@ A consequence worth stating: the editor lives in `shared/`, not `settings/assets
 library drawer and the game page's portrait slot — and couples to neither page; leaving it under `settings/` made
 the game page depend on a settings directory, which is a layering inversion. Its geometry moved to
 `lib/crop-rects.ts`, alongside `lib/image-crop.ts` whose source-pixel coordinate system it shares.
+
+
+---
+
+### 15.11 Furniture off the portrait, the identity strip, and the review round that followed
+
+**Not verified on real hardware. None of it.** Everything in this section is pinned by unit tests running against
+injected seams, which §15.9's lesson says pin the contract as written rather than as used. Suite: **4315 passed /
+2 failed** — both the pre-existing baselines of §15.4 (`SelectableCard 稀有度边框色正确`, stable; `game-store
+loadSave 应并行回读最新大纲与事件树`, flaky — a re-run scored 4316/1 with the flaky one passing, so read "2 failed"
+as the pessimistic end of a range, not a new regression). `npm run typecheck`: **0 errors**, with §12's standing
+caveat that plain `tsc` does not check `.vue` templates.
+
+#### What shipped
+
+| Commit | Change |
+|---|---|
+| `ad612d5` | **All furniture off the portrait.** The framing dial and the camera badge are gone; `CharacterPortrait.vue` is now a pure presentational component taking `framing` as a prop and touching neither the store nor any control. Everything moved into the new `shared/PortraitSettingsDialog.vue`. Click routing forks on **what there is to adjust**: a large portrait (`立绘`/`立绘bg`) opens the dialog; anything else goes straight to the file picker. |
+| `a2411f3` | **Identity strip** (种族·身份·职业·生命层级·冒险者等级) overlaid on the top of the large portrait. |
+| `1875d1c` | Crop editor's two columns brought together (stage column shrink-wraps, modal `xl`→`lg`); `dev.bat` IPv6 fix. |
+| `96b87ce`, `a12926b` | 🧪 快速测试 was calling `clearAllData()` — a full `db.delete()`. A second button 「快速测试（保留数据）」 was added; the original keeps its clean-slate semantics. |
+| *(review round, uncommitted at time of writing)* | Seven fixes — see below. |
+
+#### Why the dial had to leave the image
+
+The previous version put two small controls **on** the picture, and the dial then opened a popover that **covered the
+picture it was adjusting**. The user was tuning a frame they could not see. That is the whole reason for the move; it
+is not tidiness.
+
+Two properties of the replacement are worth protecting:
+
+- **The dialog's preview *is* `CharacterPortrait` itself**, not a second element styled to look like it. A copied
+  preview drifts from the real thing sooner or later, and a WYSIWYG control that lies is worse than no preview. This
+  is only possible *because* `CharacterPortrait` became pure — a component that reads the store cannot be handed an
+  unsaved draft, so purity is what buys the live preview for free.
+- **Persistence is debounced, and the debt records the `id` alongside the value.** Recording only "dirty" and reading
+  `props.assetId` at flush time is a real trap: the flush that lands at the moment the user switches character or
+  swaps the image writes the *previous* portrait's framing onto the *new* row. Closing and unmounting must both settle
+  the debt, or the last 300 ms of adjustment vanishes.
+
+`PortraitSettingsDialog` deliberately does **not** implement 更换图片 itself; it emits `replace`. The byte routing
+(images to the crop editor, mp4 straight through) already exists on the caller, which has the same path for
+"portrait with no asset yet". Two implementations of one rule is the drift this document has spent its whole length
+preventing.
+
+#### The identity strip is content, not a control
+
+It renders **inside** the portrait slot, so clicks bubble to the slot exactly as they do from bare image pixels and
+the truncation fallback (`title` on hover) keeps working. `pointer-events: none` would have broken the second while
+"fixing" a problem that does not exist. There are no buttons, badges, or hover popovers on it.
+
+🔴 **The scrim is a fixed black gradient and the ink a fixed light `#f0ebe1` — deliberately not theme variables.**
+Underneath is an image the *user* imported, of unknown luminance. Theme-derived colours would hand a light theme a
+light scrim, which is exactly no scrim at all on a white image. A gradient rather than a solid bar, because a solid
+bar covers the composition the user just cropped.
+
+The same data renders in **two places in the DOM** (overlaid when there is a large portrait, its own row otherwise).
+Merging them is tempting and wrong: **where it sits decides whether clicking works.** The overlaid copy must be a
+descendant of the slot to bubble; the standalone copy must be outside it, or a line of identity text becomes the
+content of a button that opens a file dialog.
+
+#### The review round — seven findings, all closed
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | `dev.bat`'s trailing-space port match **did nothing**. Without `/C:`, `findstr` splits its argument into a space-separated pattern *list*, the trailing space is dropped, and the bare `:5173` also matches `:51730`–`:51799` — next to a live `taskkill /F`. | `findstr /C:":%%P "`. |
+| 2 | UTF-8 Chinese inside `::` comments desyncs cmd's byte-offset batch parser, and **comment fragments were executing as commands** — one was really running `findstr`. stderr 940 B → 0 B. | All comments to ASCII; rationale moved to the new `docs/reference/dev-bat-notes.md`. New `.gitattributes` pins `*.bat` to CRLF (an LF-only `.bat` does not fail loudly, it just stops working). |
+| 3 | `test-save.ts`'s preserve-then-reset left the DB **cleared but unseeded** (`clearAllData()` deletes what `initializeDatabase()` seeded, and `initialized` stayed `true`), and swallowed a failed clear entirely. | `initialized` resets to `false` after a successful clear; `clearedThisLoad` is set **only** on success, so a failure retries instead of counting as done; a failed clear now warns that this run is building on an **uncleared** DB, because the button's label promised otherwise. |
+| 4 | The portrait slot wrote mp4 to `头像` — legal under D7, invisible under D20. | Writes `立绘bg`, and success is claimed only when the slot's **resolved** asset actually changed; an existing `立绘` that shadows it produces an honest warning naming the shadowing type and where to change it. **New D23.** |
+| 5 | `importForCharacter` derived type from the filename extension only, while its own caller used `blob.type` first — so a file with no extension but `type: 'video/mp4'` was routed as video and then rejected as "unsupported format". | Both use the shared `resolveSourceMime`; `ext` is looked up back from the MIME so it can never be empty. |
+| 6 | `useAssetImage` tracked a single `heldId`, but one `id` can be taken **twice** (a name flapping A→B→A within one Dexie read); the stale round deliberately does not release, so one count was never repaid and the URL was pinned forever (capacity eviction skips held entries). | An owed-**count** map. Invariant: total releases === total successful takes, and the row currently displayed always keeps at least one count. |
+| 7 | `asset-url.ts` could hand out an already-revoked URL when `revokeAll()` landed between minting and settling — a dead `<img>`, plus a release owed against a *future* URL for the same id. | A shared `liveOnly` gate on both return paths (originator and in-flight joiner); if the URL is no longer the live one, return `null`, which the contract already defines as "owe nothing". |
+
+Plus one found while fixing: `importPortraitPair` recorded the mime/ext **predicted before cropping**. Canvas does
+not promise to honour the requested type — Firefox cannot encode webp and per spec silently returns PNG — so the
+library grew rows saying `mime: image/webp` over PNG bytes. Invisible in-app (browsers sniff), but the export
+filename, the re-import routing, and the "ext is authoritative" contract were all lying, and it only detonates once
+the user carries the pack to another machine. Now the row records what the produced Blob **says it is**, falling back
+to PNG (the spec's own default for an unsupported type) rather than to the prediction, which would just restate the
+lie.
+
+**One finding was a false positive, recorded so nobody re-opens it:** `.npc-portrait` in `ScenePanel.vue` was flagged
+as missing `overflow: hidden` for the circular clip. It already has it. Nothing was changed there, and the file is
+untouched in this round.
+
+#### The two lessons worth transferring
+
+**(i) A fix whose comment confidently asserts the wrong mechanism is worse than no fix.** The `dev.bat` trailing space
+had a comment explaining, in detail and in bold, why it was load-bearing — and it did nothing, because `findstr`
+without `/C:` never saw it. The comment was doing real damage: it converted an open question into a settled one, so
+the next reader (and the review before this one) skipped past it. A missing guard gets found eventually; a guard that
+is confidently documented and inert is invisible until it fails. When a comment claims a mechanism, the claim needs
+the same evidence the code does — here, one run with a process actually listening on `:51730`.
+
+**(ii) A test can pin a bug, and two did here.** `useAssetImage.test.ts` asserted `released` equalled exactly
+`['b1']` — the leak, written down as the expectation. `StatusOverview.assets.test.ts` asserted
+`importForCharacter` was **called with** `'头像'` — which was true, and useless, because the defect was that calling
+it changed nothing the user could see. Both tests were green throughout. This is the third instance in this document
+(after §15.6's `thumbs.test.ts` and §15.9's refcount test), and the pattern is now clear enough to name: **a test
+that asserts "the function was called with X" cannot detect a defect in what X *does*.** The replacements assert the
+observable end state — the release ledger balances; the slot's rendered `src` changed — which is the only form that
+could have gone red. Where a test and the code were written by the same person in the same sitting, the test
+records the intent, not the behaviour; only an assertion phrased in terms the *user* would notice escapes that.

@@ -284,6 +284,78 @@ describe('revokeAll', () => {
 })
 
 // ═══════════════════════════════════════════════════════════
+// 4b. 活性闸：绝不端出一条已撤销的 URL
+// ═══════════════════════════════════════════════════════════
+
+describe('活性闸', () => {
+  /**
+   * 🔴 这个交错**真的摆得出来**，不是理论上的担心: `revokeAll()` 落进「load 已经
+   * 把 URL 装进缓存」与「调用方的续体跑起来」之间那几个微任务里。现实形状是
+   * 分区在一次异步卸载里调 revokeAll，而同一张头像正好有两个组件在等它。
+   *
+   * 修复前的行为: 两个调用方都拿到 `blob:fake/1` —— 一条**已经撤销**的 URL。
+   * `<img>` 当场裂，而且按契约他们各欠一次 release，那两次会记到日后为同一个 id
+   * 重新铸出来的那条身上，把别人正在显示的图撤掉。
+   */
+  it('铸好之后、兑现之前 revokeAll → 发起者与搭车者都拿到 null，而不是死链', async () => {
+    let resolveBlob!: (b: Blob) => void
+    const blobReady = new Promise<Blob>((r) => {
+      resolveBlob = r
+    })
+    const created: string[] = []
+    const revoked: string[] = []
+    let seq = 0
+    const cache = createAssetUrlCache({
+      loadBlob: () => blobReady,
+      createObjectURL: () => {
+        seq += 1
+        const u = `blob:fake/${seq}`
+        created.push(u)
+        return u
+      },
+      revokeObjectURL: (u) => {
+        revoked.push(u)
+      },
+    })
+
+    const initiator = cache.get('a')
+    const piggy = cache.get('a') // 搭同一个在飞 Promise
+
+    // 这条链注册得比 load 的续体晚，于是它恰好夹在 urls.set 之后、
+    // 两个调用方的续体之前 —— 正是那个窄窗口
+    const wedge = blobReady.then(() => {
+      cache.revokeAll()
+    })
+
+    resolveBlob(new Blob(['x']))
+    const [u1, u2] = await Promise.all([initiator, piggy, wedge])
+
+    expect(created).toHaveLength(1)
+    expect(revoked).toEqual(created) // 这条 URL 确实已经被撤销了
+    expect(u1).toBeNull()
+    expect(u2).toBeNull()
+    // 拿到 null 就不欠 release —— 迟到的 release 也不会误伤日后重铸的那条
+    expect(cache.refCount('a')).toBe(0)
+    expect(cache.size).toBe(0)
+  })
+
+  it('正常路径不受影响：搭车者照样拿到活的 URL 并各领一份计数', async () => {
+    const h = makeDeferredHarness()
+    const cache = createAssetUrlCache(h.options)
+
+    const p1 = cache.get('a')
+    const p2 = cache.get('a')
+    h.resolveOne('a')
+    const [u1, u2] = await Promise.all([p1, p2])
+
+    expect(u1).toBe('blob:fake/1')
+    expect(u2).toBe(u1)
+    expect(cache.refCount('a')).toBe(2)
+    expect(h.revoked).toHaveLength(0)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
 // 5. 在飞去重（真实泄漏 bug）
 // ═══════════════════════════════════════════════════════════
 

@@ -18,6 +18,7 @@ import { describe, it, expect } from 'vitest'
 import { effectScope, nextTick, ref, type EffectScope, type Ref } from 'vue'
 import { ASSET_TYPE_AVATAR_CHAIN, ASSET_TYPE_FALLBACK_CHAIN } from '@engine/asset-resolve'
 import type { AssetMetaRecord, AssetType } from '@engine/types'
+import { createAssetUrlCache } from '../lib/asset-url'
 import { useAssetImage, type AssetImageSource, type UseAssetImage } from './useAssetImage'
 
 // ═══════════════════════════════════════════════════════════
@@ -42,10 +43,24 @@ interface Harness {
   released: string[]
   /** 每次 `assetUrl` 调用的 id 顺序 */
   requested: string[]
+  /**
+   * **成功取到 URL** 的 id 顺序（拿到 null 的不算）。
+   *
+   * 会计恒等式的左边: 每一条 = 一份引用计数 = 欠一次 release
+   * （lib/asset-url.ts 的 `get` 契约）。`released` 是右边，两边必须是同一个多重集。
+   */
+  granted: string[]
   /** 手动兑现某个在飞的 `assetUrl(id)`；`null` 表示字节缺失 */
   settle(id: string, url?: string | null): void
   /** 兑现所有在飞请求（按发起顺序），URL 为 `blob:<id>` */
   settleAll(): void
+}
+
+/** 多重集比较 —— 顺序无关，但**次数必须一样**（少还一次就是泄漏） */
+function tally(ids: readonly string[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const id of ids) out[id] = (out[id] ?? 0) + 1
+  return out
 }
 
 /**
@@ -56,6 +71,7 @@ function makeHarness(rowsInit: AssetMetaRecord[], auto = true): Harness {
   const rows = ref<AssetMetaRecord[]>(rowsInit)
   const released: string[] = []
   const requested: string[] = []
+  const granted: string[] = []
   // 🔴 **队列**而不是 `Map<id, resolver>`: 同一个 id 完全可能有两轮同时在飞
   // （切走再切回）。用 id 做键会让后一轮把前一轮的 resolver 顶掉，前一轮的
   // Promise 永远不兑现 —— 于是「过期那一轮回来时会做什么」这件事根本没被测到。
@@ -67,7 +83,10 @@ function makeHarness(rowsInit: AssetMetaRecord[], auto = true): Harness {
     },
     assetUrl(id: string): Promise<string | null> {
       requested.push(id)
-      if (auto) return Promise.resolve(`blob:${id}`)
+      if (auto) {
+        granted.push(id)
+        return Promise.resolve(`blob:${id}`)
+      }
       return new Promise<string | null>((resolve) => pending.push({ id, resolve }))
     },
     releaseAssetUrl(id: string): void {
@@ -80,16 +99,21 @@ function makeHarness(rowsInit: AssetMetaRecord[], auto = true): Harness {
     rows,
     released,
     requested,
+    granted,
     /** 兑现该 id **最早**的那一轮（先进先出，与真实兑现顺序无关，由用例摆布） */
     settle(id, url = `blob:${id}`) {
       const at = pending.findIndex((p) => p.id === id)
       if (at < 0) throw new Error(`没有在飞的 assetUrl(${id})`)
       const [entry] = pending.splice(at, 1)
+      if (url !== null) granted.push(id)
       entry.resolve(url)
     },
     settleAll() {
       const all = pending.splice(0, pending.length)
-      for (const p of all) p.resolve(`blob:${p.id}`)
+      for (const p of all) {
+        granted.push(p.id)
+        p.resolve(`blob:${p.id}`)
+      }
     },
   }
 }
@@ -110,6 +134,11 @@ async function flush(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
   await nextTick()
+}
+
+/** 接真缓存时用：那条链多绕好几跳（load → finally → 采纳 → 活性闸 → 组件的 await） */
+async function deepFlush(): Promise<void> {
+  for (let i = 0; i < 6; i++) await flush()
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -337,13 +366,27 @@ describe('useAssetImage · 乱序兑现', () => {
     expect(h.released).toEqual(['a1'])
   })
 
-  it('过期的一轮若与新一轮是同一个 id，则不撤销（新一轮要接手它）', async () => {
+  /**
+   * ★ 本用例修正过一次断言。它原先钉的是 `released === ['b1']` ——
+   * 也就是把一个**泄漏**当成正确行为钉住了。
+   *
+   * 真相是: A→B→A 抖一下，`assetUrl('a1')` 被**成功调用了两次**，按
+   * lib/asset-url.ts 的契约那就是两份引用计数、欠两次 release。第一轮的续体走
+   * 过期分支时刻意不还（对的 —— 新一轮马上要接手这条 URL，先还会把计数踩到零），
+   * 但第三轮领的是**它自己那一份**，从没认领过第一轮那一份。于是三次成功 get、
+   * 两次 release，多出来的那一份把这条 URL 永久钉住（容量逐出跳过被持有的条目，
+   * 只有 revokeAll 收得回）。
+   *
+   * 正确的会计: a1 一共还两次 —— 一次在第三轮落笔后**当场**收拢多余份额
+   * （此时我们仍攥着 1 份，那条 URL 撤不掉，界面不会闪），另一次在拆除时。
+   */
+  it('★ 过期的一轮与新一轮同 id：那一份欠账由新一轮收拢，不是一笔勾销', async () => {
     const h = makeHarness([
       row({ id: 'a1', name: '苏婉' }),
       row({ id: 'b1', name: '林霜' }),
     ], false)
     const name = ref<string>('苏婉')
-    const { api } = run(() => useAssetImage(name, undefined, { source: h.source }))
+    const { scope, api } = run(() => useAssetImage(name, undefined, { source: h.source }))
     await flush()
 
     // 切走再切回：a1 有两轮在飞，第一轮过期
@@ -356,12 +399,155 @@ describe('useAssetImage · 乱序兑现', () => {
     h.settleAll()
     await flush()
     expect(api.url.value).toBe('blob:a1')
-    // 🔴 本用例的要害: a1 的**第一轮**回来时已经过期，但最新一轮要的正是 a1 ——
-    // 撤了它，第三轮拿到的就是一条已撤销的死链（LRU 对同 id 的在飞是去重的，
-    // 两轮拿到的是**同一条 URL**）。所以 a1 一次都不许被撤。
-    expect(h.released).not.toContain('a1')
     // b1 铸出来了却没人要（切回去了）→ 必须撤，否则就是泄漏
-    expect(h.released).toEqual(['b1'])
+    // a1 撤一次: 两份计数里多出来的那一份。**留下的那一份压住正在显示的这条 URL**
+    expect(h.released).toEqual(['b1', 'a1'])
+
+    scope.stop()
+    // 走人时把最后那一份也还掉 —— 至此 3 次成功 get 对 3 次 release
+    expect(h.released).toEqual(['b1', 'a1', 'a1'])
+    expect(tally(h.released)).toEqual(tally(h.granted))
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
+// 会计恒等式
+//
+// 🔴 本组是这个 composable 唯一的**总账**: 一生的 release 总次数必须等于成功取到
+// URL 的总次数。少还一次 = 那条 object URL 被永久钉住（容量逐出跳过被持有的条目）；
+// 多还一次 = 别人正在显示的图当场变死链。两种失败在界面上都几乎看不出来。
+// ═══════════════════════════════════════════════════════════
+
+describe('useAssetImage · 会计恒等式', () => {
+  it('★ A→B→A 快速抖动（一次 Dexie 读之内）：三次成功 get 对三次 release', async () => {
+    const h = makeHarness([
+      row({ id: 'a1', name: '苏婉' }),
+      row({ id: 'b1', name: '林霜' }),
+    ], false)
+    const name = ref<string>('苏婉')
+    const { scope } = run(() => useAssetImage(name, undefined, { source: h.source }))
+    await flush()
+    name.value = '林霜'
+    await flush()
+    name.value = '苏婉'
+    await flush()
+
+    h.settleAll()
+    await flush()
+    scope.stop()
+    await flush()
+
+    expect(h.granted).toEqual(['a1', 'b1', 'a1'])
+    expect(tally(h.released)).toEqual({ a1: 2, b1: 1 })
+  })
+
+  it('乱序兑现 + 多次抖动 + 中途查无此人：总账仍然平', async () => {
+    const h = makeHarness([
+      row({ id: 'a1', name: '苏婉' }),
+      row({ id: 'b1', name: '林霜' }),
+      row({ id: 'c1', name: '沈砚' }),
+    ], false)
+    const name = ref<string | null>('苏婉')
+    const { scope } = run(() => useAssetImage(name, undefined, { source: h.source }))
+    await flush()
+    for (const next of ['林霜', '沈砚', '苏婉', '无此人', '林霜', '苏婉'] as const) {
+      name.value = next
+      await flush()
+    }
+    // 乱序兑现: 后发的先回
+    h.settle('a1')
+    h.settle('c1')
+    h.settle('b1')
+    h.settle('b1')
+    h.settle('a1')
+    h.settle('a1', null) // 这一轮字节缺失 —— 不欠 release
+    await flush()
+
+    scope.stop()
+    await flush()
+
+    expect(h.granted.length).toBeGreaterThan(0)
+    expect(tally(h.released)).toEqual(tally(h.granted))
+  })
+
+  it('拆除时还在飞的那些兑现之后也各自还清（不靠 GC）', async () => {
+    const h = makeHarness([
+      row({ id: 'a1', name: '苏婉' }),
+      row({ id: 'b1', name: '林霜' }),
+    ], false)
+    const name = ref<string>('苏婉')
+    const { scope } = run(() => useAssetImage(name, undefined, { source: h.source }))
+    await flush()
+    name.value = '林霜'
+    await flush()
+
+    scope.stop()
+    h.settleAll() // 两轮都在拆除**之后**才回来
+    await flush()
+
+    expect(tally(h.released)).toEqual(tally(h.granted))
+    expect(tally(h.released)).toEqual({ a1: 1, b1: 1 })
+  })
+
+  /**
+   * ★ 接上**真的** LRU 缓存跑一遍 —— 假件只能证明"还的次数对得上"，
+   * 证不了"正在显示的那条没被撤销"。这条把两件事一起钉死:
+   * 抖动之后 `url.value` 指的必须是一条**活着**的 URL，而收尾时缓存必须一条不剩。
+   *
+   * 泄漏在这里的现形方式是 `cache.size`: 少还一份，a1 的条目就永远留在表里。
+   */
+  it('★ 真缓存：抖动中正在显示的 URL 绝不被撤销，拆除后缓存一条不剩', async () => {
+    const revoked: string[] = []
+    const waiters: (() => void)[] = []
+    let seq = 0
+    const cache = createAssetUrlCache({
+      loadBlob: (id) =>
+        new Promise<Blob>((resolve) => waiters.push(() => resolve(new Blob([id])))),
+      createObjectURL: () => {
+        seq += 1
+        return `blob:fake/${seq}`
+      },
+      revokeObjectURL: (u) => {
+        revoked.push(u)
+      },
+    })
+    const rows = ref<AssetMetaRecord[]>([
+      row({ id: 'a1', name: '苏婉' }),
+      row({ id: 'b1', name: '林霜' }),
+    ])
+    const source: AssetImageSource = {
+      get assets() {
+        return rows.value
+      },
+      assetUrl: (id) => cache.get(id),
+      releaseAssetUrl: (id) => cache.release(id),
+    }
+
+    const name = ref<string>('苏婉')
+    const { scope, api } = run(() => useAssetImage(name, undefined, { source }))
+    await nextTick()
+    // 三轮都还在飞时就抖完（a1 的第二轮会搭第一轮的车 → 计数 2，只铸一个 URL）
+    name.value = '林霜'
+    await nextTick()
+    name.value = '苏婉'
+    await nextTick()
+
+    for (const w of waiters.splice(0, waiters.length)) w()
+    // 真缓存那条链比假件长（load → finally → 采纳 → 活性闸 → composable 的 await），
+    // 多冲几轮微任务
+    await deepFlush()
+
+    const shown = api.url.value
+    expect(shown).not.toBeNull()
+    expect(cache.peek('a1')).toBe(shown) // 还在表里
+    expect(revoked).not.toContain(shown) // **且没被撤销** —— 正在显示它
+    expect(cache.refCount('a1')).toBe(1) // 多出来的那一份已经收拢掉了
+
+    scope.stop()
+    await deepFlush()
+    expect(cache.size).toBe(0) // 一条不剩：泄漏在这里现形
+    expect(revoked).toContain(shown)
+    expect(new Set(revoked).size).toBe(revoked.length) // 也没有二次撤销
   })
 })
 

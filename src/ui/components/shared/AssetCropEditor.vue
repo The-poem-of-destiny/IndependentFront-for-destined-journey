@@ -149,9 +149,23 @@ function resetRects(): void {
     : defaultAvatarRect(imgW.value, imgH.value)
 }
 
+/**
+ * `<img>` 量出真实尺寸。
+ *
+ * 🔴 **只在尺寸真的变了时才重置框**。`sourceSize` 传进来时 `ready` 当场就是 true、
+ * 框立刻可拖，而 `load` 事件要晚一拍才到 —— 若无条件 `setSize`，这一拍里用户拉好的
+ * 框会被"确认了一遍原来就知道的尺寸"抹掉。尺寸相同 = 没有新信息 = 不该动任何状态。
+ *
+ * 尺寸**确实**变了（`sourceSize` 给错、或换了源图）时照旧重置: 旧框的坐标是按旧尺寸
+ * 算的，留着它反而会给出一个越界的框。
+ */
 function onImgLoad(e: Event): void {
   const el = e.target as HTMLImageElement | null
-  if (el) setSize(el.naturalWidth, el.naturalHeight)
+  if (!el) return
+  const w = Math.floor(el.naturalWidth)
+  const h = Math.floor(el.naturalHeight)
+  if (w === imgW.value && h === imgH.value) return
+  setSize(w, h)
 }
 
 /** 每次打开都是全新一轮：模式、提示、忙碌位都归零 */
@@ -336,12 +350,17 @@ const confirmLabel = computed(() => {
   return n === 1 ? '保存这一张' : '保存两张素材'
 })
 
+/**
+ * 🔴 **`'busy'` 刻意不在这张表里**（与 StatusOverview 的 `portraitMessage` 同一条纪律）:
+ * 互斥闸 `rejectIfBusy()` 自己已经播报过「已有一个导入正在进行，请等它结束。」，
+ * 这里再就地写一句就是同一件事说两遍 —— 一条 toast 加一行红字，而用户要做的
+ * 只有"等一下"。共用那句对本路径完全成立（要等的确实是同一个闸），所以删的是
+ * **本地这句**。`confirm` 拿到 `'busy'` 时直接返回，绝不会走进这个 switch。
+ */
 function explain(outcome: AssetMutationOutcome): string {
   switch (outcome) {
     case 'no-crops':
       return '两个类型都选了「不生成」，那这次点击什么也不会发生 —— 至少让其中一个生成。'
-    case 'busy':
-      return '另一次导入正在进行，等它结束再试。'
     case 'naming-invariant':
       return `名称「${props.name}」里不能出现「头像 / 立绘 / 立绘bg」这类类型词，也不能是空名 —— 否则导出再导入时会被解析成另一行。名称要在素材库里改，裁剪这里改不了。`
     case 'unrepresentable-name':
@@ -387,6 +406,10 @@ async function confirm(): Promise<void> {
       emit('close')
       return
     }
+
+    // 互斥闸自己已经播报过了 —— 这里再写一行就是同一件事说两遍（见 `explain` 上方）。
+    // 它在任何字节落地**之前**就返回，所以 `saved` 必空，不存在"漏报部分成功"。
+    if (res.outcome === 'busy') return
 
     // 部分成功**绝不报成功**，也不撤回已经落地的那一半
     problem.value =

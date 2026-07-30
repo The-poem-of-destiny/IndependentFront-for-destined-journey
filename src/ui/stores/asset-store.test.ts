@@ -1055,6 +1055,39 @@ describe('importForCharacter', () => {
     expect((await getAssets())[0].name).toBe(' 苏婉 ')
   })
 
+  /**
+   * 🔴 类型判定与 `importPortraitPair` **同一条优先级**（`resolveSourceMime`:
+   * 先 `blob.type`、再文件名扩展名）。此前这里只认扩展名，于是"没有扩展名但
+   * `type: 'video/mp4'`"的文件被调用方（StatusOverview）判成视频送过来、
+   * 到这里却算不出 MIME —— 一个决定两个解析器，用户拿到一句含糊的「格式不支持」。
+   */
+  it('MIME 优先信 blob.type: 没有扩展名的 mp4 照样收，ext 由路由表反查', async () => {
+    const store = useAssetStore()
+    const bytes = fakeBytes(3)
+    const file = new File([bytes.slice().buffer as ArrayBuffer], '录屏', { type: 'video/mp4' })
+
+    const res = await store.importForCharacter(file, '苏婉', '立绘bg')
+    expect(res.outcome).toBe('ok')
+
+    const rows = await getAssets()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].mime).toBe('video/mp4')
+    // ext 绝不能是空串 —— 它是导出文件名与再导入路由的依据
+    expect(rows[0].ext).toBe('mp4')
+  })
+
+  it('blob.type 不认识时退到扩展名（顺序与 importPortraitPair 一致）', async () => {
+    const store = useAssetStore()
+    const bytes = fakeBytes(4)
+    const file = new File([bytes.slice().buffer as ArrayBuffer], 'a.png', {
+      type: 'application/octet-stream',
+    })
+
+    const res = await store.importForCharacter(file, '苏婉', '头像')
+    expect(res.outcome).toBe('ok')
+    expect((await getAssets())[0].mime).toBe('image/png')
+  })
+
   it('不认识的扩展名 → failed，库无改动', async () => {
     const store = useAssetStore()
     expect(
@@ -1970,6 +2003,131 @@ describe('importPortraitPair', () => {
       { sw: 600, sh: 400, dw: 600, dh: 400 },
       { sw: 300, sh: 300, dw: 300, dh: 300 },
     ])
+  })
+
+  // ── 🔴 记账用**产出的**类型，不用开裁前的预测 ──────────────
+  //
+  // 画布**不保证**照点单的类型编码: webp 编码并非哪儿都有（Firefox 就没有），
+  // `toBlob('image/webp')` 按 HTML 规范静默产出 **PNG 字节**。信预测的结果是库里
+  // 出现一行 `mime: image/webp` / `ext: webp` 盖在 PNG 字节上 —— 界面上看不出来
+  // （浏览器渲染时嗅探字节），但导出文件名、再导入路由、"ext 是权威"全在说谎。
+  //
+  // 三档一起钉住，缺一档这组就退化成"只验了顺手的那种情况":
+  // 编码器认 webp → 记 webp；编码器退回 PNG → 记 png；产物干脆不报类型 → 记 png。
+
+  /**
+   * 画布替身，但**产出的 blob 自称什么由本例说了算**（`undefined` = 干脆不说），
+   * 并把每次点单的类型记下来 —— 那条记录是"预测确实是 webp"的证据，
+   * 没有它，退回档的断言可能只是因为压根没请求过 webp 而恒真。
+   */
+  function encoderRig(outType: string | undefined): {
+    requested: (string | undefined)[]
+    seams: ImageCropSeams
+  } {
+    const requested: (string | undefined)[] = []
+    return {
+      requested,
+      seams: {
+        decode: async () => ({ width: 400, height: 800 }),
+        createCanvas: (width: number, height: number) => ({
+          width,
+          height,
+          getContext: () => ({ drawImage: () => {} }),
+          convertToBlob: async (o?: { type?: string }) => {
+            requested.push(o?.type)
+            return blobOf(fakeBytes(width + height * 7, 64), outType)
+          },
+        }),
+      },
+    }
+  }
+
+  /** webp 源图 —— 只有它才会让 `resolveOutputMime` 预测出 webp */
+  function webpSource(seed = 9): Blob {
+    return blobOf(fakeBytes(seed, 32), 'image/webp')
+  }
+
+  it('编码器认 webp → 行记 webp（预测与产出一致的那一档）', async () => {
+    const store = useAssetStore()
+    await store.init()
+    const rig = encoderRig('image/webp')
+
+    const res = await store.importPortraitPair(
+      webpSource(),
+      '苏婉',
+      { portrait: { x: 0, y: 0, w: 400, h: 800 }, avatar: 'skip' },
+      rig.seams,
+    )
+
+    expect(res.outcome).toBe('ok')
+    expect(rig.requested).toEqual(['image/webp']) // 点的确实是 webp
+    const row = (await getAssets())[0]
+    expect(row.mime).toBe('image/webp')
+    expect(row.ext).toBe('webp')
+  })
+
+  it('🔴 编码器不认 webp、悄悄退回 PNG 字节 → 行必须记 png，绝不记预测的 webp', async () => {
+    const store = useAssetStore()
+    await store.init()
+    const rig = encoderRig('image/png') // Firefox 的行为
+
+    const res = await store.importPortraitPair(
+      webpSource(10),
+      '苏婉',
+      { portrait: { x: 0, y: 0, w: 400, h: 800 }, avatar: 'skip' },
+      rig.seams,
+    )
+
+    expect(res.outcome).toBe('ok')
+    // 前提没跑掉: 点的是 webp（否则下面两条会因为"根本没预测过 webp"而恒真）
+    expect(rig.requested).toEqual(['image/webp'])
+    const row = (await getAssets())[0]
+    expect(row.mime).toBe('image/png')
+    expect(row.ext).toBe('png')
+  })
+
+  it('产出的 blob 不报类型 → 按规范给画布定的默认记 png，不留空 ext', async () => {
+    const store = useAssetStore()
+    await store.init()
+    const rig = encoderRig(undefined)
+
+    const res = await store.importPortraitPair(
+      webpSource(11),
+      '苏婉',
+      { portrait: { x: 0, y: 0, w: 400, h: 800 }, avatar: 'skip' },
+      rig.seams,
+    )
+
+    expect(res.outcome).toBe('ok')
+    expect(rig.requested).toEqual(['image/webp'])
+    const row = (await getAssets())[0]
+    expect(row.mime).toBe('image/png')
+    expect(row.ext).toBe('png')
+    expect(row.ext).not.toBe('')
+  })
+
+  it("整图那一半不跟着降级 —— 它不过画布，字节真的是 webp（同一次调用里两行各记各的）", async () => {
+    const store = useAssetStore()
+    await store.init()
+    const rig = encoderRig('image/png') // 裁的那一半会退回 PNG
+
+    const res = await store.importPortraitPair(
+      webpSource(12),
+      '苏婉',
+      { portrait: 'whole', avatar: { x: 0, y: 0, w: 200, h: 200 } },
+      rig.seams,
+    )
+
+    expect(res.outcome).toBe('ok')
+    const rows = await getAssets()
+    const portrait = rows.find((r) => r.type === '立绘')!
+    const avatar = rows.find((r) => r.type === '头像')!
+    // 整图: 源字节原样存，所以照实记 webp
+    expect(portrait.mime).toBe('image/webp')
+    expect(portrait.ext).toBe('webp')
+    // 裁剪: 产出的是 PNG 字节，就记 png
+    expect(avatar.mime).toBe('image/png')
+    expect(avatar.ext).toBe('png')
   })
 
   it('整图那一半不受上限约束 —— 它根本不过画布（不重编码是更强的承诺）', async () => {

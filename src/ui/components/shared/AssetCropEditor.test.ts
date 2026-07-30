@@ -192,6 +192,38 @@ async function mountEditor(): Promise<{
   }
 }
 
+/**
+ * jsdom 没有 `URL.createObjectURL`，于是 `srcUrl` 恒为空、`<img class="stage-img">`
+ * 根本不渲染 —— 而「晚到的 load 事件会不会抹掉用户调好的框」这条只能在**有** `<img>`
+ * 时才验得到。所以这几条用例临时装一个替身，跑完原样卸掉（别让它漏给别的用例:
+ * 有了它，另一批用例的预览分支会跟着换一条路走）。
+ */
+async function withObjectUrl(run: () => Promise<void>): Promise<void> {
+  const target = globalThis.URL as unknown as Record<string, unknown>
+  const create = target.createObjectURL
+  const revoke = target.revokeObjectURL
+  target.createObjectURL = () => 'blob:crop-src'
+  target.revokeObjectURL = () => {}
+  try {
+    await run()
+  } finally {
+    if (create === undefined) delete target.createObjectURL
+    else target.createObjectURL = create
+    if (revoke === undefined) delete target.revokeObjectURL
+    else target.revokeObjectURL = revoke
+  }
+}
+
+/** 让 `<img>` 报出一份 naturalWidth/Height（jsdom 不解码，只能自己定义上去） */
+async function fireImgLoad(wrapper: VueWrapper, w: number, h: number): Promise<void> {
+  const img = wrapper.find('.stage-img')
+  expect(img.exists()).toBe(true)
+  const el = img.element as HTMLImageElement
+  Object.defineProperty(el, 'naturalWidth', { value: w, configurable: true })
+  Object.defineProperty(el, 'naturalHeight', { value: h, configurable: true })
+  await img.trigger('load')
+}
+
 describe('AssetCropEditor', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -324,13 +356,71 @@ describe('AssetCropEditor', () => {
 
   it('全失败时只报理由，不出现「部分成功」的措辞', async () => {
     const { wrapper, vm, resolveWith } = await mountEditor()
-    resolveWith({ outcome: 'busy' })
+    resolveWith({ outcome: 'not-found' })
     await wrapper.find('.confirm-btn').trigger('click')
     await flushPromises()
 
     expect(vm.problem).not.toContain('部分成功')
-    expect(vm.problem).toContain('另一次导入正在进行')
+    expect(vm.problem).toContain('不在库里')
     expect(wrapper.emitted('close')).toBeUndefined()
+  })
+
+  /**
+   * 🔴 `'busy'` 是**互斥闸自己**播报的（`rejectIfBusy()` 发一条 toast）。这里再
+   * 就地写一行红字，就是同一件事说两遍 —— 一条 toast + 一行红字，而用户能做的
+   * 只有"等一下"。窗不关、按钮恢复可点，重试的路一条不少。
+   */
+  it('🔴 busy 不在窗内再说一遍（互斥闸自己已经播报过）', async () => {
+    const { wrapper, vm, resolveWith } = await mountEditor()
+    resolveWith({ outcome: 'busy' })
+    await wrapper.find('.confirm-btn').trigger('click')
+    await flushPromises()
+
+    expect(vm.problem).toBe('')
+    expect(wrapper.find('.field-error').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('另一次导入正在进行')
+    // 也不冒充成功
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(wrapper.emitted('saved')).toBeUndefined()
+    expect(wrapper.emitted('announce')).toBeUndefined()
+    // 忙碌位收干净了，等闸放开就能再点
+    expect(vm.canConfirm).toBe(true)
+  })
+
+  /**
+   * 🔴 `sourceSize` 给了之后 `ready` 当场为 true、框立刻可拖，而 `<img>` 的 load
+   * 事件要晚一拍才到。那一拍里用户调过的框**绝不能**被一次"确认了一遍早就知道的
+   * 尺寸"的 load 抹掉 —— 尺寸没变就是没有新信息，不该动任何状态。
+   */
+  it('🔴 load 事件只确认了已知尺寸时，不重置用户已经调过的框', async () => {
+    await withObjectUrl(async () => {
+      const { wrapper, vm } = await mountEditor()
+
+      // 用户在 load 到达之前已经把头像框拖过了
+      await wrapper.find('[data-handle="avatar-se"]').trigger('keydown', { key: 'ArrowRight' })
+      const adjusted = { ...vm.avatarRect }
+      expect(adjusted).toEqual({ x: 50, y: 0, w: 301, h: 301 })
+
+      // load 姗姗来迟，量出来的正是注入的那份尺寸 —— 没有新信息
+      await fireImgLoad(wrapper, 400, 900)
+
+      expect(vm.avatarRect).toEqual(adjusted)
+      expect(vm.portraitRect).toEqual(wholeImageRect(400, 900))
+    })
+  })
+
+  /** 尺寸**确实**不同（注入的 sourceSize 给错了）→ 照旧重置：旧框的坐标已经无效 */
+  it('load 量出的尺寸与注入的不一致时，仍然重置（旧框按旧尺寸算，留着会越界）', async () => {
+    await withObjectUrl(async () => {
+      const { wrapper, vm } = await mountEditor()
+      await wrapper.find('[data-handle="avatar-se"]').trigger('keydown', { key: 'ArrowRight' })
+      expect(vm.avatarRect.w).toBe(301)
+
+      await fireImgLoad(wrapper, 200, 400)
+
+      expect(vm.portraitRect).toEqual(wholeImageRect(200, 400))
+      expect(vm.avatarRect).toEqual(defaultAvatarRect(200, 400))
+    })
   })
 })
 

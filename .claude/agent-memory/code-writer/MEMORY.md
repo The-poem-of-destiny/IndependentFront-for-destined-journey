@@ -7,4 +7,6 @@
 - [store mock 必须 reactive](reactive-store-mock-vacuous.md) — 裸对象 mock 切断响应式链，「落库后 UI 自己刷新」的断言恒真/恒假；去掉 reactive 必须变红
 - [图像上不放控件](feedback-no-furniture-on-media.md) — 画像位保持纯净（无旋钮/徽章/浮层），调节收进 Modal 内含实时预览；两层 Modal 用 `open && !childOpen` 收父层
 - [Blob/Uint8Array typecheck 陷阱](blob-uint8array-typecheck-trap.md) — new Blob([变量 Uint8Array]) 测试绿但 tsc 红；写成 bytes.slice().buffer as ArrayBuffer
+- [预测值别当记账依据](asset-crop-mime-precommit.md) — 裁剪落库曾用 resolveOutputMime 预定 ext/mime，画布编不出 webp 时写假类型；已修（读产出 blob.type）
 - [PowerShell 会毁掉 UTF-8 源文件](powershell-mangles-utf8-source.md) — PS 5.1 的 Get/Set-Content 批量替换把中文注释整份变乱码；改文件一律 Edit/Write，脚本化用 Bash
+- [.bat stderr 噪音要换姿势才测得出](bat-stderr-harness-dependent.md) — Start-Process 恒报 0；只有 Git Bash 的 `cmd.exe /c 全路径 2> e.txt < /dev/null` 复现得出。测 dev.bat 先把端口改等长安全值，别碰 5173

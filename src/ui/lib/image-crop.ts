@@ -189,14 +189,27 @@ function resolveCanvasFactory(seam?: CropCanvasFactory): CropCanvasFactory {
  *
  * 所以名单外的一律落到 PNG。
  *
+ * 🔴 **`image/webp` 留在名单里，但它只是"点名要"，不是"一定拿得到"**:
+ * 画布的 webp **编码**并非哪儿都有（Firefox 就没有），`toBlob('image/webp')`
+ * 按 HTML 规范会静默产出 **PNG 字节**。gif/avif 是"确定编不出"所以直接不写进名单，
+ * webp 是"多数引擎编得出"所以照样请求 —— 但**这两者的结论是同一条**:
+ * 谁都不许把请求的类型当成产出的类型去记账。
+ * 输出类型的**唯一权威是产出的 `blob.type`**，调用方必须读它（见
+ * {@link cropImageBlob} 的返回值说明），拿不到明确类型时按 {@link FALLBACK_OUTPUT_MIME}
+ * 记 —— 那正是规范给画布定的默认。
+ *
  * ⚠️ 一个诚实的损失，读代码的人该知道: 动态 WebP 经过画布只剩**第一帧**（画布本来
  * 就只能画一帧）。输出仍标 `image/webp`，但它是静态的。裁剪这件事本身就没法保留动画，
  * 换成任何别的格式也一样 —— 想留动画就别裁，走原样导入那条路。
  */
 const PRESERVED_OUTPUT_MIMES: ReadonlySet<string> = new Set(['image/png', 'image/webp'])
 
-/** 名单外一律落这里 */
-const FALLBACK_OUTPUT_MIME = 'image/png'
+/**
+ * 名单外一律落这里；**也是"产出的 blob 不肯说自己是什么"时唯一站得住的记法** ——
+ * HTML 规范给画布定的默认就是它（请求的类型不被支持 → `image/png`）。
+ * 导出成常量是为了让调用方的兜底与本模块的兜底是**同一个值**，而不是两处各写一遍。
+ */
+export const FALLBACK_OUTPUT_MIME = 'image/png'
 
 function assertNotVideoMime(mime: string, what: string): void {
   if (mime.toLowerCase().startsWith('video/')) {
@@ -335,6 +348,13 @@ export async function readImageSize(
  *   绝不静默返回一张空白 PNG —— 一张全透明的图存进库里之后没人查得出它是怎么来的。
  * - `options.maxEdge` 把长边压下来，等比。
  * - 输出 MIME 见 {@link resolveOutputMime}；`video/*` 永远抛错。
+ *
+ * 🔴 **返回的 `blob.type` 才是这次产出的真类型，别用 {@link resolveOutputMime}
+ * 的预测去记账**: 那个函数回答的是"这次**要**编成什么"，而画布**不保证**照办
+ * （webp 编码在 Firefox 上没有，会静默退回 PNG 字节）。把预测写进库里，得到的
+ * 就是一行 `ext: webp` 盖在 PNG 字节上的记录 —— 显示看不出来（浏览器嗅探字节），
+ * 但导出文件名、再导入路由、"ext 是权威"的契约全在说谎。
+ * `blob.type` 为空或不认识时按 {@link FALLBACK_OUTPUT_MIME} 记。
  *
  * @throws {ImageCropError} 一切失败路径，带 `code`
  */

@@ -8,6 +8,7 @@ import { useAssetImage } from '../../composables/useAssetImage'
 import { ASSET_MIME_BY_EXTENSION, mimeForAssetExtension } from '@engine/asset-types'
 import { ASSET_TYPE_FALLBACK_CHAIN } from '@engine/asset-resolve'
 import type { AssetMutationOutcome } from '../../stores/asset-store'
+import type { AssetType } from '@engine/types'
 import { normalizeItemType } from '@engine/field-enums'
 import ResourceBar from '../shared/ResourceBar.vue'
 import AvatarPanel from '../shared/AvatarPanel.vue'
@@ -37,7 +38,18 @@ const player = computed(() => game.player)
 //     用户手里只有一张图，让他导两次、各裁一次，等于把"这两张图同源"的记账推给他。
 //   · mp4 → **不开**裁剪台。画布只取得到某一帧，"裁一段视频"没有意义；而且 D7
 //     本来就不让视频落在 `立绘` 上（那是要抠图合成的）。于是走原来的直通路径，
-//     且**只**写 `头像` —— 存进去的必须是确定的一格，只有读取才降级。
+//     写 `立绘bg` —— 存进去的必须是确定的一格，只有读取才降级。
+//
+// 🔴 mp4 为什么写 `立绘bg` 而不是 `头像`: 这个槽**读**的是立牌链
+// `立绘 → 立绘bg → 头像`，而 `头像` 在链的**最末**。往 `头像` 写，只要这个角色
+// 已经有一张 `立绘`（点「更换图片」的人多半正是这种情况），链照旧命中旧立绘 ——
+// 画面一动不动，却弹一句「已设为画像」。`立绘bg` 同样是 D7 认可的视频落点
+// （`allowsVideo('立绘bg') === true`：整幅铺满，什么都不合成，不需要 alpha），
+// 而且在链上**压过** `头像`，于是"没有立绘时视频立刻显示出来"成立。
+//
+// 但 `立绘` 仍会压过它，而**永不覆盖**（D11）是不可动摇的，所以这一格没法靠写入
+// 解决遮挡。剩下的唯一诚实做法: 写完回头看链现在命中的是不是这一行，不是就
+// 照实说「存下了，但这一格没变，是谁压着、去哪解决」（见 `announcePortraitWrite`）。
 const {
   url: portraitUrl,
   isVideo: portraitIsVideo,
@@ -59,6 +71,16 @@ const hasLargePortrait = computed(
 
 const assets = useAssetStore()
 const ui = useUIStore()
+
+/**
+ * mp4 落在哪一格。
+ *
+ * `立绘bg` 是 D7 认可的两个视频落点之一（`allowsVideo('立绘bg') === true` ——
+ * 整幅铺满，什么都不合成，用不上 alpha），同时在**立牌链**上压过 `头像`。
+ * 另一个合法落点 `头像` 在链的最末，写进去很可能一点都看不见（见顶部长注释）。
+ * 🔴 绝不可以是 `立绘`: 那是要抠像叠在背景上的立牌，mp4 没有合成 alpha。
+ */
+const PORTRAIT_VIDEO_TYPE: AssetType = '立绘bg'
 
 /** 认可的素材 MIME —— 路由表是唯一来源（含 `video/mp4`），不在这里手抄一份 */
 const ASSET_MIMES = new Set(Object.values(ASSET_MIME_BY_EXTENSION))
@@ -161,7 +183,10 @@ function onCropSaved(ids: { portraitId?: string; avatarId?: string }): void {
  * 那句共用文案对本路径完全成立（要等的确实是同一个闸），所以删的是**本地这句**
  * 而不是共用那句。调用方在拿到 `'busy'` 时直接返回，绝不会走到这个 switch。
  */
-function portraitMessage(outcome: AssetMutationOutcome, name: string): { text: string; type: 'info' | 'error' } {
+function portraitMessage(
+  outcome: AssetMutationOutcome,
+  name: string,
+): { text: string; type: 'info' | 'warning' | 'error' } {
   switch (outcome) {
     case 'ok':
       return { text: `已把这张图设为「${name}」的画像。`, type: 'info' }
@@ -210,14 +235,52 @@ async function onPortraitFile(e: Event): Promise<void> {
     return
   }
 
-  // mp4 → 裁不了（画布只有某一帧），直通导入，且只写 头像。
+  // mp4 → 裁不了（画布只有某一帧），直通导入，写 立绘bg（见本文件顶部"为什么不是头像"）。
   // 文件名在这条路径上**只**贡献扩展名 —— name 与 type 由这个槽位说了算，
   // 于是 `IMG_1234.mp4` 不会在库里长出一个叫 IMG_1234 的幽灵角色组
-  const { outcome } = await assets.importForCharacter(file, name, '头像')
+  const { outcome, id } = await assets.importForCharacter(file, name, PORTRAIT_VIDEO_TYPE)
   // 互斥闸已经自己播报过了 —— 这里再补一句就是两条 toast 说同一件事
   if (outcome === 'busy') return
-  const { text, type } = portraitMessage(outcome, name)
-  ui.toast(text, type)
+  announcePortraitWrite(outcome, id, name)
+}
+
+/**
+ * 落库的结论 → 说给用户听的那一句。**判据是这一格现在显示的是不是刚写的那一行**，
+ * 不是 store 有没有返回 `'ok'`。
+ *
+ * 🔴 为什么必须多这一步: 写入定位到**一格**（`立绘bg`），而读取走的是**一条链**
+ * （`立绘 → 立绘bg → 头像`）。角色已经有 `立绘` 时，链继续命中旧立绘，这一格
+ * 一个像素都没变 —— 此时说「已设为画像」就是在骗人，而用户看着没反应只会再点一次。
+ *
+ * 遮挡**不是**可以靠写入解决的: 唯一的解法是删掉/换掉压在上面的那一行，而
+ * **永不覆盖**（D11）不允许导入路径替用户做这个决定。所以这里给的是"谁压着、
+ * 去哪改"，不是一句道歉。
+ *
+ * `portraitRow` 是同步 computed（纯索引查找），而 store 在 `writeIntoSlot` 末尾
+ * 已经 `refreshAssets()` 过，所以 await 回来直接读它就是最新的答案。
+ */
+function announcePortraitWrite(
+  outcome: AssetMutationOutcome,
+  id: string | undefined,
+  name: string,
+): void {
+  if (outcome !== 'ok' || id === undefined) {
+    const { text, type } = portraitMessage(outcome, name)
+    ui.toast(text, type)
+    return
+  }
+
+  const shown = portraitRow.value
+  if (shown !== null && shown.id !== id) {
+    ui.toast(
+      `这段视频已经存进「${name}」的「${PORTRAIT_VIDEO_TYPE}」了，但画像位显示的仍是排在更前面的「${shown.type}」—— 这一格看上去没有任何变化。` +
+        `想让视频显示出来，请到 设置 → 素材 里把「${name}」的那张「${shown.type}」删掉或换掉。`,
+      'warning',
+    )
+    return
+  }
+
+  ui.toast(`已把这段视频设为「${name}」的画像。`, 'info')
 }
 
 // ═══ 折叠状态 ═══

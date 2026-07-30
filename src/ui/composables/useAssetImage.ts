@@ -191,7 +191,24 @@ export function useAssetImage(
 
   const url = ref<string | null>(null)
 
-  /** 当前持有 URL 的 id —— 我们**欠它一次 release** */
+  /**
+   * id → **我们还欠这个 id 几次 release**。
+   *
+   * 🔴 为什么这里必须是「每个 id 一个计数」而不是单个 `heldId`: 一次成功的
+   * `assetUrl(id)` 就是一份引用计数（lib/asset-url.ts 的契约「每一次成功取用
+   * 都 +1，调用方欠一次对应的 release」），而**同一个 id 完全可能被取两次** ——
+   * 名字在一次 Dexie 读之内 A→B→A 地抖一下，第一轮与第三轮各自领了一份，
+   * 第一轮的续体走过期分支**刻意不还**（新一轮要接手），可新一轮领的是它自己
+   * 铸的那一份，从没认领过第一轮那一份。单个 `heldId` 表达不出「欠 2 次」，
+   * 卸载时只还 1 次 —— 剩下那一份把这条 URL 永久钉住（容量逐出跳过被持有的
+   * 条目，只有 `revokeAll()` 收得回）。
+   *
+   * **不变式（本模块的会计恒等式）**: 本 composable 一生的 release 总次数
+   * === 成功取到 URL 的总次数；且**正在显示的那条永远留着至少一份**，不会被
+   * 我们自己踩到零。
+   */
+  const owed = new Map<string, number>()
+  /** 当前正在显示的那条的 id（`owed` 里为它保留最后一份） */
   let heldId: string | null = null
   /** 加载世代号；每次目标变化 +1，await 回来先验号再落笔 */
   let generation = 0
@@ -200,11 +217,33 @@ export function useAssetImage(
   /** 作用域已拆；此后一律不再写状态 */
   let disposed = false
 
-  /** 放掉当前持有的那条（若有）。**只在这里改 `heldId`** */
-  function releaseHeld(): void {
-    const prev = heldId
-    heldId = null
-    if (prev !== null) source.releaseAssetUrl(prev)
+  /** 记一笔欠账（**只在成功取到 URL 之后调**） */
+  function owe(id: string): void {
+    owed.set(id, (owed.get(id) ?? 0) + 1)
+  }
+
+  /**
+   * 把某个 id 的欠账还到只剩 `keep` 份。`keep` 恒是 0 或 1:
+   * - `0` = 没人在显示它了，全还清；
+   * - `1` = 正在显示它，**留最后一份压住它别被撤销**。多出来的那些还掉是安全的:
+   *   我们自己还攥着 1 份，缓存计数不可能因这几次 release 归零。
+   */
+  function payDown(id: string, keep: number): void {
+    let n = owed.get(id) ?? 0
+    while (n > keep) {
+      n -= 1
+      source.releaseAssetUrl(id)
+    }
+    if (n <= 0) owed.delete(id)
+    else owed.set(id, n)
+  }
+
+  /**
+   * 落笔之后收拢欠账: 正在显示的那条留一份，其余全部还清 —— 既包括刚被换下的
+   * 那个 id，也包括**同一个 id 上过期轮次留下的多余份额**（就是上面说的那份）。
+   */
+  function settleDebts(keepId: string | null): void {
+    for (const id of [...owed.keys()]) payDown(id, id === keepId ? 1 : 0)
   }
 
   async function load(id: string | null): Promise<void> {
@@ -213,43 +252,52 @@ export function useAssetImage(
 
     if (id === null) {
       url.value = null
-      releaseHeld()
+      heldId = null
+      settleDebts(null)
       return
     }
     // 已经就是它且已装载 —— 不重复铸造，也不撤销后重铸（那会闪一下）
     if (id === heldId && url.value !== null) return
 
     const next = await source.assetUrl(id)
+    // 🔴 记账要做的第一件事: 成功取到就是欠了一份，此后**每条分支都从这张表出账**。
+    // （拿到 null 不欠 —— 见 lib/asset-url.ts 的 `get` 契约）
+    if (next !== null) owe(id)
 
     if (disposed || gen !== generation) {
       // 过期的一轮**绝不落笔**（否则界面上是另一个角色的脸）。
-      // 刚铸出来的这条要不要撤销，取决于还有没有人要它:
-      // - 新一轮要的正是同一个 id → 留着，那一轮会接手
-      // - 我们已经持有它 → 留着，撤了就是把正在显示的图撤掉
-      if (next !== null && id !== latestId && id !== heldId) source.releaseAssetUrl(id)
+      // 刚领的这一份欠账要不要当场还，取决于还有没有人要这条 URL:
+      // - 新一轮要的正是同一个 id → **留着**。当场还会走进这条分支本来要防的那个
+      //   窄窗口: 新一轮可能还没领到自己那一份计数，先还就把计数踩到零、URL 当场
+      //   撤销，新一轮兑现时拿到的是死链。这一份由接手的那一轮在 `settleDebts` 里
+      //   收拢（它自己也会领一份，所以还得起）。
+      // - 我们正持有它 → 留着，撤了就是把正在显示的图撤掉。
+      if (id !== latestId && id !== heldId) payDown(id, 0)
       return
     }
 
-    const prev = heldId
     // 字节缺失（元数据在、blob 没了）→ 什么都不持有，渲染占位；重试仍可成功
     heldId = next === null ? null : id
     url.value = next
-    // 🔴 **后**撤旧的: 先撤会在 prev === id 这条路上撤掉自己刚拿到的那条 URL
-    if (prev !== null && prev !== id) source.releaseAssetUrl(prev)
+    // 🔴 顺序是**先落笔、后收拢**。反过来（先把旧的还干净再取新的）会在
+    // 「换走又换回同一个 id」那条路上，把自己马上要用的那条 URL 踩到零。
+    settleDebts(heldId)
   }
 
   watch(resolvedId, (id) => void load(id), { immediate: true })
 
   onScopeDispose(() => {
     disposed = true
-    // 🔴 这两行不是清理洁癖，是**堵一个真实的泄漏**: 拆除时若还有 `assetUrl(id)`
+    // 🔴 这几行不是清理洁癖，是**堵一个真实的泄漏**: 拆除时若还有 `assetUrl(id)`
     // 在飞，它回来时会走过期分支，而那里的 `id !== latestId` 本意是「新一轮要接手
     // 这条 URL」—— 拆除之后根本没有新一轮，`latestId` 却还停在它身上，于是刚铸出来
     // 的那条 URL 谁都不撤。清成 null 之后，过期分支才会当场把它撤掉。
     latestId = null
     generation += 1
     url.value = null
-    releaseHeld()
+    heldId = null
+    // 走人了，一份都不留 —— 同一个 id 欠几份就还几份
+    settleDebts(null)
   })
 
   return { url, isVideo, row }

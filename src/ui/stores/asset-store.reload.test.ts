@@ -167,6 +167,10 @@ describe('刷新之后素材还读得出字节吗（真机症状复现）', () =
     }
     const rowsBefore = await s1.db.getAssets()
     expect(rowsBefore).toHaveLength(2)
+    // 这里记的是 webp，因为**本替身真的按点单的类型出了 blob**（`options?.type`）。
+    // 行里的 ext/mime 一律取自**产出的** blob，不取自开裁前的预测 —— 编码器不认
+    // webp 而退回 PNG 时该记 png，那一档钉在 asset-store.test.ts 的
+    // 「编码器不认 webp、悄悄退回 PNG 字节」。
     expect(rowsBefore.every((r) => r.ext === 'webp' && r.mime === 'image/webp')).toBe(true)
 
     // ── 刷新 ──────────────────────────────────────────────

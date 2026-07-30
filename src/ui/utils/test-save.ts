@@ -42,19 +42,36 @@ let clearedThisLoad = false;
  * 丢的东西和幸存的东西都各自"看起来合理"，这就是它极难自查的原因。
  *
  * 两个开关分别记账，缺一不可:
- * - `initialized`: `initializeDatabase()` 每次页面加载只需一次。
+ * - `initialized`: `initializeDatabase()` 负责播下默认预设/设置，正常情况下每次页面
+ *   加载只需跑一次。**但 `clearAllData()` 是 `db.delete()`，会把它播下的东西一并删掉**，
+ *   所以清库成功后必须把这个开关**重置回 `false` 强制补种**。少了这一步就会落进
+ *   "库清空了、默认数据却再也没回来"的状态 —— 只在特定点击顺序下发作:
+ *   先点「保留数据」（`initialized` 置真），再点「清空重建」，清是清了，播种被跳过。
  * - `clearedThisLoad`: 清库**每次页面加载最多一次**（保持原行为 —— 同一次加载里
  *   点第二下不再清，这正是会攒出两个「测试冒险」存档的原因）。
- *   刻意与 `initialized` **分开**记: 合成一个的话，先点了「保留数据」那一档之后
- *   `initialized` 已为真，再点「清空重建」就永远清不掉了 —— 一个只在特定点击
- *   顺序下才出现的哑火。
+ *   **只在 `clearAllData()` 真正成功之后才置位**: 失败时保持 `false`，下次点击仍会
+ *   重试，而不是把一次失败的清空记成"已经清过了"。
+ *
+ * 清库失败时**不静默吞掉**: 会 `console.warn` 并如实说明"这次是在未清空的库上继续
+ * 造存档"，因为按钮标题承诺的是「清空重建」，不吭声会让用户看到的和实际发生的对不上。
  *
  * 想要"造存档但别动我的素材/音乐"，用 {@link createTestSavePreservingData}。
  */
 async function ensureDb(reset: boolean) {
   if (reset && !clearedThisLoad) {
-    clearedThisLoad = true;
-    try { await clearAllData(); } catch { /* 首次运行可能无数据 */ }
+    try {
+      await clearAllData();
+      clearedThisLoad = true;
+      // 整个库连同默认预设/设置都没了，必须重新播种。
+      initialized = false;
+    } catch (err) {
+      // 常见真实成因: 另一个标签页还占着 Dexie 连接，`db.delete()` 被 blocked。
+      console.warn(
+        '[test-save] 清空数据库失败，本次将在**未清空**的库上继续创建测试存档' +
+          '（按钮承诺的「清空重建」这次没有兑现）。常见原因: 另一个标签页占着 Dexie 连接。',
+        err,
+      );
+    }
   }
   if (!initialized) {
     await initializeDatabase();

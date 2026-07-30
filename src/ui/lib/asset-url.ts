@@ -7,7 +7,13 @@
  * 同时出现在 ScenePanel 与 CharacterListPanel）。没有计数时，第一个卸载的组件
  * 就把 URL 撤了，其余还在显示它的组件当场变成死图。所以:
  * - `get()` **每一次成功取用都 +1**（含命中缓存与搭在飞的车）
- * - `release()` -1，**归零才撤销**；未知 id / 已归零一律是无害空操作，计数永不为负
+ * - `release()` -1，**归零才撤销**。它保证的是**不炸**: 未知 id / 已归零不抛错、
+ *   计数永不为负、重复 release 不会二次撤销。⚠️ **但"不炸"不等于"无害"** ——
+ *   计数只按 id 记、**不记是谁欠的**，所以一次没有对应 `get()` 的 release 花的是
+ *   **别人**的那一份。最尖锐的窗口是「URL 已铸好、发起者还没拿到手」那一小段
+ *   （此刻计数恰好是 1）: 这时插进来一次误 release 会当场撤销这条 URL，发起者的
+ *   `get()` 只能拿到 `null`（活性闸拦住了死链，但那次取用确实失败了）。
+ *   规矩因此是**只 release 自己 get 到的那一份**，别拿 id 当"清一下缓存"的开关
  * - 容量逐出**绝不撤销被持有的条目**：宁可超容，也不能撤掉正在显示的 URL
  * - `revokeAll()` 是拆除口，**无视计数**全撤（分区 unmount 时那一下）
  *
@@ -65,6 +71,9 @@ export interface AssetUrlCache {
    *   各得一份计数**（两个组件并发要同一张头像 → 计数是 2 不是 1）
    * - loader 返回 undefined（blob 缺失）→ 返回 null 且**什么都不缓存**，之后重试仍可成功
    * - loader 抛错 → 原样上浮，且不留下中毒的在飞条目，之后重试仍可成功
+   * - 铸好之后、兑现之前被 {@link AssetUrlCache.revokeAll} 拆掉（或被别人 release
+   *   归零）→ 返回 null。**绝不端出一条已撤销的 URL**: 那既是死链，又会让调用方
+   *   欠下一次记到「日后同 id 新铸的那条」头上的 release
    */
   get(id: string): Promise<string | null>
   /**
@@ -76,8 +85,16 @@ export interface AssetUrlCache {
    */
   peek(id: string): string | null
   /**
-   * 归还一份引用。**计数归零才撤销并移除**；未知 id、已归零的 id 都是无害空操作
-   * （计数永不为负），重复 release 也不会二次撤销。
+   * 归还一份引用。**计数归零才撤销并移除**。
+   *
+   * 保证的是**不炸**: 未知 id、已归零的 id 都不抛错，计数永不为负，重复 release
+   * 也不会二次撤销。
+   *
+   * ⚠️ **不是"无害"**: 计数按 id 记、不记是谁欠的，所以一次没有对应 `get()` 的
+   * release 花掉的是**别人**的那一份；当那一份恰好是唯一一份时（典型是一次
+   * 还在飞的 `get()`——它的计数已在内部落地、URL 却还没交到调用方手上），
+   * 这条 URL 会被当场撤销，那次 `get()` 于是返回 `null`。**只 release 自己
+   * get 到的那一份。**
    */
   release(id: string): void
   /** 拆除用（如分区 unmount）：**无视引用计数**逐条撤销全部存活 URL 并清空缓存 */
@@ -182,6 +199,26 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
     }
   }
 
+  /**
+   * 出门前的**活性闸** —— `get` 的两条返回路径共用这一道。
+   *
+   * 🔴 为什么不能「验不过就只是不计数、URL 照样端出去」: 铸造完成与调用方拿到它
+   * 之间隔着若干个微任务，这中间 `revokeAll()`（分区拆除）完全可能插进来把这条
+   * URL 撤掉。此时端出去的是一条**死链**（`<img>` 当场裂），而且按契约调用方
+   * 仍欠一次 release —— 那一次会记到日后为同一个 id 重新铸出来的**新** URL 头上，
+   * 把别人正在显示的图撤掉。两害都由「拿不到就给 null」一并堵掉（契约里
+   * 「拿到 null 则不欠」正好接得住）。
+   *
+   * @param claim 调用方手上**还没有**计数（搭车路径）→ 验过当场 +1；
+   *   发起者的那一份已在 {@link load} 里落地，传 `false` 只验不加。
+   */
+  function liveOnly(id: string, url: string | null, claim: boolean): string | null {
+    if (url === null) return null
+    if (urls.get(id) !== url) return null
+    if (claim) retain(id)
+    return url
+  }
+
   /** 刷新新鲜度：delete + set 把条目挪到队尾 */
   function touch(id: string, url: string): void {
     urls.delete(id)
@@ -248,11 +285,7 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
         // 直接返回的话，两个组件并发要同一张头像只会记 1 份，先卸载的那个
         // 一 release 就归零撤销 —— 另一个组件当场死图。这正是引用计数要修的
         // 那个 bug 的并发变体，而且比串行版更难查（要两个组件卡在同一个 tick）。
-        const url = await pending
-        // 只有「这条 URL 确实还是当前缓存里的那条」才计数。中途被 revokeAll()
-        // 拆掉、或已被别人 release 归零的话，计数上去就成了永不归零的幽灵引用。
-        if (url !== null && urls.get(id) === url) retain(id)
-        return url
+        return liveOnly(id, await pending, true)
       }
 
       // 两个组件同时要同一张头像时，若不去重就会铸两个 URL、只记住一个，
@@ -263,13 +296,16 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
         if (inflight.get(id) === p) inflight.delete(id)
       })
       inflight.set(id, p)
-      // 发起者那一份计数在 load() 里落地（必须早于 evictIfNeeded，见那里的注释）
-      return p
+      // 发起者那一份计数在 load() 里落地（必须早于 evictIfNeeded，见那里的注释）；
+      // 但**落地之后、兑现之前**这条 URL 仍可能被 revokeAll() 拆掉，所以出门前
+      // 同样要验一次活性 —— 发起者与搭车者走的是同一道闸。
+      return liveOnly(id, await p, false)
     },
 
     release(id: string): void {
       const n = countOf(id)
-      // 未知 id / 已归零：无害空操作，且计数绝不为负
+      // 未知 id / 已归零：不抛错、计数绝不为负。
+      // （"无害"只到这一步为止 —— n === 1 那条分支撤的可能是别人的那一份，见契约）
       if (n <= 0) {
         refs.delete(id)
         return

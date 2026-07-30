@@ -69,6 +69,7 @@ import { hashMediaBlob } from '../lib/media-hash'
 import {
   cropImageBlob,
   resolveOutputMime,
+  FALLBACK_OUTPUT_MIME,
   ImageCropError,
   type CropRect,
   type ImageCropSeams,
@@ -463,6 +464,40 @@ function resolveSourceMime(source: Blob): string | undefined {
     if (byExt !== undefined) return byExt
   }
   return undefined
+}
+
+/**
+ * 画布**真的产出了**什么类型 —— 用来给行填 `mime` / `ext`，**取代开裁前的预测**。
+ *
+ * 🔴 为什么不能信 `resolveOutputMime()` 的预测: 那个函数回答的是"这次**要**编成
+ * 什么"，而画布**不保证**照办。webp 编码并非哪儿都有（Firefox 就没有），
+ * `toBlob('image/webp')` 按 HTML 规范会静默产出 **PNG 字节**。信预测的结果是库里
+ * 出现一行 `mime: image/webp` / `ext: webp` **盖在 PNG 字节上** —— 界面上完全看不
+ * 出来（浏览器渲染时嗅探字节），但导出的文件名、再导入时的路由、以及"ext 是权威"
+ * 这条契约全在说谎，而且要到用户把包带去另一台机器才炸。
+ * image-crop.ts 早就为 gif/avif 讲过同一条理由（"别记一个字节并不具备的类型"），
+ * 只是当时没把它落到 webp 上 —— 这里补上，落点在**记账的那一侧**。
+ *
+ * **只信 blob 自称的类型，绝不嗅字节**: 嗅字节要把整份内容读出来，为一个
+ * "几乎总是对得上"的字段付这个代价不划算；而 blob 是编码器自己交回来的，
+ * 它比我们的预测近一手。
+ *
+ * 兜底一律 {@link FALLBACK_OUTPUT_MIME}（PNG），两种情形共用:
+ * - `type` 是空串（注入的替身、或某些老引擎不填）；
+ * - `type` 不在素材路由表里（含 `video/*`：画布产不出视频，出现即是替身在乱来，
+ *   顺着记只会给行编一个更假的 ext）。
+ *
+ * 为什么兜底是 PNG 而不是"沿用预测": 规范给画布定的默认就是 PNG（请求的类型不被
+ * 支持时产出 `image/png`），所以在没有别的线索时它是**最可能为真**的那个；
+ * 而沿用预测等于把要修的那个谎原样再写一遍。
+ */
+function producedAssetType(blob: Blob): { mime: string; ext: string } {
+  const declared = (blob.type ?? '').trim().toLowerCase()
+  if (declared.startsWith('image/')) {
+    const ext = ASSET_EXTENSION_BY_MIME[declared]
+    if (ext !== undefined) return { mime: declared, ext }
+  }
+  return { mime: FALLBACK_OUTPUT_MIME, ext: ASSET_EXTENSION_BY_MIME[FALLBACK_OUTPUT_MIME] }
 }
 
 /**
@@ -1421,10 +1456,20 @@ export const useAssetStore = defineStore('asset', () => {
   ): Promise<{ outcome: AssetMutationOutcome; id?: string }> {
     if (rejectIfBusy() !== null) return { outcome: 'busy' }
 
-    // 文件名在这条路径上**只**贡献扩展名 —— 绝不从它反推 name / type
-    const ext = extensionOf(file.name)
-    const mime = mimeForAssetExtension(ext)
+    // 文件名在这条路径上**只**贡献扩展名 —— 绝不从它反推 name / type。
+    //
+    // 🔴 类型判定走**共用**的 {@link resolveSourceMime}（先 `blob.type`、再文件名
+    // 扩展名），与 {@link importPortraitPair} 逐字同一条优先级。此前这里只认扩展名，
+    // 于是"一个没有扩展名、但 `type: 'video/mp4'` 的文件"在调用方那边被判成视频、
+    // 送到这里却算不出 MIME —— 用户拿到的是一句含糊的「格式不支持」。**一个决定
+    // 两个解析器**正是漂移的来路。
+    //
+    // ext 从 MIME 反查而不是直接取文件名: 文件名可能压根没有扩展名（那时
+    // `extensionOf` 给空串），而 `ext` 是导出文件名与再导入路由的依据，不能是空的。
+    const mime = resolveSourceMime(file)
     if (mime === undefined) return { outcome: 'failed' }
+    const ext = ASSET_EXTENSION_BY_MIME[mime]
+    if (ext === undefined) return { outcome: 'failed' }
 
     const { end } = beginImport()
     try {
@@ -1589,7 +1634,12 @@ export const useAssetStore = defineStore('asset', () => {
     // 视频到不了裁剪台（画布只有某一帧），而且 D7 本来就不让它落在 立绘 上
     if (sourceMime.startsWith('video/')) return { outcome: 'media-rule' }
 
-    // 裁出来会是什么类型 —— **开裁之前**就要知道，闸门要拿 ext 判
+    // 裁出来**打算**是什么类型 —— 开裁之前就要有个值，因为闸门要拿 ext 判，
+    // 而"名字不合法"不该等到字节都烘好了才发现。
+    //
+    // ⚠️ 这**只是预测**，不是记账依据: 画布可以不照我们点的类型编（webp 编码
+    // 并非哪儿都有）。真正写进行里的 mime/ext 一律取自产出的 blob
+    // （见下面的 {@link producedAssetType}）。
     let cropMime: string
     try {
       cropMime = resolveOutputMime(sourceMime)
@@ -1622,7 +1672,11 @@ export const useAssetStore = defineStore('asset', () => {
     }
 
     // 一个字节都还没烘之前，要写的类型闸门全过一遍: 名字不合法时不该先切出一张图
-    // 再发现存不进去（`writeIntoSlot` 里还会各判一次，那是权威的一道）
+    // 再发现存不进去。
+    //
+    // 🔴 这一道拿的是**预测**的 ext，所以它只是"省开销的一道"，不是权威的一道:
+    // 预测与产出不符时，`writeIntoSlot` 会拿**真实** ext 再判一次，那次才算数。
+    // 反过来的方向（预测过得了、真实过不了）也由那一次接住，混不进库里。
     for (const step of plan) {
       const gate = checkNameGates({
         name,
@@ -1643,14 +1697,14 @@ export const useAssetStore = defineStore('asset', () => {
 
       for (const step of plan) {
         const rect = step.rect
-        const mime = rect === undefined ? sourceMime : cropMime
-        const ext = rect === undefined ? wholeExt : cropExt
 
         let blob: Blob | null
         try {
           blob =
             rect === undefined
-              ? await sameBytesAs(source, mime)
+              ? // 整图: 不过画布，字节就是源字节，`sameBytesAs` 只把 type 对齐成
+                // 我们已经问准了的 `sourceMime` —— 这一半本来就没有"预测"可言
+                await sameBytesAs(source, sourceMime)
               : await cropImageBlob(source, rect, {
                   mime: cropMime,
                   // 按类型各一档的上限（调用方可用 options.maxEdge 整体覆盖）
@@ -1672,6 +1726,15 @@ export const useAssetStore = defineStore('asset', () => {
           continue
         }
 
+        // 🔴 记账用**产出的**类型，不用开裁前的预测（见 {@link producedAssetType}）:
+        // 画布可能没照我们点的类型编（webp 在 Firefox 上会退回 PNG 字节）。
+        // 整图那一半不过画布、字节即源字节，所以继续用问准的源类型。
+        const { mime, ext } = rect === undefined
+          ? { mime: sourceMime, ext: wholeExt }
+          : producedAssetType(blob)
+
+        // 预测与现实不一致时，权威的那道闸门在 `writeIntoSlot` 里 —— 它拿的是这里
+        // 算出来的**真实** ext，所以一行绝不可能靠"预测过得了闸"混进库里。
         const res = await writeIntoSlot(blob, name, step.type, ext, mime)
         if (res.id !== undefined) {
           progressDone.value += 1

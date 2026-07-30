@@ -16,7 +16,11 @@
  *   🔴 名字传的是**玩家名**，不是文件名 —— 这条路径上文件名只贡献扩展名，
  *   否则库里会长出一个叫 `IMG_1234` 的幽灵角色组
  * - 选中 **mp4** → **不开**裁剪台（画布只取得到某一帧，且 D7 不让视频落在 `立绘` 上），
- *   走直通的 `importForCharacter(file, 玩家名, '头像')`
+ *   走直通的 `importForCharacter(file, 玩家名, '立绘bg')`
+ * - 🔴 **mp4 的断言盯的是"画面上看得见什么"，不是"函数被调用了没有"**:
+ *   写入定位到一格、读取走一条链（`立绘 → 立绘bg → 头像`），两者不是一回事。
+ *   曾经写 `头像`（链的**最末**一档）而照样弹「已设为画像」—— 函数确实被调用了，
+ *   画面却一动不动。那条只断言到调用的旧测试正是它溜过去的原因。
  * - 取消裁剪台 → 不留半张素材、不卡住、且**同一个文件再选一次照样能开**
  *   （file input 的值不清空就不会再触发 change —— 经典坑）
  * - D16 / D19 名字拒收 → 提示必须说「角色名当不了文件名」，而不是含糊的「导入失败」
@@ -81,6 +85,28 @@ function makeRow(name: string, over: Partial<AssetMetaRecord> = {}): AssetMetaRe
   }
 }
 
+/**
+ * 像真 store 那样落库的 `importForCharacter` 替身: 往 `assets` 里**真的写一行**
+ * 再返回它的 id（生产路径是 `writeIntoSlot` 末尾 `setPrimary` + `refreshAssets()`）。
+ *
+ * 🔴 这是本文件 mp4 那几条断言能盯住"看得见的结果"的前提。只返回
+ * `{ outcome: 'ok' }`、库里什么都不落的替身，会让"画像换过来了没有"这个问题
+ * 在测试里根本问不出口 —— 而那正是 defect 1 溜过去的形状。
+ */
+function landingImport(id = 'vid_1') {
+  return vi.fn(async (_file: File, name: string, type: string) => {
+    // 同 (name, type) 里原来的基图**降级成变体**（永不覆盖，D11 + 末尾 setPrimary），
+    // 新行占基图位。少了这一步，索引里会出现两个基图，测出来的就不是生产行为。
+    for (const r of mockAssets.assets as AssetMetaRecord[]) {
+      if (r.name === name && r.type === type && r.variant === undefined) r.variant = '2'
+    }
+    mockAssets.assets.push(
+      makeRow(name, { id, type: type as AssetMetaRecord['type'], ext: 'mp4', mime: 'video/mp4' }),
+    )
+    return { outcome: 'ok', id }
+  })
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   mockGame = {
@@ -98,7 +124,7 @@ beforeEach(() => {
     assets: [] as AssetMetaRecord[],
     assetUrl: vi.fn(async () => null),
     releaseAssetUrl: vi.fn(),
-    importForCharacter: vi.fn(async () => ({ outcome: 'ok', id: 'asset_1' })),
+    importForCharacter: landingImport(),
     importPortraitPair: vi.fn(async () => ({ outcome: 'ok', portraitId: 'st', avatarId: 'av' })),
     setAssetFraming: vi.fn(async () => ({ outcome: 'ok' })),
   })
@@ -507,7 +533,7 @@ describe('StatusOverview — 点画像分叉（有大画像 → 弹窗；否则�
     expect(editor.props('name')).not.toBe('IMG_1234')
   })
 
-  it('「更换图片」选中 mp4 → 绕开裁剪台，直通 importForCharacter(…, 头像)', async () => {
+  it('「更换图片」选中 mp4 → 绕开裁剪台，直通 importForCharacter(…, 立绘bg)', async () => {
     const wrapper = await mountWithLargePortrait()
     await wrapper.find('.portrait-slot').trigger('click')
     wrapper.findComponent(PortraitSettingsDialog).vm.$emit('replace')
@@ -516,7 +542,7 @@ describe('StatusOverview — 点画像分叉（有大画像 → 弹窗；否则�
     await chooseFile(wrapper, mp4())
     expect(wrapper.findComponent(AssetCropEditor).props('open')).toBe(false)
     expect(mockAssets.importForCharacter).toHaveBeenCalledTimes(1)
-    expect(mockAssets.importForCharacter.mock.calls[0][2]).toBe('头像')
+    expect(mockAssets.importForCharacter.mock.calls[0][2]).toBe('立绘bg')
   })
 
   /**
@@ -711,7 +737,7 @@ describe('StatusOverview — 选中图片则开裁剪台（一源两图）', () 
 // ═══════════════════════════════════════════════════════════
 
 describe('StatusOverview — mp4 绕开裁剪台（视频裁不了，且 D7 不让它当立绘）', () => {
-  it('mp4 → 裁剪台不开，直接 importForCharacter(file, 玩家名, 头像)', async () => {
+  it('mp4 → 裁剪台不开，直接 importForCharacter(file, 玩家名, 立绘bg)', async () => {
     const wrapper = mount(StatusOverview)
     const file = mp4()
     await chooseFile(wrapper, file)
@@ -724,8 +750,11 @@ describe('StatusOverview — mp4 绕开裁剪台（视频裁不了，且 D7 不�
     expect(passedFile).toBe(file)
     expect(passedName).toBe('苏婉')
     expect(passedName).not.toBe('CLIP_9')
-    // 🔴 绝不是 立绘 —— 那是要抠图合成的，视频没有 alpha 可言
-    expect(passedType).toBe('头像')
+    // 🔴 绝不是 立绘 —— 那是要抠图合成的，视频没有 alpha 可言（D7）
+    expect(passedType).not.toBe('立绘')
+    // 🔴 也不是 头像: 它在立牌链的**最末**，写进去很可能一格都看不见（defect 1）。
+    //    立绘bg 同样是 D7 认可的视频落点，且在链上压过头像
+    expect(passedType).toBe('立绘bg')
   })
 
   it('mp4 且 blob.type 缺席时按扩展名判定，同样绕开裁剪台', async () => {
@@ -734,7 +763,7 @@ describe('StatusOverview — mp4 绕开裁剪台（视频裁不了，且 D7 不�
 
     expect(wrapper.findComponent(AssetCropEditor).props('open')).toBe(false)
     expect(mockAssets.importForCharacter).toHaveBeenCalledTimes(1)
-    expect(mockAssets.importForCharacter.mock.calls[0][2]).toBe('头像')
+    expect(mockAssets.importForCharacter.mock.calls[0][2]).toBe('立绘bg')
   })
 
   it('成功 → 一条 info 提示', async () => {
@@ -744,6 +773,82 @@ describe('StatusOverview — mp4 绕开裁剪台（视频裁不了，且 D7 不�
     expect(toast).toHaveBeenCalledTimes(1)
     expect(toast.mock.calls[0][1]).toBe('info')
     expect(toast.mock.calls[0][0]).toContain('苏婉')
+  })
+
+  // ── 看得见的结果，而不是"函数被调用了" ──────────────────
+  //
+  // 这两条是 defect 1 的钉子。写入定位到**一格**、读取走**一条链**，
+  // 两者不是一回事 —— 断言必须落在链最终显示出来的那张图上。
+
+  it('🔴 已有立绘bg（无立绘）→ 视频**当场显示出来**，因为立绘bg 压过头像', async () => {
+    // 先给一张 立绘bg 图片: 写 `头像` 的旧做法会被它压住，画面一动不动
+    mockAssets.assets = [makeRow('苏婉', { id: 'bg', type: '立绘bg' })]
+    mockAssets.assetUrl = vi.fn(async (id: string) => `blob:${id}`)
+    mockAssets.importForCharacter = landingImport('vid_1')
+
+    const wrapper = mount(StatusOverview)
+    await flushPromises()
+    // 出发点: 显示的是那张旧的 立绘bg 图片
+    expect(wrapper.find('.portrait-frame img').attributes('src')).toBe('blob:bg')
+
+    await chooseFile(wrapper, mp4())
+    await flushPromises()
+
+    // 落点: 画面上**真的**换成了刚导入的这段视频
+    const video = wrapper.find('.portrait-frame video')
+    expect(video.exists()).toBe(true)
+    expect(video.attributes('src')).toBe('blob:vid_1')
+    expect(wrapper.find('.portrait-frame img').exists()).toBe(false)
+
+    // 看得见了才配说"已设为画像"
+    expect(toast).toHaveBeenCalledTimes(1)
+    expect(toast.mock.calls[0][1]).toBe('info')
+    expect(toast.mock.calls[0][0]).toContain('已把这段视频设为')
+  })
+
+  it('🔴 已有立绘 → 视频被压住，画面一个像素没变；提示必须**照实说**，不冒充成功', async () => {
+    mockAssets.assets = [makeRow('苏婉', { id: 'st', type: '立绘' })]
+    mockAssets.assetUrl = vi.fn(async (id: string) => `blob:${id}`)
+    mockAssets.importForCharacter = landingImport('vid_1')
+
+    const wrapper = mount(StatusOverview)
+    await flushPromises()
+    expect(wrapper.find('.portrait-frame img').attributes('src')).toBe('blob:st')
+
+    await chooseFile(wrapper, mp4())
+    await flushPromises()
+
+    // 字节确实进库了（`立绘bg` 那一格），但这一格显示的仍是旧立绘
+    expect(mockAssets.importForCharacter.mock.calls[0][2]).toBe('立绘bg')
+    expect(wrapper.find('.portrait-frame img').attributes('src')).toBe('blob:st')
+    expect(wrapper.find('.portrait-frame video').exists()).toBe(false)
+
+    expect(toast).toHaveBeenCalledTimes(1)
+    const [text, type] = toast.mock.calls[0]
+    // 🔴 绝不能说成功 —— 用户看着没反应，只会再点一次
+    expect(type).toBe('warning')
+    expect(text).not.toContain('已把这段视频设为')
+    expect(text).not.toContain('已把这张图设为')
+    // 说清: 存到哪了 · 是谁压着 · 去哪解决
+    expect(text).toContain('立绘bg')
+    expect(text).toContain('立绘」')
+    expect(text).toContain('设置')
+    expect(text).toContain('素材')
+  })
+
+  it('导入本身失败时仍走各自的理由，不误报成"被遮住了"', async () => {
+    mockAssets.assets = [makeRow('苏婉', { id: 'st', type: '立绘' })]
+    mockAssets.assetUrl = vi.fn(async (id: string) => `blob:${id}`)
+    mockAssets.importForCharacter = vi.fn(async () => ({ outcome: 'failed' }))
+
+    const wrapper = mount(StatusOverview)
+    await flushPromises()
+    await chooseFile(wrapper, mp4())
+
+    const [text, type] = toast.mock.calls[0]
+    expect(type).toBe('error')
+    expect(text).toContain('没能存进素材库')
+    expect(text).not.toContain('立绘bg')
   })
 
   it('naming-invariant → 说清是「角色名当不了文件名」，不含糊报导入失败', async () => {
