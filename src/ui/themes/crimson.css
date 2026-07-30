@@ -456,14 +456,27 @@
   outline: none;
 }
 
+/*
+ * Floating surfaces are flat colour — deliberately NO `--crimson-control` texture.
+ *
+ * Every other user of that texture is a fixed-ish strip or tile (top bar, tab bar,
+ * input bar, item rows, buttons), where `background-size: 100% 100%` stretches it by
+ * a predictable amount. These surfaces are the opposite: a modal is as tall as its
+ * content, so the same declaration stretched one bitmap across everything from a
+ * 200px tooltip to a full-height dialog. The texture's grain ended up at a different
+ * scale and aspect in every single overlay, which read as a rendering fault rather
+ * than as material.
+ *
+ * Indigo already resolves the same problem the same way (frosted fill, no image).
+ * If a texture comes back here it needs `background-size` that preserves its aspect
+ * (`cover`, or a 9-slice via border-image) — not `100% 100%`.
+ */
 :root[data-theme="crimson"] body .options-popup,
 :root[data-theme="crimson"] body .ctx-menu,
 :root[data-theme="crimson"] body .buff-pop,
 :root[data-theme="crimson"] body .thought-bubble,
 :root[data-theme="crimson"] body .modal-content {
   background-color: #131113;
-  background-image: var(--crimson-control);
-  background-size: 100% 100%;
   border-color: rgba(95, 53, 60, 0.82);
   box-shadow:
     inset 0 1px rgba(240, 220, 210, 0.045),
@@ -1342,8 +1355,12 @@
   }
 }
 
-/* Backpack and character modals use scalable liquid glass instead of the
-   fixed-size blood-control artwork, which distorted across their many ratios. */
+/* Backpack and character modals go further than the flat fill above: liquid glass.
+   This started as a local escape from the blood-control artwork distorting across
+   their many ratios — that artwork is now gone from every floating surface (see the
+   note on the .modal-content rule), so what remains here is purely the glass look.
+   The `background-image: none` below is therefore redundant; it is kept as a guard
+   so re-adding a texture upstream cannot silently reappear behind the blur. */
 :root[data-theme="crimson"] body .modal-overlay:has(.items-panel),
 :root[data-theme="crimson"] body .modal-overlay:has(.char-panel) {
   background: rgba(6, 6, 7, 0.72);
