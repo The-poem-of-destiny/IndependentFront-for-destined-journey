@@ -789,7 +789,7 @@ injected clock for `createdAt`.
 | Item | Why, and what unblocks it |
 |---|---|
 | **Any in-game rendering** | v1 is the management system only. `AvatarPanel`, `ScenePanel`, `CharacterListPanel`, `StatusOverview` untouched. |
-| Unifying the 5 avatar render sites | Three bypass `AvatarPanel` with hand-rolled circles ([CharacterListPanel.vue:94](../../src/ui/components/game/CharacterListPanel.vue), [:113](../../src/ui/components/game/CharacterListPanel.vue), [ScenePanel.vue:196](../../src/ui/components/game/ScenePanel.vue)). Must be unified *before* rendering lands, or the feature ships to 2 of 5 places. `ScenePanel` also needs `nameColorVar` preserved as the fallback. |
+| Unifying the 5 avatar render sites | Three bypass `AvatarPanel` with hand-rolled markup. Must be unified *before* rendering lands, or the feature ships to 2 of 5 places. **Line references refreshed after the `ui-test` rebase** — see the table below, which rewrote `ScenePanel` and `StatusOverview` substantially. |
 | **Poster / thumbnail frames** | Withdrawn. Justified by `ScenePanel` decoding 15 videos at once — which doesn't exist in v1. The manager grid previews a handful; `<video muted>` is fine at that count. Revisit with the render surfaces; also closes the port eval's §11.3 "no thumbnails" gap. |
 | **`<video>` branch in `AvatarPanel`** | Needed for mp4 avatars when rendering lands. `muted` + `playsinline` autoplays with **no user gesture** — assets have none of audio's autoplay tax. |
 | **The VN-style stage** | The real home for `立绘`. Its own design problem (positioning, layering, entry/exit, mood switching, backdrop resolution) and it drags `背景`/`全景` into scope. The `立绘 → 立绘bg → 头像` fallback chain means art authored now still works when it lands. |
@@ -925,6 +925,18 @@ rows are untouched.
   a screenful of dead images. Both decisions are pinned by mutation tests: adding release-on-drop-out fails exactly
   the two tests that encode the shared-LRU design.
 
+### 15.4 Pre-existing test failures (not asset-related — do not mistake for regressions)
+
+- `src/ui/stores/game-store.test.ts` › 「loadSave 应并行回读最新大纲与事件树」 — **flaky (~50%)**. Root cause
+  found: `savePlotOutline` unconditionally sets `updatedAt = Date.now()`, clobbering the test's deliberate
+  `Date.now() - 1000`; when both rows land in the same millisecond, `sortBy('updatedAt')` ties and order is
+  arbitrary.
+- `src/ui/components/create/SelectableCard.test.ts` › 「稀有度边框色正确」 — **stable failure**, predates this
+  work; asserts an `rgb()` value but receives a CSS variable under jsdom.
+
+Both are tracked separately and neither is caused by this work. The suite baseline is therefore
+**4041 passed / 2 failed**, not 4043/0.
+
 ### 15.5 A pre-existing bug this work uncovered and fixed
 
 `SettingsPage.vue` destructured **`deleteDatabase`** from `@engine/database` — a name the engine has never
@@ -985,7 +997,33 @@ D14's rename — already built, already carrying both gates — is the natural c
 §7.3 asks for therefore lives in the rename field** (native `<datalist>` over existing names), which is the one
 moment a user is actually weighing a name. It remains the only mitigation for §3.2's unverified-names risk.
 
-### 15.7 Two environment facts worth knowing
+### 15.7 Rebased onto `ui-test` — the v2 render sites moved
+
+This work was rebased onto `ui-test` (8 commits, 91 files, +4,273) after the review round. The rebase was clean
+and the suite is unchanged at **4041 passed / 2 failed** (both pre-existing). No asset code needed changes — the
+subsystem's decoupling (D3) meant a substantial UI overhaul touched none of it.
+
+But `ui-test` **rewrote the very surfaces §11 names as the v2 integration work**, so the render-site inventory is
+restated here as the current truth:
+
+| Site | State after rebase |
+|---|---|
+| [StatusOverview.vue:199](../../src/ui/components/game/StatusOverview.vue) | `<AvatarPanel>` — **moved from :79, and the props changed**: now `size="xl" shape="square"` |
+| [CreateStepConfirm.vue:18](../../src/ui/components/create/CreateStepConfirm.vue) | `<AvatarPanel size="lg">` — unchanged |
+| [CharacterListPanel.vue:94](../../src/ui/components/game/CharacterListPanel.vue) | hand-rolled `.npc-avatar`, `name[0]` — unchanged |
+| [CharacterListPanel.vue:113](../../src/ui/components/game/CharacterListPanel.vue) | hand-rolled `.d-avatar`, `name[0]` — unchanged |
+| [ScenePanel.vue:295](../../src/ui/components/game/ScenePanel.vue) | **moved from :196 and renamed** — now `.npc-portrait` driving a `--npc-avatar-color` custom property from `nameColorVar`, with `initialsOf` |
+
+Two consequences for whoever does the v2 render work:
+
+- **`AvatarPanel` grew an API.** It now takes `shape` (at least `square`) and an `xl` size. The planned `<video>`
+  branch for mp4 avatars must handle both — a square `object-fit: cover` video is fine, but the circle-clip
+  reasoning in §2.2 that justified allowing mp4 on `头像` was written for a circle. It still holds (a square crop
+  composites no more than a circle does), but check it against whatever shapes exist by then rather than assuming.
+- **`ScenePanel`'s fallback is now a CSS custom property**, not an inline background. Preserving the
+  `nameColorVar` fallback when art is absent means feeding `--npc-avatar-color`, not restyling a `<span>`.
+
+### 15.8 Two environment facts worth knowing
 
 - **`@types/node` is not installed**, so any Node builtin referenced from `src/**` is an automatic TS2307/TS2304.
   The engine-import guard test therefore reads sources via Vite's `?raw` through the project aliases rather than
@@ -994,11 +1032,3 @@ moment a user is actually weighing a name. It remains the only mitigation for §
   once catching a half-written import and once catching a deliberately-removed guard from a mutation test. Both
   produced alarming-looking failures that did not exist. Test counts climbing between runs is the tell.
 
-### 15.4 Pre-existing test failures (not asset-related — do not mistake for regressions)
-
-- `src/ui/stores/game-store.test.ts` › 「loadSave 应并行回读最新大纲与事件树」 — **flaky**. Root cause found:
-  `savePlotOutline` unconditionally sets `updatedAt = Date.now()`, clobbering the test's deliberate
-  `Date.now() - 1000`; when both rows land in the same millisecond, `sortBy('updatedAt')` ties and order is
-  arbitrary.
-- `src/ui/components/create/SelectableCard.test.ts` › 「稀有度边框色正确」 — **stable failure**, predates this
-  work; asserts an `rgb()` value but receives a CSS variable under jsdom.
