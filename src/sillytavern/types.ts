@@ -3074,6 +3074,31 @@ export interface AudioTrack {
   relativePath?: string;
   /** source='file': the file was gone at last scan. Row is kept so tags/playlist slots survive. */
   missing?: boolean;
+  /**
+   * sha-256 of the bytes, written by the unified zip importer (D12 / §4.4).
+   *
+   * **Non-indexed property — needs no Dexie version bump.** Only new writes carry it;
+   * rows without it fall through to `uniqueAudioName` exactly as before, and existing
+   * tracks are never rewritten. Absent whenever `crypto.subtle` was unavailable
+   * (insecure context), in which case dedupe is skipped rather than approximated.
+   */
+  hash?: string;
+  /**
+   * Attribution carried by an import pack's `manifest.json` (D10 / §5.2), and the
+   * only place it can survive — a filename cannot express it.
+   *
+   * **Non-indexed properties — no Dexie version bump**, same as `hash` above: only new
+   * writes carry them, rows without them behave exactly as before, and existing tracks
+   * are never rewritten. Absent when the pack shipped no manifest entry for the file.
+   *
+   * The built-in library already models this per track in `public/audio/manifest.json`
+   * (`credit: "Aoo"` / `license: "PLACEHOLDER-PENDING-REVIEW"`); before these columns
+   * existed those values reached no Dexie row at all, so attribution died at the
+   * loader. Retrofitting it onto a shipped library is materially harder than carrying
+   * it from the start (§12).
+   */
+  credit?: string;
+  license?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -3131,4 +3156,69 @@ export interface AudioPlaybackState {
   masterMuted: boolean;
   /** AudioContext resumed by a user gesture yet (§7) */
   unlocked: boolean;
+}
+
+// ═══════════════════════════════════════════════════════════
+// Asset System — 素材子系统 (Dexie v13)
+// 设计: docs/planning/2026-07-29-asset-management-system-design.md §2 / §4.1
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 素材类型（D4）。三者都可导入，v1 **一个都不渲染** —— v1 只交付管理系统，
+ * 类型先立好，今天打包的素材包才能活到 v2。
+ *
+ * 为什么住在 types.ts 而不是 field-enums.ts: field-enums.ts 只收 **AI 提名**
+ * 的游戏数据枚举（每个都配一个 normalize*()，铁律5 治的是模型输出漂移）。
+ * AssetType 由用户在 UI 控件里选，模型永不提名它 —— 与 AudioSourceKind /
+ * AudioTrackKind 同级，照音频先例走。
+ */
+export type AssetType = '头像' | '立绘' | '立绘bg';
+
+/**
+ * 素材大类。v1 只有 'character' —— 头像/立绘/立绘bg 都是角色美术。
+ * 别名保留是因为 背景/全景/CG/misc 迟早要来；那时这里加联合成员即可。
+ *
+ * **永不落库**（§4.1）: 由 type 经 `categoryForType()` 派生，
+ * 存一份就是第二个真相来源，违反铁律4（每类数据唯一真源）。
+ */
+export type AssetCategory = 'character';
+
+/**
+ * AssetType 的运行时清单 —— 文件名解析要拿它做**整段相等**比对
+ * （见 asset-types.ts 的 isAssetTypeToken）。顺序即 UI 展示顺序。
+ */
+export const ASSET_TYPES: readonly AssetType[] = ['头像', '立绘', '立绘bg'];
+
+/**
+ * 素材元数据 —— 列表用，不含字节（字节在 assetBlobs 表，理由同音频 §3.2）。
+ */
+export interface AssetMetaRecord {
+  id: string;
+  /** 原始字符串，用 `===` 匹配角色名，**不做任何归一化**（D2） */
+  name: string;
+  type: AssetType;
+  /** 情绪/表情，以及碰撞时自动分配的编号（D11） */
+  variant?: string;
+  /** 小写，不含点 */
+  ext: string;
+  mime: string;
+  /** 未压缩前的字节数 */
+  bytes: number;
+  /** sha-256；`crypto.subtle` 不可用时缺省，此时退化到编号路径（§4.4） */
+  hash?: string;
+  /** 素材作者署名 —— 文件名带不了，只能由 manifest.json 补（D10） */
+  credit?: string;
+  license?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * 素材字节 —— 与元数据分表存储（§4.1），照 AudioBlobRecord 先例。
+ * 分表的意义: `assetMeta.toArray()` 列全库时永不反序列化任何字节。
+ * **存 Blob，永不 base64**（§4.2: base64 +33% 不可回收，且主线程反序列化）。
+ */
+export interface AssetBlobRecord {
+  id: string;                 // === AssetMetaRecord.id
+  blob: Blob;
 }

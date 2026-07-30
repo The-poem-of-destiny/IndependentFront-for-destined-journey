@@ -9,6 +9,7 @@
  */
 import { ref, computed, watch, onMounted, inject } from 'vue'
 import { useAudioStore } from '../../../stores/audio-store'
+import { useAssetStore } from '../../../stores/asset-store'
 import { useSettingsStore } from '../../../stores/settings-store'
 import { useUIStore } from '../../../stores/ui-store'
 import type { AudioTrack, AudioTrackKind } from '@engine/types'
@@ -31,6 +32,7 @@ const emit = defineEmits<{
 }>()
 
 const audio = useAudioStore()
+const assets = useAssetStore()
 const cfg = useSettingsStore()
 const ui = useUIStore()
 const s = cfg.settings
@@ -49,6 +51,7 @@ const kindFilter = ref<'all' | AudioTrackKind>('all')
 const tagFilter = ref('')
 const uploadKind = ref<AudioTrackKind>('music')
 const fileInput = ref<HTMLInputElement | null>(null)
+const zipInput = ref<HTMLInputElement | null>(null)
 const editingId = ref<string>('')
 const editName = ref('')
 const editTags = ref('')
@@ -311,6 +314,30 @@ async function onFilesPicked(e: Event): Promise<void> {
   storageInfo.value = await cfg.getStorageUsage()
 }
 
+// ===== 素材包导入（zip）=====
+// 同一份实现的第二个入口（素材设计 D9 / §7.2）: 一个包里图片与音频混装，
+// 按扩展名各自归位。想「加音乐包」的人来音频分区，想「加立绘」的人去素材分区。
+//
+// 本组件**只负责递一个 File 进去**:
+//   · 解包 / 归位 / 去重 / 编号 / 落库 —— 全在 asset-store.importZip 里，绝不在这里重写；
+//   · 音频半边写完由它自己调 audio-store 的 refreshTracks()，所以这里**不再刷一遍**；
+//   · 摘要（含素材与音频两个半边的计数）由它弹**唯一**那条 toast，这里绝不补第二条。
+// 这里额外做的只有两件本地的事: 无障碍播报，以及刷新配额显示（字节确实变多了）。
+
+function pickZip(): void {
+  zipInput.value?.click()
+}
+
+async function onZipPicked(e: Event): Promise<void> {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  const summary = await assets.importZip(file)
+  emit('announce', summary.message || '导入结束。')
+  storageInfo.value = await cfg.getStorageUsage()
+}
+
 /** 配额耗尽在各浏览器里的两种名字 */
 function isQuotaError(err: unknown): boolean {
   const name = (err as { name?: unknown } | null)?.name
@@ -422,6 +449,33 @@ async function audition(t: AudioTrack): Promise<void> {
       @change="onFilesPicked"
     />
     <span class="upload-hint">决定接下来上传的文件如何归类，上传后可在曲目编辑中更改。</span>
+  </div>
+
+  <!--
+    素材包导入：与上传组紧邻（同一副外壳），因为两者都是「往库里放东西」。
+    独立成条而不是塞进上传组，是因为「上传为」那个选择器管不到 zip ——
+    包里的音频归类由文件名与清单决定，不受它影响。
+  -->
+  <div class="lib-import">
+    <span class="upload-label">素材包</span>
+    <AppButton variant="secondary" size="sm" :disabled="assets.importing" @click="pickZip">
+      <i class="fa-solid fa-file-zipper" aria-hidden="true" /> 导入素材包（zip）
+    </AppButton>
+    <input
+      ref="zipInput"
+      class="file-input"
+      type="file"
+      accept=".zip,application/zip"
+      aria-label="选择素材包压缩文件"
+      @change="onZipPicked"
+    />
+    <span v-if="assets.importing" class="import-progress" role="status">
+      正在导入… {{ assets.progressDone }} / {{ assets.progressTotal }}
+    </span>
+    <span v-else class="upload-hint">
+      一个包里可以混装图片与音频：图片进素材库，音频进曲库，按扩展名自动归位。
+      与「素材」分区里的是同一个导入。
+    </span>
   </div>
 
   <!-- 工具条（查看筛选） -->
@@ -764,8 +818,9 @@ async function audition(t: AudioTrack): Promise<void> {
   margin: var(--theme-spacing-xs) 0 var(--theme-spacing-md);
 }
 
-/* ═══ 条状分组：上传组 / 行内编辑共用同一副外壳（音乐文件夹条同款，见该组件） ═══ */
+/* ═══ 条状分组：上传组 / 素材包条 / 行内编辑共用同一副外壳（音乐文件夹条同款，见该组件） ═══ */
 .lib-upload,
+.lib-import,
 .edit-panel {
   display: flex;
   align-items: center;
@@ -793,6 +848,18 @@ async function audition(t: AudioTrack): Promise<void> {
 /* 上传组：输入模式，独立成组，与下方的查看筛选区分开 */
 .lib-upload {
   margin-bottom: var(--theme-spacing-sm);
+}
+/* 素材包条紧跟上传组（两条都是「往库里放东西」），与下方查看筛选区之间留一档 */
+.lib-import {
+  margin-bottom: var(--theme-spacing-sm);
+}
+/* 进度：等宽数字，避免计数跳动时整条左右抖 */
+.import-progress {
+  flex: 1;
+  min-width: 12rem;
+  font-size: 0.75rem;
+  color: var(--theme-text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .lib-toolbar {
