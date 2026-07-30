@@ -411,7 +411,7 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
   <AppModal
     :open="open"
     :title="`裁剪 · ${name}`"
-    size="xl"
+    size="lg"
     :closable="!busy"
     @update:open="close"
   >
@@ -471,10 +471,6 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
             </div>
           </template>
         </div>
-        <p class="hint">
-          拖动框可移动，拖四角改大小；键盘操作时先 Tab 到框上，方向键移动、Shift+方向键快移，
-          Tab 到角把手上则用方向键改大小。头像框恒定 1:1。
-        </p>
       </div>
 
       <!-- ═══ 两个类型各一张卡 ═══ -->
@@ -530,13 +526,21 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
             <template v-else>尚未读到源图尺寸。</template>
           </p>
         </section>
-
-        <p v-if="bothSkip" class="field-warn">
-          两个都选「不生成」等于这次点击什么也不做 —— 至少让其中一个生成。
-        </p>
-        <p v-if="problem" class="field-error">{{ problem }}</p>
       </div>
     </div>
+
+    <!--
+      提示与报错刻意住在两栏**外面**: 它们是整句整段的中文，塞进 14rem 宽的预览栏会被
+      挤成一条细长的字带；而两栏本身要贴在一起比对，宽度已经吃紧。
+    -->
+    <p class="hint">
+      拖动框可移动，拖四角改大小；键盘操作时先 Tab 到框上，方向键移动、Shift+方向键快移，
+      Tab 到角把手上则用方向键改大小。头像框恒定 1:1。
+    </p>
+    <p v-if="bothSkip" class="field-warn">
+      两个都选「不生成」等于这次点击什么也不做 —— 至少让其中一个生成。
+    </p>
+    <p v-if="problem" class="field-error">{{ problem }}</p>
 
     <template #footer>
       <AppButton variant="ghost" :disabled="busy" @click="close">取消</AppButton>
@@ -558,19 +562,32 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
   color: var(--theme-text-muted);
 }
 
+/*
+ * 取景台与预览栏必须**挨着**: 用户拉一下框、扫一眼旁边那张预览，视线不该横穿一段空白。
+ * 之前是 `flex: 1 1 22rem` 的取景栏 + 右侧预览栏，在 modal-xl（1080px）里被拉满整行 ——
+ * 而 `.stage` 是 inline-block、图又被 `max-height: 46vh` 卡住高度，于是一张竖构图立绘
+ * 只占 ~280px，剩下 ~500px 全是取景栏内部的死区，图贴最左、预览贴最右。
+ *
+ * 修法两步: ①两栏都**按内容定宽**（不再抢占剩余空间）②整组 `justify-content: center`
+ * —— 富余宽度于是被赶到两侧外沿，栏间距恒等于这里写的那一个 token。
+ */
 .editor-grid {
   display: flex;
   align-items: flex-start;
-  gap: var(--theme-spacing-lg);
+  justify-content: center;
+  gap: var(--theme-spacing-md);
   flex-wrap: wrap;
 }
+/* 按内容定宽（basis:auto）而不是抢剩余空间；宽图时照常被压回栏内 */
 .stage-col {
-  flex: 1 1 22rem;
-  min-width: 16rem;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
 }
+/* 次要角色: 恒定 14rem，绝不跟着取景台一起长 */
 .side-col {
-  flex: 0 1 15rem;
-  min-width: 12rem;
+  flex: 0 0 14rem;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   gap: var(--theme-spacing-md);
@@ -668,7 +685,7 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
 .h-se { bottom: -7px; right: -7px; }
 
 .hint {
-  margin: var(--theme-spacing-sm) 0 0;
+  margin: var(--theme-spacing-lg) 0 0;
   font-size: 0.75rem;
   line-height: 1.55;
   color: var(--theme-text-muted);
@@ -782,7 +799,7 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
 
 .field-warn,
 .field-error {
-  margin: 0;
+  margin: var(--theme-spacing-sm) 0 0;
   font-size: 0.75rem;
   line-height: 1.55;
 }
@@ -791,6 +808,22 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
 }
 .field-error {
   color: var(--theme-error);
+}
+
+/*
+ * 窄屏改上下堆叠（768px 是本项目已有的断点，design.md 未另立）。并排到这个宽度以下时，
+ * 取景台会被压到只剩一百多像素 —— 那时"挨着比对"已经不成立，不如把整幅宽度还给取景台，
+ * 预览整组落到它正下方。两个预览仍然同屏可见，只是改成上下相邻。
+ */
+@media (max-width: 768px) {
+  .editor-grid {
+    flex-direction: column;
+    align-items: center;
+  }
+  .side-col {
+    flex: 0 0 auto;
+    width: min(100%, 18rem);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
