@@ -12,6 +12,7 @@ import { normalizeItemType } from '@engine/field-enums'
 import ResourceBar from '../shared/ResourceBar.vue'
 import AvatarPanel from '../shared/AvatarPanel.vue'
 import CharacterPortrait from '../shared/CharacterPortrait.vue'
+import PortraitSettingsDialog from '../shared/PortraitSettingsDialog.vue'
 import AppTabs from '../shared/AppTabs.vue'
 import BuffChip from '../shared/BuffChip.vue'
 // 裁剪台是 shared/ 的东西（它只认「一份源字节 + 一个名字」，跟设置页零耦合；
@@ -84,6 +85,34 @@ const portraitInput = ref<HTMLInputElement | null>(null)
 function pickPortrait(): void {
   portraitInput.value?.click()
 }
+
+// ── 点画像 = 一个入口，两种去处 ────────────────────────────
+//
+// 画像上**什么家具都不放**（没有旋钮、没有相机徽章）: 那两样都盖在图上，
+// 而旋钮弹出的浮层还会盖住画像自己 —— 一边调一边看不见调的结果。
+// 现在整块画像可点，点了去哪由**有没有东西可调**决定:
+//   · 已经是大画像（立绘 / 立绘bg）→ 开设置弹窗，那里有取景滑块和「更换图片」；
+//   · 没有素材，或只有一张头像 → **直接**开文件选择框。这时取景无从谈起
+//     （头像是圆形裁切的脸位，没有取景概念），弹一个只有「更换图片」可点的
+//     窗口纯属多一次点击。
+
+const portraitDialogOpen = ref(false)
+
+function onPortraitActivate(): void {
+  if (hasLargePortrait.value) portraitDialogOpen.value = true
+  else pickPortrait()
+}
+
+function closePortraitDialog(): void {
+  portraitDialogOpen.value = false
+}
+
+/** 点画像时该说什么 —— 两条去处结果不同，说明也必须不同 */
+const portraitActionLabel = computed(() =>
+  hasLargePortrait.value
+    ? `调整「${player.value?.name ?? ''}」的画像取景，或更换图片`
+    : `挑一张图，裁出「${player.value?.name ?? ''}」的立绘与头像`,
+)
 
 // ── 裁剪台的开关 ──────────────────────────────────────────
 // 名字在**开台那一刻**就定死（`cropName`），不是每帧去读 `player.name`: 编辑器
@@ -375,28 +404,26 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         </div>
       </div>
       <div class="player-summary">
-        <!-- 点画像 = 挑一张图，裁出这个角色的立绘与头像（唯一带导入入口的渲染位）。
-             说明文案照实说**结果是两张素材**，而不是含糊的"导入" —— 用户点之前
-             就该知道这一下会同时定下立牌位和头像位。 -->
+        <!-- 画像上不画任何东西: 整块可点，去处由 `onPortraitActivate` 按"有没有
+             东西可调"决定（有大画像 → 设置弹窗；否则直接开文件框）。 -->
         <div
           class="portrait-slot"
           :class="{ large: hasLargePortrait }"
           role="button"
           tabindex="0"
-          :title="`点击挑一张图，裁出「${player.name}」的立绘与头像`"
-          :aria-label="`设置「${player.name}」的立绘与头像`"
-          @click="pickPortrait"
-          @keydown.enter="pickPortrait"
-          @keydown.space.prevent="pickPortrait"
+          :title="portraitActionLabel"
+          :aria-label="portraitActionLabel"
+          @click="onPortraitActivate"
+          @keydown.enter.prevent="onPortraitActivate"
+          @keydown.space.prevent="onPortraitActivate"
         >
-          <!-- 立绘 / 立绘bg → 顶对齐的大画像（带取景旋钮）；只有头像 → 保持 1:1 小方框。
-               两种形态都被同一个可点的槽包着，导入入口对两者一视同仁。 -->
+          <!-- 立绘 / 立绘bg → 顶对齐的大画像；只有头像 → 保持 1:1 小方框。
+               两种形态都被同一个可点的槽包着，入口对两者一视同仁。 -->
           <CharacterPortrait
             v-if="hasLargePortrait"
             :name="player.name"
             :src="portraitUrl"
             :video="portraitIsVideo"
-            :asset-id="portraitRow?.id ?? null"
             :framing="portraitRow?.framing ?? null"
           />
           <AvatarPanel
@@ -407,7 +434,6 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
             :src="portraitUrl ?? undefined"
             :video="portraitIsVideo"
           />
-          <span class="portrait-hint" aria-hidden="true"><i class="fa-solid fa-camera" /></span>
         </div>
         <input
           ref="portraitInput"
@@ -578,6 +604,25 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
     </Transition>
   </Teleport>
 
+  <!-- ═══ 画像设置 —— 取景滑块 + 更换图片 ═══
+       `&& !cropOpen`: 裁剪台开着时本窗先收起来（而不是叠成两层弹窗）。两个
+       AppModal 各自在 document 上听 Escape，同时开着按一下 Esc 会把两层一起关掉
+       —— 与 AssetCharacterDrawer 同一个解法，不另发明第二套。收起来不丢状态:
+       `portraitDialogOpen` 还是 true，裁剪台一关本窗原样回来，用户接着调新图的取景。
+       「更换图片」不在弹窗里自己实现，只把意图发回来走**同一条** `pickPortrait`
+       → `onPortraitFile` 路径（图片进裁剪台 / mp4 直通头像），两处各写一遍必漂。 -->
+  <PortraitSettingsDialog
+    v-if="player"
+    :open="portraitDialogOpen && !cropOpen"
+    :name="player.name"
+    :src="portraitUrl"
+    :video="portraitIsVideo"
+    :asset-id="portraitRow?.id ?? null"
+    :framing="portraitRow?.framing ?? null"
+    @close="closePortraitDialog"
+    @replace="pickPortrait"
+  />
+
   <!-- ═══ 裁剪台 —— 一张源图 → 立绘 + 头像 ═══
        刻意挂在 `v-if="player"` **之外**: 挂在里面的话，编辑器开着时存档切换 /
        角色数据短暂缺席就会把它连根卸载，用户拉了一半的框凭空消失。
@@ -680,44 +725,22 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   max-width: 11.25rem;
   cursor: pointer;
   border-radius: var(--theme-radius-md, 6px);
+  transition: box-shadow var(--theme-transition-fast, 0.15s ease);
 }
 /* 大画像形态：解开 1:1 小框的宽度上限，让 4:5 立牌吃满整栏 */
 .portrait-slot.large {
   max-width: none;
 }
-/* 右下角归取景旋钮了，导入提示让到左下 —— 两个 24px 的小按钮不该叠在一起 */
-.portrait-slot.large .portrait-hint {
-  right: auto;
-  left: 6px;
-}
 .portrait-slot:focus-visible {
   outline: 2px solid var(--theme-primary);
   outline-offset: 2px;
 }
-.portrait-hint {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--theme-radius-sm, 4px);
-  background: color-mix(in srgb, var(--theme-primary) 82%, transparent);
-  border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
-  color: var(--theme-primary-text);
-  font-size: 0.6875rem;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  pointer-events: none;
-}
-.portrait-slot:hover .portrait-hint,
-.portrait-slot:focus-visible .portrait-hint {
-  opacity: 1;
+/* 画像上不放任何家具，"可点"只由指针形状与一圈极淡的染边表达 */
+.portrait-slot:hover {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-primary) 35%, transparent);
 }
 @media (prefers-reduced-motion: reduce) {
-  .portrait-hint { transition: none; }
+  .portrait-slot { transition: none; }
 }
 /* 真正的文件选择框藏起来，点击由画像槽转发 */
 .portrait-file { display: none; }

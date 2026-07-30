@@ -6,7 +6,12 @@
  * - 有素材 → `<img>` 铺满画像框（名字严格 `===`，D2）
  * - 🔴 **按命中的档位分叉呈现**: `立绘` / `立绘bg` → 顶对齐的大画像；
  *   只有 `头像` → 留在 1:1 小方框（把一张脸的特写拉满整栏看起来像 bug）
- * - 点击 / Enter / 空格 → 打开文件选择框（空格必须 preventDefault，否则页面滚动）
+ * - 🔴 **点画像的去处按"有没有东西可调"分叉**（这次改版的核心）:
+ *   · 已是大画像（立绘 / 立绘bg）→ 开 `PortraitSettingsDialog`（取景滑块 + 更换图片）；
+ *   · 没素材、或只有一张头像 → **直接**开文件选择框，不弹一个只有一个按钮可点的窗
+ * - 画像上**没有任何家具**: 相机徽章与取景旋钮都已删除（它们盖在图上，
+ *   而旋钮的浮层还会盖住画像自己）
+ * - 点击 / Enter / 空格 都走同一条去处（空格必须 preventDefault，否则页面滚动）
  * - 选中**图片** → 开裁剪台（`AssetCropEditor`），一张源图烘出 `立绘` + `头像`。
  *   🔴 名字传的是**玩家名**，不是文件名 —— 这条路径上文件名只贡献扩展名，
  *   否则库里会长出一个叫 `IMG_1234` 的幽灵角色组
@@ -23,6 +28,7 @@ import { reactive } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import StatusOverview from './StatusOverview.vue'
 import AssetCropEditor from '../shared/AssetCropEditor.vue'
+import PortraitSettingsDialog from '../shared/PortraitSettingsDialog.vue'
 import type { AssetMetaRecord } from '@engine/types'
 
 // ---- Mocks ----
@@ -155,11 +161,9 @@ describe('StatusOverview — 大画像 vs 小方框的分叉（按命中的档�
     expect(wrapper.find('.character-portrait').exists()).toBe(false)
     expect(wrapper.find('.portrait-slot .avatar-shape-square').exists()).toBe(true)
     expect(wrapper.find('.portrait-slot').classes()).not.toContain('large')
-    // 头像不可调取景 —— 小框里没有旋钮
-    expect(wrapper.find('.framing-dial').exists()).toBe(false)
   })
 
-  it('有立绘 → 顶对齐的大画像 + 取景旋钮，小方框让位', async () => {
+  it('有立绘 → 顶对齐的大画像，小方框让位', async () => {
     mockAssets.assets = [makeRow('苏婉', { id: 'st', type: '立绘' })]
     mockAssets.assetUrl = vi.fn(async () => 'blob:st')
 
@@ -170,7 +174,31 @@ describe('StatusOverview — 大画像 vs 小方框的分叉（按命中的档�
     expect(wrapper.find('.portrait-slot').classes()).toContain('large')
     expect(wrapper.find('.portrait-frame img').attributes('src')).toBe('blob:st')
     expect(wrapper.find('.avatar-shape-square').exists()).toBe(false)
-    expect(wrapper.find('.framing-dial').exists()).toBe(true)
+  })
+
+  /**
+   * 🔴 画像上**一个控件都不许有**。上一版把取景旋钮和相机徽章盖在图上，
+   * 旋钮弹出的浮层还盖住画像自己 —— 这条断言是防回潮的闸。
+   */
+  it('🔴 大画像上没有任何按钮/徽章（旋钮与相机徽章都已删除）', async () => {
+    mockAssets.assets = [makeRow('苏婉', { id: 'st', type: '立绘' })]
+    mockAssets.assetUrl = vi.fn(async () => 'blob:st')
+
+    const wrapper = mount(StatusOverview)
+    await flushPromises()
+
+    expect(wrapper.find('.portrait-slot button').exists()).toBe(false)
+    expect(wrapper.find('.portrait-hint').exists()).toBe(false)
+    expect(wrapper.find('.framing-dial').exists()).toBe(false)
+    expect(wrapper.find('.framing-pop').exists()).toBe(false)
+  })
+
+  it('🔴 小方框形态同样没有相机徽章', async () => {
+    const wrapper = mount(StatusOverview)
+    await flushPromises()
+
+    expect(wrapper.find('.portrait-slot button').exists()).toBe(false)
+    expect(wrapper.find('.portrait-hint').exists()).toBe(false)
   })
 
   it('立绘bg 也走大画像（同样是整幅构图）', async () => {
@@ -262,6 +290,178 @@ describe('StatusOverview — 画像槽的导入入口（GOAL C）', () => {
 })
 
 // ═══════════════════════════════════════════════════════════
+// 点画像的去处：有东西可调才弹窗
+// ═══════════════════════════════════════════════════════════
+
+describe('StatusOverview — 点画像分叉（有大画像 → 弹窗；否则直接开文件框）', () => {
+  async function mountWithLargePortrait() {
+    mockAssets.assets = [makeRow('苏婉', { id: 'st', type: '立绘', framing: { x: 40, y: 15, scale: 1.4 } })]
+    mockAssets.assetUrl = vi.fn(async () => 'blob:st')
+    const wrapper = mount(StatusOverview)
+    await flushPromises()
+    return wrapper
+  }
+
+  it('🔴 大画像 → 点击开设置弹窗，**不**直接开文件框', async () => {
+    const wrapper = await mountWithLargePortrait()
+    expect(wrapper.find('.character-portrait').exists()).toBe(true)
+
+    const input = wrapper.find('input.portrait-file')
+    const click = vi.spyOn(input.element as HTMLInputElement, 'click')
+
+    const dialog = wrapper.findComponent(PortraitSettingsDialog)
+    expect(dialog.props('open')).toBe(false)
+
+    await wrapper.find('.portrait-slot').trigger('click')
+    expect(dialog.props('open')).toBe(true)
+    expect(click).not.toHaveBeenCalled()
+
+    // 弹窗拿到的就是命中那条素材的 id 与取景 —— 否则滑块会写到别的行上
+    expect(dialog.props('assetId')).toBe('st')
+    expect(dialog.props('framing')).toEqual({ x: 40, y: 15, scale: 1.4 })
+    expect(dialog.props('src')).toBe('blob:st')
+    expect(dialog.props('name')).toBe('苏婉')
+  })
+
+  it('大画像下 Enter / 空格同样开弹窗，空格 preventDefault（否则页面滚动）', async () => {
+    const wrapper = await mountWithLargePortrait()
+    const slot = wrapper.find('.portrait-slot')
+
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    slot.element.dispatchEvent(enter)
+    await flushPromises()
+    expect(wrapper.findComponent(PortraitSettingsDialog).props('open')).toBe(true)
+
+    wrapper.findComponent(PortraitSettingsDialog).vm.$emit('close')
+    await flushPromises()
+    expect(wrapper.findComponent(PortraitSettingsDialog).props('open')).toBe(false)
+
+    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+    slot.element.dispatchEvent(space)
+    await flushPromises()
+    expect(wrapper.findComponent(PortraitSettingsDialog).props('open')).toBe(true)
+    expect(space.defaultPrevented).toBe(true)
+  })
+
+  it('🔴 没有素材 → 直接开文件框，弹窗一眼都不露（没东西可调，弹窗只是多一次点击）', async () => {
+    const wrapper = mount(StatusOverview)
+    await flushPromises()
+
+    const input = wrapper.find('input.portrait-file')
+    const click = vi.spyOn(input.element as HTMLInputElement, 'click')
+
+    await wrapper.find('.portrait-slot').trigger('click')
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(wrapper.findComponent(PortraitSettingsDialog).props('open')).toBe(false)
+  })
+
+  it('🔴 只有头像 → 同样直接开文件框（头像是圆形脸位，没有取景可言）', async () => {
+    mockAssets.assets = [makeRow('苏婉', { id: 'av', type: '头像' })]
+    mockAssets.assetUrl = vi.fn(async () => 'blob:av')
+
+    const wrapper = mount(StatusOverview)
+    await flushPromises()
+    expect(wrapper.find('.character-portrait').exists()).toBe(false)
+
+    const input = wrapper.find('input.portrait-file')
+    const click = vi.spyOn(input.element as HTMLInputElement, 'click')
+
+    await wrapper.find('.portrait-slot').trigger('click')
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(wrapper.findComponent(PortraitSettingsDialog).props('open')).toBe(false)
+  })
+
+  it('两种去处的说明文案不同（点之前就该知道会发生什么）', async () => {
+    const plain = mount(StatusOverview)
+    await flushPromises()
+    expect(plain.find('.portrait-slot').attributes('aria-label')).toContain('立绘')
+    expect(plain.find('.portrait-slot').attributes('aria-label')).toContain('头像')
+
+    const large = await mountWithLargePortrait()
+    expect(large.find('.portrait-slot').attributes('aria-label')).toContain('取景')
+    expect(large.find('.portrait-slot').attributes('title')).toContain('取景')
+  })
+
+  it('🔴 弹窗里的「更换图片」走同一条文件路径：图片进裁剪台，名字仍是玩家名', async () => {
+    const wrapper = await mountWithLargePortrait()
+    await wrapper.find('.portrait-slot').trigger('click')
+
+    const input = wrapper.find('input.portrait-file')
+    const click = vi.spyOn(input.element as HTMLInputElement, 'click')
+    wrapper.findComponent(PortraitSettingsDialog).vm.$emit('replace')
+    await flushPromises()
+    expect(click).toHaveBeenCalledTimes(1)
+
+    await chooseFile(wrapper, png())
+    const editor = wrapper.findComponent(AssetCropEditor)
+    expect(editor.props('open')).toBe(true)
+    expect(editor.props('name')).toBe('苏婉')
+    expect(editor.props('name')).not.toBe('IMG_1234')
+  })
+
+  it('「更换图片」选中 mp4 → 绕开裁剪台，直通 importForCharacter(…, 头像)', async () => {
+    const wrapper = await mountWithLargePortrait()
+    await wrapper.find('.portrait-slot').trigger('click')
+    wrapper.findComponent(PortraitSettingsDialog).vm.$emit('replace')
+    await flushPromises()
+
+    await chooseFile(wrapper, mp4())
+    expect(wrapper.findComponent(AssetCropEditor).props('open')).toBe(false)
+    expect(mockAssets.importForCharacter).toHaveBeenCalledTimes(1)
+    expect(mockAssets.importForCharacter.mock.calls[0][2]).toBe('头像')
+  })
+
+  /**
+   * 🔴 两个 AppModal 各自在 document 上听 Escape —— 同时开着按一下 Esc 会把两层
+   * 一起关掉。与 AssetCharacterDrawer 同一个解法: 裁剪台开着时本窗先收起来。
+   */
+  it('🔴 裁剪台开着时设置弹窗先收起（一次 Esc 只关一层），裁剪台一关它原样回来', async () => {
+    const wrapper = await mountWithLargePortrait()
+    await wrapper.find('.portrait-slot').trigger('click')
+    expect(wrapper.findComponent(PortraitSettingsDialog).props('open')).toBe(true)
+
+    wrapper.findComponent(PortraitSettingsDialog).vm.$emit('replace')
+    await flushPromises()
+    await chooseFile(wrapper, png())
+
+    expect(wrapper.findComponent(AssetCropEditor).props('open')).toBe(true)
+    expect(wrapper.findComponent(PortraitSettingsDialog).props('open')).toBe(false)
+
+    // 裁剪台取消 → 设置弹窗回来（状态没丢）
+    wrapper.findComponent(AssetCropEditor).vm.$emit('close')
+    await flushPromises()
+    expect(wrapper.findComponent(AssetCropEditor).props('open')).toBe(false)
+    expect(wrapper.findComponent(PortraitSettingsDialog).props('open')).toBe(true)
+  })
+
+  it('🔴 「更换图片」后再选**同一个文件**照样能开台（input.value 一进门就清）', async () => {
+    const wrapper = await mountWithLargePortrait()
+    const input = wrapper.find('input.portrait-file')
+
+    const writes: string[] = []
+    Object.defineProperty(input.element, 'value', {
+      get: () => '',
+      set: (v: string) => void writes.push(v),
+      configurable: true,
+    })
+
+    const file = png()
+    await chooseFile(wrapper, file)
+    expect(wrapper.findComponent(AssetCropEditor).props('open')).toBe(true)
+    expect(writes).toContain('')
+
+    wrapper.findComponent(AssetCropEditor).vm.$emit('close')
+    await flushPromises()
+
+    writes.length = 0
+    await chooseFile(wrapper, file)
+    expect(wrapper.findComponent(AssetCropEditor).props('open')).toBe(true)
+    expect(wrapper.findComponent(AssetCropEditor).props('source')).toBe(file)
+    expect(writes).toContain('')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
 // 图片 → 裁剪台
 // ═══════════════════════════════════════════════════════════
 
@@ -311,38 +511,6 @@ describe('StatusOverview — 选中图片则开裁剪台（一源两图）', () 
     expect(mockAssets.importForCharacter).not.toHaveBeenCalled()
     expect(toast).toHaveBeenCalledTimes(1)
     expect(toast.mock.calls[0][1]).toBe('error')
-  })
-
-  /**
-   * 🔴 导入入口对**两种呈现形态**一视同仁。大画像那条分支很容易只把组件换掉、
-   * 而把可点的槽落在小方框那一支上 —— 表现就是「有立绘的角色再也换不了图」。
-   */
-  it('大画像形态下：点击 / Enter 照样开文件框，选中图片照样进裁剪台', async () => {
-    mockAssets.assets = [makeRow('苏婉', { id: 'st', type: '立绘' })]
-    mockAssets.assetUrl = vi.fn(async () => 'blob:st')
-
-    const wrapper = mount(StatusOverview)
-    await flushPromises()
-    expect(wrapper.find('.character-portrait').exists()).toBe(true)
-
-    const input = wrapper.find('input.portrait-file')
-    const click = vi.spyOn(input.element as HTMLInputElement, 'click')
-    await wrapper.find('.portrait-slot').trigger('click')
-    expect(click).toHaveBeenCalledTimes(1)
-
-    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    wrapper.find('.portrait-slot').element.dispatchEvent(enter)
-    expect(click).toHaveBeenCalledTimes(2)
-
-    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
-    wrapper.find('.portrait-slot').element.dispatchEvent(space)
-    expect(click).toHaveBeenCalledTimes(3)
-    expect(space.defaultPrevented).toBe(true)
-
-    await chooseFile(wrapper, png())
-    const editor = wrapper.findComponent(AssetCropEditor)
-    expect(editor.props('open')).toBe(true)
-    expect(editor.props('name')).toBe('苏婉')
   })
 
   it('小方框形态下同样进裁剪台（两种呈现共用一个槽）', async () => {

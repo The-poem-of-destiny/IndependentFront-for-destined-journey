@@ -1,62 +1,34 @@
 /**
- * CharacterPortrait — 大画像位 + 取景旋钮
+ * CharacterPortrait — 大画像位（**纯呈现**，画面上没有任何家具）
  *
- * 要钉住的三件事，每件都对应一个**在界面上看不出来**的失败形态:
+ * 要钉住的三件事，前两件都对应一个**在界面上看不出来**的失败形态:
  *
  * 1. 🔴 **落到 CSS 的取景永远是夹逼过的**。一个 NaN 会让整条 `object-position` /
  *    `transform` 被浏览器丢弃，表现成「这张图偶尔没对齐」—— 而存量行没有 framing、
- *    旧版本可能写过越界 scale、拖拽算出 NaN，这些路径全汇到本组件。
+ *    旧版本可能写过越界 scale、滑块算出 NaN，这些路径全汇到本组件。
  * 2. 🔴 **`transform-origin` 必须等于 `object-position`**。origin 固定在中心而焦点
  *    在别处时，放大会把刚对准的地方推出框外，用户感受是「两个滑块在打架」。
- * 3. 🔴 **落库防抖**。一次拖拽产生几十上百个 `input`，逐个写 Dexie 会在拖拽中途
- *    反复重建索引。断言是「**恰好一次**」，不是「至少一次」。
+ * 3. 🔴 **一个按钮都不许有**。旋钮 + 相机徽章盖在图上、浮层再盖住画像本身，
+ *    正是这次拆掉的东西；调节面搬到了 `PortraitSettingsDialog`。这条断言是
+ *    防回潮的闸: 谁再往画像上加控件，这里先红。
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { defineComponent, h, nextTick } from 'vue'
+import { describe, it, expect, vi } from 'vitest'
+import { defineComponent, h } from 'vue'
 import { mount } from '@vue/test-utils'
 import CharacterPortrait from './CharacterPortrait.vue'
 import { DEFAULT_ASSET_FRAMING, type AssetFraming } from '@engine/types'
 
-// 形参写全 —— 否则 mock 的 args 是空元组，`mock.calls[0][1]` 过不了 tsc
-const setAssetFraming = vi.fn(async (_id: string, _framing: AssetFraming) => ({
-  outcome: 'ok' as const,
-}))
-
-vi.mock('../../stores/asset-store', () => ({
-  useAssetStore: () => ({ setAssetFraming }),
-}))
-
-beforeEach(() => {
-  vi.clearAllMocks()
-  vi.useFakeTimers()
-})
-afterEach(() => {
-  vi.useRealTimers()
-})
-
 function mountPortrait(props: Record<string, unknown> = {}) {
   return mount(CharacterPortrait, {
-    props: { name: '苏婉', src: 'blob:st', assetId: 'a1', ...props },
+    props: { name: '苏婉', src: 'blob:st', ...props },
   })
 }
 
 /** 内联 style 里某个属性的值（jsdom 归一化后按属性名取，不比整串文本） */
 function styleOf(el: Element, prop: string): string {
   return (el as HTMLElement).style.getPropertyValue(prop)
-}
-
-async function openDial(wrapper: ReturnType<typeof mountPortrait>) {
-  await wrapper.find('.framing-dial').trigger('click')
-  await nextTick()
-}
-
-/** 拖一格滑块 */
-async function slide(wrapper: ReturnType<typeof mountPortrait>, index: number, value: number) {
-  const input = wrapper.findAll('input[type="range"]')[index]
-  ;(input.element as HTMLInputElement).value = String(value)
-  await input.trigger('input')
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -81,7 +53,7 @@ describe('CharacterPortrait — 取景落到 CSS', () => {
     expect(DEFAULT_ASSET_FRAMING).toEqual({ x: 50, y: 0, scale: 1 })
   })
 
-  it('存的取景原样落到 object-position / transform', () => {
+  it('传进来的取景原样落到 object-position / transform', () => {
     const framing: AssetFraming = { x: 30, y: 70, scale: 1.8 }
     const img = mountPortrait({ framing }).find('img').element
     expect(styleOf(img, 'object-position')).toBe('30% 70%')
@@ -119,153 +91,59 @@ describe('CharacterPortrait — 取景落到 CSS', () => {
     expect(styleOf(el, 'object-position')).toBe('10% 20%')
     expect(styleOf(el, 'transform')).toBe('scale(1.5)')
   })
+
+  /** 换图/换取景直接反映到 CSS —— 弹窗拖滑块时的实时预览就靠这条 */
+  it('props.framing 变化当帧反映到 CSS（预览由外部驱动，本组件不存状态）', async () => {
+    const wrapper = mountPortrait({ framing: { x: 50, y: 0, scale: 1 } })
+    await wrapper.setProps({ framing: { x: 12, y: 88, scale: 2.4 } })
+    const img = wrapper.find('img').element
+    expect(styleOf(img, 'object-position')).toBe('12% 88%')
+    expect(styleOf(img, 'transform')).toBe('scale(2.4)')
+  })
 })
 
 // ═══════════════════════════════════════════════════════════
-// 旋钮的出现条件与可达性
+// 画面上没有家具
 // ═══════════════════════════════════════════════════════════
 
-describe('CharacterPortrait — 取景旋钮', () => {
-  it('有图有 id → 旋钮在；没 id（无处写回）或 framable=false → 不出现', () => {
-    expect(mountPortrait().find('.framing-dial').exists()).toBe(true)
-    expect(mountPortrait({ assetId: null }).find('.framing-dial').exists()).toBe(false)
-    expect(mountPortrait({ framable: false }).find('.framing-dial').exists()).toBe(false)
-    expect(mountPortrait({ src: null }).find('.framing-dial').exists()).toBe(false)
-  })
-
-  it('点旋钮开合浮层，三个滑块都是真 range（方向键可操作）且有标签', async () => {
-    const wrapper = mountPortrait()
-    expect(wrapper.find('.framing-pop').exists()).toBe(false)
-    expect(wrapper.find('.framing-dial').attributes('aria-expanded')).toBe('false')
-
-    await openDial(wrapper)
-    expect(wrapper.find('.framing-pop').exists()).toBe(true)
-    expect(wrapper.find('.framing-dial').attributes('aria-expanded')).toBe('true')
-    expect(wrapper.find('.framing-pop').attributes('role')).toBe('dialog')
-
-    const ranges = wrapper.findAll('input[type="range"]')
-    expect(ranges).toHaveLength(3)
-    for (const r of ranges) expect(r.attributes('aria-label')).toBeTruthy()
-    // 缩放滑块的区间来自引擎常量，不在组件里手抄
-    expect(ranges[2].attributes('min')).toBe('1')
-    expect(ranges[2].attributes('max')).toBe('3')
-
-    await wrapper.find('.framing-dial').trigger('click')
-    await nextTick()
+describe('CharacterPortrait — 画面干净', () => {
+  it('🔴 一个按钮/滑块/浮层都没有 —— 取景面搬去了 PortraitSettingsDialog', () => {
+    const wrapper = mountPortrait({ framing: { x: 30, y: 40, scale: 2 } })
+    expect(wrapper.findAll('button')).toHaveLength(0)
+    expect(wrapper.findAll('input')).toHaveLength(0)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    // 旧版的旋钮与浮层，一个都不许回来
+    expect(wrapper.find('.framing-dial').exists()).toBe(false)
     expect(wrapper.find('.framing-pop').exists()).toBe(false)
   })
 
-  it('Esc 收起浮层', async () => {
-    const wrapper = mountPortrait()
-    await openDial(wrapper)
-    await wrapper.find('.framing-pop').trigger('keydown', { key: 'Escape' })
-    await nextTick()
-    expect(wrapper.find('.framing-pop').exists()).toBe(false)
+  it('mp4 形态下同样没有家具', () => {
+    const wrapper = mountPortrait({ video: true })
+    expect(wrapper.findAll('button')).toHaveLength(0)
+    expect(wrapper.findAll('input')).toHaveLength(0)
   })
 
-  it('🔴 旋钮的点击与键盘事件不外泄 —— 外层「点一下=导入」的槽不会被误触', async () => {
+  /**
+   * 本组件常被塞进一个「整块可点」的槽位里（StatusOverview 的画像槽就是）。
+   * 它自己不拦任何事件，点击必须一路冒泡到那个槽 —— 旧版为了保护旋钮而
+   * `stopPropagation` 的那套已经随旋钮一起删掉了。
+   */
+  it('点击与键盘照常冒泡给外层可点的槽（本组件不吞事件）', async () => {
     const onClick = vi.fn()
     const onKeydown = vi.fn()
     const Host = defineComponent({
       setup() {
         return () =>
           h('div', { class: 'slot', onClick, onKeydown }, [
-            h(CharacterPortrait, { name: '苏婉', src: 'blob:st', assetId: 'a1' }),
+            h(CharacterPortrait, { name: '苏婉', src: 'blob:st' }),
           ])
       },
     })
     const wrapper = mount(Host)
-    await wrapper.find('.framing-dial').trigger('click')
-    await wrapper.find('.framing-dial').trigger('keydown', { key: 'Enter' })
-    await nextTick()
+    await wrapper.find('.portrait-frame').trigger('click')
+    await wrapper.find('.portrait-frame').trigger('keydown', { key: 'Enter' })
 
-    expect(onClick).not.toHaveBeenCalled()
-    expect(onKeydown).not.toHaveBeenCalled()
-    expect(wrapper.find('.framing-pop').exists()).toBe(true)
-  })
-})
-
-// ═══════════════════════════════════════════════════════════
-// 实时预览 + 防抖落库
-// ═══════════════════════════════════════════════════════════
-
-describe('CharacterPortrait — 调取景', () => {
-  it('拖滑块 → 画面当帧就变（不等落库）', async () => {
-    const wrapper = mountPortrait()
-    await openDial(wrapper)
-
-    await slide(wrapper, 1, 65) // 垂直
-    expect(styleOf(wrapper.find('img').element, 'object-position')).toBe('50% 65%')
-    // 还没到防抖点 —— 预览已生效，库一个字没写
-    expect(setAssetFraming).not.toHaveBeenCalled()
-  })
-
-  it('🔴 一次拖拽几十个 input → setAssetFraming **恰好一次**，且是最后那个值', async () => {
-    const wrapper = mountPortrait()
-    await openDial(wrapper)
-
-    for (let v = 0; v <= 40; v += 2) await slide(wrapper, 0, v)
-    expect(setAssetFraming).not.toHaveBeenCalled()
-
-    vi.advanceTimersByTime(300)
-    expect(setAssetFraming).toHaveBeenCalledTimes(1)
-    expect(setAssetFraming.mock.calls[0]).toEqual(['a1', { x: 40, y: 0, scale: 1 }])
-  })
-
-  it('缩放滑块写 scale，落库值同样夹逼过', async () => {
-    const wrapper = mountPortrait()
-    await openDial(wrapper)
-
-    await slide(wrapper, 2, 2.5)
-    vi.advanceTimersByTime(300)
-    expect(setAssetFraming.mock.calls[0][1]).toEqual({ x: 50, y: 0, scale: 2.5 })
-  })
-
-  it('复位 → 回到 DEFAULT_ASSET_FRAMING，画面与落库都跟上', async () => {
-    const wrapper = mountPortrait({ framing: { x: 12, y: 88, scale: 2.4 } })
-    await openDial(wrapper)
-    expect(styleOf(wrapper.find('img').element, 'object-position')).toBe('12% 88%')
-
-    await wrapper.find('.fp-reset').trigger('click')
-    await nextTick()
-    expect(styleOf(wrapper.find('img').element, 'object-position')).toBe('50% 0%')
-    expect(styleOf(wrapper.find('img').element, 'transform')).toBe('scale(1)')
-
-    vi.advanceTimersByTime(300)
-    expect(setAssetFraming).toHaveBeenCalledTimes(1)
-    expect(setAssetFraming.mock.calls[0][1]).toEqual({ ...DEFAULT_ASSET_FRAMING })
-  })
-
-  it('拖完立刻卸载 → 欠的那一笔补写（最后 300ms 的调整不许凭空丢）', async () => {
-    const wrapper = mountPortrait()
-    await openDial(wrapper)
-    await slide(wrapper, 0, 22)
-
-    wrapper.unmount()
-    expect(setAssetFraming).toHaveBeenCalledTimes(1)
-    expect(setAssetFraming.mock.calls[0][1]).toEqual({ x: 22, y: 0, scale: 1 })
-
-    // 补写之后定时器已作废，不会再写第二遍
-    vi.advanceTimersByTime(300)
-    expect(setAssetFraming).toHaveBeenCalledTimes(1)
-  })
-
-  it('🔴 换了一张图 → 欠账写回**上一条** id，草稿不跟着挂到新图上', async () => {
-    const wrapper = mountPortrait()
-    await openDial(wrapper)
-    await slide(wrapper, 0, 18)
-
-    await wrapper.setProps({ assetId: 'a2', src: 'blob:st2' })
-    expect(setAssetFraming).toHaveBeenCalledTimes(1)
-    expect(setAssetFraming.mock.calls[0][0]).toBe('a1')
-
-    await nextTick()
-    // 新图用它自己的（缺省）取景，不继承上一张的草稿
-    expect(styleOf(wrapper.find('img').element, 'object-position')).toBe('50% 0%')
-  })
-
-  it('没动过就卸载 → 一次都不写', () => {
-    mountPortrait().unmount()
-    expect(setAssetFraming).not.toHaveBeenCalled()
+    expect(onClick).toHaveBeenCalledTimes(1)
+    expect(onKeydown).toHaveBeenCalledTimes(1)
   })
 })

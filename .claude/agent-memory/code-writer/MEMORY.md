@@ -5,4 +5,5 @@
 - [全量测试的既有失败基线](known-flaky-tests.md) — game-store 大纲回读 ~50% 概率失败 + SelectableCard 品质色；全量 2 failed 是基线，不是新改动弄坏的
 - [typecheck 查不到 .vue](typecheck-skips-vue-sfc.md) — 裸 tsc 不解析 SFC，改 Vue 必须另跑 pin 住 TS 的 vue-tsc；输出有 ~40 条既有错误基线
 - [store mock 必须 reactive](reactive-store-mock-vacuous.md) — 裸对象 mock 切断响应式链，「落库后 UI 自己刷新」的断言恒真/恒假；去掉 reactive 必须变红
+- [图像上不放控件](feedback-no-furniture-on-media.md) — 画像位保持纯净（无旋钮/徽章/浮层），调节收进 Modal 内含实时预览；两层 Modal 用 `open && !childOpen` 收父层
 - [Blob/Uint8Array typecheck 陷阱](blob-uint8array-typecheck-trap.md) — new Blob([变量 Uint8Array]) 测试绿但 tsc 红；写成 bytes.slice().buffer as ArrayBuffer
