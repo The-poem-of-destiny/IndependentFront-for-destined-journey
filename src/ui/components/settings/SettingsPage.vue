@@ -14,7 +14,7 @@ import { VERSION } from '@engine/index'
 import { getAgentTemplate } from '@engine/agent-templates'
 import { getDefaultTemplate } from '@engine/placeholder-registry'
 import { preprocessPresetForPreview } from '@engine/preset-loader'
-import { withProxy } from '@engine/api-tools'
+import { fetchModels } from '@engine/api-tools'
 import BeautifierSection from './BeautifierSection.vue'
 import AudioSection from './AudioSection.vue'
 import AssetSection from './AssetSection.vue'
@@ -53,14 +53,82 @@ const hasApi = computed(() => s.apiPool.length > 0)
 const showAddApi = ref(false)
 const apiForm = reactive({ name: '', baseUrl: '', apiKey: '', model: '', apiType: 'chat' as 'chat' | 'embedding', enableThinking: false, _realKey: '' as string, _masked: false })
 const apiModels = ref<string[]>([])
+const showModelList = ref(false)
+// 浮层始终显示全部已获取模型——不按 input 当前值过滤（否则聚焦时旧值会滤掉其他模型，重蹈 datalist 覆辙）。
+// 当前已选模型高亮，用户可从全部列表点选，或继续手动输入。
+function selectModel(m: string) { apiForm.model = m; showModelList.value = false }
+function onModelBlur() { setTimeout(() => { showModelList.value = false }, 150) }
 const showAdvancedApi = ref(false)
 const apiFormTesting = ref(false)
 const apiFormFetchingModels = ref(false)
 const editingApiId = ref<string | null>(null)
 
 function maskKey(key: string): string { if (!key || key.length < 8) return key ? key.slice(0,3)+'***' : ''; return key.slice(0,3)+'***'+key.slice(-4) }
-async function testApiAndFetch() { if(!apiForm.baseUrl||!apiForm.apiKey)return; apiFormTesting.value=true; const realKey=apiForm._realKey||apiForm.apiKey; try{await fetchModelList();let testModel=apiForm.model;if(!testModel&&apiModels.value.length>0){if(apiForm.apiType==='embedding'){const emb=apiModels.value.find((m=>m.toLowerCase().includes('embedding')));testModel=emb||apiModels.value[0]}else{testModel=apiModels.value[0]}}if(!testModel){ui.toast('未获取到模型，请先点「获取模型」并选择一个模型再测试','warning');apiFormTesting.value=false;return}const testPath=apiForm.apiType==='embedding'?'/embeddings':'/chat/completions';const testBody=apiForm.apiType==='embedding'?JSON.stringify({model:testModel,input:'test'}):JSON.stringify({model:testModel,messages:[{role:'user',content:'hi'}],max_tokens:1});const r=await new Promise((ok,rej)=>{const x=new XMLHttpRequest();x.open('POST',withProxy(apiForm.baseUrl.replace(/\/+$/,'')+testPath));x.setRequestHeader('Content-Type','application/json');x.setRequestHeader('Authorization','Bearer '+realKey);x.timeout=15000;x.onload=()=>{if(x.status>=200&&x.status<300)ok(x);else rej(new Error(x.status+' '+x.responseText.slice(0,100)))};x.onerror=()=>rej(new Error('network error'));x.ontimeout=()=>rej(new Error('timeout'));x.send(testBody)});apiForm._realKey=realKey; apiForm.apiKey=maskKey(realKey); apiForm._masked=true; ui.toast('ok','success');if(apiModels.value.length===0)await fetchModelList()}catch(e){const msg=(e?.message||'').slice(0,80);const hint=msg.indexOf('401')>=0?'（API Key 无效或格式不符，确认 key 与服务要求匹配）':msg.indexOf('404')>=0?'（模型名或接口路径不对，检查 baseUrl/模型）':'';ui.toast('fail: '+msg+hint,'error')} apiFormTesting.value=false }
-	async function fetchModelList() { apiFormFetchingModels.value=true; const rk=apiForm._realKey||apiForm.apiKey; try{const r=await new Promise((ok,rej)=>{const x=new XMLHttpRequest();x.open("GET",withProxy(apiForm.baseUrl.replace(/\/+$/,'')+"/models"));x.setRequestHeader("Authorization","Bearer "+rk);x.timeout=10000;x.onload=()=>{if(x.status>=200&&x.status<300)ok(x);else rej(new Error(x.status+" "+x.responseText.slice(0,100)))};x.onerror=()=>rej(new Error("network error"));x.ontimeout=()=>rej(new Error("timeout"));x.send()});const d=JSON.parse(r.responseText);const _rawModels=(Array.isArray(d)?d:Array.isArray(d.data)?d.data:Array.isArray(d.models)?d.models:[]).map(function(m){return typeof m==='string'?m:m.id}).filter(Boolean);apiModels.value=[...new Set(_rawModels)];console.log('[fetchModelList] raw response:',JSON.stringify(d).slice(0,800),'→ unique models:',JSON.stringify(apiModels.value));ui.toast("已获取 "+apiModels.value.length+" 个模型，点击输入框下拉选择或手动填写","success")}catch(e){const msg=(e.message||"").slice(0,100);const hint=msg.indexOf("401")>=0?"（Key 无效或与端点不匹配，如 z.ai coding key 必须配 coding endpoint）":msg.indexOf("404")>=0?"（该端点可能不支持 /models，请手动填 model）":msg.indexOf("network")>=0?"（代理或网络问题）":"";ui.toast("获取失败: "+msg+hint,"error")} apiFormFetchingModels.value=false }
+async function testApiAndFetch() {
+	if (!apiForm.baseUrl || !apiForm.apiKey) return
+	apiFormTesting.value = true
+	const realKey = apiForm._realKey || apiForm.apiKey
+	try {
+		await fetchModelList()
+		let testModel = apiForm.model
+		if (!testModel && apiModels.value.length > 0) {
+			if (apiForm.apiType === 'embedding') {
+				const emb = apiModels.value.find(m => m.toLowerCase().includes('embedding'))
+				testModel = emb || apiModels.value[0]
+			} else {
+				testModel = apiModels.value[0]
+			}
+		}
+		if (!testModel) { ui.toast('未获取到模型，请先点「获取模型」并选择一个模型再测试', 'warning'); apiFormTesting.value = false; return }
+		const testUrl = apiForm.apiType === 'embedding' ? '/api/embeddings' : '/api/chat/test'
+		const testBody = apiForm.apiType === 'embedding'
+			? JSON.stringify({ model: testModel, input: 'test' })
+			: JSON.stringify({ model: testModel, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 })
+		const r = await fetch(testUrl, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'X-Target-Base-URL': apiForm.baseUrl.replace(/\/+$/, ''), 'Authorization': 'Bearer ' + realKey },
+			body: testBody,
+		})
+		if (!r.ok) {
+			const t = await r.text().catch(() => '')
+			throw new Error(r.status + ' ' + t.slice(0, 100))
+		}
+		apiForm._realKey = realKey
+		apiForm.apiKey = maskKey(realKey)
+		apiForm._masked = true
+		ui.toast('ok', 'success')
+		if (apiModels.value.length === 0) await fetchModelList()
+	} catch (e) {
+		const msg = (e?.message || '').slice(0, 80)
+		const hint = msg.indexOf('401') >= 0 ? '（API Key 无效或格式不符，确认 key 与服务要求匹配）'
+			: msg.indexOf('404') >= 0 ? '（模型名或接口路径不对，检查 baseUrl/模型）' : ''
+		ui.toast('fail: ' + msg + hint, 'error')
+	}
+	apiFormTesting.value = false
+}
+	async function fetchModelList() {
+		if (!apiForm.baseUrl) { return }
+		apiFormFetchingModels.value = true
+		const rk = apiForm._realKey || apiForm.apiKey
+		try {
+			// 去重：复用 api-tools.fetchModels（同源 /api/models + Bearer/api-key 双鉴权 + 三形态解析）
+			const { models, source, error } = await fetchModels({ baseUrl: apiForm.baseUrl, apiKey: rk })
+			if (source === 'remote' && models.length > 0) {
+				apiModels.value = [...new Set(models)]
+				console.log('[fetchModelList] remote → unique models:', JSON.stringify(apiModels.value))
+				ui.toast('已获取 ' + apiModels.value.length + ' 个模型，点击输入框下拉选择或手动填写', 'success')
+			} else {
+				const msg = (error || 'unknown').slice(0, 100)
+				const hint = msg.indexOf('401') >= 0 ? '（Key 无效或与端点不匹配，如 z.ai coding key 必须配 coding endpoint）'
+					: msg.indexOf('404') >= 0 ? '（该端点可能不支持 /models，请手动填 model）'
+					: msg.indexOf('network') >= 0 ? '（代理或网络问题）' : ''
+				ui.toast('获取失败: ' + msg + hint, 'error')
+			}
+		} catch (e) {
+			ui.toast('获取失败: ' + (e.message || '').slice(0, 100), 'error')
+		}
+		apiFormFetchingModels.value = false
+	}
 function openAddApi() { editingApiId.value=null; apiForm.name='';apiForm.baseUrl='';apiForm.apiKey='';apiForm.model='';apiForm.apiType='chat';apiForm.enableThinking=false;apiForm._realKey=''; apiForm._masked=false; apiModels.value=[];showAddApi.value=true }
 function openEditApi(ep: ApiEntry) { editingApiId.value=ep.id;apiForm.name=ep.name;apiForm.baseUrl=ep.baseUrl;const key=ep.apiKey||'';apiForm.apiKey=key;apiForm._realKey=key;apiForm._masked=key ? true : false;apiForm.model=ep.model;apiForm.apiType=ep.apiType||'chat';apiForm.enableThinking=ep.enableThinking??false;apiModels.value=ep.models?.length?[...ep.models]:[ep.model].filter(Boolean);showAddApi.value=true }
 	function saveApi() { const realKey=apiForm._realKey||apiForm.apiKey; const e: ApiEntry = {id:editingApiId.value||crypto.randomUUID(),name:apiForm.name,baseUrl:apiForm.baseUrl,apiKey:realKey,maskedKey:maskKey(realKey),model:apiForm.model,models:apiModels.value.length>0?apiModels.value:[apiForm.model].filter(Boolean),apiType:apiForm.apiType,enableThinking:apiForm.enableThinking};if(editingApiId.value){const i=s.apiPool.findIndex(x=>x.id===editingApiId.value);if(i>=0)s.apiPool[i]=e}else s.apiPool.push(e);showAddApi.value=false;editingApiId.value=null;ui.toast(editingApiId.value?"API updated":"API added","success") }
@@ -1377,7 +1445,7 @@ async function clearAll(){const{clearAllData}=await import('@engine/database');a
 
     <!-- 添加/编辑 API 弹窗 -->
     <AppModal :open="showAddApi" :title="editingApiId?'编辑 API':'添加 API'" size="md" @update:open="showAddApi=$event">
-      <div class="api-form"><label class="form-label">名称<input v-model="apiForm.name" class="form-input" placeholder="如: DeepSeek 生产" /></label><label class="form-label">类型<select v-model="apiForm.apiType" class="form-input"><option value="chat">文本补全 (Chat)</option><option value="embedding">向量嵌入 (Embedding)</option></select><p class="form-hint">Chat 模型用 /chat/completions 测试；Embedding 模型用 /embeddings 测试</p></label><label class="form-label">主链接<input v-model="apiForm.baseUrl" class="form-input" placeholder="https://api.deepseek.com/v1" /></label><label class="form-label">API Key<div class="key-row"><input v-model="apiForm.apiKey" class="form-input" :type="(editingApiId && apiForm._masked && (!apiForm._realKey || apiForm.apiKey.length > 10 && apiForm.apiKey.includes('***'))) ? 'password' : (apiForm.apiKey.length>10&&!apiForm.apiKey.includes('***')?'text':'password')" placeholder="API Key（按服务商提供，不一定是 sk- 开头）" /><AppButton variant="secondary" size="sm" :disabled="apiFormTesting" @click="testApiAndFetch">{{ apiFormTesting?'测试中...':'测试连接' }}</AppButton></div><p class="form-hint">编辑已有 API 时密钥默认隐藏。点击测试连接验证密钥并获取模型列表。</p></label><label class="form-label">模型<div class="key-row"><input v-model="apiForm.model" class="form-input" list="api-model-list" placeholder="如 glm-4.6 / deepseek-chat" /><datalist id="api-model-list"><option v-for="m in apiModels" :key="m" :value="m" /></datalist><AppButton variant="secondary" size="sm" :disabled="apiFormFetchingModels" @click="fetchModelList">{{ apiFormFetchingModels?'获取中...':'获取模型' }}</AppButton></div><p class="form-hint">可手动填写模型 id，或点「获取模型」拉取列表后选择。获取失败时按服务商文档手动填（如 z.ai 填 glm-4.6）。</p></label>
+      <div class="api-form"><label class="form-label">名称<input v-model="apiForm.name" class="form-input" placeholder="如: DeepSeek 生产" /></label><label class="form-label">类型<select v-model="apiForm.apiType" class="form-input"><option value="chat">文本补全 (Chat)</option><option value="embedding">向量嵌入 (Embedding)</option></select><p class="form-hint">Chat 模型用 /chat/completions 测试；Embedding 模型用 /embeddings 测试</p></label><label class="form-label">主链接<input v-model="apiForm.baseUrl" class="form-input" placeholder="https://api.deepseek.com/v1" /></label><label class="form-label">API Key<div class="key-row"><input v-model="apiForm.apiKey" class="form-input" :type="(editingApiId && apiForm._masked && (!apiForm._realKey || apiForm.apiKey.length > 10 && apiForm.apiKey.includes('***'))) ? 'password' : (apiForm.apiKey.length>10&&!apiForm.apiKey.includes('***')?'text':'password')" placeholder="API Key（按服务商提供，不一定是 sk- 开头）" /><AppButton variant="secondary" size="sm" :disabled="apiFormTesting" @click="testApiAndFetch">{{ apiFormTesting?'测试中...':'测试连接' }}</AppButton></div><p class="form-hint">编辑已有 API 时密钥默认隐藏。点击测试连接验证密钥并获取模型列表。</p></label><label class="form-label">模型<div class="key-row"><div class="model-combo"><input v-model="apiForm.model" class="form-input" placeholder="如 glm-4.6 / deepseek-chat" autocomplete="off" @focus="showModelList=true" @blur="onModelBlur" /><div v-if="showModelList && apiModels.length" class="model-dropdown"><div v-for="m in apiModels" :key="m" class="model-option" :class="{'model-option-current': m === apiForm.model}" @mousedown.prevent="selectModel(m)">{{ m }}</div></div></div><AppButton variant="secondary" size="sm" :disabled="apiFormFetchingModels" @click="fetchModelList">{{ apiFormFetchingModels?'获取中...':'获取模型' }}</AppButton></div><p class="form-hint">可手动填写模型 id，或点「获取模型」拉取列表后选择。获取失败时按服务商文档手动填（如 z.ai 填 glm-4.6）。</p></label>
         <!-- 高级设置（可折叠） -->
         <div class="advanced-section">
           <button class="advanced-toggle" type="button" @click="showAdvancedApi = !showAdvancedApi">
@@ -1461,6 +1529,12 @@ async function clearAll(){const{clearAllData}=await import('@engine/database');a
 .form-hint{font-size:0.72rem;color:var(--theme-text-muted);margin:0 0 4px;line-height:1.4}
 .key-row{display:flex;gap:8px;align-items:center}
 .key-row .form-input{flex:1}
+.model-combo{position:relative;flex:1;min-width:0}
+.model-combo .form-input{width:100%}
+.model-dropdown{position:absolute;top:calc(100% + 2px);left:0;right:0;z-index:50;background:var(--theme-content-bg);border:1px solid var(--theme-card-border);border-radius:var(--theme-radius-md);max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.2)}
+.model-option{padding:7px 12px;cursor:pointer;font-size:0.85rem;color:var(--theme-text-primary);transition:background var(--theme-transition-fast)}
+.model-option:hover{background:var(--theme-tab-hover-bg)}
+.model-option-current{background:color-mix(in srgb, var(--theme-primary) 12%, var(--theme-content-bg));color:var(--theme-primary);font-weight:600}
 
 /* API */
 .api-pool{display:flex;flex-direction:column;gap:8px}

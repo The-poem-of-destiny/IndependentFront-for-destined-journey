@@ -216,7 +216,7 @@ describe('computeEmbedding', () => {
     expect(result).toEqual(expectedEmbedding);
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const fetchUrl = mockFetch.mock.calls[0][0] as string;
-    expect(fetchUrl).toContain('embeddings');
+    expect(fetchUrl).toBe('/api/embeddings');
   });
 
   it('should use custom model when provided', async () => {
@@ -299,9 +299,10 @@ describe('computeEmbedding', () => {
 
     await computeEmbedding('test', makeEndpoint({ baseUrl: 'https://api.example.com/v1/' }));
 
-    const fetchUrl = mockFetch.mock.calls[0][0] as string;
-    expect(fetchUrl).toContain('api.example.com');
-    expect(fetchUrl).toContain('embeddings');
+    // 同源路由：url 固定，真实 baseUrl（已 strip 尾斜杠）走 X-Target-Base-URL header
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/embeddings');
+    const headers = (mockFetch.mock.calls[0][1] as any).headers;
+    expect(headers['X-Target-Base-URL']).toBe('https://api.example.com/v1');
   });
 
   it('should include authorization header', async () => {
@@ -659,7 +660,9 @@ describe('saveMemoryWithEmbedding', () => {
     const endpoint = makeEndpoint({ baseUrl: 'https://custom.api.com/v2', apiKey: 'sk-custom' });
     await saveMemoryWithEmbedding(makeMemory(), endpoint);
 
-    const fetchUrl = mockFetch.mock.calls[0][0] as string;
-    expect(fetchUrl).toContain('custom.api.com');
+    // 同源路由：url 固定，endpoint.baseUrl 走 X-Target-Base-URL header
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/embeddings');
+    const headers = (mockFetch.mock.calls[0][1] as any).headers;
+    expect(headers['X-Target-Base-URL']).toBe('https://custom.api.com/v2');
   });
 });

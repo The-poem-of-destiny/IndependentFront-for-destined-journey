@@ -9,30 +9,6 @@ export interface ApiCallTarget {
   model?: string;
 }
 
-/**
- * 将外部 API URL 包装到 dev 服务器内置的 CORS 代理 /api/proxy/<encoded>，
- * 仅在浏览器环境且需要跨域时启用。Node/vitest 环境直接返回原 URL。
- *
- * 背景：ollama.com、api.deepseek.com 等国外站点不返回 CORS 头，
- * 浏览器会直接拦截并报 "Failed to fetch" / "network error"，
- * 被误判为代理或网络问题。实际代理是通的，只是浏览器策略限制。
- * vite.config.ts 已实现 /api/proxy 透传中间件，此处统一接入。
- */
-export function withProxy(url: string): string {
-  // 非 http(s) 链接不处理（相对路径已经是同源）
-  if (!/^https?:\/\//i.test(url)) return url;
-  // 同源（dev 服务器自身）不需要代理
-  if (typeof location !== 'undefined') {
-    const loc = location;
-    if (url.startsWith(`${loc.protocol}//${loc.host}`)) return url;
-  }
-  // 生产构建（file:// 或静态托管）通常无 /api/proxy 中间件，保留原 URL
-  // 用 import.meta.env.DEV 判断 dev 环境，避免生产环境误用
-  const isDev = typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV;
-  if (!isDev) return url;
-  return `/api/proxy/${encodeURIComponent(url)}`;
-}
-
 const COMMON_MODELS_BY_HOST: { match: string; models: string[] }[] = [
   { match: 'deepseek', models: ['deepseek-chat', 'deepseek-reasoner'] },
   { match: 'moonshot', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
@@ -60,12 +36,17 @@ function normalizeBaseUrl(url: string): string {
 }
 
 async function tryFetchModels(baseUrl: string, headers: Record<string, string>): Promise<string[]> {
-  const res = await fetch(withProxy(`${baseUrl}/models`), {
-    headers: { Accept: 'application/json', ...headers },
+  const res = await fetch('/api/models', {
+    headers: { Accept: 'application/json', 'X-Target-Base-URL': baseUrl, ...headers },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
-  return ((data.data ?? []) as Array<{ id?: string }>).map(m => m.id).filter((x): x is string => !!x).sort();
+  // 兼容三种返回形态：顶层数组 / {data:[]} / {models:[]}；元素可为字符串或 {id}
+  const raw = Array.isArray(data) ? data
+    : Array.isArray(data?.data) ? data.data
+    : Array.isArray(data?.models) ? data.models
+    : [];
+  return raw.map((m: any) => typeof m === 'string' ? m : m?.id).filter((x: any): x is string => !!x).sort();
 }
 
 /**
@@ -111,11 +92,12 @@ export async function testConnection(target: ApiCallTarget): Promise<{ ok: boole
     return { ok: false, error: '请填写 URL 和 Key' };
   }
   try {
-    const res = await fetch(withProxy(`${baseUrl}/chat/completions`), {
+    const res = await fetch('/api/chat/test', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
+        'X-Target-Base-URL': baseUrl,
         Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({

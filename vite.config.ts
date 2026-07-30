@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 import fs from 'fs'
+import { buildHonoApp } from './server/app'
+import { getRequestListener } from '@hono/node-server'
 
 export default defineConfig({
   plugins: [
@@ -9,6 +11,18 @@ export default defineConfig({
     {
       name: 'file-write-api',
       configureServer(server) {
+        // === BFF (hono)：同源 API 路由，dev 挂载（Phase A）===
+        // prod 走独立 server.js，见方案 §7
+        const honoListener = getRequestListener(buildHonoApp().fetch)
+        server.middlewares.use((req, res, next) => {
+          const u = req.url || ''
+          // hono BFF 管辖的路由前缀；其余 /api/*（proxy/worldbooks/defaults）走下方 inline middleware
+          if (u.startsWith('/api/chat') || u.startsWith('/api/status') || u.startsWith('/api/models') || u.startsWith('/api/embeddings')) {
+            return honoListener(req, res)
+          }
+          next()
+        })
+
         const dataDir = resolve(__dirname, 'data')
 
         server.middlewares.use('/data', (req, res, next) => {

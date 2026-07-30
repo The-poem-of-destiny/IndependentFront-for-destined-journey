@@ -11,7 +11,6 @@
  */
 
 import type { ApiEndpoint, AgentResult, ToolDefinition } from './types';
-import { withProxy } from './api-tools';
 
 /** 内部扩展 — 包含原始 tool_calls 数据 */
 type InternalAgentResult = AgentResult & { _toolCalls?: any[] };
@@ -361,10 +360,11 @@ export class AgentClient {
         body.thinking = { type: 'disabled' };
       }
 
-      const res = await fetch(withProxy(`${this.baseUrl}/chat/completions`), {
+      const res = await fetch('/api/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-Target-Base-URL': this.baseUrl,
           Authorization: `Bearer ${this.endpoint.apiKey}`,
         },
         body: JSON.stringify(body),
@@ -599,10 +599,11 @@ export class AgentClient {
         body.thinking = { type: 'disabled' };
       }
 
-      const res = await fetch(withProxy(`${this.baseUrl}/chat/completions`), {
+      const res = await fetch('/api/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-Target-Base-URL': this.baseUrl,
           Authorization: `Bearer ${this.endpoint.apiKey}`,
         },
         body: JSON.stringify(body),
