@@ -395,7 +395,14 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 
     <!-- ═══════ 玩家概要 —— 身份一行 + 方形画像 ═══════ -->
     <div class="section">
-      <div class="section-header">
+      <!-- 身份一行的**两种落位**（同一份数据，两处 DOM）:
+           · 有大画像 → 盖在画框顶端（见 .player-summary 里那一份）；
+           · 只有头像 / 没有素材 → 留在这里自己一行。11.25rem 的小方框上盖一条
+             通栏的字会把画像整个吞掉，所以小框形态**不**overlay。
+           不合并成一份的原因是**放哪里决定了点击能不能生效**: 盖在画上的那份必须
+           是画像槽的后代，冒泡到槽才有"点哪都开设置窗"；而这一份必须在槽外面，
+           否则一行身份文字会变成"点了会弹文件框"的按钮内容。 -->
+      <div class="section-header" v-if="!hasLargePortrait">
         <div class="identity-line" :title="identityTitle">
           <template v-for="(f, i) in identityFields" :key="f.label"
             ><span v-if="i" class="identity-sep" aria-hidden="true"> · </span
@@ -434,6 +441,16 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
             :src="portraitUrl ?? undefined"
             :video="portraitIsVideo"
           />
+          <!-- 身份条 —— **内容**，不是控件: 没有按钮、没有徽章、没有悬停浮层，
+               只有一层自上而下化开的护读底把字托住（见 style 里的说明）。 -->
+          <div class="identity-strip" v-if="hasLargePortrait">
+            <div class="identity-line" :title="identityTitle">
+              <template v-for="(f, i) in identityFields" :key="f.label"
+                ><span v-if="i" class="identity-sep" aria-hidden="true"> · </span
+                ><span class="identity-field" :class="f.cls">{{ f.value }}</span
+              ></template>
+            </div>
+          </div>
         </div>
         <input
           ref="portraitInput"
@@ -710,6 +727,54 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 .identity-field {
   font-weight: 500;
 }
+
+/* ── 身份条：盖在大画像顶端 ──────────────────────────────────
+ *
+ * 📌 **pointer-events 刻意保持默认。** 它是画像槽的**后代**，点在字上事件照样
+ *   冒泡到槽的 @click，去处与点画面别处完全一样 —— 所以不需要 `pointer-events:
+ *   none` 来"让开"。反过来，设了 none 会把截断时唯一的补救（悬停 title 看全文）
+ *   一起关掉。同理这里不写 @click.stop、不放按钮/徽章: 这块是内容，不是控件。
+ *
+ * 🔴 **护读底必须与主题无关。** 底下是用户自己导入的图，深浅未知；若用主题变量
+ *   调色，浅色主题会给出浅色 scrim，在一张白图上彻底失效。所以 scrim 恒为黑、
+ *   字恒为浅色 —— 这一对在白图与黑图上都成立。
+ *
+ * 🔴 **用渐变而不是实色条。** 实色条会盖掉用户刚裁好的构图（取景滑块调的正是
+ *   那一块），渐变只在字那一带压暗，往下化到全透明。
+ */
+.identity-strip {
+  position: absolute;
+  top: 1px;   /* 让开画框那 1px 边框，边线保持干净 */
+  left: 1px;
+  right: 1px;
+  z-index: 1;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md) var(--theme-spacing-xl);
+  border-radius: calc(var(--theme-radius-md, 6px) - 1px) calc(var(--theme-radius-md, 6px) - 1px) 0 0;
+  /* 字带（顶起 ~40%）内 alpha 0.78→0.58: 白图被压到约 22-42% 亮度，浅色字对比
+     仍有 ~7:1；黑图上自然更高。往下 100% 处归零，构图不受影响。 */
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.78) 0%,
+    rgba(0, 0, 0, 0.58) 40%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+/* 与主题无关的浅色墨（见上）。text-shadow 兜住"顶部很花"的图 —— 花图上
+   scrim 压暗有余而反差不足，一圈暗描边才能把笔画从纹理里拉出来。 */
+.identity-strip .identity-line {
+  font-size: 0.75rem;
+  color: #f0ebe1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+.identity-strip .identity-sep {
+  color: #f0ebe1;
+  opacity: 0.5;
+}
+/* 品质紫落在深 scrim 上偏暗 —— 提亮，但仍是同一个语义色而非另换一色 */
+.identity-strip .tier-text {
+  color: color-mix(in srgb, var(--theme-quality-epic) 60%, #fff);
+}
+
 .player-summary {
   display: flex;
   flex-direction: column;

@@ -240,6 +240,114 @@ describe('StatusOverview — 大画像 vs 小方框的分叉（按命中的档�
   })
 })
 
+// ═══════════════════════════════════════════════════════════
+// 身份条的落位：盖在大画像上 vs 留在画像上方自己一行
+// ═══════════════════════════════════════════════════════════
+
+describe('StatusOverview — 身份条落位（有大画像才 overlay）', () => {
+  /** 库里给一张立绘 —— 大画像形态 */
+  async function mountLarge() {
+    mockAssets.assets = [makeRow('苏婉', { id: 'st', type: '立绘' })]
+    mockAssets.assetUrl = vi.fn(async () => 'blob:st')
+    const wrapper = mount(StatusOverview)
+    await flushPromises()
+    return wrapper
+  }
+
+  it('🔴 有立绘 → 身份条盖在画像里（画像槽的后代），不再是画像上方那一行', async () => {
+    const wrapper = await mountLarge()
+
+    // 就在槽里 —— 这既是"盖在画上"的落位，也是点击能冒泡到槽的前提
+    expect(wrapper.find('.portrait-slot .identity-strip .identity-line').exists()).toBe(true)
+    // 上方那一行没了（section-header 里不该再有身份文字）
+    expect(wrapper.find('.section-header .identity-line').exists()).toBe(false)
+    // 只有一份，不是两处同时渲染
+    expect(wrapper.findAll('.identity-line')).toHaveLength(1)
+  })
+
+  it('🔴 没有素材 → 身份条留在画像**上方**自己一行（通栏字条会吞掉 11.25rem 小方框）', async () => {
+    const wrapper = mount(StatusOverview)
+    await flushPromises()
+    expect(wrapper.find('.character-portrait').exists()).toBe(false)
+
+    expect(wrapper.find('.section-header .identity-line').exists()).toBe(true)
+    expect(wrapper.find('.portrait-slot .identity-line').exists()).toBe(false)
+    expect(wrapper.find('.identity-strip').exists()).toBe(false)
+    expect(wrapper.findAll('.identity-line')).toHaveLength(1)
+  })
+
+  it('🔴 只有头像 → 同样留在上方一行（小方框形态不 overlay）', async () => {
+    mockAssets.assets = [makeRow('苏婉', { id: 'av', type: '头像' })]
+    mockAssets.assetUrl = vi.fn(async () => 'blob:av')
+
+    const wrapper = mount(StatusOverview)
+    await flushPromises()
+    expect(wrapper.find('.character-portrait').exists()).toBe(false)
+
+    expect(wrapper.find('.section-header .identity-line').exists()).toBe(true)
+    expect(wrapper.find('.identity-strip').exists()).toBe(false)
+  })
+
+  it('立绘bg 也 overlay（同样是整幅构图）', async () => {
+    mockAssets.assets = [makeRow('苏婉', { id: 'bg', type: '立绘bg' })]
+    mockAssets.assetUrl = vi.fn(async () => 'blob:bg')
+
+    const wrapper = mount(StatusOverview)
+    await flushPromises()
+    expect(wrapper.find('.portrait-slot .identity-strip').exists()).toBe(true)
+  })
+
+  /**
+   * 一行放不下就是省略号 —— 完整的**带标签**版本必须还在 title 上，
+   * 两种落位都不能丢（丢了就等于用户永远看不到被截掉的那几项）。
+   */
+  it('两种落位都保留单行截断 + 完整带标签的 title', async () => {
+    const expected = '种族：人族　身份：—　职业：—　生命层级：普通　冒险者等级：—'
+
+    const plain = mount(StatusOverview)
+    await flushPromises()
+    const plainLine = plain.find('.identity-line')
+    expect(plainLine.attributes('title')).toBe(expected)
+    // 截断靠 white-space:nowrap + ellipsis，文本本身不做任何裁剪
+    expect(plainLine.text()).toContain('人族')
+
+    const large = await mountLarge()
+    const largeLine = large.find('.portrait-slot .identity-line')
+    expect(largeLine.attributes('title')).toBe(expected)
+    expect(largeLine.text()).toContain('人族')
+  })
+
+  it('生命层级仍带 tier-text 类（overlay 里靠它提亮，不是另换一色）', async () => {
+    const wrapper = await mountLarge()
+    expect(wrapper.find('.identity-strip .tier-text').text()).toBe('普通')
+  })
+
+  /**
+   * 🔴 身份条不许挡住"点画像开设置窗"这条唯一的入口。
+   * 它是槽的后代且没有 @click.stop，所以点在字上照样冒泡到槽 ——
+   * 反过来，若把它做成槽的兄弟再靠 `pointer-events: none` 让开，
+   * 这条断言就会红（事件根本不会经过槽）。
+   */
+  it('🔴 点身份条 = 点画像：照样开设置弹窗，且不会顺手弹文件框', async () => {
+    const wrapper = await mountLarge()
+    const input = wrapper.find('input.portrait-file')
+    const click = vi.spyOn(input.element as HTMLInputElement, 'click')
+
+    expect(wrapper.findComponent(PortraitSettingsDialog).props('open')).toBe(false)
+    await wrapper.find('.identity-strip').trigger('click')
+
+    expect(wrapper.findComponent(PortraitSettingsDialog).props('open')).toBe(true)
+    expect(click).not.toHaveBeenCalled()
+  })
+
+  it('🔴 身份条上没有任何控件（内容不是家具，防 ad612d5 之后回潮）', async () => {
+    const wrapper = await mountLarge()
+    expect(wrapper.find('.identity-strip button').exists()).toBe(false)
+    expect(wrapper.find('.identity-strip input').exists()).toBe(false)
+    expect(wrapper.find('.identity-strip [role="button"]').exists()).toBe(false)
+  })
+})
+
 describe('StatusOverview — 画像槽的导入入口（GOAL C）', () => {
   it('画像槽可聚焦、说明照实说结果是「立绘与头像」，点击打开文件选择框', async () => {
     const wrapper = mount(StatusOverview)
