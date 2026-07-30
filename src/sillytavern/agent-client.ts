@@ -11,6 +11,7 @@
  */
 
 import type { ApiEndpoint, AgentResult, ToolDefinition } from './types';
+import { withProxy } from './api-tools';
 
 /** 内部扩展 — 包含原始 tool_calls 数据 */
 type InternalAgentResult = AgentResult & { _toolCalls?: any[] };
@@ -339,7 +340,7 @@ export class AgentClient {
         body.reasoning_effort = 'high';
       }
 
-      const res = await fetch(`${this.baseUrl}/chat/completions`, {
+      const res = await fetch(withProxy(`${this.baseUrl}/chat/completions`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -556,7 +557,7 @@ export class AgentClient {
         body.reasoning_effort = 'high';
       }
 
-      const res = await fetch(`${this.baseUrl}/chat/completions`, {
+      const res = await fetch(withProxy(`${this.baseUrl}/chat/completions`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

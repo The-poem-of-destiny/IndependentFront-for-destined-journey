@@ -1,4 +1,5 @@
 import type { ApiSettings, ApiTarget, Task } from './types';
+import { withProxy } from './api-tools';
 
 interface ChatRequest {
   messages: Array<{ role: string; content: string }>;
@@ -36,7 +37,7 @@ export function createApiRouter(settings: ApiSettings, deps: RouterDeps = {}) {
 
   async function callOnce(target: ApiTarget, body: ChatRequest): Promise<Response> {
     const ep = endpointFor(target);
-    return await fetchImpl(`${ep.baseUrl}/chat/completions`, {
+    return await fetchImpl(withProxy(`${ep.baseUrl}/chat/completions`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
