@@ -68,6 +68,13 @@ import {
   getAudioHandle,
   saveAudioHandle,
   deleteAudioHandle,
+  // Asset (v13)
+  getAssets,
+  getAsset,
+  saveAsset,
+  deleteAsset,
+  deleteAssets,
+  getAssetBlob,
 } from './database';
 import type {
   ChatMessage,
@@ -82,7 +89,9 @@ import type {
   AudioTrack,
   AudioPlaylist,
   AudioHandleRecord,
+  AssetMetaRecord,
 } from './types';
+import Dexie from 'dexie';
 import { createDefaultCharacterState } from './types';
 import { createDefaultSaveProfile, saveSaveProfile, savePlotOutline } from './database';
 import { createStateManager } from './state-manager';
@@ -214,6 +223,20 @@ function makeAudioHandle(overrides: Partial<AudioHandleRecord> = {}): AudioHandl
     id: 'library-root',
     handle: { kind: 'directory', name: '我的音乐' } as unknown as FileSystemDirectoryHandle,
     addedAt: Date.now(),
+    ...overrides,
+  };
+}
+
+function makeAsset(overrides: Partial<AssetMetaRecord> = {}): AssetMetaRecord {
+  return {
+    id: crypto.randomUUID(),
+    name: '苏婉',
+    type: '头像',
+    ext: 'png',
+    mime: 'image/png',
+    bytes: 4096,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
     ...overrides,
   };
 }
@@ -751,7 +774,8 @@ describe('exportAllData / importAllData', () => {
     await saveApiEndpoint(makeApiEndpoint({ id: 'exp_api' }));
 
     const backup = await exportAllData();
-    expect(backup.version).toBe(12);
+    // 跟随 DB_VERSION（v13: 素材子系统两表）—— 每次升版这里同步
+    expect(backup.version).toBe(13);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -1216,5 +1240,273 @@ describe('Audio CRUD (v11)', () => {
   it('不存在的目录句柄应返回 undefined', async () => {
     expect(await getAudioHandle('library-root')).toBeUndefined();
     expect(await getAudioHandle('不存在的id')).toBeUndefined();
+  });
+});
+
+// ========== Asset (v13) ==========
+
+/**
+ * v12 完整 schema —— 迁移回归测试用（见本文件末尾"v13 升版不得丢数据"）。
+ * 这份副本是**刻意的**: 它冻结了升版前的真实形状，改动 database.ts 的 v13 块不会连带改到它，
+ * 所以"漏写某表 = 静默删表"这个 Dexie 陷阱才会被测出来而不是一起改坏。
+ */
+const V12_STORES = {
+  lorebooks: 'id, name, updatedAt',
+  presets: 'id, name, updatedAt',
+  settings: 'key',
+  memories: 'id, saveId, createdAt, realTimestamp',
+  plotEvents: 'id, saveId, parentId, status, updatedAt',
+  characters: 'id, saveId, type',
+  snapshots: 'id, saveId, createdAt',
+  saves: 'id, slot, updatedAt',
+  apiEndpoints: 'id, name',
+  plotOutlines: 'id, saveId, updatedAt',
+  saveProfiles: 'saveId, updatedAt',
+  createPresets: 'id, name, updatedAt',
+  messages: 'id, saveId, [saveId+turn]',
+  audioTracks: 'id, name, kind, *tags, updatedAt',
+  audioBlobs: 'id',
+  audioPlaylists: 'id, name, updatedAt',
+  audioHandles: 'id',
+} as const;
+
+describe('Asset CRUD (v13)', () => {
+  it('assetMeta / assetBlobs 表应存在', async () => {
+    expect(typeof await getDatabase().assetMeta.count()).toBe('number');
+    expect(typeof await getDatabase().assetBlobs.count()).toBe('number');
+  });
+
+  it('保存/读取素材元数据应往返一致', async () => {
+    const asset = makeAsset({ name: '苏婉', type: '立绘', variant: '微笑', ext: 'webp', mime: 'image/webp' });
+    const id = await saveAsset(asset);
+    expect(id).toBe(asset.id);
+
+    const loaded = await getAsset(asset.id);
+    expect(loaded).toBeDefined();
+    expect(loaded!.name).toBe('苏婉');
+    expect(loaded!.type).toBe('立绘');
+    expect(loaded!.variant).toBe('微笑');
+    expect(loaded!.ext).toBe('webp');
+    expect(loaded!.mime).toBe('image/webp');
+    expect(loaded!.bytes).toBe(4096);
+  });
+
+  it('saveAsset 应自行打上 updatedAt', async () => {
+    const before = Date.now();
+    const asset = makeAsset({ updatedAt: 0 });
+    await saveAsset(asset);
+    const loaded = await getAsset(asset.id);
+    expect(loaded!.updatedAt).toBeGreaterThanOrEqual(before);
+  });
+
+  it('可选字段（hash/credit/license）应原样往返', async () => {
+    const asset = makeAsset({ hash: 'a'.repeat(64), credit: 'Aoo', license: 'CC-BY-4.0' });
+    await saveAsset(asset);
+    const loaded = await getAsset(asset.id);
+    expect(loaded!.hash).toBe('a'.repeat(64));
+    expect(loaded!.credit).toBe('Aoo');
+    expect(loaded!.license).toBe('CC-BY-4.0');
+  });
+
+  it('传入 blob 时应同时写入 assetBlobs', async () => {
+    const asset = makeAsset();
+    const blob = new Blob(['fake-png-bytes']);
+    await saveAsset(asset, blob);
+
+    const loadedBlob = await getAssetBlob(asset.id);
+    expect(loadedBlob).toBeDefined();
+    expect(await loadedBlob!.text()).toBe('fake-png-bytes');
+  });
+
+  it('未传 blob 时不应写入 assetBlobs（元数据可先落库）', async () => {
+    const asset = makeAsset();
+    await saveAsset(asset);
+    expect(await getAsset(asset.id)).toBeDefined();
+    expect(await getAssetBlob(asset.id)).toBeUndefined();
+  });
+
+  it('getAssets 应只返回元数据、不触碰 assetBlobs（列全库不反序列化字节）', async () => {
+    await saveAsset(makeAsset({ name: '苏婉' }), new Blob(['bytes-1']));
+    await saveAsset(makeAsset({ name: '林秋', type: '立绘bg', ext: 'mp4', mime: 'video/mp4' }), new Blob(['bytes-2']));
+
+    const all = await getAssets();
+    expect(all).toHaveLength(2);
+    // 元数据行本身不含 blob 字段
+    for (const row of all) {
+      expect((row as unknown as Record<string, unknown>).blob).toBeUndefined();
+    }
+    // 字节确实在，只是要单独取
+    expect(all.map(a => a.name).sort()).toEqual(['林秋', '苏婉']);
+    for (const row of all) {
+      expect(await getAssetBlob(row.id)).toBeDefined();
+    }
+  });
+
+  it('不存在的 id 应返回 undefined', async () => {
+    expect(await getAsset('不存在的id')).toBeUndefined();
+    expect(await getAssetBlob('不存在的id')).toBeUndefined();
+  });
+
+  it('删除素材应连带清掉字节（不留孤儿 blob）', async () => {
+    const asset = makeAsset();
+    await saveAsset(asset, new Blob(['bytes']));
+
+    await deleteAsset(asset.id);
+
+    expect(await getAsset(asset.id)).toBeUndefined();
+    expect(await getAssetBlob(asset.id)).toBeUndefined();
+    expect(await getDatabase().assetBlobs.count()).toBe(0);
+  });
+
+  it('批量删除应清掉指定行的元数据与字节，其余保留', async () => {
+    const a = makeAsset({ name: 'A' });
+    const b = makeAsset({ name: 'B' });
+    const c = makeAsset({ name: 'C' });
+    await saveAsset(a, new Blob(['a']));
+    await saveAsset(b, new Blob(['b']));
+    await saveAsset(c, new Blob(['c']));
+
+    await deleteAssets([a.id, b.id]);
+
+    expect(await getAsset(a.id)).toBeUndefined();
+    expect(await getAsset(b.id)).toBeUndefined();
+    expect(await getAssetBlob(a.id)).toBeUndefined();
+    expect(await getAssetBlob(b.id)).toBeUndefined();
+    expect(await getAsset(c.id)).toBeDefined();
+    expect(await getAssetBlob(c.id)).toBeDefined();
+    expect(await getAssets()).toHaveLength(1);
+  });
+
+  it('批量删除空数组应为无操作', async () => {
+    await saveAsset(makeAsset(), new Blob(['bytes']));
+    await deleteAssets([]);
+    expect(await getAssets()).toHaveLength(1);
+    expect(await getDatabase().assetBlobs.count()).toBe(1);
+  });
+
+  it('[name+type] 复合索引应可查询（去重按 (name, type) 定域，§4.4）', async () => {
+    await saveAsset(makeAsset({ name: '苏婉', type: '头像', hash: 'h1' }));
+    await saveAsset(makeAsset({ name: '苏婉', type: '头像', variant: '微笑', hash: 'h2' }));
+    await saveAsset(makeAsset({ name: '苏婉', type: '立绘', hash: 'h3' }));
+    await saveAsset(makeAsset({ name: '林秋', type: '头像', hash: 'h4' }));
+
+    const scoped = await getDatabase().assetMeta.where('[name+type]').equals(['苏婉', '头像']).toArray();
+    expect(scoped).toHaveLength(2);
+    expect(scoped.map(a => a.hash).sort()).toEqual(['h1', 'h2']);
+
+    // 同名不同类型不落入同一定域 —— 去重不该跨类型
+    const other = await getDatabase().assetMeta.where('[name+type]').equals(['苏婉', '立绘']).toArray();
+    expect(other).toHaveLength(1);
+    expect(other[0].hash).toBe('h3');
+
+    // name 单列索引仍可用（按名分组浏览）
+    const byName = await getDatabase().assetMeta.where('name').equals('苏婉').toArray();
+    expect(byName).toHaveLength(3);
+  });
+
+  it('type 与 createdAt 单列索引应可查询', async () => {
+    await saveAsset(makeAsset({ type: '头像', createdAt: 1000 }));
+    await saveAsset(makeAsset({ type: '立绘', createdAt: 2000 }));
+    await saveAsset(makeAsset({ type: '立绘', createdAt: 3000 }));
+
+    expect(await getDatabase().assetMeta.where('type').equals('立绘').count()).toBe(2);
+    const recent = await getDatabase().assetMeta.where('createdAt').above(1500).toArray();
+    expect(recent).toHaveLength(2);
+  });
+
+  it('素材不应进入 FullBackup（D13 —— zip 导出才是迁移路径）', async () => {
+    await saveAsset(makeAsset(), new Blob(['bytes']));
+    const backup = await exportAllData();
+    const asRecord = backup as unknown as Record<string, unknown>;
+    expect(asRecord.assetMeta).toBeUndefined();
+    expect(asRecord.assetBlobs).toBeUndefined();
+  });
+
+  it('clearAllData 应销毁素材表（整库 db.delete()，无需额外拆卸代码）', async () => {
+    await saveAsset(makeAsset(), new Blob(['bytes']));
+    expect(await getAssets()).toHaveLength(1);
+
+    await clearAllData();
+    await initializeDatabase();
+
+    expect(await getAssets()).toHaveLength(0);
+    expect(await getDatabase().assetBlobs.count()).toBe(0);
+  });
+
+  /**
+   * 回归守卫: 以 v12 schema 真实写一遍数据，再以 v13 打开，逐表验数据还在 + 表册齐全。
+   *
+   * ⚠️ 关于"漏写即删表"这个说法（database.ts 的 v12 注释这么写）: **对 Dexie 4 不成立。**
+   * `Version.stores()` 跨版本累加 schema，缺席的表从上一版继承；删表必须显式 `表名: null`
+   * （v9 的 `chats: null` 就是唯一的删表写法）。已实测: 把 audioPlaylists 从 v13 块里删掉，
+   * 数据照样在。所以本测试的真实守卫价值不在"漏写"，而在:
+   *   · 升版路径本身不吃数据（比如误加 upgrade 回调 clear 了某表）
+   *   · 表册不缺员（比如误写 `表名: null`，或新表根本没声明）—— 见下方 EXPECTED_V13_TABLES 断言
+   */
+  it('v13 升版不得丢数据 —— 以旧版本写入后再打开应逐表保留', async () => {
+    const dbName = getDatabase().name;
+    // 从零起：先销毁 beforeEach 建好的 v13 库
+    await clearAllData();
+
+    // ---- 以 v12 schema 打开并逐表写入一行 ----
+    const legacy = new Dexie(dbName);
+    legacy.version(12).stores({ ...V12_STORES });
+    await legacy.open();
+    expect(legacy.verno).toBe(12);
+
+    const rows: Record<string, unknown> = {
+      lorebooks: { id: 'lb1', name: '测试世界书', updatedAt: 1 },
+      presets: { id: 'p1', name: '测试预设', updatedAt: 1 },
+      settings: { key: 'settings', legacyMarker: true },
+      memories: makeMemory({ id: 'MEM000001' }),
+      plotEvents: makePlotEvent({ id: 'pe1' }),
+      characters: makeCharacter({ id: 'ch1', saveId: 'save_test' }),
+      snapshots: makeSnapshot({ id: 'sn1' }),
+      saves: makeSaveSlot({ id: 'sv1' }),
+      apiEndpoints: makeApiEndpoint({ id: 'api1' }),
+      plotOutlines: { id: 'po1', saveId: 'save_test', updatedAt: 1 },
+      saveProfiles: createDefaultSaveProfile('save_test'),
+      createPresets: { id: 'cp1', name: '捏人预设', createdAt: 1, updatedAt: 1, data: {} },
+      messages: { id: 'msg1', saveId: 'save_test', turn: 1, role: 'user', content: '你好', timestamp: 1 },
+      audioTracks: makeAudioTrack({ id: 'tr1' }),
+      audioBlobs: { id: 'tr1', blob: new Blob(['legacy-audio']) },
+      audioPlaylists: makeAudioPlaylist({ id: 'pl1', trackIds: ['tr1'] }),
+      audioHandles: makeAudioHandle(),
+    };
+    for (const [table, row] of Object.entries(rows)) {
+      await legacy.table(table).put(row as never);
+    }
+    // 前置断言：v12 库里确实每表一行（否则下面的"数据还在"是空断言）
+    for (const table of Object.keys(V12_STORES)) {
+      expect(await legacy.table(table).count(), `v12 ${table} 应有 1 行`).toBe(1);
+    }
+    legacy.close();
+
+    // ---- 以 v13 (AppDatabase) 打开：触发升版 ----
+    await initializeDatabase();
+    const db = getDatabase();
+    expect(db.verno).toBe(13);
+
+    // 表册齐全: v12 的 17 张 + 素材两张，一个不少（误写 `表名: null` 或漏声明会在这里炸）
+    const EXPECTED_V13_TABLES = [...Object.keys(V12_STORES), 'assetMeta', 'assetBlobs'].sort();
+    expect(db.tables.map(t => t.name).sort()).toEqual(EXPECTED_V13_TABLES);
+
+    // 每一张旧表的数据都必须还在（漏写任一表会让这里归零）
+    for (const table of Object.keys(V12_STORES)) {
+      expect(await db.table(table).count(), `v13 升版后 ${table} 数据丢失`).toBe(1);
+    }
+    // 抽查内容而非仅行数
+    expect((await db.lorebooks.get('lb1'))!.name).toBe('测试世界书');
+    expect((await getAudioBlob('tr1'))).toBeDefined();
+    expect(await (await getAudioBlob('tr1'))!.text()).toBe('legacy-audio');
+    expect((await db.audioPlaylists.get('pl1'))!.trackIds).toEqual(['tr1']);
+    // 新表就位且为空
+    expect(await getAssets()).toHaveLength(0);
+    expect(await db.assetBlobs.count()).toBe(0);
+
+    // 升版后新表可正常写入
+    const asset = makeAsset();
+    await saveAsset(asset, new Blob(['post-upgrade']));
+    expect(await (await getAssetBlob(asset.id))!.text()).toBe('post-upgrade');
   });
 });

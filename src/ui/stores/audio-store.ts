@@ -43,6 +43,7 @@ import {
   resolveFile,
   type ScannedFile,
 } from '../lib/audio-folder'
+import { hashMediaBlob } from '../lib/media-hash'
 import { useSettingsStore } from './settings-store'
 import { useUIStore } from './ui-store'
 
@@ -585,6 +586,10 @@ export const useAudioStore = defineStore('audio', () => {
       if (name !== desired) renamed += 1
       const id = newId('audio')
       namePool.push({ id, name })
+      // 顺手补 hash: 上传进来的轨是 source:'blob'，会被打进素材导出包，
+      // 没 hash 的话重新导入时计划器无从比对，会克隆出一条 ` (2)`（D12/§4.4）。
+      // 非安全上下文算不出来就留空 —— 上传绝不因为哈希失败而失败。
+      const hash = await hashMediaBlob(file)
       const track: AudioTrack = {
         id,
         name,
@@ -592,6 +597,7 @@ export const useAudioStore = defineStore('audio', () => {
         source: 'blob',
         mimeType: file.type || undefined,
         size: file.size,
+        hash,
         tags: [],
         createdAt: now,
         updatedAt: now,

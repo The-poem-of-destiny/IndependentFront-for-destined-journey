@@ -128,6 +128,10 @@ function getDefaults(): Record<string, any> {
     snapshotRetentionMode: 'tiered' as 'tiered' | 'dense',
     memoryCacheStrategy: 'balanced' as string,
 
+    // 交互 —— 悬停浮层延迟（ms）。全站 hover-to-display 统一读它：
+    // 状态效果气泡、在场角色心声气泡等。0 = 立即弹出。
+    hoverDelayMs: 200,
+
     // 消息 & 系统事件可见性
     systemEventsVisible: true,
     systemEventFilters: {

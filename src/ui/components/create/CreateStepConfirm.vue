@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { useCreateStore } from '../../stores/create-store'
+import { useAssetImage } from '../../composables/useAssetImage'
+import { ASSET_TYPE_AVATAR_CHAIN } from '@engine/asset-resolve'
 import { ATTRIBUTE_NAMES, RARITY_TO_QUALITY } from '@engine/start-catalog'
 import type { QualityLevel } from '@engine/types'
 import AvatarPanel from '../shared/AvatarPanel.vue'
 import QualityBadge from '../shared/QualityBadge.vue'
 
 const store = useCreateStore()
+
+// 素材库里若已有同名角色的画像就用它 —— 名字**严格 `===`**（D2），
+// 还没起名（空串）时 composable 静默给 null，画像位照旧显示占位首字母。
+// 96px 圆 = 脸位，走脸位链 头像 → 立绘 → 立绘bg（只导了立绘的角色也能显示）
+const { url: portraitUrl, isVideo: portraitIsVideo } = useAssetImage(
+  () => store.name,
+  ASSET_TYPE_AVATAR_CHAIN,
+)
 </script>
 
 <template>
@@ -15,7 +25,12 @@ const store = useCreateStore()
     <div class="confirm-card">
       <!-- 头像 + 基本信息 -->
       <div class="hero-row">
-        <AvatarPanel :name="store.name || '?'" size="lg" />
+        <AvatarPanel
+          :name="store.name || '?'"
+          size="lg"
+          :src="portraitUrl ?? undefined"
+          :video="portraitIsVideo"
+        />
         <div class="hero-info">
           <span class="hero-name">{{ store.name || '未命名' }}</span>
           <span class="hero-meta">

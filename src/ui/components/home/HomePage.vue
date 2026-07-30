@@ -91,9 +91,18 @@ function loadGame(saveId: string) {
 }
 
 // 🧪 开发用快速测试 (正式版移除)
+// ⚠️ 会先清空**整个数据库** —— 素材库与音频库不随存档隔离，会一并没
 async function quickTest() {
   const { createTestSave } = await import('../../utils/test-save')
   const saveId = await createTestSave()
+  ui.navigate('game', saveId)
+}
+
+// 🧪 同一个测试存档，但一个字节都不清 —— 手动导入的素材/音乐留着
+// (调渲染面时要的是"能进去的存档"，不是"把刚导入的图全删了")
+async function quickTestKeep() {
+  const { createTestSavePreservingData } = await import('../../utils/test-save')
+  const saveId = await createTestSavePreservingData()
   ui.navigate('game', saveId)
 }
 
@@ -195,9 +204,26 @@ function formatTime(ts: number) {
         </div>
         <!-- 🧪 开发用 — 悬停显示 -->
         <transition name="fade">
-          <AppButton v-if="showDevButton" variant="ghost" size="sm" class="dev-test-btn" @click="quickTest">
-            🧪 快速测试
-          </AppButton>
+          <div v-if="showDevButton" class="dev-test-row">
+            <AppButton
+              variant="ghost"
+              size="sm"
+              class="dev-test-btn"
+              title="清空整个数据库后重建测试存档 —— 素材库与音频库会一并清掉"
+              @click="quickTest"
+            >
+              🧪 快速测试
+            </AppButton>
+            <AppButton
+              variant="ghost"
+              size="sm"
+              class="dev-test-btn"
+              title="创建测试存档，但不清任何数据 —— 已导入的素材与音乐保留"
+              @click="quickTestKeep"
+            >
+              🧪 快速测试（保留数据）
+            </AppButton>
+          </div>
         </transition>
       </div>
     </div>
@@ -582,11 +608,21 @@ function formatTime(ts: number) {
 }
 
 /* Dev 按钮 */
+/* 两个开发按钮并排；窄屏换行，不挤出容器 */
+.dev-test-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--theme-spacing-xs, 4px);
+}
 .dev-test-btn {
   opacity: 0.5;
   font-size: 0.75rem;
   transition: opacity 0.2s;
   margin-top: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dev-test-btn { transition: none; }
 }
 .dev-test-btn:hover {
   opacity: 1;

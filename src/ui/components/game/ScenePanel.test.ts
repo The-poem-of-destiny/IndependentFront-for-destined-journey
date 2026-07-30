@@ -6,8 +6,9 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount as vtuMount, flushPromises } from '@vue/test-utils'
 import { reactive } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import ScenePanel from './ScenePanel.vue'
 
 // ---- Mocks ----
@@ -27,8 +28,33 @@ vi.mock('../../stores/settings-store', () => ({
   useSettingsStore: () => ({ settings: {} }),
 }))
 
+/**
+ * 🔴 **必须给 Pinia**，哪怕本文件的 game-store / settings-store 都是 mock 的。
+ *
+ * 在场角色位用的 `AssetMedia` 会调 `useAssetStore()`（真 store，本文件没 mock 它）。
+ * 本文件的 fixture 恰好 `characters: []`，所以那条路径今天走不到 —— 但那是巧合，
+ * 不是保障: 谁往 fixture 里加一个在场角色，就会撞上「no active Pinia」而摸不着头脑。
+ * 这里一次性把陷阱填掉。
+ */
+function mount(component: typeof ScenePanel) {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  return vtuMount(component, { global: { plugins: [pinia] } })
+}
+
 function makeNews(id: string, read: boolean) {
   return { id, title: `新闻${id}`, content: `内容${id}`, category: 'world', publishedAt: 100, read }
+}
+
+/**
+ * 世界消息自 UI 改版起挂在「世界」页签下（页签序：角色 / 任务 / 世界 / 万象），
+ * 默认页签是「角色」，所以取 .news-item 之前必须先切过去。
+ */
+async function openWorldTab(wrapper: ReturnType<typeof mount>) {
+  const tabs = wrapper.findAll('.tab-item')
+  expect(tabs).toHaveLength(4)
+  await tabs[2].trigger('click')
+  return wrapper
 }
 
 beforeEach(() => {
@@ -62,7 +88,7 @@ beforeEach(() => {
 
 describe('ScenePanel — 新闻展开标记已读 (M6 #36)', () => {
   it('展开未读新闻 → 本地 read=true + markNewsRead(JSON 克隆, id) 持久化', async () => {
-    const wrapper = mount(ScenePanel)
+    const wrapper = await openWorldTab(mount(ScenePanel))
     const items = wrapper.findAll('.news-item')
     expect(items).toHaveLength(2)
 
@@ -80,7 +106,7 @@ describe('ScenePanel — 新闻展开标记已读 (M6 #36)', () => {
   })
 
   it('展开已读新闻不调用 markNewsRead（只标未读项）', async () => {
-    const wrapper = mount(ScenePanel)
+    const wrapper = await openWorldTab(mount(ScenePanel))
 
     await wrapper.findAll('.news-item')[1].trigger('click') // n2 已读
     await flushPromises()
@@ -90,7 +116,7 @@ describe('ScenePanel — 新闻展开标记已读 (M6 #36)', () => {
   })
 
   it('收起不触发标记；再次展开已标记项也不重复调用', async () => {
-    const wrapper = mount(ScenePanel)
+    const wrapper = await openWorldTab(mount(ScenePanel))
     const first = () => wrapper.findAll('.news-item')[0]
 
     await first().trigger('click') // 展开 → 标记
@@ -104,7 +130,7 @@ describe('ScenePanel — 新闻展开标记已读 (M6 #36)', () => {
   })
 
   it('未读红点随标记消失', async () => {
-    const wrapper = mount(ScenePanel)
+    const wrapper = await openWorldTab(mount(ScenePanel))
     expect(wrapper.findAll('.news-dot')).toHaveLength(1)
 
     await wrapper.findAll('.news-item')[0].trigger('click')

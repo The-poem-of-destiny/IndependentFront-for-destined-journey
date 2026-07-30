@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useGameStore } from '../../stores/game-store'
+import AssetMedia from '../shared/AssetMedia.vue'
+import { ASSET_TYPE_AVATAR_CHAIN } from '@engine/asset-resolve'
 import { getAffectionLabel } from '@engine/affection-system'
 import { qualityVar } from '../../lib/quality-colors'
 import ResourceBar from '../shared/ResourceBar.vue'
@@ -91,7 +93,8 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
       <!-- 左: NPC 列表 -->
       <div class="npc-list">
         <div v-for="(npc, i) in npcs" :key="npc.id" class="npc-card" :class="{ selected: i === selectedIdx }" @click="selectedIdx = i; detailTab = 'overview'; showScripts = false">
-          <div class="npc-avatar">{{ npc.name[0] }}</div>
+          <!-- 2.5rem 圆 = 脸位，走脸位链 头像 → 立绘 → 立绘bg（只有立绘的角色也不留洞） -->
+          <div class="npc-avatar"><AssetMedia :name="npc.name" :type="ASSET_TYPE_AVATAR_CHAIN">{{ npc.name[0] }}</AssetMedia></div>
           <div class="npc-info">
             <div class="npc-name">{{ npc.name }}</div>
             <div class="npc-meta">{{ npc.race }} · {{ npc.tierName }} · Lv.{{ npc.level }}</div>
@@ -110,7 +113,8 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
       <!-- 右: 详情 -->
       <div class="detail" v-if="selected">
         <div class="d-header">
-          <div class="d-avatar">{{ selected.name[0] }}</div>
+          <!-- 3.5rem 圆 = 脸位，同上 -->
+          <div class="d-avatar"><AssetMedia :name="selected.name" :type="ASSET_TYPE_AVATAR_CHAIN">{{ selected.name[0] }}</AssetMedia></div>
           <div>
             <div class="d-name">{{ selected.name }}</div>
             <div class="d-meta">{{ selected.race }} · {{ selected.occupation?.join(' / ') || selected.identity?.join(' / ') || '未知' }}</div>
@@ -396,6 +400,8 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
   display: flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 1rem; flex-shrink: 0;
   font-family: var(--theme-font-title, 'Cinzel', serif);
+  /* 裁掉铺满的素材，圆形才成立（无素材时不改变任何观感） */
+  overflow: hidden;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 30%, transparent);
 }
 .npc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -441,6 +447,8 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
   display: flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 1.5rem; flex-shrink: 0;
   font-family: var(--theme-font-title, 'Cinzel', serif);
+  /* 同 .npc-avatar：圆形裁切铺满的素材 */
+  overflow: hidden;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-primary) 35%, transparent);
 }
 .d-name {

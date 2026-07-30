@@ -13,6 +13,8 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import AudioSection from './AudioSection.vue'
 import { useAudioStore } from '../../stores/audio-store'
+import { useAssetStore } from '../../stores/asset-store'
+import { useUIStore } from '../../stores/ui-store'
 import { resetAudioManager } from '../../lib/audio-singleton'
 
 // ---- Mocks: Dexie 在 jsdom 下不可用，整层替掉 ----
@@ -585,6 +587,50 @@ describe('AudioSection', () => {
     await box.trigger('click')
     // 勾选框自身的 checked 就是非颜色指示
     expect((box.element as HTMLInputElement).checked).toBe(true)
+    wrapper.unmount()
+  })
+
+  // ═══ 素材包导入（第二个入口，素材设计 §7.2 / D9）═══
+  // 这里守的不是导入本身（那在 asset-store.test.ts），而是"音频这道门通往同一份实现"
+  // 这条接缝：入口在，递的是同一个 importZip，且本组件不补第二条摘要。
+
+  it('曲库里有素材包导入入口，且说明它收混装包而不只是音频', async () => {
+    const wrapper = mount(AudioSection)
+    await flushPromises()
+    const strip = wrapper.find('.lib-import')
+    expect(strip.exists()).toBe(true)
+    expect(strip.text()).toContain('导入素材包')
+    expect(strip.text()).toContain('图片进素材库')
+    expect(strip.find('input[type="file"]').attributes('accept')).toContain('.zip')
+  })
+
+  it('选中 zip → 调 asset-store.importZip（不在组件里另写一条读文件的路）', async () => {
+    const wrapper = mount(AudioSection)
+    await flushPromises()
+    const store = useAssetStore()
+    const spy = vi.spyOn(store, 'importZip').mockResolvedValue({
+      read: true, cancelled: false, assetsAdded: 12, audioAdded: 5,
+      duplicatesSkipped: 4, renumbered: 2, namingConflicts: 0, mediaRuleSkipped: 0,
+      ignored: 0, failed: 0, warnings: [],
+      message: '素材 12 新增 · 音频 5 新增 · 跳过 4 重复 · 编号 2',
+    })
+    const ui = useUIStore()
+    const toast = vi.spyOn(ui, 'toast')
+
+    const input = wrapper.find('.lib-import input[type="file"]')
+    const file = new File([new Uint8Array([1, 2, 3])], 'pack.zip', { type: 'application/zip' })
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0]).toBe(file)
+    // 唯一那条摘要归 store（这里被 mock 掉了）—— 组件绝不能自己再弹一条
+    expect(toast).not.toHaveBeenCalled()
+    // 两个半边的计数都进壳层那唯一的 aria-live 区
+    const live = wrapper.findAll('[aria-live="polite"]')
+    expect(live).toHaveLength(1)
+    expect(live[0].text()).toContain('素材 12 新增 · 音频 5 新增')
     wrapper.unmount()
   })
 

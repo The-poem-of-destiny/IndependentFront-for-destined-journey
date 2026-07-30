@@ -318,6 +318,29 @@ Modal 打开：`<Transition name="modal">` — fade + scale(0.97→1)
 
 ---
 
+## 7.4 已知问题
+
+### 🐛 切换主题会改变字体，即便字体设置没动（未修复）
+
+**现象**：设置页「字体风格」保持不变，但切到某些主题后界面字体从无衬线变成衬线。
+
+**根因链**（`theme-store.ts` + `themes/*.css`）：
+
+1. `setFonts()` 只写 `--theme-font-body` 这一个内联变量，**且只在用户主动改下拉框时才执行**；
+2. `fated-poem-fonts` 只被 `setItem` 写入，**全项目没有任何读取点** —— 刷新后不恢复，`fonts` ref 永远重置为 `'sans'`，DOM 上也就没有内联覆盖；
+3. 没有内联覆盖时，`--theme-font-body` 由 `[data-theme="…"]` 块决定，而 `parchment` / `ivory` 把它定义成了 `'Noto Serif SC', serif`（`variables.css` 的 `:root` 是 `'Noto Sans SC', sans-serif`）。
+
+于是：**换主题 → 正文字体跟着变，而设置页仍显示原来的值**。
+
+**为什么没顺手修**：涉及一个设计决策，需要主人拍板 ——
+
+- **方案 A**：主题只管颜色，字体变量从 `parchment` / `ivory` / `misty-lilac` 中删除，字体完全由设置控制（符合 §1「主题无关」原则，但三个主题会失去各自的字体性格）；
+- **方案 B**：保留主题字体作为「默认值」，但补上 `initFonts()` 读回 localStorage，并让 `setFonts()` 同时写 `--theme-font-title`，用户一旦设置过就恒定压过主题。
+
+无论选哪个，**`fated-poem-fonts` 写了不读**这一条都是要修的。
+
+---
+
 ## 8. 检查清单
 
 每个新页面/组件交付前应确认：
