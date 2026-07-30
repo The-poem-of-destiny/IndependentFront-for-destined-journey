@@ -107,6 +107,20 @@ export class AgentClient {
   }
 
   /**
+   * 确保 messages 至少包含一条 user 消息。
+   *
+   * 修复(2026-07-30): 部分 API（如 ollama.com）当 messages 只有 system 消息时
+   * 返回 finish_reason="load" 和空内容（模型不加载），导致所有 agent 空回。
+   * 当 messages 全是 system 时追加一条空 user 消息以触发正常生成。
+   */
+  private ensureUserMessage(messages: ChatRequest['messages']): ChatRequest['messages'] {
+    if (messages.length === 0) return messages;
+    const hasUser = messages.some(m => m.role === 'user');
+    if (hasUser) return messages;
+    return [...messages, { role: 'user', content: '' }];
+  }
+
+  /**
    * 发送 chat completion 请求（非 agentic 路径）
    * @returns AgentResult — 即使失败也返回带 error 字段的结果（不抛异常）
    */
@@ -304,7 +318,12 @@ export class AgentClient {
     const startTime = Date.now();
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+    let abortedByTimeout = false;
+    // 流式超时：首字节等待期用 this.timeout * 3（流式请求含模型加载 + 大上下文处理，
+    // ollama.com 等云端 API 首字节延迟可能 >120s）。收到首个 chunk 后清除超时
+    // （数据在流动说明请求活着，不应因总时长超限而中断长文本生成）
+    const streamTimeout = this.timeout * 3;
+    const timeoutId = setTimeout(() => { abortedByTimeout = true; controller.abort(); }, streamTimeout);
 
     const onExternalAbort = () => controller.abort();
     if (signal?.aborted) {
@@ -317,7 +336,7 @@ export class AgentClient {
       const model = request.model || this.endpoint.defaultModel;
       const body: Record<string, any> = {
         model,
-        messages: request.messages,
+        messages: this.ensureUserMessage(request.messages),
         temperature: request.temperature ?? 0.7,
         max_tokens: request.maxTokens ?? 16384,  // 真机修(2026-07-17): 侧链 request 不带 maxTokens，2048 兜底会截断 char_gen 思考链+XML → 静默解析失败
         top_p: request.topP ?? 1.0,
@@ -334,10 +353,12 @@ export class AgentClient {
         body.tool_choice = request.tool_choice ?? 'auto';
       }
 
-      // 🆕 DeepSeek 思考模式：按 endpoint 配置决定是否开启（与非流式 callOnce 对齐）
+      // 🆕 思考模式控制（与 callOnce 对齐，详见该处注释）
       if (this.endpoint.enableThinking) {
         body.thinking = { type: 'enabled' };
         body.reasoning_effort = 'high';
+      } else {
+        body.thinking = { type: 'disabled' };
       }
 
       const res = await fetch(withProxy(`${this.baseUrl}/chat/completions`), {
@@ -377,6 +398,7 @@ export class AgentClient {
       const toolCallAccum: Map<number, { id: string; name: string; arguments: string }> = new Map();
 
       try {
+        let firstChunkReceived = false;
         while (true) {
           // Check for external abort between reads
           if (signal?.aborted) {
@@ -385,6 +407,12 @@ export class AgentClient {
 
           const { done, value } = await reader.read();
           if (done) break;
+
+          // 收到首个数据块后清除超时 — 流式响应只要数据在流动就不应超时
+          if (!firstChunkReceived) {
+            firstChunkReceived = true;
+            clearTimeout(timeoutId);
+          }
 
           buffer += decoder.decode(value, { stream: true });
 
@@ -508,7 +536,11 @@ export class AgentClient {
       }
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
-        callbacks.onError('Request aborted');
+        if (abortedByTimeout) {
+          callbacks.onError(`请求超时（${Math.round(streamTimeout / 1000)}秒内未收到响应），请重试或减少上下文注入`);
+        } else {
+          callbacks.onError('Request aborted');
+        }
       } else {
         callbacks.onError(e instanceof Error ? e.message : String(e));
       }
@@ -534,7 +566,7 @@ export class AgentClient {
       const model = request.model || this.endpoint.defaultModel;
       const body: Record<string, any> = {
         model,
-        messages: request.messages,
+        messages: this.ensureUserMessage(request.messages),
         temperature: request.temperature ?? 0.7,
         max_tokens: request.maxTokens ?? 16384,  // 真机修(2026-07-17): 侧链 request 不带 maxTokens，2048 兜底会截断 char_gen 思考链+XML → 静默解析失败
         top_p: request.topP ?? 1.0,
@@ -551,10 +583,20 @@ export class AgentClient {
         body.tool_choice = request.tool_choice ?? 'auto';
       }
 
-      // 🆕 DeepSeek 思考模式：仅按 endpoint.enableThinking 开关，不再卡 provider（中转/官方均支持）
+      // 🆕 思考模式控制：
+      // - enableThinking=true → 开启思考（DeepSeek: thinking + reasoning_effort=high；Ollama: 默认开启）
+      // - enableThinking=false → 显式关闭思考（thinking.type=disabled）
+      //   关键修复(2026-07-30): Ollama 思考模型（glm-5.2 等）默认开启 thinking，且 think:false
+      //   在 /v1/chat/completions 上被静默忽略（ollama#14820）。若不显式关闭，思考会耗尽
+      //   max_tokens 导致 content 永远为空 → 所有 agent 输出空白。
+      //   注意: 不用 reasoning_effort=none，因为非思考模型（如 deepseek-v4-flash）
+      //   不认识 'none'（只认 high/low/medium/max/xhigh），会报 HTTP 400。
+      //   改用标准 OpenAI 字段 thinking.type=disabled 关闭，兼容性更好。
       if (this.endpoint.enableThinking) {
         body.thinking = { type: 'enabled' };
         body.reasoning_effort = 'high';
+      } else {
+        body.thinking = { type: 'disabled' };
       }
 
       const res = await fetch(withProxy(`${this.baseUrl}/chat/completions`), {
