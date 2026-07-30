@@ -10,7 +10,6 @@
 
 import {
   initializeDatabase,
-  clearAllData,
   saveSaveSlot,
   saveCharacters,
   saveSaveProfile,
@@ -30,9 +29,24 @@ import type {
 
 let initialized = false;
 
+/**
+ * 🔴 **这里曾经调 `clearAllData()`，那是一个会吃掉用户数据的地雷 —— 别加回来。**
+ *
+ * 它清的是**整个数据库**，其中 `assetMeta` / `assetBlobs` / `audioTracks` /
+ * `audioBlobs` / `audioPlaylists` 是**全局库、刻意不随存档隔离**的（见 CLAUDE.md
+ * 的 Dexie 段）。于是真实症状是:
+ *   刷新页面 → 点「🧪 快速测试」回到游戏 → 辛苦导入的立绘/头像/音乐**全没了**。
+ * 而存档看起来"还在"，因为本函数紧接着又造了一个新的测试存档 —— 这个假象正是
+ * 它难查的原因: 丢的东西和幸存的东西看起来都合理。
+ *
+ * `initialized` 是模块级的、刷新即重置，所以**每次页面加载后的第一次点击**都会清一次；
+ * 同一次加载里点第二下反而不清（这就是为什么会攒出两个「测试冒险」存档）。
+ *
+ * 本函数的职责只是"造一个测试存档"，不是"重置世界"。要清库请走
+ * 设置 → 存档数据 → 清除所有数据（那里有确认弹窗，且用户知道自己在干什么）。
+ */
 async function ensureDb() {
   if (!initialized) {
-    try { await clearAllData(); } catch { /* 首次运行可能无数据 */ }
     await initializeDatabase();
     initialized = true;
   }
