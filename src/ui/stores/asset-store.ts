@@ -38,7 +38,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { ASSET_TYPES } from '@engine/types'
-import type { AssetMetaRecord, AssetType, AudioTrack } from '@engine/types'
+import type { AssetFraming, AssetMetaRecord, AssetType, AudioTrack } from '@engine/types'
 import {
   getAssets,
   saveAsset,
@@ -58,8 +58,21 @@ import type {
   ImportWarning,
 } from '@engine/asset-import-plan'
 import { formatAssetFilename, violatesNamingInvariant } from '@engine/asset-filename'
-import { isMediaAllowed, mimeForAssetExtension } from '@engine/asset-types'
+import {
+  ASSET_MIME_BY_EXTENSION,
+  clampAssetFraming,
+  isDefaultAssetFraming,
+  isMediaAllowed,
+  mimeForAssetExtension,
+} from '@engine/asset-types'
 import { hashMediaBlob } from '../lib/media-hash'
+import {
+  cropImageBlob,
+  resolveOutputMime,
+  ImageCropError,
+  type CropRect,
+  type ImageCropSeams,
+} from '../lib/image-crop'
 import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names'
 import {
   readAssetZip,
@@ -204,6 +217,13 @@ export type AssetMutationOutcome =
    * 改名 / 设为主图**永不**返回这个值。
    */
   | 'busy'
+  /**
+   * 两个类型都写了 `'skip'` —— **只有 `importPortraitPair` 会产出它**。
+   *
+   * "一张都不生成"意味着这次调用什么也不做，那是调用点写错了。单独一个值是为了
+   * 不把**程序错误**混进 `'failed'`（写库失败）里 —— 那两件事的处置完全不同。
+   */
+  | 'no-crops'
   | 'failed'
 
 export interface AssetMutationResult {
@@ -215,6 +235,66 @@ export interface AssetMutationResult {
    * 本来无变体（从 base 位被挤走）时是空串 `''`，与"没改号"的 undefined 区分。
    */
   renumberedFrom?: string
+}
+
+/**
+ * 一个类型在「一源两图」里的取材方式 —— **三态，且三态各有一个字面值**。
+ *
+ * | 值 | 含义 |
+ * |---|---|
+ * | {@link CropRect} | **裁剪**: 按这个框（源图像素）过画布真裁，长边受上限约束 |
+ * | `'whole'` | **整图**: 原始字节原样存，**不过画布** —— 过一趟画布会把动态 WebP 拍成第一帧、把 JPEG 再有损编码一次，而用户什么都没要求。因此长边上限对它无效：没有"裁"可言。 |
+ * | `'skip'` | **不生成这个类型**: 一行都不写，库里既有的同类型行原样不动 |
+ *
+ * 🔴 **刻意不用"缺省"表达任何一态**（{@link PortraitCropPlan} 两个字段都是必填）。
+ * 早期版本用 `crops: { portrait?, avatar? }`，把"省略"读成"整图" —— 于是**没有
+ * 任何写法能表示"这个类型不要"**，每次重裁立绘都会顺手再铸一张头像变体，
+ * 库按次数累积膨胀。补一个 `null` 当"跳过"能修好行为，但 `undefined` 与 `null`
+ * 在 JS 里长得太像（`?.`、解构默认值、`JSON.parse` 都会把两者搅在一起），
+ * 调用点写错时静默走另一条分支。字面量 `'whole'` / `'skip'` 读一眼就知道说的是哪一档，
+ * 拼错则是编译错误。
+ */
+export type PortraitCropSpec = CropRect | 'whole' | 'skip'
+
+/**
+ * 「一源两图」的取材计划: 两个类型各表一次态，**都必须显式写出来**。
+ *
+ * 必填不是为了严格而严格 —— 见 {@link PortraitCropSpec} 里那段: 一旦允许省略，
+ * 省略的含义就得靠约定，而这个约定恰好是上一版最贵的那个 bug。
+ */
+export interface PortraitCropPlan {
+  portrait: PortraitCropSpec
+  avatar: PortraitCropSpec
+}
+
+/**
+ * 裁剪产出的**长边上限**（源图像素），按类型各一档。
+ *
+ * 数字的来路: 立绘最高渲染到 ~24rem 高、头像最高 ~11.25rem，按 16px 根字号
+ * 约合 384px 与 180px。取 2048 / 768 已覆盖 3× 高密度屏并留足余量
+ * （3× 分别只需 ~1152 / ~540）。再往上存的是**任何显示面都拿不出来的像素**：
+ * 字节按面积平方增长，配额是共享的，而屏幕上一个像素的差别都看不见。
+ *
+ * 不会放大: `fitWithinMaxEdge` 在"本来就没超"时原样返回，所以一张 300px 的
+ * 小图不会被这两个数字撑成 768。
+ */
+export const PORTRAIT_CROP_MAX_EDGE = 2048
+export const AVATAR_CROP_MAX_EDGE = 768
+
+/**
+ * 「一源两图」的回执（`importPortraitPair`）。
+ *
+ * 两个 id 各自独立**就是这个形状存在的理由**: 部分成功时 `outcome` 说的是失败的
+ * 那一半的理由，而落地的那一半仍然把 id 带回来 —— 调用方据此既能如实提示，
+ * 又能立刻用上已经存好的那张图。
+ */
+export interface PortraitPairResult {
+  /** 两半都成才是 `'ok'`；否则是**先出问题的那一半**的理由 */
+  outcome: AssetMutationOutcome
+  /** 立绘那一行（成功落地或被哈希认成库里已有行时才有） */
+  portraitId?: string
+  /** 头像那一行，同上 */
+  avatarId?: string
 }
 
 /** 浏览器配额（§4.5 的配额条） */
@@ -270,6 +350,24 @@ function notify(message: string, type: 'info' | 'error'): void {
     // 静默：提示失败不能影响主流程的结果
   }
 }
+
+/**
+ * 素材 MIME → 扩展名的反查表。
+ *
+ * 用在**字节不是从文件来**的路径上（裁剪产出的 blob 只有 mime，没有文件名），
+ * 而 `AssetMetaRecord.ext` 是必填的 —— 导出时的文件名靠它拼。
+ *
+ * 与音频那张反查表同一套构造与同一条"先到先得"规则: `ASSET_MIME_BY_EXTENSION`
+ * 的键序决定谁赢，于是 `image/jpeg` 稳定反查成 `jpg` 而不是 `jpeg`/`jpe`。
+ * 两张表都从**同一份正向路由表**推出来，不手写第二份（手写的那份就是漂移的来路）。
+ */
+const ASSET_EXTENSION_BY_MIME: Readonly<Record<string, string>> = (() => {
+  const out: Record<string, string> = {}
+  for (const [ext, mime] of Object.entries(ASSET_MIME_BY_EXTENSION)) {
+    if (!Object.prototype.hasOwnProperty.call(out, mime)) out[mime] = ext
+  }
+  return out
+})()
 
 /** MIME → 扩展名的反查表（导出音频要给文件名一个扩展名，路由表是唯一来源） */
 const AUDIO_EXTENSION_BY_MIME: Readonly<Record<string, string>> = (() => {
@@ -338,6 +436,46 @@ function violatesZipEntryName(name: string, variant?: string): boolean {
   if (hasSeparator(name)) return true
   if (variant !== undefined && variant !== '' && hasSeparator(variant)) return true
   return name.startsWith('.')
+}
+
+/** 文件名 → 小写无点扩展名；没有扩展名（或以点开头的隐藏文件）给空串 */
+function extensionOf(filename: string): string {
+  const dot = filename.lastIndexOf('.')
+  return dot > 0 ? filename.slice(dot + 1).trim().toLowerCase() : ''
+}
+
+/**
+ * 一份源字节的素材 MIME —— 先信 `blob.type`，`File` 可以退到文件名扩展名。
+ *
+ * 顺序是有讲究的，与 {@link isZipFile} 那条平台知识同源: 从磁盘选出来的 `File`
+ * 在某些系统 / 某些格式上 `type` 干脆是**空字符串**，只信它会让一张好好的 png
+ * 被判成"类型不明"。反过来，`type` 有值时它比扩展名可靠（扩展名可以被改错）。
+ *
+ * 问不出来就返回 `undefined` —— 调用方据此算失败，**不猜**: 猜错了会给行填上一个
+ * 假的 ext/mime，而那两个字段是导出文件名与再导入路由的依据。
+ */
+function resolveSourceMime(source: Blob): string | undefined {
+  const declared = (source.type ?? '').trim().toLowerCase()
+  if (declared !== '' && ASSET_EXTENSION_BY_MIME[declared] !== undefined) return declared
+  const named = source as Partial<File>
+  if (typeof named.name === 'string') {
+    const byExt = mimeForAssetExtension(extensionOf(named.name))
+    if (byExt !== undefined) return byExt
+  }
+  return undefined
+}
+
+/**
+ * 同一份字节，但 `type` 换成 `mime`。**字节一个都不改** —— 所以哈希不变，
+ * 去重照样认得出它就是那张图。
+ *
+ * 为什么需要: 整图路径要原样存源字节（不过画布），但源 blob 的 `type` 可能是空的
+ * 或与我们推断出来的 MIME 不一致，而 `AssetMetaRecord.mime` 与字节自称的类型对不上
+ * 是日后最难查的一类问题。`type` 已经一致时直接原样返回，连拷贝都省了。
+ */
+async function sameBytesAs(source: Blob, mime: string): Promise<Blob | null> {
+  if ((source.type ?? '').toLowerCase() === mime) return source
+  return makeBlob(new Uint8Array(await source.arrayBuffer()), mime)
 }
 
 /** 行排序: 类型顺序 → 基图优先 → 变体名 */
@@ -499,6 +637,23 @@ export const useAssetStore = defineStore('asset', () => {
    */
   async function assetUrl(id: string): Promise<string | null> {
     return cache().get(id)
+  }
+
+  /**
+   * 取素材的**原始字节**；查无此行、或元数据在而字节丢了，都返回 `null`。
+   *
+   * 为什么要有它，而不是让调用点自己 `import { getAssetBlob }`: store 是 UI
+   * 通往 Dexie 的**唯一边界**（本文件开头「边界」那条），而"我要的是字节不是
+   * object URL"是个正当需求 —— 裁剪台要喂给画布的就是源字节。少了这个动作，
+   * 需要字节的组件只能绕过 store 直取数据库，于是 D6 那条注入缝（日后换磁盘层
+   * 只改一行）从"一处"变成"一处 + 每个绕过去的调用点"。
+   *
+   * 🔴 **不吞异常**: 读失败（IndexedDB 挂了、事务被中止）与"这条素材没有字节"
+   * 是两件事，调用点的话术也不一样（前者"可以再试一次"，后者"图像已丢失"）。
+   * 在这里 catch 成 `null` 会把两者压成一句话。
+   */
+  async function assetBlob(id: string): Promise<Blob | null> {
+    return (await getAssetBlob(id)) ?? null
   }
 
   /** 同步窥视已铸造的 URL，不触发加载 */
@@ -936,6 +1091,10 @@ export const useAssetStore = defineStore('asset', () => {
         if (planned.entry.hash !== undefined) meta.hash = planned.entry.hash
         if (planned.credit !== undefined) meta.credit = planned.credit
         if (planned.license !== undefined) meta.license = planned.license
+        // 取景同署名: 文件名承载不了，只能靠清单带走（D10 —— 清单补显示元数据，
+        // 永不碰身份）。计划器已经夹逼过；被判成重复的条目根本走不到这里，
+        // 于是清单永远改不动一条既有行的取景。
+        if (planned.framing !== undefined) meta.framing = planned.framing
         await saveAsset(meta, blob)
         summary.assetsAdded += 1
       } catch (e) {
@@ -1263,14 +1422,14 @@ export const useAssetStore = defineStore('asset', () => {
     if (rejectIfBusy() !== null) return { outcome: 'busy' }
 
     // 文件名在这条路径上**只**贡献扩展名 —— 绝不从它反推 name / type
-    const dot = file.name.lastIndexOf('.')
-    const ext = dot > 0 ? file.name.slice(dot + 1).trim().toLowerCase() : ''
+    const ext = extensionOf(file.name)
     const mime = mimeForAssetExtension(ext)
     if (mime === undefined) return { outcome: 'failed' }
 
     const { end } = beginImport()
     try {
-      // 三道闸门先过: 名字不合法时连字节都不必读
+      // 三道闸门先过: 名字不合法时**连字节都不必读**（`writeIntoSlot` 里还会再判
+      // 一次，那是权威的一道；这一次纯粹是为了省下读整个文件的开销）
       const gate = checkNameGates({ name, type, ext })
       if (gate !== null) return { outcome: gate }
 
@@ -1278,8 +1437,6 @@ export const useAssetStore = defineStore('asset', () => {
       progressDone.value = 0
       progressTotal.value = 1
       progressPhase.value = 'write'
-
-      await refreshAssets()
 
       let bytes: Uint8Array
       try {
@@ -1289,59 +1446,276 @@ export const useAssetStore = defineStore('asset', () => {
       }
       const blob = makeBlob(bytes, mime)
       if (!blob) return { outcome: 'failed' }
-      // 哈希算不出就跳过去重，**绝不换第二种算法** —— 与两条导入路径同一条降级规则
-      const hash = await hashMediaBlob(blob)
 
-      // 去重仍是 `(name, type)` 作用域（D12）: 同一张占位图给第 2..N 个角色用是合法的
-      if (hash !== undefined) {
-        const twin = rowsInGroup(name, type).find((r) => r.hash === hash)
-        if (twin) {
-          progressDone.value = 1
-          // 不写新行，但**照样提主图** —— 见上方"结局一定是这个槽位显示这张图"
-          return { outcome: asSlotOutcome(await setPrimary(twin.id)), id: twin.id }
-        }
-      }
-
-      const alloc = allocateSlot({ name, type, ext })
-      if (!alloc.ok) return { outcome: alloc.reason ?? 'failed' }
-
-      const now = Date.now()
-      const meta: AssetMetaRecord = {
-        id: newId('asset'),
-        name,
-        type,
-        ext,
-        mime,
-        bytes: bytes.length,
-        createdAt: now,
-        updatedAt: now,
-      }
-      // 基图位被占时先落在变体位上（永不覆盖，D11），下面再由 setPrimary 换过来
-      if (alloc.variant !== undefined) meta.variant = alloc.variant
-      if (hash !== undefined) meta.hash = hash
-
-      try {
-        await saveAsset(meta, blob)
-      } catch (e) {
-        if (isQuotaError(e)) {
-          // 配额耗尽时"可以再试一次"这句话是假的，得当场说清
-          notify('浏览器存储空间已满，这张素材没有导入；先清理一些素材或音频再试。', 'error')
-        }
-        return { outcome: 'failed' }
-      }
-      progressDone.value = 1
-      await refreshAssets()
-
-      // 与两条导入路径同一条: 首次写入成功之后才请求持久化，永不阻塞（§4.5）
-      if (!persistRequested) {
-        persistRequested = true
-        await requestPersistence()
-      }
-
-      return { outcome: asSlotOutcome(await setPrimary(meta.id)), id: meta.id }
+      const res = await writeIntoSlot(blob, name, type, ext, mime)
+      if (res.id !== undefined) progressDone.value = 1
+      return res
     } finally {
       end()
     }
+  }
+
+  /**
+   * 定点写入的**共同内核**: 一份已经定好的字节 → `(name, type)` 槽位。
+   *
+   * 单独抽出来不是为了少写几行，而是为了让"定点导入"这件事**只有一套闸门**。
+   * `importForCharacter` 与 `importPortraitPair` 走的是同一段代码，于是
+   * D16/D19/D7 三关、`(name, type)` 作用域的哈希去重（D12）、**永不覆盖**的撞位
+   * 编号（D11 / §5.3）、以及末尾那次 `setPrimary`，两条路径逐字一致 ——
+   * 而不是"看起来一样"的两份实现（那正是 §5.3 反复点名的漂移来路）。
+   *
+   * 调用方负责: 互斥闸（{@link rejectIfBusy} / {@link beginImport}）与进度计数。
+   * 本函数负责: 其余全部，包括每次都先 `refreshAssets()` —— 成对写入时第二次调用
+   * 必须看得见第一次刚落的行，否则两行会去抢同一个槽位。
+   *
+   * @param blob 已经确定 MIME 的字节（裁剪产出的，或按扩展名重新包过的原文件）
+   */
+  async function writeIntoSlot(
+    blob: Blob,
+    name: string,
+    type: AssetType,
+    ext: string,
+    mime: string,
+  ): Promise<{ outcome: AssetMutationOutcome; id?: string }> {
+    // 权威的一道闸门（调用方可能已经先判过一次省开销，判两次无害）
+    const gate = checkNameGates({ name, type, ext })
+    if (gate !== null) return { outcome: gate }
+
+    await refreshAssets()
+
+    // 哈希算不出就跳过去重，**绝不换第二种算法** —— 与两条导入路径同一条降级规则
+    const hash = await hashMediaBlob(blob)
+
+    // 去重仍是 `(name, type)` 作用域（D12）: 同一张占位图给第 2..N 个角色用是合法的
+    if (hash !== undefined) {
+      const twin = rowsInGroup(name, type).find((r) => r.hash === hash)
+      if (twin) {
+        // 不写新行，但**照样提主图** —— 见 importForCharacter 的
+        // "结局一定是这个槽位显示这张图"
+        return { outcome: asSlotOutcome(await setPrimary(twin.id)), id: twin.id }
+      }
+    }
+
+    const alloc = allocateSlot({ name, type, ext })
+    if (!alloc.ok) return { outcome: alloc.reason ?? 'failed' }
+
+    const now = Date.now()
+    const meta: AssetMetaRecord = {
+      id: newId('asset'),
+      name,
+      type,
+      ext,
+      mime,
+      bytes: blob.size,
+      createdAt: now,
+      updatedAt: now,
+    }
+    // 基图位被占时先落在变体位上（永不覆盖，D11），下面再由 setPrimary 换过来
+    if (alloc.variant !== undefined) meta.variant = alloc.variant
+    if (hash !== undefined) meta.hash = hash
+
+    try {
+      await saveAsset(meta, blob)
+    } catch (e) {
+      if (isQuotaError(e)) {
+        // 配额耗尽时"可以再试一次"这句话是假的，得当场说清
+        notify('浏览器存储空间已满，这张素材没有导入；先清理一些素材或音频再试。', 'error')
+      }
+      return { outcome: 'failed' }
+    }
+    await refreshAssets()
+
+    // 与两条导入路径同一条: 首次写入成功之后才请求持久化，永不阻塞（§4.5）
+    if (!persistRequested) {
+      persistRequested = true
+      await requestPersistence()
+    }
+
+    return { outcome: asSlotOutcome(await setPrimary(meta.id)), id: meta.id }
+  }
+
+  // ═══ 一源两图（裁剪编辑器的落库端）═══════════════════════
+
+  /**
+   * 从**一张源图**烘出一对素材: 立绘 + 头像，同一个 `name` 下的两行。
+   *
+   * 为什么不是两次 `importForCharacter`: 用户手里只有一张图，两个框是他在裁剪
+   * 编辑器里拉出来的。让他导两次、各裁一次，等于把"这两张图来自同一张源图"
+   * 这件事的记账推给用户。这里一次调用把两份**真字节**都烘出来
+   * （见 image-crop.ts 开头"为什么要真裁"）。
+   *
+   * **两个类型各表一次态**（{@link PortraitCropSpec}）: 给框 = 真裁，`'whole'` =
+   * 整张源图原始字节原样存（不过画布），`'skip'` = **这个类型一行都不写**。
+   * 两个都 `'skip'` 是调用方的错（那次调用什么也不做），返回 `'no-crops'`。
+   *
+   * 🔴 `'skip'` 不是可有可无的第三档，它是**库不按次数膨胀**的前提: 素材库里
+   * 重裁一张立绘是常规操作，若每次都顺带铸一张头像，重裁 5 次就留下 5 张头像变体
+   * —— 用户从没要过其中任何一张。
+   *
+   * 长边上限（{@link PORTRAIT_CROP_MAX_EDGE} / {@link AVATAR_CROP_MAX_EDGE}）
+   * **只作用于真裁那一半**: 整图路径上没有"裁"可言，也不该为了压尺寸去重编码。
+   *
+   * 闸门与 {@link importForCharacter} **逐条相同**，因为走的就是同一个
+   * {@link writeIntoSlot}: 互斥闸 · D16 命名不变式 · D19 zip 条目名可承载性 ·
+   * D7 媒体规则 · 名字不 trim（D2）· 永不覆盖（撞位进变体槽，D11）· 哈希去重（D12）·
+   * 末尾 `setPrimary`（新图就是显示出来的那张）。
+   *
+   * 🔴 **部分成功如实报**（与本 store 每一条批量路径同一条纪律）: 立绘写成功、
+   * 头像失败时，`outcome` 是**那个失败的理由**，而 `portraitId` 照样带回来。
+   * 绝不回滚已经落地的那一半（回滚等于把用户已经拿到的东西再拿走），
+   * 也绝不因为"至少成一个"就报成功。
+   *
+   * @param source 源图字节。视频一律拒（D7 + 画布取不到"哪一帧"）
+   * @param name 角色名，严格 `===`，**不 trim**（D2）
+   * @param crops 两个类型各自的取材方式（框的单位是源图像素）
+   * @param options `maxEdge` 覆盖按类型的默认长边上限（测试与特殊调用点用，
+   *   生产不传）；其余是解码/画布注入缝
+   */
+  async function importPortraitPair(
+    source: File | Blob,
+    name: string,
+    crops: PortraitCropPlan,
+    options: { maxEdge?: number } & ImageCropSeams = {},
+  ): Promise<PortraitPairResult> {
+    if (crops.portrait === 'skip' && crops.avatar === 'skip') {
+      return { outcome: 'no-crops' }
+    }
+    if (rejectIfBusy() !== null) return { outcome: 'busy' }
+
+    // 源类型: 先信 blob 自带的 type，`File` 可以退到文件名扩展名。两者都问不出
+    // 就没法给行填一个诚实的 ext/mime —— 那不该靠猜，直接算失败。
+    const sourceMime = resolveSourceMime(source)
+    if (sourceMime === undefined) return { outcome: 'failed' }
+    // 视频到不了裁剪台（画布只有某一帧），而且 D7 本来就不让它落在 立绘 上
+    if (sourceMime.startsWith('video/')) return { outcome: 'media-rule' }
+
+    // 裁出来会是什么类型 —— **开裁之前**就要知道，闸门要拿 ext 判
+    let cropMime: string
+    try {
+      cropMime = resolveOutputMime(sourceMime)
+    } catch {
+      return { outcome: 'media-rule' }
+    }
+    const wholeExt = ASSET_EXTENSION_BY_MIME[sourceMime]
+    const cropExt = ASSET_EXTENSION_BY_MIME[cropMime]
+    if (wholeExt === undefined || cropExt === undefined) return { outcome: 'failed' }
+
+    /**
+     * 立绘在前 —— 部分成功的语义要有确定的先后，否则"哪一半落了"取决于时序。
+     *
+     * `'skip'` 的类型**根本不进这个数组**: 它不占进度分母、不过闸门、不写行。
+     */
+    const plan: { type: AssetType; rect?: CropRect; maxEdge: number }[] = []
+    if (crops.portrait !== 'skip') {
+      plan.push({
+        type: '立绘',
+        ...(crops.portrait === 'whole' ? {} : { rect: crops.portrait }),
+        maxEdge: options.maxEdge ?? PORTRAIT_CROP_MAX_EDGE,
+      })
+    }
+    if (crops.avatar !== 'skip') {
+      plan.push({
+        type: '头像',
+        ...(crops.avatar === 'whole' ? {} : { rect: crops.avatar }),
+        maxEdge: options.maxEdge ?? AVATAR_CROP_MAX_EDGE,
+      })
+    }
+
+    // 一个字节都还没烘之前，要写的类型闸门全过一遍: 名字不合法时不该先切出一张图
+    // 再发现存不进去（`writeIntoSlot` 里还会各判一次，那是权威的一道）
+    for (const step of plan) {
+      const gate = checkNameGates({
+        name,
+        type: step.type,
+        ext: step.rect === undefined ? wholeExt : cropExt,
+      })
+      if (gate !== null) return { outcome: gate }
+    }
+
+    const { end } = beginImport()
+    try {
+      progressDone.value = 0
+      progressTotal.value = plan.length
+      progressPhase.value = 'write'
+
+      const out: PortraitPairResult = { outcome: 'ok' }
+      let firstProblem: AssetMutationOutcome | null = null
+
+      for (const step of plan) {
+        const rect = step.rect
+        const mime = rect === undefined ? sourceMime : cropMime
+        const ext = rect === undefined ? wholeExt : cropExt
+
+        let blob: Blob | null
+        try {
+          blob =
+            rect === undefined
+              ? await sameBytesAs(source, mime)
+              : await cropImageBlob(source, rect, {
+                  mime: cropMime,
+                  // 按类型各一档的上限（调用方可用 options.maxEdge 整体覆盖）
+                  maxEdge: step.maxEdge,
+                  ...(options.decode !== undefined ? { decode: options.decode } : {}),
+                  ...(options.createCanvas !== undefined
+                    ? { createCanvas: options.createCanvas }
+                    : {}),
+                })
+        } catch (e) {
+          // 裁剪失败只毁掉**这一半**: 另一半照跑，结果如实报（部分成功纪律）
+          blob = null
+          if (e instanceof ImageCropError && e.code === 'video-source') {
+            firstProblem = firstProblem ?? 'media-rule'
+          }
+        }
+        if (!blob) {
+          firstProblem = firstProblem ?? 'failed'
+          continue
+        }
+
+        const res = await writeIntoSlot(blob, name, step.type, ext, mime)
+        if (res.id !== undefined) {
+          progressDone.value += 1
+          if (step.type === '立绘') out.portraitId = res.id
+          else out.avatarId = res.id
+        }
+        if (res.outcome !== 'ok') firstProblem = firstProblem ?? res.outcome
+      }
+
+      if (firstProblem !== null) out.outcome = firstProblem
+      return out
+    } finally {
+      end()
+    }
+  }
+
+  // ═══ 取景（framing）═══════════════════════════════════
+
+  /**
+   * 存一张素材的取景（焦点 + 缩放）。
+   *
+   * **一律先夹逼**（`clampAssetFraming`）: 这个动作的上游是一个拖拽 UI，
+   * 而拖拽算出来的数值有大把机会变成 NaN（除以一个还没测量出来的 0 宽容器就够了）。
+   * 一个 NaN 落库之后每次渲染都会让整条 `object-position` 失效，表现成
+   * "这张图偶尔没对齐" —— 所以收敛点必须在**写入侧**，而不是指望每个读方都记得夹。
+   *
+   * 不进互斥闸: 它既不写字节也不动槽位，与导入没有可争的东西。
+   */
+  async function setAssetFraming(id: string, framing: AssetFraming): Promise<AssetMutationResult> {
+    const row = findAsset(id)
+    if (!row) return { outcome: 'not-found' }
+
+    const next: AssetMetaRecord = {
+      ...row,
+      framing: clampAssetFraming(framing),
+      updatedAt: Date.now(),
+    }
+    try {
+      await saveAsset(next)
+    } catch {
+      return { outcome: 'failed' }
+    }
+    await refreshAssets()
+    return { outcome: 'ok', row: findAsset(id) ?? next }
   }
 
   /** `AssetZipError` → 人话。按 `code` 判别，不去 match 文案 */
@@ -1414,12 +1788,17 @@ export const useAssetStore = defineStore('asset', () => {
           used.add(name)
           entries.push({ name, bytes: new Uint8Array(await blob.arrayBuffer()) })
           result.assets += 1
-          if (row.credit !== undefined || row.license !== undefined) {
-            manifest.assets[name] = {
-              ...(row.credit !== undefined ? { credit: row.credit } : {}),
-              ...(row.license !== undefined ? { license: row.license } : {}),
-            }
+          const meta: AssetZipManifest['assets'][string] = {}
+          if (row.credit !== undefined) meta.credit = row.credit
+          if (row.license !== undefined) meta.license = row.license
+          // 取景只在**偏离默认**时写出来。默认值写进去是个无操作，却会让每一条
+          // 素材都在清单里长出一段 —— 一个 200 图的包白白多几 KB 噪音，还让读的人
+          // 以为作者特意调过构图。`isDefaultAssetFraming` 先夹逼再比，所以存量的
+          // 垃圾值（NaN / 越界）夹回默认后同样被省掉。
+          if (row.framing !== undefined && !isDefaultAssetFraming(row.framing)) {
+            meta.framing = clampAssetFraming(row.framing)
           }
+          if (Object.keys(meta).length > 0) manifest.assets[name] = meta
         } catch {
           result.failed += 1
         }
@@ -1722,15 +2101,18 @@ export const useAssetStore = defineStore('asset', () => {
     importFiles,
     importAny,
     importForCharacter,
+    importPortraitPair,
     cancelImport,
     exportZip,
     // mutations
     renameAsset,
     setPrimary,
+    setAssetFraming,
     deleteAsset: deleteAssetById,
     deleteAssets: deleteAssetsByIds,
     // urls
     assetUrl,
+    assetBlob,
     peekAssetUrl,
     releaseAssetUrl,
     revokeAllUrls,

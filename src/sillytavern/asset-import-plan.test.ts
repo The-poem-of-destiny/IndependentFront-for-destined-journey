@@ -645,6 +645,79 @@ describe('清单 (§5.2 / D10)', () => {
     const plan = planImport([entry('assets/角色/苏婉_头像.png')], noRows(), manifest);
     expect(plan.assets[0].credit).toBe('画师A');
   });
+
+  // ── 取景（2026-07-29 追加）: 显示元数据可以进清单，身份仍然不行 ──
+
+  it('取景随清单进计划', () => {
+    const manifest: ImportManifest = {
+      assets: { '苏婉_头像.png': { framing: { x: 20, y: 80, scale: 1.75 } } },
+    };
+    const plan = planImport([entry('苏婉_头像.png')], noRows(), manifest);
+    expect(plan.assets[0].framing).toEqual({ x: 20, y: 80, scale: 1.75 });
+  });
+
+  it('🔴 敌意取景当场夹逼: NaN / 越界都进不了计划', () => {
+    const manifest = {
+      assets: {
+        'A_头像.png': { framing: { x: Number.NaN, y: 0, scale: 1 } },
+        'B_头像.png': { framing: { x: 1e9, y: -50, scale: 999 } },
+      },
+    } as unknown as ImportManifest;
+    const plan = planImport([entry('A_头像.png'), entry('B_头像.png')], noRows(), manifest);
+    expect(plan.assets[0].framing).toEqual({ x: 50, y: 0, scale: 1 });
+    const b = plan.assets[1].framing!;
+    expect(b.x).toBeLessThanOrEqual(100);
+    expect(b.y).toBeGreaterThanOrEqual(0);
+    expect(b.scale).toBeLessThanOrEqual(3);
+  });
+
+  it('🔴 非对象的取景一律丢掉 —— 不悄悄翻译成一个默认取景', () => {
+    for (const bad of ['居中', 42, [1, 2, 3], null, true]) {
+      const manifest = {
+        assets: { '苏婉_头像.png': { framing: bad } },
+      } as unknown as ImportManifest;
+      const plan = planImport([entry('苏婉_头像.png')], noRows(), manifest);
+      expect(plan.assets[0].framing, JSON.stringify(bad)).toBeUndefined();
+    }
+  });
+
+  it('🔴 加了 framing 之后，清单**依然**改不了名字与类型', () => {
+    const hostile = {
+      assets: {
+        '苏婉_头像.png': {
+          name: '林月',
+          type: '立绘',
+          variant: '微笑',
+          framing: { x: 10, y: 10, scale: 2 },
+        },
+      },
+    } as unknown as ImportManifest;
+    const plan = planImport([entry('苏婉_头像.png')], noRows(), hostile);
+    expect(slots(plan)).toEqual([{ name: '苏婉', type: '头像', variant: undefined }]);
+    expect(plan.assets[0].framing).toEqual({ x: 10, y: 10, scale: 2 });
+  });
+
+  it('🔴 被判成重复的条目根本不进计划 → 清单的取景碰不到既有行', () => {
+    const existing = {
+      assets: [{ id: 'x', name: '苏婉', type: '头像' as const, hash: 'h1' }],
+      audio: [],
+    };
+    const manifest: ImportManifest = {
+      assets: { '苏婉_头像.png': { framing: { x: 99, y: 1, scale: 2 } } },
+    };
+    const plan = planImport([entry('苏婉_头像.png', 'h1')], existing, manifest);
+    expect(plan.assets).toHaveLength(0);
+    expect(plan.skips.map((s) => s.reason)).toEqual(['duplicate']);
+  });
+
+  it('音频分区的取景无处可落，静默忽略（PlannedAudio 里没有这个字段）', () => {
+    const manifest: ImportManifest = {
+      audio: { '战斗.mp3': { framing: { x: 1, y: 2, scale: 2 } } },
+    };
+    const plan = planImport([entry('战斗.mp3')], noRows(), manifest);
+    expect(plan.audio).toHaveLength(1);
+    expect(plan.audio[0]).not.toHaveProperty('framing');
+  });
 });
 
 // ═══════════════════════════════════════════════════════════

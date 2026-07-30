@@ -877,6 +877,39 @@ describe('manifest.json', () => {
     })
   })
 
+  it('取景经解析层进来，并在**第一道门**就被夹逼（外来 JSON 不可信）', () => {
+    const parsed = parseAssetZipManifest(
+      utf8(
+        JSON.stringify({
+          assets: {
+            'ok.png': { framing: { x: 20, y: 80, scale: 1.75 } },
+            'wild.png': { framing: { x: 1e9, y: -50, scale: 999 } },
+            'text.png': { framing: '居中' },
+            'arr.png': { framing: [1, 2, 3] },
+            'nan.png': { framing: { x: Number.NaN, y: 0, scale: 1 } },
+          },
+          audio: {},
+        }),
+      ),
+    )
+    expect(parsed?.assets['ok.png']?.framing).toEqual({ x: 20, y: 80, scale: 1.75 })
+    expect(parsed?.assets['wild.png']?.framing).toEqual({ x: 100, y: 0, scale: 3 })
+    // 非对象 → 当"没写取景"，整条 meta 于是也空了 → 该键不出现
+    expect(parsed?.assets['text.png']).toBeUndefined()
+    expect(parsed?.assets['arr.png']).toBeUndefined()
+    // NaN 经 JSON 变成 null → 非数 → 退回默认，绝不带着 NaN 往下走
+    expect(parsed?.assets['nan.png']?.framing).toEqual({ x: 50, y: 0, scale: 1 })
+  })
+
+  it('取景走 write → read 往返一字不差', async () => {
+    const blob = await writeAssetZip([{ name: 'a.png', bytes: fakeBytes(1, 32) }], {
+      assets: { 'a.png': { framing: { x: 12, y: 34, scale: 2.5 } } },
+      audio: {},
+    })
+    const result = await readAssetZip(new Uint8Array(await blob.arrayBuffer()))
+    expect(result.manifest?.assets['a.png']).toEqual({ framing: { x: 12, y: 34, scale: 2.5 } })
+  })
+
   it('清单引用不存在的文件、文件不在清单里，都静默容忍', async () => {
     const zipped = zipSync({
       'manifest.json': utf8('{"assets":{"不存在.png":{"credit":"x"}},"audio":{}}'),

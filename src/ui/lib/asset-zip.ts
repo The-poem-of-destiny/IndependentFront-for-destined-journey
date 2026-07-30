@@ -57,7 +57,7 @@
  */
 
 import { AsyncUnzipInflate, Unzip, zip, type UnzipFile } from 'fflate'
-import { isAssetExtension } from '@engine/asset-types'
+import { clampAssetFraming, isAssetExtension } from '@engine/asset-types'
 import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names'
 import type {
   DecodedEntry,
@@ -378,7 +378,14 @@ function encodeUtf8(text: string): Uint8Array {
   return out
 }
 
-/** 只留下清单允许携带的三个字段；其余键（含 name / type）一律丢弃 */
+/**
+ * 只留下清单允许携带的四个**显示元数据**字段；其余键（含 name / type）一律丢弃。
+ *
+ * 🔴 名字与类型的唯一来源永远是文件名（D10）。这个函数就是那句话的执法者 ——
+ * 输出形状里根本没有 name / type 字段，所以"清单改名"连表达都表达不出来。
+ * `framing` 是 2026-07-29 追加的显示元数据，与 credit/license 同类: 它不改身份，
+ * 只说这张图在框里怎么摆；不带它，一次导出→导入就把用户逐张调过的构图抹回默认值。
+ */
 function sanitizeMeta(raw: unknown): ImportManifestMeta | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
   const src = raw as Record<string, unknown>
@@ -389,6 +396,12 @@ function sanitizeMeta(raw: unknown): ImportManifestMeta | undefined {
   }
   if (typeof src.credit === 'string') meta.credit = src.credit
   if (typeof src.license === 'string') meta.license = src.license
+  // 非对象（字符串/数组/数字/null）一律当"没写取景"丢掉，而不是喂给夹逼函数 ——
+  // 那样会把 `"framing": "居中"` 悄悄翻译成一个默认取景，读起来像清单真说了什么。
+  // 是对象则**当场夹逼**: 这一层是外来 JSON 进入本应用的第一道门。
+  if (typeof src.framing === 'object' && src.framing !== null && !Array.isArray(src.framing)) {
+    meta.framing = clampAssetFraming(src.framing)
+  }
   return Object.keys(meta).length ? meta : undefined
 }
 

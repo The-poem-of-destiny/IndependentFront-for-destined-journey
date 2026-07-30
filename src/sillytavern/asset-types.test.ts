@@ -7,6 +7,7 @@
  *    最要紧的那条断言
  * 3. 扩展名路由表: 图片七种 / 视频只有 mp4 / 无 svg / 无 webm（webm 归音频）
  * 4. 媒体规则 (D7): 立绘 拒 mp4，头像 与 立绘bg 收
+ * 5. 取景夹逼 clampAssetFraming: NaN / 越界 / 缺字段 / 非数字 一律收成可渲染值
  */
 
 import { describe, it, expect } from 'vitest';
@@ -23,9 +24,13 @@ import {
   mimeForAssetExtension,
   allowsVideo,
   isMediaAllowed,
+  clampAssetFraming,
+  isDefaultAssetFraming,
+  ASSET_FRAMING_MIN_SCALE,
+  ASSET_FRAMING_MAX_SCALE,
 } from './asset-types';
 import { AUDIO_MIME_BY_EXTENSION } from './audio-names';
-import { ASSET_TYPES } from './types';
+import { ASSET_TYPES, DEFAULT_ASSET_FRAMING } from './types';
 
 describe('ASSET_TYPES', () => {
   it('v1 恰好三个类型', () => {
@@ -167,5 +172,71 @@ describe('isMediaAllowed', () => {
       expect(isMediaAllowed(type, 'svg')).toBe(false);
       expect(isMediaAllowed(type, 'webm')).toBe(false);
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 取景夹逼 (AssetFraming)
+// ═══════════════════════════════════════════════════════════
+
+describe('clampAssetFraming', () => {
+  it('默认值就是「顶对齐、水平居中、不放大」', () => {
+    expect(DEFAULT_ASSET_FRAMING).toEqual({ x: 50, y: 0, scale: 1 });
+  });
+
+  it('undefined / null / 非对象 一律得到默认值的副本（不是同一个对象）', () => {
+    for (const input of [undefined, null, 42, '50', [] as unknown]) {
+      expect(clampAssetFraming(input)).toEqual(DEFAULT_ASSET_FRAMING);
+    }
+    const got = clampAssetFraming(undefined);
+    expect(got).not.toBe(DEFAULT_ASSET_FRAMING);
+    // 拿到的副本可写 —— 默认值本身冻结，改副本不该改到它
+    got.x = 10;
+    expect(DEFAULT_ASSET_FRAMING.x).toBe(50);
+  });
+
+  it('缺字段的部分对象逐字段补默认值', () => {
+    expect(clampAssetFraming({ x: 12 })).toEqual({ x: 12, y: 0, scale: 1 });
+    expect(clampAssetFraming({ y: 80 })).toEqual({ x: 50, y: 80, scale: 1 });
+    expect(clampAssetFraming({ scale: 2 })).toEqual({ x: 50, y: 0, scale: 2 });
+  });
+
+  it('NaN / Infinity 退回默认值 —— 裸夹逼拦不住 NaN，这条是本组的重点', () => {
+    expect(clampAssetFraming({ x: NaN, y: NaN, scale: NaN })).toEqual(DEFAULT_ASSET_FRAMING);
+    expect(clampAssetFraming({ x: Infinity, y: -Infinity, scale: Infinity })).toEqual(
+      DEFAULT_ASSET_FRAMING,
+    );
+    // 反例保护: 如果实现改回裸 Math.min/max，这条会红
+    expect(Number.isNaN(clampAssetFraming({ x: NaN }).x)).toBe(false);
+  });
+
+  it('非数字类型（字符串 / null / 对象）也退回默认值，不做隐式转换', () => {
+    expect(clampAssetFraming({ x: '30', y: null, scale: {} })).toEqual(DEFAULT_ASSET_FRAMING);
+  });
+
+  it('x / y 越界收进 [0, 100]', () => {
+    expect(clampAssetFraming({ x: -20, y: 250 })).toEqual({ x: 0, y: 100, scale: 1 });
+    expect(clampAssetFraming({ x: 0, y: 100 })).toEqual({ x: 0, y: 100, scale: 1 });
+  });
+
+  it('scale 收进 [1, 3] —— 小于 1 会在框里露白，所以下限是 1 不是 0', () => {
+    expect(clampAssetFraming({ scale: 0 }).scale).toBe(ASSET_FRAMING_MIN_SCALE);
+    expect(clampAssetFraming({ scale: 0.4 }).scale).toBe(1);
+    expect(clampAssetFraming({ scale: -3 }).scale).toBe(1);
+    expect(clampAssetFraming({ scale: 99 }).scale).toBe(ASSET_FRAMING_MAX_SCALE);
+    expect(clampAssetFraming({ scale: 2.5 }).scale).toBe(2.5);
+  });
+
+  it('合法值原样通过（夹逼不是归一化，不改动本来就对的数）', () => {
+    const ok = { x: 33.3, y: 66.6, scale: 1.75 };
+    expect(clampAssetFraming(ok)).toEqual(ok);
+  });
+
+  it('isDefaultAssetFraming: 只有真正等于默认值才算「没调过」', () => {
+    expect(isDefaultAssetFraming(undefined)).toBe(true);
+    expect(isDefaultAssetFraming({ x: 50, y: 0, scale: 1 })).toBe(true);
+    // 垃圾输入夹逼后就是默认值 —— 所以也算没调过
+    expect(isDefaultAssetFraming({ x: NaN, y: NaN, scale: NaN })).toBe(true);
+    expect(isDefaultAssetFraming({ x: 50, y: 1, scale: 1 })).toBe(false);
   });
 });

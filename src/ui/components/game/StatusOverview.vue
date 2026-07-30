@@ -5,14 +5,20 @@ import { useAssetStore } from '../../stores/asset-store'
 import { useUIStore } from '../../stores/ui-store'
 import { useHoverPopup } from '../../composables/useHoverPopup'
 import { useAssetImage } from '../../composables/useAssetImage'
-import { ASSET_MIME_BY_EXTENSION } from '@engine/asset-types'
-import { ASSET_TYPE_AVATAR_CHAIN } from '@engine/asset-resolve'
+import { ASSET_MIME_BY_EXTENSION, mimeForAssetExtension } from '@engine/asset-types'
+import { ASSET_TYPE_FALLBACK_CHAIN } from '@engine/asset-resolve'
 import type { AssetMutationOutcome } from '../../stores/asset-store'
 import { normalizeItemType } from '@engine/field-enums'
 import ResourceBar from '../shared/ResourceBar.vue'
 import AvatarPanel from '../shared/AvatarPanel.vue'
+import CharacterPortrait from '../shared/CharacterPortrait.vue'
 import AppTabs from '../shared/AppTabs.vue'
 import BuffChip from '../shared/BuffChip.vue'
+// 裁剪台是 shared/ 的东西（它只认「一份源字节 + 一个名字」，跟设置页零耦合；
+// 正因为这里也在用它，它才不该住在 settings/assets/ 下）。这里**原样消费**
+// 它的 props/events，不复制一份 —— 复制一份就等于把 D16 不变式、撞位分配、
+// 部分成功口径再实现一遍。
+import AssetCropEditor from '../shared/AssetCropEditor.vue'
 
 const game = useGameStore()
 
@@ -23,24 +29,95 @@ const player = computed(() => game.player)
 // 名字**严格 `===`**（D2）: `useAssetImage` 不做任何归一化，名字对不上就静默走
 // 首字母兜底 —— 那是 prompt / 世界书要在源头修的缺陷，素材层不宽容匹配。
 //
-// **读**走脸位链 `头像 → 立绘 → 立绘bg`（1:1 方框要的是脸），只导了立绘的角色
-// 也能显示；下方的**导入**入口仍写死单个 `头像` —— 存进去的必须是确定的一格，
-// 只有读取才降级。
-const { url: portraitUrl, isVideo: portraitIsVideo } = useAssetImage(
-  () => player.value?.name,
-  ASSET_TYPE_AVATAR_CHAIN,
+// **读**走立牌链 `立绘 → 立绘bg → 头像`: 右栏这块地方是竖着的，有立绘就该铺开用。
+//
+// **写**分两条，判据是**这份字节能不能过画布**:
+//   · 图片 → 开裁剪台，一张源图烘出 `立绘` + `头像` 两行。这才是这个入口的意义:
+//     用户手里只有一张图，让他导两次、各裁一次，等于把"这两张图同源"的记账推给他。
+//   · mp4 → **不开**裁剪台。画布只取得到某一帧，"裁一段视频"没有意义；而且 D7
+//     本来就不让视频落在 `立绘` 上（那是要抠图合成的）。于是走原来的直通路径，
+//     且**只**写 `头像` —— 存进去的必须是确定的一格，只有读取才降级。
+const {
+  url: portraitUrl,
+  isVideo: portraitIsVideo,
+  row: portraitRow,
+} = useAssetImage(() => player.value?.name, ASSET_TYPE_FALLBACK_CHAIN)
+
+/**
+ * 铺成大画像，还是留在 1:1 小方框里？
+ *
+ * 判据是**链上命中的那一档**，不是「有没有图」: `立绘` / `立绘bg` 本来就是竖幅
+ * 或整幅构图，铺满整栏是它们该有的样子；而 `头像` 是一张脸的特写，拉满整栏宽
+ * 只会糊成一团，看起来像 bug 而不像功能 —— 所以只有头像的角色必须留小框。
+ */
+const hasLargePortrait = computed(
+  () =>
+    portraitUrl.value !== null &&
+    (portraitRow.value?.type === '立绘' || portraitRow.value?.type === '立绘bg'),
 )
 
 const assets = useAssetStore()
 const ui = useUIStore()
 
-/** 文件选择框的 accept —— 路由表是唯一来源（含 `video/mp4`），不在这里手抄一份 */
-const PORTRAIT_ACCEPT = Array.from(new Set(Object.values(ASSET_MIME_BY_EXTENSION))).join(',')
+/** 认可的素材 MIME —— 路由表是唯一来源（含 `video/mp4`），不在这里手抄一份 */
+const ASSET_MIMES = new Set(Object.values(ASSET_MIME_BY_EXTENSION))
+/** 文件选择框的 accept */
+const PORTRAIT_ACCEPT = Array.from(ASSET_MIMES).join(',')
+
+/**
+ * 这份字节按素材路由表算是什么 MIME —— 与 asset-store 的 `resolveSourceMime`
+ * **同一条优先级**: 先信 `blob.type`（从磁盘选出来的 `File` 在某些系统上是空串，
+ * 但有值时它比扩展名可靠），问不出来再退到文件名扩展名。
+ *
+ * 两边都问不出 → `undefined`，**不猜**: 猜错了会让一份 svg / 乱改扩展名的文件
+ * 一路走到裁剪台，然后在保存那一刻才含糊地失败。
+ */
+function assetMimeOf(file: File): string | undefined {
+  const declared = (file.type ?? '').trim().toLowerCase()
+  if (ASSET_MIMES.has(declared)) return declared
+  const dot = file.name.lastIndexOf('.')
+  return mimeForAssetExtension(dot > 0 ? file.name.slice(dot + 1) : '')
+}
 
 const portraitInput = ref<HTMLInputElement | null>(null)
 
 function pickPortrait(): void {
   portraitInput.value?.click()
+}
+
+// ── 裁剪台的开关 ──────────────────────────────────────────
+// 名字在**开台那一刻**就定死（`cropName`），不是每帧去读 `player.name`: 编辑器
+// 开着的时候存档可以切、角色可以改名，而用户裁的是他刚才点开的那个人。
+// 🔴 编辑器**永不**改名字，它只决定像素（见 AssetCropEditor 顶部注释）。
+
+const cropOpen = ref(false)
+const cropSource = ref<File | null>(null)
+const cropName = ref('')
+
+/**
+ * 取消 = **什么都不留下**: 没有半张素材（落库全在编辑器的确认里）、没有卡住的
+ * 忙碌位（本组件不持有忙碌位，互斥闸在 store 里且随那次调用结束而释放）、
+ * 源字节也放掉（编辑器自己会撤销它铸的 object URL）。
+ *
+ * 文件选择框的 `value` 不在这里清 —— 它在 `onPortraitFile` 一进门就清了，
+ * 那才是唯一正确的时机: 取消**编辑器**与取消**文件对话框**是两件事，只有前者
+ * 会走到这里，而"连选同一个文件两次"这个坑两条路都要躲过。
+ */
+function closeCrop(): void {
+  cropOpen.value = false
+  cropSource.value = null
+}
+
+/** 两半都落地了才会来（部分成功由编辑器就地说明，不冒充成功） */
+function onCropSaved(ids: { portraitId?: string; avatarId?: string }): void {
+  const name = cropName.value
+  closeCrop()
+  const saved = [
+    ...(ids.portraitId !== undefined ? ['立绘'] : []),
+    ...(ids.avatarId !== undefined ? ['头像'] : []),
+  ]
+  if (saved.length === 0) return
+  ui.toast(`已把这张图设为「${name}」的${saved.join('与')}。`, 'info')
 }
 
 /**
@@ -80,14 +157,33 @@ function portraitMessage(outcome: AssetMutationOutcome, name: string): { text: s
 async function onPortraitFile(e: Event): Promise<void> {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
-  // 先清空，否则连续选**同一个文件**不会再触发 change（浏览器认为值没变）
+  // 🔴 先清空，否则连续选**同一个文件**不会再触发 change（浏览器认为值没变）。
+  // 必须在**所有** early return 之前 —— 走到裁剪台那条分支同样要清，否则
+  // "开了裁剪台 → 取消 → 想重选刚才那张图" 会一声不响地什么都不发生。
   input.value = ''
   if (!file) return
   const name = player.value?.name
   if (!name) return
 
+  const mime = assetMimeOf(file)
+  if (mime === undefined) {
+    // 连 MIME 都问不出来: 不开裁剪台，也不把一个必然失败的请求发给 store
+    const { text, type } = portraitMessage('failed', name)
+    ui.toast(text, type)
+    return
+  }
+
+  if (!mime.startsWith('video/')) {
+    // 图片 → 交给裁剪台，由它调 `importPortraitPair` 一次烘出 立绘 + 头像
+    cropSource.value = file
+    cropName.value = name
+    cropOpen.value = true
+    return
+  }
+
+  // mp4 → 裁不了（画布只有某一帧），直通导入，且只写 头像。
   // 文件名在这条路径上**只**贡献扩展名 —— name 与 type 由这个槽位说了算，
-  // 于是 `IMG_1234.png` 不会在库里长出一个叫 IMG_1234 的幽灵角色组
+  // 于是 `IMG_1234.mp4` 不会在库里长出一个叫 IMG_1234 的幽灵角色组
   const { outcome } = await assets.importForCharacter(file, name, '头像')
   // 互斥闸已经自己播报过了 —— 这里再补一句就是两条 toast 说同一件事
   if (outcome === 'busy') return
@@ -279,18 +375,32 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         </div>
       </div>
       <div class="player-summary">
-        <!-- 点画像 = 给这个角色导一张头像素材（唯一带导入入口的渲染位） -->
+        <!-- 点画像 = 挑一张图，裁出这个角色的立绘与头像（唯一带导入入口的渲染位）。
+             说明文案照实说**结果是两张素材**，而不是含糊的"导入" —— 用户点之前
+             就该知道这一下会同时定下立牌位和头像位。 -->
         <div
           class="portrait-slot"
+          :class="{ large: hasLargePortrait }"
           role="button"
           tabindex="0"
-          :title="`点击设置「${player.name}」的画像`"
-          :aria-label="`设置「${player.name}」的画像`"
+          :title="`点击挑一张图，裁出「${player.name}」的立绘与头像`"
+          :aria-label="`设置「${player.name}」的立绘与头像`"
           @click="pickPortrait"
           @keydown.enter="pickPortrait"
           @keydown.space.prevent="pickPortrait"
         >
+          <!-- 立绘 / 立绘bg → 顶对齐的大画像（带取景旋钮）；只有头像 → 保持 1:1 小方框。
+               两种形态都被同一个可点的槽包着，导入入口对两者一视同仁。 -->
+          <CharacterPortrait
+            v-if="hasLargePortrait"
+            :name="player.name"
+            :src="portraitUrl"
+            :video="portraitIsVideo"
+            :asset-id="portraitRow?.id ?? null"
+            :framing="portraitRow?.framing ?? null"
+          />
           <AvatarPanel
+            v-else
             :name="player.name"
             size="xl"
             shape="square"
@@ -467,6 +577,18 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
       </div>
     </Transition>
   </Teleport>
+
+  <!-- ═══ 裁剪台 —— 一张源图 → 立绘 + 头像 ═══
+       刻意挂在 `v-if="player"` **之外**: 挂在里面的话，编辑器开着时存档切换 /
+       角色数据短暂缺席就会把它连根卸载，用户拉了一半的框凭空消失。
+       它自己调 `importPortraitPair` 落库，本组件只负责开台与收台。 -->
+  <AssetCropEditor
+    :open="cropOpen"
+    :source="cropSource"
+    :name="cropName"
+    @close="closeCrop"
+    @saved="onCropSaved"
+  />
 </template>
 
 <style scoped>
@@ -558,6 +680,15 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   max-width: 11.25rem;
   cursor: pointer;
   border-radius: var(--theme-radius-md, 6px);
+}
+/* 大画像形态：解开 1:1 小框的宽度上限，让 4:5 立牌吃满整栏 */
+.portrait-slot.large {
+  max-width: none;
+}
+/* 右下角归取景旋钮了，导入提示让到左下 —— 两个 24px 的小按钮不该叠在一起 */
+.portrait-slot.large .portrait-hint {
+  right: auto;
+  left: 6px;
 }
 .portrait-slot:focus-visible {
   outline: 2px solid var(--theme-primary);

@@ -33,7 +33,17 @@ npx -y -p vue-tsc@2.2.10 -p typescript@5.8.3 vue-tsc --noEmit
 ```
 
 两个坑：①光 `npx vue-tsc` 会拉到新版 TypeScript 并炸在
-`ERR_PACKAGE_PATH_NOT_EXPORTED ./lib/tsc`，必须像上面那样把 TS 一起 pin 住。
-②输出里有 **约 40 条既有错误**（CreateStep*/CharacterListPanel/ChatFlow/MapPanel/
-CombatMessageFlow/SettingsPage 那堆压缩成一行的老函数），这是基线不是你弄坏的 ——
-按路径 grep 只看自己碰过的文件。相关：[[known-flaky-tests]]（测试侧的同类基线）。
+`ERR_PACKAGE_PATH_NOT_EXPORTED ./lib/tsc`，必须像上面那样把 TS 一起 pin 住
+（`-p typescript@5.6.3 -p vue-tsc@2.1.10` 这一对也验证可用）。
+②输出里有既有错误基线，2026-07-29 实测**恰好 32 条**，其中 **18 条集中在
+`SettingsPage.vue`**（`PresetItem.settings` / `.template` 类型上不存在 —— 真类型漂移，
+已作为已知缺陷记进素材设计文档 §12，刻意未修），其余散在
+CreateStepPlot(5)/CombatMessageFlow(2)/CharacterListPanel(2)/WorldBookEditor/MapPanel/
+ChatFlow/CustomItemForm/CreateStepBackground 各 1。这是基线不是你弄坏的 ——
+数总数 + 按路径分组比对最快：
+
+```
+… vue-tsc --noEmit -p tsconfig.json 2>&1 | grep -oE "^[^(]+\.vue" | sort | uniq -c | sort -rn
+```
+
+相关：[[known-flaky-tests]]（测试侧的同类基线）。

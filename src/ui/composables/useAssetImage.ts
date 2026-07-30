@@ -89,6 +89,21 @@ export interface UseAssetImage {
    * 走链时说的是**最终命中的那一档**: 头像位退到 `立绘` 时，这里跟着 `立绘` 那行走。
    */
   isVideo: Ref<boolean>
+  /**
+   * 链上**最终命中的那一行**（查不到 / 名字为空 → null）。
+   *
+   * 为什么要把整行交出去而不是只交一个 `type`: 调用方问「命中的是哪一档」时，
+   * 紧接着要问的恒是 `id`（写取景、设为主图）与 `framing`（怎么摆）—— 三者
+   * 出自同一行，分三个 ref 交只会多出三处可能不同步的状态。
+   *
+   * 🔴 典型用法是**按类型分叉呈现**: 走立牌链 `立绘 → 立绘bg → 头像` 时，
+   * 命中前两档才铺成大画像；只有头像的角色必须留在 1:1 小框里 ——
+   * 把一张证件照拉满整栏看起来像 bug，而不像功能。
+   *
+   * ⚠️ 与 `url` 的时序**刻意不同步**: 本 ref 是同步的（纯索引查找），`url` 要等
+   * 一次异步铸造。所以判分叉用它，判「有没有图」仍要看 `url`。
+   */
+  row: Ref<AssetMetaRecord | null>
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -155,15 +170,23 @@ export function useAssetImage(
   })
 
   /**
+   * 命中的那一行。**唯一一次** id → 行的回查 —— `isVideo` 与调用方要的
+   * `type` / `framing` 都从这里派生，不各查各的（各查各的就有各自过期的可能）。
+   */
+  const row = computed<AssetMetaRecord | null>(() => {
+    const id = resolvedId.value
+    if (id === null) return null
+    return source.assets.find((a) => a.id === id) ?? null
+  })
+
+  /**
    * 由**命中的行**判定是不是视频，不去嗅 URL —— object URL 里没有扩展名，
    * blob 的 MIME 也可能在导出/再导入之间被路由表改写；行才是真源。
    */
   const isVideo = computed<boolean>(() => {
-    const id = resolvedId.value
-    if (id === null) return false
-    const row = source.assets.find((a) => a.id === id)
-    if (row === undefined) return false
-    return isVideoExtension(row.ext) || row.mime.startsWith('video/')
+    const hit = row.value
+    if (hit === null) return false
+    return isVideoExtension(hit.ext) || hit.mime.startsWith('video/')
   })
 
   const url = ref<string | null>(null)
@@ -229,5 +252,5 @@ export function useAssetImage(
     releaseHeld()
   })
 
-  return { url, isVideo }
+  return { url, isVideo, row }
 }

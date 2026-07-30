@@ -15,7 +15,13 @@
  * 设计: docs/planning/2026-07-29-asset-management-system-design.md §2 / §6.2
  */
 
-import { ASSET_TYPES, type AssetCategory, type AssetType } from './types';
+import {
+  ASSET_TYPES,
+  DEFAULT_ASSET_FRAMING,
+  type AssetCategory,
+  type AssetFraming,
+  type AssetType,
+} from './types';
 
 // ═══════════════════════════════════════════════════════════
 // 类型 → 大类
@@ -153,4 +159,67 @@ export function allowsVideo(type: AssetType): boolean {
 export function isMediaAllowed(type: AssetType, ext: string): boolean {
   if (!isAssetExtension(ext)) return false;
   return !isVideoExtension(ext) || allowsVideo(type);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 取景（framing）的有效区间 —— 全项目唯一一份
+// ═══════════════════════════════════════════════════════════
+
+/** 焦点百分比下限（`object-position` 语义：0% = 左/上边贴齐） */
+export const ASSET_FRAMING_MIN_PERCENT = 0;
+/** 焦点百分比上限（100% = 右/下边贴齐） */
+export const ASSET_FRAMING_MAX_PERCENT = 100;
+/** 缩放下限 —— 1 就是"恰好 cover"，再小框里会露白 */
+export const ASSET_FRAMING_MIN_SCALE = 1;
+/** 缩放上限 —— 够放大到只取一张脸，又不至于把 512px 的源图放成马赛克 */
+export const ASSET_FRAMING_MAX_SCALE = 3;
+
+/**
+ * 一个数收进 [min, max]；**不是数、或不是有限数，就退回 fallback**。
+ *
+ * `Number.isFinite` 这一关是重点而不是形式: `NaN` 参与任何比较都是 false，
+ * 于是 `Math.min(Math.max(NaN, 0), 100)` 照样是 `NaN` —— 裸夹逼**拦不住 NaN**。
+ * 而一个 NaN 流到 `object-position: NaN% 0%` 会让整条 CSS 声明被丢弃，
+ * 表现成"这张图偶尔没对齐"，是最难查的那类样式 bug。
+ */
+function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(value, min), max);
+}
+
+/**
+ * 把任意来路的取景值收成一个**一定能安全渲染**的 {@link AssetFraming}。
+ *
+ * 为什么是纯函数而不是校验器: 取景没有"非法"这回事 —— 少一个字段、拖出界、
+ * 从旧版本读到越界的 scale，正确反应都是**当作默认/贴边**继续渲染，而不是报错
+ * 或者拒绝显示这张图。所以这里只收敛，不判错、不抛。
+ *
+ * 唯一的读取入口: 渲染面、store 写入前、任何拿到 `row.framing` 的地方，
+ * 一律先过这里。`undefined`（存量行、刚导入的行）得到 {@link DEFAULT_ASSET_FRAMING}
+ * 的副本 —— **副本**，因为默认值是冻结的共享对象，调用方拿去改滑块不该改到它。
+ *
+ * @param input 任意值: `AssetFraming` / 局部对象 / `undefined` / 从 JSON 读回来的垃圾
+ */
+export function clampAssetFraming(input?: unknown): AssetFraming {
+  const src = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
+  return {
+    x: clampNumber(src.x, DEFAULT_ASSET_FRAMING.x, ASSET_FRAMING_MIN_PERCENT, ASSET_FRAMING_MAX_PERCENT),
+    y: clampNumber(src.y, DEFAULT_ASSET_FRAMING.y, ASSET_FRAMING_MIN_PERCENT, ASSET_FRAMING_MAX_PERCENT),
+    scale: clampNumber(
+      src.scale,
+      DEFAULT_ASSET_FRAMING.scale,
+      ASSET_FRAMING_MIN_SCALE,
+      ASSET_FRAMING_MAX_SCALE,
+    ),
+  };
+}
+
+/** 这份取景是不是就是默认值（存库前可据此省掉一个字段，UI 可据此显示"未调整"） */
+export function isDefaultAssetFraming(framing?: unknown): boolean {
+  const f = clampAssetFraming(framing);
+  return (
+    f.x === DEFAULT_ASSET_FRAMING.x &&
+    f.y === DEFAULT_ASSET_FRAMING.y &&
+    f.scale === DEFAULT_ASSET_FRAMING.scale
+  );
 }

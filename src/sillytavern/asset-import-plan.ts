@@ -33,9 +33,9 @@
  */
 
 import { explainAssetFilename } from './asset-filename';
-import { mimeForAssetExtension } from './asset-types';
+import { clampAssetFraming, mimeForAssetExtension } from './asset-types';
 import { AUDIO_MIME_BY_EXTENSION, normalizeAudioName, uniqueAudioName } from './audio-names';
-import type { AssetMetaRecord, AssetType, AudioTrack } from './types';
+import type { AssetFraming, AssetMetaRecord, AssetType, AudioTrack } from './types';
 
 // ═══════════════════════════════════════════════════════════
 // 输入形状
@@ -72,6 +72,19 @@ export interface ImportManifestMeta {
   tags?: string[];
   credit?: string;
   license?: string;
+  /**
+   * 取景（{@link AssetFraming}）。素材专用；音频半边读到也无处可落，静默忽略。
+   *
+   * 为什么它属于清单而 D10 依然成立: D10 护住的是**身份** —— 名字与类型只能来自
+   * 文件名，清单永远不能改它们。取景是**显示元数据**，和 `credit` / `license`
+   * 一样是文件名承载不了、又不改变"这是谁的哪一类图"的东西。不带它，一次
+   * 导出→导入就把用户逐张调过的构图全部抹回默认值。
+   *
+   * 🔴 读侧一律先过 `clampAssetFraming`: 清单是**外来 JSON**，NaN / 越界 /
+   * 字符串 / 数组都可能出现在这里，而一个 NaN 落库之后每次渲染都会让整条
+   * `object-position` 失效。
+   */
+  framing?: AssetFraming;
 }
 
 /**
@@ -80,8 +93,9 @@ export interface ImportManifestMeta {
  * 两个分区都可缺省，缺省即"这半边没有元数据"。畸形值一律降级成"没有元数据"，
  * **绝不抛异常** —— 一个手写坏了的清单不该让整包导入失败。
  *
- * 🔴 它**永远不能改名或改类型**（§5.2）: 本模块只读 `tags`/`credit`/`license`
- * 三个字段，清单里出现 `name`/`type` 会被静默忽略。身份的唯一来源是文件名。
+ * 🔴 它**永远不能改名或改类型**（§5.2）: 本模块只读 `tags`/`credit`/`license`/
+ * `framing` 四个字段，清单里出现 `name`/`type` 会被静默忽略。身份的唯一来源是
+ * 文件名 —— 清单只补**显示元数据**，从不参与身份。
  */
 export interface ImportManifest {
   assets?: Record<string, ImportManifestMeta>;
@@ -105,6 +119,13 @@ export interface PlannedAsset {
   mime: string;
   credit?: string;
   license?: string;
+  /**
+   * 清单带来的取景，**已经夹逼过**（见 {@link ImportManifestMeta.framing}）。
+   *
+   * 只出现在**新落的行**上: 被哈希判成重复的条目在这之前就 `continue` 掉了，
+   * 于是清单永远碰不到一条既有行的取景 —— 那条行可能是用户自己一格一格调出来的。
+   */
+  framing?: AssetFraming;
   /**
    * 分配前的变体 —— 只在**真的被改号**时出现，供摘要说明"它被挪到哪去了"。
    *
@@ -256,6 +277,13 @@ function readManifestMeta(
   }
   if (typeof src.credit === 'string') meta.credit = src.credit;
   if (typeof src.license === 'string') meta.license = src.license;
+  // 取景: **先判是不是个对象，再夹逼**。两步缺一不可 —— `clampAssetFraming`
+  // 对任何垃圾都会交出一个合法值，所以单靠它，`"framing": "居中"` 这种写法会被
+  // 悄悄翻译成默认取景并落库；而"清单里根本没写取景"与"清单写了个默认取景"
+  // 在下游是同一件事，多写一行毫无意义的字段只会让人以为清单说了什么。
+  if (typeof src.framing === 'object' && src.framing !== null && !Array.isArray(src.framing)) {
+    meta.framing = clampAssetFraming(src.framing);
+  }
   return meta;
 }
 
@@ -603,6 +631,7 @@ export function planImport(
     // 清单的 tags 对素材无处可落（AssetMetaRecord 无 tags 列，§4.1），静默忽略
     if (meta.credit !== undefined) planned.credit = meta.credit;
     if (meta.license !== undefined) planned.license = meta.license;
+    if (meta.framing !== undefined) planned.framing = meta.framing;
     if (allocated.renumberedFrom !== undefined) planned.renumberedFrom = allocated.renumberedFrom;
     assets.push(planned);
 

@@ -30,7 +30,7 @@ reason is recorded.
 | D7 | **mp4 allowed where alpha is not needed:** `头像`, `立绘bg`. **Never on `立绘`** | RPT's rule was right; its formulation was type-specific. A cut-out standee composites and needs alpha; a circle-clipped avatar does not. |
 | D8 | **`.webm` stays audio.** Animated alpha uses **animated WebP** | `webm: 'audio/webm'` is already claimed in shipped code. Disambiguation buys compression for a type that does not render in v1. |
 | D9 | **One zip importer, routing by extension.** Surfaced in both 素材 and 音频 sections | Subsumes "one zip with both" and "separate packs" readings. One implementation, two entry points matching user intent. |
-| D10 | **Optional `manifest.json`** in the zip; may only *add* metadata (`tags`, `credit`, `license`), never rename or re-type | Filenames cannot carry attribution. Retrofitting credit onto a shipped library is materially harder than designing it in. |
+| D10 | **Optional `manifest.json`** in the zip; may only *add* metadata (`tags`, `credit`, `license`, and `framing` per D21), never rename or re-type | Filenames cannot carry attribution. Retrofitting credit onto a shipped library is materially harder than designing it in. |
 | D11 | **Never overwrite.** Collisions auto-number **into the variant slot** | Appending to the name orphans the asset from its character under D2; the variant slot is precisely the "another one of these" slot the convention already has. |
 | D12 | **Hash on import; skip byte-identical duplicates.** Assets scoped to `(name, type)`; audio scoped to normalized name | Global-by-hash would refuse the same placeholder image for the 2nd..Nth character. Audio must be covered too or re-importing an export clones every track (§5.3). |
 | D13 | Assets excluded from `FullBackup`; **both omissions stated in 存档数据** | `FullBackup` is JSON — blobs would force base64, which the simulation shows is strictly dominated. The zip export *is* the migration path. |
@@ -41,6 +41,8 @@ reason is recorded.
 | D18 | **Hashing happens in the UI layer, before planning.** Entries reach the planner pre-hashed | `crypto.subtle.digest` is async; the planner is pure and synchronous. The seam has to be explicit or the signature lies. |
 | D19 | **A name must survive a round-trip through a zip entry name.** No `/`, no `\`, no leading `.` — rejected at the rename gate. Whitespace **is** allowed and must not be trimmed | Post-merge review (§15.6). A separator becomes a *path* in the zip and flattens on re-import; a leading dot becomes a dotfile and is skipped as noise. Neither can round-trip, and both broke the D11 "never two bases" invariant through the allocator. Whitespace is representable, so trimming it would be the export side quietly enforcing a normalization D2 rejects. |
 | D20 | **Two type-fallback chains, picked by slot *shape*.** `ASSET_TYPE_FALLBACK_CHAIN` (`立绘 → 立绘bg → 头像`) for standee-shaped slots, and still the default; `ASSET_TYPE_AVATAR_CHAIN` (`头像 → 立绘 → 立绘bg`) for face-shaped ones. A single `AssetType` still means exact match with **no** degradation | §15.9. One chain cannot serve both shapes: a full-body standee cropped into a 2.5rem circle shows a torso, not a face. Both chains end at an acceptable last resort, so neither shape leaves a hole in a half-finished pack — which is the entire value of having a chain in the first place. Exactness stays reachable because *writes* (import, set-primary) address one specific cell; only **reads** degrade. |
+| D21 | **The manifest also carries `framing`** — display metadata, clamped through `clampAssetFraming` on the way in. It still may never carry `name` or `type` | 2026-07-29. D10 protects **identity**: name and type come from the filename and nothing else. Framing is not identity — it is display metadata exactly like `credit`/`license`, and a filename cannot carry it. Without this, one export→import round-trip silently resets every frame the user hand-tuned. A non-object `framing` is **dropped**, not clamped: clamping it would translate `"framing": "centred"` into a default frame that reads as if the manifest had said something. Manifest framing lands only on **newly created** rows — a byte-identical duplicate is skipped before the manifest is read, so an existing row's framing is never overwritten. |
+| D22 | **`importPortraitPair` takes a three-state spec per type**: a rect (crop) / `'whole'` / `'skip'`. Both fields are **required** — omission is a compile error, not a default | 2026-07-29. The old `{ portrait?, avatar? }` read omission as "use the whole image", so **no** call could express "don't write this type" and every re-crop of a 立绘 minted another 头像 variant — the library grew by click count. A `null`-means-skip patch would fix behaviour but `undefined` and `null` are too easy to conflate in JS (`?.`, destructuring defaults, `JSON.parse`); string literals cannot be confused, and a typo is a type error. Two `'skip'` stays the `'no-crops'` programmer error. |
 
 ---
 
@@ -447,7 +449,9 @@ cannot carry:
 
 ```jsonc
 {
-  "assets": { "苏婉_头像.png": { "credit": "…", "license": "…" } },
+  "assets": {
+    "苏婉_头像.png": { "credit": "…", "license": "…", "framing": { "x": 20, "y": 80, "scale": 1.75 } }
+  },
   "audio":  { "战斗主题.mp3": { "tags": ["情境:战斗", "情绪:紧张"], "credit": "Aoo", "license": "…" } }
 }
 ```
@@ -457,6 +461,20 @@ referencing absent files, and files absent from the manifest, are both tolerated
 
 This is what lets a shareable pack carry attribution — which the port eval §12 argues for and which
 `public/audio/manifest.json` already models with per-track `credit` / `license`.
+
+**`framing` (D21).** The line D10 draws is around **identity**, not around the field list: name and type come from
+the filename and nothing else, and no manifest key can touch them. Framing is display metadata in the same class as
+`credit`/`license` — a filename cannot carry it, and without it a single export→import round-trip resets every frame
+the user hand-tuned. Three rules make it safe:
+
+- **Clamped at the door.** `clampAssetFraming` runs in `asset-zip.ts`'s `sanitizeMeta` *and* in the planner's
+  `readManifestMeta`, so no NaN or out-of-range value can reach a row.
+- **Non-objects are dropped, not clamped.** `"framing": "centred"` would otherwise become a default frame, which
+  reads as if the manifest had said something.
+- **Newly created rows only.** A byte-identical duplicate is skipped before the manifest is consulted, so manifest
+  framing can never overwrite a frame the user set themselves.
+
+Export omits framing when it equals the default — a 200-image pack should not carry 200 no-op entries.
 
 ### 5.3 Collisions: never overwrite, number into the variant slot (D11)
 
@@ -828,7 +846,9 @@ injected clock for `createdAt`.
 | **Omitted type token creates a phantom character group** — `苏婉_微笑.png` → name `苏婉_微笑` | Medium-High — silent, plausible-looking, and invisible without a roster or rendering | Advisory `疑似漏写类型 n` heuristic in the import summary (§2); D14 rename as the fix. Cannot be auto-corrected — an underscore in a name is legal (`圣殿_内庭`). |
 | Duplicates accumulate invisibly | Medium | Hash-skip (D12) now covering **both** halves (§4.4); per-group variant counts in the grid (§7.3) |
 | Export omits builtin/file audio and reads as data loss | Low | Export summary states every exclusion explicitly (§5.4) |
-| **`.vue` templates are not type-checked at all** — `npm run typecheck` is plain `tsc`, and `vue-tsc` is not installed. ~40 pre-existing SFC type errors exist repo-wide. | **Medium**, project-wide (not asset-specific) | The asset SFCs were verified with a one-off `vue-tsc` run at 0 errors, and the audio precedent's store/lib tests are the real guard. Adding `vue-tsc` to `typecheck` would surface ~40 existing errors and is a separate decision. |
+| **`.vue` templates are not type-checked at all** — `npm run typecheck` is plain `tsc`, and `vue-tsc` is not installed. **32** pre-existing SFC type errors exist repo-wide (measured 2026-07-29 with a one-off pinned `vue-tsc`; 18 of them in `SettingsPage.vue`, see the row above). | **Medium**, project-wide (not asset-specific) | The asset SFCs were verified with a one-off `vue-tsc` run at 0 errors, and the audio precedent's store/lib tests are the real guard. Adding `vue-tsc` to `typecheck` would surface ~40 existing errors and is a separate decision. |
+| **`compareRows` sorts variants as strings — `_10` sorts before `_2`** (`asset-store.ts`). **NOT fixed.** `AssetCharacterDrawer` carries a *local* comparator with `{ numeric: true }` and a comment that says exactly why. A local patch layered over a shared comparator is the standard way the two drift: every other consumer of `compareRows` (the flat 全部素材 table, `groups`' per-group ordering, anything added later) still gets the wrong order, and the next reader has two orderings to reconcile. The fix is one option object on the shared comparator, then deleting the local one. | Low impact, **Medium** as debt — only visible past 10 variants of one `(name, type)`, which auto-numbering reaches. | Recorded 2026-07-29; not fixed to keep that round mechanical (§15.10) |
+| **`SettingsPage.vue` accounts for 18 of the repo's 32 `vue-tsc` errors** — `PresetItem.settings` / `PresetItem.template` do not exist on the type. **NOT fixed.** This is real type drift, not template noise, and it is *structurally invisible* to `npm run typecheck`, which is plain `tsc` and does not parse `.vue` (the row below). It is the concrete cost of that gap: 18 errors accumulated in one file with nothing failing. | **Medium**, not asset-specific | Recorded 2026-07-29. Fixing it means deciding what `PresetItem` should actually declare, which is a preset-system change, not an asset one |
 | IndexedDB eviction loses the library | Medium | `persist()` (§4.5); zip export as the user-controlled backup (§5.4) |
 | `crypto.subtle` absent over LAN http | Low | Documented fallback to numbering + summary line (§4.4) |
 | Volume growth invalidates D5 | Low now, rises with 立绘 | D6 seam; §4.2 records the threshold |
@@ -876,6 +896,7 @@ Recorded so a future reader doesn't "fix" them back.
 | 2026-07-29 | Adversarial review (Fable agent). Verified all codebase citations, counts, and line references as accurate. Found 9 defects; **all 9 applied**: the D16 round-trip hole (§2.3), audio dedupe gap (§4.4), export licensing scope (D17/§5.4), `ImportPlan` + numbering under-specification (§5.3/§6.1), size-cap layering error (§5.1/§9), missing `docs/design.md` binding (§7), zip filename encoding risk (§5.1/§12), phantom-character-group risk (§2/§12), and three nits (dead `hash` index, no-op teardown deliverable, line reference). |
 | 2026-07-29 | Implemented in 6 phases via delegated agents. All acceptance criteria met; see §15 for the decisions implementation forced and the two design corrections it produced. |
 | 2026-07-29 | **In-game rendering built — D4's "nothing renders" clause reversed.** Five render sites wired; two latent defects surfaced the moment anything actually rendered. New D20 (two fallback chains). §11 lost three rows, §12's High risk downgraded to Medium. See §15.9. |
+| 2026-07-29 | **Large portrait + framing dial + crop editor.** New D21 (manifest carries `framing`) and D22 (three-state crop spec). Two real defects found in passing and **recorded, not fixed** (`compareRows` string-sorts variants; `SettingsPage.vue` holds 18 of 32 `vue-tsc` errors) — see §12. **Main path verified on real hardware**; zip framing round-trip, mp4, skip mode, library re-edit and all four NPC render sites are not. See §15.10. |
 
 ---
 
@@ -1106,3 +1127,106 @@ This is the same shape as §15.6's prototype-pollution finding ("latent in v1, n
 the concrete cost of D4's original no-render scoping, which §13 should be read alongside. **When a subsystem ships
 its contract before its only consumer, the tests pin the contract as written, not as used.**
 
+
+---
+
+### 15.10 The large portrait, the framing dial, and the crop editor
+
+**✅ The main path IS now verified on real hardware** (Chromium, dev server, 2026-07-29). Walked end-to-end in a live
+browser against save 「测试冒险」/亚瑟: clicking the player portrait opened the editor titled 裁剪 · 亚瑟 with **no name
+field** (§7.3 holding in practice, not just in tests); the 立绘 rect defaulted to the whole 1200×1600 source and the
+头像 rect to `533 × 533 自 (334, 0)` — horizontally centred, pinned to the top, and landing **on the head**, which the
+circular preview confirmed; confirming wrote exactly **two rows under one name** (`亚瑟/头像`, `亚瑟/立绘`) from one
+source file named `IMG_9999.png`, proving the filename contributed nothing but its extension; the large portrait then
+appeared top-aligned without a reload; the dial opened with the correct defaults (水平 50%, 垂直 0%, 缩放 1.00×), moved
+the image live (`object-position: 50% 70%` + `matrix(2,0,0,2,0,0)`), persisted `{x:50,y:70,scale:2}` to the **立绘 row
+only** after the debounce, and 复位 restored `{x:50,y:0,scale:1}` and persisted that too.
+
+**🔴 Still unverified on real hardware**, and the list matters more than the pass above: no zip carrying `framing`
+has been round-tripped through a real file; the mp4 path has never been exercised (neither the bypass-the-editor
+branch nor video in a portrait frame); the library's 裁剪 re-edit entry has not been opened; the 不生成 skip mode has
+not been run end-to-end; crop rects have not been adjusted by keyboard; and **no NPC portrait has ever been rendered
+from an asset** — only the player slot was exercised, so the four non-player render sites remain test-only.
+The verified path is pinned by tests running against injected seams (decoder, canvas, `createObjectURL`) — which is exactly the
+`environment: 'node'` posture the audio system shipped under, and §15.9's lesson says the tests pin the contract as
+written, not as used. Suite: **4259 passed / 1 failed** (the `SelectableCard` baseline of §15.4). `npm run
+typecheck`: **0 errors**, with the standing `.vue` caveat of §12.
+
+#### The large portrait, and why a lone 头像 never gets one
+
+`StatusOverview`'s right-hand slot now renders a **top-aligned large portrait** filling the column width, via the
+new `shared/CharacterPortrait.vue`. But it only does so when the type the fallback chain actually landed on is
+`立绘` or `立绘bg` — a character whose only asset is a `头像` keeps the original 1:1 square.
+
+The branch predicate is **the matched row's type, not "is there an image"**. That distinction is the whole point.
+`立绘`/`立绘bg` are authored as full-height or full-frame compositions; filling the column is what they are *for*.
+A `头像` is a face crop, typically a few hundred pixels square. Blown up to column width it is soft, badly framed,
+and reads to the user as a rendering bug rather than a feature — the failure is indistinguishable from "the app
+scaled my image wrong". So D20's read-side degradation still runs (a lone `头像` **does** fill the standee slot, as
+it must — that chain is the reason half-finished packs stay usable), but the *presentation* does not degrade with
+it. Falling back on the source is right; falling back on the layout is not.
+
+`CharacterPortrait` and `AvatarPanel` therefore split on **presentation shape**, not on data source. Both consume
+the same `useAssetImage` result; the caller picks. `useAssetImage` gained a `row` ref for precisely this — the
+consumer needs to know *which cell answered*, and sniffing it off the object URL is impossible (they carry no
+extension, the same reason `isVideo` has always come from the row).
+
+#### Framing is display metadata, which is what keeps D21 consistent with D10
+
+A large portrait immediately raises a question a small circle never did: the character's face is a third of the way
+down a 2:3 standee, and the slot is 3:4. Something has to decide what is visible. That is `AssetFraming` — a focal
+point plus a scale, stored on the asset row, adjusted with a dial that opens off the portrait.
+
+The dial writes through `setAssetFraming` (debounced), and every read passes `clampAssetFraming` first. The clamp
+is not defensive hygiene: a single `NaN` makes the browser discard the whole `object-position` / `transform`
+declaration, so the symptom is "this picture is *sometimes* misaligned" — the worst class of style bug to trace.
+Legacy rows have no `framing` at all, an older build could have written an out-of-range scale, and a drag divided
+by a not-yet-measured container width produces `NaN` on its own. All of those paths converge on one clamp.
+
+**Why this does not reopen D10.** D10's line is around **identity**: `name` and `type` come from the filename and
+from nothing else, so no manifest key may set them. Framing sets neither. It is display metadata in the same class
+as `credit` and `license` — the two fields D10 has always permitted — and like them it *cannot* be expressed in a
+filename, which is the entire reason the manifest exists. D21 adds it to that class and to no other. The three
+guards in §5.2 (clamped at both doors, non-objects dropped rather than clamped, applied to newly created rows only)
+exist so the addition cannot become an identity channel by accident: a manifest can never overwrite a frame the
+user tuned, because a byte-identical duplicate is skipped before the manifest is consulted.
+
+Without D21, one export → import round-trip silently resets every frame the user hand-tuned. That is data loss
+wearing the costume of a no-op.
+
+#### The crop editor — and why it is not a naming form
+
+`shared/AssetCropEditor.vue` turns **one source image into a 立绘 + 头像 pair**, in one action, from one file the
+user already has. Two rects over one stage, two live previews, and per type a **three-state** switch — 裁剪 /
+整图 / 不生成 — mapping one-to-one onto `PortraitCropSpec` (`CropRect` / `'whole'` / `'skip'`, D22, both fields
+required so omission is a compile error rather than a silent default).
+
+`'skip'` is the state that keeps the library from growing by click count. The editor is also the **re-crop** entry
+point, and re-cropping a 立绘 almost never means "and mint me another 头像"; without the third state every re-crop
+left behind an avatar variant nobody asked for. `'whole'` matters for the opposite reason: it stores the **original
+bytes** untouched rather than passing them through a canvas, which would flatten an animated WebP to frame one and
+re-encode a JPEG lossily. Only the true-crop halves are capped — 2048 for 立绘, 768 for 头像, chosen as roughly 3×
+the largest size either is ever rendered at (~384px and ~180px at a 16px root), which covers 3× density displays
+with headroom. Above that the bytes grow with the square of the edge, the quota is shared, and not one pixel of it
+can reach a screen. `fitWithinMaxEdge` never upscales, so a 300px source stays 300px.
+
+**It has no name field, and must never grow one.** §7.3 refused a pre-import naming form because it would be a
+**second naming entry point**, obliged to re-implement the D16 invariant, the D19 gate and the §5.3 collision
+allocator — and duplication of exactly those three is the drift this design has spent its whole length preventing.
+That refusal still stands, and the crop editor is the case that tests it hardest, because it is the one surface
+where the user is staring at an image and could plausibly be asked what to call it.
+
+The name is a **prop**, supplied by whoever opened the editor, and always from context:
+
+- the player portrait slot passes `player.name` — the same string the render path reads, so the two sides cannot
+  disagree about identity no matter what the user types (this is why §12 calls the player slot a closed loop);
+- the library drawer passes the existing asset's name — a group that already exists cannot be renamed by cropping it.
+
+**Cropping decides pixels, never names.** Renaming stays in the library, where the user is actually deliberating
+about the name and where the autocomplete belongs (§15.6). The editor's own header comment says this in red, the
+test file has a case whose stated job is enforcing it, and both should stay.
+
+A consequence worth stating: the editor lives in `shared/`, not `settings/assets/`. It has two consumers — the
+library drawer and the game page's portrait slot — and couples to neither page; leaving it under `settings/` made
+the game page depend on a settings directory, which is a layering inversion. Its geometry moved to
+`lib/crop-rects.ts`, alongside `lib/image-crop.ts` whose source-pixel coordinate system it shares.

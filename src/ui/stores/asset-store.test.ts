@@ -32,6 +32,13 @@ const failFlags = {
   deleteFailIds: new Set<string>(),
   /** 这些 name 的 saveAsset 会抛 */
   saveFailNames: new Set<string>(),
+  /**
+   * 这些 type 的 saveAsset 会抛。
+   *
+   * 单独一把闸是因为「一源两图」两行**共用同一个 name**，按名字注入失败没法只打中
+   * 其中一半 —— 而"立绘落了、头像没落"正是要验的那个部分成功。
+   */
+  saveFailTypes: new Set<string>(),
   /** 每次 saveAsset 落库成功之后回调 —— 用来在"写库中途"按下取消 */
   afterSaveAsset: null as null | (() => void),
 }
@@ -42,6 +49,7 @@ vi.mock('@engine/database', async (importOriginal) => {
     ...actual,
     saveAsset: vi.fn(async (meta: AssetMetaRecord, blob?: Blob) => {
       if (failFlags.saveFailNames.has(meta.name)) throw new Error('写不进去')
+      if (failFlags.saveFailTypes.has(meta.type)) throw new Error('写不进去')
       const id = await actual.saveAsset(meta, blob)
       failFlags.afterSaveAsset?.()
       return id
@@ -70,7 +78,13 @@ import {
   saveAudioTrack,
 } from '@engine/database'
 import { readAssetZip } from '../lib/asset-zip'
-import { isZipFile, useAssetStore } from './asset-store'
+import type { ImageCropSeams } from '../lib/image-crop'
+import {
+  AVATAR_CROP_MAX_EDGE,
+  PORTRAIT_CROP_MAX_EDGE,
+  isZipFile,
+  useAssetStore,
+} from './asset-store'
 import { useUIStore } from './ui-store'
 
 // ═══════════════════════════════════════════════════════════
@@ -163,6 +177,7 @@ beforeEach(async () => {
   setActivePinia(createPinia())
   failFlags.deleteFailIds.clear()
   failFlags.saveFailNames.clear()
+  failFlags.saveFailTypes.clear()
   failFlags.afterSaveAsset = null
   builtinTracks.length = 0
   audioRefreshTracks.mockClear()
@@ -1240,5 +1255,734 @@ describe('object URL', () => {
     expect(await store.assetUrl('u-1')).toBeNull()
     expect(store.peekAssetUrl('u-1')).toBeNull()
     store.revokeAllUrls() // 拆除是无害的
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
+// 9b. assetBlob —— store 是 UI 通往 Dexie 的唯一边界
+// ═══════════════════════════════════════════════════════════
+
+describe('assetBlob', () => {
+  it('取得到原始字节（不是 object URL）', async () => {
+    const bytes = fakeBytes(77, 64)
+    await saveAsset(makeAssetRow({ id: 'b-1' }), blobOf(bytes, 'image/png'))
+    const store = useAssetStore()
+    await store.init()
+
+    const blob = await store.assetBlob('b-1')
+    expect(blob).toBeInstanceOf(Blob)
+    expect(new Uint8Array(await blob!.arrayBuffer())).toEqual(bytes)
+  })
+
+  it('查无此 id → null；元数据在而字节丢了 → 同样 null', async () => {
+    await saveAsset(makeAssetRow({ id: 'b-2' })) // 只有元数据
+    const store = useAssetStore()
+    await store.init()
+
+    expect(await store.assetBlob('根本没有这条')).toBeNull()
+    expect(await store.assetBlob('b-2')).toBeNull()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
+// 10. 取景 framing —— 写入侧夹逼 + 非索引字段真的能落 Dexie v13
+// ═══════════════════════════════════════════════════════════
+
+describe('setAssetFraming', () => {
+  it('落库并回读 —— framing 是**非索引**字段，v13 的 stores() 没声明它也照存不误', async () => {
+    await saveAsset(makeAssetRow({ id: 'f-1' }))
+    const store = useAssetStore()
+    await store.init()
+
+    const res = await store.setAssetFraming('f-1', { x: 40, y: 12, scale: 1.5 })
+    expect(res.outcome).toBe('ok')
+    expect(res.row?.framing).toEqual({ x: 40, y: 12, scale: 1.5 })
+
+    // 绕开 store 的内存副本，直接问数据库 —— 这才是"没升版也存得下"的证据
+    const fromDb = (await getAssets()).find((r) => r.id === 'f-1')
+    expect(fromDb?.framing).toEqual({ x: 40, y: 12, scale: 1.5 })
+    expect(store.findAsset('f-1')?.framing).toEqual({ x: 40, y: 12, scale: 1.5 })
+  })
+
+  it('🔴 越界与 NaN 在**写入侧**就被夹住 —— 渲染层永远收不到 NaN', async () => {
+    await saveAsset(makeAssetRow({ id: 'f-2' }))
+    const store = useAssetStore()
+    await store.init()
+
+    const res = await store.setAssetFraming('f-2', {
+      x: NaN,
+      y: 999,
+      scale: 0.2,
+    })
+    expect(res.outcome).toBe('ok')
+    expect(res.row?.framing).toEqual({ x: 50, y: 100, scale: 1 })
+
+    const fromDb = (await getAssets()).find((r) => r.id === 'f-2')
+    expect(Number.isNaN(fromDb?.framing?.x)).toBe(false)
+  })
+
+  it('查无此行 → not-found，不写任何东西', async () => {
+    const store = useAssetStore()
+    await store.init()
+    expect((await store.setAssetFraming('没有这条', { x: 1, y: 2, scale: 1 })).outcome).toBe(
+      'not-found',
+    )
+    expect(await getAssets()).toHaveLength(0)
+  })
+
+  it('写库失败 → failed，行不变', async () => {
+    await saveAsset(makeAssetRow({ id: 'f-3', name: '写不进的' }))
+    const store = useAssetStore()
+    await store.init()
+    failFlags.saveFailNames.add('写不进的')
+
+    expect((await store.setAssetFraming('f-3', { x: 10, y: 10, scale: 2 })).outcome).toBe('failed')
+    expect((await getAssets())[0].framing).toBeUndefined()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
+// 10b. 取景走 zip 往返 —— 清单补的是**显示元数据**，永不碰身份（D10 延伸）
+// ═══════════════════════════════════════════════════════════
+
+describe('取景的 zip 往返', () => {
+  /** 一个"库里有一张调过构图的素材"的起手式 */
+  async function libraryWithFraming(): Promise<ReturnType<typeof useAssetStore>> {
+    const store = useAssetStore()
+    await store.importZip(makeZip({ '苏婉_头像.png': fakeBytes(1) }))
+    const row = store.assets[0]
+    await store.setAssetFraming(row.id, { x: 20, y: 80, scale: 1.75 })
+    return store
+  }
+
+  it('🔴 导出 → 导入进一个空库，取景原样还在（文件名带不走它，清单能）', async () => {
+    const source = await libraryWithFraming()
+    const exported = await source.exportZip()
+    const bytes = new Uint8Array(await exported.blob!.arrayBuffer())
+
+    // 清一遍库，模拟"把包发给另一个人"
+    await clearAllData()
+    await initializeDatabase()
+    setActivePinia(createPinia())
+    const fresh = useAssetStore()
+    const res = await fresh.importZip(bytes)
+
+    expect(res.assetsAdded).toBe(1)
+    expect((await getAssets())[0].framing).toEqual({ x: 20, y: 80, scale: 1.75 })
+  })
+
+  it('默认取景**不写进清单** —— 没调过构图的素材不该在清单里长出无操作条目', async () => {
+    const store = useAssetStore()
+    await store.importZip(
+      makeZip({ '苏婉_头像.png': fakeBytes(1), '苏婉_立绘.png': fakeBytes(2) }),
+    )
+    // 一条显式设成默认值，一条根本没设过 —— 两条都不该出现在清单里
+    await store.setAssetFraming(store.assets.find((a) => a.type === '头像')!.id, {
+      x: 50,
+      y: 0,
+      scale: 1,
+    })
+
+    const exported = await store.exportZip()
+    const back = await readAssetZip(new Uint8Array(await exported.blob!.arrayBuffer()))
+    expect(back.manifest?.assets['苏婉_头像.png']).toBeUndefined()
+    expect(back.manifest?.assets['苏婉_立绘.png']).toBeUndefined()
+  })
+
+  it('偏离默认才写，且只写这一条（不顺手把 credit/license 变成必填）', async () => {
+    const store = await libraryWithFraming()
+    const exported = await store.exportZip()
+    const back = await readAssetZip(new Uint8Array(await exported.blob!.arrayBuffer()))
+    expect(back.manifest?.assets['苏婉_头像.png']).toEqual({
+      framing: { x: 20, y: 80, scale: 1.75 },
+    })
+  })
+
+  it('带取景的包走一整圈往返仍然幂等', async () => {
+    const store = await libraryWithFraming()
+    const exported = await store.exportZip()
+    const again = await store.importZip(new Uint8Array(await exported.blob!.arrayBuffer()))
+    expect(again.assetsAdded).toBe(0)
+    expect(again.duplicatesSkipped).toBe(1)
+    expect(store.assets[0].framing).toEqual({ x: 20, y: 80, scale: 1.75 })
+  })
+
+  it('🔴 敌意/损坏的清单: NaN、越界、非对象都进不了库', async () => {
+    const store = useAssetStore()
+    const res = await store.importZip(
+      makeZip(
+        {
+          'A_头像.png': fakeBytes(11),
+          'B_头像.png': fakeBytes(12),
+          'C_头像.png': fakeBytes(13),
+          'D_头像.png': fakeBytes(14),
+        },
+        {
+          assets: {
+            'A_头像.png': { framing: { x: NaN, y: 0, scale: 1 } },
+            'B_头像.png': { framing: { x: 999, y: -400, scale: 500 } },
+            'C_头像.png': { framing: '居中一点' },
+            'D_头像.png': { framing: [1, 2, 3] },
+          },
+        },
+      ),
+    )
+    expect(res.assetsAdded).toBe(4)
+
+    const byName = new Map((await getAssets()).map((r) => [r.name, r]))
+    // JSON 里的 NaN 会被 JSON.stringify 写成 null → 非法 → 夹回默认
+    expect(byName.get('A')!.framing).toEqual({ x: 50, y: 0, scale: 1 })
+    // 越界被夹进合法区间，绝不原样落库
+    const b = byName.get('B')!.framing!
+    expect(b.x).toBeLessThanOrEqual(100)
+    expect(b.y).toBeGreaterThanOrEqual(0)
+    expect(Number.isFinite(b.scale)).toBe(true)
+    expect(b.scale).toBeLessThan(500)
+    // 非对象一律当"清单没写取景"丢掉，不留一个假的默认值
+    expect(byName.get('C')!.framing).toBeUndefined()
+    expect(byName.get('D')!.framing).toBeUndefined()
+  })
+
+  it('🔴 清单的取景碰不到被哈希跳过的重复行 —— 那张图的构图是用户自己调的', async () => {
+    const store = useAssetStore()
+    const bytes = fakeBytes(1)
+    await store.importZip(makeZip({ '苏婉_头像.png': bytes }))
+    const id = store.assets[0].id
+    await store.setAssetFraming(id, { x: 10, y: 90, scale: 2 })
+
+    // 同一份字节再导一次，这回清单里带了完全不同的取景
+    const res = await store.importZip(
+      makeZip(
+        { '苏婉_头像.png': bytes },
+        { assets: { '苏婉_头像.png': { framing: { x: 99, y: 1, scale: 1.1 } } } },
+      ),
+    )
+    expect(res.assetsAdded).toBe(0)
+    expect(res.duplicatesSkipped).toBe(1)
+    expect(store.findAsset(id)?.framing).toEqual({ x: 10, y: 90, scale: 2 })
+  })
+
+  it('🔴 清单仍然改不了名字与类型（D10 的红线，加了 framing 之后重验一遍）', async () => {
+    const store = useAssetStore()
+    const res = await store.importZip(
+      makeZip(
+        { '苏婉_头像.png': fakeBytes(1) },
+        {
+          assets: {
+            '苏婉_头像.png': {
+              name: '另一个人',
+              type: '立绘',
+              variant: '偷渡的变体',
+              ext: 'mp4',
+              framing: { x: 30, y: 30, scale: 1.3 },
+            },
+          },
+        },
+      ),
+    )
+    expect(res.assetsAdded).toBe(1)
+
+    const row = (await getAssets())[0]
+    expect(row.name).toBe('苏婉') // 身份只来自文件名
+    expect(row.type).toBe('头像')
+    expect(row.variant).toBeUndefined()
+    expect(row.ext).toBe('png')
+    // 显示元数据照收 —— 这正是身份/显示两分的证据
+    expect(row.framing).toEqual({ x: 30, y: 30, scale: 1.3 })
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
+// 11. 一源两图 importPortraitPair
+// ═══════════════════════════════════════════════════════════
+
+interface DrawRecord {
+  sw: number
+  sh: number
+  dw: number
+  dh: number
+}
+
+/**
+ * 裁剪注入缝: 假解码器 + 假画布（node 环境下没有 createImageBitmap / canvas）。
+ * 产出的字节**随画布尺寸变**，于是两刀切出来的哈希不同 —— 否则去重会把第二刀吃掉，
+ * 测试会误以为"只写了一行"。
+ */
+function cropRig(
+  imageWidth = 400,
+  imageHeight = 800,
+): { draws: DrawRecord[]; seams: ImageCropSeams } {
+  const draws: DrawRecord[] = []
+  return {
+    draws,
+    seams: {
+      decode: async () => ({ width: imageWidth, height: imageHeight }),
+      createCanvas: (width: number, height: number) => ({
+        width,
+        height,
+        getContext: () => ({
+          drawImage: (
+            _s: unknown,
+            _sx: number,
+            _sy: number,
+            sw: number,
+            sh: number,
+            _dx: number,
+            _dy: number,
+            dw: number,
+            dh: number,
+          ) => {
+            draws.push({ sw, sh, dw, dh })
+          },
+        }),
+        convertToBlob: async (o?: { type?: string }) =>
+          blobOf(fakeBytes(width + height * 7, 64), o?.type ?? 'image/png'),
+      }),
+    },
+  }
+}
+
+/** `Uint8Array` → `Blob`（同 store 的 makeBlob：复制一份独立缓冲区，顺带过 TS 的 BlobPart 关） */
+function blobOf(bytes: Uint8Array, type?: string): Blob {
+  return new Blob([bytes.slice().buffer as ArrayBuffer], type !== undefined ? { type } : undefined)
+}
+
+/** 源图：伪 png 字节 */
+function pngSource(seed = 7): Blob {
+  return blobOf(fakeBytes(seed, 32), 'image/png')
+}
+
+describe('importPortraitPair', () => {
+  it('两个框 → 同一个名字下的两行，类型分别是 立绘 与 头像，都是基图', async () => {
+    const store = useAssetStore()
+    await store.init()
+    const rig = cropRig(400, 800)
+
+    const res = await store.importPortraitPair(
+      pngSource(),
+      '苏婉',
+      { portrait: { x: 0, y: 0, w: 400, h: 800 }, avatar: { x: 100, y: 0, w: 200, h: 200 } },
+      rig.seams,
+    )
+
+    expect(res.outcome).toBe('ok')
+    expect(res.portraitId).toBeTruthy()
+    expect(res.avatarId).toBeTruthy()
+    expect(res.portraitId).not.toBe(res.avatarId)
+
+    const rows = await getAssets()
+    expect(rows).toHaveLength(2)
+    expect(new Set(rows.map((r) => r.name))).toEqual(new Set(['苏婉']))
+    expect(new Set(rows.map((r) => r.type))).toEqual(new Set(['立绘', '头像']))
+    // 都是基图（无变体）—— 新库里两个槽位都空着
+    expect(rows.every((r) => r.variant === undefined)).toBe(true)
+    // 两刀的源矩形确实不同，说明是**真裁**而不是把同一份字节存了两遍
+    expect(rig.draws).toEqual([
+      { sw: 400, sh: 800, dw: 400, dh: 800 },
+      { sw: 200, sh: 200, dw: 200, dh: 200 },
+    ])
+    expect(rows.find((r) => r.type === '立绘')!.hash).not.toBe(
+      rows.find((r) => r.type === '头像')!.hash,
+    )
+  })
+
+  it("'whole' = 那个类型用**整张源图的原始字节**，不过画布", async () => {
+    const store = useAssetStore()
+    await store.init()
+    const rig = cropRig(400, 800)
+    const source = pngSource(11)
+
+    const res = await store.importPortraitPair(
+      source,
+      '苏婉',
+      { portrait: { x: 0, y: 0, w: 400, h: 800 }, avatar: 'whole' },
+      rig.seams,
+    )
+
+    expect(res.outcome).toBe('ok')
+    const rows = await getAssets()
+    expect(rows).toHaveLength(2)
+    // 只裁了一刀 —— 整图那半边根本没上画布
+    expect(rig.draws).toHaveLength(1)
+
+    const avatar = rows.find((r) => r.type === '头像')!
+    expect(avatar.mime).toBe('image/png')
+    expect(avatar.ext).toBe('png')
+    expect(avatar.bytes).toBe(source.size)
+  })
+
+  it('两个都 skip → no-crops，一个字节都不写（这次调用什么也做不了）', async () => {
+    const store = useAssetStore()
+    await store.init()
+
+    const res = await store.importPortraitPair(
+      pngSource(),
+      '苏婉',
+      { portrait: 'skip', avatar: 'skip' },
+      cropRig().seams,
+    )
+    expect(res.outcome).toBe('no-crops')
+    expect(res.portraitId).toBeUndefined()
+    expect(res.avatarId).toBeUndefined()
+    expect(await getAssets()).toHaveLength(0)
+  })
+
+  // ── 🔴 三态里最要紧的一档: skip 真的一行都不写 ──
+  // 旧契约（省略 = 整图）下**没有任何写法**能表达"这个类型不要"，于是素材库里
+  // 重裁一次立绘就顺手多铸一张头像变体，库按点击次数膨胀。
+
+  it("🔴 skip 只写另一个类型，被 skip 的那一类**一行都没有**", async () => {
+    const store = useAssetStore()
+    await store.init()
+    const rig = cropRig(400, 800)
+
+    const res = await store.importPortraitPair(
+      pngSource(),
+      '苏婉',
+      { portrait: { x: 0, y: 0, w: 400, h: 800 }, avatar: 'skip' },
+      rig.seams,
+    )
+
+    expect(res.outcome).toBe('ok')
+    expect(res.portraitId).toBeTruthy()
+    expect(res.avatarId).toBeUndefined()
+
+    const rows = await getAssets()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].type).toBe('立绘')
+    expect(rows.some((r) => r.type === '头像')).toBe(false)
+    // 只烘了一刀 —— 被 skip 的那一半连解码都没走
+    expect(rig.draws).toHaveLength(1)
+  })
+
+  it('🔴 重裁立绘 N 次不会累出 N 张头像变体（skip 的整个存在理由）', async () => {
+    const store = useAssetStore()
+    await store.init()
+
+    for (let i = 0; i < 3; i += 1) {
+      const res = await store.importPortraitPair(
+        pngSource(20 + i),
+        '苏婉',
+        { portrait: { x: 0, y: 0, w: 100 + i * 10, h: 200 }, avatar: 'skip' },
+        cropRig().seams,
+      )
+      expect(res.outcome).toBe('ok')
+    }
+
+    const rows = await getAssets()
+    expect(rows.filter((r) => r.type === '头像')).toHaveLength(0)
+    expect(rows.filter((r) => r.type === '立绘')).toHaveLength(3)
+  })
+
+  it("skip 掉立绘同样成立（两个方向对称，不是只给头像开的后门）", async () => {
+    const store = useAssetStore()
+    await store.init()
+
+    const res = await store.importPortraitPair(
+      pngSource(),
+      '苏婉',
+      { portrait: 'skip', avatar: { x: 0, y: 0, w: 200, h: 200 } },
+      cropRig().seams,
+    )
+    expect(res.outcome).toBe('ok')
+    expect(res.portraitId).toBeUndefined()
+    expect(res.avatarId).toBeTruthy()
+    expect((await getAssets()).map((r) => r.type)).toEqual(['头像'])
+  })
+
+  it("两个都 'whole' 是合法的（skip 之后它不再是错误）—— 两行都是整图原始字节", async () => {
+    const store = useAssetStore()
+    await store.init()
+    const rig = cropRig(400, 800)
+    const source = pngSource(31)
+
+    const res = await store.importPortraitPair(
+      source,
+      '苏婉',
+      { portrait: 'whole', avatar: 'whole' },
+      rig.seams,
+    )
+    expect(res.outcome).toBe('ok')
+    const rows = await getAssets()
+    expect(rows).toHaveLength(2)
+    expect(rig.draws).toHaveLength(0) // 一刀都没裁
+    expect(rows.every((r) => r.bytes === source.size)).toBe(true)
+  })
+
+  it('🔴 D16 违规的名字在**烘任何字节之前**就被拒（解码器一次都没被调用）', async () => {
+    const store = useAssetStore()
+    await store.init()
+    const decode = vi.fn(async () => ({ width: 400, height: 800 }))
+
+    const res = await store.importPortraitPair(
+      pngSource(),
+      '苏婉_立绘', // 名字里含类型 token
+      { portrait: { x: 0, y: 0, w: 10, h: 10 }, avatar: { x: 0, y: 0, w: 10, h: 10 } },
+      { ...cropRig().seams, decode },
+    )
+    expect(res.outcome).toBe('naming-invariant')
+    expect(decode).not.toHaveBeenCalled()
+    expect(await getAssets()).toHaveLength(0)
+  })
+
+  it('🔴 D19 违规的名字同样在开裁之前被拒，且与 D16 可区分', async () => {
+    const store = useAssetStore()
+    await store.init()
+    const decode = vi.fn(async () => ({ width: 400, height: 800 }))
+
+    for (const bad of ['圣殿/内庭', '.苏婉', '苏婉\\影']) {
+      const res = await store.importPortraitPair(
+        pngSource(),
+        bad,
+        { portrait: { x: 0, y: 0, w: 10, h: 10 }, avatar: 'skip' },
+        { ...cropRig().seams, decode },
+      )
+      expect(res.outcome).toBe('unrepresentable-name')
+    }
+    expect(decode).not.toHaveBeenCalled()
+    expect(await getAssets()).toHaveLength(0)
+  })
+
+  it('空名字被拒；名字**不 trim**（D2：带空格的名字照原样进库）', async () => {
+    const store = useAssetStore()
+    await store.init()
+
+    expect(
+      (
+        await store.importPortraitPair(
+          pngSource(),
+          '',
+          { portrait: { x: 0, y: 0, w: 9, h: 9 }, avatar: 'skip' },
+          cropRig().seams,
+        )
+      ).outcome,
+    ).toBe('naming-invariant')
+
+    const ok = await store.importPortraitPair(
+      pngSource(),
+      ' 苏婉 ',
+      { portrait: { x: 0, y: 0, w: 9, h: 9 }, avatar: 'skip' },
+      cropRig().seams,
+    )
+    expect(ok.outcome).toBe('ok')
+    expect((await getAssets()).every((r) => r.name === ' 苏婉 ')).toBe(true)
+  })
+
+  it('🔴 撞位永不覆盖: 已有基图时新行进变体槽，随后被提成主图，旧基图降级', async () => {
+    await saveAsset(makeAssetRow({ id: 'old', name: '苏婉', type: '立绘' }))
+    const store = useAssetStore()
+    await store.init()
+
+    const res = await store.importPortraitPair(
+      pngSource(3),
+      '苏婉',
+      { portrait: { x: 0, y: 0, w: 100, h: 200 }, avatar: 'skip' },
+      cropRig().seams,
+    )
+    expect(res.outcome).toBe('ok')
+
+    const portraits = (await getAssets()).filter((r) => r.type === '立绘')
+    expect(portraits).toHaveLength(2) // 旧的没被删、也没被覆盖
+    const base = portraits.filter((r) => r.variant === undefined)
+    expect(base).toHaveLength(1) // 基图位从不被两行同时占据
+    expect(base[0].id).toBe(res.portraitId) // 新图就是显示出来的那张
+    expect(portraits.find((r) => r.id === 'old')!.variant).toBeTruthy() // 旧基图降级进变体槽
+  })
+
+  it('哈希去重: 同 (name,type) 下已有同字节的行 → 不写新行，但照样提成主图', async () => {
+    const store = useAssetStore()
+    await store.init()
+    const crop = { portrait: { x: 0, y: 0, w: 100, h: 200 }, avatar: 'skip' } as const
+
+    const first = await store.importPortraitPair(pngSource(5), '苏婉', crop, cropRig().seams)
+    expect(first.outcome).toBe('ok')
+    const countAfterFirst = (await getAssets()).length
+
+    const second = await store.importPortraitPair(pngSource(5), '苏婉', crop, cropRig().seams)
+    expect(second.outcome).toBe('ok')
+    expect(second.portraitId).toBe(first.portraitId)
+    expect((await getAssets()).length).toBe(countAfterFirst)
+  })
+
+  it('🔴 部分成功如实报: 立绘落了、头像写库失败 → outcome=failed，portraitId 照样带回来且不回滚', async () => {
+    const store = useAssetStore()
+    await store.init()
+    failFlags.saveFailTypes.add('头像')
+
+    const res = await store.importPortraitPair(
+      pngSource(),
+      '苏婉',
+      { portrait: { x: 0, y: 0, w: 100, h: 200 }, avatar: { x: 0, y: 0, w: 50, h: 50 } },
+      cropRig().seams,
+    )
+
+    expect(res.outcome).toBe('failed') // 绝不因为"至少成了一半"就报成功
+    expect(res.portraitId).toBeTruthy() // 落地的那一半照样交出 id
+    expect(res.avatarId).toBeUndefined()
+
+    const rows = await getAssets()
+    expect(rows).toHaveLength(1) // 成功的那半**没有**被静默回滚
+    expect(rows[0].type).toBe('立绘')
+    expect(rows[0].id).toBe(res.portraitId)
+  })
+
+  it('裁剪本身失败也只毁掉那一半 —— 第二刀解码炸了，立绘照样落地', async () => {
+    const store = useAssetStore()
+    await store.init()
+    let calls = 0
+    const seams = {
+      ...cropRig().seams,
+      decode: async () => {
+        calls += 1
+        if (calls > 1) throw new Error('第二刀解码炸了')
+        return { width: 400, height: 800 }
+      },
+    }
+
+    const res = await store.importPortraitPair(
+      pngSource(),
+      '苏婉',
+      { portrait: { x: 0, y: 0, w: 100, h: 200 }, avatar: { x: 0, y: 0, w: 50, h: 50 } },
+      seams,
+    )
+    expect(res.outcome).toBe('failed')
+    expect(res.portraitId).toBeTruthy()
+    expect(res.avatarId).toBeUndefined()
+    expect(await getAssets()).toHaveLength(1)
+  })
+
+  it('零面积的框 → 那一半 failed，绝不静默存进一张空白图', async () => {
+    const store = useAssetStore()
+    await store.init()
+
+    const res = await store.importPortraitPair(
+      pngSource(),
+      '苏婉',
+      { portrait: { x: 0, y: 0, w: 0, h: 0 }, avatar: { x: 0, y: 0, w: 50, h: 50 } },
+      cropRig().seams,
+    )
+    expect(res.outcome).toBe('failed')
+    expect(res.portraitId).toBeUndefined()
+    expect(res.avatarId).toBeTruthy()
+    expect((await getAssets()).map((r) => r.type)).toEqual(['头像'])
+  })
+
+  it('mp4 源 → media-rule（立绘不收视频，画布也取不到"哪一帧"）', async () => {
+    const store = useAssetStore()
+    await store.init()
+
+    const res = await store.importPortraitPair(
+      blobOf(fakeBytes(1, 32), 'video/mp4'),
+      '苏婉',
+      { portrait: { x: 0, y: 0, w: 10, h: 10 }, avatar: 'skip' },
+      cropRig().seams,
+    )
+    expect(res.outcome).toBe('media-rule')
+    expect(await getAssets()).toHaveLength(0)
+  })
+
+  it('类型问不出来的源（空 type 且不是 File）→ failed，不给行编一个假 ext', async () => {
+    const store = useAssetStore()
+    await store.init()
+    const res = await store.importPortraitPair(
+      blobOf(fakeBytes(1, 32)),
+      '苏婉',
+      { portrait: { x: 0, y: 0, w: 10, h: 10 }, avatar: 'skip' },
+      cropRig().seams,
+    )
+    expect(res.outcome).toBe('failed')
+    expect(await getAssets()).toHaveLength(0)
+  })
+
+  it('与整批导入共用同一道互斥闸 → 导入在跑时返回 busy', async () => {
+    const store = useAssetStore()
+    await store.init()
+
+    const running = store.importZip(typicalZip())
+    const res = await store.importPortraitPair(
+      pngSource(),
+      '苏婉',
+      { portrait: { x: 0, y: 0, w: 10, h: 10 }, avatar: 'skip' },
+      cropRig().seams,
+    )
+    expect(res.outcome).toBe('busy')
+    await running
+  })
+
+  it('options.maxEdge 覆盖按类型的默认上限 —— 一张 8000px 的源图不该切出几十 MB', async () => {
+    const store = useAssetStore()
+    await store.init()
+    const rig = cropRig(8000, 8000)
+
+    await store.importPortraitPair(
+      pngSource(),
+      '苏婉',
+      { portrait: 'skip', avatar: { x: 0, y: 0, w: 8000, h: 4000 } },
+      { ...rig.seams, maxEdge: 512 },
+    )
+    expect(rig.draws).toEqual([{ sw: 8000, sh: 4000, dw: 512, dh: 256 }])
+  })
+
+  // ── 尺寸上限（不传 maxEdge 时的默认档）──
+  // 旧版一个 maxEdge 都不传，于是一张 8000px 的源图就原样存成 8000px 的立绘 ——
+  // 而立绘最高只渲染到 ~24rem，那些像素**没有任何显示面拿得出来**。
+
+  it('🔴 默认上限按类型各一档: 立绘 2048 / 头像 768，且都**保持长宽比**', async () => {
+    const store = useAssetStore()
+    await store.init()
+    const rig = cropRig(8000, 8000)
+
+    await store.importPortraitPair(
+      pngSource(),
+      '苏婉',
+      {
+        portrait: { x: 0, y: 0, w: 4000, h: 8000 }, // 高图: 长边是高
+        avatar: { x: 0, y: 0, w: 3000, h: 3000 },
+      },
+      rig.seams,
+    )
+
+    expect(PORTRAIT_CROP_MAX_EDGE).toBe(2048)
+    expect(AVATAR_CROP_MAX_EDGE).toBe(768)
+    expect(rig.draws).toEqual([
+      // 8000 → 2048 长边，短边等比 4000×(2048/8000) = 1024（比例 1:2 原样保住）
+      { sw: 4000, sh: 8000, dw: 1024, dh: 2048 },
+      { sw: 3000, sh: 3000, dw: 768, dh: 768 },
+    ])
+  })
+
+  it('🔴 上限**永不放大**: 比上限还小的源图原样切，不被撑成 2048 / 768', async () => {
+    const store = useAssetStore()
+    await store.init()
+    const rig = cropRig(600, 400)
+
+    await store.importPortraitPair(
+      pngSource(),
+      '苏婉',
+      {
+        portrait: { x: 0, y: 0, w: 600, h: 400 },
+        avatar: { x: 0, y: 0, w: 300, h: 300 },
+      },
+      rig.seams,
+    )
+
+    expect(rig.draws).toEqual([
+      { sw: 600, sh: 400, dw: 600, dh: 400 },
+      { sw: 300, sh: 300, dw: 300, dh: 300 },
+    ])
+  })
+
+  it('整图那一半不受上限约束 —— 它根本不过画布（不重编码是更强的承诺）', async () => {
+    const store = useAssetStore()
+    await store.init()
+    const rig = cropRig(8000, 8000)
+    const source = pngSource(41)
+
+    await store.importPortraitPair(source, '苏婉', { portrait: 'whole', avatar: 'skip' }, rig.seams)
+
+    expect(rig.draws).toHaveLength(0)
+    const rows = await getAssets()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].bytes).toBe(source.size)
   })
 })

@@ -23,6 +23,7 @@ import { useAssetStore, type AssetMutationOutcome } from '../../../stores/asset-
 import { useUIStore } from '../../../stores/ui-store'
 import AppButton from '../../shared/AppButton.vue'
 import AppModal from '../../shared/AppModal.vue'
+import AssetCropEditor from '../../shared/AssetCropEditor.vue'
 import { assetDialogsKey } from './dialogs'
 import { useAssetThumbs } from './thumbs'
 import { fmtBytes } from '../audio/format'
@@ -192,6 +193,47 @@ async function makePrimary(row: AssetMetaRecord): Promise<void> {
   ui.toast(explainOutcome(res.outcome), res.outcome === 'already-base' ? 'info' : 'error')
 }
 
+// ═══ 裁剪（一源两图，再编辑入口）═════════════════════════
+
+/**
+ * 打开裁剪编辑器。名字**取这条素材已有的 `name`** —— 编辑器里没有名字输入框，
+ * 也不该有（§7.3 否决了第二个命名入口）。
+ *
+ * 视频进不来: `image-crop.ts` 明写"调用方传视频进来是调用方的错"，所以把它拦在
+ * **按钮**上而不是等到抛错 —— 一个点了才报错的按钮，等于让用户替我们做类型检查。
+ */
+const cropSource = ref<Blob | null>(null)
+const cropName = ref('')
+const cropOpen = ref(false)
+const cropLoadingId = ref('')
+
+async function startCrop(row: AssetMetaRecord): Promise<void> {
+  if (isVideoExtension(row.ext)) return
+  cropLoadingId.value = row.id
+  try {
+    // 字节也走 store（`assetBlob`）—— store 是本 UI 通往 Dexie 的唯一边界，
+    // 于是 D6 那条 loadBlob 注入缝仍然只有一处，日后换磁盘层不用回头找调用点
+    const blob = await assets.assetBlob(row.id)
+    if (!blob) {
+      // 元数据在、字节没了。这不是"再试一次"能修的，得说清楚
+      ui.toast('这条素材的字节读不出来（元数据还在，图像已丢失），没法裁剪。', 'error')
+      return
+    }
+    cropSource.value = blob
+    cropName.value = row.name
+    cropOpen.value = true
+  } catch {
+    ui.toast('读取素材字节失败，没法裁剪；可以再试一次。', 'error')
+  } finally {
+    cropLoadingId.value = ''
+  }
+}
+
+function closeCrop(): void {
+  cropOpen.value = false
+  cropSource.value = null
+}
+
 async function removeRow(row: AssetMetaRecord): Promise<void> {
   const isBase = !row.variant
   const message = isBase
@@ -210,8 +252,11 @@ async function removeRow(row: AssetMetaRecord): Promise<void> {
 </script>
 
 <template>
+  <!-- 裁剪编辑器开着时抽屉先收起来（而不是叠成两层弹窗）: 两个 AppModal 各自在
+       document 上听 Escape，同时开着按一下 Esc 会把两层一起关掉。收起来不丢状态 ——
+       `group` 由 props.name 现算，编辑器一关抽屉原样回来。 -->
   <AppModal
-    :open="!!group"
+    :open="!!group && !cropOpen"
     :title="group ? `素材 · ${group.name}` : ''"
     size="lg"
     @update:open="emit('close')"
@@ -265,6 +310,20 @@ async function removeRow(row: AssetMetaRecord): Promise<void> {
             :disabled="!row.variant"
             @click="makePrimary(row)"
           >设为主图</AppButton>
+          <!-- 视频不给裁: 画布只取得到某一帧，而"哪一帧"从来没人指定过。
+               禁用而不是藏起来 —— 藏起来只会让人以为这一行坏了。 -->
+          <button
+            class="icon-btn"
+            :data-crop-action="row.id"
+            :disabled="isVideoExtension(row.ext) || cropLoadingId === row.id"
+            :aria-label="isVideoExtension(row.ext) ? '裁剪（视频无法裁剪）' : '裁剪出立绘与头像'"
+            :title="isVideoExtension(row.ext)
+              ? '视频没法裁剪：画布只取得到某一帧。'
+              : '从这张图裁出立绘与头像'"
+            @click="startCrop(row)"
+          >
+            <i class="fa-solid fa-crop-simple" aria-hidden="true" />
+          </button>
           <button class="icon-btn" aria-label="重命名" @click="startEdit(row)">
             <i class="fa-solid fa-pen" aria-hidden="true" />
           </button>
@@ -303,6 +362,15 @@ async function removeRow(row: AssetMetaRecord): Promise<void> {
       </section>
     </template>
   </AppModal>
+
+  <!-- 刻意挂在 AppModal **外面**: 挂在里面就会随抽屉收起一起卸载，编辑器刚开就没了 -->
+  <AssetCropEditor
+    :open="cropOpen"
+    :source="cropSource"
+    :name="cropName"
+    @close="closeCrop"
+    @announce="emit('announce', $event)"
+  />
 </template>
 
 <style scoped>
@@ -477,6 +545,10 @@ async function removeRow(row: AssetMetaRecord): Promise<void> {
 .icon-btn:hover:not(:disabled) {
   background: var(--theme-tab-hover-bg);
   color: var(--theme-text-primary);
+}
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .icon-btn:focus-visible {
   outline: none;

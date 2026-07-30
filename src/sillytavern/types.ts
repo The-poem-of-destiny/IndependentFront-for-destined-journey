@@ -3190,6 +3190,54 @@ export type AssetCategory = 'character';
 export const ASSET_TYPES: readonly AssetType[] = ['头像', '立绘', '立绘bg'];
 
 /**
+ * 一张素材在它的显示框里怎么摆 —— 焦点 + 缩放，**不改字节**。
+ *
+ * 为什么存在: 右栏那种「顶对齐的大画像」拿到的框比图窄得多，`object-fit: cover`
+ * 只会按框中心裁，于是一张全身立绘被裁成腰腹。裁剪编辑器（另做真裁）解决的是
+ * 「我要从这张源图切出头像和立绘」，而 framing 解决的是**同一张图在不同框里怎么摆**
+ * —— 后者必须可逆、可反复调，所以只能是元数据，绝不能烘进字节。
+ *
+ * 三个字段刻意都是**与框尺寸无关的百分比/倍数**，而不是像素偏移: 框会随主题、
+ * 缩放、窗口宽度变，存像素的话换个主题就全偏了。渲染侧的对应写法是
+ * `object-position: x% y%` + `transform: scale()`（或等价的 background-size/position）。
+ *
+ * **单位与端点是契约的一部分**，别改口径:
+ * - `x` / `y` 是 CSS `object-position` 的百分比语义 —— 0% 表示"图的左/上边贴框的左/上边"，
+ *   100% 表示右/下边贴齐。所以 `y: 0` 就是**顶对齐**（脸在上方的画像最常要的那个）。
+ * - `scale` 的 1 表示"恰好 cover"，即图刚好铺满框、没有多余部分可平移。
+ *   小于 1 会在框里露出空白，所以下限就是 1；上限 3 是「放大到能只取一张脸」够用、
+ *   同时不至于让一张 512px 的图糊成马赛克的经验值。
+ *
+ * ⚠️ 落库但**不建索引**（Dexie v13 的 `assetMeta` 索引串不含它）。Dexie 的
+ * `stores()` 只声明索引，不声明列 —— 非索引字段随对象整体存取，**加它不需要升版**。
+ * 反过来说也别指望能按 framing 查询，也不该有人这么查。
+ *
+ * 归一化: 任何来路不明的 framing（存量行没有、手改过的库、旧版写的越界值）
+ * 一律先过 `clampAssetFraming()`（asset-types.ts）再交给渲染 —— 渲染层永远
+ * 不该收到 NaN，一个 NaN 会让整条 CSS 声明失效，表现成"这张图偶尔没对齐"。
+ */
+export interface AssetFraming {
+  /** 水平焦点 0-100(%)，50 = 居中 */
+  x: number;
+  /** 垂直焦点 0-100(%)，0 = 顶对齐 */
+  y: number;
+  /** 缩放倍数，1 = 恰好 cover；有效范围 [1, 3] */
+  scale: number;
+}
+
+/**
+ * 没调过的那张图该怎么摆 —— **顶对齐、水平居中、不放大**。
+ *
+ * 为什么默认 `y: 0` 而不是 50: 这三个类型全是角色美术，脸在上方。居中裁一张
+ * 全身立绘得到的是腰，顶对齐得到的是脸 —— 后者在"用户还没调过"这个最常见的
+ * 状态下明显更对。
+ *
+ * `Object.freeze` 不是洁癖: 这是个**被到处引用的共享默认值**，谁写一句
+ * `row.framing = DEFAULT_ASSET_FRAMING` 再拖一下滑块，全库的默认值就一起变了。
+ */
+export const DEFAULT_ASSET_FRAMING: AssetFraming = Object.freeze({ x: 50, y: 0, scale: 1 });
+
+/**
  * 素材元数据 —— 列表用，不含字节（字节在 assetBlobs 表，理由同音频 §3.2）。
  */
 export interface AssetMetaRecord {
@@ -3209,6 +3257,18 @@ export interface AssetMetaRecord {
   /** 素材作者署名 —— 文件名带不了，只能由 manifest.json 补（D10） */
   credit?: string;
   license?: string;
+  /**
+   * 这张图在显示框里怎么摆（{@link AssetFraming}）。
+   *
+   * **可选，且缺省就是"没调过"** —— 不是"数据缺失"。存量行、导入进来的新行都没有它，
+   * 读方一律 `clampAssetFraming(row.framing)` 拿到 {@link DEFAULT_ASSET_FRAMING}。
+   * 非索引字段，加它**不需要 Dexie 升版**（见 AssetFraming 的说明）。
+   *
+   * ⚠️ **不进 zip 往返**: 文件名承载不了它，manifest 又只准补 tags/credit/license（D10）。
+   * 所以导出再导入之后 framing 会回到默认 —— 这是刻意的取舍，不是漏做:
+   * 它是"这台机器上这个框里怎么摆"的本地偏好，不是素材本身的属性。
+   */
+  framing?: AssetFraming;
   createdAt: number;
   updatedAt: number;
 }

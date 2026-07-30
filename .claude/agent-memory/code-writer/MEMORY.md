@@ -4,3 +4,5 @@
 - [Dexie stores() 是累加的](dexie-stores-cumulative.md) — database.ts v12 注释「漏写表即删表」对 Dexie 4 是错的；删表必须显式 `表名: null`（v9 chats 即先例）
 - [全量测试的既有失败基线](known-flaky-tests.md) — game-store 大纲回读 ~50% 概率失败 + SelectableCard 品质色；全量 2 failed 是基线，不是新改动弄坏的
 - [typecheck 查不到 .vue](typecheck-skips-vue-sfc.md) — 裸 tsc 不解析 SFC，改 Vue 必须另跑 pin 住 TS 的 vue-tsc；输出有 ~40 条既有错误基线
+- [store mock 必须 reactive](reactive-store-mock-vacuous.md) — 裸对象 mock 切断响应式链，「落库后 UI 自己刷新」的断言恒真/恒假；去掉 reactive 必须变红
+- [Blob/Uint8Array typecheck 陷阱](blob-uint8array-typecheck-trap.md) — new Blob([变量 Uint8Array]) 测试绿但 tsc 红；写成 bytes.slice().buffer as ArrayBuffer
