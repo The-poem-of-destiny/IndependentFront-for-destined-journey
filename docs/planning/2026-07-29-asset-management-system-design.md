@@ -24,7 +24,7 @@ reason is recorded.
 | D1 | Keep RPT's `<name>_<type>[_<variant>].<ext>` convention; **type token optional, defaults to `头像`** | The filename *is* the zip format. A convention-less v1 makes every art pack ambiguous the moment 立绘 lands. Optional type keeps the common case zero-ceremony. |
 | D2 | **Strict `===` name matching. No normalization.** Unmatched reported passively, never as a toast | Names originate in a controlled pipeline; a mismatch is a prompt/lorebook defect, not something the asset layer should paper over. |
 | D3 | Asset library is **fully decoupled** from saves and the `characters` table | No global character registry → no cross-save interference by construction. The library is a standalone global subsystem, exactly like audio. |
-| D4 | Types in v1: **`头像`, `立绘`, `立绘bg`**. All three importable; **none rendered** | v1 delivers the *management system only*. Types exist so packs authored now survive to v2. |
+| D4 | Types in v1: **`头像`, `立绘`, `立绘bg`**. All three importable; ~~none rendered~~ — **the no-render half was reversed on 2026-07-29 (§15.9)**; five render sites are now wired | v1 delivered the *management system only*, so that types would exist and packs authored then would survive to v2. The type set is unchanged; only the "nothing renders" clause fell. Recorded rather than rewritten because two defects (§15.9) were structurally invisible *because of* this clause. |
 | D5 | **One storage tier: IndexedDB `Blob` rows.** No folder tier, no built-in `public/assets/` tier | ~40–100 assets ≈ 3.6–50 MB. S3's entire case is a cold-start cost that does not exist at this scale. Built-in art is a licensing liability. |
 | D6 | Blob resolution behind an **injected resolver seam** | The audio folder backend landed later with *engine zero changes* via exactly this seam. Keeps S3 a cheap v2 migration rather than a rewrite. |
 | D7 | **mp4 allowed where alpha is not needed:** `头像`, `立绘bg`. **Never on `立绘`** | RPT's rule was right; its formulation was type-specific. A cut-out standee composites and needs alpha; a circle-clipped avatar does not. |
@@ -39,7 +39,8 @@ reason is recorded.
 | D16 | **Naming invariant: no segment of `name` or `variant` may equal a type token.** Enforced at import *and* rename | Without it, `format()` → `parse()` is not bijective and the mandatory round-trip test (§5.4) is unsatisfiable. See §2.5. |
 | D17 | **Export carries only `source: 'blob'` audio.** `builtin` and `file` tracks excluded | Exporting the 57 built-in tracks (`license: PLACEHOLDER-PENDING-REVIEW`) into a shareable pack is exactly the redistribution mistake §4.2 avoids. `file` bytes aren't ours and may be unauthorized or `missing`. |
 | D18 | **Hashing happens in the UI layer, before planning.** Entries reach the planner pre-hashed | `crypto.subtle.digest` is async; the planner is pure and synchronous. The seam has to be explicit or the signature lies. |
-| D19 | **A name must survive a round-trip through a zip entry name.** No `/`, no `\`, no leading `.` — rejected at the rename gate. Whitespace **is** allowed and must not be trimmed | Post-review (§16). A separator becomes a *path* in the zip and flattens on re-import; a leading dot becomes a dotfile and is skipped as noise. Neither can round-trip, and both broke the D11 "never two bases" invariant through the allocator. Whitespace is representable, so trimming it would be the export side quietly enforcing a normalization D2 rejects. |
+| D19 | **A name must survive a round-trip through a zip entry name.** No `/`, no `\`, no leading `.` — rejected at the rename gate. Whitespace **is** allowed and must not be trimmed | Post-merge review (§15.6). A separator becomes a *path* in the zip and flattens on re-import; a leading dot becomes a dotfile and is skipped as noise. Neither can round-trip, and both broke the D11 "never two bases" invariant through the allocator. Whitespace is representable, so trimming it would be the export side quietly enforcing a normalization D2 rejects. |
+| D20 | **Two type-fallback chains, picked by slot *shape*.** `ASSET_TYPE_FALLBACK_CHAIN` (`立绘 → 立绘bg → 头像`) for standee-shaped slots, and still the default; `ASSET_TYPE_AVATAR_CHAIN` (`头像 → 立绘 → 立绘bg`) for face-shaped ones. A single `AssetType` still means exact match with **no** degradation | §15.9. One chain cannot serve both shapes: a full-body standee cropped into a 2.5rem circle shows a torso, not a face. Both chains end at an acceptable last resort, so neither shape leaves a hole in a half-finished pack — which is the entire value of having a chain in the first place. Exactness stays reachable because *writes* (import, set-primary) address one specific cell; only **reads** degrade. |
 
 ---
 
@@ -82,7 +83,10 @@ matches no character and is inert. It shows up in 全部素材 and can be rename
 
 ⚠️ **The likelier authoring error is subtler than junk names: omitting the type token while intending a variant.**
 `苏婉_微笑.png` parses as name `苏婉_微笑`, type `头像` — a plausible-looking *phantom character group* sitting
-beside the real 苏婉, created silently, with no roster, no coverage meter, and no rendering to reveal it (§3.2).
+beside the real 苏婉, created silently, with no roster and no coverage meter to reveal it (§3.2).
+Rendering (§15.9) gives an *indirect* signal it did not have before: the user imported a picture of 苏婉 and
+苏婉's slot still shows initials. That points at the symptom, not the cause — the phantom group itself is still
+visible only in 全部素材, and nothing says the two are related — so the mitigation below still stands.
 Mitigation is a soft heuristic in the import summary: if a parsed name's trailing segment matches a known variant
 of an existing name (or, more cheaply, if the name contains an underscore at all), surface it as
 `疑似漏写类型 n` — advisory, non-blocking, never auto-corrected. Recorded as a risk in §12.
@@ -206,21 +210,28 @@ anything.
 **What this buys:** zero coupling to saves. No save-lifecycle questions, no "what happens when a save is deleted",
 no cross-save interference. The library is a standalone global subsystem exactly like audio.
 
-### 3.2 ⚠️ Known deferred risk: names are unverified in v1
+### 3.2 ⚠️ Known deferred risk: names are only partly verifiable
 
-Three decisions stack:
+Three decisions stacked in v1:
 
-| Decision | Effect |
-|---|---|
-| D4 — nothing renders | no visual confirmation |
-| D2 — strict, silent | no error on mismatch |
-| D3 — no roster | nothing to validate against |
+| Decision | Effect | State after rendering landed (§15.9) |
+|---|---|---|
+| D4 — nothing renders | no visual confirmation | **Reversed.** Five sites render; an absent face is now the confirmation signal |
+| D2 — strict, silent | no error on mismatch | Unchanged, and deliberately so |
+| D3 — no roster | nothing to validate against | Unchanged |
 
-**v1 therefore has no feedback loop for name correctness at all.** Every name a user types is unverified until
-render surfaces ship. When they do, a wrong name shows initials and the failure is ambiguous across three layers.
+**v1 therefore had no feedback loop for name correctness at all.** Rendering closed that unevenly, and the two
+halves are worth separating:
 
-Mitigations in v1: autocomplete off existing asset names (§7.3), and full rename as the correction path (D14).
-Verification arrives with rendering — see §11.
+- **The player slot is a closed loop by construction.** Its import path (`importForCharacter`) writes exactly
+  `player.name` and its render path reads exactly `player.name`. The filename contributes only an extension.
+  The two sides cannot disagree, so there is no name to get wrong.
+- **NPC slots gained feedback but not diagnosis.** A wrong or missing name shows initials where a face should be
+  — which is the confirmation that was missing. But it does not say *which* of the three layers failed: a typo in
+  the asset name, a typo in the character name, or an asset that was simply never imported all look identical.
+
+Mitigations: autocomplete off existing asset names, which lives in the rename field (§15.6), and full rename as
+the correction path (D14). A real diagnostic still needs something to validate against — see §3.3 and §12.
 
 ### 3.3 📌 Side note — the "lorebook scan" feature we are NOT building
 
@@ -716,9 +727,12 @@ This is the port eval's Blocker 1 (§16), and the manager grid is the one place 
 
 - **LRU keyed by asset id, cap ~64, revoking on evict**, plus revoke-all on section unmount. Audio gets away with
   revoke-per-track-change because its live cap is effectively 1; a grid holds dozens at once.
+  **Amended 2026-07-29 (§15.9):** the cache is now **reference-counted** — `release()` revokes only at zero, and
+  eviction **skips held entries**, tolerating over-capacity rather than revoking a URL that is on screen. Required
+  once one asset can have two simultaneous holders (an NPC in both `ScenePanel` and `CharacterListPanel`).
 - **mp4 previews share the same LRU** — `<video muted>` needs an object URL exactly like `<img>`.
 - **Never persist an object URL.** Store the logical key (`name`/`type`/`variant`) and resolve at render. Forced in
-  v1 by having no render surfaces; stated now so nobody caches a URL into a save when they arrive.
+  v1 by having no render surfaces; now load-bearing, and restated in `useAssetImage`'s header for the same reason.
 - Escalation if the library grows: `IntersectionObserver` so URLs are minted only for visible rows. Not worth it at
   ~40–100 assets; recorded so it isn't rediscovered.
 
@@ -786,19 +800,19 @@ injected clock for `createdAt`.
 
 ## 11. Explicitly out of scope for v1
 
+> **Three rows left this table on 2026-07-29 (§15.9): in-game rendering, unifying the 5 avatar render sites, and
+> the `<video>` branch in `AvatarPanel`. All three are built.** What follows is what is still genuinely not built.
+
 | Item | Why, and what unblocks it |
 |---|---|
-| **Any in-game rendering** | v1 is the management system only. `AvatarPanel`, `ScenePanel`, `CharacterListPanel`, `StatusOverview` untouched. |
-| Unifying the 5 avatar render sites | Three bypass `AvatarPanel` with hand-rolled markup. Must be unified *before* rendering lands, or the feature ships to 2 of 5 places. **Line references refreshed after the `ui-test` rebase** — see the table below, which rewrote `ScenePanel` and `StatusOverview` substantially. |
-| **Poster / thumbnail frames** | Withdrawn. Justified by `ScenePanel` decoding 15 videos at once — which doesn't exist in v1. The manager grid previews a handful; `<video muted>` is fine at that count. Revisit with the render surfaces; also closes the port eval's §11.3 "no thumbnails" gap. |
-| **`<video>` branch in `AvatarPanel`** | Needed for mp4 avatars when rendering lands. `muted` + `playsinline` autoplays with **no user gesture** — assets have none of audio's autoplay tax. |
-| **The VN-style stage** | The real home for `立绘`. Its own design problem (positioning, layering, entry/exit, mood switching, backdrop resolution) and it drags `背景`/`全景` into scope. The `立绘 → 立绘bg → 头像` fallback chain means art authored now still works when it lands. |
+| **Poster / thumbnail frames** | Still withdrawn. The original justification (`ScenePanel` decoding 15 videos at once) now *could* exist — but the five sites that landed each mount at most one media element per character and reuse one refcounted object URL per asset (§7.5), so the decode count is bounded by visible characters, not by library size. Revisit if the VN stage puts many `立绘` on screen at once; also closes the port eval's §11.3 "no thumbnails" gap. |
+| **The VN-style stage** | The real home for `立绘`. Its own design problem (positioning, layering, entry/exit, mood switching, backdrop resolution) and it drags `背景`/`全景` into scope. The `立绘 → 立绘bg → 头像` chain (D20) means art authored now still works when it lands — and that chain is now exercised in production by `ScenePanel`, so it will not rot again the way §15.9 (1) describes. |
 | **`背景` / `全景` / `CG` / `misc` types** | Not defined in v1. `asset-scene.ts` (scene resolution over `location-db`'s `parentId` tree) belongs with them. |
-| **Name verification** | See §3.2. Arrives with rendering. |
+| **Name diagnostics for NPCs** | Rendering closed the *player* half of §3.2 by construction and gave the NPC half visual feedback, but a silently-wrong NPC name still produces nothing beyond an absent face. See the revised §3.2 / §12 row. |
 | **Lorebook scan** | See §3.3 — recorded with its trap, deliberately not built. |
 | **Folder-linked tier (FS Access)** | D5. The D6 seam makes it a cheap v2 addition. |
 | **Built-in `public/assets/` library** | Licensing (§4.2). |
-| **Content-addressed / refcounted blobs** | §4.4. |
+| **Content-addressed / refcounted blobs** | §4.4. Not to be confused with §15.9's object-URL refcount — that counts *live holders of a URL*, not shared ownership of stored bytes. |
 | **Remote-declaration layer, custom protocols, `fs.watch`** | No browser analogue; port eval §18 already says skip. |
 | **WebM/VP9-alpha assets** | D8. One-line routing tiebreak when animated standees become real. |
 | **i18n** | RPT routes every string through `t()`; this project is Chinese-only. |
@@ -809,7 +823,7 @@ injected clock for `createdAt`.
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| **Names unverified until v2** (§3.2) | **High** — a user may build a whole library of names that never match | Autocomplete (§7.3); full rename (D14); verification lands with rendering; lorebook scan recorded (§3.3) |
+| **Wrong NPC names are still undiagnosable** (§3.2) | **Medium** — downgraded from High on 2026-07-29, *not* closed. Rendering (§15.9) changed the picture unevenly: the **player slot is now a closed loop by construction** — the import path writes exactly `player.name` and the render path reads exactly `player.name`, so the two sides cannot disagree about identity no matter what the user types. **NPC slots now give visual feedback**: a wrong or missing name shows initials where a face should be, which is precisely the confirmation that was absent before. But a *silently wrong* NPC name still produces **no diagnostic beyond "no face appeared"** — the user cannot tell a typo from an asset that was never imported, and with D2 strict + D3 no-roster there is nothing to compare against. | Player slot needs no mitigation. For NPCs: autocomplete in the rename field (§15.6); full rename (D14); lorebook scan still recorded but not built (§3.3) |
 | **Zip filename encoding (CP936/GBK without the UTF-8 flag)** | **High** — every identity under this convention *is* a Chinese filename, so mojibake hits the core case, not an edge. Likely the first real-world bug report. | Honour the UTF-8 flag; detect suspect unflagged names and warn; import anyway under the decoded name so D14 can fix it; never transcode on a guess (§5.1). Covered by `asset-zip` tests (§9). |
 | **Omitted type token creates a phantom character group** — `苏婉_微笑.png` → name `苏婉_微笑` | Medium-High — silent, plausible-looking, and invisible without a roster or rendering | Advisory `疑似漏写类型 n` heuristic in the import summary (§2); D14 rename as the fix. Cannot be auto-corrected — an underscore in a name is legal (`圣殿_内庭`). |
 | Duplicates accumulate invisibly | Medium | Hash-skip (D12) now covering **both** halves (§4.4); per-group variant counts in the grid (§7.3) |
@@ -861,6 +875,7 @@ Recorded so a future reader doesn't "fix" them back.
 | 2026-07-29 | Design written from a 16-question design interview against the two RPT source documents. |
 | 2026-07-29 | Adversarial review (Fable agent). Verified all codebase citations, counts, and line references as accurate. Found 9 defects; **all 9 applied**: the D16 round-trip hole (§2.3), audio dedupe gap (§4.4), export licensing scope (D17/§5.4), `ImportPlan` + numbering under-specification (§5.3/§6.1), size-cap layering error (§5.1/§9), missing `docs/design.md` binding (§7), zip filename encoding risk (§5.1/§12), phantom-character-group risk (§2/§12), and three nits (dead `hash` index, no-op teardown deliverable, line reference). |
 | 2026-07-29 | Implemented in 6 phases via delegated agents. All acceptance criteria met; see §15 for the decisions implementation forced and the two design corrections it produced. |
+| 2026-07-29 | **In-game rendering built — D4's "nothing renders" clause reversed.** Five render sites wired; two latent defects surfaced the moment anything actually rendered. New D20 (two fallback chains). §11 lost three rows, §12's High risk downgraded to Medium. See §15.9. |
 
 ---
 
@@ -1031,4 +1046,63 @@ Two consequences for whoever does the v2 render work:
 - **Verify against a quiescent tree.** During implementation the suite was twice run while agents were mid-edit,
   once catching a half-written import and once catching a deliberately-removed guard from a mutation test. Both
   produced alarming-looking failures that did not exist. Test counts climbing between runs is the tell.
+
+### 15.9 Rendering landed — D4 reversed, and the two defects that were invisible until it did
+
+**Unverified on real hardware.** Suite: **4123 passed / 1 failed** (`SelectableCard 稀有度边框色正确`, the known
+pre-existing baseline failure of §15.4, unrelated to assets — the other known-flaky `game-store` test passed this
+run). `npm run typecheck`: **0 errors** (with §12's standing caveat that plain `tsc` does not check `.vue`
+templates). **15 files modified, 8 new.**
+
+#### What was built
+
+| Piece | Notes |
+|---|---|
+| `src/ui/composables/useAssetImage.ts` (new) | The single render seam: `(name, type?) → { url, isVideo }`. Strict `===` (D2) — an empty or unmatched name yields `null` silently, never a toast. Owns the object-URL lifecycle, a generation guard on the async `assetUrl()` (an out-of-order resolution renders *another character's face*, so this is not hygiene), and release on scope dispose. `isVideo` is decided from the **matched row**, never sniffed off the URL — object URLs carry no extension. |
+| `src/ui/components/shared/AssetMedia.vue` (new) | Fills its container when an asset resolves; hands the slot back untouched when none does. A component rather than a few computeds because each list item needs **its own** resolution scope, and letting Vue build and tear those down makes the URL release free. Size, shape and cropping all come from the *outer* container, so one component fills a 2.5rem circle and a 46×58 standee slot alike. Used by the two hand-rolled sites (§15.7's inventory). |
+| `AvatarPanel.vue` | Gained an optional `video` prop → `<video muted playsinline loop autoplay>`. Omitted means `false`, so **no existing caller changes behaviour**. This is the row §11 used to carry. |
+| Five render sites | `StatusOverview` (player, 1:1 square), `CreateStepConfirm` (96px circle), `CharacterListPanel` ×2 (2.5rem and 3.5rem circles), `ScenePanel` (46×58 NPC portrait). **Every one keeps its original initials / first-character fallback.** `ScenePanel` keeps `.npc-portrait` on the **outer** element because that class is the hover-popup `anchorSelector` — the asset goes *inside* it. |
+| `asset-store.init()` hoisted to `App.vue` | It had only ever run in `AssetSection`'s `onMounted`. A session that never opened the settings page saw an empty library, which reads as "the avatar I imported doesn't show up". Same reasoning and same location as the audio library's `init()`. |
+| Import affordance on the **player portrait only** | Click / Enter / Space opens a file picker → new store action `importForCharacter(file, name, type)`. This is the roster-driven import routed **through the naming convention**: the picked filename supplies *only its extension*; `name` and `type` come from the slot, so `IMG_1234.png` cannot grow a phantom character group (§2's risk, structurally absent on this path). It reuses the same mutex, the same three gates, the same hash dedupe and the same collision allocator — never overwrites (D11), conflicts go to a variant slot — and **always ends in `setPrimary`**, including when the bytes were already present by hash. Without that last step a user clicks import on a slot, an identical *variant* already exists, and nothing visibly changes. D16/D19-violating names are refused with their **own** outcome and their own sentence, because on this path the filename is irrelevant and telling the user "import failed" would send them renaming a perfectly good file. |
+| `src/ui/lib/asset-url.ts` | Reference counting — see defect (2). |
+
+#### Defect 1 — the fallback chain was dead code, and D20 is the fix
+
+`resolveAsset` walked `ASSET_TYPE_FALLBACK_CHAIN` **only when `type` was `undefined`**. Any explicit type took an
+exact-match path with no degradation. Every real caller names a type. So the chain that its own file header calls
+「整个移植里最值钱的一行」 — the one whose entire purpose is that a character with only a `头像` still fills a
+standee slot — stopped working the instant it acquired a caller.
+
+**v1 shipped it with no production caller at all, which is exactly why nobody noticed.** The unit tests passed
+because they tested the `undefined` branch, which is the branch nothing uses.
+
+The fix is **D20's two chains**, not one chain reached more often. A face-shaped slot and a standee-shaped slot
+want *opposite* priorities: `头像 → 立绘 → 立绘bg` for the former, `立绘 → 立绘bg → 头像` for the latter. Sharing
+one chain would mean a full-body standee cropped into a 2.5rem circle, which shows a torso. The `type` parameter
+now accepts a single `AssetType` (exact, unchanged — writes depend on it) **or** an array walked in order. The
+index-outer / chain-inner nesting is preserved, so source priority still beats chain priority and the "add a
+built-in tier by unshifting an index" property of §4.3 is intact.
+
+#### Defect 2 — `release()` had no refcount
+
+`asset-url.ts`'s `release()` unconditionally revoked. Harmless while nothing rendered — there was only ever one
+holder. The moment two components can show the same asset (an NPC visible in **both** `ScenePanel` and
+`CharacterListPanel`), the first to unmount revoked the URL out from under the second, which became a broken
+image. Now: `get()` retains on every successful take (including callers that join an in-flight load — a bare
+`return pending` would record one count for two holders, the concurrent form of the same bug), `release()`
+decrements and revokes only at zero, and **capacity eviction skips held entries** rather than revoking a URL that
+is on screen. Over-capacity is the accepted cost; a dead image that only appears "sometimes" is not.
+
+A test in `assets/thumbs.test.ts` had pinned the *old* behaviour — capacity 2 evicting and revoking two entries —
+and was rewritten. **It was asserting the bug.** `thumbs.ts` deliberately never releases, so under the old rule
+every thumbnail scrolled past 64 could revoke a URL another surface was still displaying.
+
+#### The lesson worth keeping
+
+Both defects were **structurally invisible in a no-render v1**, and neither was a coding slip: each was a correct
+implementation of a contract that only one side of had been built. A fallback chain with no caller cannot be
+observed to not fall back; a refcount is indistinguishable from no refcount while there is only ever one holder.
+This is the same shape as §15.6's prototype-pollution finding ("latent in v1, no production caller") — and it is
+the concrete cost of D4's original no-render scoping, which §13 should be read alongside. **When a subsystem ships
+its contract before its only consumer, the tests pin the contract as written, not as used.**
 

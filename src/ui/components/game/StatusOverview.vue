@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useGameStore } from '../../stores/game-store'
+import { useAssetStore } from '../../stores/asset-store'
+import { useUIStore } from '../../stores/ui-store'
 import { useHoverPopup } from '../../composables/useHoverPopup'
+import { useAssetImage } from '../../composables/useAssetImage'
+import { ASSET_MIME_BY_EXTENSION } from '@engine/asset-types'
+import { ASSET_TYPE_AVATAR_CHAIN } from '@engine/asset-resolve'
+import type { AssetMutationOutcome } from '../../stores/asset-store'
 import { normalizeItemType } from '@engine/field-enums'
 import ResourceBar from '../shared/ResourceBar.vue'
 import AvatarPanel from '../shared/AvatarPanel.vue'
@@ -11,6 +17,83 @@ import BuffChip from '../shared/BuffChip.vue'
 const game = useGameStore()
 
 const player = computed(() => game.player)
+
+// ═══ 玩家画像 —— 素材库渲染 + 定点导入 ═══════════════════
+//
+// 名字**严格 `===`**（D2）: `useAssetImage` 不做任何归一化，名字对不上就静默走
+// 首字母兜底 —— 那是 prompt / 世界书要在源头修的缺陷，素材层不宽容匹配。
+//
+// **读**走脸位链 `头像 → 立绘 → 立绘bg`（1:1 方框要的是脸），只导了立绘的角色
+// 也能显示；下方的**导入**入口仍写死单个 `头像` —— 存进去的必须是确定的一格，
+// 只有读取才降级。
+const { url: portraitUrl, isVideo: portraitIsVideo } = useAssetImage(
+  () => player.value?.name,
+  ASSET_TYPE_AVATAR_CHAIN,
+)
+
+const assets = useAssetStore()
+const ui = useUIStore()
+
+/** 文件选择框的 accept —— 路由表是唯一来源（含 `video/mp4`），不在这里手抄一份 */
+const PORTRAIT_ACCEPT = Array.from(new Set(Object.values(ASSET_MIME_BY_EXTENSION))).join(',')
+
+const portraitInput = ref<HTMLInputElement | null>(null)
+
+function pickPortrait(): void {
+  portraitInput.value?.click()
+}
+
+/**
+ * 每种结局一句**属于它自己**的话。
+ *
+ * 两种「名字不合法」（D16 命名不变式 / D19 zip 条目名可承载性）**必须说清是名字的问题**:
+ * 这条路径上文件名只贡献扩展名，name 由角色给定，所以用户改文件名一万次也没用 ——
+ * 报成「导入失败」会让人对着一张好图反复重试。
+ *
+ * 🔴 **`'busy'` 刻意不在这张表里**: 互斥闸 `rejectIfBusy()` 自己已经播报过
+ * 「已有一个导入正在进行，请等它结束。」，这里再说一句就是同一件事弹两条 toast。
+ * 那句共用文案对本路径完全成立（要等的确实是同一个闸），所以删的是**本地这句**
+ * 而不是共用那句。调用方在拿到 `'busy'` 时直接返回，绝不会走到这个 switch。
+ */
+function portraitMessage(outcome: AssetMutationOutcome, name: string): { text: string; type: 'info' | 'error' } {
+  switch (outcome) {
+    case 'ok':
+      return { text: `已把这张图设为「${name}」的画像。`, type: 'info' }
+    case 'naming-invariant':
+      return {
+        text: `没法用「${name}」这个角色名当素材文件名：名字里含有「头像 / 立绘 / 立绘bg」这类类型词（或名字为空），素材会被读成另一个角色。请先改角色名。`,
+        type: 'error',
+      }
+    case 'unrepresentable-name':
+      return {
+        text: `没法用「${name}」这个角色名当素材文件名：名字里带「/」「\\」或以「.」开头，导出成素材包后会变成路径或被当成隐藏文件。请先改角色名。`,
+        type: 'error',
+      }
+    case 'media-rule':
+      return { text: '这个类型不接受 mp4，请换一张图片。', type: 'error' }
+    default:
+      // not-found / failed —— 字节没写进去（格式不认、读不出、存储写入失败）
+      return { text: '这张图没能存进素材库：可能是格式不支持，或浏览器存储写入失败。', type: 'error' }
+  }
+}
+
+async function onPortraitFile(e: Event): Promise<void> {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  // 先清空，否则连续选**同一个文件**不会再触发 change（浏览器认为值没变）
+  input.value = ''
+  if (!file) return
+  const name = player.value?.name
+  if (!name) return
+
+  // 文件名在这条路径上**只**贡献扩展名 —— name 与 type 由这个槽位说了算，
+  // 于是 `IMG_1234.png` 不会在库里长出一个叫 IMG_1234 的幽灵角色组
+  const { outcome } = await assets.importForCharacter(file, name, '头像')
+  // 互斥闸已经自己播报过了 —— 这里再补一句就是两条 toast 说同一件事
+  if (outcome === 'busy') return
+  const { text, type } = portraitMessage(outcome, name)
+  ui.toast(text, type)
+}
 
 // ═══ 折叠状态 ═══
 const daoOpen = ref(true)
@@ -196,7 +279,33 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         </div>
       </div>
       <div class="player-summary">
-        <AvatarPanel :name="player.name" size="xl" shape="square" />
+        <!-- 点画像 = 给这个角色导一张头像素材（唯一带导入入口的渲染位） -->
+        <div
+          class="portrait-slot"
+          role="button"
+          tabindex="0"
+          :title="`点击设置「${player.name}」的画像`"
+          :aria-label="`设置「${player.name}」的画像`"
+          @click="pickPortrait"
+          @keydown.enter="pickPortrait"
+          @keydown.space.prevent="pickPortrait"
+        >
+          <AvatarPanel
+            :name="player.name"
+            size="xl"
+            shape="square"
+            :src="portraitUrl ?? undefined"
+            :video="portraitIsVideo"
+          />
+          <span class="portrait-hint" aria-hidden="true"><i class="fa-solid fa-camera" /></span>
+        </div>
+        <input
+          ref="portraitInput"
+          class="portrait-file"
+          type="file"
+          :accept="PORTRAIT_ACCEPT"
+          @change="onPortraitFile"
+        />
         <div class="summary-name">{{ player.name }}</div>
       </div>
     </div>
@@ -441,6 +550,47 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   padding: 4px 12px 12px;
   gap: 8px;
 }
+/* 画像槽 —— 与原 AvatarPanel 同一个盒子（width:100% + max-width 11.25rem），
+   只是多了个定位上下文与可点击的观感，尺寸/形状/间距一律不动 */
+.portrait-slot {
+  position: relative;
+  width: 100%;
+  max-width: 11.25rem;
+  cursor: pointer;
+  border-radius: var(--theme-radius-md, 6px);
+}
+.portrait-slot:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
+}
+.portrait-hint {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--theme-radius-sm, 4px);
+  background: color-mix(in srgb, var(--theme-primary) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
+  color: var(--theme-primary-text);
+  font-size: 0.6875rem;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+.portrait-slot:hover .portrait-hint,
+.portrait-slot:focus-visible .portrait-hint {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .portrait-hint { transition: none; }
+}
+/* 真正的文件选择框藏起来，点击由画像槽转发 */
+.portrait-file { display: none; }
+
 .summary-name {
   font-family: var(--theme-font-title, 'Noto Serif SC', serif);
   font-size: 1.0625rem;

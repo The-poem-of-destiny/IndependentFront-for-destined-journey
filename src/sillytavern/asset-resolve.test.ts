@@ -3,16 +3,23 @@
  *
  * 覆盖:
  * 1. 精确命中 / 变体命中 / 变体缺席退 base
- * 2. ★ 回退链 立绘 → 立绘bg → 头像 —— 只有头像的角色照样填得进立牌槽位
+ * 2. ★ 立牌链 立绘 → 立绘bg → 头像 —— 只有头像的角色照样填得进立牌槽位
  *    （§7/§11 这条是整个移植最值钱的一行）
- * 3. ★ 严格 `===`（D2）: 大小写差一个字母、尾随一个空格，都**不得**命中
- * 4. 多索引优先级: 数组序在前的索引先赢，哪怕它只有更靠后的类型
- * 5. 边界: 全 miss / 空索引数组 / 只有变体没有 base 时继续走链
+ * 3. ★ 脸位链 头像 → 立绘 → 立绘bg —— 反序，因为全身立牌裁进小圆里露的是躯干；
+ *    但只有立绘时照样退给它，两种槽位都不留洞
+ * 4. ★ 单个类型仍是精确匹配、**绝不降级**（导入 / 设为主图靠它）
+ * 5. ★ 严格 `===`（D2）: 大小写差一个字母、尾随一个空格，都**不得**命中
+ * 6. 多索引优先级: 数组序在前的索引先赢，哪怕它只有更靠后的类型
+ * 7. 边界: 全 miss / 空索引数组 / 只有变体没有 base 时继续走链
  */
 
 import { describe, it, expect } from 'vitest';
 import { buildAssetIndex, type AssetIndex } from './asset-index';
-import { resolveAsset, ASSET_TYPE_FALLBACK_CHAIN } from './asset-resolve';
+import {
+  resolveAsset,
+  ASSET_TYPE_FALLBACK_CHAIN,
+  ASSET_TYPE_AVATAR_CHAIN,
+} from './asset-resolve';
 import type { AssetMetaRecord, AssetType } from './types';
 
 function row(over: Partial<AssetMetaRecord> & { id: string; name: string }): AssetMetaRecord {
@@ -112,6 +119,75 @@ describe('resolveAsset — 类型回退链 立绘 → 立绘bg → 头像', () =
   });
 });
 
+describe('resolveAsset — 脸位链 头像 → 立绘 → 立绘bg', () => {
+  it('两条链装同一批类型，只是首选相反（谁都不会漏掉一档）', () => {
+    expect(ASSET_TYPE_AVATAR_CHAIN).toEqual(['头像', '立绘', '立绘bg']);
+    expect([...ASSET_TYPE_AVATAR_CHAIN].sort()).toEqual([...ASSET_TYPE_FALLBACK_CHAIN].sort());
+    expect(ASSET_TYPE_AVATAR_CHAIN[0]).not.toBe(ASSET_TYPE_FALLBACK_CHAIN[0]);
+  });
+
+  it('★ 头像与立绘都有 → 取 头像（与立牌链在同一份库上得出相反答案）', () => {
+    const index = indexOf(
+      row({ id: 'p', name: '苏婉', type: '立绘' }),
+      row({ id: 'av', name: '苏婉', type: '头像' }),
+    );
+    expect(resolveAsset([index], '苏婉', ASSET_TYPE_AVATAR_CHAIN)).toBe('av');
+    expect(resolveAsset([index], '苏婉', ASSET_TYPE_FALLBACK_CHAIN)).toBe('p');
+  });
+
+  it('★ 只有 立绘 → 脸位照样命中（这条曾经是坏的: 圆框显示首字母）', () => {
+    const index = indexOf(row({ id: 'p', name: '苏婉', type: '立绘' }));
+    expect(resolveAsset([index], '苏婉', ASSET_TYPE_AVATAR_CHAIN)).toBe('p');
+  });
+
+  it('只有 立绘bg → 退到第三档', () => {
+    const index = indexOf(row({ id: 'bg', name: '苏婉', type: '立绘bg' }));
+    expect(resolveAsset([index], '苏婉', ASSET_TYPE_AVATAR_CHAIN)).toBe('bg');
+  });
+
+  it('走链时变体请求跟着走到命中的那一档', () => {
+    const index = indexOf(
+      row({ id: 'p-base', name: '苏婉', type: '立绘' }),
+      row({ id: 'p-smile', name: '苏婉', type: '立绘', variant: '微笑' }),
+    );
+    expect(resolveAsset([index], '苏婉', ASSET_TYPE_AVATAR_CHAIN, '微笑')).toBe('p-smile');
+  });
+
+  it('该名字整个不在库里 → null（链走完也不瞎给）', () => {
+    const index = indexOf(row({ id: 'av', name: '苏婉', type: '头像' }));
+    expect(resolveAsset([index], '羡愚', ASSET_TYPE_AVATAR_CHAIN)).toBeNull();
+  });
+
+  it('自定义链也照走（链就是个有序数组，没有白名单）', () => {
+    const index = indexOf(
+      row({ id: 'av', name: '苏婉', type: '头像' }),
+      row({ id: 'bg', name: '苏婉', type: '立绘bg' }),
+    );
+    expect(resolveAsset([index], '苏婉', ['立绘bg', '头像'])).toBe('bg');
+    // 空链 = 什么都不接受 → null（不偷偷回落到缺省链）
+    expect(resolveAsset([index], '苏婉', [])).toBeNull();
+  });
+});
+
+describe('resolveAsset — 单个类型绝不降级（向后兼容 / 导入与设为主图靠它）', () => {
+  const index = indexOf(
+    row({ id: 'av', name: '苏婉', type: '头像' }),
+    row({ id: 'p', name: '苏婉', type: '立绘' }),
+  );
+
+  it('单个类型 = 精确匹配，其它档一个都不看', () => {
+    expect(resolveAsset([index], '苏婉', '头像')).toBe('av');
+    expect(resolveAsset([index], '苏婉', '立绘')).toBe('p');
+    // 库里有另外两档，但请求的是 立绘bg → 必须空手（若降级，这里会给 av 或 p）
+    expect(resolveAsset([index], '苏婉', '立绘bg')).toBeNull();
+  });
+
+  it('单元素数组与单个类型等价', () => {
+    expect(resolveAsset([index], '苏婉', ['立绘bg'])).toBeNull();
+    expect(resolveAsset([index], '苏婉', ['头像'])).toBe('av');
+  });
+});
+
 describe('resolveAsset — 严格 === (D2，刻意不归一化)', () => {
   const index = indexOf(
     row({ id: 'av', name: '苏婉' }),
@@ -157,6 +233,15 @@ describe('resolveAsset — 多索引优先级', () => {
     const highPriority = indexOf(row({ id: 'hi-av', name: '苏婉', type: '头像' }));
     const lowPriority = indexOf(row({ id: 'lo-portrait', name: '苏婉', type: '立绘' }));
     expect(resolveAsset([highPriority, lowPriority], '苏婉')).toBe('hi-av');
+  });
+
+  it('★ 脸位链同理: 前面索引只有 立绘 也胜过后面索引的 头像（索引序永远是外层）', () => {
+    const highPriority = indexOf(row({ id: 'hi-portrait', name: '苏婉', type: '立绘' }));
+    const lowPriority = indexOf(row({ id: 'lo-av', name: '苏婉', type: '头像' }));
+    // 若把循环嵌套写反（链在外、索引在内），这里会给 lo-av —— 来源优先级就没了
+    expect(resolveAsset([highPriority, lowPriority], '苏婉', ASSET_TYPE_AVATAR_CHAIN)).toBe(
+      'hi-portrait',
+    );
   });
 
   it('前面的索引没有该名字 → 落到后面的索引', () => {

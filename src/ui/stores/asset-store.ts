@@ -58,7 +58,7 @@ import type {
   ImportWarning,
 } from '@engine/asset-import-plan'
 import { formatAssetFilename, violatesNamingInvariant } from '@engine/asset-filename'
-import { isMediaAllowed } from '@engine/asset-types'
+import { isMediaAllowed, mimeForAssetExtension } from '@engine/asset-types'
 import { hashMediaBlob } from '../lib/media-hash'
 import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names'
 import {
@@ -198,6 +198,12 @@ export type AssetMutationOutcome =
   | 'unrepresentable-name'
   /** 已经是基图，无事可做 */
   | 'already-base'
+  /**
+   * 已有一次导入在跑 —— 定点导入（{@link useAssetStore} 的 `importForCharacter`）
+   * 与整批导入共用同一道互斥闸，所以它也会以"忙"收场。
+   * 改名 / 设为主图**永不**返回这个值。
+   */
+  | 'busy'
   | 'failed'
 
 export interface AssetMutationResult {
@@ -1212,6 +1218,132 @@ export const useAssetStore = defineStore('asset', () => {
     }
   }
 
+  // ═══ 定点导入（花名册驱动，§7.3）══════════════════════════
+
+  /**
+   * 「提主图」的结论 → 定点导入的结论。
+   *
+   * `'already-base'` 在改名/设为主图那条路上是"你没改动任何东西"，但在这条路上
+   * 它恰恰是**期望结局**（新写的行本来就落在基图位上）—— 同一个值在两条路上
+   * 读法不同，所以在这里翻译一次，而不是让调用方去猜。
+   */
+  function asSlotOutcome(res: AssetMutationResult): AssetMutationOutcome {
+    return res.outcome === 'already-base' ? 'ok' : res.outcome
+  }
+
+  /**
+   * 把一个**任意文件名**的文件导进指定的 `(name, type)` 槽位。
+   *
+   * 与 {@link importFiles} 的唯一区别是**名字从哪来**:
+   * - `importFiles` 里文件名说了算（`<name>[_<type>][_<variant>].<ext>`，D1）；
+   * - 这里文件名**只提供扩展名**，name 与 type 由调用点（被聚焦的角色槽位）给定。
+   *
+   * 于是 `IMG_1234.png` 不会在库里长出一个叫 `IMG_1234` 的幽灵角色组（§2 明写的
+   * phantom group 风险，在这条路径上根本不存在）—— 这正是这条路径存在的理由。
+   *
+   * 其余规矩一条不减，且全部**复用**既有实现、不另起一套:
+   * 互斥闸（{@link rejectIfBusy} / {@link beginImport}）· 三道闸门
+   * （{@link checkNameGates}: D16 命名不变式 / D19 zip 条目名可承载性 / D7 媒体规则）·
+   * 哈希去重（作用域仍是 `(name, type)`，D12）· 撞位编号（{@link allocateSlot}，
+   * §5.3，**永不覆盖**）。
+   *
+   * **结局一定是"这个槽位显示这张图"**: 无论是新写了一行，还是被哈希认成了库里
+   * 已有的一行，最后都过一遍 {@link setPrimary}。否则用户对着一个槽位点了导入，
+   * 却因为库里早有一张同字节的**变体**而看不到任何变化 —— 那读起来就是没生效。
+   *
+   * 拒收一律**返回具体理由**、不发提示（UI 就地解释，见 §7.4）；只有"忙"与
+   * 配额耗尽两条会播报，前者由 `rejectIfBusy` 发、后者是"再试一次"这句话会说谎的
+   * 唯一情形。
+   */
+  async function importForCharacter(
+    file: File,
+    name: string,
+    type: AssetType,
+  ): Promise<{ outcome: AssetMutationOutcome; id?: string }> {
+    if (rejectIfBusy() !== null) return { outcome: 'busy' }
+
+    // 文件名在这条路径上**只**贡献扩展名 —— 绝不从它反推 name / type
+    const dot = file.name.lastIndexOf('.')
+    const ext = dot > 0 ? file.name.slice(dot + 1).trim().toLowerCase() : ''
+    const mime = mimeForAssetExtension(ext)
+    if (mime === undefined) return { outcome: 'failed' }
+
+    const { end } = beginImport()
+    try {
+      // 三道闸门先过: 名字不合法时连字节都不必读
+      const gate = checkNameGates({ name, type, ext })
+      if (gate !== null) return { outcome: gate }
+
+      // 单文件有诚实的固定分母，直接进写库段（解压段那套"没有分母"不适用）
+      progressDone.value = 0
+      progressTotal.value = 1
+      progressPhase.value = 'write'
+
+      await refreshAssets()
+
+      let bytes: Uint8Array
+      try {
+        bytes = new Uint8Array(await file.arrayBuffer())
+      } catch {
+        return { outcome: 'failed' }
+      }
+      const blob = makeBlob(bytes, mime)
+      if (!blob) return { outcome: 'failed' }
+      // 哈希算不出就跳过去重，**绝不换第二种算法** —— 与两条导入路径同一条降级规则
+      const hash = await hashMediaBlob(blob)
+
+      // 去重仍是 `(name, type)` 作用域（D12）: 同一张占位图给第 2..N 个角色用是合法的
+      if (hash !== undefined) {
+        const twin = rowsInGroup(name, type).find((r) => r.hash === hash)
+        if (twin) {
+          progressDone.value = 1
+          // 不写新行，但**照样提主图** —— 见上方"结局一定是这个槽位显示这张图"
+          return { outcome: asSlotOutcome(await setPrimary(twin.id)), id: twin.id }
+        }
+      }
+
+      const alloc = allocateSlot({ name, type, ext })
+      if (!alloc.ok) return { outcome: alloc.reason ?? 'failed' }
+
+      const now = Date.now()
+      const meta: AssetMetaRecord = {
+        id: newId('asset'),
+        name,
+        type,
+        ext,
+        mime,
+        bytes: bytes.length,
+        createdAt: now,
+        updatedAt: now,
+      }
+      // 基图位被占时先落在变体位上（永不覆盖，D11），下面再由 setPrimary 换过来
+      if (alloc.variant !== undefined) meta.variant = alloc.variant
+      if (hash !== undefined) meta.hash = hash
+
+      try {
+        await saveAsset(meta, blob)
+      } catch (e) {
+        if (isQuotaError(e)) {
+          // 配额耗尽时"可以再试一次"这句话是假的，得当场说清
+          notify('浏览器存储空间已满，这张素材没有导入；先清理一些素材或音频再试。', 'error')
+        }
+        return { outcome: 'failed' }
+      }
+      progressDone.value = 1
+      await refreshAssets()
+
+      // 与两条导入路径同一条: 首次写入成功之后才请求持久化，永不阻塞（§4.5）
+      if (!persistRequested) {
+        persistRequested = true
+        await requestPersistence()
+      }
+
+      return { outcome: asSlotOutcome(await setPrimary(meta.id)), id: meta.id }
+    } finally {
+      end()
+    }
+  }
+
   /** `AssetZipError` → 人话。按 `code` 判别，不去 match 文案 */
   function describeZipError(e: unknown): string {
     if (e instanceof AssetZipError) {
@@ -1589,6 +1721,7 @@ export const useAssetStore = defineStore('asset', () => {
     importZip,
     importFiles,
     importAny,
+    importForCharacter,
     cancelImport,
     exportZip,
     // mutations

@@ -929,6 +929,158 @@ describe('importAny', () => {
 })
 
 // ═══════════════════════════════════════════════════════════
+// 6g. importForCharacter —— 定点导入（花名册驱动，§7.3）
+//
+// 这条路径与其它导入入口的唯一区别是**名字从哪来**: 文件名只贡献扩展名，
+// name / type 由被聚焦的槽位给定。其余（D16 / D19 / D7 / D12 去重 / D11
+// 永不覆盖）必须与整批导入逐位一致 —— 下面每条断言都在盯这一点。
+// ═══════════════════════════════════════════════════════════
+
+describe('importForCharacter', () => {
+  const asFile = (name: string, bytes: Uint8Array): File =>
+    new File([bytes.slice().buffer as ArrayBuffer], name)
+
+  it('强制改名: 源文件名只贡献扩展名，绝不长出 IMG_1234 这个幽灵角色组', async () => {
+    const store = useAssetStore()
+    const res = await store.importForCharacter(asFile('IMG_1234.PNG', fakeBytes(1)), '苏婉', '立绘')
+
+    expect(res.outcome).toBe('ok')
+    expect(res.id).toBeTruthy()
+
+    const rows = await getAssets()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].name).toBe('苏婉')
+    expect(rows[0].type).toBe('立绘')
+    expect(rows[0].variant).toBeUndefined()
+    // 扩展名归一化到路由表的键；MIME 由表说了算，不信 File.type
+    expect(rows[0].ext).toBe('png')
+    expect(rows[0].mime).toBe('image/png')
+    // §2 的 phantom group 风险在这条路径上根本不存在
+    expect(store.groups.map((g) => g.name)).toEqual(['苏婉'])
+  })
+
+  it('媒体规则 (D7): 立绘拒 mp4，头像收 mp4', async () => {
+    const store = useAssetStore()
+
+    const rejected = await store.importForCharacter(asFile('a.mp4', fakeBytes(5)), '苏婉', '立绘')
+    expect(rejected.outcome).toBe('media-rule')
+    expect(rejected.id).toBeUndefined()
+    expect(await getAssets()).toHaveLength(0)
+
+    const accepted = await store.importForCharacter(asFile('a.mp4', fakeBytes(5)), '苏婉', '头像')
+    expect(accepted.outcome).toBe('ok')
+    const rows = await getAssets()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].mime).toBe('video/mp4')
+  })
+
+  it('撞基图位 → 编号进变体位（永不覆盖），然后被提成主图', async () => {
+    const store = useAssetStore()
+    const first = await store.importForCharacter(asFile('a.png', fakeBytes(1)), '苏婉', '头像')
+    const second = await store.importForCharacter(asFile('b.png', fakeBytes(2)), '苏婉', '头像')
+
+    expect(second.outcome).toBe('ok')
+    const rows = await getAssets()
+    expect(rows).toHaveLength(2) // 旧行**没有**被覆盖
+
+    const added = rows.find((r) => r.id === second.id)
+    const previous = rows.find((r) => r.id === first.id)
+    expect(added?.variant).toBeUndefined() // 新的这张就是槽位现在显示的那张
+    // 旧主图拿到的是 `3` 而不是 `2` —— 这正是"新行先落在变体位 `2` 上、
+    // 再由 setPrimary 用 max+1 把旧主图挪走"的证据（§5.3：max+1，不是首个空位）
+    expect(previous?.variant).toBe('3')
+  })
+
+  it('同字节重导: 不长第二行，但那一行**照样**成为主图', async () => {
+    const store = useAssetStore()
+    const a = await store.importForCharacter(asFile('a.png', fakeBytes(1)), '苏婉', '头像')
+    // 把 a 挤成变体（b 成为主图），这样"仍然提主图"才有可观测的后果
+    const b = await store.importForCharacter(asFile('b.png', fakeBytes(2)), '苏婉', '头像')
+    expect(store.findAsset(a.id!)?.variant).toBe('3')
+
+    const again = await store.importForCharacter(asFile('完全不同的名字.png', fakeBytes(1)), '苏婉', '头像')
+    expect(again.outcome).toBe('ok')
+    expect(again.id).toBe(a.id) // 认成了库里已有的那一行
+    expect(await getAssets()).toHaveLength(2) // 没有第三行
+    expect(store.findAsset(a.id!)?.variant).toBeUndefined() // 它现在是主图
+    expect(store.findAsset(b.id!)?.variant).toBeTruthy()
+  })
+
+  it('去重作用域仍是 (name, type): 同一张占位图能给第二个角色用', async () => {
+    const store = useAssetStore()
+    await store.importForCharacter(asFile('a.png', fakeBytes(1)), '苏婉', '头像')
+    const other = await store.importForCharacter(asFile('a.png', fakeBytes(1)), '林清', '头像')
+    expect(other.outcome).toBe('ok')
+    expect(await getAssets()).toHaveLength(2)
+  })
+
+  it('名字过不了 D16 / D19 时**拒收**，绝不静默改名', async () => {
+    const store = useAssetStore()
+
+    // D16: name 的任何下划线段等于类型 token
+    expect(
+      (await store.importForCharacter(asFile('a.png', fakeBytes(1)), '苏婉_头像', '头像')).outcome,
+    ).toBe('naming-invariant')
+    expect(
+      (await store.importForCharacter(asFile('a.png', fakeBytes(1)), '', '头像')).outcome,
+    ).toBe('naming-invariant')
+
+    // D19: 分隔符会在导出包里变成路径、前导点会被当 dotfile 丢掉
+    for (const bad of ['圣殿/内庭', '圣殿\\内庭', '.苏婉']) {
+      expect(
+        (await store.importForCharacter(asFile('a.png', fakeBytes(1)), bad, '头像')).outcome,
+      ).toBe('unrepresentable-name')
+    }
+
+    // 一条都没写进去
+    expect(await getAssets()).toHaveLength(0)
+    // 名字里的空白**不 trim**（D2）—— 那是名字的一部分，不是脏数据
+    const spaced = await store.importForCharacter(asFile('a.png', fakeBytes(1)), ' 苏婉 ', '头像')
+    expect(spaced.outcome).toBe('ok')
+    expect((await getAssets())[0].name).toBe(' 苏婉 ')
+  })
+
+  it('不认识的扩展名 → failed，库无改动', async () => {
+    const store = useAssetStore()
+    expect(
+      (await store.importForCharacter(asFile('稿子.psd', fakeBytes(1)), '苏婉', '头像')).outcome,
+    ).toBe('failed')
+    expect(
+      (await store.importForCharacter(asFile('没有扩展名', fakeBytes(1)), '苏婉', '头像')).outcome,
+    ).toBe('failed')
+    // `.webm` 归音频（D8），素材这边不认
+    expect(
+      (await store.importForCharacter(asFile('a.webm', fakeBytes(1)), '苏婉', '头像')).outcome,
+    ).toBe('failed')
+    expect(await getAssets()).toHaveLength(0)
+  })
+
+  it('与整批导入共用互斥闸: 有导入在跑时拒收，不并发写库', async () => {
+    const store = useAssetStore()
+    const inFlight = store.importZip(typicalZip())
+    const res = await store.importForCharacter(asFile('a.png', fakeBytes(9)), '苏婉', '头像')
+    expect(res.outcome).toBe('busy')
+    expect(res.id).toBeUndefined()
+
+    await inFlight
+    // 闸门放开后照常可用
+    expect(
+      (await store.importForCharacter(asFile('a.png', fakeBytes(9)), '林清', '头像')).outcome,
+    ).toBe('ok')
+  })
+
+  it('写库失败 → failed，且不留半行', async () => {
+    const store = useAssetStore()
+    failFlags.saveFailNames.add('苏婉')
+    const res = await store.importForCharacter(asFile('a.png', fakeBytes(1)), '苏婉', '头像')
+    expect(res.outcome).toBe('failed')
+    expect(await getAssets()).toHaveLength(0)
+    // 互斥闸已放开（finally 里收的）
+    expect(store.importing).toBe(false)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
 // 6d. 进度口径: 百分比绝不倒退
 // ═══════════════════════════════════════════════════════════
 

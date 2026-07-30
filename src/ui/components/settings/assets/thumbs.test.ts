@@ -201,8 +201,12 @@ describe('useAssetThumbs — 可见集合变化', () => {
     expect(h1.cache.peek('a')).toBe(urlA)
   })
 
-  it('超出容量时逐出即撤销，每个被逐出的 URL 恰好撤销一次', async () => {
-    // 生命周期的上界在这里: 掉出可见集合不撤销，但库大了也不会无限涨。
+  it('本使用面持有的条目不被容量逐出 —— 宁可超容，收尾归 revokeAll', async () => {
+    // 🔴 引用计数落地前，这条用例断言的是**反过来**的行为（容量 2 会把 a 与 b
+    // 挤出去撤销）。那才是隐患: 本模块刻意从不 release，所以被挤掉的 URL 完全
+    // 可能还挂在另一个使用面上 —— 滚过 64 张缩略图就会撤掉正在显示的图。
+    // 现在 LRU 逐出绝不碰被持有的条目，代价是缓存会涨到本使用面见过的条目数，
+    // 上界由分区卸载时的 revokeAllUrls() 兜。
     const h1 = makeHarness({ capacity: 2 })
     const visible = ref([row('a')])
     const wrapper = mountThumbs(visible, h1.source)
@@ -212,11 +216,15 @@ describe('useAssetThumbs — 可见集合变化', () => {
     visible.value = [row('b'), row('c'), row('d')]
     await flush()
 
-    // 容量 2：a 与 b 先后被挤出去，各撤销一次，且不重复
-    expect(h1.revoked).toContain(urlA)
+    expect(h1.revoked).toHaveLength(0)
+    expect(h1.cache.size).toBe(4) // 超容，但一条都没丢失追踪
+    expect(h1.cache.peek('a')).toBe(urlA) // 掉出可见集合 ≠ 被撤销
+
+    wrapper.unmount()
+    h1.cache.revokeAll() // 生命周期的上界在这里
+    expect(h1.revoked).toHaveLength(h1.created.length)
     expect(new Set(h1.revoked).size).toBe(h1.revoked.length)
-    expect(h1.cache.size).toBe(2)
-    expect(h1.revoked).toHaveLength(h1.created.length - h1.cache.size)
+    expect(h1.cache.size).toBe(0)
   })
 
   it('可见集合变得比装载快时，过期的那一轮不会把已剪掉的 id 写回来', async () => {

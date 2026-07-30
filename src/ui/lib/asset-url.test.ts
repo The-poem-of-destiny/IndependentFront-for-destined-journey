@@ -143,49 +143,44 @@ describe('get — 缓存命中', () => {
 // 2 & 3. LRU 逐出 + 新鲜度刷新
 // ═══════════════════════════════════════════════════════════
 
-describe('LRU 逐出', () => {
-  it('超出容量时逐出最久未用者，并对**那一个** URL 恰好撤销一次', async () => {
+describe('容量与逐出', () => {
+  /**
+   * ⚠️ 引用计数落地后，「零引用条目」在公开 API 下不会存续（`get` 落地即 +1，
+   * release 归零即撤销），所以**容量逐出实际上已经退化成一条安全网**。这一组
+   * 于是主要钉两件事: 逐出绝不碰被持有的条目；以及归零之后容量确实回落。
+   * 逐出顺序（LRU 新鲜度）本身现在从外部观察不到 —— 没有可构造的零引用条目
+   * 让它去挑。刻意不为此开测试后门。
+   */
+  it('全员被持有时宁可超容，也绝不撤销正在用的 URL', async () => {
     const h = makeHarness({ capacity: 2 })
     const cache = createAssetUrlCache(h.options)
 
     const ua = await cache.get('a')
     await cache.get('b')
+    await cache.get('c') // 换作无计数的旧行为，这一下会挤掉 a
+
     expect(h.revoked).toHaveLength(0)
-
-    await cache.get('c') // 挤掉 a
-
-    expect(h.revoked).toEqual([ua])
-    expect(cache.size).toBe(2)
-    expect(cache.peek('a')).toBeNull()
+    expect(cache.size).toBe(3) // 超容 > 打死别人正在显示的图
+    expect(cache.peek('a')).toBe(ua) // 且没有「丢失追踪」：a 还在表里
     expect(cache.peek('b')).not.toBeNull()
     expect(cache.peek('c')).not.toBeNull()
   })
 
-  it('对已有条目 get 会刷新新鲜度 —— 它不再是下一个被逐出的', async () => {
+  it('持有者还回引用后容量随之回落，且每条恰好撤销一次', async () => {
     const h = makeHarness({ capacity: 2 })
-    const cache = createAssetUrlCache(h.options)
-
-    await cache.get('a')
-    const ub = await cache.get('b')
-    await cache.get('a') // a 回到队尾，b 变成最久未用
-
-    await cache.get('c')
-
-    expect(h.revoked).toEqual([ub]) // 被逐出的是 b 不是 a
-    expect(cache.peek('a')).not.toBeNull()
-    expect(cache.peek('b')).toBeNull()
-  })
-
-  it('容量为 1 时每次换 id 都逐出上一条', async () => {
-    const h = makeHarness({ capacity: 1 })
     const cache = createAssetUrlCache(h.options)
 
     const ua = await cache.get('a')
     const ub = await cache.get('b')
     await cache.get('c')
+    expect(cache.size).toBe(3)
+
+    cache.release('a')
+    cache.release('b')
 
     expect(h.revoked).toEqual([ua, ub])
     expect(cache.size).toBe(1)
+    expect(cache.peek('a')).toBeNull()
   })
 
   it('容量非法值（0 / 负数）按 1 处理，不会退化成「立刻逐出自己」', async () => {
@@ -198,11 +193,29 @@ describe('LRU 逐出', () => {
     expect(h.revoked).toHaveLength(0)
   })
 
-  it('逐出后重新 get 会重新加载并铸造新 URL', async () => {
+  it('容量 1 时新铸的条目不会把自己当成逐出对象', async () => {
+    // 回归钉子: 若 load() 在 retain 之前就 evict，新条目此刻是全场唯一的零引用
+    // 条目，扫描会当场把它自己挑走 —— 调用方拿到的是一条刚被撤销的死链。
+    const h = makeHarness({ capacity: 1 })
+    const cache = createAssetUrlCache(h.options)
+
+    const ua = await cache.get('a')
+    expect(ua).not.toBeNull()
+    expect(h.revoked).toHaveLength(0)
+    expect(cache.peek('a')).toBe(ua)
+
+    const ub = await cache.get('b') // a 仍被持有 → 不逐出，超容
+    expect(h.revoked).toHaveLength(0)
+    expect(cache.peek('b')).toBe(ub)
+    expect(cache.size).toBe(2)
+  })
+
+  it('撤销后重新 get 会重新加载并铸造新 URL', async () => {
     const h = makeHarness({ capacity: 1 })
     const cache = createAssetUrlCache(h.options)
 
     const first = await cache.get('a')
+    cache.release('a')
     await cache.get('b')
     const again = await cache.get('a')
 
@@ -422,23 +435,198 @@ describe('release', () => {
 })
 
 // ═══════════════════════════════════════════════════════════
+// 9. 引用计数
+//
+// 本组钉的是这条缓存存在的理由: 同一张素材会被**多个组件同时挂着**（一个 NPC
+// 可以同时出现在 ScenePanel 与 CharacterListPanel）。没有计数时，第一个卸载的
+// 组件就把 URL 撤了，其余还在显示它的组件当场死图 —— 而死图在界面上像是「偶尔
+// 没加载出来」，几乎不会有人报成 bug。
+// ═══════════════════════════════════════════════════════════
+
+describe('引用计数', () => {
+  it('两个持有者：release 一次 URL 依然活着，第二次才撤销', async () => {
+    const h = makeHarness()
+    const cache = createAssetUrlCache(h.options)
+
+    const first = await cache.get('a') // ScenePanel 挂上
+    const second = await cache.get('a') // CharacterListPanel 也挂上
+    expect(second).toBe(first)
+    expect(cache.refCount('a')).toBe(2)
+    expect(h.created).toHaveLength(1)
+
+    cache.release('a') // ScenePanel 卸载
+    expect(h.revoked).toHaveLength(0) // 另一个组件还在显示它
+    expect(cache.peek('a')).toBe(first)
+    expect(cache.refCount('a')).toBe(1)
+
+    cache.release('a') // 最后一个持有者也走了
+    expect(h.revoked).toEqual([first])
+    expect(cache.peek('a')).toBeNull()
+    expect(cache.refCount('a')).toBe(0)
+    expect(cache.size).toBe(0)
+  })
+
+  it('并发在飞的两次 get：搭车者也各得一份计数（是 2 不是 1）', async () => {
+    // 最微妙的一条: 第二个调用方搭的是同一个在飞 Promise。若直接 `return pending`
+    // 而不补计数，两个组件只会记 1 份，先卸载的那个一 release 就归零撤销。
+    const h = makeDeferredHarness()
+    const cache = createAssetUrlCache(h.options)
+
+    const p1 = cache.get('a')
+    const p2 = cache.get('a')
+    h.resolveOne('a')
+    const [u1, u2] = await Promise.all([p1, p2])
+
+    expect(u1).toBe(u2)
+    expect(h.created).toHaveLength(1)
+    expect(cache.refCount('a')).toBe(2)
+
+    cache.release('a')
+    expect(h.revoked).toHaveLength(0) // 搭车的那个还挂着
+    expect(cache.peek('a')).toBe(u1)
+
+    cache.release('a')
+    expect(h.revoked).toEqual([u1])
+  })
+
+  it('三方并发（其中一个在解决之后才来）计数是 3', async () => {
+    const h = makeDeferredHarness()
+    const cache = createAssetUrlCache(h.options)
+
+    const p1 = cache.get('a')
+    const p2 = cache.get('a')
+    h.resolveOne('a')
+    await Promise.all([p1, p2])
+    await cache.get('a') // 这次是缓存命中路径
+
+    expect(cache.refCount('a')).toBe(3)
+    cache.release('a')
+    cache.release('a')
+    expect(h.revoked).toHaveLength(0)
+    cache.release('a')
+    expect(h.revoked).toHaveLength(1)
+  })
+
+  it('拿到 null（字节缺失）不欠引用', async () => {
+    const h = makeHarness({ missing: new Set(['gone']) })
+    const cache = createAssetUrlCache(h.options)
+
+    expect(await cache.get('gone')).toBeNull()
+    expect(cache.refCount('gone')).toBe(0)
+  })
+
+  it('peek 不增加计数 —— 窥视者不拥有那条 URL', async () => {
+    // thumbs.ts 的快路径靠这条: 它 peek 到的 URL 归别人所有，它自己不欠 release。
+    const h = makeHarness()
+    const cache = createAssetUrlCache(h.options)
+    await cache.get('a')
+
+    expect(cache.peek('a')).not.toBeNull()
+    expect(cache.refCount('a')).toBe(1)
+
+    cache.release('a')
+    expect(h.revoked).toHaveLength(1)
+  })
+
+  it('未知 id / 已归零的 id 上 release 是空操作，计数不会变负', async () => {
+    const h = makeHarness()
+    const cache = createAssetUrlCache(h.options)
+
+    cache.release('从来没有过的 id')
+    expect(cache.refCount('从来没有过的 id')).toBe(0)
+    expect(h.revoked).toHaveLength(0)
+
+    await cache.get('a')
+    cache.release('a')
+    cache.release('a')
+    cache.release('a')
+    expect(cache.refCount('a')).toBe(0) // 不是 -2
+    expect(h.revoked).toHaveLength(1) // 也没有二次撤销
+
+    // 计数没被压到负数 —— 重新 get 之后一次 release 就该撤销
+    const again = await cache.get('a')
+    expect(cache.refCount('a')).toBe(1)
+    cache.release('a')
+    expect(h.revoked).toEqual([...h.created.slice(0, 1), again])
+  })
+
+  it('revokeAll 无视计数：仍被持有的也全部撤销，且计数一并清零', async () => {
+    const h = makeHarness()
+    const cache = createAssetUrlCache(h.options)
+
+    const ua = await cache.get('a')
+    await cache.get('a') // 计数 2
+    const ub = await cache.get('b')
+
+    cache.revokeAll()
+
+    expect(new Set(h.revoked)).toEqual(new Set([ua, ub]))
+    expect(h.revoked).toHaveLength(2) // 各一次，不因计数 2 而撤两次
+    expect(cache.size).toBe(0)
+    expect(cache.refCount('a')).toBe(0)
+
+    // 拆除后迟到的 release 不该再撤销任何东西
+    cache.release('a')
+    cache.release('a')
+    expect(h.revoked).toHaveLength(2)
+  })
+
+  it('逐出扫描跳过被持有的条目，只挑得动没人要的', async () => {
+    // 「零引用条目」在公开 API 下不会存续，所以这条从可观察面反证:
+    // 容量 1、两条都被持有 → 一条都逐不掉；还回一条 → 立刻撤销那一条。
+    const h = makeHarness({ capacity: 1 })
+    const cache = createAssetUrlCache(h.options)
+
+    const ua = await cache.get('a')
+    const ub = await cache.get('b')
+    expect(h.revoked).toHaveLength(0)
+    expect(cache.size).toBe(2)
+
+    cache.release('a')
+    expect(h.revoked).toEqual([ua])
+    expect(cache.peek('b')).toBe(ub) // 还在用的那条毫发无损
+    expect(cache.size).toBe(1)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
 // 会计恒等式：网格用量下每个 URL 恰好撤销一次
 // ═══════════════════════════════════════════════════════════
 
 describe('URL 会计', () => {
-  it('默认容量下滚过 200 条素材：撤销数 = 铸造数 - 存活数，且无重复撤销', async () => {
+  it('用完即还（组件挂载/卸载）滚过 200 条：每条恰好撤销一次，收尾一条不剩', async () => {
+    const h = makeHarness()
+    const cache = createAssetUrlCache(h.options)
+
+    for (let i = 0; i < 200; i++) {
+      await cache.get(`asset-${i}`)
+      cache.release(`asset-${i}`)
+    }
+
+    expect(h.created).toHaveLength(200)
+    expect(h.revoked).toHaveLength(200)
+    expect(new Set(h.revoked).size).toBe(h.revoked.length) // 没有二次撤销
+    expect(new Set(h.revoked)).toEqual(new Set(h.created))
+    expect(cache.size).toBe(0)
+  })
+
+  it('只取不还（thumbs.ts 那种用法）：一条都不撤销、超容留着，revokeAll 收尾全撤', async () => {
+    // 这是引用计数带来的**刻意取舍**，写下来免得日后当成泄漏来"修":
+    // 不还引用的使用面会让缓存涨到它见过的条目数，容量 64 拦不住它。
+    // 换来的是它显示中的缩略图永远不会被别人逐掉。上界归 revokeAll()。
     const h = makeHarness()
     const cache = createAssetUrlCache(h.options)
 
     for (let i = 0; i < 200; i++) await cache.get(`asset-${i}`)
 
-    expect(cache.size).toBe(ASSET_URL_DEFAULT_CAPACITY)
+    expect(cache.size).toBe(200)
+    expect(cache.size).toBeGreaterThan(ASSET_URL_DEFAULT_CAPACITY)
     expect(h.created).toHaveLength(200)
-    expect(h.revoked).toHaveLength(200 - ASSET_URL_DEFAULT_CAPACITY)
-    expect(new Set(h.revoked).size).toBe(h.revoked.length)
+    expect(h.revoked).toHaveLength(0)
 
     cache.revokeAll()
     expect(h.revoked).toHaveLength(200)
     expect(new Set(h.revoked)).toEqual(new Set(h.created))
+    expect(cache.size).toBe(0)
   })
 })

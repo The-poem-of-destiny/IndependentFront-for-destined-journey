@@ -44,8 +44,9 @@ docs/
 │   ├── debug-loop-handbook.md          # 🆕 游玩→导出→分析→修复 调试循环操作手册（每次发现 bug 必读）
 │   ├── audio_system.md                 # 🆕 音频系统 v1.0 说明书（分层/双通道/三音源/存储/API/按名寻址/限制）← 改音频必读
 ├── planning/2026-07-29-asset-management-system-design.md
-│                                       # 🆕 素材管理系统设计 v1.0（D1-D18 决策表 + 命名约定/命名不变式/
-│                                       #    zip 契约/存储单层+注入缝/plan-execute 拆分）← 改素材必读（未实现）
+│                                       # 🆕 素材管理系统设计 v1.0（D1-D20 决策表 + 命名约定/命名不变式/
+│                                       #    zip 契约/存储单层+注入缝/plan-execute 拆分/双回退链）← 改素材必读
+│                                       #    已实现；渲染面 2026-07-29 接通（§15.9），待真机验证
 └── story_preset_format.md          # 🆕 Story Agent 预设编写指南（输出标签顺序 + 占位符排列 + 可用宏）
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
@@ -380,9 +381,14 @@ src/sillytavern/                    ← 核心引擎（30+ 模块，含 Phase 1-
   │   └── **命名不变式**: name/variant 任何分段都不得是类型 token → 否则 parse 返回 null
   │       (否则 (苏婉,头像,立绘) 会回读成 (苏婉_头像,立绘)，往返不是双射)
   ├── asset-index.ts                ← [素材] buildAssetIndex(rows) → 大类→名字→类型→{base,variants}，只吃行不吃目录
-  ├── asset-resolve.ts              ← [素材] resolveAsset + 回退链 立绘→立绘bg→头像 (只有头像也能占立绘位，素材包缺件优雅降级)
-  │                                    名字严格 `===` 不归一化 (对齐 state-manager，刻意不用 normalizeAudioName)
-  │                                    ⚠️ v1 无生产调用方 —— 渲染面落地时才接
+  ├── asset-resolve.ts              ← [素材] resolveAsset + **两条链，按槽位形状选**（顺序必须相反，不能共用一条）
+  │   ├── ASSET_TYPE_FALLBACK_CHAIN 立绘→立绘bg→头像 = **立牌位** (ScenePanel 46×58 竖幅 / 日后 VN 舞台)，也是缺省
+  │   ├── ASSET_TYPE_AVATAR_CHAIN   头像→立绘→立绘bg = **脸位** (圆形与 1:1 方框)
+  │   │     理由: 全身立牌裁进 2.5rem 圆里显示的是躯干不是脸；两条链都以"能接受的最后一档"收尾，两种槽位都不留洞
+  │   ├── type 三种写法: 单个 AssetType = 精确匹配**绝不降级**(导入/设为主图这类"就是这一格") / 数组 = 按序走链 / 缺省 = 立牌链
+  │   ├── 索引数组序为外层、链为内层 → **来源优先级仍压过链优先级**（日后内置库/文件夹库零改动插队）
+  │   ├── 名字严格 `===` 不归一化 (对齐 state-manager，刻意不用 normalizeAudioName)
+  │   └── 🔴 v1 那条链**一直是死代码**: 只在 type 省略时才走，而调用方一律写死类型 —— 无渲染面所以没人发现（见设计 §15.9）
   ├── asset-import-plan.ts          ← [素材] ★ 全系统承重模块: planImport(entries, existing, manifest?) 纯同步出计划
   │   ├── 按扩展名分流 / mp4 立绘拒收 / 不变式拒收 / 噪音跳过
   │   ├── 撞号进 variant 槽 (max+1 非首空位 / 换号不嵌套 / **批内统一分配**: 两个撞的给 2 和 3)
@@ -545,7 +551,7 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC
 | 10k | 快照面板 + 右键回退重发: 左侧 SideToolbar「快照」按钮(SnapshotPanel 历史快照恢复) + 最新 AI 消息右键「回退本轮/复制」(回退=restoreSnapshot 上一轮+回填本轮输入→重发即重生成/编辑重发) + Snapshot 阶梯保留(trimSnapshots tiered: 最近5全留+旧层4/8/10稀疏, 非turn档受保护) + restoreSnapshot 增强(plotEvents 捕获+覆写/memories 清理/totalTurns 对齐) + 设置「快照保留模式」可配置(pipeline 搭桥同步 AppSettings)。计划: docs/planning/2026-07-23-snapshot-rollback-plan.md | ✅ 待真机验证 |
 | Audio | 音频系统 **v1.0 定版** (说明书: docs/reference/audio_system.md ← 改音频必读): audio-channels.ts (MusicChannel 音序器 + SfxChannel 声池, 69 tests) + audio-manager.ts (音轨库注册表/主音量/手势解锁/playByTag AI 钩子, 54 tests) + audio-fakes.ts 测试替身 + Dexie 三表 (audioTracks/audioBlobs/audioPlaylists, 全局非存档级, 排除于 FullBackup) + types.ts 7 类型 + audio-singleton.ts/audio-store.ts 桥接 + AudioSection.vue/MiniPlayer.vue。v1 不做远程 URL 音源/解码缓存/真交叉淡入；**SFX 基建完备但刻意无触发方**(playSfx/playByTag 无生产调用)；`public/audio/manifest.json` 内置库刻意空载(授权未清)。设计: docs/planning/2026-07-26-audio-system-design.md<br>**本地音乐文件夹增补 (2026-07-27)**: audio-folder.ts (File System Access 唯一接触点, 27 tests) + Dexie v12 audioHandles 表 (持久化目录句柄, id='library-root') + AudioSourceKind 增 `'file'` + AudioTrack 增 relativePath/missing + store 文件夹状态与扫描对账 + audio-singleton setBlobResolver + AudioSection 文件夹条。三后端并存 (file 磁盘 / blob IndexedDB 兜底 / builtin 内置)；权限不跨浏览器重启需每会话一次手势授权；扫描永不删行。**引擎零改动**——整个新存储后端由既有 loadBlob 注入缝吸收。增补: docs/planning/2026-07-27-audio-local-files-addendum.md<br>**按名称寻址 + 名称唯一性**: audio-names.ts (normalizeAudioName 四步归一化 / findByName 稳定取最早 / isNameTaken+uniqueAudioName, 40 tests) + store playTrackByName/playPlaylistByName/findTrackByName/findPlaylistByName + 曲目与播放列表独立命名空间；导入路径自动编号永不失败、手动录入拒绝重名；**约束仅作用于新写入，存量重名不动**。对齐「AI 永不产 id」铁律，为日后 AI 接线备好按名/按标签寻址。<br>**审查后修复 + 拆分 + 新功能 (2026-07-27)**: ①加载竞态收口 (自增世代号 + 每个 await 后 isStale；pause 保留曲目 / stop 丢弃) ②时长广播 (loadedmetadata/durationchange，暂停态切歌也刷新 durationSec) ③store 错误处理族 (forgetFolder 改返 boolean / rescanFolder / uploadFiles / markMissing 按 trackId 去重 —— 单条失败不中断、结束后一条汇总、如实呈现部分成功) ④types-audio.ts 收纳接口与 state/options (types.ts re-export，导出面不变) + clamp01 去重 ⑤AudioSection.vue 1502 行 → 壳层 + settings/audio/ 5 子组件 (AudioMixer/AudioPlaylists/AudioLibrary/AudioFolderStrip/AudioDialogs) + format.ts/dialogs.ts ⑥播放列表拖拽排序 (原生 HTML5 DnD，▲▼ 保留为键盘路径) + 曲库多选 (shift 区间/全选筛选结果) 与批量加入列表/批量删除 (新 action deleteTracks/addTracksToPlaylist → AudioBatchResult) ⑦database.ts 音频 reader 补 await + 新增 audio-singleton.test.ts (26 tests)。<br>🔴 自动化测试全部跑在注入替身上<br>**内置曲库上架 + 按地点选曲 (2026-07-27)**: `public/audio/bgm/` 收录 **57 首** (35 地点 A/B + 13 通用场景 + 9 人物主题，约 267MB；无尽树海 B 源站 404 缺失)，manifest 走既有 `source:'builtin'` 机制**零代码改动**上架；素材作者 **Aoo**（credit 已署名）；`license` = `PLACEHOLDER-PENDING-REVIEW` —— **当前是测试占位素材，正式发布前需复核是否继续使用，可能变更**；刻意既不声称已授权也不声称未授权。新增 audio-tags.ts (`类型:值` 四维标签，18 tests) + audio-scene.ts (七段路径逐级回退 + 四维加权累计打分，42 tests) + store `playByScene()/playByLocation()` (同曲不重播/暂停不唤醒/未命中保持当前播放，9 tests)。内置曲库标签已全量改为 `类型:值`<br>**AI 接线 · Code 侧 (2026-07-27)**: `<play_audio situation mood variant action>` → marker-protocol 扫描 → orchestrator `onPlayAudio` (不 await/一轮取最后一个) → GamePipeline **Stage1 只暂存**、run() 末尾 refreshFromDb 后才 flush (转场时地点才是新的) → `playByScene`。**AI 不写地点与在场角色**(取自 player.location / present===true，少一处漂移源)；正文入库前 stripPlayAudioMarkers 剥标记。⚠️ AI 标记的 **prompt 侧刻意留空**（story 预设无该约定，加条目即可启用，Code 零改动）。<br>**场景配乐接通 (v1 收尾)**: 触发三条来源 —— ⓪**界面切换**(view-audio.ts 纯映射 + App.vue watch: home→系统菜单曲 / create→仪式曲 / game·settings·workshop 不动音乐；查询刻意不带 location；曲库改在 App.vue 装，首页也要出声)，另两条收口在 flushPendingAudio 且都在 refreshFromDb 之后 —— ①**地点变化**(主路径，lastAudioLocation 比对，没变不重选) ②AI 标记(优先，知道戏剧意图)。GamePage 挂载时 `primeSceneAudio()` 进场起一次(init 已上提到 App.vue，此处再调即空转)。设置→音频→混音台新增「场景配乐」开关(`audioSceneAutoPlay`，默认开)，关闭时**三条来源全不生效**但照样记地点(重开不补播)。**手势解锁监听上提到 main.ts** —— 装在 audio.init() 里会错过"点按钮进游戏"那一下手势，进场配乐落进 pending，表现为"进去没声音、再点一下才响"。<br>📌 **免手势自动播放：浏览器里做不到，属平台约束非缺陷**（说明书§十有完整取舍表）。激活是页面级一次性的，`main.ts` 已捡走最早那次点击；仅"零交互直达游戏页"仍需一次点击/按键兑现 pending。唯一能保证的路是打包成桌面应用（Electron/Tauri 设 `--autoplay-policy`），PWA 次之，Chrome MEI 不可控。**不要为此写规避代码。**音效仍无触发方。**审查后修复 (16 项)**: ①解锁监听改为成功才自摘 (resume 失败留住下一次手势，否则音频永久锁死) ②未授权≠文件不见了 (loadBlob 先看 folderPermission，不写 missing) ③坏曲目跳下一首而非停住整个队列 (skipUnavailable，跳过次数封顶队列长) ④标记正则认三种写法+属性值含 `>`+大写 ⑤配乐触发挪到状态回读之后 ⑥stop() 丢弃 currentTrackId (否则「选 A→停→播」放回旧曲) ⑦AudioSection 轮询挂载竞态泄漏 ⑧⑬批量/上传全失败不再报成功 ⑨侧栏音乐按钮只能开不能关 ⑩文件夹 prompt/denied 死胡同 ⑪Dice 档测试空转 (样本零交集，断言恒真) ⑫规范名深度跟随命中段 ⑭重命名区分「不存在」与「重名」 ⑮扫描中禁用取消关联 ⑯MiniPlayer 下拉受控写回。✅ **真机验证已过**（地点换歌 / 界面换歌 / 设置页试听出声 / 手势解锁时机——最后一条正是它暴露出"监听装在 audio.init() 里会错过进游戏那一下手势"）；❌ 音效与 AI 标记两条**无从验起**（无触发方 / prompt 侧空），本机文件夹与非 Chromium 浏览器未验。说明书第八节<br>**内置 mp3 移出仓库 (2026-07-28)**: 那 57 首（267MB）当初随音频系统误提交并推送。已 `git rm --cached public/audio/bgm/` + `.gitignore` 加音频扩展名规则；**manifest.json 与 README.md 继续 tracked**（清单与格式说明属代码，view-audio.test.ts 也要拿 manifest 做真实曲库对账）。后果：**全新 clone 会列出 57 首但点不响**（文件 404）——刻意取舍，把 mp3 放回 `public/audio/bgm/` 即恢复，零代码改动。历史提交仍含这批字节，clone 体积不变；彻底瘦身需重写历史 + force push，本次刻意不做。 | ✅ v1.0 |
 | 真机迭代 | debug loop 5 轮修复: 物品/角色零落库根因链（AI 输出 JSON 形状漂移 → 解析器 XML+JSON 双兜底）/ 侧链 systemPrompt+世界书注入根治（此前恒 stub 裸奔）/ maxTokens 2048 兜底截断 / 创角初始装备改走 item_gen 链(不直接落库,交 item_gen 生成 stats)+自定义装备战斗数值输入+自定义物品编辑管理 / characterName 属性传递 / 嵌套标签剥离 / activePresetId 运行时尊重 / 世界书 ST 宏噪音清理。ST 预设 setvar/getvar 配对机制排查经验见 debug 记录。story 正文救援兜底(rescueStoryOutput: 正文吞思维链 raw 空→从 reasoning 抠 / 思维链泄漏正文→截 maintext 前; 空门控+取最后 maintext+story 守卫) | 🔄 持续验证中 |
-| 素材 | 素材管理系统 **v1.0 已实现**。设计: docs/planning/2026-07-29-asset-management-system-design.md（D1-D19 决策表 + §13 反转理由 + §14 审查记录 + §15 实现纪要与两轮审查）← 改素材必读。**行为参考 RP Terminal 素材系统，但刻意不移植代码**（架构差异过大；来源报告在 RPT 仓库 docs/asset-system-report-and-port-eval-2026-07-28.md + asset-storage-simulation-2026-07-28.zh.md）。v1 范围: 三类型 `头像/立绘/立绘bg` 全部可导入、**全部不渲染**（v1 只交管理系统，AvatarPanel/ScenePanel/CharacterListPanel/StatusOverview 零改动）+ 一键 zip 导入（素材与音频同一个导入器，按扩展名分流；`.webm` 仍归音频）+ zip 导出（**仅 blob 源音频，内置 57 首与本地文件夹源刻意排除** —— 内置是 PLACEHOLDER-PENDING-REVIEW 占位授权，打进可分享包等于再犯 2026-07-28 刚修掉的错）。关键决策: **命名约定 `<name>[_<type>][_<variant>].<ext>`，type 可省默认头像**（文件名即 zip 格式，为日后加类型留路）· **严格 `===` 匹配不归一化**（对齐 state-manager.findByName，刻意不用 audio 的 normalizeAudioName；名字错是 prompt/世界书缺陷）· **命名不变式: name 与 variant 的任何分段都不得等于类型 token**（否则 format→parse 不是双射，`(苏婉,头像,立绘)` 会回读成 `(苏婉_头像,立绘)`，往返测试无法通过；D16 因 D14 全量改名而存在）· **与存档/characters 表零耦合**（无角色名册、无覆盖率计、无未匹配列表 —— 换来无跨存档干扰）· **单存储层 IndexedDB Blob**（~40-100 张 ≈ 3.6-50MB，模拟报告推荐的 S3 折叠冷启动优势在此规模消失；但走 audio 的 loadBlob 注入缝，日后加文件夹层引擎零改动）· **mp4 只准用在不需要 alpha 的类型**（头像圆形裁切/立绘bg 整屏 ✅；立绘是抠图要合成 ❌ —— RPT 规则对，只是表述过宽）· **永不覆盖，冲突编号进 variant 槽**（`苏婉_头像_2`；编进 name 会脱钩角色）· 导入哈希去重（素材按 `(name,type)`，音频按归一化名 —— 否则重导出口会克隆全部音轨）· plan/execute 拆分（纯 `asset-import-plan.ts` 出计划，store 只执行）。⚠️ **已知延后风险: v1 完全没有名字正确性反馈闭环**（不渲染+严格静默+无名册三者叠加），验证等渲染落地。📌 侧记: 理想上需要「世界书扫描」取角色名做选择列表，v1 刻意不做（含陷阱: 29 条角色条目里 8 条 `entry.name` 是编目标签而非在世名，如 `诗灵-仲夏夜之梦` 实际叫 `仲夏夜之梦`）<br>**已实现 (2026-07-29)**: 5 纯引擎模块 (asset-types/filename/index/resolve/import-plan) + Dexie v13 两表 + `src/ui/lib/` 三件 (asset-zip/media-hash/asset-url) + asset-store.ts + AssetSection.vue 及 4 子组件 + 音频分区第二入口 + 存档数据文案。**332 tests / 12 files 全绿**，typecheck 0 错误。审查发现并修掉的真缺陷: ①**命名不变式漏洞** —— 全字段改名放开后 `(苏婉,头像,立绘)` 会格式化成 `苏婉_头像_立绘.png` 再回读成 `(苏婉_头像,立绘)`，往返不是双射（修法: name/variant 任何分段不得是类型 token，导入与改名两个入口共用一个 `violatesNamingInvariant`）②**音频去重缺失** —— 只做素材去重会让"重导出自己的导出"素材跳过、音轨全部 ` (2)` 克隆，半幂等比两个极端都糟 ③**导出会打包内置 57 首**(PLACEHOLDER-PENDING-REVIEW 占位授权) → D17 只导 `source:'blob'` ④**音频上传路径不算 hash** → 抽出 media-hash.ts 共用，否则上传的音轨重导入照样克隆 ⑤**未知扩展名会因体积上限炸掉整次导入** → 分流提到 fflate `onfile`，噪音永不解压也不计入上限 ⑥`thumbs.ts` 过期轮次把已剪掉的 id 写回来（世代号守卫，照 audio-channels 先例）。<br>📌 **顺带修掉一个先存 bug**: `SettingsPage.vue` 解构了 `deleteDatabase` —— database.ts 从来没导出这个名字，「清除所有数据」必然 TypeError 且抛在 toast 之前，**一直是坏的**；已改为真名 `clearAllData()`，D13 那句"清除会一并销毁素材"才真正成立。<br>⚠️ **v1 无名字正确性反馈闭环**（不渲染+严格静默+无名册三者叠加），等渲染面落地才能验；未做世界书扫描/文件夹层/内置素材库/立绘渲染面<br>**合并后审查轮 (设计文档 §15.6)**: 对 `97e5900` 做对抗式审查，查出 7 条缺陷全部收口，修的过程中又自查出 5 条审查没看见的。要点: ①`allocateSlot` 经文件名往返是有损的 —— 名字含 `/` 会去错 `(name,type)` 组、造出**两个 base 行**破 D11（改法: planner 导出 `allocateVariantSlot` 共用同一内核，去掉文件名编码）②**新增 D19**: 名字必须能经 zip 条目名往返 —— `/`、`\`、前导 `.` 在改名口拒收（分隔符会变成路径、前导点会被当 dotfile 跳过）；**空白可表示，一律不 trim** ③`buildAssetIndex` 原型污染（`__proto__.png` 可导入 → 写穿 `Object.prototype`），改 `Object.create(null)`，PoC 验过修复前确实红 ④补上一直漏做的**单文件导入**（`importAny` 一次调用内部分流，UI 零路由，一次导入只弹一条汇总）⑤音频批内去重的 hash 记在改名**后**的键上导致同字节文件不跳过 ⑥toast 文案在 `hash-unavailable` 时承诺了做不到的去重。<br>📌 **本轮最值得记的一条**: 去掉导出侧一个不该有的 `.trim()`，直接让另外三个 bug 现形（尾随空格的扩展名把合法 PNG 当噪音丢掉 / store 里第二处 `.trim()` / 进度条能倒退）—— **D2「不做归一化」是结构性的，不是龟毛**；根因修法比补丁修法多捞出三条。<br>**刻意不做**: §7.3 的导入前命名表单 —— 那是**第二个命名入口**，必然要重实现 D16 不变式 + D19 门 + §5.3 撞号器，正是设计一直在防的重复；自动补全改放在改名框（原生 `<datalist>`），那才是用户真正在斟酌名字的时刻 | ✅ v1.0 已实现（待真机验证） |
+| 素材 | 素材管理系统 **v1.0 已实现**。设计: docs/planning/2026-07-29-asset-management-system-design.md（D1-D20 决策表 + §13 反转理由 + §14 审查记录 + §15 实现纪要/两轮审查/渲染面落地 §15.9）← 改素材必读。**行为参考 RP Terminal 素材系统，但刻意不移植代码**（架构差异过大；来源报告在 RPT 仓库 docs/asset-system-report-and-port-eval-2026-07-28.md + asset-storage-simulation-2026-07-28.zh.md）。v1 范围: 三类型 `头像/立绘/立绘bg` 全部可导入（初版**刻意不渲染**，只交管理系统；该决策已于 2026-07-29 **反转**，见本行末尾「渲染面落地」）+ 一键 zip 导入（素材与音频同一个导入器，按扩展名分流；`.webm` 仍归音频）+ zip 导出（**仅 blob 源音频，内置 57 首与本地文件夹源刻意排除** —— 内置是 PLACEHOLDER-PENDING-REVIEW 占位授权，打进可分享包等于再犯 2026-07-28 刚修掉的错）。关键决策: **命名约定 `<name>[_<type>][_<variant>].<ext>`，type 可省默认头像**（文件名即 zip 格式，为日后加类型留路）· **严格 `===` 匹配不归一化**（对齐 state-manager.findByName，刻意不用 audio 的 normalizeAudioName；名字错是 prompt/世界书缺陷）· **命名不变式: name 与 variant 的任何分段都不得等于类型 token**（否则 format→parse 不是双射，`(苏婉,头像,立绘)` 会回读成 `(苏婉_头像,立绘)`，往返测试无法通过；D16 因 D14 全量改名而存在）· **与存档/characters 表零耦合**（无角色名册、无覆盖率计、无未匹配列表 —— 换来无跨存档干扰）· **单存储层 IndexedDB Blob**（~40-100 张 ≈ 3.6-50MB，模拟报告推荐的 S3 折叠冷启动优势在此规模消失；但走 audio 的 loadBlob 注入缝，日后加文件夹层引擎零改动）· **mp4 只准用在不需要 alpha 的类型**（头像圆形裁切/立绘bg 整屏 ✅；立绘是抠图要合成 ❌ —— RPT 规则对，只是表述过宽）· **永不覆盖，冲突编号进 variant 槽**（`苏婉_头像_2`；编进 name 会脱钩角色）· 导入哈希去重（素材按 `(name,type)`，音频按归一化名 —— 否则重导出口会克隆全部音轨）· plan/execute 拆分（纯 `asset-import-plan.ts` 出计划，store 只执行）。⚠️ **名字正确性反馈闭环（渲染面落地后已降级，未消除）**: 玩家位是**构造上闭合**的（导入写的就是 `player.name`，渲染读的也是 `player.name`，两边不可能不一致）；NPC 位现在有了视觉反馈（名字错/缺就在该有脸的地方显示首字母）—— 这正是此前完全缺失的那一环。但**名字悄悄写错的 NPC 除了"没出现脸"之外仍无任何诊断**（严格静默 + 无名册），所以风险是降级不是清零。📌 侧记: 理想上需要「世界书扫描」取角色名做选择列表，v1 刻意不做（含陷阱: 29 条角色条目里 8 条 `entry.name` 是编目标签而非在世名，如 `诗灵-仲夏夜之梦` 实际叫 `仲夏夜之梦`）<br>**已实现 (2026-07-29)**: 5 纯引擎模块 (asset-types/filename/index/resolve/import-plan) + Dexie v13 两表 + `src/ui/lib/` 三件 (asset-zip/media-hash/asset-url) + asset-store.ts + AssetSection.vue 及 4 子组件 + 音频分区第二入口 + 存档数据文案。**332 tests / 12 files 全绿**，typecheck 0 错误。审查发现并修掉的真缺陷: ①**命名不变式漏洞** —— 全字段改名放开后 `(苏婉,头像,立绘)` 会格式化成 `苏婉_头像_立绘.png` 再回读成 `(苏婉_头像,立绘)`，往返不是双射（修法: name/variant 任何分段不得是类型 token，导入与改名两个入口共用一个 `violatesNamingInvariant`）②**音频去重缺失** —— 只做素材去重会让"重导出自己的导出"素材跳过、音轨全部 ` (2)` 克隆，半幂等比两个极端都糟 ③**导出会打包内置 57 首**(PLACEHOLDER-PENDING-REVIEW 占位授权) → D17 只导 `source:'blob'` ④**音频上传路径不算 hash** → 抽出 media-hash.ts 共用，否则上传的音轨重导入照样克隆 ⑤**未知扩展名会因体积上限炸掉整次导入** → 分流提到 fflate `onfile`，噪音永不解压也不计入上限 ⑥`thumbs.ts` 过期轮次把已剪掉的 id 写回来（世代号守卫，照 audio-channels 先例）。<br>📌 **顺带修掉一个先存 bug**: `SettingsPage.vue` 解构了 `deleteDatabase` —— database.ts 从来没导出这个名字，「清除所有数据」必然 TypeError 且抛在 toast 之前，**一直是坏的**；已改为真名 `clearAllData()`，D13 那句"清除会一并销毁素材"才真正成立。<br>⚠️ 当时未做世界书扫描/文件夹层/内置素材库/渲染面（渲染面已于本日补上，见行末）<br>**合并后审查轮 (设计文档 §15.6)**: 对 `97e5900` 做对抗式审查，查出 7 条缺陷全部收口，修的过程中又自查出 5 条审查没看见的。要点: ①`allocateSlot` 经文件名往返是有损的 —— 名字含 `/` 会去错 `(name,type)` 组、造出**两个 base 行**破 D11（改法: planner 导出 `allocateVariantSlot` 共用同一内核，去掉文件名编码）②**新增 D19**: 名字必须能经 zip 条目名往返 —— `/`、`\`、前导 `.` 在改名口拒收（分隔符会变成路径、前导点会被当 dotfile 跳过）；**空白可表示，一律不 trim** ③`buildAssetIndex` 原型污染（`__proto__.png` 可导入 → 写穿 `Object.prototype`），改 `Object.create(null)`，PoC 验过修复前确实红 ④补上一直漏做的**单文件导入**（`importAny` 一次调用内部分流，UI 零路由，一次导入只弹一条汇总）⑤音频批内去重的 hash 记在改名**后**的键上导致同字节文件不跳过 ⑥toast 文案在 `hash-unavailable` 时承诺了做不到的去重。<br>📌 **本轮最值得记的一条**: 去掉导出侧一个不该有的 `.trim()`，直接让另外三个 bug 现形（尾随空格的扩展名把合法 PNG 当噪音丢掉 / store 里第二处 `.trim()` / 进度条能倒退）—— **D2「不做归一化」是结构性的，不是龟毛**；根因修法比补丁修法多捞出三条。<br>**刻意不做**: §7.3 的导入前命名表单 —— 那是**第二个命名入口**，必然要重实现 D16 不变式 + D19 门 + §5.3 撞号器，正是设计一直在防的重复；自动补全改放在改名框（原生 `<datalist>`），那才是用户真正在斟酌名字的时刻<br>**渲染面落地 (2026-07-29，设计文档 §15.9)**: **D4「只管理不渲染」正式反转** —— 新增 `useAssetImage.ts`（唯一渲染缝: 严格 `===` + object URL 生命周期 + 世代号守卫 + 按数据源共享索引）与 `AssetMedia.vue`（命中铺满、没命中把插槽兜底原样交回）；AvatarPanel 加 `video` prop；**五个渲染位接通**（StatusOverview 玩家 1:1 方框 / CreateStepConfirm 96px 圆 / CharacterListPanel ×2 圆 / ScenePanel 46×58 立牌位），**全部保留原首字母兜底**；`asset-store.init()` 上提到 App.vue（此前只在 AssetSection 的 onMounted 里，游戏页/捏人页看到的库恒为空）；玩家画像位加**唯一的定点导入入口**（点击开文件选择框，文件名只贡献扩展名，name/type 由槽位给定 —— 这就是"花名册驱动的导入经由命名约定改名"那条路）。🔴 **两个此前完全看不见的缺陷**（正因为 v1 什么都不渲染）: ①`resolveAsset` **只在 type 省略时才走回退链**，任何显式类型都是精确匹配无降级 —— 那条被自己的文件头称作"整个移植里最值钱的一行"的链，从有调用方的那一刻起就是死代码。修法是**两条链**: `ASSET_TYPE_FALLBACK_CHAIN` 立绘→立绘bg→头像（立牌位）与新增 `ASSET_TYPE_AVATAR_CHAIN` 头像→立绘→立绘bg（脸位），顺序必须相反——全身立牌裁进 2.5rem 圆里显示的是躯干。②`asset-url.ts` 的 `release()` 是无条件撤销、无引用计数 —— 一个 NPC 同时出现在 ScenePanel 与 CharacterListPanel 时，先卸载的那个把 URL 从另一个手里撤掉。已改引用计数，容量逐出绝不碰被持有的条目；`assets/thumbs.test.ts` 里一条钉着旧行为的用例**当时断言的正是这个 bug**，已重写。**4123 passed / 1 failed**（`SelectableCard 稀有度边框色正确`，与素材无关的既有基线失败），typecheck 0 错误；15 文件改动 + 8 新增。⚠️ **未经真机验证** | ✅ v1.0 已实现 + 渲染面已接通（均待真机验证） |
 | 战斗 v2 | 战斗系统架构 v2 重构（管道+中间件+同构契约+6 大类效果对齐 #265160+buff 规则对齐 [状态规则]+19 event+Combat Agent+独立战斗面板+计算分工）。魔改不照抄世界书，趣味优先+代码兜底。架构: docs/reference/combat-system-architecture.md；计划: docs/planning/2026-07-28-combat-system-v2-plan.md。M1-M6 六批次，§十三 待确认清单已全收口。**M1 ✅**（emitChain+script-registry，130）**M2 ✅**（modifier 6 大类+buff 去重，~140）**M3 ✅**（管道版+19event+登神+HP红线，~80）**M4 ✅**（combat systemPrompt+13工具注册+executeCombatToolCall 独立通道(B方案)+combat-runner 跨回合循环+item_gen 6大类契约+校验纯函数 54测+combat-agent-api.md 接口规格文档；agent-tools 58测）**M5 ✅**（runner 路径 X 回合调度: 按行动轴逐单位+敌方自主/我方暂停等玩家+激活死字段 currentTurnIndex+7类 CombatEvent 事件流+pendingResolver 暂停恢复+hp同步修正+combat-store(combatLog/awaiting/submit)+pipeline 桥接(enter/exit/applyCombatEvent)+CombatPanel 覆盖层+4子组件(CombatUnitCard/CombatActionCard/CombatMessageFlow/CombatActionBar)B+C 按钮注入文本框+CombatHeader+useBeautify composable 抽取；combat-runner 7测；M5 plan+RFC 文档。待真机验证） | ✅ M5 完成 ｜待 M6 真机 |
 
 ## 前端架构 (Phase 7, 2026-06-17)
@@ -553,14 +559,24 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC
 ```
 src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL 状态驱动)
 ├── main.ts                          ← 应用入口 (createApp + Pinia + 主题初始化)
-├── App.vue                          ← 根组件 (<router-view> + ToastContainer)
+├── App.vue                          ← 根组件 (<router-view> + ToastContainer + 界面级场景配乐 watch)
+│                                       曲库与**素材库**的 init() 都装在这里: 两者都要在游戏页/捏人页用，而那两处都不经设置页。
+│                                       素材 init() 此前只在 AssetSection 的 onMounted 里调 → 没进过设置页的会话库恒为空，
+│                                       表现成「导入过的头像不显示」。两个 init() 都幂等，分区里再调即空转
 ├── env.d.ts                         ← .vue 类型声明
 │
 ├── composables/                     ← Vue 3 Composables (可复用逻辑)
 │   ├── useMapViewer.ts              ← OpenSeadragon 生命周期 (创建/加载/销毁)
 │   ├── useMapMarkers.ts             ← 地图标记 CRUD + Overlay 同步
-│   └── useHoverPopup.ts             ← 悬停浮层唯一实现 (延迟读 settings.hoverDelayMs / 定位 below·right·right-bottom
-│                                       / 键盘 focus 不吃延迟 / zoom 坐标回除 / 滚动即隐)
+│   ├── useHoverPopup.ts             ← 悬停浮层唯一实现 (延迟读 settings.hoverDelayMs / 定位 below·right·right-bottom
+│   │                                   / 键盘 focus 不吃延迟 / zoom 坐标回除 / 滚动即隐)
+│   └── useAssetImage.ts             ← [素材] 渲染缝: (name, type?) → { url, isVideo }。名字严格 `===` (D2)，
+│                                       缺省走**脸位链**；isVideo 由**命中的行**判定不嗅 URL (object URL 无扩展名)
+│                                       三条纪律各对应一个真实失败形态: **先铸新的再撤旧的**(反了会闪空白) ·
+│                                       **世代号守卫**(过期一轮落笔 = 界面上是另一个角色的脸) · onScopeDispose 释放
+│                                       🔴 索引按**数据源**共享一份，建在 detached `effectScope(true)` 里 ——
+│                                       直接 computed() 会挂到当前组件作用域，第一个卸载的组件就把它 stop 掉，
+│                                       后来者拿到**僵尸索引**，表现为「刚导入的头像要刷新页面才出现」
 │
 ├── lib/                              ← 前端↔引擎桥接层
 │   ├── game-pipeline.ts              ← GamePipeline: AgentConfig组装/上下文构建/编排器/回调处理
@@ -568,7 +584,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │   ├── audio-folder.ts               ← 本地音乐文件夹 (File System Access 唯一接触点: 选择/持久化/权限/扫描/解析，仅 Chromium)
 │   ├── asset-zip.ts                  ← [素材] 一键 zip 读写 (流式 + 中途中断的体积上限 / 按名分流噪音永不解压 / SHA-256 / AbortSignal 取消 / manifest 防御性解析)
 │   ├── media-hash.ts                 ← [素材] SHA-256 唯一实现 (crypto.subtle 特性探测；不可用时返回 undefined，绝不换算法) — asset-zip 与音频上传共用
-│   ├── asset-url.ts                  ← [素材] object URL LRU (cap 64 / 淘汰即 revoke / 同 id 在飞去重 / 注入 createObjectURL)
+│   ├── asset-url.ts                  ← [素材] object URL LRU + **引用计数** (cap 64 / get 每次成功 +1、release 归零才 revoke /
+│   │                                    容量逐出**绝不撤销被持有的条目**，宁可超容 / 同 id 在飞去重且搭车者各领一份计数 /
+│   │                                    revokeAll 无视计数 / 注入 createObjectURL)
+│   │                                    🔴 无计数时: 一个 NPC 同时出现在 ScenePanel 与 CharacterListPanel，先卸载的那个把 URL
+│   │                                    撤了，另一个当场死图 —— v1 无渲染面所以这条隐患完全看不见（见设计 §15.9）
 │   ├── quality-colors.ts             ← 品质色映射
 │   ├── test-fixtures.ts              ← 测试数据注入
 │   └── toSystemEvent.ts              ← 系统事件类型转换
@@ -586,9 +606,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │   ├── game-store.ts                ← 游戏状态 (存档/角色/对话/战斗/FP)
 │   ├── audio-store.ts               ← 音频状态 (Pinia 薄壳，桥接 AudioManager 单例 + 音轨库 CRUD + 音乐文件夹状态/扫描对账/loadBlob 三后端分流)
 │   └── asset-store.ts               ← [素材] 执行器 (自身零决策: planImport 出计划，本店只落库) — 库状态/按名分组/一键 importZip/exportZip(仅 blob 源音频)/改名(全字段+不变式拒收+撞号)/设为主图(单事务先降后清)/批删/URL 缓存/persist
+│                                       + importForCharacter(file, name, type): **花名册驱动的定点导入** —— 文件名**只**贡献扩展名，
+│                                       name/type 由槽位给定 (于是 IMG_1234.png 不会长出一个叫 IMG_1234 的幽灵角色组)。
+│                                       复用同一道互斥闸/三道闸门/哈希去重/撞号器；**永不覆盖**，撞位先落变体再 setPrimary 换过来 ——
+│                                       连"字节已在库里(哈希命中)"也照样提主图，否则用户点了导入却因为库里早有同字节变体而看不到变化
 │
 ├── components/
-│   ├── shared/                      ← 15 个通用组件
+│   ├── shared/                      ← 16 个通用组件
 │   │   ├── AppButton.vue            ← Primary/Secondary/Danger/Ghost × 3 尺寸
 │   │   ├── AppModal.vue             ← Teleport + ×关闭 + Esc + 过渡动画
 │   │   ├── AppCard.vue              ← 品质色边框 + 选中态
@@ -597,6 +621,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │   │   ├── QualityBadge.vue         ← 7 级品质徽章
 │   │   ├── BuffChip.vue             ← Buff/Debuff/Special 药丸
 │   │   ├── AvatarPanel.vue          ← 头像 (4 尺寸 sm/md/lg/xl × 形状 circle/square，默认圆形不破坏既有调用)
+│   │   │                               + `video` prop: mp4 走 `<video muted playsinline loop autoplay>` 与 `<img>` 共用样式；
+│   │   │                               省略即 false，现有调用方一个都不受影响。由调用方从**素材行**判定，不在此嗅 URL
+│   │   ├── AssetMedia.vue           ← [素材] 一个素材位: 命中就铺满外层容器，没命中把插槽(首字母兜底)原样交回，绝不渲染空白框
+│   │   │                               尺寸/形状/裁切一律由**外层容器**给 → 同一组件既填 2.5rem 圆也填 46×58 立牌位
+│   │   │                               📌 之所以是组件不是几个 computed: 列表里每项要**一条自己的**解析链，
+│   │   │                               让 Vue 建/拆作用域，object URL 释放是白拿的 (手写对账器只会多一个漏 URL 的地方)
 │   │   ├── ToastContainer.vue       ← 全局通知 (4 类型 + 动画)
 │   │   └── form/ (5 files)          ← Input/Select/Stepper/Cascader/KeyValue
 │   ├── home/HomePage.vue            ← 游戏标题画面 (40vh 标题 + 4 按钮 + 风味文字)
@@ -611,14 +641,20 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 │   │   ├── SideToolbar.vue          ← 左侧工具栏 (8 按钮，宽度收窄 30% → 图标在上文字在下)
 │   │   ├── ScenePanel.vue           ← 场景面板 (顶:日期年份同行+具体时刻+位置+天气 / 四页签: 角色(默认)·任务·世界·万象)
 │   │   │                               角色条目右对齐(方形立绘在右)+好感度双向条+等级，悬停出云朵思绪气泡；任务就地展开
+│   │   │                               [素材] 46×58 NPC 立牌位走 AssetMedia + **立牌链**，无素材照旧首字母兜底
+│   │   │                               ⚠️ `.npc-portrait` 是心声气泡的 anchorSelector，类必须留在**外层**元素上，素材只能塞进它里面
 │   │   ├── ChatFlow.vue             ← 对话流 (三源消息: AI/用户/系统 + 美化正文 + 系统卡片)
 │   │   ├── InputBar.vue             ← 输入栏
 │   │   ├── StatusHUD.vue            ← 右侧状态栏容器
 │   │   ├── StatusOverview.vue       ← 角色状态详览 (方形立绘 + 身份单行文本 / HP·MP·SP·EXP 条 / 等级+五维 6 等宽格
 │   │   │                               / 状态效果徽章与标题同行·悬停出详情 / 持有物四页签 装备·背包·消耗品·技能，
 │   │   │                               金钱与 FP 常驻标题行、条目就地展开不弹 Modal)
+│   │   │                               [素材] 玩家画像 1:1 方框走**脸位链**；**全站唯一带导入入口的渲染位** ——
+│   │   │                               点/Enter/Space 开文件选择框 → importForCharacter(file, player.name, '头像')，
+│   │   │                               **写入写死单个 `头像`**(存进去的必须是确定的一格，只有读取才降级)
 │   │   ├── ItemsPanel.vue           ← 背包面板
-│   │   ├── CharacterListPanel.vue   ← 角色列表面板
+│   │   ├── CharacterListPanel.vue   ← 角色列表面板 ([素材] 2.5rem/3.5rem 两处圆形头像走 AssetMedia + **脸位链**，
+│   │   │                               容器补 overflow:hidden 让圆形裁切成立；无素材时观感一字不变)
 │   │   ├── QuestsPanel.vue          ← 任务面板
 │   │   ├── PlotPanel.vue            ← 剧情面板
 │   │   ├── MemoryPanel.vue          ← 记忆面板
@@ -642,7 +678,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端 (单 URL �
 | 💬 消息显示 | 系统通知全局开关 + 7 种事件类型独立过滤 |
 | ✨ 输出美化 | 预设规则库 beautifier-rules.json (22条: 2内置+20远程) + 世界书/角色 auto-enable 绑定 + 三段式UI(自动管理/已启用/可用规则库折叠)。用户规则 CRUD + 实时预览 + 导入/导出 JSON |
 | 🎵 音频 | 三段式: ①混音台(主/音乐/音效 音量+静音 + 播放控制/进度/循环/随机 + **场景配乐开关**) ②播放列表(仅音乐音轨，左选单右曲目排序) ③音轨库(音乐文件夹条 + 上传/搜索/按类型与标签过滤/试听/编辑/删除 + 占用配额显示)。音乐文件夹: 选择目录一次→文件留在磁盘只存目录，「授权访问」每次开浏览器点一次，「重新扫描」增量对账(文件消失只标 `文件已移除` 不删行)；仅 Chromium 支持，其他浏览器走上传入 IndexedDB 的兜底路径。音频库全局共享不随存档；**不参与存档导出/导入**，但「清除全部数据」会一并销毁 |
-| 🖼 素材 | 三段式: ①导入条(一键 zip 导入素材+音频同一个包，按扩展名分流 / 进度+取消 / 结构化回执: 新增·跳过重复·编号·命名冲突·警告 / 配额 + `persist()` 结果) ②素材库(按角色分组卡+变体数+无主图徽章 / 全部素材扁平表 + 搜索 + 类型过滤 + shift 多选 + 批量删除 / mp4 走 `<video muted playsinline>`) ③变体抽屉(设为主图 / 全字段改名+不变式行内拒收 / 删除)。**v1 只管理不渲染** —— AvatarPanel/ScenePanel/CharacterListPanel/StatusOverview 零改动，游戏内看不到素材。素材库全局共享不随存档；**不参与存档导出/导入**(走 zip 导出)，「清除全部数据」会一并销毁 |
+| 🖼 素材 | 三段式: ①导入条(一键 zip 导入素材+音频同一个包，按扩展名分流 / 进度+取消 / 结构化回执: 新增·跳过重复·编号·命名冲突·警告 / 配额 + `persist()` 结果) ②素材库(按角色分组卡+变体数+无主图徽章 / 全部素材扁平表 + 搜索 + 类型过滤 + shift 多选 + 批量删除 / mp4 走 `<video muted playsinline>`) ③变体抽屉(设为主图 / 全字段改名+不变式行内拒收 / 删除)。**导入的素材游戏内会直接显示** —— 五个渲染位已接通(StatusOverview 玩家画像 / CreateStepConfirm / CharacterListPanel ×2 / ScenePanel NPC 立牌位)，按名字严格 `===` 取图、取不到照旧显示首字母；本分区仍是**唯一的整批导入与管理入口**，游戏内只有玩家画像位有一个定点导入口。素材库全局共享不随存档；**不参与存档导出/导入**(走 zip 导出)，「清除全部数据」会一并销毁 |
 | 💾 存档数据 | 导出/导入/清除 (含确认弹窗)。**明写两项排除**: 存档导出不含音频库与素材库，各有独立导出口；清除全部数据会销毁两者 |
 | ℹ 关于 | 引擎版本/技术栈/统计 |
 

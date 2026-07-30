@@ -1,7 +1,21 @@
 /**
- * asset-url.ts — 素材 object URL 的 LRU 缓存（含逐出即撤销）
+ * asset-url.ts — 素材 object URL 的引用计数缓存（LRU 逐出为兜底）
  *
  * 设计依据: docs/planning/2026-07-29-asset-management-system-design.md §7.5
+ *
+ * 🔴 **引用计数（本轮加）**: 同一张素材会被**多个组件同时挂着**（一个 NPC 可以
+ * 同时出现在 ScenePanel 与 CharacterListPanel）。没有计数时，第一个卸载的组件
+ * 就把 URL 撤了，其余还在显示它的组件当场变成死图。所以:
+ * - `get()` **每一次成功取用都 +1**（含命中缓存与搭在飞的车）
+ * - `release()` -1，**归零才撤销**；未知 id / 已归零一律是无害空操作，计数永不为负
+ * - 容量逐出**绝不撤销被持有的条目**：宁可超容，也不能撤掉正在显示的 URL
+ * - `revokeAll()` 是拆除口，**无视计数**全撤（分区 unmount 时那一下）
+ *
+ * ⚠️ 由此产生的一个**刻意的语义位移**，读代码时别被文件名骗了: 现在每条落地的
+ * 条目在创建时就至少有 1 份计数，而归零即撤销 —— 于是「零引用条目」在公开 API 下
+ * 根本不会存续，容量逐出实际上退化成一条**安全网**（只有当调用方不还引用时，
+ * 缓存才会超容）。`touch()` 与逐出扫描一并保留: 它们是正确的 LRU 语义，若日后
+ * 把「归零即撤销」改成「归零转为可逐出」，这两处不用重写。
  *
  * 为什么不照抄音频那套「换曲即撤销」:
  * 浏览器里没有自定义资源协议，blob 只能靠 `URL.createObjectURL` 端出去，而
@@ -43,22 +57,35 @@ export interface AssetUrlCacheOptions {
 
 export interface AssetUrlCache {
   /**
-   * 取 id 对应的 object URL；没有就加载并铸造一个。
+   * 取 id 对应的 object URL；没有就加载并铸造一个。**成功取到即 +1 份引用**，
+   * 调用方欠一次对应的 {@link AssetUrlCache.release}（拿到 null 则不欠）。
    *
-   * - 命中已有条目 → 刷新其 LRU 新鲜度并返回同一个 URL（不重复铸造）
-   * - 同一 id 的并发调用 → 共享同一个在飞 Promise，只铸造一个 URL
+   * - 命中已有条目 → 刷新其 LRU 新鲜度并返回同一个 URL（不重复铸造），计数 +1
+   * - 同一 id 的并发调用 → 共享同一个在飞 Promise、只铸造一个 URL，但**每个调用方
+   *   各得一份计数**（两个组件并发要同一张头像 → 计数是 2 不是 1）
    * - loader 返回 undefined（blob 缺失）→ 返回 null 且**什么都不缓存**，之后重试仍可成功
    * - loader 抛错 → 原样上浮，且不留下中毒的在飞条目，之后重试仍可成功
    */
   get(id: string): Promise<string | null>
-  /** 同步窥视已缓存的 URL；不触发加载、不改动新鲜度。未缓存返回 null */
+  /**
+   * 同步窥视已缓存的 URL；不触发加载、不改动新鲜度、**不增加引用计数**。
+   * 未缓存返回 null。
+   *
+   * ⚠️ 窥视到的 URL **不归窥视者所有** —— 它随时可能被持有者释放掉。要保证它
+   * 在自己手上活着，得走 {@link AssetUrlCache.get}。
+   */
   peek(id: string): string | null
-  /** 撤销并移除单条；未知 id 是无害空操作 */
+  /**
+   * 归还一份引用。**计数归零才撤销并移除**；未知 id、已归零的 id 都是无害空操作
+   * （计数永不为负），重复 release 也不会二次撤销。
+   */
   release(id: string): void
-  /** 拆除用（如分区 unmount）：逐条撤销全部存活 URL 并清空缓存 */
+  /** 拆除用（如分区 unmount）：**无视引用计数**逐条撤销全部存活 URL 并清空缓存 */
   revokeAll(): void
-  /** 当前已铸造 URL 的条目数（不含在飞加载） */
+  /** 当前已铸造 URL 的条目数（不含在飞加载）。持有者不还引用时**可能超过容量** */
   readonly size: number
+  /** 当前引用计数；未持有为 0。诊断与测试用，生产渲染面不需要 */
+  refCount(id: string): number
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -102,6 +129,11 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
 
   /** Map 的插入顺序即新鲜度：队首最久未用，队尾最新 */
   const urls = new Map<string, string>()
+  /**
+   * id → 当前持有者数量。**不变式**: 只要 `urls` 里有这条，`refs` 里就 ≥ 1；
+   * 归零的那一刻两张表同时删。所以「entry 存在但没人要」这个状态不会存续。
+   */
+  const refs = new Map<string, number>()
   /** 在飞去重表：同一 id 的并发 get 共享同一个 Promise */
   const inflight = new Map<string, Promise<string | null>>()
 
@@ -114,14 +146,38 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
    */
   let generation = 0
 
-  /** 插入新条目后按容量逐出最久未用者，逐出即撤销 */
+  /** 当前引用数（未持有为 0） */
+  function countOf(id: string): number {
+    return refs.get(id) ?? 0
+  }
+
+  /** +1 份引用 */
+  function retain(id: string): void {
+    refs.set(id, countOf(id) + 1)
+  }
+
+  /**
+   * 插入新条目后按容量逐出，逐出即撤销。
+   *
+   * 🔴 **被持有的条目一律跳过** —— 逐出一条还有人挂着的 URL，就是把别人正在显示
+   * 的图打成死链，而这在界面上只表现为「有时候图裂了」，极难查。所以这里从队首
+   * （最久未用）起找**第一个零引用**的受害者；一个都没有就宁可超容返回。
+   * 超容的条目仍留在 `urls` 里（没有"丢失追踪"这回事），等它们被 release 归零、
+   * 或被 `revokeAll()` 一并收走。
+   */
   function evictIfNeeded(): void {
     while (urls.size > capacity) {
-      const oldest = urls.keys().next()
-      if (oldest.done) return
-      const victim = oldest.value
+      let victim: string | null = null
+      for (const key of urls.keys()) {
+        if (countOf(key) === 0) {
+          victim = key
+          break
+        }
+      }
+      if (victim === null) return // 全员在用：超容 > 撤掉在用的 URL
       const url = urls.get(victim)
       urls.delete(victim)
+      refs.delete(victim)
       if (url) revoke(url)
     }
   }
@@ -153,10 +209,14 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
     if (existing) {
       revoke(url)
       touch(id, existing)
+      retain(id) // 发起者自己那一份
       return existing
     }
 
     urls.set(id, url)
+    // 🔴 必须**先** retain 再 evict: 新条目此刻是全场唯一的零引用条目，
+    // 逐出扫描会当场把它自己挑走（容量 1 时 100% 复现，表现为「刚拿到就是死链」）
+    retain(id)
     evictIfNeeded()
     return url
   }
@@ -170,15 +230,30 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
       return urls.get(id) ?? null
     },
 
+    refCount(id: string): number {
+      return countOf(id)
+    },
+
     async get(id: string): Promise<string | null> {
       const hit = urls.get(id)
       if (hit) {
         touch(id, hit)
+        retain(id)
         return hit
       }
 
       const pending = inflight.get(id)
-      if (pending) return pending
+      if (pending) {
+        // 🔴 搭车者必须**自己**领一份计数，不能直接 `return pending`。
+        // 直接返回的话，两个组件并发要同一张头像只会记 1 份，先卸载的那个
+        // 一 release 就归零撤销 —— 另一个组件当场死图。这正是引用计数要修的
+        // 那个 bug 的并发变体，而且比串行版更难查（要两个组件卡在同一个 tick）。
+        const url = await pending
+        // 只有「这条 URL 确实还是当前缓存里的那条」才计数。中途被 revokeAll()
+        // 拆掉、或已被别人 release 归零的话，计数上去就成了永不归零的幽灵引用。
+        if (url !== null && urls.get(id) === url) retain(id)
+        return url
+      }
 
       // 两个组件同时要同一张头像时，若不去重就会铸两个 URL、只记住一个，
       // 另一个永久泄漏。这是真 bug，不是优化。
@@ -188,12 +263,24 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
         if (inflight.get(id) === p) inflight.delete(id)
       })
       inflight.set(id, p)
+      // 发起者那一份计数在 load() 里落地（必须早于 evictIfNeeded，见那里的注释）
       return p
     },
 
     release(id: string): void {
+      const n = countOf(id)
+      // 未知 id / 已归零：无害空操作，且计数绝不为负
+      if (n <= 0) {
+        refs.delete(id)
+        return
+      }
+      if (n > 1) {
+        refs.set(id, n - 1)
+        return // 还有别人挂着，撤了就是打死他的图
+      }
+      refs.delete(id)
       const url = urls.get(id)
-      if (!url) return // 未知 id：无害空操作
+      if (!url) return
       urls.delete(id)
       revoke(url)
     },
@@ -202,6 +289,8 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
       generation += 1
       for (const url of urls.values()) revoke(url)
       urls.clear()
+      // 拆除口**无视计数**: 分区都没了，谁持有已经不重要，留着才是泄漏
+      refs.clear()
       // 在飞的加载不取消 —— 它们回来时会撞上世代号校验并自行撤销
     },
   }
