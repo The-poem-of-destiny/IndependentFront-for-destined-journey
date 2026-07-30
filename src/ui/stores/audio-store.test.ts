@@ -70,6 +70,7 @@ import { useAudioStore } from './audio-store'
 import { useUIStore } from './ui-store'
 import { getAudioManager, resetAudioManager } from '../lib/audio-singleton'
 import { __setFolderTestHooks, __resetFolderTestHooks } from '../lib/audio-folder'
+import { hashMediaBlob } from '../lib/media-hash'
 import type { AudioHandleRecord } from '@engine/types'
 
 // ═══════════════════════════════════════════════════════════
@@ -173,6 +174,7 @@ beforeEach(() => {
 
 afterEach(() => {
   __resetFolderTestHooks()
+  vi.unstubAllGlobals() // 上传补 hash 那组会替掉 crypto，别漏给下一个用例
 })
 
 // ═══════════════════════════════════════════════════════════
@@ -514,6 +516,48 @@ describe('audio-store · 文件夹生命周期', () => {
 // ═══════════════════════════════════════════════════════════
 
 const audioFile = (name: string) => new File(['x'], name, { type: 'audio/mpeg' })
+
+describe('audio-store · 上传补 hash (D12/§4.4)', () => {
+  /**
+   * 回归钉子。缺陷原貌: 哈希只住在 asset-zip.ts 里，上传路径不算 hash。上传来的轨是
+   * `source:'blob'`，会被打进素材导出包；重新导入时计划器无 hash 可比，回落
+   * `uniqueAudioName`，克隆出一条 ` (2)` —— 素材那半边幂等、音频这半边克隆，
+   * 正是 D12 点名的"半套幂等"。
+   */
+  it('上传写入的行带上 SHA-256，且与 media-hash 对同一份字节算出的值一致', async () => {
+    const store = useAudioStore()
+    await store.init()
+
+    const file = audioFile('夜行曲.mp3')
+    const created = await store.uploadFiles([file])
+
+    expect(created).toHaveLength(1)
+    expect(created[0].hash).toMatch(/^[0-9a-f]{64}$/)
+    // 落库的那一行也带着（不是只在返回值上）
+    expect(trackRows.get(created[0].id)?.hash).toBe(created[0].hash)
+    // 与导入路径落在同一个哈希空间 —— 否则去重永远比不中
+    expect(created[0].hash).toBe(await hashMediaBlob(file))
+  })
+
+  it('同样字节不同文件名 → 同一个 hash（去重看字节，不看名字）', async () => {
+    const store = useAudioStore()
+    await store.init()
+    const created = await store.uploadFiles([audioFile('甲.mp3'), audioFile('乙.mp3')])
+    expect(created[0].hash).toBe(created[1].hash)
+  })
+
+  it('crypto.subtle 不可用时上传照样成功，只是没有 hash —— 绝不因哈希失败挡住上传', async () => {
+    vi.stubGlobal('crypto', {})
+    const store = useAudioStore()
+    await store.init()
+
+    const created = await store.uploadFiles([audioFile('夜行曲.mp3')])
+
+    expect(created).toHaveLength(1)
+    expect(created[0].hash).toBeUndefined()
+    expect(trackRows.size).toBe(1) // 行照样建成了
+  })
+})
 
 describe('audio-store · 名字唯一性（仅新写入）', () => {
   it('上传撞名自动编号，绝不失败', async () => {

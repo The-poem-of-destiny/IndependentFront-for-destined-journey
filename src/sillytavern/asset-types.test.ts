@@ -1,0 +1,242 @@
+/**
+ * asset-types.test.ts — 素材类型规则与扩展名表
+ *
+ * 覆盖:
+ * 1. categoryForType 派生（v1 恒 character）
+ * 2. isAssetTypeToken **整段相等**，绝不子串 —— `立绘bg` 含 `立绘` 是本文件
+ *    最要紧的那条断言
+ * 3. 扩展名路由表: 图片七种 / 视频只有 mp4 / 无 svg / 无 webm（webm 归音频）
+ * 4. 媒体规则 (D7): 立绘 拒 mp4，头像 与 立绘bg 收
+ * 5. 取景夹逼 clampAssetFraming: NaN / 越界 / 缺字段 / 非数字 一律收成可渲染值
+ */
+
+import { describe, it, expect } from 'vitest';
+import {
+  categoryForType,
+  isAssetTypeToken,
+  ASSET_MIME_BY_EXTENSION,
+  ASSET_FILE_EXTENSIONS,
+  ASSET_IMAGE_EXTENSIONS,
+  ASSET_VIDEO_EXTENSIONS,
+  isAssetExtension,
+  isImageExtension,
+  isVideoExtension,
+  mimeForAssetExtension,
+  allowsVideo,
+  isMediaAllowed,
+  clampAssetFraming,
+  isDefaultAssetFraming,
+  ASSET_FRAMING_MIN_SCALE,
+  ASSET_FRAMING_MAX_SCALE,
+} from './asset-types';
+import { AUDIO_MIME_BY_EXTENSION } from './audio-names';
+import { ASSET_TYPES, DEFAULT_ASSET_FRAMING } from './types';
+
+describe('ASSET_TYPES', () => {
+  it('v1 恰好三个类型', () => {
+    expect(ASSET_TYPES).toEqual(['头像', '立绘', '立绘bg']);
+  });
+});
+
+describe('categoryForType', () => {
+  it('三个类型都是 character（v1 只有角色美术）', () => {
+    for (const type of ASSET_TYPES) {
+      expect(categoryForType(type)).toBe('character');
+    }
+  });
+});
+
+describe('isAssetTypeToken', () => {
+  it('三个 token 整段命中', () => {
+    expect(isAssetTypeToken('头像')).toBe(true);
+    expect(isAssetTypeToken('立绘')).toBe(true);
+    expect(isAssetTypeToken('立绘bg')).toBe(true);
+  });
+
+  it('🔴 绝不子串匹配 —— 含 token 的更长 segment 不算命中', () => {
+    // 这条是整个解析器的地基: 若用 includes，`立绘bg` 会被当成 `立绘`+`bg`
+    expect(isAssetTypeToken('立绘bg2')).toBe(false);
+    expect(isAssetTypeToken('大头像')).toBe(false);
+    expect(isAssetTypeToken('头像图')).toBe(false);
+    expect(isAssetTypeToken('半身立绘')).toBe(false);
+  });
+
+  it('不 trim、不折叠大小写（D2 素材名不做归一化）', () => {
+    expect(isAssetTypeToken(' 头像')).toBe(false);
+    expect(isAssetTypeToken('头像 ')).toBe(false);
+    expect(isAssetTypeToken('立绘BG')).toBe(false);
+  });
+
+  it('空串与任意噪音都不是 token', () => {
+    expect(isAssetTypeToken('')).toBe(false);
+    expect(isAssetTypeToken('微笑')).toBe(false);
+    expect(isAssetTypeToken('IMG')).toBe(false);
+  });
+});
+
+describe('ASSET_MIME_BY_EXTENSION', () => {
+  it('图片七种，MIME 对得上', () => {
+    expect(ASSET_MIME_BY_EXTENSION.png).toBe('image/png');
+    expect(ASSET_MIME_BY_EXTENSION.jpg).toBe('image/jpeg');
+    expect(ASSET_MIME_BY_EXTENSION.jpeg).toBe('image/jpeg');
+    expect(ASSET_MIME_BY_EXTENSION.jpe).toBe('image/jpeg');
+    expect(ASSET_MIME_BY_EXTENSION.webp).toBe('image/webp');
+    expect(ASSET_MIME_BY_EXTENSION.avif).toBe('image/avif');
+    expect(ASSET_MIME_BY_EXTENSION.gif).toBe('image/gif');
+    expect(ASSET_IMAGE_EXTENSIONS).toHaveLength(7);
+  });
+
+  it('视频只有 mp4', () => {
+    expect(ASSET_VIDEO_EXTENSIONS).toEqual(['mp4']);
+    expect(ASSET_MIME_BY_EXTENSION.mp4).toBe('video/mp4');
+  });
+
+  it('不含 svg（能带脚本的文档格式，§2.4 排除）', () => {
+    expect(ASSET_MIME_BY_EXTENSION.svg).toBeUndefined();
+    expect(isAssetExtension('svg')).toBe(false);
+  });
+
+  it('不含 webm —— 它归音频，改判是回退 (D8)', () => {
+    expect(ASSET_MIME_BY_EXTENSION.webm).toBeUndefined();
+    expect(isAssetExtension('webm')).toBe(false);
+    // 真的还在音频表里（这条断言在有人手滑搬走 webm 时会响）
+    expect(AUDIO_MIME_BY_EXTENSION.webm).toBe('audio/webm');
+  });
+
+  it('与音频扩展名表**零交集** —— 否则 zip 按扩展名路由会二义 (§5.1)', () => {
+    const audio = new Set(Object.keys(AUDIO_MIME_BY_EXTENSION));
+    const overlap = ASSET_FILE_EXTENSIONS.filter((ext) => audio.has(ext));
+    expect(overlap).toEqual([]);
+  });
+
+  it('ASSET_FILE_EXTENSIONS = 图片 + 视频', () => {
+    expect([...ASSET_FILE_EXTENSIONS].sort()).toEqual(
+      [...ASSET_IMAGE_EXTENSIONS, ...ASSET_VIDEO_EXTENSIONS].sort(),
+    );
+  });
+});
+
+describe('扩展名分类与查表', () => {
+  it('大小写与前导点都认', () => {
+    expect(isAssetExtension('PNG')).toBe(true);
+    expect(isAssetExtension('.png')).toBe(true);
+    expect(isAssetExtension(' .PNG ')).toBe(true);
+    expect(mimeForAssetExtension('.MP4')).toBe('video/mp4');
+  });
+
+  it('图片 / 视频互斥', () => {
+    expect(isImageExtension('png')).toBe(true);
+    expect(isVideoExtension('png')).toBe(false);
+    expect(isVideoExtension('mp4')).toBe(true);
+    expect(isImageExtension('mp4')).toBe(false);
+  });
+
+  it('不认识的扩展名给 undefined，不给兜底 MIME', () => {
+    expect(mimeForAssetExtension('txt')).toBeUndefined();
+    expect(mimeForAssetExtension('')).toBeUndefined();
+    expect(isAssetExtension('txt')).toBe(false);
+    expect(isAssetExtension('')).toBe(false);
+  });
+});
+
+describe('allowsVideo (D7)', () => {
+  it('头像 允许 —— 圆形裁切，什么都不合成，不需要 alpha', () => {
+    expect(allowsVideo('头像')).toBe(true);
+  });
+
+  it('立绘bg 允许 —— 整幅铺满', () => {
+    expect(allowsVideo('立绘bg')).toBe(true);
+  });
+
+  it('立绘 拒绝 —— 抠像立牌需要合成 alpha，mp4 没有', () => {
+    expect(allowsVideo('立绘')).toBe(false);
+  });
+});
+
+describe('isMediaAllowed', () => {
+  it('图片对三个类型都合法', () => {
+    for (const type of ASSET_TYPES) {
+      expect(isMediaAllowed(type, 'png')).toBe(true);
+      expect(isMediaAllowed(type, 'webp')).toBe(true);
+    }
+  });
+
+  it('mp4 只在 头像 / 立绘bg 上合法', () => {
+    expect(isMediaAllowed('头像', 'mp4')).toBe(true);
+    expect(isMediaAllowed('立绘bg', 'mp4')).toBe(true);
+    expect(isMediaAllowed('立绘', 'mp4')).toBe(false);
+  });
+
+  it('未知扩展名一律不合法，与类型无关', () => {
+    for (const type of ASSET_TYPES) {
+      expect(isMediaAllowed(type, 'svg')).toBe(false);
+      expect(isMediaAllowed(type, 'webm')).toBe(false);
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 取景夹逼 (AssetFraming)
+// ═══════════════════════════════════════════════════════════
+
+describe('clampAssetFraming', () => {
+  it('默认值就是「顶对齐、水平居中、不放大」', () => {
+    expect(DEFAULT_ASSET_FRAMING).toEqual({ x: 50, y: 0, scale: 1 });
+  });
+
+  it('undefined / null / 非对象 一律得到默认值的副本（不是同一个对象）', () => {
+    for (const input of [undefined, null, 42, '50', [] as unknown]) {
+      expect(clampAssetFraming(input)).toEqual(DEFAULT_ASSET_FRAMING);
+    }
+    const got = clampAssetFraming(undefined);
+    expect(got).not.toBe(DEFAULT_ASSET_FRAMING);
+    // 拿到的副本可写 —— 默认值本身冻结，改副本不该改到它
+    got.x = 10;
+    expect(DEFAULT_ASSET_FRAMING.x).toBe(50);
+  });
+
+  it('缺字段的部分对象逐字段补默认值', () => {
+    expect(clampAssetFraming({ x: 12 })).toEqual({ x: 12, y: 0, scale: 1 });
+    expect(clampAssetFraming({ y: 80 })).toEqual({ x: 50, y: 80, scale: 1 });
+    expect(clampAssetFraming({ scale: 2 })).toEqual({ x: 50, y: 0, scale: 2 });
+  });
+
+  it('NaN / Infinity 退回默认值 —— 裸夹逼拦不住 NaN，这条是本组的重点', () => {
+    expect(clampAssetFraming({ x: NaN, y: NaN, scale: NaN })).toEqual(DEFAULT_ASSET_FRAMING);
+    expect(clampAssetFraming({ x: Infinity, y: -Infinity, scale: Infinity })).toEqual(
+      DEFAULT_ASSET_FRAMING,
+    );
+    // 反例保护: 如果实现改回裸 Math.min/max，这条会红
+    expect(Number.isNaN(clampAssetFraming({ x: NaN }).x)).toBe(false);
+  });
+
+  it('非数字类型（字符串 / null / 对象）也退回默认值，不做隐式转换', () => {
+    expect(clampAssetFraming({ x: '30', y: null, scale: {} })).toEqual(DEFAULT_ASSET_FRAMING);
+  });
+
+  it('x / y 越界收进 [0, 100]', () => {
+    expect(clampAssetFraming({ x: -20, y: 250 })).toEqual({ x: 0, y: 100, scale: 1 });
+    expect(clampAssetFraming({ x: 0, y: 100 })).toEqual({ x: 0, y: 100, scale: 1 });
+  });
+
+  it('scale 收进 [1, 3] —— 小于 1 会在框里露白，所以下限是 1 不是 0', () => {
+    expect(clampAssetFraming({ scale: 0 }).scale).toBe(ASSET_FRAMING_MIN_SCALE);
+    expect(clampAssetFraming({ scale: 0.4 }).scale).toBe(1);
+    expect(clampAssetFraming({ scale: -3 }).scale).toBe(1);
+    expect(clampAssetFraming({ scale: 99 }).scale).toBe(ASSET_FRAMING_MAX_SCALE);
+    expect(clampAssetFraming({ scale: 2.5 }).scale).toBe(2.5);
+  });
+
+  it('合法值原样通过（夹逼不是归一化，不改动本来就对的数）', () => {
+    const ok = { x: 33.3, y: 66.6, scale: 1.75 };
+    expect(clampAssetFraming(ok)).toEqual(ok);
+  });
+
+  it('isDefaultAssetFraming: 只有真正等于默认值才算「没调过」', () => {
+    expect(isDefaultAssetFraming(undefined)).toBe(true);
+    expect(isDefaultAssetFraming({ x: 50, y: 0, scale: 1 })).toBe(true);
+    // 垃圾输入夹逼后就是默认值 —— 所以也算没调过
+    expect(isDefaultAssetFraming({ x: NaN, y: NaN, scale: NaN })).toBe(true);
+    expect(isDefaultAssetFraming({ x: 50, y: 1, scale: 1 })).toBe(false);
+  });
+});

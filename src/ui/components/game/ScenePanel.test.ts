@@ -6,8 +6,9 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount as vtuMount, flushPromises } from '@vue/test-utils'
 import { reactive } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import ScenePanel from './ScenePanel.vue'
 
 // ---- Mocks ----
@@ -26,6 +27,20 @@ vi.mock('../../stores/game-store', () => ({
 vi.mock('../../stores/settings-store', () => ({
   useSettingsStore: () => ({ settings: {} }),
 }))
+
+/**
+ * 🔴 **必须给 Pinia**，哪怕本文件的 game-store / settings-store 都是 mock 的。
+ *
+ * 在场角色位用的 `AssetMedia` 会调 `useAssetStore()`（真 store，本文件没 mock 它）。
+ * 本文件的 fixture 恰好 `characters: []`，所以那条路径今天走不到 —— 但那是巧合，
+ * 不是保障: 谁往 fixture 里加一个在场角色，就会撞上「no active Pinia」而摸不着头脑。
+ * 这里一次性把陷阱填掉。
+ */
+function mount(component: typeof ScenePanel) {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  return vtuMount(component, { global: { plugins: [pinia] } })
+}
 
 function makeNews(id: string, read: boolean) {
   return { id, title: `新闻${id}`, content: `内容${id}`, category: 'world', publishedAt: 100, read }

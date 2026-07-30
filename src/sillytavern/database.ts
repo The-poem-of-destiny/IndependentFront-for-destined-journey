@@ -12,6 +12,7 @@ import type {
   MemoryRecord, PlotEvent, CharacterState, Snapshot, SaveSlot, ApiEndpoint,
   PlotOutline, SaveProfile, ChatMessage,
   AudioTrack, AudioBlobRecord, AudioPlaylist, AudioHandleRecord,
+  AssetMetaRecord, AssetBlobRecord,
 } from './types';
 import type { CreatePreset } from '../ui/stores/create-store';
 import { DEFAULT_SETTINGS } from './types';
@@ -26,7 +27,7 @@ export interface CreatePresetRecord {
 }
 
 const DB_NAME = 'SillyTavernWebDB';
-const DB_VERSION = 12;
+const DB_VERSION = 13;
 
 class AppDatabase extends Dexie {
   // v1-v3 tables (chats 已于 v9 删除)
@@ -61,6 +62,10 @@ class AppDatabase extends Dexie {
 
   // v12 new table (Audio 本地文件夹) — File System Access 目录句柄（结构化克隆存储）
   audioHandles!: Table<AudioHandleRecord>;
+
+  // v13 new tables (Asset System) — 元数据 / 字节 分表存储（设计 §4.1）
+  assetMeta!: Table<AssetMetaRecord>;
+  assetBlobs!: Table<AssetBlobRecord>;
 
   constructor() {
     super(DB_NAME);
@@ -304,6 +309,41 @@ class AppDatabase extends Dexie {
       audioBlobs: 'id',
       audioPlaylists: 'id, name, updatedAt',
       audioHandles: 'id',
+    });
+
+    // v13: 素材子系统 — 新增 assetMeta / assetBlobs 两表（纯增量，无 upgrade 回调，照 v11/v12 先例）
+    //
+    // 照本文件惯例重述全部 17 张旧表 —— 这是**约定**，不是 Dexie 的硬要求:
+    // Dexie 4 的 Version.stores() 跨版本**累加** schema（dexie.js: `extend(storesSpec, ...)` 逐版合并），
+    // 漏写的表会从上一版继承下来；真要删表必须显式写 `表名: null`（见上方 v9 的 `chats: null`）。
+    // 仍然全量重述的理由: 每一版一眼可见完整形状，且与既有 v4–v12 写法一致。
+    // （上方 v12 注释说"漏写即删表"—— 那句对 Dexie 4 不成立，见 database.test.ts 的升版回归测试。）
+    //
+    // 刻意不建的索引/表（设计 §4.1，各有理由）:
+    //   · 独立 hash 索引 —— 去重按 (name, type) 定域，查询走 [name+type] 后在内存里比 hash，
+    //     没有查询在背后的索引就是死重量。
+    //   · assetHandles 表 —— v1 无 File System Access 层级（D5），等 v14 再做一次纯增量升版。
+    //   · category 列 —— 由 type 经 categoryForType() 派生，落库即第二个真相来源（违反铁律4）。
+    this.version(13).stores({
+      lorebooks: 'id, name, updatedAt',
+      presets: 'id, name, updatedAt',
+      settings: 'key',
+      memories: 'id, saveId, createdAt, realTimestamp',
+      plotEvents: 'id, saveId, parentId, status, updatedAt',
+      characters: 'id, saveId, type',
+      snapshots: 'id, saveId, createdAt',
+      saves: 'id, slot, updatedAt',
+      apiEndpoints: 'id, name',
+      plotOutlines: 'id, saveId, updatedAt',
+      saveProfiles: 'saveId, updatedAt',
+      createPresets: 'id, name, updatedAt',
+      messages: 'id, saveId, [saveId+turn]',
+      audioTracks: 'id, name, kind, *tags, updatedAt',
+      audioBlobs: 'id',
+      audioPlaylists: 'id, name, updatedAt',
+      audioHandles: 'id',
+      assetMeta: 'id, name, type, [name+type], createdAt, updatedAt',
+      assetBlobs: 'id',
     });
   }
 }
@@ -986,4 +1026,66 @@ export async function saveAudioHandle(record: AudioHandleRecord): Promise<string
 /** 取消关联音乐文件夹 — 只删句柄，音轨目录保留（missing 由重扫标记） */
 export async function deleteAudioHandle(id: string): Promise<void> {
   await getDatabase().audioHandles.delete(id);
+}
+
+// ========== Asset (v13) ==========
+// 素材库全局共享，不随存档隔离；素材表不进 FullBackup（设计 §4.5）。
+// FullBackup 是一份 JSON，字节进 JSON 就得 base64 —— 严格劣于 Blob（§4.2）。
+// **zip 导出即素材的迁移路径**，且比多一个备份字段更好用。
+// 「清除全部数据」走 db.delete() 整库销毁，新表自动覆盖，无需额外拆卸代码。
+
+/** 获取全部素材元数据（不含字节 — 字节在 assetBlobs 表，仅用到图像时读取） */
+export async function getAssets(): Promise<AssetMetaRecord[]> {
+  const assets = await getDatabase().assetMeta.toArray();
+  return assets;
+}
+
+export async function getAsset(id: string): Promise<AssetMetaRecord | undefined> {
+  const asset = await getDatabase().assetMeta.get(id);
+  return asset;
+}
+
+/**
+ * 保存素材；传入 blob 时同时写入字节。
+ *
+ * 与 saveAudioTrack 同理，偏离本文件"单行 CRUD"惯例改用显式事务：元数据与字节分表存储，
+ * 两写必须原子 —— 半成功会留下有元数据却无字节（渲染即空图）或孤儿 blob 的记录。
+ */
+export async function saveAsset(meta: AssetMetaRecord, blob?: Blob): Promise<string> {
+  const db = getDatabase();
+  meta.updatedAt = Date.now();
+  if (blob) {
+    await db.transaction('rw', db.assetMeta, db.assetBlobs, async () => {
+      await db.assetMeta.put(meta);
+      await db.assetBlobs.put({ id: meta.id, blob });
+    });
+  } else {
+    await db.assetMeta.put(meta);
+  }
+  return meta.id;
+}
+
+/** 删除素材：元数据 + 孤儿字节一并清理，两表同事务 */
+export async function deleteAsset(id: string): Promise<void> {
+  const db = getDatabase();
+  await db.transaction('rw', db.assetMeta, db.assetBlobs, async () => {
+    await db.assetMeta.delete(id);
+    await db.assetBlobs.delete(id);
+  });
+}
+
+/** 批量删除素材 —— 单事务，要么全删要么全不删（批量删一半是用户最难自查的状态） */
+export async function deleteAssets(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = getDatabase();
+  await db.transaction('rw', db.assetMeta, db.assetBlobs, async () => {
+    await db.assetMeta.bulkDelete(ids);
+    await db.assetBlobs.bulkDelete(ids);
+  });
+}
+
+/** 读取素材字节 — 仅需要渲染/导出时调用 */
+export async function getAssetBlob(id: string): Promise<Blob | undefined> {
+  const record = await getDatabase().assetBlobs.get(id);
+  return record?.blob;
 }

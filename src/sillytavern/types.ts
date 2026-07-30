@@ -3074,6 +3074,31 @@ export interface AudioTrack {
   relativePath?: string;
   /** source='file': the file was gone at last scan. Row is kept so tags/playlist slots survive. */
   missing?: boolean;
+  /**
+   * sha-256 of the bytes, written by the unified zip importer (D12 / §4.4).
+   *
+   * **Non-indexed property — needs no Dexie version bump.** Only new writes carry it;
+   * rows without it fall through to `uniqueAudioName` exactly as before, and existing
+   * tracks are never rewritten. Absent whenever `crypto.subtle` was unavailable
+   * (insecure context), in which case dedupe is skipped rather than approximated.
+   */
+  hash?: string;
+  /**
+   * Attribution carried by an import pack's `manifest.json` (D10 / §5.2), and the
+   * only place it can survive — a filename cannot express it.
+   *
+   * **Non-indexed properties — no Dexie version bump**, same as `hash` above: only new
+   * writes carry them, rows without them behave exactly as before, and existing tracks
+   * are never rewritten. Absent when the pack shipped no manifest entry for the file.
+   *
+   * The built-in library already models this per track in `public/audio/manifest.json`
+   * (`credit: "Aoo"` / `license: "PLACEHOLDER-PENDING-REVIEW"`); before these columns
+   * existed those values reached no Dexie row at all, so attribution died at the
+   * loader. Retrofitting it onto a shipped library is materially harder than carrying
+   * it from the start (§12).
+   */
+  credit?: string;
+  license?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -3131,4 +3156,129 @@ export interface AudioPlaybackState {
   masterMuted: boolean;
   /** AudioContext resumed by a user gesture yet (§7) */
   unlocked: boolean;
+}
+
+// ═══════════════════════════════════════════════════════════
+// Asset System — 素材子系统 (Dexie v13)
+// 设计: docs/planning/2026-07-29-asset-management-system-design.md §2 / §4.1
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 素材类型（D4）。三者都可导入，v1 **一个都不渲染** —— v1 只交付管理系统，
+ * 类型先立好，今天打包的素材包才能活到 v2。
+ *
+ * 为什么住在 types.ts 而不是 field-enums.ts: field-enums.ts 只收 **AI 提名**
+ * 的游戏数据枚举（每个都配一个 normalize*()，铁律5 治的是模型输出漂移）。
+ * AssetType 由用户在 UI 控件里选，模型永不提名它 —— 与 AudioSourceKind /
+ * AudioTrackKind 同级，照音频先例走。
+ */
+export type AssetType = '头像' | '立绘' | '立绘bg';
+
+/**
+ * 素材大类。v1 只有 'character' —— 头像/立绘/立绘bg 都是角色美术。
+ * 别名保留是因为 背景/全景/CG/misc 迟早要来；那时这里加联合成员即可。
+ *
+ * **永不落库**（§4.1）: 由 type 经 `categoryForType()` 派生，
+ * 存一份就是第二个真相来源，违反铁律4（每类数据唯一真源）。
+ */
+export type AssetCategory = 'character';
+
+/**
+ * AssetType 的运行时清单 —— 文件名解析要拿它做**整段相等**比对
+ * （见 asset-types.ts 的 isAssetTypeToken）。顺序即 UI 展示顺序。
+ */
+export const ASSET_TYPES: readonly AssetType[] = ['头像', '立绘', '立绘bg'];
+
+/**
+ * 一张素材在它的显示框里怎么摆 —— 焦点 + 缩放，**不改字节**。
+ *
+ * 为什么存在: 右栏那种「顶对齐的大画像」拿到的框比图窄得多，`object-fit: cover`
+ * 只会按框中心裁，于是一张全身立绘被裁成腰腹。裁剪编辑器（另做真裁）解决的是
+ * 「我要从这张源图切出头像和立绘」，而 framing 解决的是**同一张图在不同框里怎么摆**
+ * —— 后者必须可逆、可反复调，所以只能是元数据，绝不能烘进字节。
+ *
+ * 三个字段刻意都是**与框尺寸无关的百分比/倍数**，而不是像素偏移: 框会随主题、
+ * 缩放、窗口宽度变，存像素的话换个主题就全偏了。渲染侧的对应写法是
+ * `object-position: x% y%` + `transform: scale()`（或等价的 background-size/position）。
+ *
+ * **单位与端点是契约的一部分**，别改口径:
+ * - `x` / `y` 是 CSS `object-position` 的百分比语义 —— 0% 表示"图的左/上边贴框的左/上边"，
+ *   100% 表示右/下边贴齐。所以 `y: 0` 就是**顶对齐**（脸在上方的画像最常要的那个）。
+ * - `scale` 的 1 表示"恰好 cover"，即图刚好铺满框、没有多余部分可平移。
+ *   小于 1 会在框里露出空白，所以下限就是 1；上限 3 是「放大到能只取一张脸」够用、
+ *   同时不至于让一张 512px 的图糊成马赛克的经验值。
+ *
+ * ⚠️ 落库但**不建索引**（Dexie v13 的 `assetMeta` 索引串不含它）。Dexie 的
+ * `stores()` 只声明索引，不声明列 —— 非索引字段随对象整体存取，**加它不需要升版**。
+ * 反过来说也别指望能按 framing 查询，也不该有人这么查。
+ *
+ * 归一化: 任何来路不明的 framing（存量行没有、手改过的库、旧版写的越界值）
+ * 一律先过 `clampAssetFraming()`（asset-types.ts）再交给渲染 —— 渲染层永远
+ * 不该收到 NaN，一个 NaN 会让整条 CSS 声明失效，表现成"这张图偶尔没对齐"。
+ */
+export interface AssetFraming {
+  /** 水平焦点 0-100(%)，50 = 居中 */
+  x: number;
+  /** 垂直焦点 0-100(%)，0 = 顶对齐 */
+  y: number;
+  /** 缩放倍数，1 = 恰好 cover；有效范围 [1, 3] */
+  scale: number;
+}
+
+/**
+ * 没调过的那张图该怎么摆 —— **顶对齐、水平居中、不放大**。
+ *
+ * 为什么默认 `y: 0` 而不是 50: 这三个类型全是角色美术，脸在上方。居中裁一张
+ * 全身立绘得到的是腰，顶对齐得到的是脸 —— 后者在"用户还没调过"这个最常见的
+ * 状态下明显更对。
+ *
+ * `Object.freeze` 不是洁癖: 这是个**被到处引用的共享默认值**，谁写一句
+ * `row.framing = DEFAULT_ASSET_FRAMING` 再拖一下滑块，全库的默认值就一起变了。
+ */
+export const DEFAULT_ASSET_FRAMING: AssetFraming = Object.freeze({ x: 50, y: 0, scale: 1 });
+
+/**
+ * 素材元数据 —— 列表用，不含字节（字节在 assetBlobs 表，理由同音频 §3.2）。
+ */
+export interface AssetMetaRecord {
+  id: string;
+  /** 原始字符串，用 `===` 匹配角色名，**不做任何归一化**（D2） */
+  name: string;
+  type: AssetType;
+  /** 情绪/表情，以及碰撞时自动分配的编号（D11） */
+  variant?: string;
+  /** 小写，不含点 */
+  ext: string;
+  mime: string;
+  /** 未压缩前的字节数 */
+  bytes: number;
+  /** sha-256；`crypto.subtle` 不可用时缺省，此时退化到编号路径（§4.4） */
+  hash?: string;
+  /** 素材作者署名 —— 文件名带不了，只能由 manifest.json 补（D10） */
+  credit?: string;
+  license?: string;
+  /**
+   * 这张图在显示框里怎么摆（{@link AssetFraming}）。
+   *
+   * **可选，且缺省就是"没调过"** —— 不是"数据缺失"。存量行、导入进来的新行都没有它，
+   * 读方一律 `clampAssetFraming(row.framing)` 拿到 {@link DEFAULT_ASSET_FRAMING}。
+   * 非索引字段，加它**不需要 Dexie 升版**（见 AssetFraming 的说明）。
+   *
+   * ⚠️ **不进 zip 往返**: 文件名承载不了它，manifest 又只准补 tags/credit/license（D10）。
+   * 所以导出再导入之后 framing 会回到默认 —— 这是刻意的取舍，不是漏做:
+   * 它是"这台机器上这个框里怎么摆"的本地偏好，不是素材本身的属性。
+   */
+  framing?: AssetFraming;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * 素材字节 —— 与元数据分表存储（§4.1），照 AudioBlobRecord 先例。
+ * 分表的意义: `assetMeta.toArray()` 列全库时永不反序列化任何字节。
+ * **存 Blob，永不 base64**（§4.2: base64 +33% 不可回收，且主线程反序列化）。
+ */
+export interface AssetBlobRecord {
+  id: string;                 // === AssetMetaRecord.id
+  blob: Blob;
 }

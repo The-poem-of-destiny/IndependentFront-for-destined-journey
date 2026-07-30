@@ -29,18 +29,68 @@ import type {
 } from '@engine/types';
 
 let initialized = false;
+let clearedThisLoad = false;
 
-async function ensureDb() {
+/**
+ * 准备数据库。`reset` 决定要不要**先把整个库清空**。
+ *
+ * 🔴 **`reset: true` 清的是整个 Dexie 库，不只是存档。** `assetMeta` /
+ * `assetBlobs` / `audioTracks` / `audioBlobs` / `audioPlaylists` 是**全局库、
+ * 刻意不随存档隔离**的（见 CLAUDE.md 的 Dexie 段），所以它们一并没。
+ * 真实表现是: 导入好的立绘/头像/音乐，点一下「🧪 快速测试」就全没了 ——
+ * 而**存档看起来还在**，因为本模块清完紧接着又造了一个新的测试存档。
+ * 丢的东西和幸存的东西都各自"看起来合理"，这就是它极难自查的原因。
+ *
+ * 两个开关分别记账，缺一不可:
+ * - `initialized`: `initializeDatabase()` 负责播下默认预设/设置，正常情况下每次页面
+ *   加载只需跑一次。**但 `clearAllData()` 是 `db.delete()`，会把它播下的东西一并删掉**，
+ *   所以清库成功后必须把这个开关**重置回 `false` 强制补种**。少了这一步就会落进
+ *   "库清空了、默认数据却再也没回来"的状态 —— 只在特定点击顺序下发作:
+ *   先点「保留数据」（`initialized` 置真），再点「清空重建」，清是清了，播种被跳过。
+ * - `clearedThisLoad`: 清库**每次页面加载最多一次**（保持原行为 —— 同一次加载里
+ *   点第二下不再清，这正是会攒出两个「测试冒险」存档的原因）。
+ *   **只在 `clearAllData()` 真正成功之后才置位**: 失败时保持 `false`，下次点击仍会
+ *   重试，而不是把一次失败的清空记成"已经清过了"。
+ *
+ * 清库失败时**不静默吞掉**: 会 `console.warn` 并如实说明"这次是在未清空的库上继续
+ * 造存档"，因为按钮标题承诺的是「清空重建」，不吭声会让用户看到的和实际发生的对不上。
+ *
+ * 想要"造存档但别动我的素材/音乐"，用 {@link createTestSavePreservingData}。
+ */
+async function ensureDb(reset: boolean) {
+  if (reset && !clearedThisLoad) {
+    try {
+      await clearAllData();
+      clearedThisLoad = true;
+      // 整个库连同默认预设/设置都没了，必须重新播种。
+      initialized = false;
+    } catch (err) {
+      // 常见真实成因: 另一个标签页还占着 Dexie 连接，`db.delete()` 被 blocked。
+      console.warn(
+        '[test-save] 清空数据库失败，本次将在**未清空**的库上继续创建测试存档' +
+          '（按钮承诺的「清空重建」这次没有兑现）。常见原因: 另一个标签页占着 Dexie 连接。',
+        err,
+      );
+    }
+  }
   if (!initialized) {
-    try { await clearAllData(); } catch { /* 首次运行可能无数据 */ }
     await initializeDatabase();
     initialized = true;
   }
 }
 
-/** 创建完整测试存档，返回 saveId */
-export async function createTestSave(): Promise<string> {
-  await ensureDb();
+/**
+ * 创建完整测试存档，返回 saveId。
+ *
+ * ⚠️ **默认会先清空整个数据库**（每次页面加载最多清一次）—— 包括**不随存档隔离**的
+ * 素材库与音频库。想留着它们请用 {@link createTestSavePreservingData}。
+ *
+ * @param options.reset 默认 `true`（保持原有的"干净重来"语义）
+ */
+export async function createTestSave(
+  options: { reset?: boolean } = {},
+): Promise<string> {
+  await ensureDb(options.reset ?? true);
 
   const saveId = crypto.randomUUID();
   const playerId = crypto.randomUUID();
@@ -385,4 +435,18 @@ export async function createTestSave(): Promise<string> {
   await saveMemory(memory);
 
   return saveId;
+}
+
+/**
+ * 造一个同样的测试存档，但**一个字节都不清** —— 现有存档、素材库、音频库全留着。
+ *
+ * 为什么单独有这么一个口子: 素材/立绘/音乐是**手动导入、成本很高**的东西，而
+ * {@link createTestSave} 的"干净重来"会连它们一起清掉（它们是全局库，不随存档隔离）。
+ * 调试渲染面时想要的是"给我一个能进去的存档"，不是"把我刚导入的图全删了"。
+ *
+ * 代价是每点一次就多一个「测试冒险」存档 —— 这是有意的:
+ * 与其猜哪个该删，不如让删除留给用户显式操作。
+ */
+export async function createTestSavePreservingData(): Promise<string> {
+  return createTestSave({ reset: false });
 }

@@ -2,6 +2,8 @@
 import { computed, ref } from 'vue'
 import { useGameStore } from '../../stores/game-store'
 import { useHoverPopup } from '../../composables/useHoverPopup'
+import AssetMedia from '../shared/AssetMedia.vue'
+import { ASSET_TYPE_FALLBACK_CHAIN } from '@engine/asset-resolve'
 import { useSettingsStore } from '../../stores/settings-store'
 import { markNewsRead } from '@engine/save-profile'
 import { getAffectionLabel } from '@engine/affection-system'
@@ -292,8 +294,12 @@ function openCharList() {
           @focus="thoughtPop.onFocus($event, char.id)"
           @blur="thoughtPop.hide"
         >
+          <!-- ⚠️ `.npc-portrait` 同时是心声气泡的 anchorSelector（见上方 thoughtPop），
+               类必须留在**外层**元素上；素材只能塞进它里面。
+               46×58 的 4:5 竖幅 = 立牌形状，所以走**立牌链** `立绘 → 立绘bg → 头像`:
+               只有头像的角色也能占住这一位（构图不完美，但好过一个首字母的洞）。 -->
           <span class="npc-portrait" :style="{ '--npc-avatar-color': nameColorVar(char.name) }">
-            {{ initialsOf(char.name) }}
+            <AssetMedia :name="char.name" :type="ASSET_TYPE_FALLBACK_CHAIN">{{ initialsOf(char.name) }}</AssetMedia>
           </span>
 
           <span class="npc-main">
