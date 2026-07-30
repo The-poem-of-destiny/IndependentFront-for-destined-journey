@@ -98,6 +98,22 @@ function labelFor(row: AssetMetaRecord): string {
   return row.variant ? row.variant : '主图'
 }
 
+/**
+ * 预览框该用立牌形（4:5）还是方形（1:1）。
+ *
+ * `头像` 是 1:1 —— 渲染面就是圆形裁切进方框（AvatarPanel `.avatar-*`），管理面
+ * 照方形显示才对得上。其余（`立绘` / `立绘bg`）是立牌，走项目既有的 4:5:
+ * ScenePanel `.npc-portrait` 是 46×58、CharacterPortrait 是 `aspect-ratio: 4/5`，
+ * 这里**沿用**而不是新造一个比例。
+ *
+ * 写成「不是头像即立牌」而非列举两个类型: 素材类型是要长的（背景 / CG），
+ * 而新类型基本都是横竖构图的画面，落进立牌形比落进方形更接近事实；
+ * 真出现方形新类型时，改这一行即可。
+ */
+function isStandeeType(type: AssetType): boolean {
+  return type !== '头像'
+}
+
 // ═══ 行内改名（全字段，D14）═══════════════════════════════
 
 const editingId = ref('')
@@ -279,8 +295,20 @@ async function removeRow(row: AssetMetaRecord): Promise<void> {
         <div v-for="row in sec.rows" :key="row.id" class="asset-row">
           <!-- 预览。mp4 用 <video muted playsinline>：静音 + 内联播放不需要用户手势，
                素材没有音频那套自动播放税。刻意不 autoplay —— 抽屉给的是 controls，
-               动不动由用户决定，reduced-motion 下也就无需另开分支。 -->
-          <span class="thumb">
+               动不动由用户决定，reduced-motion 下也就无需另开分支。
+
+               预览框**按类型定形**（见 .thumb / .thumb-standee）: 头像是 1:1，
+               立绘与立绘bg 是 4:5 立牌 —— 与 ScenePanel `.npc-portrait`（46×58）和
+               CharacterPortrait 同一个比例，不发明第三种答案。
+
+               📌 **不要往 src 后面接 `#t=0.1`**（那个"逼出封面帧"的老偏方）。
+               实测过（Chrome 150，真 blob: URL + 真 mp4）: 媒体片段在 blob URL 上
+               确实生效（currentTime 变成 0.1、不报错），但它**没有必要** —— 这里的
+               源永远是 IndexedDB 铸出来的 blob:，是本地字节，`preload="metadata"`
+               照样一路读到 readyState 4，第 0 帧本来就画出来了（把元素 drawImage
+               到 canvas，像素和非零）。加了只会让 src 与 LRU 里缓存的那串 URL 不再
+               相等，白白多一个不变量。 -->
+          <span class="thumb" :class="{ 'thumb-standee': isStandeeType(row.type) }">
             <video
               v-if="isVideoExtension(row.ext) && thumbFor(row.id)"
               class="thumb-media"
@@ -299,64 +327,68 @@ async function removeRow(row: AssetMetaRecord): Promise<void> {
             <span v-else class="thumb-blank" role="img" aria-label="预览不可用">—</span>
           </span>
 
-          <span class="row-label">{{ labelFor(row) }}</span>
-          <span v-if="!row.variant" class="base-badge">主图</span>
-          <span class="row-meta">{{ row.ext.toUpperCase() }}</span>
-          <span class="row-meta">{{ fmtBytes(row.bytes) }}</span>
+          <!-- 预览一大，标签与按钮就必须自成一列 —— 否则它们会被当成预览的同级项
+               参与换行，在一个 260px 高的方框旁边散成好几段。 -->
+          <div class="row-body">
+            <span class="row-label">{{ labelFor(row) }}</span>
+            <span v-if="!row.variant" class="base-badge">主图</span>
+            <span class="row-meta">{{ row.ext.toUpperCase() }}</span>
+            <span class="row-meta">{{ fmtBytes(row.bytes) }}</span>
 
-          <AppButton
-            variant="secondary"
-            size="sm"
-            :disabled="!row.variant"
-            @click="makePrimary(row)"
-          >设为主图</AppButton>
-          <!-- 视频不给裁: 画布只取得到某一帧，而"哪一帧"从来没人指定过。
-               禁用而不是藏起来 —— 藏起来只会让人以为这一行坏了。 -->
-          <button
-            class="icon-btn"
-            :data-crop-action="row.id"
-            :disabled="isVideoExtension(row.ext) || cropLoadingId === row.id"
-            :aria-label="isVideoExtension(row.ext) ? '裁剪（视频无法裁剪）' : '裁剪出立绘与头像'"
-            :title="isVideoExtension(row.ext)
-              ? '视频没法裁剪：画布只取得到某一帧。'
-              : '从这张图裁出立绘与头像'"
-            @click="startCrop(row)"
-          >
-            <i class="fa-solid fa-crop-simple" aria-hidden="true" />
-          </button>
-          <button class="icon-btn" aria-label="重命名" @click="startEdit(row)">
-            <i class="fa-solid fa-pen" aria-hidden="true" />
-          </button>
-          <button class="icon-btn icon-danger" aria-label="删除素材" @click="removeRow(row)">
-            <i class="fa-solid fa-trash" aria-hidden="true" />
-          </button>
+            <AppButton
+              variant="secondary"
+              size="sm"
+              :disabled="!row.variant"
+              @click="makePrimary(row)"
+            >设为主图</AppButton>
+            <!-- 视频不给裁: 画布只取得到某一帧，而"哪一帧"从来没人指定过。
+                 禁用而不是藏起来 —— 藏起来只会让人以为这一行坏了。 -->
+            <button
+              class="icon-btn"
+              :data-crop-action="row.id"
+              :disabled="isVideoExtension(row.ext) || cropLoadingId === row.id"
+              :aria-label="isVideoExtension(row.ext) ? '裁剪（视频无法裁剪）' : '裁剪出立绘与头像'"
+              :title="isVideoExtension(row.ext)
+                ? '视频没法裁剪：画布只取得到某一帧。'
+                : '从这张图裁出立绘与头像'"
+              @click="startCrop(row)"
+            >
+              <i class="fa-solid fa-crop-simple" aria-hidden="true" />
+            </button>
+            <button class="icon-btn" aria-label="重命名" @click="startEdit(row)">
+              <i class="fa-solid fa-pen" aria-hidden="true" />
+            </button>
+            <button class="icon-btn icon-danger" aria-label="删除素材" @click="removeRow(row)">
+              <i class="fa-solid fa-trash" aria-hidden="true" />
+            </button>
 
-          <!-- 行内改名：name / type / variant 全可改；被拒的理由就地写在下面 -->
-          <div v-if="editingId === row.id" class="edit-panel">
-            <!-- 候选是已有的素材名，防的是「同一个角色写成两个名字」（§3.2） -->
-            <input
-              v-model="form.name"
-              class="mini-input"
-              aria-label="名称"
-              placeholder="名称"
-              :list="nameListId"
-              autocomplete="off"
-            />
-            <datalist :id="nameListId">
-              <option v-for="n in knownNames" :key="n" :value="n" />
-            </datalist>
-            <select v-model="form.type" class="mini-select" aria-label="类型">
-              <option v-for="t in ASSET_TYPES" :key="t" :value="t">{{ t }}</option>
-            </select>
-            <input
-              v-model="form.variant"
-              class="mini-input"
-              aria-label="变体（留空即主图）"
-              placeholder="变体，留空即主图"
-            />
-            <AppButton variant="primary" size="sm" @click="saveEdit(row)">保存</AppButton>
-            <AppButton variant="ghost" size="sm" @click="cancelEdit">取消</AppButton>
-            <p v-if="editError" class="field-error">{{ editError }}</p>
+            <!-- 行内改名：name / type / variant 全可改；被拒的理由就地写在下面 -->
+            <div v-if="editingId === row.id" class="edit-panel">
+              <!-- 候选是已有的素材名，防的是「同一个角色写成两个名字」（§3.2） -->
+              <input
+                v-model="form.name"
+                class="mini-input"
+                aria-label="名称"
+                placeholder="名称"
+                :list="nameListId"
+                autocomplete="off"
+              />
+              <datalist :id="nameListId">
+                <option v-for="n in knownNames" :key="n" :value="n" />
+              </datalist>
+              <select v-model="form.type" class="mini-select" aria-label="类型">
+                <option v-for="t in ASSET_TYPES" :key="t" :value="t">{{ t }}</option>
+              </select>
+              <input
+                v-model="form.variant"
+                class="mini-input"
+                aria-label="变体（留空即主图）"
+                placeholder="变体，留空即主图"
+              />
+              <AppButton variant="primary" size="sm" @click="saveEdit(row)">保存</AppButton>
+              <AppButton variant="ghost" size="sm" @click="cancelEdit">取消</AppButton>
+              <p v-if="editError" class="field-error">{{ editError }}</p>
+            </div>
           </div>
         </div>
       </section>
@@ -412,30 +444,68 @@ async function removeRow(row: AssetMetaRecord): Promise<void> {
 .asset-row {
   display: flex;
   align-items: center;
-  gap: var(--theme-spacing-sm);
-  flex-wrap: wrap;
-  padding: var(--theme-spacing-sm) 0;
+  gap: var(--theme-spacing-md);
+  padding: var(--theme-spacing-md) 0;
   border-bottom: 1px solid var(--theme-card-border);
 }
 .asset-row:last-child {
   border-bottom: none;
 }
+/* 标签与操作自成一列，只在这一列内部换行 —— 行本身不再 wrap，
+   于是无论预览多高，按钮都不会被挤到面板外或跑到预览下面去 */
+.row-body {
+  flex: 1;
+  /* 没有它，长变体名会把这一列撑过容器宽度，把按钮推出面板 */
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+  flex-wrap: wrap;
+}
+
+/*
+ * 预览框 —— **按类型定形，且要看得清**。
+ *
+ * 宽度 14rem = 224px，两种形状共用（于是各行的标签起点仍然对齐）:
+ *   头像      1:1 → 224 × 224
+ *   立绘/bg   4:5 → 224 × 280（ScenePanel `.npc-portrait` / CharacterPortrait 同比例）
+ *
+ * 224 这个数不是凑的，是被 `<video controls>` 定死的下限: 原生控制条要到
+ * 约 200px 宽才排得下"播放 + 进度条 + 时间"，再窄浏览器会逐级砍控件，
+ * 到 48px（改版前的尺寸）时整条控制条比画面还大 —— 视频既看不见也拖不动。
+ * `allowsVideo()` 允许 mp4 落在 `头像` 与 `立绘bg` 上，也就是**方形与立牌形都
+ * 可能装视频**，所以两者共用的宽度必须过这条线，取 8px 网格上的 224。
+ */
 .thumb {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 3rem;
-  height: 3rem;
+  width: 14rem;
+  /* 窄视口兜底：框可以缩，但绝不许顶破面板（aspect-ratio 会跟着算高） */
+  max-width: 100%;
+  aspect-ratio: 1 / 1;
   flex-shrink: 0;
   overflow: hidden;
   background: var(--theme-surface-muted);
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-sm);
 }
+/* 立牌形（立绘 / 立绘bg） */
+.thumb-standee {
+  aspect-ratio: 4 / 5;
+}
+/*
+ * `contain` 而非 `cover` —— 与渲染面（AssetMedia / CharacterPortrait 用 cover）
+ * **刻意不同**，因为两边要回答的问题不同:
+ *   渲染面 要的是"填满这个位、别露底"，裁掉边缘是对的；
+ *   管理面 要的是"这张素材到底长什么样" —— 真实比例、透明留白、构图有没有偏，
+ *   一 cover 就全被居中裁掉，而这正是用户来这里要看的东西。
+ * 露出的空白落在 `.thumb` 的 surface-muted 底上，读起来是留白不是缺图。
+ */
 .thumb-media {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 .thumb-blank {
   font-size: 0.875rem;
@@ -559,6 +629,22 @@ async function removeRow(row: AssetMetaRecord): Promise<void> {
   color: var(--theme-error);
   border-color: color-mix(in srgb, var(--theme-error) 45%, var(--theme-card-border));
 }
+/*
+ * 窄视口: 预览与操作列改上下排。
+ *
+ * AppModal `lg` 是 `min(90vw, 720px)`，body 左右各 24px 内边距 —— 到 375px 宽的
+ * 手机上只剩约 289px 可用。224px 的预览虽然仍塞得下，横排却只给操作列留 50 来 px，
+ * 那一列会被压成每个按钮一行。竖排下预览与整条操作列各占满宽，谁也不挤谁。
+ *
+ * 768px 是项目已有的断点（MapPanel.vue），不另立新的。
+ */
+@media (max-width: 768px) {
+  .asset-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .icon-btn {
     transition: none;
