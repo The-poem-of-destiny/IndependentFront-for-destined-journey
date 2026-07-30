@@ -11,6 +11,7 @@ import type { MemoryRecord, ApiEndpoint } from './types';
 import {
   getMemories, getRecentMemories, saveMemory, deleteMemory,
 } from './database';
+import { withProxy } from './api-tools';
 
 // ========== Embedding ==========
 
@@ -24,7 +25,7 @@ export async function computeEmbedding(
   model?: string,
   signal?: AbortSignal,
 ): Promise<number[]> {
-  const url = `${endpoint.baseUrl.replace(/\/+$/, '')}/embeddings`;
+  const url = withProxy(`${endpoint.baseUrl.replace(/\/+$/, '')}/embeddings`);
   const body = JSON.stringify({
     model: model || endpoint.defaultModel,
     input: text,
