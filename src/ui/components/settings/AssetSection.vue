@@ -13,8 +13,11 @@
  * 现算，没有第二个消费者，硬要上提反而是凭空多一层。
  *
  * 边界: 本组件树只调 asset-store 的公开动作，不碰 Dexie、不自己铸 object URL。
- * ⚠️ v1 **不渲染任何素材到游戏内**（设计 §11）: 这个分区是唯一的使用面，
- * AvatarPanel / ScenePanel / CharacterListPanel / StatusOverview 一个都没动。
+ * 📌 ~~v1 不渲染任何素材到游戏内~~ —— **该决策已于 2026-07-29 反转**（设计 D4 / §15.9）。
+ * 这个分区不再是唯一的使用面: StatusOverview（玩家大画像，带取景）、ScenePanel、
+ * CharacterListPanel ×2、CreateStepConfirm 共 5 处都会真的把素材画出来。
+ * 于是这里的每一次删除/改名/设为主图**都会当场改变游戏内的画面** —— 改本组件树时
+ * 别再按"反正看不见"来判断影响面。
  */
 import { computed, onMounted, provide, ref, watch } from 'vue'
 import { useAssetStore } from '../../stores/asset-store'
@@ -80,7 +83,9 @@ watch(() => assets.exporting, (on) => {
     <h3>素材</h3>
     <p class="section-desc">
       管理角色头像与立绘。素材库为全局资源，所有存档共用；它不随存档导出/导入，
-      有自己的一份素材包（见下方「导出素材包」）。v1 只做管理 —— 游戏内暂不渲染任何素材。
+      有自己的一份素材包（见下方「导出素材包」）。导入后会直接用在游戏内的画像位、
+      角色列表与场景栏 —— <strong>名字必须与角色名完全一致</strong>才认得出来
+      （不忽略空格、不忽略大小写），对不上就只显示首字母。
     </p>
 
     <!-- 唯一状态播报区：忙碌态与各段的一次性回执。视觉隐藏，只给辅助技术 -->
