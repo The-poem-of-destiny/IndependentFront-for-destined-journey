@@ -41,6 +41,9 @@ tmp/
 tests/realtime_export/*.json
 tests/realtime_export/log.txt
 
+# 设计评审过程产物（截图/对比图，会话产物非交付物；历史已 tracked 的文件暂保留，新增不追踪）
+artifacts/
+
 # 内置音频素材（测试占位素材，体积大且授权未定，不进仓库）
 # manifest.json / README.md 继续 tracked —— 曲库清单与格式说明是代码的一部分
 public/audio/**/*.mp3
