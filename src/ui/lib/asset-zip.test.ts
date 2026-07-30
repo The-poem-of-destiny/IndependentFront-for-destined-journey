@@ -217,6 +217,131 @@ describe('writeAssetZip → readAssetZip 往返', () => {
 })
 
 // ═══════════════════════════════════════════════════════════
+// 名字保真 (D2) —— 导出端不许执行导入端拒绝的归一化
+// ═══════════════════════════════════════════════════════════
+
+describe('导出不改名', () => {
+  it('前后空白原样往返，不会变成一个被 trim 过的副本', async () => {
+    const bytes = fakeBytes(1, 512)
+    const blob = await writeAssetZip([{ name: ' 苏婉_头像.png ', bytes }])
+    const result = await readAssetZip(blob)
+
+    // 一进一出必须是同一个名字 —— 曾经这里 trim 过，于是 ` 苏婉` 出门变 `苏婉`，
+    // 再导入就成了另一行；两行都在时还会有一行被当碰撞悄悄丢掉
+    expect(result.entries).toHaveLength(1)
+    expect(result.entries[0].path).toBe(' 苏婉_头像.png ')
+    expect(result.entries[0].bytes).toEqual(bytes)
+  })
+
+  it('只差前后空白的两行都活着且互不相同', async () => {
+    const a = fakeBytes(1, 256)
+    const b = fakeBytes(2, 256)
+    const c = fakeBytes(3, 256)
+    const blob = await writeAssetZip([
+      { name: '苏婉_头像.png', bytes: a },
+      { name: ' 苏婉_头像.png', bytes: b },
+      { name: '苏婉_头像.png ', bytes: c },
+    ])
+    const result = await readAssetZip(blob)
+
+    expect(result.entries).toHaveLength(3)
+    const byPath = new Map(result.entries.map((e) => [e.path, e.bytes]))
+    expect(byPath.get('苏婉_头像.png')).toEqual(a)
+    expect(byPath.get(' 苏婉_头像.png')).toEqual(b)
+    expect(byPath.get('苏婉_头像.png ')).toEqual(c)
+  })
+
+  it('纯空白名字是合法的 zip 条目名，照样往返（不再被 trim 成空而抛错）', async () => {
+    const bytes = fakeBytes(4, 128)
+    const blob = await writeAssetZip([{ name: '  .png', bytes }])
+    const result = await readAssetZip(blob)
+    expect(result.entries[0].path).toBe('  .png')
+  })
+
+  it('扩展名带尾随空白照样认得出，且名字原样保留（归一化只用于判路由）', async () => {
+    // 字面扩展名是 `png `/`mp3 `，直接查表查不着 —— 曾经因此被整条当噪音丢掉，
+    // 而引擎的 isAssetExtension 内部本来就 trim，本模块比它更严就是漂移
+    const zipped = zipSync({
+      '苏婉_头像.png ': fakeBytes(1, 64),
+      '战斗主题.mp3 ': fakeBytes(2, 64),
+      '不认识.psd ': fakeBytes(3, 64),
+    })
+    const result = await readAssetZip(zipped)
+    expect(result.entries.map((e) => e.path).sort()).toEqual(
+      ['苏婉_头像.png ', '战斗主题.mp3 '].sort(),
+    )
+    expect(result.skippedNoise).toEqual(['不认识.psd '])
+  })
+
+  it('扩展名大小写照样认（PNG/Mp3），名字仍原样', async () => {
+    const zipped = zipSync({ '苏婉_头像.PNG': fakeBytes(1, 64), '战斗.Mp3': fakeBytes(2, 64) })
+    const result = await readAssetZip(zipped)
+    expect(result.entries.map((e) => e.path).sort()).toEqual(['苏婉_头像.PNG', '战斗.Mp3'].sort())
+  })
+
+  it('大小写不折叠 —— 导出端同样不做归一化', async () => {
+    const blob = await writeAssetZip([
+      { name: 'Su_头像.PNG', bytes: fakeBytes(1, 64) },
+      { name: 'su_头像.png', bytes: fakeBytes(2, 64) },
+    ])
+    const result = await readAssetZip(blob)
+    expect(result.entries.map((e) => e.path).sort()).toEqual(['Su_头像.PNG', 'su_头像.png'].sort())
+  })
+})
+
+describe('导出遇到路径分隔符时出声（D19 兜底）', () => {
+  it('拍平照做，但逐条上报给调用方，好计进导出摘要', async () => {
+    const reports: Array<{ original: string; flattened: string }> = []
+    const blob = await writeAssetZip(
+      [
+        { name: 'sub/苏婉_头像.png', bytes: fakeBytes(1, 64) },
+        { name: 'a\\b\\战斗.mp3', bytes: fakeBytes(2, 64) },
+        { name: '正常_头像.png', bytes: fakeBytes(3, 64) },
+      ],
+      undefined,
+      { onSeparatorInName: (r) => reports.push(r) },
+    )
+
+    expect(reports).toEqual([
+      { original: 'sub/苏婉_头像.png', flattened: '苏婉_头像.png' },
+      { original: 'a\\b\\战斗.mp3', flattened: '战斗.mp3' },
+    ])
+    // 名字合规的那条不上报
+    expect(reports.map((r) => r.original)).not.toContain('正常_头像.png')
+
+    const result = await readAssetZip(blob)
+    expect(result.entries.map((e) => e.path).sort()).toEqual(
+      ['苏婉_头像.png', '战斗.mp3', '正常_头像.png'].sort(),
+    )
+  })
+
+  it('没人接回调时退化为 console.warn 一条汇总 —— 可以没人接，不能没人知道', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await writeAssetZip([{ name: 'sub/苏婉_头像.png', bytes: fakeBytes(1, 64) }])
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0][0])).toContain('sub/苏婉_头像.png')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('全都合规时既不回调也不 warn', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const onSeparatorInName = vi.fn()
+    try {
+      await writeAssetZip([{ name: ' 苏婉_头像.png ', bytes: fakeBytes(1, 64) }], undefined, {
+        onSeparatorInName,
+      })
+      expect(onSeparatorInName).not.toHaveBeenCalled()
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
 // 拍平与噪音
 // ═══════════════════════════════════════════════════════════
 

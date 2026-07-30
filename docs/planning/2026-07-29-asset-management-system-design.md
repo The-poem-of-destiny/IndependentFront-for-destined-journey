@@ -39,6 +39,7 @@ reason is recorded.
 | D16 | **Naming invariant: no segment of `name` or `variant` may equal a type token.** Enforced at import *and* rename | Without it, `format()` → `parse()` is not bijective and the mandatory round-trip test (§5.4) is unsatisfiable. See §2.5. |
 | D17 | **Export carries only `source: 'blob'` audio.** `builtin` and `file` tracks excluded | Exporting the 57 built-in tracks (`license: PLACEHOLDER-PENDING-REVIEW`) into a shareable pack is exactly the redistribution mistake §4.2 avoids. `file` bytes aren't ours and may be unauthorized or `missing`. |
 | D18 | **Hashing happens in the UI layer, before planning.** Entries reach the planner pre-hashed | `crypto.subtle.digest` is async; the planner is pure and synchronous. The seam has to be explicit or the signature lies. |
+| D19 | **A name must survive a round-trip through a zip entry name.** No `/`, no `\`, no leading `.` — rejected at the rename gate. Whitespace **is** allowed and must not be trimmed | Post-review (§16). A separator becomes a *path* in the zip and flattens on re-import; a leading dot becomes a dotfile and is skipped as noise. Neither can round-trip, and both broke the D11 "never two bases" invariant through the allocator. Whitespace is representable, so trimming it would be the export side quietly enforcing a normalization D2 rejects. |
 
 ---
 
@@ -939,7 +940,52 @@ reintroducing `deleteDatabase` turns it red and names the offender.
 One rough edge reported and deliberately not fixed: for the 1.5 s between deletion and `location.reload()`, the
 in-memory stores still list rows that no longer exist. Cosmetic, self-heals on reload.
 
-### 15.6 Two environment facts worth knowing
+### 15.6 Post-merge review round (commit `97e5900` reviewed, fixes follow-on)
+
+An adversarial review of the merged commit found six defects. All six are closed. Fixing them surfaced **four
+more** that the review never saw — each caught by an agent while working on something adjacent.
+
+| # | Defect | Resolution |
+|---|---|---|
+| 1 | **`allocateSlot` was lossy.** It round-tripped through `formatAssetFilename` → `planImport`, whose `basenameOf` flattens at the last separator — so a name containing `/` ran the slot check against the **wrong `(name,type)` group** and could produce **two base rows**, breaking D11. Leading-`.` names read as noise and reported `'failed'`. | The planner now exports `allocateVariantSlot(name, type, desiredVariant, existingRows)` sharing the same private core as its own numbering path. The single-policy property survives; the filename encoding is gone. |
+| 2 | **Export trimmed names, import didn't** (`writeAssetZip` did `basenameOf(name).trim()`), so `" 苏婉"` silently became `苏婉` on round-trip — the export side quietly enforcing a normalization D2 rejects. | Trim removed. Separator flattening kept but made **loud** via `onSeparatorInName` (falling back to `console.warn`) — silent flattening is exactly how this stayed invisible. |
+| 3 | **Prototype pollution** in `buildAssetIndex`: `byName[row.name] ??= {}` with an importable row named `__proto__` writes an own key onto `Object.prototype`. | `Object.create(null)` at every level keyed by user input. Latent in v1 (no production caller) but this is the shipped v2 contract. |
+| 4 | **Single-file import was never built**, despite §1, §2.3 and §7.3 promising it. | `importFiles(files: File[])` reusing the whole pipeline, plus picker/drop support. **The §7.3 naming form was deliberately *not* built** — see below. |
+| 5 | **In-batch audio dedupe** recorded the planned hash under the *post*-`uniqueAudioName` key, so two byte-identical files landed as `(2)` and `(3)`. | Recorded under **both** desired and final keys — both load-bearing, covering the mirror case too. Asset side checked and confirmed correct. |
+| 6 | **Toast copy promised** re-import dedupe unconditionally — false under `hash-unavailable`. | Conditioned on hashing having worked. |
+| 7 | **A mixed drop fired two toasts** (zip half + loose half), against §7.2's "exactly one summary per import". Found while building (4). | New store action **`importAny(files: File[])`** — the UI hands over the whole drop and does **no routing**; the store splits, runs both halves through the shared `executeImport`, merges, emits one toast. `isZipFile` moved into the store with its Windows MIME nuance (`.zip` reports as `x-zip-compressed` or empty type) and four pinned cases. |
+
+**Five defects found while fixing the above, none of which the review saw:**
+
+- **Trailing-space extensions dropped legal files.** The zip routing gate looked up the *literal* extension, so `"苏婉_头像.png "` had extension `"png "`, missed the table, and was discarded as noise. The UI gate had drifted **stricter** than the engine's `isAssetExtension`, which trims internally. Now normalized for the routing decision only, name kept verbatim, and the engine predicate is called directly so the two cannot diverge again.
+- **A second `.trim()` in the store** was silently rewriting names on rename — same D2 violation as (2), different file.
+- **`return executeImport(...)` inside `try/finally`** released the import mutex and reset progress *before* the work ran. Now `return await`.
+- **The progress bar could still move backwards.** The UI's own "denominator changed → reset the high-water mark"
+  rule produced 66% → indeterminate → 25%: a decrease laundered through one spinner frame. Deleting the rule fixed
+  it, because the high-water comparison already subsumed it. **"Rendered ratio never decreases" is now
+  unconditional**, and the logic moved to a tested pure module (`settings/assets/progress.ts`). Found only because
+  the brief said *confirm, don't assume* — inspection would not have caught it.
+
+**On reporting honesty, two upgrades beyond the literal fix.** `readErrors: string[]` replaced a boolean
+"read failed" flag, so one corrupt zip among good images now reports the **real counts and names the failing
+file** in the same notification instead of collapsing into a misleading blanket message; and `nothingChanged`
+suppresses itself when `readErrors` is non-empty, so a failed read can never render as 全部跳过.
+
+> **The through-line worth remembering: removing one wrong normalization made three other bugs visible.** The
+> export-side trim was masking them. That is the strongest available argument that D2's "no normalization" is
+> structural rather than fussy — and an argument for fixing root causes, since a rename-gate patch on (1) would
+> have left (2) and the extension drop buried.
+
+**Why the §7.3 naming form was not built** (a deliberate deviation from the design, recorded here rather than
+silently dropped): a pre-import naming form is a **second naming entry point**, and it would have to re-implement
+the D16 invariant, the D19 gate, and the §5.3 collision allocator. That is precisely the duplication this design
+keeps legislating against — a form validating differently from rename is how `(苏婉, 头像, 立绘)` gets back in.
+With D1's optional type token every filename already parses, so a dropped `photo.png` lands as name `photo` and
+D14's rename — already built, already carrying both gates — is the natural correction point. **The autocomplete
+§7.3 asks for therefore lives in the rename field** (native `<datalist>` over existing names), which is the one
+moment a user is actually weighing a name. It remains the only mitigation for §3.2's unverified-names risk.
+
+### 15.7 Two environment facts worth knowing
 
 - **`@types/node` is not installed**, so any Node builtin referenced from `src/**` is an automatic TS2307/TS2304.
   The engine-import guard test therefore reads sources via Vite's `?raw` through the project aliases rather than

@@ -14,16 +14,19 @@
  *    **修复结果**（③⑧⑬），复用它是免费的，重新发明等于把那次审查再走一遍。
  *    批量结果直接复用 {@link AudioBatchResult} 的形状，不另发明第二个批量回执类型（§6.3）。
  * 2. **分配器只有一套**。改名与设为主图撞位时要编号，编号策略必须与导入器**逐位一致**
- *    （max+1 / 换号不嵌套 / 单空格加整数）。所以这里**不重写分配器**，而是拿一个
- *    合成条目去调 `planImport`，把它的结论读回来 —— 一份规则，三个入口（§5.3
- *    "One collision rule, two entry points"）。重写一份"看起来一样"的分配器，正是这份
- *    设计一直在防的漂移。
+ *    （max+1 / 换号不嵌套 / 单空格加整数），所以这里**不重写分配器**，而是直接调
+ *    引擎导出的 `allocateVariantSlot` —— 一份规则，三个入口（§5.3 "One collision
+ *    rule, two entry points"）。⚠️ 早期版本是把目标行格式化成**文件名**再喂给
+ *    `planImport` 反推，那条路是错的: 文件名是有损载体，名字里带 `/` 的行会被
+ *    `basenameOf` 拍平到另一个组，一个组里能坐出两个基图（详见 allocateSlot）。
  * 3. **导出范围窄于"库里的一切"**（D17）: 素材全导，音频**只导 `source: 'blob'`**。
  *    内置曲目带着 `license: PLACEHOLDER-PENDING-REVIEW`，打进一个可分享的 zip 就是
  *    **再分发占位授权素材** —— 正是仓库 2026-07-28 把那 57 首移出版本库时修掉的错误；
  *    `'file'` 的字节在用户自己的文件夹里，需要活的授权、还可能 `missing`。
  *    **摘要必须把每一项排除都说出来**，否则"导出的包比屏幕上的库小"读起来就是数据丢失。
  * 4. **绝不持久化 object URL**（§7.5）: 调用方存逻辑键，渲染时再解析。
+ * 5. **两个导入入口，一条管线**: `importZip` 与 `importFiles` 只在"字节从哪来"上
+ *    不同，汇合于 `executeImport`。第二条并行管线就是第二套路由与第二套去重。
  *
  * 边界:
  * - 字节读取走注入缝: 本模块持有**一份** {@link createAssetUrlCache}，它的 `loadBlob`
@@ -46,14 +49,17 @@ import {
   getAudioBlob,
   getDatabase,
 } from '@engine/database'
-import { planImport } from '@engine/asset-import-plan'
+import { allocateVariantSlot, planImport } from '@engine/asset-import-plan'
 import type {
+  DecodedEntry,
   ExistingRows,
+  ImportManifest,
   ImportPlan,
   ImportWarning,
-  PlannedSkip,
 } from '@engine/asset-import-plan'
 import { formatAssetFilename, violatesNamingInvariant } from '@engine/asset-filename'
+import { isMediaAllowed } from '@engine/asset-types'
+import { hashMediaBlob } from '../lib/media-hash'
 import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names'
 import {
   readAssetZip,
@@ -114,8 +120,24 @@ export interface AssetGroup {
 
 /** 一次导入的完整回执；`message` 就是那条唯一的汇总提示 */
 export interface AssetImportSummary {
-  /** 压缩包是否读成功；false 时其余计数全为 0，`message` 是人话错误 */
+  /**
+   * 每一个压缩包都读成功了吗。**混合导入时是"与"** —— 一个包读不出来就是 false，
+   * 但那**不掩盖**另一半成功导入的内容（计数照样是真的）。
+   * 具体的读取失败原因在 {@link readErrors} 里，一条也不丢。
+   */
   read: boolean
+  /**
+   * 读取失败的人话原因（每个读不出来的压缩包一条）。
+   *
+   * 与 `read` 分开存在是为了让"致命读取失败"与"读得好好的、只是什么都没变"**可区分**:
+   * 前者要说出哪个包坏了，后者只该说"全部跳过"。混合导入时两种结局可以同时发生。
+   *
+   * **可选**是为了让别处手写的回执字面量（测试替身、UI 的桩数据）不因为新增字段而
+   * 编译不过 —— 本 store 产出的回执一定带着它；读的时候按 `?? []` 兜。
+   */
+  readErrors?: string[]
+  /** 浏览器配额耗尽而中止（不是个案，后面基本也没戏）。可选同上 */
+  quotaHit?: boolean
   /**
    * 用户中途取消了（`cancelImport()`）。
    *
@@ -169,6 +191,11 @@ export type AssetMutationOutcome =
   | 'naming-invariant'
   /** 立绘 + mp4（D7） */
   | 'media-rule'
+  /**
+   * 名字/变体进不了 zip 条目名（D19）: 含 `/` `\` 会在导出包里变成路径、
+   * 再导入时被拍平；以 `.` 开头会被当 dotfile 噪音丢掉。两者都过不了往返。
+   */
+  | 'unrepresentable-name'
   /** 已经是基图，无事可做 */
   | 'already-base'
   | 'failed'
@@ -262,6 +289,49 @@ function audioExportExtension(track: AudioTrack, blob: Blob): string {
   const fromBlob = blob.type ? AUDIO_EXTENSION_BY_MIME[blob.type] : undefined
   if (fromBlob) return fromBlob
   return 'mp3'
+}
+
+/**
+ * 这些 MIME 都表示 zip —— 但**扩展名优先**，MIME 只是兜底（见 {@link isZipFile}）。
+ */
+const ZIP_MIME_TYPES = new Set([
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/x-zip',
+  'multipart/x-zip',
+])
+
+/**
+ * 这个文件是压缩包吗 —— 混合拖拽时的路由依据。
+ *
+ * ⚠️ **先看扩展名，MIME 只兜底**，这不是随手写的顺序: Windows 上 `.zip` 常被报成
+ * `application/x-zip-compressed`，某些情况下 `file.type` 干脆是**空字符串**。
+ * 只信 MIME 会让 Windows 用户拖进来的包被当成"未知扩展名"静默忽略。
+ *
+ * （这份平台知识原本住在 UI 的 `isZipFile` 里；"什么算压缩包"是路由决策，
+ * 跟着导入管线走才不会两边各有一份。）
+ */
+export function isZipFile(file: File): boolean {
+  if (/\.zip$/i.test(file.name)) return true
+  return ZIP_MIME_TYPES.has(file.type)
+}
+
+/**
+ * 名字/变体能不能原样活在一个 zip 条目名里（D19，§5.4 往返的前提）。
+ *
+ * 两类致命字符:
+ * - `/` 与 `\` —— 在包里就是**目录分隔符**，导入侧 `basenameOf` 会拍平，
+ *   `圣殿/内庭_头像.png` 回来就成了 `内庭_头像.png`，行被静默改名。
+ * - 名字**开头**的 `.` —— 导入侧按 dotfile 当噪音丢掉，整条素材消失。
+ *   变体开头的 `.` 无害（basename 以名字开头），所以不拦。
+ *
+ * 空白**不在此列**: 前后空格在 zip 条目名里可表示，D2 要求名字保持原始。
+ */
+function violatesZipEntryName(name: string, variant?: string): boolean {
+  const hasSeparator = (v: string): boolean => v.includes('/') || v.includes('\\')
+  if (hasSeparator(name)) return true
+  if (variant !== undefined && variant !== '' && hasSeparator(variant)) return true
+  return name.startsWith('.')
 }
 
 /** 行排序: 类型顺序 → 基图优先 → 变体名 */
@@ -489,50 +559,71 @@ export const useAssetStore = defineStore('asset', () => {
     ok: boolean
     variant?: string
     renumberedFrom?: string
-    reason?: PlannedSkip['reason']
+    reason?: AssetMutationOutcome
   }
 
   /**
-   * 给一个目标位算终态变体 —— **借导入器的分配器**，不另写一份。
+   * 给一个目标位算终态变体 —— 借导入器**同一个**分配器
+   * （{@link allocateVariantSlot}），不另写一份 max+1。
    *
-   * 做法: 把目标行格式化成文件名，当作一个**合成条目**喂给 `planImport`，读回它
-   * 分配的 `variant` / `renumberedFrom`。于是 max+1、换号不嵌套、单空格加整数
-   * 这三条政策**逐位与导入一致**，且顺带白拿命名不变式（D16）与媒体规则（D7）
-   * 的判定 —— 计划器拒了就是拒了，理由名直接透传给 UI。
+   * 🔴 曾经的做法是把目标行 `formatAssetFilename` 成文件名再喂给 `planImport`
+   * 反推。**那是错的**: 文件名是有损载体，计划器的 `basenameOf` 会在最后一个
+   * 分隔符处拍平，于是名字里带 `/`（`圣殿/内庭`）的行被算到另一个 `(name, type)`
+   * 组上 —— 两行都以为 base 位空着，一个组里坐出**两个基图**，D11 当场破功；
+   * 名字以 `.` 开头还会被判成 dotfile 噪音，表现成莫名其妙的 `'failed'`。
+   * 复用分配器是对的，用文件名当载体是错的 —— 现在只复用后者的槽位计算。
    *
-   * 刻意**不传 hash**: 传了会与自己的库内行撞成 `duplicate`（同 `(name,type)`
-   * 作用域内哈希命中），那是去重语义，不是分配语义。
+   * 合法性三关由这里自己把: D16 命名不变式 / D19 zip 条目名可承载性 / D7 媒体规则。
+   * 之前它们是从 `planImport` 的拒收理由里白拿的，现在换成显式判断 —— 反而更清楚
+   * 谁在管什么。
    */
   function allocateSlot(
     target: { name: string; type: AssetType; variant?: string; ext: string },
     excludeIds: readonly string[] = [],
   ): SlotAllocation {
+    const gate = checkNameGates(target)
+    if (gate !== null) return { ok: false, reason: gate }
+
     const skip = new Set(excludeIds)
-    const existing: ExistingRows = {
-      assets: assets.value
-        .filter((a) => !skip.has(a.id))
-        .map((a) => ({ id: a.id, name: a.name, type: a.type, variant: a.variant, hash: a.hash })),
-      audio: [],
-    }
-    const plan = planImport(
-      [{ path: formatAssetFilename(target), bytes: new Uint8Array(0) }],
-      existing,
-    )
-    const planned = plan.assets[0]
-    if (!planned) {
-      return { ok: false, reason: plan.skips[0]?.reason ?? 'naming-invariant' }
-    }
+    const rows = assets.value.filter((a) => !skip.has(a.id))
+    const allocated = allocateVariantSlot(target.name, target.type, target.variant, rows)
+
     const out: SlotAllocation = { ok: true }
-    if (planned.variant !== undefined) out.variant = planned.variant
-    if (planned.renumberedFrom !== undefined) out.renumberedFrom = planned.renumberedFrom
+    if (allocated.variant !== undefined) out.variant = allocated.variant
+    if (allocated.renumberedFrom !== undefined) out.renumberedFrom = allocated.renumberedFrom
     return out
   }
 
-  /** 计划器的拒收理由 → 可判别结论 */
-  function outcomeForReason(reason: PlannedSkip['reason'] | undefined): AssetMutationOutcome {
-    if (reason === 'mp4-on-立绘') return 'media-rule'
-    if (reason === 'naming-invariant') return 'naming-invariant'
-    return 'failed'
+  /**
+   * 这一行**能不能存在** —— 与"它该占哪个槽位"分开的三道闸门；过不了就拒，不修补。
+   *
+   * - **D16 命名不变式**: name 的任何下划线段、variant 的任何段等于类型 token。
+   *   没有它，`(苏婉, 头像, 变体=立绘)` 一次导出再导入就静默变成
+   *   `(苏婉_头像, 立绘, 无变体)`。
+   * - **D19 zip 条目名可承载性**（新）: 名字/变体带 `/` `\` 会在导出包里变成**路径**，
+   *   再导入时被拍平成别的名字；名字以 `.` 开头在导入侧算 dotfile 噪音、整条被丢掉。
+   *   两者都过不了 §5.4 的往返，所以在**唯一能产生它们的入口**（改名）拦住 ——
+   *   导入侧拍平 basename 在先，本来就造不出这两种名字。
+   *   ⚠️ **空白照原样留着**: 前后空格在 zip 条目名里是可表示的，D2 要求名字保持原始，
+   *   trim 掉等于替用户改名。
+   * - **D7 媒体规则**: mp4 只能落在不需要 alpha 的类型上。
+   *
+   * 归属说明: 这三条里前两条本该与 `violatesNamingInvariant` 并排住在
+   * asset-filename.ts（引擎层，两个入口共用）。D19 暂居此处是因为本次任务的范围
+   * 栅栏不含那个文件；等有人拥有它时，整块搬过去即可，调用点不变。
+   */
+  function checkNameGates(target: {
+    name: string
+    type: AssetType
+    variant?: string
+    ext: string
+  }): AssetMutationOutcome | null {
+    const { name, type, variant, ext } = target
+    if (name === '') return 'naming-invariant'
+    if (violatesNamingInvariant(name, variant)) return 'naming-invariant'
+    if (violatesZipEntryName(name, variant)) return 'unrepresentable-name'
+    if (!isMediaAllowed(type, ext)) return 'media-rule'
+    return null
   }
 
   // ═══ 导入（一键，两个入口共用一份实现 —— D9）═══════════
@@ -545,6 +636,8 @@ export const useAssetStore = defineStore('asset', () => {
   function emptySummary(): AssetImportSummary {
     return {
       read: false,
+      readErrors: [],
+      quotaHit: false,
       cancelled: false,
       assetsAdded: 0,
       audioAdded: 0,
@@ -569,6 +662,8 @@ export const useAssetStore = defineStore('asset', () => {
     }
     return {
       read: true,
+      readErrors: [],
+      quotaHit: false,
       cancelled: false,
       assetsAdded: 0,
       audioAdded: 0,
@@ -640,21 +735,369 @@ export const useAssetStore = defineStore('asset', () => {
   }
 
   /**
-   * 一键导入一个包（§5 / D9）。**编排而已**:
-   * `readAssetZip` → 攒 `ExistingRows` → `planImport` → 照单写行 → 刷新 → **一条**摘要。
-   *
-   * 错误处理照抄音频那套（§7.6）: 逐条 try/catch，失败就 `failed += 1` 然后 `continue`,
-   * **绝不 rethrow、绝不 break**（配额耗尽是唯一的例外 —— 它不是个案，后面基本也没戏），
-   * 结束后按分支报一次: 有失败 → error 且说清两个计数与数据现状；否则有新增 → info；
-   * 一条都没动 → 说"全部跳过"。**如实呈现部分成功。**
+   * "重新导入一遍"这句话在**算不出哈希**的机器上是假的 —— 去重靠哈希，
+   * `hash-unavailable` 时再导一遍会把已有的全部当成新文件、自动编号成 `_2`、`_3`。
+   * 这个代码库对"如实呈现部分成功"是认真的，话术就得跟着真相走。
    */
-  async function importZip(file: File | Blob | Uint8Array): Promise<AssetImportSummary> {
-    if (importing.value) {
-      const busy = emptySummary()
-      busy.message = '已有一个导入正在进行，请等它结束。'
-      notify(busy.message, 'error')
-      return busy
+  function reimportHint(s: AssetImportSummary): string {
+    return s.warnings.includes('hash-unavailable')
+      ? '注意：这台机器上算不出文件哈希（多半是用明文 http 访问的），' +
+          '再导一次**不会**识别出重复，已有的会被再导入一份并自动编号。'
+      : '重新导入同一个包即可补齐 —— 已有的会被识别成重复而跳过。'
+  }
+
+  /**
+   * **一次导入 = 一条提示**（§7.2）。所有入口都在这里收口，包括混合导入合并之后的那份。
+   *
+   * 分支顺序即优先级: 取消 → 配额满 → 有写入失败 → 有新增 → 什么都没变。
+   * 读取失败（坏压缩包）**不是一个独立分支**，而是附在上面任意一条后面 ——
+   * "一个包读不出来 + 十张图导进来了"必须同时说出来: 只说前者是在谎报数据丢失，
+   * 只说后者是在藏起一个真实的失败。
+   */
+  function notifyImportSummary(s: AssetImportSummary): AssetImportSummary {
+    const counts = buildImportMessage(s)
+    const changed = s.assetsAdded + s.audioAdded > 0
+    const readErrors = s.readErrors ?? []
+    // 读取失败的尾巴，附在任何分支后面
+    const readTail =
+      readErrors.length > 0
+        ? `另有 ${readErrors.length} 个文件读取失败：${readErrors.join('；')}`
+        : ''
+
+    let text: string
+    let type: 'info' | 'error'
+
+    if (s.cancelled) {
+      text =
+        `已取消导入：${counts}。取消前写入的内容都留在库里（不是坏数据）。` +
+        reimportHint(s) +
+        (readTail ? ` ${readTail}` : '')
+      type = 'info'
+    } else if (s.quotaHit === true) {
+      text =
+        `${counts}。浏览器存储空间已满，剩下的文件没有继续导入。` +
+        '已导入的内容都已落库并保留；素材字节存在浏览器配额里，几百 MB 的素材包很容易撑满。' +
+        (readTail ? ` ${readTail}` : '')
+      type = 'error'
+    } else if (s.failed > 0) {
+      text =
+        `${counts}。有 ${s.failed} 个文件没能写入（已写入 ${s.assetsAdded + s.audioAdded} 个）。` +
+        `已写入的都完整保留，没写入的库里一个字节都没留下。${reimportHint(s)}` +
+        (readTail ? ` ${readTail}` : '')
+      type = 'error'
+    } else if (changed) {
+      // 有东西进来了就不是"导入失败" —— 但坏包照样说清楚，不藏
+      text = readTail ? `${counts}。${readTail}` : counts
+      type = readTail ? 'error' : 'info'
+    } else if (readErrors.length > 0) {
+      // 纯失败: 什么都没进来，只有坏包
+      text = `导入失败：${readErrors.join('；')}`
+      type = 'error'
+    } else {
+      text = `${counts}（全部跳过，库没有变化）`
+      type = 'info'
     }
+
+    // `message` **就是**用户看到的那句话 —— 回执与提示不该是两套说法
+    s.message = text
+    notify(text, type)
+    return s
+  }
+
+  /**
+   * 把若干半边的回执并成一份 —— 混合导入（若干 zip + 一堆散文件）只该产出一份回执。
+   *
+   * 诚实规则:
+   * - `read` 取**与**，但读取失败的原因逐条留在 `readErrors` 里，绝不让它盖住
+   *   另一半真的导进来的东西；
+   * - 计数逐项相加，`cancelled` / `quotaHit` 取或；
+   * - 告警**取并集**（按首次出现顺序去重）—— 一台算不出哈希的机器，
+   *   两个半边都会报 `hash-unavailable`，用户只需要看到一次。
+   */
+  function mergeSummaries(parts: readonly AssetImportSummary[]): AssetImportSummary {
+    const out = emptySummary()
+    if (parts.length === 0) {
+      out.read = true
+      return out
+    }
+    out.read = parts.every((p) => p.read)
+    const warnings: ImportWarning[] = []
+    const readErrors: string[] = []
+    for (const p of parts) {
+      readErrors.push(...(p.readErrors ?? []))
+      out.cancelled = out.cancelled || p.cancelled
+      out.quotaHit = out.quotaHit === true || p.quotaHit === true
+      out.assetsAdded += p.assetsAdded
+      out.audioAdded += p.audioAdded
+      out.duplicatesSkipped += p.duplicatesSkipped
+      out.renumbered += p.renumbered
+      out.namingConflicts += p.namingConflicts
+      out.mediaRuleSkipped += p.mediaRuleSkipped
+      out.ignored += p.ignored
+      out.failed += p.failed
+      for (const w of p.warnings) if (!warnings.includes(w)) warnings.push(w)
+    }
+    out.warnings = warnings
+    out.readErrors = readErrors
+    out.message = buildImportMessage(out)
+    return out
+  }
+
+  /** 在飞导入的互斥闸 —— 两个入口共用一份，返回非空就表示"别开第二个" */
+  function rejectIfBusy(): AssetImportSummary | null {
+    if (!importing.value) return null
+    const busy = emptySummary()
+    busy.message = '已有一个导入正在进行，请等它结束。'
+    notify(busy.message, 'error')
+    return busy
+  }
+
+  /**
+   * 导入的**公共下半程**: 攒基准行 → `planImport` → 照单写行 → 刷新 → 一条摘要。
+   *
+   * zip 与单文件两个入口在这里汇合（§7.3 承诺的单文件导入不该长出第二条管线）。
+   * 于是路由（`.mp3` 落音频）、D16 拒收、哈希去重、变体编号、署名合并、部分成功回执
+   * 全部**白拿** —— 上半程的差别只有"字节从哪来、清单从哪来"。
+   */
+  async function executeImport(
+    entries: readonly DecodedEntry[],
+    manifest: ImportManifest | undefined,
+    preFilteredNoise: number,
+    signal?: AbortSignal,
+    progress: { base?: number; indeterminate?: boolean } = {},
+  ): Promise<AssetImportSummary> {
+    // ── 攒基准行 ──
+    await refreshAssets()
+    let audioRows: AudioTrack[] = []
+    try {
+      audioRows = await getAudioTracks()
+    } catch {
+      // 音频表读不到 → 当作没有音频行。去重会失效、撞名会编号，但不该整包失败
+      audioRows = []
+    }
+    const existing: ExistingRows = {
+      assets: assets.value.map((a) => ({
+        id: a.id,
+        name: a.name,
+        type: a.type,
+        variant: a.variant,
+        hash: a.hash,
+      })),
+      audio: toExistingAudio(audioRows),
+    }
+
+    // ── 定计划（全部决策都在这一行里发生）──
+    const plan = planImport(entries, existing, manifest)
+    const summary = summarizePlan(plan, preFilteredNoise)
+    // 进度进入第二段（写库）: 单批时这里有诚实的固定分母，可以显示真百分比。
+    // **混合导入是不确定态**（`indeterminate`）: 后面还有几批、每批几行要等各自规划完
+    // 才知道，分母会往上长 —— 那正是会让百分比倒退的情形，所以干脆不给分母。
+    // 同样先写计数、最后翻 phase（见 importZip 开头那段注释）
+    const progressBase = progress.base ?? 0
+    progressDone.value = progressBase
+    progressTotal.value = progress.indeterminate
+      ? 0
+      : progressBase + plan.assets.length + plan.audio.length
+    progressPhase.value = 'write'
+
+    let quotaHit = false
+    const now = Date.now()
+
+    // ── 素材半边 ──
+    for (const planned of plan.assets) {
+      // 取消: 已经写进去的行**如实留着**，只是不再往下写（写库是大包里耗时的那一半）
+      if (signal?.aborted) {
+        summary.cancelled = true
+        break
+      }
+      try {
+        const blob = makeBlob(planned.entry.bytes, planned.mime)
+        if (!blob) {
+          summary.failed += 1
+          continue
+        }
+        const meta: AssetMetaRecord = {
+          id: newId('asset'),
+          name: planned.name,
+          type: planned.type,
+          ext: planned.ext,
+          mime: planned.mime,
+          bytes: planned.entry.bytes.length,
+          createdAt: now,
+          updatedAt: now,
+        }
+        if (planned.variant !== undefined) meta.variant = planned.variant
+        if (planned.entry.hash !== undefined) meta.hash = planned.entry.hash
+        if (planned.credit !== undefined) meta.credit = planned.credit
+        if (planned.license !== undefined) meta.license = planned.license
+        await saveAsset(meta, blob)
+        summary.assetsAdded += 1
+      } catch (e) {
+        summary.failed += 1
+        if (isQuotaError(e)) {
+          quotaHit = true
+          break
+        }
+      } finally {
+        progressDone.value += 1
+      }
+    }
+
+    // ── 音频半边（同一个包、同一次导入 —— §7.2）──
+    if (!quotaHit && !summary.cancelled) {
+      for (const planned of plan.audio) {
+        if (signal?.aborted) {
+          summary.cancelled = true
+          break
+        }
+        try {
+          const blob = makeBlob(planned.entry.bytes, planned.mime)
+          if (!blob) {
+            summary.failed += 1
+            continue
+          }
+          const track: AudioTrack = {
+            id: newId('audio'),
+            name: planned.name,
+            kind: 'music',
+            // 从 zip 进来的字节只能落 IndexedDB：'file' 要目录句柄，'builtin' 是内置清单
+            source: 'blob',
+            mimeType: planned.mime,
+            size: planned.entry.bytes.length,
+            tags: [...planned.tags],
+            createdAt: now,
+            updatedAt: now,
+          }
+          if (planned.entry.hash !== undefined) track.hash = planned.entry.hash
+          // 署名照原样落库（AudioTrack 新增的 credit / license 两列，非索引属性，
+          // 无需升版）。清单存在的全部理由就是让文件名承载不了的署名活下来（D10）——
+          // 导入时丢掉它，等于让这条链条断在最后一步。
+          if (planned.credit !== undefined) track.credit = planned.credit
+          if (planned.license !== undefined) track.license = planned.license
+          await saveAudioTrack(track, blob)
+          summary.audioAdded += 1
+        } catch (e) {
+          summary.failed += 1
+          if (isQuotaError(e)) {
+            quotaHit = true
+            break
+          }
+        } finally {
+          progressDone.value += 1
+        }
+      }
+    }
+
+    // ── 刷新两边的库 ──
+    await refreshAssets()
+    if (summary.audioAdded > 0) {
+      try {
+        // 音频半边写完必须让音频分区看见 —— 调它的**公开动作**，不碰它的内部状态
+        await useAudioStore().refreshTracks()
+      } catch {
+        // 无 Pinia 上下文 / 音频 store 起不来: 素材半边已经落库，不该因此报失败
+      }
+    }
+
+    // ── 首次导入成功才请求持久化（§4.5），永不阻塞 ──
+    if (!persistRequested && summary.assetsAdded + summary.audioAdded > 0) {
+      persistRequested = true
+      await requestPersistence()
+    }
+
+    summary.quotaHit = quotaHit
+    summary.message = buildImportMessage(summary)
+    // ⚠️ **不在这里 notify**: 一次导入只该有一条提示（§7.2），而"一次导入"可能由
+    // 多个半边组成（混合拖拽 = 若干 zip + 一堆散文件）。提示统一由
+    // {@link notifyImportSummary} 在最外层发一次。
+    return summary
+  }
+
+  /**
+   * 读一个压缩包并执行 —— **半边**，不发提示。
+   *
+   * 独立成函数是为了让 `importZip` 与 `importAny` 用同一段逻辑: 一个包读坏了，
+   * 它只是这次导入里失败的**一半**，不该由它决定整次导入怎么播报。
+   */
+  async function runZipHalf(
+    file: File | Blob | Uint8Array,
+    signal: AbortSignal | undefined,
+    progress: { base?: number; indeterminate?: boolean } = {},
+  ): Promise<AssetImportSummary> {
+    let zipResult: Awaited<ReturnType<typeof readAssetZip>>
+    try {
+      const options: ReadAssetZipOptions = {
+        stallTimeoutMs: ASSET_IMPORT_STALL_TIMEOUT_MS,
+        onProgress: onReadProgress,
+      }
+      if (signal) options.signal = signal
+      zipResult = await readAssetZip(file, options)
+    } catch (e) {
+      const summary = emptySummary()
+      // 取消是用户自己按的，不是失败 —— 此时这一半还一个字节都没写
+      if (isAbortError(e, signal)) {
+        summary.read = true
+        summary.cancelled = true
+        return summary
+      }
+      summary.readErrors = [describeZipError(e)]
+      return summary
+    }
+
+    if (signal?.aborted) {
+      const summary = emptySummary()
+      summary.read = true
+      summary.cancelled = true
+      return summary
+    }
+
+    return executeImport(
+      zipResult.entries,
+      zipResult.manifest,
+      zipResult.skippedNoise.length,
+      signal,
+      progress,
+    )
+  }
+
+  /**
+   * 把一批 `File` 解码成计划器的输入并执行 —— **半边**，不发提示。
+   *
+   * 读不出字节的文件既不进计划、也不算失败，差额并进"忽略"（它们没有产生任何后果）。
+   */
+  async function runFilesHalf(
+    files: readonly File[],
+    signal: AbortSignal | undefined,
+    progress: { base?: number; indeterminate?: boolean } = {},
+  ): Promise<AssetImportSummary> {
+    const entries: DecodedEntry[] = []
+    for (const file of files) {
+      if (signal?.aborted) break
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer())
+        const entry: DecodedEntry = { path: file.name, bytes }
+        // 哈希算不出就不带 —— 计划器据此报 hash-unavailable 并回落到编号路径，
+        // 与 zip 那条路同一条降级规则（绝不换第二种哈希）
+        const hash = await hashMediaBlob(file)
+        if (hash !== undefined) entry.hash = hash
+        entries.push(entry)
+      } catch {
+        // 单个文件读不出字节（权限/被移走）不该连累其余
+      }
+    }
+
+    if (signal?.aborted) {
+      const summary = emptySummary()
+      summary.read = true
+      summary.cancelled = true
+      return summary
+    }
+
+    return executeImport(entries, undefined, files.length - entries.length, signal, progress)
+  }
+
+  /** 起一次导入: 上闸、建取消控制器、复位进度。返回本次的 signal 与收尾函数 */
+  function beginImport(): { signal: AbortSignal | undefined; end: () => void } {
     importing.value = true
     // 先把计数写成一致状态，**最后**才翻 phase —— phase 是"这一对计数可以读了"的提交点。
     // 反过来写会露出一个瞬时的错配三元组（新 phase + 旧分母），同步 watcher 与 computed
@@ -666,210 +1109,106 @@ export const useAssetStore = defineStore('asset', () => {
     const Ctor = (globalThis as { AbortController?: new () => AbortController }).AbortController
     const controller = Ctor ? new Ctor() : null
     abortController = controller
-    const signal = controller?.signal
+    return {
+      signal: controller?.signal,
+      end: () => {
+        importing.value = false
+        progressPhase.value = 'idle'
+        // 只清自己那一份: 别把后来者的控制器抹掉
+        if (abortController === controller) abortController = null
+      },
+    }
+  }
 
+  /**
+   * 一键导入一个压缩包（§5 / D9）。
+   *
+   * 错误处理照抄音频那套（§7.6）: 逐条 try/catch，失败就 `failed += 1` 然后 `continue`,
+   * **绝不 rethrow、绝不 break**（配额耗尽是唯一的例外 —— 它不是个案，后面基本也没戏），
+   * 结束后**一条**汇总（分支见 {@link notifyImportSummary}）。**如实呈现部分成功。**
+   */
+  async function importZip(file: File | Blob | Uint8Array): Promise<AssetImportSummary> {
+    const busy = rejectIfBusy()
+    if (busy) return busy
+    const { signal, end } = beginImport()
     try {
-      // ── 读包。AssetZipError 一律包成人话，绝不让它逃到调用方 ──
-      let zipResult: Awaited<ReturnType<typeof readAssetZip>>
-      try {
-        const options: ReadAssetZipOptions = {
-          stallTimeoutMs: ASSET_IMPORT_STALL_TIMEOUT_MS,
-          onProgress: onReadProgress,
-        }
-        if (signal) options.signal = signal
-        zipResult = await readAssetZip(file, options)
-      } catch (e) {
-        const summary = emptySummary()
-        // 取消是用户自己按的，不是失败 —— 此时库还一个字节都没写
-        if (isAbortError(e, signal)) {
-          summary.cancelled = true
-          summary.message = '已取消导入，库没有任何改动。'
-          notify(summary.message, 'info')
-          return summary
-        }
-        summary.message = describeZipError(e)
-        notify(summary.message, 'error')
-        return summary
-      }
-
-      if (signal?.aborted) {
-        const summary = emptySummary()
-        summary.read = true
-        summary.cancelled = true
-        summary.message = '已取消导入，库没有任何改动。'
-        notify(summary.message, 'info')
-        return summary
-      }
-
-      // ── 攒基准行 ──
-      await refreshAssets()
-      let audioRows: AudioTrack[] = []
-      try {
-        audioRows = await getAudioTracks()
-      } catch {
-        // 音频表读不到 → 当作没有音频行。去重会失效、撞名会编号，但不该整包失败
-        audioRows = []
-      }
-      const existing: ExistingRows = {
-        assets: assets.value.map((a) => ({
-          id: a.id,
-          name: a.name,
-          type: a.type,
-          variant: a.variant,
-          hash: a.hash,
-        })),
-        audio: toExistingAudio(audioRows),
-      }
-
-      // ── 定计划（全部决策都在这一行里发生）──
-      const plan = planImport(zipResult.entries, existing, zipResult.manifest)
-      const summary = summarizePlan(plan, zipResult.skippedNoise.length)
-      // 进度进入第二段（写库）: 这里才有诚实的固定分母，可以显示真百分比。
-      // 同样先写计数、最后翻 phase（见 importZip 开头那段注释）
-      progressDone.value = 0
-      progressTotal.value = plan.assets.length + plan.audio.length
-      progressPhase.value = 'write'
-
-      let quotaHit = false
-      const now = Date.now()
-
-      // ── 素材半边 ──
-      for (const planned of plan.assets) {
-        // 取消: 已经写进去的行**如实留着**，只是不再往下写（写库是大包里耗时的那一半）
-        if (signal?.aborted) {
-          summary.cancelled = true
-          break
-        }
-        try {
-          const blob = makeBlob(planned.entry.bytes, planned.mime)
-          if (!blob) {
-            summary.failed += 1
-            continue
-          }
-          const meta: AssetMetaRecord = {
-            id: newId('asset'),
-            name: planned.name,
-            type: planned.type,
-            ext: planned.ext,
-            mime: planned.mime,
-            bytes: planned.entry.bytes.length,
-            createdAt: now,
-            updatedAt: now,
-          }
-          if (planned.variant !== undefined) meta.variant = planned.variant
-          if (planned.entry.hash !== undefined) meta.hash = planned.entry.hash
-          if (planned.credit !== undefined) meta.credit = planned.credit
-          if (planned.license !== undefined) meta.license = planned.license
-          await saveAsset(meta, blob)
-          summary.assetsAdded += 1
-        } catch (e) {
-          summary.failed += 1
-          if (isQuotaError(e)) {
-            quotaHit = true
-            break
-          }
-        } finally {
-          progressDone.value += 1
-        }
-      }
-
-      // ── 音频半边（同一个包、同一次导入 —— §7.2）──
-      if (!quotaHit && !summary.cancelled) {
-        for (const planned of plan.audio) {
-          if (signal?.aborted) {
-            summary.cancelled = true
-            break
-          }
-          try {
-            const blob = makeBlob(planned.entry.bytes, planned.mime)
-            if (!blob) {
-              summary.failed += 1
-              continue
-            }
-            const track: AudioTrack = {
-              id: newId('audio'),
-              name: planned.name,
-              kind: 'music',
-              // 从 zip 进来的字节只能落 IndexedDB：'file' 要目录句柄，'builtin' 是内置清单
-              source: 'blob',
-              mimeType: planned.mime,
-              size: planned.entry.bytes.length,
-              tags: [...planned.tags],
-              createdAt: now,
-              updatedAt: now,
-            }
-            if (planned.entry.hash !== undefined) track.hash = planned.entry.hash
-            // 署名照原样落库（AudioTrack 新增的 credit / license 两列，非索引属性，
-            // 无需升版）。清单存在的全部理由就是让文件名承载不了的署名活下来（D10）——
-            // 导入时丢掉它，等于让这条链条断在最后一步。
-            if (planned.credit !== undefined) track.credit = planned.credit
-            if (planned.license !== undefined) track.license = planned.license
-            await saveAudioTrack(track, blob)
-            summary.audioAdded += 1
-          } catch (e) {
-            summary.failed += 1
-            if (isQuotaError(e)) {
-              quotaHit = true
-              break
-            }
-          } finally {
-            progressDone.value += 1
-          }
-        }
-      }
-
-      // ── 刷新两边的库 ──
-      await refreshAssets()
-      if (summary.audioAdded > 0) {
-        try {
-          // 音频半边写完必须让音频分区看见 —— 调它的**公开动作**，不碰它的内部状态
-          await useAudioStore().refreshTracks()
-        } catch {
-          // 无 Pinia 上下文 / 音频 store 起不来: 素材半边已经落库，不该因此报失败
-        }
-      }
-
-      // ── 首次导入成功才请求持久化（§4.5），永不阻塞 ──
-      if (!persistRequested && summary.assetsAdded + summary.audioAdded > 0) {
-        persistRequested = true
-        await requestPersistence()
-      }
-
-      summary.message = buildImportMessage(summary)
-
-      if (summary.cancelled) {
-        // 取消**不是失败**: 用 info，并把"写进去的留着"这件事说清楚，
-        // 否则用户会以为库处在某种半损坏状态而去手动清理。
-        notify(
-          `已取消导入：${summary.message}。取消前写入的内容都留在库里（不是坏数据），` +
-            '重新导入同一个包即可继续 —— 已有的会被识别成重复而跳过。',
-          'info',
-        )
-      } else if (quotaHit) {
-        notify(
-          `${summary.message}。浏览器存储空间已满，剩下的文件没有继续导入。` +
-            '已导入的内容都已落库并保留；素材字节存在浏览器配额里，几百 MB 的素材包很容易撑满。',
-          'error',
-        )
-      } else if (summary.failed > 0) {
-        notify(
-          `${summary.message}。有 ${summary.failed} 个文件没能写入（已写入 ` +
-            `${summary.assetsAdded + summary.audioAdded} 个）。已写入的都完整保留，` +
-            '没写入的库里一个字节都没留下，重新导入同一个包即可补齐（已有的会被识别成重复而跳过）。',
-          'error',
-        )
-      } else if (summary.assetsAdded + summary.audioAdded > 0) {
-        notify(summary.message, 'info')
-      } else {
-        notify(`${summary.message}（全部跳过，库没有变化）`, 'info')
-      }
-      return summary
+      // ⚠️ 必须 `return await`: 裸 `return promise` 会让 finally 在**执行还没开始**时
+      // 就跑掉 —— 互斥闸提前放开、进度提前复位成 idle，界面看着像导入瞬间结束了
+      return notifyImportSummary(await runZipHalf(file, signal))
     } finally {
-      importing.value = false
-      progressPhase.value = 'idle'
-      // 只清自己那一份: 万一有人在 finally 之前又开了一次（importing 闸拦着，理论上不会），
-      // 也不该把别人的控制器抹掉
-      if (abortController === controller) abortController = null
+      end()
+    }
+  }
+
+  /**
+   * 逐个文件导入（§1 / §7.3 承诺的单文件路径）—— 拖进来几张图、选中一批文件都走这里。
+   *
+   * **不长第二条管线**: 每个 `File` 变成一条 `DecodedEntry`（`path` = 文件名、字节、
+   * 哈希），然后交给与 zip 完全相同的 {@link executeImport}。于是按扩展名路由
+   * （拖进来的 `.mp3` 照样落到音频库）、D16 拒收、`(name,type)` 去重、变体编号、
+   * 部分成功回执**全都白拿**，且行为与解包导入逐位一致。
+   *
+   * 非媒体文件（`.psd` / `.txt`）**算跳过，不算拒绝**: 计划器把它们记成
+   * `unknown-extension`，摘要里并进"忽略无关文件"。
+   *
+   * 没有清单可言（清单只存在于 zip 根），所以这条路径进来的素材没有署名（D10）。
+   * 压缩包混在里面时用 {@link importAny}，别自己分流。
+   */
+  async function importFiles(files: File[]): Promise<AssetImportSummary> {
+    const busy = rejectIfBusy()
+    if (busy) return busy
+    const { signal, end } = beginImport()
+    try {
+      return notifyImportSummary(await runFilesHalf(files, signal))
+    } finally {
+      end()
+    }
+  }
+
+  /**
+   * **混合导入**: 一堆文件里既有压缩包又有散装素材/音频（拖拽的常态）。
+   *
+   * 这是给 UI 的**唯一入口** —— 分流是导入管线自己的事（"什么算压缩包"见
+   * {@link isZipFile}，它带着 Windows 的 MIME 怪癖）。让 UI 自己分流再合并回执，
+   * 就会出现两次 `notify`，而 §7.2 明写**一次导入只产出一条摘要**；
+   * 提示是本层的职责，UI 拿不到它，所以这个洞只能在这里补。
+   *
+   * 压缩包**逐个顺序处理**（不并发）: 写库要按顺序才能让整批的变体编号连续
+   * （`_2`、`_3` 而不是两个 `_2`），并发会让基准行相互看不见。
+   *
+   * 多半边时进度**不给分母**: 后面还有几批、每批几行要等各自规划完才知道，
+   * 分母只会往上长 —— 那正是会让百分比倒退的情形（同解压段的取舍）。
+   */
+  async function importAny(files: File[]): Promise<AssetImportSummary> {
+    const busy = rejectIfBusy()
+    if (busy) return busy
+    const { signal, end } = beginImport()
+    try {
+      const zips = files.filter((f) => isZipFile(f))
+      const loose = files.filter((f) => !isZipFile(f))
+      const multi = zips.length + (loose.length > 0 ? 1 : 0) > 1
+      const parts: AssetImportSummary[] = []
+      let base = 0
+
+      for (const zip of zips) {
+        if (signal?.aborted) break
+        const part = await runZipHalf(zip, signal, { base, indeterminate: multi })
+        parts.push(part)
+        base += part.assetsAdded + part.audioAdded + part.failed
+      }
+      if (loose.length > 0 && !signal?.aborted) {
+        parts.push(await runFilesHalf(loose, signal, { base, indeterminate: multi }))
+      }
+      // 中途取消时后面的半边根本没跑 —— 合并出来的回执也得说出取消这件事
+      if (signal?.aborted && !parts.some((p) => p.cancelled)) {
+        const stub = emptySummary()
+        stub.read = true
+        stub.cancelled = true
+        parts.push(stub)
+      }
+      return notifyImportSummary(mergeSummaries(parts))
+    } finally {
+      end()
     }
   }
 
@@ -1076,17 +1415,17 @@ export const useAssetStore = defineStore('asset', () => {
     const row = findAsset(id)
     if (!row) return { outcome: 'not-found' }
 
-    const name = patch.name !== undefined ? patch.name.trim() : row.name
+    // **不 trim**: 前后空白是名字的一部分（D2 原样保留），而且它在 zip 条目名里
+    // 完全可表示 —— 替用户悄悄改名比留着一个带空格的名字糟得多。
+    const name = patch.name ?? row.name
     const type = patch.type ?? row.type
-    const rawVariant = patch.variant !== undefined ? patch.variant.trim() : row.variant
+    const rawVariant = patch.variant ?? row.variant
+    // 空串变体 = 清空变体（与"无变体"是同一行，见 asset-filename 的空尾巴处理）
     const variant = rawVariant === '' ? undefined : rawVariant
 
-    if (name === '') return { outcome: 'naming-invariant' }
-    // 显式先判一次: 这条闸门要在 UI 上就地提示，不该等到分配器那边间接得出
-    if (violatesNamingInvariant(name, variant)) return { outcome: 'naming-invariant' }
-
+    // 三关（D16 / D19 / D7）在 allocateSlot 里统一判 —— 一份规则，导入与改名共用
     const alloc = allocateSlot({ name, type, variant, ext: row.ext }, [id])
-    if (!alloc.ok) return { outcome: outcomeForReason(alloc.reason) }
+    if (!alloc.ok) return { outcome: alloc.reason ?? 'failed' }
 
     const next: AssetMetaRecord = { ...row, name, type, updatedAt: Date.now() }
     if (alloc.variant === undefined) delete next.variant
@@ -1141,7 +1480,7 @@ export const useAssetStore = defineStore('asset', () => {
     // 现任基图去哪: 它是"撞在基图位上的一行"，所以拿**当前全部行**去算 max+1
     // （基图位算 1 号，已有数字变体照数），得到的号绝不会撞上所选行现在的号。
     const alloc = allocateSlot({ name: base.name, type: base.type, ext: base.ext })
-    if (!alloc.ok) return { outcome: outcomeForReason(alloc.reason) }
+    if (!alloc.ok) return { outcome: alloc.reason ?? 'failed' }
 
     const demoted = withVariant(base, alloc.variant)
     const promoted = withVariant(row, undefined)
@@ -1248,6 +1587,8 @@ export const useAssetStore = defineStore('asset', () => {
     refreshAssets,
     // zip
     importZip,
+    importFiles,
+    importAny,
     cancelImport,
     exportZip,
     // mutations

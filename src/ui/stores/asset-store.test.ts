@@ -70,7 +70,7 @@ import {
   saveAudioTrack,
 } from '@engine/database'
 import { readAssetZip } from '../lib/asset-zip'
-import { useAssetStore } from './asset-store'
+import { isZipFile, useAssetStore } from './asset-store'
 import { useUIStore } from './ui-store'
 
 // ═══════════════════════════════════════════════════════════
@@ -346,7 +346,57 @@ describe('renameAsset', () => {
     const row = makeAssetRow()
     await saveAsset(row)
     await store.refreshAssets()
-    expect((await store.renameAsset(row.id, { name: '   ' })).outcome).toBe('naming-invariant')
+    expect((await store.renameAsset(row.id, { name: '' })).outcome).toBe('naming-invariant')
+  })
+
+  it('前后空白**原样保留**，不 trim（D2: 名字保持原始，且空白在 zip 条目名里可表示）', async () => {
+    const row = makeAssetRow()
+    await saveAsset(row)
+    const store = useAssetStore()
+    await store.init()
+
+    expect((await store.renameAsset(row.id, { name: ' 苏婉 ' })).outcome).toBe('ok')
+    expect(store.findAsset(row.id)?.name).toBe(' 苏婉 ')
+    // 它是与「苏婉」不同的另一个组 —— 严格 === 分组的自然结果
+    expect(store.groups.map((g) => g.name)).toEqual([' 苏婉 '])
+  })
+
+  it('D19: 名字/变体带分隔符、或名字以点开头 → 拒收（进不了 zip 条目名）', async () => {
+    const row = makeAssetRow({ id: 'd19' })
+    await saveAsset(row)
+    const store = useAssetStore()
+    await store.init()
+
+    for (const name of ['圣殿/内庭', '圣殿\\内庭', '.隐藏', './x']) {
+      expect((await store.renameAsset('d19', { name })).outcome).toBe('unrepresentable-name')
+    }
+    expect((await store.renameAsset('d19', { variant: 'a/b' })).outcome).toBe(
+      'unrepresentable-name',
+    )
+    // 一次都没落库
+    expect(store.findAsset('d19')?.name).toBe('苏婉')
+    expect(store.findAsset('d19')?.variant).toBeUndefined()
+  })
+
+  it('D11 回归: 两行改成同一个带分隔符的名字，绝不产生两个基图', async () => {
+    const a = makeAssetRow({ id: 'sep-1', name: 'A' })
+    const b = makeAssetRow({ id: 'sep-2', name: 'B' })
+    for (const r of [a, b]) await saveAsset(r)
+    const store = useAssetStore()
+    await store.init()
+
+    // 旧实现把名字格式化成文件名再喂计划器，basenameOf 在最后一个 `/` 处拍平，
+    // 于是两行都被算到「另一个组」上、都以为 base 位空着 —— 一个组两个基图。
+    expect((await store.renameAsset('sep-1', { name: 'a/b' })).outcome).toBe(
+      'unrepresentable-name',
+    )
+    expect((await store.renameAsset('sep-2', { name: 'a/b' })).outcome).toBe(
+      'unrepresentable-name',
+    )
+
+    const bases = store.assets.filter((r) => r.variant === undefined || r.variant === '')
+    expect(bases).toHaveLength(2)
+    expect(new Set(bases.map((r) => r.name))).toEqual(new Set(['A', 'B'])) // 谁都没改成 a/b
   })
 })
 
@@ -377,6 +427,21 @@ describe('setPrimary', () => {
       .filter((r) => r.variant === undefined || r.variant === '')
     expect(bases).toHaveLength(1)
     expect(bases[0].id).toBe('p-3')
+  })
+
+  it('降级要占的号已经被占：继续 max+1 往上走，绝不覆盖', async () => {
+    // base + _2 + _5 三行，提拔 _2 → 现任基图不能拿 2（它自己就是 2 挪走的位）也不能拿 5
+    const base = makeAssetRow({ id: 'm-base' })
+    const two = makeAssetRow({ id: 'm-2', variant: '2' })
+    const five = makeAssetRow({ id: 'm-5', variant: '5' })
+    for (const r of [base, two, five]) await saveAsset(r)
+    const store = useAssetStore()
+    await store.init()
+
+    expect((await store.setPrimary('m-2')).outcome).toBe('ok')
+    expect(store.findAsset('m-2')?.variant).toBeUndefined()
+    expect(store.findAsset('m-base')?.variant).toBe('6') // max(base=1, 2, 5) + 1
+    expect(store.findAsset('m-5')?.variant).toBe('5') // 没被动过
   })
 
   it('组里本来没有基图 → 一次写入即可提拔', async () => {
@@ -682,6 +747,184 @@ describe('cancelImport', () => {
     const store = useAssetStore()
     expect(() => store.cancelImport()).not.toThrow()
     expect(store.importing).toBe(false)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
+// 6e. importFiles —— 单文件导入走同一条管线 (§7.3)
+// ═══════════════════════════════════════════════════════════
+
+describe('importFiles', () => {
+  const asFile = (name: string, bytes: Uint8Array): File =>
+    new File([bytes.slice().buffer as ArrayBuffer], name)
+
+  it('图片 + 音频 + 杂项混选: 各归各位，杂项算「忽略」而不是失败', async () => {
+    const store = useAssetStore()
+    const res = await store.importFiles([
+      asFile('苏婉_头像.png', fakeBytes(1)),
+      asFile('苏婉_立绘_微笑.png', fakeBytes(2)),
+      asFile('战斗主题.mp3', fakeBytes(3)), // 按扩展名路由 → 落音频库，不是素材
+      asFile('设定稿.psd', fakeBytes(4)),
+      asFile('readme.txt', strToU8('说明')),
+    ])
+
+    expect(res.read).toBe(true)
+    expect(res.assetsAdded).toBe(2)
+    expect(res.audioAdded).toBe(1)
+    expect(res.failed).toBe(0)
+    expect(res.ignored).toBe(2) // psd + txt：跳过，不是拒绝
+    expect(res.message).toContain('忽略无关文件 2')
+
+    expect(await getAssets()).toHaveLength(2)
+    const tracks = await getAudioTracks()
+    expect(tracks).toHaveLength(1)
+    expect(tracks[0].name).toBe('战斗主题')
+    expect(tracks[0].source).toBe('blob')
+    expect(audioRefreshTracks).toHaveBeenCalledTimes(1)
+    expect(toasts()).toHaveLength(1)
+  })
+
+  it('复用同一条管线: 去重 / 编号 / D16 拒收 全都白拿', async () => {
+    const store = useAssetStore()
+    await store.importFiles([asFile('苏婉_头像.png', fakeBytes(1))])
+
+    const again = await store.importFiles([
+      asFile('苏婉_头像.png', fakeBytes(1)), // 同字节 → 哈希去重
+      asFile('苏婉_头像.png', fakeBytes(9)), // 不同字节 → 编号进变体位
+      asFile('苏婉_头像_立绘.png', fakeBytes(7)), // D16: name 里含类型 token
+    ])
+    expect(again.duplicatesSkipped).toBe(1)
+    expect(again.renumbered).toBe(1)
+    expect(again.namingConflicts).toBe(1)
+    // Array#sort 永远把 undefined 排到末尾 —— 基图那行没有变体
+    expect(store.assets.map((a) => a.variant).sort()).toEqual(['2', undefined])
+  })
+
+  it('单文件路径没有清单，所以没有署名（要带署名就打包成 zip）', async () => {
+    const store = useAssetStore()
+    await store.importFiles([asFile('苏婉_头像.png', fakeBytes(1))])
+    expect(store.assets[0].credit).toBeUndefined()
+    expect(store.assets[0].license).toBeUndefined()
+  })
+
+  it('空选择 → 什么都不做，一条「全部跳过」提示', async () => {
+    const store = useAssetStore()
+    const res = await store.importFiles([])
+    expect(res.assetsAdded + res.audioAdded).toBe(0)
+    expect(res.failed).toBe(0)
+    expect(toasts()).toHaveLength(1)
+    expect(toasts()[0].message).toContain('全部跳过')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════
+// 6f. importAny —— 混合拖拽只产出**一条**提示 (§7.2)
+// ═══════════════════════════════════════════════════════════
+
+describe('importAny', () => {
+  const asFile = (name: string, bytes: Uint8Array, type = ''): File =>
+    new File([bytes.slice().buffer as ArrayBuffer], name, { type })
+
+  it('一个 zip + 两个散文件 → 恰好一条提示，计数相加', async () => {
+    const store = useAssetStore()
+    const res = await store.importAny([
+      asFile('pack.zip', typicalZip(), 'application/zip'),
+      asFile('林清_头像.png', fakeBytes(11)),
+      asFile('林清_立绘_微笑.png', fakeBytes(12)),
+    ])
+
+    // zip: 2 素材 + 1 音频；散装: 2 素材
+    expect(res.assetsAdded).toBe(4)
+    expect(res.audioAdded).toBe(1)
+    expect(res.failed).toBe(0)
+    expect(res.read).toBe(true)
+    expect(await getAssets()).toHaveLength(4)
+    expect(await getAudioTracks()).toHaveLength(1)
+
+    // §7.2: 一次导入 = 一条摘要，无论它由几个半边组成
+    const list = toasts()
+    expect(list).toHaveLength(1)
+    expect(list[0].type).toBe('info')
+    expect(list[0].message).toContain('素材 4 新增')
+    expect(list[0].message).toContain('音频 1 新增')
+    expect(res.message).toBe(list[0].message)
+  })
+
+  it('坏 zip + 好散文件: 散文件照常导入，坏包如实点名，仍然只有一条提示', async () => {
+    const whole = typicalZip()
+    const store = useAssetStore()
+    const res = await store.importAny([
+      asFile('broken.zip', whole.slice(0, Math.floor(whole.length / 2)), 'application/zip'),
+      asFile('林清_头像.png', fakeBytes(11)),
+    ])
+
+    // 读取失败**不掩盖**另一半的成功
+    expect(res.assetsAdded).toBe(1)
+    expect(res.read).toBe(false)
+    expect(res.readErrors).toHaveLength(1)
+    expect(await getAssets()).toHaveLength(1)
+
+    const list = toasts()
+    expect(list).toHaveLength(1)
+    expect(list[0].message).toContain('素材 1 新增') // 成功的那半边照样报出来
+    expect(list[0].message).toContain('读取失败') // 坏包也没被藏起来
+  })
+
+  it('告警取并集，两个半边都缺哈希只说一次', async () => {
+    // 让整个环境算不出哈希 → 两个半边各自都会报 hash-unavailable
+    // 只抽掉 subtle（非安全上下文的真实样子），randomUUID 留着 —— 它是 id 与 toast 的来源
+    const realCrypto = globalThis.crypto
+    Object.defineProperty(globalThis, 'crypto', {
+      value: { randomUUID: () => realCrypto.randomUUID() },
+      configurable: true,
+      writable: true,
+    })
+    try {
+      const store = useAssetStore()
+      const res = await store.importAny([
+        asFile('pack.zip', makeZip({ '苏婉_头像.png': fakeBytes(1) })),
+        asFile('林清_头像.png', fakeBytes(11)),
+      ])
+      expect(res.assetsAdded).toBe(2)
+      expect(res.warnings.filter((w) => w === 'hash-unavailable')).toHaveLength(1)
+      expect(toasts()).toHaveLength(1)
+      // 算不出哈希时不许承诺"再导一次会识别成重复"
+      expect(toasts()[0].message).not.toContain('识别成重复而跳过')
+    } finally {
+      Object.defineProperty(globalThis, 'crypto', {
+        value: realCrypto,
+        configurable: true,
+        writable: true,
+      })
+    }
+  })
+
+  it('isZipFile: 扩展名优先，MIME 兜底（Windows 会报 x-zip-compressed 甚至空 type）', () => {
+    expect(isZipFile(asFile('pack.zip', fakeBytes(1), ''))).toBe(true)
+    expect(isZipFile(asFile('PACK.ZIP', fakeBytes(1), ''))).toBe(true)
+    expect(isZipFile(asFile('pack', fakeBytes(1), 'application/x-zip-compressed'))).toBe(true)
+    expect(isZipFile(asFile('pack', fakeBytes(1), 'application/zip'))).toBe(true)
+    expect(isZipFile(asFile('苏婉_头像.png', fakeBytes(1), 'image/png'))).toBe(false)
+  })
+
+  it('全是散文件 / 全是 zip 时行为与单入口一致', async () => {
+    const store = useAssetStore()
+    const onlyFiles = await store.importAny([asFile('苏婉_头像.png', fakeBytes(1))])
+    expect(onlyFiles.assetsAdded).toBe(1)
+    useUIStore().toasts.length = 0
+
+    const onlyZip = await store.importAny([asFile('p.zip', makeZip({ '林清_头像.png': fakeBytes(2) }))])
+    expect(onlyZip.assetsAdded).toBe(1)
+    expect(toasts()).toHaveLength(1)
+  })
+
+  it('空数组 → 一条「全部跳过」，不炸', async () => {
+    const store = useAssetStore()
+    const res = await store.importAny([])
+    expect(res.read).toBe(true)
+    expect(res.assetsAdded + res.audioAdded).toBe(0)
+    expect(toasts()).toHaveLength(1)
+    expect(toasts()[0].message).toContain('全部跳过')
   })
 })
 

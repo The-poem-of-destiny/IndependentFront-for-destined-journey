@@ -6,10 +6,12 @@
  * 2. base vs variant 归位；空串变体等同无变体
  * 3. ★ 撞车决胜确定性: createdAt 最早者胜、同 createdAt 按 id 升序，
  *    且**与数组顺序无关**（打乱输入结论不变）—— 这是本文件最重要的一组
- * 4. 边界: 空输入 / 名字原样保留（不 trim 不折叠大小写，D2）
+ * 4. ★ 原型污染: 名字/变体是攻击者可控字符串（`__proto__.png` 能过导入管线
+ *    的每一道过滤器），构建索引**绝不能**在 `Object.prototype` 上挂键
+ * 5. 边界: 空输入 / 名字原样保留（不 trim 不折叠大小写，D2）
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { buildAssetIndex } from './asset-index';
 import type { AssetMetaRecord, AssetType } from './types';
 
@@ -148,6 +150,53 @@ describe('buildAssetIndex — 撞车决胜（确定性）', () => {
     }
     expect(expected.character['苏婉']?.['头像']?.base).toBe('a');
     expect(expected.character['苏婉']?.['头像']?.variants['微笑']).toBe('d');
+  });
+});
+
+describe('buildAssetIndex — 原型污染 (安全)', () => {
+  /** 每个用例后把可能被挂上的 own 键擦干净，免得污染泄漏到别的测试文件 */
+  function protoKeys(): string[] {
+    return Object.getOwnPropertyNames(Object.prototype);
+  }
+  const pristine = protoKeys();
+  afterEach(() => {
+    for (const key of protoKeys()) {
+      if (!pristine.includes(key)) delete (Object.prototype as Record<string, unknown>)[key];
+    }
+  });
+
+  const dangerous = ['__proto__', 'constructor', 'prototype'];
+
+  it.each(dangerous)('名字为 %s 不写脏 Object.prototype', (name) => {
+    buildAssetIndex([row({ id: 'evil', name, type: '头像' })]);
+    expect(({} as Record<string, unknown>)['头像']).toBeUndefined();
+    expect(Object.prototype).not.toHaveProperty('头像');
+  });
+
+  it('变体为 __proto__ 不写脏 Object.prototype（变体也由用户输入做键）', () => {
+    buildAssetIndex([row({ id: 'evil', name: '苏婉', type: '头像', variant: '__proto__' })]);
+    expect(({} as Record<string, unknown>)['evil']).toBeUndefined();
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+    expect(protoKeys()).toEqual(pristine);
+  });
+
+  it('危险名字仍然照常入索引（防污染不等于丢数据）', () => {
+    const index = buildAssetIndex([
+      row({ id: 'a1', name: '__proto__', type: '头像' }),
+      row({ id: 'a2', name: '__proto__', type: '头像', variant: '__proto__' }),
+    ]);
+    const slot = index.character['__proto__']?.['头像'];
+    expect(slot?.base).toBe('a1');
+    expect(slot?.variants['__proto__']).toBe('a2');
+  });
+
+  it('用户输入做键的层是无原型字典（不继承 toString/hasOwnProperty）', () => {
+    const index = buildAssetIndex([row({ id: 'a1', name: '苏婉', variant: '微笑' })]);
+    expect(Object.getPrototypeOf(index.character)).toBeNull();
+    expect(Object.getPrototypeOf(index.character['苏婉'])).toBeNull();
+    expect(Object.getPrototypeOf(index.character['苏婉']?.['头像']?.variants)).toBeNull();
+    // 于是"名字叫 toString"再也读不出原型上的函数
+    expect(index.character['toString']).toBeUndefined();
   });
 });
 

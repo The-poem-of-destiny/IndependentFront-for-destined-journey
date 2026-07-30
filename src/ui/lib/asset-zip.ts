@@ -9,9 +9,9 @@
  *
  * 反向 import 契约: 引擎层禁止 import `src/ui/`，所以**生产者 import 消费者的
  * 契约**，不是反过来（§6.2）。本模块因此从引擎取三样东西，一样都不本地复制:
- * - `ASSET_MIME_BY_EXTENSION`（asset-types.ts）+ `AUDIO_MIME_BY_EXTENSION`
- *   （audio-names.ts）—— 两张路由表。这里**只用它们判"这条目有没有可能成为
- *   一行数据"**；判 asset 还是 audio 是计划器的事。
+ * - `isAssetExtension`（asset-types.ts）+ `AUDIO_MIME_BY_EXTENSION`（audio-names.ts）
+ *   —— 两张路由表的判据。素材半边直接调引擎的谓词，连归一化口径都不可能分叉；
+ *   这里**只用它们判"这条目有没有可能成为一行数据"**，判 asset 还是 audio 是计划器的事。
  * - `DecodedEntry` / `ImportManifest` / `ImportWarning`（asset-import-plan.ts）
  *   —— 计划器的输入契约。同一份契约声明两遍，就是它悄悄分叉的开始。
  *
@@ -57,7 +57,7 @@
  */
 
 import { AsyncUnzipInflate, Unzip, zip, type UnzipFile } from 'fflate'
-import { ASSET_MIME_BY_EXTENSION } from '@engine/asset-types'
+import { isAssetExtension } from '@engine/asset-types'
 import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names'
 import type {
   DecodedEntry,
@@ -93,14 +93,8 @@ const PUSH_CHUNK_BYTES = 128 * 1024
 /** 停滞看门狗默认时长 —— 最后一块 push 完之后，多久没有新数据就认为包坏了 */
 const DEFAULT_STALL_TIMEOUT_MS = 15_000
 
-/**
- * 两张路由表的扩展名并集 —— **有可能成为一行数据**的文件。
- * 不在这里面的一律在 `onfile` 就筛掉，不解压、不计上限、不返回字节。
- */
-const IMPORTABLE_EXTENSIONS = new Set<string>([
-  ...Object.keys(ASSET_MIME_BY_EXTENSION),
-  ...Object.keys(AUDIO_MIME_BY_EXTENSION),
-])
+/** 音频路由表的扩展名集合（素材那半边直接用引擎的 `isAssetExtension`） */
+const AUDIO_EXTENSIONS = new Set<string>(Object.keys(AUDIO_MIME_BY_EXTENSION))
 
 // ═══════════════════════════════════════════════════════════
 // 类型
@@ -248,10 +242,27 @@ function basenameOf(path: string): string {
   return idx === -1 ? norm : norm.slice(idx + 1)
 }
 
-/** 小写扩展名（不含点）；无扩展名返回空串 */
+/** 扩展名原文（不含点）；无扩展名返回空串。归一化交给 {@link isImportableName} */
 function extensionOf(basename: string): string {
   const dot = basename.lastIndexOf('.')
-  return dot > 0 ? basename.slice(dot + 1).toLowerCase() : ''
+  return dot > 0 ? basename.slice(dot + 1) : ''
+}
+
+/**
+ * 这个 basename 有没有可能成为一行数据 —— 路由闸门的判据。
+ *
+ * 🔴 **扩展名要归一化（trim + 小写），名字本身绝不动。** `"苏婉_头像.png "` 的
+ * 字面扩展名是 `"png "`，直接查表查不着，于是整条被当噪音丢掉 —— 而它明明是张
+ * 合法的 png，且按 D2 名字里的空白必须原样保留。引擎的 `isAssetExtension`
+ * 内部本来就 trim（asset-types.ts 的私有 normalizeExtension），本模块曾经比它更严，
+ * 那是漂移。这里素材半边**直接调引擎的判据**（口径不可能再分叉），音频半边照同一
+ * 套归一化查共享表。
+ */
+function isImportableName(basename: string): boolean {
+  const raw = extensionOf(basename).trim().toLowerCase()
+  const ext = raw.startsWith('.') ? raw.slice(1) : raw
+  if (!ext) return false
+  return isAssetExtension(ext) || AUDIO_EXTENSIONS.has(ext)
 }
 
 /**
@@ -451,7 +462,7 @@ interface InflateConfig {
 function shouldInflate(path: string): boolean {
   if (isNoiseEntry(path)) return false
   if (isRootManifest(path)) return true
-  return IMPORTABLE_EXTENSIONS.has(extensionOf(basenameOf(path)))
+  return isImportableName(basenameOf(path))
 }
 
 function yieldToEventLoop(): Promise<void> {
@@ -798,6 +809,27 @@ interface BlobCtorLike {
   new (parts: BlobPart[], options?: { type?: string }): Blob
 }
 
+/** 名字带路径分隔符时的上报详情 —— D19 上游闸门漏了一条 */
+export interface SeparatorInNameReport {
+  /** 行里原本的名字 */
+  original: string
+  /** 拍平之后实际写进 zip 的名字 */
+  flattened: string
+}
+
+export interface WriteAssetZipOptions {
+  /**
+   * 名字里还带 `/` 或 `\` 时逐条回调。
+   *
+   * 为什么要有这个口子: 拍平是**兜底**，不是正常路径。名字带分隔符意味着上游的
+   * 改名闸门（D19）漏了，调用方该把它计进导出摘要如实说出来，而不是让一条行悄悄
+   * 换了名字出门 —— 静默拍平正是"导出改名"这个缺陷一直没被发现的原因。
+   *
+   * 不传时退化为 `console.warn` 一条汇总: 可以没人接，但不能没人知道。
+   */
+  onSeparatorInName?: (report: SeparatorInNameReport) => void
+}
+
 /**
  * 打一个**导入侧原样接受**的导出包（§5.4）。
  *
@@ -805,8 +837,17 @@ interface BlobCtorLike {
  * 白烧 CPU 换不到体积；清单是文本，给它 level 6。stored 走
  * `UnzipPassThrough`，读侧同样认。
  *
- * 名字一律拍平成 basename；重名**抛错而不是后者覆盖前者** —— zip 的目录是个字典，
- * 静默覆盖就是静默丢文件。
+ * 🔴 **不 trim 名字**（D2）。前后空白在 zip 条目名里是能如实表示的，而导入侧
+ * 按 D2 **不做任何归一化**（不 trim、不折叠大小写）。导出这边一 trim，
+ * `" 苏婉"` 这行出门就变成 `苏婉`，再导入回来就是另一行 —— 若两行同时存在，
+ * 还会有一行被当碰撞悄悄丢掉。**往返一致是本系统自称的最佳测试**，导出端没有
+ * 资格单方面执行一条导入端明确拒绝的归一化规则。
+ *
+ * 分隔符是另一回事，拍平**保留**为兜底: 名字里带 `/` 在 zip 里会变成一层目录，
+ * 根本无法往返。但这属于上游不变量被破坏，所以拍平的同时必须**出声**
+ * （{@link WriteAssetZipOptions.onSeparatorInName}）。
+ *
+ * 重名**抛错而不是后者覆盖前者** —— zip 的目录是个字典，静默覆盖就是静默丢文件。
  *
  * 清单按引擎的 `ImportManifest` 收（分区可缺省），落盘时补成两个分区都在的形状 ——
  * 宽进严出，读侧于是不必判空。
@@ -814,18 +855,37 @@ interface BlobCtorLike {
 export async function writeAssetZip(
   entries: readonly AssetZipWriteEntry[],
   manifest?: ImportManifest,
+  options: WriteAssetZipOptions = {},
 ): Promise<Blob> {
   const payload: Record<string, [Uint8Array, { level: 0 | 6 }]> = {}
+  const flattenedNames: SeparatorInNameReport[] = []
 
   for (const entry of entries) {
-    const name = basenameOf(entry.name).trim()
+    // 刻意不 trim: 见上方 D2 说明
+    const name = basenameOf(entry.name)
     if (!name) {
       throw new AssetZipError('invalid-name', `导出条目缺少有效文件名：${entry.name}`, entry.name)
+    }
+    // 只在"确实改了名字还放行了"时上报；拍平成空的那种已经在上面抛掉了
+    if (name !== entry.name) {
+      flattenedNames.push({ original: entry.name, flattened: name })
     }
     if (Object.prototype.hasOwnProperty.call(payload, name)) {
       throw new AssetZipError('duplicate-name', `导出条目文件名重复：${name}`, name)
     }
     payload[name] = [entry.bytes, { level: 0 }]
+  }
+
+  if (flattenedNames.length) {
+    if (options.onSeparatorInName) {
+      for (const report of flattenedNames) options.onSeparatorInName(report)
+    } else {
+      // 没人接也不能静默 —— 这是上游闸门有洞的信号，值得留下痕迹
+      globalThis.console?.warn?.(
+        `[asset-zip] ${flattenedNames.length} 个导出条目的名字含路径分隔符，已拍平：` +
+          flattenedNames.map((r) => `${r.original} → ${r.flattened}`).join('、'),
+      )
+    }
   }
 
   if (manifest) {

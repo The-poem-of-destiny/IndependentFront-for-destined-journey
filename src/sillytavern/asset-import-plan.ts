@@ -369,9 +369,60 @@ function allocateVariant(
   };
 }
 
+/**
+ * 分配器的**非文件名入口** —— 给导入以外的调用方（改名、设为主图）用。
+ *
+ * 为什么要有它: 编号策略必须只有一套（max+1 / 换号不嵌套 / 单空格加整数），
+ * 于是调用方本来只能把目标行格式化成文件名再喂给 `planImport` 反推 —— 而**文件名
+ * 是有损载体**: `basenameOf` 会在最后一个分隔符处拍平，于是名字里带 `/` 或 `\`
+ * 的行会被算到**另一个 `(name, type)` 组**上，两行都判成"base 位空着"，D11
+ * "永不覆盖 / 一个组只有一个基图"当场破功；名字以 `.` 开头还会被判成 dotfile 噪音。
+ *
+ * 所以这里把**槽位计算**直接暴露出来，绕开文件名这层编码。它与 `planImport`
+ * 内部共用同一个 {@link allocateVariant} 核心 —— 一套政策，两个入口。
+ *
+ * 差别只在工作集来源: `planImport` 维护一个随计划增长的增量工作集（整批分配，
+ * 同一个 zip 里两条撞车的条目拿 `_2` 和 `_3`），本函数则按传进来的行现算。
+ *
+ * ⚠️ 本函数**只管槽位**: 命名不变式（D16）、媒体规则（D7）、以及名字能不能进
+ * zip 条目名（D19）都由调用方自己把关 —— 那些是"这一行合不合法"，不是"它该占哪个位"。
+ *
+ * @param name 原始名字，`===` 比对，不归一化（D2）
+ * @param desiredVariant 期望变体；`undefined` / `''` 表示想占 base 位
+ * @param existing 比对基准（整库即可，本函数自己筛 `(name, type)`）
+ */
+export function allocateVariantSlot(
+  name: string,
+  type: AssetType,
+  desiredVariant: string | undefined,
+  existing: readonly Pick<AssetMetaRecord, 'name' | 'type' | 'variant'>[],
+): { variant?: string; renumberedFrom?: string } {
+  const slots: SlotSet = new Set<string>();
+  for (const row of existing) {
+    if (row.name !== name || row.type !== type) continue;
+    slots.add(variantSlotKey(row.variant));
+  }
+  return allocateVariant(slots, desiredVariant);
+}
+
 // ═══════════════════════════════════════════════════════════
 // 计划
 // ═══════════════════════════════════════════════════════════
+
+/**
+ * 往「键 → 已占哈希集」里记一笔。
+ *
+ * 一个键可以记多个哈希（同名不同字节的行共存），一个哈希也可以记在多个键下
+ * （音频改名时 desired 与终名两处都要能查到，见下方调用点的说明）。
+ */
+function rememberHash(map: Map<string, Set<string>>, key: string, hash: string): void {
+  let hashes = map.get(key);
+  if (hashes === undefined) {
+    hashes = new Set<string>();
+    map.set(key, hashes);
+  }
+  hashes.add(hash);
+}
 
 /** 告警的固定输出顺序 —— 计划必须逐字节确定，所以不能让 Set 的插入序漏出去 */
 const WARNING_ORDER: readonly ImportWarning[] = [
@@ -414,14 +465,7 @@ export function planImport(
       assetSlots.set(key, slots);
     }
     slots.add(variantSlotKey(row.variant));
-    if (row.hash !== undefined && row.hash !== '') {
-      let hashes = assetHashes.get(key);
-      if (hashes === undefined) {
-        hashes = new Set<string>();
-        assetHashes.set(key, hashes);
-      }
-      hashes.add(row.hash);
-    }
+    if (row.hash !== undefined && row.hash !== '') rememberHash(assetHashes, key, row.hash);
     knownAssetNames.add(row.name);
   }
 
@@ -433,13 +477,7 @@ export function planImport(
   const audioHashes = new Map<string, Set<string>>();
   for (const row of existing.audio ?? []) {
     if (row.hash === undefined || row.hash === '') continue;
-    const key = normalizeAudioName(row.name);
-    let hashes = audioHashes.get(key);
-    if (hashes === undefined) {
-      hashes = new Set<string>();
-      audioHashes.set(key, hashes);
-    }
-    hashes.add(row.hash);
+    rememberHash(audioHashes, normalizeAudioName(row.name), row.hash);
   }
 
   let plannedAudioSeq = 0;
@@ -497,13 +535,20 @@ export function planImport(
       plannedAudioSeq += 1;
       audioPool.push({ id: `\u0000planned:${plannedAudioSeq}`, name });
       if (entry.hash !== undefined && entry.hash !== '') {
-        const key = normalizeAudioName(name);
-        let hashes = audioHashes.get(key);
-        if (hashes === undefined) {
-          hashes = new Set<string>();
-          audioHashes.set(key, hashes);
-        }
-        hashes.add(entry.hash);
+        // 🔴 **两个键都要记**，而且两个都在防真事，不是图省事各记一份:
+        //
+        // - **desired**（改名前）: 库里已有一条**无哈希**的 `song` 时，本批第一个
+        //   `song.mp3` 会被改名成 `song (2)`。若只记终名，第二个**字节相同**的
+        //   `song.mp3` 去 `song` 底下查什么也查不到，于是落成 `song (3)` ——
+        //   两份一模一样的字节落成两行，正是 D12 要防的半幂等。后来者请求的是
+        //   同一个名字、同一份字节，那它就是重复，与先来者被改成什么无关。
+        // - **终名**（改名后）: 本批里 `song.mp3` 变成 `song (2)` 之后，再来一个
+        //   字节相同的 `song (2).mp3`，它请求的正是那一行 —— 同样是重复。
+        //
+        // 不会误杀: 命中要求**哈希也相等**，而「同名 + 同字节 = 重复」就是 D12 的
+        // 定义本身。没改名时两个键相等，退化成一次 Set 写入。
+        rememberHash(audioHashes, normalized, entry.hash);
+        rememberHash(audioHashes, normalizeAudioName(name), entry.hash);
       }
       continue;
     }
@@ -563,14 +608,9 @@ export function planImport(
 
     // 占位: 变体位与哈希集都随计划增长（整批分配）
     slots.add(variantSlotKey(allocated.variant));
-    if (entry.hash !== undefined && entry.hash !== '') {
-      let hashes = assetHashes.get(key);
-      if (hashes === undefined) {
-        hashes = new Set<string>();
-        assetHashes.set(key, hashes);
-      }
-      hashes.add(entry.hash);
-    }
+    // ✅ 素材侧**没有**音频那个坑: 去重键是 `(name, type)`，编号只动 variant，
+    // 而 variant 不在键里 —— 查与记用的是同一个 `key` 变量，分配前后不变。
+    if (entry.hash !== undefined && entry.hash !== '') rememberHash(assetHashes, key, entry.hash);
     knownAssetNames.add(name);
   }
 

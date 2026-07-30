@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { planImport } from './asset-import-plan';
+import { allocateVariantSlot, planImport } from './asset-import-plan';
 import type { DecodedEntry, ExistingRows, ImportManifest } from './asset-import-plan';
 import type { AssetType } from './types';
 
@@ -466,6 +466,64 @@ describe('去重 (§4.4 / D12)', () => {
     expect(plan.audio[0].renamedFrom).toBe('战斗主题');
   });
 
+  it('🔴 批内音频去重按 desired 名查 —— 先来者被改名不该让后来者漏网', () => {
+    // 库里有一条**无哈希**的 song（老行从不回写哈希），本批两个字节相同的 song.mp3
+    const plan = planImport([entry('song.mp3', 'SAME'), entry('song.mp3', 'SAME')], {
+      assets: [],
+      audio: [audioRow('song')],
+    });
+    expect(plan.audio.map((a) => a.name)).toEqual(['song (2)']);
+    expect(plan.summary.audioAdded).toBe(1);
+    expect(plan.summary.duplicatesSkipped).toBe(1);
+    // 回归钉子: 曾经会落成 song (2) + song (3) 两行一模一样的字节
+    expect(plan.audio.map((a) => a.name)).not.toContain('song (3)');
+  });
+
+  it('干净库里两个字节相同的同名音频，第二个也被去重', () => {
+    const plan = planImport([entry('song.mp3', 'SAME'), entry('song.mp3', 'SAME')], noRows());
+    expect(plan.audio.map((a) => a.name)).toEqual(['song']);
+    expect(plan.summary.duplicatesSkipped).toBe(1);
+  });
+
+  it('批内音频去重也按终名查 —— 改名后的那一行同样占位', () => {
+    // 第一个 song.mp3 落成 song (2)；随后来的 song (2).mp3 字节相同 → 就是它自己
+    const plan = planImport([entry('song.mp3', 'SAME'), entry('song (2).mp3', 'SAME')], {
+      assets: [],
+      audio: [audioRow('song')],
+    });
+    expect(plan.audio.map((a) => a.name)).toEqual(['song (2)']);
+    expect(plan.summary.duplicatesSkipped).toBe(1);
+  });
+
+  it('批内同名但字节不同 → 照常各拿各的号，不误杀', () => {
+    const plan = planImport([entry('song.mp3', 'A'), entry('song.mp3', 'B')], {
+      assets: [],
+      audio: [audioRow('song')],
+    });
+    expect(plan.audio.map((a) => a.name)).toEqual(['song (2)', 'song (3)']);
+    expect(plan.summary.duplicatesSkipped).toBe(0);
+  });
+
+  it('✅ 素材侧无同型缺陷: 去重键是 (name,type)，编号只动 variant', () => {
+    // 与音频那个场景同构 —— 库里一条无哈希的 base 行，本批两张字节相同的图
+    const plan = planImport([entry('苏婉_头像.png', 'SAME'), entry('苏婉_头像.png', 'SAME')], {
+      assets: [assetRow('苏婉', '头像')],
+      audio: [],
+    });
+    expect(plan.assets.map((a) => a.variant)).toEqual(['2']);
+    expect(plan.summary.assetsAdded).toBe(1);
+    expect(plan.summary.duplicatesSkipped).toBe(1);
+  });
+
+  it('✅ 素材: 带变体的行被改号后，同字节的后来者照样命中', () => {
+    const plan = planImport(
+      [entry('苏婉_头像_微笑.png', 'SAME'), entry('苏婉_头像_微笑.png', 'SAME')],
+      { assets: [assetRow('苏婉', '头像', '微笑')], audio: [] },
+    );
+    expect(plan.assets.map((a) => a.variant)).toEqual(['微笑 2']);
+    expect(plan.summary.duplicatesSkipped).toBe(1);
+  });
+
   it('音频已带 (n) 的名字换号而不嵌套', () => {
     const plan = planImport([entry('战斗 (2).mp3', 'X')], {
       assets: [],
@@ -761,5 +819,53 @@ describe('幂等 (§9 round-trip 的一半)', () => {
     const second = planImport(noHash, after);
     expect(second.summary.assetsAdded).toBe(4);
     expect(second.warnings).toContain('hash-unavailable');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// allocateVariantSlot —— 分配器的非文件名入口（改名 / 设为主图共用同一套政策）
+// ═══════════════════════════════════════════════════════════
+
+describe('allocateVariantSlot', () => {
+  const row = (name: string, type: AssetType, variant?: string) =>
+    variant === undefined ? { name, type } : { name, type, variant };
+
+  it('base 位空着就占 base；被占则 max+1（base 隐含算 1 号）', () => {
+    expect(allocateVariantSlot('苏婉', '头像', undefined, [])).toEqual({});
+    expect(
+      allocateVariantSlot('苏婉', '头像', undefined, [row('苏婉', '头像')]),
+    ).toEqual({ variant: '2', renumberedFrom: '' });
+    expect(
+      allocateVariantSlot('苏婉', '头像', undefined, [
+        row('苏婉', '头像'),
+        row('苏婉', '头像', '2'),
+        row('苏婉', '头像', '5'),
+      ]),
+    ).toEqual({ variant: '6', renumberedFrom: '' });
+  });
+
+  it('具名变体撞车换号、绝不嵌套', () => {
+    const existing = [row('苏婉', '头像', '微笑'), row('苏婉', '头像', '微笑 2')];
+    expect(allocateVariantSlot('苏婉', '头像', '微笑', existing)).toEqual({
+      variant: '微笑 3',
+      renumberedFrom: '微笑',
+    });
+  });
+
+  it('只看同一个 (name, type)：别的名字/类型不占位', () => {
+    const existing = [row('苏婉', '立绘'), row('林清', '头像')];
+    expect(allocateVariantSlot('苏婉', '头像', undefined, existing)).toEqual({});
+  });
+
+  it('名字里的分隔符不再改变归属 —— 文件名那条路会在这里拍平成另一个组', () => {
+    // 这正是 store 侧曾经的缺陷: `圣殿/内庭_头像.png` 经 basenameOf 变成 `内庭_头像.png`，
+    // 于是与真正的 `圣殿/内庭` 组对不上，两行都以为 base 位空着。
+    const existing = [row('圣殿/内庭', '头像')];
+    expect(allocateVariantSlot('圣殿/内庭', '头像', undefined, existing)).toEqual({
+      variant: '2',
+      renumberedFrom: '',
+    });
+    // 而 `内庭` 是另一个组，互不影响
+    expect(allocateVariantSlot('内庭', '头像', undefined, existing)).toEqual({});
   });
 });

@@ -16,7 +16,7 @@
  * 边界: 只调 asset-store 的公开动作；分组本身按 `name` 从 store 现算，
  * 于是任何一次落库刷新后抽屉自动跟上（不缓存一份会过期的行）。
  */
-import { computed, inject, reactive, ref, watch } from 'vue'
+import { computed, inject, reactive, ref, useId, watch } from 'vue'
 import { ASSET_TYPES, type AssetMetaRecord, type AssetType } from '@engine/types'
 import { isVideoExtension } from '@engine/asset-types'
 import { useAssetStore, type AssetMutationOutcome } from '../../../stores/asset-store'
@@ -106,6 +106,21 @@ const form = reactive<{ name: string; type: AssetType; variant: string }>({
   type: '头像',
   variant: '',
 })
+
+/**
+ * 改名输入框的候选名单 —— §7.3 承诺的「autocomplete off existing asset names」。
+ *
+ * 它落在**改名**这里而不是一个导入前的命名表单，是因为 §3.2 的风险是
+ * **名字拼错了没人发现**（没有名册、没有覆盖率表、v1 又什么都不渲染），而拼错
+ * 最常见的形态是"同一个角色被写成两个名字"。改名是唯一一处用户真的在斟酌名字的
+ * 地方，把已有名字摆在他眼前，正是那一刻最有用。
+ *
+ * 用原生 `<datalist>`: 不拦输入（新角色的第一个文件本来就没得可选），
+ * 键盘与读屏都是浏览器原生行为，比手搓下拉靠谱。
+ */
+const nameListId = `asset-name-list-${useId()}`
+
+const knownNames = computed<string[]>(() => assets.groups.map((g) => g.name))
 
 function startEdit(row: AssetMetaRecord): void {
   editingId.value = row.id
@@ -259,7 +274,18 @@ async function removeRow(row: AssetMetaRecord): Promise<void> {
 
           <!-- 行内改名：name / type / variant 全可改；被拒的理由就地写在下面 -->
           <div v-if="editingId === row.id" class="edit-panel">
-            <input v-model="form.name" class="mini-input" aria-label="名称" placeholder="名称" />
+            <!-- 候选是已有的素材名，防的是「同一个角色写成两个名字」（§3.2） -->
+            <input
+              v-model="form.name"
+              class="mini-input"
+              aria-label="名称"
+              placeholder="名称"
+              :list="nameListId"
+              autocomplete="off"
+            />
+            <datalist :id="nameListId">
+              <option v-for="n in knownNames" :key="n" :value="n" />
+            </datalist>
             <select v-model="form.type" class="mini-select" aria-label="类型">
               <option v-for="t in ASSET_TYPES" :key="t" :value="t">{{ t }}</option>
             </select>

@@ -52,6 +52,11 @@ export type AssetNameSlots = Partial<Record<AssetType, AssetTypeSlot>>;
  *
  * 名字是**原始字符串键**，`===` 匹配，不做任何归一化（D2）——
  * 刻意背离 audio-names.ts 的 `normalizeAudioName`，理由见 §3。
+ *
+ * ⚠️ 由用户输入做键的那几层（名字 / 变体）是 `Object.create(null)` 造的
+ * **无原型**字典（见 `emptyDict`）。属性读写照常，但它们**没有** `hasOwnProperty`
+ * 之类的原型方法 —— 要判存在请用 `key in dict` 或
+ * `Object.prototype.hasOwnProperty.call(dict, key)`。
  */
 export type AssetIndex = Record<AssetCategory, Record<string, AssetNameSlots>>;
 
@@ -71,6 +76,26 @@ function compareStable(a: AssetMetaRecord, b: AssetMetaRecord): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
+/**
+ * 造一个**无原型**的字典。
+ *
+ * 🔴 安全要点，不是洁癖: 名字与变体都是**攻击者可控的任意字符串**，而
+ * `__proto__.png` 能过导入管线的每一道过滤器（它是合法扩展名 + 合法名字段）。
+ * 在普通 `{}` 上做 `byName['__proto__'] ??= {}`，赋值会走到 `Object.prototype`
+ * 的 setter 上，随后那次写入就把一个 own `头像` 键挂到 `Object.prototype`
+ * 本身 —— 全应用每一个对象都被污染。
+ *
+ * `Object.create(null)` 上 `__proto__` 只是一个普通的 own 属性，没有 setter，
+ * 于是污染路径根本不存在。**每一层由用户输入做键的字典都必须走这里**:
+ * 名字层与变体层。（类型层的键取自固定的 `AssetType` 集合，不可控，
+ * 但一并走同一条路，免得日后有人照着上面那行复制出一个普通 `{}`。）
+ *
+ * 读取侧不受影响 —— 属性访问语义不变，asset-resolve.ts 一个字都不用改。
+ */
+function emptyDict<T>(): Record<string, T> {
+  return Object.create(null) as Record<string, T>;
+}
+
 /** 空变体（`undefined` / `''`）归一为"无变体" —— 与 asset-filename 的空尾巴口径一致 */
 function variantKeyOf(row: AssetMetaRecord): string | undefined {
   return row.variant === undefined || row.variant === '' ? undefined : row.variant;
@@ -88,15 +113,16 @@ function variantKeyOf(row: AssetMetaRecord): string | undefined {
  * （同音频），所以答案必须与数组顺序无关、跨次加载稳定。
  */
 export function buildAssetIndex(rows: readonly AssetMetaRecord[]): AssetIndex {
-  const index: AssetIndex = { character: {} };
+  const index: AssetIndex = { character: emptyDict<AssetNameSlots>() };
   /** 位 → 当前胜出行，仅构建期存在，不出函数 */
   const winners = new Map<string, AssetMetaRecord>();
 
   for (const row of rows) {
     const category = categoryForType(row.type);
     const byName = index[category];
-    const slots = (byName[row.name] ??= {});
-    const slot = (slots[row.type] ??= { variants: {} });
+    // 名字层与变体层都用无原型字典 —— 见 emptyDict 的安全说明
+    const slots = (byName[row.name] ??= emptyDict<AssetTypeSlot>() as AssetNameSlots);
+    const slot = (slots[row.type] ??= { variants: emptyDict<string>() });
 
     const variant = variantKeyOf(row);
     // 键用 JSON.stringify 而非拼接: 名字与变体是**任意用户字符串**，

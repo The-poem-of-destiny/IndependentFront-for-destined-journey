@@ -5,16 +5,23 @@
  * 设计: docs/planning/2026-07-29-asset-management-system-design.md §7.2 / §7.6 / §4.5
  *
  * 本组件只做四件事，全部照 store 的回执如实呈现，自己**不做任何判断**:
- *   ① 选包（按钮 / 拖放）与导出下载
+ *   ① 选文件（按钮 / 拖放）与导出下载 —— **压缩包与散装媒体文件都收**（§1 / §7.3）
  *   ② 进度条 + 取消（不可取消的转圈是用户中途强刷的原因，§7.6）
  *   ③ 一次导入的结构化回执（新增 / 跳过重复 / 自动编号 / 命名冲突 / 警告 …）
  *   ④ 配额条（`navigator.storage.estimate()` + `persist()` 的结果）
  *
  * 「取消不是失败、部分成功要如实说」这条纪律归 store（它已经把 cancelled 与
  * failed 分成两个字段），这里只负责把两者分开显示。
+ *
+ * 一条入口（D9）: 拖放/选择拿到的整个 `File[]` 原样交给 `importAny`，**本组件不做
+ * 任何路由** —— 拆包与散装的分流、两半合并、只弹一条提示全在 store 里。于是扩展名
+ * 路由（拖进来的 .mp3 照样落音频库）、D16 拒收、去重、编号、部分成功回执全都一致，
+ * 这里不必为散装路径分叉任何显示逻辑。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { ImportWarning } from '@engine/asset-import-plan'
+import { ASSET_MIME_BY_EXTENSION } from '@engine/asset-types'
+import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names'
 import AppButton from '../../shared/AppButton.vue'
 import {
   useAssetStore,
@@ -22,6 +29,7 @@ import {
   type AssetStorageEstimate,
 } from '../../../stores/asset-store'
 import { fmtBytes } from '../audio/format'
+import { createProgressTracker } from './progress'
 
 const emit = defineEmits<{
   /** 一次性事件的无障碍播报，由外层写进唯一的 aria-live 区 */
@@ -32,8 +40,32 @@ const assets = useAssetStore()
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const dragging = ref(false)
-const summary = ref<AssetImportSummary | null>(null)
 const quota = ref<AssetStorageEstimate | null>(null)
+
+/**
+ * 上一次导入的回执。
+ *
+ * 一次用户动作 = 一次 `importAny` = **一份**回执、**一条** toast（§7.2）。
+ * 拆包/散装的分流、两半的合并、以及"一个坏包 + 一批好图"该怎么报，全在 store 里 ——
+ * 这里曾经有一份 UI 侧的分流与合并，现在整段删掉了: 路由决策跟着导入管线走，
+ * 两边各留一份就是漂移的来路。
+ */
+const summary = ref<AssetImportSummary | null>(null)
+
+/**
+ * 文件选择器的 `accept`。
+ *
+ * **从两张真表推**（`ASSET_MIME_BY_EXTENSION` / `AUDIO_MIME_BY_EXTENSION`），
+ * 不手写清单 —— 手写的那份迟早与计划器真正接受的集合漂移，而漂移的表现是
+ * "选择器里灰掉、但拖进去其实能导"。扩展名与 MIME 都给上: 有些平台只认其一。
+ */
+const acceptAttr = computed(() => {
+  const exts = [...Object.keys(ASSET_MIME_BY_EXTENSION), ...Object.keys(AUDIO_MIME_BY_EXTENSION)]
+  const mimes = [
+    ...new Set([...Object.values(ASSET_MIME_BY_EXTENSION), ...Object.values(AUDIO_MIME_BY_EXTENSION)]),
+  ]
+  return ['.zip', 'application/zip', ...exts.map((e) => `.${e}`), ...mimes].join(',')
+})
 
 /** 卸载守卫: 配额查询与导入都是异步的，兑现后不能再往已卸载的组件里写状态 */
 let disposed = false
@@ -51,72 +83,40 @@ onUnmounted(() => {
 // ═══ 进度 ═════════════════════════════════════════════════
 
 /**
- * ⚠️ **`progressTotal` 不是一上来就知道的，它会边解包边长**。
+ * 「永不倒退」的判定住在 ./progress.ts（纯归约器，可穷举测试）。
  *
- * zip 的条目总数写在文件**末尾**的中央目录里，而读包是从头往后流式扫本地头的 ——
- * 所以解压阶段每发现一个条目分母就大一点，`done/total` 完全可能**往回走**；
- * 随后写库阶段又会把 `done` 归零、把 `total` 换成计划里的最终行数（比条目数**小**，
- * 噪音与跳过的都不在里面）。一条会倒退的 scaleX 比一个转圈更糟，所以这里不直接
- * 用 computed 算比例，而是维护一个**高水位**，并且允许自己说"我现在不知道"。
- *
- * 规则（store 眼下没有 phase 标志，只能从这两个数自己推；日后它给了标志就换掉这段）:
- *   ① `total <= 0` → 不确定（没有可用的分母）
- *   ② `total` 从一个非零值**变了**（长大或换阶段）→ 分母不作准，这一帧不确定，
- *      并把高水位清零 —— 旧比例是按旧分母算的，留着就会污染下一阶段
- *   ③ 算出来的比例**低于**高水位 → 宁可不确定，绝不把条往回抽
- *   ④ 其余情况 → 确定，抬高水位
- *
- * 于是: 解压期分母每帧在动 → 一路走 ②，整段是不确定态（转圈 + 计数）；
- * 阶段切换时 ② 命中一帧；写库期分母稳定、`done` 单增 → 干净的确定态。
- * 而在 `readAssetZip` 眼下**根本不报解压进度**的现实里（0 → N 一步到位，
- * ② 被 `lastTotal > 0` 挡住），写库进度照旧是确定态，行为与之前一致。
+ * 它要扛住**三种**分母不作准的情形: 解压段没有分母、**混合导入整段没有分母**
+ * （后面几批的行数要等各自规划完才知道，store 因此把 `progressTotal` 钉成 0，
+ * 而此时 `phase` 已经是 `'write'`）、以及分母万一又变回"会长的数"。
+ * 判定刻意只看这两个数、不看相位 —— 相位只用来挑文案。
  */
+const tracker = createProgressTracker()
 const shownRatio = ref(0)
 const progressIndeterminate = ref(true)
-let lastTotal = 0
-
-function resetProgressTracking(): void {
-  shownRatio.value = 0
-  progressIndeterminate.value = true
-  lastTotal = 0
-}
 
 watch(
   () => [assets.progressDone, assets.progressTotal] as const,
   ([done, total]) => {
-    // importZip 起手就把两个数归零 —— 这就是"新一轮开始"的信号，不必另设标志位
-    if (done === 0 && total === 0) {
-      resetProgressTracking()
-      return
-    }
-    if (total <= 0) {
-      progressIndeterminate.value = true
-      return
-    }
-    const changed = lastTotal > 0 && total !== lastTotal
-    lastTotal = total
-    if (changed) {
-      shownRatio.value = 0
-      progressIndeterminate.value = true
-      return
-    }
-    const ratio = Math.min(1, Math.max(0, done / total))
-    if (ratio < shownRatio.value) {
-      progressIndeterminate.value = true
-      return
-    }
-    shownRatio.value = ratio
-    progressIndeterminate.value = false
+    const state = tracker.observe(done, total)
+    shownRatio.value = state.ratio
+    progressIndeterminate.value = state.indeterminate
   },
 )
 
 /**
- * 进度文字。不确定态刻意**不写"正在读取"**: 两个阶段都可能落进不确定态，
- * 而我们分不清现在是哪个 —— 说一句分不清对错的话，不如只报手上确实有的那个计数。
+ * 进度文字。
+ *
+ * store 现在给了 `progressPhase`（`'read'` 解压/读盘段分母恒为 0，`'write'` 写库段
+ * 分母固定），所以不确定态下**可以**说清现在在干什么了 —— 上一版刻意用中性措辞，
+ * 是因为那时分不清阶段，说了就可能说错。高水位那套仍然留着当兜底: 它不依赖
+ * 这个标志，万一哪天口径又变，条也只会退化成转圈，绝不会往回抽。
  */
 const progressText = computed(() => {
   if (!progressIndeterminate.value) return `${assets.progressDone} / ${assets.progressTotal}`
-  return assets.progressDone > 0 ? `已处理 ${assets.progressDone}` : '正在解包…'
+  if (assets.progressDone > 0) {
+    return assets.progressPhase === 'read' ? `正在读取… ${assets.progressDone}` : `已处理 ${assets.progressDone}`
+  }
+  return assets.progressPhase === 'read' ? '正在读取…' : '正在准备…'
 })
 
 // ═══ 取消 ═════════════════════════════════════════════════
@@ -145,26 +145,32 @@ function pickFile(): void {
 
 async function onFilePicked(e: Event): Promise<void> {
   const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  // 先清空再取值: 同一个包连选两次也要能触发 change
+  const files = Array.from(input.files ?? [])
+  // 先清空再用: 同一批文件连选两次也要能触发 change
   input.value = ''
-  if (file) await runImport(file)
+  await runImport(files)
 }
 
-/** 拖放: 只认第一个 .zip；一个都没有就如实说，不去猜 */
 async function onDrop(e: DragEvent): Promise<void> {
   dragging.value = false
-  const files = Array.from(e.dataTransfer?.files ?? [])
-  const zip = files.find((f) => /\.zip$/i.test(f.name))
-  if (!zip) {
-    emit('announce', '拖进来的不是压缩包，导入未开始。')
-    return
-  }
-  await runImport(zip)
+  await runImport(Array.from(e.dataTransfer?.files ?? []))
 }
 
-async function runImport(file: File): Promise<void> {
-  const res = await assets.importZip(file)
+/**
+ * 一次用户动作 = 一次 `importAny` = 一份回执 + 一条 toast（§7.2 / D9）。
+ *
+ * **这里不做任何路由**: 整个 `File[]` 原样交给 store，由它拆包/散装分流、
+ * 两半都过同一个 executeImport、合并计数、只弹一条提示。UI 侧曾经有一份
+ * `isZipFile` + 分流 + 合并，已整段删除 —— "什么算压缩包"是路由决策，
+ * 跟着管线走才不会两边各留一份、慢慢漂移（Windows 那点 MIME 平台知识
+ * 也随之搬进了 store 的 `isZipFile`，并且在那边有测试钉着）。
+ */
+async function runImport(files: File[]): Promise<void> {
+  if (files.length === 0) {
+    emit('announce', '没有可导入的文件。')
+    return
+  }
+  const res = await assets.importAny(files)
   if (disposed) return
   summary.value = res
   // toast 由 store 负责（唯一那条汇总），这里只补一次无障碍播报
@@ -230,10 +236,18 @@ const WARNING_HINT: Readonly<Record<ImportWarning, string>> = {
 
 const warningHints = computed(() => (summary.value?.warnings ?? []).map((w) => WARNING_HINT[w]))
 
+/**
+ * 读不出来的包，一条一句（`readErrors` 是可选字段，按 `?? []` 兜）。
+ *
+ * 与 `read` 分开呈现正是"一个坏包 + 一批好图"要的: 计数如实报好的那半，
+ * 同时点名坏的那个 —— 塌成一个布尔就只剩"导入失败"，把成功的部分也抹掉了。
+ */
+const readErrors = computed<string[]>(() => summary.value?.readErrors ?? [])
+
 /** 一条都没动过的导入也要说出来，否则界面看起来像什么都没发生 */
 const nothingChanged = computed(() => {
   const s = summary.value
-  return !!s && s.read && s.assetsAdded === 0 && s.audioAdded === 0
+  return !!s && s.assetsAdded === 0 && s.audioAdded === 0 && readErrors.value.length === 0
 })
 
 // ═══ 配额 ═════════════════════════════════════════════════
@@ -274,10 +288,13 @@ const persistText = computed(() => {
     @dragleave="dragging = false"
     @drop.prevent="onDrop"
   >
-    <span class="io-label">素材包</span>
-    <span class="io-hint">把 .zip 拖到这里，或点右边的按钮选一个。</span>
+    <span class="io-label">导入</span>
+    <span class="io-hint">
+      把压缩包<strong>或散装的图片 / 视频 / 音频</strong>拖到这里，也可以点右边的按钮选。
+      两种混着来也行，会当成一次导入。
+    </span>
     <AppButton variant="primary" size="sm" :disabled="assets.importing" @click="pickFile">
-      <i class="fa-solid fa-file-zipper" aria-hidden="true" /> 导入素材包
+      <i class="fa-solid fa-file-import" aria-hidden="true" /> 选择文件
     </AppButton>
     <AppButton
       variant="secondary"
@@ -291,11 +308,21 @@ const persistText = computed(() => {
       ref="fileInput"
       class="file-input"
       type="file"
-      accept=".zip,application/zip"
-      aria-label="选择素材包"
+      multiple
+      :accept="acceptAttr"
+      aria-label="选择素材包或媒体文件"
       @change="onFilePicked"
     />
   </div>
+
+  <!--
+    署名只能从 zip 根的 manifest.json 来（D10），散装文件带不了 —— 打包分发的人
+    需要知道这件事，否则作者署名会在一次"随手拖几张图"里悄悄丢掉。
+  -->
+  <p class="band-note text-muted text-sm">
+    散装文件不带署名与授权信息（清单只存在于压缩包根目录）。要为分发的素材保留
+    <code class="conv-code">credit</code> / <code class="conv-code">license</code>，请打包成 zip 再导入。
+  </p>
 
   <!-- ═══ 进度 + 取消 ═══ -->
   <div v-if="assets.importing" class="io-strip io-progress" role="group" aria-label="导入进度">
@@ -316,22 +343,29 @@ const persistText = computed(() => {
 
   <!-- ═══ 上一次导入的回执 ═══ -->
   <div v-if="summary" class="io-summary">
-    <p v-if="!summary.read" class="sum-fail">{{ summary.message }}</p>
-    <template v-else>
-      <div class="sum-chips">
-        <span v-if="summary.cancelled" class="sum-chip chip-note">已取消（已写入的都保留）</span>
-        <span v-for="c in summaryChips" :key="c.label" class="sum-chip" :class="`chip-${c.tone}`">
-          {{ c.label }} {{ c.value }}
-        </span>
-        <span v-if="summaryChips.length === 0 && !summary.cancelled" class="sum-chip chip-note">
-          没有任何变化
-        </span>
-      </div>
-      <p v-if="nothingChanged" class="sum-note">
-        这个包里的内容全部被跳过了，库没有变化 —— 通常是因为它已经导入过一次。
-      </p>
-      <p v-for="hint in warningHints" :key="hint" class="sum-warn">{{ hint }}</p>
-    </template>
+    <div class="sum-chips">
+      <span v-if="summary.cancelled" class="sum-chip chip-note">已取消（已写入的都保留）</span>
+      <span v-for="c in summaryChips" :key="c.label" class="sum-chip" :class="`chip-${c.tone}`">
+        {{ c.label }} {{ c.value }}
+      </span>
+      <span
+        v-if="summaryChips.length === 0 && !summary.cancelled && readErrors.length === 0"
+        class="sum-chip chip-note"
+      >没有任何变化</span>
+    </div>
+    <p v-if="nothingChanged && !summary.cancelled" class="sum-note">
+      这次导入的内容全部被跳过了，库没有变化 —— 通常是因为它们已经导入过一次。
+    </p>
+    <!--
+      读不出来的包逐条点名。这与"读进来了但计数为 0"是两回事:
+      一个坏包 + 一批好图时，上面的计数是真的，下面这几行说的是坏的那几个。
+    -->
+    <p v-for="err in readErrors" :key="err" class="sum-fail">{{ err }}</p>
+    <p v-if="summary.quotaHit" class="sum-fail">
+      浏览器存储空间已满，剩下的文件没有继续导入。已导入的都完整保留 ——
+      可以先删掉一些素材或音频，再把同一批文件导一次（已有的会被识别成重复而跳过）。
+    </p>
+    <p v-for="hint in warningHints" :key="hint" class="sum-warn">{{ hint }}</p>
   </div>
 
   <!-- ═══ 配额 ═══ -->
