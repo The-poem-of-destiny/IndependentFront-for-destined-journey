@@ -550,6 +550,18 @@ export class GamePipeline {
     return this.buildEndpoints()[0]
   }
 
+  /** 按 agentId 解析 endpoint —— 尊重设置页 s.agentModels 映射；
+   *  未配置或映射失效时回退到默认 endpoint（与 createAgentClients 一致）。
+   *  修复(2026-07-30): 此前 char_gen/item_gen/craft_gen/combat 等侧链一律走
+   *  getDefaultEndpoint()（API 池第一项），无视用户在设置页为各 Agent 选的 API 池，
+   *  导致"全部设了 glm5.2，侧链却用 d4f"。 */
+  private getEndpointForAgent(agentId: string): ApiEndpoint {
+    const s = this.settings.settings
+    const apiPool = this.buildEndpoints()
+    const poolId = (s.agentModels as Record<string, string>)[agentId] || ''
+    return apiPool.find(ep => ep.id === poolId) || apiPool[0]
+  }
+
   /** 创建 AgentClient 工厂 —— 供 craft_gen / char_gen / item_gen 链使用。
    *  🆕 包裹一层 LogClient：拦截 chat / chatWithTools，自动写 agentLog，
    *  让侧链 Agent 在 DebugPanel 可见（否则绕过 orchestrator 时无日志）。 */
@@ -934,7 +946,7 @@ export class GamePipeline {
     marker: CombatTriggerMarker,
     storyOutput: string,
   ): Promise<CombatSummaryResult | null> {
-    const endpoint = this.getDefaultEndpoint()
+    const endpoint = this.getEndpointForAgent('combat')
     if (!endpoint) {
       console.warn('[GamePipeline] combat 跳过: 未配置 API endpoint')
       return null
@@ -993,7 +1005,7 @@ export class GamePipeline {
     markers: CraftGenRequestMarker[],
     ctx: AgentContext,
   ) {
-    const endpoint = this.getDefaultEndpoint()
+    const endpoint = this.getEndpointForAgent('craft_gen')
     if (!endpoint) {
       console.warn('[GamePipeline] craft_gen 跳过: 未配置 API endpoint')
       return
@@ -1037,7 +1049,7 @@ export class GamePipeline {
     markers: CharGenRequestMarker[],
     ctx: AgentContext,
   ) {
-    const endpoint = this.getDefaultEndpoint()
+    const endpoint = this.getEndpointForAgent('char_gen')
     if (!endpoint) {
       console.warn('[GamePipeline] char_gen 跳过: 未配置 API endpoint')
       return
@@ -1091,7 +1103,7 @@ export class GamePipeline {
     markers: import('@engine/types').ItemGenRequestMarker[],
     ctx: AgentContext,
   ) {
-    const endpoint = this.getDefaultEndpoint()
+    const endpoint = this.getEndpointForAgent('item_gen')
     if (!endpoint) {
       console.warn('[GamePipeline] item_gen 跳过: 未配置 API endpoint')
       return
