@@ -29,10 +29,10 @@
   --theme-warning: #9f742c;
   --theme-error: #a04b4b;
 
-  --theme-hp: #a1656a;
-  --theme-mp: #4a7093;
-  --theme-sp: #668672;
-  --theme-exp: #a0824d;
+  --theme-hp: #b07075;
+  --theme-mp: #4a7ba9;
+  --theme-sp: #6e967c;
+  --theme-exp: #b6914e;
   --theme-affection: #6f5d83;
   --theme-affection-bg: rgba(111, 93, 131, 0.1);
   --theme-affection-text: #594a6b;
@@ -57,11 +57,15 @@
   --theme-popover-shadow: 0 4px 8px rgba(42, 61, 95, 0.11);
   --theme-frosted-element: rgba(246, 244, 240, 0.58);
   --theme-frosted-element-hover: rgba(242, 240, 237, 0.74);
+  --theme-frosted-button: rgba(246, 244, 240, 0.247);
+  --theme-frosted-button-hover: rgba(242, 240, 237, 0.315);
   --theme-frosted-float: rgba(246, 244, 240, 0.86);
   --theme-frosted-border: rgba(255, 255, 255, 0.48);
   --theme-frosted-shadow: 0 2px 6px rgba(42, 61, 95, 0.075);
-  --theme-liquid-glass: rgba(246, 244, 240, 0.34);
-  --theme-liquid-glass-active: rgba(248, 247, 244, 0.56);
+  --theme-liquid-glass: rgba(246, 244, 240, 0.289);
+  --theme-liquid-glass-active: rgba(248, 247, 244, 0.476);
+  --theme-liquid-glass-button: rgba(246, 244, 240, 0.145);
+  --theme-liquid-glass-button-active: rgba(248, 247, 244, 0.238);
   --theme-liquid-glass-edge: rgba(255, 255, 255, 0.68);
   --theme-liquid-glass-low-edge: rgba(22, 76, 138, 0.08);
 
@@ -190,6 +194,12 @@
   box-shadow: var(--theme-frosted-shadow);
 }
 
+:root[data-theme="indigo"] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger),
+:root[data-theme="indigo"] body .game-page-layout .input-btn,
+:root[data-theme="indigo"] body .game-page-layout .send-btn {
+  background: var(--theme-frosted-button);
+}
+
 :root[data-theme="indigo"] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger):hover,
 :root[data-theme="indigo"] body .game-page-layout .input-btn:hover,
 :root[data-theme="indigo"] body .game-page-layout .cascader-trigger:hover,
@@ -198,11 +208,48 @@
   border-color: rgba(22, 76, 138, 0.18);
 }
 
+:root[data-theme="indigo"] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger):hover,
+:root[data-theme="indigo"] body .game-page-layout .input-btn:hover,
+:root[data-theme="indigo"] body .game-page-layout .send-btn:hover {
+  background: var(--theme-frosted-button-hover);
+}
+
 :root[data-theme="indigo"] body .game-page-layout .tab-item,
-:root[data-theme="indigo"] body .game-page-layout .top-btn,
-:root[data-theme="indigo"] body .game-page-layout .tool-btn {
+:root[data-theme="indigo"] body .game-page-layout .top-btn {
   background: transparent;
   box-shadow: none;
+}
+
+/* The rail sits directly over the underglaze shanshui, so each control owns a
+   glass cell. Without one, the lower buttons dissolve into the painting exactly
+   where its cobalt strokes are densest. Same glass as .item-entry — one surface
+   language for the theme, not a second one. */
+:root[data-theme="indigo"] body .game-page-layout .side-toolbar .tool-btn,
+:root[data-theme="indigo"] body .game-page-layout .side-toolbar .collapse-toggle {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.128), rgba(255, 255, 255, 0.015) 60%),
+    var(--theme-liquid-glass-button);
+  border: 1px solid var(--theme-liquid-glass-edge);
+  border-radius: 6px;
+  backdrop-filter: blur(16px) saturate(110%) brightness(102%);
+  -webkit-backdrop-filter: blur(16px) saturate(110%) brightness(102%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 -1px 0 var(--theme-liquid-glass-low-edge);
+  transition:
+    background 180ms ease-out,
+    border-color 180ms ease-out,
+    box-shadow 180ms ease-out,
+    color 180ms ease-out;
+}
+
+:root[data-theme="indigo"] body .game-page-layout .side-toolbar .tool-btn:hover,
+:root[data-theme="indigo"] body .game-page-layout .side-toolbar .collapse-toggle:hover {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.179), rgba(255, 255, 255, 0.034) 62%),
+    var(--theme-liquid-glass-button-active);
+  border-color: rgba(255, 255, 255, 0.76);
+  color: var(--theme-tab-active-text);
 }
 
 :root[data-theme="indigo"] body .game-page-layout .hold-body .tab-bar {
@@ -215,7 +262,7 @@
   gap: 3px;
   padding: 3px;
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.04) 58%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.238), rgba(255, 255, 255, 0.034) 58%),
     var(--theme-liquid-glass);
   border: 1px solid var(--theme-liquid-glass-edge);
   border-radius: 8px;
@@ -238,13 +285,13 @@
 }
 
 :root[data-theme="indigo"] body .game-page-layout .hold-body .tab-item:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.085);
 }
 
 :root[data-theme="indigo"] body .game-page-layout .hold-body .tab-active {
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08) 62%),
-    var(--theme-liquid-glass-active);
+    linear-gradient(145deg, rgba(255, 255, 255, 0.179), rgba(255, 255, 255, 0.034) 62%),
+    var(--theme-liquid-glass-button-active);
   border-color: rgba(255, 255, 255, 0.58);
   box-shadow:
     0 1px 3px rgba(42, 61, 95, 0.08),
@@ -317,7 +364,7 @@
   position: relative;
   overflow: hidden;
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.035) 60%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.255), rgba(255, 255, 255, 0.03) 60%),
     var(--theme-liquid-glass);
   border: 1px solid var(--theme-liquid-glass-edge);
   border-radius: 6px;
@@ -334,8 +381,8 @@
 
 :root[data-theme="indigo"] body .game-page-layout .item-entry:hover {
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.36), rgba(255, 255, 255, 0.055) 60%),
-    rgba(246, 244, 240, 0.44);
+    linear-gradient(145deg, rgba(255, 255, 255, 0.306), rgba(255, 255, 255, 0.047) 60%),
+    rgba(246, 244, 240, 0.374);
   border-color: rgba(255, 255, 255, 0.76);
 }
 
@@ -345,7 +392,7 @@
 
 :root[data-theme="indigo"] body .game-page-layout .item-entry.open {
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.06) 60%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.051) 60%),
     var(--theme-liquid-glass-active);
   border-color: rgba(255, 255, 255, 0.74);
   box-shadow:
@@ -452,7 +499,9 @@
   :root[data-theme="indigo"] body .game-page-layout .status-hud,
   :root[data-theme="indigo"] body .game-page-layout .input-bar,
   :root[data-theme="indigo"] body .game-page-layout .hold-body .tab-list,
-  :root[data-theme="indigo"] body .game-page-layout .item-entry {
+  :root[data-theme="indigo"] body .game-page-layout .item-entry,
+  :root[data-theme="indigo"] body .game-page-layout .side-toolbar .tool-btn,
+  :root[data-theme="indigo"] body .game-page-layout .side-toolbar .collapse-toggle {
     background: #f5f2ee;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
@@ -470,10 +519,22 @@
     background-position: right bottom;
     background-size: auto 100%;
   }
+
+  :root[data-theme="indigo"] body .game-page-layout .hold-body .tab-list,
+  :root[data-theme="indigo"] body .game-page-layout .item-entry {
+    background: rgba(245, 242, 238, 0.85);
+  }
+
+  :root[data-theme="indigo"] body .game-page-layout .side-toolbar .tool-btn,
+  :root[data-theme="indigo"] body .game-page-layout .side-toolbar .collapse-toggle {
+    background: rgba(245, 242, 238, 0.425);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root[data-theme="indigo"] body .game-page-layout .item-entry {
+  :root[data-theme="indigo"] body .game-page-layout .item-entry,
+  :root[data-theme="indigo"] body .game-page-layout .side-toolbar .tool-btn,
+  :root[data-theme="indigo"] body .game-page-layout .side-toolbar .collapse-toggle {
     transition: none;
   }
 }

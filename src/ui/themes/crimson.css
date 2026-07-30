@@ -1342,6 +1342,71 @@
   }
 }
 
+/* Backpack and character modals use scalable liquid glass instead of the
+   fixed-size blood-control artwork, which distorted across their many ratios. */
+:root[data-theme="crimson"] body .modal-overlay:has(.items-panel),
+:root[data-theme="crimson"] body .modal-overlay:has(.char-panel) {
+  background: rgba(6, 6, 7, 0.72);
+  -webkit-backdrop-filter: blur(5px) saturate(0.88);
+  backdrop-filter: blur(5px) saturate(0.88);
+}
+
+:root[data-theme="crimson"] body .modal-content:has(.items-panel),
+:root[data-theme="crimson"] body .modal-content:has(.char-panel) {
+  background-color: rgba(19, 17, 20, 0.289);
+  background-image: none;
+  border: 2px solid rgb(var(--crimson-inlay-gold-rgb) / 90%);
+  -webkit-backdrop-filter: blur(16px) saturate(1.06) contrast(1.02);
+  backdrop-filter: blur(16px) saturate(1.06) contrast(1.02);
+  box-shadow:
+    inset 0 1px rgba(255, 247, 239, 0.12),
+    inset 0 -1px rgba(255, 255, 255, 0.025),
+    0 4px 8px rgba(0, 0, 0, 0.46);
+}
+
+:root[data-theme="crimson"] body .modal-content:has(.items-panel) .modal-header,
+:root[data-theme="crimson"] body .modal-content:has(.char-panel) .modal-header {
+  border-bottom-color: rgb(var(--crimson-inlay-gold-rgb) / 52%);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+:root[data-theme="crimson"] body .modal-content:has(.items-panel) :is(
+  .money-bar,
+  .cat-tabs,
+  .item-list,
+  .detail
+),
+:root[data-theme="crimson"] body .modal-content:has(.char-panel) :is(
+  .fp-bar,
+  .npc-list,
+  .detail,
+  .tab-row
+) {
+  background-color: rgba(22, 19, 23, 0.289);
+  background-image: none;
+  border: 1px solid rgb(var(--crimson-inlay-gold-rgb) / 66%);
+  border-radius: 6px;
+  -webkit-backdrop-filter: blur(9px) saturate(1.04);
+  backdrop-filter: blur(9px) saturate(1.04);
+  box-shadow:
+    inset 0 1px rgba(255, 247, 239, 0.08),
+    0 2px 5px rgba(0, 0, 0, 0.3);
+}
+
+:root[data-theme="crimson"] body .modal-content:has(.items-panel) :is(
+  .item-row,
+  .filter-bar button
+),
+:root[data-theme="crimson"] body .modal-content:has(.char-panel) :is(
+  .npc-card,
+  .ov-card
+) {
+  background-color: rgba(27, 23, 27, 0.247);
+  background-image: none;
+  border-color: rgb(var(--crimson-inlay-gold-rgb) / 42%);
+  box-shadow: inset 0 1px rgba(255, 247, 239, 0.055);
+}
+
 /* Corner-anchored botanical planes crop as the window changes height instead
    of scaling the artwork down with their panels. */
 :root[data-theme="crimson"] body .game-page-layout .scene-panel {

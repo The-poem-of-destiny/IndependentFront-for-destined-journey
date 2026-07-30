@@ -15,23 +15,25 @@ Build theme work from the live game surface outward. Preserve the shared play-ar
 - Carry a restrained gold inlay through every theme as the seam of fate.
 - Keep text clarity above decoration, transparency, lighting, and texture.
 - Preserve every accepted decision. Do not reopen a settled panel, theme, or interaction without instruction.
-- Prefer the live browser, current code, and supplied references over stale design documents.
+- Read the repository-root `DESIGN.md` before theme work and use its accepted values as first-iteration defaults.
+- Prefer the live browser, current code, the local design guide, and supplied references over stale design documents.
 - Do not add decorative layers the user did not request.
 
 ## Work from evidence
 
 Before editing:
 
-1. Open the current game state in the in-app browser.
-2. Capture the full play area and any supplied reference at comparable scale.
-3. Inspect the target element, its parent, pseudo-elements, computed background, border, overflow, and hover or active rules.
-4. Identify which layer owns each visible surface:
+1. Read `DESIGN.md` and identify relevant cross-theme defaults and theme-specific decisions.
+2. Open the current game state in the in-app browser.
+3. Capture the full play area and any supplied reference at comparable scale.
+4. Inspect the target element, its parent, pseudo-elements, computed background, border, overflow, and hover or active rules.
+5. Identify which layer owns each visible surface:
    - page background;
    - structural panel;
    - decorative asset;
    - content ledger;
    - interaction state.
-5. Record the user's locked decisions and the one element currently allowed to change.
+6. Record the user's locked decisions and the one element currently allowed to change.
 
 Do not diagnose material quality from CSS alone. Inspect the rendered result.
 
@@ -49,6 +51,18 @@ Evaluate visual problems in this order:
 6. decoration.
 
 Do not keep tuning shadows when the palette or composition is wrong.
+
+## Maintain the local design guide
+
+Treat `DESIGN.md` as the source of truth for owner-approved visual starting values.
+
+- Record explicit user decisions and clearly accepted defaults after implementation.
+- Label every entry as cross-theme or theme-specific.
+- Include scope, starting values, flexibility, and any important exception.
+- Keep values advisory. User-directed refinement and rendered quality override the guide.
+- Do not record transient experiments or infer approval from silence.
+- Update an existing decision when it changes instead of leaving conflicting instructions.
+- Never generalize a theme-specific construction into a universal rule.
 
 ## Build a material stack
 
@@ -81,6 +95,7 @@ Use one token for shared gold borders and inlays within a theme. Avoid several u
 - Use clear glass for shared information surfaces and deep red blood glass only where requested.
 - Keep outer stone frames visually stationary; let the inner gem or light respond.
 - Use roses and petals as dimensional objects, not merely a wallpaper.
+- For the established crimson tab treatment only, preserve its continuous stone base with inactive labels integrated into the strip and one symmetric active cap separated by light and depth.
 
 ### Frosted or liquid glass
 
@@ -89,20 +104,15 @@ Use one token for shared gold borders and inlays within a theme. Avoid several u
 - Avoid white gradients, multiple glow rings, hard top shines, and excessive translucency.
 - Apply glass only to the named layer. Do not spread a successful control treatment to entire panels without approval.
 
-## Construct tab strips as one object
+## Design tab strips from the theme
 
-Treat a tab strip as one continuous stone ledger:
+Do not prescribe one tab construction across themes. Derive the strip material, silhouette, separation, and selected state from the current theme's accepted visual language and reference.
 
-- render one uninterrupted base frame;
-- place all inactive labels directly on that base;
-- render one separate, horizontally symmetric active cap above the selected slot;
-- keep slot widths stable;
-- change selection without translating, scaling, or reshaping the strip;
-- let the active cap separate visually through material, light, and depth;
-- do not draw pre-cut seams between inactive tabs;
-- do not give every tab the active cap shape.
-
-Use separate base-strip and active-cap assets when texture is required. Never bake every possible selected state into a stretched strip.
+- Keep dimensions stable across selection states unless movement is an explicit part of that theme.
+- Give base, inactive, hover, and selected states clear layer ownership.
+- Use consistent tab anatomy within one theme without copying it into other themes.
+- Avoid accidental layout shifts, text overflow, or state-dependent frame loss.
+- Verify every selectable position rather than judging only the first active tab.
 
 ## Make assets production-aware
 
