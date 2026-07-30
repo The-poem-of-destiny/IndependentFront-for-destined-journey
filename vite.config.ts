@@ -75,6 +75,7 @@ export default defineConfig({
         })
 
         // CORS proxy: /api/proxy/<encoded_url> -> forward to external API
+        // 支持流式响应（SSE）：用 r.body 管道转发，避免缓冲整个响应
         server.middlewares.use('/api/proxy', (req, res) => {
           const targetUrl = (req.url || '').replace(/^\//, '')
           if (!targetUrl) { res.statusCode = 400; res.end('missing url'); return }
@@ -94,8 +95,35 @@ export default defineConfig({
             })
               .then(async (r) => {
                 res.statusCode = r.status || 200
-                for (const [k, v] of r.headers) { try { res.setHeader(k, v) } catch {} }
-                res.end(await r.text())
+                // 转发响应头，但移除可能破坏分块的 transfer-encoding/content-length
+                for (const [k, v] of r.headers) {
+                  if (k.toLowerCase() === 'transfer-encoding' || k.toLowerCase() === 'content-length') continue
+                  try { res.setHeader(k, v) } catch {}
+                }
+                // 流式响应：直接管道转发 body，不缓冲
+                if (r.body) {
+                  const reader = (r.body as any).getReader?.()
+                  if (reader) {
+                    // Web ReadableStream (Node 18+ undici)
+                    try {
+                      while (true) {
+                        const { done, value } = await reader.read()
+                        if (done) break
+                        res.write(value)
+                      }
+                    } catch (e: any) {
+                      // 客户端提前断开等
+                    } finally {
+                      try { reader.releaseLock?.() } catch {}
+                      res.end()
+                    }
+                  } else {
+                    // Node stream：pipe
+                    ;(r.body as any).pipe(res)
+                  }
+                } else {
+                  res.end()
+                }
               })
               .catch((e: any) => { res.statusCode = 502; res.end(JSON.stringify({ error: e.message })) })
           })
