@@ -11,4 +11,5 @@
 - [PowerShell 会毁掉 UTF-8 源文件](powershell-mangles-utf8-source.md) — PS 5.1 的 Get/Set-Content 批量替换把中文注释整份变乱码；改文件一律 Edit/Write，脚本化用 Bash
 - [备份新字段：缺席 ≠ 空数组](backup-field-absent-vs-empty.md) — FullBackup 加表时别照抄 clear-then-guard；字段 undefined 必须整表不动，否则旧备份清空用户世界书
 - [真机走查页面换不了视图](browser-pane-raf-blocks-transitions.md) — Browser pane 不显示则无 rAF，Vue transition mode="out-in" 永远卡首屏；先 reload 再打 rAF 补丁再切视图
+- [prettier 基线本来就是红的](prettier-baseline-dirty.md) — CI 跑 format:check 但 HEAD 就有 423 文件不合格；只校自己动过的文件，千万别跑 npm run format
 - [.bat stderr 噪音要换姿势才测得出](bat-stderr-harness-dependent.md) — Start-Process 恒报 0；只有 Git Bash 的 `cmd.exe /c 全路径 2> e.txt < /dev/null` 复现得出。测 dev.bat 先把端口改等长安全值，别碰 5173

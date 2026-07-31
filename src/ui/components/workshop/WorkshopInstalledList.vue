@@ -9,22 +9,57 @@
  * （设计 D16）；`<script>` 在 `v-html` 里不会执行；载荷缺失时条目取自详情预览……
  * 每一条都写进了 `WorkshopProject.droppedNotes`。
  *
- * **丢弃必须 loud**（D16 原话）: 折叠态就把「N 项内容未导入」的数字摆在行上，
- * 一次点击即可看全文。静默截断会让用户以为装全了，然后花一晚上找"为什么这个正则
- * 不生效" —— 那正是这个数字要替他省掉的一晚上。
+ * **丢弃必须 loud**（D16 原话）: 折叠态就把数字摆在行上，一次点击即可看全文。
+ * 静默截断会让用户以为装全了，然后花一晚上找"为什么这个正则不生效"。
+ *
+ * ★ **但 loud ≠ 一律说「未导入」。** 首版把三种处置合流成一个数字，真机上一个
+ * 项目报「34 项内容未导入」，其中 20 多条其实是「装了、也启用了，只是 `<script>`
+ * 不执行 / `<style>` 会全局生效」—— 用户读到的是安装失败。现在按 `kind` 分三组
+ * 各自计数：只有 `dropped` 叫「未导入」，`sideEffect` 因为会波及整个界面而最显眼。
+ *
+ * 老项目行的 `droppedNotes` 是裸 `string[]`（P1 首版落库形态），`groupWorkshopNotes`
+ * 就地兼容（裸串归 `dropped`），不做迁移。
  *
  * 本组件纯呈现: 更新/卸载只 emit，实际动作由 WorkshopPage 走 store 的两段式提交。
  */
-import { ref } from 'vue';
-import type { WorkshopProject } from '@engine/types';
+import { computed, ref } from 'vue';
+import type { WorkshopNoteKind, WorkshopProject } from '@engine/types';
+import type { WorkshopNoteGroups } from '@engine/workshop-types';
+import { WORKSHOP_NOTE_KINDS, groupWorkshopNotes } from '@engine/workshop-types';
 import AppButton from '../shared/AppButton.vue';
-import { formatDate, formatVersion } from './format';
+import {
+  WORKSHOP_NOTE_HINT,
+  WORKSHOP_NOTE_LABEL,
+  formatDate,
+  formatNoteSegment,
+  formatVersion,
+} from './format';
 
-defineProps<{
+const props = defineProps<{
   projects: WorkshopProject[];
   /** 正在处理中的项目 id（安装/更新/卸载/查更新），用于禁用该行按钮 */
   busyId?: string;
 }>();
+
+/** 项目 id → 分好组的处置记录。一次算好，模板里三处读同一份 */
+const noteGroups = computed<Record<string, WorkshopNoteGroups>>(() => {
+  const map: Record<string, WorkshopNoteGroups> = {};
+  for (const p of props.projects) map[p.id] = groupWorkshopNotes(p.droppedNotes);
+  return map;
+});
+
+/** 非空的类别（保持 dropped → degraded → sideEffect 的固定次序） */
+function activeKinds(id: string): WorkshopNoteKind[] {
+  const groups = noteGroups.value[id];
+  if (!groups) return [];
+  return WORKSHOP_NOTE_KINDS.filter((kind) => groups[kind].length > 0);
+}
+
+function noteCount(id: string): number {
+  const groups = noteGroups.value[id];
+  if (!groups) return 0;
+  return WORKSHOP_NOTE_KINDS.reduce((sum, kind) => sum + groups[kind].length, 0);
+}
 
 const emit = defineEmits<{
   detail: [projectId: string];
@@ -86,8 +121,8 @@ function stateText(p: WorkshopProject): string {
             <li v-for="tag in p.tags" :key="tag" class="wk-tag">{{ tag }}</li>
           </ul>
 
-          <!-- ★ 丢弃必须 loud（D16） -->
-          <div v-if="p.droppedNotes && p.droppedNotes.length > 0" class="wk-notes">
+          <!-- ★ 丢弃必须 loud（D16），但按 kind 分组如实报数：只有 dropped 叫「未导入」 -->
+          <div v-if="noteCount(p.id) > 0" class="wk-notes">
             <button
               type="button"
               class="wk-notes-toggle"
@@ -100,12 +135,34 @@ function stateText(p: WorkshopProject): string {
                 aria-hidden="true"
                 >▶</span
               >
-              {{ p.droppedNotes.length }} 项内容未导入
+              <span
+                v-for="(kind, i) in activeKinds(p.id)"
+                :key="kind"
+                class="wk-note-seg"
+                :class="`seg-${kind}`"
+              >
+                <span v-if="i > 0" class="wk-dot" aria-hidden="true">·</span>
+                <span v-if="kind === 'sideEffect'" aria-hidden="true">⚠ </span>
+                {{ formatNoteSegment(kind, noteGroups[p.id][kind].length) }}
+              </span>
             </button>
             <Transition name="notes">
-              <ul v-if="expanded.has(p.id)" class="wk-notes-list">
-                <li v-for="(note, i) in p.droppedNotes" :key="i">{{ note }}</li>
-              </ul>
+              <div v-if="expanded.has(p.id)" class="wk-notes-body">
+                <section
+                  v-for="kind in activeKinds(p.id)"
+                  :key="kind"
+                  class="wk-note-group"
+                  :class="`group-${kind}`"
+                >
+                  <h4 class="wk-note-title">
+                    {{ noteGroups[p.id][kind].length }} 项{{ WORKSHOP_NOTE_LABEL[kind] }}
+                  </h4>
+                  <p class="wk-note-hint">{{ WORKSHOP_NOTE_HINT[kind] }}</p>
+                  <ul class="wk-notes-list">
+                    <li v-for="(note, i) in noteGroups[p.id][kind]" :key="i">{{ note.text }}</li>
+                  </ul>
+                </section>
+              </div>
             </Transition>
           </div>
         </div>
@@ -259,13 +316,15 @@ function stateText(p: WorkshopProject): string {
 .wk-notes-toggle {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 2px 0;
   background: none;
   border: none;
-  color: var(--theme-warning);
+  color: var(--theme-text-muted);
   font-family: inherit;
   font-size: 0.75rem;
+  text-align: left;
   cursor: pointer;
   transition: color var(--theme-transition-fast);
 }
@@ -280,14 +339,68 @@ function stateText(p: WorkshopProject): string {
 .caret-open {
   transform: rotate(90deg);
 }
+
+/* 折叠行分段：真丢弃用 warning，装上了但打折用 muted，全局副作用最显眼 */
+.wk-note-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.seg-dropped {
+  color: var(--theme-warning);
+}
+.seg-degraded {
+  color: var(--theme-text-muted);
+}
+.seg-sideEffect {
+  color: var(--theme-error);
+  font-weight: 600;
+}
+
+.wk-notes-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-xs);
+  margin-top: var(--theme-spacing-xs);
+}
+.wk-note-group {
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  /* 全边 1px —— 禁止状态色左边条（design.md §1） */
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  background: var(--theme-card-bg);
+}
+.group-dropped {
+  background: color-mix(in srgb, var(--theme-warning) 6%, var(--theme-card-bg));
+  border-color: color-mix(in srgb, var(--theme-warning) 22%, var(--theme-card-border));
+}
+.group-degraded {
+  background: color-mix(in srgb, var(--theme-text-muted) 6%, var(--theme-card-bg));
+}
+.group-sideEffect {
+  background: color-mix(in srgb, var(--theme-error) 7%, var(--theme-card-bg));
+  border-color: color-mix(in srgb, var(--theme-error) 30%, var(--theme-card-border));
+}
+.wk-note-title {
+  margin: 0;
+  font-family: var(--theme-font-title);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+}
+.group-sideEffect .wk-note-title {
+  color: var(--theme-error);
+}
+.wk-note-hint {
+  margin: 2px 0 0;
+  font-size: 0.6875rem;
+  line-height: 1.7;
+  color: var(--theme-text-muted);
+}
 .wk-notes-list {
   margin: var(--theme-spacing-xs) 0 0;
-  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  padding: 0 0 0 var(--theme-spacing-lg);
   list-style: disc;
-  padding-left: var(--theme-spacing-xl);
-  background: color-mix(in srgb, var(--theme-warning) 6%, var(--theme-card-bg));
-  border: 1px solid color-mix(in srgb, var(--theme-warning) 22%, var(--theme-card-border));
-  border-radius: var(--theme-radius-sm);
   font-size: 0.75rem;
   line-height: 1.7;
   color: var(--theme-text-secondary);

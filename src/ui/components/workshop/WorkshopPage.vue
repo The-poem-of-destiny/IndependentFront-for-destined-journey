@@ -22,6 +22,7 @@
 import { computed, onMounted, ref } from 'vue';
 import type { WorkshopProject } from '@engine/types';
 import type { InstallConflict } from '@engine/workshop-types';
+import { groupWorkshopNotes } from '@engine/workshop-types';
 import { useUIStore } from '../../stores/ui-store';
 import { useWorkshopStore } from '../../stores/workshop-store';
 import type { WorkshopPrepared } from '../../stores/workshop-store';
@@ -32,6 +33,7 @@ import WorkshopDetailModal from './WorkshopDetailModal.vue';
 import WorkshopInstalledList from './WorkshopInstalledList.vue';
 import WorkshopConflictModal from './WorkshopConflictModal.vue';
 import { describeFailure } from './failure-text';
+import { summarizeNoteGroups } from './format';
 
 const ui = useUIStore();
 const workshop = useWorkshopStore();
@@ -74,20 +76,24 @@ function openDetail(projectId: string): void {
 /**
  * 提交一份计划。**只有它调 `commitInstall`** —— 别在别处再加一个调用点。
  *
- * 回执文案把三个数字一起报: 装了多少条目、多少美化规则、多少项没导入。最后那个数字
- * 是 D16 的「丢弃必须 loud」在 toast 上的落点；详情仍留在已装列表里可展开。
+ * 回执文案把数字一起报: 装了多少条目、多少美化规则，以及处置记录**分类**后的计数。
+ * 这是 D16 的「丢弃必须 loud」在 toast 上的落点；详情仍留在已装列表里可展开。
+ *
+ * ⚠️ 处置计数**必须与已装列表同口径**（`summarizeNoteGroups`）。曾经这里把三类
+ * 合起来报「N 项未导入」，而其中大多数条目装得好好的 —— 两处说法一旦分家，用户
+ * 会以为自己遇到了两个不同的问题。
  */
 async function commit(prepared: WorkshopPrepared): Promise<void> {
   busyId.value = prepared.projectId;
   try {
     const { project, plan } = await workshop.commitInstall(prepared);
-    const dropped = project.droppedNotes?.length ?? 0;
+    const groups = groupWorkshopNotes(project.droppedNotes);
     const parts = [`世界书 ${plan.entries.length} 条`, `美化规则 ${plan.rules.length} 条`];
-    if (dropped > 0) parts.push(`${dropped} 项未导入`);
-    announce(
-      `「${project.name}」已装上 · ${parts.join(' · ')}`,
-      dropped > 0 ? 'warning' : 'success',
-    );
+    const noteSummary = summarizeNoteGroups(groups);
+    if (noteSummary) parts.push(noteSummary);
+    // 真丢了东西或有全局副作用才升到 warning；「装上了只是效果打折」不该长得像失败
+    const alarming = groups.dropped.length > 0 || groups.sideEffect.length > 0;
+    announce(`「${project.name}」已装上 · ${parts.join(' · ')}`, alarming ? 'warning' : 'success');
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     announce(`安装写入失败：${reason}`, 'error');

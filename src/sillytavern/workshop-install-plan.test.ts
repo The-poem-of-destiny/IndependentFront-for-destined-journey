@@ -379,6 +379,11 @@ describe('planInstall —— ★ D15 sourceHash 冲突判定', () => {
 });
 
 describe('planInstall —— droppedNotes 汇总', () => {
+  /** note 正文拼一串（note 带 kind，直接 join 会得到 [object Object]） */
+  function noteText(plan: { droppedNotes: Array<{ text: string }> }): string {
+    return plan.droppedNotes.map((n) => n.text).join('\n');
+  }
+
   function rx(over: Partial<WorkshopSourceRegex> = {}): WorkshopSourceRegex {
     return {
       id: 'rx-1',
@@ -402,28 +407,41 @@ describe('planInstall —— droppedNotes 汇总', () => {
     expect(planInstall(input([source('a')], [rx()]), FRESH).droppedNotes).toEqual([]);
   });
 
-  it('正则侧的丢弃项汇总进来', () => {
+  it('正则侧的丢弃项汇总进来，且保留 kind', () => {
     const plan = planInstall(input([source('a')], [rx({ promptOnly: true })]), FRESH);
     expect(plan.rules).toHaveLength(0);
-    expect(plan.droppedNotes.join('\n')).toContain('promptOnly');
+    expect(plan.droppedNotes.map((n) => n.kind)).toEqual(['dropped']);
+    expect(noteText(plan)).toContain('promptOnly');
   });
 
-  it('退休条目记一条，带 uid 与「不再复用」', () => {
+  it('正则侧的 degraded / sideEffect 不被算成丢弃', () => {
+    const plan = planInstall(
+      input([source('a')], [rx({ replaceString: '<style>a{}</style><script>x</script>' })]),
+      FRESH,
+    );
+    expect(plan.rules).toHaveLength(1); // 装上了
+    expect(plan.droppedNotes.filter((n) => n.kind === 'dropped')).toHaveLength(0);
+    expect(plan.droppedNotes.map((n) => n.kind).sort()).toEqual(['degraded', 'sideEffect']);
+  });
+
+  it('退休条目记一条 dropped，带 uid 与「不再复用」', () => {
     const plan = planInstall(input([]), {
       nextUid: 20,
       existingEntries: [installed(10, 'a', 'x'), installed(11, 'b', 'y')],
     });
-    const note = plan.droppedNotes.find((n) => n.includes('已移除'));
-    expect(note).toContain('2 条');
-    expect(note).toContain('10, 11');
-    expect(note).toContain('不再复用');
+    const note = plan.droppedNotes.find((n) => n.text.includes('已移除'));
+    expect(note?.kind).toBe('dropped');
+    expect(note?.text).toContain('2 条');
+    expect(note?.text).toContain('10, 11');
+    expect(note?.text).toContain('不再复用');
   });
 
-  it('上游重名条目 → 本地唯一化并记 note（否则两条抢同一个 uid）', () => {
+  it('上游重名条目 → 本地唯一化并记 note（条目装进来了，故算 degraded 不算未导入）', () => {
     const plan = planInstall(input([source('核心', 'a'), source('核心', 'b')]), FRESH);
     expect(plan.entries.map((e) => e.name)).toEqual(['核心', '核心 (2)']);
     expect(plan.entries.map((e) => e.uid)).toEqual([0, 1]);
-    expect(plan.droppedNotes.join('\n')).toContain('重复');
+    expect(plan.droppedNotes.map((n) => n.kind)).toEqual(['degraded']);
+    expect(noteText(plan)).toContain('重复');
   });
 
   it('三重名 → (2)/(3) 依次递增', () => {

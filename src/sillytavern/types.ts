@@ -81,6 +81,38 @@ export interface WorldBook {
 // ========== Creative Workshop Types (D13) ==========
 
 /**
+ * 一条处置记录的类别 —— **「丢了」和「装上了但会这样」不是一回事**。
+ *
+ * 首版把两者合流成一个 `string[]`，UI 统一按「N 项内容未导入」报数，于是一条
+ * 装好了、也启用了、只是 `<script>` 不执行的正则，会被算进「未导入」——
+ * 用户读到的是安装失败，实际内容装得好好的。类别就是为了让 UI 不再说这个谎。
+ *
+ * - `dropped` —— ST 字段在本引擎无对应物，**确实丢了**（`placement` / `minDepth`
+ *   / `maxDepth` / `runOnEdit` / `substituteRegex` / `trimStrings`；`promptOnly`
+ *   更是整条不产出规则）
+ * - `degraded` —— **装了**，但渲染不完整（```` ``` ```` 围栏无渲染器、完整 HTML
+ *   文档被解析器截断、`<script>` 在 v-html 里惰性、`{{...}}` 宏原样输出）
+ * - `sideEffect` —— **装了**，且有**规则自身之外**的副作用（`<style>` 全局生效，
+ *   可能覆盖应用主题 token）。单独成类是因为它是唯一会影响其它 UI 的，该最显眼。
+ */
+export type WorkshopNoteKind = 'dropped' | 'degraded' | 'sideEffect';
+
+/** 带类别的处置记录 */
+export interface WorkshopNote {
+  kind: WorkshopNoteKind;
+  text: string;
+}
+
+/**
+ * 落库形态 —— **裸字符串是历史数据**。
+ *
+ * P1 首版把 `droppedNotes` 写成了 `string[]`，用户库里已经有这种行了。读侧一律
+ * 经 `normalizeWorkshopNotes()` 归一（裸串按 `dropped` 处理，与旧文案语气一致），
+ * 不做迁移脚本：这是纯展示字段，为它扫全表升级不划算，就地兼容即可。
+ */
+export type WorkshopNoteLike = string | WorkshopNote;
+
+/**
  * 创意工坊项目元数据。
  *
  * 一个项目对应一本 `partition: 'creative_workshop'` 的 WorldBook（D7），
@@ -105,7 +137,14 @@ export interface WorkshopProject {
   installedAt: number;
   fetchedAt: number; // 上次拉取上游元数据时间（TTL 判定）
   uidRange: { start: number; end: number };
-  droppedNotes?: string[]; // 安装时的处置记录，供 UI 提示
+  /**
+   * 安装时的处置记录，供 UI 提示。
+   *
+   * ⚠️ 元素类型是 `string | WorkshopNote` 的联合而不只是 `WorkshopNote`：老行里
+   * 存的是裸字符串（P1 首版），读侧必须过 `normalizeWorkshopNotes()`。新写入一律
+   * 是结构化的。
+   */
+  droppedNotes?: WorkshopNoteLike[];
   /** 最后写入时间（v14 索引字段），每次落库盖戳 */
   updatedAt: number;
 }

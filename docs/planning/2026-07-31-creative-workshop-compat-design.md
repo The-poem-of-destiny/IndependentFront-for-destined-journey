@@ -170,6 +170,7 @@ const allowedUids = enabledByPartition.get(book.partition);
 - 勾一个项目 → 写入其全部条目的 `creative_workshop:<uid>`。用户不需要在维拉的 12 条里挑 11 条；那 12 条是一个作品。
 - **不做命定核心冲突检测**：工坊项目可能自带命定核心，与内置单选的那个撞。但 `tags` 是上游自由文本（"系统"/"命定核心"/"外挂"/"路边"），无可靠机器信号，猜必误伤。**UI 显著展示 tags 与简介，由用户判断。**
 - 捏人页现有的命定核心是**单选一个 uid**（`selectedSystemCoreEntryUid`），项目是 N 条条目，塞不进那个槽 —— 工坊走自己的多选列表。
+- **实施期 UX 调整（2026-07-31）**：工坊多选列表与命定核心单选**同屏并列**，都在捏人页「命定核心」步骤里，拆成视觉上分开的两轴（`一 · 命定核心` 单选·必选 / `二 · 工坊项目` 多选·可选）；工坊区从 `CreateStepCharacters.vue` 挪到 `CreateStepDestinyCore.vue`，原步骤名「内容启用」改回「角色启用」。**仍不做冲突拦截** —— 同屏之后反而更好落实本条决策：用户能同时看到内置命定核心与工坊项目的 tags 与简介，自行判断是否撞车。纯 UI 位置调整，`create-store` 三条轴逻辑与 `buildEnabledWorldBookEntries()` 输出逐字未变（有测试钉住）。
 - 建档后须可改（工坊项目是玩到一半装的），因此除捏人页外还需一个每存档的启用面板。
 
 ---
@@ -258,7 +259,7 @@ entry.extra = {
 | — | `isBuiltin: false` · `group: '创意工坊 · <项目名>'` | |
 | — | `autoEnable.worldBookIds: ['workshop:<id>']` | 装了才启用，卸载即失效 |
 
-**无对应物、明确丢弃**：`promptOnly`（美化库是显示层，无提示词侧改写通道）· `placement` · `minDepth`/`maxDepth` · `substituteRegex`（⚠️ 实测是**枚举**不是布尔，值 0 与 2）· `runOnEdit` · `trimStrings`。逐条记入 `droppedNotes`，UI 明示「N 项未导入」——**丢弃必须 loud**，静默截断会让用户以为装全了。
+**无对应物、明确丢弃**：`promptOnly`（美化库是显示层，无提示词侧改写通道）· `placement` · `minDepth`/`maxDepth` · `substituteRegex`（⚠️ 实测是**枚举**不是布尔，值 0 与 2）· `runOnEdit` · `trimStrings`。逐条记入 `droppedNotes`，UI 明示「N 项未导入」——**丢弃必须 loud**，静默截断会让用户以为装全了。（⚠️ 「N 项未导入」这个单一口径已被**实施期修订**推翻，见本节末「D16 实施期修订」）
 
 **已知后果（已确认接受）**：
 
@@ -270,6 +271,27 @@ entry.extra = {
 以上均在 `droppedNotes` 中记录，项目卡片如实展示。
 
 另有 1/6 条（读者对话渲染0726）的 `replaceString` 含 2 处 `{{getvar::}}` 宏，引擎美化管线无宏替换环节 —— 记入 `droppedNotes`。
+
+#### D16 实施期修订 —— `droppedNotes` 分三类（2026-07-31）
+
+**问题**：本节原定的单一口径「N 项未导入」在真机上会**撒谎**。装「艾莉亚核心先行版 v3.2.1」时 UI 顶部写「**34 项内容未导入**」，但那 34 条 note 里只有约 14 条是真丢弃；其余 20 条描述的对象是**已装且已启用、只是渲染受限或有副作用**的正则 —— Dexie 里那 5 条正则全部 `enabled`，世界书那边也装得好好的。用户读到「34 项未导入」只会以为安装失败。
+
+**修订**：note 从裸 `string` 升为带 `kind` 的结构，分三类：
+
+| kind | 含义 | 覆盖 |
+| --- | --- | --- |
+| `dropped` | ST 字段本引擎无对应物，**确实没导入** | `placement` · `maxDepth` · `minDepth` · `runOnEdit` · `promptOnly`（整条跳过）· `substituteRegex` · `trimStrings` · 退休条目 |
+| `degraded` | **已装**，但渲染不完整 | ` ```html ` 围栏无渲染器 · 完整 HTML 文档被解析器截断 · `<script>` 惰性 · `{{宏}}` 无替换环节 · 上游重名本地改名 |
+| `sideEffect` | **已装**，且有规则自身之外的副作用 | `<style>` 全局生效、可能覆盖应用主题 token |
+
+三类的事实依据全部来自本节「已知后果（已确认接受）」——修订没有改变任何一条已知后果，只是**停止把「已装但受限」误报成「未导入」**。
+
+- 类型：`types.ts` 新增 `WorkshopNoteKind` / `WorkshopNote` / `WorkshopNoteLike`
+- 纯函数：`workshop-types.ts` 新增 `workshopNote` / `normalizeWorkshopNote(s)` / `groupWorkshopNotes`。**向后兼容**：已装项目在 Dexie 里存的是旧 `string[]`，裸字符串与脏 `kind` 一律退回 `dropped`，**绝不抛**
+- 打 kind：`workshop-regex-map.ts` / `workshop-install-plan.ts`；文案口径统一在 `components/workshop/format.ts`
+- UI：`WorkshopInstalledList.vue` 折叠行三段分计数（`sideEffect` 带 ⚠ 且最显眼），`WorkshopPage.vue` toast 同口径
+
+**真机复验**：同一批 note 现在显示为「14 项未导入 · 15 项已装但效果受限 · ⚠ 5 项有全局副作用」，合计仍是 34。**「丢弃必须 loud」不变**，改的是 loud 的对象要分得清 —— 把不同性质的事混成一个数字，本身就是另一种静默截断。
 
 ---
 

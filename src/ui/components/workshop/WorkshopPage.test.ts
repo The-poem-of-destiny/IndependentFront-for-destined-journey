@@ -180,10 +180,13 @@ describe('WorkshopPage', () => {
 
   // ═══ D16：丢弃必须 loud ═══
 
-  it('droppedNotes 折叠态露出「N 项内容未导入」，展开后逐条可见', async () => {
+  it('droppedNotes 折叠态露出计数，展开后逐条可见', async () => {
     state.projects = [
       makeProject({
-        droppedNotes: ['promptOnly 不受支持，已丢弃', 'placement 无对应物，已丢弃'],
+        droppedNotes: [
+          { kind: 'dropped', text: 'promptOnly 不受支持，已丢弃' },
+          { kind: 'dropped', text: 'placement 无对应物，已丢弃' },
+        ],
       }),
     ];
     const wrapper = mount(WorkshopPage);
@@ -191,7 +194,7 @@ describe('WorkshopPage', () => {
 
     const toggle = wrapper.find('.wk-notes-toggle');
     expect(toggle.exists()).toBe(true);
-    expect(toggle.text()).toContain('2 项内容未导入');
+    expect(toggle.text()).toContain('2 项未导入');
     expect(toggle.attributes('aria-expanded')).toBe('false');
     // 折叠态不渲染正文
     expect(wrapper.find('.wk-notes-list').exists()).toBe(false);
@@ -208,7 +211,80 @@ describe('WorkshopPage', () => {
     wrapper.unmount();
   });
 
-  it('没有处置记录的项目不显示「未导入」提示', async () => {
+  it('★ 三类 note 分组计数：只有 dropped 叫「未导入」，degraded/sideEffect 各自成组', async () => {
+    state.projects = [
+      makeProject({
+        droppedNotes: [
+          { kind: 'dropped', text: '丢弃 placement' },
+          { kind: 'degraded', text: '含 <script>：已装上但不执行' },
+          { kind: 'degraded', text: '围栏原样显示' },
+          { kind: 'sideEffect', text: '含 <style>：样式会全局生效' },
+        ],
+      }),
+    ];
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+
+    const toggle = wrapper.find('.wk-notes-toggle');
+    const summary = toggle.text();
+    expect(summary).toContain('1 项未导入');
+    expect(summary).toContain('2 项已装但效果受限');
+    expect(summary).toContain('1 项有全局副作用');
+    // ★ 4 条 note 绝不能被报成「4 项未导入」—— 那正是本次要修的谎
+    expect(summary).not.toContain('4 项未导入');
+    // 副作用那一段单独有类，视觉上最显眼
+    expect(wrapper.find('.wk-note-seg.seg-sideEffect').exists()).toBe(true);
+
+    await toggle.trigger('click');
+    const groups = wrapper.findAll('.wk-note-group');
+    expect(groups).toHaveLength(3);
+    // 分组互不串：degraded 组里 3 条 note 只属于自己那 2 条
+    const degraded = wrapper.find('.wk-note-group.group-degraded');
+    expect(degraded.findAll('li')).toHaveLength(2);
+    expect(degraded.text()).not.toContain('placement');
+    const side = wrapper.find('.wk-note-group.group-sideEffect');
+    expect(side.findAll('li')).toHaveLength(1);
+    expect(side.text()).toContain('<style>');
+    wrapper.unmount();
+  });
+
+  it('★ 旧 string[] 数据照常渲染（P1 首版落库形态，不做迁移）', async () => {
+    state.projects = [
+      makeProject({
+        // 老行就是裸字符串数组 —— 归 dropped，不炸、不丢
+        droppedNotes: ['promptOnly 不受支持，已丢弃', '丢弃 runOnEdit'],
+      }),
+    ];
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+
+    const toggle = wrapper.find('.wk-notes-toggle');
+    expect(toggle.exists()).toBe(true);
+    expect(toggle.text()).toContain('2 项未导入');
+    await toggle.trigger('click');
+    expect(wrapper.findAll('.wk-note-group')).toHaveLength(1);
+    expect(wrapper.findAll('.wk-notes-list li')).toHaveLength(2);
+    expect(wrapper.text()).toContain('丢弃 runOnEdit');
+    wrapper.unmount();
+  });
+
+  it('★ 旧串与新结构混在同一行时两者都渲染', async () => {
+    state.projects = [
+      makeProject({
+        droppedNotes: ['老的裸串记录', { kind: 'sideEffect', text: '含 <style>：全局生效' }],
+      }),
+    ];
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    const toggle = wrapper.find('.wk-notes-toggle');
+    expect(toggle.text()).toContain('1 项未导入');
+    expect(toggle.text()).toContain('1 项有全局副作用');
+    await toggle.trigger('click');
+    expect(wrapper.findAll('.wk-notes-list li')).toHaveLength(2);
+    wrapper.unmount();
+  });
+
+  it('没有处置记录的项目不显示折叠区', async () => {
     state.projects = [makeProject({ droppedNotes: [] })];
     const wrapper = mount(WorkshopPage);
     await flushPromises();

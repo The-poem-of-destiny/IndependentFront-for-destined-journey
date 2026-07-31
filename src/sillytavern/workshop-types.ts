@@ -12,7 +12,15 @@
  * 设计: docs/planning/2026-07-31-creative-workshop-compat-design.md D6/D7/D8/D13/D14/D15/D16
  */
 
-import type { BeautifierRule, WorkshopProject, WorldBookEntry, WorldBookPartition } from './types';
+import type {
+  BeautifierRule,
+  WorkshopNote,
+  WorkshopNoteKind,
+  WorkshopNoteLike,
+  WorkshopProject,
+  WorldBookEntry,
+  WorldBookPartition,
+} from './types';
 
 // ═══════════════════════════════════════════════════════════
 // 常量
@@ -46,6 +54,75 @@ export function workshopBookId(projectId: string): string {
 /** 一条工坊正则对应的美化规则 id */
 export function workshopRuleId(projectId: string, sourceId: string): string {
   return `${WORKSHOP_RULE_ID_PREFIX}${projectId}:${sourceId}`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 处置记录：类别、归一、分组
+// ═══════════════════════════════════════════════════════════
+
+/** 展示顺序 —— `sideEffect` 最后但在 UI 上最显眼；它是唯一会影响其它 UI 的一类 */
+export const WORKSHOP_NOTE_KINDS: readonly WorkshopNoteKind[] = [
+  'dropped',
+  'degraded',
+  'sideEffect',
+] as const;
+
+/** 造一条处置记录（产出侧的糖，省得每处都写字面量） */
+export function workshopNote(kind: WorkshopNoteKind, text: string): WorkshopNote {
+  return { kind, text };
+}
+
+function isNoteKind(value: unknown): value is WorkshopNoteKind {
+  return typeof value === 'string' && (WORKSHOP_NOTE_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * 归一一条处置记录 —— **读侧唯一入口**（铁律 2 的同一个道理）。
+ *
+ * 裸字符串是 P1 首版的落库形态，用户库里已经有；缺省归 `dropped`，与旧 UI
+ * 「N 项内容未导入」的语气一致，不会把老数据说成「有副作用」。
+ * `kind` 是脏值（老版本写的、手改过的备份）时同样退回 `dropped`，绝不抛。
+ */
+export function normalizeWorkshopNote(note: WorkshopNoteLike): WorkshopNote {
+  if (typeof note === 'string') return { kind: 'dropped', text: note };
+  const kind = isNoteKind((note as Partial<WorkshopNote>)?.kind)
+    ? (note as WorkshopNote).kind
+    : 'dropped';
+  const raw: unknown = (note as Partial<WorkshopNote>)?.text;
+  return { kind, text: typeof raw === 'string' ? raw : String(raw ?? '') };
+}
+
+/**
+ * 归一整个数组，**容忍旧 `string[]` 与混合数组**。
+ *
+ * 非数组（`undefined` / 被备份改坏的行）一律得空数组：一条脏的展示字段不该让
+ * 整个已装列表白屏。空文本的项丢掉 —— 它只会渲染成一个空 `<li>` 并把计数灌水。
+ */
+export function normalizeWorkshopNotes(
+  notes: readonly WorkshopNoteLike[] | undefined,
+): WorkshopNote[] {
+  if (!Array.isArray(notes)) return [];
+  return notes
+    .filter((n) => n !== null && n !== undefined)
+    .map((n) => normalizeWorkshopNote(n))
+    .filter((n) => n.text.length > 0);
+}
+
+/** 按类别分好的处置记录 —— 三个键恒在（空组给空数组），UI 直接 `.length` 取数 */
+export type WorkshopNoteGroups = Record<WorkshopNoteKind, WorkshopNote[]>;
+
+/**
+ * 归一 + 分组，一步到位。
+ *
+ * UI 拿它出「N 项未导入 · N 项已装但效果受限 · N 项有全局副作用」——
+ * **只有 `dropped` 那一组配叫「未导入」**。
+ */
+export function groupWorkshopNotes(
+  notes: readonly WorkshopNoteLike[] | undefined,
+): WorkshopNoteGroups {
+  const groups: WorkshopNoteGroups = { dropped: [], degraded: [], sideEffect: [] };
+  for (const note of normalizeWorkshopNotes(notes)) groups[note.kind].push(note);
+  return groups;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -202,8 +279,11 @@ export interface InstallPlan {
   retiredUids: number[];
   /** 用户改过、将被本次更新覆盖的条目（D15）—— 非空时 store 须先弹警告 */
   conflicts: InstallConflict[];
-  /** 处置记录（丢弃项 / 已知后果）—— **丢弃必须 loud**，UI 明示「N 项未导入」 */
-  droppedNotes: string[];
+  /**
+   * 处置记录（丢弃项 / 已知后果）—— **丢弃必须 loud**，但只有 `kind: 'dropped'`
+   * 那一组配叫「未导入」；`degraded` / `sideEffect` 是装上了之后的表现。
+   */
+  droppedNotes: WorkshopNote[];
   /** 是否为更新（registry 带了已装条目） */
   isUpdate: boolean;
 }

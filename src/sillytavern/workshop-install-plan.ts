@@ -32,7 +32,7 @@
  * 设计: docs/planning/2026-07-31-creative-workshop-compat-design.md D7/D8/D14/D15/D16
  */
 
-import type { WorldBookEntry } from './types';
+import type { WorkshopNote, WorldBookEntry } from './types';
 import { mapWorkshopRegexes } from './workshop-regex-map';
 import type {
   InstallConflict,
@@ -41,7 +41,7 @@ import type {
   WorkshopInstallInput,
   WorkshopSourceEntry,
 } from './workshop-types';
-import { WORKSHOP_PARTITION, workshopBookId } from './workshop-types';
+import { WORKSHOP_PARTITION, workshopBookId, workshopNote } from './workshop-types';
 
 /**
  * 正文哈希 —— 只为「这段文本被人改过吗」这一个问题服务（D15）。
@@ -75,7 +75,7 @@ export function hashWorkshopContent(content: string): string {
  */
 function uniquifyNames(
   entries: WorkshopSourceEntry[],
-  notes: string[],
+  notes: WorkshopNote[],
 ): Array<{ entry: WorkshopSourceEntry; name: string }> {
   const used = new Set<string>();
   return entries.map((entry) => {
@@ -84,7 +84,14 @@ function uniquifyNames(
       let suffix = 2;
       while (used.has(`${entry.name} (${suffix})`)) suffix++;
       name = `${entry.name} (${suffix})`;
-      notes.push(`条目名「${entry.name}」在上游重复，本地重命名为「${name}」以保证按名匹配稳定`);
+      // 条目**装进来了**，只是本地叫了别的名字 → 不是 dropped（说它「未导入」是撒谎），
+      // 归 degraded：装上了，但与上游有出入。
+      notes.push(
+        workshopNote(
+          'degraded',
+          `条目名「${entry.name}」在上游重复，本地重命名为「${name}」以保证按名匹配稳定`,
+        ),
+      );
     }
     used.add(name);
     return { entry, name };
@@ -102,7 +109,7 @@ function uniquifyNames(
  */
 export function planInstall(payload: WorkshopInstallInput, registry: InstallRegistry): InstallPlan {
   const { project } = payload;
-  const droppedNotes: string[] = [];
+  const droppedNotes: WorkshopNote[] = [];
 
   const existingEntries = registry.existingEntries ?? [];
   const isUpdate = existingEntries.length > 0;
@@ -173,8 +180,12 @@ export function planInstall(payload: WorkshopInstallInput, registry: InstallRegi
     .filter((entry) => !matchedNames.has(entry.name))
     .map((entry) => entry.uid);
   if (retiredUids.length > 0) {
+    // 这些条目本次之后**库里真的没有了** → dropped
     droppedNotes.push(
-      `${retiredUids.length} 条已装条目在上游新版本中已移除，将被删除（uid ${retiredUids.join(', ')} 就此退休，不再复用）`,
+      workshopNote(
+        'dropped',
+        `${retiredUids.length} 条已装条目在上游新版本中已移除，将被删除（uid ${retiredUids.join(', ')} 就此退休，不再复用）`,
+      ),
     );
   }
 

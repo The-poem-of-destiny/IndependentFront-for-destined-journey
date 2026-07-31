@@ -20,6 +20,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { getDatabase } from '@engine/database';
 import type { WorkshopProject } from '@engine/types';
+import { normalizeWorkshopNotes } from '@engine/workshop-types';
 
 // 内置世界书 / 预设美化规则都靠 fetch 读静态文件，node 下不可用 —— 直接替身，
 // 免得每次 init 都去撞一次注定失败的 fetch。
@@ -317,9 +318,12 @@ describe('workshop-store', () => {
     const store = await freshStore();
     await store.install('P2');
 
-    const notes = (await dbRow('P2'))!.droppedNotes ?? [];
-    expect(notes.some((n) => n.includes('详情预览'))).toBe(true);
-    expect(notes.some((n) => n.includes('promptOnly'))).toBe(true);
+    const notes = normalizeWorkshopNotes((await dbRow('P2'))!.droppedNotes);
+    expect(notes.some((n) => n.text.includes('详情预览'))).toBe(true);
+    expect(notes.some((n) => n.text.includes('promptOnly'))).toBe(true);
+    // 客户端侧裸串经 normalize 落成结构化 —— 新写入的行不再有裸字符串
+    expect(notes.every((n) => typeof n === 'object' && typeof n.kind === 'string')).toBe(true);
+    expect(notes.find((n) => n.text.includes('详情预览'))!.kind).toBe('dropped');
     // promptOnly 那条整条没导入 → 没有规则落库
     expect(await dbRuleIds('P2')).toEqual([]);
   });
@@ -502,7 +506,9 @@ describe('workshop-store', () => {
 
     const row = (await dbRow('U'))!;
     expect(row.installedVersion).toBe('2.0.0');
-    expect(row.droppedNotes?.some((n) => n.includes('已移除'))).toBe(true);
+    expect(normalizeWorkshopNotes(row.droppedNotes).some((n) => n.text.includes('已移除'))).toBe(
+      true,
+    );
     // 只有一行项目、一本书
     expect(await getDatabase().workshopProjects.count()).toBe(1);
     expect(await getDatabase().worldBooks.count()).toBe(1);
@@ -677,7 +683,10 @@ describe('workshop-store', () => {
     expect(localRow.installedVersion).toBe(netRow.installedVersion);
     expect(localRow.name).toBe(netRow.name);
     // 唯一的差别是溯源那一行（本地文件无从与上游校对版本，必须说出来）
-    expect(localRow.droppedNotes).toEqual([LOCAL_IMPORT_NOTE, ...(netRow.droppedNotes ?? [])]);
+    expect(localRow.droppedNotes).toEqual([
+      { kind: 'dropped', text: LOCAL_IMPORT_NOTE },
+      ...(netRow.droppedNotes ?? []),
+    ]);
   });
 
   it('本地文件缺 id / 无内容时拒绝，不落库', async () => {

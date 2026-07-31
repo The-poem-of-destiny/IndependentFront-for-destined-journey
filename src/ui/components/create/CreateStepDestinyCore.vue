@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useCreateStore } from '../../stores/create-store';
+import WorkshopEnableList from '../shared/WorkshopEnableList.vue';
 
 const store = useCreateStore();
 
@@ -24,82 +25,115 @@ function summary(content: string, maxLen = 200): string {
 
 <template>
   <section class="step-core">
-    <h2 class="step-title">命定核心 — 选择你的命定之灵</h2>
+    <h2 class="step-title">命定核心与工坊内容</h2>
     <p class="step-desc">
-      命定之灵是寄宿于你灵魂中的存在，它将伴随整个命运之旅，影响叙事风格和特殊机制。请慎重选择。
+      这一步有两条彼此独立的选择：<b>命定核心</b>只能选一枚，<b>工坊项目</b>可以勾多个。
+      工坊项目不是命定核心的候选项，两者不互相替代。
     </p>
 
-    <div v-if="store.systemCoreEntries.length === 0" class="core-loading">
-      正在加载命定核心列表…
-    </div>
+    <!-- ═══ 轴一：命定核心（单选） ═══ -->
+    <div class="axis">
+      <h3 class="axis-label">
+        <span class="axis-name">一 · 命定核心</span>
+        <span class="axis-badge badge-single">单选 · 必选</span>
+      </h3>
+      <p class="axis-desc">
+        命定之灵是寄宿于你灵魂中的存在，它将伴随整个命运之旅，影响叙事风格和特殊机制。请慎重选择。
+      </p>
 
-    <!-- 选中条目的详情卡片 -->
-    <div v-if="store.selectedSystemCoreEntry" class="selected-detail">
-      <div class="sd-header">
-        <span class="sd-dot" />
-        <h3>{{ store.selectedSystemCoreEntry.name }}</h3>
-        <button
-          class="sd-deselect"
-          title="取消选择"
-          @click="store.selectSystemCoreEntry(null as any)"
-        >
-          ✕
-        </button>
+      <div v-if="store.systemCoreEntries.length === 0" class="core-loading">
+        正在加载命定核心列表…
       </div>
-      <div class="sd-desc">{{ summary(store.selectedSystemCoreEntry.content, 500) }}</div>
-    </div>
 
-    <!-- 紧凑单选列表（始终显示所有条目） -->
-    <div class="core-list">
-      <div
-        v-for="entry in store.systemCoreEntries"
-        :key="entry.uid"
-        class="core-row"
-        :class="{ selected: store.selectedSystemCoreEntryUid === entry.uid }"
-        role="radio"
-        :aria-checked="store.selectedSystemCoreEntryUid === entry.uid"
-        tabindex="0"
-      >
-        <!-- 行主体：点击即选中 -->
-        <div
-          class="core-row-body"
-          @click="store.selectSystemCoreEntry(entry.uid)"
-          @keydown.enter="store.selectSystemCoreEntry(entry.uid)"
-          @keydown.space.prevent="store.selectSystemCoreEntry(entry.uid)"
-        >
-          <span
-            class="core-radio"
-            :class="{ checked: store.selectedSystemCoreEntryUid === entry.uid }"
-          />
-          <span class="core-name">{{ entry.name }}</span>
+      <!-- 选中条目的详情卡片 -->
+      <div v-if="store.selectedSystemCoreEntry" class="selected-detail">
+        <div class="sd-header">
+          <span class="sd-dot" />
+          <h3>{{ store.selectedSystemCoreEntry.name }}</h3>
+          <button
+            class="sd-deselect"
+            title="取消选择"
+            @click="store.selectSystemCoreEntry(null as any)"
+          >
+            ✕
+          </button>
         </div>
+        <div class="sd-desc">{{ summary(store.selectedSystemCoreEntry.content, 500) }}</div>
+      </div>
 
-        <!-- 展开/折叠按钮 -->
-        <button
-          class="core-chevron"
-          :class="{ expanded: expandedUid === entry.uid }"
-          aria-label="展开内容预览"
-          type="button"
-          @click.stop="toggleExpand(entry.uid)"
+      <!-- 紧凑单选列表（始终显示所有条目） -->
+      <div class="core-list">
+        <div
+          v-for="entry in store.systemCoreEntries"
+          :key="entry.uid"
+          class="core-row"
+          :class="{ selected: store.selectedSystemCoreEntryUid === entry.uid }"
+          role="radio"
+          :aria-checked="store.selectedSystemCoreEntryUid === entry.uid"
+          tabindex="0"
         >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-            <path
-              d="M4 2l4 4-4 4"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
+          <!-- 行主体：点击即选中 -->
+          <div
+            class="core-row-body"
+            @click="store.selectSystemCoreEntry(entry.uid)"
+            @keydown.enter="store.selectSystemCoreEntry(entry.uid)"
+            @keydown.space.prevent="store.selectSystemCoreEntry(entry.uid)"
+          >
+            <span
+              class="core-radio"
+              :class="{ checked: store.selectedSystemCoreEntryUid === entry.uid }"
             />
-          </svg>
-        </button>
+            <span class="core-name">{{ entry.name }}</span>
+          </div>
 
-        <!-- 可展开的内容预览 -->
-        <div class="core-preview" :class="{ open: expandedUid === entry.uid }">
-          <div class="core-preview-inner">
-            {{ summary(entry.content, 400) }}
+          <!-- 展开/折叠按钮 -->
+          <button
+            class="core-chevron"
+            :class="{ expanded: expandedUid === entry.uid }"
+            aria-label="展开内容预览"
+            type="button"
+            @click.stop="toggleExpand(entry.uid)"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path
+                d="M4 2l4 4-4 4"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+
+          <!-- 可展开的内容预览 -->
+          <div class="core-preview" :class="{ open: expandedUid === entry.uid }">
+            <div class="core-preview-inner">
+              {{ summary(entry.content, 400) }}
+            </div>
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- ═══ 轴二：工坊项目（多选，D10/D12） ═══
+         刻意与命定核心同屏并列：一个工坊项目是 N 条条目，塞不进单个 uid 的单选槽；
+         项目可能自带自己的命定核心，与上方内置单选撞车 —— 不做冲突拦截（tags 是
+         上游自由文本，猜必误伤），而是把两边摆在同一屏，由用户对照标签与简介判断。 -->
+    <div class="axis">
+      <h3 class="axis-label">
+        <span class="axis-name">二 · 工坊项目</span>
+        <span class="axis-badge badge-multi">多选 · 可选</span>
+      </h3>
+      <p class="axis-desc">
+        来自创意工坊的社区内容，勾选后其全部世界书条目随本存档启用。
+        部分项目可能自带命定核心，与上方内置核心重叠 —— 请对照标签与简介自行判断。
+      </p>
+      <WorkshopEnableList
+        :options="store.workshopOptions"
+        :selected="store.enabledWorkshopProjectIds"
+        empty-text="尚未安装工坊项目 —— 可在首页「创意工坊」中安装"
+        @toggle="store.toggleWorkshopProject"
+      />
     </div>
   </section>
 </template>
@@ -120,7 +154,70 @@ function summary(content: string, maxLen = 200): string {
 .step-desc {
   color: var(--theme-text-secondary);
   font-size: 0.85rem;
+  line-height: 1.6;
   margin-bottom: var(--theme-spacing-lg);
+}
+.step-desc b {
+  color: var(--theme-text-primary);
+  font-weight: 700;
+}
+
+/* ── 两条并列的轴（命定核心单选 / 工坊项目多选） ── */
+.axis + .axis {
+  margin-top: var(--theme-spacing-xl);
+  padding-top: var(--theme-spacing-lg);
+  border-top: 1px solid var(--theme-card-border);
+}
+
+/* Section 标题装饰线 — design.md §5.1 */
+.axis-label {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+  margin: 0 0 var(--theme-spacing-xs);
+  font-family: var(--theme-font-title, serif);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--theme-text-primary);
+}
+.axis-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, var(--theme-card-border), transparent);
+}
+.axis-name {
+  flex-shrink: 0;
+}
+.axis-badge {
+  flex-shrink: 0;
+  padding: 1px var(--theme-spacing-sm);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  background: var(--theme-surface-muted);
+  font-family: var(--theme-font-body, sans-serif);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.6;
+  letter-spacing: 0.02em;
+}
+/* 单选 / 多选用两种颜色区分，避免误以为是同一条轴 */
+.badge-single {
+  color: var(--theme-quality-epic);
+  border-color: color-mix(in srgb, var(--theme-quality-epic) 45%, var(--theme-card-border));
+  background: color-mix(in srgb, var(--theme-quality-epic) 8%, var(--theme-card-bg));
+}
+.badge-multi {
+  color: var(--theme-primary);
+  border-color: color-mix(in srgb, var(--theme-primary) 45%, var(--theme-card-border));
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+}
+
+.axis-desc {
+  color: var(--theme-text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  margin: 0 0 var(--theme-spacing-md);
 }
 
 .core-loading {

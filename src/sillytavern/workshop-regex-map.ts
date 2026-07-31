@@ -6,6 +6,10 @@
  * 已知后果已确认接受，逐条记入 `droppedNotes` 由 UI 如实展示 —— 见文件末尾
  * `noteKnownConsequences()`。
  *
+ * ★ 每条 note 带 `kind`（`dropped` / `degraded` / `sideEffect`）。这不是装饰：
+ * 「`placement` 丢了」与「`<script>` 装上了但不执行」曾经合流成同一个数字，UI 报
+ * 「34 项内容未导入」，而那些正则装得好好的。**只有 `dropped` 配叫「未导入」。**
+ *
  * 三个**实测**的坑（每一个都曾是「看起来显然」的错误假设）:
  *
  * 1. `findRegex` **有两种形态**。实测 6 条里 2 条是裸 pattern（`<yanling_edits\b...`），
@@ -27,11 +31,13 @@
  * 设计: docs/planning/2026-07-31-creative-workshop-compat-design.md D16
  */
 
+import type { WorkshopNote } from './types';
 import type { BeautifierRuleDraft, WorkshopSourceRegex } from './workshop-types';
 import {
   WORKSHOP_RULE_GROUP_PREFIX,
   WORKSHOP_RULE_ORDER_BASE,
   workshopBookId,
+  workshopNote,
   workshopRuleId,
 } from './workshop-types';
 
@@ -99,32 +105,65 @@ export interface RegexMapContext {
 
 export interface RegexMapResult {
   rules: BeautifierRuleDraft[];
-  /** 丢弃项与已知后果 —— **必须 loud**，静默截断会让用户以为装全了 */
-  droppedNotes: string[];
+  /**
+   * 处置记录 —— **必须 loud**，静默截断会让用户以为装全了。
+   *
+   * ⚠️ 每条带 `kind`（见 `WorkshopNote`）。**别把这一整个数组当「未导入」报数**：
+   * 只有 `dropped` 是真丢了；`degraded` / `sideEffect` 那条正则是**装了也启用了**的。
+   */
+  droppedNotes: WorkshopNote[];
 }
 
 /**
  * 记录「原样安装」带来的已知后果（D16 已确认接受，但必须如实告知）。
  *
- * 这些不是我们**丢弃**的东西，而是我们**保留了但环境不支持**的东西 ——
- * 两者对用户是同一个问题：「我装的东西没完全生效」，故合流进同一个数组。
+ * ★ 这些**不是丢弃**：规则装上了、`enabled` 按上游、匹配照常发生。它们描述的是
+ * 装上之后会怎么表现，所以一律是 `degraded`（自身渲染不完整）或 `sideEffect`
+ * （溢出到规则之外）。把它们混进「未导入」的计数，就是本文件曾经在 UI 上说的谎。
  */
-function noteKnownConsequences(name: string, replacement: string, notes: string[]): void {
+function noteKnownConsequences(name: string, replacement: string, notes: WorkshopNote[]): void {
   if (/<script[\s>]/i.test(replacement)) {
-    notes.push(`「${name}」replacement 含 <script>：v-html 插入的脚本浏览器不会执行，该段只占字节`);
+    // 装了、也会被插进 DOM —— 只是 v-html 插入的 <script> 浏览器不执行
+    notes.push(
+      workshopNote(
+        'degraded',
+        `「${name}」replacement 含 <script>：已装上，但 v-html 插入的脚本浏览器不会执行，该段只占字节`,
+      ),
+    );
   }
   if (/<style[\s>]/i.test(replacement)) {
-    notes.push(`「${name}」replacement 含 <style>：样式会全局生效，可能覆盖应用主题 token`);
+    // ★ 唯一溢出到规则之外的一类：<style> 无作用域，会波及整个应用
+    notes.push(
+      workshopNote(
+        'sideEffect',
+        `「${name}」replacement 含 <style>：已装上，样式会全局生效，可能覆盖应用主题 token`,
+      ),
+    );
   }
   if (/^\s*```/.test(replacement)) {
-    notes.push(`「${name}」replacement 包在 \`\`\` 围栏里：本应用无围栏渲染器，会原样显示`);
+    notes.push(
+      workshopNote(
+        'degraded',
+        `「${name}」replacement 包在 \`\`\` 围栏里：已装上，但本应用无围栏渲染器，会原样显示`,
+      ),
+    );
   }
   if (/<!doctype|<html[\s>]/i.test(replacement)) {
-    notes.push(`「${name}」replacement 是完整 HTML 文档：<html>/<head>/<body> 会被解析器丢弃，渲染残缺`);
+    notes.push(
+      workshopNote(
+        'degraded',
+        `「${name}」replacement 是完整 HTML 文档：已装上，但 <html>/<head>/<body> 会被解析器丢弃，渲染残缺`,
+      ),
+    );
   }
   const macros = replacement.match(/\{\{[^}]+\}\}/g);
   if (macros && macros.length > 0) {
-    notes.push(`「${name}」replacement 含 ${macros.length} 处 {{...}} 宏：美化管线无宏替换环节，将原样输出`);
+    notes.push(
+      workshopNote(
+        'degraded',
+        `「${name}」replacement 含 ${macros.length} 处 {{...}} 宏：已装上，但美化管线无宏替换环节，将原样输出`,
+      ),
+    );
   }
 }
 
@@ -134,29 +173,32 @@ function noteKnownConsequences(name: string, replacement: string, notes: string[
  * 只在字段**真的携带了信息**时记 note —— `substituteRegex: 0` / 空 `placement` /
  * `minDepth: null` 丢掉不损失任何东西，为它们刷屏会淹没真正的丢弃项。
  */
-function noteDroppedFields(name: string, entry: WorkshopSourceRegex, notes: string[]): void {
+function noteDroppedFields(name: string, entry: WorkshopSourceRegex, notes: WorkshopNote[]): void {
+  const drop = (text: string): number => notes.push(workshopNote('dropped', text));
+
   if (entry.placement.length > 0) {
-    notes.push(`「${name}」丢弃 placement=[${entry.placement.join(',')}]：本引擎无消息位置定向`);
+    drop(`「${name}」丢弃 placement=[${entry.placement.join(',')}]：本引擎无消息位置定向`);
   }
   if (entry.minDepth !== null) {
-    notes.push(`「${name}」丢弃 minDepth=${entry.minDepth}：本引擎美化不按楼层深度限定`);
+    drop(`「${name}」丢弃 minDepth=${entry.minDepth}：本引擎美化不按楼层深度限定`);
   }
   if (entry.maxDepth !== null) {
-    notes.push(`「${name}」丢弃 maxDepth=${entry.maxDepth}：本引擎美化不按楼层深度限定`);
+    drop(`「${name}」丢弃 maxDepth=${entry.maxDepth}：本引擎美化不按楼层深度限定`);
   }
   // ⚠️ 枚举非布尔：0 = 不替换，丢弃无损；非 0 才是真丢了东西
   if (entry.substituteRegex !== 0) {
-    notes.push(`「${name}」丢弃 substituteRegex=${entry.substituteRegex}：本引擎无宏替换环节`);
+    drop(`「${name}」丢弃 substituteRegex=${entry.substituteRegex}：本引擎无宏替换环节`);
   }
   if (entry.runOnEdit) {
-    notes.push(`「${name}」丢弃 runOnEdit：本引擎美化在渲染时统一求值，无编辑态重跑`);
+    drop(`「${name}」丢弃 runOnEdit：本引擎美化在渲染时统一求值，无编辑态重跑`);
   }
   if (entry.trimStrings.length > 0) {
-    notes.push(`「${name}」丢弃 trimStrings（${entry.trimStrings.length} 项）：本引擎无裁剪串环节`);
+    drop(`「${name}」丢弃 trimStrings（${entry.trimStrings.length} 项）：本引擎无裁剪串环节`);
   }
-  // markdownOnly=false 意味着上游同时改写提示词侧，而美化库是纯显示层
+  // markdownOnly=false 意味着上游同时改写提示词侧，而美化库是纯显示层 ——
+  // 显示侧装上了，提示词侧那一半是真丢了，故仍是 dropped
   if (!entry.markdownOnly) {
-    notes.push(`「${name}」markdownOnly 为 false：提示词侧改写未导入，仅作用于显示层`);
+    drop(`「${name}」markdownOnly 为 false：提示词侧改写未导入，仅作用于显示层`);
   }
 }
 
@@ -184,26 +226,38 @@ export function mapWorkshopRegexes(
   ctx: RegexMapContext,
 ): RegexMapResult {
   const rules: BeautifierRuleDraft[] = [];
-  const droppedNotes: string[] = [];
+  const droppedNotes: WorkshopNote[] = [];
   const orderBase = ctx.orderBase ?? WORKSHOP_RULE_ORDER_BASE;
 
   entries.forEach((entry, index) => {
     const name = entry.scriptName.trim() || `未命名正则 ${index + 1}`;
 
+    // ⚠️ 三个 return 分支都是**整条不产出规则** → 货真价实的 dropped。
+    //    尤其 promptOnly：它长得像「装了但只在提示词侧生效」，实际是一条规则都没有。
     if (entry.promptOnly) {
-      droppedNotes.push(`「${name}」整条未导入（promptOnly）：美化库是显示层，无提示词侧改写通道`);
+      droppedNotes.push(
+        workshopNote(
+          'dropped',
+          `「${name}」整条未导入（promptOnly）：美化库是显示层，无提示词侧改写通道`,
+        ),
+      );
       return;
     }
 
     const { pattern, flags } = parseFindRegex(entry.findRegex);
     if (!pattern) {
-      droppedNotes.push(`「${name}」整条未导入：findRegex 为空`);
+      droppedNotes.push(workshopNote('dropped', `「${name}」整条未导入：findRegex 为空`));
       return;
     }
     try {
       new RegExp(pattern, flags);
     } catch {
-      droppedNotes.push(`「${name}」整条未导入：正则编译失败（${entry.findRegex.slice(0, 40)}…）`);
+      droppedNotes.push(
+        workshopNote(
+          'dropped',
+          `「${name}」整条未导入：正则编译失败（${entry.findRegex.slice(0, 40)}…）`,
+        ),
+      );
       return;
     }
 

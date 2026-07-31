@@ -26,7 +26,9 @@
  *
  * 3. **丢弃必须 loud**。`WorkshopBundle.notes`（客户端侧处置，如「载荷缺失，取自
  *    详情预览」）与 `InstallPlan.droppedNotes`（计划侧处置）**并进同一个数组**落进
- *    `WorkshopProject.droppedNotes`。任何一侧被吞掉，UI 上的「N 项未导入」就会少报。
+ *    `WorkshopProject.droppedNotes`。任何一侧被吞掉，UI 上的处置计数就会少报。
+ *    ⚠️ loud 不等于**报错**：note 分 `dropped` / `degraded` / `sideEffect` 三类，
+ *    只有 `dropped` 配叫「未导入」，后两类是**装上了**之后的表现。
  *
  * 4. **冲突不自作主张（D15）**。`plan.conflicts` 非空时 `install()` **不提交**，
  *    返回 `needs_confirmation` + 冲突清单；UI 弹警告拿到用户确认后再调
@@ -47,7 +49,12 @@ import { getDatabase } from '@engine/database';
 import type { BeautifierRule, WorkshopProject } from '@engine/types';
 import { parsePayload, parseProjectMeta } from '@engine/workshop-manifest';
 import { planInstall } from '@engine/workshop-install-plan';
-import { WORKSHOP_PARTITION, workshopBookId, workshopRuleId } from '@engine/workshop-types';
+import {
+  WORKSHOP_PARTITION,
+  normalizeWorkshopNotes,
+  workshopBookId,
+  workshopRuleId,
+} from '@engine/workshop-types';
 import type {
   BeautifierRuleDraft,
   InstallConflict,
@@ -373,8 +380,11 @@ export const useWorkshopStore = defineStore('workshop', () => {
       installedAt: previous?.installedAt ?? now,
       fetchedAt: now,
       uidRange: plan.uidRange,
-      // ★ 两侧处置记录并进同一个数组 —— 少任何一侧，UI 的「N 项未导入」就少报
-      droppedNotes: [...prepared.sourceNotes, ...plan.droppedNotes],
+      // ★ 两侧处置记录并进同一个数组 —— 少任何一侧，UI 的处置计数就少报。
+      //   `sourceNotes` 是裸串（客户端侧溯源，如「取自详情预览」），经 normalize
+      //   落成 kind: 'dropped'；plan 侧本就带 kind。新写入一律结构化，老行仍是
+      //   裸串，读侧统一过 normalizeWorkshopNotes 兼容。
+      droppedNotes: normalizeWorkshopNotes([...prepared.sourceNotes, ...plan.droppedNotes]),
       updatedAt: now,
     };
     await putProject(row);
