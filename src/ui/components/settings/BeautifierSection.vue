@@ -8,6 +8,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useGameStore } from '../../stores/game-store';
+import { useBeautifierStore } from '../../stores/beautifier-store';
 import { loadPresetRules, mergeRules, collectActiveSignalsFromEntries } from '@engine/beautifier';
 import type { BeautifierRule } from '@engine/types';
 import AppButton from '../shared/AppButton.vue';
@@ -17,6 +18,9 @@ import RuleEditorModal from './RuleEditorModal.vue';
 const cfg = useSettingsStore();
 const s = cfg.settings;
 const game = useGameStore();
+// Phase 0b: 用户规则住在 Dexie（唯一入口 beautifier-store），预设规则是纯内存派生缓存。
+// `beautifierBuiltinDisabled` 仍在 settings（几个 id，体积无关紧要）。
+const beautifier = useBeautifierStore();
 
 // ===== State =====
 
@@ -30,8 +34,8 @@ const loading = ref(true);
 // 内置规则禁用列表
 const builtinDisabled = computed<string[]>(() => s.beautifierBuiltinDisabled ?? []);
 
-// 用户规则
-const userRules = computed<BeautifierRule[]>(() => s.beautifierRules ?? []);
+// 用户规则（Dexie 真源的响应式投影）
+const userRules = computed<BeautifierRule[]>(() => beautifier.userRules);
 
 // ===== 加载预设规则 =====
 
@@ -45,6 +49,8 @@ function getActiveWorldBookState() {
 
 onMounted(async () => {
   try {
+    // 先确保 store 已 hydrate（迁移 + 读 Dexie），否则 userRules 还是空的
+    await beautifier.init();
     const { activeWorldBookIds, activeEntryUids } = getActiveWorldBookState();
     const merged = mergeRules(
       await loadPresetRules(),
@@ -55,7 +61,8 @@ onMounted(async () => {
       new Set(), // characterNames — 后续从 game store 获取
     );
     presetRules.value = merged.filter((r) => r.isBuiltin);
-    s.beautifierPresetRules = merged.filter((r) => r.isBuiltin) as any[];
+    // 派生缓存只进 store 的内存 ref，**不再写 settings**（那是 ~378 KB 的白存）
+    beautifier.presetRules = merged.filter((r) => r.isBuiltin);
   } catch {
     // 加载失败静默，UI 空态
   }
@@ -117,8 +124,7 @@ function toggleBuiltinRule(ruleId: string) {
 }
 
 function toggleUserRule(rule: BeautifierRule) {
-  rule.enabled = !rule.enabled;
-  s.beautifierRules = [...(s.beautifierRules as BeautifierRule[])];
+  void beautifier.toggleRule(rule.id);
 }
 
 function openAdd() {
@@ -131,28 +137,24 @@ function openEdit(rule: BeautifierRule) {
   showEditor.value = true;
 }
 
-function saveRule(rule: BeautifierRule) {
-  const list = [...(s.beautifierRules as BeautifierRule[])];
-  if (editingRule.value) {
-    const idx = list.findIndex((r) => r.id === editingRule.value!.id);
-    if (idx >= 0) list[idx] = rule;
-  } else {
-    list.push(rule);
-  }
-  s.beautifierRules = list;
+async function saveRule(rule: BeautifierRule) {
+  // 编辑时若改了 id，先删旧行再写新行（upsert 按 id，否则会留下孤儿）
+  const prevId = editingRule.value?.id;
+  if (prevId && prevId !== rule.id) await beautifier.deleteRule(prevId);
+  await beautifier.upsertRule(rule);
   showEditor.value = false;
 }
 
 function deleteRule(rule: BeautifierRule) {
-  s.beautifierRules = (s.beautifierRules as BeautifierRule[]).filter((r) => r.id !== rule.id);
+  void beautifier.deleteRule(rule.id);
 }
 
 function refreshPresetRules() {
   const { activeWorldBookIds, activeEntryUids } = getActiveWorldBookState();
   const merged = mergeRules(
     presetRules.value.map((r) => {
-      // 从 beautifierPresetRules 中恢复原始 autoEnable 状态
-      const orig = (s.beautifierPresetRules as any[])?.find((pr: any) => pr.id === r.id);
+      // 从 store 的预设缓存中恢复原始 autoEnable 状态
+      const orig = beautifier.presetRules.find((pr) => pr.id === r.id);
       return { ...r, autoEnable: orig?.autoEnable ?? r.autoEnable };
     }),
     userRules.value,
@@ -162,14 +164,14 @@ function refreshPresetRules() {
     new Set(),
   );
   presetRules.value = merged.filter((r) => r.isBuiltin);
-  s.beautifierPresetRules = merged.filter((r) => r.isBuiltin) as any[];
+  beautifier.presetRules = merged.filter((r) => r.isBuiltin);
 }
 
 function exportRules() {
   const data = {
     version: 1,
     builtinDisabled: s.beautifierBuiltinDisabled,
-    rules: s.beautifierRules,
+    rules: beautifier.userRules,
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -190,15 +192,10 @@ function importRules() {
     try {
       const data = JSON.parse(await f.text());
       if (Array.isArray(data.rules)) {
-        const existing = [...(s.beautifierRules as BeautifierRule[])];
-        for (const rule of data.rules) {
-          const idx = existing.findIndex((r) => r.id === rule.id);
-          if (idx >= 0) existing[idx] = rule;
-          else existing.push(rule);
-        }
-        s.beautifierRules = existing;
+        // 同 id 覆盖、否则追加 —— upsertRules 就是这个语义
+        await beautifier.upsertRules(data.rules as BeautifierRule[]);
       } else if (Array.isArray(data)) {
-        s.beautifierRules = data as BeautifierRule[];
+        await beautifier.replaceAllRules(data as BeautifierRule[]);
       }
       if (data.builtinDisabled && Array.isArray(data.builtinDisabled)) {
         s.beautifierBuiltinDisabled = data.builtinDisabled;

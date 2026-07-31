@@ -34,6 +34,7 @@ import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
 import type { useGameStore } from '../stores/game-store';
 import type { useSettingsStore } from '../stores/settings-store';
 import { useAudioStore } from '../stores/audio-store';
+import { useWorldBookStore } from '../stores/worldbook-store';
 
 export interface GamePipelineDeps {
   gameStore: ReturnType<typeof useGameStore>;
@@ -572,10 +573,12 @@ export class GamePipeline {
   /** 加载启用世界书：统一数据源（store 优先 + 文件兜底），与 plot_outline 共用 */
   private async loadActiveWorldBooks(): Promise<WorldBook[]> {
     try {
-      // 统一数据源：store 优先（含用户在 WorldBookEditor 的 enabled 修改 + 自建书）+ 文件兜底
-      const all = await loadWorldBooksWithFallback(
-        this.settings.settings.worldBooks as WorldBook[] | undefined,
-      );
+      // 统一数据源：worldbook-store 优先（Dexie，含用户在 WorldBookEditor 的 enabled 修改
+      // + 自建书 + 工坊书）+ 文件兜底。init() 幂等，保证「消费必在迁移之后」。
+      // catch 兼顾单测里没有 activePinia 的场景 —— 与迁移前的空数组行为一致。
+      const wb = useWorldBookStore();
+      await wb.init();
+      const all = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
       const enabledEntries = this.game.activeSave?.metadata?.enabledWorldBookEntries ?? [];
       return filterBooksByEnabledEntries(all, enabledEntries);
     } catch {

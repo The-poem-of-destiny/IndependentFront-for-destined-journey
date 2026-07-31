@@ -10,11 +10,15 @@ import { processRules, escapeHtml, collectActiveSignalsFromEntries } from '@engi
 import type { BeautifierRule, ChatMessage } from '@engine/types';
 import { useSettingsStore } from '../stores/settings-store';
 import { useGameStore } from '../stores/game-store';
+import { useBeautifierStore } from '../stores/beautifier-store';
 
 export function useBeautify() {
   const settings = useSettingsStore();
   const s = settings.settings;
   const game = useGameStore();
+  // Phase 0b: 规则从 beautifier-store 取 —— 用户规则在 Dexie，预设规则是纯内存派生缓存。
+  // `beautifierEnabled` 仍是 settings 里的开关，不动。
+  const beautifier = useBeautifierStore();
 
   /**
    * 合并预设规则 + 用户规则，返回完整美化规则列表。
@@ -23,8 +27,8 @@ export function useBeautify() {
    * 存于 save.metadata.enabledWorldBookEntries。无 autoEnable 的规则保持预设状态。
    */
   function getBeautifierRules(): BeautifierRule[] {
-    const preset = (s.beautifierPresetRules ?? []) as BeautifierRule[];
-    const user = (s.beautifierRules ?? []) as BeautifierRule[];
+    const preset = beautifier.presetRules;
+    const user = beautifier.userRules;
     const presetIds = new Set(preset.map((r) => r.id));
 
     const enabledEntries: string[] =

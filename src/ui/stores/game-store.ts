@@ -261,6 +261,32 @@ export const useGameStore = defineStore('game', () => {
     agentLog.value = [];
   }
 
+  /**
+   * 改写本存档的世界书条目启用轴（`metadata.enabledWorldBookEntries`）。
+   *
+   * ADR-21 的受控例外（P1-09）：这是**纯 UI 辅助字段**，与 `markOpeningPromptConsumed`
+   * 同一条路径 —— 经本统一写入函数 + try/catch，不裸 `db.put`。AI 产生的存档变更
+   * 仍必须走 `vars_update` 语义 op，不在此例外内。
+   *
+   * 写完同步回内存 `saves`，否则 `activeSave` 仍是旧值，面板会显示成没改动。
+   */
+  async function setEnabledWorldBookEntries(entries: string[]): Promise<boolean> {
+    const current = activeSave.value;
+    if (!current) return false;
+    const clean = JSON.parse(JSON.stringify(current));
+    clean.metadata = { ...(clean.metadata ?? {}), enabledWorldBookEntries: [...entries] };
+    clean.updatedAt = Date.now();
+    try {
+      await saveSaveSlot(clean);
+      const idx = saves.value.findIndex((s: SaveSlot) => s.id === clean.id);
+      if (idx >= 0) saves.value[idx] = clean;
+      return true;
+    } catch (err) {
+      console.error('[game-store] 写入世界书启用轴失败:', err);
+      return false;
+    }
+  }
+
   /** 标记开场 Prompt 已消费 */
   async function markOpeningPromptConsumed() {
     if (!activeSave.value) return;
@@ -606,6 +632,7 @@ export const useGameStore = defineStore('game', () => {
     hasOpeningPromptConsumed,
     openingPrompt,
     markOpeningPromptConsumed,
+    setEnabledWorldBookEntries,
     pendingOptions,
     setPendingOptions,
     pendingItemFocus,

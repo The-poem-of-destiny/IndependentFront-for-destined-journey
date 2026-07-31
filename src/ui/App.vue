@@ -5,6 +5,8 @@ import { useThemeStore } from './stores/theme-store';
 import { useAudioStore } from './stores/audio-store';
 import { useAssetStore } from './stores/asset-store';
 import { useSettingsStore } from './stores/settings-store';
+import { useWorldBookStore } from './stores/worldbook-store';
+import { useBeautifierStore } from './stores/beautifier-store';
 import { queryForView } from './lib/view-audio';
 import ToastContainer from './components/shared/ToastContainer.vue';
 
@@ -13,6 +15,29 @@ const ui = useUIStore();
 const audio = useAudioStore();
 const assets = useAssetStore();
 const settings = useSettingsStore();
+const worldbooks = useWorldBookStore();
+const beautifier = useBeautifierStore();
+
+// ═══ 世界书（Phase 0 / 设计 D4）═══════════════════════════
+//
+// 必须在**任何**世界书消费之前跑：init() 会把 localStorage 里的书搬进 Dexie
+// 并删掉 localStorage 副本，之后 `settings.worldBooks` 就不存在了。
+// 这里只负责尽早踢一脚；三个消费端（game-pipeline / create-store / SettingsPage）
+// 各自也 `await init()` —— init() 幂等且并发共用同一个 Promise，
+// 所以「谁先到谁等着」，不依赖本处的时序。
+void worldbooks.init().catch(() => {
+  /* 迁移例程内部永不抛；这里兜 hydrate/内置合并的意外，不该拦住应用启动 */
+});
+
+// ═══ 美化规则（Phase 0b）═════════════════════════════════
+//
+// 同理：init() 把用户规则搬进 Dexie 并删掉 localStorage 副本，同时丢弃
+// `beautifierPresetRules` 那份 ~378 KB 的派生缓存，改为纯内存持有。
+// 必须在游戏页首次美化正文之前跑完，否则规则列表是空的 → 正则不生效。
+// init() 幂等，消费端（ChatFlow via useBeautify / BeautifierSection）各自也会 await。
+void beautifier.init().catch(() => {
+  /* 同上：不该拦住应用启动 */
+});
 
 // ═══ 界面级场景配乐 ═══════════════════════════════════════
 //

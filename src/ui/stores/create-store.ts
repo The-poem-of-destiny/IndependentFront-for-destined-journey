@@ -44,9 +44,16 @@ import {
   ATTRIBUTE_NAMES,
   ATTR_CN_TO_EN,
 } from '@engine/start-catalog';
-import { loadBuiltInWorldBooks, loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
+import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
+import { useWorldBookStore } from './worldbook-store';
+import { useWorkshopStore } from './workshop-store';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
 import type { WorldBook, WorldBookEntry } from '@engine/types';
+import {
+  applyWorkshopSelection,
+  buildWorkshopEnableOptions,
+  type WorkshopEnableOption,
+} from '../lib/workshop-enable';
 
 // ===== 类型 =====
 
@@ -361,20 +368,56 @@ export const useCreateStore = defineStore('create', () => {
   /** 勾选的 character entry uids */
   const enabledCharacterEntryUids = ref<Set<number>>(new Set());
 
-  /** 从内置世界书加载 system_core 和 character 条目 */
+  // ── P1-5: 第三条轴 —— 启用的工坊项目（项目级多选，D10/D12）──────────
+  //
+  // 刻意**不**挤命定核心那个单选槽: 一个工坊项目是 N 条条目，塞不进单个 uid 的
+  // `selectedSystemCoreEntryUid`。这里存项目 id，落库时才展开成
+  // `creative_workshop:<uid>` —— 与 system_core / character 同一套机制，无特判。
+
+  /** 已装工坊项目（含各自条目 uid），由 {@link loadWorldBookEntries} 填充 */
+  const workshopOptions = ref<WorkshopEnableOption[]>([]);
+
+  /** 勾选的工坊项目 id */
+  const enabledWorkshopProjectIds = ref<Set<string>>(new Set());
+
+  /** toggle 勾选工坊项目（项目级，一次连带其全部条目） */
+  function toggleWorkshopProject(projectId: string) {
+    const next = new Set(enabledWorkshopProjectIds.value);
+    if (next.has(projectId)) {
+      next.delete(projectId);
+    } else {
+      next.add(projectId);
+    }
+    enabledWorkshopProjectIds.value = next;
+  }
+
+  /**
+   * 加载 system_core 和 character 条目。
+   *
+   * Phase 0 起改读 worldbook-store（Dexie 全量：内置 + 用户导入/编辑 + 将来的工坊书），
+   * 不再直读 `data/worldbooks/*.json` —— 此前用户在设置页对内置书的编辑
+   * 进不了捏人页。store 为空（IndexedDB 不可用）时仍回落 fetch 本地 JSON。
+   */
   async function loadWorldBookEntries() {
     try {
-      const books = await loadBuiltInWorldBooks();
+      const wb = useWorldBookStore();
+      await wb.init();
+      const books = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
       systemCoreEntries.value = books
         .filter((b) => b.partition === 'system_core')
         .flatMap((b) => b.entries);
       characterEntries.value = books
         .filter((b) => b.partition === 'character')
         .flatMap((b) => b.entries);
+      // P1-5: 工坊项目走自己的项目级列表（未安装的不出现）
+      const ws = useWorkshopStore();
+      await ws.init();
+      workshopOptions.value = buildWorkshopEnableOptions(ws.projects, books);
     } catch {
       // fetch 不可用时静默跳过，保持空数组
       systemCoreEntries.value = [];
       characterEntries.value = [];
+      workshopOptions.value = [];
     }
   }
 
@@ -408,7 +451,9 @@ export const useCreateStore = defineStore('create', () => {
       ids.push(`character:${uid}`);
     }
 
-    return ids;
+    // P1-5: 启用的工坊项目 → 展开成该项目全部条目的 creative_workshop:uid（D12）。
+    // 走同一个纯函数，与建档后的每存档面板共用一套展开语义。
+    return applyWorkshopSelection(ids, workshopOptions.value, enabledWorkshopProjectIds.value);
   }
 
   // ═══════════════════════════════════════════════════════
@@ -882,10 +927,11 @@ export const useCreateStore = defineStore('create', () => {
   /** 加载剧情大纲 Agent 可见的世界书（统一数据源：store 优先 + 文件兜底；worldBookIds + 捏人勾选过滤） */
   async function loadPlotOutlineWorldBooks(agentConfigs: AgentConfig[]): Promise<WorldBook[]> {
     try {
-      // 统一数据源：读 store（含用户在 WorldBookEditor 的 enabled 修改），不再绕过 store 读原始文件
-      const all = await loadWorldBooksWithFallback(
-        useSettingsStore().settings.worldBooks as WorldBook[] | undefined,
-      );
+      // 统一数据源：读 worldbook-store（Dexie，含用户在 WorldBookEditor 的 enabled 修改），
+      // 不再绕过 store 读原始文件
+      const wb = useWorldBookStore();
+      await wb.init();
+      const all = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
       const cfg = agentConfigs.find((c) => c.agentId === 'plot_outline');
       let filtered = all;
       if (cfg && cfg.worldBookIds?.length) {
@@ -1702,8 +1748,10 @@ export const useCreateStore = defineStore('create', () => {
     showPresetModal.value = false;
     selectedSystemCoreEntryUid.value = null;
     enabledCharacterEntryUids.value = new Set();
+    enabledWorkshopProjectIds.value = new Set();
     systemCoreEntries.value = [];
     characterEntries.value = [];
+    workshopOptions.value = [];
   }
 
   return {
@@ -1786,6 +1834,10 @@ export const useCreateStore = defineStore('create', () => {
     selectSystemCoreEntry,
     toggleCharacterEntry,
     buildEnabledWorldBookEntries,
+    // P1-5: 工坊项目启用轴（项目级多选）
+    workshopOptions,
+    enabledWorkshopProjectIds,
+    toggleWorkshopProject,
     // 选择 (→ 开场提示词)
     selectedEquipments,
     selectedItems,

@@ -55,6 +55,9 @@ docs/
 │                                       #    已实现；渲染面接通（§15.9）；大画像/裁剪台 §15.10
 │                                       #    （🔴 §15.10 真机验证记录只对 `e818b61` 那一版有效，
 │                                       #      现行 UI 未经真机走查）；审查轮 §15.11
+├── planning/2026-07-31-creative-workshop-compat-design.md
+│                                       # 🆕 创意工坊兼容层设计 v2（D1-D17）← 改工坊/世界书存储必读
+│                                       #    Phase 0 世界书迁 Dexie · Phase 1 工坊 · Phase 2 EJS 沙盒（未做）
 └── story_preset_format.md          # 🆕 Story Agent 预设编写指南（输出标签顺序 + 占位符排列 + 可用宏）
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
@@ -296,7 +299,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 7a-7c     | 工程 (Vite+Vue3+Pinia) / 主题组件 / 首页+设置页       | ✅                  |
 | 7d        | 捏人页 `/create`                                      | 🔄 世界书驱动改造中 |
 | 7e        | 游戏页+HUD+脚本引擎+ChatFlow+输出美化+ScenePanel      | 🔄 待集成验证       |
-| 7f / 7g   | 创意工坊 / 衔接测试                                   | ⬜                  |
+| 7f / 7g   | 创意工坊（= 工坊 P1）/ 衔接测试                        | ✅ / ⬜             |
 | 8 / 8.5   | Agent 可见性 / Agentic Agent (function calling)       | ✅                  |
 | 9 / 9b    | System Prompt 迁移 / craft_gen 细化                   | ✅                  |
 | 9c        | 集成测试 & 交付                                       | ⬜                  |
@@ -309,7 +312,13 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 素材      | 素材管理系统 v1.0（渲染面+大画像+裁剪台+画像弹窗）    | ✅                  |
 | 战斗 v2   | 战斗系统架构 v2（管道+中间件+6大类+19event+独立面板） | ✅ M5完成 待M6真机  |
 | 战斗 v3   | 代码内核主持流程（Kernel+DiceTape+EffectIntent+DSL）  | 📋 架构+plan 已定稿 |
+| 工坊 P0   | 世界书迁出 localStorage → Dexie v14（+ 进 FullBackup） | ✅                  |
+| 工坊 P0b  | 美化规则迁出 localStorage → Dexie v15                 | ✅                  |
+| 工坊 P1   | 创意工坊（浏览/安装/更新/卸载/启用，= 7f）             | ✅ 真机已过         |
+| 工坊 P2   | EJS 沙盒 + 只读 stats 投影                             | ⬜ 未做             |
 | 真机迭代  | debug loop 持续修复                                   | 🔄                  |
+
+> 🔴 **工坊 P2 未做**：工坊装进来的世界书条目里的 EJS **目前不会被求值**，正文原样进 Agent 上下文。这与内置世界书现状一致（`event.json` 297 个 EJS 块、`system_core.json` 252 个），不是工坊新增的缺陷，但也**不要对外宣称工坊内容已完整生效**。
 
 ## 架构（已实现部分）
 
@@ -324,12 +333,19 @@ src/sillytavern/                    ← 核心引擎
   │   ├── Audio: AudioSourceKind ('blob'|'builtin'|'file') / AudioTrack / AudioBlobRecord 等
   │   └── 辅助: createDefaultCharacterState() / resolvePlotTree()
   │
-  ├── database.ts                   ← Dexie/IndexedDB v13
+  ├── database.ts                   ← Dexie/IndexedDB v15
   │   ├── v1-v3: lorebooks / presets / settings / chats
+  │   │           🪦 lorebooks 是 v3 遗留 `Lorebook` 类型的**死表**，生产代码零读写；
+  │   │              现役世界书表是 v14 的 worldBooks（`WorldBook` 类型）。settings 同为死表。
+  │   │              两张死表刻意保留（删表要写 `表名: null`，会永久抹掉老用户的 v1–v3 行）
   │   ├── v4+: memories / plotEvents / characters / snapshots / saves / apiEndpoints
   │   ├── v11+: audioTracks / audioBlobs / audioPlaylists（全局共享，排除 FullBackup）
   │   ├── v12+: audioHandles（持久化 FileSystemDirectoryHandle）
-  │   └── v13+: assetMeta / assetBlobs（素材库，全局共享，排除 FullBackup，走 zip 导出）
+  │   ├── v13+: assetMeta / assetBlobs（素材库，全局共享，排除 FullBackup，走 zip 导出）
+  │   ├── v14+: worldBooks / workshopProjects（工坊 P0；两者都进 FullBackup）
+  │   └── v15+: beautifierRules（工坊 P0b；只存**用户规则**，内置预设是派生缓存不落库）
+  │       🔴 **世界书与美化规则现居 Dexie，不再在 localStorage**。localStorage 只剩
+  │          settings-store 的其余设置（Agent 配置/主题/`beautifierBuiltinDisabled` 等）
   │
   ├── agent-client.ts               ← [Phase 3] API 客户端（每 Agent 独立 userId / 重试退避 / 缓存检测）
   ├── agent-templates.ts            ← [Phase 3+9] Prompt 模板（systemPrompt 已迁 agent-config.json，留 stub + 动态上下文）
@@ -373,6 +389,11 @@ src/sillytavern/                    ← 核心引擎
   ├── asset-resolve.ts              ← [素材] resolveAsset + 两条相反回退链（立牌链 / 脸位链）
   ├── asset-import-plan.ts          ← [素材] ★ planImport 纯同步出计划（撞号进 variant / 哈希去重 / manifest 只补元数据）
   │
+  ├── workshop-types.ts             ← [工坊 P1] WorkshopProject / 载荷与安装计划类型 + 常量
+  ├── workshop-manifest.ts          ← [工坊 P1] ★纯函数：上游 JSON → 内部形状（容忍字段增删，丢弃项记 droppedNotes）
+  ├── workshop-regex-map.ts         ← [工坊 P1] ★纯函数：ST 正则 → BeautifierRule（裸 pattern 与 /p/flags 两形态都吃）
+  ├── workshop-install-plan.ts      ← [工坊 P1] ★纯同步 planInstall：uid 分区内重新发号 / 条目转换 / 按名匹配更新 / 冲突与丢弃收集
+  │
   ├── lorebook-engine.ts / prompt-assembler.ts / importer.ts / variables.ts / vars-merger.ts
   ├── stream-parser.ts / api-router.ts / api-tools.ts / editor-utils.ts
   │
@@ -404,13 +425,20 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── asset-url.ts                 ← [素材] object URL LRU + 引用计数
 │   ├── image-crop.ts                ← [素材] 从源图切真字节（解码与画布两处注入缝）
 │   ├── crop-rects.ts                ← [素材] 裁剪框几何（纯函数，源图像素坐标系）
+│   ├── workshop-client.ts           ← [工坊] 唯一网络接触点（判别联合永不抛穿 + 超时 + 取消）
+│   ├── workshop-enable.ts           ← [工坊] 启用展开纯函数（项目 → `creative_workshop:<uid>` 集合）
 │   ├── quality-colors.ts / test-fixtures.ts / toSystemEvent.ts
 │   └── variables.css + 10 主题 CSS（parchment/obsidian/crimson/indigo/bronze/sakura/ivory/misty-lilac/forest/ocean）
 │
 ├── stores/
 │   ├── theme-store.ts / ui-store.ts / settings-store.ts / create-store.ts / game-store.ts
 │   ├── audio-store.ts               ← [Audio] Pinia 薄壳（桥接单例 + CRUD + 三后端分流）
-│   └── asset-store.ts               ← [素材] 执行器（planImport 出计划，本店只落库）+ importForCharacter/importPortraitPair
+│   ├── asset-store.ts               ← [素材] 执行器（planImport 出计划，本店只落库）+ importForCharacter/importPortraitPair
+│   ├── worldbook-store.ts           ← [工坊 P0] 🆕 世界书 Dexie 唯一入口（`settings.worldBooks` 已不存在）
+│   ├── worldbook-migration.ts       ← [工坊 P0] localStorage→Dexie 六步迁移（标志位判定→单事务 bulkPut→逐本回读校验→过了才删源→失败一律不动可重试；dedupeIds 防同 id 静默合并）
+│   ├── beautifier-store.ts          ← [工坊 P0b] 美化规则 Dexie 唯一入口（内置预设走纯内存 ref，不持久化）
+│   ├── beautifier-migration.ts      ← [工坊 P0b] 复用 P0 六步迁移
+│   └── workshop-store.ts            ← [工坊 P1] 执行器：拿 planInstall 的计划落 DB，不含转换逻辑
 │
 ├── components/
 │   ├── shared/                      ← 通用组件
@@ -420,6 +448,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── CharacterPortrait.vue    ← [素材] 顶对齐大画像位（纯呈现组件，不碰 store）
 │   │   ├── PortraitSettingsDialog.vue ← [素材] 画像唯一调节面（取景三滑块 + 换图）
 │   │   ├── AssetCropEditor.vue      ← [素材] 裁剪台（一张源图烘出立绘+头像两份真字节）
+│   │   ├── WorkshopEnableList.vue   ← [工坊] 项目粒度启用列表（捏人页与游戏页共用）
 │   │   ├── ToastContainer.vue
 │   │   └── form/ (Input/Select/Stepper/Cascader/KeyValue)
 │   ├── home/HomePage.vue            ← 游戏标题画面
@@ -433,8 +462,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── MapPanel.vue / TopBar.vue / SideToolbar.vue / ScenePanel.vue / ChatFlow.vue / InputBar.vue
 │   │   ├── StatusHUD.vue / StatusOverview.vue / ItemsPanel.vue / CharacterListPanel.vue
 │   │   ├── QuestsPanel.vue / PlotPanel.vue / MemoryPanel.vue / SnapshotPanel.vue / MiniPlayer.vue
+│   │   ├── WorkshopEnablePanel.vue  ← [工坊] 每存档「内容启用」面板（建档后仍可改）
 │   │   └── (战斗面板见 combat/ 子组件，docs/reference/combat-system-architecture.md)
-│   └── workshop/WorkshopPage.vue    ← [占位] 创意工坊
+│   └── workshop/                    ← [工坊 P1] 创意工坊页
+│       ├── WorkshopPage.vue         ← 页面壳（已安装列表 + 浏览入口；首页与侧栏均有入口）
+│       ├── WorkshopBrowseModal.vue / WorkshopDetailModal.vue / WorkshopProjectCard.vue
+│       ├── WorkshopInstalledList.vue / WorkshopConflictModal.vue（更新覆盖前警告）
+│       └── format.ts / failure-text.ts（展示层纯函数）
 │
 └── styles/                          ← base.css / transitions.css / utilities.css
 ```

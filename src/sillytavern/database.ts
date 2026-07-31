@@ -26,6 +26,9 @@ import type {
   AudioHandleRecord,
   AssetMetaRecord,
   AssetBlobRecord,
+  WorldBook,
+  WorkshopProject,
+  BeautifierRule,
 } from './types';
 import type { CreatePreset } from '../ui/stores/create-store';
 import { DEFAULT_SETTINGS } from './types';
@@ -40,7 +43,7 @@ export interface CreatePresetRecord {
 }
 
 const DB_NAME = 'SillyTavernWebDB';
-const DB_VERSION = 13;
+const DB_VERSION = 15;
 
 class AppDatabase extends Dexie {
   // v1-v3 tables (chats 已于 v9 删除)
@@ -79,6 +82,17 @@ class AppDatabase extends Dexie {
   // v13 new tables (Asset System) — 元数据 / 字节 分表存储（设计 §4.1）
   assetMeta!: Table<AssetMetaRecord>;
   assetBlobs!: Table<AssetBlobRecord>;
+
+  // v14 new tables (创意工坊 / 世界书迁出 localStorage) — 设计 D3
+  //   worldBooks: 全部世界书（内置 / 导入 / 工坊）唯一一张表
+  //   workshopProjects: 仅项目生命周期元数据（WorldBook 没有字段位的那些）
+  worldBooks!: Table<WorldBook>;
+  workshopProjects!: Table<WorkshopProject>;
+
+  // v15 new table (美化规则迁出 localStorage) — Phase 0b
+  //   仅**用户规则**。内置 22 条预设规则（~378 KB）是 loadPresetRules() 从
+  //   data/defaults/beautifier-rules.json 现算出来的派生缓存，纯内存持有，不进任何表。
+  beautifierRules!: Table<BeautifierRule>;
 
   constructor() {
     super(DB_NAME);
@@ -370,6 +384,77 @@ class AppDatabase extends Dexie {
       assetMeta: 'id, name, type, [name+type], createdAt, updatedAt',
       assetBlobs: 'id',
     });
+
+    // v14: 世界书迁出 localStorage + 创意工坊 — 新增 worldBooks / workshopProjects 两表
+    //      （纯增量，无 upgrade 回调；迁移例程在 UI 层单独跑，见设计 D4）
+    //
+    // 照本文件惯例重述全部 19 张旧表（约定，非 Dexie 硬要求，见 v13 注释）。
+    //
+    // 🔴 刻意**不写** `lorebooks: null` / `settings: null`（设计 D3）:
+    //    这两张是 v1–v3 遗留死表、生产零读写，但删表会永久抹掉长期用户可能仍存有的旧行。
+    //    放着不花钱，导出也只是空数组。删除是独立的、需要明确决定的动作，不是本次迁移的附带损伤。
+    //
+    // 索引取舍:
+    //   · worldBooks.partition —— 工坊过滤（按分区整体识别/开关/排除）是一等访问模式，保留。
+    //   · workshopProjects 不建 rootProjectId / installState 索引 —— 项目量级是几十条，全表扫即可。
+    this.version(14).stores({
+      lorebooks: 'id, name, updatedAt',
+      presets: 'id, name, updatedAt',
+      settings: 'key',
+      memories: 'id, saveId, createdAt, realTimestamp',
+      plotEvents: 'id, saveId, parentId, status, updatedAt',
+      characters: 'id, saveId, type',
+      snapshots: 'id, saveId, createdAt',
+      saves: 'id, slot, updatedAt',
+      apiEndpoints: 'id, name',
+      plotOutlines: 'id, saveId, updatedAt',
+      saveProfiles: 'saveId, updatedAt',
+      createPresets: 'id, name, updatedAt',
+      messages: 'id, saveId, [saveId+turn]',
+      audioTracks: 'id, name, kind, *tags, updatedAt',
+      audioBlobs: 'id',
+      audioPlaylists: 'id, name, updatedAt',
+      audioHandles: 'id',
+      assetMeta: 'id, name, type, [name+type], createdAt, updatedAt',
+      assetBlobs: 'id',
+      worldBooks: 'id, partition, updatedAt',
+      workshopProjects: 'id, installedAt, updatedAt',
+    });
+
+    // v15: 美化规则迁出 localStorage（Phase 0b）— 新增 beautifierRules 一表
+    //      （纯增量，无 upgrade 回调；迁移例程在 UI 层单独跑，复用 Phase 0 的六步）
+    //
+    // 🔴 必须**新开 v15 而不是就地改 v14**：v14 已在本分支存在，本地可能已有跑到 v14 的库，
+    //    就地改 v14 不会触发 Dexie 升级，新表永远建不出来。
+    //
+    // 照本文件惯例重述全部 21 张旧表；同样刻意**不写**任何 `表名: null`（设计 D3）。
+    //
+    // 索引取舍：`group` 供设置页按分组折叠，`order` 供 processRules 排序取用；
+    // 用户规则量级是几十条，不再多建索引。
+    this.version(15).stores({
+      lorebooks: 'id, name, updatedAt',
+      presets: 'id, name, updatedAt',
+      settings: 'key',
+      memories: 'id, saveId, createdAt, realTimestamp',
+      plotEvents: 'id, saveId, parentId, status, updatedAt',
+      characters: 'id, saveId, type',
+      snapshots: 'id, saveId, createdAt',
+      saves: 'id, slot, updatedAt',
+      apiEndpoints: 'id, name',
+      plotOutlines: 'id, saveId, updatedAt',
+      saveProfiles: 'saveId, updatedAt',
+      createPresets: 'id, name, updatedAt',
+      messages: 'id, saveId, [saveId+turn]',
+      audioTracks: 'id, name, kind, *tags, updatedAt',
+      audioBlobs: 'id',
+      audioPlaylists: 'id, name, updatedAt',
+      audioHandles: 'id',
+      assetMeta: 'id, name, type, [name+type], createdAt, updatedAt',
+      assetBlobs: 'id',
+      worldBooks: 'id, partition, updatedAt',
+      workshopProjects: 'id, installedAt, updatedAt',
+      beautifierRules: 'id, group, order',
+    });
   }
 }
 
@@ -432,6 +517,12 @@ export interface FullBackup {
   createPresets: CreatePresetRecord[];
   // v8 Phase 10h
   messages: ChatMessage[];
+  // v14 创意工坊 / 世界书迁出 localStorage（设计 D5）—— 旧备份缺这两个字段，导入侧必须容忍
+  worldBooks: WorldBook[];
+  workshopProjects: WorkshopProject[];
+  // v15 美化规则迁出 localStorage（Phase 0b）—— 同样是「旧备份缺字段」的三态语义。
+  // 只含**用户规则**；内置预设规则是派生缓存，不进备份（导入方启动时自己从磁盘算）。
+  beautifierRules: BeautifierRule[];
 }
 
 export async function exportAllData(): Promise<FullBackup> {
@@ -450,6 +541,9 @@ export async function exportAllData(): Promise<FullBackup> {
     saveProfiles,
     createPresets,
     messages,
+    worldBooks,
+    workshopProjects,
+    beautifierRules,
   ] = await Promise.all([
     db.lorebooks.toArray(),
     db.presets.toArray(),
@@ -464,6 +558,9 @@ export async function exportAllData(): Promise<FullBackup> {
     db.saveProfiles.toArray(),
     db.createPresets.toArray(),
     db.messages.toArray(),
+    db.worldBooks.toArray(),
+    db.workshopProjects.toArray(),
+    db.beautifierRules.toArray(),
   ]);
   return {
     version: DB_VERSION,
@@ -481,6 +578,9 @@ export async function exportAllData(): Promise<FullBackup> {
     saveProfiles,
     createPresets,
     messages,
+    worldBooks,
+    workshopProjects,
+    beautifierRules,
   };
 }
 
@@ -509,6 +609,10 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
     'saveProfiles',
     'createPresets',
     'messages',
+    // v14 新增 —— 此循环只在字段**存在且非数组**时报错，旧备份缺这两个字段照常通过
+    'worldBooks',
+    'workshopProjects',
+    'beautifierRules',
   ];
   for (const f of arrayFields) {
     const v = backup[f];
@@ -603,6 +707,41 @@ async function doImportAllData(
   await db.transaction('rw', db.messages, async () => {
     await db.messages.clear();
     if (Array.isArray(backup.messages)) await db.messages.bulkPut(backup.messages);
+  });
+
+  // v14 transaction — 🔴 与上面各段**语义不同**，不要照抄成「先 clear 再守卫」:
+  //
+  // 世界书迁进 Dexie 之后，worldBooks 里装着用户导入的书、自建的书、以及对内置书的全部编辑。
+  // pre-v14 的备份根本没有 `worldBooks` 字段（那时书还在 localStorage，压根不在备份里）——
+  // 它对这张表**无话可说**，就不该有权删它。无条件 clear 会让「恢复一份旧备份」这个动作
+  // 静默抹掉用户全部世界书（内置书下次启动能 fetch 回来，用户自己的书和编辑永久丢失）。
+  //
+  // 因此按字段**存在与否**分流，两者必须区分，不可用 `?? []` 把 undefined 抹平成 []:
+  //   · undefined（字段缺席，pre-v14 备份）→ 整张表原样不动，连 clear 都不执行
+  //   · []（字段存在但为空，v14+ 备份）    → 合法的「用户确实没有世界书」，照常 clear
+  await db.transaction('rw', db.worldBooks, db.workshopProjects, async () => {
+    if (backup.worldBooks !== undefined) {
+      await db.worldBooks.clear();
+      if (Array.isArray(backup.worldBooks)) await db.worldBooks.bulkPut(backup.worldBooks);
+    }
+    if (backup.workshopProjects !== undefined) {
+      await db.workshopProjects.clear();
+      if (Array.isArray(backup.workshopProjects))
+        await db.workshopProjects.bulkPut(backup.workshopProjects);
+    }
+  });
+
+  // v15 transaction — 与上面 v14 段**同一套三态语义**（Phase 0b）:
+  //   · undefined（字段缺席，pre-v15 备份）→ 整张表原样不动，连 clear 都不执行
+  //   · []（字段存在但为空）               → 合法的「用户确实没有自定义规则」，照常 clear
+  //   · 有数据                             → 清空后整表覆盖
+  // 守卫必须在 clear() **之前**，不可写成「先 clear 再 if」。
+  await db.transaction('rw', db.beautifierRules, async () => {
+    if (backup.beautifierRules !== undefined) {
+      await db.beautifierRules.clear();
+      if (Array.isArray(backup.beautifierRules))
+        await db.beautifierRules.bulkPut(backup.beautifierRules);
+    }
   });
 }
 

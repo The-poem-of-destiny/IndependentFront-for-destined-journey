@@ -34,7 +34,8 @@ export type WorldBookPartition =
   | 'quick_feature' // 快捷功能 — 命运抽卡/盲盒/FP扩展
   | 'extra_setting' // 额外设定 — 数值表/战斗/制作/旅行/状态
   | 'cot' // COT — Chain-of-Thought 推理模板
-  | 'dlc'; // DLC — 可开关扩展内容
+  | 'dlc' // DLC — 可开关扩展内容
+  | 'creative_workshop'; // 创意工坊 — 社区二创内容
 
 export interface WorldBookEntry {
   uid: number; // 唯一标识（来自原版世界书 UID）
@@ -46,6 +47,19 @@ export interface WorldBookEntry {
   selectiveLogic: 0 | 1 | 2 | 3; // AND_ANY / NOT_ALL / NOT_ANY / AND_ALL
   order: number; // 排序（越大越靠后）
   position: number; // 世界书内位置分组（ST 兼容保留）
+  /**
+   * 条目溯源（D14）—— 仅由安装/更新流程写入，正常编辑不碰。
+   * 目前只有创意工坊一种来源；未来其它来源在此并列加字段，不改 WorldBookEntry 顶层形状。
+   */
+  extra?: {
+    workshop?: {
+      projectId: string;
+      projectName: string;
+      sourceUid: string | number; // 上游原始 uid，仅溯源
+      sourceComment: string; // 上游 comment（= 本引擎的 name）
+      sourceHash: string; // 安装时正文哈希 —— 供 D15 精确判定是否被改过
+    };
+  };
 }
 
 export interface WorldBook {
@@ -55,6 +69,45 @@ export interface WorldBook {
   description?: string;
   entries: WorldBookEntry[];
   builtIn?: boolean; // Phase 8: 项目内置世界书，禁止删除
+  /**
+   * 最后写入时间（v14 索引字段）。
+   *
+   * 可选是因为 `data/worldbooks/*.json` 里的内置书没有该字段——它由 worldbook-store
+   * 在每次落库时盖戳。Dexie 索引容忍缺值行（该行不进 updatedAt 索引，主键查询不受影响）。
+   */
+  updatedAt?: number;
+}
+
+// ========== Creative Workshop Types (D13) ==========
+
+/**
+ * 创意工坊项目元数据。
+ *
+ * 一个项目对应一本 `partition: 'creative_workshop'` 的 WorldBook（D7），
+ * 本类型只承载 WorldBook 没有字段位的项目生命周期数据。
+ * 上游 `project` 响应有 34 字段，此处只落自己要的 —— 原始响应不整包存库（否则即第二真相来源，违反铁律4）。
+ */
+export interface WorkshopProject {
+  id: string; // 上游 uuid，跨版本稳定
+  rootProjectId: string; // 版本族系根
+  name: string;
+  description: string;
+  version: string; // 上游自由填，本引擎只做串比对不解析
+  authorName: string; // authorGlobalName 优先，回退 authorName
+  tags: string[]; // 仅展示与筛选，不参与 partition（D6）
+  coverUrl?: string;
+  downloadUrl: string;
+  fileSize: number;
+
+  // ===== 本地状态 =====
+  installState: 'installed' | 'update_available' | 'broken';
+  installedVersion: string;
+  installedAt: number;
+  fetchedAt: number; // 上次拉取上游元数据时间（TTL 判定）
+  uidRange: { start: number; end: number };
+  droppedNotes?: string[]; // 安装时的处置记录，供 UI 提示
+  /** 最后写入时间（v14 索引字段），每次落库盖戳 */
+  updatedAt: number;
 }
 
 // ========== World Book (Lorebook) Types (v3, deprecated) ==========
@@ -463,9 +516,16 @@ export interface AppSettings {
   memoryCompressionThreshold: number;
   /** Phase 7e: 输出美化 */
   beautifierEnabled: boolean;
+  /**
+   * @deprecated Phase 0b: 用户规则的唯一真源已是 Dexie `beautifierRules` 表
+   *   （入口 `src/ui/stores/beautifier-store.ts`）。本字段属于 v1–v3 遗留的死表
+   *   `settings`，生产零读写，保留仅为不改 DEFAULT_SETTINGS 形状。
+   *
+   * 🔴 Phase 10i 曾并列的 `beautifierPresetRules` 已**删除**：内置 22 条预设规则
+   *   （~378 KB）是 `loadPresetRules()` 从 data/defaults/beautifier-rules.json
+   *   现算出来的派生缓存，给它任何持久化字段位都是制造第二真相来源。
+   */
   beautifierRules: BeautifierRule[];
-  /** Phase 10i: 预设规则（从 beautifier-rules.json 加载，含 autoEnable 计算后的 enabled/locked 状态） */
-  beautifierPresetRules: BeautifierRule[];
 }
 
 export const DEFAULT_FORMAT_PROMPT = `你必须严格按照以下 XML 标签格式输出回复，不要使用 Markdown 包裹：
@@ -517,7 +577,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   /** Phase 7e: 输出美化 */
   beautifierEnabled: true,
   beautifierRules: [],
-  beautifierPresetRules: [],
 };
 
 // ========== Chat Types ==========

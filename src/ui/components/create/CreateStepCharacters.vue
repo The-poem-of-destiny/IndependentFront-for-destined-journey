@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useCreateStore } from '../../stores/create-store';
+import WorkshopEnableList from '../shared/WorkshopEnableList.vue';
 
 const store = useCreateStore();
 
@@ -43,6 +44,17 @@ function summary(content: string, maxLen = 160): string {
 
     <div class="chars-count">
       已选择 {{ store.enabledCharacterEntryUids.size }} / {{ store.characterEntries.length }} 个角色
+    </div>
+
+    <!-- P1-5: 第三条轴 —— 启用的工坊项目（项目级多选，与命定核心单选槽互不相干） -->
+    <div class="workshop-section">
+      <h3 class="section-label">启用的工坊项目</h3>
+      <WorkshopEnableList
+        :options="store.workshopOptions"
+        :selected="store.enabledWorkshopProjectIds"
+        empty-text="尚未安装工坊项目 —— 可在首页「创意工坊」中安装"
+        @toggle="store.toggleWorkshopProject"
+      />
     </div>
   </section>
 </template>
@@ -137,5 +149,34 @@ function summary(content: string, maxLen = 160): string {
   text-align: right;
   border-top: 1px solid var(--theme-card-border);
   margin-top: var(--theme-spacing-sm);
+}
+
+/* ===== 工坊项目（第三条轴） ===== */
+.workshop-section {
+  flex-shrink: 0;
+  margin-top: var(--theme-spacing-md);
+}
+
+/* Section 标题装饰线 — design.md §5.1 */
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 var(--theme-spacing-sm);
+  font-family: var(--theme-font-title, serif);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+}
+.section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, var(--theme-card-border), transparent);
+}
+
+/* 列表自带滚动，这里只给它一个上限，免得挤掉上方角色区 */
+.workshop-section :deep(.wk-grid) {
+  max-height: 14rem;
 }
 </style>

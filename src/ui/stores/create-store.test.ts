@@ -1597,3 +1597,89 @@ describe('localStorage 草稿 save/restore/clear', () => {
     expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
   });
 });
+
+// ===== 世界书启用轴（P1-5: 命定核心单选 / 角色多选 / 工坊项目多选，三轴互不干扰） =====
+
+describe('buildEnabledWorldBookEntries 三条启用轴', () => {
+  let store: ReturnType<typeof useCreateStore>;
+
+  /** 直接铺 workshopOptions —— 不碰 Dexie，测的是展开语义本身 */
+  function seedWorkshop() {
+    store.workshopOptions = [
+      {
+        projectId: 'p1',
+        name: '维拉',
+        description: '一个角色包',
+        authorName: '作者A',
+        version: '1.2.0',
+        tags: ['角色'],
+        entryUids: [105, 106, 107],
+      },
+      {
+        projectId: 'p2',
+        name: '空项目',
+        description: '只带正则',
+        authorName: '作者B',
+        version: '0.1',
+        tags: [],
+        entryUids: [],
+      },
+    ];
+  }
+
+  beforeEach(() => {
+    store = makeStore();
+    seedWorkshop();
+  });
+
+  it('勾一个项目 → 输出该项目全部条目的 creative_workshop:<uid>', () => {
+    store.toggleWorkshopProject('p1');
+    expect(store.buildEnabledWorldBookEntries()).toEqual([
+      'creative_workshop:105',
+      'creative_workshop:106',
+      'creative_workshop:107',
+    ]);
+  });
+
+  it('取消 → 该项目的串全部移除', () => {
+    store.toggleWorkshopProject('p1');
+    store.toggleWorkshopProject('p1');
+    expect(store.buildEnabledWorldBookEntries()).toEqual([]);
+  });
+
+  it('★ 与 system_core / character 两轴互不干扰', () => {
+    store.selectSystemCoreEntry(413);
+    store.toggleCharacterEntry(313);
+    store.toggleWorkshopProject('p1');
+    const ids = store.buildEnabledWorldBookEntries();
+    expect(ids).toContain('system_core:413');
+    expect(ids).toContain('character:313');
+    expect(ids.filter((i) => i.startsWith('creative_workshop:'))).toHaveLength(3);
+
+    // 取消工坊后另两轴原样还在
+    store.toggleWorkshopProject('p1');
+    expect(store.buildEnabledWorldBookEntries()).toEqual(['system_core:413', 'character:313']);
+  });
+
+  it('未安装的项目不在列表里，也就勾不上（勾不存在的 id 不产出任何串）', () => {
+    store.toggleWorkshopProject('不存在的项目');
+    expect(store.buildEnabledWorldBookEntries()).toEqual([]);
+  });
+
+  it('已装但无条目的项目：勾选不炸，只是产不出串', () => {
+    expect(() => store.toggleWorkshopProject('p2')).not.toThrow();
+    expect(store.buildEnabledWorldBookEntries()).toEqual([]);
+  });
+
+  it('工坊轴是独立的一条 —— 不占用命定核心那个单选槽', () => {
+    store.toggleWorkshopProject('p1');
+    expect(store.selectedSystemCoreEntryUid).toBeNull();
+  });
+
+  it('resetAll 清空工坊勾选与选项', () => {
+    store.toggleWorkshopProject('p1');
+    store.resetAll();
+    expect(store.enabledWorkshopProjectIds.size).toBe(0);
+    expect(store.workshopOptions).toEqual([]);
+  });
+});
