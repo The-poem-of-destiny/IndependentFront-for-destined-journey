@@ -12,6 +12,7 @@
 理查德（第三层级法师，FP 46480）单挑 A 级幻书残卷「被啃噬的求知欲」—— 4 回合内通过"起源炼金造物投喂 → 真理火球轰击（200FP/发×3）→ 硬吃濒死精神反扑 → 800FP 认知剥夺收尾"结束战斗。
 
 **关键机制点（带行号）**：
+
 - 起源炼金造"异界冗余信息黑盒"（稀有，固伤 800+逻辑死锁词条）投喂，造成 800 伤害+认知宕机状态（被豁免）（行 280-295）。
 - 🔥 **真理火球**：200FP+400MP，火球术威力+1500 真伤，分 3 段/单段投送（行 494-514、636-651、730-751、946-967）。
 - 🔥 Boss **认知切割**（精神伤害，意图"抹杀/概念抹除"）：意图对抗失败降级常规，造成 1523 精神伤害（行 992-1011），尝试施加"认知剥落"（被豁免）。
@@ -26,25 +27,25 @@
 
 ### 2.1 CombatCommand 序列
 
-| # | 回合 | Command | 成本 | revision | DiceTape 消费 |
-|---|------|---------|------|----------|--------------|
-| C1 | R1 | `BeginOutput`（注入 60×d20） | — | r0→r1 | — |
-| C2 | R1 | `TacticalAction(理查德, craft→异界黑盒)` | 动作槽 1 | r1→r2 | 1×d20（制作检定 d20=9） |
-| C3 | R1 | `Attack(理查德→残卷, 投掷异界黑盒, intent=常规)` | 攻击槽 1 | r2→r3 | 2×d20（劣势取低 13,14→13） |
-| C4 | R1 | `Attack(残卷→理查德, 吞噬本能, 本能反击)` | 残卷攻击槽 1 | r3→r4 | 0（吞食触发道具，无检定） |
-| C5 | R2 | `BeginOutput` | — | r4→r5 | — |
-| C6 | R2 | `Attack(理查德→残卷, 星屑连袭+焚烬之理, intent=猛烈)` | 攻击槽 1，**SpendResource(FP=200, MP=280)** | r5→r6 | 3×d20（19,19,14 多段）+1（先攻9） |
-| C7 | R2 | `TacticalAction(残卷→理查德, 概念重组反噬, 施加认知扭曲)` | 残卷动作槽 1 | r6→r7 | 0 |
-| C8 | R3 | `BeginOutput` | — | r7→r8 | — |
-| C9 | R3 | `TacticalAction(理查德, 移形幻影, 自身位移+闪避buff)` | 动作槽 1，SpendResource(MP=420) | r8→r9 | 1×d20（先攻9） |
-| C10 | R3 | `Attack(理查德→残卷, 真理·火球术+焚烬之理, intent=猛烈)` | 攻击槽 1，**SpendResource(FP=200, MP=400)** | r9→r10 | 1×d20（19） |
-| C11 | R4 | `BeginOutput` | — | r10→r11 | — |
-| C12 | R4 | `Attack(理查德→残卷, 真理·火球术+焚烬之理, intent=猛烈)` | 攻击槽 1，**SpendResource(FP=200, MP=400)** | r11→r12 | 1×d20（19）+1（先攻18） |
-| C13 | R4 | **Morale/战意触发**：内核检测 HP 5472/15000，**Override(closedRuleKey=濒死反扑)** → 残卷 `Attack(残卷→理查德, 认知切割, intent=抹杀→概念)` | 残卷攻击槽 1，SpendResource(MP=800) | r12→r13 | 2×d20（意图对抗 攻方2+守方9）+1（命中15） |
-| C14 | R5 | `BeginOutput` | — | r13→r14 | — |
-| C15 | R5 | `Attack(残卷→理查德, 概念冲撞, intent=常规)` | 残卷攻击槽 1 | r14→r15 | 1×d20（先攻10）+1（命中16） |
-| C16 | R5 | **`Attack(理查德→残卷, 认知剥夺+无面者狂想曲, intent=抹杀→概念)`** | 攻击槽 1，**SpendResource(FP=800)** | r15→r16 | 2×d20（意图对抗 攻方20+守方2）+1（命中8）+1×d20（状态对抗理查德13+残卷12） |
-| C17 | R5 | `Settlement`（内核终局，幂等 settlementId） | — | r16→terminal | 0 |
+| #   | 回合 | Command                                                                                                                                    | 成本                                        | revision     | DiceTape 消费                                                              |
+| --- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- | ------------ | -------------------------------------------------------------------------- |
+| C1  | R1   | `BeginOutput`（注入 60×d20）                                                                                                               | —                                           | r0→r1        | —                                                                          |
+| C2  | R1   | `TacticalAction(理查德, craft→异界黑盒)`                                                                                                   | 动作槽 1                                    | r1→r2        | 1×d20（制作检定 d20=9）                                                    |
+| C3  | R1   | `Attack(理查德→残卷, 投掷异界黑盒, intent=常规)`                                                                                           | 攻击槽 1                                    | r2→r3        | 2×d20（劣势取低 13,14→13）                                                 |
+| C4  | R1   | `Attack(残卷→理查德, 吞噬本能, 本能反击)`                                                                                                  | 残卷攻击槽 1                                | r3→r4        | 0（吞食触发道具，无检定）                                                  |
+| C5  | R2   | `BeginOutput`                                                                                                                              | —                                           | r4→r5        | —                                                                          |
+| C6  | R2   | `Attack(理查德→残卷, 星屑连袭+焚烬之理, intent=猛烈)`                                                                                      | 攻击槽 1，**SpendResource(FP=200, MP=280)** | r5→r6        | 3×d20（19,19,14 多段）+1（先攻9）                                          |
+| C7  | R2   | `TacticalAction(残卷→理查德, 概念重组反噬, 施加认知扭曲)`                                                                                  | 残卷动作槽 1                                | r6→r7        | 0                                                                          |
+| C8  | R3   | `BeginOutput`                                                                                                                              | —                                           | r7→r8        | —                                                                          |
+| C9  | R3   | `TacticalAction(理查德, 移形幻影, 自身位移+闪避buff)`                                                                                      | 动作槽 1，SpendResource(MP=420)             | r8→r9        | 1×d20（先攻9）                                                             |
+| C10 | R3   | `Attack(理查德→残卷, 真理·火球术+焚烬之理, intent=猛烈)`                                                                                   | 攻击槽 1，**SpendResource(FP=200, MP=400)** | r9→r10       | 1×d20（19）                                                                |
+| C11 | R4   | `BeginOutput`                                                                                                                              | —                                           | r10→r11      | —                                                                          |
+| C12 | R4   | `Attack(理查德→残卷, 真理·火球术+焚烬之理, intent=猛烈)`                                                                                   | 攻击槽 1，**SpendResource(FP=200, MP=400)** | r11→r12      | 1×d20（19）+1（先攻18）                                                    |
+| C13 | R4   | **Morale/战意触发**：内核检测 HP 5472/15000，**Override(closedRuleKey=濒死反扑)** → 残卷 `Attack(残卷→理查德, 认知切割, intent=抹杀→概念)` | 残卷攻击槽 1，SpendResource(MP=800)         | r12→r13      | 2×d20（意图对抗 攻方2+守方9）+1（命中15）                                  |
+| C14 | R5   | `BeginOutput`                                                                                                                              | —                                           | r13→r14      | —                                                                          |
+| C15 | R5   | `Attack(残卷→理查德, 概念冲撞, intent=常规)`                                                                                               | 残卷攻击槽 1                                | r14→r15      | 1×d20（先攻10）+1（命中16）                                                |
+| C16 | R5   | **`Attack(理查德→残卷, 认知剥夺+无面者狂想曲, intent=抹杀→概念)`**                                                                         | 攻击槽 1，**SpendResource(FP=800)**         | r15→r16      | 2×d20（意图对抗 攻方20+守方2）+1（命中8）+1×d20（状态对抗理查德13+残卷12） |
+| C17 | R5   | `Settlement`（内核终局，幂等 settlementId）                                                                                                | —                                           | r16→terminal | 0                                                                          |
 
 > 每回合 BeginOutput 单独是 RequiredInput，战斗消耗 5 批 60×d20（与原文 5 个骰子池声明对齐）。
 
@@ -115,6 +116,7 @@ automaton "无面者·认知剥夺" {
 ```
 
 **"概念抹杀走哪条路"的回答**：
+
 - **不走 Override RuleKey**：不是"修改内核某已有规则"，而是施加新状态。
 - **不走 ProposedEffectPlan**：ApplyStatus + divinity + 状态对抗这套组合 v3 词汇已能表达。
 - **走 DealDamage(特殊标签)？不是**：原文伤害本来就是 0，主路径是 ApplyStatus。
@@ -236,36 +238,44 @@ Command C16: Attack(理查德→残卷, 认知剥夺, intent=抹杀→概念, �
 ## 3. 架构执行问题清单
 
 ### 🟡 Q1："概念崩坏导致濒死反扑"需要 Override RuleKey 改濒死阈值
+
 **现象**：原文行 979-985，残卷 HP 5472/15000=36%，"30% 阈值未达成，但由于概念崩坏，本能进入濒死反扑"。这是"概念级状态强制触发濒死行为，无视 HP 阈值"。
 **根因**：v3 的战意/濒死是 closed RuleKey（基于 HP 阈值+战斗类型+d20 判定，v2 §9.5）。要让"概念崩坏"绕过 HP 阈值强制触发濒死反扑，必须用 `OverrideIntent` 改这个 closed RuleKey——但提案说 Override 只能"在 closed RuleKey 上选择内核已支持的替代规则"。问题：**内核有没有"无视 HP 阈值强制触发濒死"这个替代规则？** 若只有标准阈值规则，"概念崩坏→强制濒死"表达不出来。
 **建议**：内核 morale RuleKey 需支持 override 选项 `{ forceMoraleState: "濒死反扑", ignoreHpThreshold: true }`，由"概念崩坏"状态在 `morale.before` 窗口通过 OverrideIntent 注入。closed RuleKey 扩容，属"内核已支持的替代规则"范畴，应该可行——前提是设计时预置了 forceState 选项。
 
 ### 🔴 Q2："认知剥夺"的胜负判定缺口 —— 最致命
+
 **现象**：原文认知剥夺伤害=0，靠施加"认知丧失"状态 → AI 判定"永久性概念宕机" → 战斗胜利。残卷 HP 还有 5472。
 **根因**：v3 的终局触发（UnitDowned/CombatEnded）是 closed RuleKey，标准是 `HP ≤ 0` 或 `战意溃逃`。"施加一个状态 → 目标失去行动能力 → 判胜利"这条路径在 v3 里**没有对应的终局规则**。状态本身只是"持续 1 回合"，1 回合后状态消失，残卷 HP 还在，战斗应该继续——但叙事上它已经是"死物"了。
 这是 v3 closed RuleKey 体系的**真实缺口**：能处理"HP 清空死亡"和"战意溃逃"，但处理不了"非致死状态导致的目标永久失能"。
 **建议**（按主人决策，走 BoundedAdjudication）：要么①内核终局 RuleKey 支持 override `{ forceTerminal: true, reason: "概念宕机" }`（由高 divinity 状态触发）；要么②明确允许战斗 Agent 在判定后提交 `ProposedAdjudication(requestedRuleOverride: terminal.forceTerminal)`（内核验 divinity≥法则级 且目标确有该状态 → 执行终局）。**这是 v3 在概念级战斗上的真实软肋，必须补 forceTerminal**。
 
 ### ⚪ Q3：真理火球/认知剥夺的"召唤幻书+释放"两段式 —— 已解决
+
 **现象**：原文是"召唤《焚烬之理》(200FP) → 释放火球术(400MP)"两段。
 **判定**：v3 下必须是**1 个 Command、消耗 1 个攻击槽**。两个 SpendResource intent（FP+MP）在同一 EffectAutomaton 的 intent batch 里原子提交。跟 v3 设计完全吻合（intent batch 原子范围）。✅ 拆成 2 个 Command 会消耗 2 个行动槽，违反原文（理查德每回合只打一发）。
 
 ### 🔴 Q4：FP 跨战斗态↔存档态的原子提交 + 崩溃恢复幂等
+
 **现象**：FP 是 v2 里的**存档级元货币**（SaveProfile 字段，ADR-22）。本场消耗 200×3+800=1400 FP。v3 要求"所有 HP/资源/状态变化同一原子提交"。
 **根因**：v3 的 CombatState 是战斗内权威，但 FP 真源在 SaveProfile（持久化层）。v3 提案说"StateManager 保留为持久化 adapter，战斗内每步写 journal，终局再幂等提交"。问题：
+
 - **战斗中途崩溃**：认知剥夺扣了 800FP，但战斗没结束就崩了。恢复时 FP 扣减幂等怎么保证？`idempotencyKey` 在 journal replay 时能识别"这 800FP 已扣"，但 SaveProfile 写入是终局提交，中途崩溃时 SaveProfile 没扣 FP，重跑会再扣一次——除非 journal 也记录"已对 SaveProfile 应用的 diff"。
 - **FP 不足预检**：800FP 认知剥夺前，内核查 FP 余额。FP 不在 CombatState（在 SaveProfile），v3 Command 校验"FP≥800"怎么查？
-**建议**：FP 这种存档级资源需①战斗开始时 FP 快照进 CombatState（本地权威副本），战斗内所有 FP 操作对副本进行，终局一次性 diff 回 SaveProfile；②journal 记录 FP diff 的 idempotencyKey 防重放。详见交接地图 §FP 跨边界。
+  **建议**：FP 这种存档级资源需①战斗开始时 FP 快照进 CombatState（本地权威副本），战斗内所有 FP 操作对副本进行，终局一次性 diff 回 SaveProfile；②journal 记录 FP diff 的 idempotencyKey 防重放。详见交接地图 §FP 跨边界。
 
 ### 🟡 Q5：divinity 差值压制表在"状态施加"场景的适用性
+
 **现象**：v2 §13.1c 的 divinity 差值压制表（差1级压20%防御…差≥5级100%无视）明确定义在"穿透/DR"阶段（Step3/7）。但认知剥夺是**状态施加**，不走伤害管线。
 **根因**：认知剥夺的"认知丧失"div=6，残卷本体 div=5，对抗检定 34 vs 30 已成功。但"高 divinity 状态压过低 divinity 目标"在 v3 里怎么体现？提案说"概念免疫通过带神性优先级的 effect-acceptance rule 拒绝匹配标签"——这是反向（高 divinity 拒绝低 divinity 效果）。正向"高 divinity 状态强制施加给低 divinity 目标，无视豁免"在提案里**没有明确规则**。原文靠纯对抗检定成功（34>30），没靠 divinity 压制。但若残卷精神更高、对抗失败呢？v3 缺一个"divinity 差值补偿对抗结果"的规则。
 **建议**：divinity 优先级机制从"只在穿透/DR"扩展到"状态对抗/意图对抗"——高 divinity 攻方在对抗检定时获加值（或低 divinity 守方获减值）。提案"神性优先级"语义需明确定义在所有冲突窗口。
 
 ### ⚪ Q6：精神伤害类型减免 —— 无问题
+
 **判定**：v3 没动 8 步管线和伤害类型减免公式（提案明确保留 combat-damage.ts 纯函数）。精神伤害=精13×0.8%=10.4% 减免，1700×0.896=1523。✅ 完全复现。认知剥夺伤害=0 也不走减免（本身就是 0）。"认知剥落"状态施加被豁免是对抗失败，不是伤害减免。
 
 ### 🟡 Q7：起源炼金造物投喂（道具内置伤害触发）
+
 **现象**：行 280-295，理查德投掷"异界冗余信息黑盒"，残卷"吞噬本能"吞下后触发道具内置 800 伤害+逻辑死锁状态（对抗失败）。
 **根因**："道具被目标吞噬后触发内置效果"的特殊机制。v3 里投掷道具是 `Attack(投掷)`，但伤害来源是"道具被吞食后内部触发"，不是标准攻击检定。原文意图判定"无需判定"（道具必中被吞噬）。
 **建议**：v3 的 Attack command 支持 `{ attackType: "thrown_consumable", bypassHitCheck: true }`，道具 EffectAutomaton 在 `damage.before` 声明 DealDamage(800,真实)+ApplyStatus(认知宕机, contest)。v3 能表达（Outcome.DealDamage+ApplyStatus 组合），但"吞噬触发"时序需内核支持"目标主动消费道具"command——不在标准 Attack/TacticalAction 里，可能需扩展。边界场景，不致命。
@@ -279,12 +289,14 @@ Command C16: Attack(理查德→残卷, 认知剥夺, intent=抹杀→概念, �
 **能顺畅复现的部分**（约 70%）：FP 消耗两段式技能（SpendResource batch 原子提交，1 Command 1 行动槽）、精神伤害减免（8 步管线保留）、真理火球的能量+真伤双轨（核心管线+automaton Outcome）、多段分割、意图对抗降级——这些 v3 都能干净复现，甚至比 v2 更严谨（FP/HP/MP 同一原子提交）。
 
 **真实卡点**（约 30%）：
+
 1. 🔴 **Q2 认知剥夺的胜负判定缺口**——"施加状态 → 目标永久失能 → 判胜利"在 v3 closed RuleKey 体系里没有对应终局规则。这是最致命的：案例的收尾机制本身在 v3 里表达不全。按主人决策走 BoundedAdjudication（战斗 Agent 判 + forceTerminal RuleKey）可解。
 2. 🔴 **Q4 FP 跨边界原子性**——FP 是存档级元货币，v3"同一原子提交"在战斗态↔存档态边界没明确设计，崩溃恢复幂等存疑。
 3. 🟡 **Q1 概念崩坏强制濒死**——需 morale RuleKey 预置 forceState override 选项。
 4. 🟡 **Q5 divinity 压制表只覆盖穿透/DR**——状态施加/意图对抗场景的 divinity 优先级语义缺失。
 
 **最小补丁建议**：
+
 1. **终局 RuleKey 扩容**：内核终局规则增加 override 选项 `forceTerminal(reason, divinity)`，允许高 divinity 状态（如"认知丧失"div=6）施加成功后于 `unit.beforeDown` 或新增窗口强制触发终局。或按主人决策走 BoundedAdjudication。这是 v3 处理概念级战斗的**必备能力**，不是可选增强。
 2. **FP 跨边界方案**：战斗开始 FP 快照进 CombatState 作本地权威，终局 diff 回 SaveProfile；journal 记 FP diff 的 idempotencyKey 防重放。RFC 明确这个边界协议。
 3. **morale RuleKey 预置 forceState 选项**：让"概念崩坏"等高 divinity 状态能 override 战意阈值。

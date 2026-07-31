@@ -12,6 +12,7 @@
 3 回合死斗，主角理查德（T5 传说）+ 菲希芙（T4）碾压清剿苍棘之塔处刑人，核心机制是「虚数偏折」状态触发的**虚数反弹反伤**（真实伤害），最终补刀处决 BOSS 查加尔。
 
 **关键机制点（带行号）**：
+
 - **虚数偏折状态**（行 101/236）：自身 buff，2 回合，"针对单体命中降低 5 / 反弹 50% 真伤"。
 - 🔥 **反伤触发 ×4 次**（行 131、270、471、767）：攻方本是处刑人/查加尔打理查德，反伤后面板改写成「攻方: 理查德(反伤触发) | 守方: 原攻击者 | 招式: 虚数反弹」。
 - **反伤仍掷骰**（行 139 优势 d20(3,19)→19「有效」、行 278、行 479 优势 d20(9,3)→9「勉强」、行 775）：反伤有独立命中评级结算，**消费骰池**。
@@ -27,28 +28,28 @@
 
 > 约定：每条 Command 带 `commandId`、`expectedRevision`、`cost:{attack?,action?}`。骰子由 DiceTape 在 BeginOutput 注入 60 个 d20，cursor 顺序消费。本场所属回合跨 3 个 BeginOutput epoch（行 68/382/825）。
 
-| # | Command | 成本 | 时机/phase | 骰耗 | 说明 |
-|---|---------|------|-----------|------|------|
-| C0 | `BeginOutput(batch1)` | — | 战斗发起 | 注入 60, cursor=0 | 行 68 |
-| C1 | `DeclareCombat(死斗, 参战方)` | — | RoundOpen 前 | 0 | 行 79 |
-| C2 | `RollInitiative` | — | RoundOpen.initiative | d20[1],[1] | 行 90-92 |
-| C3 | `UseSkill(理查德, 虚数偏折, 自身)` | action | 理查德.action.declared | 0 | 行 97，挂虚数偏折 |
-| C4 | `Attack(集群→理查德, 破甲重弩)` | attack | 集群回合 | 意图骰 2 + 命中劣势 2 + **反伤优势 2** | 行 106/130，主伤害 582 |
-| C5 | *(内核自动)* `Schedule→DealDamage 反伤`(理查德→集群) | — | C4 的 damage.after | 反伤命中 d20(3,19)→19 | 行 131，2542 伤，集群 2800→258，减员 1/4 |
-| C6 | `Attack(菲希芙→残存处刑人, 暗影之刃)` | attack | 菲希芙回合 | d20(7) | 行 154，628 伤 |
-| C7 | `EndRound` → DoT tick | — | RoundClose | 0 | 虚数偏折 2→1 |
-| — | `BeginOutput(batch2)` | — | 下一 epoch | 60 | 行 382 |
-| C8 | `RollInitiative` | — | RoundOpen | d20[11],[3],[4] | 行 405 |
-| C9 | `Attack(理查德→查加尔, 灼热射线)` | attack | 理查德回合 | 优势 d20(19,5)→19 | 行 414，3624 伤，挂灼烧 |
-| C10 | `UseSkill(查加尔, 影渊步, 自身)` | action | 查加尔回合 | 0 | 行 438，绝对闪避（被压制判无效）|
-| C11 | `Attack(查加尔→理查德, 猩红处决)` | attack | 查加尔回合 | 劣势 d20(8,18)→8 + **反伤 d20(9,3)→9** | 行 447，484 伤 |
-| C12 | *(内核自动)* `Schedule→DealDamage 反伤`(理查德→查加尔) | — | C11 的 damage.after | d20(9,3)→9 | 行 471，1080 伤 |
-| C13 | `EndRound` → 灼烧 tick(30) | — | RoundClose | 0 | |
-| — | `BeginOutput(batch3)` | — | | 60 | 行 825 |
-| C14 | `RollInitiative` | — | RoundOpen | d20[13],[7] | 行 847 |
-| C15 | `Attack(理查德→查加尔, 虚空·星轨裁决, 多段5)` | attack | 理查德回合 | 意图 d20[8]/[1] + 优势 d20(13,5)→13 | 行 855，4208 伤，挂空间锚定 |
-| C16 | `Attack(理查德→查加尔, 冰霜射线, 处决意图)` | attack | 理查德回合（同回合第二攻击，见 Q3）| 优势 d20(4,20)→20 | 行 880，4255 伤，查加尔死 |
-| C17 | `SettleCombat(胜利)` | — | Terminal→Settlement | 0 | 行 902，幂等 EXP+1500/FP+3000 |
+| #   | Command                                                | 成本   | 时机/phase                          | 骰耗                                   | 说明                                     |
+| --- | ------------------------------------------------------ | ------ | ----------------------------------- | -------------------------------------- | ---------------------------------------- |
+| C0  | `BeginOutput(batch1)`                                  | —      | 战斗发起                            | 注入 60, cursor=0                      | 行 68                                    |
+| C1  | `DeclareCombat(死斗, 参战方)`                          | —      | RoundOpen 前                        | 0                                      | 行 79                                    |
+| C2  | `RollInitiative`                                       | —      | RoundOpen.initiative                | d20[1],[1]                             | 行 90-92                                 |
+| C3  | `UseSkill(理查德, 虚数偏折, 自身)`                     | action | 理查德.action.declared              | 0                                      | 行 97，挂虚数偏折                        |
+| C4  | `Attack(集群→理查德, 破甲重弩)`                        | attack | 集群回合                            | 意图骰 2 + 命中劣势 2 + **反伤优势 2** | 行 106/130，主伤害 582                   |
+| C5  | _(内核自动)_ `Schedule→DealDamage 反伤`(理查德→集群)   | —      | C4 的 damage.after                  | 反伤命中 d20(3,19)→19                  | 行 131，2542 伤，集群 2800→258，减员 1/4 |
+| C6  | `Attack(菲希芙→残存处刑人, 暗影之刃)`                  | attack | 菲希芙回合                          | d20(7)                                 | 行 154，628 伤                           |
+| C7  | `EndRound` → DoT tick                                  | —      | RoundClose                          | 0                                      | 虚数偏折 2→1                             |
+| —   | `BeginOutput(batch2)`                                  | —      | 下一 epoch                          | 60                                     | 行 382                                   |
+| C8  | `RollInitiative`                                       | —      | RoundOpen                           | d20[11],[3],[4]                        | 行 405                                   |
+| C9  | `Attack(理查德→查加尔, 灼热射线)`                      | attack | 理查德回合                          | 优势 d20(19,5)→19                      | 行 414，3624 伤，挂灼烧                  |
+| C10 | `UseSkill(查加尔, 影渊步, 自身)`                       | action | 查加尔回合                          | 0                                      | 行 438，绝对闪避（被压制判无效）         |
+| C11 | `Attack(查加尔→理查德, 猩红处决)`                      | attack | 查加尔回合                          | 劣势 d20(8,18)→8 + **反伤 d20(9,3)→9** | 行 447，484 伤                           |
+| C12 | _(内核自动)_ `Schedule→DealDamage 反伤`(理查德→查加尔) | —      | C11 的 damage.after                 | d20(9,3)→9                             | 行 471，1080 伤                          |
+| C13 | `EndRound` → 灼烧 tick(30)                             | —      | RoundClose                          | 0                                      |                                          |
+| —   | `BeginOutput(batch3)`                                  | —      |                                     | 60                                     | 行 825                                   |
+| C14 | `RollInitiative`                                       | —      | RoundOpen                           | d20[13],[7]                            | 行 847                                   |
+| C15 | `Attack(理查德→查加尔, 虚空·星轨裁决, 多段5)`          | attack | 理查德回合                          | 意图 d20[8]/[1] + 优势 d20(13,5)→13    | 行 855，4208 伤，挂空间锚定              |
+| C16 | `Attack(理查德→查加尔, 冰霜射线, 处决意图)`            | attack | 理查德回合（同回合第二攻击，见 Q3） | 优势 d20(4,20)→20                      | 行 880，4255 伤，查加尔死                |
+| C17 | `SettleCombat(胜利)`                                   | —      | Terminal→Settlement                 | 0                                      | 行 902，幂等 EXP+1500/FP+3000            |
 
 ---
 
@@ -92,6 +93,7 @@ automaton "虚数偏折" {
 ```
 
 **rootChainId / depth / 反射标签走法**：
+
 - 第一次反伤：`rootChainId = C4 的 actionId`、`depth = 1`、`isReflection = true`
 - 内核验证：`depth ≤ MAX_REFLECTION_DEPTH`（提案未给阈值，见 Q2）
 - 反伤 DealDamage 进入管线时再次触发 `damage.after` → 守方=原攻击者，**若原攻击者也有反伤**会再 Schedule depth=2 反伤
@@ -211,35 +213,41 @@ Attack({
 ## 3. 架构执行问题清单
 
 ### 🔴 Q1：反伤不消耗攻击槽但产生 DealDamage，与不变量①的边界
+
 **现象**：行 131/270/471/767 反伤面板明确「消耗: HP[0] MP[0] SP[0]」—— 反伤不消耗资源也不消耗攻击槽（被动触发，发生在**别人**回合）。但反伤本身是完整 DealDamage（有命中检定、伤害管线、消费骰子）。
 **根因**：不变量①约束**主动行动**。反伤是 reaction，发生在 `damage.after`，属"触发方在别人回合的被动反应"。但 `DealDamage` 默认语义是"一次攻击行动产出"，没区分"主动攻击 vs 被动反射"。
 **风险**：内核若把反伤当"理查德的一次攻击行动"，会误扣攻击槽（理查德此时甚至不在自己回合）。反伤面板「攻方: 理查德(反伤触发)」会让 attackerId 指向理查德，不变量校验若按 attackerId 统计会误判。
 **建议**：`DealDamage` 增加 `isReaction: boolean` / `doesNotConsumeSlot: boolean`。不变量①校验只统计 `cost.attack/action` 非零的主动 Command，reaction 产出的 DealDamage 豁免。行动轴推进不能因"反伤让理查德造成了伤害"就移动 turnPtr。
 
 ### 🔴 Q2：反伤 depth 链的终止策略，提案完全没定义
+
 **现象**：提案原文只说"携带 rootActionId、depth 和反射标签，避免无限反射"——但 **MAX_REFLECTION_DEPTH 阈值、熔断策略、谁定**，三份提案文件全空白。
 **根因**：本案反伤只反弹一次（处刑人/查加尔都无反伤被动，链自然终止）。但 v3 要 hold 住真实战斗，必然出现"反伤对反伤"（两个反伤装对打）。depth 阈值定多少？v2 subscription-manager ≤10，战斗场景建议 ≤5。超限是 `EffectRejected`（整批拒绝）还是 `ClampToZero`（伤害归零）还是叙事提示？反伤对反伤时，"原伤害 1130"的基准取谁的？depth=2 的基准是 depth=1 的"最终 2542"还是"原始 1130"？样本没答案。
 **建议**：明确 `MAX_REFLECTION_DEPTH = 2`（反射→反射→终止，符合"反弹一次"直觉）。超限走 `EmitNarrativeCue("反射湮灭") + 双方反伤互相抵消`（叙事+数值双兜底）。反伤基准统一取 `rootChainId 对应的原始伤害`（depth≥2 时 base 不累加，永远基于根伤害 50%），避免伤害放大。
 
 ### 🟡 Q3：反伤的 DiceTape 消费 vs "每次输出 60 个 d20"语义对齐
+
 **现象**：行 68 一批 60 个 d20，本回合消费：先攻骰(2) → 处刑人意图(2) → 处刑人命中(2,劣势) → **反伤命中(2,优势)** → 菲希芙命中(1)。反伤 d20(3,19)（行139）就是同一批顺序取的下一对。
 **判定**：v3 的 DiceTape"每次输出 60 个 d20 顺序消费"+cursor 模型，与样本"一批骰池本回合所有掷骰（含反伤）顺序消费"**语义对得上**。反伤消费 d20[5]、d20[6] 正好是 cursor 顺序推进。✅ v3 比 v2 更严谨（v2 emitChain 里脚本可能 Math.random）。
 **残留风险**：反伤 `hitPolicy.consumeDice` 必须显式声明（样本反伤**确实掷骰**）。若一批 60 颗在反伤密集战斗不够用（反伤链 depth=2 + 多段连击5 + 集群3次攻击，单回合最多 2+2+2+2=8 颗），cursor 耗尽 → `RequiredInput.BeginOutput`。adapter 不能暗中补骰。
 **建议**：反伤 intent 强制带 `hitPolicy`（不能默认"自动命中"）。做骰子消耗压力测试。**推荐 DiceTape 分通道**（反伤命中走 attackHit 通道，不和 procCheck 混）。
 
 ### 🟡 Q4：复活机制——PreventDeath 与"HP≤0=死亡不可协商"红线的调和
+
 **现象**：本场景复活**未实际触发**（理查德 HP 最低 21003=69%）。但 AM0288 设定"被异神法则抹杀后复活"是已确立角色能力，v3 必须能表达。
 **根因**：v2 红线（§7.1）「HP≤0=死亡，**不可协商**」；v3 `PreventDeath`+`unit.beforeDown`+Override closed RuleKey。"法则抹杀"是 Override RuleKey（概念级），"复活"是 PreventDeath。时序：抹杀发生在死亡判定阶段，复活发生在 `unit.beforeDown`——**beforeDown 在死亡判定之前**，复活先生效，抹杀走不到。
 **矛盾**：时序上 PreventDeath 抢在死亡前，等于"死亡从未发生"，叙事上"被抹杀后复活"的"抹杀"部分无法在数值层体现（HP 没真到 0）。严格按 v2 红线则复活实现不了；v3 用 divinity 调和（复活 divinity=6 > 抹杀），等于**承认 v2 红线被 v3 打破**。复活的 `restoreHpPercent`+`ConsumeCharge` 是 stateful，提案没说 PreventDeath 的 HP 恢复走哪个原子提交。
 **建议**：明确复活走 `unit.beforeDown`，Override `death.threshold` RuleKey，divinity≥抹杀来源。v3 应正式声明："v2 HP≤0=死亡红线，在 v3 中由 PreventDeath window 提供 closed Override 出口，仅 divinity≥法则级 可激活"——**显式修订**，不是违反。PreventDeath 的 HP 恢复必须在**同一原子提交**内（不变量④），ConsumeCharge 同批。
 
 ### 🟡 Q5：反伤触发时，理查德身份从"守方"变反伤的"攻方"，owner/在场过滤
+
 **现象**：行 131 面板「攻方: 理查德(反伤触发) | 守方: 集群」。C4 里理查德是守方，C5 里变攻方。
 **判定**：v3 ReactionWindow evaluator 在 `damage.after` 触发反伤 automaton 时，automaton `owner=理查德`（虚数偏折挂理查德身上），反伤 DealDamage `sourceId=理查德`。理查德一直在场，**本身没问题**。
 **残留风险**：若反伤 automaton 注册时 `owner` 写成"虚数偏折状态"而非"理查德"，在场过滤查不到参战者 → 不响应。反伤 DealDamage 的 `targetId=ctx.event.attackerId`（处刑人/查加尔），若原攻击者在反伤结算前已离场，内核必须校验 `targetId 在场`，否则 `EffectRejected` 或 `Retarget`。本案处刑人反伤后仍存活(258HP)，未触发。
 **建议**：反伤 automaton 的 `owner` 标准化为"被反伤保护的角色 id"。反伤 DealDamage 进管线前强制校验 targetId 在场，离场 silently drop。
 
 ### ⚪ Q6：反伤取"原伤害 1130"而非"最终伤害 582"——EffectIntent 表达力
+
 **现象**：行 136「基础伤害: 原伤害 1130 × 50% = 565」。反伤基准是**管线 Step1 初始伤害 1130**，不是最终 582。
 **建议**：`damage.after` 的 immutable snapshot 必须暴露完整伤害管线中间值（`rawDamage.preReduction` / `postStep6` / `final` 三档），让 automaton 自选基准。
 
@@ -248,6 +256,7 @@ Attack({
 ## 4. 判定
 
 **🟡 部分能**。核心反伤机制 v3 的 `damage.after` window + `Schedule→DealDamage` + `rootChainId/depth/反射标签` 设计**方向正确，能表达本案例**（反伤只反弹一次，链自然终止，不存在 depth 熔断问题）。骰子语义（DiceTape 顺序消费）反而比 v2 更严谨对齐样本。但 v3 提案在三个关键点**留白过多**，实机必然卡住：
+
 1. 🔴 反伤 intent 缺 `isReaction/doesNotConsumeSlot`，不变量①会误扣槽位
 2. 🔴 `MAX_REFLECTION_DEPTH` 阈值与超限策略完全未定义，"反伤对反伤"场景必翻车
 3. 🟡 PreventDeath 调和 v2 死亡红线需显式声明，否则复活无法落地
@@ -255,6 +264,7 @@ Attack({
 本案例因复活未触发、反伤链未递归，**恰好绕过了 Q2/Q4 两个最深的坑**——这说明**第 24 场不足以压测 v3 反伤/复活边界**，需补一个"双方都有反伤被动"+"角色真正死亡后复活"的极端样本。
 
 **最小补丁建议**：
+
 1. **EffectIntent.DealDamage 增加反应伤害标记**：`isReaction?`、`doesNotConsumeSlot?`、`rootChainId?`、`depth?`，不变量①校验豁免 `isReaction=true` 的 DealDamage 槽位统计。
 2. **明确反伤熔断策略**：`MAX_REFLECTION_DEPTH = 2`；超限走 `EmitNarrativeCue("反射湮灭")+双方反伤互相抵消`；depth≥2 的反伤基准固定取 rootChain 原始伤害（不放大）。
 3. **PreventDeath 正式修订 v2 死亡红线**：声明 `unit.beforeDown`+Override `death.threshold` RuleKey 为合法出口，仅 `divinity ≥ 法则级` 可激活，HP 恢复与 ConsumeCharge 同原子提交。

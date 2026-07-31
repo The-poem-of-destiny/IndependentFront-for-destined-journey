@@ -24,13 +24,13 @@
 
 从 24 场战斗样本中，按"稀有压测机制"精确定位 5 场，每场专门压测 v3 EffectIntent 词汇表里最刁钻的一个 intent：
 
-| 场 | 强度 | 回合 | 压测 intent | 稀有机制（样本行号） |
-|---|---|---|---|---|
-| 07 | 713 | 7 | PreventDeath | 濒死免死（诺娅 HP→1+击飞，行 1315）+ 生机重燃解除濒死（行 1561/2225） |
-| 06 | 505 | 5 | SpawnOrDespawn | 召唤 2 食尸鬼持续 3 回合（行 1190-1193）+ 概率召狼（行 695-697） |
-| 24 | 316 | 3 | Schedule（反射） | 虚数反弹反伤（行 131/270/471/767）+ 复活背景（行 45） |
-| 13 | 290 | 4 | Permission | 时间暂停+禁忌之门（行 1436/1615/1860） |
-| 09 | 253 | 4 | Override RuleKey | 概念崩坏强制濒死（行 821/981）+ 认知剥夺判胜（行 1086-1116） |
+| 场  | 强度 | 回合 | 压测 intent      | 稀有机制（样本行号）                                                  |
+| --- | ---- | ---- | ---------------- | --------------------------------------------------------------------- |
+| 07  | 713  | 7    | PreventDeath     | 濒死免死（诺娅 HP→1+击飞，行 1315）+ 生机重燃解除濒死（行 1561/2225） |
+| 06  | 505  | 5    | SpawnOrDespawn   | 召唤 2 食尸鬼持续 3 回合（行 1190-1193）+ 概率召狼（行 695-697）      |
+| 24  | 316  | 3    | Schedule（反射） | 虚数反弹反伤（行 131/270/471/767）+ 复活背景（行 45）                 |
+| 13  | 290  | 4    | Permission       | 时间暂停+禁忌之门（行 1436/1615/1860）                                |
+| 09  | 253  | 4    | Override RuleKey | 概念崩坏强制濒死（行 821/981）+ 认知剥夺判胜（行 1086-1116）          |
 
 ### 1.2 脑测维度
 
@@ -40,13 +40,13 @@
 
 ## 2. 5 场判定一览
 
-| 场 | 判定 | 最致命卡点 |
-|---|---|---|
-| 07（濒死免死） | 🟡 部分能 | `damage.preview` window 缺失 → 格挡（受击后改伤害）表达不出 |
-| 06（召唤物） | 🟡 部分能 | 召唤物"下轮才进先攻" vs 原版"当回合参战"（样本打脸）+ 定时消失无表达 + 概率召唤抢骰子 |
-| 24（反伤+复活） | 🟡 部分能 | 反伤缺 `isReaction` 标记会被误扣攻击槽 + 反射 depth 熔断策略完全空白 |
-| 13（时间暂停） | 🟡 部分能 | "暂停敌方攻势"=grantActionSlot 语义造假（≠冻结敌方）+ "奇迹"开放性塞不进 closed 词汇 |
-| 09（概念抹杀） | 🟡 部分能 | 认知剥夺"状态→判胜"无终局规则（HP 5472 没清空，战斗不结束）+ FP 跨边界原子性 |
+| 场              | 判定      | 最致命卡点                                                                            |
+| --------------- | --------- | ------------------------------------------------------------------------------------- |
+| 07（濒死免死）  | 🟡 部分能 | `damage.preview` window 缺失 → 格挡（受击后改伤害）表达不出                           |
+| 06（召唤物）    | 🟡 部分能 | 召唤物"下轮才进先攻" vs 原版"当回合参战"（样本打脸）+ 定时消失无表达 + 概率召唤抢骰子 |
+| 24（反伤+复活） | 🟡 部分能 | 反伤缺 `isReaction` 标记会被误扣攻击槽 + 反射 depth 熔断策略完全空白                  |
+| 13（时间暂停）  | 🟡 部分能 | "暂停敌方攻势"=grantActionSlot 语义造假（≠冻结敌方）+ "奇迹"开放性塞不进 closed 词汇  |
+| 09（概念抹杀）  | 🟡 部分能 | 认知剥夺"状态→判胜"无终局规则（HP 5472 没清空，战斗不结束）+ FP 跨边界原子性          |
 
 ---
 
@@ -102,11 +102,11 @@ automaton "技能/物品名" {
 
 > 主人原方向："战斗中调用一次 char_gen"。本喵瞄严谨拆解后，三个子项归属不同：
 
-| 子项 | 归属 | 处理 |
-|---|---|---|
+| 子项                                    | 归属     | 处理                                                                                            |
+| --------------------------------------- | -------- | ----------------------------------------------------------------------------------------------- |
 | 召唤物"当回合参战" vs v3 "下轮才进先攻" | **真·C** | ✅ **char_gen 战斗中调用**（见 §5.1）—— 新单位生成归 AI，参战时机由 char_gen 产出的单位定义声明 |
-| 反伤豁免攻击槽 | 实为 B | ✅ 归 schema 补丁（`isReaction` 字段豁免不变量①） |
-| PreventDeath 改 v2 死亡红线 | 实为 D | ✅ 归 RuleKey Override（`death.threshold` + divinity≥法则级） |
+| 反伤豁免攻击槽                          | 实为 B   | ✅ 归 schema 补丁（`isReaction` 字段豁免不变量①）                                               |
+| PreventDeath 改 v2 死亡红线             | 实为 D   | ✅ 归 RuleKey Override（`death.threshold` + divinity≥法则级）                                   |
 
 **只有"战斗中新增单位 + 参战时机"这块走 char_gen 方案**。反伤/复活不是"新单位生成"问题，归各自 schema/RuleKey 补丁。
 
@@ -174,6 +174,7 @@ type SummonedUnitDefinition = {
 ```
 
 **语义**：
+
 - 内核**默认**召唤物 `next_round_head`（保不变量①纯洁）
 - 但 char_gen 可声明 `this_round_tail`（原版语义：亡灵/即战力召唤）——**参战时机是创造性判定**（取决于召唤物性质），归 AI
 - 战斗面板在 CharGenRequest 期间显示"召唤中…"，char_gen 返回后插入先攻序列尾部
@@ -194,29 +195,31 @@ type SummonedUnitDefinition = {
 // 战斗 Agent 在 ReactionWindow 遇到"无法用标准 intent 表达的创意效果"时
 // 提交 ProposedAdjudication（不是 ProposedEffectPlan，强调"裁决"而非"效果"）
 type ProposedAdjudication = {
-  effectDescription: string                    // 自然语言效果描述（如"认知丧失→永久失能"）
-  divinity: number                             // 神性优先级（内核验证是否够压目标）
-  verifiableBounds: {                          // 🆕 可验证边界 —— 内核只验这部分
-    targetLegal: boolean
-    numericalRange?: { min, max }              // 数值影响范围
-    invariantCompliant: InvariantCheck[]       // 是否违反 5 不变量
-  }
-  requestedRuleOverride?: ClosedRuleKeyHandle  // 如 forceTerminal / freezeSlot
-  reason: string                               // 裁判理由（供审计/回放）
-}
+  effectDescription: string; // 自然语言效果描述（如"认知丧失→永久失能"）
+  divinity: number; // 神性优先级（内核验证是否够压目标）
+  verifiableBounds: {
+    // 🆕 可验证边界 —— 内核只验这部分
+    targetLegal: boolean;
+    numericalRange?: { min; max }; // 数值影响范围
+    invariantCompliant: InvariantCheck[]; // 是否违反 5 不变量
+  };
+  requestedRuleOverride?: ClosedRuleKeyHandle; // 如 forceTerminal / freezeSlot
+  reason: string; // 裁判理由（供审计/回放）
+};
 
 // 内核流程
 function evaluateAdjudication(p: ProposedAdjudication): AdjudicationResult {
   // 1. 验证边界（不验证创造性）
-  if (!p.verifiableBounds.targetLegal) return Reject('目标非法')
-  if (p.divinity < target.divinity) return Reject('神性不足')
-  if (!p.verifiableBounds.invariantCompliant.every(Boolean)) return Reject('违反不变量')
+  if (!p.verifiableBounds.targetLegal) return Reject('目标非法');
+  if (p.divinity < target.divinity) return Reject('神性不足');
+  if (!p.verifiableBounds.invariantCompliant.every(Boolean)) return Reject('违反不变量');
   // 2. 边界通过 → 执行（产 DomainEvent）
-  return Execute({ ruleOverride: p.requestedRuleOverride, narrative: p.effectDescription })
+  return Execute({ ruleOverride: p.requestedRuleOverride, narrative: p.effectDescription });
 }
 ```
 
 **用例**：
+
 - **09 场认知剥夺**：Agent 判"认知丧失→目标永久失能→判胜"，提交 `ProposedAdjudication(requestedRuleOverride: terminal.forceTerminal, divinity: 6, reason: "概念宕机")`。内核验证 divinity≥法则级 且目标确有"认知丧失"状态 → 执行终局。
 - **13 场禁忌之门奇迹**：Agent 判"奇迹触发，妲丽安收容幻书"，提交 `ProposedAdjudication(effectDescription: "强制收容幻书", divinity: 7, verifiableBounds: {...})`。内核验证边界 → 产 `MiracleTriggered` DomainEvent 投影给 Story Agent 展开。
 
@@ -228,24 +231,24 @@ function evaluateAdjudication(p: ProposedAdjudication): AdjudicationResult {
 // DealDamage 补字段
 interface DealDamage {
   /* 原有 */
-  damageType: 'physical' | 'energy' | 'mental' | 'true'    // 🆕 'true' 在 8 步管线短路 Step3-7
-  bypass?: ModifierSlot[]                                  // 🆕 真伤绕过 equip_bonus/crit/dr/attribute_reduce
-  isReaction?: boolean                                     // 🆕 反射伤害标记
-  doesNotConsumeSlot?: boolean                             // 🆕 豁免不变量①槽位统计（reaction 用）
-  rootChainId?: string                                     // 🆕 反射链根动作
-  depth?: number                                           // 🆕 反射深度
+  damageType: 'physical' | 'energy' | 'mental' | 'true'; // 🆕 'true' 在 8 步管线短路 Step3-7
+  bypass?: ModifierSlot[]; // 🆕 真伤绕过 equip_bonus/crit/dr/attribute_reduce
+  isReaction?: boolean; // 🆕 反射伤害标记
+  doesNotConsumeSlot?: boolean; // 🆕 豁免不变量①槽位统计（reaction 用）
+  rootChainId?: string; // 🆕 反射链根动作
+  depth?: number; // 🆕 反射深度
 }
 
 // SummonUnit 补字段（与 §5.1 char_gen 协同）
 interface SummonUnit {
   /* 原有 */
-  duration?: { rounds: number }                            // 🆕 定时消失
-  joinTiming: 'this_round_tail' | 'next_round_head'       // 🆕 参战时机
+  duration?: { rounds: number }; // 🆕 定时消失
+  joinTiming: 'this_round_tail' | 'next_round_head'; // 🆕 参战时机
 }
 
 // AddModifier 补 scope
 interface AddModifier {
-  scope: 'whole_action' | 'per_hit' | 'per_target'        // 🆕 连击每发 / 整体 / 每目标
+  scope: 'whole_action' | 'per_hit' | 'per_target'; // 🆕 连击每发 / 整体 / 每目标
 }
 
 // ApplyStatus 对抗加 divinity 加成（见 §5.5 divinity 泛化）
@@ -255,20 +258,20 @@ interface AddModifier {
 
 明确 v3 的 typed ReactionWindow 完整清单（提案只列了部分）：
 
-| Window | 时机 | 典型用途 |
-|---|---|---|
-| `round.open` / `round.close` | 回合开/闭 | buff tick |
-| `initiative.before` / `initiative.after` | 先攻掷骰前后 | 改先攻 |
-| `turn.open` / `turn.close` | 单位回合开/闭 | 行动预算 |
-| `action.declared` | 战术动作声明 | 道具/格挡/移动 |
-| `check.intent` / `check.hit` | 意图对抗 / 命中检定 | 检定修正 |
-| `collect_attacker_mods` / `collect_defender_mods` | modifier 收集 | 装备声明 |
-| **`damage.preview`** 🆕 | **伤害算出未提交** | **格挡/招架/闪避反应（RequestChoice）** |
-| `damage.compute` | 伤害管线 Step1-8 | 真伤注入、反伤基准读取 |
-| `damage.after` | 伤害结算后 | 反伤 Schedule、状态施加 |
-| `unit.beforeDown` | HP 即将≤0 | PreventDeath、复活 |
-| `morale.before` / `morale.after` | 战意判定前后 | forceState override |
-| `settlement.before` | 终局结算 | EXP/FP 幂等 |
+| Window                                            | 时机                | 典型用途                                |
+| ------------------------------------------------- | ------------------- | --------------------------------------- |
+| `round.open` / `round.close`                      | 回合开/闭           | buff tick                               |
+| `initiative.before` / `initiative.after`          | 先攻掷骰前后        | 改先攻                                  |
+| `turn.open` / `turn.close`                        | 单位回合开/闭       | 行动预算                                |
+| `action.declared`                                 | 战术动作声明        | 道具/格挡/移动                          |
+| `check.intent` / `check.hit`                      | 意图对抗 / 命中检定 | 检定修正                                |
+| `collect_attacker_mods` / `collect_defender_mods` | modifier 收集       | 装备声明                                |
+| **`damage.preview`** 🆕                           | **伤害算出未提交**  | **格挡/招架/闪避反应（RequestChoice）** |
+| `damage.compute`                                  | 伤害管线 Step1-8    | 真伤注入、反伤基准读取                  |
+| `damage.after`                                    | 伤害结算后          | 反伤 Schedule、状态施加                 |
+| `unit.beforeDown`                                 | HP 即将≤0           | PreventDeath、复活                      |
+| `morale.before` / `morale.after`                  | 战意判定前后        | forceState override                     |
+| `settlement.before`                               | 终局结算            | EXP/FP 幂等                             |
 
 **关键**：`damage.preview` 允许返回 `RequestChoice` 触发 `RequiredInput.EffectChoice`，支持响应式战术动作。只有装备了反应类 automaton 的单位才触发暂停，避免每次受击都打断节奏。
 
@@ -276,12 +279,12 @@ interface AddModifier {
 
 预置以下 closed RuleKey（每个独立 schema/scope/权限/divinity/merge policy）：
 
-| RuleKey | 用途 | Override 选项 | divinity 门槛 |
-|---|---|---|---|
-| `morale.forceState` | 概念崩坏等强制濒死反扑 | `{ state: '濒死反扑', ignoreHpThreshold: true }` | ≥法则级 |
-| `terminal.forceTerminal` | 概念级终局（非 HP 清空判胜） | `{ reason: string }` | ≥法则级 |
-| `action.freezeSlot` | 时间暂停冻结敌方槽 | `{ targetId, slotType, rounds }` | ≥法则级 |
-| `death.threshold` | PreventDeath 复活 | `{ alive: true, hp: percent }` | ≥法则级（显式修订 v2 红线） |
+| RuleKey                  | 用途                         | Override 选项                                    | divinity 门槛               |
+| ------------------------ | ---------------------------- | ------------------------------------------------ | --------------------------- |
+| `morale.forceState`      | 概念崩坏等强制濒死反扑       | `{ state: '濒死反扑', ignoreHpThreshold: true }` | ≥法则级                     |
+| `terminal.forceTerminal` | 概念级终局（非 HP 清空判胜） | `{ reason: string }`                             | ≥法则级                     |
+| `action.freezeSlot`      | 时间暂停冻结敌方槽           | `{ targetId, slotType, rounds }`                 | ≥法则级                     |
+| `death.threshold`        | PreventDeath 复活            | `{ alive: true, hp: percent }`                   | ≥法则级（显式修订 v2 红线） |
 
 **divinity 差值压制表泛化**：从"只在穿透/DR（Step3/7）"扩展到状态对抗 / 意图对抗：
 
@@ -329,12 +332,12 @@ settlement(combatId, settlementId):
 ```ts
 interface DiceTape {
   channels: {
-    initiative:    D20Stream     // 先攻骰
-    attackHit:     D20Stream     // 命中/伤害骰
-    statusContest: D20Stream     // 状态对抗骰
-    procCheck:     D20Stream     // 概率触发判定骰（召唤/特效）
-    intentCheck:   D20Stream     // 意图对抗骰
-  }
+    initiative: D20Stream; // 先攻骰
+    attackHit: D20Stream; // 命中/伤害骰
+    statusContest: D20Stream; // 状态对抗骰
+    procCheck: D20Stream; // 概率触发判定骰（召唤/特效）
+    intentCheck: D20Stream; // 意图对抗骰
+  };
 }
 // BeginOutput 注入时按通道预分配（如各 12 颗 = 60 颗）
 ```
@@ -349,9 +352,9 @@ interface DiceTape {
 
 ```ts
 interface ReflectionPolicy {
-  MAX_REFLECTION_DEPTH: 2        // 反射→反射→终止（符合"反弹一次"直觉）
-  overflowStrategy: 'mutual_cancel'  // 超限 → EmitNarrativeCue("反射湮灭") + 双方反伤互相抵消
-  baseRule: 'root_chain'         // depth≥2 的反伤基准固定取 rootChain 原始伤害（不放大）
+  MAX_REFLECTION_DEPTH: 2; // 反射→反射→终止（符合"反弹一次"直觉）
+  overflowStrategy: 'mutual_cancel'; // 超限 → EmitNarrativeCue("反射湮灭") + 双方反伤互相抵消
+  baseRule: 'root_chain'; // depth≥2 的反伤基准固定取 rootChain 原始伤害（不放大）
 }
 ```
 
@@ -367,19 +370,19 @@ interface ReflectionPolicy {
 
 ### 7.1 优先级
 
-| 优先级 | 补丁 | 解缺口 | 工作量 |
-|---|---|---|---|
-| **P0** | DealDamage schema（isReaction/bypass/damageType/rootChainId/depth） | B | 小 |
-| **P0** | `damage.preview` typed window + RequestChoice | A | 中 |
-| **P0** | DiceTape 分通道 | 共识 | 中 |
-| **P0** | FP 跨边界协议（快照 + 幂等 diff） | E | 中 |
-| **P0** | `terminal.forceTerminal` + `morale.forceState` RuleKey | D | 中 |
-| **P1** | char_gen 战斗中调用（CharGenRequest + SummonedUnitDefinition） | C | 大 |
-| **P1** | BoundedAdjudication 接口 | F | 中 |
-| **P1** | SummonUnit duration/joinTiming + AddModifier scope | B | 小 |
-| **P1** | 反射专项规范（depth 熔断 + 基准取值 + owner） | 24场 | 中 |
-| **P2** | `action.freezeSlot` + `death.threshold` RuleKey | D | 小 |
-| **P2** | divinity 压制表泛化到状态/意图对抗 | D | 中 |
+| 优先级 | 补丁                                                                | 解缺口 | 工作量 |
+| ------ | ------------------------------------------------------------------- | ------ | ------ |
+| **P0** | DealDamage schema（isReaction/bypass/damageType/rootChainId/depth） | B      | 小     |
+| **P0** | `damage.preview` typed window + RequestChoice                       | A      | 中     |
+| **P0** | DiceTape 分通道                                                     | 共识   | 中     |
+| **P0** | FP 跨边界协议（快照 + 幂等 diff）                                   | E      | 中     |
+| **P0** | `terminal.forceTerminal` + `morale.forceState` RuleKey              | D      | 中     |
+| **P1** | char_gen 战斗中调用（CharGenRequest + SummonedUnitDefinition）      | C      | 大     |
+| **P1** | BoundedAdjudication 接口                                            | F      | 中     |
+| **P1** | SummonUnit duration/joinTiming + AddModifier scope                  | B      | 小     |
+| **P1** | 反射专项规范（depth 熔断 + 基准取值 + owner）                       | 24场   | 中     |
+| **P2** | `action.freezeSlot` + `death.threshold` RuleKey                     | D      | 小     |
+| **P2** | divinity 压制表泛化到状态/意图对抗                                  | D      | 中     |
 
 ### 7.2 建议落地顺序（在 v3 提案 M0-M5 基础上调整）
 
@@ -409,18 +412,18 @@ interface ReflectionPolicy {
 
 供后续实现时交叉核对（文件均在 `reference/战斗对话样本/`）：
 
-| 场 | 文件 | 关键行号 |
-|---|---|---|
-| 07 | `第07场_行332-352_2026-03-28_强度713.md` | 濒死免死 1315/2011；生机重燃 1561/2225；格挡 2109/2338；真实伤害 2153/2419；9 次骰池续杯 |
-| 06 | `第06场_行274-286_2026-03-27_强度505.md` | 召唤食尸鬼 1190-1193/1347-1350；概率召狼 695-697/922-924；召唤物当回合参战 1202-1209；FP 消耗 1287 |
-| 24 | `第24场_行1596-1600_2026-04-16_强度316.md` | 反伤（虚数反弹）131/270/471/767；复活背景 45；反伤掷骰 139/278/479/775；反伤取原伤害1130 136 |
-| 13 | `第13场_行784-798_2026-04-03_强度290.md` | 危机响应机制 1436/1615/1860；禁忌之门 1803-1839；玩家选择 1845；FP 2400 过载 1456-1460 |
-| 09 | `第09场_行431-438_2026-03-30_强度253.md` | 概念崩坏强制濒死 821/981；真理火球 876/946-967；认知剥夺判胜 1086-1116/1279-1299；濒死反扑 1019/1238 |
+| 场  | 文件                                       | 关键行号                                                                                             |
+| --- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| 07  | `第07场_行332-352_2026-03-28_强度713.md`   | 濒死免死 1315/2011；生机重燃 1561/2225；格挡 2109/2338；真实伤害 2153/2419；9 次骰池续杯             |
+| 06  | `第06场_行274-286_2026-03-27_强度505.md`   | 召唤食尸鬼 1190-1193/1347-1350；概率召狼 695-697/922-924；召唤物当回合参战 1202-1209；FP 消耗 1287   |
+| 24  | `第24场_行1596-1600_2026-04-16_强度316.md` | 反伤（虚数反弹）131/270/471/767；复活背景 45；反伤掷骰 139/278/479/775；反伤取原伤害1130 136         |
+| 13  | `第13场_行784-798_2026-04-03_强度290.md`   | 危机响应机制 1436/1615/1860；禁忌之门 1803-1839；玩家选择 1845；FP 2400 过载 1456-1460               |
+| 09  | `第09场_行431-438_2026-03-30_强度253.md`   | 概念崩坏强制濒死 821/981；真理火球 876/946-967；认知剥夺判胜 1086-1116/1279-1299；濒死反扑 1019/1238 |
 
 ---
 
 ## 变更记录
 
-| 日期 | 变更 | 作者 |
-|---|---|---|
+| 日期       | 变更                                                                                                  | 作者                                            |
+| ---------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | 2026-07-31 | 初版：5 真实样本压测 + 6 类缺口分析 + 补丁 RFC（C 用 char_gen、F 用 BoundedAdjudication、其余打补丁） | Claude（5 opus 子 agent 并发脑测 + 总指挥汇总） |

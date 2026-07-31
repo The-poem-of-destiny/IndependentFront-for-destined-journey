@@ -16,13 +16,13 @@
 
 ## 案例索引
 
-| 案例 | 场次 | 压测 intent | 判定 | 核心卡点 |
-|---|---|---|---|---|
-| [① PreventDeath 濒死免死](./case-07-prevent-death.md) | 第07场（713，7回合）| PreventDeath + ConsumeCharge | 🟡 部分能 | `damage.preview` window 缺失（格挡）+ DealDamage 真伤 bypass |
-| [② SpawnOrDespawn 召唤物](./case-06-summon.md) | 第06场（505，5回合）| SpawnOrDespawn + SummonUnit | 🟡 部分能 | 召唤当回合参战 vs v3"下轮进先攻" + 定时消失无表达 + 概率召唤抢骰子 |
-| [③ Schedule 反伤+复活](./case-24-reflection.md) | 第24场（316，3回合）| Schedule（反射）+ PreventDeath | 🟡 部分能 | 反伤缺 isReaction 标记 + 反射 depth 熔断策略空白 + 复活调和死亡红线 |
-| [④ Permission 时间暂停](./case-13-time-freeze.md) | 第13场（290，4回合）| Permission + RequestChoice | 🟡 部分能 | "暂停敌方"语义造假 + "奇迹"开放性塞不进 closed 词汇 |
-| [⑤ Override 概念抹杀](./case-09-concept.md) | 第09场（253，4回合）| Override RuleKey + SpendResource | 🟡 部分能 | "状态→判胜"无终局规则 + FP 跨边界原子性 |
+| 案例                                                  | 场次                 | 压测 intent                      | 判定      | 核心卡点                                                            |
+| ----------------------------------------------------- | -------------------- | -------------------------------- | --------- | ------------------------------------------------------------------- |
+| [① PreventDeath 濒死免死](./case-07-prevent-death.md) | 第07场（713，7回合） | PreventDeath + ConsumeCharge     | 🟡 部分能 | `damage.preview` window 缺失（格挡）+ DealDamage 真伤 bypass        |
+| [② SpawnOrDespawn 召唤物](./case-06-summon.md)        | 第06场（505，5回合） | SpawnOrDespawn + SummonUnit      | 🟡 部分能 | 召唤当回合参战 vs v3"下轮进先攻" + 定时消失无表达 + 概率召唤抢骰子  |
+| [③ Schedule 反伤+复活](./case-24-reflection.md)       | 第24场（316，3回合） | Schedule（反射）+ PreventDeath   | 🟡 部分能 | 反伤缺 isReaction 标记 + 反射 depth 熔断策略空白 + 复活调和死亡红线 |
+| [④ Permission 时间暂停](./case-13-time-freeze.md)     | 第13场（290，4回合） | Permission + RequestChoice       | 🟡 部分能 | "暂停敌方"语义造假 + "奇迹"开放性塞不进 closed 词汇                 |
+| [⑤ Override 概念抹杀](./case-09-concept.md)           | 第09场（253，4回合） | Override RuleKey + SpendResource | 🟡 部分能 | "状态→判胜"无终局规则 + FP 跨边界原子性                             |
 
 **5/5 全是 🟡**——但 v3 方向正确，卡点是 6 类系统性缺口（schema/window/RuleKey/跨边界/不变量冲突/开放性），不是架构方向错误。详见 RFC 主文档。
 
