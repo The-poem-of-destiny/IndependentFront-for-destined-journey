@@ -35,5 +35,3 @@
 ### 仓库治理规范
 
 完整的仓库治理与协作规范（分支策略/CI/代码规范/资产策略/PR 流程/Agent 协作）见 `docs/planning/2026-07-31-repo-management.md`。
-
-每次向远程仓库 push 后，必须主动检查对应的 GitHub Actions CI 状态；CI 失败时读取失败日志、定位根因并修复，不得只报告 push 成功。
