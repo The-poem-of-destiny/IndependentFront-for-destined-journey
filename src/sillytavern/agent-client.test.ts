@@ -130,6 +130,22 @@ describe('AgentClient', () => {
       const body = JSON.parse(mockFn.mock.calls[0][1].body);
       expect(body.user_id).toBe('fp|save_test|story');
     });
+
+    it('应解包 Cline 网关的 data 信封（非流式响应包在顶层 data 里）', async () => {
+      // 真机踩坑(2026-07-31): api.cline.bot 的非流式响应形如 {data:{choices:[...],usage:{...}}}，
+      // 直接读顶层 choices 会静默解析成空字符串。流式 chunk 是标准形态，不受影响。
+      const mockRes = {
+        data: {
+          choices: [{ message: { content: 'from cline' } }],
+          usage: { total_tokens: 42 },
+        },
+      };
+      globalThis.fetch = mockFetch(mockRes);
+
+      const result = await client.chat({ messages: [{ role: 'user', content: 'test' }] });
+      expect(result.rawResponse).toBe('from cline');
+      expect(result.tokensUsed).toBe(42);
+    });
   });
 
   describe('chat — 错误', () => {

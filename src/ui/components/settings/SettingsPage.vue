@@ -95,6 +95,12 @@ function maskKey(key: string): string {
   if (!key || key.length < 8) return key ? key.slice(0, 3) + '***' : '';
   return key.slice(0, 3) + '***' + key.slice(-4);
 }
+function onApiKeyInput() {
+  // 用户手动改了 key 输入框：新输入即权威。必须丢弃 _realKey，
+  // 否则测试/获取模型/保存全走 `_realKey || apiKey` 的旧 key，新 key 永远不生效。
+  apiForm._realKey = '';
+  apiForm._masked = false;
+}
 async function testApiAndFetch() {
   if (!apiForm.baseUrl || !apiForm.apiKey) return;
   apiFormTesting.value = true;
@@ -146,7 +152,7 @@ async function testApiAndFetch() {
     const msg = (e?.message || '').slice(0, 80);
     const hint =
       msg.indexOf('401') >= 0
-        ? '（API Key 无效或格式不符，确认 key 与服务要求匹配）'
+        ? '（API Key 无效或格式不符，确认 key 与服务要求匹配；如 Cline key 需在 app.cline.bot 生成）'
         : msg.indexOf('404') >= 0
           ? '（模型名或接口路径不对，检查 baseUrl/模型）'
           : '';
@@ -174,7 +180,7 @@ async function fetchModelList() {
       const msg = (error || 'unknown').slice(0, 100);
       const hint =
         msg.indexOf('401') >= 0
-          ? '（Key 无效或与端点不匹配，如 z.ai coding key 必须配 coding endpoint）'
+          ? '（Key 无效或与端点不匹配，如 z.ai coding key 必须配 coding endpoint、Cline key 需在 app.cline.bot 生成）'
           : msg.indexOf('404') >= 0
             ? '（该端点可能不支持 /models，请手动填 model）'
             : msg.indexOf('network') >= 0
@@ -2596,6 +2602,7 @@ async function clearAll() {
             <input
               v-model="apiForm.apiKey"
               class="form-input"
+              @input="onApiKeyInput"
               :type="
                 editingApiId &&
                 apiForm._masked &&

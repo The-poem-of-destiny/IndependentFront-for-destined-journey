@@ -639,7 +639,10 @@ export class AgentClient {
         throw new Error(`HTTP ${res.status}: ${errorText.slice(0, 200)}`);
       }
 
-      const data = await res.json();
+      const raw = await res.json();
+      // Cline 网关(api.cline.bot)把非流式响应整个包在顶层 data 里（流式 chunk 是标准形态）。
+      // 顶层无 choices 而 data.choices 存在时解包；标准 OpenAI 网关不受影响。
+      const data = !raw.choices && raw.data?.choices ? raw.data : raw;
       const choice = data.choices?.[0];
       const message = choice?.message;
       const rawResponse: string = message?.content ?? '';
