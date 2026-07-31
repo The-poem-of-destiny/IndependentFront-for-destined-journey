@@ -37,6 +37,11 @@ tests/agent-framework/.api-config*.json
 # 临时脚本目录（历史 tracked 文件保留，新增文件不追踪）
 tmp/
 
+# 🔒 P2-07: 备份与 crash dump 不追踪（历史 tracked 的用 git rm --cached 清理）
+*.bak
+*.stackdump
+*.orig
+
 # 真机调试实时导出（preset.json 已 tracked 继续保留；debug 导出/日志不追踪）
 tests/realtime_export/*.json
 tests/realtime_export/log.txt

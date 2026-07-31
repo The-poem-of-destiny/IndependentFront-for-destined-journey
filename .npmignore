@@ -1,0 +1,31 @@
+# 🔒 P1-18 / P2-07: npm 发布包排除清单
+# 发布模式（引擎库 / Web 应用 / 桌面应用）的独立边界待定（review 第五阶段），
+# 此处先排除明显不该进入任何发布包的内容：临时文件、备份、crash dump、测试、开发配置。
+# 待发布决策落地后，改用 package.json "files" 白名单做更精确的收口。
+
+# 临时 / 备份 / crash dump
+tmp/
+*.bak
+*.stackdump
+*.orig
+*.pre-*
+
+# 测试源码与 fixtures（不进发布包）
+tests/
+*.test.ts
+*.test.js
+
+# Claude Code 本地配置 / skill
+.claude/
+
+# 开发工具脚本
+scripts/
+
+# Git 元数据
+.git/
+.gitignore
+.gitattributes
+
+# 编辑器 / IDE
+.vscode/
+.idea/
