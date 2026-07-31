@@ -166,7 +166,10 @@ const playerLocationNode = computed(() => {
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 function schedulePersist() {
   if (persistTimer) clearTimeout(persistTimer)
-  persistTimer = setTimeout(persistTimer, 1000)
+  // 🔴 原 setTimeout(persistTimer, ...) 把 timer id 当回调传（TS 报 TimerHandler 错），是类型+运行时双 bug
+  //    （1 秒后引擎试图把 number 当函数调用必然抛错）。回调合法化为 no-op 以过 vue-tsc；
+  //    markers 持久化若需要应在此接入真正的写入函数（当前由 useMapMarkers 内部处理）。
+  persistTimer = setTimeout(() => { persistTimer = null }, 1000)
 }
 
 watch(markers, () => schedulePersist(), { deep: true })

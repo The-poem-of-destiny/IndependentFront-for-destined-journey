@@ -216,7 +216,7 @@ function saveEdit() {
     entry.name = editForm.value.name
     entry.key = editForm.value.keys.split(',').map(k => k.trim()).filter(Boolean)
     entry.keysecondary = editForm.value.keysecondary.split(',').map(k => k.trim()).filter(Boolean)
-    entry.selectiveLogic = editForm.value.selectiveLogic
+    entry.selectiveLogic = editForm.value.selectiveLogic as 0 | 1 | 2 | 3
     entry.order = editForm.value.order
     entry.content = editForm.value.content
     saveBook()

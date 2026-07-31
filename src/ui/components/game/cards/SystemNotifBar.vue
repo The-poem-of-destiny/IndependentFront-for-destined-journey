@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { CharacterUpdateEvent, ItemUpdateEvent, QuestUpdateEvent } from '@engine/types'
-const props = defineProps<{ event: CharacterUpdateEvent | ItemUpdateEvent | QuestUpdateEvent }>()
+import type { SystemEvent } from '@engine/types'
+const props = defineProps<{ event: SystemEvent }>()
 
 function notifIcon(): string {
   if (props.event.type === 'character_update') return 'fa-solid fa-arrow-trend-up'

@@ -628,6 +628,8 @@ export const useCreateStore = defineStore('create', () => {
   /** 结构化章节（含 keyEvents）— startJourney 时经 outlineToEvents 生成事件树 */
   const plotOutlineChapters = ref<ParsedOutlineOutput['chapters']>([])
   const isPlotGenerating = ref(false)
+  /** 大纲预览是否已揭示（防剧透遮罩，捏人页本地状态） */
+  const plotOutlineRevealed = ref(false)
   const plotGenerationError = ref<string | null>(null)
   /** 最近一次大纲生成的完整 AI 数据（供导出） */
   const lastPlotGenerationMeta = ref<{
@@ -1562,7 +1564,7 @@ const cc = Number(s.plotChapterCount)
     plotDifficultyTier, plotGenrePreference, plotCustomPreference,
     plotFocusRegion, plotTabooContent,
     plotChapterCount, plotEventsPerChapter,
-    plotSettings, plotOutline, plotOutlineChapters, isPlotGenerating,
+    plotSettings, plotOutline, plotOutlineChapters, isPlotGenerating, plotOutlineRevealed,
     plotGenerationError, outlineHistory,
     exportAIDebugDump,
     lastPlotGenerationMeta,

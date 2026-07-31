@@ -17,9 +17,9 @@ import type { CombatActionResult, CombatDamageBreakdown } from '@engine/types'
 
 const props = defineProps<{
   /** 工具调用结果（CombatActionResult 形状，可能不完整） */
-  result: Record<string, unknown>
+  result?: Record<string, unknown>
   /** 工具名称，如 'combat_attack' / 'combat_use_skill' / 'status_apply' */
-  toolName: string
+  toolName?: string
 }>()
 
 // ── 折叠/展开状态 ──
@@ -82,7 +82,7 @@ const defenderId = computed((): string | null => {
 /** 安全读取 result.damage 作为 CombatDamageBreakdown */
 const damage = computed((): CombatDamageBreakdown | null => {
   if (!hasDamageBreakdown.value) return null
-  return props.result.damage as CombatDamageBreakdown
+  return props.result!.damage as CombatDamageBreakdown
 })
 
 /** 安全读取 finalDamage */
@@ -147,7 +147,7 @@ const toolLabel = computed((): string => {
     combat_flee: '逃跑',
     status_apply: '状态',
   }
-  return map[props.toolName] ?? props.toolName
+  return map[props.toolName ?? ''] ?? props.toolName ?? ''
 })
 
 /** 多段分割信息 */

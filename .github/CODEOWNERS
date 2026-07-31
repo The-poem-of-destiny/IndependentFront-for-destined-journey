@@ -1,0 +1,18 @@
+# CODEOWNERS — 热点文件改动自动请求 review
+# 单人项目主要起「碰了敏感文件」的提示作用。
+# 主人 GitHub 用户名若与 git user (Richardoooo) 不同，请全局替换 @Richardoooo。
+
+# 指令正文（唯一真源 + 薄壳）
+/AGENTS.md     @Richardoooo
+/CLAUDE.md     @Richardoooo
+
+# 类型来源 / 数据库 / Agent 配置（冲突磁铁）
+/src/sillytavern/types.ts       @Richardoooo
+/src/sillytavern/database.ts    @Richardoooo
+/agent-config.json              @Richardoooo
+
+# 治理规范
+/docs/planning/2026-07-31-repo-management.md  @Richardoooo
+
+# 默认：所有其他文件
+*              @Richardoooo
