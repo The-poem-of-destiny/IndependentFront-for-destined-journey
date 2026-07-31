@@ -323,11 +323,9 @@ describe('worldbook-migration (D4)', () => {
       const db = getDatabase();
 
       // 先验一遍失败路径：碰撞 + 写入炸 → 源必须完好
-      const spy = vi
-        .spyOn(db.worldBooks, 'bulkPut')
-        .mockImplementation((async () => {
-          throw new Error('模拟写入失败');
-        }) as never);
+      const spy = vi.spyOn(db.worldBooks, 'bulkPut').mockImplementation((async () => {
+        throw new Error('模拟写入失败');
+      }) as never);
       const failed = await migrateWorldBooksToDexie(h);
       expect(failed).toMatchObject({ status: 'failed', stage: 'write' });
       expect(h.settings[LEGACY_BOOKS_KEY]).toBe(source);

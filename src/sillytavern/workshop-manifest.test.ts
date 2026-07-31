@@ -317,8 +317,9 @@ describe('parsePayload —— 条目两种形状归一（★ 实测差异）', (
   });
 
   it('enabled 优先于 disable（两者矛盾时以显式 enabled 为准）', () => {
-    const [entry] = parsePayload([{ ...PAYLOAD_ENTRY, disable: true, enabled: true }])
-      .worldbookEntries;
+    const [entry] = parsePayload([
+      { ...PAYLOAD_ENTRY, disable: true, enabled: true },
+    ]).worldbookEntries;
     expect(entry.enabled).toBe(true);
   });
 
@@ -328,8 +329,10 @@ describe('parsePayload —— 条目两种形状归一（★ 实测差异）', (
   });
 
   it('comment 为空 → 用序号兜底，name 永不为空（按名匹配的锚点）', () => {
-    const entries = parsePayload([{ content: 'a' }, { comment: '   ', content: 'b' }])
-      .worldbookEntries;
+    const entries = parsePayload([
+      { content: 'a' },
+      { comment: '   ', content: 'b' },
+    ]).worldbookEntries;
     expect(entries[0].name).toBe('未命名条目 1');
     expect(entries[1].name).toBe('未命名条目 2');
   });
@@ -341,15 +344,18 @@ describe('parsePayload —— 条目两种形状归一（★ 实测差异）', (
   });
 
   it('selectiveLogic 越界 → 夹回 0', () => {
-    expect(parsePayload([{ comment: 'a', selectiveLogic: 9 }]).worldbookEntries[0].selectiveLogic)
-      .toBe(0);
-    expect(parsePayload([{ comment: 'a', selectiveLogic: 3 }]).worldbookEntries[0].selectiveLogic)
-      .toBe(3);
+    expect(
+      parsePayload([{ comment: 'a', selectiveLogic: 9 }]).worldbookEntries[0].selectiveLogic,
+    ).toBe(0);
+    expect(
+      parsePayload([{ comment: 'a', selectiveLogic: 3 }]).worldbookEntries[0].selectiveLogic,
+    ).toBe(3);
   });
 
   it('key / keysecondary 混进非串只留串', () => {
-    const [entry] = parsePayload([{ comment: 'a', key: ['x', 1, null], keysecondary: 'nope' }])
-      .worldbookEntries;
+    const [entry] = parsePayload([
+      { comment: 'a', key: ['x', 1, null], keysecondary: 'nope' },
+    ]).worldbookEntries;
     expect(entry.key).toEqual(['x']);
     expect(entry.keysecondary).toEqual([]);
   });
@@ -376,8 +382,9 @@ describe('parsePayload —— 正则 13 字段', () => {
   });
 
   it('★ substituteRegex 是枚举不是布尔：值 2 原样保留', () => {
-    const [rx] = parsePayload({ regexEntries: [{ ...REAL_REGEX, substituteRegex: 2 }] })
-      .regexEntries;
+    const [rx] = parsePayload({
+      regexEntries: [{ ...REAL_REGEX, substituteRegex: 2 }],
+    }).regexEntries;
     expect(rx.substituteRegex).toBe(2);
   });
 

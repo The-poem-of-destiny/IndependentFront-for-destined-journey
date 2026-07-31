@@ -114,8 +114,7 @@ export type WorkshopOutcome =
 
 /** prepare 阶段的判别联合（形状对齐 `WorkshopResult`，少一个 `fromCache`） */
 export type WorkshopPrepareResult =
-  | { ok: true; prepared: WorkshopPrepared }
-  | { ok: false; error: WorkshopFailure };
+  { ok: true; prepared: WorkshopPrepared } | { ok: false; error: WorkshopFailure };
 
 /** `checkUpdate()` 回执 */
 export type WorkshopUpdateCheck =

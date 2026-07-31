@@ -289,34 +289,34 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 
 > 详细记录见 `docs/CHANGELOG.md`。架构变更同步更新下方架构图。
 
-| Phase     | 内容                                                  | 状态                |
-| --------- | ----------------------------------------------------- | ------------------- |
-| 1-4.6     | 架构/数据结构/Agent编排/记忆/事件/FP 基础             | ✅                  |
-| 5         | 角色 & 变量系统 (tier/bloodlines/validate/char/time)  | ✅                  |
-| Geography | 位置系统 (location-db, 10势力 32节点)                 | ✅                  |
-| Audit Fix | 世界书对齐 (数值/地理/品质/血脉)                      | ✅                  |
-| 6a-6e     | 战斗/制作/集群士气/好感/Marker+SubAgent               | ✅                  |
-| 7a-7c     | 工程 (Vite+Vue3+Pinia) / 主题组件 / 首页+设置页       | ✅                  |
-| 7d        | 捏人页 `/create`                                      | 🔄 世界书驱动改造中 |
-| 7e        | 游戏页+HUD+脚本引擎+ChatFlow+输出美化+ScenePanel      | 🔄 待集成验证       |
+| Phase     | 内容                                                   | 状态                |
+| --------- | ------------------------------------------------------ | ------------------- |
+| 1-4.6     | 架构/数据结构/Agent编排/记忆/事件/FP 基础              | ✅                  |
+| 5         | 角色 & 变量系统 (tier/bloodlines/validate/char/time)   | ✅                  |
+| Geography | 位置系统 (location-db, 10势力 32节点)                  | ✅                  |
+| Audit Fix | 世界书对齐 (数值/地理/品质/血脉)                       | ✅                  |
+| 6a-6e     | 战斗/制作/集群士气/好感/Marker+SubAgent                | ✅                  |
+| 7a-7c     | 工程 (Vite+Vue3+Pinia) / 主题组件 / 首页+设置页        | ✅                  |
+| 7d        | 捏人页 `/create`                                       | 🔄 世界书驱动改造中 |
+| 7e        | 游戏页+HUD+脚本引擎+ChatFlow+输出美化+ScenePanel       | 🔄 待集成验证       |
 | 7f / 7g   | 创意工坊（= 工坊 P1）/ 衔接测试                        | ✅ / ⬜             |
-| 8 / 8.5   | Agent 可见性 / Agentic Agent (function calling)       | ✅                  |
-| 9 / 9b    | System Prompt 迁移 / craft_gen 细化                   | ✅                  |
-| 9c        | 集成测试 & 交付                                       | ⬜                  |
-| 10a-10h   | 模板系统/预设占位符/vars_update/Quest/memory_summary  | ✅                  |
-| 10i       | 输出美化规则库                                        | ✅                  |
-| 10j       | 剧情系统接线                                          | ✅ 待真机           |
-| 10k       | 快照面板+右键回退重发                                 | ✅ 待真机           |
-| M1-M6     | 数据字段规范迁移（2787 tests 全绿）                   | ✅                  |
-| Audio     | 音频系统 v1.0（双通道+三后端+按名寻址+场景配乐）      | ✅                  |
-| 素材      | 素材管理系统 v1.0（渲染面+大画像+裁剪台+画像弹窗）    | ✅                  |
-| 战斗 v2   | 战斗系统架构 v2（管道+中间件+6大类+19event+独立面板） | ✅ M5完成 待M6真机  |
-| 战斗 v3   | 代码内核主持流程（Kernel+DiceTape+EffectIntent+DSL）  | 📋 架构+plan 已定稿 |
+| 8 / 8.5   | Agent 可见性 / Agentic Agent (function calling)        | ✅                  |
+| 9 / 9b    | System Prompt 迁移 / craft_gen 细化                    | ✅                  |
+| 9c        | 集成测试 & 交付                                        | ⬜                  |
+| 10a-10h   | 模板系统/预设占位符/vars_update/Quest/memory_summary   | ✅                  |
+| 10i       | 输出美化规则库                                         | ✅                  |
+| 10j       | 剧情系统接线                                           | ✅ 待真机           |
+| 10k       | 快照面板+右键回退重发                                  | ✅ 待真机           |
+| M1-M6     | 数据字段规范迁移（2787 tests 全绿）                    | ✅                  |
+| Audio     | 音频系统 v1.0（双通道+三后端+按名寻址+场景配乐）       | ✅                  |
+| 素材      | 素材管理系统 v1.0（渲染面+大画像+裁剪台+画像弹窗）     | ✅                  |
+| 战斗 v2   | 战斗系统架构 v2（管道+中间件+6大类+19event+独立面板）  | ✅ M5完成 待M6真机  |
+| 战斗 v3   | 代码内核主持流程（Kernel+DiceTape+EffectIntent+DSL）   | 📋 架构+plan 已定稿 |
 | 工坊 P0   | 世界书迁出 localStorage → Dexie v14（+ 进 FullBackup） | ✅                  |
-| 工坊 P0b  | 美化规则迁出 localStorage → Dexie v15                 | ✅                  |
+| 工坊 P0b  | 美化规则迁出 localStorage → Dexie v15                  | ✅                  |
 | 工坊 P1   | 创意工坊（浏览/安装/更新/卸载/启用，= 7f）             | ✅ 真机已过         |
 | 工坊 P2   | EJS 沙盒 + 只读 stats 投影                             | ⬜ 未做             |
-| 真机迭代  | debug loop 持续修复                                   | 🔄                  |
+| 真机迭代  | debug loop 持续修复                                    | 🔄                  |
 
 > 🔴 **工坊 P2 未做**：工坊装进来的世界书条目里的 EJS **目前不会被求值**，正文原样进 Agent 上下文。这与内置世界书现状一致（`event.json` 297 个 EJS 块、`system_core.json` 252 个），不是工坊新增的缺陷，但也**不要对外宣称工坊内容已完整生效**。
 

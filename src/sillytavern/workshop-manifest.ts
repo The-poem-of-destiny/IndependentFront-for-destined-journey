@@ -95,7 +95,9 @@ function readNumberArray(source: unknown, keys: string[]): number[] {
   for (const key of keys) {
     const value = pick(source, key);
     if (Array.isArray(value)) {
-      return value.filter((item): item is number => typeof item === 'number' && Number.isFinite(item));
+      return value.filter(
+        (item): item is number => typeof item === 'number' && Number.isFinite(item),
+      );
     }
   }
   return [];

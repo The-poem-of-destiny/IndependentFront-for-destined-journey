@@ -48,6 +48,7 @@ Dexie 世界书的**唯一入口**。对外暴露与现状同形的响应式数�
 6. **启动顺序**：迁移 → 之后才跑 `loadBuiltInWorldBooks()` 内置合并（针对 Dexie）
 
 **验收**（这几条是本阶段的核心资产）：
+
 - 正常迁移：数据完整、localStorage 键消失、标志位置位
 - 事务中途抛错：Dexie 无残留、localStorage 完好、标志位未置、**重跑成功**
 - 校验失败（人为构造数量不符）：不删 localStorage、不置标志位
@@ -72,12 +73,12 @@ Dexie 世界书的**唯一入口**。对外暴露与现状同形的响应式数�
 
 ### P1-1 纯函数层（可并行，无 DB/网络依赖）
 
-| 文件 | 职责 | 关键点 |
-| --- | --- | --- |
-| `workshop-types.ts` | 类型 + 常量 | `WORKSHOP_PARTITION` |
-| `workshop-manifest.ts` | 上游 JSON → 内部形状 | 容忍字段增删，未知字段忽略；只取 D13 的 12 个字段 |
-| `workshop-regex-map.ts` | ST 正则 → `BeautifierRule` | ⚠️ `findRegex` **两种形态**（裸 pattern / `/p/flags`）都要吃；`substituteRegex` 是**枚举非布尔**；`promptOnly` 等丢弃项写进 `droppedNotes`；**不剥离 `<script>`/`<style>`**，`enabled` 按上游 |
-| `workshop-install-plan.ts` | `planInstall()` 纯同步出计划 | uid 分配（D8）/ 条目转换 + `extra.workshop`（D14）/ 正则映射 / `sourceHash` 冲突检测（D15）/ 丢弃项收集 |
+| 文件                       | 职责                         | 关键点                                                                                                                                                                                        |
+| -------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workshop-types.ts`        | 类型 + 常量                  | `WORKSHOP_PARTITION`                                                                                                                                                                          |
+| `workshop-manifest.ts`     | 上游 JSON → 内部形状         | 容忍字段增删，未知字段忽略；只取 D13 的 12 个字段                                                                                                                                             |
+| `workshop-regex-map.ts`    | ST 正则 → `BeautifierRule`   | ⚠️ `findRegex` **两种形态**（裸 pattern / `/p/flags`）都要吃；`substituteRegex` 是**枚举非布尔**；`promptOnly` 等丢弃项写进 `droppedNotes`；**不剥离 `<script>`/`<style>`**，`enabled` 按上游 |
+| `workshop-install-plan.ts` | `planInstall()` 纯同步出计划 | uid 分配（D8）/ 条目转换 + `extra.workshop`（D14）/ 正则映射 / `sourceHash` 冲突检测（D15）/ 丢弃项收集                                                                                       |
 
 **验收**：每个模块配套 `*.test.ts`。`planInstall` 必测：跨项目 uid 不重叠、卸载后号段不回收、按名匹配的增删改、`sourceHash` 命中与不命中、`droppedNotes` 内容正确。
 

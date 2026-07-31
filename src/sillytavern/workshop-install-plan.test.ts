@@ -36,7 +36,11 @@ function project(over: Partial<WorkshopProjectMeta> = {}): WorkshopProjectMeta {
   };
 }
 
-function source(name: string, content = `${name} 的正文`, over: Partial<WorkshopSourceEntry> = {}): WorkshopSourceEntry {
+function source(
+  name: string,
+  content = `${name} 的正文`,
+  over: Partial<WorkshopSourceEntry> = {},
+): WorkshopSourceEntry {
   return {
     sourceUid: 0,
     name,
@@ -163,9 +167,16 @@ describe('planInstall —— ★ D8 uid 分配', () => {
     const yanling = planInstall(input([source('言灵核心')], [], { id: 'p1' }), { nextUid: 0 });
 
     const veraNames = Array.from({ length: 12 }, (_, i) => `维拉条目${i}`);
-    const vera = planInstall(input(veraNames.map((n) => source(n)), [], { id: 'p2' }), {
-      nextUid: yanling.nextUid,
-    });
+    const vera = planInstall(
+      input(
+        veraNames.map((n) => source(n)),
+        [],
+        { id: 'p2' },
+      ),
+      {
+        nextUid: yanling.nextUid,
+      },
+    );
 
     const reader = planInstall(input([source('读者核心')], [], { id: 'p3' }), {
       nextUid: vera.nextUid,
@@ -445,10 +456,7 @@ describe('planInstall —— droppedNotes 汇总', () => {
   });
 
   it('三重名 → (2)/(3) 依次递增', () => {
-    const plan = planInstall(
-      input([source('x', '1'), source('x', '2'), source('x', '3')]),
-      FRESH,
-    );
+    const plan = planInstall(input([source('x', '1'), source('x', '2'), source('x', '3')]), FRESH);
     expect(plan.entries.map((e) => e.name)).toEqual(['x', 'x (2)', 'x (3)']);
     expect(new Set(plan.entries.map((e) => e.uid)).size).toBe(3);
   });

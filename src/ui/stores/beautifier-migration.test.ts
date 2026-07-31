@@ -64,8 +64,7 @@ function makeSettingsHarness(init: HarnessInit = {}) {
   const settings: Record<string, unknown> = { beautifierEnabled: true };
   if (init.rules !== undefined) settings[LEGACY_RULES_KEY] = init.rules;
   if (init.presetCache !== undefined) settings[LEGACY_PRESET_CACHE_KEY] = init.presetCache;
-  if (init.builtinDisabled !== undefined)
-    settings.beautifierBuiltinDisabled = init.builtinDisabled;
+  if (init.builtinDisabled !== undefined) settings.beautifierBuiltinDisabled = init.builtinDisabled;
   const persistSettings = () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   };

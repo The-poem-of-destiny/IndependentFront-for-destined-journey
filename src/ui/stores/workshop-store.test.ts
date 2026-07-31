@@ -721,7 +721,8 @@ describe('workshop-store', () => {
 
     // 书内容一个字节都不许回到 settings / localStorage（Phase 0 的验收线）
     useSettingsStore().saveNow();
-    const serialized = JSON.stringify(useSettingsStore().settings) + (lsBacking.get('fated-poem-settings') ?? '');
+    const serialized =
+      JSON.stringify(useSettingsStore().settings) + (lsBacking.get('fated-poem-settings') ?? '');
     expect(serialized).not.toContain('"entries"');
     expect(serialized).not.toContain('项目W');
   });

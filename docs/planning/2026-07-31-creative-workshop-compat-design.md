@@ -19,12 +19,12 @@
 
 ## 0. 阶段划分
 
-| 阶段 | 内容 | 依赖 | 状态 |
-| --- | --- | --- | --- |
-| **Phase 0** | 世界书从 localStorage 迁移到 Dexie | 无 —— 独立价值，且是 Phase 1 的前置 | ✅ 已实施（Dexie v14） |
-| **Phase 0b** | 美化规则从 localStorage 迁移到 Dexie | 无 —— **实施期新增**，定稿时未预见 | ✅ 已实施（Dexie v15） |
-| **Phase 1** | 创意工坊：浏览 · 下载 · 安装 · 更新 · 卸载 | Phase 0 | ✅ 已实施 + 真机走查已过 |
-| **Phase 2** | EJS 沙盒 + 只读 stats 投影（另行设计） | 无强依赖，但工坊内容需要它才能真正生效 | ⬜ **未做** |
+| 阶段         | 内容                                       | 依赖                                   | 状态                     |
+| ------------ | ------------------------------------------ | -------------------------------------- | ------------------------ |
+| **Phase 0**  | 世界书从 localStorage 迁移到 Dexie         | 无 —— 独立价值，且是 Phase 1 的前置    | ✅ 已实施（Dexie v14）   |
+| **Phase 0b** | 美化规则从 localStorage 迁移到 Dexie       | 无 —— **实施期新增**，定稿时未预见     | ✅ 已实施（Dexie v15）   |
+| **Phase 1**  | 创意工坊：浏览 · 下载 · 安装 · 更新 · 卸载 | Phase 0                                | ✅ 已实施 + 真机走查已过 |
+| **Phase 2**  | EJS 沙盒 + 只读 stats 投影（另行设计）     | 无强依赖，但工坊内容需要它才能真正生效 | ⬜ **未做**              |
 
 **已确认的取舍**：Phase 1 装进来的世界书条目在 Phase 2 落地前**不会被求值**——条目正文里的 EJS 会原样进入 Agent 上下文。这**不是**新增的缺陷：内置世界书今天就在这么干（`event.json` 297 个 EJS 块、`system_core.json` 252 个）。工坊条目与内置条目一视同仁，不做特殊门禁（D6）。
 
@@ -38,10 +38,10 @@
 
 三个后果：
 
-| 问题 | 实测 |
-| --- | --- |
-| 配额压力 | 内置世界书紧凑序列化 889,962 字符（≈0.85 MB；localStorage 按 UTF-16 计约 1.7 MB），配额通常 5 MB。且 [settings-store.ts:233](../../src/ui/stores/settings-store.ts:233) 配额溢出**静默 catch** |
-| 写放大 | deep watch 在**任何**设置变更时重新 `JSON.stringify` 整个 ~2 MB 设置对象 |
+| 问题             | 实测                                                                                                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 配额压力         | 内置世界书紧凑序列化 889,962 字符（≈0.85 MB；localStorage 按 UTF-16 计约 1.7 MB），配额通常 5 MB。且 [settings-store.ts:233](../../src/ui/stores/settings-store.ts:233) 配额溢出**静默 catch**          |
+| 写放大           | deep watch 在**任何**设置变更时重新 `JSON.stringify` 整个 ~2 MB 设置对象                                                                                                                                |
 | **备份不覆盖** ★ | 设置页 存档数据 分区标注「IndexedDB + localStorage」，但 `exportAllData()` 只做 `db.*.toArray()`，**从不读 localStorage**。导出→清库→导入 会丢失全部世界书编辑、自建/导入书、Agent 配置、美化规则、主题 |
 
 ### D2 — 行为保持迁移，不改语义
@@ -150,10 +150,10 @@ const allowedUids = enabledByPartition.get(book.partition);
 
 ### D10 — 两条轴
 
-| 轴 | 粒度 | 存储 |
-| --- | --- | --- |
-| **已安装** | 项目 | 全局 —— `worldBooks` + `workshopProjects` 行（照音频库/素材库先例，下载一次全存档可用） |
-| **已启用** | 项目（展开成条目） | 每存档 —— `SaveSlot.metadata.enabledWorldBookEntries`，写 `creative_workshop:<uid>` |
+| 轴         | 粒度               | 存储                                                                                    |
+| ---------- | ------------------ | --------------------------------------------------------------------------------------- |
+| **已安装** | 项目               | 全局 —— `worldBooks` + `workshopProjects` 行（照音频库/素材库先例，下载一次全存档可用） |
+| **已启用** | 项目（展开成条目） | 每存档 —— `SaveSlot.metadata.enabledWorldBookEntries`，写 `creative_workshop:<uid>`     |
 
 **启用完全走既有机制**，与 `system_core:413` 无异。不新增 SaveSlot 字段、不改 `filterBooksByEnabledEntries`、不做分区特判。缺省语义沿用现状（分区未出现在 `enabledWorldBookEntries` → 整本放行），与所有导入书一致。
 
@@ -183,13 +183,13 @@ const allowedUids = enabledByPartition.get(book.partition);
 
 ```ts
 export interface WorkshopProject {
-  id: string;                    // 上游 uuid，跨版本稳定
-  rootProjectId: string;         // 版本族系根
+  id: string; // 上游 uuid，跨版本稳定
+  rootProjectId: string; // 版本族系根
   name: string;
   description: string;
-  version: string;               // 上游自由填，本引擎只做串比对不解析
-  authorName: string;            // authorGlobalName 优先，回退 authorName
-  tags: string[];                // 仅展示与筛选，不参与 partition（D6）
+  version: string; // 上游自由填，本引擎只做串比对不解析
+  authorName: string; // authorGlobalName 优先，回退 authorName
+  tags: string[]; // 仅展示与筛选，不参与 partition（D6）
   coverUrl?: string;
   downloadUrl: string;
   fileSize: number;
@@ -198,9 +198,9 @@ export interface WorkshopProject {
   installState: 'installed' | 'update_available' | 'broken';
   installedVersion: string;
   installedAt: number;
-  fetchedAt: number;             // 上次拉取上游元数据时间（TTL 判定）
+  fetchedAt: number; // 上次拉取上游元数据时间（TTL 判定）
   uidRange: { start: number; end: number };
-  droppedNotes?: string[];       // 安装时的处置记录，供 UI 提示
+  droppedNotes?: string[]; // 安装时的处置记录，供 UI 提示
 }
 ```
 
@@ -249,15 +249,15 @@ entry.extra = {
 
 字段映射：
 
-| ST 正则 | → `BeautifierRule` | 备注 |
-| --- | --- | --- |
-| `findRegex` | `pattern` + `flags` | ⚠️ **两种形态**：实测 2 条是裸 pattern、4 条是 `/pattern/flags`，解析器必须都吃 |
-| `replaceString` | `replacement` | ✅ 捕获组方言**已核实兼容**：一律 `$1..$9`，`{{match}}` 出现 0 次；引擎侧 `result.replace(re, rule.replacement)` 同为 JS 语义，**无需转写** |
-| `disabled` | `enabled` | 取反 |
-| `scriptName` | `name` | |
-| `markdownOnly` | `scope: 'maintext'` | |
-| — | `isBuiltin: false` · `group: '创意工坊 · <项目名>'` | |
-| — | `autoEnable.worldBookIds: ['workshop:<id>']` | 装了才启用，卸载即失效 |
+| ST 正则         | → `BeautifierRule`                                  | 备注                                                                                                                                        |
+| --------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `findRegex`     | `pattern` + `flags`                                 | ⚠️ **两种形态**：实测 2 条是裸 pattern、4 条是 `/pattern/flags`，解析器必须都吃                                                             |
+| `replaceString` | `replacement`                                       | ✅ 捕获组方言**已核实兼容**：一律 `$1..$9`，`{{match}}` 出现 0 次；引擎侧 `result.replace(re, rule.replacement)` 同为 JS 语义，**无需转写** |
+| `disabled`      | `enabled`                                           | 取反                                                                                                                                        |
+| `scriptName`    | `name`                                              |                                                                                                                                             |
+| `markdownOnly`  | `scope: 'maintext'`                                 |                                                                                                                                             |
+| —               | `isBuiltin: false` · `group: '创意工坊 · <项目名>'` |                                                                                                                                             |
+| —               | `autoEnable.worldBookIds: ['workshop:<id>']`        | 装了才启用，卸载即失效                                                                                                                      |
 
 **无对应物、明确丢弃**：`promptOnly`（美化库是显示层，无提示词侧改写通道）· `placement` · `minDepth`/`maxDepth` · `substituteRegex`（⚠️ 实测是**枚举**不是布尔，值 0 与 2）· `runOnEdit` · `trimStrings`。逐条记入 `droppedNotes`，UI 明示「N 项未导入」——**丢弃必须 loud**，静默截断会让用户以为装全了。（⚠️ 「N 项未导入」这个单一口径已被**实施期修订**推翻，见本节末「D16 实施期修订」）
 
@@ -278,11 +278,11 @@ entry.extra = {
 
 **修订**：note 从裸 `string` 升为带 `kind` 的结构，分三类：
 
-| kind | 含义 | 覆盖 |
-| --- | --- | --- |
-| `dropped` | ST 字段本引擎无对应物，**确实没导入** | `placement` · `maxDepth` · `minDepth` · `runOnEdit` · `promptOnly`（整条跳过）· `substituteRegex` · `trimStrings` · 退休条目 |
-| `degraded` | **已装**，但渲染不完整 | ` ```html ` 围栏无渲染器 · 完整 HTML 文档被解析器截断 · `<script>` 惰性 · `{{宏}}` 无替换环节 · 上游重名本地改名 |
-| `sideEffect` | **已装**，且有规则自身之外的副作用 | `<style>` 全局生效、可能覆盖应用主题 token |
+| kind         | 含义                                  | 覆盖                                                                                                                         |
+| ------------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `dropped`    | ST 字段本引擎无对应物，**确实没导入** | `placement` · `maxDepth` · `minDepth` · `runOnEdit` · `promptOnly`（整条跳过）· `substituteRegex` · `trimStrings` · 退休条目 |
+| `degraded`   | **已装**，但渲染不完整                | ` ```html ` 围栏无渲染器 · 完整 HTML 文档被解析器截断 · `<script>` 惰性 · `{{宏}}` 无替换环节 · 上游重名本地改名             |
+| `sideEffect` | **已装**，且有规则自身之外的副作用    | `<style>` 全局生效、可能覆盖应用主题 token                                                                                   |
 
 三类的事实依据全部来自本节「已知后果（已确认接受）」——修订没有改变任何一条已知后果，只是**停止把「已装但受限」误报成「未导入」**。
 
@@ -345,17 +345,17 @@ src/ui/
 
 ## 9. v1 中已被推翻的结论（勿重开）
 
-| v1 结论 | 结局 | 原因 |
-| --- | --- | --- |
-| `creative_workshop` 分区缺省拒绝（反转放行语义） | ❌ 撤销 | 与「一视同仁」冲突；真正的闸门是 Agent 可见性，且它已默认关闭 |
-| 每存档存项目 id 而非 uid（新增 SaveSlot 字段） | ❌ 撤销 | 缺省放行后更新友好性问题自行消失；不必为工坊单开一条启用路径 |
-| `workshopBooks` 独立表 | ❌ 撤销 | 世界书迁进 Dexie 后，工坊书就是普通行 |
-| 合并只读视图 `getAllWorldBooks()` | ❌ 不需要 | 单一数据源，无可合并 |
-| 工坊正则不导入（需 iframe 渲染器） | ❌ 撤销 | 改为原样安装并默认启用（D16），已知后果已确认接受 |
-| 工坊内容排除出 FullBackup | ❌ 撤销 | 工坊书即 `worldBooks` 行，排除需按 partition 特判，与「一视同仁」冲突 |
-| Phase 1 只建启用存储不建 UI | ❌ 撤销 | 「一视同仁」= 不做门禁 |
-| 交换 Phase 1/2 顺序 | ❌ 否决 | 明确保持现有顺序 |
-| 「不存在列表/搜索端点」 | ⚠️ **事实错误** | 该断言来自只读压缩 bundle；端点在 worker 侧（附录 C） |
+| v1 结论                                          | 结局            | 原因                                                                  |
+| ------------------------------------------------ | --------------- | --------------------------------------------------------------------- |
+| `creative_workshop` 分区缺省拒绝（反转放行语义） | ❌ 撤销         | 与「一视同仁」冲突；真正的闸门是 Agent 可见性，且它已默认关闭         |
+| 每存档存项目 id 而非 uid（新增 SaveSlot 字段）   | ❌ 撤销         | 缺省放行后更新友好性问题自行消失；不必为工坊单开一条启用路径          |
+| `workshopBooks` 独立表                           | ❌ 撤销         | 世界书迁进 Dexie 后，工坊书就是普通行                                 |
+| 合并只读视图 `getAllWorldBooks()`                | ❌ 不需要       | 单一数据源，无可合并                                                  |
+| 工坊正则不导入（需 iframe 渲染器）               | ❌ 撤销         | 改为原样安装并默认启用（D16），已知后果已确认接受                     |
+| 工坊内容排除出 FullBackup                        | ❌ 撤销         | 工坊书即 `worldBooks` 行，排除需按 partition 特判，与「一视同仁」冲突 |
+| Phase 1 只建启用存储不建 UI                      | ❌ 撤销         | 「一视同仁」= 不做门禁                                                |
+| 交换 Phase 1/2 顺序                              | ❌ 否决         | 明确保持现有顺序                                                      |
+| 「不存在列表/搜索端点」                          | ⚠️ **事实错误** | 该断言来自只读压缩 bundle；端点在 worker 侧（附录 C）                 |
 
 ---
 
@@ -369,11 +369,11 @@ creative_workshop_cache
 └── worldbookSources{ <uuid>: { cachedAt, downloadUrl, data: WorldbookEntry[] } }
 ```
 
-| 项目 | 版本 | 作者 | 条目 | 正则 | 体积 | 正文 EJS 占比 |
-| --- | --- | --- | --- | --- | --- | --- |
-| 命定核心-言灵（重置） | 2.1.0 | 夜见哉川 | 1 | 2 | 24 530 B | 51.0% |
-| 命定核心-维拉 占卜/穿越时空 | 1.0.0 | redcrown | 12 | 3 | 228 336 B | 12.1% |
-| 读者-先行稳定版 | 1.2.5 | Allomerus | 1 | 1 | 108 980 B | 72.8% |
+| 项目                        | 版本  | 作者      | 条目 | 正则 | 体积      | 正文 EJS 占比 |
+| --------------------------- | ----- | --------- | ---- | ---- | --------- | ------------- |
+| 命定核心-言灵（重置）       | 2.1.0 | 夜见哉川  | 1    | 2    | 24 530 B  | 51.0%         |
+| 命定核心-维拉 占卜/穿越时空 | 1.0.0 | redcrown  | 12   | 3    | 228 336 B | 12.1%         |
+| 读者-先行稳定版             | 1.2.5 | Allomerus | 1    | 1    | 108 980 B | 72.8%         |
 
 条目为标准 ST 形状（24+ 字段），**正文含 0 个 `<script>` 标签**；正则为标准 ST 形状（13 字段），**每条含 1 个 `<script>` + 1 个 `<style>`**。
 
@@ -396,11 +396,11 @@ creative_workshop_cache
 
 `cloudflare/src/index.ts` 路由表 + `endpoints/projects.ts` zod schema。
 
-| 认证 | 方法 | 路径 |
-| --- | --- | --- |
-| 公开 | GET | `/api/projects`（分页/搜索/标签/排序）· `/api/projects/{id}` · `/api/files/*` |
-| 需登录 | — | `/api/auth/login·callback·poll·me·logout` · `/api/my/projects` · `POST·PUT·DELETE /api/projects*` · `like` · `subscribe` · `upload*` |
-| 管理员 | — | `/api/admin/*` |
+| 认证   | 方法 | 路径                                                                                                                                 |
+| ------ | ---- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 公开   | GET  | `/api/projects`（分页/搜索/标签/排序）· `/api/projects/{id}` · `/api/files/*`                                                        |
+| 需登录 | —    | `/api/auth/login·callback·poll·me·logout` · `/api/my/projects` · `POST·PUT·DELETE /api/projects*` · `like` · `subscribe` · `upload*` |
+| 管理员 | —    | `/api/admin/*`                                                                                                                       |
 
 `GET /api/projects` — Query：`page`(0) · `pageSize`(20) · `tag?` · `search?` · `sort`(`published`)。
 Response：`{ success, total, page, pageSize, projects[] }`，每项 20 字段（`id` `name` `description` `version` `author*` `downloadUrl` `fileSize` `coverImage` `tags[]` `downloadsCount` `likesCount` `subscribesCount` `userLiked` `userSubscribed` `createdAt` `updatedAt`）。服务端固定 `approvedOnly: true`。

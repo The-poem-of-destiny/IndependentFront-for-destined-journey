@@ -15,7 +15,8 @@ metadata:
 window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 0);
 // 顺带把过渡时长压到 ~0，减少等待
 const s = document.createElement('style');
-s.textContent = '*,*::before,*::after{transition-duration:0.001s!important;animation-duration:0.001s!important}';
+s.textContent =
+  '*,*::before,*::after{transition-duration:0.001s!important;animation-duration:0.001s!important}';
 document.head.appendChild(s);
 ```
 
@@ -30,6 +31,7 @@ document.head.appendChild(s);
 `dispatchEvent(new Event('input',{bubbles:true}))`，否则 v-model 收不到。
 
 配套的两条：
+
 - 拿 store 实例：`document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('ui')`，然后 `ui.navigate('workshop')`。直接写 `pinia.state.value.ui.currentView` 也能改到值，但一样过不了过渡那关。
 - 点击一律用 `element.click()`（JS），别用 `computer` 的坐标点击。
 - 验证结果读 `document.body.innerText` / `querySelectorAll`，screenshot 在这个模式下不可用。
