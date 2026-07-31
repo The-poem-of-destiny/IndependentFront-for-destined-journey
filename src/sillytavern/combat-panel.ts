@@ -163,11 +163,17 @@ export function buildAttackPanel(params: {
     : params.disadvantage
       ? `劣势:2d20(${params.diceRolls.join(',')})→取值${Math.min(...params.diceRolls)}`
       : `正常:d20(${params.diceRolls[0]})`;
+  // 🐛修复: 检定行显示实际采用骰（优势取高/劣势取低），旧实现恒显示 diceRolls[0]
+  const diceUsedForCheck = params.advantage
+    ? Math.max(...params.diceRolls)
+    : params.disadvantage
+      ? Math.min(...params.diceRolls)
+      : params.diceRolls[0];
   lines.push(`  | 掷骰: ${diceDesc} |`);
   lines.push(`  | 命中加值: ${params.hitBonus} |`);
   lines.push(`  | 闪避减值: ${params.dodgeBonus} |`);
   lines.push(
-    `  | 检定结果: d20[${params.diceRolls[0]}] + 命中${params.hitBonus} - 闪避${params.dodgeBonus} = ${params.checkValue} | 结果: ${params.ratingName}(${params.ratingCoeff}) |`,
+    `  | 检定结果: d20[${diceUsedForCheck}] + 命中${params.hitBonus} - 闪避${params.dodgeBonus} = ${params.checkValue} | 结果: ${params.ratingName}(${params.ratingCoeff}) |`,
   );
 
   // 伤害修正
@@ -281,11 +287,17 @@ export function buildFullActionPanel(params: {
     : params.disadvantage
       ? `劣势:2d20(${params.diceRolls.join(',')})→取值${Math.min(...params.diceRolls)}`
       : `正常:d20(${params.diceRolls[0]})`;
+  // 🐛修复: 多骰时显示实际采用骰（优势取高/劣势取低），旧实现劣势也显示 Math.max
+  const diceUsedDisplay = params.advantage
+    ? Math.max(...params.diceRolls)
+    : params.disadvantage
+      ? Math.min(...params.diceRolls)
+      : params.diceRolls[0];
   lines.push(`  | 掷骰: ${diceDesc} |`);
   lines.push(`  | 命中加值: max(技能命中, 装备命中) = ${params.hitBonus} |`);
   lines.push(`  | 闪避减值: max(装备闪避, 技能闪避) = ${params.dodgeBonus} |`);
   lines.push(
-    `  | 检定结果: d20[取值${params.diceRolls.length > 1 ? '=' + Math.max(...params.diceRolls) : params.diceRolls[0]}] + 命中${params.hitBonus} - 闪避${params.dodgeBonus} = ${params.checkValue} | 结果: ${params.ratingName}(${params.ratingCoeff}) |`,
+    `  | 检定结果: d20[${params.diceRolls.length > 1 ? '取值=' + diceUsedDisplay : params.diceRolls[0]}] + 命中${params.hitBonus} - 闪避${params.dodgeBonus} = ${params.checkValue} | 结果: ${params.ratingName}(${params.ratingCoeff}) |`,
   );
 
   // 伤害修正

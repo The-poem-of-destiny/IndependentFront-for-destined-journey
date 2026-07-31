@@ -1782,6 +1782,8 @@ export interface CombatParticipant {
   canAct: boolean;
   /** 战意状态 (Phase 6c) */
   morale?: MoraleState;
+  /** 集群成员数 (≥3 视为集群单位: 承伤 ×1.5 + 结算 EXP 衰减；缺省=非集群) */
+  clusterCount?: number;
 }
 
 // ========== Combat State ==========

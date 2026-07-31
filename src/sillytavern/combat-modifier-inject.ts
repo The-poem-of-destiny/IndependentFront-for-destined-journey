@@ -43,7 +43,8 @@ export function foldModsToPipelineModifiers(
   const fixedDamageBonus = sumFixedDamage(attackerMods).amount;
 
   // 2. 百分比（attacker 声明累加系数）→ damageMultiplier
-  const damageMultiplier = sumPercentages(attackerMods);
+  // 🐛修复: 只累加 target='damage' 的百分比 modifier（heal/resource 不进伤害乘区）
+  const damageMultiplier = sumPercentages(attackerMods, 'damage');
 
   // 3. 穿透（attacker 声明的「特殊机制·穿透」value 之和）→ penetrationRateBonus
   const penetrationRateBonus = collectSpecialMechanisms(attackerMods, '穿透').reduce(

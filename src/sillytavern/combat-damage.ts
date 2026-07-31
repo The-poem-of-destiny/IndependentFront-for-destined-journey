@@ -30,6 +30,33 @@ function clamp01(v: number): number {
   return Math.min(1, Math.max(0, v));
 }
 
+/** 🐛修复(对抗验证): d20 骰值结构性校验 —— 任何来源(AI 参数/事件脚本)的骰值都 clamp 到 [1,20]，
+ *  防止伪造 d20=100 必超暴击 / d20=0 必失手（API 纪律"禁止编造骰值"此前无机制强制） */
+function clampD20(v: number): number {
+  if (typeof v !== 'number' || Number.isNaN(v)) return 1;
+  return Math.min(20, Math.max(1, Math.floor(v)));
+}
+
+/** 关联属性推导: 显式指定优先，否则按伤害类型缺省（物理→str / 能量→int / 精神→spi / 真实→str）。
+ *  legacy resolveAttack 与管线版共用（避免两版行为分叉）。 */
+export function resolveRelevantAttribute(
+  explicit: string | undefined,
+  damageType: DamageType,
+): 'str' | 'dex' | 'con' | 'int' | 'spi' {
+  const valid = ['str', 'dex', 'con', 'int', 'spi'];
+  if (explicit && valid.includes(explicit)) {
+    return explicit as 'str' | 'dex' | 'con' | 'int' | 'spi';
+  }
+  switch (damageType) {
+    case '能量':
+      return 'int';
+    case '精神':
+      return 'spi';
+    default:
+      return 'str';
+  }
+}
+
 // ========== Step 1: 初始伤害 ==========
 
 /** 计算初始伤害 = 关联属性×10×层级系数 + 技能威力 + 武器攻击力 (世界书公式) */
@@ -246,6 +273,10 @@ export interface PipelineModifiers {
  * 返回逐步分解的伤害计算结果。
  */
 export function runDamagePipeline(input: DamagePipelineInput): CombatDamageBreakdown {
+  // 🐛修复(对抗验证): multiHitCount 是 AI 工具入参，负数/0/小数会让 Step 6b 把已 clamp≥0 的
+  // 伤害重新变负（实测 -2 段 → finalDamage=-1070 → delta_hp 反向加血）。强制 ≥1 整数。
+  const multiHitCount = Math.max(1, Math.floor(input.multiHitCount || 1));
+
   // Step 1: 初始伤害
   const initial = calcInitialDamage(
     input.relevantAttribute,
@@ -255,7 +286,7 @@ export function runDamagePipeline(input: DamagePipelineInput): CombatDamageBreak
   );
 
   // Step 2: 多段分割
-  const multiSplit = applyMultiSplit(initial.damage, input.multiHitCount);
+  const multiSplit = applyMultiSplit(initial.damage, multiHitCount);
   const afterSplit = multiSplit.perHitDamage;
 
   // Step 3: 穿透修正 (M3: + modifier 穿透，含登神压制率)
@@ -282,15 +313,18 @@ export function runDamagePipeline(input: DamagePipelineInput): CombatDamageBreak
   );
   const damageMultiplier = input.modifiers?.damageMultiplier ?? 0;
   if (damageMultiplier !== 0) {
-    afterRating = Math.floor(afterRating * (1 + damageMultiplier));
+    // 🐛修复: 减伤 modifier 累加可能 < -100%，(1+m) 需 clamp ≥ 0，否则伤害为负 → delta_hp 变成给目标加血
+    afterRating = Math.floor(afterRating * Math.max(0, 1 + damageMultiplier));
   }
 
   // Step 6a: + 额外固定伤害 (世界书: 武器附魔/品质固伤等 + M3 modifier 固伤)
+  // 注: 固伤加在单段上、Step 6b 再 × 攻击次数 —— 对齐架构 §八 (Step 6a 在 6b 之前)。
+  // 🐛修复: 固伤可为负(诅咒类)，单段伤害 clamp ≥ 0，防止负伤害经 delta_hp 反向加血
   const fixedBonus = (input.fixedDamageBonus ?? 0) + (input.modifiers?.fixedDamageBonus ?? 0);
-  const afterFixed = afterRating + fixedBonus;
+  const afterFixed = Math.max(0, afterRating + fixedBonus);
 
-  // Step 6b: × 攻击次数 (世界书: 多段/连击恢复总伤害)
-  const afterAttackCount = afterFixed * input.multiHitCount;
+  // Step 6b: × 攻击次数 (世界书: 多段/连击恢复总伤害；使用已消毒的 multiHitCount)
+  const afterAttackCount = afterFixed * multiHitCount;
 
   // Step 7: DR 修正 (M3: + modifier DR，登神压制时为负削减守方 DR)
   const drApplied = applyDR(
@@ -306,8 +340,7 @@ export function runDamagePipeline(input: DamagePipelineInput): CombatDamageBreak
     initialFormula: initial.formula,
 
     afterMultiSplit: afterSplit,
-    multiSplitInfo:
-      input.multiHitCount > 1 ? { count: input.multiHitCount, perHit: afterSplit } : undefined,
+    multiSplitInfo: multiHitCount > 1 ? { count: multiHitCount, perHit: afterSplit } : undefined,
 
     penetration: {
       originalDef: penetration.originalDef,
@@ -339,6 +372,12 @@ export function runDamagePipeline(input: DamagePipelineInput): CombatDamageBreak
 export interface AttackCheckInput {
   /** d20 骰值 */
   d20Roll: number;
+  /**
+   * 🐛修复: 第二颗 d20（层级优劣势 2d20 用）。
+   * 不提供时内部掷一颗独立均匀 d20（旧实现是 r1±3 的伪骰，优势收益偏低且有偏）。
+   * 调用方（管线版）应通过 dice.roll 事件提供，保证确定性。
+   */
+  d20Roll2?: number;
   /** 攻方层级 */
   attackerTier: number;
   /** 守方层级 */
@@ -387,25 +426,31 @@ export function performAttackCheck(input: AttackCheckInput): AttackCheckResult {
   let advantage = false;
   let disadvantage = false;
 
+  // 🐛修复: 第二骰必须是独立均匀 d20。旧实现 r2 = r1 + rand(-3..2) 与首骰强相关且期望为负，
+  // 优势几乎无收益、劣势失真。优先用调用方传入的 d20Roll2（可走 dice.roll 事件保证确定性）。
+  // 🐛修复(对抗验证): 所有骰值 clamp 到 [1,20] —— 外部可控输入不再能伪造 100/0 操纵评级。
+  const firstRoll = clampD20(input.d20Roll);
+  const secondRoll = (): number => clampD20(input.d20Roll2 ?? Math.floor(Math.random() * 20) + 1);
+
   // 层级比较决定优劣势
   if (attackerTier > defenderTier) {
     // 高T对低T → 优势 (2d20取高)
-    const r1 = input.d20Roll;
-    const r2 = Math.max(1, Math.min(20, r1 + Math.floor(Math.random() * 6 - 3))); // simulated second roll
+    const r1 = firstRoll;
+    const r2 = secondRoll();
     diceRolls = [r1, r2];
     diceUsed = Math.max(r1, r2);
     advantage = true;
   } else if (attackerTier < defenderTier) {
     // 低T对高T → 劣势 (2d20取低)
-    const r1 = input.d20Roll;
-    const r2 = Math.max(1, Math.min(20, r1 + Math.floor(Math.random() * 6 - 3))); // simulated second roll
+    const r1 = firstRoll;
+    const r2 = secondRoll();
     diceRolls = [r1, r2];
     diceUsed = Math.min(r1, r2);
     disadvantage = true;
   } else {
     // 同层级 → 1d20
-    diceRolls = [input.d20Roll];
-    diceUsed = input.d20Roll;
+    diceRolls = [firstRoll];
+    diceUsed = firstRoll;
   }
 
   // 闪避判定
@@ -431,7 +476,8 @@ export function performAttackCheck(input: AttackCheckInput): AttackCheckResult {
     diceRolls,
     advantage,
     disadvantage,
-    dodgeNegated: effectiveDodge === 0,
+    // 🐛修复: 旧实现用 effectiveDodge===0 判断，守方闪避加值本来就是 0 时会误报"闪避被无效"
+    dodgeNegated: dodgeNegatedReason !== undefined,
     dodgeNegatedReason,
     hitBonus,
     effectiveDodge,

@@ -474,3 +474,57 @@ describe('tick (BuffRegistry.tick / tickBuffs)', () => {
     expect(existing[0].remainingTime).toBe(3);
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+describe('collectDotTicks — DoT 周期伤害结算(2026-07-31)', () => {
+  it('dot 固定伤害 × 层数', async () => {
+    const { collectDotTicks } = await import('./buff-registry');
+    const ticks = collectDotTicks(
+      [makeEffect({ name: '中毒', effects: { dot: 60 }, stacks: 2 })],
+      1000,
+    );
+    expect(ticks).toEqual([{ name: '中毒', amount: 120 }]);
+  });
+
+  it('dotPercent 按 maxHp 比例 × 层数,累计封顶 100%', async () => {
+    const { collectDotTicks } = await import('./buff-registry');
+    expect(
+      collectDotTicks([makeEffect({ name: '流血', effects: { dotPercent: 0.05 } })], 2000),
+    ).toEqual([{ name: '流血', amount: 100 }]);
+    // 3 层 50% = 150% → 封顶 100%
+    expect(
+      collectDotTicks(
+        [makeEffect({ name: '重创', effects: { dotPercent: 0.5 }, stacks: 3 })],
+        1000,
+      ),
+    ).toEqual([{ name: '重创', amount: 1000 }]);
+  });
+
+  it('增益上的 dot 键不消费;非有限数/负数/未知键按 0;多 buff 各自出账', async () => {
+    const { collectDotTicks } = await import('./buff-registry');
+    const ticks = collectDotTicks(
+      [
+        makeEffect({ name: '斗气', category: '增益', effects: { dot: 999 } }),
+        makeEffect({ name: '中毒', effects: { dot: -5 } }),
+        makeEffect({
+          name: '诅咒',
+          effects: { dot: Number.NaN, dotPoison: 90, poison: 60 } as Record<string, number>,
+        }),
+        makeEffect({ name: '灼烧', effects: { dot: 40 } }),
+        makeEffect({ name: '流血', effects: { dotPercent: 0.1 } }),
+      ],
+      500,
+    );
+    expect(ticks).toEqual([
+      { name: '灼烧', amount: 40 },
+      { name: '流血', amount: 50 },
+    ]);
+  });
+
+  it('dot 与 dotPercent 同 buff 叠加', async () => {
+    const { collectDotTicks } = await import('./buff-registry');
+    expect(
+      collectDotTicks([makeEffect({ name: '腐蚀', effects: { dot: 30, dotPercent: 0.02 } })], 1000),
+    ).toEqual([{ name: '腐蚀', amount: 50 }]);
+  });
+});

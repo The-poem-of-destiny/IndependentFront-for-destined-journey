@@ -52,7 +52,7 @@ describe('applyStatusIntents', () => {
     expect(r.updated[0].name).toBe('流血');
   });
 
-  it('同源刷新时间（stacks=0）→ add patch（覆盖）+ action=refreshed', () => {
+  it('同源刷新时间（stacks=0）→ add patch（增量）+ action=refreshed', () => {
     const existing = [
       makeEffect({
         name: '流血',
@@ -78,9 +78,10 @@ describe('applyStatusIntents', () => {
     expect(r.patches).toHaveLength(1);
     expect(r.patches[0].op).toBe('add_status_effect');
     expect(r.patches[0].target).toBe('characters.hero');
-    // patch value 是 merged（stacks=2 不变，remainingTime=5 刷新）
+    // 🐛修复(对抗验证): patch value 是**增量** buffDef（stacks=0, remainingTime=5）——
+    // 落库消费方 state-manager.applyAddStatusEffect 是按名累加语义，携带 merged 总量会双计
     const patched = r.patches[0].value as StatusEffect;
-    expect(patched.stacks).toBe(2);
+    expect(patched.stacks).toBe(0);
     expect(patched.remainingTime).toBe(5);
     // updated 反映合并后的状态
     expect(r.updated).toHaveLength(1);
@@ -88,7 +89,7 @@ describe('applyStatusIntents', () => {
     expect(r.updated[0].remainingTime).toBe(5);
   });
 
-  it('同源增层（stacks>0）→ add patch（覆盖）+ action=stacked', () => {
+  it('同源增层（stacks>0）→ add patch（增量）+ action=stacked', () => {
     const existing = [
       makeEffect({
         name: '流血',
@@ -113,9 +114,12 @@ describe('applyStatusIntents', () => {
     expect(r.results[0].action).toBe('stacked');
     expect(r.patches).toHaveLength(1);
     expect(r.patches[0].op).toBe('add_status_effect');
+    // 🐛修复(对抗验证): patch value 是增量（本次施加 2 层），累加语义的落库方会得到 1+2=3
     const patched = r.patches[0].value as StatusEffect;
-    expect(patched.stacks).toBe(3); // 1+2
+    expect(patched.stacks).toBe(2);
     expect(patched.remainingTime).toBe(5);
+    // updated 反映合并后的状态（1+2=3）
+    expect(r.updated[0].stacks).toBe(3);
   });
 
   it('多 intent 串行 fold：先新增后叠加', () => {
@@ -218,11 +222,13 @@ describe('removeStatusIntents', () => {
     ];
     const intents = [{ target: 'hero', buffIdOrName: '幽怨之剑.流血' }];
     const r = removeStatusIntents(existing, intents);
+    // 🐛修复(对抗验证): patch value 用 {name}（state-manager 契约，string 会在落库时抛错），
+    // 按实际移除的 effect 逐名生成
     expect(r.patches).toEqual([
       {
         op: 'remove_status_effect',
         target: 'characters.hero',
-        value: '幽怨之剑.流血',
+        value: { name: '流血' },
       },
     ]);
     expect(r.updated).toHaveLength(1);
@@ -258,12 +264,13 @@ describe('removeStatusIntents', () => {
     expect(r.updated[0].name).toBe('灼烧');
   });
 
-  it('移除不存在的 buffId → patch 仍生成，updated 不变', () => {
+  it('移除不存在的 buffId → 不生成 patch，updated 不变', () => {
     const existing = [makeEffect({ name: '流血', sourceKey: '剑' })];
     const intents = [{ target: 'hero', buffIdOrName: '剑.灼烧' }];
     const r = removeStatusIntents(existing, intents);
-    // 仍生成 remove patch（state-manager 自行判断实际有没有匹配）
-    expect(r.patches).toHaveLength(1);
+    // 🐛修复(对抗验证): 无命中不产 patch（旧行为发 string value 的 patch，落库时
+    // state-manager 因缺 value.name 直接抛错）
+    expect(r.patches).toHaveLength(0);
     expect(r.updated).toHaveLength(1);
     expect(r.updated[0].name).toBe('流血');
   });

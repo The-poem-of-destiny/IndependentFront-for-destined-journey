@@ -32,10 +32,15 @@ import type {
   StatusEffect,
   CharacterState,
 } from './types';
-import { getHitRating, INTENTION_CONFIGS } from './types';
+import { getHitRating, INTENTION_CONFIGS, HIT_RATINGS } from './types';
 
 import { resolveIntention, parseIntentionFromInput, checkNonLethal } from './combat-intention';
-import { runDamagePipeline, performAttackCheck, checkStatusTrigger } from './combat-damage';
+import {
+  runDamagePipeline,
+  performAttackCheck,
+  checkStatusTrigger,
+  resolveRelevantAttribute,
+} from './combat-damage';
 import { rollInitiative, consumeAttack, consumeAction } from './combat-turn';
 import { buildFullActionPanel, buildCombatSummary } from './combat-panel';
 
@@ -78,8 +83,13 @@ export interface AttackInput {
   costs?: { hp?: number; mp?: number; sp?: number };
   /** d20 骰值 (攻击检定) */
   d20Attack: number;
-  /** d20 骰值 (意图判定) */
+  /** 🐛修复: 第二颗攻击 d20（层级优劣势 2d20 用；不提供时引擎内部掷独立均匀 d20） */
+  d20Attack2?: number;
+  /** d20 骰值 (意图判定·攻方) */
   d20Intention?: number;
+  /** 🐛修复: d20 骰值 (意图判定·守方)。旧实现攻守共用一颗骰(管线版)或守方随机(legacy)，
+   *  对抗公式两侧的 d20 会互相抵消 → 同层级下对抗必败。规范要求双方各自独立掷骰。 */
+  d20IntentionDefender?: number;
   /** d20 骰值 (状态触发判定) */
   d20Status?: number;
 }
@@ -110,14 +120,22 @@ export function resolveAttack(input: AttackInput): CombatActionResult {
   // 确定伤害计算参数 (使用默认值或传入值)
   const weaponAtk = input.weaponAtk ?? attacker.weaponAtk;
   const skillPower = input.skillPower ?? 0;
-  const relAttrValue = input.relevantAttributeValue ?? attacker.attributes.str;
   const dmgType: DamageType = input.damageType ?? '物理';
+  // 🐛修复(对抗验证): 与管线版一致 —— 关联属性可显式指定，缺省按伤害类型推导
+  // （物理→str/能量→int/精神→spi），法系攻击不再错用力量算初伤。
+  const relAttrName = resolveRelevantAttribute(input.relevantAttribute, dmgType);
+  const relAttrValue =
+    input.relevantAttributeValue ?? attacker.attributes[relAttrName] ?? attacker.attributes.str;
   const multiHit = input.multiHitCount ?? 1;
 
   // ===== Step 1: 意图解析 + 判定 =====
   const intentionLevel: IntentionLevel = input.userInput
     ? parseIntentionFromInput(input.userInput)
     : '常规';
+
+  // 🐛修复: "打晕/活捉"等关键词解析为非致死意图时，必须同步置 nonLethal 标记，
+  // 否则叙事承诺"HP锁1昏迷"而引擎照样打死（关键词解析与 checkNonLethal 此前无联动）
+  const nonLethal = (input.nonLethal ?? false) || intentionLevel === '非致死';
 
   const isShakenOrWorse =
     defender.morale === 'shaken' || defender.morale === 'wavering' || defender.morale === 'routing';
@@ -129,9 +147,12 @@ export function resolveAttack(input: AttackInput): CombatActionResult {
     defenderIncapacitated: !defender.canAct,
     defenderMorale: defender.morale,
     isExecutionIntent: intentionLevel === '抹杀' || intentionLevel === '概念',
-    nonLethal: input.nonLethal ?? false,
-    attackerD20: input.d20Intention ?? 10,
-    defenderD20: Math.floor(Math.random() * 20) + 1, // deterministic alternative would be better
+    nonLethal,
+    // 🐛修复(对抗验证): 攻方骰缺省也掷真实 d20（旧常量 10 使缺省路径下高难度意图恒败），
+    // 守方骰优先用外部提供值（支持骰池/确定性测试），缺省保持随机
+    attackerD20: input.d20Intention ?? Math.floor(Math.random() * 20) + 1,
+    // 🐛修复: 守方骰优先用外部提供值（支持骰池/确定性测试），缺省保持原随机行为
+    defenderD20: input.d20IntentionDefender ?? Math.floor(Math.random() * 20) + 1,
   });
 
   // ===== Step 2: 攻击检定 =====
@@ -142,12 +163,20 @@ export function resolveAttack(input: AttackInput): CombatActionResult {
 
   const attackCheck = performAttackCheck({
     d20Roll: input.d20Attack,
+    d20Roll2: input.d20Attack2,
     attackerTier: attacker.tier,
     defenderTier: defender.tier,
     hitBonus: attacker.hitBonus,
     defenderDodge: defender.dodgeBonus,
     dodgeNegated,
   });
+
+  // 🐛修复: 处决意图承诺"评级保底为暴击(1.3)"，此前只是 extraEffects 字符串从未生效
+  let effectiveRating = attackCheck.rating;
+  if (intention.level === '处决' && effectiveRating.coefficient < 1.3) {
+    const critRating = HIT_RATINGS.find((r) => r.level === '暴击');
+    if (critRating) effectiveRating = critRating;
+  }
 
   // ===== Step 3: 8 步伤害管线 =====
   const damageBreakdown = runDamagePipeline({
@@ -160,7 +189,7 @@ export function resolveAttack(input: AttackInput): CombatActionResult {
     penetrationRate: attacker.penetration,
     damageType: dmgType,
     defenderAttributes: defender.attributes,
-    ratingCoefficient: attackCheck.rating.coefficient,
+    ratingCoefficient: effectiveRating.coefficient,
     intentionCoefficient: intention.coefficient,
     drRate: defender.dr,
     isClusterTarget: false, // Phase 6c
@@ -169,8 +198,8 @@ export function resolveAttack(input: AttackInput): CombatActionResult {
 
   // ===== Step 4: 非致死检查 =====
   const nonLethalResult = checkNonLethal({
-    nonLethal: input.nonLethal ?? false,
-    ratingCoefficient: attackCheck.rating.coefficient,
+    nonLethal,
+    ratingCoefficient: effectiveRating.coefficient,
     finalDamage: damageBreakdown.finalDamage,
     currentHp: defender.hp,
   });
@@ -180,25 +209,63 @@ export function resolveAttack(input: AttackInput): CombatActionResult {
 
   // ===== Step 5: 状态施加判定 =====
   const statusApplied: CombatActionResult['statusApplied'] = [];
-  if (attackCheck.rating.coefficient >= 1.3) {
+  if (effectiveRating.coefficient >= 1.3) {
     // 暴击必触发 — 此处仅为示例
     statusApplied.push({
-      name: `${attackCheck.rating.level}冲击`,
+      name: `${effectiveRating.level}冲击`,
       duration: 1,
       effect: '目标下一次闪避-2',
     });
   }
+  if (nonLethalResult.unconscious) {
+    statusApplied.push({
+      name: '昏迷',
+      duration: 2,
+      effect: '失去行动能力，闪避无效',
+    });
+  }
 
   // ===== Step 6: StatePatch 生成 =====
+  // 🐛修复: patch 必须与 finalHp 一致。旧实现非致死锁血时面板显示 HP=1、
+  // patch 却按全额伤害扣 → 落库后角色死亡。统一改为 amount = finalHp - 当前HP。
   const patches: StatePatch[] = [
     {
       op: 'delta_hp',
       target: `characters.${defender.characterId}`,
-      amount: -damageBreakdown.finalDamage,
+      // 🐛修复(对抗验证): 战斗产生的 delta_hp 永不为正（防御性下限，防止任何路径反向加血）
+      amount: Math.min(0, finalHp - defender.hp),
       metadata: { source: 'combat', attackerId: attacker.characterId },
     },
   ];
+  if (nonLethalResult.unconscious) {
+    patches.push({
+      op: 'add_status_effect',
+      target: `characters.${defender.characterId}`,
+      value: {
+        name: '昏迷',
+        description: '非致死攻击击昏，失去行动能力',
+        category: '减益',
+        stacks: 1,
+        remainingTime: 2,
+        timeUnit: '回合',
+        source: '减益-战斗;休息或治疗解除',
+        sourceKey: '战斗',
+        effects: {},
+        lifecycle: '战斗',
+      },
+      metadata: { source: 'combat-nonlethal' },
+    });
+  }
 
+  // 🐛修复: costs.hp 此前从不生成 patch（HP 代价技能白嫖），与 mp/sp 对齐
+  if (input.costs?.hp) {
+    patches.push({
+      op: 'delta_hp',
+      target: `characters.${attacker.characterId}`,
+      amount: -input.costs.hp,
+      metadata: { source: 'combat_skill_cost' },
+    });
+  }
   if (input.costs?.mp) {
     patches.push({
       op: 'delta_mp',
@@ -247,14 +314,14 @@ export function resolveAttack(input: AttackInput): CombatActionResult {
     hitBonus: attackCheck.hitBonus,
     dodgeBonus: attackCheck.effectiveDodge,
     checkValue: attackCheck.checkValue,
-    ratingName: attackCheck.rating.level,
-    ratingCoeff: attackCheck.rating.coefficient,
+    ratingName: effectiveRating.level,
+    ratingCoeff: effectiveRating.coefficient,
     advantage: attackCheck.advantage,
     disadvantage: attackCheck.disadvantage,
     statusApplied: statusApplied.map((s) => ({
       ...s,
       triggered: true,
-      reason: `暴击(≥1.3)必触发`,
+      reason: s.name === '昏迷' ? '非致死锁血击昏' : `暴击(≥1.3)必触发`,
     })),
     isDead,
     nonLethalNote: nonLethalResult.narrative || undefined,
@@ -265,7 +332,7 @@ export function resolveAttack(input: AttackInput): CombatActionResult {
     attackerName: attacker.name,
     defenderName: defender.name,
     damage: damageBreakdown.finalDamage,
-    ratingName: attackCheck.rating.level,
+    ratingName: effectiveRating.level,
     isDead,
   });
 
@@ -297,7 +364,7 @@ export function resolveAttack(input: AttackInput): CombatActionResult {
       hitBonus: attackCheck.hitBonus,
       dodgeBonus: attackCheck.effectiveDodge,
       checkValue: attackCheck.checkValue,
-      rating: attackCheck.rating,
+      rating: effectiveRating,
     },
     damage: damageBreakdown,
     finalHp,
@@ -333,10 +400,16 @@ export function resolveDefend(
         value: {
           name: '防御姿态',
           description: '本回合防御+50%，闪避+3',
+          // 🐛修复: 补齐 category/timeUnit/lifecycle —— 缺 category 时 tickBuffs 两个阶段都
+          // 不处理该 buff（round.start 只 tick 增益、round.end 只 tick 减益/特殊），永不过期
+          category: '增益',
           stacks: 1,
           remainingTime: 1,
+          timeUnit: '回合',
           source: 'combat-defend',
+          sourceKey: '战斗',
           effects: { defense: 0.5, dodge: 3 },
+          lifecycle: '战斗',
         },
       },
     ],
@@ -356,10 +429,12 @@ export function resolveFlee(
     return { success: false, description: `${characterId} 不在战斗中`, patches: [] };
   }
 
-  // 逃跑检定: 敏捷 + d20 vs DC 15 + 敌方平均层级
-  const avgEnemyTier = combat.participants
-    .filter((p) => p.side === 'enemy')
-    .reduce((sum, p, _i, arr) => sum + p.tier / arr.length, 0);
+  // 逃跑检定: 敏捷 + d20 vs DC = 15 + 对方平均层级×2
+  // 🐛修复: 旧实现固定按 side==='enemy' 算 DC —— 敌方单位逃跑时错拿己方层级当阻拦方。
+  // 改为「与逃跑者敌对的一方」的平均层级。
+  const opponents = combat.participants.filter((p) => p.side !== participant.side);
+  const avgEnemyTier =
+    opponents.length > 0 ? opponents.reduce((sum, p) => sum + p.tier, 0) / opponents.length : 0;
 
   const dc = 15 + Math.floor(avgEnemyTier * 2);
   const roll = participant.attributes.dex + d20Roll;
@@ -477,6 +552,9 @@ export function characterToCombatParticipant(
     weaponAtk: weapon?.stats?.atk ?? 0,
     side,
     canAct: char.hp > 0,
+    // 🐛修复(2026-07-31 定向压测): clusterCount 此前不拷贝 —— 管线 Step 8(×1.5)与结算 EXP 衰减
+    // 都从 participant 读该字段,真实链路恒 undefined,集群机制只在手工构造 participant 的单测里活着
+    clusterCount: (char as CharacterState & { clusterCount?: number }).clusterCount,
     ...overrides,
   };
 }

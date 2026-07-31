@@ -442,10 +442,19 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
             enum: ['物理', '能量', '精神', '真实'],
             description: '伤害类型，缺省=物理',
           },
+          relevantAttribute: {
+            type: 'string',
+            enum: ['str', 'dex', 'con', 'int', 'spi'],
+            description: '伤害公式的关联属性（缺省按伤害类型推导: 物理→str, 能量→int, 精神→spi）',
+          },
           skillName: { type: 'string', description: '技能名（用技能时填）' },
           skillPower: { type: 'integer', description: '技能威力' },
           weaponName: { type: 'string', description: '武器名' },
-          multiHitCount: { type: 'integer', description: '多段攻击次数，缺省 1' },
+          multiHitCount: {
+            type: 'integer',
+            minimum: 1,
+            description: '多段攻击次数，缺省 1（引擎强制 ≥1）',
+          },
           nonLethal: { type: 'boolean', description: '非致死标记' },
           costs: {
             type: 'object',
@@ -458,11 +467,28 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
           },
           d20Attack: {
             type: 'integer',
-            description: '攻击检定 d20（必须先调 roll_d20 取真实值）',
+            minimum: 1,
+            maximum: 20,
+            description: '攻击检定 d20（必须先调 roll_d20 取真实值；引擎 clamp 到 1-20）',
+          },
+          d20Attack2: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 20,
+            description:
+              '攻击检定第二颗 d20（攻守层级不同=优势/劣势 2d20 时必填，同样先调 roll_d20）',
           },
           d20Intention: {
             type: 'integer',
-            description: '意图对抗 d20（需对抗的层级才填：战术/机能/核心/抹杀/概念）',
+            minimum: 1,
+            maximum: 20,
+            description: '攻方意图对抗 d20（需对抗的层级才填：战术/机能/核心/抹杀/概念）',
+          },
+          d20IntentionDefender: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 20,
+            description: '守方意图对抗 d20（与 d20Intention 配对，各自独立掷骰，禁止复用同一颗）',
           },
         },
         required: ['attackerId', 'defenderId', 'd20Attack'],
@@ -620,7 +646,8 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
           },
           effects: {
             type: 'object',
-            description: '数值化效果（如 {defense:0.5, dodge:3}）',
+            description:
+              '数值化效果。引擎仅消费以下键,其余键无任何效果: hit(命中±) / dodge(闪避±) / defense(防御比例±,0.5=+50%) / dr(伤害减免率±) / penetration(穿透率±) / damage(伤害乘区±,0.2=+20%) / fixedDamage(固伤±) / dot(每回合结束扣固定 HP,×层数,仅减益/特殊) / dotPercent(每回合结束扣 maxHp 比例,0.05=5%,×层数,仅减益/特殊)。例: 中毒 {dot:60},重甲流血 {dotPercent:0.05},防御姿态 {defense:0.5, dodge:3}',
           },
         },
         required: ['target', 'name', 'category', 'sourceKey'],
@@ -1405,11 +1432,14 @@ async function dispatchCombatTool(
         skillPower: args.skillPower,
         weaponName: args.weaponName,
         damageType: (args.damageType ?? '物理') as DamageType,
+        relevantAttribute: args.relevantAttribute,
         multiHitCount: args.multiHitCount,
         nonLethal: args.nonLethal,
         costs: args.costs,
         d20Attack: args.d20Attack,
+        d20Attack2: args.d20Attack2,
         d20Intention: args.d20Intention,
+        d20IntentionDefender: args.d20IntentionDefender,
       };
       const pipelineCtx = buildPipelineCtx(ctx);
       const result = await resolveAttackPipeline(input, pipelineCtx);
@@ -1485,10 +1515,11 @@ async function dispatchCombatTool(
         category: args.category,
         ...(args.sourceKey !== undefined && { sourceKey: args.sourceKey }),
         ...(args.stacks !== undefined && { stacks: args.stacks }),
-        ...(args.duration !== undefined && {
-          remainingTime: args.duration,
-          timeUnit: '回合' as const,
-        }),
+        // 🐛修复(对抗验证): duration 缺省时显式置 remainingTime:null（永久/直至解除）——
+        // 缺省 undefined 会被 tickBuffs 算出 NaN 递减污染数据
+        ...(args.duration !== undefined
+          ? { remainingTime: args.duration, timeUnit: '回合' as const }
+          : { remainingTime: null }),
         ...(args.lifecycle !== undefined && { lifecycle: args.lifecycle }),
         ...(args.divinity !== undefined && { divinity: args.divinity }),
         ...(args.effects !== undefined && { effects: args.effects }),
@@ -1543,6 +1574,101 @@ async function dispatchCombatTool(
     }
 
     default:
-      throw new Error(`executeCombatToolCall: 未知 combat 工具「${name}」`);
+      // 🐛修复: combat agent 的工具清单（getToolsForAgent('combat')）包含 roll_d20/roll_d100/
+      // roll_dice/get_character/get_hp_percent/get_inventory/status_query 等通用工具，而
+      // combat-runner 把**所有**工具调用都路由到本函数。旧实现 default 直接抛「未知 combat 工具」，
+      // 导致 agent 按纪律先调 roll_d20 取骰值时必然报错（只能编造骰值或卡死）。
+      //
+      // 对抗验证补充（三点）:
+      //  1. 白名单委托 —— 只放行 combat 通道声明的通用工具，防模型幻觉调用 craft_settle 等
+      //     未声明工具经 executeToolCall 真实执行并落库（绕过 AGENT_TOOL_MAP.combat 边界）。
+      //  2. 按名→id 映射 —— get_character/get_hp_percent/get_inventory 按 c.id 查角色，而
+      //     combat agent 依铁律1 只有角色名；不映射则这三个工具必然查无此人。
+      //  3. 战中实时数据 —— status_query/get_hp_percent 的目标在参战者中时，直接读
+      //     combatState.participants（战中 hp/buff 只同步到那里，deps.characters 是开战前快照）。
+      return await executeGeneralToolForCombat(name, args, ctx);
   }
+}
+
+/** combat 通道放行的通用工具白名单（= AGENT_TOOL_MAP.combat 中除 combat 专属与 status_apply/remove 外的部分） */
+const COMBAT_GENERAL_TOOL_WHITELIST = new Set([
+  'roll_d20',
+  'roll_d100',
+  'roll_dice',
+  'get_character',
+  'get_hp_percent',
+  'get_inventory',
+  'status_query',
+]);
+
+/** default 委托：白名单校验 + 名→id 映射 + 战中数据优先（见 dispatchCombatTool default 注释） */
+async function executeGeneralToolForCombat(
+  name: string,
+  args: Record<string, any>,
+  ctx: CombatToolContext,
+): Promise<any> {
+  if (!COMBAT_GENERAL_TOOL_WHITELIST.has(name)) {
+    throw new Error(`executeCombatToolCall: 工具「${name}」不在 combat 通道白名单内`);
+  }
+
+  // 按名找参战者（combat agent 只有名字）；不在战斗中的角色回落 deps.characters 按名查
+  const findParticipantByName = (n: string) => ctx.combat?.participants?.find((p) => p.name === n);
+  const findCharByName = (n: string) => ctx.characters.find((c) => c.name === n);
+
+  // 战中实时数据拦截: status_query / get_hp_percent 优先读参战者（战中同步的真源）。
+  // 返回形状对齐 executeToolCall 的原生实现，AI 侧无感知差异。
+  const targetName: string | undefined =
+    typeof args.target === 'string'
+      ? args.target
+      : typeof args.characterId === 'string'
+        ? args.characterId
+        : undefined;
+  if (targetName) {
+    const p = findParticipantByName(targetName);
+    if (p) {
+      if (name === 'get_hp_percent') {
+        const percent = p.maxHp > 0 ? Math.round((p.hp / p.maxHp) * 100) : 0;
+        return { characterId: targetName, hpPercent: percent, hp: p.hp, maxHp: p.maxHp };
+      }
+      if (name === 'status_query') {
+        const effects = p.statusEffects ?? [];
+        const query: string | undefined = args.buffIdOrName;
+        if (!query) {
+          return {
+            target: targetName,
+            found: true,
+            characterName: p.name,
+            count: effects.length,
+            statusEffects: effects,
+          };
+        }
+        // 与原生实现同语义: 含点→按 buffId 精确匹配；裸 name→匹配所有同名聚合层数
+        const hasDot = query.includes('.');
+        const matched = hasDot
+          ? effects.filter((e) => (e.sourceKey ? `${e.sourceKey}.${e.name}` : e.name) === query)
+          : effects.filter((e) => e.name === query);
+        if (matched.length === 0) {
+          return { target: targetName, has: false, query, stacks: 0 };
+        }
+        const totalStacks = matched.reduce((s, e) => s + (e.stacks ?? 1), 0);
+        return { target: targetName, has: true, query, stacks: totalStacks, matched };
+      }
+    }
+  }
+
+  // 名→id 映射后委托通用执行器（get_character/get_inventory 及回落场景）
+  const mapped: Record<string, any> = { ...args };
+  if (typeof mapped.characterId === 'string') {
+    const c = findCharByName(mapped.characterId);
+    if (c) mapped.characterId = c.id;
+  }
+  if (typeof mapped.target === 'string') {
+    const c = findCharByName(mapped.target);
+    if (c) mapped.target = c.id;
+  }
+  return await executeToolCall(name, mapped, {
+    characters: ctx.characters,
+    variables: ctx.variables,
+    saveId: ctx.saveId,
+  });
 }

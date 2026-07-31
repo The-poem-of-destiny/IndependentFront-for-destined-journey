@@ -289,6 +289,12 @@ collect_attacker_mods 事件
 
 **铁律**：增益在 `combat.round.start` 结算，减益在 `combat.round.end` 结算。
 
+> **实现说明（2026-07-31）**: DoT 周期伤害已接线 —— `buff-registry.collectDotTicks`（纯函数）+
+> runner `tickRoundBuffs`（回合结束、时长递减前逐 buff 结算）。可消费键 `dot`（固定值 ×stacks）/
+> `dotPercent`（maxHp 比例 ×stacks，封顶 1），仅减益/特殊生效；出 `delta_hp` patch
+> （`source=combat-dot-tick`）+ CombatEvent `dot_tick`；HP 归零置 `canAct=false`。
+> 此前该结算步为空承诺，AI 施加的毒/流血是纯叙事 buff（第六轮定向压测实锤）。
+
 ### 5.5 layer 处理
 
 `layers` 作为 handler 的**自由参数**，由脚本自己读写。架构不规定 layer 的语义，由 buff 类型决定：
@@ -342,27 +348,31 @@ collect_attacker_mods 事件
 
 ### 6.3 攻击行动子流程（管道视角）
 
+> 🐛 2026-07-31 修正：`collect_defender_mods` 从「hit 之后」提前到「攻击检定之前」。
+> 原顺序下守方「检定·闪避」modifier 永远晚于攻击检定（fold 出的 dodgeBonus 是死代码），
+> 与 §4.4「检定 → 累加进命中/闪避/先攻修正」冲突。现攻/守 mods 均在检定前收集（miss 也收集）。
+
 ```
 combat.attack.request (AI→代码)
   payload: 攻方/守方/技能/意图层级(AI已判定)/消耗
      │
-     │ 【意图对抗检定】（代码，纯数值）
-     │
-combat.dice.roll (代码→脚本)  ← 随机数事件，脚本可改骰值
+     │ 【意图对抗检定】（代码，纯数值；攻/守各自独立 d20，守方骰缺省走 dice.roll 事件）
      │
 combat.attack.collect_attacker_mods (代码→脚本)
   攻方装备声明 modifier（5 戒指在这里）
+     │
+combat.attack.collect_defender_mods (代码→脚本)
+  守方装备声明 modifier（2 盾甲在这里；闪避检定 mod 需在检定前生效）
+     │
+combat.dice.roll (代码→脚本)  ← 随机数事件，脚本可改骰值（优劣势时含第二颗 d20）
      │
      │ 【攻击检定】d20+优劣势+闪避 → 评级（代码）
      │
 combat.attack.hit / .miss (代码→脚本)
   命中分支：挂 buff 类脚本在 hit 触发
      │
-combat.attack.collect_defender_mods (代码→脚本)
-  守方装备声明 modifier（2 盾甲在这里）
-     │
      │ 【8 步伤害管线】（代码，纯数值）
-     │ 【生死判定 + HP 扣减】（代码，红线）
+     │ 【非致死判定 + 生死判定 + HP 扣减】（代码，红线）
      │
 combat.attack.damage (代码→AI)
   传最终伤害+HP 变更

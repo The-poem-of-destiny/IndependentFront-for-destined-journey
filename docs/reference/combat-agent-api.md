@@ -98,18 +98,24 @@
   defenderId:      string   目标角色名                    (必)
   intentionInput:  string   用户原始输入（意图解析用，如"砍向要害"）(可选，缺省='常规')
   damageType:      enum['物理','能量','精神','真实']        (可选，缺省='物理')
+  relevantAttribute: enum['str','dex','con','int','spi']   (可选，缺省按伤害类型推导:
+                                                            物理→str, 能量→int, 精神→spi)
   skillName:       string   技能名（用技能时填）           (可选)
   skillPower:      integer  技能威力                       (可选)
   weaponName:      string   武器名                         (可选)
   multiHitCount:   integer  多段攻击次数（可选，缺省1）
-  nonLethal:       boolean  非致死标记                     (可选)
-  costs:           object{hp?,mp?,sp?}  技能消耗           (可选)
+  nonLethal:       boolean  非致死标记                     (可选；意图关键词解析为"非致死"时自动置位)
+  costs:           object{hp?,mp?,sp?}  技能消耗           (可选；hp 消耗同样生成 delta_hp patch)
   d20Attack:       integer  攻击检定 d20                   (必) ← 先调 roll_d20 拿
-  d20Intention:    integer  意图对抗 d20（需对抗的层级用） (可选)
+  d20Attack2:      integer  攻击检定第二颗 d20             (可选；攻守层级不同=优/劣势 2d20 时必填,
+                                                            同样先调 roll_d20；缺省引擎掷独立均匀 d20)
+  d20Intention:    integer  攻方意图对抗 d20（需对抗的层级用） (可选)
+  d20IntentionDefender: integer 守方意图对抗 d20           (可选；与 d20Intention 各自独立掷骰,
+                                                            禁止复用同一颗；缺省走 dice.roll 事件掷)
 返回: CombatActionResult（§4.1 完整字段）
 底层: resolveAttackPipeline(input, ctx) —— 走 19 event 攻击链
 时机: 每次攻击行动；返回值含 rating/damage/finalHp/isDead/patches
-红线: HP 扣减/生死由代码结算；AI 只读结果做叙事
+红线: HP 扣减/生死由代码结算；AI 只读结果做叙事。非致死锁血时 patch 与 finalHp 一致（锁1+昏迷）。
 ```
 > ⚠️ `d20Attack` 必须先调 `roll_d20` 取真实骰值，**禁止 AI 编造骰值**（对齐现有工具纪律）。
 
@@ -178,10 +184,15 @@
   duration:  integer  持续回合（战斗型有效，可选）
   lifecycle: enum['战斗','持续','触发','条件']       (可选)
   divinity:  integer  登神等级 0-8（可选，神位级 buff 才填）
-  effects:   object   数值化效果 {defense:0.5, dodge:3, ...}（可选）
+  effects:   object   数值化效果（可选）。引擎仅消费以下键，其余键静默无效:
+             hit/dodge/defense/dr/penetration/damage/fixedDamage（战斗修正，collectBuffCombatMods）
+             dot（每回合结束扣固定 HP，×stacks）/ dotPercent（每回合结束扣 maxHp 比例，×stacks，封顶1）
+             —— DoT 仅在减益/特殊上结算（架构 §5.4），2026-07-31 接线（collectDotTicks + runner 回合 tick）
 返回: { action:'added'|'refreshed'|'stacked', buffId, patches }
 底层: applyStatusIntents → applyBuff（同源刷新+增层 / 异源独立，§6.3）
 红线: buff id 去重代码做；AI 只声明 buff 描述
+DoT 结算: 回合结束（时长递减前）按在场减益逐 buff 出 delta_hp patch（source=combat-dot-tick），
+         HP clamp≥0、归零置 canAct=false；emit CombatEvent `dot_tick`（unit/ticks/hpAfter）
 ```
 
 #### `status_remove` — 移除 buff
@@ -207,7 +218,7 @@
 
 | 工具 | 用途 | 战斗场景 |
 |------|------|---------|
-| `roll_d20` | d20 + 加值/优劣势 | 攻击检定、意图对抗、逃跑、战意低阈值检定 |
+| `roll_d20` | d20 + 加值/优劣势 | 攻击检定、意图对抗（攻/守各一颗）、逃跑（战意低阈值 d20 由引擎在管线内经 `combat.dice.roll` (purpose='morale') 自掷，AI 无需传入） |
 | `roll_d100` | d100 | 百分比概率判定 |
 | `roll_dice` | 任意公式（2d6/3d8+2） | 伤害随机、属性随机 |
 
@@ -239,8 +250,8 @@
 | 7 | `combat.attack.request` | AI→代码 | AI 调 `combat_attack` 触发 | attackerId / defenderId / intentionKeywords / nonLethal |
 | 8 | `combat.dice.roll` | 代码→脚本 | （AI 不直接处理）脚本可改骰值（幸运/诅咒） | dice[] / sides / purpose |
 | 9 | `combat.attack.collect_attacker_mods` | 代码→脚本 | （AI 不直接处理）攻方装备声明 modifier | attackerId / defenderId / damageType |
-| 10 | `combat.attack.hit` / `.miss` | 代码→脚本 | （AI 不直接处理）挂 buff 类脚本在此触发 | rating / checkValue |
-| 11 | `combat.attack.collect_defender_mods` | 代码→脚本 | （AI 不直接处理）守方装备声明 modifier | 同 9 |
+| 10 | `combat.attack.collect_defender_mods` | 代码→脚本 | （AI 不直接处理）守方装备声明 modifier（2026-07-31 起在攻击检定**之前**收集，闪避检定 mod 才能生效；miss 也收集） | 同 9 |
+| 11 | `combat.attack.hit` / `.miss` | 代码→脚本 | （AI 不直接处理）挂 buff 类脚本在此触发 | rating / checkValue |
 | 12 | `combat.attack.damage` | 代码→AI | **AI 消费**：救场/濒死保护/状态施加决策点 | damage / finalHp / isDead / breakdown |
 | 13 | `combat.attack.result` | 代码→AI | **AI 消费**：完整面板 → 生成战斗叙事 | finalHp / isDead / moraleOutcome / rating |
 | 14 | `combat.action.use` | AI→代码 | AI 调 block/move/focus/useSkill/useItem 触发 | characterId / action |

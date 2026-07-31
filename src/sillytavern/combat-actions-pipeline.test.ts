@@ -194,7 +194,9 @@ describe('combat-actions-pipeline', () => {
       expect(effect.effects.hit).toBe(5);
       expect(effect.source).toBe('combat-focus');
       expect(effect.sourceKey).toBe('战斗');
-      expect(effect.remainingTime).toBe(1);
+      // 🐛修复(真机压测): rt=1 在回合 wrap 的增益 tick 就过期，专注常在"下次攻击"发生前
+      // 已消失 → rt=2 保证跨一次回合边界，实际消耗由 runner 在攻击结算后执行（一次性）
+      expect(effect.remainingTime).toBe(2);
     });
   });
 

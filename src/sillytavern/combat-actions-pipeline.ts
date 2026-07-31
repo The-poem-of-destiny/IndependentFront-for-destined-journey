@@ -138,7 +138,10 @@ export async function resolveFocus(
     description: '下次攻击命中+5',
     category: '增益',
     stacks: 1,
-    remainingTime: 1,
+    // 🐛修复(真机压测): rt=1 会在回合 wrap 的增益 tick 就过期 —— 专注常常在"下次攻击"
+    // 发生前已消失（S10 实测全程未生效）。改 rt=2 保证跨一次回合边界存活，
+    // 实际消耗由 combat-runner 在攻击结算后执行（一次性 buff，用掉即移除）。
+    remainingTime: 2,
     timeUnit: '回合',
     source: 'combat-focus',
     sourceKey: '战斗',

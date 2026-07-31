@@ -148,18 +148,19 @@ export function applyBuff(existing: StatusEffect[], newEffect: StatusEffect): Bu
  * 按 buffId 或裸 name 移除 buff（架构 §5.2 实例标识 + §5.6 状态交互）。
  *
  * - 入参精确等于某 buffId → 移除该实例
- * - 入参是裸 name（无 `.` 前缀）→ 移除所有同名 buff（覆盖所有 sourceKey 前缀的实例）
+ * - 否则按裸 name 匹配 → 移除所有同名 buff（覆盖所有 sourceKey 前缀的实例）
  *
- * 返回 { remaining, removed }（新数组，不改原数组）。
+ * 🐛修复(两轮): ①旧实现用 `includes('.')` 判断裸名，name 本身带点（如 "Lv.2 强化"）会被
+ * 误判成 buffId 而永远删不掉；②对抗验证发现"精确命中优先"在裸名实例与前缀实例共存时
+ * 只删裸名实例。最终采用并集匹配: buffId === 入参 或 name === 入参 都视为命中 ——
+ * 裸 name 删所有同名（含带前缀实例），完整 buffId 精确删该实例，带点名字也能删。
  */
 export function removeBuff(existing: StatusEffect[], buffIdOrName: string): BuffRemoveResult {
-  const containsDot = buffIdOrName.includes('.');
   const removed: StatusEffect[] = [];
   const remaining: StatusEffect[] = [];
 
   for (const e of existing) {
-    const id = buffIdOf(e);
-    const hit = containsDot ? id === buffIdOrName : e.name === buffIdOrName;
+    const hit = buffIdOf(e) === buffIdOrName || e.name === buffIdOrName;
     if (hit) removed.push(e);
     else remaining.push(e);
   }
@@ -199,8 +200,14 @@ export function tickBuffs(existing: StatusEffect[], phase: TickPhase): BuffTickR
       continue;
     }
 
-    // 战斗型但 remainingTime=null（理论上不该出现，但兜底：原样保留）
-    if (e.remainingTime === null) {
+    // 战斗型但 remainingTime 非法（null 已排除；undefined/NaN 来自未传 duration 的
+    // status_apply —— 🐛修复(对抗验证): undefined-1=NaN 会把 buff 变成永生且污染数据，
+    // 一律视为"无时限"原样保留，不做递减）
+    if (
+      e.remainingTime === null ||
+      typeof e.remainingTime !== 'number' ||
+      Number.isNaN(e.remainingTime)
+    ) {
       remaining.push(e);
       continue;
     }
@@ -214,6 +221,105 @@ export function tickBuffs(existing: StatusEffect[], phase: TickPhase): BuffTickR
   }
 
   return { remaining, expired };
+}
+
+// ═══════════════════════════════════════════════════════════
+// buff effects → 战斗数值折叠（🐛修复: 防御姿态/专注等 buff 此前无任何消费方）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * buff `effects` 对象里引擎认识的数值键（对齐 combat-agent-api §6.3 示例 {defense:0.5, dodge:3}）:
+ *  - hit          检定·命中加值（整数，如 专注 {hit:5}）
+ *  - dodge        检定·闪避加值（整数，如 防御姿态 {dodge:3}）
+ *  - defense      防御百分比加成（小数，如 防御姿态 {defense:0.5} = +50% 防御）
+ *  - dr           DR 率加成（小数，累加进 Step 7）
+ *  - penetration  穿透率加成（小数，累加进 Step 3）
+ *  - damage       伤害百分比乘区（小数，累加进 Step 6 乘算系数）
+ *  - fixedDamage  固定伤害加成（整数，累加进 Step 6a）
+ * 所有键均按 stacks 倍乘。未知键忽略（叙事性效果由 AI 处理）。
+ */
+export interface BuffCombatMods {
+  hitBonus: number;
+  dodgeBonus: number;
+  /** 防御百分比加成（0.5 = +50%），调用方按 defense × (1 + this) 应用 */
+  defenseMultiplier: number;
+  drBonus: number;
+  penetrationBonus: number;
+  damageMultiplier: number;
+  fixedDamageBonus: number;
+}
+
+/**
+ * 把一组激活 buff 的 `effects` 数值折叠成战斗修正（纯函数）。
+ * resolveAttackPipeline 在检定/伤害管线前调用，使 combat_block/combat_focus/status_apply
+ * 施加的 buff 真正参与数值计算（此前这些 effects 无任何消费方，格挡/专注是空气）。
+ */
+export function collectBuffCombatMods(effects: StatusEffect[]): BuffCombatMods {
+  const out: BuffCombatMods = {
+    hitBonus: 0,
+    dodgeBonus: 0,
+    defenseMultiplier: 0,
+    drBonus: 0,
+    penetrationBonus: 0,
+    damageMultiplier: 0,
+    fixedDamageBonus: 0,
+  };
+  for (const e of effects) {
+    const eff = e.effects;
+    if (!eff || typeof eff !== 'object') continue;
+    const stacks = typeof e.stacks === 'number' && e.stacks > 0 ? e.stacks : 1;
+    const num = (v: unknown): number => (typeof v === 'number' && !Number.isNaN(v) ? v : 0);
+    out.hitBonus += num((eff as Record<string, unknown>).hit) * stacks;
+    out.dodgeBonus += num((eff as Record<string, unknown>).dodge) * stacks;
+    out.defenseMultiplier += num((eff as Record<string, unknown>).defense) * stacks;
+    out.drBonus += num((eff as Record<string, unknown>).dr) * stacks;
+    out.penetrationBonus += num((eff as Record<string, unknown>).penetration) * stacks;
+    out.damageMultiplier += num((eff as Record<string, unknown>).damage) * stacks;
+    out.fixedDamageBonus += num((eff as Record<string, unknown>).fixedDamage) * stacks;
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════
+// DoT 结算（2026-07-31 定向压测补: 架构 §5.4 承诺"回合结束后结算减益(流血/中毒/燃烧 DoT)"
+// 但引擎此前无任何周期伤害消费方 —— AI 施加的毒/流血是纯叙事 buff，永不真扣血）
+// ═══════════════════════════════════════════════════════════
+
+/** 单个 buff 本回合的 DoT 咬合量 */
+export interface DotTick {
+  /** buff 名（patch metadata 溯源用） */
+  name: string;
+  /** 本次结算伤害（≥1，已按层数放大、maxHp 比例折算） */
+  amount: number;
+}
+
+/**
+ * 收集一组 buff 在回合结束时的 DoT 伤害（纯函数，不改入参）。
+ *
+ * 可消费键（effects 对象上）:
+ *  - `dot`        每回合固定扣血，×stacks（架构 §5.5: DoT 类 layer=层数，每层 +X）
+ *  - `dotPercent` 每回合扣 maxHp 比例（0.05 = 5%），×stacks，比例累计封顶 1
+ *
+ * 结算纪律（架构 §5.4）: 只结算【减益】/【特殊】—— 增益在 round.start 结算且不该带 DoT，
+ * 挂在增益上的 dot 键与其他未知键一样不消费。非有限数/负数一律按 0 处理（对齐 collectBuffCombatMods）。
+ */
+export function collectDotTicks(effects: StatusEffect[], maxHp: number): DotTick[] {
+  const out: DotTick[] = [];
+  for (const e of effects) {
+    if (e.category === '增益') continue;
+    const eff = e.effects;
+    if (!eff || typeof eff !== 'object') continue;
+    const stacks = typeof e.stacks === 'number' && e.stacks > 0 ? e.stacks : 1;
+    const num = (v: unknown): number =>
+      typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0;
+    const flat = num((eff as Record<string, unknown>).dot);
+    const pct = Math.min(num((eff as Record<string, unknown>).dotPercent) * stacks, 1);
+    const amount = Math.floor(flat * stacks + maxHp * pct);
+    if (amount > 0) {
+      out.push({ name: e.name, amount });
+    }
+  }
+  return out;
 }
 
 // ═══════════════════════════════════════════════════════════

@@ -104,6 +104,7 @@ describe('resolveAttack', () => {
       relevantAttributeValue: 14,
       damageType: '物理',
       d20Attack: 15,
+      d20Attack2: 15, // 跨层级(优势)第二骰显式传入保持确定性
       d20Intention: 12,
     });
 
@@ -152,6 +153,7 @@ describe('resolveAttack', () => {
       relevantAttributeValue: 18,
       damageType: '物理',
       d20Attack: 18, // 高d20
+      d20Attack2: 18, // 跨层级(优势)第二骰显式传入保持确定性
       d20Intention: 15,
     });
 
@@ -193,6 +195,7 @@ describe('resolveAttack', () => {
       relevantAttributeValue: 18,
       damageType: '真实',
       d20Attack: 14,
+      d20Attack2: 14, // 跨层级(优势)第二骰显式传入保持确定性
     });
 
     // 真实伤害: typeReductionRate = 0
@@ -316,6 +319,8 @@ describe('resolveAttack', () => {
       damageType: '物理',
       multiHitCount: 3,
       d20Attack: 13,
+      // 🐛修复后: 攻守层级不同(优势)时第二骰是真实独立 d20，测试需显式传入保持确定性
+      d20Attack2: 13,
     });
 
     // 多段分割: 初始伤害 / 3
@@ -389,6 +394,7 @@ describe('resolveAttack', () => {
       relevantAttributeValue: 14,
       damageType: '物理',
       d20Attack: 12,
+      d20Attack2: 12, // 跨层级(劣势)第二骰显式传入保持确定性(对抗验证发现的 flaky)
     });
 
     // DR > 0 → drReduction > 0

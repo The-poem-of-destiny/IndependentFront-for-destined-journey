@@ -22,7 +22,23 @@ import { INTENTION_CONFIGS } from './types';
 
 /** 意图关键词映射表 — 中文输入 → IntentionLevel */
 const KEYWORD_INTENTION_MAP: Array<{ keywords: string[]; level: IntentionLevel }> = [
-  { keywords: ['打晕', '活捉', '不要杀死', '留活口', '制服'], level: '非致死' },
+  // 🐛修复(对抗验证): 非致死关键词接线到生死判定后，裸词 '制服' 会误伤叙事输入
+  // （"刺向穿制服的军官" → 被判非致死锁血）。收窄为动宾短语 + 补充明确词。
+  {
+    keywords: [
+      '打晕',
+      '活捉',
+      '不要杀死',
+      '留活口',
+      '制服他',
+      '制服她',
+      '制服对方',
+      '制服敌',
+      '生擒',
+      '俘虏',
+    ],
+    level: '非致死',
+  },
   { keywords: ['斩首', '断头', '枭首'], level: '抹杀' },
   { keywords: ['湮灭', '吞噬灵魂', '抹除存在', '概念抹消'], level: '概念' },
   { keywords: ['粉碎心脏', '贯穿要害', '致命一击', '必杀', '处决'], level: '抹杀' },
@@ -97,6 +113,13 @@ export function resolveIntention(input: IntentionCheckInput): IntentionResult {
   const config = getIntentionConfig(input.intentionLevel);
   const { attackerTier, defenderTier } = input;
 
+  // 🐛修复(真机压测): AI 会把 roll_d20 带 modifier 的"总值"(如 21)误传给意图骰参数，
+  // schema 的 min/max 模型并不必然遵守 —— 引擎侧 clamp 到 [1,20]（与攻击骰同规则）。
+  const clampD20 = (v: number): number =>
+    typeof v === 'number' && !Number.isNaN(v) ? Math.min(20, Math.max(1, Math.floor(v))) : 10;
+  const attackerD20 = clampD20(input.attackerD20);
+  const defenderD20 = clampD20(input.defenderD20);
+
   // 非致死/常规 → 无需判定
   if (config.requiresContest === false && input.intentionLevel !== '处决') {
     return {
@@ -151,8 +174,8 @@ export function resolveIntention(input: IntentionCheckInput): IntentionResult {
   }
 
   // 对抗检定: (攻方T×5 + d20) vs (守方T×5 + d20 + 意图难度)
-  const attackerValue = attackerTier * 5 + input.attackerD20;
-  const defenderValue = defenderTier * 5 + input.defenderD20 + config.difficulty;
+  const attackerValue = attackerTier * 5 + attackerD20;
+  const defenderValue = defenderTier * 5 + defenderD20 + config.difficulty;
 
   const success = attackerValue >= defenderValue;
 
@@ -160,9 +183,9 @@ export function resolveIntention(input: IntentionCheckInput): IntentionResult {
     level: input.intentionLevel,
     verdict: success ? '成功' : '失败',
     contested: {
-      attackerFormula: `(T${attackerTier}×5 + d20[${input.attackerD20}])`,
+      attackerFormula: `(T${attackerTier}×5 + d20[${attackerD20}])`,
       attackerValue,
-      defenderFormula: `(T${defenderTier}×5 + d20[${input.defenderD20}] + 意图难度[${config.difficulty}])`,
+      defenderFormula: `(T${defenderTier}×5 + d20[${defenderD20}] + 意图难度[${config.difficulty}])`,
       defenderValue,
     },
     coefficient: success ? config.coefficient : 1.0,
@@ -206,6 +229,18 @@ export interface NonLethalCheckResult {
  *   - 评级 ≥ 暴击(1.3) → 失手致死 (无法非致死)
  */
 export function checkNonLethal(input: NonLethalCheckInput): NonLethalCheckResult {
+  // 🐛修复(对抗验证): 目标已倒地(HP≤0)时非致死锁血会把死者拉回 1 HP（"打尸体复活"）——
+  // patch 语义 amount = finalHp - hp 会产出 +1 的 delta_hp。已倒地目标不适用非致死规则。
+  if (input.currentHp <= 0) {
+    return {
+      applied: false,
+      adjustedHp: 0,
+      unconscious: false,
+      accidentalKill: false,
+      narrative: input.nonLethal ? '目标已倒地，非致死规则不适用' : '',
+    };
+  }
+
   if (!input.nonLethal) {
     return {
       applied: false,

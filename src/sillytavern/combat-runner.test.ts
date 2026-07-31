@@ -394,3 +394,61 @@ describe('runCombat · 路径 X 调度', () => {
     await expect(runCombat(baseRequest as any, deps)).rejects.toThrow(/combat_start/);
   });
 });
+
+describe('runCombat · DoT 回合结算(2026-07-31)', () => {
+  it('回合结束 tick: 减益 dot 扣血 + delta_hp patch(source=combat-dot-tick) + dot_tick 事件', async () => {
+    const state = makeCombatState(['英雄'], ['哥布林']);
+    state.participants[1]!.statusEffects = [
+      {
+        name: '中毒',
+        description: '蚀骨蛇毒',
+        category: '减益',
+        stacks: 1,
+        remainingTime: 2,
+        timeUnit: '回合',
+        source: '毒刃',
+        sourceKey: '毒刃',
+        effects: { dot: 30 },
+      } as any,
+    ];
+
+    vi.mocked(executeCombatToolCall).mockImplementation(async (name) => {
+      if (name === 'combat_start') {
+        return { toolCallId: 'tc', functionName: name, result: { _combatState: state } } as any;
+      }
+      if (name === 'combat_end') {
+        return { toolCallId: 'tc', functionName: name, result: { exp: 10 } } as any;
+      }
+      return { toolCallId: 'tc', functionName: name, result: {} } as any;
+    });
+
+    const client = makeScriptedClient([
+      { tools: [{ name: 'combat_start', args: {} }], output: '战斗开始。' },
+      { output: '英雄谨慎游走。' }, // R1 英雄(代打)
+      { output: '哥布林毒发呻吟。' }, // R1 哥布林 → 满圈 → advanceRound → DoT tick
+      {
+        tools: [{ name: 'combat_end', args: { winner: 'ally' } }],
+        output: '<combat_summary>哥布林毒发倒地，我方获胜。</combat_summary>',
+      }, // R2 英雄
+    ]);
+
+    const { deps, events } = makeDeps(client, { registerSubmitter: undefined });
+    const result = await runCombat(baseRequest as any, deps, (e) => events.push(e));
+
+    // dot_tick 事件: 哥布林 100 → 70
+    const dot = events.find((e) => e.type === 'dot_tick') as any;
+    expect(dot).toBeTruthy();
+    expect(dot.unit).toBe('哥布林');
+    expect(dot.ticks).toEqual([{ name: '中毒', amount: 30 }]);
+    expect(dot.hpAfter).toBe(70);
+    // 落库补丁: -30 且溯源 combat-dot-tick
+    const dotPatch = result.patches.find(
+      (p: any) => p.metadata?.source === 'combat-dot-tick',
+    ) as any;
+    expect(dotPatch).toBeTruthy();
+    expect(dotPatch.amount).toBe(-30);
+    expect(dotPatch.target).toBe('characters.e0');
+    // 引擎态同步
+    expect(state.participants[1]!.hp).toBe(70);
+  });
+});

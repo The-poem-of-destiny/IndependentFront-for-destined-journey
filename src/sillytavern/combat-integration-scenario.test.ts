@@ -748,6 +748,7 @@ describe('🎮 第九章: $combat.initCombat / resolveAttack / endCombat', () =>
       relevantAttributeValue: 14,
       damageType: '物理',
       d20Attack: 16,
+      d20Attack2: 16, // 跨层级(优势)第二骰显式传入保持确定性
       d20Intention: 14,
       d20Status: 16,
       costs: { sp: 15 },
@@ -856,6 +857,7 @@ describe('🎮 第十章: <action_info> 面板生成', () => {
       relevantAttributeValue: 14,
       damageType: '物理',
       d20Attack: 16,
+      d20Attack2: 16, // 跨层级(优势)第二骰显式传入保持确定性
       d20Intention: 14,
       d20Status: 16,
     });

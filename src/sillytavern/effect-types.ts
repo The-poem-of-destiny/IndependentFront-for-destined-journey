@@ -132,11 +132,13 @@ export function sumFixedDamage(mods: Modifier[]): { amount: number; type?: Damag
 }
 
 /** 聚合百分比 modifier（架构 §4.4：累加进乘算系数）。
- *  返回总系数和（如 0.5 = +50%），调用方按 `1 + sum` 调整乘数 */
-export function sumPercentages(mods: Modifier[]): number {
+ *  返回总系数和（如 0.5 = +50%），调用方按 `1 + sum` 调整乘数。
+ *  🐛修复: 支持按 target 过滤 —— 伤害乘区只应累加 target='damage' 的 modifier，
+ *  否则 heal/resource 类百分比会被误算进伤害。不传 target 保持旧行为（全量累加）。 */
+export function sumPercentages(mods: Modifier[], target?: PercentageModifier['target']): number {
   let sum = 0;
   for (const m of mods) {
-    if (m.category === '百分比') {
+    if (m.category === '百分比' && (target === undefined || m.target === target)) {
       sum += m.coefficient;
     }
   }

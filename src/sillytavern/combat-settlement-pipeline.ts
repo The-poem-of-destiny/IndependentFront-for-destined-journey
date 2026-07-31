@@ -72,12 +72,19 @@ export async function runSettlementPipeline(
   let exp = 0;
   const defeatedEnemies: Array<{ name: string; tier: number; level: number }> = [];
   if (loserSide) {
-    for (const p of combat.participants) {
-      if (p.side === loserSide) {
-        const factor = clusterExpFactor((p as { clusterCount?: number }).clusterCount);
-        exp += p.level * getCombatCoefficient(p.tier) * factor;
-        defeatedEnemies.push({ name: p.name, tier: p.tier, level: p.level });
-      }
+    // 🐛修复(对抗验证): 先排除逃跑成功的单位（runner 对其置 canAct=false + fled 标记，
+    // 若只看 hp/canAct，逃掉的敌人会被当作"被击败"照发 EXP —— 规范 §13-m 逃跑无 EXP）
+    const losers = combat.participants.filter(
+      (p) => p.side === loserSide && !(p as { fled?: boolean }).fled,
+    );
+    // EXP 只计"被击败"的单位（阵亡或失能/被制服）。
+    // 若无人满足（如全员投降的无伤胜利），退回按全体未逃跑败方计（认输也是被击败）。
+    const defeated = losers.filter((p) => p.hp <= 0 || !p.canAct);
+    const counted = defeated.length > 0 ? defeated : losers;
+    for (const p of counted) {
+      const factor = clusterExpFactor(p.clusterCount);
+      exp += p.level * getCombatCoefficient(p.tier) * factor;
+      defeatedEnemies.push({ name: p.name, tier: p.tier, level: p.level });
     }
     // 整数取整（与 tier-constants 的乘数表对齐，避免浮点 EXP）
     exp = Math.floor(exp);

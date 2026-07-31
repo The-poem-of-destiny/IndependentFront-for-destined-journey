@@ -65,8 +65,8 @@ export interface RemoveStatusIntentsResult {
  *
  * 流程（按 intents 顺序串行 fold existing）:
  *  1. 对每个 intent，用 BuffRegistry.applyBuff(currentExisting, buffDef) 决定 added/refreshed/stacked
- *  2. added → push 到 currentExisting + 生成 add_status_effect patch（value=buffDef）
- *     refreshed/stacked → 就地替换 currentExisting[index] = merged + 生成 add_status_effect patch（value=merged，覆盖式）
+ *  2. added → push 到 currentExisting；refreshed/stacked → 就地替换 currentExisting[index] = merged
+ *     patch 一律携带增量 buffDef（消费方 state-manager/combat-runner 均为累加语义，见函数内注释）
  *  3. patch.target = `characters.${target}`
  *
  * 注意：buffDef 是 Partial<StatusEffect>，调用方（state-manager）应能容忍缺省字段。
@@ -98,13 +98,15 @@ export function applyStatusIntents(
       current = current.map((e, i) => (i === r.index ? r.merged : e));
     }
 
-    // 统一用 add_status_effect（state-manager 对同 id 走覆盖语义，详见 effect-runtime.ts）
-    // - added: value 是全新 effect
-    // - refreshed/stacked: value 是合并后的 effect（含更新后的 stacks/remainingTime）
+    // 🐛修复(对抗验证): patch 统一携带**增量**(本次施加的 buffDef)，不带合并后总量。
+    // 旧实现 refreshed/stacked 时 value=merged(总层数)，而唯一的落库消费方
+    // state-manager.applyAddStatusEffect 是**按名累加**语义（stacks += value.stacks），
+    // 合并总量 + 累加 = 层数双计（战前 2 层 + 施加 1 层 → patch 带 3 → 落库变 5）。
+    // 增量 patch 对累加消费方（state-manager / combat-runner 战中同步）恰好正确。
     patches.push({
       op: 'add_status_effect',
       target: `characters.${intent.target}`,
-      value: r.action === 'added' ? newEffect : r.merged,
+      value: newEffect,
     });
 
     results.push({ action: r.action, buffId });
@@ -119,7 +121,7 @@ export function applyStatusIntents(
  * 流程（按 intents 顺序串行 fold existing）:
  *  1. 对每个 intent，用 BuffRegistry.removeBuff(currentExisting, buffIdOrName) 移除匹配项
  *  2. 更新 current = remaining
- *  3. 生成 remove_status_effect patch（target=`characters.${target}`，value=buffIdOrName）
+ *  3. 按实际移除的 effect 逐名生成 remove_status_effect patch（value={name}，对齐 state-manager 契约）
  *
  * 注意：state-manager 的 remove_status_effect handler 应支持按完整 buffId 或裸 name 移除
  *       （裸 name 移除所有同名）。本函数只生成意图，真正落库由 state-manager 完成。
@@ -138,11 +140,17 @@ export function removeStatusIntents(
     const r = removeBuff(current, intent.buffIdOrName);
     current = r.remaining;
 
-    patches.push({
-      op: 'remove_status_effect',
-      target: `characters.${intent.target}`,
-      value: intent.buffIdOrName,
-    });
+    // 🐛修复(对抗验证): state-manager.applyRemoveStatusEffect 要求 value={name}（string 直接抛错，
+    // 旧实现每次 status_remove 落库必炸）且按裸 name 过滤。按本次实际移除的 effect 逐名生成
+    // patch（去重），完整 buffId 入参也能正确落库。无命中则不产 patch。
+    const removedNames = [...new Set(r.removed.map((e) => e.name))];
+    for (const name of removedNames) {
+      patches.push({
+        op: 'remove_status_effect',
+        target: `characters.${intent.target}`,
+        value: { name },
+      });
+    }
   }
 
   return { updated: current, patches };

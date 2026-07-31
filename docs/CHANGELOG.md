@@ -9,6 +9,18 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 战斗压测整改 — 七轮真机压测 + ~50 项修复 + 集群断线 + DoT 接线 ｜ ✅ 已交付
+
+对战斗系统 v2 做七轮「排查 → 修复 → DeepSeek 真机压测 → 审计」闭环（deepseek-v4-flash，共 47 场全真链路压测，零 mock）。完整过程、基线对比与误诊裁决见 `docs/planning/2026-07-31-combat-stress-handoff.md`（§2-§4e）。
+
+- **~50 项修复**: 意图对抗攻守同骰（同层级必败）/ 管线版非致死缺失（"打晕"会打死）+ 锁血 patch 与 finalHp 不一致 / buff effects 无消费方（格挡/专注是空气）+ 永不 tick + 过期无补偿 remove / 玩家输入死锁 → agent 代打降级 / 行动经济初始化旁路 + 预扣改成功后扣 / fled 误发 EXP / 骰值 clamp[1,20] / multiHitCount 消毒 / inferOutcome 按名主语绑定 + deriveWinnerFromState 终局状态推导 等
+- **🐛 集群机制全链断线**: `characterToCombatParticipant` 不拷贝 `clusterCount`，管线 Step 8（×1.5）与结算 EXP 衰减读 participant 恒 undefined —— 真实链路死代码，只在手工构造 participant 的单测里活着（真机压测实锤后修复 + 回归用例）
+- **🆕 DoT 周期伤害接线**: 架构 §5.4 的空承诺落地 —— `buff-registry.collectDotTicks`（`dot` 固定值×stacks / `dotPercent` maxHp 比例×stacks 封顶1，仅减益/特殊）+ runner 回合结束结算（delta_hp `source=combat-dot-tick` / HP 归零置 canAct=false）+ CombatEvent 新增 `dot_tick`；`status_apply` schema 枚举全部 9 个可消费键（收口 AI 自由发明 effects 形状的缺口）
+- **prompt 硬化**: combat systemPrompt 追加 7 条战斗纪律，叙事越权率 7/10 → ~1.5/9（真机对照）
+- **压测基建**: `scripts/combat-stress-test.ts` —— 16 场景矩阵（S01-S10 基础 + S11-S16 定向: DoT/集群/多段/登神/玩家指令/预算极限）、`STRESS_REPEAT` 规模化、`playerScript`/`preRun` 注入缝、网络错误重试、toolHistory 记录返回值、engineEvents（subscribeChain 掷骰/战意入日志）、不变量检查；密钥只走环境变量
+- **真机指标**: 47 场 0 崩溃、不变量零违例、并发 8 时延无劣化（p50 5.0s）、缓存命中 ~95%、MAX_TURNS 强制收场路径验证、S11 毒伤四层对齐（施加→结算→落库→叙事，AI 摘要 240/回合与引擎真值一致）
+- 新增 `combat-bugfix-regression.test.ts`（32 用例）+ buff-registry DoT 4 用例 + runner DoT 1 用例；`combat-agent-api.md` / `combat-system-architecture.md` 已同步
+
 ### 战斗 v2 — 战斗系统架构 v2 重构 ｜ ✅ M5 完成，待 M6 真机
 
 战斗系统架构 v2 重构（管道+中间件+同构契约+6 大类效果对齐 #265160+buff 规则对齐 [状态规则]+19 event+Combat Agent+独立战斗面板+计算分工）。魔改不照抄世界书，趣味优先+代码兜底。架构: `docs/reference/combat-system-architecture.md`；计划: `docs/planning/2026-07-28-combat-system-v2-plan.md`。M1-M6 六批次，§十三 待确认清单已全收口。

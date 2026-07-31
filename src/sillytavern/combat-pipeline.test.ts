@@ -248,7 +248,7 @@ describe('resolveAttackPipeline — 主攻击管道', () => {
     // miss 时不触发 collect_defender（单独测试）
   });
 
-  it('miss 时不触发 collect_defender_mods / damage 仍触发（0 伤害）', async () => {
+  it('miss 时 collect_defender_mods 仍会触发（检定前收集守方闪避 mod）/ damage 为 0', async () => {
     const defCollectTriggered: string[] = [];
     bus.subscribeChain({
       type: COMBAT_EVENTS.ATTACK_COLLECT_DEF,
@@ -277,7 +277,9 @@ describe('resolveAttackPipeline — 主攻击管道', () => {
     );
 
     expect(result.damage.finalDamage).toBe(0);
-    expect(defCollectTriggered).toHaveLength(0); // miss 不收集守方 modifier
+    // 🐛修复后行为: 守方「检定·闪避」modifier 必须参与攻击检定，因此守方 mods 在检定前
+    // 就要收集（旧实现命中后才收集 → 守方闪避 mod 是死代码）。miss 也会收集一次。
+    expect(defCollectTriggered).toHaveLength(1);
   });
 
   it('attackerId 不存在 → 错误结果（不抛错）', async () => {
