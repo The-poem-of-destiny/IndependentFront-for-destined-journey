@@ -45,20 +45,20 @@
  */
 
 /** 默认容量 —— §7.5 的 ~64。素材库预期 40~100 条，一屏网格远小于此 */
-export const ASSET_URL_DEFAULT_CAPACITY = 64
+export const ASSET_URL_DEFAULT_CAPACITY = 64;
 
 /** 字节读取 seam：拿不到（素材行存在但 blob 缺失）返回 undefined，不是抛错 */
-export type AssetBlobLoader = (id: string) => Promise<Blob | undefined>
+export type AssetBlobLoader = (id: string) => Promise<Blob | undefined>;
 
 export interface AssetUrlCacheOptions {
   /** 必填：按 asset id 取字节。缓存不关心它背后是 Dexie、内存还是磁盘 */
-  loadBlob: AssetBlobLoader
+  loadBlob: AssetBlobLoader;
   /** LRU 容量上限，默认 {@link ASSET_URL_DEFAULT_CAPACITY}；小于 1 时按 1 处理 */
-  capacity?: number
+  capacity?: number;
   /** 注入 seam，默认惰性取 `globalThis.URL.createObjectURL`（缺失时返回空串） */
-  createObjectURL?: (blob: Blob) => string
+  createObjectURL?: (blob: Blob) => string;
   /** 注入 seam，默认惰性取 `globalThis.URL.revokeObjectURL`（缺失时空转） */
-  revokeObjectURL?: (url: string) => void
+  revokeObjectURL?: (url: string) => void;
 }
 
 export interface AssetUrlCache {
@@ -75,7 +75,7 @@ export interface AssetUrlCache {
    *   归零）→ 返回 null。**绝不端出一条已撤销的 URL**: 那既是死链，又会让调用方
    *   欠下一次记到「日后同 id 新铸的那条」头上的 release
    */
-  get(id: string): Promise<string | null>
+  get(id: string): Promise<string | null>;
   /**
    * 同步窥视已缓存的 URL；不触发加载、不改动新鲜度、**不增加引用计数**。
    * 未缓存返回 null。
@@ -83,7 +83,7 @@ export interface AssetUrlCache {
    * ⚠️ 窥视到的 URL **不归窥视者所有** —— 它随时可能被持有者释放掉。要保证它
    * 在自己手上活着，得走 {@link AssetUrlCache.get}。
    */
-  peek(id: string): string | null
+  peek(id: string): string | null;
   /**
    * 归还一份引用。**计数归零才撤销并移除**。
    *
@@ -96,13 +96,13 @@ export interface AssetUrlCache {
    * 这条 URL 会被当场撤销，那次 `get()` 于是返回 `null`。**只 release 自己
    * get 到的那一份。**
    */
-  release(id: string): void
+  release(id: string): void;
   /** 拆除用（如分区 unmount）：**无视引用计数**逐条撤销全部存活 URL 并清空缓存 */
-  revokeAll(): void
+  revokeAll(): void;
   /** 当前已铸造 URL 的条目数（不含在飞加载）。持有者不还引用时**可能超过容量** */
-  readonly size: number
+  readonly size: number;
   /** 当前引用计数；未持有为 0。诊断与测试用，生产渲染面不需要 */
-  refCount(id: string): number
+  refCount(id: string): number;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -110,21 +110,23 @@ export interface AssetUrlCache {
 // ═══════════════════════════════════════════════════════════
 
 function defaultCreateObjectURL(blob: Blob): string {
-  const u = (globalThis as unknown as { URL?: typeof URL }).URL
-  if (!u || typeof u.createObjectURL !== 'function') return ''
+  const u = (globalThis as unknown as { URL?: typeof URL }).URL;
+  if (!u || typeof u.createObjectURL !== 'function') return '';
   try {
-    return u.createObjectURL(blob)
+    return u.createObjectURL(blob);
   } catch {
-    return ''
+    return '';
   }
 }
 
 function defaultRevokeObjectURL(url: string): void {
-  const u = (globalThis as unknown as { URL?: typeof URL }).URL
-  if (!u || typeof u.revokeObjectURL !== 'function' || !url) return
+  const u = (globalThis as unknown as { URL?: typeof URL }).URL;
+  if (!u || typeof u.revokeObjectURL !== 'function' || !url) return;
   try {
-    u.revokeObjectURL(url)
-  } catch { /* 静默 —— 撤销失败没有可做的补救 */ }
+    u.revokeObjectURL(url);
+  } catch {
+    /* 静默 —— 撤销失败没有可做的补救 */
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -139,20 +141,20 @@ function defaultRevokeObjectURL(url: string): void {
  * 靠 reset 互相清场。
  */
 export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCache {
-  const loadBlob = options.loadBlob
-  const capacity = Math.max(1, Math.floor(options.capacity ?? ASSET_URL_DEFAULT_CAPACITY))
-  const create = options.createObjectURL ?? defaultCreateObjectURL
-  const revoke = options.revokeObjectURL ?? defaultRevokeObjectURL
+  const loadBlob = options.loadBlob;
+  const capacity = Math.max(1, Math.floor(options.capacity ?? ASSET_URL_DEFAULT_CAPACITY));
+  const create = options.createObjectURL ?? defaultCreateObjectURL;
+  const revoke = options.revokeObjectURL ?? defaultRevokeObjectURL;
 
   /** Map 的插入顺序即新鲜度：队首最久未用，队尾最新 */
-  const urls = new Map<string, string>()
+  const urls = new Map<string, string>();
   /**
    * id → 当前持有者数量。**不变式**: 只要 `urls` 里有这条，`refs` 里就 ≥ 1；
    * 归零的那一刻两张表同时删。所以「entry 存在但没人要」这个状态不会存续。
    */
-  const refs = new Map<string, number>()
+  const refs = new Map<string, number>();
   /** 在飞去重表：同一 id 的并发 get 共享同一个 Promise */
-  const inflight = new Map<string, Promise<string | null>>()
+  const inflight = new Map<string, Promise<string | null>>();
 
   /**
    * 世代号 —— revokeAll() 递增。
@@ -161,16 +163,16 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
    * 它回来后会把一个新 URL 塞进已经拆掉的缓存里，从此无人撤销。对齐
    * MusicChannel 的加载世代号做法：await 回来先校验，过期就当场撤销收手。
    */
-  let generation = 0
+  let generation = 0;
 
   /** 当前引用数（未持有为 0） */
   function countOf(id: string): number {
-    return refs.get(id) ?? 0
+    return refs.get(id) ?? 0;
   }
 
   /** +1 份引用 */
   function retain(id: string): void {
-    refs.set(id, countOf(id) + 1)
+    refs.set(id, countOf(id) + 1);
   }
 
   /**
@@ -184,18 +186,18 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
    */
   function evictIfNeeded(): void {
     while (urls.size > capacity) {
-      let victim: string | null = null
+      let victim: string | null = null;
       for (const key of urls.keys()) {
         if (countOf(key) === 0) {
-          victim = key
-          break
+          victim = key;
+          break;
         }
       }
-      if (victim === null) return // 全员在用：超容 > 撤掉在用的 URL
-      const url = urls.get(victim)
-      urls.delete(victim)
-      refs.delete(victim)
-      if (url) revoke(url)
+      if (victim === null) return; // 全员在用：超容 > 撤掉在用的 URL
+      const url = urls.get(victim);
+      urls.delete(victim);
+      refs.delete(victim);
+      if (url) revoke(url);
     }
   }
 
@@ -213,79 +215,79 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
    *   发起者的那一份已在 {@link load} 里落地，传 `false` 只验不加。
    */
   function liveOnly(id: string, url: string | null, claim: boolean): string | null {
-    if (url === null) return null
-    if (urls.get(id) !== url) return null
-    if (claim) retain(id)
-    return url
+    if (url === null) return null;
+    if (urls.get(id) !== url) return null;
+    if (claim) retain(id);
+    return url;
   }
 
   /** 刷新新鲜度：delete + set 把条目挪到队尾 */
   function touch(id: string, url: string): void {
-    urls.delete(id)
-    urls.set(id, url)
+    urls.delete(id);
+    urls.set(id, url);
   }
 
   async function load(id: string, gen: number): Promise<string | null> {
-    const blob = await loadBlob(id)
+    const blob = await loadBlob(id);
     // blob 缺失不是错误（素材行还在、字节丢了），但也绝不缓存 —— 之后重试要能成功
-    if (!blob) return null
+    if (!blob) return null;
 
-    const url = create(blob)
+    const url = create(blob);
     // 空串意味着环境里没有 createObjectURL，同样不缓存（否则会缓存一条死链）
-    if (!url) return null
+    if (!url) return null;
 
     if (gen !== generation) {
       // 加载期间被 revokeAll() 拆过了：这个 URL 不该进缓存，当场撤销
-      revoke(url)
-      return null
+      revoke(url);
+      return null;
     }
 
     // 并发窗口内可能已有同 id 条目落地（例如 release 后又被别人装上），
     // 以已在缓存的那个为准，本次多铸的撤掉，保证一个 id 只对应一个存活 URL。
-    const existing = urls.get(id)
+    const existing = urls.get(id);
     if (existing) {
-      revoke(url)
-      touch(id, existing)
-      retain(id) // 发起者自己那一份
-      return existing
+      revoke(url);
+      touch(id, existing);
+      retain(id); // 发起者自己那一份
+      return existing;
     }
 
-    urls.set(id, url)
+    urls.set(id, url);
     // 🔴 必须**先** retain 再 evict: 新条目此刻是全场唯一的零引用条目，
     // 逐出扫描会当场把它自己挑走（容量 1 时 100% 复现，表现为「刚拿到就是死链」）
-    retain(id)
-    evictIfNeeded()
-    return url
+    retain(id);
+    evictIfNeeded();
+    return url;
   }
 
   return {
     get size(): number {
-      return urls.size
+      return urls.size;
     },
 
     peek(id: string): string | null {
-      return urls.get(id) ?? null
+      return urls.get(id) ?? null;
     },
 
     refCount(id: string): number {
-      return countOf(id)
+      return countOf(id);
     },
 
     async get(id: string): Promise<string | null> {
-      const hit = urls.get(id)
+      const hit = urls.get(id);
       if (hit) {
-        touch(id, hit)
-        retain(id)
-        return hit
+        touch(id, hit);
+        retain(id);
+        return hit;
       }
 
-      const pending = inflight.get(id)
+      const pending = inflight.get(id);
       if (pending) {
         // 🔴 搭车者必须**自己**领一份计数，不能直接 `return pending`。
         // 直接返回的话，两个组件并发要同一张头像只会记 1 份，先卸载的那个
         // 一 release 就归零撤销 —— 另一个组件当场死图。这正是引用计数要修的
         // 那个 bug 的并发变体，而且比串行版更难查（要两个组件卡在同一个 tick）。
-        return liveOnly(id, await pending, true)
+        return liveOnly(id, await pending, true);
       }
 
       // 两个组件同时要同一张头像时，若不去重就会铸两个 URL、只记住一个，
@@ -293,41 +295,41 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
       const p = load(id, generation).finally(() => {
         // 无论成功、缺失还是抛错，都必须把在飞条目撤掉，否则一次失败会把这个
         // id 永久钉死在一个已 reject 的 Promise 上。
-        if (inflight.get(id) === p) inflight.delete(id)
-      })
-      inflight.set(id, p)
+        if (inflight.get(id) === p) inflight.delete(id);
+      });
+      inflight.set(id, p);
       // 发起者那一份计数在 load() 里落地（必须早于 evictIfNeeded，见那里的注释）；
       // 但**落地之后、兑现之前**这条 URL 仍可能被 revokeAll() 拆掉，所以出门前
       // 同样要验一次活性 —— 发起者与搭车者走的是同一道闸。
-      return liveOnly(id, await p, false)
+      return liveOnly(id, await p, false);
     },
 
     release(id: string): void {
-      const n = countOf(id)
+      const n = countOf(id);
       // 未知 id / 已归零：不抛错、计数绝不为负。
       // （"无害"只到这一步为止 —— n === 1 那条分支撤的可能是别人的那一份，见契约）
       if (n <= 0) {
-        refs.delete(id)
-        return
+        refs.delete(id);
+        return;
       }
       if (n > 1) {
-        refs.set(id, n - 1)
-        return // 还有别人挂着，撤了就是打死他的图
+        refs.set(id, n - 1);
+        return; // 还有别人挂着，撤了就是打死他的图
       }
-      refs.delete(id)
-      const url = urls.get(id)
-      if (!url) return
-      urls.delete(id)
-      revoke(url)
+      refs.delete(id);
+      const url = urls.get(id);
+      if (!url) return;
+      urls.delete(id);
+      revoke(url);
     },
 
     revokeAll(): void {
-      generation += 1
-      for (const url of urls.values()) revoke(url)
-      urls.clear()
+      generation += 1;
+      for (const url of urls.values()) revoke(url);
+      urls.clear();
       // 拆除口**无视计数**: 分区都没了，谁持有已经不重要，留着才是泄漏
-      refs.clear()
+      refs.clear();
       // 在飞的加载不取消 —— 它们回来时会撞上世代号校验并自行撤销
     },
-  }
+  };
 }

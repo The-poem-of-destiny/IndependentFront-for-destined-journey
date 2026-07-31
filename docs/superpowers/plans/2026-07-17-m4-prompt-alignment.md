@@ -21,10 +21,12 @@
 ### Task 1: vars_update systemPrompt — id→name 键 + 示例改造 + quests/affections 教学
 
 **Files:**
+
 - Modify: `data/defaults/agent-config.json`（agents.vars_update.systemPrompt）
 - Create: `tmp/m4-t1-edit.cjs`（编辑脚本）+ `tmp/m4-t1-assert.cjs`（断言脚本）
 
 **Interfaces:**
+
 - Produces（AI 端输出契约，M3 翻译层已按此消费）:
   - characters.replace/delta/add/remove 条目键: `"name": "<角色名>"`（`"id"` 键从格式说明与全部示例中移除）
   - items.*: target 一律物品名
@@ -41,8 +43,16 @@ const sp = cfg.agents.vars_update.systemPrompt;
 const must = ['"name": "理查德"', '"quests"', '"affections"', '枚举取值', '搁置'];
 const mustNot = ['player_1', '"id": "'];
 let fail = 0;
-for (const m of must) if (!sp.includes(m)) { console.error('缺失:', m); fail++; }
-for (const m of mustNot) if (sp.includes(m)) { console.error('残留:', m); fail++; }
+for (const m of must)
+  if (!sp.includes(m)) {
+    console.error('缺失:', m);
+    fail++;
+  }
+for (const m of mustNot)
+  if (sp.includes(m)) {
+    console.error('残留:', m);
+    fail++;
+  }
 process.exit(fail ? 1 : 0);
 ```
 
@@ -58,10 +68,12 @@ process.exit(fail ? 1 : 0);
 ### Task 2: request_dispatcher systemPrompt — 示例改名 + owner 教学 + 意识体判定规则
 
 **Files:**
+
 - Modify: `data/defaults/agent-config.json`（agents.request_dispatcher.systemPrompt）
 - Create: `tmp/m4-t2-edit.cjs` + `tmp/m4-t2-assert.cjs`
 
 **Interfaces:**
+
 - Produces: 示例 id（player_1/npc_guard_01）全改角色名；`<item_gen_request>` 的 owner 属性教学=「持有者的角色名」；新增判定规则一条:「有名字、有对话、会持续出场的意识体/附灵/器灵（如寄宿在物品中的人格）**按新角色处理**，输出 char_gen_request」（补上轮 debug 发现的妲丽安缺口）。
 
 - [ ] **Step 1: 断言脚本**（must: `owner="理查德"` 型示例、`意识体`；mustNot: `player_1`、`npc_guard_01`）先跑失败。
@@ -75,6 +87,7 @@ process.exit(fail ? 1 : 0);
 ### Task 3: item_gen / char_gen systemPrompt — 枚举对齐
 
 **Files:**
+
 - Modify: `data/defaults/agent-config.json`（agents.item_gen / agents.char_gen 的 systemPrompt）
 - Create: `tmp/m4-t3-edit.cjs` + `tmp/m4-t3-assert.cjs`
 
@@ -88,6 +101,7 @@ process.exit(fail ? 1 : 0);
 ### Task 4: agent-templates.ts fixedExamples 改名 + story prompt 的 char_detect 指令删除
 
 **Files:**
+
 - Modify: `src/sillytavern/agent-templates.ts`（:182 附近 fixedExamples 的 player_1）
 - Modify: `data/defaults/agent-config.json`（agents.story 预设内的 char_detect 输出指令——M3 已删代码路径，这里删教学，story 不再输出该 marker）
 - Test: `src/sillytavern/agent-templates.test.ts`
@@ -101,6 +115,7 @@ process.exit(fail ? 1 : 0);
 ### Task 5: 拆除全部过渡兼容（代码侧收口）
 
 **Files:**
+
 - Modify: `src/sillytavern/state-manager.ts`（resolveCharacter 的 UUID 兜底分支）
 - Modify: `src/sillytavern/agent-orchestrator.ts`（`a.name ?? a.id` 过渡读，四处循环）
 - Test: `src/sillytavern/state-manager.test.ts` / `agent-orchestrator.test.ts`
@@ -115,6 +130,7 @@ process.exit(fail ? 1 : 0);
 ### Task 6: 文档同步 + 收尾
 
 **Files:**
+
 - Modify: `reference/agent流程测试/agent预期分析.md`（vars_update/dispatcher/item_gen 三节的输出格式与示例同步新契约）
 - Modify: `docs/superpowers/specs/2026-07-16-data-field-conventions-design.md`（附录 A 注记）
 - Modify: `docs/reference/agent_system_prompt_guide.md`（若其中示例含 player_1 同步）
@@ -127,13 +143,13 @@ process.exit(fail ? 1 : 0);
 
 ## 覆盖清单
 
-| 项 | Task |
-|----|------|
-| #25 quests 格式未教 | 1 |
-| affections 格式教学（#15 前提）| 1 |
-| player_1 毒化源灭绝 | 1 / 2 / 4 |
-| #37 #38 prompt 侧枚举 | 3 |
-| 妲丽安式意识体判定缺口 | 2 |
-| story char_detect 教学残留 | 4 |
-| 过渡兼容拆除（铁律1 收口）| 5 |
-| 文档同步（CLAUDE.md 规定）| 6 |
+| 项                              | Task      |
+| ------------------------------- | --------- |
+| #25 quests 格式未教             | 1         |
+| affections 格式教学（#15 前提） | 1         |
+| player_1 毒化源灭绝             | 1 / 2 / 4 |
+| #37 #38 prompt 侧枚举           | 3         |
+| 妲丽安式意识体判定缺口          | 2         |
+| story char_detect 教学残留      | 4         |
+| 过渡兼容拆除（铁律1 收口）      | 5         |
+| 文档同步（CLAUDE.md 规定）      | 6         |

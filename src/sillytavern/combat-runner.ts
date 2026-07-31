@@ -191,8 +191,7 @@ export async function runCombat(
   let combatState: CombatState | undefined;
   let winner: 'ally' | 'enemy' | 'draw' | undefined;
   let settlement:
-    | { exp?: number; fp?: number; loot?: CombatSummaryResult['loot']; summary?: string }
-    | undefined;
+    { exp?: number; fp?: number; loot?: CombatSummaryResult['loot']; summary?: string } | undefined;
   let summaryText: string | undefined;
   const allPatches: StatePatch[] = [];
 
@@ -322,9 +321,7 @@ export async function runCombat(
 
   // ===== 5. 阶段二：行动轴逐单位调度（路径 X 核心）=====
   if (!summaryText) {
-    const sideOf = new Map(
-      combatState.participants.map((p) => [p.characterId, p.side]),
-    );
+    const sideOf = new Map(combatState.participants.map((p) => [p.characterId, p.side]));
     let turnPtr = 0;
     let roundsCompleted = 0;
 

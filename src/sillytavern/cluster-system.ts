@@ -13,11 +13,7 @@
  *   - 范围结算: 总伤害 = 单体修正伤害 × min(范围x, 集群当前数量n)
  */
 
-import type {
-  ClusterState,
-  ClusterFormResult,
-  ClusterAttritionResult,
-} from './types';
+import type { ClusterState, ClusterFormResult, ClusterAttritionResult } from './types';
 import { MORALE_OUTCOME_POOL } from './types';
 
 // ========== 集群形成 ==========
@@ -147,10 +143,7 @@ export const CLUSTER_DAMAGE_MULTIPLIER = 1.5;
 /**
  * 对集群单位的伤害修正: 最终伤害 × 1.5
  */
-export function calcClusterDamageMultiplier(
-  damage: number,
-  isClusterTarget: boolean,
-): number {
+export function calcClusterDamageMultiplier(damage: number, isClusterTarget: boolean): number {
   return isClusterTarget ? Math.floor(damage * CLUSTER_DAMAGE_MULTIPLIER) : damage;
 }
 
@@ -182,11 +175,7 @@ export function updateClusterAfterDamage(
   const hpPercentBefore = getClusterHpRatio(cluster);
 
   const newHp = Math.max(0, cluster.clusterHp - damageTaken);
-  const newCount = getClusterSurvivingCount(
-    cluster.initialCount,
-    newHp,
-    cluster.clusterMaxHp,
-  );
+  const newCount = getClusterSurvivingCount(cluster.initialCount, newHp, cluster.clusterMaxHp);
 
   const casualtiesThisRound = cluster.currentCount - newCount;
   const hpPercentAfter = cluster.clusterMaxHp > 0 ? newHp / cluster.clusterMaxHp : 0;

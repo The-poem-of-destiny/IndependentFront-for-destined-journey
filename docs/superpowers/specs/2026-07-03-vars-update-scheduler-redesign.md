@@ -10,22 +10,22 @@
 
 ### 当前 vars_update 行为
 
-| 维度 | 当前 |
-|------|------|
-| 类型 | 纯文本 Agent（无 tool calling） |
-| Pipeline 位置 | Stage 2（等 story） |
-| 输入 | `{{SYS_PROMPT}}` + `{{AGENT.STORY}}` + `{{CHARACTER_STATE}}` + `{{LORE_BOOK}}` |
-| 输出 | 严格 JSON：`{"replace":[...], "delta":[...], "insert":[...], "delta_time": N}` |
-| 下游消费 | Code 解析 JSON → StatePatch；char_update 通过 `{{AGENT.VARS_UPDATE}}` 读取 |
-| 世界书分区 | `world_setting`, `race` |
+| 维度          | 当前                                                                           |
+| ------------- | ------------------------------------------------------------------------------ |
+| 类型          | 纯文本 Agent（无 tool calling）                                                |
+| Pipeline 位置 | Stage 2（等 story）                                                            |
+| 输入          | `{{SYS_PROMPT}}` + `{{AGENT.STORY}}` + `{{CHARACTER_STATE}}` + `{{LORE_BOOK}}` |
+| 输出          | 严格 JSON：`{"replace":[...], "delta":[...], "insert":[...], "delta_time": N}` |
+| 下游消费      | Code 解析 JSON → StatePatch；char_update 通过 `{{AGENT.VARS_UPDATE}}` 读取     |
+| 世界书分区    | `world_setting`, `race`                                                        |
 
 ### 当前 Marker 系统
 
-| 标签 | 扫描阶段 | 执行阶段 | 延迟？ |
-|------|---------|---------|--------|
-| `<craft_request>` | Stage 1 | Stage 2 | 是 |
-| `<combat_trigger>` | Stage 1 | Stage 2 | 是 |
-| `<char_detect>` | Stage 2 | Stage 2 | 否 |
+| 标签               | 扫描阶段 | 执行阶段 | 延迟？ |
+| ------------------ | -------- | -------- | ------ |
+| `<craft_request>`  | Stage 1  | Stage 2  | 是     |
+| `<combat_trigger>` | Stage 1  | Stage 2  | 是     |
+| `<char_detect>`    | Stage 2  | Stage 2  | 否     |
 
 **问题**：`<char_detect>` 由 Story Agent 输出，但"角色是否新角色"的判断不应由 Story 承担。
 
@@ -116,14 +116,14 @@ vars_update 完成后 (processStageMarkers)：
 </char_gen_request>
 ```
 
-| 属性 | 必填 | 说明 |
-|------|------|------|
-| `characterName` | ✅ | 从正文提取 |
-| `race` | ❌ | 如能推断，否则 char_gen 自行决定 |
-| `tier` | ❌ | 如能推断 |
-| `characterType` | ❌ | npc / enemy / ally |
-| `faction` | ❌ | 势力归属 |
-| 正文 | ✅ | 出场上下文描述 |
+| 属性            | 必填 | 说明                             |
+| --------------- | ---- | -------------------------------- |
+| `characterName` | ✅   | 从正文提取                       |
+| `race`          | ❌   | 如能推断，否则 char_gen 自行决定 |
+| `tier`          | ❌   | 如能推断                         |
+| `characterType` | ❌   | npc / enemy / ally               |
+| `faction`       | ❌   | 势力归属                         |
+| 正文            | ✅   | 出场上下文描述                   |
 
 ### `<char_update_request>` — 已有角色状态更新
 
@@ -134,9 +134,9 @@ vars_update 完成后 (processStageMarkers)：
 </char_update_request>
 ```
 
-| 属性 | 必填 | 说明 |
-|------|------|------|
-| `target` | ✅ | 角色 ID（从已有角色表匹配） |
+| 属性     | 必填 | 说明                        |
+| -------- | ---- | --------------------------- |
+| `target` | ✅   | 角色 ID（从已有角色表匹配） |
 
 ### `<item_gen_request>` — 新物品/技能生成
 
@@ -146,11 +146,11 @@ vars_update 完成后 (processStageMarkers)：
 </item_gen_request>
 ```
 
-| 属性 | 必填 | 说明 |
-|------|------|------|
-| `itemType` | ✅ | equipment / skill / consumable / material / ascension |
-| `source` | ❌ | craft / loot / gift / story |
-| `owner` | ❌ | 归属角色 ID |
+| 属性       | 必填 | 说明                                                  |
+| ---------- | ---- | ----------------------------------------------------- |
+| `itemType` | ✅   | equipment / skill / consumable / material / ascension |
+| `source`   | ❌   | craft / loot / gift / story                           |
+| `owner`    | ❌   | 归属角色 ID                                           |
 
 ### `<item_update_request>` — 已有物品变更
 
@@ -160,12 +160,12 @@ vars_update 完成后 (processStageMarkers)：
 </item_update_request>
 ```
 
-| 属性 | 必填 | 说明 |
-|------|------|------|
-| `target` | ✅ | 物品 ID 或物品名 |
-| `operation` | ✅ | consume / transfer / modify / equip / unequip |
-| `quantity` | ❌ | 数量变化 |
-| `owner` | ❌ | 当前归属角色 |
+| 属性        | 必填 | 说明                                          |
+| ----------- | ---- | --------------------------------------------- |
+| `target`    | ✅   | 物品 ID 或物品名                              |
+| `operation` | ✅   | consume / transfer / modify / equip / unequip |
+| `quantity`  | ❌   | 数量变化                                      |
+| `owner`     | ❌   | 当前归属角色                                  |
 
 ### `<craft_gen_request>` — 制作请求
 
@@ -182,37 +182,43 @@ vars_update 完成后 (processStageMarkers)：
 ## 四、需要修改的文件
 
 ### 类型层
-| 文件 | 改动 |
-|------|------|
+
+| 文件       | 改动                                                                                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `types.ts` | 扩展 `MarkerType` 联合类型；新增 `CharUpdateRequestMarker`, `ItemUpdateRequestMarker`, `ItemGenRequestMarker` 接口；char_detect 可标记 deprecated |
 
 ### 标记协议层
-| 文件 | 改动 |
-|------|------|
+
+| 文件                 | 改动                                                                                                                                                |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `marker-protocol.ts` | 新增 `scanCharGenRequests`, `scanCharUpdateRequests`, `scanItemGenRequests`, `scanItemUpdateRequests`, `scanCraftGenRequests`；`scanMarkers()` 整合 |
 
 ### 编排引擎层
-| 文件 | 改动 |
-|------|------|
+
+| 文件                    | 改动                                                                                                                                                                                    |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `agent-orchestrator.ts` | `OrchestratorEvents` 新增回调：`onCharGenRequest`, `onItemGenRequest`, `onItemUpdateRequest`；`processStageMarkers()` 新增并行处理分支（char_update 保留在 Stage 3 Pipeline，不走回调） |
 
 ### Agent 模板层
-| 文件 | 改动 |
-|------|------|
-| `agent-templates.ts` | 新增 `item_update` 模板定义（Phase 10 stub） |
-| `placeholder-registry.ts` | 新增 `item_update` 默认模板；更新 `vars_update` 默认模板 |
-| `agent-config.json` | 更新 `varsUpdate` systemPrompt（新输出格式）；新增 `itemUpdate` 配置 |
+
+| 文件                      | 改动                                                                 |
+| ------------------------- | -------------------------------------------------------------------- |
+| `agent-templates.ts`      | 新增 `item_update` 模板定义（Phase 10 stub）                         |
+| `placeholder-registry.ts` | 新增 `item_update` 默认模板；更新 `vars_update` 默认模板             |
+| `agent-config.json`       | 更新 `varsUpdate` systemPrompt（新输出格式）；新增 `itemUpdate` 配置 |
 
 ### Agent 编排/链层
-| 文件 | 改动 |
-|------|------|
-| `char-gen-agent.ts` | 适配新的触发方式（从 `<char_detect>` → `<char_gen_request>`） |
-| `craft-gen-chain.ts` | 适配新的触发方式（从 `<craft_request>` → `<craft_gen_request>`） |
-| **新文件** `item-update-chain.ts` | 处理 `<item_update_request>`，解析 → StatePatch |
+
+| 文件                              | 改动                                                             |
+| --------------------------------- | ---------------------------------------------------------------- |
+| `char-gen-agent.ts`               | 适配新的触发方式（从 `<char_detect>` → `<char_gen_request>`）    |
+| `craft-gen-chain.ts`              | 适配新的触发方式（从 `<craft_request>` → `<craft_gen_request>`） |
+| **新文件** `item-update-chain.ts` | 处理 `<item_update_request>`，解析 → StatePatch                  |
 
 ### 可见性层
-| 文件 | 改动 |
-|------|------|
+
+| 文件                    | 改动                          |
+| ----------------------- | ----------------------------- |
 | `context-visibility.ts` | 新增 `item_update` 可见性配置 |
 
 ---
@@ -222,6 +228,7 @@ vars_update 完成后 (processStageMarkers)：
 ### vars_update System Prompt 重写
 
 **核心变化**：
+
 - 从"输出 JSON"变成"先输出 `<json>`，再输出 request 标签"
 - 需要根据 `{{CHARACTER_STATE}}` 的已有角色表判断新 vs 已存在
 - 物品同理：根据角色背包判断新 vs 已存在
@@ -269,7 +276,7 @@ const scanResult = scanMarkers(storyOutput);
 // 新:
 const varsOutput = this.getAgentOutputText('vars_update');
 const scanResult = scanMarkers(varsOutput);
-const jsonText = scanResult.cleanText;  // 去掉 XML 标签后的纯 JSON
+const jsonText = scanResult.cleanText; // 去掉 XML 标签后的纯 JSON
 ```
 
 ### JSON 解析与 Marker 扫描合一
@@ -285,6 +292,7 @@ vars_update 输出:
 ```
 
 统一流程：
+
 1. `scanMarkers(varsOutput)` → `{ markers[], cleanText }`
 2. `JSON.parse(cleanText)` → StatePatch
 3. `markers[]` → 触发各个回调（可并行）
@@ -300,6 +308,7 @@ vars_update 输出:
 ### craft 叙事注入逻辑简化
 
 当前 craft 结果通过字符串替换注入回 story 输出。新设计中 craft 标记在 vars_update 输出中（不在 story 中），建议：
+
 - craft 结果只做 StatePatch（物品入库 + FP/EXP 奖励）
 - 叙事描述由下一轮 Story Agent 自然引用
 - `onCraftRequest` 回调返回值从 `Promise<string | null>` 改为不需要叙事注入
@@ -307,25 +316,29 @@ vars_update 输出:
 
 ### 需要修改的接口签名
 
-| 函数/接口 | 文件 | 当前 | 新 |
-|---|---|---|---|
-| `OrchestratorEvents.onCraftRequest` | agent-orchestrator.ts:60 | `(marker, storyOutput): Promise<string\|null>` | `(marker, varsOutput): Promise<void>` |
-| `OrchestratorEvents.onCharDetect` | agent-orchestrator.ts:73 | `(markers, storyOutput, context)` | `(markers, varsOutput, context)` |
-| 改为 `onCharGenRequest` | 同上 | — | `(markers, varsOutput, context): Promise<void>` |
-| 新增 `onItemGenRequest` | 同上 | — | `(markers, varsOutput, context): Promise<void>` |
-| 新增 `onItemUpdateRequest` | 同上 | — | `(markers, varsOutput, context): Promise<void>` |
-| `CraftGenRequest` | craft-gen-chain.ts:39 | `storyOutput: string` | `varsOutput: string` |
-| `CharGenRequest` | char-gen-agent.ts:42 | 使用 `detection.rawContent` | 使用 `varsOutput` + `marker.bodyText` |
+| 函数/接口                           | 文件                     | 当前                                           | 新                                              |
+| ----------------------------------- | ------------------------ | ---------------------------------------------- | ----------------------------------------------- |
+| `OrchestratorEvents.onCraftRequest` | agent-orchestrator.ts:60 | `(marker, storyOutput): Promise<string\|null>` | `(marker, varsOutput): Promise<void>`           |
+| `OrchestratorEvents.onCharDetect`   | agent-orchestrator.ts:73 | `(markers, storyOutput, context)`              | `(markers, varsOutput, context)`                |
+| 改为 `onCharGenRequest`             | 同上                     | —                                              | `(markers, varsOutput, context): Promise<void>` |
+| 新增 `onItemGenRequest`             | 同上                     | —                                              | `(markers, varsOutput, context): Promise<void>` |
+| 新增 `onItemUpdateRequest`          | 同上                     | —                                              | `(markers, varsOutput, context): Promise<void>` |
+| `CraftGenRequest`                   | craft-gen-chain.ts:39    | `storyOutput: string`                          | `varsOutput: string`                            |
+| `CharGenRequest`                    | char-gen-agent.ts:42     | 使用 `detection.rawContent`                    | 使用 `varsOutput` + `marker.bodyText`           |
 
 ### 类型层
 
 ```typescript
 // types.ts — MarkerType 扩展
-export type MarkerType = 
-  | 'craft_request' | 'combat_trigger' | 'char_detect'     // 旧（保留兼容）
-  | 'char_gen_request' | 'char_update_request'              // 新
-  | 'item_gen_request' | 'item_update_request'              // 新
-  | 'craft_gen_request';                                    // 新（统一命名）
+export type MarkerType =
+  | 'craft_request'
+  | 'combat_trigger'
+  | 'char_detect' // 旧（保留兼容）
+  | 'char_gen_request'
+  | 'char_update_request' // 新
+  | 'item_gen_request'
+  | 'item_update_request' // 新
+  | 'craft_gen_request'; // 新（统一命名）
 ```
 
 ### char_update 不变
@@ -334,9 +347,9 @@ Stage 3 的 char_update 保持原样 —— 通过 `{{AGENT.VARS_UPDATE}}` 读�
 
 ### 新增 Agent 清单
 
-| Agent ID | 类型 | 工具 | 位置 |
-|----------|------|------|------|
-| `item_update` | 纯文本（非 Agentic） | 无 | Stage 2 回调，不在 Pipeline 中 |
+| Agent ID      | 类型                 | 工具 | 位置                           |
+| ------------- | -------------------- | ---- | ------------------------------ |
+| `item_update` | 纯文本（非 Agentic） | 无   | Stage 2 回调，不在 Pipeline 中 |
 
 ---
 
@@ -511,6 +524,7 @@ vars_update 模板需要增加 `{{INVENTORY}}` 以便判断"新物品 vs 已有�
 ### char_update System Prompt 微调
 
 当前 prompt 保持不变，仅需在提示中说明：
+
 - `{{AGENT.VARS_UPDATE}}` 现在包含 `<char_update_request>` 标签块
 - 优先从 `<char_update_request target="...">` 正文提取变化
 - 如 vars_update 未输出对应标签则保持现有逻辑（从 Story 正文自行分析）
@@ -576,11 +590,11 @@ processStageMarkers(Stage 2):
 
 ## 七、废弃项
 
-| 废弃内容 | 替代 |
-|---------|------|
-| vars_update 的 replace/delta/insert 中操作角色/物品变量 | `<char_update_request>` (→ char_update) / `<item_update_request>` (→ item_update) |
+| 废弃内容                                                | 替代                                                                               |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| vars_update 的 replace/delta/insert 中操作角色/物品变量 | `<char_update_request>` (→ char_update) / `<item_update_request>` (→ item_update)  |
 | `{{AGENT.VARS_UPDATE}}` 被 char_update 作为纯 JSON 解析 | 改为包含 request 标签的结构化正文，char_update 从中提取 `<char_update_request>` 块 |
-| Story Agent 输出 `<char_detect>` | vars_update 输出 `<char_gen_request>` |
+| Story Agent 输出 `<char_detect>`                        | vars_update 输出 `<char_gen_request>`                                              |
 
 ## 八、向后兼容
 

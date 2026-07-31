@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import AppButton from '../shared/AppButton.vue'
+import AppButton from '../shared/AppButton.vue';
 
 defineProps<{
-  canPrev?: boolean
-  canNext?: boolean
-  nextLabel?: string
-}>()
+  canPrev?: boolean;
+  canNext?: boolean;
+  nextLabel?: string;
+}>();
 
 defineEmits<{
-  prev: []
-  next: []
-  openPreset: []
-}>()
+  prev: [];
+  next: [];
+  openPreset: [];
+}>();
 </script>
 
 <template>
@@ -21,20 +21,10 @@ defineEmits<{
     </AppButton>
 
     <div class="footer-nav">
-      <AppButton
-        variant="secondary"
-        size="md"
-        :disabled="canPrev === false"
-        @click="$emit('prev')"
-      >
+      <AppButton variant="secondary" size="md" :disabled="canPrev === false" @click="$emit('prev')">
         ← 上一步
       </AppButton>
-      <AppButton
-        variant="primary"
-        size="md"
-        :disabled="canNext === false"
-        @click="$emit('next')"
-      >
+      <AppButton variant="primary" size="md" :disabled="canNext === false" @click="$emit('next')">
         {{ nextLabel || '下一步 →' }}
       </AppButton>
     </div>

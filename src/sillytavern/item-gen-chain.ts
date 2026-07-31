@@ -118,10 +118,13 @@ export async function runItemGenChain(
 
   // Step 2: 转成 patches（owner 来自 marker.attributes.owner，缺省取 context 玩家名；#6 player_1 灭绝）
   const ownerFromMarker = request.marker.attributes.owner;
-  const playerName = request.context.characters?.find(c => c.type === 'player')?.name;
+  const playerName = request.context.characters?.find((c) => c.type === 'player')?.name;
   const characterId = ownerFromMarker ?? playerName;
   if (!characterId) {
-    console.warn('[item-gen-chain] 无 owner 且无玩家角色，跳过该 item_gen_request:', request.marker.bodyText.slice(0, 50));
+    console.warn(
+      '[item-gen-chain] 无 owner 且无玩家角色，跳过该 item_gen_request:',
+      request.marker.bodyText.slice(0, 50),
+    );
     return { patches: [], itemOutput: { skills: [], equipment: [], inventory: [] } };
   }
   const patches = buildItemGenPatches(itemOutput, characterId);
@@ -150,7 +153,8 @@ async function callItemGenForRequest(
 ): Promise<ItemGenOutput> {
   const marker = request.marker;
   const itemType = marker.attributes.itemType ?? 'equipment';
-  const slotAttr = itemType === 'equipment' ? ` slot="${guessSlot(marker.bodyText, itemType)}"` : '';
+  const slotAttr =
+    itemType === 'equipment' ? ` slot="${guessSlot(marker.bodyText, itemType)}"` : '';
   // item_gen 模板的 <request> 子元素期望含描述；type 约束它生成的条目类别。
   const itemRequestsXML = [
     `<item_requests>`,
@@ -163,21 +167,27 @@ async function callItemGenForRequest(
   const itemLocalParams: Record<string, string> = {
     ITEM_REQUEST: itemRequestsXML,
     // 独立链没有 char_gen / craft_gen 上游，留空注释给 item_gen 提示
-    CHAR_GEN_RESULT: '（无 — 本次为 request_dispatcher 直接触发的独立物品生成，参考上方 <物品需求>）',
+    CHAR_GEN_RESULT:
+      '（无 — 本次为 request_dispatcher 直接触发的独立物品生成，参考上方 <物品需求>）',
     CRAFT_RESULT: '',
   };
 
   // 构建 item_gen 上下文 — agentOutputs['story'] 传正文，对标 char/craft 链
   const contextWithStory: AgentContext = {
     ...request.context,
-    agentOutputs: new Map([
-      ['story', request.storyOutput],
-    ]),
+    agentOutputs: new Map([['story', request.storyOutput]]),
   };
 
   try {
     // 真机修(2026-07-17): configs/worldBooks/presets 透传 — 此前恒 undefined（systemPrompt 退化 stub）
-    const messages = buildAgentMessages('item_gen', contextWithStory, request.configs, request.worldBooks, request.presets, itemLocalParams);
+    const messages = buildAgentMessages(
+      'item_gen',
+      contextWithStory,
+      request.configs,
+      request.worldBooks,
+      request.presets,
+      itemLocalParams,
+    );
     if (!messages || messages.length === 0) {
       // item_gen 模板找不到 / 产出空 messages 时返回空，不阻塞主流程
       // （避免空 messages 打 API 触发 HTTP 400 "missing field messages"）
@@ -240,10 +250,7 @@ async function callItemGenForRequest(
  * - 废除 id 生成（itemgen_eq_/inv_/skill_ 前缀）
  * - owner 解析: marker.attributes.owner ?? context 玩家名（'player_1' 假 id 灭绝 #6）
  */
-export function buildItemGenPatches(
-  itemOutput: ItemGenOutput,
-  characterId: string,
-): StatePatch[] {
+export function buildItemGenPatches(itemOutput: ItemGenOutput, characterId: string): StatePatch[] {
   const patches: StatePatch[] = [];
 
   // 1. 装备 → add_item（M3: 带 equippedSlot 单 patch 落库，不再 add+equip 两步）
@@ -257,7 +264,7 @@ export function buildItemGenPatches(
         quantity: 1,
         type: '装备',
         rarity: equip.quality,
-        equippedSlot: normalizeSlot(equip.slot),  // M3: slot 归一化，null=留背包
+        equippedSlot: normalizeSlot(equip.slot), // M3: slot 归一化，null=留背包
         stats: equip.stats,
         durability: equip.durability,
         maxDurability: equip.durability,

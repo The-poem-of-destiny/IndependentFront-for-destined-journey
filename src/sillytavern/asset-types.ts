@@ -203,8 +203,18 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
 export function clampAssetFraming(input?: unknown): AssetFraming {
   const src = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
   return {
-    x: clampNumber(src.x, DEFAULT_ASSET_FRAMING.x, ASSET_FRAMING_MIN_PERCENT, ASSET_FRAMING_MAX_PERCENT),
-    y: clampNumber(src.y, DEFAULT_ASSET_FRAMING.y, ASSET_FRAMING_MIN_PERCENT, ASSET_FRAMING_MAX_PERCENT),
+    x: clampNumber(
+      src.x,
+      DEFAULT_ASSET_FRAMING.x,
+      ASSET_FRAMING_MIN_PERCENT,
+      ASSET_FRAMING_MAX_PERCENT,
+    ),
+    y: clampNumber(
+      src.y,
+      DEFAULT_ASSET_FRAMING.y,
+      ASSET_FRAMING_MIN_PERCENT,
+      ASSET_FRAMING_MAX_PERCENT,
+    ),
     scale: clampNumber(
       src.scale,
       DEFAULT_ASSET_FRAMING.scale,

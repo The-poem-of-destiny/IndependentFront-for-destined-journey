@@ -98,6 +98,7 @@ reference/audit_report.md        # 代码 vs 世界书冲突审计报告
 **在生成任何与《命定之诗》世界观相关的叙事内容时，必须先查阅 `reference/narrative_context_example.md`。**
 
 该文件定义了两件事：
+
 1. **应该考虑什么** — 生成叙事场景时，需要从哪些维度提取世界信息（外貌/种族/背景/性格/五维/装备/技能/背包/关系/好感度/状态效果/时间/地点/天气等）并自然地编织进叙事
 2. **不应该出现什么** — 什么内容会破坏世界观沉浸感（装备数值 `攻击力+15`、技能消耗 `SP消耗:15`、物品数值效果 `恢复20HP`、游戏机制术语 `好感度+5` 等）
 
@@ -120,6 +121,7 @@ reference/agent流程测试/要求.md            # 测试需求说明
 ```
 
 该分析文件记录了每个 Agent 的：
+
 - 模板格式规范（agent-templates.ts 原文约束）
 - 可用工具 Schema（Agentic 类型）及参数/返回值
 - 完整输出追踪（思维链 → 工具调用序列 → 最终输出）
@@ -138,21 +140,21 @@ reference/status_index.html        # 状态栏 (477KB) — React + immer + gsap,
 
 ### 参考页面架构摘要
 
-| 页面 | 框架 | 大小 | 核心组件/功能 |
-|------|------|------|--------------|
-| `home_index.html` | Vue 3 | 94KB | hero-title/hero-subtitle, info-panel, recommend-hero-section, update-section, 环境检测(tavernHelper/MVU/EJS), 用户协议弹窗 |
-| `custom_start_index.html` | Vue 3 + Pinia + VueRouter | 341KB | 7级品质选择(普通~唯一), 装备类型(武器/防具/饰品), 技能类型(主动/被动), 物品类型(装备/道具/技能), 加载 `baseInfo.json` 自定义数据 |
-| `status_index.html` | React + immer + gsap + OpenSeadragon | 477KB | StatusBar/ResourceBar/AvatarPanel/DetailPanel/InfoPanel, MapView, MarkerPanel, CategoryBar/FilterBar/SettingBar/TabBar/TitleBar |
+| 页面                      | 框架                                 | 大小  | 核心组件/功能                                                                                                                    |
+| ------------------------- | ------------------------------------ | ----- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `home_index.html`         | Vue 3                                | 94KB  | hero-title/hero-subtitle, info-panel, recommend-hero-section, update-section, 环境检测(tavernHelper/MVU/EJS), 用户协议弹窗       |
+| `custom_start_index.html` | Vue 3 + Pinia + VueRouter            | 341KB | 7级品质选择(普通~唯一), 装备类型(武器/防具/饰品), 技能类型(主动/被动), 物品类型(装备/道具/技能), 加载 `baseInfo.json` 自定义数据 |
+| `status_index.html`       | React + immer + gsap + OpenSeadragon | 477KB | StatusBar/ResourceBar/AvatarPanel/DetailPanel/InfoPanel, MapView, MarkerPanel, CategoryBar/FilterBar/SettingBar/TabBar/TitleBar  |
 
 ### 关键数值来源（世界书 #417617 [核心数值表]）
 
-| 参数 | T1 | T2 | T3 | T4 | T5 | T6 | T7 |
-|------|----|----|----|----|----|----|-----|
-| HP乘数 | 1 | 2 | 4 | 10 | 20 | 40 | 100 |
-| MP/SP乘数 | 1 | 2.5 | 6 | 15 | 35 | 80 | 160 |
-| 战斗系数 | 2.0 | 2.8 | 4.0 | 8.0 | 15.0 | 35.0 | 80.0 |
-| 属性上限 | 8 | 10 | 12 | 14 | 16 | 18 | 20 |
-| EXP上限 | 100 | 1000 | 4000 | 10000 | 25000 | 50000 | 999999 |
+| 参数      | T1  | T2   | T3   | T4    | T5    | T6    | T7     |
+| --------- | --- | ---- | ---- | ----- | ----- | ----- | ------ |
+| HP乘数    | 1   | 2    | 4    | 10    | 20    | 40    | 100    |
+| MP/SP乘数 | 1   | 2.5  | 6    | 15    | 35    | 80    | 160    |
+| 战斗系数  | 2.0 | 2.8  | 4.0  | 8.0   | 15.0  | 35.0  | 80.0   |
+| 属性上限  | 8   | 10   | 12   | 14    | 16    | 18    | 20     |
+| EXP上限   | 100 | 1000 | 4000 | 10000 | 25000 | 50000 | 999999 |
 
 - **属性硬上限**: 20（仅 T7 可达），公式: `天赋 + 层级 + 等级`
 - **品质体系**: 普通/优良/稀有/史诗/传说/神话/唯一（7 级）
@@ -197,7 +199,7 @@ npm run dev            # 开发服务器（dev.bat：自动杀残留进程 + 固
 - 变量按**每个 Save** 存储，`user.` / `sys.` 命名空间隔离。
 - **必须写测试** — 每个新模块必须配套 `*.test.ts`。测试框架 **Vitest**，DB 测试用 **fake-indexeddb**。`npm test` 必须全部通过。代码审查前先跑测试。
 - **Prompt vs Code 边界 (ADR-11)**：确定性逻辑（战斗/制作/数值/骰池/状态结算）归 Code；创造性逻辑（叙事/角色/记忆/剧情判断）归 Prompt。
-- **$ API 语义级抽象 (ADR-19)**：AI 调 `$combat.attack()` 声明意图，Code 内部执行公式。不暴露 `modifyHp()` 等 CRUD 原语给 AI。
+- **$ API 语义级抽象 (ADR-19)**：AI 调 `$combat.attack()`声明意图，Code 内部执行公式。不暴露`modifyHp()` 等 CRUD 原语给 AI。
 - **声明式优先 (ADR-20)**：效果系统先用 VarsPatch + StatusEffect 声明式格式。复杂动态逻辑通过 `script-executor.ts` 脚本沙盒实现（`$event.on/off` 持久订阅、`$call` 跨对象引用、`init/cleanup` 生命周期）。
 - **StateManager 为唯一写入入口 (ADR-21)**：所有状态变更通过 `commitChatState()`，替代分散的 `saveChat()`。
   - 📌 **受控例外 (P1-09)**：SaveProfile 的纯 UI 辅助字段（`focusQuest` 焦点任务选择、`news[].read` 已读标记）允许 UI 层直写，但必须走 `updateProfile()` / `markNewsRead()` 统一写入函数（非裸 `db.put`）并带 try/catch。AI 产生的 SaveProfile 变更仍必须走 `vars_update` 语义 op，不在此例外内。
@@ -220,16 +222,16 @@ Layer 1  原语级 状态读写        StateManager.commitChatState() / $validat
 
 ### 关键架构决策
 
-| 决策 | 选择 | 理由 |
-|------|------|------|
-| EventBus 实例化 | 按 SaveSlot | 效果实例随存档隔离 |
-| Script 执行 | 沙盒模式 (script-executor.ts) | $event.on/off 持久订阅 + $call 跨对象调用 + init/cleanup 生命周期 |
-| 持久订阅管理 | subscription-manager.ts | 递归保护(≤10) + 僵尸兜底(unregisterAll) |
-| EffectRuntime 时序 | 管线完成后批量执行 | 保持 DAG 原子性 |
-| EventBus 引入时机 | Phase 7e+8（已完成） | 与 Script 系统同步上线 |
-| Agentic 模式 | OpenAI function calling (Phase 8.5) | craft_gen/char_gen/item_gen 通过 tools 调用真实 Code 函数，禁止 AI 编造数值 |
-| craft_request 时序 | 延迟型 (对齐 combat_trigger) | Stage 1 暂存 → Stage 2 统一执行，避免阻塞叙事 |
-| System Prompt 管理 (Phase 9) | agent-config.json 唯一来源 | 所有 Agent 的完整 systemPrompt 存在 agent-config.json；agent-templates.ts 只留 stub + 动态上下文函数 |
+| 决策                         | 选择                                | 理由                                                                                                 |
+| ---------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| EventBus 实例化              | 按 SaveSlot                         | 效果实例随存档隔离                                                                                   |
+| Script 执行                  | 沙盒模式 (script-executor.ts)       | $event.on/off 持久订阅 + $call 跨对象调用 + init/cleanup 生命周期                                    |
+| 持久订阅管理                 | subscription-manager.ts             | 递归保护(≤10) + 僵尸兜底(unregisterAll)                                                              |
+| EffectRuntime 时序           | 管线完成后批量执行                  | 保持 DAG 原子性                                                                                      |
+| EventBus 引入时机            | Phase 7e+8（已完成）                | 与 Script 系统同步上线                                                                               |
+| Agentic 模式                 | OpenAI function calling (Phase 8.5) | craft_gen/char_gen/item_gen 通过 tools 调用真实 Code 函数，禁止 AI 编造数值                          |
+| craft_request 时序           | 延迟型 (对齐 combat_trigger)        | Stage 1 暂存 → Stage 2 统一执行，避免阻塞叙事                                                        |
+| System Prompt 管理 (Phase 9) | agent-config.json 唯一来源          | 所有 Agent 的完整 systemPrompt 存在 agent-config.json；agent-templates.ts 只留 stub + 动态上下文函数 |
 
 ### 效果系统统一框架（战斗+制作共用，ADR-29）
 
@@ -255,16 +257,16 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC → ch
 
 ### 9 个 $ API Namespace
 
-| Namespace | AI可见 | 用途 |
-|-----------|--------|------|
-| `$combat` | ✅ | 战斗流程 |
-| `$craft` | ✅ | 制作流程 |
-| `$status` | ✅ | 状态效果 |
-| `$dice` | ✅ | 骰池系统 |
-| `$char` | ✅(只读) | 角色查询 |
-| `$var` | ✅ | 变量读写 |
-| `$time` | ✅ | 时间查询 |
-| `$resource` | ✅(只读) | 资源查询 |
+| Namespace   | AI可见     | 用途     |
+| ----------- | ---------- | -------- |
+| `$combat`   | ✅         | 战斗流程 |
+| `$craft`    | ✅         | 制作流程 |
+| `$status`   | ✅         | 状态效果 |
+| `$dice`     | ✅         | 骰池系统 |
+| `$char`     | ✅(只读)   | 角色查询 |
+| `$var`      | ✅         | 变量读写 |
+| `$time`     | ✅         | 时间查询 |
+| `$resource` | ✅(只读)   | 资源查询 |
 | `$validate` | ❌(引擎内) | 数值约束 |
 
 ## Phase 完成通知
@@ -282,29 +284,29 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 
 > 详细记录见 `docs/CHANGELOG.md`。架构变更同步更新下方架构图。
 
-| Phase | 内容 | 状态 |
-|-------|------|------|
-| 1-4.6 | 架构/数据结构/Agent编排/记忆/事件/FP 基础 | ✅ |
-| 5 | 角色 & 变量系统 (tier/bloodlines/validate/char/time) | ✅ |
-| Geography | 位置系统 (location-db, 10势力 32节点) | ✅ |
-| Audit Fix | 世界书对齐 (数值/地理/品质/血脉) | ✅ |
-| 6a-6e | 战斗/制作/集群士气/好感/Marker+SubAgent | ✅ |
-| 7a-7c | 工程 (Vite+Vue3+Pinia) / 主题组件 / 首页+设置页 | ✅ |
-| 7d | 捏人页 `/create` | 🔄 世界书驱动改造中 |
-| 7e | 游戏页+HUD+脚本引擎+ChatFlow+输出美化+ScenePanel | 🔄 待集成验证 |
-| 7f / 7g | 创意工坊 / 衔接测试 | ⬜ |
-| 8 / 8.5 | Agent 可见性 / Agentic Agent (function calling) | ✅ |
-| 9 / 9b | System Prompt 迁移 / craft_gen 细化 | ✅ |
-| 9c | 集成测试 & 交付 | ⬜ |
-| 10a-10h | 模板系统/预设占位符/vars_update/Quest/memory_summary | ✅ |
-| 10i | 输出美化规则库 | ✅ |
-| 10j | 剧情系统接线 | ✅ 待真机 |
-| 10k | 快照面板+右键回退重发 | ✅ 待真机 |
-| M1-M6 | 数据字段规范迁移（2787 tests 全绿） | ✅ |
-| Audio | 音频系统 v1.0（双通道+三后端+按名寻址+场景配乐） | ✅ |
-| 素材 | 素材管理系统 v1.0（渲染面+大画像+裁剪台+画像弹窗） | ✅ |
-| 战斗 v2 | 战斗系统架构 v2（管道+中间件+6大类+19event+独立面板） | ✅ M5完成 待M6真机 |
-| 真机迭代 | debug loop 持续修复 | 🔄 |
+| Phase     | 内容                                                  | 状态                |
+| --------- | ----------------------------------------------------- | ------------------- |
+| 1-4.6     | 架构/数据结构/Agent编排/记忆/事件/FP 基础             | ✅                  |
+| 5         | 角色 & 变量系统 (tier/bloodlines/validate/char/time)  | ✅                  |
+| Geography | 位置系统 (location-db, 10势力 32节点)                 | ✅                  |
+| Audit Fix | 世界书对齐 (数值/地理/品质/血脉)                      | ✅                  |
+| 6a-6e     | 战斗/制作/集群士气/好感/Marker+SubAgent               | ✅                  |
+| 7a-7c     | 工程 (Vite+Vue3+Pinia) / 主题组件 / 首页+设置页       | ✅                  |
+| 7d        | 捏人页 `/create`                                      | 🔄 世界书驱动改造中 |
+| 7e        | 游戏页+HUD+脚本引擎+ChatFlow+输出美化+ScenePanel      | 🔄 待集成验证       |
+| 7f / 7g   | 创意工坊 / 衔接测试                                   | ⬜                  |
+| 8 / 8.5   | Agent 可见性 / Agentic Agent (function calling)       | ✅                  |
+| 9 / 9b    | System Prompt 迁移 / craft_gen 细化                   | ✅                  |
+| 9c        | 集成测试 & 交付                                       | ⬜                  |
+| 10a-10h   | 模板系统/预设占位符/vars_update/Quest/memory_summary  | ✅                  |
+| 10i       | 输出美化规则库                                        | ✅                  |
+| 10j       | 剧情系统接线                                          | ✅ 待真机           |
+| 10k       | 快照面板+右键回退重发                                 | ✅ 待真机           |
+| M1-M6     | 数据字段规范迁移（2787 tests 全绿）                   | ✅                  |
+| Audio     | 音频系统 v1.0（双通道+三后端+按名寻址+场景配乐）      | ✅                  |
+| 素材      | 素材管理系统 v1.0（渲染面+大画像+裁剪台+画像弹窗）    | ✅                  |
+| 战斗 v2   | 战斗系统架构 v2（管道+中间件+6大类+19event+独立面板） | ✅ M5完成 待M6真机  |
+| 真机迭代  | debug loop 持续修复                                   | 🔄                  |
 
 ## 架构（已实现部分）
 
@@ -436,20 +438,20 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 
 ### 设置页 12 分区
 
-| 分区 | 内容 |
-|------|------|
-| 🔌 API 配置 | API 池 CRUD、连接测试、模型列表获取、模型推荐 |
-| 🤖 Agent 配置 | 11 个汉化 Agent、模型选择、世界书开关、System Prompt 编辑 |
-| 📚 世界书 | [占位] 导入/新建按钮 |
-| 📖 剧情系统 | 8 种剧情偏向、模式/年份/难度/外部NPC/自定义偏好、大纲预览 |
-| 🧠 记忆 & 缓存 | 召回数/压缩阈值/快照上限/缓存策略 |
-| 🎨 外观主题 | 10 主题网格、字体风格、字体大小、悬停延迟 |
-| 💬 消息显示 | 系统通知开关 + 7 种事件类型过滤 |
-| ✨ 输出美化 | 预设规则库 (22条) + auto-enable 绑定 + 三段式 UI + CRUD |
-| 🎵 音频 | 混音台 + 播放列表 + 音轨库（音乐文件夹条/上传/搜索/场景配乐开关） |
-| 🖼 素材 | 导入条 + 素材库（按角色分组/扁平表/多选批删）+ 变体抽屉（设主图/裁剪/改名） |
-| 💾 存档数据 | 导出/导入/清除（排除音频库与素材库，各有独立导出口） |
-| ℹ 关于 | 引擎版本/技术栈/统计 |
+| 分区           | 内容                                                                        |
+| -------------- | --------------------------------------------------------------------------- |
+| 🔌 API 配置    | API 池 CRUD、连接测试、模型列表获取、模型推荐                               |
+| 🤖 Agent 配置  | 11 个汉化 Agent、模型选择、世界书开关、System Prompt 编辑                   |
+| 📚 世界书      | [占位] 导入/新建按钮                                                        |
+| 📖 剧情系统    | 8 种剧情偏向、模式/年份/难度/外部NPC/自定义偏好、大纲预览                   |
+| 🧠 记忆 & 缓存 | 召回数/压缩阈值/快照上限/缓存策略                                           |
+| 🎨 外观主题    | 10 主题网格、字体风格、字体大小、悬停延迟                                   |
+| 💬 消息显示    | 系统通知开关 + 7 种事件类型过滤                                             |
+| ✨ 输出美化    | 预设规则库 (22条) + auto-enable 绑定 + 三段式 UI + CRUD                     |
+| 🎵 音频        | 混音台 + 播放列表 + 音轨库（音乐文件夹条/上传/搜索/场景配乐开关）           |
+| 🖼 素材         | 导入条 + 素材库（按角色分组/扁平表/多选批删）+ 变体抽屉（设主图/裁剪/改名） |
+| 💾 存档数据    | 导出/导入/清除（排除音频库与素材库，各有独立导出口）                        |
+| ℹ 关于         | 引擎版本/技术栈/统计                                                        |
 
 ### 预设系统（正文 Agent 专用）
 

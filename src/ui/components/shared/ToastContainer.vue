@@ -1,20 +1,20 @@
 <script setup lang="ts">
-import { useUIStore } from '../../stores/ui-store'
+import { useUIStore } from '../../stores/ui-store';
 
-const ui = useUIStore()
+const ui = useUIStore();
 
 const iconMap: Record<string, string> = {
   info: 'i',
   success: '✓',
   warning: '⚠',
   error: '✕',
-}
+};
 
 function handleClick(t: { id: string; message: string; type: string }) {
   if (t.type === 'error' || t.type === 'warning') {
-    navigator.clipboard.writeText(t.message).catch(() => {})
+    navigator.clipboard.writeText(t.message).catch(() => {});
   }
-  ui.removeToast(t.id)
+  ui.removeToast(t.id);
 }
 </script>
 
@@ -76,13 +76,35 @@ function handleClick(t: { id: string; message: string; type: string }) {
   min-width: 0;
 }
 
-.toast-info    { background: var(--theme-primary); color: var(--theme-primary-text); }
-.toast-success { background: var(--theme-success); color: #fff; }
-.toast-warning { background: var(--theme-warning); color: #1a1510; }
-.toast-error   { background: var(--theme-error); color: #fff; }
+.toast-info {
+  background: var(--theme-primary);
+  color: var(--theme-primary-text);
+}
+.toast-success {
+  background: var(--theme-success);
+  color: #fff;
+}
+.toast-warning {
+  background: var(--theme-warning);
+  color: #1a1510;
+}
+.toast-error {
+  background: var(--theme-error);
+  color: #fff;
+}
 
-.toast-enter-active { transition: all 0.3s ease; }
-.toast-leave-active { transition: all 0.2s ease; }
-.toast-enter-from { opacity: 0; transform: translateX(50px); }
-.toast-leave-to   { opacity: 0; transform: translateX(50px); }
+.toast-enter-active {
+  transition: all 0.3s ease;
+}
+.toast-leave-active {
+  transition: all 0.2s ease;
+}
+.toast-enter-from {
+  opacity: 0;
+  transform: translateX(50px);
+}
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(50px);
+}
 </style>

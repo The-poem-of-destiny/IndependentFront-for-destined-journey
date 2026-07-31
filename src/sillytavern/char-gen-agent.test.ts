@@ -15,11 +15,7 @@ import {
   runCharGenChain,
   $chargen,
 } from './char-gen-agent';
-import type {
-  CharGenRequest,
-  CharGenAgentDeps,
-  CharGenClient,
-} from './char-gen-agent';
+import type { CharGenRequest, CharGenAgentDeps, CharGenClient } from './char-gen-agent';
 import type {
   CharDetectMarker,
   CharGenOutput,
@@ -93,9 +89,14 @@ function makeCharGenOutput(overrides: Partial<CharGenOutput> = {}): CharGenOutpu
     equipment: [],
     inventory: [],
     ascension: {
-      enabled: false, path: '', description: '',
-      elements: [], authorities: [], laws: [],
-      deityPosition: '', divineKingdom: { name: '', description: '' },
+      enabled: false,
+      path: '',
+      description: '',
+      elements: [],
+      authorities: [],
+      laws: [],
+      deityPosition: '',
+      divineKingdom: { name: '', description: '' },
     },
     ...overrides,
   };
@@ -191,19 +192,16 @@ describe('detectNewCharacters', () => {
   });
 
   it('应过滤已存在的角色名 (大小写不敏感)', () => {
-    const existingChars = [
-      { name: '小明', type: 'npc' } as CharacterState,
-    ];
-    const text = '<char_detect characterName="小明">已存在</char_detect><char_detect characterName="小红">新角色</char_detect>';
+    const existingChars = [{ name: '小明', type: 'npc' } as CharacterState];
+    const text =
+      '<char_detect characterName="小明">已存在</char_detect><char_detect characterName="小红">新角色</char_detect>';
     const result = detectNewCharacters(text, existingChars);
     expect(result).toHaveLength(1);
     expect(result[0].characterName).toBe('小红');
   });
 
   it('没有名字的 char_detect 不应被过滤 (需要 AI 生成名字)', () => {
-    const existingChars = [
-      { name: '路人甲', type: 'npc' } as CharacterState,
-    ];
+    const existingChars = [{ name: '路人甲', type: 'npc' } as CharacterState];
     const text = '<char_detect>无名角色</char_detect>';
     const result = detectNewCharacters(text, existingChars);
     expect(result).toHaveLength(1);
@@ -215,7 +213,8 @@ describe('detectNewCharacters', () => {
       { name: '小明', type: 'npc' },
       { name: '小红', type: 'npc' },
     ] as CharacterState[];
-    const text = '<char_detect characterName="小明">A</char_detect><char_detect characterName="小红">B</char_detect>';
+    const text =
+      '<char_detect characterName="小明">A</char_detect><char_detect characterName="小红">B</char_detect>';
     const result = detectNewCharacters(text, existingChars);
     expect(result).toHaveLength(0);
   });
@@ -284,7 +283,7 @@ describe('assembleCharacterState', () => {
     });
     const result = assembleCharacterState(charData, itemData);
     // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
-    const equipped = result.inventory.filter(i => i.equippedSlot);
+    const equipped = result.inventory.filter((i) => i.equippedSlot);
     expect(equipped).toHaveLength(1);
     expect(equipped[0].equippedSlot).toBe('武器');
   });
@@ -292,13 +291,11 @@ describe('assembleCharacterState', () => {
   it('应合并背包物品', () => {
     const charData = makeCharGenOutput();
     const itemData = makeItemGenOutput({
-      inventory: [
-        { name: '药水', description: '回复药水', quantity: 5, type: '消耗品' },
-      ],
+      inventory: [{ name: '药水', description: '回复药水', quantity: 5, type: '消耗品' }],
     });
     const result = assembleCharacterState(charData, itemData);
     // M2: 装备也是物品 — 默认 itemData 的 精灵长弓 以 equippedSlot 非空形式并入 inventory（规范 §3）
-    const looseItems = result.inventory.filter(i => !i.equippedSlot);
+    const looseItems = result.inventory.filter((i) => !i.equippedSlot);
     expect(looseItems).toHaveLength(1);
     expect(looseItems[0].name).toBe('药水');
     expect(looseItems[0].quantity).toBe(5);
@@ -309,7 +306,7 @@ describe('assembleCharacterState', () => {
     const result = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] });
     expect(result.skills).toHaveLength(0);
     // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
-    expect(result.inventory.filter(i => i.equippedSlot)).toHaveLength(0);
+    expect(result.inventory.filter((i) => i.equippedSlot)).toHaveLength(0);
     expect(result.inventory).toHaveLength(0);
   });
 
@@ -334,9 +331,14 @@ describe('assembleCharacterState', () => {
       tier: 5,
       level: 15,
       ascension: {
-        enabled: true, path: '火焰之道', description: '掌控火之要素',
-        elements: [], authorities: [], laws: [],
-        deityPosition: '', divineKingdom: { name: '', description: '' },
+        enabled: true,
+        path: '火焰之道',
+        description: '掌控火之要素',
+        elements: [],
+        authorities: [],
+        laws: [],
+        deityPosition: '',
+        divineKingdom: { name: '', description: '' },
       },
     });
     const result = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] });
@@ -346,27 +348,43 @@ describe('assembleCharacterState', () => {
 
   it('应支持 overrides 参数', () => {
     const charData = makeCharGenOutput();
-    const result = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] }, {
-      id: 'custom-id',
-      location: '白曜城',
-    });
+    const result = assembleCharacterState(
+      charData,
+      { skills: [], equipment: [], inventory: [] },
+      {
+        id: 'custom-id',
+        location: '白曜城',
+      },
+    );
     expect(result.id).toBe('custom-id');
     expect(result.location).toBe('白曜城');
   });
 
   it('默认 present=true 且可被 overrides 覆盖', () => {
     const charData = makeCharGenOutput();
-    const defaultResult = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] });
+    const defaultResult = assembleCharacterState(charData, {
+      skills: [],
+      equipment: [],
+      inventory: [],
+    });
     expect(defaultResult.present).toBe(true);
 
-    const customResult = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] }, {
-      present: false,
-    });
+    const customResult = assembleCharacterState(
+      charData,
+      { skills: [], equipment: [], inventory: [] },
+      {
+        present: false,
+      },
+    );
     expect(customResult.present).toBe(false);
   });
 
   it('高层级角色应有更高的 HP（世界书公式）', () => {
-    const charData = makeCharGenOutput({ tier: 5, level: 15, attributes: { str: 8, dex: 8, con: 10, int: 8, spi: 8 } });
+    const charData = makeCharGenOutput({
+      tier: 5,
+      level: 15,
+      attributes: { str: 8, dex: 8, con: 10, int: 8, spi: 8 },
+    });
     const result = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] });
     // T5: hpMul=20, mpMul=35, spMul=35; 五维和=42
     // HP = 10×100×20 + 42 = 20042
@@ -456,7 +474,11 @@ describe('buildCharGenPatches', () => {
 
   it('空物品数据时应只有 add_character patch', () => {
     const charData = makeCharGenOutput();
-    const character = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] });
+    const character = assembleCharacterState(charData, {
+      skills: [],
+      equipment: [],
+      inventory: [],
+    });
     const patches = buildCharGenPatches(character);
     expect(patches).toHaveLength(1);
     expect(patches[0].op).toBe('add_character');
@@ -584,7 +606,7 @@ describe('runCharGenChain', () => {
     const commitChatState = vi.fn().mockResolvedValue(undefined);
 
     const deps: CharGenAgentDeps = {
-      clientFactory: (agentId: string) => agentId === 'char_gen' ? charClient : itemClient,
+      clientFactory: (agentId: string) => (agentId === 'char_gen' ? charClient : itemClient),
       stateManager: { commitChatState },
     };
 
@@ -598,7 +620,7 @@ describe('runCharGenChain', () => {
     const itemClient = makeMockClient(makeItemGenOutput());
 
     const deps: CharGenAgentDeps = {
-      clientFactory: (agentId: string) => agentId === 'char_gen' ? charClient : itemClient,
+      clientFactory: (agentId: string) => (agentId === 'char_gen' ? charClient : itemClient),
       // 不提供 stateManager
     };
 
@@ -635,7 +657,10 @@ describe('$chargen', () => {
  * - 需要 character context 的工具 → 空 context 自然降级
  * - get_inventory 需要 characterId，空 context 会 throw → catch 降级
  */
-async function executeToolCallForTest(functionName: string, args: Record<string, any>): Promise<any> {
+async function executeToolCallForTest(
+  functionName: string,
+  args: Record<string, any>,
+): Promise<any> {
   // get_inventory 需要 characterId → 空 context 找不到角色会抛错 → 降级
   if (functionName === 'get_inventory') {
     return {
@@ -680,48 +705,46 @@ function makeAgenticMockClient(
       cacheHit: false,
       duration: 0,
     }),
-    chatWithTools: vi.fn().mockImplementation(
-      async (request, toolExecutor, _options) => {
-        const conversation = [...request.messages];
+    chatWithTools: vi.fn().mockImplementation(async (request, toolExecutor, _options) => {
+      const conversation = [...request.messages];
 
-        for (const step of toolCallSequence) {
-          // 注入 assistant 消息（含 tool_calls）
-          const toolCalls = step.calls.map((c) => ({
-            id: `call_${c.name}_${Date.now()}`,
-            type: 'function' as const,
-            function: {
-              name: c.name,
-              arguments: JSON.stringify(c.args),
-            },
-          }));
+      for (const step of toolCallSequence) {
+        // 注入 assistant 消息（含 tool_calls）
+        const toolCalls = step.calls.map((c) => ({
+          id: `call_${c.name}_${Date.now()}`,
+          type: 'function' as const,
+          function: {
+            name: c.name,
+            arguments: JSON.stringify(c.args),
+          },
+        }));
 
+        conversation.push({
+          role: 'assistant',
+          content: `Calling ${step.calls.map((c) => c.name).join(', ')}...`,
+          tool_calls: toolCalls,
+        } as any);
+
+        // 逐个执行工具并回注 tool 消息
+        for (const c of step.calls) {
+          const result = await toolExecutor(c.name, c.args);
           conversation.push({
-            role: 'assistant',
-            content: `Calling ${step.calls.map((c) => c.name).join(', ')}...`,
-            tool_calls: toolCalls,
+            role: 'tool',
+            tool_call_id: `call_${c.name}`,
+            name: c.name,
+            content: JSON.stringify(result),
           } as any);
-
-          // 逐个执行工具并回注 tool 消息
-          for (const c of step.calls) {
-            const result = await toolExecutor(c.name, c.args);
-            conversation.push({
-              role: 'tool',
-              tool_call_id: `call_${c.name}`,
-              name: c.name,
-              content: JSON.stringify(result),
-            } as any);
-          }
         }
+      }
 
-        return {
-          output: finalOutput,
-          rawResponse: finalOutput,
-          tokensUsed: 500,
-          cacheHit: false,
-          duration: 1000,
-        };
-      },
-    ),
+      return {
+        output: finalOutput,
+        rawResponse: finalOutput,
+        tokensUsed: 500,
+        cacheHit: false,
+        duration: 1000,
+      };
+    }),
   };
 }
 
@@ -806,7 +829,11 @@ describe('callCharGenAgent (Agentic 路径)', () => {
     // roll_attributes 返回 { str, dex, con, int, spi, breakdown } 不带 tier
 
     // craft_get_base_dc 在 item_gen 白名单中
-    const dcResult = await executeToolCall('craft_get_base_dc', { quality: '稀有' }, { characters: [], variables: {}, saveId: 'test' });
+    const dcResult = await executeToolCall(
+      'craft_get_base_dc',
+      { quality: '稀有' },
+      { characters: [], variables: {}, saveId: 'test' },
+    );
     expect(dcResult.baseDC).toBeDefined();
     expect(dcResult.quality).toBe('稀有');
   });
@@ -949,8 +976,18 @@ describe('runCharGenChain (Agentic 路径)', () => {
     // char_gen: 2 轮工具调用 → 最终输出 charXml
     const charClient = makeAgenticMockClient(
       [
-        { calls: [{ name: 'get_character', args: {} }, { name: 'random_name', args: { race: '人类', gender: '男' } }] },
-        { calls: [{ name: 'roll_attributes', args: { tier: 2, level: 7 } }, { name: 'random_personality', args: {} }] },
+        {
+          calls: [
+            { name: 'get_character', args: {} },
+            { name: 'random_name', args: { race: '人类', gender: '男' } },
+          ],
+        },
+        {
+          calls: [
+            { name: 'roll_attributes', args: { tier: 2, level: 7 } },
+            { name: 'random_personality', args: {} },
+          ],
+        },
       ],
       charXml,
     );
@@ -958,7 +995,12 @@ describe('runCharGenChain (Agentic 路径)', () => {
     // item_gen: 1 轮工具调用 → 最终输出 itemXml
     const itemClient = makeAgenticMockClient(
       [
-        { calls: [{ name: 'craft_get_base_dc', args: { quality: '优良' } }, { name: 'roll_dice', args: { formula: '1d3+1' } }] },
+        {
+          calls: [
+            { name: 'craft_get_base_dc', args: { quality: '优良' } },
+            { name: 'roll_dice', args: { formula: '1d3+1' } },
+          ],
+        },
       ],
       itemXml,
     );
@@ -1003,7 +1045,10 @@ describe('parseItemGenOutput — <item_result> 内嵌 JSON 兜底', () => {
         quality: '史诗',
         description: '深蓝色天鹅绒裁制的长袍。',
         stats: { defense: 12, magicDefense: 18 },
-        scripts: { init: "$event.on('combat_round_start', '__tick__');", cleanup: "$event.off('combat_round_start');" },
+        scripts: {
+          init: "$event.on('combat_round_start', '__tick__');",
+          cleanup: "$event.off('combat_round_start');",
+        },
         tags: ['神秘', '防具'],
         flavorText: '它一直在等你。',
       }),
@@ -1033,7 +1078,13 @@ describe('parseItemGenOutput — <item_result> 内嵌 JSON 兜底', () => {
       '```json',
       JSON.stringify([
         { name: '铁剑', type: '装备', slot: '武器', rarity: '普通', stats: { atk: 10 } },
-        { name: '火球术', type: 'active', description: '一颗火球', cost: { type: 'MP', amount: 10 }, cooldown: 2 },
+        {
+          name: '火球术',
+          type: 'active',
+          description: '一颗火球',
+          cost: { type: 'MP', amount: 10 },
+          cooldown: 2,
+        },
         { name: '治疗药水', type: '消耗品', quantity: 3, description: '恢复少量生命' },
       ]),
       '```',
@@ -1043,7 +1094,7 @@ describe('parseItemGenOutput — <item_result> 内嵌 JSON 兜底', () => {
     const out = parseItemGenOutput(raw);
     expect(out.equipment).toHaveLength(1);
     expect(out.equipment[0].slot).toBe('武器');
-    expect(out.equipment[0].quality).toBe('普通');  // rarity→quality 映射
+    expect(out.equipment[0].quality).toBe('普通'); // rarity→quality 映射
     expect(out.skills).toHaveLength(1);
     expect(out.skills[0].name).toBe('火球术');
     expect(out.skills[0].cost).toEqual({ type: 'MP', amount: 10 });
@@ -1245,8 +1296,10 @@ describe('parseItemGenOutput — <modifiers> 子元素解析（6 大类 modifier
     expect(mods).toBeDefined();
     expect(mods).toHaveLength(6);
     // 6 类各一个
-    const cats = mods!.map(m => m.category);
-    expect(cats).toEqual(expect.arrayContaining(['固伤', '百分比', '资源', '检定', '附加效果', '特殊机制']));
+    const cats = mods!.map((m) => m.category);
+    expect(cats).toEqual(
+      expect.arrayContaining(['固伤', '百分比', '资源', '检定', '附加效果', '特殊机制']),
+    );
     // 描述不被 modifiers JSON 污染（stripInnerTags 可能留尾部空白，用 trim + contains 校验）
     expect(out.equipment[0].description.trim()).toBe('一把散发着幽怨气息的长剑。');
     expect(out.equipment[0].description).not.toContain('category');
@@ -1435,24 +1488,49 @@ describe('parseItemGenOutput — JSON 兜底路径 modifiers 透传', () => {
 describe('assembleCharacterState — modifiers/buffs/divinity 透传到 InventoryItem', () => {
   it('item_gen 装备的 modifiers/buffs/divinity 应透传到 character.inventory', () => {
     const baseChar = {
-      name: '测试角色', race: '人类', tier: 1, level: 1,
+      name: '测试角色',
+      race: '人类',
+      tier: 1,
+      level: 1,
       attributes: { str: 10, dex: 10, con: 10, int: 10, spi: 10 },
-      identity: [], occupation: [], background: '', appearance: '',
-      clothing: '', personality: '', likes: '', thoughts: '',
-      ascension: { enabled: false, path: '', description: '', elements: [], authorities: [], laws: [], deityPosition: '', divineKingdom: { name: '', description: '' } },
-      skills: [], equipment: [], inventory: [],
+      identity: [],
+      occupation: [],
+      background: '',
+      appearance: '',
+      clothing: '',
+      personality: '',
+      likes: '',
+      thoughts: '',
+      ascension: {
+        enabled: false,
+        path: '',
+        description: '',
+        elements: [],
+        authorities: [],
+        laws: [],
+        deityPosition: '',
+        divineKingdom: { name: '', description: '' },
+      },
+      skills: [],
+      equipment: [],
+      inventory: [],
     };
     const itemData = {
       skills: [],
-      equipment: [{
-        slot: '武器', name: '神剑', description: '神剑', stats: { 攻击力: 50 },
-        modifiers: [{ category: '固伤' as const, source: '神剑', amount: 100 }],
-        divinity: 5 as 5,
-      }],
+      equipment: [
+        {
+          slot: '武器',
+          name: '神剑',
+          description: '神剑',
+          stats: { 攻击力: 50 },
+          modifiers: [{ category: '固伤' as const, source: '神剑', amount: 100 }],
+          divinity: 5 as const,
+        },
+      ],
       inventory: [],
     };
     const char = assembleCharacterState(baseChar as any, itemData as any);
-    const weapon = char.inventory.find(i => i.name === '神剑');
+    const weapon = char.inventory.find((i) => i.name === '神剑');
     expect(weapon).toBeDefined();
     expect(weapon!.modifiers).toHaveLength(1);
     expect(weapon!.modifiers![0].category).toBe('固伤');

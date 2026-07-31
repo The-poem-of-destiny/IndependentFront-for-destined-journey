@@ -4,79 +4,80 @@
  *
  * 布局: 选择区(固定高度,内部滚动) + 伙伴区(下方独立)
  */
-import { computed, ref } from 'vue'
-import { useCreateStore } from '../../stores/create-store'
-import type { CatalogItem } from '@engine/start-catalog'
-import CategorySelectionLayout from './CategorySelectionLayout.vue'
-import CategoryTabs from './CategoryTabs.vue'
-import QualityFilter from './QualityFilter.vue'
-import SelectableCard from './SelectableCard.vue'
-import SelectedPanel from './SelectedPanel.vue'
-import CustomItemForm from './CustomItemForm.vue'
-import AppButton from '../shared/AppButton.vue'
+import { computed, ref } from 'vue';
+import { useCreateStore } from '../../stores/create-store';
+import type { CatalogItem } from '@engine/start-catalog';
+import CategorySelectionLayout from './CategorySelectionLayout.vue';
+import CategoryTabs from './CategoryTabs.vue';
+import QualityFilter from './QualityFilter.vue';
+import SelectableCard from './SelectableCard.vue';
+import SelectedPanel from './SelectedPanel.vue';
+import CustomItemForm from './CustomItemForm.vue';
+import AppButton from '../shared/AppButton.vue';
 
-const store = useCreateStore()
-const showCustomForm = ref(false)
+const store = useCreateStore();
+const showCustomForm = ref(false);
 
-const editingItem = ref<CatalogItem | null>(null)
+const editingItem = ref<CatalogItem | null>(null);
 
 function handleCustomSave(item: CatalogItem) {
   if (editingItem.value) {
-    if (item.category === 'equipment') store.updateEquipment(item)
-    else if (item.category === 'item') store.updateItem(item)
-    else store.updateSkill(item)
-    editingItem.value = null
+    if (item.category === 'equipment') store.updateEquipment(item);
+    else if (item.category === 'item') store.updateItem(item);
+    else store.updateSkill(item);
+    editingItem.value = null;
   } else {
-    if (item.category === 'equipment') store.addEquipment(item)
-    else if (item.category === 'item') store.addItem(item)
-    else store.addSkill(item)
+    if (item.category === 'equipment') store.addEquipment(item);
+    else if (item.category === 'item') store.addItem(item);
+    else store.addSkill(item);
   }
 }
 function handleEditItem(item: CatalogItem) {
-  editingItem.value = item
-  showCustomForm.value = true
+  editingItem.value = item;
+  showCustomForm.value = true;
 }
 function handleCustomClose() {
-  showCustomForm.value = false
-  editingItem.value = null
+  showCustomForm.value = false;
+  editingItem.value = null;
 }
 function handleSelect(item: CatalogItem) {
-  if (item.category === 'equipment') store.addEquipment(item)
-  else if (item.category === 'item') store.addItem(item)
-  else store.addSkill(item)
+  if (item.category === 'equipment') store.addEquipment(item);
+  else if (item.category === 'item') store.addItem(item);
+  else store.addSkill(item);
 }
 function handleRemove(item: CatalogItem) {
-  if (item.category === 'equipment') store.removeEquipment(item.id)
-  else if (item.category === 'item') store.removeItem(item.id)
-  else store.removeSkill(item.id)
+  if (item.category === 'equipment') store.removeEquipment(item.id);
+  else if (item.category === 'item') store.removeItem(item.id);
+  else store.removeSkill(item.id);
 }
 
 const sidebarCategories = computed(() => [
   { key: 'equipment', label: '装备', count: store.selectedEquipments.length },
-  { key: 'item',      label: '道具', count: store.selectedItems.length },
-  { key: 'skill',     label: '技能', count: store.selectedSkills.length },
-])
+  { key: 'item', label: '道具', count: store.selectedItems.length },
+  { key: 'skill', label: '技能', count: store.selectedSkills.length },
+]);
 
 const subCategoryOptions = computed(() => [
   { key: 'all', label: '全部' },
-  ...store.subCategories.map(tag => ({ key: tag, label: tag })),
-])
+  ...store.subCategories.map((tag) => ({ key: tag, label: tag })),
+]);
 
-const searchText = ref('')
+const searchText = ref('');
 
 const visiblePool = computed(() => {
   // filteredPool 已按 activeCategory(大分类) + rarityFilter(品质) + typeFilter(子分类) 三层过滤
-  let pool = store.filteredPool
+  let pool = store.filteredPool;
   if (searchText.value.trim()) {
-    const q = searchText.value.trim().toLowerCase()
-    pool = pool.filter(item =>
-      item.name.toLowerCase().includes(q) ||
-      item.tag.some(t => t.toLowerCase().includes(q)) ||
-      item.description.toLowerCase().includes(q)
-    )
+    const q = searchText.value.trim().toLowerCase();
+    pool = pool.filter(
+      (item) =>
+        item.name.toLowerCase().includes(q) ||
+        item.tag.some((t) => t.toLowerCase().includes(q)) ||
+        item.description.toLowerCase().includes(q),
+    );
   }
-  return pool
-})
+  return pool;
+});
 </script>
 
 <template>
@@ -88,13 +89,14 @@ const visiblePool = computed(() => {
         <template #sidebar>
           <div class="sidebar-nav">
             <CategoryTabs
-              :categories="sidebarCategories"
               v-model="store.activeCategory"
+              :categories="sidebarCategories"
               variant="vertical"
             />
             <div v-if="subCategoryOptions.length > 1" class="sub-nav">
               <button
-                v-for="sc in subCategoryOptions" :key="sc.key"
+                v-for="sc in subCategoryOptions"
+                :key="sc.key"
                 class="sub-btn"
                 :class="{ active: store.typeFilter === sc.key }"
                 @click="store.typeFilter = sc.key"
@@ -120,7 +122,8 @@ const visiblePool = computed(() => {
             {{ searchText ? '无搜索结果' : '该分类暂无物品' }}
           </div>
           <SelectableCard
-            v-for="item in visiblePool" :key="item.id"
+            v-for="item in visiblePool"
+            :key="item.id"
             :item="item"
             :selected="store.isSelected(item)"
             :disabled="!store.canSelect(item)"
@@ -159,7 +162,12 @@ const visiblePool = computed(() => {
     <!-- ====== 下部: 伙伴 (独立区域, 后面做自己的滚动) ====== -->
 
     <!-- 自定义 Modal -->
-    <CustomItemForm :visible="showCustomForm" :edit-item="editingItem" @save="handleCustomSave" @close="handleCustomClose" />
+    <CustomItemForm
+      :visible="showCustomForm"
+      :edit-item="editingItem"
+      @save="handleCustomSave"
+      @close="handleCustomClose"
+    />
   </section>
 </template>
 
@@ -221,7 +229,10 @@ const visiblePool = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   border-radius: var(--theme-radius-sm);
-  transition: background var(--theme-transition-fast), color var(--theme-transition-fast), border-color var(--theme-transition-fast);
+  transition:
+    background var(--theme-transition-fast),
+    color var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
 }
 .sub-btn:hover {
   color: var(--theme-text-primary);
@@ -235,7 +246,10 @@ const visiblePool = computed(() => {
 }
 
 /* ===== 搜索 ===== */
-.search-box { position: relative; margin-left: auto; }
+.search-box {
+  position: relative;
+  margin-left: auto;
+}
 .search-input {
   width: 10em;
   padding: 0.4em 1.8em 0.4em 0.8em;
@@ -245,10 +259,14 @@ const visiblePool = computed(() => {
   color: var(--theme-text-primary);
   font-size: 0.82em;
   outline: none;
-  transition: border-color var(--theme-transition-fast), box-shadow var(--theme-transition-fast);
+  transition:
+    border-color var(--theme-transition-fast),
+    box-shadow var(--theme-transition-fast);
   font-family: inherit;
 }
-.search-input::placeholder { color: var(--theme-text-muted); }
+.search-input::placeholder {
+  color: var(--theme-text-muted);
+}
 .search-input:focus {
   border-color: var(--theme-primary);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 12%, transparent);
@@ -294,10 +312,28 @@ const visiblePool = computed(() => {
 
 /* ===== 响应式 ===== */
 @media (max-width: 768px) {
-  .selection-main { flex-direction: column; }
-  .selected-sidebar { width: 100%; overflow: visible; }
-  .sidebar-nav { max-height: none; overflow: visible; }
-  .sub-nav { flex-direction: row; flex-wrap: wrap; overflow-y: visible; flex: none; }
-  .sub-btn { width: auto; font-size: 0.82em; padding: 0.4em 0.7em; min-height: 1.8em; }
+  .selection-main {
+    flex-direction: column;
+  }
+  .selected-sidebar {
+    width: 100%;
+    overflow: visible;
+  }
+  .sidebar-nav {
+    max-height: none;
+    overflow: visible;
+  }
+  .sub-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    overflow-y: visible;
+    flex: none;
+  }
+  .sub-btn {
+    width: auto;
+    font-size: 0.82em;
+    padding: 0.4em 0.7em;
+    min-height: 1.8em;
+  }
 }
 </style>

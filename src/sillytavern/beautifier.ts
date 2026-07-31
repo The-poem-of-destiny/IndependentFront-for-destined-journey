@@ -37,10 +37,7 @@ export function escapeHtml(str: string): string {
  * 与 escapeHtml 的区别：后者额外转义 `"` `'`，用于属性值等需要引号安全的场景。
  */
 export function escapeHtmlBasic(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // ========== Built-in Rules (Legacy) ==========
@@ -102,20 +99,23 @@ export async function loadPresetRules(): Promise<BeautifierRule[]> {
     }
     const data = await resp.json();
     const raw: any[] = data?.rules ?? [];
-    return raw.map((r: any) => ({
-      id: r.id,
-      name: r.name,
-      scope: r.scope ?? 'maintext',
-      pattern: r.pattern,
-      flags: r.flags ?? 'g',
-      replacement: r.replacement,
-      enabled: r.defaultEnabled ?? false,
-      order: r.order ?? 99,
-      isBuiltin: r.isBuiltin ?? true,
-      autoEnable: r.autoEnable,
-      group: r.group,
-      locked: false,
-    } satisfies BeautifierRule));
+    return raw.map(
+      (r: any) =>
+        ({
+          id: r.id,
+          name: r.name,
+          scope: r.scope ?? 'maintext',
+          pattern: r.pattern,
+          flags: r.flags ?? 'g',
+          replacement: r.replacement,
+          enabled: r.defaultEnabled ?? false,
+          order: r.order ?? 99,
+          isBuiltin: r.isBuiltin ?? true,
+          autoEnable: r.autoEnable,
+          group: r.group,
+          locked: false,
+        }) satisfies BeautifierRule,
+    );
   } catch (err) {
     console.warn('[Beautifier] 预设规则加载异常，回退到 getBuiltinRules():', err);
     return getBuiltinRules();
@@ -134,22 +134,22 @@ export async function loadPresetRules(): Promise<BeautifierRule[]> {
  * @param enabledEntries 存档启用的条目 ID 列表（partition:uid）
  */
 export function collectActiveSignalsFromEntries(enabledEntries: string[]): {
-  activeWorldBookIds: Set<string>
-  activeEntryUids: Set<number>
+  activeWorldBookIds: Set<string>;
+  activeEntryUids: Set<number>;
 } {
-  const activeWorldBookIds = new Set<string>()
-  const activeEntryUids = new Set<number>()
+  const activeWorldBookIds = new Set<string>();
+  const activeEntryUids = new Set<number>();
   for (const id of enabledEntries) {
-    const i = id.indexOf(':')
-    if (i < 0) continue
-    const partition = id.slice(0, i)
-    const uid = Number(id.slice(i + 1))
+    const i = id.indexOf(':');
+    if (i < 0) continue;
+    const partition = id.slice(0, i);
+    const uid = Number(id.slice(i + 1));
     if (!Number.isNaN(uid)) {
-      activeEntryUids.add(uid)
-      activeWorldBookIds.add(partition)
+      activeEntryUids.add(uid);
+      activeWorldBookIds.add(partition);
     }
   }
-  return { activeWorldBookIds, activeEntryUids }
+  return { activeWorldBookIds, activeEntryUids };
 }
 
 /**
@@ -175,7 +175,7 @@ export function resolveAutoEnable(
   activeWorldBookEntryUids: Set<number>,
   activeCharacterNames: Set<string>,
 ): BeautifierRule[] {
-  return rules.map(rule => {
+  return rules.map((rule) => {
     const ae = rule.autoEnable;
     if (!ae) return rule;
 
@@ -184,21 +184,30 @@ export function resolveAutoEnable(
     // 检查 worldBookIds
     if (ae.worldBookIds?.length) {
       for (const id of ae.worldBookIds) {
-        if (activeWorldBookIds.has(id)) { matched = true; break; }
+        if (activeWorldBookIds.has(id)) {
+          matched = true;
+          break;
+        }
       }
     }
 
     // 检查 worldBookEntryUids
     if (!matched && ae.worldBookEntryUids?.length) {
       for (const uid of ae.worldBookEntryUids) {
-        if (activeWorldBookEntryUids.has(uid)) { matched = true; break; }
+        if (activeWorldBookEntryUids.has(uid)) {
+          matched = true;
+          break;
+        }
       }
     }
 
     // 检查 characterNames
     if (!matched && ae.characterNames?.length) {
       for (const name of ae.characterNames) {
-        if (activeCharacterNames.has(name)) { matched = true; break; }
+        if (activeCharacterNames.has(name)) {
+          matched = true;
+          break;
+        }
       }
     }
 
@@ -236,19 +245,24 @@ export function mergeRules(
   activeCharacterNames: Set<string>,
 ): BeautifierRule[] {
   // Step 1: 解析 auto-enable
-  const resolved = resolveAutoEnable(presetRules, activeWorldBookIds, activeWorldBookEntryUids, activeCharacterNames);
+  const resolved = resolveAutoEnable(
+    presetRules,
+    activeWorldBookIds,
+    activeWorldBookEntryUids,
+    activeCharacterNames,
+  );
 
   // Step 2: 应用用户禁用列表（locked 的规则不受影响）
   const disabledSet = new Set(builtinDisabled);
-  const merged = resolved.map(r => {
+  const merged = resolved.map((r) => {
     if (r.locked) return r;
     if (disabledSet.has(r.id)) return { ...r, enabled: false };
     return r;
   });
 
   // Step 3: 追加用户规则（同名 ID 覆盖预设）
-  const presetIds = new Set(merged.map(r => r.id));
-  const uniqueUserRules = userRules.filter(r => !presetIds.has(r.id));
+  const presetIds = new Set(merged.map((r) => r.id));
+  const uniqueUserRules = userRules.filter((r) => !presetIds.has(r.id));
 
   return [...merged, ...uniqueUserRules];
 }
@@ -279,7 +293,7 @@ export function processRules(text: string, scope: string, rules: BeautifierRule[
   let result = escapeHtmlBasic(text);
 
   const active = rules
-    .filter(r => r.enabled && (r.scope === 'global' || r.scope === scope))
+    .filter((r) => r.enabled && (r.scope === 'global' || r.scope === scope))
     .sort((a, b) => a.order - b.order);
 
   for (const rule of active) {
@@ -305,17 +319,22 @@ export function processRules(text: string, scope: string, rules: BeautifierRule[
  * @param builtinDisabled 禁用的内置规则 ID 列表
  * @returns 处理后的文本
  */
-export function beautify(text: string, scope: string, userRules: BeautifierRule[], builtinDisabled?: string[]): string {
+export function beautify(
+  text: string,
+  scope: string,
+  userRules: BeautifierRule[],
+  builtinDisabled?: string[],
+): string {
   const builtin = getBuiltinRules();
   const disabledSet = new Set(builtinDisabled ?? []);
-  const filteredBuiltin = builtin.map(r => ({
+  const filteredBuiltin = builtin.map((r) => ({
     ...r,
     enabled: r.enabled && !disabledSet.has(r.id),
   }));
-  const builtinIds = new Set(builtin.map(r => r.id));
+  const builtinIds = new Set(builtin.map((r) => r.id));
   const merged: BeautifierRule[] = [
     ...filteredBuiltin,
-    ...userRules.filter(r => !builtinIds.has(r.id)),
+    ...userRules.filter((r) => !builtinIds.has(r.id)),
   ];
   return processRules(text, scope, merged);
 }

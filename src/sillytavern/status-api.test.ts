@@ -5,10 +5,7 @@
  *       removeStatusIntents（remove patch + updated 剔除）
  */
 import { describe, it, expect } from 'vitest';
-import {
-  applyStatusIntents,
-  removeStatusIntents,
-} from './status-api';
+import { applyStatusIntents, removeStatusIntents } from './status-api';
 import type { StatusEffect } from './types';
 
 /** 构造一个 StatusEffect，便于测试 */
@@ -44,9 +41,7 @@ describe('applyStatusIntents', () => {
       },
     ];
     const r = applyStatusIntents(existing, intents);
-    expect(r.results).toEqual([
-      { action: 'added', buffId: '幽怨之剑.流血' },
-    ]);
+    expect(r.results).toEqual([{ action: 'added', buffId: '幽怨之剑.流血' }]);
     expect(r.patches).toHaveLength(1);
     expect(r.patches[0]).toEqual({
       op: 'add_status_effect',

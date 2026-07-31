@@ -20,8 +20,12 @@ export function toSystemMessage(event: SystemEvent): ChatMessage {
 // ========== Convenience helpers — 各类型 event 构造 + 自动生成 narrative ==========
 
 import type {
-  CraftGenOutput, CharGenOutput, ItemGenOutput, CombatSummaryResult,
-  QualityLevel, CraftRating,
+  CraftGenOutput,
+  CharGenOutput,
+  ItemGenOutput,
+  CombatSummaryResult,
+  QualityLevel,
+  CraftRating,
 } from '@engine/types';
 
 export function craftToEvent(output: CraftGenOutput): SystemEvent {
@@ -48,10 +52,11 @@ export function charGenToEvent(output: CharGenOutput): SystemEvent {
 
 export function itemGenToEvent(output: ItemGenOutput): SystemEvent {
   // 提取第一个物品/技能/装备名作为摘要
-  const firstName = output.equipment?.[0]?.name
-    ?? output.skills?.[0]?.name
-    ?? output.inventory?.[0]?.name
-    ?? '未知物品';
+  const firstName =
+    output.equipment?.[0]?.name ??
+    output.skills?.[0]?.name ??
+    output.inventory?.[0]?.name ??
+    '未知物品';
   let quality: QualityLevel = '普通';
   if (output.equipment?.[0]?.quality) quality = output.equipment[0].quality as QualityLevel;
   else if (output.inventory?.[0]?.rarity) quality = output.inventory[0].rarity as QualityLevel;
@@ -67,7 +72,10 @@ export function itemGenToEvent(output: ItemGenOutput): SystemEvent {
 
 export function combatToEvent(result: CombatSummaryResult): SystemEvent {
   const outcomeLabel: Record<string, string> = {
-    ally_win: '胜利', enemy_win: '败北', draw: '平局', fled: '逃跑',
+    ally_win: '胜利',
+    enemy_win: '败北',
+    draw: '平局',
+    fled: '逃跑',
   };
   return {
     type: 'combat',
@@ -85,9 +93,17 @@ export function charUpdateToEvent(characterName: string, summary: string): Syste
   };
 }
 
-export function itemUpdateToEvent(itemName: string, operation: string, summary: string): SystemEvent {
+export function itemUpdateToEvent(
+  itemName: string,
+  operation: string,
+  summary: string,
+): SystemEvent {
   const opLabel: Record<string, string> = {
-    consume: '消耗', transfer: '转移', modify: '变更', equip: '装备', unequip: '卸下',
+    consume: '消耗',
+    transfer: '转移',
+    modify: '变更',
+    equip: '装备',
+    unequip: '卸下',
   };
   return {
     type: 'item_update',
@@ -97,7 +113,11 @@ export function itemUpdateToEvent(itemName: string, operation: string, summary: 
   };
 }
 
-export function questUpdateToEvent(questName: string, status: string, summary: string): SystemEvent {
+export function questUpdateToEvent(
+  questName: string,
+  status: string,
+  summary: string,
+): SystemEvent {
   return {
     type: 'quest_update',
     questName,

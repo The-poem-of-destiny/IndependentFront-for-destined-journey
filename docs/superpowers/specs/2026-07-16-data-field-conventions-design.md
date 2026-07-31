@@ -11,13 +11,13 @@
 
 ## 第 0 章 五条铁律（横切一切实体）
 
-| # | 铁律 | 一句话 |
-|---|------|--------|
-| 铁律 1 | **逻辑键 = 名字** | 角色 `(saveId, name)`、物品/技能/状态效果 `(所属角色, name)`、任务 `(saveId, name)`。UUID 降级为纯内部物理主键（仅角色保留），**永不出现在 AI 契约、StatePatch target、prompt 示例中** |
-| 铁律 2 | **名字解析唯一入口** | StateManager 提供 `resolveCharacter(name)` / 集合内按 name 查找的统一辅助，全引擎只此一处做名字→记录查找。解析失败必须进 `errors[]` 上浮，禁止静默 no-op |
-| 铁律 3 | **字段分工** | AI 只填叙事字段（name/description/effects/rarity/…），Code 补账务字段（saveId/时间戳/数量合并/枚举归一化）。**AI 永远不产 id** |
-| 铁律 4 | **每类数据唯一真源（SSOT）** | 每类数据只有一个家（见第 13 章 SSOT 总表）。发现双轨即为 bug |
-| 铁律 5 | **枚举值统一中文、集中定义** | slot/type/rarity/quest.status/statusEffect.category 等枚举在 `src/sillytavern/field-enums.ts`（新建）一处定义，写入时统一做归一化校验 |
+| #      | 铁律                         | 一句话                                                                                                                                                                                 |
+| ------ | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 铁律 1 | **逻辑键 = 名字**            | 角色 `(saveId, name)`、物品/技能/状态效果 `(所属角色, name)`、任务 `(saveId, name)`。UUID 降级为纯内部物理主键（仅角色保留），**永不出现在 AI 契约、StatePatch target、prompt 示例中** |
+| 铁律 2 | **名字解析唯一入口**         | StateManager 提供 `resolveCharacter(name)` / 集合内按 name 查找的统一辅助，全引擎只此一处做名字→记录查找。解析失败必须进 `errors[]` 上浮，禁止静默 no-op                               |
+| 铁律 3 | **字段分工**                 | AI 只填叙事字段（name/description/effects/rarity/…），Code 补账务字段（saveId/时间戳/数量合并/枚举归一化）。**AI 永远不产 id**                                                         |
+| 铁律 4 | **每类数据唯一真源（SSOT）** | 每类数据只有一个家（见第 13 章 SSOT 总表）。发现双轨即为 bug                                                                                                                           |
+| 铁律 5 | **枚举值统一中文、集中定义** | slot/type/rarity/quest.status/statusEffect.category 等枚举在 `src/sillytavern/field-enums.ts`（新建）一处定义，写入时统一做归一化校验                                                  |
 
 ---
 
@@ -27,18 +27,18 @@
 
 ### 1.1 表清单与身份声明（新表必须先在此登记身份）
 
-| 表 | 身份 | 主键 | saveId | 说明 |
-|----|------|------|--------|------|
-| `saves` | 存档本体 | id (=saveId, UUID) | — | SaveSlot |
-| `characters` | **存档私有** | id (UUID, 内部) | ✅ **一等字段+索引**（🆕 从 customFields 提升） | 角色（含内嵌物品/技能/状态） |
-| `saveProfiles` | 存档私有 | saveId | ✅ 主键即 saveId | 任务/时间/好感/FP/新闻/**变量**(🆕) |
-| `messages` | 存档私有 | id (UUID) | ✅ 一等+索引 | 对话唯一真源 |
-| `memories` | 存档私有 | id | ✅ 一等+索引 | 记忆 |
-| `plotEvents` / `plotOutlines` | 存档私有 | id | ✅ 一等+索引 | 剧情 |
-| `snapshots` | 存档私有 | id | ✅ 一等+索引 | 快照唯一真源 |
-| `lorebooks` / `presets` / `settings` / `apiEndpoints` / `createPresets` | **全局共享** | id/key | ❌ 不设 | 世界书/预设/设置/API 池 |
-| `audioTracks` / `audioBlobs` / `audioPlaylists` / `audioHandles` | **全局共享** | id | ❌ 不设 | 音频资源（见第 15 章）。非存档状态，不入 StatePatch，**不进备份格式**（`audioHandles` 另有一层原因：目录句柄只对本机有效） |
-| `chats` | ⚰️ v3 遗留 | id | — | 标记废弃，迁移批次中删除 |
+| 表                                                                      | 身份         | 主键               | saveId                                          | 说明                                                                                                                       |
+| ----------------------------------------------------------------------- | ------------ | ------------------ | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `saves`                                                                 | 存档本体     | id (=saveId, UUID) | —                                               | SaveSlot                                                                                                                   |
+| `characters`                                                            | **存档私有** | id (UUID, 内部)    | ✅ **一等字段+索引**（🆕 从 customFields 提升） | 角色（含内嵌物品/技能/状态）                                                                                               |
+| `saveProfiles`                                                          | 存档私有     | saveId             | ✅ 主键即 saveId                                | 任务/时间/好感/FP/新闻/**变量**(🆕)                                                                                        |
+| `messages`                                                              | 存档私有     | id (UUID)          | ✅ 一等+索引                                    | 对话唯一真源                                                                                                               |
+| `memories`                                                              | 存档私有     | id                 | ✅ 一等+索引                                    | 记忆                                                                                                                       |
+| `plotEvents` / `plotOutlines`                                           | 存档私有     | id                 | ✅ 一等+索引                                    | 剧情                                                                                                                       |
+| `snapshots`                                                             | 存档私有     | id                 | ✅ 一等+索引                                    | 快照唯一真源                                                                                                               |
+| `lorebooks` / `presets` / `settings` / `apiEndpoints` / `createPresets` | **全局共享** | id/key             | ❌ 不设                                         | 世界书/预设/设置/API 池                                                                                                    |
+| `audioTracks` / `audioBlobs` / `audioPlaylists` / `audioHandles`        | **全局共享** | id                 | ❌ 不设                                         | 音频资源（见第 15 章）。非存档状态，不入 StatePatch，**不进备份格式**（`audioHandles` 另有一层原因：目录句柄只对本机有效） |
+| `chats`                                                                 | ⚰️ v3 遗留   | id                 | —                                               | 标记废弃，迁移批次中删除                                                                                                   |
 
 ### 1.2 隔离三规则
 
@@ -53,6 +53,7 @@
   "save": {...}, "characters": [...], "saveProfile": {...},
   "messages": [...], "memories": [...], "plotEvents": [...], "snapshots": [...] }
 ```
+
 导入时**重新生成 saveId** 及所有内部 UUID，防撞车。整库备份（`exportAllData`）另存，两者并存。
 
 ---
@@ -64,27 +65,27 @@
 
 ### 2.1 字段表
 
-| 字段 | 类型 | 必填 | 谁填 | 说明 |
-|------|------|-----|------|------|
-| id | string (UUID) | ✅ | **Code** | 内部物理主键，不出现在 AI 契约 |
-| saveId | string | ✅ | **Code**（落库层强制注入） | 🆕 一等字段 |
-| name | string | ✅ | AI/玩家 | **逻辑键**。同存档唯一，写入时查重 |
-| type | 'player'\|'npc'\|'monster'\|'summon' | ✅ | Code/AI | |
-| quantity | number | 可选 | Code | 🆕 **怪物集群数**（哥布林 ×3 = 一条记录）。仅 type='monster'/'summon' 使用，缺省=1 |
-| race / identity[] / occupation[] | string / string[] | ✅ | AI | |
-| tier / tierName / level / totalExp / expToNext | number/string | ✅ | Code 校验 | 数值约束走 validate.ts |
-| attributes {str,dex,con,int,spi} / freeAttrPoints | number | ✅ | Code 校验 | |
-| hp/maxHp/mp/maxMp/sp/maxSp / money | number | ✅ | Code | |
-| ascension | 结构不变 | ✅ | AI+Code | ⚠️ 修改必须走 update_character，禁走变量（修 #12） |
-| inventory[] | Item[] | ✅ | 见第 3 章 | **物品唯一容器**（装备也在这，见 equippedSlot） |
-| ~~equipment[]~~ | — | — | — | ⚰️ **退役**（EquipmentSlot 类型删除） |
-| skills[] | Skill[] | ✅ | 见第 4 章 | |
-| statusEffects[] | StatusEffect[] | ✅ | 见第 5 章 | |
-| location / present / currentAction / adventurerRank | string/boolean | ✅ | AI | location(地理)与present(在场)分离；present严格===true判断；角色进出场景由vars_update切换 |
-| bloodlineIds[] | string[] | 可选 | Code | |
-| appearance / background / personality / gender | string | 可选 | AI/玩家 | 🆕 **从 customFields 升正式字段**。同义分裂裁决: physics→appearance、backstory→background、clothing→outfit（见下） |
-| outfit / thoughts | string | 可选 | AI | 🆕 升正式字段（服装/心里话） |
-| customFields | Record<string,any> | ✅ | — | 仅存真扩展数据（destinyCoreId/destinyPoints/age/likes/faction 等），**禁止再放 saveId 及上述已升级字段** |
+| 字段                                                | 类型                                 | 必填 | 谁填                       | 说明                                                                                                               |
+| --------------------------------------------------- | ------------------------------------ | ---- | -------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| id                                                  | string (UUID)                        | ✅   | **Code**                   | 内部物理主键，不出现在 AI 契约                                                                                     |
+| saveId                                              | string                               | ✅   | **Code**（落库层强制注入） | 🆕 一等字段                                                                                                        |
+| name                                                | string                               | ✅   | AI/玩家                    | **逻辑键**。同存档唯一，写入时查重                                                                                 |
+| type                                                | 'player'\|'npc'\|'monster'\|'summon' | ✅   | Code/AI                    |                                                                                                                    |
+| quantity                                            | number                               | 可选 | Code                       | 🆕 **怪物集群数**（哥布林 ×3 = 一条记录）。仅 type='monster'/'summon' 使用，缺省=1                                 |
+| race / identity[] / occupation[]                    | string / string[]                    | ✅   | AI                         |                                                                                                                    |
+| tier / tierName / level / totalExp / expToNext      | number/string                        | ✅   | Code 校验                  | 数值约束走 validate.ts                                                                                             |
+| attributes {str,dex,con,int,spi} / freeAttrPoints   | number                               | ✅   | Code 校验                  |                                                                                                                    |
+| hp/maxHp/mp/maxMp/sp/maxSp / money                  | number                               | ✅   | Code                       |                                                                                                                    |
+| ascension                                           | 结构不变                             | ✅   | AI+Code                    | ⚠️ 修改必须走 update_character，禁走变量（修 #12）                                                                 |
+| inventory[]                                         | Item[]                               | ✅   | 见第 3 章                  | **物品唯一容器**（装备也在这，见 equippedSlot）                                                                    |
+| ~~equipment[]~~                                     | —                                    | —    | —                          | ⚰️ **退役**（EquipmentSlot 类型删除）                                                                              |
+| skills[]                                            | Skill[]                              | ✅   | 见第 4 章                  |                                                                                                                    |
+| statusEffects[]                                     | StatusEffect[]                       | ✅   | 见第 5 章                  |                                                                                                                    |
+| location / present / currentAction / adventurerRank | string/boolean                       | ✅   | AI                         | location(地理)与present(在场)分离；present严格===true判断；角色进出场景由vars_update切换                           |
+| bloodlineIds[]                                      | string[]                             | 可选 | Code                       |                                                                                                                    |
+| appearance / background / personality / gender      | string                               | 可选 | AI/玩家                    | 🆕 **从 customFields 升正式字段**。同义分裂裁决: physics→appearance、backstory→background、clothing→outfit（见下） |
+| outfit / thoughts                                   | string                               | 可选 | AI                         | 🆕 升正式字段（服装/心里话）                                                                                       |
+| customFields                                        | Record<string,any>                   | ✅   | —                          | 仅存真扩展数据（destinyCoreId/destinyPoints/age/likes/faction 等），**禁止再放 saveId 及上述已升级字段**           |
 
 ### 2.2 生命周期规则
 
@@ -95,14 +96,14 @@
 
 ### 2.3 StatePatch 速查（本实体相关 op）
 
-| op | target | value / amount 形状 |
-|----|--------|---------------------|
-| add_character | `characters.<名字>` | 角色对象（无 id/saveId，**Code 补**） |
-| remove_character 🆕 | `characters.<名字>` | — （怪物清场/删除用） |
-| rename_character 🆕 | `characters.<旧名>` | `"<新名>"` |
-| update_character | `characters.<名字>` | 部分字段对象。**白名单校验：禁止数组字段**（inventory/skills/statusEffects 必须走专用 op，修 #21） |
-| set_hp/mp/sp、delta_hp/mp/sp | `characters.<名字>` | number（不变，仅 target 改名字） |
-| set_location | `characters.<名字>` | string |
+| op                           | target              | value / amount 形状                                                                                |
+| ---------------------------- | ------------------- | -------------------------------------------------------------------------------------------------- |
+| add_character                | `characters.<名字>` | 角色对象（无 id/saveId，**Code 补**）                                                              |
+| remove_character 🆕          | `characters.<名字>` | — （怪物清场/删除用）                                                                              |
+| rename_character 🆕          | `characters.<旧名>` | `"<新名>"`                                                                                         |
+| update_character             | `characters.<名字>` | 部分字段对象。**白名单校验：禁止数组字段**（inventory/skills/statusEffects 必须走专用 op，修 #21） |
+| set_hp/mp/sp、delta_hp/mp/sp | `characters.<名字>` | number（不变，仅 target 改名字）                                                                   |
+| set_location                 | `characters.<名字>` | string                                                                                             |
 
 ---
 
@@ -114,19 +115,19 @@
 
 ### 3.1 字段表
 
-| 字段 | 类型 | 必填 | 谁填 | 说明 |
-|------|------|-----|------|------|
-| name | string | ✅ | AI | **逻辑键** |
-| quantity | number | ✅ | Code 归一 | 缺省=1；同名合并累加 |
-| equippedSlot | slot枚举 \| null | ✅ | AI 提名 + Code 校验 | 🆕 null=背包。**堆叠与穿戴互斥**: quantity>1 不可直接穿，需先拆 1 个为独立记录 |
-| type | '装备'\|'消耗品'\|'材料'\|'任务物品'\|'特殊' | 可选 | AI | 中文枚举（裁决 #38 三套取值） |
-| rarity | 7级品质（普通~唯一） | 可选 | AI | **quality 字段废除，统一 rarity**（修 #39） |
-| description | string | 可选 | AI | |
-| stats | Record<string,number> | 可选 | AI | 属性加成（穿戴时生效） |
-| durability / maxDurability | number | 可选 | AI+Code | |
-| effects | Record<词条名,中文描述> | 可选 | AI | |
-| scripts | Record<脚本名,代码> | 可选 | AI | |
-| data | Record<string,any> | 可选 | — | 扩展 |
+| 字段                       | 类型                                         | 必填 | 谁填                | 说明                                                                           |
+| -------------------------- | -------------------------------------------- | ---- | ------------------- | ------------------------------------------------------------------------------ |
+| name                       | string                                       | ✅   | AI                  | **逻辑键**                                                                     |
+| quantity                   | number                                       | ✅   | Code 归一           | 缺省=1；同名合并累加                                                           |
+| equippedSlot               | slot枚举 \| null                             | ✅   | AI 提名 + Code 校验 | 🆕 null=背包。**堆叠与穿戴互斥**: quantity>1 不可直接穿，需先拆 1 个为独立记录 |
+| type                       | '装备'\|'消耗品'\|'材料'\|'任务物品'\|'特殊' | 可选 | AI                  | 中文枚举（裁决 #38 三套取值）                                                  |
+| rarity                     | 7级品质（普通~唯一）                         | 可选 | AI                  | **quality 字段废除，统一 rarity**（修 #39）                                    |
+| description                | string                                       | 可选 | AI                  |                                                                                |
+| stats                      | Record<string,number>                        | 可选 | AI                  | 属性加成（穿戴时生效）                                                         |
+| durability / maxDurability | number                                       | 可选 | AI+Code             |                                                                                |
+| effects                    | Record<词条名,中文描述>                      | 可选 | AI                  |                                                                                |
+| scripts                    | Record<脚本名,代码>                          | 可选 | AI                  |                                                                                |
+| data                       | Record<string,any>                           | 可选 | —                   | 扩展                                                                           |
 
 ### 3.2 slot 枚举（集中定义于 field-enums.ts，中文，对齐世界书装备条目）
 
@@ -135,14 +136,14 @@
 
 ### 3.3 StatePatch 速查
 
-| op | target | value / amount 形状 |
-|----|--------|---------------------|
-| add_item | `characters.<角色名>` | `{name(必), quantity?, type?, rarity?, description?, stats?, effects?, scripts?, equippedSlot?}` — 同名合并 |
-| remove_item | `characters.<角色名>` | `{name(必), quantity?}` 缺省扣 1；**找不到 → errors[] 上浮**（不再静默，修 #5/#35） |
-| equip_item | `characters.<角色名>` | `{name(必), slot(必)}` → 设 equippedSlot（原 itemId 语义废除，修 #23） |
-| unequip_item | `characters.<角色名>` | `{name(必)}` → 清 equippedSlot（原 slot-only 语义废除，修 #24） |
-| update_item 🆕 | `characters.<角色名>` | `{name(必), changes:{...}}`（替代 items.modify 的假字段污染，修 #21） |
-| transfer_item 🆕 | `characters.<甲>` | `{name(必), to:'<乙名>', quantity?}` — Code 原子执行 扣甲+加乙（修 #5 transfer 断裂） |
+| op               | target                | value / amount 形状                                                                                         |
+| ---------------- | --------------------- | ----------------------------------------------------------------------------------------------------------- |
+| add_item         | `characters.<角色名>` | `{name(必), quantity?, type?, rarity?, description?, stats?, effects?, scripts?, equippedSlot?}` — 同名合并 |
+| remove_item      | `characters.<角色名>` | `{name(必), quantity?}` 缺省扣 1；**找不到 → errors[] 上浮**（不再静默，修 #5/#35）                         |
+| equip_item       | `characters.<角色名>` | `{name(必), slot(必)}` → 设 equippedSlot（原 itemId 语义废除，修 #23）                                      |
+| unequip_item     | `characters.<角色名>` | `{name(必)}` → 清 equippedSlot（原 slot-only 语义废除，修 #24）                                             |
+| update_item 🆕   | `characters.<角色名>` | `{name(必), changes:{...}}`（替代 items.modify 的假字段污染，修 #21）                                       |
+| transfer_item 🆕 | `characters.<甲>`     | `{name(必), to:'<乙名>', quantity?}` — Code 原子执行 扣甲+加乙（修 #5 transfer 断裂）                       |
 
 **禁止**: AI 产物品 id ❌ · 英文 slot ❌ · quality 字段 ❌ · `itemgen_*`/`craft_*`/`varsupd_*` 前缀 id 全部退役 ❌
 
@@ -153,14 +154,14 @@
 **键规则**: 同一角色下 name 唯一（🆕 Skill.id 退役）。技能不可穿戴、不可堆叠（与物品的本质区别）。
 **存储**: `CharacterState.skills[]`。
 
-| 字段 | 类型 | 必填 | 谁填 |
-|------|------|-----|------|
-| name | string | ✅ | AI（逻辑键） |
-| description | string | ✅ | AI |
-| type | 'active'\|'passive' | ✅ | AI |
-| cost {type:'HP'\|'MP'\|'SP', amount} | 可选 | AI |
-| cooldown / maxCooldown / level | number | 可选 | AI+Code |
-| effects / scripts | Record<string,string> | 可选 | AI |
+| 字段                                 | 类型                  | 必填 | 谁填         |
+| ------------------------------------ | --------------------- | ---- | ------------ |
+| name                                 | string                | ✅   | AI（逻辑键） |
+| description                          | string                | ✅   | AI           |
+| type                                 | 'active'\|'passive'   | ✅   | AI           |
+| cost {type:'HP'\|'MP'\|'SP', amount} | 可选                  | AI   |
+| cooldown / maxCooldown / level       | number                | 可选 | AI+Code      |
+| effects / scripts                    | Record<string,string> | 可选 | AI           |
 
 **StatePatch**: `add_skill` value=`{name,...}`（同名 = 覆盖升级，Code 不再要求 id，修 #4）；`update_skill` value=`{name, changes}`；`remove_skill` 🆕 value=`{name}`（替代 `{removeSkill:...}` 假字段，修 #21）。
 
@@ -171,16 +172,16 @@
 **键规则**: 同一角色下 name 唯一（🆕 id 退役）。同名再施加 = 按 stackable/maxStacks 叠层。
 **存储**: `CharacterState.statusEffects[]`（独立第三集合——它既不是物品也不是技能）。
 
-| 字段 | 类型 | 必填 | 谁填 |
-|------|------|-----|------|
-| name | string | ✅ | AI（逻辑键） |
-| description / source | string | ✅ | AI |
-| category | '增益'\|'减益'\|'特殊' | ✅ | AI |
-| stacks / maxStacks / stackable | number/boolean | stacks✅ | Code 归一（缺省 stacks=1） |
-| remainingTime | number\|null | ✅ | AI（null=永久） |
-| timeUnit | '回合'\|'分钟'\|'小时' | ✅ | AI |
-| effects | Record<string,number> | ✅ | AI |
-| effectDescriptions / scripts / onApply / onTick / onRemove / onTrigger | 可选 | AI |
+| 字段                                                                   | 类型                   | 必填     | 谁填                       |
+| ---------------------------------------------------------------------- | ---------------------- | -------- | -------------------------- |
+| name                                                                   | string                 | ✅       | AI（逻辑键）               |
+| description / source                                                   | string                 | ✅       | AI                         |
+| category                                                               | '增益'\|'减益'\|'特殊' | ✅       | AI                         |
+| stacks / maxStacks / stackable                                         | number/boolean         | stacks✅ | Code 归一（缺省 stacks=1） |
+| remainingTime                                                          | number\|null           | ✅       | AI（null=永久）            |
+| timeUnit                                                               | '回合'\|'分钟'\|'小时' | ✅       | AI                         |
+| effects                                                                | Record<string,number>  | ✅       | AI                         |
+| effectDescriptions / scripts / onApply / onTick / onRemove / onTrigger | 可选                   | AI       |
 
 **StatePatch**: `add_status_effect` value=`{name,...}`（Code 不再要求 id——根除 #4 "必 throw"）；`remove_status_effect` value=`{name}`（按名删，修 #22 按 id 匹配永删不掉）。时间结算（applyTimeAdvance）按 name 匹配删除。
 
@@ -191,11 +192,11 @@
 **键规则**: `(saveId, 任务名)`。任务名即主键（现状即如此，予以确认）。改名 = 删旧建新。
 **存储**: `SaveProfile.quests: Record<任务名, Quest>`。
 
-| 字段 | 类型 | 必填 | 谁填 |
-|------|------|-----|------|
-| status | '进行中'\|'已完成'\|'失败'\|'搁置' | ✅ | AI 提名 + **Code 归一化**（自由字符串废除，修 #32） |
-| priority | '低'\|'中'\|'高' | ✅ | AI |
-| progress / detail / objective / reward | string | ✅ | AI |
+| 字段                                   | 类型                               | 必填 | 谁填                                                |
+| -------------------------------------- | ---------------------------------- | ---- | --------------------------------------------------- |
+| status                                 | '进行中'\|'已完成'\|'失败'\|'搁置' | ✅   | AI 提名 + **Code 归一化**（自由字符串废除，修 #32） |
+| priority                               | '低'\|'中'\|'高'                   | ✅   | AI                                                  |
+| progress / detail / objective / reward | string                             | ✅   | AI                                                  |
 
 **StatePatch**: `update_quest` value=`{name(必), ...fields}`（upsert）；`remove_quest` value=`{name}`（统一对象形状，裁决 #40 形态不一致）。
 **AI 契约补课**: vars_update systemPrompt **必须显式教 quests 输出格式**（`<json>{quests:{upsert:[...],remove:[...]}}` + 示例），不能只靠自检清单暗示（修 #25）。
@@ -216,17 +217,17 @@
 
 **存储**: `saveProfiles` 表，主键=saveId，惰性创建（现状确认）。
 
-| 字段 | 类型 | SSOT 裁决 / 说明 |
-|------|------|------------------|
-| fp / fpHistory | number / FPTransaction[] | 结构不变（FPTransaction.id 由 Code 生成，保留——审计流水需要）。接线（fp-system→管线）列入待办，不属本规范 |
-| quests | Record<任务名,Quest> | 见第 6 章 |
-| affections | Record<角色名,number> | 见第 7 章 |
-| gameTime | GameTime | ✅ 唯一真源确认。修 weekday 往返 bug（#31: '周日'→7→'周六'漂移） |
-| news | NewsItem[] | **唯一真源 = 此处**（修 #16 双轨）: dispatcher 输出的世界新闻由 orchestrator 翻译为 `add_news` 🆕 patch（value=`{title, content, category}`，Code 补 id/publishedAt/read=false）写入此处；变量里的"世界新闻"/sys.news 路径退役 |
-| contracts / achievements | 结构不变 | 接线待办 |
-| variables | Record<string,any> | 🆕 **变量的新家**（见第 12 章；从快照寄生迁出，修 #1/#33） |
-| worldFlags | Record<string,any> | 保留（mapMarkers 等）。与 variables 分工: worldFlags=Code 写的引擎标志，variables=AI 写的叙事变量 |
-| focusQuest | string | UI 修改必须回写（修 #14） |
+| 字段                     | 类型                     | SSOT 裁决 / 说明                                                                                                                                                                                                               |
+| ------------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| fp / fpHistory           | number / FPTransaction[] | 结构不变（FPTransaction.id 由 Code 生成，保留——审计流水需要）。接线（fp-system→管线）列入待办，不属本规范                                                                                                                      |
+| quests                   | Record<任务名,Quest>     | 见第 6 章                                                                                                                                                                                                                      |
+| affections               | Record<角色名,number>    | 见第 7 章                                                                                                                                                                                                                      |
+| gameTime                 | GameTime                 | ✅ 唯一真源确认。修 weekday 往返 bug（#31: '周日'→7→'周六'漂移）                                                                                                                                                               |
+| news                     | NewsItem[]               | **唯一真源 = 此处**（修 #16 双轨）: dispatcher 输出的世界新闻由 orchestrator 翻译为 `add_news` 🆕 patch（value=`{title, content, category}`，Code 补 id/publishedAt/read=false）写入此处；变量里的"世界新闻"/sys.news 路径退役 |
+| contracts / achievements | 结构不变                 | 接线待办                                                                                                                                                                                                                       |
+| variables                | Record<string,any>       | 🆕 **变量的新家**（见第 12 章；从快照寄生迁出，修 #1/#33）                                                                                                                                                                     |
+| worldFlags               | Record<string,any>       | 保留（mapMarkers 等）。与 variables 分工: worldFlags=Code 写的引擎标志，variables=AI 写的叙事变量                                                                                                                              |
+| focusQuest               | string                   | UI 修改必须回写（修 #14）                                                                                                                                                                                                      |
 
 ---
 
@@ -243,12 +244,12 @@
 
 **SSOT**: `messages` 表 = 对话唯一真源（append-only）。`chats` v3 表废弃删除（#46）。
 
-| 字段 | 裁决 |
-|------|------|
-| id / saveId / role / content / timestamp | 保留。saveId 必填（persistMessage 非空断言改为前置校验，activeSaveId 为 null 时拒绝写入并报错，修 #13） |
-| turn | 保留（一问一答共享同一 turn，语义确认）。快照恢复的截断游标 |
-| systemEvent | 保留（系统卡片） |
-| ~~variablesAfter / metadata / apiUsed / parsed~~ | ⚰️ 死字段全部删除（修 #33/#48） |
+| 字段                                             | 裁决                                                                                                    |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| id / saveId / role / content / timestamp         | 保留。saveId 必填（persistMessage 非空断言改为前置校验，activeSaveId 为 null 时拒绝写入并报错，修 #13） |
+| turn                                             | 保留（一问一答共享同一 turn，语义确认）。快照恢复的截断游标                                             |
+| systemEvent                                      | 保留（系统卡片）                                                                                        |
+| ~~variablesAfter / metadata / apiUsed / parsed~~ | ⚰️ 死字段全部删除（修 #33/#48）                                                                         |
 
 ---
 
@@ -256,26 +257,26 @@
 
 ### 11.1 SaveSlot
 
-| 字段 | 裁决 |
-|------|------|
-| id (=saveId) / name / slot / createdAt / updatedAt | 保留。slot 多槽位实现列入待办 |
-| ~~snapshots[]（内嵌数组）~~ | ⚰️ **删除**（快照唯一真源 = snapshots 表，修 #2 双轨死路径） |
-| activeSnapshotId | 保留，指向 snapshots **表**记录 |
-| metadata.characterName / userName / totalTurns / openingPrompt / openingPromptConsumed / enabledWorldBookEntries | 保留。totalTurns 语义修正: **每对话轮 +1**（由管线在轮结束时递增，不再每 commit +1，修 #27） |
-| metadata.gameStartTime | 语义裁决: **现实时间**（创档时刻，ISO 串）。游戏内时间只住 saveProfile.gameTime（修 #42 双语义） |
-| ~~metadata.description~~ | ⚰️ 删除（塞 JSON 无人读，#47；destinyCoreId 等移入玩家角色 customFields） |
+| 字段                                                                                                             | 裁决                                                                                             |
+| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| id (=saveId) / name / slot / createdAt / updatedAt                                                               | 保留。slot 多槽位实现列入待办                                                                    |
+| ~~snapshots[]（内嵌数组）~~                                                                                      | ⚰️ **删除**（快照唯一真源 = snapshots 表，修 #2 双轨死路径）                                     |
+| activeSnapshotId                                                                                                 | 保留，指向 snapshots **表**记录                                                                  |
+| metadata.characterName / userName / totalTurns / openingPrompt / openingPromptConsumed / enabledWorldBookEntries | 保留。totalTurns 语义修正: **每对话轮 +1**（由管线在轮结束时递增，不再每 commit +1，修 #27）     |
+| metadata.gameStartTime                                                                                           | 语义裁决: **现实时间**（创档时刻，ISO 串）。游戏内时间只住 saveProfile.gameTime（修 #42 双语义） |
+| ~~metadata.description~~                                                                                         | ⚰️ 删除（塞 JSON 无人读，#47；destinyCoreId 等移入玩家角色 customFields）                        |
 
 ### 11.2 Snapshot（整体重定义，修 #1/#2/#28）
 
 ```ts
 interface Snapshot {
-  id: string            // Code 生成 UUID
-  saveId: string        // 一等字段
-  createdAt: number     // 现实时间戳
-  reason: 'turn' | 'manual' | 'pre-combat'   // 触发原因
-  turn: number          // 对话回合游标（恢复时截断 messages 用）
-  characters: CharacterState[]   // 深拷贝
-  saveProfile: SaveProfile       // 深拷贝（含任务/时间/好感/变量——变量自然随行）
+  id: string; // Code 生成 UUID
+  saveId: string; // 一等字段
+  createdAt: number; // 现实时间戳
+  reason: 'turn' | 'manual' | 'pre-combat'; // 触发原因
+  turn: number; // 对话回合游标（恢复时截断 messages 用）
+  characters: CharacterState[]; // 深拷贝
+  saveProfile: SaveProfile; // 深拷贝（含任务/时间/好感/变量——变量自然随行）
 }
 ```
 
@@ -299,16 +300,16 @@ interface Snapshot {
 
 ## 第 13 章 SSOT 总表（速查）
 
-| 数据 | 唯一真源 | 被裁掉的双轨 |
-|------|---------|-------------|
-| 角色状态（含物品/技能/状态效果） | `characters` 表 | ascension/exp 走变量的路径（#12） |
-| 装备状态 | `Item.equippedSlot` | equipment[] 独立数组 |
-| 任务 / 时间 / 好感 / FP / 新闻 / 变量 | `saveProfiles` 表 | 变量寄生快照、新闻走变量、关系列表 affinity |
-| 对话 | `messages` 表 | chats v3 表、快照内对话副本（从未有，明令禁止） |
-| 快照 | `snapshots` 表 | SaveSlot.snapshots 内嵌数组 |
-| 记忆 / 剧情 | `memories` / `plotEvents` / `plotOutlines` 表 | — |
-| 全局配置 | `settings` / `lorebooks` / `presets` / `apiEndpoints` | — |
-| 音频资源 | `audioTracks`（元数据）/ `audioBlobs`（`source='blob'` 的字节）/ `audioPlaylists` / `audioHandles`（音乐文件夹目录句柄） | 音量等混音设置归 `settings`，不重复存在音轨上；`source='file'` 的字节唯一真源是用户磁盘上的文件夹，库里只存目录不存拷贝 |
+| 数据                                  | 唯一真源                                                                                                                 | 被裁掉的双轨                                                                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| 角色状态（含物品/技能/状态效果）      | `characters` 表                                                                                                          | ascension/exp 走变量的路径（#12）                                                                                       |
+| 装备状态                              | `Item.equippedSlot`                                                                                                      | equipment[] 独立数组                                                                                                    |
+| 任务 / 时间 / 好感 / FP / 新闻 / 变量 | `saveProfiles` 表                                                                                                        | 变量寄生快照、新闻走变量、关系列表 affinity                                                                             |
+| 对话                                  | `messages` 表                                                                                                            | chats v3 表、快照内对话副本（从未有，明令禁止）                                                                         |
+| 快照                                  | `snapshots` 表                                                                                                           | SaveSlot.snapshots 内嵌数组                                                                                             |
+| 记忆 / 剧情                           | `memories` / `plotEvents` / `plotOutlines` 表                                                                            | —                                                                                                                       |
+| 全局配置                              | `settings` / `lorebooks` / `presets` / `apiEndpoints`                                                                    | —                                                                                                                       |
+| 音频资源                              | `audioTracks`（元数据）/ `audioBlobs`（`source='blob'` 的字节）/ `audioPlaylists` / `audioHandles`（音乐文件夹目录句柄） | 音量等混音设置归 `settings`，不重复存在音轨上；`source='file'` 的字节唯一真源是用户磁盘上的文件夹，库里只存目录不存拷贝 |
 
 ---
 
@@ -334,63 +335,63 @@ interface Snapshot {
 
 **存储**: 四张表，身份均为**全局共享**（不设 saveId）：
 
-| 表 | 内容 | 为什么分开 |
-|----|------|-----------|
-| `audioTracks` | 元数据，KB 级 | IndexedDB **无列投影**——字节若与元数据同行，`toArray()`（画音频库列表的那个查询）会把整库音频拉进内存。5 首无感，50 首灾难，且随库增长静默劣化 |
-| `audioBlobs` | 纯 `id → blob` | 只在**播放时**读取；仅 `source='blob'` 的音轨有行 |
-| `audioPlaylists` | 有序 trackIds | 播放列表是音序器概念，只收 `kind === 'music'` 的音轨 |
-| `audioHandles` | 持久化的 `FileSystemDirectoryHandle`（🆕 v12） | 句柄是可结构化克隆但**非 JSON**，只能存 IndexedDB，进不了 `settings`/`localStorage` |
+| 表               | 内容                                           | 为什么分开                                                                                                                                     |
+| ---------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `audioTracks`    | 元数据，KB 级                                  | IndexedDB **无列投影**——字节若与元数据同行，`toArray()`（画音频库列表的那个查询）会把整库音频拉进内存。5 首无感，50 首灾难，且随库增长静默劣化 |
+| `audioBlobs`     | 纯 `id → blob`                                 | 只在**播放时**读取；仅 `source='blob'` 的音轨有行                                                                                              |
+| `audioPlaylists` | 有序 trackIds                                  | 播放列表是音序器概念，只收 `kind === 'music'` 的音轨                                                                                           |
+| `audioHandles`   | 持久化的 `FileSystemDirectoryHandle`（🆕 v12） | 句柄是可结构化克隆但**非 JSON**，只能存 IndexedDB，进不了 `settings`/`localStorage`                                                            |
 
 上传/删除是**同一事务内的两表写**，删除时清理孤儿 blob 并从各播放列表剔除悬挂 id。
 
 **三种字节后端并存**（Store 的 `loadBlob` 按 `source` 分流，引擎侧只见一个注入缝）：
 
-| `source` | 字节住在 | 何时使用 |
-|----------|---------|---------|
-| `'file'` | 用户磁盘上的音乐文件夹 | 浏览器支持 File System Access（仅 Chromium） |
-| `'blob'` | `audioBlobs` 表 | 无 File System Access 的兜底路径；既有音轨永不迁移、永不删除 |
-| `'builtin'` | `public/audio/` | 内置 manifest 条目（不变） |
+| `source`    | 字节住在               | 何时使用                                                     |
+| ----------- | ---------------------- | ------------------------------------------------------------ |
+| `'file'`    | 用户磁盘上的音乐文件夹 | 浏览器支持 File System Access（仅 Chromium）                 |
+| `'blob'`    | `audioBlobs` 表        | 无 File System Access 的兜底路径；既有音轨永不迁移、永不删除 |
+| `'builtin'` | `public/audio/`        | 内置 manifest 条目（不变）                                   |
 
 **字段表 — AudioTrack**
 
-| 字段 | 类型 | 必填 | 谁填 | 说明 |
-|------|------|-----|------|------|
-| id | string | ✅ | Code / manifest | 物理主键，不出现在任何 AI 契约 |
-| name | string | ✅ | 玩家 / manifest | 显示名 |
-| kind | `'music'\|'sfx'` | ✅ | 玩家 / manifest | 决定走音序通道还是声池；**可能填错**，故体积门禁独立于本字段兜底 |
-| source | `'blob'\|'builtin'\|'file'` | ✅ | Code | `'file'` 🆕 2026-07-27；仍无 `'url'`（远程音源整类砍掉，见设计 §13）；日后新增纯属加法 |
-| url | string | — | Code | 仅 `source='builtin'`: manifest 中的相对路径 |
-| relativePath | string | — | Code | 🆕 仅 `source='file'`: 音乐文件夹内的文件名（目录句柄另存 `audioHandles`，不挂在音轨行上） |
-| missing | boolean | — | Code | 🆕 仅 `source='file'`: 上次扫描时文件已不在。**标记而非删除**——标签/`kind`/播放列表位是玩家的整理成果，必须挺过文件临时移动或硬盘拔出 |
-| mimeType / size | string / number | — | Code | 压缩后字节数 |
-| duration | number | — | Code | 秒，首次加载后回填 |
-| tags | string[] | ✅ | 玩家 / manifest | 场景标签。**AI 侧唯一寻址方式** |
-| builtin | boolean | — | Code | true = 不可删除，只可隐藏 |
-| createdAt / updatedAt | number | ✅ | Code | 账务字段 |
+| 字段                  | 类型                        | 必填 | 谁填            | 说明                                                                                                                                  |
+| --------------------- | --------------------------- | ---- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| id                    | string                      | ✅   | Code / manifest | 物理主键，不出现在任何 AI 契约                                                                                                        |
+| name                  | string                      | ✅   | 玩家 / manifest | 显示名                                                                                                                                |
+| kind                  | `'music'\|'sfx'`            | ✅   | 玩家 / manifest | 决定走音序通道还是声池；**可能填错**，故体积门禁独立于本字段兜底                                                                      |
+| source                | `'blob'\|'builtin'\|'file'` | ✅   | Code            | `'file'` 🆕 2026-07-27；仍无 `'url'`（远程音源整类砍掉，见设计 §13）；日后新增纯属加法                                                |
+| url                   | string                      | —    | Code            | 仅 `source='builtin'`: manifest 中的相对路径                                                                                          |
+| relativePath          | string                      | —    | Code            | 🆕 仅 `source='file'`: 音乐文件夹内的文件名（目录句柄另存 `audioHandles`，不挂在音轨行上）                                            |
+| missing               | boolean                     | —    | Code            | 🆕 仅 `source='file'`: 上次扫描时文件已不在。**标记而非删除**——标签/`kind`/播放列表位是玩家的整理成果，必须挺过文件临时移动或硬盘拔出 |
+| mimeType / size       | string / number             | —    | Code            | 压缩后字节数                                                                                                                          |
+| duration              | number                      | —    | Code            | 秒，首次加载后回填                                                                                                                    |
+| tags                  | string[]                    | ✅   | 玩家 / manifest | 场景标签。**AI 侧唯一寻址方式**                                                                                                       |
+| builtin               | boolean                     | —    | Code            | true = 不可删除，只可隐藏                                                                                                             |
+| createdAt / updatedAt | number                      | ✅   | Code            | 账务字段                                                                                                                              |
 
 **字段表 — AudioBlobRecord**
 
-| 字段 | 类型 | 必填 | 谁填 | 说明 |
-|------|------|-----|------|------|
-| id | string | ✅ | Code | `=== AudioTrack.id` |
-| blob | Blob | ✅ | 玩家（上传） | 原始压缩字节；仅播放时读；仅 `source='blob'` 的音轨有此行 |
+| 字段 | 类型   | 必填 | 谁填         | 说明                                                      |
+| ---- | ------ | ---- | ------------ | --------------------------------------------------------- |
+| id   | string | ✅   | Code         | `=== AudioTrack.id`                                       |
+| blob | Blob   | ✅   | 玩家（上传） | 原始压缩字节；仅播放时读；仅 `source='blob'` 的音轨有此行 |
 
 **字段表 — AudioHandleRecord**（🆕 2026-07-27）
 
-| 字段 | 类型 | 必填 | 谁填 | 说明 |
-|------|------|-----|------|------|
-| id | string | ✅ | Code | 固定字面量键，当前只有一行 `'library-root'`（模型是**一个**音乐文件夹，非按文件发句柄） |
-| handle | FileSystemDirectoryHandle | ✅ | 玩家（选择目录） | 结构化克隆存库。权限**不跨浏览器重启**：启动后 `queryPermission()` 通常回 `'prompt'`，重新授权需用户手势，不可在 `onMounted` 里静默重试 |
-| addedAt | number | ✅ | Code | 账务字段 |
+| 字段    | 类型                      | 必填 | 谁填             | 说明                                                                                                                                    |
+| ------- | ------------------------- | ---- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| id      | string                    | ✅   | Code             | 固定字面量键，当前只有一行 `'library-root'`（模型是**一个**音乐文件夹，非按文件发句柄）                                                 |
+| handle  | FileSystemDirectoryHandle | ✅   | 玩家（选择目录） | 结构化克隆存库。权限**不跨浏览器重启**：启动后 `queryPermission()` 通常回 `'prompt'`，重新授权需用户手势，不可在 `onMounted` 里静默重试 |
+| addedAt | number                    | ✅   | Code             | 账务字段                                                                                                                                |
 
 **字段表 — AudioPlaylist**
 
-| 字段 | 类型 | 必填 | 谁填 | 说明 |
-|------|------|-----|------|------|
-| id | string | ✅ | Code | 物理主键 |
-| name | string | ✅ | 玩家 | 显示名 |
-| trackIds | string[] | ✅ | 玩家 | **有序**；音轨删除时剔除悬挂 id。随机播放在副本上洗牌，存储顺序永不被改写 |
-| createdAt / updatedAt | number | ✅ | Code | 账务字段 |
+| 字段                  | 类型     | 必填 | 谁填 | 说明                                                                      |
+| --------------------- | -------- | ---- | ---- | ------------------------------------------------------------------------- |
+| id                    | string   | ✅   | Code | 物理主键                                                                  |
+| name                  | string   | ✅   | 玩家 | 显示名                                                                    |
+| trackIds              | string[] | ✅   | 玩家 | **有序**；音轨删除时剔除悬挂 id。随机播放在副本上洗牌，存储顺序永不被改写 |
+| createdAt / updatedAt | number   | ✅   | Code | 账务字段                                                                  |
 
 **引用关系**: `AudioPlaylist.trackIds` → `AudioTrack.id`；`AudioBlobRecord.id` → `AudioTrack.id`；`AudioTrack.relativePath` → `audioHandles['library-root']` 目录下的文件名（跨表软引用，解析不到即置 `missing`）。音轨改名（改 `name`）**不需要迁移任何引用**——引用一律走 id，这正是本实体不适用铁律 1 的原因：它没有"按名寻址"的消费方。
 
@@ -401,6 +402,7 @@ interface Snapshot {
 **备份**: 音频四表**整体缺席** `FullBackup`（v1 无导出/导入）。`audioHandles` 还多一层理由——目录句柄是**本机私有**的，导到别的机器上既指不到目录也拿不到权限，导出等于导一坨垃圾。两个必须在 UI 里说清的后果——导入存档备份**不会动**音频库；`clearAllData()` 走 `db.delete()`，所以「清除全部数据」**会销毁音频库**，必须在确认弹窗里点名。
 
 **禁止**:
+
 - ❌ 把音轨 id / 播放列表 id 写进任何 prompt、AI 输出契约、StatePatch target——AI 只认标签
 - ❌ 把音频字节挂回 `audioTracks` 行（列表查询会拉全库进内存）
 - ❌ 按存档复制音频库（全局共享一份；按档复制等于白烧配额）
@@ -414,15 +416,15 @@ interface Snapshot {
 
 ## 附录 A 迁移批次（S1 丢数据 → S4 清理，每批 typecheck+全量测试）
 
-| 批次 | 内容 | 覆盖问题 |
-|------|------|---------|
-| M1 类型与库 | types.ts 字段增删（equippedSlot/quantity/saveId 一等/死字段删除）+ field-enums.ts + database v9（characters 索引、级联删除、chats 删表、$char.getNpcs 等 saveId 参数真正生效）+ 开发期清库重建 | #8 #9 #13 #30 #43 #46 #47 #48 |
+| 批次                 | 内容                                                                                                                                                                                                                                                     | 覆盖问题                                      |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| M1 类型与库          | types.ts 字段增删（equippedSlot/quantity/saveId 一等/死字段删除）+ field-enums.ts + database v9（characters 索引、级联删除、chats 删表、$char.getNpcs 等 saveId 参数真正生效）+ 开发期清库重建                                                           | #8 #9 #13 #30 #43 #46 #47 #48                 |
 | M2 StateManager 重写 | 名字解析入口 + 全部 apply* 按名字契约重写 + 新 op（remove/rename_character, transfer_item, update_item, remove_skill, set/delta_affection, add_news）+ 枚举归一化（quest.status 等）+ 验证失败进 errors[]（修 #35 风格分裂 + 深坑"验证失败不进 errors"） | #4 #5 #10 #19 #20 #21 #22 #23 #24 #32 #35 #40 |
-| M3 翻译层重写 | orchestrator Stage2/3 + item/char/craft 三链 buildPatches 按新契约 + 'player_1' 兜底删除 + craft 双 Date.now 等 id 逻辑整体退役 + assembleCharacterState 无损映射（effects/scripts 全字段传递） | #6 #7 #11 #12 #26 #37 #38 #39 #41 #45 |
-| M4 AI prompt 对齐 | 第 14 章全部（agent-config.json + agent-templates.ts） | #25 及示例毒化源头 |
-| M5 SSOT 落地 | 变量迁 saveProfile + 快照重定义（打/恢复/滚动上限）+ 新闻/好感度走新 op（含关系列表退役）+ totalTurns 语义 + focusQuest 回写 + weekday bug | #1 #2 #14 #15 #16 #27 #28 #31 #33 #42 #44 |
-| M6 UI 适配与清理 | 装备栏 = inventory.filter(equippedSlot) + CharacterListPanel 读正式字段 + 死代码清理（markNewsRead 接线或删、#49-#52） | #17 #34 #36 #49-#52 |
-| 范围外（另立项） | memory_summary/plot/FP/EventBus 管线接线（#3 #18 #29）——数据形状本规范已锁定，接线不属字段规范 | #3 #18 #29 |
+| M3 翻译层重写        | orchestrator Stage2/3 + item/char/craft 三链 buildPatches 按新契约 + 'player_1' 兜底删除 + craft 双 Date.now 等 id 逻辑整体退役 + assembleCharacterState 无损映射（effects/scripts 全字段传递）                                                          | #6 #7 #11 #12 #26 #37 #38 #39 #41 #45         |
+| M4 AI prompt 对齐    | 第 14 章全部（agent-config.json + agent-templates.ts）                                                                                                                                                                                                   | #25 及示例毒化源头                            |
+| M5 SSOT 落地         | 变量迁 saveProfile + 快照重定义（打/恢复/滚动上限）+ 新闻/好感度走新 op（含关系列表退役）+ totalTurns 语义 + focusQuest 回写 + weekday bug                                                                                                               | #1 #2 #14 #15 #16 #27 #28 #31 #33 #42 #44     |
+| M6 UI 适配与清理     | 装备栏 = inventory.filter(equippedSlot) + CharacterListPanel 读正式字段 + 死代码清理（markNewsRead 接线或删、#49-#52）                                                                                                                                   | #17 #34 #36 #49-#52                           |
+| 范围外（另立项）     | memory_summary/plot/FP/EventBus 管线接线（#3 #18 #29）——数据形状本规范已锁定，接线不属字段规范                                                                                                                                                           | #3 #18 #29                                    |
 
 > **M1 执行注记（2026-07-16）**: M1 已按"每批次编译绿灯"原则重校准——物品/技能/状态效果 id 退役与 EquipmentSlot 删除移至 M2/M3（随消费者 StateManager/翻译层重写同批）；Snapshot 类型重定义移至 M5（随快照机制重建同批）；新正式字段采用双写策略，读方 M6 切换。M1 实际完成: field-enums.ts、CharacterState.saveId 一等化(#8 #43)、Dexie v9(#46)、级联删除(#9)、char-query 隔离(#30)、persistMessage 校验(#13)、SaveSlot 清理(#47)、ChatMessage 死字段(#48 #33 前半)。
 
@@ -461,6 +463,7 @@ interface Snapshot {
 > **⑥ 装备 UI 验收**: StatusOverview（8 槽位图标映射）/ItemsPanel（中文槽位直展）/CharacterListPanel（[槽位] 标签）三组件 equippedSlot 渲染逻辑核查无破损，M2 T12 filter 惯用式够用，纯样式优化不做。
 >
 > **范围外接线待办（M6 T5 留档移交，数据形状已锁定，接线属功能开发另立项）**:
+>
 > - **#17 FP/契约/成就管线**: SaveProfile.fp/fpHistory/contracts/achievements 字段与 fp-system.ts 计算函数就位，但无游戏流程写入点（FP 获取/消费的玩法触发、契约签订、成就解锁判定均未接线）。
 > - **#29 EventBus 三件套**: game-event.ts EventBus + effect-runtime 声明式效果 + subscription-manager 持久订阅基础设施完备，GamePipeline 管线完成后的批量效果执行时序（ADR: 管线完成后批量执行）未接入 run() 主流程。
 > - **#3 memory_summary 落库**: memory_summary Agent 输出解析后的 MemoryRecord 写入（含 hiddenLine 新定义）在 orchestrator 无 Stage4 翻译点。
@@ -475,6 +478,7 @@ interface Snapshot {
 ## 附录 C 新实体扩展模板（拓展时照抄）
 
 > ### 第 N 章 <实体名>
+>
 > **键规则**: (归属, name) / 说明改名与同名策略
 > **存储**: 哪张表 / 内嵌在谁下面 · 身份: 存档私有 or 全局共享
 > **字段表**: | 字段 | 类型 | 必填 | 谁填(AI/Code/玩家) | 说明 |

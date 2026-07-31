@@ -84,8 +84,7 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'roll_dice',
-      description:
-        '掷任意骰子公式。如 2d6, 3d8+2, 4d6 等。用于属性随机、伤害随机等场景。',
+      description: '掷任意骰子公式。如 2d6, 3d8+2, 4d6 等。用于属性随机、伤害随机等场景。',
       parameters: {
         type: 'object',
         properties: {
@@ -190,12 +189,31 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'object',
         properties: {
           characterId: { type: 'string', description: '制作者角色 ID' },
-          industry: { type: 'string', enum: ['锻造', '炼金', '烹饪', '裁缝'], description: '制作行业' },
+          industry: {
+            type: 'string',
+            enum: ['锻造', '炼金', '烹饪', '裁缝'],
+            description: '制作行业',
+          },
           stage: { type: 'string', enum: ['基础加工', '半成品', '成品'], description: '制作阶段' },
           productName: { type: 'string', description: '目标产物名称' },
-          targetQuality: { type: 'string', enum: ['普通', '优良', '稀有', '史诗', '传说', '神话'], description: '目标品质' },
+          targetQuality: {
+            type: 'string',
+            enum: ['普通', '优良', '稀有', '史诗', '传说', '神话'],
+            description: '目标品质',
+          },
           quantity: { type: 'integer', description: '制作数量，默认 1' },
-          materials: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, quantity: { type: 'integer' }, quality: { type: 'string' } } }, description: '投入材料列表' },
+          materials: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                quantity: { type: 'integer' },
+                quality: { type: 'string' },
+              },
+            },
+            description: '投入材料列表',
+          },
         },
         required: ['characterId', 'industry', 'targetQuality'],
       },
@@ -222,8 +240,7 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'random_hair_color',
-      description:
-        '随机生成符合种族特征的发色。魔法世界中发色可多样化，受种族、血统、元素影响。',
+      description: '随机生成符合种族特征的发色。魔法世界中发色可多样化，受种族、血统、元素影响。',
       parameters: {
         type: 'object',
         properties: {
@@ -262,7 +279,8 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'random_appearance',
-      description: '随机生成角色外貌摘要（外观年龄、体型）。发色和瞳色请分别调用 random_hair_color 和 random_eye_color。',
+      description:
+        '随机生成角色外貌摘要（外观年龄、体型）。发色和瞳色请分别调用 random_hair_color 和 random_eye_color。',
       parameters: {
         type: 'object',
         properties: {
@@ -331,12 +349,17 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_inventory',
-      description: '查询角色背包中的所有物品。返回物品名称、数量、类型、品质、效果词条。craft_gen 必须调用此工具获取材料清单，禁止凭空编造材料。',
+      description:
+        '查询角色背包中的所有物品。返回物品名称、数量、类型、品质、效果词条。craft_gen 必须调用此工具获取材料清单，禁止凭空编造材料。',
       parameters: {
         type: 'object',
         properties: {
           characterId: { type: 'string', description: '角色 ID' },
-          type: { type: 'string', enum: ['consumable', 'material', 'quest'], description: '按类型筛选（可选）' },
+          type: {
+            type: 'string',
+            enum: ['consumable', 'material', 'quest'],
+            description: '按类型筛选（可选）',
+          },
         },
       },
     },
@@ -345,13 +368,15 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_script_reference',
-      description: '查询脚本沙盒中可用的 $ API 签名、变量路径约定、生命周期hook 列表。当需要编写 skill/equipment/item/element/authority 的 scripts 时调用此工具获取正确的 API 文档。返回 Markdown 格式的参考文本。',
+      description:
+        '查询脚本沙盒中可用的 $ API 签名、变量路径约定、生命周期hook 列表。当需要编写 skill/equipment/item/element/authority 的 scripts 时调用此工具获取正确的 API 文档。返回 Markdown 格式的参考文本。',
       parameters: {
         type: 'object',
         properties: {
           query: {
             type: 'string',
-            description: '查询分类 — "all"=全部参考, "events"=事件系统($event.on/off/emit), "resources"=资源操作($resource), "status"=状态效果($status), "dice"=骰子($dice), "paths"=变量路径+跨对象引用($call/@语法)',
+            description:
+              '查询分类 — "all"=全部参考, "events"=事件系统($event.on/off/emit), "resources"=资源操作($resource), "status"=状态效果($status), "dice"=骰子($dice), "paths"=变量路径+跨对象引用($call/@语法)',
             enum: ['all', 'events', 'resources', 'status', 'dice', 'paths'],
           },
         },
@@ -464,8 +489,7 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'combat_use_item',
-      description:
-        '使用道具。生成 remove_item patch（按名消耗，铁律1）。这是真实流程，不是猜测。',
+      description: '使用道具。生成 remove_item patch（按名消耗，铁律1）。这是真实流程，不是猜测。',
       parameters: {
         type: 'object',
         properties: {
@@ -480,8 +504,7 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'combat_block',
-      description:
-        '格挡（本回合防御+50%/闪避+3）。上「防御姿态」buff。这是真实流程，不是猜测。',
+      description: '格挡（本回合防御+50%/闪避+3）。上「防御姿态」buff。这是真实流程，不是猜测。',
       parameters: {
         type: 'object',
         properties: {
@@ -510,8 +533,7 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'combat_focus',
-      description:
-        '专注（下次攻击命中+5）。上「专注」buff。这是真实流程，不是猜测。',
+      description: '专注（下次攻击命中+5）。上「专注」buff。这是真实流程，不是猜测。',
       parameters: {
         type: 'object',
         properties: {
@@ -665,35 +687,56 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
 
 export const AGENT_TOOL_MAP: Record<string, string[]> = {
   craft_gen: [
-    'roll_d20', 'roll_d100', 'roll_dice',
-    'craft_check', 'craft_settle', 'craft_get_base_dc', 'craft_get_production_bonus',
-    'get_character', 'get_inventory',
+    'roll_d20',
+    'roll_d100',
+    'roll_dice',
+    'craft_check',
+    'craft_settle',
+    'craft_get_base_dc',
+    'craft_get_production_bonus',
+    'get_character',
+    'get_inventory',
   ],
   char_gen: [
-    'roll_d20', 'roll_d100', 'roll_dice',
-    'random_name', 'random_hair_color', 'random_eye_color',
-    'random_personality', 'random_appearance', 'roll_attributes',
-    'get_character', 'get_inventory',
+    'roll_d20',
+    'roll_d100',
+    'roll_dice',
+    'random_name',
+    'random_hair_color',
+    'random_eye_color',
+    'random_personality',
+    'random_appearance',
+    'roll_attributes',
+    'get_character',
+    'get_inventory',
   ],
-  item_gen: [
-    'get_script_reference',
-    'get_character', 'get_inventory',
-  ],
-  vars_update: [
-    'get_script_reference',
-    'get_character', 'get_inventory',
-  ],
+  item_gen: ['get_script_reference', 'get_character', 'get_inventory'],
+  vars_update: ['get_script_reference', 'get_character', 'get_inventory'],
   // Combat Agent (M4 任务 5.3) — 见 docs/reference/combat-agent-api.md §7
   combat: [
     // 战斗控制
-    'combat_start', 'combat_attack', 'combat_use_skill', 'combat_use_item',
-    'combat_block', 'combat_move', 'combat_focus', 'combat_flee', 'combat_end',
+    'combat_start',
+    'combat_attack',
+    'combat_use_skill',
+    'combat_use_item',
+    'combat_block',
+    'combat_move',
+    'combat_focus',
+    'combat_flee',
+    'combat_end',
     // 状态
-    'status_apply', 'status_remove', 'status_query',
+    'status_apply',
+    'status_remove',
+    'status_query',
     // 骰子（复用现有）
-    'roll_d20', 'roll_d100', 'roll_dice',
+    'roll_d20',
+    'roll_d100',
+    'roll_dice',
     // 只读查询（复用现有 + 新建 get_combat_state）
-    'get_character', 'get_hp_percent', 'get_inventory', 'get_combat_state',
+    'get_character',
+    'get_hp_percent',
+    'get_inventory',
+    'get_combat_state',
   ],
 };
 
@@ -706,12 +749,12 @@ export function getToolsForAgent(agentId: string): ToolDefinition[] {
   const allowed = AGENT_TOOL_MAP[agentId];
   if (!allowed) return [];
   const allowedSet = new Set(allowed);
-  return ALL_TOOL_DEFINITIONS.filter(t => allowedSet.has(t.function.name));
+  return ALL_TOOL_DEFINITIONS.filter((t) => allowedSet.has(t.function.name));
 }
 
 /** 根据工具名获取单个工具定义 */
 export function getToolDefinition(functionName: string): ToolDefinition | undefined {
-  return ALL_TOOL_DEFINITIONS.find(t => t.function.name === functionName);
+  return ALL_TOOL_DEFINITIONS.find((t) => t.function.name === functionName);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -799,15 +842,13 @@ export async function executeToolCall(
         throw new Error(`未找到角色: ${args.characterId}`);
       }
 
-      const materials: CraftMaterial[] = (args.materials ?? []).map(
-        (m: any, i: number) => ({
-          itemId: `mat_${i}`,
-          itemName: m.name ?? '未知材料',
-          quantity: m.quantity ?? 1,
-          quality: (m.quality ?? '普通') as QualityLevel,
-          dcModifier: 0, // Will be calculated by craft-quality
-        }),
-      );
+      const materials: CraftMaterial[] = (args.materials ?? []).map((m: any, i: number) => ({
+        itemId: `mat_${i}`,
+        itemName: m.name ?? '未知材料',
+        quantity: m.quantity ?? 1,
+        quality: (m.quality ?? '普通') as QualityLevel,
+        dcModifier: 0, // Will be calculated by craft-quality
+      }));
 
       const request: CraftActionRequest = {
         characterId: args.characterId,
@@ -860,15 +901,13 @@ export async function executeToolCall(
       const character = findCharacter(args.characterId, context);
       if (!character) throw new Error(`未找到角色: ${args.characterId}`);
 
-      const materials: CraftMaterial[] = (args.materials ?? []).map(
-        (m: any, i: number) => ({
-          itemId: `mat_${i}`,
-          itemName: m.name ?? '未知材料',
-          quantity: m.quantity ?? 1,
-          quality: (m.quality ?? '普通') as QualityLevel,
-          dcModifier: 0,
-        }),
-      );
+      const materials: CraftMaterial[] = (args.materials ?? []).map((m: any, i: number) => ({
+        itemId: `mat_${i}`,
+        itemName: m.name ?? '未知材料',
+        quantity: m.quantity ?? 1,
+        quality: (m.quality ?? '普通') as QualityLevel,
+        dcModifier: 0,
+      }));
 
       const request: CraftActionRequest = {
         characterId: args.characterId,
@@ -944,7 +983,7 @@ export async function executeToolCall(
     // ── Character Query ──
     case 'get_character': {
       if (args.characterId) {
-        const char = context.characters.find(c => c.id === args.characterId);
+        const char = context.characters.find((c) => c.id === args.characterId);
         if (!char) return { found: false, characterId: args.characterId };
         return {
           found: true,
@@ -956,9 +995,12 @@ export async function executeToolCall(
           tierName: char.tierName,
           level: char.level,
           attributes: char.attributes,
-          hp: char.hp, maxHp: char.maxHp,
-          mp: char.mp, maxMp: char.maxMp,
-          sp: char.sp, maxSp: char.maxSp,
+          hp: char.hp,
+          maxHp: char.maxHp,
+          mp: char.mp,
+          maxMp: char.maxMp,
+          sp: char.sp,
+          maxSp: char.maxSp,
           location: char.location,
           occupation: char.occupation,
           identity: char.identity,
@@ -966,7 +1008,7 @@ export async function executeToolCall(
       }
       // Return list of all character IDs/names for dedup
       return {
-        characters: context.characters.map(c => ({
+        characters: context.characters.map((c) => ({
           id: c.id,
           name: c.name,
           race: c.race,
@@ -986,13 +1028,13 @@ export async function executeToolCall(
       if (!char) throw new Error(`未找到角色: ${args.characterId}`);
       let items = char.inventory ?? [];
       if (args.type) {
-        items = items.filter(i => i.type === args.type);
+        items = items.filter((i) => i.type === args.type);
       }
       return {
         characterId: args.characterId,
         characterName: char.name,
         itemCount: items.length,
-        items: items.map(i => ({
+        items: items.map((i) => ({
           id: i.id,
           name: i.name,
           quantity: i.quantity,
@@ -1069,7 +1111,9 @@ temp.<path>    — 会话临时 (不持久化)
       };
 
       if (query === 'all') {
-        const allParts = Object.entries(SCRIPT_REF).map(([key, text]) => text).join('\n\n');
+        const allParts = Object.entries(SCRIPT_REF)
+          .map(([key, text]) => text)
+          .join('\n\n');
         return { query: 'all', reference: allParts };
       }
       if (SCRIPT_REF[query as keyof typeof SCRIPT_REF]) {
@@ -1099,7 +1143,7 @@ temp.<path>    — 会话临时 (不持久化)
     case 'get_combat_state':
       throw new Error(
         `combat 工具「${functionName}」需 M4 orchestrator 接入 PipelineContext (EventBus + combatants + 战斗实例) 后生效，` +
-        `当前 ToolExecutionContext 仅含 { characters, variables, saveId }。详见 docs/reference/combat-agent-api.md §8。`,
+          `当前 ToolExecutionContext 仅含 { characters, variables, saveId }。详见 docs/reference/combat-agent-api.md §8。`,
       );
 
     // ── Status Tools (M4 任务 5.3) ──
@@ -1111,7 +1155,7 @@ temp.<path>    — 会话临时 (不持久化)
     case 'status_remove':
       throw new Error(
         `status 工具「${functionName}」需 M4 orchestrator 接入 PipelineContext 协调落库时机后生效。` +
-        `当前 ToolExecutionContext 缺 bus/combatants。详见 docs/reference/combat-agent-api.md §2.2/§8。`,
+          `当前 ToolExecutionContext 缺 bus/combatants。详见 docs/reference/combat-agent-api.md §2.2/§8。`,
       );
     case 'status_query': {
       const target = args.target;
@@ -1135,8 +1179,8 @@ temp.<path>    — 会话临时 (不持久化)
       // 裸 name（不含点号）→ 匹配所有同名并聚合层数。
       const hasDot = query.includes('.');
       const matched = hasDot
-        ? effects.filter(e => buffIdMatches(e, query))
-        : effects.filter(e => e.name === query);
+        ? effects.filter((e) => buffIdMatches(e, query))
+        : effects.filter((e) => e.name === query);
       if (matched.length === 0) {
         return { target, has: false, query, stacks: 0 };
       }
@@ -1161,7 +1205,7 @@ temp.<path>    — 会话临时 (不持久化)
 // ═══════════════════════════════════════════════════════════
 
 function findCharacter(id: string, ctx: ToolExecutionContext): CharacterState | undefined {
-  return ctx.characters.find(c => c.id === id);
+  return ctx.characters.find((c) => c.id === id);
 }
 
 /**
@@ -1169,7 +1213,7 @@ function findCharacter(id: string, ctx: ToolExecutionContext): CharacterState | 
  * 多个同名取第一个；找不到返回 undefined。
  */
 function findCharacterByName(name: string, ctx: ToolExecutionContext): CharacterState | undefined {
-  return ctx.characters.find(c => c.name === name);
+  return ctx.characters.find((c) => c.name === name);
 }
 
 /**
@@ -1185,17 +1229,22 @@ function buffIdMatches(effect: { name: string; sourceKey?: string }, query: stri
 /** 从角色五维中提取制作行业对应的核心属性值 */
 function getCoreAttribute(char: CharacterState, industry?: string): number {
   switch (industry) {
-    case '锻造': return char.attributes.str;
-    case '炼金': return char.attributes.int;
-    case '烹饪': return char.attributes.spi;
-    case '裁缝': return char.attributes.dex;
-    default: return Math.max(
-      char.attributes.str,
-      char.attributes.dex,
-      char.attributes.con,
-      char.attributes.int,
-      char.attributes.spi,
-    );
+    case '锻造':
+      return char.attributes.str;
+    case '炼金':
+      return char.attributes.int;
+    case '烹饪':
+      return char.attributes.spi;
+    case '裁缝':
+      return char.attributes.dex;
+    default:
+      return Math.max(
+        char.attributes.str,
+        char.attributes.dex,
+        char.attributes.con,
+        char.attributes.int,
+        char.attributes.spi,
+      );
   }
 }
 
@@ -1228,7 +1277,7 @@ function buildPipelineCtx(ctx: CombatToolContext): PipelineContext {
  * 找不到抛错（调用方应保证参战者都在 combat.participants 里）。
  */
 function findCharIdByName(ctx: CombatToolContext, name: string): string {
-  const p = ctx.combat.participants.find(p => p.name === name);
+  const p = ctx.combat.participants.find((p) => p.name === name);
   if (!p) {
     throw new Error(`角色「${name}」不在当前战斗 participants 中（按名寻址失败）`);
   }
@@ -1237,7 +1286,7 @@ function findCharIdByName(ctx: CombatToolContext, name: string): string {
 
 /** 按 target 角色名从 ctx.characters 查现有 statusEffects（status_apply/remove 用） */
 function findStatusEffectsByName(ctx: CombatToolContext, name: string): StatusEffect[] {
-  const char = ctx.characters.find(c => c.name === name);
+  const char = ctx.characters.find((c) => c.name === name);
   if (!char) {
     throw new Error(`未找到角色: ${name}`);
   }
@@ -1306,12 +1355,12 @@ async function dispatchCombatTool(
 
       // 按名从 ctx.characters 查 → CombatParticipant（铁律1）
       const findChar = (n: string): CharacterState => {
-        const c = ctx.characters.find(c => c.name === n);
+        const c = ctx.characters.find((c) => c.name === n);
         if (!c) throw new Error(`combat_start: 我方/敌方角色「${n}」未找到（按名寻址）`);
         return c;
       };
-      const allies = alliesNames.map(n => characterToCombatParticipant(findChar(n), 'ally'));
-      const enemies = enemiesNames.map(n => characterToCombatParticipant(findChar(n), 'enemy'));
+      const allies = alliesNames.map((n) => characterToCombatParticipant(findChar(n), 'ally'));
+      const enemies = enemiesNames.map((n) => characterToCombatParticipant(findChar(n), 'enemy'));
 
       const combat = initCombat({
         combatType: args.combatType,
@@ -1328,7 +1377,7 @@ async function dispatchCombatTool(
         status: combat.status,
         environment: combat.environment,
         turnOrder: combat.turnOrder,
-        participants: combat.participants.map(p => ({
+        participants: combat.participants.map((p) => ({
           name: p.name,
           side: p.side,
           hp: p.hp,
@@ -1436,7 +1485,10 @@ async function dispatchCombatTool(
         category: args.category,
         ...(args.sourceKey !== undefined && { sourceKey: args.sourceKey }),
         ...(args.stacks !== undefined && { stacks: args.stacks }),
-        ...(args.duration !== undefined && { remainingTime: args.duration, timeUnit: '回合' as const }),
+        ...(args.duration !== undefined && {
+          remainingTime: args.duration,
+          timeUnit: '回合' as const,
+        }),
         ...(args.lifecycle !== undefined && { lifecycle: args.lifecycle }),
         ...(args.divinity !== undefined && { divinity: args.divinity }),
         ...(args.effects !== undefined && { effects: args.effects }),
@@ -1480,7 +1532,7 @@ async function dispatchCombatTool(
         round: ctx.combat.round,
         combatType: ctx.combat.combatType,
         status: ctx.combat.status,
-        participants: ctx.combat.participants.map(p => ({
+        participants: ctx.combat.participants.map((p) => ({
           name: p.name,
           side: p.side,
           hp: p.hp,

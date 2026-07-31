@@ -91,13 +91,19 @@ function makeCombatState(allies: string[], enemies: string[]): CombatState {
 }
 
 /** 造 combat_attack 的 mock 结果（只填 runner 用到的字段） */
-function makeAttackResult(defenderId: string, finalHp: number, isDead: boolean): Partial<CombatActionResult> {
+function makeAttackResult(
+  defenderId: string,
+  finalHp: number,
+  isDead: boolean,
+): Partial<CombatActionResult> {
   return {
     request: { attackerId: 'x', defenderId, action: 'attack' } as any,
     finalHp,
     maxHp: 100,
     isDead,
-    patches: [{ op: 'delta_hp', target: `characters.${defenderId}`, amount: -(100 - finalHp) } as any],
+    patches: [
+      { op: 'delta_hp', target: `characters.${defenderId}`, amount: -(100 - finalHp) } as any,
+    ],
   };
 }
 
@@ -126,7 +132,13 @@ function makeScriptedClient(steps: ScriptedStep[]): CombatClient {
         duration: 10,
       };
     }),
-    chat: vi.fn(async () => ({ output: '', rawResponse: '', tokensUsed: 0, cacheHit: false, duration: 0 })),
+    chat: vi.fn(async () => ({
+      output: '',
+      rawResponse: '',
+      tokensUsed: 0,
+      cacheHit: false,
+      duration: 0,
+    })),
   };
 }
 
@@ -145,7 +157,10 @@ const baseRequest = {
   endpoint: {} as any,
 };
 
-function makeDeps(client: CombatClient, extra?: Partial<CombatRunDeps>): {
+function makeDeps(
+  client: CombatClient,
+  extra?: Partial<CombatRunDeps>,
+): {
   deps: CombatRunDeps;
   events: CombatEvent[];
   /** ref.submit — registerSubmitter 注册的提交器（用 ref 避免 primitive 值拷贝丢失更新） */
@@ -214,7 +229,8 @@ describe('runCombat · 路径 X 调度', () => {
       { tools: [{ name: 'combat_start', args: {} }], output: '战斗开始！哥布林龇牙咧嘴。' },
       {
         tools: [{ name: 'combat_end', args: { winner: 'ally' } }],
-        output: '哥布林不堪一击，转身逃跑。<combat_summary>我方获胜，英雄击败了哥布林，获得 50 EXP。</combat_summary>',
+        output:
+          '哥布林不堪一击，转身逃跑。<combat_summary>我方获胜，英雄击败了哥布林，获得 50 EXP。</combat_summary>',
       },
     ]);
 
@@ -310,7 +326,11 @@ describe('runCombat · 路径 X 调度', () => {
         return { toolCallId: 'tc', functionName: name, result: { _combatState: state } } as any;
       }
       if (name === 'combat_attack') {
-        return { toolCallId: 'tc', functionName: name, result: makeAttackResult(goblinId, 0, true) } as any;
+        return {
+          toolCallId: 'tc',
+          functionName: name,
+          result: makeAttackResult(goblinId, 0, true),
+        } as any;
       }
       if (name === 'combat_end') {
         return { toolCallId: 'tc', functionName: name, result: { exp: 50 } } as any;
@@ -351,14 +371,24 @@ describe('runCombat · 路径 X 调度', () => {
 
   it('client 不支持 chatWithTools 时抛错', async () => {
     const brokenClient: CombatClient = {
-      chat: vi.fn(async () => ({ output: 'x', rawResponse: '', tokensUsed: 0, cacheHit: false, duration: 0 })),
+      chat: vi.fn(async () => ({
+        output: 'x',
+        rawResponse: '',
+        tokensUsed: 0,
+        cacheHit: false,
+        duration: 0,
+      })),
     };
     const { deps } = makeDeps(brokenClient);
     await expect(runCombat(baseRequest as any, deps)).rejects.toThrow(/chatWithTools/);
   });
 
   it('未调 combat_start 时抛错', async () => {
-    vi.mocked(executeCombatToolCall).mockResolvedValue({ toolCallId: 'tc', functionName: 'x', result: {} } as any);
+    vi.mocked(executeCombatToolCall).mockResolvedValue({
+      toolCallId: 'tc',
+      functionName: 'x',
+      result: {},
+    } as any);
     const client = makeScriptedClient([{ output: 'agent 没调 combat_start 直接叙事' }]);
     const { deps } = makeDeps(client);
     await expect(runCombat(baseRequest as any, deps)).rejects.toThrow(/combat_start/);

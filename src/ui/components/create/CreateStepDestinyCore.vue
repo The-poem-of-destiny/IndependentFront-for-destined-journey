@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useCreateStore } from '../../stores/create-store'
+import { ref } from 'vue';
+import { useCreateStore } from '../../stores/create-store';
 
-const store = useCreateStore()
+const store = useCreateStore();
 
 /** 展开/折叠的条目 uid */
-const expandedUid = ref<number | null>(null)
+const expandedUid = ref<number | null>(null);
 
 function toggleExpand(uid: number) {
-  expandedUid.value = expandedUid.value === uid ? null : uid
+  expandedUid.value = expandedUid.value === uid ? null : uid;
 }
 
 /** 提取条目内容的纯文本摘要（去掉 HTML/EJS 标签） */
@@ -17,8 +17,8 @@ function summary(content: string, maxLen = 200): string {
     .replace(/<[^>]+>/g, '')
     .replace(/\{\{[^}]+\}\}/g, '')
     .replace(/\s+/g, ' ')
-    .trim()
-  return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + '…' : cleaned
+    .trim();
+  return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + '…' : cleaned;
 }
 </script>
 
@@ -38,7 +38,11 @@ function summary(content: string, maxLen = 200): string {
       <div class="sd-header">
         <span class="sd-dot" />
         <h3>{{ store.selectedSystemCoreEntry.name }}</h3>
-        <button class="sd-deselect" @click="store.selectSystemCoreEntry(null as any)" title="取消选择">
+        <button
+          class="sd-deselect"
+          title="取消选择"
+          @click="store.selectSystemCoreEntry(null as any)"
+        >
           ✕
         </button>
       </div>
@@ -63,7 +67,10 @@ function summary(content: string, maxLen = 200): string {
           @keydown.enter="store.selectSystemCoreEntry(entry.uid)"
           @keydown.space.prevent="store.selectSystemCoreEntry(entry.uid)"
         >
-          <span class="core-radio" :class="{ checked: store.selectedSystemCoreEntryUid === entry.uid }" />
+          <span
+            class="core-radio"
+            :class="{ checked: store.selectedSystemCoreEntryUid === entry.uid }"
+          />
           <span class="core-name">{{ entry.name }}</span>
         </div>
 
@@ -71,20 +78,23 @@ function summary(content: string, maxLen = 200): string {
         <button
           class="core-chevron"
           :class="{ expanded: expandedUid === entry.uid }"
-          @click.stop="toggleExpand(entry.uid)"
           aria-label="展开内容预览"
           type="button"
+          @click.stop="toggleExpand(entry.uid)"
         >
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-            <path d="M4 2l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+            <path
+              d="M4 2l4 4-4 4"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
         </button>
 
         <!-- 可展开的内容预览 -->
-        <div
-          class="core-preview"
-          :class="{ open: expandedUid === entry.uid }"
-        >
+        <div class="core-preview" :class="{ open: expandedUid === entry.uid }">
           <div class="core-preview-inner">
             {{ summary(entry.content, 400) }}
           </div>
@@ -159,7 +169,9 @@ function summary(content: string, maxLen = 200): string {
   justify-content: center;
   cursor: pointer;
   font-size: 0.75rem;
-  transition: color var(--theme-transition-fast), border-color var(--theme-transition-fast);
+  transition:
+    color var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
 }
 .sd-deselect:hover {
   color: var(--theme-text-primary);
@@ -220,7 +232,9 @@ function summary(content: string, maxLen = 200): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: border-color 0.2s ease, background-color 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease;
 }
 .core-radio.checked {
   border-color: var(--theme-quality-epic);
@@ -249,7 +263,9 @@ function summary(content: string, maxLen = 200): string {
   cursor: pointer;
   padding: var(--theme-spacing-xs);
   color: var(--theme-text-muted);
-  transition: transform 0.2s ease, color 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    color 0.2s ease;
   margin-top: 2px;
 }
 .core-chevron:hover {
@@ -281,6 +297,8 @@ function summary(content: string, maxLen = 200): string {
   border-top: 1px solid var(--theme-card-border);
 }
 @media (prefers-reduced-motion: reduce) {
-  .core-preview { transition: none; }
+  .core-preview {
+    transition: none;
+  }
 }
 </style>

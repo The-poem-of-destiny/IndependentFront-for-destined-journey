@@ -8,25 +8,25 @@
 
 ## 0. Decisions
 
-| # | Decision | Consequence |
-|---|----------|-------------|
-| 1 | **Multi-channel**, not music-only | Music and SFX play concurrently |
-| 2 | **No remote/URL audio in v1** | `AudioSourceKind = 'blob' \| 'builtin'`; kills the CORS class of bug entirely |
-| 3 | **Pure Web Audio** | Follows from #2 — no CORS tainting risk left to avoid |
-| 4 | **Two channel classes**: sequencer + voice pool | No dead state; each class tests only what it does |
-| 5 | SFX **infrastructure complete, no trigger wiring** | Consumer side deferred, not the plumbing |
-| 6 | `kind: 'music' \| 'sfx'` on the track | Plus a size guard behind it, because the field can be wrong |
-| 7 | **No decode cache** — decode per play | The one decision that is retrofittable with zero interface change |
-| 8 | **Master + per-channel volume, global** | Audio levels are an environment property, not fiction state |
-| 9 | **Single-element fade**, not crossfade | Internal to MusicChannel; upgradeable later |
-| 10 | **Hand-roll engine and UI** | Desktop-only target; howler's main value is iOS quirks we don't need |
-| 11 | **Transitions broadcast, position polled on demand** | Zero cost when nothing renders a progress bar |
-| 12 | **No audio export/import in v1** | Audio tables simply absent from `FullBackup` |
-| 13 | **App-global singleton** | Playback survives navigation; title music possible |
-| 14 | **Cap 8 voices, steal oldest** | Plus an in-flight decode cap of 4 |
-| 15 | **Split tables**: metadata / blobs | Library listing stays cheap at any library size |
-| 16 | **Built-in manifest ships empty** | Mechanism now, licensed music later, no schema change |
-| 17 | **Mini player = floating card** | The one control worth touching while reading |
+| #   | Decision                                             | Consequence                                                                   |
+| --- | ---------------------------------------------------- | ----------------------------------------------------------------------------- |
+| 1   | **Multi-channel**, not music-only                    | Music and SFX play concurrently                                               |
+| 2   | **No remote/URL audio in v1**                        | `AudioSourceKind = 'blob' \| 'builtin'`; kills the CORS class of bug entirely |
+| 3   | **Pure Web Audio**                                   | Follows from #2 — no CORS tainting risk left to avoid                         |
+| 4   | **Two channel classes**: sequencer + voice pool      | No dead state; each class tests only what it does                             |
+| 5   | SFX **infrastructure complete, no trigger wiring**   | Consumer side deferred, not the plumbing                                      |
+| 6   | `kind: 'music' \| 'sfx'` on the track                | Plus a size guard behind it, because the field can be wrong                   |
+| 7   | **No decode cache** — decode per play                | The one decision that is retrofittable with zero interface change             |
+| 8   | **Master + per-channel volume, global**              | Audio levels are an environment property, not fiction state                   |
+| 9   | **Single-element fade**, not crossfade               | Internal to MusicChannel; upgradeable later                                   |
+| 10  | **Hand-roll engine and UI**                          | Desktop-only target; howler's main value is iOS quirks we don't need          |
+| 11  | **Transitions broadcast, position polled on demand** | Zero cost when nothing renders a progress bar                                 |
+| 12  | **No audio export/import in v1**                     | Audio tables simply absent from `FullBackup`                                  |
+| 13  | **App-global singleton**                             | Playback survives navigation; title music possible                            |
+| 14  | **Cap 8 voices, steal oldest**                       | Plus an in-flight decode cap of 4                                             |
+| 15  | **Split tables**: metadata / blobs                   | Library listing stays cheap at any library size                               |
+| 16  | **Built-in manifest ships empty**                    | Mechanism now, licensed music later, no schema change                         |
+| 17  | **Mini player = floating card**                      | The one control worth touching while reading                                  |
 
 ---
 
@@ -73,19 +73,19 @@ export interface AudioTrack {
   name: string;
   kind: AudioTrackKind;
   source: AudioSourceKind;
-  url?: string;               // source='builtin': the manifest path
+  url?: string; // source='builtin': the manifest path
   mimeType?: string;
-  size?: number;              // compressed bytes
-  duration?: number;          // seconds, backfilled after first load
-  tags: string[];             // scene tags — the AI hook's only addressing scheme (§8)
-  builtin?: boolean;          // cannot be deleted, only hidden
+  size?: number; // compressed bytes
+  duration?: number; // seconds, backfilled after first load
+  tags: string[]; // scene tags — the AI hook's only addressing scheme (§8)
+  builtin?: boolean; // cannot be deleted, only hidden
   createdAt: number;
   updatedAt: number;
 }
 
 /** Audio bytes, stored apart from metadata and read only at play time */
 export interface AudioBlobRecord {
-  id: string;                 // === AudioTrack.id
+  id: string; // === AudioTrack.id
   blob: Blob;
 }
 
@@ -93,7 +93,7 @@ export interface AudioBlobRecord {
 export interface AudioPlaylist {
   id: string;
   name: string;
-  trackIds: string[];         // ordered; dangling ids pruned on track delete
+  trackIds: string[]; // ordered; dangling ids pruned on track delete
   createdAt: number;
   updatedAt: number;
 }
@@ -111,7 +111,7 @@ export interface AudioPlaybackState {
     playlistId: string | null;
     index: number;
     durationSec: number;
-    volume: number;           // 0..1, channel gain
+    volume: number; // 0..1, channel gain
     muted: boolean;
     repeat: AudioRepeatMode;
     shuffle: boolean;
@@ -147,6 +147,7 @@ this.version(11).stores({
   audioPlaylists: 'id, name, updatedAt',
 });
 ```
+
 Purely additive; no upgrade callback.
 
 ### 3.2 Why blobs live in their own table
@@ -206,6 +207,7 @@ They share only a narrow interface — `gain`, `muted`, `stop()`, `dispose()` �
 almost nothing else in common.
 
 **`MusicChannel` — a sequencer**
+
 - One `HTMLAudioElement` through a `MediaElementSource`. Music **streams**; it is never decoded to
   a buffer (5 min of stereo float32 ≈ 105 MB).
 - Owns `queue: string[]`, `index`, `repeat`, `shuffle`.
@@ -213,18 +215,19 @@ almost nothing else in common.
   a **copy** so stored order is never mutated.
 - `ended` drives advancement:
 
-  | repeat | shuffle | Behavior |
-  |--------|---------|----------|
-  | `one` | — | replay current |
-  | `all` | off | wrap to index 0 |
-  | `all` | on | reshuffle, restart from top |
-  | `off` | — | end of queue → `idle` |
+  | repeat | shuffle | Behavior                    |
+  | ------ | ------- | --------------------------- |
+  | `one`  | —       | replay current              |
+  | `all`  | off     | wrap to index 0             |
+  | `all`  | on      | reshuffle, restart from top |
+  | `off`  | —       | end of queue → `idle`       |
 
 - Track change: ramp gain to 0 (~300 ms), swap `src`, ramp back. A beat of silence at the seam
   reads as a scene transition. Upgrading to true two-element crossfade later is internal to this
   class — no interface change.
 
 **`SfxChannel` — a voice pool**
+
 - No queue, no index, no repeat. Each shot: `blob.arrayBuffer()` → `decodeAudioData` →
   `AudioBufferSourceNode` → `start()`. Nodes are one-shot and GC'd after `ended`; nothing to pool.
 - **Cap 8 live voices**; past the cap, stop the longest-running voice to free a slot — the newest
@@ -242,6 +245,7 @@ No cache: every shot decodes fresh. This is the only decision in the design that
 with **zero interface change** — an LRU cache is a pure internal optimization behind `playSfx()`.
 
 Two things it forces, which the implementation must handle explicitly:
+
 - `decodeAudioData` **detaches** the ArrayBuffer it consumes, so each play needs its own
   `blob.arrayBuffer()` read; a shared buffer cannot be reused
 - decode is async, so two rapid calls can resolve **out of order** — the pool must tolerate that
@@ -265,16 +269,23 @@ export class AudioManager {
   // Music (delegates to MusicChannel)
   playTrack(trackId: string): Promise<void>;
   playPlaylist(playlistId: string, startIndex?: number): Promise<void>;
-  play(): Promise<void>;  pause(): void;  toggle(): Promise<void>;  stop(): void;
-  next(): Promise<void>;  prev(): Promise<void>;  seek(sec: number): void;
-  setRepeat(mode: AudioRepeatMode): void;  setShuffle(on: boolean): void;
+  play(): Promise<void>;
+  pause(): void;
+  toggle(): Promise<void>;
+  stop(): void;
+  next(): Promise<void>;
+  prev(): Promise<void>;
+  seek(sec: number): void;
+  setRepeat(mode: AudioRepeatMode): void;
+  setShuffle(on: boolean): void;
 
   // SFX (delegates to SfxChannel)
-  playSfx(trackId: string): Promise<boolean>;   // false if capped or guard-rejected
+  playSfx(trackId: string): Promise<boolean>; // false if capped or guard-rejected
   stopAllSfx(): void;
 
   // Mixing
-  setMasterVolume(v: number): void;  setMasterMuted(m: boolean): void;
+  setMasterVolume(v: number): void;
+  setMasterMuted(m: boolean): void;
   setChannelVolume(ch: 'music' | 'sfx', v: number): void;
   setChannelMuted(ch: 'music' | 'sfx', m: boolean): void;
 
@@ -285,8 +296,8 @@ export class AudioManager {
   playByTag(tag: string, opts?: { fallback?: 'keep' | 'stop' }): Promise<boolean>;
 
   // Observation
-  get state(): Readonly<AudioPlaybackState>;   // discrete only
-  get positionSec(): number;                   // sampled on demand, never broadcast
+  get state(): Readonly<AudioPlaybackState>; // discrete only
+  get positionSec(): number; // sampled on demand, never broadcast
   subscribe(fn: (s: AudioPlaybackState) => void): () => void;
   dispose(): void;
 }
@@ -300,13 +311,13 @@ would not touch playback logic.
 
 ```ts
 interface AudioManagerOptions {
-  createContext?: () => AudioContextLike;      // no AudioContext under environment:'node'
-  createElement?: () => AudioElementLike;      // no Audio either
+  createContext?: () => AudioContextLike; // no AudioContext under environment:'node'
+  createElement?: () => AudioElementLike; // no Audio either
   createObjectURL?: (b: Blob) => string;
   revokeObjectURL?: (u: string) => void;
-  random?: () => number;                       // shuffle determinism
-  fadeMs?: number;                             // 0 in tests, 300 in the UI
-  loadBlob?: (trackId: string) => Promise<Blob | undefined>;  // storage seam
+  random?: () => number; // shuffle determinism
+  fadeMs?: number; // 0 in tests, 300 in the UI
+  loadBlob?: (trackId: string) => Promise<Blob | undefined>; // storage seam
 }
 ```
 
@@ -319,6 +330,7 @@ public/audio/
 ├── manifest.json    # [] in v1
 └── README.md        # entry format: { id, name, kind, file, tags, credit, license }
 ```
+
 Fetched at startup, silent on failure (matching `loadBuiltInWorldBooks`). Ships **empty**: the repo
 is bound by the 《命定之诗》derivative-content license, so bundled audio needs its own clearance
 (CC0, or CC-BY with attribution). Keeping the mechanism means dropping in cleared music later is a
@@ -361,7 +373,7 @@ on outside click or Esc:
 ```
 
 This deliberately breaks the page's Modal pattern for one control, because adjusting volume or
-skipping a track is the one interaction you'd want *while reading* — a Modal would blank the
+skipping a track is the one interaction you'd want _while reading_ — a Modal would blank the
 narrative every time. Cost: it owns its own dismissal and focus handling rather than inheriting
 `AppModal`'s. While playing, the toolbar icon breathes at low amplitude; static under
 reduced-motion.
@@ -399,6 +411,7 @@ story Agent emits <bgm scene="combat"/>
   → GamePipeline callback onBgmRequest → audioStore.playByTag('combat')
   → no match → fallback:'keep' holds the current track (never cut to silence mid-scene)
 ```
+
 No schema change will be needed — only marker parsing and a systemPrompt section.
 
 **SFX triggers are the same story**: `playSfx()` is complete, but nothing fires it. When the
@@ -413,19 +426,19 @@ precisely so that a combat round's burst of events cannot machine-gun once that 
 
 `audio-manager.test.ts` + `audio-channels.test.ts`, all seams injected.
 
-| Group | Cases |
-|-------|-------|
+| Group           | Cases                                                                                         |
+| --------------- | --------------------------------------------------------------------------------------------- |
 | Sequencer queue | playTrack single-track queue / playPlaylist order / startIndex / empty playlist doesn't throw |
-| Advance | ended × repeat(off/all/one) × shuffle / next at end / prev at start / reshuffle on wrap |
-| Fade | gain ramps to 0 before src swap, back after / fadeMs=0 is synchronous |
-| Voice pool | 8 concurrent OK / 9th steals oldest / decode cap queues / out-of-order decode resolution |
-| Guard | oversize track rejected with reason, nothing decoded / wrong `kind` still caught by size |
-| Mixing | master × channel composition / mute leaves volume value intact / clamp (<0, >1) |
-| Sources | blob objectURL created and revoked on track change / builtin path used directly |
-| Library sync | setTracks deleting current track → stop / deleting a queued track → queue shrinks |
-| AI hook | playByTag hit / multi-hit uses injected random / miss with fallback keep vs stop |
-| Unlock | play while locked stores pending; unlock() redeems it / no throw while locked |
-| Observation | subscribe fires on discrete changes only / never on position / unsubscribe / dispose |
+| Advance         | ended × repeat(off/all/one) × shuffle / next at end / prev at start / reshuffle on wrap       |
+| Fade            | gain ramps to 0 before src swap, back after / fadeMs=0 is synchronous                         |
+| Voice pool      | 8 concurrent OK / 9th steals oldest / decode cap queues / out-of-order decode resolution      |
+| Guard           | oversize track rejected with reason, nothing decoded / wrong `kind` still caught by size      |
+| Mixing          | master × channel composition / mute leaves volume value intact / clamp (<0, >1)               |
+| Sources         | blob objectURL created and revoked on track change / builtin path used directly               |
+| Library sync    | setTracks deleting current track → stop / deleting a queued track → queue shrinks             |
+| AI hook         | playByTag hit / multi-hit uses injected random / miss with fallback keep vs stop              |
+| Unlock          | play while locked stores pending; unlock() redeems it / no throw while locked                 |
+| Observation     | subscribe fires on discrete changes only / never on position / unsubscribe / dispose          |
 
 Target ≥ 60 cases. `npm test` fully green before delivery (project rule: every module ships tests).
 
@@ -433,22 +446,22 @@ Target ≥ 60 cases. `npm test` fully green before delivery (project rule: every
 
 ## 10. Deliverables
 
-| # | File | Action |
-|---|------|--------|
-| 1 | `src/sillytavern/types.ts` | +6 types (§2) |
-| 2 | `src/sillytavern/database.ts` | Dexie v11, 3 tables + CRUD (2-table transactional upload/delete) |
-| 3 | `src/sillytavern/audio-channels.ts` | 🆕 MusicChannel + SfxChannel |
-| 4 | `src/sillytavern/audio-manager.ts` | 🆕 registry, master gain, unlock, AI hook |
-| 5 | `src/sillytavern/audio-channels.test.ts` | 🆕 |
-| 6 | `src/sillytavern/audio-manager.test.ts` | 🆕 |
-| 7 | `src/ui/stores/audio-store.ts` | 🆕 Pinia shell over the module-level singleton |
-| 8 | `src/ui/components/settings/AudioSection.vue` | 🆕 |
-| 9 | `src/ui/components/settings/SettingsPage.vue` | +nav entry + mount |
-| 10 | `src/ui/components/game/MiniPlayer.vue` | 🆕 floating card |
-| 11 | `src/ui/components/game/SideToolbar.vue` | +music button |
-| 12 | `src/ui/components/game/GamePage.vue` | mount the overlay |
-| 13 | `public/audio/manifest.json` + `README.md` | 🆕 empty skeleton |
-| 14 | `CLAUDE.md` / data dictionary | architecture table, settings sections 9→10, audio entity chapter |
+| #   | File                                          | Action                                                           |
+| --- | --------------------------------------------- | ---------------------------------------------------------------- |
+| 1   | `src/sillytavern/types.ts`                    | +6 types (§2)                                                    |
+| 2   | `src/sillytavern/database.ts`                 | Dexie v11, 3 tables + CRUD (2-table transactional upload/delete) |
+| 3   | `src/sillytavern/audio-channels.ts`           | 🆕 MusicChannel + SfxChannel                                     |
+| 4   | `src/sillytavern/audio-manager.ts`            | 🆕 registry, master gain, unlock, AI hook                        |
+| 5   | `src/sillytavern/audio-channels.test.ts`      | 🆕                                                               |
+| 6   | `src/sillytavern/audio-manager.test.ts`       | 🆕                                                               |
+| 7   | `src/ui/stores/audio-store.ts`                | 🆕 Pinia shell over the module-level singleton                   |
+| 8   | `src/ui/components/settings/AudioSection.vue` | 🆕                                                               |
+| 9   | `src/ui/components/settings/SettingsPage.vue` | +nav entry + mount                                               |
+| 10  | `src/ui/components/game/MiniPlayer.vue`       | 🆕 floating card                                                 |
+| 11  | `src/ui/components/game/SideToolbar.vue`      | +music button                                                    |
+| 12  | `src/ui/components/game/GamePage.vue`         | mount the overlay                                                |
+| 13  | `public/audio/manifest.json` + `README.md`    | 🆕 empty skeleton                                                |
+| 14  | `CLAUDE.md` / data dictionary                 | architecture table, settings sections 9→10, audio entity chapter |
 
 Order: **1-6 (engine green) → 7-9 (settings usable) → 10-12 (game page) → 13-14 (docs)**.
 
@@ -456,16 +469,16 @@ Order: **1-6 (engine green) → 7-9 (settings usable) → 10-12 (game page) → 
 
 ## 11. Risks
 
-| Risk | Handling |
-|------|----------|
-| Audio fills the IndexedDB quota, taking saves with it | Soft prompt on upload + always-visible usage; no auto-cleanup |
-| "Clear all data" silently destroys the library | Name audio explicitly in the confirmation dialog (§3.4) |
-| Decode-per-play latency once SFX are wired | Accepted; LRU cache is a zero-interface-change retrofit (§4.4) |
-| Oversize file sent to the SFX channel | Size guard rejects before decode, independent of `kind` (§4.4) |
-| Autoplay blocked | Gesture unlock + pending redemption (§7) |
-| Two browser tabs = doubled playback | Ignored for a desktop single-window target; `BroadcastChannel` if it ever bites |
-| Built-in library licensing | Ships empty; mechanism only (§5) |
-| Mini player stealing attention | Floating card, low-amplitude animation, reduced-motion aware (§6.2) |
+| Risk                                                  | Handling                                                                        |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Audio fills the IndexedDB quota, taking saves with it | Soft prompt on upload + always-visible usage; no auto-cleanup                   |
+| "Clear all data" silently destroys the library        | Name audio explicitly in the confirmation dialog (§3.4)                         |
+| Decode-per-play latency once SFX are wired            | Accepted; LRU cache is a zero-interface-change retrofit (§4.4)                  |
+| Oversize file sent to the SFX channel                 | Size guard rejects before decode, independent of `kind` (§4.4)                  |
+| Autoplay blocked                                      | Gesture unlock + pending redemption (§7)                                        |
+| Two browser tabs = doubled playback                   | Ignored for a desktop single-window target; `BroadcastChannel` if it ever bites |
+| Built-in library licensing                            | Ships empty; mechanism only (§5)                                                |
+| Mini player stealing attention                        | Floating card, low-amplitude animation, reduced-motion aware (§6.2)             |
 
 ---
 
@@ -491,7 +504,7 @@ Named so they don't get quietly re-litigated during implementation:
 Kept because these are the decisions most likely to look arbitrary in six months.
 
 **Remote URLs cut (#2).** Routing a cross-origin stream through `MediaElementSource` yields
-*silence*, not an error, unless the server sends permissive CORS headers — and it would never
+_silence_, not an error, unless the server sends permissive CORS headers — and it would never
 reproduce in dev, where everything is same-origin localhost. Cutting the feature removed an entire
 class of silent, environment-dependent failure and made pure Web Audio unambiguously correct.
 

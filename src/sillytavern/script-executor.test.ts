@@ -2,7 +2,14 @@
  * script-executor 测试 (Phase 7e+8)
  */
 import { describe, it, expect } from 'vitest';
-import { executeScript, executeHook, createScriptEffects, resolveScriptRef, executeInit, executeCleanup } from './script-executor';
+import {
+  executeScript,
+  executeHook,
+  createScriptEffects,
+  resolveScriptRef,
+  executeInit,
+  executeCleanup,
+} from './script-executor';
 import type { StatusEffect, ReadonlyHookSet } from './types';
 import type { ScriptContext } from './script-executor';
 
@@ -95,10 +102,7 @@ describe('executeScript', () => {
 
   it('$event.emit fires events', () => {
     const ctx = makeContext();
-    const result = executeScript(
-      '$event.emit("flame_burst", { damage: 50 })',
-      ctx,
-    );
+    const result = executeScript('$event.emit("flame_burst", { damage: 50 })', ctx);
     expect(result.events).toHaveLength(1);
     expect(result.events[0].eventType).toBe('flame_burst');
     expect(result.events[0].data.damage).toBe(50);
@@ -126,8 +130,18 @@ describe('executeScript', () => {
 describe('executeHook', () => {
   it('executes onTick on all statuses that have it', () => {
     const statuses = [
-      makeStatus({ id: 'burn', name: '灼烧', scripts: { tick: '$resource.modifyHp(owner, -5)' }, onTick: 'tick' }),
-      makeStatus({ id: 'poison', name: '中毒', scripts: { tick: '$resource.modifyHp(owner, -3)' }, onTick: 'tick' }),
+      makeStatus({
+        id: 'burn',
+        name: '灼烧',
+        scripts: { tick: '$resource.modifyHp(owner, -5)' },
+        onTick: 'tick',
+      }),
+      makeStatus({
+        id: 'poison',
+        name: '中毒',
+        scripts: { tick: '$resource.modifyHp(owner, -3)' },
+        onTick: 'tick',
+      }),
       makeStatus({ id: 'shield', name: '护盾', scripts: {}, onTick: undefined }),
     ];
     const ctx = { owner: 'char_1', target: undefined, event: { turn: 3 } };
@@ -136,16 +150,19 @@ describe('executeHook', () => {
   });
 
   it('skips statuses without scripts or hook', () => {
-    const statuses = [
-      makeStatus({ id: 'bare', scripts: undefined, onTick: undefined }),
-    ];
+    const statuses = [makeStatus({ id: 'bare', scripts: undefined, onTick: undefined })];
     const result = executeHook(statuses, 'onTick', { owner: 'x', target: undefined });
     expect(result.hpChanges).toHaveLength(0);
   });
 
   it('executes onApply hook', () => {
     const statuses = [
-      makeStatus({ id: 'fear', name: '恐惧', scripts: { apply: '$resource.modifyStat(owner, "atk", -5)' }, onApply: 'apply' }),
+      makeStatus({
+        id: 'fear',
+        name: '恐惧',
+        scripts: { apply: '$resource.modifyStat(owner, "atk", -5)' },
+        onApply: 'apply',
+      }),
     ];
     const result = executeHook(statuses, 'onApply', { owner: 'char_1', target: undefined });
     expect(result.statChanges).toHaveLength(1);
@@ -168,8 +185,9 @@ describe('resolveScriptRef', () => {
   // 🆕 @parent 解析
   it('resolves @parent.xxx from parentScripts', () => {
     const parentScripts = { burnFormula: '$resource.modifyHp(owner, -10)' };
-    expect(resolveScriptRef('@parent.burnFormula', {}, parentScripts))
-      .toBe('$resource.modifyHp(owner, -10)');
+    expect(resolveScriptRef('@parent.burnFormula', {}, parentScripts)).toBe(
+      '$resource.modifyHp(owner, -10)',
+    );
   });
 
   // 🆕 @parent 递归解析
@@ -177,14 +195,12 @@ describe('resolveScriptRef', () => {
     const scripts = { tick: '@parent.burnFormula' };
     const parentScripts = { burnFormula: '$resource.modifyHp(owner, -8)' };
     // resolveScriptRef 递归: "tick" → "@parent.burnFormula" → "$resource.modifyHp(owner, -8)"
-    expect(resolveScriptRef('tick', scripts, parentScripts))
-      .toBe('$resource.modifyHp(owner, -8)');
+    expect(resolveScriptRef('tick', scripts, parentScripts)).toBe('$resource.modifyHp(owner, -8)');
   });
 
   // 🆕 @parent 不存在不崩溃
   it('returns undefined when @parent key does not exist', () => {
-    expect(resolveScriptRef('@parent.nonexistent', {}, {}))
-      .toBeUndefined();
+    expect(resolveScriptRef('@parent.nonexistent', {}, {})).toBeUndefined();
   });
 
   // 🆕 递归深度保护
@@ -202,10 +218,7 @@ describe('resolveScriptRef', () => {
 describe('$event.on and $event.off (init self-registration)', () => {
   it('$event.on collects subscription in ScriptEffects', () => {
     const ctx = makeContext();
-    const result = executeScript(
-      "$event.on('combat_action', 'reflect');",
-      ctx,
-    );
+    const result = executeScript("$event.on('combat_action', 'reflect');", ctx);
     expect(result.subscriptions).toHaveLength(1);
     expect(result.subscriptions[0].eventType).toBe('combat_action');
     expect(result.subscriptions[0].scriptKey).toBe('reflect');
@@ -225,16 +238,15 @@ describe('$event.on and $event.off (init self-registration)', () => {
 
   it('$event.off collects unsubscription in ScriptEffects', () => {
     const ctx = makeContext();
-    const result = executeScript(
-      "$event.off('combat_action');",
-      ctx,
-    );
+    const result = executeScript("$event.off('combat_action');", ctx);
     expect(result.unsubscriptions).toHaveLength(1);
     expect(result.unsubscriptions[0]).toBe('combat_action');
   });
 
   it('$event.on + $event.off together in init + cleanup pattern', () => {
-    const ctx = makeContext({ self: { stacks: 1, remainingTime: null, name: '荆棘甲', scripts: {} } });
+    const ctx = makeContext({
+      self: { stacks: 1, remainingTime: null, name: '荆棘甲', scripts: {} },
+    });
     // Simulate init
     const initResult = executeScript(
       "$event.on('combat_action', 'reflect'); $event.on('location_change', 'onMove');",
@@ -316,7 +328,8 @@ describe('$status.add parentScripts inheritance', () => {
     const scripts = {
       init: "$event.on('combat_action', 'burn');",
       burn: '$resource.modifyHp(target, -5);',
-      onHit: "$status.add(target, { name:'灼烧', category:'减益', stacks:1, remainingTime:3, timeUnit:'回合', source:'test', scripts:{ tick:'@parent.burn' }, onTick:'tick' });",
+      onHit:
+        "$status.add(target, { name:'灼烧', category:'减益', stacks:1, remainingTime:3, timeUnit:'回合', source:'test', scripts:{ tick:'@parent.burn' }, onTick:'tick' });",
     };
     const ctx: ScriptContext = {
       owner: 'char_1',

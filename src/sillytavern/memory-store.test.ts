@@ -46,7 +46,9 @@ const {
 // Helpers
 // ═══════════════════════════════════════════════════════════════
 
-function makeEndpoint(overrides: Partial<{ baseUrl: string; apiKey: string; defaultModel: string }> = {}) {
+function makeEndpoint(
+  overrides: Partial<{ baseUrl: string; apiKey: string; defaultModel: string }> = {},
+) {
   return {
     baseUrl: 'https://api.deepseek.com/v1',
     apiKey: 'sk-test-key-12345',
@@ -72,7 +74,11 @@ function makeMemory(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
 }
 
 /** Create N memories with sequential ids and timestamps */
-function makeMemories(count: number, saveId = 'save_test', baseOpts: Partial<MemoryRecord> = {}): MemoryRecord[] {
+function makeMemories(
+  count: number,
+  saveId = 'save_test',
+  baseOpts: Partial<MemoryRecord> = {},
+): MemoryRecord[] {
   return Array.from({ length: count }, (_, i) =>
     makeMemory({
       id: `MEM${String(i + 1).padStart(6, '0')}`,
@@ -106,7 +112,9 @@ function makeErrorResponse(status: number, body = 'Internal Server Error') {
   return {
     ok: false,
     status,
-    json: async () => { throw new Error('not json'); },
+    json: async () => {
+      throw new Error('not json');
+    },
     text: async () => body,
   };
 }
@@ -566,13 +574,17 @@ describe('applyCompression', () => {
     const summaryMemory = makeMemory({ id: 'MEM_SUMMARY' });
 
     const callOrder: string[] = [];
-    mockDeleteMemory.mockImplementation(async () => { callOrder.push('delete'); });
-    mockSaveMemory.mockImplementation(async () => { callOrder.push('save'); });
+    mockDeleteMemory.mockImplementation(async () => {
+      callOrder.push('delete');
+    });
+    mockSaveMemory.mockImplementation(async () => {
+      callOrder.push('save');
+    });
 
     await applyCompression('save_1', oldMemories, summaryMemory);
 
     // All deletes before the save
-    expect(callOrder.slice(0, 3).every(s => s === 'delete')).toBe(true);
+    expect(callOrder.slice(0, 3).every((s) => s === 'delete')).toBe(true);
     expect(callOrder[callOrder.length - 1]).toBe('save');
   });
 });

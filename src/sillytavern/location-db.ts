@@ -59,7 +59,8 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'continent',
     parentId: null,
     tier: 1,
-    description: '虚海中物理稳定的主位面，诸神间接干涉之地。中部为帝国平原，北接诺斯加德冰境，南临赤金沙海，西连兽族草原，东望索伦蒂斯海域',
+    description:
+      '虚海中物理稳定的主位面，诸神间接干涉之地。中部为帝国平原，北接诺斯加德冰境，南临赤金沙海，西连兽族草原，东望索伦蒂斯海域',
     neighbors: [],
   },
 
@@ -70,13 +71,44 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'region',
     parentId: 'continent_astalia',
     tier: 2,
-    description: '大陆最强盛的人类帝国，横跨东部大平原，温带大陆性气候。双头狮鹫纹章，中央集权行省制',
+    description:
+      '大陆最强盛的人类帝国，横跨东部大平原，温带大陆性气候。双头狮鹫纹章，中央集权行省制',
     neighbors: [
-      { targetId: 'region_norsgard', terrain: '平原' as TerrainType, distance: 2, fromDirection: '北', toDirection: '南' },
-      { targetId: 'region_sagela', terrain: '平原' as TerrainType, distance: 10, fromDirection: '南', toDirection: '北' },
-      { targetId: 'region_beast', terrain: '平原' as TerrainType, distance: 14, fromDirection: '西', toDirection: '东' },
-      { targetId: 'region_solenthis', terrain: '海洋' as TerrainType, distance: 1, fromDirection: '东', toDirection: '西' },
-      { targetId: 'region_valentia', terrain: '河流' as TerrainType, distance: 1, fromDirection: '南', toDirection: '北' },
+      {
+        targetId: 'region_norsgard',
+        terrain: '平原' as TerrainType,
+        distance: 2,
+        fromDirection: '北',
+        toDirection: '南',
+      },
+      {
+        targetId: 'region_sagela',
+        terrain: '平原' as TerrainType,
+        distance: 10,
+        fromDirection: '南',
+        toDirection: '北',
+      },
+      {
+        targetId: 'region_beast',
+        terrain: '平原' as TerrainType,
+        distance: 14,
+        fromDirection: '西',
+        toDirection: '东',
+      },
+      {
+        targetId: 'region_solenthis',
+        terrain: '海洋' as TerrainType,
+        distance: 1,
+        fromDirection: '东',
+        toDirection: '西',
+      },
+      {
+        targetId: 'region_valentia',
+        terrain: '河流' as TerrainType,
+        distance: 1,
+        fromDirection: '南',
+        toDirection: '北',
+      },
     ],
   },
   {
@@ -85,9 +117,16 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'region',
     parentId: 'continent_astalia',
     tier: 2,
-    description: '北方 U 型大陆的贵族共和联盟。碎冕冰脊天险、苍白海内海、极寒至温润的气候梯度。霜狼契约宪法，5 公国 + 首都直辖区',
+    description:
+      '北方 U 型大陆的贵族共和联盟。碎冕冰脊天险、苍白海内海、极寒至温润的气候梯度。霜狼契约宪法，5 公国 + 首都直辖区',
     neighbors: [
-      { targetId: 'region_augustim', terrain: '平原' as TerrainType, distance: 2, fromDirection: '南', toDirection: '北' },
+      {
+        targetId: 'region_augustim',
+        terrain: '平原' as TerrainType,
+        distance: 2,
+        fromDirection: '南',
+        toDirection: '北',
+      },
     ],
   },
   {
@@ -96,10 +135,23 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'region',
     parentId: 'continent_astalia',
     tier: 2,
-    description: '大陆南方赤金沙海的波斯阿拉伯文明。绿洲城邦 + 无垠沙海 + 鹰之山脉。工程学与炼金术高度发达，奴隶制商业城邦',
+    description:
+      '大陆南方赤金沙海的波斯阿拉伯文明。绿洲城邦 + 无垠沙海 + 鹰之山脉。工程学与炼金术高度发达，奴隶制商业城邦',
     neighbors: [
-      { targetId: 'region_augustim', terrain: '平原' as TerrainType, distance: 10, fromDirection: '北', toDirection: '南' },
-      { targetId: 'region_solenthis', terrain: '沙漠' as TerrainType, distance: 14, fromDirection: '西', toDirection: '东' },
+      {
+        targetId: 'region_augustim',
+        terrain: '平原' as TerrainType,
+        distance: 10,
+        fromDirection: '北',
+        toDirection: '南',
+      },
+      {
+        targetId: 'region_solenthis',
+        terrain: '沙漠' as TerrainType,
+        distance: 14,
+        fromDirection: '西',
+        toDirection: '东',
+      },
     ],
   },
   {
@@ -110,7 +162,13 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 2,
     description: '高空中珊瑚礁群——深蓝云海。妖精与人鱼混居的自治区，以音乐与情报交易闻名',
     neighbors: [
-      { targetId: 'region_solenthis', terrain: '海洋' as TerrainType, distance: 2, fromDirection: '西', toDirection: '东' },
+      {
+        targetId: 'region_solenthis',
+        terrain: '海洋' as TerrainType,
+        distance: 2,
+        fromDirection: '西',
+        toDirection: '东',
+      },
     ],
   },
   {
@@ -119,10 +177,23 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'region',
     parentId: 'continent_astalia',
     tier: 2,
-    description: '大陆西南角的古老魔法森林。与世界树"翠梦乡之树"共生的巨大魔法生态系统。精灵文明艾尔文海姆的家园',
+    description:
+      '大陆西南角的古老魔法森林。与世界树"翠梦乡之树"共生的巨大魔法生态系统。精灵文明艾尔文海姆的家园',
     neighbors: [
-      { targetId: 'region_beast', terrain: '平原' as TerrainType, distance: 14, fromDirection: '北', toDirection: '南' },
-      { targetId: 'region_valentia', terrain: '森林' as TerrainType, distance: 30, fromDirection: '西', toDirection: '东' },
+      {
+        targetId: 'region_beast',
+        terrain: '平原' as TerrainType,
+        distance: 14,
+        fromDirection: '北',
+        toDirection: '南',
+      },
+      {
+        targetId: 'region_valentia',
+        terrain: '森林' as TerrainType,
+        distance: 30,
+        fromDirection: '西',
+        toDirection: '东',
+      },
     ],
   },
   {
@@ -133,7 +204,13 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 2,
     description: '神迹山脉主峰峰顶的翼民神权国。荣光女神崇拜，垂直礼制与空域秩序。92% 翼民人口',
     neighbors: [
-      { targetId: 'region_augustim', terrain: '飞艇' as TerrainType, distance: 1, fromDirection: '下', toDirection: '上' },
+      {
+        targetId: 'region_augustim',
+        terrain: '飞艇' as TerrainType,
+        distance: 1,
+        fromDirection: '下',
+        toDirection: '上',
+      },
     ],
   },
   {
@@ -142,9 +219,16 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'region',
     parentId: 'continent_astalia',
     tier: 2,
-    description: '13 血族氏族的隐政府。首都诺克瓦罗斯位于悲鸣沼泽上空的独立空间折叠点，红月永悬。奉行同态复仇法与恩惠体系',
+    description:
+      '13 血族氏族的隐政府。首都诺克瓦罗斯位于悲鸣沼泽上空的独立空间折叠点，红月永悬。奉行同态复仇法与恩惠体系',
     neighbors: [
-      { targetId: 'region_valentia', terrain: '沼泽' as TerrainType, distance: 2, fromDirection: '上', toDirection: '下' },
+      {
+        targetId: 'region_valentia',
+        terrain: '沼泽' as TerrainType,
+        distance: 2,
+        fromDirection: '上',
+        toDirection: '下',
+      },
     ],
   },
   {
@@ -153,11 +237,30 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'region',
     parentId: 'continent_astalia',
     tier: 2,
-    description: '雨林地区的冒险者公国。多国共管，议会决策，冒险经济繁荣。诺瓦尔河水运，监视"无尽地城"的桥头堡',
+    description:
+      '雨林地区的冒险者公国。多国共管，议会决策，冒险经济繁荣。诺瓦尔河水运，监视"无尽地城"的桥头堡',
     neighbors: [
-      { targetId: 'region_augustim', terrain: '河流' as TerrainType, distance: 1, fromDirection: '北', toDirection: '南' },
-      { targetId: 'region_emerald', terrain: '森林' as TerrainType, distance: 30, fromDirection: '东', toDirection: '西' },
-      { targetId: 'region_night', terrain: '沼泽' as TerrainType, distance: 2, fromDirection: '下', toDirection: '上' },
+      {
+        targetId: 'region_augustim',
+        terrain: '河流' as TerrainType,
+        distance: 1,
+        fromDirection: '北',
+        toDirection: '南',
+      },
+      {
+        targetId: 'region_emerald',
+        terrain: '森林' as TerrainType,
+        distance: 30,
+        fromDirection: '东',
+        toDirection: '西',
+      },
+      {
+        targetId: 'region_night',
+        terrain: '沼泽' as TerrainType,
+        distance: 2,
+        fromDirection: '下',
+        toDirection: '上',
+      },
     ],
   },
   {
@@ -166,11 +269,30 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'region',
     parentId: 'continent_astalia',
     tier: 2,
-    description: '热带海洋性气候的人鱼双王制王国。潮汐王座为半潜式首都，金狮商会总部所在。大陆最大自由贸易区与洗钱中心',
+    description:
+      '热带海洋性气候的人鱼双王制王国。潮汐王座为半潜式首都，金狮商会总部所在。大陆最大自由贸易区与洗钱中心',
     neighbors: [
-      { targetId: 'region_augustim', terrain: '海洋' as TerrainType, distance: 1, fromDirection: '西', toDirection: '东' },
-      { targetId: 'region_sagela', terrain: '沙漠' as TerrainType, distance: 14, fromDirection: '东', toDirection: '西' },
-      { targetId: 'region_serilia', terrain: '海洋' as TerrainType, distance: 2, fromDirection: '东', toDirection: '西' },
+      {
+        targetId: 'region_augustim',
+        terrain: '海洋' as TerrainType,
+        distance: 1,
+        fromDirection: '西',
+        toDirection: '东',
+      },
+      {
+        targetId: 'region_sagela',
+        terrain: '沙漠' as TerrainType,
+        distance: 14,
+        fromDirection: '东',
+        toDirection: '西',
+      },
+      {
+        targetId: 'region_serilia',
+        terrain: '海洋' as TerrainType,
+        distance: 2,
+        fromDirection: '东',
+        toDirection: '西',
+      },
     ],
   },
   {
@@ -179,10 +301,23 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'region',
     parentId: 'continent_astalia',
     tier: 2,
-    description: '大陆中西部的草原帝国。游牧部落联邦，巡天巨兽背上的移动首都。8 大区域，多样兽族部族',
+    description:
+      '大陆中西部的草原帝国。游牧部落联邦，巡天巨兽背上的移动首都。8 大区域，多样兽族部族',
     neighbors: [
-      { targetId: 'region_augustim', terrain: '平原' as TerrainType, distance: 14, fromDirection: '东', toDirection: '西' },
-      { targetId: 'region_emerald', terrain: '平原' as TerrainType, distance: 14, fromDirection: '南', toDirection: '北' },
+      {
+        targetId: 'region_augustim',
+        terrain: '平原' as TerrainType,
+        distance: 14,
+        fromDirection: '东',
+        toDirection: '西',
+      },
+      {
+        targetId: 'region_emerald',
+        terrain: '平原' as TerrainType,
+        distance: 14,
+        fromDirection: '南',
+        toDirection: '北',
+      },
     ],
   },
 
@@ -195,10 +330,34 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '帝国首都"永恒辉光之城"。白金拱桥横跨天穹，浮空符文，皇宫与贵族区所在',
     neighbors: [
-      { targetId: 'city_goldenvalley', terrain: '平原' as TerrainType, distance: 3, fromDirection: '东', toDirection: '西' },
-      { targetId: 'city_ironforge', terrain: '平原' as TerrainType, distance: 7, fromDirection: '西', toDirection: '东' },
-      { targetId: 'city_clocktower', terrain: '平原' as TerrainType, distance: 10, fromDirection: '南', toDirection: '北' },
-      { targetId: 'city_ravenport', terrain: '平原' as TerrainType, distance: 14, fromDirection: '东', toDirection: '西' },
+      {
+        targetId: 'city_goldenvalley',
+        terrain: '平原' as TerrainType,
+        distance: 3,
+        fromDirection: '东',
+        toDirection: '西',
+      },
+      {
+        targetId: 'city_ironforge',
+        terrain: '平原' as TerrainType,
+        distance: 7,
+        fromDirection: '西',
+        toDirection: '东',
+      },
+      {
+        targetId: 'city_clocktower',
+        terrain: '平原' as TerrainType,
+        distance: 10,
+        fromDirection: '南',
+        toDirection: '北',
+      },
+      {
+        targetId: 'city_ravenport',
+        terrain: '平原' as TerrainType,
+        distance: 14,
+        fromDirection: '东',
+        toDirection: '西',
+      },
     ],
   },
   {
@@ -209,8 +368,20 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '维里迪斯省省会，帝国最大粮食集散地与商贸城。金穗大粮仓与运河贸易繁荣',
     neighbors: [
-      { targetId: 'city_aesergard', terrain: '平原' as TerrainType, distance: 3, fromDirection: '西', toDirection: '东' },
-      { targetId: 'city_windmill', terrain: '平原' as TerrainType, distance: 2, fromDirection: '东', toDirection: '西' },
+      {
+        targetId: 'city_aesergard',
+        terrain: '平原' as TerrainType,
+        distance: 3,
+        fromDirection: '西',
+        toDirection: '东',
+      },
+      {
+        targetId: 'city_windmill',
+        terrain: '平原' as TerrainType,
+        distance: 2,
+        fromDirection: '东',
+        toDirection: '西',
+      },
     ],
   },
   {
@@ -221,8 +392,20 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '驰原省省会，帝国最大军事堡垒与冶炼中心。城如战争机器，对抗兽族联盟的最前线',
     neighbors: [
-      { targetId: 'city_aesergard', terrain: '平原' as TerrainType, distance: 7, fromDirection: '东', toDirection: '西' },
-      { targetId: 'city_redleaf', terrain: '平原' as TerrainType, distance: 7, fromDirection: '西', toDirection: '东' },
+      {
+        targetId: 'city_aesergard',
+        terrain: '平原' as TerrainType,
+        distance: 7,
+        fromDirection: '东',
+        toDirection: '西',
+      },
+      {
+        targetId: 'city_redleaf',
+        terrain: '平原' as TerrainType,
+        distance: 7,
+        fromDirection: '西',
+        toDirection: '东',
+      },
     ],
   },
   {
@@ -233,8 +416,20 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '辰钟省省会，魔法之都与魔导研究中心。97m 魔法钟楼，法师公会总部所在',
     neighbors: [
-      { targetId: 'city_aesergard', terrain: '平原' as TerrainType, distance: 10, fromDirection: '北', toDirection: '南' },
-      { targetId: 'city_nova_valentia', terrain: '河流' as TerrainType, distance: 1, fromDirection: '北', toDirection: '南' },
+      {
+        targetId: 'city_aesergard',
+        terrain: '平原' as TerrainType,
+        distance: 10,
+        fromDirection: '北',
+        toDirection: '南',
+      },
+      {
+        targetId: 'city_nova_valentia',
+        terrain: '河流' as TerrainType,
+        distance: 1,
+        fromDirection: '北',
+        toDirection: '南',
+      },
     ],
   },
   {
@@ -254,8 +449,20 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '索莱尔省沿海商贸港口，帝国东大门。通往索伦蒂斯的海上枢纽',
     neighbors: [
-      { targetId: 'city_aesergard', terrain: '平原' as TerrainType, distance: 14, fromDirection: '西', toDirection: '东' },
-      { targetId: 'city_silverSail', terrain: '海洋' as TerrainType, distance: 1, fromDirection: '北', toDirection: '南' },
+      {
+        targetId: 'city_aesergard',
+        terrain: '平原' as TerrainType,
+        distance: 14,
+        fromDirection: '西',
+        toDirection: '东',
+      },
+      {
+        targetId: 'city_silverSail',
+        terrain: '海洋' as TerrainType,
+        distance: 1,
+        fromDirection: '北',
+        toDirection: '南',
+      },
     ],
   },
   {
@@ -266,7 +473,13 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '金色麦海之中的酿酒中心，数十座风车林立。帝国最大的麦酒产地',
     neighbors: [
-      { targetId: 'city_goldenvalley', terrain: '平原' as TerrainType, distance: 2, fromDirection: '西', toDirection: '东' },
+      {
+        targetId: 'city_goldenvalley',
+        terrain: '平原' as TerrainType,
+        distance: 2,
+        fromDirection: '西',
+        toDirection: '东',
+      },
     ],
   },
   {
@@ -277,7 +490,13 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '驰原省军事前哨镇。梦境神爱梅斯教堂所在地，活藤缠绕的无人净化池',
     neighbors: [
-      { targetId: 'city_ironforge', terrain: '平原' as TerrainType, distance: 7, fromDirection: '东', toDirection: '西' },
+      {
+        targetId: 'city_ironforge',
+        terrain: '平原' as TerrainType,
+        distance: 7,
+        fromDirection: '东',
+        toDirection: '西',
+      },
     ],
   },
 
@@ -290,9 +509,27 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '联盟首都，议会城堡坐落于王冠石台。凛冬大学所在地，文官考试制度',
     neighbors: [
-      { targetId: 'city_ambergaard', terrain: '平原' as TerrainType, distance: 2, fromDirection: '东', toDirection: '西' },
-      { targetId: 'city_linsong', terrain: '平原' as TerrainType, distance: 2, fromDirection: '西', toDirection: '东' },
-      { targetId: 'city_windferry', terrain: '平原' as TerrainType, distance: 3, fromDirection: '西', toDirection: '东' },
+      {
+        targetId: 'city_ambergaard',
+        terrain: '平原' as TerrainType,
+        distance: 2,
+        fromDirection: '东',
+        toDirection: '西',
+      },
+      {
+        targetId: 'city_linsong',
+        terrain: '平原' as TerrainType,
+        distance: 2,
+        fromDirection: '西',
+        toDirection: '东',
+      },
+      {
+        targetId: 'city_windferry',
+        terrain: '平原' as TerrainType,
+        distance: 3,
+        fromDirection: '西',
+        toDirection: '东',
+      },
     ],
   },
   {
@@ -303,7 +540,13 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '鎏金沃土的中心城市。金谷河麦带，帝国南部边境贸易枢纽',
     neighbors: [
-      { targetId: 'city_whitegleam', terrain: '平原' as TerrainType, distance: 2, fromDirection: '西', toDirection: '东' },
+      {
+        targetId: 'city_whitegleam',
+        terrain: '平原' as TerrainType,
+        distance: 2,
+        fromDirection: '西',
+        toDirection: '东',
+      },
     ],
   },
   {
@@ -314,7 +557,13 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '乌尔芬公国首都，铁木树冠之城。永恒暮光之下，铁木河岸建筑的奇观',
     neighbors: [
-      { targetId: 'city_whitegleam', terrain: '平原' as TerrainType, distance: 2, fromDirection: '东', toDirection: '西' },
+      {
+        targetId: 'city_whitegleam',
+        terrain: '平原' as TerrainType,
+        distance: 2,
+        fromDirection: '东',
+        toDirection: '西',
+      },
     ],
   },
   {
@@ -325,7 +574,13 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '雾凇海岸的核心港口城市。狼喉海峡咽喉，盐雾航运要道',
     neighbors: [
-      { targetId: 'city_whitegleam', terrain: '平原' as TerrainType, distance: 3, fromDirection: '东', toDirection: '西' },
+      {
+        targetId: 'city_whitegleam',
+        terrain: '平原' as TerrainType,
+        distance: 3,
+        fromDirection: '东',
+        toDirection: '西',
+      },
     ],
   },
 
@@ -338,8 +593,20 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '萨赫拉联邦政治首都，娱乐与艺术之都。烈阳大角斗场与千纱广场闻名大陆',
     neighbors: [
-      { targetId: 'city_beitnar', terrain: '沙漠' as TerrainType, distance: 3, fromDirection: '南', toDirection: '北' },
-      { targetId: 'city_darsuk', terrain: '沙漠' as TerrainType, distance: 3, fromDirection: '东', toDirection: '西' },
+      {
+        targetId: 'city_beitnar',
+        terrain: '沙漠' as TerrainType,
+        distance: 3,
+        fromDirection: '南',
+        toDirection: '北',
+      },
+      {
+        targetId: 'city_darsuk',
+        terrain: '沙漠' as TerrainType,
+        distance: 3,
+        fromDirection: '东',
+        toDirection: '西',
+      },
     ],
   },
   {
@@ -350,7 +617,13 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '金辉学府所在地，大陆顶级工程学院。沙漠中的科技中心',
     neighbors: [
-      { targetId: 'city_azhar', terrain: '沙漠' as TerrainType, distance: 3, fromDirection: '北', toDirection: '南' },
+      {
+        targetId: 'city_azhar',
+        terrain: '沙漠' as TerrainType,
+        distance: 3,
+        fromDirection: '北',
+        toDirection: '南',
+      },
     ],
   },
   {
@@ -361,7 +634,13 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '军事要塞与奴隶贸易中心。砂岩堡垒，所有沙漠战士的摇篮',
     neighbors: [
-      { targetId: 'city_azhar', terrain: '沙漠' as TerrainType, distance: 3, fromDirection: '西', toDirection: '东' },
+      {
+        targetId: 'city_azhar',
+        terrain: '沙漠' as TerrainType,
+        distance: 3,
+        fromDirection: '西',
+        toDirection: '东',
+      },
     ],
   },
 
@@ -372,7 +651,8 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'area',
     parentId: 'region_serilia',
     tier: 4,
-    description: '赛瑞利亚的中心——巨大螺旋海螺。人鱼与妖精展示才华、分享快乐的舞台。每年星见之月举办全大陆最盛大的演奏会',
+    description:
+      '赛瑞利亚的中心——巨大螺旋海螺。人鱼与妖精展示才华、分享快乐的舞台。每年星见之月举办全大陆最盛大的演奏会',
     neighbors: [],
   },
 
@@ -383,7 +663,8 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'area',
     parentId: 'region_emerald',
     tier: 4,
-    description: '翡翠之心最深处，世界树翠梦乡之树的所在地。翠梦白圣林环绕，艾尔文海姆倡议的精神核心',
+    description:
+      '翡翠之心最深处，世界树翠梦乡之树的所在地。翠梦白圣林环绕，艾尔文海姆倡议的精神核心',
     neighbors: [],
   },
 
@@ -394,7 +675,8 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'city',
     parentId: 'region_vania',
     tier: 3,
-    description: '神迹山脉主峰峰顶的云海巨都。白色石材垂直礼制建筑，荣光女神神殿、教皇座所在的浮岛圣域区悬浮于城市上空',
+    description:
+      '神迹山脉主峰峰顶的云海巨都。白色石材垂直礼制建筑，荣光女神神殿、教皇座所在的浮岛圣域区悬浮于城市上空',
     neighbors: [],
   },
 
@@ -405,7 +687,8 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'city',
     parentId: 'region_night',
     tier: 3,
-    description: '红月永悬的哥特式宏伟都城。位于悲鸣沼泽上空的独立空间折叠点，需血匙方可进入。血之大圣堂与静默囚窟所在',
+    description:
+      '红月永悬的哥特式宏伟都城。位于悲鸣沼泽上空的独立空间折叠点，需血匙方可进入。血之大圣堂与静默囚窟所在',
     neighbors: [],
   },
 
@@ -416,9 +699,16 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'city',
     parentId: 'region_valentia',
     tier: 3,
-    description: '冒险者之城——超大型要塞都市。运河水道纵横，冒险者公会总部所在。监视"无尽地城"的桥头堡',
+    description:
+      '冒险者之城——超大型要塞都市。运河水道纵横，冒险者公会总部所在。监视"无尽地城"的桥头堡',
     neighbors: [
-      { targetId: 'city_clocktower', terrain: '河流' as TerrainType, distance: 1, fromDirection: '南', toDirection: '北' },
+      {
+        targetId: 'city_clocktower',
+        terrain: '河流' as TerrainType,
+        distance: 1,
+        fromDirection: '南',
+        toDirection: '北',
+      },
     ],
   },
 
@@ -429,9 +719,16 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     type: 'city',
     parentId: 'region_solenthis',
     tier: 3,
-    description: '索伦蒂斯首都——利用超巨型上古海龙遗骸与魔法力场构建的半潜式都市。人鱼双王共治的权力中心',
+    description:
+      '索伦蒂斯首都——利用超巨型上古海龙遗骸与魔法力场构建的半潜式都市。人鱼双王共治的权力中心',
     neighbors: [
-      { targetId: 'city_silverSail', terrain: '平原' as TerrainType, distance: 1, fromDirection: '南', toDirection: '北' },
+      {
+        targetId: 'city_silverSail',
+        terrain: '平原' as TerrainType,
+        distance: 1,
+        fromDirection: '南',
+        toDirection: '北',
+      },
     ],
   },
   {
@@ -442,8 +739,20 @@ export const DEFAULT_LOCATIONS: LocationNode[] = [
     tier: 3,
     description: '巨大的深水良港，金狮商会总部所在地。大陆最大的自由贸易区',
     neighbors: [
-      { targetId: 'city_tidethrone', terrain: '平原' as TerrainType, distance: 1, fromDirection: '北', toDirection: '南' },
-      { targetId: 'city_ravenport', terrain: '海洋' as TerrainType, distance: 1, fromDirection: '南', toDirection: '北' },
+      {
+        targetId: 'city_tidethrone',
+        terrain: '平原' as TerrainType,
+        distance: 1,
+        fromDirection: '北',
+        toDirection: '南',
+      },
+      {
+        targetId: 'city_ravenport',
+        terrain: '海洋' as TerrainType,
+        distance: 1,
+        fromDirection: '南',
+        toDirection: '北',
+      },
     ],
   },
 
@@ -471,12 +780,12 @@ export function buildAdjacency(nodes: LocationNode[]): Map<string, LocationEdge[
   for (const node of nodes) {
     for (const edge of node.neighbors) {
       const list = adj.get(node.id);
-      if (list && !list.some(e => e.targetId === edge.targetId)) {
+      if (list && !list.some((e) => e.targetId === edge.targetId)) {
         list.push(edge);
       }
 
       const revList = adj.get(edge.targetId);
-      if (revList && !revList.some(e => e.targetId === node.id)) {
+      if (revList && !revList.some((e) => e.targetId === node.id)) {
         revList.push({
           targetId: node.id,
           terrain: edge.terrain,
@@ -495,7 +804,7 @@ export function buildAdjacency(nodes: LocationNode[]): Map<string, LocationEdge[
 
 export function getLocationNode(nodes: LocationNode[], id: string): LocationNode | undefined {
   if (!id) return undefined;
-  return nodes.find(n => n.id === id);
+  return nodes.find((n) => n.id === id);
 }
 
 export function getLocationTier(node: LocationNode): number {
@@ -504,7 +813,7 @@ export function getLocationTier(node: LocationNode): number {
 
 export function getChildren(nodes: LocationNode[], parentId: string): LocationNode[] {
   if (!parentId) return [];
-  return nodes.filter(n => n.parentId === parentId);
+  return nodes.filter((n) => n.parentId === parentId);
 }
 
 export function getNeighbors(nodes: LocationNode[], nodeId: string): LocationNode[] {
@@ -555,13 +864,13 @@ export function getLocationPath(nodes: LocationNode[], nodeId: string): string {
 export function areAdjacent(nodes: LocationNode[], a: string, b: string): boolean {
   const nodeA = getLocationNode(nodes, a);
   if (!nodeA) return false;
-  return nodeA.neighbors.some(e => e.targetId === b);
+  return nodeA.neighbors.some((e) => e.targetId === b);
 }
 
 export function getEdge(nodes: LocationNode[], from: string, to: string): LocationEdge | undefined {
   const nodeFrom = getLocationNode(nodes, from);
   if (!nodeFrom) return undefined;
-  return nodeFrom.neighbors.find(e => e.targetId === to);
+  return nodeFrom.neighbors.find((e) => e.targetId === to);
 }
 
 // ========== $location Namespace ==========

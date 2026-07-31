@@ -1,56 +1,83 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { useGameStore } from '../../stores/game-store'
-import { useUIStore } from '../../stores/ui-store'
-import { VERSION } from '@engine/index'
-import AppButton from '../shared/AppButton.vue'
-import AppModal from '../shared/AppModal.vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { useGameStore } from '../../stores/game-store';
+import { useUIStore } from '../../stores/ui-store';
+import { VERSION } from '@engine/index';
+import AppButton from '../shared/AppButton.vue';
+import AppModal from '../shared/AppModal.vue';
 
-const game = useGameStore()
-const ui = useUIStore()
+const game = useGameStore();
+const ui = useUIStore();
 
 // === 读取存档 ===
-const showSaveModal = ref(false)
-const showCreditsModal = ref(false)
-const selectedSaveId = ref<string | null>(null)
-const selectedSave = computed(() => game.saves.find(s => s.id === selectedSaveId.value) || null)
-const selectedSaveData = ref<any>(null)
+const showSaveModal = ref(false);
+const showCreditsModal = ref(false);
+const selectedSaveId = ref<string | null>(null);
+const selectedSave = computed(() => game.saves.find((s) => s.id === selectedSaveId.value) || null);
+const selectedSaveData = ref<any>(null);
 
 watch(selectedSaveId, async (id) => {
-  if (!id) { selectedSaveData.value = null; return }
+  if (!id) {
+    selectedSaveData.value = null;
+    return;
+  }
   try {
-    const { getSave, getCharacters, getSaveProfile } = await import('@engine/database')
-    const save = await getSave(id)
-    const chars = await getCharacters(id)
-    const profile = await getSaveProfile(id)
-    const player = chars?.find((c: any) => c.type === 'player')
+    const { getSave, getCharacters, getSaveProfile } = await import('@engine/database');
+    const save = await getSave(id);
+    const chars = await getCharacters(id);
+    const profile = await getSaveProfile(id);
+    const player = chars?.find((c: any) => c.type === 'player');
     if (player) {
       selectedSaveData.value = {
         characterName: save?.metadata?.characterName || player.name,
         level: player.level,
         race: player.race,
         location: player.location,
-        hp: player.hp, maxHp: player.maxHp,
-        mp: player.mp, maxMp: player.maxMp,
-        sp: player.sp, maxSp: player.maxSp,
+        hp: player.hp,
+        maxHp: player.maxHp,
+        mp: player.mp,
+        maxMp: player.maxMp,
+        sp: player.sp,
+        maxSp: player.maxSp,
         fp: profile?.fp || 0,
         attributes: player.attributes,
         lastMessages: null,
-      }
+      };
     } else {
       selectedSaveData.value = {
         characterName: save?.metadata?.characterName || '未知角色',
-        level: '?', race: '?', location: '?',
-        hp: 0, maxHp: 0, mp: 0, maxMp: 0, sp: 0, maxSp: 0,
+        level: '?',
+        race: '?',
+        location: '?',
+        hp: 0,
+        maxHp: 0,
+        mp: 0,
+        maxMp: 0,
+        sp: 0,
+        maxSp: 0,
         fp: profile?.fp || 0,
         attributes: {},
         lastMessages: null,
-      }
+      };
     }
   } catch {
-    selectedSaveData.value = { characterName: '加载失败', level:'?', race:'?', location:'?', hp:0,maxHp:0,mp:0,maxMp:0,sp:0,maxSp:0,fp:0,attributes:{},lastMessages:null }
+    selectedSaveData.value = {
+      characterName: '加载失败',
+      level: '?',
+      race: '?',
+      location: '?',
+      hp: 0,
+      maxHp: 0,
+      mp: 0,
+      maxMp: 0,
+      sp: 0,
+      maxSp: 0,
+      fp: 0,
+      attributes: {},
+      lastMessages: null,
+    };
   }
-})
+});
 
 // === 风味文字循环 ===
 const quotes = [
@@ -59,104 +86,117 @@ const quotes = [
   '每一次抉择，都是诗篇的一行',
   '星辰为引，长夜作伴',
   '于灰烬中点亮前行的灯',
-]
-const currentQuote = ref(0)
-let quoteTimer: ReturnType<typeof setInterval> | null = null
+];
+const currentQuote = ref(0);
+let quoteTimer: ReturnType<typeof setInterval> | null = null;
 
-const showDevButton = ref(false)
+const showDevButton = ref(false);
 // 🔒 P1-14: 快速测试按钮仅 DEV 构建显示 —— 生产构建不应有可清库/建测试存档的入口
-const isDev = import.meta.env.DEV
+const isDev = import.meta.env.DEV;
 
 onMounted(async () => {
-  await nextTick()
-  document.body.classList.add('home-entered')
+  await nextTick();
+  document.body.classList.add('home-entered');
   // 加载存档列表
-  try { await game.loadSaves() } catch { /* IndexedDB 可能未初始化 */ }
+  try {
+    await game.loadSaves();
+  } catch {
+    /* IndexedDB 可能未初始化 */
+  }
   // 风味文字循环
   quoteTimer = setInterval(() => {
-    currentQuote.value = (currentQuote.value + 1) % quotes.length
-  }, 5000)
-})
+    currentQuote.value = (currentQuote.value + 1) % quotes.length;
+  }, 5000);
+});
 
 onUnmounted(() => {
-  if (quoteTimer) clearInterval(quoteTimer)
-  document.body.classList.remove('home-entered')
-})
+  if (quoteTimer) clearInterval(quoteTimer);
+  document.body.classList.remove('home-entered');
+});
 
 function newGame() {
-  ui.navigate('create')
+  ui.navigate('create');
 }
 
 function loadGame(saveId: string) {
-  showSaveModal.value = false
-  ui.navigate('game', saveId)
+  showSaveModal.value = false;
+  ui.navigate('game', saveId);
 }
 
 // 🧪 开发用快速测试 (正式版移除)
 // ⚠️ 会先清空**整个数据库** —— 素材库与音频库不随存档隔离，会一并没
 async function quickTest() {
-  const { createTestSave } = await import('../../utils/test-save')
-  const saveId = await createTestSave()
-  ui.navigate('game', saveId)
+  const { createTestSave } = await import('../../utils/test-save');
+  const saveId = await createTestSave();
+  ui.navigate('game', saveId);
 }
 
 // 🧪 同一个测试存档，但一个字节都不清 —— 手动导入的素材/音乐留着
 // (调渲染面时要的是"能进去的存档"，不是"把刚导入的图全删了")
 async function quickTestKeep() {
-  const { createTestSavePreservingData } = await import('../../utils/test-save')
-  const saveId = await createTestSavePreservingData()
-  ui.navigate('game', saveId)
+  const { createTestSavePreservingData } = await import('../../utils/test-save');
+  const saveId = await createTestSavePreservingData();
+  ui.navigate('game', saveId);
 }
 
 async function deleteSave(saveId: string) {
-  if (!confirm('确定要删除这个存档吗？此操作不可撤销。')) return
-  const { deleteSaveSlot } = await import('@engine/database')
-  await deleteSaveSlot(saveId)
-  await game.loadSaves()
+  if (!confirm('确定要删除这个存档吗？此操作不可撤销。')) return;
+  const { deleteSaveSlot } = await import('@engine/database');
+  await deleteSaveSlot(saveId);
+  await game.loadSaves();
 }
 
 async function importSave() {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = '.json'
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
   input.onchange = async (e) => {
-    const file = (e.target as HTMLInputElement).files?.[0]
-    if (!file) return
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
     try {
-      const text = await file.text()
-      const data = JSON.parse(text)
-      const { importAllData } = await import('@engine/database')
-      await importAllData(data)
-      await game.loadSaves()
-      ui.toast('存档导入成功', 'success')
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const { importAllData } = await import('@engine/database');
+      await importAllData(data);
+      await game.loadSaves();
+      ui.toast('存档导入成功', 'success');
     } catch {
-      ui.toast('导入失败，文件格式不正确', 'error')
+      ui.toast('导入失败，文件格式不正确', 'error');
     }
-  }
-  input.click()
+  };
+  input.click();
 }
 
 function formatTime(ts: number) {
-  return new Date(ts).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return new Date(ts).toLocaleDateString('zh-CN', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 </script>
 
 <template>
   <div class="home-page" @mouseenter="showDevButton = true" @mouseleave="showDevButton = false">
-
     <!-- 装饰性背景光晕 -->
     <div class="bg-glow bg-glow-1" aria-hidden="true" />
     <div class="bg-glow bg-glow-2" aria-hidden="true" />
 
     <!-- 装饰性星点 -->
     <div class="stars" aria-hidden="true">
-      <i v-for="i in 20" :key="i" class="star" :style="{
-        left: `${Math.random() * 100}%`,
-        top: `${Math.random() * 100}%`,
-        '--delay': `${Math.random() * 6}s`,
-        '--size': `${Math.random() * 2 + 1}px`,
-        opacity: Math.random() * 0.5 + 0.2,
-      }" />
+      <i
+        v-for="i in 20"
+        :key="i"
+        class="star"
+        :style="{
+          left: `${Math.random() * 100}%`,
+          top: `${Math.random() * 100}%`,
+          '--delay': `${Math.random() * 6}s`,
+          '--size': `${Math.random() * 2 + 1}px`,
+          opacity: Math.random() * 0.5 + 0.2,
+        }"
+      />
     </div>
 
     <!-- 标题区域 -->
@@ -193,7 +233,13 @@ function formatTime(ts: number) {
         <AppButton variant="primary" size="lg" block class="btn-new-game" @click="newGame">
           ✦ 新 建 存 档
         </AppButton>
-        <AppButton variant="secondary" size="lg" block class="btn-load" @click="showSaveModal = true">
+        <AppButton
+          variant="secondary"
+          size="lg"
+          block
+          class="btn-load"
+          @click="showSaveModal = true"
+        >
           <i class="btn-icon fa-solid fa-folder-open" aria-hidden="true"></i>读 取 存 档
         </AppButton>
         <div class="btn-row">
@@ -247,7 +293,9 @@ function formatTime(ts: number) {
               <h2 class="save-panel-title">读取存档</h2>
               <div class="save-panel-header-actions">
                 <AppButton variant="ghost" size="sm" @click="importSave">导入存档</AppButton>
-                <button class="save-panel-close" @click="showSaveModal = false" aria-label="关闭">✕</button>
+                <button class="save-panel-close" aria-label="关闭" @click="showSaveModal = false">
+                  ✕
+                </button>
               </div>
             </div>
             <!-- 主体：左列表 + 右预览 -->
@@ -261,7 +309,8 @@ function formatTime(ts: number) {
                 </div>
                 <div v-else class="save-list">
                   <div
-                    v-for="save in game.saves" :key="save.id"
+                    v-for="save in game.saves"
+                    :key="save.id"
                     class="save-item"
                     :class="{ 'save-item-active': selectedSaveId === save.id }"
                     @click="selectedSaveId = save.id"
@@ -271,11 +320,16 @@ function formatTime(ts: number) {
                       <span class="save-name">{{ save.name || '未命名存档' }}</span>
                       <span class="save-meta text-muted">
                         <!-- M5 #27 语义修正: totalTurns 是对话回合数（每轮管线 +1），不是等级 -->
-                        {{ save.metadata?.characterName || '未知角色' }} · 第 {{ save.metadata?.totalTurns ?? 0 }} 回合
+                        {{ save.metadata?.characterName || '未知角色' }} · 第
+                        {{ save.metadata?.totalTurns ?? 0 }} 回合
                       </span>
-                      <span class="save-meta text-muted text-xs">{{ formatTime(save.updatedAt) }}</span>
+                      <span class="save-meta text-muted text-xs">{{
+                        formatTime(save.updatedAt)
+                      }}</span>
                     </div>
-                    <button class="save-delete" @click.stop="deleteSave(save.id)" title="删除存档">✕</button>
+                    <button class="save-delete" title="删除存档" @click.stop="deleteSave(save.id)">
+                      ✕
+                    </button>
                   </div>
                 </div>
               </div>
@@ -283,40 +337,65 @@ function formatTime(ts: number) {
               <div class="save-panel-right">
                 <template v-if="selectedSave && selectedSaveData">
                   <div class="save-preview-header">
-                    <div class="preview-avatar">{{ (selectedSaveData.characterName || '?')[0] }}</div>
+                    <div class="preview-avatar">
+                      {{ (selectedSaveData.characterName || '?')[0] }}
+                    </div>
                     <div class="preview-info">
                       <h3>{{ selectedSaveData.characterName || selectedSave.name }}</h3>
                       <p class="text-muted text-sm">
-                        Lv.{{ selectedSaveData.level || '?' }} · {{ selectedSaveData.race || '未知种族' }}
+                        Lv.{{ selectedSaveData.level || '?' }} ·
+                        {{ selectedSaveData.race || '未知种族' }}
                       </p>
-                      <p class="text-muted text-xs">{{ selectedSaveData.location || '未知地点' }}</p>
+                      <p class="text-muted text-xs">
+                        {{ selectedSaveData.location || '未知地点' }}
+                      </p>
                     </div>
                   </div>
                   <div class="save-preview-stats">
                     <div class="preview-stat">
                       <span class="stat-label hp-label">HP</span>
-                      <span class="stat-value">{{ selectedSaveData.hp }}/{{ selectedSaveData.maxHp }}</span>
+                      <span class="stat-value"
+                        >{{ selectedSaveData.hp }}/{{ selectedSaveData.maxHp }}</span
+                      >
                     </div>
                     <div class="preview-stat">
                       <span class="stat-label mp-label">MP</span>
-                      <span class="stat-value">{{ selectedSaveData.mp }}/{{ selectedSaveData.maxMp }}</span>
+                      <span class="stat-value"
+                        >{{ selectedSaveData.mp }}/{{ selectedSaveData.maxMp }}</span
+                      >
                     </div>
                     <div class="preview-stat">
                       <span class="stat-label sp-label">SP</span>
-                      <span class="stat-value">{{ selectedSaveData.sp }}/{{ selectedSaveData.maxSp }}</span>
+                      <span class="stat-value"
+                        >{{ selectedSaveData.sp }}/{{ selectedSaveData.maxSp }}</span
+                      >
                     </div>
                     <div class="preview-stat">
                       <span class="stat-label fp-label">FP</span>
                       <span class="stat-value">{{ selectedSaveData.fp || 0 }}</span>
                     </div>
                   </div>
-                  <div class="save-preview-attrs" v-if="Object.keys(selectedSaveData.attributes || {}).length">
-                    <span v-for="(v,k) in (selectedSaveData.attributes)" :key="k" class="preview-attr">
-                      <span class="attr-label">{{ {str:'力',dex:'敏',con:'体',int:'智',spi:'精'}[k]||k }}</span>
+                  <div
+                    v-if="Object.keys(selectedSaveData.attributes || {}).length"
+                    class="save-preview-attrs"
+                  >
+                    <span
+                      v-for="(v, k) in selectedSaveData.attributes"
+                      :key="k"
+                      class="preview-attr"
+                    >
+                      <span class="attr-label">{{
+                        { str: '力', dex: '敏', con: '体', int: '智', spi: '精' }[k] || k
+                      }}</span>
                       <strong class="attr-value">{{ v }}</strong>
                     </span>
                   </div>
-                  <AppButton variant="primary" size="md" class="btn-enter-game" @click="loadGame(selectedSave.id)">
+                  <AppButton
+                    variant="primary"
+                    size="md"
+                    class="btn-enter-game"
+                    @click="loadGame(selectedSave.id)"
+                  >
                     进入游戏
                   </AppButton>
                 </template>
@@ -342,13 +421,12 @@ function formatTime(ts: number) {
         <div class="world-lore">
           <h4>阿斯塔利亚世界</h4>
           <p class="text-muted text-sm">
-            复兴纪元 · 10大势力 · 23血脉 · 32节点地图<br/>
+            复兴纪元 · 10大势力 · 23血脉 · 32节点地图<br />
             普通 / 优良 / 稀有 / 史诗 / 传说 / 神话 / 唯一
           </p>
         </div>
       </div>
     </AppModal>
-
   </div>
 </template>
 
@@ -367,9 +445,21 @@ function formatTime(ts: number) {
   overflow-x: hidden;
   overflow-y: auto;
   background:
-    radial-gradient(ellipse 80% 50% at 50% 25%, color-mix(in srgb, var(--theme-primary) 6%, transparent), transparent),
-    radial-gradient(ellipse 60% 40% at 30% 60%, color-mix(in srgb, var(--theme-quality-epic) 4%, transparent), transparent),
-    radial-gradient(ellipse 60% 40% at 70% 60%, color-mix(in srgb, var(--theme-quality-legendary) 3%, transparent), transparent),
+    radial-gradient(
+      ellipse 80% 50% at 50% 25%,
+      color-mix(in srgb, var(--theme-primary) 6%, transparent),
+      transparent
+    ),
+    radial-gradient(
+      ellipse 60% 40% at 30% 60%,
+      color-mix(in srgb, var(--theme-quality-epic) 4%, transparent),
+      transparent
+    ),
+    radial-gradient(
+      ellipse 60% 40% at 70% 60%,
+      color-mix(in srgb, var(--theme-quality-legendary) 3%, transparent),
+      transparent
+    ),
     var(--theme-window-bg);
 }
 
@@ -382,21 +472,37 @@ function formatTime(ts: number) {
   animation: glowDrift 12s ease-in-out infinite alternate;
 }
 .bg-glow-1 {
-  width: 600px; height: 600px;
-  top: -200px; left: 50%;
+  width: 600px;
+  height: 600px;
+  top: -200px;
+  left: 50%;
   transform: translateX(-50%);
-  background: radial-gradient(circle, color-mix(in srgb, var(--theme-primary) 5%, transparent), transparent 70%);
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--theme-primary) 5%, transparent),
+    transparent 70%
+  );
 }
 .bg-glow-2 {
-  width: 400px; height: 400px;
-  bottom: -100px; right: -100px;
-  background: radial-gradient(circle, color-mix(in srgb, var(--theme-quality-epic) 4%, transparent), transparent 70%);
+  width: 400px;
+  height: 400px;
+  bottom: -100px;
+  right: -100px;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--theme-quality-epic) 4%, transparent),
+    transparent 70%
+  );
   animation-delay: -4s;
   animation-direction: alternate-reverse;
 }
 @keyframes glowDrift {
-  0% { transform: translateX(-50%) translateY(0); }
-  100% { transform: translateX(-50%) translateY(20px); }
+  0% {
+    transform: translateX(-50%) translateY(0);
+  }
+  100% {
+    transform: translateX(-50%) translateY(20px);
+  }
 }
 
 /* ═══ 星点 ═══ */
@@ -415,8 +521,13 @@ function formatTime(ts: number) {
   animation: starPulse 4s ease-in-out var(--delay) infinite;
 }
 @keyframes starPulse {
-  0%, 100% { opacity: 0.2; }
-  50% { opacity: 0.8; }
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.8;
+  }
 }
 
 /* ═══ 标题区 ═══ */
@@ -435,15 +546,32 @@ function formatTime(ts: number) {
 }
 .title-corner {
   position: absolute;
-  width: 24px; height: 24px;
+  width: 24px;
+  height: 24px;
   border-color: color-mix(in srgb, var(--theme-primary) 50%, transparent);
   border-style: solid;
   transition: border-color 0.8s ease;
 }
-.title-corner-tl { top: 0; left: 0; border-width: 2px 0 0 2px; }
-.title-corner-tr { top: 0; right: 0; border-width: 2px 2px 0 0; }
-.title-corner-bl { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
-.title-corner-br { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+.title-corner-tl {
+  top: 0;
+  left: 0;
+  border-width: 2px 0 0 2px;
+}
+.title-corner-tr {
+  top: 0;
+  right: 0;
+  border-width: 2px 2px 0 0;
+}
+.title-corner-bl {
+  bottom: 0;
+  left: 0;
+  border-width: 0 0 2px 2px;
+}
+.title-corner-br {
+  bottom: 0;
+  right: 0;
+  border-width: 0 2px 2px 0;
+}
 
 .main-title {
   display: flex;
@@ -459,8 +587,9 @@ function formatTime(ts: number) {
   font-weight: 700;
   color: var(--theme-text-primary);
   letter-spacing: 6px;
-  text-shadow: 0 0 40px color-mix(in srgb, var(--theme-primary) 35%, transparent),
-               0 0 80px color-mix(in srgb, var(--theme-primary) 15%, transparent);
+  text-shadow:
+    0 0 40px color-mix(in srgb, var(--theme-primary) 35%, transparent),
+    0 0 80px color-mix(in srgb, var(--theme-primary) 15%, transparent);
   line-height: 1.3;
 }
 .alt-line {
@@ -472,8 +601,14 @@ function formatTime(ts: number) {
 }
 
 @keyframes titleEnter {
-  from { opacity: 0; transform: translateY(-30px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(-30px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* ═══ 标题分割线 ═══ */
@@ -490,13 +625,22 @@ function formatTime(ts: number) {
   content: '';
   flex: 1;
   height: 1px;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--theme-primary) 40%, transparent));
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--theme-primary) 40%, transparent)
+  );
 }
 .title-divider::after {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--theme-primary) 40%, transparent), transparent);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--theme-primary) 40%, transparent),
+    transparent
+  );
 }
 .divider-diamond {
-  width: 8px; height: 8px;
+  width: 8px;
+  height: 8px;
   margin: 0 16px;
   background: var(--theme-primary);
   transform: rotate(45deg);
@@ -515,8 +659,14 @@ function formatTime(ts: number) {
   animation: subEnter 0.8s ease-out 0.2s both;
 }
 @keyframes subEnter {
-  from { opacity: 0; transform: translateY(-10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ═══ 风味文字 ═══ */
@@ -526,8 +676,12 @@ function formatTime(ts: number) {
   animation: quoteEnter 0.8s ease-out 0.4s both;
 }
 @keyframes quoteEnter {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .flavor-quote {
   font-family: 'KaiTi', 'STKaiti', '楷体', var(--theme-font-body);
@@ -554,8 +708,14 @@ function formatTime(ts: number) {
   animation: btnsEnter 0.8s ease-out 0.5s both;
 }
 @keyframes btnsEnter {
-  from { opacity: 0; transform: translateY(16px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .btn-column {
@@ -568,20 +728,25 @@ function formatTime(ts: number) {
 
 .btn-new-game {
   box-shadow: 0 0 24px color-mix(in srgb, var(--theme-primary) 30%, transparent);
-  transition: transform 0.2s ease, box-shadow 0.3s ease;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.3s ease;
   letter-spacing: 3px;
 }
 .btn-new-game:hover {
   transform: translateY(-2px);
-  box-shadow: 0 0 40px color-mix(in srgb, var(--theme-primary) 50%, transparent),
-              0 6px 20px color-mix(in srgb, #000 30%, transparent);
+  box-shadow:
+    0 0 40px color-mix(in srgb, var(--theme-primary) 50%, transparent),
+    0 6px 20px color-mix(in srgb, #000 30%, transparent);
 }
 .btn-new-game:active {
   transform: translateY(0);
 }
 
 .btn-load {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
 }
 .btn-load:hover {
   transform: translateY(-2px);
@@ -624,7 +789,9 @@ function formatTime(ts: number) {
   margin-top: 4px;
 }
 @media (prefers-reduced-motion: reduce) {
-  .dev-test-btn { transition: none; }
+  .dev-test-btn {
+    transition: none;
+  }
 }
 .dev-test-btn:hover {
   opacity: 1;
@@ -829,7 +996,11 @@ function formatTime(ts: number) {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--theme-primary) 40%, transparent), color-mix(in srgb, var(--theme-quality-epic) 40%, transparent));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--theme-primary) 40%, transparent),
+    color-mix(in srgb, var(--theme-quality-epic) 40%, transparent)
+  );
   color: var(--theme-text-primary);
   display: flex;
   align-items: center;
@@ -867,10 +1038,18 @@ function formatTime(ts: number) {
   letter-spacing: 1px;
   text-transform: uppercase;
 }
-.hp-label { color: var(--theme-hp); }
-.mp-label { color: var(--theme-mp); }
-.sp-label { color: var(--theme-sp); }
-.fp-label { color: var(--theme-quality-epic); }
+.hp-label {
+  color: var(--theme-hp);
+}
+.mp-label {
+  color: var(--theme-mp);
+}
+.sp-label {
+  color: var(--theme-sp);
+}
+.fp-label {
+  color: var(--theme-quality-epic);
+}
 .stat-value {
   font-size: 0.95rem;
   font-weight: 700;

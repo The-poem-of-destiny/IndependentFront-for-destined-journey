@@ -1,51 +1,70 @@
 <script setup lang="ts">
-import { watch, onMounted, onUnmounted } from 'vue'
+import { watch, onMounted, onUnmounted } from 'vue';
 
-const props = withDefaults(defineProps<{
-  open: boolean
-  title?: string
-  size?: 'sm' | 'md' | 'lg' | 'xl' | 'xxl'
-  closable?: boolean
-}>(), {
-  closable: true,
-})
+const props = withDefaults(
+  defineProps<{
+    open: boolean;
+    title?: string;
+    size?: 'sm' | 'md' | 'lg' | 'xl' | 'xxl';
+    closable?: boolean;
+  }>(),
+  {
+    closable: true,
+  },
+);
 
 const emit = defineEmits<{
-  'update:open': [value: boolean]
-  close: []
-}>()
+  'update:open': [value: boolean];
+  close: [];
+}>();
 
 function doClose() {
-  if (props.closable === false) return
-  emit('update:open', false)
-  emit('close')
+  if (props.closable === false) return;
+  emit('update:open', false);
+  emit('close');
 }
 
-watch(() => props.open, (val) => {
-  document.body.style.overflow = val ? 'hidden' : ''
-})
+watch(
+  () => props.open,
+  (val) => {
+    document.body.style.overflow = val ? 'hidden' : '';
+  },
+);
 
 // Escape key — document level, always works
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && props.open) doClose()
+  if (e.key === 'Escape' && props.open) doClose();
 }
-onMounted(() => document.addEventListener('keydown', onKeydown))
-onUnmounted(() => document.removeEventListener('keydown', onKeydown))
+onMounted(() => document.addEventListener('keydown', onKeydown));
+onUnmounted(() => document.removeEventListener('keydown', onKeydown));
 
 function onOverlayClick(e: MouseEvent) {
-  if (e.target === e.currentTarget) doClose()
+  if (e.target === e.currentTarget) doClose();
 }
 </script>
 
 <template>
   <Teleport to="body">
     <transition name="modal">
-      <div v-if="open" class="modal-overlay" @click="onOverlayClick" @keydown="onKeydown" tabindex="-1">
+      <div
+        v-if="open"
+        class="modal-overlay"
+        tabindex="-1"
+        @click="onOverlayClick"
+        @keydown="onKeydown"
+      >
         <div class="modal-content" :class="`modal-${size || 'md'}`">
           <div v-if="title || $slots.header || closable !== false" class="modal-header">
             <h3 v-if="title" class="modal-title">{{ title }}</h3>
             <slot name="header" />
-            <button v-if="closable !== false" class="modal-close" @click="doClose" aria-label="关闭">×</button>
+            <button
+              v-if="closable !== false"
+              class="modal-close"
+              aria-label="关闭"
+              @click="doClose"
+            >
+              ×
+            </button>
           </div>
           <div class="modal-body">
             <slot />
@@ -80,11 +99,22 @@ function onOverlayClick(e: MouseEvent) {
   display: flex;
   flex-direction: column;
 }
-.modal-sm { width: min(90vw, 360px); }
-.modal-md { width: min(90vw, 520px); }
-.modal-lg { width: min(90vw, 720px); }
-.modal-xl { width: min(94vw, 1080px); }
-.modal-xxl { width: min(94vw, 1600px); max-height: 85vh; }
+.modal-sm {
+  width: min(90vw, 360px);
+}
+.modal-md {
+  width: min(90vw, 520px);
+}
+.modal-lg {
+  width: min(90vw, 720px);
+}
+.modal-xl {
+  width: min(94vw, 1080px);
+}
+.modal-xxl {
+  width: min(94vw, 1600px);
+  max-height: 85vh;
+}
 
 .modal-header {
   padding: var(--theme-spacing-lg) var(--theme-spacing-xl);
@@ -103,15 +133,25 @@ function onOverlayClick(e: MouseEvent) {
   flex: 1;
 }
 .modal-close {
-  width: 28px; height: 28px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 1.3rem; line-height: 1;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  line-height: 1;
   color: var(--theme-text-muted);
-  background: none; border: none; border-radius: var(--theme-radius-sm);
-  cursor: pointer; flex-shrink: 0;
+  background: none;
+  border: none;
+  border-radius: var(--theme-radius-sm);
+  cursor: pointer;
+  flex-shrink: 0;
   transition: all var(--theme-transition-fast);
 }
-.modal-close:hover { color: var(--theme-text-primary); background: var(--theme-tab-hover-bg); }
+.modal-close:hover {
+  color: var(--theme-text-primary);
+  background: var(--theme-tab-hover-bg);
+}
 .modal-body {
   padding: var(--theme-spacing-xl);
   flex: 1;

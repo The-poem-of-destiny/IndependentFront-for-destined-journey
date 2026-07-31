@@ -48,7 +48,9 @@ function audioRow(name: string, hash?: string): ExistingRows['audio'][number] {
 }
 
 /** 只取断言关心的三元组，读起来比整行 diff 清楚 */
-function slots(plan: ReturnType<typeof planImport>): { name: string; type: string; variant?: string }[] {
+function slots(
+  plan: ReturnType<typeof planImport>,
+): { name: string; type: string; variant?: string }[] {
   return plan.assets.map((a) => ({ name: a.name, type: a.type, variant: a.variant }));
 }
 
@@ -263,7 +265,11 @@ describe('碰撞编号 (§5.3 分配表)', () => {
   it('🔴 max+1 而不是首个空位 —— 中间行被删也不回收旧号', () => {
     // base、2、5 在库里；3 与 4 曾存在过又被删了
     const plan = planImport([entry('苏婉_头像.png')], {
-      assets: [assetRow('苏婉', '头像'), assetRow('苏婉', '头像', '2'), assetRow('苏婉', '头像', '5')],
+      assets: [
+        assetRow('苏婉', '头像'),
+        assetRow('苏婉', '头像', '2'),
+        assetRow('苏婉', '头像', '5'),
+      ],
       audio: [],
     });
     expect(plan.assets[0].variant).toBe('6');
@@ -905,9 +911,10 @@ describe('allocateVariantSlot', () => {
 
   it('base 位空着就占 base；被占则 max+1（base 隐含算 1 号）', () => {
     expect(allocateVariantSlot('苏婉', '头像', undefined, [])).toEqual({});
-    expect(
-      allocateVariantSlot('苏婉', '头像', undefined, [row('苏婉', '头像')]),
-    ).toEqual({ variant: '2', renumberedFrom: '' });
+    expect(allocateVariantSlot('苏婉', '头像', undefined, [row('苏婉', '头像')])).toEqual({
+      variant: '2',
+      renumberedFrom: '',
+    });
     expect(
       allocateVariantSlot('苏婉', '头像', undefined, [
         row('苏婉', '头像'),

@@ -28,12 +28,7 @@ import type {
   LoadBlobFn,
   ManagerAudioContextLike,
 } from './types-audio';
-import type {
-  AudioPlaybackState,
-  AudioPlaylist,
-  AudioRepeatMode,
-  AudioTrack,
-} from './types';
+import type { AudioPlaybackState, AudioPlaylist, AudioRepeatMode, AudioTrack } from './types';
 
 // ═══════════════════════════════════════════════════════════
 // 类型再导出 (§4.6)
@@ -54,8 +49,7 @@ export const AUDIO_DEFAULT_FADE_MS = 300;
 function defaultCreateContext(): ManagerAudioContextLike {
   const g = globalThis as unknown as Record<string, unknown>;
   const Ctor = (g.AudioContext ?? g.webkitAudioContext) as
-    | (new () => ManagerAudioContextLike)
-    | undefined;
+    (new () => ManagerAudioContextLike) | undefined;
   if (!Ctor) throw new Error('AudioContext 不可用：请通过 createContext 注入');
   return new Ctor();
 }
@@ -108,7 +102,9 @@ export class AudioManager {
 
     const resolveTrack = (id: string): AudioTrack | undefined => this.tracks.get(id);
     const loadBlob: LoadBlobFn = opts.loadBlob ?? (async () => undefined);
-    const onChange = (): void => { this.emit(); };
+    const onChange = (): void => {
+      this.emit();
+    };
 
     this.music = new MusicChannel({
       context: this.ctx,
@@ -269,12 +265,18 @@ export class AudioManager {
     else this.sfx.setMuted(m);
   }
 
-  get masterVolume(): number { return this._masterVolume; }
-  get masterMuted(): boolean { return this._masterMuted; }
+  get masterVolume(): number {
+    return this._masterVolume;
+  }
+  get masterMuted(): boolean {
+    return this._masterMuted;
+  }
 
   // ── 解锁 (§7) ───────────────────────────────────────────
 
-  get unlocked(): boolean { return this._unlocked; }
+  get unlocked(): boolean {
+    return this._unlocked;
+  }
 
   /** 锁定期被暂存的曲目 —— UI 用它显示"点击任意处开始播放" */
   get pendingTrackId(): string | null {
@@ -324,9 +326,12 @@ export class AudioManager {
       if ((opts.fallback ?? 'keep') === 'stop') this.stop();
       return false;
     }
-    const pick = matches.length === 1
-      ? matches[0]
-      : matches[Math.min(matches.length - 1, Math.max(0, Math.floor(this.random() * matches.length)))];
+    const pick =
+      matches.length === 1
+        ? matches[0]
+        : matches[
+            Math.min(matches.length - 1, Math.max(0, Math.floor(this.random() * matches.length)))
+          ];
     await this.playTrack(pick.id);
     return true;
   }
@@ -363,7 +368,9 @@ export class AudioManager {
 
   subscribe(fn: (s: AudioPlaybackState) => void): () => void {
     this.subscribers.add(fn);
-    return () => { this.subscribers.delete(fn); };
+    return () => {
+      this.subscribers.delete(fn);
+    };
   }
 
   dispose(): void {

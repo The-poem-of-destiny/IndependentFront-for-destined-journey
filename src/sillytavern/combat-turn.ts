@@ -17,16 +17,12 @@ import type { CombatUnitTurn, TurnOrder, CombatParticipant } from './types';
  * 公式: (敏捷 × (1 + 速度修正%)) + d20 + 固定修正
  * 速度修正和固定修正均为多来源取最高值。
  */
-export function rollInitiative(
-  participant: CombatParticipant,
-  d20Roll: number,
-): CombatUnitTurn {
+export function rollInitiative(participant: CombatParticipant, d20Roll: number): CombatUnitTurn {
   const agility = participant.attributes.dex;
 
   // 速度修正: 多来源取最高
-  const speedMod = participant.speedModifiers.length > 0
-    ? Math.max(...participant.speedModifiers)
-    : 0;
+  const speedMod =
+    participant.speedModifiers.length > 0 ? Math.max(...participant.speedModifiers) : 0;
 
   // 固定修正: 多来源取最高
   const fixedMod = participant.fixedInitiativeBonus;
@@ -107,14 +103,12 @@ export function getNextActiveIndex(order: TurnOrder, currentIndex: number): numb
 
 /** 检查回合是否结束 (所有单位的攻击和动作都用完) */
 export function isRoundOver(order: TurnOrder): boolean {
-  return order.sequence.every(
-    u => u.attacksRemaining <= 0 && u.actionsRemaining <= 0,
-  );
+  return order.sequence.every((u) => u.attacksRemaining <= 0 && u.actionsRemaining <= 0);
 }
 
 /** 消耗 1 次攻击 */
 export function consumeAttack(order: TurnOrder, characterId: string): void {
-  const unit = order.sequence.find(u => u.characterId === characterId);
+  const unit = order.sequence.find((u) => u.characterId === characterId);
   if (unit) {
     unit.attacksRemaining = Math.max(0, unit.attacksRemaining - 1);
   }
@@ -122,7 +116,7 @@ export function consumeAttack(order: TurnOrder, characterId: string): void {
 
 /** 消耗 1 个动作 */
 export function consumeAction(order: TurnOrder, characterId: string): void {
-  const unit = order.sequence.find(u => u.characterId === characterId);
+  const unit = order.sequence.find((u) => u.characterId === characterId);
   if (unit) {
     unit.actionsRemaining = Math.max(0, unit.actionsRemaining - 1);
   }
@@ -143,15 +137,14 @@ export function formatInitiativeSequence(order: TurnOrder): string {
   if (order.sequence.length === 0) return '(空)';
 
   const details = order.sequence
-    .map(u => {
-      const speedModStr = u.speedModifiers.length > 0
-        ? ` × (1+${Math.max(...u.speedModifiers) * 100}%修正)`
-        : '';
+    .map((u) => {
+      const speedModStr =
+        u.speedModifiers.length > 0 ? ` × (1+${Math.max(...u.speedModifiers) * 100}%修正)` : '';
       return `${u.name}: (敏捷${u.agility}${speedModStr}) + 骰${u.d20Roll} = ${u.totalInitiative}`;
     })
     .join('\n');
 
-  const sequence = order.sequence.map(u => u.name).join(' → ');
+  const sequence = order.sequence.map((u) => u.name).join(' → ');
 
   return `${details}\n序列: ${sequence}`;
 }
@@ -159,15 +152,18 @@ export function formatInitiativeSequence(order: TurnOrder): string {
 // ========== 验证 ==========
 
 /** 验证先攻序列的合法性 */
-export function validateInitiative(participants: CombatParticipant[]): { valid: boolean; errors: string[] } {
+export function validateInitiative(participants: CombatParticipant[]): {
+  valid: boolean;
+  errors: string[];
+} {
   const errors: string[] = [];
 
   if (participants.length < 2) {
     errors.push('战斗至少需要 2 名参与者');
   }
 
-  const allyCount = participants.filter(p => p.side === 'ally').length;
-  const enemyCount = participants.filter(p => p.side === 'enemy').length;
+  const allyCount = participants.filter((p) => p.side === 'ally').length;
+  const enemyCount = participants.filter((p) => p.side === 'enemy').length;
 
   if (allyCount === 0) errors.push('没有友方参与者');
   if (enemyCount === 0) errors.push('没有敌方参与者');

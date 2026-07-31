@@ -38,17 +38,17 @@ final per design §2.
 
 Nine agents, all **Opus at medium reasoning effort**, none spawning subagents.
 
-| Wave | Agent | Deliverables | Parallel? |
-|------|-------|--------------|-----------|
-| 0 | Scout | Conventions map — Dexie CRUD idiom, settings-section component shape, test setup, theme tokens | — |
-| 1 | Data layer | `types.ts` (+6 types), `database.ts` (Dexie v11, 3 tables, CRUD), DB tests | — |
-| 2 | Channels | `audio-channels.ts`, `audio-fakes.ts`, `audio-channels.test.ts` | — |
-| 3 | Manager | `audio-manager.ts`, `audio-manager.test.ts` | — |
-| 4 | Store | `audio-store.ts`, `audio-singleton.ts` | — |
-| 5a | Settings UI | `AudioSection.vue` + `SettingsPage.vue` wiring | ✅ with 5b, 5c |
-| 5b | Game UI | `MiniPlayer.vue` + `SideToolbar.vue` + `GamePage.vue` | ✅ |
-| 5c | Assets/docs | `public/audio/manifest.json` + `README.md`, `CLAUDE.md`, data dictionary chapter | ✅ |
-| 6 | Verifier | Full suite + typecheck + diff review against acceptance criteria | — |
+| Wave | Agent       | Deliverables                                                                                   | Parallel?      |
+| ---- | ----------- | ---------------------------------------------------------------------------------------------- | -------------- |
+| 0    | Scout       | Conventions map — Dexie CRUD idiom, settings-section component shape, test setup, theme tokens | —              |
+| 1    | Data layer  | `types.ts` (+6 types), `database.ts` (Dexie v11, 3 tables, CRUD), DB tests                     | —              |
+| 2    | Channels    | `audio-channels.ts`, `audio-fakes.ts`, `audio-channels.test.ts`                                | —              |
+| 3    | Manager     | `audio-manager.ts`, `audio-manager.test.ts`                                                    | —              |
+| 4    | Store       | `audio-store.ts`, `audio-singleton.ts`                                                         | —              |
+| 5a   | Settings UI | `AudioSection.vue` + `SettingsPage.vue` wiring                                                 | ✅ with 5b, 5c |
+| 5b   | Game UI     | `MiniPlayer.vue` + `SideToolbar.vue` + `GamePage.vue`                                          | ✅             |
+| 5c   | Assets/docs | `public/audio/manifest.json` + `README.md`, `CLAUDE.md`, data dictionary chapter               | ✅             |
+| 6    | Verifier    | Full suite + typecheck + diff review against acceptance criteria                               | —              |
 
 Waves 1→4 are strictly sequential: each consumes the previous one's exports. Wave 5 fans out because
 its three agents touch disjoint files and share only the store's API, which is fixed by Wave 4.
@@ -164,8 +164,8 @@ Report back in at most 15 lines:
 If you cannot finish, say so plainly and report what you learned so the next attempt starts warm.
 ```
 
-Plus, in every brief: *"Do the work yourself with direct tool use; do not spawn subagents. Do not
-refactor beyond this task; list unrelated issues in your report instead of fixing them."*
+Plus, in every brief: _"Do the work yourself with direct tool use; do not spawn subagents. Do not
+refactor beyond this task; list unrelated issues in your report instead of fixing them."_
 
 ---
 

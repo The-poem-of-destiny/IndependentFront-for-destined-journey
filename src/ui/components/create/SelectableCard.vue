@@ -1,28 +1,30 @@
 <script setup lang="ts">
-import type { CatalogItem, Rarity } from '@engine/start-catalog'
-import { RARITY_TO_QUALITY } from '@engine/start-catalog'
-import type { QualityLevel } from '@engine/types'
-import QualityBadge from '../shared/QualityBadge.vue'
-import AppButton from '../shared/AppButton.vue'
-import { computed } from 'vue'
+import type { CatalogItem, Rarity } from '@engine/start-catalog';
+import { RARITY_TO_QUALITY } from '@engine/start-catalog';
+import type { QualityLevel } from '@engine/types';
+import QualityBadge from '../shared/QualityBadge.vue';
+import AppButton from '../shared/AppButton.vue';
+import { computed } from 'vue';
 
-const props = defineProps<{ item: CatalogItem; selected: boolean; disabled?: boolean }>()
-defineEmits<{ select: [item: CatalogItem]; remove: [item: CatalogItem] }>()
+const props = defineProps<{ item: CatalogItem; selected: boolean; disabled?: boolean }>();
+defineEmits<{ select: [item: CatalogItem]; remove: [item: CatalogItem] }>();
 
-const qualityLabel = computed(() => RARITY_TO_QUALITY[props.item.rarity] as QualityLevel)
+const qualityLabel = computed(() => RARITY_TO_QUALITY[props.item.rarity] as QualityLevel);
 
 // 稀有度 → 主题品质令牌（色点 + 名字着色）
 const RARITY_QUALITY_VAR: Record<string, string> = {
-  common:    '--theme-quality-common',
-  uncommon:  '--theme-quality-uncommon',
-  rare:      '--theme-quality-rare',
-  epic:      '--theme-quality-epic',
+  common: '--theme-quality-common',
+  uncommon: '--theme-quality-uncommon',
+  rare: '--theme-quality-rare',
+  epic: '--theme-quality-epic',
   legendary: '--theme-quality-legendary',
-  mythic:    '--theme-quality-mythic',
-  only:      '--theme-quality-unique',
-}
+  mythic: '--theme-quality-mythic',
+  only: '--theme-quality-unique',
+};
 
-const qualityColor = computed(() => `var(${RARITY_QUALITY_VAR[props.item.rarity] ?? '--theme-quality-common'})`)
+const qualityColor = computed(
+  () => `var(${RARITY_QUALITY_VAR[props.item.rarity] ?? '--theme-quality-common'})`,
+);
 </script>
 
 <template>
@@ -46,24 +48,24 @@ const qualityColor = computed(() => `var(${RARITY_QUALITY_VAR[props.item.rarity]
       </div>
 
       <!-- Tag 标签 (最多 5 个) -->
-      <div class="card-tags" v-if="item.tag.length">
+      <div v-if="item.tag.length" class="card-tags">
         <span v-for="t in item.tag.slice(0, 5)" :key="t" class="tag">{{ t }}</span>
       </div>
 
       <!-- Effect 效果键值对 -->
-      <div class="card-effects" v-if="Object.keys(item.effect).length">
+      <div v-if="Object.keys(item.effect).length" class="card-effects">
         <span v-for="(v, k) in item.effect" :key="k" class="effect-line">
           <strong>{{ k }}:</strong> {{ v }}
         </span>
       </div>
 
       <!-- Consume 消耗 (MP/SP) — 原版有此字段，当前缺失 -->
-      <div class="card-consume" v-if="item.consume">
+      <div v-if="item.consume" class="card-consume">
         {{ item.consume }}
       </div>
 
       <!-- 描述 (截断) -->
-      <div class="card-desc" v-if="item.description">{{ item.description }}</div>
+      <div v-if="item.description" class="card-desc">{{ item.description }}</div>
 
       <!-- 转生点数消耗 -->
       <div class="card-cost">
@@ -73,9 +75,7 @@ const qualityColor = computed(() => `var(${RARITY_QUALITY_VAR[props.item.rarity]
 
     <!-- 操作按钮 -->
     <div class="card-action">
-      <AppButton v-if="!selected" size="sm" @click.stop="$emit('select', item)">
-        选择
-      </AppButton>
+      <AppButton v-if="!selected" size="sm" @click.stop="$emit('select', item)"> 选择 </AppButton>
       <AppButton v-else size="sm" variant="danger" @click.stop="$emit('remove', item)">
         移除
       </AppButton>
@@ -88,8 +88,10 @@ const qualityColor = computed(() => `var(${RARITY_QUALITY_VAR[props.item.rarity]
   display: flex;
   align-items: flex-start;
   gap: var(--theme-spacing-sm);
-  padding: var(--theme-spacing-sm) var(--theme-spacing-sm) var(--theme-spacing-sm) var(--theme-spacing-md);
-  border: 1px solid color-mix(in srgb, var(--q-color, var(--theme-card-border)) 35%, var(--theme-card-border));
+  padding: var(--theme-spacing-sm) var(--theme-spacing-sm) var(--theme-spacing-sm)
+    var(--theme-spacing-md);
+  border: 1px solid
+    color-mix(in srgb, var(--q-color, var(--theme-card-border)) 35%, var(--theme-card-border));
   border-radius: var(--theme-radius-md);
   background: var(--theme-card-bg);
   transition: all var(--theme-transition-normal);
@@ -117,7 +119,10 @@ const qualityColor = computed(() => `var(${RARITY_QUALITY_VAR[props.item.rarity]
 }
 
 /* ===== 卡片内容 ===== */
-.card-body { flex: 1; min-width: 0; }
+.card-body {
+  flex: 1;
+  min-width: 0;
+}
 
 .card-header {
   display: flex;
@@ -137,7 +142,12 @@ const qualityColor = computed(() => `var(${RARITY_QUALITY_VAR[props.item.rarity]
 }
 
 /* Tags */
-.card-tags { display: flex; flex-wrap: wrap; gap: 0.2em; margin-bottom: 0.25em; }
+.card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2em;
+  margin-bottom: 0.25em;
+}
 .tag {
   font-size: 0.65em;
   padding: 0.15em 0.4em;
@@ -148,9 +158,19 @@ const qualityColor = computed(() => `var(${RARITY_QUALITY_VAR[props.item.rarity]
 }
 
 /* Effects */
-.card-effects { margin-bottom: 0.25em; }
-.effect-line { display: block; font-size: 0.72em; color: var(--theme-text-secondary); line-height: 1.5; }
-.effect-line strong { color: var(--theme-text-primary); font-size: inherit; }
+.card-effects {
+  margin-bottom: 0.25em;
+}
+.effect-line {
+  display: block;
+  font-size: 0.72em;
+  color: var(--theme-text-secondary);
+  line-height: 1.5;
+}
+.effect-line strong {
+  color: var(--theme-text-primary);
+  font-size: inherit;
+}
 
 /* Consume */
 .card-consume {
@@ -173,7 +193,11 @@ const qualityColor = computed(() => `var(${RARITY_QUALITY_VAR[props.item.rarity]
 }
 
 /* 转生点消耗 */
-.card-cost { font-size: 0.75em; color: var(--theme-color-primary); font-weight: 600; }
+.card-cost {
+  font-size: 0.75em;
+  color: var(--theme-color-primary);
+  font-weight: 600;
+}
 
 /* 操作按钮 */
 .card-action {

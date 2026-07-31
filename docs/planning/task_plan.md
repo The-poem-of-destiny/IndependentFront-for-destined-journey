@@ -21,6 +21,7 @@ SubSystem-CharGen 角色  │ Stage2异步   │ AI生成+物品Agent│ 延迟�
 ```
 
 **核心理由:**
+
 - **制作**: 需要AI生成创意效果(词条/命名/描述) + Code 做DC/骰检。正文阻塞等待，类似 tool-calling 模式。
 - **战斗**: 面板数据量大(每回合千token级)，独立窗口避免污染正文上下文；结束后AI生成摘要回注。
 - **角色生成**: 新NPC当前回合只用外观+一句话；完整数据下回合才需要，异步后置不打断叙事。
@@ -62,29 +63,29 @@ Stage 5:  plot_post_check   (世界线修正)
 
 ### 对应的新 Agent 列表
 
-| Agent | 触发者 | 时机 | 职责 |
-|-------|--------|------|------|
-| **craft_gen** | Story AI | Stage 1 阻塞 | 判定难度/调用$craft工具/生成创意效果词条 |
-| **char_gen** | vars_update | Stage 2 异步 | 名字/五维/种族/背景/登神长阶 → 调 item_gen |
-| **item_gen** | char_gen | 被char_gen调用(仅1次) | 技能/装备/道具生成 → 遵循 #261442 + #265160 |
-| **combat_summary** | 战斗窗口 | Stage 1.5 独立 | 战斗叙事摘要 (回合数/关键事件/战利品) |
+| Agent              | 触发者      | 时机                  | 职责                                        |
+| ------------------ | ----------- | --------------------- | ------------------------------------------- |
+| **craft_gen**      | Story AI    | Stage 1 阻塞          | 判定难度/调用$craft工具/生成创意效果词条    |
+| **char_gen**       | vars_update | Stage 2 异步          | 名字/五维/种族/背景/登神长阶 → 调 item_gen  |
+| **item_gen**       | char_gen    | 被char_gen调用(仅1次) | 技能/装备/道具生成 → 遵循 #261442 + #265160 |
+| **combat_summary** | 战斗窗口    | Stage 1.5 独立        | 战斗叙事摘要 (回合数/关键事件/战利品)       |
 
 ---
 
 ## 关键架构决策 (ADR)
 
-| ID | 决策 | 版本 |
-|----|------|------|
-| ADR-04 | EJS 由 Code 层在提示装配时评估，注入 variableContent（**v2 修正: 不再静态预渲染**） | v2 |
-| ADR-11 | Prompt vs Code 边界：确定性逻辑→Code，创造性推理→Prompt | v1 |
-| ADR-19 | $ API 语义级抽象：AI 调 `$combat.attack()`，Code 内部执行公式 | v1 |
-| ADR-20 | 声明式优先：VarsPatch + StatusEffect，覆盖率 <90% 才引入 DSL | v1 |
-| ADR-21 | StateManager 为唯一写入入口 (`commitChatState`) | v1 |
-| ADR-22 | FP 是存档级元货币，独立于 CharacterState（SaveProfile 概念） | v3 |
-| ADR-23 | namespace-normalizer: `stat_data.*` ↔ 语义命名空间双向映射 | v3 |
-| ADR-24 | 三层子系统分流: Craft(正文阻塞Agent)/Combat(独立窗口)/CharGen(异步后置) | 🆕 v4 |
+| ID     | 决策                                                                                        | 版本  |
+| ------ | ------------------------------------------------------------------------------------------- | ----- |
+| ADR-04 | EJS 由 Code 层在提示装配时评估，注入 variableContent（**v2 修正: 不再静态预渲染**）         | v2    |
+| ADR-11 | Prompt vs Code 边界：确定性逻辑→Code，创造性推理→Prompt                                     | v1    |
+| ADR-19 | $ API 语义级抽象：AI 调 `$combat.attack()`，Code 内部执行公式                               | v1    |
+| ADR-20 | 声明式优先：VarsPatch + StatusEffect，覆盖率 <90% 才引入 DSL                                | v1    |
+| ADR-21 | StateManager 为唯一写入入口 (`commitChatState`)                                             | v1    |
+| ADR-22 | FP 是存档级元货币，独立于 CharacterState（SaveProfile 概念）                                | v3    |
+| ADR-23 | namespace-normalizer: `stat_data.*` ↔ 语义命名空间双向映射                                  | v3    |
+| ADR-24 | 三层子系统分流: Craft(正文阻塞Agent)/Combat(独立窗口)/CharGen(异步后置)                     | 🆕 v4 |
 | ADR-25 | Marker Protocol: 正文通过 XML 标记与引擎通信 (craft_request/combat_trigger/new_char_detect) | 🆕 v4 |
-| ADR-26 | SubAgent 链: char_gen → item_gen (仅1次调用，防高并发浪费token) | 🆕 v4 |
+| ADR-26 | SubAgent 链: char_gen → item_gen (仅1次调用，防高并发浪费token)                             | 🆕 v4 |
 
 ---
 
@@ -188,23 +189,28 @@ Stage 5:  plot_post_check   (世界线修正)
 ## Phase 4.6: Foundation Layer（P0 缺口修正） ✅
 
 ### 4.6.1 SaveProfile (`save-profile.ts`)
+
 - 新增类型: SaveProfile / FPTransaction / FateContract
 - database.ts: v6 升级 + saveProfiles 表 + CRUD
 - getFP() / addFP() / spendFP() / addContract() / addAchievement()
 
 ### 4.6.2 FP 系统 (`fp-system.ts`)
+
 - calcContractCost(T1:200→T6:150000) / calcFPFromTask() / calcFPFromIntimacy()
 - $fp namespace
 
 ### 4.6.3 EJS 运行时 (`ejs-runtime.ts`)
+
 - 沙盒 eval: `new Function('getMessageVar', 'setMessageVar', 'Math', 'JSON')`
 - Token 化解析 + 错误隔离 + 批量渲染
 
 ### 4.6.4 Effect 声明解析器 (`effect-parser.ts`)
+
 - `parseEffectDeclaration("攻击力: +50, DR: 5%")` → ParsedEffect[]
 - 中→英键映射（50+ 条）
 
 ### 4.6.5 变量持久化修复
+
 - StateManager: set_variable/delta_variable 不再 stub，真正写入
 - StatePatchOp 扩展: remove_variable / move_variable / insert_variable
 - var-resolver: moveVar() + applyVarsPatch 扩展
@@ -216,19 +222,23 @@ Stage 5:  plot_post_check   (世界线修正)
 ## Phase 5 (EXPANDED): 数据层 ✅
 
 ### 5.1 命名空间规范化 (`namespace-normalizer.ts`)
+
 - flatToEngine() / engineToFlat(): `stat_data.主角.HP` ↔ `char.player.hp`
 - 50+ 条映射表 + normalizeVariables() / denormalizeVariables()
 
 ### 5.2 核心数值表 (`tier-constants.ts`)
+
 - TIER_CONFIGS[7]: HP/MP/SP 乘数、战斗系数、EXP 上限、品质上限
 - calcHP() / calcMP() / calcSP() / calcExpToNext() / canBreakthrough()
 
 ### 5.3 血脉系统 (`bloodlines.ts`)
+
 - 23 种已知血脉静态数据 + calcBloodlineModifiers()
 - 4 大分类：智人种/亚人种/幻身种/异界种（对齐世界书 #906373）
 - 觉醒/继承/复合机制由 AI 叙事演绎（ADR-11）
 
 ### 5.4 死亡检测 (`death-system.ts`)
+
 - 最小实现: detectDeath() + detectDeaths()
 - 复活机制（延迟/FP补偿/状态恢复）由 AI 世界书规则演绎（ADR-11）
 
@@ -242,6 +252,7 @@ Stage 5:  plot_post_check   (世界线修正)
 **预估**: 1 模块 | ~50 tests | 累计 ~1362 tests
 
 ### G.1 位置数据库 (`location-db.ts`)
+
 - `DEFAULT_LOCATIONS` 嵌入式世界地图（**32 节点，10 势力**，5 层级：大陆→势力→城市→区域）
 - 10 势力：奥古斯提姆帝国/诺斯加德联盟/萨赫拉联邦/赛瑞利亚/翡翠之心/翼民圣都梵尼亚/永夜盟约/瓦伦蒂亚/索伦蒂斯王国/兽族联盟（对齐世界书）
 - `buildAdjacency()` 构建双向邻接表 / `getLocationNode()` 按 ID 查找
@@ -251,6 +262,7 @@ Stage 5:  plot_post_check   (世界线修正)
 - ✅ 48 tests
 
 ### 设计决策
+
 - ❌ 不做路径规划/旅行时间计算 — 叙事 AI 的职责
 - 静态嵌入数据，无需 DB 表，遵循 bloodlines.ts 模式
 - 旧死代码 MapTopology/TopologyEdge 已删除
@@ -265,27 +277,33 @@ Stage 5:  plot_post_check   (世界线修正)
 **预估**: 5 模块 | ~275 tests | 累计 ~1637 tests
 
 ### 6a.0 战斗类型 & 数据结构 (`types.ts` 扩展)
+
 - `CombatType`: 切磋 / 竞技 / 镇压 / 死斗 / 标准（5 种，影响士气阈值和集群行为）
 - `CombatActionRequest` 扩展: `combatType` + `round` + `participants`
 - 世界书伤害公式: `关联属性×10×层级系数 + 技能威力 + 武器攻击力`
 
 ### 6a.1 战斗意图解析 (`combat-intention.ts`)
+
 - 6 级意图: 常规→战术→机能→核心→抹杀→概念
 - `resolveIntention()`: 中文输入解析 + 层级对抗检定 `(攻方T×5+d20) vs (守方T×5+d20+意图难度)`
 - 层级压制（攻方T < 守方T-1 → 强制失败）/ 非致死判定 / 失能处决自动成功
 
 ### 6a.2 伤害管线 (`combat-damage.ts`)
+
 - 8 步计算: 基础→多段分割→穿透→装备减免→类型减免→评级系数→DR→最终
 - 7 级命中评级（超暴击2.0≥30 / 强暴击1.6≥25 / 暴击1.3≥20 / 有效1.0(11-19) / 勉强0.8(8-10) / 擦伤0.3(4-7) / 失手0≤3）+ 4 伤害类型（physical/energy/spirit/true）
 
 ### 6a.3 回合管理 (`combat-turn.ts`)
+
 - `rollInitiative()`: `(敏捷×(1+速度修正%)) + d20 + 固定修正`（对齐世界书公式）
 - 每单位 1 攻击 + 1 动作/回合
 
 ### 6a.4 战斗面板生成 (`combat-panel.ts`)
+
 - `<action_info>` XML: `{战况总览}` + `| 数据行 |`（对齐世界书格式）
 
 ### 6a.5 战斗解析器 (`combat-resolver.ts`)
+
 - 整合意图→先攻→攻击→伤害→面板→StatePatch 完整管线
 
 ---
@@ -295,6 +313,7 @@ Stage 5:  plot_post_check   (世界线修正)
 **Status: complete ✅ | 1671 tests | 155 新增 craft tests**
 
 ### 已完成模块
+
 - ✅ `types.ts` 扩展: +~220 行 (QualityLevel/CraftIndustry(4种)/CraftStage(3级)/CraftRating(4级)/DC基准/产能加成/CraftMaterial/CraftCheckBreakdown/CraftSettlementBreakdown)
 - ✅ `craft-quality.ts` (新建, ~270行): 品质继承/逐级降级/阶段验证/DC修正生成/管制物/资源检查
 - ✅ `craft-dc.ts` (新建, ~340行): 骰池(优势劣势)/品质DC公式/经验FP计算/产能加成(普通→神话)/材料节省
@@ -311,10 +330,12 @@ Stage 5:  plot_post_check   (世界线修正)
 **数据来源**: 世界书 #837805 [战斗协议]
 
 ### 6c.1 集群系统 (`cluster-system.ts`) ✅
+
 - ≥3 同类敌人自动合并，HP%决定攻击次数(≥80%→3次/≥50%→2次/≥30%→1次)，×1.5 伤害修正
 - 集群减员按 HP% 折算存活数 / 意图免疫 / 范围结算 min(范围, 集群数) / T1-3 资格判定
 
 ### 6c.2 士气系统 (`morale-system.ts`) ✅
+
 - 4 状态: steady→shaken→wavering→routing
 - 基于战斗类型的士气阈值: 切磋40%/竞技30%/压制50%/死斗10%/标准30%/守卫35%
 - 高阈值自动触发 / 低阈值 d20<12 检定 / 结果池(投降/溃逃等) / 处决条件检测
@@ -329,6 +350,7 @@ Stage 5:  plot_post_check   (世界线修正)
 **数据来源**: 世界书 #966681 [好感度]
 
 ### 6d.1 好感度引擎 (`affection-system.ts`) ✅
+
 - 精简版: 仅钳制[-100,+100] + 读写 + 11级标签(对齐#966681)
 - `$affection` API: get/set/add/batch/label/simpleLabel (6方法)
 - 架构决策: Code 层只做数值存储+边界保护，行为判断全交给叙事 AI
@@ -340,6 +362,7 @@ Stage 5:  plot_post_check   (世界线修正)
 **Status: complete ✅ | 1978 tests | +108 tests | +2 test files**
 
 ### 已完成模块
+
 - ✅ `types.ts` 扩展: +~130 行 (MarkerType/DetectedMarker/CraftRequestMarker/CombatTriggerMarker/CharDetectMarker/CraftAgentOutput/CharGenOutput/ItemGenOutput/CharGenChainResult/CombatSummaryResult + `add_character` StatePatchOp)
 - ✅ `marker-protocol.ts` (新建, ~220行): scanMarkers/scanCraftRequests/scanCombatTriggers/scanCharDetects/stripMarkers/classifyMarker/parseTagAttributes/isMarkerTag — 纯函数模块，正则检测
 - ✅ `agent-templates.ts` 扩展: 3 新模板 craft_gen/char_gen/item_gen，REGISTERED_AGENT_IDS 10→13
@@ -348,6 +371,7 @@ Stage 5:  plot_post_check   (世界线修正)
 - ✅ `index.ts`: 导出新模块 + VERSION 3.0.0→4.0.0
 
 ### 架构决策 (实施修正)
+
 - **Combat 延迟到 Stage 2 后**: Stage 1 暂存 combat_trigger → Stage 2 char_gen 先执行 → 再执行 combat（确保新敌人已生成）
 - **Craft 阻塞注入**: Stage 1 post-processing 中扫描 craft_request → 调 Craft Agent → 用 position 精确替换标记块
 - **Marker 检测用正则**: 非 StreamTagParser 扩展，标记检测在已完成文本上进行
@@ -361,6 +385,7 @@ Stage 5:  plot_post_check   (世界线修正)
 **预估**: ~10 tests（现有测试更新）| 累计 ~1362 tests
 
 ### 修复内容
+
 - P0: tier-constants.ts 数值全量对齐世界书 #417617
 - P0: validate.ts ATTR_RANGE.max 999→20
 - P1: location-db.ts 用真实世界书地理重写（32节点/10势力）
@@ -372,16 +397,23 @@ Stage 5:  plot_post_check   (世界线修正)
 ---
 
 ## Phase 7: 前端 UI 🔄
+
 - 首页/捏人/游戏三栏/设置/地图/世界书编辑器
 - Vue 3 + Pinia + Vite，~100 UI 测试
 - **预估**: ~100 tests | 累计 ~2089 tests
 
 ### 7a 工程搭建 ✅
+
 ### 7b 主题系统 + 通用组件 ✅
+
 ### 7c 首页 + 设置页 ✅
+
 ### 7d 捏人页 ✅ (暂结，后续继续改)
+
 ### 7e 游戏页 + 状态栏 HUD ⬜ ← 当前位置
+
 ### 7f 创意工坊 ⬜
+
 ### 7g 衔接 & 测试 ⬜
 
 ---
@@ -429,12 +461,14 @@ Stage 5:  plot_post_check   (世界线修正)
 ### 8.2 Prompt 模板体系 (`prompt-templates.ts` / 重写 `agent-templates.ts`)
 
 **当前问题**: 现有 7 个 Agent 模板(Phase 3)是骨架版本，需要：
+
 1. 注入"你只能看到 X，你不知道 Y"的边界声明
 2. 防止 Story AI 的"预知"倾向（不能提前写后续剧情）
 3. 防止 Plot AI 的"过度规划"（不能强制 Story AI 走向）
 4. 各 Agent 的输出格式严格化
 
 **产出结构**:
+
 ```
 agent-templates.ts  (Code 层: 模板结构 + 占位符)
   ├── fixedSystem       ← 主人编写 (缓存敏感, 不变)
@@ -444,12 +478,14 @@ agent-templates.ts  (Code 层: 模板结构 + 占位符)
 ```
 
 **主人负责**:
+
 - 每个 Agent 的 `fixedSystem` 内容（角色定义/世界观/边界声明/输出格式）
 - Few-shot 示例 (`fixedExamples`)
 - Story AI 的叙事风格指导
 - 反"全知"约束措辞
 
 **Code 负责**:
+
 - `variableContext` 的自动填充（根据可见性规则裁剪）
 - `variableInstruction` 的本轮指令拼接
 - 模板变量替换 (`{{charName}}`, `{{currentLocation}}` 等)
@@ -469,6 +505,7 @@ agent-templates.ts  (Code 层: 模板结构 + 占位符)
 ---
 
 ## Phase 9: 集成 & 交付 ⬜
+
 - E2E 流程测试 / 缓存命中率基准 / 角色卡可插拔验证 / 确定性回放 / 性能基准
 - ~40 tests | 累计 ~2179 tests
 
@@ -478,38 +515,38 @@ agent-templates.ts  (Code 层: 模板结构 + 占位符)
 
 每个 Phase 产出**可测试的能力**，避免长链非功能性交付:
 
-| 里程碑 | 可测能力 |
-|--------|---------|
+| 里程碑            | 可测能力                                   |
+| ----------------- | ------------------------------------------ |
 | Phase 4.6 完成 ✅ | FP 读写、EJS 渲染、Effect 解析、变量持久化 |
-| Phase 5 完成 ✅ | 命名空间映射、核心数值查询、血脉/死亡检测 |
-| Geography 完成 | 10势力拓扑连通性查询 |
-| Phase 6a.2 完成 | 任意两角色伤害计算 |
-| Phase 6a.5 完成 | **首个完整游戏能力**: 提交动作→面板+Patch |
-| Phase 7 完成 | **首个玩家可见产物** |
+| Phase 5 完成 ✅   | 命名空间映射、核心数值查询、血脉/死亡检测  |
+| Geography 完成    | 10势力拓扑连通性查询                       |
+| Phase 6a.2 完成   | 任意两角色伤害计算                         |
+| Phase 6a.5 完成   | **首个完整游戏能力**: 提交动作→面板+Patch  |
+| Phase 7 完成      | **首个玩家可见产物**                       |
 
 ---
 
 ## 测试进度
 
-| Phase | 新增 Tests | 累计 | 状态 |
-|-------|-----------|------|------|
-| Phase 1-3 | 161 | 161 | ✅ |
-| Phase 4 | 201 | 369 | ✅ |
-| Phase 4.5 | 238 | 607 | ✅ |
-| Phase 5 | 365 | 972 | ✅ |
-| Phase 4.6 | 204 | 1176 | ✅ |
-| Phase 5 (EXPANDED) | 134 | 1310 | ✅ |
-| Geography | 48 | 1358 | ✅ |
-| Audit Fix | 4 | 1362 | ✅ |
-| 6a (战斗) | 154 | 1516 | ✅ |
-| 6b (制作) | 155 | 1671 | ✅ |
-| 6c (集群/士气) | 112 | 1783 | ✅ |
-| 6d (好感度) | 42 | 1869 | ✅ |
-| 6d.5 (集成场景) | 44 | 1869 | ✅ |
-| 6e (Marker+Agent) | 108 | 1978 | ✅ |
-| 7 (前端 UI) | ~100 | ~2078 | ⬜ |
-| 8 (上下文可见性) | ~50 | ~2139 | ⬜ |
-| 9 (集成交付) | ~40 | ~2179 | ⬜ |
+| Phase              | 新增 Tests | 累计  | 状态 |
+| ------------------ | ---------- | ----- | ---- |
+| Phase 1-3          | 161        | 161   | ✅   |
+| Phase 4            | 201        | 369   | ✅   |
+| Phase 4.5          | 238        | 607   | ✅   |
+| Phase 5            | 365        | 972   | ✅   |
+| Phase 4.6          | 204        | 1176  | ✅   |
+| Phase 5 (EXPANDED) | 134        | 1310  | ✅   |
+| Geography          | 48         | 1358  | ✅   |
+| Audit Fix          | 4          | 1362  | ✅   |
+| 6a (战斗)          | 154        | 1516  | ✅   |
+| 6b (制作)          | 155        | 1671  | ✅   |
+| 6c (集群/士气)     | 112        | 1783  | ✅   |
+| 6d (好感度)        | 42         | 1869  | ✅   |
+| 6d.5 (集成场景)    | 44         | 1869  | ✅   |
+| 6e (Marker+Agent)  | 108        | 1978  | ✅   |
+| 7 (前端 UI)        | ~100       | ~2078 | ⬜   |
+| 8 (上下文可见性)   | ~50        | ~2139 | ⬜   |
+| 9 (集成交付)       | ~40        | ~2179 | ⬜   |
 
 ---
 
@@ -524,18 +561,19 @@ agent-templates.ts  (Code 层: 模板结构 + 占位符)
 
 ## V3 代码复用
 
-| 文件 | 状态 | 说明 |
-|------|------|------|
-| lorebook-engine.ts | 可复用 | 关键字扫描器完整，需添加模板解析钩子 |
-| stream-parser.ts | 可复用 | 通用 XML 解析器，添加 `action_info` 标签即可 |
-| vars-merger.ts | 可复用 | deepMerge 可用，parseVarsBlock 需扩展 |
-| variables.ts | 可复用 | aggregateEvents 可用，需新标签处理器 |
+| 文件               | 状态   | 说明                                         |
+| ------------------ | ------ | -------------------------------------------- |
+| lorebook-engine.ts | 可复用 | 关键字扫描器完整，需添加模板解析钩子         |
+| stream-parser.ts   | 可复用 | 通用 XML 解析器，添加 `action_info` 标签即可 |
+| vars-merger.ts     | 可复用 | deepMerge 可用，parseVarsBlock 需扩展        |
+| variables.ts       | 可复用 | aggregateEvents 可用，需新标签处理器         |
 
 ---
 
 ## 验证策略
 
 每个 Phase 完成后:
+
 1. `npm run typecheck` — 零错误
 2. `npm run build` — 编译成功
 3. `npm run test -- --run` — 全部通过

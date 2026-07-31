@@ -16,42 +16,42 @@
  * 的 getAudioHandle / saveAudioHandle / deleteAudioHandle。
  */
 
-import {
-  getAudioHandle,
-  saveAudioHandle,
-  deleteAudioHandle,
-} from '@engine/database'
-import type { AudioHandleRecord } from '@engine/types'
-import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names'
+import { getAudioHandle, saveAudioHandle, deleteAudioHandle } from '@engine/database';
+import type { AudioHandleRecord } from '@engine/types';
+import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names';
 
 /** 扫描结果 —— 磁盘上的一个音频文件的最小描述 */
 export interface ScannedFile {
-  name: string
-  size: number
-  mimeType: string
+  name: string;
+  size: number;
+  mimeType: string;
 }
 
 /** 持久化目录句柄的固定行 id（当前只有一行） */
-const LIBRARY_ROOT_ID = 'library-root'
+const LIBRARY_ROOT_ID = 'library-root';
 
 // ═══════════════════════════════════════════════════════════
 // 非标准权限方法的窄接口扩展
 // ═══════════════════════════════════════════════════════════
 
 interface FileSystemPermissionDescriptorLike {
-  mode?: 'read' | 'readwrite'
+  mode?: 'read' | 'readwrite';
 }
 
 /** DOM lib 未必声明 query/requestPermission，这里做窄扩展而不是 any */
 interface PermissionCapableHandle {
-  queryPermission?: (desc?: FileSystemPermissionDescriptorLike) => Promise<PermissionState | string>
-  requestPermission?: (desc?: FileSystemPermissionDescriptorLike) => Promise<PermissionState | string>
+  queryPermission?: (
+    desc?: FileSystemPermissionDescriptorLike,
+  ) => Promise<PermissionState | string>;
+  requestPermission?: (
+    desc?: FileSystemPermissionDescriptorLike,
+  ) => Promise<PermissionState | string>;
 }
 
 /** 目录句柄的 values() 在部分 TS lib 版本里缺失，同样窄扩展 */
 interface DirectoryLike {
-  values?: () => AsyncIterable<FileSystemHandle>
-  getFileHandle?: (name: string, options?: { create?: boolean }) => Promise<FileSystemFileHandle>
+  values?: () => AsyncIterable<FileSystemHandle>;
+  getFileHandle?: (name: string, options?: { create?: boolean }) => Promise<FileSystemFileHandle>;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -59,34 +59,34 @@ interface DirectoryLike {
 // ═══════════════════════════════════════════════════════════
 
 export interface FolderTestHooks {
-  picker?: () => Promise<FileSystemDirectoryHandle>
-  getHandle?: (id: string) => Promise<AudioHandleRecord | undefined>
-  saveHandle?: (record: AudioHandleRecord) => Promise<unknown>
-  deleteHandle?: (id: string) => Promise<void>
+  picker?: () => Promise<FileSystemDirectoryHandle>;
+  getHandle?: (id: string) => Promise<AudioHandleRecord | undefined>;
+  saveHandle?: (record: AudioHandleRecord) => Promise<unknown>;
+  deleteHandle?: (id: string) => Promise<void>;
 }
 
-let hooks: FolderTestHooks = {}
+let hooks: FolderTestHooks = {};
 
 /** 仅测试使用：注入 picker / 句柄存储实现 */
 export function __setFolderTestHooks(next: FolderTestHooks): void {
-  hooks = { ...hooks, ...next }
+  hooks = { ...hooks, ...next };
 }
 
 /** 仅测试使用：清空所有注入，恢复真实实现 */
 export function __resetFolderTestHooks(): void {
-  hooks = {}
+  hooks = {};
 }
 
 function readHandle(id: string): Promise<AudioHandleRecord | undefined> {
-  return (hooks.getHandle ?? getAudioHandle)(id)
+  return (hooks.getHandle ?? getAudioHandle)(id);
 }
 
 function writeHandle(record: AudioHandleRecord): Promise<unknown> {
-  return (hooks.saveHandle ?? saveAudioHandle)(record)
+  return (hooks.saveHandle ?? saveAudioHandle)(record);
 }
 
 function removeHandle(id: string): Promise<void> {
-  return (hooks.deleteHandle ?? deleteAudioHandle)(id)
+  return (hooks.deleteHandle ?? deleteAudioHandle)(id);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -95,28 +95,31 @@ function removeHandle(id: string): Promise<void> {
 
 /** 浏览器是否支持 File System Access 目录选择。node 下安全返回 false。 */
 export function isFolderSupported(): boolean {
-  if (hooks.picker) return true
+  if (hooks.picker) return true;
   try {
-    return 'showDirectoryPicker' in globalThis
+    return 'showDirectoryPicker' in globalThis;
   } catch {
-    return false
+    return false;
   }
 }
 
 function getPicker(): (() => Promise<FileSystemDirectoryHandle>) | null {
-  if (hooks.picker) return hooks.picker
-  const g = globalThis as unknown as Record<string, unknown>
-  const fn = g.showDirectoryPicker
-  if (typeof fn !== 'function') return null
-  return () => (fn as (opts?: unknown) => Promise<FileSystemDirectoryHandle>).call(globalThis, { mode: 'read' })
+  if (hooks.picker) return hooks.picker;
+  const g = globalThis as unknown as Record<string, unknown>;
+  const fn = g.showDirectoryPicker;
+  if (typeof fn !== 'function') return null;
+  return () =>
+    (fn as (opts?: unknown) => Promise<FileSystemDirectoryHandle>).call(globalThis, {
+      mode: 'read',
+    });
 }
 
 function isAbortError(err: unknown): boolean {
-  return !!err && typeof err === 'object' && (err as { name?: string }).name === 'AbortError'
+  return !!err && typeof err === 'object' && (err as { name?: string }).name === 'AbortError';
 }
 
 function isNotFoundError(err: unknown): boolean {
-  return !!err && typeof err === 'object' && (err as { name?: string }).name === 'NotFoundError'
+  return !!err && typeof err === 'object' && (err as { name?: string }).name === 'NotFoundError';
 }
 
 /**
@@ -124,18 +127,18 @@ function isNotFoundError(err: unknown): boolean {
  * 成功时顺带持久化。其他错误照常抛出。
  */
 export async function pickLibraryFolder(): Promise<FileSystemDirectoryHandle | null> {
-  const picker = getPicker()
-  if (!picker) return null
-  let handle: FileSystemDirectoryHandle
+  const picker = getPicker();
+  if (!picker) return null;
+  let handle: FileSystemDirectoryHandle;
   try {
-    handle = await picker()
+    handle = await picker();
   } catch (err) {
-    if (isAbortError(err)) return null
-    throw err
+    if (isAbortError(err)) return null;
+    throw err;
   }
-  if (!handle) return null
-  await storeFolder(handle)
-  return handle
+  if (!handle) return null;
+  await storeFolder(handle);
+  return handle;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -144,18 +147,18 @@ export async function pickLibraryFolder(): Promise<FileSystemDirectoryHandle | n
 
 /** 读取已持久化的目录句柄；没有则 null */
 export async function getStoredFolder(): Promise<FileSystemDirectoryHandle | null> {
-  const record = await readHandle(LIBRARY_ROOT_ID)
-  return record?.handle ?? null
+  const record = await readHandle(LIBRARY_ROOT_ID);
+  return record?.handle ?? null;
 }
 
 /** 持久化目录句柄（覆盖既有行） */
 export async function storeFolder(handle: FileSystemDirectoryHandle): Promise<void> {
-  await writeHandle({ id: LIBRARY_ROOT_ID, handle, addedAt: Date.now() })
+  await writeHandle({ id: LIBRARY_ROOT_ID, handle, addedAt: Date.now() });
 }
 
 /** 取消关联音乐文件夹 —— 只删句柄 */
 export async function forgetFolder(): Promise<void> {
-  await removeHandle(LIBRARY_ROOT_ID)
+  await removeHandle(LIBRARY_ROOT_ID);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -163,28 +166,30 @@ export async function forgetFolder(): Promise<void> {
 // ═══════════════════════════════════════════════════════════
 
 function normalizeState(value: unknown): 'granted' | 'prompt' | 'denied' {
-  return value === 'granted' || value === 'denied' ? value : 'prompt'
+  return value === 'granted' || value === 'denied' ? value : 'prompt';
 }
 
 /** 查询读权限。方法缺失或抛错一律当 'prompt'（后续由用户手势重新申请）。 */
-export async function checkPermission(handle: FileSystemDirectoryHandle): Promise<'granted' | 'prompt' | 'denied'> {
-  const h = handle as unknown as PermissionCapableHandle
-  if (!h || typeof h.queryPermission !== 'function') return 'prompt'
+export async function checkPermission(
+  handle: FileSystemDirectoryHandle,
+): Promise<'granted' | 'prompt' | 'denied'> {
+  const h = handle as unknown as PermissionCapableHandle;
+  if (!h || typeof h.queryPermission !== 'function') return 'prompt';
   try {
-    return normalizeState(await h.queryPermission({ mode: 'read' }))
+    return normalizeState(await h.queryPermission({ mode: 'read' }));
   } catch {
-    return 'prompt'
+    return 'prompt';
   }
 }
 
 /** 申请读权限（需要用户手势）。方法缺失或抛错 → false。 */
 export async function requestPermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
-  const h = handle as unknown as PermissionCapableHandle
-  if (!h || typeof h.requestPermission !== 'function') return false
+  const h = handle as unknown as PermissionCapableHandle;
+  if (!h || typeof h.requestPermission !== 'function') return false;
   try {
-    return normalizeState(await h.requestPermission({ mode: 'read' })) === 'granted'
+    return normalizeState(await h.requestPermission({ mode: 'read' })) === 'granted';
   } catch {
-    return false
+    return false;
   }
 }
 
@@ -195,9 +200,9 @@ export async function requestPermission(handle: FileSystemDirectoryHandle): Prom
 // 扩展名 → MIME 的唯一来源在 @engine/audio-names（名字归一化要剥同一份扩展名）
 
 function extensionOf(name: string): string {
-  const dot = name.lastIndexOf('.')
-  if (dot <= 0 || dot === name.length - 1) return ''
-  return name.slice(dot + 1).toLowerCase()
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0 || dot === name.length - 1) return '';
+  return name.slice(dot + 1).toLowerCase();
 }
 
 /**
@@ -205,28 +210,28 @@ function extensionOf(name: string): string {
  * 单个文件出错只跳过该文件，不中断整次扫描。
  */
 export async function scanFolder(handle: FileSystemDirectoryHandle): Promise<ScannedFile[]> {
-  const dir = handle as unknown as DirectoryLike
-  if (!dir || typeof dir.values !== 'function') return []
+  const dir = handle as unknown as DirectoryLike;
+  if (!dir || typeof dir.values !== 'function') return [];
 
-  const out: ScannedFile[] = []
+  const out: ScannedFile[] = [];
   for await (const entry of dir.values()) {
     try {
-      if (!entry || entry.kind !== 'file') continue
-      const mimeType = AUDIO_MIME_BY_EXTENSION[extensionOf(entry.name)]
-      if (!mimeType) continue
-      const file = await (entry as FileSystemFileHandle).getFile()
+      if (!entry || entry.kind !== 'file') continue;
+      const mimeType = AUDIO_MIME_BY_EXTENSION[extensionOf(entry.name)];
+      if (!mimeType) continue;
+      const file = await (entry as FileSystemFileHandle).getFile();
       out.push({
         name: entry.name,
         size: file?.size ?? 0,
         mimeType: file?.type || mimeType,
-      })
+      });
     } catch {
       // 单文件失败（权限/被删/读错）不该毁掉整次扫描
-      continue
+      continue;
     }
   }
-  out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-  return out
+  out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return out;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -238,14 +243,14 @@ export async function resolveFile(
   handle: FileSystemDirectoryHandle,
   relativePath: string,
 ): Promise<File | null> {
-  const dir = handle as unknown as DirectoryLike
-  if (!dir || typeof dir.getFileHandle !== 'function' || !relativePath) return null
+  const dir = handle as unknown as DirectoryLike;
+  if (!dir || typeof dir.getFileHandle !== 'function' || !relativePath) return null;
   try {
-    const fileHandle = await dir.getFileHandle(relativePath)
-    const file = await fileHandle.getFile()
-    return file ?? null
+    const fileHandle = await dir.getFileHandle(relativePath);
+    const file = await fileHandle.getFile();
+    return file ?? null;
   } catch (err) {
-    if (isNotFoundError(err)) return null
-    throw err
+    if (isNotFoundError(err)) return null;
+    throw err;
   }
 }

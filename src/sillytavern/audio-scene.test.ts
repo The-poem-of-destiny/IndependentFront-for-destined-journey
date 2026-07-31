@@ -21,7 +21,12 @@ import type { AudioTrack, LocationNode } from './types';
 
 // ═══ 夹具 ═══════════════════════════════════════════════
 
-function track(id: string, name: string, tags: string[], over: Partial<AudioTrack> = {}): AudioTrack {
+function track(
+  id: string,
+  name: string,
+  tags: string[],
+  over: Partial<AudioTrack> = {},
+): AudioTrack {
   return {
     id,
     name,
@@ -38,14 +43,54 @@ function track(id: string, name: string, tags: string[], over: Partial<AudioTrac
 
 /** 微型地图: 大陆 → 帝国 → 铁炉堡；帝国旁挂一个无音乐的联邦 */
 const NODES: LocationNode[] = [
-  { id: 'c', name: '阿斯塔利亚大陆', type: 'continent', parentId: null, tier: 1, description: '', neighbors: [] },
-  { id: 'r1', name: '奥古斯提姆帝国', type: 'region', parentId: 'c', tier: 2, description: '', neighbors: [] },
-  { id: 'r2', name: '萨赫拉联邦', type: 'region', parentId: 'c', tier: 2, description: '', neighbors: [] },
-  { id: 'city1', name: '铁炉堡', type: 'city', parentId: 'r1', tier: 3, description: '', neighbors: [] },
+  {
+    id: 'c',
+    name: '阿斯塔利亚大陆',
+    type: 'continent',
+    parentId: null,
+    tier: 1,
+    description: '',
+    neighbors: [],
+  },
+  {
+    id: 'r1',
+    name: '奥古斯提姆帝国',
+    type: 'region',
+    parentId: 'c',
+    tier: 2,
+    description: '',
+    neighbors: [],
+  },
+  {
+    id: 'r2',
+    name: '萨赫拉联邦',
+    type: 'region',
+    parentId: 'c',
+    tier: 2,
+    description: '',
+    neighbors: [],
+  },
+  {
+    id: 'city1',
+    name: '铁炉堡',
+    type: 'city',
+    parentId: 'r1',
+    tier: 3,
+    description: '',
+    neighbors: [],
+  },
 ];
 
-const EMPIRE_A = track('emp_a', '奥古斯提姆帝国（平静）', ['地点:奥古斯提姆帝国', '情绪:平静', '情境:探索']);
-const EMPIRE_B = track('emp_b', '奥古斯提姆帝国（不安）', ['地点:奥古斯提姆帝国', '情绪:不安', '情境:活动']);
+const EMPIRE_A = track('emp_a', '奥古斯提姆帝国（平静）', [
+  '地点:奥古斯提姆帝国',
+  '情绪:平静',
+  '情境:探索',
+]);
+const EMPIRE_B = track('emp_b', '奥古斯提姆帝国（不安）', [
+  '地点:奥古斯提姆帝国',
+  '情绪:不安',
+  '情境:活动',
+]);
 const DRAGON_A = track('drg_a', '龙脊山脉（平静）', ['地点:龙脊山脉', '情绪:平静', '情境:探索']);
 const LIB: AudioTrack[] = [EMPIRE_A, EMPIRE_B, DRAGON_A];
 
@@ -75,16 +120,16 @@ describe('nameSimilarity', () => {
     // 样本必须**真的有共享二元组**，否则 Dice 恒为 0，这条断言就成了空转:
     // 「龙脊山脉北」与「龙脊之脉北」共享 {龙脊, 脉北}，落在字形档
     const shape = nameSimilarity('龙脊山脉北', '龙脊之脉北');
-    expect(shape).toBeGreaterThan(0);            // 确实走到了 Dice 分支
-    expect(shape).toBeLessThan(0.6);             // 且被压在包含档之下
+    expect(shape).toBeGreaterThan(0); // 确实走到了 Dice 分支
+    expect(shape).toBeLessThan(0.6); // 且被压在包含档之下
     expect(shape).toBeLessThan(nameSimilarity('龙脊山脉北麓', '龙脊山脉'));
   });
 
   it('字形档整体不超过 0.55 —— 这条上限是"档间不重叠"的全部依据', () => {
     // 构造一个 Dice 尽可能高的样本: 只差一个字，共享绝大多数二元组
     const almost = nameSimilarity('碎星群岛外', '碎星群岛内');
-    expect(almost).toBeGreaterThan(0.3);         // 字形上已经很像了
-    expect(almost).toBeLessThanOrEqual(0.55);    // 仍然进不了包含档
+    expect(almost).toBeGreaterThan(0.3); // 字形上已经很像了
+    expect(almost).toBeLessThanOrEqual(0.55); // 仍然进不了包含档
   });
 
   it('毫无共享字形时归零', () => {
@@ -158,15 +203,39 @@ describe('buildLocationChain', () => {
 
   it('parentId 断链时就地停止，不抛异常', () => {
     const broken: LocationNode[] = [
-      { id: 'x', name: '孤儿城', type: 'city', parentId: 'nowhere', tier: 3, description: '', neighbors: [] },
+      {
+        id: 'x',
+        name: '孤儿城',
+        type: 'city',
+        parentId: 'nowhere',
+        tier: 3,
+        description: '',
+        neighbors: [],
+      },
     ];
     expect(buildLocationChain('孤儿城', broken)).toEqual([{ name: '孤儿城', depth: 0 }]);
   });
 
   it('parentId 成环时靠深度上限收敛（数据错误不该死循环）', () => {
     const cyclic: LocationNode[] = [
-      { id: 'a', name: '甲地', type: 'area', parentId: 'b', tier: 1, description: '', neighbors: [] },
-      { id: 'b', name: '乙地', type: 'area', parentId: 'a', tier: 1, description: '', neighbors: [] },
+      {
+        id: 'a',
+        name: '甲地',
+        type: 'area',
+        parentId: 'b',
+        tier: 1,
+        description: '',
+        neighbors: [],
+      },
+      {
+        id: 'b',
+        name: '乙地',
+        type: 'area',
+        parentId: 'a',
+        tier: 1,
+        description: '',
+        neighbors: [],
+      },
     ];
     const chain = buildLocationChain('甲地', cyclic);
     expect(chain.map((l) => l.name)).toEqual(['甲地', '乙地']); // 去重后自然收敛
@@ -179,7 +248,15 @@ describe('splitLocationPath', () => {
   it('正典七段路径拆成「由细到粗」的段序列', () => {
     expect(
       splitLocationPath('大陆中东部-帝国平原-奥古斯提姆帝国-北境行省-艾瑟嘉德-贵族区-锻炉大厅'),
-    ).toEqual(['锻炉大厅', '贵族区', '艾瑟嘉德', '北境行省', '奥古斯提姆帝国', '帝国平原', '大陆中东部']);
+    ).toEqual([
+      '锻炉大厅',
+      '贵族区',
+      '艾瑟嘉德',
+      '北境行省',
+      '奥古斯提姆帝国',
+      '帝国平原',
+      '大陆中东部',
+    ]);
   });
 
   it('单段输入原样返回（叙事里直接写的地名）', () => {
@@ -188,7 +265,9 @@ describe('splitLocationPath', () => {
 
   it('认 getLocationPath 的斜杠格式', () => {
     expect(splitLocationPath('阿斯塔利亚大陆/奥古斯提姆帝国/铁炉堡')).toEqual([
-      '铁炉堡', '奥古斯提姆帝国', '阿斯塔利亚大陆',
+      '铁炉堡',
+      '奥古斯提姆帝国',
+      '阿斯塔利亚大陆',
     ]);
   });
 
@@ -204,7 +283,6 @@ describe('splitLocationPath', () => {
     expect(splitLocationPath('   ')).toEqual([]);
   });
 });
-
 
 // ═══ resolveSceneByTags · 地点维 ════════════════════════
 
@@ -261,7 +339,11 @@ describe('resolveSceneByTags · 跨维度累计', () => {
   const FULL: AudioTrack[] = [...LIB, AOXUE, BATTLE];
 
   it('地点很准时压过人物主题（depth 0 = 1.00 > 人物 0.55）', () => {
-    const r = resolveSceneByTags(FULL, { location: '龙脊山脉', characters: ['傲雪'] }, { nodes: NODES });
+    const r = resolveSceneByTags(
+      FULL,
+      { location: '龙脊山脉', characters: ['傲雪'] },
+      { nodes: NODES },
+    );
     expect(r?.track.id).toBe('drg_a');
   });
 
@@ -308,8 +390,12 @@ describe('resolveSceneByTags · 跨维度累计', () => {
 
   it('无类型标签参与所有维度（用户手打的标签不该变成死标签）', () => {
     const loose = track('loose', '某某曲', ['雨夜']);
-    expect(resolveSceneByTags([loose], { moods: ['雨夜'] }, { nodes: NODES })?.track.id).toBe('loose');
-    expect(resolveSceneByTags([loose], { situations: ['雨夜'] }, { nodes: NODES })?.track.id).toBe('loose');
+    expect(resolveSceneByTags([loose], { moods: ['雨夜'] }, { nodes: NODES })?.track.id).toBe(
+      'loose',
+    );
+    expect(resolveSceneByTags([loose], { situations: ['雨夜'] }, { nodes: NODES })?.track.id).toBe(
+      'loose',
+    );
   });
 
   it('多个查询词取最佳单项，不累加 —— 免得标签打得多的曲子平白占便宜', () => {
@@ -350,7 +436,9 @@ describe('resolveSceneByTags · 边界', () => {
   it('只在指定 kind 内选曲', () => {
     const sfx = track('sfx1', '龙脊山脉（音效）', ['地点:龙脊山脉'], { kind: 'sfx', createdAt: 1 });
     const pool = [sfx, DRAGON_A];
-    expect(resolveSceneByTags(pool, { location: '龙脊山脉' }, { nodes: NODES })?.track.id).toBe('drg_a');
+    expect(resolveSceneByTags(pool, { location: '龙脊山脉' }, { nodes: NODES })?.track.id).toBe(
+      'drg_a',
+    );
     expect(
       resolveSceneByTags(pool, { location: '龙脊山脉', kind: 'sfx' }, { nodes: NODES })?.track.id,
     ).toBe('sfx1');
@@ -381,8 +469,24 @@ describe('resolveSceneByTags · 边界', () => {
 
 describe('buildLocationChain · 规范名深度', () => {
   const DEEP: LocationNode[] = [
-    { id: 'r', name: '永夜盟约', type: 'region', parentId: null, tier: 2, description: '', neighbors: [] },
-    { id: 'c', name: '诺克瓦罗斯', type: 'city', parentId: 'r', tier: 3, description: '', neighbors: [] },
+    {
+      id: 'r',
+      name: '永夜盟约',
+      type: 'region',
+      parentId: null,
+      tier: 2,
+      description: '',
+      neighbors: [],
+    },
+    {
+      id: 'c',
+      name: '诺克瓦罗斯',
+      type: 'city',
+      parentId: 'r',
+      tier: 3,
+      description: '',
+      neighbors: [],
+    },
   ];
 
   it('命中发生在较粗的段上时，规范名不得被提升到 depth 0', () => {
@@ -397,7 +501,11 @@ describe('buildLocationChain · 规范名深度', () => {
   it('最具体地点的专属曲不会输给城市级曲子', () => {
     const cave = track('cave', '地穴', ['地点:地穴'], { createdAt: 9 });
     const city = track('city', '诺克瓦罗斯', ['地点:诺克瓦罗斯'], { createdAt: 1 });
-    const r = resolveSceneByTags([city, cave], { location: '永夜领-诺克瓦罗斯城-地穴' }, { nodes: DEEP });
+    const r = resolveSceneByTags(
+      [city, cave],
+      { location: '永夜领-诺克瓦罗斯城-地穴' },
+      { nodes: DEEP },
+    );
     // 修复前两者同为 1.00，靠 createdAt 兜底 → 城市曲赢；修复后地穴 depth 0 胜出
     expect(r?.track.id).toBe('cave');
     expect(r?.fallbackDepth).toBe(0);

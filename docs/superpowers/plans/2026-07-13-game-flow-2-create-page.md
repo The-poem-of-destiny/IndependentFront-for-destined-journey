@@ -20,9 +20,11 @@
 ### Task 1: create-store — 新增世界书条目加载 + 命运核心/角色选择状态
 
 **Files:**
+
 - Modify: `src/ui/stores/create-store.ts`
 
 **Interfaces:**
+
 - Consumes: `loadBuiltInWorldBooks` from `@engine/builtin-worldbooks`
 - Consumes: `WorldBook, WorldBookEntry` from `@engine/types`
 - Produces: `systemCoreEntries: Ref<WorldBookEntry[]>` — system_core 分区条目列表
@@ -40,8 +42,8 @@
 在 `create-store.ts` 顶部 import 区添加：
 
 ```typescript
-import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks'
-import type { WorldBook, WorldBookEntry } from '@engine/types'
+import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks';
+import type { WorldBook, WorldBookEntry } from '@engine/types';
 ```
 
 在 store 内部（`defineStore('create', () => {` 之后），现有 `destinyCore` ref 附近添加新状态：
@@ -52,22 +54,22 @@ import type { WorldBook, WorldBookEntry } from '@engine/types'
 // ═══════════════════════════════════════════════════════
 
 /** system_core 世界书条目列表（命定核心候选） */
-const systemCoreEntries = ref<WorldBookEntry[]>([])
+const systemCoreEntries = ref<WorldBookEntry[]>([]);
 
 /** character 世界书条目列表（可启用角色） */
-const characterEntries = ref<WorldBookEntry[]>([])
+const characterEntries = ref<WorldBookEntry[]>([]);
 
 /** 选中的命定核心 entry uid */
-const selectedSystemCoreEntryUid = ref<number | null>(null)
+const selectedSystemCoreEntryUid = ref<number | null>(null);
 
 /** 选中的命定核心条目 */
 const selectedSystemCoreEntry = computed<WorldBookEntry | null>(() => {
-  if (selectedSystemCoreEntryUid.value === null) return null
-  return systemCoreEntries.value.find(e => e.uid === selectedSystemCoreEntryUid.value) ?? null
-})
+  if (selectedSystemCoreEntryUid.value === null) return null;
+  return systemCoreEntries.value.find((e) => e.uid === selectedSystemCoreEntryUid.value) ?? null;
+});
 
 /** 勾选的 character entry uids */
-const enabledCharacterEntryUids = ref<Set<number>>(new Set())
+const enabledCharacterEntryUids = ref<Set<number>>(new Set());
 ```
 
 - [ ] **Step 2: 添加加载函数**
@@ -78,51 +80,51 @@ const enabledCharacterEntryUids = ref<Set<number>>(new Set())
 /** 从内置世界书加载 system_core 和 character 条目 */
 async function loadWorldBookEntries() {
   try {
-    const books = await loadBuiltInWorldBooks()
+    const books = await loadBuiltInWorldBooks();
     systemCoreEntries.value = books
-      .filter(b => b.partition === 'system_core')
-      .flatMap(b => b.entries)
+      .filter((b) => b.partition === 'system_core')
+      .flatMap((b) => b.entries);
     characterEntries.value = books
-      .filter(b => b.partition === 'character')
-      .flatMap(b => b.entries)
+      .filter((b) => b.partition === 'character')
+      .flatMap((b) => b.entries);
   } catch {
     // fetch 不可用时静默跳过，保持空数组
-    systemCoreEntries.value = []
-    characterEntries.value = []
+    systemCoreEntries.value = [];
+    characterEntries.value = [];
   }
 }
 
 /** 单选命定核心 */
 function selectSystemCoreEntry(uid: number) {
-  selectedSystemCoreEntryUid.value = uid
+  selectedSystemCoreEntryUid.value = uid;
 }
 
 /** toggle 勾选角色 */
 function toggleCharacterEntry(uid: number) {
-  const next = new Set(enabledCharacterEntryUids.value)
+  const next = new Set(enabledCharacterEntryUids.value);
   if (next.has(uid)) {
-    next.delete(uid)
+    next.delete(uid);
   } else {
-    next.add(uid)
+    next.add(uid);
   }
-  enabledCharacterEntryUids.value = next
+  enabledCharacterEntryUids.value = next;
 }
 
 /** 构建存档用的世界书条目 ID 列表（partition:uid 格式） */
 function buildEnabledWorldBookEntries(): string[] {
-  const ids: string[] = []
+  const ids: string[] = [];
 
   // 命定核心 → system_core:uid
   if (selectedSystemCoreEntryUid.value !== null) {
-    ids.push(`system_core:${selectedSystemCoreEntryUid.value}`)
+    ids.push(`system_core:${selectedSystemCoreEntryUid.value}`);
   }
 
   // 启用角色 → character:uid
   for (const uid of enabledCharacterEntryUids.value) {
-    ids.push(`character:${uid}`)
+    ids.push(`character:${uid}`);
   }
 
-  return ids
+  return ids;
 }
 ```
 
@@ -133,14 +135,18 @@ function buildEnabledWorldBookEntries(): string[] {
 ```typescript
 const stepValid = computed<Record<number, boolean>>(() => ({
   0: difficulty.value !== null,
-  1: name.value.trim().length > 0 && race.value !== '' && remainingBP.value >= 0 && remainingAP.value >= 0,
-  2: selectedSystemCoreEntryUid.value !== null,  // 命定核心
-  3: true,  // 角色启用（可选）
-  4: true,  // 装备选择
-  5: true,  // 背景故事
-  6: true,  // 剧情规划
-  7: true,  // 确认提交
-}))
+  1:
+    name.value.trim().length > 0 &&
+    race.value !== '' &&
+    remainingBP.value >= 0 &&
+    remainingAP.value >= 0,
+  2: selectedSystemCoreEntryUid.value !== null, // 命定核心
+  3: true, // 角色启用（可选）
+  4: true, // 装备选择
+  5: true, // 背景故事
+  6: true, // 剧情规划
+  7: true, // 确认提交
+}));
 ```
 
 同时修改 `nextStep()` 中的最大步数：`currentStep.value < 7`。
@@ -169,11 +175,11 @@ await saveSaveSlot({
       difficulty: difficulty.value?.id ?? 'normal',
       remainingPoints: remainingPoints.value,
     }),
-    enabledWorldBookEntries: buildEnabledWorldBookEntries(),  // 🆕
-    openingPrompt: openingPrompt,                              // 🆕
-    openingPromptConsumed: false,                              // 🆕
+    enabledWorldBookEntries: buildEnabledWorldBookEntries(), // 🆕
+    openingPrompt: openingPrompt, // 🆕
+    openingPromptConsumed: false, // 🆕
   },
-})
+});
 ```
 
 - [ ] **Step 5: 保留旧 destinyCore 相关代码兼容性**
@@ -192,9 +198,9 @@ enabledCharacterEntryUids: [...enabledCharacterEntryUids.value],
 在 `applyPresetData()` 中恢复：
 
 ```typescript
-if (data.systemCoreEntryUid) selectSystemCoreEntry(data.systemCoreEntryUid)
+if (data.systemCoreEntryUid) selectSystemCoreEntry(data.systemCoreEntryUid);
 if (data.enabledCharacterEntryUids) {
-  enabledCharacterEntryUids.value = new Set(data.enabledCharacterEntryUids)
+  enabledCharacterEntryUids.value = new Set(data.enabledCharacterEntryUids);
 }
 ```
 
@@ -230,9 +236,11 @@ git commit -m "feat(create): create-store — 世界书驱动的命运核心 + �
 ### Task 2: CreateStepDestinyCore.vue — 改为世界书条目渲染
 
 **Files:**
+
 - Modify: `src/ui/components/create/CreateStepDestinyCore.vue`
 
 **Interfaces:**
+
 - Consumes: `store.systemCoreEntries`, `store.selectedSystemCoreEntryUid`, `store.selectedSystemCoreEntry`, `store.selectSystemCoreEntry`
 
 - [ ] **Step 1: 重写模板 — 用世界书条目代替硬编码卡片**
@@ -241,9 +249,9 @@ git commit -m "feat(create): create-store — 世界书驱动的命运核心 + �
 
 ```vue
 <script setup lang="ts">
-import { useCreateStore } from '../../stores/create-store'
+import { useCreateStore } from '../../stores/create-store';
 
-const store = useCreateStore()
+const store = useCreateStore();
 
 /** 提取条目内容的纯文本摘要（去掉 HTML/EJS 标签） */
 function summary(content: string, maxLen = 200): string {
@@ -251,8 +259,8 @@ function summary(content: string, maxLen = 200): string {
     .replace(/<[^>]+>/g, '')
     .replace(/\{\{[^}]+\}\}/g, '')
     .replace(/\s+/g, ' ')
-    .trim()
-  return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + '…' : cleaned
+    .trim();
+  return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + '…' : cleaned;
 }
 </script>
 
@@ -328,9 +336,11 @@ git commit -m "feat(create): CreateStepDestinyCore — 改为从 system_core 世
 ### Task 3: 新增 CreateStepCharacters.vue — 角色启用步骤
 
 **Files:**
+
 - Create: `src/ui/components/create/CreateStepCharacters.vue`
 
 **Interfaces:**
+
 - Consumes: `store.characterEntries`, `store.enabledCharacterEntryUids`, `store.toggleCharacterEntry`
 - Produces: 多选勾选角色卡片的 UI 组件
 
@@ -338,9 +348,9 @@ git commit -m "feat(create): CreateStepDestinyCore — 改为从 system_core 世
 
 ```vue
 <script setup lang="ts">
-import { useCreateStore } from '../../stores/create-store'
+import { useCreateStore } from '../../stores/create-store';
 
-const store = useCreateStore()
+const store = useCreateStore();
 
 /** 提取条目内容的纯文本摘要 */
 function summary(content: string, maxLen = 160): string {
@@ -348,21 +358,17 @@ function summary(content: string, maxLen = 160): string {
     .replace(/<[^>]+>/g, '')
     .replace(/\{\{[^}]+\}\}/g, '')
     .replace(/\s+/g, ' ')
-    .trim()
-  return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + '…' : cleaned
+    .trim();
+  return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + '…' : cleaned;
 }
 </script>
 
 <template>
   <section class="step-characters">
     <h2 class="step-title">启用角色</h2>
-    <p class="step-desc">
-      勾选你希望在此存档中出现的角色。未勾选的角色不会在叙事中被激活。
-    </p>
+    <p class="step-desc">勾选你希望在此存档中出现的角色。未勾选的角色不会在叙事中被激活。</p>
 
-    <div v-if="store.characterEntries.length === 0" class="chars-loading">
-      正在加载角色列表…
-    </div>
+    <div v-if="store.characterEntries.length === 0" class="chars-loading">正在加载角色列表…</div>
 
     <div v-else class="chars-grid">
       <label
@@ -502,10 +508,12 @@ git commit -m "feat(create): 新增 CreateStepCharacters — character 世界书
 ### Task 4: CreatePage.vue + CreateSteps.vue — 插入新步骤
 
 **Files:**
+
 - Modify: `src/ui/components/create/CreatePage.vue`
 - Modify: `src/ui/components/create/CreateSteps.vue`
 
 **Interfaces:**
+
 - Consumes: CreateStepCharacters (lazy import)
 - Consumes: `store.loadWorldBookEntries()`
 
@@ -518,12 +526,12 @@ const STEP_LABELS = [
   '难度选择',
   '基础信息',
   '命定核心',
-  '角色启用',    // 🆕
+  '角色启用', // 🆕
   '装备选择',
   '背景故事',
   '剧情规划',
   '确认提交',
-]
+];
 ```
 
 - [ ] **Step 2: CreatePage.vue — 添加世界书加载 + 新步骤组件**
@@ -531,19 +539,20 @@ const STEP_LABELS = [
 在 `CreatePage.vue` 的 `<script setup>` 中找到 `onMounted`（或类似的初始化逻辑，如果没有就加一个）：
 
 ```typescript
-import { onMounted } from 'vue'
-import { useCreateStore } from '../../stores/create-store'
+import { onMounted } from 'vue';
+import { useCreateStore } from '../../stores/create-store';
 
-const store = useCreateStore()
+const store = useCreateStore();
 
 onMounted(() => {
-  store.loadWorldBookEntries()
-})
+  store.loadWorldBookEntries();
+});
 ```
 
 在 template 的步骤切换区域，找到 `v-if="store.currentStep === 2"`（原命运核心），确认它是第 2 步。然后在原来第 3 步（装备选择）之前插入新步骤。找到现有的步骤条件渲染，调整序号：
 
 原有的步骤映射：
+
 - step 0: CreateStepDifficulty
 - step 1: CreateStepBasic
 - step 2: CreateStepDestinyCore
@@ -553,6 +562,7 @@ onMounted(() => {
 - step 6: CreateStepConfirm
 
 改为（插入新步骤后）：
+
 - step 0: CreateStepDifficulty
 - step 1: CreateStepBasic
 - step 2: CreateStepDestinyCore
@@ -565,7 +575,7 @@ onMounted(() => {
 添加 lazy import（找到其他 `defineAsyncComponent` 导入的位置）：
 
 ```typescript
-const CreateStepCharacters = defineAsyncComponent(() => import('./CreateStepCharacters.vue'))
+const CreateStepCharacters = defineAsyncComponent(() => import('./CreateStepCharacters.vue'));
 ```
 
 在 template 中插入（在 CreateStepDestinyCore 和 CreateStepSelections 之间）：
@@ -586,6 +596,7 @@ npm run build
 ```
 
 启动 dev server，走一遍完整创角流程（7 步），确认：
+
 - 步骤指示器显示 8 个标签
 - 第 2 步命运核心从世界书加载
 - 第 3 步角色列表从世界书加载，可多选
@@ -617,36 +628,62 @@ Expected: 现有测试 PASS。如有失败，检查 Task 1 的修改是否影响
 ```typescript
 describe('create-store — 世界书条目管理 (Phase 10h)', () => {
   it('loadWorldBookEntries 应正确加载 system_core 和 character 条目', async () => {
-    const store = useCreateStore()
-    await store.loadWorldBookEntries()
+    const store = useCreateStore();
+    await store.loadWorldBookEntries();
 
     // systemCoreEntries 和 characterEntries 在 fake-indexeddb 中可能为空
     // 验证初始状态为数组
-    expect(Array.isArray(store.systemCoreEntries)).toBe(true)
-    expect(Array.isArray(store.characterEntries)).toBe(true)
-  })
+    expect(Array.isArray(store.systemCoreEntries)).toBe(true);
+    expect(Array.isArray(store.characterEntries)).toBe(true);
+  });
 
   it('selectSystemCoreEntry + toggleCharacterEntry + buildEnabledWorldBookEntries', async () => {
-    const store = useCreateStore()
+    const store = useCreateStore();
     // 模拟手动设置条目
-    store.systemCoreEntries = [{ uid: 408, name: '白祷', content: '...', enabled: false, constant: true, key: [], keysecondary: [], selectiveLogic: 0, order: 100, position: 0 }]
-    store.characterEntries = [{ uid: 313, name: '丝特拉', content: '...', enabled: false, constant: true, key: [], keysecondary: [], selectiveLogic: 0, order: 100, position: 0 }]
+    store.systemCoreEntries = [
+      {
+        uid: 408,
+        name: '白祷',
+        content: '...',
+        enabled: false,
+        constant: true,
+        key: [],
+        keysecondary: [],
+        selectiveLogic: 0,
+        order: 100,
+        position: 0,
+      },
+    ];
+    store.characterEntries = [
+      {
+        uid: 313,
+        name: '丝特拉',
+        content: '...',
+        enabled: false,
+        constant: true,
+        key: [],
+        keysecondary: [],
+        selectiveLogic: 0,
+        order: 100,
+        position: 0,
+      },
+    ];
 
-    store.selectSystemCoreEntry(408)
-    expect(store.selectedSystemCoreEntryUid).toBe(408)
+    store.selectSystemCoreEntry(408);
+    expect(store.selectedSystemCoreEntryUid).toBe(408);
 
-    store.toggleCharacterEntry(313)
-    expect(store.enabledCharacterEntryUids.has(313)).toBe(true)
+    store.toggleCharacterEntry(313);
+    expect(store.enabledCharacterEntryUids.has(313)).toBe(true);
 
-    store.toggleCharacterEntry(313)
-    expect(store.enabledCharacterEntryUids.has(313)).toBe(false)
+    store.toggleCharacterEntry(313);
+    expect(store.enabledCharacterEntryUids.has(313)).toBe(false);
 
-    store.toggleCharacterEntry(313)
-    const ids = store.buildEnabledWorldBookEntries()
-    expect(ids).toContain('system_core:408')
-    expect(ids).toContain('character:313')
-  })
-})
+    store.toggleCharacterEntry(313);
+    const ids = store.buildEnabledWorldBookEntries();
+    expect(ids).toContain('system_core:408');
+    expect(ids).toContain('character:313');
+  });
+});
 ```
 
 **注意:** 测试需要 store 的属性是可写的。如果 `systemCoreEntries` 是 `ref`，需要确认测试可以直接赋值。如果 Pinia store 不允许直接赋值（因为是 computed 或 readonly），需要调整：改为 `(store as any).systemCoreEntries = [...]` 或者通过 store 的内部方法设置。

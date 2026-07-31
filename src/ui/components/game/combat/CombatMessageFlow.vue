@@ -12,39 +12,37 @@
  * @see docs/planning/2026-07-29-combat-v2-m5-plan.md §2.3
  * @see src/ui/components/game/ChatFlow.vue 叙事气泡样式参考
  */
-import { ref, watch, nextTick } from 'vue'
-import type { CombatLogEntry } from '../../../stores/game-store'
-import { useBeautify } from '../../../composables/useBeautify'
-import CombatActionCard from './CombatActionCard.vue'
+import { ref, watch, nextTick } from 'vue';
+import type { CombatLogEntry } from '../../../stores/game-store';
+import { useBeautify } from '../../../composables/useBeautify';
+import CombatActionCard from './CombatActionCard.vue';
 
 const props = defineProps<{
-  entries: CombatLogEntry[]
-}>()
+  entries: CombatLogEntry[];
+}>();
 
-const { beautifyPlain } = useBeautify()
+const { beautifyPlain } = useBeautify();
 
 /* ── 自动滚到底（参考 ChatFlow.vue watch 写法） ── */
-const container = ref<HTMLDivElement>()
+const container = ref<HTMLDivElement>();
 
 watch(
   () => props.entries.length,
   () => {
     nextTick(() => {
       if (container.value) {
-        container.value.scrollTop = container.value.scrollHeight
+        container.value.scrollTop = container.value.scrollHeight;
       }
-    })
+    });
   },
-)
+);
 </script>
 
 <template>
   <div class="combat-message-flow">
     <div ref="container" class="combat-messages">
       <!-- 空态（design.md §5.2） -->
-      <div v-if="entries.length === 0" class="empty-tab">
-        战斗即将开始…
-      </div>
+      <div v-if="entries.length === 0" class="empty-tab">战斗即将开始…</div>
 
       <template v-for="entry in entries" :key="entry.id">
         <!-- 回合分隔线 -->
@@ -58,27 +56,15 @@ watch(
         </div>
 
         <!-- 叙事气泡 -->
-        <div
-          v-else-if="entry.kind === 'narrative'"
-          class="bubble-row bubble-row-narrative"
-        >
+        <div v-else-if="entry.kind === 'narrative'" class="bubble-row bubble-row-narrative">
           <div class="bubble bubble-narrative-full">
-            <div
-              class="narrative-body"
-              v-html="beautifyPlain(entry.text ?? '')"
-            />
+            <div class="narrative-body" v-html="beautifyPlain(entry.text ?? '')" />
           </div>
         </div>
 
         <!-- 动作结果卡片 -->
-        <div
-          v-else-if="entry.kind === 'action'"
-          class="bubble-row bubble-row-action"
-        >
-          <CombatActionCard
-            :result="entry.result"
-            :tool-name="entry.toolName"
-          />
+        <div v-else-if="entry.kind === 'action'" class="bubble-row bubble-row-action">
+          <CombatActionCard :result="entry.result" :tool-name="entry.toolName" />
         </div>
       </template>
     </div>

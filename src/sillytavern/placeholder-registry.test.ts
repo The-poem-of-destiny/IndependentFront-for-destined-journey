@@ -11,8 +11,14 @@ import {
 } from './placeholder-registry';
 import { resolveTemplate } from './template-resolver';
 import type {
-  AgentContext, AgentConfig, WorldBook, CharacterState,
-  MemoryRecord, PlotEvent, InventoryItem, StatusEffect,
+  AgentContext,
+  AgentConfig,
+  WorldBook,
+  CharacterState,
+  MemoryRecord,
+  PlotEvent,
+  InventoryItem,
+  StatusEffect,
 } from './types';
 
 // ========== Helpers ==========
@@ -71,9 +77,12 @@ function makeChar(overrides?: Partial<CharacterState>): CharacterState {
     expToNext: 800,
     attributes: { str: 12, dex: 8, con: 10, int: 7, spi: 5 },
     freeAttrPoints: 0,
-    hp: 85, maxHp: 100,
-    mp: 40, maxMp: 50,
-    sp: 30, maxSp: 50,
+    hp: 85,
+    maxHp: 100,
+    mp: 40,
+    maxMp: 50,
+    sp: 30,
+    maxSp: 50,
     ascension: {
       enabled: false,
       elements: [],
@@ -173,7 +182,7 @@ describe('NARRATIVE', () => {
     const config = mockConfig({ agentId: 'story' });
     const result = PLACEHOLDER_REGISTRY['NARRATIVE'](ctx, config, { layers: '1' });
     // 1 layer = 2 messages
-    const lines = result.split('\n').filter(l => l);
+    const lines = result.split('\n').filter((l) => l);
     expect(lines.length).toBe(2);
     expect(lines[0]).toContain('[user]: e');
     expect(lines[1]).toContain('[assistant]: f');
@@ -183,7 +192,12 @@ describe('NARRATIVE', () => {
   it('does not truncate content (slice retired)', () => {
     const ctx = mockCtx({
       history: [
-        { id: '1', role: 'user', content: 'a very long message that should be truncated', timestamp: 1 },
+        {
+          id: '1',
+          role: 'user',
+          content: 'a very long message that should be truncated',
+          timestamp: 1,
+        },
         { id: '2', role: 'assistant', content: 'another long response', timestamp: 2 },
       ],
     });
@@ -201,9 +215,7 @@ describe('NARRATIVE', () => {
 
   it('returns empty string when layers is 0', () => {
     const ctx = mockCtx({
-      history: [
-        { id: '1', role: 'user', content: 'hello', timestamp: 1 },
-      ],
+      history: [{ id: '1', role: 'user', content: 'hello', timestamp: 1 }],
     });
     const result = PLACEHOLDER_REGISTRY['NARRATIVE'](ctx, mockConfig(), { layers: '0' });
     expect(result).toBe('');
@@ -212,13 +224,15 @@ describe('NARRATIVE', () => {
   it('uses defaultHistoryLayers for the agent when no params', () => {
     const ctx = mockCtx({
       history: Array.from({ length: 20 }, (_, i) => ({
-        id: `${i}`, role: i % 2 === 0 ? 'user' as const : 'assistant' as const,
-        content: `msg ${i}`, timestamp: i,
+        id: `${i}`,
+        role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+        content: `msg ${i}`,
+        timestamp: i,
       })),
     });
     const config = mockConfig({ agentId: 'story' }); // defaultLayers=6 → 12 messages
     const result = PLACEHOLDER_REGISTRY['NARRATIVE'](ctx, config);
-    const lines = result.split('\n').filter(l => l);
+    const lines = result.split('\n').filter((l) => l);
     expect(lines.length).toBe(12);
   });
 });
@@ -229,7 +243,10 @@ describe('MEMORY_ENTRIES', () => {
   it('formats memories', () => {
     const memories: MemoryRecord[] = [
       {
-        id: 'MEM000001', saveId: 's1', createdAt: 1, realTimestamp: 1000,
+        id: 'MEM000001',
+        saveId: 's1',
+        createdAt: 1,
+        realTimestamp: 1000,
         timeRange: { start: '001-01-01', end: '001-01-02' },
         content: '主角进入了白曜城的铁匠铺。',
         hiddenLine: '铁匠铺初入',
@@ -253,7 +270,10 @@ describe('MEMORY_ENTRIES', () => {
   it('respects top_k param', () => {
     const memories: MemoryRecord[] = [
       {
-        id: 'MEM000001', saveId: 's1', createdAt: 1, realTimestamp: 1000,
+        id: 'MEM000001',
+        saveId: 's1',
+        createdAt: 1,
+        realTimestamp: 1000,
         timeRange: { start: '001-01-01', end: '001-01-02' },
         content: '第一条记忆。',
         hiddenLine: 'h1',
@@ -262,7 +282,10 @@ describe('MEMORY_ENTRIES', () => {
         importance: 5,
       },
       {
-        id: 'MEM000002', saveId: 's1', createdAt: 2, realTimestamp: 2000,
+        id: 'MEM000002',
+        saveId: 's1',
+        createdAt: 2,
+        realTimestamp: 2000,
         timeRange: { start: '001-01-02', end: '001-01-03' },
         content: '第二条记忆。',
         hiddenLine: 'h2',
@@ -271,7 +294,10 @@ describe('MEMORY_ENTRIES', () => {
         importance: 8,
       },
       {
-        id: 'MEM000003', saveId: 's1', createdAt: 3, realTimestamp: 3000,
+        id: 'MEM000003',
+        saveId: 's1',
+        createdAt: 3,
+        realTimestamp: 3000,
         timeRange: { start: '001-01-03', end: '001-01-04' },
         content: '第三条记忆。',
         hiddenLine: 'h3',
@@ -291,7 +317,10 @@ describe('MEMORY_ENTRIES', () => {
   it('top_k larger than memory count returns all', () => {
     const memories: MemoryRecord[] = [
       {
-        id: 'MEM000001', saveId: 's1', createdAt: 1, realTimestamp: 1000,
+        id: 'MEM000001',
+        saveId: 's1',
+        createdAt: 1,
+        realTimestamp: 1000,
         timeRange: { start: '001-01-01', end: '001-01-02' },
         content: '唯一一条。',
         hiddenLine: 'h1',
@@ -312,26 +341,34 @@ describe('PLOT_EVENTS', () => {
   it('formats active and pending events', () => {
     const events: PlotEvent[] = [
       {
-        id: 'evt_01', saveId: 's1', title: '铁匠的委托',
+        id: 'evt_01',
+        saveId: 's1',
+        title: '铁匠的委托',
         description: '铁匠需要10块铁矿石。',
         status: 'active',
         childrenIds: [],
         relatedCharacterIds: [],
         worldLineChanged: false,
         visibility: 'revealed',
-        depth: 0, order: 1,
-        createdAt: 1, updatedAt: 2,
+        depth: 0,
+        order: 1,
+        createdAt: 1,
+        updatedAt: 2,
       },
       {
-        id: 'evt_02', saveId: 's1', title: '古墓传闻',
+        id: 'evt_02',
+        saveId: 's1',
+        title: '古墓传闻',
         description: '有人提到了北境古墓。',
         status: 'pending',
         childrenIds: [],
         relatedCharacterIds: [],
         worldLineChanged: false,
         visibility: 'revealed',
-        depth: 0, order: 2,
-        createdAt: 1, updatedAt: 2,
+        depth: 0,
+        order: 2,
+        createdAt: 1,
+        updatedAt: 2,
       },
     ];
     const ctx = mockCtx({ plotEvents: events });
@@ -346,26 +383,34 @@ describe('PLOT_EVENTS', () => {
   it('filters out completed events', () => {
     const events: PlotEvent[] = [
       {
-        id: 'evt_01', saveId: 's1', title: '已完成的任务',
+        id: 'evt_01',
+        saveId: 's1',
+        title: '已完成的任务',
         description: '已经完成了。',
         status: 'completed',
         childrenIds: [],
         relatedCharacterIds: [],
         worldLineChanged: false,
         visibility: 'revealed',
-        depth: 0, order: 1,
-        createdAt: 1, updatedAt: 2,
+        depth: 0,
+        order: 1,
+        createdAt: 1,
+        updatedAt: 2,
       },
       {
-        id: 'evt_02', saveId: 's1', title: '活跃的任务',
+        id: 'evt_02',
+        saveId: 's1',
+        title: '活跃的任务',
         description: '正在进行。',
         status: 'active',
         childrenIds: [],
         relatedCharacterIds: [],
         worldLineChanged: false,
         visibility: 'revealed',
-        depth: 0, order: 2,
-        createdAt: 1, updatedAt: 2,
+        depth: 0,
+        order: 2,
+        createdAt: 1,
+        updatedAt: 2,
       },
     ];
     const ctx = mockCtx({ plotEvents: events });
@@ -377,26 +422,34 @@ describe('PLOT_EVENTS', () => {
   it('filters out skipped and failed events', () => {
     const events: PlotEvent[] = [
       {
-        id: 'evt_01', saveId: 's1', title: '跳过了',
+        id: 'evt_01',
+        saveId: 's1',
+        title: '跳过了',
         description: 'x',
         status: 'skipped',
         childrenIds: [],
         relatedCharacterIds: [],
         worldLineChanged: false,
         visibility: 'revealed',
-        depth: 0, order: 1,
-        createdAt: 1, updatedAt: 2,
+        depth: 0,
+        order: 1,
+        createdAt: 1,
+        updatedAt: 2,
       },
       {
-        id: 'evt_02', saveId: 's1', title: '失败了',
+        id: 'evt_02',
+        saveId: 's1',
+        title: '失败了',
         description: 'x',
         status: 'failed',
         childrenIds: [],
         relatedCharacterIds: [],
         worldLineChanged: false,
         visibility: 'revealed',
-        depth: 0, order: 2,
-        createdAt: 1, updatedAt: 2,
+        depth: 0,
+        order: 2,
+        createdAt: 1,
+        updatedAt: 2,
       },
     ];
     const ctx = mockCtx({ plotEvents: events });
@@ -442,7 +495,14 @@ describe('INVENTORY', () => {
 
   it('includes rarity and type info', () => {
     const items: InventoryItem[] = [
-      { id: 'i1', name: '传说之剑', quantity: 1, type: '武器', rarity: '传说', description: '一把传说中的宝剑' },
+      {
+        id: 'i1',
+        name: '传说之剑',
+        quantity: 1,
+        type: '武器',
+        rarity: '传说',
+        description: '一把传说中的宝剑',
+      },
     ];
     const char = makeChar({ inventory: items });
     const ctx = mockCtx({ characters: [char] });
@@ -459,10 +519,10 @@ describe('GAME_TIME', () => {
   it('extracts world keys from variables', () => {
     const ctx = mockCtx({
       variables: {
-        '时间': '光辉纪元001年-05月-24日-15:30',
-        '位置': '北方-诺斯加德-白曜城-铁匠铺',
-        '天气': '晴',
-        '季节': '春季',
+        时间: '光辉纪元001年-05月-24日-15:30',
+        位置: '北方-诺斯加德-白曜城-铁匠铺',
+        天气: '晴',
+        季节: '春季',
       },
     });
     const result = PLACEHOLDER_REGISTRY['GAME_TIME'](ctx, mockConfig());
@@ -482,10 +542,10 @@ describe('GAME_TIME', () => {
   it('extracts alternative key names (English)', () => {
     const ctx = mockCtx({
       variables: {
-        'time': 'evening',
-        'location': 'Whiteforge',
-        'weather': 'rainy',
-        'era': '复兴纪元',
+        time: 'evening',
+        location: 'Whiteforge',
+        weather: 'rainy',
+        era: '复兴纪元',
       },
     });
     const result = PLACEHOLDER_REGISTRY['GAME_TIME'](ctx, mockConfig());
@@ -498,9 +558,9 @@ describe('GAME_TIME', () => {
   it('ignores non-world keys', () => {
     const ctx = mockCtx({
       variables: {
-        '金钱': 200,
-        'HP': 85,
-        '时间': 'noon',
+        金钱: 200,
+        HP: 85,
+        时间: 'noon',
       },
     });
     const result = PLACEHOLDER_REGISTRY['GAME_TIME'](ctx, mockConfig());
@@ -516,9 +576,13 @@ describe('ACTIVE_EFFECTS', () => {
   it('extracts status effects from characters', () => {
     const effects: StatusEffect[] = [
       {
-        id: 'se1', name: '中毒', description: '每回合失去少量HP',
-        category: '减益', stacks: 2,
-        remainingTime: 3, timeUnit: '回合',
+        id: 'se1',
+        name: '中毒',
+        description: '每回合失去少量HP',
+        category: '减益',
+        stacks: 2,
+        remainingTime: 3,
+        timeUnit: '回合',
         source: '毒蛇-毒牙',
         effects: { hp_per_turn: -5 },
       },
@@ -534,9 +598,13 @@ describe('ACTIVE_EFFECTS', () => {
   it('handles permanent effects', () => {
     const effects: StatusEffect[] = [
       {
-        id: 'se1', name: '祝福', description: '永久增益',
-        category: '增益', stacks: 1,
-        remainingTime: null, timeUnit: '分钟',
+        id: 'se1',
+        name: '祝福',
+        description: '永久增益',
+        category: '增益',
+        stacks: 1,
+        remainingTime: null,
+        timeUnit: '分钟',
         source: '女神-祝福',
         effects: { atk: 5 },
       },
@@ -556,10 +624,30 @@ describe('ACTIVE_EFFECTS', () => {
 
   it('handles multiple characters', () => {
     const effects1: StatusEffect[] = [
-      { id: 'se1', name: '中毒', description: '毒', category: '减益', stacks: 1, remainingTime: 3, timeUnit: '回合', source: 'x', effects: {} },
+      {
+        id: 'se1',
+        name: '中毒',
+        description: '毒',
+        category: '减益',
+        stacks: 1,
+        remainingTime: 3,
+        timeUnit: '回合',
+        source: 'x',
+        effects: {},
+      },
     ];
     const effects2: StatusEffect[] = [
-      { id: 'se2', name: '加速', description: '快', category: '增益', stacks: 1, remainingTime: 5, timeUnit: '回合', source: 'x', effects: {} },
+      {
+        id: 'se2',
+        name: '加速',
+        description: '快',
+        category: '增益',
+        stacks: 1,
+        remainingTime: 5,
+        timeUnit: '回合',
+        source: 'x',
+        effects: {},
+      },
     ];
     const char1 = makeChar({ id: 'c1', name: '角色A', statusEffects: effects1 });
     const char2 = makeChar({ id: 'c2', name: '角色B', statusEffects: effects2 });
@@ -603,9 +691,18 @@ describe('CHARACTER_STATE', () => {
   it('does not throw on various agentIds', () => {
     const char = makeChar();
     const ctx = mockCtx({ characters: [char] });
-    const agentIds = ['story', 'memory_recall', 'request_dispatcher', 'request_dispatcher', 'char_gen', 'craft_gen'];
+    const agentIds = [
+      'story',
+      'memory_recall',
+      'request_dispatcher',
+      'request_dispatcher',
+      'char_gen',
+      'craft_gen',
+    ];
     for (const id of agentIds) {
-      expect(() => PLACEHOLDER_REGISTRY['CHARACTER_STATE'](ctx, mockConfig({ agentId: id }))).not.toThrow();
+      expect(() =>
+        PLACEHOLDER_REGISTRY['CHARACTER_STATE'](ctx, mockConfig({ agentId: id })),
+      ).not.toThrow();
     }
   });
 });
@@ -735,12 +832,26 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
         partition: 'world_setting',
         entries: [
           {
-            uid: 1, name: '条目A', content: 'AAA', enabled: true,
-            key: [], keysecondary: [], selectiveLogic: 0, order: 1, position: 0,
+            uid: 1,
+            name: '条目A',
+            content: 'AAA',
+            enabled: true,
+            key: [],
+            keysecondary: [],
+            selectiveLogic: 0,
+            order: 1,
+            position: 0,
           },
           {
-            uid: 2, name: '条目B', content: 'BBB', enabled: true,
-            key: [], keysecondary: [], selectiveLogic: 0, order: 2, position: 0,
+            uid: 2,
+            name: '条目B',
+            content: 'BBB',
+            enabled: true,
+            key: [],
+            keysecondary: [],
+            selectiveLogic: 0,
+            order: 2,
+            position: 0,
           },
         ],
       },
@@ -748,20 +859,32 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
     const configs = [mockConfig({ agentId: 'story', worldBookIds: ['wb1'] })];
     setPlaceholderGlobals(worldBooks, configs);
 
-    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](
-      mockCtx(), mockConfig({ agentId: 'story' }), { limit: '1' },
-    );
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](mockCtx(), mockConfig({ agentId: 'story' }), {
+      limit: '1',
+    });
     // Should only contain one entry's content
-    const lines = result.split('\n\n').filter(l => l);
+    const lines = result.split('\n\n').filter((l) => l);
     expect(lines.length).toBe(1);
   });
 
   it('resetPlaceholderGlobals clears globals', () => {
     const worldBooks: WorldBook[] = [
       {
-        id: 'wb1', name: '测试', partition: 'world_setting',
+        id: 'wb1',
+        name: '测试',
+        partition: 'world_setting',
         entries: [
-          { uid: 1, name: 'e1', content: 'content', enabled: true, key: [], keysecondary: [], selectiveLogic: 0, order: 1, position: 0 },
+          {
+            uid: 1,
+            name: 'e1',
+            content: 'content',
+            enabled: true,
+            key: [],
+            keysecondary: [],
+            selectiveLogic: 0,
+            order: 1,
+            position: 0,
+          },
         ],
       },
     ];
@@ -964,7 +1087,7 @@ describe('resolveTemplate for chain placeholders', () => {
     // 1 layer = 2 messages, each truncated to 4 chars
     const lines = result.split('\n');
     expect(lines.length).toBe(2);
-    expect(result).toContain('[user]: msg3');  // should be last 2 msgs
+    expect(result).toContain('[user]: msg3'); // should be last 2 msgs
     expect(result).toContain('[assistant]: msg4');
   });
 
@@ -978,14 +1101,30 @@ describe('resolveTemplate for chain placeholders', () => {
 
   it('resolves MEMORY_ENTRIES with top_k param', () => {
     const memories: MemoryRecord[] = [
-      { id: 'M1', saveId: 's1', createdAt: 1, realTimestamp: 1000,
+      {
+        id: 'M1',
+        saveId: 's1',
+        createdAt: 1,
+        realTimestamp: 1000,
         timeRange: { start: '001-01-01', end: '001-01-02' },
-        content: 'memory 1', hiddenLine: 'h1', keywords: ['k1'],
-        relatedCharacterIds: [], importance: 5 },
-      { id: 'M2', saveId: 's1', createdAt: 2, realTimestamp: 2000,
+        content: 'memory 1',
+        hiddenLine: 'h1',
+        keywords: ['k1'],
+        relatedCharacterIds: [],
+        importance: 5,
+      },
+      {
+        id: 'M2',
+        saveId: 's1',
+        createdAt: 2,
+        realTimestamp: 2000,
         timeRange: { start: '001-01-02', end: '001-01-03' },
-        content: 'memory 2', hiddenLine: 'h2', keywords: ['k2'],
-        relatedCharacterIds: [], importance: 8 },
+        content: 'memory 2',
+        hiddenLine: 'h2',
+        keywords: ['k2'],
+        relatedCharacterIds: [],
+        importance: 8,
+      },
     ];
     const ctx = mockCtx({ memories });
     const config = mockConfig({ agentId: 'memory_recall' });
@@ -1005,7 +1144,9 @@ describe('resolveTemplate for chain placeholders', () => {
   it('injects localParams into ctx for chain placeholders', () => {
     const config = mockConfig({ agentId: 'craft_gen' });
     const ctx = mockCtx();
-    const localParams = { CRAFT_REQUEST: '<craft_request expects="magic sword">forge</craft_request>' };
+    const localParams = {
+      CRAFT_REQUEST: '<craft_request expects="magic sword">forge</craft_request>',
+    };
     // Chain placeholders are injected via resolveTemplate() localParams, not the registry
     const result = resolveTemplate('{{CRAFT_REQUEST}}', 'craft_gen', ctx, config, localParams);
     expect(result).toContain('craft_request');
@@ -1020,7 +1161,9 @@ describe('resolveTemplate for chain placeholders', () => {
     ctx.agentOutputs.set('memory_recall', 'MEMORY_RECALL_OUTPUT');
     const result = resolveTemplate(
       '{{SYS_PROMPT}}\n{{AGENT.MEMORY_RECALL}}\n{{USER_INPUT}}',
-      'story', ctx, config,
+      'story',
+      ctx,
+      config,
     );
     expect(result).toContain('SYSTEM_PROMPT_CONTENT');
     expect(result).toContain('MEMORY_RECALL_OUTPUT');

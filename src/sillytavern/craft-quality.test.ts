@@ -25,7 +25,13 @@ import {
 
 // ========== Helpers ==========
 
-function mat(name: string, quality: QualityLevel, qty = 1, regulated = false, licensed = false): CraftMaterial {
+function mat(
+  name: string,
+  quality: QualityLevel,
+  qty = 1,
+  regulated = false,
+  licensed = false,
+): CraftMaterial {
   return {
     itemId: `id_${name}`,
     itemName: name,
@@ -278,28 +284,19 @@ describe('checkRegulatedLicenses', () => {
 
 describe('checkResourceSufficiency', () => {
   it('资源充足应通过', () => {
-    const result = checkResourceSufficiency(
-      { hp: 100, mp: 50, sp: 30 },
-      { hp: 10, mp: 5, sp: 3 },
-    );
+    const result = checkResourceSufficiency({ hp: 100, mp: 50, sp: 30 }, { hp: 10, mp: 5, sp: 3 });
     expect(result.sufficient).toBe(true);
     expect(result.shortage).toHaveLength(0);
   });
 
   it('HP不足应报告', () => {
-    const result = checkResourceSufficiency(
-      { hp: 5, mp: 50, sp: 30 },
-      { hp: 10, mp: 5, sp: 3 },
-    );
+    const result = checkResourceSufficiency({ hp: 5, mp: 50, sp: 30 }, { hp: 10, mp: 5, sp: 3 });
     expect(result.sufficient).toBe(false);
-    expect(result.shortage.some(s => s.includes('HP'))).toBe(true);
+    expect(result.shortage.some((s) => s.includes('HP'))).toBe(true);
   });
 
   it('多种资源不足应全部报告', () => {
-    const result = checkResourceSufficiency(
-      { hp: 0, mp: 0, sp: 30 },
-      { hp: 10, mp: 5, sp: 3 },
-    );
+    const result = checkResourceSufficiency({ hp: 0, mp: 0, sp: 30 }, { hp: 10, mp: 5, sp: 3 });
     expect(result.sufficient).toBe(false);
     expect(result.shortage.length).toBeGreaterThanOrEqual(2);
   });

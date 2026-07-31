@@ -114,7 +114,7 @@ export class AgentClient {
    */
   private ensureUserMessage(messages: ChatRequest['messages']): ChatRequest['messages'] {
     if (messages.length === 0) return messages;
-    const hasUser = messages.some(m => m.role === 'user');
+    const hasUser = messages.some((m) => m.role === 'user');
     if (hasUser) return messages;
     return [...messages, { role: 'user', content: '' }];
   }
@@ -135,7 +135,7 @@ export class AgentClient {
       } catch (e) {
         lastError = e as Error;
         if (attempt < this.maxRetries) {
-          await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
+          await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
         }
       }
     }
@@ -182,7 +182,7 @@ export class AgentClient {
     let totalCacheHitTokens = 0;
     let totalCacheMissTokens = 0;
     let totalCompletionTokens = 0;
-    const allReasoning: string[] = [];  // 跨轮次收集 reasoning
+    const allReasoning: string[] = []; // 跨轮次收集 reasoning
 
     for (let round = 0; round < maxRounds; round++) {
       const roundRequest: ChatRequest = {
@@ -322,7 +322,10 @@ export class AgentClient {
     // ollama.com 等云端 API 首字节延迟可能 >120s）。收到首个 chunk 后清除超时
     // （数据在流动说明请求活着，不应因总时长超限而中断长文本生成）
     const streamTimeout = this.timeout * 3;
-    const timeoutId = setTimeout(() => { abortedByTimeout = true; controller.abort(); }, streamTimeout);
+    const timeoutId = setTimeout(() => {
+      abortedByTimeout = true;
+      controller.abort();
+    }, streamTimeout);
 
     const onExternalAbort = () => controller.abort();
     if (signal?.aborted) {
@@ -337,12 +340,12 @@ export class AgentClient {
         model,
         messages: this.ensureUserMessage(request.messages),
         temperature: request.temperature ?? 0.7,
-        max_tokens: request.maxTokens ?? 16384,  // 真机修(2026-07-17): 侧链 request 不带 maxTokens，2048 兜底会截断 char_gen 思考链+XML → 静默解析失败
+        max_tokens: request.maxTokens ?? 16384, // 真机修(2026-07-17): 侧链 request 不带 maxTokens，2048 兜底会截断 char_gen 思考链+XML → 静默解析失败
         top_p: request.topP ?? 1.0,
         frequency_penalty: request.frequencyPenalty ?? 0,
         presence_penalty: request.presencePenalty ?? 0,
         stream: true,
-        stream_options: { include_usage: true },  // 🆕 让流式末尾 chunk 返回 usage（DeepSeek 命中/未命中/输出 token），否则流式永远拿不到 usage
+        stream_options: { include_usage: true }, // 🆕 让流式末尾 chunk 返回 usage（DeepSeek 命中/未命中/输出 token），否则流式永远拿不到 usage
         stop: request.stop,
         user_id: this.userId,
       };
@@ -373,8 +376,13 @@ export class AgentClient {
 
       if (!res.ok) {
         const errorText = await res.text().catch(() => '');
-        console.error('[AgentClient] API error — status:', res.status, 'body:', errorText.slice(0, 500))
-        console.error('[AgentClient] Request model:', body.model, 'has model:', !!body.model)
+        console.error(
+          '[AgentClient] API error — status:',
+          res.status,
+          'body:',
+          errorText.slice(0, 500),
+        );
+        console.error('[AgentClient] Request model:', body.model, 'has model:', !!body.model);
         throw new Error(`HTTP ${res.status}: ${errorText.slice(0, 200)}`);
       }
 
@@ -497,7 +505,11 @@ export class AgentClient {
                 // Check finish_reason
                 if (finishReason !== null && finishReason !== undefined) {
                   // Build final tool calls array
-                  const toolCalls: Array<{ id: string; name: string; arguments: Record<string, any> }> = [];
+                  const toolCalls: Array<{
+                    id: string;
+                    name: string;
+                    arguments: Record<string, any>;
+                  }> = [];
                   for (const [, acc] of toolCallAccum) {
                     let parsedArgs: Record<string, any> = {};
                     try {
@@ -537,7 +549,9 @@ export class AgentClient {
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
         if (abortedByTimeout) {
-          callbacks.onError(`请求超时（${Math.round(streamTimeout / 1000)}秒内未收到响应），请重试或减少上下文注入`);
+          callbacks.onError(
+            `请求超时（${Math.round(streamTimeout / 1000)}秒内未收到响应），请重试或减少上下文注入`,
+          );
         } else {
           callbacks.onError('Request aborted');
         }
@@ -553,7 +567,10 @@ export class AgentClient {
   private async callOnce(request: ChatRequest, signal?: AbortSignal): Promise<InternalAgentResult> {
     const controller = new AbortController();
     let abortedByTimeout = false;
-    const timeoutId = setTimeout(() => { abortedByTimeout = true; controller.abort(); }, this.timeout);
+    const timeoutId = setTimeout(() => {
+      abortedByTimeout = true;
+      controller.abort();
+    }, this.timeout);
 
     const onExternalAbort = () => controller.abort();
     if (signal?.aborted) {
@@ -568,7 +585,7 @@ export class AgentClient {
         model,
         messages: this.ensureUserMessage(request.messages),
         temperature: request.temperature ?? 0.7,
-        max_tokens: request.maxTokens ?? 16384,  // 真机修(2026-07-17): 侧链 request 不带 maxTokens，2048 兜底会截断 char_gen 思考链+XML → 静默解析失败
+        max_tokens: request.maxTokens ?? 16384, // 真机修(2026-07-17): 侧链 request 不带 maxTokens，2048 兜底会截断 char_gen 思考链+XML → 静默解析失败
         top_p: request.topP ?? 1.0,
         frequency_penalty: request.frequencyPenalty ?? 0,
         presence_penalty: request.presencePenalty ?? 0,
@@ -612,8 +629,13 @@ export class AgentClient {
 
       if (!res.ok) {
         const errorText = await res.text().catch(() => '');
-        console.error('[AgentClient] API error — status:', res.status, 'body:', errorText.slice(0, 500))
-        console.error('[AgentClient] Request model:', body.model, 'has model:', !!body.model)
+        console.error(
+          '[AgentClient] API error — status:',
+          res.status,
+          'body:',
+          errorText.slice(0, 500),
+        );
+        console.error('[AgentClient] Request model:', body.model, 'has model:', !!body.model);
         throw new Error(`HTTP ${res.status}: ${errorText.slice(0, 200)}`);
       }
 
@@ -655,7 +677,9 @@ export class AgentClient {
       // "The user aborted a request." 直接冒泡 → 用户看不懂。翻译成友好信息（区分超时/外部取消）。
       if (e instanceof DOMException && e.name === 'AbortError') {
         if (abortedByTimeout) {
-          throw new Error(`请求超时（${Math.round(this.timeout / 1000)}秒内未收到完整响应），请重试或减少上下文注入`);
+          throw new Error(
+            `请求超时（${Math.round(this.timeout / 1000)}秒内未收到完整响应），请重试或减少上下文注入`,
+          );
         }
         throw new Error('请求已取消');
       }

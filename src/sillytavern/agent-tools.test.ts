@@ -44,9 +44,12 @@ function makeCharacter(partial: Partial<CharacterState>): CharacterState {
     tierName: 'T1',
     level: 1,
     attributes: { str: 10, dex: 10, con: 10, int: 10, spi: 10 },
-    hp: 100, maxHp: 100,
-    mp: 50, maxMp: 50,
-    sp: 50, maxSp: 50,
+    hp: 100,
+    maxHp: 100,
+    mp: 50,
+    maxMp: 50,
+    sp: 50,
+    maxSp: 50,
     location: '奥古斯提姆帝国·王都',
     inventory: [],
     statusEffects: [],
@@ -76,13 +79,29 @@ describe('AGENT_TOOL_MAP["combat"] 白名单', () => {
     const combatTools = AGENT_TOOL_MAP.combat;
     // 13 个新建工具
     const newTools = [
-      'combat_start', 'combat_attack', 'combat_use_skill', 'combat_use_item',
-      'combat_block', 'combat_move', 'combat_focus', 'combat_flee', 'combat_end',
-      'status_apply', 'status_remove', 'status_query',
+      'combat_start',
+      'combat_attack',
+      'combat_use_skill',
+      'combat_use_item',
+      'combat_block',
+      'combat_move',
+      'combat_focus',
+      'combat_flee',
+      'combat_end',
+      'status_apply',
+      'status_remove',
+      'status_query',
       'get_combat_state',
     ];
     // 7 个复用工具
-    const reuseTools = ['roll_d20', 'roll_d100', 'roll_dice', 'get_character', 'get_hp_percent', 'get_inventory'];
+    const reuseTools = [
+      'roll_d20',
+      'roll_d100',
+      'roll_dice',
+      'get_character',
+      'get_hp_percent',
+      'get_inventory',
+    ];
     for (const name of [...newTools, ...reuseTools]) {
       expect(combatTools, `白名单缺工具: ${name}`).toContain(name);
     }
@@ -105,7 +124,7 @@ describe('AGENT_TOOL_MAP["combat"] 白名单', () => {
 describe('getToolsForAgent("combat")', () => {
   it('返回的工具名集合 = 白名单', () => {
     const tools = getToolsForAgent('combat');
-    const names = tools.map(t => t.function.name);
+    const names = tools.map((t) => t.function.name);
     expect(names.sort()).toEqual([...AGENT_TOOL_MAP.combat].sort());
   });
 
@@ -123,9 +142,18 @@ describe('getToolsForAgent("combat")', () => {
 
 describe('新 combat/status 工具 schema 结构', () => {
   const newToolNames = [
-    'combat_start', 'combat_attack', 'combat_use_skill', 'combat_use_item',
-    'combat_block', 'combat_move', 'combat_focus', 'combat_flee', 'combat_end',
-    'status_apply', 'status_remove', 'status_query',
+    'combat_start',
+    'combat_attack',
+    'combat_use_skill',
+    'combat_use_item',
+    'combat_block',
+    'combat_move',
+    'combat_focus',
+    'combat_flee',
+    'combat_end',
+    'status_apply',
+    'status_remove',
+    'status_query',
     'get_combat_state',
   ];
 
@@ -198,10 +226,18 @@ describe('新 combat/status 工具 schema 结构', () => {
 
 describe('executeToolCall combat 占位分发', () => {
   const placeholderTools = [
-    'combat_start', 'combat_attack', 'combat_use_skill', 'combat_use_item',
-    'combat_block', 'combat_move', 'combat_focus', 'combat_flee', 'combat_end',
+    'combat_start',
+    'combat_attack',
+    'combat_use_skill',
+    'combat_use_item',
+    'combat_block',
+    'combat_move',
+    'combat_focus',
+    'combat_flee',
+    'combat_end',
     'get_combat_state',
-    'status_apply', 'status_remove',
+    'status_apply',
+    'status_remove',
   ];
   const ctx = makeCtx();
 
@@ -242,8 +278,27 @@ describe('executeToolCall status_query（接真函数）', () => {
     const char = makeCharacter({
       name: '勇者',
       statusEffects: [
-        { name: '流血', description: 'd', category: '减益', stacks: 2, remainingTime: 3, timeUnit: '回合', source: 's', effects: {}, sourceKey: '剑' } as any,
-        { name: '专注', description: 'd', category: '增益', stacks: 1, remainingTime: null, timeUnit: '回合', source: 's', effects: {} } as any,
+        {
+          name: '流血',
+          description: 'd',
+          category: '减益',
+          stacks: 2,
+          remainingTime: 3,
+          timeUnit: '回合',
+          source: 's',
+          effects: {},
+          sourceKey: '剑',
+        } as any,
+        {
+          name: '专注',
+          description: 'd',
+          category: '增益',
+          stacks: 1,
+          remainingTime: null,
+          timeUnit: '回合',
+          source: 's',
+          effects: {},
+        } as any,
       ],
     });
     const ctx = makeCtx([char]);
@@ -257,9 +312,38 @@ describe('executeToolCall status_query（接真函数）', () => {
     const char = makeCharacter({
       name: '战士',
       statusEffects: [
-        { name: '流血', description: 'd', category: '减益', stacks: 2, remainingTime: 3, timeUnit: '回合', source: 's', effects: {}, sourceKey: '剑A' } as any,
-        { name: '流血', description: 'd', category: '减益', stacks: 3, remainingTime: 3, timeUnit: '回合', source: 's', effects: {}, sourceKey: '剑B' } as any,
-        { name: '中毒', description: 'd', category: '减益', stacks: 1, remainingTime: 3, timeUnit: '回合', source: 's', effects: {} } as any,
+        {
+          name: '流血',
+          description: 'd',
+          category: '减益',
+          stacks: 2,
+          remainingTime: 3,
+          timeUnit: '回合',
+          source: 's',
+          effects: {},
+          sourceKey: '剑A',
+        } as any,
+        {
+          name: '流血',
+          description: 'd',
+          category: '减益',
+          stacks: 3,
+          remainingTime: 3,
+          timeUnit: '回合',
+          source: 's',
+          effects: {},
+          sourceKey: '剑B',
+        } as any,
+        {
+          name: '中毒',
+          description: 'd',
+          category: '减益',
+          stacks: 1,
+          remainingTime: 3,
+          timeUnit: '回合',
+          source: 's',
+          effects: {},
+        } as any,
       ],
     });
     const ctx = makeCtx([char]);
@@ -273,11 +357,25 @@ describe('executeToolCall status_query（接真函数）', () => {
     const char = makeCharacter({
       name: '法师',
       statusEffects: [
-        { name: '灼烧', description: 'd', category: '减益', stacks: 1, remainingTime: 3, timeUnit: '回合', source: 's', effects: {}, sourceKey: '火杖' } as any,
+        {
+          name: '灼烧',
+          description: 'd',
+          category: '减益',
+          stacks: 1,
+          remainingTime: 3,
+          timeUnit: '回合',
+          source: 's',
+          effects: {},
+          sourceKey: '火杖',
+        } as any,
       ],
     });
     const ctx = makeCtx([char]);
-    const r = await executeToolCall('status_query', { target: '法师', buffIdOrName: '火杖.灼烧' }, ctx);
+    const r = await executeToolCall(
+      'status_query',
+      { target: '法师', buffIdOrName: '火杖.灼烧' },
+      ctx,
+    );
     expect(r.has).toBe(true);
     expect(r.stacks).toBe(1);
     expect(r.matched).toHaveLength(1);
@@ -328,11 +426,7 @@ describe('复用工具回归保护', () => {
 // 6. executeCombatToolCall 独立通道（B 方案, M4 任务 5.2）
 // ═══════════════════════════════════════════════════════════
 
-import type {
-  CombatState,
-  CombatParticipant,
-  StatusEffect,
-} from './types';
+import type { CombatState, CombatParticipant, StatusEffect } from './types';
 import type { CombatToolContext } from './agent-tools';
 
 // ── combat 专用夹具 ──
@@ -344,14 +438,25 @@ function makeCombatParticipant(o: Partial<CombatParticipant> = {}): CombatPartic
     tier: 3,
     level: 10,
     attributes: { str: 14, dex: 13, con: 12, int: 10, spi: 11 },
-    hp: 1000, maxHp: 1000,
-    mp: 50, maxMp: 50, sp: 50, maxSp: 50,
-    defense: 100, dr: 0, penetration: 0,
-    hitBonus: 3, dodgeBonus: 2,
-    speedModifiers: [], fixedInitiativeBonus: 0,
-    attacksRemaining: 1, actionsRemaining: 1,
+    hp: 1000,
+    maxHp: 1000,
+    mp: 50,
+    maxMp: 50,
+    sp: 50,
+    maxSp: 50,
+    defense: 100,
+    dr: 0,
+    penetration: 0,
+    hitBonus: 3,
+    dodgeBonus: 2,
+    speedModifiers: [],
+    fixedInitiativeBonus: 0,
+    attacksRemaining: 1,
+    actionsRemaining: 1,
     statusEffects: [],
-    weaponAtk: 25, side: 'ally', canAct: true,
+    weaponAtk: 25,
+    side: 'ally',
+    canAct: true,
     ...o,
   };
 }
@@ -363,7 +468,14 @@ function makeCombatState(o: Partial<CombatState> = {}): CombatState {
     round: 1,
     participants: [
       makeCombatParticipant({ characterId: 'ally1', name: '勇者', side: 'ally', tier: 3 }),
-      makeCombatParticipant({ characterId: 'enemy1', name: '哥布林', side: 'enemy', tier: 1, hp: 2000, maxHp: 2000 }),
+      makeCombatParticipant({
+        characterId: 'enemy1',
+        name: '哥布林',
+        side: 'enemy',
+        tier: 1,
+        hp: 2000,
+        maxHp: 2000,
+      }),
     ],
     turnOrder: [],
     currentTurnIndex: 0,
@@ -419,7 +531,10 @@ describe('executeCombatToolCall — combat 工具独立通道', () => {
     expect(cs.turnOrder.length).toBe(2);
     // 先攻排序：勇者 d20=15 应排在哥布林 d20=8 之前
     expect(cs.turnOrder[0].characterId).toBe('ally1');
-    expect(cs.participants.map((p: CombatParticipant) => p.name).sort()).toEqual(['勇者', '哥布林']);
+    expect(cs.participants.map((p: CombatParticipant) => p.name).sort()).toEqual([
+      '勇者',
+      '哥布林',
+    ]);
     // _combatState 是原始 CombatState，调用方据此更新 ctx.combat
     expect(cs._combatState).toBeDefined();
     expect(cs._combatState.combatId).toBe(cs.combatId);
@@ -432,7 +547,13 @@ describe('executeCombatToolCall — combat 工具独立通道', () => {
 
     const r = await executeCombatToolCall(
       'combat_start',
-      { combatType: '标准', allies: ['不存在的角色'], enemies: ['哥布林'], environment: 'x', d20Rolls: [10] },
+      {
+        combatType: '标准',
+        allies: ['不存在的角色'],
+        enemies: ['哥布林'],
+        environment: 'x',
+        d20Rolls: [10],
+      },
       ctx,
     );
 
@@ -447,9 +568,9 @@ describe('executeCombatToolCall — combat 工具独立通道', () => {
     const r = await executeCombatToolCall(
       'combat_attack',
       {
-        attackerId: '勇者',      // 按名寻址
-        defenderId: '哥布林',    // 按名寻址
-        d20Attack: 20,           // 暴击命中
+        attackerId: '勇者', // 按名寻址
+        defenderId: '哥布林', // 按名寻址
+        d20Attack: 20, // 暴击命中
         skillName: '斩击',
         skillPower: 30,
         weaponName: '长剑',
@@ -462,7 +583,7 @@ describe('executeCombatToolCall — combat 工具独立通道', () => {
     const ar = r.result;
     // CombatActionResult 形状
     expect(ar.damage.finalDamage).toBeGreaterThan(0);
-    expect(ar.finalHp).toBeLessThan(2000);     // 守方 HP 下降
+    expect(ar.finalHp).toBeLessThan(2000); // 守方 HP 下降
     expect(ar.isDead).toBe(false);
     expect(Array.isArray(ar.patches)).toBe(true);
     expect(ar.patches.some((p: any) => p.op === 'delta_hp')).toBe(true);
@@ -490,7 +611,7 @@ describe('executeCombatToolCall — combat 工具独立通道', () => {
 
     const r = await executeCombatToolCall(
       'combat_flee',
-      { characterId: '勇者', d20Roll: 20 },  // 高骰值利于逃脱
+      { characterId: '勇者', d20Roll: 20 }, // 高骰值利于逃脱
       ctx,
     );
 
@@ -629,12 +750,12 @@ describe('executeCombatToolCall — status 类工具', () => {
 
     expect(r.error).toBeUndefined();
     expect(r.result.patches.some((p: any) => p.op === 'remove_status_effect')).toBe(true);
-    expect(r.result.updated.length).toBe(0);  // 移除后为空
+    expect(r.result.updated.length).toBe(0); // 移除后为空
   });
 
   it('status_apply: target 角色不在战斗 participants → 报错（按名寻址失败）', async () => {
     const bus = new EventBus();
-    const combat = makeCombatState();  // participants 只有 勇者/哥布林
+    const combat = makeCombatState(); // participants 只有 勇者/哥布林
     const char = makeCharacter({ id: 'bystander', name: '路人' });
     const ctx = makeCombatToolCtx([char], combat, bus);
 
@@ -653,10 +774,18 @@ describe('executeCombatToolCall — 占位工具在新通道不再 throw', () =>
   // 旧 executeToolCall 通道对 combat_* 仍 throw（引导到新通道）；
   // 新 executeCombatToolCall 通道对全部 12 个工具正常分发，不抛「PipelineContext」错。
   const combatTools = [
-    'combat_start', 'combat_attack', 'combat_use_skill', 'combat_use_item',
-    'combat_block', 'combat_move', 'combat_focus', 'combat_flee', 'combat_end',
+    'combat_start',
+    'combat_attack',
+    'combat_use_skill',
+    'combat_use_item',
+    'combat_block',
+    'combat_move',
+    'combat_focus',
+    'combat_flee',
+    'combat_end',
     'get_combat_state',
-    'status_apply', 'status_remove',
+    'status_apply',
+    'status_remove',
   ];
 
   const bus = new EventBus();

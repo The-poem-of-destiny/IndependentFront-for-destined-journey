@@ -14,8 +14,13 @@
  */
 
 import type {
-  VisibilityLevel, ZoneId, ZoneVisibilityMatrix,
-  VariableZone, ZoneConfig, AgentContext, CharacterState,
+  VisibilityLevel,
+  ZoneId,
+  ZoneVisibilityMatrix,
+  VariableZone,
+  ZoneConfig,
+  AgentContext,
+  CharacterState,
 } from './types';
 
 // ═══════════════════════════════════════════════════════════
@@ -23,69 +28,160 @@ import type {
 // ═══════════════════════════════════════════════════════════
 
 export const ZONE_IDS: ZoneId[] = [
-  'memory', 'npc', 'world', 'quest', 'craft', 'combat', 'outline', 'variable',
+  'memory',
+  'npc',
+  'world',
+  'quest',
+  'craft',
+  'combat',
+  'outline',
+  'variable',
 ];
 
 /** 11 Agent + 2 v3 兼容 stub 的完整可见性矩阵 */
 export const VISIBILITY_MATRIX: Record<string, ZoneVisibilityMatrix> = {
   memory_recall: {
-    memory: 'FULL', npc: 'KEYS', world: 'KEYS', quest: 'KEYS',
-    craft: 'NONE', combat: 'NONE', outline: 'NONE', variable: 'NONE',
+    memory: 'FULL',
+    npc: 'KEYS',
+    world: 'KEYS',
+    quest: 'KEYS',
+    craft: 'NONE',
+    combat: 'NONE',
+    outline: 'NONE',
+    variable: 'NONE',
   },
   plot_pre_check: {
-    memory: 'SUMMARY', npc: 'FULL', world: 'FULL', quest: 'FULL',
-    craft: 'NONE', combat: 'NONE', outline: 'FULL', variable: 'KEYS',
+    memory: 'SUMMARY',
+    npc: 'FULL',
+    world: 'FULL',
+    quest: 'FULL',
+    craft: 'NONE',
+    combat: 'NONE',
+    outline: 'FULL',
+    variable: 'KEYS',
   },
   story: {
-    memory: 'SUMMARY', npc: 'NARRATIVE', world: 'FULL', quest: 'SUMMARY',
-    craft: 'SUMMARY', combat: 'FULL', outline: 'SUMMARY', variable: 'NONE',
+    memory: 'SUMMARY',
+    npc: 'NARRATIVE',
+    world: 'FULL',
+    quest: 'SUMMARY',
+    craft: 'SUMMARY',
+    combat: 'FULL',
+    outline: 'SUMMARY',
+    variable: 'NONE',
   },
   request_dispatcher: {
-    memory: 'NONE', npc: 'KEYS', world: 'FULL', quest: 'NONE',
-    craft: 'KEYS', combat: 'KEYS', outline: 'NONE', variable: 'FULL',
+    memory: 'NONE',
+    npc: 'KEYS',
+    world: 'FULL',
+    quest: 'NONE',
+    craft: 'KEYS',
+    combat: 'KEYS',
+    outline: 'NONE',
+    variable: 'FULL',
   },
   vars_update: {
-    memory: 'NONE', npc: 'FULL', world: 'FULL', quest: 'NONE',
-    craft: 'KEYS', combat: 'FULL', outline: 'NONE', variable: 'NONE',
+    memory: 'NONE',
+    npc: 'FULL',
+    world: 'FULL',
+    quest: 'NONE',
+    craft: 'KEYS',
+    combat: 'FULL',
+    outline: 'NONE',
+    variable: 'NONE',
   },
   memory_summary: {
-    memory: 'SUMMARY', npc: 'KEYS', world: 'SUMMARY', quest: 'KEYS',
-    craft: 'NONE', combat: 'KEYS', outline: 'NONE', variable: 'NONE',
+    memory: 'SUMMARY',
+    npc: 'KEYS',
+    world: 'SUMMARY',
+    quest: 'KEYS',
+    craft: 'NONE',
+    combat: 'KEYS',
+    outline: 'NONE',
+    variable: 'NONE',
   },
   plot_post_check: {
-    memory: 'SUMMARY', npc: 'SUMMARY', world: 'FULL', quest: 'FULL',
-    craft: 'NONE', combat: 'SUMMARY', outline: 'FULL', variable: 'NONE',
+    memory: 'SUMMARY',
+    npc: 'SUMMARY',
+    world: 'FULL',
+    quest: 'FULL',
+    craft: 'NONE',
+    combat: 'SUMMARY',
+    outline: 'FULL',
+    variable: 'NONE',
   },
   plot_outline: {
-    memory: 'NONE', npc: 'FULL', world: 'FULL', quest: 'KEYS',
-    craft: 'NONE', combat: 'NONE', outline: 'FULL', variable: 'NONE',
+    memory: 'NONE',
+    npc: 'FULL',
+    world: 'FULL',
+    quest: 'KEYS',
+    craft: 'NONE',
+    combat: 'NONE',
+    outline: 'FULL',
+    variable: 'NONE',
   },
   craft_gen: {
-    memory: 'NONE', npc: 'SUMMARY', world: 'FULL', quest: 'NONE',
-    craft: 'FULL', combat: 'NONE', outline: 'NONE', variable: 'KEYS',
+    memory: 'NONE',
+    npc: 'SUMMARY',
+    world: 'FULL',
+    quest: 'NONE',
+    craft: 'FULL',
+    combat: 'NONE',
+    outline: 'NONE',
+    variable: 'KEYS',
   },
   char_gen: {
-    memory: 'NONE', npc: 'KEYS', world: 'FULL', quest: 'NONE',
-    craft: 'NONE', combat: 'NONE', outline: 'NONE', variable: 'SUMMARY',
+    memory: 'NONE',
+    npc: 'KEYS',
+    world: 'FULL',
+    quest: 'NONE',
+    craft: 'NONE',
+    combat: 'NONE',
+    outline: 'NONE',
+    variable: 'SUMMARY',
   },
   item_gen: {
-    memory: 'NONE', npc: 'KEYS', world: 'FULL', quest: 'NONE',
-    craft: 'NONE', combat: 'NONE', outline: 'NONE', variable: 'KEYS',
+    memory: 'NONE',
+    npc: 'KEYS',
+    world: 'FULL',
+    quest: 'NONE',
+    craft: 'NONE',
+    combat: 'NONE',
+    outline: 'NONE',
+    variable: 'KEYS',
   },
   // v3 兼容 stub — 最小可见性
   plot_check: {
-    memory: 'NONE', npc: 'NONE', world: 'NONE', quest: 'NONE',
-    craft: 'NONE', combat: 'NONE', outline: 'NONE', variable: 'NONE',
+    memory: 'NONE',
+    npc: 'NONE',
+    world: 'NONE',
+    quest: 'NONE',
+    craft: 'NONE',
+    combat: 'NONE',
+    outline: 'NONE',
+    variable: 'NONE',
   },
   plot_correct: {
-    memory: 'NONE', npc: 'NONE', world: 'NONE', quest: 'NONE',
-    craft: 'NONE', combat: 'NONE', outline: 'NONE', variable: 'NONE',
+    memory: 'NONE',
+    npc: 'NONE',
+    world: 'NONE',
+    quest: 'NONE',
+    craft: 'NONE',
+    combat: 'NONE',
+    outline: 'NONE',
+    variable: 'NONE',
   },
 };
 
 const DEFAULT_VISIBILITY: ZoneVisibilityMatrix = {
-  memory: 'NONE', npc: 'NONE', world: 'NONE', quest: 'NONE',
-  craft: 'NONE', combat: 'NONE', outline: 'NONE', variable: 'NONE',
+  memory: 'NONE',
+  npc: 'NONE',
+  world: 'NONE',
+  quest: 'NONE',
+  craft: 'NONE',
+  combat: 'NONE',
+  outline: 'NONE',
+  variable: 'NONE',
 };
 
 /** 获取指定 Agent 的 Zone 可见性矩阵 */
@@ -106,7 +202,7 @@ export function buildZoneContext(ctx: AgentContext): Record<ZoneId, VariableZone
     config: { limit: 50, injectAs: 'list' },
     visibility: [],
     content: {
-      entries: (ctx.memories ?? []).map(m => ({
+      entries: (ctx.memories ?? []).map((m) => ({
         id: m.id,
         content: m.content,
         hiddenLine: m.hiddenLine,
@@ -129,9 +225,22 @@ export function buildZoneContext(ctx: AgentContext): Record<ZoneId, VariableZone
 
   // --- world zone ---
   const worldKeys = new Set([
-    '时间', '位置', '天气', '季节', '月相', '纪元',
-    'time', 'location', 'weather', 'season', 'moonPhase', 'era',
-    'timeOfDay', 'currentRegion', 'currentFaction', 'dangerLevel',
+    '时间',
+    '位置',
+    '天气',
+    '季节',
+    '月相',
+    '纪元',
+    'time',
+    'location',
+    'weather',
+    'season',
+    'moonPhase',
+    'era',
+    'timeOfDay',
+    'currentRegion',
+    'currentFaction',
+    'dangerLevel',
   ]);
   const worldContent: Record<string, any> = {};
   for (const k of Object.keys(ctx.variables ?? {})) {
@@ -214,12 +323,18 @@ export function filterZoneContent(
   ctx?: AgentContext,
 ): string | null {
   switch (visibility) {
-    case 'NONE': return null;
-    case 'FULL': return formatZoneFull(zoneId, content);
-    case 'NARRATIVE': return formatZoneNarrative(zoneId, content, ctx);
-    case 'SUMMARY': return formatZoneSummary(zoneId, content);
-    case 'KEYS': return formatZoneKeys(zoneId, content);
-    default: return null;
+    case 'NONE':
+      return null;
+    case 'FULL':
+      return formatZoneFull(zoneId, content);
+    case 'NARRATIVE':
+      return formatZoneNarrative(zoneId, content, ctx);
+    case 'SUMMARY':
+      return formatZoneSummary(zoneId, content);
+    case 'KEYS':
+      return formatZoneKeys(zoneId, content);
+    default:
+      return null;
   }
 }
 
@@ -278,14 +393,16 @@ function formatZoneNarrative(
 /** 格式化单个角色为 NARRATIVE 视图 */
 function formatCharacterNarrative(char: CharacterState): string {
   const cf = char.customFields ?? {};
-  const typeLabel = char.type === 'player' ? '你' : (char.type === 'monster' ? '敌人' : char.name);
+  const typeLabel = char.type === 'player' ? '你' : char.type === 'monster' ? '敌人' : char.name;
 
   const lines: string[] = [];
 
   // 基础信息行
   const tierLabel = `T${char.tier} ${char.tierName || ''}`;
   const occupationStr = char.occupation?.length ? ` · 职业: ${char.occupation.join(', ')}` : '';
-  const identityStr = char.identity?.length ? `  身份: ${char.identity.join(', ')}${occupationStr}` : '';
+  const identityStr = char.identity?.length
+    ? `  身份: ${char.identity.join(', ')}${occupationStr}`
+    : '';
   // M6 T1: 读方切正式字段（规范 §2.1）；customFields 兜底 Task 2 停写后删
   const background = char.background ?? cf.background;
   const personality = char.personality ?? cf.personality;
@@ -303,34 +420,48 @@ function formatCharacterNarrative(char: CharacterState): string {
 
   // 五维
   const attr = char.attributes;
-  lines.push(`  五维: 力量${attr.str} 敏捷${attr.dex} 体质${attr.con} 智力${attr.int} 精神${attr.spi}`);
+  lines.push(
+    `  五维: 力量${attr.str} 敏捷${attr.dex} 体质${attr.con} 智力${attr.int} 精神${attr.spi}`,
+  );
 
   // 资源
-  lines.push(`  HP: ${char.hp}/${char.maxHp}  MP: ${char.mp}/${char.maxMp}  SP: ${char.sp}/${char.maxSp}`);
+  lines.push(
+    `  HP: ${char.hp}/${char.maxHp}  MP: ${char.mp}/${char.maxMp}  SP: ${char.sp}/${char.maxSp}`,
+  );
 
   // 位置 & 状态
   const statusStr = char.statusEffects?.length
-    ? ` · 状态效果: ${char.statusEffects.map(s => {
-        const effDesc = s.effectDescriptions
-          ? ` [${Object.entries(s.effectDescriptions).map(([k, v]) => `${k}: ${v}`).join(', ')}]`
-          : '';
-        return `${s.name} — ${s.description || ''}${effDesc}${s.remainingTime != null ? ` (剩余${s.remainingTime}${s.timeUnit || '分钟'})` : ''}`;
-      }).join('; ')}`
+    ? ` · 状态效果: ${char.statusEffects
+        .map((s) => {
+          const effDesc = s.effectDescriptions
+            ? ` [${Object.entries(s.effectDescriptions)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join(', ')}]`
+            : '';
+          return `${s.name} — ${s.description || ''}${effDesc}${s.remainingTime != null ? ` (剩余${s.remainingTime}${s.timeUnit || '分钟'})` : ''}`;
+        })
+        .join('; ')}`
     : ' · 状态效果: 无';
-  lines.push(`  位置: ${char.location || '未知'} · 状态: ${char.currentAction || '待机中'}${statusStr}`);
+  lines.push(
+    `  位置: ${char.location || '未知'} · 状态: ${char.currentAction || '待机中'}${statusStr}`,
+  );
 
   // 金钱
   if (char.money != null) lines.push(`  金钱: ${char.money}G`);
 
   // 装备 — 剥离 stats 数值，保留 effects 描述
   // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
-  const equippedItems = (char.inventory ?? []).filter(i => i.equippedSlot);
+  const equippedItems = (char.inventory ?? []).filter((i) => i.equippedSlot);
   if (equippedItems.length) {
     lines.push('');
     lines.push('  装备:');
     for (const eq of equippedItems) {
       const desc = eq.description ? ` — ${eq.description}` : '';
-      const effs = eq.effects ? ` [${Object.entries(eq.effects).map(([k, v]) => `${k}: ${v}`).join(', ')}]` : '';
+      const effs = eq.effects
+        ? ` [${Object.entries(eq.effects)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(', ')}]`
+        : '';
       lines.push(`    [${eq.equippedSlot}] ${eq.name}${desc}${effs}`);
       // 不显示 eq.stats (数值设计)
       // 不显示 eq.scripts (JS 代码)
@@ -343,7 +474,11 @@ function formatCharacterNarrative(char: CharacterState): string {
     lines.push('  技能:');
     for (const sk of char.skills) {
       const typeLabel = sk.type === 'active' ? '主动' : '被动';
-      const effs = sk.effects ? ` [${Object.entries(sk.effects).map(([k, v]) => `${k}: ${v}`).join(', ')}]` : '';
+      const effs = sk.effects
+        ? ` [${Object.entries(sk.effects)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(', ')}]`
+        : '';
       lines.push(`    [${typeLabel}] ${sk.name} — ${sk.description || ''}${effs}`);
       // 不显示 sk.cost (SP消耗:15)
       // 不显示 sk.cooldown (冷却:3回合)
@@ -353,11 +488,15 @@ function formatCharacterNarrative(char: CharacterState): string {
 
   // 背包 — 剥离 stats，保留 effects 描述
   if (char.inventory?.length) {
-    const items = char.inventory.map(item => {
+    const items = char.inventory.map((item) => {
       const rarityStr = item.rarity ? `, ${item.rarity}` : '';
       const typeStr = item.type ? ` (${item.type}${rarityStr})` : '';
       const desc = item.description ? ` — ${item.description}` : '';
-      const effs = item.effects ? ` [${Object.entries(item.effects).map(([k, v]) => `${k}: ${v}`).join(', ')}]` : '';
+      const effs = item.effects
+        ? ` [${Object.entries(item.effects)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(', ')}]`
+        : '';
       return `    ${item.name} ×${item.quantity}${typeStr}${desc}${effs}`;
     });
     lines.push('');
@@ -371,9 +510,9 @@ function formatCharacterNarrative(char: CharacterState): string {
   if (char.ascension?.enabled) {
     lines.push('');
     lines.push('  登神长阶:');
-    const elementNames = (char.ascension.elements ?? []).map(e => e.name);
-    const authorityNames = (char.ascension.authority ?? []).map(a => a.name);
-    const lawNames = (char.ascension.law ?? []).map(l => l.name);
+    const elementNames = (char.ascension.elements ?? []).map((e) => e.name);
+    const authorityNames = (char.ascension.authority ?? []).map((a) => a.name);
+    const lawNames = (char.ascension.law ?? []).map((l) => l.name);
     if (elementNames.length) lines.push(`    要素: ${elementNames.join(', ')}`);
     if (authorityNames.length) lines.push(`    权能: ${authorityNames.join(', ')}`);
     if (lawNames.length) lines.push(`    法则: ${lawNames.join(', ')}`);
@@ -446,9 +585,13 @@ function formatNpcSummary(content: Record<string, any>): string {
   if (characters.length === 0) return '';
   const lines = ['## 👥 在场角色 (摘要)'];
   for (const char of characters) {
-    const statusEffects = char.statusEffects?.map((s: any) =>
-      `${s.name}(${s.remainingTime != null ? `剩余${s.remainingTime}${s.timeUnit || '分钟'}` : '永久'})`,
-    ).join(', ') || '无';
+    const statusEffects =
+      char.statusEffects
+        ?.map(
+          (s: any) =>
+            `${s.name}(${s.remainingTime != null ? `剩余${s.remainingTime}${s.timeUnit || '分钟'}` : '永久'})`,
+        )
+        .join(', ') || '无';
     lines.push(
       `[${char.type === 'player' ? '你' : char.name}] ${char.race} · T${char.tier} ${char.tierName || ''} · Lv.${char.level}`,
       `  HP: ${char.hp}/${char.maxHp}  MP: ${char.mp}/${char.maxMp}  SP: ${char.sp}/${char.maxSp}`,
@@ -464,7 +607,9 @@ function formatQuestSummary(content: Record<string, any>): string {
   const quests: Record<string, any> = content.quests ?? {};
   const entries = Object.entries(quests);
   if (entries.length === 0) return '';
-  const activeEntries = entries.filter(([, q]: [string, any]) => q.status !== '已完成' && q.status !== '失败');
+  const activeEntries = entries.filter(
+    ([, q]: [string, any]) => q.status !== '已完成' && q.status !== '失败',
+  );
   if (activeEntries.length === 0) return '';
   const lines = ['📖 活跃任务'];
   for (const [name, q] of activeEntries as [string, any][]) {
@@ -492,7 +637,9 @@ function formatCombatSummary(content: Record<string, any>): string {
   const active = content.active;
   if (!active) return '';
   const lines = ['⚔️ 战斗状态'];
-  lines.push(`战斗ID: ${active.combatId ?? ''} | 类型: ${active.combatType ?? ''} | 状态: ${active.status ?? ''}`);
+  lines.push(
+    `战斗ID: ${active.combatId ?? ''} | 类型: ${active.combatType ?? ''} | 状态: ${active.status ?? ''}`,
+  );
   if (active.participants?.length) {
     lines.push('参战方:');
     for (const p of active.participants) {
@@ -509,8 +656,8 @@ function formatOutlineSummary(content: Record<string, any>): string {
   if (!outline && chapters.length === 0) return '';
 
   // Only show current chapter's title + ~100 char goal
-  const currentChapter = chapters.find((c: any) => c.status === 'active' || c.status === 'in_progress')
-    ?? chapters[0];
+  const currentChapter =
+    chapters.find((c: any) => c.status === 'active' || c.status === 'in_progress') ?? chapters[0];
   if (currentChapter) {
     const lines = ['📚 剧情大纲 (当前章节)'];
     lines.push(`当前进度: ${currentChapter.title ?? ''}`);
@@ -522,8 +669,8 @@ function formatOutlineSummary(content: Record<string, any>): string {
 
 function formatVariableSummary(content: Record<string, any>): string {
   const sys = content.sys ?? {};
-  const factionKeys = Object.keys(sys).filter(k =>
-    k.startsWith('sys.faction_standing') || k.startsWith('sys.region_state'),
+  const factionKeys = Object.keys(sys).filter(
+    (k) => k.startsWith('sys.faction_standing') || k.startsWith('sys.region_state'),
   );
   if (factionKeys.length === 0) return '';
   const lines = ['📦 世界观变量'];
@@ -578,8 +725,9 @@ function formatNpcKeys(content: Record<string, any>): string {
     '',
     '| ID | Name | Race | Type | Tier | Location |',
     '|----|------|------|------|------|----------|',
-    ...characters.map((c: CharacterState) =>
-      `| ${c.id} | ${c.name} | ${c.race} | ${c.type} | T${c.tier} | ${c.location || '未知'} |`,
+    ...characters.map(
+      (c: CharacterState) =>
+        `| ${c.id} | ${c.name} | ${c.race} | ${c.type} | T${c.tier} | ${c.location || '未知'} |`,
     ),
     '',
     '注意: 上述角色的五维/技能/装备/背包已被安全屏蔽。此列表仅用于重名检查和关系判断。',
@@ -653,17 +801,12 @@ function wrapZoneSection(zoneId: string, level: string, body: string): string {
  * 为指定 Agent 构建 zone 注入段落。
  * 如果 ctx.zones 未定义，返回空字符串（调用方应回退到旧的 variableContext()）。
  */
-export function buildZoneSection(
-  agentId: string,
-  ctx: AgentContext,
-): string {
+export function buildZoneSection(agentId: string, ctx: AgentContext): string {
   if (!ctx.zones) return '';
 
   const visibility = getAgentZoneVisibility(agentId);
   const sections: string[] = [];
-  const headNote = ctx.targetCharacterId
-    ? `> 目标角色: ${ctx.targetCharacterId}\n`
-    : '';
+  const headNote = ctx.targetCharacterId ? `> 目标角色: ${ctx.targetCharacterId}\n` : '';
 
   for (const zoneId of ZONE_IDS) {
     const level = visibility[zoneId];
@@ -678,9 +821,15 @@ export function buildZoneSection(
       filteredContent = filterNpcForTarget(zone.content, ctx.targetCharacterId);
       const formatted = filterZoneContent(zoneId, filteredContent, 'FULL', agentId, ctx);
       if (formatted) {
-        sections.push(wrapZoneSection(zoneId, 'FULL (目标角色)',
-          formatNpcKeys({ characters: filterNonTargets(zone.content, ctx.targetCharacterId) }) +
-          '\n\n' + formatted));
+        sections.push(
+          wrapZoneSection(
+            zoneId,
+            'FULL (目标角色)',
+            formatNpcKeys({ characters: filterNonTargets(zone.content, ctx.targetCharacterId) }) +
+              '\n\n' +
+              formatted,
+          ),
+        );
       }
       continue;
     }
@@ -699,20 +848,14 @@ export function buildZoneSection(
 // ═══════════════════════════════════════════════════════════
 
 /** 从 npc zone 中提取目标角色的内容（用于 FULL 格式化） */
-function filterNpcForTarget(
-  content: Record<string, any>,
-  targetId: string,
-): Record<string, any> {
+function filterNpcForTarget(content: Record<string, any>, targetId: string): Record<string, any> {
   const allChars = content.characters ?? [];
   const target = allChars.find((c: CharacterState) => c.id === targetId);
   return { characters: target ? [target] : [] };
 }
 
 /** 从 npc zone 中提取非目标角色的列表（用于 KEYS 显示） */
-function filterNonTargets(
-  content: Record<string, any>,
-  targetId: string,
-): CharacterState[] {
+function filterNonTargets(content: Record<string, any>, targetId: string): CharacterState[] {
   const allChars = content.characters ?? [];
   return allChars.filter((c: CharacterState) => c.id !== targetId);
 }

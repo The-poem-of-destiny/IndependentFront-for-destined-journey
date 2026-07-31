@@ -14,5 +14,5 @@ export function detectDeath(char: CharacterState): boolean {
 
 /** 批量检测 */
 export function detectDeaths(characters: CharacterState[]): CharacterState[] {
-  return characters.filter(c => detectDeath(c));
+  return characters.filter((c) => detectDeath(c));
 }

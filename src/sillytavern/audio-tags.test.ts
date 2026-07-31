@@ -18,7 +18,11 @@ import {
 
 describe('parseAudioTag', () => {
   it('识别四个规范前缀', () => {
-    expect(parseAudioTag('地点:龙脊山脉')).toEqual({ type: 'location', value: '龙脊山脉', raw: '地点:龙脊山脉' });
+    expect(parseAudioTag('地点:龙脊山脉')).toEqual({
+      type: 'location',
+      value: '龙脊山脉',
+      raw: '地点:龙脊山脉',
+    });
     expect(parseAudioTag('人物:傲雪').type).toBe('character');
     expect(parseAudioTag('情绪:紧张').type).toBe('mood');
     expect(parseAudioTag('情境:战斗').type).toBe('situation');
@@ -33,13 +37,17 @@ describe('parseAudioTag', () => {
 
   it('全角冒号与前后空白都认', () => {
     expect(parseAudioTag(' 地点 ： 龙脊山脉 ')).toEqual({
-      type: 'location', value: '龙脊山脉', raw: '地点 ： 龙脊山脉',
+      type: 'location',
+      value: '龙脊山脉',
+      raw: '地点 ： 龙脊山脉',
     });
   });
 
   it('只在第一个冒号处切分，值里的冒号原样保留', () => {
     expect(parseAudioTag('情境:战斗:决战')).toEqual({
-      type: 'situation', value: '战斗:决战', raw: '情境:战斗:决战',
+      type: 'situation',
+      value: '战斗:决战',
+      raw: '情境:战斗:决战',
     });
   });
 
@@ -93,7 +101,11 @@ describe('groupTrackTags / tagValuesFor', () => {
 
   it('空输入不炸', () => {
     expect(groupTrackTags([])).toEqual({
-      location: [], character: [], mood: [], situation: [], untyped: [],
+      location: [],
+      character: [],
+      mood: [],
+      situation: [],
+      untyped: [],
     });
   });
 });

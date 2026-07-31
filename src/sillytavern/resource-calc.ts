@@ -77,18 +77,18 @@ export function canAffordMoney(char: CharacterState, amount: number): boolean {
 
 /** 检查是否有物品 — M2 按名寻址（铁律1，逻辑键=name）；`|| id` 为旧存档过渡容忍 */
 export function hasItem(char: CharacterState, name: string, quantity: number = 1): boolean {
-  const item = char.inventory.find(i => i.name === name || i.id === name);
+  const item = char.inventory.find((i) => i.name === name || i.id === name);
   return item ? item.quantity >= quantity : false;
 }
 
 /** 检查是否有技能 — M2 按名寻址（铁律1，逻辑键=name）；`|| id` 为旧存档过渡容忍 */
 export function hasSkill(char: CharacterState, name: string): boolean {
-  return char.skills.some(s => s.name === name || s.id === name);
+  return char.skills.some((s) => s.name === name || s.id === name);
 }
 
 /** 检查是否有某个状态效果 */
 export function hasStatus(char: CharacterState, statusName: string): boolean {
-  return char.statusEffects.some(s => s.name === statusName || s.id === statusName);
+  return char.statusEffects.some((s) => s.name === statusName || s.id === statusName);
 }
 
 // ========== 属性查询 ==========
@@ -143,25 +143,61 @@ export function queryResource(char: CharacterState, query: ResourceQuery): Resou
 
   switch (query.query) {
     case 'hp_percent':
-      return { ...base, value: getHpPercent(char), description: `${char.name} HP: ${char.hp}/${char.maxHp} (${getHpPercent(char)}%)` };
+      return {
+        ...base,
+        value: getHpPercent(char),
+        description: `${char.name} HP: ${char.hp}/${char.maxHp} (${getHpPercent(char)}%)`,
+      };
     case 'mp_percent':
-      return { ...base, value: getMpPercent(char), description: `${char.name} MP: ${char.mp}/${char.maxMp} (${getMpPercent(char)}%)` };
+      return {
+        ...base,
+        value: getMpPercent(char),
+        description: `${char.name} MP: ${char.mp}/${char.maxMp} (${getMpPercent(char)}%)`,
+      };
     case 'sp_percent':
-      return { ...base, value: getSpPercent(char), description: `${char.name} SP: ${char.sp}/${char.maxSp} (${getSpPercent(char)}%)` };
+      return {
+        ...base,
+        value: getSpPercent(char),
+        description: `${char.name} SP: ${char.sp}/${char.maxSp} (${getSpPercent(char)}%)`,
+      };
     case 'tier':
-      return { ...base, value: char.tier, description: `${char.name} 层级: ${char.tierName} (T${char.tier})` };
+      return {
+        ...base,
+        value: char.tier,
+        description: `${char.name} 层级: ${char.tierName} (T${char.tier})`,
+      };
     case 'level':
       return { ...base, value: char.level, description: `${char.name} 等级: Lv.${char.level}` };
     case 'stat':
-      return { ...base, value: getAttribute(char, query.params?.attr ?? 'str'), description: `${char.name} ${query.params?.attr}: ${getAttribute(char, query.params?.attr ?? 'str')}` };
+      return {
+        ...base,
+        value: getAttribute(char, query.params?.attr ?? 'str'),
+        description: `${char.name} ${query.params?.attr}: ${getAttribute(char, query.params?.attr ?? 'str')}`,
+      };
     case 'can_afford':
-      return { ...base, value: canAffordMoney(char, query.params?.amount ?? 0), description: canAffordMoney(char, query.params?.amount ?? 0) ? '可支付' : '资金不足' };
+      return {
+        ...base,
+        value: canAffordMoney(char, query.params?.amount ?? 0),
+        description: canAffordMoney(char, query.params?.amount ?? 0) ? '可支付' : '资金不足',
+      };
     case 'has_item':
-      return { ...base, value: hasItem(char, query.params?.itemId ?? ''), description: hasItem(char, query.params?.itemId ?? '') ? '拥有' : '未拥有' };
+      return {
+        ...base,
+        value: hasItem(char, query.params?.itemId ?? ''),
+        description: hasItem(char, query.params?.itemId ?? '') ? '拥有' : '未拥有',
+      };
     case 'has_skill':
-      return { ...base, value: hasSkill(char, query.params?.skillId ?? ''), description: hasSkill(char, query.params?.skillId ?? '') ? '已习得' : '未习得' };
+      return {
+        ...base,
+        value: hasSkill(char, query.params?.skillId ?? ''),
+        description: hasSkill(char, query.params?.skillId ?? '') ? '已习得' : '未习得',
+      };
     case 'has_status':
-      return { ...base, value: hasStatus(char, query.params?.statusName ?? ''), description: hasStatus(char, query.params?.statusName ?? '') ? '已受影响' : '未受影响' };
+      return {
+        ...base,
+        value: hasStatus(char, query.params?.statusName ?? ''),
+        description: hasStatus(char, query.params?.statusName ?? '') ? '已受影响' : '未受影响',
+      };
     default:
       return { ...base, value: 0, description: '未知查询' };
   }

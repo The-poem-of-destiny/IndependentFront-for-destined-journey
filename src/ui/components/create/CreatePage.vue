@@ -1,55 +1,53 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted } from 'vue'
-import { useCreateStore } from '../../stores/create-store'
-import { useUIStore } from '../../stores/ui-store'
-import CreateSteps from './CreateSteps.vue'
-import CreateFooter from './CreateFooter.vue'
-import PointsBar from './PointsBar.vue'
-import PresetModal from './PresetModal.vue'
+import { computed, defineAsyncComponent, onMounted } from 'vue';
+import { useCreateStore } from '../../stores/create-store';
+import { useUIStore } from '../../stores/ui-store';
+import CreateSteps from './CreateSteps.vue';
+import CreateFooter from './CreateFooter.vue';
+import PointsBar from './PointsBar.vue';
+import PresetModal from './PresetModal.vue';
 
-const store = useCreateStore()
-const ui = useUIStore()
+const store = useCreateStore();
+const ui = useUIStore();
 
 // 懒加载步骤组件
-const Step0 = defineAsyncComponent(() => import('./CreateStepDifficulty.vue'))
-const Step1 = defineAsyncComponent(() => import('./CreateStepBasic.vue'))
-const Step2 = defineAsyncComponent(() => import('./CreateStepDestinyCore.vue'))
-const Step3 = defineAsyncComponent(() => import('./CreateStepCharacters.vue'))
-const Step4 = defineAsyncComponent(() => import('./CreateStepSelections.vue'))
-const Step5 = defineAsyncComponent(() => import('./CreateStepBackground.vue'))
-const Step6 = defineAsyncComponent(() => import('./CreateStepPlot.vue'))
-const Step7 = defineAsyncComponent(() => import('./CreateStepConfirm.vue'))
+const Step0 = defineAsyncComponent(() => import('./CreateStepDifficulty.vue'));
+const Step1 = defineAsyncComponent(() => import('./CreateStepBasic.vue'));
+const Step2 = defineAsyncComponent(() => import('./CreateStepDestinyCore.vue'));
+const Step3 = defineAsyncComponent(() => import('./CreateStepCharacters.vue'));
+const Step4 = defineAsyncComponent(() => import('./CreateStepSelections.vue'));
+const Step5 = defineAsyncComponent(() => import('./CreateStepBackground.vue'));
+const Step6 = defineAsyncComponent(() => import('./CreateStepPlot.vue'));
+const Step7 = defineAsyncComponent(() => import('./CreateStepConfirm.vue'));
 
-const stepComponents = [Step0, Step1, Step2, Step3, Step4, Step5, Step6, Step7] as const
+const stepComponents = [Step0, Step1, Step2, Step3, Step4, Step5, Step6, Step7] as const;
 
-const currentComponent = computed(() => stepComponents[store.currentStep])
+const currentComponent = computed(() => stepComponents[store.currentStep]);
 
-const nextLabel = computed(() =>
-  store.currentStep === 7 ? '✦ 开始命运之旅 ✦' : '下一步 →'
-)
+const nextLabel = computed(() => (store.currentStep === 7 ? '✦ 开始命运之旅 ✦' : '下一步 →'));
 
 // Step 7 特殊处理: 点击"下一步" → 执行 startJourney
 async function handleNext() {
   if (store.currentStep === 7) {
     try {
-      const saveId = await store.startJourney()
-      ui.navigate('game', saveId)
+      const saveId = await store.startJourney();
+      ui.navigate('game', saveId);
     } catch (err) {
-      console.error('[CreatePage] 创建存档失败:', err)
+      console.error('[CreatePage] 创建存档失败:', err);
     }
   } else {
-    store.nextStep()
+    store.nextStep();
   }
 }
 
 onMounted(() => {
-  store.loadWorldBookEntries()
-})
+  store.loadWorldBookEntries();
+});
 </script>
 
 <template>
   <div class="create-page">
-    <button class="back-btn" @click="ui.navigate('home')" title="返回首页">← 首页</button>
+    <button class="back-btn" title="返回首页" @click="ui.navigate('home')">← 首页</button>
 
     <CreateSteps :current="store.currentStep" :total="8" />
 
@@ -61,7 +59,7 @@ onMounted(() => {
 
     <main class="create-content">
       <Transition name="step-fade" mode="out-in">
-        <component :key="store.currentStep" :is="currentComponent" />
+        <component :is="currentComponent" :key="store.currentStep" />
       </Transition>
     </main>
 
@@ -127,7 +125,9 @@ onMounted(() => {
 /* 步骤切换动画 */
 .step-fade-enter-active,
 .step-fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
 }
 .step-fade-enter-from {
   opacity: 0;

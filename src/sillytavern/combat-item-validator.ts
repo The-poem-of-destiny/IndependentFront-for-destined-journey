@@ -96,11 +96,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 // ═══════════════════════════════════════════════════════════
 
 /** divinity 合法性（§6.2）：缺失=合规（可选）；提供须是 0-8 整数 */
-function checkDivinity(
-  v: Record<string, unknown>,
-  label: string,
-  reasons: string[],
-): void {
+function checkDivinity(v: Record<string, unknown>, label: string, reasons: string[]): void {
   if (v.divinity === undefined) return;
   const d = v.divinity;
   if (!Number.isInteger(d) || (d as number) < 0 || (d as number) > 8) {
@@ -114,10 +110,7 @@ function checkDivinity(
  * 扫描对象顶层 key + effects（若存在）的 key，命中五维别名（str/dex/con/int/spi 或 体/力/敏/智/精）
  * 且 category≠'检定' → 违规「五维只能走检定类」。
  */
-function checkNoFiveDimOutsideCheck(
-  v: Record<string, unknown>,
-  reasons: string[],
-): void {
+function checkNoFiveDimOutsideCheck(v: Record<string, unknown>, reasons: string[]): void {
   // 顶层 key 直接命中（如 { str: 5 }）
   for (const k of Object.keys(v)) {
     if (FIVE_DIM_ALIASES.has(k)) {
@@ -203,9 +196,7 @@ export function validateModifier(mod: unknown): string[] {
 
     case '资源':
       if (typeof mod.resource !== 'string' || !VALID_RESOURCES.has(mod.resource)) {
-        reasons.push(
-          `资源类：resource 必须是 hp/mp/sp 之一，当前=${JSON.stringify(mod.resource)}`,
-        );
+        reasons.push(`资源类：resource 必须是 hp/mp/sp 之一，当前=${JSON.stringify(mod.resource)}`);
       }
       if (typeof mod.amount !== 'number' || Number.isNaN(mod.amount)) {
         reasons.push(`资源类：amount 必须是 number，当前=${JSON.stringify(mod.amount)}`);
@@ -289,23 +280,22 @@ export function validateBuff(buff: unknown): string[] {
     reasons.push(`description 必填（中文描述），当前=${JSON.stringify(buff.description)}`);
   }
   if (typeof buff.category !== 'string' || !VALID_BUFF_CATEGORIES.has(buff.category)) {
-    reasons.push(
-      `category 必须是 增益/减益/特殊 之一，当前=${JSON.stringify(buff.category)}`,
-    );
+    reasons.push(`category 必须是 增益/减益/特殊 之一，当前=${JSON.stringify(buff.category)}`);
   }
   if (typeof buff.stacks !== 'number' || Number.isNaN(buff.stacks)) {
     reasons.push(`stacks 必须是 number，当前=${JSON.stringify(buff.stacks)}`);
   }
   // remainingTime: number | null（null=永久）；允许 0（已到期边界）
-  if (buff.remainingTime !== null && (typeof buff.remainingTime !== 'number' || Number.isNaN(buff.remainingTime))) {
+  if (
+    buff.remainingTime !== null &&
+    (typeof buff.remainingTime !== 'number' || Number.isNaN(buff.remainingTime))
+  ) {
     reasons.push(
       `remainingTime 必须是 number 或 null（永久），当前=${JSON.stringify(buff.remainingTime)}`,
     );
   }
   if (typeof buff.timeUnit !== 'string' || !VALID_TIME_UNITS.has(buff.timeUnit)) {
-    reasons.push(
-      `timeUnit 必须是 回合/分钟/小时 之一，当前=${JSON.stringify(buff.timeUnit)}`,
-    );
+    reasons.push(`timeUnit 必须是 回合/分钟/小时 之一，当前=${JSON.stringify(buff.timeUnit)}`);
   }
   if (typeof buff.source !== 'string' || (buff.source as string).trim() === '') {
     reasons.push(

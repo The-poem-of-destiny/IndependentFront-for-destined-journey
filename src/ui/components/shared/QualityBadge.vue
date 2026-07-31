@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { QualityLevel } from '@engine/types'
+import { computed } from 'vue';
+import type { QualityLevel } from '@engine/types';
 
 const props = defineProps<{
-  quality: QualityLevel
-  size?: 'sm' | 'md'
-}>()
+  quality: QualityLevel;
+  size?: 'sm' | 'md';
+}>();
 
-const color = computed(() => `var(--theme-quality-${props.quality})`)
+const color = computed(() => `var(--theme-quality-${props.quality})`);
 </script>
 
 <template>

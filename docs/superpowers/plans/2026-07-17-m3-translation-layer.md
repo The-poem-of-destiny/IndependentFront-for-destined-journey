@@ -21,10 +21,12 @@
 ### Task 1: orchestrator Stage3 characters.* 翻译重写
 
 **Files:**
+
 - Modify: `src/sillytavern/agent-orchestrator.ts`（processStageMarkers 的 vars_update `<json>` 解析块）
 - Test: `src/sillytavern/agent-orchestrator.test.ts`（Stage3 系列）
 
 **Interfaces:**
+
 - Consumes: M2 apply* 新契约。
 - Produces: AI json → patch 的键名约定 `const key = a.name ?? a.id;  // 过渡: M4 改 prompt 后删 ?? a.id`；target 一律 `characters.${key}`。
 
@@ -40,10 +42,12 @@
 ### Task 2: orchestrator items.* 翻译重写
 
 **Files:**
+
 - Modify: `src/sillytavern/agent-orchestrator.ts`（items.consume/equip/unequip/transfer/modify 五循环）
 - Test: `src/sillytavern/agent-orchestrator.test.ts`
 
 **Interfaces:**
+
 - Produces: consume→`remove_item {name,quantity}`；equip→`equip_item {name,slot}`；unequip→`unequip_item {name}`；transfer→**单个 `transfer_item {name,to,quantity}`**（旧"remove+add 两 patch"删除，杀 #5 transfer 断裂）；modify→`update_item {name,changes}`（杀 #21 itemUpdate 假字段）。
 
 - [ ] **Step 1: 失败测试**（五式各一 + transfer 只产 1 个 patch 的断言）；**Step 2: 确认失败**；**Step 3: 实现**。
@@ -57,6 +61,7 @@
 ### Task 3: orchestrator Stage2 清理 — 死 delta 分支 + metadata.source
 
 **Files:**
+
 - Modify: `src/sillytavern/agent-orchestrator.ts`（request_dispatcher `<json>` 解析块）
 - Test: `src/sillytavern/agent-orchestrator.test.ts`
 
@@ -71,10 +76,12 @@
 ### Task 4: item-gen-chain buildItemGenPatches 重写
 
 **Files:**
+
 - Modify: `src/sillytavern/item-gen-chain.ts`
 - Test: `src/sillytavern/item-gen-chain.test.ts`
 
 **Interfaces:**
+
 - Produces: 装备=**单 add_item** `{name, quantity:1, type:'装备', rarity, description, stats, effects, scripts, equippedSlot: normalizeSlot(slot)}`（两步落库废除）；背包/技能同式无 id；`itemgen_eq_/inv_/skill_` 三处 id 生成删除；owner 解析 `marker.attributes.owner ?? context 玩家名`——**玩家名取 request.context.characters 中 type='player' 的 name，两者皆缺进 console.warn + 跳过该 marker**（'player_1' 假 id 灭绝，杀 #6）。
 
 - [ ] **Step 1: 失败测试** — ① 装备产 1 个 patch 且 value.equippedSlot 已归一 ② owner 缺失时用 context 玩家名 ③ 玩家也缺时跳过并 warn ④ 全部 patch 的 value 无 id 键。
@@ -88,13 +95,15 @@
 ### Task 5: char-gen-agent 重写 — target 修正 + 无损映射 + 正式字段
 
 **Files:**
+
 - Modify: `src/sillytavern/char-gen-agent.ts`（buildCharGenPatches / assembleCharacterState）+ `src/sillytavern/types.ts`（ItemGenOutput 补 effects/scripts 字段）
 - Test: `src/sillytavern/char-gen-agent.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - buildCharGenPatches: target 子路径灭绝——附属 add_skill/add_item/equip_item **整体删除**，全部数据内嵌在 add_character 的 value 里一次落库（现状本来就靠 add_character 兜底、附属 patch 恒 errors，删掉即修 #11 且防 target 修好后的二次叠加）
-  - assembleCharacterState: ① 无损映射（装备 scripts 传递、inventory effects/scripts 传递、maxDurability 独立字段，杀 #45）② 装备产物直接进 inventory 带 equippedSlot ③ 正式字段直写（appearance/background/personality/gender/outfit 一等字段，customFields 同步双写到 M6）④ ascension 数据进 add_character value 本体，**ascension.* 的 set_variable patch 删除**（杀 #12 写进变量快照）
+  - assembleCharacterState: ① 无损映射（装备 scripts 传递、inventory effects/scripts 传递、maxDurability 独立字段，杀 #45）② 装备产物直接进 inventory 带 equippedSlot ③ 正式字段直写（appearance/background/personality/gender/outfit 一等字段，customFields 同步双写到 M6）④ ascension 数据进 add_character value 本体，_*ascension.* 的 set_variable patch 删除_*（杀 #12 写进变量快照）
   - types.ts ItemGenOutput 的 equipment/inventory 条目补 `effects?: Record<string,string>; scripts?: Record<string,string>`（解析层 parseItemGenOutput 同步补提取——若 XML 解析器不支持子元素则先透传空对象并注记，完整解析随 agent 输出格式在本 task 内验证）
 
 - [ ] **Step 1: 失败测试** — ① buildCharGenPatches 只产 1 个 add_character（无附属 patch）② value.inventory 内装备条目带 equippedSlot+scripts ③ 正式字段与 customFields 双写一致 ④ 无任何 set_variable patch。
@@ -108,10 +117,12 @@
 ### Task 6: craft-gen-chain buildCraftPatches 重写
 
 **Files:**
+
 - Modify: `src/sillytavern/craft-gen-chain.ts`
 - Test: `src/sillytavern/craft-gen-chain.test.ts`（若无则新建，覆盖 buildCraftPatches 纯函数）
 
 **Interfaces:**
+
 - Produces: 产物=add_item `{name, quantity, type: normalizeItemType(原始type) ?? '特殊', rarity, stats, durability, maxDurability, effects, scripts, equippedSlot?}`——stats/durability 从 metadata 移回 value（杀 #7）、type 硬编码 'equipment' 修正（杀 #38）；`craft_*` 双 Date.now id 生成三处删除；exp→`update_character {value:{totalExp:...}, metadata:{delta:true}}`、fp→M5 接线前暂走 `delta_variable profile.fp` 保持现状并标 `// M5 改 FP op`（杀 #12 的 exp 侧）；owner 兜底同 Task 4 玩家名式（杀 #6 craft 侧）。
 
 - [ ] **Step 1: 失败测试**（① 装备产物 stats 在 value ② type 药剂→'消耗品'非'equipment' ③ 无 craft_ 前缀 id ④ exp 走 update_character delta）；**Step 2: 确认失败**；**Step 3: 实现**；**Step 4: 断言更新 + typecheck + 全量**。
@@ -124,6 +135,7 @@
 ### Task 7: story 层 char_detect 死路径删除（可选收尾）
 
 **Files:**
+
 - Modify: `src/sillytavern/agent-orchestrator.ts`（processStageMarkers Step C 旧格式块）、`src/sillytavern/types.ts`（OrchestratorEvents.onCharDetect @deprecated→删除）、`src/sillytavern/marker-protocol.ts`（char_detect 扫描保留——story prompt 仍可能输出，剥离逻辑保留但不再回调）
 - Test: `src/sillytavern/agent-orchestrator.test.ts`
 
@@ -142,17 +154,17 @@
 
 ## 覆盖清单
 
-| # | Task |
-|---|------|
-| #5 #21 #23（翻译侧收口）| 2 |
-| #6 'player_1' 灭绝 | 4 / 6 |
-| #7 stats 归位 | 6 |
-| #11 target 子路径 | 5 |
+| #                           | Task  |
+| --------------------------- | ----- |
+| #5 #21 #23（翻译侧收口）    | 2     |
+| #6 'player_1' 灭绝          | 4 / 6 |
+| #7 stats 归位               | 6     |
+| #11 target 子路径           | 5     |
 | #12 ascension/exp 走正规 op | 5 / 6 |
-| #19 #20（翻译侧收口）| 1 |
-| #26 死 delta + source | 3 |
-| #37（翻译侧 slot 归一）| 4 / 6 |
-| #38 #39 type/rarity | 6 |
-| #41（翻译侧装备单 patch）| 4 / 5 |
-| #45 无损映射 | 5 |
-| char_detect 死路径 | 7 |
+| #19 #20（翻译侧收口）       | 1     |
+| #26 死 delta + source       | 3     |
+| #37（翻译侧 slot 归一）     | 4 / 6 |
+| #38 #39 type/rarity         | 6     |
+| #41（翻译侧装备单 patch）   | 4 / 5 |
+| #45 无损映射                | 5     |
+| char_detect 死路径          | 7     |

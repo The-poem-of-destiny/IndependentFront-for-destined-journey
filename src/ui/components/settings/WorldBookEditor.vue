@@ -1,7 +1,12 @@
 <template>
   <div class="worldbook-editor">
     <div class="editor-header">
-      <button class="back-btn" type="button" @click.stop="$emit('back')" aria-label="返回世界书列表">
+      <button
+        class="back-btn"
+        type="button"
+        aria-label="返回世界书列表"
+        @click.stop="$emit('back')"
+      >
         <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
         <span>返回列表</span>
       </button>
@@ -10,15 +15,29 @@
         <i class="fa-solid fa-plus" aria-hidden="true"></i>
         <span>新建条目</span>
       </button>
-      <button v-if="!readonly" class="batch-btn" @click="enableAllEntries" :disabled="sortedEntries.length === 0" title="将本书所有条目设为启用">
+      <button
+        v-if="!readonly"
+        class="batch-btn"
+        :disabled="sortedEntries.length === 0"
+        title="将本书所有条目设为启用"
+        @click="enableAllEntries"
+      >
         <i class="fa-solid fa-check-double" aria-hidden="true"></i>
         <span>全部启用</span>
       </button>
-      <button v-if="!readonly" class="batch-btn" @click="disableAllEntries" :disabled="sortedEntries.length === 0" title="将本书所有条目设为禁用">
+      <button
+        v-if="!readonly"
+        class="batch-btn"
+        :disabled="sortedEntries.length === 0"
+        title="将本书所有条目设为禁用"
+        @click="disableAllEntries"
+      >
         <i class="fa-solid fa-ban" aria-hidden="true"></i>
         <span>全部禁用</span>
       </button>
-      <span v-else class="builtin-notice"><i class="fa-solid fa-lock" aria-hidden="true"></i> 内置世界书 · 只读</span>
+      <span v-else class="builtin-notice"
+        ><i class="fa-solid fa-lock" aria-hidden="true"></i> 内置世界书 · 只读</span
+      >
     </div>
 
     <!-- 空状态 -->
@@ -52,23 +71,50 @@
           {{ entry.name || '(未命名)' }}
         </span>
         <label class="col-toggle toggle-label-inline" :title="entry.enabled ? '已启用' : '已禁用'">
-          <input type="checkbox" v-model="entry.enabled" @change="onToggleChange" :aria-label="`启用 ${entry.name}`" />
+          <input
+            v-model="entry.enabled"
+            type="checkbox"
+            :aria-label="`启用 ${entry.name}`"
+            @change="onToggleChange"
+          />
           <span class="toggle-slider-sm"></span>
         </label>
         <span class="col-order">
-          <button class="order-btn" @click="moveUp(idx)" :disabled="readonly || idx === 0" aria-label="上移">
+          <button
+            class="order-btn"
+            :disabled="readonly || idx === 0"
+            aria-label="上移"
+            @click="moveUp(idx)"
+          >
             <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
           </button>
-          <input type="number" v-model.number="entry.order" :disabled="readonly" @change="markDirty" class="order-input" :aria-label="`${entry.name} 排序`" />
-          <button class="order-btn" @click="moveDown(idx)" :disabled="readonly || idx === sortedEntries.length - 1" aria-label="下移">
+          <input
+            v-model.number="entry.order"
+            type="number"
+            :disabled="readonly"
+            class="order-input"
+            :aria-label="`${entry.name} 排序`"
+            @change="markDirty"
+          />
+          <button
+            class="order-btn"
+            :disabled="readonly || idx === sortedEntries.length - 1"
+            aria-label="下移"
+            @click="moveDown(idx)"
+          >
             <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
           </button>
         </span>
         <span class="col-actions">
-          <button class="icon-btn" @click="editEntry(idx)" :aria-label="`编辑 ${entry.name}`">
+          <button class="icon-btn" :aria-label="`编辑 ${entry.name}`" @click="editEntry(idx)">
             <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
           </button>
-          <button v-if="!readonly" class="icon-btn danger" @click="deleteEntry(idx)" :aria-label="`删除 ${entry.name}`">
+          <button
+            v-if="!readonly"
+            class="icon-btn danger"
+            :aria-label="`删除 ${entry.name}`"
+            @click="deleteEntry(idx)"
+          >
             <i class="fa-solid fa-trash" aria-hidden="true"></i>
           </button>
         </span>
@@ -76,22 +122,55 @@
     </div>
 
     <!-- 条目编辑弹窗 -->
-    <div v-if="editingIndex !== null" class="modal-overlay" @click.self="cancelEdit" @keydown.escape="cancelEdit">
+    <div
+      v-if="editingIndex !== null"
+      class="modal-overlay"
+      @click.self="cancelEdit"
+      @keydown.escape="cancelEdit"
+    >
       <div class="edit-modal" role="dialog" aria-modal="true" aria-label="编辑条目">
         <h4>{{ readonly ? '查看条目' : '编辑条目' }}</h4>
 
         <label class="form-label" for="edit-name">名称</label>
-        <input id="edit-name" ref="editNameInput" v-model="editForm.name" class="form-input" placeholder="条目名称" :disabled="readonly" :readonly="readonly" />
+        <input
+          id="edit-name"
+          ref="editNameInput"
+          v-model="editForm.name"
+          class="form-input"
+          placeholder="条目名称"
+          :disabled="readonly"
+          :readonly="readonly"
+        />
 
         <label class="form-label" for="edit-keys">关键词（逗号分隔）</label>
-        <input id="edit-keys" v-model="editForm.keys" class="form-input" placeholder="阿斯塔利亚, 虚海" :disabled="readonly" :readonly="readonly" />
+        <input
+          id="edit-keys"
+          v-model="editForm.keys"
+          class="form-input"
+          placeholder="阿斯塔利亚, 虚海"
+          :disabled="readonly"
+          :readonly="readonly"
+        />
 
         <label class="form-label" for="edit-keysecondary">辅助关键词</label>
-        <input id="edit-keysecondary" v-model="editForm.keysecondary" class="form-input" placeholder="世界设定" :disabled="readonly" :readonly="readonly" />
+        <input
+          id="edit-keysecondary"
+          v-model="editForm.keysecondary"
+          class="form-input"
+          placeholder="世界设定"
+          :disabled="readonly"
+          :readonly="readonly"
+        />
 
         <div class="edit-row">
-          <label class="form-label">逻辑
-            <select v-model.number="editForm.selectiveLogic" class="form-input" aria-label="关键词匹配逻辑" :disabled="readonly">
+          <label class="form-label"
+            >逻辑
+            <select
+              v-model.number="editForm.selectiveLogic"
+              class="form-input"
+              aria-label="关键词匹配逻辑"
+              :disabled="readonly"
+            >
               <option :value="0">AND_ANY — 命中任一辅助关键词</option>
               <option :value="1">NOT_ALL — 未命中所有辅助关键词</option>
               <option :value="2">NOT_ANY — 未命中任何辅助关键词</option>
@@ -99,16 +178,33 @@
             </select>
           </label>
 
-          <label class="form-label" for="edit-order">排序
-            <input id="edit-order" type="number" v-model.number="editForm.order" class="form-input order-input-sm" :disabled="readonly" :readonly="readonly" />
+          <label class="form-label" for="edit-order"
+            >排序
+            <input
+              id="edit-order"
+              v-model.number="editForm.order"
+              type="number"
+              class="form-input order-input-sm"
+              :disabled="readonly"
+              :readonly="readonly"
+            />
           </label>
         </div>
 
         <label class="form-label" for="edit-content">内容 (Markdown)</label>
-        <textarea id="edit-content" v-model="editForm.content" class="form-textarea" rows="12" :disabled="readonly" :readonly="readonly"></textarea>
+        <textarea
+          id="edit-content"
+          v-model="editForm.content"
+          class="form-textarea"
+          rows="12"
+          :disabled="readonly"
+          :readonly="readonly"
+        ></textarea>
 
         <div class="modal-actions">
-          <button class="btn-secondary" @click="cancelEdit">{{ readonly ? '关闭' : '取消' }}</button>
+          <button class="btn-secondary" @click="cancelEdit">
+            {{ readonly ? '关闭' : '取消' }}
+          </button>
           <button v-if="!readonly" class="btn-primary" @click="saveEdit">保存</button>
         </div>
       </div>
@@ -117,28 +213,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
-import type { WorldBook, WorldBookEntry } from '@engine/types'
+import { ref, computed, watch, nextTick } from 'vue';
+import type { WorldBook, WorldBookEntry } from '@engine/types';
 
-const editNameInput = ref<HTMLInputElement | null>(null)
+const editNameInput = ref<HTMLInputElement | null>(null);
 
 const props = defineProps<{
-  book: WorldBook
-  readonly?: boolean
-}>()
+  book: WorldBook;
+  readonly?: boolean;
+}>();
 
 const emit = defineEmits<{
-  back: []
-  update: [book: WorldBook]
-}>()
+  back: [];
+  update: [book: WorldBook];
+}>();
 
 // ===== State =====
 
-const entries = ref<WorldBookEntry[]>(
-  JSON.parse(JSON.stringify(props.book.entries))
-)
+const entries = ref<WorldBookEntry[]>(JSON.parse(JSON.stringify(props.book.entries)));
 
-const editingIndex = ref<number | null>(null)
+const editingIndex = ref<number | null>(null);
 const editForm = ref({
   name: '',
   keys: '',
@@ -146,13 +240,13 @@ const editForm = ref({
   selectiveLogic: 0 as number,
   order: 100,
   content: '',
-})
+});
 
 // ===== Computed =====
 
 const sortedEntries = computed(() => {
-  return [...entries.value].sort((a, b) => a.order - b.order)
-})
+  return [...entries.value].sort((a, b) => a.order - b.order);
+});
 
 // ===== Methods =====
 
@@ -162,19 +256,23 @@ function markDirty() {
 
 function onToggleChange() {
   // 条目启用/禁用的切换直接走 saveBook → Pinia → localStorage 持久化链路
-  saveBook()
+  saveBook();
 }
 
 // ===== 批量启停（整书级） =====
 
 function enableAllEntries() {
-  entries.value.forEach(e => { e.enabled = true })
-  saveBook()
+  entries.value.forEach((e) => {
+    e.enabled = true;
+  });
+  saveBook();
 }
 
 function disableAllEntries() {
-  entries.value.forEach(e => { e.enabled = false })
-  saveBook()
+  entries.value.forEach((e) => {
+    e.enabled = false;
+  });
+  saveBook();
 }
 
 function addEntry() {
@@ -186,18 +284,16 @@ function addEntry() {
     key: [],
     keysecondary: [],
     selectiveLogic: 0,
-    order: entries.value.length > 0
-      ? Math.max(...entries.value.map(e => e.order)) + 10
-      : 100,
+    order: entries.value.length > 0 ? Math.max(...entries.value.map((e) => e.order)) + 10 : 100,
     position: 0,
-  }
-  entries.value.push(newEntry)
-  saveBook()
+  };
+  entries.value.push(newEntry);
+  saveBook();
 }
 
 async function editEntry(idx: number) {
-  const entry = sortedEntries.value[idx]
-  editingIndex.value = idx
+  const entry = sortedEntries.value[idx];
+  editingIndex.value = idx;
   editForm.value = {
     name: entry.name,
     keys: entry.key.join(', '),
@@ -205,71 +301,80 @@ async function editEntry(idx: number) {
     selectiveLogic: entry.selectiveLogic,
     order: entry.order,
     content: entry.content,
-  }
-  await nextTick()
-  editNameInput.value?.focus()
+  };
+  await nextTick();
+  editNameInput.value?.focus();
 }
 
 function saveEdit() {
   if (editingIndex.value !== null) {
-    const entry = sortedEntries.value[editingIndex.value]
-    entry.name = editForm.value.name
-    entry.key = editForm.value.keys.split(',').map(k => k.trim()).filter(Boolean)
-    entry.keysecondary = editForm.value.keysecondary.split(',').map(k => k.trim()).filter(Boolean)
-    entry.selectiveLogic = editForm.value.selectiveLogic as 0 | 1 | 2 | 3
-    entry.order = editForm.value.order
-    entry.content = editForm.value.content
-    saveBook()
+    const entry = sortedEntries.value[editingIndex.value];
+    entry.name = editForm.value.name;
+    entry.key = editForm.value.keys
+      .split(',')
+      .map((k) => k.trim())
+      .filter(Boolean);
+    entry.keysecondary = editForm.value.keysecondary
+      .split(',')
+      .map((k) => k.trim())
+      .filter(Boolean);
+    entry.selectiveLogic = editForm.value.selectiveLogic as 0 | 1 | 2 | 3;
+    entry.order = editForm.value.order;
+    entry.content = editForm.value.content;
+    saveBook();
   }
-  editingIndex.value = null
+  editingIndex.value = null;
 }
 
 function cancelEdit() {
-  editingIndex.value = null
+  editingIndex.value = null;
 }
 
 function deleteEntry(idx: number) {
-  if (!confirm('确定删除此条目？')) return
-  const entry = sortedEntries.value[idx]
-  const realIdx = entries.value.findIndex(e => e.uid === entry.uid)
+  if (!confirm('确定删除此条目？')) return;
+  const entry = sortedEntries.value[idx];
+  const realIdx = entries.value.findIndex((e) => e.uid === entry.uid);
   if (realIdx >= 0) {
-    entries.value.splice(realIdx, 1)
-    saveBook()
+    entries.value.splice(realIdx, 1);
+    saveBook();
   }
 }
 
 function moveUp(idx: number) {
-  if (idx === 0) return
-  const a = sortedEntries.value[idx - 1]
-  const b = sortedEntries.value[idx]
-  const tmp = a.order
-  a.order = b.order
-  b.order = tmp
-  saveBook()
+  if (idx === 0) return;
+  const a = sortedEntries.value[idx - 1];
+  const b = sortedEntries.value[idx];
+  const tmp = a.order;
+  a.order = b.order;
+  b.order = tmp;
+  saveBook();
 }
 
 function moveDown(idx: number) {
-  if (idx >= sortedEntries.value.length - 1) return
-  const a = sortedEntries.value[idx]
-  const b = sortedEntries.value[idx + 1]
-  const tmp = a.order
-  a.order = b.order
-  b.order = tmp
-  saveBook()
+  if (idx >= sortedEntries.value.length - 1) return;
+  const a = sortedEntries.value[idx];
+  const b = sortedEntries.value[idx + 1];
+  const tmp = a.order;
+  a.order = b.order;
+  b.order = tmp;
+  saveBook();
 }
 
 function saveBook() {
   emit('update', {
     ...props.book,
     entries: entries.value,
-  })
+  });
 }
 
 // 只在切换书（book.id 变化）时重置本地副本；同书编辑的 emit 回流不触发重置，
 // 否则 deep watch 会把本地修改（如启用开关）冲掉，导致"禁用后点不开"。
-watch(() => props.book?.id, () => {
-  entries.value = JSON.parse(JSON.stringify(props.book.entries))
-})
+watch(
+  () => props.book?.id,
+  () => {
+    entries.value = JSON.parse(JSON.stringify(props.book.entries));
+  },
+);
 </script>
 
 <style scoped>
@@ -309,7 +414,9 @@ watch(() => props.book?.id, () => {
   color: var(--theme-text-primary);
 }
 
-.back-btn, .add-btn, .batch-btn {
+.back-btn,
+.add-btn,
+.batch-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -324,10 +431,14 @@ watch(() => props.book?.id, () => {
   min-height: 36px;
   transition: all 0.15s;
 }
-.back-btn:hover, .add-btn:hover, .batch-btn:hover {
+.back-btn:hover,
+.add-btn:hover,
+.batch-btn:hover {
   filter: brightness(1.1);
 }
-.back-btn:active, .add-btn:active, .batch-btn:active {
+.back-btn:active,
+.add-btn:active,
+.batch-btn:active {
   transform: scale(0.97);
 }
 
@@ -472,7 +583,7 @@ watch(() => props.book?.id, () => {
   position: relative;
 }
 
-.toggle-label-inline input[type="checkbox"] {
+.toggle-label-inline input[type='checkbox'] {
   position: absolute;
   width: 36px;
   height: 22px;
@@ -609,8 +720,12 @@ watch(() => props.book?.id, () => {
 }
 
 @keyframes wbFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .edit-modal {
@@ -623,12 +738,18 @@ watch(() => props.book?.id, () => {
   max-height: 85dvh;
   overflow-y: auto;
   animation: wbSlideUp 0.2s ease;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 @keyframes wbSlideUp {
-  from { transform: translateY(16px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 .edit-modal h4 {
@@ -670,7 +791,9 @@ watch(() => props.book?.id, () => {
   outline: none;
   box-sizing: border-box;
   font-family: inherit;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 
 .edit-modal .form-input:focus {
@@ -700,7 +823,7 @@ watch(() => props.book?.id, () => {
   padding-top: 18px !important;
 }
 
-.checkbox-label input[type="checkbox"] {
+.checkbox-label input[type='checkbox'] {
   width: 18px;
   height: 18px;
   cursor: pointer;
@@ -727,7 +850,9 @@ watch(() => props.book?.id, () => {
   min-height: 200px;
   outline: none;
   box-sizing: border-box;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 
 .form-textarea:focus {
@@ -750,7 +875,8 @@ watch(() => props.book?.id, () => {
   border-top: 1px solid var(--theme-card-border);
 }
 
-.btn-primary, .btn-secondary {
+.btn-primary,
+.btn-secondary {
   display: inline-flex;
   align-items: center;
   padding: 10px 24px;
@@ -785,7 +911,9 @@ watch(() => props.book?.id, () => {
 }
 
 /* ===== 禁用态 ===== */
-input:disabled, select:disabled, textarea:disabled {
+input:disabled,
+select:disabled,
+textarea:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -795,7 +923,10 @@ button:disabled {
 }
 
 /* ===== Focus visible ===== */
-button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
   outline: 2px solid var(--theme-primary);
   outline-offset: 2px;
 }

@@ -26,7 +26,10 @@ function makeCtx(bus: EventBus, combatants: string[] = []): PipelineContext {
 }
 
 /** 在指定 type 上挂 passthrough 计数器，返回 { counts, types } */
-function attachCounters(bus: EventBus, types: string[]): {
+function attachCounters(
+  bus: EventBus,
+  types: string[],
+): {
   counts: Record<string, number>;
 } {
   const counts: Record<string, number> = {};
@@ -56,12 +59,7 @@ describe('runMoraleCheckPipeline', () => {
 
   describe('1. HP 高于阈值', () => {
     it('hpRatio=0.8（标准阈值 0.30）→ triggered=false，无 outcome', async () => {
-      const result = await runMoraleCheckPipeline(
-        'goblin',
-        0.8,
-        '标准',
-        makeCtx(bus),
-      );
+      const result = await runMoraleCheckPipeline('goblin', 0.8, '标准', makeCtx(bus));
 
       expect(result.triggered).toBe(false);
       expect(result.outcome).toBeUndefined();
@@ -69,12 +67,7 @@ describe('runMoraleCheckPipeline', () => {
     });
 
     it('hpRatio=0.6（切磋阈值 0.40）→ triggered=false', async () => {
-      const result = await runMoraleCheckPipeline(
-        'goblin',
-        0.6,
-        '切磋',
-        makeCtx(bus),
-      );
+      const result = await runMoraleCheckPipeline('goblin', 0.6, '切磋', makeCtx(bus));
 
       expect(result.triggered).toBe(false);
       expect(result.outcome).toBeUndefined();
@@ -100,18 +93,10 @@ describe('runMoraleCheckPipeline', () => {
     });
 
     it('hpRatio=0.2 d20=5 → state=routing（routing 结果池）', async () => {
-      const result = await runMoraleCheckPipeline(
-        'orc',
-        0.2,
-        '标准',
-        makeCtx(bus),
-        5,
-      );
+      const result = await runMoraleCheckPipeline('orc', 0.2, '标准', makeCtx(bus), 5);
 
       // routing 池: 溃逃/阵线溃散/被击昏/被俘虏/内讧/投降/求饶
-      const routingPool = [
-        '溃逃', '阵线溃散', '被击昏', '被俘虏', '内讧', '投降', '求饶',
-      ];
+      const routingPool = ['溃逃', '阵线溃散', '被击昏', '被俘虏', '内讧', '投降', '求饶'];
       expect(result.triggered).toBe(true);
       expect(result.outcome).toBeDefined();
       expect(routingPool).toContain(result.outcome);
@@ -128,13 +113,7 @@ describe('runMoraleCheckPipeline', () => {
       });
 
       // 用一个本来会触发 checkMorale 的场景（标准 0.2 + d20=5 routing）
-      const result = await runMoraleCheckPipeline(
-        'goblin',
-        0.2,
-        '标准',
-        makeCtx(bus),
-        5,
-      );
+      const result = await runMoraleCheckPipeline('goblin', 0.2, '标准', makeCtx(bus), 5);
 
       expect(result.outcome).toBe('投降');
       expect(result.triggered).toBe(true);
@@ -147,12 +126,7 @@ describe('runMoraleCheckPipeline', () => {
       });
 
       // hpRatio=0.8 → checkMorale 未触发；但 AI 选了 outcome
-      const result = await runMoraleCheckPipeline(
-        'goblin',
-        0.8,
-        '标准',
-        makeCtx(bus),
-      );
+      const result = await runMoraleCheckPipeline('goblin', 0.8, '标准', makeCtx(bus));
 
       expect(result.outcome).toBe('撤退');
       // baseResult.triggered=false 但 outcome 有值 → triggered=true
@@ -165,13 +139,7 @@ describe('runMoraleCheckPipeline', () => {
   describe('4. AI 不响应（无订阅）→ 纯函数兜底', () => {
     it('无 MORALE_CHECK 订阅 → 用 checkMorale 纯函数 outcome', async () => {
       // 标准 0.2 + d20=5 → routing → outcome 来自 routing 池第 0 个（seed 默认 0）
-      const result = await runMoraleCheckPipeline(
-        'goblin',
-        0.2,
-        '标准',
-        makeCtx(bus),
-        5,
-      );
+      const result = await runMoraleCheckPipeline('goblin', 0.2, '标准', makeCtx(bus), 5);
 
       expect(result.triggered).toBe(true);
       expect(result.outcome).toBeDefined();
@@ -180,12 +148,7 @@ describe('runMoraleCheckPipeline', () => {
     });
 
     it('高 HP 但无订阅 → triggered=false 无 outcome', async () => {
-      const result = await runMoraleCheckPipeline(
-        'goblin',
-        0.9,
-        '标准',
-        makeCtx(bus),
-      );
+      const result = await runMoraleCheckPipeline('goblin', 0.9, '标准', makeCtx(bus));
 
       expect(result.triggered).toBe(false);
       expect(result.outcome).toBeUndefined();
@@ -201,13 +164,7 @@ describe('runMoraleCheckPipeline', () => {
         COMBAT_EVENTS.MORALE_RESULT,
       ]);
 
-      await runMoraleCheckPipeline(
-        'goblin',
-        0.2,
-        '标准',
-        makeCtx(bus),
-        5,
-      );
+      await runMoraleCheckPipeline('goblin', 0.2, '标准', makeCtx(bus), 5);
 
       expect(counts[COMBAT_EVENTS.MORALE_CHECK]).toBe(1);
       expect(counts[COMBAT_EVENTS.MORALE_RESULT]).toBe(1);
@@ -219,12 +176,7 @@ describe('runMoraleCheckPipeline', () => {
         COMBAT_EVENTS.MORALE_RESULT,
       ]);
 
-      await runMoraleCheckPipeline(
-        'goblin',
-        0.9,
-        '标准',
-        makeCtx(bus),
-      );
+      await runMoraleCheckPipeline('goblin', 0.9, '标准', makeCtx(bus));
 
       // 不管是否触发战意事件本身，emitChain 调用恒发生
       expect(counts[COMBAT_EVENTS.MORALE_CHECK]).toBe(1);
@@ -251,13 +203,7 @@ describe('runMoraleCheckPipeline', () => {
 
     it('低阈值类型「标准」d20=15 (≥12) → 不触发（triggered=false）', async () => {
       // 标准 0.30；hpRatio=0.2 < 0.30 但 d20=15 ≥ 12 → checkMorale 返回 triggered=false
-      const result = await runMoraleCheckPipeline(
-        'goblin',
-        0.2,
-        '标准',
-        makeCtx(bus),
-        15,
-      );
+      const result = await runMoraleCheckPipeline('goblin', 0.2, '标准', makeCtx(bus), 15);
 
       // checkMorale 在 d20>=12 时 triggered=false 但 moraleState=shaken
       // 我们的实现: triggered = baseResult.triggered || outcome !== undefined
@@ -268,13 +214,7 @@ describe('runMoraleCheckPipeline', () => {
     });
 
     it('低阈值类型「标准」d20=5 (<12) → 触发', async () => {
-      const result = await runMoraleCheckPipeline(
-        'goblin',
-        0.2,
-        '标准',
-        makeCtx(bus),
-        5,
-      );
+      const result = await runMoraleCheckPipeline('goblin', 0.2, '标准', makeCtx(bus), 5);
 
       expect(result.triggered).toBe(true);
       expect(result.outcome).toBeDefined();
@@ -309,13 +249,7 @@ describe('runMoraleCheckPipeline', () => {
         },
       });
 
-      await runMoraleCheckPipeline(
-        'orc_chief',
-        0.15,
-        '标准',
-        makeCtx(bus),
-        5,
-      );
+      await runMoraleCheckPipeline('orc_chief', 0.15, '标准', makeCtx(bus), 5);
 
       expect(received).toBeDefined();
       expect(received!.defenderId).toBe('orc_chief');
@@ -340,13 +274,7 @@ describe('runMoraleCheckPipeline', () => {
         },
       });
 
-      await runMoraleCheckPipeline(
-        'goblin',
-        0.2,
-        '标准',
-        makeCtx(bus),
-        5,
-      );
+      await runMoraleCheckPipeline('goblin', 0.2, '标准', makeCtx(bus), 5);
 
       expect(received).toBeDefined();
       expect(received!.defenderId).toBe('goblin');

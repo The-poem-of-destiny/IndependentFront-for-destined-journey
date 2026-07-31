@@ -15,12 +15,7 @@
  *   - 成品: 半成品→最终可用品，需图纸，有经验
  */
 
-import type {
-  QualityLevel,
-  CraftIndustry,
-  CraftStage,
-  CraftMaterial,
-} from './types';
+import type { QualityLevel, CraftIndustry, CraftStage, CraftMaterial } from './types';
 import {
   QUALITY_RANK,
   QUALITY_BY_RANK,
@@ -176,7 +171,7 @@ export function validateCraftStage(
  */
 export function generateDCModifier(quality: QualityLevel, seed?: number): number {
   const range = CRAFT_DC_MODIFIER_RANGE[quality];
-  if (!range || range[0] === 0 && range[1] === 0) return 0;
+  if (!range || (range[0] === 0 && range[1] === 0)) return 0;
 
   const [min, max] = range;
   if (seed !== undefined) {
@@ -188,10 +183,8 @@ export function generateDCModifier(quality: QualityLevel, seed?: number): number
 /**
  * 为一批材料生成 DC 修正
  */
-export function assignMaterialDCModifiers(
-  materials: CraftMaterial[],
-): CraftMaterial[] {
-  return materials.map(m => ({
+export function assignMaterialDCModifiers(materials: CraftMaterial[]): CraftMaterial[] {
+  return materials.map((m) => ({
     ...m,
     dcModifier: m.dcModifier !== undefined ? m.dcModifier : generateDCModifier(m.quality),
   }));
@@ -202,11 +195,12 @@ export function assignMaterialDCModifiers(
 /**
  * 检查是否有管制投入物 (史诗+)
  */
-export function checkRegulatedMaterials(
-  materials: CraftMaterial[],
-): { hasRegulated: boolean; regulatedMaterials: CraftMaterial[] } {
-  const regulated = materials.filter(m =>
-    m.isRegulated === true || QUALITY_RANK[m.quality] >= 3, // 史诗+
+export function checkRegulatedMaterials(materials: CraftMaterial[]): {
+  hasRegulated: boolean;
+  regulatedMaterials: CraftMaterial[];
+} {
+  const regulated = materials.filter(
+    (m) => m.isRegulated === true || QUALITY_RANK[m.quality] >= 3, // 史诗+
   );
   return {
     hasRegulated: regulated.length > 0,
@@ -217,9 +211,10 @@ export function checkRegulatedMaterials(
 /**
  * 检查管制物许可
  */
-export function checkRegulatedLicenses(
-  materials: CraftMaterial[],
-): { passed: boolean; missingLicenses: string[] } {
+export function checkRegulatedLicenses(materials: CraftMaterial[]): {
+  passed: boolean;
+  missingLicenses: string[];
+} {
   const { regulatedMaterials } = checkRegulatedMaterials(materials);
   const missing: string[] = [];
 
@@ -329,14 +324,46 @@ export function validateIndustryCompatibility(
 ): { compatible: boolean; reason?: string } {
   // 基本检查: 锻造→金属/武器/防具, 炼金→药水/药剂, 烹饪→食物/料理, 裁缝→布/皮/时装
   const keywords: Record<CraftIndustry, string[]> = {
-    '锻造': ['武器', '剑', '刀', '斧', '锤', '枪', '弓', '盾', '甲', '铠', '盔', '金属', '工具', '锭', '板'],
-    '炼金': ['药', '水', '剂', '油', '膏', '炸', '毒', '瓶', '粉', '附魔'],
-    '烹饪': ['餐', '食', '肉', '鱼', '菜', '汤', '酒', '饮', '面包', '料', '理', '烤', '煮'],
-    '裁缝': ['布', '皮', '衣', '袍', '袋', '包', '帽', '鞋', '靴', '丝', '棉', '毛', '装', '时装', '容器'],
+    锻造: [
+      '武器',
+      '剑',
+      '刀',
+      '斧',
+      '锤',
+      '枪',
+      '弓',
+      '盾',
+      '甲',
+      '铠',
+      '盔',
+      '金属',
+      '工具',
+      '锭',
+      '板',
+    ],
+    炼金: ['药', '水', '剂', '油', '膏', '炸', '毒', '瓶', '粉', '附魔'],
+    烹饪: ['餐', '食', '肉', '鱼', '菜', '汤', '酒', '饮', '面包', '料', '理', '烤', '煮'],
+    裁缝: [
+      '布',
+      '皮',
+      '衣',
+      '袍',
+      '袋',
+      '包',
+      '帽',
+      '鞋',
+      '靴',
+      '丝',
+      '棉',
+      '毛',
+      '装',
+      '时装',
+      '容器',
+    ],
   };
 
   const kw = keywords[industry] ?? [];
-  const match = kw.some(k => productName.includes(k));
+  const match = kw.some((k) => productName.includes(k));
 
   if (!match) {
     return {

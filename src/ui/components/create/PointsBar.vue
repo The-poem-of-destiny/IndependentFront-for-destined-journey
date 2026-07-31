@@ -1,23 +1,23 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed } from 'vue';
 
 const props = defineProps<{
-  total: number
-  used: number
-  difficultyLabel?: string
-}>()
+  total: number;
+  used: number;
+  difficultyLabel?: string;
+}>();
 
 const percent = computed(() => {
-  if (props.total <= 0) return 100
-  return Math.min(100, Math.max(0, ((props.total - props.used) / props.total) * 100))
-})
+  if (props.total <= 0) return 100;
+  return Math.min(100, Math.max(0, ((props.total - props.used) / props.total) * 100));
+});
 
 const barColor = computed(() => {
   // 剩余多→绿，剩余中→金，剩余少→红
-  if (percent.value > 50) return 'var(--theme-success)'
-  if (percent.value > 25) return 'var(--theme-warning)'
-  return 'var(--theme-error)'
-})
+  if (percent.value > 50) return 'var(--theme-success)';
+  if (percent.value > 25) return 'var(--theme-warning)';
+  return 'var(--theme-error)';
+});
 </script>
 
 <template>
@@ -56,15 +56,21 @@ const barColor = computed(() => {
 }
 .points-fill {
   position: absolute;
-  left: 0; top: 0; bottom: 0;
+  left: 0;
+  top: 0;
+  bottom: 0;
   width: 100%;
   transform-origin: left center;
-  transition: transform 0.4s ease, background 0.4s ease;
+  transition:
+    transform 0.4s ease,
+    background 0.4s ease;
   opacity: 0.4;
   border-radius: var(--theme-radius-md, 8px);
 }
 @media (prefers-reduced-motion: reduce) {
-  .points-fill { transition: none; }
+  .points-fill {
+    transition: none;
+  }
 }
 .points-text {
   position: relative;

@@ -24,9 +24,17 @@ function row(id: string, name: string, createdAt: number) {
 describe('AUDIO_FILE_EXTENSIONS', () => {
   it('与 MIME 表同源，且含全部 9 个受支持扩展名', () => {
     expect(AUDIO_FILE_EXTENSIONS).toEqual(Object.keys(AUDIO_MIME_BY_EXTENSION));
-    expect([...AUDIO_FILE_EXTENSIONS].sort()).toEqual(
-      ['aac', 'flac', 'm4a', 'mp3', 'oga', 'ogg', 'opus', 'wav', 'webm'],
-    );
+    expect([...AUDIO_FILE_EXTENSIONS].sort()).toEqual([
+      'aac',
+      'flac',
+      'm4a',
+      'mp3',
+      'oga',
+      'ogg',
+      'opus',
+      'wav',
+      'webm',
+    ]);
   });
 });
 
@@ -113,20 +121,12 @@ describe('findByName', () => {
   });
 
   it('多命中取 createdAt 最小的一条', () => {
-    const dupes = [
-      row('a', '战斗', 300),
-      row('b', '战斗.mp3', 100),
-      row('c', ' 战斗 ', 200),
-    ];
+    const dupes = [row('a', '战斗', 300), row('b', '战斗.mp3', 100), row('c', ' 战斗 ', 200)];
     expect(findByName(dupes, '战斗')?.id).toBe('b');
   });
 
   it('数组顺序颠倒后结果不变', () => {
-    const dupes = [
-      row('a', '战斗', 300),
-      row('b', '战斗.mp3', 100),
-      row('c', ' 战斗 ', 200),
-    ];
+    const dupes = [row('a', '战斗', 300), row('b', '战斗.mp3', 100), row('c', ' 战斗 ', 200)];
     expect(findByName([...dupes].reverse(), '战斗')?.id).toBe('b');
   });
 

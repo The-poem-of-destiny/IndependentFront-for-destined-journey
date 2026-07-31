@@ -10,10 +10,22 @@
  */
 
 import type {
-  Pipeline, PipelineStage, AgentContext, AgentResult,
-  OrchestratorRun, AgentConfig, ApiEndpoint, AgentDefinition,
-  CraftRequestMarker, CombatTriggerMarker, CombatSummaryResult, PlayAudioMarker,
-  CharGenRequestMarker, ItemGenRequestMarker, ItemUpdateRequestMarker, CraftGenRequestMarker,
+  Pipeline,
+  PipelineStage,
+  AgentContext,
+  AgentResult,
+  OrchestratorRun,
+  AgentConfig,
+  ApiEndpoint,
+  AgentDefinition,
+  CraftRequestMarker,
+  CombatTriggerMarker,
+  CombatSummaryResult,
+  PlayAudioMarker,
+  CharGenRequestMarker,
+  ItemGenRequestMarker,
+  ItemUpdateRequestMarker,
+  CraftGenRequestMarker,
   ToolExecutionContext,
 } from './types';
 import { AgentClient } from './agent-client';
@@ -69,7 +81,10 @@ export interface OrchestratorEvents {
    * 调用方应打开独立战斗页面，返回战斗摘要+经验+patches。
    * 返回 null 跳过此标记。
    */
-  onCombatTrigger?: (marker: CombatTriggerMarker, storyOutput: string) => Promise<CombatSummaryResult | null>;
+  onCombatTrigger?: (
+    marker: CombatTriggerMarker,
+    storyOutput: string,
+  ) => Promise<CombatSummaryResult | null>;
 
   /**
    * 🎵 Play Audio: Stage 1 正文中检测到 <play_audio> 后触发，切换 BGM。
@@ -83,16 +98,32 @@ export interface OrchestratorEvents {
   // ===== Phase 10: request_dispatcher 调度器回调 =====
 
   /** Stage 2: request_dispatcher 输出中的 <char_gen_request> → char_gen→item_gen 链 */
-  onCharGenRequest?: (markers: CharGenRequestMarker[], varsOutput: string, context: AgentContext) => Promise<void>;
+  onCharGenRequest?: (
+    markers: CharGenRequestMarker[],
+    varsOutput: string,
+    context: AgentContext,
+  ) => Promise<void>;
 
   /** Stage 2: request_dispatcher 输出中的 <item_gen_request> → item_gen 独立调用 */
-  onItemGenRequest?: (markers: ItemGenRequestMarker[], varsOutput: string, context: AgentContext) => Promise<void>;
+  onItemGenRequest?: (
+    markers: ItemGenRequestMarker[],
+    varsOutput: string,
+    context: AgentContext,
+  ) => Promise<void>;
 
   /** Stage 2: request_dispatcher 输出中的 <item_update_request> → 已合并到 Stage 3 vars_update，此回调仅作兼容 */
-  onItemUpdateRequest?: (markers: ItemUpdateRequestMarker[], varsOutput: string, context: AgentContext) => Promise<void>;
+  onItemUpdateRequest?: (
+    markers: ItemUpdateRequestMarker[],
+    varsOutput: string,
+    context: AgentContext,
+  ) => Promise<void>;
 
   /** Stage 2: request_dispatcher 输出中的 <craft_gen_request> → craft_gen→item_gen 链 */
-  onCraftGenRequest?: (markers: CraftGenRequestMarker[], varsOutput: string, context: AgentContext) => Promise<void>;
+  onCraftGenRequest?: (
+    markers: CraftGenRequestMarker[],
+    varsOutput: string,
+    context: AgentContext,
+  ) => Promise<void>;
 
   /** Phase 8.5: Agentic Agent 发出工具调用时触发 */
   onToolCall?: (agentId: string, toolName: string, args: any, result: any) => void;
@@ -138,12 +169,12 @@ export class AgentOrchestrator {
     }
 
     // Phase 10: plotSettings.mode === 'off' → 禁用三个剧情 Agent
-    const plotMode = options.context.plotSettings?.mode
+    const plotMode = options.context.plotSettings?.mode;
     if (plotMode === 'off') {
       for (const plotAgentId of ['plot_pre_check', 'plot_post_check', 'plot_outline']) {
-        const cfg = this.agentConfigs.get(plotAgentId)
+        const cfg = this.agentConfigs.get(plotAgentId);
         if (cfg) {
-          cfg.enabled = false
+          cfg.enabled = false;
         }
       }
     }
@@ -250,13 +281,13 @@ export class AgentOrchestrator {
 
   private async executeStage(stage: PipelineStage, _stageIndex: number): Promise<void> {
     const agentsToRun = this.onlyAgents
-      ? stage.agents.filter(a => this.onlyAgents!.has(a))
+      ? stage.agents.filter((a) => this.onlyAgents!.has(a))
       : stage.agents;
 
     if (agentsToRun.length === 0) return;
 
     // 并行执行同阶段所有 Agent
-    const promises = agentsToRun.map(agentId => this.executeAgent(agentId));
+    const promises = agentsToRun.map((agentId) => this.executeAgent(agentId));
     const results = await Promise.allSettled(promises);
 
     // 收集结果
@@ -342,10 +373,10 @@ export class AgentOrchestrator {
     }
 
     // 🆕 自动检测：memory_recall 模型名含 "embedding" 或 apiType 为 embedding → 走向量召回路径
-    if (config.agentId === 'memory_recall' && (
-      /embedding/i.test(config.model) ||
-      (endpoint as any).apiType === 'embedding'
-    )) {
+    if (
+      config.agentId === 'memory_recall' &&
+      (/embedding/i.test(config.model) || (endpoint as any).apiType === 'embedding')
+    ) {
       return this.callMemoryRecallEmbedding(endpoint, config);
     }
 
@@ -394,7 +425,7 @@ export class AgentOrchestrator {
       presencePenalty: config.presencePenalty,
     };
 
-    let result: AgentResult
+    let result: AgentResult;
 
     // 🆕 流式路径: 如果配置了 streamCallbacks，使用 chatStream() 逐块输出
     if (config.streamCallbacks) {
@@ -404,14 +435,14 @@ export class AgentOrchestrator {
     }
 
     // 🆕 注入请求消息供 debug 面板使用
-    result.requestMessages = messages
+    result.requestMessages = messages;
 
     // 🆕 Story 正文救援：修正"正文吞进思维链"(raw 空) 与"思维链泄漏进正文"(raw 含前导思维链) 两类 AI 缺陷
     if (config.agentId === 'story') {
       rescueStoryOutput(result);
     }
 
-    return result
+    return result;
   }
 
   /**
@@ -427,36 +458,40 @@ export class AgentOrchestrator {
     const callbacks = config.streamCallbacks!;
 
     return new Promise((resolve) => {
-      client.chatStream(request, {
-        onChunk: (text, isComplete) => {
-          callbacks.onChunk(text, isComplete);
+      client.chatStream(
+        request,
+        {
+          onChunk: (text, isComplete) => {
+            callbacks.onChunk(text, isComplete);
+          },
+          onComplete: (streamResult) => {
+            resolve({
+              agentId: config.agentId,
+              output: streamResult.fullText,
+              rawResponse: streamResult.fullText,
+              reasoning: streamResult.reasoning,
+              tokensUsed: streamResult.tokensUsed,
+              cacheHit: streamResult.cacheHit,
+              cacheHitTokens: streamResult.cacheHitTokens,
+              cacheMissTokens: streamResult.cacheMissTokens,
+              completionTokens: streamResult.completionTokens,
+              duration: streamResult.duration,
+            });
+          },
+          onError: (error) => {
+            resolve({
+              agentId: config.agentId,
+              output: null,
+              rawResponse: '',
+              tokensUsed: 0,
+              cacheHit: false,
+              duration: Date.now() - startTime,
+              error,
+            });
+          },
         },
-        onComplete: (streamResult) => {
-          resolve({
-            agentId: config.agentId,
-            output: streamResult.fullText,
-            rawResponse: streamResult.fullText,
-            reasoning: streamResult.reasoning,
-            tokensUsed: streamResult.tokensUsed,
-            cacheHit: streamResult.cacheHit,
-            cacheHitTokens: streamResult.cacheHitTokens,
-            cacheMissTokens: streamResult.cacheMissTokens,
-            completionTokens: streamResult.completionTokens,
-            duration: streamResult.duration,
-          });
-        },
-        onError: (error) => {
-          resolve({
-            agentId: config.agentId,
-            output: null,
-            rawResponse: '',
-            tokensUsed: 0,
-            cacheHit: false,
-            duration: Date.now() - startTime,
-            error,
-          });
-        },
-      }, config.abortSignal);
+        config.abortSignal,
+      );
     });
   }
 
@@ -546,42 +581,36 @@ export class AgentOrchestrator {
     endpoint: ApiEndpoint,
     config: AgentConfig,
   ): Promise<AgentResult> {
-    const startTime = Date.now()
-    const topK = 20 // 使用合理默认值，与 settings-store 的 memoryRecallCount 默认对齐
-    const query = this.context.userInput || ''
+    const startTime = Date.now();
+    const topK = 20; // 使用合理默认值，与 settings-store 的 memoryRecallCount 默认对齐
+    const query = this.context.userInput || '';
 
     try {
-      const recalled = await recallMemories(
-        this.saveId,
-        query,
-        topK,
-        {
-          baseUrl: endpoint.baseUrl,
-          apiKey: endpoint.apiKey,
-          defaultModel: config.model || endpoint.defaultModel,
-        },
-      )
+      const recalled = await recallMemories(this.saveId, query, topK, {
+        baseUrl: endpoint.baseUrl,
+        apiKey: endpoint.apiKey,
+        defaultModel: config.model || endpoint.defaultModel,
+      });
 
       // 格式化为与 LLM 路径兼容的输出结构
-      const memories = recalled.map(r => ({
+      const memories = recalled.map((r) => ({
         id: r.memory.id,
         relevance: Math.round(r.score * 100) / 100,
-        reason: r.score > 0
-          ? `Embedding 余弦相似度: ${r.score.toFixed(3)}`
-          : '无向量，按重要度排序',
-      }))
+        reason:
+          r.score > 0 ? `Embedding 余弦相似度: ${r.score.toFixed(3)}` : '无向量，按重要度排序',
+      }));
 
-      const output = { memories }
-      const duration = Date.now() - startTime
+      const output = { memories };
+      const duration = Date.now() - startTime;
 
       return {
         agentId: config.agentId,
         output,
         rawResponse: JSON.stringify(output),
-        tokensUsed: 0,       // Embedding API 按 token 计费但在 /chat/completions 口径下为 0
+        tokensUsed: 0, // Embedding API 按 token 计费但在 /chat/completions 口径下为 0
         cacheHit: false,
         duration,
-      }
+      };
     } catch (err) {
       return {
         agentId: config.agentId,
@@ -591,7 +620,7 @@ export class AgentOrchestrator {
         cacheHit: false,
         duration: Date.now() - startTime,
         error: `Embedding 召回失败: ${err instanceof Error ? err.message : String(err)}`,
-      }
+      };
     }
   }
 
@@ -603,7 +632,22 @@ export class AgentOrchestrator {
     const knownAgents = new Set(this.agentConfigs.keys());
 
     // 注册内置 Agent（即使未配置，含 Phase 6e 新增 + Phase 10 重命名）
-    for (const id of ['memory_recall', 'plot_pre_check', 'story', 'request_dispatcher', 'vars_update', 'memory_summary', 'plot_post_check', 'plot_outline', 'plot_check', 'plot_correct', 'craft_gen', 'char_gen', 'item_gen', 'combat_summary']) {
+    for (const id of [
+      'memory_recall',
+      'plot_pre_check',
+      'story',
+      'request_dispatcher',
+      'vars_update',
+      'memory_summary',
+      'plot_post_check',
+      'plot_outline',
+      'plot_check',
+      'plot_correct',
+      'craft_gen',
+      'char_gen',
+      'item_gen',
+      'combat_summary',
+    ]) {
       knownAgents.add(id);
     }
 
@@ -717,7 +761,7 @@ export class AgentOrchestrator {
           const sm = createStateManager(this.saveId);
           const patches: import('./types').StatePatch[] = [];
 
-          for (const r of (parsed.replace ?? [])) {
+          for (const r of parsed.replace ?? []) {
             // M5: 世界新闻 → add_news（#16 双轨退役）— 不再写 variables.世界新闻，改落 profile.news
             if (isWorldNewsPath(r.path)) {
               patches.push(...buildNewsPatches(r.value, 'replace'));
@@ -730,7 +774,7 @@ export class AgentOrchestrator {
               metadata: { source: 'request_dispatcher', operation: 'replace' },
             });
           }
-          for (const ins of (parsed.insert ?? [])) {
+          for (const ins of parsed.insert ?? []) {
             // M5: 世界新闻 → add_news（#16 双轨退役）— insert 路径同样拦截
             if (isWorldNewsPath(ins.path)) {
               patches.push(...buildNewsPatches(ins.value, 'insert'));
@@ -758,10 +802,18 @@ export class AgentOrchestrator {
       }
 
       // Step C: 新格式 request 标签 → 并行回调
-      const charGenMarkers = markers.filter((m): m is CharGenRequestMarker => m.type === 'char_gen_request');
-      const itemGenMarkers = markers.filter((m): m is ItemGenRequestMarker => m.type === 'item_gen_request');
-      const itemUpdateMarkers = markers.filter((m): m is ItemUpdateRequestMarker => m.type === 'item_update_request');
-      const craftGenMarkers = markers.filter((m): m is CraftGenRequestMarker => m.type === 'craft_gen_request');
+      const charGenMarkers = markers.filter(
+        (m): m is CharGenRequestMarker => m.type === 'char_gen_request',
+      );
+      const itemGenMarkers = markers.filter(
+        (m): m is ItemGenRequestMarker => m.type === 'item_gen_request',
+      );
+      const itemUpdateMarkers = markers.filter(
+        (m): m is ItemUpdateRequestMarker => m.type === 'item_update_request',
+      );
+      const craftGenMarkers = markers.filter(
+        (m): m is CraftGenRequestMarker => m.type === 'craft_gen_request',
+      );
 
       const promises: Promise<void>[] = [];
 
@@ -835,51 +887,144 @@ export class AgentOrchestrator {
 
           // --- characters.replace → set_hp/set_mp/set_sp/set_location/update_character ---
           // M4: 名字寻址唯一化（铁律1）— key 只认 name，缺 name 跳过
-          for (const r of (parsed.characters?.replace ?? [])) {
+          for (const r of parsed.characters?.replace ?? []) {
             const key = r.name;
-            if (!key) { console.warn('[Orchestrator] characters.replace 条目缺 name，跳过'); continue; }
+            if (!key) {
+              console.warn('[Orchestrator] characters.replace 条目缺 name，跳过');
+              continue;
+            }
             const { path, value } = r;
             switch (path) {
-              case 'hp': patches.push({ op: 'set_hp', target: `characters.${key}`, value, metadata: { source: 'vars_update' } }); break;
-              case 'mp': patches.push({ op: 'set_mp', target: `characters.${key}`, value, metadata: { source: 'vars_update' } }); break;
-              case 'sp': patches.push({ op: 'set_sp', target: `characters.${key}`, value, metadata: { source: 'vars_update' } }); break;
+              case 'hp':
+                patches.push({
+                  op: 'set_hp',
+                  target: `characters.${key}`,
+                  value,
+                  metadata: { source: 'vars_update' },
+                });
+                break;
+              case 'mp':
+                patches.push({
+                  op: 'set_mp',
+                  target: `characters.${key}`,
+                  value,
+                  metadata: { source: 'vars_update' },
+                });
+                break;
+              case 'sp':
+                patches.push({
+                  op: 'set_sp',
+                  target: `characters.${key}`,
+                  value,
+                  metadata: { source: 'vars_update' },
+                });
+                break;
               case 'location':
-                patches.push({ op: 'set_location', target: `characters.${key}`, value: value, metadata: { source: 'vars_update' } }); break;
+                patches.push({
+                  op: 'set_location',
+                  target: `characters.${key}`,
+                  value: value,
+                  metadata: { source: 'vars_update' },
+                });
+                break;
               case 'currentAction':
                 // M3: currentAction 走 update_character，不再顶掉 location（#19 翻译侧收口）
-                patches.push({ op: 'update_character', target: `characters.${key}`, value: { currentAction: value }, metadata: { source: 'vars_update', path } }); break;
+                patches.push({
+                  op: 'update_character',
+                  target: `characters.${key}`,
+                  value: { currentAction: value },
+                  metadata: { source: 'vars_update', path },
+                });
+                break;
               default:
-                patches.push({ op: 'update_character', target: `characters.${key}`, value: { [path]: value }, metadata: { source: 'vars_update', path } });
+                patches.push({
+                  op: 'update_character',
+                  target: `characters.${key}`,
+                  value: { [path]: value },
+                  metadata: { source: 'vars_update', path },
+                });
             }
           }
 
           // --- characters.delta → delta_hp/delta_mp/delta_sp/update_character(delta) ---
           // M4: 名字寻址唯一化（铁律1）— key 只认 name，缺 name 跳过
-          for (const d of (parsed.characters?.delta ?? [])) {
+          for (const d of parsed.characters?.delta ?? []) {
             const key = d.name;
-            if (!key) { console.warn('[Orchestrator] characters.delta 条目缺 name，跳过'); continue; }
+            if (!key) {
+              console.warn('[Orchestrator] characters.delta 条目缺 name，跳过');
+              continue;
+            }
             const { path, amount } = d;
             switch (path) {
-              case 'hp': patches.push({ op: 'delta_hp', target: `characters.${key}`, amount, metadata: { source: 'vars_update' } }); break;
-              case 'mp': patches.push({ op: 'delta_mp', target: `characters.${key}`, amount, metadata: { source: 'vars_update' } }); break;
-              case 'sp': patches.push({ op: 'delta_sp', target: `characters.${key}`, amount, metadata: { source: 'vars_update' } }); break;
+              case 'hp':
+                patches.push({
+                  op: 'delta_hp',
+                  target: `characters.${key}`,
+                  amount,
+                  metadata: { source: 'vars_update' },
+                });
+                break;
+              case 'mp':
+                patches.push({
+                  op: 'delta_mp',
+                  target: `characters.${key}`,
+                  amount,
+                  metadata: { source: 'vars_update' },
+                });
+                break;
+              case 'sp':
+                patches.push({
+                  op: 'delta_sp',
+                  target: `characters.${key}`,
+                  amount,
+                  metadata: { source: 'vars_update' },
+                });
+                break;
               case 'money':
                 // M3: money delta 走 update_character + metadata.delta=true（M2 Task 9 真加法承接 #20）
-                patches.push({ op: 'update_character', target: `characters.${key}`, value: { money: amount }, metadata: { source: 'vars_update', path, delta: true } }); break;
+                patches.push({
+                  op: 'update_character',
+                  target: `characters.${key}`,
+                  value: { money: amount },
+                  metadata: { source: 'vars_update', path, delta: true },
+                });
+                break;
               default:
-                patches.push({ op: 'update_character', target: `characters.${key}`, value: { [path]: amount }, metadata: { source: 'vars_update', path, delta: true } });
+                patches.push({
+                  op: 'update_character',
+                  target: `characters.${key}`,
+                  value: { [path]: amount },
+                  metadata: { source: 'vars_update', path, delta: true },
+                });
             }
           }
 
           // --- characters.add → add_status_effect/add_skill/add_item（M3: 零 id 生成，装备单 patch） ---
           // M4: 名字寻址唯一化（铁律1）— key 只认 name，缺 name 跳过
-          for (const a of (parsed.characters?.add ?? [])) {
+          for (const a of parsed.characters?.add ?? []) {
             const key = a.name;
-            if (!key) { console.warn('[Orchestrator] characters.add 条目缺 name，跳过'); continue; }
+            if (!key) {
+              console.warn('[Orchestrator] characters.add 条目缺 name，跳过');
+              continue;
+            }
             const { path, value } = a;
             switch (path) {
-              case 'statusEffects': patches.push({ op: 'add_status_effect', target: `characters.${key}`, value, metadata: { source: 'vars_update' } }); break;
-              case 'skills': patches.push({ op: 'add_skill', target: `characters.${key}`, value, metadata: { source: 'vars_update' } }); break;
+              case 'statusEffects':
+                patches.push({
+                  op: 'add_status_effect',
+                  target: `characters.${key}`,
+                  value,
+                  metadata: { source: 'vars_update' },
+                });
+                break;
+              case 'skills':
+                patches.push({
+                  op: 'add_skill',
+                  target: `characters.${key}`,
+                  value,
+                  metadata: { source: 'vars_update' },
+                });
+                break;
               case 'inventory': {
                 // M3: 单 add_item，无 id 生成，equippedSlot 直传
                 patches.push({
@@ -911,68 +1056,144 @@ export class AgentOrchestrator {
                     quantity: 1,
                     type: '装备',
                     rarity: value?.rarity,
-                    equippedSlot: eqSlot,  // null = 槽位不可识别，留背包
+                    equippedSlot: eqSlot, // null = 槽位不可识别，留背包
                   },
                   metadata: { source: 'vars_update', path, add: true },
                 });
                 break;
               }
-              default: patches.push({ op: 'update_character', target: `characters.${key}`, value: { [path]: value }, metadata: { source: 'vars_update', path, add: true } });
+              default:
+                patches.push({
+                  op: 'update_character',
+                  target: `characters.${key}`,
+                  value: { [path]: value },
+                  metadata: { source: 'vars_update', path, add: true },
+                });
             }
           }
 
           // --- characters.remove → remove_status_effect/unequip_item/remove_skill（M3: 统一 {name} 对象形态） ---
           // M4: 名字寻址唯一化（铁律1）— key 只认 name，缺 name 跳过
-          for (const rm of (parsed.characters?.remove ?? [])) {
+          for (const rm of parsed.characters?.remove ?? []) {
             const key = rm.name;
-            if (!key) { console.warn('[Orchestrator] characters.remove 条目缺 name，跳过'); continue; }
+            if (!key) {
+              console.warn('[Orchestrator] characters.remove 条目缺 name，跳过');
+              continue;
+            }
             const { path, target: rmTarget } = rm;
             switch (path) {
-              case 'statusEffects': patches.push({ op: 'remove_status_effect', target: `characters.${key}`, value: { name: rmTarget }, metadata: { source: 'vars_update' } }); break;
-              case 'equipment': patches.push({ op: 'unequip_item', target: `characters.${key}`, value: { name: rmTarget }, metadata: { source: 'vars_update' } }); break;
-              case 'skills': patches.push({ op: 'remove_skill', target: `characters.${key}`, value: { name: rmTarget }, metadata: { source: 'vars_update', path, remove: true } }); break;
+              case 'statusEffects':
+                patches.push({
+                  op: 'remove_status_effect',
+                  target: `characters.${key}`,
+                  value: { name: rmTarget },
+                  metadata: { source: 'vars_update' },
+                });
+                break;
+              case 'equipment':
+                patches.push({
+                  op: 'unequip_item',
+                  target: `characters.${key}`,
+                  value: { name: rmTarget },
+                  metadata: { source: 'vars_update' },
+                });
+                break;
+              case 'skills':
+                patches.push({
+                  op: 'remove_skill',
+                  target: `characters.${key}`,
+                  value: { name: rmTarget },
+                  metadata: { source: 'vars_update', path, remove: true },
+                });
+                break;
             }
           }
 
           // --- items.consume → remove_item ---
-          for (const c of (parsed.items?.consume ?? [])) {
-            patches.push({ op: 'remove_item', target: `characters.${c.owner}`, value: { name: c.target, quantity: c.quantity ?? 1 }, metadata: { source: 'vars_update', operation: 'consume' } });
+          for (const c of parsed.items?.consume ?? []) {
+            patches.push({
+              op: 'remove_item',
+              target: `characters.${c.owner}`,
+              value: { name: c.target, quantity: c.quantity ?? 1 },
+              metadata: { source: 'vars_update', operation: 'consume' },
+            });
           }
 
           // --- items.equip → equip_item ---
-          for (const e of (parsed.items?.equip ?? [])) {
+          for (const e of parsed.items?.equip ?? []) {
             // M2: e.target 本来就是物品名 → {name, slot}（杀 #23）// M3 重写
-            patches.push({ op: 'equip_item', target: `characters.${e.owner}`, value: { name: e.target, slot: e.slot }, metadata: { source: 'vars_update', operation: 'equip' } });
+            patches.push({
+              op: 'equip_item',
+              target: `characters.${e.owner}`,
+              value: { name: e.target, slot: e.slot },
+              metadata: { source: 'vars_update', operation: 'equip' },
+            });
           }
 
           // --- items.unequip → unequip_item ---
-          for (const u of (parsed.items?.unequip ?? [])) {
+          for (const u of parsed.items?.unequip ?? []) {
             // M2: u.target 是物品名 → {name} 对象形态（applyUnequipItem 按名脱）// M3 重写
-            patches.push({ op: 'unequip_item', target: `characters.${u.owner}`, value: { name: u.target }, metadata: { source: 'vars_update', operation: 'unequip' } });
+            patches.push({
+              op: 'unequip_item',
+              target: `characters.${u.owner}`,
+              value: { name: u.target },
+              metadata: { source: 'vars_update', operation: 'unequip' },
+            });
           }
 
           // --- items.transfer → transfer_item（M3: 单 patch 原子转移，杀 #5 transfer 断裂） ---
-          for (const t of (parsed.items?.transfer ?? [])) {
-            patches.push({ op: 'transfer_item', target: `characters.${t.from}`, value: { name: t.target, to: t.to, quantity: t.quantity ?? 1 }, metadata: { source: 'vars_update', operation: 'transfer' } });
+          for (const t of parsed.items?.transfer ?? []) {
+            patches.push({
+              op: 'transfer_item',
+              target: `characters.${t.from}`,
+              value: { name: t.target, to: t.to, quantity: t.quantity ?? 1 },
+              metadata: { source: 'vars_update', operation: 'transfer' },
+            });
           }
 
           // --- items.modify → update_item ---
-          for (const m of (parsed.items?.modify ?? [])) {
+          for (const m of parsed.items?.modify ?? []) {
             // M2: itemUpdate 假字段被 update_character 白名单拒 → 改专用 op update_item {name, changes} // M3 重写
             // changes 里的 name/quantity/id 是 update_item 禁改键 → 剥离（防 AI 夹带触发 throw）
-            const { name: _n, quantity: _q, id: _i, ...changes } = (m.changes ?? {}) as Record<string, any>;
-            patches.push({ op: 'update_item', target: `characters.${m.owner}`, value: { name: m.target, changes }, metadata: { source: 'vars_update', operation: 'modify' } });
+            const {
+              name: _n,
+              quantity: _q,
+              id: _i,
+              ...changes
+            } = (m.changes ?? {}) as Record<string, any>;
+            patches.push({
+              op: 'update_item',
+              target: `characters.${m.owner}`,
+              value: { name: m.target, changes },
+              metadata: { source: 'vars_update', operation: 'modify' },
+            });
           }
 
           // --- affections.set/delta → set_affection/delta_affection（M5: #15 #44 好感度接线，写 profile.affections） ---
           // M4 prompt 教的键格式: {"affections":{"set":[{name,value}],"delta":[{name,amount}]}}
-          for (const s of (parsed.affections?.set ?? [])) {
-            if (!s.name) { console.warn('[Orchestrator] affections.set 条目缺 name，跳过'); continue; }
-            patches.push({ op: 'set_affection', target: `affections.${s.name}`, value: s.value, metadata: { source: 'vars_update' } });
+          for (const s of parsed.affections?.set ?? []) {
+            if (!s.name) {
+              console.warn('[Orchestrator] affections.set 条目缺 name，跳过');
+              continue;
+            }
+            patches.push({
+              op: 'set_affection',
+              target: `affections.${s.name}`,
+              value: s.value,
+              metadata: { source: 'vars_update' },
+            });
           }
-          for (const d of (parsed.affections?.delta ?? [])) {
-            if (!d.name) { console.warn('[Orchestrator] affections.delta 条目缺 name，跳过'); continue; }
-            patches.push({ op: 'delta_affection', target: `affections.${d.name}`, amount: d.amount, metadata: { source: 'vars_update' } });
+          for (const d of parsed.affections?.delta ?? []) {
+            if (!d.name) {
+              console.warn('[Orchestrator] affections.delta 条目缺 name，跳过');
+              continue;
+            }
+            patches.push({
+              op: 'delta_affection',
+              target: `affections.${d.name}`,
+              amount: d.amount,
+              metadata: { source: 'vars_update' },
+            });
           }
 
           if (patches.length > 0) {
@@ -993,7 +1214,7 @@ export class AgentOrchestrator {
           if (effects.length > 0) {
             const { createStateManager } = await import('./state-manager');
             const sm = createStateManager(this.saveId);
-            const patches: import('./types').StatePatch[] = effects.map(e => ({
+            const patches: import('./types').StatePatch[] = effects.map((e) => ({
               op: 'add_status_effect' as const,
               target: `characters.${e.owner}`,
               value: e,
@@ -1016,7 +1237,7 @@ export class AgentOrchestrator {
             const sm = createStateManager(this.saveId);
             const patches: import('./types').StatePatch[] = [];
 
-            for (const q of (parsed.quests.upsert ?? [])) {
+            for (const q of parsed.quests.upsert ?? []) {
               const { name, ...questFields } = q;
               if (!name) continue;
               patches.push({
@@ -1027,11 +1248,11 @@ export class AgentOrchestrator {
               });
             }
 
-            for (const q of (parsed.quests.remove ?? [])) {
+            for (const q of parsed.quests.remove ?? []) {
               patches.push({
                 op: 'remove_quest',
                 target: `quests.${q.name}`,
-                value: { name: q.name },  // #40: 形态统一为 {name} 对象
+                value: { name: q.name }, // #40: 形态统一为 {name} 对象
                 metadata: { source: 'vars_update', operation: 'remove' },
               });
             }
@@ -1055,11 +1276,16 @@ export class AgentOrchestrator {
     source: string,
   ): void {
     if (result.errors.length > 0) {
-      console.error(`[Orchestrator] ${source} 状态提交失败 ${result.errors.length}/${patchCount} 条:`, result.errors);
+      console.error(
+        `[Orchestrator] ${source} 状态提交失败 ${result.errors.length}/${patchCount} 条:`,
+        result.errors,
+      );
       this.events.onStateCommitError?.(source, result.errors);
     } else if (result.patchesApplied < patchCount) {
       // applyPatch 验证失败走 return 不 throw、不进 errors[]，用数量差兜底
-      console.warn(`[Orchestrator] ${source} 部分 patch 验证失败未生效: ${result.patchesApplied}/${patchCount}`);
+      console.warn(
+        `[Orchestrator] ${source} 部分 patch 验证失败未生效: ${result.patchesApplied}/${patchCount}`,
+      );
     }
   }
 
@@ -1133,7 +1359,10 @@ function isWorldNewsPath(path: unknown): boolean {
  * - 数组 → 逐条按上述规则展开
  * 空串/null/不可识别值 → 丢弃（不产 patch，也不落变量）。
  */
-function buildNewsPatches(raw: unknown, operation: 'replace' | 'insert'): import('./types').StatePatch[] {
+function buildNewsPatches(
+  raw: unknown,
+  operation: 'replace' | 'insert',
+): import('./types').StatePatch[] {
   const items = Array.isArray(raw) ? raw : [raw];
   const patches: import('./types').StatePatch[] = [];
 
@@ -1149,7 +1378,9 @@ function buildNewsPatches(raw: unknown, operation: 'replace' | 'insert'): import
       const obj = item as Record<string, any>;
       if (typeof obj.title === 'string') title = obj.title.trim();
       // content 候选键宽容: content > event > text > news（真机实测 AI 产 {date, event} 形状）
-      const contentRaw = [obj.content, obj.event, obj.text, obj.news].find(v => typeof v === 'string' && v.trim());
+      const contentRaw = [obj.content, obj.event, obj.text, obj.news].find(
+        (v) => typeof v === 'string' && v.trim(),
+      );
       if (contentRaw) content = String(contentRaw).trim();
       if (typeof obj.category === 'string' && obj.category) category = obj.category;
       // 游戏内日期是叙事信息 → 拼 content 前缀（publishedAt 是 Code 补的现实时间戳，两者语义不同）
@@ -1172,7 +1403,7 @@ function buildNewsPatches(raw: unknown, operation: 'replace' | 'insert'): import
 
     patches.push({
       op: 'add_news',
-      target: 'news',  // M2 约定: applyAddNews 落 profile.news，target 仅作标识
+      target: 'news', // M2 约定: applyAddNews 落 profile.news，target 仅作标识
       value: category ? { title, content, category } : { title, content },
       metadata: { source: 'request_dispatcher', operation },
     });

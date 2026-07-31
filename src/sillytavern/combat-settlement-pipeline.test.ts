@@ -20,14 +20,23 @@ import type { PipelineContext } from './combat-pipeline';
 
 // ========== 工具: 造 CombatParticipant ==========
 
-function makeParticipant(overrides: Partial<CombatParticipant> & { characterId: string; name: string; side: 'ally' | 'enemy' }): CombatParticipant {
+function makeParticipant(
+  overrides: Partial<CombatParticipant> & {
+    characterId: string;
+    name: string;
+    side: 'ally' | 'enemy';
+  },
+): CombatParticipant {
   return {
     tier: 1,
     level: 1,
     attributes: { str: 10, dex: 10, con: 10, int: 10, spi: 10 },
-    hp: 100, maxHp: 100,
-    mp: 50, maxMp: 50,
-    sp: 30, maxSp: 30,
+    hp: 100,
+    maxHp: 100,
+    mp: 50,
+    maxMp: 50,
+    sp: 30,
+    maxSp: 30,
     defense: 10,
     dr: 0,
     penetration: 0,
@@ -80,7 +89,13 @@ describe('runSettlementPipeline', () => {
       // 敌方: T1 Lv5 (系数2.0 → 10) + T2 Lv4 (系数2.8 → 11.2) = 21.2 → 21
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 5 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 5,
+        }),
         makeParticipant({ characterId: 'orc', name: '兽人', side: 'enemy', tier: 2, level: 4 }),
       ]);
 
@@ -94,7 +109,13 @@ describe('runSettlementPipeline', () => {
     it('patches 含 EXP delta（op=delta_variable, target=variables.exp, amount>0）', async () => {
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 5 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 5,
+        }),
       ]);
 
       const result = await runSettlementPipeline(combat, 'ally', makeCtx(bus));
@@ -110,7 +131,13 @@ describe('runSettlementPipeline', () => {
     it('EXP patch 只在存在 ally 参战者时生成', async () => {
       // 没有 ally 单位 → 不生成 patch（即使 exp>0）
       const combat = makeCombat([
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 5 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 5,
+        }),
       ]);
 
       const result = await runSettlementPipeline(combat, 'ally', makeCtx(bus));
@@ -127,7 +154,13 @@ describe('runSettlementPipeline', () => {
     it('己方败北 → EXP = 0，patches 为空（仍触发 event）', async () => {
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 5 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 5,
+        }),
       ]);
 
       const result = await runSettlementPipeline(combat, 'enemy', makeCtx(bus));
@@ -139,7 +172,11 @@ describe('runSettlementPipeline', () => {
 
     it('enemy 胜利仍触发全部三个 event', async () => {
       const triggered: string[] = [];
-      for (const evType of [COMBAT_EVENTS.END, COMBAT_EVENTS.SETTLE_LOOT, COMBAT_EVENTS.SETTLE_COMPLETE]) {
+      for (const evType of [
+        COMBAT_EVENTS.END,
+        COMBAT_EVENTS.SETTLE_LOOT,
+        COMBAT_EVENTS.SETTLE_COMPLETE,
+      ]) {
         bus.subscribeChain({
           type: evType,
           handler: (p) => {
@@ -151,7 +188,13 @@ describe('runSettlementPipeline', () => {
 
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 5 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 5,
+        }),
       ]);
 
       await runSettlementPipeline(combat, 'enemy', makeCtx(bus));
@@ -168,7 +211,13 @@ describe('runSettlementPipeline', () => {
     it('EXP = 0，patches 为空', async () => {
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 5 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 5,
+        }),
       ]);
 
       const result = await runSettlementPipeline(combat, 'draw', makeCtx(bus));
@@ -187,7 +236,11 @@ describe('runSettlementPipeline', () => {
         [COMBAT_EVENTS.SETTLE_LOOT]: 0,
         [COMBAT_EVENTS.SETTLE_COMPLETE]: 0,
       };
-      for (const evType of [COMBAT_EVENTS.END, COMBAT_EVENTS.SETTLE_LOOT, COMBAT_EVENTS.SETTLE_COMPLETE]) {
+      for (const evType of [
+        COMBAT_EVENTS.END,
+        COMBAT_EVENTS.SETTLE_LOOT,
+        COMBAT_EVENTS.SETTLE_COMPLETE,
+      ]) {
         bus.subscribeChain({
           type: evType,
           handler: (p) => {
@@ -199,7 +252,13 @@ describe('runSettlementPipeline', () => {
 
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 3 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 3,
+        }),
       ]);
 
       await runSettlementPipeline(combat, 'ally', makeCtx(bus));
@@ -221,7 +280,13 @@ describe('runSettlementPipeline', () => {
 
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 3 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 3,
+        }),
       ]);
 
       await runSettlementPipeline(combat, 'ally', makeCtx(bus));
@@ -245,7 +310,13 @@ describe('runSettlementPipeline', () => {
 
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 3 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 3,
+        }),
       ]);
 
       const result = await runSettlementPipeline(combat, 'ally', makeCtx(bus));
@@ -260,14 +331,22 @@ describe('runSettlementPipeline', () => {
       bus.subscribeChain({
         type: COMBAT_EVENTS.SETTLE_LOOT,
         handler: (p) => {
-          receivedEnemies = (p as { defeatedEnemies?: Array<{ name: string; tier: number; level: number }> }).defeatedEnemies;
+          receivedEnemies = (
+            p as { defeatedEnemies?: Array<{ name: string; tier: number; level: number }> }
+          ).defeatedEnemies;
           return p;
         },
       });
 
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 5 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 5,
+        }),
         makeParticipant({ characterId: 'orc', name: '兽人', side: 'enemy', tier: 2, level: 4 }),
       ]);
 
@@ -282,7 +361,13 @@ describe('runSettlementPipeline', () => {
     it('无 AI 订阅时 loot 为空数组（不抛错）', async () => {
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 3 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 3,
+        }),
       ]);
 
       const result = await runSettlementPipeline(combat, 'ally', makeCtx(bus));
@@ -304,7 +389,13 @@ describe('runSettlementPipeline', () => {
 
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 3 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 3,
+        }),
       ]);
 
       const result = await runSettlementPipeline(combat, 'ally', makeCtx(bus));
@@ -320,7 +411,13 @@ describe('runSettlementPipeline', () => {
 
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 3 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 3,
+        }),
       ]);
 
       const result = await runSettlementPipeline(combat, 'ally', makeCtx(bus));
@@ -331,7 +428,13 @@ describe('runSettlementPipeline', () => {
     it('无 AI 订阅 summary 时用默认摘要（含 winner + exp）', async () => {
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 3 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 3,
+        }),
       ]);
 
       const result = await runSettlementPipeline(combat, 'ally', makeCtx(bus));
@@ -350,9 +453,21 @@ describe('runSettlementPipeline', () => {
       // 单体贡献 = 10 × 2.0 = 20；集群 5 贡献 = 10 × 2.0 × max(0.5, 1-(5-3)*0.1) = 20 × 0.8 = 16
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'solo', name: '单体兽人', side: 'enemy', tier: 1, level: 10 }),
+        makeParticipant({
+          characterId: 'solo',
+          name: '单体兽人',
+          side: 'enemy',
+          tier: 1,
+          level: 10,
+        }),
         {
-          ...makeParticipant({ characterId: 'cluster', name: '哥布林群', side: 'enemy', tier: 1, level: 10 }),
+          ...makeParticipant({
+            characterId: 'cluster',
+            name: '哥布林群',
+            side: 'enemy',
+            tier: 1,
+            level: 10,
+          }),
           clusterCount: 5,
         } as CombatParticipant,
       ]);
@@ -369,7 +484,13 @@ describe('runSettlementPipeline', () => {
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
         {
-          ...makeParticipant({ characterId: 'swarm', name: '虫群', side: 'enemy', tier: 1, level: 10 }),
+          ...makeParticipant({
+            characterId: 'swarm',
+            name: '虫群',
+            side: 'enemy',
+            tier: 1,
+            level: 10,
+          }),
           clusterCount: 100,
         } as CombatParticipant,
       ]);
@@ -384,7 +505,13 @@ describe('runSettlementPipeline', () => {
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
         {
-          ...makeParticipant({ characterId: 'pair', name: '兽人双人组', side: 'enemy', tier: 1, level: 10 }),
+          ...makeParticipant({
+            characterId: 'pair',
+            name: '兽人双人组',
+            side: 'enemy',
+            tier: 1,
+            level: 10,
+          }),
           clusterCount: 2,
         } as CombatParticipant,
       ]);
@@ -422,7 +549,13 @@ describe('runSettlementPipeline', () => {
 
       const combat = makeCombat([
         makeParticipant({ characterId: 'hero', name: '勇者', side: 'ally' }),
-        makeParticipant({ characterId: 'goblin', name: '哥布林', side: 'enemy', tier: 1, level: 3 }),
+        makeParticipant({
+          characterId: 'goblin',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 1,
+          level: 3,
+        }),
       ]);
 
       await runSettlementPipeline(combat, 'ally', makeCtx(bus, ['hero', 'goblin']));

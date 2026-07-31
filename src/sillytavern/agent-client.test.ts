@@ -163,13 +163,22 @@ describe('AgentClient', () => {
       globalThis.fetch = vi.fn().mockImplementation(() => {
         callCount++;
         if (callCount < 3) {
-          return Promise.resolve({ ok: false, status: 503, headers: new Headers(), json: async () => ({}), text: async () => 'Service Unavailable' });
+          return Promise.resolve({
+            ok: false,
+            status: 503,
+            headers: new Headers(),
+            json: async () => ({}),
+            text: async () => 'Service Unavailable',
+          });
         }
         return Promise.resolve({
           ok: true,
           status: 200,
           headers: new Headers(),
-          json: async () => ({ choices: [{ message: { content: 'finally!' } }], usage: { total_tokens: 50 } }),
+          json: async () => ({
+            choices: [{ message: { content: 'finally!' } }],
+            usage: { total_tokens: 50 },
+          }),
           text: async () => '{}',
         });
       });
@@ -201,7 +210,7 @@ describe('AgentClient', () => {
         endpoint: makeEndpoint(),
         agentId: 'test',
         saveId: 's1',
-        timeout: 50,  // very short timeout
+        timeout: 50, // very short timeout
         maxRetries: 0,
       });
 
@@ -240,7 +249,10 @@ describe('AgentClient', () => {
 
       // Abort immediately — the internal signal merges with external via onExternalAbort
       controller.abort();
-      const result = await client.chat({ messages: [{ role: 'user', content: 'test' }] }, controller.signal);
+      const result = await client.chat(
+        { messages: [{ role: 'user', content: 'test' }] },
+        controller.signal,
+      );
       expect(result.error).toBeDefined();
     });
   });

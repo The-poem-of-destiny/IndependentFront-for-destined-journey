@@ -8,66 +8,66 @@
  *
  * 设计：一个 ref 装所有设置，deep watch 自动写 localStorage。
  */
-import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
-import type { WorldBook } from '@engine/types'
-import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks'
-import { loadPresetRules, mergeRules } from '@engine/beautifier'
+import { defineStore } from 'pinia';
+import { ref, watch } from 'vue';
+import type { WorldBook } from '@engine/types';
+import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks';
+import { loadPresetRules, mergeRules } from '@engine/beautifier';
 
 // ===== 类型 =====
 
 export interface ApiEntry {
-  id: string
-  name: string
-  baseUrl: string
-  apiKey: string
-  maskedKey: string
-  model: string
-  models: string[]
-  apiType: 'chat' | 'embedding'
-  enableThinking?: boolean
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  maskedKey: string;
+  model: string;
+  models: string[];
+  apiType: 'chat' | 'embedding';
+  enableThinking?: boolean;
 }
 
 export interface PresetItem {
-  id: string
-  name: string
-  description?: string
+  id: string;
+  name: string;
+  description?: string;
   /** SillyTavern 预设原始 JSON：prompts / temp_openai / openai_max_tokens / top_p_openai / freq_pen_openai 等（ST 导入或前端构建） */
-  settings: Record<string, any>
-  createdAt: number
-  updatedAt: number
+  settings: Record<string, any>;
+  createdAt: number;
+  updatedAt: number;
 }
 
 // ===== Phase 8: Agent 项目默认配置 =====
 
 export interface AgentDefaultEntry {
-  worldBookEnabled: boolean
-  worldBookIds: string[]
-  model: string
-  systemPrompt: string
-  presetId: string
-  preset: PresetItem | null
-  temperature: number
-  topP: number
-  freqPen: number
-  presPen: number
-  maxTokens: number
+  worldBookEnabled: boolean;
+  worldBookIds: string[];
+  model: string;
+  systemPrompt: string;
+  presetId: string;
+  preset: PresetItem | null;
+  temperature: number;
+  topP: number;
+  freqPen: number;
+  presPen: number;
+  maxTokens: number;
   /** Phase 8.6: 历史对话注入层数（几轮 user+ai 对，0=不注入；不填=按 agent 类别默认） */
-  historyLayers?: number
+  historyLayers?: number;
   /** Phase 8.6: 每条历史正文截断字数（不填=按 agent 类别默认） */
-  historySlice?: number
+  historySlice?: number;
   /** Phase 10: Custom template string with {{PLACEHOLDER}} references */
-  template?: string
+  template?: string;
 }
 
 export interface AgentProjectDefaults {
-  version: number
-  agents: Record<string, AgentDefaultEntry>
+  version: number;
+  agents: Record<string, AgentDefaultEntry>;
 }
 
 // ===== 默认值 =====
 
-const STORAGE_KEY = 'fated-poem-settings'
+const STORAGE_KEY = 'fated-poem-settings';
 
 function getDefaults(): Record<string, any> {
   return {
@@ -103,7 +103,7 @@ function getDefaults(): Record<string, any> {
     worldBooks: [] as WorldBook[],
     activeWorldBookId: null as string | null,
     worldBookDirty: false,
-    allowEditBuiltInBooks: false,  // 允许编辑内置世界书（默认只读保护）
+    allowEditBuiltInBooks: false, // 允许编辑内置世界书（默认只读保护）
 
     // 剧情系统（新档默认值 — 捏人页初始化时读入，字段形状对齐 create-store / types.ts PlotSettings）
     plotMode: 'off' as string,
@@ -163,48 +163,50 @@ function getDefaults(): Record<string, any> {
     beautifierRules: [] as any[],
     beautifierPresetRules: [] as any[],
     beautifierBuiltinDisabled: [] as string[],
-  }
+  };
 }
 
 // ===== Store =====
 
 export const useSettingsStore = defineStore('settings', () => {
   // 从 localStorage 恢复
-  let saved: Record<string, any> = {}
+  let saved: Record<string, any> = {};
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) saved = JSON.parse(raw)
-  } catch { /* 解析失败用默认值 */ }
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) saved = JSON.parse(raw);
+  } catch {
+    /* 解析失败用默认值 */
+  }
 
   // 合并：已存值覆盖默认值（支持未来新增字段自动补默认值）
-  const defaults = getDefaults()
-  const merged = { ...defaults, ...saved }
+  const defaults = getDefaults();
+  const merged = { ...defaults, ...saved };
 
   // Phase 8: 启动时异步加载内置世界书（运行时 fetch，始终最新）
   setTimeout(async () => {
     try {
-      const builtIn = await loadBuiltInWorldBooks()
-      const existing = (settings.value.worldBooks as WorldBook[]) || []
-      const existingIds = new Set(existing.map(b => b.id))
+      const builtIn = await loadBuiltInWorldBooks();
+      const existing = (settings.value.worldBooks as WorldBook[]) || [];
+      const existingIds = new Set(existing.map((b) => b.id));
       for (const book of builtIn) {
         if (!existingIds.has(book.id)) {
-          existing.push(book)
+          existing.push(book);
         }
         // 已有 → 保留 localStorage 版本（用户编辑不丢）
       }
-      settings.value.worldBooks = [...existing]
+      settings.value.worldBooks = [...existing];
     } catch {
       // fetch 不可用时静默跳过
     }
     // 加载项目默认 Agent 配置
-    await loadAgentProjectDefaults()
+    await loadAgentProjectDefaults();
 
     // 🆕 初始化美化预设规则（含 autoEnable 解析）—— 修复开局游戏页读到空规则导致正则不生效。
     // 此前仅 BeautifierSection.onMounted 加载（要打开设置→输出美化才触发），现提到全局启动。
     // autoEnable 信号来自存档（命定核心选择），启动时无存档上下文 → 传空信号；
     // 规则定义加载即可，locked 由游戏页/设置页按存档 enabledWorldBookEntries 重算。
     try {
-      const presetRules = await loadPresetRules()
+      const presetRules = await loadPresetRules();
       const merged = mergeRules(
         presetRules,
         (settings.value.beautifierRules as any[]) ?? [],
@@ -212,132 +214,160 @@ export const useSettingsStore = defineStore('settings', () => {
         new Set(),
         new Set(),
         new Set(),
-      )
-      settings.value.beautifierPresetRules = merged.filter((r: any) => r.isBuiltin)
+      );
+      settings.value.beautifierPresetRules = merged.filter((r: any) => r.isBuiltin);
     } catch {
       // 加载失败静默（BeautifierSection 打开时会兜底重算）
     }
-  }, 0)
+  }, 0);
 
-  const settings = ref<Record<string, any>>(merged)
+  const settings = ref<Record<string, any>>(merged);
 
   // deep watch → 自动存
-  watch(settings, (val) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(val))
-    } catch { /* quota exceeded 等极端情况静默失败 */ }
-  }, { deep: true })
+  watch(
+    settings,
+    (val) => {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
+      } catch {
+        /* quota exceeded 等极端情况静默失败 */
+      }
+    },
+    { deep: true },
+  );
 
   /** 手动触发存储（正常情况下不需要调用，deep watch 自动处理） */
   function saveNow() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings.value))
-    } catch { /* 静默 */ }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings.value));
+    } catch {
+      /* 静默 */
+    }
   }
 
   /** 重置所有设置为默认值 */
   function resetAll() {
-    settings.value = getDefaults()
-    saveNow()
+    settings.value = getDefaults();
+    saveNow();
   }
 
   /** 恢复世界书为默认：清除旧数据，重新从 data/worldbooks/ 加载 */
   async function resetWorldBooksToDefaults() {
     try {
-      const builtIn = await loadBuiltInWorldBooks()
-      settings.value.worldBooks = builtIn
-      settings.value.activeWorldBookId = null
-      saveNow()
-    } catch { /* fetch 不可用时静默跳过 */ }
+      const builtIn = await loadBuiltInWorldBooks();
+      settings.value.worldBooks = builtIn;
+      settings.value.activeWorldBookId = null;
+      saveNow();
+    } catch {
+      /* fetch 不可用时静默跳过 */
+    }
   }
 
   // ===== 项目默认 Agent 配置 =====
 
-  const projectAgentDefaults = ref<AgentProjectDefaults>({ version: 1, agents: {} })
+  const projectAgentDefaults = ref<AgentProjectDefaults>({ version: 1, agents: {} });
 
   /** 从 data/defaults/agent-config.json 加载项目默认配置 */
   async function loadAgentProjectDefaults() {
     try {
-      const res = await fetch('/data/defaults/agent-config.json')
+      const res = await fetch('/data/defaults/agent-config.json');
       if (res.ok) {
-        projectAgentDefaults.value = await res.json()
+        projectAgentDefaults.value = await res.json();
       }
     } catch {
       // 文件不存在或 fetch 失败，使用空骨架
     }
     // 对未被用户配置过的 agent 补上项目默认值
-    const pd = projectAgentDefaults.value?.agents
-    if (!pd) return
+    const pd = projectAgentDefaults.value?.agents;
+    if (!pd) return;
     for (const [agentId, entry] of Object.entries(pd)) {
       if (!(agentId in (settings.value.agentModels as Record<string, string>))) {
-        settings.value.agentModels[agentId] = entry.model ?? ''
+        settings.value.agentModels[agentId] = entry.model ?? '';
       }
       if (!(agentId in (settings.value.agentWorldbookEnabled as Record<string, boolean>))) {
-        settings.value.agentWorldbookEnabled[agentId] = entry.worldBookEnabled ?? false
+        settings.value.agentWorldbookEnabled[agentId] = entry.worldBookEnabled ?? false;
       }
       if (!(agentId in (settings.value.agentWorldbookIds as Record<string, string[]>))) {
-        settings.value.agentWorldbookIds[agentId] = [...(entry.worldBookIds ?? [])]
+        settings.value.agentWorldbookIds[agentId] = [...(entry.worldBookIds ?? [])];
       }
       if (!(agentId in (settings.value.agentPrompts as Record<string, string>))) {
-        settings.value.agentPrompts[agentId] = entry.systemPrompt ?? ''
+        settings.value.agentPrompts[agentId] = entry.systemPrompt ?? '';
       }
       // Phase 10: 从项目默认加载上下文模板
-      if (entry.template && !(agentId in (settings.value.agentTemplates as Record<string, string>))) {
-        settings.value.agentTemplates[agentId] = entry.template
+      if (
+        entry.template &&
+        !(agentId in (settings.value.agentTemplates as Record<string, string>))
+      ) {
+        settings.value.agentTemplates[agentId] = entry.template;
       }
       // LLM 参数（缺省使用合理默认值）
       if (!(agentId in (settings.value.agentTemperature as Record<string, number>))) {
-        settings.value.agentTemperature[agentId] = entry.temperature ?? 0.7
+        settings.value.agentTemperature[agentId] = entry.temperature ?? 0.7;
       }
       if (!(agentId in (settings.value.agentTopP as Record<string, number>))) {
-        settings.value.agentTopP[agentId] = entry.topP ?? 1.0
+        settings.value.agentTopP[agentId] = entry.topP ?? 1.0;
       }
       if (!(agentId in (settings.value.agentFreqPen as Record<string, number>))) {
-        settings.value.agentFreqPen[agentId] = entry.freqPen ?? 0
+        settings.value.agentFreqPen[agentId] = entry.freqPen ?? 0;
       }
       if (!(agentId in (settings.value.agentPresPen as Record<string, number>))) {
-        settings.value.agentPresPen[agentId] = entry.presPen ?? 0
+        settings.value.agentPresPen[agentId] = entry.presPen ?? 0;
       }
       if (!(agentId in (settings.value.agentMaxTokens as Record<string, number>))) {
-        settings.value.agentMaxTokens[agentId] = entry.maxTokens ?? 16384
+        settings.value.agentMaxTokens[agentId] = entry.maxTokens ?? 16384;
       }
       // Phase 8.6: 历史注入层数/截断字数 — 不设则留空 (引擎侧 defaultHistoryLayers/Slice 兜底)
-      if (entry.historyLayers !== undefined && !(agentId in (settings.value.agentHistoryLayers as Record<string, number>))) {
-        settings.value.agentHistoryLayers[agentId] = entry.historyLayers
+      if (
+        entry.historyLayers !== undefined &&
+        !(agentId in (settings.value.agentHistoryLayers as Record<string, number>))
+      ) {
+        settings.value.agentHistoryLayers[agentId] = entry.historyLayers;
       }
-      if (entry.historySlice !== undefined && !(agentId in (settings.value.agentHistorySlice as Record<string, number>))) {
-        settings.value.agentHistorySlice[agentId] = entry.historySlice
+      if (
+        entry.historySlice !== undefined &&
+        !(agentId in (settings.value.agentHistorySlice as Record<string, number>))
+      ) {
+        settings.value.agentHistorySlice[agentId] = entry.historySlice;
       }
       // Phase 10: 从项目默认加载 Agent 上下文模板
-      if (entry.template && !(agentId in (settings.value.agentTemplates as Record<string, string>))) {
-        settings.value.agentTemplates[agentId] = entry.template
+      if (
+        entry.template &&
+        !(agentId in (settings.value.agentTemplates as Record<string, string>))
+      ) {
+        settings.value.agentTemplates[agentId] = entry.template;
       }
       // 预设：DB 空 → seed 出厂预设；DB 有同 id → 同步出厂 name（保留用户 prompts 编辑）
       if (entry.preset && entry.presetId) {
         try {
-          const { getPresets, savePreset } = await import('@engine/database')
-          const existing = await getPresets()
-          const embedded: any = JSON.parse(JSON.stringify(entry.preset))
+          const { getPresets, savePreset } = await import('@engine/database');
+          const existing = await getPresets();
+          const embedded: any = JSON.parse(JSON.stringify(entry.preset));
           if (!existing || existing.length === 0) {
-            await savePreset(embedded)
+            await savePreset(embedded);
           } else {
             // M5.1: 出厂预设改名同步 —— id 匹配时把 DB 预设 name 更新为出厂版
             // （prompts/settings 保留用户编辑；仅 name 跟随 agent-config.json）
-            const dbMatch = existing.find((p: any) => p.id === embedded.id)
+            const dbMatch = existing.find((p: any) => p.id === embedded.id);
             if (dbMatch && dbMatch.name !== embedded.name) {
-              const updated = { ...dbMatch, name: embedded.name }
-              await savePreset(updated)
-              const idx = (settings.value.presets as PresetItem[]).findIndex((p) => p.id === embedded.id)
-              if (idx >= 0) (settings.value.presets as PresetItem[])[idx] = updated as PresetItem
+              const updated = { ...dbMatch, name: embedded.name };
+              await savePreset(updated);
+              const idx = (settings.value.presets as PresetItem[]).findIndex(
+                (p) => p.id === embedded.id,
+              );
+              if (idx >= 0) (settings.value.presets as PresetItem[])[idx] = updated as PresetItem;
             }
           }
-        } catch { /* IndexedDB 不可用时静默跳过 */ }
-        const existingPreset = (settings.value.presets as PresetItem[]).find(p => p.id === entry.presetId)
+        } catch {
+          /* IndexedDB 不可用时静默跳过 */
+        }
+        const existingPreset = (settings.value.presets as PresetItem[]).find(
+          (p) => p.id === entry.presetId,
+        );
         if (!existingPreset && entry.preset) {
-          ;(settings.value.presets as PresetItem[]).push(entry.preset)
+          (settings.value.presets as PresetItem[]).push(entry.preset);
         }
         if (!settings.value.activePresetId) {
-          settings.value.activePresetId = entry.presetId
+          settings.value.activePresetId = entry.presetId;
         }
       }
     }
@@ -350,29 +380,40 @@ export const useSettingsStore = defineStore('settings', () => {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data, null, 2),
-      })
+      });
       if (res.ok) {
-        projectAgentDefaults.value = data
-        return true
+        projectAgentDefaults.value = data;
+        return true;
       }
     } catch {
       // 网络错误
     }
-    return false
+    return false;
   }
 
   /** 获取浏览器存储用量 */
   async function getStorageUsage(): Promise<{ used: number; quota: number; pct: number } | null> {
     try {
       if ('storage' in navigator && 'estimate' in navigator.storage) {
-        const est = await navigator.storage.estimate()
-        const used = est.usage ?? 0
-        const quota = est.quota ?? 0
-        return { used, quota, pct: quota > 0 ? (used / quota) * 100 : 0 }
+        const est = await navigator.storage.estimate();
+        const used = est.usage ?? 0;
+        const quota = est.quota ?? 0;
+        return { used, quota, pct: quota > 0 ? (used / quota) * 100 : 0 };
       }
-    } catch { /* 浏览器不支持 */ }
-    return null
+    } catch {
+      /* 浏览器不支持 */
+    }
+    return null;
   }
 
-  return { settings, saveNow, resetAll, resetWorldBooksToDefaults, getStorageUsage, projectAgentDefaults, loadAgentProjectDefaults, saveAgentProjectDefaults }
-})
+  return {
+    settings,
+    saveNow,
+    resetAll,
+    resetWorldBooksToDefaults,
+    getStorageUsage,
+    projectAgentDefaults,
+    loadAgentProjectDefaults,
+    saveAgentProjectDefaults,
+  };
+});

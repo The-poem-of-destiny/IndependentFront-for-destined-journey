@@ -23,17 +23,17 @@
 
 **equipment[]/EquipmentSlot 删除波及（生产代码）：**
 
-| 文件 | 处数 | 处理 |
-|------|------|------|
-| state-manager.ts | 5 + EquipmentSlot 引用 | Task 8 重写为 equippedSlot 语义 |
-| char-gen-agent.ts | 6 + 构造 5 处 | Task 12 最小适配（equipment→inventory+equippedSlot），M3 重写 |
-| char-query.ts / combat-resolver.ts / context-visibility.ts | 2/2/2 | Task 12 改读 `inventory.filter(i => i.equippedSlot)` |
-| craft-gen-chain.ts / item-gen-chain.ts | 1/1 | Task 12 最小适配，M3 重写 |
-| namespace-normalizer.ts / validate.ts | 1 / validateEquipment 块 | Task 12 改造/删除 |
-| types.ts :763（CharacterState）:831（createDefault）:605（接口）| — | Task 12 删除；:2637/:2676 是 ItemGenOutput 的 AI 输出结构，保留（M3 处理语义）|
-| UI: CharacterListPanel/ItemsPanel/StatusOverview/CharGenSystemCard/ItemSystemCard/toSystemEvent.ts | 1/2/1/2/4/3 | Task 12 最小适配 filter 写法（完整重构 M6）|
-| test-fixtures.ts 3 处 equipment 字面量 | — | Task 12 改 equippedSlot 写法 |
-| 测试 10 文件: agent-templates/char-gen-agent/combat-resolver/context-visibility/item-gen-chain/namespace-normalizer/placeholder-registry/state-manager/types/create-store 的 *.test.ts | — | Task 12 表格化清理 |
+| 文件                                                                                                                                                                                   | 处数                     | 处理                                                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------ |
+| state-manager.ts                                                                                                                                                                       | 5 + EquipmentSlot 引用   | Task 8 重写为 equippedSlot 语义                                                |
+| char-gen-agent.ts                                                                                                                                                                      | 6 + 构造 5 处            | Task 12 最小适配（equipment→inventory+equippedSlot），M3 重写                  |
+| char-query.ts / combat-resolver.ts / context-visibility.ts                                                                                                                             | 2/2/2                    | Task 12 改读 `inventory.filter(i => i.equippedSlot)`                           |
+| craft-gen-chain.ts / item-gen-chain.ts                                                                                                                                                 | 1/1                      | Task 12 最小适配，M3 重写                                                      |
+| namespace-normalizer.ts / validate.ts                                                                                                                                                  | 1 / validateEquipment 块 | Task 12 改造/删除                                                              |
+| types.ts :763（CharacterState）:831（createDefault）:605（接口）                                                                                                                       | —                        | Task 12 删除；:2637/:2676 是 ItemGenOutput 的 AI 输出结构，保留（M3 处理语义） |
+| UI: CharacterListPanel/ItemsPanel/StatusOverview/CharGenSystemCard/ItemSystemCard/toSystemEvent.ts                                                                                     | 1/2/1/2/4/3              | Task 12 最小适配 filter 写法（完整重构 M6）                                    |
+| test-fixtures.ts 3 处 equipment 字面量                                                                                                                                                 | —                        | Task 12 改 equippedSlot 写法                                                   |
+| 测试 10 文件: agent-templates/char-gen-agent/combat-resolver/context-visibility/item-gen-chain/namespace-normalizer/placeholder-registry/state-manager/types/create-store 的 *.test.ts | —                        | Task 12 表格化清理                                                             |
 
 **id 可选化波及（读点需 null 容忍或改按 name）：** ScenePanel.vue(7)、state-manager.ts(5)、effect-runtime.ts(3)、CharacterListPanel.vue(2，`:key="fx.id"`→`:key="fx.name"`)、validate.ts(2)、StatusOverview.vue(1)。（create-store/CreateStep* 的池 id 不在此列。）
 
@@ -42,10 +42,12 @@
 ### Task 1: field-enums 别名表原型键加固（M2 硬前置 ①）
 
 **Files:**
+
 - Modify: `src/sillytavern/field-enums.ts`
 - Test: `src/sillytavern/field-enums.test.ts`
 
 **Interfaces:**
+
 - Produces: 5 个 normalize* 行为不变，但对 `'constructor'`/`'toString'` 等原型键输入安全返回 null/undefined/兜底值。
 
 - [ ] **Step 1: 写失败测试（追加到 field-enums.test.ts）**
@@ -78,7 +80,9 @@ describe('原型键安全（M2 硬前置: AI 提名值可能是任意字符串�
 
 ```ts
 const SLOT_ALIASES: Record<string, EquipSlot> = Object.assign(Object.create(null), {
-  '主手': '武器', '惯用手': '武器', '副武器': '副手',
+  主手: '武器',
+  惯用手: '武器',
+  副武器: '副手',
   // …原字面量内容原样保留…
 });
 ```
@@ -95,6 +99,7 @@ const SLOT_ALIASES: Record<string, EquipSlot> = Object.assign(Object.create(null
 ### Task 2: applyAddCharacter 无条件覆写 saveId（M2 硬前置 ②）
 
 **Files:**
+
 - Modify: `src/sillytavern/state-manager.ts`（applyAddCharacter）
 - Test: `src/sillytavern/state-manager.test.ts`
 
@@ -107,7 +112,7 @@ it('add_character 携带非空但错误的 saveId 时也被覆写（铁律3: 不
   npc.saveId = 'save_WRONG';
   await sm.commitChatState([{ op: 'add_character', target: 'characters.串档NPC', value: npc }]);
   const got = await getCharacters('save_right');
-  expect(got.find(c => c.name === '串档NPC')?.saveId).toBe('save_right');
+  expect(got.find((c) => c.name === '串档NPC')?.saveId).toBe('save_right');
 });
 ```
 
@@ -115,9 +120,9 @@ it('add_character 携带非空但错误的 saveId 时也被覆写（铁律3: 不
 - [ ] **Step 3: 实现** — M1 注入的两行改为无条件：
 
 ```ts
-    // 铁律3: saveId 是账务字段，由 Code 无条件注入，不信任上游 patch 构造方 (#8/M2硬前置②)
-    character.saveId = this.saveId;
-    if (character.customFields) character.customFields.saveId = this.saveId;  // 双写，M6 删
+// 铁律3: saveId 是账务字段，由 Code 无条件注入，不信任上游 patch 构造方 (#8/M2硬前置②)
+character.saveId = this.saveId;
+if (character.customFields) character.customFields.saveId = this.saveId; // 双写，M6 删
 ```
 
 - [ ] **Step 4: 确认通过 + typecheck + 全量** ；**Step 5: Commit** `fix(M2): applyAddCharacter 无条件覆写 saveId (硬前置②)`
@@ -129,9 +134,11 @@ it('add_character 携带非空但错误的 saveId 时也被覆写（铁律3: 不
 ### Task 3: types.ts 扩展 — 新 op 联合 + id 可选化（不破坏，先铺路）
 
 **Files:**
+
 - Modify: `src/sillytavern/types.ts`
 
 **Interfaces:**
+
 - Produces: `StatePatchOp` 新增 `'remove_character' | 'rename_character' | 'remove_skill' | 'update_item' | 'transfer_item' | 'set_affection' | 'delta_affection' | 'add_news'`；`Skill.id?` / `InventoryItem.id?` / `StatusEffect.id?` 变可选并 @deprecated。
 
 - [ ] **Step 1: StatePatchOp 联合类型（types.ts:1207 附近）追加 8 个 op**（放在对应实体分组旁，每个带一行中文注释：用途 + 规范章节号）。
@@ -143,6 +150,7 @@ it('add_character 携带非空但错误的 saveId 时也被覆写（铁律3: 不
 ```
 
 （Skill/InventoryItem/StatusEffect 三处同文案。）
+
 - [ ] **Step 3: InventoryItem 核对补齐 `stats?: Record<string, number>` / `durability?: number` / `maxDurability?: number`**（规范 §3.1——装备并入物品后这些字段归物品；已有则跳过）。
 - [ ] **Step 4: typecheck + 全量测试**（id 变可选是放宽，构造点不破；若有 `string` 上下文读 `.id` 报错，本 task 内以 `?? ''` 最小适配并登记到 Task 12 表格）。
 - [ ] **Step 5: Commit** `feat(M2): StatePatchOp 扩展 8 op + 物品/技能/状态效果 id 可选化 (@deprecated)`
@@ -152,10 +160,12 @@ it('add_character 携带非空但错误的 saveId 时也被覆写（铁律3: 不
 ### Task 4: StateManager 基建 — resolveCharacter + validatePatch 语义修正
 
 **Files:**
+
 - Modify: `src/sillytavern/state-manager.ts`
 - Test: `src/sillytavern/state-manager.test.ts`
 
 **Interfaces:**
+
 - Produces（后续所有 task 与 M3 消费）:
   - `private async resolveCharacter(key: string): Promise<CharacterState>` — 存档内按 name 精确匹配 → `'主角'|'玩家'` 别名返回 type='player' → UUID 兜底（`// 过渡: M4 删`）→ 找不到 throw `` `角色不存在: ${key}` ``
   - `private async resolveCharTarget(target: string): Promise<CharacterState>` — `characters.<key>` 前缀剥离后调 resolveCharacter（子路径如 `characters.X.skills` 只取第一段，修 #11 的 Code 侧防御）
@@ -170,8 +180,12 @@ describe('resolveCharacter 名字解析唯一入口', () => {
     /* mock store 放入 {id:'uuid-1', name:'理查德', type:'player', saveId:'s1'} →
        commit [{op:'set_hp', target:'characters.理查德', value: 50}] → 断言 hp=50 */
   });
-  it('主角/玩家 别名解析到 player', async () => { /* target:'characters.主角' 同上生效 */ });
-  it('UUID 兜底仍可用（过渡期）', async () => { /* target:'characters.uuid-1' 生效 */ });
+  it('主角/玩家 别名解析到 player', async () => {
+    /* target:'characters.主角' 同上生效 */
+  });
+  it('UUID 兜底仍可用（过渡期）', async () => {
+    /* target:'characters.uuid-1' 生效 */
+  });
   it('解析失败进 errors[] 不静默', async () => {
     /* commit 不存在的名字 → result.errors 含 '角色不存在: 不存在的人' */
   });
@@ -202,6 +216,7 @@ amount 必填: delta_variable/delta_hp/mp/sp/delta_affection
 
 全部**角色类 handler**（update_character/set_hp 系/delta 系/set_location/add_status_effect 系/add_item 系/equip 系/add_skill 系）的开头统一机械替换为 `const char = await this.resolveCharTarget(patch.target);`。
 另外两处顺带接归一化：`applyUpdateQuest` 写入前 `questFields.status = normalizeQuestStatus(questFields.status ?? '')`（杀 #32 自由字符串）；`remove_quest` value 从裸字符串改 `{name}` 对象（#40 形态统一，翻译层 M3 同步）。
+
 - [ ] **Step 4: 既有测试语义更新（本 task 集中处理，逐一列出）**：
   - `state-manager.test.ts` 「validatePatch/errors stays empty」系列（~:172-227）：断言反转——非法 patch 现在**进 errors[]**，`expect(result.errors).toHaveLength(n)`。
   - partial-success 用例（~:1149-1176）：`patchesApplied` 语义不变，errors 计数按新矩阵调整。
@@ -215,10 +230,12 @@ amount 必填: delta_variable/delta_hp/mp/sp/delta_affection
 ### Task 5: 状态效果三 op 重写（按名寻址）
 
 **Files:**
+
 - Modify: `src/sillytavern/state-manager.ts`（applyAddStatusEffect / applyRemoveStatusEffect / applyTimeAdvance / convertScriptEffects）
 - Test: `src/sillytavern/state-manager.test.ts`
 
 **Interfaces:**
+
 - Produces: `add_status_effect` value=`{name(必),...}` 无 id（同名按 stackable/maxStacks 叠层，缺省 stacks=1，category 过 normalizeStatusCategory）；`remove_status_effect` value=`{name}` **或 string（按 name 解释，`// 过渡: M3 删`）**。
 
 - [ ] **Step 1: 失败测试** — ① `add_status_effect` 不带 id 成功落库（杀 #4：这条链上线以来必 throw）② 同名再施加 stackable=true 时 stacks+1、超 maxStacks 封顶 ③ `remove_status_effect` value='轻伤' 字符串按名删掉（杀 #22）④ category 传 'buff' 归一为 '增益'。
@@ -234,10 +251,12 @@ amount 必填: delta_variable/delta_hp/mp/sp/delta_affection
 ### Task 6: 技能 op 重写 + remove_skill
 
 **Files:**
+
 - Modify: `src/sillytavern/state-manager.ts`（applyAddSkill / applyUpdateSkill / 新增 applyRemoveSkill）
 - Test: `src/sillytavern/state-manager.test.ts`
 
 **Interfaces:**
+
 - Produces: `add_skill` value=`{name(必),...}` 无 id，**同名=覆盖升级**（规范 §4）；`update_skill` value=`{name, changes}`（旧 `{skillId, changes}` 形状不再支持——grep 确认生产无发送方，仅测试用）；`remove_skill` value=`{name}`。
 
 - [ ] **Step 1: 失败测试** — ① add_skill 无 id 落库（杀 #4 技能侧）② 同名 add = 字段覆盖不重复 ③ update_skill 按 name 改 level ④ remove_skill 按 name 删、删不存在的进 errors[]。
@@ -251,10 +270,12 @@ amount 必填: delta_variable/delta_hp/mp/sp/delta_affection
 ### Task 7: 物品 add/remove/update/transfer 重写（同名合并 + 归一化）
 
 **Files:**
+
 - Modify: `src/sillytavern/state-manager.ts`（applyAddItem / applyRemoveItem / 新增 applyUpdateItem / applyTransferItem）
 - Test: `src/sillytavern/state-manager.test.ts`
 
 **Interfaces:**
+
 - Produces（规范 §3.3 契约）:
   - `add_item` value=`{name(必), quantity?=1, type?, rarity?, description?, stats?, effects?, scripts?, equippedSlot?}` — **同名合并累加 quantity**；type 过 normalizeItemType、rarity 过 normalizeRarity、equippedSlot 过 normalizeSlot
   - `remove_item` value=`{name(必), quantity?=1}` **或 string（按 name 解释、patch.amount 当 quantity，兼容 craft-resolver 现行发法，`// 过渡: M3 删`）** — 扣减≤0 时 splice；**找不到 → throw 进 errors[]**（杀 #5 #35 静默）
@@ -273,10 +294,12 @@ amount 必填: delta_variable/delta_hp/mp/sp/delta_affection
 ### Task 8: equip/unequip 语义重写 — equippedSlot 单真源
 
 **Files:**
+
 - Modify: `src/sillytavern/state-manager.ts`（applyEquipItem / applyUnequipItem）
 - Test: `src/sillytavern/state-manager.test.ts`
 
 **Interfaces:**
+
 - Produces（规范 §3 装备=物品状态）:
   - `equip_item` value=`{name(必), slot(必)}` — slot 过 normalizeSlot（非法 slot 进 errors）；物品必须已在 inventory（找不到进 errors）；**quantity>1 的物品拒绝直接穿**（堆叠穿戴互斥，提示"先拆分"进 errors）；同槽已有装备自动 `equippedSlot=null`；本物品 `equippedSlot=slot`
   - `unequip_item` value=`{name}` 或 `{slot}`（按 slot 找当前穿戴者）— 清 equippedSlot；零数据搬运（杀 #10 有损穿脱）
@@ -292,10 +315,12 @@ amount 必填: delta_variable/delta_hp/mp/sp/delta_affection
 ### Task 9: update_character 白名单 + currentAction 归位 + delta 修正
 
 **Files:**
+
 - Modify: `src/sillytavern/state-manager.ts`（applyUpdateCharacter）
 - Test: `src/sillytavern/state-manager.test.ts`
 
 **Interfaces:**
+
 - Produces: `update_character` value 白名单校验——**禁数组字段**（inventory/skills/statusEffects → 进 errors 提示走专用 op，杀 #21）、**禁 name**（改名唯一途径 rename_character）、**禁 id/saveId**（账务字段）；数值字段 + `metadata.delta=true` 时做**真加法**（杀 #20 的 money delta 变替换）；`currentAction` 是合法白名单字段（M3 翻译层把 currentAction 分支从 set_location 改到这里，杀 #19 的 Code 侧承接）。
 
 - [ ] **Step 1: 失败测试** — ① value 含 inventory 键 → errors 且角色对象无污染 ② value 含 name → errors ③ `{value:{money:-50}, metadata:{delta:true}}` 在 money=100 时结果 50 ④ currentAction 正常写入不再顶掉 location。
@@ -309,10 +334,12 @@ amount 必填: delta_variable/delta_hp/mp/sp/delta_affection
 ### Task 10: 好感度/新闻 op — set_affection / delta_affection / add_news
 
 **Files:**
+
 - Modify: `src/sillytavern/state-manager.ts`
 - Test: `src/sillytavern/state-manager.test.ts`
 
 **Interfaces:**
+
 - Produces（M5 翻译层与 UI 消费）:
   - `set_affection` target=`affections.<角色名>` value=number → `profile.affections[角色名] = clamp(value, -100, 100)`（写 SaveProfile，getProfile 惰性创建路径复用 update_quest 的现成模式）
   - `delta_affection` 同 target amount=number → 现值(缺省0)+amount 后 clamp
@@ -330,10 +357,12 @@ amount 必填: delta_variable/delta_hp/mp/sp/delta_affection
 ### Task 11: remove_character / rename_character（怪物生命周期 + 改名兜底）
 
 **Files:**
+
 - Modify: `src/sillytavern/state-manager.ts`
 - Test: `src/sillytavern/state-manager.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `remove_character` target=`characters.<名>` — resolveCharTarget 后从 Dexie 删除该角色记录（`deleteCharacter(id)`，database.ts 已有或本 task 补一个 `db.characters.delete(id)` 薄封装）。规范 §2.2: 怪物/召唤物死亡或战斗结束即整条删除
   - `rename_character` target=`characters.<旧名>` value=`'<新名>'` — ① 同存档新名查重（撞名进 errors）② `char.name = 新名` 落库 ③ **按名引用迁移**: `profile.affections[旧名]` 键迁移（Task 10 已就位）+ `profile.quests` 各 quest 的文本字段不迁移（叙事文本，接受陈旧）——迁移面在本 task 注释里写明"当前按名引用仅 affections；M5/M6 新增按名引用时必须回来扩这里"
@@ -349,31 +378,34 @@ amount 必填: delta_variable/delta_hp/mp/sp/delta_affection
 ### Task 12: equipment[]/EquipmentSlot 删除大手术（编译清单驱动）
 
 **Files:**
+
 - Modify: `src/sillytavern/types.ts`（删 :605 EquipmentSlot 接口、:763 CharacterState.equipment、:831 createDefault 的 `equipment: []`）+ 附录 A 全部波及文件
 - Test: 附录 A 列出的 10 个测试文件
 
 **Interfaces:**
+
 - Produces: 全工程 `CharacterState.equipment` 消失；装备读取统一 `char.inventory.filter(i => i.equippedSlot)` 惯用式。
 
 - [ ] **Step 1: types.ts 三处删除** → `npm run typecheck 2>&1 | tee /tmp/m2-t12.txt` 拿全量报错清单。
 - [ ] **Step 2: 生产代码逐文件清理**（附录 A 的处理列 + 以下速查；同模式给一个完整示例，其余表格化）：
 
 示例（char-query.ts 读点模式，其余读点同式）:
+
 ```ts
 // 旧: const weapons = char.equipment.filter(e => e.slot === 'weapon');
 // 新: 装备=inventory 中 equippedSlot 非空的物品（规范 §3）
-const equipped = char.inventory.filter(i => i.equippedSlot);
+const equipped = char.inventory.filter((i) => i.equippedSlot);
 ```
 
-| 文件 | 改法 |
-|------|------|
-| state-manager.ts 残余 5 处 | Task 8 已改 handler，剩余读点改 filter 式 |
-| char-gen-agent.ts assembleCharacterState + 5 处构造 | 装备产物写成 `{...item, equippedSlot: guessSlot(...)}` 直接 push 进 inventory；`{skills:[],equipment:[],inventory:[]}` 空构造删 equipment 键（同步改 ItemGenOutput 消费处签名——**仅编译适配，语义 M3 重写**） |
-| craft-gen-chain.ts / item-gen-chain.ts 同款空构造 | 同上，标 `// M3 重写` |
-| combat-resolver.ts(2) context-visibility.ts(2) namespace-normalizer.ts(1) | filter 式替换 |
-| validate.ts validateEquipment 块 + EquipmentSlot import | 块删除（装备校验并入物品校验），import 清理 |
-| UI 6 文件（附录 A） | filter 式最小适配，`// M6 完整重构` |
-| test-fixtures.ts 3 处 | equipment 数组字面量改为 inventory 内带 equippedSlot 的物品 |
+| 文件                                                                      | 改法                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| state-manager.ts 残余 5 处                                                | Task 8 已改 handler，剩余读点改 filter 式                                                                                                                                                                     |
+| char-gen-agent.ts assembleCharacterState + 5 处构造                       | 装备产物写成 `{...item, equippedSlot: guessSlot(...)}` 直接 push 进 inventory；`{skills:[],equipment:[],inventory:[]}` 空构造删 equipment 键（同步改 ItemGenOutput 消费处签名——**仅编译适配，语义 M3 重写**） |
+| craft-gen-chain.ts / item-gen-chain.ts 同款空构造                         | 同上，标 `// M3 重写`                                                                                                                                                                                         |
+| combat-resolver.ts(2) context-visibility.ts(2) namespace-normalizer.ts(1) | filter 式替换                                                                                                                                                                                                 |
+| validate.ts validateEquipment 块 + EquipmentSlot import                   | 块删除（装备校验并入物品校验），import 清理                                                                                                                                                                   |
+| UI 6 文件（附录 A）                                                       | filter 式最小适配，`// M6 完整重构`                                                                                                                                                                           |
+| test-fixtures.ts 3 处                                                     | equipment 数组字面量改为 inventory 内带 equippedSlot 的物品                                                                                                                                                   |
 
 - [ ] **Step 3: 测试文件表格化清理**（10 文件，全部是"删 equipment 键/改 filter 断言/id 断言改 name"三类机械改法，以报错清单驱动逐个清零）。
 - [ ] **Step 4: typecheck 0 错误 + 全量测试**；**Step 5: Commit** `refactor(M2): EquipmentSlot/equipment[] 退役 — 装备统一 equippedSlot 单真源 (#41)`
@@ -385,6 +417,7 @@ const equipped = char.inventory.filter(i => i.equippedSlot);
 ### Task 13: id 读点清理（可选 id 的 null 容忍）
 
 **Files:**
+
 - Modify: `src/ui/components/game/ScenePanel.vue`(7) `CharacterListPanel.vue`(2: `:key="fx.id"`→`:key="fx.name"`) `StatusOverview.vue`(1) `src/sillytavern/effect-runtime.ts`(3) `validate.ts`(2) `state-manager.ts` 残余
 - ⚠️ 排除: create-store/CreateStep*/SelectedPanel 的池 id（见 Global Constraints）
 
@@ -398,9 +431,10 @@ const equipped = char.inventory.filter(i => i.equippedSlot);
 ### Task 14: 翻译层最小编译适配（M3 前的临时桥）
 
 **Files:**
+
 - Modify: `src/sillytavern/agent-orchestrator.ts` / `item-gen-chain.ts` / `char-gen-agent.ts` / `craft-gen-chain.ts`（仅 buildPatches 输出形状）
 
-- [ ] **Step 1**: 上游构造的 patch value 改成新契约**最小形状**（能过 validatePatch + apply 不 throw 即可，语义重写留 M3）：orchestrator 的 add_item 补 name 键直传、equip_item `{itemId,slot}`→`{name: 原itemId值, slot}`（旧值本来就是名字，杀 #23 顺手）、varsupd_*/itemgen_*/craft_* 的 id 生成行**保留但输出进 value.id 可选位**（apply 已忽略）并标 `// M3 删`。
+- [ ] **Step 1**: 上游构造的 patch value 改成新契约**最小形状**（能过 validatePatch + apply 不 throw 即可，语义重写留 M3）：orchestrator 的 add_item 补 name 键直传、equip_item `{itemId,slot}`→`{name: 原itemId值, slot}`（旧值本来就是名字，杀 #23 顺手）、varsupd__/itemgen__/craft_* 的 id 生成行**保留但输出进 value.id 可选位**（apply 已忽略）并标 `// M3 删`。
 - [ ] **Step 2: 相关链路测试跑绿**（agent-orchestrator.test Stage3 系列 / item-gen-chain.test / char-gen-agent.test 按新形状改断言）+ typecheck + 全量。
 - [ ] **Step 3: Commit** `chore(M2): 翻译层最小适配新契约 (M3 重写前的编译桥)`
 
@@ -409,6 +443,7 @@ const equipped = char.inventory.filter(i => i.equippedSlot);
 ### Task 15: 收尾 — 文档同步 + 全量验证
 
 **Files:**
+
 - Modify: `docs/superpowers/specs/2026-07-16-data-field-conventions-design.md`（附录 A 加 M2 执行注记）、`CLAUDE.md`（StateManager 行注记 ADR-21 后追加"M2: 按名寻址"一句）
 - Modify: `.superpowers/sdd/progress.md`（若用 SDD 执行则自动维护）
 
@@ -421,22 +456,22 @@ const equipped = char.inventory.filter(i => i.equippedSlot);
 
 ## 覆盖清单
 
-| # | 问题 | Task |
-|---|------|------|
-| 硬前置① 原型键穿透 | field-enums 加固 | 1 |
-| 硬前置② saveId 无条件覆写 | applyAddCharacter | 2 |
-| #4 技能/状态效果必 throw | 5 / 6 |
-| #5 消耗品扣不掉 | 7 |
-| #10 穿脱有损 | 8 |
-| #11 target 子路径（Code 侧防御） | 4 |
-| #19 currentAction 顶掉 location（Code 承接） | 9 |
-| #20 delta 变替换 | 9 |
-| #21 假字段污染 | 6 / 7 / 9 |
-| #22 按名删效果按 id 匹配 | 5 |
-| #23 #24 equip/unequip 语义 | 8 / 14 |
-| #32 quest.status 归一（Code 侧入口在 update_quest 内接 normalizeQuestStatus，Task 4 矩阵顺带）| 4 |
-| #35 静默/throw 风格分裂 | 7 |
-| #40 Quest 形态 + id 读点 | 4 / 13 |
-| #41 装备双表示 | 8 / 12 |
-| #15 #16 Code 侧 op | 10 |
-| 规范 §2.2 怪物生命周期/rename | 11 |
+| #                                                                                              | 问题              | Task |
+| ---------------------------------------------------------------------------------------------- | ----------------- | ---- |
+| 硬前置① 原型键穿透                                                                             | field-enums 加固  | 1    |
+| 硬前置② saveId 无条件覆写                                                                      | applyAddCharacter | 2    |
+| #4 技能/状态效果必 throw                                                                       | 5 / 6             |
+| #5 消耗品扣不掉                                                                                | 7                 |
+| #10 穿脱有损                                                                                   | 8                 |
+| #11 target 子路径（Code 侧防御）                                                               | 4                 |
+| #19 currentAction 顶掉 location（Code 承接）                                                   | 9                 |
+| #20 delta 变替换                                                                               | 9                 |
+| #21 假字段污染                                                                                 | 6 / 7 / 9         |
+| #22 按名删效果按 id 匹配                                                                       | 5                 |
+| #23 #24 equip/unequip 语义                                                                     | 8 / 14            |
+| #32 quest.status 归一（Code 侧入口在 update_quest 内接 normalizeQuestStatus，Task 4 矩阵顺带） | 4                 |
+| #35 静默/throw 风格分裂                                                                        | 7                 |
+| #40 Quest 形态 + id 读点                                                                       | 4 / 13            |
+| #41 装备双表示                                                                                 | 8 / 12            |
+| #15 #16 Code 侧 op                                                                             | 10                |
+| 规范 §2.2 怪物生命周期/rename                                                                  | 11                |

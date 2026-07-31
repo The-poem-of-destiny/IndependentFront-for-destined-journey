@@ -1,31 +1,38 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import AppButton from '../shared/AppButton.vue'
+import { ref } from 'vue';
+import AppButton from '../shared/AppButton.vue';
 
-const props = defineProps<{ outline: any; chapters: any[]; isGenerating: boolean; revealed: boolean }>()
-defineEmits<{ reveal: []; regenerate: [] }>()
+const props = defineProps<{
+  outline: any;
+  chapters: any[];
+  isGenerating: boolean;
+  revealed: boolean;
+}>();
+defineEmits<{ reveal: []; regenerate: [] }>();
 
-const expandedChapters = ref<Set<number>>(new Set())
+const expandedChapters = ref<Set<number>>(new Set());
 
 function toggleChapter(idx: number) {
-  const ns = new Set(expandedChapters.value)
-  ns.has(idx) ? ns.delete(idx) : ns.add(idx)
-  expandedChapters.value = ns
+  const ns = new Set(expandedChapters.value);
+  if (ns.has(idx)) {
+    ns.delete(idx);
+  } else {
+    ns.add(idx);
+  }
+  expandedChapters.value = ns;
 }
 
 function formatTimeRange(tr: { start?: string; end?: string } | undefined): string {
-  if (!tr?.start) return ''
-  if (!tr.end || tr.end === tr.start) return tr.start
-  return `${tr.start} ~ ${tr.end}`
+  if (!tr?.start) return '';
+  if (!tr.end || tr.end === tr.start) return tr.start;
+  return `${tr.start} ~ ${tr.end}`;
 }
 </script>
 
 <template>
   <div class="outline-preview">
     <!-- 未生成 -->
-    <div v-if="!outline && !isGenerating" class="outline-empty">
-      ─ 尚未生成剧情大纲 ─
-    </div>
+    <div v-if="!outline && !isGenerating" class="outline-empty">─ 尚未生成剧情大纲 ─</div>
 
     <!-- 生成中 -->
     <div v-if="isGenerating" class="outline-loading">
@@ -71,7 +78,9 @@ function formatTimeRange(tr: { start?: string; end?: string } | undefined): stri
             >
               <span class="chapter-toggle">{{ expandedChapters.has(idx) ? '▾' : '▸' }}</span>
               <span class="chapter-title">{{ ch.title || '第 ' + (idx + 1) + ' 章' }}</span>
-              <span v-if="ch.status" class="chapter-badge" :class="'badge-' + ch.status">{{ ch.status }}</span>
+              <span v-if="ch.status" class="chapter-badge" :class="'badge-' + ch.status">{{
+                ch.status
+              }}</span>
             </div>
             <div v-if="expandedChapters.has(idx)" class="chapter-body">
               <p v-if="ch.summary" class="chapter-summary">{{ ch.summary }}</p>
@@ -82,7 +91,11 @@ function formatTimeRange(tr: { start?: string; end?: string } | undefined): stri
                     <span class="event-bullet" />
                     <strong>{{ ev.title }}</strong>
                     <span v-if="ev.timeWindow?.start" class="event-time">
-                      {{ ev.timeWindow.end && ev.timeWindow.end !== ev.timeWindow.start ? ev.timeWindow.start + ' ~ ' + ev.timeWindow.end : ev.timeWindow.start }}
+                      {{
+                        ev.timeWindow.end && ev.timeWindow.end !== ev.timeWindow.start
+                          ? ev.timeWindow.start + ' ~ ' + ev.timeWindow.end
+                          : ev.timeWindow.start
+                      }}
                     </span>
                   </div>
                   <p v-if="ev.description" class="event-desc">{{ ev.description }}</p>
@@ -118,22 +131,42 @@ function formatTimeRange(tr: { start?: string; end?: string } | undefined): stri
 }
 
 /* Empty & Loading */
-.outline-empty { color: var(--theme-text-muted); font-size: 0.8rem; text-align: center; }
-.outline-loading { text-align: center; color: var(--theme-text-muted); font-size: 0.8rem; }
+.outline-empty {
+  color: var(--theme-text-muted);
+  font-size: 0.8rem;
+  text-align: center;
+}
+.outline-loading {
+  text-align: center;
+  color: var(--theme-text-muted);
+  font-size: 0.8rem;
+}
 .shimmer {
-  width: 100%; height: 40px;
-  background: linear-gradient(90deg, var(--theme-card-border) 25%, var(--theme-card-bg) 50%, var(--theme-card-border) 75%);
+  width: 100%;
+  height: 40px;
+  background: linear-gradient(
+    90deg,
+    var(--theme-card-border) 25%,
+    var(--theme-card-bg) 50%,
+    var(--theme-card-border) 75%
+  );
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: var(--theme-radius-sm);
   margin-bottom: var(--theme-spacing-sm);
 }
 @keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
-  .shimmer { animation: none; }
+  .shimmer {
+    animation: none;
+  }
 }
 
 /* Blur layer */
@@ -189,7 +222,9 @@ function formatTimeRange(tr: { start?: string; end?: string } | undefined): stri
 }
 
 /* Content */
-.outline-content { margin-bottom: var(--theme-spacing-sm); }
+.outline-content {
+  margin-bottom: var(--theme-spacing-sm);
+}
 .content-text {
   font-size: 0.7rem;
   color: var(--theme-text-secondary);
@@ -201,7 +236,9 @@ function formatTimeRange(tr: { start?: string; end?: string } | undefined): stri
 }
 
 /* Chapters */
-.outline-chapters { margin-bottom: var(--theme-spacing-sm); }
+.outline-chapters {
+  margin-bottom: var(--theme-spacing-sm);
+}
 .chapter-item {
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-sm);
@@ -218,25 +255,86 @@ function formatTimeRange(tr: { start?: string; end?: string } | undefined): stri
   color: var(--theme-text-primary);
   transition: background-color 0.2s;
 }
-.chapter-header:hover { background-color: var(--theme-card-bg); }
-.chapter-toggle { font-size: 0.65rem; color: var(--theme-text-muted); min-width: 12px; }
-.chapter-title { flex: 1; font-weight: 600; }
-.chapter-badge { font-size: 0.55rem; padding: 1px 6px; border-radius: 10px; }
-.badge-pending { background: var(--theme-badge-bg, #333); color: var(--theme-text-muted); }
-.badge-active { background: var(--theme-accent); color: #fff; }
-.badge-completed { background: var(--theme-success, #4a4); color: #fff; }
-.chapter-body { padding: 6px 8px 8px 24px; }
-.chapter-summary { font-size: 0.7rem; color: var(--theme-text-secondary); margin: 0 0 6px; }
+.chapter-header:hover {
+  background-color: var(--theme-card-bg);
+}
+.chapter-toggle {
+  font-size: 0.65rem;
+  color: var(--theme-text-muted);
+  min-width: 12px;
+}
+.chapter-title {
+  flex: 1;
+  font-weight: 600;
+}
+.chapter-badge {
+  font-size: 0.55rem;
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+.badge-pending {
+  background: var(--theme-badge-bg, #333);
+  color: var(--theme-text-muted);
+}
+.badge-active {
+  background: var(--theme-accent);
+  color: #fff;
+}
+.badge-completed {
+  background: var(--theme-success, #4a4);
+  color: #fff;
+}
+.chapter-body {
+  padding: 6px 8px 8px 24px;
+}
+.chapter-summary {
+  font-size: 0.7rem;
+  color: var(--theme-text-secondary);
+  margin: 0 0 6px;
+}
 
 /* Events */
-.event-list { list-style: none; padding: 0; margin: 0; }
-.event-item { padding: 4px 0; border-bottom: 1px solid var(--theme-card-border); }
-.event-item:last-child { border-bottom: none; }
-.event-title-row { display: flex; align-items: center; gap: 6px; font-size: 0.7rem; }
-.event-bullet { width: 4px; height: 4px; background: var(--theme-accent); border-radius: 50%; flex-shrink: 0; }
-.event-time { font-size: 0.6rem; color: var(--theme-text-muted); margin-left: auto; }
-.event-desc { font-size: 0.65rem; color: var(--theme-text-secondary); margin: 2px 0 2px 10px; }
-.event-conditions { display: flex; flex-wrap: wrap; gap: 4px; margin-left: 10px; }
+.event-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.event-item {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--theme-card-border);
+}
+.event-item:last-child {
+  border-bottom: none;
+}
+.event-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+}
+.event-bullet {
+  width: 4px;
+  height: 4px;
+  background: var(--theme-accent);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.event-time {
+  font-size: 0.6rem;
+  color: var(--theme-text-muted);
+  margin-left: auto;
+}
+.event-desc {
+  font-size: 0.65rem;
+  color: var(--theme-text-secondary);
+  margin: 2px 0 2px 10px;
+}
+.event-conditions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 10px;
+}
 .cond {
   font-size: 0.6rem;
   color: var(--theme-text-muted);
@@ -246,7 +344,8 @@ function formatTimeRange(tr: { start?: string; end?: string } | undefined): stri
 }
 
 /* Critique */
-.outline-critique { }
+.outline-critique {
+}
 .critique-text {
   font-size: 0.65rem;
   color: var(--theme-text-muted);

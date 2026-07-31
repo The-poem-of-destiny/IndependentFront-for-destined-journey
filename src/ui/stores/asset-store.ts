@@ -35,10 +35,10 @@
  * - 浏览器全局（`navigator` / `Blob` / `URL`）**惰性写在函数体内**，测试可替身。
  * - 音频半边写完之后调**音频 store 的公开动作**刷库，绝不伸手进它的内部状态。
  */
-import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
-import { ASSET_TYPES } from '@engine/types'
-import type { AssetFraming, AssetMetaRecord, AssetType, AudioTrack } from '@engine/types'
+import { defineStore } from 'pinia';
+import { computed, ref } from 'vue';
+import { ASSET_TYPES } from '@engine/types';
+import type { AssetFraming, AssetMetaRecord, AssetType, AudioTrack } from '@engine/types';
 import {
   getAssets,
   saveAsset,
@@ -48,24 +48,24 @@ import {
   saveAudioTrack,
   getAudioBlob,
   getDatabase,
-} from '@engine/database'
-import { allocateVariantSlot, planImport } from '@engine/asset-import-plan'
+} from '@engine/database';
+import { allocateVariantSlot, planImport } from '@engine/asset-import-plan';
 import type {
   DecodedEntry,
   ExistingRows,
   ImportManifest,
   ImportPlan,
   ImportWarning,
-} from '@engine/asset-import-plan'
-import { formatAssetFilename, violatesNamingInvariant } from '@engine/asset-filename'
+} from '@engine/asset-import-plan';
+import { formatAssetFilename, violatesNamingInvariant } from '@engine/asset-filename';
 import {
   ASSET_MIME_BY_EXTENSION,
   clampAssetFraming,
   isDefaultAssetFraming,
   isMediaAllowed,
   mimeForAssetExtension,
-} from '@engine/asset-types'
-import { hashMediaBlob } from '../lib/media-hash'
+} from '@engine/asset-types';
+import { hashMediaBlob } from '../lib/media-hash';
 import {
   cropImageBlob,
   resolveOutputMime,
@@ -73,8 +73,8 @@ import {
   ImageCropError,
   type CropRect,
   type ImageCropSeams,
-} from '../lib/image-crop'
-import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names'
+} from '../lib/image-crop';
+import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names';
 import {
   readAssetZip,
   writeAssetZip,
@@ -83,11 +83,11 @@ import {
   type AssetZipManifest,
   type AssetZipWriteEntry,
   type ReadAssetZipOptions,
-} from '../lib/asset-zip'
-import { createAssetUrlCache, type AssetUrlCache } from '../lib/asset-url'
-import { useAudioStore } from './audio-store'
-import type { AudioBatchResult } from './audio-store'
-import { useUIStore } from './ui-store'
+} from '../lib/asset-zip';
+import { createAssetUrlCache, type AssetUrlCache } from '../lib/asset-url';
+import { useAudioStore } from './audio-store';
+import type { AudioBatchResult } from './audio-store';
+import { useUIStore } from './ui-store';
 
 // ═══════════════════════════════════════════════════════════
 // 常量
@@ -100,10 +100,10 @@ import { useUIStore } from './ui-store'
  * 这件事在**调用点**可见（§7.6：不可取消的转圈是用户中途强刷的原因）。
  * 给得比默认宽一点，因为一个 200 文件的包在慢机器上确实会喘。
  */
-export const ASSET_IMPORT_STALL_TIMEOUT_MS = 25_000
+export const ASSET_IMPORT_STALL_TIMEOUT_MS = 25_000;
 
 /** 导出包的建议文件名前缀；真正的下载动作归 UI */
-const EXPORT_FILENAME_PREFIX = '素材包'
+const EXPORT_FILENAME_PREFIX = '素材包';
 
 // ═══════════════════════════════════════════════════════════
 // 对外形状
@@ -117,19 +117,19 @@ const EXPORT_FILENAME_PREFIX = '素材包'
  */
 export interface AssetGroup {
   /** 原始名字，即分组键 */
-  name: string
+  name: string;
   /** 组内全部行，按 类型顺序 → 基图优先 → 变体名 排序 */
-  rows: AssetMetaRecord[]
-  total: number
+  rows: AssetMetaRecord[];
+  total: number;
   /**
    * 带变体的行数 —— 让**累积的重复可见**而不是藏起来（D11 的成本，§7.3 明写要显示）。
    * 永不覆盖的代价就是同一个角色下会慢慢堆出 `_2`、`_3`，界面得说出来。
    */
-  variantCount: number
+  variantCount: number;
   /** 有基图（无变体行）的类型 */
-  baseTypes: AssetType[]
+  baseTypes: AssetType[];
   /** 组里出现过、但**没有基图**的类型 —— §8 的「无主图」，删基图后的常态 */
-  baselessTypes: AssetType[]
+  baselessTypes: AssetType[];
 }
 
 /** 一次导入的完整回执；`message` 就是那条唯一的汇总提示 */
@@ -139,7 +139,7 @@ export interface AssetImportSummary {
    * 但那**不掩盖**另一半成功导入的内容（计数照样是真的）。
    * 具体的读取失败原因在 {@link readErrors} 里，一条也不丢。
    */
-  read: boolean
+  read: boolean;
   /**
    * 读取失败的人话原因（每个读不出来的压缩包一条）。
    *
@@ -149,49 +149,49 @@ export interface AssetImportSummary {
    * **可选**是为了让别处手写的回执字面量（测试替身、UI 的桩数据）不因为新增字段而
    * 编译不过 —— 本 store 产出的回执一定带着它；读的时候按 `?? []` 兜。
    */
-  readErrors?: string[]
+  readErrors?: string[];
   /** 浏览器配额耗尽而中止（不是个案，后面基本也没戏）。可选同上 */
-  quotaHit?: boolean
+  quotaHit?: boolean;
   /**
    * 用户中途取消了（`cancelImport()`）。
    *
    * **取消不是失败**: 取消前已经写进去的行**如实留着**（与部分成功同一套纪律），
    * 所以这条要与 `failed` 分开报 —— 把用户自己按的取消说成错误，是在制造焦虑。
    */
-  cancelled: boolean
-  assetsAdded: number
-  audioAdded: number
-  duplicatesSkipped: number
+  cancelled: boolean;
+  assetsAdded: number;
+  audioAdded: number;
+  duplicatesSkipped: number;
   /** 自动改号的条数（素材改号 + 音频改名之和，同计划器口径） */
-  renumbered: number
-  namingConflicts: number
+  renumbered: number;
+  namingConflicts: number;
   /** 立绘上的 mp4（D7 媒体规则） */
-  mediaRuleSkipped: number
+  mediaRuleSkipped: number;
   /** 两张路由表都不认的 + `__MACOSX`/dotfile + 解压前就被筛掉的，合计 */
-  ignored: number
+  ignored: number;
   /** 计划里有、但写库没成功的条数 */
-  failed: number
-  warnings: ImportWarning[]
-  message: string
+  failed: number;
+  warnings: ImportWarning[];
+  message: string;
 }
 
 /** 一次导出的完整回执 */
 export interface AssetExportResult {
   /** 无可导出内容或打包失败时为 null */
-  blob: Blob | null
+  blob: Blob | null;
   /** 建议下载名；真正的下载归 UI */
-  filename: string
-  assets: number
-  audio: number
+  filename: string;
+  assets: number;
+  audio: number;
   /** 内置曲目（占位授权，不可再分发 —— D17） */
-  skippedBuiltin: number
+  skippedBuiltin: number;
   /** 本机音乐文件夹曲目（字节不是本应用的） */
-  skippedFile: number
+  skippedFile: number;
   /** 导出名撞车而让路的条数（存量重名行的兜底，不抛错） */
-  skippedCollision: number
+  skippedCollision: number;
   /** 元数据还在、字节读不到的条数 */
-  failed: number
-  message: string
+  failed: number;
+  message: string;
 }
 
 /**
@@ -225,17 +225,17 @@ export type AssetMutationOutcome =
    * 不把**程序错误**混进 `'failed'`（写库失败）里 —— 那两件事的处置完全不同。
    */
   | 'no-crops'
-  | 'failed'
+  | 'failed';
 
 export interface AssetMutationResult {
-  outcome: AssetMutationOutcome
+  outcome: AssetMutationOutcome;
   /** 落库后的行（`outcome === 'ok'` 时有） */
-  row?: AssetMetaRecord
+  row?: AssetMetaRecord;
   /**
    * 目标位被占，自动编号到了别处时的**原变体**（§5.3）。
    * 本来无变体（从 base 位被挤走）时是空串 `''`，与"没改号"的 undefined 区分。
    */
-  renumberedFrom?: string
+  renumberedFrom?: string;
 }
 
 /**
@@ -255,7 +255,7 @@ export interface AssetMutationResult {
  * 调用点写错时静默走另一条分支。字面量 `'whole'` / `'skip'` 读一眼就知道说的是哪一档，
  * 拼错则是编译错误。
  */
-export type PortraitCropSpec = CropRect | 'whole' | 'skip'
+export type PortraitCropSpec = CropRect | 'whole' | 'skip';
 
 /**
  * 「一源两图」的取材计划: 两个类型各表一次态，**都必须显式写出来**。
@@ -264,8 +264,8 @@ export type PortraitCropSpec = CropRect | 'whole' | 'skip'
  * 省略的含义就得靠约定，而这个约定恰好是上一版最贵的那个 bug。
  */
 export interface PortraitCropPlan {
-  portrait: PortraitCropSpec
-  avatar: PortraitCropSpec
+  portrait: PortraitCropSpec;
+  avatar: PortraitCropSpec;
 }
 
 /**
@@ -279,8 +279,8 @@ export interface PortraitCropPlan {
  * 不会放大: `fitWithinMaxEdge` 在"本来就没超"时原样返回，所以一张 300px 的
  * 小图不会被这两个数字撑成 768。
  */
-export const PORTRAIT_CROP_MAX_EDGE = 2048
-export const AVATAR_CROP_MAX_EDGE = 768
+export const PORTRAIT_CROP_MAX_EDGE = 2048;
+export const AVATAR_CROP_MAX_EDGE = 768;
 
 /**
  * 「一源两图」的回执（`importPortraitPair`）。
@@ -291,18 +291,18 @@ export const AVATAR_CROP_MAX_EDGE = 768
  */
 export interface PortraitPairResult {
   /** 两半都成才是 `'ok'`；否则是**先出问题的那一半**的理由 */
-  outcome: AssetMutationOutcome
+  outcome: AssetMutationOutcome;
   /** 立绘那一行（成功落地或被哈希认成库里已有行时才有） */
-  portraitId?: string
+  portraitId?: string;
   /** 头像那一行，同上 */
-  avatarId?: string
+  avatarId?: string;
 }
 
 /** 浏览器配额（§4.5 的配额条） */
 export interface AssetStorageEstimate {
-  used: number
-  quota: number
-  pct: number
+  used: number;
+  quota: number;
+  pct: number;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -310,13 +310,13 @@ export interface AssetStorageEstimate {
 // ═══════════════════════════════════════════════════════════
 
 function newId(prefix: string): string {
-  const c = (globalThis as { crypto?: Crypto }).crypto
-  if (c && typeof c.randomUUID === 'function') return `${prefix}_${c.randomUUID()}`
-  return `${prefix}_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`
+  const c = (globalThis as { crypto?: Crypto }).crypto;
+  if (c && typeof c.randomUUID === 'function') return `${prefix}_${c.randomUUID()}`;
+  return `${prefix}_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 }
 
 interface BlobCtorLike {
-  new (parts: BlobPart[], options?: { type?: string }): Blob
+  new (parts: BlobPart[], options?: { type?: string }): Blob;
 }
 
 /**
@@ -326,9 +326,9 @@ interface BlobCtorLike {
  * `slice()` 复制一份独立缓冲区: 直接持解压视图会连带整块底层 buffer 常驻。
  */
 function makeBlob(bytes: Uint8Array, mime: string): Blob | null {
-  const Ctor = (globalThis as { Blob?: BlobCtorLike }).Blob
-  if (!Ctor) return null
-  return new Ctor([bytes.slice().buffer as ArrayBuffer], { type: mime })
+  const Ctor = (globalThis as { Blob?: BlobCtorLike }).Blob;
+  if (!Ctor) return null;
+  return new Ctor([bytes.slice().buffer as ArrayBuffer], { type: mime });
 }
 
 /**
@@ -339,14 +339,14 @@ function makeBlob(bytes: Uint8Array, mime: string): Blob | null {
  * 栅栏禁止改 audio-store。两处判据必须一致，改一处记得改另一处。
  */
 function isQuotaError(e: unknown): boolean {
-  const name = (e as { name?: unknown } | null)?.name
-  return name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED'
+  const name = (e as { name?: unknown } | null)?.name;
+  return name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED';
 }
 
 /** 提示的唯一出口；无 Pinia 上下文（测试 / 早期启动）时不该因为一条提示炸掉调用方 */
 function notify(message: string, type: 'info' | 'error'): void {
   try {
-    useUIStore().toast(message, type)
+    useUIStore().toast(message, type);
   } catch {
     // 静默：提示失败不能影响主流程的结果
   }
@@ -363,22 +363,22 @@ function notify(message: string, type: 'info' | 'error'): void {
  * 两张表都从**同一份正向路由表**推出来，不手写第二份（手写的那份就是漂移的来路）。
  */
 const ASSET_EXTENSION_BY_MIME: Readonly<Record<string, string>> = (() => {
-  const out: Record<string, string> = {}
+  const out: Record<string, string> = {};
   for (const [ext, mime] of Object.entries(ASSET_MIME_BY_EXTENSION)) {
-    if (!Object.prototype.hasOwnProperty.call(out, mime)) out[mime] = ext
+    if (!Object.prototype.hasOwnProperty.call(out, mime)) out[mime] = ext;
   }
-  return out
-})()
+  return out;
+})();
 
 /** MIME → 扩展名的反查表（导出音频要给文件名一个扩展名，路由表是唯一来源） */
 const AUDIO_EXTENSION_BY_MIME: Readonly<Record<string, string>> = (() => {
-  const out: Record<string, string> = {}
+  const out: Record<string, string> = {};
   for (const [ext, mime] of Object.entries(AUDIO_MIME_BY_EXTENSION)) {
     // 先到先得: `audio/ogg` 反查稳定得到 `ogg` 而不是 `oga`
-    if (!Object.prototype.hasOwnProperty.call(out, mime)) out[mime] = ext
+    if (!Object.prototype.hasOwnProperty.call(out, mime)) out[mime] = ext;
   }
-  return out
-})()
+  return out;
+})();
 
 /**
  * 给一条待导出的音轨挑扩展名。
@@ -389,11 +389,11 @@ const AUDIO_EXTENSION_BY_MIME: Readonly<Record<string, string>> = (() => {
  * 只是重新导入后 `mimeType` 会变成路由表里的那个值。
  */
 function audioExportExtension(track: AudioTrack, blob: Blob): string {
-  const fromTrack = track.mimeType ? AUDIO_EXTENSION_BY_MIME[track.mimeType] : undefined
-  if (fromTrack) return fromTrack
-  const fromBlob = blob.type ? AUDIO_EXTENSION_BY_MIME[blob.type] : undefined
-  if (fromBlob) return fromBlob
-  return 'mp3'
+  const fromTrack = track.mimeType ? AUDIO_EXTENSION_BY_MIME[track.mimeType] : undefined;
+  if (fromTrack) return fromTrack;
+  const fromBlob = blob.type ? AUDIO_EXTENSION_BY_MIME[blob.type] : undefined;
+  if (fromBlob) return fromBlob;
+  return 'mp3';
 }
 
 /**
@@ -404,7 +404,7 @@ const ZIP_MIME_TYPES = new Set([
   'application/x-zip-compressed',
   'application/x-zip',
   'multipart/x-zip',
-])
+]);
 
 /**
  * 这个文件是压缩包吗 —— 混合拖拽时的路由依据。
@@ -417,8 +417,8 @@ const ZIP_MIME_TYPES = new Set([
  * 跟着导入管线走才不会两边各有一份。）
  */
 export function isZipFile(file: File): boolean {
-  if (/\.zip$/i.test(file.name)) return true
-  return ZIP_MIME_TYPES.has(file.type)
+  if (/\.zip$/i.test(file.name)) return true;
+  return ZIP_MIME_TYPES.has(file.type);
 }
 
 /**
@@ -433,16 +433,21 @@ export function isZipFile(file: File): boolean {
  * 空白**不在此列**: 前后空格在 zip 条目名里可表示，D2 要求名字保持原始。
  */
 function violatesZipEntryName(name: string, variant?: string): boolean {
-  const hasSeparator = (v: string): boolean => v.includes('/') || v.includes('\\')
-  if (hasSeparator(name)) return true
-  if (variant !== undefined && variant !== '' && hasSeparator(variant)) return true
-  return name.startsWith('.')
+  const hasSeparator = (v: string): boolean => v.includes('/') || v.includes('\\');
+  if (hasSeparator(name)) return true;
+  if (variant !== undefined && variant !== '' && hasSeparator(variant)) return true;
+  return name.startsWith('.');
 }
 
 /** 文件名 → 小写无点扩展名；没有扩展名（或以点开头的隐藏文件）给空串 */
 function extensionOf(filename: string): string {
-  const dot = filename.lastIndexOf('.')
-  return dot > 0 ? filename.slice(dot + 1).trim().toLowerCase() : ''
+  const dot = filename.lastIndexOf('.');
+  return dot > 0
+    ? filename
+        .slice(dot + 1)
+        .trim()
+        .toLowerCase()
+    : '';
 }
 
 /**
@@ -456,14 +461,14 @@ function extensionOf(filename: string): string {
  * 假的 ext/mime，而那两个字段是导出文件名与再导入路由的依据。
  */
 function resolveSourceMime(source: Blob): string | undefined {
-  const declared = (source.type ?? '').trim().toLowerCase()
-  if (declared !== '' && ASSET_EXTENSION_BY_MIME[declared] !== undefined) return declared
-  const named = source as Partial<File>
+  const declared = (source.type ?? '').trim().toLowerCase();
+  if (declared !== '' && ASSET_EXTENSION_BY_MIME[declared] !== undefined) return declared;
+  const named = source as Partial<File>;
   if (typeof named.name === 'string') {
-    const byExt = mimeForAssetExtension(extensionOf(named.name))
-    if (byExt !== undefined) return byExt
+    const byExt = mimeForAssetExtension(extensionOf(named.name));
+    if (byExt !== undefined) return byExt;
   }
-  return undefined
+  return undefined;
 }
 
 /**
@@ -492,12 +497,12 @@ function resolveSourceMime(source: Blob): string | undefined {
  * 而沿用预测等于把要修的那个谎原样再写一遍。
  */
 function producedAssetType(blob: Blob): { mime: string; ext: string } {
-  const declared = (blob.type ?? '').trim().toLowerCase()
+  const declared = (blob.type ?? '').trim().toLowerCase();
   if (declared.startsWith('image/')) {
-    const ext = ASSET_EXTENSION_BY_MIME[declared]
-    if (ext !== undefined) return { mime: declared, ext }
+    const ext = ASSET_EXTENSION_BY_MIME[declared];
+    if (ext !== undefined) return { mime: declared, ext };
   }
-  return { mime: FALLBACK_OUTPUT_MIME, ext: ASSET_EXTENSION_BY_MIME[FALLBACK_OUTPUT_MIME] }
+  return { mime: FALLBACK_OUTPUT_MIME, ext: ASSET_EXTENSION_BY_MIME[FALLBACK_OUTPUT_MIME] };
 }
 
 /**
@@ -509,29 +514,29 @@ function producedAssetType(blob: Blob): { mime: string; ext: string } {
  * 是日后最难查的一类问题。`type` 已经一致时直接原样返回，连拷贝都省了。
  */
 async function sameBytesAs(source: Blob, mime: string): Promise<Blob | null> {
-  if ((source.type ?? '').toLowerCase() === mime) return source
-  return makeBlob(new Uint8Array(await source.arrayBuffer()), mime)
+  if ((source.type ?? '').toLowerCase() === mime) return source;
+  return makeBlob(new Uint8Array(await source.arrayBuffer()), mime);
 }
 
 /** 行排序: 类型顺序 → 基图优先 → 变体名 */
 function compareRows(a: AssetMetaRecord, b: AssetMetaRecord): number {
-  const ta = ASSET_TYPES.indexOf(a.type)
-  const tb = ASSET_TYPES.indexOf(b.type)
-  if (ta !== tb) return ta - tb
-  const va = a.variant ?? ''
-  const vb = b.variant ?? ''
-  if (va === '' && vb !== '') return -1
-  if (vb === '' && va !== '') return 1
-  if (va !== vb) return va.localeCompare(vb, 'zh-Hans-CN')
-  return a.createdAt - b.createdAt
+  const ta = ASSET_TYPES.indexOf(a.type);
+  const tb = ASSET_TYPES.indexOf(b.type);
+  if (ta !== tb) return ta - tb;
+  const va = a.variant ?? '';
+  const vb = b.variant ?? '';
+  if (va === '' && vb !== '') return -1;
+  if (vb === '' && va !== '') return 1;
+  if (va !== vb) return va.localeCompare(vb, 'zh-Hans-CN');
+  return a.createdAt - b.createdAt;
 }
 
 /** 造一行的副本并覆盖变体位；**无变体时把键整个去掉**，不留 `variant: undefined` */
 function withVariant(row: AssetMetaRecord, variant?: string): AssetMetaRecord {
-  const next: AssetMetaRecord = { ...row, updatedAt: Date.now() }
-  if (variant === undefined || variant === '') delete next.variant
-  else next.variant = variant
-  return next
+  const next: AssetMetaRecord = { ...row, updatedAt: Date.now() };
+  if (variant === undefined || variant === '') delete next.variant;
+  else next.variant = variant;
+  return next;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -540,10 +545,10 @@ function withVariant(row: AssetMetaRecord, variant?: string): AssetMetaRecord {
 
 export const useAssetStore = defineStore('asset', () => {
   // ── 库 ────────────────────────────────────────────────
-  const assets = ref<AssetMetaRecord[]>([])
-  const loading = ref(false)
-  const importing = ref(false)
-  const exporting = ref(false)
+  const assets = ref<AssetMetaRecord[]>([]);
+  const loading = ref(false);
+  const importing = ref(false);
+  const exporting = ref(false);
 
   /**
    * 导入进度，仅在 `importing` 期间有意义（§7.6）。
@@ -555,25 +560,25 @@ export const useAssetStore = defineStore('asset', () => {
    *
    * 所以 UI 的规矩是: **`progressTotal <= 0` 就别算百分比**（也别除它）。
    */
-  const progressDone = ref(0)
-  const progressTotal = ref(0)
-  const progressPhase = ref<'idle' | 'read' | 'write'>('idle')
+  const progressDone = ref(0);
+  const progressTotal = ref(0);
+  const progressPhase = ref<'idle' | 'read' | 'write'>('idle');
 
   /**
    * `navigator.storage.persist()` 的结果: null = 还没问过。
    *
    * 它**可以被拒**，而拒绝不是错误 —— 记下来给配额条如实显示，绝不阻塞导入（§4.5）。
    */
-  const storagePersisted = ref<boolean | null>(null)
+  const storagePersisted = ref<boolean | null>(null);
 
-  let initialized = false
+  let initialized = false;
   /** 只在**首次导入成功**后请求一次持久化，不在启动期（§4.5） */
-  let persistRequested = false
+  let persistRequested = false;
   /**
    * 在飞导入的取消闸。不进响应式状态 —— 它是宿主对象，只被动作读写
    * （同 audio-store 对目录句柄的处理）。
    */
-  let abortController: AbortController | null = null
+  let abortController: AbortController | null = null;
 
   /**
    * 取消在飞的导入（UI 的取消按钮绑的就是这个名字）。
@@ -583,72 +588,81 @@ export const useAssetStore = defineStore('asset', () => {
    * 是同一条 —— 回滚反而会把用户已经拿到的东西再拿走。
    */
   function cancelImport(): void {
-    abortController?.abort()
+    abortController?.abort();
   }
 
   // ── 视图 ──────────────────────────────────────────────
 
   /** 全部素材（§7.3 「全部素材」），含名字匹配不到任何角色的行 */
-  const flat = computed<AssetMetaRecord[]>(() => [...assets.value].sort(
-    (a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN') || compareRows(a, b),
-  ))
+  const flat = computed<AssetMetaRecord[]>(() =>
+    [...assets.value].sort(
+      (a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN') || compareRows(a, b),
+    ),
+  );
 
   /** 按名字分组（§7.3 「按角色」）—— 严格 `===` 分组，不归一化（D2） */
   const groups = computed<AssetGroup[]>(() => {
-    const byName = new Map<string, AssetMetaRecord[]>()
+    const byName = new Map<string, AssetMetaRecord[]>();
     for (const row of assets.value) {
-      const list = byName.get(row.name)
-      if (list) list.push(row)
-      else byName.set(row.name, [row])
+      const list = byName.get(row.name);
+      if (list) list.push(row);
+      else byName.set(row.name, [row]);
     }
-    const out: AssetGroup[] = []
+    const out: AssetGroup[] = [];
     for (const [name, rows] of byName) {
-      const sorted = [...rows].sort(compareRows)
-      const baseTypes: AssetType[] = []
-      const baselessTypes: AssetType[] = []
+      const sorted = [...rows].sort(compareRows);
+      const baseTypes: AssetType[] = [];
+      const baselessTypes: AssetType[] = [];
       for (const type of ASSET_TYPES) {
-        const inType = sorted.filter((r) => r.type === type)
-        if (inType.length === 0) continue
-        if (inType.some((r) => r.variant === undefined || r.variant === '')) baseTypes.push(type)
-        else baselessTypes.push(type)
+        const inType = sorted.filter((r) => r.type === type);
+        if (inType.length === 0) continue;
+        if (inType.some((r) => r.variant === undefined || r.variant === '')) baseTypes.push(type);
+        else baselessTypes.push(type);
       }
-      let variantCount = 0
-      for (const r of sorted) if (r.variant !== undefined && r.variant !== '') variantCount += 1
-      out.push({ name, rows: sorted, total: sorted.length, variantCount, baseTypes, baselessTypes })
+      let variantCount = 0;
+      for (const r of sorted) if (r.variant !== undefined && r.variant !== '') variantCount += 1;
+      out.push({
+        name,
+        rows: sorted,
+        total: sorted.length,
+        variantCount,
+        baseTypes,
+        baselessTypes,
+      });
     }
-    out.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'))
-    return out
-  })
+    out.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
+    return out;
+  });
 
   function findAsset(id: string): AssetMetaRecord | undefined {
-    return assets.value.find((a) => a.id === id)
+    return assets.value.find((a) => a.id === id);
   }
 
   /** 同 `(name, type)` 下的全部行 —— 分配与设为主图都按这个作用域算 */
   function rowsInGroup(name: string, type: AssetType): AssetMetaRecord[] {
-    return assets.value.filter((a) => a.name === name && a.type === type)
+    return assets.value.filter((a) => a.name === name && a.type === type);
   }
 
   // ═══ 库加载 ═══════════════════════════════════════════
 
   async function refreshAssets(): Promise<void> {
     try {
-      assets.value = await getAssets()
+      assets.value = await getAssets();
     } catch {
       // IndexedDB 不可用 → 空库，界面照样能开（对齐 audio-store 的降级）
-      assets.value = []
+      assets.value = [];
     }
   }
 
   /** 幂等；分区 onMounted 里调 */
   async function init(): Promise<void> {
-    if (initialized) return
-    initialized = true
-    loading.value = true
+    if (initialized) return;
+    initialized = true;
+    loading.value = true;
     try {
-      await refreshAssets()
+      await refreshAssets();
     } finally {
-      loading.value = false
+      loading.value = false;
     }
   }
 
@@ -658,10 +672,10 @@ export const useAssetStore = defineStore('asset', () => {
    * 本 store 持有的**唯一**一份缓存。`loadBlob` 就是 `getAssetBlob` —— 单层间接，
    * 对齐 audio-singleton.ts 的 `BlobResolver`（D6）: 日后字节搬去磁盘层，改的是这一行。
    */
-  let urlCache: AssetUrlCache | null = null
+  let urlCache: AssetUrlCache | null = null;
   function cache(): AssetUrlCache {
-    if (!urlCache) urlCache = createAssetUrlCache({ loadBlob: getAssetBlob })
-    return urlCache
+    if (!urlCache) urlCache = createAssetUrlCache({ loadBlob: getAssetBlob });
+    return urlCache;
   }
 
   /**
@@ -671,7 +685,7 @@ export const useAssetStore = defineStore('asset', () => {
    * object URL 只在当前会话有效，刷新/逐出/`revokeAllUrls()` 之后立刻是死链。
    */
   async function assetUrl(id: string): Promise<string | null> {
-    return cache().get(id)
+    return cache().get(id);
   }
 
   /**
@@ -688,21 +702,21 @@ export const useAssetStore = defineStore('asset', () => {
    * 在这里 catch 成 `null` 会把两者压成一句话。
    */
   async function assetBlob(id: string): Promise<Blob | null> {
-    return (await getAssetBlob(id)) ?? null
+    return (await getAssetBlob(id)) ?? null;
   }
 
   /** 同步窥视已铸造的 URL，不触发加载 */
   function peekAssetUrl(id: string): string | null {
-    return cache().peek(id)
+    return cache().peek(id);
   }
 
   function releaseAssetUrl(id: string): void {
-    cache().release(id)
+    cache().release(id);
   }
 
   /** 分区 unmount 时调：撤销全部存活 URL */
   function revokeAllUrls(): void {
-    urlCache?.revokeAll()
+    urlCache?.revokeAll();
   }
 
   // ═══ 配额与持久化（§4.5）═══════════════════════════════
@@ -714,14 +728,14 @@ export const useAssetStore = defineStore('asset', () => {
    */
   async function getStorageEstimate(): Promise<AssetStorageEstimate | null> {
     try {
-      const nav = (globalThis as { navigator?: Navigator }).navigator
-      if (!nav?.storage || typeof nav.storage.estimate !== 'function') return null
-      const est = await nav.storage.estimate()
-      const used = est.usage ?? 0
-      const quota = est.quota ?? 0
-      return { used, quota, pct: quota > 0 ? (used / quota) * 100 : 0 }
+      const nav = (globalThis as { navigator?: Navigator }).navigator;
+      if (!nav?.storage || typeof nav.storage.estimate !== 'function') return null;
+      const est = await nav.storage.estimate();
+      const used = est.usage ?? 0;
+      const quota = est.quota ?? 0;
+      return { used, quota, pct: quota > 0 ? (used / quota) * 100 : 0 };
     } catch {
-      return null
+      return null;
     }
   }
 
@@ -734,28 +748,28 @@ export const useAssetStore = defineStore('asset', () => {
    */
   async function requestPersistence(): Promise<boolean | null> {
     try {
-      const nav = (globalThis as { navigator?: Navigator }).navigator
-      if (!nav?.storage || typeof nav.storage.persist !== 'function') return null
+      const nav = (globalThis as { navigator?: Navigator }).navigator;
+      if (!nav?.storage || typeof nav.storage.persist !== 'function') return null;
       if (typeof nav.storage.persisted === 'function' && (await nav.storage.persisted())) {
-        storagePersisted.value = true
-        return true
+        storagePersisted.value = true;
+        return true;
       }
-      const granted = await nav.storage.persist()
-      storagePersisted.value = granted
-      return granted
+      const granted = await nav.storage.persist();
+      storagePersisted.value = granted;
+      return granted;
     } catch {
       // 浏览器不支持 / 抛了 —— 记成"不知道"，不写 false（那是"被拒"的意思）
-      return null
+      return null;
     }
   }
 
   // ═══ 分配器复用（§5.3）═══════════════════════════════
 
   interface SlotAllocation {
-    ok: boolean
-    variant?: string
-    renumberedFrom?: string
-    reason?: AssetMutationOutcome
+    ok: boolean;
+    variant?: string;
+    renumberedFrom?: string;
+    reason?: AssetMutationOutcome;
   }
 
   /**
@@ -777,17 +791,17 @@ export const useAssetStore = defineStore('asset', () => {
     target: { name: string; type: AssetType; variant?: string; ext: string },
     excludeIds: readonly string[] = [],
   ): SlotAllocation {
-    const gate = checkNameGates(target)
-    if (gate !== null) return { ok: false, reason: gate }
+    const gate = checkNameGates(target);
+    if (gate !== null) return { ok: false, reason: gate };
 
-    const skip = new Set(excludeIds)
-    const rows = assets.value.filter((a) => !skip.has(a.id))
-    const allocated = allocateVariantSlot(target.name, target.type, target.variant, rows)
+    const skip = new Set(excludeIds);
+    const rows = assets.value.filter((a) => !skip.has(a.id));
+    const allocated = allocateVariantSlot(target.name, target.type, target.variant, rows);
 
-    const out: SlotAllocation = { ok: true }
-    if (allocated.variant !== undefined) out.variant = allocated.variant
-    if (allocated.renumberedFrom !== undefined) out.renumberedFrom = allocated.renumberedFrom
-    return out
+    const out: SlotAllocation = { ok: true };
+    if (allocated.variant !== undefined) out.variant = allocated.variant;
+    if (allocated.renumberedFrom !== undefined) out.renumberedFrom = allocated.renumberedFrom;
+    return out;
   }
 
   /**
@@ -809,24 +823,24 @@ export const useAssetStore = defineStore('asset', () => {
    * 栅栏不含那个文件；等有人拥有它时，整块搬过去即可，调用点不变。
    */
   function checkNameGates(target: {
-    name: string
-    type: AssetType
-    variant?: string
-    ext: string
+    name: string;
+    type: AssetType;
+    variant?: string;
+    ext: string;
   }): AssetMutationOutcome | null {
-    const { name, type, variant, ext } = target
-    if (name === '') return 'naming-invariant'
-    if (violatesNamingInvariant(name, variant)) return 'naming-invariant'
-    if (violatesZipEntryName(name, variant)) return 'unrepresentable-name'
-    if (!isMediaAllowed(type, ext)) return 'media-rule'
-    return null
+    const { name, type, variant, ext } = target;
+    if (name === '') return 'naming-invariant';
+    if (violatesNamingInvariant(name, variant)) return 'naming-invariant';
+    if (violatesZipEntryName(name, variant)) return 'unrepresentable-name';
+    if (!isMediaAllowed(type, ext)) return 'media-rule';
+    return null;
   }
 
   // ═══ 导入（一键，两个入口共用一份实现 —— D9）═══════════
 
   /** `ExistingRows` 的音频半边: 只取计划器真正会看的字段 */
   function toExistingAudio(tracks: readonly AudioTrack[]): ExistingRows['audio'] {
-    return tracks.map((t) => ({ id: t.id, name: t.name, source: t.source, hash: t.hash }))
+    return tracks.map((t) => ({ id: t.id, name: t.name, source: t.source, hash: t.hash }));
   }
 
   function emptySummary(): AssetImportSummary {
@@ -845,16 +859,16 @@ export const useAssetStore = defineStore('asset', () => {
       failed: 0,
       warnings: [],
       message: '',
-    }
+    };
   }
 
   /** 计划的定量部分 → 摘要（写库结果由调用侧补） */
   function summarizePlan(plan: ImportPlan, preFilteredNoise: number): AssetImportSummary {
-    let mediaRuleSkipped = 0
-    let unknownExtension = 0
+    let mediaRuleSkipped = 0;
+    let unknownExtension = 0;
     for (const skip of plan.skips) {
-      if (skip.reason === 'mp4-on-立绘') mediaRuleSkipped += 1
-      else if (skip.reason === 'unknown-extension') unknownExtension += 1
+      if (skip.reason === 'mp4-on-立绘') mediaRuleSkipped += 1;
+      else if (skip.reason === 'unknown-extension') unknownExtension += 1;
     }
     return {
       read: true,
@@ -873,14 +887,15 @@ export const useAssetStore = defineStore('asset', () => {
       failed: 0,
       warnings: [...plan.warnings],
       message: '',
-    }
+    };
   }
 
   const WARNING_TEXT: Readonly<Record<ImportWarning, string>> = {
     'hash-unavailable': '哈希不可用，已跳过去重',
     'suspect-filename-encoding': '文件名编码可疑，建议用支持 UTF-8 的压缩工具重新打包',
-    'suspect-missing-type': '部分文件名疑似漏写类型（如 `_头像`），请检查它们是否落到了预期的角色下',
-  }
+    'suspect-missing-type':
+      '部分文件名疑似漏写类型（如 `_头像`），请检查它们是否落到了预期的角色下',
+  };
 
   /**
    * 解压阶段的进度 —— **刻意不设分母**（`progressTotal` 留 0，phase 报 `'read'`）。
@@ -897,37 +912,37 @@ export const useAssetStore = defineStore('asset', () => {
    */
   function onReadProgress(done: number, _total: number): void {
     // _total 刻意丢弃 —— 见上：它会长，拿它做分母就是让进度条倒退
-    progressTotal.value = 0
-    progressDone.value = done
-    progressPhase.value = 'read'
+    progressTotal.value = 0;
+    progressDone.value = done;
+    progressPhase.value = 'read';
   }
 
   /**
    * 取消的错误码。用 `AssetZipErrorCode` 标注**不是装饰**: asset-zip 那边若把这个
    * 成员改名或删掉，本行会在编译期炸掉，而不是让取消静默退化成一个红色错误提示。
    */
-  const ABORTED_CODE: AssetZipErrorCode = 'aborted'
+  const ABORTED_CODE: AssetZipErrorCode = 'aborted';
 
   /** 这个错误是"用户取消"而不是"包坏了"吗 */
   function isAbortError(e: unknown, signal?: AbortSignal): boolean {
-    if (signal?.aborted) return true
-    if (e instanceof AssetZipError && e.code === ABORTED_CODE) return true
+    if (signal?.aborted) return true;
+    if (e instanceof AssetZipError && e.code === ABORTED_CODE) return true;
     // 非 asset-zip 抛的中止（DOMException）也认，取消永远不该被报成失败
-    return (e as { name?: unknown } | null)?.name === 'AbortError'
+    return (e as { name?: unknown } | null)?.name === 'AbortError';
   }
 
   /** 唯一那条汇总文案（§7.2）—— 两个入口、两个半边，都只播报这一行 */
   function buildImportMessage(s: AssetImportSummary): string {
-    const parts = [`素材 ${s.assetsAdded} 新增`, `音频 ${s.audioAdded} 新增`]
-    if (s.duplicatesSkipped > 0) parts.push(`跳过 ${s.duplicatesSkipped} 重复`)
-    if (s.renumbered > 0) parts.push(`编号 ${s.renumbered}`)
-    if (s.namingConflicts > 0) parts.push(`命名冲突 ${s.namingConflicts}`)
-    if (s.mediaRuleSkipped > 0) parts.push(`立绘不支持 mp4 ${s.mediaRuleSkipped}`)
-    if (s.ignored > 0) parts.push(`忽略无关文件 ${s.ignored}`)
-    if (s.failed > 0) parts.push(`失败 ${s.failed}`)
-    let msg = parts.join(' · ')
-    for (const w of s.warnings) msg += `；${WARNING_TEXT[w]}`
-    return msg
+    const parts = [`素材 ${s.assetsAdded} 新增`, `音频 ${s.audioAdded} 新增`];
+    if (s.duplicatesSkipped > 0) parts.push(`跳过 ${s.duplicatesSkipped} 重复`);
+    if (s.renumbered > 0) parts.push(`编号 ${s.renumbered}`);
+    if (s.namingConflicts > 0) parts.push(`命名冲突 ${s.namingConflicts}`);
+    if (s.mediaRuleSkipped > 0) parts.push(`立绘不支持 mp4 ${s.mediaRuleSkipped}`);
+    if (s.ignored > 0) parts.push(`忽略无关文件 ${s.ignored}`);
+    if (s.failed > 0) parts.push(`失败 ${s.failed}`);
+    let msg = parts.join(' · ');
+    for (const w of s.warnings) msg += `；${WARNING_TEXT[w]}`;
+    return msg;
   }
 
   /**
@@ -939,7 +954,7 @@ export const useAssetStore = defineStore('asset', () => {
     return s.warnings.includes('hash-unavailable')
       ? '注意：这台机器上算不出文件哈希（多半是用明文 http 访问的），' +
           '再导一次**不会**识别出重复，已有的会被再导入一份并自动编号。'
-      : '重新导入同一个包即可补齐 —— 已有的会被识别成重复而跳过。'
+      : '重新导入同一个包即可补齐 —— 已有的会被识别成重复而跳过。';
   }
 
   /**
@@ -951,53 +966,53 @@ export const useAssetStore = defineStore('asset', () => {
    * 只说后者是在藏起一个真实的失败。
    */
   function notifyImportSummary(s: AssetImportSummary): AssetImportSummary {
-    const counts = buildImportMessage(s)
-    const changed = s.assetsAdded + s.audioAdded > 0
-    const readErrors = s.readErrors ?? []
+    const counts = buildImportMessage(s);
+    const changed = s.assetsAdded + s.audioAdded > 0;
+    const readErrors = s.readErrors ?? [];
     // 读取失败的尾巴，附在任何分支后面
     const readTail =
       readErrors.length > 0
         ? `另有 ${readErrors.length} 个文件读取失败：${readErrors.join('；')}`
-        : ''
+        : '';
 
-    let text: string
-    let type: 'info' | 'error'
+    let text: string;
+    let type: 'info' | 'error';
 
     if (s.cancelled) {
       text =
         `已取消导入：${counts}。取消前写入的内容都留在库里（不是坏数据）。` +
         reimportHint(s) +
-        (readTail ? ` ${readTail}` : '')
-      type = 'info'
+        (readTail ? ` ${readTail}` : '');
+      type = 'info';
     } else if (s.quotaHit === true) {
       text =
         `${counts}。浏览器存储空间已满，剩下的文件没有继续导入。` +
         '已导入的内容都已落库并保留；素材字节存在浏览器配额里，几百 MB 的素材包很容易撑满。' +
-        (readTail ? ` ${readTail}` : '')
-      type = 'error'
+        (readTail ? ` ${readTail}` : '');
+      type = 'error';
     } else if (s.failed > 0) {
       text =
         `${counts}。有 ${s.failed} 个文件没能写入（已写入 ${s.assetsAdded + s.audioAdded} 个）。` +
         `已写入的都完整保留，没写入的库里一个字节都没留下。${reimportHint(s)}` +
-        (readTail ? ` ${readTail}` : '')
-      type = 'error'
+        (readTail ? ` ${readTail}` : '');
+      type = 'error';
     } else if (changed) {
       // 有东西进来了就不是"导入失败" —— 但坏包照样说清楚，不藏
-      text = readTail ? `${counts}。${readTail}` : counts
-      type = readTail ? 'error' : 'info'
+      text = readTail ? `${counts}。${readTail}` : counts;
+      type = readTail ? 'error' : 'info';
     } else if (readErrors.length > 0) {
       // 纯失败: 什么都没进来，只有坏包
-      text = `导入失败：${readErrors.join('；')}`
-      type = 'error'
+      text = `导入失败：${readErrors.join('；')}`;
+      type = 'error';
     } else {
-      text = `${counts}（全部跳过，库没有变化）`
-      type = 'info'
+      text = `${counts}（全部跳过，库没有变化）`;
+      type = 'info';
     }
 
     // `message` **就是**用户看到的那句话 —— 回执与提示不该是两套说法
-    s.message = text
-    notify(text, type)
-    return s
+    s.message = text;
+    notify(text, type);
+    return s;
   }
 
   /**
@@ -1011,41 +1026,41 @@ export const useAssetStore = defineStore('asset', () => {
    *   两个半边都会报 `hash-unavailable`，用户只需要看到一次。
    */
   function mergeSummaries(parts: readonly AssetImportSummary[]): AssetImportSummary {
-    const out = emptySummary()
+    const out = emptySummary();
     if (parts.length === 0) {
-      out.read = true
-      return out
+      out.read = true;
+      return out;
     }
-    out.read = parts.every((p) => p.read)
-    const warnings: ImportWarning[] = []
-    const readErrors: string[] = []
+    out.read = parts.every((p) => p.read);
+    const warnings: ImportWarning[] = [];
+    const readErrors: string[] = [];
     for (const p of parts) {
-      readErrors.push(...(p.readErrors ?? []))
-      out.cancelled = out.cancelled || p.cancelled
-      out.quotaHit = out.quotaHit === true || p.quotaHit === true
-      out.assetsAdded += p.assetsAdded
-      out.audioAdded += p.audioAdded
-      out.duplicatesSkipped += p.duplicatesSkipped
-      out.renumbered += p.renumbered
-      out.namingConflicts += p.namingConflicts
-      out.mediaRuleSkipped += p.mediaRuleSkipped
-      out.ignored += p.ignored
-      out.failed += p.failed
-      for (const w of p.warnings) if (!warnings.includes(w)) warnings.push(w)
+      readErrors.push(...(p.readErrors ?? []));
+      out.cancelled = out.cancelled || p.cancelled;
+      out.quotaHit = out.quotaHit === true || p.quotaHit === true;
+      out.assetsAdded += p.assetsAdded;
+      out.audioAdded += p.audioAdded;
+      out.duplicatesSkipped += p.duplicatesSkipped;
+      out.renumbered += p.renumbered;
+      out.namingConflicts += p.namingConflicts;
+      out.mediaRuleSkipped += p.mediaRuleSkipped;
+      out.ignored += p.ignored;
+      out.failed += p.failed;
+      for (const w of p.warnings) if (!warnings.includes(w)) warnings.push(w);
     }
-    out.warnings = warnings
-    out.readErrors = readErrors
-    out.message = buildImportMessage(out)
-    return out
+    out.warnings = warnings;
+    out.readErrors = readErrors;
+    out.message = buildImportMessage(out);
+    return out;
   }
 
   /** 在飞导入的互斥闸 —— 两个入口共用一份，返回非空就表示"别开第二个" */
   function rejectIfBusy(): AssetImportSummary | null {
-    if (!importing.value) return null
-    const busy = emptySummary()
-    busy.message = '已有一个导入正在进行，请等它结束。'
-    notify(busy.message, 'error')
-    return busy
+    if (!importing.value) return null;
+    const busy = emptySummary();
+    busy.message = '已有一个导入正在进行，请等它结束。';
+    notify(busy.message, 'error');
+    return busy;
   }
 
   /**
@@ -1063,13 +1078,13 @@ export const useAssetStore = defineStore('asset', () => {
     progress: { base?: number; indeterminate?: boolean } = {},
   ): Promise<AssetImportSummary> {
     // ── 攒基准行 ──
-    await refreshAssets()
-    let audioRows: AudioTrack[] = []
+    await refreshAssets();
+    let audioRows: AudioTrack[] = [];
     try {
-      audioRows = await getAudioTracks()
+      audioRows = await getAudioTracks();
     } catch {
       // 音频表读不到 → 当作没有音频行。去重会失效、撞名会编号，但不该整包失败
-      audioRows = []
+      audioRows = [];
     }
     const existing: ExistingRows = {
       assets: assets.value.map((a) => ({
@@ -1080,37 +1095,37 @@ export const useAssetStore = defineStore('asset', () => {
         hash: a.hash,
       })),
       audio: toExistingAudio(audioRows),
-    }
+    };
 
     // ── 定计划（全部决策都在这一行里发生）──
-    const plan = planImport(entries, existing, manifest)
-    const summary = summarizePlan(plan, preFilteredNoise)
+    const plan = planImport(entries, existing, manifest);
+    const summary = summarizePlan(plan, preFilteredNoise);
     // 进度进入第二段（写库）: 单批时这里有诚实的固定分母，可以显示真百分比。
     // **混合导入是不确定态**（`indeterminate`）: 后面还有几批、每批几行要等各自规划完
     // 才知道，分母会往上长 —— 那正是会让百分比倒退的情形，所以干脆不给分母。
     // 同样先写计数、最后翻 phase（见 importZip 开头那段注释）
-    const progressBase = progress.base ?? 0
-    progressDone.value = progressBase
+    const progressBase = progress.base ?? 0;
+    progressDone.value = progressBase;
     progressTotal.value = progress.indeterminate
       ? 0
-      : progressBase + plan.assets.length + plan.audio.length
-    progressPhase.value = 'write'
+      : progressBase + plan.assets.length + plan.audio.length;
+    progressPhase.value = 'write';
 
-    let quotaHit = false
-    const now = Date.now()
+    let quotaHit = false;
+    const now = Date.now();
 
     // ── 素材半边 ──
     for (const planned of plan.assets) {
       // 取消: 已经写进去的行**如实留着**，只是不再往下写（写库是大包里耗时的那一半）
       if (signal?.aborted) {
-        summary.cancelled = true
-        break
+        summary.cancelled = true;
+        break;
       }
       try {
-        const blob = makeBlob(planned.entry.bytes, planned.mime)
+        const blob = makeBlob(planned.entry.bytes, planned.mime);
         if (!blob) {
-          summary.failed += 1
-          continue
+          summary.failed += 1;
+          continue;
         }
         const meta: AssetMetaRecord = {
           id: newId('asset'),
@@ -1121,25 +1136,25 @@ export const useAssetStore = defineStore('asset', () => {
           bytes: planned.entry.bytes.length,
           createdAt: now,
           updatedAt: now,
-        }
-        if (planned.variant !== undefined) meta.variant = planned.variant
-        if (planned.entry.hash !== undefined) meta.hash = planned.entry.hash
-        if (planned.credit !== undefined) meta.credit = planned.credit
-        if (planned.license !== undefined) meta.license = planned.license
+        };
+        if (planned.variant !== undefined) meta.variant = planned.variant;
+        if (planned.entry.hash !== undefined) meta.hash = planned.entry.hash;
+        if (planned.credit !== undefined) meta.credit = planned.credit;
+        if (planned.license !== undefined) meta.license = planned.license;
         // 取景同署名: 文件名承载不了，只能靠清单带走（D10 —— 清单补显示元数据，
         // 永不碰身份）。计划器已经夹逼过；被判成重复的条目根本走不到这里，
         // 于是清单永远改不动一条既有行的取景。
-        if (planned.framing !== undefined) meta.framing = planned.framing
-        await saveAsset(meta, blob)
-        summary.assetsAdded += 1
+        if (planned.framing !== undefined) meta.framing = planned.framing;
+        await saveAsset(meta, blob);
+        summary.assetsAdded += 1;
       } catch (e) {
-        summary.failed += 1
+        summary.failed += 1;
         if (isQuotaError(e)) {
-          quotaHit = true
-          break
+          quotaHit = true;
+          break;
         }
       } finally {
-        progressDone.value += 1
+        progressDone.value += 1;
       }
     }
 
@@ -1147,14 +1162,14 @@ export const useAssetStore = defineStore('asset', () => {
     if (!quotaHit && !summary.cancelled) {
       for (const planned of plan.audio) {
         if (signal?.aborted) {
-          summary.cancelled = true
-          break
+          summary.cancelled = true;
+          break;
         }
         try {
-          const blob = makeBlob(planned.entry.bytes, planned.mime)
+          const blob = makeBlob(planned.entry.bytes, planned.mime);
           if (!blob) {
-            summary.failed += 1
-            continue
+            summary.failed += 1;
+            continue;
           }
           const track: AudioTrack = {
             id: newId('audio'),
@@ -1167,33 +1182,33 @@ export const useAssetStore = defineStore('asset', () => {
             tags: [...planned.tags],
             createdAt: now,
             updatedAt: now,
-          }
-          if (planned.entry.hash !== undefined) track.hash = planned.entry.hash
+          };
+          if (planned.entry.hash !== undefined) track.hash = planned.entry.hash;
           // 署名照原样落库（AudioTrack 新增的 credit / license 两列，非索引属性，
           // 无需升版）。清单存在的全部理由就是让文件名承载不了的署名活下来（D10）——
           // 导入时丢掉它，等于让这条链条断在最后一步。
-          if (planned.credit !== undefined) track.credit = planned.credit
-          if (planned.license !== undefined) track.license = planned.license
-          await saveAudioTrack(track, blob)
-          summary.audioAdded += 1
+          if (planned.credit !== undefined) track.credit = planned.credit;
+          if (planned.license !== undefined) track.license = planned.license;
+          await saveAudioTrack(track, blob);
+          summary.audioAdded += 1;
         } catch (e) {
-          summary.failed += 1
+          summary.failed += 1;
           if (isQuotaError(e)) {
-            quotaHit = true
-            break
+            quotaHit = true;
+            break;
           }
         } finally {
-          progressDone.value += 1
+          progressDone.value += 1;
         }
       }
     }
 
     // ── 刷新两边的库 ──
-    await refreshAssets()
+    await refreshAssets();
     if (summary.audioAdded > 0) {
       try {
         // 音频半边写完必须让音频分区看见 —— 调它的**公开动作**，不碰它的内部状态
-        await useAudioStore().refreshTracks()
+        await useAudioStore().refreshTracks();
       } catch {
         // 无 Pinia 上下文 / 音频 store 起不来: 素材半边已经落库，不该因此报失败
       }
@@ -1201,16 +1216,16 @@ export const useAssetStore = defineStore('asset', () => {
 
     // ── 首次导入成功才请求持久化（§4.5），永不阻塞 ──
     if (!persistRequested && summary.assetsAdded + summary.audioAdded > 0) {
-      persistRequested = true
-      await requestPersistence()
+      persistRequested = true;
+      await requestPersistence();
     }
 
-    summary.quotaHit = quotaHit
-    summary.message = buildImportMessage(summary)
+    summary.quotaHit = quotaHit;
+    summary.message = buildImportMessage(summary);
     // ⚠️ **不在这里 notify**: 一次导入只该有一条提示（§7.2），而"一次导入"可能由
     // 多个半边组成（混合拖拽 = 若干 zip + 一堆散文件）。提示统一由
     // {@link notifyImportSummary} 在最外层发一次。
-    return summary
+    return summary;
   }
 
   /**
@@ -1224,31 +1239,31 @@ export const useAssetStore = defineStore('asset', () => {
     signal: AbortSignal | undefined,
     progress: { base?: number; indeterminate?: boolean } = {},
   ): Promise<AssetImportSummary> {
-    let zipResult: Awaited<ReturnType<typeof readAssetZip>>
+    let zipResult: Awaited<ReturnType<typeof readAssetZip>>;
     try {
       const options: ReadAssetZipOptions = {
         stallTimeoutMs: ASSET_IMPORT_STALL_TIMEOUT_MS,
         onProgress: onReadProgress,
-      }
-      if (signal) options.signal = signal
-      zipResult = await readAssetZip(file, options)
+      };
+      if (signal) options.signal = signal;
+      zipResult = await readAssetZip(file, options);
     } catch (e) {
-      const summary = emptySummary()
+      const summary = emptySummary();
       // 取消是用户自己按的，不是失败 —— 此时这一半还一个字节都没写
       if (isAbortError(e, signal)) {
-        summary.read = true
-        summary.cancelled = true
-        return summary
+        summary.read = true;
+        summary.cancelled = true;
+        return summary;
       }
-      summary.readErrors = [describeZipError(e)]
-      return summary
+      summary.readErrors = [describeZipError(e)];
+      return summary;
     }
 
     if (signal?.aborted) {
-      const summary = emptySummary()
-      summary.read = true
-      summary.cancelled = true
-      return summary
+      const summary = emptySummary();
+      summary.read = true;
+      summary.cancelled = true;
+      return summary;
     }
 
     return executeImport(
@@ -1257,7 +1272,7 @@ export const useAssetStore = defineStore('asset', () => {
       zipResult.skippedNoise.length,
       signal,
       progress,
-    )
+    );
   }
 
   /**
@@ -1270,54 +1285,54 @@ export const useAssetStore = defineStore('asset', () => {
     signal: AbortSignal | undefined,
     progress: { base?: number; indeterminate?: boolean } = {},
   ): Promise<AssetImportSummary> {
-    const entries: DecodedEntry[] = []
+    const entries: DecodedEntry[] = [];
     for (const file of files) {
-      if (signal?.aborted) break
+      if (signal?.aborted) break;
       try {
-        const bytes = new Uint8Array(await file.arrayBuffer())
-        const entry: DecodedEntry = { path: file.name, bytes }
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const entry: DecodedEntry = { path: file.name, bytes };
         // 哈希算不出就不带 —— 计划器据此报 hash-unavailable 并回落到编号路径，
         // 与 zip 那条路同一条降级规则（绝不换第二种哈希）
-        const hash = await hashMediaBlob(file)
-        if (hash !== undefined) entry.hash = hash
-        entries.push(entry)
+        const hash = await hashMediaBlob(file);
+        if (hash !== undefined) entry.hash = hash;
+        entries.push(entry);
       } catch {
         // 单个文件读不出字节（权限/被移走）不该连累其余
       }
     }
 
     if (signal?.aborted) {
-      const summary = emptySummary()
-      summary.read = true
-      summary.cancelled = true
-      return summary
+      const summary = emptySummary();
+      summary.read = true;
+      summary.cancelled = true;
+      return summary;
     }
 
-    return executeImport(entries, undefined, files.length - entries.length, signal, progress)
+    return executeImport(entries, undefined, files.length - entries.length, signal, progress);
   }
 
   /** 起一次导入: 上闸、建取消控制器、复位进度。返回本次的 signal 与收尾函数 */
   function beginImport(): { signal: AbortSignal | undefined; end: () => void } {
-    importing.value = true
+    importing.value = true;
     // 先把计数写成一致状态，**最后**才翻 phase —— phase 是"这一对计数可以读了"的提交点。
     // 反过来写会露出一个瞬时的错配三元组（新 phase + 旧分母），同步 watcher 与 computed
     // 都看得见，表现就是进度条闪一下。
-    progressDone.value = 0
-    progressTotal.value = 0
-    progressPhase.value = 'read'
+    progressDone.value = 0;
+    progressTotal.value = 0;
+    progressPhase.value = 'read';
 
-    const Ctor = (globalThis as { AbortController?: new () => AbortController }).AbortController
-    const controller = Ctor ? new Ctor() : null
-    abortController = controller
+    const Ctor = (globalThis as { AbortController?: new () => AbortController }).AbortController;
+    const controller = Ctor ? new Ctor() : null;
+    abortController = controller;
     return {
       signal: controller?.signal,
       end: () => {
-        importing.value = false
-        progressPhase.value = 'idle'
+        importing.value = false;
+        progressPhase.value = 'idle';
         // 只清自己那一份: 别把后来者的控制器抹掉
-        if (abortController === controller) abortController = null
+        if (abortController === controller) abortController = null;
       },
-    }
+    };
   }
 
   /**
@@ -1328,15 +1343,15 @@ export const useAssetStore = defineStore('asset', () => {
    * 结束后**一条**汇总（分支见 {@link notifyImportSummary}）。**如实呈现部分成功。**
    */
   async function importZip(file: File | Blob | Uint8Array): Promise<AssetImportSummary> {
-    const busy = rejectIfBusy()
-    if (busy) return busy
-    const { signal, end } = beginImport()
+    const busy = rejectIfBusy();
+    if (busy) return busy;
+    const { signal, end } = beginImport();
     try {
       // ⚠️ 必须 `return await`: 裸 `return promise` 会让 finally 在**执行还没开始**时
       // 就跑掉 —— 互斥闸提前放开、进度提前复位成 idle，界面看着像导入瞬间结束了
-      return notifyImportSummary(await runZipHalf(file, signal))
+      return notifyImportSummary(await runZipHalf(file, signal));
     } finally {
-      end()
+      end();
     }
   }
 
@@ -1355,13 +1370,13 @@ export const useAssetStore = defineStore('asset', () => {
    * 压缩包混在里面时用 {@link importAny}，别自己分流。
    */
   async function importFiles(files: File[]): Promise<AssetImportSummary> {
-    const busy = rejectIfBusy()
-    if (busy) return busy
-    const { signal, end } = beginImport()
+    const busy = rejectIfBusy();
+    if (busy) return busy;
+    const { signal, end } = beginImport();
     try {
-      return notifyImportSummary(await runFilesHalf(files, signal))
+      return notifyImportSummary(await runFilesHalf(files, signal));
     } finally {
-      end()
+      end();
     }
   }
 
@@ -1380,35 +1395,35 @@ export const useAssetStore = defineStore('asset', () => {
    * 分母只会往上长 —— 那正是会让百分比倒退的情形（同解压段的取舍）。
    */
   async function importAny(files: File[]): Promise<AssetImportSummary> {
-    const busy = rejectIfBusy()
-    if (busy) return busy
-    const { signal, end } = beginImport()
+    const busy = rejectIfBusy();
+    if (busy) return busy;
+    const { signal, end } = beginImport();
     try {
-      const zips = files.filter((f) => isZipFile(f))
-      const loose = files.filter((f) => !isZipFile(f))
-      const multi = zips.length + (loose.length > 0 ? 1 : 0) > 1
-      const parts: AssetImportSummary[] = []
-      let base = 0
+      const zips = files.filter((f) => isZipFile(f));
+      const loose = files.filter((f) => !isZipFile(f));
+      const multi = zips.length + (loose.length > 0 ? 1 : 0) > 1;
+      const parts: AssetImportSummary[] = [];
+      let base = 0;
 
       for (const zip of zips) {
-        if (signal?.aborted) break
-        const part = await runZipHalf(zip, signal, { base, indeterminate: multi })
-        parts.push(part)
-        base += part.assetsAdded + part.audioAdded + part.failed
+        if (signal?.aborted) break;
+        const part = await runZipHalf(zip, signal, { base, indeterminate: multi });
+        parts.push(part);
+        base += part.assetsAdded + part.audioAdded + part.failed;
       }
       if (loose.length > 0 && !signal?.aborted) {
-        parts.push(await runFilesHalf(loose, signal, { base, indeterminate: multi }))
+        parts.push(await runFilesHalf(loose, signal, { base, indeterminate: multi }));
       }
       // 中途取消时后面的半边根本没跑 —— 合并出来的回执也得说出取消这件事
       if (signal?.aborted && !parts.some((p) => p.cancelled)) {
-        const stub = emptySummary()
-        stub.read = true
-        stub.cancelled = true
-        parts.push(stub)
+        const stub = emptySummary();
+        stub.read = true;
+        stub.cancelled = true;
+        parts.push(stub);
       }
-      return notifyImportSummary(mergeSummaries(parts))
+      return notifyImportSummary(mergeSummaries(parts));
     } finally {
-      end()
+      end();
     }
   }
 
@@ -1422,7 +1437,7 @@ export const useAssetStore = defineStore('asset', () => {
    * 读法不同，所以在这里翻译一次，而不是让调用方去猜。
    */
   function asSlotOutcome(res: AssetMutationResult): AssetMutationOutcome {
-    return res.outcome === 'already-base' ? 'ok' : res.outcome
+    return res.outcome === 'already-base' ? 'ok' : res.outcome;
   }
 
   /**
@@ -1454,7 +1469,7 @@ export const useAssetStore = defineStore('asset', () => {
     name: string,
     type: AssetType,
   ): Promise<{ outcome: AssetMutationOutcome; id?: string }> {
-    if (rejectIfBusy() !== null) return { outcome: 'busy' }
+    if (rejectIfBusy() !== null) return { outcome: 'busy' };
 
     // 文件名在这条路径上**只**贡献扩展名 —— 绝不从它反推 name / type。
     //
@@ -1466,37 +1481,37 @@ export const useAssetStore = defineStore('asset', () => {
     //
     // ext 从 MIME 反查而不是直接取文件名: 文件名可能压根没有扩展名（那时
     // `extensionOf` 给空串），而 `ext` 是导出文件名与再导入路由的依据，不能是空的。
-    const mime = resolveSourceMime(file)
-    if (mime === undefined) return { outcome: 'failed' }
-    const ext = ASSET_EXTENSION_BY_MIME[mime]
-    if (ext === undefined) return { outcome: 'failed' }
+    const mime = resolveSourceMime(file);
+    if (mime === undefined) return { outcome: 'failed' };
+    const ext = ASSET_EXTENSION_BY_MIME[mime];
+    if (ext === undefined) return { outcome: 'failed' };
 
-    const { end } = beginImport()
+    const { end } = beginImport();
     try {
       // 三道闸门先过: 名字不合法时**连字节都不必读**（`writeIntoSlot` 里还会再判
       // 一次，那是权威的一道；这一次纯粹是为了省下读整个文件的开销）
-      const gate = checkNameGates({ name, type, ext })
-      if (gate !== null) return { outcome: gate }
+      const gate = checkNameGates({ name, type, ext });
+      if (gate !== null) return { outcome: gate };
 
       // 单文件有诚实的固定分母，直接进写库段（解压段那套"没有分母"不适用）
-      progressDone.value = 0
-      progressTotal.value = 1
-      progressPhase.value = 'write'
+      progressDone.value = 0;
+      progressTotal.value = 1;
+      progressPhase.value = 'write';
 
-      let bytes: Uint8Array
+      let bytes: Uint8Array;
       try {
-        bytes = new Uint8Array(await file.arrayBuffer())
+        bytes = new Uint8Array(await file.arrayBuffer());
       } catch {
-        return { outcome: 'failed' }
+        return { outcome: 'failed' };
       }
-      const blob = makeBlob(bytes, mime)
-      if (!blob) return { outcome: 'failed' }
+      const blob = makeBlob(bytes, mime);
+      if (!blob) return { outcome: 'failed' };
 
-      const res = await writeIntoSlot(blob, name, type, ext, mime)
-      if (res.id !== undefined) progressDone.value = 1
-      return res
+      const res = await writeIntoSlot(blob, name, type, ext, mime);
+      if (res.id !== undefined) progressDone.value = 1;
+      return res;
     } finally {
-      end()
+      end();
     }
   }
 
@@ -1523,28 +1538,28 @@ export const useAssetStore = defineStore('asset', () => {
     mime: string,
   ): Promise<{ outcome: AssetMutationOutcome; id?: string }> {
     // 权威的一道闸门（调用方可能已经先判过一次省开销，判两次无害）
-    const gate = checkNameGates({ name, type, ext })
-    if (gate !== null) return { outcome: gate }
+    const gate = checkNameGates({ name, type, ext });
+    if (gate !== null) return { outcome: gate };
 
-    await refreshAssets()
+    await refreshAssets();
 
     // 哈希算不出就跳过去重，**绝不换第二种算法** —— 与两条导入路径同一条降级规则
-    const hash = await hashMediaBlob(blob)
+    const hash = await hashMediaBlob(blob);
 
     // 去重仍是 `(name, type)` 作用域（D12）: 同一张占位图给第 2..N 个角色用是合法的
     if (hash !== undefined) {
-      const twin = rowsInGroup(name, type).find((r) => r.hash === hash)
+      const twin = rowsInGroup(name, type).find((r) => r.hash === hash);
       if (twin) {
         // 不写新行，但**照样提主图** —— 见 importForCharacter 的
         // "结局一定是这个槽位显示这张图"
-        return { outcome: asSlotOutcome(await setPrimary(twin.id)), id: twin.id }
+        return { outcome: asSlotOutcome(await setPrimary(twin.id)), id: twin.id };
       }
     }
 
-    const alloc = allocateSlot({ name, type, ext })
-    if (!alloc.ok) return { outcome: alloc.reason ?? 'failed' }
+    const alloc = allocateSlot({ name, type, ext });
+    if (!alloc.ok) return { outcome: alloc.reason ?? 'failed' };
 
-    const now = Date.now()
+    const now = Date.now();
     const meta: AssetMetaRecord = {
       id: newId('asset'),
       name,
@@ -1554,29 +1569,29 @@ export const useAssetStore = defineStore('asset', () => {
       bytes: blob.size,
       createdAt: now,
       updatedAt: now,
-    }
+    };
     // 基图位被占时先落在变体位上（永不覆盖，D11），下面再由 setPrimary 换过来
-    if (alloc.variant !== undefined) meta.variant = alloc.variant
-    if (hash !== undefined) meta.hash = hash
+    if (alloc.variant !== undefined) meta.variant = alloc.variant;
+    if (hash !== undefined) meta.hash = hash;
 
     try {
-      await saveAsset(meta, blob)
+      await saveAsset(meta, blob);
     } catch (e) {
       if (isQuotaError(e)) {
         // 配额耗尽时"可以再试一次"这句话是假的，得当场说清
-        notify('浏览器存储空间已满，这张素材没有导入；先清理一些素材或音频再试。', 'error')
+        notify('浏览器存储空间已满，这张素材没有导入；先清理一些素材或音频再试。', 'error');
       }
-      return { outcome: 'failed' }
+      return { outcome: 'failed' };
     }
-    await refreshAssets()
+    await refreshAssets();
 
     // 与两条导入路径同一条: 首次写入成功之后才请求持久化，永不阻塞（§4.5）
     if (!persistRequested) {
-      persistRequested = true
-      await requestPersistence()
+      persistRequested = true;
+      await requestPersistence();
     }
 
-    return { outcome: asSlotOutcome(await setPrimary(meta.id)), id: meta.id }
+    return { outcome: asSlotOutcome(await setPrimary(meta.id)), id: meta.id };
   }
 
   // ═══ 一源两图（裁剪编辑器的落库端）═══════════════════════
@@ -1623,16 +1638,16 @@ export const useAssetStore = defineStore('asset', () => {
     options: { maxEdge?: number } & ImageCropSeams = {},
   ): Promise<PortraitPairResult> {
     if (crops.portrait === 'skip' && crops.avatar === 'skip') {
-      return { outcome: 'no-crops' }
+      return { outcome: 'no-crops' };
     }
-    if (rejectIfBusy() !== null) return { outcome: 'busy' }
+    if (rejectIfBusy() !== null) return { outcome: 'busy' };
 
     // 源类型: 先信 blob 自带的 type，`File` 可以退到文件名扩展名。两者都问不出
     // 就没法给行填一个诚实的 ext/mime —— 那不该靠猜，直接算失败。
-    const sourceMime = resolveSourceMime(source)
-    if (sourceMime === undefined) return { outcome: 'failed' }
+    const sourceMime = resolveSourceMime(source);
+    if (sourceMime === undefined) return { outcome: 'failed' };
     // 视频到不了裁剪台（画布只有某一帧），而且 D7 本来就不让它落在 立绘 上
-    if (sourceMime.startsWith('video/')) return { outcome: 'media-rule' }
+    if (sourceMime.startsWith('video/')) return { outcome: 'media-rule' };
 
     // 裁出来**打算**是什么类型 —— 开裁之前就要有个值，因为闸门要拿 ext 判，
     // 而"名字不合法"不该等到字节都烘好了才发现。
@@ -1640,35 +1655,35 @@ export const useAssetStore = defineStore('asset', () => {
     // ⚠️ 这**只是预测**，不是记账依据: 画布可以不照我们点的类型编（webp 编码
     // 并非哪儿都有）。真正写进行里的 mime/ext 一律取自产出的 blob
     // （见下面的 {@link producedAssetType}）。
-    let cropMime: string
+    let cropMime: string;
     try {
-      cropMime = resolveOutputMime(sourceMime)
+      cropMime = resolveOutputMime(sourceMime);
     } catch {
-      return { outcome: 'media-rule' }
+      return { outcome: 'media-rule' };
     }
-    const wholeExt = ASSET_EXTENSION_BY_MIME[sourceMime]
-    const cropExt = ASSET_EXTENSION_BY_MIME[cropMime]
-    if (wholeExt === undefined || cropExt === undefined) return { outcome: 'failed' }
+    const wholeExt = ASSET_EXTENSION_BY_MIME[sourceMime];
+    const cropExt = ASSET_EXTENSION_BY_MIME[cropMime];
+    if (wholeExt === undefined || cropExt === undefined) return { outcome: 'failed' };
 
     /**
      * 立绘在前 —— 部分成功的语义要有确定的先后，否则"哪一半落了"取决于时序。
      *
      * `'skip'` 的类型**根本不进这个数组**: 它不占进度分母、不过闸门、不写行。
      */
-    const plan: { type: AssetType; rect?: CropRect; maxEdge: number }[] = []
+    const plan: { type: AssetType; rect?: CropRect; maxEdge: number }[] = [];
     if (crops.portrait !== 'skip') {
       plan.push({
         type: '立绘',
         ...(crops.portrait === 'whole' ? {} : { rect: crops.portrait }),
         maxEdge: options.maxEdge ?? PORTRAIT_CROP_MAX_EDGE,
-      })
+      });
     }
     if (crops.avatar !== 'skip') {
       plan.push({
         type: '头像',
         ...(crops.avatar === 'whole' ? {} : { rect: crops.avatar }),
         maxEdge: options.maxEdge ?? AVATAR_CROP_MAX_EDGE,
-      })
+      });
     }
 
     // 一个字节都还没烘之前，要写的类型闸门全过一遍: 名字不合法时不该先切出一张图
@@ -1682,23 +1697,23 @@ export const useAssetStore = defineStore('asset', () => {
         name,
         type: step.type,
         ext: step.rect === undefined ? wholeExt : cropExt,
-      })
-      if (gate !== null) return { outcome: gate }
+      });
+      if (gate !== null) return { outcome: gate };
     }
 
-    const { end } = beginImport()
+    const { end } = beginImport();
     try {
-      progressDone.value = 0
-      progressTotal.value = plan.length
-      progressPhase.value = 'write'
+      progressDone.value = 0;
+      progressTotal.value = plan.length;
+      progressPhase.value = 'write';
 
-      const out: PortraitPairResult = { outcome: 'ok' }
-      let firstProblem: AssetMutationOutcome | null = null
+      const out: PortraitPairResult = { outcome: 'ok' };
+      let firstProblem: AssetMutationOutcome | null = null;
 
       for (const step of plan) {
-        const rect = step.rect
+        const rect = step.rect;
 
-        let blob: Blob | null
+        let blob: Blob | null;
         try {
           blob =
             rect === undefined
@@ -1713,41 +1728,40 @@ export const useAssetStore = defineStore('asset', () => {
                   ...(options.createCanvas !== undefined
                     ? { createCanvas: options.createCanvas }
                     : {}),
-                })
+                });
         } catch (e) {
           // 裁剪失败只毁掉**这一半**: 另一半照跑，结果如实报（部分成功纪律）
-          blob = null
+          blob = null;
           if (e instanceof ImageCropError && e.code === 'video-source') {
-            firstProblem = firstProblem ?? 'media-rule'
+            firstProblem = firstProblem ?? 'media-rule';
           }
         }
         if (!blob) {
-          firstProblem = firstProblem ?? 'failed'
-          continue
+          firstProblem = firstProblem ?? 'failed';
+          continue;
         }
 
         // 🔴 记账用**产出的**类型，不用开裁前的预测（见 {@link producedAssetType}）:
         // 画布可能没照我们点的类型编（webp 在 Firefox 上会退回 PNG 字节）。
         // 整图那一半不过画布、字节即源字节，所以继续用问准的源类型。
-        const { mime, ext } = rect === undefined
-          ? { mime: sourceMime, ext: wholeExt }
-          : producedAssetType(blob)
+        const { mime, ext } =
+          rect === undefined ? { mime: sourceMime, ext: wholeExt } : producedAssetType(blob);
 
         // 预测与现实不一致时，权威的那道闸门在 `writeIntoSlot` 里 —— 它拿的是这里
         // 算出来的**真实** ext，所以一行绝不可能靠"预测过得了闸"混进库里。
-        const res = await writeIntoSlot(blob, name, step.type, ext, mime)
+        const res = await writeIntoSlot(blob, name, step.type, ext, mime);
         if (res.id !== undefined) {
-          progressDone.value += 1
-          if (step.type === '立绘') out.portraitId = res.id
-          else out.avatarId = res.id
+          progressDone.value += 1;
+          if (step.type === '立绘') out.portraitId = res.id;
+          else out.avatarId = res.id;
         }
-        if (res.outcome !== 'ok') firstProblem = firstProblem ?? res.outcome
+        if (res.outcome !== 'ok') firstProblem = firstProblem ?? res.outcome;
       }
 
-      if (firstProblem !== null) out.outcome = firstProblem
-      return out
+      if (firstProblem !== null) out.outcome = firstProblem;
+      return out;
     } finally {
-      end()
+      end();
     }
   }
 
@@ -1764,21 +1778,21 @@ export const useAssetStore = defineStore('asset', () => {
    * 不进互斥闸: 它既不写字节也不动槽位，与导入没有可争的东西。
    */
   async function setAssetFraming(id: string, framing: AssetFraming): Promise<AssetMutationResult> {
-    const row = findAsset(id)
-    if (!row) return { outcome: 'not-found' }
+    const row = findAsset(id);
+    if (!row) return { outcome: 'not-found' };
 
     const next: AssetMetaRecord = {
       ...row,
       framing: clampAssetFraming(framing),
       updatedAt: Date.now(),
-    }
+    };
     try {
-      await saveAsset(next)
+      await saveAsset(next);
     } catch {
-      return { outcome: 'failed' }
+      return { outcome: 'failed' };
     }
-    await refreshAssets()
-    return { outcome: 'ok', row: findAsset(id) ?? next }
+    await refreshAssets();
+    return { outcome: 'ok', row: findAsset(id) ?? next };
   }
 
   /** `AssetZipError` → 人话。按 `code` 判别，不去 match 文案 */
@@ -1786,16 +1800,16 @@ export const useAssetStore = defineStore('asset', () => {
     if (e instanceof AssetZipError) {
       switch (e.code) {
         case 'entry-too-large':
-          return `导入失败：压缩包里 ${e.path ?? '某个文件'} 解压后超过单文件上限（${e.limit ?? 0} 字节）。库没有任何改动。`
+          return `导入失败：压缩包里 ${e.path ?? '某个文件'} 解压后超过单文件上限（${e.limit ?? 0} 字节）。库没有任何改动。`;
         case 'total-too-large':
-          return '导入失败：压缩包解压后体积超过上限，已中止解压。库没有任何改动。'
+          return '导入失败：压缩包解压后体积超过上限，已中止解压。库没有任何改动。';
         case 'read-failed':
-          return '导入失败：这个压缩包读不出来（可能被截断、损坏，或不是 zip）。库没有任何改动。'
+          return '导入失败：这个压缩包读不出来（可能被截断、损坏，或不是 zip）。库没有任何改动。';
         default:
-          return `导入失败：${e.message}。库没有任何改动。`
+          return `导入失败：${e.message}。库没有任何改动。`;
       }
     }
-    return `导入失败：${e instanceof Error ? e.message : String(e)}。库没有任何改动。`
+    return `导入失败：${e instanceof Error ? e.message : String(e)}。库没有任何改动。`;
   }
 
   // ═══ 导出（D17：范围窄于"库里的一切"）════════════════
@@ -1809,8 +1823,8 @@ export const useAssetStore = defineStore('asset', () => {
    * **摘要把每一项排除都说出来** —— 静默产出一个比屏幕上的库小的包，读起来就是数据丢失。
    */
   async function exportZip(): Promise<AssetExportResult> {
-    const stamp = new Date()
-    const pad = (n: number): string => String(n).padStart(2, '0')
+    const stamp = new Date();
+    const pad = (n: number): string => String(n).padStart(2, '0');
     const result: AssetExportResult = {
       blob: null,
       filename: `${EXPORT_FILENAME_PREFIX}_${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}.zip`,
@@ -1821,57 +1835,57 @@ export const useAssetStore = defineStore('asset', () => {
       skippedCollision: 0,
       failed: 0,
       message: '',
-    }
+    };
     if (exporting.value) {
-      result.message = '已有一个导出正在进行，请等它结束。'
-      notify(result.message, 'error')
-      return result
+      result.message = '已有一个导出正在进行，请等它结束。';
+      notify(result.message, 'error');
+      return result;
     }
-    exporting.value = true
+    exporting.value = true;
     try {
-      const entries: AssetZipWriteEntry[] = []
-      const manifest: AssetZipManifest = { assets: {}, audio: {} }
+      const entries: AssetZipWriteEntry[] = [];
+      const manifest: AssetZipManifest = { assets: {}, audio: {} };
       /** zip 的目录是个字典 —— 重名会让 writeAssetZip 抛错，所以这里先让路并如实计数 */
-      const used = new Set<string>()
+      const used = new Set<string>();
 
-      await refreshAssets()
+      await refreshAssets();
       for (const row of assets.value) {
         try {
-          const blob = await getAssetBlob(row.id)
+          const blob = await getAssetBlob(row.id);
           if (!blob) {
             // 元数据在、字节没了。导出不该整体失败，如实计一条
-            result.failed += 1
-            continue
+            result.failed += 1;
+            continue;
           }
-          const name = formatAssetFilename(row)
+          const name = formatAssetFilename(row);
           if (used.has(name)) {
-            result.skippedCollision += 1
-            continue
+            result.skippedCollision += 1;
+            continue;
           }
-          used.add(name)
-          entries.push({ name, bytes: new Uint8Array(await blob.arrayBuffer()) })
-          result.assets += 1
-          const meta: AssetZipManifest['assets'][string] = {}
-          if (row.credit !== undefined) meta.credit = row.credit
-          if (row.license !== undefined) meta.license = row.license
+          used.add(name);
+          entries.push({ name, bytes: new Uint8Array(await blob.arrayBuffer()) });
+          result.assets += 1;
+          const meta: AssetZipManifest['assets'][string] = {};
+          if (row.credit !== undefined) meta.credit = row.credit;
+          if (row.license !== undefined) meta.license = row.license;
           // 取景只在**偏离默认**时写出来。默认值写进去是个无操作，却会让每一条
           // 素材都在清单里长出一段 —— 一个 200 图的包白白多几 KB 噪音，还让读的人
           // 以为作者特意调过构图。`isDefaultAssetFraming` 先夹逼再比，所以存量的
           // 垃圾值（NaN / 越界）夹回默认后同样被省掉。
           if (row.framing !== undefined && !isDefaultAssetFraming(row.framing)) {
-            meta.framing = clampAssetFraming(row.framing)
+            meta.framing = clampAssetFraming(row.framing);
           }
-          if (Object.keys(meta).length > 0) manifest.assets[name] = meta
+          if (Object.keys(meta).length > 0) manifest.assets[name] = meta;
         } catch {
-          result.failed += 1
+          result.failed += 1;
         }
       }
 
-      let tracks: AudioTrack[] = []
+      let tracks: AudioTrack[] = [];
       try {
-        tracks = await getAudioTracks()
+        tracks = await getAudioTracks();
       } catch {
-        tracks = []
+        tracks = [];
       }
 
       /**
@@ -1880,90 +1894,90 @@ export const useAssetStore = defineStore('asset', () => {
        * 的 `builtinTracks`（它的公开状态，不是内部实现）。数不到就报 0，其余照常导出：
        * 少说一句排除，好过为了一句话让整个导出失败。
        */
-      const builtinIds = new Set<string>()
-      for (const t of tracks) if (t.source === 'builtin') builtinIds.add(t.id)
+      const builtinIds = new Set<string>();
+      for (const t of tracks) if (t.source === 'builtin') builtinIds.add(t.id);
       try {
-        for (const t of useAudioStore().builtinTracks) builtinIds.add(t.id)
+        for (const t of useAudioStore().builtinTracks) builtinIds.add(t.id);
       } catch {
         // 无 Pinia 上下文 / 音频 store 起不来
       }
-      result.skippedBuiltin = builtinIds.size
+      result.skippedBuiltin = builtinIds.size;
 
       for (const track of tracks) {
         // 'builtin' 已在上面数过；'file' 的字节在用户自己的文件夹里，不是本应用的
-        if (track.source === 'builtin') continue
+        if (track.source === 'builtin') continue;
         if (track.source === 'file') {
-          result.skippedFile += 1
-          continue
+          result.skippedFile += 1;
+          continue;
         }
         try {
-          const blob = await getAudioBlob(track.id)
+          const blob = await getAudioBlob(track.id);
           if (!blob) {
-            result.failed += 1
-            continue
+            result.failed += 1;
+            continue;
           }
-          const name = `${track.name}.${audioExportExtension(track, blob)}`
+          const name = `${track.name}.${audioExportExtension(track, blob)}`;
           if (used.has(name)) {
-            result.skippedCollision += 1
-            continue
+            result.skippedCollision += 1;
+            continue;
           }
-          used.add(name)
-          entries.push({ name, bytes: new Uint8Array(await blob.arrayBuffer()) })
-          result.audio += 1
+          used.add(name);
+          entries.push({ name, bytes: new Uint8Array(await blob.arrayBuffer()) });
+          result.audio += 1;
           // 署名与 tags 一样，都是文件名承载不了、只能靠清单带走的东西（D10）
-          const meta: AssetZipManifest['audio'][string] = {}
-          if (track.tags.length > 0) meta.tags = [...track.tags]
-          if (track.credit !== undefined) meta.credit = track.credit
-          if (track.license !== undefined) meta.license = track.license
-          if (Object.keys(meta).length > 0) manifest.audio[name] = meta
+          const meta: AssetZipManifest['audio'][string] = {};
+          if (track.tags.length > 0) meta.tags = [...track.tags];
+          if (track.credit !== undefined) meta.credit = track.credit;
+          if (track.license !== undefined) meta.license = track.license;
+          if (Object.keys(meta).length > 0) manifest.audio[name] = meta;
         } catch {
-          result.failed += 1
+          result.failed += 1;
         }
       }
 
       // 内置曲目是全局共享的，任何一个存档都能看到，所以它必须被说出来 ——
       // 哪怕素材与用户音频都是 0，用户屏幕上仍有 57 首。
-      const skipParts: string[] = []
-      if (result.skippedBuiltin > 0) skipParts.push(`内置 ${result.skippedBuiltin}`)
-      if (result.skippedFile > 0) skipParts.push(`本地文件 ${result.skippedFile}`)
-      if (result.skippedCollision > 0) skipParts.push(`同名让路 ${result.skippedCollision}`)
-      if (result.failed > 0) skipParts.push(`字节缺失 ${result.failed}`)
-      const skipText = skipParts.length > 0 ? ` · 已跳过 ${skipParts.join(' · ')}` : ''
+      const skipParts: string[] = [];
+      if (result.skippedBuiltin > 0) skipParts.push(`内置 ${result.skippedBuiltin}`);
+      if (result.skippedFile > 0) skipParts.push(`本地文件 ${result.skippedFile}`);
+      if (result.skippedCollision > 0) skipParts.push(`同名让路 ${result.skippedCollision}`);
+      if (result.failed > 0) skipParts.push(`字节缺失 ${result.failed}`);
+      const skipText = skipParts.length > 0 ? ` · 已跳过 ${skipParts.join(' · ')}` : '';
 
       if (entries.length === 0) {
-        result.message = `没有可导出的内容${skipText}。`
+        result.message = `没有可导出的内容${skipText}。`;
         notify(
           result.message +
             (result.skippedBuiltin > 0
               ? '内置曲目带的是占位授权，不随导出包再分发；本地文件夹里的曲目字节也不属于本应用。'
               : ''),
           'info',
-        )
-        return result
+        );
+        return result;
       }
 
       try {
-        result.blob = await writeAssetZip(entries, manifest)
+        result.blob = await writeAssetZip(entries, manifest);
       } catch (e) {
         result.message =
           e instanceof AssetZipError
             ? `导出失败：${e.message}`
-            : `导出失败：${e instanceof Error ? e.message : String(e)}`
-        notify(result.message, 'error')
-        result.blob = null
-        return result
+            : `导出失败：${e instanceof Error ? e.message : String(e)}`;
+        notify(result.message, 'error');
+        result.blob = null;
+        return result;
       }
 
-      result.message = `已导出 素材 ${result.assets} · 音频 ${result.audio}${skipText}`
+      result.message = `已导出 素材 ${result.assets} · 音频 ${result.audio}${skipText}`;
       notify(
         result.skippedBuiltin > 0 || result.skippedFile > 0
           ? `${result.message}。内置曲目带的是占位授权、本地文件夹曲目的字节不属于本应用，两者都刻意不打进包里。`
           : result.message,
         result.failed > 0 ? 'error' : 'info',
-      )
-      return result
+      );
+      return result;
     } finally {
-      exporting.value = false
+      exporting.value = false;
     }
   }
 
@@ -1986,34 +2000,34 @@ export const useAssetStore = defineStore('asset', () => {
     id: string,
     patch: { name?: string; type?: AssetType; variant?: string },
   ): Promise<AssetMutationResult> {
-    const row = findAsset(id)
-    if (!row) return { outcome: 'not-found' }
+    const row = findAsset(id);
+    if (!row) return { outcome: 'not-found' };
 
     // **不 trim**: 前后空白是名字的一部分（D2 原样保留），而且它在 zip 条目名里
     // 完全可表示 —— 替用户悄悄改名比留着一个带空格的名字糟得多。
-    const name = patch.name ?? row.name
-    const type = patch.type ?? row.type
-    const rawVariant = patch.variant ?? row.variant
+    const name = patch.name ?? row.name;
+    const type = patch.type ?? row.type;
+    const rawVariant = patch.variant ?? row.variant;
     // 空串变体 = 清空变体（与"无变体"是同一行，见 asset-filename 的空尾巴处理）
-    const variant = rawVariant === '' ? undefined : rawVariant
+    const variant = rawVariant === '' ? undefined : rawVariant;
 
     // 三关（D16 / D19 / D7）在 allocateSlot 里统一判 —— 一份规则，导入与改名共用
-    const alloc = allocateSlot({ name, type, variant, ext: row.ext }, [id])
-    if (!alloc.ok) return { outcome: alloc.reason ?? 'failed' }
+    const alloc = allocateSlot({ name, type, variant, ext: row.ext }, [id]);
+    if (!alloc.ok) return { outcome: alloc.reason ?? 'failed' };
 
-    const next: AssetMetaRecord = { ...row, name, type, updatedAt: Date.now() }
-    if (alloc.variant === undefined) delete next.variant
-    else next.variant = alloc.variant
+    const next: AssetMetaRecord = { ...row, name, type, updatedAt: Date.now() };
+    if (alloc.variant === undefined) delete next.variant;
+    else next.variant = alloc.variant;
 
     try {
-      await saveAsset(next)
+      await saveAsset(next);
     } catch {
-      return { outcome: 'failed' }
+      return { outcome: 'failed' };
     }
-    await refreshAssets()
-    const out: AssetMutationResult = { outcome: 'ok', row: findAsset(id) ?? next }
-    if (alloc.renumberedFrom !== undefined) out.renumberedFrom = alloc.renumberedFrom
-    return out
+    await refreshAssets();
+    const out: AssetMutationResult = { outcome: 'ok', row: findAsset(id) ?? next };
+    if (alloc.renumberedFrom !== undefined) out.renumberedFrom = alloc.renumberedFrom;
+    return out;
   }
 
   // ═══ 设为主图（§7.4：先降级、再清空，一个事务）═════════
@@ -2032,48 +2046,48 @@ export const useAssetStore = defineStore('asset', () => {
    * 没有导出"两行原子更新"的写口，而这里的原子性是设计明写的要求）。
    */
   async function setPrimary(id: string): Promise<AssetMutationResult> {
-    const row = findAsset(id)
-    if (!row) return { outcome: 'not-found' }
-    if (row.variant === undefined || row.variant === '') return { outcome: 'already-base' }
+    const row = findAsset(id);
+    if (!row) return { outcome: 'not-found' };
+    if (row.variant === undefined || row.variant === '') return { outcome: 'already-base' };
 
     const base = rowsInGroup(row.name, row.type).find(
       (r) => r.id !== id && (r.variant === undefined || r.variant === ''),
-    )
+    );
 
     // 组里本来就没有基图（删过基图的常态）→ 只需一次写入
     if (!base) {
       try {
-        await saveAsset(withVariant(row, undefined))
+        await saveAsset(withVariant(row, undefined));
       } catch {
-        return { outcome: 'failed' }
+        return { outcome: 'failed' };
       }
-      await refreshAssets()
-      return { outcome: 'ok', row: findAsset(id) }
+      await refreshAssets();
+      return { outcome: 'ok', row: findAsset(id) };
     }
 
     // 现任基图去哪: 它是"撞在基图位上的一行"，所以拿**当前全部行**去算 max+1
     // （基图位算 1 号，已有数字变体照数），得到的号绝不会撞上所选行现在的号。
-    const alloc = allocateSlot({ name: base.name, type: base.type, ext: base.ext })
-    if (!alloc.ok) return { outcome: alloc.reason ?? 'failed' }
+    const alloc = allocateSlot({ name: base.name, type: base.type, ext: base.ext });
+    if (!alloc.ok) return { outcome: alloc.reason ?? 'failed' };
 
-    const demoted = withVariant(base, alloc.variant)
-    const promoted = withVariant(row, undefined)
+    const demoted = withVariant(base, alloc.variant);
+    const promoted = withVariant(row, undefined);
 
     try {
-      const db = getDatabase()
+      const db = getDatabase();
       await db.transaction('rw', db.assetMeta, async () => {
-        await db.assetMeta.put(demoted)
-        await db.assetMeta.put(promoted)
-      })
+        await db.assetMeta.put(demoted);
+        await db.assetMeta.put(promoted);
+      });
     } catch {
       // 事务回滚 = 两行都没动；就算引擎层出了怪事，最坏也只是组里暂时没有基图
-      await refreshAssets()
-      return { outcome: 'failed' }
+      await refreshAssets();
+      return { outcome: 'failed' };
     }
-    await refreshAssets()
-    const out: AssetMutationResult = { outcome: 'ok', row: findAsset(id) }
-    if (alloc.variant !== undefined) out.renumberedFrom = ''
-    return out
+    await refreshAssets();
+    const out: AssetMutationResult = { outcome: 'ok', row: findAsset(id) };
+    if (alloc.variant !== undefined) out.renumberedFrom = '';
+    return out;
   }
 
   // ═══ 删除 ═════════════════════════════════════════════
@@ -2086,14 +2100,14 @@ export const useAssetStore = defineStore('asset', () => {
    */
   async function deleteAssetById(id: string): Promise<boolean> {
     try {
-      await dbDeleteAsset(id)
+      await dbDeleteAsset(id);
     } catch {
-      notify('删除失败，这条素材仍在库里，可以再试一次。', 'error')
-      return false
+      notify('删除失败，这条素材仍在库里，可以再试一次。', 'error');
+      return false;
     }
-    releaseAssetUrl(id)
-    await refreshAssets()
-    return true
+    releaseAssetUrl(id);
+    await refreshAssets();
+    return true;
   }
 
   /**
@@ -2106,39 +2120,39 @@ export const useAssetStore = defineStore('asset', () => {
    * （每条自己的元数据+字节仍然是原子的）。
    */
   async function deleteAssetsByIds(ids: readonly string[]): Promise<AudioBatchResult> {
-    const res: AudioBatchResult = { ok: 0, skipped: 0, failed: 0 }
+    const res: AudioBatchResult = { ok: 0, skipped: 0, failed: 0 };
     for (const id of ids) {
       if (!findAsset(id)) {
-        res.skipped += 1
-        continue
+        res.skipped += 1;
+        continue;
       }
       try {
-        await dbDeleteAsset(id)
-        releaseAssetUrl(id)
-        res.ok += 1
+        await dbDeleteAsset(id);
+        releaseAssetUrl(id);
+        res.ok += 1;
       } catch {
-        res.failed += 1
+        res.failed += 1;
       }
     }
-    await refreshAssets()
+    await refreshAssets();
 
     if (res.failed > 0) {
       notify(
         `已删除 ${res.ok} 条素材，但有 ${res.failed} 条没能删除，它们仍留在库里。` +
           '可以再删一次重试；已删除的字节不会回来。',
         'error',
-      )
+      );
     } else if (res.ok > 0) {
       notify(
         res.skipped > 0
           ? `已删除 ${res.ok} 条素材，另有 ${res.skipped} 条已不在库里，已跳过。`
           : `已删除 ${res.ok} 条素材。`,
         'info',
-      )
+      );
     } else if (res.skipped > 0) {
-      notify(`选中的 ${res.skipped} 条素材都已不在库里，没有任何改动。`, 'info')
+      notify(`选中的 ${res.skipped} 条素材都已不在库里，没有任何改动。`, 'info');
     }
-    return res
+    return res;
   }
 
   return {
@@ -2182,5 +2196,5 @@ export const useAssetStore = defineStore('asset', () => {
     // quota
     getStorageEstimate,
     requestPersistence,
-  }
-})
+  };
+});

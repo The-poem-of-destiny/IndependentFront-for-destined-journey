@@ -31,11 +31,11 @@ permission grant per file and a handle row per track, for a case the folder mode
 
 **Two storage backends coexist behind one seam:**
 
-| `source` | Bytes live in | When used |
-|----------|---------------|-----------|
-| `'file'` | The user's folder on disk | File System Access available (Chromium) |
-| `'blob'` | IndexedDB `audioBlobs` | Fallback for browsers without FSA; existing tracks keep working |
-| `'builtin'` | `public/audio/` | Shipped manifest entries (unchanged) |
+| `source`    | Bytes live in             | When used                                                       |
+| ----------- | ------------------------- | --------------------------------------------------------------- |
+| `'file'`    | The user's folder on disk | File System Access available (Chromium)                         |
+| `'blob'`    | IndexedDB `audioBlobs`    | Fallback for browsers without FSA; existing tracks keep working |
+| `'builtin'` | `public/audio/`           | Shipped manifest entries (unchanged)                            |
 
 Existing `'blob'` tracks are never migrated or deleted. Both paths remain live indefinitely.
 
@@ -60,7 +60,7 @@ directly. They cannot go in `localStorage`; they are not JSON.
 
 ```ts
 export interface AudioHandleRecord {
-  id: string;                          // 'library-root' — one row today
+  id: string; // 'library-root' — one row today
   handle: FileSystemDirectoryHandle;
   addedAt: number;
 }
@@ -76,6 +76,7 @@ this.version(12).stores({
   audioHandles: 'id',
 });
 ```
+
 Purely additive, no upgrade callback. Same rule as v11: **every prior table must be restated** or it
 is dropped.
 
@@ -112,6 +113,7 @@ without activation and look like a bug.
 ### Scan reconciliation
 
 `rescanFolder()` diffs the folder against catalogued `'file'` tracks:
+
 - **New filename** → new `AudioTrack` (`source:'file'`, `kind` defaulting to `'music'`, name = filename
   minus extension, empty tags)
 - **Catalogued file still present** → clear `missing`
@@ -124,6 +126,7 @@ without activation and look like a bug.
 ## Store changes (`audio-store.ts`)
 
 `loadBlob(trackId)` dispatches on `source`:
+
 - `'file'` → `resolveFile(folderHandle, relativePath)`; on `null`, mark `missing` and return undefined
 - `'blob'` → `getAudioBlob(id)` (unchanged)
 - `'builtin'` → unchanged; the music channel uses `track.url` directly

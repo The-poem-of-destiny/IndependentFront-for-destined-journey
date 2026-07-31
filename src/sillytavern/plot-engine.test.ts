@@ -437,7 +437,7 @@ describe('propagateWorldLineChange', () => {
 
     const result = propagateWorldLineChange(allEvents, 'root', 2);
     expect(result).toHaveLength(2);
-    const ids = new Set(result.map(e => e.id));
+    const ids = new Set(result.map((e) => e.id));
     expect(ids.has('child-1')).toBe(true);
     expect(ids.has('gc-1')).toBe(true);
     expect(child.worldLineChanged).toBe(true);
@@ -495,7 +495,12 @@ describe('preCheckPlot', () => {
   });
 
   it('应触发符合条件的 pending 事件', async () => {
-    const event = makeEvent({ id: 'evt-1', title: '濒死觉醒', status: 'pending', triggerCondition: '{{hp}} < 50' });
+    const event = makeEvent({
+      id: 'evt-1',
+      title: '濒死觉醒',
+      status: 'pending',
+      triggerCondition: '{{hp}} < 50',
+    });
     vi.mocked(getPlotEvents).mockResolvedValue([event]);
     vi.mocked(savePlotEvent).mockResolvedValue('evt-1');
 
@@ -514,7 +519,12 @@ describe('preCheckPlot', () => {
   });
 
   it('触发事件时应同步置 visibility 为 revealed', async () => {
-    const event = makeEvent({ id: 'evt-vis', title: '隐藏事件', status: 'pending', visibility: 'hidden' });
+    const event = makeEvent({
+      id: 'evt-vis',
+      title: '隐藏事件',
+      status: 'pending',
+      visibility: 'hidden',
+    });
     vi.mocked(getPlotEvents).mockResolvedValue([event]);
     vi.mocked(savePlotEvent).mockResolvedValue('evt-vis');
 
@@ -613,7 +623,12 @@ describe('preCheckPlot', () => {
   });
 
   it('无触发条件的 pending 事件应直接激活', async () => {
-    const event = makeEvent({ id: 'evt-no-cond', title: '无条件事件', status: 'pending', triggerCondition: undefined });
+    const event = makeEvent({
+      id: 'evt-no-cond',
+      title: '无条件事件',
+      status: 'pending',
+      triggerCondition: undefined,
+    });
     vi.mocked(getPlotEvents).mockResolvedValue([event]);
     vi.mocked(savePlotEvent).mockResolvedValue('evt-no-cond');
 
@@ -693,7 +708,12 @@ describe('postCheckPlot', () => {
   });
 
   it('新子事件的 parentTitle 应解析为 parentId 并继承 chapterTitle', async () => {
-    const parent = makeEvent({ id: 'parent-uuid', title: '父事件', status: 'active', chapterTitle: '第一章 血色纹章' });
+    const parent = makeEvent({
+      id: 'parent-uuid',
+      title: '父事件',
+      status: 'active',
+      chapterTitle: '第一章 血色纹章',
+    });
     vi.mocked(getPlotEvents).mockResolvedValue([parent]);
 
     const agentOutput = JSON.stringify({
@@ -701,9 +721,7 @@ describe('postCheckPlot', () => {
       changeLevel: 'none',
       outlineChanges: { action: 'none', changes: '' },
       eventUpdates: [],
-      newChildEvents: [
-        { title: '子事件', description: '描述', parentTitle: '父事件', depth: 2 },
-      ],
+      newChildEvents: [{ title: '子事件', description: '描述', parentTitle: '父事件', depth: 2 }],
     });
 
     const result = await postCheckPlot('save-1', agentOutput);
@@ -768,7 +786,12 @@ describe('postCheckPlot', () => {
   });
 
   it('minor 级别世界线变动不应触发大纲更新', async () => {
-    const event = makeEvent({ id: 'evt-minor', title: '次要事件', status: 'active', childrenIds: [] });
+    const event = makeEvent({
+      id: 'evt-minor',
+      title: '次要事件',
+      status: 'active',
+      childrenIds: [],
+    });
     vi.mocked(getPlotEvents).mockResolvedValue([event]);
 
     const outline = makeOutline();
@@ -778,9 +801,7 @@ describe('postCheckPlot', () => {
       worldLineChanged: true,
       changeLevel: 'minor',
       outlineChanges: { action: 'none', changes: '' },
-      eventUpdates: [
-        { title: '次要事件', action: 'complete', changes: {} },
-      ],
+      eventUpdates: [{ title: '次要事件', action: 'complete', changes: {} }],
       newChildEvents: [],
     });
 
@@ -839,9 +860,7 @@ describe('postCheckPlot', () => {
       worldLineChanged: false,
       changeLevel: 'none',
       outlineChanges: { action: 'none', changes: '' },
-      eventUpdates: [
-        { title: '幽灵事件', action: 'complete', changes: {} },
-      ],
+      eventUpdates: [{ title: '幽灵事件', action: 'complete', changes: {} }],
       newChildEvents: [],
     });
 
@@ -862,9 +881,7 @@ describe('postCheckPlot', () => {
       worldLineChanged: true,
       changeLevel: 'moderate',
       outlineChanges: { action: 'none', changes: '' },
-      eventUpdates: [
-        { title: '无变更事件', action: 'complete', changes: {} },
-      ],
+      eventUpdates: [{ title: '无变更事件', action: 'complete', changes: {} }],
       newChildEvents: [],
     });
 
@@ -881,9 +898,7 @@ describe('postCheckPlot', () => {
       worldLineChanged: true,
       changeLevel: 'moderate',
       outlineChanges: { action: 'update', changes: '无大纲时的变动' },
-      eventUpdates: [
-        { title: '无大纲事件', action: 'complete', changes: {} },
-      ],
+      eventUpdates: [{ title: '无大纲事件', action: 'complete', changes: {} }],
       newChildEvents: [],
     });
 
@@ -910,7 +925,7 @@ describe('getPendingEventsForTrigger', () => {
 
     const result = await getPendingEventsForTrigger('save-1', { x: 20 });
     expect(result).toHaveLength(2);
-    const ids = result.map(e => e.id);
+    const ids = result.map((e) => e.id);
     expect(ids).toContain('evt-1');
     expect(ids).toContain('evt-2');
     // evt-3 不是 pending

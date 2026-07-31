@@ -89,8 +89,20 @@ describe('assemblePresetContent', () => {
     // Fake settings.prompts on the preset
     (preset as any).settings = {
       prompts: [
-        { name: 'rule1', content: 'Be creative.', enabled: true, role: 'system', injection_order: 0 },
-        { name: 'rule2', content: 'Use short paragraphs.', enabled: true, role: 'system', injection_order: 1 },
+        {
+          name: 'rule1',
+          content: 'Be creative.',
+          enabled: true,
+          role: 'system',
+          injection_order: 0,
+        },
+        {
+          name: 'rule2',
+          content: 'Use short paragraphs.',
+          enabled: true,
+          role: 'system',
+          injection_order: 1,
+        },
       ],
     };
     const result = assemblePresetContent(preset);
@@ -111,7 +123,13 @@ describe('assemblePresetContent', () => {
     });
     (preset as any).settings = {
       prompts: [
-        { name: 'context', content: 'Use these: {{NARRATIVE}}\n{{USER_INPUT}}', enabled: true, role: 'system', injection_order: 0 },
+        {
+          name: 'context',
+          content: 'Use these: {{NARRATIVE}}\n{{USER_INPUT}}',
+          enabled: true,
+          role: 'system',
+          injection_order: 0,
+        },
       ],
     };
     const result = assemblePresetContent(preset);
@@ -142,9 +160,27 @@ describe('assemblePresetContent', () => {
     });
     (preset as any).settings = {
       prompts: [
-        { name: 'enabled1', content: 'Include me.', enabled: true, role: 'system', injection_order: 0 },
-        { name: 'disabled', content: 'Skip me.', enabled: false, role: 'system', injection_order: 1 },
-        { name: 'enabled2', content: 'Also include.', enabled: true, role: 'system', injection_order: 2 },
+        {
+          name: 'enabled1',
+          content: 'Include me.',
+          enabled: true,
+          role: 'system',
+          injection_order: 0,
+        },
+        {
+          name: 'disabled',
+          content: 'Skip me.',
+          enabled: false,
+          role: 'system',
+          injection_order: 1,
+        },
+        {
+          name: 'enabled2',
+          content: 'Also include.',
+          enabled: true,
+          role: 'system',
+          injection_order: 2,
+        },
       ],
     };
     const result = assemblePresetContent(preset);
@@ -203,9 +239,7 @@ describe('parseSetvars', () => {
   });
 
   it('later setvars override earlier ones (same key)', () => {
-    const { variables, stripped } = parseSetvars(
-      '{{setvar::抢话::值A}} {{setvar::抢话::值B}}',
-    );
+    const { variables, stripped } = parseSetvars('{{setvar::抢话::值A}} {{setvar::抢话::值B}}');
     expect(variables).toEqual({ 抢话: '值B' });
     expect(stripped.trim()).toBe('');
   });
@@ -219,18 +253,14 @@ describe('parseSetvars', () => {
   });
 
   it('preserves multi-line values', () => {
-    const { variables } = parseSetvars(
-      '{{setvar::rule::第一行\n第二行\n第三行}}',
-    );
+    const { variables } = parseSetvars('{{setvar::rule::第一行\n第二行\n第三行}}');
     expect(variables.rule).toContain('第一行');
     expect(variables.rule).toContain('第二行');
     expect(variables.rule).toContain('第三行');
   });
 
   it('trims key name, preserves value whitespace', () => {
-    const { variables } = parseSetvars(
-      '{{setvar::  key with spaces  ::\n  indented value\n}}',
-    );
+    const { variables } = parseSetvars('{{setvar::  key with spaces  ::\n  indented value\n}}');
     expect(variables).toHaveProperty('key with spaces');
     expect(variables['key with spaces']).toContain('indented value');
   });
@@ -250,7 +280,9 @@ describe('parseSetvars', () => {
 
 describe('resolveGetvars', () => {
   it('replaces getvar with value from vars table', () => {
-    const result = resolveGetvars('Budget: {{getvar::思维预算c}}', { '思维预算c': 'No more than 4096 words.' });
+    const result = resolveGetvars('Budget: {{getvar::思维预算c}}', {
+      思维预算c: 'No more than 4096 words.',
+    });
     expect(result).toBe('Budget: No more than 4096 words.');
   });
 
@@ -260,7 +292,7 @@ describe('resolveGetvars', () => {
   });
 
   it('handles getvar with trailing double colon', () => {
-    const result = resolveGetvars('{{getvar::转述::}} rule', { '转述': '不转述模式' });
+    const result = resolveGetvars('{{getvar::转述::}} rule', { 转述: '不转述模式' });
     expect(result).toBe('不转述模式 rule');
   });
 
@@ -307,7 +339,7 @@ describe('replaceCharUser', () => {
 
 describe('preprocessEntry', () => {
   it('strips setvars, resolves getvars, strips comments', () => {
-    const vars = { 'model': 'Gemini' };
+    const vars = { model: 'Gemini' };
     const result = preprocessEntry(
       '{{setvar::model::Gemini}}{{//comment}} output: {{getvar::model}} {{char}}',
       vars,
@@ -317,38 +349,26 @@ describe('preprocessEntry', () => {
   });
 
   it('resolves random + getvar together', () => {
-    const vars = { 'style': 'epic' };
-    const result = preprocessEntry(
-      'Style: {{getvar::style}}, pick: {{random::X,Y,Z}}',
-      vars,
-    );
+    const vars = { style: 'epic' };
+    const result = preprocessEntry('Style: {{getvar::style}}, pick: {{random::X,Y,Z}}', vars);
     expect(result).toContain('Style: epic, pick: ');
-    expect(['X', 'Y', 'Z'].some(v => result.endsWith(v))).toBe(true);
+    expect(['X', 'Y', 'Z'].some((v) => result.endsWith(v))).toBe(true);
   });
 
   it('strips unknown non-system placeholders', () => {
-    const result = preprocessEntry(
-      '{{生成菜单美化}}plain text{{roll 1d99999+1000}}end',
-      {},
-    );
+    const result = preprocessEntry('{{生成菜单美化}}plain text{{roll 1d99999+1000}}end', {});
     expect(result.trim()).toBe('plain textend');
   });
 
   it('preserves system placeholders', () => {
-    const result = preprocessEntry(
-      '{{NARRATIVE}}\n{{USER_INPUT}}\n{{AGENT.MEMORY_RECALL}}',
-      {},
-    );
+    const result = preprocessEntry('{{NARRATIVE}}\n{{USER_INPUT}}\n{{AGENT.MEMORY_RECALL}}', {});
     expect(result).toContain('{{NARRATIVE}}');
     expect(result).toContain('{{USER_INPUT}}');
     expect(result).toContain('{{AGENT.MEMORY_RECALL}}');
   });
 
   it('setvar empty declarations are stripped', () => {
-    const result = preprocessEntry(
-      '{{setvar::抢话::}}{{setvar::转述::}}text',
-      {},
-    );
+    const result = preprocessEntry('{{setvar::抢话::}}{{setvar::转述::}}text', {});
     expect(result.trim()).toBe('text');
   });
 });
@@ -383,9 +403,27 @@ describe('assemblePresetContent (Phase 10 extended)', () => {
     const preset = makePreset({ fixedSystem: '', fixedExamples: '' });
     (preset as any).settings = {
       prompts: [
-        { name: 'init', content: '{{setvar::抢话::}}{{setvar::转述::}}{{setvar::思维预算c::}}', enabled: true, role: 'system', injection_order: 0 },
-        { name: 'choose', content: '{{setvar::思维预算c::No more than 4096 words.}}', enabled: true, role: 'system', injection_order: 1 },
-        { name: 'body', content: 'Budget: {{getvar::思维预算c}}', enabled: true, role: 'system', injection_order: 2 },
+        {
+          name: 'init',
+          content: '{{setvar::抢话::}}{{setvar::转述::}}{{setvar::思维预算c::}}',
+          enabled: true,
+          role: 'system',
+          injection_order: 0,
+        },
+        {
+          name: 'choose',
+          content: '{{setvar::思维预算c::No more than 4096 words.}}',
+          enabled: true,
+          role: 'system',
+          injection_order: 1,
+        },
+        {
+          name: 'body',
+          content: 'Budget: {{getvar::思维预算c}}',
+          enabled: true,
+          role: 'system',
+          injection_order: 2,
+        },
       ],
     };
     const result = assemblePresetContent(preset);
@@ -398,9 +436,27 @@ describe('assemblePresetContent (Phase 10 extended)', () => {
     const preset = makePreset({ fixedSystem: '', fixedExamples: '' });
     (preset as any).settings = {
       prompts: [
-        { name: 'a', content: '{{setvar::style::old}}', enabled: true, role: 'system', injection_order: 0 },
-        { name: 'b', content: '{{setvar::style::new}}', enabled: true, role: 'system', injection_order: 1 },
-        { name: 'c', content: '{{getvar::style}}', enabled: true, role: 'system', injection_order: 2 },
+        {
+          name: 'a',
+          content: '{{setvar::style::old}}',
+          enabled: true,
+          role: 'system',
+          injection_order: 0,
+        },
+        {
+          name: 'b',
+          content: '{{setvar::style::new}}',
+          enabled: true,
+          role: 'system',
+          injection_order: 1,
+        },
+        {
+          name: 'c',
+          content: '{{getvar::style}}',
+          enabled: true,
+          role: 'system',
+          injection_order: 2,
+        },
       ],
     };
     const result = assemblePresetContent(preset);
@@ -412,7 +468,13 @@ describe('assemblePresetContent (Phase 10 extended)', () => {
     const preset = makePreset({ fixedSystem: '', fixedExamples: '' });
     (preset as any).settings = {
       prompts: [
-        { name: 'r', content: 'Hello {{//这是注释}} world {{roll 1d99999+1000}} end', enabled: true, role: 'system', injection_order: 0 },
+        {
+          name: 'r',
+          content: 'Hello {{//这是注释}} world {{roll 1d99999+1000}} end',
+          enabled: true,
+          role: 'system',
+          injection_order: 0,
+        },
       ],
     };
     const result = assemblePresetContent(preset);
@@ -425,10 +487,19 @@ describe('assemblePresetContent (Phase 10 extended)', () => {
     const preset = makePreset({ fixedSystem: '', fixedExamples: '' });
     (preset as any).settings = {
       prompts: [
-        { name: 'r', content: '{{char}} meets {{user}}', enabled: true, role: 'system', injection_order: 0 },
+        {
+          name: 'r',
+          content: '{{char}} meets {{user}}',
+          enabled: true,
+          role: 'system',
+          injection_order: 0,
+        },
       ],
     };
-    const result = assemblePresetContent(preset, undefined, { characterName: 'Knight', userName: 'Hero' });
+    const result = assemblePresetContent(preset, undefined, {
+      characterName: 'Knight',
+      userName: 'Hero',
+    });
     expect(result).toContain('Knight meets Hero');
   });
 
@@ -436,7 +507,13 @@ describe('assemblePresetContent (Phase 10 extended)', () => {
     const preset = makePreset({ fixedSystem: '', fixedExamples: '' });
     (preset as any).settings = {
       prompts: [
-        { name: 'ctx', content: 'Context: {{NARRATIVE}}\nInput: {{USER_INPUT}}', enabled: true, role: 'system', injection_order: 0 },
+        {
+          name: 'ctx',
+          content: 'Context: {{NARRATIVE}}\nInput: {{USER_INPUT}}',
+          enabled: true,
+          role: 'system',
+          injection_order: 0,
+        },
       ],
     };
     const result = assemblePresetContent(preset);
@@ -448,7 +525,13 @@ describe('assemblePresetContent (Phase 10 extended)', () => {
     const preset = makePreset({ fixedSystem: '', fixedExamples: '' });
     (preset as any).settings = {
       prompts: [
-        { name: 'cot', content: '<%_ if (getvar("model") === "Gemini") { _%>GEMINI_MODE<%_ } _%>', enabled: true, role: 'system', injection_order: 0 },
+        {
+          name: 'cot',
+          content: '<%_ if (getvar("model") === "Gemini") { _%>GEMINI_MODE<%_ } _%>',
+          enabled: true,
+          role: 'system',
+          injection_order: 0,
+        },
       ],
     };
     const result = assemblePresetContent(preset);
@@ -460,7 +543,13 @@ describe('assemblePresetContent (Phase 10 extended)', () => {
     const preset = makePreset({ fixedSystem: '', fixedExamples: '' });
     (preset as any).settings = {
       prompts: [
-        { name: 'r', content: 'Pick: {{random::A,B,C,D}}', enabled: true, role: 'system', injection_order: 0 },
+        {
+          name: 'r',
+          content: 'Pick: {{random::A,B,C,D}}',
+          enabled: true,
+          role: 'system',
+          injection_order: 0,
+        },
       ],
     };
     const result = assemblePresetContent(preset);

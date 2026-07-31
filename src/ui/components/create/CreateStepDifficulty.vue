@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { useCreateStore } from '../../stores/create-store'
-import { DIFFICULTY_PRESETS } from '@engine/start-catalog'
-import AppCard from '../shared/AppCard.vue'
+import { useCreateStore } from '../../stores/create-store';
+import { DIFFICULTY_PRESETS } from '@engine/start-catalog';
+import AppCard from '../shared/AppCard.vue';
 
-const store = useCreateStore()
+const store = useCreateStore();
 </script>
 
 <template>
@@ -29,7 +29,8 @@ const store = useCreateStore()
     </div>
 
     <p v-if="store.difficulty" class="selected-hint">
-      已选择「{{ store.difficulty.label }}」，获得 {{ store.difficulty.points.toLocaleString() }} 转生点数
+      已选择「{{ store.difficulty.label }}」，获得
+      {{ store.difficulty.points.toLocaleString() }} 转生点数
     </p>
   </section>
 </template>
@@ -57,16 +58,20 @@ const store = useCreateStore()
 }
 .difficulty-card {
   padding: var(--theme-spacing-md);
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
 }
 .difficulty-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 }
 .difficulty-card.selected {
   border-color: var(--theme-primary) !important;
-  box-shadow: 0 0 0 1px var(--theme-primary),
-              0 4px 20px color-mix(in srgb, var(--theme-primary) 20%, transparent);
+  box-shadow:
+    0 0 0 1px var(--theme-primary),
+    0 4px 20px color-mix(in srgb, var(--theme-primary) 20%, transparent);
 }
 .card-inner {
   display: flex;

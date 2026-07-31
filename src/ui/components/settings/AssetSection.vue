@@ -19,26 +19,30 @@
  * 于是这里的每一次删除/改名/设为主图**都会当场改变游戏内的画面** —— 改本组件树时
  * 别再按"反正看不见"来判断影响面。
  */
-import { computed, onMounted, provide, ref, watch } from 'vue'
-import { useAssetStore } from '../../stores/asset-store'
-import AppCard from '../shared/AppCard.vue'
-import AssetImportStrip from './assets/AssetImportStrip.vue'
-import AssetLibrary from './assets/AssetLibrary.vue'
-import AssetDialogs from './assets/AssetDialogs.vue'
-import { assetDialogsKey, type AssetConfirmOptions, type AssetPromptOptions } from './assets/dialogs'
+import { computed, onMounted, provide, ref, watch } from 'vue';
+import { useAssetStore } from '../../stores/asset-store';
+import AppCard from '../shared/AppCard.vue';
+import AssetImportStrip from './assets/AssetImportStrip.vue';
+import AssetLibrary from './assets/AssetLibrary.vue';
+import AssetDialogs from './assets/AssetDialogs.vue';
+import {
+  assetDialogsKey,
+  type AssetConfirmOptions,
+  type AssetPromptOptions,
+} from './assets/dialogs';
 
-const assets = useAssetStore()
+const assets = useAssetStore();
 
 // ===== 弹窗能力下发 =====
 // 弹窗本体挂在本壳里（一次只有一个在场），子组件通过 inject 拿到这两个方法。
 // 这里包一层闭包而不是直接 provide 实例：provide 发生在挂载之前，那时 ref 还是空的。
 
-const dialogsRef = ref<InstanceType<typeof AssetDialogs> | null>(null)
+const dialogsRef = ref<InstanceType<typeof AssetDialogs> | null>(null);
 
 provide(assetDialogsKey, {
   askConfirm: (opts: AssetConfirmOptions) => dialogsRef.value!.askConfirm(opts),
   askPrompt: (opts: AssetPromptOptions) => dialogsRef.value!.askPrompt(opts),
-})
+});
 
 // ===== 生命周期 =====
 
@@ -52,8 +56,8 @@ provide(assetDialogsKey, {
  * 写一个守着空语句的标志位，只会让下一个人以为它在防着什么。
  */
 onMounted(() => {
-  void assets.init()
-})
+  void assets.init();
+});
 
 // ===== 状态播报（唯一 aria-live 区域） =====
 // 只播报离散的、用户会关心的转变：库的忙碌态与导入/导出的忙碌态。
@@ -61,21 +65,30 @@ onMounted(() => {
 // 一次性事件（导入回执、批量删除结果、改名结果）由各段 emit('announce') 上来，
 // 仍然只写这一处。
 
-const liveMessage = ref('')
+const liveMessage = ref('');
 
-const assetCount = computed(() => assets.assets.length)
+const assetCount = computed(() => assets.assets.length);
 
 // 忙碌态结束必须改写这行字：留着「正在导入…」既是骗人，也会让下一次导入
 // 因为字符串没变而彻底不播报。结束时报库的现状（回执文案由子组件 announce 覆盖）。
-watch(() => assets.loading, (on) => {
-  liveMessage.value = on ? '正在翻检素材库…' : `素材库共 ${assetCount.value} 条。`
-})
-watch(() => assets.importing, (on) => {
-  if (on) liveMessage.value = '正在导入素材包…'
-})
-watch(() => assets.exporting, (on) => {
-  if (on) liveMessage.value = '正在打包素材…'
-})
+watch(
+  () => assets.loading,
+  (on) => {
+    liveMessage.value = on ? '正在翻检素材库…' : `素材库共 ${assetCount.value} 条。`;
+  },
+);
+watch(
+  () => assets.importing,
+  (on) => {
+    if (on) liveMessage.value = '正在导入素材包…';
+  },
+);
+watch(
+  () => assets.exporting,
+  (on) => {
+    if (on) liveMessage.value = '正在打包素材…';
+  },
+);
 </script>
 
 <template>
@@ -83,8 +96,8 @@ watch(() => assets.exporting, (on) => {
     <h3>素材</h3>
     <p class="section-desc">
       管理角色头像与立绘。素材库为全局资源，所有存档共用；它不随存档导出/导入，
-      有自己的一份素材包（见下方「导出素材包」）。导入后会直接用在游戏内的画像位、
-      角色列表与场景栏 —— <strong>名字必须与角色名完全一致</strong>才认得出来
+      有自己的一份素材包（见下方「导出素材包」）。导入后会直接用在游戏内的画像位、 角色列表与场景栏
+      —— <strong>名字必须与角色名完全一致</strong>才认得出来
       （不忽略空格、不忽略大小写），对不上就只显示首字母。
     </p>
 

@@ -17,33 +17,35 @@
  * 边界: 只调 asset-store 的公开动作；分组本身按 `name` 从 store 现算，
  * 于是任何一次落库刷新后抽屉自动跟上（不缓存一份会过期的行）。
  */
-import { computed, inject, reactive, ref, useId, watch } from 'vue'
-import { ASSET_TYPES, type AssetMetaRecord, type AssetType } from '@engine/types'
-import { isVideoExtension } from '@engine/asset-types'
-import { useAssetStore, type AssetMutationOutcome } from '../../../stores/asset-store'
-import { useUIStore } from '../../../stores/ui-store'
-import AppButton from '../../shared/AppButton.vue'
-import AppModal from '../../shared/AppModal.vue'
-import AssetCropEditor from '../../shared/AssetCropEditor.vue'
-import { assetDialogsKey } from './dialogs'
-import { useAssetThumbs } from './thumbs'
-import { fmtBytes } from '../audio/format'
+import { computed, inject, reactive, ref, useId, watch } from 'vue';
+import { ASSET_TYPES, type AssetMetaRecord, type AssetType } from '@engine/types';
+import { isVideoExtension } from '@engine/asset-types';
+import { useAssetStore, type AssetMutationOutcome } from '../../../stores/asset-store';
+import { useUIStore } from '../../../stores/ui-store';
+import AppButton from '../../shared/AppButton.vue';
+import AppModal from '../../shared/AppModal.vue';
+import AssetCropEditor from '../../shared/AssetCropEditor.vue';
+import { assetDialogsKey } from './dialogs';
+import { useAssetThumbs } from './thumbs';
+import { fmtBytes } from '../audio/format';
 
 const props = defineProps<{
   /** 分组名（即 `AssetMetaRecord.name`）；null 表示抽屉关着 */
-  name: string | null
-}>()
+  name: string | null;
+}>();
 
 const emit = defineEmits<{
-  (e: 'close'): void
-  (e: 'announce', message: string): void
-}>()
+  (e: 'close'): void;
+  (e: 'announce', message: string): void;
+}>();
 
-const assets = useAssetStore()
-const ui = useUIStore()
-const dialogs = inject(assetDialogsKey)!
+const assets = useAssetStore();
+const ui = useUIStore();
+const dialogs = inject(assetDialogsKey)!;
 
-const group = computed(() => (props.name ? assets.groups.find((g) => g.name === props.name) : undefined))
+const group = computed(() =>
+  props.name ? assets.groups.find((g) => g.name === props.name) : undefined,
+);
 
 /**
  * 变体排序: 主图在前，随后**自然序**。
@@ -53,36 +55,36 @@ const group = computed(() => (props.name ? assets.groups.find((g) => g.name === 
  * 不去改 store 的口径，因为那份顺序还服务着别的调用方。
  */
 function byVariantNatural(a: AssetMetaRecord, b: AssetMetaRecord): number {
-  const va = a.variant ?? ''
-  const vb = b.variant ?? ''
-  if (va === '' && vb !== '') return -1
-  if (vb === '' && va !== '') return 1
-  if (va !== vb) return va.localeCompare(vb, 'zh-Hans-CN', { numeric: true })
-  return a.createdAt - b.createdAt
+  const va = a.variant ?? '';
+  const vb = b.variant ?? '';
+  if (va === '' && vb !== '') return -1;
+  if (vb === '' && va !== '') return 1;
+  if (va !== vb) return va.localeCompare(vb, 'zh-Hans-CN', { numeric: true });
+  return a.createdAt - b.createdAt;
 }
 
 interface DrawerSection {
-  type: AssetType
-  rows: AssetMetaRecord[]
+  type: AssetType;
+  rows: AssetMetaRecord[];
   /** 该类型有行、但没有主图 —— §8 的「无主图」，删过主图后的常态 */
-  baseless: boolean
+  baseless: boolean;
 }
 
 const sections = computed<DrawerSection[]>(() => {
-  const g = group.value
-  if (!g) return []
-  const out: DrawerSection[] = []
+  const g = group.value;
+  if (!g) return [];
+  const out: DrawerSection[] = [];
   for (const type of ASSET_TYPES) {
-    const rows = g.rows.filter((r) => r.type === type).sort(byVariantNatural)
-    if (rows.length === 0) continue
-    out.push({ type, rows, baseless: g.baselessTypes.includes(type) })
+    const rows = g.rows.filter((r) => r.type === type).sort(byVariantNatural);
+    if (rows.length === 0) continue;
+    out.push({ type, rows, baseless: g.baselessTypes.includes(type) });
   }
-  return out
-})
+  return out;
+});
 
-const visibleRows = computed<AssetMetaRecord[]>(() => sections.value.flatMap((s) => s.rows))
+const visibleRows = computed<AssetMetaRecord[]>(() => sections.value.flatMap((s) => s.rows));
 
-const { thumbFor } = useAssetThumbs(() => visibleRows.value)
+const { thumbFor } = useAssetThumbs(() => visibleRows.value);
 
 /**
  * 组整个消失就关抽屉 —— 最后一条被删掉、或改名把它搬去了别的组。
@@ -90,13 +92,13 @@ const { thumbFor } = useAssetThumbs(() => visibleRows.value)
  */
 watch(group, (g) => {
   if (props.name && !g) {
-    editingId.value = ''
-    emit('close')
+    editingId.value = '';
+    emit('close');
   }
-})
+});
 
 function labelFor(row: AssetMetaRecord): string {
-  return row.variant ? row.variant : '主图'
+  return row.variant ? row.variant : '主图';
 }
 
 /**
@@ -112,18 +114,18 @@ function labelFor(row: AssetMetaRecord): string {
  * 真出现方形新类型时，改这一行即可。
  */
 function isStandeeType(type: AssetType): boolean {
-  return type !== '头像'
+  return type !== '头像';
 }
 
 // ═══ 行内改名（全字段，D14）═══════════════════════════════
 
-const editingId = ref('')
-const editError = ref('')
+const editingId = ref('');
+const editError = ref('');
 const form = reactive<{ name: string; type: AssetType; variant: string }>({
   name: '',
   type: '头像',
   variant: '',
-})
+});
 
 /**
  * 改名输入框的候选名单 —— §7.3 承诺的「autocomplete off existing asset names」。
@@ -138,78 +140,78 @@ const form = reactive<{ name: string; type: AssetType; variant: string }>({
  * 用原生 `<datalist>`: 不拦输入（新角色的第一个文件本来就没得可选），
  * 键盘与读屏都是浏览器原生行为，比手搓下拉靠谱。
  */
-const nameListId = `asset-name-list-${useId()}`
+const nameListId = `asset-name-list-${useId()}`;
 
-const knownNames = computed<string[]>(() => assets.groups.map((g) => g.name))
+const knownNames = computed<string[]>(() => assets.groups.map((g) => g.name));
 
 function startEdit(row: AssetMetaRecord): void {
-  editingId.value = row.id
-  editError.value = ''
-  form.name = row.name
-  form.type = row.type
-  form.variant = row.variant ?? ''
+  editingId.value = row.id;
+  editError.value = '';
+  form.name = row.name;
+  form.type = row.type;
+  form.variant = row.variant ?? '';
 }
 
 function cancelEdit(): void {
-  editingId.value = ''
-  editError.value = ''
+  editingId.value = '';
+  editError.value = '';
 }
 
 /** 拒收理由 → 就地能读懂的人话（每条都说清后果，不只说"不行"） */
 function explainOutcome(outcome: AssetMutationOutcome): string {
   switch (outcome) {
     case 'naming-invariant':
-      return '名称与变体里都不能出现「头像 / 立绘 / 立绘bg」这类类型词，也不能留空名 —— 否则导出再导入时会被解析成另一行，这条素材会悄悄换主人。'
+      return '名称与变体里都不能出现「头像 / 立绘 / 立绘bg」这类类型词，也不能留空名 —— 否则导出再导入时会被解析成另一行，这条素材会悄悄换主人。';
     case 'media-rule':
-      return '立绘不支持 mp4：视频没有合成用的透明通道，抠像立牌会渲染成人物背后一块黑框。换成图片（含动态 WebP），或改成「头像 / 立绘bg」。'
+      return '立绘不支持 mp4：视频没有合成用的透明通道，抠像立牌会渲染成人物背后一块黑框。换成图片（含动态 WebP），或改成「头像 / 立绘bg」。';
     case 'not-found':
-      return '这条素材已经不在库里了（可能在别处被删除）。'
+      return '这条素材已经不在库里了（可能在别处被删除）。';
     case 'already-base':
-      return '这一项已经是主图了。'
+      return '这一项已经是主图了。';
     default:
-      return '保存失败，这条素材没有任何改动，可以再试一次。'
+      return '保存失败，这条素材没有任何改动，可以再试一次。';
   }
 }
 
 async function saveEdit(row: AssetMetaRecord): Promise<void> {
-  editError.value = ''
+  editError.value = '';
   const res = await assets.renameAsset(row.id, {
     name: form.name,
     type: form.type,
     variant: form.variant,
-  })
+  });
   if (res.outcome !== 'ok') {
     // 就地提示，编辑面板原样留着 —— 用户填的东西不能被清掉。
     // 刻意**不给这段加 role="alert"**: 那会是分区里的第二个 live region，与壳层
     // 那唯一一处抢着说话。视觉上就地显示，读屏则走同一条 announce 通道。
-    editError.value = explainOutcome(res.outcome)
-    emit('announce', editError.value)
-    return
+    editError.value = explainOutcome(res.outcome);
+    emit('announce', editError.value);
+    return;
   }
-  editingId.value = ''
+  editingId.value = '';
   emit(
     'announce',
     res.renumberedFrom !== undefined
       ? `已保存；目标位已被占用，自动编号为「${res.row?.variant ?? ''}」。`
       : '已保存。',
-  )
+  );
 }
 
 // ═══ 设为主图 / 删除 ══════════════════════════════════════
 
 async function makePrimary(row: AssetMetaRecord): Promise<void> {
-  const res = await assets.setPrimary(row.id)
+  const res = await assets.setPrimary(row.id);
   if (res.outcome === 'ok') {
     emit(
       'announce',
       res.renumberedFrom !== undefined
         ? `已把「${labelFor(row)}」设为主图，原主图自动编号后保留在库里。`
         : `已把「${labelFor(row)}」设为主图。`,
-    )
-    return
+    );
+    return;
   }
   // 这一条不是某个输入框的问题（没有输入框），所以走 toast 而非行内提示
-  ui.toast(explainOutcome(res.outcome), res.outcome === 'already-base' ? 'info' : 'error')
+  ui.toast(explainOutcome(res.outcome), res.outcome === 'already-base' ? 'info' : 'error');
 }
 
 // ═══ 裁剪（一源两图，再编辑入口）═════════════════════════
@@ -221,52 +223,52 @@ async function makePrimary(row: AssetMetaRecord): Promise<void> {
  * 视频进不来: `image-crop.ts` 明写"调用方传视频进来是调用方的错"，所以把它拦在
  * **按钮**上而不是等到抛错 —— 一个点了才报错的按钮，等于让用户替我们做类型检查。
  */
-const cropSource = ref<Blob | null>(null)
-const cropName = ref('')
-const cropOpen = ref(false)
-const cropLoadingId = ref('')
+const cropSource = ref<Blob | null>(null);
+const cropName = ref('');
+const cropOpen = ref(false);
+const cropLoadingId = ref('');
 
 async function startCrop(row: AssetMetaRecord): Promise<void> {
-  if (isVideoExtension(row.ext)) return
-  cropLoadingId.value = row.id
+  if (isVideoExtension(row.ext)) return;
+  cropLoadingId.value = row.id;
   try {
     // 字节也走 store（`assetBlob`）—— store 是本 UI 通往 Dexie 的唯一边界，
     // 于是 D6 那条 loadBlob 注入缝仍然只有一处，日后换磁盘层不用回头找调用点
-    const blob = await assets.assetBlob(row.id)
+    const blob = await assets.assetBlob(row.id);
     if (!blob) {
       // 元数据在、字节没了。这不是"再试一次"能修的，得说清楚
-      ui.toast('这条素材的字节读不出来（元数据还在，图像已丢失），没法裁剪。', 'error')
-      return
+      ui.toast('这条素材的字节读不出来（元数据还在，图像已丢失），没法裁剪。', 'error');
+      return;
     }
-    cropSource.value = blob
-    cropName.value = row.name
-    cropOpen.value = true
+    cropSource.value = blob;
+    cropName.value = row.name;
+    cropOpen.value = true;
   } catch {
-    ui.toast('读取素材字节失败，没法裁剪；可以再试一次。', 'error')
+    ui.toast('读取素材字节失败，没法裁剪；可以再试一次。', 'error');
   } finally {
-    cropLoadingId.value = ''
+    cropLoadingId.value = '';
   }
 }
 
 function closeCrop(): void {
-  cropOpen.value = false
-  cropSource.value = null
+  cropOpen.value = false;
+  cropSource.value = null;
 }
 
 async function removeRow(row: AssetMetaRecord): Promise<void> {
-  const isBase = !row.variant
+  const isBase = !row.variant;
   const message = isBase
     ? `删除「${row.name}」的${row.type}主图？\n删除主图不会自动提拔其他变体：这一类会显示为「无主图」，需要你手动用「设为主图」指定一个。此操作不可撤销。`
-    : `删除「${row.name}」的${row.type}变体「${row.variant}」？此操作不可撤销。`
+    : `删除「${row.name}」的${row.type}变体「${row.variant}」？此操作不可撤销。`;
   const ok = await dialogs.askConfirm({
     title: '删除素材',
     message,
     confirmLabel: '删除',
     danger: true,
-  })
-  if (!ok) return
+  });
+  if (!ok) return;
   // 失败时 store 自己会弹一条 error（尽力做完模式），这里只播报成功
-  if (await assets.deleteAsset(row.id)) emit('announce', '已删除一条素材。')
+  if (await assets.deleteAsset(row.id)) emit('announce', '已删除一条素材。');
 }
 </script>
 
@@ -282,8 +284,9 @@ async function removeRow(row: AssetMetaRecord): Promise<void> {
   >
     <template v-if="group">
       <p class="drawer-meta">
-        共 {{ group.total }} 项<template v-if="group.variantCount > 0">，其中 {{ group.variantCount }} 项是变体</template>。
-        变体越堆越多是「永不覆盖」的代价 —— 用不上的可以在这里删掉。
+        共 {{ group.total }} 项<template v-if="group.variantCount > 0"
+          >，其中 {{ group.variantCount }} 项是变体</template
+        >。 变体越堆越多是「永不覆盖」的代价 —— 用不上的可以在这里删掉。
       </p>
 
       <section v-for="sec in sections" :key="sec.type" class="type-section">
@@ -343,7 +346,8 @@ async function removeRow(row: AssetMetaRecord): Promise<void> {
               size="sm"
               :disabled="!row.variant"
               @click="makePrimary(row)"
-            >设为主图</AppButton>
+              >设为主图</AppButton
+            >
             <!-- 视频不给裁: 画布只取得到某一帧，而"哪一帧"从来没人指定过。
                  禁用而不是藏起来 —— 藏起来只会让人以为这一行坏了。 -->
             <button
@@ -351,9 +355,11 @@ async function removeRow(row: AssetMetaRecord): Promise<void> {
               :data-crop-action="row.id"
               :disabled="isVideoExtension(row.ext) || cropLoadingId === row.id"
               :aria-label="isVideoExtension(row.ext) ? '裁剪（视频无法裁剪）' : '裁剪出立绘与头像'"
-              :title="isVideoExtension(row.ext)
-                ? '视频没法裁剪：画布只取得到某一帧。'
-                : '从这张图裁出立绘与头像'"
+              :title="
+                isVideoExtension(row.ext)
+                  ? '视频没法裁剪：画布只取得到某一帧。'
+                  : '从这张图裁出立绘与头像'
+              "
               @click="startCrop(row)"
             >
               <i class="fa-solid fa-crop-simple" aria-hidden="true" />
@@ -608,7 +614,9 @@ async function removeRow(row: AssetMetaRecord): Promise<void> {
   font-family: inherit;
   font-size: 0.8rem;
   cursor: pointer;
-  transition: background var(--theme-transition-fast), color var(--theme-transition-fast),
+  transition:
+    background var(--theme-transition-fast),
+    color var(--theme-transition-fast),
     border-color var(--theme-transition-fast);
 }
 .icon-btn i {

@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import type { DestinyCore } from '@engine/start-catalog'
-import AppCard from '../shared/AppCard.vue'
+import type { DestinyCore } from '@engine/start-catalog';
+import AppCard from '../shared/AppCard.vue';
 
-defineProps<{ core: DestinyCore; selected: boolean }>()
-defineEmits<{ select: [id: string] }>()
+defineProps<{ core: DestinyCore; selected: boolean }>();
+defineEmits<{ select: [id: string] }>();
 
 const MODE_BADGES: Record<string, string> = {
-  '官方': 'bg-official',
-  '社区': 'bg-community',
-  '隐藏': 'bg-hidden',
-}
+  官方: 'bg-official',
+  社区: 'bg-community',
+  隐藏: 'bg-hidden',
+};
 </script>
 
 <template>
@@ -17,7 +17,9 @@ const MODE_BADGES: Record<string, string> = {
     <div class="core-inner">
       <div class="core-top">
         <span class="core-name">{{ core.name }}</span>
-        <span v-if="core.mode" class="core-mode-badge" :class="MODE_BADGES[core.mode] || ''">{{ core.mode }}</span>
+        <span v-if="core.mode" class="core-mode-badge" :class="MODE_BADGES[core.mode] || ''">{{
+          core.mode
+        }}</span>
       </div>
       <span class="core-author">{{ core.author }}</span>
       <span class="core-theme">{{ core.theme }}</span>
@@ -29,17 +31,21 @@ const MODE_BADGES: Record<string, string> = {
 <style scoped>
 .core-card {
   padding: var(--theme-spacing-md);
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
   border: 1px solid var(--theme-card-border);
 }
 .core-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 }
 .core-card.selected {
   border-color: var(--theme-quality-epic) !important;
-  box-shadow: 0 0 0 1px var(--theme-quality-epic),
-              0 4px 20px color-mix(in srgb, var(--theme-quality-epic) 20%, transparent);
+  box-shadow:
+    0 0 0 1px var(--theme-quality-epic),
+    0 4px 20px color-mix(in srgb, var(--theme-quality-epic) 20%, transparent);
 }
 .core-inner {
   display: flex;

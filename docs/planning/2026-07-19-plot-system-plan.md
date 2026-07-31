@@ -10,17 +10,17 @@
 
 Phase 4 引擎层已完成，但整条链路从未接通：
 
-| # | 断点 | 位置 | 影响 |
-|---|------|------|------|
-| 1 | `plotSettings: { mode: 'off' }` 硬编码 | `game-pipeline.ts buildContext()` | 三个剧情 Agent 永远禁用 |
-| 2 | `preCheckPlot`/`postCheckPlot` 无人调用 | `plot-engine.ts`（只有测试引用） | Agent 输出即使产生也不落库 |
-| 3 | `game-store.plotOutline` 恒 null | `loadSave()` 不加载 plotOutlines 表 | PlotPanel 大纲区永远空 |
-| 4 | PlotPanel 读 `outline.title/summary` | `PlotPanel.vue:21-22` | 字段不存在（类型只有 content/selfCritique）|
-| 5 | 捏人页 plotSettings 不落库 | `create-store.startJourney()` | 用户配置流失，游戏页读不到 |
-| 6 | 大纲"游戏开始后自动生成"未实现 | `create-store.generatePlotOutline()` 占位 | 大纲永不生成 |
-| 7 | 三个剧情 Agent 提示词是老简版 | agent-config.json（746~1422 字符） | 输出格式不可靠 |
-| 8 | pre/post_check 按事件 **id** 寻址 | plot-engine 解析器 + 提示词 | 违反字段规范铁律 1（AI 永不产/引 id，逻辑键=名字→标题） |
-| 9 | 剧情设置存 settings-store（全局 localStorage） | `settings-store: plotMode 等 6 个 key` | 剧情配置应随存档而非全局（每档不同剧情模式） |
+| #   | 断点                                           | 位置                                      | 影响                                                    |
+| --- | ---------------------------------------------- | ----------------------------------------- | ------------------------------------------------------- |
+| 1   | `plotSettings: { mode: 'off' }` 硬编码         | `game-pipeline.ts buildContext()`         | 三个剧情 Agent 永远禁用                                 |
+| 2   | `preCheckPlot`/`postCheckPlot` 无人调用        | `plot-engine.ts`（只有测试引用）          | Agent 输出即使产生也不落库                              |
+| 3   | `game-store.plotOutline` 恒 null               | `loadSave()` 不加载 plotOutlines 表       | PlotPanel 大纲区永远空                                  |
+| 4   | PlotPanel 读 `outline.title/summary`           | `PlotPanel.vue:21-22`                     | 字段不存在（类型只有 content/selfCritique）             |
+| 5   | 捏人页 plotSettings 不落库                     | `create-store.startJourney()`             | 用户配置流失，游戏页读不到                              |
+| 6   | 大纲"游戏开始后自动生成"未实现                 | `create-store.generatePlotOutline()` 占位 | 大纲永不生成                                            |
+| 7   | 三个剧情 Agent 提示词是老简版                  | agent-config.json（746~1422 字符）        | 输出格式不可靠                                          |
+| 8   | pre/post_check 按事件 **id** 寻址              | plot-engine 解析器 + 提示词               | 违反字段规范铁律 1（AI 永不产/引 id，逻辑键=名字→标题） |
+| 9   | 剧情设置存 settings-store（全局 localStorage） | `settings-store: plotMode 等 6 个 key`    | 剧情配置应随存档而非全局（每档不同剧情模式）            |
 
 ### 最初设计回顾（phase4_plan.md v2）
 
@@ -74,8 +74,8 @@ export interface PlotSettings {
   mode: 'off' | 'side' | 'main';
   /** 🆕 雷点 — 绝对禁止生成的内容（所有模式通用，硬约束） */
   tabooContent: string;
-  main?: { /* ...现有字段不动... */ };
-  side?: { /* ...现有字段不动... */ };
+  main?: {/* ...现有字段不动... */};
+  side?: {/* ...现有字段不动... */};
 }
 ```
 
@@ -87,22 +87,23 @@ export interface PlotSettings {
 ### 2.4 设置页 ↔ 捏人页字段对齐
 
 两处 UI 使用**同一套字段集**（含新增雷点），语义分工：
+
 - **设置页「剧情系统」分区** = 新档默认值（settings-store 持久化 localStorage）
 - **捏人页 CreateStepPlot** = 本档实际值（初始化时从设置页默认值读入，可改，
   startJourney 落 SaveSlot.metadata.plotSettings）
 
 现状两边字段名/形状不一致，需收口对齐 create-store 的形状（与 types.ts PlotSettings 对齐）:
 
-| 字段 | settings-store 现状 | create-store 现状 | 收口后 |
-|------|--------------------|------------------|--------|
-| 模式 | plotMode | plotMode | ✅ 一致 |
-| 持续年份 | plotDuration | plotDurationYears | plotDurationYears |
-| 难度 | plotDifficulty ('dynamic') | plotDifficultyTier ('adaptive') | plotDifficultyTier ('adaptive') |
-| 外部NPC | plotAllowExternalNPC | plotAllowNonWorldbookNpc | plotAllowNonWorldbookNpc |
-| 偏向 | plotGenres | plotGenrePreference | plotGenrePreference（8 选项全量） |
-| 自定义偏好 | plotCustomPref | plotCustomPreference | plotCustomPreference |
-| 支线区域/年生成 | ❌ 缺 | plotFocusRegion / plotYearlyGeneration | 设置页补齐 |
-| 🆕 雷点 | ❌ 缺 | ❌ 缺 | plotTabooContent（两边都加，textarea） |
+| 字段            | settings-store 现状        | create-store 现状                      | 收口后                                 |
+| --------------- | -------------------------- | -------------------------------------- | -------------------------------------- |
+| 模式            | plotMode                   | plotMode                               | ✅ 一致                                |
+| 持续年份        | plotDuration               | plotDurationYears                      | plotDurationYears                      |
+| 难度            | plotDifficulty ('dynamic') | plotDifficultyTier ('adaptive')        | plotDifficultyTier ('adaptive')        |
+| 外部NPC         | plotAllowExternalNPC       | plotAllowNonWorldbookNpc               | plotAllowNonWorldbookNpc               |
+| 偏向            | plotGenres                 | plotGenrePreference                    | plotGenrePreference（8 选项全量）      |
+| 自定义偏好      | plotCustomPref             | plotCustomPreference                   | plotCustomPreference                   |
+| 支线区域/年生成 | ❌ 缺                      | plotFocusRegion / plotYearlyGeneration | 设置页补齐                             |
+| 🆕 雷点         | ❌ 缺                      | ❌ 缺                                  | plotTabooContent（两边都加，textarea） |
 
 ### 2.5 寻址方式修正（铁律 1 收口）
 
@@ -119,10 +120,12 @@ export interface PlotSettings {
 ### 3.1 plot_pre_check（正文前，Stage 0，与 memory_recall 并行）
 
 **输入**（variableContext/variableInstruction 动态注入）:
+
 - 大纲 content + 当前章节 + 活跃/待触发事件列表（标题+描述+触发条件语义）
 - 用户输入 + 最近 2 轮对话 + 角色状态摘要（位置/时间/关键变量）
 
 **输出** `<json>`:
+
 ```json
 {
   "triggeredEvents": [{ "title": "事件标题", "reason": "触发原因" }],
@@ -139,6 +142,7 @@ export interface PlotSettings {
 **输入**: 大纲 + 活跃事件 + 本轮正文 + 用户输入 + 角色状态摘要
 
 **输出** `<json>`:
+
 ```json
 {
   "worldLineChanged": false,
@@ -157,6 +161,7 @@ export interface PlotSettings {
 ### 3.3 plot_outline（捏人页生成 / 年度 / 世界线重生成，不在每轮管线中）
 
 **触发时机**（2026-07-19 主人拍板: 主线大纲在捏人页生成，游戏首回合零等待）:
+
 - 主线 main: **捏人页 CreateStepPlot** 点「🤖 生成剧情大纲」→ 一次 AI 调用产出结构化 JSON
   → PlotOutlinePreview 模糊预览，不满意可重新生成 → startJourney() 落库 + Code 转事件树
 - 支线 side: 游戏内首回合 + 每游戏年（gameTime 年份变化检测），复用同一 Agent/提示词
@@ -166,12 +171,19 @@ export interface PlotSettings {
 调用中产出，游戏里由 Code 纯确定性转换为 PlotEvent（ADR-11: 格式化归 Code）。
 
 **输出** `<json>`:
+
 ```json
 {
   "title": "大纲标题",
   "summary": "一句话摘要",
   "content": "# 完整叙事大纲（markdown，含章节）",
-  "chapters": [{ "title": "第一章 ...", "summary": "...", "keyEvents": [{ "title": "", "description": "", "triggerHint": "" }] }],
+  "chapters": [
+    {
+      "title": "第一章 ...",
+      "summary": "...",
+      "keyEvents": [{ "title": "", "description": "", "triggerHint": "" }]
+    }
+  ],
   "selfCritique": { "score": 7, "strengths": [], "weaknesses": [], "suggestions": [] }
 }
 ```
@@ -187,6 +199,7 @@ export interface PlotSettings {
 区别于「重新生成」（丢弃重来）：**带着上一版大纲 + user 的修改要求，让 AI 重写/修改**。
 
 **UI（捏人页 PlotOutlinePreview 下方）**:
+
 ```
 [🎲 重新生成]  [✏️ 按要求修改]
 点「按要求修改」→ 展开 textarea:「你希望怎么改这份大纲？」
@@ -195,6 +208,7 @@ export interface PlotSettings {
 ```
 
 **Prompt 结构**（同一个 plot_outline Agent，走「修改模式」动态注入）:
+
 ```
 [system] plot_outline systemPrompt（含修改模式说明区块）
 [user]
@@ -209,6 +223,7 @@ export interface PlotSettings {
 ```
 
 **行为细节**:
+
 - 输出仍是完整大纲 JSON → 同一条校验/自检/预览链，零新增解析逻辑
 - create-store 保留 `outlineHistory: PlotOutline[]`（会话内，最多 5 版）→ 「回退上一版」按钮
 - 落库时只存最终确认版（历史不入库，避免膨胀）
@@ -222,6 +237,7 @@ export interface PlotSettings {
 ## 四、提示词（agent-config.json 重写，参照 vars_update ~300 行标准）
 
 三个 Agent 各重写 systemPrompt，共同要求：
+
 1. 遵循 `agent_system_prompt_guide.md` 流程 + `narrative_context_example.md` 叙事规范
 2. 世界观锚定：复兴纪元 / 10 势力 / 7 级品质 / T1-T7 层级（引用世界书条目语义）
 3. **格式纪律**（吸取 char_gen 真机教训）: 思维链后必须输出 `<json>` 区块、
@@ -246,6 +262,7 @@ export interface PlotSettings {
 ### 5.2 大纲生成时序
 
 **主线（捏人页）**:
+
 ```
 CreateStepPlot 点「生成大纲」→ plot_outline Agent（create-store 直调 AgentClient）
   → JSON 校验 + 自检循环（score<6 重试 1 次）
@@ -257,6 +274,7 @@ startJourney():
 ```
 
 **支线（游戏内）**:
+
 ```
 loadSave → mode==='side' 且当年无大纲 → GamePipeline.ensurePlotOutline()
   → plot_outline Agent（agentStatus: '生成大纲'）→ 同上落库链
@@ -293,7 +311,7 @@ finally  refreshFromDb 扩展: + getLatestPlotOutline + getPlotEvents 回读 Pin
 ### 6.2 PlotPanel（Modal）升级 + 剧透开关
 
 - 头部: outline.title + summary + 版本号(v2 时显示"世界线已变动×1") + 章节进度条
-  + **「剧透模式」眼睛开关**（默认关闭）
+  - **「剧透模式」眼睛开关**（默认关闭）
 - 章节手风琴: 每章 title + status 色标；展开显示本章 summary + 事件列表
 - 事件渲染规则:
   - visibility==='revealed' → 正常显示（标题+描述+状态分组: ⚡活跃/⏳待触发/✅完成/✖失败）
@@ -307,15 +325,15 @@ finally  refreshFromDb 扩展: + getLatestPlotOutline + getPlotEvents 回读 Pin
 
 ## 七、实施顺序（7 步，每步可独立验证）
 
-| 步 | 内容 | 文件 | 验证 |
-|----|------|------|------|
-| 1 | 类型+解析层: PlotOutline/PlotEvent 字段增补 + PlotSettings 雷点 + id→title 寻址 | types.ts / plot-engine.ts / plot-outline.ts | 单测更新 |
-| 2 | 存储: plotSettings 入 SaveSlot.metadata + loadSave/refreshFromDb 加载大纲事件 | create-store / game-store | 单测 + typecheck |
-| 3 | 提示词: 三个 Agent systemPrompt 重写（plot_outline 含雷点注入区 + 修改模式区块） | agent-config.json / agent-templates.ts 动态上下文 | 人工审读 |
-| 4 | 大纲生成链: 捏人页真实 AI 调用 + 自检循环 + 重 roll（修改模式 + outlineHistory 回退） + Code 结构化事件树 + 支线年度生成 | create-store / game-pipeline.ts / plot-outline.ts | 单测 |
-| 5 | 每轮接线: buildContext 读真实 plotSettings + handleAgentResult 接 pre/post | game-pipeline.ts | 单测 |
-| 6 | UI: SideToolbar 剧情按钮 + PlotPanel 升级（剧透开关+？？？蒙层）+ 设置页/捏人页字段对齐 + 雷点 textarea + 重 roll 按钮组 | SideToolbar.vue / PlotPanel.vue / SettingsPage.vue / CreateStepPlot | typecheck，主人真机验证 |
-| 7 | 文档同步: CLAUDE.md 进度 + agent预期分析 + phase4 注记 | docs/ | — |
+| 步  | 内容                                                                                                                     | 文件                                                                | 验证                    |
+| --- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- | ----------------------- |
+| 1   | 类型+解析层: PlotOutline/PlotEvent 字段增补 + PlotSettings 雷点 + id→title 寻址                                          | types.ts / plot-engine.ts / plot-outline.ts                         | 单测更新                |
+| 2   | 存储: plotSettings 入 SaveSlot.metadata + loadSave/refreshFromDb 加载大纲事件                                            | create-store / game-store                                           | 单测 + typecheck        |
+| 3   | 提示词: 三个 Agent systemPrompt 重写（plot_outline 含雷点注入区 + 修改模式区块）                                         | agent-config.json / agent-templates.ts 动态上下文                   | 人工审读                |
+| 4   | 大纲生成链: 捏人页真实 AI 调用 + 自检循环 + 重 roll（修改模式 + outlineHistory 回退） + Code 结构化事件树 + 支线年度生成 | create-store / game-pipeline.ts / plot-outline.ts                   | 单测                    |
+| 5   | 每轮接线: buildContext 读真实 plotSettings + handleAgentResult 接 pre/post                                               | game-pipeline.ts                                                    | 单测                    |
+| 6   | UI: SideToolbar 剧情按钮 + PlotPanel 升级（剧透开关+？？？蒙层）+ 设置页/捏人页字段对齐 + 雷点 textarea + 重 roll 按钮组 | SideToolbar.vue / PlotPanel.vue / SettingsPage.vue / CreateStepPlot | typecheck，主人真机验证 |
+| 7   | 文档同步: CLAUDE.md 进度 + agent预期分析 + phase4 注记                                                                   | docs/                                                               | —                       |
 
 **真机验证点**（主人执行）: 新开主线档 → 首回合看大纲生成 → PlotPanel 有内容 →
 玩几轮看事件触发/完成 → 完成事件出现在记忆面板。

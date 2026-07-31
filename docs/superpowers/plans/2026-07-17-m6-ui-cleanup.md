@@ -20,6 +20,7 @@
 ### Task 1: 读方切正式字段（切读，双写仍在）
 
 **Files:**
+
 - Modify: `src/sillytavern/context-visibility.ts`（customFields.background/personality/appearance 读点 → 一等字段，customFields 兜底保留一行 `?? customFields.xxx` 到 Task 2 删）
 - Modify: `src/ui/components/game/CharacterListPanel.vue`（gender/age/appearance/outfit/trait/background 读点——**trait→personality**: UI 改读 `char.personality`）
 - Modify: `src/ui/utils/test-save.ts`（NPC 的 customFields.trait 值同步复制为一等 personality 字段——**若 M2-M5 执行期间已做则跳过**）
@@ -37,6 +38,7 @@
 ### Task 2: 双写退役（停写旧 key）
 
 **Files:**
+
 - Modify: `src/ui/stores/create-store.ts`（buildCharacterState 的 customFields: 删 saveId/gender/personality/physics/backstory，保留 destinyCoreId/destinyPoints/age/extra）
 - Modify: `src/ui/utils/test-save.ts`（4 处 customFields 同式收缩）
 - Modify: `src/sillytavern/char-gen-agent.ts`（assembleCharacterState 停写 customFields 的 background/appearance/personality/gender/clothing——M3 起的双写侧）
@@ -54,6 +56,7 @@
 ### Task 3: 查询与类型清理
 
 **Files:**
+
 - Modify: `src/ui/stores/game-store.ts`（refreshFromDb: `getCharacters()` 全量 → `getCharacters(activeSaveId.value)` 索引查询，合并语义保持）
 - Modify: `src/sillytavern/types.ts`（ChatSession 接口删除 + 失真 deprecation 注释清理；MemoryRecord.relatedPlotEventId 删除 #50）
 - Modify: `src/sillytavern/memory-summarizer.ts`（createCompressionSummaryMemory 的 `Omit<...,'id'>` 返回改为内部补 `generateMemoryId()` 直接返回完整记录 #50）
@@ -71,6 +74,7 @@
 ### Task 4: UI 死功能裁决 — markNewsRead 接线 + deleteSaveSlot 事务化
 
 **Files:**
+
 - Modify: `src/ui/components/game/ScenePanel.vue`（toggleNews 展开时调 markNewsRead + refreshFromDb 或本地同步 read 标志）
 - Modify: `src/sillytavern/database.ts`（deleteSaveSlot 用 `db.transaction('rw', [...7 表], ...)` 包裹——M1 终审 Minor 遗留）
 - Test: `src/sillytavern/save-profile.test.ts` / `database.test.ts`
@@ -85,6 +89,7 @@
 ### Task 5: 范围外留档 + 装备 UI 完整化验收
 
 **Files:**
+
 - Modify: `docs/superpowers/specs/2026-07-16-data-field-conventions-design.md`（附录 A 后追加「范围外接线待办」小节）
 - Modify: `src/ui/components/game/StatusOverview.vue` / `ItemsPanel.vue` / `CharacterListPanel.vue`（M2 Task 12 的 filter 最小适配 → 检查是否需要正式的"装备栏分组展示"重构；**只在展示破损时修**，纯样式优化不做）
 
@@ -99,6 +104,7 @@
 ### Task 6: 收官验证 — 解冻真机测试
 
 **Files:**
+
 - Modify: `CLAUDE.md`（进度表 + 架构注记更新）
 - Modify: `docs/superpowers/specs/2026-07-16-data-field-conventions-design.md`（附录 A 全批次完成注记）
 
@@ -115,16 +121,16 @@
 
 ## 覆盖清单
 
-| 项 | Task |
-|----|------|
-| #34 读方/写方双侧 | 1 / 2 |
-| #36 markNewsRead | 4 |
-| #46 ChatSession 收尾 | 3 |
-| #49（M5 已启用索引，本批确认）| 3 |
-| #50 #51 #52 | 3 |
-| #17 #29（范围外留档）| 5 |
-| trait→personality | 1 |
-| getThoughts charName 死参数 | 1 |
-| refreshFromDb 索引查询 | 3 |
-| deleteSaveSlot 事务化（M1 遗留）| 4 |
-| 真机解冻 + 52 项收官核对 | 6 |
+| 项                               | Task  |
+| -------------------------------- | ----- |
+| #34 读方/写方双侧                | 1 / 2 |
+| #36 markNewsRead                 | 4     |
+| #46 ChatSession 收尾             | 3     |
+| #49（M5 已启用索引，本批确认）   | 3     |
+| #50 #51 #52                      | 3     |
+| #17 #29（范围外留档）            | 5     |
+| trait→personality                | 1     |
+| getThoughts charName 死参数      | 1     |
+| refreshFromDb 索引查询           | 3     |
+| deleteSaveSlot 事务化（M1 遗留） | 4     |
+| 真机解冻 + 52 项收官核对         | 6     |

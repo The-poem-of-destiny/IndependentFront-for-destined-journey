@@ -43,13 +43,13 @@ import { getTierConfig } from './tier-constants';
  *   T1→优良, T2→稀有, T3→史诗, T4→传说, T5→神话, T6→唯一
  */
 const QUALITY_TIER_REFERENCE: Record<QualityLevel, number> = {
-  '普通': 1,
-  '优良': 1,   // T1 可产
-  '稀有': 2,   // T2 可产
-  '史诗': 3,   // T3 可产
-  '传说': 4,   // T4 可产
-  '神话': 5,   // T5 可产
-  '唯一': 6,   // T6 可产 (实际不可生产,仅参考)
+  普通: 1,
+  优良: 1, // T1 可产
+  稀有: 2, // T2 可产
+  史诗: 3, // T3 可产
+  传说: 4, // T4 可产
+  神话: 5, // T5 可产
+  唯一: 6, // T6 可产 (实际不可生产,仅参考)
 };
 
 /**
@@ -125,19 +125,17 @@ export function calcFinalDC(
 /**
  * 计算完整的制作检定分解
  */
-export function calcCraftCheck(
-  params: {
-    targetQuality: QualityLevel;
-    materials: CraftMaterial[];
-    crafterTier: number;
-    coreAttributeValue: number;
-    d20Rolls: number[];
-    skillBonus?: number;
-    toolBonus?: number;
-    identityBonus?: number;
-    locationBonus?: number;
-  },
-): CraftCheckBreakdown {
+export function calcCraftCheck(params: {
+  targetQuality: QualityLevel;
+  materials: CraftMaterial[];
+  crafterTier: number;
+  coreAttributeValue: number;
+  d20Rolls: number[];
+  skillBonus?: number;
+  toolBonus?: number;
+  identityBonus?: number;
+  locationBonus?: number;
+}): CraftCheckBreakdown {
   const {
     targetQuality,
     materials,
@@ -191,7 +189,10 @@ export function calcCraftCheck(
   return {
     baseDC,
     materialDCModifier,
-    materialDCDetails: materials.map(m => ({ materialName: m.itemName, dcModifier: m.dcModifier })),
+    materialDCDetails: materials.map((m) => ({
+      materialName: m.itemName,
+      dcModifier: m.dcModifier,
+    })),
     bonusDCReduction,
     finalDC,
     fixedBonus,
@@ -289,7 +290,13 @@ export function calcFPReward(
   if (stage === '基础加工') return 0;
 
   const fpMultiplier: Record<QualityLevel, number> = {
-    '普通': 1, '优良': 2, '稀有': 3, '史诗': 5, '传说': 8, '神话': 12, '唯一': 0,
+    普通: 1,
+    优良: 2,
+    稀有: 3,
+    史诗: 5,
+    传说: 8,
+    神话: 12,
+    唯一: 0,
   };
 
   // 半成品 FP 减半
@@ -382,26 +389,33 @@ export function checkQualityUpgrade(
 /**
  * 构建完整的制作结算分解
  */
-export function buildSettlementBreakdown(
-  params: {
-    stage: CraftStage;
-    targetQuality: QualityLevel;
-    outputQuality: QualityLevel;
-    rating: CraftRating;
-    materials: CraftMaterial[];
-    quantity: number;
-    crafterTier: number;
-    crafterLevel: number;
-    isSingle: boolean;
-    d20MaterialSave: number;
-    d20QualityUpgrade: number;
-    resourceCost: { hp: number; mp: number; sp: number };
-  },
-): CraftSettlementBreakdown {
+export function buildSettlementBreakdown(params: {
+  stage: CraftStage;
+  targetQuality: QualityLevel;
+  outputQuality: QualityLevel;
+  rating: CraftRating;
+  materials: CraftMaterial[];
+  quantity: number;
+  crafterTier: number;
+  crafterLevel: number;
+  isSingle: boolean;
+  d20MaterialSave: number;
+  d20QualityUpgrade: number;
+  resourceCost: { hp: number; mp: number; sp: number };
+}): CraftSettlementBreakdown {
   const {
-    stage, targetQuality, outputQuality, rating, materials,
-    quantity, crafterTier, crafterLevel, isSingle,
-    d20MaterialSave, d20QualityUpgrade, resourceCost,
+    stage,
+    targetQuality,
+    outputQuality,
+    rating,
+    materials,
+    quantity,
+    crafterTier,
+    crafterLevel,
+    isSingle,
+    d20MaterialSave,
+    d20QualityUpgrade,
+    resourceCost,
   } = params;
 
   const bonus = getProductionBonus(outputQuality);
@@ -417,10 +431,12 @@ export function buildSettlementBreakdown(
     lossRate = bonus.failureProtection;
   }
 
-  const lostMaterials = materials.map(m => ({
-    itemName: m.itemName,
-    quantity: Math.ceil(m.quantity * lossRate),
-  })).filter(m => m.quantity > 0);
+  const lostMaterials = materials
+    .map((m) => ({
+      itemName: m.itemName,
+      quantity: Math.ceil(m.quantity * lossRate),
+    }))
+    .filter((m) => m.quantity > 0);
 
   // 精益求精增益
   let perfectionBonus: CraftSettlementBreakdown['perfectionBonus'];
@@ -439,11 +455,12 @@ export function buildSettlementBreakdown(
 
   // DC 修正
   const dcRange = bonus.canUpgradeQuality
-    ? [16, 25] as [number, number]
-    : [Math.floor((CRAFT_DC_MODIFIER_RANGE[outputQuality]?.[0] ?? 0) * 0.7),
-       CRAFT_DC_MODIFIER_RANGE[outputQuality]?.[1] ?? 0] as [number, number];
-  const productDCModifier = dcRange[0] +
-    Math.floor(Math.random() * (dcRange[1] - dcRange[0] + 1));
+    ? ([16, 25] as [number, number])
+    : ([
+        Math.floor((CRAFT_DC_MODIFIER_RANGE[outputQuality]?.[0] ?? 0) * 0.7),
+        CRAFT_DC_MODIFIER_RANGE[outputQuality]?.[1] ?? 0,
+      ] as [number, number]);
+  const productDCModifier = dcRange[0] + Math.floor(Math.random() * (dcRange[1] - dcRange[0] + 1));
 
   // 经验
   const expReward = calcExpReward(stage, outputQuality, rating, crafterTier, crafterLevel);
@@ -470,8 +487,8 @@ export function buildSettlementBreakdown(
     materialLoss: { lossRate, lostMaterials },
     outputQuality: finalQuality,
     qualityDowngraded: finalQuality !== targetQuality,
-    qualityDowngradeReason: finalQuality !== targetQuality
-      ? `品质继承不满足，产出降级为「${finalQuality}」` : undefined,
+    qualityDowngradeReason:
+      finalQuality !== targetQuality ? `品质继承不满足，产出降级为「${finalQuality}」` : undefined,
     perfectionBonus,
     productDCModifier,
     valueRange,

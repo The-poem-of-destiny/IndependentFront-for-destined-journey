@@ -14,17 +14,17 @@
 
 ```typescript
 interface CatalogItem {
-  id: string
-  name: string
-  category: 'equipment' | 'item' | 'skill'
-  type: string                    // 装备:武器/防具/饰品  技能:主动/被动  道具:消耗品/材料/特殊
-  rarity: Rarity                  // common / uncommon / rare / epic / legendary / mythic / only
-  tag: string[]                   // [属性, 目标类型, 伤害类型, 学派, 功能...]
-  effect: Record<string, string>  // { "范围伤害": "造成100%能量伤害", ... }
-  consume?: string                // "攻击: 400MP" / "动作: 150MP"
-  description: string
-  cost: number                    // 转生点消耗
-  quantity?: number               // 仅 item 类
+  id: string;
+  name: string;
+  category: 'equipment' | 'item' | 'skill';
+  type: string; // 装备:武器/防具/饰品  技能:主动/被动  道具:消耗品/材料/特殊
+  rarity: Rarity; // common / uncommon / rare / epic / legendary / mythic / only
+  tag: string[]; // [属性, 目标类型, 伤害类型, 学派, 功能...]
+  effect: Record<string, string>; // { "范围伤害": "造成100%能量伤害", ... }
+  consume?: string; // "攻击: 400MP" / "动作: 150MP"
+  description: string;
+  cost: number; // 转生点消耗
+  quantity?: number; // 仅 item 类
 }
 ```
 
@@ -48,7 +48,7 @@ interface CatalogItem {
 
 ```typescript
 // start-catalog.ts — 主人后续填充
-DESTINY_CORE_WORLDBOOK_MAP: Record<string, string[]> = {}
+DESTINY_CORE_WORLDBOOK_MAP: Record<string, string[]> = {};
 ```
 
 ---
@@ -68,14 +68,14 @@ PointsBar 置顶: `转生点数: 824 / 2000 (简单)    [角色预设]`
 
 ## 三、Step 0: 难度选择
 
-| id | 名称 | 点数 |
-|----|------|------|
+| id       | 名称     | 点数  |
+| -------- | -------- | ----- |
 | creative | 创造模式 | 10000 |
-| easy | 轻松 | 5000 |
-| simple | 简单 | 2000 |
-| normal | 普通 | 1000 |
-| hard | 困难 | 500 |
-| hell | 地狱 | 100 |
+| easy     | 轻松     | 5000  |
+| simple   | 简单     | 2000  |
+| normal   | 普通     | 1000  |
+| hard     | 困难     | 500   |
+| hell     | 地狱     | 100   |
 
 六张卡片纵向排列, 点击即选, 默认不选中。
 
@@ -83,17 +83,17 @@ PointsBar 置顶: `转生点数: 824 / 2000 (简单)    [角色预设]`
 
 ## 四、Step 1: 基础信息
 
-| 字段 | 组件 | 写入路径 |
-|------|------|---------|
-| 角色名 | FormInput | 变量 |
-| 性别 | FormSelect (8选项) | 变量 |
-| 年龄 | FormStepper (1-999) | 变量 |
-| 种族 | FormSelect (22种族+自定义) | 变量 |
-| 身份 | FormSelect (30+身份) | 变量 |
-| 起始地点 | FormCascader (5大区级联) | 变量 |
-| 等级 | FormStepper (1-25) | 变量 |
-| 基础属性 BP×5 | AttributeEditor (maxBP=25, per=6) | 变量 |
-| 额外属性 AP×5 | AttributeEditor (maxAP=level-1) | 变量 |
+| 字段          | 组件                              | 写入路径 |
+| ------------- | --------------------------------- | -------- |
+| 角色名        | FormInput                         | 变量     |
+| 性别          | FormSelect (8选项)                | 变量     |
+| 年龄          | FormStepper (1-999)               | 变量     |
+| 种族          | FormSelect (22种族+自定义)        | 变量     |
+| 身份          | FormSelect (30+身份)              | 变量     |
+| 起始地点      | FormCascader (5大区级联)          | 变量     |
+| 等级          | FormStepper (1-25)                | 变量     |
+| 基础属性 BP×5 | AttributeEditor (maxBP=25, per=6) | 变量     |
+| 额外属性 AP×5 | AttributeEditor (maxAP=level-1)   | 变量     |
 
 联动: `tier = f(level)`, `finalAttr = BP + tierBonus + AP`, HP/MP/SP = `TIER_CONFIGS[tier] × 属性 × 10`
 
@@ -139,6 +139,7 @@ PointsBar 置顶: `转生点数: 824 / 2000 (简单)    [角色预设]`
 ## 八、Step 5: 剧情规划
 
 复用 SettingsPage 剧情分区 UI + 底部「生成剧情大纲」按钮。
+
 - 调用 `createOutlineFromAgent()`, 显示等待警告
 - 未生成/生成中/已生成(高斯模糊) 三态
 - 可跳过, 存档创建后自动生成
@@ -173,34 +174,64 @@ PointsBar 置顶: `转生点数: 824 / 2000 (简单)    [角色预设]`
 
 ```typescript
 function buildOpeningPrompt(): string {
-  const parts: string[] = []
+  const parts: string[] = [];
 
   if (selectedEquipments.value.length > 0) {
-    parts.push(`【初始装备】\n${JSON.stringify(selectedEquipments.value.map(e => ({
-      name: e.name, type: e.type, rarity: e.rarity,
-      tag: e.tag, effect: e.effect, description: e.description,
-    })))}`)
+    parts.push(
+      `【初始装备】\n${JSON.stringify(
+        selectedEquipments.value.map((e) => ({
+          name: e.name,
+          type: e.type,
+          rarity: e.rarity,
+          tag: e.tag,
+          effect: e.effect,
+          description: e.description,
+        })),
+      )}`,
+    );
   }
   if (selectedSkills.value.length > 0) {
-    parts.push(`【初始技能】\n${JSON.stringify(selectedSkills.value.map(s => ({
-      name: s.name, type: s.type, rarity: s.rarity,
-      tag: s.tag, effect: s.effect, consume: s.consume, description: s.description,
-    })))}`)
+    parts.push(
+      `【初始技能】\n${JSON.stringify(
+        selectedSkills.value.map((s) => ({
+          name: s.name,
+          type: s.type,
+          rarity: s.rarity,
+          tag: s.tag,
+          effect: s.effect,
+          consume: s.consume,
+          description: s.description,
+        })),
+      )}`,
+    );
   }
   if (selectedItems.value.length > 0) {
-    parts.push(`【背包物品】\n${JSON.stringify(selectedItems.value.map(i => ({
-      name: i.name, type: i.type, rarity: i.rarity, quantity: i.quantity,
-      tag: i.tag, effect: i.effect, description: i.description,
-    })))}`)
+    parts.push(
+      `【背包物品】\n${JSON.stringify(
+        selectedItems.value.map((i) => ({
+          name: i.name,
+          type: i.type,
+          rarity: i.rarity,
+          quantity: i.quantity,
+          tag: i.tag,
+          effect: i.effect,
+          description: i.description,
+        })),
+      )}`,
+    );
   }
   if (selectedBackground.value) {
-    parts.push(`【角色背景】\n${JSON.stringify({ name: selectedBackground.value.name, text: selectedBackground.value.fullText })}`)
+    parts.push(
+      `【角色背景】\n${JSON.stringify({ name: selectedBackground.value.name, text: selectedBackground.value.fullText })}`,
+    );
   }
   if (destinyCore.value) {
-    parts.push(`【命定之灵】\n${JSON.stringify({ name: destinyCore.value.name, author: destinyCore.value.author, theme: destinyCore.value.theme })}`)
+    parts.push(
+      `【命定之灵】\n${JSON.stringify({ name: destinyCore.value.name, author: destinyCore.value.author, theme: destinyCore.value.theme })}`,
+    );
   }
 
-  return parts.join('\n\n')
+  return parts.join('\n\n');
 }
 ```
 
@@ -219,10 +250,10 @@ function buildOpeningPrompt(): string {
 ```typescript
 interface SaveSlot {
   // 现有字段...
-  openingPrompt?: string    // 开场提示词 (首回合消费后清空)
-  destinyCoreId?: string
-  difficulty?: string
-  remainingPoints?: number
+  openingPrompt?: string; // 开场提示词 (首回合消费后清空)
+  destinyCoreId?: string;
+  difficulty?: string;
+  remainingPoints?: number;
 }
 ```
 
@@ -233,46 +264,47 @@ interface SaveSlot {
 ```typescript
 export const useCreateStore = defineStore('create', () => {
   // 步骤
-  const currentStep = ref(0)
+  const currentStep = ref(0);
 
   // 难度
-  const difficulty = ref<DifficultyPreset | null>(null)
+  const difficulty = ref<DifficultyPreset | null>(null);
 
   // 角色 (→ 变量)
-  const name, gender, customGender, age
-  const race, customRace, identity, customIdentity
-  const startLocation, customStartLocation
-  const level, basePoints, attributePoints
-  const reincarnationPoints, destinyPoints, money
+  const name, gender, customGender, age;
+  const race, customRace, identity, customIdentity;
+  const startLocation, customStartLocation;
+  const level, basePoints, attributePoints;
+  const reincarnationPoints, destinyPoints, money;
 
   // computed: tier, tierBonus, finalAttributes, hp/mp/sp preview
   // computed: raceCost, identityCost, totalCost, remainingPoints
 
   // 命定核心
-  const destinyCore = ref<DestinyCore | null>(null)
+  const destinyCore = ref<DestinyCore | null>(null);
 
   // 装备/道具/技能 (→ 开场提示词)
-  const selectedEquipments, selectedItems, selectedSkills
-  const activeCategory, rarityFilter, typeFilter
+  const selectedEquipments, selectedItems, selectedSkills;
+  const activeCategory, rarityFilter, typeFilter;
   // 筛选池: equipmentPool / itemPool / skillPool
 
   // 背景
-  const selectedBackground, customBackgroundText
+  const selectedBackground, customBackgroundText;
 
   // 剧情
-  const plotSettings, plotOutline, isPlotGenerating
+  const plotSettings, plotOutline, isPlotGenerating;
 
   // 提交
-  function buildCharacterState(): CharacterState
-  function buildOpeningPrompt(): string
-  async function startJourney(): Promise<string>
+  function buildCharacterState(): CharacterState;
+  function buildOpeningPrompt(): string;
+  async function startJourney(): Promise<string>;
 
   // 预设
-  const presets; loadPresets / saveCurrentPreset / loadPreset / deletePreset
+  const presets;
+  loadPresets / saveCurrentPreset / loadPreset / deletePreset;
 
   // 重置
-  function resetAll()
-})
+  function resetAll();
+});
 ```
 
 ---
@@ -287,55 +319,57 @@ export const useCreateStore = defineStore('create', () => {
 ## 十三、组件清单
 
 ### 已有复用
+
 AppButton, AppCard, AppModal, AppTabs, QualityBadge, ResourceBar, AvatarPanel, FormInput, FormSelect, FormStepper, FormCascader
 
 ### 新建 (17 个)
-| 组件 | 用途 |
-|------|------|
-| `CreatePage.vue` | 步骤容器 + 预设弹窗 |
-| `CreateSteps.vue` | 7 步指示器 |
-| `CreateFooter.vue` | 底部导航 (含「角色预设」按钮) |
-| `PointsBar.vue` | 点数消耗条 |
-| `CreateStepDifficulty.vue` | Step 0 |
-| `CreateStepBasic.vue` | Step 1 |
-| `AttributeEditor.vue` | 五维属性步进器 |
-| `CreateStepDestinyCore.vue` | Step 2 |
-| `DestinyCoreCard.vue` | 核心卡片 |
-| `CreateStepSelections.vue` | Step 3 |
-| `CategoryTabs.vue` | 装备/道具/技能 标签 |
-| `QualityFilter.vue` | rarity 筛选按钮组 |
-| `SelectableCard.vue` | 通用可选卡片 (tag+effect 展示) |
-| `SelectedPanel.vue` | 已选列表 |
-| `CreateStepBackground.vue` | Step 4 |
-| `BackgroundList.vue` | 背景卡片列表 |
-| `CreateStepPlot.vue` | Step 5 |
-| `PlotOutlinePreview.vue` | 大纲预览 (模糊/揭示) |
-| `CreateStepConfirm.vue` | Step 6 |
-| `PresetModal.vue` | 预设管理弹窗 |
-| `CustomItemForm.vue` | 自定义物品 Modal |
-| `PartnerWorldBookPanel.vue` | 伙伴 (占位) |
+
+| 组件                        | 用途                           |
+| --------------------------- | ------------------------------ |
+| `CreatePage.vue`            | 步骤容器 + 预设弹窗            |
+| `CreateSteps.vue`           | 7 步指示器                     |
+| `CreateFooter.vue`          | 底部导航 (含「角色预设」按钮)  |
+| `PointsBar.vue`             | 点数消耗条                     |
+| `CreateStepDifficulty.vue`  | Step 0                         |
+| `CreateStepBasic.vue`       | Step 1                         |
+| `AttributeEditor.vue`       | 五维属性步进器                 |
+| `CreateStepDestinyCore.vue` | Step 2                         |
+| `DestinyCoreCard.vue`       | 核心卡片                       |
+| `CreateStepSelections.vue`  | Step 3                         |
+| `CategoryTabs.vue`          | 装备/道具/技能 标签            |
+| `QualityFilter.vue`         | rarity 筛选按钮组              |
+| `SelectableCard.vue`        | 通用可选卡片 (tag+effect 展示) |
+| `SelectedPanel.vue`         | 已选列表                       |
+| `CreateStepBackground.vue`  | Step 4                         |
+| `BackgroundList.vue`        | 背景卡片列表                   |
+| `CreateStepPlot.vue`        | Step 5                         |
+| `PlotOutlinePreview.vue`    | 大纲预览 (模糊/揭示)           |
+| `CreateStepConfirm.vue`     | Step 6                         |
+| `PresetModal.vue`           | 预设管理弹窗                   |
+| `CustomItemForm.vue`        | 自定义物品 Modal               |
+| `PartnerWorldBookPanel.vue` | 伙伴 (占位)                    |
 
 ---
 
 ## 十四、实现顺序
 
-| # | 内容 | 状态 |
-|---|------|------|
-| 1 | `start-catalog.ts` | ✅ 完成 |
-| 2 | `create-store.ts` 扩展 | ⬜ |
-| 3 | `database.ts` v7 升级 | ⬜ |
-| 4 | `CreatePage.vue` `CreateSteps.vue` `CreateFooter.vue` `PointsBar.vue` | ⬜ |
-| 5 | Step 0 `CreateStepDifficulty.vue` | ⬜ |
-| 6 | Step 1 `CreateStepBasic.vue` `AttributeEditor.vue` | ⬜ |
-| 7 | Step 2 `CreateStepDestinyCore.vue` `DestinyCoreCard.vue` | ⬜ |
-| 8 | Step 3 `CreateStepSelections.vue` + 子组件 | ⬜ |
-| 9 | Step 4 `CreateStepBackground.vue` `BackgroundList.vue` | ⬜ |
-| 10 | Step 5 `CreateStepPlot.vue` `PlotOutlinePreview.vue` | ⬜ |
-| 11 | Step 6 `CreateStepConfirm.vue` | ⬜ |
-| 12 | `PresetModal.vue` + DB | ⬜ |
-| 13 | `CustomItemForm.vue` | ⬜ |
-| 14 | 联调 | ⬜ |
+| #   | 内容                                                                  | 状态    |
+| --- | --------------------------------------------------------------------- | ------- |
+| 1   | `start-catalog.ts`                                                    | ✅ 完成 |
+| 2   | `create-store.ts` 扩展                                                | ⬜      |
+| 3   | `database.ts` v7 升级                                                 | ⬜      |
+| 4   | `CreatePage.vue` `CreateSteps.vue` `CreateFooter.vue` `PointsBar.vue` | ⬜      |
+| 5   | Step 0 `CreateStepDifficulty.vue`                                     | ⬜      |
+| 6   | Step 1 `CreateStepBasic.vue` `AttributeEditor.vue`                    | ⬜      |
+| 7   | Step 2 `CreateStepDestinyCore.vue` `DestinyCoreCard.vue`              | ⬜      |
+| 8   | Step 3 `CreateStepSelections.vue` + 子组件                            | ⬜      |
+| 9   | Step 4 `CreateStepBackground.vue` `BackgroundList.vue`                | ⬜      |
+| 10  | Step 5 `CreateStepPlot.vue` `PlotOutlinePreview.vue`                  | ⬜      |
+| 11  | Step 6 `CreateStepConfirm.vue`                                        | ⬜      |
+| 12  | `PresetModal.vue` + DB                                                | ⬜      |
+| 13  | `CustomItemForm.vue`                                                  | ⬜      |
+| 14  | 联调                                                                  | ⬜      |
 
 ---
 
-*最后更新: 2026-06-16 | 准备开始写前端*
+_最后更新: 2026-06-16 | 准备开始写前端_

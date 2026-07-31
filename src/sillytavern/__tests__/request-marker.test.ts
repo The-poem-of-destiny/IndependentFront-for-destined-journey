@@ -1,9 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { scanCharGenRequests, scanCharUpdateRequests, scanItemGenRequests, scanItemUpdateRequests, scanCraftGenRequests, scanMarkers } from '../marker-protocol';
+import {
+  scanCharGenRequests,
+  scanCharUpdateRequests,
+  scanItemGenRequests,
+  scanItemUpdateRequests,
+  scanCraftGenRequests,
+  scanMarkers,
+} from '../marker-protocol';
 
 describe('scanCharGenRequests', () => {
   it('should detect a single char_gen_request tag', () => {
-    const text = '<char_gen_request characterName="汉斯" race="人类" characterType="npc">\n  白曜城铁匠铺主人\n</char_gen_request>';
+    const text =
+      '<char_gen_request characterName="汉斯" race="人类" characterType="npc">\n  白曜城铁匠铺主人\n</char_gen_request>';
     const results = scanCharGenRequests(text);
     expect(results).toHaveLength(1);
     expect(results[0].type).toBe('char_gen_request');
@@ -47,7 +55,8 @@ describe('scanCharUpdateRequests', () => {
 
 describe('scanItemGenRequests', () => {
   it('should detect an item_gen_request', () => {
-    const text = '<item_gen_request itemType="equipment" source="craft" owner="player_1">定制长剑</item_gen_request>';
+    const text =
+      '<item_gen_request itemType="equipment" source="craft" owner="player_1">定制长剑</item_gen_request>';
     const results = scanItemGenRequests(text);
     expect(results).toHaveLength(1);
     expect(results[0].type).toBe('item_gen_request');
@@ -59,7 +68,8 @@ describe('scanItemGenRequests', () => {
 
 describe('scanItemUpdateRequests', () => {
   it('should detect a consume operation', () => {
-    const text = '<item_update_request target="治疗药水" operation="consume" quantity="1" owner="player_1">用掉一瓶</item_update_request>';
+    const text =
+      '<item_update_request target="治疗药水" operation="consume" quantity="1" owner="player_1">用掉一瓶</item_update_request>';
     const results = scanItemUpdateRequests(text);
     expect(results).toHaveLength(1);
     expect(results[0].attributes.operation).toBe('consume');
@@ -68,7 +78,8 @@ describe('scanItemUpdateRequests', () => {
   });
 
   it('should detect equip operation', () => {
-    const text = '<item_update_request target="铁剑" operation="equip" owner="player_1">装备铁剑</item_update_request>';
+    const text =
+      '<item_update_request target="铁剑" operation="equip" owner="player_1">装备铁剑</item_update_request>';
     const results = scanItemUpdateRequests(text);
     expect(results).toHaveLength(1);
     expect(results[0].attributes.operation).toBe('equip');
@@ -78,7 +89,8 @@ describe('scanItemUpdateRequests', () => {
 
 describe('scanCraftGenRequests', () => {
   it('should detect a craft_gen_request', () => {
-    const text = '<craft_gen_request characterId="player_1" industry="锻造" productName="长剑" targetQuality="稀有">使用铁矿石x3和皮革x1</craft_gen_request>';
+    const text =
+      '<craft_gen_request characterId="player_1" industry="锻造" productName="长剑" targetQuality="稀有">使用铁矿石x3和皮革x1</craft_gen_request>';
     const results = scanCraftGenRequests(text);
     expect(results).toHaveLength(1);
     expect(results[0].type).toBe('craft_gen_request');
@@ -105,7 +117,8 @@ describe('scanMarkers with new vars_update format', () => {
   });
 
   it('should produce cleanText with vars_update JSON-like format', () => {
-    const text = '<json>{"delta_time": 30}</json>\n<char_gen_request characterName="汉斯">铁匠铺主人</char_gen_request>\n<item_update_request target="药水" operation="consume">用掉一瓶</item_update_request>';
+    const text =
+      '<json>{"delta_time": 30}</json>\n<char_gen_request characterName="汉斯">铁匠铺主人</char_gen_request>\n<item_update_request target="药水" operation="consume">用掉一瓶</item_update_request>';
     const result = scanMarkers(text);
     // <json> is NOT in MARKER_TAGS, so it's not stripped by scanMarkers
     // It's handled separately in the orchestrator via regex

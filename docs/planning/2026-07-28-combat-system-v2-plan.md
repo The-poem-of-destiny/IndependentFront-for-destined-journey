@@ -11,16 +11,16 @@
 
 实施前必须吃透 v2 文档的几个核心机制：
 
-| 机制 | 要点 | 实施关键 |
-|------|------|---------|
-| 管道 + 中间件 | 主函数触发 event → 脚本链式处理参数 → 主函数仲裁 | EventBus 要支持「返回值链」 |
-| 同构契约 | 物品/buff/技能/天赋同一脚本契约 | 声明式注册替代 init/cleanup |
-| 6 大效果类别 | 固伤/百分比/资源/检定/附加效果/特殊机制 | modifier 类型枚举 + 管线分发 |
-| 登神 9 级 priority | 普通→微弱要素→...→神国，高阶压低阶 | divinity 字段 + 冲突仲裁 |
-| buff 6 字段 + id 去重 | id = `[上级.]状态名`，同源刷新/异源独立 | 对齐 [状态规则] |
-| 结算时机 | 增益 round.start / 减益 round.end | 两个 event 分工 |
-| 19 个 event | 战斗生命周期/回合/单位/攻击/战术/战意/结算 | event 名单见 v2 §6.4 |
-| 计算分工 | 代码管数值红线，AI 管创造性 | HP 扣减/生死必须代码 |
+| 机制                  | 要点                                             | 实施关键                     |
+| --------------------- | ------------------------------------------------ | ---------------------------- |
+| 管道 + 中间件         | 主函数触发 event → 脚本链式处理参数 → 主函数仲裁 | EventBus 要支持「返回值链」  |
+| 同构契约              | 物品/buff/技能/天赋同一脚本契约                  | 声明式注册替代 init/cleanup  |
+| 6 大效果类别          | 固伤/百分比/资源/检定/附加效果/特殊机制          | modifier 类型枚举 + 管线分发 |
+| 登神 9 级 priority    | 普通→微弱要素→...→神国，高阶压低阶               | divinity 字段 + 冲突仲裁     |
+| buff 6 字段 + id 去重 | id = `[上级.]状态名`，同源刷新/异源独立          | 对齐 [状态规则]              |
+| 结算时机              | 增益 round.start / 减益 round.end                | 两个 event 分工              |
+| 19 个 event           | 战斗生命周期/回合/单位/攻击/战术/战意/结算       | event 名单见 v2 §6.4         |
+| 计算分工              | 代码管数值红线，AI 管创造性                      | HP 扣减/生死必须代码         |
 
 ---
 
@@ -52,14 +52,14 @@ M6 集成测试与交付（单元 + 集成 + Agent + 真机）
 
 ### 任务清单
 
-| # | 任务 | 涉及文件 | 产出 | 验收 |
-|---|------|---------|------|------|
-| 1.1 | EventBus 支持「链式返回值」 | `game-event.ts` | 新增 `emitChain(event, initialParams)` 方法，按订阅顺序调用 handler，前一个返回值作后一个输入，最终返回 | 单元测试：3 个 handler 链式改参数，最终值正确 |
-| 1.2 | 在场过滤机制 | `game-event.ts` / `subscription-manager.ts` | emit 时检查订阅者 owner 是否在上下文参战者列表，不在则跳过 | 单元测试：远在场外的脚本不触发 |
-| 1.3 | 声明式脚本契约 | `script-executor.ts` / 新增 `script-registry.ts` | 支持注册 `{event, source, owner, handler, condition, priority}` 结构，替代裸 `$event.on` | 单元测试：物品装备时自动注册整份清单 |
-| 1.4 | 套娃深度限制 | `subscription-manager.ts` | 战斗场景深度 ≤5（现有 ≤10 保留为非战斗默认） | 单元测试：6 层套娃第 6 层被拦截 |
-| 1.5 | ctx 只读 API | `script-executor.ts` | `$resource.getHp(owner)` / `$char.getAttr(owner,'str')` 等只读函数暴露给脚本（最小集） | 单元测试：脚本能读不能写 HP |
-| 1.6 | 旧 `$event.on/off` 兼容层 | `script-executor.ts` | 保留命令式 API 但内部映射到声明式注册，向后兼容 | 现有测试全绿 |
+| #   | 任务                        | 涉及文件                                         | 产出                                                                                                    | 验收                                          |
+| --- | --------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| 1.1 | EventBus 支持「链式返回值」 | `game-event.ts`                                  | 新增 `emitChain(event, initialParams)` 方法，按订阅顺序调用 handler，前一个返回值作后一个输入，最终返回 | 单元测试：3 个 handler 链式改参数，最终值正确 |
+| 1.2 | 在场过滤机制                | `game-event.ts` / `subscription-manager.ts`      | emit 时检查订阅者 owner 是否在上下文参战者列表，不在则跳过                                              | 单元测试：远在场外的脚本不触发                |
+| 1.3 | 声明式脚本契约              | `script-executor.ts` / 新增 `script-registry.ts` | 支持注册 `{event, source, owner, handler, condition, priority}` 结构，替代裸 `$event.on`                | 单元测试：物品装备时自动注册整份清单          |
+| 1.4 | 套娃深度限制                | `subscription-manager.ts`                        | 战斗场景深度 ≤5（现有 ≤10 保留为非战斗默认）                                                            | 单元测试：6 层套娃第 6 层被拦截               |
+| 1.5 | ctx 只读 API                | `script-executor.ts`                             | `$resource.getHp(owner)` / `$char.getAttr(owner,'str')` 等只读函数暴露给脚本（最小集）                  | 单元测试：脚本能读不能写 HP                   |
+| 1.6 | 旧 `$event.on/off` 兼容层   | `script-executor.ts`                             | 保留命令式 API 但内部映射到声明式注册，向后兼容                                                         | 现有测试全绿                                  |
 
 ### 风险
 
@@ -77,14 +77,14 @@ M6 集成测试与交付（单元 + 集成 + Agent + 真机）
 
 M1 全 6 任务完成。方案 B：主线预备 `ReadonlyHookSet` → 两 code-writer agent 并行 1.1/1.5 → 主线串行 1.4/1.3/1.6。
 
-| 任务 | 产出 | 测试 |
-|------|------|------|
-| 1.1 emitChain | `EventBus.emitChain/subscribeChain` 链式返回值，分离注册表 `chainHandlers`，稳定排序+错误隔离 | 19 |
-| 1.2 在场过滤 | emitChain 入口 `ctx.combatants` 过滤 `owner`（1.1 顺手交付） | 含 1.1 |
-| 1.3 声明式 registry | `script-registry.ts`（register/registerAll/unregisterOwner/clear，按 ownerKey 分组） | 11 |
-| 1.4 套娃深度 | emitChain per-chain `ctx.maxDepth`（内层继承）+ SubscriptionManager `setMaxDepth` | 4 |
-| 1.5 ctx 只读 API | ScriptContext `readHooks`（$resource/$char 只读，缺省 0 兼容旧测试） | 9 |
-| 1.6 兼容层 | 分离注册表保证（声明式 emitChain ↔ 命令式 publish 互不串台） | 含 1.3 |
+| 任务                | 产出                                                                                          | 测试   |
+| ------------------- | --------------------------------------------------------------------------------------------- | ------ |
+| 1.1 emitChain       | `EventBus.emitChain/subscribeChain` 链式返回值，分离注册表 `chainHandlers`，稳定排序+错误隔离 | 19     |
+| 1.2 在场过滤        | emitChain 入口 `ctx.combatants` 过滤 `owner`（1.1 顺手交付）                                  | 含 1.1 |
+| 1.3 声明式 registry | `script-registry.ts`（register/registerAll/unregisterOwner/clear，按 ownerKey 分组）          | 11     |
+| 1.4 套娃深度        | emitChain per-chain `ctx.maxDepth`（内层继承）+ SubscriptionManager `setMaxDepth`             | 4      |
+| 1.5 ctx 只读 API    | ScriptContext `readHooks`（$resource/$char 只读，缺省 0 兼容旧测试）                          | 9      |
+| 1.6 兼容层          | 分离注册表保证（声明式 emitChain ↔ 命令式 publish 互不串台）                                  | 含 1.3 |
 
 **类型新增**（types.ts）：`AttributeName`（str/dex/con/int/spi）、`ReadonlyHookSet`（10 只读方法）。
 
@@ -100,18 +100,18 @@ M1 全 6 任务完成。方案 B：主线预备 `ReadonlyHookSet` → 两 code-w
 
 ### 任务清单
 
-| # | 任务 | 涉及文件 | 产出 | 验收 |
-|---|------|---------|------|------|
-| 3.1 | modifier 6 大类定义 | `types.ts` / 新增 `effect-types.ts` | `EffectCategory` 枚举（固伤/百分比/资源/检定/附加效果/特殊机制）+ 各类型接口 | 类型检查通过 |
-| 3.2 | 登神 9 级 divinity | `types.ts` | `DivinityLevel` 枚举（普通/微弱要素/.../神国）+ 冲突仲裁函数 `resolveDivinityConflict(a, b)` | 单元测试：神位压常规、同级不压 |
-| 3.3 | collect_mods 事件机制 | `combat-damage.ts` / 新增 `modifier-collector.ts` | `collectAttackerMods()` / `collectDefenderMods()`，按订阅收集 modifier 列表 | 单元测试：5 戒指各声明，收集到 5 个 |
-| 3.4 | modifier 按类分发到管线 | `modifier-collector.ts` | 固伤→Step6a、百分比→Step6、检定→检定阶段、特殊→DR/穿透各归位 | 单元测试：各类 modifier 进对应 step |
-| 3.5 | buff 6 字段结构 | `types.ts`（重构 StatusEffect） | 效果名称/类型/层数/剩余时间/来源/效果 六字段，对齐 [状态规则] | 类型检查通过 |
-| 3.6 | buff id 去重 | 新增 `buff-registry.ts` | id = `[上级.]状态名`，实例 = `(owner, id)`；同源刷新+增层，异源独立 | 单元测试：同源叠加、异源共存、无上级裸名 |
-| 3.7 | buff 4 种生命周期 | `buff-registry.ts` | 战斗型(X回合) / 持续型(永久) / 触发型(直至触发) / 条件型(直至条件消失) | 单元测试：4 种都能正确移除 |
-| 3.8 | 结算时机 | `combat-turn.ts` / `morale-system.ts` | 增益在 `round.start` 结算、减益/DoT 在 `round.end` 结算 | 单元测试：流血在 round.end tick |
-| 3.9 | layer 作为自由参数 | `buff-registry.ts` | handler 可读写 `params.layers`，架构不规定语义 | 单元测试：流血每层 +X |
-| 3.10 | `$status` API | 新增 `status-api.ts` | `$status.apply(target, buffDef)` / `.remove` / `.query`，apply 自动走 id 去重 | 单元测试：apply 同源刷新 |
+| #    | 任务                    | 涉及文件                                          | 产出                                                                                         | 验收                                     |
+| ---- | ----------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| 3.1  | modifier 6 大类定义     | `types.ts` / 新增 `effect-types.ts`               | `EffectCategory` 枚举（固伤/百分比/资源/检定/附加效果/特殊机制）+ 各类型接口                 | 类型检查通过                             |
+| 3.2  | 登神 9 级 divinity      | `types.ts`                                        | `DivinityLevel` 枚举（普通/微弱要素/.../神国）+ 冲突仲裁函数 `resolveDivinityConflict(a, b)` | 单元测试：神位压常规、同级不压           |
+| 3.3  | collect_mods 事件机制   | `combat-damage.ts` / 新增 `modifier-collector.ts` | `collectAttackerMods()` / `collectDefenderMods()`，按订阅收集 modifier 列表                  | 单元测试：5 戒指各声明，收集到 5 个      |
+| 3.4  | modifier 按类分发到管线 | `modifier-collector.ts`                           | 固伤→Step6a、百分比→Step6、检定→检定阶段、特殊→DR/穿透各归位                                 | 单元测试：各类 modifier 进对应 step      |
+| 3.5  | buff 6 字段结构         | `types.ts`（重构 StatusEffect）                   | 效果名称/类型/层数/剩余时间/来源/效果 六字段，对齐 [状态规则]                                | 类型检查通过                             |
+| 3.6  | buff id 去重            | 新增 `buff-registry.ts`                           | id = `[上级.]状态名`，实例 = `(owner, id)`；同源刷新+增层，异源独立                          | 单元测试：同源叠加、异源共存、无上级裸名 |
+| 3.7  | buff 4 种生命周期       | `buff-registry.ts`                                | 战斗型(X回合) / 持续型(永久) / 触发型(直至触发) / 条件型(直至条件消失)                       | 单元测试：4 种都能正确移除               |
+| 3.8  | 结算时机                | `combat-turn.ts` / `morale-system.ts`             | 增益在 `round.start` 结算、减益/DoT 在 `round.end` 结算                                      | 单元测试：流血在 round.end tick          |
+| 3.9  | layer 作为自由参数      | `buff-registry.ts`                                | handler 可读写 `params.layers`，架构不规定语义                                               | 单元测试：流血每层 +X                    |
+| 3.10 | `$status` API           | 新增 `status-api.ts`                              | `$status.apply(target, buffDef)` / `.remove` / `.query`，apply 自动走 id 去重                | 单元测试：apply 同源刷新                 |
 
 ### 风险
 
@@ -128,18 +128,18 @@ M1 全 6 任务完成。方案 B：主线预备 `ReadonlyHookSet` → 两 code-w
 
 M2 全 10 任务完成。方案 B：主线组 A（types.ts 加 3 字段 + DivinityLevel + effect-types.ts）→ 两 code-writer agent 并行组 B（buff 引擎）+ 组 C（modifier collect）。
 
-| 任务 | 产出 | 测试 |
-|------|------|------|
-| 3.1 modifier 6 大类 | `effect-types.ts`（EffectCategory + 6 接口 + Modifier 联合） | 17 |
-| 3.2 登神 divinity | `effect-types.ts` DivinityLevel + resolveDivinityConflict（差值压制表） | 含上 |
-| 3.3 collect_mods | `modifier-collector.ts`（collectAttackerMods/collectDefenderMods，复用 emitChain） | 11 |
-| 3.4 modifier 分发 | `effect-types.ts` classifyModifier + 聚合工具（sumFixedDamage/sumPercentages/collectChecks/...） | 含 3.1 |
-| 3.5 buff 6 字段 | `types.ts` StatusEffect +3 可选字段（sourceKey/lifecycle/divinity） | 类型 |
-| 3.6 buff id 去重 | `buff-registry.ts`（buffIdOf/applyBuff：同源刷新+增层/异源独立） | 35 |
-| 3.7 buff 4 生命周期 | `buff-registry.ts` lifecycleOf + tick（战斗型递减/持续型不动） | 含上 |
-| 3.8 结算时机 | `buff-registry.ts` tick（round.start 增益/round.end 减益） | 含上 |
-| 3.9 layer 自由参数 | `$status.apply` 透传 stacks 给 handler | 含 3.10 |
-| 3.10 $status API | `status-api.ts`（applyStatusIntents/removeStatusIntents）+ 沙盒 $status 扩展 | 13+22 |
+| 任务                | 产出                                                                                             | 测试    |
+| ------------------- | ------------------------------------------------------------------------------------------------ | ------- |
+| 3.1 modifier 6 大类 | `effect-types.ts`（EffectCategory + 6 接口 + Modifier 联合）                                     | 17      |
+| 3.2 登神 divinity   | `effect-types.ts` DivinityLevel + resolveDivinityConflict（差值压制表）                          | 含上    |
+| 3.3 collect_mods    | `modifier-collector.ts`（collectAttackerMods/collectDefenderMods，复用 emitChain）               | 11      |
+| 3.4 modifier 分发   | `effect-types.ts` classifyModifier + 聚合工具（sumFixedDamage/sumPercentages/collectChecks/...） | 含 3.1  |
+| 3.5 buff 6 字段     | `types.ts` StatusEffect +3 可选字段（sourceKey/lifecycle/divinity）                              | 类型    |
+| 3.6 buff id 去重    | `buff-registry.ts`（buffIdOf/applyBuff：同源刷新+增层/异源独立）                                 | 35      |
+| 3.7 buff 4 生命周期 | `buff-registry.ts` lifecycleOf + tick（战斗型递减/持续型不动）                                   | 含上    |
+| 3.8 结算时机        | `buff-registry.ts` tick（round.start 增益/round.end 减益）                                       | 含上    |
+| 3.9 layer 自由参数  | `$status.apply` 透传 stacks 给 handler                                                           | 含 3.10 |
+| 3.10 $status API    | `status-api.ts`（applyStatusIntents/removeStatusIntents）+ 沙盒 $status 扩展                     | 13+22   |
 
 **关键降风险**：StatusEffect **未重构现有字段**（D5 选 A，只加 3 可选字段）；craft/morale/affection **实际不在引用面**（grep 实测，计划风险栏过虑）。
 
@@ -153,18 +153,18 @@ M2 全 10 任务完成。方案 B：主线组 A（types.ts 加 3 字段 + Divini
 
 ### 任务清单
 
-| # | 任务 | 涉及文件 | 产出 | 验收 |
-|---|------|---------|------|------|
-| 4.1 | combat-resolver 管道化 | `combat-resolver.ts` | `resolveAttack` 重构为管道，每个关键步骤触发对应 event | 现有 154 测试迁移通过 |
-| 4.2 | 19 event 触发点接入 | `combat-resolver.ts` / `combat-turn.ts` | 按v2 §6.4 清单，在每个步骤 emit 对应 event | 集成测试：攻击走完整 event 链 |
-| 4.3 | 随机数事件化 | `dice.ts` / 新增 `dice-event.ts` | `rollDice()` 触发 `combat.dice.roll` 事件，脚本可改骰值 | 单元测试：幸运戒指+2、诅咒取低 |
-| 4.4 | 8 步管线 modifier 注入 | `combat-damage.ts` | 在 Step 1/3/6/6a/7 等位置插入 modifier 收集点，按类分发 | 单元测试：固伤进 6a、百分比进 6 |
-| 4.5 | 登神 priority 仲裁 | `combat-damage.ts` | 攻防 divinity 比较，高阶压制低阶（等效穿透/无视 DR） | 单元测试：神位伤无视常规防 |
-| 4.6 | HP 扣减 + 生死判定红线 | `combat-resolver.ts` | HP 扣减必须代码执行（AI 不可直接动），HP≤0 强制死亡 | 单元测试：AI 输出再离谱也 clamp |
-| 4.7 | `$combat` API 扩展 | `combat-resolver.ts` | 补全 `useSkill` / `useItem` / `block` / `move` / `focus`（v2 §13 h 项） | 单元测试：每个 API 可调 |
-| 4.8 | 战意判定接线 | `morale-system.ts` | HP<阈值触发 `combat.morale.check` → AI 返回 → `morale.result` 应用 | 集成测试：B HP<30% 触发 |
-| 4.9 | 战斗结算管线 | `combat-resolver.ts` | `combat.end` → EXP 计算 → `settle.loot` → `settle.complete` | 集成测试：胜利正确给 EXP |
-| 4.10 | 集群系统适配 | `cluster-system.ts` | "同类"判定归 AI（char_gen 只生成 1 个代表），属性/资源 ×N | 单元测试：集群资源正确 |
+| #    | 任务                   | 涉及文件                                | 产出                                                                    | 验收                            |
+| ---- | ---------------------- | --------------------------------------- | ----------------------------------------------------------------------- | ------------------------------- |
+| 4.1  | combat-resolver 管道化 | `combat-resolver.ts`                    | `resolveAttack` 重构为管道，每个关键步骤触发对应 event                  | 现有 154 测试迁移通过           |
+| 4.2  | 19 event 触发点接入    | `combat-resolver.ts` / `combat-turn.ts` | 按v2 §6.4 清单，在每个步骤 emit 对应 event                              | 集成测试：攻击走完整 event 链   |
+| 4.3  | 随机数事件化           | `dice.ts` / 新增 `dice-event.ts`        | `rollDice()` 触发 `combat.dice.roll` 事件，脚本可改骰值                 | 单元测试：幸运戒指+2、诅咒取低  |
+| 4.4  | 8 步管线 modifier 注入 | `combat-damage.ts`                      | 在 Step 1/3/6/6a/7 等位置插入 modifier 收集点，按类分发                 | 单元测试：固伤进 6a、百分比进 6 |
+| 4.5  | 登神 priority 仲裁     | `combat-damage.ts`                      | 攻防 divinity 比较，高阶压制低阶（等效穿透/无视 DR）                    | 单元测试：神位伤无视常规防      |
+| 4.6  | HP 扣减 + 生死判定红线 | `combat-resolver.ts`                    | HP 扣减必须代码执行（AI 不可直接动），HP≤0 强制死亡                     | 单元测试：AI 输出再离谱也 clamp |
+| 4.7  | `$combat` API 扩展     | `combat-resolver.ts`                    | 补全 `useSkill` / `useItem` / `block` / `move` / `focus`（v2 §13 h 项） | 单元测试：每个 API 可调         |
+| 4.8  | 战意判定接线           | `morale-system.ts`                      | HP<阈值触发 `combat.morale.check` → AI 返回 → `morale.result` 应用      | 集成测试：B HP<30% 触发         |
+| 4.9  | 战斗结算管线           | `combat-resolver.ts`                    | `combat.end` → EXP 计算 → `settle.loot` → `settle.complete`             | 集成测试：胜利正确给 EXP        |
+| 4.10 | 集群系统适配           | `cluster-system.ts`                     | "同类"判定归 AI（char_gen 只生成 1 个代表），属性/资源 ×N               | 单元测试：集群资源正确          |
 
 ### 风险
 
@@ -183,18 +183,18 @@ M2 全 10 任务完成。方案 B：主线组 A（types.ts 加 3 字段 + Divini
 
 M3 全 10 任务完成。方案 C：主线核心管道（combat-pipeline.ts + combat-damage modifier 注入缝 + 骨架/stub）+ 4 code-writer agent 并行周边子功能（文件零重叠）。
 
-| 任务 | 产出 | 测试 |
-|------|------|------|
-| 4.1 管道化 | 新建 `combat-pipeline.ts` resolveAttackPipeline（async），legacy combat-resolver 保留 | 7（端到端） |
-| 4.2 19 event | COMBAT_EVENTS 常量集中 + 管道各步骤 emitChain | 含 4.1 |
-| 4.3 骰子事件化 | combat.dice.roll emitChain（脚本可改骰值） | 含 4.1 |
-| 4.4 modifier 注入 | combat-damage.ts +DamagePipelineInput.modifiers? + combat-modifier-inject foldMods | 26（agent1）|
-| 4.5 登神压制 | combat-modifier-inject.ts foldMods 时调 resolveDivinityConflict（压制率当穿透+削减DR） | 含 4.4 |
-| 4.6 HP 红线 | combat-pipeline clamp≥0 + 强制 isDead | 含 4.1 |
-| 4.7 $combat 扩展 | combat-actions-pipeline.ts（useSkill/Item/block/move/focus） | 12（agent4）|
-| 4.8 战意接线 | combat-morale-pipeline.ts（morale.check/result emitChain + checkMorale 兜底） | 16（agent2）|
-| 4.9 结算管线 | combat-settlement-pipeline.ts（end→EXP→loot→complete） | 19（agent3）|
-| 4.10 集群适配 | combat-pipeline 守方 clusterCount≥3 → finalDamage×1.5 | 含 4.1 |
+| 任务              | 产出                                                                                   | 测试         |
+| ----------------- | -------------------------------------------------------------------------------------- | ------------ |
+| 4.1 管道化        | 新建 `combat-pipeline.ts` resolveAttackPipeline（async），legacy combat-resolver 保留  | 7（端到端）  |
+| 4.2 19 event      | COMBAT_EVENTS 常量集中 + 管道各步骤 emitChain                                          | 含 4.1       |
+| 4.3 骰子事件化    | combat.dice.roll emitChain（脚本可改骰值）                                             | 含 4.1       |
+| 4.4 modifier 注入 | combat-damage.ts +DamagePipelineInput.modifiers? + combat-modifier-inject foldMods     | 26（agent1） |
+| 4.5 登神压制      | combat-modifier-inject.ts foldMods 时调 resolveDivinityConflict（压制率当穿透+削减DR） | 含 4.4       |
+| 4.6 HP 红线       | combat-pipeline clamp≥0 + 强制 isDead                                                  | 含 4.1       |
+| 4.7 $combat 扩展  | combat-actions-pipeline.ts（useSkill/Item/block/move/focus）                           | 12（agent4） |
+| 4.8 战意接线      | combat-morale-pipeline.ts（morale.check/result emitChain + checkMorale 兜底）          | 16（agent2） |
+| 4.9 结算管线      | combat-settlement-pipeline.ts（end→EXP→loot→complete）                                 | 19（agent3） |
+| 4.10 集群适配     | combat-pipeline 守方 clusterCount≥3 → finalDamage×1.5                                  | 含 4.1       |
 
 **关键决策落地**: legacy combat-resolver 保留（193 测试零破坏，D1）；runDamagePipeline 加可选 modifiers 字段（61 damage 测试不破坏，D3）；agent 各自发现 emitChain 不触发 subscribeAll（M1 分离注册表的正确行为）。
 
@@ -208,16 +208,16 @@ M3 全 10 任务完成。方案 C：主线核心管道（combat-pipeline.ts + co
 
 ### 任务清单
 
-| # | 任务 | 涉及文件 | 产出 | 验收 |
-|---|------|---------|------|------|
-| 5.1 | Combat Agent 定义 | `agent-config.json` / `types.ts` | 新增第 14 个 Agent「combat」，主持人定位 systemPrompt（四步流程 + 函数调用规则 + 摘要规则） | Agent 配置加载正常 |
-| 5.2 | Combat Agent 接入 orchestrator | `agent-orchestrator.ts` | combat_trigger 唤起 Combat Agent，独立战斗循环（不走主 DAG） | 集成测试：trigger 正确唤起 |
-| 5.3 | Combat Agent 工具白名单 | `agent-tools.ts` / `AGENT_TOOL_MAP` | `$combat.*` / `$status.*` / `$dice.*` / `$resource.*`(只读) 对 combat 开放 | 工具调用成功 |
-| 5.4 | item_gen systemPrompt 增强 | `agent-config.json` | 生成装备/技能时：效果必须归 6 大类、按转化表翻译、带 divinity、buff id 带物品前缀、脚本契约格式 | 测试：生成的物品合规 |
-| 5.5 | item_gen 输出 schema 校验 | `char-gen-agent.ts` / `craft-gen-chain.ts` | 解析 item_gen 输出时校验 6 大类 + divinity + 脚本契约，不合规打回 | 测试：违规输出被拒 |
-| 5.6 | Story 调整（摘要接收） | `agent-config.json`（story） | 战斗摘要作为用户消息注入，Story 知道接续战斗后剧情 | 集成测试：摘要正确接续 |
-| 5.7 | request_dispatcher 调整 | `agent-config.json` / `agent-orchestrator.ts` | combat_trigger 路由到 Combat Agent（现有 onCombatTrigger 复用） | 集成测试：路由正确 |
-| 5.8 | combat_summary Agent 复用 | `agent-orchestrator.ts` | 现有 combat_summary Agent 并入 Combat Agent 第 4 步（或保留独立） | 集成测试：摘要生成正常 |
+| #   | 任务                           | 涉及文件                                      | 产出                                                                                            | 验收                       |
+| --- | ------------------------------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------- |
+| 5.1 | Combat Agent 定义              | `agent-config.json` / `types.ts`              | 新增第 14 个 Agent「combat」，主持人定位 systemPrompt（四步流程 + 函数调用规则 + 摘要规则）     | Agent 配置加载正常         |
+| 5.2 | Combat Agent 接入 orchestrator | `agent-orchestrator.ts`                       | combat_trigger 唤起 Combat Agent，独立战斗循环（不走主 DAG）                                    | 集成测试：trigger 正确唤起 |
+| 5.3 | Combat Agent 工具白名单        | `agent-tools.ts` / `AGENT_TOOL_MAP`           | `$combat.*` / `$status.*` / `$dice.*` / `$resource.*`(只读) 对 combat 开放                      | 工具调用成功               |
+| 5.4 | item_gen systemPrompt 增强     | `agent-config.json`                           | 生成装备/技能时：效果必须归 6 大类、按转化表翻译、带 divinity、buff id 带物品前缀、脚本契约格式 | 测试：生成的物品合规       |
+| 5.5 | item_gen 输出 schema 校验      | `char-gen-agent.ts` / `craft-gen-chain.ts`    | 解析 item_gen 输出时校验 6 大类 + divinity + 脚本契约，不合规打回                               | 测试：违规输出被拒         |
+| 5.6 | Story 调整（摘要接收）         | `agent-config.json`（story）                  | 战斗摘要作为用户消息注入，Story 知道接续战斗后剧情                                              | 集成测试：摘要正确接续     |
+| 5.7 | request_dispatcher 调整        | `agent-config.json` / `agent-orchestrator.ts` | combat_trigger 路由到 Combat Agent（现有 onCombatTrigger 复用）                                 | 集成测试：路由正确         |
+| 5.8 | combat_summary Agent 复用      | `agent-orchestrator.ts`                       | 现有 combat_summary Agent 并入 Combat Agent 第 4 步（或保留独立）                               | 集成测试：摘要生成正常     |
 
 ### 风险
 
@@ -240,18 +240,18 @@ M3 全 10 任务完成。方案 C：主线核心管道（combat-pipeline.ts + co
 
 ### 任务清单
 
-| # | 任务 | 涉及文件 | 产出 | 验收 |
-|---|------|---------|------|------|
-| 6.1 | CombatPanel 主组件 | 新增 `src/ui/components/game/CombatPanel.vue` | 独立战斗界面，从上/下方滑入，覆盖正文 | 手动：面板正确滑入 |
-| 6.2 | 敌我角色展示区 | `CombatPanel.vue` 子组件 | 暴露敌方/我方角色 + 三属性（HP/MP/SP 或选定三属性） | 手动：数值正确显示 |
-| 6.3 | 战斗对话流 | 新增 `CombatChatFlow.vue` | 类似 ChatFlow 但战斗专用，显示 Combat Agent 叙事 + 数值面板 | 手动：叙事正确渲染 |
-| 6.4 | 输入区 + 角色选择 | `CombatPanel.vue` 子组件 | 对话框 + 上方选我方角色 → 暴露技能/装备 + 普通攻击入口 | 手动：选角色后技能暴露 |
-| 6.5 | 战斗状态 store | 新增 `src/ui/stores/combat-store.ts` | 战斗状态管理（CombatState / 参与者 / 回合 / 日志） | 单元测试：状态正确流转 |
-| 6.6 | 正文暂停机制 | `game-store.ts` / `GamePage.vue` | 战斗期间正文流暂停，战斗面板接管 | 手动：战斗时正文不动 |
-| 6.7 | pipeline 桥接 | `src/ui/lib/game-pipeline.ts` | combat_trigger → 唤起 Combat Agent → 回调驱动面板更新 | 集成测试：端到端 |
-| 6.8 | 数值面板渲染 | `CombatPanel.vue` | 替代 `<action_info>` XML，前端组件化渲染（评级/伤害分解/状态） | 手动：数据对齐 |
-| 6.9 | 战斗结束 + 摘要注入 | `CombatPanel.vue` / `game-pipeline.ts` | 战斗结束 → 面板滑出 → 摘要作为用户消息进 ChatFlow | 集成测试：摘要接续 |
-| 6.10 | 样式与设计规范对齐 | CombatPanel 全套 | 遵循 [`docs/design.md`](../design.md)（间距/品质色/动画） | 设计审查 |
+| #    | 任务                | 涉及文件                                      | 产出                                                           | 验收                   |
+| ---- | ------------------- | --------------------------------------------- | -------------------------------------------------------------- | ---------------------- |
+| 6.1  | CombatPanel 主组件  | 新增 `src/ui/components/game/CombatPanel.vue` | 独立战斗界面，从上/下方滑入，覆盖正文                          | 手动：面板正确滑入     |
+| 6.2  | 敌我角色展示区      | `CombatPanel.vue` 子组件                      | 暴露敌方/我方角色 + 三属性（HP/MP/SP 或选定三属性）            | 手动：数值正确显示     |
+| 6.3  | 战斗对话流          | 新增 `CombatChatFlow.vue`                     | 类似 ChatFlow 但战斗专用，显示 Combat Agent 叙事 + 数值面板    | 手动：叙事正确渲染     |
+| 6.4  | 输入区 + 角色选择   | `CombatPanel.vue` 子组件                      | 对话框 + 上方选我方角色 → 暴露技能/装备 + 普通攻击入口         | 手动：选角色后技能暴露 |
+| 6.5  | 战斗状态 store      | 新增 `src/ui/stores/combat-store.ts`          | 战斗状态管理（CombatState / 参与者 / 回合 / 日志）             | 单元测试：状态正确流转 |
+| 6.6  | 正文暂停机制        | `game-store.ts` / `GamePage.vue`              | 战斗期间正文流暂停，战斗面板接管                               | 手动：战斗时正文不动   |
+| 6.7  | pipeline 桥接       | `src/ui/lib/game-pipeline.ts`                 | combat_trigger → 唤起 Combat Agent → 回调驱动面板更新          | 集成测试：端到端       |
+| 6.8  | 数值面板渲染        | `CombatPanel.vue`                             | 替代 `<action_info>` XML，前端组件化渲染（评级/伤害分解/状态） | 手动：数据对齐         |
+| 6.9  | 战斗结束 + 摘要注入 | `CombatPanel.vue` / `game-pipeline.ts`        | 战斗结束 → 面板滑出 → 摘要作为用户消息进 ChatFlow              | 集成测试：摘要接续     |
+| 6.10 | 样式与设计规范对齐  | CombatPanel 全套                              | 遵循 [`docs/design.md`](../design.md)（间距/品质色/动画）      | 设计审查               |
 
 ### 风险
 
@@ -274,18 +274,18 @@ M3 全 10 任务完成。方案 C：主线核心管道（combat-pipeline.ts + co
 
 ### 任务清单
 
-| # | 任务 | 涉及文件 | 产出 | 验收 |
-|---|------|---------|------|------|
-| 7.1 | 端到端场景测试 | 新增 `combat-e2e-scenario.test.ts` | 按 v2 文档的「幽怨之剑砍 B」例子完整跑一遍 | 全 event 触发、数值正确 |
-| 7.2 | buff 套娃测试 | 同上 | 流血触发大出血、深度限制生效 | 套娃正确、超深拦截 |
-| 7.3 | 登神压制测试 | 同上 | 神位伤 vs 常规防，DR 被压制 | 数值符合预期 |
-| 7.4 | miss/救场测试 | 同上 | miss 不挂 buff、赫卡忒式救场在 damage 事件触发 | 行为正确 |
-| 7.5 | item_gen 合规测试 | `item-gen.test.ts` 增强 | 各品质物品生成都符合 6 大类 + divinity + 转化表 | 违规输出被拒 |
-| 7.6 | Combat Agent 流程测试 | `combat-agent.test.ts` | 四步流程（初始化/回合/判赢/结算）完整 | 流程正确 |
-| 7.7 | 前端组件测试 | CombatPanel 单元测试 | 角色选择/技能暴露/数值渲染/暂停恢复 | 组件行为正确 |
-| 7.8 | 真机 debug loop | 按 [`debug-loop-handbook.md`](../reference/debug-loop-handbook.md) | 主人实机游玩 → 导出 → 分析 → 修复 | 5 轮内无重大 bug |
-| 7.9 | 文档同步 | `CLAUDE.md` / v2 架构文档 | 更新进度、补真机记录、CLAUDE.md 文档导航加 v2 | 文档检查通过 |
-| 7.10 | 旧版清理 | 删 `combat-resolver.legacy.ts` | M3 保留的旧版确认稳定后删除 | 无引用残留 |
+| #    | 任务                  | 涉及文件                                                           | 产出                                            | 验收                    |
+| ---- | --------------------- | ------------------------------------------------------------------ | ----------------------------------------------- | ----------------------- |
+| 7.1  | 端到端场景测试        | 新增 `combat-e2e-scenario.test.ts`                                 | 按 v2 文档的「幽怨之剑砍 B」例子完整跑一遍      | 全 event 触发、数值正确 |
+| 7.2  | buff 套娃测试         | 同上                                                               | 流血触发大出血、深度限制生效                    | 套娃正确、超深拦截      |
+| 7.3  | 登神压制测试          | 同上                                                               | 神位伤 vs 常规防，DR 被压制                     | 数值符合预期            |
+| 7.4  | miss/救场测试         | 同上                                                               | miss 不挂 buff、赫卡忒式救场在 damage 事件触发  | 行为正确                |
+| 7.5  | item_gen 合规测试     | `item-gen.test.ts` 增强                                            | 各品质物品生成都符合 6 大类 + divinity + 转化表 | 违规输出被拒            |
+| 7.6  | Combat Agent 流程测试 | `combat-agent.test.ts`                                             | 四步流程（初始化/回合/判赢/结算）完整           | 流程正确                |
+| 7.7  | 前端组件测试          | CombatPanel 单元测试                                               | 角色选择/技能暴露/数值渲染/暂停恢复             | 组件行为正确            |
+| 7.8  | 真机 debug loop       | 按 [`debug-loop-handbook.md`](../reference/debug-loop-handbook.md) | 主人实机游玩 → 导出 → 分析 → 修复               | 5 轮内无重大 bug        |
+| 7.9  | 文档同步              | `CLAUDE.md` / v2 架构文档                                          | 更新进度、补真机记录、CLAUDE.md 文档导航加 v2   | 文档检查通过            |
+| 7.10 | 旧版清理              | 删 `combat-resolver.legacy.ts`                                     | M3 保留的旧版确认稳定后删除                     | 无引用残留              |
 
 ### 产出
 
@@ -316,6 +316,7 @@ M1 ── EventBus 管道 + 声明式契约
 ```
 
 **可并行项**：
+
 - M4 的 item_gen 增强（5.4-5.5）可在 M3 进行中并行（依赖 M2 的 6 大类即可）
 - M5 的组件静态部分（6.1-6.4）可在 M4 进行中并行（不依赖 Agent）
 - M6 的测试用例编写可与各 M 并行
@@ -326,16 +327,16 @@ M1 ── EventBus 管道 + 声明式契约
 
 以下点不阻塞计划启动，但在对应 M 实施前需要主人拍板：
 
-| 点 | 阻塞哪个 M | 本喵倾向 |
-|----|-----------|---------|
-| 嵌套上级取根源 vs 直接 | M2（buff id） | 根源 |
-| 链执行顺序规则 | M1（emitChain） | 类型优先级 + order |
-| 登神 priority 与穿透映射 | M3（4.5） | 神位+无视常规防，中间级别按比例 |
-| divinity 挂整件装备还是单 modifier | M2（3.2）/ M4（5.4）| 整件装备 |
-| ctx 暴露字段 | M1（1.5） | 最小集起步 |
-| 战术动作具体函数 | M3（4.7） | 按 #837805 §4 |
-| buff 默认 duration/layers | M2（3.7） | 按 [状态规则] |
-| clamp vs 重算 | M3（4.6） | clamp |
+| 点                                 | 阻塞哪个 M           | 本喵倾向                        |
+| ---------------------------------- | -------------------- | ------------------------------- |
+| 嵌套上级取根源 vs 直接             | M2（buff id）        | 根源                            |
+| 链执行顺序规则                     | M1（emitChain）      | 类型优先级 + order              |
+| 登神 priority 与穿透映射           | M3（4.5）            | 神位+无视常规防，中间级别按比例 |
+| divinity 挂整件装备还是单 modifier | M2（3.2）/ M4（5.4） | 整件装备                        |
+| ctx 暴露字段                       | M1（1.5）            | 最小集起步                      |
+| 战术动作具体函数                   | M3（4.7）            | 按 #837805 §4                   |
+| buff 默认 duration/layers          | M2（3.7）            | 按 [状态规则]                   |
+| clamp vs 重算                      | M3（4.6）            | clamp                           |
 
 ---
 
@@ -368,6 +369,6 @@ M1 ── EventBus 管道 + 声明式契约
 
 ## 11. 变更记录
 
-| 日期 | 变更 | 作者 |
-|------|------|------|
-| 2026-07-28 | 初版：基于 v2 架构文档，分 M1-M6 六批次 | Claude（计划）|
+| 日期       | 变更                                    | 作者           |
+| ---------- | --------------------------------------- | -------------- |
+| 2026-07-28 | 初版：基于 v2 架构文档，分 M1-M6 六批次 | Claude（计划） |

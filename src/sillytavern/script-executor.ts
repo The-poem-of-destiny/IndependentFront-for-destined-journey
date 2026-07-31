@@ -178,21 +178,31 @@ export function executeScript(script: string, context: ScriptContext): ScriptEff
     // 同理 `eval` / `arguments` 是 strict 模式保留字，不能作参数名；strict 模式下 eval 已受限，
     // 主要逃逸路径是 Function 构造器，此处已遮蔽。
     const SANDBOX_SHADOW_GLOBALS = [
-      'globalThis', 'window', 'document', 'fetch', 'navigator',
-      'localStorage', 'sessionStorage', 'indexedDB',
-      'Function', 'setTimeout', 'setInterval', 'XMLHttpRequest', 'WebSocket',
+      'globalThis',
+      'window',
+      'document',
+      'fetch',
+      'navigator',
+      'localStorage',
+      'sessionStorage',
+      'indexedDB',
+      'Function',
+      'setTimeout',
+      'setInterval',
+      'XMLHttpRequest',
+      'WebSocket',
     ];
     const fn = new Function(
       ...Object.keys(sandbox),
       ...SANDBOX_SHADOW_GLOBALS,
       `"use strict";\n${script}`,
     );
-    fn(
-      ...Object.values(sandbox),
-      ...SANDBOX_SHADOW_GLOBALS.map(() => undefined),
-    );
+    fn(...Object.values(sandbox), ...SANDBOX_SHADOW_GLOBALS.map(() => undefined));
   } catch (err) {
-    console.error('[ScriptExecutor] 脚本执行失败:', err instanceof Error ? err.message : String(err));
+    console.error(
+      '[ScriptExecutor] 脚本执行失败:',
+      err instanceof Error ? err.message : String(err),
+    );
   }
 
   return effects;
@@ -234,7 +244,7 @@ export function executeHook(
       stacks: status.stacks,
       remainingTime: status.remainingTime,
       name: status.name,
-      scripts: status.scripts,  // 🆕 把自己 scripts 池传入，供 resolveScriptRef 本地查找
+      scripts: status.scripts, // 🆕 把自己 scripts 池传入，供 resolveScriptRef 本地查找
     };
 
     // 每个效果独立执行，但收集到一个 effects 对象

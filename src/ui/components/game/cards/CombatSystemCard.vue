@@ -1,25 +1,37 @@
 <script setup lang="ts">
-import type { CombatSystemEvent } from '@engine/types'
+import type { CombatSystemEvent } from '@engine/types';
 
-defineProps<{ event: CombatSystemEvent }>()
-const emit = defineEmits<{ collapse: [] }>()
+defineProps<{ event: CombatSystemEvent }>();
+const emit = defineEmits<{ collapse: [] }>();
 
 const outcomeConfig: Record<string, { label: string; icon: string; borderColor: string }> = {
-  ally_win:   { label: '胜利', icon: 'fa-solid fa-trophy', borderColor: 'var(--theme-quality-uncommon)' },
-  enemy_win:  { label: '败北', icon: 'fa-solid fa-skull', borderColor: 'var(--theme-error)' },
-  draw:       { label: '平局', icon: 'fa-solid fa-handshake', borderColor: 'var(--theme-warning)' },
-  fled:       { label: '逃跑', icon: 'fa-solid fa-person-running', borderColor: 'var(--theme-text-muted)' },
-}
+  ally_win: {
+    label: '胜利',
+    icon: 'fa-solid fa-trophy',
+    borderColor: 'var(--theme-quality-uncommon)',
+  },
+  enemy_win: { label: '败北', icon: 'fa-solid fa-skull', borderColor: 'var(--theme-error)' },
+  draw: { label: '平局', icon: 'fa-solid fa-handshake', borderColor: 'var(--theme-warning)' },
+  fled: {
+    label: '逃跑',
+    icon: 'fa-solid fa-person-running',
+    borderColor: 'var(--theme-text-muted)',
+  },
+};
 </script>
 
 <template>
   <div
     class="sys-card"
-    :style="{ '--sys-accent': outcomeConfig[event.outcome]?.borderColor ?? 'var(--theme-text-muted)' }"
+    :style="{
+      '--sys-accent': outcomeConfig[event.outcome]?.borderColor ?? 'var(--theme-text-muted)',
+    }"
   >
     <div class="sys-card-header" @click="emit('collapse')">
       <span class="sys-card-dot" />
-      <i :class="'sys-card-icon ' + (outcomeConfig[event.outcome]?.icon ?? 'fa-solid fa-hand-fist')" />
+      <i
+        :class="'sys-card-icon ' + (outcomeConfig[event.outcome]?.icon ?? 'fa-solid fa-hand-fist')"
+      />
       <span class="sys-card-label">{{ outcomeConfig[event.outcome]?.label ?? event.outcome }}</span>
       <span class="sys-card-rounds">{{ event.details.rounds }} 回合</span>
       <i class="fa-solid fa-chevron-up sys-card-collapse" title="收起" />
@@ -27,14 +39,8 @@ const outcomeConfig: Record<string, { label: string; icon: string; borderColor: 
     <div class="sys-card-body">
       <div class="combat-summary">{{ event.details.narrativeSummary }}</div>
       <div v-if="event.details.loot?.length" class="combat-loot section-divider">
-        <span class="section-label">
-          <i class="fa-solid fa-coins" /> 战利品:
-        </span>
-        <span
-          v-for="l in event.details.loot"
-          :key="l.name"
-          class="loot-chip"
-        >
+        <span class="section-label"> <i class="fa-solid fa-coins" /> 战利品: </span>
+        <span v-for="l in event.details.loot" :key="l.name" class="loot-chip">
           {{ l.name }}<span v-if="l.quantity > 1"> ×{{ l.quantity }}</span>
         </span>
       </div>

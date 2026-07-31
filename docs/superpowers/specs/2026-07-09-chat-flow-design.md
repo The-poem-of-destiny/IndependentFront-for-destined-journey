@@ -28,13 +28,13 @@
 
 ## 2. 关键决策
 
-| # | 决策 | 选择 | 理由 |
-|---|------|------|------|
-| 1 | AI history 中系统消息的 role | `assistant`（非 `system`） | OpenAI 协议中 `system` 是系统指令语义，mid-conversation 使用非标准，可能被模型误解 |
-| 2 | AI 看到的内容 | 纯文本摘要（如 `[系统] 锻造完成：传说级武器「霜月之刃」`） | 不把 HTML/XML 塞进 API history |
-| 3 | 前端渲染方式 | C+A：折叠通知条 → 点击展开品质色卡片 | 用户不想看时可快速跳过，想细看时展开 |
-| 4 | `ChatMessage` 扩展 | 新增 `systemEvent` 可选字段 | `content` 给 AI 用，`systemEvent` 给前端渲染用，语义清晰不需维护双数组 |
-| 5 | 系统事件可见性 | 分类开关，高频事件默认关闭 | `character_update`/`item_update` 等高频但用户不关心的类型默认隐藏 |
+| #   | 决策                         | 选择                                                       | 理由                                                                               |
+| --- | ---------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| 1   | AI history 中系统消息的 role | `assistant`（非 `system`）                                 | OpenAI 协议中 `system` 是系统指令语义，mid-conversation 使用非标准，可能被模型误解 |
+| 2   | AI 看到的内容                | 纯文本摘要（如 `[系统] 锻造完成：传说级武器「霜月之刃」`） | 不把 HTML/XML 塞进 API history                                                     |
+| 3   | 前端渲染方式                 | C+A：折叠通知条 → 点击展开品质色卡片                       | 用户不想看时可快速跳过，想细看时展开                                               |
+| 4   | `ChatMessage` 扩展           | 新增 `systemEvent` 可选字段                                | `content` 给 AI 用，`systemEvent` 给前端渲染用，语义清晰不需维护双数组             |
+| 5   | 系统事件可见性               | 分类开关，高频事件默认关闭                                 | `character_update`/`item_update` 等高频但用户不关心的类型默认隐藏                  |
 
 ---
 
@@ -45,24 +45,24 @@
 ```typescript
 // types.ts
 export interface ChatMessage {
-  id: string
-  role: 'system' | 'user' | 'assistant'
-  content: string                        // ← AI 看的纯文本（进 history）
-  timestamp: number
+  id: string;
+  role: 'system' | 'user' | 'assistant';
+  content: string; // ← AI 看的纯文本（进 history）
+  timestamp: number;
 
   // 🆕 系统事件数据（仅 role='system' 时有值）
-  systemEvent?: SystemEvent
+  systemEvent?: SystemEvent;
 
   // 现有字段保留不变
-  parsed?: ParsedTags
-  variables?: Record<string, string | number>
+  parsed?: ParsedTags;
+  variables?: Record<string, string | number>;
   metadata?: {
-    tokenCount?: number
-    lorebookEntries?: string[]
-    processingTime?: number
-  }
-  variablesAfter?: Record<string, any>
-  apiUsed?: ApiTarget
+    tokenCount?: number;
+    lorebookEntries?: string[];
+    processingTime?: number;
+  };
+  variablesAfter?: Record<string, any>;
+  apiUsed?: ApiTarget;
 }
 ```
 
@@ -70,77 +70,78 @@ export interface ChatMessage {
 
 ```typescript
 export type SystemEvent =
-  | CraftSystemEvent      // 制作完成
-  | CharGenSystemEvent    // 新角色加入
-  | ItemGenSystemEvent    // 新物品获得
-  | CombatSystemEvent     // 战斗结果
-  | CharacterUpdateEvent  // 角色状态微调
-  | ItemUpdateEvent       // 物品变动
-  | QuestUpdateEvent      // 任务进度
+  | CraftSystemEvent // 制作完成
+  | CharGenSystemEvent // 新角色加入
+  | ItemGenSystemEvent // 新物品获得
+  | CombatSystemEvent // 战斗结果
+  | CharacterUpdateEvent // 角色状态微调
+  | ItemUpdateEvent // 物品变动
+  | QuestUpdateEvent; // 任务进度
 
 export interface CraftSystemEvent {
-  type: 'craft'
-  productName: string
-  quality: QualityLevel
-  rating: CraftRating
-  narrative: string           // 给 AI 看的摘要
-  details: CraftGenOutput     // 完整数据，给卡片渲染
+  type: 'craft';
+  productName: string;
+  quality: QualityLevel;
+  rating: CraftRating;
+  narrative: string; // 给 AI 看的摘要
+  details: CraftGenOutput; // 完整数据，给卡片渲染
 }
 
 export interface CharGenSystemEvent {
-  type: 'char_gen'
-  characterName: string
-  race: string
-  tier: number
-  narrative: string
-  details: CharGenOutput
+  type: 'char_gen';
+  characterName: string;
+  race: string;
+  tier: number;
+  narrative: string;
+  details: CharGenOutput;
 }
 
 export interface ItemGenSystemEvent {
-  type: 'item_gen'
-  itemName: string
-  quality: QualityLevel
-  itemType: string
-  narrative: string
-  details: ItemGenOutput
+  type: 'item_gen';
+  itemName: string;
+  quality: QualityLevel;
+  itemType: string;
+  narrative: string;
+  details: ItemGenOutput;
 }
 
 export interface CombatSystemEvent {
-  type: 'combat'
-  outcome: 'ally_win' | 'enemy_win' | 'draw' | 'fled'
-  narrative: string
-  details: CombatSummaryResult
+  type: 'combat';
+  outcome: 'ally_win' | 'enemy_win' | 'draw' | 'fled';
+  narrative: string;
+  details: CombatSummaryResult;
 }
 
 export interface CharacterUpdateEvent {
-  type: 'character_update'
-  characterName: string
-  narrative: string            // "角色属性提升" 等简短摘要
+  type: 'character_update';
+  characterName: string;
+  narrative: string; // "角色属性提升" 等简短摘要
 }
 
 export interface ItemUpdateEvent {
-  type: 'item_update'
-  itemName: string
-  operation: string            // consume | transfer | modify | equip | unequip
-  narrative: string
+  type: 'item_update';
+  itemName: string;
+  operation: string; // consume | transfer | modify | equip | unequip
+  narrative: string;
 }
 
 export interface QuestUpdateEvent {
-  type: 'quest_update'
-  questName: string
-  status: string
-  narrative: string
+  type: 'quest_update';
+  questName: string;
+  status: string;
+  narrative: string;
 }
 ```
 
 ### 3.3 两条数据通路
 
-| 字段 | 消费者 | 内容 |
-|------|--------|------|
-| `content` | AI（API history） | 纯文本摘要，role 转成 `assistant` |
+| 字段          | 消费者               | 内容                               |
+| ------------- | -------------------- | ---------------------------------- |
+| `content`     | AI（API history）    | 纯文本摘要，role 转成 `assistant`  |
 | `systemEvent` | 前端（Vue 卡片组件） | 完整结构化数据，驱动品质色卡片渲染 |
 
 **发给 API 时的转换**（`buildAgentMessages` 中）：
+
 ```
 role='system' 的 ChatMessage → { role: 'assistant', content: msg.content }
 ```
@@ -165,15 +166,16 @@ AgentOrchestrator
 ```
 
 **工厂函数**：
+
 ```typescript
 function toSystemMessage(event: SystemEvent): ChatMessage {
   return {
     id: crypto.randomUUID(),
-    role: 'system',           // 前端用 'system' 区分三种来源
+    role: 'system', // 前端用 'system' 区分三种来源
     content: event.narrative, // API 看到的是纯文本
     timestamp: Date.now(),
-    systemEvent: event,       // 前端读这个渲染卡片
-  }
+    systemEvent: event, // 前端读这个渲染卡片
+  };
 }
 ```
 
@@ -187,15 +189,15 @@ function toSystemMessage(event: SystemEvent): ChatMessage {
 
 ### 5.2 分类开关
 
-| 事件类型 | 默认值 | 理由 |
-|---------|--------|------|
-| `craft` (制作完成) | ✅ ON | 重要成果，用户关心 |
-| `char_gen` (新角色加入) | ✅ ON | 剧情关键节点 |
-| `combat` (战斗结果) | ✅ ON | 战斗产出 |
-| `item_gen` (新物品获得) | ✅ ON | 战利品/任务奖励 |
-| `character_update` (角色微调) | ❌ OFF | 高频，变化微小 |
-| `item_update` (物品变动) | ❌ OFF | 消耗/转移太频繁 |
-| `quest_update` (任务进度) | ❌ OFF | 仅关键节点展示 |
+| 事件类型                      | 默认值 | 理由               |
+| ----------------------------- | ------ | ------------------ |
+| `craft` (制作完成)            | ✅ ON  | 重要成果，用户关心 |
+| `char_gen` (新角色加入)       | ✅ ON  | 剧情关键节点       |
+| `combat` (战斗结果)           | ✅ ON  | 战斗产出           |
+| `item_gen` (新物品获得)       | ✅ ON  | 战利品/任务奖励    |
+| `character_update` (角色微调) | ❌ OFF | 高频，变化微小     |
+| `item_update` (物品变动)      | ❌ OFF | 消耗/转移太频繁    |
+| `quest_update` (任务进度)     | ❌ OFF | 仅关键节点展示     |
 
 存储位置：`gameStore.systemEventFilters: Record<string, boolean>`
 
@@ -205,35 +207,35 @@ function toSystemMessage(event: SystemEvent): ChatMessage {
 
 ### 6.1 三条消息流
 
-| 来源 | role | 对齐 | 样式 |
-|------|------|------|------|
-| AI | `assistant` | 左 | 深色气泡 + 衬线字体（叙事感） |
-| 用户 | `user` | 右 | 浅色/主色气泡 |
-| 系统 | `system` | 居中 | 折叠通知条 → 展开品质色卡片 |
+| 来源 | role        | 对齐 | 样式                          |
+| ---- | ----------- | ---- | ----------------------------- |
+| AI   | `assistant` | 左   | 深色气泡 + 衬线字体（叙事感） |
+| 用户 | `user`      | 右   | 浅色/主色气泡                 |
+| 系统 | `system`    | 居中 | 折叠通知条 → 展开品质色卡片   |
 
 ### 6.2 系统卡片组件
 
-| 类型 | 卡片组件 | 渲染级别 |
-|------|---------|---------|
-| `craft` | **CraftSystemCard** | 完整卡片：品质色顶栏 + 检定摘要 + 词条列表 + 材料/EXP/FP 结算 |
-| `char_gen` | **CharGenSystemCard** | 完整卡片：名字 + 身份标签 + 五维 + 背景摘要 + [查看完整角色卡] 链接 |
-| `combat` | **CombatSystemCard** | 完整卡片：胜负图标 + 回合数 + 战利品 + 伤害统计 + EXP/FP |
-| `item_gen` | **ItemSystemCard** | 中等卡片：物品名 + 品质色 + 类型图标 + 效果描述 |
-| `character_update` | **SimpleNotifBar** | 轻量通知条 |
-| `item_update` | **SimpleNotifBar** | 轻量通知条 |
-| `quest_update` | **QuestProgressBar** | 任务进度条 |
+| 类型               | 卡片组件              | 渲染级别                                                            |
+| ------------------ | --------------------- | ------------------------------------------------------------------- |
+| `craft`            | **CraftSystemCard**   | 完整卡片：品质色顶栏 + 检定摘要 + 词条列表 + 材料/EXP/FP 结算       |
+| `char_gen`         | **CharGenSystemCard** | 完整卡片：名字 + 身份标签 + 五维 + 背景摘要 + [查看完整角色卡] 链接 |
+| `combat`           | **CombatSystemCard**  | 完整卡片：胜负图标 + 回合数 + 战利品 + 伤害统计 + EXP/FP            |
+| `item_gen`         | **ItemSystemCard**    | 中等卡片：物品名 + 品质色 + 类型图标 + 效果描述                     |
+| `character_update` | **SimpleNotifBar**    | 轻量通知条                                                          |
+| `item_update`      | **SimpleNotifBar**    | 轻量通知条                                                          |
+| `quest_update`     | **QuestProgressBar**  | 任务进度条                                                          |
 
 ### 6.3 品质色系统（参考原版 v4.2.1 角色卡）
 
-| 品质 | 色值 | CSS class |
-|------|------|-----------|
-| 普通 | `#c4cad3` | `quality-common` |
-| 优良 | `#7be495` | `quality-uncommon` |
-| 稀有 | `#62bbff` | `quality-rare` |
-| 史诗 | `#cf95ff` | `quality-epic` |
+| 品质 | 色值      | CSS class           |
+| ---- | --------- | ------------------- |
+| 普通 | `#c4cad3` | `quality-common`    |
+| 优良 | `#7be495` | `quality-uncommon`  |
+| 稀有 | `#62bbff` | `quality-rare`      |
+| 史诗 | `#cf95ff` | `quality-epic`      |
 | 传说 | `#ffc46b` | `quality-legendary` |
-| 神话 | `#ff78c5` | `quality-mythic` |
-| 唯一 | `#00ffff` | `quality-unique` |
+| 神话 | `#ff78c5` | `quality-mythic`    |
+| 唯一 | `#00ffff` | `quality-unique`    |
 
 ### 6.4 原版参考
 
@@ -260,6 +262,6 @@ function toSystemMessage(event: SystemEvent): ChatMessage {
 
 ## 8. 变更记录
 
-| 日期 | 变更 |
-|------|------|
+| 日期       | 变更                                                                  |
+| ---------- | --------------------------------------------------------------------- |
 | 2026-07-09 | 初始设计：三源消息系统 + SystemEvent 类型 + 可见性控制 + 前端卡片方案 |

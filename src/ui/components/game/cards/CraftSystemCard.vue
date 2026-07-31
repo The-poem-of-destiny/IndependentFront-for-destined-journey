@@ -1,26 +1,26 @@
 <script setup lang="ts">
-import type { CraftSystemEvent } from '@engine/types'
-import { qualityVar } from '../../../lib/quality-colors'
+import type { CraftSystemEvent } from '@engine/types';
+import { qualityVar } from '../../../lib/quality-colors';
 
-defineProps<{ event: CraftSystemEvent }>()
-const emit = defineEmits<{ collapse: [] }>()
+defineProps<{ event: CraftSystemEvent }>();
+const emit = defineEmits<{ collapse: [] }>();
 
 // Industry icon mapping
 const industryIcons: Record<string, string> = {
-  '锻造': 'fa-solid fa-hammer',
-  '炼金': 'fa-solid fa-flask',
-  '烹饪': 'fa-solid fa-utensils',
-  '裁缝': 'fa-solid fa-scissors',
-}
-const industryIconsDefault = 'fa-solid fa-hammer'
+  锻造: 'fa-solid fa-hammer',
+  炼金: 'fa-solid fa-flask',
+  烹饪: 'fa-solid fa-utensils',
+  裁缝: 'fa-solid fa-scissors',
+};
+const industryIconsDefault = 'fa-solid fa-hammer';
 
 // Rating icon + color
 const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
-  '大失败':     { icon: 'fa-regular fa-circle-xmark',       colorVar: '--theme-error' },
-  '失败':       { icon: 'fa-solid fa-triangle-exclamation', colorVar: '--theme-warning' },
-  '成功':       { icon: 'fa-regular fa-circle-check',      colorVar: '--theme-success' },
-  '精益求精': { icon: 'fa-solid fa-star',                colorVar: '--theme-quality-legendary' },
-}
+  大失败: { icon: 'fa-regular fa-circle-xmark', colorVar: '--theme-error' },
+  失败: { icon: 'fa-solid fa-triangle-exclamation', colorVar: '--theme-warning' },
+  成功: { icon: 'fa-regular fa-circle-check', colorVar: '--theme-success' },
+  精益求精: { icon: 'fa-solid fa-star', colorVar: '--theme-quality-legendary' },
+};
 </script>
 
 <template>
@@ -28,7 +28,13 @@ const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
     <!-- Header -->
     <div class="sys-card-header" @click="emit('collapse')">
       <span class="sys-card-dot" />
-      <i :class="'fa-solid ' + (industryIcons[event.details.craftParams.industry] ?? industryIconsDefault) + ' sys-card-icon'" />
+      <i
+        :class="
+          'fa-solid ' +
+          (industryIcons[event.details.craftParams.industry] ?? industryIconsDefault) +
+          ' sys-card-icon'
+        "
+      />
       <span class="sys-card-title">{{ event.quality }} · {{ event.productName }}</span>
       <span v-if="!event.details.success" class="sys-card-fail">失败</span>
       <i class="fa-solid fa-chevron-up sys-card-collapse" title="收起" />
@@ -38,9 +44,19 @@ const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
     <div class="sys-card-body">
       <!-- A. Rating -->
       <div class="card-section craft-rating">
-        <i :class="ratingMeta[event.rating]?.icon ?? 'fa-regular fa-circle-question'" class="rating-icon" :style="{ color: `var(${ratingMeta[event.rating]?.colorVar ?? '--theme-text-muted'})` }" />
-        <span class="rating-text" :style="{ color: `var(${ratingMeta[event.rating]?.colorVar ?? '--theme-text-muted'})` }">{{ event.rating }}</span>
-        <span v-if="event.details.perfectionBonus" class="perfection-bonus">— {{ event.details.perfectionBonus }}</span>
+        <i
+          :class="ratingMeta[event.rating]?.icon ?? 'fa-regular fa-circle-question'"
+          class="rating-icon"
+          :style="{ color: `var(${ratingMeta[event.rating]?.colorVar ?? '--theme-text-muted'})` }"
+        />
+        <span
+          class="rating-text"
+          :style="{ color: `var(${ratingMeta[event.rating]?.colorVar ?? '--theme-text-muted'})` }"
+          >{{ event.rating }}</span
+        >
+        <span v-if="event.details.perfectionBonus" class="perfection-bonus"
+          >— {{ event.details.perfectionBonus }}</span
+        >
       </div>
 
       <!-- B. Check summary -->
@@ -53,16 +69,30 @@ const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
       <div v-if="event.details.craftParams.materials" class="card-section">
         <span class="section-label"><i class="fa-solid fa-cubes" /> 材料</span>
         <div class="material-chips">
-          <span v-for="(mat, idx) in event.details.craftParams.materials.split(/[,，、]/)" :key="idx" class="material-chip">{{ mat.trim() }}</span>
+          <span
+            v-for="(mat, idx) in event.details.craftParams.materials.split(/[,，、]/)"
+            :key="idx"
+            class="material-chip"
+            >{{ mat.trim() }}</span
+          >
         </div>
       </div>
 
       <!-- D. Item requests -->
       <div v-if="event.details.itemRequests?.length" class="card-section">
         <span class="section-label"><i class="fa-solid fa-gift" /> 制品</span>
-        <div v-for="req in event.details.itemRequests" :key="req.quality + req.type + (req.slot ?? '')" class="item-request">
-          <i :class="req.type === 'equipment' ? 'fa-solid fa-shield-halved' : 'fa-solid fa-flask'" class="req-type" />
-          <span class="req-quality" :style="{ color: qualityVar(req.quality) }">{{ req.quality }}</span>
+        <div
+          v-for="req in event.details.itemRequests"
+          :key="req.quality + req.type + (req.slot ?? '')"
+          class="item-request"
+        >
+          <i
+            :class="req.type === 'equipment' ? 'fa-solid fa-shield-halved' : 'fa-solid fa-flask'"
+            class="req-type"
+          />
+          <span class="req-quality" :style="{ color: qualityVar(req.quality) }">{{
+            req.quality
+          }}</span>
           <span v-if="req.slot" class="req-slot">{{ req.slot }}</span>
           <span class="req-desc">{{ req.description.slice(0, 100) }}</span>
         </div>
@@ -71,19 +101,24 @@ const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
       <!-- E. Footer: meta info -->
       <div class="card-section craft-footer">
         <span class="stat-badge">
-          <i :class="'fa-solid ' + (industryIcons[event.details.craftParams.industry] ?? industryIconsDefault)" />
+          <i
+            :class="
+              'fa-solid ' +
+              (industryIcons[event.details.craftParams.industry] ?? industryIconsDefault)
+            "
+          />
           {{ event.details.craftParams.industry }}
         </span>
-        <span class="stat-badge" v-if="event.details.craftParams.stage !== '成品'">
+        <span v-if="event.details.craftParams.stage !== '成品'" class="stat-badge">
           <i class="fa-solid fa-gears" /> {{ event.details.craftParams.stage }}
         </span>
-        <span class="stat-badge" v-if="event.details.craftParams.quantity > 1">
+        <span v-if="event.details.craftParams.quantity > 1" class="stat-badge">
           <i class="fa-solid fa-layer-group" /> ×{{ event.details.craftParams.quantity }}
         </span>
-        <span class="stat-badge" v-if="event.details.craftParams.expGained > 0">
+        <span v-if="event.details.craftParams.expGained > 0" class="stat-badge">
           <i class="fa-solid fa-bolt" /> EXP +{{ event.details.craftParams.expGained }}
         </span>
-        <span class="stat-badge" v-if="event.details.craftParams.fpGained > 0">
+        <span v-if="event.details.craftParams.fpGained > 0" class="stat-badge">
           <i class="fa-solid fa-star" /> FP +{{ event.details.craftParams.fpGained }}
         </span>
       </div>
@@ -147,7 +182,7 @@ const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
   font-size: 0.6875rem;
   color: var(--theme-text-muted);
   background: var(--theme-surface-muted);
-  border: 1px solid var(--theme-border, rgba(255,255,255,0.06));
+  border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.06));
 }
 
 /* Item requests */

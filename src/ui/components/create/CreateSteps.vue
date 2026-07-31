@@ -1,8 +1,8 @@
 <script setup lang="ts">
 defineProps<{
-  current: number
-  total?: number
-}>()
+  current: number;
+  total?: number;
+}>();
 
 const STEP_LABELS = [
   '难度选择',
@@ -13,16 +13,21 @@ const STEP_LABELS = [
   '背景故事',
   '剧情规划',
   '确认提交',
-]
+];
 
-const CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八']
+const CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八'];
 </script>
 
 <template>
   <nav class="create-steps" aria-label="角色创建步骤">
     <template v-for="(label, i) in STEP_LABELS" :key="i">
       <!-- 章节间丝线 -->
-      <div v-if="i > 0" class="step-connector" :class="{ 'connector-done': i <= current }" aria-hidden="true" />
+      <div
+        v-if="i > 0"
+        class="step-connector"
+        :class="{ 'connector-done': i <= current }"
+        aria-hidden="true"
+      />
 
       <button
         class="step-dot"
@@ -96,7 +101,11 @@ const CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八']
   background: transparent;
   color: var(--theme-text-muted);
   border: 1px solid var(--theme-card-border);
-  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 .step-cn {
   font-family: var(--theme-font-title, 'Noto Serif SC', serif);

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { useCreateStore } from '../../stores/create-store'
+import { useCreateStore } from '../../stores/create-store';
 
-const store = useCreateStore()
+const store = useCreateStore();
 
 /** 提取条目内容的纯文本摘要 */
 function summary(content: string, maxLen = 160): string {
@@ -9,21 +9,17 @@ function summary(content: string, maxLen = 160): string {
     .replace(/<[^>]+>/g, '')
     .replace(/\{\{[^}]+\}\}/g, '')
     .replace(/\s+/g, ' ')
-    .trim()
-  return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + '…' : cleaned
+    .trim();
+  return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + '…' : cleaned;
 }
 </script>
 
 <template>
   <section class="step-characters">
     <h2 class="step-title">启用角色</h2>
-    <p class="step-desc">
-      勾选你希望在此存档中出现的角色。未勾选的角色不会在叙事中被激活。
-    </p>
+    <p class="step-desc">勾选你希望在此存档中出现的角色。未勾选的角色不会在叙事中被激活。</p>
 
-    <div v-if="store.characterEntries.length === 0" class="chars-loading">
-      正在加载角色列表…
-    </div>
+    <div v-if="store.characterEntries.length === 0" class="chars-loading">正在加载角色列表…</div>
 
     <div v-else class="chars-grid">
       <label

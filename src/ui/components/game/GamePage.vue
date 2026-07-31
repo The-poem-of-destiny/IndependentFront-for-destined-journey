@@ -1,79 +1,89 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
-import { useGameStore } from '../../stores/game-store'
-import { useUIStore } from '../../stores/ui-store'
-import { useSettingsStore } from '../../stores/settings-store'
-import { useAudioStore } from '../../stores/audio-store'
-import { GamePipeline } from '../../lib/game-pipeline'
-import TopBar from './TopBar.vue'
-import SideToolbar from './SideToolbar.vue'
-import ChatFlow from './ChatFlow.vue'
-import ScenePanel from './ScenePanel.vue'
-import StatusHUD from './StatusHUD.vue'
-import AppModal from '../shared/AppModal.vue'
-import ItemsPanel from './ItemsPanel.vue'
-import CharacterListPanel from './CharacterListPanel.vue'
-import QuestsPanel from './QuestsPanel.vue'
-import PlotPanel from './PlotPanel.vue'
-import MemoryPanel from './MemoryPanel.vue'
-import SnapshotPanel from './SnapshotPanel.vue'
-import MapPanel from './MapPanel.vue'
-import AgentStatusPanel from './AgentStatusPanel.vue'
-import DebugPanel from './DebugPanel.vue'
-import MiniPlayer from './MiniPlayer.vue'
-import CombatPanel from './combat/CombatPanel.vue'
+import { onMounted, onUnmounted, ref } from 'vue';
+import { useGameStore } from '../../stores/game-store';
+import { useUIStore } from '../../stores/ui-store';
+import { useSettingsStore } from '../../stores/settings-store';
+import { useAudioStore } from '../../stores/audio-store';
+import { GamePipeline } from '../../lib/game-pipeline';
+import TopBar from './TopBar.vue';
+import SideToolbar from './SideToolbar.vue';
+import ChatFlow from './ChatFlow.vue';
+import ScenePanel from './ScenePanel.vue';
+import StatusHUD from './StatusHUD.vue';
+import AppModal from '../shared/AppModal.vue';
+import ItemsPanel from './ItemsPanel.vue';
+import CharacterListPanel from './CharacterListPanel.vue';
+import QuestsPanel from './QuestsPanel.vue';
+import PlotPanel from './PlotPanel.vue';
+import MemoryPanel from './MemoryPanel.vue';
+import SnapshotPanel from './SnapshotPanel.vue';
+import MapPanel from './MapPanel.vue';
+import AgentStatusPanel from './AgentStatusPanel.vue';
+import DebugPanel from './DebugPanel.vue';
+import MiniPlayer from './MiniPlayer.vue';
+import CombatPanel from './combat/CombatPanel.vue';
 
-const game = useGameStore()
-const ui = useUIStore()
-const settings = useSettingsStore()
-const audio = useAudioStore()
-const s = settings.settings
+const game = useGameStore();
+const ui = useUIStore();
+const settings = useSettingsStore();
+const audio = useAudioStore();
+const s = settings.settings;
 
-let pipeline: GamePipeline | null = null
-const streamingText = ref('')
+let pipeline: GamePipeline | null = null;
+const streamingText = ref('');
 
 onMounted(async () => {
-  window.addEventListener('keydown', onKeyDown)
-  console.log('[GamePage] onMounted, activeSaveId:', ui.activeSaveId)
+  window.addEventListener('keydown', onKeyDown);
+  console.log('[GamePage] onMounted, activeSaveId:', ui.activeSaveId);
   if (ui.activeSaveId) {
-    console.log('[GamePage] loading save...')
-    await game.loadSave(ui.activeSaveId)
-    console.log('[GamePage] save loaded, hasOpeningPromptConsumed:', game.hasOpeningPromptConsumed, 'openingPrompt exists:', !!game.openingPrompt)
+    console.log('[GamePage] loading save...');
+    await game.loadSave(ui.activeSaveId);
+    console.log(
+      '[GamePage] save loaded, hasOpeningPromptConsumed:',
+      game.hasOpeningPromptConsumed,
+      'openingPrompt exists:',
+      !!game.openingPrompt,
+    );
     // 创建 pipeline 实例
     pipeline = new GamePipeline({
       gameStore: game,
       settingsStore: settings,
       saveId: ui.activeSaveId,
-    })
+    });
     // 🎵 曲库必须在这里装 —— 此前只有设置页音频分区和迷你播放器会 init()，
     // 没打开过它们的会话曲库是空的，选曲永远命中不了任何东西。
     // 装完按当前地点起一次场景配乐（读档回来的第一眼也该有音乐）。
     void audio
       .init()
       .then(() => pipeline?.primeSceneAudio())
-      .catch((err) => console.warn('[GamePage] 音频初始化失败（不影响游戏）:', err))
+      .catch((err) => console.warn('[GamePage] 音频初始化失败（不影响游戏）:', err));
     // 首次加载 → 自动发送开场 Prompt
     if (!game.hasOpeningPromptConsumed && game.openingPrompt) {
-      console.log('[GamePage] sending opening prompt...')
+      console.log('[GamePage] sending opening prompt...');
       await pipeline.sendOpeningPrompt((chunk: string, isComplete: boolean) => {
         if (isComplete) {
-          streamingText.value = ''
+          streamingText.value = '';
         } else {
-          streamingText.value += chunk
+          streamingText.value += chunk;
         }
-      })
+      });
     } else {
-      console.log('[GamePage] NOT sending opening prompt. consumed:', game.hasOpeningPromptConsumed, 'prompt empty:', !game.openingPrompt)
+      console.log(
+        '[GamePage] NOT sending opening prompt. consumed:',
+        game.hasOpeningPromptConsumed,
+        'prompt empty:',
+        !game.openingPrompt,
+      );
     }
   } else {
-    console.log('[GamePage] no activeSaveId, skipping')
+    console.log('[GamePage] no activeSaveId, skipping');
   }
-})
+});
 
 /** 🧪 开发用测试注入 — 仅 DEV 构建注册到 window / 快捷键（P1-14: 生产构建不暴露） */
 async function injectChatFlowTest() {
   // 确保所有系统事件类型都可见
-  s.systemEventsVisible = true
+  s.systemEventsVisible = true;
   s.systemEventFilters = {
     craft: true,
     char_gen: true,
@@ -82,87 +92,87 @@ async function injectChatFlowTest() {
     character_update: true,
     item_update: true,
     quest_update: true,
-  }
+  };
   // 动态 import：test-fixtures 只在调用时加载，不进生产首包
-  const { injectTestData, buildScenePreviewMock } = await import('../../lib/test-fixtures')
+  const { injectTestData, buildScenePreviewMock } = await import('../../lib/test-fixtures');
   // 注入 ScenePanel 中段(在场NPC + thoughts 心里话) 与下段(新闻) 预览数据
   // 经 store.getThoughts(CharacterState.thoughts 正式字段，M6 单源)、saveProfile.news 读取
-  const preview = buildScenePreviewMock()
-  game.hydratePreview(preview)
+  const preview = buildScenePreviewMock();
+  game.hydratePreview(preview);
   // 先清空再注入 ChatFlow 消息
   injectTestData({
     messages: game.messages,
     isGenerating: game.isGenerating,
-  })
+  });
 }
 
 // 暴露到全局，方便控制台调用: window.__injectChatFlowTest__()
 // 🔒 P1-14: 仅 DEV 构建暴露 —— 生产构建不该有可注入测试数据的入口（会污染真实存档）
 if (import.meta.env.DEV && typeof window !== 'undefined') {
-  ;(window as any).__injectChatFlowTest__ = injectChatFlowTest
+  (window as any).__injectChatFlowTest__ = injectChatFlowTest;
 }
 
 // Ctrl+Shift+T 快捷键注入 / Alt+Shift+D 调试面板 — 仅 DEV 构建响应（P1-14）
 function onKeyDown(e: KeyboardEvent) {
-  if (!import.meta.env.DEV) return
+  if (!import.meta.env.DEV) return;
   if (e.ctrlKey && e.shiftKey && e.key === 'T') {
-    e.preventDefault()
-    void injectChatFlowTest()
+    e.preventDefault();
+    void injectChatFlowTest();
   }
   // Alt+Shift+D 切换调试面板
   if (e.altKey && e.shiftKey && e.key === 'D') {
-    e.preventDefault()
-    showDebug.value = !showDebug.value
+    e.preventDefault();
+    showDebug.value = !showDebug.value;
   }
 }
 
 // ===== 调试面板 =====
-const showDebug = ref(false)
+const showDebug = ref(false);
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeyDown)
-  game.isGenerating = false
-})
+  window.removeEventListener('keydown', onKeyDown);
+  game.isGenerating = false;
+});
 
 async function handleSend(content: string) {
-  if (game.isGenerating || !pipeline) return
-  streamingText.value = ''
+  if (game.isGenerating || !pipeline) return;
+  streamingText.value = '';
   await pipeline.run(content, (chunk: string, isComplete: boolean) => {
     if (isComplete) {
-      streamingText.value = ''
+      streamingText.value = '';
     } else {
-      streamingText.value += chunk
+      streamingText.value += chunk;
     }
-  })
+  });
 }
 
 function handleStop() {
-  pipeline?.abort()
-  streamingText.value = ''
+  pipeline?.abort();
+  streamingText.value = '';
 }
 
 function handleToolClick(id: string) {
   if (id === 'settings') {
-    ui.navigate('settings')
-    return
+    ui.navigate('settings');
+    return;
   }
   // 迷你播放器是浮动卡片，不走 activeModal（§6.2），必须先于 showModal 拦下
   if (id === 'audio') {
-    showMiniPlayer.value = !showMiniPlayer.value
-    return
+    showMiniPlayer.value = !showMiniPlayer.value;
+    return;
   }
-  game.showModal(id)
+  game.showModal(id);
 }
 
 /** 迷你播放器开合（浮动卡片，非 Modal） */
-const showMiniPlayer = ref(false)
+const showMiniPlayer = ref(false);
 
 function handleSelectOption(text: string) {
-  game.fillInput(text)
+  game.fillInput(text);
 }
 
 function onModalOpenChange(v: boolean) {
-  if (!v) game.closeModal()
+  if (!v) game.closeModal();
 }
 </script>
 
@@ -191,28 +201,84 @@ function onModalOpenChange(v: boolean) {
     <!-- M5 战斗面板（isInCombat 驱动，覆盖层） -->
     <CombatPanel />
 
-    <AppModal title="背包 / 装备 / 技能" :open="game.activeModal === 'items'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
+    <AppModal
+      title="背包 / 装备 / 技能"
+      :open="game.activeModal === 'items'"
+      size="xxl"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
       <ItemsPanel />
     </AppModal>
-    <AppModal title="角色列表" :open="game.activeModal === 'characters'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
+    <AppModal
+      title="角色列表"
+      :open="game.activeModal === 'characters'"
+      size="xxl"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
       <CharacterListPanel />
     </AppModal>
-    <AppModal title="任务" :open="game.activeModal === 'quests'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
+    <AppModal
+      title="任务"
+      :open="game.activeModal === 'quests'"
+      size="xxl"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
       <QuestsPanel />
     </AppModal>
-    <AppModal title="剧情规划" :open="game.activeModal === 'plot'" @close="game.closeModal()" @update:open="onModalOpenChange" size="lg" closable>
+    <AppModal
+      title="剧情规划"
+      :open="game.activeModal === 'plot'"
+      size="lg"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
       <PlotPanel />
     </AppModal>
-    <AppModal title="记忆" :open="game.activeModal === 'memory'" @close="game.closeModal()" @update:open="onModalOpenChange" size="lg" closable>
+    <AppModal
+      title="记忆"
+      :open="game.activeModal === 'memory'"
+      size="lg"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
       <MemoryPanel />
     </AppModal>
-    <AppModal title="快照" :open="game.activeModal === 'snapshots'" @close="game.closeModal()" @update:open="onModalOpenChange" size="md" closable>
+    <AppModal
+      title="快照"
+      :open="game.activeModal === 'snapshots'"
+      size="md"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
       <SnapshotPanel />
     </AppModal>
-    <AppModal title="地图" :open="game.activeModal === 'map'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
+    <AppModal
+      title="地图"
+      :open="game.activeModal === 'map'"
+      size="xxl"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
       <MapPanel />
     </AppModal>
-    <AppModal title="调试 & 导出" :open="game.activeModal === 'debug'" @close="game.closeModal()" @update:open="onModalOpenChange" size="xxl" closable>
+    <AppModal
+      title="调试 & 导出"
+      :open="game.activeModal === 'debug'"
+      size="xxl"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
       <DebugPanel />
     </AppModal>
 
@@ -233,7 +299,13 @@ function onModalOpenChange(v: boolean) {
         </div>
         <div class="debug-section">
           <h4>Characters ({{ game.characters.length }})</h4>
-          <pre>{{ JSON.stringify(game.characters.map(c => ({ id: c.id, name: c.name, type: c.type })), null, 2) }}</pre>
+          <pre>{{
+            JSON.stringify(
+              game.characters.map((c) => ({ id: c.id, name: c.name, type: c.type })),
+              null,
+              2,
+            )
+          }}</pre>
         </div>
         <div class="debug-section">
           <h4>Pending Options</h4>

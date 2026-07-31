@@ -2,10 +2,10 @@
  * GamePage 基础渲染测试 (Phase 7e)
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
-import GamePage from './GamePage.vue'
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
+import GamePage from './GamePage.vue';
 
 // Mock game store
 vi.mock('../../stores/game-store', () => ({
@@ -32,97 +32,118 @@ vi.mock('../../stores/game-store', () => ({
     hasOpeningPromptConsumed: true,
     openingPrompt: null as string | null,
   })),
-}))
+}));
 
 vi.mock('../../stores/ui-store', () => ({
   useUIStore: vi.fn(() => ({
     activeSaveId: null,
     navigate: vi.fn(),
   })),
-}))
+}));
 
 describe('GamePage', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
-  })
+    setActivePinia(createPinia());
+  });
 
   it('renders layout structure', () => {
-    const wrapper = mount(GamePage)
-    expect(wrapper.find('.game-page-layout').exists()).toBe(true)
-    expect(wrapper.find('.game-body').exists()).toBe(true)
-  })
+    const wrapper = mount(GamePage);
+    expect(wrapper.find('.game-page-layout').exists()).toBe(true);
+    expect(wrapper.find('.game-body').exists()).toBe(true);
+  });
 
   it('renders TopBar, ChatFlow, StatusHUD, InputBar', () => {
-    const wrapper = mount(GamePage)
-    expect(wrapper.findComponent({ name: 'TopBar' }).exists() || true).toBe(true)
-    expect(wrapper.findComponent({ name: 'ChatFlow' }).exists() || true).toBe(true)
-    expect(wrapper.findComponent({ name: 'StatusHUD' }).exists() || true).toBe(true)
-    expect(wrapper.findComponent({ name: 'InputBar' }).exists() || true).toBe(true)
-  })
+    const wrapper = mount(GamePage);
+    expect(wrapper.findComponent({ name: 'TopBar' }).exists() || true).toBe(true);
+    expect(wrapper.findComponent({ name: 'ChatFlow' }).exists() || true).toBe(true);
+    expect(wrapper.findComponent({ name: 'StatusHUD' }).exists() || true).toBe(true);
+    expect(wrapper.findComponent({ name: 'InputBar' }).exists() || true).toBe(true);
+  });
 
   it('calls loadSave on mount when activeSaveId is set', async () => {
-    const { useUIStore } = await import('../../stores/ui-store')
-    const { useGameStore } = await import('../../stores/game-store')
-    const mockLoadSave = vi.fn()
-    ;(useGameStore as any).mockReturnValue({
-      player: null, npcs: [], saveProfile: null, fp: 0,
-      messages: [], isGenerating: false, recentMemories: [], activePlotEvents: [],
-      plotOutline: null, activeCombat: null,
-      sidebarCollapsed: false, rightPanelMode: 'status', fullscreenStatus: false,
-      loadSave: mockLoadSave, toggleSidebar: vi.fn(), setRightPanel: vi.fn(), toggleFullscreen: vi.fn(),
-      pendingOptions: [] as string[], hasOpeningPromptConsumed: true, openingPrompt: null as string | null,
-    })
-    ;(useUIStore as any).mockReturnValue({ activeSaveId: 'test-save-123', navigate: vi.fn() })
+    const { useUIStore } = await import('../../stores/ui-store');
+    const { useGameStore } = await import('../../stores/game-store');
+    const mockLoadSave = vi.fn();
+    (useGameStore as any).mockReturnValue({
+      player: null,
+      npcs: [],
+      saveProfile: null,
+      fp: 0,
+      messages: [],
+      isGenerating: false,
+      recentMemories: [],
+      activePlotEvents: [],
+      plotOutline: null,
+      activeCombat: null,
+      sidebarCollapsed: false,
+      rightPanelMode: 'status',
+      fullscreenStatus: false,
+      loadSave: mockLoadSave,
+      toggleSidebar: vi.fn(),
+      setRightPanel: vi.fn(),
+      toggleFullscreen: vi.fn(),
+      pendingOptions: [] as string[],
+      hasOpeningPromptConsumed: true,
+      openingPrompt: null as string | null,
+    });
+    (useUIStore as any).mockReturnValue({ activeSaveId: 'test-save-123', navigate: vi.fn() });
 
-    mount(GamePage)
-    expect(mockLoadSave).toHaveBeenCalledWith('test-save-123')
-  })
-})
+    mount(GamePage);
+    expect(mockLoadSave).toHaveBeenCalledWith('test-save-123');
+  });
+});
 
 /* ===== ChatFlow 三源消息渲染测试 ===== */
 describe('ChatFlow — 三源消息渲染', () => {
   it('应渲染用户消息（右对齐）', async () => {
-    const ChatFlow = (await import('./ChatFlow.vue')).default
+    const ChatFlow = (await import('./ChatFlow.vue')).default;
     const msgs: import('@engine/types').ChatMessage[] = [
       { id: '1', role: 'user', content: '你好', timestamp: 0 },
-    ]
-    const wrapper = mount(ChatFlow, { props: { messages: msgs } })
-    expect(wrapper.find('.bubble-player').exists()).toBe(true)
-    expect(wrapper.find('.bubble-player .bubble-text').text()).toBe('你好')
-  })
+    ];
+    const wrapper = mount(ChatFlow, { props: { messages: msgs } });
+    expect(wrapper.find('.bubble-player').exists()).toBe(true);
+    expect(wrapper.find('.bubble-player .bubble-text').text()).toBe('你好');
+  });
 
   it('应渲染 AI 叙事消息（左对齐）', async () => {
-    const ChatFlow = (await import('./ChatFlow.vue')).default
+    const ChatFlow = (await import('./ChatFlow.vue')).default;
     const msgs: import('@engine/types').ChatMessage[] = [
       { id: '1', role: 'assistant', content: '冒险开始了', timestamp: 0 },
-    ]
-    const wrapper = mount(ChatFlow, { props: { messages: msgs } })
-    expect(wrapper.find('.bubble-narrative-full').exists()).toBe(true)
-  })
+    ];
+    const wrapper = mount(ChatFlow, { props: { messages: msgs } });
+    expect(wrapper.find('.bubble-narrative-full').exists()).toBe(true);
+  });
 
   it('应渲染系统消息为折叠通知条', async () => {
-    const ChatFlow = (await import('./ChatFlow.vue')).default
+    const ChatFlow = (await import('./ChatFlow.vue')).default;
     const msgs = [
       {
         id: '1',
         role: 'system' as const,
         content: '[制作] 成功 — 传说级 霜月之刃',
         timestamp: 0,
-        systemEvent: { type: 'craft' as const, narrative: '成功打造传说级武器', productName: '霜月之刃', quality: '传说' as const, rating: '成功' as const, details: {} as any },
+        systemEvent: {
+          type: 'craft' as const,
+          narrative: '成功打造传说级武器',
+          productName: '霜月之刃',
+          quality: '传说' as const,
+          rating: '成功' as const,
+          details: {} as any,
+        },
       },
-    ]
+    ];
     const wrapper = mount(ChatFlow, {
       props: { messages: msgs, systemEventsVisible: true, systemEventFilters: {} },
-    })
+    });
     // system 消息在 systemEventsVisible=true 且有 systemEvent 时渲染为折叠通知条
-    expect(wrapper.find('.chat-messages').exists()).toBe(true)
-    expect(wrapper.find('.system-notif').exists()).toBe(true)
-  })
+    expect(wrapper.find('.chat-messages').exists()).toBe(true);
+    expect(wrapper.find('.system-notif').exists()).toBe(true);
+  });
 
   it('空消息列表应显示占位文案', async () => {
-    const ChatFlow = (await import('./ChatFlow.vue')).default
-    const wrapper = mount(ChatFlow, { props: { messages: [] } })
-    expect(wrapper.find('.chat-empty').exists()).toBe(true)
-    expect(wrapper.text()).toContain('等待冒险开始')
-  })
-})
+    const ChatFlow = (await import('./ChatFlow.vue')).default;
+    const wrapper = mount(ChatFlow, { props: { messages: [] } });
+    expect(wrapper.find('.chat-empty').exists()).toBe(true);
+    expect(wrapper.text()).toContain('等待冒险开始');
+  });
+});

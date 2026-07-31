@@ -46,10 +46,7 @@ describe('detectDeaths', () => {
   });
 
   it('全部存活返回空数组', () => {
-    const chars = [
-      makeChar({ hp: 10 }),
-      makeChar({ hp: 50 }),
-    ];
+    const chars = [makeChar({ hp: 10 }), makeChar({ hp: 50 })];
     expect(detectDeaths(chars)).toHaveLength(0);
   });
 

@@ -14,13 +14,7 @@ import type { AttributeName, DivinityLevel, DamageType } from './types';
 
 // ========== 效果类别（6 大类，对齐 #265160 [品质效果限定]） ==========
 
-export type EffectCategory =
-  | '固伤'
-  | '百分比'
-  | '资源'
-  | '检定'
-  | '附加效果'
-  | '特殊机制';
+export type EffectCategory = '固伤' | '百分比' | '资源' | '检定' | '附加效果' | '特殊机制';
 
 // ========== Modifier 基础 ==========
 
@@ -110,10 +104,7 @@ export type Modifier =
  *   effectiveDef = def × (1 − 压制率)   // 等效穿透
  *   effectiveDR  = dr  × (1 − 压制率)   // 等效无视 DR
  */
-export function resolveDivinityConflict(
-  atk: DivinityLevel,
-  def: DivinityLevel,
-): number {
+export function resolveDivinityConflict(atk: DivinityLevel, def: DivinityLevel): number {
   const diff = atk - def;
   if (diff <= 0) return 0;
   if (diff >= 5) return 1;

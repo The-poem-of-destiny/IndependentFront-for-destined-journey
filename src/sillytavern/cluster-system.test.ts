@@ -53,7 +53,7 @@ describe('formClusterState', () => {
     const result = formClusterState('goblin_t1', 3, 50, 50);
     expect(result.cluster.initialCount).toBe(3);
     expect(result.cluster.currentCount).toBe(3);
-    expect(result.cluster.clusterHp).toBe(150);   // 50 × 3
+    expect(result.cluster.clusterHp).toBe(150); // 50 × 3
     expect(result.cluster.clusterMaxHp).toBe(150);
     expect(result.cluster.attacksPerRound).toBe(3); // HP=100% → 3次
     expect(result.reason).toContain('合并为集群');
@@ -63,7 +63,7 @@ describe('formClusterState', () => {
     const result = formClusterState('skeleton_t2', 5, 80);
     expect(result.cluster.initialCount).toBe(5);
     expect(result.cluster.currentCount).toBe(5);
-    expect(result.cluster.clusterHp).toBe(400);   // 80 × 5
+    expect(result.cluster.clusterHp).toBe(400); // 80 × 5
     expect(result.cluster.clusterMaxHp).toBe(400);
     expect(result.cluster.attacksPerRound).toBe(3); // HP=100% → 3次
   });
@@ -263,7 +263,7 @@ describe('updateClusterAfterDamage', () => {
     const result = updateClusterAfterDamage(cluster, 250); // 750/1000 = 75%
     expect(result.cluster).not.toBeNull();
     expect(result.cluster!.currentCount).toBe(8); // ceil(10 × 0.75) = 8
-    expect(result.casualtiesThisRound).toBe(2);  // 10 - 8
+    expect(result.casualtiesThisRound).toBe(2); // 10 - 8
   });
 
   it('半血减员', () => {

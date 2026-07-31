@@ -45,10 +45,22 @@ export const AUDIO_TAG_PREFIX: Readonly<Record<AudioTagType, string>> = {
  * 用户手打标签时不该因为写了 `角色:` 而不是 `人物:` 就失效。
  */
 const PREFIX_LOOKUP: Readonly<Record<string, AudioTagType>> = {
-  地点: 'location', 位置: 'location', location: 'location', loc: 'location',
-  人物: 'character', 角色: 'character', character: 'character', char: 'character',
-  情绪: 'mood', 心情: 'mood', 氛围: 'mood', mood: 'mood',
-  情境: 'situation', 场景: 'situation', situation: 'situation', scene: 'situation',
+  地点: 'location',
+  位置: 'location',
+  location: 'location',
+  loc: 'location',
+  人物: 'character',
+  角色: 'character',
+  character: 'character',
+  char: 'character',
+  情绪: 'mood',
+  心情: 'mood',
+  氛围: 'mood',
+  mood: 'mood',
+  情境: 'situation',
+  场景: 'situation',
+  situation: 'situation',
+  scene: 'situation',
 };
 
 /** 半角/全角冒号都认；只在**第一个**冒号处切分，值里的冒号原样保留 */

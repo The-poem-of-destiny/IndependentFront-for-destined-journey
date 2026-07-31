@@ -86,11 +86,7 @@ describe('modifier-collector', () => {
     const mods = await collectAttackerMods(bus, attack, ['char_1', 'char_2']);
 
     expect(mods).toHaveLength(3);
-    expect(mods.map((m) => m.source).sort()).toEqual([
-      '力量戒指',
-      '战士天赋',
-      '锋利附魔',
-    ]);
+    expect(mods.map((m) => m.source).sort()).toEqual(['力量戒指', '战士天赋', '锋利附魔']);
     // 每个都应该是固伤 modifier
     expect(mods.every((m) => m.category === '固伤')).toBe(true);
   });
@@ -162,10 +158,7 @@ describe('modifier-collector', () => {
 
     // owner 缺省的系统 buff + 在场的 owner buff 都应被收集
     expect(mods).toHaveLength(2);
-    expect(mods.map((m) => m.source).sort()).toEqual([
-      '主角光环',
-      '战场环境：火山喷发',
-    ]);
+    expect(mods.map((m) => m.source).sort()).toEqual(['主角光环', '战场环境：火山喷发']);
   });
 
   it('4. collectDefenderMods 走 DEFENDER_MODS，与 ATTACKER_MODS 互不串台', async () => {
@@ -200,20 +193,14 @@ describe('modifier-collector', () => {
     });
 
     // 先只做攻方收集 → 验证 attacker handler 触发、defender handler 未触发（互不串台）
-    const attackerMods = await collectAttackerMods(bus, attack, [
-      'char_1',
-      'char_2',
-    ]);
+    const attackerMods = await collectAttackerMods(bus, attack, ['char_1', 'char_2']);
     expect(attackerTriggered).toBe(true);
     expect(defenderTriggered).toBe(false); // ← 关键：attacker collect 不应触发 defender handler
     expect(attackerMods).toHaveLength(1);
     expect(attackerMods[0].source).toBe('攻方:怒火');
 
     // 再做守方收集 → 验证 defender handler 触发，且只收 defender 声明的 modifier
-    const defenderMods = await collectDefenderMods(bus, attack, [
-      'char_1',
-      'char_2',
-    ]);
+    const defenderMods = await collectDefenderMods(bus, attack, ['char_1', 'char_2']);
     expect(defenderTriggered).toBe(true);
     expect(defenderMods).toHaveLength(1);
     expect(defenderMods[0].source).toBe('守方:荆棘护甲');
@@ -222,14 +209,8 @@ describe('modifier-collector', () => {
 
   it('5. 无任何订阅时返回空数组', async () => {
     // 不注册任何 handler
-    const attackerMods = await collectAttackerMods(bus, attack, [
-      'char_1',
-      'char_2',
-    ]);
-    const defenderMods = await collectDefenderMods(bus, attack, [
-      'char_1',
-      'char_2',
-    ]);
+    const attackerMods = await collectAttackerMods(bus, attack, ['char_1', 'char_2']);
+    const defenderMods = await collectDefenderMods(bus, attack, ['char_1', 'char_2']);
 
     expect(attackerMods).toEqual([]);
     expect(defenderMods).toEqual([]);
@@ -327,21 +308,13 @@ describe('modifier-collector', () => {
     });
 
     // 抑制 emitChain 内部的 console.warn 噪音（错误隔离会 warn）
-    const warnSpy = vi
-      .spyOn(console, 'warn')
-      .mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const mods = await collectAttackerMods(bus, attack, [
-        'char_1',
-        'char_2',
-      ]);
+      const mods = await collectAttackerMods(bus, attack, ['char_1', 'char_2']);
 
       // 抛错的 handler 没贡献 modifier，但前后的正常 handler 仍被收集
       expect(mods).toHaveLength(2);
-      expect(mods.map((m) => m.source).sort()).toEqual([
-        '装备A:正常声明',
-        '装备C:正常声明',
-      ]);
+      expect(mods.map((m) => m.source).sort()).toEqual(['装备A:正常声明', '装备C:正常声明']);
       // emitChain 应该 warn 了错误
       expect(warnSpy).toHaveBeenCalled();
     } finally {
@@ -364,18 +337,12 @@ describe('modifier-collector', () => {
       },
     });
 
-    const beforeUnsub = await collectAttackerMods(bus, attack, [
-      'char_1',
-      'char_2',
-    ]);
+    const beforeUnsub = await collectAttackerMods(bus, attack, ['char_1', 'char_2']);
     expect(beforeUnsub).toHaveLength(1);
 
     unsub();
 
-    const afterUnsub = await collectAttackerMods(bus, attack, [
-      'char_1',
-      'char_2',
-    ]);
+    const afterUnsub = await collectAttackerMods(bus, attack, ['char_1', 'char_2']);
     expect(afterUnsub).toEqual([]);
   });
 
@@ -453,10 +420,7 @@ describe('modifier-collector', () => {
       },
     });
 
-    const mods: Modifier[] = await collectAttackerMods(bus, attack, [
-      'char_1',
-      'char_2',
-    ]);
+    const mods: Modifier[] = await collectAttackerMods(bus, attack, ['char_1', 'char_2']);
 
     expect(mods).toHaveLength(1);
     // Modifier 联合类型层面已编译期校验，运行时校验判别字段

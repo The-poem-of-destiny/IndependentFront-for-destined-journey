@@ -1,32 +1,32 @@
 <script setup lang="ts">
 const props = defineProps<{
-  modelValue: number
-  min?: number
-  max?: number
-  step?: number
-  disabled?: boolean
-  label?: string
-}>()
+  modelValue: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  disabled?: boolean;
+  label?: string;
+}>();
 
 const emit = defineEmits<{
-  'update:modelValue': [value: number]
-}>()
+  'update:modelValue': [value: number];
+}>();
 
 function clamp(v: number): number {
-  if (props.min !== undefined && v < props.min) return props.min
-  if (props.max !== undefined && v > props.max) return props.max
-  return v
+  if (props.min !== undefined && v < props.min) return props.min;
+  if (props.max !== undefined && v > props.max) return props.max;
+  return v;
 }
 
 function increase() {
-  emit('update:modelValue', clamp(props.modelValue + (props.step || 1)))
+  emit('update:modelValue', clamp(props.modelValue + (props.step || 1)));
 }
 function decrease() {
-  emit('update:modelValue', clamp(props.modelValue - (props.step || 1)))
+  emit('update:modelValue', clamp(props.modelValue - (props.step || 1)));
 }
 function onInput(e: Event) {
-  const v = parseInt((e.target as HTMLInputElement).value, 10)
-  if (!isNaN(v)) emit('update:modelValue', clamp(v))
+  const v = parseInt((e.target as HTMLInputElement).value, 10);
+  if (!isNaN(v)) emit('update:modelValue', clamp(v));
 }
 </script>
 
@@ -34,7 +34,13 @@ function onInput(e: Event) {
   <div class="stepper">
     <span v-if="label" class="stepper-label">{{ label }}</span>
     <div class="stepper-controls">
-      <button class="stepper-btn" :disabled="disabled || (min !== undefined && modelValue <= min)" @click="decrease">−</button>
+      <button
+        class="stepper-btn"
+        :disabled="disabled || (min !== undefined && modelValue <= min)"
+        @click="decrease"
+      >
+        −
+      </button>
       <input
         class="stepper-input"
         type="number"
@@ -45,15 +51,32 @@ function onInput(e: Event) {
         :disabled="disabled"
         @input="onInput"
       />
-      <button class="stepper-btn" :disabled="disabled || (max !== undefined && modelValue >= max)" @click="increase">+</button>
+      <button
+        class="stepper-btn"
+        :disabled="disabled || (max !== undefined && modelValue >= max)"
+        @click="increase"
+      >
+        +
+      </button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.stepper { display: flex; flex-direction: column; gap: 4px; }
-.stepper-label { font-size: 0.85rem; font-weight: 500; color: var(--theme-text-secondary); }
-.stepper-controls { display: flex; align-items: stretch; }
+.stepper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stepper-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--theme-text-secondary);
+}
+.stepper-controls {
+  display: flex;
+  align-items: stretch;
+}
 .stepper-btn {
   width: 32px;
   display: flex;
@@ -66,10 +89,19 @@ function onInput(e: Event) {
   cursor: pointer;
   transition: all var(--theme-transition-fast);
 }
-.stepper-btn:first-child { border-radius: var(--theme-radius-md) 0 0 var(--theme-radius-md); }
-.stepper-btn:last-child { border-radius: 0 var(--theme-radius-md) var(--theme-radius-md) 0; }
-.stepper-btn:hover:not(:disabled) { background: var(--theme-surface-muted); }
-.stepper-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.stepper-btn:first-child {
+  border-radius: var(--theme-radius-md) 0 0 var(--theme-radius-md);
+}
+.stepper-btn:last-child {
+  border-radius: 0 var(--theme-radius-md) var(--theme-radius-md) 0;
+}
+.stepper-btn:hover:not(:disabled) {
+  background: var(--theme-surface-muted);
+}
+.stepper-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
 
 .stepper-input {
   width: 60px;
@@ -84,6 +116,10 @@ function onInput(e: Event) {
   -moz-appearance: textfield;
 }
 .stepper-input::-webkit-outer-spin-button,
-.stepper-input::-webkit-inner-spin-button { -webkit-appearance: none; }
-.stepper-input:focus { outline: none; }
+.stepper-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+.stepper-input:focus {
+  outline: none;
+}
 </style>

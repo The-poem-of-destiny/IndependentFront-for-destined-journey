@@ -9,20 +9,20 @@
 
 原版作为 SillyTavern 插件运行，环境由外部注入：
 
-| 依赖 | 来源 | 说明 |
-|------|------|------|
-| Vue 3 | ST 全局 `window.Vue` | `createApp`, `ref`, `computed`, `watch`, `onMounted`... |
-| Pinia | CDN jsDelivr | `createPinia`, `defineStore`, `storeToRefs` |
-| Vue Router | ST 全局 | `createMemoryHistory` (非 browser history，因为是弹窗内嵌) |
-| Lodash (`_`) | ST 全局 | `mergeWith`, `isArray`, `isEqual` |
-| jQuery (`$`) | ST 全局 | `$(fn)` DOM ready 回调 |
-| `toastr` | ST 全局 | 通知弹窗 |
-| `SillyTavern` API | ST 全局 | `getVariables`, `insertOrAssignVariables`, `substituteParams` |
-| `Mvu` | ST 全局 | MVU 变量引擎，`getMvuData` / `replaceMvuData` |
-| `createChatMessages` | ST 全局 | 发送消息到 AI |
-| `triggerSlash` | ST 全局 | 触发斜杠命令 |
-| `JSON5` | CDN | 解析含注释的 JSON |
-| `klona` | CDN | 深克隆 |
+| 依赖                 | 来源                 | 说明                                                          |
+| -------------------- | -------------------- | ------------------------------------------------------------- |
+| Vue 3                | ST 全局 `window.Vue` | `createApp`, `ref`, `computed`, `watch`, `onMounted`...       |
+| Pinia                | CDN jsDelivr         | `createPinia`, `defineStore`, `storeToRefs`                   |
+| Vue Router           | ST 全局              | `createMemoryHistory` (非 browser history，因为是弹窗内嵌)    |
+| Lodash (`_`)         | ST 全局              | `mergeWith`, `isArray`, `isEqual`                             |
+| jQuery (`$`)         | ST 全局              | `$(fn)` DOM ready 回调                                        |
+| `toastr`             | ST 全局              | 通知弹窗                                                      |
+| `SillyTavern` API    | ST 全局              | `getVariables`, `insertOrAssignVariables`, `substituteParams` |
+| `Mvu`                | ST 全局              | MVU 变量引擎，`getMvuData` / `replaceMvuData`                 |
+| `createChatMessages` | ST 全局              | 发送消息到 AI                                                 |
+| `triggerSlash`       | ST 全局              | 触发斜杠命令                                                  |
+| `JSON5`              | CDN                  | 解析含注释的 JSON                                             |
+| `klona`              | CDN                  | 深克隆                                                        |
 
 **路由**: 使用 `createMemoryHistory`，因为页面在 ST 弹窗内运行，没有独立 URL。
 
@@ -45,14 +45,14 @@ RouterView (App shell: <div class="creator-app">)
 
 ```javascript
 const Je = { 1: 'BasicInfo', 2: 'Selections', 3: 'Background', 4: 'Confirm' };
-const Qe = { 'BasicInfo': 1, 'Selections': 2, 'Background': 3, 'Confirm': 4 };
+const Qe = { BasicInfo: 1, Selections: 2, Background: 3, Confirm: 4 };
 
 // 步骤定义
 const Ue = [
   { title: '基础信息与属性', shortTitle: '信息/属性', step: 1 },
-  { title: '装备与技能',     shortTitle: '装备/技能', step: 2 },
+  { title: '装备与技能', shortTitle: '装备/技能', step: 2 },
   { title: '伙伴与初始背景', shortTitle: '伙伴/背景', step: 3 },
-  { title: '确认提交',       shortTitle: '确认',     step: 4 }
+  { title: '确认提交', shortTitle: '确认', step: 4 },
 ];
 ```
 
@@ -67,10 +67,7 @@ const Ue = [
   </div>
 
   <!-- 顶部控制栏 -->
-  <HeaderControls>
-    转生点: {{ availablePoints }}
-    [随机点数] [预设管理]
-  </HeaderControls>
+  <HeaderControls> 转生点: {{ availablePoints }} [随机点数] [预设管理] </HeaderControls>
 
   <!-- 步骤指示器 -->
   <Steps :current="currentStep" :steps="4" />
@@ -87,11 +84,14 @@ const Ue = [
     :can-prev="canGoPrevious"
     :next-label="isLastStep ? '踏上旅程' : '下一步'"
     :next-disabled="availablePoints < 0"
-    @prev @next />
+    @prev
+    @next
+  />
 </div>
 ```
 
 **关键逻辑**:
+
 - `transitionName` = 前进 `slide-left` / 后退 `slide-right` (比较新旧 route 的 step)
 - `isLastStep` = `currentStep === 4`，按钮文字从"下一步"变为"踏上旅程"
 - `isNextDisabled` = `availablePoints < 0` (点数不能为负)
@@ -102,72 +102,72 @@ const Ue = [
 
 ### 3.1 Shell/Layout 组件 (5 个)
 
-| 组件 | Scope ID | 用途 |
-|------|----------|------|
-| `Layout` (index) | `data-v-3ba0e588` | 主布局: 标题 + 步骤条 + 内容区 + 导航 + 预设弹窗 |
-| `ContentArea` | `data-v-422e4092` | 包裹 `<router-view>` + `<Transition>` 滑入滑出动画 |
-| `HeaderControls` | `data-v-25795810` | 点数显示 + Roll 随机点数按钮 + 预设管理按钮 |
-| `Steps` | `data-v-4595f292` | 水平步骤指示器 (`.step` + `.pass` 完成态) |
-| `NavigationButtons` | `data-v-de8f52dc` | [上一步] [下一步/踏上旅程] 按钮组 |
+| 组件                | Scope ID          | 用途                                               |
+| ------------------- | ----------------- | -------------------------------------------------- |
+| `Layout` (index)    | `data-v-3ba0e588` | 主布局: 标题 + 步骤条 + 内容区 + 导航 + 预设弹窗   |
+| `ContentArea`       | `data-v-422e4092` | 包裹 `<router-view>` + `<Transition>` 滑入滑出动画 |
+| `HeaderControls`    | `data-v-25795810` | 点数显示 + Roll 随机点数按钮 + 预设管理按钮        |
+| `Steps`             | `data-v-4595f292` | 水平步骤指示器 (`.step` + `.pass` 完成态)          |
+| `NavigationButtons` | `data-v-de8f52dc` | [上一步] [下一步/踏上旅程] 按钮组                  |
 
 ### 3.2 Step 1 组件 (1 个)
 
-| 组件 | Scope ID | 用途 |
-|------|----------|------|
+| 组件        | Scope ID | 用途                    |
+| ----------- | -------- | ----------------------- |
 | `BasicInfo` | (无独立) | 基础信息表单 + 属性面板 |
 
 ### 3.3 Step 2 组件 (8 个)
 
-| 组件 | Scope ID | 用途 |
-|------|----------|------|
-| `CategorySelectionLayout` | `data-v-0b4afefe` | 左侧分类导航 + 右侧内容区通用布局 |
-| `CategoryTabs` | `data-v-53e67b8a` | 分类标签按钮 (装备/道具/技能) |
-| `RarityFilter` | `data-v-0cb1e7b4` | 稀有度筛选按钮组 (7 级) |
-| `ItemCard` | `data-v-59c411bc` | 物品卡片 (名称/标签/效果/描述/消耗) |
-| `ItemList` | `data-v-6ed91820` | 物品列表容器 (搜索+筛选+分页) |
-| `SelectedPanel` | `data-v-68795e6a` | 已选物品侧栏 (展示+移除+消耗汇总) |
-| `CustomItemForm` | `data-v-4102fea8` | 自定义物品表单 Modal |
-| `EquipmentEditor` / `SkillEditor` | `data-v-1821fd54` / `data-v-01050429` | 编辑现有物品 Modal |
+| 组件                              | Scope ID                              | 用途                                |
+| --------------------------------- | ------------------------------------- | ----------------------------------- |
+| `CategorySelectionLayout`         | `data-v-0b4afefe`                     | 左侧分类导航 + 右侧内容区通用布局   |
+| `CategoryTabs`                    | `data-v-53e67b8a`                     | 分类标签按钮 (装备/道具/技能)       |
+| `RarityFilter`                    | `data-v-0cb1e7b4`                     | 稀有度筛选按钮组 (7 级)             |
+| `ItemCard`                        | `data-v-59c411bc`                     | 物品卡片 (名称/标签/效果/描述/消耗) |
+| `ItemList`                        | `data-v-6ed91820`                     | 物品列表容器 (搜索+筛选+分页)       |
+| `SelectedPanel`                   | `data-v-68795e6a`                     | 已选物品侧栏 (展示+移除+消耗汇总)   |
+| `CustomItemForm`                  | `data-v-4102fea8`                     | 自定义物品表单 Modal                |
+| `EquipmentEditor` / `SkillEditor` | `data-v-1821fd54` / `data-v-01050429` | 编辑现有物品 Modal                  |
 
 ### 3.4 Step 3 组件 (5 个)
 
-| 组件 | Scope ID | 用途 |
-|------|----------|------|
-| `BackgroundList` | `data-v-20e63764` | 背景故事卡片列表 |
-| `RequirementBadge` | `data-v-18788000` | 需求徽章 (种族/身份/地点，绿色满足/红色不满足) |
-| `PartnerList` | `data-v-2e7bfa8a` | 伙伴卡片列表 |
-| `CustomPartnerForm` | `data-v-253614da` | 自定义伙伴表单 (20+ 字段) |
-| `AttributeEditor` | `data-v-e089f256` | 伙伴属性编辑器 |
+| 组件                | Scope ID          | 用途                                           |
+| ------------------- | ----------------- | ---------------------------------------------- |
+| `BackgroundList`    | `data-v-20e63764` | 背景故事卡片列表                               |
+| `RequirementBadge`  | `data-v-18788000` | 需求徽章 (种族/身份/地点，绿色满足/红色不满足) |
+| `PartnerList`       | `data-v-2e7bfa8a` | 伙伴卡片列表                                   |
+| `CustomPartnerForm` | `data-v-253614da` | 自定义伙伴表单 (20+ 字段)                      |
+| `AttributeEditor`   | `data-v-e089f256` | 伙伴属性编辑器                                 |
 
 ### 3.5 Step 4 组件 (2 个)
 
-| 组件 | Scope ID | 用途 |
-|------|----------|------|
+| 组件                    | Scope ID          | 用途                      |
+| ----------------------- | ----------------- | ------------------------- |
 | `DestinyPointsExchange` | `data-v-c35365ee` | 命运点数兑换 (金主题卡片) |
-| `MoneyExchangeCard` | `data-v-5acd2d02` | 金钱兑换控件 |
+| `MoneyExchangeCard`     | `data-v-5acd2d02` | 金钱兑换控件              |
 
 ### 3.6 通用表单组件 (10 个)
 
-| 组件 | Scope ID | 用途 |
-|------|----------|------|
-| `FormInput` | `data-v-68bda4ea` | 文本输入 |
-| `FormTextarea` | `data-v-517d0cac` | 多行文本（自动高度） |
-| `FormSelect` | `data-v-4a660eb2` | 下拉选择（可搜索） |
-| `FormNumber` | `data-v-588d959c` | 数字输入 |
-| `FormRadio` | `data-v-48d2dd58` | 单选按钮组 |
-| `FormStepper` | `data-v-bf006b3c` | +/- 步进器 |
-| `FormLabel` | `data-v-11a19624` | 标签 + required 标记 |
-| `FormCascader` | `data-v-8dd65b4a` | 级联选择器（带搜索 + 树形展开） |
-| `FormKeyValueInput` | `data-v-a1444030` | 键值对编辑器 |
-| `FormArrayInput` | `data-v-62de9d7e` | 数组输入（可排序/增减） |
+| 组件                | Scope ID          | 用途                            |
+| ------------------- | ----------------- | ------------------------------- |
+| `FormInput`         | `data-v-68bda4ea` | 文本输入                        |
+| `FormTextarea`      | `data-v-517d0cac` | 多行文本（自动高度）            |
+| `FormSelect`        | `data-v-4a660eb2` | 下拉选择（可搜索）              |
+| `FormNumber`        | `data-v-588d959c` | 数字输入                        |
+| `FormRadio`         | `data-v-48d2dd58` | 单选按钮组                      |
+| `FormStepper`       | `data-v-bf006b3c` | +/- 步进器                      |
+| `FormLabel`         | `data-v-11a19624` | 标签 + required 标记            |
+| `FormCascader`      | `data-v-8dd65b4a` | 级联选择器（带搜索 + 树形展开） |
+| `FormKeyValueInput` | `data-v-a1444030` | 键值对编辑器                    |
+| `FormArrayInput`    | `data-v-62de9d7e` | 数组输入（可排序/增减）         |
 
 ### 3.7 弹窗组件 (3 个)
 
-| 组件 | Scope ID | 用途 |
-|------|----------|------|
-| `PresetModal` | `data-v-7f65fba9` | 预设管理弹窗 (保存/加载/导入/导出/删除/冲突处理) |
-| `SavePresetConfirm` | `data-v-45c171a6` | "保存当前配置?" 确认弹窗 |
-| `ConfirmModal` | `data-v-0a519f5e` | 通用确认对话框 |
+| 组件                | Scope ID          | 用途                                             |
+| ------------------- | ----------------- | ------------------------------------------------ |
+| `PresetModal`       | `data-v-7f65fba9` | 预设管理弹窗 (保存/加载/导入/导出/删除/冲突处理) |
+| `SavePresetConfirm` | `data-v-45c171a6` | "保存当前配置?" 确认弹窗                         |
+| `ConfirmModal`      | `data-v-0a519f5e` | 通用确认对话框                                   |
 
 ---
 
@@ -179,7 +179,6 @@ const Ue = [
 <div class="basic-info-page">
   <!-- 两列 grid 布局 (form-row: 1fr 1fr) -->
   <div class="form-row">
-
     <!-- === 左列: 角色信息 === -->
     <div class="form-col">
       <FormInput v-model="name" label="角色名称" />
@@ -194,8 +193,7 @@ const Ue = [
       <FormSelect v-model="identity" label="身份" :options="identityCosts" />
       <FormTextarea v-if="isCustom(identity)" v-model="customIdentity" />
 
-      <FormCascader v-model="startLocation" label="起始地点"
-                    :options="startLocations" />
+      <FormCascader v-model="startLocation" label="起始地点" :options="startLocations" />
       <FormTextarea v-if="isCustom(startLocation)" v-model="customStartLocation" />
     </div>
 
@@ -220,13 +218,18 @@ const Ue = [
             <tr v-for="attr in ['力量','敏捷','体质','智力','精神']" :key="attr">
               <td class="attr-name">{{ attr }}</td>
               <td>
-                <FormStepper v-model="basePoints[attr]" :max="6"
-                  :disabled="remainingBP <= 0 && basePoints[attr] <= 0" />
+                <FormStepper
+                  v-model="basePoints[attr]"
+                  :max="6"
+                  :disabled="remainingBP <= 0 && basePoints[attr] <= 0"
+                />
               </td>
               <td class="attr-tier">{{ tierBonus }}</td>
               <td>
-                <FormStepper v-model="attributePoints[attr]"
-                  :disabled="remainingAP <= 0 && attributePoints[attr] <= 0" />
+                <FormStepper
+                  v-model="attributePoints[attr]"
+                  :disabled="remainingAP <= 0 && attributePoints[attr] <= 0"
+                />
               </td>
               <td class="attr-result">
                 <strong>{{ finalAttributes[attr] }}</strong>
@@ -256,8 +259,8 @@ const Ue = [
       { key: 'equipments', label: '装备', count: selectedEquipments.length },
       { key: 'items',      label: '道具', count: selectedItems.length },
       { key: 'skills',     label: '技能', count: selectedSkills.length }
-    ]">
-
+    ]"
+  >
     <!-- 左侧分类导航栏 -->
     <template #sidebar="{ categories }">
       <CategoryTabs :categories="categories" />
@@ -267,9 +270,14 @@ const Ue = [
     <template #content>
       <!-- 子类型筛选 (装备: 武器/防具/饰品; 技能: 主动/被动) -->
       <div class="type-filter" v-if="activeCategory !== 'items'">
-        <button v-for="t in subTypes" class="type-btn"
+        <button
+          v-for="t in subTypes"
+          class="type-btn"
           :class="{ active: typeFilter === t }"
-          @click="typeFilter = t">{{ t }}</button>
+          @click="typeFilter = t"
+        >
+          {{ t }}
+        </button>
       </div>
 
       <!-- 稀有度筛选 -->
@@ -277,12 +285,15 @@ const Ue = [
 
       <!-- 物品列表 -->
       <ItemList :items="filteredPool" :search="searchText">
-        <ItemCard v-for="item in visibleItems" :key="item.name"
+        <ItemCard
+          v-for="item in visibleItems"
+          :key="item.name"
           :item="item"
           :selected="isSelected(item)"
           :disabled="!canSelect(item)"
           @select="handleSelect(item)"
-          @remove="handleRemove(item)" />
+          @remove="handleRemove(item)"
+        />
       </ItemList>
     </template>
   </CategorySelectionLayout>
@@ -293,14 +304,19 @@ const Ue = [
     :items="selectedItems"
     :skills="selectedSkills"
     :total-cost="selectionsCost"
-    @remove-equipment @remove-item @remove-skill />
+    @remove-equipment
+    @remove-item
+    @remove-skill
+  />
 
   <!-- 自定义物品 -->
   <AppButton @click="showCustomForm = true">+ 自定义物品</AppButton>
-  <CustomItemForm v-if="showCustomForm"
+  <CustomItemForm
+    v-if="showCustomForm"
     :initial-category="activeCategory"
     @save="addCustomItem"
-    @close="showCustomForm = false" />
+    @close="showCustomForm = false"
+  />
 </div>
 ```
 
@@ -316,7 +332,8 @@ const Ue = [
   <!-- 右侧: 过滤区 + 内容区 -->
   <div class="category-main">
     <div class="category-toolbar">
-      <slot name="toolbar" />  <!-- 子类型过滤 + 稀有度过滤 -->
+      <slot name="toolbar" />
+      <!-- 子类型过滤 + 稀有度过滤 -->
     </div>
     <div class="category-content" :style="{ maxHeight: contentMaxHeight }">
       <slot name="content" />
@@ -328,14 +345,15 @@ const Ue = [
 ### 4.3 ItemCard (物品卡片)
 
 ```html
-<div class="item-card"
+<div
+  class="item-card"
   :class="{
     selected: selected,
     disabled: disabled,
     ['rarity-' + item.rarity]: true
   }"
-  @click="!disabled && (selected ? $emit('remove') : $emit('select'))">
-
+  @click="!disabled && (selected ? $emit('remove') : $emit('select'))"
+>
   <div class="card-body">
     <!-- 头部: 名称 + 稀有度徽章 -->
     <div class="card-header">
@@ -361,9 +379,7 @@ const Ue = [
     </div>
 
     <!-- 消耗 (MP/SP) -->
-    <div class="card-consume" v-if="item.consume">
-      消耗: <strong>{{ item.consume }}</strong>
-    </div>
+    <div class="card-consume" v-if="item.consume">消耗: <strong>{{ item.consume }}</strong></div>
 
     <!-- 描述 (截断) -->
     <div class="card-desc">{{ truncate(item.description, 100) }}</div>
@@ -387,29 +403,35 @@ const Ue = [
   <!-- 左区: 初始背景 -->
   <section class="background-section">
     <h2>初始剧情</h2>
-    <BackgroundList :items="backgrounds" :selected="selectedBackground"
-                    @select="setBackground">
+    <BackgroundList :items="backgrounds" :selected="selectedBackground" @select="setBackground">
       <template #card="{ item, isSelected, isDisabled }">
-        <div class="background-card"
+        <div
+          class="background-card"
           :class="{ selected: isSelected, disabled: isDisabled }"
-          @click="!isDisabled && setBackground(item)">
-
+          @click="!isDisabled && setBackground(item)"
+        >
           <h3>{{ item.name }}</h3>
 
           <!-- 需求徽章 (种族/身份/地点) -->
           <div class="requirements">
-            <RequirementBadge v-if="item.requiredRace"
+            <RequirementBadge
+              v-if="item.requiredRace"
               :required="item.requiredRace"
               :current="character.race"
-              mode="race" />
-            <RequirementBadge v-if="item.requiredIdentity"
+              mode="race"
+            />
+            <RequirementBadge
+              v-if="item.requiredIdentity"
               :required="item.requiredIdentity"
               :current="character.identity"
-              mode="identity" />
-            <RequirementBadge v-if="item.requiredLocation"
+              mode="identity"
+            />
+            <RequirementBadge
+              v-if="item.requiredLocation"
               :required="item.requiredLocation"
               :current="character.startLocation"
-              mode="location" />
+              mode="location"
+            />
           </div>
 
           <!-- 描述 (截断 100 字) -->
@@ -421,26 +443,30 @@ const Ue = [
     </BackgroundList>
 
     <!-- 自定义开局 (始终可选) -->
-    <div class="background-card custom"
+    <div
+      class="background-card custom"
       :class="{ selected: isCustomSelected }"
-      @click="selectCustom">
+      @click="selectCustom"
+    >
       <h3>✎ 自定义开局</h3>
-      <FormTextarea v-if="isCustomSelected"
+      <FormTextarea
+        v-if="isCustomSelected"
         v-model="customBackgroundDescription"
-        placeholder="描述你想要的初始剧情..." />
+        placeholder="描述你想要的初始剧情..."
+      />
     </div>
   </section>
 
   <!-- 右区: 命定之人 (伙伴) -->
   <section class="partner-section">
     <h2>命定之人</h2>
-    <PartnerList :items="partners"
-      :selected="selectedPartners"
-      @select @remove />
+    <PartnerList :items="partners" :selected="selectedPartners" @select @remove />
     <AppButton @click="showCustomPartner = true">+ 自定义伙伴</AppButton>
-    <CustomPartnerForm v-if="showCustomPartner"
+    <CustomPartnerForm
+      v-if="showCustomPartner"
       @save="addCustomPartner"
-      @close="showCustomPartner = false" />
+      @close="showCustomPartner = false"
+    />
   </section>
 
   <!-- 底部粘性汇总条 -->
@@ -474,9 +500,7 @@ const Ue = [
     </div>
     <div class="point-card">
       <span class="label">可用</span>
-      <span class="value" :class="{ negative: availablePoints < 0 }">
-        {{ availablePoints }}
-      </span>
+      <span class="value" :class="{ negative: availablePoints < 0 }"> {{ availablePoints }} </span>
     </div>
     <div class="point-card">
       <span class="label">等级经验</span>
@@ -488,7 +512,7 @@ const Ue = [
   <div class="confirm-card">
     <!-- 角色头部 -->
     <div class="hero-row">
-      <div class="avatar" :style="avatarStyle"> <!-- 圆形头像占位 --> </div>
+      <div class="avatar" :style="avatarStyle"><!-- 圆形头像占位 --></div>
       <div class="hero-info">
         <span class="hero-name">{{ name }}</span>
         <span class="hero-meta">{{ race }} | {{ identity }}</span>
@@ -507,18 +531,16 @@ const Ue = [
     <!-- 五维属性 -->
     <div class="attr-row">
       <span v-for="attr in ATTRIBUTES">
-        {{ attr.cn }}: {{ attr.base }} + {{ attr.tier }} + {{ attr.extra }}
-        = <strong>{{ attr.final }}</strong>
+        {{ attr.cn }}: {{ attr.base }} + {{ attr.tier }} + {{ attr.extra }} =
+        <strong>{{ attr.final }}</strong>
       </span>
     </div>
 
     <!-- 物品摘要 -->
     <div class="stats-row">
-      装备 ×{{ selectedEquipments.length }}
-      技能 ×{{ selectedSkills.length }}
-      道具 ×{{ selectedItems.length }}
-      伙伴 ×{{ selectedPartners.length }}
-      背景: {{ selectedBackground?.name || '无' }}
+      装备 ×{{ selectedEquipments.length }} 技能 ×{{ selectedSkills.length }} 道具 ×{{
+      selectedItems.length }} 伙伴 ×{{ selectedPartners.length }} 背景: {{ selectedBackground?.name
+      || '无' }}
     </div>
 
     <!-- 物品 Chip 列表 -->
@@ -531,14 +553,14 @@ const Ue = [
     </div>
 
     <!-- 命运点数兑换 -->
-    <DestinyPointsExchange v-if="destinyPoints > 0"
+    <DestinyPointsExchange
+      v-if="destinyPoints > 0"
       v-model="destinyPoints"
-      @exchange="handleExchange" />
+      @exchange="handleExchange"
+    />
   </div>
 
-  <p class="points-hint">
-    💡 剩余转生点数: {{ availablePoints }}
-  </p>
+  <p class="points-hint">💡 剩余转生点数: {{ availablePoints }}</p>
 </div>
 ```
 
@@ -556,15 +578,12 @@ const Ue = [
 
       <!-- 保存区 -->
       <div class="save-row" v-if="mode === 'manage'">
-        <input v-model="presetName" placeholder="输入预设名称…"
-               @keyup.enter="handleSave" />
+        <input v-model="presetName" placeholder="输入预设名称…" @keyup.enter="handleSave" />
         <button @click="handleSave" :disabled="!presetName.trim()">
           {{ isOverwrite ? '确认覆盖' : '保存当前配置' }}
         </button>
         <!-- 重名警告 -->
-        <p v-if="nameExists && !isOverwrite" class="warning-text">
-          预设名已存在，再次点击确认覆盖
-        </p>
+        <p v-if="nameExists && !isOverwrite" class="warning-text">预设名已存在，再次点击确认覆盖</p>
       </div>
 
       <!-- 预设列表 -->
@@ -573,10 +592,8 @@ const Ue = [
           <div class="preset-main">
             <span class="preset-name">{{ p.name }}</span>
             <span class="preset-meta">
-              {{ p.character?.name || '未命名' }}
-              · Lv.{{ p.character?.level || 1 }}
-              · 装{{ p.equipments?.length || 0 }}
-              技{{ p.skills?.length || 0 }}
+              {{ p.character?.name || '未命名' }} · Lv.{{ p.character?.level || 1 }} · 装{{
+              p.equipments?.length || 0 }} 技{{ p.skills?.length || 0 }}
             </span>
             <span class="preset-time">{{ formatTime(p.updatedAt) }}</span>
           </div>
@@ -596,17 +613,20 @@ const Ue = [
       <!-- 底部操作 -->
       <div class="modal-footer">
         <button @click="handleImport" class="btn-import">📥 导入预设文件</button>
-        <button @click="handleExportAll" class="btn-export-all"
-                :disabled="!presets.length">📤 全部导出</button>
+        <button @click="handleExportAll" class="btn-export-all" :disabled="!presets.length">
+          📤 全部导出
+        </button>
         <button @click="$emit('close')" class="btn-cancel">关闭</button>
       </div>
 
       <!-- 导入冲突弹窗 (子 Modal) -->
-      <ConfirmModal v-if="conflictData"
+      <ConfirmModal
+        v-if="conflictData"
         :title="'导入冲突'"
         :message="`预设 '${conflictData.name}' 已存在，是否覆盖？`"
         @confirm="resolveConflict('overwrite')"
-        @cancel="resolveConflict('skip')" />
+        @cancel="resolveConflict('skip')"
+      />
     </div>
   </div>
 </Teleport>
@@ -622,113 +642,150 @@ const Ue = [
 defineStore('character', () => {
   // ===== 状态 =====
   const character = ref({
-    name: '', gender: '', customGender: '',
-    age: 18, race: '', customRace: '',
-    identity: '', customIdentity: '',
-    startLocation: '', customStartLocation: '',
+    name: '',
+    gender: '',
+    customGender: '',
+    age: 18,
+    race: '',
+    customRace: '',
+    identity: '',
+    customIdentity: '',
+    startLocation: '',
+    customStartLocation: '',
     level: 1,
-    basePoints:      { 力量:0, 敏捷:0, 体质:0, 智力:0, 精神:0 },
-    attributePoints: { 力量:0, 敏捷:0, 体质:0, 智力:0, 精神:0 },
+    basePoints: { 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 },
+    attributePoints: { 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 },
     reincarnationPoints: 1000,
     destinyPoints: 0,
     money: 0,
-  })
+  });
 
-  const selectedEquipments = ref([])
-  const selectedItems      = ref([])
-  const selectedSkills     = ref([])
-  const selectedPartners   = ref([])
-  const selectedBackground = ref(null)
+  const selectedEquipments = ref([]);
+  const selectedItems = ref([]);
+  const selectedSkills = ref([]);
+  const selectedPartners = ref([]);
+  const selectedBackground = ref(null);
 
   // ===== 核心 Computed =====
   // 点数计算
-  const consumedPoints = computed(() =>
-    raceCost(character.value.race) +
-    identityCost(character.value.identity) +
-    sumCost(selectedEquipments.value) +
-    sumCost(selectedItems.value) +
-    sumCost(selectedSkills.value) +
-    sumCost(selectedPartners.value) +
-    (selectedBackground.value?.cost || 0) +
-    Math.floor(character.value.money / 100) +
-    Math.floor(character.value.destinyPoints / 2)
-  )
+  const consumedPoints = computed(
+    () =>
+      raceCost(character.value.race) +
+      identityCost(character.value.identity) +
+      sumCost(selectedEquipments.value) +
+      sumCost(selectedItems.value) +
+      sumCost(selectedSkills.value) +
+      sumCost(selectedPartners.value) +
+      (selectedBackground.value?.cost || 0) +
+      Math.floor(character.value.money / 100) +
+      Math.floor(character.value.destinyPoints / 2),
+  );
 
   // BP (基础点数) — 固定 25，每属性上限 6
-  const maxBP = 25
-  const usedBP = computed(() => sum(character.value.basePoints))
-  const remainingBP = computed(() => maxBP - usedBP.value)
+  const maxBP = 25;
+  const usedBP = computed(() => sum(character.value.basePoints));
+  const remainingBP = computed(() => maxBP - usedBP.value);
 
   // AP (额外点数) — 随等级变化 = max(0, level-1)
-  const maxAP = computed(() => Math.max(0, character.value.level - 1))
-  const usedAP = computed(() => sum(character.value.attributePoints))
-  const remainingAP = computed(() => maxAP.value - usedAP.value)
+  const maxAP = computed(() => Math.max(0, character.value.level - 1));
+  const usedAP = computed(() => sum(character.value.attributePoints));
+  const remainingAP = computed(() => maxAP.value - usedAP.value);
 
   // 最终属性 = 基础 + 层级加成 + 额外
-  const tier = computed(() => w(character.value.level))
-  const tierBonus = computed(() => tier.value)  // 0-6
+  const tier = computed(() => w(character.value.level));
+  const tierBonus = computed(() => tier.value); // 0-6
   const finalAttributes = computed(() => {
-    const attrs = {}
-    for (const key of ['力量','敏捷','体质','智力','精神']) {
-      attrs[key] = character.value.basePoints[key] + tierBonus.value + character.value.attributePoints[key]
+    const attrs = {};
+    for (const key of ['力量', '敏捷', '体质', '智力', '精神']) {
+      attrs[key] =
+        character.value.basePoints[key] + tierBonus.value + character.value.attributePoints[key];
     }
-    return attrs
-  })
+    return attrs;
+  });
 
   // ===== 核心 Watchers =====
   // Level 变化 → 重置 attributePoints (flush: 'sync')
-  watch(() => character.value.level, () => {
-    character.value.attributePoints = { 力量:0, 敏捷:0, 体质:0, 智力:0, 精神:0 }
-  })
+  watch(
+    () => character.value.level,
+    () => {
+      character.value.attributePoints = { 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 };
+    },
+  );
 
   // Race 变化 → 移除不属于该种族的技能
-  watch(() => character.value.race, (newRace) => {
-    selectedSkills.value = selectedSkills.value.filter(s =>
-      !s.requiredRace || s.requiredRace === newRace ||
-      DEFAULT_UNIVERSAL_SKILLS.includes(s.id)
-    )
-  })
+  watch(
+    () => character.value.race,
+    (newRace) => {
+      selectedSkills.value = selectedSkills.value.filter(
+        (s) =>
+          !s.requiredRace || s.requiredRace === newRace || DEFAULT_UNIVERSAL_SKILLS.includes(s.id),
+      );
+    },
+  );
 
   // ===== Actions =====
-  function updateCharacterField(key, value) { /* ... */ }
-  function addBasePoint(attr)     { /* 上限 6, 受 remainingBP 约束 */ }
-  function removeBasePoint(attr)  { /* 下限 0 */ }
-  function addAttributePoint(attr)  { /* 受 remainingAP 约束 */ }
-  function removeAttributePoint(attr) { /* 下限 0 */ }
+  function updateCharacterField(key, value) {
+    /* ... */
+  }
+  function addBasePoint(attr) {
+    /* 上限 6, 受 remainingBP 约束 */
+  }
+  function removeBasePoint(attr) {
+    /* 下限 0 */
+  }
+  function addAttributePoint(attr) {
+    /* 受 remainingAP 约束 */
+  }
+  function removeAttributePoint(attr) {
+    /* 下限 0 */
+  }
   function rollInitialPoints() {
     // 三次方随机: floor(random()^3 * 9000 + 1000)
     // 测试名直接给 888888
   }
-  function resetCharacter() { /* 重置所有状态 */ }
+  function resetCharacter() {
+    /* 重置所有状态 */
+  }
   // ... 装备/道具/技能/伙伴 CRUD
-})
+});
 ```
 
 ### 5.2 `customContent` Store (自定义内容)
 
 ```javascript
 defineStore('customContent', () => {
-  const customBackgroundDescription = ref('')
-  const editingCustomItemName = ref('')
-  const editingCustomPartnerName = ref('')
+  const customBackgroundDescription = ref('');
+  const editingCustomItemName = ref('');
+  const editingCustomPartnerName = ref('');
 
   const customItemForm = ref({
-    categoryType: 'equipment',  // 'equipment' | 'item' | 'skill'
-    customItemType: '',         // 子类型
-    itemName: '', itemRarity: 'common',
-    itemTag: [], itemEffect: {},
-    itemDescription: '', itemConsume: '', itemQuantity: 1,
-  })
+    categoryType: 'equipment', // 'equipment' | 'item' | 'skill'
+    customItemType: '', // 子类型
+    itemName: '',
+    itemRarity: 'common',
+    itemTag: [],
+    itemEffect: {},
+    itemDescription: '',
+    itemConsume: '',
+    itemQuantity: 1,
+  });
 
   const customPartnerForm = ref({
-    name: '', level: 1, race: '', identity: [],
-    career: [], personality: '',
-    attributes: { 力量:0, 敏捷:0, 体质:0, 智力:0, 精神:0 },
-    skills: [], equipment: [],
-    stairway: '', contract: '', affinity: 0,
+    name: '',
+    level: 1,
+    race: '',
+    identity: [],
+    career: [],
+    personality: '',
+    attributes: { 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 },
+    skills: [],
+    equipment: [],
+    stairway: '',
+    contract: '',
+    affinity: 0,
     // ... 20+ 字段
-  })
-})
+  });
+});
 ```
 
 ---
@@ -740,18 +797,26 @@ defineStore('customContent', () => {
 ```javascript
 // 等级 → 层级索引 (0-6)
 function w(level) {
-  if (level <= 4)  return 0;   // T1 第一层级
-  if (level <= 8)  return 1;   // T2
-  if (level <= 12) return 2;   // T3
-  if (level <= 16) return 3;   // T4
-  if (level <= 20) return 4;   // T5
-  if (level <= 24) return 5;   // T6
-  return 6;                    // T7 第七层级
+  if (level <= 4) return 0; // T1 第一层级
+  if (level <= 8) return 1; // T2
+  if (level <= 12) return 2; // T3
+  if (level <= 16) return 3; // T4
+  if (level <= 20) return 4; // T5
+  if (level <= 24) return 5; // T6
+  return 6; // T7 第七层级
 }
 
 // 层级 → 中文名
 function S(level) {
-  const tiers = ['第一层级','第二层级','第三层级','第四层级','第五层级','第六层级','第七层级'];
+  const tiers = [
+    '第一层级',
+    '第二层级',
+    '第三层级',
+    '第四层级',
+    '第五层级',
+    '第六层级',
+    '第七层级',
+  ];
   return tiers[w(level)];
 }
 ```
@@ -760,18 +825,24 @@ function S(level) {
 
 ```javascript
 const RARITY_LEVELS = [
-  { key: 'common',    label: '普通', color: '#9e9e9e' },
-  { key: 'uncommon',  label: '优良', color: '#4caf50' },
-  { key: 'rare',      label: '稀有', color: '#2196f3' },
-  { key: 'epic',      label: '史诗', color: '#9c27b0' },
+  { key: 'common', label: '普通', color: '#9e9e9e' },
+  { key: 'uncommon', label: '优良', color: '#4caf50' },
+  { key: 'rare', label: '稀有', color: '#2196f3' },
+  { key: 'epic', label: '史诗', color: '#9c27b0' },
   { key: 'legendary', label: '传说', color: '#ff9800' },
-  { key: 'mythic',    label: '神话', color: '#f44336' },
-  { key: 'only',      label: '唯一', color: '#00bcd4' },
+  { key: 'mythic', label: '神话', color: '#f44336' },
+  { key: 'only', label: '唯一', color: '#00bcd4' },
 ];
 
-function rarityLabel(key) { return RARITY_LEVELS.find(r => r.key === key)?.label || key; }
-function rarityColor(key) { return RARITY_LEVELS.find(r => r.key === key)?.color || '#999'; }
-function rarityIndex(key) { return RARITY_LEVELS.findIndex(r => r.key === key); }
+function rarityLabel(key) {
+  return RARITY_LEVELS.find((r) => r.key === key)?.label || key;
+}
+function rarityColor(key) {
+  return RARITY_LEVELS.find((r) => r.key === key)?.color || '#999';
+}
+function rarityIndex(key) {
+  return RARITY_LEVELS.findIndex((r) => r.key === key);
+}
 ```
 
 ### 6.3 转生点数随机
@@ -783,7 +854,7 @@ function rollInitialPoints() {
   character.value.reincarnationPoints = roll;
 
   // 测试/开发名 → 直接给满
-  if (['测试','test','debug'].some(k => character.value.name.toLowerCase().includes(k))) {
+  if (['测试', 'test', 'debug'].some((k) => character.value.name.toLowerCase().includes(k))) {
     character.value.reincarnationPoints = 888888;
   }
 }
@@ -797,7 +868,7 @@ function createSelectionValidator(sourceRef, costFn) {
 
   return {
     isSelected(item) {
-      return sourceRef.value.some(s => s.name === item.name || s.id === item.id);
+      return sourceRef.value.some((s) => s.name === item.name || s.id === item.id);
     },
     canSelect(item) {
       return availablePoints.value >= costFn(item) && !this.isSelected(item);
@@ -816,11 +887,11 @@ function createSelectionValidator(sourceRef, costFn) {
 ```javascript
 function meetsRequirements(background) {
   // 地点使用前缀匹配 (层级匹配: "索伦蒂斯王国-王都" startsWith "索伦蒂斯王国")
-  const raceMatch     = !background.requiredRace ||
-    character.value.race === background.requiredRace;
-  const identityMatch = !background.requiredIdentity ||
-    character.value.identity === background.requiredIdentity;
-  const locationMatch = !background.requiredLocation ||
+  const raceMatch = !background.requiredRace || character.value.race === background.requiredRace;
+  const identityMatch =
+    !background.requiredIdentity || character.value.identity === background.requiredIdentity;
+  const locationMatch =
+    !background.requiredLocation ||
     character.value.startLocation === background.requiredLocation ||
     character.value.startLocation.startsWith(background.requiredLocation + '-');
 
@@ -830,10 +901,10 @@ function meetsRequirements(background) {
 
 ### 6.6 RequirementBadge 匹配模式
 
-| mode | 匹配方式 | 示例 |
-|------|---------|------|
-| `race` | 精确匹配 | `requiredRace: '人族'` → `current: '人族'` ✅ |
-| `identity` | 精确匹配 | `requiredIdentity: '冒险者'` → `current: '冒险者'` ✅ |
+| mode       | 匹配方式 | 示例                                                                   |
+| ---------- | -------- | ---------------------------------------------------------------------- |
+| `race`     | 精确匹配 | `requiredRace: '人族'` → `current: '人族'` ✅                          |
+| `identity` | 精确匹配 | `requiredIdentity: '冒险者'` → `current: '冒险者'` ✅                  |
 | `location` | 前缀匹配 | `requiredLocation: '索伦蒂斯王国'` → `current: '索伦蒂斯王国-王都'` ✅ |
 
 ### 6.7 深度模板替换 (用于背景描述)
@@ -863,28 +934,30 @@ function deepSubstituteParams(data) {
 
 原版从 GitHub jsDelivr CDN 加载 5 个 JSON 文件 (JSON5 格式，含注释):
 
-| 文件 | 内容 | 加载时机 |
-|------|------|----------|
-| `baseInfo.json` | 性别/种族费/身份费/起始地点 | 模块初始化 (立即) |
-| `equipments.json` | ~28 件装备 | Step 2 挂载时 (懒加载单例) |
-| `items.json` | ~16 种道具 | Step 2 挂载时 (懒加载单例) |
-| `skills.json` | ~20 个技能 | Step 2 挂载时 (懒加载单例) |
-| `backgrounds.json` | ~6 个背景 | Step 3 挂载时 |
-| `partners.json` | 伙伴数据 | Step 3 挂载时 |
+| 文件               | 内容                        | 加载时机                   |
+| ------------------ | --------------------------- | -------------------------- |
+| `baseInfo.json`    | 性别/种族费/身份费/起始地点 | 模块初始化 (立即)          |
+| `equipments.json`  | ~28 件装备                  | Step 2 挂载时 (懒加载单例) |
+| `items.json`       | ~16 种道具                  | Step 2 挂载时 (懒加载单例) |
+| `skills.json`      | ~20 个技能                  | Step 2 挂载时 (懒加载单例) |
+| `backgrounds.json` | ~6 个背景                   | Step 3 挂载时              |
+| `partners.json`    | 伙伴数据                    | Step 3 挂载时              |
 
 ### 7.2 加载模式
 
 ```javascript
 // IIFE 异步加载 + 懒加载单例
-const defaultData = { /* 内联默认值 */ };
+const defaultData = {/* 内联默认值 */};
 let cachedData = null;
 
-function getData() { return cachedData || defaultData; }
+function getData() {
+  return cachedData || defaultData;
+}
 
-!(async function() {
+!(async function () {
   const response = await fetch(CDN_URL);
   const text = await response.text();
-  const remote = JSON5.parse(text);  // 支持注释的 JSON
+  const remote = JSON5.parse(text); // 支持注释的 JSON
   cachedData = deepMerge(defaultData, remote);
 })();
 ```
@@ -930,12 +1003,12 @@ function savePresets(data) {
       "name": "我的预设名",
       "createdAt": 1718000000000,
       "updatedAt": 1718100000000,
-      "character": { /* character store 完整状态 (klona 深克隆) */ },
-      "equipments": [ /* 装备数组 */ ],
-      "items": [ /* 道具数组 */ ],
-      "skills": [ /* 技能数组 */ ],
-      "partners": [ /* 伙伴数组 */ ],
-      "background": { /* 背景对象或 null */ }
+      "character": {/* character store 完整状态 (klona 深克隆) */},
+      "equipments": [/* 装备数组 */],
+      "items": [/* 道具数组 */],
+      "skills": [/* 技能数组 */],
+      "partners": [/* 伙伴数组 */],
+      "background": {/* 背景对象或 null */}
     }
   ],
   "lastUsedPreset": "上次使用的预设名"
@@ -944,14 +1017,14 @@ function savePresets(data) {
 
 ### 8.3 操作一览
 
-| 操作 | 关键逻辑 |
-|------|---------|
-| 保存 | 同名检查 → 二次点击确认覆盖 → `klona` 深克隆所有状态 → 写入变量 |
-| 加载 | 读取预设 → 恢复 character / equipments / items / skills / partners / background |
-| 导出单个 | `JSON.stringify(preset)` → Blob → `URL.createObjectURL` → `<a download>` |
-| 全部导出 | 同上，导出整个 `{ presets }` 对象 |
-| 导入 | FileReader → JSON5.parse → 验证结构 → 冲突检查 (同名: 跳过/覆盖) → 合并 |
-| 删除 | 二次确认 → `splice(index, 1)` → 写入 |
+| 操作     | 关键逻辑                                                                        |
+| -------- | ------------------------------------------------------------------------------- |
+| 保存     | 同名检查 → 二次点击确认覆盖 → `klona` 深克隆所有状态 → 写入变量                 |
+| 加载     | 读取预设 → 恢复 character / equipments / items / skills / partners / background |
+| 导出单个 | `JSON.stringify(preset)` → Blob → `URL.createObjectURL` → `<a download>`        |
+| 全部导出 | 同上，导出整个 `{ presets }` 对象                                               |
+| 导入     | FileReader → JSON5.parse → 验证结构 → 冲突检查 (同名: 跳过/覆盖) → 合并         |
+| 删除     | 二次确认 → `splice(index, 1)` → 写入                                            |
 
 ### 8.4 预设自动匹配 (踏上旅程前)
 
@@ -959,13 +1032,14 @@ function savePresets(data) {
 function findMatchingPreset(character, selections, background) {
   // 遍历所有 presets，用 _.isEqual 深度比对
   // character + equipments + items + skills + partners + background
-  return presets.find(p =>
-    _.isEqual(p.character, character) &&
-    _.isEqual(p.equipments, selections.equipments) &&
-    _.isEqual(p.items, selections.items) &&
-    _.isEqual(p.skills, selections.skills) &&
-    _.isEqual(p.partners, selections.partners) &&
-    _.isEqual(p.background, background)
+  return presets.find(
+    (p) =>
+      _.isEqual(p.character, character) &&
+      _.isEqual(p.equipments, selections.equipments) &&
+      _.isEqual(p.items, selections.items) &&
+      _.isEqual(p.skills, selections.skills) &&
+      _.isEqual(p.partners, selections.partners) &&
+      _.isEqual(p.background, background),
   );
 }
 ```
@@ -1044,13 +1118,13 @@ function findMatchingPreset(character, selections, background) {
 
 ### 9.2 关键集成点 (Phase 7d 需替换)
 
-| 原版 | Phase 7d 替代方案 |
-|------|------------------|
-| `Mvu.getMvuData` / `Mvu.replaceMvuData` | `StateManager.commitChatState()` |
+| 原版                                       | Phase 7d 替代方案                                    |
+| ------------------------------------------ | ---------------------------------------------------- |
+| `Mvu.getMvuData` / `Mvu.replaceMvuData`    | `StateManager.commitChatState()`                     |
 | `getVariables` / `insertOrAssignVariables` | `database.ts` → `createPresets` 表 (Dexie/IndexedDB) |
-| `createChatMessages` + `triggerSlash` | `AgentOrchestrator.run()` |
-| `SillyTavern.substituteParams` | 本地实现的模板引擎 |
-| `toastr.*` | `ToastContainer` (已有) |
+| `createChatMessages` + `triggerSlash`      | `AgentOrchestrator.run()`                            |
+| `SillyTavern.substituteParams`             | 本地实现的模板引擎                                   |
+| `toastr.*`                                 | `ToastContainer` (已有)                              |
 
 ---
 
@@ -1086,14 +1160,19 @@ function findMatchingPreset(character, selections, background) {
   --font-body: 'Segoe UI', 'Microsoft YaHei', sans-serif;
   --font-mono: 'Monaco', 'Menlo', monospace;
 
-  --spacing-xs: 4px;   --spacing-sm: 8px;   --spacing-md: 12px;
-  --spacing-lg: 16px;  --spacing-xl: 24px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
 
-  --radius-sm: 2px;  --radius-md: 4px;  --radius-lg: 8px;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
 
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.1);
-  --shadow-md: 0 2px 8px rgba(0,0,0,0.12);
-  --shadow-lg: 0 4px 16px rgba(0,0,0,0.15);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.15);
 
   --transition-fast: 0.15s ease-in-out;
   --transition-normal: 0.3s ease-in-out;
@@ -1102,28 +1181,28 @@ function findMatchingPreset(character, selections, background) {
 
 ### 10.3 响应式断点
 
-| 断点 | 行为 |
-|------|------|
+| 断点  | 行为                                      |
+| ----- | ----------------------------------------- |
 | 768px | 单列布局，更大触摸目标 (min-height: 44px) |
-| 480px | 全宽按钮，属性表格折叠为标签行 |
+| 480px | 全宽按钮，属性表格折叠为标签行            |
 
 ---
 
 ## 十一、原版 vs 当前实现 关键差异
 
-| 维度 | 原版 (custom_start_index.html) | 当前 Phase 7d 实现 |
-|------|-------------------------------|---------------------|
-| 步骤数 | **4 步** (信息/选择/背景/确认) | **7 步** (难度/基础/核心/选择/背景/剧情/确认) |
-| 框架 | Vue 3 + Pinia + Router (CDN 注入) | Vue 3 + Pinia + Router (Vite 本地编译) |
-| CSS | 单 `<style>` 块, scoped, 暖色羊皮纸 | 主题 CSS 变量系统 (10 主题) |
-| 表单组件 | 10 个自定义 Form* 组件 | 已有 FormInput/FormSelect/FormStepper/FormCascader |
-| Step 2 布局 | `CategorySelectionLayout` (左侧分类+右侧内容) | `CategoryTabs` + `QualityFilter` + `1fr 260px` grid |
-| 伙伴系统 | Step 3 完整伙伴系统 (PartnerList + CustomPartnerForm) | `PartnerWorldBookPanel` (占位 `<details>`) |
-| 预设存储 | ST character variables | IndexedDB `createPresets` 表 (database.ts v7) |
-| 提交方式 | MVU 变量 + `/trigger` 斜杠命令 | `AgentOrchestrator.run()` + 独立的开场提示词 |
-| 数据来源 | CDN JSON + JSON5 解析 | `start-catalog.ts` 内联常量 |
-| 类型检查 | 无 (纯 JS) | TypeScript |
-| 测试 | 无 | Vitest (待写) |
+| 维度        | 原版 (custom_start_index.html)                        | 当前 Phase 7d 实现                                  |
+| ----------- | ----------------------------------------------------- | --------------------------------------------------- |
+| 步骤数      | **4 步** (信息/选择/背景/确认)                        | **7 步** (难度/基础/核心/选择/背景/剧情/确认)       |
+| 框架        | Vue 3 + Pinia + Router (CDN 注入)                     | Vue 3 + Pinia + Router (Vite 本地编译)              |
+| CSS         | 单 `<style>` 块, scoped, 暖色羊皮纸                   | 主题 CSS 变量系统 (10 主题)                         |
+| 表单组件    | 10 个自定义 Form* 组件                                | 已有 FormInput/FormSelect/FormStepper/FormCascader  |
+| Step 2 布局 | `CategorySelectionLayout` (左侧分类+右侧内容)         | `CategoryTabs` + `QualityFilter` + `1fr 260px` grid |
+| 伙伴系统    | Step 3 完整伙伴系统 (PartnerList + CustomPartnerForm) | `PartnerWorldBookPanel` (占位 `<details>`)          |
+| 预设存储    | ST character variables                                | IndexedDB `createPresets` 表 (database.ts v7)       |
+| 提交方式    | MVU 变量 + `/trigger` 斜杠命令                        | `AgentOrchestrator.run()` + 独立的开场提示词        |
+| 数据来源    | CDN JSON + JSON5 解析                                 | `start-catalog.ts` 内联常量                         |
+| 类型检查    | 无 (纯 JS)                                            | TypeScript                                          |
+| 测试        | 无                                                    | Vitest (待写)                                       |
 
 ---
 
@@ -1157,4 +1236,4 @@ function findMatchingPreset(character, selections, background) {
 
 ---
 
-*文档结束。新 session 重构时请参考此文档了解原版页面架构，结合 `docs/phases/phase7d/current_state.md` 了解当前实现状态。*
+_文档结束。新 session 重构时请参考此文档了解原版页面架构，结合 `docs/phases/phase7d/current_state.md` 了解当前实现状态。_

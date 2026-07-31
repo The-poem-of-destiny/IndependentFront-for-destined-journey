@@ -6,50 +6,69 @@
  * 进度轮询的起停由外层 AudioSection 负责（分区级生命周期），本组件只管
  * 显示值与 seek 的交互语义。
  */
-import { ref, computed, onUnmounted } from 'vue'
-import { useAudioStore } from '../../../stores/audio-store'
-import { useSettingsStore } from '../../../stores/settings-store'
-import type { AudioTrack, AudioRepeatMode } from '@engine/types'
-import { fmtDuration } from './format'
+import { ref, computed, onUnmounted } from 'vue';
+import { useAudioStore } from '../../../stores/audio-store';
+import { useSettingsStore } from '../../../stores/settings-store';
+import type { AudioTrack, AudioRepeatMode } from '@engine/types';
+import { fmtDuration } from './format';
 
-const audio = useAudioStore()
-const settings = useSettingsStore()
+const audio = useAudioStore();
+const settings = useSettingsStore();
 
 /** 场景自动配乐开关（写进 settings-store，deep watch 自动持久化） */
 const sceneAutoPlay = computed({
   get: () => settings.settings.audioSceneAutoPlay !== false,
-  set: (v: boolean) => { settings.settings.audioSceneAutoPlay = v },
-})
+  set: (v: boolean) => {
+    settings.settings.audioSceneAutoPlay = v;
+  },
+});
 
 // ===== 通道 =====
 
-type ChannelKey = 'master' | 'music' | 'sfx'
+type ChannelKey = 'master' | 'music' | 'sfx';
 
 const channels = computed(() => [
-  { key: 'master' as ChannelKey, label: '主音量', volume: audio.state.masterVolume, muted: audio.state.masterMuted },
-  { key: 'music' as ChannelKey, label: '音乐', volume: audio.state.music.volume, muted: audio.state.music.muted },
-  { key: 'sfx' as ChannelKey, label: '音效', volume: audio.state.sfx.volume, muted: audio.state.sfx.muted },
-])
+  {
+    key: 'master' as ChannelKey,
+    label: '主音量',
+    volume: audio.state.masterVolume,
+    muted: audio.state.masterMuted,
+  },
+  {
+    key: 'music' as ChannelKey,
+    label: '音乐',
+    volume: audio.state.music.volume,
+    muted: audio.state.music.muted,
+  },
+  {
+    key: 'sfx' as ChannelKey,
+    label: '音效',
+    volume: audio.state.sfx.volume,
+    muted: audio.state.sfx.muted,
+  },
+]);
 
 function setVolume(key: ChannelKey, raw: string | number): void {
-  const v = Math.min(1, Math.max(0, Number(raw) / 100))
-  if (key === 'master') audio.setMasterVolume(v)
-  else audio.setChannelVolume(key, v)
+  const v = Math.min(1, Math.max(0, Number(raw) / 100));
+  if (key === 'master') audio.setMasterVolume(v);
+  else audio.setChannelVolume(key, v);
 }
 
 function toggleMute(key: ChannelKey, current: boolean): void {
-  if (key === 'master') audio.setMasterMuted(!current)
-  else audio.setChannelMuted(key, !current)
+  if (key === 'master') audio.setMasterMuted(!current);
+  else audio.setChannelMuted(key, !current);
 }
 
 // ===== 传输 =====
 
 const currentTrack = computed<AudioTrack | undefined>(() => {
-  const id = audio.state.music.trackId
-  return id ? audio.findTrack(id) : undefined
-})
+  const id = audio.state.music.trackId;
+  return id ? audio.findTrack(id) : undefined;
+});
 
-const durationSec = computed(() => audio.state.music.durationSec || currentTrack.value?.duration || 0)
+const durationSec = computed(
+  () => audio.state.music.durationSec || currentTrack.value?.duration || 0,
+);
 
 // ── 进度滑块：提交式 seek ────────────────────────────────
 // store 以 ~4Hz 轮询回写 positionSec。若滑块直接绑定它，拖动时轮询会把把手
@@ -63,79 +82,79 @@ const durationSec = computed(() => audio.state.music.durationSec || currentTrack
 // 轮询值，随后无论焦点在哪都放开跟随真实播放位置。
 
 /** 提交后的安定窗口(ms)：够盖住 1-2 拍 250ms 轮询，短到用户察觉不到 */
-const SEEK_SETTLE_MS = 500
+const SEEK_SETTLE_MS = 500;
 
-const seekDragging = ref(false)
-const seekSettling = ref(false)
-const seekDraft = ref(0)
+const seekDragging = ref(false);
+const seekSettling = ref(false);
+const seekDraft = ref(0);
 
-let seekSettleTimer: ReturnType<typeof setTimeout> | null = null
+let seekSettleTimer: ReturnType<typeof setTimeout> | null = null;
 
 function clearSeekSettle(): void {
   if (seekSettleTimer !== null) {
-    clearTimeout(seekSettleTimer)
-    seekSettleTimer = null
+    clearTimeout(seekSettleTimer);
+    seekSettleTimer = null;
   }
-  seekSettling.value = false
+  seekSettling.value = false;
 }
 
 /** 用户正在操纵进度条（或刚松手） → 冻结轮询对显示值的写入 */
-const seekHeld = computed(() => seekDragging.value || seekSettling.value)
+const seekHeld = computed(() => seekDragging.value || seekSettling.value);
 
 /** 进度条把手与时间文字共用的显示值，保证两者永远一致 */
-const displayPositionSec = computed(() => (seekHeld.value ? seekDraft.value : audio.positionSec))
+const displayPositionSec = computed(() => (seekHeld.value ? seekDraft.value : audio.positionSec));
 
 /** 拖动过程中只更新草稿，不真的 seek */
 function onSeekInput(raw: string | number): void {
-  clearSeekSettle() // 新交互作废上一次的安定窗口
-  seekDragging.value = true
-  seekDraft.value = Number(raw)
+  clearSeekSettle(); // 新交互作废上一次的安定窗口
+  seekDragging.value = true;
+  seekDraft.value = Number(raw);
 }
 
 /** 提交才 seek —— 松手、方向键、Home/End 都会触发 change */
 function onSeekCommit(raw: string | number): void {
-  const sec = Number(raw)
-  clearSeekSettle()
-  seekDraft.value = sec
-  seekDragging.value = false
-  audio.seek(sec)
-  seekSettling.value = true
+  const sec = Number(raw);
+  clearSeekSettle();
+  seekDraft.value = sec;
+  seekDragging.value = false;
+  audio.seek(sec);
+  seekSettling.value = true;
   seekSettleTimer = setTimeout(() => {
-    seekSettleTimer = null
-    seekSettling.value = false
-  }, SEEK_SETTLE_MS)
+    seekSettleTimer = null;
+    seekSettling.value = false;
+  }, SEEK_SETTLE_MS);
 }
 
 /** 松手时值没变则不会有 change —— 兜住这条路径，别把冻结态留在原地 */
 function onSeekPointerUp(): void {
-  if (!seekDragging.value) return
-  seekDragging.value = false
-  clearSeekSettle()
+  if (!seekDragging.value) return;
+  seekDragging.value = false;
+  clearSeekSettle();
 }
 
 /** 0..1 —— 进度条用 scaleX，绝不过渡 width（design.md §1 禁令） */
 const progressRatio = computed(() => {
-  const d = durationSec.value
-  if (d <= 0) return 0
-  return Math.min(1, Math.max(0, displayPositionSec.value / d))
-})
+  const d = durationSec.value;
+  if (d <= 0) return 0;
+  return Math.min(1, Math.max(0, displayPositionSec.value / d));
+});
 
-const isPlaying = computed(() => audio.state.music.status === 'playing')
+const isPlaying = computed(() => audio.state.music.status === 'playing');
 
 const repeatLabel = computed(() => {
-  const map: Record<AudioRepeatMode, string> = { off: '不循环', all: '列表循环', one: '单曲循环' }
-  return map[audio.state.music.repeat] ?? '列表循环'
-})
+  const map: Record<AudioRepeatMode, string> = { off: '不循环', all: '列表循环', one: '单曲循环' };
+  return map[audio.state.music.repeat] ?? '列表循环';
+});
 
 function cycleRepeat(): void {
-  const order: AudioRepeatMode[] = ['off', 'all', 'one']
-  const i = order.indexOf(audio.state.music.repeat)
-  audio.setRepeat(order[(i + 1) % order.length])
+  const order: AudioRepeatMode[] = ['off', 'all', 'one'];
+  const i = order.indexOf(audio.state.music.repeat);
+  audio.setRepeat(order[(i + 1) % order.length]);
 }
 
 onUnmounted(() => {
-  clearSeekSettle() // 别让安定计时器烧到已拆掉的组件上
-})
+  clearSeekSettle(); // 别让安定计时器烧到已拆掉的组件上
+});
 </script>
 
 <template>
@@ -149,7 +168,13 @@ onUnmounted(() => {
       :aria-label="ch.muted ? `取消静音：${ch.label}` : `静音：${ch.label}`"
       :aria-pressed="ch.muted"
       @click="toggleMute(ch.key, ch.muted)"
-    ><i class="fa-solid" :class="ch.muted ? 'fa-volume-xmark' : 'fa-volume-high'" aria-hidden="true" /></button>
+    >
+      <i
+        class="fa-solid"
+        :class="ch.muted ? 'fa-volume-xmark' : 'fa-volume-high'"
+        aria-hidden="true"
+      />
+    </button>
     <div class="slider" :class="{ 'slider-off': ch.muted }">
       <div class="slider-track">
         <div class="slider-fill" :style="{ transform: `scaleX(${ch.volume})` }" />
@@ -195,7 +220,9 @@ onUnmounted(() => {
       />
     </div>
     <div class="transport-row">
-      <span class="time-text">{{ fmtDuration(displayPositionSec) }} / {{ fmtDuration(durationSec) }}</span>
+      <span class="time-text"
+        >{{ fmtDuration(displayPositionSec) }} / {{ fmtDuration(durationSec) }}</span
+      >
       <div class="transport-btns">
         <button class="icon-btn" aria-label="上一曲" @click="audio.prev()">
           <i class="fa-solid fa-backward-step" aria-hidden="true" />
@@ -211,14 +238,18 @@ onUnmounted(() => {
           :class="{ 'chip-on': audio.state.music.repeat !== 'off' }"
           :aria-label="`循环模式：${repeatLabel}`"
           @click="cycleRepeat()"
-        ><i class="fa-solid fa-repeat" aria-hidden="true" /> {{ repeatLabel }}</button>
+        >
+          <i class="fa-solid fa-repeat" aria-hidden="true" /> {{ repeatLabel }}
+        </button>
         <button
           class="chip-btn"
           :class="{ 'chip-on': audio.state.music.shuffle }"
           :aria-pressed="audio.state.music.shuffle"
           aria-label="随机播放"
           @click="audio.setShuffle(!audio.state.music.shuffle)"
-        ><i class="fa-solid fa-shuffle" aria-hidden="true" /> 随机</button>
+        >
+          <i class="fa-solid fa-shuffle" aria-hidden="true" /> 随机
+        </button>
         <button
           class="chip-btn"
           :class="{ 'chip-on': sceneAutoPlay }"
@@ -226,13 +257,17 @@ onUnmounted(() => {
           aria-label="进入新地点时自动换背景音乐"
           title="进入新地点时，按地点/人物/情绪/情境自动挑一首 BGM"
           @click="sceneAutoPlay = !sceneAutoPlay"
-        ><i class="fa-solid fa-location-dot" aria-hidden="true" /> 场景配乐</button>
+        >
+          <i class="fa-solid fa-location-dot" aria-hidden="true" /> 场景配乐
+        </button>
       </div>
     </div>
     <p class="hint-text">
-      {{ sceneAutoPlay
-        ? '进入新地点时会自动换背景音乐；曲库里没有合适的曲子时保持当前播放，不会突然静音。'
-        : '已关闭：地点变化不再自动换歌，音乐完全由你手动控制。' }}
+      {{
+        sceneAutoPlay
+          ? '进入新地点时会自动换背景音乐；曲库里没有合适的曲子时保持当前播放，不会突然静音。'
+          : '已关闭：地点变化不再自动换歌，音乐完全由你手动控制。'
+      }}
     </p>
     <p v-if="!audio.state.unlocked" class="hint-text">浏览器需要一次点击才能开始播放。</p>
   </div>
@@ -457,7 +492,9 @@ onUnmounted(() => {
   font-family: inherit;
   font-size: 0.8rem;
   cursor: pointer;
-  transition: background var(--theme-transition-fast), color var(--theme-transition-fast),
+  transition:
+    background var(--theme-transition-fast),
+    color var(--theme-transition-fast),
     border-color var(--theme-transition-fast);
 }
 /* 图标字体的视觉重量与 emoji 不同，单独给一档字号找回平衡（按钮尺寸不变） */
@@ -486,7 +523,9 @@ onUnmounted(() => {
   font-family: inherit;
   font-size: 0.75rem;
   cursor: pointer;
-  transition: background var(--theme-transition-fast), color var(--theme-transition-fast),
+  transition:
+    background var(--theme-transition-fast),
+    color var(--theme-transition-fast),
     border-color var(--theme-transition-fast);
 }
 .chip-btn i {

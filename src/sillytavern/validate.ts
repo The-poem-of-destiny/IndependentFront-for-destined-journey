@@ -11,8 +11,12 @@
  */
 
 import type {
-  CharacterState, StatusEffect, Skill, InventoryItem,
-  VarsPatch, StatePatch,
+  CharacterState,
+  StatusEffect,
+  Skill,
+  InventoryItem,
+  VarsPatch,
+  StatePatch,
 } from './types';
 
 // ========== 数值约束 ==========

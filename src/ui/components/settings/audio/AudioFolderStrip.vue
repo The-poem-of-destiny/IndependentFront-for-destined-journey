@@ -6,18 +6,18 @@
  * File System Access 的一切细节都在 store 与 audio-folder.ts 里，本组件只
  * 负责「说清现在是哪种状态、下一步该点哪个按钮」。
  */
-import { computed, inject } from 'vue'
-import { useAudioStore } from '../../../stores/audio-store'
-import { useUIStore } from '../../../stores/ui-store'
-import AppButton from '../../shared/AppButton.vue'
-import { audioDialogsKey } from './dialogs'
+import { computed, inject } from 'vue';
+import { useAudioStore } from '../../../stores/audio-store';
+import { useUIStore } from '../../../stores/ui-store';
+import AppButton from '../../shared/AppButton.vue';
+import { audioDialogsKey } from './dialogs';
 
-const audio = useAudioStore()
-const ui = useUIStore()
-const dialogs = inject(audioDialogsKey)!
+const audio = useAudioStore();
+const ui = useUIStore();
+const dialogs = inject(audioDialogsKey)!;
 
 /** 已收录在曲库里的「磁盘文件」曲目数（含暂时失联的） */
-const fileTrackCount = computed(() => audio.tracks.filter((t) => t.source === 'file').length)
+const fileTrackCount = computed(() => audio.tracks.filter((t) => t.source === 'file').length);
 
 /**
  * 选择文件夹。用户取消时 store 静默返回 false（不是错误，不弹 toast）；
@@ -25,43 +25,43 @@ const fileTrackCount = computed(() => audio.tracks.filter((t) => t.source === 'f
  */
 async function chooseFolder(): Promise<void> {
   try {
-    await audio.pickFolder()
+    await audio.pickFolder();
   } catch {
-    ui.toast('无法打开文件夹选择器，请检查浏览器权限设置。', 'error')
+    ui.toast('无法打开文件夹选择器，请检查浏览器权限设置。', 'error');
   }
 }
 
 async function grantFolder(): Promise<void> {
   try {
-    const ok = await audio.grantFolderPermission()
-    if (!ok) ui.toast('浏览器拒绝了音乐文件夹的访问授权。', 'warning')
+    const ok = await audio.grantFolderPermission();
+    if (!ok) ui.toast('浏览器拒绝了音乐文件夹的访问授权。', 'warning');
   } catch {
-    ui.toast('申请文件夹访问授权失败。', 'error')
+    ui.toast('申请文件夹访问授权失败。', 'error');
   }
 }
 
 async function rescanFolder(): Promise<void> {
   try {
-    await audio.rescanFolder()
+    await audio.rescanFolder();
   } catch {
-    ui.toast('扫描音乐文件夹失败。', 'error')
+    ui.toast('扫描音乐文件夹失败。', 'error');
   }
 }
 
 /** 取消关联只丢句柄；曲目行与播放列表位次都留着（addendum §forgetFolder） */
 async function forgetFolder(): Promise<void> {
-  const name = audio.folderName || '音乐文件夹'
+  const name = audio.folderName || '音乐文件夹';
   const ok = await dialogs.askConfirm({
     title: '取消关联音乐文件夹',
     message: `取消关联「${name}」？曲库记录与播放列表位次都会保留，重新选回同一个文件夹即可恢复播放。`,
     confirmLabel: '取消关联',
     danger: true,
-  })
-  if (!ok) return
+  });
+  if (!ok) return;
   try {
-    await audio.forgetFolder()
+    await audio.forgetFolder();
   } catch {
-    ui.toast('取消关联失败。', 'error')
+    ui.toast('取消关联失败。', 'error');
   }
 }
 </script>
@@ -125,7 +125,9 @@ async function forgetFolder(): Promise<void> {
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-md);
   margin-bottom: var(--theme-spacing-md);
-  transition: background var(--theme-transition-fast), border-color var(--theme-transition-fast);
+  transition:
+    background var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
 }
 .folder-strip-on {
   background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));

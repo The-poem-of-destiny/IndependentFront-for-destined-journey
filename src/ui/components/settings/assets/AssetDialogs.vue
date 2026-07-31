@@ -7,78 +7,84 @@
  * inject 后直接 await。Esc / 遮罩 / × 三条路都由 AppModal 兜到 update:open，
  * 统一收进 closeXxx 的唯一出口，保证 Promise 只兑现一次。
  */
-import { ref, computed, nextTick, onUnmounted } from 'vue'
-import AppButton from '../../shared/AppButton.vue'
-import AppModal from '../../shared/AppModal.vue'
-import type { AssetConfirmOptions, AssetPromptOptions } from './dialogs'
+import { ref, computed, nextTick, onUnmounted } from 'vue';
+import AppButton from '../../shared/AppButton.vue';
+import AppModal from '../../shared/AppModal.vue';
+import type { AssetConfirmOptions, AssetPromptOptions } from './dialogs';
 
 // ===== 确认 =====
 
-const confirmDialog = ref({ open: false, title: '', message: '', confirmLabel: '确认', danger: false })
-let confirmResolve: ((ok: boolean) => void) | null = null
+const confirmDialog = ref({
+  open: false,
+  title: '',
+  message: '',
+  confirmLabel: '确认',
+  danger: false,
+});
+let confirmResolve: ((ok: boolean) => void) | null = null;
 
 function askConfirm(opts: AssetConfirmOptions): Promise<boolean> {
-  closeConfirm(false) // 保险：清掉任何残留的上一轮
+  closeConfirm(false); // 保险：清掉任何残留的上一轮
   return new Promise<boolean>((resolve) => {
-    confirmResolve = resolve
+    confirmResolve = resolve;
     confirmDialog.value = {
       open: true,
       title: opts.title,
       message: opts.message,
       confirmLabel: opts.confirmLabel ?? '确认',
       danger: opts.danger ?? false,
-    }
-  })
+    };
+  });
 }
 
 /** 唯一出口 —— 取消 / Esc / 遮罩 / 确认 都走这里，保证 resolve 只兑现一次 */
 function closeConfirm(ok: boolean): void {
-  const resolve = confirmResolve
-  confirmResolve = null
-  confirmDialog.value.open = false
-  resolve?.(ok)
+  const resolve = confirmResolve;
+  confirmResolve = null;
+  confirmDialog.value.open = false;
+  resolve?.(ok);
 }
 
 // ===== 输入 =====
 
-const promptDialog = ref({ open: false, title: '', label: '', value: '' })
-const promptInput = ref<HTMLInputElement | null>(null)
-let promptResolve: ((value: string | null) => void) | null = null
+const promptDialog = ref({ open: false, title: '', label: '', value: '' });
+const promptInput = ref<HTMLInputElement | null>(null);
+let promptResolve: ((value: string | null) => void) | null = null;
 
 /** 解析为 trim 后的非空字符串；取消返回 null（对齐 window.prompt 的语义） */
 function askPrompt(opts: AssetPromptOptions): Promise<string | null> {
-  closePrompt(null)
+  closePrompt(null);
   return new Promise<string | null>((resolve) => {
-    promptResolve = resolve
-    promptDialog.value = { open: true, title: opts.title, label: opts.label, value: opts.value }
+    promptResolve = resolve;
+    promptDialog.value = { open: true, title: opts.title, label: opts.label, value: opts.value };
     void nextTick(() => {
-      promptInput.value?.focus()
-      promptInput.value?.select()
-    })
-  })
+      promptInput.value?.focus();
+      promptInput.value?.select();
+    });
+  });
 }
 
 function closePrompt(value: string | null): void {
-  const resolve = promptResolve
-  promptResolve = null
-  promptDialog.value.open = false
-  resolve?.(value)
+  const resolve = promptResolve;
+  promptResolve = null;
+  promptDialog.value.open = false;
+  resolve?.(value);
 }
 
-const promptValid = computed(() => promptDialog.value.value.trim().length > 0)
+const promptValid = computed(() => promptDialog.value.value.trim().length > 0);
 
 function submitPrompt(): void {
-  if (!promptValid.value) return
-  closePrompt(promptDialog.value.value.trim())
+  if (!promptValid.value) return;
+  closePrompt(promptDialog.value.value.trim());
 }
 
 onUnmounted(() => {
   // 卸载时把悬着的 Promise 收干净，避免调用方永远 await 不到
-  closeConfirm(false)
-  closePrompt(null)
-})
+  closeConfirm(false);
+  closePrompt(null);
+});
 
-defineExpose({ askConfirm, askPrompt })
+defineExpose({ askConfirm, askPrompt });
 </script>
 
 <template>
@@ -96,7 +102,8 @@ defineExpose({ askConfirm, askPrompt })
         :variant="confirmDialog.danger ? 'danger' : 'primary'"
         size="sm"
         @click="closeConfirm(true)"
-      >{{ confirmDialog.confirmLabel }}</AppButton>
+        >{{ confirmDialog.confirmLabel }}</AppButton
+      >
     </template>
   </AppModal>
 
@@ -119,7 +126,9 @@ defineExpose({ askConfirm, askPrompt })
     </label>
     <template #footer>
       <AppButton variant="ghost" size="sm" @click="closePrompt(null)">取消</AppButton>
-      <AppButton variant="primary" size="sm" :disabled="!promptValid" @click="submitPrompt">确定</AppButton>
+      <AppButton variant="primary" size="sm" :disabled="!promptValid" @click="submitPrompt"
+        >确定</AppButton
+      >
     </template>
   </AppModal>
 </template>

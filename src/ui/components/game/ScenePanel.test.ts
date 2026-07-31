@@ -5,28 +5,28 @@
  * 跟随 QuestsPanel focusQuest 回写模式（M5）: 先改内存 reactive，再 JSON 克隆落库。
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount as vtuMount, flushPromises } from '@vue/test-utils'
-import { reactive } from 'vue'
-import { createPinia, setActivePinia } from 'pinia'
-import ScenePanel from './ScenePanel.vue'
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mount as vtuMount, flushPromises } from '@vue/test-utils';
+import { reactive } from 'vue';
+import { createPinia, setActivePinia } from 'pinia';
+import ScenePanel from './ScenePanel.vue';
 
 // ---- Mocks ----
 
-const mockMarkNewsRead = vi.fn(async (profile: any, _newsId: string) => profile)
+const mockMarkNewsRead = vi.fn(async (profile: any, _newsId: string) => profile);
 vi.mock('@engine/save-profile', () => ({
   markNewsRead: (...args: any[]) => (mockMarkNewsRead as any)(...args),
-}))
+}));
 
-let mockProfile: any
-let mockStore: any
+let mockProfile: any;
+let mockStore: any;
 
 vi.mock('../../stores/game-store', () => ({
   useGameStore: () => mockStore,
-}))
+}));
 vi.mock('../../stores/settings-store', () => ({
   useSettingsStore: () => ({ settings: {} }),
-}))
+}));
 
 /**
  * 🔴 **必须给 Pinia**，哪怕本文件的 game-store / settings-store 都是 mock 的。
@@ -37,13 +37,20 @@ vi.mock('../../stores/settings-store', () => ({
  * 这里一次性把陷阱填掉。
  */
 function mount(component: typeof ScenePanel) {
-  const pinia = createPinia()
-  setActivePinia(pinia)
-  return vtuMount(component, { global: { plugins: [pinia] } })
+  const pinia = createPinia();
+  setActivePinia(pinia);
+  return vtuMount(component, { global: { plugins: [pinia] } });
 }
 
 function makeNews(id: string, read: boolean) {
-  return { id, title: `新闻${id}`, content: `内容${id}`, category: 'world', publishedAt: 100, read }
+  return {
+    id,
+    title: `新闻${id}`,
+    content: `内容${id}`,
+    category: 'world',
+    publishedAt: 100,
+    read,
+  };
 }
 
 /**
@@ -51,14 +58,14 @@ function makeNews(id: string, read: boolean) {
  * 默认页签是「角色」，所以取 .news-item 之前必须先切过去。
  */
 async function openWorldTab(wrapper: ReturnType<typeof mount>) {
-  const tabs = wrapper.findAll('.tab-item')
-  expect(tabs).toHaveLength(4)
-  await tabs[2].trigger('click')
-  return wrapper
+  const tabs = wrapper.findAll('.tab-item');
+  expect(tabs).toHaveLength(4);
+  await tabs[2].trigger('click');
+  return wrapper;
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.clearAllMocks();
   mockProfile = reactive({
     saveId: 'save_1',
     fp: 0,
@@ -73,69 +80,71 @@ beforeEach(() => {
     variables: {},
     worldFlags: {},
     updatedAt: 0,
-  })
+  });
   mockStore = {
     activeSaveId: 'save_1',
     gameTime: null,
     player: null,
     characters: [],
     saveProfile: mockProfile,
-    get news() { return mockProfile.news },
+    get news() {
+      return mockProfile.news;
+    },
     getThoughts: vi.fn(() => ''),
     showModal: vi.fn(),
-  }
-})
+  };
+});
 
 describe('ScenePanel — 新闻展开标记已读 (M6 #36)', () => {
   it('展开未读新闻 → 本地 read=true + markNewsRead(JSON 克隆, id) 持久化', async () => {
-    const wrapper = await openWorldTab(mount(ScenePanel))
-    const items = wrapper.findAll('.news-item')
-    expect(items).toHaveLength(2)
+    const wrapper = await openWorldTab(mount(ScenePanel));
+    const items = wrapper.findAll('.news-item');
+    expect(items).toHaveLength(2);
 
-    await items[0].trigger('click')
-    await flushPromises()
+    await items[0].trigger('click');
+    await flushPromises();
 
     // reactive 即时标记（未读红点消失、其他面板即时可见）
-    expect(mockProfile.news[0].read).toBe(true)
+    expect(mockProfile.news[0].read).toBe(true);
     // 持久化路径: markNewsRead 收到 JSON 克隆（Dexie 吃不下 Vue Proxy）+ 正确 newsId
-    expect(mockMarkNewsRead).toHaveBeenCalledTimes(1)
-    const [persistedProfile, newsId] = mockMarkNewsRead.mock.calls[0]
-    expect(newsId).toBe('n1')
-    expect(persistedProfile).not.toBe(mockProfile)
-    expect(persistedProfile.news.find((n: any) => n.id === 'n1').read).toBe(true)
-  })
+    expect(mockMarkNewsRead).toHaveBeenCalledTimes(1);
+    const [persistedProfile, newsId] = mockMarkNewsRead.mock.calls[0];
+    expect(newsId).toBe('n1');
+    expect(persistedProfile).not.toBe(mockProfile);
+    expect(persistedProfile.news.find((n: any) => n.id === 'n1').read).toBe(true);
+  });
 
   it('展开已读新闻不调用 markNewsRead（只标未读项）', async () => {
-    const wrapper = await openWorldTab(mount(ScenePanel))
+    const wrapper = await openWorldTab(mount(ScenePanel));
 
-    await wrapper.findAll('.news-item')[1].trigger('click') // n2 已读
-    await flushPromises()
+    await wrapper.findAll('.news-item')[1].trigger('click'); // n2 已读
+    await flushPromises();
 
-    expect(mockMarkNewsRead).not.toHaveBeenCalled()
-    expect(mockProfile.news[1].read).toBe(true)
-  })
+    expect(mockMarkNewsRead).not.toHaveBeenCalled();
+    expect(mockProfile.news[1].read).toBe(true);
+  });
 
   it('收起不触发标记；再次展开已标记项也不重复调用', async () => {
-    const wrapper = await openWorldTab(mount(ScenePanel))
-    const first = () => wrapper.findAll('.news-item')[0]
+    const wrapper = await openWorldTab(mount(ScenePanel));
+    const first = () => wrapper.findAll('.news-item')[0];
 
-    await first().trigger('click') // 展开 → 标记
-    await flushPromises()
-    await first().trigger('click') // 收起
-    await flushPromises()
-    await first().trigger('click') // 再展开（此时已读）
-    await flushPromises()
+    await first().trigger('click'); // 展开 → 标记
+    await flushPromises();
+    await first().trigger('click'); // 收起
+    await flushPromises();
+    await first().trigger('click'); // 再展开（此时已读）
+    await flushPromises();
 
-    expect(mockMarkNewsRead).toHaveBeenCalledTimes(1)
-  })
+    expect(mockMarkNewsRead).toHaveBeenCalledTimes(1);
+  });
 
   it('未读红点随标记消失', async () => {
-    const wrapper = await openWorldTab(mount(ScenePanel))
-    expect(wrapper.findAll('.news-dot')).toHaveLength(1)
+    const wrapper = await openWorldTab(mount(ScenePanel));
+    expect(wrapper.findAll('.news-dot')).toHaveLength(1);
 
-    await wrapper.findAll('.news-item')[0].trigger('click')
-    await flushPromises()
+    await wrapper.findAll('.news-item')[0].trigger('click');
+    await flushPromises();
 
-    expect(wrapper.findAll('.news-dot')).toHaveLength(0)
-  })
-})
+    expect(wrapper.findAll('.news-dot')).toHaveLength(0);
+  });
+});

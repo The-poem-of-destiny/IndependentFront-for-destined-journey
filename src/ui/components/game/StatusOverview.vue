@@ -1,30 +1,30 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useGameStore } from '../../stores/game-store'
-import { useAssetStore } from '../../stores/asset-store'
-import { useUIStore } from '../../stores/ui-store'
-import { useHoverPopup } from '../../composables/useHoverPopup'
-import { useAssetImage } from '../../composables/useAssetImage'
-import { ASSET_MIME_BY_EXTENSION, mimeForAssetExtension } from '@engine/asset-types'
-import { ASSET_TYPE_FALLBACK_CHAIN } from '@engine/asset-resolve'
-import type { AssetMutationOutcome } from '../../stores/asset-store'
-import type { AssetType } from '@engine/types'
-import { normalizeItemType } from '@engine/field-enums'
-import ResourceBar from '../shared/ResourceBar.vue'
-import AvatarPanel from '../shared/AvatarPanel.vue'
-import CharacterPortrait from '../shared/CharacterPortrait.vue'
-import PortraitSettingsDialog from '../shared/PortraitSettingsDialog.vue'
-import AppTabs from '../shared/AppTabs.vue'
-import BuffChip from '../shared/BuffChip.vue'
+import { ref, computed } from 'vue';
+import { useGameStore } from '../../stores/game-store';
+import { useAssetStore } from '../../stores/asset-store';
+import { useUIStore } from '../../stores/ui-store';
+import { useHoverPopup } from '../../composables/useHoverPopup';
+import { useAssetImage } from '../../composables/useAssetImage';
+import { ASSET_MIME_BY_EXTENSION, mimeForAssetExtension } from '@engine/asset-types';
+import { ASSET_TYPE_FALLBACK_CHAIN } from '@engine/asset-resolve';
+import type { AssetMutationOutcome } from '../../stores/asset-store';
+import type { AssetType } from '@engine/types';
+import { normalizeItemType } from '@engine/field-enums';
+import ResourceBar from '../shared/ResourceBar.vue';
+import AvatarPanel from '../shared/AvatarPanel.vue';
+import CharacterPortrait from '../shared/CharacterPortrait.vue';
+import PortraitSettingsDialog from '../shared/PortraitSettingsDialog.vue';
+import AppTabs from '../shared/AppTabs.vue';
+import BuffChip from '../shared/BuffChip.vue';
 // 裁剪台是 shared/ 的东西（它只认「一份源字节 + 一个名字」，跟设置页零耦合；
 // 正因为这里也在用它，它才不该住在 settings/assets/ 下）。这里**原样消费**
 // 它的 props/events，不复制一份 —— 复制一份就等于把 D16 不变式、撞位分配、
 // 部分成功口径再实现一遍。
-import AssetCropEditor from '../shared/AssetCropEditor.vue'
+import AssetCropEditor from '../shared/AssetCropEditor.vue';
 
-const game = useGameStore()
+const game = useGameStore();
 
-const player = computed(() => game.player)
+const player = computed(() => game.player);
 
 // ═══ 玩家画像 —— 素材库渲染 + 定点导入 ═══════════════════
 //
@@ -54,7 +54,7 @@ const {
   url: portraitUrl,
   isVideo: portraitIsVideo,
   row: portraitRow,
-} = useAssetImage(() => player.value?.name, ASSET_TYPE_FALLBACK_CHAIN)
+} = useAssetImage(() => player.value?.name, ASSET_TYPE_FALLBACK_CHAIN);
 
 /**
  * 铺成大画像，还是留在 1:1 小方框里？
@@ -67,10 +67,10 @@ const hasLargePortrait = computed(
   () =>
     portraitUrl.value !== null &&
     (portraitRow.value?.type === '立绘' || portraitRow.value?.type === '立绘bg'),
-)
+);
 
-const assets = useAssetStore()
-const ui = useUIStore()
+const assets = useAssetStore();
+const ui = useUIStore();
 
 /**
  * mp4 落在哪一格。
@@ -80,12 +80,12 @@ const ui = useUIStore()
  * 另一个合法落点 `头像` 在链的最末，写进去很可能一点都看不见（见顶部长注释）。
  * 🔴 绝不可以是 `立绘`: 那是要抠像叠在背景上的立牌，mp4 没有合成 alpha。
  */
-const PORTRAIT_VIDEO_TYPE: AssetType = '立绘bg'
+const PORTRAIT_VIDEO_TYPE: AssetType = '立绘bg';
 
 /** 认可的素材 MIME —— 路由表是唯一来源（含 `video/mp4`），不在这里手抄一份 */
-const ASSET_MIMES = new Set(Object.values(ASSET_MIME_BY_EXTENSION))
+const ASSET_MIMES = new Set(Object.values(ASSET_MIME_BY_EXTENSION));
 /** 文件选择框的 accept */
-const PORTRAIT_ACCEPT = Array.from(ASSET_MIMES).join(',')
+const PORTRAIT_ACCEPT = Array.from(ASSET_MIMES).join(',');
 
 /**
  * 这份字节按素材路由表算是什么 MIME —— 与 asset-store 的 `resolveSourceMime`
@@ -96,16 +96,16 @@ const PORTRAIT_ACCEPT = Array.from(ASSET_MIMES).join(',')
  * 一路走到裁剪台，然后在保存那一刻才含糊地失败。
  */
 function assetMimeOf(file: File): string | undefined {
-  const declared = (file.type ?? '').trim().toLowerCase()
-  if (ASSET_MIMES.has(declared)) return declared
-  const dot = file.name.lastIndexOf('.')
-  return mimeForAssetExtension(dot > 0 ? file.name.slice(dot + 1) : '')
+  const declared = (file.type ?? '').trim().toLowerCase();
+  if (ASSET_MIMES.has(declared)) return declared;
+  const dot = file.name.lastIndexOf('.');
+  return mimeForAssetExtension(dot > 0 ? file.name.slice(dot + 1) : '');
 }
 
-const portraitInput = ref<HTMLInputElement | null>(null)
+const portraitInput = ref<HTMLInputElement | null>(null);
 
 function pickPortrait(): void {
-  portraitInput.value?.click()
+  portraitInput.value?.click();
 }
 
 // ── 点画像 = 一个入口，两种去处 ────────────────────────────
@@ -118,15 +118,15 @@ function pickPortrait(): void {
 //     （头像是圆形裁切的脸位，没有取景概念），弹一个只有「更换图片」可点的
 //     窗口纯属多一次点击。
 
-const portraitDialogOpen = ref(false)
+const portraitDialogOpen = ref(false);
 
 function onPortraitActivate(): void {
-  if (hasLargePortrait.value) portraitDialogOpen.value = true
-  else pickPortrait()
+  if (hasLargePortrait.value) portraitDialogOpen.value = true;
+  else pickPortrait();
 }
 
 function closePortraitDialog(): void {
-  portraitDialogOpen.value = false
+  portraitDialogOpen.value = false;
 }
 
 /** 点画像时该说什么 —— 两条去处结果不同，说明也必须不同 */
@@ -134,16 +134,16 @@ const portraitActionLabel = computed(() =>
   hasLargePortrait.value
     ? `调整「${player.value?.name ?? ''}」的画像取景，或更换图片`
     : `挑一张图，裁出「${player.value?.name ?? ''}」的立绘与头像`,
-)
+);
 
 // ── 裁剪台的开关 ──────────────────────────────────────────
 // 名字在**开台那一刻**就定死（`cropName`），不是每帧去读 `player.name`: 编辑器
 // 开着的时候存档可以切、角色可以改名，而用户裁的是他刚才点开的那个人。
 // 🔴 编辑器**永不**改名字，它只决定像素（见 AssetCropEditor 顶部注释）。
 
-const cropOpen = ref(false)
-const cropSource = ref<File | null>(null)
-const cropName = ref('')
+const cropOpen = ref(false);
+const cropSource = ref<File | null>(null);
+const cropName = ref('');
 
 /**
  * 取消 = **什么都不留下**: 没有半张素材（落库全在编辑器的确认里）、没有卡住的
@@ -155,20 +155,20 @@ const cropName = ref('')
  * 会走到这里，而"连选同一个文件两次"这个坑两条路都要躲过。
  */
 function closeCrop(): void {
-  cropOpen.value = false
-  cropSource.value = null
+  cropOpen.value = false;
+  cropSource.value = null;
 }
 
 /** 两半都落地了才会来（部分成功由编辑器就地说明，不冒充成功） */
 function onCropSaved(ids: { portraitId?: string; avatarId?: string }): void {
-  const name = cropName.value
-  closeCrop()
+  const name = cropName.value;
+  closeCrop();
   const saved = [
     ...(ids.portraitId !== undefined ? ['立绘'] : []),
     ...(ids.avatarId !== undefined ? ['头像'] : []),
-  ]
-  if (saved.length === 0) return
-  ui.toast(`已把这张图设为「${name}」的${saved.join('与')}。`, 'info')
+  ];
+  if (saved.length === 0) return;
+  ui.toast(`已把这张图设为「${name}」的${saved.join('与')}。`, 'info');
 }
 
 /**
@@ -189,59 +189,62 @@ function portraitMessage(
 ): { text: string; type: 'info' | 'warning' | 'error' } {
   switch (outcome) {
     case 'ok':
-      return { text: `已把这张图设为「${name}」的画像。`, type: 'info' }
+      return { text: `已把这张图设为「${name}」的画像。`, type: 'info' };
     case 'naming-invariant':
       return {
         text: `没法用「${name}」这个角色名当素材文件名：名字里含有「头像 / 立绘 / 立绘bg」这类类型词（或名字为空），素材会被读成另一个角色。请先改角色名。`,
         type: 'error',
-      }
+      };
     case 'unrepresentable-name':
       return {
         text: `没法用「${name}」这个角色名当素材文件名：名字里带「/」「\\」或以「.」开头，导出成素材包后会变成路径或被当成隐藏文件。请先改角色名。`,
         type: 'error',
-      }
+      };
     case 'media-rule':
-      return { text: '这个类型不接受 mp4，请换一张图片。', type: 'error' }
+      return { text: '这个类型不接受 mp4，请换一张图片。', type: 'error' };
     default:
       // not-found / failed —— 字节没写进去（格式不认、读不出、存储写入失败）
-      return { text: '这张图没能存进素材库：可能是格式不支持，或浏览器存储写入失败。', type: 'error' }
+      return {
+        text: '这张图没能存进素材库：可能是格式不支持，或浏览器存储写入失败。',
+        type: 'error',
+      };
   }
 }
 
 async function onPortraitFile(e: Event): Promise<void> {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
   // 🔴 先清空，否则连续选**同一个文件**不会再触发 change（浏览器认为值没变）。
   // 必须在**所有** early return 之前 —— 走到裁剪台那条分支同样要清，否则
   // "开了裁剪台 → 取消 → 想重选刚才那张图" 会一声不响地什么都不发生。
-  input.value = ''
-  if (!file) return
-  const name = player.value?.name
-  if (!name) return
+  input.value = '';
+  if (!file) return;
+  const name = player.value?.name;
+  if (!name) return;
 
-  const mime = assetMimeOf(file)
+  const mime = assetMimeOf(file);
   if (mime === undefined) {
     // 连 MIME 都问不出来: 不开裁剪台，也不把一个必然失败的请求发给 store
-    const { text, type } = portraitMessage('failed', name)
-    ui.toast(text, type)
-    return
+    const { text, type } = portraitMessage('failed', name);
+    ui.toast(text, type);
+    return;
   }
 
   if (!mime.startsWith('video/')) {
     // 图片 → 交给裁剪台，由它调 `importPortraitPair` 一次烘出 立绘 + 头像
-    cropSource.value = file
-    cropName.value = name
-    cropOpen.value = true
-    return
+    cropSource.value = file;
+    cropName.value = name;
+    cropOpen.value = true;
+    return;
   }
 
   // mp4 → 裁不了（画布只有某一帧），直通导入，写 立绘bg（见本文件顶部"为什么不是头像"）。
   // 文件名在这条路径上**只**贡献扩展名 —— name 与 type 由这个槽位说了算，
   // 于是 `IMG_1234.mp4` 不会在库里长出一个叫 IMG_1234 的幽灵角色组
-  const { outcome, id } = await assets.importForCharacter(file, name, PORTRAIT_VIDEO_TYPE)
+  const { outcome, id } = await assets.importForCharacter(file, name, PORTRAIT_VIDEO_TYPE);
   // 互斥闸已经自己播报过了 —— 这里再补一句就是两条 toast 说同一件事
-  if (outcome === 'busy') return
-  announcePortraitWrite(outcome, id, name)
+  if (outcome === 'busy') return;
+  announcePortraitWrite(outcome, id, name);
 }
 
 /**
@@ -265,126 +268,135 @@ function announcePortraitWrite(
   name: string,
 ): void {
   if (outcome !== 'ok' || id === undefined) {
-    const { text, type } = portraitMessage(outcome, name)
-    ui.toast(text, type)
-    return
+    const { text, type } = portraitMessage(outcome, name);
+    ui.toast(text, type);
+    return;
   }
 
-  const shown = portraitRow.value
+  const shown = portraitRow.value;
   if (shown !== null && shown.id !== id) {
     ui.toast(
       `这段视频已经存进「${name}」的「${PORTRAIT_VIDEO_TYPE}」了，但画像位显示的仍是排在更前面的「${shown.type}」—— 这一格看上去没有任何变化。` +
         `想让视频显示出来，请到 设置 → 素材 里把「${name}」的那张「${shown.type}」删掉或换掉。`,
       'warning',
-    )
-    return
+    );
+    return;
   }
 
-  ui.toast(`已把这段视频设为「${name}」的画像。`, 'info')
+  ui.toast(`已把这段视频设为「${name}」的画像。`, 'info');
 }
 
 // ═══ 折叠状态 ═══
-const daoOpen = ref(true)
-const inventoryOpen = ref(true)
+const daoOpen = ref(true);
+const inventoryOpen = ref(true);
 
 // ═══ 状态效果：悬停弹出详情（延迟走全局设置 settings.hoverDelayMs） ═══
 // 气泡 Teleport 到 body，拿不到状态栏的 zoom:1.1，自己缩放；
 // 传给夹紧计算的是**渲染后**尺寸：240×1.1=264 / 132×1.1=145
-const buffPop = useHoverPopup({ width: 264, estHeight: 145, zoom: 1.1, placement: 'below' })
-const popBuff = computed(() =>
-  player.value?.statusEffects?.find(f => f.name === buffPop.key.value) ?? null
-)
+const buffPop = useHoverPopup({ width: 264, estHeight: 145, zoom: 1.1, placement: 'below' });
+const popBuff = computed(
+  () => player.value?.statusEffects?.find((f) => f.name === buffPop.key.value) ?? null,
+);
 
 // ═══ 身份元信息 —— 顶部一行（取代原「玩家概要」标题 + 整个「个人信息」区块） ═══
 const identityFields = computed(() => {
-  const p = player.value
-  if (!p) return []
+  const p = player.value;
+  if (!p) return [];
   return [
     { label: '种族', value: p.race || '—', cls: '' },
     { label: '身份', value: p.identity?.[0] || '—', cls: '' },
     { label: '职业', value: p.occupation?.[0] || '—', cls: '' },
     { label: '生命层级', value: p.tierName || '—', cls: 'tier-text' },
     { label: '冒险者等级', value: p.adventurerRank ? `${p.adventurerRank}级` : '—', cls: '' },
-  ]
-})
+  ];
+});
 /** 一行放不下时会被省略号截断，完整带标签的版本挂在 title 上，信息不丢 */
 const identityTitle = computed(() =>
-  identityFields.value.map(f => `${f.label}：${f.value}`).join('　')
-)
+  identityFields.value.map((f) => `${f.label}：${f.value}`).join('　'),
+);
 
 // ═══ 属性映射 ═══
 const ATTR_LABELS: Record<string, string> = {
-  str: '力量', dex: '敏捷', con: '体质', int: '智力', spi: '精神',
-}
+  str: '力量',
+  dex: '敏捷',
+  con: '体质',
+  int: '智力',
+  spi: '精神',
+};
 const attrEntries = computed(() =>
   Object.entries(player.value?.attributes ?? {}).map(([key, value]) => ({
     key,
     label: ATTR_LABELS[key] || key,
     value,
-  }))
-)
+  })),
+);
 
 // ═══ 装备列表 ═══
 // M6 完整重构: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3），槽位为中文枚举
 const EQUIP_ICONS: Record<string, string> = {
-  '武器': 'fa-solid fa-sword', '副手': 'fa-solid fa-shield-halved', '头部': 'fa-solid fa-helmet-safety',
-  '身体': 'fa-solid fa-shirt', '手部': 'fa-solid fa-mitten', '脚部': 'fa-solid fa-shoe-prints',
-  '腰带': 'fa-solid fa-ring', '饰品': 'fa-regular fa-gem',
-}
+  武器: 'fa-solid fa-sword',
+  副手: 'fa-solid fa-shield-halved',
+  头部: 'fa-solid fa-helmet-safety',
+  身体: 'fa-solid fa-shirt',
+  手部: 'fa-solid fa-mitten',
+  脚部: 'fa-solid fa-shoe-prints',
+  腰带: 'fa-solid fa-ring',
+  饰品: 'fa-regular fa-gem',
+};
 const equipmentList = computed(() =>
-  (player.value?.inventory ?? []).filter(i => i.equippedSlot).map(e => ({
-    ...e,
-    icon: EQUIP_ICONS[e.equippedSlot!] || 'fa-solid fa-circle',
-  }))
-)
+  (player.value?.inventory ?? [])
+    .filter((i) => i.equippedSlot)
+    .map((e) => ({
+      ...e,
+      icon: EQUIP_ICONS[e.equippedSlot!] || 'fa-solid fa-circle',
+    })),
+);
 
 // ═══ 持有物页签：装备 / 背包 / 消耗品 / 技能 ═══
-type HoldTab = 'equipment' | 'bag' | 'consumable' | 'skills'
-const holdTab = ref<HoldTab>('equipment')
+type HoldTab = 'equipment' | 'bag' | 'consumable' | 'skills';
+const holdTab = ref<HoldTab>('equipment');
 const holdTabs: { key: HoldTab; label: string }[] = [
   { key: 'equipment', label: '装备' },
   { key: 'bag', label: '背包' },
   { key: 'consumable', label: '消耗品' },
   { key: 'skills', label: '技能' },
-]
+];
 
 /** 未穿戴的物品（穿戴中的归「装备」页签，规范 §3：装备是物品的状态而非独立实体） */
-const unequipped = computed(() =>
-  (player.value?.inventory ?? []).filter(i => !i.equippedSlot)
-)
+const unequipped = computed(() => (player.value?.inventory ?? []).filter((i) => !i.equippedSlot));
 const consumableList = computed(() =>
-  unequipped.value.filter(i => normalizeItemType(i.type ?? '') === '消耗品')
-)
+  unequipped.value.filter((i) => normalizeItemType(i.type ?? '') === '消耗品'),
+);
 /** 背包 = 未穿戴且非消耗品（材料/任务物品/特殊/未穿戴的装备都在这） */
 const bagList = computed(() =>
-  unequipped.value.filter(i => normalizeItemType(i.type ?? '') !== '消耗品')
-)
-const skillList = computed(() => player.value?.skills ?? [])
+  unequipped.value.filter((i) => normalizeItemType(i.type ?? '') !== '消耗品'),
+);
+const skillList = computed(() => player.value?.skills ?? []);
 
 /** 统一行模型 —— 四个页签共用一套渲染，避免四份几乎一样的模板 */
 interface HoldRow {
-  name: string
-  icon: string
-  tag?: string
-  trail?: string
-  description?: string
-  meta: { label: string; value: string }[]
-  effects?: Record<string, string>
+  name: string;
+  icon: string;
+  tag?: string;
+  trail?: string;
+  description?: string;
+  meta: { label: string; value: string }[];
+  effects?: Record<string, string>;
 }
 
 /** 装备加成 Record<词条, 数值> → meta 行，正数补 + 号 */
 function statsMeta(stats?: Record<string, number>): { label: string; value: string }[] {
-  if (!stats) return []
+  if (!stats) return [];
   return Object.entries(stats).map(([label, v]) => ({
     label,
     value: v > 0 ? `+${v}` : String(v),
-  }))
+  }));
 }
 
 const holdRows = computed<HoldRow[]>(() => {
   switch (holdTab.value) {
     case 'equipment':
-      return equipmentList.value.map(e => ({
+      return equipmentList.value.map((e) => ({
         name: e.name,
         icon: e.icon,
         tag: e.equippedSlot ?? undefined,
@@ -392,15 +404,17 @@ const holdRows = computed<HoldRow[]>(() => {
         meta: [
           ...(e.rarity ? [{ label: '品质', value: e.rarity }] : []),
           ...statsMeta(e.stats),
-          ...(e.maxDurability ? [{ label: '耐久', value: `${e.durability ?? e.maxDurability}/${e.maxDurability}` }] : []),
+          ...(e.maxDurability
+            ? [{ label: '耐久', value: `${e.durability ?? e.maxDurability}/${e.maxDurability}` }]
+            : []),
         ],
         effects: e.effects,
-      }))
+      }));
     case 'bag':
     case 'consumable': {
-      const list = holdTab.value === 'bag' ? bagList.value : consumableList.value
-      const icon = holdTab.value === 'bag' ? 'fa-solid fa-cube' : 'fa-solid fa-flask'
-      return list.map(i => ({
+      const list = holdTab.value === 'bag' ? bagList.value : consumableList.value;
+      const icon = holdTab.value === 'bag' ? 'fa-solid fa-cube' : 'fa-solid fa-flask';
+      return list.map((i) => ({
         name: i.name,
         icon,
         tag: holdTab.value === 'bag' ? i.type : undefined,
@@ -413,10 +427,10 @@ const holdRows = computed<HoldRow[]>(() => {
           ...statsMeta(i.stats),
         ],
         effects: i.effects,
-      }))
+      }));
     }
     case 'skills':
-      return skillList.value.map(s => ({
+      return skillList.value.map((s) => ({
         name: s.name,
         icon: s.type === 'active' ? 'fa-solid fa-wand-sparkles' : 'fa-solid fa-shield-heart',
         tag: s.type === 'active' ? '主动' : '被动',
@@ -424,38 +438,41 @@ const holdRows = computed<HoldRow[]>(() => {
         description: s.description,
         meta: [
           ...(s.cost ? [{ label: '消耗', value: `${s.cost.amount} ${s.cost.type}` }] : []),
-          ...(s.maxCooldown ? [{ label: '冷却', value: `${s.cooldown ?? 0}/${s.maxCooldown}` }] : []),
+          ...(s.maxCooldown
+            ? [{ label: '冷却', value: `${s.cooldown ?? 0}/${s.maxCooldown}` }]
+            : []),
         ],
         effects: s.effects,
-      }))
+      }));
+    default:
+      return [];
   }
-})
+});
 
 /** 每个页签最多预览 6 条，超出走「查看全部」进背包面板 */
-const HOLD_PREVIEW = 6
-const holdOverflow = computed(() => Math.max(0, holdRows.value.length - HOLD_PREVIEW))
+const HOLD_PREVIEW = 6;
+const holdOverflow = computed(() => Math.max(0, holdRows.value.length - HOLD_PREVIEW));
 
 /** 就地展开详情（原先点条目会弹全屏 Modal —— 触发已摘掉，store.focusItem 保留未删） */
-const expandedHold = ref<string | null>(null)
+const expandedHold = ref<string | null>(null);
 function toggleHold(name: string) {
-  const key = `${holdTab.value}:${name}`
-  expandedHold.value = expandedHold.value === key ? null : key
+  const key = `${holdTab.value}:${name}`;
+  expandedHold.value = expandedHold.value === key ? null : key;
 }
 function isHoldOpen(name: string): boolean {
-  return expandedHold.value === `${holdTab.value}:${name}`
+  return expandedHold.value === `${holdTab.value}:${name}`;
 }
 
 function buffType(cat: string): 'buff' | 'debuff' | 'special' {
-  if (cat === '增益') return 'buff'
-  if (cat === '减益') return 'debuff'
-  return 'special'
+  if (cat === '增益') return 'buff';
+  if (cat === '减益') return 'debuff';
+  return 'special';
 }
 </script>
 
 <template>
   <!-- ═══ 已加载 ═══ -->
-  <div class="status-overview" v-if="player">
-
+  <div v-if="player" class="status-overview">
     <!-- ═══════ 玩家概要 —— 身份一行 + 方形画像 ═══════ -->
     <div class="section">
       <!-- 身份一行的**两种落位**（同一份数据，两处 DOM）:
@@ -465,12 +482,12 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
            不合并成一份的原因是**放哪里决定了点击能不能生效**: 盖在画上的那份必须
            是画像槽的后代，冒泡到槽才有"点哪都开设置窗"；而这一份必须在槽外面，
            否则一行身份文字会变成"点了会弹文件框"的按钮内容。 -->
-      <div class="section-header" v-if="!hasLargePortrait">
+      <div v-if="!hasLargePortrait" class="section-header">
         <div class="identity-line" :title="identityTitle">
           <template v-for="(f, i) in identityFields" :key="f.label"
             ><span v-if="i" class="identity-sep" aria-hidden="true"> · </span
-            ><span class="identity-field" :class="f.cls">{{ f.value }}</span
-          ></template>
+            ><span class="identity-field" :class="f.cls">{{ f.value }}</span></template
+          >
         </div>
       </div>
       <div class="player-summary">
@@ -506,12 +523,12 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
           />
           <!-- 身份条 —— **内容**，不是控件: 没有按钮、没有徽章、没有悬停浮层，
                只有一层自上而下化开的护读底把字托住（见 style 里的说明）。 -->
-          <div class="identity-strip" v-if="hasLargePortrait">
+          <div v-if="hasLargePortrait" class="identity-strip">
             <div class="identity-line" :title="identityTitle">
               <template v-for="(f, i) in identityFields" :key="f.label"
                 ><span v-if="i" class="identity-sep" aria-hidden="true"> · </span
-                ><span class="identity-field" :class="f.cls">{{ f.value }}</span
-              ></template>
+                ><span class="identity-field" :class="f.cls">{{ f.value }}</span></template
+              >
             </div>
           </div>
         </div>
@@ -527,137 +544,205 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
     </div>
 
     <div class="status-glass">
-    <!-- ═══════ 属性 ═══════ -->
-    <div class="section attribute-section">
-      <div class="section-header clickable" @click="daoOpen = !daoOpen" role="button" tabindex="0" :aria-expanded="daoOpen" @keydown.enter="daoOpen = !daoOpen" @keydown.space.prevent="daoOpen = !daoOpen">
-        <span class="section-title">属性</span>
-        <span class="attr-level">Lv.{{ player.level }}</span>
-        <i class="fa-solid" :class="daoOpen ? 'fa-chevron-up' : 'fa-chevron-down'" />
-      </div>
-      <Transition name="collapse">
-        <div class="section-body" v-if="daoOpen">
-        <ResourceBar label="HP" :current="player.hp" :max="player.maxHp" color="color-mix(in srgb, var(--theme-hp) 65%, #000)" :height="20" :showValues="true" />
-        <ResourceBar label="MP" :current="player.mp" :max="player.maxMp" color="color-mix(in srgb, var(--theme-mp) 65%, #000)" :height="20" :showValues="true" />
-        <ResourceBar label="SP" :current="player.sp" :max="player.maxSp" color="color-mix(in srgb, var(--theme-sp) 65%, #000)" :height="20" :showValues="true" />
+      <!-- ═══════ 属性 ═══════ -->
+      <div class="section attribute-section">
+        <div
+          class="section-header clickable"
+          role="button"
+          tabindex="0"
+          :aria-expanded="daoOpen"
+          @click="daoOpen = !daoOpen"
+          @keydown.enter="daoOpen = !daoOpen"
+          @keydown.space.prevent="daoOpen = !daoOpen"
+        >
+          <span class="section-title">属性</span>
+          <span class="attr-level">Lv.{{ player.level }}</span>
+          <i class="fa-solid" :class="daoOpen ? 'fa-chevron-up' : 'fa-chevron-down'" />
+        </div>
+        <Transition name="collapse">
+          <div v-if="daoOpen" class="section-body">
+            <ResourceBar
+              label="HP"
+              :current="player.hp"
+              :max="player.maxHp"
+              color="color-mix(in srgb, var(--theme-hp) 65%, #000)"
+              :height="20"
+              :show-values="true"
+            />
+            <ResourceBar
+              label="MP"
+              :current="player.mp"
+              :max="player.maxMp"
+              color="color-mix(in srgb, var(--theme-mp) 65%, #000)"
+              :height="20"
+              :show-values="true"
+            />
+            <ResourceBar
+              label="SP"
+              :current="player.sp"
+              :max="player.maxSp"
+              color="color-mix(in srgb, var(--theme-sp) 65%, #000)"
+              :height="20"
+              :show-values="true"
+            />
 
-        <!-- 经验条 —— 与 HP/MP/SP 同宽同形
+            <!-- 经验条 —— 与 HP/MP/SP 同宽同形
              totalExp = 本层级已积累，expToNext = 距上限还差多少，两者之和 = 该层级 EXP 上限
              （实测 8500 + 1500 = 10000，正是核心数值表 T4 的 expCap；创角时 0 + expCap 亦自洽） -->
-        <ResourceBar label="EXP" :current="player.totalExp" :max="player.totalExp + player.expToNext" color="color-mix(in srgb, var(--theme-exp) 65%, #000)" :height="20" :showValues="true" />
+            <ResourceBar
+              label="EXP"
+              :current="player.totalExp"
+              :max="player.totalExp + player.expToNext"
+              color="color-mix(in srgb, var(--theme-exp) 65%, #000)"
+              :height="20"
+              :show-values="true"
+            />
 
-        <!-- 五维属性保持单行 -->
-        <div class="attr-grid">
-          <div v-for="attr in attrEntries" :key="attr.key" class="kv-item">
-            <span class="kv-label">{{ attr.label }}</span>
-            <span class="kv-value">{{ attr.value }}</span>
-          </div>
-        </div>
-
-      </div>
-      </Transition>
-    </div>
-
-    <!-- ═══════ 状态效果 ═══════ -->
-    <!-- 徽章与标题同处一行：flex-wrap 让前几个自然排在标题右侧，放不下的往下折 -->
-    <div class="section" v-if="player.statusEffects?.length">
-      <div class="section-header buff-header">
-        <span class="section-title">状态效果</span>
-        <div class="buff-scroll">
-        <button
-          v-for="fx in player.statusEffects"
-          :key="fx.name"
-          class="buff-row"
-          :aria-describedby="buffPop.key.value === fx.name ? 'buff-pop' : undefined"
-          @mouseenter="buffPop.onEnter($event, fx.name)"
-          @mouseleave="buffPop.hide"
-          @focus="buffPop.onFocus($event, fx.name)"
-          @blur="buffPop.hide"
-        >
-          <BuffChip :name="fx.name" :type="buffType(fx.category)" :stacks="fx.stacks" />
-          <span class="buff-time" v-if="fx.remainingTime === null">永久</span>
-          <span class="buff-time" v-else-if="fx.remainingTime !== null && fx.remainingTime < 999">{{ fx.remainingTime }}{{ fx.timeUnit }}</span>
-        </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ═══════ 储物袋预览 ═══════ -->
-    <div class="section">
-      <div class="section-header clickable" @click="inventoryOpen = !inventoryOpen" role="button" tabindex="0" :aria-expanded="inventoryOpen" @keydown.enter="inventoryOpen = !inventoryOpen" @keydown.space.prevent="inventoryOpen = !inventoryOpen">
-        <span class="section-title">持有物</span>
-        <!-- 钱袋 / 命运点常驻标题行 —— 在 Transition 之外，折叠时依然可见 -->
-        <span class="hold-meta">
-          <span class="hold-money"><i class="fa-solid fa-coins" />{{ player.money }} G</span>
-          <span class="hold-fp"><i class="fa-solid fa-star" />{{ game.fp }} FP</span>
-        </span>
-        <i class="fa-solid" :class="inventoryOpen ? 'fa-chevron-up' : 'fa-chevron-down'" />
-      </div>
-      <Transition name="collapse">
-        <div class="hold-body" v-if="inventoryOpen">
-          <AppTabs :tabs="holdTabs" :active="holdTab" @select="holdTab = $event" />
-
-          <div class="item-list">
-            <div
-              v-for="row in holdRows.slice(0, HOLD_PREVIEW)"
-              :key="row.name"
-              class="item-entry"
-              :class="{ open: isHoldOpen(row.name) }"
-            >
-              <button
-                class="item-row"
-                :class="{ open: isHoldOpen(row.name) }"
-                :aria-expanded="isHoldOpen(row.name)"
-                @click="toggleHold(row.name)"
-              >
-                <i :class="row.icon" class="item-icon" />
-                <span class="item-name">{{ row.name }}</span>
-                <span class="item-tag" v-if="row.tag">{{ row.tag }}</span>
-                <span class="item-count" v-if="row.trail">{{ row.trail }}</span>
-                <i class="fa-solid item-chevron" :class="isHoldOpen(row.name) ? 'fa-chevron-up' : 'fa-chevron-down'" />
-              </button>
-
-              <div class="item-detail" v-if="isHoldOpen(row.name)">
-                <div class="det-desc" v-if="row.description">{{ row.description }}</div>
-                <div class="det-meta" v-if="row.meta.length">
-                  <span v-for="m in row.meta" :key="m.label" class="det-chip">
-                    <span class="det-chip-label">{{ m.label }}</span>{{ m.value }}
-                  </span>
-                </div>
-                <div class="det-effects" v-if="row.effects && Object.keys(row.effects).length">
-                  <div v-for="(text, name) in row.effects" :key="name" class="det-effect">
-                    <span class="det-effect-name">{{ name }}</span>{{ text }}
-                  </div>
-                </div>
-                <div class="det-empty" v-if="!row.description && !row.meta.length && !(row.effects && Object.keys(row.effects).length)">
-                  暂无更多记载
-                </div>
+            <!-- 五维属性保持单行 -->
+            <div class="attr-grid">
+              <div v-for="attr in attrEntries" :key="attr.key" class="kv-item">
+                <span class="kv-label">{{ attr.label }}</span>
+                <span class="kv-value">{{ attr.value }}</span>
               </div>
             </div>
-
-            <div class="empty-tab" v-if="!holdRows.length">囊中空空…</div>
           </div>
+        </Transition>
+      </div>
 
-          <div class="item-footer" v-if="holdOverflow" role="button" tabindex="0" @click="game.showModal('items')" @keydown.enter="game.showModal('items')">
-            查看全部 · 另有 {{ holdOverflow }} 项
-            <i class="fa-solid fa-chevron-right" />
+      <!-- ═══════ 状态效果 ═══════ -->
+      <!-- 徽章与标题同处一行：flex-wrap 让前几个自然排在标题右侧，放不下的往下折 -->
+      <div v-if="player.statusEffects?.length" class="section">
+        <div class="section-header buff-header">
+          <span class="section-title">状态效果</span>
+          <div class="buff-scroll">
+            <button
+              v-for="fx in player.statusEffects"
+              :key="fx.name"
+              class="buff-row"
+              :aria-describedby="buffPop.key.value === fx.name ? 'buff-pop' : undefined"
+              @mouseenter="buffPop.onEnter($event, fx.name)"
+              @mouseleave="buffPop.hide"
+              @focus="buffPop.onFocus($event, fx.name)"
+              @blur="buffPop.hide"
+            >
+              <BuffChip :name="fx.name" :type="buffType(fx.category)" :stacks="fx.stacks" />
+              <span v-if="fx.remainingTime === null" class="buff-time">永久</span>
+              <span
+                v-else-if="fx.remainingTime !== null && fx.remainingTime < 999"
+                class="buff-time"
+                >{{ fx.remainingTime }}{{ fx.timeUnit }}</span
+              >
+            </button>
           </div>
         </div>
-      </Transition>
-    </div>
-    </div>
+      </div>
 
+      <!-- ═══════ 储物袋预览 ═══════ -->
+      <div class="section">
+        <div
+          class="section-header clickable"
+          role="button"
+          tabindex="0"
+          :aria-expanded="inventoryOpen"
+          @click="inventoryOpen = !inventoryOpen"
+          @keydown.enter="inventoryOpen = !inventoryOpen"
+          @keydown.space.prevent="inventoryOpen = !inventoryOpen"
+        >
+          <span class="section-title">持有物</span>
+          <!-- 钱袋 / 命运点常驻标题行 —— 在 Transition 之外，折叠时依然可见 -->
+          <span class="hold-meta">
+            <span class="hold-money"><i class="fa-solid fa-coins" />{{ player.money }} G</span>
+            <span class="hold-fp"><i class="fa-solid fa-star" />{{ game.fp }} FP</span>
+          </span>
+          <i class="fa-solid" :class="inventoryOpen ? 'fa-chevron-up' : 'fa-chevron-down'" />
+        </div>
+        <Transition name="collapse">
+          <div v-if="inventoryOpen" class="hold-body">
+            <AppTabs :tabs="holdTabs" :active="holdTab" @select="holdTab = $event" />
+
+            <div class="item-list">
+              <div
+                v-for="row in holdRows.slice(0, HOLD_PREVIEW)"
+                :key="row.name"
+                class="item-entry"
+                :class="{ open: isHoldOpen(row.name) }"
+              >
+                <button
+                  class="item-row"
+                  :class="{ open: isHoldOpen(row.name) }"
+                  :aria-expanded="isHoldOpen(row.name)"
+                  @click="toggleHold(row.name)"
+                >
+                  <i :class="row.icon" class="item-icon" />
+                  <span class="item-name">{{ row.name }}</span>
+                  <span v-if="row.tag" class="item-tag">{{ row.tag }}</span>
+                  <span v-if="row.trail" class="item-count">{{ row.trail }}</span>
+                  <i
+                    class="fa-solid item-chevron"
+                    :class="isHoldOpen(row.name) ? 'fa-chevron-up' : 'fa-chevron-down'"
+                  />
+                </button>
+
+                <div v-if="isHoldOpen(row.name)" class="item-detail">
+                  <div v-if="row.description" class="det-desc">{{ row.description }}</div>
+                  <div v-if="row.meta.length" class="det-meta">
+                    <span v-for="m in row.meta" :key="m.label" class="det-chip">
+                      <span class="det-chip-label">{{ m.label }}</span
+                      >{{ m.value }}
+                    </span>
+                  </div>
+                  <div v-if="row.effects && Object.keys(row.effects).length" class="det-effects">
+                    <div v-for="(text, name) in row.effects" :key="name" class="det-effect">
+                      <span class="det-effect-name">{{ name }}</span
+                      >{{ text }}
+                    </div>
+                  </div>
+                  <div
+                    v-if="
+                      !row.description &&
+                      !row.meta.length &&
+                      !(row.effects && Object.keys(row.effects).length)
+                    "
+                    class="det-empty"
+                  >
+                    暂无更多记载
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="!holdRows.length" class="empty-tab">囊中空空…</div>
+            </div>
+
+            <div
+              v-if="holdOverflow"
+              class="item-footer"
+              role="button"
+              tabindex="0"
+              @click="game.showModal('items')"
+              @keydown.enter="game.showModal('items')"
+            >
+              查看全部 · 另有 {{ holdOverflow }} 项
+              <i class="fa-solid fa-chevron-right" />
+            </div>
+          </div>
+        </Transition>
+      </div>
+    </div>
   </div>
 
   <!-- ═══ 骨架屏 ═══ -->
-  <div class="status-skeleton" v-else-if="game.isGenerating || !game.player">
-    <div class="sk-block" v-for="i in 4" :key="i">
+  <div v-else-if="game.isGenerating || !game.player" class="status-skeleton">
+    <div v-for="i in 4" :key="i" class="sk-block">
       <div class="sk-hdr" />
-      <div class="sk-lines"><div class="sk-l" /><div class="sk-l sk-short" /></div>
+      <div class="sk-lines">
+        <div class="sk-l" />
+        <div class="sk-l sk-short" />
+      </div>
     </div>
   </div>
 
   <!-- ═══ 错误态 ═══ -->
-  <div class="status-error" v-else>
+  <div v-else class="status-error">
     <i class="fa-solid fa-triangle-exclamation error-icon" />
     <p>角色数据加载失败</p>
     <button class="retry-btn" @click="game.loadSave(game.activeSaveId!)">重试</button>
@@ -677,7 +762,12 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         <div class="bd-desc">{{ popBuff.description }}</div>
         <div class="bd-meta">
           <span>层数: {{ popBuff.stacks }}</span>
-          <span>剩余: {{ popBuff.remainingTime === null ? '永久' : popBuff.remainingTime + popBuff.timeUnit }}</span>
+          <span
+            >剩余:
+            {{
+              popBuff.remainingTime === null ? '永久' : popBuff.remainingTime + popBuff.timeUnit
+            }}</span
+          >
           <span>来源: {{ popBuff.source }}</span>
         </div>
       </div>
@@ -730,7 +820,9 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 .section {
   border-bottom: 1px solid var(--theme-card-border);
 }
-.section:last-child { border-bottom: none; }
+.section:last-child {
+  border-bottom: none;
+}
 
 .status-glass {
   display: flex;
@@ -807,7 +899,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
  */
 .identity-strip {
   position: absolute;
-  top: 1px;   /* 让开画框那 1px 边框，边线保持干净 */
+  top: 1px; /* 让开画框那 1px 边框，边线保持干净 */
   left: 1px;
   right: 1px;
   z-index: 1;
@@ -868,10 +960,14 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-primary) 35%, transparent);
 }
 @media (prefers-reduced-motion: reduce) {
-  .portrait-slot { transition: none; }
+  .portrait-slot {
+    transition: none;
+  }
 }
 /* 真正的文件选择框藏起来，点击由画像槽转发 */
-.portrait-file { display: none; }
+.portrait-file {
+  display: none;
+}
 
 .summary-name {
   font-family: var(--theme-font-title, 'Noto Serif SC', serif);
@@ -899,7 +995,9 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   font-weight: 600;
   color: var(--theme-text-primary);
 }
-.tier-text { color: var(--theme-quality-epic); }
+.tier-text {
+  color: var(--theme-quality-epic);
+}
 
 /* ═══ 五维属性 —— 紧凑单行 ═══ */
 .attr-level {
@@ -940,34 +1038,85 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   gap: 8px;
   padding-bottom: 10px;
 }
-.buff-header .section-title { flex-shrink: 0; }
-.buff-scroll { max-height: 7.5rem; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 4px 8px; flex: 1; min-width: 0; }
+.buff-header .section-title {
+  flex-shrink: 0;
+}
+.buff-scroll {
+  max-height: 7.5rem;
+  overflow-y: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  flex: 1;
+  min-width: 0;
+}
 /* cursor: help —— 点击不再有行为，指针不该继续骗人说"可点" */
-.buff-row { display: flex; align-items: center; gap: 4px; cursor: help; border: none; background: none; padding: 0; font-family: inherit; font-size: inherit; color: inherit; width: auto; }
-.buff-time { font-size: 0.625rem; color: var(--theme-text-muted); }
+.buff-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: help;
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  width: auto;
+}
+.buff-time {
+  font-size: 0.625rem;
+  color: var(--theme-text-muted);
+}
 
 /* 悬停气泡 —— fixed 定位，走语义 z 阶而非魔法数字 */
 .buff-pop {
   position: fixed;
   z-index: var(--z-tooltip, 500);
-  zoom: 1.1;              /* 与状态栏同步放大 —— 它在面板外，继承不到 */
+  zoom: 1.1; /* 与状态栏同步放大 —— 它在面板外，继承不到 */
   width: 240px;
   padding: 9px 11px;
   background: var(--theme-card-bg);
   border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
   border-radius: var(--theme-radius-md, 6px);
   box-shadow: var(--theme-shadow-lg);
-  pointer-events: none;   /* 气泡不吃鼠标，避免盖住徽章造成进出闪烁 */
+  pointer-events: none; /* 气泡不吃鼠标，避免盖住徽章造成进出闪烁 */
 }
-.bd-name { font-size: 0.8125rem; font-weight: 700; color: var(--theme-text-primary); }
-.bd-desc { font-size: 0.75rem; line-height: 1.55; color: var(--theme-text-secondary); margin-top: 3px; }
-.bd-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 7px; font-size: 0.6875rem; color: var(--theme-text-muted); }
+.bd-name {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--theme-text-primary);
+}
+.bd-desc {
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: var(--theme-text-secondary);
+  margin-top: 3px;
+}
+.bd-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 7px;
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+}
 
-.buff-pop-enter-active { transition: opacity 0.12s ease-out; }
-.buff-pop-leave-active { transition: opacity 0.1s ease-in; }
-.buff-pop-enter-from, .buff-pop-leave-to { opacity: 0; }
+.buff-pop-enter-active {
+  transition: opacity 0.12s ease-out;
+}
+.buff-pop-leave-active {
+  transition: opacity 0.1s ease-in;
+}
+.buff-pop-enter-from,
+.buff-pop-leave-to {
+  opacity: 0;
+}
 @media (prefers-reduced-motion: reduce) {
-  .buff-pop-enter-active, .buff-pop-leave-active { transition: none; }
+  .buff-pop-enter-active,
+  .buff-pop-leave-active {
+    transition: none;
+  }
 }
 
 /* ═══ 持有物 —— 页签体（AppTabs 全宽出血，列表自带内边距） ═══ */
@@ -985,15 +1134,23 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
-.hold-money, .hold-fp {
+.hold-money,
+.hold-fp {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   font-weight: 600;
 }
-.hold-money { color: var(--theme-currency-gold); }
-.hold-fp { color: var(--theme-primary); }
-.hold-meta i { font-size: 0.6875rem; opacity: 0.85; }
+.hold-money {
+  color: var(--theme-currency-gold);
+}
+.hold-fp {
+  color: var(--theme-primary);
+}
+.hold-meta i {
+  font-size: 0.6875rem;
+  opacity: 0.85;
+}
 .hold-body .item-list {
   padding: 8px 12px 4px;
 }
@@ -1059,8 +1216,12 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   justify-content: center;
   gap: 4px;
 }
-.item-footer:hover { color: var(--theme-text-secondary); }
-.item-footer i { font-size: 0.5625rem; }
+.item-footer:hover {
+  color: var(--theme-text-secondary);
+}
+.item-footer i {
+  font-size: 0.5625rem;
+}
 
 /* ═══ 条目就地展开详情 ═══ */
 .item-chevron {
@@ -1072,7 +1233,9 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 .item-row.open {
   background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
 }
-.item-row.open .item-chevron { opacity: 0.9; }
+.item-row.open .item-chevron {
+  opacity: 0.9;
+}
 .item-detail {
   /* 与上方条目等宽 —— 原先左缩进 22px 让它比条目窄一截、右侧还空着 */
   margin: 2px 0 6px;
@@ -1155,24 +1318,42 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   gap: 12px;
   padding: 10px;
 }
-.sk-block { display: flex; flex-direction: column; gap: 6px; }
+.sk-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .sk-hdr {
-  height: 10px; width: 40%;
+  height: 10px;
+  width: 40%;
   border-radius: 3px;
   background: var(--theme-surface-muted);
   animation: sk-pulse 1.5s infinite;
 }
-.sk-lines { display: flex; flex-direction: column; gap: 4px; padding-left: 4px; }
+.sk-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 4px;
+}
 .sk-l {
-  height: 14px; width: 90%;
+  height: 14px;
+  width: 90%;
   border-radius: 3px;
   background: var(--theme-surface-muted);
   animation: sk-pulse 1.5s infinite;
 }
-.sk-short { width: 50%; }
+.sk-short {
+  width: 50%;
+}
 @keyframes sk-pulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 0.7; }
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }
 
 /* ═══ 错误态 ═══ */
@@ -1187,7 +1368,10 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   padding: 16px;
   text-align: center;
 }
-.error-icon { font-size: 1.75rem; color: var(--theme-error); }
+.error-icon {
+  font-size: 1.75rem;
+  color: var(--theme-error);
+}
 .retry-btn {
   padding: 6px 16px;
   border: 1px solid var(--theme-card-border);
@@ -1198,11 +1382,15 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   cursor: pointer;
   font-family: inherit;
 }
-.retry-btn:hover { background: var(--theme-tab-hover-bg); }
+.retry-btn:hover {
+  background: var(--theme-tab-hover-bg);
+}
 
 /* ═══ 折叠动画 — 只动 opacity/transform，不动布局属性 ═══ */
 .collapse-enter-active {
-  transition: opacity 0.2s ease-out, transform 0.2s ease-out;
+  transition:
+    opacity 0.2s ease-out,
+    transform 0.2s ease-out;
 }
 .collapse-leave-active {
   transition: opacity 0.12s ease-in;

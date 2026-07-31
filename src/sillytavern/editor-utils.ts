@@ -78,12 +78,7 @@ export function movePromptItem<T>(arr: T[], from: number, to: number): T[] {
   return next;
 }
 
-export function clampNumber(
-  value: unknown,
-  min: number,
-  max: number,
-  fallback?: number,
-): number {
+export function clampNumber(value: unknown, min: number, max: number, fallback?: number): number {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n)) return fallback ?? min;
   if (n < min) return min;

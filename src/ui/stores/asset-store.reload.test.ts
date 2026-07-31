@@ -28,23 +28,23 @@
  * 「Chromium 的画布 Blob 在 IndexedDB 里的存法」这一层这里验不了 ——
  * 那一层已由真机探针单独验过（见本次诊断报告）。
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { createPinia, setActivePinia } from 'pinia'
-import type { CropBitmapLike, CropCanvasLike, ImageCropSeams } from '../lib/image-crop'
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { createPinia, setActivePinia } from 'pinia';
+import type { CropBitmapLike, CropCanvasLike, ImageCropSeams } from '../lib/image-crop';
 
 // audio-store 只用到这两个面；避开 AudioManager 单例（node 环境没有 Web Audio）
 vi.mock('./audio-store', () => ({
   useAudioStore: () => ({ refreshTracks: async () => {}, builtinTracks: [] }),
-}))
+}));
 
 // ═══════════════════════════════════════════════════════════
 // 辅助
 // ═══════════════════════════════════════════════════════════
 
 function fakeBytes(seed: number, size = 512): Uint8Array {
-  const out = new Uint8Array(size)
-  for (let i = 0; i < size; i += 1) out[i] = (seed * 31 + i * 17) % 251
-  return out
+  const out = new Uint8Array(size);
+  for (let i = 0; i < size; i += 1) out[i] = (seed * 31 + i * 17) % 251;
+  return out;
 }
 
 /**
@@ -57,11 +57,11 @@ function fakeBytes(seed: number, size = 512): Uint8Array {
  * 这里照抄那一条，不另发明。
  */
 function bytesPart(seed: number, size = 512): ArrayBuffer {
-  return fakeBytes(seed, size).slice().buffer as ArrayBuffer
+  return fakeBytes(seed, size).slice().buffer as ArrayBuffer;
 }
 
-const SOURCE_W = 900
-const SOURCE_H = 1600
+const SOURCE_W = 900;
+const SOURCE_H = 1600;
 
 /**
  * 裁剪注入缝: 解码替身报一个固定尺寸，画布替身把「画了多大一块」编成真 Blob 字节。
@@ -81,10 +81,10 @@ function cropSeams(): ImageCropSeams {
           new Blob([bytesPart(canvas.width * 7 + canvas.height, 256)], {
             type: options?.type ?? 'image/png',
           }),
-      }
-      return canvas
+      };
+      return canvas;
     },
-  }
+  };
 }
 
 /** 一个 blob 的「它到底是什么」快照 —— 报告里要的就是这四个字段 */
@@ -94,16 +94,16 @@ function describeBlob(v: unknown): Record<string, unknown> {
     isBlob: v instanceof Blob,
     size: (v as Blob | undefined)?.size,
     type: (v as Blob | undefined)?.type,
-  }
+  };
 }
 
-type DatabaseModule = typeof import('@engine/database')
-type StoreModule = typeof import('./asset-store')
-type AssetStore = ReturnType<StoreModule['useAssetStore']>
+type DatabaseModule = typeof import('@engine/database');
+type StoreModule = typeof import('./asset-store');
+type AssetStore = ReturnType<StoreModule['useAssetStore']>;
 
 interface Session {
-  db: DatabaseModule
-  store: AssetStore
+  db: DatabaseModule;
+  store: AssetStore;
 }
 
 /**
@@ -113,30 +113,30 @@ interface Session {
  * 于是 `getDatabase()` 会 new 一个 Dexie 并**重新 open** 同一个（fake-）IndexedDB 库。
  */
 async function openSession(): Promise<Session> {
-  vi.resetModules()
-  const db: DatabaseModule = await import('@engine/database')
-  const storeModule: StoreModule = await import('./asset-store')
-  await db.initializeDatabase()
-  setActivePinia(createPinia())
-  const store = storeModule.useAssetStore()
-  await store.init()
-  return { db, store }
+  vi.resetModules();
+  const db: DatabaseModule = await import('@engine/database');
+  const storeModule: StoreModule = await import('./asset-store');
+  await db.initializeDatabase();
+  setActivePinia(createPinia());
+  const store = storeModule.useAssetStore();
+  await store.init();
+  return { db, store };
 }
 
 /** 关掉这次会话的连接 —— 相当于关掉标签页 */
 function closeSession(s: Session): void {
-  s.db.getDatabase().close()
+  s.db.getDatabase().close();
 }
 
 beforeEach(async () => {
-  vi.resetModules()
-  const db: DatabaseModule = await import('@engine/database')
+  vi.resetModules();
+  const db: DatabaseModule = await import('@engine/database');
   try {
-    await db.clearAllData()
+    await db.clearAllData();
   } catch {
     /* 首次运行时库还不存在 */
   }
-})
+});
 
 // ═══════════════════════════════════════════════════════════
 // 复现
@@ -145,52 +145,52 @@ beforeEach(async () => {
 describe('刷新之后素材还读得出字节吗（真机症状复现）', () => {
   it('裁剪落库的一对（立绘+头像）：关连接 → 重开 → 两行都还能取到真 Blob 与 object URL', async () => {
     // ── 会话 1: 导入 ──────────────────────────────────────
-    const s1 = await openSession()
-    const source = new File([bytesPart(1, 4096)], '来源.webp', { type: 'image/webp' })
+    const s1 = await openSession();
+    const source = new File([bytesPart(1, 4096)], '来源.webp', { type: 'image/webp' });
 
     const res = await s1.store.importPortraitPair(
       source,
       '亚瑟',
       { portrait: { x: 0, y: 0, w: 900, h: 1600 }, avatar: { x: 300, y: 100, w: 400, h: 400 } },
       cropSeams(),
-    )
-    expect(res.outcome).toBe('ok')
-    expect(res.portraitId).toBeDefined()
-    expect(res.avatarId).toBeDefined()
-    const ids = [res.portraitId!, res.avatarId!]
+    );
+    expect(res.outcome).toBe('ok');
+    expect(res.portraitId).toBeDefined();
+    expect(res.avatarId).toBeDefined();
+    const ids = [res.portraitId!, res.avatarId!];
 
     // 落库当时: 字节读得出、URL 铸得出（真机上这一步也是好的）
     for (const id of ids) {
-      const blob = await s1.db.getAssetBlob(id)
-      expect(describeBlob(blob)).toMatchObject({ isBlob: true })
-      expect(await s1.store.assetUrl(id)).not.toBeNull()
+      const blob = await s1.db.getAssetBlob(id);
+      expect(describeBlob(blob)).toMatchObject({ isBlob: true });
+      expect(await s1.store.assetUrl(id)).not.toBeNull();
     }
-    const rowsBefore = await s1.db.getAssets()
-    expect(rowsBefore).toHaveLength(2)
+    const rowsBefore = await s1.db.getAssets();
+    expect(rowsBefore).toHaveLength(2);
     // 这里记的是 webp，因为**本替身真的按点单的类型出了 blob**（`options?.type`）。
     // 行里的 ext/mime 一律取自**产出的** blob，不取自开裁前的预测 —— 编码器不认
     // webp 而退回 PNG 时该记 png，那一档钉在 asset-store.test.ts 的
     // 「编码器不认 webp、悄悄退回 PNG 字节」。
-    expect(rowsBefore.every((r) => r.ext === 'webp' && r.mime === 'image/webp')).toBe(true)
+    expect(rowsBefore.every((r) => r.ext === 'webp' && r.mime === 'image/webp')).toBe(true);
 
     // ── 刷新 ──────────────────────────────────────────────
-    closeSession(s1)
-    const s2 = await openSession()
+    closeSession(s1);
+    const s2 = await openSession();
 
     // 元数据照旧（真机上这一半是对的 —— 名字/类型/体积都在）
-    expect(s2.store.assets).toHaveLength(2)
+    expect(s2.store.assets).toHaveLength(2);
     for (const id of ids) {
-      expect(s2.store.assets.find((r) => r.id === id)).toBeDefined()
+      expect(s2.store.assets.find((r) => r.id === id)).toBeDefined();
     }
 
     // 🔴 症状所在: 刷新之后字节还在不在、URL 还铸不铸得出来
     for (const id of ids) {
-      const blob = await s2.db.getAssetBlob(id)
-      expect(describeBlob(blob)).toMatchObject({ isBlob: true })
-      expect((blob as Blob).size).toBeGreaterThan(0)
-      expect(await s2.store.assetUrl(id)).not.toBeNull()
+      const blob = await s2.db.getAssetBlob(id);
+      expect(describeBlob(blob)).toMatchObject({ isBlob: true });
+      expect((blob as Blob).size).toBeGreaterThan(0);
+      expect(await s2.store.assetUrl(id)).not.toBeNull();
     }
-  })
+  });
 
   /**
    * 真机症状说的是 `assetBlobs` **一条记录都没有**（不是字节读不出来，是表空的）。
@@ -202,91 +202,91 @@ describe('刷新之后素材还读得出字节吗（真机症状复现）', () =
    * 裁剪 = 画布产物；整图 = `sameBytesAs` 交回来的**源对象本体**；skip = 不写行。
    */
   it('assetBlobs 行数：重开之后必须与 assetMeta 一一对应（裁剪 / 整图 / 跳过）', async () => {
-    const s1 = await openSession()
+    const s1 = await openSession();
 
     await s1.store.importPortraitPair(
       new File([bytesPart(5, 4096)], '甲.webp', { type: 'image/webp' }),
       '测甲',
       { portrait: { x: 0, y: 0, w: 900, h: 1600 }, avatar: { x: 200, y: 50, w: 400, h: 400 } },
       cropSeams(),
-    )
+    );
     // 整图: 两半都不过画布，存的是源对象本身
     await s1.store.importPortraitPair(
       new File([bytesPart(6, 2048)], '乙.webp', { type: 'image/webp' }),
       '测乙',
       { portrait: 'whole', avatar: 'whole' },
       cropSeams(),
-    )
+    );
     // 一半跳过: 只该长出一行
     await s1.store.importPortraitPair(
       new File([bytesPart(7, 2048)], '丙.webp', { type: 'image/webp' }),
       '测丙',
       { portrait: { x: 0, y: 0, w: 900, h: 1600 }, avatar: 'skip' },
       cropSeams(),
-    )
+    );
 
-    closeSession(s1)
-    const s2 = await openSession()
+    closeSession(s1);
+    const s2 = await openSession();
 
-    const db = s2.db.getDatabase()
-    const metaRows = await db.assetMeta.toArray()
-    const blobRows = await db.assetBlobs.toArray()
-    expect(metaRows).toHaveLength(5) // 2 + 2 + 1
+    const db = s2.db.getDatabase();
+    const metaRows = await db.assetMeta.toArray();
+    const blobRows = await db.assetBlobs.toArray();
+    expect(metaRows).toHaveLength(5); // 2 + 2 + 1
     // 🔴 真机上这一行是 0 —— 元数据在、字节表空
-    expect(blobRows).toHaveLength(metaRows.length)
-    expect(new Set(blobRows.map((r) => r.id))).toEqual(new Set(metaRows.map((r) => r.id)))
+    expect(blobRows).toHaveLength(metaRows.length);
+    expect(new Set(blobRows.map((r) => r.id))).toEqual(new Set(metaRows.map((r) => r.id)));
     for (const r of blobRows) {
-      expect(describeBlob(r.blob)).toMatchObject({ isBlob: true })
-      expect((r.blob as Blob).size).toBeGreaterThan(0)
+      expect(describeBlob(r.blob)).toMatchObject({ isBlob: true });
+      expect((r.blob as Blob).size).toBeGreaterThan(0);
     }
-  })
+  });
 
   it('普通文件导入的一行：同样跨刷新可读（作为裁剪路径的对照组）', async () => {
-    const s1 = await openSession()
-    const file = new File([bytesPart(2, 1024)], 'IMG_0001.png', { type: 'image/png' })
-    const r = await s1.store.importForCharacter(file, '兰斯', '头像')
-    expect(r.outcome).toBe('ok')
-    const id = r.id!
+    const s1 = await openSession();
+    const file = new File([bytesPart(2, 1024)], 'IMG_0001.png', { type: 'image/png' });
+    const r = await s1.store.importForCharacter(file, '兰斯', '头像');
+    expect(r.outcome).toBe('ok');
+    const id = r.id!;
 
-    expect(describeBlob(await s1.db.getAssetBlob(id))).toMatchObject({ isBlob: true })
+    expect(describeBlob(await s1.db.getAssetBlob(id))).toMatchObject({ isBlob: true });
 
-    closeSession(s1)
-    const s2 = await openSession()
+    closeSession(s1);
+    const s2 = await openSession();
 
-    const blob = await s2.db.getAssetBlob(id)
-    expect(describeBlob(blob)).toMatchObject({ isBlob: true })
-    expect((blob as Blob).size).toBe(1024)
-    expect(await s2.store.assetUrl(id)).not.toBeNull()
-  })
+    const blob = await s2.db.getAssetBlob(id);
+    expect(describeBlob(blob)).toMatchObject({ isBlob: true });
+    expect((blob as Blob).size).toBe(1024);
+    expect(await s2.store.assetUrl(id)).not.toBeNull();
+  });
 
   it('诊断: 裁剪路径与普通导入路径存进 assetBlobs 的是同一种东西', async () => {
-    const s1 = await openSession()
+    const s1 = await openSession();
 
     const pair = await s1.store.importPortraitPair(
       new File([bytesPart(3, 4096)], '来源.webp', { type: 'image/webp' }),
       '亚瑟',
       { portrait: { x: 0, y: 0, w: 900, h: 1600 }, avatar: 'skip' },
       cropSeams(),
-    )
+    );
     const plain = await s1.store.importForCharacter(
       new File([bytesPart(4, 1024)], 'IMG_0002.png', { type: 'image/png' }),
       '兰斯',
       '头像',
-    )
+    );
 
-    closeSession(s1)
-    const s2 = await openSession()
+    closeSession(s1);
+    const s2 = await openSession();
 
-    const raw = await s2.db.getDatabase().assetBlobs.toArray()
-    const byId = new Map(raw.map((r) => [r.id, r.blob]))
-    const cropped = describeBlob(byId.get(pair.portraitId!))
-    const imported = describeBlob(byId.get(plain.id!))
+    const raw = await s2.db.getDatabase().assetBlobs.toArray();
+    const byId = new Map(raw.map((r) => [r.id, r.blob]));
+    const cropped = describeBlob(byId.get(pair.portraitId!));
+    const imported = describeBlob(byId.get(plain.id!));
 
     // 两条路径存进去的东西必须是同一类 —— 不同就是最强的嫌疑
-    expect(cropped.ctor).toBe(imported.ctor)
-    expect(cropped.isBlob).toBe(true)
-    expect(imported.isBlob).toBe(true)
-  })
+    expect(cropped.ctor).toBe(imported.ctor);
+    expect(cropped.isBlob).toBe(true);
+    expect(imported.isBlob).toBe(true);
+  });
 
   /**
    * **阴性对照** —— 证明上面那几条断言真的有判别力，不是恒真。
@@ -300,9 +300,9 @@ describe('刷新之后素材还读得出字节吗（真机症状复现）', () =
    * 上面三条也就不再能证明任何事。
    */
   it('阴性对照: 存进去的若不是真 Blob，刷新后 assetUrl 必然是 null（本测试确实抓得到）', async () => {
-    const s1 = await openSession()
-    const now = Date.now()
-    const id = 'asset_not-a-blob'
+    const s1 = await openSession();
+    const now = Date.now();
+    const id = 'asset_not-a-blob';
     await s1.db.getDatabase().assetMeta.put({
       id,
       name: '假货',
@@ -312,15 +312,15 @@ describe('刷新之后素材还读得出字节吗（真机症状复现）', () =
       bytes: 64,
       createdAt: now,
       updatedAt: now,
-    })
-    await s1.db.getDatabase().assetBlobs.put({ id, blob: fakeBytes(9, 64) as unknown as Blob })
+    });
+    await s1.db.getDatabase().assetBlobs.put({ id, blob: fakeBytes(9, 64) as unknown as Blob });
 
-    closeSession(s1)
-    const s2 = await openSession()
+    closeSession(s1);
+    const s2 = await openSession();
 
-    const stored = await s2.db.getAssetBlob(id)
-    expect(stored).toBeDefined()
-    expect(stored instanceof Blob).toBe(false) // 不是 Blob —— 这正是被模拟的缺陷
-    expect(await s2.store.assetUrl(id)).toBeNull() // …于是界面上就是一张空图
-  })
-})
+    const stored = await s2.db.getAssetBlob(id);
+    expect(stored).toBeDefined();
+    expect(stored instanceof Blob).toBe(false); // 不是 Blob —— 这正是被模拟的缺陷
+    expect(await s2.store.assetUrl(id)).toBeNull(); // …于是界面上就是一张空图
+  });
+});

@@ -17,23 +17,23 @@
  * 📌 之前 ScenePanel.vue 与 CharacterListPanel.vue 各有一份逐字相同的本地实现
  * （当时的范围栅栏不允许新建共享组件文件）—— 现在两处都用这一份。
  */
-import { useAssetImage } from '../../composables/useAssetImage'
-import type { AssetType } from '@engine/types'
+import { useAssetImage } from '../../composables/useAssetImage';
+import type { AssetType } from '@engine/types';
 
 const props = withDefaults(
   defineProps<{
     /** 角色名，**严格 `===`**（D2）；空 / null → 直接走插槽兜底 */
-    name?: string | null
+    name?: string | null;
     /** 单个类型（精确匹配）或类型链（按序降级） */
-    type: AssetType | readonly AssetType[]
+    type: AssetType | readonly AssetType[];
   }>(),
   { name: '' },
-)
+);
 
 const { url, isVideo } = useAssetImage(
   () => props.name,
   () => props.type,
-)
+);
 </script>
 
 <template>

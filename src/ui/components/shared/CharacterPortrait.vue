@@ -22,40 +22,40 @@
  * 百分比）。若 origin 固定在中心而焦点在别处，放大会把刚对准的地方推出框外 ——
  * 用户的感受是「这两个滑块在互相打架」。
  */
-import { computed } from 'vue'
-import { clampAssetFraming } from '@engine/asset-types'
-import type { AssetFraming } from '@engine/types'
+import { computed } from 'vue';
+import { clampAssetFraming } from '@engine/asset-types';
+import type { AssetFraming } from '@engine/types';
 
 const props = withDefaults(
   defineProps<{
     /** 角色名 —— 只用于 alt / aria，**不参与解析**（解析在调用方） */
-    name: string
+    name: string;
     /** object URL；null = 没图（本组件不做兜底，调用方该换成 AvatarPanel） */
-    src?: string | null
+    src?: string | null;
     /** `src` 是 mp4 吗（D7: `头像` / `立绘bg` 允许视频）。由**行**判定，别嗅 URL */
-    video?: boolean
+    video?: boolean;
     /**
      * 要用的取景，**可以是任意来路的垃圾**，本组件负责收敛。
      * 调节中的实时预览直接把草稿传进来即可（本组件不区分草稿与落库值）。
      */
-    framing?: AssetFraming | null
+    framing?: AssetFraming | null;
   }>(),
   { src: null, video: false, framing: null },
-)
+);
 
 /** 真正交给 CSS 的那一份，**永远夹逼过** */
-const framing = computed<AssetFraming>(() => clampAssetFraming(props.framing))
+const framing = computed<AssetFraming>(() => clampAssetFraming(props.framing));
 
 const mediaStyle = computed(() => {
-  const f = framing.value
-  const focus = `${f.x}% ${f.y}%`
+  const f = framing.value;
+  const focus = `${f.x}% ${f.y}%`;
   return {
     objectPosition: focus,
     transform: `scale(${f.scale})`,
     // 与焦点同一对百分比 —— 放大绕着看的那一点发生，两个滑块才不打架
     transformOrigin: focus,
-  }
-})
+  };
+});
 </script>
 
 <template>

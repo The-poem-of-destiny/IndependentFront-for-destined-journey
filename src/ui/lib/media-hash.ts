@@ -23,11 +23,11 @@
 
 /** `crypto.subtle` 的窄接口 —— 只用 digest，不引 DOM 全量类型 */
 interface SubtleLike {
-  digest: (algorithm: string, data: Uint8Array) => Promise<ArrayBuffer>
+  digest: (algorithm: string, data: Uint8Array) => Promise<ArrayBuffer>;
 }
 
 /** 本项目唯一使用的摘要算法。改它等于换哈希空间，会让存量 hash 全部失配 */
-const HASH_ALGORITHM = 'SHA-256'
+const HASH_ALGORITHM = 'SHA-256';
 
 /**
  * 取 `crypto.subtle`，惰性 + 特性检测。拿不到返回 `undefined`。
@@ -36,23 +36,23 @@ const HASH_ALGORITHM = 'SHA-256'
  * `undefined` 才发现 —— 读包路径要据此报一次 `hash-unavailable` 告警。
  */
 export function isMediaHashAvailable(): boolean {
-  return resolveSubtle() !== undefined
+  return resolveSubtle() !== undefined;
 }
 
 function resolveSubtle(): SubtleLike | undefined {
-  const scope = globalThis as { crypto?: { subtle?: unknown } }
-  const subtle = scope.crypto?.subtle
+  const scope = globalThis as { crypto?: { subtle?: unknown } };
+  const subtle = scope.crypto?.subtle;
   if (subtle && typeof (subtle as SubtleLike).digest === 'function') {
-    return subtle as SubtleLike
+    return subtle as SubtleLike;
   }
-  return undefined
+  return undefined;
 }
 
 function toHex(buffer: ArrayBuffer): string {
-  const view = new Uint8Array(buffer)
-  let out = ''
-  for (let i = 0; i < view.length; i += 1) out += view[i].toString(16).padStart(2, '0')
-  return out
+  const view = new Uint8Array(buffer);
+  let out = '';
+  for (let i = 0; i < view.length; i += 1) out += view[i].toString(16).padStart(2, '0');
+  return out;
 }
 
 /**
@@ -63,12 +63,12 @@ function toHex(buffer: ArrayBuffer): string {
  * 后续照旧走编号路径。
  */
 export async function hashMediaBytes(bytes: Uint8Array): Promise<string | undefined> {
-  const subtle = resolveSubtle()
-  if (!subtle) return undefined
+  const subtle = resolveSubtle();
+  if (!subtle) return undefined;
   try {
-    return toHex(await subtle.digest(HASH_ALGORITHM, bytes))
+    return toHex(await subtle.digest(HASH_ALGORITHM, bytes));
   } catch {
-    return undefined
+    return undefined;
   }
 }
 
@@ -79,10 +79,10 @@ export async function hashMediaBytes(bytes: Uint8Array): Promise<string | undefi
  * `new Uint8Array(await file.arrayBuffer())` —— 那行代码写第二遍就是下一处漂移。
  */
 export async function hashMediaBlob(blob: Blob): Promise<string | undefined> {
-  if (!isMediaHashAvailable()) return undefined
+  if (!isMediaHashAvailable()) return undefined;
   try {
-    return await hashMediaBytes(new Uint8Array(await blob.arrayBuffer()))
+    return await hashMediaBytes(new Uint8Array(await blob.arrayBuffer()));
   } catch {
-    return undefined
+    return undefined;
   }
 }

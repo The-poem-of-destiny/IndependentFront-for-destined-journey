@@ -12,9 +12,16 @@
  */
 
 import type {
-  EffectDefinition, EffectResult, StatePatch, GameEvent,
-  VarsPatch, StatusEffectPayload, CharacterUpdatePayload,
-  DiceRollPayload, ItemEffectPayload, SkillEffectPayload,
+  EffectDefinition,
+  EffectResult,
+  StatePatch,
+  GameEvent,
+  VarsPatch,
+  StatusEffectPayload,
+  CharacterUpdatePayload,
+  DiceRollPayload,
+  ItemEffectPayload,
+  SkillEffectPayload,
   CharacterState,
 } from './types';
 import { executeDiceRoll } from './dice';
@@ -94,7 +101,7 @@ export class EffectRuntime {
       }
 
       let patches: StatePatch[] = [];
-      let childEffects: EffectDefinition[] = [];
+      const childEffects: EffectDefinition[] = [];
 
       switch (effect.type) {
         case 'vars_patch':
@@ -140,9 +147,7 @@ export class EffectRuntime {
 
   /** 将所有 EffectResult 展平为 StatePatch 列表 */
   collectPatches(results: EffectResult[]): StatePatch[] {
-    return results
-      .filter(r => r.success)
-      .flatMap(r => r.patches);
+    return results.filter((r) => r.success).flatMap((r) => r.patches);
   }
 
   // ========== 效果分发 ==========
@@ -201,36 +206,42 @@ export class EffectRuntime {
 
   private executeStatusEffect(effect: EffectDefinition): StatePatch[] {
     const payload = effect.payload as StatusEffectPayload;
-    return [{
-      op: payload.action === 'remove' ? 'remove_status_effect' : 'add_status_effect',
-      target: `characters.${payload.targetCharacterId}`,
-      value: payload.effect,
-    }];
+    return [
+      {
+        op: payload.action === 'remove' ? 'remove_status_effect' : 'add_status_effect',
+        target: `characters.${payload.targetCharacterId}`,
+        value: payload.effect,
+      },
+    ];
   }
 
   private executeCharacterUpdate(effect: EffectDefinition): StatePatch[] {
     const payload = effect.payload as CharacterUpdatePayload;
-    return [{
-      op: 'update_character',
-      target: `characters.${payload.characterId}`,
-      value: payload.changes,
-    }];
+    return [
+      {
+        op: 'update_character',
+        target: `characters.${payload.characterId}`,
+        value: payload.changes,
+      },
+    ];
   }
 
   private executeDiceEffect(effect: EffectDefinition): StatePatch[] {
     const payload = effect.payload as DiceRollPayload;
     const result = executeDiceRoll(payload);
 
-    return [{
-      op: 'set_variable',
-      target: 'variables.lastDiceRoll',
-      value: result,
-      metadata: {
-        criticalSuccess: result.criticalSuccess,
-        criticalFailure: result.criticalFailure,
-        meetsDC: result.meetsDC,
+    return [
+      {
+        op: 'set_variable',
+        target: 'variables.lastDiceRoll',
+        value: result,
+        metadata: {
+          criticalSuccess: result.criticalSuccess,
+          criticalFailure: result.criticalFailure,
+          meetsDC: result.meetsDC,
+        },
       },
-    }];
+    ];
   }
 
   private executeItemEffect(effect: EffectDefinition): StatePatch[] {
@@ -255,11 +266,13 @@ export class EffectRuntime {
       value = { name: payload.itemId };
     }
 
-    return [{
-      op,
-      target: `characters.${payload.characterId}`,
-      value,
-    }];
+    return [
+      {
+        op,
+        target: `characters.${payload.characterId}`,
+        value,
+      },
+    ];
   }
 
   private executeSkillEffect(effect: EffectDefinition): StatePatch[] {
@@ -272,14 +285,15 @@ export class EffectRuntime {
     const op = opMap[payload.action] ?? 'update_skill';
 
     // M2 契约: 按名寻址（payload.skillId 在效果定义里本来就是名字）；targetId 挪进 metadata // M3 重写
-    return [{
-      op,
-      target: `characters.${payload.characterId}`,
-      value: op === 'add_skill'
-        ? { name: payload.skillId }
-        : { name: payload.skillId, changes: {} },
-      metadata: payload.targetId ? { targetId: payload.targetId } : undefined,
-    }];
+    return [
+      {
+        op,
+        target: `characters.${payload.characterId}`,
+        value:
+          op === 'add_skill' ? { name: payload.skillId } : { name: payload.skillId, changes: {} },
+        metadata: payload.targetId ? { targetId: payload.targetId } : undefined,
+      },
+    ];
   }
 
   // ========== 条件评估 ==========
@@ -288,14 +302,18 @@ export class EffectRuntime {
   private evaluateCondition(condition: string): boolean {
     try {
       // 替换变量引用
-      let expr = condition.replace(/\{\{([^}]+)\}\}/g, (_match, path: string) => {
+      const expr = condition.replace(/\{\{([^}]+)\}\}/g, (_match, path: string) => {
         const value = this.resolvePath(path.trim());
         return typeof value === 'string' ? JSON.stringify(value) : String(value);
       });
 
-      const fn = new Function('vars', 'chars', `
+      const fn = new Function(
+        'vars',
+        'chars',
+        `
         try { return !!(${expr}); } catch { return false; }
-      `);
+      `,
+      );
       return fn(this.variables, Object.fromEntries(this.characters));
     } catch {
       return condition.includes('true') && !condition.includes('false');

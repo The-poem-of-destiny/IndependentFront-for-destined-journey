@@ -35,7 +35,10 @@ export async function generateMemoryId(saveId: string): Promise<string> {
 // ========== 校验 ==========
 
 /** 校验记忆正文是否满足最低字数要求 */
-export function validateMemoryContent(content: string, minChars: number = 200): {
+export function validateMemoryContent(
+  content: string,
+  minChars: number = 200,
+): {
   valid: boolean;
   reason?: string;
 } {
@@ -126,7 +129,9 @@ export interface SummarizeAndSaveOptions {
  * 4. 计算 embedding
  * 5. 持久化
  */
-export async function summarizeAndSave(options: SummarizeAndSaveOptions): Promise<MemoryRecord | null> {
+export async function summarizeAndSave(
+  options: SummarizeAndSaveOptions,
+): Promise<MemoryRecord | null> {
   const {
     saveId,
     agentRawOutput,
@@ -202,7 +207,7 @@ export async function createCompressionSummaryMemory(
   const id = await generateMemoryId(saveId);
   const now = Date.now();
   const earliestTime = oldMemories.reduce(
-    (min, m) => m.createdAt < min ? m.createdAt : min,
+    (min, m) => (m.createdAt < min ? m.createdAt : min),
     oldMemories[0]?.createdAt ?? now,
   );
 

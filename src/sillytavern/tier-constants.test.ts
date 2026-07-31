@@ -37,9 +37,17 @@ describe('TIER_CONFIGS', () => {
 
   it('每个条目应包含所有必需的 TierConfig 字段', () => {
     const requiredKeys = [
-      'tier', 'name', 'levelRange', 'hpMultiplier', 'mpMultiplier',
-      'spMultiplier', 'combatCoefficient', 'expCap', 'qualityCap',
-      'populationWeight', 'attributeCap',
+      'tier',
+      'name',
+      'levelRange',
+      'hpMultiplier',
+      'mpMultiplier',
+      'spMultiplier',
+      'combatCoefficient',
+      'expCap',
+      'qualityCap',
+      'populationWeight',
+      'attributeCap',
     ];
     TIER_CONFIGS.forEach((cfg) => {
       for (const key of requiredKeys) {
@@ -136,8 +144,22 @@ describe('calcResources', () => {
   });
 
   it('无效 tier (99 或 0) 应返回兜底值 {hp:100, maxHp:100, mp:50, maxMp:50, sp:50, maxSp:50}', () => {
-    expect(calcResources(99, { str: 10, dex: 10, con: 10, int: 10, spi: 10 })).toEqual({ hp: 100, maxHp: 100, mp: 50, maxMp: 50, sp: 50, maxSp: 50 });
-    expect(calcResources(0, { str: 10, dex: 10, con: 10, int: 10, spi: 10 })).toEqual({ hp: 100, maxHp: 100, mp: 50, maxMp: 50, sp: 50, maxSp: 50 });
+    expect(calcResources(99, { str: 10, dex: 10, con: 10, int: 10, spi: 10 })).toEqual({
+      hp: 100,
+      maxHp: 100,
+      mp: 50,
+      maxMp: 50,
+      sp: 50,
+      maxSp: 50,
+    });
+    expect(calcResources(0, { str: 10, dex: 10, con: 10, int: 10, spi: 10 })).toEqual({
+      hp: 100,
+      maxHp: 100,
+      mp: 50,
+      maxMp: 50,
+      sp: 50,
+      maxSp: 50,
+    });
   });
 
   it('T7, 极限属性 20（五维和 100）→ HP=200100, MP=320000, SP=320000', () => {
@@ -300,7 +322,7 @@ describe('getCombatCoefficient', () => {
   });
 
   it('中间层级系数应单调递增', () => {
-    const coeffs = [1, 2, 3, 4, 5, 6, 7].map(t => getCombatCoefficient(t));
+    const coeffs = [1, 2, 3, 4, 5, 6, 7].map((t) => getCombatCoefficient(t));
     for (let i = 1; i < coeffs.length; i++) {
       expect(coeffs[i]).toBeGreaterThan(coeffs[i - 1]);
     }

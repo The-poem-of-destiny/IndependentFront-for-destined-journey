@@ -18,11 +18,7 @@ import {
   destroyEventBus,
   destroyAllEventBuses,
 } from './game-event';
-import type {
-  ChainContext,
-  ChainSubscription,
-  ChainHandler,
-} from './game-event';
+import type { ChainContext, ChainSubscription, ChainHandler } from './game-event';
 import type {
   GameEvent,
   GameEventType,
@@ -52,7 +48,9 @@ function makeCraftRequest(overrides: Partial<CraftActionRequest> = {}): CraftAct
     quantity: 1,
     recipeId: 'recipe_001',
     hasRecipe: true,
-    materials: [{ itemId: 'iron_ore', itemName: '铁矿石', quantity: 3, quality: '普通', dcModifier: 0 }],
+    materials: [
+      { itemId: 'iron_ore', itemName: '铁矿石', quantity: 3, quality: '普通', dcModifier: 0 },
+    ],
     crafterTier: 1,
     crafterLevel: 3,
     coreAttributeValue: 10,
@@ -118,10 +116,7 @@ describe('EventBus', () => {
 
   it('subscribeWhen 应在 filter 返回 true 时触发', async () => {
     const handler = vi.fn();
-    bus.subscribeWhen(
-      (e) => e.type === 'combat_action',
-      handler,
-    );
+    bus.subscribeWhen((e) => e.type === 'combat_action', handler);
 
     await bus.publish(createGameEvent('combat_action', {}));
 
@@ -130,10 +125,7 @@ describe('EventBus', () => {
 
   it('subscribeWhen 应在 filter 返回 false 时不触发', async () => {
     const handler = vi.fn();
-    bus.subscribeWhen(
-      (e) => e.type === 'combat_action',
-      handler,
-    );
+    bus.subscribeWhen((e) => e.type === 'combat_action', handler);
 
     await bus.publish(createGameEvent('craft_action', {}));
 
@@ -170,10 +162,7 @@ describe('EventBus', () => {
 
   it('subscribeWhen 返回的取消函数应停止条件处理器', async () => {
     const handler = vi.fn();
-    const unsubscribe = bus.subscribeWhen(
-      (e) => e.type === 'combat_action',
-      handler,
-    );
+    const unsubscribe = bus.subscribeWhen((e) => e.type === 'combat_action', handler);
 
     await bus.publish(createGameEvent('combat_action', {}));
     expect(handler).toHaveBeenCalledTimes(1);
@@ -661,17 +650,26 @@ describe('emitChain', () => {
     bus.subscribeChain({
       type: 'test.order',
       priority: 10,
-      handler: () => { order.push('high'); return {}; },
+      handler: () => {
+        order.push('high');
+        return {};
+      },
     });
     bus.subscribeChain({
       type: 'test.order',
       priority: 1,
-      handler: () => { order.push('low'); return {}; },
+      handler: () => {
+        order.push('low');
+        return {};
+      },
     });
     bus.subscribeChain({
       type: 'test.order',
       priority: 5,
-      handler: () => { order.push('mid'); return {}; },
+      handler: () => {
+        order.push('mid');
+        return {};
+      },
     });
 
     await bus.emitChain('test.order', {});
@@ -687,19 +685,28 @@ describe('emitChain', () => {
       type: 'test.order',
       priority: 5,
       order: 3,
-      handler: () => { seq.push(3); return {}; },
+      handler: () => {
+        seq.push(3);
+        return {};
+      },
     });
     bus.subscribeChain({
       type: 'test.order',
       priority: 5,
       order: 1,
-      handler: () => { seq.push(1); return {}; },
+      handler: () => {
+        seq.push(1);
+        return {};
+      },
     });
     bus.subscribeChain({
       type: 'test.order',
       priority: 5,
       order: 2,
-      handler: () => { seq.push(2); return {}; },
+      handler: () => {
+        seq.push(2);
+        return {};
+      },
     });
 
     await bus.emitChain('test.order', {});
@@ -711,15 +718,24 @@ describe('emitChain', () => {
     const seq: string[] = [];
     bus.subscribeChain({
       type: 'test.stable',
-      handler: () => { seq.push('first'); return {}; },
+      handler: () => {
+        seq.push('first');
+        return {};
+      },
     });
     bus.subscribeChain({
       type: 'test.stable',
-      handler: () => { seq.push('second'); return {}; },
+      handler: () => {
+        seq.push('second');
+        return {};
+      },
     });
     bus.subscribeChain({
       type: 'test.stable',
-      handler: () => { seq.push('third'); return {}; },
+      handler: () => {
+        seq.push('third');
+        return {};
+      },
     });
 
     await bus.emitChain('test.stable', {});
@@ -734,12 +750,18 @@ describe('emitChain', () => {
     bus.subscribeChain({
       type: 'combat.attack.collect',
       owner: 'char_hero',
-      handler: (p) => { seen.push('hero'); return p; },
+      handler: (p) => {
+        seen.push('hero');
+        return p;
+      },
     });
     bus.subscribeChain({
       type: 'combat.attack.collect',
       owner: 'char_absent',
-      handler: (p) => { seen.push('absent'); return p; },
+      handler: (p) => {
+        seen.push('absent');
+        return p;
+      },
     });
 
     // combatants 只含 hero，不含 absent
@@ -757,19 +779,21 @@ describe('emitChain', () => {
     bus.subscribeChain({
       type: 'combat.attack.collect',
       // owner 缺省 = 永在场
-      handler: (p) => { seen.push('global'); return p; },
+      handler: (p) => {
+        seen.push('global');
+        return p;
+      },
     });
     bus.subscribeChain({
       type: 'combat.attack.collect',
       owner: 'char_hero',
-      handler: (p) => { seen.push('hero'); return p; },
+      handler: (p) => {
+        seen.push('hero');
+        return p;
+      },
     });
 
-    await bus.emitChain(
-      'combat.attack.collect',
-      { dmg: 0 },
-      { combatants: ['char_hero'] },
-    );
+    await bus.emitChain('combat.attack.collect', { dmg: 0 }, { combatants: ['char_hero'] });
 
     expect(seen).toEqual(['global', 'hero']);
   });
@@ -779,12 +803,18 @@ describe('emitChain', () => {
     bus.subscribeChain({
       type: 'combat.attack.collect',
       owner: 'char_a',
-      handler: (p) => { seen.push('a'); return p; },
+      handler: (p) => {
+        seen.push('a');
+        return p;
+      },
     });
     bus.subscribeChain({
       type: 'combat.attack.collect',
       owner: 'char_b',
-      handler: (p) => { seen.push('b'); return p; },
+      handler: (p) => {
+        seen.push('b');
+        return p;
+      },
     });
 
     // 不传 combatants
@@ -800,12 +830,18 @@ describe('emitChain', () => {
     bus.subscribeChain({
       type: 'test.cond',
       condition: () => false,
-      handler: (p) => { seen.push('skipped'); return p; },
+      handler: (p) => {
+        seen.push('skipped');
+        return p;
+      },
     });
     bus.subscribeChain({
       type: 'test.cond',
       condition: () => true,
-      handler: (p) => { seen.push('executed'); return p; },
+      handler: (p) => {
+        seen.push('executed');
+        return p;
+      },
     });
 
     await bus.emitChain('test.cond', {});
@@ -822,7 +858,10 @@ describe('emitChain', () => {
     bus.subscribeChain({
       type: 'test.cond.params',
       // 第二个 handler 的 condition 应该看到 +50 后的值
-      condition: (p) => { condSawBaseDamage = p.baseDamage; return true; },
+      condition: (p) => {
+        condSawBaseDamage = p.baseDamage;
+        return true;
+      },
       handler: (p) => p,
     });
 
@@ -839,15 +878,24 @@ describe('emitChain', () => {
 
     bus.subscribeChain({
       type: 'test.err',
-      handler: (p) => { seen.push('first'); return { ...p, value: 1 }; },
+      handler: (p) => {
+        seen.push('first');
+        return { ...p, value: 1 };
+      },
     });
     bus.subscribeChain({
       type: 'test.err',
-      handler: () => { seen.push('boom'); throw new Error('BOOM'); },
+      handler: () => {
+        seen.push('boom');
+        throw new Error('BOOM');
+      },
     });
     bus.subscribeChain({
       type: 'test.err',
-      handler: (p) => { seen.push('third'); return { ...p, value: p.value + 10 }; },
+      handler: (p) => {
+        seen.push('third');
+        return { ...p, value: p.value + 10 };
+      },
     });
 
     const result = await bus.emitChain('test.err', { value: 0 });
@@ -982,7 +1030,10 @@ describe('emitChain', () => {
     // 验证返回新对象的常见用法 + 同引用修改也兼容（链只看返回值）
     bus.subscribeChain({
       type: 'test.mutate',
-      handler: (p) => { (p as any).touched = true; return p; },
+      handler: (p) => {
+        (p as any).touched = true;
+        return p;
+      },
     });
 
     const result = await bus.emitChain('test.mutate', { v: 1 });

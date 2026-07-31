@@ -26,14 +26,17 @@ export async function getChars(saveId?: string): Promise<CharacterState[]> {
 }
 
 /** 按类型过滤 */
-export async function getCharsByType(type: CharacterState['type'], saveId?: string): Promise<CharacterState[]> {
+export async function getCharsByType(
+  type: CharacterState['type'],
+  saveId?: string,
+): Promise<CharacterState[]> {
   return getCharactersByType(type, saveId);
 }
 
 /** 获取玩家角色 */
 export async function getPlayer(saveId?: string): Promise<CharacterState | undefined> {
   const all = await getCharacters(saveId);
-  return all.find(c => c.type === 'player');
+  return all.find((c) => c.type === 'player');
 }
 
 /** 获取所有 NPC */
@@ -50,22 +53,22 @@ export async function getMonsters(saveId?: string): Promise<CharacterState[]> {
 
 /** 按名称查找 */
 export function findByName(chars: CharacterState[], name: string): CharacterState | undefined {
-  return chars.find(c => c.name === name);
+  return chars.find((c) => c.name === name);
 }
 
 /** 按位置过滤 */
 export function filterByLocation(chars: CharacterState[], location: string): CharacterState[] {
-  return chars.filter(c => c.location === location);
+  return chars.filter((c) => c.location === location);
 }
 
 /** 按层级过滤 */
 export function filterByTier(chars: CharacterState[], tier: number): CharacterState[] {
-  return chars.filter(c => c.tier === tier);
+  return chars.filter((c) => c.tier === tier);
 }
 
 /** 按冒险者等级过滤 */
 export function filterByRank(chars: CharacterState[], rank: string): CharacterState[] {
-  return chars.filter(c => c.adventurerRank === rank);
+  return chars.filter((c) => c.adventurerRank === rank);
 }
 
 /** 角色是否在场（在主角附近/同场景）。严格 === true 判断。 */
@@ -74,8 +77,11 @@ export function isPresent(c: CharacterState): boolean {
 }
 
 /** 获取在场角色（在主角附近/同场景） */
-export function getPresentCharacters(chars: CharacterState[], reference: CharacterState): CharacterState[] {
-  return chars.filter(c => c.id !== reference.id && c.present === true);
+export function getPresentCharacters(
+  chars: CharacterState[],
+  reference: CharacterState,
+): CharacterState[] {
+  return chars.filter((c) => c.id !== reference.id && c.present === true);
 }
 
 // ========== 状态摘要 ==========
@@ -90,14 +96,14 @@ export function summarizeChar(char: CharacterState): string {
   parts.push(`位置:${char.location || '未知'}[${char.present === true ? '在场' : '离场'}]`);
 
   if (char.statusEffects.length > 0) {
-    const effects = char.statusEffects.map(s => `${s.name}(${s.stacks}层)`).join(', ');
+    const effects = char.statusEffects.map((s) => `${s.name}(${s.stacks}层)`).join(', ');
     parts.push(`状态:[${effects}]`);
   }
 
   // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
-  const equipped = char.inventory.filter(i => i.equippedSlot);
+  const equipped = char.inventory.filter((i) => i.equippedSlot);
   if (equipped.length > 0) {
-    const equip = equipped.map(e => e.name).join(', ');
+    const equip = equipped.map((e) => e.name).join(', ');
     parts.push(`装备:[${equip}]`);
   }
 
@@ -108,15 +114,17 @@ export function summarizeChar(char: CharacterState): string {
 
 /** 生成所有角色状态摘要 */
 export function summarizeChars(chars: CharacterState[]): string {
-  return chars.map(c => summarizeChar(c)).join('\n');
+  return chars.map((c) => summarizeChar(c)).join('\n');
 }
 
 // ========== 角色比较 ==========
 
 /** 比较两个角色的战斗力（近似值） */
 export function comparePower(a: CharacterState, b: CharacterState): number {
-  const powerA = a.level * 10 + a.tier * 50 + Object.values(a.attributes).reduce((s, v) => s + v, 0);
-  const powerB = b.level * 10 + b.tier * 50 + Object.values(b.attributes).reduce((s, v) => s + v, 0);
+  const powerA =
+    a.level * 10 + a.tier * 50 + Object.values(a.attributes).reduce((s, v) => s + v, 0);
+  const powerB =
+    b.level * 10 + b.tier * 50 + Object.values(b.attributes).reduce((s, v) => s + v, 0);
   return powerA - powerB;
 }
 
@@ -152,19 +160,19 @@ export function hasAscension(char: CharacterState): boolean {
 /** 获取角色的要素列表 */
 export function getElements(char: CharacterState): string[] {
   if (!char.ascension?.elements) return [];
-  return char.ascension.elements.map(e => e.name);
+  return char.ascension.elements.map((e) => e.name);
 }
 
 /** 获取角色的权能列表 */
 export function getAuthorities(char: CharacterState): string[] {
   if (!char.ascension?.authority) return [];
-  return char.ascension.authority.map(a => a.name);
+  return char.ascension.authority.map((a) => a.name);
 }
 
 /** 获取角色的法则列表 */
 export function getLaws(char: CharacterState): string[] {
   if (!char.ascension?.law) return [];
-  return char.ascension.law.map(l => l.name);
+  return char.ascension.law.map((l) => l.name);
 }
 
 // ========== $char Namespace ==========

@@ -64,8 +64,7 @@ export type AssetFilenameRejection = 'unknown-extension' | 'naming-invariant' | 
 
 /** 解析的完整结论 —— 带理由，供导入摘要分类计数 */
 export type AssetFilenameResult =
-  | { ok: true; parsed: ParsedAssetName }
-  | { ok: false; reason: AssetFilenameRejection };
+  { ok: true; parsed: ParsedAssetName } | { ok: false; reason: AssetFilenameRejection };
 
 /** 类型 token 缺省值（D1）—— 零仪式路径 */
 export const DEFAULT_ASSET_TYPE: AssetType = '头像';
@@ -154,7 +153,10 @@ export function explainAssetFilename(basename: string): AssetFilenameResult {
   // 媒体规则 (D7): mp4 只能落在不需要 alpha 的类型上
   if (!isMediaAllowed(type, ext)) return { ok: false, reason: 'mp4-on-立绘' };
 
-  return { ok: true, parsed: variant === undefined ? { name, type, ext } : { name, type, variant, ext } };
+  return {
+    ok: true,
+    parsed: variant === undefined ? { name, type, ext } : { name, type, variant, ext },
+  };
 }
 
 /**

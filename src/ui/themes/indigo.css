@@ -1,5 +1,5 @@
 /* ===== Qinghua Porcelain (青花瓷) ===== */
-[data-theme="indigo"] {
+[data-theme='indigo'] {
   --theme-window-bg: #f1efeb;
   --theme-window-border: #d3d0ca;
   --theme-content-bg: #f7f5f1;
@@ -74,66 +74,81 @@
   --theme-shadow-lg: 0 4px 8px rgba(42, 61, 95, 0.09);
   --paper-stack: none;
 
-  --indigo-left-shanshui: url("../assets/themes/indigo/porcelain-left-shanshui-alpha-v4.png");
-  --indigo-right-birds: url("../assets/themes/indigo/porcelain-right-birds-alpha-v5.png");
+  --indigo-left-shanshui: url('../assets/themes/indigo/porcelain-left-shanshui-alpha-v4.png');
+  --indigo-right-birds: url('../assets/themes/indigo/porcelain-right-birds-alpha-v5.png');
 }
 
 /* Large underglaze composition lives behind the interface, not on every control. */
-:root[data-theme="indigo"] body .game-page-layout {
+:root[data-theme='indigo'] body .game-page-layout {
   position: relative;
   isolation: isolate;
   background:
-    linear-gradient(115deg, rgba(239, 236, 231, 0.98), rgba(248, 246, 242, 0.99) 44%, rgba(241, 238, 233, 0.98)),
+    linear-gradient(
+      115deg,
+      rgba(239, 236, 231, 0.98),
+      rgba(248, 246, 242, 0.99) 44%,
+      rgba(241, 238, 233, 0.98)
+    ),
     #f1efeb;
 }
 
-:root[data-theme="indigo"] body .game-page-layout::before,
-:root[data-theme="indigo"] body .game-page-layout::after {
-  content: "";
+:root[data-theme='indigo'] body .game-page-layout::before,
+:root[data-theme='indigo'] body .game-page-layout::after {
+  content: '';
   position: absolute;
   z-index: 0;
   pointer-events: none;
 }
 
-:root[data-theme="indigo"] body .game-page-layout::before {
+:root[data-theme='indigo'] body .game-page-layout::before {
   top: -15vh;
   left: -10vw;
   width: 52vw;
   height: 74vh;
   opacity: 0.68;
   background:
-    radial-gradient(circle at 31% 38%, transparent 0 24%, rgba(11, 64, 136, 0.17) 24.4% 25.1%, transparent 25.5%),
+    radial-gradient(
+      circle at 31% 38%,
+      transparent 0 24%,
+      rgba(11, 64, 136, 0.17) 24.4% 25.1%,
+      transparent 25.5%
+    ),
     radial-gradient(ellipse at 36% 44%, rgba(36, 75, 142, 0.16), transparent 49%),
     radial-gradient(ellipse at 12% 70%, rgba(55, 92, 151, 0.13), transparent 38%);
   filter: blur(11px);
   transform: rotate(-11deg);
 }
 
-:root[data-theme="indigo"] body .game-page-layout::after {
+:root[data-theme='indigo'] body .game-page-layout::after {
   right: -10vw;
   bottom: -24vh;
   width: 54vw;
   height: 76vh;
   opacity: 0.52;
   background:
-    radial-gradient(circle at 56% 52%, transparent 0 30%, rgba(11, 64, 136, 0.16) 30.4% 31%, transparent 31.5%),
+    radial-gradient(
+      circle at 56% 52%,
+      transparent 0 30%,
+      rgba(11, 64, 136, 0.16) 30.4% 31%,
+      transparent 31.5%
+    ),
     radial-gradient(ellipse at 63% 58%, rgba(36, 75, 142, 0.14), transparent 50%),
     radial-gradient(ellipse at 88% 24%, rgba(55, 92, 151, 0.11), transparent 37%);
   filter: blur(13px);
   transform: rotate(14deg);
 }
 
-:root[data-theme="indigo"] body .game-page-layout > * {
+:root[data-theme='indigo'] body .game-page-layout > * {
   position: relative;
   z-index: 1;
 }
 
 /* Structural panels stay quiet and nearly opaque. */
-:root[data-theme="indigo"] body .game-page-layout .top-bar,
-:root[data-theme="indigo"] body .game-page-layout .side-toolbar,
-:root[data-theme="indigo"] body .game-page-layout .scene-panel,
-:root[data-theme="indigo"] body .game-page-layout .status-hud,
-:root[data-theme="indigo"] body .game-page-layout .input-bar {
+:root[data-theme='indigo'] body .game-page-layout .top-bar,
+:root[data-theme='indigo'] body .game-page-layout .side-toolbar,
+:root[data-theme='indigo'] body .game-page-layout .scene-panel,
+:root[data-theme='indigo'] body .game-page-layout .status-hud,
+:root[data-theme='indigo'] body .game-page-layout .input-bar {
   background: var(--theme-structural-surface);
   border-color: var(--theme-porcelain-line);
   backdrop-filter: blur(21px) saturate(104%);
@@ -141,12 +156,12 @@
   box-shadow: none;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .scene-panel {
+:root[data-theme='indigo'] body .game-page-layout .scene-panel {
   border-right-color: rgba(22, 76, 138, 0.22);
 }
 
 /* The rail and scene ledger reveal one continuous underglaze painting. */
-:root[data-theme="indigo"] body .game-page-layout .game-body {
+:root[data-theme='indigo'] body .game-page-layout .game-body {
   background-color: var(--theme-window-bg);
   background-image: var(--indigo-left-shanshui);
   background-repeat: no-repeat;
@@ -154,8 +169,8 @@
   background-size: 25% auto;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .side-toolbar,
-:root[data-theme="indigo"] body .game-page-layout .scene-panel {
+:root[data-theme='indigo'] body .game-page-layout .side-toolbar,
+:root[data-theme='indigo'] body .game-page-layout .scene-panel {
   background-color: rgba(246, 244, 240, 0.54);
   background-image: none;
   backdrop-filter: blur(1.5px) saturate(102%);
@@ -163,7 +178,7 @@
 }
 
 /* The status ledger keeps its own quiet, bottom-right underglaze accent. */
-:root[data-theme="indigo"] body .game-page-layout .status-hud {
+:root[data-theme='indigo'] body .game-page-layout .status-hud {
   background-color: var(--theme-structural-surface);
   background-image: var(--indigo-right-birds);
   background-repeat: no-repeat;
@@ -171,22 +186,22 @@
   background-size: auto 100%;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .chat-flow,
-:root[data-theme="indigo"] body .game-page-layout .chat-messages {
+:root[data-theme='indigo'] body .game-page-layout .chat-flow,
+:root[data-theme='indigo'] body .game-page-layout .chat-messages {
   background: rgba(248, 246, 242, 0.975);
 }
 
 /* Frosted controls borrow the panel colour and float with one restrained shadow. */
-:root[data-theme="indigo"] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger),
-:root[data-theme="indigo"] body .game-page-layout .input-btn,
-:root[data-theme="indigo"] body .game-page-layout .input-field,
-:root[data-theme="indigo"] body .game-page-layout .send-btn,
-:root[data-theme="indigo"] body .game-page-layout .form-select,
-:root[data-theme="indigo"] body .game-page-layout .form-input,
-:root[data-theme="indigo"] body .game-page-layout .mini-select,
-:root[data-theme="indigo"] body .game-page-layout .focus-select,
-:root[data-theme="indigo"] body .game-page-layout .cascader-trigger,
-:root[data-theme="indigo"] body .game-page-layout select {
+:root[data-theme='indigo'] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger),
+:root[data-theme='indigo'] body .game-page-layout .input-btn,
+:root[data-theme='indigo'] body .game-page-layout .input-field,
+:root[data-theme='indigo'] body .game-page-layout .send-btn,
+:root[data-theme='indigo'] body .game-page-layout .form-select,
+:root[data-theme='indigo'] body .game-page-layout .form-input,
+:root[data-theme='indigo'] body .game-page-layout .mini-select,
+:root[data-theme='indigo'] body .game-page-layout .focus-select,
+:root[data-theme='indigo'] body .game-page-layout .cascader-trigger,
+:root[data-theme='indigo'] body .game-page-layout select {
   background: var(--theme-frosted-element);
   border-color: var(--theme-frosted-border);
   backdrop-filter: blur(16px) saturate(106%);
@@ -194,28 +209,28 @@
   box-shadow: var(--theme-frosted-shadow);
 }
 
-:root[data-theme="indigo"] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger),
-:root[data-theme="indigo"] body .game-page-layout .input-btn,
-:root[data-theme="indigo"] body .game-page-layout .send-btn {
+:root[data-theme='indigo'] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger),
+:root[data-theme='indigo'] body .game-page-layout .input-btn,
+:root[data-theme='indigo'] body .game-page-layout .send-btn {
   background: var(--theme-frosted-button);
 }
 
-:root[data-theme="indigo"] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger):hover,
-:root[data-theme="indigo"] body .game-page-layout .input-btn:hover,
-:root[data-theme="indigo"] body .game-page-layout .cascader-trigger:hover,
-:root[data-theme="indigo"] body .game-page-layout select:hover {
+:root[data-theme='indigo'] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger):hover,
+:root[data-theme='indigo'] body .game-page-layout .input-btn:hover,
+:root[data-theme='indigo'] body .game-page-layout .cascader-trigger:hover,
+:root[data-theme='indigo'] body .game-page-layout select:hover {
   background: var(--theme-frosted-element-hover);
   border-color: rgba(22, 76, 138, 0.18);
 }
 
-:root[data-theme="indigo"] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger):hover,
-:root[data-theme="indigo"] body .game-page-layout .input-btn:hover,
-:root[data-theme="indigo"] body .game-page-layout .send-btn:hover {
+:root[data-theme='indigo'] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger):hover,
+:root[data-theme='indigo'] body .game-page-layout .input-btn:hover,
+:root[data-theme='indigo'] body .game-page-layout .send-btn:hover {
   background: var(--theme-frosted-button-hover);
 }
 
-:root[data-theme="indigo"] body .game-page-layout .tab-item,
-:root[data-theme="indigo"] body .game-page-layout .top-btn {
+:root[data-theme='indigo'] body .game-page-layout .tab-item,
+:root[data-theme='indigo'] body .game-page-layout .top-btn {
   background: transparent;
   box-shadow: none;
 }
@@ -224,8 +239,8 @@
    glass cell. Without one, the lower buttons dissolve into the painting exactly
    where its cobalt strokes are densest. Same glass as .item-entry — one surface
    language for the theme, not a second one. */
-:root[data-theme="indigo"] body .game-page-layout .side-toolbar .tool-btn,
-:root[data-theme="indigo"] body .game-page-layout .side-toolbar .collapse-toggle {
+:root[data-theme='indigo'] body .game-page-layout .side-toolbar .tool-btn,
+:root[data-theme='indigo'] body .game-page-layout .side-toolbar .collapse-toggle {
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.128), rgba(255, 255, 255, 0.015) 60%),
     var(--theme-liquid-glass-button);
@@ -243,8 +258,8 @@
     color 180ms ease-out;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .side-toolbar .tool-btn:hover,
-:root[data-theme="indigo"] body .game-page-layout .side-toolbar .collapse-toggle:hover {
+:root[data-theme='indigo'] body .game-page-layout .side-toolbar .tool-btn:hover,
+:root[data-theme='indigo'] body .game-page-layout .side-toolbar .collapse-toggle:hover {
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.179), rgba(255, 255, 255, 0.034) 62%),
     var(--theme-liquid-glass-button-active);
@@ -252,13 +267,13 @@
   color: var(--theme-tab-active-text);
 }
 
-:root[data-theme="indigo"] body .game-page-layout .hold-body .tab-bar {
+:root[data-theme='indigo'] body .game-page-layout .hold-body .tab-bar {
   padding: 6px 10px 0;
   background: transparent;
   border-bottom: 0;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .hold-body .tab-list {
+:root[data-theme='indigo'] body .game-page-layout .hold-body .tab-list {
   gap: 3px;
   padding: 3px;
   background:
@@ -273,22 +288,22 @@
     inset 0 -1px 0 var(--theme-liquid-glass-low-edge);
 }
 
-:root[data-theme="indigo"] body .game-page-layout .hold-body .tab-item {
+:root[data-theme='indigo'] body .game-page-layout .hold-body .tab-item {
   min-width: 0;
   padding: 7px 8px;
   border: 1px solid transparent;
   border-radius: 5px;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .hold-body .tab-item::after {
+:root[data-theme='indigo'] body .game-page-layout .hold-body .tab-item::after {
   display: none;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .hold-body .tab-item:hover {
+:root[data-theme='indigo'] body .game-page-layout .hold-body .tab-item:hover {
   background: rgba(255, 255, 255, 0.085);
 }
 
-:root[data-theme="indigo"] body .game-page-layout .hold-body .tab-active {
+:root[data-theme='indigo'] body .game-page-layout .hold-body .tab-active {
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.179), rgba(255, 255, 255, 0.034) 62%),
     var(--theme-liquid-glass-button-active);
@@ -300,28 +315,28 @@
   color: var(--theme-tab-active-text);
 }
 
-:root[data-theme="indigo"] body .game-page-layout .input-field {
+:root[data-theme='indigo'] body .game-page-layout .input-field {
   border-radius: 4px;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .input-field:focus {
+:root[data-theme='indigo'] body .game-page-layout .input-field:focus {
   border-color: rgba(11, 64, 136, 0.52);
   box-shadow: 0 0 0 2px rgba(11, 64, 136, 0.065);
 }
 
-:root[data-theme="indigo"] body .game-page-layout .input-btn,
-:root[data-theme="indigo"] body .game-page-layout .send-btn {
+:root[data-theme='indigo'] body .game-page-layout .input-btn,
+:root[data-theme='indigo'] body .game-page-layout .send-btn {
   border: 1px solid var(--theme-porcelain-line);
   border-radius: 4px;
 }
 
 /* Compact attribute lenses remain on one line. */
-:root[data-theme="indigo"] body .game-page-layout .attr-grid {
+:root[data-theme='indigo'] body .game-page-layout .attr-grid {
   gap: 3px;
   border-block: 0;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .attr-grid .kv-item {
+:root[data-theme='indigo'] body .game-page-layout .attr-grid .kv-item {
   background: var(--theme-frosted-element);
   border: 1px solid var(--theme-frosted-border);
   border-radius: 4px;
@@ -330,7 +345,7 @@
   box-shadow: var(--theme-frosted-shadow);
 }
 
-:root[data-theme="indigo"] body .game-page-layout .quest-item {
+:root[data-theme='indigo'] body .game-page-layout .quest-item {
   background: transparent;
   border: 0;
   border-bottom: 1px solid rgba(22, 76, 138, 0.14);
@@ -338,29 +353,29 @@
   padding-inline: 4px;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .quest-item:hover,
-:root[data-theme="indigo"] body .game-page-layout .item-row:hover,
-:root[data-theme="indigo"] body .game-page-layout .scene-npc-item:hover,
-:root[data-theme="indigo"] body .game-page-layout .scene-npc-item.hovered {
+:root[data-theme='indigo'] body .game-page-layout .quest-item:hover,
+:root[data-theme='indigo'] body .game-page-layout .item-row:hover,
+:root[data-theme='indigo'] body .game-page-layout .scene-npc-item:hover,
+:root[data-theme='indigo'] body .game-page-layout .scene-npc-item.hovered {
   background: rgba(11, 64, 136, 0.05);
   border-color: rgba(22, 76, 138, 0.18);
 }
 
-:root[data-theme="indigo"] body .game-page-layout .quest-item.open {
+:root[data-theme='indigo'] body .game-page-layout .quest-item.open {
   background: var(--theme-frosted-element);
   border-color: var(--theme-frosted-border);
   box-shadow: var(--theme-frosted-shadow);
 }
 
-:root[data-theme="indigo"] body .game-page-layout .item-row {
+:root[data-theme='indigo'] body .game-page-layout .item-row {
   border-radius: 0;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .item-list {
+:root[data-theme='indigo'] body .game-page-layout .item-list {
   gap: 5px;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .item-entry {
+:root[data-theme='indigo'] body .game-page-layout .item-entry {
   position: relative;
   overflow: hidden;
   background:
@@ -379,18 +394,18 @@
     box-shadow 180ms ease-out;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .item-entry:hover {
+:root[data-theme='indigo'] body .game-page-layout .item-entry:hover {
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.306), rgba(255, 255, 255, 0.047) 60%),
     rgba(246, 244, 240, 0.374);
   border-color: rgba(255, 255, 255, 0.76);
 }
 
-:root[data-theme="indigo"] body .game-page-layout .item-entry .item-row:hover {
+:root[data-theme='indigo'] body .game-page-layout .item-entry .item-row:hover {
   background: transparent;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .item-entry.open {
+:root[data-theme='indigo'] body .game-page-layout .item-entry.open {
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.051) 60%),
     var(--theme-liquid-glass-active);
@@ -401,14 +416,14 @@
     inset 0 -1px 0 var(--theme-liquid-glass-low-edge);
 }
 
-:root[data-theme="indigo"] body .game-page-layout .item-entry.open .item-row {
+:root[data-theme='indigo'] body .game-page-layout .item-entry.open .item-row {
   background: transparent;
   border: 0;
   border-radius: 0;
   box-shadow: none;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .item-entry.open .item-detail {
+:root[data-theme='indigo'] body .game-page-layout .item-entry.open .item-detail {
   margin: 0;
   background: transparent;
   border: 0;
@@ -419,56 +434,56 @@
   box-shadow: none;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .det-chip {
+:root[data-theme='indigo'] body .game-page-layout .det-chip {
   background: transparent;
   border-color: rgba(22, 76, 138, 0.19);
   border-radius: 2px;
 }
 
 /* The right portrait remains porcelain; left portraits use one continuous gold frame. */
-:root[data-theme="indigo"] body .game-page-layout .avatar-shape-square,
-:root[data-theme="indigo"] body .game-page-layout .npc-portrait {
+:root[data-theme='indigo'] body .game-page-layout .avatar-shape-square,
+:root[data-theme='indigo'] body .game-page-layout .npc-portrait {
   background: rgba(239, 237, 233, 0.78);
   border-color: rgba(22, 76, 138, 0.2);
   border-radius: 3px;
   box-shadow: none;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .scene-panel .npc-portrait {
+:root[data-theme='indigo'] body .game-page-layout .scene-panel .npc-portrait {
   background: rgba(35, 78, 123, 0.9);
   border: 1px solid rgba(184, 134, 45, 0.78);
   box-shadow: none;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .attribute-section {
+:root[data-theme='indigo'] body .game-page-layout .attribute-section {
   border-bottom: 0;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .summary-name {
+:root[data-theme='indigo'] body .game-page-layout .summary-name {
   letter-spacing: 0.055em;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .res-track {
+:root[data-theme='indigo'] body .game-page-layout .res-track {
   background: rgba(42, 61, 95, 0.09);
   border: 1px solid rgba(22, 76, 138, 0.13);
   border-radius: 3px;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .res-fill {
+:root[data-theme='indigo'] body .game-page-layout .res-fill {
   border-radius: 2px;
   opacity: 0.92;
 }
 
-:root[data-theme="indigo"] body .game-page-layout .res-values {
+:root[data-theme='indigo'] body .game-page-layout .res-values {
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.48);
 }
 
 /* Floating surfaces are opaque enough for text and use one short shadow. */
-:root[data-theme="indigo"] body .options-popup,
-:root[data-theme="indigo"] body .cascader-dropdown,
-:root[data-theme="indigo"] body .modal-content,
-:root[data-theme="indigo"] body .thought-bubble,
-:root[data-theme="indigo"] body .buff-pop {
+:root[data-theme='indigo'] body .options-popup,
+:root[data-theme='indigo'] body .cascader-dropdown,
+:root[data-theme='indigo'] body .modal-content,
+:root[data-theme='indigo'] body .thought-bubble,
+:root[data-theme='indigo'] body .buff-pop {
   background: var(--theme-frosted-float);
   border-color: var(--theme-frosted-border);
   border-radius: 5px;
@@ -477,13 +492,13 @@
   box-shadow: var(--theme-popover-shadow);
 }
 
-:root[data-theme="indigo"] body select option {
+:root[data-theme='indigo'] body select option {
   color: var(--theme-text-primary);
   background: #f7f5f1;
 }
 
 /* The shared fate seam appears once, as a restrained title rule. */
-:root[data-theme="indigo"] body .game-page-layout .top-title-rule {
+:root[data-theme='indigo'] body .game-page-layout .top-title-rule {
   background: linear-gradient(
     to right,
     transparent,
@@ -493,26 +508,26 @@
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  :root[data-theme="indigo"] body .game-page-layout .top-bar,
-  :root[data-theme="indigo"] body .game-page-layout .side-toolbar,
-  :root[data-theme="indigo"] body .game-page-layout .scene-panel,
-  :root[data-theme="indigo"] body .game-page-layout .status-hud,
-  :root[data-theme="indigo"] body .game-page-layout .input-bar,
-  :root[data-theme="indigo"] body .game-page-layout .hold-body .tab-list,
-  :root[data-theme="indigo"] body .game-page-layout .item-entry,
-  :root[data-theme="indigo"] body .game-page-layout .side-toolbar .tool-btn,
-  :root[data-theme="indigo"] body .game-page-layout .side-toolbar .collapse-toggle {
+  :root[data-theme='indigo'] body .game-page-layout .top-bar,
+  :root[data-theme='indigo'] body .game-page-layout .side-toolbar,
+  :root[data-theme='indigo'] body .game-page-layout .scene-panel,
+  :root[data-theme='indigo'] body .game-page-layout .status-hud,
+  :root[data-theme='indigo'] body .game-page-layout .input-bar,
+  :root[data-theme='indigo'] body .game-page-layout .hold-body .tab-list,
+  :root[data-theme='indigo'] body .game-page-layout .item-entry,
+  :root[data-theme='indigo'] body .game-page-layout .side-toolbar .tool-btn,
+  :root[data-theme='indigo'] body .game-page-layout .side-toolbar .collapse-toggle {
     background: #f5f2ee;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
 
-  :root[data-theme="indigo"] body .game-page-layout .side-toolbar,
-  :root[data-theme="indigo"] body .game-page-layout .scene-panel {
+  :root[data-theme='indigo'] body .game-page-layout .side-toolbar,
+  :root[data-theme='indigo'] body .game-page-layout .scene-panel {
     background: transparent;
   }
 
-  :root[data-theme="indigo"] body .game-page-layout .status-hud {
+  :root[data-theme='indigo'] body .game-page-layout .status-hud {
     background-color: #f5f2ee;
     background-image: var(--indigo-right-birds);
     background-repeat: no-repeat;
@@ -520,21 +535,21 @@
     background-size: auto 100%;
   }
 
-  :root[data-theme="indigo"] body .game-page-layout .hold-body .tab-list,
-  :root[data-theme="indigo"] body .game-page-layout .item-entry {
+  :root[data-theme='indigo'] body .game-page-layout .hold-body .tab-list,
+  :root[data-theme='indigo'] body .game-page-layout .item-entry {
     background: rgba(245, 242, 238, 0.85);
   }
 
-  :root[data-theme="indigo"] body .game-page-layout .side-toolbar .tool-btn,
-  :root[data-theme="indigo"] body .game-page-layout .side-toolbar .collapse-toggle {
+  :root[data-theme='indigo'] body .game-page-layout .side-toolbar .tool-btn,
+  :root[data-theme='indigo'] body .game-page-layout .side-toolbar .collapse-toggle {
     background: rgba(245, 242, 238, 0.425);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root[data-theme="indigo"] body .game-page-layout .item-entry,
-  :root[data-theme="indigo"] body .game-page-layout .side-toolbar .tool-btn,
-  :root[data-theme="indigo"] body .game-page-layout .side-toolbar .collapse-toggle {
+  :root[data-theme='indigo'] body .game-page-layout .item-entry,
+  :root[data-theme='indigo'] body .game-page-layout .side-toolbar .tool-btn,
+  :root[data-theme='indigo'] body .game-page-layout .side-toolbar .collapse-toggle {
     transition: none;
   }
 }

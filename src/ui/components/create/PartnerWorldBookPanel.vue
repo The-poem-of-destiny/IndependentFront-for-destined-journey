@@ -4,19 +4,19 @@
  *
  * 紧凑显示当前已选的背景故事，未选时提示用户到 Step 4 选择。
  */
-import { computed } from 'vue'
-import { useCreateStore } from '../../stores/create-store'
+import { computed } from 'vue';
+import { useCreateStore } from '../../stores/create-store';
 
-const store = useCreateStore()
+const store = useCreateStore();
 
 /** 是否有已选背景 */
-const hasBackground = computed(() => store.selectedBackground !== null)
+const hasBackground = computed(() => store.selectedBackground !== null);
 
 /** 背景描述截断 (最多显示前 120 字) */
 const bgSnippet = computed(() => {
-  const text = store.selectedBackground?.description ?? ''
-  return text.length > 120 ? text.slice(0, 120) + '…' : text
-})
+  const text = store.selectedBackground?.description ?? '';
+  return text.length > 120 ? text.slice(0, 120) + '…' : text;
+});
 </script>
 
 <template>
@@ -40,7 +40,15 @@ const bgSnippet = computed(() => {
         <span v-if="store.selectedBackground?.requiredDestinyCore" class="pp-meta-tag met">
           {{ store.selectedBackground?.requiredDestinyCore }}
         </span>
-        <span v-if="!store.selectedBackground?.requiredRace && !store.selectedBackground?.requiredIdentity && !store.selectedBackground?.requiredLocation && !store.selectedBackground?.requiredDestinyCore" class="pp-meta-tag universal">
+        <span
+          v-if="
+            !store.selectedBackground?.requiredRace &&
+            !store.selectedBackground?.requiredIdentity &&
+            !store.selectedBackground?.requiredLocation &&
+            !store.selectedBackground?.requiredDestinyCore
+          "
+          class="pp-meta-tag universal"
+        >
           通用开局
         </span>
       </div>
@@ -49,7 +57,9 @@ const bgSnippet = computed(() => {
     <!-- 未选 -->
     <div v-else class="pp-empty">
       <p>尚未选择角色背景故事。</p>
-      <p class="pp-hint">你可以在 <strong>第 4 步 · 背景故事</strong> 中从 50+ 个预设开局中选择，或自定义你的故事。</p>
+      <p class="pp-hint">
+        你可以在 <strong>第 4 步 · 背景故事</strong> 中从 50+ 个预设开局中选择，或自定义你的故事。
+      </p>
     </div>
 
     <!-- 伙伴占位 (预留) -->

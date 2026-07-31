@@ -1,34 +1,36 @@
 <script setup lang="ts">
-import { useGameStore } from '../../stores/game-store'
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useGameStore } from '../../stores/game-store';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 
-const game = useGameStore()
+const game = useGameStore();
 
 /** 持续递增的 tick，每 250ms +1，产生 reactive 副作用驱动计时 */
-const tick = ref(0)
-let timer: ReturnType<typeof setInterval> | null = null
+const tick = ref(0);
+let timer: ReturnType<typeof setInterval> | null = null;
 
 onMounted(() => {
-  timer = setInterval(() => { tick.value++ }, 250)
-})
+  timer = setInterval(() => {
+    tick.value++;
+  }, 250);
+});
 
 onUnmounted(() => {
-  if (timer) clearInterval(timer)
-})
+  if (timer) clearInterval(timer);
+});
 
 /** 随 tick 自动刷新的已过毫秒 */
 const currentElapsedMs = computed(() => {
-  void tick.value  // 消费 tick 确保依赖追踪
-  if (!game.agentStatus) return 0
-  return Date.now() - game.agentStatus.startedAt
-})
+  void tick.value; // 消费 tick 确保依赖追踪
+  if (!game.agentStatus) return 0;
+  return Date.now() - game.agentStatus.startedAt;
+});
 
 /** 格式化毫秒为 mm:ss */
 function formatElapsed(ms: number): string {
-  const sec = Math.floor(ms / 1000)
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  return `${m}:${s.toString().padStart(2, '0')}`
+  const sec = Math.floor(ms / 1000);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 </script>
 
@@ -37,7 +39,7 @@ function formatElapsed(ms: number): string {
     <transition name="slide-up">
       <div v-if="game.isGenerating || game.agentStatus" class="agent-status-panel">
         <!-- 当前 Agent -->
-        <div class="agent-current" v-if="game.agentStatus">
+        <div v-if="game.agentStatus" class="agent-current">
           <div class="agent-spinner" />
           <span class="agent-label">{{ game.agentStatus.label }}</span>
           <span class="agent-timer">{{ formatElapsed(currentElapsedMs) }}</span>
@@ -70,7 +72,11 @@ function formatElapsed(ms: number): string {
   background: var(--theme-card-bg);
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-md, 6px);
-  box-shadow: var(--paper-stack, 0 1px 0 0 color-mix(in srgb, var(--theme-card-border) 40%, transparent), 0 4px 12px rgba(0,0,0,0.08));
+  box-shadow: var(
+    --paper-stack,
+    0 1px 0 0 color-mix(in srgb, var(--theme-card-border) 40%, transparent),
+    0 4px 12px rgba(0, 0, 0, 0.08)
+  );
   padding: var(--theme-spacing-md, 12px);
   display: flex;
   flex-direction: column;
@@ -94,7 +100,9 @@ function formatElapsed(ms: number): string {
 }
 
 @keyframes agent-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .agent-label {

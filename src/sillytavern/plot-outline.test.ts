@@ -5,12 +5,7 @@
  * 事件生成/版本更新/设置判断/事件同步等全部导出函数。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type {
-  PlotOutline,
-  PlotSettings,
-  PlotEvent,
-  CharacterState,
-} from './types';
+import type { PlotOutline, PlotSettings, PlotEvent, CharacterState } from './types';
 
 // ========== Mock database ==========
 
@@ -169,7 +164,14 @@ describe('parseOutlineAgentOutput', () => {
       content: '大纲',
       chapters: [
         { title: '', summary: '无标题章节' },
-        { title: '有效章节', summary: 'ok', keyEvents: [{ title: '', description: '无标题事件' }, { title: '有效事件', description: 'ok' }] },
+        {
+          title: '有效章节',
+          summary: 'ok',
+          keyEvents: [
+            { title: '', description: '无标题事件' },
+            { title: '有效事件', description: 'ok' },
+          ],
+        },
       ],
     });
     const result = parseOutlineAgentOutput(raw);
@@ -206,7 +208,11 @@ describe('createOutlineFromAgent', () => {
       summary: '一句话摘要',
       content: '完整剧情大纲...',
       chapters: [
-        { title: '第一章', summary: '章节摘要', keyEvents: [{ title: '事件A', description: '描述' }] },
+        {
+          title: '第一章',
+          summary: '章节摘要',
+          keyEvents: [{ title: '事件A', description: '描述' }],
+        },
       ],
       selfCritique: { score: 7, strengths: ['好'], weaknesses: [], suggestions: [] },
     });
@@ -218,7 +224,11 @@ describe('createOutlineFromAgent', () => {
     expect(outline!.summary).toBe('一句话摘要');
     expect(outline!.content).toBe('完整剧情大纲...');
     expect(outline!.chapters).toHaveLength(1);
-    expect(outline!.chapters[0]).toEqual({ title: '第一章', summary: '章节摘要', status: 'pending' });
+    expect(outline!.chapters[0]).toEqual({
+      title: '第一章',
+      summary: '章节摘要',
+      status: 'pending',
+    });
     expect(outline!.selfCritique).toContain('评分: 7/10');
     expect(outline!.confirmed).toBe(false);
     expect(outline!.version).toBe(1);
@@ -347,9 +357,7 @@ describe('outlineToEvents', () => {
     {
       title: '第二章 试炼',
       summary: '通过古代遗迹的考验。',
-      keyEvents: [
-        { title: '遗迹之门', description: '找到遗迹入口' },
-      ],
+      keyEvents: [{ title: '遗迹之门', description: '找到遗迹入口' }],
     },
   ];
 
@@ -357,8 +365,8 @@ describe('outlineToEvents', () => {
     const events = outlineToEvents(chapters, 'save-x');
     expect(events).toHaveLength(5);
 
-    const chapterEvents = events.filter(e => e.depth === 0);
-    const keyEvents = events.filter(e => e.depth === 1);
+    const chapterEvents = events.filter((e) => e.depth === 0);
+    const keyEvents = events.filter((e) => e.depth === 1);
     expect(chapterEvents).toHaveLength(2);
     expect(keyEvents).toHaveLength(3);
     expect(chapterEvents[0].title).toBe('第一章 启程');
@@ -367,9 +375,9 @@ describe('outlineToEvents', () => {
 
   it('keyEvent 的 parentId 指向章节事件，章节 childrenIds 包含 keyEvent', () => {
     const events = outlineToEvents(chapters, 'save-1');
-    const ch1 = events.find(e => e.title === '第一章 启程')!;
-    const ke1 = events.find(e => e.title === '告别故乡')!;
-    const ke2 = events.find(e => e.title === '初遇同伴')!;
+    const ch1 = events.find((e) => e.title === '第一章 启程')!;
+    const ke1 = events.find((e) => e.title === '告别故乡')!;
+    const ke2 = events.find((e) => e.title === '初遇同伴')!;
     expect(ke1.parentId).toBe(ch1.id);
     expect(ke2.parentId).toBe(ch1.id);
     expect(ch1.childrenIds).toEqual([ke1.id, ke2.id]);
@@ -377,9 +385,9 @@ describe('outlineToEvents', () => {
 
   it('triggerCondition 使用 keyEvent.triggerHint', () => {
     const events = outlineToEvents(chapters, 'save-1');
-    const ke = events.find(e => e.title === '初遇同伴')!;
+    const ke = events.find((e) => e.title === '初遇同伴')!;
     expect(ke.triggerCondition).toBe('{{location}} == "官道"');
-    const keNoHint = events.find(e => e.title === '遗迹之门')!;
+    const keNoHint = events.find((e) => e.title === '遗迹之门')!;
     expect(keNoHint.triggerCondition).toBeUndefined();
   });
 
@@ -388,9 +396,9 @@ describe('outlineToEvents', () => {
     for (const e of events) {
       expect(e.visibility).toBe('hidden');
     }
-    expect(events.find(e => e.title === '告别故乡')!.chapterTitle).toBe('第一章 启程');
-    expect(events.find(e => e.title === '遗迹之门')!.chapterTitle).toBe('第二章 试炼');
-    expect(events.find(e => e.title === '第一章 启程')!.chapterTitle).toBe('第一章 启程');
+    expect(events.find((e) => e.title === '告别故乡')!.chapterTitle).toBe('第一章 启程');
+    expect(events.find((e) => e.title === '遗迹之门')!.chapterTitle).toBe('第二章 试炼');
+    expect(events.find((e) => e.title === '第一章 启程')!.chapterTitle).toBe('第一章 启程');
   });
 
   it('所有事件应有正确的 saveId 且状态为 pending', () => {
@@ -403,24 +411,27 @@ describe('outlineToEvents', () => {
 
   it('描述应被截断至 500 字符', () => {
     const longSummary = 'A'.repeat(600);
-    const events = outlineToEvents([{ title: '长章节', summary: longSummary, keyEvents: [] }], 'save-1');
+    const events = outlineToEvents(
+      [{ title: '长章节', summary: longSummary, keyEvents: [] }],
+      'save-1',
+    );
     expect(events[0].description.length).toBeLessThanOrEqual(500);
     expect(events[0].description).toBe(longSummary.slice(0, 500));
   });
 
   it('章节 order 应递增，keyEvent order 章内独立递增', () => {
     const events = outlineToEvents(chapters, 'save-1');
-    const chapterEvents = events.filter(e => e.depth === 0);
+    const chapterEvents = events.filter((e) => e.depth === 0);
     expect(chapterEvents[0].order).toBe(0);
     expect(chapterEvents[1].order).toBe(10);
-    const ch1Keys = events.filter(e => e.parentId === chapterEvents[0].id);
+    const ch1Keys = events.filter((e) => e.parentId === chapterEvents[0].id);
     expect(ch1Keys[0].order).toBe(0);
     expect(ch1Keys[1].order).toBe(10);
   });
 
   it('每个事件应有唯一 UUID', () => {
     const events = outlineToEvents(chapters, 'save-1');
-    const ids = new Set(events.map(e => e.id));
+    const ids = new Set(events.map((e) => e.id));
     expect(ids.size).toBe(events.length);
   });
 
@@ -463,11 +474,7 @@ describe('updateOutlineVersion', () => {
     });
     mockSavePlotOutline.mockResolvedValue('outline-1');
 
-    const updated = await updateOutlineVersion(
-      outline,
-      'v2 内容',
-      '主角选择了另一条道路',
-    );
+    const updated = await updateOutlineVersion(outline, 'v2 内容', '主角选择了另一条道路');
     expect(updated.selfCritique).toContain('原自检内容');
     expect(updated.selfCritique).toContain('世界线变动记录 (v2)');
     expect(updated.selfCritique).toContain('主角选择了另一条道路');
@@ -477,11 +484,7 @@ describe('updateOutlineVersion', () => {
     const outline = makeOutline({ version: 1, selfCritique: undefined });
     mockSavePlotOutline.mockResolvedValue('outline-1');
 
-    const updated = await updateOutlineVersion(
-      outline,
-      'v2 内容',
-      '世界线分歧',
-    );
+    const updated = await updateOutlineVersion(outline, 'v2 内容', '世界线分歧');
     expect(updated.selfCritique).toContain('世界线变动记录 (v2)');
     expect(updated.selfCritique).toContain('世界线分歧');
     expect(updated.selfCritique).not.toContain('---');
@@ -637,9 +640,7 @@ describe('syncOutlineEvents', () => {
   });
 
   it('混合场景：部分新增 + 部分重复', async () => {
-    const existing = [
-      makePlotEvent({ id: 'old-1', title: '第一章' }),
-    ];
+    const existing = [makePlotEvent({ id: 'old-1', title: '第一章' })];
     mockGetPlotEvents.mockResolvedValue(existing);
     mockSavePlotEvents.mockResolvedValue(undefined);
 
@@ -836,9 +837,15 @@ describe('parseOutlineXml', () => {
 
     const result = parseOutlineXml(xml);
     expect(result).not.toBeNull();
-    expect(result!.directionAnchors).toBe('核心张力：帝国与教会的权力斗争；主角主题：寻求真相；关键关系人：失踪的公主');
-    expect(result!.chapters[0].npcAgendas).toBe('帝国宰相计划借刀杀人；教会暗中调查皇室秘密；公主试图传递情报');
-    expect(result!.chapters[0].ifAbsent).toBe('主角若未介入，公主将在三日后被捕处决，帝国与教会关系恶化');
+    expect(result!.directionAnchors).toBe(
+      '核心张力：帝国与教会的权力斗争；主角主题：寻求真相；关键关系人：失踪的公主',
+    );
+    expect(result!.chapters[0].npcAgendas).toBe(
+      '帝国宰相计划借刀杀人；教会暗中调查皇室秘密；公主试图传递情报',
+    );
+    expect(result!.chapters[0].ifAbsent).toBe(
+      '主角若未介入，公主将在三日后被捕处决，帝国与教会关系恶化',
+    );
   });
 });
 
@@ -954,25 +961,30 @@ describe('parseOutlineJson', () => {
       title: '开放世界测试',
       summary: '摘要',
       content: '正文',
-      directionAnchors: '核心张力：帝国与教会的权力斗争；主角主题：寻求真相；关键关系人：失踪的公主',
+      directionAnchors:
+        '核心张力：帝国与教会的权力斗争；主角主题：寻求真相；关键关系人：失踪的公主',
       chapters: [
         {
           title: '第一章',
           summary: '章节摘要',
           npcAgendas: '帝国宰相计划借刀杀人；教会暗中调查皇室秘密；公主试图传递情报',
           ifAbsent: '主角若未介入，公主将在三日后被捕处决，帝国与教会关系恶化',
-          keyEvents: [
-            { title: '事件A', description: '描述' },
-          ],
+          keyEvents: [{ title: '事件A', description: '描述' }],
         },
       ],
     });
 
     const result = parseOutlineJson(json);
     expect(result).not.toBeNull();
-    expect(result!.directionAnchors).toBe('核心张力：帝国与教会的权力斗争；主角主题：寻求真相；关键关系人：失踪的公主');
-    expect(result!.chapters[0].npcAgendas).toBe('帝国宰相计划借刀杀人；教会暗中调查皇室秘密；公主试图传递情报');
-    expect(result!.chapters[0].ifAbsent).toBe('主角若未介入，公主将在三日后被捕处决，帝国与教会关系恶化');
+    expect(result!.directionAnchors).toBe(
+      '核心张力：帝国与教会的权力斗争；主角主题：寻求真相；关键关系人：失踪的公主',
+    );
+    expect(result!.chapters[0].npcAgendas).toBe(
+      '帝国宰相计划借刀杀人；教会暗中调查皇室秘密；公主试图传递情报',
+    );
+    expect(result!.chapters[0].ifAbsent).toBe(
+      '主角若未介入，公主将在三日后被捕处决，帝国与教会关系恶化',
+    );
   });
 });
 
@@ -998,7 +1010,7 @@ describe('outlineToEvents with new fields', () => {
     ];
 
     const events = outlineToEvents(chapters, 'save-1');
-    const ke = events.find(e => e.title === '关键事件')!;
+    const ke = events.find((e) => e.title === '关键事件')!;
     expect(ke.triggerCondition).toBe('{{location}} == "帝都"');
     expect(ke.completeCondition).toBe('找到线索');
     expect(ke.failCondition).toBe('线索丢失');
@@ -1010,14 +1022,12 @@ describe('outlineToEvents with new fields', () => {
       {
         title: '第一章',
         summary: '章节摘要',
-        keyEvents: [
-          { title: '简单事件', description: '描述' },
-        ],
+        keyEvents: [{ title: '简单事件', description: '描述' }],
       },
     ];
 
     const events = outlineToEvents(chapters, 'save-1');
-    const ke = events.find(e => e.title === '简单事件')!;
+    const ke = events.find((e) => e.title === '简单事件')!;
     expect(ke.triggerCondition).toBeUndefined();
     expect(ke.completeCondition).toBeUndefined();
     expect(ke.failCondition).toBeUndefined();
@@ -1031,14 +1041,12 @@ describe('outlineToEvents with new fields', () => {
         summary: '章节摘要',
         npcAgendas: '帝国宰相计划借刀杀人；教会暗中调查',
         ifAbsent: '主角若未介入，公主将被捕处决',
-        keyEvents: [
-          { title: '事件A', description: '描述' },
-        ],
+        keyEvents: [{ title: '事件A', description: '描述' }],
       },
     ];
 
     const events = outlineToEvents(chapters, 'save-1');
-    const chapterEvent = events.find(e => e.depth === 0)!;
+    const chapterEvent = events.find((e) => e.depth === 0)!;
     expect(chapterEvent.npcAgendas).toBe('帝国宰相计划借刀杀人；教会暗中调查');
     expect(chapterEvent.ifAbsent).toBe('主角若未介入，公主将被捕处决');
   });
@@ -1050,14 +1058,12 @@ describe('outlineToEvents with new fields', () => {
         summary: '章节摘要',
         npcAgendas: 'NPC 议程',
         ifAbsent: '反事实基线',
-        keyEvents: [
-          { title: '事件A', description: '描述' },
-        ],
+        keyEvents: [{ title: '事件A', description: '描述' }],
       },
     ];
 
     const events = outlineToEvents(chapters, 'save-1');
-    const keyEvent = events.find(e => e.depth === 1)!;
+    const keyEvent = events.find((e) => e.depth === 1)!;
     expect(keyEvent.npcAgendas).toBeUndefined();
     expect(keyEvent.ifAbsent).toBeUndefined();
   });

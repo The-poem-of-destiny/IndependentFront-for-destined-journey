@@ -18,53 +18,53 @@
  * - prefers-reduced-motion 检查清单（§6.3）
  */
 
-import { ref, computed, watch } from 'vue'
-import { useGameStore } from '../../../stores/game-store'
-import type { CharacterState, CombatParticipant, Skill, InventoryItem } from '@engine/types'
+import { ref, computed, watch } from 'vue';
+import { useGameStore } from '../../../stores/game-store';
+import type { CharacterState, CombatParticipant, Skill, InventoryItem } from '@engine/types';
 
-const game = useGameStore()
+const game = useGameStore();
 
 // ════════════════════════════════════════
 //  派生状态
 // ════════════════════════════════════════
 
 /** 当前是否轮到我方输入（null = 敌方回合/非战斗） */
-const awaiting = computed(() => game.combatAwaitingInput)
+const awaiting = computed(() => game.combatAwaitingInput);
 
 /** 整个操作栏是否禁用（敌方回合或非战斗态） */
-const isLocked = computed(() => !awaiting.value)
+const isLocked = computed(() => !awaiting.value);
 
 /** 我方参战单位列表 */
 const allyUnits = computed<CombatParticipant[]>(() => {
-  const combat = game.activeCombat
-  if (!combat) return []
-  return combat.participants.filter((p) => p.side === 'ally' && p.hp > 0)
-})
+  const combat = game.activeCombat;
+  if (!combat) return [];
+  return combat.participants.filter((p) => p.side === 'ally' && p.hp > 0);
+});
 
 /** 敌方参战单位列表（选目标用） */
 const enemyUnits = computed<CombatParticipant[]>(() => {
-  const combat = game.activeCombat
-  if (!combat) return []
-  return combat.participants.filter((p) => p.side === 'enemy' && p.hp > 0)
-})
+  const combat = game.activeCombat;
+  if (!combat) return [];
+  return combat.participants.filter((p) => p.side === 'enemy' && p.hp > 0);
+});
 
 // ════════════════════════════════════════
 //  四步拼装状态
 // ════════════════════════════════════════
 
-type ActionType = 'attack' | 'skill' | 'item' | 'defend' | 'flee'
+type ActionType = 'attack' | 'skill' | 'item' | 'defend' | 'flee';
 
 /** 步骤 1：选中的我方单位 characterId */
-const selectedUnitId = ref<string>('')
+const selectedUnitId = ref<string>('');
 /** 步骤 2：选中的行动类型 */
-const selectedAction = ref<ActionType | ''>('')
+const selectedAction = ref<ActionType | ''>('');
 /** 步骤 3：选中的技能名 / 道具名 */
-const selectedDetail = ref<string>('')
+const selectedDetail = ref<string>('');
 /** 步骤 4：选中的目标 characterId */
-const selectedTargetId = ref<string>('')
+const selectedTargetId = ref<string>('');
 
 /** 自由文本框内容 */
-const inputText = ref('')
+const inputText = ref('');
 
 // ════════════════════════════════════════
 //  单位 → CharacterState 查询（读技能/道具/武器）
@@ -72,60 +72,60 @@ const inputText = ref('')
 
 /** 按 characterId 从 game.characters 查 CharacterState */
 function findCharacter(charId: string): CharacterState | undefined {
-  return game.characters.find((c) => c.id === charId)
+  return game.characters.find((c) => c.id === charId);
 }
 
 /** 当前选中单位的 CharacterState */
 const selectedCharacter = computed<CharacterState | undefined>(() =>
   selectedUnitId.value ? findCharacter(selectedUnitId.value) : undefined,
-)
+);
 
 /** 当前选中单位的 CombatParticipant（取名字用） */
 const selectedParticipant = computed<CombatParticipant | undefined>(() => {
-  const combat = game.activeCombat
-  if (!combat || !selectedUnitId.value) return undefined
-  return combat.participants.find((p) => p.characterId === selectedUnitId.value)
-})
+  const combat = game.activeCombat;
+  if (!combat || !selectedUnitId.value) return undefined;
+  return combat.participants.find((p) => p.characterId === selectedUnitId.value);
+});
 
 // ── 技能列表（仅 active 类型可主动施放）──
 const availableSkills = computed<Skill[]>(() => {
-  const char = selectedCharacter.value
-  if (!char) return []
-  return (char.skills ?? []).filter((s) => s.type === 'active')
-})
+  const char = selectedCharacter.value;
+  if (!char) return [];
+  return (char.skills ?? []).filter((s) => s.type === 'active');
+});
 
 // ── 道具列表（消耗品/可用物品）──
 const availableItems = computed<InventoryItem[]>(() => {
-  const char = selectedCharacter.value
-  if (!char) return []
+  const char = selectedCharacter.value;
+  if (!char) return [];
   return (char.inventory ?? []).filter(
     (item) => (item.type === 'consumable' || item.type === 'material') && item.quantity > 0,
-  )
-})
+  );
+});
 
 // ── 武器名（从 inventory 中找 equippedSlot 为武器槽的物品）──
-const WEAPON_SLOTS = ['weapon', '武器'] as const
+const WEAPON_SLOTS = ['weapon', '武器'] as const;
 
 const weaponName = computed<string>(() => {
-  const char = selectedCharacter.value
-  if (!char) return '武器'
+  const char = selectedCharacter.value;
+  if (!char) return '武器';
   const weapon = (char.inventory ?? []).find(
     (item) => item.equippedSlot && WEAPON_SLOTS.includes(item.equippedSlot as any),
-  )
-  return weapon?.name ?? '武器'
-})
+  );
+  return weapon?.name ?? '武器';
+});
 
 // ════════════════════════════════════════
 //  行动类型 Tab 定义
 // ════════════════════════════════════════
 
 interface ActionTab {
-  type: ActionType
-  label: string
+  type: ActionType;
+  label: string;
   /** 该行动是否需要选目标 */
-  needsTarget: boolean
+  needsTarget: boolean;
   /** 该行动是否需要选技能/道具 */
-  needsDetail: boolean
+  needsDetail: boolean;
 }
 
 const ACTION_TABS: readonly ActionTab[] = [
@@ -134,12 +134,12 @@ const ACTION_TABS: readonly ActionTab[] = [
   { type: 'item', label: '道具', needsTarget: false, needsDetail: true },
   { type: 'defend', label: '防御', needsTarget: false, needsDetail: false },
   { type: 'flee', label: '逃跑', needsTarget: false, needsDetail: false },
-] as const
+] as const;
 
 /** 当前选中行动 Tab 的定义 */
 const activeTab = computed<ActionTab | undefined>(() =>
   ACTION_TABS.find((t) => t.type === selectedAction.value),
-)
+);
 
 // ════════════════════════════════════════
 //  交互逻辑
@@ -150,23 +150,23 @@ watch(
   () => awaiting.value,
   (awt) => {
     if (awt) {
-      selectedUnitId.value = awt.unitId
+      selectedUnitId.value = awt.unitId;
     } else {
       // 脱离我方回合时清空选择，下次重新来
-      selectedAction.value = ''
-      selectedDetail.value = ''
-      selectedTargetId.value = ''
+      selectedAction.value = '';
+      selectedDetail.value = '';
+      selectedTargetId.value = '';
     }
   },
   { immediate: true },
-)
+);
 
 /** 切换行动类型时清空子选择 */
 function selectAction(type: ActionType) {
-  if (selectedAction.value === type) return
-  selectedAction.value = type
-  selectedDetail.value = ''
-  selectedTargetId.value = ''
+  if (selectedAction.value === type) return;
+  selectedAction.value = type;
+  selectedDetail.value = '';
+  selectedTargetId.value = '';
 }
 
 // ════════════════════════════════════════
@@ -175,61 +175,61 @@ function selectAction(type: ActionType) {
 
 /** 获取单位显示名（优先用 CombatParticipant.name） */
 function unitName(charId: string): string {
-  const combat = game.activeCombat
-  const p = combat?.participants.find((pt) => pt.characterId === charId)
-  return p?.name ?? findCharacter(charId)?.name ?? '未知单位'
+  const combat = game.activeCombat;
+  const p = combat?.participants.find((pt) => pt.characterId === charId);
+  return p?.name ?? findCharacter(charId)?.name ?? '未知单位';
 }
 
 /** 获取目标显示名 */
 function targetName(): string {
-  if (!selectedTargetId.value) return '敌人'
-  const p = enemyUnits.value.find((e) => e.characterId === selectedTargetId.value)
-  return p?.name ?? '敌人'
+  if (!selectedTargetId.value) return '敌人';
+  const p = enemyUnits.value.find((e) => e.characterId === selectedTargetId.value);
+  return p?.name ?? '敌人';
 }
 
 /** 拼装自然语言指令，注入文本框 */
 function assembleAndInject() {
-  if (!selectedUnitId.value || !selectedAction.value) return
+  if (!selectedUnitId.value || !selectedAction.value) return;
 
-  const me = unitName(selectedUnitId.value)
-  let text = ''
+  const me = unitName(selectedUnitId.value);
+  let text = '';
 
   switch (selectedAction.value) {
     case 'attack':
-      text = `${me}挥舞${weaponName.value}攻击${targetName()}`
-      break
+      text = `${me}挥舞${weaponName.value}攻击${targetName()}`;
+      break;
 
     case 'skill': {
-      if (!selectedDetail.value) return
+      if (!selectedDetail.value) return;
       // 判断技能是否攻击型：技能名含"攻击/斩/击/刺/射/轰/术"等关键字启发式判断
-      const isAttackSkill = /攻|斩|击|刺|射|轰|术|爆|裂|波/.test(selectedDetail.value)
+      const isAttackSkill = /攻|斩|击|刺|射|轰|术|爆|裂|波/.test(selectedDetail.value);
       if (isAttackSkill && activeTab.value?.needsTarget) {
         // 攻击型技能 — 需要目标就带目标
-        text = `${me}施展${selectedDetail.value}，攻向${targetName()}`
+        text = `${me}施展${selectedDetail.value}，攻向${targetName()}`;
       } else {
-        text = `${me}施展${selectedDetail.value}`
+        text = `${me}施展${selectedDetail.value}`;
       }
-      break
+      break;
     }
 
     case 'item': {
-      if (!selectedDetail.value) return
-      text = `${me}使用${selectedDetail.value}`
-      break
+      if (!selectedDetail.value) return;
+      text = `${me}使用${selectedDetail.value}`;
+      break;
     }
 
     case 'defend':
-      text = `${me}举盾防御`
-      break
+      text = `${me}举盾防御`;
+      break;
 
     case 'flee':
-      text = `${me}尝试撤退`
-      break
+      text = `${me}尝试撤退`;
+      break;
   }
 
   if (text) {
     // 追加而非覆盖（允许玩家连续拼装多句）
-    inputText.value = inputText.value ? `${inputText.value}；${text}` : text
+    inputText.value = inputText.value ? `${inputText.value}；${text}` : text;
   }
 }
 
@@ -237,21 +237,21 @@ function assembleAndInject() {
 //  发送
 // ════════════════════════════════════════
 
-const canSend = computed(() => inputText.value.trim().length > 0 && !isLocked.value)
+const canSend = computed(() => inputText.value.trim().length > 0 && !isLocked.value);
 
 function handleSend() {
-  const text = inputText.value.trim()
-  if (!text || isLocked.value) return
-  game.submitCombatInput(text)
-  inputText.value = ''
+  const text = inputText.value.trim();
+  if (!text || isLocked.value) return;
+  game.submitCombatInput(text);
+  inputText.value = '';
   // 拼装状态保留（同单位可能多次行动），文本框清空
 }
 
 function handleKeydown(e: KeyboardEvent) {
   // Ctrl/Cmd + Enter 发送
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-    e.preventDefault()
-    handleSend()
+    e.preventDefault();
+    handleSend();
   }
 }
 </script>
@@ -277,11 +277,7 @@ function handleKeydown(e: KeyboardEvent) {
           aria-label="选择我方单位"
         >
           <option value="" disabled>选择单位…</option>
-          <option
-            v-for="u in allyUnits"
-            :key="u.characterId"
-            :value="u.characterId"
-          >
+          <option v-for="u in allyUnits" :key="u.characterId" :value="u.characterId">
             {{ u.name }}（HP {{ u.hp }}/{{ u.maxHp }}）
           </option>
         </select>
@@ -313,24 +309,15 @@ function handleKeydown(e: KeyboardEvent) {
           :disabled="isLocked"
           :aria-label="selectedAction === 'skill' ? '选择技能' : '选择道具'"
         >
-          <option value="" disabled>
-            选择{{ selectedAction === 'skill' ? '技能' : '道具' }}…
-          </option>
+          <option value="" disabled>选择{{ selectedAction === 'skill' ? '技能' : '道具' }}…</option>
           <template v-if="selectedAction === 'skill'">
-            <option
-              v-for="sk in availableSkills"
-              :key="sk.name"
-              :value="sk.name"
-            >
-              {{ sk.name }}<template v-if="sk.cost"> ({{ sk.cost.type }} {{ sk.cost.amount }})</template>
+            <option v-for="sk in availableSkills" :key="sk.name" :value="sk.name">
+              {{ sk.name
+              }}<template v-if="sk.cost"> ({{ sk.cost.type }} {{ sk.cost.amount }})</template>
             </option>
           </template>
           <template v-else>
-            <option
-              v-for="item in availableItems"
-              :key="item.name"
-              :value="item.name"
-            >
+            <option v-for="item in availableItems" :key="item.name" :value="item.name">
               {{ item.name }} ×{{ item.quantity }}
             </option>
           </template>
@@ -347,11 +334,7 @@ function handleKeydown(e: KeyboardEvent) {
           aria-label="选择目标"
         >
           <option value="" disabled>选择目标…</option>
-          <option
-            v-for="e in enemyUnits"
-            :key="e.characterId"
-            :value="e.characterId"
-          >
+          <option v-for="e in enemyUnits" :key="e.characterId" :value="e.characterId">
             {{ e.name }}（HP {{ e.hp }}/{{ e.maxHp }}）
           </option>
         </select>
@@ -360,7 +343,7 @@ function handleKeydown(e: KeyboardEvent) {
       <!-- 注入按钮 -->
       <button
         class="inject-btn"
-        :disabled="isLocked || !selectedAction || (!selectedUnitId)"
+        :disabled="isLocked || !selectedAction || !selectedUnitId"
         @click="assembleAndInject"
       >
         注入文本框
@@ -508,7 +491,9 @@ function handleKeydown(e: KeyboardEvent) {
   font-size: 0.85rem;
   font-family: var(--theme-font-body);
   cursor: pointer;
-  transition: background var(--theme-transition-fast), border-color var(--theme-transition-fast),
+  transition:
+    background var(--theme-transition-fast),
+    border-color var(--theme-transition-fast),
     color var(--theme-transition-fast);
 }
 

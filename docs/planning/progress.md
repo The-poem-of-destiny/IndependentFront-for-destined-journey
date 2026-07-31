@@ -3,6 +3,7 @@
 ## Session: 2026-06-13
 
 ### Phase 1: 架构设计 & 可行性验证
+
 - **Status:** complete ✅
 - **Started:** 2026-06-13
 - **Completed:** 2026-06-13
@@ -51,6 +52,7 @@
   - tsconfig.json（创建）
 
 ### Phase 2: 核心数据结构 & 数据库设计
+
 - **Status:** complete ✅
 - **Started:** 2026-06-13
 - **Completed:** 2026-06-13
@@ -71,6 +73,7 @@
   - src/sillytavern/database.ts（修改，~200 行新表+迁移+CRUD）
 
 ### Phase 3: Agent 编排引擎
+
 - **Status:** complete ✅
 - **Started:** 2026-06-13
 - **Completed:** 2026-06-13
@@ -111,39 +114,40 @@
 
 ## Test Results
 
-| Test | Input | Expected | Actual | Status |
-|------|-------|----------|--------|--------|
-| TypeScript type-check | npx tsc --noEmit | 无错误 | 0 errors | ✓ |
-| npm install dexie | npm install dexie | 安装成功 | installed ^4.4.3 | ✓ |
-| JSON script extraction | node -e script | 找到3个目标脚本 | 3/3 found | ✓ |
-| TypeScript type-check v4 | npx tsc --noEmit | 0 errors | 0 errors | ✓ |
-| npm build v4 | npm run build | 成功 | 成功 | ✓ |
-| Vitest (Phase 2) | npx vitest --run | 83 passed | 83 passed | ✓ |
-| Vitest (Phase 3) | npx vitest --run | 161 passed | 161 passed | ✓ |
+| Test                     | Input             | Expected        | Actual           | Status |
+| ------------------------ | ----------------- | --------------- | ---------------- | ------ |
+| TypeScript type-check    | npx tsc --noEmit  | 无错误          | 0 errors         | ✓      |
+| npm install dexie        | npm install dexie | 安装成功        | installed ^4.4.3 | ✓      |
+| JSON script extraction   | node -e script    | 找到3个目标脚本 | 3/3 found        | ✓      |
+| TypeScript type-check v4 | npx tsc --noEmit  | 0 errors        | 0 errors         | ✓      |
+| npm build v4             | npm run build     | 成功            | 成功             | ✓      |
+| Vitest (Phase 2)         | npx vitest --run  | 83 passed       | 83 passed        | ✓      |
+| Vitest (Phase 3)         | npx vitest --run  | 161 passed      | 161 passed       | ✓      |
 
 ## Error Log
 
-| Timestamp | Error | Attempt | Resolution |
-|-----------|-------|---------|------------|
-| 2026-06-13 | TS18047 'settings' possibly null | 1 | 添加 const s = settings! 类型守卫 |
-| 2026-06-13 | ENOENT node path double E: drive | 1 | 改用 E:/code/... 格式 |
-| 2026-06-13 | scripts count 0 at top level | 1 | 深入 data.extensions.regex_scripts 查找 |
-| 2026-06-13 | Dexie transaction() overload — 10 tables exceeds ~5-table TypeScript arg limit | 2 | 将 importAllData 拆分为 3 个 transaction 分批导入 |
-| 2026-06-13 | TS2615 PlotEvent.children 循环引用导致 Dexie mapped type 无限递归 | 1 | 改用 childrenIds: string[] 扁平存储 + resolvePlotTree() 运行时重建 |
-| 2026-06-13 | AgestClient AbortSignal — 外部已abort的signal注册listener不触发 | 1 | callOnce 中先检查 signal.aborted 再决定注册listener |
-| 2026-06-13 | ESM require() — `const { X } = require('./types')` 在 type:module 下报错 | 2 | 统一使用顶层 import |
+| Timestamp  | Error                                                                          | Attempt | Resolution                                                         |
+| ---------- | ------------------------------------------------------------------------------ | ------- | ------------------------------------------------------------------ |
+| 2026-06-13 | TS18047 'settings' possibly null                                               | 1       | 添加 const s = settings! 类型守卫                                  |
+| 2026-06-13 | ENOENT node path double E: drive                                               | 1       | 改用 E:/code/... 格式                                              |
+| 2026-06-13 | scripts count 0 at top level                                                   | 1       | 深入 data.extensions.regex_scripts 查找                            |
+| 2026-06-13 | Dexie transaction() overload — 10 tables exceeds ~5-table TypeScript arg limit | 2       | 将 importAllData 拆分为 3 个 transaction 分批导入                  |
+| 2026-06-13 | TS2615 PlotEvent.children 循环引用导致 Dexie mapped type 无限递归              | 1       | 改用 childrenIds: string[] 扁平存储 + resolvePlotTree() 运行时重建 |
+| 2026-06-13 | AgestClient AbortSignal — 外部已abort的signal注册listener不触发                | 1       | callOnce 中先检查 signal.aborted 再决定注册listener                |
+| 2026-06-13 | ESM require() — `const { X } = require('./types')` 在 type:module 下报错       | 2       | 统一使用顶层 import                                                |
 
 ## 5-Question Reboot Check
 
-| Question | Answer |
-|----------|--------|
-| Where am I? | Phase 4 已完成 — 记忆系统 & 剧情规划 |
-| Where am I going? | Phase 4.5 → 事件系统基础设施 (GameEvent + StateManager) → Phase 8 交付 |
-| What's the goal? | 多 Agent 文字 RPG 引擎 + 可插拔角色 + 缓存优化 + 浏览器 UI |
-| What have I learned? | See findings.md |
-| What have I done? | Phase 1-4 全部完成 (369 tests) |
+| Question             | Answer                                                                 |
+| -------------------- | ---------------------------------------------------------------------- |
+| Where am I?          | Phase 4 已完成 — 记忆系统 & 剧情规划                                   |
+| Where am I going?    | Phase 4.5 → 事件系统基础设施 (GameEvent + StateManager) → Phase 8 交付 |
+| What's the goal?     | 多 Agent 文字 RPG 引擎 + 可插拔角色 + 缓存优化 + 浏览器 UI             |
+| What have I learned? | See findings.md                                                        |
+| What have I done?    | Phase 1-4 全部完成 (369 tests)                                         |
 
 ### Phase 4: 记忆系统 & 剧情规划
+
 - **Status:** complete ✅
 - **Started:** 2026-06-14
 - **Completed:** 2026-06-14
@@ -179,14 +183,15 @@
 
 ### Phase 4 架构亮点
 
-| 模块 | 行数 | 导出函数 | 职责 |
-|------|------|---------|------|
-| memory-store.ts | ~170 | 7 | Embedding 召回引擎: 向量计算/余弦相似度/top-K召回/压缩触发 |
-| memory-summarizer.ts | ~190 | 5 | 记忆总结: MEM编号生成/Agent输出解析/校验/持久化 |
-| plot-outline.ts | ~210 | 12 | 大纲管理: AI生成/自检/确认/→事件树/版本更新 |
-| plot-engine.ts | ~260 | 10 | 剧情运行时: pre-check触发/post-check修正/条件评估/世界线传播 |
+| 模块                 | 行数 | 导出函数 | 职责                                                         |
+| -------------------- | ---- | -------- | ------------------------------------------------------------ |
+| memory-store.ts      | ~170 | 7        | Embedding 召回引擎: 向量计算/余弦相似度/top-K召回/压缩触发   |
+| memory-summarizer.ts | ~190 | 5        | 记忆总结: MEM编号生成/Agent输出解析/校验/持久化              |
+| plot-outline.ts      | ~210 | 12       | 大纲管理: AI生成/自检/确认/→事件树/版本更新                  |
+| plot-engine.ts       | ~260 | 10       | 剧情运行时: pre-check触发/post-check修正/条件评估/世界线传播 |
 
 ### 新管线 (Phase 4 DAG)
+
 ```
 Stage 0: memory_recall + plot_pre_check (并行)
 Stage 1: story
@@ -198,13 +203,14 @@ Stage 5: plot_post_check
 
 ## Test Results
 
-| Test | Input | Expected | Actual | Status |
-|------|-------|----------|--------|--------|
-| TypeScript type-check | npx tsc --noEmit | 无错误 | 0 errors | ✓ |
-| npm build v5 | npm run build | 成功 | 成功 | ✓ |
-| All tests (972) | npm test -- --run | 972 passed | 972 passed | ✓ |
+| Test                  | Input             | Expected   | Actual     | Status |
+| --------------------- | ----------------- | ---------- | ---------- | ------ |
+| TypeScript type-check | npx tsc --noEmit  | 无错误     | 0 errors   | ✓      |
+| npm build v5          | npm run build     | 成功       | 成功       | ✓      |
+| All tests (972)       | npm test -- --run | 972 passed | 972 passed | ✓      |
 
 ### Phase 5: 角色 & 变量系统 + $ API 命名空间 ✅
+
 - ✅ validate.ts (新建, ~200行): Layer 1 数值约束 — clamp/角色校验/Patch校验/物品技能校验/$validate
 - ✅ time-system.ts (新建, ~180行): Layer 2 游戏时间 — parse/format/advance/compare/daytime/season/$time
 - ✅ resource-calc.ts (新建, ~170行): Layer 2 资源计算 — HP%/支付检查/物品技能查询/经验公式/$resource
@@ -215,19 +221,20 @@ Stage 5: plot_post_check
 
 **9 $ API Namespace 实现进度:**
 
-| Namespace | 状态 | 模块 |
-|-----------|------|------|
-| `$dice` | ✅ | dice.ts (Phase 4.5) |
-| `$validate` | ✅ | validate.ts |
-| `$resource` | ✅ | resource-calc.ts |
-| `$char` | ✅ | char-query.ts |
-| `$var` | ✅ | var-resolver.ts |
-| `$time` | ✅ | time-system.ts |
-| `$combat` | ⬜ | Phase 6 |
-| `$craft` | ⬜ | Phase 6 |
-| `$status` | ⬜ | Phase 6 |
+| Namespace   | 状态 | 模块                |
+| ----------- | ---- | ------------------- |
+| `$dice`     | ✅   | dice.ts (Phase 4.5) |
+| `$validate` | ✅   | validate.ts         |
+| `$resource` | ✅   | resource-calc.ts    |
+| `$char`     | ✅   | char-query.ts       |
+| `$var`      | ✅   | var-resolver.ts     |
+| `$time`     | ✅   | time-system.ts      |
+| `$combat`   | ⬜   | Phase 6             |
+| `$craft`    | ⬜   | Phase 6             |
+| `$status`   | ⬜   | Phase 6             |
 
 ### Phase 4.5: 事件系统基础设施 (GameEvent + StateManager) ✅
+
 - ✅ types.ts: +~150 行 (GameEvent/StatePatch/EffectDefinition/DiceRollResult/CombatAction 等)
 - ✅ dice.ts (新建, ~140行): Layer 2 骰池 — d20/d100/优势劣势/DC判定/临界/$dice namespace
 - ✅ state-manager.ts (新建, ~400行): ADR-21 唯一写入入口 — 20 种 Patch 操作/自动快照
@@ -237,9 +244,11 @@ Stage 5: plot_post_check
 - ✅ 编译零错误 + 607 tests 全部通过
 
 ---
-*Update after completing each phase or encountering errors*
+
+_Update after completing each phase or encountering errors_
 
 ### Phase 6a: 战斗系统 ✅
+
 - **Status:** complete ✅
 - **Started:** 2026-06-15
 - **Completed:** 2026-06-15
@@ -255,15 +264,16 @@ Stage 5: plot_post_check
 
 ### Phase 6a 架构亮点
 
-| 模块 | 行数 | 导出函数 | 职责 |
-|------|------|---------|------|
-| combat-intention.ts | ~220 | 5 | 意图解析: 8级意图/对抗检定/层级压制/非致死 |
-| combat-damage.ts | ~330 | 15 | 伤害管线: 8步计算/命中评级/攻击检定/状态触发 |
-| combat-turn.ts | ~180 | 10 | 回合管理: 先攻排序/资源追踪/序列验证 |
-| combat-panel.ts | ~270 | 6 | 面板生成: 三阶段XML/完整管线展开/摘要 |
-| combat-resolver.ts | ~410 | 10 | 战斗引擎: 管线整合/$combat API/参与者转换 |
+| 模块                | 行数 | 导出函数 | 职责                                         |
+| ------------------- | ---- | -------- | -------------------------------------------- |
+| combat-intention.ts | ~220 | 5        | 意图解析: 8级意图/对抗检定/层级压制/非致死   |
+| combat-damage.ts    | ~330 | 15       | 伤害管线: 8步计算/命中评级/攻击检定/状态触发 |
+| combat-turn.ts      | ~180 | 10       | 回合管理: 先攻排序/资源追踪/序列验证         |
+| combat-panel.ts     | ~270 | 6        | 面板生成: 三阶段XML/完整管线展开/摘要        |
+| combat-resolver.ts  | ~410 | 10       | 战斗引擎: 管线整合/$combat API/参与者转换    |
 
 ### 世界书对齐
+
 - ✅ 战斗类型: 切磋/竞技/压制/死斗/标准/守卫 (6种, 对齐 #837805)
 - ✅ 六意图+非致死+处决: 对症 #837805 第三阶段 §3
 - ✅ 命中评级: ≥30(超暴击,2.0)→≤3(失手,0) (7级, 对齐世界书)
@@ -275,6 +285,7 @@ Stage 5: plot_post_check
 - ✅ d20 优劣势: 高T vs 低T → 优势; 低T vs 高T → 劣势
 
 ### Phase 6b: 制作系统 ✅
+
 - **Status:** complete ✅
 - **Started:** 2026-06-15
 - **Completed:** 2026-06-15
@@ -288,13 +299,14 @@ Stage 5: plot_post_check
 
 ### Phase 6b 架构亮点
 
-| 模块 | 行数 | 导出函数 | 职责 |
-|------|------|---------|------|
-| craft-quality.ts | ~270 | 15 | 品质链: 继承/降级/校验/DC修正/管制/资源/批次 |
-| craft-dc.ts | ~340 | 15 | DC引擎: 骰池/计算/经验FP/产能加成/材料节省 |
-| craft-resolver.ts | ~580 | 8 | 制作管线: 3阶段/$craft API/面板/描述/Patch |
+| 模块              | 行数 | 导出函数 | 职责                                         |
+| ----------------- | ---- | -------- | -------------------------------------------- |
+| craft-quality.ts  | ~270 | 15       | 品质链: 继承/降级/校验/DC修正/管制/资源/批次 |
+| craft-dc.ts       | ~340 | 15       | DC引擎: 骰池/计算/经验FP/产能加成/材料节省   |
+| craft-resolver.ts | ~580 | 8        | 制作管线: 3阶段/$craft API/面板/描述/Patch   |
 
 ### 世界书对齐
+
 - ✅ 4制作类型: 锻造(力量)/炼金(智力)/烹饪(精神)/裁缝(敏捷) (对齐 #683615)
 - ✅ 3级加工: 基础加工/半成品/成品 (对齐 #683615)
 - ✅ 品质DC: 普通6→神话40 (对齐 #265160)
@@ -307,6 +319,7 @@ Stage 5: plot_post_check
 - ✅ 大失败: d20=1→100%损毁; 神话豁免 (对齐 #683615)
 
 ### Phase 6c: 集群/士气系统 ✅
+
 - **Status:** complete ✅
 - **Started:** 2026-06-15
 - **Completed:** 2026-06-15
@@ -319,12 +332,13 @@ Stage 5: plot_post_check
 
 ### Phase 6c 架构亮点
 
-| 模块 | 行数 | 导出函数 | 职责 |
-|------|------|---------|------|
-| cluster-system.ts | ~270 | 15 | 集群管理: 形成/HP比例/攻击次数/减员/伤害修正/意图免疫 |
-| morale-system.ts | ~250 | 13 | 士气引擎: 状态机/阈值检测/自动vs检定/结果池/行为修正 |
+| 模块              | 行数 | 导出函数 | 职责                                                  |
+| ----------------- | ---- | -------- | ----------------------------------------------------- |
+| cluster-system.ts | ~270 | 15       | 集群管理: 形成/HP比例/攻击次数/减员/伤害修正/意图免疫 |
+| morale-system.ts  | ~250 | 13       | 士气引擎: 状态机/阈值检测/自动vs检定/结果池/行为修正  |
 
 ### 世界书对齐
+
 - ✅ 集群形成: ≥3同类低级单位自动聚合 (对齐 #837805 §1.3)
 - ✅ 攻击次数: HP≥80%→3次/≥50%→2次/<50%→1次 (对齐 #837805 §3.2)
 - ✅ 集群修正: ×1.5 伤害 (对齐 #837805 §3.5)
@@ -336,6 +350,7 @@ Stage 5: plot_post_check
 - ✅ 处决条件: wavering/routing + 处决意图 → 自动成功 (对齐 #837805 §3.3)
 
 ### Phase 6d: 好感度系统 ✅
+
 - **Status:** complete ✅
 - **Started:** 2026-06-15
 - **Completed:** 2026-06-15
@@ -347,33 +362,38 @@ Stage 5: plot_post_check
 
 ### Phase 6d 设计哲学
 
-| 决策 | 选择 | 理由 |
-|------|------|------|
-| Code 层职责 | 仅钳制 + 读写 + 标签 | 用户指示简化，行为/判断/演绎交给叙事 AI |
+| 决策           | 选择                                | 理由                                     |
+| -------------- | ----------------------------------- | ---------------------------------------- |
+| Code 层职责    | 仅钳制 + 读写 + 标签                | 用户指示简化，行为/判断/演绎交给叙事 AI  |
 | $affection API | get/set/add/batch/label/simpleLabel | 6 个方法，vars_update Agent 每回合可调用 |
-| 不可变操作 | 每次返回新 AffectionMap | 遵循 StateManager 不可变更新模式 |
+| 不可变操作     | 每次返回新 AffectionMap             | 遵循 StateManager 不可变更新模式         |
 
 ### 世界书对齐
+
 - ✅ 范围: -100 ~ +100 (对齐 #966681)
 - ✅ 标签: 11 级命名区间 (对齐 #966681)
 - ✅ 简化标签: 友好/中立/敌对 三档（供简易 UI 使用）
 
 ### Phase 7d: 捏人页 — 暂结标记
+
 - **Status:** complete ✅ (暂结，后续到 Phase 8 继续改)
 - **Marked:** 2026-06-17
 - 已完成: 6 项快速改进 + 剧情偏向 8 选项 + 难度单选组 + 背景 <user> 替换
 - 待完善: 更多捏人细节留到 Phase 8 之后迭代
 
 ---
-*Last updated: 2026-07-14*
+
+_Last updated: 2026-07-14_
 
 ## Session: 2026-07-14
 
 ### Plan 3: GamePipeline + GamePage — 前端↔引擎桥接层
+
 - **Status:** 🔄 in_progress
 - **Started:** 2026-07-14
 
 ### Task 5: 全局测试回归
+
 - **Status:** complete ✅
 - Actions taken:
   - ✅ `npm run test -- --run` — **2582 tests PASS | 64 files**
@@ -388,6 +408,7 @@ Stage 5: plot_post_check
   - src/ui/components/game/GamePage.test.ts (修改: mock 补全新字段)
 
 ## Plan 3 Summary
+
 - **Status:** complete ✅
 - **Results:** 2582 tests PASS | typecheck 0 errors | build 成功
 - **Deliverables:**
@@ -399,6 +420,7 @@ Stage 5: plot_post_check
 ## Session: 2026-06-17
 
 ### Phase 7d 修复 (6 项快速改进)
+
 - **Status:** complete ✅
 - Actions taken:
   - ✅ **修复 1**: `CreateSteps.vue` step-num 数字可见性 — 删除父级 `opacity:0.35`，改用固定灰色 `#888`/`#999`，白色/深色主题均清晰
@@ -421,6 +443,7 @@ Stage 5: plot_post_check
   - src/ui/themes/variables.css
 
 ### 架构改造: 多 URL Router → 单 URL Store 驱动
+
 - **Status:** complete ✅
 - Actions taken:
   - ✅ `ui-store.ts` 新增 `currentView` / `activeSaveId` / `navigate()` 导航系统
@@ -434,6 +457,7 @@ Stage 5: plot_post_check
 - 结果: 浏览器地址栏永远 `localhost:5174/`，页面切换纯状态驱动
 
 ### 设置持久化系统
+
 - **Status:** complete ✅
 - Actions taken:
   - ✅ **`settings-store.ts`** (新建, ~100 行): 通用 key-value 自动持久化 store
@@ -444,6 +468,7 @@ Stage 5: plot_post_check
   - ✅ 存储用量: "存档数据"区新增 📊 卡片，调用 `navigator.storage.estimate()` 显示已用/总量
 
 ### UI 测试体系建设
+
 - **Status:** complete ✅
 - Actions taken:
   - ✅ `npm install -D jsdom` — 组件测试 DOM 环境
@@ -457,10 +482,12 @@ Stage 5: plot_post_check
   - ✅ **2085 tests | 47 files | 编译 0 错误**
 
 ### Bug 修复: 设置页空白
+
 - **根因**: sed 批量替换 `apiPool`→`s.apiPool` 时漏掉了 `v-for` 和 `v-if` 绑定
 - **修复**: `SettingsPage.vue` 两行模板 `v-for="ep in apiPool"`→`v-for="ep in s.apiPool"`、`v-for="p in presets"`→`v-for="p in s.presets"`
 
 ### 小改进
+
 - ✅ **settings-store.test.ts** (新建, 7 tests) — 冒烟测试 + mock localStorage
 - ✅ **CreatePage.vue** 左上角新增"← 首页"返回按钮 — Pinia store 跨页面保活，无需提醒保存
 - ✅ **测试总数: 2092 tests | 48 files**
@@ -471,13 +498,12 @@ Stage 5: plot_post_check
 
 本 session Claude 犯的 7 个错误，原因和教训：
 
-| # | 错误 | 根因 | 教训 |
-|---|------|------|------|
-| 1 | `--theme-color-primary` 变量不存在 | 假设变量名存在，未在主题文件里 grep 验证 | 写 CSS 前先确认 CSS 变量名来源 |
-| 2 | `opacity:0.35` 导致 step 数字不可见 | 没注意到父元素 opacity 会洗掉子元素颜色 | 排查"看不见"先检查父级 CSS 透明度 |
-| 3 | ResourceBar current/max 传同一值 | 没仔细看调用方传参：`:current="hpPreview" :max="hpPreview"` | 写模板绑定前确认当前值是 max 还是相同值 |
-| 4 | `<user>` 只在 buildOpeningPrompt 里替换 | 忘了背景文字在 BackgroundList.vue 里也有展示路径 | 搜索所有使用点，不只修最明显的那个 |
-| 5 | sed 批量替换漏掉 `v-for` 绑定 | `sed 's/apiPool/s.apiPool/g'` 不会匹配 `v-for="ep in apiPool"` | 批量替换后用 grep 验证没有遗漏 |
-| 6 | settings-store 测试缺 `await nextTick()` | Vue watch deep 回调是异步排队的，不是同步 | store 的 deep watch 测试需要 `await nextTick()` |
-| 7 | vitest.config.ts 缺 resolve.alias | vite.config.ts 配了别名但 vitest.config.ts 没同步 | 新增路径别名时要检查所有配置文件 |
-
+| #   | 错误                                     | 根因                                                           | 教训                                            |
+| --- | ---------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------- |
+| 1   | `--theme-color-primary` 变量不存在       | 假设变量名存在，未在主题文件里 grep 验证                       | 写 CSS 前先确认 CSS 变量名来源                  |
+| 2   | `opacity:0.35` 导致 step 数字不可见      | 没注意到父元素 opacity 会洗掉子元素颜色                        | 排查"看不见"先检查父级 CSS 透明度               |
+| 3   | ResourceBar current/max 传同一值         | 没仔细看调用方传参：`:current="hpPreview" :max="hpPreview"`    | 写模板绑定前确认当前值是 max 还是相同值         |
+| 4   | `<user>` 只在 buildOpeningPrompt 里替换  | 忘了背景文字在 BackgroundList.vue 里也有展示路径               | 搜索所有使用点，不只修最明显的那个              |
+| 5   | sed 批量替换漏掉 `v-for` 绑定            | `sed 's/apiPool/s.apiPool/g'` 不会匹配 `v-for="ep in apiPool"` | 批量替换后用 grep 验证没有遗漏                  |
+| 6   | settings-store 测试缺 `await nextTick()` | Vue watch deep 回调是异步排队的，不是同步                      | store 的 deep watch 测试需要 `await nextTick()` |
+| 7   | vitest.config.ts 缺 resolve.alias        | vite.config.ts 配了别名但 vitest.config.ts 没同步              | 新增路径别名时要检查所有配置文件                |

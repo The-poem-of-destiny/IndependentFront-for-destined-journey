@@ -1,34 +1,29 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed } from 'vue';
 
 const props = defineProps<{
-  label: string
-  current: number
-  max: number
-  color?: string  // CSS variable or hex
-  showValues?: boolean
-  height?: number
-}>()
+  label: string;
+  current: number;
+  max: number;
+  color?: string; // CSS variable or hex
+  showValues?: boolean;
+  height?: number;
+}>();
 
 const percent = computed(() => {
-  if (props.max <= 0) return 0
-  return Math.min(100, Math.max(0, (props.current / props.max) * 100))
-})
+  if (props.max <= 0) return 0;
+  return Math.min(100, Math.max(0, (props.current / props.max) * 100));
+});
 
-const barColor = computed(() => props.color || 'var(--theme-hp)')
+const barColor = computed(() => props.color || 'var(--theme-hp)');
 </script>
 
 <template>
   <div class="resource-bar" :style="{ height: (height || 14) + 'px' }">
     <span class="res-label">{{ label }}</span>
     <div class="res-track">
-      <div
-        class="res-fill"
-        :style="{ width: percent + '%', background: barColor }"
-      />
-      <span v-if="showValues !== false" class="res-values">
-        {{ current }} / {{ max }}
-      </span>
+      <div class="res-fill" :style="{ width: percent + '%', background: barColor }" />
+      <span v-if="showValues !== false" class="res-values"> {{ current }} / {{ max }} </span>
     </div>
   </div>
 </template>
@@ -75,8 +70,8 @@ const barColor = computed(() => props.color || 'var(--theme-hp)')
      无论叠在深色血条上还是浅色空轨上、无论深色主题还是亮色主题，都能看清 */
   color: #fff;
   text-shadow:
-    0 0 4px rgba(0,0,0,0.8),
-    0 1px 2px rgba(0,0,0,0.6);
+    0 0 4px rgba(0, 0, 0, 0.8),
+    0 1px 2px rgba(0, 0, 0, 0.6);
   z-index: 1;
 }
 </style>

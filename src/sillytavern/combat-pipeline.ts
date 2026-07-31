@@ -185,7 +185,11 @@ export async function resolveAttackPipeline(
   const relAttrValue = input.relevantAttributeValue ?? attacker.attributes.str;
   const dmgType: DamageType = input.damageType ?? '物理';
   const multiHit = input.multiHitCount ?? 1;
-  const chainCtx = { combatants: ctx.combatants, source: input.attackerId, readHooks: ctx.readHooks };
+  const chainCtx = {
+    combatants: ctx.combatants,
+    source: input.attackerId,
+    readHooks: ctx.readHooks,
+  };
 
   // ===== event: combat.attack.request (AI→代码) =====
   await ctx.bus.emitChain(
@@ -278,7 +282,10 @@ export async function resolveAttackPipeline(
     const defenderMods = await collectDefenderMods(ctx.bus, attackCtx, ctx.combatants);
 
     // fold mods + 登神压制 → PipelineModifiers（stub 实现，M3 agent 替换）
-    const modifiers: PipelineModifiers | undefined = foldModsToPipelineModifiers(attackerMods, defenderMods);
+    const modifiers: PipelineModifiers | undefined = foldModsToPipelineModifiers(
+      attackerMods,
+      defenderMods,
+    );
 
     // 8 步管线（复用 runDamagePipeline，注入 modifiers）
     damageBreakdown = runDamagePipeline({

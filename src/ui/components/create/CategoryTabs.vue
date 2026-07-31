@@ -8,12 +8,12 @@
  */
 
 defineProps<{
-  categories: { key: string; label: string; count?: number }[]
-  modelValue: string
-  variant?: 'horizontal' | 'vertical'
-}>()
+  categories: { key: string; label: string; count?: number }[];
+  modelValue: string;
+  variant?: 'horizontal' | 'vertical';
+}>();
 
-defineEmits<{ 'update:modelValue': [key: string] }>()
+defineEmits<{ 'update:modelValue': [key: string] }>();
 </script>
 
 <template>
@@ -83,7 +83,10 @@ defineEmits<{ 'update:modelValue': [key: string] }>()
   cursor: pointer;
   text-align: left;
   border-radius: var(--theme-radius-sm);
-  transition: background var(--theme-transition-fast), color var(--theme-transition-fast), border-color var(--theme-transition-fast);
+  transition:
+    background var(--theme-transition-fast),
+    color var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
 }
 .tabs-vertical .tab-btn:hover {
   background: var(--theme-card-bg);

@@ -161,7 +161,11 @@ describe('parseAssetFilename — 边角', () => {
   });
 
   it('空尾巴当作无变体（苏婉_头像_.png）', () => {
-    expect(parseAssetFilename('苏婉_头像_.png')).toEqual({ name: '苏婉', type: '头像', ext: 'png' });
+    expect(parseAssetFilename('苏婉_头像_.png')).toEqual({
+      name: '苏婉',
+      type: '头像',
+      ext: 'png',
+    });
   });
 
   it('缺省类型就是 头像', () => {
@@ -324,7 +328,9 @@ describe('★ 往返: parse(format(row)) === row', () => {
   it('格式化出来的文件名里**恰好一个**类型 token —— 往返成立的那一行证明', () => {
     for (const row of buildRows()) {
       const stem = formatAssetFilename(row).replace(/\.[^.]+$/, '');
-      const hits = stem.split('_').filter((seg) => (ASSET_TYPES as readonly string[]).includes(seg));
+      const hits = stem
+        .split('_')
+        .filter((seg) => (ASSET_TYPES as readonly string[]).includes(seg));
       expect(hits, `token 数不为 1: ${stem}`).toHaveLength(1);
     }
   });

@@ -20,14 +20,14 @@
  *   · `@engine/database` 整层替掉: jsdom 下没有可用的 IndexedDB，而本文件测的东西
  *     跟持久层没有关系。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
-import type { AssetMetaRecord } from '@engine/types'
-import type { CropRect } from '../../lib/image-crop'
-import AssetCropEditor from './AssetCropEditor.vue'
-import AssetCharacterDrawer from '../settings/assets/AssetCharacterDrawer.vue'
-import { assetDialogsKey } from '../settings/assets/dialogs'
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
+import type { AssetMetaRecord } from '@engine/types';
+import type { CropRect } from '../../lib/image-crop';
+import AssetCropEditor from './AssetCropEditor.vue';
+import AssetCharacterDrawer from '../settings/assets/AssetCharacterDrawer.vue';
+import { assetDialogsKey } from '../settings/assets/dialogs';
 import {
   clampRect,
   defaultAvatarRect,
@@ -35,12 +35,12 @@ import {
   previewBackground,
   resizeRect,
   wholeImageRect,
-} from '../../lib/crop-rects'
+} from '../../lib/crop-rects';
 import {
   useAssetStore,
   type PortraitCropPlan,
   type PortraitPairResult,
-} from '../../stores/asset-store'
+} from '../../stores/asset-store';
 
 // ── 抽屉那条用例要的两行；编辑器那些用例用不到，getAssets 返回它无害 ──
 const ROWS: AssetMetaRecord[] = [
@@ -64,7 +64,7 @@ const ROWS: AssetMetaRecord[] = [
     createdAt: 2,
     updatedAt: 2,
   },
-]
+];
 
 vi.mock('@engine/database', () => ({
   getAssets: vi.fn(async () => ROWS),
@@ -82,7 +82,7 @@ vi.mock('@engine/database', () => ({
   saveAudioHandle: vi.fn(async () => 'library-root'),
   deleteAudioHandle: vi.fn(async () => {}),
   getDatabase: vi.fn(() => ({})),
-}))
+}));
 
 // ═══════════════════════════════════════════════════════════
 // 纯几何
@@ -90,23 +90,23 @@ vi.mock('@engine/database', () => ({
 
 describe('crop-rects 几何', () => {
   it('立绘默认框就是整张图', () => {
-    expect(wholeImageRect(400, 900)).toEqual({ x: 0, y: 0, w: 400, h: 900 })
-  })
+    expect(wholeImageRect(400, 900)).toEqual({ x: 0, y: 0, w: 400, h: 900 });
+  });
 
   it('头像默认框是顶部居中的正方形，边长取「图宽」与「图高三分之一」里较小者', () => {
     // 高图: 三分之一更小
-    expect(defaultAvatarRect(400, 900)).toEqual({ x: 50, y: 0, w: 300, h: 300 })
+    expect(defaultAvatarRect(400, 900)).toEqual({ x: 50, y: 0, w: 300, h: 300 });
     // 宽图: 图宽更小 → 顶部整宽的方块
-    expect(defaultAvatarRect(200, 900)).toEqual({ x: 0, y: 0, w: 200, h: 200 })
-  })
+    expect(defaultAvatarRect(200, 900)).toEqual({ x: 0, y: 0, w: 200, h: 200 });
+  });
 
   it('平移撞到边界就停住，尺寸不变', () => {
-    const r = moveRect({ x: 50, y: 0, w: 300, h: 300 }, 999, 999, 400, 900)
-    expect(r).toEqual({ x: 100, y: 600, w: 300, h: 300 })
-  })
+    const r = moveRect({ x: 50, y: 0, w: 300, h: 300 }, 999, 999, 400, 900);
+    expect(r).toEqual({ x: 100, y: 600, w: 300, h: 300 });
+  });
 
   it('锁定 1:1 时四个角怎么拖都还是正方形，且不越界', () => {
-    const base: CropRect = { x: 50, y: 100, w: 200, h: 200 }
+    const base: CropRect = { x: 50, y: 100, w: 200, h: 200 };
     for (const corner of ['nw', 'ne', 'sw', 'se'] as const) {
       for (const [dx, dy] of [
         [999, 5],
@@ -114,82 +114,82 @@ describe('crop-rects 几何', () => {
         [7, 999],
         [-30, 12],
       ] as const) {
-        const r = resizeRect(base, corner, dx, dy, 400, 900, true)
-        expect(r.w, `${corner} ${dx},${dy}`).toBe(r.h)
-        expect(r.x).toBeGreaterThanOrEqual(0)
-        expect(r.y).toBeGreaterThanOrEqual(0)
-        expect(r.x + r.w).toBeLessThanOrEqual(400)
-        expect(r.y + r.h).toBeLessThanOrEqual(900)
+        const r = resizeRect(base, corner, dx, dy, 400, 900, true);
+        expect(r.w, `${corner} ${dx},${dy}`).toBe(r.h);
+        expect(r.x).toBeGreaterThanOrEqual(0);
+        expect(r.y).toBeGreaterThanOrEqual(0);
+        expect(r.x + r.w).toBeLessThanOrEqual(400);
+        expect(r.y + r.h).toBeLessThanOrEqual(900);
       }
     }
-  })
+  });
 
   it('自由比例改尺寸时对角固定不动', () => {
-    const r = resizeRect({ x: 10, y: 20, w: 100, h: 100 }, 'se', 40, -30, 400, 900, false)
-    expect(r.x).toBe(10)
-    expect(r.y).toBe(20)
-    expect(r).toEqual({ x: 10, y: 20, w: 140, h: 70 })
-  })
+    const r = resizeRect({ x: 10, y: 20, w: 100, h: 100 }, 'se', 40, -30, 400, 900, false);
+    expect(r.x).toBe(10);
+    expect(r.y).toBe(20);
+    expect(r).toEqual({ x: 10, y: 20, w: 140, h: 70 });
+  });
 
   it('非有限数不猜: NaN 进来不会造出一个不存在的框', () => {
-    const r = clampRect({ x: Number.NaN, y: 0, w: Number.NaN, h: 50 }, 400, 900)
-    expect(Number.isFinite(r.x)).toBe(true)
-    expect(Number.isFinite(r.w)).toBe(true)
-    expect(r.w).toBeGreaterThan(0)
-  })
+    const r = clampRect({ x: Number.NaN, y: 0, w: Number.NaN, h: 50 }, 400, 900);
+    expect(Number.isFinite(r.x)).toBe(true);
+    expect(Number.isFinite(r.w)).toBe(true);
+    expect(r.w).toBeGreaterThan(0);
+  });
 
   it('预览背景: 整图时 100% / 无偏移，取一角时按公式换算', () => {
     expect(previewBackground({ x: 0, y: 0, w: 400, h: 900 }, 400, 900)).toEqual({
       size: '100% 100%',
       position: '0% 0%',
-    })
+    });
     // 400 宽里取 200 宽、起点 x=100 → 恰好是可移动区间的一半
-    const bg = previewBackground({ x: 100, y: 0, w: 200, h: 200 }, 400, 900)
-    expect(bg.size).toBe('200% 450%')
-    expect(bg.position).toBe('50% 0%')
-  })
-})
+    const bg = previewBackground({ x: 100, y: 0, w: 200, h: 200 }, 400, 900);
+    expect(bg.size).toBe('200% 450%');
+    expect(bg.position).toBe('50% 0%');
+  });
+});
 
 // ═══════════════════════════════════════════════════════════
 // 编辑器
 // ═══════════════════════════════════════════════════════════
 
 interface EditorVm {
-  portraitRect: CropRect
-  avatarRect: CropRect
-  problem: string
-  canConfirm: boolean
+  portraitRect: CropRect;
+  avatarRect: CropRect;
+  problem: string;
+  canConfirm: boolean;
 }
 
 function sourceBlob(): Blob {
-  return new Blob(['fake-png-bytes'], { type: 'image/png' })
+  return new Blob(['fake-png-bytes'], { type: 'image/png' });
 }
 
 async function mountEditor(): Promise<{
-  wrapper: VueWrapper
-  vm: EditorVm
-  source: Blob
-  calls: () => unknown[][]
-  resolveWith: (res: PortraitPairResult) => void
+  wrapper: VueWrapper;
+  vm: EditorVm;
+  source: Blob;
+  calls: () => unknown[][];
+  resolveWith: (res: PortraitPairResult) => void;
 }> {
-  const store = useAssetStore()
-  const spy = vi.spyOn(store, 'importPortraitPair')
-  spy.mockResolvedValue({ outcome: 'ok', portraitId: 'p1', avatarId: 'a1' })
-  const source = sourceBlob()
+  const store = useAssetStore();
+  const spy = vi.spyOn(store, 'importPortraitPair');
+  spy.mockResolvedValue({ outcome: 'ok', portraitId: 'p1', avatarId: 'a1' });
+  const source = sourceBlob();
   const wrapper = mount(AssetCropEditor, {
     props: { open: true, source, name: '苏婉', sourceSize: { w: 400, h: 900 } },
     global: { stubs: { teleport: true } },
-  })
-  await flushPromises()
+  });
+  await flushPromises();
   return {
     wrapper,
     vm: wrapper.vm as unknown as EditorVm,
     source,
     calls: () => spy.mock.calls as unknown[][],
     resolveWith: (res) => {
-      spy.mockResolvedValue(res)
+      spy.mockResolvedValue(res);
     },
-  }
+  };
 }
 
 /**
@@ -199,171 +199,171 @@ async function mountEditor(): Promise<{
  * 有了它，另一批用例的预览分支会跟着换一条路走）。
  */
 async function withObjectUrl(run: () => Promise<void>): Promise<void> {
-  const target = globalThis.URL as unknown as Record<string, unknown>
-  const create = target.createObjectURL
-  const revoke = target.revokeObjectURL
-  target.createObjectURL = () => 'blob:crop-src'
-  target.revokeObjectURL = () => {}
+  const target = globalThis.URL as unknown as Record<string, unknown>;
+  const create = target.createObjectURL;
+  const revoke = target.revokeObjectURL;
+  target.createObjectURL = () => 'blob:crop-src';
+  target.revokeObjectURL = () => {};
   try {
-    await run()
+    await run();
   } finally {
-    if (create === undefined) delete target.createObjectURL
-    else target.createObjectURL = create
-    if (revoke === undefined) delete target.revokeObjectURL
-    else target.revokeObjectURL = revoke
+    if (create === undefined) delete target.createObjectURL;
+    else target.createObjectURL = create;
+    if (revoke === undefined) delete target.revokeObjectURL;
+    else target.revokeObjectURL = revoke;
   }
 }
 
 /** 让 `<img>` 报出一份 naturalWidth/Height（jsdom 不解码，只能自己定义上去） */
 async function fireImgLoad(wrapper: VueWrapper, w: number, h: number): Promise<void> {
-  const img = wrapper.find('.stage-img')
-  expect(img.exists()).toBe(true)
-  const el = img.element as HTMLImageElement
-  Object.defineProperty(el, 'naturalWidth', { value: w, configurable: true })
-  Object.defineProperty(el, 'naturalHeight', { value: h, configurable: true })
-  await img.trigger('load')
+  const img = wrapper.find('.stage-img');
+  expect(img.exists()).toBe(true);
+  const el = img.element as HTMLImageElement;
+  Object.defineProperty(el, 'naturalWidth', { value: w, configurable: true });
+  Object.defineProperty(el, 'naturalHeight', { value: h, configurable: true });
+  await img.trigger('load');
 }
 
 describe('AssetCropEditor', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
-  })
+    setActivePinia(createPinia());
+  });
 
   it('打开时立绘框=整图、头像框=顶部居中正方形', async () => {
-    const { vm } = await mountEditor()
-    expect(vm.portraitRect).toEqual({ x: 0, y: 0, w: 400, h: 900 })
-    expect(vm.avatarRect).toEqual({ x: 50, y: 0, w: 300, h: 300 })
-  })
+    const { vm } = await mountEditor();
+    expect(vm.portraitRect).toEqual({ x: 0, y: 0, w: 400, h: 900 });
+    expect(vm.avatarRect).toEqual({ x: 50, y: 0, w: 300, h: 300 });
+  });
 
   it('刻意没有名称输入框 —— 名字只能由 prop 给（§7.3）', async () => {
-    const { wrapper } = await mountEditor()
-    expect(wrapper.findAll('input').length).toBe(0)
-    expect(wrapper.findAll('textarea').length).toBe(0)
-  })
+    const { wrapper } = await mountEditor();
+    expect(wrapper.findAll('input').length).toBe(0);
+    expect(wrapper.findAll('textarea').length).toBe(0);
+  });
 
   it('角把手按方向键改尺寸，头像框始终 1:1', async () => {
-    const { wrapper, vm } = await mountEditor()
-    const handle = wrapper.find('[data-handle="avatar-se"]')
-    expect(handle.exists()).toBe(true)
+    const { wrapper, vm } = await mountEditor();
+    const handle = wrapper.find('[data-handle="avatar-se"]');
+    expect(handle.exists()).toBe(true);
 
-    await handle.trigger('keydown', { key: 'ArrowRight' })
-    expect(vm.avatarRect).toEqual({ x: 50, y: 0, w: 301, h: 301 })
+    await handle.trigger('keydown', { key: 'ArrowRight' });
+    expect(vm.avatarRect).toEqual({ x: 50, y: 0, w: 301, h: 301 });
 
     // Shift 加速；一路顶到边界后仍然是正方形（350 = 图宽 400 - 左边 50）
     for (let i = 0; i < 20; i += 1) {
-      await handle.trigger('keydown', { key: 'ArrowDown', shiftKey: true })
+      await handle.trigger('keydown', { key: 'ArrowDown', shiftKey: true });
     }
-    expect(vm.avatarRect.w).toBe(vm.avatarRect.h)
-    expect(vm.avatarRect.w).toBe(350)
-    expect(vm.avatarRect.x + vm.avatarRect.w).toBeLessThanOrEqual(400)
-  })
+    expect(vm.avatarRect.w).toBe(vm.avatarRect.h);
+    expect(vm.avatarRect.w).toBe(350);
+    expect(vm.avatarRect.x + vm.avatarRect.w).toBeLessThanOrEqual(400);
+  });
 
   it('框本体按方向键平移，撞到图边界就停住', async () => {
-    const { wrapper, vm } = await mountEditor()
-    const rect = wrapper.find('[data-rect="avatar"]')
+    const { wrapper, vm } = await mountEditor();
+    const rect = wrapper.find('[data-rect="avatar"]');
     for (let i = 0; i < 40; i += 1) {
-      await rect.trigger('keydown', { key: 'ArrowRight', shiftKey: true })
+      await rect.trigger('keydown', { key: 'ArrowRight', shiftKey: true });
     }
-    expect(vm.avatarRect.x + vm.avatarRect.w).toBe(400)
-    expect(vm.avatarRect.w).toBe(300)
-  })
+    expect(vm.avatarRect.x + vm.avatarRect.w).toBe(400);
+    expect(vm.avatarRect.w).toBe(300);
+  });
 
   it('确认时把两个框交给 importPortraitPair，名字取的是 prop', async () => {
-    const { wrapper, calls, source } = await mountEditor()
-    await wrapper.find('.confirm-btn').trigger('click')
-    await flushPromises()
+    const { wrapper, calls, source } = await mountEditor();
+    await wrapper.find('.confirm-btn').trigger('click');
+    await flushPromises();
 
-    expect(calls().length).toBe(1)
-    const [gotSource, gotName, crops] = calls()[0] as [Blob, string, PortraitCropPlan]
-    expect(gotSource).toBe(source)
-    expect(gotName).toBe('苏婉')
-    expect(crops.portrait).toEqual({ x: 0, y: 0, w: 400, h: 900 })
-    expect(crops.avatar).toEqual({ x: 50, y: 0, w: 300, h: 300 })
-    expect(wrapper.emitted('close')?.length).toBe(1)
-  })
+    expect(calls().length).toBe(1);
+    const [gotSource, gotName, crops] = calls()[0] as [Blob, string, PortraitCropPlan];
+    expect(gotSource).toBe(source);
+    expect(gotName).toBe('苏婉');
+    expect(crops.portrait).toEqual({ x: 0, y: 0, w: 400, h: 900 });
+    expect(crops.avatar).toEqual({ x: 50, y: 0, w: 300, h: 300 });
+    expect(wrapper.emitted('close')?.length).toBe(1);
+  });
 
   it("某一类型切到「整图」→ 那一半传 'whole'（不是 undefined，也不是跳过）", async () => {
-    const { wrapper, calls } = await mountEditor()
-    await wrapper.find('[data-mode="portrait-whole"]').trigger('click')
-    await wrapper.find('.confirm-btn').trigger('click')
-    await flushPromises()
+    const { wrapper, calls } = await mountEditor();
+    await wrapper.find('[data-mode="portrait-whole"]').trigger('click');
+    await wrapper.find('.confirm-btn').trigger('click');
+    await flushPromises();
 
-    const crops = (calls()[0] as unknown[])[2] as PortraitCropPlan
-    expect(crops.portrait).toBe('whole')
-    expect(crops.avatar).toEqual({ x: 50, y: 0, w: 300, h: 300 })
-  })
+    const crops = (calls()[0] as unknown[])[2] as PortraitCropPlan;
+    expect(crops.portrait).toBe('whole');
+    expect(crops.avatar).toEqual({ x: 50, y: 0, w: 300, h: 300 });
+  });
 
   it("🔴 某一类型切到「不生成」→ 那一半传 'skip'，另一半照常给框", async () => {
-    const { wrapper, calls } = await mountEditor()
-    await wrapper.find('[data-mode="avatar-skip"]').trigger('click')
-    await wrapper.find('.confirm-btn').trigger('click')
-    await flushPromises()
+    const { wrapper, calls } = await mountEditor();
+    await wrapper.find('[data-mode="avatar-skip"]').trigger('click');
+    await wrapper.find('.confirm-btn').trigger('click');
+    await flushPromises();
 
-    const crops = (calls()[0] as unknown[])[2] as PortraitCropPlan
-    expect(crops.avatar).toBe('skip')
-    expect(crops.portrait).toEqual({ x: 0, y: 0, w: 400, h: 900 })
-  })
+    const crops = (calls()[0] as unknown[])[2] as PortraitCropPlan;
+    expect(crops.avatar).toBe('skip');
+    expect(crops.portrait).toEqual({ x: 0, y: 0, w: 400, h: 900 });
+  });
 
   it('三态开关: 每个类型恰好三个按钮，且选中态互斥', async () => {
-    const { wrapper } = await mountEditor()
+    const { wrapper } = await mountEditor();
     for (const which of ['portrait', 'avatar'] as const) {
-      const btns = wrapper.findAll(`[data-mode^="${which}-"]`)
-      expect(btns.map((b) => b.text())).toEqual(['裁剪', '整图', '不生成'])
-      expect(btns.filter((b) => b.attributes('aria-pressed') === 'true')).toHaveLength(1)
+      const btns = wrapper.findAll(`[data-mode^="${which}-"]`);
+      expect(btns.map((b) => b.text())).toEqual(['裁剪', '整图', '不生成']);
+      expect(btns.filter((b) => b.attributes('aria-pressed') === 'true')).toHaveLength(1);
     }
-    await wrapper.find('[data-mode="portrait-skip"]').trigger('click')
-    const after = wrapper.findAll('[data-mode^="portrait-"]')
-    expect(after.filter((b) => b.attributes('aria-pressed') === 'true')).toHaveLength(1)
-    expect(wrapper.find('[data-mode="portrait-skip"]').attributes('aria-pressed')).toBe('true')
-  })
+    await wrapper.find('[data-mode="portrait-skip"]').trigger('click');
+    const after = wrapper.findAll('[data-mode^="portrait-"]');
+    expect(after.filter((b) => b.attributes('aria-pressed') === 'true')).toHaveLength(1);
+    expect(wrapper.find('[data-mode="portrait-skip"]').attributes('aria-pressed')).toBe('true');
+  });
 
   it('两个都选「不生成」→ 确认按钮禁用，不把必然失败的 no-crops 发出去', async () => {
-    const { wrapper, vm, calls } = await mountEditor()
-    await wrapper.find('[data-mode="portrait-skip"]').trigger('click')
-    await wrapper.find('[data-mode="avatar-skip"]').trigger('click')
+    const { wrapper, vm, calls } = await mountEditor();
+    await wrapper.find('[data-mode="portrait-skip"]').trigger('click');
+    await wrapper.find('[data-mode="avatar-skip"]').trigger('click');
 
-    expect(vm.canConfirm).toBe(false)
-    expect(wrapper.find('.confirm-btn').attributes('disabled')).toBeDefined()
-    await wrapper.find('.confirm-btn').trigger('click')
-    await flushPromises()
-    expect(calls().length).toBe(0)
-  })
+    expect(vm.canConfirm).toBe(false);
+    expect(wrapper.find('.confirm-btn').attributes('disabled')).toBeDefined();
+    await wrapper.find('.confirm-btn').trigger('click');
+    await flushPromises();
+    expect(calls().length).toBe(0);
+  });
 
   it("两个都选「整图」不再是错误 —— 按钮可用，两半都传 'whole'", async () => {
-    const { wrapper, vm, calls } = await mountEditor()
-    await wrapper.find('[data-mode="portrait-whole"]').trigger('click')
-    await wrapper.find('[data-mode="avatar-whole"]').trigger('click')
+    const { wrapper, vm, calls } = await mountEditor();
+    await wrapper.find('[data-mode="portrait-whole"]').trigger('click');
+    await wrapper.find('[data-mode="avatar-whole"]').trigger('click');
 
-    expect(vm.canConfirm).toBe(true)
-    await wrapper.find('.confirm-btn').trigger('click')
-    await flushPromises()
-    expect(calls()[0][2]).toEqual({ portrait: 'whole', avatar: 'whole' })
-  })
+    expect(vm.canConfirm).toBe(true);
+    await wrapper.find('.confirm-btn').trigger('click');
+    await flushPromises();
+    expect(calls()[0][2]).toEqual({ portrait: 'whole', avatar: 'whole' });
+  });
 
   it('部分成功如实报: 不当成功、不关窗、说清哪一张留下了', async () => {
-    const { wrapper, vm, resolveWith } = await mountEditor()
-    resolveWith({ outcome: 'failed', portraitId: 'p1' })
-    await wrapper.find('.confirm-btn').trigger('click')
-    await flushPromises()
+    const { wrapper, vm, resolveWith } = await mountEditor();
+    resolveWith({ outcome: 'failed', portraitId: 'p1' });
+    await wrapper.find('.confirm-btn').trigger('click');
+    await flushPromises();
 
-    expect(vm.problem).toContain('部分成功')
-    expect(vm.problem).toContain('立绘')
-    expect(vm.problem).toContain('不会撤回')
-    expect(wrapper.emitted('close')).toBeUndefined()
-    expect(wrapper.emitted('saved')).toBeUndefined()
-    expect(wrapper.text()).toContain('部分成功')
-  })
+    expect(vm.problem).toContain('部分成功');
+    expect(vm.problem).toContain('立绘');
+    expect(vm.problem).toContain('不会撤回');
+    expect(wrapper.emitted('close')).toBeUndefined();
+    expect(wrapper.emitted('saved')).toBeUndefined();
+    expect(wrapper.text()).toContain('部分成功');
+  });
 
   it('全失败时只报理由，不出现「部分成功」的措辞', async () => {
-    const { wrapper, vm, resolveWith } = await mountEditor()
-    resolveWith({ outcome: 'not-found' })
-    await wrapper.find('.confirm-btn').trigger('click')
-    await flushPromises()
+    const { wrapper, vm, resolveWith } = await mountEditor();
+    resolveWith({ outcome: 'not-found' });
+    await wrapper.find('.confirm-btn').trigger('click');
+    await flushPromises();
 
-    expect(vm.problem).not.toContain('部分成功')
-    expect(vm.problem).toContain('不在库里')
-    expect(wrapper.emitted('close')).toBeUndefined()
-  })
+    expect(vm.problem).not.toContain('部分成功');
+    expect(vm.problem).toContain('不在库里');
+    expect(wrapper.emitted('close')).toBeUndefined();
+  });
 
   /**
    * 🔴 `'busy'` 是**互斥闸自己**播报的（`rejectIfBusy()` 发一条 toast）。这里再
@@ -371,21 +371,21 @@ describe('AssetCropEditor', () => {
    * 只有"等一下"。窗不关、按钮恢复可点，重试的路一条不少。
    */
   it('🔴 busy 不在窗内再说一遍（互斥闸自己已经播报过）', async () => {
-    const { wrapper, vm, resolveWith } = await mountEditor()
-    resolveWith({ outcome: 'busy' })
-    await wrapper.find('.confirm-btn').trigger('click')
-    await flushPromises()
+    const { wrapper, vm, resolveWith } = await mountEditor();
+    resolveWith({ outcome: 'busy' });
+    await wrapper.find('.confirm-btn').trigger('click');
+    await flushPromises();
 
-    expect(vm.problem).toBe('')
-    expect(wrapper.find('.field-error').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('另一次导入正在进行')
+    expect(vm.problem).toBe('');
+    expect(wrapper.find('.field-error').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('另一次导入正在进行');
     // 也不冒充成功
-    expect(wrapper.emitted('close')).toBeUndefined()
-    expect(wrapper.emitted('saved')).toBeUndefined()
-    expect(wrapper.emitted('announce')).toBeUndefined()
+    expect(wrapper.emitted('close')).toBeUndefined();
+    expect(wrapper.emitted('saved')).toBeUndefined();
+    expect(wrapper.emitted('announce')).toBeUndefined();
     // 忙碌位收干净了，等闸放开就能再点
-    expect(vm.canConfirm).toBe(true)
-  })
+    expect(vm.canConfirm).toBe(true);
+  });
 
   /**
    * 🔴 `sourceSize` 给了之后 `ready` 当场为 true、框立刻可拖，而 `<img>` 的 load
@@ -394,35 +394,35 @@ describe('AssetCropEditor', () => {
    */
   it('🔴 load 事件只确认了已知尺寸时，不重置用户已经调过的框', async () => {
     await withObjectUrl(async () => {
-      const { wrapper, vm } = await mountEditor()
+      const { wrapper, vm } = await mountEditor();
 
       // 用户在 load 到达之前已经把头像框拖过了
-      await wrapper.find('[data-handle="avatar-se"]').trigger('keydown', { key: 'ArrowRight' })
-      const adjusted = { ...vm.avatarRect }
-      expect(adjusted).toEqual({ x: 50, y: 0, w: 301, h: 301 })
+      await wrapper.find('[data-handle="avatar-se"]').trigger('keydown', { key: 'ArrowRight' });
+      const adjusted = { ...vm.avatarRect };
+      expect(adjusted).toEqual({ x: 50, y: 0, w: 301, h: 301 });
 
       // load 姗姗来迟，量出来的正是注入的那份尺寸 —— 没有新信息
-      await fireImgLoad(wrapper, 400, 900)
+      await fireImgLoad(wrapper, 400, 900);
 
-      expect(vm.avatarRect).toEqual(adjusted)
-      expect(vm.portraitRect).toEqual(wholeImageRect(400, 900))
-    })
-  })
+      expect(vm.avatarRect).toEqual(adjusted);
+      expect(vm.portraitRect).toEqual(wholeImageRect(400, 900));
+    });
+  });
 
   /** 尺寸**确实**不同（注入的 sourceSize 给错了）→ 照旧重置：旧框的坐标已经无效 */
   it('load 量出的尺寸与注入的不一致时，仍然重置（旧框按旧尺寸算，留着会越界）', async () => {
     await withObjectUrl(async () => {
-      const { wrapper, vm } = await mountEditor()
-      await wrapper.find('[data-handle="avatar-se"]').trigger('keydown', { key: 'ArrowRight' })
-      expect(vm.avatarRect.w).toBe(301)
+      const { wrapper, vm } = await mountEditor();
+      await wrapper.find('[data-handle="avatar-se"]').trigger('keydown', { key: 'ArrowRight' });
+      expect(vm.avatarRect.w).toBe(301);
 
-      await fireImgLoad(wrapper, 200, 400)
+      await fireImgLoad(wrapper, 200, 400);
 
-      expect(vm.portraitRect).toEqual(wholeImageRect(200, 400))
-      expect(vm.avatarRect).toEqual(defaultAvatarRect(200, 400))
-    })
-  })
-})
+      expect(vm.portraitRect).toEqual(wholeImageRect(200, 400));
+      expect(vm.avatarRect).toEqual(defaultAvatarRect(200, 400));
+    });
+  });
+});
 
 // ═══════════════════════════════════════════════════════════
 // 抽屉入口
@@ -430,12 +430,12 @@ describe('AssetCropEditor', () => {
 
 describe('AssetCharacterDrawer 的裁剪入口', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
-  })
+    setActivePinia(createPinia());
+  });
 
   it('图片行给裁剪按钮，mp4 行的按钮禁用并说明原因', async () => {
-    const store = useAssetStore()
-    await store.refreshAssets()
+    const store = useAssetStore();
+    await store.refreshAssets();
 
     const wrapper = mount(AssetCharacterDrawer, {
       props: { name: '苏婉' },
@@ -448,16 +448,16 @@ describe('AssetCharacterDrawer 的裁剪入口', () => {
           },
         },
       },
-    })
-    await flushPromises()
+    });
+    await flushPromises();
 
-    const png = wrapper.find('[data-crop-action="a-png"]')
-    const mp4 = wrapper.find('[data-crop-action="a-mp4"]')
-    expect(png.exists()).toBe(true)
-    expect(png.attributes('disabled')).toBeUndefined()
-    expect(mp4.exists()).toBe(true)
-    expect(mp4.attributes('disabled')).toBeDefined()
-    expect(mp4.attributes('aria-label')).toContain('视频')
-    expect(mp4.attributes('title')).toContain('一帧')
-  })
-})
+    const png = wrapper.find('[data-crop-action="a-png"]');
+    const mp4 = wrapper.find('[data-crop-action="a-mp4"]');
+    expect(png.exists()).toBe(true);
+    expect(png.attributes('disabled')).toBeUndefined();
+    expect(mp4.exists()).toBe(true);
+    expect(mp4.attributes('disabled')).toBeDefined();
+    expect(mp4.attributes('aria-label')).toContain('视频');
+    expect(mp4.attributes('title')).toContain('一帧');
+  });
+});

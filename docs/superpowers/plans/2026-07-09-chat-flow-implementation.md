@@ -24,30 +24,32 @@
 
 ## File Map
 
-| File | Action | Responsibility |
-|------|--------|----------------|
-| `src/sillytavern/types.ts` | Modify | 新增 `SystemEvent` type + 7 subtypes，扩展 `ChatMessage` |
-| `src/ui/lib/toSystemEvent.ts` | Create | `toSystemMessage()` 工厂函数：CraftGenOutput/CharGenOutput/... → ChatMessage |
-| `src/ui/components/game/ChatFlow.vue` | Modify | 删 `FlowMessage`，切到 `ChatMessage`，三源渲染 + 折叠卡片 |
-| `src/ui/components/game/GamePage.vue` | Modify | 删 mock `FlowMessage[]`，切到 `game.messages` |
-| `src/ui/stores/game-store.ts` | Modify | 加 `addMessage()`、`systemEventFilters`、`systemEventsVisible` |
-| `src/ui/components/game/cards/CraftSystemCard.vue` | Create | 制作结果卡 |
-| `src/ui/components/game/cards/CharGenSystemCard.vue` | Create | 新角色卡 |
-| `src/ui/components/game/cards/CombatSystemCard.vue` | Create | 战斗结果卡 |
-| `src/ui/components/game/cards/ItemSystemCard.vue` | Create | 新物品卡 |
-| `src/ui/components/game/cards/SystemNotifBar.vue` | Create | 轻量通知条（character_update/item_update/quest_update 共用） |
-| `src/sillytavern/agent-templates.ts` | Modify | `buildAgentMessages` → history 中 system→assistant 转换 |
-| `src/ui/stores/settings-store.ts` | Modify | 加 `systemEventFilters` 持久化字段 |
-| `src/ui/components/settings/SettingsPage.vue` | Modify | 加系统事件可见性开关 UI |
+| File                                                 | Action | Responsibility                                                               |
+| ---------------------------------------------------- | ------ | ---------------------------------------------------------------------------- |
+| `src/sillytavern/types.ts`                           | Modify | 新增 `SystemEvent` type + 7 subtypes，扩展 `ChatMessage`                     |
+| `src/ui/lib/toSystemEvent.ts`                        | Create | `toSystemMessage()` 工厂函数：CraftGenOutput/CharGenOutput/... → ChatMessage |
+| `src/ui/components/game/ChatFlow.vue`                | Modify | 删 `FlowMessage`，切到 `ChatMessage`，三源渲染 + 折叠卡片                    |
+| `src/ui/components/game/GamePage.vue`                | Modify | 删 mock `FlowMessage[]`，切到 `game.messages`                                |
+| `src/ui/stores/game-store.ts`                        | Modify | 加 `addMessage()`、`systemEventFilters`、`systemEventsVisible`               |
+| `src/ui/components/game/cards/CraftSystemCard.vue`   | Create | 制作结果卡                                                                   |
+| `src/ui/components/game/cards/CharGenSystemCard.vue` | Create | 新角色卡                                                                     |
+| `src/ui/components/game/cards/CombatSystemCard.vue`  | Create | 战斗结果卡                                                                   |
+| `src/ui/components/game/cards/ItemSystemCard.vue`    | Create | 新物品卡                                                                     |
+| `src/ui/components/game/cards/SystemNotifBar.vue`    | Create | 轻量通知条（character_update/item_update/quest_update 共用）                 |
+| `src/sillytavern/agent-templates.ts`                 | Modify | `buildAgentMessages` → history 中 system→assistant 转换                      |
+| `src/ui/stores/settings-store.ts`                    | Modify | 加 `systemEventFilters` 持久化字段                                           |
+| `src/ui/components/settings/SettingsPage.vue`        | Modify | 加系统事件可见性开关 UI                                                      |
 
 ---
 
 ### Task 1: types.ts — 新增 SystemEvent 类型 + 扩展 ChatMessage
 
 **Files:**
+
 - Modify: `src/sillytavern/types.ts`
 
 **Produces:**
+
 - `SystemEvent` type（7 成员联合）
 - `CraftSystemEvent`, `CharGenSystemEvent`, `ItemGenSystemEvent`, `CombatSystemEvent`, `CharacterUpdateEvent`, `ItemUpdateEvent`, `QuestUpdateEvent`
 - `ChatMessage.systemEvent?: SystemEvent`
@@ -138,6 +140,7 @@ export interface QuestUpdateEvent {
 ```
 
 完整修改后：
+
 ```typescript
 export interface ChatMessage {
   id: string;
@@ -178,14 +181,17 @@ git commit -m "feat(types): add SystemEvent union type + extend ChatMessage.syst
 ### Task 2: toSystemEvent.ts — 工厂函数模块
 
 **Files:**
+
 - Create: `src/ui/lib/toSystemEvent.ts`
 
 **Consumes:**
+
 - `SystemEvent`, `CraftSystemEvent`, `CharGenSystemEvent`, `ItemGenSystemEvent`, `CombatSystemEvent`, `CharacterUpdateEvent`, `ItemUpdateEvent`, `QuestUpdateEvent`（from `@engine/types`）
 - `ChatMessage`（from `@engine/types`）
 - `CraftGenOutput`, `CharGenOutput`, `ItemGenOutput`, `CombatSummaryResult`（from `@engine/types`）
 
 **Produces:**
+
 - `toSystemMessage(event: SystemEvent): ChatMessage`
 
 - [ ] **Step 1: 创建文件**
@@ -215,8 +221,12 @@ export function toSystemMessage(event: SystemEvent): ChatMessage {
 // ========== Convenience helpers — 各类型 event 构造 + 自动生成 narrative ==========
 
 import type {
-  CraftGenOutput, CharGenOutput, ItemGenOutput, CombatSummaryResult,
-  QualityLevel, CraftRating,
+  CraftGenOutput,
+  CharGenOutput,
+  ItemGenOutput,
+  CombatSummaryResult,
+  QualityLevel,
+  CraftRating,
 } from '@engine/types';
 
 export function craftToEvent(output: CraftGenOutput): SystemEvent {
@@ -243,10 +253,11 @@ export function charGenToEvent(output: CharGenOutput): SystemEvent {
 
 export function itemGenToEvent(output: ItemGenOutput): SystemEvent {
   // 提取第一个物品/技能/装备名作为摘要
-  const firstName = output.equipment?.[0]?.name
-    ?? output.skills?.[0]?.name
-    ?? output.inventory?.[0]?.name
-    ?? '未知物品';
+  const firstName =
+    output.equipment?.[0]?.name ??
+    output.skills?.[0]?.name ??
+    output.inventory?.[0]?.name ??
+    '未知物品';
   let quality: QualityLevel = '普通';
   if (output.equipment?.[0]?.quality) quality = output.equipment[0].quality as QualityLevel;
   else if (output.inventory?.[0]?.rarity) quality = output.inventory[0].rarity as QualityLevel;
@@ -262,7 +273,10 @@ export function itemGenToEvent(output: ItemGenOutput): SystemEvent {
 
 export function combatToEvent(result: CombatSummaryResult): SystemEvent {
   const outcomeLabel: Record<string, string> = {
-    ally_win: '胜利', enemy_win: '败北', draw: '平局', fled: '逃跑',
+    ally_win: '胜利',
+    enemy_win: '败北',
+    draw: '平局',
+    fled: '逃跑',
   };
   return {
     type: 'combat',
@@ -280,9 +294,17 @@ export function charUpdateToEvent(characterName: string, summary: string): Syste
   };
 }
 
-export function itemUpdateToEvent(itemName: string, operation: string, summary: string): SystemEvent {
+export function itemUpdateToEvent(
+  itemName: string,
+  operation: string,
+  summary: string,
+): SystemEvent {
   const opLabel: Record<string, string> = {
-    consume: '消耗', transfer: '转移', modify: '变更', equip: '装备', unequip: '卸下',
+    consume: '消耗',
+    transfer: '转移',
+    modify: '变更',
+    equip: '装备',
+    unequip: '卸下',
   };
   return {
     type: 'item_update',
@@ -292,7 +314,11 @@ export function itemUpdateToEvent(itemName: string, operation: string, summary: 
   };
 }
 
-export function questUpdateToEvent(questName: string, status: string, summary: string): SystemEvent {
+export function questUpdateToEvent(
+  questName: string,
+  status: string,
+  summary: string,
+): SystemEvent {
   return {
     type: 'quest_update',
     questName,
@@ -322,12 +348,15 @@ git commit -m "feat(ui): add toSystemMessage factory + per-type event constructo
 ### Task 3: game-store.ts — 消息管理 + 可见性控制
 
 **Files:**
+
 - Modify: `src/ui/stores/game-store.ts`
 
 **Consumes:**
+
 - `ChatMessage`, `SystemEvent`（from `@engine/types`）
 
 **Produces:**
+
 - `game.messages` — store 驱动而非 local array
 - `game.addMessage(content: string, role: 'user' | 'assistant'): void`
 - `game.addSystemMessage(event: SystemEvent): void`
@@ -340,7 +369,7 @@ git commit -m "feat(ui): add toSystemMessage factory + per-type event constructo
 
 ```typescript
 // === 系统事件可见性 === (加在 isGenerating ref 后)
-const systemEventsVisible = ref(true)
+const systemEventsVisible = ref(true);
 const systemEventFilters = ref<Record<string, boolean>>({
   craft: true,
   char_gen: true,
@@ -349,7 +378,7 @@ const systemEventFilters = ref<Record<string, boolean>>({
   character_update: false,
   item_update: false,
   quest_update: false,
-})
+});
 ```
 
 新方法（加在 `closeModal` 之后）：
@@ -361,7 +390,7 @@ function addMessage(content: string, role: 'user' | 'assistant'): void {
     role,
     content,
     timestamp: Date.now(),
-  })
+  });
 }
 
 function addSystemMessage(systemEvent: import('@engine/types').SystemEvent): void {
@@ -371,26 +400,46 @@ function addSystemMessage(systemEvent: import('@engine/types').SystemEvent): voi
     content: systemEvent.narrative,
     timestamp: Date.now(),
     systemEvent,
-  })
+  });
 }
 ```
 
 Return 要导出新增的：
+
 ```typescript
 return {
-  saves, activeSaveId, activeSave,
-  characters, player, npcs,
-  messages, isGenerating,
-  recentMemories, activePlotEvents, plotOutline,
-  activeCombat, isInCombat,
-  saveProfile, fp, gameTime,
-  sidebarCollapsed, activeModal, fullscreenStatus,
-  toggleSidebar, showModal, closeModal, toggleFullscreen,
-  loadSaves, loadSave, clearActive,
+  saves,
+  activeSaveId,
+  activeSave,
+  characters,
+  player,
+  npcs,
+  messages,
+  isGenerating,
+  recentMemories,
+  activePlotEvents,
+  plotOutline,
+  activeCombat,
+  isInCombat,
+  saveProfile,
+  fp,
+  gameTime,
+  sidebarCollapsed,
+  activeModal,
+  fullscreenStatus,
+  toggleSidebar,
+  showModal,
+  closeModal,
+  toggleFullscreen,
+  loadSaves,
+  loadSave,
+  clearActive,
   // 🆕 系统事件
-  systemEventsVisible, systemEventFilters,
-  addMessage, addSystemMessage,
-}
+  systemEventsVisible,
+  systemEventFilters,
+  addMessage,
+  addSystemMessage,
+};
 ```
 
 还需在顶部 import 加 `import type { ChatMessage } from '@engine/types'`（已存在，无需改动）。
@@ -415,14 +464,17 @@ git commit -m "feat(store): add message management + system event visibility fil
 ### Task 4: ChatFlow.vue — 重构为三源消息流
 
 **Files:**
+
 - Modify: `src/ui/components/game/ChatFlow.vue`
 
 **Consumes:**
+
 - `ChatMessage` from `@engine/types`（替换本地 `FlowMessage`）
 - `systemEventFilters: Record<string, boolean>`（from game store）
 - 5 个系统卡片组件（Task 5-6 创建）
 
 **Produces:**
+
 - 删 `FlowMessage` 接口
 - Props 改为 `messages: ChatMessage[]`（from store）
 - `role === 'system'` 分支：折叠通知条 → 点击展开卡片
@@ -435,53 +487,56 @@ git commit -m "feat(store): add message management + system event visibility fil
 
 ```vue
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
-import InputBar from './InputBar.vue'
-import type { ChatMessage, SystemEvent } from '@engine/types'
+import { ref, watch, nextTick } from 'vue';
+import InputBar from './InputBar.vue';
+import type { ChatMessage, SystemEvent } from '@engine/types';
 
 const props = defineProps<{
-  messages?: ChatMessage[]
-  isGenerating?: boolean
-  systemEventsVisible?: boolean
-  systemEventFilters?: Record<string, boolean>
-}>()
+  messages?: ChatMessage[];
+  isGenerating?: boolean;
+  systemEventsVisible?: boolean;
+  systemEventFilters?: Record<string, boolean>;
+}>();
 
 const emit = defineEmits<{
-  send: [content: string]
-}>()
+  send: [content: string];
+}>();
 
-const container = ref<HTMLDivElement>()
-const expandedIds = ref<Set<string>>(new Set())
+const container = ref<HTMLDivElement>();
+const expandedIds = ref<Set<string>>(new Set());
 
-watch(() => props.messages?.length, () => {
-  nextTick(() => {
-    if (container.value) {
-      container.value.scrollTop = container.value.scrollHeight
-    }
-  })
-})
+watch(
+  () => props.messages?.length,
+  () => {
+    nextTick(() => {
+      if (container.value) {
+        container.value.scrollTop = container.value.scrollHeight;
+      }
+    });
+  },
+);
 
 function formatTime(ts?: number): string {
-  if (!ts) return ''
-  const d = new Date(ts)
-  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  if (!ts) return '';
+  const d = new Date(ts);
+  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
 function toggleExpand(id: string) {
   if (expandedIds.value.has(id)) {
-    expandedIds.value.delete(id)
+    expandedIds.value.delete(id);
   } else {
-    expandedIds.value.add(id)
+    expandedIds.value.add(id);
   }
 }
 
 /** 该系统事件是否应该显示 */
 function isEventVisible(ev: SystemEvent): boolean {
-  if (!props.systemEventsVisible) return false
+  if (!props.systemEventsVisible) return false;
   if (props.systemEventFilters && ev.type in props.systemEventFilters) {
-    return props.systemEventFilters[ev.type]
+    return props.systemEventFilters[ev.type];
   }
-  return true // 未知类型默认显示
+  return true; // 未知类型默认显示
 }
 </script>
 ```
@@ -543,10 +598,7 @@ function isEventVisible(ev: SystemEvent): boolean {
             </div>
             <div class="system-card-body">
               <!-- 根据 type 渲染对应卡片组件 -->
-              <CraftSystemCard
-                v-if="msg.systemEvent.type === 'craft'"
-                :event="msg.systemEvent"
-              />
+              <CraftSystemCard v-if="msg.systemEvent.type === 'craft'" :event="msg.systemEvent" />
               <CharGenSystemCard
                 v-else-if="msg.systemEvent.type === 'char_gen'"
                 :event="msg.systemEvent"
@@ -559,10 +611,7 @@ function isEventVisible(ev: SystemEvent): boolean {
                 v-else-if="msg.systemEvent.type === 'item_gen'"
                 :event="msg.systemEvent"
               />
-              <SystemNotifBar
-                v-else
-                :event="msg.systemEvent"
-              />
+              <SystemNotifBar v-else :event="msg.systemEvent" />
             </div>
           </div>
         </div>
@@ -592,15 +641,15 @@ function isEventVisible(ev: SystemEvent): boolean {
 
 function eventIcon(type: string): string {
   const icons: Record<string, string> = {
-    craft: '🛠️',           // 🛠️
-    char_gen: '👤',              // 👤
-    item_gen: '🎒',              // 🎒
-    combat: '⚔️',                // ⚔️
-    character_update: '📊',      // 📊
-    item_update: '📦',           // 📦
-    quest_update: '📝',          // 📝
-  }
-  return icons[type] ?? 'ℹ️'    // ℹ️
+    craft: '🛠️', // 🛠️
+    char_gen: '👤', // 👤
+    item_gen: '🎒', // 🎒
+    combat: '⚔️', // ⚔️
+    character_update: '📊', // 📊
+    item_update: '📦', // 📦
+    quest_update: '📝', // 📝
+  };
+  return icons[type] ?? 'ℹ️'; // ℹ️
 }
 ```
 
@@ -664,7 +713,7 @@ function eventIcon(type: string): string {
   gap: 8px;
   padding: 8px 14px;
   background: var(--theme-surface-muted);
-  border-bottom: 1px solid var(--theme-border, rgba(255,255,255,0.06));
+  border-bottom: 1px solid var(--theme-border, rgba(255, 255, 255, 0.06));
   cursor: pointer;
   user-select: none;
 }
@@ -712,6 +761,7 @@ git commit -m "refactor(ui): ChatFlow — three-source message flow with foldabl
 ### Task 5: 系统卡片组件（5 个 Vue SFC）
 
 **Files:**
+
 - Create: `src/ui/components/game/cards/CraftSystemCard.vue`
 - Create: `src/ui/components/game/cards/CharGenSystemCard.vue`
 - Create: `src/ui/components/game/cards/CombatSystemCard.vue`
@@ -719,27 +769,37 @@ git commit -m "refactor(ui): ChatFlow — three-source message flow with foldabl
 - Create: `src/ui/components/game/cards/SystemNotifBar.vue`
 
 **Consumes:**
+
 - Type-specific SystemEvent subtypes（`CraftSystemEvent`, `CharGenSystemEvent`, `CombatSystemEvent`, `ItemGenSystemEvent`, `CharacterUpdateEvent | ItemUpdateEvent | QuestUpdateEvent`）
 
 **Produces:**
+
 - 5 个组件，ChatFlow 直接使用
 
 - [ ] **Step 1: CraftSystemCard.vue**
 
 ```vue
 <script setup lang="ts">
-import type { CraftSystemEvent } from '@engine/types'
+import type { CraftSystemEvent } from '@engine/types';
 
-defineProps<{ event: CraftSystemEvent }>()
+defineProps<{ event: CraftSystemEvent }>();
 
 const qualityColors: Record<string, string> = {
-  '普通': '#c4cad3', '优良': '#7be495', '稀有': '#62bbff',
-  '史诗': '#cf95ff', '传说': '#ffc46b', '神话': '#ff78c5', '唯一': '#00ffff',
-}
+  普通: '#c4cad3',
+  优良: '#7be495',
+  稀有: '#62bbff',
+  史诗: '#cf95ff',
+  传说: '#ffc46b',
+  神话: '#ff78c5',
+  唯一: '#00ffff',
+};
 
 const ratingIcons: Record<string, string> = {
-  '大失败': '❌', '失败': '⚠️', '成功': '✅', '精益求精': '⭐',
-}
+  大失败: '❌',
+  失败: '⚠️',
+  成功: '✅',
+  精益求精: '⭐',
+};
 </script>
 
 <template>
@@ -759,33 +819,92 @@ const ratingIcons: Record<string, string> = {
         <span class="label">材料:</span> {{ event.details.craftParams.materials }}
       </div>
       <div v-if="event.details.itemRequests?.length" class="craft-effects">
-        <div v-for="req in event.details.itemRequests" :key="req.quality + req.type" class="craft-req">
+        <div
+          v-for="req in event.details.itemRequests"
+          :key="req.quality + req.type"
+          class="craft-req"
+        >
           <span class="req-type">{{ req.type === 'equipment' ? '🗡️' : '🎒' }}</span>
           <span>{{ req.quality }} {{ req.type === 'equipment' ? '装备' : '物品' }}</span>
           <span class="req-desc" v-if="req.description">: {{ req.description.slice(0, 80) }}</span>
         </div>
       </div>
       <div class="craft-footer">
-        <span v-if="event.details.craftParams?.expGained" class="stat-badge">EXP +{{ event.details.craftParams.expGained }}</span>
-        <span v-if="event.details.craftParams?.fpGained" class="stat-badge">FP +{{ event.details.craftParams.fpGained }}</span>
+        <span v-if="event.details.craftParams?.expGained" class="stat-badge"
+          >EXP +{{ event.details.craftParams.expGained }}</span
+        >
+        <span v-if="event.details.craftParams?.fpGained" class="stat-badge"
+          >FP +{{ event.details.craftParams.fpGained }}</span
+        >
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.craft-card { border-radius: 6px; overflow: hidden; }
-.card-top { padding: 8px 12px; font-weight: 600; font-size: 0.875rem; color: #1a1a2e; display: flex; align-items: center; gap: 8px; }
-.card-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 0.8125rem; color: var(--theme-text-primary); }
-.craft-summary { font-weight: 600; }
-.check-detail { font-weight: 400; opacity: 0.7; }
-.craft-materials .label { font-weight: 600; opacity: 0.6; margin-right: 4px; }
-.craft-effects { display: flex; flex-direction: column; gap: 4px; }
-.craft-req { display: flex; align-items: center; gap: 6px; font-size: 0.8125rem; }
-.req-type { font-size: 0.75rem; }
-.req-desc { opacity: 0.65; font-size: 0.75rem; }
-.craft-footer { display: flex; gap: 8px; margin-top: 4px; }
-.stat-badge { background: var(--theme-surface-muted); padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+.craft-card {
+  border-radius: 6px;
+  overflow: hidden;
+}
+.card-top {
+  padding: 8px 12px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: #1a1a2e;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.8125rem;
+  color: var(--theme-text-primary);
+}
+.craft-summary {
+  font-weight: 600;
+}
+.check-detail {
+  font-weight: 400;
+  opacity: 0.7;
+}
+.craft-materials .label {
+  font-weight: 600;
+  opacity: 0.6;
+  margin-right: 4px;
+}
+.craft-effects {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.craft-req {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+}
+.req-type {
+  font-size: 0.75rem;
+}
+.req-desc {
+  opacity: 0.65;
+  font-size: 0.75rem;
+}
+.craft-footer {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.stat-badge {
+  background: var(--theme-surface-muted);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
 </style>
 ```
 
@@ -793,8 +912,8 @@ const ratingIcons: Record<string, string> = {
 
 ```vue
 <script setup lang="ts">
-import type { CharGenSystemEvent } from '@engine/types'
-defineProps<{ event: CharGenSystemEvent }>()
+import type { CharGenSystemEvent } from '@engine/types';
+defineProps<{ event: CharGenSystemEvent }>();
 </script>
 
 <template>
@@ -806,34 +925,93 @@ defineProps<{ event: CharGenSystemEvent }>()
     </div>
     <div class="card-body">
       <div class="char-attrs">
-        <span v-if="event.details.attributes" class="attr">💪{{ event.details.attributes.str }}</span>
-        <span v-if="event.details.attributes" class="attr">🏃{{ event.details.attributes.dex }}</span>
-        <span v-if="event.details.attributes" class="attr">🛡️{{ event.details.attributes.con }}</span>
-        <span v-if="event.details.attributes" class="attr">🧠{{ event.details.attributes.int }}</span>
-        <span v-if="event.details.attributes" class="attr">✨{{ event.details.attributes.spi }}</span>
+        <span v-if="event.details.attributes" class="attr"
+          >💪{{ event.details.attributes.str }}</span
+        >
+        <span v-if="event.details.attributes" class="attr"
+          >🏃{{ event.details.attributes.dex }}</span
+        >
+        <span v-if="event.details.attributes" class="attr"
+          >🛡️{{ event.details.attributes.con }}</span
+        >
+        <span v-if="event.details.attributes" class="attr"
+          >🧠{{ event.details.attributes.int }}</span
+        >
+        <span v-if="event.details.attributes" class="attr"
+          >✨{{ event.details.attributes.spi }}</span
+        >
       </div>
       <div v-if="event.details.identity?.length" class="char-tags">
         <span v-for="tag in event.details.identity" :key="tag" class="tag">{{ tag }}</span>
       </div>
       <div v-if="event.details.background" class="char-bg">
-        {{ event.details.background.slice(0, 150) }}{{ event.details.background.length > 150 ? '...' : '' }}
+        {{ event.details.background.slice(0, 150)
+        }}{{ event.details.background.length > 150 ? '...' : '' }}
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.chargen-card { border-radius: 6px; overflow: hidden; }
-.card-top { padding: 8px 12px; background: var(--theme-surface-muted); display: flex; align-items: center; gap: 8px; }
-.char-name { font-weight: 700; font-size: 0.9375rem; color: var(--theme-text-primary); }
-.char-tier { background: var(--theme-primary); color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 0.6875rem; font-weight: 600; }
-.char-race { font-size: 0.75rem; opacity: 0.6; }
-.card-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
-.char-attrs { display: flex; gap: 12px; font-size: 0.8125rem; color: var(--theme-text-primary); }
-.attr { font-weight: 600; }
-.char-tags { display: flex; gap: 6px; flex-wrap: wrap; }
-.tag { background: var(--theme-surface-muted); padding: 2px 8px; border-radius: 4px; font-size: 0.6875rem; }
-.char-bg { font-size: 0.75rem; opacity: 0.7; line-height: 1.5; }
+.chargen-card {
+  border-radius: 6px;
+  overflow: hidden;
+}
+.card-top {
+  padding: 8px 12px;
+  background: var(--theme-surface-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.char-name {
+  font-weight: 700;
+  font-size: 0.9375rem;
+  color: var(--theme-text-primary);
+}
+.char-tier {
+  background: var(--theme-primary);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+.char-race {
+  font-size: 0.75rem;
+  opacity: 0.6;
+}
+.card-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.char-attrs {
+  display: flex;
+  gap: 12px;
+  font-size: 0.8125rem;
+  color: var(--theme-text-primary);
+}
+.attr {
+  font-weight: 600;
+}
+.char-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.tag {
+  background: var(--theme-surface-muted);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.6875rem;
+}
+.char-bg {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  line-height: 1.5;
+}
 </style>
 ```
 
@@ -841,11 +1019,16 @@ defineProps<{ event: CharGenSystemEvent }>()
 
 ```vue
 <script setup lang="ts">
-import type { CombatSystemEvent } from '@engine/types'
-defineProps<{ event: CombatSystemEvent }>()
+import type { CombatSystemEvent } from '@engine/types';
+defineProps<{ event: CombatSystemEvent }>();
 
-const labels: Record<string, string> = { ally_win: '胜利', enemy_win: '败北', draw: '平局', fled: '逃跑' }
-const icons: Record<string, string> = { ally_win: '🏆', enemy_win: '💀', draw: '🤝', fled: '🏃' }
+const labels: Record<string, string> = {
+  ally_win: '胜利',
+  enemy_win: '败北',
+  draw: '平局',
+  fled: '逃跑',
+};
+const icons: Record<string, string> = { ally_win: '🏆', enemy_win: '💀', draw: '🤝', fled: '🏃' };
 </script>
 
 <template>
@@ -872,18 +1055,69 @@ const icons: Record<string, string> = { ally_win: '🏆', enemy_win: '💀', dra
 </template>
 
 <style scoped>
-.combat-card { border-radius: 6px; overflow: hidden; }
-.card-top { padding: 8px 12px; background: var(--theme-surface-muted); display: flex; align-items: center; gap: 8px; }
-.combat-icon { font-size: 1.125rem; }
-.combat-label { font-weight: 700; font-size: 0.9375rem; color: var(--theme-text-primary); }
-.combat-rounds { font-size: 0.75rem; opacity: 0.5; margin-left: auto; }
-.card-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 0.8125rem; }
-.combat-summary { line-height: 1.5; color: var(--theme-text-primary); }
-.combat-loot { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.loot-label { font-weight: 600; opacity: 0.6; font-size: 0.75rem; }
-.loot-item { background: var(--theme-surface-muted); padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }
-.combat-footer { display: flex; gap: 8px; }
-.stat-badge { background: var(--theme-surface-muted); padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+.combat-card {
+  border-radius: 6px;
+  overflow: hidden;
+}
+.card-top {
+  padding: 8px 12px;
+  background: var(--theme-surface-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.combat-icon {
+  font-size: 1.125rem;
+}
+.combat-label {
+  font-weight: 700;
+  font-size: 0.9375rem;
+  color: var(--theme-text-primary);
+}
+.combat-rounds {
+  font-size: 0.75rem;
+  opacity: 0.5;
+  margin-left: auto;
+}
+.card-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.8125rem;
+}
+.combat-summary {
+  line-height: 1.5;
+  color: var(--theme-text-primary);
+}
+.combat-loot {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.loot-label {
+  font-weight: 600;
+  opacity: 0.6;
+  font-size: 0.75rem;
+}
+.loot-item {
+  background: var(--theme-surface-muted);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+.combat-footer {
+  display: flex;
+  gap: 8px;
+}
+.stat-badge {
+  background: var(--theme-surface-muted);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
 </style>
 ```
 
@@ -891,21 +1125,30 @@ const icons: Record<string, string> = { ally_win: '🏆', enemy_win: '💀', dra
 
 ```vue
 <script setup lang="ts">
-import type { ItemGenSystemEvent } from '@engine/types'
-defineProps<{ event: ItemGenSystemEvent }>()
+import type { ItemGenSystemEvent } from '@engine/types';
+defineProps<{ event: ItemGenSystemEvent }>();
 
 const qualityColors: Record<string, string> = {
-  '普通': '#c4cad3', '优良': '#7be495', '稀有': '#62bbff',
-  '史诗': '#cf95ff', '传说': '#ffc46b', '神话': '#ff78c5', '唯一': '#00ffff',
-}
+  普通: '#c4cad3',
+  优良: '#7be495',
+  稀有: '#62bbff',
+  史诗: '#cf95ff',
+  传说: '#ffc46b',
+  神话: '#ff78c5',
+  唯一: '#00ffff',
+};
 </script>
 
 <template>
   <div class="item-card">
     <div class="card-top" :style="{ borderColor: qualityColors[event.quality] || '#c4cad3' }">
-      <span class="item-type">{{ event.itemType === '装备' ? '🗡️' : event.itemType === '技能' ? '✨' : '🎒' }}</span>
+      <span class="item-type">{{
+        event.itemType === '装备' ? '🗡️' : event.itemType === '技能' ? '✨' : '🎒'
+      }}</span>
       <span class="item-name">{{ event.itemName }}</span>
-      <span class="item-quality" :style="{ color: qualityColors[event.quality] || '#c4cad3' }">{{ event.quality }}</span>
+      <span class="item-quality" :style="{ color: qualityColors[event.quality] || '#c4cad3' }">{{
+        event.quality
+      }}</span>
     </div>
     <div v-if="event.details.equipment?.length" class="card-body">
       <div v-for="eq in event.details.equipment" :key="eq.name" class="equip-line">
@@ -929,16 +1172,59 @@ const qualityColors: Record<string, string> = {
 </template>
 
 <style scoped>
-.item-card { border-radius: 6px; overflow: hidden; }
-.card-top { padding: 8px 12px; border-left: 4px solid; background: var(--theme-surface-muted); display: flex; align-items: center; gap: 8px; }
-.item-name { font-weight: 700; font-size: 0.875rem; }
-.item-quality { font-size: 0.75rem; font-weight: 600; }
-.item-type { font-size: 0.75rem; }
-.card-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 0.8125rem; }
-.equip-line, .skill-line, .inv-line { display: flex; gap: 8px; align-items: baseline; }
-.equip-slot { background: var(--theme-primary); color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 0.625rem; font-weight: 600; }
-.skill-name { color: #90cdf4; font-weight: 600; }
-.inv-desc { opacity: 0.6; font-size: 0.75rem; }
+.item-card {
+  border-radius: 6px;
+  overflow: hidden;
+}
+.card-top {
+  padding: 8px 12px;
+  border-left: 4px solid;
+  background: var(--theme-surface-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.item-name {
+  font-weight: 700;
+  font-size: 0.875rem;
+}
+.item-quality {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.item-type {
+  font-size: 0.75rem;
+}
+.card-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8125rem;
+}
+.equip-line,
+.skill-line,
+.inv-line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.equip-slot {
+  background: var(--theme-primary);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.625rem;
+  font-weight: 600;
+}
+.skill-name {
+  color: #90cdf4;
+  font-weight: 600;
+}
+.inv-desc {
+  opacity: 0.6;
+  font-size: 0.75rem;
+}
 </style>
 ```
 
@@ -946,8 +1232,8 @@ const qualityColors: Record<string, string> = {
 
 ```vue
 <script setup lang="ts">
-import type { CharacterUpdateEvent, ItemUpdateEvent, QuestUpdateEvent } from '@engine/types'
-defineProps<{ event: CharacterUpdateEvent | ItemUpdateEvent | QuestUpdateEvent }>()
+import type { CharacterUpdateEvent, ItemUpdateEvent, QuestUpdateEvent } from '@engine/types';
+defineProps<{ event: CharacterUpdateEvent | ItemUpdateEvent | QuestUpdateEvent }>();
 </script>
 
 <template>
@@ -968,7 +1254,10 @@ defineProps<{ event: CharacterUpdateEvent | ItemUpdateEvent | QuestUpdateEvent }
   font-size: 0.75rem;
   color: var(--theme-text-secondary);
 }
-.notif-icon { font-size: 0.875rem; opacity: 0.6; }
+.notif-icon {
+  font-size: 0.875rem;
+  opacity: 0.6;
+}
 </style>
 ```
 
@@ -977,11 +1266,11 @@ defineProps<{ event: CharacterUpdateEvent | ItemUpdateEvent | QuestUpdateEvent }
 在 `ChatFlow.vue` 的 `<script setup>` 顶部，把 Task 4 里注释掉的 import 取消注释：
 
 ```typescript
-import CraftSystemCard from './cards/CraftSystemCard.vue'
-import CharGenSystemCard from './cards/CharGenSystemCard.vue'
-import CombatSystemCard from './cards/CombatSystemCard.vue'
-import ItemSystemCard from './cards/ItemSystemCard.vue'
-import SystemNotifBar from './cards/SystemNotifBar.vue'
+import CraftSystemCard from './cards/CraftSystemCard.vue';
+import CharGenSystemCard from './cards/CharGenSystemCard.vue';
+import CombatSystemCard from './cards/CombatSystemCard.vue';
+import ItemSystemCard from './cards/ItemSystemCard.vue';
+import SystemNotifBar from './cards/SystemNotifBar.vue';
 ```
 
 - [ ] **Step 7: 编译验证**
@@ -1004,15 +1293,18 @@ git commit -m "feat(ui): add 5 system card components + wire into ChatFlow"
 ### Task 6: GamePage.vue — 从 mock 切换到 store 驱动
 
 **Files:**
+
 - Modify: `src/ui/components/game/GamePage.vue`
 
 **Consumes:**
+
 - `game.messages`（Task 3 产出）
 - `game.addMessage()`（Task 3 产出）
 - `game.systemEventsVisible`、`game.systemEventFilters`（Task 3 产出）
 - `ChatFlow`（已重构，Task 4-5 产出）
 
 **Produces:**
+
 - 删 `FlowMessage[]` mock
 - `handleSend` 写入 store
 - `ChatFlow` props 绑定 store
@@ -1023,51 +1315,52 @@ git commit -m "feat(ui): add 5 system card components + wire into ChatFlow"
 
 ```vue
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { useGameStore } from '../../stores/game-store'
-import { useUIStore } from '../../stores/ui-store'
-import TopBar from './TopBar.vue'
-import SideToolbar from './SideToolbar.vue'
-import ChatFlow from './ChatFlow.vue'
-import StatusHUD from './StatusHUD.vue'
-import AppModal from '../shared/AppModal.vue'
-import ItemsPanel from './ItemsPanel.vue'
-import CharacterListPanel from './CharacterListPanel.vue'
-import QuestsPanel from './QuestsPanel.vue'
-import PlotPanel from './PlotPanel.vue'
-import MemoryPanel from './MemoryPanel.vue'
-import MapPanel from './MapPanel.vue'
+import { onMounted } from 'vue';
+import { useGameStore } from '../../stores/game-store';
+import { useUIStore } from '../../stores/ui-store';
+import TopBar from './TopBar.vue';
+import SideToolbar from './SideToolbar.vue';
+import ChatFlow from './ChatFlow.vue';
+import StatusHUD from './StatusHUD.vue';
+import AppModal from '../shared/AppModal.vue';
+import ItemsPanel from './ItemsPanel.vue';
+import CharacterListPanel from './CharacterListPanel.vue';
+import QuestsPanel from './QuestsPanel.vue';
+import PlotPanel from './PlotPanel.vue';
+import MemoryPanel from './MemoryPanel.vue';
+import MapPanel from './MapPanel.vue';
 
-const game = useGameStore()
-const ui = useUIStore()
+const game = useGameStore();
+const ui = useUIStore();
 
 onMounted(async () => {
   if (ui.activeSaveId) {
-    await game.loadSave(ui.activeSaveId)
+    await game.loadSave(ui.activeSaveId);
   }
-})
+});
 
 function handleSend(content: string) {
-  game.addMessage(content, 'user')
+  game.addMessage(content, 'user');
   // TODO: Phase 7e-3 — 接入 AgentOrchestrator，移除 mock
-  game.isGenerating = true
+  game.isGenerating = true;
   setTimeout(() => {
-    game.addMessage('[AI 回复将在 Phase 7e-3 接入引擎后生效]', 'assistant')
-    game.isGenerating = false
-  }, 500)
+    game.addMessage('[AI 回复将在 Phase 7e-3 接入引擎后生效]', 'assistant');
+    game.isGenerating = false;
+  }, 500);
 }
 
 function handleToolClick(id: string) {
   if (id === 'settings') {
-    ui.navigate('settings')
-    return
+    ui.navigate('settings');
+    return;
   }
-  game.showModal(id)
+  game.showModal(id);
 }
 </script>
 ```
 
 关键变更：
+
 - 删 `import type { FlowMessage } from './ChatFlow.vue'`
 - 删 `const flowMessages: FlowMessage[] = []`
 - `handleSend` 改用 `game.addMessage()`
@@ -1076,11 +1369,13 @@ function handleToolClick(id: string) {
 - [ ] **Step 2: 修改 template 的 ChatFlow props**
 
 把：
+
 ```vue
 <ChatFlow :messages="flowMessages" :is-generating="game.isGenerating" @send="handleSend" />
 ```
 
 改为：
+
 ```vue
 <ChatFlow
   :messages="game.messages"
@@ -1111,17 +1406,21 @@ git commit -m "refactor(ui): GamePage — switch from FlowMessage mock to store-
 ### Task 7: agent-templates.ts — buildAgentMessages 处理 system role
 
 **Files:**
+
 - Modify: `src/sillytavern/agent-templates.ts`
 
 **Consumes:**
+
 - `ChatMessage`（已有，约 line 74-83 的 `formatHistory` 函数）
 
 **Produces:**
+
 - `formatHistory` 输出时将 `role='system'` 的消息转为 `[assistant]` 显示
 
 - [ ] **Step 1: 修改 formatHistory 函数**
 
 `formatHistory`（约 line 74-83）当前：
+
 ```typescript
 function formatHistory(ctx: AgentContext): string {
   const agentId = ctx.agentConfig?.agentId ?? (ctx as any)._proxyAgentId ?? '';
@@ -1129,13 +1428,15 @@ function formatHistory(ctx: AgentContext): string {
   const slice = ctx.agentConfig?.historySlice ?? defaultHistorySlice(agentId);
   if (layers <= 0) return '';
   const maxMessages = layers * 2;
-  return ctx.history.slice(-maxMessages)
-    .map(m => `[${m.role}]: ${m.content.slice(0, slice)}`)
+  return ctx.history
+    .slice(-maxMessages)
+    .map((m) => `[${m.role}]: ${m.content.slice(0, slice)}`)
     .join('\n');
 }
 ```
 
 改为：
+
 ```typescript
 function formatHistory(ctx: AgentContext): string {
   const agentId = ctx.agentConfig?.agentId ?? (ctx as any)._proxyAgentId ?? '';
@@ -1143,8 +1444,9 @@ function formatHistory(ctx: AgentContext): string {
   const slice = ctx.agentConfig?.historySlice ?? defaultHistorySlice(agentId);
   if (layers <= 0) return '';
   const maxMessages = layers * 2;
-  return ctx.history.slice(-maxMessages)
-    .map(m => {
+  return ctx.history
+    .slice(-maxMessages)
+    .map((m) => {
       // 系统消息在 API history 里转成 assistant role（避免 mid-conversation system role 语义歧义）
       const displayRole = m.role === 'system' ? 'assistant' : m.role;
       return `[${displayRole}]: ${m.content.slice(0, slice)}`;
@@ -1156,6 +1458,7 @@ function formatHistory(ctx: AgentContext): string {
 - [ ] **Step 2: 同时修改 `recentHistoryBlock` 相关的另一处引用**
 
 检查 `agent-templates.ts:401`：
+
 ```typescript
 tplCtx.userInput + '\n' + (tplCtx.history.slice(-5).map(m => m.content).join('\n')),
 ```
@@ -1182,14 +1485,17 @@ git commit -m "fix(engine): formatHistory — system role messages displayed as 
 ### Task 8: settings-store.ts + SettingsPage.vue — 系统事件可见性开关
 
 **Files:**
+
 - Modify: `src/ui/stores/settings-store.ts`
 - Modify: `src/ui/components/settings/SettingsPage.vue`
 
 **Consumes:**
+
 - settings KV store（已有）
 - 现有 SettingsPage 的 8 分区布局
 
 **Produces:**
+
 - 设置页新增「消息显示」分区，含全局开关 + 7 个分类 toggle
 - 默认值写入 settings-store 的 defaults
 
@@ -1225,7 +1531,8 @@ section nav 区域（约 line 27-37），在 theme 和 data 之间插入新 sect
 
 ```typescript
 // 在 Section 类型的联合里加 'messages'
-type Section = 'api' | 'agent' | 'worldbook' | 'plot' | 'memory' | 'theme' | 'messages' | 'data' | 'about'
+type Section =
+  'api' | 'agent' | 'worldbook' | 'plot' | 'memory' | 'theme' | 'messages' | 'data' | 'about';
 
 const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'api', label: 'API 配置', icon: 'fa-solid fa-plug' },
@@ -1234,10 +1541,10 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'plot', label: '剧情系统', icon: 'fa-solid fa-feather' },
   { key: 'memory', label: '记忆 & 缓存', icon: 'fa-solid fa-brain' },
   { key: 'theme', label: '外观主题', icon: 'fa-solid fa-palette' },
-  { key: 'messages', label: '消息显示', icon: 'fa-solid fa-message' },  // 🆕
+  { key: 'messages', label: '消息显示', icon: 'fa-solid fa-message' }, // 🆕
   { key: 'data', label: '存档数据', icon: 'fa-solid fa-floppy-disk' },
   { key: 'about', label: '关于', icon: 'fa-solid fa-circle-info' },
-]
+];
 ```
 
 - [ ] **Step 4: 在 template 中加入新分区 UI（插在 theme 和 data 之间）**
@@ -1289,8 +1596,8 @@ function eventFilterLabel(key: string): string {
     character_update: '📊 角色微调',
     item_update: '📦 物品变动',
     quest_update: '📝 任务进度',
-  }
-  return labels[key] ?? key
+  };
+  return labels[key] ?? key;
 }
 ```
 
@@ -1309,7 +1616,7 @@ function eventFilterLabel(key: string): string {
   justify-content: space-between;
   align-items: center;
   padding: 6px 0;
-  border-bottom: 1px solid var(--theme-border, rgba(255,255,255,0.04));
+  border-bottom: 1px solid var(--theme-border, rgba(255, 255, 255, 0.04));
 }
 ```
 
@@ -1335,6 +1642,7 @@ git commit -m "feat(settings): add system event visibility controls — global t
 ### Task 9: 集成测试 — ChatFlow 消息渲染
 
 **Files:**
+
 - Modify: `src/ui/components/game/GamePage.test.ts`
 
 写入一个简单的渲染验证测试，确保 ChatFlow 处理三种 role 不崩溃。
@@ -1342,28 +1650,26 @@ git commit -m "feat(settings): add system event visibility controls — global t
 - [ ] **Step 1: 写入测试**
 
 ```typescript
-import { describe, it, expect } from 'vitest'
-import { mount } from '@vue/test-utils'
-import ChatFlow from './ChatFlow.vue'
-import type { ChatMessage } from '@engine/types'
+import { describe, it, expect } from 'vitest';
+import { mount } from '@vue/test-utils';
+import ChatFlow from './ChatFlow.vue';
+import type { ChatMessage } from '@engine/types';
 
 describe('ChatFlow — 三源消息渲染', () => {
   it('应渲染用户消息（右对齐）', () => {
-    const msgs: ChatMessage[] = [
-      { id: '1', role: 'user', content: '你好', timestamp: 0 },
-    ]
-    const wrapper = mount(ChatFlow, { props: { messages: msgs } })
-    expect(wrapper.find('.bubble-player').exists()).toBe(true)
-    expect(wrapper.find('.bubble-player .bubble-text').text()).toBe('你好')
-  })
+    const msgs: ChatMessage[] = [{ id: '1', role: 'user', content: '你好', timestamp: 0 }];
+    const wrapper = mount(ChatFlow, { props: { messages: msgs } });
+    expect(wrapper.find('.bubble-player').exists()).toBe(true);
+    expect(wrapper.find('.bubble-player .bubble-text').text()).toBe('你好');
+  });
 
   it('应渲染 AI 叙事消息（左对齐）', () => {
     const msgs: ChatMessage[] = [
       { id: '1', role: 'assistant', content: '冒险开始了', timestamp: 0 },
-    ]
-    const wrapper = mount(ChatFlow, { props: { messages: msgs } })
-    expect(wrapper.find('.bubble-narrative').exists()).toBe(true)
-  })
+    ];
+    const wrapper = mount(ChatFlow, { props: { messages: msgs } });
+    expect(wrapper.find('.bubble-narrative').exists()).toBe(true);
+  });
 
   it('应渲染系统消息为折叠通知条', () => {
     const msgs: ChatMessage[] = [
@@ -1373,20 +1679,20 @@ describe('ChatFlow — 三源消息渲染', () => {
         content: '[制作] 成功 — 传说级 霜月之刃',
         timestamp: 0,
       },
-    ]
+    ];
     const wrapper = mount(ChatFlow, {
       props: { messages: msgs, systemEventsVisible: true, systemEventFilters: {} },
-    })
+    });
     // 没有 systemEvent 字段，但 role=system 不崩溃
-    expect(wrapper.find('.chat-messages').exists()).toBe(true)
-  })
+    expect(wrapper.find('.chat-messages').exists()).toBe(true);
+  });
 
   it('空消息列表应显示占位文案', () => {
-    const wrapper = mount(ChatFlow, { props: { messages: [] } })
-    expect(wrapper.find('.chat-empty').exists()).toBe(true)
-    expect(wrapper.text()).toContain('等待冒险开始')
-  })
-})
+    const wrapper = mount(ChatFlow, { props: { messages: [] } });
+    expect(wrapper.find('.chat-empty').exists()).toBe(true);
+    expect(wrapper.text()).toContain('等待冒险开始');
+  });
+});
 ```
 
 - [ ] **Step 2: 运行测试**

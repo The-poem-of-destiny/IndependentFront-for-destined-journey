@@ -25,7 +25,7 @@ export const VAR_NAMESPACES = {
   TEMP: 'temp',
 } as const;
 
-export type VarNamespace = typeof VAR_NAMESPACES[keyof typeof VAR_NAMESPACES];
+export type VarNamespace = (typeof VAR_NAMESPACES)[keyof typeof VAR_NAMESPACES];
 
 // ========== 路径解析 ==========
 
@@ -45,7 +45,7 @@ export function parseVarPath(path: string): { namespace: string; parts: string[]
 
   const parts = trimmed.split('.');
   // 🔒 拒绝危险段（原型污染防御，见上方 DANGEROUS_PATH_SEGMENTS）
-  if (parts.some(p => DANGEROUS_PATH_SEGMENTS.has(p))) {
+  if (parts.some((p) => DANGEROUS_PATH_SEGMENTS.has(p))) {
     return null;
   }
   const firstPart = parts[0];
@@ -63,10 +63,7 @@ export function parseVarPath(path: string): { namespace: string; parts: string[]
 // ========== 变量读写 ==========
 
 /** 安全获取嵌套值 */
-export function getVar(
-  variables: Record<string, any>,
-  path: string,
-): any {
+export function getVar(variables: Record<string, any>, path: string): any {
   const parsed = parseVarPath(path);
   if (!parsed) return undefined;
 
@@ -119,10 +116,7 @@ export function setVar(
 }
 
 /** 删除变量路径 */
-export function delVar(
-  variables: Record<string, any>,
-  path: string,
-): Record<string, any> {
+export function delVar(variables: Record<string, any>, path: string): Record<string, any> {
   const parsed = parseVarPath(path);
   if (!parsed) return variables;
 
@@ -289,10 +283,7 @@ export function diffVariables(
   after: Record<string, any>,
 ): VarChange[] {
   const changes: VarChange[] = [];
-  const allPaths = new Set([
-    ...collectPaths(before),
-    ...collectPaths(after),
-  ]);
+  const allPaths = new Set([...collectPaths(before), ...collectPaths(after)]);
 
   for (const path of allPaths) {
     const oldVal = getVar(before, path);
@@ -312,10 +303,7 @@ export function diffVariables(
 }
 
 /** 收集所有变量的路径 */
-function collectPaths(
-  obj: Record<string, any>,
-  prefix: string = '',
-): string[] {
+function collectPaths(obj: Record<string, any>, prefix: string = ''): string[] {
   const paths: string[] = [];
 
   for (const [key, value] of Object.entries(obj)) {

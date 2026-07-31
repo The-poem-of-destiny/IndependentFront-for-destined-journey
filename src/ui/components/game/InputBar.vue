@@ -1,49 +1,52 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { useGameStore } from '../../stores/game-store'
+import { ref, computed, watch } from 'vue';
+import { useGameStore } from '../../stores/game-store';
 
 const emit = defineEmits<{
-  send: [content: string]
-  stop: []
-}>()
+  send: [content: string];
+  stop: [];
+}>();
 
-const props = defineProps<{ disabled?: boolean }>()
+const props = defineProps<{ disabled?: boolean }>();
 
-const game = useGameStore()
-const input = ref('')
-const showOptions = ref(false)
+const game = useGameStore();
+const input = ref('');
+const showOptions = ref(false);
 
 /** vars_update 解析出的动态行动选项 */
-const dynamicOptions = computed(() => game.pendingOptions)
+const dynamicOptions = computed(() => game.pendingOptions);
 
 // 监听 ChatFlow 选项点击 → 填入输入框
-watch(() => game.pendingInput, (v) => {
-  if (v) {
-    input.value = v
-    game.clearPendingInput()
-  }
-})
+watch(
+  () => game.pendingInput,
+  (v) => {
+    if (v) {
+      input.value = v;
+      game.clearPendingInput();
+    }
+  },
+);
 
 function selectOption(option: string) {
-  input.value = option
-  showOptions.value = false
+  input.value = option;
+  showOptions.value = false;
 }
 
 function handleSend() {
-  const text = input.value.trim()
-  if (!text) return
-  emit('send', text)
-  input.value = ''
+  const text = input.value.trim();
+  if (!text) return;
+  emit('send', text);
+  input.value = '';
 }
 
 function handleStop() {
-  emit('stop')
+  emit('stop');
 }
 </script>
 
 <template>
   <div class="input-bar">
-    <div class="options-popup" v-if="showOptions" role="listbox">
+    <div v-if="showOptions" class="options-popup" role="listbox">
       <div class="options-title">可选行动</div>
       <button
         v-for="(opt, i) in dynamicOptions"
@@ -58,7 +61,14 @@ function handleStop() {
     </div>
 
     <!-- 非生成态：显示选项按钮 -->
-    <button v-if="!props.disabled && dynamicOptions.length > 0" class="input-btn" @click="showOptions = !showOptions" title="可选行动" :aria-expanded="showOptions" aria-haspopup="listbox">
+    <button
+      v-if="!props.disabled && dynamicOptions.length > 0"
+      class="input-btn"
+      title="可选行动"
+      :aria-expanded="showOptions"
+      aria-haspopup="listbox"
+      @click="showOptions = !showOptions"
+    >
       <i class="fa-solid fa-list-ul" />
     </button>
 
@@ -72,12 +82,12 @@ function handleStop() {
     />
 
     <!-- 非生成态：发送按钮 -->
-    <button v-if="!props.disabled" class="input-btn send-btn" @click="handleSend" title="发送">
+    <button v-if="!props.disabled" class="input-btn send-btn" title="发送" @click="handleSend">
       <i class="fa-solid fa-paper-plane" />
     </button>
 
     <!-- 生成态：停止按钮 -->
-    <button v-if="props.disabled" class="input-btn stop-btn" @click="handleStop" title="停止生成">
+    <button v-if="props.disabled" class="input-btn stop-btn" title="停止生成" @click="handleStop">
       <i class="fa-solid fa-stop" />
     </button>
   </div>
@@ -153,7 +163,7 @@ function handleStop() {
   border-radius: var(--theme-radius-md, 8px);
   padding: 8px;
   margin-bottom: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   z-index: var(--z-dropdown, 100);
 }
 .options-title {

@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import type { SystemEvent } from '@engine/types'
-const props = defineProps<{ event: SystemEvent }>()
+import type { SystemEvent } from '@engine/types';
+const props = defineProps<{ event: SystemEvent }>();
 
 function notifIcon(): string {
-  if (props.event.type === 'character_update') return 'fa-solid fa-arrow-trend-up'
-  if (props.event.type === 'item_update') return 'fa-solid fa-boxes-stacked'
-  if (props.event.type === 'quest_update') return 'fa-solid fa-list-check'
-  return 'fa-solid fa-circle-info'
+  if (props.event.type === 'character_update') return 'fa-solid fa-arrow-trend-up';
+  if (props.event.type === 'item_update') return 'fa-solid fa-boxes-stacked';
+  if (props.event.type === 'quest_update') return 'fa-solid fa-list-check';
+  return 'fa-solid fa-circle-info';
 }
 </script>
 
@@ -28,5 +28,10 @@ function notifIcon(): string {
   font-size: 0.75rem;
   color: var(--theme-text-secondary);
 }
-.notif-icon { font-size: 0.75rem; opacity: 0.6; width: 1rem; text-align: center; }
+.notif-icon {
+  font-size: 0.75rem;
+  opacity: 0.6;
+  width: 1rem;
+  text-align: center;
+}
 </style>

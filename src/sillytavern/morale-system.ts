@@ -14,11 +14,7 @@
  */
 
 import type { CombatType, MoraleState, MoraleCheckResult } from './types';
-import {
-  COMBAT_TYPE_MORALE_THRESHOLDS,
-  MORALE_OUTCOME_POOL,
-  MORALE_STATE_LABELS,
-} from './types';
+import { COMBAT_TYPE_MORALE_THRESHOLDS, MORALE_OUTCOME_POOL, MORALE_STATE_LABELS } from './types';
 
 // ========== 阈值查询 ==========
 
@@ -60,10 +56,7 @@ export const CHECK_TRIGGER_TYPES: CombatType[] = ['死斗', '标准', '守卫'];
  * @param hpRatio - 当前 HP / 最大 HP (0.0 ~ 1.0)
  * @param threshold - 士气阈值 (如 0.30 = 30%)
  */
-export function getBaseMoraleState(
-  hpRatio: number,
-  threshold: number,
-): MoraleState {
+export function getBaseMoraleState(hpRatio: number, threshold: number): MoraleState {
   if (hpRatio > threshold) return 'steady';
   if (hpRatio > threshold * 0.5) return 'shaken';
   if (hpRatio > threshold * 0.25) return 'wavering';
@@ -73,10 +66,14 @@ export function getBaseMoraleState(
 /** 战意状态 → 严重度 (0-3) */
 export function getMoraleSeverity(state: MoraleState): number {
   switch (state) {
-    case 'steady': return 0;
-    case 'shaken': return 1;
-    case 'wavering': return 2;
-    case 'routing': return 3;
+    case 'steady':
+      return 0;
+    case 'shaken':
+      return 1;
+    case 'wavering':
+      return 2;
+    case 'routing':
+      return 3;
   }
 }
 
@@ -129,7 +126,7 @@ export function checkMorale(
   // 低阈值类型 → 需要 d20 检定
   if (isCheckTriggerType(combatType)) {
     const roll = d20Roll ?? 10; // 默认值 (用于测试)
-    const passed = roll < 12;   // d20 < 12 → 战意崩溃
+    const passed = roll < 12; // d20 < 12 → 战意崩溃
     const state: MoraleState = passed ? 'routing' : 'shaken';
     const outcome = passed ? pickRandomOutcome('routing') : pickRandomOutcome('shaken');
 
@@ -165,10 +162,7 @@ export function checkMorale(
  * 使用简单的确定性选择 (基于状态 + 简单轮换) 而非 Math.random()。
  * 调用方可通过 seed 参数控制选择。
  */
-export function pickRandomOutcome(
-  state: MoraleState,
-  seed?: number,
-): string {
+export function pickRandomOutcome(state: MoraleState, seed?: number): string {
   const pool = MORALE_OUTCOME_POOL[state];
   if (pool.length === 0) return '坚守阵地';
   // 确定性选择: 使用 seed (默认 0) 取模

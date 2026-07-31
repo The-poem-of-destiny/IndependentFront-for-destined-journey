@@ -1,19 +1,19 @@
 <script setup lang="ts">
 defineProps<{
-  modelValue: string
-  label?: string
-  placeholder?: string
-  disabled?: boolean
-  type?: string
-  readonly?: boolean
-}>()
+  modelValue: string;
+  label?: string;
+  placeholder?: string;
+  disabled?: boolean;
+  type?: string;
+  readonly?: boolean;
+}>();
 
 const emit = defineEmits<{
-  'update:modelValue': [value: string]
-}>()
+  'update:modelValue': [value: string];
+}>();
 
 function onInput(e: Event) {
-  emit('update:modelValue', (e.target as HTMLInputElement | HTMLTextAreaElement).value)
+  emit('update:modelValue', (e.target as HTMLInputElement | HTMLTextAreaElement).value);
 }
 </script>
 

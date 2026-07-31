@@ -7,17 +7,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import {
-  runItemGenChain,
-  buildItemGenPatches,
-} from './item-gen-chain';
+import { runItemGenChain, buildItemGenPatches } from './item-gen-chain';
 import type { ItemGenChainClient, ItemGenChainDeps } from './item-gen-chain';
-import type {
-  ItemGenRequestMarker,
-  ItemGenOutput,
-  ApiEndpoint,
-  AgentContext,
-} from './types';
+import type { ItemGenRequestMarker, ItemGenOutput, ApiEndpoint, AgentContext } from './types';
 
 // ========== Factory Helpers ==========
 
@@ -188,7 +180,11 @@ describe('buildItemGenPatches', () => {
 
   it('target 指向 owner 角色字符路径', () => {
     const patches = buildItemGenPatches(
-      { skills: [], equipment: [], inventory: [{ name: 'x', description: '', quantity: 1, type: '材料' }] },
+      {
+        skills: [],
+        equipment: [],
+        inventory: [{ name: 'x', description: '', quantity: 1, type: '材料' }],
+      },
       'char-007',
     );
     expect(patches[0].target).toBe('characters.char-007');
@@ -242,7 +238,13 @@ describe('runItemGenChain', () => {
 
   it('Agentic 路径 (chatWithTools) 优先', async () => {
     const client: ItemGenChainClient = {
-      chat: vi.fn().mockResolvedValue({ output: '<item_result></item_result>', rawResponse: '', tokensUsed: 0, cacheHit: false, duration: 0 }),
+      chat: vi.fn().mockResolvedValue({
+        output: '<item_result></item_result>',
+        rawResponse: '',
+        tokensUsed: 0,
+        cacheHit: false,
+        duration: 0,
+      }),
       chatWithTools: vi.fn().mockResolvedValue({
         output: makeItemGenXML(),
         rawResponse: makeItemGenXML(),
@@ -253,10 +255,10 @@ describe('runItemGenChain', () => {
     };
     const deps: ItemGenChainDeps = { clientFactory: () => client };
     await runItemGenChain(makeRequest(makeMarker()), deps);
-    expect((client.chatWithTools as any)).toHaveBeenCalledTimes(1);
-    expect((client.chat as any)).not.toHaveBeenCalled();
+    expect(client.chatWithTools as any).toHaveBeenCalledTimes(1);
+    expect(client.chat as any).not.toHaveBeenCalled();
     // 防回归: maxRounds 必须为 10（5 轮会让 equipment 类生成触顶失败）
-    expect((client.chatWithTools as any)).toHaveBeenCalledWith(
+    expect(client.chatWithTools as any).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
       { maxRounds: 10 },

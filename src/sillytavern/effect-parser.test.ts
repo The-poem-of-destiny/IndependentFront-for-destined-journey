@@ -282,7 +282,9 @@ describe('getEffectValue', () => {
 
 describe('sumEffectValues', () => {
   it('单个匹配直接返回值', () => {
-    const effects = [{ key: 'atk', rawKey: '攻击力', value: 50, isPercentage: false, isSubtractive: false }];
+    const effects = [
+      { key: 'atk', rawKey: '攻击力', value: 50, isPercentage: false, isSubtractive: false },
+    ];
     expect(sumEffectValues(effects, 'atk')).toBe(50);
   });
 
@@ -307,7 +309,9 @@ describe('sumEffectValues', () => {
   });
 
   it('无匹配时应返回 0', () => {
-    const effects = [{ key: 'atk', rawKey: '攻击力', value: 50, isPercentage: false, isSubtractive: false }];
+    const effects = [
+      { key: 'atk', rawKey: '攻击力', value: 50, isPercentage: false, isSubtractive: false },
+    ];
     expect(sumEffectValues(effects, 'hp')).toBe(0);
   });
 
@@ -352,7 +356,9 @@ describe('$effect namespace', () => {
   });
 
   it('$effect.getValue 与直接调用 getEffectValue 结果一致', () => {
-    const effects = [{ key: 'atk', rawKey: '攻击力', value: 50, isPercentage: false, isSubtractive: false }];
+    const effects = [
+      { key: 'atk', rawKey: '攻击力', value: 50, isPercentage: false, isSubtractive: false },
+    ];
     expect($effect.getValue(effects, 'atk')).toBe(50);
   });
 

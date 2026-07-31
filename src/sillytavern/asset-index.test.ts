@@ -129,7 +129,9 @@ describe('buildAssetIndex — 撞车决胜（确定性）', () => {
   it('变体撞车走同一条规则', () => {
     const older = row({ id: 'zzz', name: '苏婉', variant: '微笑', createdAt: 100 });
     const newer = row({ id: 'aaa', name: '苏婉', variant: '微笑', createdAt: 900 });
-    expect(buildAssetIndex([newer, older]).character['苏婉']?.['头像']?.variants['微笑']).toBe('zzz');
+    expect(buildAssetIndex([newer, older]).character['苏婉']?.['头像']?.variants['微笑']).toBe(
+      'zzz',
+    );
   });
 
   it('★ 结论与数组顺序无关 —— 任意排列都给同一棵树', () => {

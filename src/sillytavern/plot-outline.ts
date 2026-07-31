@@ -8,13 +8,8 @@
  * 4. 世界线变动时更新大纲
  */
 
-import type {
-  PlotOutline, PlotSettings, PlotEvent, CharacterState,
-} from './types';
-import {
-  getLatestPlotOutline, savePlotOutline,
-  getPlotEvents, savePlotEvents,
-} from './database';
+import type { PlotOutline, PlotSettings, PlotEvent, CharacterState } from './types';
+import { getLatestPlotOutline, savePlotOutline, getPlotEvents, savePlotEvents } from './database';
 
 // ========== 大纲生成 ==========
 
@@ -59,7 +54,12 @@ export interface ParsedOutlineOutput {
   selfCritique?: string;
 }
 
-function formatSelfCritique(sc?: { score: number; strengths?: string[]; weaknesses?: string[]; suggestions?: string[] }): string | undefined {
+function formatSelfCritique(sc?: {
+  score: number;
+  strengths?: string[];
+  weaknesses?: string[];
+  suggestions?: string[];
+}): string | undefined {
   if (!sc) return undefined;
   return `评分: ${sc.score}/10\n优点: ${sc.strengths?.join('; ')}\n不足: ${sc.weaknesses?.join('; ')}\n建议: ${sc.suggestions?.join('; ')}`;
 }
@@ -84,7 +84,12 @@ interface RawOutlineJson {
       failHint?: string;
     }>;
   }>;
-  selfCritique?: { score: number; strengths?: string[]; weaknesses?: string[]; suggestions?: string[] };
+  selfCritique?: {
+    score: number;
+    strengths?: string[];
+    weaknesses?: string[];
+    suggestions?: string[];
+  };
 }
 
 function normalizeOutlineJson(parsed: RawOutlineJson): ParsedOutlineOutput | null {
@@ -97,16 +102,16 @@ function normalizeOutlineJson(parsed: RawOutlineJson): ParsedOutlineOutput | nul
     directionAnchors: parsed.directionAnchors,
     chapters: Array.isArray(parsed.chapters)
       ? parsed.chapters
-          .filter(ch => ch && ch.title)
-          .map(ch => ({
+          .filter((ch) => ch && ch.title)
+          .map((ch) => ({
             title: ch.title!,
             summary: ch.summary || '',
             npcAgendas: ch.npcAgendas,
             ifAbsent: ch.ifAbsent,
             keyEvents: Array.isArray(ch.keyEvents)
               ? ch.keyEvents
-                  .filter(ke => ke && ke.title)
-                  .map(ke => ({
+                  .filter((ke) => ke && ke.title)
+                  .map((ke) => ({
                     title: ke.title!,
                     description: ke.description || '',
                     triggerHint: ke.triggerHint,
@@ -155,7 +160,7 @@ function extractXmlTagWithAttrs(
   tag: string,
   attrs: string[],
 ): { text: string; attrs: Record<string, string>; rest: string } {
-  const attrPattern = attrs.map(a => `\\s+${a}\\s*=\\s*"([^"]*)"`).join('') || '\\s*';
+  const attrPattern = attrs.map((a) => `\\s+${a}\\s*=\\s*"([^"]*)"`).join('') || '\\s*';
   const regex = new RegExp(`<\\s*${tag}${attrPattern}\\s*>([\\s\\S]*?)<\\/\\s*${tag}\\s*>`, 'i');
   const match = content.match(regex);
   if (!match) return { text: '', attrs: {}, rest: content };
@@ -172,7 +177,7 @@ function extractSelfClosingAttrs(
   tag: string,
   attrs: string[],
 ): { attrs: Record<string, string>; rest: string } | null {
-  const attrPattern = attrs.map(a => `\\s+${a}\\s*=\\s*"([^"]*)"`).join('');
+  const attrPattern = attrs.map((a) => `\\s+${a}\\s*=\\s*"([^"]*)"`).join('');
   const regex = new RegExp(`<\\s*${tag}${attrPattern}\\s*\\/>`, 'i');
   const match = content.match(regex);
   if (!match) return null;
@@ -184,7 +189,10 @@ function extractSelfClosingAttrs(
 }
 
 /** 提取非贪婪匹配的正则 — 提取指定模式后的剩余文本 */
-function extractPattern(content: string, regex: RegExp): { match: RegExpExecArray | null; rest: string } {
+function extractPattern(
+  content: string,
+  regex: RegExp,
+): { match: RegExpExecArray | null; rest: string } {
   const m = regex.exec(content);
   if (!m) return { match: null, rest: content };
   return { match: m, rest: content.replace(regex, '') };
@@ -255,9 +263,10 @@ export function parseOutlineXml(raw: string): ParsedOutlineOutput | null {
 
   // chapters — parse each <chapter> with attrs
   const chapters: ParsedOutlineOutput['chapters'] = [];
-  // eslint-disable-next-line no-constant-condition
+
   while (true) {
-    const chRegex = /<\s*chapter\s+title\s*=\s*"([^"]*)"(?:\s+summary\s*=\s*"([^"]*)")?(?:\s+start\s*=\s*"([^"]*)")?(?:\s+end\s*=\s*"([^"]*)")?\s*>([\s\S]*?)<\/\s*chapter\s*>/i;
+    const chRegex =
+      /<\s*chapter\s+title\s*=\s*"([^"]*)"(?:\s+summary\s*=\s*"([^"]*)")?(?:\s+start\s*=\s*"([^"]*)")?(?:\s+end\s*=\s*"([^"]*)")?\s*>([\s\S]*?)<\/\s*chapter\s*>/i;
     const chExec = chRegex.exec(inner);
     if (!chExec) break;
     inner = inner.replace(chRegex, '');
@@ -277,7 +286,7 @@ export function parseOutlineXml(raw: string): ParsedOutlineOutput | null {
     const ifAbsent = iaResult.text.trim() || undefined;
 
     const keyEvents: ParsedOutlineOutput['chapters'][number]['keyEvents'] = [];
-    // eslint-disable-next-line no-constant-condition
+
     while (true) {
       const evRegex = /<\s*event\s+title\s*=\s*"([^"]*)"\s*>([\s\S]*?)<\/\s*event\s*>/i;
       const evExec = evRegex.exec(chInner);
@@ -351,21 +360,21 @@ export function parseOutlineXml(raw: string): ParsedOutlineOutput | null {
 
     // Parse strength/weakness/suggestion within self_critique
     let scInner = scResult.text;
-    // eslint-disable-next-line no-constant-condition
+
     while (true) {
       const strResult = extractXmlTag(scInner, 'strength');
       if (!strResult.text) break;
       scInner = strResult.rest;
       strengths.push(strResult.text.trim());
     }
-    // eslint-disable-next-line no-constant-condition
+
     while (true) {
       const weakResult = extractXmlTag(scInner, 'weakness');
       if (!weakResult.text) break;
       scInner = weakResult.rest;
       weaknesses.push(weakResult.text.trim());
     }
-    // eslint-disable-next-line no-constant-condition
+
     while (true) {
       const sugResult = extractXmlTag(scInner, 'suggestion');
       if (!sugResult.text) break;
@@ -423,7 +432,11 @@ export function createOutlineFromAgent(
     title: parsed.title,
     summary: parsed.summary,
     content: parsed.content,
-    chapters: parsed.chapters.map(ch => ({ title: ch.title, summary: ch.summary, status: 'pending' as const })),
+    chapters: parsed.chapters.map((ch) => ({
+      title: ch.title,
+      summary: ch.summary,
+      status: 'pending' as const,
+    })),
     selfCritique: parsed.selfCritique,
     confirmed: false,
     version,
@@ -592,7 +605,7 @@ export async function syncOutlineEvents(
   newEvents: PlotEvent[],
 ): Promise<{ added: number; skipped: number }> {
   const existingEvents = await getPlotEvents(saveId);
-  const existingTitles = new Set(existingEvents.map(e => e.title));
+  const existingTitles = new Set(existingEvents.map((e) => e.title));
 
   let added = 0;
   let skipped = 0;

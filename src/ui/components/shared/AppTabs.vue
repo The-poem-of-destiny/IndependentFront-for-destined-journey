@@ -1,12 +1,12 @@
 <script setup lang="ts" generic="T extends string">
 defineProps<{
-  tabs: { key: T; label: string; badge?: number }[]
-  active: T
-}>()
+  tabs: { key: T; label: string; badge?: number }[];
+  active: T;
+}>();
 
 const emit = defineEmits<{
-  select: [key: T]
-}>()
+  select: [key: T];
+}>();
 </script>
 
 <template>
@@ -36,7 +36,9 @@ const emit = defineEmits<{
   overflow-x: auto;
   scrollbar-width: none;
 }
-.tab-list::-webkit-scrollbar { display: none; }
+.tab-list::-webkit-scrollbar {
+  display: none;
+}
 
 .tab-item {
   position: relative;

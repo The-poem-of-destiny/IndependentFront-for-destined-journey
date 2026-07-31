@@ -29,7 +29,9 @@ import {
 
 /** 让所有已 resolve 的 promise 链跑完 */
 function flush(): Promise<void> {
-  return new Promise((resolve) => { setTimeout(resolve, 0); });
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -59,7 +61,9 @@ function musicSetup(opts: { fadeMs?: number; random?: () => number } = {}) {
     random: opts.random ?? (() => 0),
     fadeMs: opts.fadeMs ?? 0,
     scheduleTimeout: timers.schedule,
-    onChange: (s) => { changes.push(s); },
+    onChange: (s) => {
+      changes.push(s);
+    },
   });
 
   const gain = ctx.gains[0] as FakeGainNode;
@@ -557,14 +561,16 @@ describe('MusicChannel — Library sync', () => {
 // SfxChannel harness
 // ═══════════════════════════════════════════════════════════
 
-function sfxSetup(opts: {
-  maxVoices?: number;
-  maxConcurrentDecodes?: number;
-  maxDurationSec?: number;
-  maxBytes?: number;
-  deferDecodes?: boolean;
-  decodedDuration?: number;
-} = {}) {
+function sfxSetup(
+  opts: {
+    maxVoices?: number;
+    maxConcurrentDecodes?: number;
+    maxDurationSec?: number;
+    maxBytes?: number;
+    deferDecodes?: boolean;
+    decodedDuration?: number;
+  } = {},
+) {
   const ctx = new FakeAudioContext({
     deferDecodes: opts.deferDecodes,
     decodedDuration: opts.decodedDuration,
@@ -583,7 +589,9 @@ function sfxSetup(opts: {
     maxConcurrentDecodes: opts.maxConcurrentDecodes,
     maxDurationSec: opts.maxDurationSec,
     maxBytes: opts.maxBytes,
-    onChange: (s) => { changes.push(s); },
+    onChange: (s) => {
+      changes.push(s);
+    },
   });
 
   const gain = ctx.gains[0] as FakeGainNode;
@@ -815,7 +823,9 @@ describe('测试替身自检', () => {
   it('createFakeTimers 记录延迟并可手动 flush', () => {
     const t = createFakeTimers();
     let fired = false;
-    t.schedule(() => { fired = true; }, 300);
+    t.schedule(() => {
+      fired = true;
+    }, 300);
     expect(t.delays).toEqual([300]);
     expect(fired).toBe(false);
     t.flush();

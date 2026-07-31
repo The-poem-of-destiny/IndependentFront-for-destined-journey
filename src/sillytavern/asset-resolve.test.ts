@@ -15,11 +15,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { buildAssetIndex, type AssetIndex } from './asset-index';
-import {
-  resolveAsset,
-  ASSET_TYPE_FALLBACK_CHAIN,
-  ASSET_TYPE_AVATAR_CHAIN,
-} from './asset-resolve';
+import { resolveAsset, ASSET_TYPE_FALLBACK_CHAIN, ASSET_TYPE_AVATAR_CHAIN } from './asset-resolve';
 import type { AssetMetaRecord, AssetType } from './types';
 
 function row(over: Partial<AssetMetaRecord> & { id: string; name: string }): AssetMetaRecord {
@@ -189,10 +185,7 @@ describe('resolveAsset — 单个类型绝不降级（向后兼容 / 导入与�
 });
 
 describe('resolveAsset — 严格 === (D2，刻意不归一化)', () => {
-  const index = indexOf(
-    row({ id: 'av', name: '苏婉' }),
-    row({ id: 'en', name: 'Suwan' }),
-  );
+  const index = indexOf(row({ id: 'av', name: '苏婉' }), row({ id: 'en', name: 'Suwan' }));
 
   it('尾随空格不命中', () => {
     expect(resolveAsset([index], '苏婉 ')).toBeNull();

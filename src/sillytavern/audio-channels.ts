@@ -122,7 +122,11 @@ export class MusicChannel {
     this.revokeObjectURL = opts.revokeObjectURL ?? ((u: string) => URL.revokeObjectURL(u));
     this.random = opts.random ?? Math.random;
     this.fadeMs = Math.max(0, opts.fadeMs ?? 0);
-    this.scheduleTimeout = opts.scheduleTimeout ?? ((fn, ms) => { setTimeout(fn, ms); });
+    this.scheduleTimeout =
+      opts.scheduleTimeout ??
+      ((fn, ms) => {
+        setTimeout(fn, ms);
+      });
     this.onChange = opts.onChange;
     this._volume = clamp01(opts.volume ?? 1);
     this._muted = opts.muted ?? false;
@@ -134,11 +138,15 @@ export class MusicChannel {
     this.gainNode.connect(opts.destination);
     this.ctx.createMediaElementSource(this.element).connect(this.gainNode);
 
-    this.endedListener = () => { void this.handleEnded(); };
+    this.endedListener = () => {
+      void this.handleEnded();
+    };
     this.element.addEventListener('ended', this.endedListener);
 
     // 监听器只在构造时绑一次、dispose 时解一次 —— 换曲不重绑，绝不累积
-    this.durationListener = () => { this.handleDurationChange(); };
+    this.durationListener = () => {
+      this.handleDurationChange();
+    };
     this.element.addEventListener('loadedmetadata', this.durationListener);
     this.element.addEventListener('durationchange', this.durationListener);
   }
@@ -319,8 +327,12 @@ export class MusicChannel {
     this.emit();
   }
 
-  get volume(): number { return this._volume; }
-  get muted(): boolean { return this._muted; }
+  get volume(): number {
+    return this._volume;
+  }
+  get muted(): boolean {
+    return this._muted;
+  }
 
   // ── 曲库同步 ────────────────────────────────────────────
 
@@ -450,7 +462,9 @@ export class MusicChannel {
   /** fadeMs === 0 时**完全不排定时器** —— 测试保持确定性 */
   private waitFade(): Promise<void> | null {
     if (this.fadeMs === 0) return null;
-    return new Promise<void>((resolve) => { this.scheduleTimeout(resolve, this.fadeMs); });
+    return new Promise<void>((resolve) => {
+      this.scheduleTimeout(resolve, this.fadeMs);
+    });
   }
 
   /** gen 失效时收手 —— 加载/恢复期间被 stop() 打断的元素不得在稍后出声 */
@@ -671,12 +685,22 @@ export class SfxChannel {
     return { volume: this._volume, muted: this._muted, liveVoices: this.voices.length };
   }
 
-  get liveVoices(): number { return this.voices.length; }
-  get volume(): number { return this._volume; }
-  get muted(): boolean { return this._muted; }
-  get gain(): AudioGainLike { return this.gainNode; }
+  get liveVoices(): number {
+    return this.voices.length;
+  }
+  get volume(): number {
+    return this._volume;
+  }
+  get muted(): boolean {
+    return this._muted;
+  }
+  get gain(): AudioGainLike {
+    return this.gainNode;
+  }
   /** 在途 decode 数 —— 供上层观测拥塞 */
-  get pendingDecodes(): number { return this.inFlightDecodes; }
+  get pendingDecodes(): number {
+    return this.inFlightDecodes;
+  }
 
   /**
    * 打一发音效。
@@ -727,7 +751,11 @@ export class SfxChannel {
     this.voices = [];
     for (const v of live) {
       v.source.onended = null;
-      try { v.source.stop(); } catch { /* 已停止的节点重复 stop 会抛，忽略 */ }
+      try {
+        v.source.stop();
+      } catch {
+        /* 已停止的节点重复 stop 会抛，忽略 */
+      }
       v.source.disconnect();
     }
     if (live.length > 0) this.emit();
@@ -776,7 +804,11 @@ export class SfxChannel {
       }
       const victim = this.voices.splice(oldest, 1)[0];
       victim.source.onended = null;
-      try { victim.source.stop(); } catch { /* ignore */ }
+      try {
+        victim.source.stop();
+      } catch {
+        /* ignore */
+      }
       victim.source.disconnect();
     }
   }
@@ -787,7 +819,9 @@ export class SfxChannel {
     source.buffer = buffer;
     source.connect(this.gainNode);
     const voice: Voice = { id: this.nextVoiceId++, source, startedAt: this.ctx.currentTime };
-    source.onended = () => { this.retireVoice(voice.id); };
+    source.onended = () => {
+      this.retireVoice(voice.id);
+    };
     this.voices.push(voice);
     source.start();
     this.emit();

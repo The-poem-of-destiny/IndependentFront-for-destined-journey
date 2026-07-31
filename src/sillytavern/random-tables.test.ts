@@ -151,7 +151,7 @@ describe('randomName', () => {
     const names: string[] = [];
     for (let i = 0; i < 10; i++) names.push(randomName('亡灵', '男'));
     // 亡灵姓氏包含称号风格（如 寂灭者/永夜 等）
-    const hasSurname = names.some(n => n.includes('·'));
+    const hasSurname = names.some((n) => n.includes('·'));
     expect(hasSurname).toBe(true);
   });
 
@@ -210,7 +210,7 @@ describe('randomEyeColor', () => {
   it('巨龙应为竖瞳', () => {
     const colors: string[] = [];
     for (let i = 0; i < 100; i++) colors.push(randomEyeColor('巨龙'));
-    const hasSlit = colors.some(c => c.includes('竖瞳'));
+    const hasSlit = colors.some((c) => c.includes('竖瞳'));
     // 巨龙瞳色池 6 项中 5 项是竖瞳，100 次至少命中一次
     expect(hasSlit).toBe(true);
   });

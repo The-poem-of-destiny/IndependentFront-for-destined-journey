@@ -7,7 +7,9 @@ import { EventBus } from './game-event';
 import type { CodeResolver } from './subscription-manager';
 import type { ScriptContext } from './script-executor';
 
-function makeBaseCtx(overrides: Partial<Pick<ScriptContext, 'owner' | 'parentScripts'>> = {}): Pick<ScriptContext, 'owner' | 'parentScripts'> {
+function makeBaseCtx(
+  overrides: Partial<Pick<ScriptContext, 'owner' | 'parentScripts'>> = {},
+): Pick<ScriptContext, 'owner' | 'parentScripts'> {
   return { owner: 'char_1', parentScripts: {}, ...overrides };
 }
 
@@ -53,7 +55,13 @@ describe('SubscriptionManager', () => {
     const codeResolver: CodeResolver = () => '$resource.modifyHp(owner, -1);';
 
     manager.register('char_1:item:荆棘甲', 'combat_action', 'reflect', codeResolver, makeBaseCtx());
-    manager.register('char_1:item:荆棘甲', 'location_change', 'onMove', codeResolver, makeBaseCtx());
+    manager.register(
+      'char_1:item:荆棘甲',
+      'location_change',
+      'onMove',
+      codeResolver,
+      makeBaseCtx(),
+    );
     expect(manager.getSubscriptionCount('char_1:item:荆棘甲')).toBe(2);
 
     manager.unregisterAll('char_1:item:荆棘甲');
@@ -129,7 +137,13 @@ describe('SubscriptionManager', () => {
     const codeResolver: CodeResolver = () => '// noop';
 
     manager.register('char_1:item:剑', 'combat_action', 'slash', codeResolver, makeBaseCtx());
-    manager.register('char_2:item:弓', 'combat_action', 'shoot', codeResolver, makeBaseCtx({ owner: 'char_2' }));
+    manager.register(
+      'char_2:item:弓',
+      'combat_action',
+      'shoot',
+      codeResolver,
+      makeBaseCtx({ owner: 'char_2' }),
+    );
     expect(manager.getSubscriptionCount('char_1:item:剑')).toBe(1);
     expect(manager.getSubscriptionCount('char_2:item:弓')).toBe(1);
     expect(manager.totalSubscriptions).toBe(2);
@@ -148,7 +162,13 @@ describe('SubscriptionManager', () => {
     const codeResolver: CodeResolver = () => '// noop';
 
     manager.register('char_1:item:剑', 'combat_action', 'slash', codeResolver, makeBaseCtx());
-    manager.register('char_2:item:弓', 'combat_action', 'shoot', codeResolver, makeBaseCtx({ owner: 'char_2' }));
+    manager.register(
+      'char_2:item:弓',
+      'combat_action',
+      'shoot',
+      codeResolver,
+      makeBaseCtx({ owner: 'char_2' }),
+    );
     expect(manager.totalSubscriptions).toBe(2);
 
     manager.clear();

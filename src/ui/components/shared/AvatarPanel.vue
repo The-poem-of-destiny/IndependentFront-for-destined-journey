@@ -1,10 +1,10 @@
 <script setup lang="ts">
 defineProps<{
-  src?: string
-  name: string
-  size?: 'sm' | 'md' | 'lg' | 'xl'
+  src?: string;
+  name: string;
+  size?: 'sm' | 'md' | 'lg' | 'xl';
   /** 'circle'（默认，原有调用方不受影响）| 'square' 立绘/画像框 */
-  shape?: 'circle' | 'square'
+  shape?: 'circle' | 'square';
   /**
    * `src` 指向的是 mp4 吗（D7 允许 `头像` / `立绘bg` 用视频）。
    *
@@ -12,11 +12,11 @@ defineProps<{
    * 由调用方从**素材行**判定（`useAssetImage` 的 `isVideo`），不要在这里嗅 URL:
    * object URL 里没有扩展名。
    */
-  video?: boolean
-}>()
+  video?: boolean;
+}>();
 
 function initials(name: string): string {
-  return name.slice(0, 2)
+  return name.slice(0, 2);
 }
 </script>
 
@@ -49,16 +49,30 @@ function initials(name: string): string {
   overflow: hidden;
   flex-shrink: 0;
 }
-.avatar-shape-circle { border-radius: 50%; }
+.avatar-shape-circle {
+  border-radius: 50%;
+}
 /* 画像框 —— 走 design.md §4.2 的统一卡片外壳（叠纸阴影 + 1px 边框） */
 .avatar-shape-square {
   border-radius: var(--theme-radius-md, 6px);
   border: 1px solid var(--theme-card-border);
   box-shadow: var(--paper-stack);
 }
-.avatar-sm { width: 40px; height: 40px; font-size: 0.8rem; }
-.avatar-md { width: 64px; height: 64px; font-size: 1.1rem; }
-.avatar-lg { width: 96px; height: 96px; font-size: 1.5rem; }
+.avatar-sm {
+  width: 40px;
+  height: 40px;
+  font-size: 0.8rem;
+}
+.avatar-md {
+  width: 64px;
+  height: 64px;
+  font-size: 1.1rem;
+}
+.avatar-lg {
+  width: 96px;
+  height: 96px;
+  font-size: 1.5rem;
+}
 /* xl 为方形画像框设计：宽度跟随容器，高度由 aspect-ratio 保方 */
 .avatar-xl {
   width: 100%;
