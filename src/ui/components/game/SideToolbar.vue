@@ -13,7 +13,7 @@ const emit = defineEmits<{
   toolClick: [id: string]
 }>()
 
-const tools = [
+const allTools = [
   { id: 'items', label: '背包', icon: 'fa-solid fa-box' },
   { id: 'characters', label: '角色', icon: 'fa-solid fa-users' },
   { id: 'quests', label: '任务', icon: 'fa-solid fa-scroll' },
@@ -25,6 +25,10 @@ const tools = [
   { id: 'debug', label: '调试', icon: 'fa-solid fa-bug' },
   { id: 'settings', label: '设置', icon: 'fa-solid fa-gear' },
 ]
+// 🔒 P1-14: 调试按钮仅 DEV 构建显示 —— 生产构建不暴露调试面板入口
+const tools = computed(() =>
+  import.meta.env.DEV ? allTools : allTools.filter(t => t.id !== 'debug')
+)
 
 function handleClick(id: string) {
   emit('toolClick', id)

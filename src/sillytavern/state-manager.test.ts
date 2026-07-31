@@ -34,6 +34,10 @@ vi.mock('./database', () => ({
   trimSnapshots: vi.fn(),
   getSettings: vi.fn(),
   deleteMessagesAfterTurn: vi.fn(),
+  // 🔒 P1-06: restoreSnapshot 用 db.transaction 包原子事务；测试不验原子性，回调直接执行
+  getDatabase: () => ({
+    transaction: async (_mode: string, _tables: any, cb: () => any) => cb(),
+  }),
 }));
 
 // save-profile 也 mock（quest 双 op 测试用；state-manager 对其为动态 import，vitest 同样拦截）
@@ -1203,7 +1207,7 @@ describe('StateManager', () => {
       expect(char.inventory[0].quantity).toBe(2);
     });
 
-    it('remove_item 扣减到 ≤0 时 splice 删除条目', async () => {
+    it('remove_item 扣到正好 0 时 splice 删除条目', async () => {
       const char = buildMockCharacter({
         id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
         inventory: [{ name: '生命药水', quantity: 2 }],
@@ -1212,10 +1216,28 @@ describe('StateManager', () => {
 
       const sm = new StateManager({ saveId: 's1' });
       await sm.commitChatState([
-        { op: 'remove_item', target: 'characters.理查德', value: { name: '生命药水', quantity: 5 } },
+        { op: 'remove_item', target: 'characters.理查德', value: { name: '生命药水', quantity: 2 } },
       ]);
 
       expect(char.inventory).toHaveLength(0);
+    });
+
+    it('remove_item 库存不足时进 errors[] 不偷偷扣光 (P1-07)', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1', name: '理查德', type: 'player', saveId: 's1',
+        inventory: [{ name: '生命药水', quantity: 2 }],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        { op: 'remove_item', target: 'characters.理查德', value: { name: '生命药水', quantity: 5 } },
+      ]);
+
+      // 库存不足不静默扣光 —— 进 errors，库存保持原样（上游 patchesApplied 能如实反映）
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(char.inventory).toHaveLength(1);
+      expect(char.inventory[0].quantity).toBe(2);
     });
 
     it('remove_item 找不到物品 → 进 errors[] 不静默（#5 #35）', async () => {

@@ -23,6 +23,7 @@ import {
   getSave, saveSaveSlot,
   getSnapshot, saveSnapshot, trimSnapshots,
   getSettings, deleteMessagesAfterTurn,
+  getDatabase,
 } from './database';
 import { getVar, setVar, delVar, insertVar } from './var-resolver';
 import { normalizeQuestStatus, normalizeStatusCategory, normalizeItemType, normalizeRarity, normalizeSlot } from './field-enums';
@@ -676,8 +677,13 @@ export class StateManager {
     const idx = char.inventory.findIndex(i => i.name === name);
     if (idx < 0) throw new Error(`物品不存在: ${name}`);
 
+    // 🔒 P1-07: 删除前验证库存总量 —— 此前 qty > 持有时扣到负数再 splice，静默吞错，
+    // 上游（craft_settle 等）拿到的 patchesApplied 无法反映材料不够。现在库存不足直接抛错。
+    if (char.inventory[idx].quantity < qty) {
+      throw new Error(`物品「${name}」库存不足: 持有 ${char.inventory[idx].quantity}，需要 ${qty}`);
+    }
     char.inventory[idx].quantity -= qty;
-    if (char.inventory[idx].quantity <= 0) {
+    if (char.inventory[idx].quantity === 0) {
       char.inventory.splice(idx, 1);
     }
     await saveCharacter(char);
@@ -1236,38 +1242,46 @@ export class StateManager {
         throw new Error(`快照不属于当前存档: ${snapshot.saveId}（当前 ${this.saveId}）`);
       }
 
-      // ② characters 整体覆写: 全删 → 写入快照副本
-      //    structuredClone 防库内对象与快照对象引用共享（快照需保持不可变，可重复恢复）
-      const current = await getCharacters(this.saveId);
-      for (const c of current) {
-        await deleteCharacter(c.id);
-      }
-      await saveCharacters(structuredClone(snapshot.characters));
-
-      // ③ saveProfile 覆写（变量/任务/时间/好感随行回滚）
+      // 🔒 P1-06: 单事务覆盖所有被修改的表 —— 快照恢复此前是顺序多步独立 DB 操作，
+      // 后段失败会留下部分恢复状态（如角色已覆写但对话/记忆未回滚）。包进单事务后任一步
+      // 抛错 Dexie 自动回滚全表，恢复要么完整成功要么完全不动。
       const { updateProfile } = await import('./save-profile');
-      await updateProfile(structuredClone(snapshot.saveProfile));
+      const db = getDatabase();
+      await db.transaction('rw',
+        [db.characters, db.saveProfiles, db.plotEvents, db.messages, db.memories, db.saves],
+        async () => {
+          // ② characters 整体覆写: 全删 → 写入快照副本
+          //    structuredClone 防库内对象与快照对象引用共享（快照需保持不可变，可重复恢复）
+          const current = await getCharacters(this.saveId);
+          for (const c of current) {
+            await deleteCharacter(c.id);
+          }
+          await saveCharacters(structuredClone(snapshot.characters));
 
-      // ③.b plotEvents 覆写：全删 → 写入快照副本（旧快照无 plotEvents → 写空数组=清空）
-      const currentEvents = await getPlotEvents(this.saveId);
-      for (const e of currentEvents) {
-        await deletePlotEvent(e.id);
-      }
-      await savePlotEvents(structuredClone(snapshot.plotEvents ?? []));
+          // ③ saveProfile 覆写（变量/任务/时间/好感随行回滚）
+          await updateProfile(structuredClone(snapshot.saveProfile));
 
-      // ④ 对话回滚: 删除快照 turn 之后的消息
-      await deleteMessagesAfterTurn(this.saveId, snapshot.turn);
+          // ③.b plotEvents 覆写：全删 → 写入快照副本（旧快照无 plotEvents → 写空数组=清空）
+          const currentEvents = await getPlotEvents(this.saveId);
+          for (const e of currentEvents) {
+            await deletePlotEvent(e.id);
+          }
+          await savePlotEvents(structuredClone(snapshot.plotEvents ?? []));
 
-      // ④.b 清理"未来"记忆（realTimestamp > 快照创建时间；记忆 append-only 安全）
-      await deleteMemoriesAfter(this.saveId, snapshot.createdAt);
+          // ④ 对话回滚: 删除快照 turn 之后的消息
+          await deleteMessagesAfterTurn(this.saveId, snapshot.turn);
 
-      // ⑤ activeSnapshotId 指向 + totalTurns 对齐快照 turn（防重发后 turn 编号错位）
-      const save = await getSave(this.saveId);
-      if (save) {
-        save.activeSnapshotId = snapshot.id;
-        save.metadata.totalTurns = snapshot.turn;
-        await saveSaveSlot(save);
-      }
+          // ④.b 清理"未来"记忆（realTimestamp > 快照创建时间；记忆 append-only 安全）
+          await deleteMemoriesAfter(this.saveId, snapshot.createdAt);
+
+          // ⑤ activeSnapshotId 指向 + totalTurns 对齐快照 turn（防重发后 turn 编号错位）
+          const save = await getSave(this.saveId);
+          if (save) {
+            save.activeSnapshotId = snapshot.id;
+            save.metadata.totalTurns = snapshot.turn;
+            await saveSaveSlot(save);
+          }
+        });
     } catch (err) {
       errors.push(err instanceof Error ? err.message : String(err));
     }

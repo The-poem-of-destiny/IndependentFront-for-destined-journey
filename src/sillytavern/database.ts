@@ -439,13 +439,55 @@ export async function exportAllData(): Promise<FullBackup> {
   };
 }
 
-export async function importAllData(backup: FullBackup): Promise<void> {
+/**
+ * 🔒 P0-04: 校验备份完整性 —— 空 `{}` / 残缺备份此前会让各事务的 clear() 先执行、
+ * bulkPut 因字段非数组全跳过，结果全库被清空。此处要求 version 存在且实体字段为数组。
+ */
+function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
   if (!backup || typeof backup !== 'object') {
-    throw new Error('备份格式无效');
+    throw new Error('备份格式无效：非对象');
   }
-  const db = getDatabase();
+  if (typeof backup.version !== 'number' || !Number.isFinite(backup.version)) {
+    throw new Error('备份格式无效：缺少有效的 version 字段');
+  }
+  const arrayFields: Array<keyof FullBackup> = [
+    'lorebooks', 'presets', 'settings', 'memories', 'plotEvents',
+    'characters', 'snapshots', 'saves', 'apiEndpoints', 'plotOutlines',
+    'saveProfiles', 'createPresets', 'messages',
+  ];
+  for (const f of arrayFields) {
+    const v = backup[f];
+    if (v !== undefined && !Array.isArray(v)) {
+      throw new Error(`备份格式无效：字段 ${String(f)} 必须是数组`);
+    }
+  }
+}
 
-  // Split into 3 transactions — Dexie overload limit (~5 tables per call)
+export async function importAllData(backup: FullBackup): Promise<void> {
+  // 🔒 P0-04: 先验证 —— 不合法的备份（空对象/残缺结构）直接拒绝，不进入 clear 流程
+  validateBackupOrThrow(backup);
+
+  const db = getDatabase();
+  // 🔒 P0-04: 预备份 —— 6 个独立事务跨段不原子，后段失败时前段已永久替换。
+  // 导入前先快照当前数据，任一段抛错时用它回滚到导入前状态（review P0-04 要求的「可恢复备份」）。
+  const previousData = await exportAllData();
+
+  try {
+    await doImportAllData(db, backup);
+  } catch (err) {
+    // 失败回滚：把预备份重新导入（doImportAllData 不验证/不再预备份，避免递归）
+    try {
+      await doImportAllData(db, previousData);
+    } catch (rollbackErr) {
+      console.error('[importAllData] 回滚失败；预备份（内存）仍可手动恢复:', rollbackErr);
+    }
+    throw err;
+  }
+}
+
+/** 纯导入内核（无验证、无预备份）— importAllData 与失败回滚共用 */
+async function doImportAllData(db: ReturnType<typeof getDatabase>, backup: FullBackup): Promise<void> {
+  // Split into multiple transactions — 单事务覆盖 13 张表在 Dexie 上有性能/锁问题
   await db.transaction('rw', db.lorebooks, db.presets, db.settings, async () => {
     await db.lorebooks.clear();
     await db.presets.clear();
@@ -805,9 +847,16 @@ export async function deleteApiEndpoint(id: string): Promise<void> {
 // --- Plot Outlines (Phase 4) ---
 
 export async function getPlotOutlines(saveId: string): Promise<PlotOutline[]> {
-  return getDatabase().plotOutlines
+  // P1-08: 同毫秒保存会让 updatedAt 并列、Dexie sortBy 顺序不稳定 —— 改复合排序（升序）。
+  const outlines = await getDatabase().plotOutlines
     .where('saveId').equals(saveId)
-    .sortBy('updatedAt');
+    .toArray();
+  outlines.sort((a, b) =>
+    (a.updatedAt ?? 0) - (b.updatedAt ?? 0) ||
+    (a.version ?? 0) - (b.version ?? 0) ||
+    (a.createdAt ?? 0) - (b.createdAt ?? 0),
+  );
+  return outlines;
 }
 
 export async function getPlotOutline(id: string): Promise<PlotOutline | undefined> {
@@ -815,11 +864,18 @@ export async function getPlotOutline(id: string): Promise<PlotOutline | undefine
 }
 
 export async function getLatestPlotOutline(saveId: string): Promise<PlotOutline | undefined> {
-  // M6 #51: version 为原地覆盖递增（同 id put），按 version 排序形同虚设 — 改按 updatedAt 取最新
+  // P1-08: 同毫秒连续保存会让 updatedAt 并列，Dexie .reverse().sortBy() 此时顺序不稳定
+  // （全量测试曾因此返回旧大纲）。改为 toArray + 复合排序：updatedAt 降序为主，
+  // 并列时 version 降序（世界线变动递增），再并列则 createdAt 降序（后创建的大纲更新）。
   const outlines = await getDatabase().plotOutlines
     .where('saveId').equals(saveId)
-    .reverse()
-    .sortBy('updatedAt');
+    .toArray();
+  if (outlines.length === 0) return undefined;
+  outlines.sort((a, b) =>
+    (b.updatedAt ?? 0) - (a.updatedAt ?? 0) ||
+    (b.version ?? 0) - (a.version ?? 0) ||
+    (b.createdAt ?? 0) - (a.createdAt ?? 0),
+  );
   return outlines[0];
 }
 

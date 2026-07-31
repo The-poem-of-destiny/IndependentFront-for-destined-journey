@@ -331,14 +331,21 @@ export function resolveCraft(request: CraftActionRequest): CraftActionResult {
   // Build patches
   const patches: StatePatch[] = [];
 
-  // 材料消耗 — 从背包中扣除（用 remove_item 而非 delta_variable）
-  // remove_item 内部逻辑: qty -= amount, quantity ≤ 0 则 splice 删除
-  // M3: 使用 {name, quantity} 对象形态（铁律1 按名寻址）
+  // 🔒 P1-07: 材料消耗走结算结果（lostMaterials），不再无条件删全量。
+  //   成功: 消耗全量（材料变成产物）
+  //   大失败: lostMaterials lossRate=1.0 → 同样全量（全损）
+  //   失败: 只扣 lostMaterials（lossRate 50%，或受 failureProtection 保护更低），剩余返还玩家
+  //   此前无论成败都删 request.materials 全量，导致失败制作亏双倍材料（结算算 50%，实际扣 100%）。
+  //   失败保护 failureProtection 形同虚设 —— 现在让结算成为材料消耗的唯一来源。
+  const matLoss = settleResult.breakdown.materialLoss;
+  const lossByItem = new Map(matLoss.lostMaterials.map(l => [l.itemName, l.quantity]));
   for (const mat of request.materials) {
+    const consumeQty = success ? mat.quantity : (lossByItem.get(mat.itemName) ?? 0);
+    if (consumeQty <= 0) continue;  // 该材料无损（如失败时受保护），不扣
     patches.push({
       op: 'remove_item',
       target: `characters.${request.characterId}`,
-      value: { name: mat.itemName, quantity: mat.quantity },
+      value: { name: mat.itemName, quantity: consumeQty },
     });
   }
 

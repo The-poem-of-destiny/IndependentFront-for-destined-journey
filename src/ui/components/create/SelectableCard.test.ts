@@ -92,8 +92,7 @@ describe('SelectableCard', () => {
       props: { item: testItem, selected: false },
     })
     const card = wrapper.find('.selectable-card')
-    // epic → #9c27b0
-    // jsdom 将 #9c27b0 转换为 rgb(156, 39, 176)
-    expect(card.attributes('style')).toMatch(/rgb\(156,\s*39,\s*176\)/)
+    // epic → 经主题令牌 var(--theme-quality-epic) 注入到 --q-color（不再写死 hex，主题可换色）
+    expect(card.attributes('style')).toContain('--q-color: var(--theme-quality-epic)')
   })
 })

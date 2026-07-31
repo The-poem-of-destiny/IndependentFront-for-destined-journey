@@ -191,7 +191,17 @@ export class GamePipeline {
       this.orch = new AgentOrchestrator(options, events)
 
       // 4. 运行管线
-      await this.orch.run()
+      const orchResult = await this.orch.run()
+
+      // 🔒 P0-03: 仅在管线成功完成时推进回合 + 打快照。
+      // 此前无论 agent 是否失败/中止都 advanceTurn，会消耗玩家输入却不产生有效回复，
+      // 还把半成品状态存进快照。status='failed'（管线校验失败、必需阶段失败、或 abort
+      // 让 story fetch 抛 AbortError）时跳过 —— 玩家输入已入消息流但回合不推进，可安全重发。
+      // refreshFromDb 仍会把已部分落库的 patch 回读，不丢已生成的正文。
+      if (orchResult.status !== 'completed') {
+        console.warn('[GamePipeline] 管线未完成 (status=' + orchResult.status + ')，跳过回合推进/快照')
+        return false
+      }
 
       // 4.5 步5: 等待剧情落库任务（preCheckPlot/postCheckPlot/年度大纲）完成
       if (this.pendingPlotTasks.length > 0) {

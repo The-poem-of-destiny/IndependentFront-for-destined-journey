@@ -11,6 +11,21 @@ const STRIP_RESP_HEADERS = new Set([
   'keep-alive',
 ])
 
+/**
+ * 🔒 P1-03 SSRF 黑名单 —— 云厂商元数据端点，可泄露实例凭据（IMDSv1 尤其危险）。
+ *
+ * 不拒绝 localhost / 私有 IP：本地 LLM（ollama:11434 等）需要它们。这是同源 BFF
+ * （key 前端持有，非多租户云服务），且模型 XSS 已修（P1-01），不存在
+ * 「同源攻击代码读代理响应」的组合链。若将来上云多租户，需改为 DNS 解析后
+ * 逐 IP 校验私有/loopback/link-local 段，并在解析后二次校验防 DNS rebinding。
+ */
+const SSRF_BLOCKLIST = new Set([
+  '169.254.169.254',   // AWS / GCP / Azure IMDS（IPv4）
+  'fd00:ec2::254',     // AWS IMDS（IPv6）
+  'metadata.google.internal',
+  'metadata.azure.com',
+])
+
 export function stripHopHeaders(src: Headers): Record<string, string> {
   const out: Record<string, string> = {}
   src.forEach((v, k) => {
@@ -34,6 +49,12 @@ export async function forward(c: Context, suffix: string): Promise<Response> {
   }
   if (!/^https?:\/\//i.test(base)) {
     return c.json({ error: 'invalid X-Target-Base-URL (must start with http/https)' }, 400)
+  }
+
+  // 🔒 P1-03 SSRF 防护：拒绝云元数据端点（见 SSRF_BLOCKLIST 注释）
+  const host = (() => { try { return new URL(base).hostname } catch { return '' } })()
+  if (SSRF_BLOCKLIST.has(host)) {
+    return c.json({ error: 'blocked target by SSRF protection' }, 403)
   }
 
   const headers: Record<string, string> = {

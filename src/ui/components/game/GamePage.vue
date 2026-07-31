@@ -4,7 +4,6 @@ import { useGameStore } from '../../stores/game-store'
 import { useUIStore } from '../../stores/ui-store'
 import { useSettingsStore } from '../../stores/settings-store'
 import { useAudioStore } from '../../stores/audio-store'
-import { injectTestData, buildScenePreviewMock } from '../../lib/test-fixtures'
 import { GamePipeline } from '../../lib/game-pipeline'
 import TopBar from './TopBar.vue'
 import SideToolbar from './SideToolbar.vue'
@@ -71,9 +70,8 @@ onMounted(async () => {
   }
 })
 
-// ===== 🧪 ChatFlow 测试注入 =====
-/** 注入覆盖全 7 种卡片 + 对话流 + ScenePanel 中下段(在场NPC/心里话/新闻) 的测试数据 */
-function injectChatFlowTest() {
+/** 🧪 开发用测试注入 — 仅 DEV 构建注册到 window / 快捷键（P1-14: 生产构建不暴露） */
+async function injectChatFlowTest() {
   // 确保所有系统事件类型都可见
   s.systemEventsVisible = true
   s.systemEventFilters = {
@@ -85,6 +83,8 @@ function injectChatFlowTest() {
     item_update: true,
     quest_update: true,
   }
+  // 动态 import：test-fixtures 只在调用时加载，不进生产首包
+  const { injectTestData, buildScenePreviewMock } = await import('../../lib/test-fixtures')
   // 注入 ScenePanel 中段(在场NPC + thoughts 心里话) 与下段(新闻) 预览数据
   // 经 store.getThoughts(CharacterState.thoughts 正式字段，M6 单源)、saveProfile.news 读取
   const preview = buildScenePreviewMock()
@@ -97,15 +97,17 @@ function injectChatFlowTest() {
 }
 
 // 暴露到全局，方便控制台调用: window.__injectChatFlowTest__()
-if (typeof window !== 'undefined') {
+// 🔒 P1-14: 仅 DEV 构建暴露 —— 生产构建不该有可注入测试数据的入口（会污染真实存档）
+if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as any).__injectChatFlowTest__ = injectChatFlowTest
 }
 
-// Ctrl+Shift+T 快捷键注入
+// Ctrl+Shift+T 快捷键注入 / Alt+Shift+D 调试面板 — 仅 DEV 构建响应（P1-14）
 function onKeyDown(e: KeyboardEvent) {
+  if (!import.meta.env.DEV) return
   if (e.ctrlKey && e.shiftKey && e.key === 'T') {
     e.preventDefault()
-    injectChatFlowTest()
+    void injectChatFlowTest()
   }
   // Alt+Shift+D 切换调试面板
   if (e.altKey && e.shiftKey && e.key === 'D') {

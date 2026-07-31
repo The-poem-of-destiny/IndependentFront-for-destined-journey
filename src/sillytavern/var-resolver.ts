@@ -29,12 +29,25 @@ export type VarNamespace = typeof VAR_NAMESPACES[keyof typeof VAR_NAMESPACES];
 
 // ========== 路径解析 ==========
 
+/**
+ * 🔒 危险路径段 —— 原型污染防御 (P1-04)。
+ *
+ * 被提示注入的模型或恶意 VarsPatch 可能写入 `sys.__proto__.polluted` 之类的路径，
+ * 从而篡改 Object.prototype 并影响此后所有对象创建。parseVarPath 在此统一拦截，
+ * 使 getVar/setVar/delVar/applyVarsPatch 等所有读写入口都共享这道守卫。
+ */
+const DANGEROUS_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
+
 /** 解析变量路径 "sys.世界.地点" → { namespace: 'sys', parts: ['世界', '地点'] } */
 export function parseVarPath(path: string): { namespace: string; parts: string[] } | null {
   const trimmed = path.trim();
   if (!trimmed) return null;
 
   const parts = trimmed.split('.');
+  // 🔒 拒绝危险段（原型污染防御，见上方 DANGEROUS_PATH_SEGMENTS）
+  if (parts.some(p => DANGEROUS_PATH_SEGMENTS.has(p))) {
+    return null;
+  }
   const firstPart = parts[0];
 
   // 检查是否为已知命名空间

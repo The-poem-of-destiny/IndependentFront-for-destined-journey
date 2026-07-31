@@ -64,6 +64,8 @@ const currentQuote = ref(0)
 let quoteTimer: ReturnType<typeof setInterval> | null = null
 
 const showDevButton = ref(false)
+// 🔒 P1-14: 快速测试按钮仅 DEV 构建显示 —— 生产构建不应有可清库/建测试存档的入口
+const isDev = import.meta.env.DEV
 
 onMounted(async () => {
   await nextTick()
@@ -204,7 +206,7 @@ function formatTime(ts: number) {
         </div>
         <!-- 🧪 开发用 — 悬停显示 -->
         <transition name="fade">
-          <div v-if="showDevButton" class="dev-test-row">
+          <div v-if="showDevButton && isDev" class="dev-test-row">
             <AppButton
               variant="ghost"
               size="sm"

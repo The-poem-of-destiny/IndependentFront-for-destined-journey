@@ -619,7 +619,7 @@ function onHistorySliceInput(ev: Event) {
   else s.agentHistorySlice[activeAgent.value] = Number(v)
   s.agentDirty[activeAgent.value] = true
 }
-function restoreAgentDefaults() {
+async function restoreAgentDefaults() {
   if (!activeAgent.value) return
   const agentId = activeAgent.value
 
@@ -635,8 +635,14 @@ function restoreAgentDefaults() {
         const existing = (s.presets as PresetItem[]).find(p => p.id === pd.preset!.id)
         if (!existing) {
           s.presets.push(pd.preset)
-          // 同步写入 IndexedDB，让 loadPresets() 能读到
-          import('@engine/database').then(({ savePreset }) => savePreset(pd.preset as any)).catch(() => {})
+          // 🔒 P2-04: await 写 IndexedDB —— 此前 fire-and-forget + 空 catch，
+          // 刷新或页面销毁时 Promise 可能未完成，预设丢失且错误被吞。
+          try {
+            const { savePreset } = await import('@engine/database')
+            await savePreset(pd.preset as any)
+          } catch (err) {
+            console.error('[SettingsPage] 恢复默认预设写 IndexedDB 失败:', err)
+          }
         }
       }
     } else {

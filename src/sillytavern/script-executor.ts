@@ -168,8 +168,29 @@ export function executeScript(script: string, context: ScriptContext): ScriptEff
 
   try {
     const sandbox = buildSandbox(effects, context);
-    const fn = new Function(...Object.keys(sandbox), `"use strict";\n${script}`);
-    fn(...Object.values(sandbox));
+    // 🔒 P1-02 沙箱加固：把危险全局显式遮蔽为 undefined（同名参数遮蔽，使脚本内直接引用拿到 undefined）。
+    // ⚠️ 这不是真正的安全沙箱 —— new Function 无法堵住所有逃逸路径（经典绕过：
+    //    `({}).constructor.constructor("return globalThis")()` 仍能拿回 Function 构造器）。
+    //    当前生产链路尚未接通脚本执行（见 P1-11 / ARCHITECTURE 声明与实际不符），此为纵深防御；
+    //    正式接通前必须替换为白名单 AST 解释器或 SES/QuickJS 等真正隔离的求值器。
+    // 注意：浏览器全局 `self` 已被 sandbox 的上下文变量占用（脚本内 self === ctx.self），
+    // 不能再列入此处 —— 重复参数名在 "use strict" 下是 SyntaxError，会让整个脚本静默编译失败。
+    // 同理 `eval` / `arguments` 是 strict 模式保留字，不能作参数名；strict 模式下 eval 已受限，
+    // 主要逃逸路径是 Function 构造器，此处已遮蔽。
+    const SANDBOX_SHADOW_GLOBALS = [
+      'globalThis', 'window', 'document', 'fetch', 'navigator',
+      'localStorage', 'sessionStorage', 'indexedDB',
+      'Function', 'setTimeout', 'setInterval', 'XMLHttpRequest', 'WebSocket',
+    ];
+    const fn = new Function(
+      ...Object.keys(sandbox),
+      ...SANDBOX_SHADOW_GLOBALS,
+      `"use strict";\n${script}`,
+    );
+    fn(
+      ...Object.values(sandbox),
+      ...SANDBOX_SHADOW_GLOBALS.map(() => undefined),
+    );
   } catch (err) {
     console.error('[ScriptExecutor] 脚本执行失败:', err instanceof Error ? err.message : String(err));
   }

@@ -888,10 +888,12 @@ export async function executeToolCall(
 
       const result = $craft.startProject(request);
 
-      // 提交产生的 StatePatch（HP/MP/SP 消耗、EXP、FP）
+      // 提交产生的 StatePatch（HP/MP/SP 消耗、EXP、FP、材料）
+      let patchesApplied = 0;
       if (result.patches && result.patches.length > 0) {
         const sm = createStateManager(context.saveId);
         const commitResult = await sm.commitChatState(result.patches);
+        patchesApplied = commitResult.patchesApplied;
         if (commitResult.errors.length > 0) {
           console.error('[AgentTools] craft patches 提交失败:', commitResult.errors);
         }
@@ -904,7 +906,8 @@ export async function executeToolCall(
         productQuantity: result.productQuantity,
         xpGained: result.xpGained,
         fpGained: result.fpGained,
-        patchesApplied: result.patches?.length ?? 0,
+        // 🔒 P1-07: 返回实际 commit 成功数（库存不足等会让部分 patch 失败），而非计划数
+        patchesApplied,
       };
     }
 

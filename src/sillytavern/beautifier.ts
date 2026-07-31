@@ -27,6 +27,22 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, '&#039;');
 }
 
+/**
+ * 🔒 仅转义 & < >（不转义引号）— 用于 beautifier 处理原始模型文本 (P1-01)。
+ *
+ * 规则 pattern 可能依赖原文引号（如内置对话卡片规则匹配 `("对话")` 里的 `"`），
+ * 若把引号也转义成 `&quot;` 会破坏匹配；而在纯文本上下文里引号不构成注入 ——
+ * 原文的标签已被 `<` `>` 转义废掉，残留的引号只是字面字符。
+ *
+ * 与 escapeHtml 的区别：后者额外转义 `"` `'`，用于属性值等需要引号安全的场景。
+ */
+export function escapeHtmlBasic(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 // ========== Built-in Rules (Legacy) ==========
 
 /**
@@ -256,7 +272,11 @@ export function mergeRules(
  * @returns 处理后的文本
  */
 export function processRules(text: string, scope: string, rules: BeautifierRule[]): string {
-  let result = text;
+  // 🔒 P1-01 XSS 防御：先对原始模型文本做 HTML 转义（仅 & < >，见 escapeHtmlBasic 注释）。
+  // 模型响应可能含 <img onerror=...> 等恶意片段；若不先 escape，未被任何规则匹配的原文会
+  // 原样进入 v-html，导致存储型与流式 XSS。转义后所有原始尖括号都成为纯文本实体，
+  // 只有下方规则 replacement 模板里的 HTML 结构才是会被浏览器解析的真标签。
+  let result = escapeHtmlBasic(text);
 
   const active = rules
     .filter(r => r.enabled && (r.scope === 'global' || r.scope === scope))
@@ -265,19 +285,9 @@ export function processRules(text: string, scope: string, rules: BeautifierRule[
   for (const rule of active) {
     try {
       const re = new RegExp(rule.pattern, rule.flags);
-      if (rule.isBuiltin) {
-        result = result.replace(re, (...args: (string | number | undefined)[]) => {
-          const groupCount = args.length > 2 ? args.length - 3 : 0;
-          let html = rule.replacement;
-          for (let i = 1; i <= groupCount; i++) {
-            const value = String(args[i] ?? '');
-            html = html.split(`$${i}`).join(escapeHtml(value));
-          }
-          return html;
-        });
-      } else {
-        result = result.replace(re, rule.replacement);
-      }
+      // 捕获组现在匹配的是已转义文本，replacement 里的 $1/$2 会被替换为已转义内容，
+      // 故内置规则与用户规则走同一路径，均无需二次 escape。
+      result = result.replace(re, rule.replacement);
     } catch {
       // 规则编译失败静默跳过，不阻断管道
     }
