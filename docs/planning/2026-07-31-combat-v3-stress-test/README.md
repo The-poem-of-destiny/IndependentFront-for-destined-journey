@@ -98,6 +98,6 @@ automaton "技能/物品名" {
 ## 相关资料
 
 - **RFC 主文档**：[`../2026-07-31-combat-v3-real-sample-stress-test-rfc.md`](../2026-07-31-combat-v3-real-sample-stress-test-rfc.md)（6 类缺口 + 补丁方案 + M0-M5 落地路线）
-- **v3 提案原文**：[`../2026-07-30-combat-kernel-v3-proposal.md`](../2026-07-30-combat-kernel-v3-proposal.md) + [`../../../../reference/战斗架构设计参考.txt`](../../../../reference/战斗架构设计参考.txt)
-- **v2 现状架构**：[`../../../../docs/reference/combat-system-architecture.md`](../../../../docs/reference/combat-system-architecture.md)
-- **战斗样本源**：[`../../../../reference/战斗对话样本/`](../../../../reference/战斗对话样本/)（24 场，本目录用其中 5 场）
+- **v3 提案原文**：[`../2026-07-30-combat-kernel-v3-proposal.md`](../2026-07-30-combat-kernel-v3-proposal.md) + [`../../../reference/战斗架构设计参考.txt`](../../../reference/战斗架构设计参考.txt)
+- **v2 现状架构**：[`../../reference/combat-system-architecture.md`](../../reference/combat-system-architecture.md)
+- **战斗样本源**：[`../../../reference/战斗对话样本/`](../../../reference/战斗对话样本/)（24 场，本目录用其中 5 场）
