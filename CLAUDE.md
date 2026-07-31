@@ -461,6 +461,13 @@ src/vanilla/sillytavern-store.ts    ← 框架无关响应式 Store (Observer �
 - **$ API 语义级抽象 (ADR-19)**：AI 调 `$combat.attack()` 声明意图，Code 内部执行公式。不暴露 `modifyHp()` 等 CRUD 原语给 AI。
 - **声明式优先 (ADR-20)**：效果系统先用 VarsPatch + StatusEffect 声明式格式。复杂动态逻辑通过 `script-executor.ts` 脚本沙盒实现（`$event.on/off` 持久订阅、`$call` 跨对象引用、`init/cleanup` 生命周期）。
 - **StateManager 为唯一写入入口 (ADR-21)**：所有状态变更通过 `commitChatState()`，替代分散的 `saveChat()`。
+  - 📌 **受控例外 (P1-09)**：SaveProfile 的纯 UI 辅助字段（`focusQuest` 焦点任务选择、`news[].read` 已读标记）允许 UI 层直写，但必须走 `updateProfile()` / `markNewsRead()` 统一写入函数（非裸 `db.put`）并带 try/catch。理由：这些是用户交互产生的 UI 辅助状态，不参与 AI 契约/事件链/数值验证/原子边界。AI 产生的 SaveProfile 变更仍必须走 `vars_update` 语义 op，不在此例外内。
+- **世界书实现理念 (ADR-28)**：世界书（v4.2.1 角色卡 character_book）是给**纯文本 AI** 的协议——骰子池(60枚预掷)、action_info 文本面板、`{{roll 1d20}}` 文本注入都是因为没有 Code 层才用的文本手段。我们有 Code 纯函数+工具调用+script 沙盒，**中间结构不必照抄**：
+  - 骰子池 → Code 的 `$dice` / `Math.random` 即可，**不求"60枚严格顺序可复现"**
+  - action_info 文本面板 → 内部数据结构 + 前端组件（面板格式是给文本 AI 看的约束）
+  - 文本效果描述("攻击时20%灼烧") → script + $ API 代码化执行
+  - **目标**：输入→流程→**结果**模仿世界书（制作三阶段/检定公式/品质继承/伤害8步管线/状态规则结构/品质数轴范围），中间实现用工程手段
+  - **script 定位**：是"让世界书自由文本效果代码化"的**妥协桥梁**，不是追求完美复现世界书每个机制的借口；纠结"完美复现"时停下来，回到"流程+结果是否对齐"
 
 ## 事件驱动架构（Phase 4.5-8 实现）
 
@@ -489,6 +496,19 @@ Layer 1  原语级 状态读写        StateManager.commitChatState() / $validat
 | Agentic 模式 | OpenAI function calling (Phase 8.5) | craft_gen/char_gen/item_gen 通过 tools 调用真实 Code 函数，禁止 AI 编造数值 |
 | craft_request 时序 | 延迟型 (对齐 combat_trigger) | Stage 1 暂存 → Stage 2 统一执行，避免阻塞叙事 |
 | System Prompt 管理 (Phase 9) | agent-config.json 唯一来源 | 所有 Agent 的完整 systemPrompt 存在 agent-config.json；agent-templates.ts 只留 stub + 动态上下文函数 |
+
+### 效果系统统一框架（战斗+制作共用，ADR-29）
+
+战斗 v2 (M1-M5) 已验证一套**统一 subscribeChain 链式管道**机制，制作系统直接复用，不发明第二套。完整设计见 `docs/planning/unified-effect-system-framework.md`。
+
+- **统一机制**：`EventBus.emitChain(type, params, ctx)` 链式参数管道——`(priority, order, 注册序)` 稳定排序、`ctx.combatants`+`subscription.owner` 在场过滤、错误隔离、递归保护（maxDepth 默认10/战斗5）
+- **两个注册 facade**（互不干扰）：
+  - `ScriptRegistry`（声明式）：物品装备时 `registerAll` 把脚本清单注册成 handler；卸下时 `unregisterOwner`
+  - `SubscriptionManager`（动态）：AI script 运行时 `$event.on` 注册
+- **modifier 不是第二套系统**：物品 `modifiers[]` 字段在装备时由 ScriptRegistry 注册成"push handler"（往 `params.mods.push(...)` 写），走同一条 emitChain —— 数值操控（DC/重骰/优势）和触发效果（灼烧/召唤）共用一条管道
+- **核心模式：纯函数兜底 + AI subscribeChain 覆盖**（combat-morale/settlement 已验证）：Code 算基础 → emitChain 传 AI → AI handler 改 outcome/返回内容 → AI 不响应走兜底。制作侧精益求精词条/失败叙事/徽记设计照搬
+- **世界书 6 类效果对应**（[品质效果限定]）：前4类（固伤/百分比/资源/检定）= 数值 modifier；后2类（附加效果/特殊机制）= script 触发 + 特殊机制数值。这不是屎山，是世界书本身的客观分层
+- **🔴 P1-11 真相**：基础设施全部齐全（emitChain / ScriptRegistry / SubscriptionManager / executeInit / collect_mods），战斗 collect_mods 管线已接通；**唯一缺口是"装备/卸下/存档加载时调 executeInit → ScriptRegistry.registerAll"接线**——通了之后 modifier 收集 + script 触发 + $event.on 全部自动生效。落地三步见框架文档 §5.2
 
 ## v4 三层子系统分流 (ADR-24/25/26, 2026-06-15)
 
