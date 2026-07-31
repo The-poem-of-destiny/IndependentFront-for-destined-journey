@@ -82,7 +82,10 @@ export async function fetchModels(
     const models = await tryFetchModels(baseUrl, key ? { 'api-key': key } : {});
     if (models.length > 0) return { models, source: 'remote' };
   } catch (e) {
-    lastError = e;
+    // 保留 Bearer 首次错误，不被兜底覆盖：api-key 是 Azure 风格兜底，非 Azure 端点
+    // 普遍对它回 401——若覆盖，Bearer 明明 404（如 Cline 无 /models）也会误报成
+    // "401 Key 无效"，把用户往换 key 的死路上带。
+    if (lastError === undefined) lastError = e;
   }
   return {
     models: getFallbackModels(baseUrl),

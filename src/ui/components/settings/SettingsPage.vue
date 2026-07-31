@@ -104,9 +104,10 @@ function onApiKeyInput() {
 async function testApiAndFetch() {
   if (!apiForm.baseUrl || !apiForm.apiKey) return;
   apiFormTesting.value = true;
-  const realKey = apiForm._realKey || apiForm.apiKey;
+  // trim 与 fetchModels 对齐：粘贴带尾随空白/换行的 key 时，避免"获取模型能通、测试反而 401"
+  const realKey = (apiForm._realKey || apiForm.apiKey).trim();
   try {
-    await fetchModelList();
+    await fetchModelList({ fromConnectionTest: true });
     let testModel = apiForm.model;
     if (!testModel && apiModels.value.length > 0) {
       if (apiForm.apiType === 'embedding') {
@@ -147,12 +148,13 @@ async function testApiAndFetch() {
     apiForm.apiKey = maskKey(realKey);
     apiForm._masked = true;
     ui.toast('ok', 'success');
-    if (apiModels.value.length === 0) await fetchModelList();
+    // 测试通过后兜底重拉一次列表；首次已弹过提示，这次失败保持安静
+    if (apiModels.value.length === 0) await fetchModelList({ silentFail: true });
   } catch (e: any) {
     const msg = (e?.message || '').slice(0, 80);
     const hint =
       msg.indexOf('401') >= 0
-        ? '（API Key 无效或格式不符，确认 key 与服务要求匹配；如 Cline key 需在 app.cline.bot 生成）'
+        ? '（API Key 无效或与该服务不匹配，请按服务商文档核对 key 的来源与格式）'
         : msg.indexOf('404') >= 0
           ? '（模型名或接口路径不对，检查 baseUrl/模型）'
           : '';
@@ -160,12 +162,12 @@ async function testApiAndFetch() {
   }
   apiFormTesting.value = false;
 }
-async function fetchModelList() {
+async function fetchModelList(opts: { fromConnectionTest?: boolean; silentFail?: boolean } = {}) {
   if (!apiForm.baseUrl) {
     return;
   }
   apiFormFetchingModels.value = true;
-  const rk = apiForm._realKey || apiForm.apiKey;
+  const rk = (apiForm._realKey || apiForm.apiKey).trim();
   try {
     // 去重：复用 api-tools.fetchModels（同源 /api/models + Bearer/api-key 双鉴权 + 三形态解析）
     const { models, source, error } = await fetchModels({ baseUrl: apiForm.baseUrl, apiKey: rk });
@@ -176,20 +178,30 @@ async function fetchModelList() {
         '已获取 ' + apiModels.value.length + ' 个模型，点击输入框下拉选择或手动填写',
         'success',
       );
-    } else {
+    } else if (!opts.silentFail) {
       const msg = (error || 'unknown').slice(0, 100);
-      const hint =
-        msg.indexOf('401') >= 0
-          ? '（Key 无效或与端点不匹配，如 z.ai coding key 必须配 coding endpoint、Cline key 需在 app.cline.bot 生成）'
-          : msg.indexOf('404') >= 0
-            ? '（该端点可能不支持 /models，请手动填 model）'
+      if (msg.indexOf('404') >= 0) {
+        // 404 独立分支：不是 key 问题——要么端点根本没实现 /models（Cline 等属常态），
+        // 要么主链接填错。从「测试连接」进来时降级为 info（列表只是顺手拉，
+        // 连接测试的权威结果是后面那条 chat 请求），单独点「获取模型」时用 warning。
+        ui.toast(
+          opts.fromConnectionTest
+            ? '该端点没有 /models 模型列表接口（或主链接不正确），已用手填模型继续测试连接'
+            : '该端点没有 /models 模型列表接口（或主链接不正确），请手动填写模型 id',
+          opts.fromConnectionTest ? 'info' : 'warning',
+        );
+      } else {
+        const hint =
+          msg.indexOf('401') >= 0
+            ? '（Key 无效或与端点不匹配，请按服务商文档核对 key 与主链接是否配套）'
             : msg.indexOf('network') >= 0
               ? '（代理或网络问题）'
               : '';
-      ui.toast('获取失败: ' + msg + hint, 'error');
+        ui.toast('获取失败: ' + msg + hint, 'error');
+      }
     }
   } catch (e: any) {
-    ui.toast('获取失败: ' + (e.message || '').slice(0, 100), 'error');
+    if (!opts.silentFail) ui.toast('获取失败: ' + (e.message || '').slice(0, 100), 'error');
   }
   apiFormFetchingModels.value = false;
 }
@@ -221,7 +233,8 @@ function openEditApi(ep: ApiEntry) {
   showAddApi.value = true;
 }
 function saveApi() {
-  const realKey = apiForm._realKey || apiForm.apiKey;
+  // trim 防脏存：这里不 trim 的话，带空白的 key 会原样进库，之后每次运行时调用都 401
+  const realKey = (apiForm._realKey || apiForm.apiKey).trim();
   const e: ApiEntry = {
     id: editingApiId.value || crypto.randomUUID(),
     name: apiForm.name,
