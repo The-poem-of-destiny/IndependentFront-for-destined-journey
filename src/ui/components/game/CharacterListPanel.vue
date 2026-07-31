@@ -208,9 +208,9 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
                 <span class="ov-dl-label">特征</span>
                 <span class="ov-dl-text">{{ selected.personality }}</span>
               </div>
-              <div class="ov-dl-item" v-if="selected.background || selected.description">
+              <div class="ov-dl-item" v-if="selected.background">
                 <span class="ov-dl-label">背景</span>
-                <span class="ov-dl-text">{{ selected.background || selected.description }}</span>
+                <span class="ov-dl-text">{{ selected.background }}</span>
               </div>
             </div>
           </template>

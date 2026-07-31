@@ -32,14 +32,10 @@ export interface PresetItem {
   id: string
   name: string
   description?: string
-  mainPrompt?: string
-  system_prompt?: string
-  temperature?: string
-  maxTokens?: string
-  topP?: string
-  freqPen?: string
-  presPen?: string
-  prompts?: { name: string; content: string; enabled: boolean; role: string }[]
+  /** SillyTavern 预设原始 JSON：prompts / temp_openai / openai_max_tokens / top_p_openai / freq_pen_openai 等（ST 导入或前端构建） */
+  settings: Record<string, any>
+  createdAt: number
+  updatedAt: number
 }
 
 // ===== Phase 8: Agent 项目默认配置 =====

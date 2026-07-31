@@ -98,7 +98,7 @@ async function testApiAndFetch() {
 		apiForm._masked = true
 		ui.toast('ok', 'success')
 		if (apiModels.value.length === 0) await fetchModelList()
-	} catch (e) {
+	} catch (e: any) {
 		const msg = (e?.message || '').slice(0, 80)
 		const hint = msg.indexOf('401') >= 0 ? '（API Key 无效或格式不符，确认 key 与服务要求匹配）'
 			: msg.indexOf('404') >= 0 ? '（模型名或接口路径不对，检查 baseUrl/模型）' : ''
@@ -124,15 +124,15 @@ async function testApiAndFetch() {
 					: msg.indexOf('network') >= 0 ? '（代理或网络问题）' : ''
 				ui.toast('获取失败: ' + msg + hint, 'error')
 			}
-		} catch (e) {
+		} catch (e: any) {
 			ui.toast('获取失败: ' + (e.message || '').slice(0, 100), 'error')
 		}
 		apiFormFetchingModels.value = false
 	}
 function openAddApi() { editingApiId.value=null; apiForm.name='';apiForm.baseUrl='';apiForm.apiKey='';apiForm.model='';apiForm.apiType='chat';apiForm.enableThinking=false;apiForm._realKey=''; apiForm._masked=false; apiModels.value=[];showAddApi.value=true }
 function openEditApi(ep: ApiEntry) { editingApiId.value=ep.id;apiForm.name=ep.name;apiForm.baseUrl=ep.baseUrl;const key=ep.apiKey||'';apiForm.apiKey=key;apiForm._realKey=key;apiForm._masked=key ? true : false;apiForm.model=ep.model;apiForm.apiType=ep.apiType||'chat';apiForm.enableThinking=ep.enableThinking??false;apiModels.value=ep.models?.length?[...ep.models]:[ep.model].filter(Boolean);showAddApi.value=true }
-	function saveApi() { const realKey=apiForm._realKey||apiForm.apiKey; const e: ApiEntry = {id:editingApiId.value||crypto.randomUUID(),name:apiForm.name,baseUrl:apiForm.baseUrl,apiKey:realKey,maskedKey:maskKey(realKey),model:apiForm.model,models:apiModels.value.length>0?apiModels.value:[apiForm.model].filter(Boolean),apiType:apiForm.apiType,enableThinking:apiForm.enableThinking};if(editingApiId.value){const i=s.apiPool.findIndex(x=>x.id===editingApiId.value);if(i>=0)s.apiPool[i]=e}else s.apiPool.push(e);showAddApi.value=false;editingApiId.value=null;ui.toast(editingApiId.value?"API updated":"API added","success") }
-function deleteApi(id:string) { s.apiPool = s.apiPool.filter(e=>e.id!==id);ui.toast('API 已删除','info') }
+	function saveApi() { const realKey=apiForm._realKey||apiForm.apiKey; const e: ApiEntry = {id:editingApiId.value||crypto.randomUUID(),name:apiForm.name,baseUrl:apiForm.baseUrl,apiKey:realKey,maskedKey:maskKey(realKey),model:apiForm.model,models:apiModels.value.length>0?apiModels.value:[apiForm.model].filter(Boolean),apiType:apiForm.apiType,enableThinking:apiForm.enableThinking};if(editingApiId.value){const i=s.apiPool.findIndex((x: ApiEntry) => x.id === editingApiId.value);if(i>=0)s.apiPool[i]=e}else s.apiPool.push(e);showAddApi.value=false;editingApiId.value=null;ui.toast(editingApiId.value?"API updated":"API added","success") }
+function deleteApi(id:string) { s.apiPool = s.apiPool.filter((e: ApiEntry) => e.id !== id);ui.toast('API 已删除','info') }
 
 // ============================================================
 // Agent 配置
@@ -558,6 +558,7 @@ async function saveAsDefault() {
     // Phase 8.6: Agent 历史注入配置 (存档不设则引擎侧按类别默认)
     historyLayers: s.agentHistoryLayers[agentId],
     historySlice: s.agentHistorySlice[agentId],
+    template: '',
   }
 
   if (agentId === 'story') {
@@ -720,11 +721,11 @@ async function saveWorldBookAsDefault(book: WorldBook) {
 
 /** 重置单本内置世界书 → 删除用户副本，重新从本地 JSON 加载 */
 async function resetSingleWorldBook(id: string) {
-  const book = s.worldBooks.find(b => b.id === id)
+  const book = s.worldBooks.find((b: WorldBook) => b.id === id)
   if (!book?.builtIn) return
   if (!confirm(`确定将"${book.name}"恢复为默认吗？\n\n您对该书的所有修改将被清除。`)) return
   try {
-    s.worldBooks = s.worldBooks.filter(b => b.id !== id)
+    s.worldBooks = s.worldBooks.filter((b: WorldBook) => b.id !== id)
     const builtIn = await loadBuiltInWorldBooks()
     const fresh = builtIn.find(b => b.id === id)
     if (fresh) {
@@ -784,10 +785,10 @@ function newWorldBook() {
 }
 
 function deleteWorldBook(id: string) {
-  const book = s.worldBooks.find(b => b.id === id)
+  const book = s.worldBooks.find((b: WorldBook) => b.id === id)
   if (!book) return
   if (!confirm(`确定删除世界书"${book.name}"吗？将删除全部 ${book.entries?.length || 0} 条条目，此操作不可撤销。`)) return
-  s.worldBooks = s.worldBooks.filter(b => b.id !== id)
+  s.worldBooks = s.worldBooks.filter((b: WorldBook) => b.id !== id)
   ui.toast(`已删除"${book.name}"`, 'warning')
 }
 
@@ -807,7 +808,7 @@ async function resetWorldBooks() {
 }
 
 function handleWorldBookUpdate(updated: WorldBook) {
-  const idx = s.worldBooks.findIndex(b => b.id === updated.id)
+  const idx = s.worldBooks.findIndex((b: WorldBook) => b.id === updated.id)
   if (idx >= 0) {
     s.worldBooks[idx] = updated
   }
@@ -847,7 +848,7 @@ const plotDifficultyOptions = [
 // 主题 & 数据 & 关于
 // ============================================================
 function selectTheme(id:string){theme.apply(id);ui.toast(`主题：${theme.currentTheme?.nameZh}`,'success')}
-function eventFilterLabel(key: string): string {
+function eventFilterLabel(key: string | number): string {
   const labels: Record<string, string> = {
     craft: '制作完成',
     char_gen: '新角色加入',
@@ -857,7 +858,7 @@ function eventFilterLabel(key: string): string {
     item_update: '物品变动',
     quest_update: '任务进度',
   }
-  return labels[key] ?? key
+  return labels[String(key)] ?? String(key)
 }
 const showClearConfirm = ref(false)
 const storageInfo = ref<{ used: number; quota: number; pct: number } | null>(null)
@@ -1078,17 +1079,17 @@ async function clearAll(){const{clearAllData}=await import('@engine/database');a
                   条目列表（{{ activePreset.settings?.prompts?.length || 0 }} 个）
                 </h4>
                 <div v-for="(sp, idx) in (activePreset.settings?.prompts || [])" :key="sp.identifier || idx" class="subprompt-item" :class="{ 'subprompt-disabled': sp.enabled === false }">
-                  <div class="subprompt-header" @click="toggleEntry(s.activePresetId, idx)">
+                  <div class="subprompt-header" @click="toggleEntry(s.activePresetId, Number(idx))">
                     <div class="subprompt-info">
-                      <label class="subprompt-toggle" @click.stop.prevent="togglePresetEntryEnabled(s.activePresetId, idx)">
+                      <label class="subprompt-toggle" @click.stop.prevent="togglePresetEntryEnabled(s.activePresetId, Number(idx))">
                         <input type="checkbox" :checked="sp.enabled !== false" class="toggle-input" />
                         <span class="toggle-slider toggle-sm"></span>
                       </label>
-                      <span class="subprompt-name">{{ sp.name || `条目 #${idx + 1}` }}</span>
+                      <span class="subprompt-name">{{ sp.name || `条目 #${Number(idx) + 1}` }}</span>
                       <span class="subprompt-role text-xs text-muted">{{ sp.role || 'system' }}</span>
                     </div>
                     <div class="subprompt-meta">
-                      <button class="subprompt-edit-btn" @click.stop="openEntryEditor(s.activePresetId, idx)" title="编辑此条目">✎</button>
+                      <button class="subprompt-edit-btn" @click.stop="openEntryEditor(s.activePresetId, Number(idx))" title="编辑此条目">✎</button>
                       <span class="subprompt-chars text-xs text-muted">{{ (sp.content || '').length }} 字</span>
                       <span class="subprompt-chevron" :class="{ 'chevron-open': expandedEntries.has(`${s.activePresetId}:${idx}`) }">▸</span>
                     </div>

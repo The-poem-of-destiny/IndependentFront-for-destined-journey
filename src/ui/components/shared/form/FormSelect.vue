@@ -1,15 +1,23 @@
-<script setup lang="ts">
-defineProps<{
-  modelValue: string
+<script setup lang="ts" generic="T extends string | number | boolean">
+const props = defineProps<{
+  modelValue: T
   label?: string
-  options: { value: string; label: string; disabled?: boolean }[]
+  options: { value: T; label: string; disabled?: boolean }[]
   placeholder?: string
   disabled?: boolean
 }>()
 
 const emit = defineEmits<{
-  'update:modelValue': [value: string]
+  'update:modelValue': [value: T]
 }>()
+
+// select.value 永远是 string，所以渲染时统一 String() 匹配；
+// 反向按 string 找回 option 的原值（可能是 boolean/number），保证 v-model 类型不漂移
+function onChange(e: Event) {
+  const sel = e.target as HTMLSelectElement
+  const matched = props.options.find(o => String(o.value) === sel.value)
+  emit('update:modelValue', (matched ? matched.value : sel.value) as T)
+}
 </script>
 
 <template>
@@ -19,15 +27,15 @@ const emit = defineEmits<{
     </label>
     <select
       class="form-select"
-      :value="modelValue"
+      :value="String(modelValue)"
       :disabled="disabled"
-      @change="emit('update:modelValue', ($event.target as HTMLSelectElement).value)"
+      @change="onChange"
     >
       <option v-if="placeholder" value="" disabled>{{ placeholder }}</option>
       <option
         v-for="opt in options"
-        :key="opt.value"
-        :value="opt.value"
+        :key="String(opt.value)"
+        :value="String(opt.value)"
         :disabled="opt.disabled"
       >
         {{ opt.label }}

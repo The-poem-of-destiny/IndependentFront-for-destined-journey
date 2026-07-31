@@ -50,7 +50,7 @@ function activateCustom() {
         <CategoryTabs
           :categories="sidebarCategories"
           :model-value="store.activeBackgroundCategory"
-          @update:model-value="store.activeBackgroundCategory = $event"
+          @update:model-value="store.activeBackgroundCategory = $event as 'race' | 'identity' | 'location' | 'universal'"
           variant="vertical"
         />
       </template>
