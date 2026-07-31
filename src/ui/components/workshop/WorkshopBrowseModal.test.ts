@@ -154,6 +154,50 @@ describe('WorkshopBrowseModal', () => {
     wrapper.unmount();
   });
 
+  it('排序恒带且改排序回到第 0 页', async () => {
+    // total 要够多，「下一页」才是可点的
+    listMock.mockResolvedValue(page([meta()], { total: 100 }));
+    const wrapper = await open();
+    // 缺省排序必须显式带上：请求可复现，缓存键才稳定
+    expect(lastQuery()).toMatchObject({ sort: 'published' });
+
+    // 先翻到第 2 页，再改排序 —— 排序在服务端做，停在第 2 页会排出自相矛盾的结果
+    const next = [...document.body.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === '下一页',
+    ) as HTMLButtonElement;
+    next.click();
+    await flushPromises();
+    expect(lastQuery()).toMatchObject({ page: 1 });
+
+    const select = document.body.querySelector('.wk-sort') as HTMLSelectElement;
+    select.value = 'downloads';
+    select.dispatchEvent(new Event('change'));
+    await flushPromises();
+    expect(lastQuery()).toMatchObject({ sort: 'downloads', page: 0 });
+    wrapper.unmount();
+  });
+
+  it('标签条恒定四项，不随当前页的项目漂移', async () => {
+    // 这一页只有一个带「系统」的项目，「扩展/角色/事件」照样在条上
+    const wrapper = await open();
+    const chips = [...document.body.querySelectorAll('.wk-tagchip')].map((c) =>
+      c.textContent?.trim(),
+    );
+    expect(chips).toEqual(['系统', '扩展', '角色', '事件']);
+
+    // 换成一页完全不含基础标签的结果，条上仍是同样四项（不塌不长 → 下方网格不被顶动）
+    listMock.mockResolvedValue(page([meta({ tags: ['外挂', '路边'] })]));
+    const refresh = [...document.body.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === '刷新',
+    ) as HTMLButtonElement;
+    refresh.click();
+    await flushPromises();
+    expect(
+      [...document.body.querySelectorAll('.wk-tagchip')].map((c) => c.textContent?.trim()),
+    ).toEqual(['系统', '扩展', '角色', '事件']);
+    wrapper.unmount();
+  });
+
   it('翻页把 page 传给 client；首页的「上一页」不可点', async () => {
     listMock.mockResolvedValue(page([meta()], { total: 60, pageSize: 20 }));
     const wrapper = await open();

@@ -14,11 +14,16 @@
  *    就闪一次红）。
  * 3. **失败要说人话且给得起重试**。上游是第三方 worker，抽风是常态而非异常路径。
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { WorkshopProjectMeta } from '@engine/workshop-types';
+import { WORKSHOP_BASE_TAGS } from '@engine/workshop-types';
 import type { WorkshopProject } from '@engine/types';
-import { listProjects, WORKSHOP_DEFAULT_PAGE_SIZE } from '../../lib/workshop-client';
-import type { WorkshopFailure } from '../../lib/workshop-client';
+import {
+  listProjects,
+  WORKSHOP_DEFAULT_PAGE_SIZE,
+  WORKSHOP_DEFAULT_SORT,
+} from '../../lib/workshop-client';
+import type { WorkshopFailure, WorkshopSortMode } from '../../lib/workshop-client';
 import AppModal from '../shared/AppModal.vue';
 import AppButton from '../shared/AppButton.vue';
 import WorkshopProjectCard from './WorkshopProjectCard.vue';
@@ -41,6 +46,21 @@ const search = ref('');
 const activeTag = ref('');
 const page = ref(0);
 const pageSize = ref(WORKSHOP_DEFAULT_PAGE_SIZE);
+const sort = ref<WorkshopSortMode>(WORKSHOP_DEFAULT_SORT as WorkshopSortMode);
+
+/**
+ * 排序选项。**值**是上游 `z.enum` 的成员（传别的会 400），文案是本地的。
+ *
+ * 按点赞/订阅/下载排序不需要我们建任何社交状态 —— 它只是个查询参数，计数本身
+ * 仍然不消费（属 Phase 3+）。
+ */
+const SORT_OPTIONS: { value: WorkshopSortMode; label: string }[] = [
+  { value: 'published', label: '最新发布' },
+  { value: 'updated', label: '最近更新' },
+  { value: 'likes', label: '最多点赞' },
+  { value: 'subscribes', label: '最多订阅' },
+  { value: 'downloads', label: '最多下载' },
+];
 
 const projects = ref<WorkshopProjectMeta[]>([]);
 const total = ref(0);
@@ -66,13 +86,26 @@ const totalPages = computed(() =>
 const canPrev = computed(() => page.value > 0 && !loading.value);
 const canNext = computed(() => page.value + 1 < totalPages.value && !loading.value);
 
-/** 标签筛选条: 从当前这页的结果里现采。上游没有 `/api/tags`，这是唯一的来源 */
-const tagOptions = computed(() => {
-  const seen = new Set<string>();
-  for (const p of projects.value) for (const t of p.tags) if (t) seen.add(t);
-  if (activeTag.value) seen.add(activeTag.value); // 筛出来的那页可能不含该标签本身
-  return [...seen];
-});
+/**
+ * 标签筛选条 —— **恒定**四个基础标签，不从当前页现采（见 `WORKSHOP_BASE_TAGS`）。
+ *
+ * 现采的老做法有两处害：翻到不含某标签的页时该标签会从条上消失；条的行数随内容
+ * 变化，每次翻页都把下方整个网格顶上顶下。上游 `/api` 没有 `/tags` 接口，所以
+ * 「完整标签全集」本来也拿不到 —— 现采只是拿一页冒充全集。
+ *
+ * 卡片和详情页仍然照常展示项目自己的全部标签（D12），这里限制的只是**筛选入口**。
+ */
+const tagOptions = WORKSHOP_BASE_TAGS;
+
+/**
+ * 网格的重建键。变一次 → Vue 整片换掉 → 卡片重跑入场动画。
+ *
+ * 这是「翻页像换了一页纸」而不是「内容原地跳变」的关键: 没有它，Vue 会按 key 复用
+ * 卡片 DOM，新旧两页的内容逐格替换，读起来像闪烁。
+ */
+const gridKey = computed(
+  () => `${sort.value}|${activeTag.value}|${search.value.trim()}|${page.value}`,
+);
 
 const installedById = computed(() => {
   const map = new Map<string, WorkshopProject>();
@@ -100,6 +133,7 @@ async function load(): Promise<void> {
     {
       page: page.value,
       pageSize: pageSize.value,
+      sort: sort.value,
       tag: activeTag.value || undefined,
       search: search.value.trim() || undefined,
     },
@@ -150,11 +184,41 @@ function selectTag(tag: string): void {
   reloadFromFirstPage();
 }
 
+/**
+ * 排序必须**服务端**做且回到第 0 页。只对当前页重排会排出「第 2 页的热门项目
+ * 排在第 1 页的冷门项目之前」这种自相矛盾的结果。
+ */
+function selectSort(next: WorkshopSortMode): void {
+  if (sort.value === next) return;
+  sort.value = next;
+  reloadFromFirstPage();
+}
+
+/** 结果区容器 —— 翻页后要把它滚回顶部 */
+const resultsEl = ref<HTMLElement | null>(null);
+
+/**
+ * 翻页后把滚动位置带回结果区顶部。
+ *
+ * 不做的话，从第 1 页底部按「下一页」会停在第 2 页的中段，屏幕上一半是空白一半是
+ * 卡片 —— 用户以为新页只有几个项目。滚的是模态自己的滚动容器（`closest`），
+ * 不是 window。
+ */
+function scrollResultsToTop(): void {
+  const el = resultsEl.value;
+  if (!el) return;
+  const scroller = el.closest<HTMLElement>('.modal-body') ?? el.parentElement;
+  if (!scroller || typeof scroller.scrollTo !== 'function') return;
+  const reduced =
+    typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  scroller.scrollTo({ top: 0, behavior: reduced ? 'auto' : 'smooth' });
+}
+
 function goPage(delta: number): void {
   const next = page.value + delta;
   if (next < 0 || next >= totalPages.value) return;
   page.value = next;
-  void load();
+  void load().then(() => nextTick(scrollResultsToTop));
 }
 
 watch(
@@ -183,7 +247,7 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
 <template>
   <AppModal :open="open" title="浏览创意工坊" size="xl" @update:open="emit('update:open', $event)">
     <div class="wk-browse">
-      <!-- ═══ 工具条：搜索 + 取消/刷新 ═══ -->
+      <!-- ═══ 工具条：搜索 + 排序 + 取消/刷新 ═══ -->
       <div class="wk-toolbar">
         <input
           v-model="search"
@@ -192,14 +256,24 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
           placeholder="搜索项目名或作者…"
           aria-label="搜索工坊项目"
         />
+        <select
+          class="wk-sort"
+          aria-label="排序方式"
+          :value="sort"
+          @change="selectSort(($event.target as HTMLSelectElement).value as WorkshopSortMode)"
+        >
+          <option v-for="opt in SORT_OPTIONS" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
         <AppButton v-if="loading" variant="secondary" size="sm" @click="cancelLoad">
           取消
         </AppButton>
         <AppButton v-else variant="secondary" size="sm" @click="load()"> 刷新 </AppButton>
       </div>
 
-      <!-- ═══ 标签筛选 ═══ -->
-      <div v-if="tagOptions.length > 0" class="wk-tagbar" role="group" aria-label="按标签筛选">
+      <!-- ═══ 标签筛选（恒定四项，不随当前页漂移） ═══ -->
+      <div class="wk-tagbar" role="group" aria-label="按标签筛选">
         <button
           v-for="tag in tagOptions"
           :key="tag"
@@ -210,14 +284,6 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
           @click="selectTag(tag)"
         >
           {{ tag }}
-        </button>
-        <button
-          v-if="activeTag"
-          type="button"
-          class="wk-tagchip chip-clear"
-          @click="selectTag(activeTag)"
-        >
-          清除筛选
         </button>
       </div>
 
@@ -232,8 +298,15 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
       </p>
 
       <!-- ═══ 结果区 ═══ -->
-      <div class="wk-results">
-        <p v-if="loading && projects.length === 0" class="empty-tab">正在向创意工坊取书…</p>
+      <div ref="resultsEl" class="wk-results" :aria-busy="loading">
+        <div v-if="loading && projects.length === 0" class="wk-skeleton-grid" aria-hidden="true">
+          <div v-for="n in 8" :key="n" class="wk-skeleton">
+            <div class="wk-skeleton-cover"></div>
+            <div class="wk-skeleton-line sk-title"></div>
+            <div class="wk-skeleton-line sk-meta"></div>
+            <div class="wk-skeleton-line sk-desc"></div>
+          </div>
+        </div>
 
         <div v-else-if="failure" class="wk-failure" role="alert">
           <p class="wk-failure-text">{{ failureText }}</p>
@@ -248,7 +321,8 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
           {{ search.trim() || activeTag ? '没有符合条件的项目' : '工坊里还空着' }}
         </p>
 
-        <div v-else class="wk-grid">
+        <!-- :key 让整片网格随查询条件重建 → 卡片重跑入场动画，翻页读起来像换了一页纸 -->
+        <div v-else :key="gridKey" class="wk-grid" :class="{ 'grid-loading': loading }">
           <WorkshopProjectCard
             v-for="p in projects"
             :key="p.id"
@@ -310,6 +384,23 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
   outline: none;
   border-color: var(--theme-primary);
 }
+/* 排序：与搜索框同高同字号（工具条里两个控件差一号字会很扎眼） */
+.wk-sort {
+  min-height: 36px;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  background: var(--theme-content-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  color: var(--theme-text-primary);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: border-color var(--theme-transition-fast);
+}
+.wk-sort:focus {
+  outline: none;
+  border-color: var(--theme-primary);
+}
 
 /* ── 标签条 ── */
 .wk-tagbar {
@@ -348,13 +439,127 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
 }
 
 /* ── 结果 ── */
+/*
+ * min-height 撑住一整屏卡片的高度。翻页时新旧两页条数不同（末页往往只有几个），
+ * 没有它模态会先塌到几十像素再弹回来 —— 那一下塌陷就是最明显的一次抖动。
+ */
 .wk-results {
-  min-height: 220px;
+  min-height: 420px;
 }
 .wk-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: var(--theme-spacing-md);
+}
+
+/*
+ * 在飞时把旧结果压暗而不是抽走: 屏幕上始终有内容，用户知道自己还在原地。
+ * 只动 opacity（design.md §1 禁止布局属性过渡）。
+ */
+.grid-loading {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.wk-grid {
+  transition: opacity var(--theme-transition-normal);
+}
+
+/*
+ * 卡片入场: opacity + translateY(12px) / 0.35s（design.md §6.1「消息入场」同款）。
+ * 逐格递延 40ms，到第 8 格封顶 —— 不封顶的话一页 20 个卡片最后一个要等 0.8s，
+ * 那已经不是「入场」而是「加载慢」了。
+ */
+.wk-grid > * {
+  animation: wk-card-in 0.35s ease both;
+}
+.wk-grid > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.wk-grid > *:nth-child(2) {
+  animation-delay: 40ms;
+}
+.wk-grid > *:nth-child(3) {
+  animation-delay: 80ms;
+}
+.wk-grid > *:nth-child(4) {
+  animation-delay: 120ms;
+}
+.wk-grid > *:nth-child(5) {
+  animation-delay: 160ms;
+}
+.wk-grid > *:nth-child(6) {
+  animation-delay: 200ms;
+}
+.wk-grid > *:nth-child(7) {
+  animation-delay: 240ms;
+}
+.wk-grid > *:nth-child(n + 8) {
+  animation-delay: 280ms;
+}
+@keyframes wk-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/*
+ * 骨架屏 —— 首次加载用它替掉一行「正在取书…」的文字。
+ *
+ * 理由不是好看: 文字态只有一行高，等结果到了整个模态从一行猛涨到满屏，是这里
+ * 第二明显的一次抖动。骨架把最终布局**先占住**，内容到位时只是填色。
+ */
+.wk-skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: var(--theme-spacing-md);
+}
+.wk-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-sm);
+  padding: 0 0 var(--theme-spacing-md);
+  background: var(--theme-card-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-lg);
+  overflow: hidden;
+}
+.wk-skeleton-cover {
+  aspect-ratio: 16 / 9;
+  background: var(--theme-surface-muted);
+}
+.wk-skeleton-line {
+  height: 10px;
+  margin: 0 var(--theme-spacing-md);
+  border-radius: var(--theme-radius-sm);
+  background: var(--theme-surface-muted);
+}
+.sk-title {
+  width: 70%;
+  height: 13px;
+}
+.sk-meta {
+  width: 45%;
+}
+.sk-desc {
+  width: 90%;
+}
+.wk-skeleton-cover,
+.wk-skeleton-line {
+  animation: wk-skeleton-pulse 1.4s ease-in-out infinite;
+}
+@keyframes wk-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
 }
 
 .wk-failure {
@@ -436,8 +641,23 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
 
 @media (prefers-reduced-motion: reduce) {
   .wk-search,
-  .wk-tagchip {
+  .wk-sort,
+  .wk-tagchip,
+  .wk-grid {
     transition: none;
+  }
+  /*
+   * 入场动画整个关掉。`animation: none` 会连 `both` 的终态一起撤销，所以必须
+   * 显式把卡片摁回可见 —— 否则减动效用户看到的是一片空网格。
+   */
+  .wk-grid > *,
+  .wk-skeleton-cover,
+  .wk-skeleton-line {
+    animation: none;
+  }
+  .wk-grid > * {
+    opacity: 1;
+    transform: none;
   }
 }
 </style>

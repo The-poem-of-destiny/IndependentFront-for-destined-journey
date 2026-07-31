@@ -46,6 +46,19 @@ export const WORKSHOP_RULE_GROUP_PREFIX = '创意工坊 · ';
 /** 工坊美化规则的 order 起始值 —— 排在内置规则之后 */
 export const WORKSHOP_RULE_ORDER_BASE = 1000;
 
+/**
+ * 上游的四个基础标签（对齐上游 `BASE_TAG_META`）。
+ *
+ * ★ 筛选条**恒定渲染这四个**，不从当前页的项目里现采。现采的版本有两个毛病：
+ * 一是翻到不含某标签的页时该标签会从筛选条里消失（用户无从得知它存在过）；
+ * 二是筛选条的行数随页面内容变化，每次翻页都把下方整个网格顶上顶下 —— 这是
+ * 浏览模态里最显眼的一处抖动。
+ *
+ * 上游项目的 `tags` 是自由文本，可以含这四个以外的值；那些只作展示（D6/D12），
+ * 不进筛选条。
+ */
+export const WORKSHOP_BASE_TAGS: readonly string[] = ['系统', '扩展', '角色', '事件'];
+
 /** 一个项目对应的世界书 id（D7） */
 export function workshopBookId(projectId: string): string {
   return `${WORKSHOP_BOOK_ID_PREFIX}${projectId}`;

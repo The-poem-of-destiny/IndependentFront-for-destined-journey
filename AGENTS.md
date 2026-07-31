@@ -466,7 +466,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   └── (战斗面板见 combat/ 子组件，docs/reference/combat-system-architecture.md)
 │   └── workshop/                    ← [工坊 P1] 创意工坊页
 │       ├── WorkshopPage.vue         ← 页面壳（已安装列表 + 浏览入口；首页与侧栏均有入口）
-│       ├── WorkshopBrowseModal.vue / WorkshopDetailModal.vue / WorkshopProjectCard.vue
+│       ├── WorkshopBrowseModal.vue    ← 搜索 + 服务端排序（5 模式）+ 恒定四标签筛选 + 骨架屏
+│       ├── WorkshopDetailModal.vue    ← 装前检视：条目/正则逐条展开
+│       │                                 ★ 正则行的处置预告复用 `mapWorkshopRegexes`
+│       │                                   （与装后已装列表同源，别另写第二套判定）
+│       ├── WorkshopProjectCard.vue    ← tags 一条不折叠（D12，勿改成「更多」）
 │       ├── WorkshopInstalledList.vue / WorkshopConflictModal.vue（更新覆盖前警告）
 │       └── format.ts / failure-text.ts（展示层纯函数）
 │

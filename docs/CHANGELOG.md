@@ -196,6 +196,50 @@ beautifier-rules.json 预设规则（22 条: 2 内置 + 20 远程）+ 世界书/
 
 ---
 
+### 2026-07-31 — 工坊 P1 增补：装前检视 / 服务端排序 / 恒定标签条 + 抗抖动
+
+对齐上游插件（`AkabaneSaki/myrepo`）功能盘点后补的三处差距，外加浏览模态的抖动治理。
+
+**装前检视（详情模态）**
+
+- 世界书条目与正则**逐条可展开**，不再只报一个总数。条目展开后给主/次关键词、
+  匹配逻辑、order/position 与完整正文；正则给 pattern、replacement。
+- ★ 每条正则带**处置预告**（不会生效 / 全局副作用），走的是安装时那个
+  `mapWorkshopRegexes` —— 与装后已装列表**同源**。这是本屏比上游多出来的一件事：
+  上游把 ST 字段搬进 ST，没有东西会丢，只需展示 pattern；我们的美化库不是 ST 正则
+  引擎，与其装完再说「N 项未导入」，不如装之前就在每一条上标出来。
+  🔴 若将来有人在这里另写一套判定，用户就会遇到「装前说好好的、装完说没导入」。
+- 长列表先渲 25 行，其余按需 —— 上游有几百条目的项目，一次性展开会让模态卡一拍。
+
+**服务端排序**：`WORKSHOP_SORT_MODES`（published/updated/likes/subscribes/downloads）。
+排序必须服务端做且回到第 0 页，否则会排出「第 2 页的热门项目排在第 1 页的冷门项目之前」。
+社交**计数**仍不消费（Phase 3+），按它们排序只是一个查询参数。
+
+**恒定标签条**：`WORKSHOP_BASE_TAGS`（系统/扩展/角色/事件）替掉「从当前页现采」。
+现采有两处害：翻到不含某标签的页时该标签会消失；条的行数随内容变化，每次翻页都把
+下方整个网格顶上顶下。
+
+**抗抖动 + 动画**（design.md §6.1 口径）
+
+- 结果区 `min-height: 420px` —— 末页条数少时模态不再先塌后弹
+- 首次加载用**骨架屏**替掉一行文字，先把最终布局占住
+- 在飞时旧结果压暗（只动 opacity）而非抽走，屏幕上始终有内容
+- 卡片入场 opacity + translateY(12px)/0.35s，逐格递延 40ms 至第 8 格封顶
+- 折叠行展开走 `grid-template-rows: 0fr→1fr`（禁止 max-height 过渡）
+- 翻页后滚回结果区顶部
+- 全部配 `prefers-reduced-motion`（入场动画关掉时显式把卡片摁回可见，
+  否则 `animation: none` 会连 `both` 的终态一起撤销 → 一片空网格）
+
+涉及文件: `workshop-types.ts`(+`WORKSHOP_BASE_TAGS`) · `workshop-client.ts`
+(+`WORKSHOP_SORT_MODES`) · `WorkshopBrowseModal.vue` · `WorkshopDetailModal.vue` ·
+`format.ts` · 新增 `WorkshopDetailModal.test.ts`
+
+验证: 139 文件 / 4658 测试全绿（+13）· typecheck & vue-tsc 0 错误 · lint 0 error。
+🔴 **未做真机走查** —— 预览面板不合成帧（Vue `<Transition>` 依赖 rAF，导航卡在
+leave 阶段），Chrome 扩展未连接。视觉与动画观感待真机确认。
+
+---
+
 ## 历史速览
 
 已完成且稳定的旧 Phase（1-9、10a-g、6x、Geography、Audit Fix）细节由 `docs/phases/` 各计划文档 + git log 承载，不再在此处展开。状态见 `AGENTS.md`「当前进度」速览表。

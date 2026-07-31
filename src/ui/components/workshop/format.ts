@@ -74,3 +74,55 @@ export function summarizeNoteGroups(groups: WorkshopNoteGroups): string {
     .filter((seg) => seg.length > 0)
     .join(' · ');
 }
+
+// ═══════════════════════════════════════════════════════════
+// 装前检视（详情模态的条目/正则列表）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * ST 条目的 `position` → 中文。
+ *
+ * 数值取自 ST 的 world info：0/1 是相对角色定义的前后，4 是按深度插入。
+ * 本引擎注入时**不消费**这个字段（`formatWorldBookEntries` 只按 order 拼接），
+ * 所以这里的用途纯粹是「让用户看懂上游作者的意图」，不代表安装后的行为。
+ */
+export function describeEntryPosition(position: number): string {
+  switch (position) {
+    case 0:
+      return '角色定义前';
+    case 1:
+      return '角色定义后';
+    case 4:
+      return '按深度插入';
+    default:
+      return `位置 ${position}`;
+  }
+}
+
+/**
+ * ST 的 `selectiveLogic` → 中文（对齐 `worldbook-loader.matchKeyword` 的四分支）。
+ *
+ * 只在条目**有次要关键词**时才有意义 —— 没有次要关键词时 ST 直接走「主关键词任一
+ * 命中」，这个字段的值是什么都不影响结果，照实显示反而误导。
+ */
+export function describeSelectiveLogic(logic: number): string {
+  switch (logic) {
+    case 0:
+      return '任一次要命中';
+    case 1:
+      return '非全部次要命中';
+    case 2:
+      return '无次要命中';
+    case 3:
+      return '全部次要命中';
+    default:
+      return `逻辑 ${logic}`;
+  }
+}
+
+/** 长文本截断 —— 折叠行的预览段，展开后看全文 */
+export function truncate(text: string, max = 90): string {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max)}…`;
+}

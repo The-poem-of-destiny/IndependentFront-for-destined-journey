@@ -10,11 +10,14 @@ import { describe, it, expect } from 'vitest';
 import { groupWorkshopNotes, workshopNote } from '@engine/workshop-types';
 import {
   WORKSHOP_NOTE_LABEL,
+  describeEntryPosition,
+  describeSelectiveLogic,
   formatBytes,
   formatDate,
   formatNoteSegment,
   formatVersion,
   summarizeNoteGroups,
+  truncate,
 } from './format';
 
 describe('formatBytes / formatDate / formatVersion', () => {
@@ -77,5 +80,32 @@ describe('处置文案 —— 只有 dropped 配叫「未导入」', () => {
   it('无 note → 空串（调用方据此整块不渲染）', () => {
     expect(summarizeNoteGroups(groupWorkshopNotes([]))).toBe('');
     expect(summarizeNoteGroups(groupWorkshopNotes(undefined))).toBe('');
+  });
+});
+
+describe('装前检视的字段翻译', () => {
+  it('position 覆盖 ST 的三个已知值，未知值原样报出而不是硬派一个说法', () => {
+    expect(describeEntryPosition(0)).toBe('角色定义前');
+    expect(describeEntryPosition(1)).toBe('角色定义后');
+    expect(describeEntryPosition(4)).toBe('按深度插入');
+    // 上游可以有我们没见过的值：宁可显示"位置 7"，也不要错报成"按深度插入"
+    expect(describeEntryPosition(7)).toBe('位置 7');
+  });
+
+  it('selectiveLogic 四分支与 worldbook-loader.matchKeyword 同义', () => {
+    expect(describeSelectiveLogic(0)).toBe('任一次要命中');
+    expect(describeSelectiveLogic(1)).toBe('非全部次要命中');
+    expect(describeSelectiveLogic(2)).toBe('无次要命中');
+    expect(describeSelectiveLogic(3)).toBe('全部次要命中');
+    expect(describeSelectiveLogic(9)).toBe('逻辑 9');
+  });
+
+  it('truncate 压平空白并在超长时才加省略号', () => {
+    expect(truncate('短句')).toBe('短句');
+    // 折叠行是单行的，换行/连续空格必须压掉，否则摘要会带一串空洞
+    expect(truncate('第一行\n\n第二行   末尾')).toBe('第一行 第二行 末尾');
+    expect(truncate('abcdef', 3)).toBe('abc…');
+    expect(truncate('abc', 3)).toBe('abc');
+    expect(truncate('')).toBe('');
   });
 });

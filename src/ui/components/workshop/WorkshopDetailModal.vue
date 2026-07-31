@@ -19,11 +19,21 @@
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import type { WorkshopProject } from '@engine/types';
+import { groupWorkshopNotes } from '@engine/workshop-types';
+import { mapWorkshopRegexes } from '@engine/workshop-regex-map';
 import { fetchProject } from '../../lib/workshop-client';
 import type { WorkshopFailure, WorkshopProjectDetail } from '../../lib/workshop-client';
 import AppModal from '../shared/AppModal.vue';
 import AppButton from '../shared/AppButton.vue';
-import { formatBytes, formatDate, formatVersion } from './format';
+import {
+  describeEntryPosition,
+  describeSelectiveLogic,
+  formatBytes,
+  formatDate,
+  formatVersion,
+  truncate,
+  WORKSHOP_NOTE_LABEL,
+} from './format';
 import { describeFailure } from './failure-text';
 
 const props = defineProps<{
@@ -121,6 +131,81 @@ const primaryLabel = computed(() => {
 });
 
 const failureText = computed(() => (failure.value ? describeFailure(failure.value) : ''));
+
+// ═══════════════════════════════════════════════════════════
+// 装前检视
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 一次渲染多少行。
+ *
+ * 有上限不是为了好看: 上游有几百条目的项目，一次性展开几百个折叠行会让模态开启
+ * 明显卡一拍。先渲一屏，其余按需。
+ */
+const INSPECT_PAGE = 25;
+
+const entryLimit = ref(INSPECT_PAGE);
+const regexLimit = ref(INSPECT_PAGE);
+
+/** 展开的折叠行 —— 存 key 而非在每行挂 ref，换项目时一次清干净 */
+const openRows = ref(new Set<string>());
+
+function toggleRow(key: string): void {
+  // 必须换 Set 实例：原地 add/delete 不会触发 Vue 的依赖更新
+  const next = new Set(openRows.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  openRows.value = next;
+}
+
+const isOpen = (key: string): boolean => openRows.value.has(key);
+
+/** 换项目/重新拉取时把检视区复位，免得上一个项目的展开状态串到下一个 */
+watch(
+  () => [props.projectId, detail.value] as const,
+  () => {
+    entryLimit.value = INSPECT_PAGE;
+    regexLimit.value = INSPECT_PAGE;
+    openRows.value = new Set();
+  },
+);
+
+const previewEntries = computed(() => detail.value?.previewEntries ?? []);
+const visibleEntries = computed(() => previewEntries.value.slice(0, entryLimit.value));
+
+/**
+ * ★ 每条正则**装进来会变成什么样** —— 用的就是安装时的那个纯函数。
+ *
+ * 这是本屏比上游多出来的一件事: 上游把 ST 的字段原样搬进 ST，没有东西会丢，
+ * 所以它只需展示 pattern/replacement。我们的美化库不是 ST 正则引擎，`promptOnly`、
+ * `placement`、`substituteRegex` 这些没有对应物 —— 与其装完再在已装列表里告诉用户
+ * 「14 项未导入」，不如**装之前**就在每一条上标出来。
+ *
+ * 复用 `mapWorkshopRegexes` 而不是另写一套判定，是因为两套判定迟早会分家，
+ * 而分家的那天用户会看到「装前说好好的、装完说没导入」。逐条单独调用只是为了
+ * 拿到**按条归属**的 notes（该函数返回的是整批的平铺数组）。
+ */
+const regexRows = computed(() => {
+  const list = detail.value?.regexEntries ?? [];
+  const ctx = { projectId: props.projectId, projectName: meta.value?.name ?? '' };
+  return list.map((entry, index) => {
+    const { rules, droppedNotes } = mapWorkshopRegexes([entry], ctx);
+    const groups = groupWorkshopNotes(droppedNotes);
+    return {
+      key: entry.id || `#${index}`,
+      entry,
+      /** 整条被跳过（promptOnly / 表达式编译失败）→ 一条规则都不会产出 */
+      willInstall: rules.length > 0,
+      groups,
+      notes: droppedNotes,
+    };
+  });
+});
+
+const visibleRegexRows = computed(() => regexRows.value.slice(0, regexLimit.value));
+
+/** 顶部提要：这个项目里有几条正则装不进来 —— 装之前就该看见的数字 */
+const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInstall).length);
 </script>
 
 <template>
@@ -210,6 +295,120 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
             条目数取自详情预览，安装时以实际下载的载荷为准，可能更多。正则会装进「输出美化」
             规则库，默认启用，只在这本世界书装着时生效。
           </p>
+        </section>
+
+        <!-- ═══ 世界书条目检视 ═══ -->
+        <section v-if="previewEntries.length > 0" class="wk-section">
+          <h4 class="wk-label">世界书条目预览（{{ previewEntries.length }}）</h4>
+          <ul class="wk-rows">
+            <li v-for="(e, i) in visibleEntries" :key="`e${i}`" class="wk-row">
+              <button
+                type="button"
+                class="wk-row-head"
+                :aria-expanded="isOpen(`e${i}`)"
+                @click="toggleRow(`e${i}`)"
+              >
+                <span
+                  class="wk-chevron"
+                  :class="{ 'chev-open': isOpen(`e${i}`) }"
+                  aria-hidden="true"
+                  >›</span
+                >
+                <span class="wk-row-name">{{ e.name || '无标题' }}</span>
+                <span v-if="!e.enabled" class="wk-flag flag-off">默认关闭</span>
+                <span v-if="!isOpen(`e${i}`)" class="wk-row-peek">{{ truncate(e.content) }}</span>
+              </button>
+              <div class="wk-row-body" :class="{ 'body-open': isOpen(`e${i}`) }">
+                <div class="wk-row-inner">
+                  <div class="wk-chip-block">
+                    <span class="wk-chip-k">主要关键词</span>
+                    <span v-if="e.key.length === 0" class="wk-muted">无（常驻注入）</span>
+                    <ul v-else class="wk-chips">
+                      <li v-for="(k, ki) in e.key" :key="ki" class="wk-chip">{{ k }}</li>
+                    </ul>
+                  </div>
+                  <div v-if="e.keysecondary.length > 0" class="wk-chip-block">
+                    <span class="wk-chip-k">
+                      次要关键词 · {{ describeSelectiveLogic(e.selectiveLogic) }}
+                    </span>
+                    <ul class="wk-chips">
+                      <li v-for="(k, ki) in e.keysecondary" :key="ki" class="wk-chip">{{ k }}</li>
+                    </ul>
+                  </div>
+                  <p class="wk-row-meta">
+                    order {{ e.order }} · {{ describeEntryPosition(e.position) }}
+                  </p>
+                  <pre class="wk-row-content">{{ e.content || '（空内容）' }}</pre>
+                </div>
+              </div>
+            </li>
+          </ul>
+          <AppButton
+            v-if="entryLimit < previewEntries.length"
+            variant="ghost"
+            size="sm"
+            @click="entryLimit = previewEntries.length"
+          >
+            展开其余 {{ previewEntries.length - entryLimit }} 条
+          </AppButton>
+        </section>
+
+        <!-- ═══ 正则检视（含装前处置预告） ═══ -->
+        <section v-if="regexRows.length > 0" class="wk-section">
+          <h4 class="wk-label">正则（{{ regexRows.length }}）</h4>
+          <p v-if="regexDropCount > 0" class="wk-predrop">
+            其中 <strong>{{ regexDropCount }}</strong> 条在本引擎没有对应物，安装后不会生效 ——
+            下面逐条标了出来。
+          </p>
+          <ul class="wk-rows">
+            <li v-for="row in visibleRegexRows" :key="row.key" class="wk-row">
+              <button
+                type="button"
+                class="wk-row-head"
+                :aria-expanded="isOpen(`r${row.key}`)"
+                @click="toggleRow(`r${row.key}`)"
+              >
+                <span
+                  class="wk-chevron"
+                  :class="{ 'chev-open': isOpen(`r${row.key}`) }"
+                  aria-hidden="true"
+                  >›</span
+                >
+                <span class="wk-row-name">{{ row.entry.scriptName || '未命名正则' }}</span>
+                <span v-if="!row.willInstall" class="wk-flag flag-drop">不会生效</span>
+                <span v-else-if="row.entry.disabled" class="wk-flag flag-off">默认关闭</span>
+                <span v-if="row.groups.sideEffect.length > 0" class="wk-flag flag-side">
+                  全局副作用
+                </span>
+              </button>
+              <div class="wk-row-body" :class="{ 'body-open': isOpen(`r${row.key}`) }">
+                <div class="wk-row-inner">
+                  <div class="wk-chip-block">
+                    <span class="wk-chip-k">匹配</span>
+                    <pre class="wk-code">{{ row.entry.findRegex || '（空）' }}</pre>
+                  </div>
+                  <div class="wk-chip-block">
+                    <span class="wk-chip-k">替换为</span>
+                    <pre class="wk-code">{{ row.entry.replaceString || '（删除匹配内容）' }}</pre>
+                  </div>
+                  <!-- 装前处置预告：与装后已装列表同一口径（同一个纯函数算出来的） -->
+                  <ul v-if="row.notes.length > 0" class="wk-note-list">
+                    <li v-for="(n, ni) in row.notes" :key="ni" :class="`note-${n.kind}`">
+                      <strong>{{ WORKSHOP_NOTE_LABEL[n.kind] }}</strong> · {{ n.text }}
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </li>
+          </ul>
+          <AppButton
+            v-if="regexLimit < regexRows.length"
+            variant="ghost"
+            size="sm"
+            @click="regexLimit = regexRows.length"
+          >
+            展开其余 {{ regexRows.length - regexLimit }} 条
+          </AppButton>
         </section>
 
         <!-- ═══ 上游拉取失败但本地有记录 ═══ -->
@@ -383,10 +582,212 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
   line-height: 1.6;
 }
 
+/* ── 装前检视：折叠行 ── */
+.wk-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wk-row {
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: var(--theme-card-bg);
+  overflow: hidden;
+}
+.wk-row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+  width: 100%;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  background: none;
+  border: none;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: background var(--theme-transition-fast);
+}
+.wk-row-head:hover {
+  background: var(--theme-tab-hover-bg);
+}
+.wk-row-head:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: -2px;
+}
+.wk-chevron {
+  flex-shrink: 0;
+  color: var(--theme-text-muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  /* transform 而非改字符：旋转可过渡，换字符会跳 */
+  transition: transform var(--theme-transition-fast);
+}
+.chev-open {
+  transform: rotate(90deg);
+}
+.wk-row-name {
+  flex-shrink: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+}
+/* 收起时补一段正文摘要 —— 不展开也能扫一遍这条是干什么的 */
+.wk-row-peek {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.75rem;
+  color: var(--theme-text-muted);
+}
+.wk-flag {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: var(--theme-radius-full);
+  font-size: 0.6875rem;
+  line-height: 1.7;
+}
+.flag-off {
+  background: color-mix(in srgb, var(--theme-text-muted) 12%, var(--theme-card-bg));
+  border: 1px solid color-mix(in srgb, var(--theme-text-muted) 30%, var(--theme-card-border));
+  color: var(--theme-text-muted);
+}
+.flag-drop {
+  background: color-mix(in srgb, var(--theme-error) 14%, var(--theme-card-bg));
+  border: 1px solid color-mix(in srgb, var(--theme-error) 32%, var(--theme-card-border));
+  color: var(--theme-error);
+}
+.flag-side {
+  background: color-mix(in srgb, var(--theme-warning) 14%, var(--theme-card-bg));
+  border: 1px solid color-mix(in srgb, var(--theme-warning) 32%, var(--theme-card-border));
+  color: var(--theme-warning);
+}
+
+/*
+ * 展开动画: grid-template-rows 0fr→1fr（design.md §6.1 指定，禁止 max-height 过渡）。
+ * 内层必须 min-height:0 + overflow:hidden，否则 0fr 那一格压不住内容。
+ */
+.wk-row-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition:
+    grid-template-rows var(--theme-transition-normal),
+    opacity var(--theme-transition-normal);
+  opacity: 0;
+}
+.body-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.wk-row-inner {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-sm);
+  padding: 0 var(--theme-spacing-md);
+}
+.body-open .wk-row-inner {
+  padding-bottom: var(--theme-spacing-md);
+}
+
+.wk-chip-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wk-chip-k {
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+  letter-spacing: 0.03em;
+}
+.wk-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wk-chip {
+  padding: 1px 7px;
+  border-radius: var(--theme-radius-sm);
+  background: var(--theme-surface-muted);
+  border: 1px solid var(--theme-card-border);
+  color: var(--theme-text-secondary);
+  font-size: 0.6875rem;
+  line-height: 1.7;
+}
+.wk-row-meta {
+  margin: 0;
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+}
+.wk-row-content,
+.wk-code {
+  margin: 0;
+  padding: var(--theme-spacing-sm);
+  max-height: 220px;
+  overflow: auto;
+  background: var(--theme-surface-muted);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  color: var(--theme-text-secondary);
+  font-family: 'Cascadia Code', monospace;
+  font-size: 0.6875rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wk-predrop {
+  margin: 0;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  background: color-mix(in srgb, var(--theme-error) 8%, var(--theme-card-bg));
+  border: 1px solid color-mix(in srgb, var(--theme-error) 28%, var(--theme-card-border));
+  border-radius: var(--theme-radius-md);
+  color: var(--theme-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.wk-note-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.6875rem;
+  line-height: 1.6;
+}
+.note-dropped {
+  color: var(--theme-error);
+}
+.note-degraded {
+  color: var(--theme-text-muted);
+}
+.note-sideEffect {
+  color: var(--theme-warning);
+}
+
 .wk-inline-failure {
   margin: 0;
   font-size: 0.75rem;
   color: var(--theme-error);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wk-row-head,
+  .wk-chevron,
+  .wk-row-body {
+    transition: none;
+  }
 }
 
 .wk-failure {

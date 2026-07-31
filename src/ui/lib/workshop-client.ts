@@ -74,6 +74,25 @@ export const WORKSHOP_DEFAULT_PAGE_SIZE = 20;
 export const WORKSHOP_DEFAULT_SORT = 'published';
 
 /**
+ * 上游 `sort` 的合法取值（服务端是 `z.enum`，传别的会 400）。
+ *
+ * 排序在**服务端**做，翻页才是对的 —— 只对当前页重排会得出「第 2 页的热门项目
+ * 排在第 1 页的冷门项目之前」这种自相矛盾的结果。所以改排序必须重拉且回到第 0 页。
+ *
+ * 我们不消费点赞/订阅/下载的**计数**（社交面属 Phase 3+），但按它们**排序**只是
+ * 一个查询参数，不需要在本地建任何社交状态。
+ */
+export const WORKSHOP_SORT_MODES = [
+  'published',
+  'updated',
+  'likes',
+  'subscribes',
+  'downloads',
+] as const;
+
+export type WorkshopSortMode = (typeof WORKSHOP_SORT_MODES)[number];
+
+/**
  * 元数据请求（列表 / 详情）的超时上限。
  *
  * 为什么必须有: `fetch` **默认不超时**。上游 worker 冷启动卡住、代理吞掉连接、
