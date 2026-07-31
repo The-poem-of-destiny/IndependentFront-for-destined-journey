@@ -1,20 +1,20 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useGameStore } from '../../../stores/game-store'
-import type { CombatParticipant } from '@engine/types'
-import CombatHeader from './CombatHeader.vue'
-import CombatUnitCard from './CombatUnitCard.vue'
-import CombatMessageFlow from './CombatMessageFlow.vue'
-import CombatActionBar from './CombatActionBar.vue'
+import { computed } from 'vue';
+import { useGameStore } from '../../../stores/game-store';
+import type { CombatParticipant } from '@engine/types';
+import CombatHeader from './CombatHeader.vue';
+import CombatUnitCard from './CombatUnitCard.vue';
+import CombatMessageFlow from './CombatMessageFlow.vue';
+import CombatActionBar from './CombatActionBar.vue';
 
-const game = useGameStore()
+const game = useGameStore();
 
 const enemies = computed<CombatParticipant[]>(
   () => game.activeCombat?.participants.filter((p) => p.side === 'enemy') ?? [],
-)
+);
 const allies = computed<CombatParticipant[]>(
   () => game.activeCombat?.participants.filter((p) => p.side === 'ally') ?? [],
-)
+);
 </script>
 
 <template>

@@ -32,15 +32,15 @@
  * 部分成功如实报（与 store 每一条批量路径同一条纪律）: 立绘存下了、头像没存下时，
  * **绝不报成功**，也绝不把已经落地的那一半撤回来。
  */
-import { computed, onUnmounted, ref, watch } from 'vue'
-import type { CropRect } from '../../lib/image-crop'
+import { computed, onUnmounted, ref, watch } from 'vue';
+import type { CropRect } from '../../lib/image-crop';
 import {
   useAssetStore,
   type AssetMutationOutcome,
   type PortraitCropSpec,
-} from '../../stores/asset-store'
-import AppButton from './AppButton.vue'
-import AppModal from './AppModal.vue'
+} from '../../stores/asset-store';
+import AppButton from './AppButton.vue';
+import AppModal from './AppModal.vue';
 import {
   clampRect,
   defaultAvatarRect,
@@ -49,104 +49,104 @@ import {
   resizeRect,
   wholeImageRect,
   type CropCorner,
-} from '../../lib/crop-rects'
+} from '../../lib/crop-rects';
 
 const props = defineProps<{
-  open: boolean
+  open: boolean;
   /** 源图字节。视频到不了这里（调用点负责拦，见 AssetCharacterDrawer） */
-  source: File | Blob | null
+  source: File | Blob | null;
   /** 🔴 名字由调用点给定，本组件只读不改 */
-  name: string
+  name: string;
   /** 再次编辑时可以带回上次的框；不给就用默认框 */
-  initialPortrait?: CropRect
-  initialAvatar?: CropRect
+  initialPortrait?: CropRect;
+  initialAvatar?: CropRect;
   /**
    * 源图像素尺寸的**注入缝**，**只在打开那一刻读一次**。缺省时由 `<img>` 的 load
    * 事件量出来（刻意不调 `readImageSize` —— 那要解码整张图，而浏览器为了显示本来
    * 就要解一次）。调用方已经知道尺寸、或测试环境没有真的图片解码时传它。
    */
-  sourceSize?: { w: number; h: number }
-}>()
+  sourceSize?: { w: number; h: number };
+}>();
 
 const emit = defineEmits<{
-  (e: 'close'): void
+  (e: 'close'): void;
   /** 两半都落地了才发；带回两个 id 供调用点跳转/高亮 */
-  (e: 'saved', ids: { portraitId?: string; avatarId?: string }): void
-  (e: 'announce', message: string): void
-}>()
+  (e: 'saved', ids: { portraitId?: string; avatarId?: string }): void;
+  (e: 'announce', message: string): void;
+}>();
 
-const assets = useAssetStore()
+const assets = useAssetStore();
 
-type Which = 'portrait' | 'avatar'
+type Which = 'portrait' | 'avatar';
 /** 与 store 的 {@link PortraitCropSpec} 三态一一对应，别在这里多发明一档 */
-type Mode = 'crop' | 'whole' | 'skip'
+type Mode = 'crop' | 'whole' | 'skip';
 
-const MODES: readonly Mode[] = ['crop', 'whole', 'skip']
+const MODES: readonly Mode[] = ['crop', 'whole', 'skip'];
 const MODE_LABEL: Readonly<Record<Mode, string>> = {
   crop: '裁剪',
   whole: '整图',
   skip: '不生成',
-}
+};
 
-const CORNERS: readonly CropCorner[] = ['nw', 'ne', 'sw', 'se']
+const CORNERS: readonly CropCorner[] = ['nw', 'ne', 'sw', 'se'];
 const CORNER_LABEL: Readonly<Record<CropCorner, string>> = {
   nw: '左上',
   ne: '右上',
   sw: '左下',
   se: '右下',
-}
-const TYPE_LABEL: Readonly<Record<Which, string>> = { portrait: '立绘', avatar: '头像' }
+};
+const TYPE_LABEL: Readonly<Record<Which, string>> = { portrait: '立绘', avatar: '头像' };
 
 // ═══ 源图 URL ═════════════════════════════════════════════
 // 绝不持久化（§7.5）；换源 / 卸载都要撤销，否则一次次打开编辑器就是一次次泄漏。
 
-const srcUrl = ref('')
+const srcUrl = ref('');
 
 function revokeSrc(): void {
-  const u = srcUrl.value
-  srcUrl.value = ''
-  if (!u) return
-  const URLCtor = (globalThis as { URL?: { revokeObjectURL?: (u: string) => void } }).URL
-  URLCtor?.revokeObjectURL?.(u)
+  const u = srcUrl.value;
+  srcUrl.value = '';
+  if (!u) return;
+  const URLCtor = (globalThis as { URL?: { revokeObjectURL?: (u: string) => void } }).URL;
+  URLCtor?.revokeObjectURL?.(u);
 }
 
 function mintSrc(blob: Blob): void {
-  const URLCtor = (globalThis as { URL?: { createObjectURL?: (b: Blob) => string } }).URL
+  const URLCtor = (globalThis as { URL?: { createObjectURL?: (b: Blob) => string } }).URL;
   // 没有 createObjectURL 的环境（node 测试）不是错误 —— 预览缺席，几何照常可用
-  srcUrl.value = URLCtor?.createObjectURL?.(blob) ?? ''
+  srcUrl.value = URLCtor?.createObjectURL?.(blob) ?? '';
 }
 
 // ═══ 尺寸与框 ═════════════════════════════════════════════
 
-const imgW = ref(0)
-const imgH = ref(0)
-const ready = computed(() => imgW.value > 0 && imgH.value > 0)
+const imgW = ref(0);
+const imgH = ref(0);
+const ready = computed(() => imgW.value > 0 && imgH.value > 0);
 
-const portraitRect = ref<CropRect>({ x: 0, y: 0, w: 1, h: 1 })
-const avatarRect = ref<CropRect>({ x: 0, y: 0, w: 1, h: 1 })
-const portraitMode = ref<Mode>('crop')
-const avatarMode = ref<Mode>('crop')
-const selected = ref<Which>('avatar')
+const portraitRect = ref<CropRect>({ x: 0, y: 0, w: 1, h: 1 });
+const avatarRect = ref<CropRect>({ x: 0, y: 0, w: 1, h: 1 });
+const portraitMode = ref<Mode>('crop');
+const avatarMode = ref<Mode>('crop');
+const selected = ref<Which>('avatar');
 
-const busy = ref(false)
+const busy = ref(false);
 /** 失败 / 部分成功的就地说明（不弹 toast：这是这个弹窗自己的事） */
-const problem = ref('')
+const problem = ref('');
 
 function setSize(w: number, h: number): void {
-  if (!(w > 0) || !(h > 0)) return
-  imgW.value = Math.floor(w)
-  imgH.value = Math.floor(h)
-  resetRects()
+  if (!(w > 0) || !(h > 0)) return;
+  imgW.value = Math.floor(w);
+  imgH.value = Math.floor(h);
+  resetRects();
 }
 
 function resetRects(): void {
-  if (!ready.value) return
+  if (!ready.value) return;
   portraitRect.value = props.initialPortrait
     ? clampRect(props.initialPortrait, imgW.value, imgH.value)
-    : wholeImageRect(imgW.value, imgH.value)
+    : wholeImageRect(imgW.value, imgH.value);
   avatarRect.value = props.initialAvatar
     ? clampRect(props.initialAvatar, imgW.value, imgH.value, true)
-    : defaultAvatarRect(imgW.value, imgH.value)
+    : defaultAvatarRect(imgW.value, imgH.value);
 }
 
 /**
@@ -160,84 +160,84 @@ function resetRects(): void {
  * 算的，留着它反而会给出一个越界的框。
  */
 function onImgLoad(e: Event): void {
-  const el = e.target as HTMLImageElement | null
-  if (!el) return
-  const w = Math.floor(el.naturalWidth)
-  const h = Math.floor(el.naturalHeight)
-  if (w === imgW.value && h === imgH.value) return
-  setSize(w, h)
+  const el = e.target as HTMLImageElement | null;
+  if (!el) return;
+  const w = Math.floor(el.naturalWidth);
+  const h = Math.floor(el.naturalHeight);
+  if (w === imgW.value && h === imgH.value) return;
+  setSize(w, h);
 }
 
 /** 每次打开都是全新一轮：模式、提示、忙碌位都归零 */
 watch(
   () => [props.open, props.source] as const,
   ([open, source]) => {
-    revokeSrc()
-    imgW.value = 0
-    imgH.value = 0
-    problem.value = ''
-    busy.value = false
-    portraitMode.value = 'crop'
-    avatarMode.value = 'crop'
-    selected.value = 'avatar'
-    if (!open || !source) return
-    mintSrc(source)
-    if (props.sourceSize) setSize(props.sourceSize.w, props.sourceSize.h)
+    revokeSrc();
+    imgW.value = 0;
+    imgH.value = 0;
+    problem.value = '';
+    busy.value = false;
+    portraitMode.value = 'crop';
+    avatarMode.value = 'crop';
+    selected.value = 'avatar';
+    if (!open || !source) return;
+    mintSrc(source);
+    if (props.sourceSize) setSize(props.sourceSize.w, props.sourceSize.h);
   },
   { immediate: true },
-)
+);
 
-onUnmounted(revokeSrc)
+onUnmounted(revokeSrc);
 
 function rectOf(which: Which): CropRect {
-  return which === 'portrait' ? portraitRect.value : avatarRect.value
+  return which === 'portrait' ? portraitRect.value : avatarRect.value;
 }
 
 function setRect(which: Which, next: CropRect): void {
-  if (which === 'portrait') portraitRect.value = next
-  else avatarRect.value = next
+  if (which === 'portrait') portraitRect.value = next;
+  else avatarRect.value = next;
 }
 
 function modeOf(which: Which): Mode {
-  return which === 'portrait' ? portraitMode.value : avatarMode.value
+  return which === 'portrait' ? portraitMode.value : avatarMode.value;
 }
 
 function setMode(which: Which, mode: Mode): void {
-  if (which === 'portrait') portraitMode.value = mode
-  else avatarMode.value = mode
-  problem.value = ''
+  if (which === 'portrait') portraitMode.value = mode;
+  else avatarMode.value = mode;
+  problem.value = '';
 }
 
 function select(which: Which): void {
-  selected.value = which
+  selected.value = which;
 }
 
 // ═══ 指针拖拽 ═════════════════════════════════════════════
 // 位移一律先除以缩放比换回**源图像素**再进几何函数 —— 状态里永远不存屏幕坐标，
 // 于是缩放变化（窗口 resize / 主题换字号）不会让已经拉好的框跟着漂。
 
-const stage = ref<HTMLElement | null>(null)
+const stage = ref<HTMLElement | null>(null);
 
 interface DragState {
-  which: Which
-  corner?: CropCorner
-  startX: number
-  startY: number
-  base: CropRect
-  scale: number
+  which: Which;
+  corner?: CropCorner;
+  startX: number;
+  startY: number;
+  base: CropRect;
+  scale: number;
 }
-let drag: DragState | null = null
+let drag: DragState | null = null;
 
 function scaleOf(): number {
-  const el = stage.value
-  if (!el || imgW.value <= 0) return 1
-  const box = el.getBoundingClientRect()
-  return box.width > 0 ? box.width / imgW.value : 1
+  const el = stage.value;
+  if (!el || imgW.value <= 0) return 1;
+  const box = el.getBoundingClientRect();
+  return box.width > 0 ? box.width / imgW.value : 1;
 }
 
 function onPointerDown(e: PointerEvent, which: Which, corner?: CropCorner): void {
-  if (!ready.value || busy.value) return
-  select(which)
+  if (!ready.value || busy.value) return;
+  select(which);
   drag = {
     which,
     ...(corner !== undefined ? { corner } : {}),
@@ -245,29 +245,29 @@ function onPointerDown(e: PointerEvent, which: Which, corner?: CropCorner): void
     startY: e.clientY,
     base: rectOf(which),
     scale: scaleOf(),
-  }
-  const target = e.currentTarget as (Element & { setPointerCapture?: (id: number) => void }) | null
-  target?.setPointerCapture?.(e.pointerId)
-  e.preventDefault()
-  e.stopPropagation()
+  };
+  const target = e.currentTarget as (Element & { setPointerCapture?: (id: number) => void }) | null;
+  target?.setPointerCapture?.(e.pointerId);
+  e.preventDefault();
+  e.stopPropagation();
 }
 
 function onPointerMove(e: PointerEvent): void {
-  const d = drag
-  if (!d) return
-  const dx = (e.clientX - d.startX) / d.scale
-  const dy = (e.clientY - d.startY) / d.scale
-  const square = d.which === 'avatar'
+  const d = drag;
+  if (!d) return;
+  const dx = (e.clientX - d.startX) / d.scale;
+  const dy = (e.clientY - d.startY) / d.scale;
+  const square = d.which === 'avatar';
   setRect(
     d.which,
     d.corner === undefined
       ? moveRect(d.base, dx, dy, imgW.value, imgH.value, square)
       : resizeRect(d.base, d.corner, dx, dy, imgW.value, imgH.value, square),
-  )
+  );
 }
 
 function endDrag(): void {
-  drag = null
+  drag = null;
 }
 
 // ═══ 键盘 ═════════════════════════════════════════════════
@@ -277,78 +277,89 @@ function endDrag(): void {
 function arrowDelta(key: string): { x: number; y: number } | null {
   switch (key) {
     case 'ArrowLeft':
-      return { x: -1, y: 0 }
+      return { x: -1, y: 0 };
     case 'ArrowRight':
-      return { x: 1, y: 0 }
+      return { x: 1, y: 0 };
     case 'ArrowUp':
-      return { x: 0, y: -1 }
+      return { x: 0, y: -1 };
     case 'ArrowDown':
-      return { x: 0, y: 1 }
+      return { x: 0, y: 1 };
     default:
-      return null
+      return null;
   }
 }
 
 function onRectKey(e: KeyboardEvent, which: Which): void {
-  const d = arrowDelta(e.key)
-  if (!d || !ready.value) return
-  e.preventDefault()
-  const step = e.shiftKey ? 10 : 1
-  setRect(which, moveRect(rectOf(which), d.x * step, d.y * step, imgW.value, imgH.value, which === 'avatar'))
+  const d = arrowDelta(e.key);
+  if (!d || !ready.value) return;
+  e.preventDefault();
+  const step = e.shiftKey ? 10 : 1;
+  setRect(
+    which,
+    moveRect(rectOf(which), d.x * step, d.y * step, imgW.value, imgH.value, which === 'avatar'),
+  );
 }
 
 function onHandleKey(e: KeyboardEvent, which: Which, corner: CropCorner): void {
-  const d = arrowDelta(e.key)
-  if (!d || !ready.value) return
-  e.preventDefault()
-  e.stopPropagation()
-  const step = e.shiftKey ? 10 : 1
+  const d = arrowDelta(e.key);
+  if (!d || !ready.value) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const step = e.shiftKey ? 10 : 1;
   setRect(
     which,
-    resizeRect(rectOf(which), corner, d.x * step, d.y * step, imgW.value, imgH.value, which === 'avatar'),
-  )
+    resizeRect(
+      rectOf(which),
+      corner,
+      d.x * step,
+      d.y * step,
+      imgW.value,
+      imgH.value,
+      which === 'avatar',
+    ),
+  );
 }
 
 // ═══ 样式计算 ═════════════════════════════════════════════
 
 function rectStyle(which: Which): Record<string, string> {
-  const r = rectOf(which)
-  if (!ready.value) return { display: 'none' }
+  const r = rectOf(which);
+  if (!ready.value) return { display: 'none' };
   return {
     left: `${(r.x / imgW.value) * 100}%`,
     top: `${(r.y / imgH.value) * 100}%`,
     width: `${(r.w / imgW.value) * 100}%`,
     height: `${(r.h / imgH.value) * 100}%`,
-  }
+  };
 }
 
 /** 预览: 「整图」模式下看到的就是整张图，因为那一半存的正是整张图 */
 function previewStyle(which: Which): Record<string, string> {
-  if (!ready.value || !srcUrl.value) return {}
-  const r = modeOf(which) === 'whole' ? wholeImageRect(imgW.value, imgH.value) : rectOf(which)
-  const bg = previewBackground(r, imgW.value, imgH.value)
+  if (!ready.value || !srcUrl.value) return {};
+  const r = modeOf(which) === 'whole' ? wholeImageRect(imgW.value, imgH.value) : rectOf(which);
+  const bg = previewBackground(r, imgW.value, imgH.value);
   return {
     backgroundImage: `url("${srcUrl.value}")`,
     backgroundSize: bg.size,
     backgroundPosition: bg.position,
     backgroundRepeat: 'no-repeat',
     aspectRatio: `${r.w} / ${r.h}`,
-  }
+  };
 }
 
 // ═══ 确认 ═════════════════════════════════════════════════
 
 /** 两个都选「不生成」= 这次点击什么也不做，store 判 `'no-crops'`。不发这一枪 */
-const bothSkip = computed(() => portraitMode.value === 'skip' && avatarMode.value === 'skip')
+const bothSkip = computed(() => portraitMode.value === 'skip' && avatarMode.value === 'skip');
 const canConfirm = computed(
   () => props.source !== null && ready.value && !busy.value && !bothSkip.value,
-)
+);
 
 /** 按钮文案照实说会存几张 —— 一张时写「保存两张」是在骗人 */
 const confirmLabel = computed(() => {
-  const n = (portraitMode.value === 'skip' ? 0 : 1) + (avatarMode.value === 'skip' ? 0 : 1)
-  return n === 1 ? '保存这一张' : '保存两张素材'
-})
+  const n = (portraitMode.value === 'skip' ? 0 : 1) + (avatarMode.value === 'skip' ? 0 : 1);
+  return n === 1 ? '保存这一张' : '保存两张素材';
+});
 
 /**
  * 🔴 **`'busy'` 刻意不在这张表里**（与 StatusOverview 的 `portraitMessage` 同一条纪律）:
@@ -360,84 +371,78 @@ const confirmLabel = computed(() => {
 function explain(outcome: AssetMutationOutcome): string {
   switch (outcome) {
     case 'no-crops':
-      return '两个类型都选了「不生成」，那这次点击什么也不会发生 —— 至少让其中一个生成。'
+      return '两个类型都选了「不生成」，那这次点击什么也不会发生 —— 至少让其中一个生成。';
     case 'naming-invariant':
-      return `名称「${props.name}」里不能出现「头像 / 立绘 / 立绘bg」这类类型词，也不能是空名 —— 否则导出再导入时会被解析成另一行。名称要在素材库里改，裁剪这里改不了。`
+      return `名称「${props.name}」里不能出现「头像 / 立绘 / 立绘bg」这类类型词，也不能是空名 —— 否则导出再导入时会被解析成另一行。名称要在素材库里改，裁剪这里改不了。`;
     case 'unrepresentable-name':
-      return `名称「${props.name}」带了 \`/\`、\`\\\` 或以 \`.\` 开头，进不了导出包的条目名。名称要在素材库里改。`
+      return `名称「${props.name}」带了 \`/\`、\`\\\` 或以 \`.\` 开头，进不了导出包的条目名。名称要在素材库里改。`;
     case 'media-rule':
-      return '这份字节是视频：视频没法裁剪（画布只取得到某一帧），立绘也不接受 mp4。'
+      return '这份字节是视频：视频没法裁剪（画布只取得到某一帧），立绘也不接受 mp4。';
     case 'not-found':
-      return '目标素材已经不在库里了。'
+      return '目标素材已经不在库里了。';
     default:
-      return '保存失败，可以再试一次；已经存下的那部分不会重复写入。'
+      return '保存失败，可以再试一次；已经存下的那部分不会重复写入。';
   }
 }
 
 /** 三态 → store 的三态。**没有"缺省"这条路**，所以这里不可能漏说一个类型 */
 function specOf(which: Which): PortraitCropSpec {
-  const mode = modeOf(which)
-  if (mode === 'skip') return 'skip'
-  if (mode === 'whole') return 'whole'
-  return rectOf(which)
+  const mode = modeOf(which);
+  if (mode === 'skip') return 'skip';
+  if (mode === 'whole') return 'whole';
+  return rectOf(which);
 }
 
 async function confirm(): Promise<void> {
-  if (!canConfirm.value || props.source === null) return
-  busy.value = true
-  problem.value = ''
+  if (!canConfirm.value || props.source === null) return;
+  busy.value = true;
+  problem.value = '';
   try {
     const res = await assets.importPortraitPair(props.source, props.name, {
       portrait: specOf('portrait'),
       avatar: specOf('avatar'),
-    })
+    });
 
-    const saved: string[] = []
-    if (res.portraitId !== undefined) saved.push('立绘')
-    if (res.avatarId !== undefined) saved.push('头像')
+    const saved: string[] = [];
+    if (res.portraitId !== undefined) saved.push('立绘');
+    if (res.avatarId !== undefined) saved.push('头像');
 
     if (res.outcome === 'ok') {
-      const msg = `已保存「${props.name}」的${saved.join(' 与 ')}。`
-      emit('announce', msg)
+      const msg = `已保存「${props.name}」的${saved.join(' 与 ')}。`;
+      emit('announce', msg);
       emit('saved', {
         ...(res.portraitId !== undefined ? { portraitId: res.portraitId } : {}),
         ...(res.avatarId !== undefined ? { avatarId: res.avatarId } : {}),
-      })
-      emit('close')
-      return
+      });
+      emit('close');
+      return;
     }
 
     // 互斥闸自己已经播报过了 —— 这里再写一行就是同一件事说两遍（见 `explain` 上方）。
     // 它在任何字节落地**之前**就返回，所以 `saved` 必空，不存在"漏报部分成功"。
-    if (res.outcome === 'busy') return
+    if (res.outcome === 'busy') return;
 
     // 部分成功**绝不报成功**，也不撤回已经落地的那一半
     problem.value =
       saved.length > 0
         ? `部分成功：${saved.join('、')}已经保存进库里，另一张没能保存 —— ${explain(res.outcome)}已保存的那张留着，不会撤回。`
-        : explain(res.outcome)
-    emit('announce', problem.value)
+        : explain(res.outcome);
+    emit('announce', problem.value);
   } finally {
-    busy.value = false
+    busy.value = false;
   }
 }
 
 function close(): void {
-  if (busy.value) return
-  emit('close')
+  if (busy.value) return;
+  emit('close');
 }
 
-defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canConfirm })
+defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canConfirm });
 </script>
 
 <template>
-  <AppModal
-    :open="open"
-    :title="`裁剪 · ${name}`"
-    size="lg"
-    :closable="!busy"
-    @update:open="close"
-  >
+  <AppModal :open="open" :title="`裁剪 · ${name}`" size="lg" :closable="!busy" @update:open="close">
     <p class="editor-note">
       从这一张源图切出<b>立绘</b>与<b>头像</b>两份素材，都记在名称「{{ name }}」下。
       名称由打开这个窗口的地方决定，这里只决定画面 —— 要改名请回素材库。
@@ -464,7 +469,7 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
 
           <template v-if="ready">
             <div
-              v-for="which in (['portrait', 'avatar'] as const)"
+              v-for="which in ['portrait', 'avatar'] as const"
               v-show="modeOf(which) === 'crop'"
               :key="which"
               class="crop-rect"
@@ -499,7 +504,7 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
       <!-- ═══ 两个类型各一张卡 ═══ -->
       <div class="side-col">
         <section
-          v-for="which in (['portrait', 'avatar'] as const)"
+          v-for="which in ['portrait', 'avatar'] as const"
           :key="which"
           class="type-card"
           :class="{ 'card-active': selected === which }"
@@ -516,7 +521,9 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
               :aria-pressed="modeOf(which) === m"
               :data-mode="`${which}-${m}`"
               @click="setMode(which, m)"
-            >{{ MODE_LABEL[m] }}</button>
+            >
+              {{ MODE_LABEL[m] }}
+            </button>
           </div>
 
           <div
@@ -525,7 +532,9 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
             :class="which === 'avatar' ? 'preview-round' : 'preview-box'"
             role="img"
             :aria-label="`不生成${TYPE_LABEL[which]}`"
-          >—</div>
+          >
+            —
+          </div>
           <div
             v-else
             class="preview"
@@ -543,8 +552,8 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
               用整张源图，原始字节原样存（不重新编码）。
             </template>
             <template v-else-if="ready">
-              {{ rectOf(which).w }} × {{ rectOf(which).h }} px
-              （自 {{ rectOf(which).x }}, {{ rectOf(which).y }}）
+              {{ rectOf(which).w }} × {{ rectOf(which).h }} px （自 {{ rectOf(which).x }},
+              {{ rectOf(which).y }}）
             </template>
             <template v-else>尚未读到源图尺寸。</template>
           </p>
@@ -557,8 +566,8 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
       挤成一条细长的字带；而两栏本身要贴在一起比对，宽度已经吃紧。
     -->
     <p class="hint">
-      拖动框可移动，拖四角改大小；键盘操作时先 Tab 到框上，方向键移动、Shift+方向键快移，
-      Tab 到角把手上则用方向键改大小。头像框恒定 1:1。
+      拖动框可移动，拖四角改大小；键盘操作时先 Tab 到框上，方向键移动、Shift+方向键快移， Tab
+      到角把手上则用方向键改大小。头像框恒定 1:1。
     </p>
     <p v-if="bothSkip" class="field-warn">
       两个都选「不生成」等于这次点击什么也不做 —— 至少让其中一个生成。
@@ -567,12 +576,9 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
 
     <template #footer>
       <AppButton variant="ghost" :disabled="busy" @click="close">取消</AppButton>
-      <AppButton
-        variant="primary"
-        class="confirm-btn"
-        :disabled="!canConfirm"
-        @click="confirm"
-      >{{ busy ? '保存中…' : confirmLabel }}</AppButton>
+      <AppButton variant="primary" class="confirm-btn" :disabled="!canConfirm" @click="confirm">{{
+        busy ? '保存中…' : confirmLabel
+      }}</AppButton>
     </template>
   </AppModal>
 </template>
@@ -653,7 +659,9 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
   /* 全边细线，不用彩色侧边条（design.md §1 禁令） */
   border: 1px solid color-mix(in srgb, var(--theme-primary) 55%, transparent);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
-  transition: background var(--theme-transition-fast), border-color var(--theme-transition-fast);
+  transition:
+    background var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
 }
 .rect-portrait {
   border-style: dashed;
@@ -702,10 +710,24 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
   outline: none;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 60%, transparent);
 }
-.h-nw { top: -7px; left: -7px; }
-.h-ne { top: -7px; right: -7px; cursor: nesw-resize; }
-.h-sw { bottom: -7px; left: -7px; cursor: nesw-resize; }
-.h-se { bottom: -7px; right: -7px; }
+.h-nw {
+  top: -7px;
+  left: -7px;
+}
+.h-ne {
+  top: -7px;
+  right: -7px;
+  cursor: nesw-resize;
+}
+.h-sw {
+  bottom: -7px;
+  left: -7px;
+  cursor: nesw-resize;
+}
+.h-se {
+  bottom: -7px;
+  right: -7px;
+}
 
 .hint {
   margin: var(--theme-spacing-lg) 0 0;
@@ -724,7 +746,9 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-md);
   box-shadow: var(--paper-stack);
-  transition: background var(--theme-transition-fast), border-color var(--theme-transition-fast);
+  transition:
+    background var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
 }
 .card-active {
   background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
@@ -764,7 +788,9 @@ defineExpose({ portraitRect, avatarRect, portraitMode, avatarMode, problem, canC
   font-family: inherit;
   font-size: 0.8125rem;
   cursor: pointer;
-  transition: background var(--theme-transition-fast), color var(--theme-transition-fast);
+  transition:
+    background var(--theme-transition-fast),
+    color var(--theme-transition-fast);
 }
 .mode-btn:hover {
   background: var(--theme-tab-hover-bg);

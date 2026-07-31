@@ -20,76 +20,76 @@
  * mp4 直通）在调用方，而调用方**本来就有**一条同样的路径（画像上没有素材时
  * 点一下直接开文件框）。两处各写一遍就是两套会漂开的规则。
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   ASSET_FRAMING_MAX_SCALE,
   ASSET_FRAMING_MIN_SCALE,
   clampAssetFraming,
-} from '@engine/asset-types'
-import { DEFAULT_ASSET_FRAMING, type AssetFraming } from '@engine/types'
-import { useAssetStore } from '../../stores/asset-store'
-import AppButton from './AppButton.vue'
-import AppModal from './AppModal.vue'
-import CharacterPortrait from './CharacterPortrait.vue'
+} from '@engine/asset-types';
+import { DEFAULT_ASSET_FRAMING, type AssetFraming } from '@engine/types';
+import { useAssetStore } from '../../stores/asset-store';
+import AppButton from './AppButton.vue';
+import AppModal from './AppModal.vue';
+import CharacterPortrait from './CharacterPortrait.vue';
 
 const props = withDefaults(
   defineProps<{
-    open: boolean
+    open: boolean;
     /** 角色名 —— 标题与 alt 用，本组件从不改名 */
-    name: string
+    name: string;
     /** 预览用的 object URL */
-    src?: string | null
+    src?: string | null;
     /** 这份字节是 mp4 吗（由**行**判定，别嗅 URL） */
-    video?: boolean
+    video?: boolean;
     /** 取景写回哪一条。null = 没有落点，滑块整体禁用 */
-    assetId?: string | null
+    assetId?: string | null;
     /** 库里存的取景，**可以是任意来路的垃圾**，交给 clamp 收敛 */
-    framing?: AssetFraming | null
+    framing?: AssetFraming | null;
   }>(),
   { src: null, video: false, assetId: null, framing: null },
-)
+);
 
 const emit = defineEmits<{
-  (e: 'close'): void
+  (e: 'close'): void;
   /** 「更换图片」—— 字节分流归调用方，这里只说"用户要换" */
-  (e: 'replace'): void
-}>()
+  (e: 'replace'): void;
+}>();
 
-const assets = useAssetStore()
+const assets = useAssetStore();
 
 /** 拖动期间的本地覆盖 —— 落库是防抖的，但画面必须**当帧**跟手 */
-const draft = ref<AssetFraming | null>(null)
+const draft = ref<AssetFraming | null>(null);
 
 /** 交给预览的那一份，**永远夹逼过** */
-const framing = computed<AssetFraming>(() => clampAssetFraming(draft.value ?? props.framing))
+const framing = computed<AssetFraming>(() => clampAssetFraming(draft.value ?? props.framing));
 
 /** 没有落点就没法写回 —— 滑块禁用而不是藏起来，藏起来只会让人以为这里坏了 */
-const editable = computed(() => props.assetId !== null)
+const editable = computed(() => props.assetId !== null);
 
 // ═══ 落库 ═══════════════════════════════════════════════════
 
-const PERSIST_DEBOUNCE_MS = 300
-let timer: number | undefined
+const PERSIST_DEBOUNCE_MS = 300;
+let timer: number | undefined;
 /** 欠着的那一笔，**连 id 一起记**（见文件头） */
-let pending: { id: string; framing: AssetFraming } | null = null
+let pending: { id: string; framing: AssetFraming } | null = null;
 
 /** 立刻落库（防抖到点、换图、关窗或卸载时补写）。没有欠账就什么都不做 */
 function flushPersist(): void {
-  if (timer !== undefined) window.clearTimeout(timer)
-  timer = undefined
-  const owed = pending
-  pending = null
-  if (owed === null) return
+  if (timer !== undefined) window.clearTimeout(timer);
+  timer = undefined;
+  const owed = pending;
+  pending = null;
+  if (owed === null) return;
   // store 自己会再夹逼一次（写入侧收敛），这里给的已经是夹过的
-  void assets.setAssetFraming(owed.id, owed.framing)
+  void assets.setAssetFraming(owed.id, owed.framing);
 }
 
 function schedulePersist(): void {
-  const id = props.assetId
-  if (id === null) return
-  pending = { id, framing: framing.value }
-  if (timer !== undefined) window.clearTimeout(timer)
-  timer = window.setTimeout(flushPersist, PERSIST_DEBOUNCE_MS)
+  const id = props.assetId;
+  if (id === null) return;
+  pending = { id, framing: framing.value };
+  if (timer !== undefined) window.clearTimeout(timer);
+  timer = window.setTimeout(flushPersist, PERSIST_DEBOUNCE_MS);
 }
 
 /**
@@ -100,43 +100,43 @@ function schedulePersist(): void {
 watch(
   () => props.assetId,
   () => {
-    flushPersist()
-    draft.value = null
+    flushPersist();
+    draft.value = null;
   },
-)
+);
 
 /** 关窗（含被调用方收起去让位给裁剪台）一律补写，草稿归零 */
 watch(
   () => props.open,
   (isOpen) => {
-    if (isOpen) return
-    flushPersist()
-    draft.value = null
+    if (isOpen) return;
+    flushPersist();
+    draft.value = null;
   },
-)
+);
 
-onBeforeUnmount(flushPersist)
+onBeforeUnmount(flushPersist);
 
 // ═══ 滑块 ═══════════════════════════════════════════════════
 
 /** 滑块 → 草稿。`valueAsNumber` 在空值时是 NaN，照样交给 clamp 兜（见文件头） */
 function onSlide(key: keyof AssetFraming, e: Event): void {
-  const raw = (e.target as HTMLInputElement).valueAsNumber
-  draft.value = { ...framing.value, [key]: raw }
-  schedulePersist()
+  const raw = (e.target as HTMLInputElement).valueAsNumber;
+  draft.value = { ...framing.value, [key]: raw };
+  schedulePersist();
 }
 
 function reset(): void {
-  draft.value = { ...DEFAULT_ASSET_FRAMING }
-  schedulePersist()
+  draft.value = { ...DEFAULT_ASSET_FRAMING };
+  schedulePersist();
 }
 
 function close(): void {
-  emit('close')
+  emit('close');
 }
 
 function replace(): void {
-  emit('replace')
+  emit('replace');
 }
 </script>
 
@@ -209,7 +209,9 @@ function replace(): void {
     </div>
 
     <template #footer>
-      <AppButton variant="ghost" class="ps-reset" :disabled="!editable" @click="reset">复位</AppButton>
+      <AppButton variant="ghost" class="ps-reset" :disabled="!editable" @click="reset"
+        >复位</AppButton
+      >
       <AppButton variant="secondary" class="ps-replace" @click="replace">更换图片</AppButton>
       <AppButton variant="primary" @click="close">完成</AppButton>
     </template>

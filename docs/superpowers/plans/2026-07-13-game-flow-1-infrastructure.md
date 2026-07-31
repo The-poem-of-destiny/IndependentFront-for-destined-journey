@@ -19,11 +19,13 @@
 ### Task 1: 扩展 types.ts — ChatMessage + SaveSlot.metadata + Snapshot 预留
 
 **Files:**
+
 - Modify: `src/sillytavern/types.ts:471-487` (ChatMessage)
 - Modify: `src/sillytavern/types.ts:976-994` (SaveSlot)
 - Modify: `src/sillytavern/types.ts:955-973` (Snapshot)
 
 **Interfaces:**
+
 - Produces: `ChatMessage.saveId?: string` — 消息所属存档 ID（持久化时设置）
 - Produces: `ChatMessage.turn?: number` — 消息轮次编号（持久化时设置）
 - Produces: `SaveSlot.metadata.enabledWorldBookEntries?: string[]`
@@ -67,7 +69,7 @@ export interface ChatMessage {
 export interface SaveSlot {
   id: string;
   name: string;
-  slot: number;                  // 0-9
+  slot: number; // 0-9
   createdAt: number;
   updatedAt: number;
   activeSnapshotId: string | null;
@@ -128,9 +130,11 @@ git commit -m "feat(types): 扩展 SaveSlot.metadata 和 Snapshot — openedWorl
 ### Task 2: 类型测试 — SaveSlot metadata 扩展
 
 **Files:**
+
 - Modify: `src/sillytavern/types.test.ts`
 
 **Interfaces:**
+
 - Consumes: SaveSlot.metadata 新字段
 
 - [ ] **Step 1: 添加 SaveSlot metadata 测试**
@@ -141,9 +145,13 @@ git commit -m "feat(types): 扩展 SaveSlot.metadata 和 Snapshot — openedWorl
 describe('SaveSlot metadata (Phase 10h)', () => {
   it('metadata.enabledWorldBookEntries 应为可选字符串数组', () => {
     const slot: SaveSlot = {
-      id: 's1', name: 'test', slot: 0,
-      createdAt: 0, updatedAt: 0,
-      activeSnapshotId: null, snapshots: [],
+      id: 's1',
+      name: 'test',
+      slot: 0,
+      createdAt: 0,
+      updatedAt: 0,
+      activeSnapshotId: null,
+      snapshots: [],
       metadata: {
         characterName: 'test',
         userName: 'player',
@@ -151,16 +159,20 @@ describe('SaveSlot metadata (Phase 10h)', () => {
         totalTurns: 0,
         enabledWorldBookEntries: ['system_core:408', 'character:313'],
       },
-    }
-    expect(slot.metadata.enabledWorldBookEntries).toHaveLength(2)
-    expect(slot.metadata.enabledWorldBookEntries![0]).toBe('system_core:408')
-  })
+    };
+    expect(slot.metadata.enabledWorldBookEntries).toHaveLength(2);
+    expect(slot.metadata.enabledWorldBookEntries![0]).toBe('system_core:408');
+  });
 
   it('metadata.openingPrompt 和 openingPromptConsumed 应为可选项', () => {
     const slot: SaveSlot = {
-      id: 's2', name: 'test', slot: 1,
-      createdAt: 0, updatedAt: 0,
-      activeSnapshotId: null, snapshots: [],
+      id: 's2',
+      name: 'test',
+      slot: 1,
+      createdAt: 0,
+      updatedAt: 0,
+      activeSnapshotId: null,
+      snapshots: [],
       metadata: {
         characterName: 'test',
         userName: 'player',
@@ -169,24 +181,30 @@ describe('SaveSlot metadata (Phase 10h)', () => {
         openingPrompt: '你是冒险者...',
         openingPromptConsumed: false,
       },
-    }
-    expect(slot.metadata.openingPrompt).toBe('你是冒险者...')
-    expect(slot.metadata.openingPromptConsumed).toBe(false)
-  })
-})
+    };
+    expect(slot.metadata.openingPrompt).toBe('你是冒险者...');
+    expect(slot.metadata.openingPromptConsumed).toBe(false);
+  });
+});
 
 describe('Snapshot messageIds 预留 (Phase 10h)', () => {
   it('Snapshot 应有可选的 messageIds 字段', () => {
     const snap: Snapshot = {
-      id: 'snap1', saveId: 's1', index: 0,
-      timestamp: Date.now(), gameTime: '春-1日',
-      variables: {}, characters: [], plotEvents: [],
-      memoryIds: [], turnNumber: 0,
+      id: 'snap1',
+      saveId: 's1',
+      index: 0,
+      timestamp: Date.now(),
+      gameTime: '春-1日',
+      variables: {},
+      characters: [],
+      plotEvents: [],
+      memoryIds: [],
+      turnNumber: 0,
       messageIds: ['msg1', 'msg2'],
-    }
-    expect(snap.messageIds).toHaveLength(2)
-  })
-})
+    };
+    expect(snap.messageIds).toHaveLength(2);
+  });
+});
 ```
 
 **注意:** 测试文件顶部需已有 `import type { SaveSlot, Snapshot } from './types'`。如果没有，补上。
@@ -211,10 +229,12 @@ git commit -m "test(types): SaveSlot metadata 扩展 + Snapshot messageIds 测�
 ### Task 3: DB v8 升级 — 新增 messages 表
 
 **Files:**
+
 - Modify: `src/sillytavern/database.ts` (AppDatabase class + FullBackup + importAllData + clearAllData)
 - Modify: `src/sillytavern/database.ts` (新增 CRUD 函数)
 
 **Interfaces:**
+
 - Produces: `messages` 表 (key: `id`, indexes: `saveId`, `[saveId+turn]`)
 - Produces: `saveMessage(msg)`, `getMessages(saveId)`, `deleteMessagesBySaveId(saveId)`
 
@@ -259,9 +279,19 @@ this.version(8).stores({
 
 ```typescript
 import type {
-  Lorebook, ChatPreset, AppSettings, ChatSession,
-  MemoryRecord, PlotEvent, CharacterState, Snapshot, SaveSlot, ApiEndpoint,
-  PlotOutline, SaveProfile, ChatMessage,
+  Lorebook,
+  ChatPreset,
+  AppSettings,
+  ChatSession,
+  MemoryRecord,
+  PlotEvent,
+  CharacterState,
+  Snapshot,
+  SaveSlot,
+  ApiEndpoint,
+  PlotOutline,
+  SaveProfile,
+  ChatMessage,
 } from './types';
 ```
 
@@ -282,8 +312,19 @@ messages: ChatMessage[];
 
 ```typescript
 const [
-  lorebooks, presets, settings, chats,
-  memories, plotEvents, characters, snapshots, saves, apiEndpoints, plotOutlines, saveProfiles, createPresets,
+  lorebooks,
+  presets,
+  settings,
+  chats,
+  memories,
+  plotEvents,
+  characters,
+  snapshots,
+  saves,
+  apiEndpoints,
+  plotOutlines,
+  saveProfiles,
+  createPresets,
   messages,
 ] = await Promise.all([
   db.lorebooks.toArray(),
@@ -309,8 +350,19 @@ const [
 return {
   version: DB_VERSION,
   exportedAt: Date.now(),
-  lorebooks, presets, settings, chats,
-  memories, plotEvents, characters, snapshots, saves, apiEndpoints, plotOutlines, saveProfiles, createPresets,
+  lorebooks,
+  presets,
+  settings,
+  chats,
+  memories,
+  plotEvents,
+  characters,
+  snapshots,
+  saves,
+  apiEndpoints,
+  plotOutlines,
+  saveProfiles,
+  createPresets,
   messages,
 };
 ```
@@ -332,7 +384,7 @@ await db.transaction('rw', db.messages, async () => {
 
 ```typescript
 const messagesToDelete = await db.messages.where('saveId').equals(id).toArray();
-await db.messages.bulkDelete(messagesToDelete.map(m => m.id));
+await db.messages.bulkDelete(messagesToDelete.map((m) => m.id));
 ```
 
 - [ ] **Step 6: 添加 Messages CRUD 函数**
@@ -357,9 +409,7 @@ export async function saveMessages(messages: ChatMessage[]): Promise<void> {
 
 /** 按存档 ID 获取全部消息，按时间戳升序排列 */
 export async function getMessages(saveId: string): Promise<ChatMessage[]> {
-  return getDatabase().messages
-    .where('saveId').equals(saveId)
-    .sortBy('timestamp');
+  return getDatabase().messages.where('saveId').equals(saveId).sortBy('timestamp');
 }
 
 /** 按存档 ID 删除所有消息 */
@@ -392,9 +442,11 @@ git commit -m "feat(db): DB v8 — 新增 messages 表 + CRUD 函数 + 级联删
 ### Task 4: Messages CRUD 测试
 
 **Files:**
+
 - Modify: `src/sillytavern/database.test.ts`
 
 **Interfaces:**
+
 - Consumes: `saveMessage`, `getMessages`, `deleteMessagesBySaveId`
 
 - [ ] **Step 1: 添加 Messages CRUD 测试**
@@ -403,13 +455,10 @@ git commit -m "feat(db): DB v8 — 新增 messages 表 + CRUD 函数 + 级联删
 
 ```typescript
 import type { ChatMessage } from './types';
-import {
-  saveMessage, saveMessages,
-  getMessages, deleteMessagesBySaveId,
-} from './database';
+import { saveMessage, saveMessages, getMessages, deleteMessagesBySaveId } from './database';
 
 describe('Messages CRUD (Phase 10h)', () => {
-  const SAVE_ID = 'msg-test-save'
+  const SAVE_ID = 'msg-test-save';
 
   function makeMsg(overrides: Partial<ChatMessage> = {}): ChatMessage {
     return {
@@ -418,57 +467,57 @@ describe('Messages CRUD (Phase 10h)', () => {
       content: '测试消息',
       timestamp: Date.now(),
       ...overrides,
-    }
+    };
   }
 
   beforeEach(async () => {
-    await deleteMessagesBySaveId(SAVE_ID)
-  })
+    await deleteMessagesBySaveId(SAVE_ID);
+  });
 
   it('saveMessage: 写入单条消息并可读取', async () => {
-    const msg = makeMsg({ content: 'AI 回复正文' })
-    await saveMessage(msg)
+    const msg = makeMsg({ content: 'AI 回复正文' });
+    await saveMessage(msg);
 
-    const msgs = await getMessages(SAVE_ID)
-    expect(msgs).toHaveLength(1)
-    expect(msgs[0].content).toBe('AI 回复正文')
-    expect(msgs[0].role).toBe('assistant')
-  })
+    const msgs = await getMessages(SAVE_ID);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].content).toBe('AI 回复正文');
+    expect(msgs[0].role).toBe('assistant');
+  });
 
   it('saveMessages: 批量写入多条消息', async () => {
     const msgs = [
       makeMsg({ role: 'user', content: '你好' }),
       makeMsg({ role: 'assistant', content: '你好啊冒险者' }),
-    ]
-    await saveMessages(msgs)
+    ];
+    await saveMessages(msgs);
 
-    const loaded = await getMessages(SAVE_ID)
-    expect(loaded).toHaveLength(2)
-  })
+    const loaded = await getMessages(SAVE_ID);
+    expect(loaded).toHaveLength(2);
+  });
 
   it('getMessages: 按 saveId 隔离，不同存档消息不混淆', async () => {
-    const msg1 = makeMsg({ content: '存档A的消息' })
-    const msg2 = makeMsg({ id: crypto.randomUUID(), content: '存档B的消息', role: 'assistant' })
+    const msg1 = makeMsg({ content: '存档A的消息' });
+    const msg2 = makeMsg({ id: crypto.randomUUID(), content: '存档B的消息', role: 'assistant' });
 
-    await saveMessage(msg1)  // SAVE_ID
+    await saveMessage(msg1); // SAVE_ID
     // 直接写入另一 saveId
-    const { getDatabase } = await import('./database')
-    await getDatabase().messages.put(msg2)  // 这里需要特殊处理
+    const { getDatabase } = await import('./database');
+    await getDatabase().messages.put(msg2); // 这里需要特殊处理
 
-    const loaded = await getMessages(SAVE_ID)
-    expect(loaded).toHaveLength(1)
-    expect(loaded[0].content).toBe('存档A的消息')
-  })
+    const loaded = await getMessages(SAVE_ID);
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].content).toBe('存档A的消息');
+  });
 
   it('deleteMessagesBySaveId: 清空指定存档全部消息', async () => {
-    await saveMessage(makeMsg())
-    await saveMessage(makeMsg({ id: crypto.randomUUID() }))
-    expect((await getMessages(SAVE_ID)).length).toBe(2)
+    await saveMessage(makeMsg());
+    await saveMessage(makeMsg({ id: crypto.randomUUID() }));
+    expect((await getMessages(SAVE_ID)).length).toBe(2);
 
-    await deleteMessagesBySaveId(SAVE_ID)
-    expect((await getMessages(SAVE_ID)).length).toBe(0)
-  })
-})
+    await deleteMessagesBySaveId(SAVE_ID);
+    expect((await getMessages(SAVE_ID)).length).toBe(0);
+  });
+});
 ```
 
 **注意:** 查看 `database.test.ts` 顶部 import 和 beforeEach 模式，确保新测试遵循一致的 fake-indexeddb 初始化方式。通常 database.test.ts 会调用 `initializeDatabase()` 或类似 setup。

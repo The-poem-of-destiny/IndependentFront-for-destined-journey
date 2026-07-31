@@ -7,98 +7,99 @@
  * - 不满足条件 → 灰显 + 警告 + 阻止点击
  * - 自定义开局 → 选中后展开 textarea
  */
-import { computed } from 'vue'
-import { useCreateStore } from '../../stores/create-store'
-import type { BackgroundTemplate } from '@engine/start-catalog'
+import { computed } from 'vue';
+import { useCreateStore } from '../../stores/create-store';
+import type { BackgroundTemplate } from '@engine/start-catalog';
 
-const store = useCreateStore()
+const store = useCreateStore();
 
 const props = defineProps<{
-  backgrounds: BackgroundTemplate[]
-  modelValue: BackgroundTemplate | null
+  backgrounds: BackgroundTemplate[];
+  modelValue: BackgroundTemplate | null;
   /** 角色当前种族 (用于条件检查) */
-  characterRace: string
+  characterRace: string;
   /** 角色当前身份 (用于条件检查) */
-  characterIdentity: string
+  characterIdentity: string;
   /** 角色出生地 (用于条件检查, 前缀匹配) */
-  characterLocation: string
+  characterLocation: string;
   /** 命运核心名称 (用于条件检查, 前缀匹配) */
-  destinyCoreName: string
-}>()
+  destinyCoreName: string;
+}>();
 
 const emit = defineEmits<{
-  'update:modelValue': [bg: BackgroundTemplate | null]
-}>()
+  'update:modelValue': [bg: BackgroundTemplate | null];
+}>();
 
 /** 判断单个背景是否满足条件 */
 function checkConditions(bg: BackgroundTemplate): { valid: boolean; missing: string[] } {
-  const missing: string[] = []
+  const missing: string[] = [];
   if (bg.requiredRace && props.characterRace !== bg.requiredRace) {
-    missing.push(`种族需为「${bg.requiredRace}」(当前: ${props.characterRace})`)
+    missing.push(`种族需为「${bg.requiredRace}」(当前: ${props.characterRace})`);
   }
   if (bg.requiredIdentity && props.characterIdentity !== bg.requiredIdentity) {
-    missing.push(`身份需为「${bg.requiredIdentity}」(当前: ${props.characterIdentity})`)
+    missing.push(`身份需为「${bg.requiredIdentity}」(当前: ${props.characterIdentity})`);
   }
   if (bg.requiredLocation) {
-    const loc = props.characterLocation
+    const loc = props.characterLocation;
     if (loc !== bg.requiredLocation && !loc.includes(bg.requiredLocation)) {
-      missing.push(`出生地需在「${bg.requiredLocation}」`)
+      missing.push(`出生地需在「${bg.requiredLocation}」`);
     }
   }
   if (bg.requiredDestinyCore) {
-    const dc = props.destinyCoreName
+    const dc = props.destinyCoreName;
     if (!dc || !dc.includes(bg.requiredDestinyCore)) {
-      missing.push(`命定核心需为「${bg.requiredDestinyCore}」(当前: ${dc || '未选择'})`)
+      missing.push(`命定核心需为「${bg.requiredDestinyCore}」(当前: ${dc || '未选择'})`);
     }
   }
-  return { valid: missing.length === 0, missing }
+  return { valid: missing.length === 0, missing };
 }
 
 /** 是否为自定义开局 */
-const CUSTOM_BG_NAME = '【自定义开局】'
+const CUSTOM_BG_NAME = '【自定义开局】';
 
 function isCustom(bg: BackgroundTemplate) {
-  return bg.name === CUSTOM_BG_NAME
+  return bg.name === CUSTOM_BG_NAME;
 }
 
 /** 获取背景的所有限定标签 (用于显示) */
 function getRequirementTags(bg: BackgroundTemplate) {
-  const tags: { label: string; value: string; met: boolean }[] = []
+  const tags: { label: string; value: string; met: boolean }[] = [];
   if (bg.requiredRace) {
     tags.push({
       label: '种族',
       value: bg.requiredRace,
       met: props.characterRace === bg.requiredRace,
-    })
+    });
   }
   if (bg.requiredIdentity) {
     tags.push({
       label: '身份',
       value: bg.requiredIdentity,
       met: props.characterIdentity === bg.requiredIdentity,
-    })
+    });
   }
   if (bg.requiredLocation) {
-    const met = props.characterLocation === bg.requiredLocation ||
-      props.characterLocation.includes(bg.requiredLocation)
+    const met =
+      props.characterLocation === bg.requiredLocation ||
+      props.characterLocation.includes(bg.requiredLocation);
     tags.push({
       label: '出生地',
       value: bg.requiredLocation,
       met,
-    })
+    });
   }
   if (bg.requiredDestinyCore) {
-    const met = props.destinyCoreName.includes(bg.requiredDestinyCore)
+    const met = props.destinyCoreName.includes(bg.requiredDestinyCore);
     tags.push({
       label: '命运核心',
       value: bg.requiredDestinyCore,
       met,
-    })
+    });
   }
-  return tags
+  return tags;
 }
 
-const selectedId = computed(() => props.modelValue?.id ?? null)
+const selectedId = computed(() => props.modelValue?.id ?? null);
 </script>
 
 <template>
@@ -146,17 +147,20 @@ const selectedId = computed(() => props.modelValue?.id ?? null)
       <div v-if="isCustom(bg) && selectedId === bg.id" class="bg-custom-textarea" @click.stop>
         <textarea
           :value="modelValue?.fullText ?? ''"
-          @input="emit('update:modelValue', { ...bg, fullText: ($event.target as HTMLTextAreaElement).value })"
           placeholder="在此书写你的角色背景故事…"
           rows="5"
           class="custom-textarea"
+          @input="
+            emit('update:modelValue', {
+              ...bg,
+              fullText: ($event.target as HTMLTextAreaElement).value,
+            })
+          "
         ></textarea>
       </div>
     </div>
 
-    <div v-if="backgrounds.length === 0" class="empty">
-      该分类暂无背景
-    </div>
+    <div v-if="backgrounds.length === 0" class="empty">该分类暂无背景</div>
   </div>
 </template>
 
@@ -180,7 +184,7 @@ const selectedId = computed(() => props.modelValue?.id ?? null)
 .bg-card:hover:not(.disabled) {
   border-color: var(--theme-color-primary);
   background: color-mix(in srgb, var(--theme-color-primary) 5%, var(--theme-card-bg));
-  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
   transform: translateY(-1px);
 }
 .bg-card.selected {

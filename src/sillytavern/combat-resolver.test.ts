@@ -26,8 +26,26 @@ function makeCombatState(overrides: Partial<CombatState> = {}): CombatState {
       makeParticipant({ characterId: 'enemy1', name: '哥布林', side: 'enemy', tier: 1 }),
     ],
     turnOrder: [
-      { characterId: 'ally1', name: '勇者', agility: 13, d20Roll: 15, speedModifiers: [], totalInitiative: 28, attacksRemaining: 1, actionsRemaining: 1 },
-      { characterId: 'enemy1', name: '哥布林', agility: 10, d20Roll: 8, speedModifiers: [], totalInitiative: 18, attacksRemaining: 1, actionsRemaining: 1 },
+      {
+        characterId: 'ally1',
+        name: '勇者',
+        agility: 13,
+        d20Roll: 15,
+        speedModifiers: [],
+        totalInitiative: 28,
+        attacksRemaining: 1,
+        actionsRemaining: 1,
+      },
+      {
+        characterId: 'enemy1',
+        name: '哥布林',
+        agility: 10,
+        d20Roll: 8,
+        speedModifiers: [],
+        totalInitiative: 18,
+        attacksRemaining: 1,
+        actionsRemaining: 1,
+      },
     ],
     currentTurnIndex: 0,
     status: 'active',
@@ -45,9 +63,12 @@ function makeParticipant(overrides: Partial<CombatParticipant> = {}): CombatPart
     tier: 3,
     level: 10,
     attributes: { str: 14, dex: 13, con: 12, int: 10, spi: 11 },
-    hp: 100, maxHp: 100,
-    mp: 50, maxMp: 50,
-    sp: 50, maxSp: 50,
+    hp: 100,
+    maxHp: 100,
+    mp: 50,
+    maxMp: 50,
+    sp: 50,
+    maxSp: 50,
     defense: 200,
     dr: 0,
     penetration: 0,
@@ -103,8 +124,21 @@ describe('resolveAttack', () => {
   it('暴击意图攻击', () => {
     const combat = makeCombatState({
       participants: [
-        makeParticipant({ characterId: 'ally1', name: '剑圣', side: 'ally', tier: 5, attributes: { str: 18, dex: 16, con: 14, int: 12, spi: 14 } }),
-        makeParticipant({ characterId: 'enemy1', name: '魔物', side: 'enemy', tier: 2, hp: 200, maxHp: 200 }),
+        makeParticipant({
+          characterId: 'ally1',
+          name: '剑圣',
+          side: 'ally',
+          tier: 5,
+          attributes: { str: 18, dex: 16, con: 14, int: 12, spi: 14 },
+        }),
+        makeParticipant({
+          characterId: 'enemy1',
+          name: '魔物',
+          side: 'enemy',
+          tier: 2,
+          hp: 200,
+          maxHp: 200,
+        }),
       ],
     });
 
@@ -129,8 +163,23 @@ describe('resolveAttack', () => {
   it('真实伤害跳过减免', () => {
     const combat = makeCombatState({
       participants: [
-        makeParticipant({ characterId: 'ally1', name: '法师', side: 'ally', tier: 4, attributes: { str: 8, dex: 10, con: 8, int: 18, spi: 16 } }),
-        makeParticipant({ characterId: 'enemy1', name: '高防魔像', side: 'enemy', tier: 4, hp: 500, maxHp: 500, defense: 1000, dr: 0.3 }),
+        makeParticipant({
+          characterId: 'ally1',
+          name: '法师',
+          side: 'ally',
+          tier: 4,
+          attributes: { str: 8, dex: 10, con: 8, int: 18, spi: 16 },
+        }),
+        makeParticipant({
+          characterId: 'enemy1',
+          name: '高防魔像',
+          side: 'enemy',
+          tier: 4,
+          hp: 500,
+          maxHp: 500,
+          defense: 1000,
+          dr: 0.3,
+        }),
       ],
     });
 
@@ -153,13 +202,22 @@ describe('resolveAttack', () => {
 
   it('穿透效果减少装备减免', () => {
     const penAttacker = makeParticipant({
-      characterId: 'ally1', name: '穿甲弓手', side: 'ally', tier: 3,
-      penetration: 0.5, weaponAtk: 40,
+      characterId: 'ally1',
+      name: '穿甲弓手',
+      side: 'ally',
+      tier: 3,
+      penetration: 0.5,
+      weaponAtk: 40,
       attributes: { str: 10, dex: 16, con: 10, int: 10, spi: 10 },
     });
     const highDefDefender = makeParticipant({
-      characterId: 'enemy1', name: '重甲骑士', side: 'enemy', tier: 3,
-      defense: 2000, hp: 500, maxHp: 500,
+      characterId: 'enemy1',
+      name: '重甲骑士',
+      side: 'enemy',
+      tier: 3,
+      defense: 2000,
+      hp: 500,
+      maxHp: 500,
     });
 
     const combat: CombatState = {
@@ -168,8 +226,26 @@ describe('resolveAttack', () => {
       round: 1,
       participants: [penAttacker, highDefDefender],
       turnOrder: [
-        { characterId: 'ally1', name: '穿甲弓手', agility: 16, d20Roll: 14, speedModifiers: [], totalInitiative: 30, attacksRemaining: 1, actionsRemaining: 1 },
-        { characterId: 'enemy1', name: '重甲骑士', agility: 10, d20Roll: 8, speedModifiers: [], totalInitiative: 18, attacksRemaining: 1, actionsRemaining: 1 },
+        {
+          characterId: 'ally1',
+          name: '穿甲弓手',
+          agility: 16,
+          d20Roll: 14,
+          speedModifiers: [],
+          totalInitiative: 30,
+          attacksRemaining: 1,
+          actionsRemaining: 1,
+        },
+        {
+          characterId: 'enemy1',
+          name: '重甲骑士',
+          agility: 10,
+          d20Roll: 8,
+          speedModifiers: [],
+          totalInitiative: 18,
+          attacksRemaining: 1,
+          actionsRemaining: 1,
+        },
       ],
       currentTurnIndex: 0,
       status: 'active',
@@ -211,8 +287,21 @@ describe('resolveAttack', () => {
   it('多段攻击正确分割伤害', () => {
     const combat = makeCombatState({
       participants: [
-        makeParticipant({ characterId: 'ally1', name: '连击剑士', side: 'ally', tier: 3, attributes: { str: 14, dex: 14, con: 12, int: 10, spi: 10 } }),
-        makeParticipant({ characterId: 'enemy1', name: '大型史莱姆', side: 'enemy', tier: 2, hp: 300, maxHp: 300 }),
+        makeParticipant({
+          characterId: 'ally1',
+          name: '连击剑士',
+          side: 'ally',
+          tier: 3,
+          attributes: { str: 14, dex: 14, con: 12, int: 10, spi: 10 },
+        }),
+        makeParticipant({
+          characterId: 'enemy1',
+          name: '大型史莱姆',
+          side: 'enemy',
+          tier: 2,
+          hp: 300,
+          maxHp: 300,
+        }),
       ],
     });
 
@@ -243,9 +332,14 @@ describe('resolveAttack', () => {
 
   it('DR 修正降低最终伤害', () => {
     const drDefender = makeParticipant({
-      characterId: 'enemy1', name: '石像鬼', side: 'enemy', tier: 4,
-      hp: 500, maxHp: 500,
-      defense: 500, dr: 0.4, // 40% DR
+      characterId: 'enemy1',
+      name: '石像鬼',
+      side: 'enemy',
+      tier: 4,
+      hp: 500,
+      maxHp: 500,
+      defense: 500,
+      dr: 0.4, // 40% DR
       attributes: { str: 12, dex: 8, con: 18, int: 4, spi: 6 },
     });
 
@@ -258,8 +352,26 @@ describe('resolveAttack', () => {
         drDefender,
       ],
       turnOrder: [
-        { characterId: 'ally1', name: '勇者', agility: 13, d20Roll: 15, speedModifiers: [], totalInitiative: 28, attacksRemaining: 1, actionsRemaining: 1 },
-        { characterId: 'enemy1', name: '石像鬼', agility: 8, d20Roll: 5, speedModifiers: [], totalInitiative: 13, attacksRemaining: 1, actionsRemaining: 1 },
+        {
+          characterId: 'ally1',
+          name: '勇者',
+          agility: 13,
+          d20Roll: 15,
+          speedModifiers: [],
+          totalInitiative: 28,
+          attacksRemaining: 1,
+          actionsRemaining: 1,
+        },
+        {
+          characterId: 'enemy1',
+          name: '石像鬼',
+          agility: 8,
+          d20Roll: 5,
+          speedModifiers: [],
+          totalInitiative: 13,
+          attacksRemaining: 1,
+          actionsRemaining: 1,
+        },
       ],
       currentTurnIndex: 0,
       status: 'active',
@@ -282,7 +394,9 @@ describe('resolveAttack', () => {
     // DR > 0 → drReduction > 0
     expect(result.damage.drRate).toBe(0.4);
     expect(result.damage.drReduction).toBeGreaterThan(0);
-    expect(result.damage.finalDamage).toBeLessThan(result.damage.afterDr + result.damage.drReduction);
+    expect(result.damage.finalDamage).toBeLessThan(
+      result.damage.afterDr + result.damage.drReduction,
+    );
   });
 });
 
@@ -314,13 +428,17 @@ describe('resolveFlee', () => {
     const combat = makeCombatState({
       participants: [
         makeParticipant({
-          characterId: 'ally1', name: '敏捷贼',
-          side: 'ally', tier: 3,
+          characterId: 'ally1',
+          name: '敏捷贼',
+          side: 'ally',
+          tier: 3,
           attributes: { str: 8, dex: 18, con: 8, int: 8, spi: 8 },
         }),
         makeParticipant({
-          characterId: 'enemy1', name: '迟钝兽',
-          side: 'enemy', tier: 1,
+          characterId: 'enemy1',
+          name: '迟钝兽',
+          side: 'enemy',
+          tier: 1,
         }),
       ],
     });
@@ -335,13 +453,17 @@ describe('resolveFlee', () => {
     const combat = makeCombatState({
       participants: [
         makeParticipant({
-          characterId: 'ally1', name: '缓慢法师',
-          side: 'ally', tier: 3,
+          characterId: 'ally1',
+          name: '缓慢法师',
+          side: 'ally',
+          tier: 3,
           attributes: { str: 6, dex: 6, con: 6, int: 18, spi: 14 },
         }),
         makeParticipant({
-          characterId: 'enemy1', name: '迅影龙',
-          side: 'enemy', tier: 6,
+          characterId: 'enemy1',
+          name: '迅影龙',
+          side: 'enemy',
+          tier: 6,
         }),
       ],
     });
@@ -362,14 +484,18 @@ describe('initCombat / endCombat', () => {
 
     const combat = initCombat({
       combatType: '标准',
-      allies: [{
-        ...ally,
-        side: 'ally',
-      }],
-      enemies: [{
-        ...enemy,
-        side: 'enemy',
-      }],
+      allies: [
+        {
+          ...ally,
+          side: 'ally',
+        },
+      ],
+      enemies: [
+        {
+          ...enemy,
+          side: 'enemy',
+        },
+      ],
       environment: '洞窟',
       d20Rolls: [15, 8],
     });
@@ -381,7 +507,9 @@ describe('initCombat / endCombat', () => {
     expect(combat.participants[1].side).toBe('enemy');
     expect(combat.turnOrder).toHaveLength(2);
     // 先攻降序排列
-    expect(combat.turnOrder[0].totalInitiative).toBeGreaterThanOrEqual(combat.turnOrder[1].totalInitiative);
+    expect(combat.turnOrder[0].totalInitiative).toBeGreaterThanOrEqual(
+      combat.turnOrder[1].totalInitiative,
+    );
     expect(combat.environment).toBe('洞窟');
   });
 
@@ -434,9 +562,12 @@ describe('characterToCombatParticipant', () => {
       expToNext: 1200,
       attributes: { str: 14, dex: 13, con: 12, int: 10, spi: 11 },
       freeAttrPoints: 2,
-      hp: 100, maxHp: 100,
-      mp: 50, maxMp: 50,
-      sp: 50, maxSp: 50,
+      hp: 100,
+      maxHp: 100,
+      mp: 50,
+      maxMp: 50,
+      sp: 50,
+      maxSp: 50,
       ascension: {
         enabled: false,
         elements: [],
@@ -489,9 +620,12 @@ describe('characterToCombatParticipant', () => {
       expToNext: 200,
       attributes: { str: 8, dex: 10, con: 7, int: 4, spi: 5 },
       freeAttrPoints: 0,
-      hp: 0, maxHp: 40,
-      mp: 10, maxMp: 10,
-      sp: 10, maxSp: 10,
+      hp: 0,
+      maxHp: 40,
+      mp: 10,
+      maxMp: 10,
+      sp: 10,
+      maxSp: 10,
       ascension: {
         enabled: false,
         elements: [],
@@ -531,9 +665,12 @@ describe('characterToCombatParticipant', () => {
       expToNext: 600,
       attributes: { str: 12, dex: 10, con: 11, int: 8, spi: 8 },
       freeAttrPoints: 1,
-      hp: 80, maxHp: 80,
-      mp: 30, maxMp: 30,
-      sp: 30, maxSp: 30,
+      hp: 80,
+      maxHp: 80,
+      mp: 30,
+      maxMp: 30,
+      sp: 30,
+      maxSp: 30,
       ascension: {
         enabled: false,
         elements: [],

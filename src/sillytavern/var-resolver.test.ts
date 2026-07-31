@@ -477,7 +477,11 @@ describe('diffVariables', () => {
     const changes = diffVariables(before, after);
     const removed = changes.filter((c) => c.path === 'user.inventory');
     expect(removed).toHaveLength(1);
-    expect(removed[0]).toMatchObject({ op: 'delete', oldValue: ['sword', 'shield'], newValue: undefined });
+    expect(removed[0]).toMatchObject({
+      op: 'delete',
+      oldValue: ['sword', 'shield'],
+      newValue: undefined,
+    });
   });
 
   it('detects changed (replaced) values', () => {

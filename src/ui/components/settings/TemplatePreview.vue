@@ -1,37 +1,40 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed } from 'vue';
 
 // ============================================================
 // Types
 // ============================================================
 interface TemplateSegment {
-  type: 'text' | 'placeholder'
-  raw: string        // The matched {{...}} text (e.g. "{{SYS_PROMPT}}") or plain text
-  name: string       // Placeholder name without braces/params (e.g. "SYS_PROMPT")
-  params?: string    // Optional params after colon (e.g. "AGENT.STORY:output" → "output")
-  color: string      // CSS variable for the badge color
-  label: string      // Human-readable description
-  category: string   // Category for grouping/reference
+  type: 'text' | 'placeholder';
+  raw: string; // The matched {{...}} text (e.g. "{{SYS_PROMPT}}") or plain text
+  name: string; // Placeholder name without braces/params (e.g. "SYS_PROMPT")
+  params?: string; // Optional params after colon (e.g. "AGENT.STORY:output" → "output")
+  color: string; // CSS variable for the badge color
+  label: string; // Human-readable description
+  category: string; // Category for grouping/reference
 }
 
 // ============================================================
 // Props
 // ============================================================
-const props = withDefaults(defineProps<{
-  template: string
-  agentId?: string
-  showLabels?: boolean
-}>(), {
-  showLabels: true,
-})
+const props = withDefaults(
+  defineProps<{
+    template: string;
+    agentId?: string;
+    showLabels?: boolean;
+  }>(),
+  {
+    showLabels: true,
+  },
+);
 
 // ============================================================
 // Placeholder metadata registry
 // ============================================================
 interface PlaceholderMeta {
-  label: string
-  color: string
-  category: string
+  label: string;
+  color: string;
+  category: string;
 }
 
 const PLACEHOLDER_META: Record<string, PlaceholderMeta> = {
@@ -153,19 +156,19 @@ const PLACEHOLDER_META: Record<string, PlaceholderMeta> = {
     color: 'var(--theme-text-muted, #888)',
     category: 'chain',
   },
-}
+};
 
 // Default fallback for unknown placeholders
 const FALLBACK_META: PlaceholderMeta = {
   label: '(未注册占位符)',
   color: '#666',
   category: 'unknown',
-}
+};
 
 // ============================================================
 // Parse template into segments
 // ============================================================
-const PLACEHOLDER_RE = /\{\{([A-Z_][A-Z0-9_.]*)(?::([^{}]*))?\}\}/g
+const PLACEHOLDER_RE = /\{\{([A-Z_][A-Z0-9_.]*)(?::([^{}]*))?\}\}/g;
 
 /** 渲染占位符显示文本 — 避免 Vue 模板中 {{ 被解析为表达式 */
 function badgeText(seg: { name: string; params?: string }): string {
@@ -173,17 +176,18 @@ function badgeText(seg: { name: string; params?: string }): string {
 }
 
 const segments = computed<TemplateSegment[]>(() => {
-  const result: TemplateSegment[] = []
-  const tpl = props.template
-  let lastIndex = 0
-  let match: RegExpExecArray | null
+  const result: TemplateSegment[] = [];
+  const tpl = props.template;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
 
   // Reset regex state
-  PLACEHOLDER_RE.lastIndex = 0
+  // eslint-disable-next-line vue/no-side-effects-in-computed-properties -- 重置全局 regex 的 lastIndex，确保 computed 每次从头匹配
+  PLACEHOLDER_RE.lastIndex = 0;
   while ((match = PLACEHOLDER_RE.exec(tpl)) !== null) {
     // Push preceding plain text
     if (match.index > lastIndex) {
-      const raw = tpl.slice(lastIndex, match.index)
+      const raw = tpl.slice(lastIndex, match.index);
       if (raw) {
         result.push({
           type: 'text',
@@ -192,13 +196,13 @@ const segments = computed<TemplateSegment[]>(() => {
           color: '',
           label: '',
           category: '',
-        })
+        });
       }
     }
 
-    const name = match[1]!
-    const params = match[2] || undefined
-    const meta = PLACEHOLDER_META[name] ?? FALLBACK_META
+    const name = match[1]!;
+    const params = match[2] || undefined;
+    const meta = PLACEHOLDER_META[name] ?? FALLBACK_META;
 
     result.push({
       type: 'placeholder',
@@ -208,9 +212,9 @@ const segments = computed<TemplateSegment[]>(() => {
       color: meta.color,
       label: meta.label,
       category: meta.category,
-    })
+    });
 
-    lastIndex = match.index + match[0].length
+    lastIndex = match.index + match[0].length;
   }
 
   // Push trailing plain text
@@ -222,11 +226,11 @@ const segments = computed<TemplateSegment[]>(() => {
       color: '',
       label: '',
       category: '',
-    })
+    });
   }
 
-  return result
-})
+  return result;
+});
 </script>
 
 <template>
@@ -244,11 +248,7 @@ const segments = computed<TemplateSegment[]>(() => {
         <span v-if="seg.type === 'text'" class="template-text">{{ seg.raw }}</span>
 
         <!-- Placeholder badge -->
-        <span
-          v-else
-          class="template-badge"
-          :style="{ '--badge-color': seg.color }"
-        >
+        <span v-else class="template-badge" :style="{ '--badge-color': seg.color }">
           <span class="badge-text">{{ badgeText(seg) }}</span>
           <span v-if="showLabels" class="badge-label text-xs">{{ seg.label }}</span>
         </span>

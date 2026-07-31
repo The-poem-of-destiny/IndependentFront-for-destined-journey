@@ -245,7 +245,11 @@ function makeAsset(overrides: Partial<AssetMetaRecord> = {}): AssetMetaRecord {
 
 beforeEach(async () => {
   // Reset the database singleton completely
-  try { await clearAllData(); } catch { /* db may not exist yet */ }
+  try {
+    await clearAllData();
+  } catch {
+    /* db may not exist yet */
+  }
   await initializeDatabase();
 });
 
@@ -405,7 +409,7 @@ describe('PlotEvents CRUD', () => {
   it('savePlotEvent 应自动更新 updatedAt', async () => {
     const e = makePlotEvent();
     const oldUpdatedAt = e.updatedAt;
-    await new Promise(r => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 10));
     await savePlotEvent(e);
     const all = await getPlotEvents('save_test');
     expect(all[0].updatedAt).toBeGreaterThan(oldUpdatedAt);
@@ -445,10 +449,7 @@ describe('Characters CRUD', () => {
   });
 
   it('saveCharacters 应批量保存', async () => {
-    const chars = [
-      makeCharacter({ id: 'c1' }),
-      makeCharacter({ id: 'c2' }),
-    ];
+    const chars = [makeCharacter({ id: 'c1' }), makeCharacter({ id: 'c2' })];
     await saveCharacters(chars);
     expect(await getCharacter('c1')).toBeDefined();
     expect(await getCharacter('c2')).toBeDefined();
@@ -477,7 +478,7 @@ describe('Snapshots CRUD', () => {
     await saveSnapshot(makeSnapshot({ id: 's2', createdAt: 3000 }));
 
     const all = await getSnapshots('save_test');
-    expect(all.map(s => s.id)).toEqual(['s0', 's1', 's2']);
+    expect(all.map((s) => s.id)).toEqual(['s0', 's1', 's2']);
   });
 
   it('getLatestSnapshot 应返回 createdAt 最大的快照', async () => {
@@ -503,7 +504,7 @@ describe('Snapshots CRUD', () => {
     const remaining = await getSnapshots('save_test');
     expect(remaining).toHaveLength(5);
     // 应保留 createdAt 最新的 5 个 (s5-s9)
-    expect(remaining.map(s => s.id).sort()).toEqual(['s5', 's6', 's7', 's8', 's9']);
+    expect(remaining.map((s) => s.id).sort()).toEqual(['s5', 's6', 's7', 's8', 's9']);
   });
 
   it('trimSnapshots 数量不超上限时不过删除', async () => {
@@ -520,7 +521,7 @@ describe('Snapshots CRUD', () => {
       await saveSnapshot(makeSnapshot({ id: `turn-${t}`, turn: t, createdAt: 1000 + t }));
     }
     await trimSnapshots('save_test', 30, 'tiered');
-    const remaining = (await getSnapshots('save_test')).map(s => s.turn).sort((a, b) => a - b);
+    const remaining = (await getSnapshots('save_test')).map((s) => s.turn).sort((a, b) => a - b);
     // tier0(36-40 全留) + tier1 每4(32,28,24,20,16) + tier2 每8(8)
     expect(remaining).toEqual([8, 16, 20, 24, 28, 32, 36, 37, 38, 39, 40]);
   });
@@ -531,20 +532,22 @@ describe('Snapshots CRUD', () => {
     }
     // maxCount=3，但最近5(turn 6-10)必须全保留
     await trimSnapshots('save_test', 3, 'tiered');
-    const remaining = (await getSnapshots('save_test')).map(s => s.turn).sort((a, b) => a - b);
+    const remaining = (await getSnapshots('save_test')).map((s) => s.turn).sort((a, b) => a - b);
     expect(remaining).toEqual([6, 7, 8, 9, 10]);
   });
 
   it('🆕 trimSnapshots(tiered) 非 turn 档(manual/pre-combat)受保护永不淘汰', async () => {
     await saveSnapshot(makeSnapshot({ id: 'manual-1', turn: 5, reason: 'manual', createdAt: 500 }));
-    await saveSnapshot(makeSnapshot({ id: 'combat-1', turn: 7, reason: 'pre-combat', createdAt: 700 }));
+    await saveSnapshot(
+      makeSnapshot({ id: 'combat-1', turn: 7, reason: 'pre-combat', createdAt: 700 }),
+    );
     for (let t = 1; t <= 40; t++) {
       await saveSnapshot(makeSnapshot({ id: `turn-${t}`, turn: t, createdAt: 1000 + t }));
     }
     await trimSnapshots('save_test', 30, 'tiered');
     const remaining = await getSnapshots('save_test');
-    expect(remaining.find(s => s.id === 'manual-1')).toBeDefined();
-    expect(remaining.find(s => s.id === 'combat-1')).toBeDefined();
+    expect(remaining.find((s) => s.id === 'manual-1')).toBeDefined();
+    expect(remaining.find((s) => s.id === 'combat-1')).toBeDefined();
   });
 
   it('🆕 trimSnapshots(dense) 向后兼容：保留最新 N 个（FIFO）', async () => {
@@ -552,12 +555,17 @@ describe('Snapshots CRUD', () => {
       await saveSnapshot(makeSnapshot({ id: `turn-${t}`, turn: t, createdAt: 1000 + t }));
     }
     await trimSnapshots('save_test', 5, 'dense');
-    const remaining = (await getSnapshots('save_test')).map(s => s.turn).sort((a, b) => a - b);
+    const remaining = (await getSnapshots('save_test')).map((s) => s.turn).sort((a, b) => a - b);
     expect(remaining).toEqual([6, 7, 8, 9, 10]);
   });
 
   it('快照 characters/saveProfile 整份落库可读回（M5 §11.2）', async () => {
-    const hero = createDefaultCharacterState({ id: 'h1', name: '主角', saveId: 'save_test', hp: 77 });
+    const hero = createDefaultCharacterState({
+      id: 'h1',
+      name: '主角',
+      saveId: 'save_test',
+      hp: 77,
+    });
     const profile = createDefaultSaveProfile('save_test');
     profile.fp = 9;
     profile.variables = { sys: { 进度: '第二章' } };
@@ -583,14 +591,14 @@ describe('SaveSlots CRUD', () => {
   it('getSaves 应按更新时间倒序排列（越新越靠前）', async () => {
     // saveSaveSlot 内部会设置 updatedAt = Date.now()
     await saveSaveSlot(makeSaveSlot({ id: 'save_1', slot: 1 }));
-    await new Promise(r => setTimeout(r, 2)); // 确保不同毫秒
+    await new Promise((r) => setTimeout(r, 2)); // 确保不同毫秒
     await saveSaveSlot(makeSaveSlot({ id: 'save_0', slot: 0 }));
-    await new Promise(r => setTimeout(r, 2));
+    await new Promise((r) => setTimeout(r, 2));
     await saveSaveSlot(makeSaveSlot({ id: 'save_2', slot: 2 }));
 
     const all = await getSaves();
     // 倒序：最后创建的 save_2(slot=2) → save_0(slot=0) → save_1(slot=1)
-    expect(all.map(s => s.slot)).toEqual([2, 0, 1]);
+    expect(all.map((s) => s.slot)).toEqual([2, 0, 1]);
   });
 
   it('getSaveBySlot 应按槽号查找', async () => {
@@ -609,7 +617,7 @@ describe('SaveSlots CRUD', () => {
   it('saveSaveSlot 应自动更新 updatedAt', async () => {
     const s = makeSaveSlot();
     const oldTime = s.updatedAt;
-    await new Promise(r => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 10));
     await saveSaveSlot(s);
     const saved = await getSave(s.id);
     expect(saved!.updatedAt).toBeGreaterThan(oldTime);
@@ -633,12 +641,16 @@ describe('SaveSlots CRUD', () => {
 
   it('deleteSaveSlot 级联删除该存档的 characters（修 #9 删档残留）', async () => {
     await saveSaveSlot(makeSaveSlot({ id: 'save_del' }));
-    await saveCharacter(createDefaultCharacterState({ id: 'cd1', name: '将删', saveId: 'save_del' }));
-    await saveCharacter(createDefaultCharacterState({ id: 'cd2', name: '留下', saveId: 'save_other' }));
+    await saveCharacter(
+      createDefaultCharacterState({ id: 'cd1', name: '将删', saveId: 'save_del' }),
+    );
+    await saveCharacter(
+      createDefaultCharacterState({ id: 'cd2', name: '留下', saveId: 'save_other' }),
+    );
     await deleteSaveSlot('save_del');
     const all = await getCharacters();
-    expect(all.map(c => c.id)).not.toContain('cd1');
-    expect(all.map(c => c.id)).toContain('cd2');
+    expect(all.map((c) => c.id)).not.toContain('cd1');
+    expect(all.map((c) => c.id)).toContain('cd2');
   });
 });
 
@@ -684,7 +696,9 @@ describe('deleteSaveSlot 事务化 (M6 Task 4)', () => {
     await savePlotOutline(makeOutlineFor(saveId));
     await saveSnapshot(makeSnapshot({ id: `snap_${saveId}`, saveId }));
     await saveMessage(makeMessageFor(saveId));
-    await saveCharacter(createDefaultCharacterState({ id: `char_${saveId}`, name: `角色_${saveId}`, saveId }));
+    await saveCharacter(
+      createDefaultCharacterState({ id: `char_${saveId}`, name: `角色_${saveId}`, saveId }),
+    );
     await saveSaveProfile(createDefaultSaveProfile(saveId));
   }
 
@@ -823,10 +837,18 @@ describe('exportAllData / importAllData', () => {
     backup.characters = [legacyChar];
     // pre-v9 SaveProfile：无 variables 字段
     const legacyProfile: any = {
-      saveId: 'save_legacy', fp: 0, fpHistory: [], contracts: [], achievements: [],
-      news: [], quests: {}, focusQuest: '', affections: {},
+      saveId: 'save_legacy',
+      fp: 0,
+      fpHistory: [],
+      contracts: [],
+      achievements: [],
+      news: [],
+      quests: {},
+      focusQuest: '',
+      affections: {},
       gameTime: { era: '复兴纪元', year: 1, month: 1, day: 1, weekday: 1, hour: 8, minute: 0 },
-      worldFlags: {}, updatedAt: Date.now(),
+      worldFlags: {},
+      updatedAt: Date.now(),
     };
     backup.saveProfiles = [legacyProfile];
 
@@ -911,12 +933,14 @@ describe('Messages CRUD (Phase 10h)', () => {
 
   it('getMessages: 按 saveId 隔离，不同存档消息不混淆', async () => {
     await saveMessage(makeMsg({ content: '存档A的消息' }));
-    await saveMessage(makeMsg({
-      id: crypto.randomUUID(),
-      content: '存档B的消息',
-      saveId: 'other-save',
-      role: 'assistant',
-    }));
+    await saveMessage(
+      makeMsg({
+        id: crypto.randomUUID(),
+        content: '存档B的消息',
+        saveId: 'other-save',
+        role: 'assistant',
+      }),
+    );
 
     const loaded = await getMessages(SAVE_ID);
     expect(loaded).toHaveLength(1);
@@ -938,9 +962,13 @@ describe('Messages CRUD (Phase 10h)', () => {
 
   it('getMessages: 返回结果按时间戳升序排列', async () => {
     const base = Date.now();
-    await saveMessage(makeMsg({ id: crypto.randomUUID(), timestamp: base + 100, content: '第二条' }));
+    await saveMessage(
+      makeMsg({ id: crypto.randomUUID(), timestamp: base + 100, content: '第二条' }),
+    );
     await saveMessage(makeMsg({ id: crypto.randomUUID(), timestamp: base, content: '第一条' }));
-    await saveMessage(makeMsg({ id: crypto.randomUUID(), timestamp: base + 200, content: '第三条' }));
+    await saveMessage(
+      makeMsg({ id: crypto.randomUUID(), timestamp: base + 200, content: '第三条' }),
+    );
 
     const msgs = await getMessages(SAVE_ID);
     expect(msgs).toHaveLength(3);
@@ -958,14 +986,19 @@ describe('v9: characters saveId 一等索引', () => {
     const b = createDefaultCharacterState({ id: 'cb', name: '乙', saveId: 'save_B' });
     await saveCharacters([a, b]);
     const got = await getCharacters('save_A');
-    expect(got.map(c => c.id)).toEqual(['ca']);
+    expect(got.map((c) => c.id)).toEqual(['ca']);
   });
 
   it('customFields.saveId 不再参与过滤', async () => {
-    const c = createDefaultCharacterState({ id: 'cc', name: '丙', saveId: '', customFields: { saveId: 'save_A' } });
+    const c = createDefaultCharacterState({
+      id: 'cc',
+      name: '丙',
+      saveId: '',
+      customFields: { saveId: 'save_A' },
+    });
     await saveCharacter(c);
     const got = await getCharacters('save_A');
-    expect(got.find(x => x.id === 'cc')).toBeUndefined();
+    expect(got.find((x) => x.id === 'cc')).toBeUndefined();
   });
 });
 
@@ -981,7 +1014,7 @@ describe('deleteMessagesAfterTurn — [saveId+turn] 复合索引 (M5 #49)', () =
     await saveMessages([mk('t1', 1), mk('t2a', 2), mk('t2b', 2), mk('t3', 3), mk('t4', 4)]);
     await deleteMessagesAfterTurn(SID, 2);
     const rest = await getMessages(SID);
-    expect(rest.map(m => m.id).sort()).toEqual(['t1', 't2a', 't2b']);
+    expect(rest.map((m) => m.id).sort()).toEqual(['t1', 't2a', 't2b']);
   });
 
   it('不同存档的消息不受影响', async () => {
@@ -989,7 +1022,7 @@ describe('deleteMessagesAfterTurn — [saveId+turn] 复合索引 (M5 #49)', () =
     await deleteMessagesAfterTurn(SID, 0);
     expect(await getMessages(SID)).toHaveLength(0);
     const other = await getMessages('save_other');
-    expect(other.map(m => m.id)).toEqual(['other3']);
+    expect(other.map((m) => m.id)).toEqual(['other3']);
   });
 });
 
@@ -1001,7 +1034,14 @@ describe('restoreSnapshot 集成 — 真实 DB (M5 §11.2)', () => {
     await saveSaveSlot(makeSaveSlot({ id: saveId }));
 
     // 角色 hp=80 + profile fp=5 + 变量第一章
-    const hero = createDefaultCharacterState({ id: 'hero-1', name: '主角', type: 'player', saveId, hp: 80, maxHp: 100 });
+    const hero = createDefaultCharacterState({
+      id: 'hero-1',
+      name: '主角',
+      type: 'player',
+      saveId,
+      hp: 80,
+      maxHp: 100,
+    });
     await saveCharacter(hero);
     const { getProfile, updateProfile } = await import('./save-profile');
     const p1 = await getProfile(saveId);
@@ -1010,8 +1050,14 @@ describe('restoreSnapshot 集成 — 真实 DB (M5 §11.2)', () => {
     await updateProfile(p1);
 
     // 造 3 轮对话消息(turn 1/2/3)，前两轮在快照前
-    const mkMsg = (id: string, turn: number, content: string): ChatMessage =>
-      ({ id, role: 'user', content, timestamp: turn, saveId, turn });
+    const mkMsg = (id: string, turn: number, content: string): ChatMessage => ({
+      id,
+      role: 'user',
+      content,
+      timestamp: turn,
+      saveId,
+      turn,
+    });
     await saveMessage(mkMsg('m1', 1, '第一轮'));
     await saveMessage(mkMsg('m2', 2, '第二轮'));
 
@@ -1022,7 +1068,9 @@ describe('restoreSnapshot 集成 — 真实 DB (M5 §11.2)', () => {
     // → turn3 后: 角色 hp=30、fp=9、变量第三章、新增消息、新增 NPC
     hero.hp = 30;
     await saveCharacter(hero);
-    await saveCharacter(createDefaultCharacterState({ id: 'npc-late', name: '路人', type: 'npc', saveId }));
+    await saveCharacter(
+      createDefaultCharacterState({ id: 'npc-late', name: '路人', type: 'npc', saveId }),
+    );
     const p2 = await getProfile(saveId);
     p2.fp = 9;
     p2.variables = { sys: { 进度: '第三章' } };
@@ -1047,7 +1095,7 @@ describe('restoreSnapshot 集成 — 真实 DB (M5 §11.2)', () => {
 
     // turn3 消息已删、turn1/2 消息还在
     const msgs = await getMessages(saveId);
-    expect(msgs.map(m => m.id).sort()).toEqual(['m1', 'm2']);
+    expect(msgs.map((m) => m.id).sort()).toEqual(['m1', 'm2']);
 
     // activeSnapshotId 指向该快照
     const slot = await getSave(saveId);
@@ -1272,12 +1320,18 @@ const V12_STORES = {
 
 describe('Asset CRUD (v13)', () => {
   it('assetMeta / assetBlobs 表应存在', async () => {
-    expect(typeof await getDatabase().assetMeta.count()).toBe('number');
-    expect(typeof await getDatabase().assetBlobs.count()).toBe('number');
+    expect(typeof (await getDatabase().assetMeta.count())).toBe('number');
+    expect(typeof (await getDatabase().assetBlobs.count())).toBe('number');
   });
 
   it('保存/读取素材元数据应往返一致', async () => {
-    const asset = makeAsset({ name: '苏婉', type: '立绘', variant: '微笑', ext: 'webp', mime: 'image/webp' });
+    const asset = makeAsset({
+      name: '苏婉',
+      type: '立绘',
+      variant: '微笑',
+      ext: 'webp',
+      mime: 'image/webp',
+    });
     const id = await saveAsset(asset);
     expect(id).toBe(asset.id);
 
@@ -1327,7 +1381,10 @@ describe('Asset CRUD (v13)', () => {
 
   it('getAssets 应只返回元数据、不触碰 assetBlobs（列全库不反序列化字节）', async () => {
     await saveAsset(makeAsset({ name: '苏婉' }), new Blob(['bytes-1']));
-    await saveAsset(makeAsset({ name: '林秋', type: '立绘bg', ext: 'mp4', mime: 'video/mp4' }), new Blob(['bytes-2']));
+    await saveAsset(
+      makeAsset({ name: '林秋', type: '立绘bg', ext: 'mp4', mime: 'video/mp4' }),
+      new Blob(['bytes-2']),
+    );
 
     const all = await getAssets();
     expect(all).toHaveLength(2);
@@ -1336,7 +1393,7 @@ describe('Asset CRUD (v13)', () => {
       expect((row as unknown as Record<string, unknown>).blob).toBeUndefined();
     }
     // 字节确实在，只是要单独取
-    expect(all.map(a => a.name).sort()).toEqual(['林秋', '苏婉']);
+    expect(all.map((a) => a.name).sort()).toEqual(['林秋', '苏婉']);
     for (const row of all) {
       expect(await getAssetBlob(row.id)).toBeDefined();
     }
@@ -1390,12 +1447,18 @@ describe('Asset CRUD (v13)', () => {
     await saveAsset(makeAsset({ name: '苏婉', type: '立绘', hash: 'h3' }));
     await saveAsset(makeAsset({ name: '林秋', type: '头像', hash: 'h4' }));
 
-    const scoped = await getDatabase().assetMeta.where('[name+type]').equals(['苏婉', '头像']).toArray();
+    const scoped = await getDatabase()
+      .assetMeta.where('[name+type]')
+      .equals(['苏婉', '头像'])
+      .toArray();
     expect(scoped).toHaveLength(2);
-    expect(scoped.map(a => a.hash).sort()).toEqual(['h1', 'h2']);
+    expect(scoped.map((a) => a.hash).sort()).toEqual(['h1', 'h2']);
 
     // 同名不同类型不落入同一定域 —— 去重不该跨类型
-    const other = await getDatabase().assetMeta.where('[name+type]').equals(['苏婉', '立绘']).toArray();
+    const other = await getDatabase()
+      .assetMeta.where('[name+type]')
+      .equals(['苏婉', '立绘'])
+      .toArray();
     expect(other).toHaveLength(1);
     expect(other[0].hash).toBe('h3');
 
@@ -1467,7 +1530,14 @@ describe('Asset CRUD (v13)', () => {
       plotOutlines: { id: 'po1', saveId: 'save_test', updatedAt: 1 },
       saveProfiles: createDefaultSaveProfile('save_test'),
       createPresets: { id: 'cp1', name: '捏人预设', createdAt: 1, updatedAt: 1, data: {} },
-      messages: { id: 'msg1', saveId: 'save_test', turn: 1, role: 'user', content: '你好', timestamp: 1 },
+      messages: {
+        id: 'msg1',
+        saveId: 'save_test',
+        turn: 1,
+        role: 'user',
+        content: '你好',
+        timestamp: 1,
+      },
       audioTracks: makeAudioTrack({ id: 'tr1' }),
       audioBlobs: { id: 'tr1', blob: new Blob(['legacy-audio']) },
       audioPlaylists: makeAudioPlaylist({ id: 'pl1', trackIds: ['tr1'] }),
@@ -1489,7 +1559,7 @@ describe('Asset CRUD (v13)', () => {
 
     // 表册齐全: v12 的 17 张 + 素材两张，一个不少（误写 `表名: null` 或漏声明会在这里炸）
     const EXPECTED_V13_TABLES = [...Object.keys(V12_STORES), 'assetMeta', 'assetBlobs'].sort();
-    expect(db.tables.map(t => t.name).sort()).toEqual(EXPECTED_V13_TABLES);
+    expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_V13_TABLES);
 
     // 每一张旧表的数据都必须还在（漏写任一表会让这里归零）
     for (const table of Object.keys(V12_STORES)) {
@@ -1497,7 +1567,7 @@ describe('Asset CRUD (v13)', () => {
     }
     // 抽查内容而非仅行数
     expect((await db.lorebooks.get('lb1'))!.name).toBe('测试世界书');
-    expect((await getAudioBlob('tr1'))).toBeDefined();
+    expect(await getAudioBlob('tr1')).toBeDefined();
     expect(await (await getAudioBlob('tr1'))!.text()).toBe('legacy-audio');
     expect((await db.audioPlaylists.get('pl1'))!.trackIds).toEqual(['tr1']);
     // 新表就位且为空

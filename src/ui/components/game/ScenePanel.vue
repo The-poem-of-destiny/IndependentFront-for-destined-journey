@@ -1,32 +1,32 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useGameStore } from '../../stores/game-store'
-import { useHoverPopup } from '../../composables/useHoverPopup'
-import AssetMedia from '../shared/AssetMedia.vue'
-import { ASSET_TYPE_FALLBACK_CHAIN } from '@engine/asset-resolve'
-import { useSettingsStore } from '../../stores/settings-store'
-import { markNewsRead } from '@engine/save-profile'
-import { getAffectionLabel } from '@engine/affection-system'
-import { MONTH_NAMES, WEEKDAY_NAMES, getTimeOfDay } from '@engine/time-system'
-import { nameColorVar, initialsOf } from '../../utils/name-color'
-import { formatRel } from '../../utils/time-format'
-import AppTabs from '../shared/AppTabs.vue'
+import { computed, ref } from 'vue';
+import { useGameStore } from '../../stores/game-store';
+import { useHoverPopup } from '../../composables/useHoverPopup';
+import AssetMedia from '../shared/AssetMedia.vue';
+import { ASSET_TYPE_FALLBACK_CHAIN } from '@engine/asset-resolve';
+import { useSettingsStore } from '../../stores/settings-store';
+import { markNewsRead } from '@engine/save-profile';
+import { getAffectionLabel } from '@engine/affection-system';
+import { MONTH_NAMES, WEEKDAY_NAMES, getTimeOfDay } from '@engine/time-system';
+import { nameColorVar, initialsOf } from '../../utils/name-color';
+import { formatRel } from '../../utils/time-format';
+import AppTabs from '../shared/AppTabs.vue';
 
-const game = useGameStore()
-const settings = useSettingsStore()
-const s = settings.settings
+const game = useGameStore();
+const settings = useSettingsStore();
+const s = settings.settings;
 
 // ═══ 时间 ═══
 const timeInfo = computed(() => {
-  const t = game.gameTime
-  if (!t) return null
+  const t = game.gameTime;
+  if (!t) return null;
   return {
     era: `${t.era}${t.year}年`,
     date: `${MONTH_NAMES[t.month - 1]}${t.day}日 ${WEEKDAY_NAMES[t.weekday - 1]}`,
     time: `${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`,
     timeOfDay: getTimeOfDay(t),
-  }
-})
+  };
+});
 
 /**
  * 时段 → 图标 + 氛围色 token
@@ -35,80 +35,80 @@ const timeInfo = computed(() => {
  * 氛围色用主题语义 token，不引入硬编码 hex，双模式下都能呼吸。
  */
 const TOD_META: Record<string, { icon: string; colorVar: string }> = {
-  凌晨: { icon: 'fa-solid fa-moon', colorVar: '--theme-quality-rare' },       // 静谧蓝
-  早晨: { icon: 'fa-solid fa-sun', colorVar: '--theme-quality-uncommon' },   // 晨光绿
+  凌晨: { icon: 'fa-solid fa-moon', colorVar: '--theme-quality-rare' }, // 静谧蓝
+  早晨: { icon: 'fa-solid fa-sun', colorVar: '--theme-quality-uncommon' }, // 晨光绿
   上午: { icon: 'fa-solid fa-sun', colorVar: '--theme-quality-uncommon' },
-  中午: { icon: 'fa-solid fa-sun', colorVar: '--theme-warning' },             // 正午金
+  中午: { icon: 'fa-solid fa-sun', colorVar: '--theme-warning' }, // 正午金
   下午: { icon: 'fa-solid fa-sun', colorVar: '--theme-warning' },
   傍晚: { icon: 'fa-solid fa-cloud-sun', colorVar: '--theme-quality-mythic' }, // 黄昏赤
   深夜: { icon: 'fa-solid fa-moon', colorVar: '--theme-quality-rare' },
-}
+};
 
 const todMeta = computed(() => {
-  const t = game.gameTime
-  if (!t) return null
-  const tod = getTimeOfDay(t)
-  return TOD_META[tod] ?? { icon: 'fa-solid fa-clock', colorVar: '--theme-text-muted' }
-})
+  const t = game.gameTime;
+  if (!t) return null;
+  const tod = getTimeOfDay(t);
+  return TOD_META[tod] ?? { icon: 'fa-solid fa-clock', colorVar: '--theme-text-muted' };
+});
 
 // ═══ 位置 ═══
 const locationDisplay = computed(() => {
-  const loc = game.player?.location
-  if (!loc) return '未知'
-  return loc.replace(/-/g, ' · ')
-})
+  const loc = game.player?.location;
+  if (!loc) return '未知';
+  return loc.replace(/-/g, ' · ');
+});
 
 // ═══ 天气 —— 变量真源 SaveProfile.variables（M5 §12；dispatcher 的 天气 变量落 sys 命名空间），worldFlags 兜底旧数据 ═══
 const weather = computed(() => {
-  const sys = (game.saveProfile?.variables as any)?.sys
-  const wf = game.saveProfile?.worldFlags
-  return (sys?.['天气'] as string) ?? (wf?.['天气'] as string) ?? (wf?.['weather'] as string) ?? ''
-})
+  const sys = (game.saveProfile?.variables as any)?.sys;
+  const wf = game.saveProfile?.worldFlags;
+  return (sys?.['天气'] as string) ?? (wf?.['天气'] as string) ?? (wf?.['weather'] as string) ?? '';
+});
 
 // ═══ 在场角色 — present 字段判断 ═══
 const presentChars = computed(() => {
   // 兜 undefined：心声气泡的 popChar 计算在 activeSaveId 分支之外，
   // 未加载存档时也会求值一次，characters 还没就位就会炸。
-  const all = game.characters ?? []
-  return all.filter(c => {
-    if (c.type === 'player') return false
-    return c.present === true
-  })
-})
+  const all = game.characters ?? [];
+  return all.filter((c) => {
+    if (c.type === 'player') return false;
+    return c.present === true;
+  });
+});
 
 // ═══ 页签 ═══
-type SceneTab = 'chars' | 'quests' | 'world' | 'misc'
+type SceneTab = 'chars' | 'quests' | 'world' | 'misc';
 /** 默认落在「角色」—— 在场者是场景栏最即时的信息，不该藏在页签后面 */
-const activeTab = ref<SceneTab>('chars')
+const activeTab = ref<SceneTab>('chars');
 
 /** 未读世界消息数 —— 只有它配得上 AppTabs 的红色 badge（真提醒，不是纯计数） */
-const unreadNews = computed(() => game.news.filter(n => !n.read).length)
+const unreadNews = computed(() => game.news.filter((n) => !n.read).length);
 
 const sceneTabs = computed(() => [
   { key: 'chars' as SceneTab, label: '角色' },
   { key: 'quests' as SceneTab, label: '任务' },
   { key: 'world' as SceneTab, label: '世界', badge: unreadNews.value || undefined },
   { key: 'misc' as SceneTab, label: '万象' },
-])
+]);
 
 // ═══ 任务（原在右侧状态栏「任务追踪」，M6 起改挂左栏页签） ═══
 const questEntries = computed(() => {
-  const quests = game.saveProfile?.quests
-  if (!quests) return []
-  const order: Record<string, number> = { '高': 0, '中': 1, '低': 2 }
+  const quests = game.saveProfile?.quests;
+  if (!quests) return [];
+  const order: Record<string, number> = { 高: 0, 中: 1, 低: 2 };
   return Object.entries(quests).sort(
-    ([, a], [, b]) => (order[a.priority] ?? 2) - (order[b.priority] ?? 2)
-  )
-})
+    ([, a], [, b]) => (order[a.priority] ?? 2) - (order[b.priority] ?? 2),
+  );
+});
 
 function openQuests() {
-  game.showModal('quests')
+  game.showModal('quests');
 }
 
 /** 任务就地展开详情（对齐右栏持有物条目的交互） */
-const expandedQuest = ref<string | null>(null)
+const expandedQuest = ref<string | null>(null);
 function toggleQuest(name: string) {
-  expandedQuest.value = expandedQuest.value === name ? null : name
+  expandedQuest.value = expandedQuest.value === name ? null : name;
 }
 
 // ═══ 角色页签：悬停弹出心声气泡（延迟走全局设置 settings.hoverDelayMs） ═══
@@ -121,14 +121,14 @@ const thoughtPop = useHoverPopup({
   zoom: 1.1,
   placement: 'right-bottom',
   gap: 6,
-  anchorSelector: '.npc-portrait',   // 气泡左下角贴头像右上角
-})
-const popChar = computed(() =>
-  presentChars.value.find(c => c.id === thoughtPop.key.value) ?? null
-)
+  anchorSelector: '.npc-portrait', // 气泡左下角贴头像右上角
+});
+const popChar = computed(
+  () => presentChars.value.find((c) => c.id === thoughtPop.key.value) ?? null,
+);
 const popThought = computed(() =>
-  popChar.value ? (game.getThoughts(popChar.value) || '此刻风平浪静，无声可闻…') : ''
-)
+  popChar.value ? game.getThoughts(popChar.value) || '此刻风平浪静，无声可闻…' : '',
+);
 
 /** tier 名 → CSS 变量描边色；tierName 未在品质池时降级默认色。 */
 const TIER_COLOR: Record<string, string> = {
@@ -138,28 +138,28 @@ const TIER_COLOR: Record<string, string> = {
   史诗: 'var(--theme-quality-epic)',
   传说: 'var(--theme-quality-legendary)',
   神话: 'var(--theme-quality-mythic)',
-}
+};
 function tierColor(tierName?: string): string {
-  if (tierName && TIER_COLOR[tierName]) return TIER_COLOR[tierName]
-  return 'var(--theme-text-muted)'
+  if (tierName && TIER_COLOR[tierName]) return TIER_COLOR[tierName];
+  return 'var(--theme-text-muted)';
 }
 
 // ═══ 好感度 ═══
 // 真源是 saveProfile.affections，按**角色名**索引（M2/M5 起，rename_character 随迁）
 function affectionOf(name: string): number {
-  return game.saveProfile?.affections?.[name] ?? 0
+  return game.saveProfile?.affections?.[name] ?? 0;
 }
 /** [-100,100] → 单边填充比例 [0,1]；符号决定往左还是往右长 */
 function affectionRatio(name: string): number {
-  return Math.min(1, Math.abs(affectionOf(name)) / 100)
+  return Math.min(1, Math.abs(affectionOf(name)) / 100);
 }
 function affectionText(name: string): string {
-  const v = affectionOf(name)
-  return `${getAffectionLabel(v)} ${v > 0 ? '+' : ''}${v}`
+  const v = affectionOf(name);
+  return `${getAffectionLabel(v)} ${v > 0 ? '+' : ''}${v}`;
 }
 
 // ═══ 下段：新闻单选展开 ═══
-const expandedNewsId = ref<string | null>(null)
+const expandedNewsId = ref<string | null>(null);
 
 /**
  * M6 #36: 展开新闻时标记已读并持久化。
@@ -167,43 +167,46 @@ const expandedNewsId = ref<string | null>(null)
  * （Dexie 结构化克隆吃不下 Vue Proxy，同 QuestsPanel focusQuest 回写的做法）。
  */
 async function toggleNews(id: string) {
-  const opening = expandedNewsId.value !== id
-  expandedNewsId.value = opening ? id : null
-  if (!opening) return
+  const opening = expandedNewsId.value !== id;
+  expandedNewsId.value = opening ? id : null;
+  if (!opening) return;
 
-  const profile = game.saveProfile
-  if (!profile) return
-  const item = profile.news?.find(n => n.id === id)
-  if (!item || item.read) return // 只标未读项
+  const profile = game.saveProfile;
+  if (!profile) return;
+  const item = profile.news?.find((n) => n.id === id);
+  if (!item || item.read) return; // 只标未读项
 
-  item.read = true
+  item.read = true;
   try {
-    await markNewsRead(JSON.parse(JSON.stringify(profile)), id)
+    await markNewsRead(JSON.parse(JSON.stringify(profile)), id);
   } catch (err) {
-    console.error('[ScenePanel] 新闻已读标记持久化失败:', err)
+    console.error('[ScenePanel] 新闻已读标记持久化失败:', err);
   }
 }
 
 function openCharList() {
-  game.showModal('characters')
+  game.showModal('characters');
 }
 </script>
 
 <template>
-  <div class="scene-panel" v-if="game.activeSaveId">
+  <div v-if="game.activeSaveId" class="scene-panel">
     <!-- ═══════ 上段：场景 (时间 + 位置 + 天气) ═══════ -->
     <div class="scene-top">
       <!-- 时间 —— 无标题：纪元年 + 月日周合并一行，时段/时刻置于其下 -->
       <div class="scene-section scene-datetime">
         <template v-if="timeInfo">
           <div class="scene-date-line">{{ timeInfo.era }} {{ timeInfo.date }}</div>
-          <div class="scene-tod-line" :style="{ '--tod-color': `var(${todMeta?.colorVar ?? '--theme-text-muted'})` }">
+          <div
+            class="scene-tod-line"
+            :style="{ '--tod-color': `var(${todMeta?.colorVar ?? '--theme-text-muted'})` }"
+          >
             <i :class="'scene-tod-icon ' + (todMeta?.icon ?? 'fa-solid fa-clock')" />
             <span class="scene-tod-name">{{ timeInfo.timeOfDay }}</span>
             <span class="scene-tod-clock">{{ timeInfo.time }}</span>
           </div>
         </template>
-        <div class="scene-empty" v-else>时间未同步</div>
+        <div v-else class="scene-empty">时间未同步</div>
       </div>
 
       <!-- 位置 -->
@@ -213,7 +216,7 @@ function openCharList() {
       </div>
 
       <!-- 天气 -->
-      <div class="scene-section" v-if="weather">
+      <div v-if="weather" class="scene-section">
         <div class="scene-section-title">天气</div>
         <div class="scene-weather">{{ weather }}</div>
       </div>
@@ -227,10 +230,17 @@ function openCharList() {
       <template v-if="activeTab === 'quests'">
         <div class="scene-section-title scene-pane-title">
           <span>任务 ({{ questEntries.length }})</span>
-          <button class="scene-title-action" @click="openQuests" title="打开任务面板" aria-label="打开任务面板">›</button>
+          <button
+            class="scene-title-action"
+            title="打开任务面板"
+            aria-label="打开任务面板"
+            @click="openQuests"
+          >
+            ›
+          </button>
         </div>
 
-        <div class="quest-list" v-if="questEntries.length">
+        <div v-if="questEntries.length" class="quest-list">
           <div
             v-for="[name, q] in questEntries"
             :key="name"
@@ -246,134 +256,153 @@ function openCharList() {
             <div class="quest-top">
               <span class="quest-name">{{ name }}</span>
               <span class="quest-prio" :class="'pri-' + q.priority">{{ q.priority }}</span>
-              <i class="fa-solid quest-chevron" :class="expandedQuest === name ? 'fa-chevron-up' : 'fa-chevron-down'" />
+              <i
+                class="fa-solid quest-chevron"
+                :class="expandedQuest === name ? 'fa-chevron-up' : 'fa-chevron-down'"
+              />
             </div>
-            <div class="quest-obj" v-if="q.objective">{{ q.objective }}</div>
+            <div v-if="q.objective" class="quest-obj">{{ q.objective }}</div>
 
-            <div class="quest-detail" v-if="expandedQuest === name">
-              <div class="qd-row" v-if="q.progress">
+            <div v-if="expandedQuest === name" class="quest-detail">
+              <div v-if="q.progress" class="qd-row">
                 <span class="qd-label">进展</span>
                 <span class="qd-value qd-prog">{{ q.progress }}</span>
               </div>
-              <div class="qd-row" v-if="q.detail">
+              <div v-if="q.detail" class="qd-row">
                 <span class="qd-label">详情</span>
                 <span class="qd-value">{{ q.detail }}</span>
               </div>
-              <div class="qd-row" v-if="q.reward">
+              <div v-if="q.reward" class="qd-row">
                 <span class="qd-label">奖励</span>
                 <span class="qd-value qd-reward">{{ q.reward }}</span>
               </div>
-              <div class="qd-row" v-if="q.status">
+              <div v-if="q.status" class="qd-row">
                 <span class="qd-label">状态</span>
                 <span class="qd-value">{{ q.status }}</span>
               </div>
-              <div class="qd-empty" v-if="!q.progress && !q.detail && !q.reward && !q.status">暂无更多记载</div>
+              <div v-if="!q.progress && !q.detail && !q.reward && !q.status" class="qd-empty">
+                暂无更多记载
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="empty-tab" v-else>尚无在办之事…</div>
+        <div v-else class="empty-tab">尚无在办之事…</div>
       </template>
 
       <!-- ─── 角色 ─── -->
       <template v-else-if="activeTab === 'chars'">
-      <div class="scene-section-title scene-pane-title">
-        <span>在场 ({{ presentChars.length }})</span>
-        <button class="scene-title-action" @click="openCharList" title="查看完整角色列表" aria-label="查看完整角色列表">›</button>
-      </div>
+        <div class="scene-section-title scene-pane-title">
+          <span>在场 ({{ presentChars.length }})</span>
+          <button
+            class="scene-title-action"
+            title="查看完整角色列表"
+            aria-label="查看完整角色列表"
+            @click="openCharList"
+          >
+            ›
+          </button>
+        </div>
 
-      <div class="scene-npc-list" v-if="presentChars.length">
-        <button
-          v-for="char in presentChars"
-          :key="char.id"
-          class="scene-npc-item"
-          :class="{ hovered: thoughtPop.key.value === char.id }"
-          :aria-describedby="thoughtPop.key.value === char.id ? 'npc-thought-pop' : undefined"
-          @mouseenter="thoughtPop.onEnter($event, char.id)"
-          @mouseleave="thoughtPop.hide"
-          @focus="thoughtPop.onFocus($event, char.id)"
-          @blur="thoughtPop.hide"
-        >
-          <!-- ⚠️ `.npc-portrait` 同时是心声气泡的 anchorSelector（见上方 thoughtPop），
+        <div v-if="presentChars.length" class="scene-npc-list">
+          <button
+            v-for="char in presentChars"
+            :key="char.id"
+            class="scene-npc-item"
+            :class="{ hovered: thoughtPop.key.value === char.id }"
+            :aria-describedby="thoughtPop.key.value === char.id ? 'npc-thought-pop' : undefined"
+            @mouseenter="thoughtPop.onEnter($event, char.id)"
+            @mouseleave="thoughtPop.hide"
+            @focus="thoughtPop.onFocus($event, char.id)"
+            @blur="thoughtPop.hide"
+          >
+            <!-- ⚠️ `.npc-portrait` 同时是心声气泡的 anchorSelector（见上方 thoughtPop），
                类必须留在**外层**元素上；素材只能塞进它里面。
                46×58 的 4:5 竖幅 = 立牌形状，所以走**立牌链** `立绘 → 立绘bg → 头像`:
                只有头像的角色也能占住这一位（构图不完美，但好过一个首字母的洞）。 -->
-          <span class="npc-portrait" :style="{ '--npc-avatar-color': nameColorVar(char.name) }">
-            <AssetMedia :name="char.name" :type="ASSET_TYPE_FALLBACK_CHAIN">{{ initialsOf(char.name) }}</AssetMedia>
-          </span>
-
-          <span class="npc-main">
-            <span class="npc-line">
-              <span class="npc-name">{{ char.name }}</span>
-              <span
-                class="npc-tier"
-                v-if="char.tier"
-                :style="{ color: tierColor((char as any).tierName), borderColor: tierColor((char as any).tierName) }"
-              >
-                T{{ char.tier }}
-              </span>
+            <span class="npc-portrait" :style="{ '--npc-avatar-color': nameColorVar(char.name) }">
+              <AssetMedia :name="char.name" :type="ASSET_TYPE_FALLBACK_CHAIN">{{
+                initialsOf(char.name)
+              }}</AssetMedia>
             </span>
 
-            <span class="npc-lv">Lv.{{ char.level ?? 1 }}</span>
-
-            <!-- 好感度 [-100,100]：中线为 0，正向右生长、负向左生长 -->
-            <span class="npc-aff">
-              <span class="aff-track">
+            <span class="npc-main">
+              <span class="npc-line">
+                <span class="npc-name">{{ char.name }}</span>
                 <span
-                  class="aff-fill"
-                  :class="affectionOf(char.name) < 0 ? 'neg' : 'pos'"
-                  :style="{ transform: `scaleX(${affectionRatio(char.name)})` }"
-                />
-                <span class="aff-zero" aria-hidden="true" />
+                  v-if="char.tier"
+                  class="npc-tier"
+                  :style="{
+                    color: tierColor((char as any).tierName),
+                    borderColor: tierColor((char as any).tierName),
+                  }"
+                >
+                  T{{ char.tier }}
+                </span>
               </span>
-              <span class="aff-text" :class="affectionOf(char.name) < 0 ? 'neg' : 'pos'">
-                {{ affectionText(char.name) }}
+
+              <span class="npc-lv">Lv.{{ char.level ?? 1 }}</span>
+
+              <!-- 好感度 [-100,100]：中线为 0，正向右生长、负向左生长 -->
+              <span class="npc-aff">
+                <span class="aff-track">
+                  <span
+                    class="aff-fill"
+                    :class="affectionOf(char.name) < 0 ? 'neg' : 'pos'"
+                    :style="{ transform: `scaleX(${affectionRatio(char.name)})` }"
+                  />
+                  <span class="aff-zero" aria-hidden="true" />
+                </span>
+                <span class="aff-text" :class="affectionOf(char.name) < 0 ? 'neg' : 'pos'">
+                  {{ affectionText(char.name) }}
+                </span>
               </span>
             </span>
-          </span>
-        </button>
-      </div>
+          </button>
+        </div>
 
-      <div class="empty-tab" v-else>此处别无他人…</div>
+        <div v-else class="empty-tab">此处别无他人…</div>
       </template>
 
       <!-- ─── 世界 ─── -->
       <template v-else-if="activeTab === 'world'">
-      <div class="scene-section-title">世界消息 · {{ timeInfo?.date || '' }} {{ timeInfo?.time || '' }}</div>
+        <div class="scene-section-title">
+          世界消息 · {{ timeInfo?.date || '' }} {{ timeInfo?.time || '' }}
+        </div>
 
-      <div class="scene-news-list" v-if="game.news.length">
-        <div
-          v-for="item in game.news"
-          :key="item.id"
-          class="news-item"
-          :class="{ expanded: expandedNewsId === item.id, read: item.read }"
-          role="button"
-          tabindex="0"
-          :aria-expanded="expandedNewsId === item.id"
-          @click="toggleNews(item.id)"
-          @keydown.enter="toggleNews(item.id)"
-          @keydown.space.prevent="toggleNews(item.id)"
-        >
-          <span class="news-dot" v-if="!item.read" />
-          <i class="news-icon fa-solid fa-newspaper" v-else />
-          <div class="news-main">
-            <div class="news-title-row">
-              <span class="news-title">{{ item.title }}</span>
-            </div>
-            <div v-if="expandedNewsId === item.id" class="news-content">
-              <span class="news-category" v-if="item.category">{{ item.category }}</span>
-              {{ item.content }}
+        <div v-if="game.news.length" class="scene-news-list">
+          <div
+            v-for="item in game.news"
+            :key="item.id"
+            class="news-item"
+            :class="{ expanded: expandedNewsId === item.id, read: item.read }"
+            role="button"
+            tabindex="0"
+            :aria-expanded="expandedNewsId === item.id"
+            @click="toggleNews(item.id)"
+            @keydown.enter="toggleNews(item.id)"
+            @keydown.space.prevent="toggleNews(item.id)"
+          >
+            <span v-if="!item.read" class="news-dot" />
+            <i v-else class="news-icon fa-solid fa-newspaper" />
+            <div class="news-main">
+              <div class="news-title-row">
+                <span class="news-title">{{ item.title }}</span>
+              </div>
+              <div v-if="expandedNewsId === item.id" class="news-content">
+                <span v-if="item.category" class="news-category">{{ item.category }}</span>
+                {{ item.content }}
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div class="empty-tab" v-else>四方无声，暂无新讯…</div>
+        <div v-else class="empty-tab">四方无声，暂无新讯…</div>
       </template>
 
       <!-- ─── 万象 ───
            占位：日后收纳「资产」一类条目 —— 需要具体信息、但不隶属于世界本身的记载 -->
-      <div class="empty-tab misc-placeholder" v-else>
+      <div v-else class="empty-tab misc-placeholder">
         <div>万象未启，此页尚空…</div>
         <div class="misc-note">
           此处日后收纳资产等条目 —— 需要具体信息、却独立于世界之外的记载。
@@ -383,7 +412,7 @@ function openCharList() {
   </div>
 
   <!-- ═══ 未加载 ═══ -->
-  <div class="scene-panel scene-panel-empty" v-else>
+  <div v-else class="scene-panel scene-panel-empty">
     <div class="scene-empty-msg">未选择存档</div>
   </div>
 
@@ -413,7 +442,7 @@ function openCharList() {
   width: calc(25% - var(--rail-w, 4.2rem));
   min-width: 200px;
   flex-shrink: 0;
-  overflow: hidden;                      /* 外层不滚， scrolls 委托给 mid/bot */
+  overflow: hidden; /* 外层不滚， scrolls 委托给 mid/bot */
   background: var(--theme-content-bg);
   border-right: 1px solid var(--theme-card-border);
   display: flex;
@@ -502,7 +531,9 @@ function openCharList() {
 }
 .scene-tod-icon {
   font-size: 0.85rem;
-  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--tod-color, var(--theme-text-muted)) 55%, transparent));
+  filter: drop-shadow(
+    0 0 4px color-mix(in srgb, var(--tod-color, var(--theme-text-muted)) 55%, transparent)
+  );
 }
 .scene-tod-name {
   font-size: 0.74rem;
@@ -532,7 +563,9 @@ function openCharList() {
   border-radius: var(--theme-radius-sm, 4px);
   border: 1px solid color-mix(in srgb, var(--theme-primary) 22%, var(--theme-card-border));
   cursor: pointer;
-  transition: background 120ms, border-color 120ms;
+  transition:
+    background 120ms,
+    border-color 120ms;
 }
 .quest-item:hover {
   border-color: color-mix(in srgb, var(--theme-primary) 40%, var(--theme-card-border));
@@ -565,9 +598,18 @@ function openCharList() {
   font-weight: 600;
   flex-shrink: 0;
 }
-.pri-高 { background: color-mix(in srgb, var(--theme-error) 18%, transparent); color: var(--theme-error); }
-.pri-中 { background: color-mix(in srgb, var(--theme-warning) 18%, transparent); color: var(--theme-warning); }
-.pri-低 { background: var(--theme-surface-muted); color: var(--theme-text-muted); }
+.pri-高 {
+  background: color-mix(in srgb, var(--theme-error) 18%, transparent);
+  color: var(--theme-error);
+}
+.pri-中 {
+  background: color-mix(in srgb, var(--theme-warning) 18%, transparent);
+  color: var(--theme-warning);
+}
+.pri-低 {
+  background: var(--theme-surface-muted);
+  color: var(--theme-text-muted);
+}
 .quest-obj {
   font-size: 0.6875rem;
   color: var(--theme-text-secondary);
@@ -600,8 +642,12 @@ function openCharList() {
   color: var(--theme-text-secondary);
   overflow-wrap: break-word;
 }
-.qd-prog { color: var(--theme-success); }
-.qd-reward { color: var(--theme-currency-gold); }
+.qd-prog {
+  color: var(--theme-success);
+}
+.qd-reward {
+  color: var(--theme-currency-gold);
+}
 .qd-empty {
   font-size: 0.6875rem;
   font-style: italic;
@@ -671,7 +717,7 @@ function openCharList() {
   font-weight: 700;
   font-family: var(--theme-font-title, serif);
   letter-spacing: -0.02em;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   overflow: hidden;
   white-space: nowrap;
 }
@@ -680,7 +726,7 @@ function openCharList() {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;   /* 文字块整体靠右 */
+  align-items: flex-end; /* 文字块整体靠右 */
   gap: 3px;
 }
 /* 同样反向：品质徽章在左、名字紧挨画像 */
@@ -723,7 +769,7 @@ function openCharList() {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  align-self: stretch;   /* 好感度条要占满，不能被 align-items:flex-end 收成内容宽 */
+  align-self: stretch; /* 好感度条要占满，不能被 align-items:flex-end 收成内容宽 */
 }
 .aff-track {
   position: relative;
@@ -767,11 +813,17 @@ function openCharList() {
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
-.aff-text.pos { color: var(--theme-affection-text); }
-.aff-text.neg { color: var(--theme-error); }
+.aff-text.pos {
+  color: var(--theme-affection-text);
+}
+.aff-text.neg {
+  color: var(--theme-error);
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .aff-fill { transition: none; }
+  .aff-fill {
+    transition: none;
+  }
 }
 
 /* ═══ 心声气泡 —— 云朵造型的 thought bubble ═══
@@ -780,14 +832,14 @@ function openCharList() {
 .thought-bubble {
   position: fixed;
   z-index: var(--z-tooltip, 500);
-  zoom: 1.1;              /* 与场景栏同步放大 —— 它在面板外，继承不到 */
+  zoom: 1.1; /* 与场景栏同步放大 —— 它在面板外，继承不到 */
   width: 260px;
   padding: 11px 14px;
   border-radius: 18px;
   background: color-mix(in srgb, var(--theme-primary) 7%, var(--theme-card-bg));
   border: 1px solid color-mix(in srgb, var(--theme-primary) 28%, var(--theme-card-border));
   box-shadow: var(--theme-shadow-lg);
-  pointer-events: none;   /* 气泡不吃鼠标，避免盖住行造成进出闪烁 */
+  pointer-events: none; /* 气泡不吃鼠标，避免盖住行造成进出闪烁 */
 }
 /* 思绪尾巴：两颗圆点，越靠近角色越小 */
 .thought-bubble::before,
@@ -823,11 +875,21 @@ function openCharList() {
   color: var(--theme-text-secondary);
 }
 
-.thought-pop-enter-active { transition: opacity 0.14s ease-out; }
-.thought-pop-leave-active { transition: opacity 0.1s ease-in; }
-.thought-pop-enter-from, .thought-pop-leave-to { opacity: 0; }
+.thought-pop-enter-active {
+  transition: opacity 0.14s ease-out;
+}
+.thought-pop-leave-active {
+  transition: opacity 0.1s ease-in;
+}
+.thought-pop-enter-from,
+.thought-pop-leave-to {
+  opacity: 0;
+}
 @media (prefers-reduced-motion: reduce) {
-  .thought-pop-enter-active, .thought-pop-leave-active { transition: none; }
+  .thought-pop-enter-active,
+  .thought-pop-leave-active {
+    transition: none;
+  }
 }
 
 /* ═══ 下段新闻 ═══ */

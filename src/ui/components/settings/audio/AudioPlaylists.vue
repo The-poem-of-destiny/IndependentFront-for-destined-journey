@@ -5,98 +5,106 @@
  * 可选曲目由外层传入（已过滤掉隐藏的内置曲目，且只收 music —— 播放列表是
  * 音序器概念，见设计稿 §4.3）。选中项是本组件的局部状态，别处不关心。
  */
-import { ref, computed, inject } from 'vue'
-import { useAudioStore } from '../../../stores/audio-store'
-import { useUIStore } from '../../../stores/ui-store'
-import type { AudioTrack } from '@engine/types'
-import AppButton from '../../shared/AppButton.vue'
-import { audioDialogsKey } from './dialogs'
+import { ref, computed, inject } from 'vue';
+import { useAudioStore } from '../../../stores/audio-store';
+import { useUIStore } from '../../../stores/ui-store';
+import type { AudioTrack } from '@engine/types';
+import AppButton from '../../shared/AppButton.vue';
+import { audioDialogsKey } from './dialogs';
 
 defineProps<{
   /** 可加入播放列表的曲目（外层已按隐藏名单 + kind 过滤） */
-  musicTracks: AudioTrack[]
-}>()
+  musicTracks: AudioTrack[];
+}>();
 
 const emit = defineEmits<{
   /** 排序结果的无障碍播报，由外层写进唯一的 aria-live 区 */
-  (e: 'announce', message: string): void
-}>()
+  (e: 'announce', message: string): void;
+}>();
 
-const audio = useAudioStore()
-const ui = useUIStore()
-const dialogs = inject(audioDialogsKey)!
+const audio = useAudioStore();
+const ui = useUIStore();
+const dialogs = inject(audioDialogsKey)!;
 
-const selectedPlaylistId = ref<string>('')
+const selectedPlaylistId = ref<string>('');
 
 const selectedPlaylist = computed(() =>
   selectedPlaylistId.value ? audio.findPlaylist(selectedPlaylistId.value) : undefined,
-)
+);
 
 const playlistTracks = computed<AudioTrack[]>(() => {
-  const p = selectedPlaylist.value
-  if (!p) return []
-  return p.trackIds.map((id) => audio.findTrack(id)).filter((t): t is AudioTrack => !!t)
-})
+  const p = selectedPlaylist.value;
+  if (!p) return [];
+  return p.trackIds.map((id) => audio.findTrack(id)).filter((t): t is AudioTrack => !!t);
+});
 
-const addTrackId = ref<string>('')
+const addTrackId = ref<string>('');
 
 /**
  * 手工命名撞名时 store 拒绝写入。这里不把用户刚打的字丢掉 —— 说清是哪个名字
  * 被占了，然后带着原文重新弹出输入框，让人改一个字就能继续。取消才退出。
  */
 async function createPlaylist(): Promise<void> {
-  let draft = '新播放列表'
+  let draft = '新播放列表';
   for (;;) {
-    const name = await dialogs.askPrompt({ title: '新建播放列表', label: '新建播放列表名称', value: draft })
-    if (!name) return
-    const list = await audio.createPlaylist(name)
+    const name = await dialogs.askPrompt({
+      title: '新建播放列表',
+      label: '新建播放列表名称',
+      value: draft,
+    });
+    if (!name) return;
+    const list = await audio.createPlaylist(name);
     if (list) {
-      selectedPlaylistId.value = list.id
-      return
+      selectedPlaylistId.value = list.id;
+      return;
     }
-    draft = name
-    ui.toast(`已有名为「${name}」的播放列表，请换一个名字。`, 'error')
+    draft = name;
+    ui.toast(`已有名为「${name}」的播放列表，请换一个名字。`, 'error');
   }
 }
 
 async function renameSelectedPlaylist(): Promise<void> {
-  const p = selectedPlaylist.value
-  if (!p) return
-  let draft = p.name
+  const p = selectedPlaylist.value;
+  if (!p) return;
+  let draft = p.name;
   for (;;) {
-    const name = await dialogs.askPrompt({ title: '重命名播放列表', label: '播放列表名称', value: draft })
-    if (!name) return
-    if (await audio.renamePlaylist(p.id, name)) return
+    const name = await dialogs.askPrompt({
+      title: '重命名播放列表',
+      label: '播放列表名称',
+      value: draft,
+    });
+    if (!name) return;
+    if (await audio.renamePlaylist(p.id, name)) return;
     // store 返回 false 有两种原因：撞名、或这一条已经不存在了（在别处被删）。
     // 一律归因撞名的话，列表被删时用户换十个名字都出不去，只能取消。
     if (!audio.findPlaylist(p.id)) {
-      ui.toast('这个播放列表已经不存在了（可能在别处被删除）。', 'error')
-      return
+      ui.toast('这个播放列表已经不存在了（可能在别处被删除）。', 'error');
+      return;
     }
-    draft = name
-    ui.toast(`已有名为「${name}」的播放列表，请换一个名字。`, 'error')
+    draft = name;
+    ui.toast(`已有名为「${name}」的播放列表，请换一个名字。`, 'error');
   }
 }
 
 async function deleteSelectedPlaylist(): Promise<void> {
-  const p = selectedPlaylist.value
-  if (!p) return
+  const p = selectedPlaylist.value;
+  if (!p) return;
   const ok = await dialogs.askConfirm({
     title: '删除播放列表',
     message: `删除播放列表「${p.name}」？曲目本身不会被删除。`,
     confirmLabel: '删除',
     danger: true,
-  })
-  if (!ok) return
-  await audio.deletePlaylist(p.id)
-  selectedPlaylistId.value = ''
+  });
+  if (!ok) return;
+  await audio.deletePlaylist(p.id);
+  selectedPlaylistId.value = '';
 }
 
 async function addSelectedTrack(): Promise<void> {
-  const p = selectedPlaylist.value
-  if (!p || !addTrackId.value) return
-  await audio.addTrackToPlaylist(p.id, addTrackId.value)
-  addTrackId.value = ''
+  const p = selectedPlaylist.value;
+  if (!p || !addTrackId.value) return;
+  await audio.addTrackToPlaylist(p.id, addTrackId.value);
+  addTrackId.value = '';
 }
 
 // ===== 排序 =====
@@ -105,16 +113,16 @@ async function addSelectedTrack(): Promise<void> {
 
 /** 把第 from 位挪到第 to 位；越界或原地一律不写库 */
 async function moveTrack(from: number, to: number): Promise<void> {
-  const p = selectedPlaylist.value
-  if (!p) return
-  const ids = [...p.trackIds]
-  if (from < 0 || from >= ids.length) return
-  if (to < 0 || to >= ids.length || to === from) return
-  const [moved] = ids.splice(from, 1)
-  ids.splice(to, 0, moved)
-  await audio.reorderPlaylist(p.id, ids)
-  const name = audio.findTrack(moved)?.name ?? '曲目'
-  emit('announce', `已将「${name}」移动到第 ${to + 1} 位，共 ${ids.length} 首。`)
+  const p = selectedPlaylist.value;
+  if (!p) return;
+  const ids = [...p.trackIds];
+  if (from < 0 || from >= ids.length) return;
+  if (to < 0 || to >= ids.length || to === from) return;
+  const [moved] = ids.splice(from, 1);
+  ids.splice(to, 0, moved);
+  await audio.reorderPlaylist(p.id, ids);
+  const name = audio.findTrack(moved)?.name ?? '曲目';
+  emit('announce', `已将「${name}」移动到第 ${to + 1} 位，共 ${ids.length} 首。`);
 }
 
 // ── 原生 HTML5 拖放 ───────────────────────────────────────
@@ -123,37 +131,41 @@ async function moveTrack(from: number, to: number): Promise<void> {
 // 染底 + 一圈 1px 内描边（design.md 绝对禁令：不用 >1px 的彩色侧边条）。
 
 /** 拖拽源的位次；-1 表示当前没有在拖 */
-const dragIndex = ref(-1)
+const dragIndex = ref(-1);
 /** 悬停中的落点位次；-1 表示没有落点 */
-const dropIndex = ref(-1)
+const dropIndex = ref(-1);
 
 function onDragStart(index: number, e: DragEvent): void {
-  dragIndex.value = index
-  dropIndex.value = index
-  const dt = e.dataTransfer
-  if (!dt) return
-  dt.effectAllowed = 'move'
+  dragIndex.value = index;
+  dropIndex.value = index;
+  const dt = e.dataTransfer;
+  if (!dt) return;
+  dt.effectAllowed = 'move';
   // Firefox 不 setData 就根本不开始拖；个别环境禁止写入，失败也不该炸掉拖拽
-  try { dt.setData('text/plain', String(index)) } catch { /* 忽略 */ }
+  try {
+    dt.setData('text/plain', String(index));
+  } catch {
+    /* 忽略 */
+  }
 }
 
 function onDragOver(index: number, e: DragEvent): void {
-  if (dragIndex.value < 0) return
-  e.preventDefault() // 不 preventDefault 就不会触发 drop
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-  dropIndex.value = index
+  if (dragIndex.value < 0) return;
+  e.preventDefault(); // 不 preventDefault 就不会触发 drop
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+  dropIndex.value = index;
 }
 
 async function onDrop(index: number, e: DragEvent): Promise<void> {
-  e.preventDefault()
-  const from = dragIndex.value
-  resetDrag()
-  await moveTrack(from, index) // 原地放下 → moveTrack 自己会短路，不写库
+  e.preventDefault();
+  const from = dragIndex.value;
+  resetDrag();
+  await moveTrack(from, index); // 原地放下 → moveTrack 自己会短路，不写库
 }
 
 function resetDrag(): void {
-  dragIndex.value = -1
-  dropIndex.value = -1
+  dragIndex.value = -1;
+  dropIndex.value = -1;
 }
 </script>
 
@@ -164,9 +176,23 @@ function resetDrag(): void {
     <!-- 选择器 -->
     <div class="playlist-picker">
       <div class="picker-actions">
-        <AppButton variant="primary" size="sm" @click="createPlaylist"><i class="fa-solid fa-plus" aria-hidden="true" /> 新建</AppButton>
-        <AppButton variant="secondary" size="sm" :disabled="!selectedPlaylist" @click="renameSelectedPlaylist">重命名</AppButton>
-        <AppButton variant="secondary" size="sm" :disabled="!selectedPlaylist" @click="deleteSelectedPlaylist">删除</AppButton>
+        <AppButton variant="primary" size="sm" @click="createPlaylist"
+          ><i class="fa-solid fa-plus" aria-hidden="true" /> 新建</AppButton
+        >
+        <AppButton
+          variant="secondary"
+          size="sm"
+          :disabled="!selectedPlaylist"
+          @click="renameSelectedPlaylist"
+          >重命名</AppButton
+        >
+        <AppButton
+          variant="secondary"
+          size="sm"
+          :disabled="!selectedPlaylist"
+          @click="deleteSelectedPlaylist"
+          >删除</AppButton
+        >
       </div>
       <div v-if="audio.playlists.length === 0" class="empty-tab">书页尚空，尚未建立播放列表…</div>
       <button
@@ -190,8 +216,16 @@ function resetDrag(): void {
             <option value="">加入曲目…</option>
             <option v-for="t in musicTracks" :key="t.id" :value="t.id">{{ t.name }}</option>
           </select>
-          <AppButton variant="secondary" size="sm" :disabled="!addTrackId" @click="addSelectedTrack">加入</AppButton>
-          <AppButton variant="secondary" size="sm" :disabled="playlistTracks.length === 0" @click="audio.playPlaylist(selectedPlaylist.id, 0)"><i class="fa-solid fa-play" aria-hidden="true" /> 播放</AppButton>
+          <AppButton variant="secondary" size="sm" :disabled="!addTrackId" @click="addSelectedTrack"
+            >加入</AppButton
+          >
+          <AppButton
+            variant="secondary"
+            size="sm"
+            :disabled="playlistTracks.length === 0"
+            @click="audio.playPlaylist(selectedPlaylist.id, 0)"
+            ><i class="fa-solid fa-play" aria-hidden="true" /> 播放</AppButton
+          >
         </div>
         <div v-if="playlistTracks.length === 0" class="empty-tab">此列表尚无曲目…</div>
         <p v-else class="reorder-hint text-muted">可拖动曲目调整顺序。</p>
@@ -199,7 +233,10 @@ function resetDrag(): void {
           v-for="(t, i) in playlistTracks"
           :key="t.id + '_' + i"
           class="track-row"
-          :class="{ 'row-dragging': dragIndex === i, 'row-drop-target': dropIndex === i && dragIndex !== i }"
+          :class="{
+            'row-dragging': dragIndex === i,
+            'row-drop-target': dropIndex === i && dragIndex !== i,
+          }"
           draggable="true"
           @dragstart="onDragStart(i, $event)"
           @dragover="onDragOver(i, $event)"
@@ -207,7 +244,9 @@ function resetDrag(): void {
           @dragend="resetDrag"
         >
           <!-- 拖拽把手：纯装饰的可供性提示，真正可拖的是整行 -->
-          <span class="drag-grip" aria-hidden="true"><i class="fa-solid fa-grip-vertical" aria-hidden="true" /></span>
+          <span class="drag-grip" aria-hidden="true"
+            ><i class="fa-solid fa-grip-vertical" aria-hidden="true"
+          /></span>
           <span
             class="kind-dot"
             :class="`dot-${t.kind}`"
@@ -215,7 +254,11 @@ function resetDrag(): void {
             :aria-label="t.kind === 'sfx' ? '音效' : '音乐'"
           />
           <span class="track-name">{{ t.name }}</span>
-          <button class="icon-btn icon-danger" aria-label="移出列表" @click="audio.removeTrackFromPlaylist(selectedPlaylist!.id, t.id)">
+          <button
+            class="icon-btn icon-danger"
+            aria-label="移出列表"
+            @click="audio.removeTrackFromPlaylist(selectedPlaylist!.id, t.id)"
+          >
             <i class="fa-solid fa-xmark" aria-hidden="true" />
           </button>
         </div>
@@ -267,7 +310,9 @@ function resetDrag(): void {
   gap: var(--theme-spacing-lg);
 }
 @media (max-width: 720px) {
-  .playlist-grid { grid-template-columns: minmax(0, 1fr); }
+  .playlist-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .picker-actions {
   display: flex;
@@ -292,7 +337,9 @@ function resetDrag(): void {
   font-size: 0.8125rem;
   text-align: left;
   cursor: pointer;
-  transition: background var(--theme-transition-fast), color var(--theme-transition-fast),
+  transition:
+    background var(--theme-transition-fast),
+    color var(--theme-transition-fast),
     border-color var(--theme-transition-fast);
 }
 .picker-item:hover {
@@ -411,7 +458,9 @@ function resetDrag(): void {
   font-family: inherit;
   font-size: 0.8rem;
   cursor: pointer;
-  transition: background var(--theme-transition-fast), color var(--theme-transition-fast),
+  transition:
+    background var(--theme-transition-fast),
+    color var(--theme-transition-fast),
     border-color var(--theme-transition-fast);
 }
 /* 图标字体的视觉重量与 emoji 不同，单独给一档字号找回平衡（按钮尺寸不变） */

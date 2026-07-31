@@ -167,7 +167,10 @@ describe('parseParams', () => {
   });
 
   it('should handle boolean-like string values', () => {
-    expect(parseParams('enabled=true:verbose=false')).toEqual({ enabled: 'true', verbose: 'false' });
+    expect(parseParams('enabled=true:verbose=false')).toEqual({
+      enabled: 'true',
+      verbose: 'false',
+    });
   });
 });
 
@@ -248,12 +251,7 @@ describe('resolveTemplate — basic resolution', () => {
   it('should resolve a single placeholder with no params', () => {
     registerPlaceholder('NAME', vi.fn().mockReturnValue('Alice'));
 
-    const result = resolveTemplate(
-      'Hello {{NAME}}!',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('Hello {{NAME}}!', 'story', makeCtx(), makeConfig());
     expect(result).toBe('Hello Alice!');
   });
 
@@ -261,12 +259,7 @@ describe('resolveTemplate — basic resolution', () => {
     const resolver = vi.fn().mockReturnValue('resolved');
     registerPlaceholder('NARRATIVE', resolver);
 
-    resolveTemplate(
-      '{{NARRATIVE:layers=3}}',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    resolveTemplate('{{NARRATIVE:layers=3}}', 'story', makeCtx(), makeConfig());
 
     expect(resolver).toHaveBeenCalledTimes(1);
     const callArgs = resolver.mock.calls[0];
@@ -355,13 +348,9 @@ describe('resolveTemplate — localParams override', () => {
   it('should use localParams value over registry resolver', () => {
     registerPlaceholder('NAME', vi.fn().mockReturnValue('from_registry'));
 
-    const result = resolveTemplate(
-      'Hello {{NAME}}!',
-      'story',
-      makeCtx(),
-      makeConfig(),
-      { NAME: 'from_local' },
-    );
+    const result = resolveTemplate('Hello {{NAME}}!', 'story', makeCtx(), makeConfig(), {
+      NAME: 'from_local',
+    });
     expect(result).toBe('Hello from_local!');
   });
 
@@ -369,26 +358,16 @@ describe('resolveTemplate — localParams override', () => {
     const resolver = vi.fn().mockReturnValue('from_registry');
     registerPlaceholder('NAME', resolver);
 
-    resolveTemplate(
-      '{{NAME}}',
-      'story',
-      makeCtx(),
-      makeConfig(),
-      { NAME: 'local_value' },
-    );
+    resolveTemplate('{{NAME}}', 'story', makeCtx(), makeConfig(), { NAME: 'local_value' });
     expect(resolver).not.toHaveBeenCalled();
   });
 
   it('should fall back to registry when localParams does not have the key', () => {
     registerPlaceholder('NAME', vi.fn().mockReturnValue('from_registry'));
 
-    const result = resolveTemplate(
-      '{{NAME}}',
-      'story',
-      makeCtx(),
-      makeConfig(),
-      { OTHER: 'unrelated' },
-    );
+    const result = resolveTemplate('{{NAME}}', 'story', makeCtx(), makeConfig(), {
+      OTHER: 'unrelated',
+    });
     expect(result).toBe('from_registry');
   });
 
@@ -410,13 +389,10 @@ describe('resolveTemplate — localParams override', () => {
     registerPlaceholder('A', vi.fn().mockReturnValue('reg_A'));
     registerPlaceholder('B', vi.fn().mockReturnValue('reg_B'));
 
-    const result = resolveTemplate(
-      '{{A}} + {{B}} = ?',
-      'story',
-      makeCtx(),
-      makeConfig(),
-      { A: 'local_A', B: 'local_B' },
-    );
+    const result = resolveTemplate('{{A}} + {{B}} = ?', 'story', makeCtx(), makeConfig(), {
+      A: 'local_A',
+      B: 'local_B',
+    });
     expect(result).toBe('local_A + local_B = ?');
   });
 });
@@ -431,12 +407,7 @@ describe('resolveTemplate — unknown placeholders', () => {
   });
 
   it('should leave unknown placeholder as-is', () => {
-    const result = resolveTemplate(
-      'Hello {{UNKNOWN}}!',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('Hello {{UNKNOWN}}!', 'story', makeCtx(), makeConfig());
     expect(result).toBe('Hello {{UNKNOWN}}!');
   });
 
@@ -485,31 +456,21 @@ describe('resolveTemplate — ST compatibility', () => {
 
   it('should leave {{char}} unchanged (lowercase ST placeholder)', () => {
     const result = resolveTemplate(
-      'Write {{char}}\'s next reply.',
+      "Write {{char}}'s next reply.",
       'story',
       makeCtx(),
       makeConfig(),
     );
-    expect(result).toBe('Write {{char}}\'s next reply.');
+    expect(result).toBe("Write {{char}}'s next reply.");
   });
 
   it('should leave {{user}} unchanged (lowercase ST placeholder)', () => {
-    const result = resolveTemplate(
-      '{{user}} says hello.',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('{{user}} says hello.', 'story', makeCtx(), makeConfig());
     expect(result).toBe('{{user}} says hello.');
   });
 
   it('should leave {{original}} unchanged (ST passthrough)', () => {
-    const result = resolveTemplate(
-      '{{original}}',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('{{original}}', 'story', makeCtx(), makeConfig());
     expect(result).toBe('{{original}}');
   });
 
@@ -536,12 +497,7 @@ describe('resolveTemplate — ST compatibility', () => {
   });
 
   it('should handle {{getvar::...}} ST syntax as passthrough', () => {
-    const result = resolveTemplate(
-      '{{getvar::HP::}}',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('{{getvar::HP::}}', 'story', makeCtx(), makeConfig());
     expect(result).toBe('{{getvar::HP::}}');
   });
 });
@@ -609,9 +565,10 @@ describe('resolveTemplate — AGENT.* placeholders', () => {
     });
 
     // Simulate what the real AGENT.STORY resolver would do
-    registerPlaceholder('AGENT.STORY', vi.fn().mockImplementation(
-      (c: AgentContext) => c.agentOutputs?.get('story') ?? '',
-    ));
+    registerPlaceholder(
+      'AGENT.STORY',
+      vi.fn().mockImplementation((c: AgentContext) => c.agentOutputs?.get('story') ?? ''),
+    );
 
     const result = resolveTemplate(
       'Story output was: {{AGENT.STORY}}',
@@ -625,12 +582,7 @@ describe('resolveTemplate — AGENT.* placeholders', () => {
   it('should resolve AGENT.STORY to empty string when no story output', () => {
     registerPlaceholder('AGENT.STORY', vi.fn().mockReturnValue(''));
 
-    const result = resolveTemplate(
-      '{{AGENT.STORY}}',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('{{AGENT.STORY}}', 'story', makeCtx(), makeConfig());
     expect(result).toBe('');
   });
 
@@ -773,12 +725,7 @@ describe('resolveTemplate — resolver returning undefined', () => {
   it('should keep placeholder when resolver returns undefined', () => {
     registerPlaceholder('MAYBE', vi.fn().mockReturnValue(undefined));
 
-    const result = resolveTemplate(
-      '{{MAYBE}} should stay',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('{{MAYBE}} should stay', 'story', makeCtx(), makeConfig());
     expect(result).toBe('{{MAYBE}} should stay');
   });
 
@@ -786,48 +733,28 @@ describe('resolveTemplate — resolver returning undefined', () => {
     registerPlaceholder('NULLISH', vi.fn().mockReturnValue(null));
 
     // null -> String(null) -> "null", which is defined, so it gets replaced
-    const result = resolveTemplate(
-      '{{NULLISH}} resolved',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('{{NULLISH}} resolved', 'story', makeCtx(), makeConfig());
     expect(result).toBe('null resolved');
   });
 
   it('should replace when resolver returns empty string', () => {
     registerPlaceholder('EMPTY', vi.fn().mockReturnValue(''));
 
-    const result = resolveTemplate(
-      '[{{EMPTY}}]',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('[{{EMPTY}}]', 'story', makeCtx(), makeConfig());
     expect(result).toBe('[]');
   });
 
   it('should replace when resolver returns number', () => {
     registerPlaceholder('NUM', vi.fn().mockReturnValue(42));
 
-    const result = resolveTemplate(
-      'The answer is {{NUM}}.',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('The answer is {{NUM}}.', 'story', makeCtx(), makeConfig());
     expect(result).toBe('The answer is 42.');
   });
 
   it('should replace when resolver returns boolean false', () => {
     registerPlaceholder('FLAG', vi.fn().mockReturnValue(false));
 
-    const result = resolveTemplate(
-      '{{FLAG}}',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('{{FLAG}}', 'story', makeCtx(), makeConfig());
     expect(result).toBe('false');
   });
 });
@@ -844,60 +771,35 @@ describe('resolveTemplate — dot notation placeholders', () => {
   it('should resolve AGENT.STORY placeholder', () => {
     registerPlaceholder('AGENT.STORY', vi.fn().mockReturnValue('story output'));
 
-    const result = resolveTemplate(
-      '{{AGENT.STORY}}',
-      'vars_update',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('{{AGENT.STORY}}', 'vars_update', makeCtx(), makeConfig());
     expect(result).toBe('story output');
   });
 
   it('should resolve CHAR.PLAYER placeholder with dot notation', () => {
     registerPlaceholder('CHAR.PLAYER', vi.fn().mockReturnValue('主角'));
 
-    const result = resolveTemplate(
-      'Name: {{CHAR.PLAYER}}',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('Name: {{CHAR.PLAYER}}', 'story', makeCtx(), makeConfig());
     expect(result).toBe('Name: 主角');
   });
 
   it('should resolve CHAR.PLAYER.HP placeholder', () => {
     registerPlaceholder('CHAR.PLAYER.HP', vi.fn().mockReturnValue('85/100'));
 
-    const result = resolveTemplate(
-      'HP: {{CHAR.PLAYER.HP}}',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('HP: {{CHAR.PLAYER.HP}}', 'story', makeCtx(), makeConfig());
     expect(result).toBe('HP: 85/100');
   });
 
   it('should resolve WORLD.LOCATION placeholder', () => {
     registerPlaceholder('WORLD.LOCATION', vi.fn().mockReturnValue('北方-诺斯加德'));
 
-    const result = resolveTemplate(
-      'Current: {{WORLD.LOCATION}}',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('Current: {{WORLD.LOCATION}}', 'story', makeCtx(), makeConfig());
     expect(result).toBe('Current: 北方-诺斯加德');
   });
 
   it('should resolve VAR.PLOT_MAIN placeholder', () => {
     registerPlaceholder('VAR.PLOT_MAIN', vi.fn().mockReturnValue('第一章'));
 
-    const result = resolveTemplate(
-      'Plot: {{VAR.PLOT_MAIN}}',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const result = resolveTemplate('Plot: {{VAR.PLOT_MAIN}}', 'story', makeCtx(), makeConfig());
     expect(result).toBe('Plot: 第一章');
   });
 });
@@ -915,12 +817,7 @@ describe('resolveTemplate — NARRATIVE placeholder', () => {
     const resolver = vi.fn().mockReturnValue('narrative text');
     registerPlaceholder('NARRATIVE', resolver);
 
-    resolveTemplate(
-      '{{NARRATIVE:layers=3}}',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    resolveTemplate('{{NARRATIVE:layers=3}}', 'story', makeCtx(), makeConfig());
 
     expect(resolver).toHaveBeenCalledTimes(1);
     expect(resolver.mock.calls[0][2]).toEqual({ layers: '3' });
@@ -930,12 +827,7 @@ describe('resolveTemplate — NARRATIVE placeholder', () => {
     const resolver = vi.fn().mockReturnValue('narrative');
     registerPlaceholder('NARRATIVE', resolver);
 
-    resolveTemplate(
-      '{{NARRATIVE:layers=4}}',
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    resolveTemplate('{{NARRATIVE:layers=4}}', 'story', makeCtx(), makeConfig());
 
     expect(resolver.mock.calls[0][2]).toEqual({ layers: '4' });
   });
@@ -989,14 +881,7 @@ describe('resolveTemplateWithGlobals', () => {
     const wb = makeWorldBook({ id: 'wb-test' });
     const cfgs = [makeConfig({ agentId: 'test-agent' })];
 
-    resolveTemplateWithGlobals(
-      '{{X}}',
-      'test-agent',
-      makeCtx(),
-      cfgs[0],
-      [wb],
-      cfgs,
-    );
+    resolveTemplateWithGlobals('{{X}}', 'test-agent', makeCtx(), cfgs[0], [wb], cfgs);
 
     expect(setGlobalsSpy).toHaveBeenCalledWith([wb], cfgs);
   });
@@ -1037,11 +922,7 @@ describe('resolveTemplates', () => {
       makeConfig(),
     );
 
-    expect(results).toEqual([
-      'Hello Alice!',
-      'Welcome to 白曜城.',
-      'Alice is at 白曜城.',
-    ]);
+    expect(results).toEqual(['Hello Alice!', 'Welcome to 白曜城.', 'Alice is at 白曜城.']);
   });
 
   it('should support localParams in resolveTemplates', () => {
@@ -1055,19 +936,11 @@ describe('resolveTemplates', () => {
       { HERO: '阿尔冯斯' },
     );
 
-    expect(results).toEqual([
-      '阿尔冯斯 arrives.',
-      'Destination: 白曜城',
-    ]);
+    expect(results).toEqual(['阿尔冯斯 arrives.', 'Destination: 白曜城']);
   });
 
   it('should return empty array for empty input', () => {
-    const results = resolveTemplates(
-      [],
-      'story',
-      makeCtx(),
-      makeConfig(),
-    );
+    const results = resolveTemplates([], 'story', makeCtx(), makeConfig());
     expect(results).toEqual([]);
   });
 
@@ -1083,13 +956,7 @@ describe('resolveTemplates', () => {
       makeConfig(),
     );
 
-    expect(results).toEqual([
-      'a',
-      'b',
-      'a and b',
-      'no placeholder',
-      '',
-    ]);
+    expect(results).toEqual(['a', 'b', 'a and b', 'no placeholder', '']);
   });
 });
 
@@ -1133,9 +1000,10 @@ describe('resolveTemplate — integration-style scenarios', () => {
 
   it('should resolve a vars_update instruction template with AGENT.STORY', () => {
     const storyText = '<maintext>你进入了铁匠铺。</maintext>';
-    registerPlaceholder('AGENT.STORY', vi.fn().mockImplementation(
-      (c: AgentContext) => c.agentOutputs?.get('story') ?? '',
-    ));
+    registerPlaceholder(
+      'AGENT.STORY',
+      vi.fn().mockImplementation((c: AgentContext) => c.agentOutputs?.get('story') ?? ''),
+    );
 
     const ctx = makeCtx({ agentOutputs: new Map([['story', storyText]]) });
 
@@ -1151,9 +1019,18 @@ describe('resolveTemplate — integration-style scenarios', () => {
 
   it('should handle a complex prompt with 10+ placeholders', () => {
     const placeholders = [
-      'PAA', 'PBB', 'PCC', 'PDD', 'PEE',
-      'PFF', 'PGG', 'PHH', 'PII', 'PJJ',
-      'PKK', 'PLL',
+      'PAA',
+      'PBB',
+      'PCC',
+      'PDD',
+      'PEE',
+      'PFF',
+      'PGG',
+      'PHH',
+      'PII',
+      'PJJ',
+      'PKK',
+      'PLL',
     ];
     for (const p of placeholders) {
       registerPlaceholder(p, vi.fn().mockReturnValue(`[${p}]`));

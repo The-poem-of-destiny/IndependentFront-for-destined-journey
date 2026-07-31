@@ -11,15 +11,15 @@
 
 ## 0. 现状诊断（2026-07-31 复核）
 
-| # | 问题 | 影响 | 严重度 | 当前状态 |
-|---|------|------|--------|----------|
-| 1 | `CLAUDE.md` 与 `AGENTS.md` 双源分叉（AGENTS.md 停在素材/战斗 v2 之前，落后一大截） | 不同工具的 agent 看到不同的仓库真相 | 🔴 | 仍在，§1 解决 |
-| 2 | `CLAUDE.md` 进度表膨胀成变更日志（单格数千字，全文 805 行） | 每会话 token 浪费 + 多人合并冲突头号来源 | 🔴 | 仍在，§3 解决 |
-| 3 | CI 缺 `vue-tsc`（.vue SFC 检查无兜底）+ 无分支保护 | 质量地板有洞 | 🔴 | `ci.yml` 已建但缺 vue-tsc，§4 补 |
-| 4 | 无 lint/format 工具 | 多 agent 风格漂移，diff 噪音累积 | 🟡 | §5 解决 |
-| 5 | 过程产物入库 | clone 变慢，仓库不可逆膨胀 | 🟡 | ✅ artifacts/ 已出库（`56f3ac4`） |
-| 6 | 分支策略随缘 + 遗留分支 5 条未清 | 多人并行互相踩脚 | 🟡 | §2 解决 |
-| 7 | `package.json` license=`ISC` 与文档 MIT 矛盾（description 乱码已修） | 元数据无守卫 | 🟢 | license 待修，§5.4 |
+| #   | 问题                                                                               | 影响                                     | 严重度 | 当前状态                          |
+| --- | ---------------------------------------------------------------------------------- | ---------------------------------------- | ------ | --------------------------------- |
+| 1   | `CLAUDE.md` 与 `AGENTS.md` 双源分叉（AGENTS.md 停在素材/战斗 v2 之前，落后一大截） | 不同工具的 agent 看到不同的仓库真相      | 🔴     | 仍在，§1 解决                     |
+| 2   | `CLAUDE.md` 进度表膨胀成变更日志（单格数千字，全文 805 行）                        | 每会话 token 浪费 + 多人合并冲突头号来源 | 🔴     | 仍在，§3 解决                     |
+| 3   | CI 缺 `vue-tsc`（.vue SFC 检查无兜底）+ 无分支保护                                 | 质量地板有洞                             | 🔴     | `ci.yml` 已建但缺 vue-tsc，§4 补  |
+| 4   | 无 lint/format 工具                                                                | 多 agent 风格漂移，diff 噪音累积         | 🟡     | §5 解决                           |
+| 5   | 过程产物入库                                                                       | clone 变慢，仓库不可逆膨胀               | 🟡     | ✅ artifacts/ 已出库（`56f3ac4`） |
+| 6   | 分支策略随缘 + 遗留分支 5 条未清                                                   | 多人并行互相踩脚                         | 🟡     | §2 解决                           |
+| 7   | `package.json` license=`ISC` 与文档 MIT 矛盾（description 乱码已修）               | 元数据无守卫                             | 🟢     | license 待修，§5.4                |
 
 ---
 
@@ -33,9 +33,9 @@
 
 `@path` import 是**单向**语法：
 
-| 工具 | 读哪个文件 | 支持 `@xxx` import？ |
-|------|-----------|---------------------|
-| Claude Code | `CLAUDE.md` | ✅ 认 |
+| 工具                      | 读哪个文件  | 支持 `@xxx` import？      |
+| ------------------------- | ----------- | ------------------------- |
+| Claude Code               | `CLAUDE.md` | ✅ 认                     |
 | Codex / Cursor / Windsurf | `AGENTS.md` | ❌ 不认（当普通文本忽略） |
 
 → Codex 读 AGENTS.md 时不会执行 import，所以 **AGENTS.md 必须自含完整正文**（它写 `@CLAUDE.md` 对 Codex 无效，正文会丢）；而 CLAUDE.md 可以靠 `@AGENTS.md` 把正文拉进来。
@@ -55,13 +55,13 @@ CLAUDE.md    ← 薄壳，只留三样：
 
 ### 1.3 内容归属铁律
 
-| 内容 | 放哪 | 理由 |
-|------|------|------|
-| 项目概览/架构图/设计约定/必读清单/常用命令 | **AGENTS.md** | 所有 agent 都需要，工具中立 |
-| Bug 反馈规范/世界观/数据字段/UI 设计规范 | **AGENTS.md** | 同上，Codex 也该遵守 |
-| 猫娘人格段（"本喵瞄"） | **CLAUDE.md** | Claude Code 专属，污染 Codex 无意义 |
+| 内容                                          | 放哪          | 理由                                  |
+| --------------------------------------------- | ------------- | ------------------------------------- |
+| 项目概览/架构图/设计约定/必读清单/常用命令    | **AGENTS.md** | 所有 agent 都需要，工具中立           |
+| Bug 反馈规范/世界观/数据字段/UI 设计规范      | **AGENTS.md** | 同上，Codex 也该遵守                  |
+| 猫娘人格段（"本喵瞄"）                        | **CLAUDE.md** | Claude Code 专属，污染 Codex 无意义   |
 | skills/workflows（`/workflow audit-code` 等） | **CLAUDE.md** | Claude Code 的 Skill 机制，Codex 没有 |
-| `@AGENTS.md` import | **CLAUDE.md** | 单向语法，只 Claude Code 认 |
+| `@AGENTS.md` import                           | **CLAUDE.md** | 单向语法，只 Claude Code 认           |
 
 **铁律：AGENTS.md 里绝不写「Claude Code 怎么样」「Codex 怎么样」** —— 它是共享正文，必须工具中立。
 
@@ -111,9 +111,9 @@ jobs:
   test:
     steps:
       - run: npm ci
-      - run: npm run typecheck          # tsc --noEmit
-      - run: npx vue-tsc --noEmit       # ← 补这条：覆盖 .vue SFC
-      - run: npm run test:run           # vitest --run
+      - run: npm run typecheck # tsc --noEmit
+      - run: npx vue-tsc --noEmit # ← 补这条：覆盖 .vue SFC
+      - run: npm run test:run # vitest --run
 ```
 
 - 三个检查全部设为 master 的 **required checks**（主人在 GitHub 手动配置）。
@@ -156,13 +156,13 @@ jobs:
 
 多人 + 多 agent 并行时，可预期的合并冲突磁铁及对策：
 
-| 热点文件 | 对策 |
-|----------|------|
-| `AGENTS.md` / `CLAUDE.md` | §1 真源化 + §3 历史迁出，指令文件低频改动 |
-| `src/sillytavern/types.ts` | 新增大类型强制走 `types-*.ts` 分册；同 PR 内只 append 不重排 |
-| `agent-config.json` | 🔶 **本轮不拆**（见决策点⑧），中期再评估拆为 `agent-config/<agent>.json` |
-| `docs/CHANGELOG.md` | append-only 按日期，新条目永远加在自己日期段 |
-| `package-lock.json` | 依赖变更单独 PR，不与功能混提 |
+| 热点文件                   | 对策                                                                     |
+| -------------------------- | ------------------------------------------------------------------------ |
+| `AGENTS.md` / `CLAUDE.md`  | §1 真源化 + §3 历史迁出，指令文件低频改动                                |
+| `src/sillytavern/types.ts` | 新增大类型强制走 `types-*.ts` 分册；同 PR 内只 append 不重排             |
+| `agent-config.json`        | 🔶 **本轮不拆**（见决策点⑧），中期再评估拆为 `agent-config/<agent>.json` |
+| `docs/CHANGELOG.md`        | append-only 按日期，新条目永远加在自己日期段                             |
+| `package-lock.json`        | 依赖变更单独 PR，不与功能混提                                            |
 
 - 新建 `.github/CODEOWNERS`：给热点文件挂 owner，PR 触碰时自动请求 review。
 
@@ -183,9 +183,11 @@ jobs:
 
 ```markdown
 ## 变更说明
+
 <!-- 做了什么、为什么 -->
 
 ## 检查清单
+
 - [ ] `npm run typecheck` + `npm run test:run` 本地通过
 - [ ] 文档同步检查：AGENTS.md / docs/ / reference/agent流程测试/ / tests/agent-framework/README.md
 - [ ] 涉及游戏数值/世界观 → 已查 `reference/world_book_index.md`
@@ -197,6 +199,7 @@ jobs:
 ```
 
 **Agent 产出 PR 的额外规则：**
+
 - PR 描述必须写明：哪个工具/agent 产出、人工是否逐行复核、验证方式（测试/真机/仅编译）。
 - 未经人工真机验证的功能 PR，标题或 label 标注「待真机验证」（现有惯例正式化）。
 
@@ -214,14 +217,15 @@ jobs:
 
 ## 10. 落地顺序（四批，每批一个 PR）
 
-| 批次 | 内容 | 风险 | 状态 |
-|------|------|------|------|
-| **A** | AGENTS.md 真源化（搬正文/去重/工具中立化）+ CLAUDE.md 瘦身（人格+skills+`@AGENTS.md`）+ 进度表迁 `docs/CHANGELOG.md` + 删旧 draft | 低（纯文档） | ⬜ 进行中 |
-| **B** | CI 补 `vue-tsc` + vue-tsc 存量错误清零 + PR 模板 + CODEOWNERS + 分支保护（主人手动）+ 遗留分支清理 | 低-中 | ⬜ |
-| **C** | `.editorconfig` + ESLint/Prettier 引入 + 全仓一次性 format（单独提交）+ `package.json` license=MIT | 中（大 diff，需单独 PR） | ⬜ |
-| **D** | 资产体积红线落地（扫描现有大图 + 压缩） | 低 | ⬜ |
+| 批次  | 内容                                                                                                                              | 风险                     | 状态      |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | --------- |
+| **A** | AGENTS.md 真源化（搬正文/去重/工具中立化）+ CLAUDE.md 瘦身（人格+skills+`@AGENTS.md`）+ 进度表迁 `docs/CHANGELOG.md` + 删旧 draft | 低（纯文档）             | ⬜ 进行中 |
+| **B** | CI 补 `vue-tsc` + vue-tsc 存量错误清零 + PR 模板 + CODEOWNERS + 分支保护（主人手动）+ 遗留分支清理                                | 低-中                    | ⬜        |
+| **C** | `.editorconfig` + ESLint/Prettier 引入 + 全仓一次性 format（单独提交）+ `package.json` license=MIT                                | 中（大 diff，需单独 PR） | ⬜        |
+| **D** | 资产体积红线落地（扫描现有大图 + 压缩）                                                                                           | 低                       | ⬜        |
 
 **主人手动操作汇总（本喵改不了）：**
+
 1. GitHub Settings → Branches：master 分支保护（禁推 + required checks = typecheck/test:run/vue-tsc）+ 允许管理员绕过
 2. GitHub Settings → 勾选 auto-delete head branches
 
@@ -229,13 +233,13 @@ jobs:
 
 ## 附：决策点定稿汇总（原 8 个 🔶 全部拍板）
 
-| # | 决策点 | 定稿选择 | 理由 |
-|---|--------|----------|------|
-| ① | 格式化工具 | **ESLint + Prettier** | Vue SFC 生态完整，与 vue-tsc 配合稳 |
-| ② | vue-tsc 存量错误 | **一次性清零，CI required** | 观察模式会永久卡住，没人回头清 |
-| ③ | 合并方式 | **Squash merge** | agent WIP 链不值得进历史，blame 干净 |
-| ④ | 分支保护严格度 | **允许管理员绕过** | solo 热修刚需 |
-| ⑤ | 大图资产 | **≤500KB 体积红线，不引 LFS** | 用户素材已走 IndexedDB，LFS ROI 低 |
-| ⑥ | CHANGELOG 格式 | **单文件 `docs/CHANGELOG.md`** | 搜得动，append-only 免冲突 |
-| ⑦ | CHANGELOG 历史范围 | **只搬进行中+近期交付** | 已完成旧 Phase 由 docs/phases/ + git log 承载 |
-| ⑧ | agent-config.json 拆分 | **本轮不做，中期再评估** | 当下能编辑，痛不到值得动构建链 |
+| #   | 决策点                 | 定稿选择                       | 理由                                          |
+| --- | ---------------------- | ------------------------------ | --------------------------------------------- |
+| ①   | 格式化工具             | **ESLint + Prettier**          | Vue SFC 生态完整，与 vue-tsc 配合稳           |
+| ②   | vue-tsc 存量错误       | **一次性清零，CI required**    | 观察模式会永久卡住，没人回头清                |
+| ③   | 合并方式               | **Squash merge**               | agent WIP 链不值得进历史，blame 干净          |
+| ④   | 分支保护严格度         | **允许管理员绕过**             | solo 热修刚需                                 |
+| ⑤   | 大图资产               | **≤500KB 体积红线，不引 LFS**  | 用户素材已走 IndexedDB，LFS ROI 低            |
+| ⑥   | CHANGELOG 格式         | **单文件 `docs/CHANGELOG.md`** | 搜得动，append-only 免冲突                    |
+| ⑦   | CHANGELOG 历史范围     | **只搬进行中+近期交付**        | 已完成旧 Phase 由 docs/phases/ + git log 承载 |
+| ⑧   | agent-config.json 拆分 | **本轮不做，中期再评估**       | 当下能编辑，痛不到值得动构建链                |

@@ -102,11 +102,10 @@ export async function runMoraleCheckPipeline(
     outcome,
     triggered,
   };
-  await ctx.bus.emitChain<MoraleResultParams>(
-    COMBAT_EVENTS.MORALE_RESULT,
-    resultParams,
-    { combatants: ctx.combatants, source: defenderId },
-  );
+  await ctx.bus.emitChain<MoraleResultParams>(COMBAT_EVENTS.MORALE_RESULT, resultParams, {
+    combatants: ctx.combatants,
+    source: defenderId,
+  });
 
   return { triggered, moraleState: baseResult.moraleState, outcome };
 }

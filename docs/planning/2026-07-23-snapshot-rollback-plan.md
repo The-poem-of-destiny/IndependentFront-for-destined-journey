@@ -15,15 +15,15 @@
 
 ## 二、设计决策（主人已锁定）
 
-| # | 决策 |
-|---|------|
-| ① | 右键菜单只做「回退」（撤回上一轮 + 回填输入）；不再单列"重新生成"（由回退+重发达成） |
-| ② | 右键只在**最新一回合**消息上生效 |
-| ③ | 分层保留（最近 5 每轮 → 每 4 回合 → 每 8~10 回合，封顶 ~30）；`trimSnapshots` 从 FIFO 改阶梯淘汰；设置加可配置项 |
-| ④ | 快照按钮放**左**侧 SideToolbar，**调试按钮上面** |
-| ⑤ | 回退/恢复底层用 `restoreSnapshot`（不用 `regenerateAgent`，它不级联下游） |
-| A | 右键菜单额外加「复制」（复制该条消息文本） |
-| B | 设置项 = 「快照保留模式」下拉：`阶梯式(推荐) / 密集(每轮)`，配合已有「快照上限」数字 |
+| #   | 决策                                                                                                             |
+| --- | ---------------------------------------------------------------------------------------------------------------- |
+| ①   | 右键菜单只做「回退」（撤回上一轮 + 回填输入）；不再单列"重新生成"（由回退+重发达成）                             |
+| ②   | 右键只在**最新一回合**消息上生效                                                                                 |
+| ③   | 分层保留（最近 5 每轮 → 每 4 回合 → 每 8~10 回合，封顶 ~30）；`trimSnapshots` 从 FIFO 改阶梯淘汰；设置加可配置项 |
+| ④   | 快照按钮放**左**侧 SideToolbar，**调试按钮上面**                                                                 |
+| ⑤   | 回退/恢复底层用 `restoreSnapshot`（不用 `regenerateAgent`，它不级联下游）                                        |
+| A   | 右键菜单额外加「复制」（复制该条消息文本）                                                                       |
+| B   | 设置项 = 「快照保留模式」下拉：`阶梯式(推荐) / 密集(每轮)`，配合已有「快照上限」数字                             |
 
 ## 三、架构与数据流
 
@@ -68,42 +68,42 @@ SideToolbar「快照」→ Modal 列出分层快照
 
 ### A. 引擎层（`src/sillytavern/`）
 
-| 任务 | 文件 | 说明 |
-|------|------|------|
-| A1 | `types.ts` | `Snapshot` 加 `plotEvents?: PlotEvent[]`（capture 用，可选=兼容旧快照） |
-| A2 | `state-manager.ts:1165` `createSnapshot` | capture `plotEvents`（`structuredClone`，同 characters） |
-| A3 | `state-manager.ts:1223` `restoreSnapshot` | 增强：① plotEvents 覆写恢复（全删+重写）② 清理 memories（realTimestamp > snap.createdAt）。需 `database.ts` 加 `deleteMemoriesAfter(saveId, realTimestamp)` helper |
-| A4 | `database.ts:581` `trimSnapshots` | 加 `mode: 'tiered' \| 'dense'` 参数；实现阶梯淘汰算法（按 turn/createdAt 排序→分桶→保最近5+稀疏化旧层） |
-| A5 | `state-manager.ts:1191` | `createSnapshot` 按 `settings.snapshotRetentionMode` 调对应 trim 模式 |
-| A6 | `game-store.ts`（或 `game-pipeline.ts`） | 新增 action `rollbackOneTurn()`：捕获当前 user 输入 → restoreSnapshot(上一轮) → fillInput → refresh。入口需 `StateManager` 实例（实现时确认获取方式：`new StateManager(saveId)` 或复用 pipeline 的） |
+| 任务 | 文件                                      | 说明                                                                                                                                                                                                 |
+| ---- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1   | `types.ts`                                | `Snapshot` 加 `plotEvents?: PlotEvent[]`（capture 用，可选=兼容旧快照）                                                                                                                              |
+| A2   | `state-manager.ts:1165` `createSnapshot`  | capture `plotEvents`（`structuredClone`，同 characters）                                                                                                                                             |
+| A3   | `state-manager.ts:1223` `restoreSnapshot` | 增强：① plotEvents 覆写恢复（全删+重写）② 清理 memories（realTimestamp > snap.createdAt）。需 `database.ts` 加 `deleteMemoriesAfter(saveId, realTimestamp)` helper                                   |
+| A4   | `database.ts:581` `trimSnapshots`         | 加 `mode: 'tiered' \| 'dense'` 参数；实现阶梯淘汰算法（按 turn/createdAt 排序→分桶→保最近5+稀疏化旧层）                                                                                              |
+| A5   | `state-manager.ts:1191`                   | `createSnapshot` 按 `settings.snapshotRetentionMode` 调对应 trim 模式                                                                                                                                |
+| A6   | `game-store.ts`（或 `game-pipeline.ts`）  | 新增 action `rollbackOneTurn()`：捕获当前 user 输入 → restoreSnapshot(上一轮) → fillInput → refresh。入口需 `StateManager` 实例（实现时确认获取方式：`new StateManager(saveId)` 或复用 pipeline 的） |
 
 ### B. 前端层（`src/ui/components/game/`）
 
-| 任务 | 文件 | 说明 |
-|------|------|------|
-| B1 | `SideToolbar.vue:10` | tools 数组在 `debug` 前插入 `{ id: 'snapshots', label: '快照', icon: 'fa-solid fa-clock-rotate-left' }` |
-| B2 | `GamePage.vue` | `handleToolClick` 加 `'snapshots'` → `activeModal='snapshots'`；现有快照 Modal 占位（~行182）换成 `<SnapshotPanel>` |
-| B3 | 新建 `SnapshotPanel.vue` | 列出 `getSnapshots(saveId)`：每条显示 回合#N / 时间 / reason 标签（回合档/手动/战斗前）/ 简要状态摘要；「恢复」按钮调 restoreSnapshot。外壳用 `AppModal` + `AppButton`，遵守 `docs/design.md` |
-| B4 | `ChatFlow.vue` | 每条 `.bubble-row` 加 `@contextmenu`；**仅最新一回合** assistant 消息启用菜单。菜单项：回退 / 复制。新建 `ContextMenu.vue`（定位参考 `FormCascader.vue` 绝对定位+zindex）或内联实现 |
-| B5 | `InputBar.vue` | 复用现有 `fillInput`/`pendingInput` watch（已就绪，无需改） |
-| B6 | 守卫 | `activeCombat` 存在时：禁用右键回退 + 面板恢复按钮置灰 + toast「战斗中无法回退」 |
+| 任务 | 文件                     | 说明                                                                                                                                                                                          |
+| ---- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B1   | `SideToolbar.vue:10`     | tools 数组在 `debug` 前插入 `{ id: 'snapshots', label: '快照', icon: 'fa-solid fa-clock-rotate-left' }`                                                                                       |
+| B2   | `GamePage.vue`           | `handleToolClick` 加 `'snapshots'` → `activeModal='snapshots'`；现有快照 Modal 占位（~行182）换成 `<SnapshotPanel>`                                                                           |
+| B3   | 新建 `SnapshotPanel.vue` | 列出 `getSnapshots(saveId)`：每条显示 回合#N / 时间 / reason 标签（回合档/手动/战斗前）/ 简要状态摘要；「恢复」按钮调 restoreSnapshot。外壳用 `AppModal` + `AppButton`，遵守 `docs/design.md` |
+| B4   | `ChatFlow.vue`           | 每条 `.bubble-row` 加 `@contextmenu`；**仅最新一回合** assistant 消息启用菜单。菜单项：回退 / 复制。新建 `ContextMenu.vue`（定位参考 `FormCascader.vue` 绝对定位+zindex）或内联实现           |
+| B5   | `InputBar.vue`           | 复用现有 `fillInput`/`pendingInput` watch（已就绪，无需改）                                                                                                                                   |
+| B6   | 守卫                     | `activeCombat` 存在时：禁用右键回退 + 面板恢复按钮置灰 + toast「战斗中无法回退」                                                                                                              |
 
 ### C. 设置（`src/ui/`）
 
-| 任务 | 文件 | 说明 |
-|------|------|------|
-| C1 | `types.ts:392` `AppSettings` | 加 `snapshotRetentionMode: 'tiered' \| 'dense'`；`DEFAULT_SETTINGS` 设 `'tiered'` |
-| C2 | `SettingsPage.vue` 「记忆 & 缓存」分区 | 加下拉「快照保留模式」（阶梯式(推荐)/密集(每轮)） |
-| C3 | `settings-store.ts` | 持久化新字段；确认「快照上限」数字项已暴露（已有 `maxSnapshotsPerSave`） |
+| 任务 | 文件                                   | 说明                                                                              |
+| ---- | -------------------------------------- | --------------------------------------------------------------------------------- |
+| C1   | `types.ts:392` `AppSettings`           | 加 `snapshotRetentionMode: 'tiered' \| 'dense'`；`DEFAULT_SETTINGS` 设 `'tiered'` |
+| C2   | `SettingsPage.vue` 「记忆 & 缓存」分区 | 加下拉「快照保留模式」（阶梯式(推荐)/密集(每轮)）                                 |
+| C3   | `settings-store.ts`                    | 持久化新字段；确认「快照上限」数字项已暴露（已有 `maxSnapshotsPerSave`）          |
 
 ### D. 测试（Vitest + fake-indexeddb）
 
-| 任务 | 说明 |
-|------|------|
-| D1 | `trimSnapshots` 阶梯淘汰单测：构造 40+ turn 快照，验证 tiered 模式保留最近5全 + 旧层稀疏化、总数≤上限；dense 模式=FIFO |
-| D2 | `restoreSnapshot` 增强单测：plotEvents 覆写 + memories 按 realTimestamp 清理 |
-| D3 | `rollbackOneTurn` 单测：捕获输入 + 回滚（不重跑 pipeline）+ 回填正确 |
-| D4 | 阶梯淘汰"铁律"：永远不删最近 5 个（即使上限=3） |
+| 任务 | 说明                                                                                                                   |
+| ---- | ---------------------------------------------------------------------------------------------------------------------- |
+| D1   | `trimSnapshots` 阶梯淘汰单测：构造 40+ turn 快照，验证 tiered 模式保留最近5全 + 旧层稀疏化、总数≤上限；dense 模式=FIFO |
+| D2   | `restoreSnapshot` 增强单测：plotEvents 覆写 + memories 按 realTimestamp 清理                                           |
+| D3   | `rollbackOneTurn` 单测：捕获输入 + 回滚（不重跑 pipeline）+ 回填正确                                                   |
+| D4   | 阶梯淘汰"铁律"：永远不删最近 5 个（即使上限=3）                                                                        |
 
 ## 五、技术坑修复（汇总）
 

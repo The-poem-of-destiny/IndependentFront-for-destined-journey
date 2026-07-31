@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { useGameStore } from '../../../stores/game-store'
+import { useGameStore } from '../../../stores/game-store';
 
-const game = useGameStore()
+const game = useGameStore();
 </script>
 
 <template>
@@ -10,7 +10,9 @@ const game = useGameStore()
       <i class="fa-solid fa-hand-fist combat-title-icon" />
       <span class="combat-type">{{ game.activeCombat?.combatType ?? '战斗' }}</span>
       <span class="combat-round">第 {{ game.activeCombat?.round ?? 1 }} 回合</span>
-      <span v-if="game.activeCombat?.environment" class="combat-env">· {{ game.activeCombat.environment }}</span>
+      <span v-if="game.activeCombat?.environment" class="combat-env"
+        >· {{ game.activeCombat.environment }}</span
+      >
     </div>
     <div class="combat-status">
       <span v-if="game.combatAwaitingInput" class="combat-your-turn">轮到你了</span>

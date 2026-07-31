@@ -20,6 +20,7 @@ DebugPanel 新增「本轮缓存 token 汇总」：命中 / 未命中 / 输出 t
 **bug2：自动管理全亮 + autoEnable 信号源错误**
 
 根因两层：
+
 - **数据层**：`beautifier-rules.json` 18 条规则挂了 `worldBookIds:["system_core"]`，核心书因含变量系统等默认 enabled 条目而恒活跃，`resolveAutoEnable` 的 OR 逻辑短路、绕过精确 uid 匹配 → 全 locked。删除该字段（uid 本就全对，保留）。
 - **信号源**（更深）：autoEnable 原以「worldBooks 条目 enabled」为信号，但那是「是否注入 prompt」的开关（核心书 480 条目几乎全 enabled），**不等于「这局选了哪个命定核心」**。命定核心是存档级单选，存于 `save.metadata.enabledWorldBookEntries`（`system_core:413` 格式）。改为以此为信号源：
   - `beautifier.ts`：`collectActiveWorldBookSignals(books)` → `collectActiveSignalsFromEntries(entries)`

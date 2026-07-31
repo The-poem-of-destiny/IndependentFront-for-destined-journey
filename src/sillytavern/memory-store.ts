@@ -8,9 +8,7 @@
  */
 
 import type { MemoryRecord, ApiEndpoint } from './types';
-import {
-  getMemories, getRecentMemories, saveMemory, deleteMemory,
-} from './database';
+import { getMemories, getRecentMemories, saveMemory, deleteMemory } from './database';
 
 // ========== Embedding ==========
 
@@ -35,7 +33,7 @@ export async function computeEmbedding(
     headers: {
       'Content-Type': 'application/json',
       'X-Target-Base-URL': baseUrl,
-      'Authorization': `Bearer ${endpoint.apiKey}`,
+      Authorization: `Bearer ${endpoint.apiKey}`,
     },
     body,
     signal,
@@ -46,7 +44,7 @@ export async function computeEmbedding(
     throw new Error(`Embedding API ${res.status}: ${errBody.slice(0, 200)}`);
   }
 
-  const json = await res.json() as {
+  const json = (await res.json()) as {
     data: Array<{ embedding: number[]; index: number }>;
   };
 
@@ -87,7 +85,7 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 /** 召回结果 */
 export interface RecalledMemory {
   memory: MemoryRecord;
-  score: number;           // 余弦相似度
+  score: number; // 余弦相似度
 }
 
 /**
@@ -119,7 +117,7 @@ export async function recallMemories(
     return allMemories
       .sort((a, b) => b.importance - a.importance || b.createdAt - a.createdAt)
       .slice(0, topK)
-      .map(m => ({ memory: m, score: 0 }));
+      .map((m) => ({ memory: m, score: 0 }));
   }
 
   // 有 embedding 的记忆：余弦相似度

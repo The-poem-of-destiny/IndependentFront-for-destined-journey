@@ -353,10 +353,7 @@ describe('EjsRuntime 类', () => {
 
   it('renderAll 合并多个模板的渲染结果', () => {
     const runtime = new EjsRuntime({ variables: {} });
-    const result = runtime.renderAll([
-      'Hello <%= "Alice" %>',
-      'World <%= "Bob" %>',
-    ]);
+    const result = runtime.renderAll(['Hello <%= "Alice" %>', 'World <%= "Bob" %>']);
     expect(result.rendered).toBe('Hello Alice\nWorld Bob\n');
     expect(result.errors).toHaveLength(0);
     expect(result.mutations).toEqual({});
@@ -374,10 +371,7 @@ describe('EjsRuntime 类', () => {
 
   it('renderAll 中前一个模板的 setMessageVar 影响后续模板', () => {
     const runtime = new EjsRuntime({ variables: {} });
-    const result = runtime.renderAll([
-      '<% setMessageVar("x", 10) %>',
-      '<%= getMessageVar("x") %>',
-    ]);
+    const result = runtime.renderAll(['<% setMessageVar("x", 10) %>', '<%= getMessageVar("x") %>']);
     expect(result.rendered).toContain('10');
   });
 
@@ -424,10 +418,7 @@ describe('EjsRuntime 类', () => {
 
 describe('renderEjs 便捷函数', () => {
   it('renderEjs 通过变量渲染模板', () => {
-    const result = renderEjs(
-      'Hello <%= getMessageVar("name") %>!',
-      { name: '主人' },
-    );
+    const result = renderEjs('Hello <%= getMessageVar("name") %>!', { name: '主人' });
     expect(result.rendered).toBe('Hello 主人!');
     expect(result.errors).toHaveLength(0);
   });
@@ -448,10 +439,7 @@ describe('renderEjs 便捷函数', () => {
   });
 
   it('renderEjs 的 mutations 在单次调用内可通过 getMessageVar 读取', () => {
-    const result = renderEjs(
-      '<% setMessageVar("hp", 30) %><%= getMessageVar("hp") %>',
-      {},
-    );
+    const result = renderEjs('<% setMessageVar("hp", 30) %><%= getMessageVar("hp") %>', {});
     expect(result.rendered).toBe('30');
     expect(result.mutations).toHaveProperty('hp', 30);
   });
@@ -473,9 +461,7 @@ describe('EjsRuntime — 混合模板场景', () => {
   it('嵌套变量对象通过 getMessageVar 正确渲染', () => {
     const vars = { player: { name: 'Hero', level: 5 } };
     const template =
-      '<%= getMessageVar("player.name") %>' +
-      ' Lv.' +
-      '<%= getMessageVar("player.level") %>';
+      '<%= getMessageVar("player.name") %>' + ' Lv.' + '<%= getMessageVar("player.level") %>';
     const result = renderEjs(template, vars);
     expect(result.rendered).toBe('Hero Lv.5');
   });
@@ -488,7 +474,8 @@ describe('EjsRuntime — 混合模板场景', () => {
 
   it('各 EJS 块之间变量不跨块共享（独立 new Function 作用域）', () => {
     // 第一个代码块声明 let name = "test"，第二个输出块无法访问
-    const template = '<% let localVar = "secret"; %><%= typeof localVar === "undefined" ? "isolated" : "shared" %>';
+    const template =
+      '<% let localVar = "secret"; %><%= typeof localVar === "undefined" ? "isolated" : "shared" %>';
     const result = renderEjs(template, {});
     expect(result.rendered).toBe('isolated');
   });

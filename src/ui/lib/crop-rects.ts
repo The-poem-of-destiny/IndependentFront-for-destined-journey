@@ -20,7 +20,7 @@
  * 3. **锁定 1:1 时以 `w` 为准**。方框只有一个自由度，拿两个字段去表达它必然有一个是
  *    多余的；约定死哪个说了算，比每处各挑一个要少一类"偶尔变成长方形"的 bug。
  */
-import type { CropRect } from './image-crop'
+import type { CropRect } from './image-crop';
 
 /**
  * 框的最小边长（源图像素）。
@@ -29,26 +29,26 @@ import type { CropRect } from './image-crop'
  * 但**源图本身比它还小时**这条让路（见 {@link clampSize}）—— 规则不该让一张
  * 4×4 的图变得没法裁。
  */
-export const MIN_CROP_SIZE = 8
+export const MIN_CROP_SIZE = 8;
 
 /** 四个角的把手。命名同 CSS 方位，`n` 上 `s` 下 `w` 左 `e` 右 */
-export type CropCorner = 'nw' | 'ne' | 'sw' | 'se'
+export type CropCorner = 'nw' | 'ne' | 'sw' | 'se';
 
 function round(v: number, fallback: number): number {
-  return Number.isFinite(v) ? Math.round(v) : fallback
+  return Number.isFinite(v) ? Math.round(v) : fallback;
 }
 
 /** 边长夹逼: `[min(MIN, 上限), 上限]`。图比 MIN 还小时上限说了算 */
 function clampSize(v: number, max: number): number {
-  const hi = Math.max(1, Math.floor(Number.isFinite(max) ? max : 1))
-  const lo = Math.min(MIN_CROP_SIZE, hi)
-  return Math.min(Math.max(round(v, lo), lo), hi)
+  const hi = Math.max(1, Math.floor(Number.isFinite(max) ? max : 1));
+  const lo = Math.min(MIN_CROP_SIZE, hi);
+  return Math.min(Math.max(round(v, lo), lo), hi);
 }
 
 /** 位置夹逼: `[0, 上限]`，上限即 `图边长 - 框边长` */
 function clampPos(v: number, max: number): number {
-  const hi = Math.max(0, Math.floor(Number.isFinite(max) ? max : 0))
-  return Math.min(Math.max(round(v, 0), 0), hi)
+  const hi = Math.max(0, Math.floor(Number.isFinite(max) ? max : 0));
+  return Math.min(Math.max(round(v, 0), 0), hi);
 }
 
 /** 整张图。**立绘的默认框**就是它 —— 大多数立绘素材本来就是裁好的 */
@@ -58,7 +58,7 @@ export function wholeImageRect(imgW: number, imgH: number): CropRect {
     y: 0,
     w: Math.max(1, Math.floor(Number.isFinite(imgW) ? imgW : 1)),
     h: Math.max(1, Math.floor(Number.isFinite(imgH) ? imgH : 1)),
-  }
+  };
 }
 
 /**
@@ -69,8 +69,8 @@ export function wholeImageRect(imgW: number, imgH: number): CropRect {
  * 就是框住腰部，每一次都得手动往上拖。
  */
 export function defaultAvatarRect(imgW: number, imgH: number): CropRect {
-  const side = clampSize(Math.min(imgW, imgH / 3), Math.min(imgW, imgH))
-  return { x: clampPos(Math.round((imgW - side) / 2), imgW - side), y: 0, w: side, h: side }
+  const side = clampSize(Math.min(imgW, imgH / 3), Math.min(imgW, imgH));
+  return { x: clampPos(Math.round((imgW - side) / 2), imgW - side), y: 0, w: side, h: side };
 }
 
 /**
@@ -79,15 +79,10 @@ export function defaultAvatarRect(imgW: number, imgH: number): CropRect {
  *
  * @param square 锁定 1:1 时以 `rect.w` 为准（纪律 3）
  */
-export function clampRect(
-  rect: CropRect,
-  imgW: number,
-  imgH: number,
-  square = false,
-): CropRect {
-  const w = square ? clampSize(rect.w, Math.min(imgW, imgH)) : clampSize(rect.w, imgW)
-  const h = square ? w : clampSize(rect.h, imgH)
-  return { x: clampPos(rect.x, imgW - w), y: clampPos(rect.y, imgH - h), w, h }
+export function clampRect(rect: CropRect, imgW: number, imgH: number, square = false): CropRect {
+  const w = square ? clampSize(rect.w, Math.min(imgW, imgH)) : clampSize(rect.w, imgW);
+  const h = square ? w : clampSize(rect.h, imgH);
+  return { x: clampPos(rect.x, imgW - w), y: clampPos(rect.y, imgH - h), w, h };
 }
 
 /** 平移（尺寸不变，撞到边界就停住） */
@@ -99,7 +94,7 @@ export function moveRect(
   imgH: number,
   square = false,
 ): CropRect {
-  return clampRect({ ...rect, x: rect.x + dx, y: rect.y + dy }, imgW, imgH, square)
+  return clampRect({ ...rect, x: rect.x + dx, y: rect.y + dy }, imgW, imgH, square);
 }
 
 /**
@@ -118,42 +113,42 @@ export function resizeRect(
   imgH: number,
   square = false,
 ): CropRect {
-  const left = rect.x
-  const top = rect.y
-  const right = rect.x + rect.w
-  const bottom = rect.y + rect.h
-  const east = corner === 'ne' || corner === 'se'
-  const south = corner === 'sw' || corner === 'se'
-  const ddx = Number.isFinite(dx) ? dx : 0
-  const ddy = Number.isFinite(dy) ? dy : 0
+  const left = rect.x;
+  const top = rect.y;
+  const right = rect.x + rect.w;
+  const bottom = rect.y + rect.h;
+  const east = corner === 'ne' || corner === 'se';
+  const south = corner === 'sw' || corner === 'se';
+  const ddx = Number.isFinite(dx) ? dx : 0;
+  const ddy = Number.isFinite(dy) ? dy : 0;
 
   if (square) {
-    const sx = east ? rect.w + ddx : rect.w - ddx
-    const sy = south ? rect.h + ddy : rect.h - ddy
-    const dominant = Math.abs(sx - rect.w) >= Math.abs(sy - rect.h) ? sx : sy
+    const sx = east ? rect.w + ddx : rect.w - ddx;
+    const sy = south ? rect.h + ddy : rect.h - ddy;
+    const dominant = Math.abs(sx - rect.w) >= Math.abs(sy - rect.h) ? sx : sy;
     // 锚点是对角，于是可用空间只由锚点到图边的距离决定
-    const maxSide = Math.min(east ? imgW - left : right, south ? imgH - top : bottom)
-    const side = clampSize(dominant, maxSide)
+    const maxSide = Math.min(east ? imgW - left : right, south ? imgH - top : bottom);
+    const side = clampSize(dominant, maxSide);
     return {
       x: east ? clampPos(left, imgW - side) : clampPos(right - side, imgW - side),
       y: south ? clampPos(top, imgH - side) : clampPos(bottom - side, imgH - side),
       w: side,
       h: side,
-    }
+    };
   }
 
-  const minW = Math.min(MIN_CROP_SIZE, Math.max(1, Math.floor(imgW)))
-  const minH = Math.min(MIN_CROP_SIZE, Math.max(1, Math.floor(imgH)))
-  let l = left
-  let r = right
-  let t = top
-  let b = bottom
-  if (east) r = Math.min(imgW, Math.max(left + minW, right + ddx))
-  else l = Math.max(0, Math.min(right - minW, left + ddx))
-  if (south) b = Math.min(imgH, Math.max(top + minH, bottom + ddy))
-  else t = Math.max(0, Math.min(bottom - minH, top + ddy))
+  const minW = Math.min(MIN_CROP_SIZE, Math.max(1, Math.floor(imgW)));
+  const minH = Math.min(MIN_CROP_SIZE, Math.max(1, Math.floor(imgH)));
+  let l = left;
+  let r = right;
+  let t = top;
+  let b = bottom;
+  if (east) r = Math.min(imgW, Math.max(left + minW, right + ddx));
+  else l = Math.max(0, Math.min(right - minW, left + ddx));
+  if (south) b = Math.min(imgH, Math.max(top + minH, bottom + ddy));
+  else t = Math.max(0, Math.min(bottom - minH, top + ddy));
 
-  return clampRect({ x: l, y: t, w: r - l, h: b - t }, imgW, imgH, false)
+  return clampRect({ x: l, y: t, w: r - l, h: b - t }, imgW, imgH, false);
 }
 
 /**
@@ -167,15 +162,15 @@ export function resizeRect(
  * 分母为 0（框就是整图）时定位没有意义，取 0。
  */
 export interface PreviewBackground {
-  size: string
-  position: string
+  size: string;
+  position: string;
 }
 
 export function previewBackground(rect: CropRect, imgW: number, imgH: number): PreviewBackground {
-  const pct = (n: number): string => `${Math.round(n * 100) / 100}%`
-  const sx = rect.w > 0 ? (imgW / rect.w) * 100 : 100
-  const sy = rect.h > 0 ? (imgH / rect.h) * 100 : 100
-  const px = imgW > rect.w ? (rect.x / (imgW - rect.w)) * 100 : 0
-  const py = imgH > rect.h ? (rect.y / (imgH - rect.h)) * 100 : 0
-  return { size: `${pct(sx)} ${pct(sy)}`, position: `${pct(px)} ${pct(py)}` }
+  const pct = (n: number): string => `${Math.round(n * 100) / 100}%`;
+  const sx = rect.w > 0 ? (imgW / rect.w) * 100 : 100;
+  const sy = rect.h > 0 ? (imgH / rect.h) * 100 : 100;
+  const px = imgW > rect.w ? (rect.x / (imgW - rect.w)) * 100 : 0;
+  const py = imgH > rect.h ? (rect.y / (imgH - rect.h)) * 100 : 0;
+  return { size: `${pct(sx)} ${pct(sy)}`, position: `${pct(px)} ${pct(py)}` };
 }

@@ -21,11 +21,11 @@ Flexibility: tune per theme after browser review; do not enforce mechanically
 
 Use 85% of the previous surface alpha when refining an existing liquid-glass treatment. For a new theme, begin with the Qinghua reference values below and adapt the surface color to the background it covers.
 
-| Role | Starting fill alpha | Starting active alpha |
-| --- | ---: | ---: |
-| Lightweight liquid-glass control | 0.145 | 0.238 |
-| Dense or frosted control | 0.247 | 0.315 |
-| Liquid-glass container or item ledger | 0.289 | 0.476 |
+| Role                                  | Starting fill alpha | Starting active alpha |
+| ------------------------------------- | ------------------: | --------------------: |
+| Lightweight liquid-glass control      |               0.145 |                 0.238 |
+| Dense or frosted control              |               0.247 |                 0.315 |
+| Liquid-glass container or item ledger |               0.289 |                 0.476 |
 
 Implementation notes:
 

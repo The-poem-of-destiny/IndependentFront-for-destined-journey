@@ -96,10 +96,7 @@ export function lifecycleOf(effect: StatusEffect): BuffLifecycle {
  *
  * 调用方按 index 决定 push 还是 in-place 更新（merged 是合并后的新对象，原数组不变）。
  */
-export function applyBuff(
-  existing: StatusEffect[],
-  newEffect: StatusEffect,
-): BuffApplyResult {
+export function applyBuff(existing: StatusEffect[], newEffect: StatusEffect): BuffApplyResult {
   const newId = buffIdOf(newEffect);
   const foundIndex = existing.findIndex((e) => buffIdOf(e) === newId);
 
@@ -155,10 +152,7 @@ export function applyBuff(
  *
  * 返回 { remaining, removed }（新数组，不改原数组）。
  */
-export function removeBuff(
-  existing: StatusEffect[],
-  buffIdOrName: string,
-): BuffRemoveResult {
+export function removeBuff(existing: StatusEffect[], buffIdOrName: string): BuffRemoveResult {
   const containsDot = buffIdOrName.includes('.');
   const removed: StatusEffect[] = [];
   const remaining: StatusEffect[] = [];
@@ -183,10 +177,7 @@ export function removeBuff(
  *
  * 返回 { remaining, expired }（新数组，不改原数组）。
  */
-export function tickBuffs(
-  existing: StatusEffect[],
-  phase: TickPhase,
-): BuffTickResult {
+export function tickBuffs(existing: StatusEffect[], phase: TickPhase): BuffTickResult {
   const remaining: StatusEffect[] = [];
   const expired: StatusEffect[] = [];
 

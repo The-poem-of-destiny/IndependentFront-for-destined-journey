@@ -56,29 +56,29 @@
  * 设计: docs/planning/2026-07-29-asset-management-system-design.md §5.1 / §5.2 / §5.4 / §6.1
  */
 
-import { AsyncUnzipInflate, Unzip, zip, type UnzipFile } from 'fflate'
-import { clampAssetFraming, isAssetExtension } from '@engine/asset-types'
-import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names'
+import { AsyncUnzipInflate, Unzip, zip, type UnzipFile } from 'fflate';
+import { clampAssetFraming, isAssetExtension } from '@engine/asset-types';
+import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names';
 import type {
   DecodedEntry,
   ImportManifest,
   ImportManifestMeta,
   ImportWarning,
-} from '@engine/asset-import-plan'
-import { hashMediaBytes, isMediaHashAvailable } from './media-hash'
+} from '@engine/asset-import-plan';
+import { hashMediaBytes, isMediaHashAvailable } from './media-hash';
 
 // ═══════════════════════════════════════════════════════════
 // 常量
 // ═══════════════════════════════════════════════════════════
 
 /** 单条目解压后上限 —— 10 MB（§5.1） */
-export const ASSET_ZIP_MAX_ENTRY_BYTES = 10 * 1024 * 1024
+export const ASSET_ZIP_MAX_ENTRY_BYTES = 10 * 1024 * 1024;
 
 /** 整包解压后上限 —— 2 GB（§5.1） */
-export const ASSET_ZIP_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
+export const ASSET_ZIP_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
 
 /** 清单文件名，仅认 zip 根目录那一份（§5.2） */
-export const ASSET_ZIP_MANIFEST_NAME = 'manifest.json'
+export const ASSET_ZIP_MANIFEST_NAME = 'manifest.json';
 
 /**
  * 每次 push 给 fflate 的压缩字节数。
@@ -88,13 +88,13 @@ export const ASSET_ZIP_MANIFEST_NAME = 'manifest.json'
  * 之间让出事件循环，才能在下一块之前收手。一块 128 KB 的 deflate 最坏能膨胀到
  * ~132 MB —— 这就是"中途终止"实际能兜住的内存峰值。调大更快但兜得更松。
  */
-const PUSH_CHUNK_BYTES = 128 * 1024
+const PUSH_CHUNK_BYTES = 128 * 1024;
 
 /** 停滞看门狗默认时长 —— 最后一块 push 完之后，多久没有新数据就认为包坏了 */
-const DEFAULT_STALL_TIMEOUT_MS = 15_000
+const DEFAULT_STALL_TIMEOUT_MS = 15_000;
 
 /** 音频路由表的扩展名集合（素材那半边直接用引擎的 `isAssetExtension`） */
-const AUDIO_EXTENSIONS = new Set<string>(Object.keys(AUDIO_MIME_BY_EXTENSION))
+const AUDIO_EXTENSIONS = new Set<string>(Object.keys(AUDIO_MIME_BY_EXTENSION));
 
 // ═══════════════════════════════════════════════════════════
 // 类型
@@ -108,7 +108,7 @@ const AUDIO_EXTENSIONS = new Set<string>(Object.keys(AUDIO_MIME_BY_EXTENSION))
  * 文件系统要落地，所以嵌套路径需要的是拍平而不是拒绝，zip-slip 防御无从谈起。
  * 计划器再拍一次是幂等空操作。
  */
-export type { DecodedEntry }
+export type { DecodedEntry };
 
 /**
  * 本模块能产出的告警 —— 从引擎的 `ImportWarning` 里**取子集而非另写一份**。
@@ -120,10 +120,10 @@ export type { DecodedEntry }
 export type AssetZipWarning = Extract<
   ImportWarning,
   'hash-unavailable' | 'suspect-filename-encoding'
->
+>;
 
 /** 清单元数据 —— 与引擎同一个类型；清单只能**追加**元数据，永不改名改类型（§5.2） */
-export type AssetZipManifestMeta = ImportManifestMeta
+export type AssetZipManifestMeta = ImportManifestMeta;
 
 /**
  * `manifest.json` 的形状 —— 由引擎的 `ImportManifest` 派生，不另写一份。
@@ -133,12 +133,12 @@ export type AssetZipManifestMeta = ImportManifestMeta
  * 所以这里用 `Required<>` 收紧 —— 读侧拿到 `manifest.assets` 不必再判空，写侧的
  * 输入仍按 `ImportManifest` 收，宽进严出。分区增减会自动跟随引擎。
  */
-export type AssetZipManifest = Required<ImportManifest>
+export type AssetZipManifest = Required<ImportManifest>;
 
 export interface ReadAssetZipResult {
-  entries: DecodedEntry[]
+  entries: DecodedEntry[];
   /** 缺失、畸形、或解析不出对象时一律 undefined —— 降级成"没有清单"，绝不抛 */
-  manifest?: AssetZipManifest
+  manifest?: AssetZipManifest;
   /**
    * 被当噪音筛掉的**文件** basename，按 zip 内出现顺序（§5.1）。
    *
@@ -148,20 +148,20 @@ export interface ReadAssetZipResult {
    * 这些条目的字节从未被解压，所以它们既不占内存也不参与体积上限；给出名字是为了
    * 让计划器/摘要照样能说清"跳过了什么"，而不是让用户对着一个变少的库自己猜。
    */
-  skippedNoise: string[]
-  warnings: AssetZipWarning[]
+  skippedNoise: string[];
+  warnings: AssetZipWarning[];
 }
 
 export interface ReadAssetZipOptions {
   /** 单条目解压上限，默认 {@link ASSET_ZIP_MAX_ENTRY_BYTES}。只作用于可导入条目 */
-  maxEntryBytes?: number
+  maxEntryBytes?: number;
   /** 整包解压上限，默认 {@link ASSET_ZIP_MAX_TOTAL_BYTES}。只作用于可导入条目 */
-  maxTotalBytes?: number
+  maxTotalBytes?: number;
   /**
    * 停滞超时（毫秒），默认 {@link DEFAULT_STALL_TIMEOUT_MS}；`0` 或负数关闭。
    * 见文件头限制 #2 —— 这是截断/损坏 zip 的唯一兜底。
    */
-  stallTimeoutMs?: number
+  stallTimeoutMs?: number;
   /**
    * 取消信号（§7.6）。中止后以 `code: 'aborted'` 的 {@link AssetZipError} 拒绝，
    * **与真失败区分开** —— 调用方该显示「已取消」而不是弹错误。
@@ -169,7 +169,7 @@ export interface ReadAssetZipOptions {
    * 检查点复用了上限校验那套管道: 开工前、每块 push 之间、每次 `ondata`、以及
    * 逐条目哈希的间隙。传进来时就已经 aborted 的信号会立刻拒绝，一个字节都不解压。
    */
-  signal?: AbortSignal
+  signal?: AbortSignal;
   /**
    * 进度回调，`(已完成条目数, 已发现的可导入条目数)`。
    *
@@ -182,19 +182,19 @@ export interface ReadAssetZipOptions {
    * 想要连续百分比的话，用**压缩字节**而不是条目数会更平滑，但那要另一套口径；
    * v1 只报条目。回调自身抛错会被吞掉，不会连累导入。
    */
-  onProgress?: (done: number, total: number) => void
+  onProgress?: (done: number, total: number) => void;
   /**
    * 哈希注入缝（测试用）。返回 undefined 表示"这条算不出"。
    * 不注入时走 `media-hash.ts`（全项目唯一实现，上传路径共用同一份）；
    * `crypto.subtle` 缺失则整批不哈希并报 `hash-unavailable`。
    */
-  hash?: (bytes: Uint8Array) => Promise<string | undefined>
+  hash?: (bytes: Uint8Array) => Promise<string | undefined>;
 }
 
 /** 导出侧的单个条目 —— 名字必须是 basename（带路径会被拍平） */
 export interface AssetZipWriteEntry {
-  name: string
-  bytes: Uint8Array
+  name: string;
+  bytes: Uint8Array;
 }
 
 export type AssetZipErrorCode =
@@ -204,25 +204,25 @@ export type AssetZipErrorCode =
   | 'invalid-name'
   | 'read-failed'
   /** 调用方主动取消（`options.signal`）—— 刻意与真失败分开，UI 该显示「已取消」而不是报错 */
-  | 'aborted'
+  | 'aborted';
 
 /**
  * 本模块唯一的错误类型，按 `code` 判别 —— 调用方据此出人话提示，不用去 match 文案。
  * 超限时刻意**抛错而不是静默截断**: 截断出来的图片是坏图，比失败更难查。
  */
 export class AssetZipError extends Error {
-  readonly code: AssetZipErrorCode
+  readonly code: AssetZipErrorCode;
   /** 触发错误的条目路径（体积/命名类错误有，读取失败没有） */
-  readonly path?: string
+  readonly path?: string;
   /** 被越过的上限字节数（体积类错误有） */
-  readonly limit?: number
+  readonly limit?: number;
 
   constructor(code: AssetZipErrorCode, message: string, path?: string, limit?: number) {
-    super(message)
-    this.name = 'AssetZipError'
-    this.code = code
-    this.path = path
-    this.limit = limit
+    super(message);
+    this.name = 'AssetZipError';
+    this.code = code;
+    this.path = path;
+    this.limit = limit;
   }
 }
 
@@ -232,20 +232,20 @@ export class AssetZipError extends Error {
 
 /** 斜杠归一化: 部分 Windows 工具会写反斜杠分隔符 */
 function normalizeSlashes(path: string): string {
-  return path.replace(/\\/g, '/')
+  return path.replace(/\\/g, '/');
 }
 
 /** 取 basename（拍平嵌套目录）；纯路径返回空串 */
 function basenameOf(path: string): string {
-  const norm = normalizeSlashes(path)
-  const idx = norm.lastIndexOf('/')
-  return idx === -1 ? norm : norm.slice(idx + 1)
+  const norm = normalizeSlashes(path);
+  const idx = norm.lastIndexOf('/');
+  return idx === -1 ? norm : norm.slice(idx + 1);
 }
 
 /** 扩展名原文（不含点）；无扩展名返回空串。归一化交给 {@link isImportableName} */
 function extensionOf(basename: string): string {
-  const dot = basename.lastIndexOf('.')
-  return dot > 0 ? basename.slice(dot + 1) : ''
+  const dot = basename.lastIndexOf('.');
+  return dot > 0 ? basename.slice(dot + 1) : '';
 }
 
 /**
@@ -259,10 +259,10 @@ function extensionOf(basename: string): string {
  * 套归一化查共享表。
  */
 function isImportableName(basename: string): boolean {
-  const raw = extensionOf(basename).trim().toLowerCase()
-  const ext = raw.startsWith('.') ? raw.slice(1) : raw
-  if (!ext) return false
-  return isAssetExtension(ext) || AUDIO_EXTENSIONS.has(ext)
+  const raw = extensionOf(basename).trim().toLowerCase();
+  const ext = raw.startsWith('.') ? raw.slice(1) : raw;
+  if (!ext) return false;
+  return isAssetExtension(ext) || AUDIO_EXTENSIONS.has(ext);
 }
 
 /**
@@ -277,19 +277,19 @@ function isImportableName(basename: string): boolean {
  * 是唯一的例外，因为那整棵目录树里没有一个字节是用户想要的。
  */
 function isNoiseEntry(path: string): boolean {
-  const norm = normalizeSlashes(path)
-  if (norm.endsWith('/')) return true
-  const segments = norm.split('/')
-  if (segments.some((seg) => seg.toLowerCase() === '__macosx')) return true
-  const base = segments[segments.length - 1]
-  if (!base) return true
-  return base.startsWith('.')
+  const norm = normalizeSlashes(path);
+  if (norm.endsWith('/')) return true;
+  const segments = norm.split('/');
+  if (segments.some((seg) => seg.toLowerCase() === '__macosx')) return true;
+  const base = segments[segments.length - 1];
+  if (!base) return true;
+  return base.startsWith('.');
 }
 
 /** 是否是 zip **根目录**那份 manifest.json（嵌套的同名文件不算） */
 function isRootManifest(path: string): boolean {
-  const norm = normalizeSlashes(path).replace(/^\.\//, '')
-  return norm.toLowerCase() === ASSET_ZIP_MANIFEST_NAME
+  const norm = normalizeSlashes(path).replace(/^\.\//, '');
+  return norm.toLowerCase() === ASSET_ZIP_MANIFEST_NAME;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -303,7 +303,7 @@ function isRootManifest(path: string): boolean {
  * 逐字节解码后就成了成对的高位字符。而真·Latin-1 名字里的重音字母（`café`、
  * `Bär`）是**单个**高位字符，不会误报。
  */
-const HIGH_BYTE_RUN = /[\u0080-\u00ff]{2,}/
+const HIGH_BYTE_RUN = /[\u0080-\u00ff]{2,}/;
 
 /**
  * 名字看起来是不是解码错了。
@@ -315,7 +315,7 @@ const HIGH_BYTE_RUN = /[\u0080-\u00ff]{2,}/
  * 高位字符，检不出来。漏报只是少一条告警，文件照样导入，代价可接受。
  */
 function isSuspectFilename(name: string): boolean {
-  return name.includes('\ufffd') || HIGH_BYTE_RUN.test(name)
+  return name.includes('\ufffd') || HIGH_BYTE_RUN.test(name);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -323,7 +323,7 @@ function isSuspectFilename(name: string): boolean {
 // ═══════════════════════════════════════════════════════════
 
 interface BlobLike {
-  arrayBuffer: () => Promise<ArrayBuffer>
+  arrayBuffer: () => Promise<ArrayBuffer>;
 }
 
 function isBlobLike(input: unknown): input is BlobLike {
@@ -331,7 +331,7 @@ function isBlobLike(input: unknown): input is BlobLike {
     typeof input === 'object' &&
     input !== null &&
     typeof (input as BlobLike).arrayBuffer === 'function'
-  )
+  );
 }
 
 /**
@@ -341,19 +341,19 @@ function isBlobLike(input: unknown): input is BlobLike {
  * 才能让本模块在 `environment:'node'` 里照样跑。
  */
 async function toBytes(input: File | Blob | Uint8Array): Promise<Uint8Array> {
-  if (input instanceof Uint8Array) return input
-  if (isBlobLike(input)) return new Uint8Array(await input.arrayBuffer())
-  throw new AssetZipError('read-failed', '无法读取输入：既不是 Uint8Array 也不是 Blob')
+  if (input instanceof Uint8Array) return input;
+  if (isBlobLike(input)) return new Uint8Array(await input.arrayBuffer());
+  throw new AssetZipError('read-failed', '无法读取输入：既不是 Uint8Array 也不是 Blob');
 }
 
 function concatChunks(chunks: readonly Uint8Array[], size: number): Uint8Array {
-  const out = new Uint8Array(size)
-  let offset = 0
+  const out = new Uint8Array(size);
+  let offset = 0;
   for (const chunk of chunks) {
-    out.set(chunk, offset)
-    offset += chunk.length
+    out.set(chunk, offset);
+    offset += chunk.length;
   }
-  return out
+  return out;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -361,21 +361,23 @@ function concatChunks(chunks: readonly Uint8Array[], size: number): Uint8Array {
 // ═══════════════════════════════════════════════════════════
 
 function decodeUtf8(bytes: Uint8Array): string {
-  const Ctor = (globalThis as { TextDecoder?: new (label?: string) => { decode: (b: Uint8Array) => string } })
-    .TextDecoder
-  if (Ctor) return new Ctor('utf-8').decode(bytes)
+  const Ctor = (
+    globalThis as { TextDecoder?: new (label?: string) => { decode: (b: Uint8Array) => string } }
+  ).TextDecoder;
+  if (Ctor) return new Ctor('utf-8').decode(bytes);
   // 无 TextDecoder 的极端环境: 逐字节兜底，只求不抛
-  let out = ''
-  for (let i = 0; i < bytes.length; i += 1) out += String.fromCharCode(bytes[i])
-  return out
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 1) out += String.fromCharCode(bytes[i]);
+  return out;
 }
 
 function encodeUtf8(text: string): Uint8Array {
-  const Ctor = (globalThis as { TextEncoder?: new () => { encode: (s: string) => Uint8Array } }).TextEncoder
-  if (Ctor) return new Ctor().encode(text)
-  const out = new Uint8Array(text.length)
-  for (let i = 0; i < text.length; i += 1) out[i] = text.charCodeAt(i) & 0xff
-  return out
+  const Ctor = (globalThis as { TextEncoder?: new () => { encode: (s: string) => Uint8Array } })
+    .TextEncoder;
+  if (Ctor) return new Ctor().encode(text);
+  const out = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i += 1) out[i] = text.charCodeAt(i) & 0xff;
+  return out;
 }
 
 /**
@@ -387,22 +389,22 @@ function encodeUtf8(text: string): Uint8Array {
  * 只说这张图在框里怎么摆；不带它，一次导出→导入就把用户逐张调过的构图抹回默认值。
  */
 function sanitizeMeta(raw: unknown): ImportManifestMeta | undefined {
-  if (typeof raw !== 'object' || raw === null) return undefined
-  const src = raw as Record<string, unknown>
-  const meta: ImportManifestMeta = {}
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const src = raw as Record<string, unknown>;
+  const meta: ImportManifestMeta = {};
   if (Array.isArray(src.tags)) {
-    const tags = src.tags.filter((t): t is string => typeof t === 'string')
-    if (tags.length) meta.tags = tags
+    const tags = src.tags.filter((t): t is string => typeof t === 'string');
+    if (tags.length) meta.tags = tags;
   }
-  if (typeof src.credit === 'string') meta.credit = src.credit
-  if (typeof src.license === 'string') meta.license = src.license
+  if (typeof src.credit === 'string') meta.credit = src.credit;
+  if (typeof src.license === 'string') meta.license = src.license;
   // 非对象（字符串/数组/数字/null）一律当"没写取景"丢掉，而不是喂给夹逼函数 ——
   // 那样会把 `"framing": "居中"` 悄悄翻译成一个默认取景，读起来像清单真说了什么。
   // 是对象则**当场夹逼**: 这一层是外来 JSON 进入本应用的第一道门。
   if (typeof src.framing === 'object' && src.framing !== null && !Array.isArray(src.framing)) {
-    meta.framing = clampAssetFraming(src.framing)
+    meta.framing = clampAssetFraming(src.framing);
   }
-  return Object.keys(meta).length ? meta : undefined
+  return Object.keys(meta).length ? meta : undefined;
 }
 
 /**
@@ -412,15 +414,15 @@ function sanitizeMeta(raw: unknown): ImportManifestMeta | undefined {
  * 键谁赢必须与对象枚举顺序无关地稳定。
  */
 function sanitizeSection(raw: unknown): Record<string, ImportManifestMeta> {
-  const out: Record<string, ImportManifestMeta> = {}
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out
+  const out: Record<string, ImportManifestMeta> = {};
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out;
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    const name = basenameOf(key)
-    if (!name || Object.prototype.hasOwnProperty.call(out, name)) continue
-    const meta = sanitizeMeta(value)
-    if (meta) out[name] = meta
+    const name = basenameOf(key);
+    if (!name || Object.prototype.hasOwnProperty.call(out, name)) continue;
+    const meta = sanitizeMeta(value);
+    if (meta) out[name] = meta;
   }
-  return out
+  return out;
 }
 
 /**
@@ -429,18 +431,18 @@ function sanitizeSection(raw: unknown): Record<string, ImportManifestMeta> {
  * 输出形状里根本没有 name / type 字段。
  */
 export function parseAssetZipManifest(bytes: Uint8Array): AssetZipManifest | undefined {
-  let parsed: unknown
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(decodeUtf8(bytes))
+    parsed = JSON.parse(decodeUtf8(bytes));
   } catch {
-    return undefined
+    return undefined;
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
-  const src = parsed as Record<string, unknown>
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+  const src = parsed as Record<string, unknown>;
   return {
     assets: sanitizeSection(src.assets),
     audio: sanitizeSection(src.audio),
-  }
+  };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -449,22 +451,22 @@ export function parseAssetZipManifest(bytes: Uint8Array): AssetZipManifest | und
 
 interface RawEntry {
   /** 原始 zip 路径（未拍平）—— 供 manifest 判根、噪音判段 */
-  path: string
-  bytes: Uint8Array
+  path: string;
+  bytes: Uint8Array;
 }
 
 interface InflateResult {
-  entries: RawEntry[]
+  entries: RawEntry[];
   /** 在 onfile 就被筛掉的**文件** basename（不含目录条目），按出现顺序 */
-  skippedNoise: string[]
+  skippedNoise: string[];
 }
 
 interface InflateConfig {
-  maxEntryBytes: number
-  maxTotalBytes: number
-  stallTimeoutMs: number
-  signal?: AbortSignal
-  onProgress?: (done: number, total: number) => void
+  maxEntryBytes: number;
+  maxTotalBytes: number;
+  stallTimeoutMs: number;
+  signal?: AbortSignal;
+  onProgress?: (done: number, total: number) => void;
 }
 
 /**
@@ -473,24 +475,24 @@ interface InflateConfig {
  * 根 `manifest.json` **必须放行**: 它的扩展名不在任何路由表里，但我们要消费它。
  */
 function shouldInflate(path: string): boolean {
-  if (isNoiseEntry(path)) return false
-  if (isRootManifest(path)) return true
-  return isImportableName(basenameOf(path))
+  if (isNoiseEntry(path)) return false;
+  if (isRootManifest(path)) return true;
+  return isImportableName(basenameOf(path));
 }
 
 function yieldToEventLoop(): Promise<void> {
   return new Promise<void>((resolve) => {
-    setTimeout(resolve, 0)
-  })
+    setTimeout(resolve, 0);
+  });
 }
 
 /** 统一的取消错误 —— 只有一处构造，`code` 不会写歪 */
 function abortError(): AssetZipError {
-  return new AssetZipError('aborted', '导入已取消')
+  return new AssetZipError('aborted', '导入已取消');
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) throw abortError()
+  if (signal?.aborted) throw abortError();
 }
 
 /**
@@ -513,105 +515,105 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
  * 丢缓冲 → 停止 push → reject，只是错误码不同。
  */
 function inflateStreaming(source: Uint8Array, cfg: InflateConfig): Promise<InflateResult> {
-  const { maxEntryBytes, maxTotalBytes, stallTimeoutMs, signal, onProgress } = cfg
+  const { maxEntryBytes, maxTotalBytes, stallTimeoutMs, signal, onProgress } = cfg;
   return new Promise<InflateResult>((resolve, reject) => {
-    const entries: RawEntry[] = []
-    const skippedNoise: string[] = []
-    const live: UnzipFile[] = []
+    const entries: RawEntry[] = [];
+    const skippedNoise: string[] = [];
+    const live: UnzipFile[] = [];
     /** 每个在飞条目的分片数组 —— 取消时要把它们清空，别让已解压的字节赖着不走 */
-    const liveBuffers: Uint8Array[][] = []
-    let totalBytes = 0
-    let pending = 0
-    let discovered = 0
-    let completed = 0
-    let pushDone = false
-    let aborted = false
-    let watchdog: ReturnType<typeof setTimeout> | undefined
+    const liveBuffers: Uint8Array[][] = [];
+    let totalBytes = 0;
+    let pending = 0;
+    let discovered = 0;
+    let completed = 0;
+    let pushDone = false;
+    let aborted = false;
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
 
     const clearWatchdog = (): void => {
       if (watchdog !== undefined) {
-        clearTimeout(watchdog)
-        watchdog = undefined
+        clearTimeout(watchdog);
+        watchdog = undefined;
       }
-    }
+    };
 
-    const onSignalAbort = (): void => abort(abortError())
+    const onSignalAbort = (): void => abort(abortError());
 
     const detachSignal = (): void => {
-      signal?.removeEventListener('abort', onSignalAbort)
-    }
+      signal?.removeEventListener('abort', onSignalAbort);
+    };
 
     /** 回调抛错不该连累导入 —— 进度只是播报，不是控制流 */
     const reportProgress = (): void => {
-      if (!onProgress) return
+      if (!onProgress) return;
       try {
-        onProgress(completed, discovered)
+        onProgress(completed, discovered);
       } catch {
         // 故意吞掉
       }
-    }
+    };
 
     /**
      * 只在"push 已经全部喂完、仍有条目没收尾"时布防，且每来一次数据就重置 ——
      * 于是慢包（一直在出数据）不会误判，截断包（再也不出数据）会被判死。
      */
     const armWatchdog = (): void => {
-      if (aborted || stallTimeoutMs <= 0 || !pushDone || pending === 0) return
-      clearWatchdog()
+      if (aborted || stallTimeoutMs <= 0 || !pushDone || pending === 0) return;
+      clearWatchdog();
       watchdog = setTimeout(() => {
-        if (aborted || pending === 0) return
+        if (aborted || pending === 0) return;
         abort(
           new AssetZipError(
             'read-failed',
             `压缩包数据不完整：还有 ${pending} 个条目的数据流没有结束，压缩包可能被截断或损坏`,
           ),
-        )
-      }, stallTimeoutMs)
-    }
+        );
+      }, stallTimeoutMs);
+    };
 
     /**
      * 唯一的终止路径 —— 越限、解压出错、看门狗、主动取消全走这里。
      * 顺序要紧: 先置旗（后续回调立刻变哑）→ 摘计时器与监听 → 收 worker → 丢缓冲 → reject。
      */
     const abort = (error: Error): void => {
-      if (aborted) return
-      aborted = true
-      clearWatchdog()
-      detachSignal()
+      if (aborted) return;
+      aborted = true;
+      clearWatchdog();
+      detachSignal();
       for (const file of live) {
         try {
-          file.terminate()
+          file.terminate();
         } catch {
           // terminate 只是尽力回收 worker，失败不影响我们已经放弃这批数据
         }
       }
       // 放掉已经解压出来的字节: 取消一个 2GB 的包不该让内存留到下次 GC 才回落
-      for (const chunks of liveBuffers) chunks.length = 0
-      liveBuffers.length = 0
-      entries.length = 0
-      reject(error)
-    }
+      for (const chunks of liveBuffers) chunks.length = 0;
+      liveBuffers.length = 0;
+      entries.length = 0;
+      reject(error);
+    };
 
     const settle = (): void => {
-      if (aborted || !pushDone) return
+      if (aborted || !pushDone) return;
       if (pending > 0) {
-        armWatchdog()
-        return
+        armWatchdog();
+        return;
       }
-      clearWatchdog()
-      detachSignal()
-      resolve({ entries, skippedNoise })
-    }
+      clearWatchdog();
+      detachSignal();
+      resolve({ entries, skippedNoise });
+    };
 
     const unzipper = new Unzip((file) => {
-      if (aborted) return
+      if (aborted) return;
       if (!shouldInflate(file.name)) {
         // 不 start()，一个字节都不解压。目录条目不进汇报名单（不是文件）
         if (!normalizeSlashes(file.name).endsWith('/')) {
-          const base = basenameOf(file.name)
-          if (base) skippedNoise.push(base)
+          const base = basenameOf(file.name);
+          if (base) skippedNoise.push(base);
         }
-        return
+        return;
       }
 
       if (typeof file.originalSize === 'number' && file.originalSize > maxEntryBytes) {
@@ -622,35 +624,37 @@ function inflateStreaming(source: Uint8Array, cfg: InflateConfig): Promise<Infla
             file.name,
             maxEntryBytes,
           ),
-        )
-        return
+        );
+        return;
       }
 
-      pending += 1
-      live.push(file)
-      const chunks: Uint8Array[] = []
-      liveBuffers.push(chunks)
-      let size = 0
+      pending += 1;
+      live.push(file);
+      const chunks: Uint8Array[] = [];
+      liveBuffers.push(chunks);
+      let size = 0;
       // 根清单不算进度: 它不是用户要导入的文件，算进去会让终值比 entries.length 多一
-      const countsForProgress = !isRootManifest(file.name)
+      const countsForProgress = !isRootManifest(file.name);
       if (countsForProgress) {
-        discovered += 1
-        reportProgress()
+        discovered += 1;
+        reportProgress();
       }
 
       file.ondata = (err, data, final) => {
-        if (aborted) return
+        if (aborted) return;
         if (signal?.aborted) {
-          abort(abortError())
-          return
+          abort(abortError());
+          return;
         }
         if (err) {
-          abort(new AssetZipError('read-failed', `解压 ${file.name} 失败：${err.message}`, file.name))
-          return
+          abort(
+            new AssetZipError('read-failed', `解压 ${file.name} 失败：${err.message}`, file.name),
+          );
+          return;
         }
         if (data && data.length) {
-          size += data.length
-          totalBytes += data.length
+          size += data.length;
+          totalBytes += data.length;
           if (size > maxEntryBytes) {
             abort(
               new AssetZipError(
@@ -659,8 +663,8 @@ function inflateStreaming(source: Uint8Array, cfg: InflateConfig): Promise<Infla
                 file.name,
                 maxEntryBytes,
               ),
-            )
-            return
+            );
+            return;
           }
           if (totalBytes > maxTotalBytes) {
             abort(
@@ -670,52 +674,52 @@ function inflateStreaming(source: Uint8Array, cfg: InflateConfig): Promise<Infla
                 file.name,
                 maxTotalBytes,
               ),
-            )
-            return
+            );
+            return;
           }
-          chunks.push(data)
-          armWatchdog() // 有进展就重置停滞计时，慢包不该被误判成坏包
+          chunks.push(data);
+          armWatchdog(); // 有进展就重置停滞计时，慢包不该被误判成坏包
         }
         if (final) {
-          entries.push({ path: file.name, bytes: concatChunks(chunks, size) })
-          pending -= 1
+          entries.push({ path: file.name, bytes: concatChunks(chunks, size) });
+          pending -= 1;
           if (countsForProgress) {
-            completed += 1
-            reportProgress()
+            completed += 1;
+            reportProgress();
           }
-          settle()
+          settle();
         }
-      }
-      file.start()
-    })
+      };
+      file.start();
+    });
     // compression 0（stored）由 UnzipPassThrough 默认兜住，只需补 deflate
-    unzipper.register(AsyncUnzipInflate)
+    unzipper.register(AsyncUnzipInflate);
 
     // 传进来就已经取消的信号: 一个字节都不解压，直接收场
     if (signal?.aborted) {
-      aborted = true
-      reject(abortError())
-      return
+      aborted = true;
+      reject(abortError());
+      return;
     }
-    signal?.addEventListener('abort', onSignalAbort)
+    signal?.addEventListener('abort', onSignalAbort);
 
     void (async () => {
       try {
         for (let offset = 0; offset < source.length; offset += PUSH_CHUNK_BYTES) {
-          if (aborted) return
+          if (aborted) return;
           if (signal?.aborted) {
-            abort(abortError())
-            return
+            abort(abortError());
+            return;
           }
-          const end = Math.min(offset + PUSH_CHUNK_BYTES, source.length)
-          unzipper.push(source.subarray(offset, end), end >= source.length)
+          const end = Math.min(offset + PUSH_CHUNK_BYTES, source.length);
+          unzipper.push(source.subarray(offset, end), end >= source.length);
           // 让出宏任务: AsyncUnzipInflate 的 ondata 走 worker 消息，
           // 只让微任务的话上限校验永远轮不到，"中途终止"就成了空话
-          await yieldToEventLoop()
+          await yieldToEventLoop();
         }
-        if (aborted) return
-        pushDone = true
-        settle()
+        if (aborted) return;
+        pushDone = true;
+        settle();
       } catch (error) {
         abort(
           error instanceof AssetZipError
@@ -724,10 +728,10 @@ function inflateStreaming(source: Uint8Array, cfg: InflateConfig): Promise<Infla
                 'read-failed',
                 `压缩包解析失败：${error instanceof Error ? error.message : String(error)}`,
               ),
-        )
+        );
       }
-    })()
-  })
+    })();
+  });
 }
 
 /**
@@ -748,15 +752,15 @@ export async function readAssetZip(
   input: File | Blob | Uint8Array,
   options: ReadAssetZipOptions = {},
 ): Promise<ReadAssetZipResult> {
-  const { signal } = options
+  const { signal } = options;
 
-  throwIfAborted(signal)
+  throwIfAborted(signal);
 
-  const source = await toBytes(input)
+  const source = await toBytes(input);
   // toBytes 对 Blob 是异步的，这中间用户完全可能已经点了取消
-  throwIfAborted(signal)
+  throwIfAborted(signal);
   if (source.length === 0) {
-    throw new AssetZipError('read-failed', '压缩包为空，读不出任何条目')
+    throw new AssetZipError('read-failed', '压缩包为空，读不出任何条目');
   }
 
   const raw = await inflateStreaming(source, {
@@ -765,53 +769,53 @@ export async function readAssetZip(
     stallTimeoutMs: options.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS,
     signal,
     onProgress: options.onProgress,
-  })
+  });
 
   // ── 抽出根清单 ──
-  let manifest: AssetZipManifest | undefined
-  const media: RawEntry[] = []
+  let manifest: AssetZipManifest | undefined;
+  const media: RawEntry[] = [];
   for (const entry of raw.entries) {
     if (manifest === undefined && isRootManifest(entry.path)) {
       // 解析失败也照样吃掉这条: 它是一份没读懂的清单，不是待导入的素材
-      manifest = parseAssetZipManifest(entry.bytes)
-      continue
+      manifest = parseAssetZipManifest(entry.bytes);
+      continue;
     }
-    media.push(entry)
+    media.push(entry);
   }
 
   // ── 拍平 + 告警 ──
-  const warnings = new Set<AssetZipWarning>()
-  const entries: DecodedEntry[] = []
+  const warnings = new Set<AssetZipWarning>();
+  const entries: DecodedEntry[] = [];
   for (const entry of media) {
-    const path = basenameOf(entry.path)
-    if (!path) continue
-    if (isSuspectFilename(path)) warnings.add('suspect-filename-encoding')
-    entries.push({ path, bytes: entry.bytes })
+    const path = basenameOf(entry.path);
+    if (!path) continue;
+    if (isSuspectFilename(path)) warnings.add('suspect-filename-encoding');
+    entries.push({ path, bytes: entry.bytes });
   }
 
   // ── 逐条目哈希（异步，所以只能在这一层做；计划器是纯同步的，D18）──
   // 哈希实现只有 media-hash.ts 一份（上传路径也用它）；这里只决定"要不要算"
-  const digest = options.hash ?? (isMediaHashAvailable() ? hashMediaBytes : undefined)
+  const digest = options.hash ?? (isMediaHashAvailable() ? hashMediaBytes : undefined);
   if (!digest) {
-    warnings.add('hash-unavailable')
+    warnings.add('hash-unavailable');
   } else {
     // 到这里的条目全都通过了 onfile 的路由闸门，不必再筛一遍扩展名
     for (const entry of entries) {
       // 40 个 5MB 文件的 SHA-256 是实打实的耗时，取消必须在这儿也生效
-      throwIfAborted(signal)
+      throwIfAborted(signal);
       try {
-        const hash = await digest(entry.bytes)
-        if (hash) entry.hash = hash
-        else warnings.add('hash-unavailable')
+        const hash = await digest(entry.bytes);
+        if (hash) entry.hash = hash;
+        else warnings.add('hash-unavailable');
       } catch {
         // 一条算不出就整批放弃: 半套哈希会让去重范围变得不可解释
-        warnings.add('hash-unavailable')
-        break
+        warnings.add('hash-unavailable');
+        break;
       }
     }
   }
 
-  return { entries, manifest, skippedNoise: raw.skippedNoise, warnings: [...warnings] }
+  return { entries, manifest, skippedNoise: raw.skippedNoise, warnings: [...warnings] };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -819,15 +823,15 @@ export async function readAssetZip(
 // ═══════════════════════════════════════════════════════════
 
 interface BlobCtorLike {
-  new (parts: BlobPart[], options?: { type?: string }): Blob
+  new (parts: BlobPart[], options?: { type?: string }): Blob;
 }
 
 /** 名字带路径分隔符时的上报详情 —— D19 上游闸门漏了一条 */
 export interface SeparatorInNameReport {
   /** 行里原本的名字 */
-  original: string
+  original: string;
   /** 拍平之后实际写进 zip 的名字 */
-  flattened: string
+  flattened: string;
 }
 
 export interface WriteAssetZipOptions {
@@ -840,7 +844,7 @@ export interface WriteAssetZipOptions {
    *
    * 不传时退化为 `console.warn` 一条汇总: 可以没人接，但不能没人知道。
    */
-  onSeparatorInName?: (report: SeparatorInNameReport) => void
+  onSeparatorInName?: (report: SeparatorInNameReport) => void;
 }
 
 /**
@@ -870,34 +874,34 @@ export async function writeAssetZip(
   manifest?: ImportManifest,
   options: WriteAssetZipOptions = {},
 ): Promise<Blob> {
-  const payload: Record<string, [Uint8Array, { level: 0 | 6 }]> = {}
-  const flattenedNames: SeparatorInNameReport[] = []
+  const payload: Record<string, [Uint8Array, { level: 0 | 6 }]> = {};
+  const flattenedNames: SeparatorInNameReport[] = [];
 
   for (const entry of entries) {
     // 刻意不 trim: 见上方 D2 说明
-    const name = basenameOf(entry.name)
+    const name = basenameOf(entry.name);
     if (!name) {
-      throw new AssetZipError('invalid-name', `导出条目缺少有效文件名：${entry.name}`, entry.name)
+      throw new AssetZipError('invalid-name', `导出条目缺少有效文件名：${entry.name}`, entry.name);
     }
     // 只在"确实改了名字还放行了"时上报；拍平成空的那种已经在上面抛掉了
     if (name !== entry.name) {
-      flattenedNames.push({ original: entry.name, flattened: name })
+      flattenedNames.push({ original: entry.name, flattened: name });
     }
     if (Object.prototype.hasOwnProperty.call(payload, name)) {
-      throw new AssetZipError('duplicate-name', `导出条目文件名重复：${name}`, name)
+      throw new AssetZipError('duplicate-name', `导出条目文件名重复：${name}`, name);
     }
-    payload[name] = [entry.bytes, { level: 0 }]
+    payload[name] = [entry.bytes, { level: 0 }];
   }
 
   if (flattenedNames.length) {
     if (options.onSeparatorInName) {
-      for (const report of flattenedNames) options.onSeparatorInName(report)
+      for (const report of flattenedNames) options.onSeparatorInName(report);
     } else {
       // 没人接也不能静默 —— 这是上游闸门有洞的信号，值得留下痕迹
       globalThis.console?.warn?.(
         `[asset-zip] ${flattenedNames.length} 个导出条目的名字含路径分隔符，已拍平：` +
           flattenedNames.map((r) => `${r.original} → ${r.flattened}`).join('、'),
-      )
+      );
     }
   }
 
@@ -907,29 +911,29 @@ export async function writeAssetZip(
         'duplicate-name',
         `导出条目占用了保留名 ${ASSET_ZIP_MANIFEST_NAME}`,
         ASSET_ZIP_MANIFEST_NAME,
-      )
+      );
     }
     const normalized: AssetZipManifest = {
       assets: manifest.assets ?? {},
       audio: manifest.audio ?? {},
-    }
+    };
     payload[ASSET_ZIP_MANIFEST_NAME] = [
       encodeUtf8(JSON.stringify(normalized, null, 2)),
       { level: 6 },
-    ]
+    ];
   }
 
   const zipped = await new Promise<Uint8Array>((resolve, reject) => {
     zip(payload, {}, (err, data) => {
-      if (err) reject(new AssetZipError('read-failed', `打包失败：${err.message}`))
-      else resolve(data)
-    })
-  })
+      if (err) reject(new AssetZipError('read-failed', `打包失败：${err.message}`));
+      else resolve(data);
+    });
+  });
 
-  const BlobCtor = (globalThis as { Blob?: BlobCtorLike }).Blob
+  const BlobCtor = (globalThis as { Blob?: BlobCtorLike }).Blob;
   if (!BlobCtor) {
-    throw new AssetZipError('read-failed', '当前环境没有 Blob，无法产出导出包')
+    throw new AssetZipError('read-failed', '当前环境没有 Blob，无法产出导出包');
   }
   // 复制进独立缓冲区: Blob 直接持 fflate 的视图会连带整块底层 buffer
-  return new BlobCtor([zipped.slice().buffer as ArrayBuffer], { type: 'application/zip' })
+  return new BlobCtor([zipped.slice().buffer as ArrayBuffer], { type: 'application/zip' });
 }

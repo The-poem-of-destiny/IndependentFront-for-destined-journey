@@ -1,88 +1,91 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import InputBar from './InputBar.vue'
-import type { ChatMessage, SystemEvent } from '@engine/types'
-import { escapeHtml } from '@engine/beautifier'
-import { useBeautify } from '../../composables/useBeautify'
-import { useSettingsStore } from '../../stores/settings-store'
-import { useGameStore } from '../../stores/game-store'
-import CraftSystemCard from './cards/CraftSystemCard.vue'
-import CharGenSystemCard from './cards/CharGenSystemCard.vue'
-import CombatSystemCard from './cards/CombatSystemCard.vue'
-import ItemSystemCard from './cards/ItemSystemCard.vue'
-import SystemNotifBar from './cards/SystemNotifBar.vue'
-import type { Component } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import InputBar from './InputBar.vue';
+import type { ChatMessage, SystemEvent } from '@engine/types';
+import { escapeHtml } from '@engine/beautifier';
+import { useBeautify } from '../../composables/useBeautify';
+import { useSettingsStore } from '../../stores/settings-store';
+import { useGameStore } from '../../stores/game-store';
+import CraftSystemCard from './cards/CraftSystemCard.vue';
+import CharGenSystemCard from './cards/CharGenSystemCard.vue';
+import CombatSystemCard from './cards/CombatSystemCard.vue';
+import ItemSystemCard from './cards/ItemSystemCard.vue';
+import SystemNotifBar from './cards/SystemNotifBar.vue';
+import type { Component } from 'vue';
 
 const CARD_COMPONENTS: Record<string, Component> = {
   craft: CraftSystemCard,
   char_gen: CharGenSystemCard,
   combat: CombatSystemCard,
   item_gen: ItemSystemCard,
-}
+};
 
 const props = defineProps<{
-  messages?: ChatMessage[]
-  isGenerating?: boolean
-  systemEventsVisible?: boolean
-  systemEventFilters?: Record<string, boolean>
-  streamingText?: string
-}>()
+  messages?: ChatMessage[];
+  isGenerating?: boolean;
+  systemEventsVisible?: boolean;
+  systemEventFilters?: Record<string, boolean>;
+  streamingText?: string;
+}>();
 
 const emit = defineEmits<{
-  send: [content: string]
-  'select-option': [text: string]
-  stop: []
-}>()
+  send: [content: string];
+  'select-option': [text: string];
+  stop: [];
+}>();
 
-const settings = useSettingsStore()
-const s = settings.settings
-const game = useGameStore()
+const settings = useSettingsStore();
+const s = settings.settings;
+const game = useGameStore();
 
-const container = ref<HTMLDivElement>()
-const expandedIds = ref<Record<string, boolean>>({})
+const container = ref<HTMLDivElement>();
+const expandedIds = ref<Record<string, boolean>>({});
 
-watch(() => props.messages?.length, () => {
-  nextTick(() => {
-    if (container.value) {
-      container.value.scrollTop = container.value.scrollHeight
-    }
-  })
-})
+watch(
+  () => props.messages?.length,
+  () => {
+    nextTick(() => {
+      if (container.value) {
+        container.value.scrollTop = container.value.scrollHeight;
+      }
+    });
+  },
+);
 
 function formatTime(ts?: number): string {
-  if (!ts) return ''
-  const d = new Date(ts)
-  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  if (!ts) return '';
+  const d = new Date(ts);
+  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
 function toggleExpand(id: string) {
   if (expandedIds.value[id]) {
-    collapseCard(id)
+    collapseCard(id);
   } else {
-    expandedIds.value = { ...expandedIds.value, [id]: true }
+    expandedIds.value = { ...expandedIds.value, [id]: true };
   }
 }
 
 function collapseCard(id: string) {
   // 整体替换对象确保 Vue 3 响应式追踪
-  const next: Record<string, boolean> = {}
+  const next: Record<string, boolean> = {};
   for (const key of Object.keys(expandedIds.value)) {
-    if (key !== id) next[key] = expandedIds.value[key]
+    if (key !== id) next[key] = expandedIds.value[key];
   }
-  expandedIds.value = next
+  expandedIds.value = next;
 }
 
 function isComplexEvent(type: string): boolean {
-  return type === 'craft' || type === 'char_gen' || type === 'combat' || type === 'item_gen'
+  return type === 'craft' || type === 'char_gen' || type === 'combat' || type === 'item_gen';
 }
 
 /** 该系统事件是否应该显示 */
 function isEventVisible(ev: SystemEvent): boolean {
-  if (!props.systemEventsVisible) return false
+  if (!props.systemEventsVisible) return false;
   if (props.systemEventFilters && ev.type in props.systemEventFilters) {
-    return props.systemEventFilters[ev.type]
+    return props.systemEventFilters[ev.type];
   }
-  return true // 未知类型默认显示
+  return true; // 未知类型默认显示
 }
 
 function eventIconClass(type: string): string {
@@ -90,71 +93,82 @@ function eventIconClass(type: string): string {
     craft: 'fa-solid fa-hammer',
     char_gen: 'fa-solid fa-user-plus',
     item_gen: 'fa-solid fa-gift',
-    combat: 'fa-solid fa-swords',          /* Font Awesome 6 pro — 降级为 fa-hand-fist */
+    combat: 'fa-solid fa-swords' /* Font Awesome 6 pro — 降级为 fa-hand-fist */,
     character_update: 'fa-solid fa-arrow-trend-up',
     item_update: 'fa-solid fa-boxes-stacked',
     quest_update: 'fa-solid fa-list-check',
-  }
-  return icons[type] ?? 'fa-solid fa-circle-info'
+  };
+  return icons[type] ?? 'fa-solid fa-circle-info';
 }
 
 // 美化逻辑抽到 composable（CombatMessageFlow 复用）
-const { beautifyText, beautifyStreamingText } = useBeautify()
-
+const { beautifyText, beautifyStreamingText } = useBeautify();
 
 // ===== 右键菜单（最新一回合 回退/复制）=====
-const ctxMenu = ref<{ x: number; y: number; msgId: string } | null>(null)
+const ctxMenu = ref<{ x: number; y: number; msgId: string } | null>(null);
 
 /** 最新一条 assistant 消息（右键菜单仅对它生效） */
 const latestAssistantMsg = computed<ChatMessage | undefined>(() => {
-  const list = props.messages ?? []
+  const list = props.messages ?? [];
   for (let i = list.length - 1; i >= 0; i--) {
-    if (list[i].role === 'assistant') return list[i]
+    if (list[i].role === 'assistant') return list[i];
   }
-  return undefined
-})
+  return undefined;
+});
 
 function onContextMenu(e: MouseEvent, msg: ChatMessage) {
   // 仅最新一条 assistant 消息启用自定义菜单；其余走浏览器默认右键
-  if (!latestAssistantMsg.value || msg.id !== latestAssistantMsg.value.id) return
-  if (game.isInCombat || props.isGenerating) return
-  e.preventDefault()
+  if (!latestAssistantMsg.value || msg.id !== latestAssistantMsg.value.id) return;
+  if (game.isInCombat || props.isGenerating) return;
+  e.preventDefault();
   // 视口夹紧，避免菜单溢出屏幕
-  const x = Math.min(e.clientX, window.innerWidth - 200)
-  const y = Math.min(e.clientY, window.innerHeight - 96)
-  ctxMenu.value = { x, y, msgId: msg.id }
+  const x = Math.min(e.clientX, window.innerWidth - 200);
+  const y = Math.min(e.clientY, window.innerHeight - 96);
+  ctxMenu.value = { x, y, msgId: msg.id };
 }
 
-function closeCtxMenu() { ctxMenu.value = null }
+function closeCtxMenu() {
+  ctxMenu.value = null;
+}
 
 async function ctxRollback() {
-  const result = await game.rollbackOneTurn()
-  closeCtxMenu()
-  if (!result.ok && result.error) console.warn('[ChatFlow] 回退失败:', result.error)
+  const result = await game.rollbackOneTurn();
+  closeCtxMenu();
+  if (!result.ok && result.error) console.warn('[ChatFlow] 回退失败:', result.error);
 }
 
 async function ctxCopy() {
-  const msgId = ctxMenu.value?.msgId
-  closeCtxMenu()
-  const msg = (props.messages ?? []).find(m => m.id === msgId)
-  if (!msg) return
-  try { await navigator.clipboard.writeText(msg.content) } catch (e) { console.warn('[ChatFlow] 复制失败:', e) }
+  const msgId = ctxMenu.value?.msgId;
+  closeCtxMenu();
+  const msg = (props.messages ?? []).find((m) => m.id === msgId);
+  if (!msg) return;
+  try {
+    await navigator.clipboard.writeText(msg.content);
+  } catch (e) {
+    console.warn('[ChatFlow] 复制失败:', e);
+  }
 }
 
-function handleGlobalClick() { closeCtxMenu() }
-function handleEsc(e: KeyboardEvent) { if (e.key === 'Escape') closeCtxMenu() }
-function handleScrollClose() { closeCtxMenu() }
+function handleGlobalClick() {
+  closeCtxMenu();
+}
+function handleEsc(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeCtxMenu();
+}
+function handleScrollClose() {
+  closeCtxMenu();
+}
 
 onMounted(() => {
-  window.addEventListener('click', handleGlobalClick)
-  window.addEventListener('keydown', handleEsc)
-  window.addEventListener('scroll', handleScrollClose, true) // capture：捕获容器内滚动
-})
+  window.addEventListener('click', handleGlobalClick);
+  window.addEventListener('keydown', handleEsc);
+  window.addEventListener('scroll', handleScrollClose, true); // capture：捕获容器内滚动
+});
 onUnmounted(() => {
-  window.removeEventListener('click', handleGlobalClick)
-  window.removeEventListener('keydown', handleEsc)
-  window.removeEventListener('scroll', handleScrollClose, true)
-})
+  window.removeEventListener('click', handleGlobalClick);
+  window.removeEventListener('keydown', handleEsc);
+  window.removeEventListener('scroll', handleScrollClose, true);
+});
 </script>
 
 <template>
@@ -172,7 +186,7 @@ onUnmounted(() => {
           <div class="bubble bubble-player">
             <span class="bubble-prefix">你:</span>
             <span class="bubble-text" v-html="escapeHtml(msg.content).replace(/\n/g, '<br>')" />
-            <span class="bubble-time" v-if="msg.timestamp">{{ formatTime(msg.timestamp) }}</span>
+            <span v-if="msg.timestamp" class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
           </div>
         </div>
 
@@ -180,18 +194,27 @@ onUnmounted(() => {
         <div
           v-else-if="msg.role === 'assistant'"
           class="bubble-row bubble-row-narrative"
-          :title="latestAssistantMsg?.id === msg.id && !game.isInCombat && !isGenerating ? '右键：回退本轮 / 复制' : ''"
+          :title="
+            latestAssistantMsg?.id === msg.id && !game.isInCombat && !isGenerating
+              ? '右键：回退本轮 / 复制'
+              : ''
+          "
           @contextmenu="onContextMenu($event, msg)"
         >
           <div class="bubble bubble-narrative-full">
             <div class="narrative-body" v-html="beautifyText(msg)" />
-            <span class="bubble-time" v-if="msg.timestamp">{{ formatTime(msg.timestamp) }}</span>
+            <span v-if="msg.timestamp" class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
           </div>
         </div>
 
         <!-- 系统事件消息 — 简单类型：纯通知条，无折叠 -->
         <div
-          v-else-if="msg.role === 'system' && msg.systemEvent && isEventVisible(msg.systemEvent) && !isComplexEvent(msg.systemEvent.type)"
+          v-else-if="
+            msg.role === 'system' &&
+            msg.systemEvent &&
+            isEventVisible(msg.systemEvent) &&
+            !isComplexEvent(msg.systemEvent.type)
+          "
           class="bubble-row bubble-row-system"
         >
           <SystemNotifBar :event="msg.systemEvent" />
@@ -237,7 +260,10 @@ onUnmounted(() => {
       <!-- 🆕 流式正文实时渲染 -->
       <div v-if="isGenerating && streamingText" class="bubble-row bubble-row-narrative">
         <div class="bubble bubble-narrative-full">
-          <div class="narrative-body streaming-content" v-html="beautifyStreamingText(streamingText)" />
+          <div
+            class="narrative-body streaming-content"
+            v-html="beautifyStreamingText(streamingText)"
+          />
         </div>
       </div>
     </div>
@@ -246,13 +272,15 @@ onUnmounted(() => {
 
     <!-- 右键菜单（最新一回合 回退/复制） -->
     <Teleport to="body">
-      <div v-if="ctxMenu" class="ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }">
+      <div
+        v-if="ctxMenu"
+        class="ctx-menu"
+        :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+      >
         <button class="ctx-item" :disabled="game.isInCombat" @click.stop="ctxRollback">
           <i class="fa-solid fa-rotate-left" /> 回退本轮
         </button>
-        <button class="ctx-item" @click.stop="ctxCopy">
-          <i class="fa-solid fa-copy" /> 复制
-        </button>
+        <button class="ctx-item" @click.stop="ctxCopy"><i class="fa-solid fa-copy" /> 复制</button>
       </div>
     </Teleport>
   </div>
@@ -432,8 +460,13 @@ onUnmounted(() => {
   display: inline-block;
 }
 @keyframes pulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 /* ===== 流式正文 ===== */
@@ -448,8 +481,13 @@ onUnmounted(() => {
   opacity: 0.8;
 }
 @keyframes cursor-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 
 /* ===== 系统消息 ===== */
@@ -471,7 +509,9 @@ onUnmounted(() => {
   width: 100%;
   font-size: 0.8125rem;
   color: var(--theme-text-secondary);
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
   user-select: none;
 }
 .system-notif:hover {

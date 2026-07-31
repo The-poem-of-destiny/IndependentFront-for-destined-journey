@@ -1,8 +1,9 @@
 # Phase 7e: 游戏页面设计规划 & 引擎支撑审计
 
 > 基于 `docs/reference/status_page_architecture.md` 原版架构分析
-> + UI/UX Pro Max 设计系统推荐
-> + 引擎核心类型 & $API 全面审计
+>
+> - UI/UX Pro Max 设计系统推荐
+> - 引擎核心类型 & $API 全面审计
 >
 > 日期：2026-06-17
 
@@ -12,26 +13,26 @@
 
 ### 1.1 自动推荐结果
 
-| 维度 | 推荐 | 适配本项目 |
-|------|------|-----------|
-| **风格** | Dark Mode (OLED) — 暗色主题、低光发射、高对比度 | ✅ 10 主题中有 obsidian/crimson/indigo 等暗色主题可直接用 |
-| **字体** | Heading: Orbitron (科幻HUD风) / Body: JetBrains Mono | ⚠️ 项目已有 Cinzel(衬线标题) + 系统字体，保持一致性优先 |
-| **主色** | Primary: `#15803D` (绿) / Accent: `#D97706` (金) | ⚠️ 主题系统已有完整 Token，按主题颜色体系走 |
-| **效果** | 最小发光(text-shadow glow)、暗→亮过渡、可读性优先 | ✅ 可用 CSS `text-shadow` + `box-shadow` 实现 |
-| **模式** | Dark Only (纯暗色) | ⚠️ 项目有浅色主题(ivory/misty-lilac)，需支持双模式 |
-| **交互模式** | 沉浸式体验、引导式产品巡览、交互后 CTA | ✅ 游戏 HUD 天然沉浸式 |
+| 维度         | 推荐                                                 | 适配本项目                                                |
+| ------------ | ---------------------------------------------------- | --------------------------------------------------------- |
+| **风格**     | Dark Mode (OLED) — 暗色主题、低光发射、高对比度      | ✅ 10 主题中有 obsidian/crimson/indigo 等暗色主题可直接用 |
+| **字体**     | Heading: Orbitron (科幻HUD风) / Body: JetBrains Mono | ⚠️ 项目已有 Cinzel(衬线标题) + 系统字体，保持一致性优先   |
+| **主色**     | Primary: `#15803D` (绿) / Accent: `#D97706` (金)     | ⚠️ 主题系统已有完整 Token，按主题颜色体系走               |
+| **效果**     | 最小发光(text-shadow glow)、暗→亮过渡、可读性优先    | ✅ 可用 CSS `text-shadow` + `box-shadow` 实现             |
+| **模式**     | Dark Only (纯暗色)                                   | ⚠️ 项目有浅色主题(ivory/misty-lilac)，需支持双模式        |
+| **交互模式** | 沉浸式体验、引导式产品巡览、交互后 CTA               | ✅ 游戏 HUD 天然沉浸式                                    |
 
 ### 1.2 项目适配结论
 
 **不盲从推荐，结合项目现有资源做设计决策：**
 
-| 设计决策 | 选择 | 理由 |
-|----------|------|------|
-| 色彩体系 | 沿用项目 **10 主题 CSS 变量** | 已有完整 Token 体系(50+ 变量)，与设置页主题系统打通。**暗色/浅色职责由主题系统承担**，不做独立的双模式开关 |
-| 字体 | 保持 **Cinzel(标题) + system-ui(正文)** | 避免引入新字体增加加载成本，现有字体已有 fantasy 调性 |
-| 发光效果 | **品质色 glow** | 神话/传说品质装备使用对应颜色的 `text-shadow` glow |
-| 动画 | CSS transition + `<Transition>` | 轻量，不需 GSAP（Vue 内置） |
-| 布局 | 三栏对话流 | 左侧工具入口 + 中间对话流 + 右侧角色状态 |
+| 设计决策 | 选择                                    | 理由                                                                                                       |
+| -------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| 色彩体系 | 沿用项目 **10 主题 CSS 变量**           | 已有完整 Token 体系(50+ 变量)，与设置页主题系统打通。**暗色/浅色职责由主题系统承担**，不做独立的双模式开关 |
+| 字体     | 保持 **Cinzel(标题) + system-ui(正文)** | 避免引入新字体增加加载成本，现有字体已有 fantasy 调性                                                      |
+| 发光效果 | **品质色 glow**                         | 神话/传说品质装备使用对应颜色的 `text-shadow` glow                                                         |
+| 动画     | CSS transition + `<Transition>`         | 轻量，不需 GSAP（Vue 内置）                                                                                |
+| 布局     | 三栏对话流                              | 左侧工具入口 + 中间对话流 + 右侧角色状态                                                                   |
 
 ---
 
@@ -88,25 +89,26 @@
 
 **对话流三种气泡**：
 
-| 气泡类型 | 前缀 | 样式 | 内容 |
-|----------|------|------|------|
-| **玩家消息** | `你:` | 右侧对齐，偏暗背景 | 用户输入的角色行动 |
-| **正文回复** | `正文:` | 左侧对齐，standard 背景 | AI 生成的故事叙事 |
-| **触发消息** | `⚡ 触发:` | 居中卡片，品质色边框 | 制作/战斗/状态变化等特殊事件触发时的提示 |
+| 气泡类型     | 前缀       | 样式                    | 内容                                     |
+| ------------ | ---------- | ----------------------- | ---------------------------------------- |
+| **玩家消息** | `你:`      | 右侧对齐，偏暗背景      | 用户输入的角色行动                       |
+| **正文回复** | `正文:`    | 左侧对齐，standard 背景 | AI 生成的故事叙事                        |
+| **触发消息** | `⚡ 触发:` | 居中卡片，品质色边框    | 制作/战斗/状态变化等特殊事件触发时的提示 |
 
 **右侧状态栏布局（从上到下）**：
 
-| 位置 | 内容 | 说明 |
-|------|------|------|
-| 最顶部 | ⏰ 游戏时间 + 📍 当前位置 | 从顶栏移入 |
+| 位置    | 内容                                                          | 说明                                   |
+| ------- | ------------------------------------------------------------- | -------------------------------------- |
+| 最顶部  | ⏰ 游戏时间 + 📍 当前位置                                     | 从顶栏移入                             |
 | 第 1 区 | **角色概览** — 头像(最大)·名字·种族·职业·层级·等级·冒险者等级 | 头像无图片时用随机底色+首字母 fallback |
-| 第 2 区 | ResourceBar — HP/MP/SP/EXP | 已有组件 |
-| 第 3 区 | 五维属性 — 紧凑 grid | 力量/敏捷/体质/智力/精神 |
-| 第 4 区 | BuffChip 药丸列表 | 已有组件 |
-| 第 5 区 | 装备摘要 — 5 槽位预览 | 武器/防具/饰品 × 品质色 |
-| 第 6 区 | 焦点任务追踪 | 当前追踪的任务目标+进展 |
+| 第 2 区 | ResourceBar — HP/MP/SP/EXP                                    | 已有组件                               |
+| 第 3 区 | 五维属性 — 紧凑 grid                                          | 力量/敏捷/体质/智力/精神               |
+| 第 4 区 | BuffChip 药丸列表                                             | 已有组件                               |
+| 第 5 区 | 装备摘要 — 5 槽位预览                                         | 武器/防具/饰品 × 品质色                |
+| 第 6 区 | 焦点任务追踪                                                  | 当前追踪的任务目标+进展                |
 
 **头像 Fallback 规则**：
+
 - 有头像 URL → 显示图片
 - 无头像 → 随机底色（基于名字 hash）+ 名字首字母（大写）
 - 随机颜色池：品质色 + 主题色共 ~10 种，确保暗/亮主题下均可见
@@ -195,12 +197,11 @@ GamePage.vue
 
 ### 2.5 对话流三种气泡详细设计
 
-| 气泡 | 前缀 | 对齐 | 背景 | 字体 | 附加信息 |
-|------|------|------|------|------|----------|
-| **玩家消息** | `你:` | 右侧 | `--theme-card-bg` 加深 | system-ui | 时间戳 |
-| **正文回复** | `正文:` | 左侧 | `--theme-content-bg` | Cinzel(中文fallback) | 时间戳 + (可选)位置标签 |
-| **触发消息** | `⚡ 触发:` | 居中 | 品质色左边框 + 半透明背景 | system-ui | 触发类型标签(制作/战斗/状态/剧情) |
-
+| 气泡         | 前缀       | 对齐 | 背景                      | 字体                 | 附加信息                          |
+| ------------ | ---------- | ---- | ------------------------- | -------------------- | --------------------------------- |
+| **玩家消息** | `你:`      | 右侧 | `--theme-card-bg` 加深    | system-ui            | 时间戳                            |
+| **正文回复** | `正文:`    | 左侧 | `--theme-content-bg`      | Cinzel(中文fallback) | 时间戳 + (可选)位置标签           |
+| **触发消息** | `⚡ 触发:` | 居中 | 品质色左边框 + 半透明背景 | system-ui            | 触发类型标签(制作/战斗/状态/剧情) |
 
 ### 2.4 交互流程
 
@@ -216,22 +217,22 @@ GamePage.vue
 
 点击 [👥 角色列表]
   → StatusHUD 切换为 CharacterListPanel (NPC 列表)
-  
+
 点击 [📋 任务]
   → StatusHUD 切换为 QuestsPanel
-  
+
 点击 [📖 剧情规划]
   → StatusHUD 切换为 PlotPanel (大纲/事件树)
-  
+
 点击 [🗺 地图]
   → 全屏 MapModal (地图太大不适合右侧小面板)
-  
+
 点击 [🧠 记忆]
   → StatusHUD 切换为 MemoryPanel
-  
+
 点击 [📸 快照]
   → 弹出 SnapshotsModal
-  
+
 点击 [⚙ 设置]
   → 弹出 SettingsModal
 ```
@@ -239,7 +240,7 @@ GamePage.vue
 #### 2.4.2 右侧面板状态
 
 ```
-rightPanelMode: 
+rightPanelMode:
   'status'      → StatusOverview (默认)
   'items'       → ItemsPanel
   'characters'  → CharacterListPanel
@@ -285,72 +286,72 @@ GamePage 显示模式 (互斥):
 
 ### 3.1 CharacterState 字段 × 状态栏需求映射
 
-| 状态栏功能 | CharacterState 字段 | 类型 | 引擎读写 | 状态 |
-|------------|-------------------|------|----------|------|
-| 角色名 | `name: string` | 基础 | $char API | ✅ |
-| 种族 | `race: string` | 基础 | $char API | ✅ |
-| 身份标签 | `identity: string[]` | 数组 | $char API | ✅ |
-| 职业标签 | `occupation: string[]` | 数组 | $char API | ✅ |
-| 生命层级 | `tier: number (1-7)` + `tierName` | 数值 | tier-constants | ✅ |
-| 等级 | `level: number` | 数值 | $char API | ✅ |
-| 经验值 | `totalExp: number` + `expToNext: number` | 数值 | resource-calc | ✅ |
-| HP | `hp: number` / `maxHp: number` | 数值 | $resource API | ✅ |
-| MP | `mp: number` / `maxMp: number` | 数值 | $resource API | ✅ |
-| SP | `sp: number` / `maxSp: number` | 数值 | $resource API | ✅ |
-| 力量/敏捷/体质/智力/精神 | `attributes: {str,dex,con,int,spi}` | 数值 | $char API | ✅ |
-| 自由属性点 | `freeAttrPoints: number` | 数值 | $char API | ✅ |
-| 装备槽 | `equipment: EquipmentSlot[]` | 数组 | $char API | ✅ |
-| 技能列表 | `skills: Skill[]` | 数组 | $char API | ✅ |
-| 背包物品 | `inventory: InventoryItem[]` | 数组 | $char API | ✅ |
-| 状态效果 | `statusEffects: StatusEffect[]` | 数组 | $status API | ✅ |
-| 金钱 | `money: number` | 数值 | $char API | ✅ |
-| 冒险者等级 | `adventurerRank: string` | 字符串 | $char API | ✅ |
-| 当前位置 | `location: string` | 字符串 | location-db + $location | ✅ |
-| 登神长阶 | `ascension: {...}` | 对象 | $char API | ✅ |
-| 血脉 | `bloodlineIds?: string[]` | 数组 | bloodlines | ✅ |
-| 自定义字段 | `customFields: Record<string,any>` | 字典 | $var API | ✅ |
+| 状态栏功能               | CharacterState 字段                      | 类型   | 引擎读写                | 状态 |
+| ------------------------ | ---------------------------------------- | ------ | ----------------------- | ---- |
+| 角色名                   | `name: string`                           | 基础   | $char API               | ✅   |
+| 种族                     | `race: string`                           | 基础   | $char API               | ✅   |
+| 身份标签                 | `identity: string[]`                     | 数组   | $char API               | ✅   |
+| 职业标签                 | `occupation: string[]`                   | 数组   | $char API               | ✅   |
+| 生命层级                 | `tier: number (1-7)` + `tierName`        | 数值   | tier-constants          | ✅   |
+| 等级                     | `level: number`                          | 数值   | $char API               | ✅   |
+| 经验值                   | `totalExp: number` + `expToNext: number` | 数值   | resource-calc           | ✅   |
+| HP                       | `hp: number` / `maxHp: number`           | 数值   | $resource API           | ✅   |
+| MP                       | `mp: number` / `maxMp: number`           | 数值   | $resource API           | ✅   |
+| SP                       | `sp: number` / `maxSp: number`           | 数值   | $resource API           | ✅   |
+| 力量/敏捷/体质/智力/精神 | `attributes: {str,dex,con,int,spi}`      | 数值   | $char API               | ✅   |
+| 自由属性点               | `freeAttrPoints: number`                 | 数值   | $char API               | ✅   |
+| 装备槽                   | `equipment: EquipmentSlot[]`             | 数组   | $char API               | ✅   |
+| 技能列表                 | `skills: Skill[]`                        | 数组   | $char API               | ✅   |
+| 背包物品                 | `inventory: InventoryItem[]`             | 数组   | $char API               | ✅   |
+| 状态效果                 | `statusEffects: StatusEffect[]`          | 数组   | $status API             | ✅   |
+| 金钱                     | `money: number`                          | 数值   | $char API               | ✅   |
+| 冒险者等级               | `adventurerRank: string`                 | 字符串 | $char API               | ✅   |
+| 当前位置                 | `location: string`                       | 字符串 | location-db + $location | ✅   |
+| 登神长阶                 | `ascension: {...}`                       | 对象   | $char API               | ✅   |
+| 血脉                     | `bloodlineIds?: string[]`                | 数组   | bloodlines              | ✅   |
+| 自定义字段               | `customFields: Record<string,any>`       | 字典   | $var API                | ✅   |
 
 ### 3.2 SaveProfile 字段（存档级数据）
 
-| 状态栏功能 | SaveProfile 字段 | 引擎读写 | 状态 |
-|------------|-----------------|----------|------|
-| 命运点数 (FP) | `fp: number` | $fp API | ✅ |
-| FP 交易记录 | `fpHistory: FPTransaction[]` | $fp API | ✅ |
-| 命运契约 | `contracts: FateContract[]` | $fp API | ✅ |
-| 成就列表 | `achievements: Achievement[]` | $fp API | ✅ |
-| 新闻 | `news: NewsItem[]` | 直接读写 | ✅ |
-| 世界标记 | `worldFlags: Record<string,any>` | $var API | ✅ |
+| 状态栏功能    | SaveProfile 字段                 | 引擎读写 | 状态 |
+| ------------- | -------------------------------- | -------- | ---- |
+| 命运点数 (FP) | `fp: number`                     | $fp API  | ✅   |
+| FP 交易记录   | `fpHistory: FPTransaction[]`     | $fp API  | ✅   |
+| 命运契约      | `contracts: FateContract[]`      | $fp API  | ✅   |
+| 成就列表      | `achievements: Achievement[]`    | $fp API  | ✅   |
+| 新闻          | `news: NewsItem[]`               | 直接读写 | ✅   |
+| 世界标记      | `worldFlags: Record<string,any>` | $var API | ✅   |
 
 ### 3.3 战斗/制作状态
 
-| 功能 | 类型 | 引擎 | 状态 |
-|------|------|------|------|
-| 当前战斗状态 | `CombatState` | $combat API | ✅ |
-| 战斗参与者 | `CombatParticipant[]` | combat-resolver | ✅ |
-| 8步伤害管线 | `CombatDamageBreakdown` | combat-damage | ✅ |
-| 战斗面板 XML | `<action_info>` 生成 | combat-panel | ✅ |
-| 制作三阶段 | `CraftActionRequest/Result` | $craft API | ✅ |
-| 制作面板 | `<action_info>` 生成 | craft-resolver | ✅ |
+| 功能         | 类型                        | 引擎            | 状态 |
+| ------------ | --------------------------- | --------------- | ---- |
+| 当前战斗状态 | `CombatState`               | $combat API     | ✅   |
+| 战斗参与者   | `CombatParticipant[]`       | combat-resolver | ✅   |
+| 8步伤害管线  | `CombatDamageBreakdown`     | combat-damage   | ✅   |
+| 战斗面板 XML | `<action_info>` 生成        | combat-panel    | ✅   |
+| 制作三阶段   | `CraftActionRequest/Result` | $craft API      | ✅   |
+| 制作面板     | `<action_info>` 生成        | craft-resolver  | ✅   |
 
 ### 3.4 记忆/剧情系统
 
-| 功能 | 类型 | 引擎 | 状态 |
-|------|------|------|------|
-| 最近记忆 | `MemoryRecord[]` | memory-store | ✅ |
-| 活跃剧情事件 | `PlotEvent[]` | plot-engine | ✅ |
-| 剧情大纲 | `PlotOutline` | plot-outline | ✅ |
-| 世界线状态 | `PlotSettings` | plot-engine | ✅ |
+| 功能         | 类型             | 引擎         | 状态 |
+| ------------ | ---------------- | ------------ | ---- |
+| 最近记忆     | `MemoryRecord[]` | memory-store | ✅   |
+| 活跃剧情事件 | `PlotEvent[]`    | plot-engine  | ✅   |
+| 剧情大纲     | `PlotOutline`    | plot-outline | ✅   |
+| 世界线状态   | `PlotSettings`   | plot-engine  | ✅   |
 
 ### 3.5 地图/位置
 
-| 功能 | 引擎 | 状态 |
-|------|------|------|
-| 32 节点位置数据库 | location-db | ✅ |
-| 10 势力拓扑 | location-db (`$location` API) | ✅ |
-| 完整层级路径 | `getLocationPath()` | ✅ |
-| 相邻节点查询 | `areAdjacent()` / `getNeighbors()` | ✅ |
-| 地图标记 (Marker) | ❌ 无引擎类型 → 需新增 `MapMarker` + 存 `SaveProfile` | ⚠️ |
-| 地图图片/瓦片 | ❌ 前端自行管理 (OpenSeadragon + SW Cache) | ⚠️ |
+| 功能              | 引擎                                                  | 状态 |
+| ----------------- | ----------------------------------------------------- | ---- |
+| 32 节点位置数据库 | location-db                                           | ✅   |
+| 10 势力拓扑       | location-db (`$location` API)                         | ✅   |
+| 完整层级路径      | `getLocationPath()`                                   | ✅   |
+| 相邻节点查询      | `areAdjacent()` / `getNeighbors()`                    | ✅   |
+| 地图标记 (Marker) | ❌ 无引擎类型 → 需新增 `MapMarker` + 存 `SaveProfile` | ⚠️   |
+| 地图图片/瓦片     | ❌ 前端自行管理 (OpenSeadragon + SW Cache)            | ⚠️   |
 
 ---
 
@@ -365,16 +366,17 @@ GamePage 显示模式 (互斥):
 **影响**：QuestsTab 完全无法工作。
 
 **建议**：
+
 ```typescript
 // 方案 A: 加入 SaveProfile（推荐 — 任务是存档级数据）
 export interface Quest {
   name: string;
-  status: string;       // 进行中/已完成/失败/搁置
+  status: string; // 进行中/已完成/失败/搁置
   priority: '高' | '中' | '低';
-  progress: string;     // 当前进展描述
-  detail: string;       // 任务详情
-  objective: string;    // 任务目标
-  reward: string;       // 奖励描述
+  progress: string; // 当前进展描述
+  detail: string; // 任务详情
+  objective: string; // 任务目标
+  reward: string; // 奖励描述
 }
 // SaveProfile 新增字段
 quests: Record<string, Quest>;
@@ -388,15 +390,15 @@ quests: Record<string, Quest>;
 伙伴 = CharacterState (type='npc') + AffectionMap[characterId]
 ```
 
-| 能力 | 接口 | 位置 |
-|------|------|------|
-| 获取所有 NPC | `getNpcs()` | `char-query.ts` |
-| 按位置过滤/在场查询 | `filterByLocation()` / `getPresentCharacters()` | `char-query.ts` |
-| 角色状态摘要 | `summarizeChar()` | `char-query.ts` |
-| 好感度 CRUD | `$affection.get/set/add/batch` | `affection-system.ts` |
-| 好感度 11 级标签 | `getAffectionLabel()` | `affection-system.ts` |
-| NPC 自动生成 | `runCharGenChain()` | `char-gen-agent.ts` |
-| 完整角色数据 | `CharacterState` (20+字段) | `types.ts` |
+| 能力                | 接口                                            | 位置                  |
+| ------------------- | ----------------------------------------------- | --------------------- |
+| 获取所有 NPC        | `getNpcs()`                                     | `char-query.ts`       |
+| 按位置过滤/在场查询 | `filterByLocation()` / `getPresentCharacters()` | `char-query.ts`       |
+| 角色状态摘要        | `summarizeChar()`                               | `char-query.ts`       |
+| 好感度 CRUD         | `$affection.get/set/add/batch`                  | `affection-system.ts` |
+| 好感度 11 级标签    | `getAffectionLabel()`                           | `affection-system.ts` |
+| NPC 自动生成        | `runCharGenChain()`                             | `char-gen-agent.ts`   |
+| 完整角色数据        | `CharacterState` (20+字段)                      | `types.ts`            |
 
 **CharacterListPanel 实现**：调用 `getNpcs()` → 交叉 `AffectionMap` → 渲染卡片列表即可。
 
@@ -407,6 +409,7 @@ quests: Record<string, Quest>;
 **决策**：保留标记系统，仅砍掉 DrawCanvas 自由绘制。标记数据存 `SaveProfile.worldFlags.mapMarkers`。
 
 **所需新增**：
+
 ```typescript
 // types.ts
 export interface MapMarker {
@@ -415,9 +418,9 @@ export interface MapMarker {
   group?: string;
   description?: string;
   imageUrls?: string[];
-  icon?: string;       // Font Awesome icon class
-  color?: string;       // hex color
-  position: { nx: number; ny: number };  // OSD 归一化坐标 (0-1)
+  icon?: string; // Font Awesome icon class
+  color?: string; // hex color
+  position: { nx: number; ny: number }; // OSD 归一化坐标 (0-1)
 }
 ```
 
@@ -458,17 +461,17 @@ export interface NewsItem {
 
 ### 4.5 🟢 已有且充足的部分
 
-| 系统 | 引擎支持 | 评价 |
-|------|----------|------|
-| 角色数据 (CharacterState) | ✅ 完整 | 20+ 字段，覆盖全部状态栏需求 |
-| $ API 体系 | ✅ 9 个 namespace | combat/craft/dice/char/var/time/resource/validate/fp/affection/location |
-| 品质系统 | ✅ 7 级 | QualityBadge 组件已有 |
-| 主题系统 | ✅ 10 主题 | CSS 变量体系完整 |
-| 资源条 | ✅ ResourceBar 组件已有 | HP/MP/SP/EXP 四色 |
-| 存档系统 | ✅ SaveSlot + SaveProfile | FP/成就/新闻/世界标记 |
-| 位置系统 | ✅ 32 节点 + 拓扑 | location-db |
-| 登神长阶 | ✅ CharacterState.ascension | 要素/权能/法则/神位/神国 |
-| 状态效果 | ✅ StatusEffect[] | buff/debuff/special 分类 |
+| 系统                      | 引擎支持                    | 评价                                                                    |
+| ------------------------- | --------------------------- | ----------------------------------------------------------------------- |
+| 角色数据 (CharacterState) | ✅ 完整                     | 20+ 字段，覆盖全部状态栏需求                                            |
+| $ API 体系                | ✅ 9 个 namespace           | combat/craft/dice/char/var/time/resource/validate/fp/affection/location |
+| 品质系统                  | ✅ 7 级                     | QualityBadge 组件已有                                                   |
+| 主题系统                  | ✅ 10 主题                  | CSS 变量体系完整                                                        |
+| 资源条                    | ✅ ResourceBar 组件已有     | HP/MP/SP/EXP 四色                                                       |
+| 存档系统                  | ✅ SaveSlot + SaveProfile   | FP/成就/新闻/世界标记                                                   |
+| 位置系统                  | ✅ 32 节点 + 拓扑           | location-db                                                             |
+| 登神长阶                  | ✅ CharacterState.ascension | 要素/权能/法则/神位/神国                                                |
+| 状态效果                  | ✅ StatusEffect[]           | buff/debuff/special 分类                                                |
 
 ---
 
@@ -513,60 +516,60 @@ export interface NewsItem {
 
 ### 6.1 布局/结构组件
 
-| 组件 | 说明 | 引擎支撑 | 优先级 |
-|------|------|----------|--------|
-| `TopBar.vue` (←首页 + 全屏) | 极简顶栏，无其他内容 | ✅ | P0 |
-| `SideToolbar.vue` (8 工具入口 + 可折叠) | 折叠后仅图标，展开图标+文字 | ✅ | P0 |
-| `ChatFlow.vue` (对话流) | 三种气泡: 玩家(`你:`)/正文(`正文:`)/触发(`⚡ 触发:`) | ✅ | P0 |
-| `StatusHUD.vue` (右侧状态栏容器) | 时间+地点→头像(含fallback)→身份→资源→属性→Buff→装备→任务 | ✅ CharacterState | P0 |
-| `InputBar.vue` | [📋 选项] + 输入框 + [发送]，选项点击自动填入 | ✅ | P0 |
+| 组件                                    | 说明                                                     | 引擎支撑          | 优先级 |
+| --------------------------------------- | -------------------------------------------------------- | ----------------- | ------ |
+| `TopBar.vue` (←首页 + 全屏)             | 极简顶栏，无其他内容                                     | ✅                | P0     |
+| `SideToolbar.vue` (8 工具入口 + 可折叠) | 折叠后仅图标，展开图标+文字                              | ✅                | P0     |
+| `ChatFlow.vue` (对话流)                 | 三种气泡: 玩家(`你:`)/正文(`正文:`)/触发(`⚡ 触发:`)     | ✅                | P0     |
+| `StatusHUD.vue` (右侧状态栏容器)        | 时间+地点→头像(含fallback)→身份→资源→属性→Buff→装备→任务 | ✅ CharacterState | P0     |
+| `InputBar.vue`                          | [📋 选项] + 输入框 + [发送]，选项点击自动填入            | ✅                | P0     |
 
 ### 6.2 右侧面板组件（替换 StatusHUD 内容）
 
-| 面板 | 触发 | 引擎支撑 | 优先级 |
-|------|------|----------|--------|
-| `StatusOverview.vue` | 默认显示 | ✅ CharacterState | P0 |
-| `ItemsPanel.vue` (背包/装备/技能 三分类) | 点击 📦 背包 | ✅ EquipmentSlot/Skill/InventoryItem | P1 |
-| `CharacterListPanel.vue` (NPC 列表 + 好感度) | 点击 👥 角色 | ✅ getNpcs() + $affection | P1 |
-| `QuestsPanel.vue` (任务列表 + 焦点选择) | 点击 📋 任务 | ⚠️ 需新增 Quest 类型 | P1 |
-| `PlotPanel.vue` (剧情大纲/事件树) | 点击 📖 剧情 | ✅ PlotOutline/PlotEvent | P1 |
-| `MemoryPanel.vue` (记忆列表) | 点击 🧠 记忆 | ✅ MemoryRecord[] | P1 |
+| 面板                                         | 触发         | 引擎支撑                             | 优先级 |
+| -------------------------------------------- | ------------ | ------------------------------------ | ------ |
+| `StatusOverview.vue`                         | 默认显示     | ✅ CharacterState                    | P0     |
+| `ItemsPanel.vue` (背包/装备/技能 三分类)     | 点击 📦 背包 | ✅ EquipmentSlot/Skill/InventoryItem | P1     |
+| `CharacterListPanel.vue` (NPC 列表 + 好感度) | 点击 👥 角色 | ✅ getNpcs() + $affection            | P1     |
+| `QuestsPanel.vue` (任务列表 + 焦点选择)      | 点击 📋 任务 | ⚠️ 需新增 Quest 类型                 | P1     |
+| `PlotPanel.vue` (剧情大纲/事件树)            | 点击 📖 剧情 | ✅ PlotOutline/PlotEvent             | P1     |
+| `MemoryPanel.vue` (记忆列表)                 | 点击 🧠 记忆 | ✅ MemoryRecord[]                    | P1     |
 
 ### 6.3 弹出层组件
 
-| 组件 | 触发 | 引擎支撑 | 优先级 |
-|------|------|----------|--------|
-| `MapModal.vue` (全屏地图，仅砍 DrawCanvas) | 点击 🗺 地图 | ⚠️ 需 MapMarker 类型 + OSD 集成 | P2 |
-| `SnapshotsModal.vue` (快照管理) | 点击 📸 快照 | ✅ Snapshot[] | P2 |
-| `SettingsModal.vue` (游戏内设置) | 点击 ⚙ 设置 | ✅ 复用 SettingsPage | P2 |
+| 组件                                       | 触发         | 引擎支撑                        | 优先级 |
+| ------------------------------------------ | ------------ | ------------------------------- | ------ |
+| `MapModal.vue` (全屏地图，仅砍 DrawCanvas) | 点击 🗺 地图  | ⚠️ 需 MapMarker 类型 + OSD 集成 | P2     |
+| `SnapshotsModal.vue` (快照管理)            | 点击 📸 快照 | ✅ Snapshot[]                   | P2     |
+| `SettingsModal.vue` (游戏内设置)           | 点击 ⚙ 设置  | ✅ 复用 SettingsPage            | P2     |
 
 ### 6.4 覆盖层组件
 
-| 组件 | 触发 | 引擎支撑 | 优先级 |
-|------|------|----------|--------|
-| `CombatPanel.vue` (覆盖 ChatFlow) | 战斗触发 | ✅ $combat | P1 |
-| `CraftPanel.vue` (覆盖 ChatFlow) | 制作触发 | ✅ $craft | P1 |
+| 组件                              | 触发     | 引擎支撑   | 优先级 |
+| --------------------------------- | -------- | ---------- | ------ |
+| `CombatPanel.vue` (覆盖 ChatFlow) | 战斗触发 | ✅ $combat | P1     |
+| `CraftPanel.vue` (覆盖 ChatFlow)  | 制作触发 | ✅ $craft  | P1     |
 
 ### 6.5 已有组件复用
 
-| 已有组件 | 使用位置 | 状态 |
-|----------|----------|------|
-| `ResourceBar.vue` | StatusOverview (HP/MP/SP/EXP) | ✅ 直接复用 |
-| `AvatarPanel.vue` | StatusOverview (角色头像 + fallback: 随机底色+首字母) | ✅ 已有，增加 fallback 模式 |
-| `BuffChip.vue` | StatusOverview (Buff/Debuff 药丸) | ✅ 已有，组合使用 |
-| `AppModal.vue` | Modals 弹出层 | ✅ 已有 |
-| `QualityBadge.vue` | 品质徽章 (物品列表) | ✅ 已有 |
-| `AppCard.vue` | 卡片容器 | ✅ 已有 |
-| `AppTabs.vue` | 面板内 Tab 切换 | ✅ 已有 |
-| `AppButton.vue` | 各类按钮 | ✅ 已有 |
-| `AppModal.vue` | Modals 弹出层 | ✅ 已有 |
-| `QualityBadge.vue` | 品质徽章 (物品列表) | ✅ 已有 |
-| `AppCard.vue` | 卡片容器 | ✅ 已有 |
-| `AppTabs.vue` | 面板内 Tab 切换 | ✅ 已有 |
-| `AppButton.vue` | 各类按钮 | ✅ 已有 |
-| `StatusEffectDisplay` | `BuffChipGroup.vue` (复用 BuffChip) | ✅ BuffChip 已有 | P0 |
-| `Ascension` | `AscensionPanel.vue` (新建) | ✅ CharacterState.ascension | P2 |
-| `ConfirmModal/DeleteConfirmModal` | ✅ 已有 `AppModal.vue` (扩展) | ✅ | P1 |
+| 已有组件                          | 使用位置                                              | 状态                        |
+| --------------------------------- | ----------------------------------------------------- | --------------------------- |
+| `ResourceBar.vue`                 | StatusOverview (HP/MP/SP/EXP)                         | ✅ 直接复用                 |
+| `AvatarPanel.vue`                 | StatusOverview (角色头像 + fallback: 随机底色+首字母) | ✅ 已有，增加 fallback 模式 |
+| `BuffChip.vue`                    | StatusOverview (Buff/Debuff 药丸)                     | ✅ 已有，组合使用           |
+| `AppModal.vue`                    | Modals 弹出层                                         | ✅ 已有                     |
+| `QualityBadge.vue`                | 品质徽章 (物品列表)                                   | ✅ 已有                     |
+| `AppCard.vue`                     | 卡片容器                                              | ✅ 已有                     |
+| `AppTabs.vue`                     | 面板内 Tab 切换                                       | ✅ 已有                     |
+| `AppButton.vue`                   | 各类按钮                                              | ✅ 已有                     |
+| `AppModal.vue`                    | Modals 弹出层                                         | ✅ 已有                     |
+| `QualityBadge.vue`                | 品质徽章 (物品列表)                                   | ✅ 已有                     |
+| `AppCard.vue`                     | 卡片容器                                              | ✅ 已有                     |
+| `AppTabs.vue`                     | 面板内 Tab 切换                                       | ✅ 已有                     |
+| `AppButton.vue`                   | 各类按钮                                              | ✅ 已有                     |
+| `StatusEffectDisplay`             | `BuffChipGroup.vue` (复用 BuffChip)                   | ✅ BuffChip 已有            | P0  |
+| `Ascension`                       | `AscensionPanel.vue` (新建)                           | ✅ CharacterState.ascension | P2  |
+| `ConfirmModal/DeleteConfirmModal` | ✅ 已有 `AppModal.vue` (扩展)                         | ✅                          | P1  |
 
 ---
 
@@ -621,25 +624,25 @@ interface GameStore {
   // ... 现有字段 ...
 
   // 🆕 UI 布局状态
-  sidebarCollapsed: boolean;         // 左侧工具栏是否折叠
-  rightPanelMode: string;            // 右侧面板当前显示:
-                                     // 'status' | 'items' | 'characters' | 
-                                     // 'quests' | 'plot' | 'memory'
-  fullscreenStatus: boolean;         // 状态栏全屏模式
+  sidebarCollapsed: boolean; // 左侧工具栏是否折叠
+  rightPanelMode: string; // 右侧面板当前显示:
+  // 'status' | 'items' | 'characters' |
+  // 'quests' | 'plot' | 'memory'
+  fullscreenStatus: boolean; // 状态栏全屏模式
 
   // 🆕 对话流
-  messages: ChatMessage[];           // 对话流所有消息
-  isGenerating: boolean;             // AI 是否正在生成
+  messages: ChatMessage[]; // 对话流所有消息
+  isGenerating: boolean; // AI 是否正在生成
 
   // 🆕 战斗/制作覆盖
-  activeCombat: CombatState | null;  // 非 null → CombatPanel 覆盖 ChatFlow
+  activeCombat: CombatState | null; // 非 null → CombatPanel 覆盖 ChatFlow
   activeCraft: CraftActionResult | null; // 非 null → CraftPanel 覆盖 ChatFlow
 
   // 🆕 伙伴 (从 characters 派生)
   partners: ComputedRef<CharacterState[]>; // type='npc' + 有 Affection 记录
 
   // 🆕 任务
-  quests: Quest[];                   // 需新增 Quest 类型 (P1)
+  quests: Quest[]; // 需新增 Quest 类型 (P1)
 }
 ```
 
@@ -649,35 +652,35 @@ interface GameStore {
 
 ### 8.1 必须遵守
 
-| 规范 | 应用场景 |
-|------|----------|
-| **触摸目标 ≥ 44×44px** | 所有可点击元素 (BuffChip/Tab/装备槽) |
-| **间距 8px+** | 列表项之间、按钮之间 |
-| **动画 150-300ms** | Tab 切换、血量变化、消息出现 |
-| **加载反馈 < 100ms** | 发送消息后立即显示 loading 态 |
-| **键盘导航** | Tab 键可在状态栏各区域间跳转 |
-| **Focus 可见** | 所有交互元素有 `:focus-visible` 样式 |
-| **色彩不是唯一指示** | 品质色 + 文字标签同时存在 (不是只靠颜色区分品质) |
-| **减少动画偏好** | 尊重 `prefers-reduced-motion` |
+| 规范                   | 应用场景                                         |
+| ---------------------- | ------------------------------------------------ |
+| **触摸目标 ≥ 44×44px** | 所有可点击元素 (BuffChip/Tab/装备槽)             |
+| **间距 8px+**          | 列表项之间、按钮之间                             |
+| **动画 150-300ms**     | Tab 切换、血量变化、消息出现                     |
+| **加载反馈 < 100ms**   | 发送消息后立即显示 loading 态                    |
+| **键盘导航**           | Tab 键可在状态栏各区域间跳转                     |
+| **Focus 可见**         | 所有交互元素有 `:focus-visible` 样式             |
+| **色彩不是唯一指示**   | 品质色 + 文字标签同时存在 (不是只靠颜色区分品质) |
+| **减少动画偏好**       | 尊重 `prefers-reduced-motion`                    |
 
 ### 8.2 暗色/浅色双模式
 
-| 规则 | 做法 |
-|------|------|
+| 规则               | 做法                                            |
+| ------------------ | ----------------------------------------------- |
 | 文字对比度 ≥ 4.5:1 | 用 CSS 变量 `--theme-text-primary` (主题已保证) |
-| 边框可见 | `--theme-card-border` 双模式下均有足够对比度 |
-| 交互状态 | hover/pressed/disabled 三种状态双模式分别测试 |
-| Modal scrim | 40-60% 黑色遮罩，不随主题变化 |
+| 边框可见           | `--theme-card-border` 双模式下均有足够对比度    |
+| 交互状态           | hover/pressed/disabled 三种状态双模式分别测试   |
+| Modal scrim        | 40-60% 黑色遮罩，不随主题变化                   |
 
 ### 8.3 游戏页面特有 UX
 
-| 规则 | 做法 |
-|------|------|
-| **状态栏可折叠** | 对话为主时收起右侧 HUD，专注叙事 |
-| **战斗/制作覆盖层** | 触发时替换叙事面板，不可被打断但可最小化 |
-| **消息自动滚动** | 新消息 → `scrollIntoView({ behavior: 'smooth' })` |
-| **输入栏固定底部** | `position: sticky; bottom: 0;` 不随内容滚动 |
-| **Toasts 非阻塞** | 存档成功/FP 变化用 Toast 提示，3-5 秒自动消失 |
+| 规则                | 做法                                              |
+| ------------------- | ------------------------------------------------- |
+| **状态栏可折叠**    | 对话为主时收起右侧 HUD，专注叙事                  |
+| **战斗/制作覆盖层** | 触发时替换叙事面板，不可被打断但可最小化          |
+| **消息自动滚动**    | 新消息 → `scrollIntoView({ behavior: 'smooth' })` |
+| **输入栏固定底部**  | `position: sticky; bottom: 0;` 不随内容滚动       |
+| **Toasts 非阻塞**   | 存档成功/FP 变化用 Toast 提示，3-5 秒自动消失     |
 
 ---
 
@@ -699,10 +702,10 @@ interface GameStore {
 
 ### ⚠️ 需新增引擎支持
 
-| 缺口 | 优先级 | 建议 |
-|------|--------|------|
-| 任务系统 (Quest 类型) | P0 | 新增 `Quest` 接口 + 加入 SaveProfile |
-| 地图标记 | P1 | UI 层数据存 SaveProfile.worldFlags |
+| 缺口                  | 优先级 | 建议                                 |
+| --------------------- | ------ | ------------------------------------ |
+| 任务系统 (Quest 类型) | P0     | 新增 `Quest` 接口 + 加入 SaveProfile |
+| 地图标记              | P1     | UI 层数据存 SaveProfile.worldFlags   |
 
 ### 📐 实施路线
 

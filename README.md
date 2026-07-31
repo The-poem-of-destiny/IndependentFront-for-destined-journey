@@ -61,16 +61,19 @@ npm run dev
 **设置页 → 🔌 API 配置 → 新建**，依次创建：
 
 **① DeepSeek V4 Flash**（便宜 · 用于大部分 Agent）
+
 - Endpoint：`https://api.deepseek.com`
 - API Key：在 [DeepSeek 平台](https://platform.deepseek.com/) 注册后获取
 - 默认模型：选 **DeepSeek V4 Flash**
 
 **② DeepSeek V4 Pro**（更聪明 · 推荐用于正文，稍贵）
+
 - Endpoint：同上
 - API Key：同一个 Key 即可
 - 默认模型：选 **DeepSeek V4 Pro**
 
 **③ Embedding 模型**（用于记忆召回 · 硅基流动）
+
 - Endpoint：`https://api.siliconflow.cn/v1`
 - API Key：在[硅基流动](https://cloud.siliconflow.cn/)注册后获取
 - 默认模型：`Qwen/Qwen3-VL-Embedding-8B`
@@ -82,6 +85,7 @@ npm run dev
 ### 2. 绑定 Agent 模型（必须）
 
 **设置页 → 🤖 Agent 配置**：
+
 - **记忆召回** Agent → 选择上面创建的 **Embedding** 模型
 - **其余所有 Agent** → 选择 **DeepSeek V4 Flash**
 
@@ -110,12 +114,12 @@ npm run dev
 
 ## 文档
 
-| 文档 | 给谁 | 内容 |
-|------|------|------|
-| [CLAUDE.md](CLAUDE.md) | 开发者 / AI 助手 | 架构、命令、规范、Phase 进度（最全） |
-| [PRODUCT.md](PRODUCT.md) | 产品 / 设计 | 用户画像、品牌、设计原则 |
-| [docs/](docs/) | 深度阅读 | PRD、架构文档、Phase 计划、设计规范 |
-| [docs/design.md](docs/design.md) | 前端开发 | 排版 / 间距 / 组件 / 动画设计规范 |
+| 文档                             | 给谁             | 内容                                 |
+| -------------------------------- | ---------------- | ------------------------------------ |
+| [CLAUDE.md](CLAUDE.md)           | 开发者 / AI 助手 | 架构、命令、规范、Phase 进度（最全） |
+| [PRODUCT.md](PRODUCT.md)         | 产品 / 设计      | 用户画像、品牌、设计原则             |
+| [docs/](docs/)                   | 深度阅读         | PRD、架构文档、Phase 计划、设计规范  |
+| [docs/design.md](docs/design.md) | 前端开发         | 排版 / 间距 / 组件 / 动画设计规范    |
 
 ---
 

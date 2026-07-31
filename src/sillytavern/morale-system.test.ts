@@ -27,23 +27,23 @@ import type { CombatType, MoraleState } from './types';
 
 describe('getMoraleThreshold', () => {
   it('切磋 → 40%', () => {
-    expect(getMoraleThreshold('切磋')).toBe(0.40);
+    expect(getMoraleThreshold('切磋')).toBe(0.4);
   });
 
   it('竞技 → 30%', () => {
-    expect(getMoraleThreshold('竞技')).toBe(0.30);
+    expect(getMoraleThreshold('竞技')).toBe(0.3);
   });
 
   it('压制 → 50%', () => {
-    expect(getMoraleThreshold('压制')).toBe(0.50);
+    expect(getMoraleThreshold('压制')).toBe(0.5);
   });
 
   it('死斗 → 10%', () => {
-    expect(getMoraleThreshold('死斗')).toBe(0.10);
+    expect(getMoraleThreshold('死斗')).toBe(0.1);
   });
 
   it('标准 → 30%', () => {
-    expect(getMoraleThreshold('标准')).toBe(0.30);
+    expect(getMoraleThreshold('标准')).toBe(0.3);
   });
 
   it('守卫 → 35%', () => {
@@ -115,7 +115,7 @@ describe('getBaseMoraleState', () => {
 
   it('阈值×50% ≥ HP > 阈值×25% → wavering', () => {
     expect(getBaseMoraleState(0.15, 0.3)).toBe('wavering'); // 0.15 = 0.3*0.5
-    expect(getBaseMoraleState(0.1, 0.3)).toBe('wavering');  // 0.1 > 0.075
+    expect(getBaseMoraleState(0.1, 0.3)).toBe('wavering'); // 0.1 > 0.075
     expect(getBaseMoraleState(0.08, 0.3)).toBe('wavering'); // 0.08 > 0.075
   });
 
@@ -147,7 +147,7 @@ describe('checkMorale', () => {
 
   it('HP 等于阈值 → 触发 (刚好低于或等于)', () => {
     // checkMorale: hpRatio > threshold → steady; hpRatio <= threshold → triggered
-    const result = checkMorale(0.40, '切磋'); // 40% = threshold → 触发
+    const result = checkMorale(0.4, '切磋'); // 40% = threshold → 触发
     // Actually 40% is NOT > 40%, so trigger
     expect(result.triggered).toBe(true);
   });
@@ -169,7 +169,7 @@ describe('checkMorale', () => {
   });
 
   it('压制 HP=40% → 自动触发 wavering', () => {
-    const result = checkMorale(0.40, '压制');
+    const result = checkMorale(0.4, '压制');
     expect(result.triggered).toBe(true);
     expect(result.triggerType).toBe('auto');
     expect(result.moraleState).toBe('wavering');
@@ -212,13 +212,13 @@ describe('checkMorale', () => {
   });
 
   it('守卫 HP=30% → d20=12 ≥ 12 → shaken', () => {
-    const result = checkMorale(0.30, '守卫', 12);
+    const result = checkMorale(0.3, '守卫', 12);
     expect(result.triggered).toBe(false);
     expect(result.moraleState).toBe('shaken');
   });
 
   it('标准 HP=50% > 阈值30% → 不触发', () => {
-    const result = checkMorale(0.50, '标准');
+    const result = checkMorale(0.5, '标准');
     expect(result.triggered).toBe(false);
     expect(result.triggerType).toBe('none');
     expect(result.moraleState).toBe('steady');
@@ -397,9 +397,7 @@ describe('checkAllMorale', () => {
   });
 
   it('user 不会被检测', () => {
-    const participants = [
-      { id: 'usr', name: '主角', hp: 10, maxHp: 100, isUser: true },
-    ];
+    const participants = [{ id: 'usr', name: '主角', hp: 10, maxHp: 100, isUser: true }];
     const results = checkAllMorale(participants, '死斗', [5]);
     expect(results).toHaveLength(0);
   });

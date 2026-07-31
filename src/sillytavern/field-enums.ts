@@ -9,34 +9,57 @@
 // ========== 枚举常量 ==========
 
 /** 装备槽位（对齐世界书装备条目，一槽一件） */
-export const EQUIP_SLOTS = ['武器', '副手', '头部', '身体', '手部', '脚部', '腰带', '饰品'] as const;
-export type EquipSlot = typeof EQUIP_SLOTS[number];
+export const EQUIP_SLOTS = [
+  '武器',
+  '副手',
+  '头部',
+  '身体',
+  '手部',
+  '脚部',
+  '腰带',
+  '饰品',
+] as const;
+export type EquipSlot = (typeof EQUIP_SLOTS)[number];
 
 /** 物品类型 */
 export const ITEM_TYPES = ['装备', '消耗品', '材料', '任务物品', '特殊'] as const;
-export type ItemType = typeof ITEM_TYPES[number];
+export type ItemType = (typeof ITEM_TYPES)[number];
 
 /** 7 级品质（世界书 #417617 品质体系） */
 export const RARITY_LEVELS = ['普通', '优良', '稀有', '史诗', '传说', '神话', '唯一'] as const;
-export type Rarity = typeof RARITY_LEVELS[number];
+export type Rarity = (typeof RARITY_LEVELS)[number];
 
 /** 任务状态（修 #32: 自由字符串 → 4 态枚举） */
 export const QUEST_STATUSES = ['进行中', '已完成', '失败', '搁置'] as const;
-export type QuestStatus = typeof QUEST_STATUSES[number];
+export type QuestStatus = (typeof QUEST_STATUSES)[number];
 
 /** 状态效果分类 */
 export const STATUS_CATEGORIES = ['增益', '减益', '特殊'] as const;
-export type StatusCategory = typeof STATUS_CATEGORIES[number];
+export type StatusCategory = (typeof STATUS_CATEGORIES)[number];
 
 // ========== 归一化 ==========
 
 /** slot 别名表（中文变体 + 英文遗留，修 #37 slot 中英双轨） */
 const SLOT_ALIASES = Object.assign(Object.create(null) as Record<string, EquipSlot>, {
-  '主手': '武器', '惯用手': '武器', '副武器': '副手',
-  '护甲': '身体', '胸甲': '身体', '衣服': '身体', '防具': '身体',
-  '鞋子': '脚部', '靴子': '脚部', '手套': '手部', '头盔': '头部',
-  weapon: '武器', offhand: '副手', head: '头部', armor: '身体',
-  hands: '手部', feet: '脚部', belt: '腰带', accessory: '饰品',
+  主手: '武器',
+  惯用手: '武器',
+  副武器: '副手',
+  护甲: '身体',
+  胸甲: '身体',
+  衣服: '身体',
+  防具: '身体',
+  鞋子: '脚部',
+  靴子: '脚部',
+  手套: '手部',
+  头盔: '头部',
+  weapon: '武器',
+  offhand: '副手',
+  head: '头部',
+  armor: '身体',
+  hands: '手部',
+  feet: '脚部',
+  belt: '腰带',
+  accessory: '饰品',
 } satisfies Record<string, EquipSlot>);
 
 /** 归一化装备槽位。无法识别返回 null，调用方决定报错或兜底 */
@@ -48,9 +71,14 @@ export function normalizeSlot(raw: string): EquipSlot | null {
 
 /** item type 别名表（英文枚举遗留，修 #38 三套取值） */
 const ITEM_TYPE_ALIASES = Object.assign(Object.create(null) as Record<string, ItemType>, {
-  equipment: '装备', weapon: '装备', armor: '装备',
-  consumable: '消耗品', material: '材料', quest: '任务物品', special: '特殊',
-  '道具': '特殊',
+  equipment: '装备',
+  weapon: '装备',
+  armor: '装备',
+  consumable: '消耗品',
+  material: '材料',
+  quest: '任务物品',
+  special: '特殊',
+  道具: '特殊',
 } satisfies Record<string, ItemType>);
 
 /** 归一化物品类型。无法识别返回 undefined（type 为可选字段） */
@@ -62,9 +90,14 @@ export function normalizeItemType(raw: string): ItemType | undefined {
 
 /** rarity 别名表（英文遗留 + quality 字段废除后统一入口，修 #39） */
 const RARITY_ALIASES = Object.assign(Object.create(null) as Record<string, Rarity>, {
-  common: '普通', uncommon: '优良', rare: '稀有',
-  epic: '史诗', legendary: '传说', mythic: '神话', unique: '唯一',
-  only: '唯一',  // start-catalog 池的第七级英文名（CDN 数据遗留）
+  common: '普通',
+  uncommon: '优良',
+  rare: '稀有',
+  epic: '史诗',
+  legendary: '传说',
+  mythic: '神话',
+  unique: '唯一',
+  only: '唯一', // start-catalog 池的第七级英文名（CDN 数据遗留）
 } satisfies Record<string, Rarity>);
 
 /** 归一化品质。无法识别返回 undefined */
@@ -76,10 +109,17 @@ export function normalizeRarity(raw: string): Rarity | undefined {
 
 /** quest status 别名表 */
 const QUEST_STATUS_ALIASES = Object.assign(Object.create(null) as Record<string, QuestStatus>, {
-  '完成': '已完成', '已结束': '已完成', '完毕': '已完成',
-  '进行': '进行中', '正在进行': '进行中', '接受': '进行中',
-  '失败了': '失败', '已失败': '失败',
-  '暂停': '搁置', '挂起': '搁置', '搁置中': '搁置',
+  完成: '已完成',
+  已结束: '已完成',
+  完毕: '已完成',
+  进行: '进行中',
+  正在进行: '进行中',
+  接受: '进行中',
+  失败了: '失败',
+  已失败: '失败',
+  暂停: '搁置',
+  挂起: '搁置',
+  搁置中: '搁置',
 } satisfies Record<string, QuestStatus>);
 
 /** 归一化任务状态。无法识别兜底 '进行中'（宁可误留活跃也不误杀） */
@@ -90,9 +130,14 @@ export function normalizeQuestStatus(raw: string): QuestStatus {
 }
 
 /** status category 别名表 */
-const STATUS_CATEGORY_ALIASES = Object.assign(Object.create(null) as Record<string, StatusCategory>, {
-  buff: '增益', debuff: '减益', special: '特殊',
-} satisfies Record<string, StatusCategory>);
+const STATUS_CATEGORY_ALIASES = Object.assign(
+  Object.create(null) as Record<string, StatusCategory>,
+  {
+    buff: '增益',
+    debuff: '减益',
+    special: '特殊',
+  } satisfies Record<string, StatusCategory>,
+);
 
 /** 归一化状态效果分类。无法识别兜底 '特殊' */
 export function normalizeStatusCategory(raw: string): StatusCategory {

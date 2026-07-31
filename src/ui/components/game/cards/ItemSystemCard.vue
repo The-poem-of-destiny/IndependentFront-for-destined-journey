@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import type { ItemGenSystemEvent } from '@engine/types'
-import { qualityVar } from '../../../lib/quality-colors'
+import type { ItemGenSystemEvent } from '@engine/types';
+import { qualityVar } from '../../../lib/quality-colors';
 
-const props = defineProps<{ event: ItemGenSystemEvent }>()
-const emit = defineEmits<{ collapse: [] }>()
+const props = defineProps<{ event: ItemGenSystemEvent }>();
+const emit = defineEmits<{ collapse: [] }>();
 
 function typeIcon(itemType: string): string {
-  if (itemType === '装备') return 'fa-solid fa-shield-halved'
-  if (itemType === '技能') return 'fa-solid fa-wand-magic-sparkles'
-  return 'fa-solid fa-flask'
+  if (itemType === '装备') return 'fa-solid fa-shield-halved';
+  if (itemType === '技能') return 'fa-solid fa-wand-magic-sparkles';
+  return 'fa-solid fa-flask';
 }
 </script>
 
@@ -18,7 +18,9 @@ function typeIcon(itemType: string): string {
       <span class="sys-card-dot" />
       <i :class="'sys-card-icon ' + typeIcon(event.itemType)" />
       <span class="sys-card-title">{{ event.itemName }}</span>
-      <span class="sys-card-quality" :style="{ color: qualityVar(event.quality) }">{{ event.quality }}</span>
+      <span class="sys-card-quality" :style="{ color: qualityVar(event.quality) }">{{
+        event.quality
+      }}</span>
       <i class="fa-solid fa-chevron-up sys-card-collapse" title="收起" />
     </div>
 
@@ -28,7 +30,9 @@ function typeIcon(itemType: string): string {
         <div v-for="eq in event.details.equipment" :key="eq.name" class="equip-line">
           <span class="equip-slot">{{ eq.slot }}</span>
           <span class="equip-name">{{ eq.name }}</span>
-          <span class="equip-desc" v-if="eq.description">{{ eq.description.slice(0, 120) }}{{ eq.description.length > 120 ? '...' : '' }}</span>
+          <span v-if="eq.description" class="equip-desc"
+            >{{ eq.description.slice(0, 120) }}{{ eq.description.length > 120 ? '...' : '' }}</span
+          >
           <span v-if="eq.stats && Object.keys(eq.stats).length" class="equip-stats">
             <span v-for="(v, k) in eq.stats" :key="k" class="stat-kv">{{ k }}+{{ v }}</span>
           </span>
@@ -42,8 +46,12 @@ function typeIcon(itemType: string): string {
       >
         <div v-for="sk in event.details.skills" :key="sk.name" class="skill-line">
           <span class="skill-name">{{ sk.name }}</span>
-          <span v-if="sk.type" class="skill-type-badge">{{ sk.type === 'active' ? '主动' : '被动' }}</span>
-          <span class="skill-desc" v-if="sk.description">{{ sk.description.slice(0, 120) }}{{ sk.description.length > 120 ? '...' : '' }}</span>
+          <span v-if="sk.type" class="skill-type-badge">{{
+            sk.type === 'active' ? '主动' : '被动'
+          }}</span>
+          <span v-if="sk.description" class="skill-desc"
+            >{{ sk.description.slice(0, 120) }}{{ sk.description.length > 120 ? '...' : '' }}</span
+          >
           <span v-if="sk.cost" class="skill-cost">{{ sk.cost.type }} {{ sk.cost.amount }}</span>
           <span v-if="sk.cooldown" class="skill-cd">CD {{ sk.cooldown }}回合</span>
         </div>
@@ -52,11 +60,17 @@ function typeIcon(itemType: string): string {
       <!-- 背包物品列表 -->
       <div
         v-if="event.details.inventory?.length"
-        :class="['section', { 'section-divider': (event.details.equipment?.length || event.details.skills?.length) }]"
+        :class="[
+          'section',
+          { 'section-divider': event.details.equipment?.length || event.details.skills?.length },
+        ]"
       >
         <div v-for="inv in event.details.inventory" :key="inv.name" class="inv-line">
           <span class="inv-name">{{ inv.name }} &times;{{ inv.quantity }}</span>
-          <span v-if="inv.description" class="inv-desc">: {{ inv.description.slice(0, 100) }}{{ inv.description.length > 100 ? '...' : '' }}</span>
+          <span v-if="inv.description" class="inv-desc"
+            >: {{ inv.description.slice(0, 100)
+            }}{{ inv.description.length > 100 ? '...' : '' }}</span
+          >
         </div>
       </div>
     </div>
@@ -99,7 +113,7 @@ function typeIcon(itemType: string): string {
 }
 
 .section-divider {
-  border-top: 1px dashed var(--theme-border, rgba(255,255,255,0.08));
+  border-top: 1px dashed var(--theme-border, rgba(255, 255, 255, 0.08));
   padding-top: 8px;
 }
 

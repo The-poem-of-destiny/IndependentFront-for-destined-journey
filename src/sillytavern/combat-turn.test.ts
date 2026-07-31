@@ -27,9 +27,12 @@ function makeParticipant(overrides: Partial<CombatParticipant> = {}): CombatPart
     tier: 3,
     level: 10,
     attributes: { str: 12, dex: 14, con: 13, int: 10, spi: 11 },
-    hp: 100, maxHp: 100,
-    mp: 50, maxMp: 50,
-    sp: 50, maxSp: 50,
+    hp: 100,
+    maxHp: 100,
+    mp: 50,
+    maxMp: 50,
+    sp: 50,
+    maxSp: 50,
     defense: 200,
     dr: 0,
     penetration: 0,
@@ -97,9 +100,22 @@ describe('rollInitiative', () => {
 
 describe('rollAndSortInitiative', () => {
   it('按先攻从高到低排序', () => {
-    const p1 = makeParticipant({ characterId: 'a', name: 'A', attributes: { str: 10, dex: 10, con: 10, int: 10, spi: 10 } });
-    const p2 = makeParticipant({ characterId: 'b', name: 'B', attributes: { str: 10, dex: 18, con: 10, int: 10, spi: 10 } });
-    const p3 = makeParticipant({ characterId: 'c', name: 'C', attributes: { str: 10, dex: 8, con: 10, int: 10, spi: 10 }, side: 'enemy' });
+    const p1 = makeParticipant({
+      characterId: 'a',
+      name: 'A',
+      attributes: { str: 10, dex: 10, con: 10, int: 10, spi: 10 },
+    });
+    const p2 = makeParticipant({
+      characterId: 'b',
+      name: 'B',
+      attributes: { str: 10, dex: 18, con: 10, int: 10, spi: 10 },
+    });
+    const p3 = makeParticipant({
+      characterId: 'c',
+      name: 'C',
+      attributes: { str: 10, dex: 8, con: 10, int: 10, spi: 10 },
+      side: 'enemy',
+    });
 
     const order = rollAndSortInitiative([p1, p2, p3], [10, 10, 10]);
 
@@ -259,14 +275,17 @@ describe('validateInitiative', () => {
   it('最少 2 名参与者', () => {
     const result = validateInitiative([makeParticipant()]);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('2'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('2'))).toBe(true);
   });
 
   it('需要友方和敌方', () => {
-    const allies = [makeParticipant({ characterId: 'a', side: 'ally' }), makeParticipant({ characterId: 'b', side: 'ally' })];
+    const allies = [
+      makeParticipant({ characterId: 'a', side: 'ally' }),
+      makeParticipant({ characterId: 'b', side: 'ally' }),
+    ];
     const result = validateInitiative(allies);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('敌方'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('敌方'))).toBe(true);
   });
 
   it('有效的战斗配置', () => {
@@ -280,11 +299,15 @@ describe('validateInitiative', () => {
 
   it('检查无效敏捷', () => {
     const chars = [
-      makeParticipant({ characterId: 'a', side: 'ally', attributes: { str: 10, dex: 0, con: 10, int: 10, spi: 10 } }),
+      makeParticipant({
+        characterId: 'a',
+        side: 'ally',
+        attributes: { str: 10, dex: 0, con: 10, int: 10, spi: 10 },
+      }),
       makeParticipant({ characterId: 'b', side: 'enemy' }),
     ];
     const result = validateInitiative(chars);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('敏捷'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('敏捷'))).toBe(true);
   });
 });

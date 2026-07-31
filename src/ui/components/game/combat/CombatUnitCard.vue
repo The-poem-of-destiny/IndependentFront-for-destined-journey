@@ -14,68 +14,68 @@
  * - HP 闪烁动画配合 prefers-reduced-motion（§6.3）
  */
 
-import { computed } from 'vue'
-import type { CombatParticipant, StatusEffect } from '@engine/types'
-import { qualityVar } from '../../../lib/quality-colors'
-import ResourceBar from '../../shared/ResourceBar.vue'
-import BuffChip from '../../shared/BuffChip.vue'
+import { computed } from 'vue';
+import type { CombatParticipant, StatusEffect } from '@engine/types';
+import { qualityVar } from '../../../lib/quality-colors';
+import ResourceBar from '../../shared/ResourceBar.vue';
+import BuffChip from '../../shared/BuffChip.vue';
 
 const props = withDefaults(
   defineProps<{
     /** 参战单位数据 */
-    participant: CombatParticipant
+    participant: CombatParticipant;
     /** 是否为当前行动者（高亮环绕光晕） */
-    isCurrentTurn?: boolean
+    isCurrentTurn?: boolean;
   }>(),
   { isCurrentTurn: false },
-)
+);
 
 // ── tier(number 1-7) → 中文品质名（对齐世界书层级 T1-T7 = 普通~唯一）──
 const TIER_TO_QUALITY: readonly string[] = [
-  '',      // 0 占位（tier 从 1 起）
-  '普通',  // T1
-  '优良',  // T2
-  '稀有',  // T3
-  '史诗',  // T4
-  '传说',  // T5
-  '神话',  // T6
-  '唯一',  // T7
-]
+  '', // 0 占位（tier 从 1 起）
+  '普通', // T1
+  '优良', // T2
+  '稀有', // T3
+  '史诗', // T4
+  '传说', // T5
+  '神话', // T6
+  '唯一', // T7
+];
 
 /** tier 数字 → 中文品质名，越界兜底「普通」 */
 function tierToQuality(tier: number): string {
-  return TIER_TO_QUALITY[tier] ?? '普通'
+  return TIER_TO_QUALITY[tier] ?? '普通';
 }
 
 // ── 派生状态 ──
 
-const qualityName = computed(() => tierToQuality(props.participant.tier))
-const qualityColor = computed(() => qualityVar(qualityName.value))
+const qualityName = computed(() => tierToQuality(props.participant.tier));
+const qualityColor = computed(() => qualityVar(qualityName.value));
 
 /** HP 百分比（0-100），maxHp<=0 时返回 0 */
 const hpPercent = computed(() => {
-  const { hp, maxHp } = props.participant
-  if (maxHp <= 0) return 0
-  return Math.min(100, Math.max(0, (hp / maxHp) * 100))
-})
+  const { hp, maxHp } = props.participant;
+  if (maxHp <= 0) return 0;
+  return Math.min(100, Math.max(0, (hp / maxHp) * 100));
+});
 
 /** 是否死亡（hp <= 0） */
-const isDead = computed(() => props.participant.hp <= 0)
+const isDead = computed(() => props.participant.hp <= 0);
 
 /** 是否低血（HP < 30% 且 hp > 0） */
-const isLowHp = computed(() => !isDead.value && hpPercent.value > 0 && hpPercent.value < 30)
+const isLowHp = computed(() => !isDead.value && hpPercent.value > 0 && hpPercent.value < 30);
 
 /** 是否无法行动（非死亡但 canAct=false，如眩晕/冰冻） */
-const isIncapacitated = computed(() => !isDead.value && !props.participant.canAct)
+const isIncapacitated = computed(() => !isDead.value && !props.participant.canAct);
 
 // ── BuffChip 类型映射 ──
 // StatusEffect.category: '增益'|'减益'|'特殊' → BuffChip type: 'buff'|'debuff'|'special'
-type BuffChipType = 'buff' | 'debuff' | 'special'
+type BuffChipType = 'buff' | 'debuff' | 'special';
 const CATEGORY_TO_CHIP: Record<StatusEffect['category'], BuffChipType> = {
   增益: 'buff',
   减益: 'debuff',
   特殊: 'special',
-}
+};
 
 /** 格式化状态效果列表为 BuffChip 所需的 props */
 const buffChips = computed(() =>
@@ -86,7 +86,7 @@ const buffChips = computed(() =>
     // 战斗中 timeUnit='回合' 时显示剩余回合数；否则不追加回合标注
     remainRounds: fx.timeUnit === '回合' && fx.remainingTime != null ? fx.remainingTime : null,
   })),
-)
+);
 </script>
 
 <template>
@@ -138,11 +138,7 @@ const buffChips = computed(() =>
 
     <!-- ── Buff chips（每个 buff 和它的剩余回合小标成组渲染） ── -->
     <div v-if="buffChips.length > 0" class="unit-buffs">
-      <span
-        v-for="(chip, idx) in buffChips"
-        :key="idx"
-        class="buff-group"
-      >
+      <span v-for="(chip, idx) in buffChips" :key="idx" class="buff-group">
         <BuffChip :type="chip.type" :name="chip.name" :stacks="chip.stacks" />
         <!-- 剩余回合小标（仅战斗型、有剩余时间时显示，不侵入 BuffChip 通用组件） -->
         <span v-if="chip.remainRounds !== null" class="buff-remain">
@@ -160,7 +156,9 @@ const buffChips = computed(() =>
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-md);
   padding: var(--theme-spacing-md);
-  transition: box-shadow 0.15s ease, opacity 0.2s ease;
+  transition:
+    box-shadow 0.15s ease,
+    opacity 0.2s ease;
 }
 
 /* 当前行动者：环绕光晕（design §4.2 选中态） */
@@ -271,8 +269,13 @@ const buffChips = computed(() =>
 }
 
 @keyframes hp-flash {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 /* ── Buff chips 区 ── */

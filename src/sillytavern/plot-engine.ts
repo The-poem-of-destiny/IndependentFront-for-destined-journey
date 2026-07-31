@@ -9,13 +9,14 @@
  * 5. 事件完成/失败 → 自动生成关联记忆
  */
 
-import type {
-  PlotEvent, PlotOutline, MemoryRecord, CharacterState,
-} from './types';
+import type { PlotEvent, PlotOutline, MemoryRecord, CharacterState } from './types';
+import { getPlotEvents, savePlotEvent, savePlotEvents } from './database';
 import {
-  getPlotEvents, savePlotEvent, savePlotEvents,
-} from './database';
-import { getActiveOutline, updateOutlineVersion, outlineToEvents, syncOutlineEvents } from './plot-outline';
+  getActiveOutline,
+  updateOutlineVersion,
+  outlineToEvents,
+  syncOutlineEvents,
+} from './plot-outline';
 
 // ========== 条件评估 ==========
 
@@ -34,20 +35,23 @@ export function evaluateCondition(
 
   try {
     // 替换模板变量
-    let expr = condition.replace(/\{\{([^}]+)\}\}/g, (_match, path: string) => {
+    const expr = condition.replace(/\{\{([^}]+)\}\}/g, (_match, path: string) => {
       const value = resolveVariablePath(path.trim(), variables);
       if (typeof value === 'string') return JSON.stringify(value);
       return String(value);
     });
 
     // 安全评估（使用 Function 构造器，限制可用全局）
-    const fn = new Function('variables', `
+    const fn = new Function(
+      'variables',
+      `
       try {
         return !!(${expr});
       } catch {
         return false;
       }
-    `);
+    `,
+    );
     return fn(variables);
   } catch {
     // 简单字符串匹配（回退）
@@ -81,7 +85,7 @@ export function parsePreCheckOutput(rawOutput: string): PreCheckResult | null {
     const parsed = JSON.parse(rawOutput) as PreCheckResult;
     if (!Array.isArray(parsed.triggeredEvents)) return null;
     return {
-      triggeredEvents: parsed.triggeredEvents.filter(e => e.title),
+      triggeredEvents: parsed.triggeredEvents.filter((e) => e.title),
       relevantBackground: parsed.relevantBackground || '',
       outlineRelevance: parsed.outlineRelevance || '',
     };
@@ -91,7 +95,7 @@ export function parsePreCheckOutput(rawOutput: string): PreCheckResult | null {
     try {
       const parsed = JSON.parse(jsonMatch[0]) as PreCheckResult;
       return {
-        triggeredEvents: parsed.triggeredEvents?.filter(e => e.title) || [],
+        triggeredEvents: parsed.triggeredEvents?.filter((e) => e.title) || [],
         relevantBackground: parsed.relevantBackground || '',
         outlineRelevance: parsed.outlineRelevance || '',
       };
@@ -102,11 +106,17 @@ export function parsePreCheckOutput(rawOutput: string): PreCheckResult | null {
 }
 
 /** 按标题在本存档事件中唯一匹配（精确匹配优先，匹配不到返回 undefined 并 warn） */
-function resolveEventByTitle(events: PlotEvent[], title: string, source: string): PlotEvent | undefined {
-  const exact = events.filter(e => e.title === title);
+function resolveEventByTitle(
+  events: PlotEvent[],
+  title: string,
+  source: string,
+): PlotEvent | undefined {
+  const exact = events.filter((e) => e.title === title);
   if (exact.length >= 1) {
     if (exact.length > 1) {
-      console.warn(`[plot-engine] ${source}: 标题 "${title}" 匹配到 ${exact.length} 个事件，取第一个`);
+      console.warn(
+        `[plot-engine] ${source}: 标题 "${title}" 匹配到 ${exact.length} 个事件，取第一个`,
+      );
     }
     return exact[0];
   }
@@ -232,7 +242,13 @@ export async function postCheckPlot(
 }> {
   const parsed = parsePostCheckOutput(agentOutput);
   if (!parsed) {
-    return { eventsUpdated: [], newEvents: [], outlineUpdated: false, worldLineChanged: false, changeLevel: 'none' };
+    return {
+      eventsUpdated: [],
+      newEvents: [],
+      outlineUpdated: false,
+      worldLineChanged: false,
+      changeLevel: 'none',
+    };
   }
 
   const allEvents = await getPlotEvents(saveId);
@@ -277,7 +293,11 @@ export async function postCheckPlot(
     let parentId: string | undefined;
     let chapterTitle: string | undefined;
     if (child.parentTitle) {
-      const parent = resolveEventByTitle(allEvents, child.parentTitle, 'postCheckPlot.newChildEvents');
+      const parent = resolveEventByTitle(
+        allEvents,
+        child.parentTitle,
+        'postCheckPlot.newChildEvents',
+      );
       parentId = parent?.id;
       chapterTitle = parent?.chapterTitle;
     }
@@ -301,7 +321,7 @@ export async function postCheckPlot(
     };
     newEvents.push(newEvent);
     if (parentId) {
-      const parent = allEvents.find(e => e.id === parentId);
+      const parent = allEvents.find((e) => e.id === parentId);
       if (parent && !parent.childrenIds.includes(newEvent.id)) {
         parent.childrenIds.push(newEvent.id);
         parent.updatedAt = now;
@@ -323,7 +343,11 @@ export async function postCheckPlot(
     if (outline) {
       await updateOutlineVersion(
         outline,
-        outline.content + '\n\n## 世界线变动 (v' + (outline.version + 1) + ')\n' + parsed.outlineChanges.changes,
+        outline.content +
+          '\n\n## 世界线变动 (v' +
+          (outline.version + 1) +
+          ')\n' +
+          parsed.outlineChanges.changes,
         parsed.outlineChanges.changes,
       );
       outlineUpdated = true;
@@ -332,7 +356,7 @@ export async function postCheckPlot(
 
   // 5. 如有世界线变动 → 级联传播
   if (parsed.worldLineChanged && parsed.changeLevel !== 'minor') {
-    const changedIds = eventsUpdated.filter(e => e.worldLineChanged).map(e => e.id);
+    const changedIds = eventsUpdated.filter((e) => e.worldLineChanged).map((e) => e.id);
     for (const changedId of changedIds) {
       propagateWorldLineChange(allEvents, changedId, 2); // 默认 2 层
     }
@@ -360,7 +384,7 @@ export function propagateWorldLineChange(
 ): PlotEvent[] {
   if (depth <= 0) return [];
 
-  const eventMap = new Map(allEvents.map(e => [e.id, e]));
+  const eventMap = new Map(allEvents.map((e) => [e.id, e]));
   const affected: PlotEvent[] = [];
 
   const changedEvent = eventMap.get(changedId);
@@ -407,9 +431,7 @@ export function eventToMemory(
     ? `【剧情失败】${event.title}。${event.description}。这个事件的失败可能对未来产生深远影响。`
     : `【剧情完成】${event.title}。${event.description}。这是一个重要的里程碑。`;
 
-  const hiddenLine = isFailure
-    ? `剧情事件失败: ${event.title}`
-    : `剧情事件完成: ${event.title}`;
+  const hiddenLine = isFailure ? `剧情事件失败: ${event.title}` : `剧情事件完成: ${event.title}`;
 
   const importance = isFailure ? 9 : 8;
 
@@ -438,7 +460,7 @@ export async function getPendingEventsForTrigger(
 ): Promise<PlotEvent[]> {
   const allEvents = await getPlotEvents(saveId);
   return allEvents.filter(
-    e => e.status === 'pending' && evaluateCondition(e.triggerCondition, variables),
+    (e) => e.status === 'pending' && evaluateCondition(e.triggerCondition, variables),
   );
 }
 
@@ -451,9 +473,7 @@ export async function autoGenerateMemoriesFromEvents(
   gameTimeRange?: { start: string; end: string },
 ): Promise<Array<Omit<MemoryRecord, 'id' | 'embedding'>>> {
   const allEvents = await getPlotEvents(saveId);
-  const terminalEvents = allEvents.filter(
-    e => (e.status === 'completed' || e.status === 'failed'),
-  );
+  const terminalEvents = allEvents.filter((e) => e.status === 'completed' || e.status === 'failed');
 
-  return terminalEvents.map(e => eventToMemory(e, saveId, gameTimeRange));
+  return terminalEvents.map((e) => eventToMemory(e, saveId, gameTimeRange));
 }

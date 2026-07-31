@@ -12,20 +12,20 @@
 
 /** 游戏内时间 */
 export interface GameTime {
-  era: string;               // 纪元名，如 "光辉纪元"
-  year: number;              // 1-based
-  month: number;             // 1-12
-  day: number;               // 1-30 (统一每月30天)
-  weekday: number;           // 1-7 (1=周日 … 7=周六，对齐 WEEKDAY_NAMES[weekday-1]，见常量注释)
-  hour: number;              // 0-23
-  minute: number;            // 0-59
+  era: string; // 纪元名，如 "光辉纪元"
+  year: number; // 1-based
+  month: number; // 1-12
+  day: number; // 1-30 (统一每月30天)
+  weekday: number; // 1-7 (1=周日 … 7=周六，对齐 WEEKDAY_NAMES[weekday-1]，见常量注释)
+  hour: number; // 0-23
+  minute: number; // 0-59
 }
 
 /** 季节性时间 — 用于剧情大纲等粗粒度时间排序（AI 只能预测到年+季节精度） */
 export interface SeasonalTime {
-  year: number;              // 绝对年份，如 512
-  season: number;            // 1=春 2=夏 3=秋 4=冬
-  month?: number;            // 可选，1-12
+  year: number; // 绝对年份，如 512
+  season: number; // 1=春 2=夏 3=秋 4=冬
+  month?: number; // 可选，1-12
 }
 
 /** 季节名常量（1-based 索引：下标 0=春） */
@@ -33,8 +33,18 @@ export const SEASON_NAMES = ['春', '夏', '秋', '冬'] as const;
 
 /** 月份名 */
 export const MONTH_NAMES = [
-  '一月', '二月', '三月', '四月', '五月', '六月',
-  '七月', '八月', '九月', '十月', '十一月', '十二月',
+  '一月',
+  '二月',
+  '三月',
+  '四月',
+  '五月',
+  '六月',
+  '七月',
+  '八月',
+  '九月',
+  '十月',
+  '十一月',
+  '十二月',
 ] as const;
 
 /**
@@ -43,9 +53,7 @@ export const MONTH_NAMES = [
  * parseGameTime / formatGameTime 均以 `WEEKDAY_NAMES[weekday-1]` 为唯一映射，
  * 禁止再引入 1=周一…7=周日 的 ISO 序（曾导致 parse(format(t)) 往返漂移: 周日→7→'周六'）。
  */
-export const WEEKDAY_NAMES = [
-  '周日', '周一', '周二', '周三', '周四', '周五', '周六',
-] as const;
+export const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'] as const;
 
 /** 每日分钟数 */
 const MINUTES_PER_HOUR = 60;
@@ -61,9 +69,9 @@ const MONTHS_PER_YEAR = 12;
 export const GAME_EPOCH_YEAR = 488;
 /** 纪元日（488-01-01）是周几：1=周日 … 7=周六。幻想日历无外部基准，声明值。 */
 const EPOCH_WEEKDAY = 1; // 周日
-const MINUTES_PER_DAY = HOURS_PER_DAY * MINUTES_PER_HOUR;       // 1440
-const MINUTES_PER_MONTH = DAYS_PER_MONTH * MINUTES_PER_DAY;     // 43200
-const MINUTES_PER_YEAR = MONTHS_PER_YEAR * MINUTES_PER_MONTH;   // 518400
+const MINUTES_PER_DAY = HOURS_PER_DAY * MINUTES_PER_HOUR; // 1440
+const MINUTES_PER_MONTH = DAYS_PER_MONTH * MINUTES_PER_DAY; // 43200
+const MINUTES_PER_YEAR = MONTHS_PER_YEAR * MINUTES_PER_MONTH; // 518400
 
 // ========== 默认时间 ==========
 
@@ -180,7 +188,7 @@ export function fromEpochMinutes(em: number): GameTime {
   rem -= hour * MINUTES_PER_HOUR;
   const minute = rem;
   const daysSinceEpoch = Math.floor(em / MINUTES_PER_DAY);
-  const weekday = (((daysSinceEpoch + EPOCH_WEEKDAY - 1) % 7) + 7) % 7 + 1;
+  const weekday = ((((daysSinceEpoch + EPOCH_WEEKDAY - 1) % 7) + 7) % 7) + 1;
   return {
     era: '复兴纪元',
     year: yearOffset + GAME_EPOCH_YEAR,
@@ -255,7 +263,7 @@ export function parseSeasonalTime(str: string): SeasonalTime | null {
 
   const year = parseInt(match[1], 10);
   const seasonName = match[2];
-  const seasonMap: Record<string, number> = { '春': 1, '夏': 2, '秋': 3, '冬': 4 };
+  const seasonMap: Record<string, number> = { 春: 1, 夏: 2, 秋: 3, 冬: 4 };
   const season = seasonMap[seasonName];
 
   if (match[3] !== undefined) {

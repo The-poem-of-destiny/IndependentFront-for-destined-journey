@@ -35,11 +35,7 @@ import type {
 import { getHitRating, INTENTION_CONFIGS } from './types';
 
 import { resolveIntention, parseIntentionFromInput, checkNonLethal } from './combat-intention';
-import {
-  runDamagePipeline,
-  performAttackCheck,
-  checkStatusTrigger,
-} from './combat-damage';
+import { runDamagePipeline, performAttackCheck, checkStatusTrigger } from './combat-damage';
 import { rollInitiative, consumeAttack, consumeAction } from './combat-turn';
 import { buildFullActionPanel, buildCombatSummary } from './combat-panel';
 
@@ -124,9 +120,7 @@ export function resolveAttack(input: AttackInput): CombatActionResult {
     : '常规';
 
   const isShakenOrWorse =
-    defender.morale === 'shaken' ||
-    defender.morale === 'wavering' ||
-    defender.morale === 'routing';
+    defender.morale === 'shaken' || defender.morale === 'wavering' || defender.morale === 'routing';
 
   const intention = resolveIntention({
     intentionLevel,
@@ -257,7 +251,7 @@ export function resolveAttack(input: AttackInput): CombatActionResult {
     ratingCoeff: attackCheck.rating.coefficient,
     advantage: attackCheck.advantage,
     disadvantage: attackCheck.disadvantage,
-    statusApplied: statusApplied.map(s => ({
+    statusApplied: statusApplied.map((s) => ({
       ...s,
       triggered: true,
       reason: `暴击(≥1.3)必触发`,
@@ -364,7 +358,7 @@ export function resolveFlee(
 
   // 逃跑检定: 敏捷 + d20 vs DC 15 + 敌方平均层级
   const avgEnemyTier = combat.participants
-    .filter(p => p.side === 'enemy')
+    .filter((p) => p.side === 'enemy')
     .reduce((sum, p, _i, arr) => sum + p.tier / arr.length, 0);
 
   const dc = 15 + Math.floor(avgEnemyTier * 2);
@@ -396,13 +390,11 @@ export function initCombat(params: {
   d20Rolls: number[];
 }): CombatState {
   const allParticipants = [
-    ...params.allies.map(a => ({ ...a, side: 'ally' as const })),
-    ...params.enemies.map(e => ({ ...e, side: 'enemy' as const })),
+    ...params.allies.map((a) => ({ ...a, side: 'ally' as const })),
+    ...params.enemies.map((e) => ({ ...e, side: 'enemy' as const })),
   ];
 
-  const turns = allParticipants.map((p, i) =>
-    rollInitiative(p, params.d20Rolls[i] ?? 10),
-  );
+  const turns = allParticipants.map((p, i) => rollInitiative(p, params.d20Rolls[i] ?? 10));
   turns.sort((a, b) => b.totalInitiative - a.totalInitiative);
 
   const combatId = `combat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -433,13 +425,13 @@ export function endCombat(combat: CombatState, winner: 'ally' | 'enemy' | 'draw'
 /** 获取当前战斗状态摘要 */
 export function getCombatState(combat: CombatState): string {
   const allyStatus = combat.participants
-    .filter(p => p.side === 'ally')
-    .map(p => `${p.name}: HP ${p.hp}/${p.maxHp}`)
+    .filter((p) => p.side === 'ally')
+    .map((p) => `${p.name}: HP ${p.hp}/${p.maxHp}`)
     .join(', ');
 
   const enemyStatus = combat.participants
-    .filter(p => p.side === 'enemy')
-    .map(p => `${p.name}: HP ${p.hp}/${p.maxHp}`)
+    .filter((p) => p.side === 'enemy')
+    .map((p) => `${p.name}: HP ${p.hp}/${p.maxHp}`)
     .join(', ');
 
   return `回合${combat.round} | 类型${combat.combatType} | 友方: ${allyStatus} | 敌方: ${enemyStatus}`;
@@ -457,8 +449,8 @@ export function characterToCombatParticipant(
   overrides?: Partial<CombatParticipant>,
 ): CombatParticipant {
   // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3，槽位为中文枚举 EQUIP_SLOTS）
-  const weapon = char.inventory.find(i => i.equippedSlot === '武器');
-  const armor = char.inventory.find(i => i.equippedSlot === '身体');
+  const weapon = char.inventory.find((i) => i.equippedSlot === '武器');
+  const armor = char.inventory.find((i) => i.equippedSlot === '身体');
 
   return {
     characterId: char.id,
@@ -492,7 +484,7 @@ export function characterToCombatParticipant(
 // ========== 内部工具 ==========
 
 function findParticipant(combat: CombatState, characterId: string): CombatParticipant | undefined {
-  return combat.participants.find(p => p.characterId === characterId);
+  return combat.participants.find((p) => p.characterId === characterId);
 }
 
 function createErrorResult(input: AttackInput, error: string): CombatActionResult {

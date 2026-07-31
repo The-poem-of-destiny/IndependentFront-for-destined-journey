@@ -89,13 +89,13 @@ export function executeDiceRoll(payload: DiceRollPayload): DiceRollResult {
 
   // 构建描述
   const advantageText = payload.advantage ? ' (优势)' : payload.disadvantage ? ' (劣势)' : '';
-  const modText = totalModifier !== 0
-    ? (totalModifier > 0 ? ` +${totalModifier}` : ` ${totalModifier}`)
-    : '';
+  const modText =
+    totalModifier !== 0 ? (totalModifier > 0 ? ` +${totalModifier}` : ` ${totalModifier}`) : '';
   const critText = criticalSuccess ? ' 🎯大成功!' : criticalFailure ? ' 💀大失败!' : '';
-  const dcText = payload.targetDC !== undefined
-    ? ` [DC${payload.targetDC}: ${meetsDC ? '✓成功' : '✗失败'}]`
-    : '';
+  const dcText =
+    payload.targetDC !== undefined
+      ? ` [DC${payload.targetDC}: ${meetsDC ? '✓成功' : '✗失败'}]`
+      : '';
 
   const description = `${payload.formula}${advantageText}${modText} = ${total} (${rolls.join(', ')})${critText}${dcText}`;
 
@@ -116,7 +116,11 @@ export function executeDiceRoll(payload: DiceRollPayload): DiceRollResult {
 // ========== 便捷掷骰函数 ==========
 
 /** d20 检定 */
-export function d20(modifier: number = 0, advantage: boolean = false, disadvantage: boolean = false): DiceRollResult {
+export function d20(
+  modifier: number = 0,
+  advantage: boolean = false,
+  disadvantage: boolean = false,
+): DiceRollResult {
   return executeDiceRoll({
     formula: 'd20',
     advantage,
@@ -151,7 +155,7 @@ export const $dice = {
 
 /** 计算期望值 */
 export function expectedValue(count: number, sides: number): number {
-  return count * (sides + 1) / 2;
+  return (count * (sides + 1)) / 2;
 }
 
 /** 计算成功率 (vs DC) — 基于均匀分布近似 */

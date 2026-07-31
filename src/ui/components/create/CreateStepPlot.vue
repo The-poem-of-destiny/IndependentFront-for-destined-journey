@@ -1,26 +1,26 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useCreateStore } from '../../stores/create-store'
-import FormSelect from '../shared/form/FormSelect.vue'
-import FormStepper from '../shared/form/FormStepper.vue'
-import AppButton from '../shared/AppButton.vue'
-import PlotOutlinePreview from './PlotOutlinePreview.vue'
+import { ref } from 'vue';
+import { useCreateStore } from '../../stores/create-store';
+import FormSelect from '../shared/form/FormSelect.vue';
+import FormStepper from '../shared/form/FormStepper.vue';
+import AppButton from '../shared/AppButton.vue';
+import PlotOutlinePreview from './PlotOutlinePreview.vue';
 
-const store = useCreateStore()
+const store = useCreateStore();
 
-const showReviseBox = ref(false)
-const reviseText = ref('')
-const importInput = ref<HTMLInputElement | null>(null)
-const exportError = ref('')
-const showClearConfirm = ref(false)
+const showReviseBox = ref(false);
+const reviseText = ref('');
+const importInput = ref<HTMLInputElement | null>(null);
+const exportError = ref('');
+const showClearConfirm = ref(false);
 
 async function submitRevise() {
-  const text = reviseText.value.trim()
-  if (!text) return
-  const ok = await store.reviseOutline(text)
+  const text = reviseText.value.trim();
+  if (!text) return;
+  const ok = await store.reviseOutline(text);
   if (ok) {
-    reviseText.value = ''
-    showReviseBox.value = false
+    reviseText.value = '';
+    showReviseBox.value = false;
   }
 }
 
@@ -34,40 +34,40 @@ function handleExportOutline() {
       plotSettings: JSON.parse(JSON.stringify(store.plotSettings)),
       exportedAt: new Date().toISOString(),
       version: 1,
-    }
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${data.title || '剧情大纲'}-${new Date().toISOString().slice(0, 10)}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${data.title || '剧情大纲'}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   } catch (err) {
-    exportError.value = '导出失败'
-    console.error('导出大纲失败:', err)
+    exportError.value = '导出失败';
+    console.error('导出大纲失败:', err);
   }
 }
 
 function triggerImportOutline() {
-  importInput.value?.click()
+  importInput.value?.click();
 }
 
 async function handleImportOutline(e: Event) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
 
   try {
-    const text = await file.text()
-    const data = JSON.parse(text)
+    const text = await file.text();
+    const data = JSON.parse(text);
 
     if (!data.title && !data.content) {
-      throw new Error('文件格式不正确：缺少 title 或 content')
+      throw new Error('文件格式不正确：缺少 title 或 content');
     }
     if (!data.chapters || !Array.isArray(data.chapters) || data.chapters.length === 0) {
-      throw new Error('文件格式不正确：缺少 chapters 或 chapters 为空')
+      throw new Error('文件格式不正确：缺少 chapters 或 chapters 为空');
     }
 
     store.plotOutline = {
@@ -83,29 +83,27 @@ async function handleImportOutline(e: Event) {
       timeRange: { start: '', end: '' },
       createdAt: Date.now(),
       updatedAt: Date.now(),
-    } as any
+    } as any;
 
-    store.plotOutlineChapters = data.chapters
+    store.plotOutlineChapters = data.chapters;
 
-    input.value = ''
-    exportError.value = ''
+    input.value = '';
+    exportError.value = '';
   } catch (err) {
-    exportError.value = err instanceof Error ? err.message : '导入失败'
-    console.error('导入大纲失败:', err)
-    input.value = ''
+    exportError.value = err instanceof Error ? err.message : '导入失败';
+    console.error('导入大纲失败:', err);
+    input.value = '';
   }
 }
 
 function handleClearOutline() {
-  store.clearOutline()
-  showClearConfirm.value = false
+  store.clearOutline();
+  showClearConfirm.value = false;
 }
 
 function handleExportDebug() {
-  const ok = store.exportAIDebugDump()
-  exportError.value = ok
-    ? ''
-    : 'AI 调试数据已失效（页面刷新后会丢失），请重新生成大纲后再导出'
+  const ok = store.exportAIDebugDump();
+  exportError.value = ok ? '' : 'AI 调试数据已失效（页面刷新后会丢失），请重新生成大纲后再导出';
 }
 
 const GENRE_OPTIONS = [
@@ -117,7 +115,7 @@ const GENRE_OPTIONS = [
   { label: '权谋', value: 'politics', desc: '侧重政治斗争与权力更迭' },
   { label: '生存', value: 'survival', desc: '侧重资源管理与逆境求生' },
   { label: '悲剧', value: 'tragedy', desc: '侧重命运无常与英雄陨落' },
-]
+];
 
 const DIFFICULTY_OPTIONS = [
   { label: '自适应', value: 'adaptive' as const, desc: '根据玩家的生命层级自动适配' },
@@ -125,7 +123,7 @@ const DIFFICULTY_OPTIONS = [
   { label: 'T3 精英', value: 3 as const },
   { label: 'T4 史诗', value: 4 as const },
   { label: 'T7 神祇', value: 7 as const },
-]
+];
 </script>
 
 <template>
@@ -133,11 +131,15 @@ const DIFFICULTY_OPTIONS = [
     <h2 class="step-title">剧情规划</h2>
 
     <div class="plot-form">
-      <FormSelect v-model="store.plotMode" label="模式" :options="[
-        { label: '关闭', value: 'off' },
-        { label: '主线模式', value: 'main' },
-        { label: '支线模式', value: 'side' },
-      ]" />
+      <FormSelect
+        v-model="store.plotMode"
+        label="模式"
+        :options="[
+          { label: '关闭', value: 'off' },
+          { label: '主线模式', value: 'main' },
+          { label: '支线模式', value: 'side' },
+        ]"
+      />
 
       <template v-if="store.plotMode === 'main'">
         <div class="field-row field-row-triple">
@@ -163,7 +165,8 @@ const DIFFICULTY_OPTIONS = [
           <p class="field-hint">主线的最高难度，生成的 NPC 和敌人不会大于此层级</p>
           <div class="difficulty-options">
             <button
-              v-for="o in DIFFICULTY_OPTIONS" :key="o.value"
+              v-for="o in DIFFICULTY_OPTIONS"
+              :key="o.value"
               class="difficulty-btn"
               :class="{ active: store.plotDifficultyTier === o.value }"
               @click="store.plotDifficultyTier = o.value"
@@ -174,23 +177,31 @@ const DIFFICULTY_OPTIONS = [
           </div>
         </div>
 
-        <FormSelect v-model="store.plotAllowNonWorldbookNpc" label="外部NPC参与" :options="[
-          { label: '允许', value: true }, { label: '禁止', value: false },
-        ]" />
+        <FormSelect
+          v-model="store.plotAllowNonWorldbookNpc"
+          label="外部NPC参与"
+          :options="[
+            { label: '允许', value: true },
+            { label: '禁止', value: false },
+          ]"
+        />
         <div class="genre-section">
           <label class="field-label">剧情偏向</label>
           <p class="field-hint">选择一个或多个你喜欢的剧情方向，AI 会优先往这些方向发展。</p>
           <div class="genre-grid">
             <label
-              v-for="g in GENRE_OPTIONS" :key="g.value"
+              v-for="g in GENRE_OPTIONS"
+              :key="g.value"
               class="genre-chip"
               :class="{ active: store.plotGenrePreference.includes(g.value as any) }"
-              @click="() => {
-                const arr = [...store.plotGenrePreference]
-                const i = arr.indexOf(g.value as any)
-                i >= 0 ? arr.splice(i, 1) : arr.push(g.value as any)
-                store.plotGenrePreference = arr
-              }"
+              @click="
+                () => {
+                  const arr = [...store.plotGenrePreference];
+                  const i = arr.indexOf(g.value as any);
+                  i >= 0 ? arr.splice(i, 1) : arr.push(g.value as any);
+                  store.plotGenrePreference = arr;
+                }
+              "
             >
               <span class="genre-chip-label">{{ g.label }}</span>
               <span class="genre-chip-desc">{{ g.desc }}</span>
@@ -222,10 +233,14 @@ const DIFFICULTY_OPTIONS = [
         </div>
       </template>
 
-      <div class="field-group" v-if="store.plotMode !== 'off'">
+      <div v-if="store.plotMode !== 'off'" class="field-group">
         <label class="field-label">雷点（绝对禁止生成的内容）</label>
         <p class="field-hint">仅在生成剧情大纲时生效，优先级高于一切剧情偏好</p>
-        <textarea v-model="store.plotTabooContent" rows="2" placeholder="例如：不要出现重要角色永久死亡、不要虐待动物的情节..." />
+        <textarea
+          v-model="store.plotTabooContent"
+          rows="2"
+          placeholder="例如：不要出现重要角色永久死亡、不要虐待动物的情节..."
+        />
       </div>
     </div>
 
@@ -297,39 +312,41 @@ const DIFFICULTY_OPTIONS = [
           <button
             class="io-btn"
             :disabled="store.isPlotGenerating"
-            @click="handleExportOutline"
             title="导出大纲为 JSON 文件"
+            @click="handleExportOutline"
           >
             导出大纲
           </button>
           <button
             class="io-btn"
             :disabled="store.isPlotGenerating"
-            @click="triggerImportOutline"
             title="从 JSON 文件导入大纲"
+            @click="triggerImportOutline"
           >
             导入大纲
           </button>
           <button
             class="io-btn io-btn-danger"
             :disabled="store.isPlotGenerating"
-            @click="showClearConfirm = !showClearConfirm"
             title="清除当前大纲，回到未生成状态"
+            @click="showClearConfirm = !showClearConfirm"
           >
             清除大纲
           </button>
           <button
             class="io-btn"
             :disabled="store.isPlotGenerating"
-            @click="handleExportDebug"
             title="导出本次生成的 AI 调试数据（提示词/思维链/正文/参数）为 JSON"
+            @click="handleExportDebug"
           >
             导出AI调试
           </button>
         </div>
         <div class="clear-confirm" :class="{ open: showClearConfirm }">
           <div class="clear-confirm-inner">
-            <p class="clear-confirm-text">确定清除大纲吗？大纲与修改历史将被删除（角色捏人数据不受影响），操作不可撤销。</p>
+            <p class="clear-confirm-text">
+              确定清除大纲吗？大纲与修改历史将被删除（角色捏人数据不受影响），操作不可撤销。
+            </p>
             <div class="clear-confirm-btns">
               <button class="io-btn io-btn-danger" @click="handleClearOutline">确认清除</button>
               <button class="io-btn" @click="showClearConfirm = false">取消</button>
@@ -340,34 +357,72 @@ const DIFFICULTY_OPTIONS = [
           ref="importInput"
           type="file"
           accept=".json"
-          style="display:none"
+          style="display: none"
           @change="handleImportOutline"
         />
-        <p class="error-msg" v-if="exportError">{{ exportError }}</p>
+        <p v-if="exportError" class="error-msg">{{ exportError }}</p>
       </template>
-      <p class="error-msg" v-if="store.plotGenerationError">{{ store.plotGenerationError }}</p>
+      <p v-if="store.plotGenerationError" class="error-msg">{{ store.plotGenerationError }}</p>
       <p class="warning">此操作将调用 AI，可能需要等待较长时间</p>
     </div>
   </section>
 </template>
 
 <style scoped>
-.step-plot { max-width: 800px; margin: 0 auto; }
-.step-title { font-family: var(--theme-font-title, serif); color: var(--theme-text-primary); font-size: 1.3rem; margin-bottom: var(--theme-spacing-md); }
-.plot-form { display: flex; flex-direction: column; gap: var(--theme-spacing-sm); }
+.step-plot {
+  max-width: 800px;
+  margin: 0 auto;
+}
+.step-title {
+  font-family: var(--theme-font-title, serif);
+  color: var(--theme-text-primary);
+  font-size: 1.3rem;
+  margin-bottom: var(--theme-spacing-md);
+}
+.plot-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-sm);
+}
 
 /* ===== 字段提示文字 ===== */
-.field-group { margin-bottom: var(--theme-spacing-xs); }
-.field-label { display: block; font-size: 0.75rem; font-weight: 600; color: var(--theme-text-secondary); margin-bottom: 2px; }
-.field-hint { font-size: 0.68rem; color: var(--theme-text-muted); margin: 2px 0 6px; line-height: 1.4; }
+.field-group {
+  margin-bottom: var(--theme-spacing-xs);
+}
+.field-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--theme-text-secondary);
+  margin-bottom: 2px;
+}
+.field-hint {
+  font-size: 0.68rem;
+  color: var(--theme-text-muted);
+  margin: 2px 0 6px;
+  line-height: 1.4;
+}
 
 /* ===== 行内多控件 ===== */
-.field-row { display: flex; gap: var(--theme-spacing-sm); }
-.field-row .field-group { flex: 1; min-width: 0; margin-bottom: 0; }
-.field-row-triple { flex-wrap: wrap; }
+.field-row {
+  display: flex;
+  gap: var(--theme-spacing-sm);
+}
+.field-row .field-group {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+.field-row-triple {
+  flex-wrap: wrap;
+}
 
 /* ===== 难度层级单选按钮 ===== */
-.difficulty-options { display: flex; flex-wrap: wrap; gap: 4px; }
+.difficulty-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
 .difficulty-btn {
   display: flex;
   flex-direction: column;
@@ -402,8 +457,14 @@ const DIFFICULTY_OPTIONS = [
 }
 
 /* ===== 剧情偏向 ===== */
-.genre-section { margin-bottom: var(--theme-spacing-xs); }
-.genre-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.genre-section {
+  margin-bottom: var(--theme-spacing-xs);
+}
+.genre-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+}
 .genre-chip {
   display: flex;
   flex-direction: column;
@@ -419,16 +480,26 @@ const DIFFICULTY_OPTIONS = [
 .genre-chip:hover {
   border-color: var(--theme-primary);
   transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.08);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
 }
 .genre-chip.active {
   border-color: var(--theme-primary);
   background: color-mix(in srgb, var(--theme-primary) 10%, var(--theme-card-bg));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-primary) 20%, transparent);
 }
-.genre-chip-label { font-weight: 600; font-size: 0.85rem; color: var(--theme-text-primary); }
-.genre-chip.active .genre-chip-label { color: var(--theme-primary); }
-.genre-chip-desc { font-size: 0.68rem; color: var(--theme-text-muted); line-height: 1.3; }
+.genre-chip-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--theme-text-primary);
+}
+.genre-chip.active .genre-chip-label {
+  color: var(--theme-primary);
+}
+.genre-chip-desc {
+  font-size: 0.68rem;
+  color: var(--theme-text-muted);
+  line-height: 1.3;
+}
 
 /* ===== 其他 ===== */
 .field-group textarea,
@@ -449,19 +520,49 @@ const DIFFICULTY_OPTIONS = [
   outline: none;
   border-color: var(--theme-primary);
 }
-.outline-section { margin-top: var(--theme-spacing-lg); padding-top: var(--theme-spacing-md); border-top: 1px solid var(--theme-card-border); }
-.outline-section h3 { font-size: 0.85rem; color: var(--theme-text-secondary); margin-bottom: var(--theme-spacing-xs); }
-.generate-row { margin-top: var(--theme-spacing-md); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.warning { margin: 0; font-size: 0.7rem; color: var(--theme-quality-legendary); }
-.error-msg { margin: 0; font-size: 0.75rem; color: var(--theme-error); }
-.reroll-btns { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--theme-spacing-sm); }
+.outline-section {
+  margin-top: var(--theme-spacing-lg);
+  padding-top: var(--theme-spacing-md);
+  border-top: 1px solid var(--theme-card-border);
+}
+.outline-section h3 {
+  font-size: 0.85rem;
+  color: var(--theme-text-secondary);
+  margin-bottom: var(--theme-spacing-xs);
+}
+.generate-row {
+  margin-top: var(--theme-spacing-md);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.warning {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--theme-quality-legendary);
+}
+.error-msg {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--theme-error);
+}
+.reroll-btns {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--theme-spacing-sm);
+}
 .revise-box {
   width: 100%;
   display: grid;
   grid-template-rows: 0fr;
   transition: grid-template-rows 0.25s ease;
 }
-.revise-box.open { grid-template-rows: 1fr; }
+.revise-box.open {
+  grid-template-rows: 1fr;
+}
 .revise-inner {
   overflow: hidden;
   min-height: 0;
@@ -470,7 +571,9 @@ const DIFFICULTY_OPTIONS = [
   align-items: flex-end;
   gap: var(--theme-spacing-sm);
 }
-.revise-box.open .revise-inner { padding-top: var(--theme-spacing-xs); }
+.revise-box.open .revise-inner {
+  padding-top: var(--theme-spacing-xs);
+}
 .revise-inner textarea {
   width: 100%;
   padding: var(--theme-spacing-sm);
@@ -484,9 +587,14 @@ const DIFFICULTY_OPTIONS = [
   box-sizing: border-box;
   resize: vertical;
 }
-.revise-inner textarea:focus { outline: none; border-color: var(--theme-primary); }
+.revise-inner textarea:focus {
+  outline: none;
+  border-color: var(--theme-primary);
+}
 @media (prefers-reduced-motion: reduce) {
-  .revise-box { transition: none; }
+  .revise-box {
+    transition: none;
+  }
 }
 
 /* ===== 导入/导出/清除 ===== */
@@ -506,7 +614,9 @@ const DIFFICULTY_OPTIONS = [
   cursor: pointer;
   font-size: 0.8rem;
   font-family: inherit;
-  transition: border-color var(--theme-transition-fast), color var(--theme-transition-fast);
+  transition:
+    border-color var(--theme-transition-fast),
+    color var(--theme-transition-fast);
 }
 .io-btn:hover:not(:disabled) {
   border-color: var(--theme-primary);
@@ -532,7 +642,9 @@ const DIFFICULTY_OPTIONS = [
   grid-template-rows: 0fr;
   transition: grid-template-rows 0.25s ease;
 }
-.clear-confirm.open { grid-template-rows: 1fr; }
+.clear-confirm.open {
+  grid-template-rows: 1fr;
+}
 .clear-confirm-inner {
   overflow: hidden;
   min-height: 0;
@@ -542,7 +654,9 @@ const DIFFICULTY_OPTIONS = [
   gap: var(--theme-spacing-xs);
   padding-top: 0;
 }
-.clear-confirm.open .clear-confirm-inner { padding-top: var(--theme-spacing-xs); }
+.clear-confirm.open .clear-confirm-inner {
+  padding-top: var(--theme-spacing-xs);
+}
 .clear-confirm-text {
   margin: 0;
   font-size: 0.72rem;
@@ -555,6 +669,8 @@ const DIFFICULTY_OPTIONS = [
   gap: var(--theme-spacing-sm, 8px);
 }
 @media (prefers-reduced-motion: reduce) {
-  .clear-confirm { transition: none; }
+  .clear-confirm {
+    transition: none;
+  }
 }
 </style>

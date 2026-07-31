@@ -137,7 +137,9 @@ export function resolveIntention(input: IntentionCheckInput): IntentionResult {
   if (
     input.isExecutionIntent &&
     input.defenderMorale &&
-    (input.defenderMorale === 'shaken' || input.defenderMorale === 'wavering' || input.defenderMorale === 'routing')
+    (input.defenderMorale === 'shaken' ||
+      input.defenderMorale === 'wavering' ||
+      input.defenderMorale === 'routing')
   ) {
     return {
       level: '处决',
@@ -164,7 +166,8 @@ export function resolveIntention(input: IntentionCheckInput): IntentionResult {
       defenderValue,
     },
     coefficient: success ? config.coefficient : 1.0,
-    extraEffects: success && config.triggersExtraEffects ? [`${input.intentionLevel}意图额外效果`] : [],
+    extraEffects:
+      success && config.triggersExtraEffects ? [`${input.intentionLevel}意图额外效果`] : [],
     narrativeNote: success
       ? `${input.intentionLevel}意图判定成功 (${attackerValue} ≥ ${defenderValue})`
       : `${input.intentionLevel}意图判定失败 (${attackerValue} < ${defenderValue})，系数重置为1.0，无额外状态`,

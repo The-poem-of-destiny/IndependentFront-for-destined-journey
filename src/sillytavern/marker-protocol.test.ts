@@ -127,7 +127,8 @@ describe('scanCraftRequests', () => {
   });
 
   it('应解析带属性的 craft_request', () => {
-    const text = '<craft_request industry="锻造" productName="长剑" targetQuality="稀有">需要精炼铁矿石</craft_request>';
+    const text =
+      '<craft_request industry="锻造" productName="长剑" targetQuality="稀有">需要精炼铁矿石</craft_request>';
     const markers = scanCraftRequests(text);
     expect(markers).toHaveLength(1);
     expect(markers[0].industry).toBe('锻造');
@@ -137,7 +138,8 @@ describe('scanCraftRequests', () => {
   });
 
   it('应检测多行 body 的 craft_request', () => {
-    const text = '<craft_request characterId="player">\n制作一把附魔长剑\n需要用龙血淬火\n</craft_request>';
+    const text =
+      '<craft_request characterId="player">\n制作一把附魔长剑\n需要用龙血淬火\n</craft_request>';
     const markers = scanCraftRequests(text);
     expect(markers).toHaveLength(1);
     expect(markers[0].characterId).toBe('player');
@@ -146,7 +148,8 @@ describe('scanCraftRequests', () => {
   });
 
   it('应检测多个 craft_request', () => {
-    const text = '<craft_request>第一件</craft_request>中间的文本<craft_request>第二件</craft_request>';
+    const text =
+      '<craft_request>第一件</craft_request>中间的文本<craft_request>第二件</craft_request>';
     const markers = scanCraftRequests(text);
     expect(markers).toHaveLength(2);
     expect(markers[0].bodyText).toBe('第一件');
@@ -187,7 +190,8 @@ describe('scanCombatTriggers', () => {
   });
 
   it('应解析带属性的 combat_trigger', () => {
-    const text = '<combat_trigger combatType="死斗" environment="地下迷宫">Boss 战</combat_trigger>';
+    const text =
+      '<combat_trigger combatType="死斗" environment="地下迷宫">Boss 战</combat_trigger>';
     const markers = scanCombatTriggers(text);
     expect(markers).toHaveLength(1);
     expect(markers[0].combatType).toBe('死斗');
@@ -220,7 +224,8 @@ describe('scanCharDetects', () => {
   });
 
   it('应解析带属性的 char_detect', () => {
-    const text = '<char_detect characterName="艾琳" characterType="npc">银发精灵弓箭手</char_detect>';
+    const text =
+      '<char_detect characterName="艾琳" characterType="npc">银发精灵弓箭手</char_detect>';
     const markers = scanCharDetects(text);
     expect(markers).toHaveLength(1);
     expect(markers[0].characterName).toBe('艾琳');
@@ -298,7 +303,8 @@ describe('scanMarkers', () => {
   });
 
   it('cleanText 应保留非标记 XML 标签', () => {
-    const text = '<thinking>思考中</thinking><maintext>正文<craft_request>制作</craft_request>继续</maintext>';
+    const text =
+      '<thinking>思考中</thinking><maintext>正文<craft_request>制作</craft_request>继续</maintext>';
     const result = scanMarkers(text);
     expect(result.markers).toHaveLength(1);
     expect(result.cleanText).toBe('<thinking>思考中</thinking><maintext>正文继续</maintext>');
@@ -326,7 +332,8 @@ describe('scanMarkers', () => {
 
 describe('stripMarkers', () => {
   it('应剥离所有标记返回纯文本', () => {
-    const text = '开头<craft_request>制作</craft_request>中间<combat_trigger>战斗</combat_trigger>结尾';
+    const text =
+      '开头<craft_request>制作</craft_request>中间<combat_trigger>战斗</combat_trigger>结尾';
     const result = stripMarkers(text);
     expect(result).toBe('开头中间结尾');
   });
@@ -401,7 +408,9 @@ describe('scanPlayAudioMarkers', () => {
   });
 
   it('解析 character / variant / action', () => {
-    const m = scanPlayAudioMarkers('<play_audio character="傲雪" variant="B"/><play_audio action="stop"/>');
+    const m = scanPlayAudioMarkers(
+      '<play_audio character="傲雪" variant="B"/><play_audio action="stop"/>',
+    );
     expect(m).toHaveLength(2);
     expect(m[0].character).toBe('傲雪');
     expect(m[0].variant).toBe('B');

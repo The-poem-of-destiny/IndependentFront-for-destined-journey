@@ -11,9 +11,12 @@
  */
 
 import type {
-  GameEvent, GameEventType,
-  StatePatch, EffectDefinition,
-  CombatActionRequest, CraftActionRequest,
+  GameEvent,
+  GameEventType,
+  StatePatch,
+  EffectDefinition,
+  CombatActionRequest,
+  CraftActionRequest,
   DiceRollPayload,
   ReadonlyHookSet,
 } from './types';
@@ -36,10 +39,7 @@ export interface EventBusConfig {
  * 与 {@link EventHandler} 不同：链式 handler 关注的是「参数流水线变换」
  * （如战斗伤害管线 baseDamage → 戒指1 → 戒指2 → 最终值），而非「通知」。
  */
-export type ChainHandler<P = any> = (
-  params: P,
-  ctx: ChainContext,
-) => P | Promise<P>;
+export type ChainHandler<P = any> = (params: P, ctx: ChainContext) => P | Promise<P>;
 
 /**
  * 链式调用上下文 —— 每次 emitChain 调用时构造。
@@ -217,9 +217,7 @@ export class EventBus {
     this.chainDepth++;
     const maxDepth = ctx.maxDepth ?? this.currentChainMaxDepth;
     if (this.chainDepth > maxDepth) {
-      console.warn(
-        `[EventBus.emitChain] 链式递归超限 (max ${maxDepth}, type=${type})`,
-      );
+      console.warn(`[EventBus.emitChain] 链式递归超限 (max ${maxDepth}, type=${type})`);
       this.chainDepth--;
       return initialParams;
     }
@@ -297,9 +295,7 @@ export class EventBus {
 
   /** 获取事件历史 */
   getHistory(type?: GameEventType, limit?: number): GameEvent[] {
-    let filtered = type
-      ? this.history.filter(e => e.type === type)
-      : this.history;
+    let filtered = type ? this.history.filter((e) => e.type === type) : this.history;
     if (limit) {
       filtered = filtered.slice(-limit);
     }
@@ -309,7 +305,7 @@ export class EventBus {
   /** 获取最新事件 */
   getLatest(type?: GameEventType): GameEvent | undefined {
     if (type) {
-      return this.history.filter(e => e.type === type).pop();
+      return this.history.filter((e) => e.type === type).pop();
     }
     return this.history[this.history.length - 1];
   }
@@ -374,10 +370,7 @@ export function createCraftEvent(
 }
 
 /** 创建骰子事件 */
-export function createDiceEvent(
-  payload: DiceRollPayload,
-  source: string = 'system',
-): GameEvent {
+export function createDiceEvent(payload: DiceRollPayload, source: string = 'system'): GameEvent {
   return createGameEvent('system', { subtype: 'dice_roll', payload }, source);
 }
 
@@ -388,11 +381,15 @@ export function createStatusEffectEvent(
   effectName: string,
   source: string = 'system',
 ): GameEvent {
-  return createGameEvent('status_effect', {
-    characterId,
-    action,
-    effectName,
-  }, source);
+  return createGameEvent(
+    'status_effect',
+    {
+      characterId,
+      action,
+      effectName,
+    },
+    source,
+  );
 }
 
 /** 创建位置变更事件 */
@@ -402,11 +399,15 @@ export function createLocationEvent(
   to: string,
   source: string = 'system',
 ): GameEvent {
-  return createGameEvent('location_change', {
-    characterId,
-    from,
-    to,
-  }, source);
+  return createGameEvent(
+    'location_change',
+    {
+      characterId,
+      from,
+      to,
+    },
+    source,
+  );
 }
 
 /** 创建剧情触发事件 */
@@ -415,10 +416,14 @@ export function createPlotTriggerEvent(
   action: string,
   source: string = 'plot_post_check',
 ): GameEvent {
-  return createGameEvent('plot_trigger', {
-    plotEventId: eventId,
-    action,
-  }, source);
+  return createGameEvent(
+    'plot_trigger',
+    {
+      plotEventId: eventId,
+      action,
+    },
+    source,
+  );
 }
 
 /** 标记事件为已处理 */

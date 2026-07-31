@@ -1,36 +1,36 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref } from 'vue';
 
 const props = defineProps<{
-  modelValue: Record<string, string>
-  disabled?: boolean
-  keyPlaceholder?: string
-  valuePlaceholder?: string
-  maxRows?: number
-}>()
+  modelValue: Record<string, string>;
+  disabled?: boolean;
+  keyPlaceholder?: string;
+  valuePlaceholder?: string;
+  maxRows?: number;
+}>();
 
 const emit = defineEmits<{
-  'update:modelValue': [value: Record<string, string>]
-}>()
+  'update:modelValue': [value: Record<string, string>];
+}>();
 
-const newKey = ref('')
-const newValue = ref('')
+const newKey = ref('');
+const newValue = ref('');
 
 function add() {
-  if (!newKey.value.trim() || !newValue.value.trim()) return
-  if (props.maxRows && Object.keys(props.modelValue).length >= props.maxRows) return
-  emit('update:modelValue', { ...props.modelValue, [newKey.value.trim()]: newValue.value.trim() })
-  newKey.value = ''
-  newValue.value = ''
+  if (!newKey.value.trim() || !newValue.value.trim()) return;
+  if (props.maxRows && Object.keys(props.modelValue).length >= props.maxRows) return;
+  emit('update:modelValue', { ...props.modelValue, [newKey.value.trim()]: newValue.value.trim() });
+  newKey.value = '';
+  newValue.value = '';
 }
 
 function remove(key: string) {
-  const next = { ...props.modelValue }
-  delete next[key]
-  emit('update:modelValue', next)
+  const next = { ...props.modelValue };
+  delete next[key];
+  emit('update:modelValue', next);
 }
 
-const entries = () => Object.entries(props.modelValue)
+const entries = () => Object.entries(props.modelValue);
 </script>
 
 <template>
@@ -52,8 +52,16 @@ const entries = () => Object.entries(props.modelValue)
 </template>
 
 <style scoped>
-.kv-editor { display: flex; flex-direction: column; gap: var(--theme-spacing-sm); }
-.kv-list { display: flex; flex-direction: column; gap: 4px; }
+.kv-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-sm);
+}
+.kv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .kv-row {
   display: flex;
   align-items: center;
@@ -63,9 +71,17 @@ const entries = () => Object.entries(props.modelValue)
   border-radius: var(--theme-radius-sm);
   font-size: 0.85rem;
 }
-.kv-key { color: var(--theme-primary); font-weight: 500; }
-.kv-colon { color: var(--theme-text-muted); }
-.kv-value { color: var(--theme-text-primary); flex: 1; }
+.kv-key {
+  color: var(--theme-primary);
+  font-weight: 500;
+}
+.kv-colon {
+  color: var(--theme-text-muted);
+}
+.kv-value {
+  color: var(--theme-text-primary);
+  flex: 1;
+}
 .kv-remove {
   background: none;
   border: none;
@@ -75,9 +91,14 @@ const entries = () => Object.entries(props.modelValue)
   padding: 0 4px;
   line-height: 1;
 }
-.kv-remove:hover { color: var(--theme-error); }
+.kv-remove:hover {
+  color: var(--theme-error);
+}
 
-.kv-add { display: flex; gap: 6px; }
+.kv-add {
+  display: flex;
+  gap: 6px;
+}
 .kv-input {
   flex: 1;
   padding: 6px 8px;
@@ -88,8 +109,13 @@ const entries = () => Object.entries(props.modelValue)
   font-family: inherit;
   font-size: 0.85rem;
 }
-.kv-input:focus { border-color: var(--theme-primary); outline: none; }
-.kv-input::placeholder { color: var(--theme-text-muted); }
+.kv-input:focus {
+  border-color: var(--theme-primary);
+  outline: none;
+}
+.kv-input::placeholder {
+  color: var(--theme-text-muted);
+}
 .kv-add-btn {
   width: 28px;
   display: flex;

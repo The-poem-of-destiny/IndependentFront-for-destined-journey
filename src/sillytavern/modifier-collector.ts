@@ -96,11 +96,10 @@ export async function collectAttackerMods(
   combatants: string[],
 ): Promise<Modifier[]> {
   const params: CollectModsParams = { mods: [], attack };
-  const result = await bus.emitChain<CollectModsParams>(
-    COMBAT_MOD_EVENTS.ATTACKER_MODS,
-    params,
-    { combatants, source: attack.attackerId },
-  );
+  const result = await bus.emitChain<CollectModsParams>(COMBAT_MOD_EVENTS.ATTACKER_MODS, params, {
+    combatants,
+    source: attack.attackerId,
+  });
   return result.mods;
 }
 
@@ -122,10 +121,9 @@ export async function collectDefenderMods(
   combatants: string[],
 ): Promise<Modifier[]> {
   const params: CollectModsParams = { mods: [], attack };
-  const result = await bus.emitChain<CollectModsParams>(
-    COMBAT_MOD_EVENTS.DEFENDER_MODS,
-    params,
-    { combatants, source: attack.defenderId },
-  );
+  const result = await bus.emitChain<CollectModsParams>(COMBAT_MOD_EVENTS.DEFENDER_MODS, params, {
+    combatants,
+    source: attack.defenderId,
+  });
   return result.mods;
 }

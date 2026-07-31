@@ -11,6 +11,7 @@
 ```
 
 `CreatePage.vue` 结构：
+
 ```
 CreatePage
 ├── CreateSteps       (顶部 7 步指示器: 0难度/1基础/2核心/3选择/4背景/5剧情/6确认)
@@ -58,6 +59,7 @@ src/ui/components/create/
 ## 三、关键 HTML 结构
 
 ### 3.1 CreatePage (容器)
+
 ```html
 <div class="create-page">
   <CreateSteps :current="n" :total="7" />
@@ -74,6 +76,7 @@ src/ui/components/create/
 ```
 
 ### 3.2 Step 1 (基础信息)
+
 ```html
 <section class="step-basic">
   <h2>基本信息</h2>
@@ -125,14 +128,18 @@ src/ui/components/create/
 ```
 
 ### 3.3 Step 3 (装备选择)
+
 ```html
 <section class="step-selections">
   <CategoryTabs :categories="[{装备},{道具},{技能}]" v-model="activeCategory" />
-  <QualityFilter v-model="rarityFilter" />    <!-- [全部][普通][优良]...[唯一] -->
-  <div class="type-filter" v-if>              <!-- [全部][武器][防具][饰品] -->
+  <QualityFilter v-model="rarityFilter" />
+  <!-- [全部][普通][优良]...[唯一] -->
+  <div class="type-filter" v-if>
+    <!-- [全部][武器][防具][饰品] -->
     <button v-for class="type-btn" />
   </div>
-  <div class="selection-layout">              <!-- grid: 1fr 260px -->
+  <div class="selection-layout">
+    <!-- grid: 1fr 260px -->
     <div class="pool-pane">
       <SelectableCard v-for="item in filteredPool" :item :selected @select @remove />
     </div>
@@ -141,12 +148,14 @@ src/ui/components/create/
     </div>
   </div>
   <AppButton @click="showCustomForm=true">+ 自定义物品</AppButton>
-  <PartnerWorldBookPanel />                  <!-- <details> 折叠面板, 占位 -->
+  <PartnerWorldBookPanel />
+  <!-- <details> 折叠面板, 占位 -->
   <CustomItemForm :visible @save @close />
 </section>
 ```
 
 ### 3.4 SelectableCard (物品卡片)
+
 ```html
 <div class="selectable-card" :class="{selected, disabled}">
   <div class="card-body">
@@ -155,10 +164,12 @@ src/ui/components/create/
       <QualityBadge :quality size="sm" />
       <span class="item-type">{{ type }}</span>
     </div>
-    <div class="card-tags">                  <!-- tag[] chips -->
+    <div class="card-tags">
+      <!-- tag[] chips -->
       <span v-for="t in item.tag.slice(0,5)" class="tag">{{ t }}</span>
     </div>
-    <div class="card-effects">               <!-- effect{} lines -->
+    <div class="card-effects">
+      <!-- effect{} lines -->
       <span v-for="(v,k) in item.effect" class="effect-line">{{ k }}: {{ v }}</span>
     </div>
     <div class="card-cost">消耗: <strong>{{ cost }}</strong> 点</div>
@@ -172,6 +183,7 @@ src/ui/components/create/
 ```
 
 ### 3.5 PresetModal (预设管理)
+
 ```html
 <AppModal :open="visible" @close>
   <template #header>角色预设</template>
@@ -203,6 +215,7 @@ src/ui/components/create/
 ```
 
 ### 3.6 Step 6 (确认创建)
+
 ```html
 <section class="step-confirm">
   <h2>确认角色</h2>
@@ -235,18 +248,18 @@ src/ui/components/create/
 
 ## 四、数据来源 (全部真实 CDN 数据, 不乱编)
 
-| 数据 | 文件 | 数量 |
-|------|------|------|
-| 装备 | `start-catalog.ts` → `DEFAULT_EQUIPMENT_POOL` | 417 件 (来自 CDN `equipments.json`) |
-| 道具 | `start-catalog.ts` → `DEFAULT_ITEM_POOL` | 171 种 (来自 CDN `items.json`) |
-| 技能 | `create-store.ts` 异步加载 CDN `skills.json` | 470 个 |
-| 背景 | `start-catalog.ts` → `DEFAULT_BACKGROUNDS` | 51 个 (来自 CDN `backgrounds.json`) |
-| 命定核心 | `start-catalog.ts` → `DEFAULT_DESTINY_CORES` | 24 个 (来自 `world_book_index.md` §4.1) |
-| 种族费用 | `start-catalog.ts` → `DEFAULT_RACE_COSTS` | 22 条 (来自 CDN `baseInfo.json`) |
-| 身份费用 | `start-catalog.ts` → `DEFAULT_IDENTITY_COSTS` | 30+ 条 (来自 CDN `baseInfo.json`) |
-| 起始地点 | `start-catalog.ts` → `START_LOCATIONS` | 5 大区 (来自 CDN `baseInfo.json`) |
-| 性别选项 | `start-catalog.ts` → `GENDER_OPTIONS` | 8 个 (来自 CDN `baseInfo.json`) |
-| 难度预设 | `start-catalog.ts` → `DIFFICULTY_PRESETS` | 6 档 (主人定制) |
+| 数据     | 文件                                          | 数量                                    |
+| -------- | --------------------------------------------- | --------------------------------------- |
+| 装备     | `start-catalog.ts` → `DEFAULT_EQUIPMENT_POOL` | 417 件 (来自 CDN `equipments.json`)     |
+| 道具     | `start-catalog.ts` → `DEFAULT_ITEM_POOL`      | 171 种 (来自 CDN `items.json`)          |
+| 技能     | `create-store.ts` 异步加载 CDN `skills.json`  | 470 个                                  |
+| 背景     | `start-catalog.ts` → `DEFAULT_BACKGROUNDS`    | 51 个 (来自 CDN `backgrounds.json`)     |
+| 命定核心 | `start-catalog.ts` → `DEFAULT_DESTINY_CORES`  | 24 个 (来自 `world_book_index.md` §4.1) |
+| 种族费用 | `start-catalog.ts` → `DEFAULT_RACE_COSTS`     | 22 条 (来自 CDN `baseInfo.json`)        |
+| 身份费用 | `start-catalog.ts` → `DEFAULT_IDENTITY_COSTS` | 30+ 条 (来自 CDN `baseInfo.json`)       |
+| 起始地点 | `start-catalog.ts` → `START_LOCATIONS`        | 5 大区 (来自 CDN `baseInfo.json`)       |
+| 性别选项 | `start-catalog.ts` → `GENDER_OPTIONS`         | 8 个 (来自 CDN `baseInfo.json`)         |
+| 难度预设 | `start-catalog.ts` → `DIFFICULTY_PRESETS`     | 6 档 (主人定制)                         |
 
 **原版源码参考**: `_frontend_ref/src/custom_start/core/` (已 clone 到本地)
 
@@ -273,10 +286,10 @@ src/ui/components/create/
 
 ## 六、已完成的引擎层文件
 
-| 文件 | 内容 |
-|------|------|
-| `src/sillytavern/start-catalog.ts` | 所有捏人数据池 (~500行) |
-| `src/sillytavern/database.ts` | v7 升级 + `createPresets` 表 + CRUD |
+| 文件                               | 内容                                |
+| ---------------------------------- | ----------------------------------- |
+| `src/sillytavern/start-catalog.ts` | 所有捏人数据池 (~500行)             |
+| `src/sillytavern/database.ts`      | v7 升级 + `createPresets` 表 + CRUD |
 
 ---
 
@@ -285,7 +298,7 @@ src/ui/components/create/
 1. **UI 太丑** — 没有参考原版的暗色主题 / 卡片样式 / 间距系统
 2. **Step 3 装备选择** — 子分类 (sub-category) 缺失, 原版按"剑类武器/斧类武器"等分组
 3. **Step 1 表单** — 原版用 `form-row` 两列布局, 我们现在是全单列
-4. **Step 3 左右分栏** — 原版 `40%/60%` 分割, 我们现在 `1fr 260px` 
+4. **Step 3 左右分栏** — 原版 `40%/60%` 分割, 我们现在 `1fr 260px`
 5. **整体色调** — 原版暗金主题, 我们的 CSS 变量没有正确继承
 6. **CustomItemForm** — 标签/效果的 UI 输入体验不好 (小 input 挤在一起)
 7. **Step 5 剧情规划** — 占位, 没有真正调用 AI
@@ -332,4 +345,4 @@ _frontend_ref/src/custom_start/core/
 
 ---
 
-*文档结束。新 session 请从原版 `_frontend_ref` 参考 UI 样式, 数据层 (`start-catalog.ts` / `create-store.ts`) 可保留。*
+_文档结束。新 session 请从原版 `_frontend_ref` 参考 UI 样式, 数据层 (`start-catalog.ts` / `create-store.ts`) 可保留。_

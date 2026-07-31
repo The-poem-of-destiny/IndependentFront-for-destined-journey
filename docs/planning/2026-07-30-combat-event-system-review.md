@@ -51,7 +51,7 @@ UI 侧（CombatActionCard 的防御性收窄、CombatActionBar 的锁定态）�
 
 - 位置: `src/sillytavern/agent-tools.ts:1490`（`default: throw 未知 combat 工具`）
 - `executeCombatToolCall` 没有 `roll_d20 / roll_d100 / roll_dice / get_character /
-  get_hp_percent / get_inventory / status_query` 的 case，但这 7 个全在
+get_hp_percent / get_inventory / status_query` 的 case，但这 7 个全在
   `AGENT_TOOL_MAP['combat']`（agent-tools.ts:693-696）里，`getToolsForAgent('combat')`
   （combat-runner.ts:292）会交给模型，而**所有**工具调用都走这一条通道
   （combat-runner.ts:242）。
@@ -294,17 +294,17 @@ UI 侧（CombatActionCard 的防御性收窄、CombatActionBar 的锁定态）�
 
 ## 四、Minor
 
-| # | 位置 | 问题 |
-|---|------|------|
-| N1 | `CombatActionCard.vue:200-202,332` | 攻击卡片渲染裸 `char_1753…` id 而非名字——工具层已把名字转成 id 再回显（agent-tools.ts:1343-1344），而同一 payload 的 `panelLines/description` 里就有名字。真机第一眼就会看到 |
-| N2 | `agent-tools.ts:1337` | `combat_start` 把完整 `CombatState`（`_combatState`，含全部 characterId / patches / roundLogs / speedModifiers）序列化回给 LLM——违反铁律1「AI 永不产 id」的暴露面 + 战斗最吃缓存的那条消息上的纯 token 浪费 |
-| N3 | `combat-modifier-inject.ts:76` vs `effect-types.ts:110` | 登神对 DR 的压制代码用**加法**（`clamp01(dr - rate)`），自家注释写**乘法**（`dr × (1-压制率)`）: DR 0.1、压制 0.2 → 文档 0.08、代码 0——低 DR 上「压制 20%」退化成 100%。穿透侧是加法（合理），DR 侧两种写法混用 |
-| N4 | `combat-damage.ts:331,436` | 面板数据失真: `drRate` 报未修正值而 `drReduction/afterDr` 用修正值（压制生效时显示「DR 30%，减免 0」自相矛盾；对比 `penetration.penetrationRate` 报的是修正后值，标准不一）；`dodgeNegated: effectiveDodge === 0` 让闪避本来就是 0 的普通单位恒报「闪避已被无效」 |
-| N5 | `game-event.ts:214-229,447` | 链深度守卫状态（`chainDepth`/`prevMaxDepth`）是实例字段、跨 `await` 变异，两个并行 `emitChain` 会互相污染彼此的深度与上限恢复；`destroyEventBus` 生产零调用，`busRegistry` 把每个存档的 bus（含 500 条 history、内含活的 CombatState 引用）pin 到进程结束 |
-| N6 | `effect-runtime.ts:97,126` | `childEffects` 声明后从未赋值、恒返回空——连锁子效果递归（:71-74，文档 effect_script_system.md:59）是不可达死代码；且一旦被填充，`execute()` 的递归**没有任何深度守卫** |
-| N7 | `game-store.ts:88` + `combat-runner.ts:269,342` | runner 直接变异 store 按引用持有的原始 `CombatState`（`defender.hp = …` / `round++`），不过 Vue set-trap；当前渲染碰巧正确只因每次变异后同 tick 都有 `combatLog.push`。任何未来的无 emit 路径会让 CombatHeader 回合数与 HP 条静默过期 |
-| N8 | `agent-tools.ts:1465` | `status_remove` 返回 `removed: args.buffIdOrName`（输入的裸回显），契约 §2.2 规定 `{ removed: string[], patches }`——AI 无法知道到底移除了哪些、有没有移除 |
-| N9 | `game-store.ts:76-81` + `game-pipeline.ts:960` | `enterCombat()` 只清状态不开面板（`isInCombat` 要等 `combat_started` 事件才置 true），call-site 注释「激活战斗面板」是错的: 覆盖层要等第一次 LLM 往返完成才出现；模型若从不调 `combat_start`，用户在 throw 之前看不到任何战斗 UI。相关: `round_started` 只在行动轴回绕时发（combat-runner.ts:343/406），第 1 回合永远没有分隔线 |
+| #   | 位置                                                    | 问题                                                                                                                                                                                                                                                                                                                            |
+| --- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| N1  | `CombatActionCard.vue:200-202,332`                      | 攻击卡片渲染裸 `char_1753…` id 而非名字——工具层已把名字转成 id 再回显（agent-tools.ts:1343-1344），而同一 payload 的 `panelLines/description` 里就有名字。真机第一眼就会看到                                                                                                                                                    |
+| N2  | `agent-tools.ts:1337`                                   | `combat_start` 把完整 `CombatState`（`_combatState`，含全部 characterId / patches / roundLogs / speedModifiers）序列化回给 LLM——违反铁律1「AI 永不产 id」的暴露面 + 战斗最吃缓存的那条消息上的纯 token 浪费                                                                                                                     |
+| N3  | `combat-modifier-inject.ts:76` vs `effect-types.ts:110` | 登神对 DR 的压制代码用**加法**（`clamp01(dr - rate)`），自家注释写**乘法**（`dr × (1-压制率)`）: DR 0.1、压制 0.2 → 文档 0.08、代码 0——低 DR 上「压制 20%」退化成 100%。穿透侧是加法（合理），DR 侧两种写法混用                                                                                                                 |
+| N4  | `combat-damage.ts:331,436`                              | 面板数据失真: `drRate` 报未修正值而 `drReduction/afterDr` 用修正值（压制生效时显示「DR 30%，减免 0」自相矛盾；对比 `penetration.penetrationRate` 报的是修正后值，标准不一）；`dodgeNegated: effectiveDodge === 0` 让闪避本来就是 0 的普通单位恒报「闪避已被无效」                                                               |
+| N5  | `game-event.ts:214-229,447`                             | 链深度守卫状态（`chainDepth`/`prevMaxDepth`）是实例字段、跨 `await` 变异，两个并行 `emitChain` 会互相污染彼此的深度与上限恢复；`destroyEventBus` 生产零调用，`busRegistry` 把每个存档的 bus（含 500 条 history、内含活的 CombatState 引用）pin 到进程结束                                                                       |
+| N6  | `effect-runtime.ts:97,126`                              | `childEffects` 声明后从未赋值、恒返回空——连锁子效果递归（:71-74，文档 effect_script_system.md:59）是不可达死代码；且一旦被填充，`execute()` 的递归**没有任何深度守卫**                                                                                                                                                          |
+| N7  | `game-store.ts:88` + `combat-runner.ts:269,342`         | runner 直接变异 store 按引用持有的原始 `CombatState`（`defender.hp = …` / `round++`），不过 Vue set-trap；当前渲染碰巧正确只因每次变异后同 tick 都有 `combatLog.push`。任何未来的无 emit 路径会让 CombatHeader 回合数与 HP 条静默过期                                                                                           |
+| N8  | `agent-tools.ts:1465`                                   | `status_remove` 返回 `removed: args.buffIdOrName`（输入的裸回显），契约 §2.2 规定 `{ removed: string[], patches }`——AI 无法知道到底移除了哪些、有没有移除                                                                                                                                                                       |
+| N9  | `game-store.ts:76-81` + `game-pipeline.ts:960`          | `enterCombat()` 只清状态不开面板（`isInCombat` 要等 `combat_started` 事件才置 true），call-site 注释「激活战斗面板」是错的: 覆盖层要等第一次 LLM 往返完成才出现；模型若从不调 `combat_start`，用户在 throw 之前看不到任何战斗 UI。相关: `round_started` 只在行动轴回绕时发（combat-runner.ts:343/406），第 1 回合永远没有分隔线 |
 
 ---
 
@@ -336,28 +336,20 @@ UI 侧（CombatActionCard 的防御性收窄、CombatActionBar 的锁定态）�
 ## 六、修复优先序建议（M6 真机验证之前）
 
 **第一批 — 不修则战斗开不了/关不掉（C2 / C3 / C4）**
+
 1. `executeCombatToolCall` 补齐 7 个缺失 case（骰子/查询类直接复用通用通道的实现）。
 2. `combat_end` 调 `endCombat()` 置 `status:'ended'`；对二次 `combat_end` 幂等。
 3. `awaitPlayerInput` 接 `AbortSignal` + CombatPanel 给逃生口。
 
-**第二批 — 安全 + 脚本效果落地（C1 / M-10 / M-11 / M-12）**
-4. `buildSandbox` 遮蔽全局（`with` 遮蔽或 iframe/Realm 边界），列 allowlist。
-5. `convertScriptEffects` 补全 5 个被丢弃的通道。
-6. 修 script-registry 过期闭包 / 嵌套订阅 ownerKey / handle 匹配三处僵尸路径；
-   `$call` 与战斗链补递归上限。
+**第二批 — 安全 + 脚本效果落地（C1 / M-10 / M-11 / M-12）** 4. `buildSandbox` 遮蔽全局（`with` 遮蔽或 iframe/Realm 边界），列 allowlist。5. `convertScriptEffects` 补全 5 个被丢弃的通道。6. 修 script-registry 过期闭包 / 嵌套订阅 ownerKey / handle 匹配三处僵尸路径；
+`$call` 与战斗链补递归上限。
 
-**第三批 — 数值正确性（C5 / C6 / C7 / M-4 / M-5 / M-6）**
-7. 意图对抗独立双骰；战意检定传真骰；优劣势用真 2d20（注入骰源，勿用 `Math.random()`）。
-8. 管线出口 `finalDamage ≥ 0`、`finalHp ∈ [0, maxHp]` 双向 clamp；
-   `multiHitCount` schema 加 minimum。
-9. 非致死接回 `checkNonLethal`；modifier 折叠按 `target` 分流、守方百分比进管线。
+**第三批 — 数值正确性（C5 / C6 / C7 / M-4 / M-5 / M-6）** 7. 意图对抗独立双骰；战意检定传真骰；优劣势用真 2d20（注入骰源，勿用 `Math.random()`）。8. 管线出口 `finalDamage ≥ 0`、`finalHp ∈ [0, maxHp]` 双向 clamp；
+`multiHitCount` schema 加 minimum。9. 非致死接回 `checkNonLethal`；modifier 折叠按 `target` 分流、守方百分比进管线。
 
-**第四批 — 事件与状态接线（M-1 / M-2 / M-3 / M-7 / M-8 / M-9）**
-10. runner 接入 `runRoundPipeline`（或等价物）并把 `tickBuffs` 的 `remaining`
-    写回；补齐 4 个从未 emit 的事件或从文档中除名。
-11. 回合资源消耗接进 `resolveAttackPipeline`；攻方资源与 `r.updated` 写回
-    `combatState` / `ctx.characters`。
-12. `clusterCount` 进 `CombatParticipant` 正式字段并补写入方，删 `as any`。
+**第四批 — 事件与状态接线（M-1 / M-2 / M-3 / M-7 / M-8 / M-9）** 10. runner 接入 `runRoundPipeline`（或等价物）并把 `tickBuffs` 的 `remaining`
+写回；补齐 4 个从未 emit 的事件或从文档中除名。11. 回合资源消耗接进 `resolveAttackPipeline`；攻方资源与 `r.updated` 写回
+`combatState` / `ctx.characters`。12. `clusterCount` 进 `CombatParticipant` 正式字段并补写入方，删 `as any`。
 
 **第五批 — 契约与 UI 打磨（M-13 / M-14 / M-15 / Minor 全部）**
 

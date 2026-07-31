@@ -149,20 +149,14 @@ describe('batchSetAffection', () => {
 
 describe('batchAddAffection', () => {
   it('批量增减', () => {
-    const result = batchAddAffection(
-      { alice: 10, bob: -10 },
-      { alice: 20, bob: -15, carol: 30 },
-    );
-    expect(result.alice).toBe(30);  // 10 + 20
-    expect(result.bob).toBe(-25);   // -10 + -15
-    expect(result.carol).toBe(30);  // 0 + 30
+    const result = batchAddAffection({ alice: 10, bob: -10 }, { alice: 20, bob: -15, carol: 30 });
+    expect(result.alice).toBe(30); // 10 + 20
+    expect(result.bob).toBe(-25); // -10 + -15
+    expect(result.carol).toBe(30); // 0 + 30
   });
 
   it('自动钳制', () => {
-    const result = batchAddAffection(
-      { alice: 95 },
-      { alice: 20, bob: -10 },
-    );
+    const result = batchAddAffection({ alice: 95 }, { alice: 20, bob: -10 });
     expect(result.alice).toBe(100);
     expect(result.bob).toBe(-10);
   });

@@ -1,24 +1,24 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useUIStore } from '../../stores/ui-store'
-import { useGameStore } from '../../stores/game-store'
+import { computed } from 'vue';
+import { useUIStore } from '../../stores/ui-store';
+import { useGameStore } from '../../stores/game-store';
 
-const ui = useUIStore()
-const game = useGameStore()
+const ui = useUIStore();
+const game = useGameStore();
 
 const turnCount = computed(() => {
-  const last = [...game.messages].reverse().find(m => m.role === 'user' || m.role === 'assistant')
-  return last?.turn ?? 0
-})
+  const last = [...game.messages]
+    .reverse()
+    .find((m) => m.role === 'user' || m.role === 'assistant');
+  return last?.turn ?? 0;
+});
 </script>
 
 <template>
   <div class="top-bar">
     <!-- 左: 导航 + 存档名 -->
     <div class="top-left">
-      <button class="top-btn" @click="ui.navigate('home')" title="回到首页">
-        ← 首页
-      </button>
+      <button class="top-btn" title="回到首页" @click="ui.navigate('home')">← 首页</button>
       <span class="top-divider" aria-hidden="true" />
       <span class="top-save-name" :title="game.activeSave?.name ?? '冒险之途'">
         {{ game.activeSave?.name ?? '冒险之途' }}
@@ -35,15 +35,15 @@ const turnCount = computed(() => {
     <!-- 右: Agent 状态 + 设置 + 全屏 -->
     <div class="top-right">
       <Transition name="agent-fade">
-        <span class="agent-indicator" v-if="game.agentStatus">
+        <span v-if="game.agentStatus" class="agent-indicator">
           <i class="fa-solid fa-circle-notch agent-spin" aria-hidden="true" />
           {{ game.agentStatus.label }}…
         </span>
       </Transition>
-      <button class="top-btn icon-btn" @click="ui.navigate('settings')" title="设置">
+      <button class="top-btn icon-btn" title="设置" @click="ui.navigate('settings')">
         <i class="fa-solid fa-gear" />
       </button>
-      <button class="top-btn" @click="game.toggleFullscreen()" title="全屏">
+      <button class="top-btn" title="全屏" @click="game.toggleFullscreen()">
         <i :class="game.fullscreenStatus ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" />
         {{ game.fullscreenStatus ? '退出' : '全屏' }}
       </button>
@@ -62,7 +62,8 @@ const turnCount = computed(() => {
   border-bottom: 1px solid var(--theme-card-border);
   flex-shrink: 0;
 }
-.top-left, .top-right {
+.top-left,
+.top-right {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -83,7 +84,9 @@ const turnCount = computed(() => {
 .top-btn:hover {
   background: var(--theme-title-bar-btn-hover);
 }
-.icon-btn { padding: 4px 8px; }
+.icon-btn {
+  padding: 4px 8px;
+}
 .top-divider {
   width: 1px;
   height: 1rem;
@@ -118,7 +121,12 @@ const turnCount = computed(() => {
   width: 2.5rem;
   height: 1px;
   flex-shrink: 0;
-  background: linear-gradient(to right, transparent, color-mix(in srgb, var(--theme-primary) 45%, transparent), transparent);
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in srgb, var(--theme-primary) 45%, transparent),
+    transparent
+  );
 }
 
 /* Agent 状态指示 */
@@ -139,18 +147,36 @@ const turnCount = computed(() => {
   font-size: 0.6875rem;
 }
 @keyframes agent-rotate {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
-.agent-fade-enter-active { transition: opacity 0.2s ease-out; }
-.agent-fade-leave-active { transition: opacity 0.15s ease-in; }
-.agent-fade-enter-from, .agent-fade-leave-to { opacity: 0; }
+.agent-fade-enter-active {
+  transition: opacity 0.2s ease-out;
+}
+.agent-fade-leave-active {
+  transition: opacity 0.15s ease-in;
+}
+.agent-fade-enter-from,
+.agent-fade-leave-to {
+  opacity: 0;
+}
 @media (prefers-reduced-motion: reduce) {
-  .agent-spin { animation: none; }
-  .agent-fade-enter-active, .agent-fade-leave-active { transition: none; }
+  .agent-spin {
+    animation: none;
+  }
+  .agent-fade-enter-active,
+  .agent-fade-leave-active {
+    transition: none;
+  }
 }
 
 @media (max-width: 720px) {
-  .top-title { display: none; }
-  .top-save-name { max-width: 8rem; }
+  .top-title {
+    display: none;
+  }
+  .top-save-name {
+    max-width: 8rem;
+  }
 }
 </style>

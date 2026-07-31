@@ -66,7 +66,7 @@ describe('ensureDb — 点击矩阵', () => {
   it('③ 先「保留数据」再「清空重建」: 清完仍然会补种 (核心回归)', async () => {
     const m = await freshPageLoad();
     await m.createTestSavePreservingData(); // 这一下把 initialized 置真
-    await m.createTestSave();               // 清库把默认数据删了 → 必须重新播种
+    await m.createTestSave(); // 清库把默认数据删了 → 必须重新播种
 
     expect(h.calls).toEqual(['init', 'clear', 'init']);
 

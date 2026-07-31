@@ -1,25 +1,26 @@
 <script setup lang="ts">
-import type { Rarity } from '@engine/start-catalog'
+import type { Rarity } from '@engine/start-catalog';
 
-defineProps<{ modelValue: Rarity | 'all' }>()
-defineEmits<{ 'update:modelValue': [val: Rarity | 'all'] }>()
+defineProps<{ modelValue: Rarity | 'all' }>();
+defineEmits<{ 'update:modelValue': [val: Rarity | 'all'] }>();
 
 const FILTER_OPTIONS: { key: Rarity | 'all'; label: string; color: string }[] = [
-  { key: 'all',       label: '全部', color: 'var(--theme-text-secondary)' },
-  { key: 'common',    label: '普通', color: 'var(--theme-quality-common)' },
-  { key: 'uncommon',  label: '优良', color: 'var(--theme-quality-uncommon)' },
-  { key: 'rare',      label: '稀有', color: 'var(--theme-quality-rare)' },
-  { key: 'epic',      label: '史诗', color: 'var(--theme-quality-epic)' },
+  { key: 'all', label: '全部', color: 'var(--theme-text-secondary)' },
+  { key: 'common', label: '普通', color: 'var(--theme-quality-common)' },
+  { key: 'uncommon', label: '优良', color: 'var(--theme-quality-uncommon)' },
+  { key: 'rare', label: '稀有', color: 'var(--theme-quality-rare)' },
+  { key: 'epic', label: '史诗', color: 'var(--theme-quality-epic)' },
   { key: 'legendary', label: '传说', color: 'var(--theme-quality-legendary)' },
-  { key: 'mythic',    label: '神话', color: 'var(--theme-quality-mythic)' },
-  { key: 'only',      label: '唯一', color: 'var(--theme-quality-unique)' },
-]
+  { key: 'mythic', label: '神话', color: 'var(--theme-quality-mythic)' },
+  { key: 'only', label: '唯一', color: 'var(--theme-quality-unique)' },
+];
 </script>
 
 <template>
   <div class="quality-filter">
     <button
-      v-for="opt in FILTER_OPTIONS" :key="opt.key"
+      v-for="opt in FILTER_OPTIONS"
+      :key="opt.key"
       class="q-btn"
       :class="{ active: modelValue === opt.key }"
       :style="{ '--q-color': opt.color }"
@@ -52,7 +53,10 @@ const FILTER_OPTIONS: { key: Rarity | 'all'; label: string; color: string }[] = 
   font-weight: 600;
   line-height: 1.3;
   white-space: nowrap;
-  transition: background var(--theme-transition-fast), color var(--theme-transition-fast), border-color var(--theme-transition-fast);
+  transition:
+    background var(--theme-transition-fast),
+    color var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
 }
 .q-dot {
   width: 0.55em;
@@ -63,11 +67,19 @@ const FILTER_OPTIONS: { key: Rarity | 'all'; label: string; color: string }[] = 
 }
 .q-btn:hover {
   color: var(--theme-text-primary);
-  border-color: color-mix(in srgb, var(--q-color, var(--theme-primary)) 45%, var(--theme-card-border));
+  border-color: color-mix(
+    in srgb,
+    var(--q-color, var(--theme-primary)) 45%,
+    var(--theme-card-border)
+  );
 }
 .q-btn.active {
   color: var(--q-color, var(--theme-text-primary));
   background: color-mix(in srgb, var(--q-color, var(--theme-primary)) 10%, transparent);
-  border-color: color-mix(in srgb, var(--q-color, var(--theme-primary)) 55%, var(--theme-card-border));
+  border-color: color-mix(
+    in srgb,
+    var(--q-color, var(--theme-primary)) 55%,
+    var(--theme-card-border)
+  );
 }
 </style>

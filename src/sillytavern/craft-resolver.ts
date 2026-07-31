@@ -77,10 +77,9 @@ import {
  * 执行制作准备阶段
  * 检查: 批量模式 / 管制物许可 / 品质要求 / 资源
  */
-export function resolvePreparation(
-  request: CraftActionRequest,
-): CraftPrepResult {
-  const { stage, materials, targetQuality, quantity, hasRecipe, currentResources, resourceCosts } = request;
+export function resolvePreparation(request: CraftActionRequest): CraftPrepResult {
+  const { stage, materials, targetQuality, quantity, hasRecipe, currentResources, resourceCosts } =
+    request;
 
   // 1. 确定单件/批量模式
   const batchMode = determineBatchMode(stage, quantity, hasRecipe ?? false);
@@ -100,10 +99,7 @@ export function resolvePreparation(
   };
   const resourceCheck = checkResourceSufficiency(currentResources, actualCost);
 
-  const canProceed =
-    regulatedCheck.passed &&
-    qualityCheck.passed &&
-    resourceCheck.sufficient;
+  const canProceed = regulatedCheck.passed && qualityCheck.passed && resourceCheck.sufficient;
 
   let stopReason: string | undefined;
   if (!canProceed) {
@@ -202,17 +198,20 @@ export function resolveSettlement(
   if (rating === '大失败' || rating === '失败') {
     const lossRate = rating === '大失败' ? 1.0 : 0.5;
     const bonus = getProductionBonus(targetQuality);
-    const effectiveLossRate = bonus.failureProtection < lossRate ? bonus.failureProtection : lossRate;
+    const effectiveLossRate =
+      bonus.failureProtection < lossRate ? bonus.failureProtection : lossRate;
 
     return {
       stage: 'settlement',
       breakdown: {
         materialLoss: {
           lossRate: effectiveLossRate,
-          lostMaterials: materials.map(m => ({
-            itemName: m.itemName,
-            quantity: Math.ceil(m.quantity * effectiveLossRate),
-          })).filter(m => m.quantity > 0),
+          lostMaterials: materials
+            .map((m) => ({
+              itemName: m.itemName,
+              quantity: Math.ceil(m.quantity * effectiveLossRate),
+            }))
+            .filter((m) => m.quantity > 0),
         },
         outputQuality: targetQuality,
         qualityDowngraded: false,
@@ -231,10 +230,7 @@ export function resolveSettlement(
   const qualityDowngraded = qualityResult.downgraded;
 
   // 品质提升判定 (神话)
-  const upgradeCheck = checkQualityUpgrade(
-    outputQuality,
-    request.d20QualityUpgrade ?? 10,
-  );
+  const upgradeCheck = checkQualityUpgrade(outputQuality, request.d20QualityUpgrade ?? 10);
   const finalQuality = upgradeCheck.upgraded ? upgradeCheck.newQuality : outputQuality;
 
   // 精益求精增益
@@ -251,9 +247,7 @@ export function resolveSettlement(
   }
 
   // DC 修正 (产出物)
-  const productDCModifier = stage === '基础加工'
-    ? 0
-    : generateDCModifier(finalQuality);
+  const productDCModifier = stage === '基础加工' ? 0 : generateDCModifier(finalQuality);
 
   // 成品数值区间
   let valueRange: { min: number; max: number } | undefined;
@@ -270,11 +264,7 @@ export function resolveSettlement(
   const fpReward = calcFPReward(stage, finalQuality, rating);
 
   // 资源消耗
-  const resourceCost = calcResourceCost(
-    request.resourceCosts,
-    finalQuality,
-    prepResult.batchCount,
-  );
+  const resourceCost = calcResourceCost(request.resourceCosts, finalQuality, prepResult.batchCount);
 
   // 管制物认证
   let certification: string | undefined;
@@ -338,10 +328,10 @@ export function resolveCraft(request: CraftActionRequest): CraftActionResult {
   //   此前无论成败都删 request.materials 全量，导致失败制作亏双倍材料（结算算 50%，实际扣 100%）。
   //   失败保护 failureProtection 形同虚设 —— 现在让结算成为材料消耗的唯一来源。
   const matLoss = settleResult.breakdown.materialLoss;
-  const lossByItem = new Map(matLoss.lostMaterials.map(l => [l.itemName, l.quantity]));
+  const lossByItem = new Map(matLoss.lostMaterials.map((l) => [l.itemName, l.quantity]));
   for (const mat of request.materials) {
     const consumeQty = success ? mat.quantity : (lossByItem.get(mat.itemName) ?? 0);
-    if (consumeQty <= 0) continue;  // 该材料无损（如失败时受保护），不扣
+    if (consumeQty <= 0) continue; // 该材料无损（如失败时受保护），不扣
     patches.push({
       op: 'remove_item',
       target: `characters.${request.characterId}`,
@@ -399,7 +389,9 @@ export function resolveCraft(request: CraftActionRequest): CraftActionResult {
     success,
     productId: success ? generateProductId() : undefined,
     productName: request.productName,
-    productQuantity: success ? prepResult.batchCount + (settleResult.breakdown.perfectionBonus?.batchExtraYield ?? 0) : 0,
+    productQuantity: success
+      ? prepResult.batchCount + (settleResult.breakdown.perfectionBonus?.batchExtraYield ?? 0)
+      : 0,
     outputQuality,
     prepResult,
     checkResult,
@@ -502,13 +494,25 @@ function buildCraftPanelLines(
 
   // Phase 1: 生产准备
   lines.push('{生产准备}');
-  lines.push(`| 目标: ${request.productName} | 数量: ${prep.batchCount} | 类型: ${request.stage} | 品质: ${request.targetQuality} |`);
-  lines.push(`| 行业: ${request.industry} | 核心属性: ${CRAFT_INDUSTRY_ATTRIBUTE[request.industry]} |`);
-  lines.push(`| 管制投入物检查: ${prep.regulatedCheck.passed ? '不涉及/有许可' : `涉及-无许可(${prep.regulatedCheck.missingLicenses.join(',')})`} |`);
-  lines.push(`| 品质要求检查: ${prep.qualityReqCheck.passed ? '满足' : `不满足(${prep.qualityReqCheck.downgradeReason})`} |`);
-  lines.push(`| 资源预检: HP[${request.currentResources.hp}/${request.resourceCosts.hp * prep.batchCount}] MP[${request.currentResources.mp}/${request.resourceCosts.mp * prep.batchCount}] SP[${request.currentResources.sp}/${request.resourceCosts.sp * prep.batchCount}] | 状态: ${prep.resourceCheck.sufficient ? '充足' : '不足(终止)'} |`);
-  lines.push(`| 批量检查: ${request.stage === '成品' && !request.hasRecipe ? '成品-图纸(未持有)->强制单件' : '允许批量'} |`);
-  const matStr = request.materials.map(m => `${m.itemName} x${m.quantity}`).join(', ');
+  lines.push(
+    `| 目标: ${request.productName} | 数量: ${prep.batchCount} | 类型: ${request.stage} | 品质: ${request.targetQuality} |`,
+  );
+  lines.push(
+    `| 行业: ${request.industry} | 核心属性: ${CRAFT_INDUSTRY_ATTRIBUTE[request.industry]} |`,
+  );
+  lines.push(
+    `| 管制投入物检查: ${prep.regulatedCheck.passed ? '不涉及/有许可' : `涉及-无许可(${prep.regulatedCheck.missingLicenses.join(',')})`} |`,
+  );
+  lines.push(
+    `| 品质要求检查: ${prep.qualityReqCheck.passed ? '满足' : `不满足(${prep.qualityReqCheck.downgradeReason})`} |`,
+  );
+  lines.push(
+    `| 资源预检: HP[${request.currentResources.hp}/${request.resourceCosts.hp * prep.batchCount}] MP[${request.currentResources.mp}/${request.resourceCosts.mp * prep.batchCount}] SP[${request.currentResources.sp}/${request.resourceCosts.sp * prep.batchCount}] | 状态: ${prep.resourceCheck.sufficient ? '充足' : '不足(终止)'} |`,
+  );
+  lines.push(
+    `| 批量检查: ${request.stage === '成品' && !request.hasRecipe ? '成品-图纸(未持有)->强制单件' : '允许批量'} |`,
+  );
+  const matStr = request.materials.map((m) => `${m.itemName} x${m.quantity}`).join(', ');
   lines.push(`| 投入物: ${matStr} |`);
 
   // Phase 2: 制作检定
@@ -518,14 +522,22 @@ function buildCraftPanelLines(
     lines.push(`| 类型: ${request.stage} | 数量: ${prep.batchCount} |`);
     const dcDetail = `${bd.baseDC} + [材料 DC ${bd.materialDCModifier}] - [减免 ${bd.bonusDCReduction}] = ${bd.finalDC}`;
     lines.push(`| 基础DC: ${dcDetail} |`);
-    lines.push(`| 检定加值: 属性[${bd.fixedBonusBreakdown.attribute}] + 技能[${bd.fixedBonusBreakdown.skill}] + 道具[${bd.fixedBonusBreakdown.tool}] + 身份[${bd.fixedBonusBreakdown.identity}] = 固定加值 [${bd.fixedBonus}] |`);
-    const advStr = bd.advantage ? `优势:d20(${bd.diceRolls.join(',')})→取值${bd.diceValue}` :
-      bd.disadvantage ? `劣势:d20(${bd.diceRolls.join(',')})→取值${bd.diceValue}` :
-        `正常:d20(${bd.diceValue})`;
+    lines.push(
+      `| 检定加值: 属性[${bd.fixedBonusBreakdown.attribute}] + 技能[${bd.fixedBonusBreakdown.skill}] + 道具[${bd.fixedBonusBreakdown.tool}] + 身份[${bd.fixedBonusBreakdown.identity}] = 固定加值 [${bd.fixedBonus}] |`,
+    );
+    const advStr = bd.advantage
+      ? `优势:d20(${bd.diceRolls.join(',')})→取值${bd.diceValue}`
+      : bd.disadvantage
+        ? `劣势:d20(${bd.diceRolls.join(',')})→取值${bd.diceValue}`
+        : `正常:d20(${bd.diceValue})`;
     lines.push(`| 掷骰: ${advStr} |`);
-    lines.push(`| 判定公式: ${bd.fixedBonus} + ${bd.diceValue} = ${bd.totalValue} vs DC ${bd.finalDC} |`);
+    lines.push(
+      `| 判定公式: ${bd.fixedBonus} + ${bd.diceValue} = ${bd.totalValue} vs DC ${bd.finalDC} |`,
+    );
     lines.push(`| 检定结果: ${bd.rating} |`);
-    lines.push(`| 资源消耗: HP[${settle.breakdown.resourceCost.hp}] MP[${settle.breakdown.resourceCost.mp}] SP[${settle.breakdown.resourceCost.sp}] |`);
+    lines.push(
+      `| 资源消耗: HP[${settle.breakdown.resourceCost.hp}] MP[${settle.breakdown.resourceCost.mp}] SP[${settle.breakdown.resourceCost.sp}] |`,
+    );
   } else {
     lines.push('{制作检定}');
     lines.push(`| 状态: [终止] ${prep.stopReason} |`);
@@ -539,11 +551,17 @@ function buildCraftPanelLines(
   if (request.stage === '基础加工' && check.breakdown.rating !== '大失败') {
     lines.push('| 状态: 基础加工完成，无损耗 |');
   } else if (sb.materialLoss.lossRate > 0) {
-    lines.push(`| 状态: [制作${check.breakdown.rating}] | 投入物损耗 ${Math.round(sb.materialLoss.lossRate * 100)}% |`);
-    const lossStr = sb.materialLoss.lostMaterials.map(m => `${m.itemName} x${m.quantity}`).join(', ');
+    lines.push(
+      `| 状态: [制作${check.breakdown.rating}] | 投入物损耗 ${Math.round(sb.materialLoss.lossRate * 100)}% |`,
+    );
+    const lossStr = sb.materialLoss.lostMaterials
+      .map((m) => `${m.itemName} x${m.quantity}`)
+      .join(', ');
     lines.push(`| 损失: ${lossStr} 损毁 |`);
   } else {
-    lines.push(`| 状态: [制作成功] | 品质: ${sb.outputQuality}${sb.qualityDowngraded ? ` (降级前: ${request.targetQuality})` : ''} |`);
+    lines.push(
+      `| 状态: [制作成功] | 品质: ${sb.outputQuality}${sb.qualityDowngraded ? ` (降级前: ${request.targetQuality})` : ''} |`,
+    );
     if (sb.certification) {
       lines.push(`| 认证: ${sb.certification} |`);
     }
@@ -556,10 +574,16 @@ function buildCraftPanelLines(
         lines.push(`| 精益求精: 单件-DC修正降级${sb.perfectionBonus.dcModifierDowngrade} |`);
       }
     }
-    lines.push(`| 产出列表: ${request.productName}(${sb.outputQuality}, DC修正+${sb.productDCModifier}) x${prep.batchCount} |`);
+    lines.push(
+      `| 产出列表: ${request.productName}(${sb.outputQuality}, DC修正+${sb.productDCModifier}) x${prep.batchCount} |`,
+    );
     if (sb.expReward.actualExp > 0) {
-      lines.push(`| 经验依据: ${request.stage} ${sb.outputQuality} -> 基础EXP ${sb.expReward.baseExp} |`);
-      lines.push(`| 结算状态: ${sb.expReward.tierSuppressed ? '层级压制归零' : '正常结算'} | 实得EXP: ${sb.expReward.actualExp} |`);
+      lines.push(
+        `| 经验依据: ${request.stage} ${sb.outputQuality} -> 基础EXP ${sb.expReward.baseExp} |`,
+      );
+      lines.push(
+        `| 结算状态: ${sb.expReward.tierSuppressed ? '层级压制归零' : '正常结算'} | 实得EXP: ${sb.expReward.actualExp} |`,
+      );
       lines.push(`| 奖励: EXP +${sb.expReward.actualExp} | FP +${sb.fpReward} |`);
     }
   }
@@ -613,11 +637,11 @@ function generateProductId(): string {
  */
 function getExtraAffixLabel(quality: QualityLevel): string {
   const affixes: Partial<Record<QualityLevel, string>> = {
-    '优良': '精良词条',
-    '稀有': '稀有词条',
-    '史诗': '史诗词条',
-    '传说': '传说词条',
-    '神话': '神话词条',
+    优良: '精良词条',
+    稀有: '稀有词条',
+    史诗: '史诗词条',
+    传说: '传说词条',
+    神话: '神话词条',
   };
   return affixes[quality] ?? '额外词条';
 }
@@ -660,7 +684,7 @@ export function createCraftRequest(params: {
     resourceCosts: params.resourceCosts,
     currentResources: params.currentResources,
     recipeId: params.recipeId,
-    hasRecipe: params.hasRecipe ?? (params.stage !== '成品'),
+    hasRecipe: params.hasRecipe ?? params.stage !== '成品',
     toolBonus: params.toolBonus,
     skillBonus: params.skillBonus,
     identityBonus: params.identityBonus,

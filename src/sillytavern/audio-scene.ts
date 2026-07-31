@@ -209,7 +209,6 @@ export function buildLocationChain(
   return links.sort((a, b) => a.depth - b.depth);
 }
 
-
 // ═══════════════════════════════════════════════════════════
 // 多维度累计打分
 // ═══════════════════════════════════════════════════════════
@@ -357,7 +356,11 @@ export function resolveSceneByTags(
     const grouped = groupTrackTags(track.tags);
 
     const breakdown: SceneScoreBreakdown = {
-      location: 0, character: 0, mood: 0, situation: 0, variant: 0,
+      location: 0,
+      character: 0,
+      mood: 0,
+      situation: 0,
+      variant: 0,
     };
     const matchedTags: string[] = [];
     let anyDimensionMet = false;
@@ -401,8 +404,11 @@ export function resolveSceneByTags(
 
     if (!anyDimensionMet) continue;
     const score =
-      breakdown.location + breakdown.character + breakdown.mood +
-      breakdown.situation + breakdown.variant;
+      breakdown.location +
+      breakdown.character +
+      breakdown.mood +
+      breakdown.situation +
+      breakdown.variant;
     scored.push({ track, score, breakdown, resolvedLocation, fallbackDepth, matchedTags, grouped });
   }
 

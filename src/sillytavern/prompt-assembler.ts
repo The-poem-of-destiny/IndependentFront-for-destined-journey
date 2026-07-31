@@ -25,10 +25,26 @@ export interface AssembleResult {
 }
 
 export function assemblePrompt(options: AssembleOptions): AssembleResult {
-  const { userInput, history, preset, lorebooks, userName, characterName, variables, extraVariables, formatPrompt } = options;
+  const {
+    userInput,
+    history,
+    preset,
+    lorebooks,
+    userName,
+    characterName,
+    variables,
+    extraVariables,
+    formatPrompt,
+  } = options;
 
   const allMatchedEntries: MatchedEntry[] = [];
-  const scanText = userInput + ' ' + history.slice(-3).map(m => m.content).join(' ');
+  const scanText =
+    userInput +
+    ' ' +
+    history
+      .slice(-3)
+      .map((m) => m.content)
+      .join(' ');
 
   for (const book of lorebooks) {
     const engine = createLorebookEngine(book);
@@ -37,7 +53,7 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
   }
 
   const uniqueEntries = Array.from(
-    new Map(allMatchedEntries.map(e => [e.entry.id, e])).values()
+    new Map(allMatchedEntries.map((e) => [e.entry.id, e])).values(),
   ).sort((a, b) => a.score - b.score);
 
   const maxContextTokens = preset.settings.openai_max_context || preset.settings.max_length || 4096;
@@ -69,7 +85,7 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
   function resolvePromptContent(identifier: string): string | null {
     // Dynamic content for world info
     if (identifier === 'worldInfoBefore' || identifier === 'worldInfoAfter') {
-      const content = uniqueEntries.map(e => e.entry.content).join('\n\n');
+      const content = uniqueEntries.map((e) => e.entry.content).join('\n\n');
       return content || null;
     }
     // Character / scenario placeholders (can be filled when character cards are implemented)
@@ -101,7 +117,7 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
       return null;
     }
     // Custom prompts array
-    const custom = prompts.find(p => p.identifier === identifier);
+    const custom = prompts.find((p) => p.identifier === identifier);
     if (custom?.content) return custom.content;
     // Direct preset fields (main, nsfw, jailbreak, enhanceDefinitions, etc.)
     const direct = preset.settings[identifier];
@@ -129,7 +145,7 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     const rawContent = resolvePromptContent(item.identifier);
     if (!rawContent) continue;
 
-    let content = replaceMacros(rawContent, { userName, characterName, userInput, variables });
+    const content = replaceMacros(rawContent, { userName, characterName, userInput, variables });
     if (!content.trim()) continue;
 
     const role = item.role || 'system';
@@ -173,8 +189,8 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
   assembledMessages.push({ role: 'user', content: userInput });
 
   const systemPrompt = assembledMessages
-    .filter(m => m.role === 'system')
-    .map(m => m.content)
+    .filter((m) => m.role === 'system')
+    .map((m) => m.content)
     .join('\n\n');
 
   return {

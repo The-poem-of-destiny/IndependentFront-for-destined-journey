@@ -5,33 +5,33 @@
  * Phase 10i: 三段式布局 — 自动管理 / 已启用 / 可用规则库(折叠)。
  * 预设规则从 beautifier-rules.json 加载，用户规则完全可控。
  */
-import { ref, computed, onMounted } from 'vue'
-import { useSettingsStore } from '../../stores/settings-store'
-import { useGameStore } from '../../stores/game-store'
-import { loadPresetRules, mergeRules, collectActiveSignalsFromEntries } from '@engine/beautifier'
-import type { BeautifierRule } from '@engine/types'
-import AppButton from '../shared/AppButton.vue'
-import AppCard from '../shared/AppCard.vue'
-import RuleEditorModal from './RuleEditorModal.vue'
+import { ref, computed, onMounted } from 'vue';
+import { useSettingsStore } from '../../stores/settings-store';
+import { useGameStore } from '../../stores/game-store';
+import { loadPresetRules, mergeRules, collectActiveSignalsFromEntries } from '@engine/beautifier';
+import type { BeautifierRule } from '@engine/types';
+import AppButton from '../shared/AppButton.vue';
+import AppCard from '../shared/AppCard.vue';
+import RuleEditorModal from './RuleEditorModal.vue';
 
-const cfg = useSettingsStore()
-const s = cfg.settings
-const game = useGameStore()
+const cfg = useSettingsStore();
+const s = cfg.settings;
+const game = useGameStore();
 
 // ===== State =====
 
-const expanded = ref<Record<string, boolean>>({})
-const showEditor = ref(false)
-const editingRule = ref<BeautifierRule | null>(null)
-const libraryExpanded = ref(false)
-const presetRules = ref<BeautifierRule[]>([])
-const loading = ref(true)
+const expanded = ref<Record<string, boolean>>({});
+const showEditor = ref(false);
+const editingRule = ref<BeautifierRule | null>(null);
+const libraryExpanded = ref(false);
+const presetRules = ref<BeautifierRule[]>([]);
+const loading = ref(true);
 
 // 内置规则禁用列表
-const builtinDisabled = computed<string[]>(() => s.beautifierBuiltinDisabled ?? [])
+const builtinDisabled = computed<string[]>(() => s.beautifierBuiltinDisabled ?? []);
 
 // 用户规则
-const userRules = computed<BeautifierRule[]>(() => s.beautifierRules ?? [])
+const userRules = computed<BeautifierRule[]>(() => s.beautifierRules ?? []);
 
 // ===== 加载预设规则 =====
 
@@ -39,53 +39,47 @@ const userRules = computed<BeautifierRule[]>(() => s.beautifierRules ?? [])
  *  命定核心选择走独立 uid（不改 worldBooks 条目 enabled），须以存档为准；
  *  worldBooks.enabled 是「是否注入 prompt」的开关，核心书里几乎全 enabled，不能作为 autoEnable 信号。 */
 function getActiveWorldBookState() {
-  const entries: string[] = (game.activeSave?.metadata as any)?.enabledWorldBookEntries ?? []
-  return collectActiveSignalsFromEntries(entries)
+  const entries: string[] = (game.activeSave?.metadata as any)?.enabledWorldBookEntries ?? [];
+  return collectActiveSignalsFromEntries(entries);
 }
 
 onMounted(async () => {
   try {
-    const { activeWorldBookIds, activeEntryUids } = getActiveWorldBookState()
+    const { activeWorldBookIds, activeEntryUids } = getActiveWorldBookState();
     const merged = mergeRules(
       await loadPresetRules(),
       userRules.value,
       builtinDisabled.value,
       activeWorldBookIds,
       activeEntryUids,
-      new Set(),  // characterNames — 后续从 game store 获取
-    )
-    presetRules.value = merged.filter(r => r.isBuiltin)
-    s.beautifierPresetRules = merged.filter(r => r.isBuiltin) as any[]
+      new Set(), // characterNames — 后续从 game store 获取
+    );
+    presetRules.value = merged.filter((r) => r.isBuiltin);
+    s.beautifierPresetRules = merged.filter((r) => r.isBuiltin) as any[];
   } catch {
     // 加载失败静默，UI 空态
   }
-  loading.value = false
-})
+  loading.value = false;
+});
 
 // ===== Computed =====
 
-const autoManagedRules = computed(() =>
-  presetRules.value.filter(r => r.locked)
-)
+const autoManagedRules = computed(() => presetRules.value.filter((r) => r.locked));
 
-const manualEnabledRules = computed(() =>
-  presetRules.value.filter(r => r.enabled && !r.locked)
-)
+const manualEnabledRules = computed(() => presetRules.value.filter((r) => r.enabled && !r.locked));
 
-const disabledRules = computed(() =>
-  presetRules.value.filter(r => !r.enabled)
-)
+const disabledRules = computed(() => presetRules.value.filter((r) => !r.enabled));
 
 /** 按 group 分组 */
 const disabledGrouped = computed(() => {
-  const groups: Record<string, BeautifierRule[]> = {}
+  const groups: Record<string, BeautifierRule[]> = {};
   for (const r of disabledRules.value) {
-    const g = r.group || '其他'
-    if (!groups[g]) groups[g] = []
-    groups[g].push(r)
+    const g = r.group || '其他';
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(r);
   }
-  return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b))
-})
+  return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+});
 
 // ===== Helpers =====
 
@@ -96,79 +90,79 @@ function scopeLabel(scope: string): string {
     summary: '摘要',
     thinking: '思维链',
     global: '全局',
-  }
-  return map[scope] ?? scope
+  };
+  return map[scope] ?? scope;
 }
 
 function toggleExpand(id: string) {
-  expanded.value = { ...expanded.value, [id]: !expanded.value[id] }
+  expanded.value = { ...expanded.value, [id]: !expanded.value[id] };
 }
 
 function toggleLibrary() {
-  libraryExpanded.value = !libraryExpanded.value
+  libraryExpanded.value = !libraryExpanded.value;
 }
 
 // ===== Actions =====
 
 function toggleBuiltinRule(ruleId: string) {
-  const list = [...builtinDisabled.value]
-  const idx = list.indexOf(ruleId)
+  const list = [...builtinDisabled.value];
+  const idx = list.indexOf(ruleId);
   if (idx >= 0) {
-    list.splice(idx, 1)
+    list.splice(idx, 1);
   } else {
-    list.push(ruleId)
+    list.push(ruleId);
   }
-  s.beautifierBuiltinDisabled = list
-  refreshPresetRules()
+  s.beautifierBuiltinDisabled = list;
+  refreshPresetRules();
 }
 
 function toggleUserRule(rule: BeautifierRule) {
-  rule.enabled = !rule.enabled
-  s.beautifierRules = [...(s.beautifierRules as BeautifierRule[])]
+  rule.enabled = !rule.enabled;
+  s.beautifierRules = [...(s.beautifierRules as BeautifierRule[])];
 }
 
 function openAdd() {
-  editingRule.value = null
-  showEditor.value = true
+  editingRule.value = null;
+  showEditor.value = true;
 }
 
 function openEdit(rule: BeautifierRule) {
-  editingRule.value = { ...rule }
-  showEditor.value = true
+  editingRule.value = { ...rule };
+  showEditor.value = true;
 }
 
 function saveRule(rule: BeautifierRule) {
-  const list = [...(s.beautifierRules as BeautifierRule[])]
+  const list = [...(s.beautifierRules as BeautifierRule[])];
   if (editingRule.value) {
-    const idx = list.findIndex(r => r.id === editingRule.value!.id)
-    if (idx >= 0) list[idx] = rule
+    const idx = list.findIndex((r) => r.id === editingRule.value!.id);
+    if (idx >= 0) list[idx] = rule;
   } else {
-    list.push(rule)
+    list.push(rule);
   }
-  s.beautifierRules = list
-  showEditor.value = false
+  s.beautifierRules = list;
+  showEditor.value = false;
 }
 
 function deleteRule(rule: BeautifierRule) {
-  s.beautifierRules = (s.beautifierRules as BeautifierRule[]).filter(r => r.id !== rule.id)
+  s.beautifierRules = (s.beautifierRules as BeautifierRule[]).filter((r) => r.id !== rule.id);
 }
 
 function refreshPresetRules() {
-  const { activeWorldBookIds, activeEntryUids } = getActiveWorldBookState()
+  const { activeWorldBookIds, activeEntryUids } = getActiveWorldBookState();
   const merged = mergeRules(
-    presetRules.value.map(r => {
+    presetRules.value.map((r) => {
       // 从 beautifierPresetRules 中恢复原始 autoEnable 状态
-      const orig = (s.beautifierPresetRules as any[])?.find((pr: any) => pr.id === r.id)
-      return { ...r, autoEnable: orig?.autoEnable ?? r.autoEnable }
+      const orig = (s.beautifierPresetRules as any[])?.find((pr: any) => pr.id === r.id);
+      return { ...r, autoEnable: orig?.autoEnable ?? r.autoEnable };
     }),
     userRules.value,
     builtinDisabled.value,
     activeWorldBookIds,
     activeEntryUids,
     new Set(),
-  )
-  presetRules.value = merged.filter(r => r.isBuiltin)
-  s.beautifierPresetRules = merged.filter(r => r.isBuiltin) as any[]
+  );
+  presetRules.value = merged.filter((r) => r.isBuiltin);
+  s.beautifierPresetRules = merged.filter((r) => r.isBuiltin) as any[];
 }
 
 function exportRules() {
@@ -176,44 +170,44 @@ function exportRules() {
     version: 1,
     builtinDisabled: s.beautifierBuiltinDisabled,
     rules: s.beautifierRules,
-  }
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `beautifier-rules-${Date.now()}.json`
-  a.click()
-  URL.revokeObjectURL(url)
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `beautifier-rules-${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function importRules() {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = '.json'
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
   input.onchange = async (e) => {
-    const f = (e.target as HTMLInputElement).files?.[0]
-    if (!f) return
+    const f = (e.target as HTMLInputElement).files?.[0];
+    if (!f) return;
     try {
-      const data = JSON.parse(await f.text())
+      const data = JSON.parse(await f.text());
       if (Array.isArray(data.rules)) {
-        const existing = [...(s.beautifierRules as BeautifierRule[])]
+        const existing = [...(s.beautifierRules as BeautifierRule[])];
         for (const rule of data.rules) {
-          const idx = existing.findIndex(r => r.id === rule.id)
-          if (idx >= 0) existing[idx] = rule
-          else existing.push(rule)
+          const idx = existing.findIndex((r) => r.id === rule.id);
+          if (idx >= 0) existing[idx] = rule;
+          else existing.push(rule);
         }
-        s.beautifierRules = existing
+        s.beautifierRules = existing;
       } else if (Array.isArray(data)) {
-        s.beautifierRules = data as BeautifierRule[]
+        s.beautifierRules = data as BeautifierRule[];
       }
       if (data.builtinDisabled && Array.isArray(data.builtinDisabled)) {
-        s.beautifierBuiltinDisabled = data.builtinDisabled
+        s.beautifierBuiltinDisabled = data.builtinDisabled;
       }
     } catch {
       // 导入失败静默
     }
-  }
-  input.click()
+  };
+  input.click();
 }
 </script>
 
@@ -234,7 +228,7 @@ function importRules() {
         <div class="toggle-row">
           <span>启用输出美化</span>
           <label class="toggle-label">
-            <input type="checkbox" v-model="s.beautifierEnabled" class="toggle-input" />
+            <input v-model="s.beautifierEnabled" type="checkbox" class="toggle-input" />
             <span class="toggle-slider" />
           </label>
         </div>
@@ -265,7 +259,12 @@ function importRules() {
         <div v-for="rule in manualEnabledRules" :key="rule.id" class="rule-item">
           <div class="rule-header">
             <label class="toggle-label">
-              <input type="checkbox" :checked="rule.enabled" @change="toggleBuiltinRule(rule.id)" class="toggle-input" />
+              <input
+                type="checkbox"
+                :checked="rule.enabled"
+                class="toggle-input"
+                @change="toggleBuiltinRule(rule.id)"
+              />
               <span class="toggle-slider" />
             </label>
             <span class="rule-name">{{ rule.name }}</span>
@@ -275,8 +274,16 @@ function importRules() {
             </button>
           </div>
           <div v-if="expanded[rule.id]" class="rule-detail">
-            <div class="rule-field"><span>正则:</span><code>{{ rule.pattern }}</code></div>
-            <div class="rule-field"><span>替换:</span><code>{{ rule.replacement.slice(0, 200) }}{{ rule.replacement.length > 200 ? '...' : '' }}</code></div>
+            <div class="rule-field">
+              <span>正则:</span><code>{{ rule.pattern }}</code>
+            </div>
+            <div class="rule-field">
+              <span>替换:</span
+              ><code
+                >{{ rule.replacement.slice(0, 200)
+                }}{{ rule.replacement.length > 200 ? '...' : '' }}</code
+              >
+            </div>
           </div>
         </div>
       </AppCard>
@@ -284,12 +291,12 @@ function importRules() {
       <!-- 可用规则库 -->
       <AppCard padding="md" style="margin-top: 12px">
         <div class="library-header" @click="toggleLibrary">
-          <h4 style="margin:0;cursor:pointer">
+          <h4 style="margin: 0; cursor: pointer">
             可用规则库 · {{ disabledRules.length }} 条未启用
           </h4>
           <span class="library-arrow">{{ libraryExpanded ? '▼' : '▸' }}</span>
         </div>
-        <p v-if="!libraryExpanded" class="text-muted text-sm" style="margin-top:6px">
+        <p v-if="!libraryExpanded" class="text-muted text-sm" style="margin-top: 6px">
           <template v-for="([group, rules], i) in disabledGrouped" :key="group">
             {{ group }} ({{ rules.length }}){{ i < disabledGrouped.length - 1 ? ' · ' : '' }}
           </template>
@@ -300,7 +307,12 @@ function importRules() {
             <div v-for="rule in rules" :key="rule.id" class="rule-item rule-disabled-item">
               <div class="rule-header">
                 <label class="toggle-label">
-                  <input type="checkbox" :checked="false" @change="toggleBuiltinRule(rule.id)" class="toggle-input" />
+                  <input
+                    type="checkbox"
+                    :checked="false"
+                    class="toggle-input"
+                    @change="toggleBuiltinRule(rule.id)"
+                  />
                   <span class="toggle-slider" />
                 </label>
                 <span class="rule-name rule-name-dim">{{ rule.name }}</span>
@@ -310,47 +322,87 @@ function importRules() {
                 </button>
               </div>
               <div v-if="expanded[rule.id]" class="rule-detail">
-                <div class="rule-field"><span>正则:</span><code>{{ rule.pattern }}</code></div>
-                <div class="rule-field"><span>替换:</span><code>{{ rule.replacement.slice(0, 200) }}{{ rule.replacement.length > 200 ? '...' : '' }}</code></div>
+                <div class="rule-field">
+                  <span>正则:</span><code>{{ rule.pattern }}</code>
+                </div>
+                <div class="rule-field">
+                  <span>替换:</span
+                  ><code
+                    >{{ rule.replacement.slice(0, 200)
+                    }}{{ rule.replacement.length > 200 ? '...' : '' }}</code
+                  >
+                </div>
               </div>
             </div>
           </div>
         </template>
-        <div v-if="libraryExpanded && disabledGrouped.length === 0" class="text-muted text-sm" style="text-align:center;padding:16px">
+        <div
+          v-if="libraryExpanded && disabledGrouped.length === 0"
+          class="text-muted text-sm"
+          style="text-align: center; padding: 16px"
+        >
           暂无可用规则
         </div>
       </AppCard>
 
       <!-- 自定义规则 -->
       <AppCard padding="md" style="margin-top: 12px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <h4 style="margin:0">自定义规则</h4>
+        <div
+          style="
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+          "
+        >
+          <h4 style="margin: 0">自定义规则</h4>
           <AppButton variant="primary" size="sm" @click="openAdd">＋ 添加规则</AppButton>
         </div>
-        <p v-if="userRules.length === 0" class="text-muted text-sm" style="text-align:center;padding:24px">
+        <p
+          v-if="userRules.length === 0"
+          class="text-muted text-sm"
+          style="text-align: center; padding: 24px"
+        >
           暂无自定义规则<br />
-          <span style="font-size:0.75rem">点击右上角添加，用正则表达式自定义输出美化</span>
+          <span style="font-size: 0.75rem">点击右上角添加，用正则表达式自定义输出美化</span>
         </p>
         <div v-for="rule in userRules" :key="rule.id" class="rule-item">
           <div class="rule-header">
             <label class="toggle-label">
-              <input type="checkbox" :checked="rule.enabled" @change="toggleUserRule(rule)" class="toggle-input" />
+              <input
+                type="checkbox"
+                :checked="rule.enabled"
+                class="toggle-input"
+                @change="toggleUserRule(rule)"
+              />
               <span class="toggle-slider" />
             </label>
             <span class="rule-name">{{ rule.name }}</span>
             <span class="rule-scope text-xs text-muted">{{ scopeLabel(rule.scope) }}</span>
-            <button class="rule-action-btn" @click="openEdit(rule)" title="编辑">✎</button>
-            <button class="rule-action-btn rule-delete-btn" @click="deleteRule(rule)" title="删除"></button>
+            <button class="rule-action-btn" title="编辑" @click="openEdit(rule)">✎</button>
+            <button
+              class="rule-action-btn rule-delete-btn"
+              title="删除"
+              @click="deleteRule(rule)"
+            ></button>
           </div>
           <div v-if="expanded[rule.id]" class="rule-detail">
-            <div class="rule-field"><span>正则:</span><code>{{ rule.pattern }}</code></div>
-            <div class="rule-field"><span>替换:</span><code>{{ rule.replacement.slice(0, 200) }}{{ rule.replacement.length > 200 ? '...' : '' }}</code></div>
+            <div class="rule-field">
+              <span>正则:</span><code>{{ rule.pattern }}</code>
+            </div>
+            <div class="rule-field">
+              <span>替换:</span
+              ><code
+                >{{ rule.replacement.slice(0, 200)
+                }}{{ rule.replacement.length > 200 ? '...' : '' }}</code
+              >
+            </div>
           </div>
         </div>
       </AppCard>
 
       <!-- 导入/导出 -->
-      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
+      <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end">
         <AppButton variant="secondary" size="sm" @click="exportRules">导出规则</AppButton>
         <AppButton variant="secondary" size="sm" @click="importRules">导入规则</AppButton>
       </div>
@@ -534,7 +586,10 @@ function importRules() {
 }
 .toggle-slider {
   position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   background: var(--theme-surface-muted);
   border-radius: 22px;
   transition: background var(--theme-transition-fast, 0.15s);

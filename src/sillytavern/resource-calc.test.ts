@@ -293,12 +293,18 @@ describe('hasItem', () => {
 
 describe('hasSkill', () => {
   it('技能存在应返回 true（按 id 过渡容忍）', () => {
-    const c = makeChar({ skills: [{ id: 'fireball', name: '火球术', description: '发射火球', type: 'active' } as Skill] });
+    const c = makeChar({
+      skills: [
+        { id: 'fireball', name: '火球术', description: '发射火球', type: 'active' } as Skill,
+      ],
+    });
     expect(hasSkill(c, 'fireball')).toBe(true);
   });
 
   it('M2: 技能按 name 命中应返回 true（逻辑键=name）', () => {
-    const c = makeChar({ skills: [{ name: '火球术', description: '发射火球', type: 'active' } as Skill] });
+    const c = makeChar({
+      skills: [{ name: '火球术', description: '发射火球', type: 'active' } as Skill],
+    });
     expect(hasSkill(c, '火球术')).toBe(true);
   });
 
@@ -312,7 +318,17 @@ describe('hasStatus', () => {
   it('状态效果存在 (按 id) 应返回 true', () => {
     const c = makeChar({
       statusEffects: [
-        { id: 'poison', name: '中毒', description: '持续掉血', stacks: 3, remainingTime: 5, source: '毒蛇', category: '减益' as const, timeUnit: '回合' as const, effects: { hp_per_turn: -10 } } as StatusEffect,
+        {
+          id: 'poison',
+          name: '中毒',
+          description: '持续掉血',
+          stacks: 3,
+          remainingTime: 5,
+          source: '毒蛇',
+          category: '减益' as const,
+          timeUnit: '回合' as const,
+          effects: { hp_per_turn: -10 },
+        } as StatusEffect,
       ],
     });
     expect(hasStatus(c, 'poison')).toBe(true);
@@ -321,7 +337,17 @@ describe('hasStatus', () => {
   it('状态效果存在 (按 name) 应返回 true', () => {
     const c = makeChar({
       statusEffects: [
-        { id: 'poison', name: '中毒', description: '持续掉血', stacks: 3, remainingTime: 5, source: '毒蛇', category: '减益' as const, timeUnit: '回合' as const, effects: { hp_per_turn: -10 } } as StatusEffect,
+        {
+          id: 'poison',
+          name: '中毒',
+          description: '持续掉血',
+          stacks: 3,
+          remainingTime: 5,
+          source: '毒蛇',
+          category: '减益' as const,
+          timeUnit: '回合' as const,
+          effects: { hp_per_turn: -10 },
+        } as StatusEffect,
       ],
     });
     expect(hasStatus(c, '中毒')).toBe(true);
@@ -515,42 +541,68 @@ describe('queryResource', () => {
 
   it('query=can_afford 金额足够应返回 true', () => {
     const c = makeChar({ money: 500 });
-    const result = queryResource(c, { characterId: c.id, query: 'can_afford', params: { amount: 300 } });
+    const result = queryResource(c, {
+      characterId: c.id,
+      query: 'can_afford',
+      params: { amount: 300 },
+    });
     expect(result.value).toBe(true);
     expect(result.description).toBe('可支付');
   });
 
   it('query=can_afford 金额不足应返回 false', () => {
     const c = makeChar({ money: 100 });
-    const result = queryResource(c, { characterId: c.id, query: 'can_afford', params: { amount: 300 } });
+    const result = queryResource(c, {
+      characterId: c.id,
+      query: 'can_afford',
+      params: { amount: 300 },
+    });
     expect(result.value).toBe(false);
     expect(result.description).toBe('资金不足');
   });
 
   it('query=has_item 存在应返回 true', () => {
     const c = makeChar({ inventory: [mkItem('解毒剂', 3)] });
-    const result = queryResource(c, { characterId: c.id, query: 'has_item', params: { itemId: '解毒剂' } });
+    const result = queryResource(c, {
+      characterId: c.id,
+      query: 'has_item',
+      params: { itemId: '解毒剂' },
+    });
     expect(result.value).toBe(true);
     expect(result.description).toBe('拥有');
   });
 
   it('query=has_item 不存在应返回 false', () => {
     const c = makeChar({ inventory: [] });
-    const result = queryResource(c, { characterId: c.id, query: 'has_item', params: { itemId: '万能药' } });
+    const result = queryResource(c, {
+      characterId: c.id,
+      query: 'has_item',
+      params: { itemId: '万能药' },
+    });
     expect(result.value).toBe(false);
     expect(result.description).toBe('未拥有');
   });
 
   it('query=has_skill 已习得应返回 true', () => {
-    const c = makeChar({ skills: [{ id: 'slash', name: '斩击', description: '基础攻击', type: 'active' } as Skill] });
-    const result = queryResource(c, { characterId: c.id, query: 'has_skill', params: { skillId: 'slash' } });
+    const c = makeChar({
+      skills: [{ id: 'slash', name: '斩击', description: '基础攻击', type: 'active' } as Skill],
+    });
+    const result = queryResource(c, {
+      characterId: c.id,
+      query: 'has_skill',
+      params: { skillId: 'slash' },
+    });
     expect(result.value).toBe(true);
     expect(result.description).toBe('已习得');
   });
 
   it('query=has_skill 未习得应返回 false', () => {
     const c = makeChar({ skills: [] });
-    const result = queryResource(c, { characterId: c.id, query: 'has_skill', params: { skillId: 'meteor' } });
+    const result = queryResource(c, {
+      characterId: c.id,
+      query: 'has_skill',
+      params: { skillId: 'meteor' },
+    });
     expect(result.value).toBe(false);
     expect(result.description).toBe('未习得');
   });
@@ -558,17 +610,35 @@ describe('queryResource', () => {
   it('query=has_status 已受影响应返回 true', () => {
     const c = makeChar({
       statusEffects: [
-        { id: 'burn', name: '灼烧', description: '火焰伤害', stacks: 1, remainingTime: 3, source: '火龙', category: '减益' as const, timeUnit: '回合' as const, effects: {} } as StatusEffect,
+        {
+          id: 'burn',
+          name: '灼烧',
+          description: '火焰伤害',
+          stacks: 1,
+          remainingTime: 3,
+          source: '火龙',
+          category: '减益' as const,
+          timeUnit: '回合' as const,
+          effects: {},
+        } as StatusEffect,
       ],
     });
-    const result = queryResource(c, { characterId: c.id, query: 'has_status', params: { statusName: '灼烧' } });
+    const result = queryResource(c, {
+      characterId: c.id,
+      query: 'has_status',
+      params: { statusName: '灼烧' },
+    });
     expect(result.value).toBe(true);
     expect(result.description).toBe('已受影响');
   });
 
   it('query=has_status 未受影响应返回 false', () => {
     const c = makeChar({ statusEffects: [] });
-    const result = queryResource(c, { characterId: c.id, query: 'has_status', params: { statusName: '冰冻' } });
+    const result = queryResource(c, {
+      characterId: c.id,
+      query: 'has_status',
+      params: { statusName: '冰冻' },
+    });
     expect(result.value).toBe(false);
     expect(result.description).toBe('未受影响');
   });
@@ -584,7 +654,7 @@ describe('queryResource', () => {
     const c = makeChar();
     const r1 = queryResource(c, { characterId: c.id, query: 'level' });
     // 延迟 1ms 确保时间戳不同
-    await new Promise(r => setTimeout(r, 2));
+    await new Promise((r) => setTimeout(r, 2));
     const r2 = queryResource(c, { characterId: c.id, query: 'level' });
     expect(r2.timestamp).toBeGreaterThan(r1.timestamp);
   });

@@ -22,9 +22,11 @@
 ### Task 0.1: 叙事正文段落排版 + 消息入场动画
 
 **Files:**
+
 - Modify: `src/ui/components/game/ChatFlow.vue`
 
 **改动：**
+
 1. `.narrative-body` 内 `<p>` 加 `text-indent: 2em` + 段间距
 2. `.bubble-row` 加 fadeIn 入场动画 + `prefers-reduced-motion` 兜底
 3. 删除死代码 `.system-card-header` / `.system-card-icon` / `.system-card-title` / `.system-card-chevron` / `.system-card-body`（ChatFlow 模板不再使用，卡片由独立组件渲染）
@@ -37,6 +39,7 @@
 ### Task 0.2: 系统卡片圆角溢出修复
 
 **Files:**
+
 - Modify: `src/ui/components/game/cards/CombatSystemCard.vue`
 - Modify: `src/ui/components/game/cards/ItemSystemCard.vue`
 
@@ -49,13 +52,16 @@
 ### Task 0.3: prefers-reduced-motion 全局支持
 
 **Files:**
+
 - Modify: `src/ui/themes/variables.css`
 
 **改动：** 在文件末尾添加全局 `@media (prefers-reduced-motion: reduce)` 规则
 
 ```css
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
@@ -70,6 +76,7 @@
 ### Task 0.4: CharGenSystemCard 硬编码颜色修复
 
 **Files:**
+
 - Modify: `src/ui/components/game/cards/CharGenSystemCard.vue`
 
 **改动：** 将 `.ci-name` 和 `.ci-tier-badge` 中的 `color: #fff` 改为 `color: var(--theme-text-primary)`，确保浅色主题下文字可见
@@ -82,6 +89,7 @@
 ### Task 0.5: CraftSystemCard ratingMeta 硬编码 hex → CSS 变量
 
 **Files:**
+
 - Modify: `src/ui/components/game/cards/CraftSystemCard.vue`
 
 **改动：** `ratingMeta` 中的 `#e53e3e`/`#fc8181`/`#68d391`/`#ffd700` 改为引用 CSS 变量的内联 style 或使用主题 token
@@ -89,12 +97,13 @@
 ```ts
 // 改为用 CSS 变量 token
 const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
-  '大失败':     { icon: 'fa-regular fa-circle-xmark',       colorVar: '--theme-error' },
-  '失败':       { icon: 'fa-solid fa-triangle-exclamation', colorVar: '--theme-warning' },
-  '成功':       { icon: 'fa-regular fa-circle-check',      colorVar: '--theme-success' },
-  '精益求精': { icon: 'fa-solid fa-star',                colorVar: '--theme-quality-legendary' },
-}
+  大失败: { icon: 'fa-regular fa-circle-xmark', colorVar: '--theme-error' },
+  失败: { icon: 'fa-solid fa-triangle-exclamation', colorVar: '--theme-warning' },
+  成功: { icon: 'fa-regular fa-circle-check', colorVar: '--theme-success' },
+  精益求精: { icon: 'fa-solid fa-star', colorVar: '--theme-quality-legendary' },
+};
 ```
+
 模板中使用 `var(${ratingMeta[event.rating]?.colorVar})` 替代直接 hex。
 
 - [ ] ratingMeta 改为 colorVar token
@@ -108,12 +117,14 @@ const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
 ### Task 1.1: 键盘可访问性 — div@click 改 button/role
 
 **Files:**
+
 - Modify: `src/ui/components/game/ScenePanel.vue`
 - Modify: `src/ui/components/game/StatusOverview.vue`
 - Modify: `src/ui/components/game/ChatFlow.vue`
 - Modify: `src/ui/components/game/InputBar.vue`
 
 **改动：**
+
 - ScenePanel NPC 行 `.scene-npc-item`：加 `role="button" tabindex="0"` + `@keydown.enter` / `@keydown.space`
 - ScenePanel 新闻项 `.news-item`：同上
 - StatusOverview 折叠 section header：加 `role="button" tabindex="0"` + `aria-expanded`
@@ -129,6 +140,7 @@ const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
 ### Task 1.2: ARIA labels + 触摸目标 + InputBar 禁用
 
 **Files:**
+
 - Modify: `src/ui/components/game/SideToolbar.vue`
 - Modify: `src/ui/components/game/InputBar.vue`
 - Modify: `src/ui/components/game/ScenePanel.vue`
@@ -136,6 +148,7 @@ const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
 - Modify: `src/ui/components/game/GamePage.vue`
 
 **改动：**
+
 - SideToolbar 按钮加 `:aria-label="tool.label"`
 - 触摸目标放大：ScenePanel NPC 行 padding 5→7px，ChatFlow .system-notif padding 8→10px，InputBar .option-item padding 8→10px
 - InputBar 加 `disabled` prop，生成中禁用输入框和发送按钮
@@ -150,6 +163,7 @@ const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
 ### Task 1.3: StatusOverview 折叠过渡动画
 
 **Files:**
+
 - Modify: `src/ui/components/game/StatusOverview.vue`
 
 **改动：** 将 3 处 `v-show` 改为 `v-if` + `<Transition name="collapse">`，添加 CSS 过渡
@@ -157,7 +171,9 @@ const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
 ```css
 .collapse-enter-active,
 .collapse-leave-active {
-  transition: max-height 0.25s ease, opacity 0.2s ease;
+  transition:
+    max-height 0.25s ease,
+    opacity 0.2s ease;
   overflow: hidden;
 }
 .collapse-enter-from,
@@ -183,6 +199,7 @@ const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
 ### Task 2.1: CSS 去重 — 提取共享卡片样式
 
 **Files:**
+
 - Create: `src/ui/styles/cards-shared.css`
 - Modify: `src/ui/components/game/cards/CraftSystemCard.vue`
 - Modify: `src/ui/components/game/cards/CombatSystemCard.vue`
@@ -197,6 +214,7 @@ const ratingMeta: Record<string, { icon: string; colorVar: string }> = {
 ### Task 2.2: ChatFlow 卡片分发 v-if 链 → 动态组件
 
 **Files:**
+
 - Modify: `src/ui/components/game/ChatFlow.vue`
 
 **改动：** 4 层 `v-if/v-else-if` 改为 `component :is` + computed map
@@ -207,8 +225,9 @@ const CARD_COMPONENTS: Record<string, Component> = {
   char_gen: CharGenSystemCard,
   combat: CombatSystemCard,
   item_gen: ItemSystemCard,
-}
+};
 ```
+
 模板：`<component :is="CARD_COMPONENTS[msg.systemEvent.type]" :event="msg.systemEvent" @collapse="collapseCard(msg.id)" />`
 
 - [ ] 添加 CARD_COMPONENTS map
@@ -218,14 +237,23 @@ const CARD_COMPONENTS: Record<string, Component> = {
 ### Task 2.3: SideToolbar 宽度优化
 
 **Files:**
+
 - Modify: `src/ui/components/game/SideToolbar.vue`
 
 **改动：** 展开宽度 8.75rem → 6rem，按钮 padding/gap 微调
 
 ```css
-.side-toolbar { width: 6rem; }
-.tool-btn { padding: 10px 10px; gap: 8px; }
-.tool-btn i { font-size: 0.9rem; width: 1rem; }
+.side-toolbar {
+  width: 6rem;
+}
+.tool-btn {
+  padding: 10px 10px;
+  gap: 8px;
+}
+.tool-btn i {
+  font-size: 0.9rem;
+  width: 1rem;
+}
 ```
 
 - [ ] SideToolbar 宽度 + 按钮尺寸调整
@@ -234,9 +262,11 @@ const CARD_COMPONENTS: Record<string, Component> = {
 ### Task 2.4: GamePage 微小清理
 
 **Files:**
+
 - Modify: `src/ui/components/game/GamePage.vue`
 
 **改动：**
+
 - 提取重复的 `@update:open` handler 为 `onModalOpenChange(v: boolean)` 方法
 - 给 `.game-page-layout` 加 `min-width: 900px` 防止窄屏布局崩溃
 

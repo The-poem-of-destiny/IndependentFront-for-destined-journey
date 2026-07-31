@@ -40,7 +40,9 @@ const REVERSE_LOGIC_MAP: Record<LorebookEntry['selectiveLogic'], number> = {
   and_all: 3,
 };
 
-export function importLorebook(data: SillyTavernLorebookExport): Omit<Lorebook, 'id' | 'createdAt' | 'updatedAt'> {
+export function importLorebook(
+  data: SillyTavernLorebookExport,
+): Omit<Lorebook, 'id' | 'createdAt' | 'updatedAt'> {
   const rawEntries = Object.values(data.entries || {});
   const entries: LorebookEntry[] = rawEntries
     .filter((e) => !e.disable && !e.excluded)
@@ -111,7 +113,7 @@ export function exportLorebook(lorebook: Lorebook): SillyTavernLorebookExport {
       probability: e.probability,
       depth: e.depth ?? 4,
       group: e.group ?? '',
-      useProbability: e.useProbability ?? (e.probability < 100),
+      useProbability: e.useProbability ?? e.probability < 100,
       excluded: false,
       sticky: e.sticky ?? 0,
       cooldown: e.cooldown ?? 0,
@@ -146,7 +148,9 @@ export function exportLorebook(lorebook: Lorebook): SillyTavernLorebookExport {
   };
 }
 
-export function importPreset(data: Record<string, any>): Omit<ChatPreset, 'id' | 'createdAt' | 'updatedAt'> {
+export function importPreset(
+  data: Record<string, any>,
+): Omit<ChatPreset, 'id' | 'createdAt' | 'updatedAt'> {
   const name = data.preset || data.name || '导入的预设';
   return {
     name,
@@ -170,7 +174,10 @@ export async function importJsonFile<T>(): Promise<T | null> {
     input.accept = '.json,application/json';
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) { resolve(null); return; }
+      if (!file) {
+        resolve(null);
+        return;
+      }
       try {
         const text = await file.text();
         resolve(JSON.parse(text) as T);

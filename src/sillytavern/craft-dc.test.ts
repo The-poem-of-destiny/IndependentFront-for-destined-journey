@@ -171,7 +171,7 @@ describe('calcCraftCheck', () => {
     const result = calcCraftCheck({
       ...basicParams,
       targetQuality: '优良', // T2 quality
-      crafterTier: 5,       // T5 > T2 → advantage
+      crafterTier: 5, // T5 > T2 → advantage
       d20Rolls: [5, 18],
     });
     expect(result.diceUsed).toBe(2);
@@ -183,7 +183,7 @@ describe('calcCraftCheck', () => {
     const result = calcCraftCheck({
       ...basicParams,
       targetQuality: '传说', // T5 quality
-      crafterTier: 3,        // T3 < T5 → disadvantage
+      crafterTier: 3, // T3 < T5 → disadvantage
       d20Rolls: [15, 3],
     });
     expect(result.diceUsed).toBe(2);

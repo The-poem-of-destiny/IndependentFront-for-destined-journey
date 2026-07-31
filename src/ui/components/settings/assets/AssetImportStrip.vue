@@ -18,29 +18,29 @@
  * 路由（拖进来的 .mp3 照样落音频库）、D16 拒收、去重、编号、部分成功回执全都一致，
  * 这里不必为散装路径分叉任何显示逻辑。
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import type { ImportWarning } from '@engine/asset-import-plan'
-import { ASSET_MIME_BY_EXTENSION } from '@engine/asset-types'
-import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names'
-import AppButton from '../../shared/AppButton.vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import type { ImportWarning } from '@engine/asset-import-plan';
+import { ASSET_MIME_BY_EXTENSION } from '@engine/asset-types';
+import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names';
+import AppButton from '../../shared/AppButton.vue';
 import {
   useAssetStore,
   type AssetImportSummary,
   type AssetStorageEstimate,
-} from '../../../stores/asset-store'
-import { fmtBytes } from '../audio/format'
-import { createProgressTracker } from './progress'
+} from '../../../stores/asset-store';
+import { fmtBytes } from '../audio/format';
+import { createProgressTracker } from './progress';
 
 const emit = defineEmits<{
   /** 一次性事件的无障碍播报，由外层写进唯一的 aria-live 区 */
-  (e: 'announce', message: string): void
-}>()
+  (e: 'announce', message: string): void;
+}>();
 
-const assets = useAssetStore()
+const assets = useAssetStore();
 
-const fileInput = ref<HTMLInputElement | null>(null)
-const dragging = ref(false)
-const quota = ref<AssetStorageEstimate | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null);
+const dragging = ref(false);
+const quota = ref<AssetStorageEstimate | null>(null);
 
 /**
  * 上一次导入的回执。
@@ -50,7 +50,7 @@ const quota = ref<AssetStorageEstimate | null>(null)
  * 这里曾经有一份 UI 侧的分流与合并，现在整段删掉了: 路由决策跟着导入管线走，
  * 两边各留一份就是漂移的来路。
  */
-const summary = ref<AssetImportSummary | null>(null)
+const summary = ref<AssetImportSummary | null>(null);
 
 /**
  * 文件选择器的 `accept`。
@@ -60,25 +60,28 @@ const summary = ref<AssetImportSummary | null>(null)
  * "选择器里灰掉、但拖进去其实能导"。扩展名与 MIME 都给上: 有些平台只认其一。
  */
 const acceptAttr = computed(() => {
-  const exts = [...Object.keys(ASSET_MIME_BY_EXTENSION), ...Object.keys(AUDIO_MIME_BY_EXTENSION)]
+  const exts = [...Object.keys(ASSET_MIME_BY_EXTENSION), ...Object.keys(AUDIO_MIME_BY_EXTENSION)];
   const mimes = [
-    ...new Set([...Object.values(ASSET_MIME_BY_EXTENSION), ...Object.values(AUDIO_MIME_BY_EXTENSION)]),
-  ]
-  return ['.zip', 'application/zip', ...exts.map((e) => `.${e}`), ...mimes].join(',')
-})
+    ...new Set([
+      ...Object.values(ASSET_MIME_BY_EXTENSION),
+      ...Object.values(AUDIO_MIME_BY_EXTENSION),
+    ]),
+  ];
+  return ['.zip', 'application/zip', ...exts.map((e) => `.${e}`), ...mimes].join(',');
+});
 
 /** 卸载守卫: 配额查询与导入都是异步的，兑现后不能再往已卸载的组件里写状态 */
-let disposed = false
+let disposed = false;
 
 onMounted(async () => {
-  const est = await assets.getStorageEstimate()
-  if (disposed) return
-  quota.value = est
-})
+  const est = await assets.getStorageEstimate();
+  if (disposed) return;
+  quota.value = est;
+});
 
 onUnmounted(() => {
-  disposed = true
-})
+  disposed = true;
+});
 
 // ═══ 进度 ═════════════════════════════════════════════════
 
@@ -90,18 +93,18 @@ onUnmounted(() => {
  * 而此时 `phase` 已经是 `'write'`）、以及分母万一又变回"会长的数"。
  * 判定刻意只看这两个数、不看相位 —— 相位只用来挑文案。
  */
-const tracker = createProgressTracker()
-const shownRatio = ref(0)
-const progressIndeterminate = ref(true)
+const tracker = createProgressTracker();
+const shownRatio = ref(0);
+const progressIndeterminate = ref(true);
 
 watch(
   () => [assets.progressDone, assets.progressTotal] as const,
   ([done, total]) => {
-    const state = tracker.observe(done, total)
-    shownRatio.value = state.ratio
-    progressIndeterminate.value = state.indeterminate
+    const state = tracker.observe(done, total);
+    shownRatio.value = state.ratio;
+    progressIndeterminate.value = state.indeterminate;
   },
-)
+);
 
 /**
  * 进度文字。
@@ -112,12 +115,14 @@ watch(
  * 这个标志，万一哪天口径又变，条也只会退化成转圈，绝不会往回抽。
  */
 const progressText = computed(() => {
-  if (!progressIndeterminate.value) return `${assets.progressDone} / ${assets.progressTotal}`
+  if (!progressIndeterminate.value) return `${assets.progressDone} / ${assets.progressTotal}`;
   if (assets.progressDone > 0) {
-    return assets.progressPhase === 'read' ? `正在读取… ${assets.progressDone}` : `已处理 ${assets.progressDone}`
+    return assets.progressPhase === 'read'
+      ? `正在读取… ${assets.progressDone}`
+      : `已处理 ${assets.progressDone}`;
   }
-  return assets.progressPhase === 'read' ? '正在读取…' : '正在准备…'
-})
+  return assets.progressPhase === 'read' ? '正在读取…' : '正在准备…';
+});
 
 // ═══ 取消 ═════════════════════════════════════════════════
 
@@ -125,35 +130,38 @@ const progressText = computed(() => {
  * 已经按过取消。`abort()` 本身幂等，这个标志只为了给出反馈（按钮改字并禁用）——
  * 否则用户会以为没点上，然后连点五次。随 `importing` 落下自动复位。
  */
-const cancelRequested = ref(false)
+const cancelRequested = ref(false);
 
-watch(() => assets.importing, (on) => {
-  if (!on) cancelRequested.value = false
-})
+watch(
+  () => assets.importing,
+  (on) => {
+    if (!on) cancelRequested.value = false;
+  },
+);
 
 function cancelImport(): void {
-  cancelRequested.value = true
-  assets.cancelImport()
-  emit('announce', '正在停止导入，已写入的内容会保留。')
+  cancelRequested.value = true;
+  assets.cancelImport();
+  emit('announce', '正在停止导入，已写入的内容会保留。');
 }
 
 // ═══ 导入 ═════════════════════════════════════════════════
 
 function pickFile(): void {
-  fileInput.value?.click()
+  fileInput.value?.click();
 }
 
 async function onFilePicked(e: Event): Promise<void> {
-  const input = e.target as HTMLInputElement
-  const files = Array.from(input.files ?? [])
+  const input = e.target as HTMLInputElement;
+  const files = Array.from(input.files ?? []);
   // 先清空再用: 同一批文件连选两次也要能触发 change
-  input.value = ''
-  await runImport(files)
+  input.value = '';
+  await runImport(files);
 }
 
 async function onDrop(e: DragEvent): Promise<void> {
-  dragging.value = false
-  await runImport(Array.from(e.dataTransfer?.files ?? []))
+  dragging.value = false;
+  await runImport(Array.from(e.dataTransfer?.files ?? []));
 }
 
 /**
@@ -167,57 +175,59 @@ async function onDrop(e: DragEvent): Promise<void> {
  */
 async function runImport(files: File[]): Promise<void> {
   if (files.length === 0) {
-    emit('announce', '没有可导入的文件。')
-    return
+    emit('announce', '没有可导入的文件。');
+    return;
   }
-  const res = await assets.importAny(files)
-  if (disposed) return
-  summary.value = res
+  const res = await assets.importAny(files);
+  if (disposed) return;
+  summary.value = res;
   // toast 由 store 负责（唯一那条汇总），这里只补一次无障碍播报
-  emit('announce', res.message || '导入结束。')
-  const est = await assets.getStorageEstimate()
-  if (disposed) return
-  quota.value = est
+  emit('announce', res.message || '导入结束。');
+  const est = await assets.getStorageEstimate();
+  if (disposed) return;
+  quota.value = est;
 }
 
 // ═══ 导出 ═════════════════════════════════════════════════
 
 async function runExport(): Promise<void> {
-  const res = await assets.exportZip()
-  if (disposed) return
-  emit('announce', res.message)
-  if (!res.blob) return
+  const res = await assets.exportZip();
+  if (disposed) return;
+  emit('announce', res.message);
+  if (!res.blob) return;
   // 下载全在这一层: store 只产出字节与建议文件名，不认识 DOM
-  const url = URL.createObjectURL(res.blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = res.filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
+  const url = URL.createObjectURL(res.blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = res.filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
   // 浏览器是异步去取这份字节的，立刻撤销会让下载拿到死链 —— 留足时间再撤。
   // 即便此后组件卸载，这个定时器照样把 URL 收干净（这正是我们要的）。
-  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 // ═══ 回执呈现 ═════════════════════════════════════════════
 
 /** 计数芯片 —— 0 的一律不显示，免得回执被一排「0」淹掉 */
-const summaryChips = computed<{ label: string; value: number; tone: 'ok' | 'note' | 'warn' }[]>(() => {
-  const s = summary.value
-  if (!s) return []
-  const all: { label: string; value: number; tone: 'ok' | 'note' | 'warn' }[] = [
-    { label: '素材新增', value: s.assetsAdded, tone: 'ok' },
-    { label: '音频新增', value: s.audioAdded, tone: 'ok' },
-    { label: '跳过重复', value: s.duplicatesSkipped, tone: 'note' },
-    { label: '自动编号', value: s.renumbered, tone: 'note' },
-    { label: '命名冲突', value: s.namingConflicts, tone: 'warn' },
-    { label: '立绘不支持 mp4', value: s.mediaRuleSkipped, tone: 'warn' },
-    { label: '忽略无关文件', value: s.ignored, tone: 'note' },
-    { label: '写入失败', value: s.failed, tone: 'warn' },
-  ]
-  return all.filter((c) => c.value > 0)
-})
+const summaryChips = computed<{ label: string; value: number; tone: 'ok' | 'note' | 'warn' }[]>(
+  () => {
+    const s = summary.value;
+    if (!s) return [];
+    const all: { label: string; value: number; tone: 'ok' | 'note' | 'warn' }[] = [
+      { label: '素材新增', value: s.assetsAdded, tone: 'ok' },
+      { label: '音频新增', value: s.audioAdded, tone: 'ok' },
+      { label: '跳过重复', value: s.duplicatesSkipped, tone: 'note' },
+      { label: '自动编号', value: s.renumbered, tone: 'note' },
+      { label: '命名冲突', value: s.namingConflicts, tone: 'warn' },
+      { label: '立绘不支持 mp4', value: s.mediaRuleSkipped, tone: 'warn' },
+      { label: '忽略无关文件', value: s.ignored, tone: 'note' },
+      { label: '写入失败', value: s.failed, tone: 'warn' },
+    ];
+    return all.filter((c) => c.value > 0);
+  },
+);
 
 /**
  * 警告的行内措辞。
@@ -227,14 +237,15 @@ const summaryChips = computed<{ label: string; value: number; tone: 'ok' | 'note
  * 记得对齐；不合并是当下的取舍，不是疏忽。
  */
 const WARNING_HINT: Readonly<Record<ImportWarning, string>> = {
-  'hash-unavailable': '这个环境拿不到哈希，本次没有做重复检测 —— 重复的文件会以编号变体的形式入库。',
+  'hash-unavailable':
+    '这个环境拿不到哈希，本次没有做重复检测 —— 重复的文件会以编号变体的形式入库。',
   'suspect-filename-encoding':
     '压缩包里的文件名编码可疑（可能是 CP936）。名字已原样入库、绝不转码；如果显示成乱码，请用支持 UTF-8 的工具重新打包。',
   'suspect-missing-type':
     '有文件名疑似漏写了类型（例如把 `苏婉_微笑.png` 当成变体，实际会解析成名叫「苏婉_微笑」的另一个角色）。请到「按角色」里核对一下。',
-}
+};
 
-const warningHints = computed(() => (summary.value?.warnings ?? []).map((w) => WARNING_HINT[w]))
+const warningHints = computed(() => (summary.value?.warnings ?? []).map((w) => WARNING_HINT[w]));
 
 /**
  * 读不出来的包，一条一句（`readErrors` 是可选字段，按 `?? []` 兜）。
@@ -242,33 +253,33 @@ const warningHints = computed(() => (summary.value?.warnings ?? []).map((w) => W
  * 与 `read` 分开呈现正是"一个坏包 + 一批好图"要的: 计数如实报好的那半，
  * 同时点名坏的那个 —— 塌成一个布尔就只剩"导入失败"，把成功的部分也抹掉了。
  */
-const readErrors = computed<string[]>(() => summary.value?.readErrors ?? [])
+const readErrors = computed<string[]>(() => summary.value?.readErrors ?? []);
 
 /** 一条都没动过的导入也要说出来，否则界面看起来像什么都没发生 */
 const nothingChanged = computed(() => {
-  const s = summary.value
-  return !!s && s.assetsAdded === 0 && s.audioAdded === 0 && readErrors.value.length === 0
-})
+  const s = summary.value;
+  return !!s && s.assetsAdded === 0 && s.audioAdded === 0 && readErrors.value.length === 0;
+});
 
 // ═══ 配额 ═════════════════════════════════════════════════
 
 const quotaRatio = computed(() => {
-  const q = quota.value
-  if (!q || q.quota <= 0) return 0
-  return Math.min(1, Math.max(0, q.used / q.quota))
-})
+  const q = quota.value;
+  if (!q || q.quota <= 0) return 0;
+  return Math.min(1, Math.max(0, q.used / q.quota));
+});
 
 /**
  * 持久化存储的结果。**被拒不是错误**（§4.5）: 如实写出来，绝不阻塞导入。
  * null 是「还没问过 / 浏览器不支持」，与「问了被拒」是两件事，措辞要分开。
  */
 const persistText = computed(() => {
-  if (assets.storagePersisted === true) return '已获得持久化存储，磁盘紧张时不会被优先清理。'
+  if (assets.storagePersisted === true) return '已获得持久化存储，磁盘紧张时不会被优先清理。';
   if (assets.storagePersisted === false) {
-    return '浏览器拒绝了持久化存储：素材照常导入，但磁盘紧张时整库（含存档与音频）可能被清理，建议留一份导出包。'
+    return '浏览器拒绝了持久化存储：素材照常导入，但磁盘紧张时整库（含存档与音频）可能被清理，建议留一份导出包。';
   }
-  return '尚未申请持久化存储（首次导入成功后会自动申请一次）。'
-})
+  return '尚未申请持久化存储（首次导入成功后会自动申请一次）。';
+});
 </script>
 
 <template>
@@ -321,7 +332,8 @@ const persistText = computed(() => {
   -->
   <p class="band-note text-muted text-sm">
     散装文件不带署名与授权信息（清单只存在于压缩包根目录）。要为分发的素材保留
-    <code class="conv-code">credit</code> / <code class="conv-code">license</code>，请打包成 zip 再导入。
+    <code class="conv-code">credit</code> / <code class="conv-code">license</code>，请打包成 zip
+    再导入。
   </p>
 
   <!-- ═══ 进度 + 取消 ═══ -->
@@ -351,7 +363,8 @@ const persistText = computed(() => {
       <span
         v-if="summaryChips.length === 0 && !summary.cancelled && readErrors.length === 0"
         class="sum-chip chip-note"
-      >没有任何变化</span>
+        >没有任何变化</span
+      >
     </div>
     <p v-if="nothingChanged && !summary.cancelled" class="sum-note">
       这次导入的内容全部被跳过了，库没有变化 —— 通常是因为它们已经导入过一次。
@@ -373,7 +386,11 @@ const persistText = computed(() => {
     <span class="io-label">浏览器存储</span>
     <template v-if="quota">
       <div class="bar-track" role="img" :aria-label="`已用 ${quota.pct.toFixed(1)}%`">
-        <div class="bar-fill" :class="{ 'bar-hot': quota.pct >= 80 }" :style="{ transform: `scaleX(${quotaRatio})` }" />
+        <div
+          class="bar-fill"
+          :class="{ 'bar-hot': quota.pct >= 80 }"
+          :style="{ transform: `scaleX(${quotaRatio})` }"
+        />
       </div>
       <span class="io-count">
         {{ fmtBytes(quota.used) }} / {{ fmtBytes(quota.quota) }}（{{ quota.pct.toFixed(1) }}%）
@@ -424,7 +441,9 @@ const persistText = computed(() => {
   border-radius: var(--theme-radius-md);
   margin-bottom: var(--theme-spacing-sm);
   /* 只过渡颜色，绝不过渡布局属性（design.md §1 禁令） */
-  transition: background var(--theme-transition-fast), border-color var(--theme-transition-fast);
+  transition:
+    background var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
 }
 .io-strip-drag {
   background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));

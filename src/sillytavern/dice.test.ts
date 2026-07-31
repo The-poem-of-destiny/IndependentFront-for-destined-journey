@@ -121,7 +121,7 @@ describe('rollDice', () => {
     // 掷 100 次 d6，检查是否覆盖 1~6
     const results = new Set<number>();
     for (let i = 0; i < 100; i++) {
-      rollDice(1, 6).forEach(r => results.add(r));
+      rollDice(1, 6).forEach((r) => results.add(r));
     }
     // 极大概率覆盖 1~6
     expect(results.size).toBeGreaterThanOrEqual(4);

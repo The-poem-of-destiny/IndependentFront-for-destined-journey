@@ -90,7 +90,9 @@ function playlist(id: string, trackIds: string[]): AudioPlaylist {
 
 describe('AudioManager — 增益图 (§4.1)', () => {
   let h: Harness;
-  beforeEach(() => { h = setup(); });
+  beforeEach(() => {
+    h = setup();
+  });
 
   it('master gain 接到 context.destination', () => {
     expect(h.master.connectedTo).toContain(h.ctx.destination);
@@ -106,7 +108,9 @@ describe('AudioManager — 增益图 (§4.1)', () => {
 
 describe('AudioManager — 混音 (§9 Mixing)', () => {
   let h: Harness;
-  beforeEach(() => { h = setup(); });
+  beforeEach(() => {
+    h = setup();
+  });
 
   it('setMasterVolume 写入 master gain 并反映在 state', () => {
     h.mgr.setMasterVolume(0.5);
@@ -343,7 +347,10 @@ describe('AudioManager — AI 钩子 playByTag (§8 / §9 AI hook)', () => {
 
   it('只匹配 kind==="music"，音效曲目不入选', async () => {
     const hh = setup({ random: () => 0 });
-    seed(hh, [makeTrack('boom', { kind: 'sfx', tags: ['combat'] }), makeTrack('f1', { tags: ['combat'] })]);
+    seed(hh, [
+      makeTrack('boom', { kind: 'sfx', tags: ['combat'] }),
+      makeTrack('f1', { tags: ['combat'] }),
+    ]);
     await hh.mgr.unlock();
     const ok = await hh.mgr.playByTag('combat');
     expect(ok).toBe(true);

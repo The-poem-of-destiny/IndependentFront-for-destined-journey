@@ -1,19 +1,24 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed } from 'vue';
 
 const props = defineProps<{
-  type: 'buff' | 'debuff' | 'special'
-  name: string
-  stacks?: number
-}>()
+  type: 'buff' | 'debuff' | 'special';
+  name: string;
+  stacks?: number;
+}>();
 
 const chipColor = computed(() => {
   switch (props.type) {
-    case 'buff': return 'var(--theme-success)'
-    case 'debuff': return 'var(--theme-error)'
-    case 'special': return 'var(--theme-warning)'
+    case 'buff':
+      return 'var(--theme-success)';
+    case 'debuff':
+      return 'var(--theme-error)';
+    case 'special':
+      return 'var(--theme-warning)';
+    default:
+      return 'var(--theme-text-muted)';
   }
-})
+});
 </script>
 
 <template>

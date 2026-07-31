@@ -26,16 +26,16 @@ M1 要把现有 **fan-out 广播式 EventBus** 升级为能支撑战斗管道的
 
 ### 1.1 EventBus（`game-event.ts`）—— 纯 fan-out
 
-| 维度 | 现状 |
-|------|------|
-| 发布模型 | `publish(event)` 广播给所有订阅者，**handler 无返回值**（`void \| Promise<void>`） |
+| 维度     | 现状                                                                                    |
+| -------- | --------------------------------------------------------------------------------------- |
+| 发布模型 | `publish(event)` 广播给所有订阅者，**handler 无返回值**（`void \| Promise<void>`）      |
 | 订阅 API | `subscribe(type, handler)` / `subscribeAll(handler)` / `subscribeWhen(filter, handler)` |
-| 返回值 | 三者都返回 unsubscribe 函数 |
-| 去重 | handler 用 `Set` 去重（同函数引用重复订阅只触发一次） |
-| 错误隔离 | 每个 handler 独立 try/catch，单个抛错不阻塞其他 |
-| async | handler 顺序 await（非并发） |
-| 历史 | `history: GameEvent[]`，`maxHistory` 默认 500 |
-| 实例化 | 按 SaveSlot，`busRegistry` + `getEventBus(saveId)` |
+| 返回值   | 三者都返回 unsubscribe 函数                                                             |
+| 去重     | handler 用 `Set` 去重（同函数引用重复订阅只触发一次）                                   |
+| 错误隔离 | 每个 handler 独立 try/catch，单个抛错不阻塞其他                                         |
+| async    | handler 顺序 await（非并发）                                                            |
+| 历史     | `history: GameEvent[]`，`maxHistory` 默认 500                                           |
+| 实例化   | 按 SaveSlot，`busRegistry` + `getEventBus(saveId)`                                      |
 
 **关键缺口**：handler 之间**无法传递数据**。publish 是「通知」，不是「变换」。战斗管道需要的是「初始伤害 → 戒指1 改 → 戒指2 改 → … → 最终伤害」的链式变换，现有模型做不到。
 
@@ -64,6 +64,7 @@ src/sillytavern/subscription-manager.test.ts  ← 测试
 **没有任何生产模块调用 EventBus。** `game-event.ts` 自身注释也印证：「EventBus 引入时机: Phase 6c（按需）— 当前用声明式验证覆盖度」。Phase 6a 战斗系统走了 `combat-damage.ts` 纯函数路线，没接事件总线。
 
 **对 M1 的含义**：
+
 - ✅ 兼容负担几乎为零——没有生产调用方会被破坏
 - ✅ 可以大胆设计 `emitChain`，不必为「不破坏某处生产逻辑」束手束脚
 - ✅ 唯一必须保持绿的是 **78 个测试**（game-event ~40 + subscription-manager ~8 + script-executor ~30）
@@ -73,10 +74,10 @@ src/sillytavern/subscription-manager.test.ts  ← 测试
 
 项目里有**两套并行的"效果"系统**，M1 不能制造第三套：
 
-| 系统 | 文件 | 定位 | 数据形态 | M1 关系 |
-|------|------|------|---------|---------|
-| **EffectRuntime** | `effect-runtime.ts` | Phase 4.5 声明式效果执行器 | `EffectDefinition[]`（结构化）→ `StatePatch[]` | **不动**。它管 Agent 输出的结构化效果声明，与战斗管道无关 |
-| **ScriptExecutor + SubscriptionManager** | `script-executor.ts` / `subscription-manager.ts` | Phase 7e+8 AI 脚本沙盒 | AI 写 JS，`$ API` 收集 `ScriptEffects` | **M1 改造对象** |
+| 系统                                     | 文件                                             | 定位                       | 数据形态                                       | M1 关系                                                   |
+| ---------------------------------------- | ------------------------------------------------ | -------------------------- | ---------------------------------------------- | --------------------------------------------------------- |
+| **EffectRuntime**                        | `effect-runtime.ts`                              | Phase 4.5 声明式效果执行器 | `EffectDefinition[]`（结构化）→ `StatePatch[]` | **不动**。它管 Agent 输出的结构化效果声明，与战斗管道无关 |
+| **ScriptExecutor + SubscriptionManager** | `script-executor.ts` / `subscription-manager.ts` | Phase 7e+8 AI 脚本沙盒     | AI 写 JS，`$ API` 收集 `ScriptEffects`         | **M1 改造对象**                                           |
 
 `script-registry.ts`（M1 新增）**不是第三套系统**，而是 SubscriptionManager 的**声明式 facade**——把 `{event, source, owner, handler, condition, priority}` 翻译成 `SubscriptionManager.register` 调用。详见 §3.5。
 
@@ -85,10 +86,17 @@ src/sillytavern/subscription-manager.test.ts  ← 测试
 ```ts
 // types.ts:1220
 export type GameEventType =
-  | 'character_action' | 'combat_action' | 'craft_action'
-  | 'status_effect' | 'variable_change' | 'plot_trigger'
-  | 'item_use' | 'skill_use' | 'location_change'
-  | 'quest_update' | 'system';
+  | 'character_action'
+  | 'combat_action'
+  | 'craft_action'
+  | 'status_effect'
+  | 'variable_change'
+  | 'plot_trigger'
+  | 'item_use'
+  | 'skill_use'
+  | 'location_change'
+  | 'quest_update'
+  | 'system';
 ```
 
 11 个扁平字面量，**无命名空间**（没有 `combat.attack.*`）。v2 架构 §6.4 的 19 个 event 用的是 `combat.attack.request` 点分式。命名方案需要决策（§3.8）。
@@ -97,14 +105,14 @@ export type GameEventType =
 
 ## 2. 设计目标（验收标准）
 
-| # | 目标 | 验收 |
-|---|------|------|
-| G1 | emitChain 链式变换 | 3 个 handler 链式改 params，最终值正确 |
-| G2 | 在场过滤 | owner 不在 combatants 的订阅者被跳过 |
-| G3 | 声明式注册 | 物品装备时一次注册整份 scripts 清单，卸下时全注销 |
-| G4 | 套娃收紧 | 战斗场景 6 层套娃第 6 层被拦截；非战斗仍允许 10 层 |
-| G5 | ctx 只读 API | 脚本能 `$resource.getHp(owner)` 读到真值，`modifyHp` 仍走收集器（不能直接写） |
-| G6 | 向后兼容 | 现有 78 个测试全绿，旧 `publish/subscribe/$event.on` 行为零变化 |
+| #   | 目标               | 验收                                                                          |
+| --- | ------------------ | ----------------------------------------------------------------------------- |
+| G1  | emitChain 链式变换 | 3 个 handler 链式改 params，最终值正确                                        |
+| G2  | 在场过滤           | owner 不在 combatants 的订阅者被跳过                                          |
+| G3  | 声明式注册         | 物品装备时一次注册整份 scripts 清单，卸下时全注销                             |
+| G4  | 套娃收紧           | 战斗场景 6 层套娃第 6 层被拦截；非战斗仍允许 10 层                            |
+| G5  | ctx 只读 API       | 脚本能 `$resource.getHp(owner)` 读到真值，`modifyHp` 仍走收集器（不能直接写） |
+| G6  | 向后兼容           | 现有 78 个测试全绿，旧 `publish/subscribe/$event.on` 行为零变化               |
 
 ---
 
@@ -139,6 +147,7 @@ export type GameEventType =
 - **✅ 推荐**：handler 注册带可选 `owner: string`（角色 charId）；emitChain 的 `ctx.combatants: string[]` 给出参战者列表；`owner` 不在 `combatants` 则跳过该 handler
 
 **边界**：
+
 - `owner` 缺省（如系统/环境 buff）→ 永远在场，不过滤
 - `combatants` 缺省 → 不过滤（向后兼容非战斗场景）
 - 过滤在 emitChain 入口做一次，不在每个 handler 里重复判断
@@ -146,11 +155,15 @@ export type GameEventType =
 ### D5：声明式注册 = SubscriptionManager 的 facade（非新系统）
 
 架构 §3.1 的契约：
+
 ```ts
-{ event, source, owner, handler, condition, priority }
+{
+  (event, source, owner, handler, condition, priority);
+}
 ```
 
 `script-registry.ts` 暴露：
+
 ```ts
 registerDeclaration(decl, ownerKey)        // 注册单条
 registerDeclarations(decls[], ownerKey)    // 物品装备时批量注册整份清单
@@ -174,11 +187,11 @@ unregisterOwner(ownerKey)                  // 物品卸下时全注销（转发 
 
 ```ts
 // 新增只读查询（注入实现，脚本侧只读）
-$resource.getHp(charId) / getMaxHp / getMp / getMaxMp / getSp / getMaxSp
-$resource.getHpPercent(charId)
-$char.getAttr(charId, '体'|'智'|'敏'|'力'|'精')   // 五维只读
-$char.getTier(charId)
-$char.isPresent(charId)   // 在场判断（配合 D4）
+$resource.getHp(charId) / getMaxHp / getMp / getMaxMp / getSp / getMaxSp;
+$resource.getHpPercent(charId);
+$char.getAttr(charId, '体' | '智' | '敏' | '力' | '精'); // 五维只读
+$char.getTier(charId);
+$char.isPresent(charId); // 在场判断（配合 D4）
 ```
 
 **写入仍走收集器**（`modifyHp`/`modifyStat` 进 `ScriptEffects`，由 state-manager 统一 apply）—— 这条不变，保住「脚本不能直接动 HP」的红线。
@@ -202,10 +215,7 @@ $char.isPresent(charId)   // 在场判断（配合 D4）
 
 ```ts
 /** 链式 handler —— 接收 params，返回（可能修改过的）params */
-export type ChainHandler<P = any> = (
-  params: P,
-  ctx: ChainContext,
-) => P | Promise<P>;
+export type ChainHandler<P = any> = (params: P, ctx: ChainContext) => P | Promise<P>;
 
 /** 链式调用上下文 */
 export interface ChainContext {
@@ -223,9 +233,9 @@ export interface ChainContext {
 export interface ChainSubscription {
   type: string;
   handler: ChainHandler;
-  priority?: number;   // 默认 0
-  order?: number;      // 默认 0
-  owner?: string;      // 在场过滤用；缺省=永在场
+  priority?: number; // 默认 0
+  order?: number; // 默认 0
+  owner?: string; // 在场过滤用；缺省=永在场
   condition?: (params: any, ctx: ChainContext) => boolean;
 }
 
@@ -250,10 +260,10 @@ export class EventBus {
 ```ts
 /** 声明式脚本条目 —— 对齐架构 §3.1 */
 export interface ScriptDeclaration {
-  event: string;                    // 订阅事件
-  source: string;                   // 静态身份（物品/技能名，buff id 前缀用）
-  owner?: string;                   // 动态持有人 charId
-  handler: ChainHandler;            // 实际函数
+  event: string; // 订阅事件
+  source: string; // 静态身份（物品/技能名，buff id 前缀用）
+  owner?: string; // 动态持有人 charId
+  handler: ChainHandler; // 实际函数
   condition?: (p: any, ctx: ChainContext) => boolean;
   priority?: number;
   order?: number;
@@ -264,7 +274,7 @@ export function registerDeclaration(
   bus: EventBus,
   mgr: SubscriptionManager,
   decl: ScriptDeclaration,
-  ownerKey: string,                 // {charId}:{objectType}:{objectName}
+  ownerKey: string, // {charId}:{objectType}:{objectName}
 ): () => void;
 
 /** 批量注册（物品装备时）—— 返回整批的注销函数 */
@@ -288,7 +298,7 @@ export interface ReadonlyHookSet {
   getMp(charId: string): number;
   getSp(charId: string): number;
   getHpPercent(charId: string): number;
-  getAttr(charId: string, attr: '体'|'智'|'敏'|'力'|'精'): number;
+  getAttr(charId: string, attr: '体' | '智' | '敏' | '力' | '精'): number;
   getTier(charId: string): number;
   isPresent(charId: string): boolean;
 }
@@ -300,16 +310,17 @@ export interface ReadonlyHookSet {
 
 ## 5. 任务分解（对齐计划 M1 的 1.1–1.6）
 
-| 计划任务 | RFC 落地 | 涉及文件 | 核心改动 |
-|---------|---------|---------|---------|
-| 1.1 emitChain 链式返回值 | D1+D2+D3 | `game-event.ts` | 新增 `emitChain`/`subscribeChain`，handler 签名升级 `(event)=>void\|any` |
-| 1.2 在场过滤 | D4 | `game-event.ts` | emitChain 入口按 `ctx.combatants` 过滤 `owner` |
-| 1.3 声明式脚本契约 | D5 | 新增 `script-registry.ts` | facade 翻译 declaration → SubscriptionManager.register |
-| 1.4 套娃深度限制 | D6 | `subscription-manager.ts` | per-chain maxDepth（替代 per-instance 写死） |
-| 1.5 ctx 只读 API | D7 | `script-executor.ts` | ScriptContext 增 `readHooks`，沙盒 $resource/$char 接入 |
-| 1.6 旧 API 兼容层 | D1+D5 | `script-executor.ts` | `$event.on` 映射到声明式注册的动态版；`publish/subscribe` 不动 |
+| 计划任务                 | RFC 落地 | 涉及文件                  | 核心改动                                                                 |
+| ------------------------ | -------- | ------------------------- | ------------------------------------------------------------------------ |
+| 1.1 emitChain 链式返回值 | D1+D2+D3 | `game-event.ts`           | 新增 `emitChain`/`subscribeChain`，handler 签名升级 `(event)=>void\|any` |
+| 1.2 在场过滤             | D4       | `game-event.ts`           | emitChain 入口按 `ctx.combatants` 过滤 `owner`                           |
+| 1.3 声明式脚本契约       | D5       | 新增 `script-registry.ts` | facade 翻译 declaration → SubscriptionManager.register                   |
+| 1.4 套娃深度限制         | D6       | `subscription-manager.ts` | per-chain maxDepth（替代 per-instance 写死）                             |
+| 1.5 ctx 只读 API         | D7       | `script-executor.ts`      | ScriptContext 增 `readHooks`，沙盒 $resource/$char 接入                  |
+| 1.6 旧 API 兼容层        | D1+D5    | `script-executor.ts`      | `$event.on` 映射到声明式注册的动态版；`publish/subscribe` 不动           |
 
 **实施顺序**（建议）：1.1 → 1.5 → 1.2 → 1.4 → 1.3 → 1.6
+
 - 先 emitChain（核心机制），再只读 API（独立增强），再在场过滤/套娃（依赖 ctx），再声明式 facade（依赖前面），最后兼容层（收口）。
 
 ---
@@ -318,12 +329,12 @@ export interface ReadonlyHookSet {
 
 ### 6.1 影响面（基于 §1.3 零生产调用）
 
-| 面 | 影响 |
-|----|------|
-| 生产代码 | **零**（无任何模块 import EventBus/SubscriptionManager 用于实际逻辑） |
-| 现有测试 | 78 个必须保持绿：game-event(~40) + subscription-manager(~8) + script-executor(~30) |
-| 数据库/存档 | 零（EventBus 是内存态，不落 Dexie） |
-| Agent 层 | 零（M4 才接 Combat Agent） |
+| 面          | 影响                                                                               |
+| ----------- | ---------------------------------------------------------------------------------- |
+| 生产代码    | **零**（无任何模块 import EventBus/SubscriptionManager 用于实际逻辑）              |
+| 现有测试    | 78 个必须保持绿：game-event(~40) + subscription-manager(~8) + script-executor(~30) |
+| 数据库/存档 | 零（EventBus 是内存态，不落 Dexie）                                                |
+| Agent 层    | 零（M4 才接 Combat Agent）                                                         |
 
 ### 6.2 兼容保证清单
 
@@ -343,20 +354,22 @@ M1 全程不删旧 API、不改旧文件结构，纯**新增 + 增强**。若 em
 ## 7. 测试计划
 
 ### 7.1 现有测试回归（必须全绿）
+
 - `game-event.test.ts` ~40 个
 - `subscription-manager.test.ts` ~8 个
 - `script-executor.test.ts` ~30 个
 
 ### 7.2 M1 新增测试（对应 G1–G6）
 
-| 测试文件 | 覆盖 |
-|---------|------|
-| `game-event.test.ts` 扩展 | emitChain 链式 3 handler 改 params；priority/order 排序；在场过滤跳过；async handler 链；handler 抛错不阻塞链；emitChain 历史记录 |
-| `subscription-manager.test.ts` 扩展 | per-chain maxDepth=5 拦截第 6 层；默认仍 10；战斗 ctx 传深度 |
-| `script-executor.test.ts` 扩展 | readHooks 注入后 `$resource.getHp` 返回真值；缺省仍返回 0；`$char.getAttr`/`isPresent` |
-| 新增 `script-registry.test.ts` | registerDeclarations 批量注册；unregisterOwner 全注销；condition 过滤；priority 传递 |
+| 测试文件                            | 覆盖                                                                                                                              |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `game-event.test.ts` 扩展           | emitChain 链式 3 handler 改 params；priority/order 排序；在场过滤跳过；async handler 链；handler 抛错不阻塞链；emitChain 历史记录 |
+| `subscription-manager.test.ts` 扩展 | per-chain maxDepth=5 拦截第 6 层；默认仍 10；战斗 ctx 传深度                                                                      |
+| `script-executor.test.ts` 扩展      | readHooks 注入后 `$resource.getHp` 返回真值；缺省仍返回 0；`$char.getAttr`/`isPresent`                                            |
+| 新增 `script-registry.test.ts`      | registerDeclarations 批量注册；unregisterOwner 全注销；condition 过滤；priority 传递                                              |
 
 ### 7.3 验收命令
+
 ```bash
 npm run typecheck   # 0 错误
 npm run test -- --run   # 全绿（含新增）
@@ -366,13 +379,13 @@ npm run test -- --run   # 全绿（含新增）
 
 ## 8. 风险与对策
 
-| 风险 | 等级 | 对策 |
-|------|------|------|
-| emitChain 链式语义设计错（如 params 突变 vs 返回新对象）导致 M3 接入时返工 | 🔴 | 本 RFC §4.1 钉死签名；M1 完成后写一个**战斗管道 mock 示例**（不接 combat-resolver，纯演示 emitChain 怎么用）放测试里，提前暴露设计缺陷 |
-| 声明式 facade 和命令式 `$event.on` 双轨造成心智负担 | 🟡 | §5 任务 1.6 兼容层把两者关系讲清；文档明确「声明式=静态生命周期，命令式=动态临时」 |
-| 套娃 per-chain 深度改动破坏现有 subscription-manager 的 per-instance 计数 | 🟡 | 不删 per-instance 默认，per-chain 作为临时覆盖；现有 S4 测试保持绿 |
-| GameEventType 放开为 `(string & {})` 后失去编译期拼写检查 | 🟢 | M3 补 `CombatEventName` 字面量联合供自动补全；M1 暂不预定义 |
-| 「生产零调用」导致 M1 完成后无法真实验证 | 🟡 | 接受——M1 是基础设施层，验收靠单元测试；端到端验证是 M6 的事 |
+| 风险                                                                       | 等级 | 对策                                                                                                                                   |
+| -------------------------------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| emitChain 链式语义设计错（如 params 突变 vs 返回新对象）导致 M3 接入时返工 | 🔴   | 本 RFC §4.1 钉死签名；M1 完成后写一个**战斗管道 mock 示例**（不接 combat-resolver，纯演示 emitChain 怎么用）放测试里，提前暴露设计缺陷 |
+| 声明式 facade 和命令式 `$event.on` 双轨造成心智负担                        | 🟡   | §5 任务 1.6 兼容层把两者关系讲清；文档明确「声明式=静态生命周期，命令式=动态临时」                                                     |
+| 套娃 per-chain 深度改动破坏现有 subscription-manager 的 per-instance 计数  | 🟡   | 不删 per-instance 默认，per-chain 作为临时覆盖；现有 S4 测试保持绿                                                                     |
+| GameEventType 放开为 `(string & {})` 后失去编译期拼写检查                  | 🟢   | M3 补 `CombatEventName` 字面量联合供自动补全；M1 暂不预定义                                                                            |
+| 「生产零调用」导致 M1 完成后无法真实验证                                   | 🟡   | 接受——M1 是基础设施层，验收靠单元测试；端到端验证是 M6 的事                                                                            |
 
 ---
 
@@ -380,18 +393,18 @@ npm run test -- --run   # 全绿（含新增）
 
 以下是需要主人明确表态的设计选择。带 ✅ 的是本 RFC 推荐，主人不否决即按此实施：
 
-| # | 决策点 | 选项 | 推荐 |
-|---|--------|------|------|
-| Q1 | emitChain 与 publish 关系 | 并存 / 替换 | ✅ 并存 |
-| Q2 | handler 注册表 | 统一 / 分离 | ✅ 统一（签名升级 `(event)=>void\|any`） |
-| Q3 | 链顺序依据 | priority+order / 仅注册序 | ✅ priority+order+注册序 |
-| Q4 | 在场过滤触发时机 | emitChain 入口一次性 / 每 handler 判 | ✅ 入口一次性 |
-| Q5 | 声明式 registry 定位 | SubscriptionManager facade / 独立新系统 | ✅ facade |
-| Q6 | 套娃深度方案 | per-chain ctx.maxDepth / EventBus 战斗模式标记 / 两者 | ✅ per-chain ctx.maxDepth（最小侵入） |
-| Q7 | ctx 只读 API 范围 | 最小集(HP/属性/tier/isPresent) / 一步到位全开 | ✅ 最小集起步 |
-| Q8 | GameEventType 开放 | 扁平扩展 / 点分命名空间+`(string & {})` | ✅ 点分+开放 |
-| Q9 | `$event.emit`（瞬时事件）是否在 M1 修通 | 修（re-emit 到 bus）/ 留到 M3 | ✅ 留到 M3（M1 聚焦 emitChain，瞬时事件属 M3 接入范畴） |
-| Q10 | 实施方式 | 主线串行 / 用子 agent 并行 1.1 与 1.5 | 见 §10 |
+| #   | 决策点                                  | 选项                                                  | 推荐                                                    |
+| --- | --------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------- |
+| Q1  | emitChain 与 publish 关系               | 并存 / 替换                                           | ✅ 并存                                                 |
+| Q2  | handler 注册表                          | 统一 / 分离                                           | ✅ 统一（签名升级 `(event)=>void\|any`）                |
+| Q3  | 链顺序依据                              | priority+order / 仅注册序                             | ✅ priority+order+注册序                                |
+| Q4  | 在场过滤触发时机                        | emitChain 入口一次性 / 每 handler 判                  | ✅ 入口一次性                                           |
+| Q5  | 声明式 registry 定位                    | SubscriptionManager facade / 独立新系统               | ✅ facade                                               |
+| Q6  | 套娃深度方案                            | per-chain ctx.maxDepth / EventBus 战斗模式标记 / 两者 | ✅ per-chain ctx.maxDepth（最小侵入）                   |
+| Q7  | ctx 只读 API 范围                       | 最小集(HP/属性/tier/isPresent) / 一步到位全开         | ✅ 最小集起步                                           |
+| Q8  | GameEventType 开放                      | 扁平扩展 / 点分命名空间+`(string & {})`               | ✅ 点分+开放                                            |
+| Q9  | `$event.emit`（瞬时事件）是否在 M1 修通 | 修（re-emit 到 bus）/ 留到 M3                         | ✅ 留到 M3（M1 聚焦 emitChain，瞬时事件属 M3 接入范畴） |
+| Q10 | 实施方式                                | 主线串行 / 用子 agent 并行 1.1 与 1.5                 | 见 §10                                                  |
 
 ---
 
@@ -408,7 +421,7 @@ M1 的 6 个任务有依赖链（§5），但 1.1（emitChain）和 1.5（ctx �
 
 ## 11. 变更记录
 
-| 日期 | 变更 | 作者 |
-|------|------|------|
-| 2026-07-28 | 初版 RFC：现状审计（含生产零调用发现）+ 10 决策 + API 草案 + 测试计划 | Claude（RFC）|
-| 2026-07-28 | M1 实施完成：D2 改取 A（分离注册表）；6 任务全交付，四件套 130 tests，全量 3376/3377 零回归 | Claude（实施）|
+| 日期       | 变更                                                                                        | 作者           |
+| ---------- | ------------------------------------------------------------------------------------------- | -------------- |
+| 2026-07-28 | 初版 RFC：现状审计（含生产零调用发现）+ 10 决策 + API 草案 + 测试计划                       | Claude（RFC）  |
+| 2026-07-28 | M1 实施完成：D2 改取 A（分离注册表）；6 任务全交付，四件套 130 tests，全量 3376/3377 零回归 | Claude（实施） |

@@ -4,47 +4,48 @@
  *
  * 对齐原版: 三区聚合 (装备/道具/技能) + 始终可见 + 消耗汇总
  */
-import type { CatalogItem } from '@engine/start-catalog'
-import { RARITY_TO_QUALITY } from '@engine/start-catalog'
-import type { QualityLevel } from '@engine/types'
-import QualityBadge from '../shared/QualityBadge.vue'
-import { computed } from 'vue'
+import type { CatalogItem } from '@engine/start-catalog';
+import { RARITY_TO_QUALITY } from '@engine/start-catalog';
+import type { QualityLevel } from '@engine/types';
+import QualityBadge from '../shared/QualityBadge.vue';
+import { computed } from 'vue';
 
 const props = defineProps<{
-  equipments: CatalogItem[]
-  items: CatalogItem[]
-  skills: CatalogItem[]
-  equipmentCost?: number
-  itemCost?: number
-  skillCost?: number
-}>()
+  equipments: CatalogItem[];
+  items: CatalogItem[];
+  skills: CatalogItem[];
+  equipmentCost?: number;
+  itemCost?: number;
+  skillCost?: number;
+}>();
 
 defineEmits<{
-  'remove-equipment': [item: CatalogItem]
-  'remove-item': [item: CatalogItem]
-  'remove-skill': [item: CatalogItem]
-  'edit-equipment': [item: CatalogItem]
-  'edit-item': [item: CatalogItem]
-  'edit-skill': [item: CatalogItem]
-}>()
+  'remove-equipment': [item: CatalogItem];
+  'remove-item': [item: CatalogItem];
+  'remove-skill': [item: CatalogItem];
+  'edit-equipment': [item: CatalogItem];
+  'edit-item': [item: CatalogItem];
+  'edit-skill': [item: CatalogItem];
+}>();
 
 function qualityLabel(item: CatalogItem): QualityLevel {
-  return RARITY_TO_QUALITY[item.rarity] as QualityLevel
+  return RARITY_TO_QUALITY[item.rarity] as QualityLevel;
 }
 
-const totalCost = computed(() =>
-  (props.equipmentCost ?? props.equipments.reduce((s, e) => s + (e.cost || 0), 0)) +
-  (props.itemCost ?? props.items.reduce((s, i) => s + (i.cost || 0) * (i.quantity || 1), 0)) +
-  (props.skillCost ?? props.skills.reduce((s, sk) => s + (sk.cost || 0), 0))
-)
+const totalCost = computed(
+  () =>
+    (props.equipmentCost ?? props.equipments.reduce((s, e) => s + (e.cost || 0), 0)) +
+    (props.itemCost ?? props.items.reduce((s, i) => s + (i.cost || 0) * (i.quantity || 1), 0)) +
+    (props.skillCost ?? props.skills.reduce((s, sk) => s + (sk.cost || 0), 0)),
+);
 
 function roundCost(items: CatalogItem[]): number {
-  return items.reduce((s, i) => s + (i.cost || 0) * (i.quantity || 1), 0)
+  return items.reduce((s, i) => s + (i.cost || 0) * (i.quantity || 1), 0);
 }
 
-const eqCost = computed(() => props.equipmentCost ?? roundCost(props.equipments))
-const itCost = computed(() => props.itemCost ?? roundCost(props.items))
-const skCost = computed(() => props.skillCost ?? roundCost(props.skills))
+const eqCost = computed(() => props.equipmentCost ?? roundCost(props.equipments));
+const itCost = computed(() => props.itemCost ?? roundCost(props.items));
+const skCost = computed(() => props.skillCost ?? roundCost(props.skills));
 </script>
 
 <template>
@@ -52,7 +53,7 @@ const skCost = computed(() => props.skillCost ?? roundCost(props.skills))
     <h3 class="panel-title">已选物品</h3>
 
     <!-- 装备区 -->
-    <div class="zone" v-if="equipments.length > 0">
+    <div v-if="equipments.length > 0" class="zone">
       <div class="zone-header">
         <span class="zone-title">装备 ({{ equipments.length }})</span>
         <span class="zone-cost">{{ eqCost }} 点</span>
@@ -60,13 +61,20 @@ const skCost = computed(() => props.skillCost ?? roundCost(props.skills))
       <div v-for="item in equipments" :key="item.id" class="selected-item">
         <span class="item-name">{{ item.name }}</span>
         <QualityBadge :quality="qualityLabel(item)" size="sm" />
-        <button v-if="item.id.startsWith('custom_')" class="edit-btn" @click="$emit('edit-equipment', item)" title="编辑">✎</button>
-        <button class="remove-btn" @click="$emit('remove-equipment', item)" title="移除">✕</button>
+        <button
+          v-if="item.id.startsWith('custom_')"
+          class="edit-btn"
+          title="编辑"
+          @click="$emit('edit-equipment', item)"
+        >
+          ✎
+        </button>
+        <button class="remove-btn" title="移除" @click="$emit('remove-equipment', item)">✕</button>
       </div>
     </div>
 
     <!-- 道具区 -->
-    <div class="zone" v-if="items.length > 0">
+    <div v-if="items.length > 0" class="zone">
       <div class="zone-header">
         <span class="zone-title">道具 ({{ items.length }})</span>
         <span class="zone-cost">{{ itCost }} 点</span>
@@ -75,13 +83,20 @@ const skCost = computed(() => props.skillCost ?? roundCost(props.skills))
         <span class="item-name">{{ item.name }}</span>
         <span v-if="item.quantity && item.quantity > 1" class="item-qty">×{{ item.quantity }}</span>
         <QualityBadge :quality="qualityLabel(item)" size="sm" />
-        <button v-if="item.id.startsWith('custom_')" class="edit-btn" @click="$emit('edit-item', item)" title="编辑">✎</button>
-        <button class="remove-btn" @click="$emit('remove-item', item)" title="移除">✕</button>
+        <button
+          v-if="item.id.startsWith('custom_')"
+          class="edit-btn"
+          title="编辑"
+          @click="$emit('edit-item', item)"
+        >
+          ✎
+        </button>
+        <button class="remove-btn" title="移除" @click="$emit('remove-item', item)">✕</button>
       </div>
     </div>
 
     <!-- 技能区 -->
-    <div class="zone" v-if="skills.length > 0">
+    <div v-if="skills.length > 0" class="zone">
       <div class="zone-header">
         <span class="zone-title">技能 ({{ skills.length }})</span>
         <span class="zone-cost">{{ skCost }} 点</span>
@@ -89,8 +104,15 @@ const skCost = computed(() => props.skillCost ?? roundCost(props.skills))
       <div v-for="item in skills" :key="item.id" class="selected-item">
         <span class="item-name">{{ item.name }}</span>
         <QualityBadge :quality="qualityLabel(item)" size="sm" />
-        <button v-if="item.id.startsWith('custom_')" class="edit-btn" @click="$emit('edit-skill', item)" title="编辑">✎</button>
-        <button class="remove-btn" @click="$emit('remove-skill', item)" title="移除">✕</button>
+        <button
+          v-if="item.id.startsWith('custom_')"
+          class="edit-btn"
+          title="编辑"
+          @click="$emit('edit-skill', item)"
+        >
+          ✎
+        </button>
+        <button class="remove-btn" title="移除" @click="$emit('remove-skill', item)">✕</button>
       </div>
     </div>
 
@@ -161,7 +183,9 @@ const skCost = computed(() => props.skillCost ?? roundCost(props.skills))
   padding: 0.15em 0;
   border-bottom: 1px solid var(--theme-card-border);
 }
-.selected-item:last-child { border-bottom: none; }
+.selected-item:last-child {
+  border-bottom: none;
+}
 
 .item-name {
   font-size: 0.8em;

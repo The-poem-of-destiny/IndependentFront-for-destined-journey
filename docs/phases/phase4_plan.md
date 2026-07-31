@@ -9,6 +9,7 @@
 ## 一、主人核心需求总结
 
 ### 1.1 记忆召回 → Embedding 方案
+
 - ❌ 废弃：code 层关键词粗筛 → Agent 精选
 - ✅ 新方案：Embedding 向量相似度检索
   - 候选模型：Qwen/Qwen3-VL-Embedding-8B（或其他 OpenAI 兼容 embedding 端点）
@@ -16,6 +17,7 @@
   - 配置每轮最大返回条数（如 20 条），即使有 2000 条记忆上下文也不爆炸
 
 ### 1.2 记忆上限 → 不删除 + 压缩
+
 - ❌ 废弃：超出上限删最低重要度
 - ✅ 新方案：
   - **永不删除记忆**
@@ -23,6 +25,7 @@
   - **超过 100 轮后**：把前 100 轮的记忆压缩为一条「完整事件摘要」
 
 ### 1.3 剧情系统 → 三模式 + 大纲-自检-事件
+
 - ❌ 废弃：简单的开局生成 + 每年追加
 - ✅ 新方案：
   - **三种模式**：完全关闭 / 仅支线 / 主线
@@ -35,6 +38,7 @@
     - **正文后**：固定设定 + 大纲 + 本轮正文/记忆/角色状态 → AI 判断世界线变动 → 修改大纲 → 修改剧情树
 
 ### 1.4 其他确认
+
 - 世界线变动传播：保留（默认 2 层）
 - 条件表达式：保留 EJS 语法
 - 剧情事件完成/失败时自动生成关联记忆（重要度高）
@@ -70,16 +74,16 @@ interface PlotSettings {
   mode: 'off' | 'side' | 'main';
   /** 主线专属 */
   main?: {
-    durationYears: number;          // 主线持续年份
-    allowNonWorldbookNpc: boolean;  // 是否引入世界书外 NPC
-    difficultyTier: number;         // 事件难度层级 (1-7, 对应生命层级)
+    durationYears: number; // 主线持续年份
+    allowNonWorldbookNpc: boolean; // 是否引入世界书外 NPC
+    difficultyTier: number; // 事件难度层级 (1-7, 对应生命层级)
     genrePreference: Array<'combat' | 'mystery' | 'social' | 'romance'>;
-    customPreference: string;       // 自定义偏好输入框
+    customPreference: string; // 自定义偏好输入框
   };
   /** 支线专属 */
   side?: {
-    yearlyGeneration: boolean;      // 每年自动生成
-    focusRegion: string;            // 专注区域（空=当前区域）
+    yearlyGeneration: boolean; // 每年自动生成
+    focusRegion: string; // 专注区域（空=当前区域）
   };
 }
 
@@ -95,12 +99,12 @@ interface AppSettings {
   // ... 现有字段 ...
 
   // Phase 4 新增
-  plotSettings: PlotSettings;           // 剧情模式配置
-  embeddingEndpointId: string | null;   // Embedding 使用的 API 端点
-  embeddingModel: string;               // Embedding 模型名
-  embeddingDimension: number;           // 向量维度
-  maxMemoriesRecall: number;            // 每轮最大召回记忆数 (默认 20)
-  memoryCompressionThreshold: number;   // 多少轮后压缩旧记忆 (默认 100)
+  plotSettings: PlotSettings; // 剧情模式配置
+  embeddingEndpointId: string | null; // Embedding 使用的 API 端点
+  embeddingModel: string; // Embedding 模型名
+  embeddingDimension: number; // 向量维度
+  maxMemoriesRecall: number; // 每轮最大召回记忆数 (默认 20)
+  memoryCompressionThreshold: number; // 多少轮后压缩旧记忆 (默认 100)
 }
 ```
 
@@ -126,6 +130,7 @@ Stage 5: plot_post_check (剧情修正 + 大纲更新 + 世界线变动)
 **职责**: Embedding 向量检索 + 候选排序 + 压缩触发。
 
 **流程**:
+
 ```
 新记忆存入时:
   saveMemory()
@@ -156,6 +161,7 @@ Stage 5: plot_post_check (剧情修正 + 大纲更新 + 世界线变动)
 ```
 
 **待实现函数**:
+
 - `computeEmbedding(text: string, endpoint: ApiEndpoint, model: string): Promise<number[]>`
 - `cosineSimilarity(a: number[], b: number[]): number`
 - `recallMemories(saveId: string, query: string, topK: number): Promise<MemoryRecord[]>`
@@ -163,6 +169,7 @@ Stage 5: plot_post_check (剧情修正 + 大纲更新 + 世界线变动)
 - `getRoundCount(saveId: string): Promise<number>`
 
 **可配置项**:
+
 - `maxMemoriesRecall: number` — 默认 20
 - `memoryCompressionThreshold: number` — 默认 100（轮）
 - `compressionCheckInterval: number` — 默认 10（每 10 轮检查一次）
@@ -174,6 +181,7 @@ Stage 5: plot_post_check (剧情修正 + 大纲更新 + 世界线变动)
 **职责**: 每轮记忆总结 + 自动生成 MEM 编号 + Embedding 计算 + 持久化。
 
 **流程**:
+
 ```
 本轮 story 输出
     ↓
@@ -188,6 +196,7 @@ saveMemory() → IndexedDB
 ```
 
 **待实现函数**:
+
 - `generateMemoryId(saveId: string): Promise<string>` — MEM000001, MEM000002...
 - `summarizeAndSave(...)` — 编排 memory_summary Agent + 校验 + embedding + 持久化
 
@@ -198,6 +207,7 @@ saveMemory() → IndexedDB
 **职责**: 大纲 CRUD + AI 生成 + AI 自检 + 事件树生成。
 
 **流程**:
+
 ```
 开局时 (mode = side | main):
   用户配置 (PlotSettings)
@@ -225,6 +235,7 @@ saveMemory() → IndexedDB
 ```
 
 **待实现函数**:
+
 - `generateOutline(saveId: string, settings: PlotSettings, character: CharacterState): Promise<PlotOutline>`
 - `selfCritiqueOutline(outline: PlotOutline): Promise<PlotOutline>` — AI 自检
 - `outlineToEvents(outline: PlotOutline, character: CharacterState): Promise<PlotEvent[]>`
@@ -237,6 +248,7 @@ saveMemory() → IndexedDB
 **职责**: 正文前触发检查 + 正文后世界线修正。一个模块，两个调用点。
 
 **流程**:
+
 ```
 === 正文前 (plot_pre_check) ===
   userInput + 大纲 + 上轮情节 + 角色状态
@@ -263,6 +275,7 @@ saveMemory() → IndexedDB
 ```
 
 **待实现函数**:
+
 - `preCheckPlot(userInput, outline, context): Promise<PlotEvent[]>` — 正文前触发
 - `postCheckPlot(storyOutput, outline, context): Promise<PlotCorrectionResult>` — 正文后修正
 - `evaluateCondition(condition: string, variables: Record<string, any>): boolean` — EJS 条件
@@ -287,6 +300,7 @@ src/sillytavern/
 ```
 
 **修改现有文件**:
+
 - `types.ts` — 新增 PlotOutline / PlotSettings / MemoryRecord.embedding
 - `database.ts` — 新增 plot_outlines 表 + CRUD
 - `agent-templates.ts` — 新增 plot_outline_agent 模板 + 更新现有 plot_check/plot_correct 模板
@@ -350,21 +364,21 @@ src/sillytavern/
 
 ## 六、实现顺序
 
-| 步骤 | 内容 | 预估 |
-|------|------|------|
-| 1 | types.ts 新增类型（PlotOutline/PlotSettings/MemoryRecord.embedding） | 小 |
-| 2 | database.ts 新增 plot_outlines 表 + CRUD | 小 |
-| 3 | AppSettings 新增字段 + DEFAULT_SETTINGS 更新 | 小 |
-| 4 | agent-templates.ts 新增/更新 3 个模板 | 中 |
-| 5 | `memory-store.ts` — Embedding 召回 + 余弦相似度 | 中 |
-| 6 | `memory-summarizer.ts` — 总结 + 编号 + embedding | 中 |
-| 7 | `plot-outline.ts` — 大纲生成 + 自检 + →事件树 | 大 |
-| 8 | `plot-engine.ts` — pre-check + post-check | 大 |
-| 9 | agent-orchestrator.ts 管线更新 | 小 |
-| 10 | 全部测试文件 | 中 |
-| 11 | 编译 + 测试验证 | — |
+| 步骤 | 内容                                                                 | 预估 |
+| ---- | -------------------------------------------------------------------- | ---- |
+| 1    | types.ts 新增类型（PlotOutline/PlotSettings/MemoryRecord.embedding） | 小   |
+| 2    | database.ts 新增 plot_outlines 表 + CRUD                             | 小   |
+| 3    | AppSettings 新增字段 + DEFAULT_SETTINGS 更新                         | 小   |
+| 4    | agent-templates.ts 新增/更新 3 个模板                                | 中   |
+| 5    | `memory-store.ts` — Embedding 召回 + 余弦相似度                      | 中   |
+| 6    | `memory-summarizer.ts` — 总结 + 编号 + embedding                     | 中   |
+| 7    | `plot-outline.ts` — 大纲生成 + 自检 + →事件树                        | 大   |
+| 8    | `plot-engine.ts` — pre-check + post-check                            | 大   |
+| 9    | agent-orchestrator.ts 管线更新                                       | 小   |
+| 10   | 全部测试文件                                                         | 中   |
+| 11   | 编译 + 测试验证                                                      | —    |
 
 ---
 
-*文档版本: v2*
-*更新时间: 2026-06-13*
+_文档版本: v2_
+_更新时间: 2026-06-13_

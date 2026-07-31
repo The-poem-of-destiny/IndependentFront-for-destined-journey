@@ -12,21 +12,45 @@
  */
 
 import type {
-  StatePatch, StatePatchOp, StateCommitResult,
-  GameEvent, CharacterState, MemoryRecord, PlotEvent,
-  StatusEffect, Skill, InventoryItem, Snapshot,
+  StatePatch,
+  StatePatchOp,
+  StateCommitResult,
+  GameEvent,
+  CharacterState,
+  MemoryRecord,
+  PlotEvent,
+  StatusEffect,
+  Skill,
+  InventoryItem,
+  Snapshot,
 } from './types';
 import {
-  getCharacters, saveCharacter, saveCharacters, deleteCharacter,
-  saveMemory, deleteMemoriesAfter,
-  getPlotEvents, savePlotEvents, deletePlotEvent,
-  getSave, saveSaveSlot,
-  getSnapshot, saveSnapshot, trimSnapshots,
-  getSettings, deleteMessagesAfterTurn,
+  getCharacters,
+  saveCharacter,
+  saveCharacters,
+  deleteCharacter,
+  saveMemory,
+  deleteMemoriesAfter,
+  getPlotEvents,
+  savePlotEvents,
+  deletePlotEvent,
+  getSave,
+  saveSaveSlot,
+  getSnapshot,
+  saveSnapshot,
+  trimSnapshots,
+  getSettings,
+  deleteMessagesAfterTurn,
   getDatabase,
 } from './database';
 import { getVar, setVar, delVar, insertVar } from './var-resolver';
-import { normalizeQuestStatus, normalizeStatusCategory, normalizeItemType, normalizeRarity, normalizeSlot } from './field-enums';
+import {
+  normalizeQuestStatus,
+  normalizeStatusCategory,
+  normalizeItemType,
+  normalizeRarity,
+  normalizeSlot,
+} from './field-enums';
 
 // ========== Types ==========
 
@@ -51,27 +75,53 @@ interface PatchApplicationResult {
  */
 const UPDATE_CHAR_WHITELIST = new Set<string>([
   // 基础信息（name 除外 — 改名走 rename_character）
-  'type', 'race', 'identity', 'occupation',
+  'type',
+  'race',
+  'identity',
+  'occupation',
   // 生命层级
-  'tier', 'tierName', 'level', 'totalExp', 'expToNext',
+  'tier',
+  'tierName',
+  'level',
+  'totalExp',
+  'expToNext',
   // 五维属性
-  'attributes', 'freeAttrPoints',
+  'attributes',
+  'freeAttrPoints',
   // 资源
-  'hp', 'maxHp', 'mp', 'maxMp', 'sp', 'maxSp',
+  'hp',
+  'maxHp',
+  'mp',
+  'maxMp',
+  'sp',
+  'maxSp',
   // 登神长阶
   'ascension',
   // 经济 / 位置 / 冒险者等级 / 当前行为
-  'money', 'location', 'present', 'adventurerRank', 'currentAction',
+  'money',
+  'location',
+  'present',
+  'adventurerRank',
+  'currentAction',
   // 血脉 / 集群数量 / 叙事字段
-  'bloodlineIds', 'quantity',
-  'appearance', 'background', 'personality', 'gender', 'outfit', 'thoughts',
+  'bloodlineIds',
+  'quantity',
+  'appearance',
+  'background',
+  'personality',
+  'gender',
+  'outfit',
+  'thoughts',
   // 扩展字段
   'customFields',
 ]);
 
 /** 禁止的数组实体字段 → 必须走各自专用 op（杀 #21 假字段污染） */
 const UPDATE_CHAR_FORBIDDEN_ARRAY_FIELDS = new Set<string>([
-  'inventory', 'skills', 'statusEffects', 'equipment', // equipment 在 M2 T12 删除前同样禁止
+  'inventory',
+  'skills',
+  'statusEffects',
+  'equipment', // equipment 在 M2 T12 删除前同样禁止
 ]);
 
 /** 禁止的账务字段 — 仅 Code 层维护（铁律3） */
@@ -79,9 +129,19 @@ const UPDATE_CHAR_FORBIDDEN_LEDGER_FIELDS = new Set<string>(['id', 'saveId']);
 
 /** 可 delta 加法的数值字段（metadata.delta=true 时仅允许这些键，杀 #20 delta 变替换） */
 const UPDATE_CHAR_NUMERIC_FIELDS = new Set<string>([
-  'tier', 'level', 'totalExp', 'expToNext', 'freeAttrPoints',
-  'hp', 'maxHp', 'mp', 'maxMp', 'sp', 'maxSp',
-  'money', 'quantity',
+  'tier',
+  'level',
+  'totalExp',
+  'expToNext',
+  'freeAttrPoints',
+  'hp',
+  'maxHp',
+  'mp',
+  'maxMp',
+  'sp',
+  'maxSp',
+  'money',
+  'quantity',
 ]);
 
 // ========== StateManager ==========
@@ -142,7 +202,7 @@ export class StateManager {
 
     return {
       success: errors.length === 0,
-      patchesApplied: results.filter(r => r.success).length,
+      patchesApplied: results.filter((r) => r.success).length,
       eventsGenerated: [...this.events],
       errors,
     };
@@ -286,7 +346,11 @@ export class StateManager {
 
     // amount 必填
     const AMOUNT_REQUIRED_OPS: StatePatchOp[] = [
-      'delta_variable', 'delta_hp', 'delta_mp', 'delta_sp', 'delta_affection',
+      'delta_variable',
+      'delta_hp',
+      'delta_mp',
+      'delta_sp',
+      'delta_affection',
     ];
     if (AMOUNT_REQUIRED_OPS.includes(patch.op) && patch.amount === undefined) {
       throw new Error(`${patch.op} 需要 amount 字段`);
@@ -294,16 +358,31 @@ export class StateManager {
 
     // value 必填
     const VALUE_REQUIRED_OPS: StatePatchOp[] = [
-      'set_variable', 'insert_variable',
-      'set_hp', 'set_mp', 'set_sp', 'set_location',
-      'update_quest', 'remove_quest',
-      'add_item', 'remove_item', 'update_item', 'transfer_item',
-      'equip_item', 'unequip_item',
-      'add_skill', 'update_skill', 'remove_skill',
-      'add_status_effect', 'remove_status_effect',
-      'add_character', 'rename_character',
-      'add_memory', 'update_plot_event',
-      'set_affection', 'add_news',
+      'set_variable',
+      'insert_variable',
+      'set_hp',
+      'set_mp',
+      'set_sp',
+      'set_location',
+      'update_quest',
+      'remove_quest',
+      'add_item',
+      'remove_item',
+      'update_item',
+      'transfer_item',
+      'equip_item',
+      'unequip_item',
+      'add_skill',
+      'update_skill',
+      'remove_skill',
+      'add_status_effect',
+      'remove_status_effect',
+      'add_character',
+      'rename_character',
+      'add_memory',
+      'update_plot_event',
+      'set_affection',
+      'add_news',
     ];
     if (VALUE_REQUIRED_OPS.includes(patch.op) && patch.value === undefined) {
       throw new Error(`${patch.op} 需要 value 字段`);
@@ -329,12 +408,12 @@ export class StateManager {
     const chars = await getCharacters(this.saveId);
 
     // ① 名字精确匹配
-    const byName = chars.find(c => c.name === key);
+    const byName = chars.find((c) => c.name === key);
     if (byName) return byName;
 
     // ② 主角别名
     if (key === '主角' || key === '玩家') {
-      const player = chars.find(c => c.type === 'player');
+      const player = chars.find((c) => c.type === 'player');
       if (player) return player;
     }
 
@@ -347,9 +426,7 @@ export class StateManager {
    * （防御子路径写法 'characters.X.skills'，#11 Code 侧防御）
    */
   private async resolveCharTarget(target: string): Promise<CharacterState> {
-    const raw = target.startsWith('characters.')
-      ? target.slice('characters.'.length)
-      : target;
+    const raw = target.startsWith('characters.') ? target.slice('characters.'.length) : target;
     const key = raw.split('.')[0];
     if (!key) throw new Error(`无效的 character target: ${target}`);
     return this.resolveCharacter(key);
@@ -360,7 +437,9 @@ export class StateManager {
   private async applySetVariable(patch: StatePatch): Promise<GameEvent> {
     // 读取当前 save 的 variables（真源: SaveProfile.variables，M5）
     const vars = await this.getCurrentVariables();
-    const path = patch.target.startsWith('variables.') ? patch.target.slice('variables.'.length) : patch.target;
+    const path = patch.target.startsWith('variables.')
+      ? patch.target.slice('variables.'.length)
+      : patch.target;
     const newVars = setVar(vars, path, patch.value);
     await this.persistVariables(newVars);
     return this.createEvent('variable_change', patch);
@@ -368,7 +447,9 @@ export class StateManager {
 
   private async applyDeltaVariable(patch: StatePatch): Promise<GameEvent> {
     const vars = await this.getCurrentVariables();
-    const path = patch.target.startsWith('variables.') ? patch.target.slice('variables.'.length) : patch.target;
+    const path = patch.target.startsWith('variables.')
+      ? patch.target.slice('variables.'.length)
+      : patch.target;
     const current = getVar(vars, path);
     const newValue = (typeof current === 'number' ? current : 0) + (patch.amount ?? 0);
     const newVars = setVar(vars, path, newValue);
@@ -378,7 +459,9 @@ export class StateManager {
 
   private async applyRemoveVariable(patch: StatePatch): Promise<GameEvent> {
     const vars = await this.getCurrentVariables();
-    const path = patch.target.startsWith('variables.') ? patch.target.slice('variables.'.length) : patch.target;
+    const path = patch.target.startsWith('variables.')
+      ? patch.target.slice('variables.'.length)
+      : patch.target;
     const newVars = delVar(vars, path);
     await this.persistVariables(newVars);
     return this.createEvent('variable_change', patch);
@@ -386,7 +469,9 @@ export class StateManager {
 
   private async applyMoveVariable(patch: StatePatch): Promise<GameEvent> {
     const vars = await this.getCurrentVariables();
-    const fromPath = patch.target.startsWith('variables.') ? patch.target.slice('variables.'.length) : patch.target;
+    const fromPath = patch.target.startsWith('variables.')
+      ? patch.target.slice('variables.'.length)
+      : patch.target;
     const toPath = patch.metadata?.toPath as string;
     if (!toPath) throw new Error('move_variable 需要 metadata.toPath');
     const value = getVar(vars, fromPath);
@@ -398,7 +483,9 @@ export class StateManager {
 
   private async applyInsertVariable(patch: StatePatch): Promise<GameEvent> {
     const vars = await this.getCurrentVariables();
-    const path = patch.target.startsWith('variables.') ? patch.target.slice('variables.'.length) : patch.target;
+    const path = patch.target.startsWith('variables.')
+      ? patch.target.slice('variables.'.length)
+      : patch.target;
     const newVars = insertVar(vars, path, patch.value, patch.metadata?.index as number);
     await this.persistVariables(newVars);
     return this.createEvent('variable_change', patch);
@@ -436,7 +523,7 @@ export class StateManager {
         if (UPDATE_CHAR_FORBIDDEN_ARRAY_FIELDS.has(k)) {
           // #21: 数组实体禁走 update_character，防假字段污染
           throw new Error(
-            `update_character 禁止写数组字段 "${k}" — 请使用专用 op（add/update/remove_status_effect、add/update/remove_skill、add/update/remove_item、equip/unequip_item）`
+            `update_character 禁止写数组字段 "${k}" — 请使用专用 op（add/update/remove_status_effect、add/update/remove_skill、add/update/remove_item、equip/unequip_item）`,
           );
         }
         if (k === 'name') {
@@ -457,7 +544,9 @@ export class StateManager {
             throw new Error(`update_character delta=true 仅支持数值字段，"${k}" 不是数值字段`);
           }
           if (typeof value[k] !== 'number') {
-            throw new Error(`update_character delta=true 要求 "${k}" 的值为 number，实际为 ${typeof value[k]}`);
+            throw new Error(
+              `update_character delta=true 要求 "${k}" 的值为 number，实际为 ${typeof value[k]}`,
+            );
           }
         }
       }
@@ -481,7 +570,8 @@ export class StateManager {
       // ===== hp/mp/sp 钳制: 与 set_hp 语义一致 [0, 对应 max]（终审修复）=====
       // 仅在本次 patch 涉及资源或其 max 时钳制（若本次也写了 max* 则以写后值为准）
       for (const res of ['hp', 'mp', 'sp'] as const) {
-        const maxField = `max${res.charAt(0).toUpperCase()}${res.slice(1)}` as 'maxHp' | 'maxMp' | 'maxSp';
+        const maxField = `max${res.charAt(0).toUpperCase()}${res.slice(1)}` as
+          'maxHp' | 'maxMp' | 'maxSp';
         if (keys.includes(res) || keys.includes(maxField)) {
           const cur = (char as any)[res];
           const max = (char as any)[maxField];
@@ -502,7 +592,8 @@ export class StateManager {
     const char = await this.resolveCharTarget(patch.target);
 
     const resource = patch.op.replace('set_', '') as 'hp' | 'mp' | 'sp';
-    const maxField = `max${resource.charAt(0).toUpperCase()}${resource.slice(1)}` as 'maxHp' | 'maxMp' | 'maxSp';
+    const maxField = `max${resource.charAt(0).toUpperCase()}${resource.slice(1)}` as
+      'maxHp' | 'maxMp' | 'maxSp';
 
     const newValue = Math.max(0, Math.min(patch.value as number, (char as any)[maxField]));
     (char as any)[resource] = newValue;
@@ -515,7 +606,8 @@ export class StateManager {
     const char = await this.resolveCharTarget(patch.target);
 
     const resource = patch.op.replace('delta_', '') as 'hp' | 'mp' | 'sp';
-    const maxField = `max${resource.charAt(0).toUpperCase()}${resource.slice(1)}` as 'maxHp' | 'maxMp' | 'maxSp';
+    const maxField = `max${resource.charAt(0).toUpperCase()}${resource.slice(1)}` as
+      'maxHp' | 'maxMp' | 'maxSp';
 
     const current = (char as any)[resource] as number;
     const delta = patch.amount ?? 0;
@@ -612,7 +704,7 @@ export class StateManager {
     const name = (patch.value as { name?: string })?.name;
     if (!name) throw new Error('remove_status_effect 需要 value.name');
 
-    char.statusEffects = char.statusEffects.filter(e => e.name !== name);
+    char.statusEffects = char.statusEffects.filter((e) => e.name !== name);
     await saveCharacter(char);
 
     return this.createEvent('status_effect', patch);
@@ -647,7 +739,8 @@ export class StateManager {
         description: value.description,
         type: value.type !== undefined ? normalizeItemType(value.type) : undefined,
         rarity: value.rarity !== undefined ? normalizeRarity(value.rarity) : undefined,
-        equippedSlot: value.equippedSlot != null ? normalizeSlot(value.equippedSlot) : value.equippedSlot,
+        equippedSlot:
+          value.equippedSlot != null ? normalizeSlot(value.equippedSlot) : value.equippedSlot,
         stats: value.stats,
         durability: value.durability,
         maxDurability: value.maxDurability,
@@ -674,7 +767,7 @@ export class StateManager {
     const qty = value?.quantity ?? 1;
     if (!name) throw new Error('remove_item 需要 value.name');
 
-    const idx = char.inventory.findIndex(i => i.name === name);
+    const idx = char.inventory.findIndex((i) => i.name === name);
     if (idx < 0) throw new Error(`物品不存在: ${name}`);
 
     // 🔒 P1-07: 删除前验证库存总量 —— 此前 qty > 持有时扣到负数再 splice，静默吞错，
@@ -708,8 +801,10 @@ export class StateManager {
     if (!item) throw new Error(`物品不存在: ${update.name}`);
 
     const rawChanges = update.changes ?? {};
-    if ('name' in rawChanges) throw new Error('update_item 禁止改 name（改名走 remove_item + add_item）');
-    if ('quantity' in rawChanges) throw new Error('update_item 禁止改 quantity（数量走 add_item / remove_item）');
+    if ('name' in rawChanges)
+      throw new Error('update_item 禁止改 name（改名走 remove_item + add_item）');
+    if ('quantity' in rawChanges)
+      throw new Error('update_item 禁止改 quantity（数量走 add_item / remove_item）');
 
     // id 剥离（铁律1）+ 枚举字段归一化（铁律5）
     const { id: _ignoredId, ...changes } = rawChanges;
@@ -738,23 +833,25 @@ export class StateManager {
     const qty = typeof value.quantity === 'number' && value.quantity > 0 ? value.quantity : 1;
 
     // ── 校验阶段: 任一失败在此 throw，尚未发生任何变更 ──
-    const to = await this.resolveCharacter(value.to);   // 乙不存在 → throw，甲不动
+    const to = await this.resolveCharacter(value.to); // 乙不存在 → throw，甲不动
 
     // 自转移防复制: 甲乙为同一角色时 bulkPut 同主键后写覆盖前写，会凭空复制物品
     if (to.id === from.id) {
       throw new Error(`transfer_item 不允许自我转移: ${from.name}`);
     }
-    const idx = from.inventory.findIndex(i => i.name === value.name);
+    const idx = from.inventory.findIndex((i) => i.name === value.name);
     if (idx < 0) throw new Error(`物品不存在: ${value.name}`);
     if (from.inventory[idx].quantity < qty) {
-      throw new Error(`物品数量不足: ${value.name}（持有 ${from.inventory[idx].quantity}，需 ${qty}）`);
+      throw new Error(
+        `物品数量不足: ${value.name}（持有 ${from.inventory[idx].quantity}，需 ${qty}）`,
+      );
     }
 
     // ── 变更阶段: 校验全过后才动内存，双方一次事务落库 ──
     const source = from.inventory[idx];
     const received = findByName(to.inventory, value.name);
     if (received) {
-      received.quantity += qty;   // 乙同名合并
+      received.quantity += qty; // 乙同名合并
     } else {
       // 乙新增: 物品字段随转移带过去，剥离 id（铁律1）
       const { id: _ignoredId, ...fields } = source;
@@ -764,7 +861,7 @@ export class StateManager {
     if (source.quantity <= 0) {
       from.inventory.splice(idx, 1);
     }
-    await saveCharacters([from, to]);   // Dexie bulkPut 单事务，避免半持久化
+    await saveCharacters([from, to]); // Dexie bulkPut 单事务，避免半持久化
 
     return this.createEvent('item_use', patch);
   }
@@ -793,7 +890,9 @@ export class StateManager {
 
     // 堆叠穿戴互斥: 堆叠物品穿上后 quantity 语义会撕裂（穿 1 件还是 5 件？）
     if (item.quantity > 1) {
-      throw new Error(`堆叠物品不可直接穿戴: ${value.name}（数量 ${item.quantity}），请先拆分为单件`);
+      throw new Error(
+        `堆叠物品不可直接穿戴: ${value.name}（数量 ${item.quantity}），请先拆分为单件`,
+      );
     }
 
     // 同槽顶替: 仅清旧穿戴者的 equippedSlot，物品留在背包字段无损（杀 #10 有损穿脱）
@@ -829,7 +928,7 @@ export class StateManager {
       // 按槽脱: slot 先归一化再匹配穿戴者（铁律5）
       const slot = normalizeSlot(value.slot);
       if (!slot) throw new Error(`无法识别的装备槽位: ${value.slot}`);
-      item = char.inventory.find(i => i.equippedSlot === slot);
+      item = char.inventory.find((i) => i.equippedSlot === slot);
       if (!item) throw new Error(`该槽位无穿戴: ${slot}`);
     } else {
       throw new Error('unequip_item 需要 value.name 或 value.slot');
@@ -917,7 +1016,7 @@ export class StateManager {
 
     if (!findByName(char.skills, name)) throw new Error(`技能不存在: ${name}`);
 
-    char.skills = char.skills.filter(s => s.name !== name);
+    char.skills = char.skills.filter((s) => s.name !== name);
     await saveCharacter(char);
 
     return this.createEvent('skill_use', patch);
@@ -942,7 +1041,7 @@ export class StateManager {
 
     // 同存档同名查重（排除同 id 重放 — Dexie put 幂等覆盖无害），与 rename_character 查重口径一致（终审修复）
     const chars = await getCharacters(this.saveId);
-    const clash = chars.find(c => c.name === name && c.id !== character.id);
+    const clash = chars.find((c) => c.name === name && c.id !== character.id);
     if (clash) throw new Error(`同名角色已存在: ${name}`);
 
     // 铁律3: saveId 是账务字段，由 Code 无条件注入，不信任上游 patch 构造方 (#8/M2硬前置②)
@@ -998,7 +1097,7 @@ export class StateManager {
 
     // 同存档新名查重（排除自身 — 自己改自己的名不算撞名，上面已 no-op 短路）
     const chars = await getCharacters(this.saveId);
-    const clash = chars.find(c => c.name === newName && c.id !== char.id);
+    const clash = chars.find((c) => c.name === newName && c.id !== char.id);
     if (clash) {
       throw new Error(`rename_character 新名已被占用: ${newName}`);
     }
@@ -1032,7 +1131,7 @@ export class StateManager {
     if (!update?.eventId) throw new Error('缺少事件 ID');
 
     const events = await getPlotEvents(this.saveId);
-    const event = events.find(e => e.id === update.eventId);
+    const event = events.find((e) => e.id === update.eventId);
     if (!event) throw new Error(`剧情事件不存在: ${update.eventId}`);
 
     Object.assign(event, update.changes);
@@ -1247,7 +1346,8 @@ export class StateManager {
       // 抛错 Dexie 自动回滚全表，恢复要么完整成功要么完全不动。
       const { updateProfile } = await import('./save-profile');
       const db = getDatabase();
-      await db.transaction('rw',
+      await db.transaction(
+        'rw',
         [db.characters, db.saveProfiles, db.plotEvents, db.messages, db.memories, db.saves],
         async () => {
           // ② characters 整体覆写: 全删 → 写入快照副本
@@ -1281,7 +1381,8 @@ export class StateManager {
             save.metadata.totalTurns = snapshot.turn;
             await saveSaveSlot(save);
           }
-        });
+        },
+      );
     } catch (err) {
       errors.push(err instanceof Error ? err.message : String(err));
     }
@@ -1356,7 +1457,7 @@ export class StateManager {
           patches.push(...convertScriptEffects(result));
         }
 
-        char.statusEffects = char.statusEffects.filter(e => e.name !== fx.name);
+        char.statusEffects = char.statusEffects.filter((e) => e.name !== fx.name);
 
         patches.push({
           op: 'remove_status_effect',
@@ -1390,7 +1491,10 @@ export class StateManager {
 // ========== 工厂函数 ==========
 
 /** 创建 StateManager 实例 */
-export function createStateManager(saveId: string, config?: Partial<StateManagerConfig>): StateManager {
+export function createStateManager(
+  saveId: string,
+  config?: Partial<StateManagerConfig>,
+): StateManager {
   return new StateManager({ saveId, ...config });
 }
 
@@ -1403,7 +1507,7 @@ export function createStateManager(saveId: string, config?: Partial<StateManager
  * 供各 op handler 在 inventory/skills/statusEffects 等列表中按名寻址。
  */
 export function findByName<T extends { name: string }>(list: T[], name: string): T | undefined {
-  return list.find(item => item.name === name);
+  return list.find((item) => item.name === name);
 }
 
 import type { ScriptEffects } from './script-executor';
@@ -1411,12 +1515,29 @@ import type { ScriptEffects } from './script-executor';
 function convertScriptEffects(se: ScriptEffects): StatePatch[] {
   const patches: StatePatch[] = [];
   // M2: add_status_effect 不再要求 id → Partial<StatusEffect> 直接透传（handler 内按 name 寻址+补缺省）
-  for (const a of se.adds) patches.push({ op: 'add_status_effect', target: `characters.${a.charId}`, value: a.effect });
+  for (const a of se.adds)
+    patches.push({ op: 'add_status_effect', target: `characters.${a.charId}`, value: a.effect });
   // M2: effectId 字符串按 name 解释（remove handler 的裸字符串过渡形态）
-  for (const r of se.removes) patches.push({ op: 'remove_status_effect', target: `characters.${r.charId}`, value: r.effectId });
+  for (const r of se.removes)
+    patches.push({
+      op: 'remove_status_effect',
+      target: `characters.${r.charId}`,
+      value: r.effectId,
+    });
   // M2: 逻辑键=name（铁律1）— stackSets 的 effectId 按 name 解释（脚本层 $status.setStacks 过渡形态，M3 收敛）
-  for (const s of se.stackSets) patches.push({ op: 'set_variable', target: `characters.${s.charId}.statusEffects`, value: { name: s.effectId, stacks: s.stacks } });
-  for (const h of se.hpChanges) patches.push({ op: 'delta_variable', target: `characters.${h.charId}.hp`, amount: h.amount });
-  for (const st of se.statChanges) patches.push({ op: 'delta_variable', target: `characters.${st.charId}.attributes.${st.stat}`, amount: st.amount });
+  for (const s of se.stackSets)
+    patches.push({
+      op: 'set_variable',
+      target: `characters.${s.charId}.statusEffects`,
+      value: { name: s.effectId, stacks: s.stacks },
+    });
+  for (const h of se.hpChanges)
+    patches.push({ op: 'delta_variable', target: `characters.${h.charId}.hp`, amount: h.amount });
+  for (const st of se.statChanges)
+    patches.push({
+      op: 'delta_variable',
+      target: `characters.${st.charId}.attributes.${st.stat}`,
+      amount: st.amount,
+    });
   return patches;
 }

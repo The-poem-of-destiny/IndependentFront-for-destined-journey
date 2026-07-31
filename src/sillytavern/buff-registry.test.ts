@@ -65,24 +65,18 @@ describe('lifecycleOf', () => {
   });
 
   it('缺省 + remainingTime=null → 持续（永久）', () => {
-    expect(
-      lifecycleOf(makeEffect({ timeUnit: '小时', remainingTime: null })),
-    ).toBe('持续');
+    expect(lifecycleOf(makeEffect({ timeUnit: '小时', remainingTime: null }))).toBe('持续');
   });
 
   it('缺省 + timeUnit=分钟 + remainingTime 非 null → 战斗（脱战按战斗型处理）', () => {
-    expect(
-      lifecycleOf(makeEffect({ timeUnit: '分钟', remainingTime: 10 })),
-    ).toBe('战斗');
+    expect(lifecycleOf(makeEffect({ timeUnit: '分钟', remainingTime: 10 }))).toBe('战斗');
   });
 
   it('显式 lifecycle 优先于 timeUnit 推导', () => {
     // timeUnit=回合但显式声明持续 → 取持续
-    expect(
-      lifecycleOf(
-        makeEffect({ timeUnit: '回合', remainingTime: 3, lifecycle: '持续' }),
-      ),
-    ).toBe('持续');
+    expect(lifecycleOf(makeEffect({ timeUnit: '回合', remainingTime: 3, lifecycle: '持续' }))).toBe(
+      '持续',
+    );
   });
 });
 
@@ -272,9 +266,7 @@ describe('apply (BuffRegistry.apply / applyBuff)', () => {
   });
 
   it('apply 不修改原数组（纯函数）', () => {
-    const existing = [
-      makeEffect({ name: '流血', sourceKey: '剑', stacks: 1, remainingTime: 3 }),
-    ];
+    const existing = [makeEffect({ name: '流血', sourceKey: '剑', stacks: 1, remainingTime: 3 })];
     const newEffect = makeEffect({ name: '流血', sourceKey: '剑', stacks: 2 });
     applyBuff(existing, newEffect);
     // 原数组未变
@@ -296,10 +288,7 @@ describe('remove (BuffRegistry.remove / removeBuff)', () => {
     expect(r.removed[0].sourceKey).toBe('幽怨之剑');
     expect(r.removed[0].name).toBe('流血');
     expect(r.remaining).toHaveLength(2);
-    expect(r.remaining.map((e) => buffIdOf(e))).toEqual([
-      '毒瓶.流血',
-      '幽怨之剑.灼烧',
-    ]);
+    expect(r.remaining.map((e) => buffIdOf(e))).toEqual(['毒瓶.流血', '幽怨之剑.灼烧']);
   });
 
   it('按裸 name 移除所有同名（跨所有 sourceKey 前缀）', () => {
@@ -370,9 +359,7 @@ describe('tick (BuffRegistry.tick / tickBuffs)', () => {
   });
 
   it('战斗型递减 remainingTime', () => {
-    const existing = [
-      makeEffect({ name: '流血', category: '减益', remainingTime: 2 }),
-    ];
+    const existing = [makeEffect({ name: '流血', category: '减益', remainingTime: 2 })];
     const r = tickBuffs(existing, 'round.end');
     expect(r.remaining[0].remainingTime).toBe(1);
   });
@@ -422,9 +409,7 @@ describe('tick (BuffRegistry.tick / tickBuffs)', () => {
   });
 
   it('到期（remainingTime 减到 0）→ 进 expired', () => {
-    const existing = [
-      makeEffect({ name: '流血', category: '减益', remainingTime: 1 }),
-    ];
+    const existing = [makeEffect({ name: '流血', category: '减益', remainingTime: 1 })];
     const r = tickBuffs(existing, 'round.end');
     expect(r.remaining).toHaveLength(0);
     expect(r.expired).toHaveLength(1);
@@ -484,9 +469,7 @@ describe('tick (BuffRegistry.tick / tickBuffs)', () => {
   });
 
   it('tick 不修改原数组', () => {
-    const existing = [
-      makeEffect({ name: '流血', category: '减益', remainingTime: 3 }),
-    ];
+    const existing = [makeEffect({ name: '流血', category: '减益', remainingTime: 3 })];
     tickBuffs(existing, 'round.end');
     expect(existing[0].remainingTime).toBe(3);
   });

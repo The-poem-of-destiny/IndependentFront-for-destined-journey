@@ -21,12 +21,12 @@ describe('DEFAULT_LOCATIONS', () => {
   });
 
   it('所有节点应有唯一的 id', () => {
-    const ids = DEFAULT_LOCATIONS.map(n => n.id);
+    const ids = DEFAULT_LOCATIONS.map((n) => n.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
   it('应包含所有层级类型的节点', () => {
-    const types = new Set(DEFAULT_LOCATIONS.map(n => n.type));
+    const types = new Set(DEFAULT_LOCATIONS.map((n) => n.type));
     expect(types.has('continent')).toBe(true);
     expect(types.has('region')).toBe(true);
     expect(types.has('city')).toBe(true);
@@ -41,7 +41,7 @@ describe('DEFAULT_LOCATIONS', () => {
   });
 
   it('所有边引用的 targetId 应为有效节点', () => {
-    const ids = new Set(DEFAULT_LOCATIONS.map(n => n.id));
+    const ids = new Set(DEFAULT_LOCATIONS.map((n) => n.id));
     for (const node of DEFAULT_LOCATIONS) {
       for (const edge of node.neighbors) {
         expect(ids.has(edge.targetId), `${node.id} → ${edge.targetId} 不存在`).toBe(true);
@@ -50,25 +50,25 @@ describe('DEFAULT_LOCATIONS', () => {
   });
 
   it('应恰好有一个 continent 节点且 parentId 为 null', () => {
-    const continents = DEFAULT_LOCATIONS.filter(n => n.type === 'continent');
+    const continents = DEFAULT_LOCATIONS.filter((n) => n.type === 'continent');
     expect(continents.length).toBe(1);
     expect(continents[0].parentId).toBeNull();
   });
 
   it('应包含 10 个势力 (region)', () => {
-    const regions = DEFAULT_LOCATIONS.filter(n => n.type === 'region');
+    const regions = DEFAULT_LOCATIONS.filter((n) => n.type === 'region');
     expect(regions.length).toBe(10);
   });
 
   it('所有 region 应归属于 continent', () => {
-    const regions = DEFAULT_LOCATIONS.filter(n => n.type === 'region');
+    const regions = DEFAULT_LOCATIONS.filter((n) => n.type === 'region');
     for (const r of regions) {
       expect(r.parentId).toBe('continent_astalia');
     }
   });
 
   it('应包含世界书中的真实城市名称', () => {
-    const names = new Set(DEFAULT_LOCATIONS.map(n => n.name));
+    const names = new Set(DEFAULT_LOCATIONS.map((n) => n.name));
     // 奥古斯提姆帝国
     expect(names.has('艾瑟嘉德')).toBe(true);
     expect(names.has('金谷城')).toBe(true);
@@ -89,7 +89,7 @@ describe('DEFAULT_LOCATIONS', () => {
   });
 
   it('不应包含编造的地点（北方冰原/东部海域/霜语城/珍珠港）', () => {
-    const names = new Set(DEFAULT_LOCATIONS.map(n => n.name));
+    const names = new Set(DEFAULT_LOCATIONS.map((n) => n.name));
     expect(names.has('北方冰原')).toBe(false);
     expect(names.has('东部海域')).toBe(false);
     expect(names.has('霜语城')).toBe(false);
@@ -122,7 +122,7 @@ describe('buildAdjacency', () => {
   it('不应有重复边', () => {
     const adj = buildAdjacency(DEFAULT_LOCATIONS);
     for (const [, edges] of adj) {
-      const targets = edges.map(e => e.targetId);
+      const targets = edges.map((e) => e.targetId);
       expect(new Set(targets).size).toBe(targets.length);
     }
   });
@@ -171,13 +171,13 @@ describe('getChildren', () => {
   it('continent 应有 10 个 region 子节点', () => {
     const children = getChildren(DEFAULT_LOCATIONS, 'continent_astalia');
     expect(children.length).toBe(10);
-    expect(children.every(c => c.type === 'region')).toBe(true);
+    expect(children.every((c) => c.type === 'region')).toBe(true);
   });
 
   it('奥古斯提姆帝国应有至少 5 个城市子节点', () => {
     const children = getChildren(DEFAULT_LOCATIONS, 'region_augustim');
     expect(children.length).toBeGreaterThanOrEqual(5);
-    expect(children.every(c => c.type === 'city')).toBe(true);
+    expect(children.every((c) => c.type === 'city')).toBe(true);
   });
 
   it('无子节点的节点应返回空数组', () => {
@@ -194,13 +194,13 @@ describe('getChildren', () => {
 describe('getNeighbors', () => {
   it('金谷城应有与艾瑟嘉德相邻的邻居', () => {
     const neighbors = getNeighbors(DEFAULT_LOCATIONS, 'city_goldenvalley');
-    const names = neighbors.map(n => n.name);
+    const names = neighbors.map((n) => n.name);
     expect(names).toContain('艾瑟嘉德');
   });
 
   it('帝国势力应有相邻的其他势力', () => {
     const neighbors = getNeighbors(DEFAULT_LOCATIONS, 'region_augustim');
-    const names = neighbors.map(n => n.name);
+    const names = neighbors.map((n) => n.name);
     expect(names).toContain('诺斯加德联盟');
     expect(names).toContain('萨赫拉联邦');
     expect(names).toContain('兽族联盟');
@@ -249,18 +249,21 @@ describe('getContinent', () => {
 
 describe('getLocationPath', () => {
   it('艾瑟嘉德的完整路径', () => {
-    expect(getLocationPath(DEFAULT_LOCATIONS, 'city_aesergard'))
-      .toBe('阿斯塔利亚大陆/奥古斯提姆帝国/艾瑟嘉德');
+    expect(getLocationPath(DEFAULT_LOCATIONS, 'city_aesergard')).toBe(
+      '阿斯塔利亚大陆/奥古斯提姆帝国/艾瑟嘉德',
+    );
   });
 
   it('白曜城的完整路径', () => {
-    expect(getLocationPath(DEFAULT_LOCATIONS, 'city_whitegleam'))
-      .toBe('阿斯塔利亚大陆/诺斯加德联盟/白曜城');
+    expect(getLocationPath(DEFAULT_LOCATIONS, 'city_whitegleam')).toBe(
+      '阿斯塔利亚大陆/诺斯加德联盟/白曜城',
+    );
   });
 
   it('璀璨之心的完整路径', () => {
-    expect(getLocationPath(DEFAULT_LOCATIONS, 'area_emerald_core'))
-      .toBe('阿斯塔利亚大陆/翡翠之心/璀璨之心');
+    expect(getLocationPath(DEFAULT_LOCATIONS, 'area_emerald_core')).toBe(
+      '阿斯塔利亚大陆/翡翠之心/璀璨之心',
+    );
   });
 
   it('无效 ID 应返回空字符串', () => {

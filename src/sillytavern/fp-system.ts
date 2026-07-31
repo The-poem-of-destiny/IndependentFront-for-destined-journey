@@ -35,11 +35,11 @@ export function calcContractCost(
 /** 任务完成 FP 奖励 */
 export function calcFPFromTask(grade: string): number {
   const rewards: Record<string, number> = {
-    'D': 50,
-    'C': 100,
-    'B': 500,
-    'A': 1000,
-    'S': 10000,
+    D: 50,
+    C: 100,
+    B: 500,
+    A: 1000,
+    S: 10000,
   };
   return rewards[grade] ?? 50;
 }
@@ -52,13 +52,13 @@ export function calcFPFromAchievement(scale: 'minor' | 'major' | 'legendary'): n
 /** 亲密行为 FP 奖励 */
 export function calcFPFromIntimacy(type: string): number {
   const rewards: Record<string, number> = {
-    'daily': 100,
-    'crisis': 2000,
-    'bond': 2000,
-    'first_time': 500,
-    'sex': 50,
-    'orgasm': 100,
-    'special': 500,
+    daily: 100,
+    crisis: 2000,
+    bond: 2000,
+    first_time: 500,
+    sex: 50,
+    orgasm: 100,
+    special: 500,
   };
   return rewards[type] ?? 100;
 }
@@ -66,13 +66,13 @@ export function calcFPFromIntimacy(type: string): number {
 /** 制作 FP 奖励 */
 export function calcFPFromCraft(quality: string): number {
   const rewards: Record<string, number> = {
-    '普通': 0,
-    '优良': 50,
-    '稀有': 100,
-    '史诗': 400,
-    '传说': 1000,
-    '神话': 3000,
-    '唯一': 6000,
+    普通: 0,
+    优良: 50,
+    稀有: 100,
+    史诗: 400,
+    传说: 1000,
+    神话: 3000,
+    唯一: 6000,
   };
   return rewards[quality] ?? 0;
 }

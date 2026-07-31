@@ -14,58 +14,58 @@
 
 ```typescript
 interface VariableZone {
-  config: ZoneConfig;              // 注入行为控制
-  visibility: string[];            // Agent ID 可见白名单
-  content: Record<string, any>;    // 纯字典，实际数据
+  config: ZoneConfig; // 注入行为控制
+  visibility: string[]; // Agent ID 可见白名单
+  content: Record<string, any>; // 纯字典，实际数据
 }
 
 interface ZoneConfig {
-  orderBy?: string;       // 注入排序字段
-  limit?: number;         // 注入截断上限
+  orderBy?: string; // 注入排序字段
+  limit?: number; // 注入截断上限
   injectAs?: 'json' | 'list' | 'table' | 'summary';
 }
 ```
 
 ### 1.2 Zone 总览
 
-| # | Zone ID | 内容 | 写入方 | 状态 |
-|---|---------|------|--------|------|
-| 1 | `memory` | 记忆条目 `{MEM0001: {content, keywords, importance, timeRange, ...}}` | `memory_summary` | ✅ Active |
-| 2 | `npc` | 所有角色（含主角），`type` 区分 player/npc/monster/summon | `char_update`, `char_gen` | ✅ Active |
-| 3 | `world` | 世界状态：时间/地点/天气/季节/月相/纪元 | `vars_update` | ✅ Active |
-| 4 | `quest` | 剧情事件/任务：活跃/待触发/已完成/失败 | `plot_pre_check`, `plot_post_check` | ✅ Active |
-| 5 | `craft` | 制作项目：锻造/炼金/烹饪/裁缝 | `craft_gen`, `vars_update` | ✅ Active |
-| 6 | `combat` | 活跃战斗状态 | `combat-resolver` (引擎直写) | ✅ Active |
-| 7 | `outline` | 剧情大纲 + 世界线状态 | `plot_outline`, `plot_post_check` | 🆕 Reserved |
-| 8 | `variable` | 自由变量（旗标/计数）`{user: {...}, sys: {...}}` | `vars_update` | 🆕 空容器 |
+| #   | Zone ID    | 内容                                                                  | 写入方                              | 状态        |
+| --- | ---------- | --------------------------------------------------------------------- | ----------------------------------- | ----------- |
+| 1   | `memory`   | 记忆条目 `{MEM0001: {content, keywords, importance, timeRange, ...}}` | `memory_summary`                    | ✅ Active   |
+| 2   | `npc`      | 所有角色（含主角），`type` 区分 player/npc/monster/summon             | `char_update`, `char_gen`           | ✅ Active   |
+| 3   | `world`    | 世界状态：时间/地点/天气/季节/月相/纪元                               | `vars_update`                       | ✅ Active   |
+| 4   | `quest`    | 剧情事件/任务：活跃/待触发/已完成/失败                                | `plot_pre_check`, `plot_post_check` | ✅ Active   |
+| 5   | `craft`    | 制作项目：锻造/炼金/烹饪/裁缝                                         | `craft_gen`, `vars_update`          | ✅ Active   |
+| 6   | `combat`   | 活跃战斗状态                                                          | `combat-resolver` (引擎直写)        | ✅ Active   |
+| 7   | `outline`  | 剧情大纲 + 世界线状态                                                 | `plot_outline`, `plot_post_check`   | 🆕 Reserved |
+| 8   | `variable` | 自由变量（旗标/计数）`{user: {...}, sys: {...}}`                      | `vars_update`                       | 🆕 空容器   |
 
 ### 1.3 可见性级别
 
-| 级别 | 标识 | 含义 |
-|------|------|------|
-| **FULL** | ✅ | Agent 看到完整内容 |
-| **NARRATIVE** | 📝 | 叙事级视图 — 给 story Agent 专用：足够生成准确叙事的全部信息，但剥离纯数值设计细节（如装备+15攻击力→改为"锋利的刀刃"） |
-| **SUMMARY** | 📋 | Agent 看到摘要/截断版本（字段白名单过滤 + 文本截断） |
-| **KEYS** | 🔑 | Agent 仅看到 ID/名称/类型等索引信息 |
-| **NONE** | ❌ | Agent 完全看不到此 Zone |
+| 级别          | 标识 | 含义                                                                                                                   |
+| ------------- | ---- | ---------------------------------------------------------------------------------------------------------------------- |
+| **FULL**      | ✅   | Agent 看到完整内容                                                                                                     |
+| **NARRATIVE** | 📝   | 叙事级视图 — 给 story Agent 专用：足够生成准确叙事的全部信息，但剥离纯数值设计细节（如装备+15攻击力→改为"锋利的刀刃"） |
+| **SUMMARY**   | 📋   | Agent 看到摘要/截断版本（字段白名单过滤 + 文本截断）                                                                   |
+| **KEYS**      | 🔑   | Agent 仅看到 ID/名称/类型等索引信息                                                                                    |
+| **NONE**      | ❌   | Agent 完全看不到此 Zone                                                                                                |
 
 ---
 
 ## 二、完整可见性矩阵（11 Agent × 8 Zone）
 
-| Agent | memory | npc | world | quest | craft | combat | outline | variable |
-|-------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **memory_recall** | ✅ FULL¹ | 🔑 KEYS | 🔑 KEYS² | 🔑 KEYS³ | ❌ | ❌ | ❌ | ❌ |
-| **plot_pre_check** | 📋 SUMMARY⁴ | ✅ FULL | ✅ FULL | ✅ FULL | ❌ | ❌ | ✅ FULL | 🔑 KEYS⁵ |
-| **story** | 📋 SUMMARY⁶ | 📝 NARRATIVE⁷ | ✅ FULL | 📋 SUMMARY⁸ | 📋 SUMMARY⁹ | ✅ FULL | 📋 SUMMARY¹⁰ | ❌ |
-| **vars_update** | ❌ | 🔑 KEYS¹¹ | ✅ FULL | ❌ | 🔑 KEYS | 🔑 KEYS | ❌ | ✅ FULL |
-| **char_update** | ❌ | 混合¹² | ✅ FULL | ❌ | 🔑 KEYS | ✅ FULL¹³ | ❌ | ❌ |
-| **memory_summary** | 📋 SUMMARY¹⁴ | 🔑 KEYS | 📋 SUMMARY¹⁵ | 🔑 KEYS | ❌ | 🔑 KEYS¹⁶ | ❌ | ❌ |
-| **plot_post_check** | 📋 SUMMARY¹⁷ | 📋 SUMMARY¹⁸ | ✅ FULL | ✅ FULL | ❌ | 📋 SUMMARY¹⁹ | ✅ FULL²⁰ | ❌ |
-| **plot_outline** | ❌ | ✅ FULL²¹ | ✅ FULL | 🔑 KEYS²² | ❌ | ❌ | ✅ FULL²³ | ❌ |
-| **craft_gen** | ❌ | 📋 SUMMARY²⁴ | ✅ FULL | ❌ | ✅ FULL | ❌ | ❌ | 🔑 KEYS²⁵ |
-| **char_gen** | ❌ | 🔑 KEYS²⁶ | ✅ FULL | ❌ | ❌ | ❌ | ❌ | 📋 SUMMARY²⁷ |
-| **item_gen** | ❌ | 🔑 KEYS²⁸ | ✅ FULL | ❌ | ❌ | ❌ | ❌ | 🔑 KEYS²⁹ |
+| Agent               |    memory    |      npc      |    world     |    quest    |    craft    |    combat    |   outline    |   variable   |
+| ------------------- | :----------: | :-----------: | :----------: | :---------: | :---------: | :----------: | :----------: | :----------: |
+| **memory_recall**   |   ✅ FULL¹   |    🔑 KEYS    |   🔑 KEYS²   |  🔑 KEYS³   |     ❌      |      ❌      |      ❌      |      ❌      |
+| **plot_pre_check**  | 📋 SUMMARY⁴  |    ✅ FULL    |   ✅ FULL    |   ✅ FULL   |     ❌      |      ❌      |   ✅ FULL    |   🔑 KEYS⁵   |
+| **story**           | 📋 SUMMARY⁶  | 📝 NARRATIVE⁷ |   ✅ FULL    | 📋 SUMMARY⁸ | 📋 SUMMARY⁹ |   ✅ FULL    | 📋 SUMMARY¹⁰ |      ❌      |
+| **vars_update**     |      ❌      |   🔑 KEYS¹¹   |   ✅ FULL    |     ❌      |   🔑 KEYS   |   🔑 KEYS    |      ❌      |   ✅ FULL    |
+| **char_update**     |      ❌      |    混合¹²     |   ✅ FULL    |     ❌      |   🔑 KEYS   |  ✅ FULL¹³   |      ❌      |      ❌      |
+| **memory_summary**  | 📋 SUMMARY¹⁴ |    🔑 KEYS    | 📋 SUMMARY¹⁵ |   🔑 KEYS   |     ❌      |  🔑 KEYS¹⁶   |      ❌      |      ❌      |
+| **plot_post_check** | 📋 SUMMARY¹⁷ | 📋 SUMMARY¹⁸  |   ✅ FULL    |   ✅ FULL   |     ❌      | 📋 SUMMARY¹⁹ |  ✅ FULL²⁰   |      ❌      |
+| **plot_outline**    |      ❌      |   ✅ FULL²¹   |   ✅ FULL    |  🔑 KEYS²²  |     ❌      |      ❌      |  ✅ FULL²³   |      ❌      |
+| **craft_gen**       |      ❌      | 📋 SUMMARY²⁴  |   ✅ FULL    |     ❌      |   ✅ FULL   |      ❌      |      ❌      |  🔑 KEYS²⁵   |
+| **char_gen**        |      ❌      |   🔑 KEYS²⁶   |   ✅ FULL    |     ❌      |     ❌      |      ❌      |      ❌      | 📋 SUMMARY²⁷ |
+| **item_gen**        |      ❌      |   🔑 KEYS²⁸   |   ✅ FULL    |     ❌      |     ❌      |      ❌      |      ❌      |  🔑 KEYS²⁹   |
 
 ### 注解
 
@@ -103,60 +103,60 @@ interface ZoneConfig {
 
 NARRATIVE 是专门为 story Agent 设计的可见性级别。核心原则：**给足叙事所需信息，剥离数值设计细节**。
 
-| CharacterState 字段 | NARRATIVE 处理 | 示例 |
-|---------------------|---------------|------|
-| `name` | ✅ 完整 | `凯恩` |
-| `type` | ✅ 完整 | `player` / `npc` / `monster` |
-| `race` | ✅ 完整 | `人类` / `精灵` / `矮人` |
-| `tier` / `tierName` | ✅ 完整 | `T2 中坚` |
-| `level` | ✅ 完整 | `Lv.5` |
-| `appearance` | ✅ 完整 | `身材结实的年轻男子，手掌布满老茧` |
-| `identity[]` | ✅ 完整 | `["铁匠学徒", "白曜城居民"]` |
-| `occupation[]` | ✅ 完整 | `["锻造师"]` |
-| `attributes` | ✅ 保留数值 | `力量12 敏捷8 体质10 智力7 精神6` — story 据此生成 "他用结实的臂膀抡起铁锤" |
-| `hp` / `maxHp` | ✅ 保留数值 | `HP: 85/100` — story 据此判断 "你感到手臂的伤口还在隐隐作痛" |
-| `mp` / `maxMp` | ✅ 保留数值 | `MP: 40/50` |
-| `sp` / `maxSp` | ✅ 保留数值 | `SP: 30/125` |
-| `location` | ✅ 完整 | `白曜城-五馆街-铁匠铺` |
-| `currentAction` | ✅ 完整 | `正在锻造` / `靠在门边观察` |
-| `money` | ✅ 完整 | `50G` / `200G` |
-| `equipment[].slot` | ✅ 完整 | `[武器]` / `[护甲]` |
-| `equipment[].name` | ✅ 完整 | `铁剑` / `精灵长弓` |
-| `equipment[].quality` | ✅ 完整 | `普通` / `优良` |
-| `equipment[].description` | ✅ 风味文本 | `一把朴素但保养良好的铁剑，剑刃上还留着上次打磨的痕迹` |
-| `equipment[].stats` | ❌ **剥离** | 不显示 `攻击力+15` / `防御力+8` — 依靠 description 和 quality 传达品质感 |
-| `equipment[].effects` | ✅ 风味文本 | `{"锋刃": "攻击时附带轻微的出血效果"}` — 中文键值对描述 |
-| `equipment[].scripts` | ❌ **剥离** | JS 代码块 (`$status.add(target, {name:'灼烧',...})`)，引擎沙盒执行 |
-| `skills[].name` | ✅ 完整 | `重击` / `精准射击` |
-| `skills[].type` | ✅ 完整 | `主动` / `被动` |
-| `skills[].description` | ✅ 风味文本 | `集中力量进行一次势大力沉的斩击` |
-| `skills[].cost` | ❌ **剥离** | 不显示 `SP消耗:15` |
-| `skills[].cooldown` | ❌ **剥离** | 不显示 `冷却:3回合` |
-| `skills[].effects` | ✅ 风味文本 | `{"破甲": "无视目标30%防御力"}` — 中文描述 |
-| `skills[].scripts` | ❌ **剥离** | JS 代码块，引擎沙盒执行 |
-| `inventory[].name` | ✅ 完整 | `治疗药水` / `铁矿石` |
-| `inventory[].quantity` | ✅ 完整 | `×2` / `×5` |
-| `inventory[].type` | ✅ 完整 | `消耗品` / `材料` |
-| `inventory[].rarity` | ✅ 完整 | `普通` / `优良` |
-| `inventory[].description` | ✅ 风味文本 | `散发草药香气的红色液体` |
-| `inventory[].stats` | ❌ **剥离** | 不显示 `恢复20HP` |
-| `inventory[].effects` | ✅ 风味文本 | `{"治疗": "饮用后恢复少量生命值"}` — 中文描述 |
-| `inventory[].scripts` | ❌ **剥离** | JS 代码块，引擎沙盒执行 |
-| `statusEffects[].name` | ✅ 完整 | `轻微烧伤` |
-| `statusEffects[].description` | ✅ 完整 | `左手背被烧红的铁钳烫伤，泛起一片红肿` |
-| `statusEffects[].remainingTime` | ✅ 完整 | `剩余 15 分钟` |
-| `statusEffects[].effects` | ✅ 风味文本 | `{"灼烧": "每回合损失3%最大生命值"}` — 中文键值对，前端渲染用 |
-| `statusEffects[].scripts` | ❌ **剥离** | JS 代码块 (`$dice.roll('2d6'); $resource.modifyHp(...);`)，引擎沙盒执行，AI 绝不接触 |
-| `statusEffects[].onApply/onTick/onRemove/onTrigger` | ❌ **剥离** | 脚本钩子引用名 (如 `"tick"`)，引擎内部路由用 |
-| `ascension.enabled` | ✅ 完整 | `true` / `false` |
-| `ascension.path` | ✅ 仅名称 | `剑圣之道` — 不展开完整技能树 |
-| `ascension.description` | ✅ 完整 | `追求剑道极致的修行之路` |
-| `ascension.nodes[]` | ❌ **剥离** | 完整节点树太长且不必要 |
-| `ascension.effects` | ✅ 风味文本 | `{"生命摇篮": "每回合回复5%最大生命值"}` — 中文描述 |
-| `ascension.scripts` | ❌ **剥离** | JS 代码块，引擎沙盒执行；init/cleanup 生命周期由 SubscriptionManager 管理 |
-| `relationships` | 📋 仅在场角色 + 好感度数值 | `凯恩 — 友好 (好感度:23, 师徒)` — 不在场角色的关系不注入。好感度数值用于校准角色间互动的亲疏程度 |
-| `background` | ✅ 完整 | `在边境锻造坊长大，父亲是退伍老兵…` — story 据此生成符合角色过往经历的反应、对话和内心活动 |
-| `personality` | ✅ 完整 | `冷静果断，对陌生人保持礼貌的距离` 或性格编码 `dOlgY(F)` — story 据此塑造角色的说话方式、情绪反应和决策倾向 |
+| CharacterState 字段                                 | NARRATIVE 处理             | 示例                                                                                                        |
+| --------------------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `name`                                              | ✅ 完整                    | `凯恩`                                                                                                      |
+| `type`                                              | ✅ 完整                    | `player` / `npc` / `monster`                                                                                |
+| `race`                                              | ✅ 完整                    | `人类` / `精灵` / `矮人`                                                                                    |
+| `tier` / `tierName`                                 | ✅ 完整                    | `T2 中坚`                                                                                                   |
+| `level`                                             | ✅ 完整                    | `Lv.5`                                                                                                      |
+| `appearance`                                        | ✅ 完整                    | `身材结实的年轻男子，手掌布满老茧`                                                                          |
+| `identity[]`                                        | ✅ 完整                    | `["铁匠学徒", "白曜城居民"]`                                                                                |
+| `occupation[]`                                      | ✅ 完整                    | `["锻造师"]`                                                                                                |
+| `attributes`                                        | ✅ 保留数值                | `力量12 敏捷8 体质10 智力7 精神6` — story 据此生成 "他用结实的臂膀抡起铁锤"                                 |
+| `hp` / `maxHp`                                      | ✅ 保留数值                | `HP: 85/100` — story 据此判断 "你感到手臂的伤口还在隐隐作痛"                                                |
+| `mp` / `maxMp`                                      | ✅ 保留数值                | `MP: 40/50`                                                                                                 |
+| `sp` / `maxSp`                                      | ✅ 保留数值                | `SP: 30/125`                                                                                                |
+| `location`                                          | ✅ 完整                    | `白曜城-五馆街-铁匠铺`                                                                                      |
+| `currentAction`                                     | ✅ 完整                    | `正在锻造` / `靠在门边观察`                                                                                 |
+| `money`                                             | ✅ 完整                    | `50G` / `200G`                                                                                              |
+| `equipment[].slot`                                  | ✅ 完整                    | `[武器]` / `[护甲]`                                                                                         |
+| `equipment[].name`                                  | ✅ 完整                    | `铁剑` / `精灵长弓`                                                                                         |
+| `equipment[].quality`                               | ✅ 完整                    | `普通` / `优良`                                                                                             |
+| `equipment[].description`                           | ✅ 风味文本                | `一把朴素但保养良好的铁剑，剑刃上还留着上次打磨的痕迹`                                                      |
+| `equipment[].stats`                                 | ❌ **剥离**                | 不显示 `攻击力+15` / `防御力+8` — 依靠 description 和 quality 传达品质感                                    |
+| `equipment[].effects`                               | ✅ 风味文本                | `{"锋刃": "攻击时附带轻微的出血效果"}` — 中文键值对描述                                                     |
+| `equipment[].scripts`                               | ❌ **剥离**                | JS 代码块 (`$status.add(target, {name:'灼烧',...})`)，引擎沙盒执行                                          |
+| `skills[].name`                                     | ✅ 完整                    | `重击` / `精准射击`                                                                                         |
+| `skills[].type`                                     | ✅ 完整                    | `主动` / `被动`                                                                                             |
+| `skills[].description`                              | ✅ 风味文本                | `集中力量进行一次势大力沉的斩击`                                                                            |
+| `skills[].cost`                                     | ❌ **剥离**                | 不显示 `SP消耗:15`                                                                                          |
+| `skills[].cooldown`                                 | ❌ **剥离**                | 不显示 `冷却:3回合`                                                                                         |
+| `skills[].effects`                                  | ✅ 风味文本                | `{"破甲": "无视目标30%防御力"}` — 中文描述                                                                  |
+| `skills[].scripts`                                  | ❌ **剥离**                | JS 代码块，引擎沙盒执行                                                                                     |
+| `inventory[].name`                                  | ✅ 完整                    | `治疗药水` / `铁矿石`                                                                                       |
+| `inventory[].quantity`                              | ✅ 完整                    | `×2` / `×5`                                                                                                 |
+| `inventory[].type`                                  | ✅ 完整                    | `消耗品` / `材料`                                                                                           |
+| `inventory[].rarity`                                | ✅ 完整                    | `普通` / `优良`                                                                                             |
+| `inventory[].description`                           | ✅ 风味文本                | `散发草药香气的红色液体`                                                                                    |
+| `inventory[].stats`                                 | ❌ **剥离**                | 不显示 `恢复20HP`                                                                                           |
+| `inventory[].effects`                               | ✅ 风味文本                | `{"治疗": "饮用后恢复少量生命值"}` — 中文描述                                                               |
+| `inventory[].scripts`                               | ❌ **剥离**                | JS 代码块，引擎沙盒执行                                                                                     |
+| `statusEffects[].name`                              | ✅ 完整                    | `轻微烧伤`                                                                                                  |
+| `statusEffects[].description`                       | ✅ 完整                    | `左手背被烧红的铁钳烫伤，泛起一片红肿`                                                                      |
+| `statusEffects[].remainingTime`                     | ✅ 完整                    | `剩余 15 分钟`                                                                                              |
+| `statusEffects[].effects`                           | ✅ 风味文本                | `{"灼烧": "每回合损失3%最大生命值"}` — 中文键值对，前端渲染用                                               |
+| `statusEffects[].scripts`                           | ❌ **剥离**                | JS 代码块 (`$dice.roll('2d6'); $resource.modifyHp(...);`)，引擎沙盒执行，AI 绝不接触                        |
+| `statusEffects[].onApply/onTick/onRemove/onTrigger` | ❌ **剥离**                | 脚本钩子引用名 (如 `"tick"`)，引擎内部路由用                                                                |
+| `ascension.enabled`                                 | ✅ 完整                    | `true` / `false`                                                                                            |
+| `ascension.path`                                    | ✅ 仅名称                  | `剑圣之道` — 不展开完整技能树                                                                               |
+| `ascension.description`                             | ✅ 完整                    | `追求剑道极致的修行之路`                                                                                    |
+| `ascension.nodes[]`                                 | ❌ **剥离**                | 完整节点树太长且不必要                                                                                      |
+| `ascension.effects`                                 | ✅ 风味文本                | `{"生命摇篮": "每回合回复5%最大生命值"}` — 中文描述                                                         |
+| `ascension.scripts`                                 | ❌ **剥离**                | JS 代码块，引擎沙盒执行；init/cleanup 生命周期由 SubscriptionManager 管理                                   |
+| `relationships`                                     | 📋 仅在场角色 + 好感度数值 | `凯恩 — 友好 (好感度:23, 师徒)` — 不在场角色的关系不注入。好感度数值用于校准角色间互动的亲疏程度            |
+| `background`                                        | ✅ 完整                    | `在边境锻造坊长大，父亲是退伍老兵…` — story 据此生成符合角色过往经历的反应、对话和内心活动                  |
+| `personality`                                       | ✅ 完整                    | `冷静果断，对陌生人保持礼貌的距离` 或性格编码 `dOlgY(F)` — story 据此塑造角色的说话方式、情绪反应和决策倾向 |
 
 ---
 
@@ -164,22 +164,22 @@ NARRATIVE 是专门为 story Agent 设计的可见性级别。核心原则：**�
 
 ### 3.1 防止全知叙事的屏蔽
 
-| 屏蔽项 | 影响 Agent | 机制 |
-|--------|-----------|------|
-| **完整大纲** | story | 只给 100 字章节目标摘要 |
-| **hiddenLine** | story, memory_recall, memory_summary | Zone 注入层统一剥离 |
-| **装备精确数值** | story | npc zone NARRATIVE 级别 — 装备显示 "锋利的精铁长剑（优良）" 而非 "攻击力+15" |
-| **技能冷却/消耗数值** | story | npc zone NARRATIVE 级别 — 技能显示 "精准射击：一次精准的瞄准射击" 而非 "SP消耗:15, 冷却:3回合" |
-| **登神长阶完整树** | story | 仅保留 enabled + path 名称 |
-| **未触发剧情** | story | quest zone 只给 active 事件 |
+| 屏蔽项                | 影响 Agent                           | 机制                                                                                           |
+| --------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| **完整大纲**          | story                                | 只给 100 字章节目标摘要                                                                        |
+| **hiddenLine**        | story, memory_recall, memory_summary | Zone 注入层统一剥离                                                                            |
+| **装备精确数值**      | story                                | npc zone NARRATIVE 级别 — 装备显示 "锋利的精铁长剑（优良）" 而非 "攻击力+15"                   |
+| **技能冷却/消耗数值** | story                                | npc zone NARRATIVE 级别 — 技能显示 "精准射击：一次精准的瞄准射击" 而非 "SP消耗:15, 冷却:3回合" |
+| **登神长阶完整树**    | story                                | 仅保留 enabled + path 名称                                                                     |
+| **未触发剧情**        | story                                | quest zone 只给 active 事件                                                                    |
 
 ### 3.2 防止生成偏差的三重屏蔽
 
-| 屏蔽项 | 影响 Agent | 机制 |
-|--------|-----------|------|
-| **大纲** | char_gen, item_gen, craft_gen | ❌ NONE — 防止"预知未来"导致 NPC/物品/效果生成带有剧情目的 |
-| **记忆** | char_gen, item_gen, craft_gen, plot_outline | ❌ NONE — 防止历史事件驱动生成决策 |
-| **其他角色详情** | char_gen, item_gen | 🔑 KEYS — 防止 NPC 属性互相污染 |
+| 屏蔽项           | 影响 Agent                                  | 机制                                                       |
+| ---------------- | ------------------------------------------- | ---------------------------------------------------------- |
+| **大纲**         | char_gen, item_gen, craft_gen               | ❌ NONE — 防止"预知未来"导致 NPC/物品/效果生成带有剧情目的 |
+| **记忆**         | char_gen, item_gen, craft_gen, plot_outline | ❌ NONE — 防止历史事件驱动生成决策                         |
+| **其他角色详情** | char_gen, item_gen                          | 🔑 KEYS — 防止 NPC 属性互相污染                            |
 
 ### 3.3 char_update 并行过滤（per-call 而非 per-agent）
 
@@ -196,6 +196,7 @@ char_update 在 Stage 3 对 N 个角色并行执行。不是"整个 Agent 看什
 ### 3.4 plot_pre_check 作为大纲守门人
 
 `plot_pre_check` 是 **唯一** 能读到完整 `outline` zone 的常态 Agent。它充当守门人：
+
 1. 读取完整大纲 → 判断哪些事件应触发
 2. 提炼 ~100 字章节目标 → 注入 story Agent
 3. story Agent **永远**看不到完整大纲
@@ -214,25 +215,27 @@ craft_gen / char_gen / item_gen 仅在检测到对应 XML 标记时触发，注�
 
 每个 Zone 被写入时，引擎会通过 EventBus 发出对应事件。已注册 `$event.on()` 持久订阅的装备/技能/状态效果/登神长阶脚本会在此刻触发：
 
-| Zone | 写入操作 | 触发事件类型 | 可能激活的脚本 |
-|------|---------|-------------|--------------|
-| `npc` | char_update 修改 HP/MP/SP | `character_action` | 装备的 init/cleanup、登神长阶的被动效果 |
-| `npc` | char_update 添加/移除 statusEffects | `status_effect` | 状态效果的 onApply/onRemove、联动状态 |
-| `npc` | char_update 装备/卸下装备 | `item_use` | 装备的 init → `$event.on()` 注册持久监听；cleanup → `$event.off()` 注销 |
-| `npc` | char_update 学习/使用技能 | `skill_use` | 技能的 onUse 脚本 |
-| `world` | vars_update 修改时间/地点 | `variable_change`, `location_change` | 时间敏感状态效果、地点触发脚本 |
-| `variable` | vars_update 修改自由变量 | `variable_change` | 旗标变化触发剧情脚本 |
-| `quest` | plot_post_check 修改事件状态 | `plot_trigger` | 剧情事件完成/失败触发的世界线脚本 |
-| `combat` | combat-resolver 写入战斗状态 | `combat_action` | 装备/技能的战斗响应脚本 |
-| `craft` | craft-resolver 写入制作结果 | `craft_action` | 制作完成触发的装备绑定脚本 |
+| Zone       | 写入操作                            | 触发事件类型                         | 可能激活的脚本                                                          |
+| ---------- | ----------------------------------- | ------------------------------------ | ----------------------------------------------------------------------- |
+| `npc`      | char_update 修改 HP/MP/SP           | `character_action`                   | 装备的 init/cleanup、登神长阶的被动效果                                 |
+| `npc`      | char_update 添加/移除 statusEffects | `status_effect`                      | 状态效果的 onApply/onRemove、联动状态                                   |
+| `npc`      | char_update 装备/卸下装备           | `item_use`                           | 装备的 init → `$event.on()` 注册持久监听；cleanup → `$event.off()` 注销 |
+| `npc`      | char_update 学习/使用技能           | `skill_use`                          | 技能的 onUse 脚本                                                       |
+| `world`    | vars_update 修改时间/地点           | `variable_change`, `location_change` | 时间敏感状态效果、地点触发脚本                                          |
+| `variable` | vars_update 修改自由变量            | `variable_change`                    | 旗标变化触发剧情脚本                                                    |
+| `quest`    | plot_post_check 修改事件状态        | `plot_trigger`                       | 剧情事件完成/失败触发的世界线脚本                                       |
+| `combat`   | combat-resolver 写入战斗状态        | `combat_action`                      | 装备/技能的战斗响应脚本                                                 |
+| `craft`    | craft-resolver 写入制作结果         | `craft_action`                       | 制作完成触发的装备绑定脚本                                              |
 
 **重要约束**: 脚本执行在沙盒中完成，收集到 `ScriptEffects`（adds/removes/stackSets/hpChanges/statChanges/events/subscriptions）后**统一批量应用**。这意味着：
+
 - 同一轮内的多个 HP 修改会被合并（而非逐条执行）
 - `$event.emit()` 触发的事件在同一轮内被收集，下一轮才被 EventBus 分发
 - `SubscriptionManager` 管理持久订阅的生命周期，递归深度上限 10 层
 - 对象失效时 `unregisterAll(ownerKey)` 兜底清理残留订阅
 
 **对 Zone 可见性模型的影响**:
+
 - 引擎内部：脚本通过 `$resource.modifyHp()` 修改 HP → 收集到 `ScriptEffects.hpChanges` → 统一写入 `npc` zone → 触发 `character_action` 事件
 - AI 视角：story Agent **看不到** scripts 代码（NARRATIVE 级别剥离），但能看到装备/技能的 `effects` 中文描述，story 据此描述效果在叙事中的表现
 - char_update Agent：FULL 级别能看到 scripts 内容，因为 char_update 负责管理角色完整状态，包括脚本的注册和清理
@@ -597,16 +600,16 @@ Primary Input (agentOutputs['char_gen']):
 
 这是最复杂的注入级别 — 给 story 足够信息生成准确叙事，但剥离纯数值设计细节。核心原则：
 
-| 字段 | 处理方式 | 示例 |
-|------|---------|------|
-| 五维属性 | ✅ 保留数值 | `力量12 敏捷8 体质10` → 描述为"结实有力" |
-| 背景故事 | ✅ 完整 | `在边境锻造坊长大，父亲是退伍老兵…` → story 据此生成角色对特定话题的过往关联反应 |
-| 性格 | ✅ 完整 | `冷静果断，对陌生人保持礼貌的距离` 或编码 `dOlgY(F)` → story 据此塑造说话方式和情绪反应 |
-| 装备 stats | ❌ 剥离数值，保留风味 | ~~`攻击力+15`~~ → `"锋利的精铁长剑（优良）"` |
-| 技能 cost/cooldown | ❌ 剥离 | ~~`SP消耗:15, 冷却:3`~~ → `"进行一次精准的瞄准射击"` |
-| 背包物品 stats | ❌ 剥离数值 | ~~`恢复20HP`~~ → `"散发草药香气的红色液体"` |
-| 登神长阶 | 📋 仅 enabled + path 名 | `"剑圣之道"` 而非完整技能树 |
-| 关系 | ✅ 仅在场角色间 + 好感度数值 | `凯恩 — 友好 (好感度:23, 师徒)` — 数值用于校准互动亲疏 |
+| 字段               | 处理方式                     | 示例                                                                                    |
+| ------------------ | ---------------------------- | --------------------------------------------------------------------------------------- |
+| 五维属性           | ✅ 保留数值                  | `力量12 敏捷8 体质10` → 描述为"结实有力"                                                |
+| 背景故事           | ✅ 完整                      | `在边境锻造坊长大，父亲是退伍老兵…` → story 据此生成角色对特定话题的过往关联反应        |
+| 性格               | ✅ 完整                      | `冷静果断，对陌生人保持礼貌的距离` 或编码 `dOlgY(F)` → story 据此塑造说话方式和情绪反应 |
+| 装备 stats         | ❌ 剥离数值，保留风味        | ~~`攻击力+15`~~ → `"锋利的精铁长剑（优良）"`                                            |
+| 技能 cost/cooldown | ❌ 剥离                      | ~~`SP消耗:15, 冷却:3`~~ → `"进行一次精准的瞄准射击"`                                    |
+| 背包物品 stats     | ❌ 剥离数值                  | ~~`恢复20HP`~~ → `"散发草药香气的红色液体"`                                             |
+| 登神长阶           | 📋 仅 enabled + path 名      | `"剑圣之道"` 而非完整技能树                                                             |
+| 关系               | ✅ 仅在场角色间 + 好感度数值 | `凯恩 — 友好 (好感度:23, 师徒)` — 数值用于校准互动亲疏                                  |
 
 ```
 ## 👥 在场角色
@@ -756,12 +759,18 @@ npc_002 (艾琳) — 精灵 · T2 中坚 — 位置: 北境森林 — 关系: �
 
 ```typescript
 export type VisibilityLevel = 'FULL' | 'SUMMARY' | 'KEYS' | 'NONE';
-export type ZoneId = 'memory' | 'npc' | 'world' | 'quest' | 'craft' | 'combat' | 'outline' | 'variable';
+export type ZoneId =
+  'memory' | 'npc' | 'world' | 'quest' | 'craft' | 'combat' | 'outline' | 'variable';
 
 export interface AgentZoneVisibility {
-  memory: VisibilityLevel; npc: VisibilityLevel; world: VisibilityLevel;
-  quest: VisibilityLevel; craft: VisibilityLevel; combat: VisibilityLevel;
-  outline: VisibilityLevel; variable: VisibilityLevel;
+  memory: VisibilityLevel;
+  npc: VisibilityLevel;
+  world: VisibilityLevel;
+  quest: VisibilityLevel;
+  craft: VisibilityLevel;
+  combat: VisibilityLevel;
+  outline: VisibilityLevel;
+  variable: VisibilityLevel;
 }
 
 export function getAgentZoneVisibility(agentId: string): AgentZoneVisibility {
@@ -769,9 +778,14 @@ export function getAgentZoneVisibility(agentId: string): AgentZoneVisibility {
 }
 
 export function filterZoneContent(
-  zoneId: ZoneId, content: Record<string, any>,
-  visibility: VisibilityLevel, agentId: string, ctx?: AgentContext
-): string | null { /* FULL/SUMMARY/KEYS/NONE 分发 */ }
+  zoneId: ZoneId,
+  content: Record<string, any>,
+  visibility: VisibilityLevel,
+  agentId: string,
+  ctx?: AgentContext,
+): string | null {
+  /* FULL/SUMMARY/KEYS/NONE 分发 */
+}
 ```
 
 ### 6.2 修改 AgentContext (types.ts)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import StatusOverview from './StatusOverview.vue'
+import StatusOverview from './StatusOverview.vue';
 </script>
 
 <template>

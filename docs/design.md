@@ -12,26 +12,27 @@
 
 ### 核心原则
 
-| 原则 | 说明 |
-|------|------|
-| **叙事优先** | 正文区是视觉主角，所有面板退后服务于叙事 |
+| 原则         | 说明                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------ |
+| **叙事优先** | 正文区是视觉主角，所有面板退后服务于叙事                                                               |
 | **玄墨基调** | 暖墨深底（`--theme-window-bg` #191512）+ 古金强调（`--theme-primary` #c9a86a），暖色由强调色与字体承载 |
-| **纸面层次** | 用 `box-shadow` + `border-radius` 模拟纸张叠层，避免扁平化 |
-| **品质可见** | 品质用**色点 + 名字着色**表达（见 5.3），禁止品质色左边条 |
-| **衬线叙事** | 叙事正文和标题使用 `var(--theme-font-title)`（Noto Serif SC 衬线），UI 标签使用系统无衬线 |
-| **主题无关** | 所有颜色来自 CSS 变量，不从特定主题色调出发设计 |
+| **纸面层次** | 用 `box-shadow` + `border-radius` 模拟纸张叠层，避免扁平化                                             |
+| **品质可见** | 品质用**色点 + 名字着色**表达（见 5.3），禁止品质色左边条                                              |
+| **衬线叙事** | 叙事正文和标题使用 `var(--theme-font-title)`（Noto Serif SC 衬线），UI 标签使用系统无衬线              |
+| **主题无关** | 所有颜色来自 CSS 变量，不从特定主题色调出发设计                                                        |
 
 ### 绝对禁令（design hook 强制扫描）
 
-| 禁令 | 替代方案 |
-|------|---------|
-| **侧边条强调**：`border-left/right` > 1px 的彩色强调条（卡片/列表项/callout） | 全边 1px `color-mix(强调色 25-55%, var(--theme-card-border))` 边框 + 6-15% 染底 |
-| **渐变文字**：`background-clip: text` + 渐变 | 单色 + 字重/字号表达强调 |
-| **布局属性过渡**：`transition: width/height/max-height/padding` | `transform: scaleX()` / opacity / `grid-template-rows` |
-| **硬编码 `#fff` 于 primary 底上** | `var(--theme-primary-text)`（金底墨字 #1c150c） |
-| **不存在的 token**：`--theme-border` / `--theme-bg-primary` / `--theme-primary-rgb` 等 | 查 `variables.css` 确认后再引用；边框统一 `--theme-card-border` |
+| 禁令                                                                                   | 替代方案                                                                        |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| **侧边条强调**：`border-left/right` > 1px 的彩色强调条（卡片/列表项/callout）          | 全边 1px `color-mix(强调色 25-55%, var(--theme-card-border))` 边框 + 6-15% 染底 |
+| **渐变文字**：`background-clip: text` + 渐变                                           | 单色 + 字重/字号表达强调                                                        |
+| **布局属性过渡**：`transition: width/height/max-height/padding`                        | `transform: scaleX()` / opacity / `grid-template-rows`                          |
+| **硬编码 `#fff` 于 primary 底上**                                                      | `var(--theme-primary-text)`（金底墨字 #1c150c）                                 |
+| **不存在的 token**：`--theme-border` / `--theme-bg-primary` / `--theme-primary-rgb` 等 | 查 `variables.css` 确认后再引用；边框统一 `--theme-card-border`                 |
 
 **激活态/强调徽章通用配方：**
+
 ```css
 /* 激活态：染底 + 混合边框 */
 background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
@@ -48,44 +49,44 @@ border: 1px solid color-mix(in srgb, var(--theme-success) 30%, transparent);
 
 ### 2.1 字体家族
 
-| 用途 | 字体 | CSS 变量 | 示例 |
-|------|------|---------|------|
-| 叙事正文/标题 | Noto Serif SC, serif | `var(--theme-font-title)` | 对话流正文、页面标题、物品名、角色名 |
-| UI 标签/辅助文字 | system-ui, sans-serif | (默认) | 按钮、标签、提示文字 |
-| 英文副标题（装饰） | Palatino Linotype, serif | — | 首页英文副标 |
-| 风味引文（装饰） | KaiTi/楷体 | — | 首页风味文字 |
-| 代码/脚本 | 'Cascadia Code', monospace | — | 脚本展示区、正则预览 |
+| 用途               | 字体                       | CSS 变量                  | 示例                                 |
+| ------------------ | -------------------------- | ------------------------- | ------------------------------------ |
+| 叙事正文/标题      | Noto Serif SC, serif       | `var(--theme-font-title)` | 对话流正文、页面标题、物品名、角色名 |
+| UI 标签/辅助文字   | system-ui, sans-serif      | (默认)                    | 按钮、标签、提示文字                 |
+| 英文副标题（装饰） | Palatino Linotype, serif   | —                         | 首页英文副标                         |
+| 风味引文（装饰）   | KaiTi/楷体                 | —                         | 首页风味文字                         |
+| 代码/脚本          | 'Cascadia Code', monospace | —                         | 脚本展示区、正则预览                 |
 
 **层级约定**：分区大标题（设置页 section h3 等）用 `var(--theme-font-title)` + `1.3-1.4rem`，正文与列表保持无衬线，形成"手稿标题 + 工整正文"的古籍对比。
 
 ### 2.2 字号层级
 
-| 层级 | 字号 | 用途 |
-|------|------|------|
-| **页面标题** | `1.125rem` (18px) | 角色详情名、物品详情名 |
-| **区块标题** | `0.875rem` (14px) | NPC 名、消息气泡正文 |
-| **正文** | `0.8125rem` (13px) | 列表项、描述文字、属性值 |
-| **辅助文字** | `0.75rem` (12px) | 标签、meta 信息 |
+| 层级          | 字号                    | 用途                     |
+| ------------- | ----------------------- | ------------------------ |
+| **页面标题**  | `1.125rem` (18px)       | 角色详情名、物品详情名   |
+| **区块标题**  | `0.875rem` (14px)       | NPC 名、消息气泡正文     |
+| **正文**      | `0.8125rem` (13px)      | 列表项、描述文字、属性值 |
+| **辅助文字**  | `0.75rem` (12px)        | 标签、meta 信息          |
 | **小字/徽章** | `0.6875rem` (11px) 以下 | 时间戳、计数 badge、提示 |
-| **导航按钮** | `0.875rem` (14px) | SideToolbar、Tab 按钮 |
+| **导航按钮**  | `0.875rem` (14px)       | SideToolbar、Tab 按钮    |
 
 ### 2.3 字重
 
-| 用途 | 字重 |
-|------|------|
-| 页面标题（角色名/物品名） | `700` (bold) |
-| 列表项名 | `600` (semi-bold) |
-| 正文/描述 | `400` — `500` |
-| 标签/辅助 | `400` — `500` |
-| 品质徽章 | `600` |
+| 用途                      | 字重              |
+| ------------------------- | ----------------- |
+| 页面标题（角色名/物品名） | `700` (bold)      |
+| 列表项名                  | `600` (semi-bold) |
+| 正文/描述                 | `400` — `500`     |
+| 标签/辅助                 | `400` — `500`     |
+| 品质徽章                  | `600`             |
 
 ### 2.4 行高
 
-| 场景 | `line-height` |
-|------|--------------|
-| **叙事正文** (ChatFlow) | `1.7` |
-| **描述文字** (详情面板) | `1.55` — `1.7` |
-| **列表项** | `1.5`（单行截断用省略号） |
+| 场景                    | `line-height`             |
+| ----------------------- | ------------------------- |
+| **叙事正文** (ChatFlow) | `1.7`                     |
+| **描述文字** (详情面板) | `1.55` — `1.7`            |
+| **列表项**              | `1.5`（单行截断用省略号） |
 
 ### 2.5 首行缩进
 
@@ -99,24 +100,24 @@ border: 1px solid color-mix(in srgb, var(--theme-success) 30%, transparent);
 
 所有间距从 `variables.css` 中取值，**禁止硬编码像素**：
 
-| Token | 值 | 用途 |
-|-------|-----|------|
-| `--theme-spacing-xs` | 4px | 紧密元素间距 |
-| `--theme-spacing-sm` | 8px | 标签间距、图标间隙 |
-| `--theme-spacing-md` | 12px | 卡片内 padding、模块间距 |
-| `--theme-spacing-lg` | 16px | 面板 padding、主区块间距 |
-| `--theme-spacing-xl` | 24px | 大段间隔 |
-| `--theme-spacing-2xl` | 32px | 页面级间距 |
+| Token                 | 值   | 用途                     |
+| --------------------- | ---- | ------------------------ |
+| `--theme-spacing-xs`  | 4px  | 紧密元素间距             |
+| `--theme-spacing-sm`  | 8px  | 标签间距、图标间隙       |
+| `--theme-spacing-md`  | 12px | 卡片内 padding、模块间距 |
+| `--theme-spacing-lg`  | 16px | 面板 padding、主区块间距 |
+| `--theme-spacing-xl`  | 24px | 大段间隔                 |
+| `--theme-spacing-2xl` | 32px | 页面级间距               |
 
 ### 3.2 模块间距
 
-| 模块 | 内部 gap | 外部 margin/padding |
-|------|---------|-------------------|
-| 面板根容器 | `gap: 12-14px` | `padding: 16px` (Modal 内) |
-| Section 区块 | `gap: 8-10px` | 上下 `padding: 10-12px` |
-| 列表项 | `gap: 3-6px` | `padding: 7-10px` |
-| 卡片（NPC/装备/技能） | `gap: 8-10px` | `padding: 10px` |
-| Tab 按钮 | `gap: 6px` | `padding: 7-10px` |
+| 模块                  | 内部 gap       | 外部 margin/padding        |
+| --------------------- | -------------- | -------------------------- |
+| 面板根容器            | `gap: 12-14px` | `padding: 16px` (Modal 内) |
+| Section 区块          | `gap: 8-10px`  | 上下 `padding: 10-12px`    |
+| 列表项                | `gap: 3-6px`   | `padding: 7-10px`          |
+| 卡片（NPC/装备/技能） | `gap: 8-10px`  | `padding: 10px`            |
+| Tab 按钮              | `gap: 6px`     | `padding: 7-10px`          |
 
 ---
 
@@ -126,14 +127,15 @@ border: 1px solid color-mix(in srgb, var(--theme-success) 30%, transparent);
 
 遵循已定义的 `AppButton.vue` 四种变体：
 
-| 变体 | 背景 | 文字色 | 边框 | hover |
-|------|------|--------|------|-------|
-| **primary** | `--theme-primary` | primary-text | primary | `brightness(1.1)` |
-| **secondary** | `--theme-card-bg` | primary | `--theme-card-border` | bg → surface-muted |
-| **danger** | `--theme-error` | `#fff` | error | `brightness(1.1)` |
-| **ghost** | transparent | secondary | transparent | bg → hover |
+| 变体          | 背景              | 文字色       | 边框                  | hover              |
+| ------------- | ----------------- | ------------ | --------------------- | ------------------ |
+| **primary**   | `--theme-primary` | primary-text | primary               | `brightness(1.1)`  |
+| **secondary** | `--theme-card-bg` | primary      | `--theme-card-border` | bg → surface-muted |
+| **danger**    | `--theme-error`   | `#fff`       | error                 | `brightness(1.1)`  |
+| **ghost**     | transparent       | secondary    | transparent           | bg → hover         |
 
 **自定义按钮（不在 AppButton 范围内的）：**
+
 - 圆角：`var(--theme-radius-sm)`（4px）
 - 过渡：`var(--theme-transition-fast)`（0.15s ease）
 - hover: 背景色变化 + 文字色变化，禁止 scale 变换
@@ -143,18 +145,20 @@ border: 1px solid color-mix(in srgb, var(--theme-success) 30%, transparent);
 
 所有**信息面板卡片**（概述卡片、物品详情、角色详情、系统卡片）共享以下规则：
 
-| 属性 | 值 |
-|------|-----|
-| `background` | `var(--theme-card-bg)` |
-| `border` | `1px solid var(--theme-card-border)` |
-| `border-radius` | `var(--theme-radius-md)` (6px) |
-| `box-shadow` | 叠纸阴影（见下） |
-| 内部 padding | `10-16px`（根据上下文） |
+| 属性            | 值                                   |
+| --------------- | ------------------------------------ |
+| `background`    | `var(--theme-card-bg)`               |
+| `border`        | `1px solid var(--theme-card-border)` |
+| `border-radius` | `var(--theme-radius-md)` (6px)       |
+| `box-shadow`    | 叠纸阴影（见下）                     |
+| 内部 padding    | `10-16px`（根据上下文）              |
 
 **叠纸阴影（`--paper-stack`）：**
+
 ```css
---paper-stack: 0 1px 0 0 color-mix(in srgb, var(--theme-card-border) 40%, transparent),
-               0 4px 12px rgba(0,0,0,0.08);
+--paper-stack:
+  0 1px 0 0 color-mix(in srgb, var(--theme-card-border) 40%, transparent),
+  0 4px 12px rgba(0, 0, 0, 0.08);
 ```
 
 **品质色点 + 名字着色（项目统一方案）：** 物品/装备/角色列表项在名字前放一个品质色圆点（`8px` 圆形，`background: qualityVar(...)`），名字本身着品质色。**禁止 `border-left: 3px solid` 品质色左边条。**
@@ -166,6 +170,7 @@ border: 1px solid color-mix(in srgb, var(--theme-success) 30%, transparent);
 ### 4.3 导航 Tab
 
 **下划线式 Tab（推荐用于详情面板）：**
+
 - 背景：`transparent`
 - 未选中：`color: var(--theme-text-muted)`，底部透明线
 - 选中：`color: var(--theme-text-primary)`，`border-bottom: 2px solid var(--theme-primary)`
@@ -173,6 +178,7 @@ border: 1px solid color-mix(in srgb, var(--theme-success) 30%, transparent);
 - Tab 之间 `gap: 0`，底部边框线连续
 
 **分段按钮式 Tab（推荐用于主类别切换，如背包/装备/技能）：**
+
 - 外层容器：`background: var(--theme-surface-muted)` + `border-radius: var(--theme-radius-md)` + `padding: 4px`
 - 未选中按钮：`background: transparent` + `color: var(--theme-text-secondary)`
 - 选中按钮：`background: var(--theme-card-bg)` + `color: var(--theme-text-primary)` + `font-weight: 600` + `box-shadow: var(--theme-shadow-sm)`
@@ -181,23 +187,25 @@ border: 1px solid color-mix(in srgb, var(--theme-success) 30%, transparent);
 ### 4.4 面板（Panel）
 
 **信息页面板（Modal 内打开）：**
+
 - Master-Detail 两栏布局：左栏 `18rem`（列表）+ `gap: 16px` + 右栏 `flex:1`（详情）
 - 左栏列表：卡片背景 + `box-shadow: var(--paper-stack)`
 - 右栏详情：同上 + Section 标题用 `::after` 渐变装饰线
 
 **侧边面板（ScenePanel / StatusHUD）：**
+
 - 背景：`var(--theme-content-bg)`
 - 分隔：`border-right` 或 `border-left: 1px solid var(--theme-card-border)`
 
 ### 4.5 Modal 对话框
 
-| 属性 | 值 |
-|------|-----|
-| `background` | `var(--theme-overlay-bg)` + `backdrop-filter: blur(4px)` |
-| `border-radius` | `var(--theme-radius-xl)` (12px) |
-| `box-shadow` | `var(--theme-shadow-lg)` |
-| 关闭按钮 | × 字符，hover 变色 |
-| Esc 关闭 | 必须支持 |
+| 属性            | 值                                                       |
+| --------------- | -------------------------------------------------------- |
+| `background`    | `var(--theme-overlay-bg)` + `backdrop-filter: blur(4px)` |
+| `border-radius` | `var(--theme-radius-xl)` (12px)                          |
+| `box-shadow`    | `var(--theme-shadow-lg)`                                 |
+| 关闭按钮        | × 字符，hover 变色                                       |
+| Esc 关闭        | 必须支持                                                 |
 
 ### 4.6 系统通知条 / 折叠卡片
 
@@ -236,6 +244,7 @@ border: 1px solid color-mix(in srgb, var(--theme-success) 30%, transparent);
 ```
 
 CSS：
+
 ```css
 .empty-tab {
   padding: 32px 0;
@@ -272,12 +281,12 @@ import { qualityVar } from '../../lib/quality-colors'
 
 ### 6.1 微交互
 
-| 场景 | 时长 | 效果 |
-|------|------|------|
-| 按钮 hover | `0.15s ease` | 背景色/边框色过渡 |
-| Tab 切换 | `0.15-0.2s ease` | 颜色 + 下划线过渡 |
-| 卡片展开/折叠 | `0.25s ease` | `grid-template-rows: 0fr→1fr` + opacity（禁止 max-height 过渡） |
-| 消息入场 | `0.35s ease` | opacity + translateY(12px) |
+| 场景          | 时长             | 效果                                                            |
+| ------------- | ---------------- | --------------------------------------------------------------- |
+| 按钮 hover    | `0.15s ease`     | 背景色/边框色过渡                                               |
+| Tab 切换      | `0.15-0.2s ease` | 颜色 + 下划线过渡                                               |
+| 卡片展开/折叠 | `0.25s ease`     | `grid-template-rows: 0fr→1fr` + opacity（禁止 max-height 过渡） |
+| 消息入场      | `0.35s ease`     | opacity + translateY(12px)                                      |
 
 ### 6.2 面板切换
 
@@ -294,6 +303,7 @@ Modal 打开：`<Transition name="modal">` — fade + scale(0.97→1)
 ### 7.1 Master-Detail 布局
 
 信息页（背包、角色列表）统一使用 Master-Detail：
+
 - **左栏（Master）:** `width: 18rem`，列表/卡片区，可滚动
 - **右栏（Detail）:** `flex: 1`，选中项详情，可滚动
 - 两栏间距：`gap: 16px`

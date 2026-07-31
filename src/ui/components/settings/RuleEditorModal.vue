@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import type { BeautifierRule } from '@engine/types'
-import AppButton from '../shared/AppButton.vue'
-import AppModal from '../shared/AppModal.vue'
+import { ref, computed } from 'vue';
+import type { BeautifierRule } from '@engine/types';
+import AppButton from '../shared/AppButton.vue';
+import AppModal from '../shared/AppModal.vue';
 
-const props = defineProps<{ rule: BeautifierRule | null }>()
+const props = defineProps<{ rule: BeautifierRule | null }>();
 const emit = defineEmits<{
-  save: [rule: BeautifierRule]
-  cancel: []
-}>()
+  save: [rule: BeautifierRule];
+  cancel: [];
+}>();
 
-const isEditing = computed(() => props.rule !== null)
+const isEditing = computed(() => props.rule !== null);
 
 const form = ref({
   name: props.rule?.name ?? '',
@@ -18,23 +18,23 @@ const form = ref({
   pattern: props.rule?.pattern ?? '',
   flags: props.rule?.flags ?? 'gm',
   replacement: props.rule?.replacement ?? '',
-})
+});
 
-const testInput = ref('')
+const testInput = ref('');
 const testPlaceholder = computed(() => {
-  if (form.value.scope === 'maintext') return '测试文本，如: [酒馆老板]("来一杯麦酒！")'
-  return '输入测试文本...'
-})
+  if (form.value.scope === 'maintext') return '测试文本，如: [酒馆老板]("来一杯麦酒！")';
+  return '输入测试文本...';
+});
 
 const previewHtml = computed(() => {
-  if (!testInput.value || !form.value.pattern) return ''
+  if (!testInput.value || !form.value.pattern) return '';
   try {
-    const re = new RegExp(form.value.pattern, form.value.flags)
-    return testInput.value.replace(re, form.value.replacement)
+    const re = new RegExp(form.value.pattern, form.value.flags);
+    return testInput.value.replace(re, form.value.replacement);
   } catch {
-    return '<span style="color:var(--theme-error)">正则表达式有误</span>'
+    return '<span style="color:var(--theme-error)">正则表达式有误</span>';
   }
-})
+});
 
 function handleSave() {
   const rule: BeautifierRule = {
@@ -47,18 +47,25 @@ function handleSave() {
     enabled: props.rule?.enabled ?? true,
     order: props.rule?.order ?? 100,
     isBuiltin: false,
-  }
-  emit('save', rule)
+  };
+  emit('save', rule);
 }
 </script>
 
 <template>
-  <AppModal :open="true" :title="isEditing ? '编辑规则' : '添加规则'" size="md" @update:open="$emit('cancel')">
+  <AppModal
+    :open="true"
+    :title="isEditing ? '编辑规则' : '添加规则'"
+    size="md"
+    @update:open="$emit('cancel')"
+  >
     <div class="api-form">
-      <label class="form-label">规则名称
+      <label class="form-label"
+        >规则名称
         <input v-model="form.name" class="form-input" placeholder="如: 对话卡片" />
       </label>
-      <label class="form-label">作用域
+      <label class="form-label"
+        >作用域
         <select v-model="form.scope" class="form-input">
           <option value="maintext">正文 (maintext)</option>
           <option value="options">选项 (options)</option>
@@ -67,30 +74,48 @@ function handleSave() {
           <option value="global">全局 (global)</option>
         </select>
       </label>
-      <label class="form-label">正则表达式 (pattern)
-        <textarea v-model="form.pattern" class="form-textarea" rows="3"
+      <label class="form-label"
+        >正则表达式 (pattern)
+        <textarea
+          v-model="form.pattern"
+          class="form-textarea"
+          rows="3"
           placeholder='如: \[([^\]]+)\]\("([^"]*)"\)'
-          style="font-family:monospace;font-size:0.8rem" />
+          style="font-family: monospace; font-size: 0.8rem"
+        />
         <p class="form-hint">JavaScript 正则表达式，不需要前后的 /</p>
       </label>
-      <label class="form-label">标志位 (flags)
+      <label class="form-label"
+        >标志位 (flags)
         <input v-model="form.flags" class="form-input" placeholder="如: gim" />
         <p class="form-hint">g=全局匹配, i=忽略大小写, m=多行, s=dotAll</p>
       </label>
-      <label class="form-label">替换为 (replacement) -- HTML
-        <textarea v-model="form.replacement" class="form-textarea" rows="4"
+      <label class="form-label"
+        >替换为 (replacement) -- HTML
+        <textarea
+          v-model="form.replacement"
+          class="form-textarea"
+          rows="4"
           placeholder='如: &lt;span class="my-class"&gt;$1&lt;/span&gt;'
-          style="font-family:monospace;font-size:0.8rem" />
+          style="font-family: monospace; font-size: 0.8rem"
+        />
         <p class="form-hint">支持 $1, $2... 代表捕获组。这会作为 HTML 直接渲染。</p>
       </label>
 
       <!-- Preview -->
-      <label class="form-label">预览
+      <label class="form-label"
+        >预览
         <input v-model="testInput" class="form-input" :placeholder="testPlaceholder" />
-        <p class="form-hint" style="margin-top:2px">输入测试文本查看匹配效果</p>
+        <p class="form-hint" style="margin-top: 2px">输入测试文本查看匹配效果</p>
       </label>
-      <div class="preview-box" v-if="previewHtml" v-html="previewHtml" />
-      <div class="preview-box text-muted" v-else-if="testInput && !previewHtml" style="font-style:italic">未匹配到任何内容</div>
+      <div v-if="previewHtml" class="preview-box" v-html="previewHtml" />
+      <div
+        v-else-if="testInput && !previewHtml"
+        class="preview-box text-muted"
+        style="font-style: italic"
+      >
+        未匹配到任何内容
+      </div>
     </div>
     <template #footer>
       <AppButton variant="ghost" size="sm" @click="$emit('cancel')">取消</AppButton>
@@ -121,7 +146,9 @@ function handleSave() {
   color: var(--theme-text-primary);
   font-family: inherit;
   font-size: 0.9rem;
-  transition: border-color var(--theme-transition-fast), box-shadow 0.15s;
+  transition:
+    border-color var(--theme-transition-fast),
+    box-shadow 0.15s;
   width: 100%;
 }
 .form-input:focus {

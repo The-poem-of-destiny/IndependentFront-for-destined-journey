@@ -12,130 +12,134 @@
  * @see docs/design.md §4.6(折叠卡片) §6.1(grid-template-rows) §7.2(KV网格)
  */
 
-import { ref, computed } from 'vue'
-import type { CombatActionResult, CombatDamageBreakdown } from '@engine/types'
+import { ref, computed } from 'vue';
+import type { CombatActionResult, CombatDamageBreakdown } from '@engine/types';
 
 const props = defineProps<{
   /** 工具调用结果（CombatActionResult 形状，可能不完整） */
-  result?: Record<string, unknown>
+  result?: Record<string, unknown>;
   /** 工具名称，如 'combat_attack' / 'combat_use_skill' / 'status_apply' */
-  toolName?: string
-}>()
+  toolName?: string;
+}>();
 
 // ── 折叠/展开状态 ──
-const expanded = ref(false)
+const expanded = ref(false);
 
 // ── 防御性类型窄化辅助 ──
 /** 判断 result 是否包含完整伤害分解（是 combat_attack 型结果） */
 const hasDamageBreakdown = computed((): boolean => {
-  const r = props.result
+  const r = props.result;
   return (
     r?.damage != null &&
     typeof r.damage === 'object' &&
     (r.damage as Record<string, unknown>)?.finalDamage != null &&
     typeof r.attackRoll === 'object'
-  )
-})
+  );
+});
 
 /** 安全读取 result.attackRoll.rating.level（评级名） */
 const ratingLevel = computed((): string | null => {
-  const attackRoll = props.result?.attackRoll
-  if (attackRoll == null || typeof attackRoll !== 'object') return null
-  const rating = (attackRoll as Record<string, unknown>)?.rating
-  if (rating == null || typeof rating !== 'object') return null
-  const level = (rating as Record<string, unknown>)?.level
-  return typeof level === 'string' ? level : null
-})
+  const attackRoll = props.result?.attackRoll;
+  if (attackRoll == null || typeof attackRoll !== 'object') return null;
+  const rating = (attackRoll as Record<string, unknown>)?.rating;
+  if (rating == null || typeof rating !== 'object') return null;
+  const level = (rating as Record<string, unknown>)?.level;
+  return typeof level === 'string' ? level : null;
+});
 
 /** 安全读取 result.attackRoll.rating.coefficient（评级系数） */
 const ratingCoefficient = computed((): number | null => {
-  const attackRoll = props.result?.attackRoll
-  if (attackRoll == null || typeof attackRoll !== 'object') return null
-  const rating = (attackRoll as Record<string, unknown>)?.rating
-  if (rating == null || typeof rating !== 'object') return null
-  const coeff = (rating as Record<string, unknown>)?.coefficient
-  return typeof coeff === 'number' ? coeff : null
-})
+  const attackRoll = props.result?.attackRoll;
+  if (attackRoll == null || typeof attackRoll !== 'object') return null;
+  const rating = (attackRoll as Record<string, unknown>)?.rating;
+  if (rating == null || typeof rating !== 'object') return null;
+  const coeff = (rating as Record<string, unknown>)?.coefficient;
+  return typeof coeff === 'number' ? coeff : null;
+});
 
 /** 安全读取 result.attackRoll.checkValue */
 const checkValue = computed((): number | null => {
-  const attackRoll = props.result?.attackRoll
-  if (attackRoll == null || typeof attackRoll !== 'object') return null
-  const cv = (attackRoll as Record<string, unknown>)?.checkValue
-  return typeof cv === 'number' ? cv : null
-})
+  const attackRoll = props.result?.attackRoll;
+  if (attackRoll == null || typeof attackRoll !== 'object') return null;
+  const cv = (attackRoll as Record<string, unknown>)?.checkValue;
+  return typeof cv === 'number' ? cv : null;
+});
 
 /** 安全读取 result.request.attackerId / defenderId */
 const attackerId = computed((): string | null => {
-  const req = props.result?.request
-  if (req == null || typeof req !== 'object') return null
-  const id = (req as Record<string, unknown>)?.attackerId
-  return typeof id === 'string' ? id : null
-})
+  const req = props.result?.request;
+  if (req == null || typeof req !== 'object') return null;
+  const id = (req as Record<string, unknown>)?.attackerId;
+  return typeof id === 'string' ? id : null;
+});
 const defenderId = computed((): string | null => {
-  const req = props.result?.request
-  if (req == null || typeof req !== 'object') return null
-  const id = (req as Record<string, unknown>)?.defenderId
-  return typeof id === 'string' ? id : null
-})
+  const req = props.result?.request;
+  if (req == null || typeof req !== 'object') return null;
+  const id = (req as Record<string, unknown>)?.defenderId;
+  return typeof id === 'string' ? id : null;
+});
 
 /** 安全读取 result.damage 作为 CombatDamageBreakdown */
 const damage = computed((): CombatDamageBreakdown | null => {
-  if (!hasDamageBreakdown.value) return null
-  return props.result!.damage as CombatDamageBreakdown
-})
+  if (!hasDamageBreakdown.value) return null;
+  return props.result!.damage as CombatDamageBreakdown;
+});
 
 /** 安全读取 finalDamage */
 const finalDamage = computed((): number | null => {
-  const d = damage.value
-  return d?.finalDamage ?? null
-})
+  const d = damage.value;
+  return d?.finalDamage ?? null;
+});
 
 /** 安全读取 result.finalHp / result.maxHp / result.isDead */
 const finalHp = computed((): number | null => {
-  const v = props.result?.finalHp
-  return typeof v === 'number' ? v : null
-})
+  const v = props.result?.finalHp;
+  return typeof v === 'number' ? v : null;
+});
 const maxHp = computed((): number | null => {
-  const v = props.result?.maxHp
-  return typeof v === 'number' ? v : null
-})
+  const v = props.result?.maxHp;
+  return typeof v === 'number' ? v : null;
+});
 const isDead = computed((): boolean => {
-  const v = props.result?.isDead
-  return v === true
-})
+  const v = props.result?.isDead;
+  return v === true;
+});
 
 /** 安全读取 result.statusApplied 数组 */
-const statusApplied = computed<Array<{ name: string; duration: number; effect: string }> | null>(() => {
-  const arr = props.result?.statusApplied
-  if (!Array.isArray(arr)) return null
-  return arr.filter(
-    (item): item is { name: string; duration: number; effect: string } =>
-      item != null && typeof item === 'object' && typeof (item as Record<string, unknown>).name === 'string',
-  )
-})
+const statusApplied = computed<Array<{ name: string; duration: number; effect: string }> | null>(
+  () => {
+    const arr = props.result?.statusApplied;
+    if (!Array.isArray(arr)) return null;
+    return arr.filter(
+      (item): item is { name: string; duration: number; effect: string } =>
+        item != null &&
+        typeof item === 'object' &&
+        typeof (item as Record<string, unknown>).name === 'string',
+    );
+  },
+);
 
 /** 安全读取 result.description */
 const description = computed((): string => {
-  const v = props.result?.description
-  return typeof v === 'string' ? v : ''
-})
+  const v = props.result?.description;
+  return typeof v === 'string' ? v : '';
+});
 
 /** 判断是否失误（系数 === 0） */
 const isMiss = computed((): boolean => {
-  return ratingCoefficient.value === 0
-})
+  return ratingCoefficient.value === 0;
+});
 
 /** 按评级系数映射语义色 */
 const ratingColor = computed((): string => {
-  const coeff = ratingCoefficient.value
-  if (coeff === null) return 'var(--theme-text-muted)'
-  if (coeff === 0) return 'var(--theme-text-muted)'       // 失误
-  if (coeff <= 0.3) return 'var(--theme-warning)'          // 擦伤
-  if (coeff < 1.0) return 'var(--theme-text-secondary)'    // 勉强
-  if (coeff === 1.0) return 'var(--theme-text-primary)'    // 有效/命中
-  return 'var(--theme-primary)'                              // 暴击以上
-})
+  const coeff = ratingCoefficient.value;
+  if (coeff === null) return 'var(--theme-text-muted)';
+  if (coeff === 0) return 'var(--theme-text-muted)'; // 失误
+  if (coeff <= 0.3) return 'var(--theme-warning)'; // 擦伤
+  if (coeff < 1.0) return 'var(--theme-text-secondary)'; // 勉强
+  if (coeff === 1.0) return 'var(--theme-text-primary)'; // 有效/命中
+  return 'var(--theme-primary)'; // 暴击以上
+});
 
 /** 工具名 → 中文标签映射 */
 const toolLabel = computed((): string => {
@@ -146,36 +150,36 @@ const toolLabel = computed((): string => {
     combat_defend: '防御',
     combat_flee: '逃跑',
     status_apply: '状态',
-  }
-  return map[props.toolName ?? ''] ?? props.toolName ?? ''
-})
+  };
+  return map[props.toolName ?? ''] ?? props.toolName ?? '';
+});
 
 /** 多段分割信息 */
 const multiSplitInfo = computed<{ count: number; perHit: number } | null>(() => {
-  const d = damage.value
-  if (!d?.multiSplitInfo) return null
-  const info = d.multiSplitInfo
-  if (typeof info.count === 'number' && typeof info.perHit === 'number') return info
-  return null
-})
+  const d = damage.value;
+  if (!d?.multiSplitInfo) return null;
+  const info = d.multiSplitInfo;
+  if (typeof info.count === 'number' && typeof info.perHit === 'number') return info;
+  return null;
+});
 
 /** 是否有穿透信息可展示 */
 const hasPenetration = computed((): boolean => {
-  const p = damage.value?.penetration
-  return p != null && typeof p.effectiveDef === 'number'
-})
+  const p = damage.value?.penetration;
+  return p != null && typeof p.effectiveDef === 'number';
+});
 
 // ── 辅助：格式化数字（取整，避免浮点噪音） ──
 function fmt(n: number | null | undefined): string {
-  if (n == null) return '—'
-  return Number.isInteger(n) ? String(n) : n.toFixed(1)
+  if (n == null) return '—';
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
 /** 完整结果对象（仅在 hasDamageBreakdown 时用于模板深层引用） */
 const fullResult = computed((): CombatActionResult | null => {
-  if (!hasDamageBreakdown.value) return null
-  return props.result as unknown as CombatActionResult
-})
+  if (!hasDamageBreakdown.value) return null;
+  return props.result as unknown as CombatActionResult;
+});
 </script>
 
 <template>
@@ -204,22 +208,16 @@ const fullResult = computed((): CombatActionResult | null => {
 
         <span class="cac-divider" />
 
-        <span class="cac-check" v-if="checkValue !== null">
-          检定{{ checkValue }}
-        </span>
-        <span
-          class="cac-rating"
-          :style="{ color: ratingColor }"
-        >
-          ({{ ratingLevel ?? '—' }})
-        </span>
+        <span v-if="checkValue !== null" class="cac-check"> 检定{{ checkValue }} </span>
+        <span class="cac-rating" :style="{ color: ratingColor }"> ({{ ratingLevel ?? '—' }}) </span>
 
-        <span class="cac-damage" v-if="!isMiss">
-          <span class="cac-damage-num">{{ fmt(finalDamage) }}</span>伤
+        <span v-if="!isMiss" class="cac-damage">
+          <span class="cac-damage-num">{{ fmt(finalDamage) }}</span
+          >伤
         </span>
-        <span class="cac-miss" v-else>未命中</span>
+        <span v-else class="cac-miss">未命中</span>
 
-        <span class="cac-hp" v-if="finalHp !== null && maxHp !== null">
+        <span v-if="finalHp !== null && maxHp !== null" class="cac-hp">
           HP {{ fmt(finalHp) }}/{{ fmt(maxHp) }}
         </span>
       </template>
@@ -229,10 +227,7 @@ const fullResult = computed((): CombatActionResult | null => {
         <span class="cac-fallback">{{ description || toolName }}</span>
       </template>
 
-      <i
-        class="fa-solid cac-chevron"
-        :class="expanded ? 'fa-chevron-up' : 'fa-chevron-down'"
-      />
+      <i class="fa-solid cac-chevron" :class="expanded ? 'fa-chevron-up' : 'fa-chevron-down'" />
     </div>
 
     <!-- ════════ 展开态：8 步伤害管线 ════════ -->
@@ -243,7 +238,7 @@ const fullResult = computed((): CombatActionResult | null => {
           <div class="cac-step">
             <span class="cac-step-label">初始伤害</span>
             <span class="cac-step-value">{{ fmt(fullResult.damage.initialDamage) }}</span>
-            <span class="cac-step-note" v-if="fullResult.damage.initialFormula">
+            <span v-if="fullResult.damage.initialFormula" class="cac-step-note">
               {{ fullResult.damage.initialFormula }}
             </span>
           </div>
@@ -261,20 +256,25 @@ const fullResult = computed((): CombatActionResult | null => {
           <div class="cac-sep"></div>
 
           <!-- Step 3: 穿透修正 -->
-          <div class="cac-step" v-if="hasPenetration">
+          <div v-if="hasPenetration" class="cac-step">
             <span class="cac-step-label">穿透修正</span>
-            <span class="cac-step-value">有效防御 {{ fmt(fullResult.damage.penetration.effectiveDef) }}</span>
+            <span class="cac-step-value"
+              >有效防御 {{ fmt(fullResult.damage.penetration.effectiveDef) }}</span
+            >
             <span class="cac-step-note">
-              防御{{ fmt(fullResult.damage.penetration.originalDef) }} &times; (1 &minus; {{ fmt(fullResult.damage.penetration.penetrationRate * 100) }}%)
+              防御{{ fmt(fullResult.damage.penetration.originalDef) }} &times; (1 &minus;
+              {{ fmt(fullResult.damage.penetration.penetrationRate * 100) }}%)
             </span>
           </div>
 
-          <div class="cac-sep" v-if="hasPenetration"></div>
+          <div v-if="hasPenetration" class="cac-sep"></div>
 
           <!-- Step 4: 装备减免 -->
           <div class="cac-step">
             <span class="cac-step-label">装备减免</span>
-            <span class="cac-step-value cac-step-value--reduce">&minus;{{ fmt(fullResult.damage.equipmentReduction) }}</span>
+            <span class="cac-step-value cac-step-value--reduce"
+              >&minus;{{ fmt(fullResult.damage.equipmentReduction) }}</span
+            >
           </div>
 
           <div class="cac-sep"></div>
@@ -285,7 +285,7 @@ const fullResult = computed((): CombatActionResult | null => {
             <span class="cac-step-value cac-step-value--reduce">
               &minus;{{ fmt(fullResult.damage.typeReductionAmount) }}
             </span>
-            <span class="cac-step-note" v-if="fullResult.damage.typeReductionRate > 0">
+            <span v-if="fullResult.damage.typeReductionRate > 0" class="cac-step-note">
               {{ fmt(fullResult.damage.typeReductionRate * 100) }}%
             </span>
           </div>
@@ -306,14 +306,14 @@ const fullResult = computed((): CombatActionResult | null => {
           <div class="cac-sep"></div>
 
           <!-- Step 7: DR 修正 -->
-          <div class="cac-step" v-if="fullResult.damage.drRate > 0">
+          <div v-if="fullResult.damage.drRate > 0" class="cac-step">
             <span class="cac-step-label">伤害减免</span>
             <span class="cac-step-value cac-step-value--reduce">
               DR &minus;{{ fmt(fullResult.damage.drRate * 100) }}%
             </span>
           </div>
 
-          <div class="cac-sep" v-if="fullResult.damage.drRate > 0"></div>
+          <div v-if="fullResult.damage.drRate > 0" class="cac-sep"></div>
 
           <!-- Step 8: 最终伤害（★ 高亮） -->
           <div class="cac-step cac-step--final">
@@ -327,24 +327,21 @@ const fullResult = computed((): CombatActionResult | null => {
         </div>
 
         <!-- HP 变化行 -->
-        <div class="cac-hp-line" v-if="finalHp !== null && maxHp !== null">
+        <div v-if="finalHp !== null && maxHp !== null" class="cac-hp-line">
           <span class="cac-hp-line-label">
             {{ defenderId ?? '守方' }}
           </span>
           <span class="cac-hp-line-change">
-            HP {{ fmt(maxHp) }} <i class="fa-solid fa-arrow-right cac-hp-arrow" /> {{ fmt(finalHp) }}
+            HP {{ fmt(maxHp) }} <i class="fa-solid fa-arrow-right cac-hp-arrow" />
+            {{ fmt(finalHp) }}
           </span>
-          <span class="cac-hp-line-dead" v-if="isDead">已倒下</span>
-          <span class="cac-hp-line-alive" v-else>存活</span>
+          <span v-if="isDead" class="cac-hp-line-dead">已倒下</span>
+          <span v-else class="cac-hp-line-alive">存活</span>
         </div>
 
         <!-- 状态施加 -->
-        <div class="cac-status" v-if="statusApplied && statusApplied.length > 0">
-          <div
-            v-for="(status, idx) in statusApplied"
-            :key="idx"
-            class="cac-status-item"
-          >
+        <div v-if="statusApplied && statusApplied.length > 0" class="cac-status">
+          <div v-for="(status, idx) in statusApplied" :key="idx" class="cac-status-item">
             <i class="fa-solid fa-plus cac-status-icon" />
             <span class="cac-status-name">{{ status.name }}</span>
             <span class="cac-status-duration">{{ status.duration }}回合</span>
@@ -353,7 +350,10 @@ const fullResult = computed((): CombatActionResult | null => {
       </div>
 
       <!-- 展开态但无伤害分解：展示 description（如有） -->
-      <div v-else-if="expanded && !hasDamageBreakdown && description" class="cac-body cac-body--fallback">
+      <div
+        v-else-if="expanded && !hasDamageBreakdown && description"
+        class="cac-body cac-body--fallback"
+      >
         <div class="cac-desc">{{ description }}</div>
       </div>
     </Transition>
@@ -376,7 +376,7 @@ const fullResult = computed((): CombatActionResult | null => {
   align-items: center;
   gap: var(--theme-spacing-sm, 8px);
   padding: 8px var(--theme-spacing-md, 12px);
-  min-height: 36px;          /* design §8: 触摸目标 ≥ 36px */
+  min-height: 36px; /* design §8: 触摸目标 ≥ 36px */
   cursor: pointer;
   user-select: none;
   background: var(--theme-surface-muted);
@@ -398,7 +398,7 @@ const fullResult = computed((): CombatActionResult | null => {
 /* 工具标签 */
 .cac-tag {
   flex-shrink: 0;
-  font-size: 0.6875rem;      /* 11px 小字徽章 */
+  font-size: 0.6875rem; /* 11px 小字徽章 */
   font-weight: 600;
   color: var(--theme-text-muted);
   background: var(--theme-card-bg);
@@ -414,12 +414,12 @@ const fullResult = computed((): CombatActionResult | null => {
   gap: 5px;
 }
 .cac-name {
-  font-size: 0.8125rem;      /* 13px 正文 */
+  font-size: 0.8125rem; /* 13px 正文 */
   font-weight: 600;
   color: var(--theme-text-primary);
 }
 .cac-arrow {
-  font-size: 0.625rem;       /* 10px */
+  font-size: 0.625rem; /* 10px */
   opacity: 0.4;
 }
 
@@ -432,7 +432,7 @@ const fullResult = computed((): CombatActionResult | null => {
 
 /* 检定值 */
 .cac-check {
-  font-size: 0.75rem;        /* 12px 辅助 */
+  font-size: 0.75rem; /* 12px 辅助 */
   color: var(--theme-text-secondary);
 }
 
@@ -450,7 +450,7 @@ const fullResult = computed((): CombatActionResult | null => {
   margin-left: auto;
 }
 .cac-damage-num {
-  font-size: 0.875rem;       /* 14px 略大 */
+  font-size: 0.875rem; /* 14px 略大 */
 }
 
 /* 未命中 */
@@ -464,16 +464,18 @@ const fullResult = computed((): CombatActionResult | null => {
 /* HP 概要 */
 .cac-hp {
   flex-shrink: 0;
-  font-size: 0.6875rem;      /* 11px 小字 */
+  font-size: 0.6875rem; /* 11px 小字 */
   color: var(--theme-text-muted);
 }
 
 /* 展开箭头 */
 .cac-chevron {
   flex-shrink: 0;
-  font-size: 0.625rem;       /* 10px */
+  font-size: 0.625rem; /* 10px */
   opacity: 0.4;
-  transition: opacity 0.15s ease, transform 0.25s ease;
+  transition:
+    opacity 0.15s ease,
+    transform 0.25s ease;
   padding: 2px;
 }
 .cac-header:hover .cac-chevron {
@@ -503,7 +505,7 @@ const fullResult = computed((): CombatActionResult | null => {
   display: flex;
   flex-direction: column;
   gap: var(--theme-spacing-sm, 8px);
-  font-size: 0.75rem;        /* 12px 管线步 */
+  font-size: 0.75rem; /* 12px 管线步 */
   color: var(--theme-text-primary);
 }
 
@@ -548,7 +550,7 @@ const fullResult = computed((): CombatActionResult | null => {
 
 .cac-step-label {
   flex-shrink: 0;
-  font-size: 0.6875rem;      /* 11px 标签 */
+  font-size: 0.6875rem; /* 11px 标签 */
   font-weight: 600;
   color: var(--theme-text-muted);
   min-width: 4em;
@@ -589,7 +591,7 @@ const fullResult = computed((): CombatActionResult | null => {
   font-size: 0.625rem;
 }
 .cac-step-value--final {
-  font-size: 0.9375rem;      /* 15px 显著 */
+  font-size: 0.9375rem; /* 15px 显著 */
   font-weight: 700;
   color: var(--theme-primary);
 }
@@ -647,7 +649,7 @@ const fullResult = computed((): CombatActionResult | null => {
   color: var(--theme-primary);
   padding: 1px 8px;
   border-radius: var(--theme-radius-sm, 4px);
-  font-size: 0.6875rem;      /* 11px 小字 */
+  font-size: 0.6875rem; /* 11px 小字 */
   border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, transparent);
 }
 .cac-status-icon {

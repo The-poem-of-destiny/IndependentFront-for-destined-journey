@@ -295,7 +295,15 @@ describe('toEpochMinutes', () => {
   });
 
   it('returns 0 at epoch start (488-01-01 00:00)', () => {
-    const t: GameTime = { era: '复兴纪元', year: 488, month: 1, day: 1, weekday: 1, hour: 0, minute: 0 };
+    const t: GameTime = {
+      era: '复兴纪元',
+      year: 488,
+      month: 1,
+      day: 1,
+      weekday: 1,
+      hour: 0,
+      minute: 0,
+    };
     expect(toEpochMinutes(t)).toBe(0);
   });
 
@@ -304,12 +312,28 @@ describe('toEpochMinutes', () => {
   });
 
   it('returns expected value for known time (488-01-01 01:01 = 61)', () => {
-    const t: GameTime = { era: 'test', year: 488, month: 1, day: 1, weekday: 1, hour: 1, minute: 1 };
+    const t: GameTime = {
+      era: 'test',
+      year: 488,
+      month: 1,
+      day: 1,
+      weekday: 1,
+      hour: 1,
+      minute: 1,
+    };
     expect(toEpochMinutes(t)).toBe(61);
   });
 
   it('negative before epoch (487-12-30 22:00 = -120)', () => {
-    const t: GameTime = { era: '复兴纪元', year: 487, month: 12, day: 30, weekday: 7, hour: 22, minute: 0 };
+    const t: GameTime = {
+      era: '复兴纪元',
+      year: 487,
+      month: 12,
+      day: 30,
+      weekday: 7,
+      hour: 22,
+      minute: 0,
+    };
     expect(toEpochMinutes(t)).toBe(-120);
   });
 });
@@ -326,7 +350,15 @@ describe('fromEpochMinutes', () => {
   });
 
   it('roundtrips: fromEpochMinutes(toEpochMinutes(t)) 深等于 t（复兴纪元）', () => {
-    const t: GameTime = { era: '复兴纪元', year: 495, month: 6, day: 15, weekday: 9, hour: 14, minute: 30 };
+    const t: GameTime = {
+      era: '复兴纪元',
+      year: 495,
+      month: 6,
+      day: 15,
+      weekday: 9,
+      hour: 14,
+      minute: 30,
+    };
     // weekday 会被 epoch 重算（9 非法→重算为合法值），其余字段往返保真
     const rt = fromEpochMinutes(toEpochMinutes(t));
     expect(rt.year).toBe(495);
@@ -404,7 +436,13 @@ describe('diffMinutes and diffDays', () => {
   it('diffDays negative', () => {
     // Use a time far from year boundary so negative advance works without clamping
     const midYear: GameTime = {
-      era: '复兴纪元', year: 5, month: 6, day: 15, weekday: 3, hour: 12, minute: 0,
+      era: '复兴纪元',
+      year: 5,
+      month: 6,
+      day: 15,
+      weekday: 3,
+      hour: 12,
+      minute: 0,
     };
     const prevDay = advanceDays(midYear, -1);
     expect(diffDays(prevDay, midYear)).toBe(-1);

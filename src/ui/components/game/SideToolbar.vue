@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useGameStore } from '../../stores/game-store'
-import { useAudioStore } from '../../stores/audio-store'
+import { computed } from 'vue';
+import { useGameStore } from '../../stores/game-store';
+import { useAudioStore } from '../../stores/audio-store';
 
-const game = useGameStore()
-const audio = useAudioStore()
+const game = useGameStore();
+const audio = useAudioStore();
 
 /** 播放中给音乐图标一点低幅呼吸（仅 opacity，不碰布局属性） */
-const musicPlaying = computed(() => audio.state.music.status === 'playing')
+const musicPlaying = computed(() => audio.state.music.status === 'playing');
 
 const emit = defineEmits<{
-  toolClick: [id: string]
-}>()
+  toolClick: [id: string];
+}>();
 
 const allTools = [
   { id: 'items', label: '背包', icon: 'fa-solid fa-box' },
@@ -24,14 +24,14 @@ const allTools = [
   { id: 'audio', label: '音乐', icon: 'fa-solid fa-music' },
   { id: 'debug', label: '调试', icon: 'fa-solid fa-bug' },
   { id: 'settings', label: '设置', icon: 'fa-solid fa-gear' },
-]
+];
 // 🔒 P1-14: 调试按钮仅 DEV 构建显示 —— 生产构建不暴露调试面板入口
 const tools = computed(() =>
-  import.meta.env.DEV ? allTools : allTools.filter(t => t.id !== 'debug')
-)
+  import.meta.env.DEV ? allTools : allTools.filter((t) => t.id !== 'debug'),
+);
 
 function handleClick(id: string) {
-  emit('toolClick', id)
+  emit('toolClick', id);
 }
 </script>
 
@@ -47,14 +47,14 @@ function handleClick(id: string) {
       @click="handleClick(tool.id)"
     >
       <i :class="[tool.icon, { breathing: tool.id === 'audio' && musicPlaying }]" />
-      <span class="tool-label" v-show="!game.sidebarCollapsed">{{ tool.label }}</span>
+      <span v-show="!game.sidebarCollapsed" class="tool-label">{{ tool.label }}</span>
     </button>
     <button
       class="collapse-toggle"
-      @click="game.toggleSidebar()"
       :title="game.sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
       :aria-expanded="!game.sidebarCollapsed"
       :aria-label="game.sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
+      @click="game.toggleSidebar()"
     >
       {{ game.sidebarCollapsed ? '▶' : '◀' }}
     </button>
@@ -92,7 +92,9 @@ function handleClick(id: string) {
   font-family: inherit;
   border-radius: 6px;
   margin: 0 4px;
-  transition: background 100ms, color 100ms;
+  transition:
+    background 100ms,
+    color 100ms;
 }
 .side-toolbar.collapsed .tool-btn {
   padding: 8px 2px;
@@ -114,8 +116,13 @@ function handleClick(id: string) {
   animation: mini-breathe 2.4s ease-in-out infinite;
 }
 @keyframes mini-breathe {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .tool-btn i.breathing {

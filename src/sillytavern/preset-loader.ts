@@ -67,13 +67,10 @@ export function parseSetvars(content: string): { variables: SetvarMap; stripped:
  * 查变量表替换为对应值，表里没有的 key → 替换为空字符串
  */
 export function resolveGetvars(content: string, vars: SetvarMap): string {
-  return content.replace(
-    /\{\{getvar::([^}:]+)(?:::)?\}\}/g,
-    (_match, name: string) => {
-      const key = name.trim();
-      return vars[key] ?? '';
-    },
-  );
+  return content.replace(/\{\{getvar::([^}:]+)(?:::)?\}\}/g, (_match, name: string) => {
+    const key = name.trim();
+    return vars[key] ?? '';
+  });
 }
 
 /**
@@ -81,18 +78,18 @@ export function resolveGetvars(content: string, vars: SetvarMap): string {
  * 支持逗号分隔的选项列表
  */
 export function resolveRandoms(content: string): string {
-  return content.replace(
-    /\{\{random::([^}]*)\}\}/g,
-    (_match, options: string) => {
-      // 去掉两侧空白和尾逗号
-      const trimmed = options.replace(/^\s+|\s+$/g, '');
-      if (!trimmed) return '';
-      const parts = trimmed.split(',').map(s => s.replace(/^\s+|\s+$/g, '')).filter(Boolean);
-      if (parts.length === 0) return '';
-      const idx = Math.floor(Math.random() * parts.length);
-      return parts[idx];
-    },
-  );
+  return content.replace(/\{\{random::([^}]*)\}\}/g, (_match, options: string) => {
+    // 去掉两侧空白和尾逗号
+    const trimmed = options.replace(/^\s+|\s+$/g, '');
+    if (!trimmed) return '';
+    const parts = trimmed
+      .split(',')
+      .map((s) => s.replace(/^\s+|\s+$/g, ''))
+      .filter(Boolean);
+    if (parts.length === 0) return '';
+    const idx = Math.floor(Math.random() * parts.length);
+    return parts[idx];
+  });
 }
 
 /**
@@ -150,7 +147,8 @@ export function preprocessEntry(
   result = result.replace(/\{\{roll\s+[^}]*\}\}/gi, '');
 
   // 7. 剥离其他非系统 {{...}} 占位符
-  const SYSTEM_RE = /\{\{(?:SYS_PROMPT|NARRATIVE|USER_INPUT|LORE_BOOK|CHARACTER_STATE|AGENT\.\w+|INVENTORY|GAME_TIME|ACTIVE_EFFECTS|MEMORY_ENTRIES|PLOT_EVENTS|CRAFT_REQUEST|CHAR_DETECT|CHAR_GEN_RESULT|CRAFT_RESULT|ITEM_REQUEST|USER_NAME|CHARACTER_NAME)\}\}/;
+  const SYSTEM_RE =
+    /\{\{(?:SYS_PROMPT|NARRATIVE|USER_INPUT|LORE_BOOK|CHARACTER_STATE|AGENT\.\w+|INVENTORY|GAME_TIME|ACTIVE_EFFECTS|MEMORY_ENTRIES|PLOT_EVENTS|CRAFT_REQUEST|CHAR_DETECT|CHAR_GEN_RESULT|CRAFT_RESULT|ITEM_REQUEST|USER_NAME|CHARACTER_NAME)\}\}/;
   result = result.replace(/\{\{([^}]+)\}\}/g, (match) => {
     if (SYSTEM_RE.test(match)) return match;
     return '';
@@ -180,7 +178,7 @@ export async function loadPresets(): Promise<AgentPreset[]> {
     try {
       const response = await fetch(`${PRESET_BASE}${id}.json`);
       if (!response.ok) continue;
-      const preset = await response.json() as AgentPreset;
+      const preset = (await response.json()) as AgentPreset;
       presets.push(preset);
     } catch {
       // 加载失败，跳过
@@ -194,7 +192,7 @@ async function fetchPresetIds(): Promise<string[]> {
   try {
     const response = await fetch(`${PRESET_BASE}_index.json`);
     if (response.ok) {
-      return await response.json() as string[];
+      return (await response.json()) as string[];
     }
   } catch {
     // 无索引文件
@@ -203,18 +201,13 @@ async function fetchPresetIds(): Promise<string[]> {
 }
 
 /** 同步版：从预加载数据获取预设 */
-export function loadPresetsSync(
-  preloaded: Record<string, AgentPreset>,
-): AgentPreset[] {
+export function loadPresetsSync(preloaded: Record<string, AgentPreset>): AgentPreset[] {
   return Object.values(preloaded);
 }
 
 /** 获取指定预设 */
-export function getPreset(
-  id: string,
-  presets: AgentPreset[],
-): AgentPreset | undefined {
-  return presets.find(p => p.id === id);
+export function getPreset(id: string, presets: AgentPreset[]): AgentPreset | undefined {
+  return presets.find((p) => p.id === id);
 }
 
 /**
@@ -244,9 +237,7 @@ export function assemblePresetContent(
     .sort((a: any, b: any) => (a.injection_order ?? 0) - (b.injection_order ?? 0));
 
   // 快速检查：是否有任何条目需要预处理
-  const needsPreprocessing = sorted.some(
-    (p: any) => hasSTMacros(p.content || ''),
-  );
+  const needsPreprocessing = sorted.some((p: any) => hasSTMacros(p.content || ''));
 
   let content: string;
   if (needsPreprocessing) {
@@ -274,7 +265,10 @@ export function assemblePresetContent(
   }
 
   // Check if content already has our placeholder syntax
-  const hasOurPlaceholders = /\{\{(?:SYS_PROMPT|NARRATIVE|USER_INPUT|LORE_BOOK|CHARACTER_STATE|AGENT\.|INVENTORY|GAME_TIME|ACTIVE_EFFECTS|MEMORY_ENTRIES|PLOT_EVENTS)\b/.test(content);
+  const hasOurPlaceholders =
+    /\{\{(?:SYS_PROMPT|NARRATIVE|USER_INPUT|LORE_BOOK|CHARACTER_STATE|AGENT\.|INVENTORY|GAME_TIME|ACTIVE_EFFECTS|MEMORY_ENTRIES|PLOT_EVENTS)\b/.test(
+      content,
+    );
 
   if (hasOurPlaceholders) {
     return content;
@@ -354,7 +348,8 @@ export function preprocessPresetForPreview(
     content = content.replace(/\{\{roll\s+[^}]*\}\}/gi, '');
 
     // 7. 剥离未知占位符，但保留已知系统占位符 + random + char + user
-    const SYSTEM_RE = /\{\{(?:SYS_PROMPT|NARRATIVE|USER_INPUT|LORE_BOOK|CHARACTER_STATE|AGENT\.\w+|INVENTORY|GAME_TIME|ACTIVE_EFFECTS|MEMORY_ENTRIES|PLOT_EVENTS|CRAFT_REQUEST|CHAR_DETECT|CHAR_GEN_RESULT|CRAFT_RESULT|ITEM_REQUEST|USER_NAME|CHARACTER_NAME)\}\}/;
+    const SYSTEM_RE =
+      /\{\{(?:SYS_PROMPT|NARRATIVE|USER_INPUT|LORE_BOOK|CHARACTER_STATE|AGENT\.\w+|INVENTORY|GAME_TIME|ACTIVE_EFFECTS|MEMORY_ENTRIES|PLOT_EVENTS|CRAFT_REQUEST|CHAR_DETECT|CHAR_GEN_RESULT|CRAFT_RESULT|ITEM_REQUEST|USER_NAME|CHARACTER_NAME)\}\}/;
     const PRESERVE_RE = /\{\{(?:random::|char\}\}|user\}\})/i;
     content = content.replace(/\{\{([^}]+)\}\}/g, (match: string) => {
       if (SYSTEM_RE.test(match)) return match;

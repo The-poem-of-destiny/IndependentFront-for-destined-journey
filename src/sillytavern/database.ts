@@ -8,11 +8,24 @@
 
 import Dexie, { Table } from 'dexie';
 import type {
-  Lorebook, ChatPreset, AppSettings,
-  MemoryRecord, PlotEvent, CharacterState, Snapshot, SaveSlot, ApiEndpoint,
-  PlotOutline, SaveProfile, ChatMessage,
-  AudioTrack, AudioBlobRecord, AudioPlaylist, AudioHandleRecord,
-  AssetMetaRecord, AssetBlobRecord,
+  Lorebook,
+  ChatPreset,
+  AppSettings,
+  MemoryRecord,
+  PlotEvent,
+  CharacterState,
+  Snapshot,
+  SaveSlot,
+  ApiEndpoint,
+  PlotOutline,
+  SaveProfile,
+  ChatMessage,
+  AudioTrack,
+  AudioBlobRecord,
+  AudioPlaylist,
+  AudioHandleRecord,
+  AssetMetaRecord,
+  AssetBlobRecord,
 } from './types';
 import type { CreatePreset } from '../ui/stores/create-store';
 import { DEFAULT_SETTINGS } from './types';
@@ -84,84 +97,92 @@ class AppDatabase extends Dexie {
       chats: 'id, name, updatedAt',
     });
 
-    this.version(3).stores({
-      lorebooks: 'id, name, updatedAt',
-      presets: 'id, name, updatedAt',
-      settings: 'key',
-      chats: 'id, name, updatedAt',
-    }).upgrade(async tx => {
-      const settings = await tx.table('settings').toCollection().toArray();
-      for (const s of settings) {
-        if (s.uiMode === undefined) s.uiMode = 'game';
-        if (s.customTags === undefined) s.customTags = ['maintext', 'option', 'sum', 'vars', 'thinking', 'think'];
-        if (s.thinkingDisplay === undefined) s.thinkingDisplay = 'fold';
-        if (s.formatPromptTemplate === undefined) s.formatPromptTemplate = '';
-        if (s.api && s.api.secondary === undefined) {
-          s.api.secondary = { enabled: false, baseUrl: '', apiKey: '', model: '' };
+    this.version(3)
+      .stores({
+        lorebooks: 'id, name, updatedAt',
+        presets: 'id, name, updatedAt',
+        settings: 'key',
+        chats: 'id, name, updatedAt',
+      })
+      .upgrade(async (tx) => {
+        const settings = await tx.table('settings').toCollection().toArray();
+        for (const s of settings) {
+          if (s.uiMode === undefined) s.uiMode = 'game';
+          if (s.customTags === undefined)
+            s.customTags = ['maintext', 'option', 'sum', 'vars', 'thinking', 'think'];
+          if (s.thinkingDisplay === undefined) s.thinkingDisplay = 'fold';
+          if (s.formatPromptTemplate === undefined) s.formatPromptTemplate = '';
+          if (s.api && s.api.secondary === undefined) {
+            s.api.secondary = { enabled: false, baseUrl: '', apiKey: '', model: '' };
+          }
+          await tx.table('settings').put(s);
         }
-        await tx.table('settings').put(s);
-      }
-    });
+      });
 
     // v4: 多 Agent 引擎 — 新增 6 表 + Settings 字段扩展
-    this.version(4).stores({
-      lorebooks: 'id, name, updatedAt',
-      presets: 'id, name, updatedAt',
-      settings: 'key',
-      chats: 'id, name, updatedAt',
-      memories: 'id, saveId, createdAt, realTimestamp',
-      plotEvents: 'id, saveId, parentId, status, updatedAt',
-      characters: 'id, type',
-      snapshots: 'id, saveId, index, timestamp',
-      saves: 'id, slot, updatedAt',
-      apiEndpoints: 'id, name',
-    }).upgrade(async tx => {
-      // 迁移现有 settings — 添加 v4 新字段
-      const settings = await tx.table('settings').toCollection().toArray();
-      for (const s of settings) {
-        if (s.apiEndpoints === undefined) s.apiEndpoints = [];
-        if (s.agentConfigs === undefined) s.agentConfigs = [];
-        if (s.agentPipeline === undefined) {
-          const { DEFAULT_AGENT_PIPELINE } = await import('./types');
-          s.agentPipeline = DEFAULT_AGENT_PIPELINE;
+    this.version(4)
+      .stores({
+        lorebooks: 'id, name, updatedAt',
+        presets: 'id, name, updatedAt',
+        settings: 'key',
+        chats: 'id, name, updatedAt',
+        memories: 'id, saveId, createdAt, realTimestamp',
+        plotEvents: 'id, saveId, parentId, status, updatedAt',
+        characters: 'id, type',
+        snapshots: 'id, saveId, index, timestamp',
+        saves: 'id, slot, updatedAt',
+        apiEndpoints: 'id, name',
+      })
+      .upgrade(async (tx) => {
+        // 迁移现有 settings — 添加 v4 新字段
+        const settings = await tx.table('settings').toCollection().toArray();
+        for (const s of settings) {
+          if (s.apiEndpoints === undefined) s.apiEndpoints = [];
+          if (s.agentConfigs === undefined) s.agentConfigs = [];
+          if (s.agentPipeline === undefined) {
+            const { DEFAULT_AGENT_PIPELINE } = await import('./types');
+            s.agentPipeline = DEFAULT_AGENT_PIPELINE;
+          }
+          if (s.cacheStrategy === undefined) s.cacheStrategy = 'userid_isolated';
+          if (s.maxSnapshotsPerSave === undefined) s.maxSnapshotsPerSave = 30;
+          if (s.maxMemoriesRecall === undefined) s.maxMemoriesRecall = 10;
+          await tx.table('settings').put(s);
         }
-        if (s.cacheStrategy === undefined) s.cacheStrategy = 'userid_isolated';
-        if (s.maxSnapshotsPerSave === undefined) s.maxSnapshotsPerSave = 30;
-        if (s.maxMemoriesRecall === undefined) s.maxMemoriesRecall = 10;
-        await tx.table('settings').put(s);
-      }
-    });
+      });
 
     // v5: Phase 4 — 剧情大纲表 + Settings 扩展字段
-    this.version(5).stores({
-      lorebooks: 'id, name, updatedAt',
-      presets: 'id, name, updatedAt',
-      settings: 'key',
-      chats: 'id, name, updatedAt',
-      memories: 'id, saveId, createdAt, realTimestamp',
-      plotEvents: 'id, saveId, parentId, status, updatedAt',
-      characters: 'id, type',
-      snapshots: 'id, saveId, index, timestamp',
-      saves: 'id, slot, updatedAt',
-      apiEndpoints: 'id, name',
-      plotOutlines: 'id, saveId, updatedAt',
-    }).upgrade(async tx => {
-      // 迁移现有 settings — 添加 Phase 4 新字段
-      const settings = await tx.table('settings').toCollection().toArray();
-      for (const s of settings) {
-        if (s.plotSettings === undefined) {
-          const { DEFAULT_PLOT_SETTINGS } = await import('./types');
-          s.plotSettings = DEFAULT_PLOT_SETTINGS;
+    this.version(5)
+      .stores({
+        lorebooks: 'id, name, updatedAt',
+        presets: 'id, name, updatedAt',
+        settings: 'key',
+        chats: 'id, name, updatedAt',
+        memories: 'id, saveId, createdAt, realTimestamp',
+        plotEvents: 'id, saveId, parentId, status, updatedAt',
+        characters: 'id, type',
+        snapshots: 'id, saveId, index, timestamp',
+        saves: 'id, slot, updatedAt',
+        apiEndpoints: 'id, name',
+        plotOutlines: 'id, saveId, updatedAt',
+      })
+      .upgrade(async (tx) => {
+        // 迁移现有 settings — 添加 Phase 4 新字段
+        const settings = await tx.table('settings').toCollection().toArray();
+        for (const s of settings) {
+          if (s.plotSettings === undefined) {
+            const { DEFAULT_PLOT_SETTINGS } = await import('./types');
+            s.plotSettings = DEFAULT_PLOT_SETTINGS;
+          }
+          if (s.embeddingEndpointId === undefined) s.embeddingEndpointId = null;
+          if (s.embeddingModel === undefined) s.embeddingModel = 'Qwen/Qwen3-VL-Embedding-8B';
+          if (s.embeddingDimension === undefined) s.embeddingDimension = 4096;
+          if (s.memoryCompressionThreshold === undefined) s.memoryCompressionThreshold = 100;
+          // Fix: maxMemoriesRecall 默认改为 20
+          if (s.maxMemoriesRecall === undefined || s.maxMemoriesRecall === 10)
+            s.maxMemoriesRecall = 20;
+          await tx.table('settings').put(s);
         }
-        if (s.embeddingEndpointId === undefined) s.embeddingEndpointId = null;
-        if (s.embeddingModel === undefined) s.embeddingModel = 'Qwen/Qwen3-VL-Embedding-8B';
-        if (s.embeddingDimension === undefined) s.embeddingDimension = 4096;
-        if (s.memoryCompressionThreshold === undefined) s.memoryCompressionThreshold = 100;
-        // Fix: maxMemoriesRecall 默认改为 20
-        if (s.maxMemoriesRecall === undefined || s.maxMemoriesRecall === 10) s.maxMemoriesRecall = 20;
-        await tx.table('settings').put(s);
-      }
-    });
+      });
 
     // v6: Phase 4.6 — SaveProfile 存档档案
     this.version(6).stores({
@@ -215,59 +236,63 @@ class AppDatabase extends Dexie {
     });
 
     // v9: 数据字段规范 M1 — characters saveId 一等索引 (#43)；chats v3 遗留表删除 (#46)
-    this.version(9).stores({
-      lorebooks: 'id, name, updatedAt',
-      presets: 'id, name, updatedAt',
-      settings: 'key',
-      chats: null,   // 删表
-      memories: 'id, saveId, createdAt, realTimestamp',
-      plotEvents: 'id, saveId, parentId, status, updatedAt',
-      characters: 'id, saveId, type',
-      snapshots: 'id, saveId, index, timestamp',
-      saves: 'id, slot, updatedAt',
-      apiEndpoints: 'id, name',
-      plotOutlines: 'id, saveId, updatedAt',
-      saveProfiles: 'saveId, updatedAt',
-      createPresets: 'id, name, updatedAt',
-      messages: 'id, saveId, [saveId+turn]',
-    }).upgrade(async tx => {
-      // 开发期迁移: 把 customFields.saveId 回填为一等字段（老数据仅开发自用）
-      const chars = await tx.table('characters').toCollection().toArray();
-      for (const c of chars) {
-        if (!c.saveId) {
-          c.saveId = c.customFields?.saveId ?? '';
-          await tx.table('characters').put(c);
+    this.version(9)
+      .stores({
+        lorebooks: 'id, name, updatedAt',
+        presets: 'id, name, updatedAt',
+        settings: 'key',
+        chats: null, // 删表
+        memories: 'id, saveId, createdAt, realTimestamp',
+        plotEvents: 'id, saveId, parentId, status, updatedAt',
+        characters: 'id, saveId, type',
+        snapshots: 'id, saveId, index, timestamp',
+        saves: 'id, slot, updatedAt',
+        apiEndpoints: 'id, name',
+        plotOutlines: 'id, saveId, updatedAt',
+        saveProfiles: 'saveId, updatedAt',
+        createPresets: 'id, name, updatedAt',
+        messages: 'id, saveId, [saveId+turn]',
+      })
+      .upgrade(async (tx) => {
+        // 开发期迁移: 把 customFields.saveId 回填为一等字段（老数据仅开发自用）
+        const chars = await tx.table('characters').toCollection().toArray();
+        for (const c of chars) {
+          if (!c.saveId) {
+            c.saveId = c.customFields?.saveId ?? '';
+            await tx.table('characters').put(c);
+          }
         }
-      }
-      // SaveProfile.variables 为 v9 新必填字段，存量记录回填空对象
-      const profiles = await tx.table('saveProfiles').toCollection().toArray();
-      for (const p of profiles) {
-        if (p.variables === undefined) {
-          p.variables = {};
-          await tx.table('saveProfiles').put(p);
+        // SaveProfile.variables 为 v9 新必填字段，存量记录回填空对象
+        const profiles = await tx.table('saveProfiles').toCollection().toArray();
+        for (const p of profiles) {
+          if (p.variables === undefined) {
+            p.variables = {};
+            await tx.table('saveProfiles').put(p);
+          }
         }
-      }
-    });
+      });
 
     // v10: 数据字段规范 M5 — Snapshot 重定义（规范 §11.2）: 索引 index/timestamp → createdAt
-    this.version(10).stores({
-      lorebooks: 'id, name, updatedAt',
-      presets: 'id, name, updatedAt',
-      settings: 'key',
-      memories: 'id, saveId, createdAt, realTimestamp',
-      plotEvents: 'id, saveId, parentId, status, updatedAt',
-      characters: 'id, saveId, type',
-      snapshots: 'id, saveId, createdAt',
-      saves: 'id, slot, updatedAt',
-      apiEndpoints: 'id, name',
-      plotOutlines: 'id, saveId, updatedAt',
-      saveProfiles: 'saveId, updatedAt',
-      createPresets: 'id, name, updatedAt',
-      messages: 'id, saveId, [saveId+turn]',
-    }).upgrade(async tx => {
-      // 旧快照开发数据直接清弃（结构不兼容: index/timestamp/寄生 variables → reason/turn/整份深拷贝）
-      await tx.table('snapshots').clear();
-    });
+    this.version(10)
+      .stores({
+        lorebooks: 'id, name, updatedAt',
+        presets: 'id, name, updatedAt',
+        settings: 'key',
+        memories: 'id, saveId, createdAt, realTimestamp',
+        plotEvents: 'id, saveId, parentId, status, updatedAt',
+        characters: 'id, saveId, type',
+        snapshots: 'id, saveId, createdAt',
+        saves: 'id, slot, updatedAt',
+        apiEndpoints: 'id, name',
+        plotOutlines: 'id, saveId, updatedAt',
+        saveProfiles: 'saveId, updatedAt',
+        createPresets: 'id, name, updatedAt',
+        messages: 'id, saveId, [saveId+turn]',
+      })
+      .upgrade(async (tx) => {
+        // 旧快照开发数据直接清弃（结构不兼容: index/timestamp/寄生 variables → reason/turn/整份深拷贝）
+        await tx.table('snapshots').clear();
+      });
 
     // v11: 音频子系统 — 新增 3 表（纯增量，无 upgrade 回调）
     this.version(11).stores({
@@ -412,8 +437,18 @@ export interface FullBackup {
 export async function exportAllData(): Promise<FullBackup> {
   const db = getDatabase();
   const [
-    lorebooks, presets, settings,
-    memories, plotEvents, characters, snapshots, saves, apiEndpoints, plotOutlines, saveProfiles, createPresets,
+    lorebooks,
+    presets,
+    settings,
+    memories,
+    plotEvents,
+    characters,
+    snapshots,
+    saves,
+    apiEndpoints,
+    plotOutlines,
+    saveProfiles,
+    createPresets,
     messages,
   ] = await Promise.all([
     db.lorebooks.toArray(),
@@ -433,8 +468,18 @@ export async function exportAllData(): Promise<FullBackup> {
   return {
     version: DB_VERSION,
     exportedAt: Date.now(),
-    lorebooks, presets, settings,
-    memories, plotEvents, characters, snapshots, saves, apiEndpoints, plotOutlines, saveProfiles, createPresets,
+    lorebooks,
+    presets,
+    settings,
+    memories,
+    plotEvents,
+    characters,
+    snapshots,
+    saves,
+    apiEndpoints,
+    plotOutlines,
+    saveProfiles,
+    createPresets,
     messages,
   };
 }
@@ -451,9 +496,19 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
     throw new Error('备份格式无效：缺少有效的 version 字段');
   }
   const arrayFields: Array<keyof FullBackup> = [
-    'lorebooks', 'presets', 'settings', 'memories', 'plotEvents',
-    'characters', 'snapshots', 'saves', 'apiEndpoints', 'plotOutlines',
-    'saveProfiles', 'createPresets', 'messages',
+    'lorebooks',
+    'presets',
+    'settings',
+    'memories',
+    'plotEvents',
+    'characters',
+    'snapshots',
+    'saves',
+    'apiEndpoints',
+    'plotOutlines',
+    'saveProfiles',
+    'createPresets',
+    'messages',
   ];
   for (const f of arrayFields) {
     const v = backup[f];
@@ -486,7 +541,10 @@ export async function importAllData(backup: FullBackup): Promise<void> {
 }
 
 /** 纯导入内核（无验证、无预备份）— importAllData 与失败回滚共用 */
-async function doImportAllData(db: ReturnType<typeof getDatabase>, backup: FullBackup): Promise<void> {
+async function doImportAllData(
+  db: ReturnType<typeof getDatabase>,
+  backup: FullBackup,
+): Promise<void> {
   // Split into multiple transactions — 单事务覆盖 13 张表在 Dexie 上有性能/锁问题
   await db.transaction('rw', db.lorebooks, db.presets, db.settings, async () => {
     await db.lorebooks.clear();
@@ -597,7 +655,9 @@ export async function getMemories(saveId: string): Promise<MemoryRecord[]> {
 }
 
 export async function getMemoriesByIds(ids: string[]): Promise<MemoryRecord[]> {
-  return getDatabase().memories.bulkGet(ids).then(arr => arr.filter(Boolean) as MemoryRecord[]);
+  return getDatabase()
+    .memories.bulkGet(ids)
+    .then((arr) => arr.filter(Boolean) as MemoryRecord[]);
 }
 
 export async function saveMemory(memory: MemoryRecord): Promise<string> {
@@ -613,19 +673,21 @@ export async function deleteMemory(id: string): Promise<void> {
 export async function deleteMemoriesAfter(saveId: string, realTimestamp: number): Promise<number> {
   const db = getDatabase();
   const ids = await db.memories
-    .where('saveId').equals(saveId)
-    .and(m => m.realTimestamp > realTimestamp)
+    .where('saveId')
+    .equals(saveId)
+    .and((m) => m.realTimestamp > realTimestamp)
     .primaryKeys();
   if (ids.length > 0) await db.memories.bulkDelete(ids);
   return ids.length;
 }
 
 export async function getRecentMemories(saveId: string, limit: number): Promise<MemoryRecord[]> {
-  return getDatabase().memories
-    .where('saveId').equals(saveId)
+  return getDatabase()
+    .memories.where('saveId')
+    .equals(saveId)
     .reverse()
     .sortBy('createdAt')
-    .then(arr => arr.slice(0, limit));
+    .then((arr) => arr.slice(0, limit));
 }
 
 // --- Plot Events ---
@@ -635,9 +697,10 @@ export async function getPlotEvents(saveId: string): Promise<PlotEvent[]> {
 }
 
 export async function getActivePlotEvents(saveId: string): Promise<PlotEvent[]> {
-  return getDatabase().plotEvents
-    .where('saveId').equals(saveId)
-    .and(e => e.status === 'active')
+  return getDatabase()
+    .plotEvents.where('saveId')
+    .equals(saveId)
+    .and((e) => e.status === 'active')
     .toArray();
 }
 
@@ -671,9 +734,16 @@ export async function getCharacter(id: string): Promise<CharacterState | undefin
   return getDatabase().characters.get(id);
 }
 
-export async function getCharactersByType(type: CharacterState['type'], saveId?: string): Promise<CharacterState[]> {
+export async function getCharactersByType(
+  type: CharacterState['type'],
+  saveId?: string,
+): Promise<CharacterState[]> {
   if (saveId) {
-    return getDatabase().characters.where('saveId').equals(saveId).and(c => c.type === type).toArray();
+    return getDatabase()
+      .characters.where('saveId')
+      .equals(saveId)
+      .and((c) => c.type === type)
+      .toArray();
   }
   return getDatabase().characters.where('type').equals(type).toArray();
 }
@@ -695,9 +765,7 @@ export async function deleteCharacter(id: string): Promise<void> {
 
 export async function getSnapshots(saveId: string): Promise<Snapshot[]> {
   // M5: 按 createdAt 升序（旧 index 序号字段已随 §11.2 重定义删除）
-  return getDatabase().snapshots
-    .where('saveId').equals(saveId)
-    .sortBy('createdAt');
+  return getDatabase().snapshots.where('saveId').equals(saveId).sortBy('createdAt');
 }
 
 export async function getSnapshot(id: string): Promise<Snapshot | undefined> {
@@ -705,8 +773,9 @@ export async function getSnapshot(id: string): Promise<Snapshot | undefined> {
 }
 
 export async function getLatestSnapshot(saveId: string): Promise<Snapshot | undefined> {
-  const snapshots = await getDatabase().snapshots
-    .where('saveId').equals(saveId)
+  const snapshots = await getDatabase()
+    .snapshots.where('saveId')
+    .equals(saveId)
     .reverse()
     .sortBy('createdAt');
   return snapshots[0];
@@ -726,41 +795,46 @@ export async function deleteSnapshot(id: string): Promise<void> {
  *  - mode='tiered': 阶梯淘汰——最近5轮全留，再往前每4轮留1，更早每8/10轮留1；
  *    非 turn 档(manual/pre-combat)受保护永不淘汰；最近5个 turn 档铁律保护。
  */
-export async function trimSnapshots(saveId: string, maxCount: number, mode: 'tiered' | 'dense' = 'dense'): Promise<void> {
-  const all = await getDatabase().snapshots
-    .where('saveId').equals(saveId)
+export async function trimSnapshots(
+  saveId: string,
+  maxCount: number,
+  mode: 'tiered' | 'dense' = 'dense',
+): Promise<void> {
+  const all = await getDatabase()
+    .snapshots.where('saveId')
+    .equals(saveId)
     .reverse()
     .sortBy('createdAt'); // 最新在前
 
   if (all.length <= maxCount) return;
 
   // 非 turn 档(manual/pre-combat)受保护，永不淘汰
-  const protectedIds = new Set(all.filter(s => s.reason !== 'turn').map(s => s.id));
-  const turnSnaps = all.filter(s => s.reason === 'turn'); // 继承 all 顺序（最新在前）
+  const protectedIds = new Set(all.filter((s) => s.reason !== 'turn').map((s) => s.id));
+  const turnSnaps = all.filter((s) => s.reason === 'turn'); // 继承 all 顺序（最新在前）
 
   let keepTurnIds: Set<string>;
   if (mode === 'tiered') {
     keepTurnIds = selectTieredTurnSnapshots(turnSnaps);
   } else {
     const turnKeep = Math.max(0, maxCount - protectedIds.size);
-    keepTurnIds = new Set(turnSnaps.slice(0, turnKeep).map(s => s.id));
+    keepTurnIds = new Set(turnSnaps.slice(0, turnKeep).map((s) => s.id));
   }
 
   // 最近 5 个 turn 档铁律保护（回退依赖"上一轮档"必须存在）
-  const recentTurnIds = new Set(turnSnaps.slice(0, 5).map(s => s.id));
+  const recentTurnIds = new Set(turnSnaps.slice(0, 5).map((s) => s.id));
   const kept = new Set<string>([...protectedIds, ...keepTurnIds, ...recentTurnIds]);
 
   // 绝对上限兜底：总数仍超 maxCount → 从最旧可淘汰 turn 档砍起（跳过最近5与非turn）
   if (kept.size > maxCount) {
-    const droppable = turnSnaps.filter(s => kept.has(s.id) && !recentTurnIds.has(s.id)); // 最新在前
+    const droppable = turnSnaps.filter((s) => kept.has(s.id) && !recentTurnIds.has(s.id)); // 最新在前
     for (let i = droppable.length - 1; i >= 0 && kept.size > maxCount; i--) {
       kept.delete(droppable[i].id);
     }
   }
 
-  const toDelete = all.filter(s => !kept.has(s.id));
+  const toDelete = all.filter((s) => !kept.has(s.id));
   if (toDelete.length > 0) {
-    await getDatabase().snapshots.bulkDelete(toDelete.map(s => s.id));
+    await getDatabase().snapshots.bulkDelete(toDelete.map((s) => s.id));
   }
 }
 
@@ -811,7 +885,16 @@ export async function deleteSaveSlot(id: string): Promise<void> {
   // 任一步失败整体回滚，杜绝半删存档（如部分表已删但 saves/characters 残留）。
   await db.transaction(
     'rw',
-    [db.snapshots, db.memories, db.plotEvents, db.plotOutlines, db.messages, db.characters, db.saveProfiles, db.saves],
+    [
+      db.snapshots,
+      db.memories,
+      db.plotEvents,
+      db.plotOutlines,
+      db.messages,
+      db.characters,
+      db.saveProfiles,
+      db.saves,
+    ],
     async () => {
       await db.snapshots.where('saveId').equals(id).delete();
       await db.memories.where('saveId').equals(id).delete();
@@ -848,13 +931,12 @@ export async function deleteApiEndpoint(id: string): Promise<void> {
 
 export async function getPlotOutlines(saveId: string): Promise<PlotOutline[]> {
   // P1-08: 同毫秒保存会让 updatedAt 并列、Dexie sortBy 顺序不稳定 —— 改复合排序（升序）。
-  const outlines = await getDatabase().plotOutlines
-    .where('saveId').equals(saveId)
-    .toArray();
-  outlines.sort((a, b) =>
-    (a.updatedAt ?? 0) - (b.updatedAt ?? 0) ||
-    (a.version ?? 0) - (b.version ?? 0) ||
-    (a.createdAt ?? 0) - (b.createdAt ?? 0),
+  const outlines = await getDatabase().plotOutlines.where('saveId').equals(saveId).toArray();
+  outlines.sort(
+    (a, b) =>
+      (a.updatedAt ?? 0) - (b.updatedAt ?? 0) ||
+      (a.version ?? 0) - (b.version ?? 0) ||
+      (a.createdAt ?? 0) - (b.createdAt ?? 0),
   );
   return outlines;
 }
@@ -867,14 +949,13 @@ export async function getLatestPlotOutline(saveId: string): Promise<PlotOutline 
   // P1-08: 同毫秒连续保存会让 updatedAt 并列，Dexie .reverse().sortBy() 此时顺序不稳定
   // （全量测试曾因此返回旧大纲）。改为 toArray + 复合排序：updatedAt 降序为主，
   // 并列时 version 降序（世界线变动递增），再并列则 createdAt 降序（后创建的大纲更新）。
-  const outlines = await getDatabase().plotOutlines
-    .where('saveId').equals(saveId)
-    .toArray();
+  const outlines = await getDatabase().plotOutlines.where('saveId').equals(saveId).toArray();
   if (outlines.length === 0) return undefined;
-  outlines.sort((a, b) =>
-    (b.updatedAt ?? 0) - (a.updatedAt ?? 0) ||
-    (b.version ?? 0) - (a.version ?? 0) ||
-    (b.createdAt ?? 0) - (a.createdAt ?? 0),
+  outlines.sort(
+    (a, b) =>
+      (b.updatedAt ?? 0) - (a.updatedAt ?? 0) ||
+      (b.version ?? 0) - (a.version ?? 0) ||
+      (b.createdAt ?? 0) - (a.createdAt ?? 0),
   );
   return outlines[0];
 }
@@ -961,9 +1042,7 @@ export async function saveMessages(messages: ChatMessage[]): Promise<void> {
 
 /** 按存档 ID 获取全部消息，按时间戳升序排列 */
 export async function getMessages(saveId: string): Promise<ChatMessage[]> {
-  return getDatabase().messages
-    .where('saveId').equals(saveId)
-    .sortBy('timestamp');
+  return getDatabase().messages.where('saveId').equals(saveId).sortBy('timestamp');
 }
 
 /** 按存档 ID 删除所有消息 */
@@ -979,8 +1058,8 @@ export async function deleteMessagesBySaveId(saveId: string): Promise<void> {
  * 注: turn 为 undefined 的遗留消息不在复合索引内，不受本删除影响。
  */
 export async function deleteMessagesAfterTurn(saveId: string, turn: number): Promise<void> {
-  await getDatabase().messages
-    .where('[saveId+turn]')
+  await getDatabase()
+    .messages.where('[saveId+turn]')
     .between([saveId, turn], [saveId, Dexie.maxKey], false, true)
     .delete();
 }
@@ -1030,8 +1109,8 @@ export async function deleteAudioTrack(id: string): Promise<void> {
     await db.audioBlobs.delete(id);
     const lists = await db.audioPlaylists.toArray();
     const pruned = lists
-      .filter(l => l.trackIds.includes(id))
-      .map(l => ({ ...l, trackIds: l.trackIds.filter(t => t !== id), updatedAt: Date.now() }));
+      .filter((l) => l.trackIds.includes(id))
+      .map((l) => ({ ...l, trackIds: l.trackIds.filter((t) => t !== id), updatedAt: Date.now() }));
     if (pruned.length > 0) await db.audioPlaylists.bulkPut(pruned);
   });
 }

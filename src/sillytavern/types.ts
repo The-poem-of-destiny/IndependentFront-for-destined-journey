@@ -20,32 +20,32 @@ export * from './types-audio';
 // ========== World Book Types (Phase 8) ==========
 
 export type WorldBookPartition =
-  | 'world_setting'      // 世界设定 — 宇宙观/规则/层级/登神
-  | 'race'               // 种族 — 全部族血脉与特性
-  | 'faction'            // 势力 — 国家/城邦/政治实体
-  | 'character'          // 角色 — NPC/命定核心/人物卡
-  | 'event'              // 事件 — 剧情线/EJS 事件脚本
-  | 'adventure_area'     // 冒险区域 — 地下城/危险地带
-  | 'monster_ecology'    // 怪物生态 — 魔物/BOSS/生态链
-  | 'industry'           // 产业 — 经济/贸易/锻造/炼金/服务业
-  | 'organization'       // 组织 — 公会/商会/秘密结社
-  | 'system_core'        // 系统 — 命定核心/变量更新/数值公式
-  | 'variable'           // 变量 — 初始设定/变量规则/output_format
-  | 'quick_feature'      // 快捷功能 — 命运抽卡/盲盒/FP扩展
-  | 'extra_setting'      // 额外设定 — 数值表/战斗/制作/旅行/状态
-  | 'cot'                // COT — Chain-of-Thought 推理模板
-  | 'dlc';               // DLC — 可开关扩展内容
+  | 'world_setting' // 世界设定 — 宇宙观/规则/层级/登神
+  | 'race' // 种族 — 全部族血脉与特性
+  | 'faction' // 势力 — 国家/城邦/政治实体
+  | 'character' // 角色 — NPC/命定核心/人物卡
+  | 'event' // 事件 — 剧情线/EJS 事件脚本
+  | 'adventure_area' // 冒险区域 — 地下城/危险地带
+  | 'monster_ecology' // 怪物生态 — 魔物/BOSS/生态链
+  | 'industry' // 产业 — 经济/贸易/锻造/炼金/服务业
+  | 'organization' // 组织 — 公会/商会/秘密结社
+  | 'system_core' // 系统 — 命定核心/变量更新/数值公式
+  | 'variable' // 变量 — 初始设定/变量规则/output_format
+  | 'quick_feature' // 快捷功能 — 命运抽卡/盲盒/FP扩展
+  | 'extra_setting' // 额外设定 — 数值表/战斗/制作/旅行/状态
+  | 'cot' // COT — Chain-of-Thought 推理模板
+  | 'dlc'; // DLC — 可开关扩展内容
 
 export interface WorldBookEntry {
-  uid: number;                        // 唯一标识（来自原版世界书 UID）
-  name: string;                       // 条目名称（对应 ST 的 comment）
-  content: string;                    // 注入正文
-  enabled: boolean;                   // 开关（false 时该条目对所有 agent 都不注入）
-  key: string[];                      // 关键词
-  keysecondary: string[];             // 辅助关键词
-  selectiveLogic: 0 | 1 | 2 | 3;     // AND_ANY / NOT_ALL / NOT_ANY / AND_ALL
-  order: number;                      // 排序（越大越靠后）
-  position: number;                   // 世界书内位置分组（ST 兼容保留）
+  uid: number; // 唯一标识（来自原版世界书 UID）
+  name: string; // 条目名称（对应 ST 的 comment）
+  content: string; // 注入正文
+  enabled: boolean; // 开关（false 时该条目对所有 agent 都不注入）
+  key: string[]; // 关键词
+  keysecondary: string[]; // 辅助关键词
+  selectiveLogic: 0 | 1 | 2 | 3; // AND_ANY / NOT_ALL / NOT_ANY / AND_ALL
+  order: number; // 排序（越大越靠后）
+  position: number; // 世界书内位置分组（ST 兼容保留）
 }
 
 export interface WorldBook {
@@ -54,7 +54,7 @@ export interface WorldBook {
   partition: WorldBookPartition;
   description?: string;
   entries: WorldBookEntry[];
-  builtIn?: boolean;  // Phase 8: 项目内置世界书，禁止删除
+  builtIn?: boolean; // Phase 8: 项目内置世界书，禁止删除
 }
 
 // ========== World Book (Lorebook) Types (v3, deprecated) ==========
@@ -69,7 +69,15 @@ export interface LorebookEntry {
   comment?: string;
   order: number;
   /** SillyTavern position: 0=before_char, 1=after_char, 2=before_example(AN top), 3=after_example(AN bottom), 4=at_depth, 5=example_msg_top, 6=example_msg_bottom, 7=outlet */
-  position: 'before_char' | 'after_char' | 'before_example' | 'after_example' | 'at_depth' | 'example_msg_top' | 'example_msg_bottom' | 'outlet';
+  position:
+    | 'before_char'
+    | 'after_char'
+    | 'before_example'
+    | 'after_example'
+    | 'at_depth'
+    | 'example_msg_top'
+    | 'example_msg_bottom'
+    | 'outlet';
   depth?: number;
   role?: number;
   selective: boolean;
@@ -120,48 +128,51 @@ export interface Lorebook {
 export interface SillyTavernLorebookExport {
   name: string;
   description?: string;
-  entries: Record<string, {
-    uid: number;
-    key: string[];
-    keysecondary: string[];
-    comment: string;
-    content: string;
-    constant: boolean;
-    selective: boolean;
-    selectiveLogic: 0 | 1 | 2 | 3;
-    addMemo: boolean;
-    order: number;
-    position: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
-    role: number;
-    disable: boolean;
-    probability: number;
-    depth: number;
-    group: string;
-    useProbability: boolean;
-    excluded: boolean;
-    sticky: number;
-    cooldown: number;
-    delay: number;
-    weight: number;
-    scanDepth: number;
-    caseSensitive: boolean;
-    matchWholeWords: boolean;
-    excludeRecursion: boolean;
-    preventRecursion: boolean;
-    useGroupScoring: boolean;
-    matchPersonaDescription: boolean;
-    matchCharacterDescription: boolean;
-    matchCharacterPersonality: boolean;
-    matchCharacterDepthPrompt: boolean;
-    matchScenario: boolean;
-    matchCreatorNotes: boolean;
-    decorators: string[];
-    characterFilter: {
-      isExclude?: boolean;
-      names?: string[];
-      tags?: number[];
-    };
-  }>;
+  entries: Record<
+    string,
+    {
+      uid: number;
+      key: string[];
+      keysecondary: string[];
+      comment: string;
+      content: string;
+      constant: boolean;
+      selective: boolean;
+      selectiveLogic: 0 | 1 | 2 | 3;
+      addMemo: boolean;
+      order: number;
+      position: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+      role: number;
+      disable: boolean;
+      probability: number;
+      depth: number;
+      group: string;
+      useProbability: boolean;
+      excluded: boolean;
+      sticky: number;
+      cooldown: number;
+      delay: number;
+      weight: number;
+      scanDepth: number;
+      caseSensitive: boolean;
+      matchWholeWords: boolean;
+      excludeRecursion: boolean;
+      preventRecursion: boolean;
+      useGroupScoring: boolean;
+      matchPersonaDescription: boolean;
+      matchCharacterDescription: boolean;
+      matchCharacterPersonality: boolean;
+      matchCharacterDepthPrompt: boolean;
+      matchScenario: boolean;
+      matchCreatorNotes: boolean;
+      decorators: string[];
+      characterFilter: {
+        isExclude?: boolean;
+        names?: string[];
+        tags?: number[];
+      };
+    }
+  >;
   settings?: {
     recursive_scanning?: boolean;
     case_sensitive?: boolean;
@@ -211,13 +222,13 @@ export interface ApiSettings {
 
 /** 单个 API 端点定义 */
 export interface ApiEndpoint {
-  id: string;                   // UUID
-  name: string;                 // 用户自定义名称，如 'DeepSeek主号'
-  provider: string;             // 'deepseek' | 'openai' | 'moonshot' | 'custom'
+  id: string; // UUID
+  name: string; // 用户自定义名称，如 'DeepSeek主号'
+  provider: string; // 'deepseek' | 'openai' | 'moonshot' | 'custom'
   baseUrl: string;
-  apiKey: string;               // 加密存储
+  apiKey: string; // 加密存储
   defaultModel: string;
-  models: string[];             // 可用模型列表
+  models: string[]; // 可用模型列表
   timeout: number;
   /** DeepSeek 思考模式：设 true 后所有走这个 endpoint 的请求都会开启 thinking */
   enableThinking?: boolean;
@@ -225,10 +236,10 @@ export interface ApiEndpoint {
 
 /** 单个 Agent 的配置 */
 export interface AgentConfig {
-  agentId: string;              // 'story' | 'memory_recall' | 'plot_check' | 'request_dispatcher' | 'vars_update' | 'memory_summary' | 'plot_correct'
-  enabled: boolean;             // 是否启用
-  apiEndpointId: string;        // 指向 ApiEndpoint.id
-  model: string;                // 覆盖 endpoint 的默认 model
+  agentId: string; // 'story' | 'memory_recall' | 'plot_check' | 'request_dispatcher' | 'vars_update' | 'memory_summary' | 'plot_correct'
+  enabled: boolean; // 是否启用
+  apiEndpointId: string; // 指向 ApiEndpoint.id
+  model: string; // 覆盖 endpoint 的默认 model
   temperature: number;
   maxTokens: number;
   topP: number;
@@ -236,13 +247,14 @@ export interface AgentConfig {
   presencePenalty: number;
   retryOnFail: boolean;
   timeout: number;
-  userId: string;               // DeepSeek 缓存隔离（自动生成）
-  promptTemplate: {             // Prompt 模板
-    fixedSystem: string;        // 前固定部分（缓存命中关键）
-    fixedExamples: string;      // Few-shot 示例
+  userId: string; // DeepSeek 缓存隔离（自动生成）
+  promptTemplate: {
+    // Prompt 模板
+    fixedSystem: string; // 前固定部分（缓存命中关键）
+    fixedExamples: string; // Few-shot 示例
   };
-  worldBookIds: string[];       // Phase 8: 该 Agent 挂载的世界书 ID 列表
-  presetId?: string;            // Phase 8: 该 Agent 使用的预设 ID
+  worldBookIds: string[]; // Phase 8: 该 Agent 挂载的世界书 ID 列表
+  presetId?: string; // Phase 8: 该 Agent 使用的预设 ID
   /** 🆕 Agentic: 启用 OpenAI function calling（工具调用），默认 false */
   toolsEnabled?: boolean;
   /** 🆕 Agentic: 最大工具调用轮数，超限后强制输出（默认 5） */
@@ -271,8 +283,8 @@ export interface AgentConfig {
 export interface AgentPreset {
   id: string;
   name: string;
-  fixedSystem: string;            // 固定系统提示词（缓存敏感）
-  fixedExamples: string;          // Few-shot 示例
+  fixedSystem: string; // 固定系统提示词（缓存敏感）
+  fixedExamples: string; // Few-shot 示例
   temperature?: number;
   maxTokens?: number;
   topP?: number;
@@ -308,14 +320,14 @@ export type PlaceholderResolver = (
 export type LocalParams = Record<string, string>;
 
 export interface PipelineStage {
-  agents: string[];             // 本阶段运行的 Agent ID（同阶段可并行）
-  waitFor: string[];            // 等待哪些 Agent 完成
+  agents: string[]; // 本阶段运行的 Agent ID（同阶段可并行）
+  waitFor: string[]; // 等待哪些 Agent 完成
 }
 
 export interface Pipeline {
-  stages: PipelineStage[];      // 顺序执行的阶段
-  timeout: number;              // 整体超时 ms
-  retryOnFail: boolean;         // 失败重试策略
+  stages: PipelineStage[]; // 顺序执行的阶段
+  timeout: number; // 整体超时 ms
+  retryOnFail: boolean; // 失败重试策略
 }
 
 /** 默认 Agent 管线 (Phase 10 更新) */
@@ -347,19 +359,28 @@ export interface PlotSettings {
   tabooContent: string;
   /** 主线专属 */
   main?: {
-    durationYears: number;                          // 主线持续年份
-    allowNonWorldbookNpc: boolean;                  // 是否引入世界书外 NPC
-    difficultyTier?: number;                        // 事件难度层级 (1-7, 对应生命层级; 不填=自适应)
-    genrePreference: Array<'combat' | 'mystery' | 'social' | 'romance' | 'exploration' | 'politics' | 'survival' | 'tragedy'>;
-    customPreference: string;                       // 自定义偏好输入框
-    chapterCount?: number;                            // 章节数量（用户输入的数字，空=AI 自己判断）
-    eventsPerChapter?: number;                       // 每章事件数（用户输入的数字，空=AI 自己判断）
+    durationYears: number; // 主线持续年份
+    allowNonWorldbookNpc: boolean; // 是否引入世界书外 NPC
+    difficultyTier?: number; // 事件难度层级 (1-7, 对应生命层级; 不填=自适应)
+    genrePreference: Array<
+      | 'combat'
+      | 'mystery'
+      | 'social'
+      | 'romance'
+      | 'exploration'
+      | 'politics'
+      | 'survival'
+      | 'tragedy'
+    >;
+    customPreference: string; // 自定义偏好输入框
+    chapterCount?: number; // 章节数量（用户输入的数字，空=AI 自己判断）
+    eventsPerChapter?: number; // 每章事件数（用户输入的数字，空=AI 自己判断）
   };
   /** 支线专属 */
   side?: {
-    focusRegion: string;                            // 专注区域（空=当前区域）
-    chapterCount?: number;                            // 章节数量（用户输入的数字，0=AI 自己判断）
-    eventsPerChapter?: number;                       // 每章事件数（用户输入的数字，0=AI 自己判断）
+    focusRegion: string; // 专注区域（空=当前区域）
+    chapterCount?: number; // 章节数量（用户输入的数字，0=AI 自己判断）
+    eventsPerChapter?: number; // 每章事件数（用户输入的数字，0=AI 自己判断）
   };
 }
 
@@ -549,7 +570,7 @@ export function createDefaultPreset(): Omit<ChatPreset, 'id' | 'createdAt' | 'up
       max_context_unlocked: false,
       chat_completion_source: 'openai',
       openai_model: 'gpt-3.5-turbo',
-      main: 'Write {{char}}\'s next reply in a fictional chat between {{char}} and {{user}}.',
+      main: "Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.",
       nsfw: '',
       jailbreak: '',
       enhanceDefinitions: '',
@@ -638,7 +659,7 @@ export interface Skill {
   description: string;
   type: 'active' | 'passive';
   cost?: { type: 'HP' | 'MP' | 'SP'; amount: number };
-  cooldown?: number;             // 剩余冷却时间
+  cooldown?: number; // 剩余冷却时间
   maxCooldown?: number;
   level?: number;
   /** 🆕 效果词条: 词条名→中文描述 (AI写, 前端展示) */
@@ -656,7 +677,7 @@ export interface InventoryItem {
   quantity: number;
   /** 🆕 穿戴槽位（EQUIP_SLOTS 枚举值）；null/undefined = 躺背包。装备不是独立实体，是物品的状态（规范 §3） */
   equippedSlot?: string | null;
-  type?: string;                 // 'weapon' | 'armor' | 'consumable' | 'material' | 'quest'
+  type?: string; // 'weapon' | 'armor' | 'consumable' | 'material' | 'quest'
   rarity?: '普通' | '优良' | '稀有' | '史诗' | '传说' | '神话' | '唯一';
   /** 🆕 M2: 装备数值加成（装备并入物品后归物品所有，规范 §3.1） */
   stats?: Record<string, number>;
@@ -684,15 +705,15 @@ export interface StatusEffect {
   id?: string;
   name: string;
   description: string;
-  category: '增益' | '减益' | '特殊';   // 世界书三分类
-  stacks: number;                // 层数
+  category: '增益' | '减益' | '特殊'; // 世界书三分类
+  stacks: number; // 层数
   /** 🆕 最大层数, undefined=无上限, 1 且 stackable=false=不可叠 */
   maxStacks?: number;
   /** 🆕 是否可叠加层数, 默认 true. false=永远1层 */
   stackable?: boolean;
-  remainingTime: number | null;  // 剩余时间, null=永久
-  timeUnit: '回合' | '分钟' | '小时';  // 时间单位（战斗中=回合，脱战=分钟/小时）
-  source: string;                // 来源 [分类]-[施加者]; [解除方式]
+  remainingTime: number | null; // 剩余时间, null=永久
+  timeUnit: '回合' | '分钟' | '小时'; // 时间单位（战斗中=回合，脱战=分钟/小时）
+  source: string; // 来源 [分类]-[施加者]; [解除方式]
   effects: Record<string, number>; // 效果数值化 (保留, 简单数值效果)
   /** 🆕 效果词条: 词条名→中文描述 (AI写, 前端展示) */
   effectDescriptions?: Record<string, string>;
@@ -721,7 +742,7 @@ export interface StatusEffect {
 export interface ElementDetail {
   name: string;
   description: string;
-  effects: string[];             // 被动效果列表
+  effects: string[]; // 被动效果列表
   /** 🆕 Phase 9: 词条名→中文描述 (AI 编写, 前端展示, 与 Skill.effects 对齐) */
   effectDescriptions?: Record<string, string>;
   /** 🆕 Phase 9: 脚本注册表: lifecycle→JS code (AI 编写, 引擎执行, 与 Skill.scripts 对齐) */
@@ -733,7 +754,7 @@ export interface AuthorityDetail {
   name: string;
   description: string;
   effects: string[];
-  costDescription: string;      // 消耗描述 (如 '25% 最大MP+SP+攻击+动作')
+  costDescription: string; // 消耗描述 (如 '25% 最大MP+SP+攻击+动作')
   /** 🆕 Phase 9: 词条名→中文描述 */
   effectDescriptions?: Record<string, string>;
   /** 🆕 Phase 9: 脚本注册表 */
@@ -761,36 +782,43 @@ export interface CharacterState {
   type: 'player' | 'npc' | 'monster' | 'summon';
   name: string;
   race: string;
-  identity: string[];            // 身份标签
-  occupation: string[];          // 职业标签
+  identity: string[]; // 身份标签
+  occupation: string[]; // 职业标签
 
   // ===== 生命层级 =====
-  tier: number;                  // 1-7
-  tierName: string;              // '普通' | '中坚' | '精英' | '史诗' | '传说' | '神话' | '神祗'
-  level: number;                 // 1-25
+  tier: number; // 1-7
+  tierName: string; // '普通' | '中坚' | '精英' | '史诗' | '传说' | '神话' | '神祗'
+  level: number; // 1-25
   totalExp: number;
   expToNext: number;
 
   // ===== 五维属性 =====
   attributes: {
-    str: number;  dex: number;  con: number;
-    int: number;  spi: number;
+    str: number;
+    dex: number;
+    con: number;
+    int: number;
+    spi: number;
   };
   freeAttrPoints: number;
 
   // ===== 资源 =====
-  hp: number;   maxHp: number;
-  mp: number;   maxMp: number;
-  sp: number;   maxSp: number;
+  hp: number;
+  maxHp: number;
+  mp: number;
+  maxMp: number;
+  sp: number;
+  maxSp: number;
 
   // ===== 登神长阶 (Lv.13+) =====
   ascension: {
-    enabled: boolean;              // 是否开启登神长阶
-    elements: ElementDetail[];     // 要素 (Array, 有序, Phase 9: Record→Array)
-    authority: AuthorityDetail[];  // 权能 (Array, 有序, Phase 9: Record→Array)
-    law: LawDetail[];              // 法则 (Array, 有序, Phase 9: Record→Array)
-    deityPosition: string;                       // 神位 (Lv.25)
-    divineKingdom: {                             // 神国 (Lv.25巅峰)
+    enabled: boolean; // 是否开启登神长阶
+    elements: ElementDetail[]; // 要素 (Array, 有序, Phase 9: Record→Array)
+    authority: AuthorityDetail[]; // 权能 (Array, 有序, Phase 9: Record→Array)
+    law: LawDetail[]; // 法则 (Array, 有序, Phase 9: Record→Array)
+    deityPosition: string; // 神位 (Lv.25)
+    divineKingdom: {
+      // 神国 (Lv.25巅峰)
       name: string;
       description: string;
     };
@@ -803,16 +831,16 @@ export interface CharacterState {
   statusEffects: StatusEffect[];
 
   // ===== 经济 =====
-  money: number;                 // G
+  money: number; // G
 
   // ===== 位置 =====
-  location: string;              // 当前详细位置路径（地理）
+  location: string; // 当前详细位置路径（地理）
   /** 是否在主角附近/同场景（在场）。true=可被叙事直接互动；false=离场/远处/退场。
    *  AI 通过 vars_update 在角色进场/离场时切换。严格 === true 判断。 */
   present: boolean;
 
   // ===== 冒险者等级 =====
-  adventurerRank: string;        // '未评级' | 'D' | 'C' | 'B' | 'A' | 'S'
+  adventurerRank: string; // '未评级' | 'D' | 'C' | 'B' | 'A' | 'S'
 
   // ===== 当前行为 =====
   currentAction: string;
@@ -841,7 +869,9 @@ export interface CharacterState {
 }
 
 /** 创建默认空角色状态 */
-export function createDefaultCharacterState(overrides: Partial<CharacterState> = {}): CharacterState {
+export function createDefaultCharacterState(
+  overrides: Partial<CharacterState> = {},
+): CharacterState {
   return {
     id: crypto.randomUUID(),
     saveId: '',
@@ -857,9 +887,12 @@ export function createDefaultCharacterState(overrides: Partial<CharacterState> =
     expToNext: 100,
     attributes: { str: 10, dex: 10, con: 10, int: 10, spi: 10 },
     freeAttrPoints: 0,
-    hp: 100, maxHp: 100,
-    mp: 50, maxMp: 50,
-    sp: 50, maxSp: 50,
+    hp: 100,
+    maxHp: 100,
+    mp: 50,
+    maxMp: 50,
+    sp: 50,
+    maxSp: 50,
     ascension: {
       enabled: false,
       elements: [],
@@ -887,7 +920,7 @@ export function createDefaultCharacterState(overrides: Partial<CharacterState> =
 export interface CharacterCard {
   name: string;
   description: string;
-  personality: string;           // 五维编码 wOaGz(A)
+  personality: string; // 五维编码 wOaGz(A)
   scenario: string;
   firstMes: string;
   mesExample: string;
@@ -897,9 +930,9 @@ export interface CharacterCard {
   spec_version: string;
   data: {
     extensions: {
-      regex_scripts?: any[];     // 前端脚本注入
+      regex_scripts?: any[]; // 前端脚本注入
     };
-    character_book?: SillyTavernLorebookExport;  // 角色专属世界书
+    character_book?: SillyTavernLorebookExport; // 角色专属世界书
   };
 
   // 引擎元数据
@@ -912,8 +945,8 @@ export interface CharacterCard {
       initialSkills: Skill[];
     };
     displayConfig: {
-      avatar: string;            // 头像 URL/base64
-      theme: string;             // 角色专属配色
+      avatar: string; // 头像 URL/base64
+      theme: string; // 角色专属配色
     };
   };
 }
@@ -922,13 +955,14 @@ export interface CharacterCard {
 
 /** 记忆记录 — MEM00XXX 编号 */
 export interface MemoryRecord {
-  id: string;                    // 'MEM000001'
-  saveId: string;                // 所属存档
-  createdAt: number;             // 游戏时间戳
-  realTimestamp: number;         // 真实时间戳
-  timeRange: {                   // 时间跨度
-    start: string;               // 游戏时间字符串
-    end: string;                 // 游戏时间字符串
+  id: string; // 'MEM000001'
+  saveId: string; // 所属存档
+  createdAt: number; // 游戏时间戳
+  realTimestamp: number; // 真实时间戳
+  timeRange: {
+    // 时间跨度
+    start: string; // 游戏时间字符串
+    end: string; // 游戏时间字符串
   };
   /** 正文 — 对 AI 可见，≥200 字 */
   content: string;
@@ -1044,7 +1078,7 @@ export interface Snapshot {
 export interface SaveSlot {
   id: string;
   name: string;
-  slot: number;                  // 0-9
+  slot: number; // 0-9
   createdAt: number;
   updatedAt: number;
   /** 当前活跃快照 ID（指向 snapshots 表记录；恢复机制 M5 重建） */
@@ -1076,7 +1110,7 @@ export interface ToolDefinition {
   function: {
     name: string;
     description: string;
-    parameters: Record<string, any>;   // JSON Schema 对象
+    parameters: Record<string, any>; // JSON Schema 对象
   };
 }
 
@@ -1086,7 +1120,7 @@ export interface ToolCallRequest {
   type: 'function';
   function: {
     name: string;
-    arguments: string;                 // JSON-encoded arguments string
+    arguments: string; // JSON-encoded arguments string
   };
 }
 
@@ -1094,8 +1128,8 @@ export interface ToolCallRequest {
 export interface ToolCallResult {
   toolCallId: string;
   functionName: string;
-  result: any;                         // 工具返回的原始值
-  error?: string;                      // 执行失败时的错误消息
+  result: any; // 工具返回的原始值
+  error?: string; // 执行失败时的错误消息
 }
 
 /** 工具执行所需的运行时上下文（非纯函数工具需要） */
@@ -1107,19 +1141,19 @@ export interface ToolExecutionContext {
 
 /** Agent 定义 */
 export interface AgentDefinition {
-  id: string;                    // 'story' | 'memory_recall' | 'plot_check' | ...
-  name: string;                  // 显示名
-  description: string;           // 职责描述
-  model: string;                 // 'deepseek-chat' | 'deepseek-reasoner'
+  id: string; // 'story' | 'memory_recall' | 'plot_check' | ...
+  name: string; // 显示名
+  description: string; // 职责描述
+  model: string; // 'deepseek-chat' | 'deepseek-reasoner'
   temperature: number;
   maxTokens: number;
-  userId: string;                // DeepSeek 缓存隔离 key
-  dependsOn: string[];           // 依赖的 Agent ID 列表
+  userId: string; // DeepSeek 缓存隔离 key
+  dependsOn: string[]; // 依赖的 Agent ID 列表
   systemPrompt: {
-    fixed: string;               // 前固定部分（缓存命中关键）
-    variable: (ctx: AgentContext) => string;  // 后可变部分
+    fixed: string; // 前固定部分（缓存命中关键）
+    variable: (ctx: AgentContext) => string; // 后可变部分
   };
-  outputSchema?: object;         // 输出 JSON Schema (用于 function calling)
+  outputSchema?: object; // 输出 JSON Schema (用于 function calling)
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1130,19 +1164,20 @@ export interface AgentDefinition {
 export type VisibilityLevel = 'FULL' | 'NARRATIVE' | 'SUMMARY' | 'KEYS' | 'NONE';
 
 /** 8 个 Zone ID */
-export type ZoneId = 'memory' | 'npc' | 'world' | 'quest' | 'craft' | 'combat' | 'outline' | 'variable';
+export type ZoneId =
+  'memory' | 'npc' | 'world' | 'quest' | 'craft' | 'combat' | 'outline' | 'variable';
 
 /** Zone 注入行为配置 */
 export interface ZoneConfig {
-  orderBy?: string;       // 注入排序字段
-  limit?: number;         // 注入截断上限
+  orderBy?: string; // 注入排序字段
+  limit?: number; // 注入截断上限
   injectAs?: 'json' | 'list' | 'table' | 'summary';
 }
 
 /** 单个 Variable Zone — 三层自描述容器 */
 export interface VariableZone {
   config: ZoneConfig;
-  visibility: string[];   // Agent ID 可见白名单
+  visibility: string[]; // Agent ID 可见白名单
   content: Record<string, any>;
 }
 
@@ -1164,14 +1199,14 @@ export interface AgentContext {
   history: ChatMessage[];
   /** @deprecated Phase 8: 用 worldBooks 替代 */
   lorebookMatches: MatchedEntry[];
-  worldBooks: WorldBookEntry[];    // Phase 8: 本 Agent 可见的世界书条目
+  worldBooks: WorldBookEntry[]; // Phase 8: 本 Agent 可见的世界书条目
   characters: CharacterState[];
   variables: Record<string, any>;
   plotEvents: PlotEvent[];
   memories: MemoryRecord[];
   /** 用户任务列表 (Phase 10g) */
   quests?: Record<string, Quest>;
-  agentOutputs: Map<string, any>;  // 上游 Agent 的输出
+  agentOutputs: Map<string, any>; // 上游 Agent 的输出
 
   // --- Phase 10: Plot mode ---
   /** 剧情模式配置（用于 orchestrator 决定是否跳过 plot_* agent） */
@@ -1194,19 +1229,19 @@ export interface AgentContext {
 /** 单个 Agent 的运行结果 */
 export interface AgentResult {
   agentId: string;
-  output: any;                   // 解析后的输出
+  output: any; // 解析后的输出
   rawResponse: string;
   /** 🆕 DeepSeek 思考模式 — 思维链内容 */
   reasoning?: string;
   tokensUsed: number;
-  cacheHit: boolean;             // DeepSeek 缓存命中
+  cacheHit: boolean; // DeepSeek 缓存命中
   /** 🆕 命中缓存的 prompt token 数（usage.prompt_cache_hit_tokens） */
   cacheHitTokens?: number;
   /** 🆕 未命中缓存的 prompt token 数（usage.prompt_cache_miss_tokens，缺失当 0） */
   cacheMissTokens?: number;
   /** 🆕 输出 token 数（usage.completion_tokens） */
   completionTokens?: number;
-  duration: number;              // ms
+  duration: number; // ms
   error?: string;
   /** 🆕 Agentic: 本 Agent 产生的所有工具调用记录 */
   toolCalls?: Array<{ name: string; arguments: any; result: any }>;
@@ -1272,21 +1307,21 @@ export type StatePatchOp =
   | 'add_character'
   | 'update_character'
   // M2: 按名寻址角色 ops (规范章节: characters §2)
-  | 'remove_character'  // 删除角色（按名）— 死亡/离场清理 (规范 §2)
-  | 'rename_character'  // 角色改名 — 逻辑键=名字，改名需专用 op 迁移键 (规范 §2)
+  | 'remove_character' // 删除角色（按名）— 死亡/离场清理 (规范 §2)
+  | 'rename_character' // 角色改名 — 逻辑键=名字，改名需专用 op 迁移键 (规范 §2)
   | 'add_status_effect'
   | 'remove_status_effect'
   | 'add_item'
   | 'remove_item'
   // M2: 按名寻址物品 ops (规范章节: items §3)
-  | 'update_item'       // 更新物品字段（按名）— 描述/词条/耐久等 (规范 §3)
-  | 'transfer_item'     // 物品转移（按名）— 角色间背包移动 (规范 §3)
+  | 'update_item' // 更新物品字段（按名）— 描述/词条/耐久等 (规范 §3)
+  | 'transfer_item' // 物品转移（按名）— 角色间背包移动 (规范 §3)
   | 'equip_item'
   | 'unequip_item'
   | 'add_skill'
   | 'update_skill'
   // M2: 按名寻址技能 ops (规范章节: skills §4)
-  | 'remove_skill'      // 删除技能（按名）— 遗忘/替换 (规范 §4)
+  | 'remove_skill' // 删除技能（按名）— 遗忘/替换 (规范 §4)
   | 'set_location'
   | 'set_hp'
   | 'set_mp'
@@ -1304,9 +1339,9 @@ export type StatePatchOp =
   | 'update_quest'
   | 'remove_quest'
   // M2: 好感度/新闻 ops (规范章节: affections §7 / news §8)
-  | 'set_affection'     // 设置好感度绝对值（按角色名） (规范 §7)
-  | 'delta_affection'   // 好感度增量（按角色名） (规范 §7)
-  | 'add_news';         // 追加世界新闻条目 (规范 §8)
+  | 'set_affection' // 设置好感度绝对值（按角色名） (规范 §7)
+  | 'delta_affection' // 好感度增量（按角色名） (规范 §7)
+  | 'add_news'; // 追加世界新闻条目 (规范 §8)
 
 /** 原子状态补丁 — StateManager 的唯一输入格式 */
 export interface StatePatch {
@@ -1331,7 +1366,13 @@ export interface StateCommitResult {
 // ========== Effect System ==========
 
 /** 效果定义类型 */
-export type EffectType = 'vars_patch' | 'status_effect' | 'character_update' | 'dice_roll' | 'item_effect' | 'skill_effect';
+export type EffectType =
+  | 'vars_patch'
+  | 'status_effect'
+  | 'character_update'
+  | 'dice_roll'
+  | 'item_effect'
+  | 'skill_effect';
 
 /** 声明式效果定义 */
 export interface EffectDefinition {
@@ -1340,7 +1381,13 @@ export interface EffectDefinition {
   /** 效果来源: agent | system | resolver */
   source: 'agent' | 'system' | 'resolver';
   /** 效果负载（声明式） */
-  payload: VarsPatch | StatusEffectPayload | CharacterUpdatePayload | DiceRollPayload | ItemEffectPayload | SkillEffectPayload;
+  payload:
+    | VarsPatch
+    | StatusEffectPayload
+    | CharacterUpdatePayload
+    | DiceRollPayload
+    | ItemEffectPayload
+    | SkillEffectPayload;
   /** 优先级（低→高执行） */
   priority: number;
   /** 执行条件（EJS 表达式） */
@@ -1381,10 +1428,14 @@ export interface StatusEffectPayload {
 export interface CharacterUpdatePayload {
   characterId: string;
   changes: Partial<{
-    hp: number; maxHp: number;
-    mp: number; maxMp: number;
-    sp: number; maxSp: number;
-    level: number; tier: number;
+    hp: number;
+    maxHp: number;
+    mp: number;
+    maxMp: number;
+    sp: number;
+    maxSp: number;
+    level: number;
+    tier: number;
     exp: number;
     attributes: Record<string, number>;
     location: string;
@@ -1398,12 +1449,12 @@ export interface CharacterUpdatePayload {
 
 /** 骰子效果负载 */
 export interface DiceRollPayload {
-  formula: string;          // 'd20' | '2d6+3' | 'd100'
-  advantage?: boolean;      // 优势
-  disadvantage?: boolean;   // 劣势
-  modifier?: number;        // 加值
-  reason?: string;          // 掷骰原因
-  targetDC?: number;        // 目标 DC（用于判定成功/失败）
+  formula: string; // 'd20' | '2d6+3' | 'd100'
+  advantage?: boolean; // 优势
+  disadvantage?: boolean; // 劣势
+  modifier?: number; // 加值
+  reason?: string; // 掷骰原因
+  targetDC?: number; // 目标 DC（用于判定成功/失败）
 }
 
 /** 物品效果负载 */
@@ -1427,15 +1478,15 @@ export interface SkillEffectPayload {
 /** 骰子投掷结果 */
 export interface DiceRollResult {
   formula: string;
-  rolls: number[];           // 每次投掷的结果
-  total: number;             // 总和
+  rolls: number[]; // 每次投掷的结果
+  total: number; // 总和
   modifier: number;
   advantage: boolean;
   disadvantage: boolean;
-  criticalSuccess: boolean;  // 大成功 (如 d20=20)
-  criticalFailure: boolean;  // 大失败 (如 d20=1)
-  meetsDC?: boolean;         // 是否达到目标 DC
-  description: string;       // 人类可读描述
+  criticalSuccess: boolean; // 大成功 (如 d20=20)
+  criticalFailure: boolean; // 大失败 (如 d20=1)
+  meetsDC?: boolean; // 是否达到目标 DC
+  description: string; // 人类可读描述
 }
 
 // ========== Resource Calculator (Layer 2) ==========
@@ -1443,7 +1494,17 @@ export interface DiceRollResult {
 /** 资源计算结果 */
 export interface ResourceQuery {
   characterId: string;
-  query: 'hp_percent' | 'mp_percent' | 'sp_percent' | 'tier' | 'level' | 'stat' | 'can_afford' | 'has_item' | 'has_skill' | 'has_status';
+  query:
+    | 'hp_percent'
+    | 'mp_percent'
+    | 'sp_percent'
+    | 'tier'
+    | 'level'
+    | 'stat'
+    | 'can_afford'
+    | 'has_item'
+    | 'has_skill'
+    | 'has_status';
   params?: Record<string, any>;
 }
 
@@ -1467,12 +1528,12 @@ export type CombatType = '切磋' | '竞技' | '压制' | '死斗' | '标准' | 
 
 /** 各战斗类型的士气溃败阈值 */
 export const COMBAT_TYPE_MORALE_THRESHOLDS: Record<CombatType, number> = {
-  '切磋': 0.40,
-  '竞技': 0.30,
-  '压制': 0.50,
-  '死斗': 0.10,
-  '标准': 0.30,
-  '守卫': 0.35,
+  切磋: 0.4,
+  竞技: 0.3,
+  压制: 0.5,
+  死斗: 0.1,
+  标准: 0.3,
+  守卫: 0.35,
 };
 
 // ========== Damage Types (世界书: 4 种伤害类型) ==========
@@ -1482,18 +1543,18 @@ export type DamageType = '物理' | '能量' | '精神' | '真实';
 
 /** 伤害类型 → 属性减免公式映射 */
 export const DAMAGE_TYPE_FORMULAS: Record<DamageType, string> = {
-  '物理': '(最终体质+最终力量+最终敏捷)×0.25%',
-  '能量': '(最终精神+最终智力)×0.4%',
-  '精神': '最终精神×0.8%',
-  '真实': '0 (真实伤害无视所有减免)',
+  物理: '(最终体质+最终力量+最终敏捷)×0.25%',
+  能量: '(最终精神+最终智力)×0.4%',
+  精神: '最终精神×0.8%',
+  真实: '0 (真实伤害无视所有减免)',
 };
 
 // ========== Hit Rating (世界书: 7 级命中评级) ==========
 
 /** 命中评级 — 基于检定总值 (d20 + 命中 - 闪避) */
 export interface HitRating {
-  level: string;          // '超暴击' | '强暴击' | '暴击' | '有效' | '勉强' | '擦伤' | '失手'
-  coefficient: number;   // 伤害倍率
+  level: string; // '超暴击' | '强暴击' | '暴击' | '有效' | '勉强' | '擦伤' | '失手'
+  coefficient: number; // 伤害倍率
   minCheckValue: number; // 最低检定总值
   triggersStatus: boolean; // 是否触发状态效果
 }
@@ -1504,8 +1565,8 @@ export const HIT_RATINGS: HitRating[] = [
   { level: '强暴击', coefficient: 1.6, minCheckValue: 25, triggersStatus: true },
   { level: '暴击', coefficient: 1.3, minCheckValue: 20, triggersStatus: true },
   { level: '有效', coefficient: 1.0, minCheckValue: 11, triggersStatus: false }, // 需对抗检定
-  { level: '勉强', coefficient: 0.8, minCheckValue: 8,  triggersStatus: false }, // 需对抗检定
-  { level: '擦伤', coefficient: 0.3, minCheckValue: 4,  triggersStatus: false }, // 不触发
+  { level: '勉强', coefficient: 0.8, minCheckValue: 8, triggersStatus: false }, // 需对抗检定
+  { level: '擦伤', coefficient: 0.3, minCheckValue: 4, triggersStatus: false }, // 不触发
   { level: '失手', coefficient: 0.0, minCheckValue: -999, triggersStatus: false }, // 不触发
 ];
 
@@ -1520,7 +1581,8 @@ export function getHitRating(checkValue: number): HitRating {
 // ========== Intention System (世界书: 6 级意图 + 非致死 + 处决) ==========
 
 /** 意图层级 — 由用户输入触发判定 */
-export type IntentionLevel = '非致死' | '常规' | '战术' | '机能' | '核心' | '抹杀' | '概念' | '处决';
+export type IntentionLevel =
+  '非致死' | '常规' | '战术' | '机能' | '核心' | '抹杀' | '概念' | '处决';
 
 /** 意图配置 — 各层级的判定难度与系数 */
 export interface IntentionConfig {
@@ -1541,14 +1603,62 @@ export interface IntentionConfig {
  *  代码扩展: '战术'(难度3,系数1.2) 填补常规→机能过渡; '处决'(系数1.3) 保底暴击机制独立化
  */
 export const INTENTION_CONFIGS: Record<string, IntentionConfig> = {
-  '非致死': { level: '非致死', difficulty: 0,  coefficient: 1.0,  requiresContest: false, triggersExtraEffects: false },
-  '常规':   { level: '常规',   difficulty: 0,  coefficient: 1.0,  requiresContest: false, triggersExtraEffects: false },
-  '战术':   { level: '战术',   difficulty: 3,  coefficient: 1.2,  requiresContest: true,  triggersExtraEffects: false },
-  '机能':   { level: '机能',   difficulty: 5,  coefficient: 1.05, requiresContest: true,  triggersExtraEffects: true  },
-  '核心':   { level: '核心',   difficulty: 10, coefficient: 1.2,  requiresContest: true,  triggersExtraEffects: true  },
-  '抹杀':   { level: '抹杀',   difficulty: 15, coefficient: 1.4,  requiresContest: true,  triggersExtraEffects: true  },
-  '概念':   { level: '概念',   difficulty: 20, coefficient: 1.6,  requiresContest: true,  triggersExtraEffects: true  },
-  '处决':   { level: '处决',   difficulty: 0,  coefficient: 1.3,  requiresContest: false, triggersExtraEffects: true  },
+  非致死: {
+    level: '非致死',
+    difficulty: 0,
+    coefficient: 1.0,
+    requiresContest: false,
+    triggersExtraEffects: false,
+  },
+  常规: {
+    level: '常规',
+    difficulty: 0,
+    coefficient: 1.0,
+    requiresContest: false,
+    triggersExtraEffects: false,
+  },
+  战术: {
+    level: '战术',
+    difficulty: 3,
+    coefficient: 1.2,
+    requiresContest: true,
+    triggersExtraEffects: false,
+  },
+  机能: {
+    level: '机能',
+    difficulty: 5,
+    coefficient: 1.05,
+    requiresContest: true,
+    triggersExtraEffects: true,
+  },
+  核心: {
+    level: '核心',
+    difficulty: 10,
+    coefficient: 1.2,
+    requiresContest: true,
+    triggersExtraEffects: true,
+  },
+  抹杀: {
+    level: '抹杀',
+    difficulty: 15,
+    coefficient: 1.4,
+    requiresContest: true,
+    triggersExtraEffects: true,
+  },
+  概念: {
+    level: '概念',
+    difficulty: 20,
+    coefficient: 1.6,
+    requiresContest: true,
+    triggersExtraEffects: true,
+  },
+  处决: {
+    level: '处决',
+    difficulty: 0,
+    coefficient: 1.3,
+    requiresContest: false,
+    triggersExtraEffects: true,
+  },
 };
 
 /** 意图解析结果 */
@@ -1558,9 +1668,9 @@ export interface IntentionResult {
   verdict: '无需判定' | '成功' | '失败' | '自动成功' | '强制无效';
   /** 对抗检定详情 */
   contested?: {
-    attackerFormula: string;   // '(攻方层级×5 + d20)'
+    attackerFormula: string; // '(攻方层级×5 + d20)'
     attackerValue: number;
-    defenderFormula: string;   // '(守方层级×5 + d20 + 意图难度)'
+    defenderFormula: string; // '(守方层级×5 + d20 + 意图难度)'
     defenderValue: number;
   };
   /** 最终生效的伤害系数 */
@@ -1632,13 +1742,19 @@ export interface CombatParticipant {
   level: number;
   /** 五维属性 (战斗中为"最终"值，含装备/状态修正) */
   attributes: {
-    str: number; dex: number; con: number;
-    int: number; spi: number;
+    str: number;
+    dex: number;
+    con: number;
+    int: number;
+    spi: number;
   };
   /** 当前资源 */
-  hp: number; maxHp: number;
-  mp: number; maxMp: number;
-  sp: number; maxSp: number;
+  hp: number;
+  maxHp: number;
+  mp: number;
+  maxMp: number;
+  sp: number;
+  maxSp: number;
   /** 防御值 */
   defense: number;
   /** 伤害减免 (DR, 百分比) */
@@ -1835,11 +1951,25 @@ export type QualityLevel = '普通' | '优良' | '稀有' | '史诗' | '传说' 
 
 /** 品质等级数值索引 (普通=0 → 唯一=6) */
 export const QUALITY_RANK: Record<QualityLevel, number> = {
-  '普通': 0, '优良': 1, '稀有': 2, '史诗': 3, '传说': 4, '神话': 5, '唯一': 6,
+  普通: 0,
+  优良: 1,
+  稀有: 2,
+  史诗: 3,
+  传说: 4,
+  神话: 5,
+  唯一: 6,
 };
 
 /** 按 rank 索引取品质名 */
-export const QUALITY_BY_RANK: QualityLevel[] = ['普通', '优良', '稀有', '史诗', '传说', '神话', '唯一'];
+export const QUALITY_BY_RANK: QualityLevel[] = [
+  '普通',
+  '优良',
+  '稀有',
+  '史诗',
+  '传说',
+  '神话',
+  '唯一',
+];
 
 // ========== Craft Industry & Stage ==========
 
@@ -1848,10 +1978,10 @@ export type CraftIndustry = '锻造' | '炼金' | '烹饪' | '裁缝';
 
 /** 行业→核心属性映射 */
 export const CRAFT_INDUSTRY_ATTRIBUTE: Record<CraftIndustry, string> = {
-  '锻造': '力量',
-  '炼金': '智力',
-  '烹饪': '精神',
-  '裁缝': '敏捷',
+  锻造: '力量',
+  炼金: '智力',
+  烹饪: '精神',
+  裁缝: '敏捷',
 };
 
 /** 制作阶段 (对齐世界书: 3 级加工) */
@@ -1862,78 +1992,78 @@ export type CraftRating = '大失败' | '失败' | '成功' | '精益求精';
 
 /** 各评级的产出数值区间 (成品) */
 export const CRAFT_RATING_VALUE_RANGE: Record<CraftRating, { min: number; max: number }> = {
-  '大失败': { min: 0, max: 0 },
-  '失败': { min: 0, max: 0 },
-  '成功': { min: 0.40, max: 0.60 },
-  '精益求精': { min: 0.90, max: 1.00 },
+  大失败: { min: 0, max: 0 },
+  失败: { min: 0, max: 0 },
+  成功: { min: 0.4, max: 0.6 },
+  精益求精: { min: 0.9, max: 1.0 },
 };
 
 // ========== Craft DC Configuration (对齐世界书 #265160 品质数值总表) ==========
 
 /** 品质 DC 基准 (品质→基准DC) */
 export const CRAFT_DC_BASE: Record<QualityLevel, number> = {
-  '普通': 6,
-  '优良': 10,
-  '稀有': 16,
-  '史诗': 22,
-  '传说': 30,
-  '神话': 40,
-  '唯一': 0, // 唯一品质无法生产制作获得
+  普通: 6,
+  优良: 10,
+  稀有: 16,
+  史诗: 22,
+  传说: 30,
+  神话: 40,
+  唯一: 0, // 唯一品质无法生产制作获得
 };
 
 /** 品质 DC 修正范围 (材料/半成品 DC 修正) */
 export const CRAFT_DC_MODIFIER_RANGE: Record<QualityLevel, [number, number]> = {
-  '普通': [0, 0],
-  '优良': [1, 2],
-  '稀有': [3, 5],
-  '史诗': [6, 9],
-  '传说': [10, 15],
-  '神话': [16, 25],
-  '唯一': [0, 0],
+  普通: [0, 0],
+  优良: [1, 2],
+  稀有: [3, 5],
+  史诗: [6, 9],
+  传说: [10, 15],
+  神话: [16, 25],
+  唯一: [0, 0],
 };
 
 /** 品质经验表 (单次产出，对齐世界书 #284017) */
 export const CRAFT_QUALITY_EXP: Record<QualityLevel, number> = {
-  '普通': 50,
-  '优良': 120,
-  '稀有': 400,
-  '史诗': 1200,
-  '传说': 3000,
-  '神话': 6000,
-  '唯一': 0,
+  普通: 50,
+  优良: 120,
+  稀有: 400,
+  史诗: 1200,
+  传说: 3000,
+  神话: 6000,
+  唯一: 0,
 };
 
 // ========== Quality Production Bonuses (对齐世界书 #265160 生产加成表) ==========
 
 export interface CraftProductionBonus {
-  dcReduction: [number, number];           // DC 减轻范围
-  resourceReduction: [number, number];      // 资源消耗减轻 %
-  timeReduction: [number, number];          // 时间减轻 %
-  batchBonus?: string;                      // 批量加成描述
+  dcReduction: [number, number]; // DC 减轻范围
+  resourceReduction: [number, number]; // 资源消耗减轻 %
+  timeReduction: [number, number]; // 时间减轻 %
+  batchBonus?: string; // 批量加成描述
   materialSave?: { d20Threshold: number; savePercent: number }; // 材料节省
-  failureProtection: number;                // 损毁率降至 (0=完全保护)
-  perfectionThresholdReduction: number;     // 精益求精阈值降低
-  canUpgradeQuality?: boolean;             // 品质提升 (传→神)
-  greatFailureImmunity?: boolean;          // 大失败豁免
+  failureProtection: number; // 损毁率降至 (0=完全保护)
+  perfectionThresholdReduction: number; // 精益求精阈值降低
+  canUpgradeQuality?: boolean; // 品质提升 (传→神)
+  greatFailureImmunity?: boolean; // 大失败豁免
 }
 
 /** 品质产能加成配置表 */
 export const CRAFT_PRODUCTION_BONUSES: Record<QualityLevel, CraftProductionBonus> = {
-  '普通': {
+  普通: {
     dcReduction: [1, 1],
     resourceReduction: [0, 0],
     timeReduction: [0, 0],
     failureProtection: 1.0,
     perfectionThresholdReduction: 0,
   },
-  '优良': {
+  优良: {
     dcReduction: [2, 3],
     resourceReduction: [3, 5],
     timeReduction: [0, 0],
     failureProtection: 1.0,
     perfectionThresholdReduction: 0,
   },
-  '稀有': {
+  稀有: {
     dcReduction: [4, 5],
     resourceReduction: [6, 10],
     timeReduction: [20, 25],
@@ -1941,7 +2071,7 @@ export const CRAFT_PRODUCTION_BONUSES: Record<QualityLevel, CraftProductionBonus
     failureProtection: 1.0,
     perfectionThresholdReduction: 0,
   },
-  '史诗': {
+  史诗: {
     dcReduction: [6, 8],
     resourceReduction: [11, 16],
     timeReduction: [26, 35],
@@ -1949,7 +2079,7 @@ export const CRAFT_PRODUCTION_BONUSES: Record<QualityLevel, CraftProductionBonus
     failureProtection: 0.25,
     perfectionThresholdReduction: 0,
   },
-  '传说': {
+  传说: {
     dcReduction: [0, 0], // 传说自身不提供DC减免(但可通过材料)
     resourceReduction: [17, 24],
     timeReduction: [36, 50],
@@ -1957,7 +2087,7 @@ export const CRAFT_PRODUCTION_BONUSES: Record<QualityLevel, CraftProductionBonus
     failureProtection: 0.15,
     perfectionThresholdReduction: 3,
   },
-  '神话': {
+  神话: {
     dcReduction: [0, 0],
     resourceReduction: [25, 30],
     timeReduction: [51, 70],
@@ -1967,7 +2097,7 @@ export const CRAFT_PRODUCTION_BONUSES: Record<QualityLevel, CraftProductionBonus
     canUpgradeQuality: true,
     greatFailureImmunity: true,
   },
-  '唯一': {
+  唯一: {
     dcReduction: [0, 0],
     resourceReduction: [0, 0],
     timeReduction: [0, 0],
@@ -1984,9 +2114,9 @@ export interface CraftMaterial {
   itemName: string;
   quantity: number;
   quality: QualityLevel;
-  dcModifier: number;          // 该材料带来的 DC 修正
-  isRegulated?: boolean;       // 管制投入物 (史诗+需许可)
-  hasLicense?: boolean;        // 是否有许可
+  dcModifier: number; // 该材料带来的 DC 修正
+  isRegulated?: boolean; // 管制投入物 (史诗+需许可)
+  hasLicense?: boolean; // 是否有许可
 }
 
 // ========== Craft Action Request ==========
@@ -2030,7 +2160,7 @@ export interface CraftActionRequest {
   /** 当前资源 */
   currentResources: { hp: number; mp: number; sp: number };
   /** d20 骰值 (用于检定) */
-  d20Rolls: number[];           // [d20_1, d20_2] for advantage/disadvantage/normal
+  d20Rolls: number[]; // [d20_1, d20_2] for advantage/disadvantage/normal
   /** d20 骰值 (用于材料节省判定) */
   d20MaterialSave?: number;
   /** d20 骰值 (用于品质提升判定, 神话) */
@@ -2077,7 +2207,7 @@ export interface CraftCheckBreakdown {
 export interface CraftSettlementBreakdown {
   /** 投入物损耗 */
   materialLoss: {
-    lossRate: number;            // 0/0.5/1.0
+    lossRate: number; // 0/0.5/1.0
     lostMaterials: Array<{ itemName: string; quantity: number }>;
   };
 
@@ -2088,8 +2218,8 @@ export interface CraftSettlementBreakdown {
 
   /** 精益求精增益 */
   perfectionBonus?: {
-    batchExtraYield?: number;    // 批量+10%产量
-    singleExtraAffix?: string;   // 单件额外词条
+    batchExtraYield?: number; // 批量+10%产量
+    singleExtraAffix?: string; // 单件额外词条
     dcModifierDowngrade?: number; // 半成品单件 DC 修正降级
   };
 
@@ -2105,7 +2235,7 @@ export interface CraftSettlementBreakdown {
   /** 经验结算 */
   expReward: {
     baseExp: number;
-    tierSuppressed: boolean;     // 层级压制归零
+    tierSuppressed: boolean; // 层级压制归零
     actualExp: number;
   };
 
@@ -2234,7 +2364,15 @@ export interface FPTransaction {
   amount: number;
   reason: string;
   balance: number;
-  source: 'task' | 'intimacy' | 'achievement' | 'contract' | 'skill_fusion' | 'craft' | 'resurrection' | 'other';
+  source:
+    | 'task'
+    | 'intimacy'
+    | 'achievement'
+    | 'contract'
+    | 'skill_fusion'
+    | 'craft'
+    | 'resurrection'
+    | 'other';
 }
 
 export interface FateContract {
@@ -2405,8 +2543,8 @@ export interface MoraleCheckResult {
   /** d20 检定详情 (仅 triggerType='check' 时) */
   checkRoll?: {
     d20Roll: number;
-    target: number;       // 目标值 (固定 12)
-    passed: boolean;      // d20 < 12 → 战意崩溃
+    target: number; // 目标值 (固定 12)
+    passed: boolean; // d20 < 12 → 战意崩溃
   };
   /** 战意结果池输出 (投降/认输/溃逃等) */
   outcome?: string;
@@ -2416,18 +2554,18 @@ export interface MoraleCheckResult {
 
 /** 战意结果池 — 对齐世界书 #837805 第五阶段 §3 */
 export const MORALE_OUTCOME_POOL: Record<MoraleState, string[]> = {
-  'steady': [],
-  'shaken': ['继续战斗但动作犹豫', '表现出恐惧但未撤退'],
-  'wavering': ['投降', '认输', '求饶', '撤退', '中止战斗'],
-  'routing': ['溃逃', '阵线溃散', '被击昏', '被俘虏', '内讧', '投降', '求饶'],
+  steady: [],
+  shaken: ['继续战斗但动作犹豫', '表现出恐惧但未撤退'],
+  wavering: ['投降', '认输', '求饶', '撤退', '中止战斗'],
+  routing: ['溃逃', '阵线溃散', '被击昏', '被俘虏', '内讧', '投降', '求饶'],
 };
 
 /** 战意状态描述 (人类可读) */
 export const MORALE_STATE_LABELS: Record<MoraleState, string> = {
-  'steady': '坚定',
-  'shaken': '动摇',
-  'wavering': '战意动摇',
-  'routing': '丧失战意/崩溃',
+  steady: '坚定',
+  shaken: '动摇',
+  wavering: '战意动摇',
+  routing: '丧失战意/崩溃',
 };
 
 // ========== Turn & Initiative (Phase 6a) ==========
@@ -2451,11 +2589,16 @@ export interface CombatUnitTurn {
 // ========== Phase 6e: Marker Protocol + SubAgent Types ==========
 
 /** 已知 XML 标记标签名 — 正文与引擎的通信协议 (ADR-25) */
-export type MarkerType = 'craft_request' | 'combat_trigger' | 'char_detect'  // 旧（保留向后兼容）
-  | 'char_gen_request' | 'char_update_request'                              // 角色调度
-  | 'item_gen_request' | 'item_update_request'                              // 物品调度
-  | 'craft_gen_request'                                                     // 制作调度（统一 _request 后缀）
-  | 'play_audio';                                                           // 场景配乐（Story 直接输出，非阻塞）
+export type MarkerType =
+  | 'craft_request'
+  | 'combat_trigger'
+  | 'char_detect' // 旧（保留向后兼容）
+  | 'char_gen_request'
+  | 'char_update_request' // 角色调度
+  | 'item_gen_request'
+  | 'item_update_request' // 物品调度
+  | 'craft_gen_request' // 制作调度（统一 _request 后缀）
+  | 'play_audio'; // 场景配乐（Story 直接输出，非阻塞）
 
 /** 所有标记的公共字段 */
 export interface DetectedMarkerBase {
@@ -2542,9 +2685,14 @@ export interface PlayAudioMarker extends DetectedMarkerBase {
 }
 
 /** 三种标记的联合类型 */
-export type DetectedMarker = CraftRequestMarker | CombatTriggerMarker | CharDetectMarker   // 旧（保留）
-  | CharGenRequestMarker | CharUpdateRequestMarker
-  | ItemGenRequestMarker | ItemUpdateRequestMarker
+export type DetectedMarker =
+  | CraftRequestMarker
+  | CombatTriggerMarker
+  | CharDetectMarker // 旧（保留）
+  | CharGenRequestMarker
+  | CharUpdateRequestMarker
+  | ItemGenRequestMarker
+  | ItemUpdateRequestMarker
   | CraftGenRequestMarker
   | PlayAudioMarker;
 
@@ -2571,7 +2719,7 @@ export interface CharGenRequestMarker extends DetectedMarkerBase {
 export interface CharUpdateRequestMarker extends DetectedMarkerBase {
   type: 'char_update_request';
   attributes: {
-    target: string;  // 必填：角色 ID
+    target: string; // 必填：角色 ID
   };
   bodyText: string;
 }
@@ -2583,9 +2731,9 @@ export interface CharUpdateRequestMarker extends DetectedMarkerBase {
 export interface ItemGenRequestMarker extends DetectedMarkerBase {
   type: 'item_gen_request';
   attributes: {
-    itemType: string;  // equipment | skill | consumable | material | ascension
-    source?: string;   // craft | loot | gift | story
-    owner?: string;    // 归属角色 ID
+    itemType: string; // equipment | skill | consumable | material | ascension
+    source?: string; // craft | loot | gift | story
+    owner?: string; // 归属角色 ID
   };
   bodyText: string;
 }
@@ -2597,7 +2745,7 @@ export interface ItemGenRequestMarker extends DetectedMarkerBase {
 export interface ItemUpdateRequestMarker extends DetectedMarkerBase {
   type: 'item_update_request';
   attributes: {
-    target: string;    // 物品 ID 或名
+    target: string; // 物品 ID 或名
     operation: string; // consume | transfer | modify | equip | unequip
     quantity?: string;
     owner?: string;
@@ -2710,9 +2858,9 @@ export interface CraftGenOutput {
  */
 export interface ItemRequest {
   type: 'equipment' | 'inventory';
-  slot?: string;   // equipment: 武器/头部/身体/腿部/脚部/首饰/戒指/项链
+  slot?: string; // equipment: 武器/头部/身体/腿部/脚部/首饰/戒指/项链
   quality: string;
-  description: string;  // 纯自然语言，不含数值
+  description: string; // 纯自然语言，不含数值
 }
 
 /** Char Gen Agent (char_gen) 的输出 — 新 NPC 完整数据 (对齐世界书 #865613) */
@@ -2758,9 +2906,17 @@ export interface CharGenOutput {
     /** 要素 (Lv.13-16, 1-3个) — 使用 ElementDetail 统一类型 */
     elements: Array<Pick<ElementDetail, 'name' | 'description' | 'effects'>>;
     /** 权能 (Lv.17-20, 1个) — 使用 AuthorityDetail 统一类型 */
-    authorities: Array<Pick<AuthorityDetail, 'name' | 'description' | 'effects' | 'costDescription'>>;
+    authorities: Array<
+      Pick<AuthorityDetail, 'name' | 'description' | 'effects' | 'costDescription'>
+    >;
     /** 法则 (Lv.21-24, 1-2个) */
-    laws: Array<{ name: string; description: string; passiveEffects: string[]; activeEffects: string[]; costDescription: string }>;
+    laws: Array<{
+      name: string;
+      description: string;
+      passiveEffects: string[];
+      activeEffects: string[];
+      costDescription: string;
+    }>;
     /** 神位 (Lv.25) */
     deityPosition: string;
     /** 神国 (Lv.25 巅峰) */
@@ -2884,9 +3040,16 @@ export interface ItemGenOutput {
     divinity?: DivinityLevel;
   }>;
   /** 🆕 Phase 9: 登神要素 (含 scripts + effectDescriptions) */
-  elements?: Array<Pick<ElementDetail, 'name' | 'description' | 'effects' | 'effectDescriptions' | 'scripts'>>;
+  elements?: Array<
+    Pick<ElementDetail, 'name' | 'description' | 'effects' | 'effectDescriptions' | 'scripts'>
+  >;
   /** 🆕 Phase 9: 权能 (含 scripts + effectDescriptions) */
-  authorities?: Array<Pick<AuthorityDetail, 'name' | 'description' | 'effects' | 'costDescription' | 'effectDescriptions' | 'scripts'>>;
+  authorities?: Array<
+    Pick<
+      AuthorityDetail,
+      'name' | 'description' | 'effects' | 'costDescription' | 'effectDescriptions' | 'scripts'
+    >
+  >;
 }
 
 /** Char Gen 链的最终结果 — char_gen → item_gen → 完整 CharacterState + Patches */
@@ -3008,7 +3171,19 @@ export interface LocationEdge {
   toDirection?: string;
 }
 
-export type TerrainType = '平原' | '河流' | '沼泽' | '森林' | '山地' | '沙漠' | '海洋' | '冻原' | '冰原' | '湿地' | '城市' | '飞艇';
+export type TerrainType =
+  | '平原'
+  | '河流'
+  | '沼泽'
+  | '森林'
+  | '山地'
+  | '沙漠'
+  | '海洋'
+  | '冻原'
+  | '冰原'
+  | '湿地'
+  | '城市'
+  | '飞艇';
 
 export interface TravelResult {
   path: LocationEdge[];
@@ -3064,12 +3239,12 @@ export interface AudioTrack {
   name: string;
   kind: AudioTrackKind;
   source: AudioSourceKind;
-  url?: string;               // source='builtin': the manifest path
+  url?: string; // source='builtin': the manifest path
   mimeType?: string;
-  size?: number;              // compressed bytes
-  duration?: number;          // seconds, backfilled after first load
-  tags: string[];             // scene tags — the AI hook's only addressing scheme (§8)
-  builtin?: boolean;          // cannot be deleted, only hidden
+  size?: number; // compressed bytes
+  duration?: number; // seconds, backfilled after first load
+  tags: string[]; // scene tags — the AI hook's only addressing scheme (§8)
+  builtin?: boolean; // cannot be deleted, only hidden
   /** source='file': filename within the library folder. The folder handle is stored separately. */
   relativePath?: string;
   /** source='file': the file was gone at last scan. Row is kept so tags/playlist slots survive. */
@@ -3105,7 +3280,7 @@ export interface AudioTrack {
 
 /** Audio bytes, stored apart from metadata and read only at play time */
 export interface AudioBlobRecord {
-  id: string;                 // === AudioTrack.id
+  id: string; // === AudioTrack.id
   blob: Blob;
 }
 
@@ -3115,7 +3290,7 @@ export interface AudioBlobRecord {
  * they cannot go in localStorage; they are not JSON.
  */
 export interface AudioHandleRecord {
-  id: string;                          // 'library-root' — one row today
+  id: string; // 'library-root' — one row today
   handle: FileSystemDirectoryHandle;
   addedAt: number;
 }
@@ -3124,7 +3299,7 @@ export interface AudioHandleRecord {
 export interface AudioPlaylist {
   id: string;
   name: string;
-  trackIds: string[];         // ordered; dangling ids pruned on track delete
+  trackIds: string[]; // ordered; dangling ids pruned on track delete
   createdAt: number;
   updatedAt: number;
 }
@@ -3142,7 +3317,7 @@ export interface AudioPlaybackState {
     playlistId: string | null;
     index: number;
     durationSec: number;
-    volume: number;           // 0..1, channel gain
+    volume: number; // 0..1, channel gain
     muted: boolean;
     repeat: AudioRepeatMode;
     shuffle: boolean;
@@ -3279,6 +3454,6 @@ export interface AssetMetaRecord {
  * **存 Blob，永不 base64**（§4.2: base64 +33% 不可回收，且主线程反序列化）。
  */
 export interface AssetBlobRecord {
-  id: string;                 // === AssetMetaRecord.id
+  id: string; // === AssetMetaRecord.id
   blob: Blob;
 }

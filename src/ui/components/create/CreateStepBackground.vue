@@ -7,42 +7,44 @@
  * - 右侧: 背景卡片列表 (带条件徽章+禁用态)
  * - 自定义背景独立面板在列表下方，点击即选中（取消预设）
  */
-import { computed } from 'vue'
-import { useCreateStore } from '../../stores/create-store'
-import CategorySelectionLayout from './CategorySelectionLayout.vue'
-import CategoryTabs from './CategoryTabs.vue'
-import BackgroundList from './BackgroundList.vue'
+import { computed } from 'vue';
+import { useCreateStore } from '../../stores/create-store';
+import CategorySelectionLayout from './CategorySelectionLayout.vue';
+import CategoryTabs from './CategoryTabs.vue';
+import BackgroundList from './BackgroundList.vue';
 
-const store = useCreateStore()
+const store = useCreateStore();
 
 /** 侧栏四分类 (带已选计数) */
 const sidebarCategories = computed(() =>
-  store.backgroundCategories.map(c => ({
+  store.backgroundCategories.map((c) => ({
     key: c.key,
     label: c.label,
     count: c.count,
-  }))
-)
+  })),
+);
 
 /** 当前选中背景 */
 const currentBg = computed({
   get: () => store.selectedBackground,
   set: (bg) => store.selectBackground(bg),
-})
+});
 
 /** 自定义背景是否处于激活态（无预设选中） */
-const isCustomActive = computed(() => store.selectedBackground === null)
+const isCustomActive = computed(() => store.selectedBackground === null);
 
 /** 点击或聚焦自定义面板 → 取消预设选中 */
 function activateCustom() {
-  store.selectBackground(null)
+  store.selectBackground(null);
 }
 </script>
 
 <template>
   <section class="step-bg">
     <h2 class="step-title">背景故事</h2>
-    <p class="step-desc">选择一个预设背景，或自定义你的角色故事。有限定条件的背景会自动分类到对应侧栏。</p>
+    <p class="step-desc">
+      选择一个预设背景，或自定义你的角色故事。有限定条件的背景会自动分类到对应侧栏。
+    </p>
 
     <CategorySelectionLayout sidebar-width="8em">
       <!-- 左侧: 四分类导航 -->
@@ -50,16 +52,19 @@ function activateCustom() {
         <CategoryTabs
           :categories="sidebarCategories"
           :model-value="store.activeBackgroundCategory"
-          @update:model-value="store.activeBackgroundCategory = $event as 'race' | 'identity' | 'location' | 'universal'"
           variant="vertical"
+          @update:model-value="
+            store.activeBackgroundCategory = $event as
+              'race' | 'identity' | 'location' | 'universal'
+          "
         />
       </template>
 
       <!-- 右侧: 背景卡片列表 -->
       <template #content>
         <BackgroundList
-          :backgrounds="store.filteredBackgrounds"
           v-model="currentBg"
+          :backgrounds="store.filteredBackgrounds"
           :character-race="store.race"
           :character-identity="store.identity"
           :character-location="store.startLocation"
@@ -69,11 +74,7 @@ function activateCustom() {
     </CategorySelectionLayout>
 
     <!-- 自定义背景 — 独立面板，点击即选中（取消预设） -->
-    <div
-      class="custom-bg-section"
-      :class="{ active: isCustomActive }"
-      @click="activateCustom"
-    >
+    <div class="custom-bg-section" :class="{ active: isCustomActive }" @click="activateCustom">
       <div class="custom-bg-header">
         <h3 class="custom-bg-title">✎ 自定义背景故事</h3>
         <span v-if="isCustomActive" class="custom-bg-badge">使用中</span>
@@ -81,11 +82,11 @@ function activateCustom() {
       </div>
       <textarea
         :value="store.customBackgroundText"
-        @input="store.customBackgroundText = ($event.target as HTMLTextAreaElement).value"
-        @focus="activateCustom"
         placeholder="在此自由书写你的角色背景故事…"
         rows="6"
         class="custom-bg-textarea"
+        @input="store.customBackgroundText = ($event.target as HTMLTextAreaElement).value"
+        @focus="activateCustom"
       ></textarea>
     </div>
   </section>
@@ -114,7 +115,9 @@ function activateCustom() {
   border-radius: var(--theme-radius-lg);
   background: var(--theme-card-bg);
   cursor: pointer;
-  transition: border-color var(--theme-transition-fast), box-shadow var(--theme-transition-fast);
+  transition:
+    border-color var(--theme-transition-fast),
+    box-shadow var(--theme-transition-fast);
 }
 .custom-bg-section:hover {
   border-color: color-mix(in srgb, var(--theme-color-primary) 40%, var(--theme-card-border));

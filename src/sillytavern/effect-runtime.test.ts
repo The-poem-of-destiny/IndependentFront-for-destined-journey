@@ -693,9 +693,7 @@ describe('EffectRuntime', () => {
         {
           effectId: 'e2',
           success: false,
-          patches: [
-            { op: 'set_variable', target: 'variables.c', value: 3 },
-          ],
+          patches: [{ op: 'set_variable', target: 'variables.c', value: 3 }],
           childEffects: [],
           error: 'Something went wrong',
           duration: 10,
@@ -703,9 +701,7 @@ describe('EffectRuntime', () => {
         {
           effectId: 'e3',
           success: true,
-          patches: [
-            { op: 'delta_variable', target: 'variables.hp', amount: -5 },
-          ],
+          patches: [{ op: 'delta_variable', target: 'variables.hp', amount: -5 }],
           childEffects: [],
           duration: 2,
         },
@@ -714,7 +710,11 @@ describe('EffectRuntime', () => {
       expect(patches).toHaveLength(3);
       expect(patches[0]).toMatchObject({ op: 'set_variable', target: 'variables.a', value: 1 });
       expect(patches[1]).toMatchObject({ op: 'set_variable', target: 'variables.b', value: 2 });
-      expect(patches[2]).toMatchObject({ op: 'delta_variable', target: 'variables.hp', amount: -5 });
+      expect(patches[2]).toMatchObject({
+        op: 'delta_variable',
+        target: 'variables.hp',
+        amount: -5,
+      });
     });
 
     it('should return empty array when all results are failed', () => {
@@ -864,9 +864,21 @@ describe('EffectRuntime', () => {
       expect(result.success).toBe(true);
       // 1 merge + 1 replace + 1 delta + 1 insert = 4
       expect(result.patches).toHaveLength(4);
-      expect(result.patches[0]).toMatchObject({ op: 'set_variable', target: 'variables.status', value: 'active' });
-      expect(result.patches[1]).toMatchObject({ op: 'set_variable', target: 'variables.player.name', value: 'Kumo' });
-      expect(result.patches[2]).toMatchObject({ op: 'delta_variable', target: 'variables.hp', amount: -5 });
+      expect(result.patches[0]).toMatchObject({
+        op: 'set_variable',
+        target: 'variables.status',
+        value: 'active',
+      });
+      expect(result.patches[1]).toMatchObject({
+        op: 'set_variable',
+        target: 'variables.player.name',
+        value: 'Kumo',
+      });
+      expect(result.patches[2]).toMatchObject({
+        op: 'delta_variable',
+        target: 'variables.hp',
+        amount: -5,
+      });
       expect(result.patches[3]).toMatchObject({
         op: 'set_variable',
         target: 'variables.log',

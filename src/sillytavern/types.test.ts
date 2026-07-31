@@ -72,7 +72,7 @@ describe('createDefaultCharacterState', () => {
   it('装备/技能/背包/状态 默认空数组', () => {
     const c = createDefaultCharacterState();
     // M2: equipment[] 已删除 — 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
-    expect(c.inventory.filter(i => i.equippedSlot)).toEqual([]);
+    expect(c.inventory.filter((i) => i.equippedSlot)).toEqual([]);
     expect(c.skills).toEqual([]);
     expect(c.inventory).toEqual([]);
     expect(c.statusEffects).toEqual([]);
@@ -195,7 +195,7 @@ describe('resolvePlotTree', () => {
 
     const tree = resolvePlotTree([r1, r2]);
     expect(tree).toHaveLength(2);
-    expect(tree.map(n => n.id).sort()).toEqual(['r1', 'r2']);
+    expect(tree.map((n) => n.id).sort()).toEqual(['r1', 'r2']);
   });
 
   it('应按 order 排序子节点', () => {
@@ -206,7 +206,7 @@ describe('resolvePlotTree', () => {
     root.childrenIds = ['c1', 'c2', 'c3'];
 
     const tree = resolvePlotTree([root, c1, c2, c3]);
-    expect(tree[0].children.map(n => n.id)).toEqual(['c2', 'c3', 'c1']);
+    expect(tree[0].children.map((n) => n.id)).toEqual(['c2', 'c3', 'c1']);
   });
 
   it('父节点不存在时子节点升为根', () => {
@@ -353,8 +353,11 @@ describe('createDefaultPreset', () => {
 describe('SaveSlot metadata (Phase 10h)', () => {
   it('metadata.enabledWorldBookEntries 应为可选字符串数组', () => {
     const slot: SaveSlot = {
-      id: 's1', name: 'test', slot: 0,
-      createdAt: 0, updatedAt: 0,
+      id: 's1',
+      name: 'test',
+      slot: 0,
+      createdAt: 0,
+      updatedAt: 0,
       activeSnapshotId: null,
       metadata: {
         characterName: 'test',
@@ -370,8 +373,11 @@ describe('SaveSlot metadata (Phase 10h)', () => {
 
   it('metadata.openingPrompt 和 openingPromptConsumed 应为可选项', () => {
     const slot: SaveSlot = {
-      id: 's2', name: 'test', slot: 1,
-      createdAt: 0, updatedAt: 0,
+      id: 's2',
+      name: 'test',
+      slot: 1,
+      createdAt: 0,
+      updatedAt: 0,
       activeSnapshotId: null,
       metadata: {
         characterName: 'test',
@@ -397,10 +403,19 @@ describe('Snapshot 重定义 (M5 规范 §11.2)', () => {
       turn: 3,
       characters: [],
       saveProfile: {
-        saveId: 's1', fp: 0, fpHistory: [], contracts: [], achievements: [],
-        news: [], quests: {}, focusQuest: '', affections: {},
+        saveId: 's1',
+        fp: 0,
+        fpHistory: [],
+        contracts: [],
+        achievements: [],
+        news: [],
+        quests: {},
+        focusQuest: '',
+        affections: {},
         gameTime: { era: '复兴纪元', year: 1, month: 1, day: 1, weekday: 1, hour: 8, minute: 0 },
-        variables: {}, worldFlags: {}, updatedAt: Date.now(),
+        variables: {},
+        worldFlags: {},
+        updatedAt: Date.now(),
       },
     };
     expect(snap.reason).toBe('turn');

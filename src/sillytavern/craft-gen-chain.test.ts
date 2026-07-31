@@ -40,7 +40,7 @@ function makeCraftOutput(overrides: Partial<CraftGenOutput> = {}): CraftGenOutpu
 
 /** 从 patches 中筛出指定 op */
 function ops(patches: ReturnType<typeof buildCraftPatches>, op: string) {
-  return patches.filter(p => p.op === op);
+  return patches.filter((p) => p.op === op);
 }
 
 // ========== buildCraftPatches (纯函数) ==========
@@ -78,7 +78,7 @@ describe('buildCraftPatches', () => {
       equipment: [
         {
           slot: '武器',
-          name: '精钢长剑',   // 与产物同名 — item_gen 细化了产物本身
+          name: '精钢长剑', // 与产物同名 — item_gen 细化了产物本身
           description: '剑身流转着秘银纹路',
           stats: { 攻击: 45 },
           durability: 120,
@@ -92,7 +92,7 @@ describe('buildCraftPatches', () => {
 
     // 同名产物只入库 1 次（equipment 条目字段更全，以它为准）
     const addItems = ops(patches, 'add_item');
-    const sameNameAdds = addItems.filter(p => (p.value as any).name === '精钢长剑');
+    const sameNameAdds = addItems.filter((p) => (p.value as any).name === '精钢长剑');
     expect(sameNameAdds).toHaveLength(1);
     expect((sameNameAdds[0].value as any).description).toBe('剑身流转着秘银纹路');
 
@@ -107,7 +107,7 @@ describe('buildCraftPatches', () => {
       equipment: [
         {
           slot: '饰品',
-          name: '锻造师的护符',   // 与产物异名 — 附带产出
+          name: '锻造师的护符', // 与产物异名 — 附带产出
           description: '锻造中意外凝成的小护符',
           stats: { 体质: 1 },
           quality: '优良',
@@ -121,18 +121,22 @@ describe('buildCraftPatches', () => {
     const patches = buildCraftPatches(makeCraftOutput(), itemOutput, '理查德');
 
     const addItems = ops(patches, 'add_item');
-    const names = addItems.map(p => (p.value as any).name);
-    expect(names).toContain('精钢长剑');     // 产物自身
+    const names = addItems.map((p) => (p.value as any).name);
+    expect(names).toContain('精钢长剑'); // 产物自身
     expect(names).toContain('锻造师的护符'); // 异名装备
-    expect(names).toContain('秘银碎屑');     // 散件
+    expect(names).toContain('秘银碎屑'); // 散件
     expect(addItems).toHaveLength(3);
 
-    const scrap = addItems.find(p => (p.value as any).name === '秘银碎屑');
+    const scrap = addItems.find((p) => (p.value as any).name === '秘银碎屑');
     expect((scrap!.value as any).quantity).toBe(3);
   });
 
   it('制作失败 (success=false) → 空 patches，不产出任何物品', () => {
-    const patches = buildCraftPatches(makeCraftOutput({ success: false, rating: '失败' }), null, '理查德');
+    const patches = buildCraftPatches(
+      makeCraftOutput({ success: false, rating: '失败' }),
+      null,
+      '理查德',
+    );
     expect(patches).toHaveLength(0);
   });
 

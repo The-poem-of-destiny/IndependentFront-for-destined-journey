@@ -1,10 +1,10 @@
 <script setup lang="ts">
 defineProps<{
-  variant?: 'primary' | 'secondary' | 'danger' | 'ghost'
-  size?: 'sm' | 'md' | 'lg'
-  disabled?: boolean
-  block?: boolean
-}>()
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+  size?: 'sm' | 'md' | 'lg';
+  disabled?: boolean;
+  block?: boolean;
+}>();
 </script>
 
 <template>
@@ -13,7 +13,7 @@ defineProps<{
     :class="[
       `btn-${variant || 'secondary'}`,
       `btn-${size || 'md'}`,
-      { 'btn-block': block, 'btn-disabled': disabled }
+      { 'btn-block': block, 'btn-disabled': disabled },
     ]"
     :disabled="disabled"
   >
@@ -36,11 +36,22 @@ defineProps<{
   line-height: 1;
   white-space: nowrap;
 }
-.app-btn:active { transform: translateY(1px); }
+.app-btn:active {
+  transform: translateY(1px);
+}
 
-.btn-sm { padding: 6px 12px; font-size: 0.85rem; }
-.btn-md { padding: 8px 16px; font-size: 0.95rem; }
-.btn-lg { padding: 12px 24px; font-size: 1.05rem; }
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
+.btn-md {
+  padding: 8px 16px;
+  font-size: 0.95rem;
+}
+.btn-lg {
+  padding: 12px 24px;
+  font-size: 1.05rem;
+}
 
 .btn-primary {
   background: var(--theme-primary);
@@ -79,6 +90,12 @@ defineProps<{
   color: var(--theme-text-primary);
 }
 
-.btn-block { display: flex; width: 100%; }
-.btn-disabled { opacity: 0.5; pointer-events: none; }
+.btn-block {
+  display: flex;
+  width: 100%;
+}
+.btn-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
 </style>

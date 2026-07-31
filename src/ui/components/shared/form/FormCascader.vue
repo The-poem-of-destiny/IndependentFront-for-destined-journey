@@ -1,42 +1,44 @@
 <script setup lang="ts" generic="T">
-import { ref } from 'vue'
+import { ref } from 'vue';
 
 const props = defineProps<{
-  modelValue: T
-  items: { key: string; value: T }[]
-  placeholder?: string
-  disabled?: boolean
-}>()
+  modelValue: T;
+  items: { key: string; value: T }[];
+  placeholder?: string;
+  disabled?: boolean;
+}>();
 
 const emit = defineEmits<{
-  'update:modelValue': [value: T]
-}>()
+  'update:modelValue': [value: T];
+}>();
 
-const open = ref(false)
-const search = ref('')
+const open = ref(false);
+const search = ref('');
 
-const filtered = ref(props.items)
+const filtered = ref(props.items);
 
 function select(item: { key: string; value: T }) {
-  emit('update:modelValue', item.value)
-  open.value = false
-  search.value = ''
+  emit('update:modelValue', item.value);
+  open.value = false;
+  search.value = '';
 }
 
 function toggle() {
   if (!props.disabled) {
-    open.value = !open.value
-    if (open.value) search.value = ''
+    open.value = !open.value;
+    if (open.value) search.value = '';
   }
 }
 
 function onBlur() {
-  setTimeout(() => { open.value = false }, 150)
+  setTimeout(() => {
+    open.value = false;
+  }, 150);
 }
 </script>
 
 <template>
-  <div class="cascader" @blur="onBlur" tabindex="-1">
+  <div class="cascader" tabindex="-1" @blur="onBlur">
     <button class="cascader-trigger" :disabled="disabled" @click="toggle">
       <span v-if="modelValue" class="cascader-value">{{ modelValue }}</span>
       <span v-else class="cascader-placeholder">{{ placeholder || '请选择' }}</span>
@@ -58,7 +60,9 @@ function onBlur() {
 </template>
 
 <style scoped>
-.cascader { position: relative; }
+.cascader {
+  position: relative;
+}
 .cascader-trigger {
   display: flex;
   align-items: center;
@@ -74,8 +78,12 @@ function onBlur() {
   text-align: left;
   transition: border-color var(--theme-transition-fast);
 }
-.cascader-trigger:focus { border-color: var(--theme-primary); }
-.cascader-placeholder { color: var(--theme-text-muted); }
+.cascader-trigger:focus {
+  border-color: var(--theme-primary);
+}
+.cascader-placeholder {
+  color: var(--theme-text-muted);
+}
 
 .cascader-dropdown {
   position: absolute;
@@ -91,7 +99,11 @@ function onBlur() {
   max-height: 240px;
   overflow-y: auto;
 }
-.cascader-list { display: flex; flex-direction: column; padding: 4px; }
+.cascader-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
 .cascader-item {
   padding: 8px 12px;
   border: none;
@@ -104,6 +116,11 @@ function onBlur() {
   border-radius: var(--theme-radius-sm);
   transition: background var(--theme-transition-fast);
 }
-.cascader-item:hover { background: var(--theme-tab-hover-bg); }
-.cascader-selected { color: var(--theme-primary); font-weight: 500; }
+.cascader-item:hover {
+  background: var(--theme-tab-hover-bg);
+}
+.cascader-selected {
+  color: var(--theme-primary);
+  font-weight: 500;
+}
 </style>

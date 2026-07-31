@@ -22,6 +22,7 @@
 - [ ] **Step 1: 确认 API 配置正确**
 
 打开设置页 → API 配置板块，确认：
+
 - 至少一个 API endpoint 已配置（DeepSeek / 硅基流动 等）
 - model 列表已获取
 - 连接测试通过
@@ -29,6 +30,7 @@
 - [ ] **Step 2: 确认 Agent 配置正确**
 
 打开设置页 → Agent 配置板块，确认：
+
 - story / memory_recall / request_dispatcher / vars_update / memory_summary 五个 Agent 都已配置 model
 - 每个 Agent 的 systemPrompt 不为空（从 `data/defaults/agent-config.json` 加载）
 - Embedding API（memory_recall 的向量召回）可选 — 没有也不阻塞
@@ -36,6 +38,7 @@
 - [ ] **Step 3: 确认世界书已加载**
 
 打开设置页 → 世界书板块（或 DevTools → localStorage），确认：
+
 - `fated-poem-settings` 中的 `worldBooks` 数组不为空
 - 至少 `system_core` 和 `character` 两本书存在
 
@@ -68,27 +71,29 @@ npm run dev
 
 - [ ] **Step 2: 完成创角全流程**
 
-| 步骤 | 操作 | 验证点 |
-|------|------|--------|
-| 0 难度 | 选择一个难度 | 转生点数条正确显示 |
-| 1 基础信息 | 填写名称/性别/年龄/种族/身份/地点，分配属性 | BP/AP 余额正确，HP/MP/SP 预览合理 |
-| 2 命定核心 | 从世界书加载的列表中选择一个核心 | **验证点 A**: 列表非空，来自 system_core 世界书 |
-| 3 角色启用 | 勾选几个角色 | **验证点 B**: 列表非空，来自 character 世界书 |
-| 4 装备 | 选择初始装备/技能/物品 | 消耗正确计入总费用 |
-| 5 背景 | 选一个背景故事 | 条件检查正常工作 |
-| 6 规划 | 跳过（剧情模块 off） | — |
-| 7 确认 | 点击「开始命运之旅」 | 跳转到游戏页 |
+| 步骤       | 操作                                        | 验证点                                          |
+| ---------- | ------------------------------------------- | ----------------------------------------------- |
+| 0 难度     | 选择一个难度                                | 转生点数条正确显示                              |
+| 1 基础信息 | 填写名称/性别/年龄/种族/身份/地点，分配属性 | BP/AP 余额正确，HP/MP/SP 预览合理               |
+| 2 命定核心 | 从世界书加载的列表中选择一个核心            | **验证点 A**: 列表非空，来自 system_core 世界书 |
+| 3 角色启用 | 勾选几个角色                                | **验证点 B**: 列表非空，来自 character 世界书   |
+| 4 装备     | 选择初始装备/技能/物品                      | 消耗正确计入总费用                              |
+| 5 背景     | 选一个背景故事                              | 条件检查正常工作                                |
+| 6 规划     | 跳过（剧情模块 off）                        | —                                               |
+| 7 确认     | 点击「开始命运之旅」                        | 跳转到游戏页                                    |
 
 - [ ] **Step 3: 验证存档已正确写入**
 
 打开 Chrome DevTools → Application → IndexedDB → `SillyTavernWebDB`：
 
 **characters 表:**
+
 ```
 □ 1 条记录，type='player'，name/race/tier/attributes 正确
 ```
 
 **saves 表:**
+
 ```
 □ 1 条记录
 □ metadata.enabledWorldBookEntries 包含 system_core:xxx 和 character:xxx
@@ -97,6 +102,7 @@ npm run dev
 ```
 
 **saveProfiles 表:**
+
 ```
 □ 1 条记录，saveId 与 saves 表一致
 □ fp = 0, gameTime 已初始化
@@ -116,11 +122,13 @@ git commit -m "fix: Plan 4 创角验证修复"
 - [ ] **Step 1: 首次加载观察**
 
 进入游戏页后：
+
 1. 打开调试面板（**Alt+Shift+D**）
 2. 观察 Debug Panel → Messages 区域
 3. 确认开场 Prompt 自动发送后，等待 AI 回复
 
 **预期行为:**
+
 ```
 □ 控制台日志: [GamePipeline] Agent 开始: memory_recall
 □ 控制台日志: [GamePipeline] Agent 开始: story
@@ -167,11 +175,11 @@ git commit -m "fix: Plan 4 开场叙事验证修复"
 
 在 InputBar 输入 2-3 轮对话：
 
-| 轮次 | 输入 | 验证点 |
-|------|------|--------|
-| 1 | 任意行动描述 | AI 正常回复，ChatFlow 追加消息 |
-| 2 | 另一个行动 | AI 回复包含叙事推进，非重复模板 |
-| 3 | 第三个行动 | 调试面板确认 messages 数量正确增长 |
+| 轮次 | 输入         | 验证点                             |
+| ---- | ------------ | ---------------------------------- |
+| 1    | 任意行动描述 | AI 正常回复，ChatFlow 追加消息     |
+| 2    | 另一个行动   | AI 回复包含叙事推进，非重复模板    |
+| 3    | 第三个行动   | 调试面板确认 messages 数量正确增长 |
 
 - [ ] **Step 2: 验证 chars/memory 表更新**
 
@@ -206,6 +214,7 @@ git commit -m "fix: Plan 4 多轮对话刷新修复"
 - [ ] **Step 1: 空输入保护**
 
 InputBar 空文本点击发送：
+
 ```
 □ 不触发 pipeline.run()
 □ 无错误日志

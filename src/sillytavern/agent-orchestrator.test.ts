@@ -8,7 +8,10 @@ import type { AgentContext, AgentConfig, ApiEndpoint, Pipeline } from './types';
 // state-manager mock: 捕获 commitChatState 收到的 patches（Stage3 <json> 解析测试用）
 const { commitChatStateMock } = vi.hoisted(() => ({
   commitChatStateMock: vi.fn(async (patches: any[]) => ({
-    success: true, patchesApplied: patches.length, eventsGenerated: [], errors: [] as string[],
+    success: true,
+    patchesApplied: patches.length,
+    eventsGenerated: [],
+    errors: [] as string[],
   })),
 }));
 vi.mock('./state-manager', async (importOriginal) => {
@@ -101,9 +104,7 @@ function makeSimplePipeline(agents: string[]): Pipeline {
   return {
     timeout: 30000,
     retryOnFail: false,
-    stages: [
-      { agents, waitFor: [] },
-    ],
+    stages: [{ agents, waitFor: [] }],
   };
 }
 
@@ -203,15 +204,26 @@ describe('AgentOrchestrator — 基本执行', () => {
   });
 
   it('Context 应在阶段间传递（单向流）', async () => {
-    globalThis.fetch = vi.fn()
+    globalThis.fetch = vi
+      .fn()
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: '来自memory的输出' } }], usage: { total_tokens: 10 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: '来自memory的输出' } }],
+          usage: { total_tokens: 10 },
+        }),
         text: async () => '',
       })
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: '来自story的输出' } }], usage: { total_tokens: 20 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: '来自story的输出' } }],
+          usage: { total_tokens: 20 },
+        }),
         text: async () => '',
       });
 
@@ -249,8 +261,13 @@ describe('AgentOrchestrator — 基本执行', () => {
     globalThis.fetch = vi.fn().mockImplementation(() => {
       const agentId = 'unknown'; // can't easily get this from fetch mock alone
       return Promise.resolve({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: 'ok' } }], usage: { total_tokens: 10 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: 'ok' } }],
+          usage: { total_tokens: 10 },
+        }),
         text: async () => '',
       });
     });
@@ -258,9 +275,7 @@ describe('AgentOrchestrator — 基本执行', () => {
     const pipeline: Pipeline = {
       timeout: 30000,
       retryOnFail: false,
-      stages: [
-        { agents: ['memory_recall', 'plot_check'], waitFor: [] },
-      ],
+      stages: [{ agents: ['memory_recall', 'plot_check'], waitFor: [] }],
     };
 
     const orch = new AgentOrchestrator({
@@ -288,16 +303,23 @@ describe('AgentOrchestrator — 基本执行', () => {
 
 describe('AgentOrchestrator — 错误处理', () => {
   it('Agent 失败不应阻止同阶段其他 Agent', async () => {
-    globalThis.fetch = vi.fn()
+    globalThis.fetch = vi
+      .fn()
       .mockResolvedValueOnce({
-        ok: false, status: 500,
+        ok: false,
+        status: 500,
         headers: new Headers(),
         json: async () => ({}),
         text: async () => 'Server Error',
       })
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: 'plot_check OK' } }], usage: { total_tokens: 10 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: 'plot_check OK' } }],
+          usage: { total_tokens: 10 },
+        }),
         text: async () => '',
       });
 
@@ -338,15 +360,26 @@ describe('AgentOrchestrator — 错误处理', () => {
 
 describe('AgentOrchestrator — 手动重生成', () => {
   it('应重生成指定 Agent', async () => {
-    globalThis.fetch = vi.fn()
+    globalThis.fetch = vi
+      .fn()
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: 'first run' } }], usage: { total_tokens: 10 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: 'first run' } }],
+          usage: { total_tokens: 10 },
+        }),
         text: async () => '',
       })
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: 'regenerated' } }], usage: { total_tokens: 15 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: 'regenerated' } }],
+          usage: { total_tokens: 15 },
+        }),
         text: async () => '',
       });
 
@@ -483,9 +516,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
       pipeline: {
         timeout: 30000,
         retryOnFail: false,
-        stages: [
-          { agents: ['craft_gen', 'char_gen', 'item_gen', 'combat_summary'], waitFor: [] },
-        ],
+        stages: [{ agents: ['craft_gen', 'char_gen', 'item_gen', 'combat_summary'], waitFor: [] }],
       },
       context: makeContext(),
       agentConfigs: [
@@ -505,15 +536,26 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
 
   it('onCraftRequest 应在 vars_update stage 后触发 (延迟执行)', async () => {
     const storyContent = '正文开头<craft_request industry="锻造">制作长剑</craft_request>正文结尾';
-    globalThis.fetch = vi.fn()
+    globalThis.fetch = vi
+      .fn()
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 100 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: storyContent } }],
+          usage: { total_tokens: 100 },
+        }),
         text: async () => '',
       })
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: '{}' } }], usage: { total_tokens: 20 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: '{}' } }],
+          usage: { total_tokens: 20 },
+        }),
         text: async () => '',
       });
 
@@ -552,15 +594,26 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
 
   it('onCraftRequest 返回结果应注入 story output (延迟到 Stage 2)', async () => {
     const storyContent = '前言<craft_request>制作</craft_request>后语';
-    globalThis.fetch = vi.fn()
+    globalThis.fetch = vi
+      .fn()
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 50 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: storyContent } }],
+          usage: { total_tokens: 50 },
+        }),
         text: async () => '',
       })
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: '{}' } }], usage: { total_tokens: 20 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: '{}' } }],
+          usage: { total_tokens: 20 },
+        }),
         text: async () => '',
       });
 
@@ -600,15 +653,26 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
 
   it('onCraftRequest 返回 null 应跳过注入 (延迟到 Stage 2)', async () => {
     const storyContent = '前言<craft_request>制作</craft_request>后语';
-    globalThis.fetch = vi.fn()
+    globalThis.fetch = vi
+      .fn()
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 50 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: storyContent } }],
+          usage: { total_tokens: 50 },
+        }),
         text: async () => '',
       })
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: '{}' } }], usage: { total_tokens: 20 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: '{}' } }],
+          usage: { total_tokens: 20 },
+        }),
         text: async () => '',
       });
 
@@ -648,17 +712,28 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
     // M5.1: combat_trigger 改由 request_dispatcher 输出（story 只叙事，停在开战前）
     const storyContent = '英雄与魔王对峙，剑拔弩张，战斗一触即发。';
     const dispatcherContent = '<combat_trigger combatType="死斗">英雄 vs 魔王</combat_trigger>';
-    globalThis.fetch = vi.fn()
+    globalThis.fetch = vi
+      .fn()
       // Stage 1: story（纯叙事）
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 80 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: storyContent } }],
+          usage: { total_tokens: 80 },
+        }),
         text: async () => '',
       })
       // Stage 2: request_dispatcher（输出 combat_trigger）
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: dispatcherContent } }], usage: { total_tokens: 30 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: dispatcherContent } }],
+          usage: { total_tokens: 30 },
+        }),
         text: async () => '',
       });
 
@@ -696,19 +771,23 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
   });
 
   it('无回调时不应报错 (向后兼容)', async () => {
-    const storyContent = '正文<craft_request>制作</craft_request><combat_trigger>战斗</combat_trigger><char_detect>角色</char_detect>结束';
+    const storyContent =
+      '正文<craft_request>制作</craft_request><combat_trigger>战斗</combat_trigger><char_detect>角色</char_detect>结束';
     globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true, status: 200, headers: new Headers(),
-      json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 60 } }),
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({
+        choices: [{ message: { content: storyContent } }],
+        usage: { total_tokens: 60 },
+      }),
       text: async () => '',
     });
 
     const pipeline: Pipeline = {
       timeout: 30000,
       retryOnFail: false,
-      stages: [
-        { agents: ['story'], waitFor: [] },
-      ],
+      stages: [{ agents: ['story'], waitFor: [] }],
     };
 
     // No callbacks at all
@@ -726,12 +805,13 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
 
   it('标记不应在非 story/vars_update stage 上触发回调', async () => {
     const content = '<craft_request>制作</craft_request>';
-    globalThis.fetch = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content } }], usage: { total_tokens: 20 } }),
-        text: async () => '',
-      });
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ choices: [{ message: { content } }], usage: { total_tokens: 20 } }),
+      text: async () => '',
+    });
 
     const onCraftRequest = vi.fn().mockResolvedValue(null);
 
@@ -739,9 +819,7 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
     const pipeline: Pipeline = {
       timeout: 30000,
       retryOnFail: false,
-      stages: [
-        { agents: ['memory_recall'], waitFor: [] },
-      ],
+      stages: [{ agents: ['memory_recall'], waitFor: [] }],
     };
 
     const orch = new AgentOrchestrator(
@@ -764,16 +842,28 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
 
   // M3: char_detect 死路径已删除 — 角色检测统一走 request_dispatcher 的 char_gen_request
   it('多个 craft_request 应依次处理 (延迟到 Stage 2)', async () => {
-    const storyContent = '<craft_request>第一件</craft_request>和<craft_request>第二件</craft_request>';
-    globalThis.fetch = vi.fn()
+    const storyContent =
+      '<craft_request>第一件</craft_request>和<craft_request>第二件</craft_request>';
+    globalThis.fetch = vi
+      .fn()
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: storyContent } }], usage: { total_tokens: 50 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: storyContent } }],
+          usage: { total_tokens: 50 },
+        }),
         text: async () => '',
       })
       .mockResolvedValueOnce({
-        ok: true, status: 200, headers: new Headers(),
-        json: async () => ({ choices: [{ message: { content: '{}' } }], usage: { total_tokens: 20 } }),
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: '{}' } }],
+          usage: { total_tokens: 20 },
+        }),
         text: async () => '',
       });
 
@@ -864,23 +954,37 @@ async function runVarsUpdateWithJson(
     events,
   );
   await orch.run();
-  return commitChatStateMock.mock.calls.flatMap(c => c[0]);
+  return commitChatStateMock.mock.calls.flatMap((c) => c[0]);
 }
 
 describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
   beforeEach(() => {
     commitChatStateMock.mockClear();
     commitChatStateMock.mockImplementation(async (patches: any[]) => ({
-      success: true, patchesApplied: patches.length, eventsGenerated: [], errors: [],
+      success: true,
+      patchesApplied: patches.length,
+      eventsGenerated: [],
+      errors: [],
     }));
   });
 
   it('path=inventory → add_item（M3: 无 id 生成，含 equippedSlot）', async () => {
     const patches = await runVarsUpdateWithJson({
-      characters: { replace: [], delta: [], add: [{ name: 'c1', path: 'inventory', value: { name: '金色钥匙挂坠', description: '表面有刻文', quantity: 1 } }], remove: [] },
+      characters: {
+        replace: [],
+        delta: [],
+        add: [
+          {
+            name: 'c1',
+            path: 'inventory',
+            value: { name: '金色钥匙挂坠', description: '表面有刻文', quantity: 1 },
+          },
+        ],
+        remove: [],
+      },
       items: {},
     });
-    const p = patches.find(x => x.op === 'add_item');
+    const p = patches.find((x) => x.op === 'add_item');
     expect(p).toBeDefined();
     expect(p.target).toBe('characters.c1');
     // M3: 不再生成 id（无 varsupd_inv_ 前缀）
@@ -890,15 +994,26 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
     expect(p.value.quantity).toBe(1);
     expect(p.value.equippedSlot).toBeNull();
     // 防回归: 不能再出现携带 inventory 键的 update_character（会被 Object.assign 整体替换数组）
-    expect(patches.some(x => x.op === 'update_character' && x.value?.inventory)).toBe(false);
+    expect(patches.some((x) => x.op === 'update_character' && x.value?.inventory)).toBe(false);
   });
 
   it('path=equipment 无 itemId → 单 add_item + equippedSlot（M3: 不再 add+equip 两步）', async () => {
     const patches = await runVarsUpdateWithJson({
-      characters: { replace: [], delta: [], add: [{ name: 'c1', path: 'equipment', value: { name: '法师长袍', type: '防具', slot: '身体' } }], remove: [] },
+      characters: {
+        replace: [],
+        delta: [],
+        add: [
+          {
+            name: 'c1',
+            path: 'equipment',
+            value: { name: '法师长袍', type: '防具', slot: '身体' },
+          },
+        ],
+        remove: [],
+      },
       items: {},
     });
-    const addP = patches.find(x => x.op === 'add_item');
+    const addP = patches.find((x) => x.op === 'add_item');
     expect(addP).toBeDefined();
     // M3: 不再生成 id
     expect('id' in (addP.value as Record<string, unknown>)).toBe(false);
@@ -908,17 +1023,28 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
     expect(addP.value.quantity).toBe(1);
     expect(addP.value.equippedSlot).toBe('身体');
     // M3: 不再产生 equip_item patch（单 add_item 一步到位）
-    expect(patches.filter(x => x.op === 'equip_item')).toHaveLength(0);
+    expect(patches.filter((x) => x.op === 'equip_item')).toHaveLength(0);
   });
 
   it('path=equipment 夹带 itemId → 忽略 itemId 按 name 落库（M4: itemId 过渡读已拆）', async () => {
     const patches = await runVarsUpdateWithJson({
-      characters: { replace: [], delta: [], add: [{ name: 'c1', path: 'equipment', value: { itemId: 'item_9', slot: '武器', name: '白橡木法杖' } }], remove: [] },
+      characters: {
+        replace: [],
+        delta: [],
+        add: [
+          {
+            name: 'c1',
+            path: 'equipment',
+            value: { itemId: 'item_9', slot: '武器', name: '白橡木法杖' },
+          },
+        ],
+        remove: [],
+      },
       items: {},
     });
     // M3: 装备统一走 add_item（含 equippedSlot），不再走 equip_item
-    expect(patches.filter(x => x.op === 'add_item')).toHaveLength(1);
-    expect(patches.filter(x => x.op === 'equip_item')).toHaveLength(0);
+    expect(patches.filter((x) => x.op === 'add_item')).toHaveLength(1);
+    expect(patches.filter((x) => x.op === 'equip_item')).toHaveLength(0);
     const addP = patches[0];
     expect('id' in (addP.value as Record<string, unknown>)).toBe(false);
     expect(addP.value.name).toBe('白橡木法杖');
@@ -928,28 +1054,39 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
 
   it('path=equipment slot 未知 → 只 add_item 不发 equip_item（物品留背包）', async () => {
     const patches = await runVarsUpdateWithJson({
-      characters: { replace: [], delta: [], add: [{ name: 'c1', path: 'equipment', value: { name: '神秘披风' } }], remove: [] },
+      characters: {
+        replace: [],
+        delta: [],
+        add: [{ name: 'c1', path: 'equipment', value: { name: '神秘披风' } }],
+        remove: [],
+      },
       items: {},
     });
     // M2: slot 未知不再发 '未知' 垃圾值（normalizeSlot 会拒 → throw），跳过 equip
-    expect(patches.filter(x => x.op === 'add_item')).toHaveLength(1);
-    expect(patches.filter(x => x.op === 'equip_item')).toHaveLength(0);
+    expect(patches.filter((x) => x.op === 'add_item')).toHaveLength(1);
+    expect(patches.filter((x) => x.op === 'equip_item')).toHaveLength(0);
   });
 
   // M2 T14 评审修复: type='防具'（非 slot 名）→ normalizeSlot 拒，不发 equip_item // M3 重写
   it('path=equipment type=防具 非槽位 → 不发 equip_item（防具在背包,不 throw）', async () => {
     const patches = await runVarsUpdateWithJson({
-      characters: { replace: [], delta: [], add: [{ name: 'c1', path: 'equipment', value: { name: '铁甲', type: '防具' } }], remove: [] },
+      characters: {
+        replace: [],
+        delta: [],
+        add: [{ name: 'c1', path: 'equipment', value: { name: '铁甲', type: '防具' } }],
+        remove: [],
+      },
       items: {},
     });
-    expect(patches.filter(x => x.op === 'add_item')).toHaveLength(1);
-    expect(patches.filter(x => x.op === 'equip_item')).toHaveLength(0);
+    expect(patches.filter((x) => x.op === 'add_item')).toHaveLength(1);
+    expect(patches.filter((x) => x.op === 'equip_item')).toHaveLength(0);
   });
 
   it('path=skills / statusEffects 原有分支不受影响', async () => {
     const patches = await runVarsUpdateWithJson({
       characters: {
-        replace: [], delta: [],
+        replace: [],
+        delta: [],
         add: [
           { name: 'c1', path: 'skills', value: { name: '火球术' } },
           { name: 'c1', path: 'statusEffects', value: { name: '灼烧' } },
@@ -958,21 +1095,26 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
       },
       items: {},
     });
-    expect(patches.some(x => x.op === 'add_skill')).toBe(true);
-    expect(patches.some(x => x.op === 'add_status_effect')).toBe(true);
+    expect(patches.some((x) => x.op === 'add_skill')).toBe(true);
+    expect(patches.some((x) => x.op === 'add_status_effect')).toBe(true);
   });
 
   it('characters.remove path=skills → remove_skill {name}（M2: removeSkill 假字段已废）', async () => {
     const patches = await runVarsUpdateWithJson({
-      characters: { replace: [], delta: [], add: [], remove: [{ name: 'c1', path: 'skills', target: '火球术' }] },
+      characters: {
+        replace: [],
+        delta: [],
+        add: [],
+        remove: [{ name: 'c1', path: 'skills', target: '火球术' }],
+      },
       items: {},
     });
-    const p = patches.find(x => x.op === 'remove_skill');
+    const p = patches.find((x) => x.op === 'remove_skill');
     expect(p).toBeDefined();
     expect(p.target).toBe('characters.c1');
     expect(p.value).toEqual({ name: '火球术' });
     // 防回归: 不能再出现 removeSkill 假字段的 update_character（白名单会 throw）
-    expect(patches.some(x => x.op === 'update_character' && x.value?.removeSkill)).toBe(false);
+    expect(patches.some((x) => x.op === 'update_character' && x.value?.removeSkill)).toBe(false);
   });
 
   it('M4 名字寻址唯一化: 条目只有 id 无 name → 全部跳过不产 patch', async () => {
@@ -991,14 +1133,22 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
   it('items.modify → update_item {name, changes}（M2: itemUpdate 假字段已废，禁改键剥离）', async () => {
     const patches = await runVarsUpdateWithJson({
       characters: { replace: [], delta: [], add: [], remove: [] },
-      items: { modify: [{ owner: 'c1', target: '铁剑', changes: { description: '缺了口', name: '不许改名', quantity: 99 } }] },
+      items: {
+        modify: [
+          {
+            owner: 'c1',
+            target: '铁剑',
+            changes: { description: '缺了口', name: '不许改名', quantity: 99 },
+          },
+        ],
+      },
     });
-    const p = patches.find(x => x.op === 'update_item');
+    const p = patches.find((x) => x.op === 'update_item');
     expect(p).toBeDefined();
     expect(p.target).toBe('characters.c1');
     expect(p.value.name).toBe('铁剑');
-    expect(p.value.changes).toEqual({ description: '缺了口' });  // name/quantity 禁改键已剥离
-    expect(patches.some(x => x.op === 'update_character' && x.value?.itemUpdate)).toBe(false);
+    expect(p.value.changes).toEqual({ description: '缺了口' }); // name/quantity 禁改键已剥离
+    expect(patches.some((x) => x.op === 'update_character' && x.value?.itemUpdate)).toBe(false);
   });
 
   it('items.equip / items.unequip → 按名对象形态', async () => {
@@ -1009,8 +1159,8 @@ describe('AgentOrchestrator — Stage3 characters.add 解析', () => {
         unequip: [{ owner: 'c1', target: '旧皮甲' }],
       },
     });
-    const eq = patches.find(x => x.op === 'equip_item');
-    const uneq = patches.find(x => x.op === 'unequip_item');
+    const eq = patches.find((x) => x.op === 'equip_item');
+    const uneq = patches.find((x) => x.op === 'unequip_item');
     expect(eq.value).toEqual({ name: '白橡木法杖', slot: '武器' });
     expect(uneq.value).toEqual({ name: '旧皮甲' });
   });
@@ -1022,7 +1172,10 @@ describe('AgentOrchestrator — Stage3 affections 解析', () => {
   beforeEach(() => {
     commitChatStateMock.mockClear();
     commitChatStateMock.mockImplementation(async (patches: any[]) => ({
-      success: true, patchesApplied: patches.length, eventsGenerated: [], errors: [],
+      success: true,
+      patchesApplied: patches.length,
+      eventsGenerated: [],
+      errors: [],
     }));
   });
 
@@ -1030,7 +1183,7 @@ describe('AgentOrchestrator — Stage3 affections 解析', () => {
     const patches = await runVarsUpdateWithJson({
       affections: { set: [{ name: '雷娜', value: 50 }], delta: [] },
     });
-    const p = patches.find(x => x.op === 'set_affection');
+    const p = patches.find((x) => x.op === 'set_affection');
     expect(p).toBeDefined();
     expect(p.target).toBe('affections.雷娜');
     expect(p.value).toBe(50);
@@ -1041,7 +1194,7 @@ describe('AgentOrchestrator — Stage3 affections 解析', () => {
     const patches = await runVarsUpdateWithJson({
       affections: { set: [], delta: [{ name: '汉斯', amount: 5 }] },
     });
-    const p = patches.find(x => x.op === 'delta_affection');
+    const p = patches.find((x) => x.op === 'delta_affection');
     expect(p).toBeDefined();
     expect(p.target).toBe('affections.汉斯');
     expect(p.amount).toBe(5);
@@ -1052,16 +1205,23 @@ describe('AgentOrchestrator — Stage3 affections 解析', () => {
     const patches = await runVarsUpdateWithJson({
       affections: { set: [{ value: 30 }], delta: [{ amount: -10 }] },
     });
-    expect(patches.filter(x => x.op === 'set_affection' || x.op === 'delta_affection')).toHaveLength(0);
+    expect(
+      patches.filter((x) => x.op === 'set_affection' || x.op === 'delta_affection'),
+    ).toHaveLength(0);
   });
 
   it('affections 与 characters/items 同批提交（同一 patches batch）', async () => {
     const patches = await runVarsUpdateWithJson({
-      characters: { replace: [{ name: 'c1', path: 'hp', value: 42 }], delta: [], add: [], remove: [] },
+      characters: {
+        replace: [{ name: 'c1', path: 'hp', value: 42 }],
+        delta: [],
+        add: [],
+        remove: [],
+      },
       affections: { set: [{ name: '雷娜', value: 20 }], delta: [] },
     });
-    expect(patches.some(x => x.op === 'set_hp')).toBe(true);
-    expect(patches.some(x => x.op === 'set_affection')).toBe(true);
+    expect(patches.some((x) => x.op === 'set_hp')).toBe(true);
+    expect(patches.some((x) => x.op === 'set_affection')).toBe(true);
   });
 });
 
@@ -1084,14 +1244,17 @@ async function runDispatcherWithJson(
     events,
   );
   await orch.run();
-  return commitChatStateMock.mock.calls.flatMap(c => c[0]);
+  return commitChatStateMock.mock.calls.flatMap((c) => c[0]);
 }
 
 describe('AgentOrchestrator — Stage2 世界新闻 → add_news', () => {
   beforeEach(() => {
     commitChatStateMock.mockClear();
     commitChatStateMock.mockImplementation(async (patches: any[]) => ({
-      success: true, patchesApplied: patches.length, eventsGenerated: [], errors: [],
+      success: true,
+      patchesApplied: patches.length,
+      eventsGenerated: [],
+      errors: [],
     }));
   });
 
@@ -1103,16 +1266,18 @@ describe('AgentOrchestrator — Stage2 世界新闻 → add_news', () => {
         { path: '世界新闻', value: '帝国边境爆发兽潮，北境商路中断。' },
       ],
     });
-    const news = patches.find(x => x.op === 'add_news');
+    const news = patches.find((x) => x.op === 'add_news');
     expect(news).toBeDefined();
     expect(news.value.content).toBe('帝国边境爆发兽潮，北境商路中断。');
     expect(typeof news.value.title).toBe('string');
     expect(news.value.title.length).toBeGreaterThan(0);
     expect(news.metadata?.source).toBe('request_dispatcher');
     // 世界新闻不再走 set_variable 双轨（#16 退役）
-    expect(patches.some(x => x.op === 'set_variable' && String(x.target).includes('世界新闻'))).toBe(false);
+    expect(
+      patches.some((x) => x.op === 'set_variable' && String(x.target).includes('世界新闻')),
+    ).toBe(false);
     // 其他全局变量（天气）不受影响
-    const weather = patches.find(x => x.op === 'set_variable');
+    const weather = patches.find((x) => x.op === 'set_variable');
     expect(weather).toBeDefined();
     expect(weather.target).toBe('variables.天气');
   });
@@ -1120,24 +1285,38 @@ describe('AgentOrchestrator — Stage2 世界新闻 → add_news', () => {
   it('insert path=世界新闻(对象值) → add_news 直用 title/content/category，不产 insert_variable', async () => {
     const patches = await runDispatcherWithJson({
       delta_time: 10,
-      insert: [{ path: '世界新闻', value: { title: '兽潮警报', content: '北境商路因兽潮中断', category: '军事' } }],
+      insert: [
+        {
+          path: '世界新闻',
+          value: { title: '兽潮警报', content: '北境商路因兽潮中断', category: '军事' },
+        },
+      ],
     });
-    const news = patches.find(x => x.op === 'add_news');
+    const news = patches.find((x) => x.op === 'add_news');
     expect(news).toBeDefined();
-    expect(news.value).toEqual({ title: '兽潮警报', content: '北境商路因兽潮中断', category: '军事' });
-    expect(patches.some(x => x.op === 'insert_variable')).toBe(false);
+    expect(news.value).toEqual({
+      title: '兽潮警报',
+      content: '北境商路因兽潮中断',
+      category: '军事',
+    });
+    expect(patches.some((x) => x.op === 'insert_variable')).toBe(false);
   });
 
   it('世界新闻值为数组 → 逐条产 add_news', async () => {
     const patches = await runDispatcherWithJson({
       delta_time: 5,
-      replace: [{ path: '世界新闻', value: ['帝都举行丰收祭。', { title: '王室公告', content: '王储将巡视北境' }] }],
+      replace: [
+        {
+          path: '世界新闻',
+          value: ['帝都举行丰收祭。', { title: '王室公告', content: '王储将巡视北境' }],
+        },
+      ],
     });
-    const newsPatches = patches.filter(x => x.op === 'add_news');
+    const newsPatches = patches.filter((x) => x.op === 'add_news');
     expect(newsPatches).toHaveLength(2);
     expect(newsPatches[0].value.content).toBe('帝都举行丰收祭。');
     expect(newsPatches[1].value).toEqual({ title: '王室公告', content: '王储将巡视北境' });
-    expect(patches.some(x => x.op === 'set_variable')).toBe(false);
+    expect(patches.some((x) => x.op === 'set_variable')).toBe(false);
   });
 
   it('世界新闻值为空串/null → 跳过不产 patch 也不落变量', async () => {
@@ -1146,18 +1325,28 @@ describe('AgentOrchestrator — Stage2 世界新闻 → add_news', () => {
       replace: [{ path: '世界新闻', value: '' }],
       insert: [{ path: '世界新闻', value: null }],
     });
-    expect(patches.filter(x => x.op === 'add_news')).toHaveLength(0);
-    expect(patches.some(x => String(x.target ?? '').includes('世界新闻'))).toBe(false);
+    expect(patches.filter((x) => x.op === 'add_news')).toHaveLength(0);
+    expect(patches.some((x) => String(x.target ?? '').includes('世界新闻'))).toBe(false);
   });
 
   it('世界新闻 {date, event} 形状（真机实测 2026-07-17）→ event 作 content + date 拼前缀', async () => {
     const patches = await runDispatcherWithJson({
       delta_time: 5,
-      insert: [{ path: '世界新闻', value: { date: '复兴纪元001年01月02日', event: '一座古老召唤阵被激活，六人被召唤至此。幸存者苏醒于废弃古堡。' } }],
+      insert: [
+        {
+          path: '世界新闻',
+          value: {
+            date: '复兴纪元001年01月02日',
+            event: '一座古老召唤阵被激活，六人被召唤至此。幸存者苏醒于废弃古堡。',
+          },
+        },
+      ],
     });
-    const news = patches.find(x => x.op === 'add_news');
+    const news = patches.find((x) => x.op === 'add_news');
     expect(news).toBeDefined();
-    expect(news.value.content).toBe('【复兴纪元001年01月02日】一座古老召唤阵被激活，六人被召唤至此。幸存者苏醒于废弃古堡。');
+    expect(news.value.content).toBe(
+      '【复兴纪元001年01月02日】一座古老召唤阵被激活，六人被召唤至此。幸存者苏醒于废弃古堡。',
+    );
     // 标题从剥掉日期前缀的首句截断
     expect(news.value.title).toBe('一座古老召唤阵被激活，六人被召唤至此');
   });
@@ -1172,11 +1361,22 @@ describe('AgentOrchestrator — onStateCommitError 上浮', () => {
 
   it('commit errors 非空时应触发回调（source=vars_update）', async () => {
     commitChatStateMock.mockImplementation(async () => ({
-      success: false, patchesApplied: 0, eventsGenerated: [], errors: ['角色不存在: x'],
+      success: false,
+      patchesApplied: 0,
+      eventsGenerated: [],
+      errors: ['角色不存在: x'],
     }));
     const onStateCommitError = vi.fn();
     await runVarsUpdateWithJson(
-      { characters: { replace: [{ name: 'x', path: 'hp', value: 10 }], delta: [], add: [], remove: [] }, items: {} },
+      {
+        characters: {
+          replace: [{ name: 'x', path: 'hp', value: 10 }],
+          delta: [],
+          add: [],
+          remove: [],
+        },
+        items: {},
+      },
       { onStateCommitError },
     );
     expect(onStateCommitError).toHaveBeenCalled();
@@ -1186,11 +1386,22 @@ describe('AgentOrchestrator — onStateCommitError 上浮', () => {
 
   it('errors 为空时不触发回调', async () => {
     commitChatStateMock.mockImplementation(async (patches: any[]) => ({
-      success: true, patchesApplied: patches.length, eventsGenerated: [], errors: [],
+      success: true,
+      patchesApplied: patches.length,
+      eventsGenerated: [],
+      errors: [],
     }));
     const onStateCommitError = vi.fn();
     await runVarsUpdateWithJson(
-      { characters: { replace: [{ name: 'x', path: 'hp', value: 10 }], delta: [], add: [], remove: [] }, items: {} },
+      {
+        characters: {
+          replace: [{ name: 'x', path: 'hp', value: 10 }],
+          delta: [],
+          add: [],
+          remove: [],
+        },
+        items: {},
+      },
       { onStateCommitError },
     );
     expect(onStateCommitError).not.toHaveBeenCalled();

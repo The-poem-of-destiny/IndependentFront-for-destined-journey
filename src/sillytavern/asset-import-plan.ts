@@ -177,9 +177,7 @@ export interface PlannedSkip {
  *   纯建议，不阻塞，**绝不自动纠正** —— 名字里带下划线是合法的（`圣殿_内庭`）。
  */
 export type ImportWarning =
-  | 'hash-unavailable'
-  | 'suspect-filename-encoding'
-  | 'suspect-missing-type';
+  'hash-unavailable' | 'suspect-filename-encoding' | 'suspect-missing-type';
 
 export interface ImportPlan {
   assets: PlannedAsset[];

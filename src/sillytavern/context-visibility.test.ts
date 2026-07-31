@@ -12,8 +12,13 @@ import {
   buildZoneSection,
 } from './context-visibility';
 import type {
-  AgentContext, CharacterState, MemoryRecord, PlotEvent,
-  ZoneId, VisibilityLevel, VariableZone,
+  AgentContext,
+  CharacterState,
+  MemoryRecord,
+  PlotEvent,
+  ZoneId,
+  VisibilityLevel,
+  VariableZone,
 } from './types';
 
 // ========== Helpers ==========
@@ -34,9 +39,12 @@ function makeCharacter(overrides: Partial<CharacterState> = {}): CharacterState 
     expToNext: 800,
     attributes: { str: 12, dex: 8, con: 10, int: 7, spi: 5 },
     freeAttrPoints: 0,
-    hp: 85, maxHp: 100,
-    mp: 40, maxMp: 50,
-    sp: 30, maxSp: 50,
+    hp: 85,
+    maxHp: 100,
+    mp: 40,
+    maxMp: 50,
+    sp: 30,
+    maxSp: 50,
     ascension: {
       enabled: false,
       elements: [],
@@ -48,33 +56,50 @@ function makeCharacter(overrides: Partial<CharacterState> = {}): CharacterState 
     // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
     skills: [
       {
-        id: 'sk_001', name: '重击', description: '集中力量进行一次势大力沉的斩击',
-        type: 'active', cost: { type: 'SP', amount: 15 }, cooldown: 3,
-        effects: { '破甲': '无视目标30%防御力' },
+        id: 'sk_001',
+        name: '重击',
+        description: '集中力量进行一次势大力沉的斩击',
+        type: 'active',
+        cost: { type: 'SP', amount: 15 },
+        cooldown: 3,
+        effects: { 破甲: '无视目标30%防御力' },
         scripts: { execute: '$dice.roll("2d6"); $resource.modifyHp(target, -dmg);' },
       },
     ],
     inventory: [
       {
-        id: 'eq_001', name: '铁剑',
+        id: 'eq_001',
+        name: '铁剑',
         description: '一把朴素但保养良好的铁剑',
-        quantity: 1, equippedSlot: '武器',
-        stats: { 攻击力: 15 }, effects: { '锋刃': '攻击时附带轻微出血效果' },
+        quantity: 1,
+        equippedSlot: '武器',
+        stats: { 攻击力: 15 },
+        effects: { 锋刃: '攻击时附带轻微出血效果' },
         scripts: { onHit: '$resource.modifyHp(target, -5);' },
       },
       {
-        id: 'inv_001', name: '治疗药水', description: '散发草药香气的红色液体',
-        quantity: 2, type: 'consumable', rarity: '普通',
-        effects: { '治疗': '饮用后恢复少量生命值' },
+        id: 'inv_001',
+        name: '治疗药水',
+        description: '散发草药香气的红色液体',
+        quantity: 2,
+        type: 'consumable',
+        rarity: '普通',
+        effects: { 治疗: '饮用后恢复少量生命值' },
         scripts: { use: '$resource.modifyHp(owner, 20);' },
       },
     ],
     statusEffects: [
       {
-        id: 'se_001', name: '轻微烧伤', description: '左手背被烧红的铁钳烫伤',
-        category: '减益', stacks: 1, remainingTime: 15, timeUnit: '分钟',
-        source: '锻造事故', effects: {},
-        effectDescriptions: { '灼痛': '每10分钟受到1点伤害' },
+        id: 'se_001',
+        name: '轻微烧伤',
+        description: '左手背被烧红的铁钳烫伤',
+        category: '减益',
+        stacks: 1,
+        remainingTime: 15,
+        timeUnit: '分钟',
+        source: '锻造事故',
+        effects: {},
+        effectDescriptions: { 灼痛: '每10分钟受到1点伤害' },
         scripts: { tick: '$resource.modifyHp(owner, -1);' },
         onApply: 'init',
         onTick: 'tick',
@@ -143,10 +168,10 @@ function makeAgentContext(overrides: Partial<AgentContext> = {}): AgentContext {
     worldBooks: [],
     characters: [makeCharacter({ id: 'player', type: 'player', name: '凯恩' })],
     variables: {
-      '时间': '光辉纪元001年-05月-24日-16:30',
-      '位置': '白曜城-市集',
-      '天气': '晴朗',
-      '季节': '春季',
+      时间: '光辉纪元001年-05月-24日-16:30',
+      位置: '白曜城-市集',
+      天气: '晴朗',
+      季节: '春季',
     },
     plotEvents: [makePlotEvent()],
     memories: [makeMemory()],
@@ -162,10 +187,19 @@ function makeAgentContext(overrides: Partial<AgentContext> = {}): AgentContext {
 describe('Visibility Matrix', () => {
   it('covers all registered agents', () => {
     const registered = [
-      'memory_recall', 'plot_pre_check', 'story', 'request_dispatcher',
-      'request_dispatcher', 'memory_summary', 'plot_post_check', 'plot_outline',
-      'craft_gen', 'char_gen', 'item_gen',
-      'plot_check', 'plot_correct', // v3 stubs
+      'memory_recall',
+      'plot_pre_check',
+      'story',
+      'request_dispatcher',
+      'request_dispatcher',
+      'memory_summary',
+      'plot_post_check',
+      'plot_outline',
+      'craft_gen',
+      'char_gen',
+      'item_gen',
+      'plot_check',
+      'plot_correct', // v3 stubs
     ];
     for (const id of registered) {
       expect(VISIBILITY_MATRIX[id]).toBeDefined();
@@ -246,7 +280,7 @@ describe('buildZoneContext', () => {
 
   it('world zone extracts world-state keys', () => {
     const ctx = makeAgentContext({
-      variables: { '时间': '下午', '位置': '铁匠铺', '天气': '晴', 'user_count': 5 },
+      variables: { 时间: '下午', 位置: '铁匠铺', 天气: '晴', user_count: 5 },
     });
     const zones = buildZoneContext(ctx);
     expect(zones.world.content['时间']).toBe('下午');
@@ -258,7 +292,16 @@ describe('buildZoneContext', () => {
 
   it('quest zone contains quests from AgentContext', () => {
     const ctx = makeAgentContext({
-      quests: { '追查失踪商队': { status: '进行中', priority: '高', progress: '', detail: '', objective: '找到商队', reward: '' } },
+      quests: {
+        追查失踪商队: {
+          status: '进行中',
+          priority: '高',
+          progress: '',
+          detail: '',
+          objective: '找到商队',
+          reward: '',
+        },
+      },
     });
     const zones = buildZoneContext(ctx);
     expect(zones.quest.content.quests).toBeDefined();
@@ -267,7 +310,7 @@ describe('buildZoneContext', () => {
 
   it('variable zone partitions user/sys namespaces', () => {
     const ctx = makeAgentContext({
-      variables: { 'sys.reputation': 50, 'user.flag_tutorial': true, 'other': 42 },
+      variables: { 'sys.reputation': 50, 'user.flag_tutorial': true, other: 42 },
     });
     const zones = buildZoneContext(ctx);
     expect(zones.variable.content.sys).toHaveProperty('sys.reputation', 50);
@@ -299,10 +342,16 @@ describe('filterZoneContent — FULL', () => {
 describe('filterZoneContent — SUMMARY', () => {
   it('memory SUMMARY strips hiddenLine', () => {
     const content = {
-      entries: [{
-        id: 'MEM0001', content: '测试正文内容', hiddenLine: '暗线内容',
-        keywords: ['测试'], importance: 5, timeRange: { start: '001-01-01', end: '001-01-01' },
-      }],
+      entries: [
+        {
+          id: 'MEM0001',
+          content: '测试正文内容',
+          hiddenLine: '暗线内容',
+          keywords: ['测试'],
+          importance: 5,
+          timeRange: { start: '001-01-01', end: '001-01-01' },
+        },
+      ],
     };
     const result = filterZoneContent('memory', content, 'SUMMARY', 'test');
     expect(result).not.toBeNull();
@@ -313,8 +362,22 @@ describe('filterZoneContent — SUMMARY', () => {
   it('quest SUMMARY only shows active quests', () => {
     const content = {
       quests: {
-        '追查失踪商队': { status: '进行中', priority: '高', progress: '发现了线索', objective: '找到商队', detail: '', reward: '50金币' },
-        '清理地下室': { status: '已完成', priority: '中', progress: '已完成', objective: '', detail: '', reward: '' },
+        追查失踪商队: {
+          status: '进行中',
+          priority: '高',
+          progress: '发现了线索',
+          objective: '找到商队',
+          detail: '',
+          reward: '50金币',
+        },
+        清理地下室: {
+          status: '已完成',
+          priority: '中',
+          progress: '已完成',
+          objective: '',
+          detail: '',
+          reward: '',
+        },
       },
     };
     const result = filterZoneContent('quest', content, 'SUMMARY', 'test');
@@ -354,10 +417,15 @@ describe('filterZoneContent — SUMMARY', () => {
 describe('filterZoneContent — KEYS', () => {
   it('memory KEYS only shows id + importance + keywords', () => {
     const content = {
-      entries: [{
-        id: 'MEM0001', content: '不应该出现正文', hiddenLine: '不应该出现暗线',
-        keywords: ['测试'], importance: 7,
-      }],
+      entries: [
+        {
+          id: 'MEM0001',
+          content: '不应该出现正文',
+          hiddenLine: '不应该出现暗线',
+          keywords: ['测试'],
+          importance: 7,
+        },
+      ],
     };
     const result = filterZoneContent('memory', content, 'KEYS', 'test');
     expect(result).not.toBeNull();
@@ -532,7 +600,7 @@ describe('buildZoneSection backward compatibility', () => {
 
   it('respects visibility levels — story does not see variable zone', () => {
     const ctx = makeAgentContext({
-      variables: { 'user.flag': true, '时间': '16:30', '位置': '铁匠铺' },
+      variables: { 'user.flag': true, 时间: '16:30', 位置: '铁匠铺' },
     });
     ctx.zones = buildZoneContext(ctx);
     const result = buildZoneSection('story', ctx);
@@ -599,16 +667,22 @@ describe('Integration: story Agent NARRATIVE output', () => {
     const ctx = makeAgentContext({
       characters: [
         makeCharacter({
-          id: 'player', type: 'player', name: '凯恩',
+          id: 'player',
+          type: 'player',
+          name: '凯恩',
           // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
-          inventory: [{
-            id: 'eq_001', name: '精铁长剑',
-            description: '剑刃闪烁着冷冽的寒光',
-            quantity: 1, equippedSlot: '武器',
-            stats: { 攻击力: 25, 暴击率: 5 },
-            effects: { '锋刃': '攻击时附带轻微出血' },
-            scripts: { onCrit: '$resource.modifyHp(target, -30);' },
-          }],
+          inventory: [
+            {
+              id: 'eq_001',
+              name: '精铁长剑',
+              description: '剑刃闪烁着冷冽的寒光',
+              quantity: 1,
+              equippedSlot: '武器',
+              stats: { 攻击力: 25, 暴击率: 5 },
+              effects: { 锋刃: '攻击时附带轻微出血' },
+              scripts: { onCrit: '$resource.modifyHp(target, -30);' },
+            },
+          ],
         }),
       ],
     });

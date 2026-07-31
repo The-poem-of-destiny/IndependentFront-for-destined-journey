@@ -123,9 +123,7 @@ export function isNameTaken(
 ): boolean {
   const key = normalizeAudioName(candidate);
   if (!key) return false;
-  return items.some(
-    (item) => item.id !== exceptId && normalizeAudioName(item.name) === key,
-  );
+  return items.some((item) => item.id !== exceptId && normalizeAudioName(item.name) === key);
 }
 
 /** 已带 ` (n)` 尾缀的名字 —— 去重时在原尾缀上换号，而不是再套一层 */

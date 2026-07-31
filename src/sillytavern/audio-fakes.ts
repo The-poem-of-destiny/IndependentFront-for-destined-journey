@@ -73,8 +73,12 @@ export class FakeGainNode implements AudioGainLike {
 export class FakeAudioNode implements AudioNodeLike {
   readonly connectedTo: AudioNodeLike[] = [];
   disconnectCount = 0;
-  connect(destination: AudioNodeLike): void { this.connectedTo.push(destination); }
-  disconnect(): void { this.disconnectCount += 1; }
+  connect(destination: AudioNodeLike): void {
+    this.connectedTo.push(destination);
+  }
+  disconnect(): void {
+    this.disconnectCount += 1;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -89,13 +93,23 @@ export class FakeBufferSource implements AudioBufferSourceLike {
   stopped = false;
   disconnectCount = 0;
 
-  connect(destination: AudioNodeLike): void { this.connectedTo.push(destination); }
-  disconnect(): void { this.disconnectCount += 1; }
-  start(): void { this.started = true; }
-  stop(): void { this.stopped = true; }
+  connect(destination: AudioNodeLike): void {
+    this.connectedTo.push(destination);
+  }
+  disconnect(): void {
+    this.disconnectCount += 1;
+  }
+  start(): void {
+    this.started = true;
+  }
+  stop(): void {
+    this.stopped = true;
+  }
 
   /** 测试手动触发自然播放结束 */
-  fireEnded(): void { this.onended?.(); }
+  fireEnded(): void {
+    this.onended?.();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -180,7 +194,9 @@ export class FakeAudioContext implements AudioContextLike {
   }
 
   /** 推进音频时钟 */
-  advance(sec: number): void { this.currentTime += sec; }
+  advance(sec: number): void {
+    this.currentTime += sec;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -227,15 +243,24 @@ export class FakeAudioElement implements AudioElementLike {
   removeEventListener(type: AudioElementEvent, listener: () => void): void {
     const bucket = this.listeners.get(type);
     if (!bucket) return;
-    this.listeners.set(type, bucket.filter((l) => l !== listener));
+    this.listeners.set(
+      type,
+      bucket.filter((l) => l !== listener),
+    );
   }
 
   /** 手动触发 ended 事件 */
-  fireEnded(): void { this.fire('ended'); }
+  fireEnded(): void {
+    this.fire('ended');
+  }
 
-  fireLoadedMetadata(): void { this.fire('loadedmetadata'); }
+  fireLoadedMetadata(): void {
+    this.fire('loadedmetadata');
+  }
 
-  fireDurationChange(): void { this.fire('durationchange'); }
+  fireDurationChange(): void {
+    this.fire('durationchange');
+  }
 
   /** 设定时长并触发 loadedmetadata —— 模拟浏览器解析出元数据 */
   emitMetadata(durationSec: number): void {
@@ -280,7 +305,10 @@ export class FakeBlob {
   readonly type: string;
   arrayBufferCalls = 0;
 
-  constructor(public readonly size: number, type = 'audio/mpeg') {
+  constructor(
+    public readonly size: number,
+    type = 'audio/mpeg',
+  ) {
     this.type = type;
   }
 
@@ -318,13 +346,17 @@ export function createFakeObjectUrls(prefix = 'blob:fake/'): FakeObjectUrls {
   return {
     created,
     revoked,
-    get live() { return created.filter((u) => !revoked.includes(u)); },
+    get live() {
+      return created.filter((u) => !revoked.includes(u));
+    },
     createObjectURL: (_blob: Blob) => {
       const url = `${prefix}${n++}`;
       created.push(url);
       return url;
     },
-    revokeObjectURL: (url: string) => { revoked.push(url); },
+    revokeObjectURL: (url: string) => {
+      revoked.push(url);
+    },
   };
 }
 
@@ -341,7 +373,10 @@ export function createFakeTimers(): FakeTimers {
   const delays: number[] = [];
   return {
     delays,
-    schedule: (fn, ms) => { delays.push(ms); queue.push(fn); },
+    schedule: (fn, ms) => {
+      delays.push(ms);
+      queue.push(fn);
+    },
     flush: () => {
       while (queue.length > 0) {
         const fn = queue.shift();
@@ -421,7 +456,12 @@ export function createFakeLibrary(initial: AudioTrack[] = []): FakeLibrary {
       const value = b ? asBlob(b) : undefined;
       if (!lib.deferLoads) return value;
       return new Promise<Blob | undefined>((resolve) => {
-        pendingLoads.push({ trackId: id, resolve: () => { resolve(value); } });
+        pendingLoads.push({
+          trackId: id,
+          resolve: () => {
+            resolve(value);
+          },
+        });
       });
     },
     resolveLoad: (index) => {
@@ -434,8 +474,13 @@ export function createFakeLibrary(initial: AudioTrack[] = []): FakeLibrary {
       blobs.set(track.id, makeFakeBlob(blobSize, track.mimeType));
       return track;
     },
-    remove: (id) => { tracks.delete(id); blobs.delete(id); },
-    breakBlob: (id) => { blobs.delete(id); },
+    remove: (id) => {
+      tracks.delete(id);
+      blobs.delete(id);
+    },
+    breakBlob: (id) => {
+      blobs.delete(id);
+    },
   };
 
   for (const t of initial) lib.add(t);

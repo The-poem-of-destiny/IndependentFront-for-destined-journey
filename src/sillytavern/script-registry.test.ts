@@ -114,11 +114,29 @@ describe('ScriptRegistry', () => {
   it('priority 决定多条声明的执行顺序（升序：小的先）', async () => {
     const order: string[] = [];
     registry.register(
-      { event: 'mod', source: '高优', owner: 'char_1', priority: 10, handler: (p: any) => { order.push('高'); return p; } },
+      {
+        event: 'mod',
+        source: '高优',
+        owner: 'char_1',
+        priority: 10,
+        handler: (p: any) => {
+          order.push('高');
+          return p;
+        },
+      },
       'char_1:item:高',
     );
     registry.register(
-      { event: 'mod', source: '低优', owner: 'char_1', priority: 1, handler: (p: any) => { order.push('低'); return p; } },
+      {
+        event: 'mod',
+        source: '低优',
+        owner: 'char_1',
+        priority: 1,
+        handler: (p: any) => {
+          order.push('低');
+          return p;
+        },
+      },
       'char_1:item:低',
     );
 
@@ -128,11 +146,21 @@ describe('ScriptRegistry', () => {
 
   it('owner 不在 combatants 的声明被在场过滤跳过', async () => {
     registry.register(
-      { event: 'mod', source: '远剑', owner: 'char_99', handler: (p: any) => ({ ...p, far: true }) },
+      {
+        event: 'mod',
+        source: '远剑',
+        owner: 'char_99',
+        handler: (p: any) => ({ ...p, far: true }),
+      },
       'char_99:item:远剑',
     );
     registry.register(
-      { event: 'mod', source: '近剑', owner: 'char_1', handler: (p: any) => ({ ...p, near: true }) },
+      {
+        event: 'mod',
+        source: '近剑',
+        owner: 'char_1',
+        handler: (p: any) => ({ ...p, near: true }),
+      },
       'char_1:item:近剑',
     );
 
@@ -156,8 +184,14 @@ describe('ScriptRegistry', () => {
   });
 
   it('clear 清空所有 owner 的声明', async () => {
-    registry.register({ event: 'mod', source: 's1', owner: 'c1', handler: (p: any) => ({ ...p, x: 1 }) }, 'c1:item:s1');
-    registry.register({ event: 'mod', source: 's2', owner: 'c2', handler: (p: any) => ({ ...p, y: 2 }) }, 'c2:item:s2');
+    registry.register(
+      { event: 'mod', source: 's1', owner: 'c1', handler: (p: any) => ({ ...p, x: 1 }) },
+      'c1:item:s1',
+    );
+    registry.register(
+      { event: 'mod', source: 's2', owner: 'c2', handler: (p: any) => ({ ...p, y: 2 }) },
+      'c2:item:s2',
+    );
 
     registry.clear();
     expect(registry.getDeclarationCount('c1:item:s1')).toBe(0);
@@ -173,7 +207,12 @@ describe('ScriptRegistry', () => {
 
   it('声明式（emitChain）与命令式（publish）走不同注册表，互不串台（任务 1.6 兼容核心）', async () => {
     registry.register(
-      { event: 'mod', source: '声明', owner: 'char_1', handler: (p: any) => ({ ...p, declared: true }) },
+      {
+        event: 'mod',
+        source: '声明',
+        owner: 'char_1',
+        handler: (p: any) => ({ ...p, declared: true }),
+      },
       'char_1:item:声明',
     );
     const pubHandler = vi.fn();

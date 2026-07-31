@@ -155,18 +155,23 @@ export class EjsRuntime {
       try {
         if (token.type === 'code') {
           // Execute code (no output)
-          const fn = new Function(
-            'getMessageVar', 'setMessageVar', 'Math', 'JSON',
-            token.content,
-          );
+          const fn = new Function('getMessageVar', 'setMessageVar', 'Math', 'JSON', token.content);
           fn(sandbox.getMessageVar, sandbox.setMessageVar, sandbox.Math, sandbox.JSON);
         } else {
           // Output expression
           const fn = new Function(
-            'getMessageVar', 'setMessageVar', 'Math', 'JSON',
+            'getMessageVar',
+            'setMessageVar',
+            'Math',
+            'JSON',
             `return (${token.content})`,
           );
-          const result = fn(sandbox.getMessageVar, sandbox.setMessageVar, sandbox.Math, sandbox.JSON);
+          const result = fn(
+            sandbox.getMessageVar,
+            sandbox.setMessageVar,
+            sandbox.Math,
+            sandbox.JSON,
+          );
 
           if (result !== undefined && result !== null) {
             outputs.push(String(result));
@@ -214,9 +219,6 @@ export class EjsRuntime {
 // ========== 便捷函数 ==========
 
 /** 快速渲染单个 EJS 模板 */
-export function renderEjs(
-  template: string,
-  variables: Record<string, any>,
-): EjsRenderResult {
+export function renderEjs(template: string, variables: Record<string, any>): EjsRenderResult {
   return new EjsRuntime({ variables }).render(template);
 }

@@ -46,7 +46,7 @@ export async function loadWorldBooks(ids: string[]): Promise<WorldBook[]> {
       const url = `/data/worldbooks/${filename}`;
       const response = await fetch(url);
       if (!response.ok) continue;
-      const book = await response.json() as WorldBook;
+      const book = (await response.json()) as WorldBook;
       books.push(book);
     } catch {
       // 文件不存在或加载失败，跳过
@@ -60,9 +60,7 @@ export function loadWorldBooksSync(
   ids: string[],
   preloaded: Record<string, WorldBook>,
 ): WorldBook[] {
-  return ids
-    .filter(id => preloaded[id])
-    .map(id => preloaded[id]);
+  return ids.filter((id) => preloaded[id]).map((id) => preloaded[id]);
 }
 
 // ========== 过滤 ==========
@@ -78,7 +76,7 @@ export function getEntriesForAgent(
   configs: AgentConfig[],
   books: WorldBook[],
 ): WorldBookEntry[] {
-  const config = configs.find(c => c.agentId === agentId);
+  const config = configs.find((c) => c.agentId === agentId);
   if (!config || !config.worldBookIds?.length) return [];
 
   const allowedIds = new Set(config.worldBookIds);
@@ -104,7 +102,7 @@ export function getEntriesForAgent(
  * 导致用户在 UI 禁用条目完全不生效。
  */
 export function filterActiveEntries(entries: WorldBookEntry[]): WorldBookEntry[] {
-  return entries.filter(entry => entry.enabled);
+  return entries.filter((entry) => entry.enabled);
 }
 
 // ========== 关键词匹配 ==========
@@ -121,13 +119,13 @@ export function matchKeyword(
 
   if (key.length === 0) return false;
 
-  const primaryMatches = key.map(k => matchSingleKeyword(text, k));
+  const primaryMatches = key.map((k) => matchSingleKeyword(text, k));
   const anyPrimary = primaryMatches.some(Boolean);
 
   // 如果没有辅助关键词，主关键词任意命中即激活
   if (keysecondary.length === 0) return anyPrimary;
 
-  const secondaryMatches = keysecondary.map(k => matchSingleKeyword(text, k));
+  const secondaryMatches = keysecondary.map((k) => matchSingleKeyword(text, k));
   const allSecondary = secondaryMatches.every(Boolean);
   const anySecondary = secondaryMatches.some(Boolean);
 
@@ -213,12 +211,12 @@ export function filterBooksByEnabledEntries(
   // For safety: always apply when we have valid parsed data.
   if (enabledByPartition.size === 0) return books;
 
-  return books.map(book => {
+  return books.map((book) => {
     const allowedUids = enabledByPartition.get(book.partition);
     if (!allowedUids) return book; // partition 未在存档中收录 → 整本原样通过
     return {
       ...book,
-      entries: book.entries.filter(e => allowedUids.has(e.uid)),
+      entries: book.entries.filter((e) => allowedUids.has(e.uid)),
     };
   });
 }
@@ -233,7 +231,5 @@ export function formatWorldBookEntries(entries: WorldBookEntry[]): string {
 
   const sorted = [...entries].sort((a, b) => a.order - b.order);
 
-  return sorted
-    .map(entry => entry.content)
-    .join('\n\n');
+  return sorted.map((entry) => entry.content).join('\n\n');
 }

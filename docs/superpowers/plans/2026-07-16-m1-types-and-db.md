@@ -22,10 +22,12 @@
 ### Task 1: field-enums.ts 枚举集中定义
 
 **Files:**
+
 - Create: `src/sillytavern/field-enums.ts`
 - Test: `src/sillytavern/field-enums.test.ts`
 
 **Interfaces:**
+
 - Produces: `EQUIP_SLOTS/ITEM_TYPES/RARITY_LEVELS/QUEST_STATUSES/STATUS_CATEGORIES` 常量数组；`EquipSlot/ItemType/Rarity/QuestStatus/StatusCategory` 类型；`normalizeSlot(raw: string): EquipSlot | null`、`normalizeItemType(raw: string): ItemType | undefined`、`normalizeRarity(raw: string): Rarity | undefined`、`normalizeQuestStatus(raw: string): QuestStatus`、`normalizeStatusCategory(raw: string): StatusCategory`。M2 的 StateManager 归一化、M3 翻译层、M4 prompt 生成全部消费本模块。
 
 - [ ] **Step 1: 写失败测试**
@@ -37,8 +39,16 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  EQUIP_SLOTS, ITEM_TYPES, RARITY_LEVELS, QUEST_STATUSES, STATUS_CATEGORIES,
-  normalizeSlot, normalizeItemType, normalizeRarity, normalizeQuestStatus, normalizeStatusCategory,
+  EQUIP_SLOTS,
+  ITEM_TYPES,
+  RARITY_LEVELS,
+  QUEST_STATUSES,
+  STATUS_CATEGORIES,
+  normalizeSlot,
+  normalizeItemType,
+  normalizeRarity,
+  normalizeQuestStatus,
+  normalizeStatusCategory,
 } from './field-enums';
 
 describe('枚举常量', () => {
@@ -60,7 +70,9 @@ describe('枚举常量', () => {
 });
 
 describe('normalizeSlot', () => {
-  it('标准值直通', () => { expect(normalizeSlot('武器')).toBe('武器'); });
+  it('标准值直通', () => {
+    expect(normalizeSlot('武器')).toBe('武器');
+  });
   it('中文别名归一: 主手/惯用手→武器, 护甲/胸甲→身体, 鞋子/靴子→脚部', () => {
     expect(normalizeSlot('主手')).toBe('武器');
     expect(normalizeSlot('惯用手')).toBe('武器');
@@ -76,11 +88,15 @@ describe('normalizeSlot', () => {
     expect(normalizeSlot('不存在的槽位')).toBeNull();
     expect(normalizeSlot('')).toBeNull();
   });
-  it('两侧空白容忍', () => { expect(normalizeSlot(' 武器 ')).toBe('武器'); });
+  it('两侧空白容忍', () => {
+    expect(normalizeSlot(' 武器 ')).toBe('武器');
+  });
 });
 
 describe('normalizeItemType', () => {
-  it('标准值直通', () => { expect(normalizeItemType('消耗品')).toBe('消耗品'); });
+  it('标准值直通', () => {
+    expect(normalizeItemType('消耗品')).toBe('消耗品');
+  });
   it('英文遗留归一: equipment→装备, consumable→消耗品, material→材料, quest→任务物品', () => {
     expect(normalizeItemType('equipment')).toBe('装备');
     expect(normalizeItemType('consumable')).toBe('消耗品');
@@ -97,7 +113,9 @@ describe('normalizeItemType', () => {
 });
 
 describe('normalizeRarity', () => {
-  it('标准值直通', () => { expect(normalizeRarity('史诗')).toBe('史诗'); });
+  it('标准值直通', () => {
+    expect(normalizeRarity('史诗')).toBe('史诗');
+  });
   it('英文归一: common→普通, rare→稀有, legendary→传说, unique→唯一', () => {
     expect(normalizeRarity('common')).toBe('普通');
     expect(normalizeRarity('rare')).toBe('稀有');
@@ -109,11 +127,15 @@ describe('normalizeRarity', () => {
     expect(normalizeRarity('epic')).toBe('史诗');
     expect(normalizeRarity('mythic')).toBe('神话');
   });
-  it('无法识别返回 undefined', () => { expect(normalizeRarity('五彩斑斓')).toBeUndefined(); });
+  it('无法识别返回 undefined', () => {
+    expect(normalizeRarity('五彩斑斓')).toBeUndefined();
+  });
 });
 
 describe('normalizeQuestStatus', () => {
-  it('标准值直通', () => { expect(normalizeQuestStatus('已完成')).toBe('已完成'); });
+  it('标准值直通', () => {
+    expect(normalizeQuestStatus('已完成')).toBe('已完成');
+  });
   it('变体归一: 完成→已完成, 进行→进行中, 失败了→失败, 暂停/挂起→搁置', () => {
     expect(normalizeQuestStatus('完成')).toBe('已完成');
     expect(normalizeQuestStatus('进行')).toBe('进行中');
@@ -128,13 +150,17 @@ describe('normalizeQuestStatus', () => {
 });
 
 describe('normalizeStatusCategory', () => {
-  it('标准值直通', () => { expect(normalizeStatusCategory('减益')).toBe('减益'); });
+  it('标准值直通', () => {
+    expect(normalizeStatusCategory('减益')).toBe('减益');
+  });
   it('英文归一: buff→增益, debuff→减益, special→特殊', () => {
     expect(normalizeStatusCategory('buff')).toBe('增益');
     expect(normalizeStatusCategory('debuff')).toBe('减益');
     expect(normalizeStatusCategory('special')).toBe('特殊');
   });
-  it('无法识别兜底为特殊', () => { expect(normalizeStatusCategory('未知')).toBe('特殊'); });
+  it('无法识别兜底为特殊', () => {
+    expect(normalizeStatusCategory('未知')).toBe('特殊');
+  });
 });
 ```
 
@@ -158,34 +184,56 @@ Expected: FAIL — `Cannot find module './field-enums'`
 // ========== 枚举常量 ==========
 
 /** 装备槽位（对齐世界书装备条目，一槽一件） */
-export const EQUIP_SLOTS = ['武器', '副手', '头部', '身体', '手部', '脚部', '腰带', '饰品'] as const;
-export type EquipSlot = typeof EQUIP_SLOTS[number];
+export const EQUIP_SLOTS = [
+  '武器',
+  '副手',
+  '头部',
+  '身体',
+  '手部',
+  '脚部',
+  '腰带',
+  '饰品',
+] as const;
+export type EquipSlot = (typeof EQUIP_SLOTS)[number];
 
 /** 物品类型 */
 export const ITEM_TYPES = ['装备', '消耗品', '材料', '任务物品', '特殊'] as const;
-export type ItemType = typeof ITEM_TYPES[number];
+export type ItemType = (typeof ITEM_TYPES)[number];
 
 /** 7 级品质（世界书 #417617 品质体系） */
 export const RARITY_LEVELS = ['普通', '优良', '稀有', '史诗', '传说', '神话', '唯一'] as const;
-export type Rarity = typeof RARITY_LEVELS[number];
+export type Rarity = (typeof RARITY_LEVELS)[number];
 
 /** 任务状态（修 #32: 自由字符串 → 4 态枚举） */
 export const QUEST_STATUSES = ['进行中', '已完成', '失败', '搁置'] as const;
-export type QuestStatus = typeof QUEST_STATUSES[number];
+export type QuestStatus = (typeof QUEST_STATUSES)[number];
 
 /** 状态效果分类 */
 export const STATUS_CATEGORIES = ['增益', '减益', '特殊'] as const;
-export type StatusCategory = typeof STATUS_CATEGORIES[number];
+export type StatusCategory = (typeof STATUS_CATEGORIES)[number];
 
 // ========== 归一化 ==========
 
 /** slot 别名表（中文变体 + 英文遗留，修 #37 slot 中英双轨） */
 const SLOT_ALIASES: Record<string, EquipSlot> = {
-  '主手': '武器', '惯用手': '武器', '副武器': '副手',
-  '护甲': '身体', '胸甲': '身体', '衣服': '身体',
-  '鞋子': '脚部', '靴子': '脚部', '手套': '手部', '头盔': '头部',
-  weapon: '武器', offhand: '副手', head: '头部', armor: '身体',
-  hands: '手部', feet: '脚部', belt: '腰带', accessory: '饰品',
+  主手: '武器',
+  惯用手: '武器',
+  副武器: '副手',
+  护甲: '身体',
+  胸甲: '身体',
+  衣服: '身体',
+  鞋子: '脚部',
+  靴子: '脚部',
+  手套: '手部',
+  头盔: '头部',
+  weapon: '武器',
+  offhand: '副手',
+  head: '头部',
+  armor: '身体',
+  hands: '手部',
+  feet: '脚部',
+  belt: '腰带',
+  accessory: '饰品',
 };
 
 /** 归一化装备槽位。无法识别返回 null，调用方决定报错或兜底 */
@@ -197,9 +245,14 @@ export function normalizeSlot(raw: string): EquipSlot | null {
 
 /** item type 别名表（英文枚举遗留，修 #38 三套取值） */
 const ITEM_TYPE_ALIASES: Record<string, ItemType> = {
-  equipment: '装备', weapon: '装备', armor: '装备',
-  consumable: '消耗品', material: '材料', quest: '任务物品', special: '特殊',
-  '道具': '特殊',
+  equipment: '装备',
+  weapon: '装备',
+  armor: '装备',
+  consumable: '消耗品',
+  material: '材料',
+  quest: '任务物品',
+  special: '特殊',
+  道具: '特殊',
 };
 
 /** 归一化物品类型。无法识别返回 undefined（type 为可选字段） */
@@ -211,8 +264,13 @@ export function normalizeItemType(raw: string): ItemType | undefined {
 
 /** rarity 别名表（英文遗留 + quality 字段废除后统一入口，修 #39） */
 const RARITY_ALIASES: Record<string, Rarity> = {
-  common: '普通', uncommon: '优良', rare: '稀有',
-  epic: '史诗', legendary: '传说', mythic: '神话', unique: '唯一',
+  common: '普通',
+  uncommon: '优良',
+  rare: '稀有',
+  epic: '史诗',
+  legendary: '传说',
+  mythic: '神话',
+  unique: '唯一',
 };
 
 /** 归一化品质。无法识别返回 undefined */
@@ -224,10 +282,17 @@ export function normalizeRarity(raw: string): Rarity | undefined {
 
 /** quest status 别名表 */
 const QUEST_STATUS_ALIASES: Record<string, QuestStatus> = {
-  '完成': '已完成', '已结束': '已完成', '完毕': '已完成',
-  '进行': '进行中', '正在进行': '进行中', '接受': '进行中',
-  '失败了': '失败', '已失败': '失败',
-  '暂停': '搁置', '挂起': '搁置', '搁置中': '搁置',
+  完成: '已完成',
+  已结束: '已完成',
+  完毕: '已完成',
+  进行: '进行中',
+  正在进行: '进行中',
+  接受: '进行中',
+  失败了: '失败',
+  已失败: '失败',
+  暂停: '搁置',
+  挂起: '搁置',
+  搁置中: '搁置',
 };
 
 /** 归一化任务状态。无法识别兜底 '进行中'（宁可误留活跃也不误杀） */
@@ -239,7 +304,9 @@ export function normalizeQuestStatus(raw: string): QuestStatus {
 
 /** status category 别名表 */
 const STATUS_CATEGORY_ALIASES: Record<string, StatusCategory> = {
-  buff: '增益', debuff: '减益', special: '特殊',
+  buff: '增益',
+  debuff: '减益',
+  special: '特殊',
 };
 
 /** 归一化状态效果分类。无法识别兜底 '特殊' */
@@ -268,12 +335,14 @@ git commit -m "feat(M1): field-enums.ts 中文枚举集中定义 + 归一化 (�
 ### Task 2: types.ts 加法字段 + 双写迁移
 
 **Files:**
+
 - Modify: `src/sillytavern/types.ts`（CharacterState ~:725-790、createDefaultCharacterState ~:793、InventoryItem ~:644-656、SaveProfile ~:2089-2105）
 - Modify: `src/sillytavern/database.ts`（createDefaultSaveProfile ~:646-661）
 - Modify: `src/ui/stores/create-store.ts`（buildCharacterState ~:631-687）
 - Modify: `src/ui/utils/test-save.ts`（4 处角色构造 :76 :192 :211 :245 附近）
 
 **Interfaces:**
+
 - Produces: `CharacterState.saveId: string`（一等字段）、`CharacterState.quantity?: number`、`CharacterState.appearance?/background?/personality?/gender?/outfit?/thoughts?: string`、`InventoryItem.equippedSlot?: string | null`、`SaveProfile.variables: Record<string, any>`。Task 3 的索引、Task 4 的注入、M2-M6 全部依赖这些字段存在。
 - 双写策略: 写入方同时写正式字段与 customFields 旧 key（M6 才切读方），本 task 内行为零变化。
 
@@ -282,8 +351,8 @@ git commit -m "feat(M1): field-enums.ts 中文枚举集中定义 + 归一化 (�
 在 `id: string;` 之后加：
 
 ```ts
-  /** 🆕 归属存档（一等字段，数据字段规范 铁律1/第1.2节；替代 customFields.saveId） */
-  saveId: string;
+/** 🆕 归属存档（一等字段，数据字段规范 铁律1/第1.2节；替代 customFields.saveId） */
+saveId: string;
 ```
 
 在 `bloodlineIds?: string[];` 之后、`customFields` 之前加：
@@ -327,8 +396,8 @@ git commit -m "feat(M1): field-enums.ts 中文枚举集中定义 + 归一化 (�
 在 `worldFlags: Record<string, any>;` 之前加：
 
 ```ts
-  /** 🆕 叙事变量唯一真源（user./sys. 命名空间；从快照寄生迁出，规范 §12。M5 接管读写） */
-  variables: Record<string, any>;
+/** 🆕 叙事变量唯一真源（user./sys. 命名空间；从快照寄生迁出，规范 §12。M5 接管读写） */
+variables: Record<string, any>;
 ```
 
 - [ ] **Step 5: database.ts — createDefaultSaveProfile 补默认值**
@@ -384,12 +453,14 @@ git commit -m "feat(M1): CharacterState.saveId 一等化 + quantity/正式字段
 ### Task 3: Dexie v9 — characters 索引 + chats 删表 + vanilla 清理
 
 **Files:**
+
 - Modify: `src/sillytavern/database.ts`（version 块 ~:59-201、getCharacters :472-479、getChats/saveChat/deleteChat 函数 ~:390-410）
 - Delete: `src/vanilla/sillytavern-store.ts`（零消费方，已核实）
 - Modify: `src/ui/stores/game-store.ts`（refreshFromDb :341-361 改读一等 saveId）
 - Test: `src/sillytavern/database.test.ts`
 
 **Interfaces:**
+
 - Consumes: Task 2 的 `CharacterState.saveId`
 - Produces: `characters` 表 schema `'id, saveId, type'`；`getCharacters(saveId?)` 走索引查询；chats 表及其 API（getChats/saveChat/deleteChat）删除。
 
@@ -402,13 +473,18 @@ describe('v9: characters saveId 一等索引', () => {
     const b = createDefaultCharacterState({ id: 'cb', name: '乙', saveId: 'save_B' });
     await saveCharacters([a, b]);
     const got = await getCharacters('save_A');
-    expect(got.map(c => c.id)).toEqual(['ca']);
+    expect(got.map((c) => c.id)).toEqual(['ca']);
   });
   it('customFields.saveId 不再参与过滤', async () => {
-    const c = createDefaultCharacterState({ id: 'cc', name: '丙', saveId: '', customFields: { saveId: 'save_A' } });
+    const c = createDefaultCharacterState({
+      id: 'cc',
+      name: '丙',
+      saveId: '',
+      customFields: { saveId: 'save_A' },
+    });
     await saveCharacter(c);
     const got = await getCharacters('save_A');
-    expect(got.find(x => x.id === 'cc')).toBeUndefined();
+    expect(got.find((x) => x.id === 'cc')).toBeUndefined();
   });
 });
 ```
@@ -421,32 +497,34 @@ Expected: FAIL（customFields 过滤路径仍生效 / 一等字段不被识别�
 - [ ] **Step 3: database.ts 加 v9 版本块（v8 块之后）**
 
 ```ts
-    // v9: 数据字段规范 M1 — characters saveId 一等索引 (#43)；chats v3 遗留表删除 (#46)
-    this.version(9).stores({
-      lorebooks: 'id, name, updatedAt',
-      presets: 'id, name, updatedAt',
-      settings: 'key',
-      chats: null,   // 删表
-      memories: 'id, saveId, createdAt, realTimestamp',
-      plotEvents: 'id, saveId, parentId, status, updatedAt',
-      characters: 'id, saveId, type',
-      snapshots: 'id, saveId, index, timestamp',
-      saves: 'id, slot, updatedAt',
-      apiEndpoints: 'id, name',
-      plotOutlines: 'id, saveId, updatedAt',
-      saveProfiles: 'saveId, updatedAt',
-      createPresets: 'id, name, updatedAt',
-      messages: 'id, saveId, [saveId+turn]',
-    }).upgrade(async tx => {
-      // 开发期迁移: 把 customFields.saveId 回填为一等字段（老数据仅开发自用）
-      const chars = await tx.table('characters').toCollection().toArray();
-      for (const c of chars) {
-        if (!c.saveId) {
-          c.saveId = c.customFields?.saveId ?? '';
-          await tx.table('characters').put(c);
-        }
+// v9: 数据字段规范 M1 — characters saveId 一等索引 (#43)；chats v3 遗留表删除 (#46)
+this.version(9)
+  .stores({
+    lorebooks: 'id, name, updatedAt',
+    presets: 'id, name, updatedAt',
+    settings: 'key',
+    chats: null, // 删表
+    memories: 'id, saveId, createdAt, realTimestamp',
+    plotEvents: 'id, saveId, parentId, status, updatedAt',
+    characters: 'id, saveId, type',
+    snapshots: 'id, saveId, index, timestamp',
+    saves: 'id, slot, updatedAt',
+    apiEndpoints: 'id, name',
+    plotOutlines: 'id, saveId, updatedAt',
+    saveProfiles: 'saveId, updatedAt',
+    createPresets: 'id, name, updatedAt',
+    messages: 'id, saveId, [saveId+turn]',
+  })
+  .upgrade(async (tx) => {
+    // 开发期迁移: 把 customFields.saveId 回填为一等字段（老数据仅开发自用）
+    const chars = await tx.table('characters').toCollection().toArray();
+    for (const c of chars) {
+      if (!c.saveId) {
+        c.saveId = c.customFields?.saveId ?? '';
+        await tx.table('characters').put(c);
       }
-    });
+    }
+  });
 ```
 
 同时: DexieDB 类的 `chats!: Table<...>` 属性声明删除。
@@ -494,10 +572,12 @@ git commit -m "feat(M1): Dexie v9 — characters saveId 一等索引 + chats 删
 ### Task 4: applyAddCharacter 注入 saveId（修 #8 孤儿 NPC）
 
 **Files:**
+
 - Modify: `src/sillytavern/state-manager.ts`（applyAddCharacter ~:586-591）
 - Test: `src/sillytavern/state-manager.test.ts`
 
 **Interfaces:**
+
 - Produces: `add_character` patch 落库前 Code 强制注入 `saveId = this.saveId`（铁律3: Code 补账务字段）。char_gen 链新 NPC 从此不再是孤儿。
 
 - [ ] **Step 1: 写失败测试（state-manager.test.ts 追加，仿现有用例风格）**
@@ -506,11 +586,11 @@ git commit -m "feat(M1): Dexie v9 — characters saveId 一等索引 + chats 删
 it('add_character 落库时自动注入 saveId（修 #8 孤儿 NPC）', async () => {
   const sm = createStateManager('save_inject');
   const npc = createDefaultCharacterState({ id: 'npc_x', name: '妲丽安' });
-  npc.saveId = '';   // 模拟 char_gen 链未填
+  npc.saveId = ''; // 模拟 char_gen 链未填
   await sm!.commitChatState([{ op: 'add_character', target: 'characters.妲丽安', value: npc }]);
   const got = await getCharacters('save_inject');
-  expect(got.map(c => c.name)).toContain('妲丽安');
-  expect(got.find(c => c.name === '妲丽安')!.saveId).toBe('save_inject');
+  expect(got.map((c) => c.name)).toContain('妲丽安');
+  expect(got.find((c) => c.name === '妲丽安')!.saveId).toBe('save_inject');
 });
 ```
 
@@ -524,9 +604,9 @@ Expected: FAIL（saveId 仍为 ''，getCharacters 按索引查不到）
 在 `if (!char?.id) throw new Error('缺少角色数据');`（或等价校验）之后、`saveCharacter` 之前加：
 
 ```ts
-    // 铁律3: saveId 是账务字段，由 Code 注入，不信任上游 patch 构造方 (#8)
-    if (!char.saveId) char.saveId = this.saveId;
-    if (char.customFields && !char.customFields.saveId) char.customFields.saveId = this.saveId;  // 双写，M6 删
+// 铁律3: saveId 是账务字段，由 Code 注入，不信任上游 patch 构造方 (#8)
+if (!char.saveId) char.saveId = this.saveId;
+if (char.customFields && !char.customFields.saveId) char.customFields.saveId = this.saveId; // 双写，M6 删
 ```
 
 - [ ] **Step 4: 跑测试确认通过 + 全量 + 提交**
@@ -543,6 +623,7 @@ git commit -m "fix(M1): applyAddCharacter 强制注入 saveId — char_gen NPC �
 ### Task 5: deleteSaveSlot 级联删除 characters（修 #9）
 
 **Files:**
+
 - Modify: `src/sillytavern/database.ts`（deleteSaveSlot ~:563-578）
 - Test: `src/sillytavern/database.test.ts`
 
@@ -552,11 +633,13 @@ git commit -m "fix(M1): applyAddCharacter 强制注入 saveId — char_gen NPC �
 it('deleteSaveSlot 级联删除该存档的 characters（修 #9 删档残留）', async () => {
   await saveSaveSlot(makeSaveSlot({ id: 'save_del' }));
   await saveCharacter(createDefaultCharacterState({ id: 'cd1', name: '将删', saveId: 'save_del' }));
-  await saveCharacter(createDefaultCharacterState({ id: 'cd2', name: '留下', saveId: 'save_other' }));
+  await saveCharacter(
+    createDefaultCharacterState({ id: 'cd2', name: '留下', saveId: 'save_other' }),
+  );
   await deleteSaveSlot('save_del');
   const all = await getCharacters();
-  expect(all.map(c => c.id)).not.toContain('cd1');
-  expect(all.map(c => c.id)).toContain('cd2');
+  expect(all.map((c) => c.id)).not.toContain('cd1');
+  expect(all.map((c) => c.id)).toContain('cd2');
 });
 ```
 
@@ -586,21 +669,27 @@ git commit -m "fix(M1): deleteSaveSlot 级联删除 characters (#9)"
 ### Task 6: char-query saveId 参数真正生效（修 #30）
 
 **Files:**
+
 - Modify: `src/sillytavern/char-query.ts`（getNpcs/getMonsters :40-47）
 - Modify: `src/sillytavern/database.ts`（getCharactersByType :485-487）
 - Test: `src/sillytavern/char-query.test.ts`（存在则追加，不存在则新建）
 
 **Interfaces:**
+
 - Produces: `getCharactersByType(type, saveId?)` 新签名；`getNpcs(saveId?)/getMonsters(saveId?)` 传参生效。
 
 - [ ] **Step 1: 写失败测试**
 
 ```ts
 it('getNpcs(saveId) 只返回该存档的 NPC（修 #30 假隔离）', async () => {
-  await saveCharacter(createDefaultCharacterState({ id: 'n1', name: '本档NPC', type: 'npc', saveId: 'save_Q' }));
-  await saveCharacter(createDefaultCharacterState({ id: 'n2', name: '外档NPC', type: 'npc', saveId: 'save_Z' }));
+  await saveCharacter(
+    createDefaultCharacterState({ id: 'n1', name: '本档NPC', type: 'npc', saveId: 'save_Q' }),
+  );
+  await saveCharacter(
+    createDefaultCharacterState({ id: 'n2', name: '外档NPC', type: 'npc', saveId: 'save_Z' }),
+  );
   const got = await getNpcs('save_Q');
-  expect(got.map(c => c.id)).toEqual(['n1']);
+  expect(got.map((c) => c.id)).toEqual(['n1']);
 });
 it('getNpcs() 不传 saveId 保持全量（兼容既有语义）', async () => {
   const got = await getNpcs();
@@ -617,9 +706,16 @@ Expected: FAIL（返回两档 NPC）
 database.ts:
 
 ```ts
-export async function getCharactersByType(type: CharacterState['type'], saveId?: string): Promise<CharacterState[]> {
+export async function getCharactersByType(
+  type: CharacterState['type'],
+  saveId?: string,
+): Promise<CharacterState[]> {
   if (saveId) {
-    return getDatabase().characters.where('saveId').equals(saveId).and(c => c.type === type).toArray();
+    return getDatabase()
+      .characters.where('saveId')
+      .equals(saveId)
+      .and((c) => c.type === type)
+      .toArray();
   }
   return getDatabase().characters.where('type').equals(type).toArray();
 }
@@ -652,6 +748,7 @@ git commit -m "fix(M1): getNpcs/getMonsters/getCharactersByType 的 saveId 参�
 ### Task 7: persistMessage 前置校验（修 #13 孤儿消息）
 
 **Files:**
+
 - Modify: `src/ui/stores/game-store.ts`（persistMessage :233-239）
 - Test: `src/ui/stores/game-store.test.ts`
 
@@ -660,16 +757,16 @@ git commit -m "fix(M1): getNpcs/getMonsters/getCharactersByType 的 saveId 参�
 ```ts
 describe('persistMessage 前置校验', () => {
   it('activeSaveId 为 null 时拒绝持久化（不产生孤儿消息）', async () => {
-    const store = makeStore()
+    const store = makeStore();
     // activeSaveId 默认 null
-    store.addMessage('测试内容', 'user')
-    await new Promise(r => setTimeout(r, 20))   // addMessage 内部异步持久化
-    const { getMessages } = await import('@engine/database')
-    const orphans = await getMessages(undefined as any).catch(() => [])
+    store.addMessage('测试内容', 'user');
+    await new Promise((r) => setTimeout(r, 20)); // addMessage 内部异步持久化
+    const { getMessages } = await import('@engine/database');
+    const orphans = await getMessages(undefined as any).catch(() => []);
     // 库里不应出现 saveId 为 null/undefined 的孤儿（getMessages 无参路径若不存在则以下断言改查全表）
-    expect((orphans as any[]).filter(m => m.content === '测试内容')).toHaveLength(0)
-  })
-})
+    expect((orphans as any[]).filter((m) => m.content === '测试内容')).toHaveLength(0);
+  });
+});
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -680,19 +777,22 @@ Expected: FAIL（非空断言写入了 saveId=null 的消息）——若 getMess
 - [ ] **Step 3: 实现**
 
 ```ts
-  /** 持久化单条消息到 IndexedDB */
-  async function persistMessage(msg: ChatMessage) {
-    if (!activeSaveId.value) {
-      // 规范 §10: 消息 saveId 必填；无活跃存档时拒绝写入，避免产生永不召回的孤儿消息 (#13)
-      console.error('[game-store] persistMessage 拒绝: activeSaveId 为空，消息未持久化:', msg.content.slice(0, 50))
-      return
-    }
-    try {
-      await saveMessage({ ...msg, saveId: activeSaveId.value })
-    } catch (err) {
-      console.error('[game-store] 消息持久化失败:', err)
-    }
+/** 持久化单条消息到 IndexedDB */
+async function persistMessage(msg: ChatMessage) {
+  if (!activeSaveId.value) {
+    // 规范 §10: 消息 saveId 必填；无活跃存档时拒绝写入，避免产生永不召回的孤儿消息 (#13)
+    console.error(
+      '[game-store] persistMessage 拒绝: activeSaveId 为空，消息未持久化:',
+      msg.content.slice(0, 50),
+    );
+    return;
   }
+  try {
+    await saveMessage({ ...msg, saveId: activeSaveId.value });
+  } catch (err) {
+    console.error('[game-store] 消息持久化失败:', err);
+  }
+}
 ```
 
 - [ ] **Step 4: 跑测试 + typecheck + 提交**
@@ -708,12 +808,14 @@ git commit -m "fix(M1): persistMessage 前置校验替代非空断言 (#13)"
 ### Task 8: SaveSlot 清理 — 删 metadata.description 与内嵌 snapshots 数组（修 #47 + #2 准备）
 
 **Files:**
+
 - Modify: `src/sillytavern/types.ts`（SaveSlot :988-1012）
 - Modify: `src/ui/stores/create-store.ts`（startJourney :823-846）
 - Modify: `src/ui/stores/game-store.ts`（loadSave 快照恢复死块 :318-323 附近）
 - Modify: `src/ui/utils/test-save.ts` + `src/sillytavern/database.test.ts` + `src/ui/stores/game-store.test.ts`（makeSaveSlot 等构造点删两字段）
 
 **Interfaces:**
+
 - Produces: `SaveSlot` 不再有 `snapshots` 与 `metadata.description`。快照唯一真源 = snapshots 表（`activeSnapshotId` 保留，指表记录；恢复机制 M5 重建）。
 
 - [ ] **Step 1: types.ts 删两字段**
@@ -736,13 +838,13 @@ SaveSlot 中删除：
 删除：
 
 ```ts
-    // 从 Snapshot 恢复角色状态
-    if (save.activeSnapshotId && save.snapshots) {
-      const snap = save.snapshots.find((s: any) => s.id === save.activeSnapshotId)
-      if (snap) {
-        if (snap.characters) characters.value = snap.characters as CharacterState[]
-      }
-    }
+// 从 Snapshot 恢复角色状态
+if (save.activeSnapshotId && save.snapshots) {
+  const snap = save.snapshots.find((s: any) => s.id === save.activeSnapshotId);
+  if (snap) {
+    if (snap.characters) characters.value = snap.characters as CharacterState[];
+  }
+}
 ```
 
 原位留注释：`// 快照恢复走 snapshots 表（规范 §11.2），机制在 M5 重建 (#2)`。
@@ -764,6 +866,7 @@ git commit -m "refactor(M1): SaveSlot 删除内嵌 snapshots 数组与 metadata.
 ### Task 9: ChatMessage 死字段删除（修 #48 + #33 前半）
 
 **Files:**
+
 - Modify: `src/sillytavern/types.ts`（ChatMessage :477-497）
 - Modify: `src/ui/stores/game-store.ts`（latestVariables :53-62、getThoughts :69-83、return :390 附近）
 - Modify: `src/ui/components/game/ScenePanel.vue`（weather :56-66）
@@ -774,6 +877,7 @@ git commit -m "refactor(M1): SaveSlot 删除内嵌 snapshots 数组与 metadata.
 - Modify: `src/sillytavern/variables.ts`（:77 parsed 写点，v3 遗留）
 
 **Interfaces:**
+
 - Produces: `ChatMessage` 仅保留 id/role/content/timestamp/saveId/turn/systemEvent（+v3 必需的既有字段中未列废的）。`game-store.latestVariables` 移除；`getThoughts(charName, char?)` 签名不变，仅走 customFields/正式字段路径。
 
 - [ ] **Step 1: types.ts 删字段**
@@ -785,14 +889,14 @@ ChatMessage 中删除 `variables?`、`parsed?`、`metadata?`、`apiUsed?`、`var
 删除 `latestVariables` computed（:53-62）及 return 中的 `latestVariables,`。getThoughts 改为：
 
 ```ts
-  // === 心里话 ===
-  // 唯一真源: CharacterState.thoughts 正式字段（规范 §7），customFields.thoughts 兜底（M6 删）
-  function getThoughts(charName: string, char?: CharacterState): string {
-    if (char?.thoughts) return char.thoughts
-    const cf = (char as any)?.customFields
-    if (cf && typeof cf.thoughts === 'string' && cf.thoughts) return cf.thoughts
-    return ''
-  }
+// === 心里话 ===
+// 唯一真源: CharacterState.thoughts 正式字段（规范 §7），customFields.thoughts 兜底（M6 删）
+function getThoughts(charName: string, char?: CharacterState): string {
+  if (char?.thoughts) return char.thoughts;
+  const cf = (char as any)?.customFields;
+  if (cf && typeof cf.thoughts === 'string' && cf.thoughts) return cf.thoughts;
+  return '';
+}
 ```
 
 - [ ] **Step 3: ScenePanel.vue weather 去 latestVariables 路径**
@@ -800,9 +904,9 @@ ChatMessage 中删除 `variables?`、`parsed?`、`metadata?`、`apiUsed?`、`var
 ```ts
 // ═══ 天气 —— worldFlags 单源（variablesAfter 路径已死，变量真源 M5 迁入 saveProfile.variables 后再接） ═══
 const weather = computed(() => {
-  const wf = game.saveProfile?.worldFlags
-  return (wf?.['天气'] as string) ?? (wf?.['weather'] as string) ?? ''
-})
+  const wf = game.saveProfile?.worldFlags;
+  return (wf?.['天气'] as string) ?? (wf?.['weather'] as string) ?? '';
+});
 ```
 
 - [ ] **Step 4: ChatFlow.vue / game-pipeline.ts / test-fixtures.ts / variables.ts / GamePage.vue**
@@ -828,6 +932,7 @@ git commit -m "refactor(M1): ChatMessage 死字段删除 variablesAfter/parsed/m
 ### Task 10: 收尾 — 规范附录 A 范围调整回写 + 文档同步 + 全量验证
 
 **Files:**
+
 - Modify: `docs/superpowers/specs/2026-07-16-data-field-conventions-design.md`（附录 A）
 - Modify: `CLAUDE.md`（架构清单登记 field-enums.ts）
 
@@ -838,7 +943,7 @@ git commit -m "refactor(M1): ChatMessage 死字段删除 variablesAfter/parsed/m
 ```markdown
 > **M1 执行注记（2026-07-16）**: M1 已按"每批次编译绿灯"原则重校准——物品/技能/状态效果 id 退役与
 > EquipmentSlot 删除移至 M2/M3（随消费者 StateManager/翻译层重写同批）；Snapshot 类型重定义移至 M5
->（随快照机制重建同批）；新正式字段采用双写策略，读方 M6 切换。M1 实际完成: field-enums.ts、
+> （随快照机制重建同批）；新正式字段采用双写策略，读方 M6 切换。M1 实际完成: field-enums.ts、
 > CharacterState.saveId 一等化(#8 #43)、Dexie v9(#46)、级联删除(#9)、char-query 隔离(#30)、
 > persistMessage 校验(#13)、SaveSlot 清理(#47)、ChatMessage 死字段(#48 #33 前半)。
 ```

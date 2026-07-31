@@ -138,7 +138,7 @@ describe('filterActiveEntries', () => {
     ];
     const result = filterActiveEntries(entries);
     expect(result).toHaveLength(2);
-    expect(result.map(e => e.uid)).toEqual([1, 3]);
+    expect(result.map((e) => e.uid)).toEqual([1, 3]);
   });
 });
 
@@ -163,18 +163,18 @@ describe('matchKeyword', () => {
   it('AND_ANY with secondary', () => {
     const entry = { key: ['白曜城'], keysecondary: ['铁匠', '市场'], selectiveLogic: 0 };
     expect(matchKeyword(entry, '白曜城铁匠铺')).toBe(true); // primary + any secondary
-    expect(matchKeyword(entry, '白曜城远方')).toBe(false);   // primary but no secondary
+    expect(matchKeyword(entry, '白曜城远方')).toBe(false); // primary but no secondary
   });
 
   it('NOT_ANY with secondary', () => {
     const entry = { key: ['白曜城'], keysecondary: ['战斗'], selectiveLogic: 2 };
-    expect(matchKeyword(entry, '白曜城的铁匠铺')).toBe(true);  // primary, no combat keyword
+    expect(matchKeyword(entry, '白曜城的铁匠铺')).toBe(true); // primary, no combat keyword
     expect(matchKeyword(entry, '白曜城发生战斗')).toBe(false); // primary + combat keyword → excluded
   });
 
   it('AND_ALL with secondary', () => {
     const entry = { key: ['白曜城'], keysecondary: ['铁匠', '长剑'], selectiveLogic: 3 };
-    expect(matchKeyword(entry, '白曜城铁匠铺打造长剑')).toBe(true);   // all matched
+    expect(matchKeyword(entry, '白曜城铁匠铺打造长剑')).toBe(true); // all matched
     expect(matchKeyword(entry, '白曜城铁匠铺打造盾牌')).toBe(false); // missing 长剑
   });
 
@@ -207,7 +207,11 @@ describe('formatWorldBookEntries', () => {
 describe('filterBooksByEnabledEntries', () => {
   it('returns all books unchanged when enabledEntries is empty', () => {
     const books = [
-      makeBook({ id: 'system_core', partition: 'system_core', entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 })] }),
+      makeBook({
+        id: 'system_core',
+        partition: 'system_core',
+        entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 })],
+      }),
     ];
     const result = filterBooksByEnabledEntries(books, []);
     expect(result).toHaveLength(1);
@@ -222,8 +226,13 @@ describe('filterBooksByEnabledEntries', () => {
   it('keeps only matching uids for partitions in enabledEntries', () => {
     const books = [
       makeBook({
-        id: 'system_core', partition: 'system_core',
-        entries: [makeEntry({ uid: 413, content: '命运之轮' }), makeEntry({ uid: 414, content: '星辰指引' }), makeEntry({ uid: 415, content: '暗影低语' })],
+        id: 'system_core',
+        partition: 'system_core',
+        entries: [
+          makeEntry({ uid: 413, content: '命运之轮' }),
+          makeEntry({ uid: 414, content: '星辰指引' }),
+          makeEntry({ uid: 415, content: '暗影低语' }),
+        ],
       }),
     ];
     const result = filterBooksByEnabledEntries(books, ['system_core:413']);
@@ -236,7 +245,11 @@ describe('filterBooksByEnabledEntries', () => {
   it('passes through books whose partition is not in enabledEntries', () => {
     const books = [
       makeBook({ id: 'system_core', partition: 'system_core', entries: [makeEntry({ uid: 413 })] }),
-      makeBook({ id: 'race', partition: 'race', entries: [makeEntry({ uid: 1 }), makeEntry({ uid: 2 })] }),
+      makeBook({
+        id: 'race',
+        partition: 'race',
+        entries: [makeEntry({ uid: 1 }), makeEntry({ uid: 2 })],
+      }),
     ];
     const result = filterBooksByEnabledEntries(books, ['system_core:413']);
     expect(result).toHaveLength(2);
@@ -248,12 +261,18 @@ describe('filterBooksByEnabledEntries', () => {
 
   it('filters multiple books by their respective enabled entries', () => {
     const books = [
-      makeBook({ partition: 'system_core', entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 })] }),
-      makeBook({ partition: 'character', entries: [makeEntry({ uid: 301 }), makeEntry({ uid: 302 })] }),
+      makeBook({
+        partition: 'system_core',
+        entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 })],
+      }),
+      makeBook({
+        partition: 'character',
+        entries: [makeEntry({ uid: 301 }), makeEntry({ uid: 302 })],
+      }),
     ];
     const result = filterBooksByEnabledEntries(books, ['system_core:413', 'character:301']);
-    expect(result[0].entries.map(e => e.uid)).toEqual([413]);
-    expect(result[1].entries.map(e => e.uid)).toEqual([301]);
+    expect(result[0].entries.map((e) => e.uid)).toEqual([413]);
+    expect(result[1].entries.map((e) => e.uid)).toEqual([301]);
   });
 
   it('removes all entries for a partition when no uid matches', () => {
@@ -266,22 +285,35 @@ describe('filterBooksByEnabledEntries', () => {
 
   it('handles multiple uids for same partition', () => {
     const books = [
-      makeBook({ partition: 'system_core', entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 }), makeEntry({ uid: 415 })] }),
+      makeBook({
+        partition: 'system_core',
+        entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 }), makeEntry({ uid: 415 })],
+      }),
     ];
     const result = filterBooksByEnabledEntries(books, ['system_core:413', 'system_core:415']);
     expect(result[0].entries).toHaveLength(2);
-    expect(result[0].entries.map(e => e.uid).sort()).toEqual([413, 415]);
+    expect(result[0].entries.map((e) => e.uid).sort()).toEqual([413, 415]);
   });
 
   it('skips malformed enabledEntry values', () => {
     const books = [makeBook({ partition: 'system_core', entries: [makeEntry({ uid: 413 })] })];
     // mixed: one valid pair with non-matching uid, others malformed
-    const result = filterBooksByEnabledEntries(books, ['system_core:999', 'system_core:abc', '', ':']);
+    const result = filterBooksByEnabledEntries(books, [
+      'system_core:999',
+      'system_core:abc',
+      '',
+      ':',
+    ]);
     expect(result[0].entries).toHaveLength(0); // only system_core:999 parsed, uid 999 doesn't match 413
   });
 
   it('does not mutate input books', () => {
-    const books = [makeBook({ partition: 'system_core', entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 })] })];
+    const books = [
+      makeBook({
+        partition: 'system_core',
+        entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 })],
+      }),
+    ];
     const originalLength = books[0].entries.length;
     filterBooksByEnabledEntries(books, ['system_core:413']);
     expect(books[0].entries).toHaveLength(originalLength);

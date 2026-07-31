@@ -1,16 +1,16 @@
 <script setup lang="ts">
 defineProps<{
-  attrKey: string
-  modelValue: number
-  max: number
-  remaining: number
-  label: string
-}>()
+  attrKey: string;
+  modelValue: number;
+  max: number;
+  remaining: number;
+  label: string;
+}>();
 
 defineEmits<{
-  inc: [attr: string]
-  dec: [attr: string]
-}>()
+  inc: [attr: string];
+  dec: [attr: string];
+}>();
 </script>
 
 <template>
@@ -21,17 +21,21 @@ defineEmits<{
         class="attr-btn"
         data-test="dec-btn"
         :disabled="modelValue <= 0"
-        @click="$emit('dec', attrKey)"
         aria-label="减少"
-      >−</button>
+        @click="$emit('dec', attrKey)"
+      >
+        −
+      </button>
       <span class="attr-value" :class="{ boosted: modelValue > 0 }">{{ modelValue }}</span>
       <button
         class="attr-btn"
         data-test="inc-btn"
         :disabled="modelValue >= max || remaining <= 0"
-        @click="$emit('inc', attrKey)"
         aria-label="增加"
-      >+</button>
+        @click="$emit('inc', attrKey)"
+      >
+        +
+      </button>
     </div>
     <span class="attr-cap">/ {{ max }}</span>
   </div>

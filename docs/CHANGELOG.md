@@ -26,6 +26,7 @@
 **v1 范围**: 三类型 `头像/立绘/立绘bg` 全部可导入 + 一键 zip 导入（素材与音频同一个导入器，按扩展名分流；`.webm` 仍归音频）+ zip 导出（**仅 blob 源音频，内置 57 首与本地文件夹源刻意排除**）。
 
 **关键决策**:
+
 - **命名约定** `<name>[_<type>][_<variant>].<ext>`，type 可省默认头像（文件名即 zip 格式）
 - **严格 `===` 匹配不归一化**（对齐 state-manager.findByName，刻意不用 audio 的 normalizeAudioName）
 - **命名不变式**: name 与 variant 的任何分段都不得等于类型 token（否则 format→parse 不是双射，`(苏婉,头像,立绘)` 会回读成 `(苏婉_头像,立绘)`）
@@ -91,6 +92,7 @@ beautifier-rules.json 预设规则（22 条: 2 内置 + 20 远程）+ 世界书/
 ### M1-M6 — 数据字段规范迁移 ｜ ✅（2787 tests 首次 100% 全绿）
 
 52 项收口:
+
 - **M1** 类型库层
 - **M2** StateManager 按名寻址
 - **M3** 翻译层零 id

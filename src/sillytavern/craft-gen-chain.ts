@@ -40,7 +40,7 @@ import type { ToolExecutionContext } from './types';
 
 export interface CraftGenRequest {
   saveId: string;
-  marker: CraftRequestMarker | CraftGenRequestMarker;  // 兼容新旧
+  marker: CraftRequestMarker | CraftGenRequestMarker; // 兼容新旧
   storyOutput: string;
   context: AgentContext;
   endpoint: ApiEndpoint;
@@ -51,9 +51,14 @@ export interface CraftGenRequest {
 }
 
 /** Helper: extract attributes from old or new marker shape */
-function getMarkerAttr(marker: CraftRequestMarker | CraftGenRequestMarker, key: string): string | undefined {
+function getMarkerAttr(
+  marker: CraftRequestMarker | CraftGenRequestMarker,
+  key: string,
+): string | undefined {
   if (marker.type === 'craft_gen_request') {
-    return (marker as CraftGenRequestMarker).attributes[key as keyof CraftGenRequestMarker['attributes']] as string | undefined;
+    return (marker as CraftGenRequestMarker).attributes[
+      key as keyof CraftGenRequestMarker['attributes']
+    ] as string | undefined;
   }
   return (marker as any)[key] as string | undefined;
 }
@@ -136,9 +141,9 @@ export interface CraftGenOutput {
  */
 export interface ItemRequest {
   type: 'equipment' | 'inventory';
-  slot?: string;   // equipment: 武器/头部/身体/腿部/脚部/首饰/戒指/项链
+  slot?: string; // equipment: 武器/头部/身体/腿部/脚部/首饰/戒指/项链
   quality: string;
-  description: string;  // 纯自然语言，不含数值
+  description: string; // 纯自然语言，不含数值
 }
 
 export interface CraftGenChainResult {
@@ -162,16 +167,22 @@ export async function callCraftGenAgent(
   const markerBody = getMarkerBody(request.marker);
   const markerContext = [
     `一般制作请求: ${markerBody || request.marker.rawContent}`,
-    getMarkerAttr(request.marker, 'industry') ? `行业: ${getMarkerAttr(request.marker, 'industry')}` : '',
-    getMarkerAttr(request.marker, 'productName') ? `产物名: ${getMarkerAttr(request.marker, 'productName')}` : '',
-    getMarkerAttr(request.marker, 'targetQuality') ? `目标品质: ${getMarkerAttr(request.marker, 'targetQuality')}` : '',
-  ].filter(Boolean).join('\n');
+    getMarkerAttr(request.marker, 'industry')
+      ? `行业: ${getMarkerAttr(request.marker, 'industry')}`
+      : '',
+    getMarkerAttr(request.marker, 'productName')
+      ? `产物名: ${getMarkerAttr(request.marker, 'productName')}`
+      : '',
+    getMarkerAttr(request.marker, 'targetQuality')
+      ? `目标品质: ${getMarkerAttr(request.marker, 'targetQuality')}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   const ctxWithStory: AgentContext = {
     ...request.context,
-    agentOutputs: new Map([
-      ['story', markerContext],
-    ]),
+    agentOutputs: new Map([['story', markerContext]]),
   };
 
   const craftLocalParams: Record<string, string> = {
@@ -179,7 +190,14 @@ export async function callCraftGenAgent(
   };
 
   // 真机修(2026-07-17): configs/worldBooks/presets 透传
-  const messages = buildAgentMessages('craft_gen', ctxWithStory, request.configs, request.worldBooks, request.presets, craftLocalParams);
+  const messages = buildAgentMessages(
+    'craft_gen',
+    ctxWithStory,
+    request.configs,
+    request.worldBooks,
+    request.presets,
+    craftLocalParams,
+  );
 
   if (!messages) {
     throw new Error('craft_gen 模板未找到 — 请检查 AGENT_TEMPLATES 注册');
@@ -255,10 +273,12 @@ export async function callItemGenForCraft(
 
   // 将 craft_output 格式化为 item_gen 可理解的 XML 片段
   // 对标 char_gen 传给 item_gen 的 <skill_requests>/<equipment_requests>/<item_requests>
-  const itemRequestsXML = craftOutput.itemRequests.map((req) => {
-    const slotAttr = req.slot ? ` slot="${req.slot}"` : '';
-    return `<request type="${req.type}"${slotAttr} quality="${req.quality}">\n${req.description}\n</request>`;
-  }).join('\n');
+  const itemRequestsXML = craftOutput.itemRequests
+    .map((req) => {
+      const slotAttr = req.slot ? ` slot="${req.slot}"` : '';
+      return `<request type="${req.type}"${slotAttr} quality="${req.quality}">\n${req.description}\n</request>`;
+    })
+    .join('\n');
 
   const craftDataXML = [
     `<craft_output>`,
@@ -292,7 +312,14 @@ export async function callItemGenForCraft(
     };
 
     // 真机修(2026-07-17): configs/worldBooks/presets 透传
-    const messages = buildAgentMessages('item_gen', contextWithCraftData, request.configs, request.worldBooks, request.presets, craftItemLocalParams);
+    const messages = buildAgentMessages(
+      'item_gen',
+      contextWithCraftData,
+      request.configs,
+      request.worldBooks,
+      request.presets,
+      craftItemLocalParams,
+    );
     if (!messages) {
       // item_gen 模板找不到时，返回空，不阻塞主流程
       return { skills: [], equipment: [], inventory: [] };
@@ -410,7 +437,7 @@ export function buildCraftPatches(
   // M3: item_gen equipment 已细化同名产物时跳过 — 以 item_gen 的完整数据为准
   // 不再两步落库；stats/durability/maxDurability 直写 value（#7）
   const productElaboratedByItemGen =
-    itemOutput?.equipment.some(e => e.name === productName) ?? false;
+    itemOutput?.equipment.some((e) => e.name === productName) ?? false;
   if (!productElaboratedByItemGen) {
     patches.push({
       op: 'add_item',
@@ -437,9 +464,9 @@ export function buildCraftPatches(
           quantity: 1,
           type: '装备',
           rarity: equip.quality ?? craftOutput.quality,
-          equippedSlot: normalizeSlot(equip.slot),  // M3: slot 归一化
-          stats: equip.stats,                        // M3: stats 归位 value（#7）
-          durability: equip.durability,              // M3: durability 归位 value（#7）
+          equippedSlot: normalizeSlot(equip.slot), // M3: slot 归一化
+          stats: equip.stats, // M3: stats 归位 value（#7）
+          durability: equip.durability, // M3: durability 归位 value（#7）
           maxDurability: equip.durability,
           // 战斗 v2 (M4 5.5b): modifiers/buffs/divinity 写进 patch value（战斗管线 collect_mods 消费）
           ...(equip.modifiers ? { modifiers: equip.modifiers } : {}),
@@ -458,7 +485,7 @@ export function buildCraftPatches(
           name: inv.name,
           description: inv.description,
           quantity: inv.quantity,
-          type: normalizeItemType(inv.type) ?? inv.type,  // M3: type 归一化（#38）
+          type: normalizeItemType(inv.type) ?? inv.type, // M3: type 归一化（#38）
           rarity: inv.rarity,
           // 战斗 v2 (M4 5.5b): modifiers/buffs/divinity 写进 patch value
           ...(inv.modifiers ? { modifiers: inv.modifiers } : {}),
@@ -515,9 +542,10 @@ export async function runCraftGenChain(
   }
 
   // Step 3: build patches（M3: owner 优先 marker attribute，缺省取 context 玩家名；#6 player_1 灭绝）
-  const characterId = getMarkerAttr(request.marker, 'characterId')
-    ?? request.context.characters?.find(c => c.type === 'player')?.name
-    ?? '';
+  const characterId =
+    getMarkerAttr(request.marker, 'characterId') ??
+    request.context.characters?.find((c) => c.type === 'player')?.name ??
+    '';
   if (!characterId) {
     console.warn('[craft-gen-chain] 无 owner 且无玩家角色，craft patches 将跳过角色目标');
     return { narrative: craftOutput.narrative, patches: [], craftOutput, itemOutput };
@@ -629,7 +657,10 @@ function parseCraftParams(xml: string): CraftGenOutput['craftParams'] {
  * 提取 XML 标签内容 (不包含标签本身)
  */
 function extractTagContent(tagName: string, xml: string): string | null {
-  const regex = new RegExp(`<${escapeRegex(tagName)}[^>]*?>([\\s\\S]*?)<\\/${escapeRegex(tagName)}>`, 'i');
+  const regex = new RegExp(
+    `<${escapeRegex(tagName)}[^>]*?>([\\s\\S]*?)<\\/${escapeRegex(tagName)}>`,
+    'i',
+  );
   const match = regex.exec(xml);
   return match ? match[1] : null;
 }
@@ -638,7 +669,10 @@ function extractTagContent(tagName: string, xml: string): string | null {
  * 提取完整的 XML 标签块 (含标签)
  */
 function extractTag(tagName: string, text: string): string | null {
-  const regex = new RegExp(`<${escapeRegex(tagName)}[^>]*?>[\\s\\S]*?<\\/${escapeRegex(tagName)}>`, 'i');
+  const regex = new RegExp(
+    `<${escapeRegex(tagName)}[^>]*?>[\\s\\S]*?<\\/${escapeRegex(tagName)}>`,
+    'i',
+  );
   const match = regex.exec(text);
   return match ? match[0] : null;
 }

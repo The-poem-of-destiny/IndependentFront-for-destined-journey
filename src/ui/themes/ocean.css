@@ -1,5 +1,5 @@
 /* ===== Ocean (海洋) — 深海蓝黑风格 ===== */
-[data-theme="ocean"] {
+[data-theme='ocean'] {
   --theme-window-bg: #0a1628;
   --theme-window-border: #1a3550;
   --theme-content-bg: #081220;
@@ -11,19 +11,19 @@
   --theme-title-bar-bg: #0e1c33;
   --theme-title-bar-text: #d8e8f8;
   --theme-title-bar-icon: #80a8d0;
-  --theme-title-bar-btn-hover: rgba(255,255,255,0.06);
+  --theme-title-bar-btn-hover: rgba(255, 255, 255, 0.06);
   --theme-tab-bar-bg: #0c192e;
   --theme-tab-text: #6888b0;
   --theme-tab-active-text: #c8e0f8;
   --theme-tab-indicator: #48a8f0;
-  --theme-tab-hover-bg: rgba(255,255,255,0.04);
+  --theme-tab-hover-bg: rgba(255, 255, 255, 0.04);
 
   --theme-text-primary: #d8e8f8;
   --theme-text-secondary: #80a8d0;
   --theme-text-muted: #587088;
 
   --theme-primary: #48a8f0;
-  
+
   --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
   --theme-success: #48d890;
   --theme-warning: #e8b84b;
@@ -34,7 +34,7 @@
   --theme-sp: #48d890;
   --theme-exp: #e8b84b;
   --theme-affection: #e868a8;
-  --theme-affection-bg: rgba(232,104,168,0.18);
+  --theme-affection-bg: rgba(232, 104, 168, 0.18);
   --theme-affection-text: #f8a0c8;
 
   --theme-quality-common: #b0c0d0;

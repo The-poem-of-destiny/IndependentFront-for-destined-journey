@@ -18,11 +18,7 @@
  *   11-19(有效,1.0) | 8-10(勉强,0.8) | 4-7(擦伤,0.3) | ≤3(失手,0)
  */
 
-import type {
-  DamageType,
-  HitRating,
-  CombatDamageBreakdown,
-} from './types';
+import type { DamageType, HitRating, CombatDamageBreakdown } from './types';
 import { getHitRating } from './types';
 import { getCombatCoefficient } from './tier-constants';
 
@@ -273,7 +269,10 @@ export function runDamagePipeline(input: DamagePipelineInput): CombatDamageBreak
 
   // Step 5: 类型减免
   const typeReduction = calcDamageTypeReduction(input.damageType, input.defenderAttributes);
-  const typeApplied = applyTypeReduction(equipReduction.afterReduction, typeReduction.reductionRate);
+  const typeApplied = applyTypeReduction(
+    equipReduction.afterReduction,
+    typeReduction.reductionRate,
+  );
 
   // Step 6: 评级系数 × 意图系数 (M3: × modifier 乘算)
   let afterRating = applyRatingAndIntention(
@@ -307,9 +306,8 @@ export function runDamagePipeline(input: DamagePipelineInput): CombatDamageBreak
     initialFormula: initial.formula,
 
     afterMultiSplit: afterSplit,
-    multiSplitInfo: input.multiHitCount > 1
-      ? { count: input.multiHitCount, perHit: afterSplit }
-      : undefined,
+    multiSplitInfo:
+      input.multiHitCount > 1 ? { count: input.multiHitCount, perHit: afterSplit } : undefined,
 
     penetration: {
       originalDef: penetration.originalDef,

@@ -7,179 +7,185 @@
  *
  * 位置轮询 (§6.3): 卡片打开才 start，关闭/卸载即 stop —— 没人看进度条时不跑定时器。
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { useAudioStore } from '../../stores/audio-store'
-import type { AudioRepeatMode } from '@engine/types'
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { useAudioStore } from '../../stores/audio-store';
+import type { AudioRepeatMode } from '@engine/types';
 
-const props = defineProps<{ open: boolean }>()
-const emit = defineEmits<{ close: [] }>()
+const props = defineProps<{ open: boolean }>();
+const emit = defineEmits<{ close: [] }>();
 
-const audio = useAudioStore()
-const cardRef = ref<HTMLElement | null>(null)
+const audio = useAudioStore();
+const cardRef = ref<HTMLElement | null>(null);
 
 // ── 派生状态 ────────────────────────────────────────────────
-const music = computed(() => audio.state.music)
-const isPlaying = computed(() => music.value.status === 'playing')
+const music = computed(() => audio.state.music);
+const isPlaying = computed(() => music.value.status === 'playing');
 const currentTrack = computed(() =>
   music.value.trackId ? audio.findTrack(music.value.trackId) : undefined,
-)
-const trackTitle = computed(() => currentTrack.value?.name ?? '')
-const durationSec = computed(() => music.value.durationSec || 0)
+);
+const trackTitle = computed(() => currentTrack.value?.name ?? '');
+const durationSec = computed(() => music.value.durationSec || 0);
 const progressRatio = computed(() => {
-  if (durationSec.value <= 0) return 0
-  return Math.min(1, Math.max(0, audio.positionSec / durationSec.value))
-})
-const musicPlaylists = computed(() => audio.playlists)
+  if (durationSec.value <= 0) return 0;
+  return Math.min(1, Math.max(0, audio.positionSec / durationSec.value));
+});
+const musicPlaylists = computed(() => audio.playlists);
 
 const repeatLabel = computed(() =>
   music.value.repeat === 'one' ? '单曲循环' : music.value.repeat === 'all' ? '列表循环' : '不循环',
-)
+);
 
 function fmtTime(sec: number): string {
-  if (!Number.isFinite(sec) || sec < 0) sec = 0
-  const m = Math.floor(sec / 60)
-  const s = Math.floor(sec % 60)
-  return `${m}:${s < 10 ? '0' : ''}${s}`
+  if (!Number.isFinite(sec) || sec < 0) sec = 0;
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
 // ── 传输 ────────────────────────────────────────────────────
-function onToggle() { void audio.toggle() }
-function onPrev() { void audio.prev() }
-function onNext() { void audio.next() }
-
-const REPEAT_CYCLE: AudioRepeatMode[] = ['off', 'all', 'one']
-function onCycleRepeat() {
-  const i = REPEAT_CYCLE.indexOf(music.value.repeat)
-  audio.setRepeat(REPEAT_CYCLE[(i + 1) % REPEAT_CYCLE.length])
+function onToggle() {
+  void audio.toggle();
 }
-function onToggleShuffle() { audio.setShuffle(!music.value.shuffle) }
+function onPrev() {
+  void audio.prev();
+}
+function onNext() {
+  void audio.next();
+}
+
+const REPEAT_CYCLE: AudioRepeatMode[] = ['off', 'all', 'one'];
+function onCycleRepeat() {
+  const i = REPEAT_CYCLE.indexOf(music.value.repeat);
+  audio.setRepeat(REPEAT_CYCLE[(i + 1) % REPEAT_CYCLE.length]);
+}
+function onToggleShuffle() {
+  audio.setShuffle(!music.value.shuffle);
+}
 
 function onSelectPlaylist(e: Event) {
-  const el = e.target as HTMLSelectElement
-  const id = el.value
+  const el = e.target as HTMLSelectElement;
+  const id = el.value;
   if (id) {
-    void audio.playPlaylist(id)
-    return
+    void audio.playPlaylist(id);
+    return;
   }
   // 选了「— 未选择 —」：store 里没有"取消选择列表"这一动作，于是 playlistId 不变，
   // Vue 下次 patch 因绑定值未变而跳过，DOM 的 value 就卡在空串上 ——
   // 音乐还在放列表 A，下拉框却一直显示"未选择"。手动写回，保持受控。
-  el.value = music.value.playlistId ?? ''
+  el.value = music.value.playlistId ?? '';
 }
 
 // ── 进度条 ──────────────────────────────────────────────────
 function ratioFromPointer(e: MouseEvent, el: HTMLElement): number {
-  const rect = el.getBoundingClientRect()
-  if (rect.width <= 0) return 0
-  return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+  const rect = el.getBoundingClientRect();
+  if (rect.width <= 0) return 0;
+  return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
 }
 
 function onSeekClick(e: MouseEvent) {
-  if (durationSec.value <= 0) return
-  audio.seek(ratioFromPointer(e, e.currentTarget as HTMLElement) * durationSec.value)
+  if (durationSec.value <= 0) return;
+  audio.seek(ratioFromPointer(e, e.currentTarget as HTMLElement) * durationSec.value);
 }
 
 function onSeekKey(e: KeyboardEvent) {
-  if (durationSec.value <= 0) return
-  const step = e.key === 'ArrowLeft' ? -5 : e.key === 'ArrowRight' ? 5 : 0
-  if (!step) return
-  e.preventDefault()
-  audio.seek(Math.min(durationSec.value, Math.max(0, audio.positionSec + step)))
+  if (durationSec.value <= 0) return;
+  const step = e.key === 'ArrowLeft' ? -5 : e.key === 'ArrowRight' ? 5 : 0;
+  if (!step) return;
+  e.preventDefault();
+  audio.seek(Math.min(durationSec.value, Math.max(0, audio.positionSec + step)));
 }
 
 // ── 音量 (主音量) ───────────────────────────────────────────
 function onVolumeClick(e: MouseEvent) {
-  audio.setMasterVolume(ratioFromPointer(e, e.currentTarget as HTMLElement))
+  audio.setMasterVolume(ratioFromPointer(e, e.currentTarget as HTMLElement));
 }
 
 function onVolumeKey(e: KeyboardEvent) {
-  const step = e.key === 'ArrowLeft' ? -0.05 : e.key === 'ArrowRight' ? 0.05 : 0
-  if (!step) return
-  e.preventDefault()
-  audio.setMasterVolume(Math.min(1, Math.max(0, audio.state.masterVolume + step)))
+  const step = e.key === 'ArrowLeft' ? -0.05 : e.key === 'ArrowRight' ? 0.05 : 0;
+  if (!step) return;
+  e.preventDefault();
+  audio.setMasterVolume(Math.min(1, Math.max(0, audio.state.masterVolume + step)));
 }
 
-function onToggleMute() { audio.setMasterMuted(!audio.state.masterMuted) }
+function onToggleMute() {
+  audio.setMasterMuted(!audio.state.masterMuted);
+}
 
 // ── 关闭: Esc + 外部点击 (自持，非 AppModal 继承) ────────────
-function close() { emit('close') }
+function close() {
+  emit('close');
+}
 
 function onDocKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
-    e.stopPropagation()
-    close()
+    e.stopPropagation();
+    close();
   }
 }
 
 function onDocPointerDown(e: Event) {
-  const el = cardRef.value
-  if (!el || !(e.target instanceof Node)) return
-  if (el.contains(e.target)) return
+  const el = cardRef.value;
+  if (!el || !(e.target instanceof Node)) return;
+  if (el.contains(e.target)) return;
   // 侧栏「音乐」按钮本身是 toggle：pointerdown 先到 document 把卡片关掉，
   // 随后同一次点击的 click 又把它打开 —— 结果这个按钮只能开不能关。
   // 把触发它的那个按钮排除在"外部点击"之外，让 toggle 自己决定开关。
-  if (e.target instanceof Element && e.target.closest('[data-tool="audio"]')) return
-  close()
+  if (e.target instanceof Element && e.target.closest('[data-tool="audio"]')) return;
+  close();
 }
 
-let listening = false
+let listening = false;
 function bindDismiss() {
-  if (listening || typeof document === 'undefined') return
-  listening = true
-  document.addEventListener('keydown', onDocKeydown)
-  document.addEventListener('pointerdown', onDocPointerDown)
+  if (listening || typeof document === 'undefined') return;
+  listening = true;
+  document.addEventListener('keydown', onDocKeydown);
+  document.addEventListener('pointerdown', onDocPointerDown);
 }
 function unbindDismiss() {
-  if (!listening) return
-  listening = false
-  document.removeEventListener('keydown', onDocKeydown)
-  document.removeEventListener('pointerdown', onDocPointerDown)
+  if (!listening) return;
+  listening = false;
+  document.removeEventListener('keydown', onDocKeydown);
+  document.removeEventListener('pointerdown', onDocPointerDown);
 }
 
 // ── 位置轮询生命周期 (§6.3) ─────────────────────────────────
-let polling = false
+let polling = false;
 function startPolling() {
-  if (polling) return
-  polling = true
-  audio.startPositionPolling()
+  if (polling) return;
+  polling = true;
+  audio.startPositionPolling();
 }
 function stopPolling() {
-  if (!polling) return
-  polling = false
-  audio.stopPositionPolling()
+  if (!polling) return;
+  polling = false;
+  audio.stopPositionPolling();
 }
 
 watch(
   () => props.open,
   (open) => {
     if (open) {
-      void audio.init()
-      startPolling()
-      bindDismiss()
+      void audio.init();
+      startPolling();
+      bindDismiss();
     } else {
-      stopPolling()
-      unbindDismiss()
+      stopPolling();
+      unbindDismiss();
     }
   },
   { immediate: true },
-)
+);
 
 onBeforeUnmount(() => {
-  stopPolling()
-  unbindDismiss()
-})
+  stopPolling();
+  unbindDismiss();
+});
 </script>
 
 <template>
   <Teleport to="body">
     <Transition name="mini-fade">
-      <div
-        v-if="open"
-        ref="cardRef"
-        class="mini-player"
-        role="dialog"
-        aria-label="音乐播放器"
-      >
+      <div v-if="open" ref="cardRef" class="mini-player" role="dialog" aria-label="音乐播放器">
         <!-- 标题行 -->
         <div class="mp-head">
           <i class="fa-solid fa-music mp-note" aria-hidden="true" />
@@ -268,7 +274,9 @@ onBeforeUnmount(() => {
               @click="onToggleMute"
             >
               <i
-                :class="audio.state.masterMuted ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high'"
+                :class="
+                  audio.state.masterMuted ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high'
+                "
                 aria-hidden="true"
               />
             </button>
@@ -285,7 +293,9 @@ onBeforeUnmount(() => {
             >
               <div
                 class="mp-fill"
-                :style="{ transform: `scaleX(${audio.state.masterMuted ? 0 : audio.state.masterVolume})` }"
+                :style="{
+                  transform: `scaleX(${audio.state.masterMuted ? 0 : audio.state.masterVolume})`,
+                }"
               />
             </div>
           </div>
@@ -366,7 +376,9 @@ onBeforeUnmount(() => {
   font-family: inherit;
   cursor: pointer;
   border-radius: var(--theme-radius-sm);
-  transition: background var(--theme-transition-fast), color var(--theme-transition-fast);
+  transition:
+    background var(--theme-transition-fast),
+    color var(--theme-transition-fast);
 }
 .mp-close:hover {
   background: var(--theme-tab-hover-bg);
@@ -455,7 +467,9 @@ onBeforeUnmount(() => {
   font-family: inherit;
   cursor: pointer;
   border-radius: var(--theme-radius-sm);
-  transition: background var(--theme-transition-fast), color var(--theme-transition-fast),
+  transition:
+    background var(--theme-transition-fast),
+    color var(--theme-transition-fast),
     border-color var(--theme-transition-fast);
 }
 .mp-btn:hover {
@@ -504,7 +518,9 @@ onBeforeUnmount(() => {
 /* ── 出入场 ── */
 .mini-fade-enter-active,
 .mini-fade-leave-active {
-  transition: opacity var(--theme-transition-fast), transform var(--theme-transition-fast);
+  transition:
+    opacity var(--theme-transition-fast),
+    transform var(--theme-transition-fast);
 }
 .mini-fade-enter-from,
 .mini-fade-leave-to {

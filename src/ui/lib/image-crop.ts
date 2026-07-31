@@ -33,10 +33,10 @@
 
 /** 裁剪矩形，单位是**源图像素**（不是框像素、不是百分比） */
 export interface CropRect {
-  x: number
-  y: number
-  w: number
-  h: number
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export type ImageCropErrorCode =
@@ -53,16 +53,16 @@ export type ImageCropErrorCode =
   /** 环境里没有可用画布（且没注入 createCanvas seam） */
   | 'no-canvas'
   /** 画布编码没吐出 blob */
-  | 'encode-failed'
+  | 'encode-failed';
 
 /** 裁剪失败的唯一错误类型。**按 `code` 判别，别去 match `message`** */
 export class ImageCropError extends Error {
-  readonly code: ImageCropErrorCode
+  readonly code: ImageCropErrorCode;
 
   constructor(code: ImageCropErrorCode, message: string) {
-    super(message)
-    this.name = 'ImageCropError'
-    this.code = code
+    super(message);
+    this.name = 'ImageCropError';
+    this.code = code;
   }
 }
 
@@ -70,9 +70,9 @@ export class ImageCropError extends Error {
 
 /** 解码结果只需要尺寸 + 可画；`close` 可选（`ImageBitmap` 有，替身可以没有） */
 export interface CropBitmapLike {
-  readonly width: number
-  readonly height: number
-  close?: () => void
+  readonly width: number;
+  readonly height: number;
+  close?: () => void;
 }
 
 export interface CropContextLike {
@@ -86,7 +86,7 @@ export interface CropContextLike {
     dy: number,
     dw: number,
     dh: number,
-  ): void
+  ): void;
 }
 
 /**
@@ -94,24 +94,24 @@ export interface CropContextLike {
  * 都认，谁在就用谁 —— 两者能力等价，差别只在回调还是 Promise。
  */
 export interface CropCanvasLike {
-  width: number
-  height: number
-  getContext(contextId: '2d'): CropContextLike | null
-  convertToBlob?: (options?: { type?: string; quality?: number }) => Promise<Blob>
-  toBlob?: (callback: (blob: Blob | null) => void, type?: string, quality?: number) => void
+  width: number;
+  height: number;
+  getContext(contextId: '2d'): CropContextLike | null;
+  convertToBlob?: (options?: { type?: string; quality?: number }) => Promise<Blob>;
+  toBlob?: (callback: (blob: Blob | null) => void, type?: string, quality?: number) => void;
 }
 
 /** 字节 → 位图 */
-export type CropDecoder = (blob: Blob) => Promise<CropBitmapLike>
+export type CropDecoder = (blob: Blob) => Promise<CropBitmapLike>;
 /** 尺寸 → 画布；造不出返回 null（调用方据此报 `'no-canvas'`） */
-export type CropCanvasFactory = (width: number, height: number) => CropCanvasLike | null
+export type CropCanvasFactory = (width: number, height: number) => CropCanvasLike | null;
 
 /** 两个入口共用的注入缝 */
 export interface ImageCropSeams {
   /** 默认惰性取 `globalThis.createImageBitmap` */
-  decode?: CropDecoder
+  decode?: CropDecoder;
   /** 默认 `OffscreenCanvas` → `document.createElement('canvas')` */
-  createCanvas?: CropCanvasFactory
+  createCanvas?: CropCanvasFactory;
 }
 
 export interface ImageCropOptions extends ImageCropSeams {
@@ -119,7 +119,7 @@ export interface ImageCropOptions extends ImageCropSeams {
    * 点名要的输出 MIME。不给就按源类型推（见 {@link resolveOutputMime}）。
    * 传 `video/*` 一律抛 `'video-source'`。
    */
-  mime?: string
+  mime?: string;
   /**
    * 长边上限（像素）。裁出来的长边超过它就**等比**缩到它。
    *
@@ -127,9 +127,9 @@ export interface ImageCropOptions extends ImageCropSeams {
    * 而它最终显示在一个 2.5rem 的圆里 —— 那不是画质，是把用户的 IndexedDB 配额
    * 烧掉。不给这个值就不缩（导出原尺寸是合法诉求）。
    */
-  maxEdge?: number
+  maxEdge?: number;
   /** 有损编码的质量 [0,1]，只对 `image/jpeg` / `image/webp` 有意义 */
-  quality?: number
+  quality?: number;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -137,41 +137,41 @@ export interface ImageCropOptions extends ImageCropSeams {
 // ═══════════════════════════════════════════════════════════
 
 interface CreateImageBitmapLike {
-  (blob: Blob): Promise<CropBitmapLike>
+  (blob: Blob): Promise<CropBitmapLike>;
 }
 
 interface OffscreenCanvasCtorLike {
-  new (width: number, height: number): CropCanvasLike
+  new (width: number, height: number): CropCanvasLike;
 }
 
 interface DocumentLike {
-  createElement(tag: 'canvas'): CropCanvasLike
+  createElement(tag: 'canvas'): CropCanvasLike;
 }
 
 function resolveDecoder(seam?: CropDecoder): CropDecoder {
-  if (seam) return seam
-  const fn = (globalThis as { createImageBitmap?: CreateImageBitmapLike }).createImageBitmap
+  if (seam) return seam;
+  const fn = (globalThis as { createImageBitmap?: CreateImageBitmapLike }).createImageBitmap;
   if (typeof fn !== 'function') {
-    throw new ImageCropError('no-decoder', '这个环境没有 createImageBitmap，无法解码图片。')
+    throw new ImageCropError('no-decoder', '这个环境没有 createImageBitmap，无法解码图片。');
   }
   // 绑回全局：`createImageBitmap` 在部分实现里对 this 敏感
-  return (blob: Blob) => fn.call(globalThis, blob)
+  return (blob: Blob) => fn.call(globalThis, blob);
 }
 
 function resolveCanvasFactory(seam?: CropCanvasFactory): CropCanvasFactory {
-  if (seam) return seam
+  if (seam) return seam;
   return (width: number, height: number): CropCanvasLike | null => {
-    const Off = (globalThis as { OffscreenCanvas?: OffscreenCanvasCtorLike }).OffscreenCanvas
-    if (typeof Off === 'function') return new Off(width, height)
-    const doc = (globalThis as { document?: DocumentLike }).document
+    const Off = (globalThis as { OffscreenCanvas?: OffscreenCanvasCtorLike }).OffscreenCanvas;
+    if (typeof Off === 'function') return new Off(width, height);
+    const doc = (globalThis as { document?: DocumentLike }).document;
     if (doc && typeof doc.createElement === 'function') {
-      const el = doc.createElement('canvas')
-      el.width = width
-      el.height = height
-      return el
+      const el = doc.createElement('canvas');
+      el.width = width;
+      el.height = height;
+      return el;
     }
-    return null
-  }
+    return null;
+  };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -202,21 +202,21 @@ function resolveCanvasFactory(seam?: CropCanvasFactory): CropCanvasFactory {
  * 就只能画一帧）。输出仍标 `image/webp`，但它是静态的。裁剪这件事本身就没法保留动画，
  * 换成任何别的格式也一样 —— 想留动画就别裁，走原样导入那条路。
  */
-const PRESERVED_OUTPUT_MIMES: ReadonlySet<string> = new Set(['image/png', 'image/webp'])
+const PRESERVED_OUTPUT_MIMES: ReadonlySet<string> = new Set(['image/png', 'image/webp']);
 
 /**
  * 名单外一律落这里；**也是"产出的 blob 不肯说自己是什么"时唯一站得住的记法** ——
  * HTML 规范给画布定的默认就是它（请求的类型不被支持 → `image/png`）。
  * 导出成常量是为了让调用方的兜底与本模块的兜底是**同一个值**，而不是两处各写一遍。
  */
-export const FALLBACK_OUTPUT_MIME = 'image/png'
+export const FALLBACK_OUTPUT_MIME = 'image/png';
 
 function assertNotVideoMime(mime: string, what: string): void {
   if (mime.toLowerCase().startsWith('video/')) {
     throw new ImageCropError(
       'video-source',
       `${what}是视频（${mime}）。视频没法在这里裁剪 —— 画布只能取到某一帧，而"哪一帧"从来没人指定过。`,
-    )
+    );
   }
 }
 
@@ -228,12 +228,12 @@ function assertNotVideoMime(mime: string, what: string): void {
  */
 export function resolveOutputMime(sourceMime: string | undefined, requested?: string): string {
   if (requested !== undefined && requested !== '') {
-    assertNotVideoMime(requested, '指定的输出类型')
-    return requested
+    assertNotVideoMime(requested, '指定的输出类型');
+    return requested;
   }
-  const src = (sourceMime ?? '').toLowerCase()
-  if (src !== '') assertNotVideoMime(src, '源文件')
-  return PRESERVED_OUTPUT_MIMES.has(src) ? src : FALLBACK_OUTPUT_MIME
+  const src = (sourceMime ?? '').toLowerCase();
+  if (src !== '') assertNotVideoMime(src, '源文件');
+  return PRESERVED_OUTPUT_MIMES.has(src) ? src : FALLBACK_OUTPUT_MIME;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -259,22 +259,22 @@ export function clampCropRect(
   sourceWidth: number,
   sourceHeight: number,
 ): CropRect | null {
-  const finite = (n: number): boolean => typeof n === 'number' && Number.isFinite(n)
-  if (!finite(rect.x) || !finite(rect.y) || !finite(rect.w) || !finite(rect.h)) return null
-  if (rect.w <= 0 || rect.h <= 0) return null
-  if (!(sourceWidth > 0) || !(sourceHeight > 0)) return null
+  const finite = (n: number): boolean => typeof n === 'number' && Number.isFinite(n);
+  if (!finite(rect.x) || !finite(rect.y) || !finite(rect.w) || !finite(rect.h)) return null;
+  if (rect.w <= 0 || rect.h <= 0) return null;
+  if (!(sourceWidth > 0) || !(sourceHeight > 0)) return null;
 
-  const left = Math.max(0, Math.min(sourceWidth, rect.x))
-  const top = Math.max(0, Math.min(sourceHeight, rect.y))
-  const right = Math.max(0, Math.min(sourceWidth, rect.x + rect.w))
-  const bottom = Math.max(0, Math.min(sourceHeight, rect.y + rect.h))
+  const left = Math.max(0, Math.min(sourceWidth, rect.x));
+  const top = Math.max(0, Math.min(sourceHeight, rect.y));
+  const right = Math.max(0, Math.min(sourceWidth, rect.x + rect.w));
+  const bottom = Math.max(0, Math.min(sourceHeight, rect.y + rect.h));
 
-  const x = Math.round(left)
-  const y = Math.round(top)
-  const w = Math.round(right) - x
-  const h = Math.round(bottom) - y
-  if (w < 1 || h < 1) return null
-  return { x, y, w, h }
+  const x = Math.round(left);
+  const y = Math.round(top);
+  const w = Math.round(right) - x;
+  const h = Math.round(bottom) - y;
+  if (w < 1 || h < 1) return null;
+  return { x, y, w, h };
 }
 
 /**
@@ -288,14 +288,14 @@ export function fitWithinMaxEdge(
   height: number,
   maxEdge?: number,
 ): { width: number; height: number } {
-  if (maxEdge === undefined || !Number.isFinite(maxEdge) || maxEdge <= 0) return { width, height }
-  const longest = Math.max(width, height)
-  if (longest <= maxEdge) return { width, height }
-  const factor = maxEdge / longest
+  if (maxEdge === undefined || !Number.isFinite(maxEdge) || maxEdge <= 0) return { width, height };
+  const longest = Math.max(width, height);
+  if (longest <= maxEdge) return { width, height };
+  const factor = maxEdge / longest;
   return {
     width: Math.max(1, Math.round(width * factor)),
     height: Math.max(1, Math.round(height * factor)),
-  }
+  };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -304,23 +304,23 @@ export function fitWithinMaxEdge(
 
 async function decodeSource(src: Blob, seams?: ImageCropSeams): Promise<CropBitmapLike> {
   if (src.size === 0) {
-    throw new ImageCropError('empty-source', '这个文件是空的（0 字节），没有可解码的图像。')
+    throw new ImageCropError('empty-source', '这个文件是空的（0 字节），没有可解码的图像。');
   }
-  assertNotVideoMime(src.type ?? '', '源文件')
-  const decode = resolveDecoder(seams?.decode)
-  let bitmap: CropBitmapLike
+  assertNotVideoMime(src.type ?? '', '源文件');
+  const decode = resolveDecoder(seams?.decode);
+  let bitmap: CropBitmapLike;
   try {
-    bitmap = await decode(src)
+    bitmap = await decode(src);
   } catch (e) {
     throw new ImageCropError(
       'decode-failed',
       `这个文件解码不出图像：${e instanceof Error ? e.message : String(e)}`,
-    )
+    );
   }
   if (!(bitmap.width > 0) || !(bitmap.height > 0)) {
-    throw new ImageCropError('decode-failed', '解码出来的图像尺寸为 0。')
+    throw new ImageCropError('decode-failed', '解码出来的图像尺寸为 0。');
   }
-  return bitmap
+  return bitmap;
 }
 
 /**
@@ -333,11 +333,11 @@ export async function readImageSize(
   src: Blob,
   seams?: ImageCropSeams,
 ): Promise<{ w: number; h: number }> {
-  const bitmap = await decodeSource(src, seams)
+  const bitmap = await decodeSource(src, seams);
   try {
-    return { w: bitmap.width, h: bitmap.height }
+    return { w: bitmap.width, h: bitmap.height };
   } finally {
-    bitmap.close?.()
+    bitmap.close?.();
   }
 }
 
@@ -364,76 +364,65 @@ export async function cropImageBlob(
   options: ImageCropOptions = {},
 ): Promise<Blob> {
   // MIME 先算 —— 它可能抛 `'video-source'`，而那种情况下解码整张图纯属白干
-  const outputMime = resolveOutputMime(src.type, options.mime)
+  const outputMime = resolveOutputMime(src.type, options.mime);
 
-  const bitmap = await decodeSource(src, options)
+  const bitmap = await decodeSource(src, options);
   try {
-    const clamped = clampCropRect(rect, bitmap.width, bitmap.height)
+    const clamped = clampCropRect(rect, bitmap.width, bitmap.height);
     if (clamped === null) {
       throw new ImageCropError(
         'empty-rect',
         `裁剪区域在这张 ${bitmap.width}×${bitmap.height} 的图里没有面积（可能整块落在图外，或宽高为 0）。`,
-      )
+      );
     }
 
-    const out = fitWithinMaxEdge(clamped.w, clamped.h, options.maxEdge)
-    const canvas = resolveCanvasFactory(options.createCanvas)(out.width, out.height)
+    const out = fitWithinMaxEdge(clamped.w, clamped.h, options.maxEdge);
+    const canvas = resolveCanvasFactory(options.createCanvas)(out.width, out.height);
     if (!canvas) {
-      throw new ImageCropError('no-canvas', '这个环境没有可用的画布，无法裁剪图片。')
+      throw new ImageCropError('no-canvas', '这个环境没有可用的画布，无法裁剪图片。');
     }
     // 注入的替身可能是先造后设尺寸的，统一在这里对齐一次
-    canvas.width = out.width
-    canvas.height = out.height
+    canvas.width = out.width;
+    canvas.height = out.height;
 
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d');
     if (!ctx) {
-      throw new ImageCropError('no-canvas', '拿不到画布的 2d 上下文，无法裁剪图片。')
+      throw new ImageCropError('no-canvas', '拿不到画布的 2d 上下文，无法裁剪图片。');
     }
-    ctx.drawImage(
-      bitmap,
-      clamped.x,
-      clamped.y,
-      clamped.w,
-      clamped.h,
-      0,
-      0,
-      out.width,
-      out.height,
-    )
+    ctx.drawImage(bitmap, clamped.x, clamped.y, clamped.w, clamped.h, 0, 0, out.width, out.height);
 
-    return await encodeCanvas(canvas, outputMime, options.quality)
+    return await encodeCanvas(canvas, outputMime, options.quality);
   } finally {
-    bitmap.close?.()
+    bitmap.close?.();
   }
 }
 
 /** `convertToBlob`（OffscreenCanvas）与 `toBlob`（`<canvas>`）都认，谁在用谁 */
-async function encodeCanvas(
-  canvas: CropCanvasLike,
-  mime: string,
-  quality?: number,
-): Promise<Blob> {
-  let blob: Blob | null = null
+async function encodeCanvas(canvas: CropCanvasLike, mime: string, quality?: number): Promise<Blob> {
+  let blob: Blob | null = null;
   try {
     if (typeof canvas.convertToBlob === 'function') {
-      blob = await canvas.convertToBlob({ type: mime, ...(quality !== undefined ? { quality } : {}) })
+      blob = await canvas.convertToBlob({
+        type: mime,
+        ...(quality !== undefined ? { quality } : {}),
+      });
     } else if (typeof canvas.toBlob === 'function') {
-      const toBlob = canvas.toBlob.bind(canvas)
+      const toBlob = canvas.toBlob.bind(canvas);
       blob = await new Promise<Blob | null>((resolve) => {
-        toBlob((b) => resolve(b), mime, quality)
-      })
+        toBlob((b) => resolve(b), mime, quality);
+      });
     } else {
-      throw new ImageCropError('no-canvas', '这个画布既没有 convertToBlob 也没有 toBlob。')
+      throw new ImageCropError('no-canvas', '这个画布既没有 convertToBlob 也没有 toBlob。');
     }
   } catch (e) {
-    if (e instanceof ImageCropError) throw e
+    if (e instanceof ImageCropError) throw e;
     throw new ImageCropError(
       'encode-failed',
       `裁剪结果编码失败：${e instanceof Error ? e.message : String(e)}`,
-    )
+    );
   }
   if (!blob || blob.size === 0) {
-    throw new ImageCropError('encode-failed', '裁剪结果编码后是空的，没有产出任何字节。')
+    throw new ImageCropError('encode-failed', '裁剪结果编码后是空的，没有产出任何字节。');
   }
-  return blob
+  return blob;
 }

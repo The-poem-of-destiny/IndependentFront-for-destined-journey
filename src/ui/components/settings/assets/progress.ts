@@ -23,18 +23,18 @@
 
 export interface ProgressState {
   /** 真为「给不出可信百分比」—— UI 应当渲染不确定态（来回扫的窄带） */
-  indeterminate: boolean
+  indeterminate: boolean;
   /** 0..1 的高水位比例。`indeterminate` 时不该渲染它，但它**永不下降** */
-  ratio: number
+  ratio: number;
 }
 
 export interface ProgressTracker {
   /** 喂一次 `(progressDone, progressTotal)` 观测，拿回该怎么画 */
-  observe(done: number, total: number): ProgressState
+  observe(done: number, total: number): ProgressState;
   /** 手动复位（新一轮导入）。`observe(0, 0)` 也会自动复位 */
-  reset(): void
+  reset(): void;
   /** 当前高水位，便于断言单调性 */
-  readonly ratio: number
+  readonly ratio: number;
 }
 
 export function createProgressTracker(): ProgressTracker {
@@ -49,15 +49,15 @@ export function createProgressTracker(): ProgressTracker {
    * 现在分母变化不单独处理: 新比例更高就画（本来就是上升），更低就退回转圈等它追上来。
    * 少一条规则，且"渲染出来的比例永不下降"成了无条件成立的不变式。
    */
-  let shown = 0
+  let shown = 0;
 
   function reset(): void {
-    shown = 0
+    shown = 0;
   }
 
   return {
     get ratio(): number {
-      return shown
+      return shown;
     },
 
     reset,
@@ -66,18 +66,18 @@ export function createProgressTracker(): ProgressTracker {
       // importZip / importFiles / importAny 起手都把两个数归零 —— 这就是
       // "新一轮开始"的信号，不必另设标志位
       if (done === 0 && total === 0) {
-        reset()
-        return { indeterminate: true, ratio: 0 }
+        reset();
+        return { indeterminate: true, ratio: 0 };
       }
       // 没有分母（解压段 / 混合导入）——「已处理 n」是此刻唯一诚实的说法
-      if (total <= 0) return { indeterminate: true, ratio: shown }
+      if (total <= 0) return { indeterminate: true, ratio: shown };
 
-      const ratio = Math.min(1, Math.max(0, done / total))
+      const ratio = Math.min(1, Math.max(0, done / total));
       // 比高水位低（分子回退，或分母刚变大）→ 宁可转圈，绝不把条往回抽
-      if (ratio < shown) return { indeterminate: true, ratio: shown }
+      if (ratio < shown) return { indeterminate: true, ratio: shown };
 
-      shown = ratio
-      return { indeterminate: false, ratio }
+      shown = ratio;
+      return { indeterminate: false, ratio };
     },
-  }
+  };
 }

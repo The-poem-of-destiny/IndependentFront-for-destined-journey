@@ -22,9 +22,11 @@
 ### Task 1: game-store — 新增持久化 + 开场标记 + 选项管理
 
 **Files:**
+
 - Modify: `src/ui/stores/game-store.ts`
 
 **Interfaces:**
+
 - Consumes: `saveMessage`, `getMessages`, `deleteMessagesBySaveId` from `@engine/database`
 - Consumes: `ChatMessage` from `@engine/types`
 - Produces: `persistMessage(msg: ChatMessage): Promise<void>` — 单条消息写 DB
@@ -38,7 +40,7 @@
 在 import 区添加：
 
 ```typescript
-import { saveMessage, getMessages } from '@engine/database'
+import { saveMessage, getMessages } from '@engine/database';
 ```
 
 在 store 内部添加持久化函数：
@@ -47,22 +49,22 @@ import { saveMessage, getMessages } from '@engine/database'
 /** 持久化单条消息到 IndexedDB */
 async function persistMessage(msg: ChatMessage) {
   try {
-    await saveMessage({ ...msg, saveId: activeSaveId.value! })
+    await saveMessage({ ...msg, saveId: activeSaveId.value! });
   } catch (err) {
-    console.error('[game-store] 消息持久化失败:', err)
+    console.error('[game-store] 消息持久化失败:', err);
   }
 }
 
 /** 从 IndexedDB 恢复消息到内存 */
 async function restoreMessages() {
-  if (!activeSaveId.value) return
+  if (!activeSaveId.value) return;
   try {
-    const msgs = await getMessages(activeSaveId.value)
+    const msgs = await getMessages(activeSaveId.value);
     if (msgs.length > 0) {
-      messages.value = msgs
+      messages.value = msgs;
     }
   } catch (err) {
-    console.error('[game-store] 恢复消息失败:', err)
+    console.error('[game-store] 恢复消息失败:', err);
   }
 }
 ```
@@ -72,7 +74,7 @@ async function restoreMessages() {
 找到 `addMessage` 函数（约 114 行），修改为：
 
 ```typescript
-let turnCounter = 0
+let turnCounter = 0;
 
 function addMessage(content: string, role: 'user' | 'assistant'): void {
   const msg: ChatMessage = {
@@ -82,10 +84,10 @@ function addMessage(content: string, role: 'user' | 'assistant'): void {
     timestamp: Date.now(),
     saveId: activeSaveId.value ?? undefined,
     turn: role === 'user' ? ++turnCounter : turnCounter,
-  }
-  messages.value.push(msg)
+  };
+  messages.value.push(msg);
   // 异步持久化（不阻塞 UI）
-  persistMessage(msg)
+  persistMessage(msg);
 }
 ```
 
@@ -101,9 +103,9 @@ function addSystemMessage(systemEvent: import('@engine/types').SystemEvent): voi
     saveId: activeSaveId.value ?? undefined,
     turn: turnCounter,
     systemEvent,
-  }
-  messages.value.push(msg)
-  persistMessage(msg)
+  };
+  messages.value.push(msg);
+  persistMessage(msg);
 }
 ```
 
@@ -113,11 +115,11 @@ function addSystemMessage(systemEvent: import('@engine/types').SystemEvent): voi
 
 ```typescript
 // 从 messages 表恢复对话历史
-await restoreMessages()
+await restoreMessages();
 
 // 恢复 turnCounter（取最后一条 user/assistant 消息的 turn）
-const lastMsg = messages.value.filter(m => m.role === 'user' || m.role === 'assistant').pop()
-turnCounter = lastMsg?.turn ?? 0
+const lastMsg = messages.value.filter((m) => m.role === 'user' || m.role === 'assistant').pop();
+turnCounter = lastMsg?.turn ?? 0;
 ```
 
 - [ ] **Step 4: 添加开场 Prompt 管理**
@@ -125,23 +127,23 @@ turnCounter = lastMsg?.turn ?? 0
 ```typescript
 /** 是否已消费开场 Prompt（未消费 → 需要自动发送） */
 const hasOpeningPromptConsumed = computed(() => {
-  return activeSave.value?.metadata?.openingPromptConsumed === true || messages.value.length > 0
-})
+  return activeSave.value?.metadata?.openingPromptConsumed === true || messages.value.length > 0;
+});
 
 /** 获取开场 Prompt 文本 */
 const openingPrompt = computed(() => {
-  return activeSave.value?.metadata?.openingPrompt ?? null
-})
+  return activeSave.value?.metadata?.openingPrompt ?? null;
+});
 
 /** 标记开场 Prompt 已消费 */
 async function markOpeningPromptConsumed() {
-  if (!activeSave.value) return
-  activeSave.value.metadata.openingPromptConsumed = true
+  if (!activeSave.value) return;
+  activeSave.value.metadata.openingPromptConsumed = true;
   try {
-    const { saveSaveSlot } = await import('@engine/database')
-    await saveSaveSlot(activeSave.value)
+    const { saveSaveSlot } = await import('@engine/database');
+    await saveSaveSlot(activeSave.value);
   } catch (err) {
-    console.error('[game-store] 标记开场 Prompt 失败:', err)
+    console.error('[game-store] 标记开场 Prompt 失败:', err);
   }
 }
 ```
@@ -150,11 +152,11 @@ async function markOpeningPromptConsumed() {
 
 ```typescript
 /** vars_update 解析出的行动选项 */
-const pendingOptions = ref<string[]>([])
+const pendingOptions = ref<string[]>([]);
 
 /** 设置行动选项（供 GamePipeline 回调使用） */
 function setPendingOptions(options: string[]) {
-  pendingOptions.value = options
+  pendingOptions.value = options;
 }
 ```
 
@@ -188,9 +190,11 @@ git commit -m "feat(game): game-store — 消息持久化 + 开场 Prompt 管理
 ### Task 2: 新增 game-pipeline.ts — 前端↔引擎桥接层
 
 **Files:**
+
 - Create: `src/ui/lib/game-pipeline.ts`
 
 **Interfaces:**
+
 - Consumes: `AgentOrchestrator, OrchestratorOptions, OrchestratorEvents` from `@engine/agent-orchestrator`
 - Consumes: `DEFAULT_AGENT_PIPELINE, AgentContext, AgentConfig, ApiEndpoint, ChatMessage` from `@engine/types`
 - Consumes: `createStateManager, commitChatState` from `@engine/state-manager`
@@ -513,9 +517,11 @@ git commit -m "feat(game): 新增 GamePipeline — 前端↔引擎桥接层"
 ### Task 3: GamePage.vue — 接入 GamePipeline
 
 **Files:**
+
 - Modify: `src/ui/components/game/GamePage.vue`
 
 **Interfaces:**
+
 - Consumes: `GamePipeline` from `../../lib/game-pipeline`
 - Consumes: `game.hasOpeningPromptConsumed`, `game.openingPrompt`
 
@@ -524,48 +530,50 @@ git commit -m "feat(game): 新增 GamePipeline — 前端↔引擎桥接层"
 修改 `GamePage.vue` 的 `<script setup>`：
 
 ```typescript
-import { GamePipeline } from '../../lib/game-pipeline'
+import { GamePipeline } from '../../lib/game-pipeline';
 
 // ... 现有 import ...
 
-let pipeline: GamePipeline | null = null
+let pipeline: GamePipeline | null = null;
 
 onMounted(async () => {
-  window.addEventListener('keydown', onKeyDown)
+  window.addEventListener('keydown', onKeyDown);
   if (ui.activeSaveId) {
-    await game.loadSave(ui.activeSaveId)
+    await game.loadSave(ui.activeSaveId);
     // 创建 pipeline 实例
     pipeline = new GamePipeline({
       gameStore: game,
       settingsStore: settings,
       saveId: ui.activeSaveId,
-    })
+    });
     // 首次加载 → 自动发送开场 Prompt
     if (!game.hasOpeningPromptConsumed && game.openingPrompt) {
-      await pipeline.sendOpeningPrompt()
+      await pipeline.sendOpeningPrompt();
     }
   }
-})
+});
 
 // 移除旧的 mock
 // let mockTimer: ReturnType<typeof setTimeout> | null = null  ← 删除
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('keydown', onKeyDown);
   // 删除 mockTimer 清理
-  game.isGenerating = false
-})
+  game.isGenerating = false;
+});
 
 async function handleSend(content: string) {
-  if (game.isGenerating || !pipeline) return
-  await pipeline.run(content)
+  if (game.isGenerating || !pipeline) return;
+  await pipeline.run(content);
 }
 
 // ===== 测试注入保留 =====
 // Ctrl+Shift+T 快捷键注入（保留原逻辑不变）
-function injectChatFlowTest() { /* ... 不变 ... */ }
+function injectChatFlowTest() {
+  /* ... 不变 ... */
+}
 if (typeof window !== 'undefined') {
-  ;(window as any).__injectChatFlowTest__ = injectChatFlowTest
+  (window as any).__injectChatFlowTest__ = injectChatFlowTest;
 }
 ```
 
@@ -573,14 +581,14 @@ if (typeof window !== 'undefined') {
 
 ```typescript
 // ===== 调试面板 (Alt+Shift+D) =====
-const showDebug = ref(false)
+const showDebug = ref(false);
 
 window.addEventListener('keydown', (e: KeyboardEvent) => {
   if (e.altKey && e.shiftKey && e.key === 'D') {
-    e.preventDefault()
-    showDebug.value = !showDebug.value
+    e.preventDefault();
+    showDebug.value = !showDebug.value;
   }
-})
+});
 ```
 
 在 `<template>` 末尾（`</div>` 之前）添加调试面板：
@@ -602,7 +610,8 @@ window.addEventListener('keydown', (e: KeyboardEvent) => {
     </div>
     <div class="debug-section">
       <h4>Characters ({{ game.characters.length }})</h4>
-      <pre>{{ JSON.stringify(game.characters.map(c => ({ id: c.id, name: c.name, type: c.type })), null, 2) }}</pre>
+      <pre>
+{{ JSON.stringify(game.characters.map(c => ({ id: c.id, name: c.name, type: c.type })), null, 2) }}</pre>
     </div>
     <div class="debug-section">
       <h4>Pending Options</h4>
@@ -690,9 +699,11 @@ git commit -m "feat(game): GamePage — 接入 GamePipeline + 开场 Prompt + �
 ### Task 4: InputBar.vue — 动态选项替代硬编码
 
 **Files:**
+
 - Modify: `src/ui/components/game/InputBar.vue`
 
 **Interfaces:**
+
 - Consumes: `game.pendingOptions` (Ref<string[]>)
 
 - [ ] **Step 1: 替换 mockOptions 为动态选项**
@@ -708,7 +719,7 @@ git commit -m "feat(game): GamePage — 接入 GamePipeline + 开场 Prompt + �
 // ]
 
 // 改为:
-const dynamicOptions = computed(() => game.pendingOptions)
+const dynamicOptions = computed(() => game.pendingOptions);
 ```
 
 在 template 中将 `mockOptions` 替换为 `dynamicOptions`：

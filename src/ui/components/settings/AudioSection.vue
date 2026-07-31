@@ -16,32 +16,36 @@
  * 内置曲目不可改名/改标签/删除（store 拒绝），只能隐藏 —— 隐藏名单存
  * settings.audioHiddenBuiltinIds（对齐 beautifierBuiltinDisabled 先例）。
  */
-import { ref, computed, watch, onMounted, onUnmounted, provide } from 'vue'
-import { useAudioStore } from '../../stores/audio-store'
-import { useSettingsStore } from '../../stores/settings-store'
-import type { AudioTrack } from '@engine/types'
-import AppCard from '../shared/AppCard.vue'
-import AudioMixer from './audio/AudioMixer.vue'
-import AudioPlaylists from './audio/AudioPlaylists.vue'
-import AudioLibrary from './audio/AudioLibrary.vue'
-import AudioDialogs from './audio/AudioDialogs.vue'
-import { audioDialogsKey, type AudioConfirmOptions, type AudioPromptOptions } from './audio/dialogs'
-import { isHiddenBuiltin } from './audio/format'
+import { ref, computed, watch, onMounted, onUnmounted, provide } from 'vue';
+import { useAudioStore } from '../../stores/audio-store';
+import { useSettingsStore } from '../../stores/settings-store';
+import type { AudioTrack } from '@engine/types';
+import AppCard from '../shared/AppCard.vue';
+import AudioMixer from './audio/AudioMixer.vue';
+import AudioPlaylists from './audio/AudioPlaylists.vue';
+import AudioLibrary from './audio/AudioLibrary.vue';
+import AudioDialogs from './audio/AudioDialogs.vue';
+import {
+  audioDialogsKey,
+  type AudioConfirmOptions,
+  type AudioPromptOptions,
+} from './audio/dialogs';
+import { isHiddenBuiltin } from './audio/format';
 
-const audio = useAudioStore()
-const cfg = useSettingsStore()
-const s = cfg.settings
+const audio = useAudioStore();
+const cfg = useSettingsStore();
+const s = cfg.settings;
 
 // ===== 弹窗能力下发 =====
 // 弹窗本体挂在本壳里（一次只有一个在场），子组件通过 inject 拿到这两个方法。
 // 这里包一层闭包而不是直接 provide 实例：provide 发生在挂载之前，那时 ref 还是空的。
 
-const dialogsRef = ref<InstanceType<typeof AudioDialogs> | null>(null)
+const dialogsRef = ref<InstanceType<typeof AudioDialogs> | null>(null);
 
 provide(audioDialogsKey, {
   askConfirm: (opts: AudioConfirmOptions) => dialogsRef.value!.askConfirm(opts),
   askPrompt: (opts: AudioPromptOptions) => dialogsRef.value!.askPrompt(opts),
-})
+});
 
 // ===== 生命周期 =====
 
@@ -51,39 +55,41 @@ provide(audioDialogsKey, {
  * 引用计数还是 0（被 Math.max 夹住），随后 start 才执行，计数从此**永远减不回去**，
  * 定时器一路跑到刷新页面。对齐 MiniPlayer 的 polling 守卫。
  */
-let polling = false
-let unmounted = false
+let polling = false;
+let unmounted = false;
 
 onMounted(async () => {
-  await audio.init()
-  await audio.loadLibrary()
-  if (unmounted) return // 已经切走了，不要再把计数抬起来
+  await audio.init();
+  await audio.loadLibrary();
+  if (unmounted) return; // 已经切走了，不要再把计数抬起来
   // 进度条只在本分区打开时可见 → 轮询随挂载/卸载起停（引用计数，§6.3）
-  polling = true
-  audio.startPositionPolling()
-})
+  polling = true;
+  audio.startPositionPolling();
+});
 
 onUnmounted(() => {
-  unmounted = true
-  if (!polling) return
-  polling = false
-  audio.stopPositionPolling()
-})
+  unmounted = true;
+  if (!polling) return;
+  polling = false;
+  audio.stopPositionPolling();
+});
 
 // ===== 跨段共享：隐藏名单过滤后的曲目 =====
 // 「显示已隐藏的内置曲目」的开关长在曲库工具条上，但过滤结果同时决定播放列表
 // 能选到哪些曲子，所以这份派生住在壳里，两段各取所需。
 
-const showHiddenBuiltins = ref(false)
+const showHiddenBuiltins = ref(false);
 
-const hiddenBuiltinIds = computed<string[]>(() => s.audioHiddenBuiltinIds ?? [])
+const hiddenBuiltinIds = computed<string[]>(() => s.audioHiddenBuiltinIds ?? []);
 
 const visibleTracks = computed<AudioTrack[]>(() =>
-  audio.tracks.filter((t) => showHiddenBuiltins.value || !isHiddenBuiltin(t, hiddenBuiltinIds.value)),
-)
+  audio.tracks.filter(
+    (t) => showHiddenBuiltins.value || !isHiddenBuiltin(t, hiddenBuiltinIds.value),
+  ),
+);
 
 /** 播放列表是音序器概念 —— 只收 music 曲目（§4.3） */
-const musicTracks = computed(() => visibleTracks.value.filter((t) => t.kind === 'music'))
+const musicTracks = computed(() => visibleTracks.value.filter((t) => t.kind === 'music'));
 
 // ===== 状态播报（唯一 aria-live 区域） =====
 // 只播报离散的、用户会关心的转变：播放/暂停、曲库与文件夹的忙碌态、上传结果。
@@ -91,41 +97,45 @@ const musicTracks = computed(() => visibleTracks.value.filter((t) => t.kind === 
 // 三个 watch 的来源全是 store 状态，所以留在壳里；一次性事件（上传结果、
 // 排序结果、批量操作结果）由各段 emit('announce') 上来，仍然只写这一处。
 
-const liveMessage = ref('')
+const liveMessage = ref('');
 
-const isPlaying = computed(() => audio.state.music.status === 'playing')
+const isPlaying = computed(() => audio.state.music.status === 'playing');
 
 const currentTrack = computed<AudioTrack | undefined>(() => {
-  const id = audio.state.music.trackId
-  return id ? audio.findTrack(id) : undefined
-})
+  const id = audio.state.music.trackId;
+  return id ? audio.findTrack(id) : undefined;
+});
 
 /** 已收录在曲库里的「磁盘文件」曲目数（含暂时失联的） */
-const fileTrackCount = computed(() => audio.tracks.filter((t) => t.source === 'file').length)
+const fileTrackCount = computed(() => audio.tracks.filter((t) => t.source === 'file').length);
 
 watch(
   () => [isPlaying.value, currentTrack.value?.name] as const,
   ([playing, name]) => {
-    liveMessage.value = name ? `${playing ? '正在播放' : '已暂停'}：${name}` : ''
+    liveMessage.value = name ? `${playing ? '正在播放' : '已暂停'}：${name}` : '';
   },
-)
+);
 
 // 忙碌态结束必须改写这行字：留着「正在扫描…」既是骗人，也会让下一次扫描
 // 因为字符串没变而彻底不播报。有结果的报结果（沿用文件夹条的措辞），没有的清空。
-watch(() => audio.scanning, (on) => {
-  liveMessage.value = on ? '正在扫描音乐文件夹…' : `已收录 ${fileTrackCount.value} 首本地曲目。`
-})
-watch(() => audio.loading, (on) => {
-  liveMessage.value = on ? '正在翻检曲库…' : ''
-})
+watch(
+  () => audio.scanning,
+  (on) => {
+    liveMessage.value = on ? '正在扫描音乐文件夹…' : `已收录 ${fileTrackCount.value} 首本地曲目。`;
+  },
+);
+watch(
+  () => audio.loading,
+  (on) => {
+    liveMessage.value = on ? '正在翻检曲库…' : '';
+  },
+);
 </script>
 
 <template>
   <section class="section centered audio-section">
     <h3>音频</h3>
-    <p class="section-desc">
-      管理背景音乐与音效。曲库为全局资源，所有存档共用，不随存档导入导出。
-    </p>
+    <p class="section-desc">管理背景音乐与音效。曲库为全局资源，所有存档共用，不随存档导入导出。</p>
 
     <!-- 唯一状态播报区：播放/暂停、扫描、上传结果。视觉隐藏，只给辅助技术 -->
     <p class="sr-only" role="status" aria-live="polite">{{ liveMessage }}</p>
@@ -143,8 +153,8 @@ watch(() => audio.loading, (on) => {
     <!-- ═══ ③ 曲库 ═══ -->
     <AppCard padding="md" class="audio-card">
       <AudioLibrary
-        :tracks="visibleTracks"
         v-model:show-hidden="showHiddenBuiltins"
+        :tracks="visibleTracks"
         @announce="liveMessage = $event"
       />
     </AppCard>

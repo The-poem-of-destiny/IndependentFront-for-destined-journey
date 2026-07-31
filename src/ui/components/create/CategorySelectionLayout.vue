@@ -11,9 +11,9 @@
  */
 
 defineProps<{
-  sidebarWidth?: string
-  gap?: string
-}>()
+  sidebarWidth?: string;
+  gap?: string;
+}>();
 </script>
 
 <template>
@@ -112,7 +112,9 @@ defineProps<{
     position: static;
     margin-bottom: var(--theme-spacing-sm);
   }
-  .cat-content { max-height: none; }
+  .cat-content {
+    max-height: none;
+  }
   .cat-toolbar {
     position: static;
   }

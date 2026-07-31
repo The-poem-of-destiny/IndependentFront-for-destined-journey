@@ -14,58 +14,59 @@
  * object URL 的规矩（§7.5）: 缩略图 URL 由 store 的 LRU 铸造，本组件在卸载时调一次
  * `revokeAllUrls()`。**绝不持久化 URL** —— 要存就存逻辑键，渲染时再解析。
  */
-import { computed, inject, onUnmounted, ref, watch } from 'vue'
-import { ASSET_TYPES, type AssetMetaRecord, type AssetType } from '@engine/types'
-import { isVideoExtension } from '@engine/asset-types'
-import { useAssetStore, type AssetGroup } from '../../../stores/asset-store'
-import AppButton from '../../shared/AppButton.vue'
-import AssetCharacterDrawer from './AssetCharacterDrawer.vue'
-import { assetDialogsKey } from './dialogs'
-import { useAssetThumbs } from './thumbs'
-import { fmtBytes } from '../audio/format'
+import { computed, inject, onUnmounted, ref, watch } from 'vue';
+import { ASSET_TYPES, type AssetMetaRecord, type AssetType } from '@engine/types';
+import { isVideoExtension } from '@engine/asset-types';
+import { useAssetStore, type AssetGroup } from '../../../stores/asset-store';
+import AppButton from '../../shared/AppButton.vue';
+import AssetCharacterDrawer from './AssetCharacterDrawer.vue';
+import { assetDialogsKey } from './dialogs';
+import { useAssetThumbs } from './thumbs';
+import { fmtBytes } from '../audio/format';
 
 const emit = defineEmits<{
   /** 一次性事件的无障碍播报，由外层写进唯一的 aria-live 区 */
-  (e: 'announce', message: string): void
-}>()
+  (e: 'announce', message: string): void;
+}>();
 
-const assets = useAssetStore()
-const dialogs = inject(assetDialogsKey)!
+const assets = useAssetStore();
+const dialogs = inject(assetDialogsKey)!;
 
-type View = 'group' | 'flat'
-const view = ref<View>('group')
-const search = ref('')
-const typeFilter = ref<'all' | AssetType>('all')
+type View = 'group' | 'flat';
+const view = ref<View>('group');
+const search = ref('');
+const typeFilter = ref<'all' | AssetType>('all');
 
 /** 打开的分组名（null = 抽屉关着）。抽屉本体挂在这里，因为点击源在这里 */
-const openGroupName = ref<string | null>(null)
+const openGroupName = ref<string | null>(null);
 
 // ═══ 筛选 ═════════════════════════════════════════════════
 
 function matchesSearch(name: string): boolean {
-  const q = search.value.trim().toLowerCase()
-  return !q || name.toLowerCase().includes(q)
+  const q = search.value.trim().toLowerCase();
+  return !q || name.toLowerCase().includes(q);
 }
 
 const filteredGroups = computed<AssetGroup[]>(() =>
   assets.groups.filter((g) => {
-    if (!matchesSearch(g.name)) return false
-    if (typeFilter.value !== 'all' && !g.rows.some((r) => r.type === typeFilter.value)) return false
-    return true
+    if (!matchesSearch(g.name)) return false;
+    if (typeFilter.value !== 'all' && !g.rows.some((r) => r.type === typeFilter.value))
+      return false;
+    return true;
   }),
-)
+);
 
 const filteredRows = computed<AssetMetaRecord[]>(() =>
   assets.flat.filter((r) => {
-    if (typeFilter.value !== 'all' && r.type !== typeFilter.value) return false
+    if (typeFilter.value !== 'all' && r.type !== typeFilter.value) return false;
     // 变体也参与搜索：想找「苏婉 微笑」时不该被迫先记住它属于哪个名字
-    return matchesSearch(r.name) || matchesSearch(r.variant ?? '')
+    return matchesSearch(r.name) || matchesSearch(r.variant ?? '');
   }),
-)
+);
 
 /** 分组卡的封面: 优先 头像 主图，其次组里第一行（顺序由 store 定好） */
 function coverRow(g: AssetGroup): AssetMetaRecord {
-  return g.rows.find((r) => r.type === '头像' && !r.variant) ?? g.rows[0]
+  return g.rows.find((r) => r.type === '头像' && !r.variant) ?? g.rows[0];
 }
 
 /**
@@ -74,39 +75,40 @@ function coverRow(g: AssetGroup): AssetMetaRecord {
  */
 const visibleRows = computed<AssetMetaRecord[]>(() =>
   view.value === 'group' ? filteredGroups.value.map(coverRow).filter(Boolean) : filteredRows.value,
-)
+);
 
-const { thumbFor } = useAssetThumbs(() => visibleRows.value)
+const { thumbFor } = useAssetThumbs(() => visibleRows.value);
 
 onUnmounted(() => {
   // 网格一屏就要挂几十个 object URL，不撤销就是泄漏（§7.5）
-  assets.revokeAllUrls()
-})
+  assets.revokeAllUrls();
+});
 
 // ═══ 多选 + 批量删除（只在「全部素材」视图）══════════════
 // 选中集合按 id 存，跨筛选保留 —— 换个筛选条件不该把已选的东西悄悄丢掉。
 // 但「全选」只作用于**当前筛选结果**，所以勾选框旁边写死了筛选后的条数。
 // 整套交互（含 shift 区间与 syncBox 的受控闭环）对齐音频曲库的既有实现。
 
-const selectedIds = ref<Set<string>>(new Set())
+const selectedIds = ref<Set<string>>(new Set());
 /** shift 区间选择的锚点（上一次点过的行） */
-const anchorId = ref('')
+const anchorId = ref('');
 
 function isSelected(row: AssetMetaRecord): boolean {
-  return selectedIds.value.has(row.id)
+  return selectedIds.value.has(row.id);
 }
 
-const selectedRows = computed(() => assets.flat.filter((r) => selectedIds.value.has(r.id)))
-const selectedCount = computed(() => selectedRows.value.length)
+const selectedRows = computed(() => assets.flat.filter((r) => selectedIds.value.has(r.id)));
+const selectedCount = computed(() => selectedRows.value.length);
 /** 选中项里有几个是主图 —— 删主图不会自动提拔变体，确认文案得说清楚 */
-const selectedBaseCount = computed(() => selectedRows.value.filter((r) => !r.variant).length)
+const selectedBaseCount = computed(() => selectedRows.value.filter((r) => !r.variant).length);
 
 const allFilteredSelected = computed(
-  () => filteredRows.value.length > 0 && filteredRows.value.every((r) => selectedIds.value.has(r.id)),
-)
+  () =>
+    filteredRows.value.length > 0 && filteredRows.value.every((r) => selectedIds.value.has(r.id)),
+);
 const someFilteredSelected = computed(
   () => !allFilteredSelected.value && filteredRows.value.some((r) => selectedIds.value.has(r.id)),
-)
+);
 
 /**
  * 勾选框的受控闭环（照搬音频曲库那条真机踩坑结论）。
@@ -117,48 +119,48 @@ const someFilteredSelected = computed(
  * 由处理函数在同一帧把 DOM 写回集合的真值。
  */
 function syncBox(target: EventTarget | null, checked: boolean, indeterminate = false): void {
-  const el = target as HTMLInputElement | null
-  if (!el) return
-  el.checked = checked
-  el.indeterminate = indeterminate
+  const el = target as HTMLInputElement | null;
+  if (!el) return;
+  el.checked = checked;
+  el.indeterminate = indeterminate;
 }
 
 function onRowSelect(row: AssetMetaRecord, e: MouseEvent): void {
-  const next = new Set(selectedIds.value)
-  const list = filteredRows.value
-  const to = list.findIndex((x) => x.id === row.id)
-  const from = anchorId.value ? list.findIndex((x) => x.id === anchorId.value) : -1
+  const next = new Set(selectedIds.value);
+  const list = filteredRows.value;
+  const to = list.findIndex((x) => x.id === row.id);
+  const from = anchorId.value ? list.findIndex((x) => x.id === anchorId.value) : -1;
   if (e.shiftKey && from >= 0 && to >= 0) {
     // 区间只加不减，这是列表多选的通用预期
-    const [a, b] = from <= to ? [from, to] : [to, from]
-    for (let i = a; i <= b; i += 1) next.add(list[i].id)
+    const [a, b] = from <= to ? [from, to] : [to, from];
+    for (let i = a; i <= b; i += 1) next.add(list[i].id);
   } else if (next.has(row.id)) {
-    next.delete(row.id)
+    next.delete(row.id);
   } else {
-    next.add(row.id)
+    next.add(row.id);
   }
-  anchorId.value = row.id
-  selectedIds.value = next
-  syncBox(e.target, next.has(row.id))
+  anchorId.value = row.id;
+  selectedIds.value = next;
+  syncBox(e.target, next.has(row.id));
 }
 
 /** 全选/取消全选 —— **只作用于当前筛选结果** */
 function toggleSelectAllFiltered(e: MouseEvent): void {
-  const next = new Set(selectedIds.value)
-  const all = allFilteredSelected.value
+  const next = new Set(selectedIds.value);
+  const all = allFilteredSelected.value;
   for (const row of filteredRows.value) {
-    if (all) next.delete(row.id)
-    else next.add(row.id)
+    if (all) next.delete(row.id);
+    else next.add(row.id);
   }
-  anchorId.value = ''
-  selectedIds.value = next
+  anchorId.value = '';
+  selectedIds.value = next;
   // 全选框还有 indeterminate：浏览器在点击时会清掉它，同样得写回真值
-  syncBox(e.target, allFilteredSelected.value, someFilteredSelected.value)
+  syncBox(e.target, allFilteredSelected.value, someFilteredSelected.value);
 }
 
 function clearSelection(): void {
-  selectedIds.value = new Set()
-  anchorId.value = ''
+  selectedIds.value = new Set();
+  anchorId.value = '';
 }
 
 // 素材被删掉（这里删的、抽屉里删的都算）之后不能留下悬空的选中 id，
@@ -166,50 +168,50 @@ function clearSelection(): void {
 watch(
   () => assets.assets,
   (list) => {
-    if (selectedIds.value.size === 0) return
-    const alive = new Set(list.map((r) => r.id))
-    const next = new Set([...selectedIds.value].filter((id) => alive.has(id)))
-    if (next.size !== selectedIds.value.size) selectedIds.value = next
+    if (selectedIds.value.size === 0) return;
+    const alive = new Set(list.map((r) => r.id));
+    const next = new Set([...selectedIds.value].filter((id) => alive.has(id)));
+    if (next.size !== selectedIds.value.size) selectedIds.value = next;
   },
-)
+);
 
 async function batchDelete(): Promise<void> {
-  const rows = selectedRows.value
-  if (rows.length === 0) return
-  const lines = [`删除选中的 ${rows.length} 条素材？此操作不可撤销。`]
+  const rows = selectedRows.value;
+  if (rows.length === 0) return;
+  const lines = [`删除选中的 ${rows.length} 条素材？此操作不可撤销。`];
   if (selectedBaseCount.value > 0) {
     lines.push(
       `其中 ${selectedBaseCount.value} 条是主图。删除主图不会自动提拔其他变体，对应的类型会显示为「无主图」，需要手动重新指定。`,
-    )
+    );
   }
   const ok = await dialogs.askConfirm({
     title: '批量删除素材',
     message: lines.join('\n'),
     confirmLabel: `删除 ${rows.length} 条`,
     danger: true,
-  })
-  if (!ok) return
+  });
+  if (!ok) return;
   // 汇总提示由 store 负责（尽力做完模式），这里只清选择并补一次播报
-  const res = await assets.deleteAssets(rows.map((r) => r.id))
-  clearSelection()
+  const res = await assets.deleteAssets(rows.map((r) => r.id));
+  clearSelection();
   emit(
     'announce',
     res.failed > 0
       ? `已删除 ${res.ok} 条素材，${res.failed} 条未能删除。`
       : `已删除 ${res.ok} 条素材。`,
-  )
+  );
 }
 
 // ═══ 抽屉 ═════════════════════════════════════════════════
 
 function openGroup(g: AssetGroup): void {
-  openGroupName.value = g.name
+  openGroupName.value = g.name;
 }
 
 function onGroupKey(g: AssetGroup, e: KeyboardEvent): void {
   if (e.key === 'Enter' || e.key === ' ') {
-    e.preventDefault()
-    openGroup(g)
+    e.preventDefault();
+    openGroup(g);
   }
 }
 </script>
@@ -217,7 +219,9 @@ function onGroupKey(g: AssetGroup, e: KeyboardEvent): void {
 <template>
   <div class="library-head">
     <h4 class="band-title">素材库</h4>
-    <span class="usage-text">共 {{ assets.assets.length }} 条 · {{ assets.groups.length }} 个名字</span>
+    <span class="usage-text"
+      >共 {{ assets.assets.length }} 条 · {{ assets.groups.length }} 个名字</span
+    >
   </div>
 
   <!-- 视图切换：分段按钮式 Tab（design.md §4.3 主类别切换） -->
@@ -228,14 +232,18 @@ function onGroupKey(g: AssetGroup, e: KeyboardEvent): void {
       role="tab"
       :aria-selected="view === 'group'"
       @click="view = 'group'"
-    >按角色</button>
+    >
+      按角色
+    </button>
     <button
       class="view-tab"
       :class="{ 'view-tab-on': view === 'flat' }"
       role="tab"
       :aria-selected="view === 'flat'"
       @click="view = 'flat'"
-    >全部素材</button>
+    >
+      全部素材
+    </button>
   </div>
 
   <!-- 工具条 -->
@@ -430,7 +438,9 @@ function onGroupKey(g: AssetGroup, e: KeyboardEvent): void {
   font-size: 0.8125rem;
   cursor: pointer;
   /* 颜色过渡而已，不动布局属性 */
-  transition: background var(--theme-transition-fast), color var(--theme-transition-fast);
+  transition:
+    background var(--theme-transition-fast),
+    color var(--theme-transition-fast);
 }
 .view-tab:hover {
   background: var(--theme-tab-hover-bg);
@@ -573,7 +583,9 @@ function onGroupKey(g: AssetGroup, e: KeyboardEvent): void {
   box-shadow: var(--paper-stack);
   cursor: pointer;
   /* hover 只换颜色，不做 scale / 位移（design.md §4.1） */
-  transition: background var(--theme-transition-fast), border-color var(--theme-transition-fast);
+  transition:
+    background var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
 }
 .group-card:hover {
   background: color-mix(in srgb, var(--theme-primary) 6%, var(--theme-card-bg));
@@ -581,7 +593,9 @@ function onGroupKey(g: AssetGroup, e: KeyboardEvent): void {
 }
 .group-card:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 1px var(--theme-primary), var(--paper-stack);
+  box-shadow:
+    0 0 0 1px var(--theme-primary),
+    var(--paper-stack);
 }
 .group-name {
   font-family: var(--theme-font-title);

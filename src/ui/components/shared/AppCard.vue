@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import type { QualityLevel } from '@engine/types'
+import type { QualityLevel } from '@engine/types';
 
 defineProps<{
-  quality?: QualityLevel
-  clickable?: boolean
-  selected?: boolean
-  padding?: 'sm' | 'md' | 'lg'
-}>()
+  quality?: QualityLevel;
+  clickable?: boolean;
+  selected?: boolean;
+  padding?: 'sm' | 'md' | 'lg';
+}>();
 </script>
 
 <template>
@@ -30,9 +30,15 @@ defineProps<{
   border-radius: var(--theme-radius-lg);
   transition: all var(--theme-transition-fast);
 }
-.card-padding-sm { padding: var(--theme-spacing-sm) var(--theme-spacing-md); }
-.card-padding-md { padding: var(--theme-spacing-md) var(--theme-spacing-lg); }
-.card-padding-lg { padding: var(--theme-spacing-lg) var(--theme-spacing-xl); }
+.card-padding-sm {
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+}
+.card-padding-md {
+  padding: var(--theme-spacing-md) var(--theme-spacing-lg);
+}
+.card-padding-lg {
+  padding: var(--theme-spacing-lg) var(--theme-spacing-xl);
+}
 
 .card-clickable {
   cursor: pointer;
@@ -51,11 +57,25 @@ defineProps<{
 }
 
 /* 品质表达：整圈边框色调（配合品质色点/名字着色，禁用左侧色条） */
-.card-common { border-color: var(--theme-card-border); }
-.card-uncommon { border-color: color-mix(in srgb, var(--theme-quality-uncommon) 45%, var(--theme-card-border)); }
-.card-rare { border-color: color-mix(in srgb, var(--theme-quality-rare) 45%, var(--theme-card-border)); }
-.card-epic { border-color: color-mix(in srgb, var(--theme-quality-epic) 45%, var(--theme-card-border)); }
-.card-legendary { border-color: color-mix(in srgb, var(--theme-quality-legendary) 45%, var(--theme-card-border)); }
-.card-mythic { border-color: color-mix(in srgb, var(--theme-quality-mythic) 45%, var(--theme-card-border)); }
-.card-unique { border-color: color-mix(in srgb, var(--theme-quality-unique) 45%, var(--theme-card-border)); }
+.card-common {
+  border-color: var(--theme-card-border);
+}
+.card-uncommon {
+  border-color: color-mix(in srgb, var(--theme-quality-uncommon) 45%, var(--theme-card-border));
+}
+.card-rare {
+  border-color: color-mix(in srgb, var(--theme-quality-rare) 45%, var(--theme-card-border));
+}
+.card-epic {
+  border-color: color-mix(in srgb, var(--theme-quality-epic) 45%, var(--theme-card-border));
+}
+.card-legendary {
+  border-color: color-mix(in srgb, var(--theme-quality-legendary) 45%, var(--theme-card-border));
+}
+.card-mythic {
+  border-color: color-mix(in srgb, var(--theme-quality-mythic) 45%, var(--theme-card-border));
+}
+.card-unique {
+  border-color: color-mix(in srgb, var(--theme-quality-unique) 45%, var(--theme-card-border));
+}
 </style>

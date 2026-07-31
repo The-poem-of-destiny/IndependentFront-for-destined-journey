@@ -116,9 +116,7 @@ export function detectNewCharacters(
   const allDetects = scanCharDetects(storyOutput);
   if (allDetects.length === 0) return [];
 
-  const existingNames = new Set(
-    existingChars.map((c) => c.name.toLowerCase()),
-  );
+  const existingNames = new Set(existingChars.map((c) => c.name.toLowerCase()));
 
   return allDetects.filter((marker) => {
     // 如果没有名字，视为新角色（需要生成名字）
@@ -145,12 +143,16 @@ export async function callCharGenAgent(
   // char_gen 自造名字（dispatcher 要"妲丽安"产出"薇拉"）。把属性拼成指定信息行注入。
   const attrs = (request.marker?.attributes ?? {}) as Record<string, string | undefined>;
   const attrLines = [
-    attrs.characterName ? `指定名称: ${attrs.characterName}（正文已出现的名字必须沿用；若这是描述性称呼而正文里有真名，用真名）` : '',
+    attrs.characterName
+      ? `指定名称: ${attrs.characterName}（正文已出现的名字必须沿用；若这是描述性称呼而正文里有真名，用真名）`
+      : '',
     attrs.race && attrs.race !== '未知' ? `种族: ${attrs.race}` : '',
     attrs.tier && attrs.tier !== '未知' ? `层级: ${attrs.tier}` : '',
     attrs.characterType ? `类型: ${attrs.characterType}` : '',
     attrs.faction && attrs.faction !== '未知' ? `势力: ${attrs.faction}` : '',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
   const requestContent = [attrLines, bodyText].filter(Boolean).join('\n');
 
   // Bug fix 1: Set BOTH keys so templates with {{CHAR_DETECT}} or {{CHAR_GEN_REQUEST}} both resolve.
@@ -167,7 +169,14 @@ export async function callCharGenAgent(
   // The marker body is passed via charLocalParams (CHAR_DETECT / CHAR_GEN_REQUEST).
   // 真机修(2026-07-17): configs/worldBooks/presets 透传 — 此前恒 undefined，
   // char_gen 的 systemPrompt 退化为一行 stub + {{LORE_BOOK}} 恒空（命名/格式纪律全失效）。
-  const messages = buildAgentMessages('char_gen', request.context, request.configs, request.worldBooks, request.presets, charLocalParams);
+  const messages = buildAgentMessages(
+    'char_gen',
+    request.context,
+    request.configs,
+    request.worldBooks,
+    request.presets,
+    charLocalParams,
+  );
 
   if (!messages) {
     throw new Error('char_gen 模板未找到 — 请检查 AGENT_TEMPLATES 注册');
@@ -248,7 +257,14 @@ export async function callItemGenAgent(
     if (equipReqMatch) charItemLocalParams.EQUIP_REQUEST = equipReqMatch[1].trim();
   }
 
-  const messages = buildAgentMessages('item_gen', contextWithCharData, request.configs, request.worldBooks, request.presets, charItemLocalParams);
+  const messages = buildAgentMessages(
+    'item_gen',
+    contextWithCharData,
+    request.configs,
+    request.worldBooks,
+    request.presets,
+    charItemLocalParams,
+  );
 
   if (!messages) {
     throw new Error('item_gen 模板未找到 — 请检查 AGENT_TEMPLATES 注册');
@@ -311,9 +327,9 @@ export function assembleCharacterState(
   // 合并技能: char_gen 自产优先，item_gen 补充（去重+合并）
   const charSkills = charData.skills ?? [];
   const itemGenSkills = itemData.skills ?? [];
-  const charSkillNames = new Set(charSkills.map(s => s.name));
+  const charSkillNames = new Set(charSkills.map((s) => s.name));
   // item_gen 的 skill 不覆盖 char_gen 同名
-  const mergedSkills = [...itemGenSkills.filter(s => !charSkillNames.has(s.name)), ...charSkills];
+  const mergedSkills = [...itemGenSkills.filter((s) => !charSkillNames.has(s.name)), ...charSkills];
 
   const skills = mergedSkills.map((s) => ({
     name: s.name,
@@ -330,20 +346,20 @@ export function assembleCharacterState(
   // M3: 装备产物直接写成带 equippedSlot 的 InventoryItem（规范 §3），scripts 无损传递（#45）
   const charEquip = charData.equipment ?? [];
   const itemGenEquip = itemData.equipment ?? [];
-  const charEquipNames = new Set(charEquip.map(e => e.name));
-  const mergedEquip = [...itemGenEquip.filter(e => !charEquipNames.has(e.name)), ...charEquip];
+  const charEquipNames = new Set(charEquip.map((e) => e.name));
+  const mergedEquip = [...itemGenEquip.filter((e) => !charEquipNames.has(e.name)), ...charEquip];
 
   const equippedItems: InventoryItem[] = mergedEquip.map((e) => ({
     name: e.name,
     description: e.description,
     quantity: 1,
     type: '装备',
-    equippedSlot: normalizeSlot(e.slot),   // 无法识别 → null（躺背包），铁律5
+    equippedSlot: normalizeSlot(e.slot), // 无法识别 → null（躺背包），铁律5
     stats: e.stats,
     durability: e.durability,
     maxDurability: e.durability,
     effects: (e as any).effects,
-    scripts: (e as any).scripts,           // M3: scripts 无损传递（#45）
+    scripts: (e as any).scripts, // M3: scripts 无损传递（#45）
     // 战斗 v2 (M4 5.5b): modifiers/buffs/divinity 透传到 InventoryItem（战斗管线 collect_mods 消费）
     ...(e.modifiers ? { modifiers: e.modifiers } : {}),
     ...(e.buffs ? { buffs: e.buffs } : {}),
@@ -354,8 +370,8 @@ export function assembleCharacterState(
   // M3: inventory 物品 effects/scripts 无损传递，废除 id 生成（#45）
   const charInv = charData.inventory ?? [];
   const itemGenInv = itemData.inventory ?? [];
-  const charInvNames = new Set(charInv.map(i => i.name));
-  const mergedInv = [...itemGenInv.filter(i => !charInvNames.has(i.name)), ...charInv];
+  const charInvNames = new Set(charInv.map((i) => i.name));
+  const mergedInv = [...itemGenInv.filter((i) => !charInvNames.has(i.name)), ...charInv];
 
   const inventory: InventoryItem[] = [
     ...mergedInv.map((inv) => ({
@@ -364,8 +380,8 @@ export function assembleCharacterState(
       type: inv.type,
       quantity: inv.quantity,
       rarity: (inv.rarity as QualityLevel) || undefined,
-      effects: (inv as any).effects,        // M3: effects 无损传递（#45）
-      scripts: (inv as any).scripts,        // M3: scripts 无损传递（#45）
+      effects: (inv as any).effects, // M3: effects 无损传递（#45）
+      scripts: (inv as any).scripts, // M3: scripts 无损传递（#45）
       // 战斗 v2 (M4 5.5b): modifiers/buffs/divinity 透传
       ...(inv.modifiers ? { modifiers: inv.modifiers } : {}),
       ...(inv.buffs ? { buffs: inv.buffs } : {}),
@@ -390,17 +406,23 @@ export function assembleCharacterState(
     ascension: {
       enabled: charData.ascension.enabled,
       elements: (charData.ascension.elements ?? []).map((e, i) => ({
-        name: e.name, description: e.description, effects: e.effects,
+        name: e.name,
+        description: e.description,
+        effects: e.effects,
         effectDescriptions: itemData.elements?.[i]?.effectDescriptions,
         scripts: itemData.elements?.[i]?.scripts,
       })),
       authority: (charData.ascension.authorities ?? []).map((a, i) => ({
-        name: a.name, description: a.description, effects: a.effects, costDescription: a.costDescription,
+        name: a.name,
+        description: a.description,
+        effects: a.effects,
+        costDescription: a.costDescription,
         effectDescriptions: itemData.authorities?.[i]?.effectDescriptions,
         scripts: itemData.authorities?.[i]?.scripts,
       })),
       law: (charData.ascension.laws ?? []).map((l) => ({
-        name: l.name, description: l.description,
+        name: l.name,
+        description: l.description,
         effects: [...(l.passiveEffects ?? []), ...(l.activeEffects ?? [])],
         costDescription: l.costDescription,
       })),
@@ -554,7 +576,11 @@ function validateAndCollectCombatEffects(
     }
   }
 
-  return { modifiers: validModifiers, buffs: validBuffs, ...(divinity !== undefined ? { divinity } : {}) };
+  return {
+    modifiers: validModifiers,
+    buffs: validBuffs,
+    ...(divinity !== undefined ? { divinity } : {}),
+  };
 }
 
 /**
@@ -609,7 +635,9 @@ function parseModifiersXML(innerContent: string): Modifier[] {
     try {
       obj = JSON.parse(jsonStr);
     } catch (e) {
-      console.warn(`[item_gen] <modifiers> 第 ${i + 1} 行 JSON parse 失败，跳过: ${(e as Error).message} | 原文: ${raw.slice(0, 120)}`);
+      console.warn(
+        `[item_gen] <modifiers> 第 ${i + 1} 行 JSON parse 失败，跳过: ${(e as Error).message} | 原文: ${raw.slice(0, 120)}`,
+      );
       continue;
     }
 
@@ -619,7 +647,9 @@ function parseModifiersXML(innerContent: string): Modifier[] {
     }
     // 必须有 category 字段才算 modifier 形状（判别字段，对齐 effect-types ModifierBase）
     if (!('category' in obj)) {
-      console.warn(`[item_gen] <modifiers> 第 ${i + 1} 行缺 category 字段，跳过: ${raw.slice(0, 100)}`);
+      console.warn(
+        `[item_gen] <modifiers> 第 ${i + 1} 行缺 category 字段，跳过: ${raw.slice(0, 100)}`,
+      );
       continue;
     }
     modifiers.push(obj as Modifier);
@@ -668,7 +698,11 @@ function parseCharGenJSONLoose(text: string): CharGenOutput | null {
   const json = extractJSON(text);
   if (!json) return null;
   let data: any;
-  try { data = JSON.parse(json); } catch { return null; }
+  try {
+    data = JSON.parse(json);
+  } catch {
+    return null;
+  }
   if (!data || typeof data !== 'object' || !data.name) return null;
   return charGenFromJSON(data);
 }
@@ -677,11 +711,16 @@ function charGenFromJSON(data: any): CharGenOutput {
   const attrs: Record<string, number> = {};
   if (data.attributes && typeof data.attributes === 'object') {
     for (const k of ['str', 'dex', 'con', 'int', 'spi']) {
-      attrs[k] = typeof data.attributes[k] === 'number' ? data.attributes[k] : (parseInt(data.attributes[k]) || 0);
+      attrs[k] =
+        typeof data.attributes[k] === 'number'
+          ? data.attributes[k]
+          : parseInt(data.attributes[k]) || 0;
     }
   }
   // 空对象 → 用默认值（但 0 保留）
-  if (!Object.keys(attrs).length) { for (const k of ['str', 'dex', 'con', 'int', 'spi']) attrs[k] = 10; }
+  if (!Object.keys(attrs).length) {
+    for (const k of ['str', 'dex', 'con', 'int', 'spi']) attrs[k] = 10;
+  }
 
   const appearance = data.appearance;
   const personality = data.personality;
@@ -700,13 +739,31 @@ function charGenFromJSON(data: any): CharGenOutput {
       int: attrs.int,
       spi: attrs.spi,
     },
-    identity: Array.isArray(data.identity) ? data.identity : (typeof data.identity === 'string' ? [data.identity] : []),
-    occupation: Array.isArray(data.occupation) ? data.occupation : (typeof data.occupation === 'string' ? [data.occupation] : []),
+    identity: Array.isArray(data.identity)
+      ? data.identity
+      : typeof data.identity === 'string'
+        ? [data.identity]
+        : [],
+    occupation: Array.isArray(data.occupation)
+      ? data.occupation
+      : typeof data.occupation === 'string'
+        ? [data.occupation]
+        : [],
     // appearance/personality: 对象取 summary 纯文本，字符串直用
     background: data.background ?? data.lore?.origin ?? data.description ?? '',
-    appearance: typeof appearance === 'object' && appearance ? (appearance.summary ?? appearance.description ?? JSON.stringify(appearance)) : (typeof appearance === 'string' ? appearance : ''),
+    appearance:
+      typeof appearance === 'object' && appearance
+        ? (appearance.summary ?? appearance.description ?? JSON.stringify(appearance))
+        : typeof appearance === 'string'
+          ? appearance
+          : '',
     clothing: data.clothing ?? data.outfit ?? '',
-    personality: typeof personality === 'object' && personality ? (personality.summary ?? personality.description ?? JSON.stringify(personality)) : (typeof personality === 'string' ? personality : ''),
+    personality:
+      typeof personality === 'object' && personality
+        ? (personality.summary ?? personality.description ?? JSON.stringify(personality))
+        : typeof personality === 'string'
+          ? personality
+          : '',
     likes: data.likes ?? '',
     thoughts: data.thoughts ?? '',
     ascension: {
@@ -741,7 +798,12 @@ function parseCharGenXML(xml: string): CharGenOutput {
       ascElements.push({
         name: attrs['name'] ?? '',
         description: attrs['description'] ?? '',
-        effects: m[2]?.trim().split('\n').filter(s => s.trim()).map(s => s.trim()) ?? [],
+        effects:
+          m[2]
+            ?.trim()
+            .split('\n')
+            .filter((s) => s.trim())
+            .map((s) => s.trim()) ?? [],
       });
     }
     // 解析 <authority> 子标签
@@ -751,7 +813,12 @@ function parseCharGenXML(xml: string): CharGenOutput {
       ascAuthorities.push({
         name: attrs['name'] ?? '',
         description: attrs['description'] ?? '',
-        effects: m[2]?.trim().split('\n').filter(s => s.trim()).map(s => s.trim()) ?? [],
+        effects:
+          m[2]
+            ?.trim()
+            .split('\n')
+            .filter((s) => s.trim())
+            .map((s) => s.trim()) ?? [],
         costDescription: attrs['cost'] ?? '',
       });
     }
@@ -763,8 +830,16 @@ function parseCharGenXML(xml: string): CharGenOutput {
       ascLaws.push({
         name: attrs['name'] ?? '',
         description: attrs['description'] ?? '',
-        passiveEffects: attrs['passive']?.split(',').map(s => s.trim()).filter(Boolean) ?? [],
-        activeEffects: attrs['active']?.split(',').map(s => s.trim()).filter(Boolean) ?? [],
+        passiveEffects:
+          attrs['passive']
+            ?.split(',')
+            .map((s) => s.trim())
+            .filter(Boolean) ?? [],
+        activeEffects:
+          attrs['active']
+            ?.split(',')
+            .map((s) => s.trim())
+            .filter(Boolean) ?? [],
         costDescription: attrs['cost'] ?? '',
       });
     }
@@ -794,14 +869,24 @@ function parseCharGenXML(xml: string): CharGenOutput {
       int: parseAttrIntKeepZero(xml, 'attributes', 'int', 10),
       spi: parseAttrIntKeepZero(xml, 'attributes', 'spi', 10),
     },
-    identity: extractTag(xml, 'identity')?.split(',').map(s => s.trim()).filter(Boolean) ?? [],
-    occupation: extractTag(xml, 'occupation')?.split(',').map(s => s.trim()).filter(Boolean) ?? [],
+    identity:
+      extractTag(xml, 'identity')
+        ?.split(',')
+        .map((s) => s.trim())
+        .filter(Boolean) ?? [],
+    occupation:
+      extractTag(xml, 'occupation')
+        ?.split(',')
+        .map((s) => s.trim())
+        .filter(Boolean) ?? [],
     // 真机修(2026-07-17): AI 可能在叙事字段内嵌套子标签（<appearance>→<physical>/<voice>等），
     // extractTag 原样返回 → 落库带 XML 污染前端渲染。stripInnerTags 剥子标签留纯文本。
     background: stripInnerTags(extractTag(xml, 'background') ?? ''),
     appearance: stripInnerTags(extractTag(xml, 'appearance') ?? ''),
     clothing: stripInnerTags(extractTag(xml, 'clothing') ?? ''),
-    personality: stripInnerTags(extractTag(xml, 'personality') ?? extractAttr(xml, 'personality', 'code') ?? ''),
+    personality: stripInnerTags(
+      extractTag(xml, 'personality') ?? extractAttr(xml, 'personality', 'code') ?? '',
+    ),
     likes: stripInnerTags(extractTag(xml, 'likes') ?? ''),
     thoughts: stripInnerTags(extractTag(xml, 'thoughts') ?? ''),
     ascension: {
@@ -816,8 +901,14 @@ function parseCharGenXML(xml: string): CharGenOutput {
         if (!ascXML) return { name: '', description: '' };
         const kdXML = extractTagBlock(ascXML, 'kingdom');
         return {
-          name: kdXML ? (extractAttr(kdXML, 'kingdom', 'name') ?? extractTag(kdXML, 'name') ?? '') : '',
-          description: kdXML ? (extractAttr(kdXML, 'kingdom', 'description') ?? extractTag(kdXML, 'description') ?? '') : '',
+          name: kdXML
+            ? (extractAttr(kdXML, 'kingdom', 'name') ?? extractTag(kdXML, 'name') ?? '')
+            : '',
+          description: kdXML
+            ? (extractAttr(kdXML, 'kingdom', 'description') ??
+              extractTag(kdXML, 'description') ??
+              '')
+            : '',
         };
       })(),
     },
@@ -881,7 +972,11 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
   if (!data || typeof data !== 'object') return null;
 
   // 已分组形状直接映射
-  if (Array.isArray(data.skills) || Array.isArray(data.equipment) || Array.isArray(data.inventory)) {
+  if (
+    Array.isArray(data.skills) ||
+    Array.isArray(data.equipment) ||
+    Array.isArray(data.inventory)
+  ) {
     return {
       skills: data.skills ?? [],
       equipment: data.equipment ?? [],
@@ -897,15 +992,25 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
   for (const it of items) {
     if (!it || typeof it !== 'object' || !it.name) continue;
     const typeStr = String(it.type ?? '').toLowerCase();
-    const isSkill = SKILL_TYPES.has(typeStr) || (!it.slot && (it.cost !== undefined || it.cooldown !== undefined));
+    const isSkill =
+      SKILL_TYPES.has(typeStr) ||
+      (!it.slot && (it.cost !== undefined || it.cooldown !== undefined));
     const isEquip = !isSkill && (Boolean(it.slot) || EQUIP_TYPES.has(typeStr));
 
     // 战斗 v2 (M4 5.5b): JSON 兜底路径也校验 modifiers/buffs（AI 偶尔直出 JSON，同样要守铁律）
     const itModifiers: unknown[] = Array.isArray(it.modifiers) ? it.modifiers : [];
     const itBuffs: unknown[] = Array.isArray(it.buffs) ? it.buffs : [];
-    const combat: { modifiers: Modifier[]; buffs: NonNullable<ItemGenOutput['equipment'][number]['buffs']>; divinity?: DivinityLevel } =
+    const combat: {
+      modifiers: Modifier[];
+      buffs: NonNullable<ItemGenOutput['equipment'][number]['buffs']>;
+      divinity?: DivinityLevel;
+    } =
       itModifiers.length > 0 || itBuffs.length > 0
-        ? validateAndCollectCombatEffects(it.name, itModifiers as Modifier[], itBuffs as ItemGenOutput['equipment'][number]['buffs'])
+        ? validateAndCollectCombatEffects(
+            it.name,
+            itModifiers as Modifier[],
+            itBuffs as ItemGenOutput['equipment'][number]['buffs'],
+          )
         : { modifiers: [], buffs: [] };
     // 聚合 divinity：优先取元素顶层 divinity，否则取 modifier 聚合
     const elemDivinity: DivinityLevel | undefined =
@@ -1006,7 +1111,11 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
 
     // 战斗 v2 (M4 5.5b): 提取 <modifiers> 子元素 → Modifier[]，再校验接入（违规 warn 不中断）
     const rawModifiers = parseModifiersXML(innerContent);
-    const combat = validateAndCollectCombatEffects(attrs['name'] ?? '未命名技能', rawModifiers, undefined);
+    const combat = validateAndCollectCombatEffects(
+      attrs['name'] ?? '未命名技能',
+      rawModifiers,
+      undefined,
+    );
 
     // 描述 = 纯文本部分（去除所有嵌套子标签，包括 AI 自造的 <description>/<notes>/<ability> 等）
     // 优先取 <description> 子标签的文本内容，若无则剥所有标签留纯文本
@@ -1023,13 +1132,18 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
     // 中文 type 归一（真机实测 AI 产 '主动'/'被动' 直接落库 → UI 不识别）
     const skillType = (attrs['type'] ?? '').trim();
     const normalizedType: 'active' | 'passive' =
-      (skillType === '被动' || skillType === 'passive') ? 'passive' : 'active';
+      skillType === '被动' || skillType === 'passive' ? 'passive' : 'active';
 
     results.push({
       name: attrs['name'] ?? '未命名技能',
       description: description || (descSubTag ? '' : descText.replace(/<[^>]+>/g, '').trim()),
       type: normalizedType,
-      cost: attrs['cost_type'] ? { type: attrs['cost_type'] as 'HP' | 'MP' | 'SP', amount: parseInt(attrs['cost_amount'] ?? '0') } : undefined,
+      cost: attrs['cost_type']
+        ? {
+            type: attrs['cost_type'] as 'HP' | 'MP' | 'SP',
+            amount: parseInt(attrs['cost_amount'] ?? '0'),
+          }
+        : undefined,
       cooldown: attrs['cooldown'] ? parseInt(attrs['cooldown']) : undefined,
       effects: Object.keys(effects).length > 0 ? effects : undefined,
       scripts: Object.keys(scripts).length > 0 ? scripts : undefined,
@@ -1050,19 +1164,27 @@ function parseEquipmentXML(xml: string): ItemGenOutput['equipment'] {
     const statsStr = attrs['stats'] ?? '';
     const stats: Record<string, number> = {};
     for (const pair of statsStr.split(',')) {
-      const [k, v] = pair.split(':').map(s => s.trim());
+      const [k, v] = pair.split(':').map((s) => s.trim());
       if (k && v) stats[k] = parseFloat(v) || 0;
     }
     // 真机 fix(2026-07-18): 提取 <effect>/<script> 子标签，防止文本泄漏进 description
     const effects: Record<string, string> = {};
     const scripts: Record<string, string> = {};
     const em = innerContent.matchAll(/<effect\s[^>]*?name="([^"]*)"[^>]*>([\s\S]*?)<\/effect>/g);
-    for (const em2 of em) { effects[em2[1]] = em2[2]?.trim() ?? ''; }
+    for (const em2 of em) {
+      effects[em2[1]] = em2[2]?.trim() ?? '';
+    }
     const sm = innerContent.matchAll(/<script\s[^>]*?name="([^"]*)"[^>]*>([\s\S]*?)<\/script>/g);
-    for (const sm2 of sm) { scripts[sm2[1]] = sm2[2]?.trim() ?? ''; }
+    for (const sm2 of sm) {
+      scripts[sm2[1]] = sm2[2]?.trim() ?? '';
+    }
     // 战斗 v2 (M4 5.5b): 提取 <modifiers> 子元素 → Modifier[]，再校验接入（违规 warn 不中断）
     const rawModifiers = parseModifiersXML(innerContent);
-    const combat = validateAndCollectCombatEffects(attrs['name'] ?? '未命名装备', rawModifiers, undefined);
+    const combat = validateAndCollectCombatEffects(
+      attrs['name'] ?? '未命名装备',
+      rawModifiers,
+      undefined,
+    );
     // 预剥离 effect/script/modifiers 块，再 stripInnerTags 取纯文本描述
     const descText = innerContent
       .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '')
@@ -1096,12 +1218,20 @@ function parseInventoryXML(xml: string): ItemGenOutput['inventory'] {
     const effects: Record<string, string> = {};
     const scripts: Record<string, string> = {};
     const em = innerContent.matchAll(/<effect\s[^>]*?name="([^"]*)"[^>]*>([\s\S]*?)<\/effect>/g);
-    for (const em2 of em) { effects[em2[1]] = em2[2]?.trim() ?? ''; }
+    for (const em2 of em) {
+      effects[em2[1]] = em2[2]?.trim() ?? '';
+    }
     const sm = innerContent.matchAll(/<script\s[^>]*?name="([^"]*)"[^>]*>([\s\S]*?)<\/script>/g);
-    for (const sm2 of sm) { scripts[sm2[1]] = sm2[2]?.trim() ?? ''; }
+    for (const sm2 of sm) {
+      scripts[sm2[1]] = sm2[2]?.trim() ?? '';
+    }
     // 战斗 v2 (M4 5.5b): 提取 <modifiers> 子元素 → Modifier[]，再校验接入（违规 warn 不中断）
     const rawModifiers = parseModifiersXML(innerContent);
-    const combat = validateAndCollectCombatEffects(attrs['name'] ?? '未命名物品', rawModifiers, undefined);
+    const combat = validateAndCollectCombatEffects(
+      attrs['name'] ?? '未命名物品',
+      rawModifiers,
+      undefined,
+    );
     // 预剥离 effect/script/modifiers 块，再 stripInnerTags 取纯文本描述
     const descText = innerContent
       .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '')
@@ -1150,7 +1280,9 @@ function parseElementsXML(xml: string): NonNullable<ItemGenOutput['elements']> {
     }
 
     // 描述 = innerContent 中去除 effect/script 标签后的纯文本
-    const description = innerContent.replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/g, '').trim();
+    const description = innerContent
+      .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/g, '')
+      .trim();
 
     results.push({
       name: attrs['name'] ?? '未命名要素',
@@ -1189,7 +1321,9 @@ function parseAuthoritiesXML(xml: string): NonNullable<ItemGenOutput['authoritie
     }
 
     // 描述 = innerContent 中去除 effect/script 标签后的纯文本
-    const description = innerContent.replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/g, '').trim();
+    const description = innerContent
+      .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/g, '')
+      .trim();
 
     results.push({
       name: attrs['name'] ?? '未命名权能',
@@ -1221,10 +1355,10 @@ export function parseStatusEffectsXML(xmlBody: string): Array<{
   scripts?: Record<string, string>;
 }> {
   const results: any[] = [];
-  const effectRegex = /<effect\s+([^>]*)>([\s\S]*?)((?:<effect\b[^>]*>[\s\S]*?<\/effect>\s*)*)((?:<script\b[^>]*>[\s\S]*?<\/script>\s*)*)<\/effect>/gi;
+  const effectRegex =
+    /<effect\s+([^>]*)>([\s\S]*?)((?:<effect\b[^>]*>[\s\S]*?<\/effect>\s*)*)((?:<script\b[^>]*>[\s\S]*?<\/script>\s*)*)<\/effect>/gi;
   let match: RegExpExecArray | null;
 
-  // eslint-disable-next-line no-cond-assign
   while ((match = effectRegex.exec(xmlBody)) !== null) {
     const attrsStr = match[1].trim();
     const description = match[2].trim();
@@ -1234,18 +1368,18 @@ export function parseStatusEffectsXML(xmlBody: string): Array<{
     const attrs = parseAttrsStr(attrsStr);
     const owner = attrs.owner || '';
     const name = attrs.name || '';
-    const category = attrs.category as '增益' | '减益' | '特殊' || '减益';
+    const category = (attrs.category as '增益' | '减益' | '特殊') || '减益';
     const stacks = parseInt(attrs.stacks || '1', 10);
     const maxStacks = parseInt(attrs.maxStacks || attrs.stacks || '1', 10);
     const remainingTime = parseInt(attrs.remainingTime || '60', 10);
-    const timeUnit = attrs.timeUnit as '回合' | '分钟' | '小时' || '回合';
+    const timeUnit = (attrs.timeUnit as '回合' | '分钟' | '小时') || '回合';
 
     const effects: Record<string, string> = {};
     const effectDescriptions: Record<string, string> = {};
     if (innerEffectsBlock) {
       const innerRegex = /<effect\s+name="([^"]*)"[^>]*>([\s\S]*?)<\/effect>/gi;
       let innerMatch: RegExpExecArray | null;
-      // eslint-disable-next-line no-cond-assign
+
       while ((innerMatch = innerRegex.exec(innerEffectsBlock)) !== null) {
         const efName = innerMatch[1].trim();
         const efDesc = innerMatch[2].trim();
@@ -1258,7 +1392,7 @@ export function parseStatusEffectsXML(xmlBody: string): Array<{
     if (scriptsBlock) {
       const scriptRegex = /<script\s+name="([^"]*)"[^>]*>([\s\S]*?)<\/script>/gi;
       let scriptMatch: RegExpExecArray | null;
-      // eslint-disable-next-line no-cond-assign
+
       while ((scriptMatch = scriptRegex.exec(scriptsBlock)) !== null) {
         const scriptName = scriptMatch[1].trim();
         const scriptCode = scriptMatch[2].trim();
@@ -1267,8 +1401,14 @@ export function parseStatusEffectsXML(xmlBody: string): Array<{
     }
 
     results.push({
-      owner, name, category, description,
-      stacks, maxStacks, remainingTime, timeUnit,
+      owner,
+      name,
+      category,
+      description,
+      stacks,
+      maxStacks,
+      remainingTime,
+      timeUnit,
       ...(Object.keys(effects).length > 0 ? { effects } : {}),
       ...(Object.keys(effectDescriptions).length > 0 ? { effectDescriptions } : {}),
       ...(Object.keys(scripts).length > 0 ? { scripts } : {}),
@@ -1303,9 +1443,12 @@ function stripInnerTags(s: string): string {
   if (!s || !/<[a-z_]/i.test(s)) return s;
   let out = s;
   for (let i = 0; i < 3 && /<([a-z_][\w-]*)\b[^>]*>[\s\S]*?<\/\1>/i.test(out); i++) {
-    out = out.replace(/<([a-z_][\w-]*)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_m, _t, inner) => `${String(inner).trim()}\n`);
+    out = out.replace(
+      /<([a-z_][\w-]*)\b[^>]*>([\s\S]*?)<\/\1>/gi,
+      (_m, _t, inner) => `${String(inner).trim()}\n`,
+    );
   }
-  out = out.replace(/<\/?[a-z_][\w-]*[^>]*>/gi, '');  // 残留孤立标签清除
+  out = out.replace(/<\/?[a-z_][\w-]*[^>]*>/gi, ''); // 残留孤立标签清除
   return out.replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -1376,7 +1519,7 @@ function extractJSON(text: string): string {
  * 用于新登场 NPC 默认继承玩家当前位置（避免生成在「空串」位置）。
  */
 function resolvePlayerLocation(request: CharGenRequest): string {
-  const player = request.context.characters?.find(c => c.type === 'player');
+  const player = request.context.characters?.find((c) => c.type === 'player');
   return player?.location ?? '';
 }
 

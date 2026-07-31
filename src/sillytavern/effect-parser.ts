@@ -11,63 +11,63 @@ import type { ParsedEffect } from './types';
 
 const CHINESE_TO_KEY: Record<string, string> = {
   // 基础属性
-  '攻击力': 'atk',
-  '防御力': 'def',
-  'HP': 'hp',
-  'MP': 'mp',
-  'SP': 'sp',
-  '力量': 'str',
-  '敏捷': 'dex',
-  '体质': 'con',
-  '智力': 'int',
-  '精神': 'spi',
-  '生命值': 'hp',
-  '法力值': 'mp',
-  '体力值': 'sp',
+  攻击力: 'atk',
+  防御力: 'def',
+  HP: 'hp',
+  MP: 'mp',
+  SP: 'sp',
+  力量: 'str',
+  敏捷: 'dex',
+  体质: 'con',
+  智力: 'int',
+  精神: 'spi',
+  生命值: 'hp',
+  法力值: 'mp',
+  体力值: 'sp',
   // 战斗属性
-  'DR': 'dr',
-  '伤害减免': 'dr',
-  '命中': 'hit',
-  '闪避': 'dodge',
-  '暴击率': 'critRate',
-  '暴击伤害': 'critDmg',
-  '攻速': 'atkSpeed',
-  '移速': 'moveSpeed',
-  '穿透': 'penetration',
-  '穿透率': 'penetration',
-  '格挡': 'block',
+  DR: 'dr',
+  伤害减免: 'dr',
+  命中: 'hit',
+  闪避: 'dodge',
+  暴击率: 'critRate',
+  暴击伤害: 'critDmg',
+  攻速: 'atkSpeed',
+  移速: 'moveSpeed',
+  穿透: 'penetration',
+  穿透率: 'penetration',
+  格挡: 'block',
   // 抗性
-  '火焰抗性': 'fireResist',
-  '冰霜抗性': 'iceResist',
-  '雷电抗性': 'lightningResist',
-  '暗影抗性': 'shadowResist',
-  '光明抗性': 'lightResist',
-  '物理抗性': 'physicalResist',
-  '魔法抗性': 'magicResist',
-  '精神抗性': 'spiritResist',
-  '毒素抗性': 'poisonResist',
+  火焰抗性: 'fireResist',
+  冰霜抗性: 'iceResist',
+  雷电抗性: 'lightningResist',
+  暗影抗性: 'shadowResist',
+  光明抗性: 'lightResist',
+  物理抗性: 'physicalResist',
+  魔法抗性: 'magicResist',
+  精神抗性: 'spiritResist',
+  毒素抗性: 'poisonResist',
   // 伤害加成
-  '火焰伤害': 'fireDmg',
-  '冰霜伤害': 'iceDmg',
-  '雷电伤害': 'lightningDmg',
-  '暗影伤害': 'shadowDmg',
-  '光明伤害': 'lightDmg',
-  '物理伤害': 'physicalDmg',
-  '魔法伤害': 'magicDmg',
+  火焰伤害: 'fireDmg',
+  冰霜伤害: 'iceDmg',
+  雷电伤害: 'lightningDmg',
+  暗影伤害: 'shadowDmg',
+  光明伤害: 'lightDmg',
+  物理伤害: 'physicalDmg',
+  魔法伤害: 'magicDmg',
   // 恢复
-  'HP恢复': 'hpRegen',
-  'MP恢复': 'mpRegen',
-  'SP恢复': 'spRegen',
-  '生命恢复': 'hpRegen',
-  '法力恢复': 'mpRegen',
-  '体力恢复': 'spRegen',
+  HP恢复: 'hpRegen',
+  MP恢复: 'mpRegen',
+  SP恢复: 'spRegen',
+  生命恢复: 'hpRegen',
+  法力恢复: 'mpRegen',
+  体力恢复: 'spRegen',
   // 特殊
-  '经验加成': 'expBonus',
-  '金钱加成': 'moneyBonus',
-  '掉落率': 'dropRate',
-  '冷却缩减': 'cooldownReduction',
-  '技能威力': 'skillPower',
-  '治疗效果': 'healPower',
+  经验加成: 'expBonus',
+  金钱加成: 'moneyBonus',
+  掉落率: 'dropRate',
+  冷却缩减: 'cooldownReduction',
+  技能威力: 'skillPower',
+  治疗效果: 'healPower',
 };
 
 // ========== 解析函数 ==========
@@ -89,7 +89,7 @@ function parseSingleEffect(segment: string): ParsedEffect | null {
   const numMatch = rawValue.match(/([+-]?\d+(?:\.\d+)?)/);
   if (!numMatch) return null;
 
-  let value = parseFloat(numMatch[1]);
+  const value = parseFloat(numMatch[1]);
   const isSubtractive = rawValue.startsWith('-') || value < 0;
 
   // 标准化键
@@ -136,16 +136,18 @@ export function parseEffectDeclaration(raw: string): ParsedEffect[] {
 }
 
 /** 从效果列表中查找指定 key 的值 */
-export function getEffectValue(effects: ParsedEffect[], key: string, defaultValue: number = 0): number {
-  const effect = effects.find(e => e.key === key);
+export function getEffectValue(
+  effects: ParsedEffect[],
+  key: string,
+  defaultValue: number = 0,
+): number {
+  const effect = effects.find((e) => e.key === key);
   return effect ? effect.value : defaultValue;
 }
 
 /** 从效果列表中查找所有匹配 key 的总和 */
 export function sumEffectValues(effects: ParsedEffect[], key: string): number {
-  return effects
-    .filter(e => e.key === key)
-    .reduce((sum, e) => sum + e.value, 0);
+  return effects.filter((e) => e.key === key).reduce((sum, e) => sum + e.value, 0);
 }
 
 // ========== $effect Namespace ==========

@@ -18,7 +18,9 @@ export class LorebookEngine {
   scan(text: string, additionalContext?: string): MatchedEntry[] {
     const normalizedText = this.lorebook.caseSensitive ? text : text.toLowerCase();
     const normalizedContext = additionalContext
-      ? this.lorebook.caseSensitive ? additionalContext : additionalContext.toLowerCase()
+      ? this.lorebook.caseSensitive
+        ? additionalContext
+        : additionalContext.toLowerCase()
       : normalizedText;
 
     const matched: MatchedEntry[] = [];
@@ -39,8 +41,8 @@ export class LorebookEngine {
         matched.push({
           entry,
           score: entry.order,
-          matchedKeywords: entry.keys.filter(k =>
-            this.containsKeyword(normalizedText, this.normalizeKeyword(k))
+          matchedKeywords: entry.keys.filter((k) =>
+            this.containsKeyword(normalizedText, this.normalizeKeyword(k)),
           ),
         });
       }
@@ -49,7 +51,11 @@ export class LorebookEngine {
     return matched.sort((a, b) => a.score - b.score);
   }
 
-  recursiveScan(initialText: string, maxDepth: number = 3, additionalContext?: string): MatchedEntry[] {
+  recursiveScan(
+    initialText: string,
+    maxDepth: number = 3,
+    additionalContext?: string,
+  ): MatchedEntry[] {
     if (!this.lorebook.recursiveScanning || maxDepth <= 0) {
       return this.scan(initialText, additionalContext);
     }
@@ -79,8 +85,14 @@ export class LorebookEngine {
 
   groupByPosition(matched: MatchedEntry[]): Record<LorebookEntry['position'], MatchedEntry[]> {
     const grouped: Record<LorebookEntry['position'], MatchedEntry[]> = {
-      before_char: [], after_char: [], before_example: [], after_example: [], at_depth: [],
-      example_msg_top: [], example_msg_bottom: [], outlet: [],
+      before_char: [],
+      after_char: [],
+      before_example: [],
+      after_example: [],
+      at_depth: [],
+      example_msg_top: [],
+      example_msg_bottom: [],
+      outlet: [],
     };
 
     for (const m of matched) {
@@ -92,7 +104,7 @@ export class LorebookEngine {
 
   formatEntriesContent(entries: MatchedEntry[]): string {
     if (entries.length === 0) return '';
-    return entries.map(e => e.entry.content).join('\n\n');
+    return entries.map((e) => e.entry.content).join('\n\n');
   }
 
   private checkEntryMatch(entry: LorebookEntry, text: string, context: string): boolean {
@@ -100,9 +112,9 @@ export class LorebookEngine {
 
     if (keys.length === 0) return false;
 
-    const primaryMatches = keys.map(k => this.containsKeyword(text, this.normalizeKeyword(k)));
-    const allPrimary = primaryMatches.every(m => m);
-    const anyPrimary = primaryMatches.some(m => m);
+    const primaryMatches = keys.map((k) => this.containsKeyword(text, this.normalizeKeyword(k)));
+    const allPrimary = primaryMatches.every((m) => m);
+    const anyPrimary = primaryMatches.some((m) => m);
 
     let primaryOk = false;
     switch (selectiveLogic) {
@@ -126,11 +138,11 @@ export class LorebookEngine {
       return primaryOk;
     }
 
-    const secondaryMatches = secondaryKeys.map(k =>
-      this.containsKeyword(context, this.normalizeKeyword(k))
+    const secondaryMatches = secondaryKeys.map((k) =>
+      this.containsKeyword(context, this.normalizeKeyword(k)),
     );
-    const allSecondary = secondaryMatches.every(m => m);
-    const anySecondary = secondaryMatches.some(m => m);
+    const allSecondary = secondaryMatches.every((m) => m);
+    const anySecondary = secondaryMatches.some((m) => m);
 
     switch (selectiveLogic) {
       case 'and_all':

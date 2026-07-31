@@ -31,9 +31,23 @@ function makeContext(overrides: Partial<AgentContext> = {}): AgentContext {
 }
 
 function makeCfg(agentId: string, overrides: Partial<AgentConfig> = {}): AgentConfig {
-  return { agentId, enabled: true, apiEndpointId: '', model: '', temperature: 0.7,
-    maxTokens: 4096, topP: 1, frequencyPenalty: 0, presencePenalty: 0, retryOnFail: false, timeout: 0,
-    userId: '', promptTemplate: { fixedSystem: '', fixedExamples: '' }, worldBookIds: [], ...overrides };
+  return {
+    agentId,
+    enabled: true,
+    apiEndpointId: '',
+    model: '',
+    temperature: 0.7,
+    maxTokens: 4096,
+    topP: 1,
+    frequencyPenalty: 0,
+    presencePenalty: 0,
+    retryOnFail: false,
+    timeout: 0,
+    userId: '',
+    promptTemplate: { fixedSystem: '', fixedExamples: '' },
+    worldBookIds: [],
+    ...overrides,
+  };
 }
 
 // ========== Template Existence ==========
@@ -211,10 +225,20 @@ describe('buildAgentMessages', () => {
           expToNext: 100,
           attributes: { str: 10, dex: 10, con: 10, int: 10, spi: 10 },
           freeAttrPoints: 0,
-          hp: 80, maxHp: 100,
-          mp: 30, maxMp: 50,
-          sp: 30, maxSp: 50,
-          ascension: { enabled: false, elements: [], authority: [], law: [], deityPosition: '', divineKingdom: { name: '', description: '' } },
+          hp: 80,
+          maxHp: 100,
+          mp: 30,
+          maxMp: 50,
+          sp: 30,
+          maxSp: 50,
+          ascension: {
+            enabled: false,
+            elements: [],
+            authority: [],
+            law: [],
+            deityPosition: '',
+            divineKingdom: { name: '', description: '' },
+          },
           skills: [],
           inventory: [],
           statusEffects: [],
@@ -351,12 +375,14 @@ describe('buildAgentMessages — SYS_PROMPT assembly', () => {
       systemPrompt: 'should-not-be-used',
       presetId: 'test-preset',
     });
-    const presets: AgentPreset[] = [{
-      id: 'test-preset',
-      name: 'Test Preset',
-      fixedSystem: 'PRESET_CONTENT',
-      fixedExamples: '',
-    } as AgentPreset];
+    const presets: AgentPreset[] = [
+      {
+        id: 'test-preset',
+        name: 'Test Preset',
+        fixedSystem: 'PRESET_CONTENT',
+        fixedExamples: '',
+      } as AgentPreset,
+    ];
     const messages = buildAgentMessages('story', ctx, [cfg], [], presets);
     expect(messages).not.toBeNull();
     // 预设内容应出现在结果中
@@ -371,12 +397,15 @@ describe('buildAgentMessages — SYS_PROMPT assembly', () => {
       agentOutputs: new Map([['memory_recall', '{"memories":[{"id":"M1"}]}']]),
     });
     const cfg = makeCfg('story', { presetId: 'spec-preset' });
-    const presets: AgentPreset[] = [{
-      id: 'spec-preset',
-      name: 'Spec Preset',
-      fixedSystem: 'VOID 核心提示词。\n<本次任务信息参考>\n<LORE_BOOK>{{LORE_BOOK}}</LORE_BOOK>\n<USER_INPUT>{{USER_INPUT}}</USER_INPUT>\n<MEMORY>{{AGENT.MEMORY_RECALL}}</MEMORY>\n</本次任务信息参考>',
-      fixedExamples: '',
-    } as AgentPreset];
+    const presets: AgentPreset[] = [
+      {
+        id: 'spec-preset',
+        name: 'Spec Preset',
+        fixedSystem:
+          'VOID 核心提示词。\n<本次任务信息参考>\n<LORE_BOOK>{{LORE_BOOK}}</LORE_BOOK>\n<USER_INPUT>{{USER_INPUT}}</USER_INPUT>\n<MEMORY>{{AGENT.MEMORY_RECALL}}</MEMORY>\n</本次任务信息参考>',
+        fixedExamples: '',
+      } as AgentPreset,
+    ];
     const messages = buildAgentMessages('story', ctx, [cfg], [], presets);
     expect(messages).not.toBeNull();
     const content = messages![0].content;
@@ -396,9 +425,17 @@ describe('buildAgentMessages — SYS_PROMPT assembly', () => {
 
 describe('buildAgentMessages — return format (Phase 10 single system msg)', () => {
   const agentsWithTemplates = [
-    'story', 'memory_recall', 'plot_pre_check',
-    'request_dispatcher', 'request_dispatcher', 'memory_summary', 'plot_post_check',
-    'plot_outline', 'craft_gen', 'char_gen', 'item_gen',
+    'story',
+    'memory_recall',
+    'plot_pre_check',
+    'request_dispatcher',
+    'request_dispatcher',
+    'memory_summary',
+    'plot_post_check',
+    'plot_outline',
+    'craft_gen',
+    'char_gen',
+    'item_gen',
   ];
 
   for (const agentId of agentsWithTemplates) {
@@ -418,9 +455,15 @@ describe('buildAgentMessages — return format (Phase 10 single system msg)', ()
 // ========== Template Quality Checks (Phase 10: relaxed for externalized prompts) ==========
 
 // Phase 10: craft_gen/char_gen/item_gen have prompts in agent-config.json, not here
-const EXTERNALIZED_IDS = new Set(['plot_check', 'plot_correct', 'item_gen', 'craft_gen', 'char_gen', 'combat']);
-const activeTemplates = Object.entries(AGENT_TEMPLATES)
-  .filter(([id]) => !EXTERNALIZED_IDS.has(id));
+const EXTERNALIZED_IDS = new Set([
+  'plot_check',
+  'plot_correct',
+  'item_gen',
+  'craft_gen',
+  'char_gen',
+  'combat',
+]);
+const activeTemplates = Object.entries(AGENT_TEMPLATES).filter(([id]) => !EXTERNALIZED_IDS.has(id));
 
 describe('模板质量 (Phase 10)', () => {
   it('所有完整模板 fixedSystem 应非空', () => {
@@ -488,11 +531,11 @@ describe('默认截断字数 defaultHistorySlice', () => {
 
 describe('formatHistory 读取 per-agent 配置', () => {
   it('story 默认注入最近 6*2=12 条 (历史不足则全注入)', () => {
-    const ctx = makeContext({ history: makeHistory(8) });   // 8 条历史 < 12
+    const ctx = makeContext({ history: makeHistory(8) }); // 8 条历史 < 12
     const cfg = makeCfg('story');
     const msgs = buildAgentMessages('story', ctx, [cfg]);
     // Phase 10: NARRATIVE resolved into single system message via defaultHistoryLayers(6)
-    expect(countHistoryEntries(msgs![0].content)).toBe(8);  // 全部 8 条
+    expect(countHistoryEntries(msgs![0].content)).toBe(8); // 全部 8 条
   });
   it('memory_summary 默认(4层)注入最近 8 条历史 (Phase 10: via {{NARRATIVE:layers=4}})', () => {
     const ctx = makeContext({
@@ -529,7 +572,10 @@ describe('formatHistory 读取 per-agent 配置', () => {
   it('story 默认不再截断正文（:slice 已退役）', () => {
     const long = '长'.repeat(2000);
     const ctx = makeContext({
-      history: [{ role: 'user', content: long } as any, { role: 'assistant', content: long } as any],
+      history: [
+        { role: 'user', content: long } as any,
+        { role: 'assistant', content: long } as any,
+      ],
       agentOutputs: new Map([['story', 'X']]),
     });
     const cfg = makeCfg('story');

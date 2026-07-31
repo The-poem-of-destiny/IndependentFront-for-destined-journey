@@ -1,0 +1,17 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# *.bat 由 .gitattributes 钉死为 CRLF（dev.bat-notes.md：cmd 字节偏移解析器要求）
+[*.bat]
+end_of_line = crlf
+
+# Markdown 双空格换行需要保留尾随空格
+[*.md]
+trim_trailing_whitespace = false

@@ -1,5 +1,5 @@
 /* ===== Blood Rose Window — Rose Reliquary ===== */
-[data-theme="crimson"] {
+[data-theme='crimson'] {
   --theme-window-bg: #100e11;
   --theme-window-border: #423238;
   --theme-content-bg: #171317;
@@ -61,37 +61,36 @@
   --theme-shadow-md: 0 3px 7px rgba(0, 0, 0, 0.44);
   --theme-shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.5);
   --paper-stack:
-    inset 0 1px rgba(240, 220, 210, 0.055),
-    inset 0 -1px rgba(91, 20, 31, 0.16),
+    inset 0 1px rgba(240, 220, 210, 0.055), inset 0 -1px rgba(91, 20, 31, 0.16),
     0 3px 6px rgba(0, 0, 0, 0.36);
 
-  --crimson-vine: url("../assets/themes/crimson/rose-vine-reliquary.png");
-  --crimson-avatar: url("../assets/themes/crimson/avatar-rose-reliquary.png");
-  --crimson-control: url("../assets/themes/crimson/blood-glass-control.png");
-  --crimson-notification-frame: url("../assets/themes/crimson/reliquary-notification-frame.png");
-  --crimson-tab-strip: url("../assets/themes/crimson/reliquary-tab-strip-v7.png");
-  --crimson-tab-cap: url("../assets/themes/crimson/reliquary-tab-cap-v4.png");
-  --crimson-command-seal: url("../assets/themes/crimson/reliquary-command-seal.png");
-  --crimson-right-panel: url("../assets/themes/crimson/right-panel-stone-petals-option-1.png");
-  --crimson-quest-frame-1: url("../assets/themes/crimson/quest-panel-9slice-option-1-slice.png");
-  --crimson-quest-frame-2: url("../assets/themes/crimson/quest-panel-9slice-option-2-slice.png");
-  --crimson-quest-frame-3: url("../assets/themes/crimson/quest-panel-9slice-option-3-slice.png");
-  --crimson-quest-blood-tile: url("../assets/themes/crimson/quest-blood-gem-tile.png");
+  --crimson-vine: url('../assets/themes/crimson/rose-vine-reliquary.png');
+  --crimson-avatar: url('../assets/themes/crimson/avatar-rose-reliquary.png');
+  --crimson-control: url('../assets/themes/crimson/blood-glass-control.png');
+  --crimson-notification-frame: url('../assets/themes/crimson/reliquary-notification-frame.png');
+  --crimson-tab-strip: url('../assets/themes/crimson/reliquary-tab-strip-v7.png');
+  --crimson-tab-cap: url('../assets/themes/crimson/reliquary-tab-cap-v4.png');
+  --crimson-command-seal: url('../assets/themes/crimson/reliquary-command-seal.png');
+  --crimson-right-panel: url('../assets/themes/crimson/right-panel-stone-petals-option-1.png');
+  --crimson-quest-frame-1: url('../assets/themes/crimson/quest-panel-9slice-option-1-slice.png');
+  --crimson-quest-frame-2: url('../assets/themes/crimson/quest-panel-9slice-option-2-slice.png');
+  --crimson-quest-frame-3: url('../assets/themes/crimson/quest-panel-9slice-option-3-slice.png');
+  --crimson-quest-blood-tile: url('../assets/themes/crimson/quest-blood-gem-tile.png');
 }
 
 /* The narrative stays on a calm matte reading plane. */
-:root[data-theme="crimson"] body .game-page-layout,
-:root[data-theme="crimson"] body .game-page-layout .chat-flow,
-:root[data-theme="crimson"] body .game-page-layout .chat-messages {
+:root[data-theme='crimson'] body .game-page-layout,
+:root[data-theme='crimson'] body .game-page-layout .chat-flow,
+:root[data-theme='crimson'] body .game-page-layout .chat-messages {
   background: #0b0b0d;
 }
 
-:root[data-theme="crimson"] body .game-page-layout {
+:root[data-theme='crimson'] body .game-page-layout {
   box-shadow: inset 0 0 0 1px rgb(var(--crimson-inlay-gold-rgb) / 18%);
 }
 
 /* Top plane: matte glass with the blood layer visible only at the ends. */
-:root[data-theme="crimson"] body .game-page-layout .top-bar {
+:root[data-theme='crimson'] body .game-page-layout .top-bar {
   position: relative;
   z-index: 4;
   background-color: #0e0e10;
@@ -104,24 +103,24 @@
     0 2px 5px rgba(0, 0, 0, 0.42);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .top-btn {
+:root[data-theme='crimson'] body .game-page-layout .top-btn {
   border: 1px solid transparent;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .top-btn:hover,
-:root[data-theme="crimson"] body .game-page-layout .top-btn:focus-visible {
+:root[data-theme='crimson'] body .game-page-layout .top-btn:hover,
+:root[data-theme='crimson'] body .game-page-layout .top-btn:focus-visible {
   border-color: rgba(177, 69, 83, 0.32);
   background: rgba(56, 25, 31, 0.72);
   outline: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .top-title-rule {
+:root[data-theme='crimson'] body .game-page-layout .top-title-rule {
   background: var(--theme-fate-gold);
   opacity: 0.36;
 }
 
 /* Left reliquary: a real botanical asset behind the usable panel. */
-:root[data-theme="crimson"] body .game-page-layout .scene-panel {
+:root[data-theme='crimson'] body .game-page-layout .scene-panel {
   position: relative;
   isolation: isolate;
   background-color: #0d0d0f;
@@ -135,7 +134,7 @@
     3px 0 6px rgba(0, 0, 0, 0.3);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-top {
+:root[data-theme='crimson'] body .game-page-layout .scene-top {
   position: relative;
   z-index: 1;
   background: rgba(13, 13, 15, 0.88);
@@ -146,14 +145,14 @@
   backdrop-filter: blur(10px) saturate(0.72);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-tab-body {
+:root[data-theme='crimson'] body .game-page-layout .scene-tab-body {
   position: relative;
   z-index: 1;
   background: rgba(10, 10, 12, 0.46);
 }
 
 /* Side rail is the driest foreground plane. */
-:root[data-theme="crimson"] body .game-page-layout .side-toolbar {
+:root[data-theme='crimson'] body .game-page-layout .side-toolbar {
   position: relative;
   isolation: isolate;
   background: rgba(13, 12, 14, 0.98);
@@ -163,8 +162,8 @@
     2px 0 5px rgba(0, 0, 0, 0.34);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .side-toolbar::before {
-  content: "";
+:root[data-theme='crimson'] body .game-page-layout .side-toolbar::before {
+  content: '';
   position: absolute;
   z-index: -1;
   inset: 54% 0 0;
@@ -176,13 +175,13 @@
   pointer-events: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .tool-btn {
+:root[data-theme='crimson'] body .game-page-layout .tool-btn {
   border: 1px solid transparent;
   background: rgba(14, 13, 15, 0.58);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .tool-btn:hover,
-:root[data-theme="crimson"] body .game-page-layout .tool-btn:focus-visible {
+:root[data-theme='crimson'] body .game-page-layout .tool-btn:hover,
+:root[data-theme='crimson'] body .game-page-layout .tool-btn:focus-visible {
   border-color: rgba(174, 60, 77, 0.32);
   background: rgba(45, 24, 29, 0.86);
   color: var(--theme-tab-active-text);
@@ -190,9 +189,9 @@
 }
 
 /* Shared tab language: foreground labels over one continuous layered plate. */
-:root[data-theme="crimson"] body .game-page-layout .tab-bar,
-:root[data-theme="crimson"] body .cat-tabs,
-:root[data-theme="crimson"] body .tab-row {
+:root[data-theme='crimson'] body .game-page-layout .tab-bar,
+:root[data-theme='crimson'] body .cat-tabs,
+:root[data-theme='crimson'] body .tab-row {
   background-color: #151315;
   background-image: var(--crimson-control);
   background-size: 100% 100%;
@@ -203,26 +202,26 @@
     0 3px 6px rgba(0, 0, 0, 0.34);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .tab-item,
-:root[data-theme="crimson"] body .cat-tabs button,
-:root[data-theme="crimson"] body .tab-row button {
+:root[data-theme='crimson'] body .game-page-layout .tab-item,
+:root[data-theme='crimson'] body .cat-tabs button,
+:root[data-theme='crimson'] body .tab-row button {
   border: 1px solid transparent;
   background: rgba(13, 12, 14, 0.46);
   color: var(--theme-tab-text);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .tab-item:hover,
-:root[data-theme="crimson"] body .game-page-layout .tab-item:focus-visible,
-:root[data-theme="crimson"] body .cat-tabs button:hover,
-:root[data-theme="crimson"] body .tab-row button:hover {
+:root[data-theme='crimson'] body .game-page-layout .tab-item:hover,
+:root[data-theme='crimson'] body .game-page-layout .tab-item:focus-visible,
+:root[data-theme='crimson'] body .cat-tabs button:hover,
+:root[data-theme='crimson'] body .tab-row button:hover {
   background: rgba(58, 27, 33, 0.72);
   color: var(--theme-tab-active-text);
   outline: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .tab-active,
-:root[data-theme="crimson"] body .cat-tabs button.active,
-:root[data-theme="crimson"] body .tab-row button.active {
+:root[data-theme='crimson'] body .game-page-layout .tab-active,
+:root[data-theme='crimson'] body .cat-tabs button.active,
+:root[data-theme='crimson'] body .tab-row button.active {
   border-color: rgba(190, 63, 82, 0.44);
   background: rgba(102, 26, 39, 0.62);
   color: #f3e4dd;
@@ -231,24 +230,24 @@
     inset 0 -2px #b53b4e;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .tab-active::after {
+:root[data-theme='crimson'] body .game-page-layout .tab-active::after {
   background: transparent;
 }
 
 /* Controls sit one plane above the rear blood glass. */
-:root[data-theme="crimson"] body .game-page-layout .quest-item,
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-item,
-:root[data-theme="crimson"] body .game-page-layout .news-item,
-:root[data-theme="crimson"] body .game-page-layout .system-notif,
-:root[data-theme="crimson"] body .game-page-layout .item-row,
-:root[data-theme="crimson"] body .game-page-layout .item-detail,
-:root[data-theme="crimson"] body .items-panel .money-bar,
-:root[data-theme="crimson"] body .items-panel .item-list,
-:root[data-theme="crimson"] body .items-panel .detail,
-:root[data-theme="crimson"] body .char-panel .fp-bar,
-:root[data-theme="crimson"] body .char-panel .npc-card,
-:root[data-theme="crimson"] body .char-panel .detail,
-:root[data-theme="crimson"] body .char-panel .ov-card {
+:root[data-theme='crimson'] body .game-page-layout .quest-item,
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-item,
+:root[data-theme='crimson'] body .game-page-layout .news-item,
+:root[data-theme='crimson'] body .game-page-layout .system-notif,
+:root[data-theme='crimson'] body .game-page-layout .item-row,
+:root[data-theme='crimson'] body .game-page-layout .item-detail,
+:root[data-theme='crimson'] body .items-panel .money-bar,
+:root[data-theme='crimson'] body .items-panel .item-list,
+:root[data-theme='crimson'] body .items-panel .detail,
+:root[data-theme='crimson'] body .char-panel .fp-bar,
+:root[data-theme='crimson'] body .char-panel .npc-card,
+:root[data-theme='crimson'] body .char-panel .detail,
+:root[data-theme='crimson'] body .char-panel .ov-card {
   background-color: rgba(18, 16, 18, 0.94);
   background-image: var(--crimson-control);
   background-size: 100% 100%;
@@ -260,22 +259,22 @@
     0 3px 6px rgba(0, 0, 0, 0.34);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-item {
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-item {
   border: 1px solid rgba(78, 46, 51, 0.58);
   margin-bottom: 3px;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .quest-item:hover,
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-item:hover,
-:root[data-theme="crimson"] body .game-page-layout .news-item:hover,
-:root[data-theme="crimson"] body .game-page-layout .system-notif:hover,
-:root[data-theme="crimson"] body .game-page-layout .item-row:hover {
+:root[data-theme='crimson'] body .game-page-layout .quest-item:hover,
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-item:hover,
+:root[data-theme='crimson'] body .game-page-layout .news-item:hover,
+:root[data-theme='crimson'] body .game-page-layout .system-notif:hover,
+:root[data-theme='crimson'] body .game-page-layout .item-row:hover {
   border-color: rgba(177, 55, 73, 0.48);
   background-color: rgba(34, 21, 25, 0.96);
 }
 
 /* Right reliquary and its botanical rear plane. */
-:root[data-theme="crimson"] body .game-page-layout .status-hud {
+:root[data-theme='crimson'] body .game-page-layout .status-hud {
   position: relative;
   isolation: isolate;
   background: #0c0c0e;
@@ -286,8 +285,8 @@
     -3px 0 6px rgba(0, 0, 0, 0.3);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-hud::after {
-  content: "";
+:root[data-theme='crimson'] body .game-page-layout .status-hud::after {
+  content: '';
   position: absolute;
   z-index: 0;
   right: -8%;
@@ -304,24 +303,24 @@
   pointer-events: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-overview {
+:root[data-theme='crimson'] body .game-page-layout .status-overview {
   position: relative;
   z-index: 1;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-overview > .section {
+:root[data-theme='crimson'] body .game-page-layout .status-overview > .section {
   position: relative;
   background: rgba(12, 12, 14, 0.82);
   border-bottom-color: rgba(78, 46, 51, 0.72);
   backdrop-filter: blur(7px) saturate(0.74);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-overview > .section:first-child {
+:root[data-theme='crimson'] body .game-page-layout .status-overview > .section:first-child {
   background: #080809;
 }
 
 /* The avatar is the central matte disk; the generated asset supplies the single gold ring. */
-:root[data-theme="crimson"] body .game-page-layout .player-summary {
+:root[data-theme='crimson'] body .game-page-layout .player-summary {
   min-height: 250px;
   justify-content: center;
   background-color: #080809;
@@ -332,7 +331,7 @@
   background-blend-mode: screen;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .avatar.avatar-xl {
+:root[data-theme='crimson'] body .game-page-layout .avatar.avatar-xl {
   width: 138px;
   height: 138px;
   max-width: none;
@@ -345,7 +344,7 @@
     inset 0 -2px rgba(0, 0, 0, 0.52);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .summary-name {
+:root[data-theme='crimson'] body .game-page-layout .summary-name {
   padding: 4px 16px;
   background: rgba(12, 12, 14, 0.82);
   border: 1px solid rgb(var(--crimson-inlay-gold-rgb) / 24%);
@@ -354,15 +353,15 @@
 }
 
 /* Parent ledger rows stay structurally simple; children carry the layered material. */
-:root[data-theme="crimson"] body .game-page-layout .section-header {
+:root[data-theme='crimson'] body .game-page-layout .section-header {
   background: rgba(14, 13, 15, 0.76);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .section-title {
+:root[data-theme='crimson'] body .game-page-layout .section-title {
   color: #c8b4ab;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .kv-item {
+:root[data-theme='crimson'] body .game-page-layout .kv-item {
   background: rgba(26, 21, 23, 0.92);
   border: 1px solid rgba(76, 46, 51, 0.54);
   box-shadow:
@@ -370,20 +369,20 @@
     0 2px 4px rgba(0, 0, 0, 0.28);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body {
+:root[data-theme='crimson'] body .game-page-layout .hold-body {
   background: rgba(9, 9, 11, 0.42);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .item-entry {
+:root[data-theme='crimson'] body .game-page-layout .item-entry {
   border-bottom: 1px solid rgba(73, 43, 48, 0.5);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .item-entry:last-child {
+:root[data-theme='crimson'] body .game-page-layout .item-entry:last-child {
   border-bottom: none;
 }
 
 /* Four resource fluids remain distinct and lighter than the surrounding oxblood. */
-:root[data-theme="crimson"] body .game-page-layout .res-track {
+:root[data-theme='crimson'] body .game-page-layout .res-track {
   background: #1a1719;
   border: 1px solid rgba(91, 54, 60, 0.62);
   box-shadow:
@@ -391,30 +390,50 @@
     inset 0 1px rgba(240, 220, 210, 0.035);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .section-body .resource-bar:nth-child(1) .res-fill {
+:root[data-theme='crimson']
+  body
+  .game-page-layout
+  .section-body
+  .resource-bar:nth-child(1)
+  .res-fill {
   background: #b94753 !important;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .section-body .resource-bar:nth-child(2) .res-fill {
+:root[data-theme='crimson']
+  body
+  .game-page-layout
+  .section-body
+  .resource-bar:nth-child(2)
+  .res-fill {
   background: #626ca6 !important;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .section-body .resource-bar:nth-child(3) .res-fill {
+:root[data-theme='crimson']
+  body
+  .game-page-layout
+  .section-body
+  .resource-bar:nth-child(3)
+  .res-fill {
   background: #567f60 !important;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .section-body .resource-bar:nth-child(4) .res-fill {
+:root[data-theme='crimson']
+  body
+  .game-page-layout
+  .section-body
+  .resource-bar:nth-child(4)
+  .res-fill {
   background: #a9803f !important;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .res-fill {
+:root[data-theme='crimson'] body .game-page-layout .res-fill {
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.12),
     inset 0 -2px rgba(0, 0, 0, 0.24);
 }
 
 /* Input is one connected reliquary, with the command field kept matte. */
-:root[data-theme="crimson"] body .game-page-layout .input-bar {
+:root[data-theme='crimson'] body .game-page-layout .input-bar {
   background-color: #0e0d0f;
   background-image: var(--crimson-control);
   background-size: 100% 100%;
@@ -425,20 +444,20 @@
     0 -3px 6px rgba(0, 0, 0, 0.36);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .input-field {
+:root[data-theme='crimson'] body .game-page-layout .input-field {
   background: rgba(11, 11, 13, 0.94);
   border-color: rgba(84, 49, 55, 0.86);
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.46);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .input-field:focus {
+:root[data-theme='crimson'] body .game-page-layout .input-field:focus {
   border-color: rgb(var(--crimson-inlay-gold-rgb) / 58%);
   box-shadow:
     inset 0 2px 4px rgba(0, 0, 0, 0.46),
     0 0 0 2px rgba(180, 59, 77, 0.13);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .input-btn {
+:root[data-theme='crimson'] body .game-page-layout .input-btn {
   background-color: rgba(49, 22, 28, 0.92);
   background-image: var(--crimson-control);
   background-size: auto 100%;
@@ -449,8 +468,8 @@
     0 2px 5px rgba(0, 0, 0, 0.4);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .input-btn:hover,
-:root[data-theme="crimson"] body .game-page-layout .input-btn:focus-visible {
+:root[data-theme='crimson'] body .game-page-layout .input-btn:hover,
+:root[data-theme='crimson'] body .game-page-layout .input-btn:focus-visible {
   background-color: rgba(91, 26, 38, 0.96);
   border-color: rgb(var(--crimson-inlay-gold-rgb) / 42%);
   outline: none;
@@ -471,11 +490,11 @@
  * If a texture comes back here it needs `background-size` that preserves its aspect
  * (`cover`, or a 9-slice via border-image) — not `100% 100%`.
  */
-:root[data-theme="crimson"] body .options-popup,
-:root[data-theme="crimson"] body .ctx-menu,
-:root[data-theme="crimson"] body .buff-pop,
-:root[data-theme="crimson"] body .thought-bubble,
-:root[data-theme="crimson"] body .modal-content {
+:root[data-theme='crimson'] body .options-popup,
+:root[data-theme='crimson'] body .ctx-menu,
+:root[data-theme='crimson'] body .buff-pop,
+:root[data-theme='crimson'] body .thought-bubble,
+:root[data-theme='crimson'] body .modal-content {
   background-color: #131113;
   border-color: rgba(95, 53, 60, 0.82);
   box-shadow:
@@ -484,32 +503,32 @@
 }
 
 /* Modal sub-surfaces use the same dry-front / blood-rear language. */
-:root[data-theme="crimson"] body .items-panel .item-row,
-:root[data-theme="crimson"] body .char-panel .npc-card,
-:root[data-theme="crimson"] body .char-panel .tab-row button,
-:root[data-theme="crimson"] body .filter-bar button {
+:root[data-theme='crimson'] body .items-panel .item-row,
+:root[data-theme='crimson'] body .char-panel .npc-card,
+:root[data-theme='crimson'] body .char-panel .tab-row button,
+:root[data-theme='crimson'] body .filter-bar button {
   border-color: rgba(79, 46, 52, 0.68);
 }
 
-:root[data-theme="crimson"] body .items-panel .item-row.selected,
-:root[data-theme="crimson"] body .char-panel .npc-card.selected,
-:root[data-theme="crimson"] body .filter-bar button.active {
+:root[data-theme='crimson'] body .items-panel .item-row.selected,
+:root[data-theme='crimson'] body .char-panel .npc-card.selected,
+:root[data-theme='crimson'] body .filter-bar button.active {
   background-color: rgba(82, 27, 38, 0.68);
   border-color: rgb(var(--crimson-inlay-gold-rgb) / 38%);
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  :root[data-theme="crimson"] body .game-page-layout .scene-top,
-  :root[data-theme="crimson"] body .game-page-layout .status-overview > .section {
+  :root[data-theme='crimson'] body .game-page-layout .scene-top,
+  :root[data-theme='crimson'] body .game-page-layout .status-overview > .section {
     backdrop-filter: none;
     background-color: #111012;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root[data-theme="crimson"] body .game-page-layout .tab-item,
-  :root[data-theme="crimson"] body .game-page-layout .tool-btn,
-  :root[data-theme="crimson"] body .game-page-layout .input-btn {
+  :root[data-theme='crimson'] body .game-page-layout .tab-item,
+  :root[data-theme='crimson'] body .game-page-layout .tool-btn,
+  :root[data-theme='crimson'] body .game-page-layout .input-btn {
     transition: none;
   }
 }
@@ -518,11 +537,11 @@
    The app keeps one shared layout; the crimson theme changes how its planes
    overlap and how selected controls rise out of their parent ledgers. */
 
-:root[data-theme="crimson"] body .game-page-layout {
+:root[data-theme='crimson'] body .game-page-layout {
   background: #0d0b0e;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .top-bar {
+:root[data-theme='crimson'] body .game-page-layout .top-bar {
   min-height: 3.1rem;
   padding-inline: 18px;
   background-color: #171317;
@@ -533,16 +552,16 @@
     0 4px 7px rgba(0, 0, 0, 0.48);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .game-body {
+:root[data-theme='crimson'] body .game-page-layout .game-body {
   background-color: #0d0b0e;
   gap: 7px;
   padding: 8px 8px 10px 0;
 }
 
 /* The three columns are separate reliquary bodies instead of one black sheet. */
-:root[data-theme="crimson"] body .game-page-layout .scene-panel,
-:root[data-theme="crimson"] body .game-page-layout .chat-flow,
-:root[data-theme="crimson"] body .game-page-layout .status-hud {
+:root[data-theme='crimson'] body .game-page-layout .scene-panel,
+:root[data-theme='crimson'] body .game-page-layout .chat-flow,
+:root[data-theme='crimson'] body .game-page-layout .status-hud {
   margin-block: 0;
   border: 1px solid rgba(134, 78, 84, 0.82);
   background-color: #171417;
@@ -563,23 +582,23 @@
     inset 0 -3px rgba(104, 22, 36, 0.24);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-panel {
+:root[data-theme='crimson'] body .game-page-layout .scene-panel {
   width: calc(25% - var(--rail-w, 4.2rem) - 8px);
   zoom: 1;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .chat-flow {
+:root[data-theme='crimson'] body .game-page-layout .chat-flow {
   isolation: isolate;
   background: #171518;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-hud {
+:root[data-theme='crimson'] body .game-page-layout .status-hud {
   width: calc(25% - 8px);
   zoom: 1;
   background: #151216;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .chat-messages {
+:root[data-theme='crimson'] body .game-page-layout .chat-messages {
   background: #171518;
   padding: 28px 26px 36px;
   box-shadow:
@@ -588,13 +607,13 @@
 }
 
 /* Left ledger: the scene header is a floating irregular plate over the rose bed. */
-:root[data-theme="crimson"] body .game-page-layout .scene-panel {
+:root[data-theme='crimson'] body .game-page-layout .scene-panel {
   background-color: #141115;
   background-size: 112% 100%;
   background-position: 48% center;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-top {
+:root[data-theme='crimson'] body .game-page-layout .scene-top {
   margin: 10px 10px 8px;
   padding: 14px 15px 12px;
   border: 1px solid rgba(123, 76, 81, 0.78);
@@ -616,7 +635,7 @@
     0 5px 7px rgba(0, 0, 0, 0.52);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-tab-body {
+:root[data-theme='crimson'] body .game-page-layout .scene-tab-body {
   margin: 0 8px 8px;
   padding: 12px 10px 18px;
   border: 1px solid rgba(82, 52, 59, 0.64);
@@ -635,7 +654,7 @@
 }
 
 /* Scene tabs use the same continuous stone ledger as inventory. */
-:root[data-theme="crimson"] body .game-page-layout .scene-panel > .tab-bar {
+:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar {
   position: relative;
   overflow: visible;
   margin: 0 8px;
@@ -648,21 +667,17 @@
   background-size: 100% 100%;
   border: 0;
   box-shadow: none;
-  filter:
-    brightness(1.2)
-    contrast(1.08)
-    saturate(0.9)
-    drop-shadow(0 2px 2px rgba(0, 0, 0, 0.76));
+  filter: brightness(1.2) contrast(1.08) saturate(0.9) drop-shadow(0 2px 2px rgba(0, 0, 0, 0.76));
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-panel > .tab-bar .tab-list {
+:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-list {
   position: relative;
   overflow: visible;
   align-items: stretch;
   height: 100%;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-panel > .tab-bar .tab-item {
+:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-item {
   position: relative;
   z-index: 1;
   flex: 1 1 25%;
@@ -684,22 +699,22 @@
     text-shadow 180ms ease-out;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-panel > .tab-bar .tab-item .tab-label,
-:root[data-theme="crimson"] body .game-page-layout .scene-panel > .tab-bar .tab-item .tab-badge {
+:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-item .tab-label,
+:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-item .tab-badge {
   position: relative;
   z-index: 3;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-panel > .tab-bar .tab-item .tab-label {
+:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-item .tab-label {
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.82);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-panel > .tab-bar .tab-item:hover {
+:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-item:hover {
   color: #c7b1aa;
   background: transparent;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-panel > .tab-bar .tab-active {
+:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-active {
   z-index: 3;
   min-height: 0;
   height: 100%;
@@ -714,8 +729,8 @@
   text-shadow: 0 0 7px rgba(151, 43, 57, 0.34);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-panel > .tab-bar .tab-active::before {
-  content: "";
+:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-active::before {
+  content: '';
   position: absolute;
   z-index: 1;
   inset: 0;
@@ -726,28 +741,24 @@
   background-position: center;
   background-size: 100% 100%;
   opacity: 1;
-  filter:
-    brightness(1.18)
-    contrast(1.08)
-    saturate(1.04)
-    drop-shadow(0 3px 2px rgba(0, 0, 0, 0.74))
+  filter: brightness(1.18) contrast(1.08) saturate(1.04) drop-shadow(0 3px 2px rgba(0, 0, 0, 0.74))
     drop-shadow(0 1px 2px rgba(177, 28, 49, 0.52));
   clip-path: none;
   box-shadow: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-panel > .tab-bar .tab-active::after {
+:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-active::after {
   display: none;
 }
 
 /* NPC entries are shallow stone ledgers floating above the rose bed. */
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-list {
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-list {
   gap: 8px;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-item,
-:root[data-theme="crimson"] body .game-page-layout .quest-item,
-:root[data-theme="crimson"] body .game-page-layout .news-item {
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-item,
+:root[data-theme='crimson'] body .game-page-layout .quest-item,
+:root[data-theme='crimson'] body .game-page-layout .news-item {
   position: relative;
   isolation: isolate;
   min-height: 72px;
@@ -760,10 +771,10 @@
   box-shadow: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-item::before,
-:root[data-theme="crimson"] body .game-page-layout .quest-item::before,
-:root[data-theme="crimson"] body .game-page-layout .news-item::before {
-  content: "";
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-item::before,
+:root[data-theme='crimson'] body .game-page-layout .quest-item::before,
+:root[data-theme='crimson'] body .game-page-layout .news-item::before {
+  content: '';
   position: absolute;
   z-index: -1;
   inset: 0;
@@ -779,26 +790,24 @@
   transition: filter 180ms ease-out;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-item:hover,
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-item:focus-visible,
-:root[data-theme="crimson"] body .game-page-layout .quest-item:hover,
-:root[data-theme="crimson"] body .game-page-layout .news-item:hover {
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-item:hover,
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-item:focus-visible,
+:root[data-theme='crimson'] body .game-page-layout .quest-item:hover,
+:root[data-theme='crimson'] body .game-page-layout .news-item:hover {
   background-color: transparent;
   border-color: transparent;
-  filter:
-    drop-shadow(0 5px 6px rgba(0, 0, 0, 0.58))
-    drop-shadow(0 1px 2px rgba(157, 35, 53, 0.5));
+  filter: drop-shadow(0 5px 6px rgba(0, 0, 0, 0.58)) drop-shadow(0 1px 2px rgba(157, 35, 53, 0.5));
   outline: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-item:hover::before,
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-item:focus-visible::before,
-:root[data-theme="crimson"] body .game-page-layout .quest-item:hover::before,
-:root[data-theme="crimson"] body .game-page-layout .news-item:hover::before {
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-item:hover::before,
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-item:focus-visible::before,
+:root[data-theme='crimson'] body .game-page-layout .quest-item:hover::before,
+:root[data-theme='crimson'] body .game-page-layout .news-item:hover::before {
   filter: brightness(1) contrast(1.06) saturate(0.9);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .npc-portrait {
+:root[data-theme='crimson'] body .game-page-layout .npc-portrait {
   width: 50px;
   height: 50px;
   clip-path: polygon(18% 0, 82% 0, 100% 18%, 100% 82%, 82% 100%, 18% 100%, 0 82%, 0 18%);
@@ -811,7 +820,7 @@
 
 /* System messages use the same shallow stone ledger, with compact event types
    allowed to remain shorter than the narrative column. */
-:root[data-theme="crimson"] body .game-page-layout .system-notif {
+:root[data-theme='crimson'] body .game-page-layout .system-notif {
   position: relative;
   isolation: isolate;
   width: min(100%, 47rem);
@@ -822,13 +831,11 @@
   background: transparent;
   color: #dac5ba;
   box-shadow: none;
-  filter:
-    drop-shadow(0 5px 5px rgba(0, 0, 0, 0.64))
-    drop-shadow(0 1px 1px rgba(142, 27, 43, 0.36));
+  filter: drop-shadow(0 5px 5px rgba(0, 0, 0, 0.64)) drop-shadow(0 1px 1px rgba(142, 27, 43, 0.36));
 }
 
-:root[data-theme="crimson"] body .game-page-layout .system-notif::before {
-  content: "";
+:root[data-theme='crimson'] body .game-page-layout .system-notif::before {
+  content: '';
   position: absolute;
   z-index: -1;
   inset: 0;
@@ -844,40 +851,38 @@
   transition: filter 180ms ease-out;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .system-notif-character_update,
-:root[data-theme="crimson"] body .game-page-layout .system-notif-item_update,
-:root[data-theme="crimson"] body .game-page-layout .system-notif-quest_update {
+:root[data-theme='crimson'] body .game-page-layout .system-notif-character_update,
+:root[data-theme='crimson'] body .game-page-layout .system-notif-item_update,
+:root[data-theme='crimson'] body .game-page-layout .system-notif-quest_update {
   width: auto;
   max-width: 84%;
   min-width: 42%;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .system-notif:hover,
-:root[data-theme="crimson"] body .game-page-layout .system-notif:focus-visible {
+:root[data-theme='crimson'] body .game-page-layout .system-notif:hover,
+:root[data-theme='crimson'] body .game-page-layout .system-notif:focus-visible {
   background-color: transparent;
   border-color: transparent;
-  filter:
-    drop-shadow(0 5px 6px rgba(0, 0, 0, 0.58))
-    drop-shadow(0 1px 2px rgba(166, 39, 57, 0.52));
+  filter: drop-shadow(0 5px 6px rgba(0, 0, 0, 0.58)) drop-shadow(0 1px 2px rgba(166, 39, 57, 0.52));
   outline: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .system-notif:hover::before,
-:root[data-theme="crimson"] body .game-page-layout .system-notif:focus-visible::before {
+:root[data-theme='crimson'] body .game-page-layout .system-notif:hover::before,
+:root[data-theme='crimson'] body .game-page-layout .system-notif:focus-visible::before {
   filter: brightness(1.14) contrast(1.06) saturate(1);
 }
 
 /* Right status reliquary: inner ledgers are clearly separated from the shell. */
-:root[data-theme="crimson"] body .game-page-layout .status-hud::after {
+:root[data-theme='crimson'] body .game-page-layout .status-hud::after {
   opacity: 0.38;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-overview {
+:root[data-theme='crimson'] body .game-page-layout .status-overview {
   gap: 8px;
   padding: 8px;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-overview > .section {
+:root[data-theme='crimson'] body .game-page-layout .status-overview > .section {
   flex-shrink: 0;
   border: 1px solid rgba(127, 78, 79, 0.86);
   background-color: rgba(27, 22, 26, 0.96);
@@ -902,11 +907,11 @@
     0 5px 8px rgba(0, 0, 0, 0.54);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-overview > .section:first-child {
+:root[data-theme='crimson'] body .game-page-layout .status-overview > .section:first-child {
   background-color: #171317;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .player-summary {
+:root[data-theme='crimson'] body .game-page-layout .player-summary {
   min-height: 326px;
   padding-block: 10px 16px;
   background-color: #151216;
@@ -914,7 +919,7 @@
   background-position: center 46%;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .avatar.avatar-xl {
+:root[data-theme='crimson'] body .game-page-layout .avatar.avatar-xl {
   width: 164px;
   height: 164px;
   border: 1px solid rgb(var(--crimson-inlay-gold-rgb) / 66%);
@@ -926,7 +931,7 @@
     0 7px 10px rgba(0, 0, 0, 0.64);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .summary-name {
+:root[data-theme='crimson'] body .game-page-layout .summary-name {
   min-width: 88px;
   text-align: center;
   padding: 7px 18px;
@@ -937,14 +942,21 @@
   background-repeat: no-repeat;
   background-position: center;
   background-size: auto 130%;
-  clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 10px 100%, 0 50%);
+  clip-path: polygon(
+    10px 0,
+    calc(100% - 10px) 0,
+    100% 50%,
+    calc(100% - 10px) 100%,
+    10px 100%,
+    0 50%
+  );
   box-shadow:
     inset 0 1px rgba(255, 236, 224, 0.1),
     inset 0 -2px rgba(73, 17, 27, 0.38),
     0 5px 7px rgba(0, 0, 0, 0.54);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .attribute-section .section-body {
+:root[data-theme='crimson'] body .game-page-layout .attribute-section .section-body {
   margin: 0 10px 10px;
   padding: 10px;
   border: 1px solid rgba(126, 76, 77, 0.82);
@@ -953,18 +965,36 @@
   background-repeat: no-repeat;
   background-position: center;
   background-size: auto 100%;
-  clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 8px, 100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%, 0 calc(100% - 8px), 0 8px);
+  clip-path: polygon(
+    8px 0,
+    calc(100% - 8px) 0,
+    100% 8px,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    8px 100%,
+    0 calc(100% - 8px),
+    0 8px
+  );
   box-shadow:
     inset 0 0 0 3px rgba(18, 14, 17, 0.58),
     inset 0 2px 4px rgba(0, 0, 0, 0.46),
     0 5px 7px rgba(0, 0, 0, 0.46);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .kv-item {
+:root[data-theme='crimson'] body .game-page-layout .kv-item {
   border: 1px solid rgba(111, 69, 72, 0.74);
   border-radius: 0;
   background: rgba(42, 32, 37, 0.94);
-  clip-path: polygon(7px 0, calc(100% - 7px) 0, 100% 7px, 100% calc(100% - 7px), calc(100% - 7px) 100%, 7px 100%, 0 calc(100% - 7px), 0 7px);
+  clip-path: polygon(
+    7px 0,
+    calc(100% - 7px) 0,
+    100% 7px,
+    100% calc(100% - 7px),
+    calc(100% - 7px) 100%,
+    7px 100%,
+    0 calc(100% - 7px),
+    0 7px
+  );
   box-shadow:
     inset 0 1px rgba(255, 232, 218, 0.09),
     inset 0 -2px rgba(92, 24, 36, 0.34),
@@ -973,7 +1003,7 @@
 
 /* Inventory tabs use the same continuous ledger and equal hit areas.
    Selection reuses the symmetric cap without changing button geometry. */
-:root[data-theme="crimson"] body .game-page-layout .hold-body > .tab-bar {
+:root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar {
   position: relative;
   overflow: visible;
   margin: 10px 8px 0;
@@ -987,21 +1017,17 @@
   border: 0;
   clip-path: none;
   box-shadow: none;
-  filter:
-    brightness(1.2)
-    contrast(1.08)
-    saturate(0.9)
-    drop-shadow(0 2px 2px rgba(0, 0, 0, 0.76));
+  filter: brightness(1.2) contrast(1.08) saturate(0.9) drop-shadow(0 2px 2px rgba(0, 0, 0, 0.76));
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body > .tab-bar .tab-list {
+:root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-list {
   position: relative;
   overflow: visible;
   align-items: stretch;
   height: 100%;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body > .tab-bar .tab-item {
+:root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-item {
   position: relative;
   z-index: 1;
   flex: 1 1 25%;
@@ -1023,18 +1049,18 @@
     text-shadow 180ms ease-out;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body > .tab-bar .tab-item .tab-label {
+:root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-item .tab-label {
   position: relative;
   z-index: 3;
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.82);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body > .tab-bar .tab-item:hover {
+:root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-item:hover {
   color: #c7b1aa;
   background: transparent;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body > .tab-bar .tab-active {
+:root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-active {
   z-index: 3;
   min-height: 0;
   height: 100%;
@@ -1049,8 +1075,8 @@
   text-shadow: 0 0 7px rgba(151, 43, 57, 0.34);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body > .tab-bar .tab-active::before {
-  content: "";
+:root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-active::before {
+  content: '';
   position: absolute;
   z-index: 1;
   inset: 0;
@@ -1061,21 +1087,17 @@
   background-position: center;
   background-size: 100% 100%;
   opacity: 1;
-  filter:
-    brightness(1.18)
-    contrast(1.08)
-    saturate(1.04)
-    drop-shadow(0 3px 2px rgba(0, 0, 0, 0.74))
+  filter: brightness(1.18) contrast(1.08) saturate(1.04) drop-shadow(0 3px 2px rgba(0, 0, 0, 0.74))
     drop-shadow(0 1px 2px rgba(177, 28, 49, 0.52));
   clip-path: none;
   box-shadow: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body > .tab-bar .tab-active::after {
+:root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-active::after {
   display: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body .item-list {
+:root[data-theme='crimson'] body .game-page-layout .hold-body .item-list {
   margin: 0 8px 8px;
   padding: 10px 8px 8px;
   border: 1px solid rgba(112, 69, 72, 0.78);
@@ -1090,7 +1112,7 @@
     0 5px 7px rgba(0, 0, 0, 0.42);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .item-row {
+:root[data-theme='crimson'] body .game-page-layout .item-row {
   min-height: 31px;
   margin-bottom: 3px;
   padding: 6px 10px;
@@ -1109,7 +1131,7 @@
 }
 
 /* The command bar is another physical object, not the bottom edge of the page. */
-:root[data-theme="crimson"] body .game-page-layout .input-bar {
+:root[data-theme='crimson'] body .game-page-layout .input-bar {
   margin: 0 8px 8px;
   padding: 10px 11px 10px 16px;
   min-height: 58px;
@@ -1120,14 +1142,10 @@
   background-position: center;
   background-size: 100% 100%;
   box-shadow: none;
-  filter:
-    brightness(1.06)
-    contrast(1.06)
-    saturate(0.9)
-    drop-shadow(0 6px 7px rgba(0, 0, 0, 0.66));
+  filter: brightness(1.06) contrast(1.06) saturate(0.9) drop-shadow(0 6px 7px rgba(0, 0, 0, 0.66));
 }
 
-:root[data-theme="crimson"] body .game-page-layout .input-field {
+:root[data-theme='crimson'] body .game-page-layout .input-field {
   min-height: 36px;
   padding-inline: 14px;
   border-radius: 0;
@@ -1136,7 +1154,7 @@
   clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .send-btn {
+:root[data-theme='crimson'] body .game-page-layout .send-btn {
   width: 50px;
   height: 50px;
   margin: -7px -5px -7px 2px;
@@ -1149,27 +1167,22 @@
   background-size: contain;
   color: #f4d2c5;
   box-shadow: none;
-  filter:
-    brightness(1.14)
-    contrast(1.05)
-    drop-shadow(0 5px 6px rgba(0, 0, 0, 0.66));
+  filter: brightness(1.14) contrast(1.05) drop-shadow(0 5px 6px rgba(0, 0, 0, 0.66));
 }
 
-:root[data-theme="crimson"] body .game-page-layout .send-btn:hover,
-:root[data-theme="crimson"] body .game-page-layout .send-btn:focus-visible {
+:root[data-theme='crimson'] body .game-page-layout .send-btn:hover,
+:root[data-theme='crimson'] body .game-page-layout .send-btn:focus-visible {
   background-color: transparent;
   border-color: transparent;
-  filter:
-    brightness(1.22)
-    drop-shadow(0 5px 6px rgba(0, 0, 0, 0.64))
+  filter: brightness(1.22) drop-shadow(0 5px 6px rgba(0, 0, 0, 0.64))
     drop-shadow(0 1px 2px rgba(174, 45, 62, 0.55));
 }
 
 /* Small controls share the same carved stone and aged-metal surface as the
    fixed tab ledgers without changing their established hit areas. */
-:root[data-theme="crimson"] body .game-page-layout .top-btn,
-:root[data-theme="crimson"] body .game-page-layout .tool-btn,
-:root[data-theme="crimson"] body .game-page-layout .input-btn:not(.send-btn) {
+:root[data-theme='crimson'] body .game-page-layout .top-btn,
+:root[data-theme='crimson'] body .game-page-layout .tool-btn,
+:root[data-theme='crimson'] body .game-page-layout .input-btn:not(.send-btn) {
   background-color: #1b171a;
   background-image: var(--crimson-control);
   background-repeat: no-repeat;
@@ -1183,19 +1196,19 @@
   filter: brightness(1.02) contrast(1.05) saturate(0.82);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .top-btn:hover,
-:root[data-theme="crimson"] body .game-page-layout .top-btn:focus-visible,
-:root[data-theme="crimson"] body .game-page-layout .tool-btn:hover,
-:root[data-theme="crimson"] body .game-page-layout .tool-btn:focus-visible,
-:root[data-theme="crimson"] body .game-page-layout .input-btn:not(.send-btn):hover,
-:root[data-theme="crimson"] body .game-page-layout .input-btn:not(.send-btn):focus-visible {
+:root[data-theme='crimson'] body .game-page-layout .top-btn:hover,
+:root[data-theme='crimson'] body .game-page-layout .top-btn:focus-visible,
+:root[data-theme='crimson'] body .game-page-layout .tool-btn:hover,
+:root[data-theme='crimson'] body .game-page-layout .tool-btn:focus-visible,
+:root[data-theme='crimson'] body .game-page-layout .input-btn:not(.send-btn):hover,
+:root[data-theme='crimson'] body .game-page-layout .input-btn:not(.send-btn):focus-visible {
   background-color: #2b181e;
   border-color: rgb(var(--crimson-inlay-gold-rgb) / 64%);
   color: #f0d8cf;
   filter: brightness(1.14) contrast(1.05) saturate(0.96);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .res-track {
+:root[data-theme='crimson'] body .game-page-layout .res-track {
   background-color: #191619;
   background-image: var(--crimson-control);
   background-repeat: no-repeat;
@@ -1206,7 +1219,7 @@
 
 /* Information ledgers use clear glass with a restrained blur and aged-gold
    frame. Blood tint appears only when a ledger is active. */
-:root[data-theme="crimson"] body .game-page-layout .quest-item {
+:root[data-theme='crimson'] body .game-page-layout .quest-item {
   min-width: 0;
   min-height: 74px;
   padding: 13px 20px;
@@ -1224,13 +1237,13 @@
   filter: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .quest-item::before {
+:root[data-theme='crimson'] body .game-page-layout .quest-item::before {
   display: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .quest-item:hover,
-:root[data-theme="crimson"] body .game-page-layout .quest-item:focus-visible,
-:root[data-theme="crimson"] body .game-page-layout .quest-item.open {
+:root[data-theme='crimson'] body .game-page-layout .quest-item:hover,
+:root[data-theme='crimson'] body .game-page-layout .quest-item:focus-visible,
+:root[data-theme='crimson'] body .game-page-layout .quest-item.open {
   border-color: rgb(var(--crimson-inlay-gold-rgb) / 64%);
   background-color: rgba(73, 25, 40, 0.42);
   box-shadow:
@@ -1239,18 +1252,18 @@
     0 5px 7px rgba(0, 0, 0, 0.4);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .quest-top,
-:root[data-theme="crimson"] body .game-page-layout .quest-name,
-:root[data-theme="crimson"] body .game-page-layout .quest-obj {
+:root[data-theme='crimson'] body .game-page-layout .quest-top,
+:root[data-theme='crimson'] body .game-page-layout .quest-name,
+:root[data-theme='crimson'] body .game-page-layout .quest-obj {
   min-width: 0;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .quest-name,
-:root[data-theme="crimson"] body .game-page-layout .quest-obj {
+:root[data-theme='crimson'] body .game-page-layout .quest-name,
+:root[data-theme='crimson'] body .game-page-layout .quest-obj {
   overflow-wrap: anywhere;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body .item-list {
+:root[data-theme='crimson'] body .game-page-layout .hold-body .item-list {
   min-width: 0;
   padding: 9px 8px 8px;
   overflow: hidden;
@@ -1264,14 +1277,14 @@
     0 4px 6px rgba(0, 0, 0, 0.36);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body .item-entry {
+:root[data-theme='crimson'] body .game-page-layout .hold-body .item-entry {
   min-width: 0;
   margin-bottom: 4px;
   border: 0;
   border-radius: 9px;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body .item-row {
+:root[data-theme='crimson'] body .game-page-layout .hold-body .item-row {
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
@@ -1289,14 +1302,14 @@
     inset 0 -1px rgba(166, 122, 72, 0.12);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body .item-row:hover,
-:root[data-theme="crimson"] body .game-page-layout .hold-body .item-row:focus-visible {
+:root[data-theme='crimson'] body .game-page-layout .hold-body .item-row:hover,
+:root[data-theme='crimson'] body .game-page-layout .hold-body .item-row:focus-visible {
   border-color: rgb(var(--crimson-inlay-gold-rgb) / 88%);
   background-color: rgba(255, 255, 255, 0.055);
   outline: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body .item-entry.open {
+:root[data-theme='crimson'] body .game-page-layout .hold-body .item-entry.open {
   overflow: hidden;
   border: 2px solid rgb(var(--crimson-inlay-gold-rgb) / 88%);
   border-radius: 10px;
@@ -1309,7 +1322,7 @@
     0 4px 6px rgba(0, 0, 0, 0.38);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body .item-entry.open .item-row {
+:root[data-theme='crimson'] body .game-page-layout .hold-body .item-entry.open .item-row {
   border: 0;
   border-bottom: 1px solid rgb(var(--crimson-inlay-gold-rgb) / 30%);
   border-radius: 0;
@@ -1317,7 +1330,7 @@
   backdrop-filter: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body .item-detail {
+:root[data-theme='crimson'] body .game-page-layout .hold-body .item-detail {
   min-width: 0;
   width: 100%;
   max-width: 100%;
@@ -1333,24 +1346,24 @@
   box-shadow: inset 0 1px rgba(255, 244, 234, 0.06);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body .det-desc,
-:root[data-theme="crimson"] body .game-page-layout .hold-body .det-effect {
+:root[data-theme='crimson'] body .game-page-layout .hold-body .det-desc,
+:root[data-theme='crimson'] body .game-page-layout .hold-body .det-effect {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body .det-chip {
+:root[data-theme='crimson'] body .game-page-layout .hold-body .det-chip {
   border-color: rgb(var(--crimson-inlay-gold-rgb) / 66%);
   background-color: rgba(255, 255, 255, 0.045);
   box-shadow: inset 0 1px rgba(255, 243, 232, 0.06);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .hold-body .det-effects {
+:root[data-theme='crimson'] body .game-page-layout .hold-body .det-effects {
   border-top-color: rgb(var(--crimson-inlay-gold-rgb) / 54%);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root[data-theme="crimson"] body .game-page-layout .hold-body > .tab-bar .tab-item {
+  :root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-item {
     transition: none;
   }
 }
@@ -1361,15 +1374,15 @@
    note on the .modal-content rule), so what remains here is purely the glass look.
    The `background-image: none` below is therefore redundant; it is kept as a guard
    so re-adding a texture upstream cannot silently reappear behind the blur. */
-:root[data-theme="crimson"] body .modal-overlay:has(.items-panel),
-:root[data-theme="crimson"] body .modal-overlay:has(.char-panel) {
+:root[data-theme='crimson'] body .modal-overlay:has(.items-panel),
+:root[data-theme='crimson'] body .modal-overlay:has(.char-panel) {
   background: rgba(6, 6, 7, 0.72);
   -webkit-backdrop-filter: blur(5px) saturate(0.88);
   backdrop-filter: blur(5px) saturate(0.88);
 }
 
-:root[data-theme="crimson"] body .modal-content:has(.items-panel),
-:root[data-theme="crimson"] body .modal-content:has(.char-panel) {
+:root[data-theme='crimson'] body .modal-content:has(.items-panel),
+:root[data-theme='crimson'] body .modal-content:has(.char-panel) {
   background-color: rgba(19, 17, 20, 0.289);
   background-image: none;
   border: 2px solid rgb(var(--crimson-inlay-gold-rgb) / 90%);
@@ -1381,24 +1394,20 @@
     0 4px 8px rgba(0, 0, 0, 0.46);
 }
 
-:root[data-theme="crimson"] body .modal-content:has(.items-panel) .modal-header,
-:root[data-theme="crimson"] body .modal-content:has(.char-panel) .modal-header {
+:root[data-theme='crimson'] body .modal-content:has(.items-panel) .modal-header,
+:root[data-theme='crimson'] body .modal-content:has(.char-panel) .modal-header {
   border-bottom-color: rgb(var(--crimson-inlay-gold-rgb) / 52%);
   background: rgba(255, 255, 255, 0.018);
 }
 
-:root[data-theme="crimson"] body .modal-content:has(.items-panel) :is(
-  .money-bar,
-  .cat-tabs,
-  .item-list,
-  .detail
-),
-:root[data-theme="crimson"] body .modal-content:has(.char-panel) :is(
-  .fp-bar,
-  .npc-list,
-  .detail,
-  .tab-row
-) {
+:root[data-theme='crimson']
+  body
+  .modal-content:has(.items-panel)
+  :is(.money-bar, .cat-tabs, .item-list, .detail),
+:root[data-theme='crimson']
+  body
+  .modal-content:has(.char-panel)
+  :is(.fp-bar, .npc-list, .detail, .tab-row) {
   background-color: rgba(22, 19, 23, 0.289);
   background-image: none;
   border: 1px solid rgb(var(--crimson-inlay-gold-rgb) / 66%);
@@ -1410,14 +1419,11 @@
     0 2px 5px rgba(0, 0, 0, 0.3);
 }
 
-:root[data-theme="crimson"] body .modal-content:has(.items-panel) :is(
-  .item-row,
-  .filter-bar button
-),
-:root[data-theme="crimson"] body .modal-content:has(.char-panel) :is(
-  .npc-card,
-  .ov-card
-) {
+:root[data-theme='crimson']
+  body
+  .modal-content:has(.items-panel)
+  :is(.item-row, .filter-bar button),
+:root[data-theme='crimson'] body .modal-content:has(.char-panel) :is(.npc-card, .ov-card) {
   background-color: rgba(27, 23, 27, 0.247);
   background-image: none;
   border-color: rgb(var(--crimson-inlay-gold-rgb) / 42%);
@@ -1426,16 +1432,16 @@
 
 /* Corner-anchored botanical planes crop as the window changes height instead
    of scaling the artwork down with their panels. */
-:root[data-theme="crimson"] body .game-page-layout .scene-panel {
+:root[data-theme='crimson'] body .game-page-layout .scene-panel {
   background-size: auto max(100%, 62rem);
   background-position: left bottom;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-hud {
+:root[data-theme='crimson'] body .game-page-layout .status-hud {
   background-color: #100d10;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-hud::after {
+:root[data-theme='crimson'] body .game-page-layout .status-hud::after {
   inset: 0;
   width: 100%;
   height: 100%;
@@ -1449,7 +1455,7 @@
 
 /* Stats, effects, and inventory share one neutral liquid-glass body. Their
    internal sections are separated by quiet seams rather than nested panels. */
-:root[data-theme="crimson"] body .game-page-layout .status-glass {
+:root[data-theme='crimson'] body .game-page-layout .status-glass {
   position: relative;
   border: 2px solid rgb(var(--crimson-inlay-gold-rgb) / 90%);
   border-radius: 8px;
@@ -1462,7 +1468,7 @@
     0 3px 6px rgba(0, 0, 0, 0.3);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-glass > .section {
+:root[data-theme='crimson'] body .game-page-layout .status-glass > .section {
   border: 0;
   background: transparent;
   background-image: none;
@@ -1472,11 +1478,11 @@
   backdrop-filter: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-glass > .section + .section {
+:root[data-theme='crimson'] body .game-page-layout .status-glass > .section + .section {
   border-top: 1px solid rgb(var(--crimson-inlay-gold-rgb) / 44%);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-glass .section-header {
+:root[data-theme='crimson'] body .game-page-layout .status-glass .section-header {
   border: 0;
   border-radius: 0;
   background: rgba(255, 255, 255, 0.018);
@@ -1484,7 +1490,7 @@
   backdrop-filter: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-glass .attribute-section .section-body {
+:root[data-theme='crimson'] body .game-page-layout .status-glass .attribute-section .section-body {
   margin: 0;
   padding: 8px 10px 10px;
   border: 0;
@@ -1496,7 +1502,7 @@
   box-shadow: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-glass .attribute-section .res-track {
+:root[data-theme='crimson'] body .game-page-layout .status-glass .attribute-section .res-track {
   border: 2px solid rgb(var(--crimson-inlay-gold-rgb) / 58%);
   background-color: rgba(16, 16, 18, 0.4);
   background-image: none;
@@ -1505,14 +1511,14 @@
     inset 0 1px rgba(255, 255, 255, 0.045);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-glass .attribute-section .kv-item {
+:root[data-theme='crimson'] body .game-page-layout .status-glass .attribute-section .kv-item {
   border: 2px solid rgb(var(--crimson-inlay-gold-rgb) / 50%);
   background: rgba(255, 255, 255, 0.025);
   clip-path: none;
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.055);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .status-glass .hold-body .item-list {
+:root[data-theme='crimson'] body .game-page-layout .status-glass .hold-body .item-list {
   border: 0;
   background: transparent;
   -webkit-backdrop-filter: none;
@@ -1522,7 +1528,7 @@
 
 /* Character rows can grow with their content, so their frame is a real CSS
    rectangle rather than a full raster plate stretched in both axes. */
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-item {
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-item {
   min-height: 72px;
   padding: 10px 12px;
   border: 2px solid rgb(var(--crimson-inlay-gold-rgb) / 82%);
@@ -1536,13 +1542,13 @@
     0 3px 6px rgba(0, 0, 0, 0.32);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-item::before {
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-item::before {
   display: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-item:hover,
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-item:focus-visible,
-:root[data-theme="crimson"] body .game-page-layout .scene-npc-item.hovered {
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-item:hover,
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-item:focus-visible,
+:root[data-theme='crimson'] body .game-page-layout .scene-npc-item.hovered {
   border-color: rgb(var(--crimson-inlay-gold-rgb) / 94%);
   background: rgba(255, 255, 255, 0.055);
   filter: none;
@@ -1552,7 +1558,7 @@
 /* Quest ledgers use the one generated frame whose geometry is genuinely
    repeatable. Wide corner slices retain every bevel; only straight rail
    samples repeat, while the blood-glass centre remains procedural. */
-:root[data-theme="crimson"] body .game-page-layout .quest-item {
+:root[data-theme='crimson'] body .game-page-layout .quest-item {
   min-height: 86px;
   padding: 20px 31px;
   overflow: visible;
@@ -1565,9 +1571,9 @@
   filter: drop-shadow(0 5px 6px rgba(0, 0, 0, 0.54));
 }
 
-:root[data-theme="crimson"] body .game-page-layout .quest-item::before {
+:root[data-theme='crimson'] body .game-page-layout .quest-item::before {
   display: block;
-  content: "";
+  content: '';
   position: absolute;
   z-index: -1;
   inset: 0;
@@ -1584,9 +1590,9 @@
   pointer-events: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .quest-item::after {
+:root[data-theme='crimson'] body .game-page-layout .quest-item::after {
   display: block;
-  content: "";
+  content: '';
   position: absolute;
   z-index: -2;
   inset: 10px 12px;
@@ -1599,9 +1605,9 @@
   pointer-events: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .quest-item:hover,
-:root[data-theme="crimson"] body .game-page-layout .quest-item:focus-visible,
-:root[data-theme="crimson"] body .game-page-layout .quest-item.open {
+:root[data-theme='crimson'] body .game-page-layout .quest-item:hover,
+:root[data-theme='crimson'] body .game-page-layout .quest-item:focus-visible,
+:root[data-theme='crimson'] body .game-page-layout .quest-item.open {
   border: 0;
   background: transparent;
   box-shadow: none;
@@ -1609,15 +1615,15 @@
   outline: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .quest-item:hover::before,
-:root[data-theme="crimson"] body .game-page-layout .quest-item:focus-visible::before,
-:root[data-theme="crimson"] body .game-page-layout .quest-item.open::before {
+:root[data-theme='crimson'] body .game-page-layout .quest-item:hover::before,
+:root[data-theme='crimson'] body .game-page-layout .quest-item:focus-visible::before,
+:root[data-theme='crimson'] body .game-page-layout .quest-item.open::before {
   filter: brightness(1.08) contrast(1.03) saturate(0.94);
 }
 
 /* Blood glass belongs only to inline chat events. Its texture has a fixed
    physical scale and tiles behind a bright CSS frame instead of stretching. */
-:root[data-theme="crimson"] body .game-page-layout .system-notif::before {
+:root[data-theme='crimson'] body .game-page-layout .system-notif::before {
   background-color: rgba(35, 7, 15, 0.78);
   background-image: var(--crimson-quest-blood-tile);
   background-repeat: repeat;
@@ -1634,14 +1640,14 @@
   filter: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .system-notif:hover::before,
-:root[data-theme="crimson"] body .game-page-layout .system-notif:focus-visible::before {
+:root[data-theme='crimson'] body .game-page-layout .system-notif:hover::before,
+:root[data-theme='crimson'] body .game-page-layout .system-notif:focus-visible::before {
   border-color: rgb(var(--crimson-inlay-gold-rgb) / 100%);
   filter: brightness(1.06) saturate(1.05);
 }
 
 /* Remaining interactive surfaces are neutral clear glass. */
-:root[data-theme="crimson"] body .game-page-layout .news-item {
+:root[data-theme='crimson'] body .game-page-layout .news-item {
   overflow: hidden;
   border: 2px solid rgb(var(--crimson-inlay-gold-rgb) / 82%);
   border-radius: 8px;
@@ -1654,38 +1660,30 @@
     0 3px 6px rgba(0, 0, 0, 0.32);
 }
 
-:root[data-theme="crimson"] body .game-page-layout .news-item::before {
+:root[data-theme='crimson'] body .game-page-layout .news-item::before {
   display: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .news-item:hover,
-:root[data-theme="crimson"] body .game-page-layout .news-item:focus-visible {
+:root[data-theme='crimson'] body .game-page-layout .news-item:hover,
+:root[data-theme='crimson'] body .game-page-layout .news-item:focus-visible {
   border-color: rgb(var(--crimson-inlay-gold-rgb) / 96%);
   background: rgba(255, 255, 255, 0.055);
   filter: none;
   outline: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-panel > .tab-bar,
-:root[data-theme="crimson"] body .game-page-layout .hold-body > .tab-bar {
-  filter:
-    brightness(1.32)
-    contrast(1.06)
-    saturate(0.94)
-    drop-shadow(0 2px 2px rgba(0, 0, 0, 0.72));
+:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar,
+:root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar {
+  filter: brightness(1.32) contrast(1.06) saturate(0.94) drop-shadow(0 2px 2px rgba(0, 0, 0, 0.72));
 }
 
-:root[data-theme="crimson"] body .game-page-layout .scene-panel > .tab-bar .tab-active::before,
-:root[data-theme="crimson"] body .game-page-layout .hold-body > .tab-bar .tab-active::before {
-  filter:
-    brightness(1.28)
-    contrast(1.06)
-    saturate(1.04)
-    drop-shadow(0 3px 2px rgba(0, 0, 0, 0.7))
+:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-active::before,
+:root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-active::before {
+  filter: brightness(1.28) contrast(1.06) saturate(1.04) drop-shadow(0 3px 2px rgba(0, 0, 0, 0.7))
     drop-shadow(0 1px 2px rgba(177, 28, 49, 0.48));
 }
 
-:root[data-theme="crimson"] body .game-page-layout .input-bar {
+:root[data-theme='crimson'] body .game-page-layout .input-bar {
   border: 2px solid rgb(var(--crimson-inlay-gold-rgb) / 86%);
   border-radius: 8px;
   background-color: rgba(25, 24, 27, 0.34);
@@ -1698,7 +1696,7 @@
   filter: none;
 }
 
-:root[data-theme="crimson"] body .game-page-layout .input-field {
+:root[data-theme='crimson'] body .game-page-layout .input-field {
   border-color: rgb(var(--crimson-inlay-gold-rgb) / 72%);
   background: rgba(18, 18, 20, 0.52);
 }

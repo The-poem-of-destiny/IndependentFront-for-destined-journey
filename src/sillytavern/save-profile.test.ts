@@ -6,7 +6,15 @@
  * addAchievement / addNews / markNewsRead
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { SaveProfile, FPTransaction, FateContract, Achievement, NewsItem, Quest, MapMarker } from './types';
+import type {
+  SaveProfile,
+  FPTransaction,
+  FateContract,
+  Achievement,
+  NewsItem,
+  Quest,
+  MapMarker,
+} from './types';
 
 // ---- Mocks ----
 const mockGetSaveProfile = vi.fn();
@@ -264,8 +272,7 @@ describe('spendFP', () => {
     const profile = makeProfile({ fp: 30 });
     mockSaveSaveProfile.mockResolvedValue(undefined);
 
-    await expect(spendFP(profile, 50, '超支'))
-      .rejects.toThrow('FP 不足: 需要 50, 当前 30');
+    await expect(spendFP(profile, 50, '超支')).rejects.toThrow('FP 不足: 需要 50, 当前 30');
 
     expect(profile.fp).toBe(30); // unchanged
     expect(mockSaveSaveProfile).not.toHaveBeenCalled();
@@ -420,8 +427,24 @@ describe('addContract', () => {
 describe('getContracts', () => {
   it('returns all contracts from profile', () => {
     const contracts: FateContract[] = [
-      { id: 'c1', targetId: 't1', targetName: '角色A', tier: 2, fpSpent: 40, affectionLevel: '友好', createdAt: 1000 },
-      { id: 'c2', targetId: 't2', targetName: '角色B', tier: 3, fpSpent: 120, affectionLevel: '信赖', createdAt: 2000 },
+      {
+        id: 'c1',
+        targetId: 't1',
+        targetName: '角色A',
+        tier: 2,
+        fpSpent: 40,
+        affectionLevel: '友好',
+        createdAt: 1000,
+      },
+      {
+        id: 'c2',
+        targetId: 't2',
+        targetName: '角色B',
+        tier: 3,
+        fpSpent: 120,
+        affectionLevel: '信赖',
+        createdAt: 2000,
+      },
     ];
     const profile = makeProfile({ contracts });
 
@@ -437,8 +460,24 @@ describe('getContracts', () => {
 
 describe('getContractByTarget', () => {
   const contracts: FateContract[] = [
-    { id: 'c1', targetId: 'char_alice', targetName: '艾莉丝', tier: 3, fpSpent: 100, affectionLevel: '信赖', createdAt: 1000 },
-    { id: 'c2', targetId: 'char_bob', targetName: '鲍勃', tier: 1, fpSpent: 30, affectionLevel: '陌生', createdAt: 2000 },
+    {
+      id: 'c1',
+      targetId: 'char_alice',
+      targetName: '艾莉丝',
+      tier: 3,
+      fpSpent: 100,
+      affectionLevel: '信赖',
+      createdAt: 1000,
+    },
+    {
+      id: 'c2',
+      targetId: 'char_bob',
+      targetName: '鲍勃',
+      tier: 1,
+      fpSpent: 30,
+      affectionLevel: '陌生',
+      createdAt: 2000,
+    },
   ];
 
   it('returns the contract matching the targetId', () => {
@@ -595,8 +634,22 @@ describe('markNewsRead', () => {
 
   it('sets read=true on the matching news item', async () => {
     const news: NewsItem[] = [
-      { id: 'n1', title: '标题1', content: '内容1', category: 'world', publishedAt: 100, read: false },
-      { id: 'n2', title: '标题2', content: '内容2', category: 'local', publishedAt: 200, read: false },
+      {
+        id: 'n1',
+        title: '标题1',
+        content: '内容1',
+        category: 'world',
+        publishedAt: 100,
+        read: false,
+      },
+      {
+        id: 'n2',
+        title: '标题2',
+        content: '内容2',
+        category: 'local',
+        publishedAt: 200,
+        read: false,
+      },
     ];
     const profile = makeProfile({ news });
     mockSaveSaveProfile.mockResolvedValue(undefined);
@@ -609,7 +662,14 @@ describe('markNewsRead', () => {
 
   it('does nothing when newsId is not found (no-op)', async () => {
     const news: NewsItem[] = [
-      { id: 'n1', title: '标题1', content: '内容1', category: 'world', publishedAt: 100, read: false },
+      {
+        id: 'n1',
+        title: '标题1',
+        content: '内容1',
+        category: 'world',
+        publishedAt: 100,
+        read: false,
+      },
     ];
     const profile = makeProfile({ news });
     mockSaveSaveProfile.mockResolvedValue(undefined);
@@ -622,7 +682,14 @@ describe('markNewsRead', () => {
 
   it('does not change read status if already true', async () => {
     const news: NewsItem[] = [
-      { id: 'n1', title: '已读新闻', content: '内容', category: 'system', publishedAt: 100, read: true },
+      {
+        id: 'n1',
+        title: '已读新闻',
+        content: '内容',
+        category: 'system',
+        publishedAt: 100,
+        read: true,
+      },
     ];
     const profile = makeProfile({ news });
     mockSaveSaveProfile.mockResolvedValue(undefined);
@@ -645,7 +712,14 @@ describe('markNewsRead', () => {
   // M6 Task 4 (#36): 持久化路径 — 落库 payload 必须已带已读标记
   it('persisted payload carries read=true (持久化路径闭环)', async () => {
     const news: NewsItem[] = [
-      { id: 'n1', title: '未读新闻', content: '内容', category: 'world', publishedAt: 100, read: false },
+      {
+        id: 'n1',
+        title: '未读新闻',
+        content: '内容',
+        category: 'world',
+        publishedAt: 100,
+        read: false,
+      },
     ];
     const profile = makeProfile({ news });
     mockSaveSaveProfile.mockResolvedValue(undefined);
@@ -654,13 +728,22 @@ describe('markNewsRead', () => {
 
     expect(mockSaveSaveProfile).toHaveBeenCalledTimes(1);
     const persisted = mockSaveSaveProfile.mock.calls[0][0] as SaveProfile;
-    expect(persisted.news.find(n => n.id === 'n1')!.read).toBe(true);
+    expect(persisted.news.find((n) => n.id === 'n1')!.read).toBe(true);
   });
 
   // M6 Task 4 (#36): ScenePanel 接线流 — 传入 JSON 克隆（Dexie 吃不下 Vue Proxy）仍能定位并持久化
   it('works on a JSON-cloned profile (ScenePanel 克隆落库流)', async () => {
     const profile = makeProfile({
-      news: [{ id: 'n1', title: '克隆新闻', content: '内容', category: 'world', publishedAt: 100, read: false }],
+      news: [
+        {
+          id: 'n1',
+          title: '克隆新闻',
+          content: '内容',
+          category: 'world',
+          publishedAt: 100,
+          read: false,
+        },
+      ],
     });
     const clone = JSON.parse(JSON.stringify(profile)) as SaveProfile;
     mockSaveSaveProfile.mockResolvedValue(undefined);
@@ -752,7 +835,7 @@ describe('Quest', () => {
 
     expect(updated.quests['追查失踪商队'].status).toBe('进行中');
     expect(updated.quests['追查失踪商队'].priority).toBe('高');
-    expect(updated.quests['追查失踪商队'].progress).toBe('');  // default
+    expect(updated.quests['追查失踪商队'].progress).toBe(''); // default
   });
 
   it('setQuest updates existing quest partially', async () => {
@@ -764,7 +847,7 @@ describe('Quest', () => {
 
     expect(updated.quests['q1'].status).toBe('已完成');
     expect(updated.quests['q1'].progress).toBe('找到了线索');
-    expect(updated.quests['q1'].objective).toBe('目标A');  // unchanged
+    expect(updated.quests['q1'].objective).toBe('目标A'); // unchanged
   });
 
   it('removeQuest deletes a quest', async () => {
@@ -810,12 +893,7 @@ describe('Quest', () => {
 // Map Marker 测试 (Phase 7e)
 // ═══════════════════════════════════════════════════════════
 
-import {
-  getMapMarkers,
-  getMapMarker,
-  setMapMarker,
-  removeMapMarker,
-} from './save-profile';
+import { getMapMarkers, getMapMarker, setMapMarker, removeMapMarker } from './save-profile';
 
 describe('MapMarker', () => {
   beforeEach(() => {
@@ -874,7 +952,10 @@ describe('MapMarker', () => {
     const profile = makeProfile();
     mockSaveSaveProfile.mockResolvedValue(undefined);
 
-    await setMapMarker(profile, makeMarker({ id: 'loc1', name: '艾瑟嘉德', position: { nx: 0.42, ny: 0.35 } }));
+    await setMapMarker(
+      profile,
+      makeMarker({ id: 'loc1', name: '艾瑟嘉德', position: { nx: 0.42, ny: 0.35 } }),
+    );
 
     const raw = profile.worldFlags.mapMarkers as MapMarker[];
     expect(raw).toHaveLength(1);

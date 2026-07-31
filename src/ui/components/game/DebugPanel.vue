@@ -1,31 +1,31 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useGameStore, type DebugAgentEntry } from '../../stores/game-store'
-import { useSettingsStore } from '../../stores/settings-store'
-import AppModal from '../shared/AppModal.vue'
+import { computed } from 'vue';
+import { useGameStore, type DebugAgentEntry } from '../../stores/game-store';
+import { useSettingsStore } from '../../stores/settings-store';
+import AppModal from '../shared/AppModal.vue';
 
-const game = useGameStore()
-const settings = useSettingsStore()
+const game = useGameStore();
+const settings = useSettingsStore();
 
 /** 本轮 token 汇总（排除 memory_recall 记忆召回，只看正文链路的缓存效率） */
 const tokenSummary = computed(() => {
-  const entries = game.agentLog.filter(e => !e.agentId.startsWith('memory_recall'))
+  const entries = game.agentLog.filter((e) => !e.agentId.startsWith('memory_recall'));
   const sum = (sel: (e: DebugAgentEntry) => number | undefined) =>
-    entries.reduce((s, e) => s + (sel(e) ?? 0), 0)
+    entries.reduce((s, e) => s + (sel(e) ?? 0), 0);
   return {
-    hit: sum(e => e.cacheHitTokens),
-    miss: sum(e => e.cacheMissTokens),
-    completion: sum(e => e.completionTokens),
+    hit: sum((e) => e.cacheHitTokens),
+    miss: sum((e) => e.cacheMissTokens),
+    completion: sum((e) => e.completionTokens),
     count: entries.length,
-  }
-})
+  };
+});
 
 /** 组装完整导出数据 */
 async function buildExportData() {
   // 🆕 导出前先把 Dexie 最新的 characters / save.metadata / saveProfile 回读进内存，
   // 避免导出开局快照（inventory=[] / totalTurns=0 假象）
-  await game.refreshFromDb()
-  const sysSettings = settings.settings
+  await game.refreshFromDb();
+  const sysSettings = settings.settings;
   return {
     exportedAt: new Date().toISOString(),
     save: {
@@ -34,17 +34,17 @@ async function buildExportData() {
       slot: game.activeSave?.slot,
       metadata: game.activeSave?.metadata,
     },
-    characters: game.characters.map(c => ({
+    characters: game.characters.map((c) => ({
       ...c,
     })),
-    messages: game.messages.map(m => ({
+    messages: game.messages.map((m) => ({
       id: m.id,
       role: m.role,
       content: m.content,
       timestamp: m.timestamp,
     })),
     saveProfile: game.saveProfile,
-    agentLog: game.agentLog.map(e => ({
+    agentLog: game.agentLog.map((e) => ({
       agentId: e.agentId,
       label: e.label,
       model: e.model,
@@ -73,40 +73,40 @@ async function buildExportData() {
       enableThinking: ep.enableThinking,
     })),
     agentModels: sysSettings.agentModels,
-  }
+  };
 }
 
 async function downloadJson() {
-  const data = await buildExportData()
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `fated-poem-debug-${game.activeSaveId?.slice(0, 8)}-${Date.now()}.json`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  const data = await buildExportData();
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `fated-poem-debug-${game.activeSaveId?.slice(0, 8)}-${Date.now()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 async function copyJson() {
-  const data = await buildExportData()
+  const data = await buildExportData();
   try {
-    await navigator.clipboard.writeText(JSON.stringify(data, null, 2))
+    await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
   } catch {
     // fallback
-    const ta = document.createElement('textarea')
-    ta.value = JSON.stringify(data, null, 2)
-    document.body.appendChild(ta)
-    ta.select()
-    document.execCommand('copy')
-    document.body.removeChild(ta)
+    const ta = document.createElement('textarea');
+    ta.value = JSON.stringify(data, null, 2);
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
   }
 }
 
 function truncate(str: string, max: number): string {
-  if (!str) return ''
-  return str.length > max ? str.slice(0, max) + '…' : str
+  if (!str) return '';
+  return str.length > max ? str.slice(0, max) + '…' : str;
 }
 </script>
 
@@ -121,25 +121,37 @@ function truncate(str: string, max: number): string {
     <!-- 存档摘要 -->
     <div class="debug-section">
       <h4>存档</h4>
-      <pre>{{ game.activeSave?.name ?? '—' }} | slot={{ game.activeSave?.slot }} | id={{ game.activeSaveId }}</pre>
+      <pre
+        >{{ game.activeSave?.name ?? '—' }} | slot={{ game.activeSave?.slot }} | id={{
+          game.activeSaveId
+        }}</pre>
     </div>
 
     <!-- Agent 调用日志 -->
     <div class="debug-section">
       <h4>本轮 Agent 调用 ({{ game.agentLog.length }})</h4>
-      <div v-if="game.agentLog.length === 0" class="debug-empty">暂无日志（等待下一轮管线触发）</div>
+      <div v-if="game.agentLog.length === 0" class="debug-empty">
+        暂无日志（等待下一轮管线触发）
+      </div>
       <div v-else class="debug-token-summary">
-        本轮汇总（排除记忆召回 · {{ tokenSummary.count }} 个 Agent）:
-        命中 <strong>{{ tokenSummary.hit }}</strong> /
-        未命中 <strong>{{ tokenSummary.miss }}</strong> /
+        本轮汇总（排除记忆召回 · {{ tokenSummary.count }} 个 Agent）: 命中
+        <strong>{{ tokenSummary.hit }}</strong> / 未命中 <strong>{{ tokenSummary.miss }}</strong> /
         输出 <strong>{{ tokenSummary.completion }}</strong>
       </div>
-      <div v-for="entry in game.agentLog" :key="entry.agentId" class="debug-agent-entry" :class="{ 'has-error': entry.error }">
+      <div
+        v-for="entry in game.agentLog"
+        :key="entry.agentId"
+        class="debug-agent-entry"
+        :class="{ 'has-error': entry.error }"
+      >
         <div class="debug-agent-head">
           <span class="debug-agent-label">{{ entry.label }}</span>
           <span class="debug-agent-model">{{ entry.model || '无模型' }}</span>
           <span v-if="entry.error" class="debug-agent-err">{{ entry.error }}</span>
-          <span v-else class="debug-agent-ok">命中 {{ entry.cacheHitTokens ?? 0 }} / 未命中 {{ entry.cacheMissTokens ?? 0 }} / 输出 {{ entry.completionTokens ?? 0 }} · {{ entry.duration }}ms</span>
+          <span v-else class="debug-agent-ok"
+            >命中 {{ entry.cacheHitTokens ?? 0 }} / 未命中 {{ entry.cacheMissTokens ?? 0 }} / 输出
+            {{ entry.completionTokens ?? 0 }} · {{ entry.duration }}ms</span
+          >
         </div>
         <details class="debug-agent-details">
           <summary>请求 ({{ entry.messages.length }} 条消息) / 响应</summary>
@@ -150,7 +162,9 @@ function truncate(str: string, max: number): string {
                 <span class="debug-role">{{ m.role }}</span>
                 <pre>{{ truncate(m.content ?? '', 500) }}</pre>
               </div>
-              <div v-if="entry.messages.length === 0" class="debug-empty-sub">消息未捕获（流式模式下请求由编排器内部构造）</div>
+              <div v-if="entry.messages.length === 0" class="debug-empty-sub">
+                消息未捕获（流式模式下请求由编排器内部构造）
+              </div>
             </div>
             <div class="debug-half">
               <h5>响应 @ {{ entry.baseUrl || '—' }}</h5>

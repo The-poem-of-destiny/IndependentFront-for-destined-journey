@@ -22,14 +22,25 @@ function makeParticipant(o: Partial<CombatParticipant> = {}): CombatParticipant 
     tier: 3,
     level: 10,
     attributes: { str: 14, dex: 13, con: 12, int: 10, spi: 11 },
-    hp: 1000, maxHp: 1000, // 高 HP 避免攻击后触发战意（战意在 hpRatio<0.5 时）
-    mp: 50, maxMp: 50, sp: 50, maxSp: 50,
-    defense: 100, dr: 0, penetration: 0,
-    hitBonus: 3, dodgeBonus: 2,
-    speedModifiers: [], fixedInitiativeBonus: 0,
-    attacksRemaining: 1, actionsRemaining: 1,
+    hp: 1000,
+    maxHp: 1000, // 高 HP 避免攻击后触发战意（战意在 hpRatio<0.5 时）
+    mp: 50,
+    maxMp: 50,
+    sp: 50,
+    maxSp: 50,
+    defense: 100,
+    dr: 0,
+    penetration: 0,
+    hitBonus: 3,
+    dodgeBonus: 2,
+    speedModifiers: [],
+    fixedInitiativeBonus: 0,
+    attacksRemaining: 1,
+    actionsRemaining: 1,
     statusEffects: [],
-    weaponAtk: 25, side: 'ally', canAct: true,
+    weaponAtk: 25,
+    side: 'ally',
+    canAct: true,
     ...o,
   };
 }
@@ -41,7 +52,14 @@ function makeCombatState(o: Partial<CombatState> = {}): CombatState {
     round: 1,
     participants: [
       makeParticipant({ characterId: 'ally1', name: '勇者', side: 'ally', tier: 3 }),
-      makeParticipant({ characterId: 'enemy1', name: '哥布林', side: 'enemy', tier: 1, hp: 2000, maxHp: 2000 }),
+      makeParticipant({
+        characterId: 'enemy1',
+        name: '哥布林',
+        side: 'enemy',
+        tier: 1,
+        hp: 2000,
+        maxHp: 2000,
+      }),
     ],
     turnOrder: [],
     currentTurnIndex: 0,
@@ -54,10 +72,19 @@ function makeCombatState(o: Partial<CombatState> = {}): CombatState {
 }
 
 const stubHooks: ReadonlyHookSet = {
-  getHp: () => 0, getMaxHp: () => 0, getMp: () => 0, getMaxMp: () => 0,
-  getSp: () => 0, getMaxSp: () => 0, getHpPercent: () => 0,
-  getAttr: () => 0, getTier: () => 0, isPresent: () => false,
-  getStatusEffects: () => [], hasStatus: () => false, getBuffStacks: () => 0,
+  getHp: () => 0,
+  getMaxHp: () => 0,
+  getMp: () => 0,
+  getMaxMp: () => 0,
+  getSp: () => 0,
+  getMaxSp: () => 0,
+  getHpPercent: () => 0,
+  getAttr: () => 0,
+  getTier: () => 0,
+  isPresent: () => false,
+  getStatusEffects: () => [],
+  hasStatus: () => false,
+  getBuffStacks: () => 0,
 };
 
 function makeCtx(bus: EventBus): PipelineContext {
@@ -112,7 +139,14 @@ describe('resolveAttackPipeline — 主攻击管道', () => {
     const combat = makeCombatState({
       participants: [
         makeParticipant({ characterId: 'ally1', name: '勇者', side: 'ally', tier: 3 }),
-        makeParticipant({ characterId: 'enemy1', name: '哥布林', side: 'enemy', tier: 3, hp: 2000, maxHp: 2000 }),
+        makeParticipant({
+          characterId: 'enemy1',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 3,
+          hp: 2000,
+          maxHp: 2000,
+        }),
       ],
     });
     const result = await resolveAttackPipeline(
@@ -128,8 +162,21 @@ describe('resolveAttackPipeline — 主攻击管道', () => {
   it('HP 红线 clamp：大伤害 → finalHp=0 + isDead=true（AI 离谱伤害也兜底）', async () => {
     const combat = makeCombatState({
       participants: [
-        makeParticipant({ characterId: 'ally1', name: '勇者', side: 'ally', tier: 7, weaponAtk: 99999 }),
-        makeParticipant({ characterId: 'enemy1', name: '弱怪', side: 'enemy', tier: 1, hp: 100, maxHp: 100 }),
+        makeParticipant({
+          characterId: 'ally1',
+          name: '勇者',
+          side: 'ally',
+          tier: 7,
+          weaponAtk: 99999,
+        }),
+        makeParticipant({
+          characterId: 'enemy1',
+          name: '弱怪',
+          side: 'enemy',
+          tier: 1,
+          hp: 100,
+          maxHp: 100,
+        }),
       ],
     });
     const result = await resolveAttackPipeline(
@@ -205,13 +252,23 @@ describe('resolveAttackPipeline — 主攻击管道', () => {
     const defCollectTriggered: string[] = [];
     bus.subscribeChain({
       type: COMBAT_EVENTS.ATTACK_COLLECT_DEF,
-      handler: (p) => { defCollectTriggered.push('def'); return p; },
+      handler: (p) => {
+        defCollectTriggered.push('def');
+        return p;
+      },
     });
 
     const combat = makeCombatState({
       participants: [
         makeParticipant({ characterId: 'ally1', name: '勇者', side: 'ally', tier: 3 }),
-        makeParticipant({ characterId: 'enemy1', name: '哥布林', side: 'enemy', tier: 3, hp: 2000, maxHp: 2000 }),
+        makeParticipant({
+          characterId: 'enemy1',
+          name: '哥布林',
+          side: 'enemy',
+          tier: 3,
+          hp: 2000,
+          maxHp: 2000,
+        }),
       ],
     });
     const result = await resolveAttackPipeline(

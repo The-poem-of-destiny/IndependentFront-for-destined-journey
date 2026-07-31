@@ -33,10 +33,7 @@ interface SubscriptionEntry {
 export type CodeResolver = (scriptKey: string) => string | undefined;
 
 /** 脚本执行回调 — 订阅触发时调用 */
-export type SubscriptionCallback = (
-  effects: ScriptEffects,
-  event: GameEvent,
-) => void;
+export type SubscriptionCallback = (effects: ScriptEffects, event: GameEvent) => void;
 
 // ═══════════════════════════════════════════════════════════
 // SubscriptionManager
@@ -102,9 +99,8 @@ export class SubscriptionManager {
     }
 
     // 创建 EventBus 订阅
-    const self = this;
     const handler = (event: GameEvent): void => {
-      self.handleEvent(event, scriptKey, codeResolver, baseCtx);
+      this.handleEvent(event, scriptKey, codeResolver, baseCtx);
     };
 
     const unsubscribe = this.eventBus.subscribe(eventType, handler);
@@ -210,9 +206,7 @@ export class SubscriptionManager {
     // 递归深度检查
     this.recursionDepth++;
     if (this.recursionDepth > this.maxRecursionDepth) {
-      console.warn(
-        `[SubscriptionManager] 事件递归超限 (${this.maxRecursionDepth}): ${event.type}`,
-      );
+      console.warn(`[SubscriptionManager] 事件递归超限 (${this.maxRecursionDepth}): ${event.type}`);
       this.recursionDepth--;
       return;
     }

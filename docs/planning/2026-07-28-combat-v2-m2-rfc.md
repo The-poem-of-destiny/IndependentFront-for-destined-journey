@@ -28,18 +28,18 @@ M2 交付 4 块新能力 + 1 处小补丁：
 ```ts
 // types.ts:673
 export interface StatusEffect {
-  id?: string;               // @deprecated（M2 起引擎不读写，旧存档兼容）
-  name: string;              // ✅ 对齐 [状态规则]「效果名称」
+  id?: string; // @deprecated（M2 起引擎不读写，旧存档兼容）
+  name: string; // ✅ 对齐 [状态规则]「效果名称」
   description: string;
-  category: '增益' | '减益' | '特殊';   // ✅ 对齐「类型」
-  stacks: number;            // ✅ 对齐「层数」(+ maxStacks?/stackable?)
-  remainingTime: number | null;        // ✅ 对齐「剩余时间」
-  timeUnit: '回合' | '分钟' | '小时';   // ✅
-  source: string;            // ⚠️ 现状是复合字符串「[分类]-[施加者];[解除方式]」
-  effects: Record<string, number>;     // ✅ 对齐「效果」
+  category: '增益' | '减益' | '特殊'; // ✅ 对齐「类型」
+  stacks: number; // ✅ 对齐「层数」(+ maxStacks?/stackable?)
+  remainingTime: number | null; // ✅ 对齐「剩余时间」
+  timeUnit: '回合' | '分钟' | '小时'; // ✅
+  source: string; // ⚠️ 现状是复合字符串「[分类]-[施加者];[解除方式]」
+  effects: Record<string, number>; // ✅ 对齐「效果」
   effectDescriptions?: Record<string, string>;
-  scripts?: Record<string, string>;    // ✅ 脚本池
-  onApply?: string;          // ✅ 4 钩子
+  scripts?: Record<string, string>; // ✅ 脚本池
+  onApply?: string; // ✅ 4 钩子
   onTick?: string;
   onRemove?: string;
   onTrigger?: string;
@@ -58,14 +58,14 @@ export interface StatusEffect {
 
 全仓 `StatusEffect` 引用：**68 处 / 16 文件**。
 
-| 文件 | 引用数 | 性质 |
-|------|--------|------|
-| state-manager.ts | 11 | 🔴 核心（唯一写入入口） |
-| script-executor.ts | 9 | 🔴 核心（$status.add/remove 沙盒） |
-| effect-runtime.ts | 5 | 🔴 核心（add/remove_status_effect patch） |
-| types.ts | 7 | 定义本身 |
-| 其余（agent-orchestrator / char-gen-agent / combat-resolver / validate / game-event） | 各 1-2 | 轻度引用 |
-| **craft-quality / craft-resolver / morale-system / affection-system** | **0** | ✅ **不碰 StatusEffect！** |
+| 文件                                                                                  | 引用数 | 性质                                      |
+| ------------------------------------------------------------------------------------- | ------ | ----------------------------------------- |
+| state-manager.ts                                                                      | 11     | 🔴 核心（唯一写入入口）                   |
+| script-executor.ts                                                                    | 9      | 🔴 核心（$status.add/remove 沙盒）        |
+| effect-runtime.ts                                                                     | 5      | 🔴 核心（add/remove_status_effect patch） |
+| types.ts                                                                              | 7      | 定义本身                                  |
+| 其余（agent-orchestrator / char-gen-agent / combat-resolver / validate / game-event） | 各 1-2 | 轻度引用                                  |
+| **craft-quality / craft-resolver / morale-system / affection-system**                 | **0**  | ✅ **不碰 StatusEffect！**                |
 
 **对 M2 的含义**：计划 §3 风险栏写的「StatusEffect 重构会影响 craft/morale/affection」**与代码现状不符**——这三个模块根本不引用 StatusEffect 类型（morale 有自己的状态机、affection 管好感度数值、craft 管品质链）。M2 真正要保绿的是 **state-manager / script-executor / effect-runtime** 三个核心 + 它们的测试（约 20 处引用）。
 
@@ -87,16 +87,16 @@ export interface StatusEffect {
 
 ## 2. 设计目标（验收标准）
 
-| # | 目标 | 验收 |
-|---|------|------|
-| G1 | modifier 6 大类类型系统 | 各类有 TS 接口；`classifyModifier(m)` 返回正确 category |
-| G2 | 登神 divinity 冲突仲裁 | `resolveDivinityConflict(a,b)` 按 §13 决策 c 差值压制表返回压制率 |
-| G3 | collect_mods 机制 | `collectAttackerMods` / `collectDefenderMods` 用 emitChain 收到 N 个 modifier |
-| G4 | buff id 去重 | 同源（同 id）刷新时间+增层；异源（不同 id）共存；(owner,id) 唯一 |
-| G5 | buff 4 生命周期 | 战斗型随回合递减；持续型不递减；触发型/条件型正确移除 |
-| G6 | 结算时机 | 增益在 round.start tick、减益在 round.end tick（emitChain 驱动） |
-| G7 | `$status` API | apply/remove/query 可调；apply 自动走 buff-registry 去重 |
-| G8 | StatusEffect 兼容 | 现有 ~20 处核心引用零改动；旧 StatusEffect（无新字段）仍正常工作 |
+| #   | 目标                    | 验收                                                                          |
+| --- | ----------------------- | ----------------------------------------------------------------------------- |
+| G1  | modifier 6 大类类型系统 | 各类有 TS 接口；`classifyModifier(m)` 返回正确 category                       |
+| G2  | 登神 divinity 冲突仲裁  | `resolveDivinityConflict(a,b)` 按 §13 决策 c 差值压制表返回压制率             |
+| G3  | collect_mods 机制       | `collectAttackerMods` / `collectDefenderMods` 用 emitChain 收到 N 个 modifier |
+| G4  | buff id 去重            | 同源（同 id）刷新时间+增层；异源（不同 id）共存；(owner,id) 唯一              |
+| G5  | buff 4 生命周期         | 战斗型随回合递减；持续型不递减；触发型/条件型正确移除                         |
+| G6  | 结算时机                | 增益在 round.start tick、减益在 round.end tick（emitChain 驱动）              |
+| G7  | `$status` API           | apply/remove/query 可调；apply 自动走 buff-registry 去重                      |
+| G8  | StatusEffect 兼容       | 现有 ~20 处核心引用零改动；旧 StatusEffect（无新字段）仍正常工作              |
 
 ---
 
@@ -157,10 +157,13 @@ export interface StatusEffect {
 - **✅ 推荐**：buff id = `sourceKey ? \`${sourceKey}.${name}\` : name`。实例 = `(ownerCharId, buffId)`。新建 `buff-registry.ts`：
   ```ts
   class BuffRegistry {
-    apply(ownerCharId: string, effect: StatusEffect): { action: 'added' | 'refreshed' | 'stacked', instance: BuffInstance }
-    remove(ownerCharId: string, buffId: string): void
-    query(ownerCharId: string, filter?): StatusEffect[]
-    tick(ownerCharId, phase: 'round.start' | 'round.end'): StatusEffect[]  // 返回到期的
+    apply(
+      ownerCharId: string,
+      effect: StatusEffect,
+    ): { action: 'added' | 'refreshed' | 'stacked'; instance: BuffInstance };
+    remove(ownerCharId: string, buffId: string): void;
+    query(ownerCharId: string, filter?): StatusEffect[];
+    tick(ownerCharId, phase: 'round.start' | 'round.end'): StatusEffect[]; // 返回到期的
   }
   ```
 - **去重规则**：同 `(owner, id)` = 同实例 → 刷新 remainingTime + stacks+=新 stacks（受 maxStacks 上限）；不同 id = 独立实例共存。
@@ -218,16 +221,23 @@ export enum EffectCategory {
 }
 
 export enum DivinityLevel {
-  普通 = 0, 微弱要素 = 1, 完整要素 = 2, 微弱权能 = 3, 完整权能 = 4,
-  微弱法则 = 5, 完整法则 = 6, 神位 = 7, 神国 = 8,
+  普通 = 0,
+  微弱要素 = 1,
+  完整要素 = 2,
+  微弱权能 = 3,
+  完整权能 = 4,
+  微弱法则 = 5,
+  完整法则 = 6,
+  神位 = 7,
+  神国 = 8,
 }
 
 /** 基础 modifier 形状（所有类别共享） */
 export interface ModifierBase {
   category: EffectCategory;
-  source: string;          // 声明来源（物品/技能名）
+  source: string; // 声明来源（物品/技能名）
   divinity?: DivinityLevel;
-  condition?: string;      // 可选触发条件（EJS 风格）
+  condition?: string; // 可选触发条件（EJS 风格）
 }
 
 export interface FixedDamageModifier extends ModifierBase {
@@ -244,20 +254,20 @@ export interface PercentageModifier extends ModifierBase {
 export interface ResourceModifier extends ModifierBase {
   category: EffectCategory.Resource;
   resource: 'hp' | 'mp' | 'sp';
-  amount: number;          // 正=恢复，负=消耗
+  amount: number; // 正=恢复，负=消耗
 }
 export interface CheckModifier extends ModifierBase {
   category: EffectCategory.Check;
   checkType: '命中' | '闪避' | '先攻' | '抵抗' | '属性';
-  attribute?: AttributeName;  // checkType='属性' 时给
+  attribute?: AttributeName; // checkType='属性' 时给
   bonus: number;
 }
 export interface AdditionalEffectModifier extends ModifierBase {
   category: EffectCategory.AdditionalEffect;
   buffName: string;
-  sourceKey: string;       // buff id 前缀
+  sourceKey: string; // buff id 前缀
   stacks?: number;
-  duration?: number;       // 回合
+  duration?: number; // 回合
   lifecycle?: '战斗' | '持续' | '触发' | '条件';
 }
 export interface SpecialMechanismModifier extends ModifierBase {
@@ -266,8 +276,13 @@ export interface SpecialMechanismModifier extends ModifierBase {
   value: number;
 }
 
-export type Modifier = FixedDamageModifier | PercentageModifier | ResourceModifier
-  | CheckModifier | AdditionalEffectModifier | SpecialMechanismModifier;
+export type Modifier =
+  | FixedDamageModifier
+  | PercentageModifier
+  | ResourceModifier
+  | CheckModifier
+  | AdditionalEffectModifier
+  | SpecialMechanismModifier;
 
 /** §13 决策 c 差值压制表：差1级→20% → 差≥5级→100% */
 export function resolveDivinityConflict(atk: DivinityLevel, def: DivinityLevel): number;
@@ -285,16 +300,26 @@ export function collectChecks(mods: Modifier[]): CheckModifier[];
 export interface CollectModsParams {
   mods: Modifier[];
   attack: {
-    attackerId: string; defenderId: string;
-    skillId?: string; weaponName?: string;
+    attackerId: string;
+    defenderId: string;
+    skillId?: string;
+    weaponName?: string;
     damageType?: DamageType;
   };
 }
 
 /** 收集攻方装备/技能/buff 声明的 modifier（走 emitChain combat.attack.collect_attacker_mods） */
-export function collectAttackerMods(bus: EventBus, attack: CollectModsParams['attack'], combatants: string[]): Promise<Modifier[]>;
+export function collectAttackerMods(
+  bus: EventBus,
+  attack: CollectModsParams['attack'],
+  combatants: string[],
+): Promise<Modifier[]>;
 /** 收集守方装备/技能/buff 声明的 modifier（走 emitChain combat.attack.collect_defender_mods） */
-export function collectDefenderMods(bus: EventBus, attack: CollectModsParams['attack'], combatants: string[]): Promise<Modifier[]>;
+export function collectDefenderMods(
+  bus: EventBus,
+  attack: CollectModsParams['attack'],
+  combatants: string[],
+): Promise<Modifier[]>;
 ```
 
 ### 4.3 buff-registry.ts（去重 + 生命周期 + tick）
@@ -302,13 +327,16 @@ export function collectDefenderMods(bus: EventBus, attack: CollectModsParams['at
 ```ts
 export interface BuffInstance {
   ownerCharId: string;
-  buffId: string;          // `${sourceKey}.${name}` 或 `name`
+  buffId: string; // `${sourceKey}.${name}` 或 `name`
   effect: StatusEffect;
-  appliedAt: number;       // 回合号
+  appliedAt: number; // 回合号
 }
 
 export class BuffRegistry {
-  apply(ownerCharId: string, effect: StatusEffect): {
+  apply(
+    ownerCharId: string,
+    effect: StatusEffect,
+  ): {
     action: 'added' | 'refreshed' | 'stacked';
     instance: BuffInstance;
   };
@@ -317,7 +345,11 @@ export class BuffRegistry {
   has(ownerCharId: string, buffIdOrName: string): boolean;
   getStacks(ownerCharId: string, buffIdOrName: string): number;
   /** 按 phase 结算：战斗型回合递减 + 到期移除 */
-  tick(ownerCharId: string, phase: 'round.start' | 'round.end', currentRound: number): StatusEffect[];
+  tick(
+    ownerCharId: string,
+    phase: 'round.start' | 'round.end',
+    currentRound: number,
+  ): StatusEffect[];
   /** 构造 buff id */
   static buffIdOf(effect: StatusEffect): string;
 }
@@ -328,7 +360,10 @@ export class BuffRegistry {
 ```ts
 /** 注入沙盒的 $status API（扩展 ScriptSandbox） */
 export interface StatusApi {
-  apply(target: string, buffDef: Partial<StatusEffect> & { name: string; category: StatusEffect['category'] }): { action: string; instance: BuffInstance };
+  apply(
+    target: string,
+    buffDef: Partial<StatusEffect> & { name: string; category: StatusEffect['category'] },
+  ): { action: string; instance: BuffInstance };
   remove(target: string, buffIdOrName: string): boolean;
   query(target: string, filter?: (e: StatusEffect) => boolean): StatusEffect[];
   has(target: string, buffIdOrName: string): boolean;
@@ -343,18 +378,18 @@ export function createStatusApi(registry: BuffRegistry): StatusApi;
 
 ## 5. 任务分解（对齐计划 M2 的 3.1–3.10）
 
-| 计划任务 | RFC 落地 | 涉及文件 | 核心改动 |
-|---------|---------|---------|---------|
-| 3.1 modifier 6 大类 | D1 | 新增 `effect-types.ts` | EffectCategory + 6 接口 + Modifier 联合 |
-| 3.2 登神 divinity | D2 | `effect-types.ts` | DivinityLevel + resolveDivinityConflict（差值压制表） |
-| 3.3 collect_mods | D3 | 新增 `modifier-collector.ts` | collectAttackerMods/collectDefenderMods（emitChain） |
-| 3.4 modifier 分发 | D4 | `effect-types.ts` | classifyModifier + 聚合工具（不接管线，M3 再接） |
-| 3.5 buff 6 字段 | D5 | `types.ts` StatusEffect +3 可选字段 | sourceKey?/lifecycle?/divinity? |
-| 3.6 buff id 去重 | D6 | 新增 `buff-registry.ts` | apply/remove/query + 同源刷新+增层 |
-| 3.7 buff 4 生命周期 | D7 | `buff-registry.ts` | tick 按 lifecycle 决定递减/不移 |
-| 3.8 结算时机 | D8 | `buff-registry.ts` | tick(charId, phase) 区分 round.start/end |
-| 3.9 layer 自由参数 | D9 | `status-api.ts` | apply 时 layers=stacks 透传 handler |
-| 3.10 `$status` API | D10 | 新增 `status-api.ts` + 扩展 `script-executor.ts` 沙盒 | apply/remove/query/has/getStacks |
+| 计划任务            | RFC 落地 | 涉及文件                                              | 核心改动                                              |
+| ------------------- | -------- | ----------------------------------------------------- | ----------------------------------------------------- |
+| 3.1 modifier 6 大类 | D1       | 新增 `effect-types.ts`                                | EffectCategory + 6 接口 + Modifier 联合               |
+| 3.2 登神 divinity   | D2       | `effect-types.ts`                                     | DivinityLevel + resolveDivinityConflict（差值压制表） |
+| 3.3 collect_mods    | D3       | 新增 `modifier-collector.ts`                          | collectAttackerMods/collectDefenderMods（emitChain）  |
+| 3.4 modifier 分发   | D4       | `effect-types.ts`                                     | classifyModifier + 聚合工具（不接管线，M3 再接）      |
+| 3.5 buff 6 字段     | D5       | `types.ts` StatusEffect +3 可选字段                   | sourceKey?/lifecycle?/divinity?                       |
+| 3.6 buff id 去重    | D6       | 新增 `buff-registry.ts`                               | apply/remove/query + 同源刷新+增层                    |
+| 3.7 buff 4 生命周期 | D7       | `buff-registry.ts`                                    | tick 按 lifecycle 决定递减/不移                       |
+| 3.8 结算时机        | D8       | `buff-registry.ts`                                    | tick(charId, phase) 区分 round.start/end              |
+| 3.9 layer 自由参数  | D9       | `status-api.ts`                                       | apply 时 layers=stacks 透传 handler                   |
+| 3.10 `$status` API  | D10      | 新增 `status-api.ts` + 扩展 `script-executor.ts` 沙盒 | apply/remove/query/has/getStacks                      |
 
 **实施顺序建议**：3.1→3.2→3.5（类型基础）→ 3.6→3.7→3.8（buff-registry）→ 3.10→3.9（$status）→ 3.3→3.4（modifier collect，依赖 emitChain 已就绪）。
 
@@ -364,14 +399,14 @@ export function createStatusApi(registry: BuffRegistry): StatusApi;
 
 ### 6.1 影响面（基于 §1.3 实测）
 
-| 面 | 影响 |
-|----|------|
-| StatusEffect 现有字段 | **零改动**（D5 只加可选字段） |
-| state-manager.ts (11 处) | 零（add/update_status_effect patch 已存在，M2 复用） |
-| script-executor.ts (9 处) | 小改（沙盒增 `$status` namespace，复用 M1 的 readHooks 模式） |
-| effect-runtime.ts (5 处) | 零（add/remove_status_effect patch 不变） |
-| craft / morale / affection | **零**（不引用 StatusEffect） |
-| 现有测试 | StatusEffect 相关 ~20 处断言全绿（新字段可选，旧数据正常） |
+| 面                         | 影响                                                          |
+| -------------------------- | ------------------------------------------------------------- |
+| StatusEffect 现有字段      | **零改动**（D5 只加可选字段）                                 |
+| state-manager.ts (11 处)   | 零（add/update_status_effect patch 已存在，M2 复用）          |
+| script-executor.ts (9 处)  | 小改（沙盒增 `$status` namespace，复用 M1 的 readHooks 模式） |
+| effect-runtime.ts (5 处)   | 零（add/remove_status_effect patch 不变）                     |
+| craft / morale / affection | **零**（不引用 StatusEffect）                                 |
+| 现有测试                   | StatusEffect 相关 ~20 处断言全绿（新字段可选，旧数据正常）    |
 
 ### 6.2 兼容保证
 
@@ -390,19 +425,21 @@ M2 全是新增模块（effect-types / modifier-collector / buff-registry / stat
 ## 7. 测试计划
 
 ### 7.1 现有测试回归（必须全绿）
+
 - `state-manager.test.ts` / `script-executor.test.ts` / `effect-runtime.test.ts` / `validate.test.ts` / `resource-calc.test.ts` 等含 StatusEffect 断言的
 
 ### 7.2 M2 新增测试
 
-| 测试文件 | 覆盖 |
-|---------|------|
-| 新增 `effect-types.test.ts` | 6 大类 classify；divinity 差值压制表（差1→20%/差5→100%）；聚合工具 |
-| 新增 `modifier-collector.test.ts` | 注册 3 个装备声明 → collectAttackerMods 收到 3 modifier；在场过滤；priority 排序 |
-| 新增 `buff-registry.test.ts` | 同源刷新+增层；异源共存；(owner,id) 唯一；4 生命周期 tick；round.start/end 区分；sourceKey 前缀 id |
-| 新增 `status-api.test.ts` | apply 走去重；remove/query/has/getStacks；$status 注入沙盒后可调 |
-| `script-executor.test.ts` 扩展 | 沙盒 `$status.apply` 可调（mock BuffRegistry） |
+| 测试文件                          | 覆盖                                                                                               |
+| --------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 新增 `effect-types.test.ts`       | 6 大类 classify；divinity 差值压制表（差1→20%/差5→100%）；聚合工具                                 |
+| 新增 `modifier-collector.test.ts` | 注册 3 个装备声明 → collectAttackerMods 收到 3 modifier；在场过滤；priority 排序                   |
+| 新增 `buff-registry.test.ts`      | 同源刷新+增层；异源共存；(owner,id) 唯一；4 生命周期 tick；round.start/end 区分；sourceKey 前缀 id |
+| 新增 `status-api.test.ts`         | apply 走去重；remove/query/has/getStacks；$status 注入沙盒后可调                                   |
+| `script-executor.test.ts` 扩展    | 沙盒 `$status.apply` 可调（mock BuffRegistry）                                                     |
 
 ### 7.3 验收命令
+
 ```bash
 npm run typecheck
 npm run test -- --run
@@ -412,14 +449,14 @@ npm run test -- --run
 
 ## 8. 风险与对策
 
-| 风险 | 等级 | 对策 |
-|------|------|------|
-| StatusEffect 加字段破坏旧存档反序列化 | 🟡 | 三字段全可选，JSON 反序列化缺字段 = undefined = 按缺省推导，旧存档安全 |
-| buff id 的 sourceKey 与现有 source 字段语义混淆 | 🟡 | RFC 明确：source=展示用复合串，sourceKey=buff id 前缀（物品/技能名）。文档 + 注释双保险 |
-| `$status.apply` 与 `$status.add` 双 API 心智负担 | 🟡 | apply=智能（去重，推荐 AI 用），add=直接（兼容旧脚本）。item_gen systemPrompt 引导 AI 用 apply（M4） |
-| collect_mods 的事件名拼写错导致 M3 接不上 | 🟢 | M2 定义 `CombatModEvent` 常量（`combat.attack.collect_attacker_mods` 等），M3 import 复用 |
-| BuffRegistry 与 SubscriptionManager 协同顺序错（apply 时脚本未注册/已注册） | 🟡 | D11 明确：先 BuffRegistry.apply 决定实例，再（added 时）注册脚本订阅；refreshed/stacked 时不重注册 |
-| divinity 差值压制表数值记错 | 🟢 | 对齐 §13 决策 c 原文（差1级20%递增），写表驱动测试钉死 |
+| 风险                                                                        | 等级 | 对策                                                                                                 |
+| --------------------------------------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------- |
+| StatusEffect 加字段破坏旧存档反序列化                                       | 🟡   | 三字段全可选，JSON 反序列化缺字段 = undefined = 按缺省推导，旧存档安全                               |
+| buff id 的 sourceKey 与现有 source 字段语义混淆                             | 🟡   | RFC 明确：source=展示用复合串，sourceKey=buff id 前缀（物品/技能名）。文档 + 注释双保险              |
+| `$status.apply` 与 `$status.add` 双 API 心智负担                            | 🟡   | apply=智能（去重，推荐 AI 用），add=直接（兼容旧脚本）。item_gen systemPrompt 引导 AI 用 apply（M4） |
+| collect_mods 的事件名拼写错导致 M3 接不上                                   | 🟢   | M2 定义 `CombatModEvent` 常量（`combat.attack.collect_attacker_mods` 等），M3 import 复用            |
+| BuffRegistry 与 SubscriptionManager 协同顺序错（apply 时脚本未注册/已注册） | 🟡   | D11 明确：先 BuffRegistry.apply 决定实例，再（added 时）注册脚本订阅；refreshed/stacked 时不重注册   |
+| divinity 差值压制表数值记错                                                 | 🟢   | 对齐 §13 决策 c 原文（差1级20%递增），写表驱动测试钉死                                               |
 
 ---
 
@@ -427,19 +464,19 @@ npm run test -- --run
 
 带 ✅ 是本 RFC 推荐，主人不否决即按此实施：
 
-| # | 决策点 | 选项 | 推荐 |
-|---|--------|------|------|
-| Q1 | modifier 类型载体 | 新建 effect-types / 扩展 EffectDefinition | ✅ 新建 |
-| Q2 | divinity 粒度 | 挂装备(modifier继承) / 挂单 modifier | ✅ 挂装备（§13 d） |
-| Q3 | buff id 前缀来源 | 新增 sourceKey 字段 / 从 source 解析 | ✅ 新增字段 |
-| Q4 | lifecycle 表达 | 新增 lifecycle 字段 / 从 timeUnit 推导 | ✅ 新增字段 + 缺省推导 |
-| Q5 | `$status.apply` 去重路径 | 走 state-manager patch / 直接改 character | ✅ 走 patch（ADR-21） |
-| Q6 | collect_mods 机制 | 复用 emitChain / 新造 | ✅ 复用 emitChain |
-| Q7 | StatusEffect 现有字段 | 不动 / 重构 source | ✅ 不动 |
-| Q8 | BuffRegistry vs SubscriptionManager | 独立 / 合并 | ✅ 独立 |
-| Q9 | M2 是否接入 runDamagePipeline | 接 / 不接（留给 M3） | ✅ 不接 |
-| Q10 | `$status.add`（旧）去留 | 保留并存 / 删除 | ✅ 保留并存 |
-| Q11 | 实施方式 | 主线串行 / agent 并行 | 见 §10 |
+| #   | 决策点                              | 选项                                      | 推荐                   |
+| --- | ----------------------------------- | ----------------------------------------- | ---------------------- |
+| Q1  | modifier 类型载体                   | 新建 effect-types / 扩展 EffectDefinition | ✅ 新建                |
+| Q2  | divinity 粒度                       | 挂装备(modifier继承) / 挂单 modifier      | ✅ 挂装备（§13 d）     |
+| Q3  | buff id 前缀来源                    | 新增 sourceKey 字段 / 从 source 解析      | ✅ 新增字段            |
+| Q4  | lifecycle 表达                      | 新增 lifecycle 字段 / 从 timeUnit 推导    | ✅ 新增字段 + 缺省推导 |
+| Q5  | `$status.apply` 去重路径            | 走 state-manager patch / 直接改 character | ✅ 走 patch（ADR-21）  |
+| Q6  | collect_mods 机制                   | 复用 emitChain / 新造                     | ✅ 复用 emitChain      |
+| Q7  | StatusEffect 现有字段               | 不动 / 重构 source                        | ✅ 不动                |
+| Q8  | BuffRegistry vs SubscriptionManager | 独立 / 合并                               | ✅ 独立                |
+| Q9  | M2 是否接入 runDamagePipeline       | 接 / 不接（留给 M3）                      | ✅ 不接                |
+| Q10 | `$status.add`（旧）去留             | 保留并存 / 删除                           | ✅ 保留并存            |
+| Q11 | 实施方式                            | 主线串行 / agent 并行                     | 见 §10                 |
 
 ---
 
@@ -460,7 +497,7 @@ M2 的 10 个任务可分 3 组，组内有依赖、组间较独立：
 
 ## 11. 变更记录
 
-| 日期 | 变更 | 作者 |
-|------|------|------|
-| 2026-07-28 | 初版 RFC：现状审计（StatusEffect 已成熟 + craft/morale/affection 不在引用面）+ 11 决策 + API 草案 + 把「重构」降级为「小补丁+新增模块」 | Claude（RFC）|
-| 2026-07-28 | M2 实施完成：Q1-Q10 全按推荐；10 任务交付，五件套 ~140 tests，全量 3465/3466 零回归；StatusEffect 仅加 3 可选字段（D5=A），未重构 | Claude（实施）|
+| 日期       | 变更                                                                                                                                    | 作者           |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| 2026-07-28 | 初版 RFC：现状审计（StatusEffect 已成熟 + craft/morale/affection 不在引用面）+ 11 决策 + API 草案 + 把「重构」降级为「小补丁+新增模块」 | Claude（RFC）  |
+| 2026-07-28 | M2 实施完成：Q1-Q10 全按推荐；10 任务交付，五件套 ~140 tests，全量 3465/3466 零回归；StatusEffect 仅加 3 可选字段（D5=A），未重构       | Claude（实施） |

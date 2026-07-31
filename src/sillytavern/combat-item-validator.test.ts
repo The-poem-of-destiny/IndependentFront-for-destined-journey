@@ -38,7 +38,13 @@ describe('validateModifier · 6 类正例（合规返回空）', () => {
   });
 
   it('检定类合规（属性 + attribute）', () => {
-    const mod = { category: '检定', source: '巨力腰带', checkType: '属性', attribute: 'str', bonus: 3 };
+    const mod = {
+      category: '检定',
+      source: '巨力腰带',
+      checkType: '属性',
+      attribute: 'str',
+      bonus: 3,
+    };
     expect(validateModifier(mod)).toEqual([]);
   });
 
@@ -108,7 +114,12 @@ describe('validateModifier · category 与必填字段违规', () => {
   });
 
   it('资源类 resource 非法 → 违规', () => {
-    const reasons = validateModifier({ category: '资源', source: 'X', resource: '体力', amount: 10 });
+    const reasons = validateModifier({
+      category: '资源',
+      source: 'X',
+      resource: '体力',
+      amount: 10,
+    });
     expect(reasons.some((r) => r.includes('resource'))).toBe(true);
   });
 
@@ -118,7 +129,12 @@ describe('validateModifier · category 与必填字段违规', () => {
   });
 
   it('检定类 checkType 非法 → 违规', () => {
-    const reasons = validateModifier({ category: '检定', source: 'X', checkType: '暴击', bonus: 5 });
+    const reasons = validateModifier({
+      category: '检定',
+      source: 'X',
+      checkType: '暴击',
+      bonus: 5,
+    });
     expect(reasons.some((r) => r.includes('checkType'))).toBe(true);
   });
 

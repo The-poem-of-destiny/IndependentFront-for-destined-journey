@@ -48,9 +48,7 @@ describe('getBloodline', () => {
     expect(result).toBeDefined();
     expect(result!.name).toBe('北境龙裔');
     expect(result!.statModifiers).toEqual({ str: 2, con: 2 });
-    expect(result!.description).toBe(
-      '人形龙血传承者（1.8-2.2m），竖瞳，龙吼之力',
-    );
+    expect(result!.description).toBe('人形龙血传承者（1.8-2.2m），竖瞳，龙吼之力');
   });
 
   it('传入 "vampire" 应返回包含负修正的血脉', () => {

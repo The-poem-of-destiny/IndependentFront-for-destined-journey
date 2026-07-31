@@ -20,12 +20,12 @@
 
 引入一个**对标 SillyTavern 的本地同源后端（BFF）**，把"怎么把请求发出去"这件事**系统化、永久化**：
 
-| 目标 | 达成方式 |
-|---|---|
-| CORS 永久消失 | 前端永远只请求同源 `/api/...`，BFF（服务器进程，无 CORS）转发给真实 provider |
-| 生产可用 | 提供独立 `server.js` + `start.bat`，dev/prod **共享同一套路由代码** |
-| 统一接入点 | 所有 API 调用（chat / embedding / models / test）走同源路由，告别 `withProxy(真实URL)` 散落各处 |
-| 不动业务 | prompt / 编排 / 世界书 / 剧情 / 记忆 / 翻译层 **一行不改** |
+| 目标          | 达成方式                                                                                        |
+| ------------- | ----------------------------------------------------------------------------------------------- |
+| CORS 永久消失 | 前端永远只请求同源 `/api/...`，BFF（服务器进程，无 CORS）转发给真实 provider                    |
+| 生产可用      | 提供独立 `server.js` + `start.bat`，dev/prod **共享同一套路由代码**                             |
+| 统一接入点    | 所有 API 调用（chat / embedding / models / test）走同源路由，告别 `withProxy(真实URL)` 散落各处 |
+| 不动业务      | prompt / 编排 / 世界书 / 剧情 / 记忆 / 翻译层 **一行不改**                                      |
 
 ### 1.3 非目标（明确隔离线）
 
@@ -41,13 +41,13 @@
 
 ### 2.1 API 调用层文件清单
 
-| 文件 | 职责 | CORS 现状 |
-|---|---|---|
-| `src/sillytavern/agent-client.ts` | 核心：`chat()` / `chatStream()` / `chatWithTools()`。手搓 fetch + SSE 解析 + tool 多轮循环 + userId 缓存隔离 + 重试退避 + 超时 + 缓存命中检测（`x-ds-cache-hit` / `prompt_cache_*_tokens`） | 用 `withProxy()` |
-| `src/sillytavern/api-tools.ts` | `withProxy()` + `fetchModels()` + `testConnection()` + `getFallbackModels()` | 用 `withProxy()` |
-| `src/sillytavern/memory-store.ts` | `computeEmbedding()` 调 `/embeddings` | 用 `withProxy()` |
-| `src/sillytavern/api-router.ts` | v3 双模型路由（primary/secondary） | 用 `withProxy()`，但**无人 import，死代码** |
-| `src/ui/components/settings/SettingsPage.vue` | `testApiAndFetch()` / `fetchModelList()`，XHR 手搓（与 api-tools 重复实现） | 用 `withProxy()` |
+| 文件                                          | 职责                                                                                                                                                                                        | CORS 现状                                   |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `src/sillytavern/agent-client.ts`             | 核心：`chat()` / `chatStream()` / `chatWithTools()`。手搓 fetch + SSE 解析 + tool 多轮循环 + userId 缓存隔离 + 重试退避 + 超时 + 缓存命中检测（`x-ds-cache-hit` / `prompt_cache_*_tokens`） | 用 `withProxy()`                            |
+| `src/sillytavern/api-tools.ts`                | `withProxy()` + `fetchModels()` + `testConnection()` + `getFallbackModels()`                                                                                                                | 用 `withProxy()`                            |
+| `src/sillytavern/memory-store.ts`             | `computeEmbedding()` 调 `/embeddings`                                                                                                                                                       | 用 `withProxy()`                            |
+| `src/sillytavern/api-router.ts`               | v3 双模型路由（primary/secondary）                                                                                                                                                          | 用 `withProxy()`，但**无人 import，死代码** |
+| `src/ui/components/settings/SettingsPage.vue` | `testApiAndFetch()` / `fetchModelList()`，XHR 手搓（与 api-tools 重复实现）                                                                                                                 | 用 `withProxy()`                            |
 
 ### 2.2 配置存储
 
@@ -106,10 +106,10 @@
 
 ### 4.1 透传模式 vs 托管模式 → 选**透传**
 
-| 模式 | key 在哪 | BFF 是否管配置 | 复杂度 |
-|---|---|---|---|
-| **透传（选）** | 前端持有（同现状） | 否，无状态转发 | 低 |
-| 托管 | BFF 管 | 是，需同步配置 | 高 |
+| 模式           | key 在哪           | BFF 是否管配置 | 复杂度 |
+| -------------- | ------------------ | -------------- | ------ |
+| **透传（选）** | 前端持有（同现状） | 否，无状态转发 | 低     |
+| 托管           | BFF 管             | 是，需同步配置 | 高     |
 
 理由：本项目是 SillyTavern 模式，key 本就在浏览器。透传模式 = BFF 只做"加 CORS 头的 fetch 转发器"，**零状态、零配置同步、最小风险**。前端改动仅限"换 URL"，业务逻辑全保留。
 
@@ -141,13 +141,13 @@
 
 ### 5.1 路由表
 
-| Method | Path | 用途 | 上游 |
-|---|---|---|---|
-| POST | `/api/chat/completions` | chat（支持 stream） | `<X-Target-Base-URL>/chat/completions` |
-| POST | `/api/embeddings` | 向量嵌入 | `<X-Target-Base-URL>/embeddings` |
-| GET | `/api/models` | 拉取模型列表 | `<X-Target-Base-URL>/models` |
-| POST | `/api/chat/test` | 连通性 ping | `<X-Target-Base-URL>/chat/completions`（max_tokens=1） |
-| GET | `/api/status` | BFF 自身存活检测 | 无（本地返回） |
+| Method | Path                    | 用途                | 上游                                                   |
+| ------ | ----------------------- | ------------------- | ------------------------------------------------------ |
+| POST   | `/api/chat/completions` | chat（支持 stream） | `<X-Target-Base-URL>/chat/completions`                 |
+| POST   | `/api/embeddings`       | 向量嵌入            | `<X-Target-Base-URL>/embeddings`                       |
+| GET    | `/api/models`           | 拉取模型列表        | `<X-Target-Base-URL>/models`                           |
+| POST   | `/api/chat/test`        | 连通性 ping         | `<X-Target-Base-URL>/chat/completions`（max_tokens=1） |
+| GET    | `/api/status`           | BFF 自身存活检测    | 无（本地返回）                                         |
 
 ### 5.2 通用约定
 
@@ -162,23 +162,24 @@
 `/api/chat/completions` 当 body 含 `stream:true` 时，BFF **不缓冲**，用 Web Response 直接把上游 `body`（ReadableStream）管道转发回前端。前端 `chatStream()` 的 SSE 解析逻辑**原样保留**（`\n\n` 分割 / `data:` 解析）。
 
 骨架：
+
 ```ts
 // server/routes/proxy.ts — 透传核心
 async function forward(c: Context, suffix: string, init?: RequestInit) {
-  const base = c.req.header('X-Target-Base-URL')?.replace(/\/+$/, '')
-  if (!base) return c.json({ error: 'missing X-Target-Base-URL' }, 400)
-  const auth = c.req.header('Authorization')
+  const base = c.req.header('X-Target-Base-URL')?.replace(/\/+$/, '');
+  if (!base) return c.json({ error: 'missing X-Target-Base-URL' }, 400);
+  const auth = c.req.header('Authorization');
   const upstream = await fetch(`${base}${suffix}`, {
     method: c.req.method,
     headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) },
     ...init,
     // @ts-expect-error Node undici 流式需要
     duplex: 'half',
-  })
+  });
   return new Response(upstream.body, {
     status: upstream.status,
     headers: stripHopHeaders(upstream.headers),
-  })
+  });
 }
 ```
 
@@ -258,36 +259,38 @@ async function forward(c: Context, suffix: string, init?: RequestInit) {
 `vite.config.ts` 里用 `@hono/node-server` 的 `getRequestListener` 把 hono app 适配成 node listener，仅 `/api` 前缀交给 BFF，其余 `next()` 给 vite 处理 Vue HMR：
 
 ```ts
-import { buildHonoApp } from './server/app'
-import { getRequestListener } from '@hono/node-server'
+import { buildHonoApp } from './server/app';
+import { getRequestListener } from '@hono/node-server';
 
 // 在现有 configureServer(server) 里：
-const listener = getRequestListener(buildHonoApp().fetch)
+const listener = getRequestListener(buildHonoApp().fetch);
 server.middlewares.use((req, res, next) => {
-  if (req.url?.startsWith('/api')) return listener(req, res)
-  next()
-})
+  if (req.url?.startsWith('/api')) return listener(req, res);
+  next();
+});
 // 现有 /api/proxy middleware 整块删除（被 hono 路由取代）
 ```
 
 ### 7.3 prod：独立 server
 
 `server-main.ts`：
-```ts
-import { serve } from '@hono/node-server'
-import { serveStatic } from '@hono/node-server/serve-static'
-import { buildHonoApp } from './server/app'
 
-const app = buildHonoApp()
-app.use('/*', serveStatic({ root: './dist-ui' }))   // 前端静态
+```ts
+import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { buildHonoApp } from './server/app';
+
+const app = buildHonoApp();
+app.use('/*', serveStatic({ root: './dist-ui' })); // 前端静态
 serve({ fetch: app.fetch, port: 8787 }, (info) => {
-  console.log(`命定之诗运行中: http://localhost:${info.port}`)
-})
+  console.log(`命定之诗运行中: http://localhost:${info.port}`);
+});
 ```
 
 构建产物：`tsc -p tsconfig.server.json → dist-server/`，`vite build → dist-ui/`（已存在）。
 
 `start.bat`（仿 SillyTavern）：
+
 ```bat
 @echo off
 if not exist node_modules (call npm install)
@@ -313,6 +316,7 @@ pause
 ## 八、迁移阶段（分步，每步可验证）
 
 ### Phase A — BFF 骨架 + dev 挂载 + chat 一条路由打通
+
 - 建 `server/` 目录、hono app、CORS 中间件、`/api/chat/completions` + `/api/status`
 - vite.config.ts 挂载 hono app（**保留**旧 `/api/proxy` middleware——`withProxy` 仍在 api-tools/memory-store/SettingsPage 用，Phase D 统一删，避免其他路径崩）
 - **前端只改 `agent-client.ts`** 切同源
@@ -320,18 +324,21 @@ pause
 - **此时 withProxy 仍在 api-tools/memory-store/SettingsPage，不急删，保证其他路径不崩**
 
 ### Phase B — 全路由接入
+
 - 加 `/api/embeddings` `/api/models` `/api/chat/test`
 - 改 `memory-store.ts` / `api-tools.ts` / `SettingsPage.vue` 切同源
 - 顺手 SettingsPage 去重（§6.5）
 - 验证：设置页"获取模型"+"测试连接"通；记忆召回 embedding 通
 
 ### Phase C — 生产 server + start.bat
+
 - 建 `server-main.ts` + `tsconfig.server.json` + `start.bat`/`start.sh`
 - `npm run build` 增加 server 构建步骤
 - 验证：`npm run build && start.bat`，浏览器开 8787，完整跑一轮游戏
 - 更新 `package.json` scripts（`build` 串 ui+server，`start` 加生产启动）
 
 ### Phase D — 收尾清理
+
 - 删 `withProxy()` 函数、删 `api-router.ts`（死代码）、清 types 孤儿
 - 更新文档：`CLAUDE.md` 架构图 + Phase 表、本文档标 ✅
 - 全量测试绿
@@ -351,13 +358,13 @@ pause
 
 ## 十、风险与取舍
 
-| 风险 | 缓解 |
-|---|---|
-| 用户需装 Node（生产） | 同 SillyTavern 门槛，`start.bat` 自动 `npm install`；README 写清 |
-| dev/prod 行为不一致 | 双宿主共享同一 hono app，路由代码单一真源 |
-| SSE 流式在 Node undici 需 `duplex:'half'` | PR #4 已验证流式管道可行，hono Web Response 原生支持 |
-| 前端持有 key 被质疑 | 本项目本就是 SillyTavern 模式，预期行为；托管模式留待未来 |
-| 与 PR #4 冲突 | 不冲突：Phase A 删 `/api/proxy` middleware，`withProxy` Phase D 删，平滑过渡 |
+| 风险                                      | 缓解                                                                         |
+| ----------------------------------------- | ---------------------------------------------------------------------------- |
+| 用户需装 Node（生产）                     | 同 SillyTavern 门槛，`start.bat` 自动 `npm install`；README 写清             |
+| dev/prod 行为不一致                       | 双宿主共享同一 hono app，路由代码单一真源                                    |
+| SSE 流式在 Node undici 需 `duplex:'half'` | PR #4 已验证流式管道可行，hono Web Response 原生支持                         |
+| 前端持有 key 被质疑                       | 本项目本就是 SillyTavern 模式，预期行为；托管模式留待未来                    |
+| 与 PR #4 冲突                             | 不冲突：Phase A 删 `/api/proxy` middleware，`withProxy` Phase D 删，平滑过渡 |
 
 ---
 

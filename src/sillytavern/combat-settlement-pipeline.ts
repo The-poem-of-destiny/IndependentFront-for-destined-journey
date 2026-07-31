@@ -67,8 +67,7 @@ export async function runSettlementPipeline(
 
   // ===== 2. 代码算 EXP（败方所有单位 Lv × 战斗系数，集群占位衰减）=====
   // 语义: ally 胜 → 败方 = enemy，按敌单位汇总 EXP；enemy 胜/draw → 己方败北或平局，无奖励。
-  const loserSide: 'ally' | 'enemy' | null =
-    winner === 'ally' ? 'enemy' : null;
+  const loserSide: 'ally' | 'enemy' | null = winner === 'ally' ? 'enemy' : null;
 
   let exp = 0;
   const defeatedEnemies: Array<{ name: string; tier: number; level: number }> = [];
@@ -96,7 +95,9 @@ export async function runSettlementPipeline(
     },
     chainCtx,
   );
-  const loot = (lootParams as { loot?: Array<{ name: string; quality?: string; quantity?: number }> })?.loot ?? [];
+  const loot =
+    (lootParams as { loot?: Array<{ name: string; quality?: string; quantity?: number }> })?.loot ??
+    [];
 
   // ===== 4. event: combat.settle.complete (代码→AI，EXP/FP + 摘要) =====
   // AI 可在 handler 里写入 summary（结算叙事）和 fp（FP 创造性评估）
