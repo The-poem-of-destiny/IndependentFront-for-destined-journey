@@ -127,6 +127,15 @@ export const useGameStore = defineStore('game', () => {
       case 'turn_started':
         combatCurrentUnitId.value = evt.unitId;
         break;
+      case 'dot_tick':
+        // DoT 周期伤害结算(2026-07-31 引擎新增) —— 复用 narrative 渲染通道,无需新组件
+        combatLog.value.push({
+          id,
+          kind: 'narrative',
+          text: `☠ ${evt.unit} 受持续伤害：${evt.ticks.map((t) => `${t.name} -${t.amount}`).join('、')}（剩余 HP ${evt.hpAfter}）`,
+          round: evt.round,
+        });
+        break;
       // combat_ended（exitCombat 收尾）
     }
   }
