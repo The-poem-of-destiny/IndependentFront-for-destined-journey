@@ -7,7 +7,6 @@
  * 1. **D15 闸门**：`plan.conflicts` 非空时，覆盖警告必须出现在 `commitInstall`
  *    **之前** —— 这是全页唯一一条不可颠倒的时序，颠倒了就是用户改过的条目被静默盖掉。
  * 2. **丢弃 loud（D16）**：`droppedNotes` 在折叠态就露出「N 项内容未导入」，展开可看全文。
- * 3. **两个入口一条管线**：网络安装与本地文件导入都经同一个 prepare → 闸门 → commit。
  *
  * 网络层（workshop-client）整层 mock，**绝不发真实请求**。
  *
@@ -19,6 +18,7 @@ import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import type { WorkshopProject } from '@engine/types';
 import type { InstallConflict, InstallPlan } from '@engine/workshop-types';
+import type { WorkshopUpdateDiff } from '@engine/workshop-diff';
 import WorkshopPage from './WorkshopPage.vue';
 import { fetchProject, listProjects } from '../../lib/workshop-client';
 
@@ -30,7 +30,15 @@ vi.mock('../../lib/workshop-client', async () => {
     listProjects: vi.fn(async () => ({
       ok: true,
       fromCache: false,
-      data: { total: 0, page: 0, pageSize: 20, projects: [], droppedCount: 0, socials: {} },
+      data: {
+        total: 0,
+        page: 0,
+        pageSize: 20,
+        projects: [],
+        droppedCount: 0,
+        socials: {},
+        listings: {},
+      },
     })),
     fetchProject: vi.fn(async () => ({
       ok: false,
@@ -44,10 +52,18 @@ const h = vi.hoisted(() => {
   const fns = {
     init: vi.fn(async () => {}),
     prepareInstall: vi.fn(),
-    prepareInstallFromFile: vi.fn(),
     commitInstall: vi.fn(),
     checkUpdate: vi.fn(),
     uninstall: vi.fn(async () => true),
+    // B3：更新前的改动预告。默认返回「无改动」，关心 diff 的用例自己覆盖。
+    // 显式标注返回类型：不标的话空数组被推成 never[]，用例再想 mockReturnValue
+    // 一份真的 diff 就会被类型系统拒掉。
+    previewUpdate: vi.fn((): WorkshopUpdateDiff => ({
+      entries: { added: [], modified: [], removed: [] },
+      rules: { added: [], modified: [], removed: [] },
+      unchangedEntryCount: 0,
+      hasChanges: false,
+    })),
   };
   return { fns };
 });
@@ -135,7 +151,7 @@ function makeProject(over: Partial<WorkshopProject> = {}): WorkshopProject {
   };
 }
 
-function makePlan(conflicts: InstallConflict[] = []): InstallPlan {
+function makePlan(conflicts: InstallConflict[] = [], isUpdate = conflicts.length > 0): InstallPlan {
   return {
     projectId: 'p1',
     projectName: '维拉的旅途',
@@ -149,15 +165,15 @@ function makePlan(conflicts: InstallConflict[] = []): InstallPlan {
     retiredUids: [],
     conflicts,
     droppedNotes: [],
-    isUpdate: conflicts.length > 0,
+    isUpdate,
   };
 }
 
-function makePrepared(conflicts: InstallConflict[] = []) {
+function makePrepared(conflicts: InstallConflict[] = [], isUpdate = conflicts.length > 0) {
   return {
     projectId: 'p1',
     input: { project: makeProject(), worldbookEntries: [], regexEntries: [] },
-    plan: makePlan(conflicts),
+    plan: makePlan(conflicts, isUpdate),
     sourceNotes: [],
     entriesSource: 'download' as const,
   };
@@ -196,12 +212,11 @@ function findBodyButton(text: string): HTMLButtonElement | undefined {
 }
 
 describe('WorkshopPage', () => {
-  it('挂载时踢一脚 store.init，并渲染顶栏两个入口', async () => {
+  it('挂载时踢一脚 store.init，并渲染「浏览工坊」入口', async () => {
     const wrapper = mount(WorkshopPage);
     await flushPromises();
     expect(h.fns.init).toHaveBeenCalled();
     expect(findButton(wrapper, '浏览工坊')).toBeTruthy();
-    expect(findButton(wrapper, '导入本地文件')).toBeTruthy();
     wrapper.unmount();
   });
 
@@ -282,25 +297,6 @@ describe('WorkshopPage', () => {
     release({ project: makeProject(), plan: makePlan() });
     await flushPromises();
     expect(document.body.textContent).not.toContain('正在覆盖');
-    wrapper.unmount();
-  });
-
-  it('★ 忙碌时导入本地文件被挡下 —— 两个 commit 并发会互相清掉忙碌态', async () => {
-    state.projects = [makeProject({ installState: 'update_available' })];
-    h.fns.prepareInstall.mockImplementation(() => new Promise(() => {}));
-
-    const wrapper = mount(WorkshopPage);
-    await flushPromises();
-    await findButton(wrapper, '更新')!.trigger('click');
-    await flushPromises();
-
-    const file = new File(['{}'], 'project-x.json', { type: 'application/json' });
-    const input = wrapper.find('input[type="file"]');
-    Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
-    await input.trigger('change');
-    await flushPromises();
-
-    expect(h.fns.prepareInstallFromFile).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
@@ -605,9 +601,10 @@ describe('WorkshopPage', () => {
     wrapper.unmount();
   });
 
-  it('无冲突时不弹警告，直接落库', async () => {
+  it('★ 首装无冲突：一道闸都不拦，直接落库', async () => {
+    // 首装时全部内容都是新的，预告等于把详情模态里刚看过的东西再念一遍
     state.projects = [makeProject({ installState: 'update_available' })];
-    h.fns.prepareInstall.mockResolvedValue({ ok: true, prepared: makePrepared([]) });
+    h.fns.prepareInstall.mockResolvedValue({ ok: true, prepared: makePrepared([], false) });
 
     const wrapper = mount(WorkshopPage);
     await flushPromises();
@@ -615,7 +612,56 @@ describe('WorkshopPage', () => {
     await flushPromises();
 
     expect(document.body.textContent).not.toContain('确认覆盖你修改过的条目');
+    expect(document.body.textContent).not.toContain('确认更新');
     expect(h.fns.commitInstall).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it('★ 更新即使没有冲突也先给改动预告 —— 加/删条目同样不可逆', async () => {
+    state.projects = [makeProject({ installState: 'update_available' })];
+    h.fns.prepareInstall.mockResolvedValue({ ok: true, prepared: makePrepared([], true) });
+    h.fns.previewUpdate.mockReturnValue({
+      entries: {
+        added: [{ name: '新条目', before: '', after: 'x' }],
+        modified: [],
+        removed: [{ name: '被删的条目', before: 'y', after: '' }],
+      },
+      rules: { added: [], modified: [], removed: [] },
+      unchangedEntryCount: 7,
+      hasChanges: true,
+    });
+
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    await findButton(wrapper, '更新')!.trigger('click');
+    await flushPromises();
+
+    // 不是那句惊悚标题 —— 没有冲突时它只是一次普通确认
+    expect(document.body.textContent).toContain('确认更新');
+    expect(document.body.textContent).not.toContain('确认覆盖你修改过的条目');
+    expect(document.body.textContent).toContain('新条目');
+    expect(document.body.textContent).toContain('被删的条目');
+    expect(document.body.textContent).toContain('7 条条目原样保留');
+    // 一行都没写
+    expect(h.fns.commitInstall).not.toHaveBeenCalled();
+
+    findBodyButton('确认更新')!.click();
+    await flushPromises();
+    expect(h.fns.commitInstall).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it('预告拿的是「即将提交的那份计划」，不是另拉一次重算的', async () => {
+    state.projects = [makeProject({ installState: 'update_available' })];
+    const prepared = makePrepared([], true);
+    h.fns.prepareInstall.mockResolvedValue({ ok: true, prepared });
+
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    await findButton(wrapper, '更新')!.trigger('click');
+    await flushPromises();
+
+    expect(h.fns.previewUpdate).toHaveBeenCalledWith(prepared);
     wrapper.unmount();
   });
 
@@ -647,6 +693,7 @@ describe('WorkshopPage', () => {
         projects: [makeProject()],
         droppedCount: 0,
         socials: {},
+        listings: {},
       },
     });
     vi.mocked(fetchProject).mockResolvedValue({
@@ -656,6 +703,16 @@ describe('WorkshopPage', () => {
         project: makeProject(),
         regexEntries: [],
         previewEntries: [],
+        listing: {
+          authorId: '',
+          authorAvatarUrl: '',
+          status: 'approved',
+          reviewTarget: 'project',
+          rejectReason: '',
+          hasPendingDraft: false,
+          visibility: true,
+          updatedAt: '',
+        },
         social: {
           likesCount: 0,
           subscribesCount: 0,
@@ -694,74 +751,6 @@ describe('WorkshopPage', () => {
 
     expect(h.fns.commitInstall).not.toHaveBeenCalled();
     expect(wrapper.find('[aria-live="polite"]').text()).toContain('一直没有响应');
-    wrapper.unmount();
-  });
-
-  // ═══ 本地文件导入：同一条管线 ═══
-
-  /** 造一个只有 name/text 的假 File —— jsdom 各版本 Blob.text 支持不一 */
-  function fakeFile(name: string, body: string): File {
-    return { name, text: async () => body } as unknown as File;
-  }
-
-  async function pickFile(wrapper: ReturnType<typeof mount>, file: File): Promise<void> {
-    const input = wrapper.find('input[type="file"]');
-    Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
-    await input.trigger('change');
-    await flushPromises();
-  }
-
-  it('本地文件导入走 prepareInstallFromFile，无冲突直接落库', async () => {
-    const prepared = makePrepared([]);
-    h.fns.prepareInstallFromFile.mockReturnValue({ ok: true, prepared });
-
-    const wrapper = mount(WorkshopPage);
-    await flushPromises();
-    await pickFile(wrapper, fakeFile('project-p1.json', '{"id":"p1"}'));
-
-    expect(h.fns.prepareInstallFromFile).toHaveBeenCalledTimes(1);
-    expect(h.fns.prepareInstallFromFile.mock.calls[0][0]).toEqual({ id: 'p1' });
-    expect(h.fns.commitInstall).toHaveBeenCalledTimes(1);
-    // 本地这条路不许碰网络
-    expect(h.fns.prepareInstall).not.toHaveBeenCalled();
-    wrapper.unmount();
-  });
-
-  it('本地文件导入遇到冲突：同样先弹警告再落库', async () => {
-    h.fns.prepareInstallFromFile.mockReturnValue({ ok: true, prepared: makePrepared([CONFLICT]) });
-
-    const wrapper = mount(WorkshopPage);
-    await flushPromises();
-    await pickFile(wrapper, fakeFile('project-p1.json', '{"id":"p1"}'));
-
-    expect(document.body.textContent).toContain('确认覆盖你修改过的条目');
-    expect(h.fns.commitInstall).not.toHaveBeenCalled();
-    wrapper.unmount();
-  });
-
-  it('本地文件不是合法 JSON：报错且完全不进管线', async () => {
-    const wrapper = mount(WorkshopPage);
-    await flushPromises();
-    await pickFile(wrapper, fakeFile('broken.json', 'not json at all'));
-
-    expect(h.fns.prepareInstallFromFile).not.toHaveBeenCalled();
-    expect(h.fns.commitInstall).not.toHaveBeenCalled();
-    expect(wrapper.find('[aria-live="polite"]').text()).toContain('不是合法的 JSON');
-    wrapper.unmount();
-  });
-
-  it('文件里没有项目 id：把 store 的判定原样说给用户', async () => {
-    h.fns.prepareInstallFromFile.mockReturnValue({
-      ok: false,
-      error: { kind: 'malformed', message: '文件里没有项目 id', url: '' },
-    });
-
-    const wrapper = mount(WorkshopPage);
-    await flushPromises();
-    await pickFile(wrapper, fakeFile('p.json', '{}'));
-
-    expect(h.fns.commitInstall).not.toHaveBeenCalled();
-    expect(wrapper.find('[aria-live="polite"]').text()).toContain('文件里没有项目 id');
     wrapper.unmount();
   });
 

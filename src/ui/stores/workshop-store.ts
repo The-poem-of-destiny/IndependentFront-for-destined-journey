@@ -47,8 +47,9 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { getDatabase } from '@engine/database';
 import type { BeautifierRule, WorkshopProject } from '@engine/types';
-import { parsePayload, parseProjectMeta } from '@engine/workshop-manifest';
 import { planInstall } from '@engine/workshop-install-plan';
+import { diffInstallPlan } from '@engine/workshop-diff';
+import type { WorkshopUpdateDiff } from '@engine/workshop-diff';
 import {
   WORKSHOP_PARTITION,
   grantWorkshopBookToAgents,
@@ -84,11 +85,13 @@ import { useWorldBookStore } from './worldbook-store';
  */
 export const WORKSHOP_UID_CURSOR_KEY = 'workshopUidCursor';
 
-/** 本地文件导入的溯源记录 —— 与上游版本无从校对，必须说出来 */
-export const LOCAL_IMPORT_NOTE = '内容取自本地文件导入，未与上游校对版本';
-
-/** 内容来自哪一侧（`WorkshopBundle.entriesSource` 加上本地文件这一支） */
-export type WorkshopSourceKind = WorkshopBundle['entriesSource'] | 'local_file';
+/**
+ * 内容来自哪一侧。
+ *
+ * 曾经还有一支 `'local_file'`（本地 `project-xxx.json` 导入），2026-08-01 随该功能
+ * 一并删除 —— 上游工坊页从来没有提供过下载入口，这条「离线后路」实际上没有起点。
+ */
+export type WorkshopSourceKind = WorkshopBundle['entriesSource'];
 
 /**
  * 「算好了、还没写」的中间态 —— 两段式提交的载体。
@@ -289,31 +292,6 @@ export const useWorkshopStore = defineStore('workshop', () => {
     return { ok: true, prepared: toPrepared(bundle.input, bundle.notes, bundle.entriesSource) };
   }
 
-  /**
-   * 吃用户下载的 `project-{id}.json`，出计划 —— **不走网络**，其余与网络路径同一条管线。
-   *
-   * `parseProjectMeta` 会自动下钻 `.project`，`parsePayload` 吃得下裸数组 /
-   * `{ entries }` / `{ worldbookEntriesPreview, regexEntriesPreview }` 三种外层形状，
-   * 所以这里不需要认识文件长什么样。
-   */
-  function prepareInstallFromFile(raw: unknown): WorkshopPrepareResult {
-    const project = parseProjectMeta(raw);
-    if (!project) {
-      return { ok: false, error: { kind: 'malformed', message: '文件里没有项目 id', url: '' } };
-    }
-    const payload = parsePayload(raw);
-    if (payload.worldbookEntries.length === 0 && payload.regexEntries.length === 0) {
-      return {
-        ok: false,
-        error: { kind: 'no_source', message: '文件里既没有世界书条目也没有正则', url: '' },
-      };
-    }
-    return {
-      ok: true,
-      prepared: toPrepared({ project, ...payload }, [LOCAL_IMPORT_NOTE], 'local_file'),
-    };
-  }
-
   function toPrepared(
     input: WorkshopInstallInput,
     sourceNotes: string[],
@@ -469,16 +447,6 @@ export const useWorkshopStore = defineStore('workshop', () => {
     return settle(prep.prepared, opts.force === true);
   }
 
-  /** 本地文件导入。与 {@link install} 同语义，只是内容来自文件 */
-  async function installFromFile(
-    raw: unknown,
-    opts: { force?: boolean } = {},
-  ): Promise<WorkshopOutcome> {
-    const prep = prepareInstallFromFile(raw);
-    if (!prep.ok) return { status: 'failed', error: prep.error };
-    return settle(prep.prepared, opts.force === true);
-  }
-
   /** 用户在覆盖警告上点了确认（D15）—— 无条件提交 */
   async function confirmInstall(prepared: WorkshopPrepared): Promise<WorkshopOutcome> {
     return settle(prepared, true);
@@ -563,19 +531,35 @@ export const useWorkshopStore = defineStore('workshop', () => {
     return { ok: true, project: row, hasUpdate };
   }
 
+  /**
+   * 「这一版会改什么」（B3）—— 拿**已经算好的计划**对库里的现状比一次。
+   *
+   * 刻意接受 `WorkshopPrepared` 而不是 projectId: 面板要预告的必须是**用户马上要
+   * 提交的那一份**。重新拉一次详情再算，中间上游又发了一版的话，预告的和提交的
+   * 就不是同一批内容了 —— 而这个面板存在的全部意义就是「所见即所提交」。
+   *
+   * 不发请求、不写库。
+   */
+  function previewUpdate(prepared: WorkshopPrepared): WorkshopUpdateDiff {
+    const book = useWorldBookStore().getBook(workshopBookId(prepared.projectId));
+    const beautifier = useBeautifierStore();
+    const prefix = workshopRuleId(prepared.projectId, '');
+    const existingRules = beautifier.userRules.filter((r) => r.id.startsWith(prefix));
+    return diffInstallPlan(prepared.plan, book?.entries ?? [], existingRules);
+  }
+
   return {
     projects,
     ready,
     nextUid,
+    previewUpdate,
     init,
     hydrate,
     getProject,
     isInstalled,
     prepareInstall,
-    prepareInstallFromFile,
     commitInstall,
     install,
-    installFromFile,
     confirmInstall,
     uninstall,
     checkUpdate,

@@ -15,6 +15,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseProjectMeta,
   parsePayload,
+  parseListingMeta,
   parseSocialMeta,
   parseToggleAck,
 } from './workshop-manifest';
@@ -543,5 +544,66 @@ describe('parseToggleAck', () => {
   it('缺字段 → false / 0，且永不抛', () => {
     expect(parseToggleAck({})).toEqual({ active: false, count: 0 });
     expect(parseToggleAck(null)).toEqual({ active: false, count: 0 });
+  });
+});
+
+describe('parseListingMeta（Phase 4）', () => {
+  it('完整 URL 的头像原样用', () => {
+    const meta = parseListingMeta({
+      authorId: '123',
+      authorAvatar: 'https://cdn.discordapp.com/avatars/123/abc.webp?size=100',
+    });
+    expect(meta.authorAvatarUrl).toBe('https://cdn.discordapp.com/avatars/123/abc.webp?size=100');
+  });
+
+  it('★ 裸哈希也吃 —— 上游若回退到直出 DB 列，这里替它拼出 CDN 地址', () => {
+    const meta = parseListingMeta({ authorId: '123', authorAvatar: 'abc' });
+    expect(meta.authorAvatarUrl).toBe('https://cdn.discordapp.com/avatars/123/abc.webp?size=100');
+  });
+
+  it('★ 拼不出来一律空串 —— 绝不返回半截 URL', () => {
+    expect(parseListingMeta({ authorAvatar: 'abc' }).authorAvatarUrl).toBe('');
+    expect(parseListingMeta({ authorId: '123' }).authorAvatarUrl).toBe('');
+    expect(parseListingMeta(null).authorAvatarUrl).toBe('');
+  });
+
+  it('审核字段照读，未知状态原样保留', () => {
+    const meta = parseListingMeta({
+      status: 'rejected',
+      reviewTarget: 'draft',
+      rejectReason: '与命定核心冲突',
+      hasPendingDraft: true,
+      visibility: false,
+    });
+    expect(meta).toMatchObject({
+      status: 'rejected',
+      reviewTarget: 'draft',
+      rejectReason: '与命定核心冲突',
+      hasPendingDraft: true,
+      visibility: false,
+    });
+  });
+
+  it('★ visibility 缺省为 true —— 公开列表根本不带这个字段', () => {
+    expect(parseListingMeta({ status: 'approved' }).visibility).toBe(true);
+  });
+
+  it('详情响应会自动下钻 .project（与 parseSocialMeta 同款）', () => {
+    const meta = parseListingMeta({ project: { status: 'pending', authorId: 'a1' } });
+    expect(meta.status).toBe('pending');
+    expect(meta.authorId).toBe('a1');
+  });
+
+  it('缺字段一律空串 / false，且永不抛', () => {
+    expect(parseListingMeta(undefined)).toEqual({
+      authorId: '',
+      authorAvatarUrl: '',
+      status: '',
+      reviewTarget: '',
+      rejectReason: '',
+      hasPendingDraft: false,
+      visibility: true,
+      updatedAt: '',
+    });
   });
 });

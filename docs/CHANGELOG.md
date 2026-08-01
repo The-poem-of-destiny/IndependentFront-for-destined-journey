@@ -394,6 +394,109 @@ Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调
 **M2 修复的 Critical/Major:** C4（abandon 流程）。M1 已修的 C3/C5/C6/C7/M-1/M-3/M-4/M-9 由 A2-1 端到端验证。
 
 **已知遗留（M3 对齐）:** 前端 Vue 组件（CombatActionBar/CombatPanel 等）留最小改动、当前仍走 v2 渲染路径（标注 M2.5 前端完善）；`projectToAgent` 基于 CombatView 而非完整 CombatState（kernel 闭包藏 state）；`toPatches` 只算 FP 结算 patch（EXP/战利品 M4 settlement.before 补）；EffectChoice / BoundedAdjudication / CharGenRequest 三路由 `throw UnsupportedInM2`。
+### 工坊 P4 — 上游功能对齐（B1–B5）｜ ✅ 完成 待真机（2026-08-01）
+
+参照物: 上游工坊自己的两个客户端（`github.com/AkabaneSaki/myrepo`，本地克隆 `E:\Projects\myrepo`）——
+worker 托管的工坊页 `cloudflare/src/pages/home/*`（~2100 行字符串拼装的原生 JS）与 ST 扩展
+`src/CreativeWorkshop/*`。**方向是抄功能不抄实现**：我们有类型、有测试、有主题体系，
+上游那套 `innerHTML` 全量重绘 + 手写 `escapeHtml` 的做法照搬进来是倒退。
+
+**B1 展示面**
+
+- `workshop-cover.ts`（新）— 封面候选链 `wsrv.nl 代理(640/webp) → 原图`，组件按序试、走完交回自己的首字母兜底。
+  上游封面存 R2 原图（3 MB PNG 是常态），一页 20 张直连原图 = 开一次浏览模态下 60 MB
+- `workshop-upstream-error.ts`（新）— Cloudflare 平台错误**优先于**业务错误：1027 日额度耗尽 / 1102 资源超限 /
+  429 限流 / HTML 拦截页。⚠️ 顺序要紧——平台错误体有时也是带 `message` 的 JSON，那句 message 是英文栈信息
+- 类型徽章（系统/扩展/角色/事件）+ 卡片下载数 + 加载更多分页（替掉上一页/下一页）
+
+**B2 账号面**
+
+- `WorkshopListingMeta`（新，第二个 sidecar）— 作者身份 + 审核状态。与 `WorkshopSocialMeta` 同一条纪律：
+  **纯内存、绝不落库**。不并进 `WorkshopProjectMeta` 是因为那个类型是落库实体的投影
+- `listMyProjects()` — 上游一次全量返回、不吃任何筛选参数，所以该视图的搜索/标签只能落到本地，
+  排序与「加载更多」整个不出现（摆一个点了没反应的控件比没有更糟）
+- 三视图切换：全部 / 我的项目 / 订阅与已装。后者是纯派生视图，不发请求
+
+**B3 更新改动预告**
+
+- `workshop-diff.ts`（新）— ★ 与上游实现的根本不同：上游重拉详情再把两边**各自重新归一化**一遍去比
+  （两套字段读法），转换规则一改 diff 就开始撒谎。我们拿 `planInstall()` **已经算出的那批条目**去比，
+  预告与提交在结构上不可能不一致
+- `WorkshopConflictModal` 现在对**每一次更新**都出现，不只有冲突时。加/删条目同样不可逆，此前一个字都不说。
+  有冲突才用「确认覆盖你修改过的条目」那句标题，否则只是「确认更新」
+
+**B4 投稿面**
+
+- client 写侧：`createProject` / `updateProject` / `setProjectVisibility` / `deleteProject` /
+  `uploadProjectFile`（载荷·正则）/ `uploadProjectCover`（multipart）
+- 🔴 **编辑已发布项目上游会开草稿并返回草稿 id**（`createDraftFromPublished`），后续文件必须传到新 id 上——
+  传回旧 id 就是在改线上那一版。这是整个投稿面最容易错的一处，测试专门钉住
+- `WorkshopSubmitModal`（新）— 四步进度逐步亮出；中途失败明确告知「项目已经建好了，去我的项目里编辑它补传，
+  别再走一遍新建」（重走会留下第二个空项目）
+- 卡片上的作者管理动作（编辑/隐藏/删除），按 `listing.authorId === 登录用户` 判定而非按所在视图判定
+
+**B5 审核面（管理员）**
+
+- client：`listPendingProjects` / `reviewProject` / `listAdmins` / `listAdminLogs` / `setAdmin`
+- `WorkshopAdminModal`（新）— 待审核 / 管理员 / 操作日志三 Tab 合一（上游分三个入口）；后两个超管才可见
+- 驳回**必须填理由**——理由会落到项目行上，作者在「我的项目」里看得到；不给理由的驳回等于让作者去猜
+- 🔴 权限判定只决定**画不画入口**，不是安全边界：真门禁是上游那几行 403。客户端那份 `isAdmin` 是同一枚
+  token 里抄来的显示用旗标，拿它当门禁等于把权限交给一个 localStorage 值
+
+**与上游刻意不同的三处**（都写进了各自文件头）
+
+1. 没有任何基础标签的项目**不出徽章**。上游 `getBaseTag` 退回 `BASE_TAGS[0]`，会把只挂「路边」的项目
+   盖章成「系统」——而「系统」恰恰是最需要用户警惕的那类（D12）
+2. diff 由安装计划派生，不重新归一化一遍（见上）
+3. 保留我们自己的主题化占位图，不用上游那张深色 "No Preview" SVG（parchment 主题上是一块黑斑）
+
+**上游的一个真 bug（未跟随）**: 上游搜索框只在**已加载的页**里做客户端过滤，`fetchProjects` 从不发
+`?search=`，而它自家 API 支持。我们一直是服务端搜索，不跟。
+
+**真机走查发现并修掉的两条（2026-08-01 当天）**
+
+1. **待审核项目「删除」点了没反应** —— 二次确认用的是原生 `window.confirm`，它在内嵌
+   webview 里会被**直接自动关掉并返回 false**，于是删除表现成「什么都没发生」：没有报错、
+   没有请求。Chrome 里正常，所以极易被当成后端问题。改成应用内模态（与「卸载」那道确认同款），
+   顺带排除了原生弹窗与主题格格不入的问题。⚠️ 上游服务端**不禁止**删除 pending 项目
+   （`ProjectDelete` 只校验登录与归属）；上游页面是在 UI 上禁掉的，我们没跟。
+2. **改完标题点进项目还是旧的，要等几分钟** —— 是**我们自己的详情缓存**在骗人
+   （`WORKSHOP_DETAIL_TTL_MS` = 5 分钟），不是上游延迟。新增
+   `invalidateWorkshopProject(projectId)`：写操作（投稿/编辑/删除/改可见性）成功后丢掉该 id
+   的详情（**所有身份桶**）与**全部列表页**（改一个名字影响哪几页算不出来，而列表 TTL 只有
+   120 秒、重拉很便宜）。载荷刻意不丢 —— 它按 `downloadUrl` 存键，上游发新版天然是另一把钥匙。
+   编辑走草稿时新旧两个 id 都丢。
+
+3. **列表每页只出一个项目，「加载更多」也一次只加一个** —— 根因是 `pageSize` 被带跑:
+   `listMyProjects` 是**不分页**的端点，它回执里的 `pageSize` 只表示「这把拿到几条」，
+   而浏览模态把任何一次响应的 `pageSize` 都无条件写回共用的查询状态。名下只有 1 个项目的
+   作者点一次「我的项目」，`pageSize` 就被钉成 1，切回「全部」之后每页只剩一个 —— 而且
+   这个坏状态会一直粘着，因为再没有任何一次响应会把它改回去。改成**只有服务端分页的视图
+   才准回写** `pageSize`，并补了回归用例。
+
+**功能删除（同日）**: 「导入本地文件」整条链路移除 —— 页面按钮 + file input、
+`workshopStore.prepareInstallFromFile` / `installFromFile`、`WorkshopSourceKind` 的
+`'local_file'` 支、`LOCAL_IMPORT_NOTE`，以及对应的 7 个用例。
+
+> 缘由: 这个功能的前提是「用户手里有一份 `project-xxx.json`」，而查上游源码后确认
+> **工坊页从来没有提供过下载入口**（三个 file input 全是投稿用的上传口，详情里那个
+> `fa-download` 图标是「安装」按钮自己的）。一条没有起点的后路。
+> ⚠️ 这一并撤掉了 D17 写的「离线来源」那半边: 上游 worker 挂掉时，现在没有任何安装途径。
+
+**UI 调整（同日）**: 登录位 / 审核 / 投稿 / 导入本地文件 / 浏览工坊 五个入口从顶栏右角**下沉进
+页面本体**，成为简介下方的一条动作区（左身份、右动作，「浏览工坊」作主动作排在最后）。
+顶栏只留「返回」与标题。原来全挤在顶栏一条里，窄屏会折行顶掉标题，而这一页最主要的入口
+「浏览工坊」反而在最边角。
+
+> 「我的项目」列表本身的那几秒延迟不在此列: `listMyProjects` 本来就不进我们的缓存，
+> 那是上游 D1 / 边缘那一侧的事，我们管不着。
+
+**验证**: 160 文件 / 5235 tests 全绿（P3 收尾时是 5157）；`tsc` / `vue-tsc` 零错误；eslint 零错误
+（顺带修掉 P3 遗留的两个 `prefer-const`，P3 交接文件里「eslint 零错误」那句当时就不成立）。
+🔴 **B5 无法自测** —— 当前账号 `isAdmin: false`，审核面板要有管理员账号才能真机走查。
+
+---
+
 ### 工坊 P3 — 社交面：Discord 登录 + 点赞 + 订阅 ｜ ✅ 完成 待真机（2026-08-01）
 
 设计真源: `docs/planning/2026-08-01-workshop-social-design.md`（D18–D25，接续工坊 D 编号）。上游后端源码已取得（github.com/AkabaneSaki/myrepo，`cloudflare/src/`），全部契约**直接读自源码**并以 file:line 落进设计文档附录——判决：会话是 Bearer JWT（零 Cookie），CORS `ACAO:*` 放行 `Authorization`，**直连 REST 成立**，附录 B iframe 桥永久搁置（D18）。

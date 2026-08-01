@@ -397,7 +397,16 @@ export const useWorkshopSocialStore = defineStore('workshop-social', () => {
     return new Promise<WorkshopLoginOutcome>((resolve) => {
       let settled = false;
       let unsubscribe: () => void = () => {};
+      /*
+       * eslint prefer-const 会说这两个「从未重新赋值」——它们确实各只赋值一次，但
+       * 赋值点（下方 setInterval/setTimeout）在 `settle` 的**定义之后**，而 `settle`
+       * 闭包里要清掉它们。改成 const 就得把声明挪到 settle 下面，那样一旦 settle 在
+       * 赋值前被调到（快路径先到），读到的就是 TDZ 而不是 undefined —— 一句
+       * ReferenceError 换来的是登录卡死。保持 let。
+       */
+      // eslint-disable-next-line prefer-const
       let timer: ReturnType<typeof setInterval> | undefined;
+      // eslint-disable-next-line prefer-const
       let deadline: ReturnType<typeof setTimeout> | undefined;
       /** 一发 poll 在路上时不叠第二发 —— poll 是单次消费，叠了会互相吃结果 */
       let polling = false;

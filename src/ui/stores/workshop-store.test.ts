@@ -11,7 +11,6 @@
  * 3. 冲突时**一行都不写**（D15），确认后才覆盖
  * 4. **丢弃必须 loud** —— 客户端侧 notes 与计划侧 notes 都要落进 droppedNotes
  * 5. 网络失败 → `broken`，不抛穿
- * 6. 本地文件与网络安装产生等价结果（一条管线，不是两套）
  *
  * 网络全程走 `setWorkshopFetch()` 注入缝喂假响应，**不发任何真实请求**；
  * 数据层是真 Dexie + fake-indexeddb。
@@ -40,7 +39,7 @@ import {
   setWorkshopFetch,
   WORKSHOP_API_BASE,
 } from '../lib/workshop-client';
-import { useWorkshopStore, WORKSHOP_UID_CURSOR_KEY, LOCAL_IMPORT_NOTE } from './workshop-store';
+import { useWorkshopStore, WORKSHOP_UID_CURSOR_KEY } from './workshop-store';
 import { useWorldBookStore } from './worldbook-store';
 import { useBeautifierStore } from './beautifier-store';
 import { useSettingsStore } from './settings-store';
@@ -638,72 +637,6 @@ describe('workshop-store', () => {
     const failed = await store.checkUpdate('V');
     expect(failed.ok).toBe(false);
     expect((await dbRow('V'))!.installState).toBe('broken');
-  });
-
-  // ── 本地文件导入 ───────────────────────────────────────
-  it('本地文件导入与网络安装产生等价结果（同一条管线）', async () => {
-    const entries: Array<[string, string]> = [
-      ['甲', '甲的正文'],
-      ['乙', '乙的正文'],
-    ];
-    const regexes = [regexEntry('r1', '高亮')];
-
-    // ① 网络路径
-    publish('E', { entries, regexes });
-    const netStore = await freshStore();
-    expect((await netStore.install('E')).status).toBe('installed');
-    const netEntries = await dbBookEntries('E');
-    const netRules = await getDatabase().beautifierRules.toArray();
-    const netRow = (await dbRow('E'))!;
-
-    // ② 洗干净重来，走本地文件路径
-    const db = getDatabase();
-    await db.worldBooks.clear();
-    await db.workshopProjects.clear();
-    await db.beautifierRules.clear();
-    lsBacking.clear();
-    clearWorkshopCache();
-
-    const localStore = await freshStore();
-    const file = {
-      project: projectJson('E'),
-      entries: entries.map(([name, content], i) => payloadEntry(name, content, i)),
-      regexEntriesPreview: regexes,
-    };
-    const outcome = await localStore.installFromFile(file);
-    expect(outcome.status).toBe('installed');
-
-    const localEntries = await dbBookEntries('E');
-    const localRules = await getDatabase().beautifierRules.toArray();
-    const localRow = (await dbRow('E'))!;
-
-    expect(localEntries).toEqual(netEntries);
-    expect(localRules).toEqual(netRules);
-    expect(localRow.uidRange).toEqual(netRow.uidRange);
-    expect(localRow.installedVersion).toBe(netRow.installedVersion);
-    expect(localRow.name).toBe(netRow.name);
-    // 唯一的差别是溯源那一行（本地文件无从与上游校对版本，必须说出来）
-    expect(localRow.droppedNotes).toEqual([
-      { kind: 'dropped', text: LOCAL_IMPORT_NOTE },
-      ...(netRow.droppedNotes ?? []),
-    ]);
-  });
-
-  it('本地文件缺 id / 无内容时拒绝，不落库', async () => {
-    const store = await freshStore();
-
-    const noId = await store.installFromFile({ name: '没有 id' });
-    expect(noId.status).toBe('failed');
-    if (noId.status !== 'failed') throw new Error('unreachable');
-    expect(noId.error.kind).toBe('malformed');
-
-    const empty = await store.installFromFile({ project: projectJson('Z'), entries: [] });
-    expect(empty.status).toBe('failed');
-    if (empty.status !== 'failed') throw new Error('unreachable');
-    expect(empty.error.kind).toBe('no_source');
-
-    expect(await getDatabase().workshopProjects.count()).toBe(0);
-    expect(await getDatabase().worldBooks.count()).toBe(0);
   });
 
   // ── 与既有 store 的关系 ────────────────────────────────

@@ -210,6 +210,48 @@ export interface WorkshopSocialMeta {
 }
 
 /**
+ * 一个项目的**目录展示面**（Phase 4）—— 作者身份与审核状态。
+ *
+ * 🔴 与 {@link WorkshopSocialMeta} 同一条纪律：**纯内存展示层，绝不落库**。
+ * 不进 {@link WorkshopProjectMeta}、不进 `WorkshopProject`、不进 Dexie、不进 FullBackup。
+ *
+ * 为什么这些字段不能并进 `WorkshopProjectMeta`: 那个类型是**落库实体的投影**
+ * （`Pick<WorkshopProject, …>`），进去的每个字段都会被写进 `workshopProjects` 表。
+ * 而这里的每一项都会变:
+ * - `status` / `reviewTarget` / `rejectReason` —— 审核状态，作者改一版就翻篇。存下来
+ *   等于让用户在「已安装」列表里永远看到一条三个月前的「审核中」。
+ * - `visibility` / `hasPendingDraft` —— 同上，且只对作者本人有意义。
+ * - `authorAvatarUrl` —— Discord 头像哈希换了旧 URL 就 404。
+ *
+ * 与社交面并列成第二个 sidecar 而不是塞进同一个: 两者的**来源不同**。社交面还有
+ * toggle 回执这条权威更新路径（D23），本类型只有列表/详情响应一条。混在一起之后，
+ * 「toggle 回来该覆盖哪几个字段」就再没有类型上的答案了。
+ */
+export interface WorkshopListingMeta {
+  /** 上游作者 id（Discord snowflake）。用于判「这是不是我的项目」 */
+  authorId: string;
+  /**
+   * 作者头像的**完整 URL**。上游 `/api/projects` 与 `/api/my/projects` 都已在服务端
+   * 拼好（`cdn.discordapp.com/avatars/<id>/<hash>.webp`），我们不重复拼；万一将来
+   * 上游改回只给哈希，`parseListingMeta` 会替我们兜住。拿不到就空串（调用方据此
+   * 走默认头像，**不渲染空 src**）。
+   */
+  authorAvatarUrl: string;
+  /** 上游审核状态：`approved` / `pending` / `rejected`。未知值原样保留 */
+  status: string;
+  /** 审核对象：`project`（项目本体）/ `draft`（新版本草稿） */
+  reviewTarget: string;
+  /** 被拒原因。没有就空串 */
+  rejectReason: string;
+  /** 有一个待审核的新版本草稿 */
+  hasPendingDraft: boolean;
+  /** 作者是否把它设为公开 */
+  visibility: boolean;
+  /** 上游的更新时间戳（ISO 串）。用作封面的缓存版本号，见 lib/workshop-cover.ts */
+  updatedAt: string;
+}
+
+/**
  * toggle 端点（点赞/订阅）的回执 —— 上游返回 `{liked|subscribed, count}`，
  * 两个动作的字段名不同但语义同构，故在读侧统一成一个形状。
  *

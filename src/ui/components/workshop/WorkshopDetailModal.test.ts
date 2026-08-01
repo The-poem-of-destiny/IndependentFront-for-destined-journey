@@ -96,6 +96,16 @@ function detail(
       regexEntries: regexes,
       previewEntries: entries,
       // 社交面（D22）：多数用例断言装前检视，计数一律 0/false
+      listing: {
+        authorId: '',
+        authorAvatarUrl: '',
+        status: 'approved',
+        reviewTarget: 'project',
+        rejectReason: '',
+        hasPendingDraft: false,
+        visibility: true,
+        updatedAt: '',
+      },
       social: {
         likesCount: 0,
         subscribesCount: 0,

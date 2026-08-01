@@ -15,18 +15,54 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
+import { reactive } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
-import type { WorkshopProjectMeta, WorkshopSocialMeta } from '@engine/workshop-types';
+import type {
+  WorkshopListingMeta,
+  WorkshopProjectMeta,
+  WorkshopSocialMeta,
+} from '@engine/workshop-types';
 import type { WorkshopProject } from '@engine/types';
 import WorkshopBrowseModal from './WorkshopBrowseModal.vue';
-import { listProjects } from '../../lib/workshop-client';
+import {
+  deleteProject,
+  invalidateWorkshopProject,
+  listMyProjects,
+  listProjects,
+} from '../../lib/workshop-client';
 
 vi.mock('../../lib/workshop-client', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('../../lib/workshop-client');
-  return { ...actual, listProjects: vi.fn() };
+  return {
+    ...actual,
+    listProjects: vi.fn(),
+    listMyProjects: vi.fn(),
+    deleteProject: vi.fn(),
+    invalidateWorkshopProject: vi.fn(),
+  };
 });
 
+/**
+ * social store 整层替掉 —— 本组件只用它两处: `user.userId`（判「这是不是我的项目」，
+ * 决定卡片上出不出管理动作）与 `socialOf`（「订阅与已装」认订阅）。
+ * 用真 store 的话 `user` 恒为 null，管理动作永远不渲染。
+ */
+const socialState = reactive<{ userId: string | null }>({ userId: null });
+vi.mock('../../stores/workshop-social-store', () => ({
+  useWorkshopSocialStore: () => ({
+    get user() {
+      return socialState.userId === null ? null : { userId: socialState.userId };
+    },
+    socialOf: (_id: string, from?: unknown) => from,
+    isBusy: () => false,
+    isLoggedIn: socialState.userId !== null,
+  }),
+}));
+
 const listMock = vi.mocked(listProjects);
+const myMock = vi.mocked(listMyProjects);
+const deleteMock = vi.mocked(deleteProject);
+const invalidateMock = vi.mocked(invalidateWorkshopProject);
 
 function meta(over: Partial<WorkshopProjectMeta> = {}): WorkshopProjectMeta {
   return {
@@ -56,6 +92,7 @@ function page(projects: WorkshopProjectMeta[], over: Record<string, unknown> = {
       droppedCount: 0,
       // 社交面（D22）默认空 —— 多数用例断言的是浏览/筛选；派发计数另有专门用例
       socials: {} as Record<string, WorkshopSocialMeta>,
+      listings: {} as Record<string, WorkshopListingMeta>,
       ...over,
     },
   };
@@ -81,10 +118,25 @@ function lastOpts(): Record<string, unknown> {
   return listMock.mock.calls[listMock.mock.calls.length - 1][1] as Record<string, unknown>;
 }
 
+/** 「加载更多」按钮 —— 只在 total 大于已加载条数时存在 */
+function loadMoreButton(): HTMLButtonElement {
+  return document.body.querySelector('.wk-more button') as HTMLButtonElement;
+}
+
+/** 视图切换按钮 */
+function scopeButton(label: string): HTMLButtonElement {
+  return [...document.body.querySelectorAll('.wk-scopechip')].find(
+    (b) => b.textContent?.trim() === label,
+  ) as HTMLButtonElement;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   setActivePinia(createPinia());
   listMock.mockResolvedValue(page([meta()]));
+  myMock.mockResolvedValue(page([]));
+  deleteMock.mockResolvedValue({ ok: true, fromCache: false, data: null });
+  socialState.userId = null;
 });
 
 afterEach(() => {
@@ -110,12 +162,9 @@ describe('WorkshopBrowseModal', () => {
     // 打开模态：关掉又立刻打开是常见动作，这一发本就该命中缓存
     expect(lastOpts()).toMatchObject({ force: false });
 
-    const next = [...document.body.querySelectorAll('.wk-pager button')].find((b) =>
-      b.textContent?.includes('下一页'),
-    ) as HTMLButtonElement;
-    next.click();
+    loadMoreButton().click();
     await flushPromises();
-    // 翻页是另一把缓存钥匙，本来就拉的是新内容，不需要 force
+    // 加载更多是另一把缓存钥匙，本来就拉的是新内容，不需要 force
     expect(lastOpts()).toMatchObject({ force: false });
 
     const refresh = [...document.body.querySelectorAll('.wk-toolbar button')].find((b) =>
@@ -243,11 +292,8 @@ describe('WorkshopBrowseModal', () => {
     // 缺省排序必须显式带上：请求可复现，缓存键才稳定
     expect(lastQuery()).toMatchObject({ sort: 'published' });
 
-    // 先翻到第 2 页，再改排序 —— 排序在服务端做，停在第 2 页会排出自相矛盾的结果
-    const next = [...document.body.querySelectorAll('button')].find(
-      (b) => b.textContent?.trim() === '下一页',
-    ) as HTMLButtonElement;
-    next.click();
+    // 先追加一页，再改排序 —— 排序在服务端做，接着第 2 页排会排出自相矛盾的结果
+    loadMoreButton().click();
     await flushPromises();
     expect(lastQuery()).toMatchObject({ page: 1 });
 
@@ -280,20 +326,62 @@ describe('WorkshopBrowseModal', () => {
     wrapper.unmount();
   });
 
-  it('翻页把 page 传给 client；首页的「上一页」不可点', async () => {
-    listMock.mockResolvedValue(page([meta()], { total: 60, pageSize: 20 }));
+  it('「加载更多」把下一页追加在现有结果之后，不替换', async () => {
+    listMock.mockResolvedValue(page([meta({ id: 'p1', name: '第一批' })], { total: 3 }));
     const wrapper = await open();
-    listMock.mockClear();
+    expect(document.body.textContent).toContain('已加载 1 / 3');
+    expect(loadMoreButton().textContent).toContain('剩余 2 个');
 
-    const buttons = [...document.body.querySelectorAll('.wk-pager button')] as HTMLButtonElement[];
-    const prev = buttons.find((b) => b.textContent?.includes('上一页'))!;
-    const next = buttons.find((b) => b.textContent?.includes('下一页'))!;
-    expect(prev.disabled).toBe(true);
-
-    next.click();
+    listMock.mockResolvedValue(page([meta({ id: 'p2', name: '第二批' })], { total: 3, page: 1 }));
+    loadMoreButton().click();
     await flushPromises();
+
+    // page 递增，且两批同时在屏幕上 —— 追加语义的全部内容
     expect(lastQuery()).toMatchObject({ page: 1 });
-    expect(document.body.textContent).toContain('第 2 / 3 页');
+    expect(document.body.querySelectorAll('.wk-card')).toHaveLength(2);
+    expect(document.body.textContent).toContain('第一批');
+    expect(document.body.textContent).toContain('第二批');
+    expect(document.body.textContent).toContain('已加载 2 / 3');
+    wrapper.unmount();
+  });
+
+  it('★ 追加时按 id 去重 —— 上游按可变列排序 + OFFSET 分页会让同一条跨页重复', async () => {
+    listMock.mockResolvedValue(page([meta({ id: 'p1' })], { total: 5 }));
+    const wrapper = await open();
+
+    // 第 2 页把 p1 又端回来一次（有人在两次请求之间更新了它）
+    listMock.mockResolvedValue(
+      page([meta({ id: 'p1' }), meta({ id: 'p2' })], { total: 5, page: 1 }),
+    );
+    loadMoreButton().click();
+    await flushPromises();
+
+    // 重复的那条被丢掉，不是渲染成两张卡片（重复 key 会让整片网格的复用错乱）
+    expect(document.body.querySelectorAll('.wk-card')).toHaveLength(2);
+    wrapper.unmount();
+  });
+
+  it('★ 追加失败不清空已加载的内容', async () => {
+    listMock.mockResolvedValue(page([meta({ name: '已经看到的' })], { total: 9 }));
+    const wrapper = await open();
+
+    listMock.mockResolvedValue({
+      ok: false,
+      error: { kind: 'network', message: 'Failed to fetch', url: 'u' },
+    });
+    loadMoreButton().click();
+    await flushPromises();
+
+    // 报错归报错，翻了半天的结果还在
+    expect(document.body.textContent).toContain('已经看到的');
+    wrapper.unmount();
+  });
+
+  it('全部加载完毕后不再出现「加载更多」', async () => {
+    listMock.mockResolvedValue(page([meta()], { total: 1 }));
+    const wrapper = await open();
+    expect(loadMoreButton()).toBeNull();
+    expect(document.body.textContent).toContain('已加载 1 / 1');
     wrapper.unmount();
   });
 
@@ -316,7 +404,7 @@ describe('WorkshopBrowseModal', () => {
     wrapper.unmount();
   });
 
-  it('网络失败：说人话 + 给重试 + 指出本地导入这条后路', async () => {
+  it('网络失败：说人话 + 给重试', async () => {
     listMock.mockResolvedValue({
       ok: false,
       error: { kind: 'network', message: 'Failed to fetch', url: 'u' },
@@ -327,7 +415,12 @@ describe('WorkshopBrowseModal', () => {
     expect(box).toBeTruthy();
     expect(box!.textContent).toContain('连不上创意工坊');
     expect(box!.textContent).toContain('Failed to fetch');
-    expect(box!.textContent).toContain('project-xxx.json');
+    /*
+     * ★ **不许**再出现「从工坊网页下载 project-xxx.json」那句话（2026-08-01 删）。
+     * 上游工坊页没有下载按钮 —— 三个 file input 全是投稿用的上传口。指着一个不存在
+     * 的入口，等于在用户最急的时候让他白找一趟。
+     */
+    expect(box!.textContent).not.toContain('project-xxx.json');
 
     listMock.mockResolvedValue(page([meta()]));
     const retry = [...box!.querySelectorAll('button')].find((b) =>
@@ -476,6 +569,253 @@ describe('WorkshopBrowseModal', () => {
     (document.body.querySelector('.wk-card') as HTMLButtonElement).click();
     await flushPromises();
     expect(wrapper.emitted('open')).toEqual([['p1']]);
+    wrapper.unmount();
+  });
+
+  // ═══ 视图切换（Phase 4 / B2） ═══
+
+  it('切到「我的项目」走 listMyProjects，且不再带任何筛选参数', async () => {
+    const wrapper = await open();
+    myMock.mockResolvedValue(page([meta({ id: 'mine1', name: '我的草稿' })]));
+
+    scopeButton('我的项目').click();
+    await flushPromises();
+
+    expect(myMock).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).toContain('我的草稿');
+    wrapper.unmount();
+  });
+
+  it('★ 非服务端视图里排序控件整个不出现 —— 摆一个点了没反应的控件比没有更糟', async () => {
+    const wrapper = await open();
+    expect(document.body.querySelector('.wk-sort')).not.toBeNull();
+
+    scopeButton('我的项目').click();
+    await flushPromises();
+    expect(document.body.querySelector('.wk-sort')).toBeNull();
+    // 「加载更多」同理：上游一次全量返回，没有下一页可加载
+    expect(loadMoreButton()).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('★ 本地视图里搜索不过网 —— displayProjects 自己重算', async () => {
+    myMock.mockResolvedValue(
+      page([meta({ id: 'a', name: '维拉的旅途' }), meta({ id: 'b', name: '别的项目' })]),
+    );
+    const wrapper = await open();
+    scopeButton('我的项目').click();
+    await flushPromises();
+    expect(document.body.querySelectorAll('.wk-card')).toHaveLength(2);
+
+    myMock.mockClear();
+    listMock.mockClear();
+    const input = document.body.querySelector('.wk-search') as HTMLInputElement;
+    input.value = '维拉';
+    input.dispatchEvent(new Event('input'));
+    await flushPromises();
+
+    // 一发请求都没有，但结果已经筛过了
+    expect(myMock).not.toHaveBeenCalled();
+    expect(listMock).not.toHaveBeenCalled();
+    expect(document.body.querySelectorAll('.wk-card')).toHaveLength(1);
+    expect(document.body.textContent).toContain('维拉的旅途');
+    wrapper.unmount();
+  });
+
+  it('★ 「订阅与已装」不发请求，且已装项目一定在里面', async () => {
+    const installed = [
+      { ...meta({ id: 'inst1', name: '已装的' }), installState: 'installed' },
+    ] as unknown as WorkshopProject[];
+    const wrapper = await open(installed);
+
+    listMock.mockClear();
+    myMock.mockClear();
+    scopeButton('订阅与已装').click();
+    await flushPromises();
+
+    expect(listMock).not.toHaveBeenCalled();
+    expect(myMock).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('已装的');
+    wrapper.unmount();
+  });
+
+  it('切视图先清空结果 —— 不留一个「我的项目 + 全站计数」的中间态', async () => {
+    const wrapper = await open();
+    expect(document.body.textContent).toContain('维拉的旅途');
+
+    // 「我的项目」返回空 → 切过去之后旧卡片必须已经消失
+    myMock.mockResolvedValue(page([]));
+    scopeButton('我的项目').click();
+    await flushPromises();
+    expect(document.body.textContent).not.toContain('维拉的旅途');
+    expect(document.body.textContent).toContain('你还没有投稿过项目');
+    wrapper.unmount();
+  });
+
+  it('审核状态与拒绝原因渲染在卡片上', async () => {
+    myMock.mockResolvedValue(
+      page([meta({ id: 'r1', name: '被拒的' })], {
+        listings: {
+          r1: {
+            authorId: 'a',
+            authorAvatarUrl: '',
+            status: 'rejected',
+            reviewTarget: 'project',
+            rejectReason: '与命定核心冲突',
+            hasPendingDraft: false,
+            visibility: true,
+            updatedAt: '',
+          },
+        },
+      }),
+    );
+    const wrapper = await open();
+    scopeButton('我的项目').click();
+    await flushPromises();
+
+    expect(document.body.textContent).toContain('已被拒绝');
+    expect(document.body.textContent).toContain('与命定核心冲突');
+    wrapper.unmount();
+  });
+
+  // ═══ 删除（真机反馈 2026-08-01：原生 confirm 在内嵌浏览器里被自动关掉） ═══
+
+  /** 让当前登录用户拥有这个项目，卡片上才会出管理动作 */
+  function mineListing(id: string) {
+    return {
+      [id]: {
+        authorId: 'me',
+        authorAvatarUrl: '',
+        status: 'pending',
+        reviewTarget: 'project',
+        rejectReason: '',
+        hasPendingDraft: false,
+        visibility: true,
+        updatedAt: '',
+      },
+    };
+  }
+
+  it('★ 删除确认走应用内模态，**不碰** window.confirm', async () => {
+    // 原生 confirm 在内嵌 webview 里会被直接自动关掉并返回 false，
+    // 于是「删除」表现成「点了什么都没发生」—— 最难查的一种坏法
+    socialState.userId = 'me';
+    const nativeConfirm = vi.fn(() => true);
+    vi.stubGlobal('confirm', nativeConfirm);
+    try {
+      myMock.mockResolvedValue(
+        page([meta({ id: 'p1', name: '待审的项目' })], { listings: mineListing('p1') }),
+      );
+      const wrapper = await open();
+      scopeButton('我的项目').click();
+      await flushPromises();
+
+      const del = [...document.body.querySelectorAll('.wk-manage-btn')].find(
+        (b) => b.textContent?.trim() === '删除',
+      ) as HTMLButtonElement;
+      del.click();
+      await flushPromises();
+
+      // 原生对话框一次都没被叫到；确认改由应用内模态承担
+      expect(nativeConfirm).not.toHaveBeenCalled();
+      expect(document.body.textContent).toContain('工坊没有回收站');
+      // 还没确认，一发请求都不该出去
+      expect(deleteMock).not.toHaveBeenCalled();
+
+      const confirmBtn = [...document.body.querySelectorAll('button')].find(
+        (b) => b.textContent?.trim() === '删除' && !b.classList.contains('wk-manage-btn'),
+      ) as HTMLButtonElement;
+      confirmBtn.click();
+      await flushPromises();
+
+      expect(deleteMock).toHaveBeenCalledWith('p1');
+      // 删完要丢缓存，否则列表/详情还会端出这条已经不存在的项目
+      expect(invalidateMock).toHaveBeenCalledWith('p1');
+      wrapper.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('在确认框上取消：一行都不删', async () => {
+    socialState.userId = 'me';
+    myMock.mockResolvedValue(
+      page([meta({ id: 'p1', name: '待审的项目' })], { listings: mineListing('p1') }),
+    );
+    const wrapper = await open();
+    scopeButton('我的项目').click();
+    await flushPromises();
+
+    const del = [...document.body.querySelectorAll('.wk-manage-btn')].find(
+      (b) => b.textContent?.trim() === '删除',
+    ) as HTMLButtonElement;
+    del.click();
+    await flushPromises();
+
+    const cancel = [...document.body.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === '取消',
+    ) as HTMLButtonElement;
+    cancel.click();
+    await flushPromises();
+
+    expect(deleteMock).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('删除失败：报出来，且项目仍在屏幕上（它并没有被删掉）', async () => {
+    socialState.userId = 'me';
+    deleteMock.mockResolvedValue({
+      ok: false,
+      error: { kind: 'http', status: 403, message: 'Permission denied', url: 'u' },
+    });
+    myMock.mockResolvedValue(
+      page([meta({ id: 'p1', name: '待审的项目' })], { listings: mineListing('p1') }),
+    );
+    const wrapper = await open();
+    scopeButton('我的项目').click();
+    await flushPromises();
+
+    (
+      [...document.body.querySelectorAll('.wk-manage-btn')].find(
+        (b) => b.textContent?.trim() === '删除',
+      ) as HTMLButtonElement
+    ).click();
+    await flushPromises();
+    (
+      [...document.body.querySelectorAll('button')].find(
+        (b) => b.textContent?.trim() === '删除' && !b.classList.contains('wk-manage-btn'),
+      ) as HTMLButtonElement
+    ).click();
+    await flushPromises();
+
+    const notify = wrapper.emitted('notify') ?? [];
+    expect(notify.some((c) => String(c[0]).includes('删除失败'))).toBe(true);
+    expect(invalidateMock).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('待审的项目');
+    wrapper.unmount();
+  });
+
+  it('★ 回归：逛过「我的项目」之后，「全部」的每页条数不许被带跑', async () => {
+    /*
+     * 真机症状（2026-08-01）：列表每次只出一个项目，「加载更多」也一次只加一个。
+     * 根因是「我的项目」不分页，它回执里的 pageSize 只是「这把拿到几条」，
+     * 却被无条件写进了共用的查询状态 —— 名下只有 1 个项目就把 pageSize 钉成 1。
+     */
+    socialState.userId = 'me';
+    listMock.mockResolvedValue(page([meta()], { total: 100, pageSize: 20 }));
+    const wrapper = await open();
+    expect(lastQuery()).toMatchObject({ pageSize: 20 });
+
+    // 名下只有 1 个项目
+    myMock.mockResolvedValue(page([meta({ id: 'mine1' })], { total: 1, pageSize: 1 }));
+    scopeButton('我的项目').click();
+    await flushPromises();
+
+    scopeButton('全部').click();
+    await flushPromises();
+
+    // 切回来仍然按 20 要，不是 1
+    expect(lastQuery()).toMatchObject({ pageSize: 20 });
     wrapper.unmount();
   });
 });

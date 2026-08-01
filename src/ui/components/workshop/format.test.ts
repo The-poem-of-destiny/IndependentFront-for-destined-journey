@@ -9,6 +9,9 @@
 import { describe, it, expect } from 'vitest';
 import { groupWorkshopNotes, workshopNote } from '@engine/workshop-types';
 import {
+  baseTagClass,
+  baseTagOf,
+  describeReviewState,
   DISCORD_FALLBACK_AVATAR,
   WORKSHOP_NOTE_LABEL,
   describeEntryPosition,
@@ -159,5 +162,80 @@ describe('登录相关文案（D25）', () => {
 
   it('引导语只有一份 —— 卡片、详情、页面共用', () => {
     expect(WORKSHOP_LOGIN_GUIDE).toContain('Discord 登录');
+  });
+});
+
+describe('baseTagOf / baseTagClass（Phase 4）', () => {
+  it('按 WORKSHOP_BASE_TAGS 的顺序取第一个命中的', () => {
+    // 同时挂了「扩展」和「系统」时，徽章只能显示一个 —— 顺序即优先级
+    expect(baseTagOf(['扩展', '系统'])).toBe('系统');
+    expect(baseTagOf(['角色'])).toBe('角色');
+  });
+
+  it('★ 一个基础标签都没有时返回空串，不替作者盖章成「系统」', () => {
+    // 上游 getBaseTag 在这里退回 BASE_TAGS[0]，会把只挂「路边」的项目说成系统级 ——
+    // 而「系统」恰恰是最需要用户警惕的那类（D12）
+    expect(baseTagOf(['路边', '外挂'])).toBe('');
+    expect(baseTagOf([])).toBe('');
+    expect(baseTagOf(undefined)).toBe('');
+  });
+
+  it('四个基础标签各有配色类，非基础标签无类', () => {
+    expect(baseTagClass('系统')).toBe('system');
+    expect(baseTagClass('扩展')).toBe('extension');
+    expect(baseTagClass('角色')).toBe('character');
+    expect(baseTagClass('事件')).toBe('event');
+    expect(baseTagClass('路边')).toBe('');
+  });
+});
+
+describe('describeReviewState（Phase 4）', () => {
+  const base = {
+    status: 'approved',
+    reviewTarget: 'project',
+    hasPendingDraft: false,
+    visibility: true,
+  };
+
+  it('一切正常时不出徽章', () => {
+    expect(describeReviewState(base)).toBeNull();
+    expect(describeReviewState(undefined)).toBeNull();
+  });
+
+  it('★ 草稿状态压过本体状态', () => {
+    // 本体 approved + 草稿 rejected：作者要看到的是「新版本被拒」而不是「一切正常」
+    const badge = describeReviewState({
+      ...base,
+      status: 'rejected',
+      reviewTarget: 'draft',
+    });
+    expect(badge).toEqual({ text: '新版本被拒', kind: 'err' });
+  });
+
+  it('草稿审核中', () => {
+    expect(describeReviewState({ ...base, status: 'pending', reviewTarget: 'draft' })).toEqual({
+      text: '新版本审核中',
+      kind: 'warn',
+    });
+  });
+
+  it('★ 本体待审/被拒也要说出来 —— 上游这两种情况一个字都不说', () => {
+    // 刚投稿的作者切到「我的项目」看不到「审核中」，只会以为投稿没成功
+    expect(describeReviewState({ ...base, status: 'pending' })).toEqual({
+      text: '审核中',
+      kind: 'warn',
+    });
+    expect(describeReviewState({ ...base, status: 'rejected' })).toEqual({
+      text: '已被拒绝',
+      kind: 'err',
+    });
+  });
+
+  it('有待审草稿 / 已隐藏都只是信息，不是待处理', () => {
+    expect(describeReviewState({ ...base, hasPendingDraft: true })?.kind).toBe('muted');
+    expect(describeReviewState({ ...base, visibility: false })).toEqual({
+      text: '已隐藏',
+      kind: 'muted',
+    });
   });
 });

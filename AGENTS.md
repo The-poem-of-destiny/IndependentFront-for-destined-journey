@@ -326,11 +326,14 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 工坊 P0b  | 美化规则迁出 localStorage → Dexie v15                  | ✅                  |
 | 工坊 P1   | 创意工坊（浏览/安装/更新/卸载/启用，= 7f）             | 🔒 入口临时下线     |
 | 工坊 P2   | EJS 沙盒 + 只读 stats 投影（ADR-30）                   | ✅ 待真机           |
-| 工坊 P3   | 社交面（Discord 登录/点赞/订阅，D18-D25）              | ✅ 待真机           |
+| 工坊 P3   | 社交面（Discord 登录/点赞/订阅，D18-D25）              | ✅ 真机已过         |
+| 工坊 P4   | 上游对齐（封面链/类型徽章/我的项目/更新 diff/投稿/审核）| ✅ 待真机           |
 | 真机迭代  | debug loop 持续修复                                    | 🔄                  |
 
 > 🔒 **工坊入口已临时下线（2026-08-01 安全审计）**：首页「创意工坊」按钮由 `HomePage.vue` 的 `WORKSHOP_ENTRY_ENABLED = false` 隐藏 —— 那是通往 workshop 视图的唯一入口。原因是 SEC-01（工坊正则的 `replaceString` 原样进美化管线、最终由 ChatFlow 的 `v-html` 落 DOM，事件属性会真的执行）与 SEC-02（世界书 EJS 走 `new Function`，`Object.constructor("return globalThis")()` 可拿回真全局，且同步跑主线程、死循环冻 UI），命中即可读到 localStorage 的 API Key、IndexedDB 存档与本地 BFF。**工坊代码一行没删**，沙箱/消毒方案（审计 Gate 0 / Gate 2）落地后把常量改回 `true` 即恢复。⚠️ 这只是暴露面收敛、不是安全边界：已装且已启用的项目仍会照常执行，游戏页侧栏的「工坊」启用面板也仍在。全文见 `docs/reviews/2026-08-01-repository-review.md`。（SEC-02 已由 QuickJS 隔离后端在 `feat/ejs-capability-surface` 收口；入口解封仍等 SEC-01 消毒方案落地。）
 
+> 🟡 **工坊 P4 已实施（B1-B5），真机走查未做**：以上游工坊页（`github.com/AkabaneSaki/myrepo`，本地克隆 `E:\Projects\myrepo`）为参照做的功能对齐。B1 封面代理链 + 类型徽章 + Cloudflare 错误码 + 加载更多；B2 我的项目 / 订阅与已装 / 审核徽章；B3 更新前改动预告；B4 投稿·编辑·上传·可见性·删除；B5 审核队列 + 管理员 + 日志。**三条与上游刻意不同**已写进各自文件头注释：不给没有基础标签的项目盖章成「系统」、diff 由已算好的安装计划派生（不重新归一化一遍）、权限判定只用于画不画入口（门禁在上游 403）。🔴 **B5 无法自测（已搁置）** —— 当前账号 `isAdmin: false`，审核面真机验证延后到拿到管理员账号再做。
+>
 > 🟡 **工坊 P2 已实施（T1-T6），真机走查未做**：世界书条目正文的 EJS 现在**会在提示装配期求值**（ADR-30 两轴契约：只读 `stats` + 共写 `vars`，冲突 AI 赢；动态条目沉底、静态前缀字节稳定）。全语料冒烟 509 条目 / 61 动态 / **0 回退**（能力面别名层落地后 7 → 0，白名单已清空；语料门现按 **Legacy 与 QuickJS 双后端**各自跑双向白名单，基线一致），回退条目原文注入不阻断。代码位内嵌的 ST 值宏（`{{roll}}`/`{{random::}}`）已在编译期降成沙盒调用（`rewriteCodeMacros`），uid 358 出列。回退率 / 缓存命中字节 / 跨回合链尚未真机验证，设计全文见 `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`。
 
 ## 架构（已实现部分）
@@ -429,6 +432,8 @@ src/sillytavern/                    ← 核心引擎
   ├── workshop-manifest.ts          ← [工坊 P1] ★纯函数：上游 JSON → 内部形状（容忍字段增删，丢弃项记 droppedNotes）
   ├── workshop-regex-map.ts         ← [工坊 P1] ★纯函数：ST 正则 → BeautifierRule（裸 pattern 与 /p/flags 两形态都吃）
   ├── workshop-install-plan.ts      ← [工坊 P1] ★纯同步 planInstall：uid 分区内重新发号 / 条目转换 / 按名匹配更新 / 冲突与丢弃收集
+  ├── workshop-diff.ts              ← [工坊 P4] ★纯函数 diffInstallPlan：更新前的「这一版会改什么」
+  │                                    输入是**已算好的计划**而非重拉详情 —— 预告与提交在结构上同源
   │
   ├── lorebook-engine.ts / prompt-assembler.ts / importer.ts / variables.ts / vars-merger.ts
   ├── stream-parser.ts / api-router.ts / api-tools.ts / editor-utils.ts
@@ -462,6 +467,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── image-crop.ts                ← [素材] 从源图切真字节（解码与画布两处注入缝）
 │   ├── crop-rects.ts                ← [素材] 裁剪框几何（纯函数，源图像素坐标系）
 │   ├── workshop-client.ts           ← [工坊] 唯一网络接触点（判别联合永不抛穿 + 超时 + 取消）
+│   │                                   P4: +listMyProjects / 投稿写侧（create/update/visibility/delete/上传三口）
+│   │                                   / 审核面（pending/review/admins/logs/set-admin）
+│   ├── workshop-cover.ts            ← [工坊 P4] 封面候选链（wsrv.nl 代理 → 原图；组件按序试）
+│   ├── workshop-upstream-error.ts   ← [工坊 P4] Cloudflare 平台错误（1027 额度/1102 资源/429）优先于业务错误
 │   ├── workshop-enable.ts           ← [工坊] 启用展开纯函数（项目 → `creative_workshop:<uid>` 集合）
 │   ├── quality-colors.ts / test-fixtures.ts / toSystemEvent.ts
 │   └── variables.css + 10 主题 CSS（parchment/obsidian/crimson/indigo/bronze/sakura/ivory/misty-lilac/forest/ocean）
@@ -509,7 +518,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │       │                                 ★ 正则行的处置预告复用 `mapWorkshopRegexes`
 │       │                                   （与装后已装列表同源，别另写第二套判定）
 │       ├── WorkshopProjectCard.vue    ← tags 一条不折叠（D12，勿改成「更多」）
-│       ├── WorkshopInstalledList.vue / WorkshopConflictModal.vue（更新覆盖前警告）
+│       ├── WorkshopInstalledList.vue / WorkshopConflictModal.vue
+│       │     ★ P4 起后者对**每一次更新**都出现（不只有冲突时）——多出改动预告一节；
+│       │       有冲突才用那句惊悚标题，否则只是「确认更新」（狼来了会让用户闭眼点过去）
+│       ├── WorkshopSubmitModal.vue    ← [工坊 P4] 投稿/编辑（多步进度 + 失败善后话）
+│       │                                 🔴 编辑已发布项目上游会**换成草稿 id**，后续上传必须打新 id
+│       ├── WorkshopAdminModal.vue     ← [工坊 P4] 审核面板（待审核/管理员/日志三 Tab，超管才见后两个）
 │       ├── WorkshopSocialActions.vue  ← [工坊 P3] 点赞/订阅按钮对（卡片 compact / 详情 full 共用
 │       │                                 **唯一**社交动作入口——四条失败分支文案必须同源，别各写一份）
 │       └── format.ts / failure-text.ts（展示层纯函数；P3: +unauthorized 分支 / Discord 头像与登录引导文案）

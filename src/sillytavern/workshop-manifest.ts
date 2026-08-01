@@ -27,6 +27,7 @@
  */
 
 import type {
+  WorkshopListingMeta,
   WorkshopPayload,
   WorkshopProjectMeta,
   WorkshopSocialMeta,
@@ -181,6 +182,46 @@ export function parseSocialMeta(raw: unknown): WorkshopSocialMeta {
     userLiked: readBoolean(source, ['userLiked'], false),
     userSubscribed: readBoolean(source, ['userSubscribed'], false),
   };
+}
+
+/**
+ * 上游 `project` 对象 → {@link WorkshopListingMeta}（Phase 4）。
+ *
+ * 与 {@link parseProjectMeta} / {@link parseSocialMeta} 同样**吃同一个入参**、同样
+ * 零额外请求。三分而不是合一，为的是让「落库的」「随时变的社交值」「随时变的审核
+ * 状态」在类型上无法互相污染。
+ *
+ * 头像的两种上游形态都吃:
+ * - 完整 URL（现状：服务端已在 `/api/projects` 与 `/api/my/projects` 拼好）
+ * - 裸哈希（上游若哪天回退到直出 DB 列）—— 用 `authorId` 拼出 CDN 地址
+ *
+ * 拼不出来一律空串，**绝不返回半截 URL** —— `<img src="">` 会让浏览器去请求当前
+ * 页面地址，然后画一个碎图标。
+ */
+export function parseListingMeta(raw: unknown): WorkshopListingMeta {
+  const source = isRecord(raw) && isRecord(raw.project) ? raw.project : raw;
+  const authorId = readString(source, ['authorId']);
+  const rawAvatar = readString(source, ['authorAvatar', 'authorAvatarUrl']);
+
+  return {
+    authorId,
+    authorAvatarUrl: resolveAuthorAvatar(authorId, rawAvatar),
+    status: readString(source, ['status']),
+    reviewTarget: readString(source, ['reviewTarget']),
+    rejectReason: readString(source, ['rejectReason']),
+    hasPendingDraft: readBoolean(source, ['hasPendingDraft'], false),
+    // 缺省 true：上游列表接口只返回已公开的项目，那里根本不带这个字段
+    visibility: readBoolean(source, ['visibility'], true),
+    updatedAt: readString(source, ['updatedAt', 'latestApprovedAt']),
+  };
+}
+
+/** 完整 URL 原样用；裸哈希拼 CDN；两者都不成立回空串 */
+function resolveAuthorAvatar(authorId: string, rawAvatar: string): string {
+  if (!rawAvatar) return '';
+  if (/^https?:\/\//i.test(rawAvatar)) return rawAvatar;
+  if (!authorId) return '';
+  return `https://cdn.discordapp.com/avatars/${authorId}/${rawAvatar}.webp?size=100`;
 }
 
 /**

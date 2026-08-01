@@ -22,6 +22,7 @@ import {
   downloadPayload,
   fetchInstallInput,
   fetchProject,
+  invalidateWorkshopProject,
   listProjects,
   pollLogin,
   resetWorkshopClient,
@@ -1340,5 +1341,78 @@ describe('登录三段式（D19/D25）', () => {
     const res = await pollLogin('  ');
     expect(res.ok).toBe(false);
     expect(seen).toHaveLength(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// invalidateWorkshopProject（真机反馈 2026-08-01）
+// ═══════════════════════════════════════════════════════════
+
+describe('invalidateWorkshopProject', () => {
+  it('★ 丢掉该项目的详情 —— 作者改完点进去看到的必须是新的，不是 5 分钟前的副本', async () => {
+    const { impl, calls } = routedFetch([
+      [`${WORKSHOP_API_BASE}/api/projects/${PROJECT_ID}`, () => jsonResponse(detailResponse())],
+    ]);
+    setWorkshopFetch(impl);
+
+    await fetchProject(PROJECT_ID);
+    // 第二次本该吃缓存
+    const cached = await fetchProject(PROJECT_ID);
+    expect(cached.ok && cached.fromCache).toBe(true);
+    expect(calls).toHaveLength(1);
+
+    invalidateWorkshopProject(PROJECT_ID);
+
+    const fresh = await fetchProject(PROJECT_ID);
+    expect(fresh.ok && fresh.fromCache).toBe(false);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('★ 列表**全部**丢掉 —— 改一个名字会影响哪几页是算不出来的', async () => {
+    const { impl, calls } = routedFetch([
+      [`${WORKSHOP_API_BASE}/api/projects?`, () => jsonResponse({ projects: [], total: 0 })],
+    ]);
+    setWorkshopFetch(impl);
+
+    await listProjects({ page: 0 });
+    await listProjects({ page: 1 });
+    expect(calls).toHaveLength(2);
+    // 两页都该命中缓存
+    await listProjects({ page: 0 });
+    await listProjects({ page: 1 });
+    expect(calls).toHaveLength(2);
+
+    invalidateWorkshopProject(PROJECT_ID);
+
+    await listProjects({ page: 0 });
+    await listProjects({ page: 1 });
+    expect(calls).toHaveLength(4);
+  });
+
+  it('★ 载荷刻意不丢 —— 它按 downloadUrl 存键，上游发新版天然是另一把钥匙', async () => {
+    const { impl, calls } = routedFetch([[DOWNLOAD_URL, () => jsonResponse(payloadResponse())]]);
+    setWorkshopFetch(impl);
+
+    await downloadPayload(DOWNLOAD_URL);
+    invalidateWorkshopProject(PROJECT_ID);
+    const after = await downloadPayload(DOWNLOAD_URL);
+
+    expect(after.ok && after.fromCache).toBe(true);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('别的项目的详情不受牵连', async () => {
+    const OTHER = '99999999-8888-7777-6666-555555555555';
+    const { impl, calls } = routedFetch([
+      [`${WORKSHOP_API_BASE}/api/projects/${OTHER}`, () => jsonResponse(detailResponse())],
+    ]);
+    setWorkshopFetch(impl);
+
+    await fetchProject(OTHER);
+    invalidateWorkshopProject(PROJECT_ID);
+    const again = await fetchProject(OTHER);
+
+    expect(again.ok && again.fromCache).toBe(true);
+    expect(calls).toHaveLength(1);
   });
 });

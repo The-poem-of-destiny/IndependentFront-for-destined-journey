@@ -24,6 +24,7 @@ import type { WorkshopProject } from '@engine/types';
 import { groupWorkshopNotes } from '@engine/workshop-types';
 import { mapWorkshopRegexes } from '@engine/workshop-regex-map';
 import { fetchProject } from '../../lib/workshop-client';
+import { coverCandidates } from '../../lib/workshop-cover';
 import type { WorkshopFailure, WorkshopProjectDetail } from '../../lib/workshop-client';
 import AppModal from '../shared/AppModal.vue';
 import AppButton from '../shared/AppButton.vue';
@@ -120,6 +121,18 @@ onBeforeUnmount(abortInflight);
  * 而那份信息本地就有。让整屏因为网络失败而空白是最没用的收场。
  */
 const meta = computed(() => detail.value?.project ?? props.installed ?? null);
+
+/** 封面候选链（wsrv 代理 → 原图），与卡片同一套（见 lib/workshop-cover.ts） */
+const coverCandidateList = computed(() => coverCandidates(meta.value?.coverUrl));
+const coverStep = ref(0);
+const coverSrc = computed<string>(() => coverCandidateList.value[coverStep.value] ?? '');
+// 换了项目就从头试 —— 模态复用同一个组件实例，不重置会继承上一个项目的失败进度
+watch(
+  () => meta.value?.coverUrl,
+  () => {
+    coverStep.value = 0;
+  },
+);
 
 const regexCount = computed(() => detail.value?.regexEntries.length ?? 0);
 const previewEntryCount = computed(() => detail.value?.previewEntries.length ?? 0);
@@ -260,11 +273,13 @@ const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInsta
         <!-- ═══ 头部：封面 + 关键元数据 ═══ -->
         <div class="wk-head">
           <img
-            v-if="meta.coverUrl"
+            v-if="coverSrc"
+            :key="coverSrc"
             class="wk-head-cover"
-            :src="meta.coverUrl"
+            :src="coverSrc"
             :alt="`${meta.name} 封面`"
             referrerpolicy="no-referrer"
+            @error="coverStep += 1"
           />
           <div class="wk-head-meta">
             <p class="wk-head-author">{{ meta.authorName || '佚名' }}</p>

@@ -45,6 +45,7 @@
  */
 
 import {
+  parseListingMeta,
   parsePayload,
   parseProjectMeta,
   parseSocialMeta,
@@ -52,6 +53,7 @@ import {
 } from '@engine/workshop-manifest';
 import type {
   WorkshopInstallInput,
+  WorkshopListingMeta,
   WorkshopPayload,
   WorkshopProjectMeta,
   WorkshopSocialMeta,
@@ -59,6 +61,7 @@ import type {
   WorkshopSourceRegex,
   WorkshopToggleAck,
 } from '@engine/workshop-types';
+import { describePlatformFailure, describeRawBody } from './workshop-upstream-error';
 
 // ═══════════════════════════════════════════════════════════
 // 常量
@@ -229,6 +232,11 @@ export interface WorkshopListPage {
    * 键只含解析成功的项目；被丢弃的野项目没有 id，也就无从寻址。
    */
   socials: Record<string, WorkshopSocialMeta>;
+  /**
+   * 项目 id → 目录展示面（作者身份 + 审核状态，Phase 4）。与 `socials` 同一条
+   * 纪律、同一份响应、零额外请求，**永不落库**（见 `WorkshopListingMeta`）。
+   */
+  listings: Record<string, WorkshopListingMeta>;
 }
 
 /**
@@ -243,6 +251,8 @@ export interface WorkshopProjectDetail {
   previewEntries: WorkshopSourceEntry[];
   /** 同一份响应顺带解析出的社交计数（D22），零额外请求 —— 不落库 */
   social: WorkshopSocialMeta;
+  /** 同上：作者身份 + 审核状态（Phase 4），零额外请求 —— 不落库 */
+  listing: WorkshopListingMeta;
 }
 
 /** 两个 toggle 动作 —— 端点/字段名不同，流程完全同构，故共用一条实现 */
@@ -342,11 +352,13 @@ export interface WorkshopResponseLike {
  */
 export interface WorkshopFetchInit {
   signal?: AbortSignal;
-  /** 缺省 GET；仅 toggle / 未来的写操作用 POST */
-  method?: 'GET' | 'POST';
+  /** 缺省 GET；toggle 用 POST，投稿面（B4）用 POST/PUT/DELETE */
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   headers?: Record<string, string>;
   /** 仅用 `'no-store'`（D24）；不做其它缓存模式的门面 */
   cache?: 'no-store';
+  /** 请求体。JSON 已序列化成串；上传走 Blob / FormData */
+  body?: BodyInit;
 }
 
 /**
@@ -564,6 +576,34 @@ export function clearWorkshopCache(): void {
 }
 
 /**
+ * 丢掉一个项目的全部缓存 —— **写操作之后必须调**（投稿/编辑/删除/改可见性）。
+ *
+ * 为什么非有不可: 详情的 TTL 是 5 分钟。作者改完标题点进自己的项目，看到的是
+ * 我们**自己**几分钟前存下的旧副本 —— 他会以为编辑没生效，然后再改一遍。
+ * 这不是上游的延迟，是我们的缓存在骗人。上游的边缘缓存另说（那个我们管不着），
+ * 但至少本地这一层不该成为「改了没反应」的来源。
+ *
+ * 两件事都要做:
+ * 1. **该 id 的详情**，所有身份桶（`detail:<任意前缀>:<id>`）—— 登录前后是不同的
+ *    键，只清当前身份那把，登出再登入还会拿到旧的
+ * 2. **所有列表页**。改一个名字会影响哪几页？搜索词、标签、排序、页码的组合是
+ *    开放的，算不出来。列表 TTL 只有 120 秒且重拉很便宜，全清是正确的取舍 ——
+ *    留一页说着旧名字的列表，比多发几个请求糟得多。
+ *
+ * 载荷（`payload:`）**刻意不清**: 它按 `downloadUrl` 存键，而上游发新版本会换 URL，
+ * 天然就是另一把钥匙。清它只会让同一份不变的字节重下一遍。
+ */
+export function invalidateWorkshopProject(projectId: string): void {
+  const id = (projectId ?? '').trim();
+  for (const key of [...cache.keys()]) {
+    if (key.startsWith('list:') || (id !== '' && key.endsWith(`:${id}`))) {
+      cache.delete(key);
+      inflight.delete(key);
+    }
+  }
+}
+
+/**
  * 测试拆除口: 清缓存 + 复位全部注入缝。
  *
  * ★ token provider 也必须复位 —— 它是**模块级**的，上一个用例登录过、下一个用例
@@ -697,9 +737,16 @@ async function fetchJson(
   opts: {
     signal?: AbortSignal;
     timeoutMs?: number;
-    method?: 'GET' | 'POST';
+    method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
     /** 是否附着身份。登录/轮询端点本身不带（此时还没有 token） */
     withAuth?: boolean;
+    /**
+     * 请求体（投稿面，B4）。
+     * - 普通对象 → 序列化成 JSON 并带 `Content-Type: application/json`
+     * - `Blob` / `FormData` → **原样交给 fetch**，不动 Content-Type
+     *   （FormData 的 multipart boundary 只有浏览器自己知道，手写一定错）
+     */
+    body?: unknown;
   } = {},
 ): Promise<WorkshopResult<unknown>> {
   const impl = resolveFetch();
@@ -735,15 +782,29 @@ async function fetchJson(
 
   const init: WorkshopFetchInit = { signal: guard.signal };
   if (opts.method && opts.method !== 'GET') init.method = opts.method;
+
+  const headers: Record<string, string> = {};
+  if (opts.body !== undefined) {
+    if (isBinaryBody(opts.body)) {
+      // Blob / FormData 原样走 —— 尤其 FormData 的 multipart boundary 由浏览器生成，
+      // 我们一旦自己写 Content-Type，boundary 就对不上，服务端只会看到一坨乱码
+      init.body = opts.body as BodyInit;
+    } else {
+      init.body = JSON.stringify(opts.body);
+      headers['Content-Type'] = 'application/json';
+    }
+  }
+
   if (opts.withAuth) {
     const token = currentToken();
     if (token) {
       // 上游读取端同时接受 `Bearer <token>` 与裸 token；带前缀是标准写法
-      init.headers = { Authorization: `Bearer ${token}` };
+      headers.Authorization = `Bearer ${token}`;
       // 🔴 D24: 个性化字段不可进 HTTP 缓存（§1.3 上游缺 `Vary: Authorization`）
       init.cache = 'no-store';
     }
   }
+  if (Object.keys(headers).length > 0) init.headers = headers;
 
   try {
     let res: WorkshopResponseLike;
@@ -766,9 +827,15 @@ async function fetchJson(
       const status = typeof res.status === 'number' ? res.status : 0;
       // 错误正文里往往有唯一能自救的那句话（§1.4）。读不出来也无所谓 ——
       // 一个失败的响应体读不动，不该把失败本身变成另一种失败。
+      //
+      // 三档，**平台错误优先**（见 workshop-upstream-error.ts 顶部）: Cloudflare 的
+      // 额度/资源/限流失败要抢在结构化读法之前，因为那种响应体有时也是带 message 的
+      // JSON，而那句 message 是给运维看的英文栈信息。
       let detail: string | undefined;
       try {
-        detail = readUpstreamError(await res.text());
+        const raw = await res.text();
+        detail =
+          describePlatformFailure(status, raw) ?? readUpstreamError(raw) ?? describeRawBody(raw);
       } catch {
         detail = undefined;
       }
@@ -809,6 +876,16 @@ async function fetchJson(
   } finally {
     guard.dispose();
   }
+}
+
+/** Blob / FormData 这类「浏览器自己会设 Content-Type」的体 */
+function isBinaryBody(body: unknown): boolean {
+  const g = globalThis as { Blob?: unknown; FormData?: unknown };
+  if (typeof g.Blob === 'function' && body instanceof (g.Blob as typeof Blob)) return true;
+  if (typeof g.FormData === 'function' && body instanceof (g.FormData as typeof FormData)) {
+    return true;
+  }
+  return false;
 }
 
 function describeError(err: unknown): string {
@@ -926,12 +1003,14 @@ export async function listProjects(
 
       const projects: WorkshopProjectMeta[] = [];
       const socials: Record<string, WorkshopSocialMeta> = {};
+      const listings: Record<string, WorkshopListingMeta> = {};
       for (const item of list) {
         const meta = parseProjectMeta(item);
         if (!meta) continue;
         projects.push(meta);
-        // ★ 同一条 raw 再解一次社交面（D22）—— 零额外请求，且两半边的类型分得开
+        // ★ 同一条 raw 再解两次（D22 / Phase 4）—— 零额外请求，三半边的类型分得开
         socials[meta.id] = parseSocialMeta(item);
+        listings[meta.id] = parseListingMeta(item);
       }
 
       const readNum = (key: string, fallback: number): number => {
@@ -949,11 +1028,65 @@ export async function listProjects(
           projects,
           droppedCount: list.length - projects.length,
           socials,
+          listings,
         },
       };
     },
     opts.signal !== undefined,
   );
+}
+
+/**
+ * 「我的项目」（Phase 4，对齐上游 `/api/my/projects`）。
+ *
+ * 与 {@link listProjects} 的三处不同，都是上游给定的，不是我们的选择:
+ *
+ * 1. **必须登录** —— 未登录上游直接 401（→ `kind: 'unauthorized'`，UI 引导登录）。
+ * 2. **不分页、不吃 `sort`/`tag`/`search`** —— 上游一次把作者名下所有项目全给。
+ *    所以调用方的搜索/筛选只能在本地做（上游页面也是这么干的）。
+ * 3. **含未过审的项目** —— `status: pending|rejected`、草稿、以及作者自己隐藏了的。
+ *    这正是这个视图存在的理由：公开列表里看不到它们。
+ *
+ * 不进缓存: 这一屏是作者自己刚改完东西要看结果的地方，任何 TTL 都会让他以为
+ * 「我刚提交的没生效」。上游列表 120 秒缓存的省流量理由在这里不成立 —— 这个请求
+ * 只在用户主动切到该视图时发一次。
+ */
+export async function listMyProjects(
+  opts: WorkshopAbortable = {},
+): Promise<WorkshopResult<WorkshopListPage>> {
+  const url = `${WORKSHOP_API_BASE}/api/my/projects`;
+  const res = await fetchJson(url, { signal: opts.signal, withAuth: true });
+  if (!res.ok) return res;
+
+  const raw = res.data;
+  const rawProjects = isRecord(raw) && Array.isArray(raw.projects) ? raw.projects : [];
+  const list = rawProjects.length === 0 && Array.isArray(raw) ? raw : rawProjects;
+
+  const projects: WorkshopProjectMeta[] = [];
+  const socials: Record<string, WorkshopSocialMeta> = {};
+  const listings: Record<string, WorkshopListingMeta> = {};
+  for (const item of list) {
+    const meta = parseProjectMeta(item);
+    if (!meta) continue;
+    projects.push(meta);
+    socials[meta.id] = parseSocialMeta(item);
+    listings[meta.id] = parseListingMeta(item);
+  }
+
+  return {
+    ok: true,
+    fromCache: false,
+    data: {
+      // 上游不报 total/page/pageSize —— 全量返回，本页就是全部
+      total: projects.length,
+      page: 0,
+      pageSize: projects.length,
+      projects,
+      droppedCount: list.length - projects.length,
+      socials,
+      listings,
+    },
+  };
 }
 
 /**
@@ -995,8 +1128,9 @@ export async function fetchProject(
           project,
           regexEntries: parsed.regexEntries,
           previewEntries: parsed.worldbookEntries,
-          // 同一份响应顺带解出（D22），零额外请求
+          // 同一份响应顺带解出（D22 / Phase 4），零额外请求
           social: parseSocialMeta(res.data),
+          listing: parseListingMeta(res.data),
         },
       };
     },
@@ -1161,6 +1295,397 @@ async function toggleSocial(
   if (!res.ok) return res;
 
   return { ok: true, fromCache: false, data: parseToggleAck(res.data) };
+}
+
+// ═══════════════════════════════════════════════════════════
+// 投稿面（B4）—— 创建 / 编辑 / 上传 / 可见性 / 删除
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 投稿的元数据部分（对齐上游 `ProjectCreate` / `ProjectUpdate` 的请求体）。
+ *
+ * `coverImage` 不在这里: 封面是**单独一个上传端点**（multipart），不是这个 JSON
+ * 体里的字段。上游的 `coverImage` 参数是给「已经有 URL 的封面」用的，我们的
+ * 投稿流程一律走上传，就不暴露它了 —— 少一个能填错的口。
+ */
+export interface WorkshopProjectDraft {
+  name: string;
+  description: string;
+  version: string;
+  tags: string[];
+}
+
+/** 创建/编辑的回执 */
+export interface WorkshopWriteAck {
+  /**
+   * 后续上传要打的**那个** id。
+   *
+   * 🔴 编辑一个**已发布且已过审**的项目时，上游不会原地改，而是开一份**新的草稿**
+   * 并返回**草稿的 id**（`createDraftFromPublished`）。此后的载荷/正则/封面上传
+   * 必须打这个新 id —— 打回原 id 就是在改线上那一版，而线上那版是审核过的。
+   * 这是整个投稿面最容易错的一处，所以回执里把它单独摆出来。
+   */
+  projectId: string;
+  /** 上游是否为这次编辑开了草稿（即上面那种情况） */
+  isDraft: boolean;
+  /** 上游的提示原话（「修改后的新版本已进入审核区…」），照登给用户 */
+  message: string;
+}
+
+function readAckId(raw: unknown, fallback: string): string {
+  if (!isRecord(raw)) return fallback;
+  // draftProjectId 优先 —— 它在的时候，projectId 也是同一个值，但语义更明确
+  for (const key of ['draftProjectId', 'projectId', 'id']) {
+    const value = raw[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return fallback;
+}
+
+/**
+ * 新建项目。**只创建元数据**，内容要接着调 {@link uploadProjectPayload}。
+ *
+ * 上游把这两步分开是有道理的（载荷可达数百 KB，先拿到 id 才知道往哪传），
+ * 但对调用方来说这是个陷阱: 只创建不上传会在工坊里留下一个空项目。
+ * 编排两步的责任在 store，不在这里 —— 本层只负责一次请求对一个端点。
+ */
+export async function createProject(
+  draft: WorkshopProjectDraft,
+  opts: WorkshopAbortable = {},
+): Promise<WorkshopResult<WorkshopWriteAck>> {
+  const url = `${WORKSHOP_API_BASE}/api/projects`;
+  const name = draft.name.trim();
+  if (!name) {
+    return { ok: false, error: { kind: 'malformed', message: '项目名不能为空', url } };
+  }
+
+  const res = await fetchJson(url, {
+    method: 'POST',
+    withAuth: true,
+    signal: opts.signal,
+    body: {
+      name,
+      description: draft.description,
+      version: draft.version.trim() || '1.0.0',
+      tags: draft.tags,
+    },
+  });
+  if (!res.ok) return res;
+
+  const projectId = readAckId(res.data, '');
+  if (!projectId) {
+    return { ok: false, error: { kind: 'malformed', message: '创建响应没有返回项目 id', url } };
+  }
+  return {
+    ok: true,
+    fromCache: false,
+    data: { projectId, isDraft: false, message: readMessage(res.data) },
+  };
+}
+
+/** 编辑项目元数据。⚠️ 已发布项目会开草稿并换 id —— 见 {@link WorkshopWriteAck} */
+export async function updateProject(
+  projectId: string,
+  patch: Partial<WorkshopProjectDraft>,
+  opts: WorkshopAbortable = {},
+): Promise<WorkshopResult<WorkshopWriteAck>> {
+  const id = (projectId ?? '').trim();
+  const url = buildProjectUrl(id);
+  if (!id) {
+    return { ok: false, error: { kind: 'malformed', message: '缺少项目 id', url } };
+  }
+
+  const res = await fetchJson(url, {
+    method: 'PUT',
+    withAuth: true,
+    signal: opts.signal,
+    body: patch,
+  });
+  if (!res.ok) return res;
+
+  const nextId = readAckId(res.data, id);
+  return {
+    ok: true,
+    fromCache: false,
+    data: {
+      projectId: nextId,
+      // 换了 id 就说明上游开了草稿（`createDraftFromPublished`）
+      isDraft: nextId !== id,
+      message: readMessage(res.data),
+    },
+  };
+}
+
+/** 公开 / 隐藏 */
+export async function setProjectVisibility(
+  projectId: string,
+  visible: boolean,
+  opts: WorkshopAbortable = {},
+): Promise<WorkshopResult<null>> {
+  const id = (projectId ?? '').trim();
+  const url = `${buildProjectUrl(id)}/visibility`;
+  if (!id) {
+    return { ok: false, error: { kind: 'malformed', message: '缺少项目 id', url } };
+  }
+  const res = await fetchJson(url, {
+    method: 'PUT',
+    withAuth: true,
+    signal: opts.signal,
+    body: { visibility: visible },
+  });
+  return res.ok ? { ok: true, fromCache: false, data: null } : res;
+}
+
+/** 删除项目。⚠️ 上游是硬删，没有回收站 */
+export async function deleteProject(
+  projectId: string,
+  opts: WorkshopAbortable = {},
+): Promise<WorkshopResult<null>> {
+  const id = (projectId ?? '').trim();
+  const url = buildProjectUrl(id);
+  if (!id) {
+    return { ok: false, error: { kind: 'malformed', message: '缺少项目 id', url } };
+  }
+  const res = await fetchJson(url, { method: 'DELETE', withAuth: true, signal: opts.signal });
+  return res.ok ? { ok: true, fromCache: false, data: null } : res;
+}
+
+/**
+ * 上传世界书载荷 / 正则文件。
+ *
+ * 两个端点的请求形状一模一样（裸 body + Content-Type 取文件自身），只有路径不同，
+ * 所以共用一条实现 —— 上游哪天给其中一个加了参数，改的也只有这一处。
+ *
+ * ⚠️ 用**载荷超时**（60 秒）而不是元数据超时: 上传的正是那种数百 KB 的文件，
+ * 15 秒在慢速网络下真的不够。
+ */
+export async function uploadProjectFile(
+  projectId: string,
+  kind: 'payload' | 'regex',
+  file: Blob,
+  opts: WorkshopAbortable = {},
+): Promise<WorkshopResult<null>> {
+  const id = (projectId ?? '').trim();
+  const path = kind === 'payload' ? 'upload' : 'upload-regex';
+  const url = `${buildProjectUrl(id)}/${path}`;
+  if (!id) {
+    return { ok: false, error: { kind: 'malformed', message: '缺少项目 id', url } };
+  }
+  const res = await fetchJson(url, {
+    method: 'POST',
+    withAuth: true,
+    signal: opts.signal,
+    timeoutMs: WORKSHOP_PAYLOAD_TIMEOUT_MS,
+    body: file,
+  });
+  return res.ok ? { ok: true, fromCache: false, data: null } : res;
+}
+
+/** 上传封面。**multipart**，字段名 `cover`（上游写死） */
+export async function uploadProjectCover(
+  projectId: string,
+  file: Blob,
+  fileName = 'cover.png',
+  opts: WorkshopAbortable = {},
+): Promise<WorkshopResult<null>> {
+  const id = (projectId ?? '').trim();
+  const url = `${buildProjectUrl(id)}/upload-cover`;
+  if (!id) {
+    return { ok: false, error: { kind: 'malformed', message: '缺少项目 id', url } };
+  }
+  const Ctor = (globalThis as { FormData?: typeof FormData }).FormData;
+  if (typeof Ctor !== 'function') {
+    return { ok: false, error: { kind: 'network', message: '当前环境没有 FormData', url } };
+  }
+  const form = new Ctor();
+  form.append('cover', file, fileName);
+
+  const res = await fetchJson(url, {
+    method: 'POST',
+    withAuth: true,
+    signal: opts.signal,
+    timeoutMs: WORKSHOP_PAYLOAD_TIMEOUT_MS,
+    body: form,
+  });
+  return res.ok ? { ok: true, fromCache: false, data: null } : res;
+}
+
+/** 上游回执里的提示原话；没有就空串（调用方据此不弹这一条） */
+function readMessage(raw: unknown): string {
+  if (!isRecord(raw)) return '';
+  const value = raw.message;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+// ═══════════════════════════════════════════════════════════
+// 审核面（B5）—— 仅管理员可用
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * ⚠️ 本节所有端点在**非管理员**身上一律回 403（超管专属的两个更严）。
+ *
+ * 我们不在客户端「先判断再决定发不发」: 权限的唯一真相在服务端的 JWT 校验里，
+ * 客户端那份 `isAdmin` 只是同一枚 token 里抄来的显示用旗标。拿它当门禁，
+ * 等于把「谁能审核」的判定交给一个用户能自己改的 localStorage 值。
+ *
+ * 客户端的 `isAdmin` 只决定**要不要把入口画出来**（省得普通用户看到一个必然
+ * 403 的按钮），不决定请求发不发得出去 —— 那是服务端的事。
+ */
+
+/** 一条管理操作日志（上游 `admin_action_logs` 的投影） */
+export interface WorkshopAdminLog {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  actorId: string;
+  actorName: string;
+  detail: string;
+  createdAt: string;
+}
+
+/** 一个管理员 */
+export interface WorkshopAdminUser {
+  id: string;
+  username: string;
+  globalName: string;
+}
+
+function readStr(source: unknown, key: string): string {
+  if (!isRecord(source)) return '';
+  const value = source[key];
+  return typeof value === 'string' ? value : '';
+}
+
+/** 待审核队列。上游返回的是与列表同形的项目行，所以复用同一套解析 */
+export async function listPendingProjects(
+  opts: WorkshopAbortable = {},
+): Promise<WorkshopResult<WorkshopListPage>> {
+  const url = `${WORKSHOP_API_BASE}/api/admin/pending?page=0&pageSize=50`;
+  const res = await fetchJson(url, { signal: opts.signal, withAuth: true });
+  if (!res.ok) return res;
+
+  const raw = res.data;
+  const list = isRecord(raw) && Array.isArray(raw.projects) ? raw.projects : [];
+  const projects: WorkshopProjectMeta[] = [];
+  const socials: Record<string, WorkshopSocialMeta> = {};
+  const listings: Record<string, WorkshopListingMeta> = {};
+  for (const item of list) {
+    const meta = parseProjectMeta(item);
+    if (!meta) continue;
+    projects.push(meta);
+    socials[meta.id] = parseSocialMeta(item);
+    listings[meta.id] = parseListingMeta(item);
+  }
+
+  return {
+    ok: true,
+    fromCache: false,
+    data: {
+      total: projects.length,
+      page: 0,
+      pageSize: projects.length,
+      projects,
+      droppedCount: list.length - projects.length,
+      socials,
+      listings,
+    },
+  };
+}
+
+/**
+ * 通过 / 驳回一个项目。
+ *
+ * `rejectReason` 在驳回时**该给**: 它会落到项目行上，作者在「我的项目」里看得到
+ * （见 `describeReviewState` 旁边渲染的那一行）。不给理由的驳回等于让作者去猜。
+ */
+export async function reviewProject(
+  projectId: string,
+  action: 'approve' | 'reject',
+  rejectReason = '',
+  opts: WorkshopAbortable = {},
+): Promise<WorkshopResult<null>> {
+  const id = (projectId ?? '').trim();
+  const url = `${WORKSHOP_API_BASE}/api/admin/review/${encodeURIComponent(id)}`;
+  if (!id) {
+    return { ok: false, error: { kind: 'malformed', message: '缺少项目 id', url } };
+  }
+  const res = await fetchJson(url, {
+    method: 'POST',
+    withAuth: true,
+    signal: opts.signal,
+    body: action === 'reject' ? { action, rejectReason } : { action },
+  });
+  return res.ok ? { ok: true, fromCache: false, data: null } : res;
+}
+
+/** 管理员名册（超管专属） */
+export async function listAdmins(
+  opts: WorkshopAbortable = {},
+): Promise<WorkshopResult<WorkshopAdminUser[]>> {
+  const url = `${WORKSHOP_API_BASE}/api/admin/list`;
+  const res = await fetchJson(url, { signal: opts.signal, withAuth: true });
+  if (!res.ok) return res;
+
+  const raw = res.data;
+  const list = isRecord(raw) && Array.isArray(raw.admins) ? raw.admins : [];
+  return {
+    ok: true,
+    fromCache: false,
+    data: list
+      .map((item) => ({
+        id: readStr(item, 'id'),
+        username: readStr(item, 'username'),
+        globalName: readStr(item, 'globalName') || readStr(item, 'global_name'),
+      }))
+      .filter((u) => u.id !== ''),
+  };
+}
+
+/** 管理操作日志（超管专属，上游给最近 200 条） */
+export async function listAdminLogs(
+  opts: WorkshopAbortable = {},
+): Promise<WorkshopResult<WorkshopAdminLog[]>> {
+  const url = `${WORKSHOP_API_BASE}/api/admin/logs`;
+  const res = await fetchJson(url, { signal: opts.signal, withAuth: true });
+  if (!res.ok) return res;
+
+  const raw = res.data;
+  const list = isRecord(raw) && Array.isArray(raw.logs) ? raw.logs : [];
+  return {
+    ok: true,
+    fromCache: false,
+    data: list.map((item) => ({
+      id: readStr(item, 'id'),
+      action: readStr(item, 'action'),
+      targetType: readStr(item, 'targetType'),
+      targetId: readStr(item, 'targetId'),
+      actorId: readStr(item, 'actorId'),
+      actorName: readStr(item, 'actorName'),
+      detail: readStr(item, 'detail'),
+      createdAt: readStr(item, 'createdAt'),
+    })),
+  };
+}
+
+/** 授予 / 撤销管理员（超管专属） */
+export async function setAdmin(
+  userId: string,
+  isAdmin: boolean,
+  opts: WorkshopAbortable = {},
+): Promise<WorkshopResult<null>> {
+  const url = `${WORKSHOP_API_BASE}/api/admin/set-admin`;
+  const id = (userId ?? '').trim();
+  if (!id) {
+    return { ok: false, error: { kind: 'malformed', message: '缺少用户 id', url } };
+  }
+  const res = await fetchJson(url, {
+    method: 'POST',
+    withAuth: true,
+    signal: opts.signal,
+    body: { userId: id, isAdmin },
+  });
+  return res.ok ? { ok: true, fromCache: false, data: null } : res;
 }
 
 // ═══════════════════════════════════════════════════════════
