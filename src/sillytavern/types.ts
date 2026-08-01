@@ -1925,6 +1925,9 @@ export interface CombatParticipant {
   speedModifiers: number[];
   /** 固定先攻修正 (多来源取最高) */
   fixedInitiativeBonus: number;
+  /** 🆕 战斗 v3 修复：装备/技能的战斗修正声明（item_gen 产出，compileEffectProgram 编译进 activeEffects）。
+   *    v2 时代由 combat-resolver 消费；M5 退役 v2 后此链路曾断裂，现由 v3 内核接管。 */
+  modifiers?: Modifier[];
   /** 当前回合可用资源 */
   attacksRemaining: number;
   actionsRemaining: number;

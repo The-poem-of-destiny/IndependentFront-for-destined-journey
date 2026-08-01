@@ -29,6 +29,8 @@ import {
   type DiceTapeState,
 } from './types';
 import { createTape as _createTape } from './dice-tape';
+import { compileEffectProgram } from './automata/compile';
+import { buildIndex } from './automata/index-active';
 import type {
   ActiveEffectIndex,
   CombatDefinitionBundle,
@@ -36,6 +38,7 @@ import type {
   CombatUnitState,
   CombatUnitView,
   CombatView,
+  CompiledAutomaton,
   DamageRecomputeCtx,
   FrozenSlot,
   PendingChangeSet,
@@ -151,6 +154,25 @@ export function createCombatState(bundle: CombatDefinitionBundle): CombatState {
     initiativeOrder.push(id);
   }
 
+  // 🆕 战斗 v3 修复：编译参与者携带的 modifiers（item_gen 装备词条）进 activeEffects。
+  //     v2 时代由 combat-resolver 消费；M5 退役 v2 后此链路曾断——现由内核接管，
+  //     让「命中+5 / 附加流血 / 反弹 30%」等装备效果在战斗中真正生效。
+  const participantEffects: CompiledAutomaton[] = [];
+  for (const p of bundle.participants) {
+    const mods = p.modifiers ?? [];
+    if (mods.length === 0) continue;
+    const compiled = compileEffectProgram({
+      owner: p.characterId,
+      source: p.name,
+      idPrefix: p.characterId,
+      divinity: 0,
+      modifiers: mods,
+    });
+    participantEffects.push(...compiled.automata);
+  }
+  const activeEffects: ActiveEffectIndex =
+    participantEffects.length > 0 ? buildIndex(participantEffects) : EMPTY_EFFECT_INDEX();
+
   const dice: DiceTapeState = _createTape(buildInitialEpoch(bundle.combatId));
 
   return {
@@ -161,7 +183,7 @@ export function createCombatState(bundle: CombatDefinitionBundle): CombatState {
     initiativeOrder,
     currentTurnIndex: 0,
     units,
-    activeEffects: EMPTY_EFFECT_INDEX(),
+    activeEffects,
     dice,
     resourceSnapshots: { FP: bundle.resourceSnapshots.FP },
     journal: [],

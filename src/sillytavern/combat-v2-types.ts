@@ -150,6 +150,12 @@ export function characterToCombatParticipant(
   const weapon = char.inventory.find((i) => i.equippedSlot === '武器');
   const armor = char.inventory.find((i) => i.equippedSlot === '身体');
 
+  // 🆕 战斗 v3 修复：收集全部已装备物品的 modifiers（词条效果）→ CombatParticipant.modifiers，
+  //    由 createCombatState 编译进 activeEffects。v2 时代由 combat-resolver 消费，M5 后此链路曾断。
+  const equippedModifiers = char.inventory
+    .filter((i) => i.equippedSlot)
+    .flatMap((i) => i.modifiers ?? []);
+
   return {
     characterId: char.id,
     name: char.name,
@@ -173,6 +179,7 @@ export function characterToCombatParticipant(
     actionsRemaining: 1,
     statusEffects: char.statusEffects,
     weaponAtk: weapon?.stats?.atk ?? 0,
+    modifiers: equippedModifiers.length > 0 ? equippedModifiers : undefined,
     side,
     canAct: char.hp > 0,
     ...overrides,

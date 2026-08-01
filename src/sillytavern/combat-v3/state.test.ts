@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { applyPending, createCombatState, toView, applyOutcome } from './state';
 import { emptyChanges } from './phases/outcome';
 import type { CombatState } from './types';
-import { mkBundle } from './test-utils';
+import { mkBundle, mkParticipant } from './test-utils';
 
 describe('createCombatState / toView', () => {
   it('由 bundle 建状态：units 键 = 角色 id，初始槽位 0，phase=CombatOpen', () => {
@@ -52,6 +52,42 @@ describe('createCombatState / toView', () => {
     expect(out).not.toBe(state);
     expect(out.units['乙'].hp).toBe(450);
     expect(out.revision).toBe(state.revision + 1);
+  });
+
+  it('🆕 参与者 modifiers 编译进 activeEffects：装备词条效果在战斗中生效（v3 链路修复）', () => {
+    // 甲带「命中+5」检定 modifier + 附加「流血」buff modifier
+    const bundle = mkBundle({
+      participants: [
+        mkParticipant('甲', {
+          modifiers: [
+            {
+              category: '检定',
+              source: '测试剑',
+              checkType: '命中',
+              bonus: 5,
+              divinity: 0,
+            },
+          ],
+        }),
+        mkParticipant('乙', { side: 'enemy', characterId: '乙', name: '乙' }),
+      ],
+    });
+    const state = createCombatState(bundle);
+
+    // activeEffects 不再恒 EMPTY——命中 modifier 编译成 check.hit 窗口的 push-handler
+    const hitMods = state.activeEffects.byWindow['check.hit'] ?? [];
+    expect(hitMods.length).toBeGreaterThan(0);
+    const ownerSet = new Set(hitMods.map((a) => a.owner));
+    expect(ownerSet.has('甲')).toBe(true);
+  });
+
+  it('🆕 无 modifiers 的参与者 activeEffects 仍为 EMPTY（不误编译）', () => {
+    const state = createCombatState(mkBundle());
+    const total = Object.values(state.activeEffects.byWindow).reduce(
+      (n, list) => n + list.length,
+      0,
+    );
+    expect(total).toBe(0);
   });
 });
 
