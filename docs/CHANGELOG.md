@@ -36,15 +36,15 @@
 
 **7 场 fixture + contract test（A4-1/A4-2）:**
 
-| fixture | 断言重点 |
-|---------|---------|
-| case-06-summon（全量） | 召唤端到端：UnitSummoned + this_round_tail 当回合参战 + FP 300→200 |
-| case-07-prevent-death（全量） | PreventDeath 保命（death.threshold） |
-| case-09-concept（全量） | damage + roundCount + forceTerminal 落 state（Adjudicate → RuleOverridden） |
-| case-13-time-freeze | freezeSlot 端到端：理查德 TurnOpened 0 攻 0 动 |
-| case-24-reflection（全量） | 反射 depth=1 落地 + 攻方 HP 扣减 |
-| **case-x1-mutual-reflection**（新增） | 双方 30% 反伤 → depth 2 熔断 → 反射湮灭 + 无 depth≥2 事件 |
-| **case-x2-true-death-revive**（新增） | HP→0 → death.threshold（divinity 6）→ 保命 + DamagePrevented |
+| fixture                               | 断言重点                                                                    |
+| ------------------------------------- | --------------------------------------------------------------------------- |
+| case-06-summon（全量）                | 召唤端到端：UnitSummoned + this_round_tail 当回合参战 + FP 300→200          |
+| case-07-prevent-death（全量）         | PreventDeath 保命（death.threshold）                                        |
+| case-09-concept（全量）               | damage + roundCount + forceTerminal 落 state（Adjudicate → RuleOverridden） |
+| case-13-time-freeze                   | freezeSlot 端到端：理查德 TurnOpened 0 攻 0 动                              |
+| case-24-reflection（全量）            | 反射 depth=1 落地 + 攻方 HP 扣减                                            |
+| **case-x1-mutual-reflection**（新增） | 双方 30% 反伤 → depth 2 熔断 → 反射湮灭 + 无 depth≥2 事件                   |
+| **case-x2-true-death-revive**（新增） | HP→0 → death.threshold（divinity 6）→ 保命 + DamagePrevented                |
 
 **eventHash 冻结（A4-5）:** 7 场 fixture 的 `expected.eventHash` 从 null 升级为具体 hash（h1vj9zgo 等），contract test 断言 `result.hash === fixture.expected.eventHash`——此后任何改动导致 hash 变化必须在 PR 说明。
 
