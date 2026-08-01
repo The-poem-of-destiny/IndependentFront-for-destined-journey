@@ -23,7 +23,7 @@ import {
 } from '@engine/database';
 import { saveMessage, getMessages, saveSaveSlot } from '@engine/database';
 import { createStateManager } from '@engine/state-manager';
-import type { CombatEvent } from '@engine/combat-runner';
+import type { CombatEvent } from '@engine/combat-v2-types';
 
 /** 单条 Agent 调试日志（含完整请求/响应上下文） */
 export interface DebugAgentEntry {

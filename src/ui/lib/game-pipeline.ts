@@ -1183,68 +1183,32 @@ export class GamePipeline {
     }
   }
 
-  /** 处理战斗触发 — 唤起 combat agent 独立循环 (M4 任务 5.7) */
+  /** 处理战斗触发 — 唤起 combo v3 Coordinator（v2 分支 M5 已退役 → 优雅提示） */
   private async handleCombatTrigger(
     marker: CombatTriggerMarker,
     storyOutput: string,
   ): Promise<CombatSummaryResult | null> {
-    // 🆕 M2 feature flag（架构 §十四 14.5）：分支点唯一，v2 走现有 runCombat，v3 走 coordinator
+    // feature flag（架构 §十四 14.5）：分支点唯一。v3 走 coordinator；打回 'v2' 走优雅退役提示。
     const engineVersion = this.settings?.settings?.combatEngineVersion ?? 'v3';
     if (engineVersion === 'v3') {
       return this.handleCombatTriggerV3(marker, storyOutput);
     }
-    const endpoint = this.getEndpointForAgent('combat');
-    if (!endpoint) {
-      console.warn('[GamePipeline] combat 跳过: 未配置 API endpoint');
-      return null;
-    }
-    try {
-      const { runCombat } = await import('@engine/combat-runner');
-      const { getEventBus } = await import('@engine/game-event');
-      const context = this.currentContext ?? this.buildContext('');
-      this.game.updateAgentStatus('combat');
-      // M5: 激活战斗面板（isInCombat=true → 覆盖层挂起）+ 清空面板状态
-      this.game.enterCombat();
-      const result = await runCombat(
-        {
-          saveId: this.saveId,
-          marker,
-          storyOutput,
-          context,
-          endpoint,
-          configs: this.chainData?.agentConfigs,
-          worldBooks: this.chainData?.worldBooks,
-          presets: this.chainData?.presets,
-        },
-        {
-          clientFactory: this.getClientFactory(),
-          stateManager: this.getStateManager(),
-          eventBus: getEventBus(this.saveId),
-          characters: this.game.characters,
-          variables: context.variables,
-          // M5: runner 注册玩家文本提交器 → store，前端 CombatActionBar 发送时调
-          registerSubmitter: (submit) => this.game.setCombatSubmitter(submit),
-          // readHooks 暂不传（物品/buff modifier 订阅留后续）
-        },
-        // M5: 事件流 → store（消息流 + 单位卡片 + 伤害面板数据源）
-        (evt) => this.game.applyCombatEvent(evt),
-      );
-      this.game.clearAgentStatus('combat');
-      // M5: 关闭战斗面板（isInCombat=false → 覆盖层滑出）
-      this.game.exitCombat();
-      // 摘要回注正文（架构 §12：战斗摘要注入对话流，Story 下一轮据此自然接续战斗后剧情）
-      // 前缀【战斗摘要】帮 Story Agent 识别这是已结束战斗的总结
-      if (result.narrativeSummary) {
-        this.game.addMessage(`【战斗摘要】${result.narrativeSummary}`, 'assistant');
-      }
-      return result;
-    } catch (err) {
-      this.game.clearAgentStatus('combat', String(err));
-      // M5: 出错也要关面板，否则覆盖层卡住
-      this.game.exitCombat();
-      console.error('[GamePipeline] combat 失败:', err);
-      return null;
-    }
+    // ⚠️ v2 战斗运行时已于 M5 真正退役删除（combat-runner/pipeline/resolver/settlement）。
+    //    打回 'v2' 不再真实开局战斗——改为优雅退役提示，避免悬空 import 与编译错误。
+    const message =
+      '【系统】v2 战斗引擎已退役删除。若非显式切换，战斗请走 v3（当前 AppSettings.combatEngineVersion）' +
+      `。当前设置被显式打回 'v2'，本场战斗不执行。`;
+    console.warn('[GamePipeline] combat v2 分支已退役，返回优雅提示而非真实开局');
+    this.game.addMessage(message, 'assistant');
+    return {
+      narrativeSummary: message,
+      patches: [],
+      totalExp: 0,
+      totalFp: 0,
+      loot: [],
+      rounds: 1,
+      outcome: 'draw',
+    };
   }
 
   /** 🆕 M2 v3 分支：走 v3 Coordinator（openCombat + runCombatV3）。 */
@@ -1252,7 +1216,7 @@ export class GamePipeline {
     marker: CombatTriggerMarker,
     _storyOutput: string,
   ): Promise<CombatSummaryResult | null> {
-    const endpoint = this.getEndpointForAgent('combat_v3') ?? this.getEndpointForAgent('combat');
+    const endpoint = this.getEndpointForAgent('combat_v3');
     if (!endpoint) {
       console.warn('[GamePipeline] combat_v3 跳过: 未配置 API endpoint');
       return null;
@@ -1263,7 +1227,7 @@ export class GamePipeline {
       this.game.updateAgentStatus('combat_v3');
 
       const { runCombatV3 } = await import('@engine/combat-v3');
-      const { characterToCombatParticipant } = await import('@engine/combat-resolver');
+      const { characterToCombatParticipant } = await import('@engine/combat-v2-types');
 
       // 组装 bundle：全部人物 → CombatParticipant（player → ally，其余 → enemy）
       const playerC = this.game.characters.find((c) => c.type === 'player');

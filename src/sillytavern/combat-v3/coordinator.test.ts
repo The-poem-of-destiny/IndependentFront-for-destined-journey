@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { runCombatV3, UnsupportedInM2, type RunCombatV3Opts } from './coordinator';
 import { mkBundle, mkParticipant } from './test-utils';
-import type { CombatClient } from '../combat-runner';
+import type { CombatClient } from '../combat-v2-types';
 import type { CombatCommand } from './types';
 
 /** 甲(player) + 乙(enemy, 脆皮 HP1)：甲一刀杀乙 → hp_zero 终局 */

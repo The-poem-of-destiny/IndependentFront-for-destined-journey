@@ -3,17 +3,19 @@
  *
  * 场景: 主角(T3剑士) + 队友(T2法师) 在森林中遭遇 8只哥布林侦察兵(T1)
  *
- * 本测试模拟 AI 调用 $combat API 的完整流程:
- *   $combat.initCombat() → 集群形成 → rollInitiative → 先攻排序
- *   → $combat.attack() (常规/范围/处决) → resolveAttack → 伤害管线 → 集群减员
- *   → 士气检测 → 处决判定 → endCombat
+ * M5-PR2 后 v2 战斗运行时（combat-resolver 的 $combat API / resolveAttack / initCombat /
+ * endCombat）已退役删除。原第九章/第十章（走 $combat 编排）随删除一并移除。
  *
- * 涉及模块:
+ * 本文件覆盖**存活的 v2 纯计算**（仍被 v3 内核使用的数值/规则部分）:
+ *   - 集群先攻/减员 → $combat.initCombat() 被 initCombat 前的流程
+ *   - 意图解析 → resolveAttack → 伤害管线 → 集群减员
+ *   - 士气检测 → 处决判定
+ *
+ * 涉及模块（全部保留）:
  *   combat-intention  (意图解析)
  *   combat-damage     (8步伤害管线)
  *   combat-turn       (先攻回合)
  *   combat-panel      (面板生成)
- *   combat-resolver   ($combat API)
  *   cluster-system    (集群形成/减员/修正)
  *   morale-system     (士气状态机/处决条件)
  */
@@ -32,7 +34,6 @@ import {
 } from './combat-damage';
 import { rollInitiative, rollAndSortInitiative } from './combat-turn';
 import { buildOverviewPanel, buildAttackPanel } from './combat-panel';
-import { resolveAttack, initCombat, endCombat } from './combat-resolver';
 
 // 集群系统 (统一从 cluster-system 导入，避免与 combat-damage 重复)
 import {
@@ -657,218 +658,6 @@ describe('🎮 第八章: 完整战斗流程 — 从遇敌到结算', () => {
     const aSurvivors = aAfterR2.cluster?.currentCount ?? 0;
     const bSurvivors = bAfterR3.cluster?.currentCount ?? 0;
     expect(aSurvivors + bSurvivors).toBeLessThan(totalInitial);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════
-// 第九章: $combat API 实际调用模式
-// ═══════════════════════════════════════════════════════════
-
-describe('🎮 第九章: $combat.initCombat / resolveAttack / endCombat', () => {
-  it('$combat.initCombat() — AI 初始化战斗', () => {
-    const combat = initCombat({
-      combatType: '标准',
-      allies: [PLAYER, ALLY],
-      enemies: [
-        makeParticipant({
-          characterId: 'clusterA',
-          name: '哥布林群A',
-          side: 'enemy',
-          tier: 1,
-          hp: 300,
-          maxHp: 300,
-          attributes: GOBLIN_TEMPLATE.attributes,
-          defense: 8,
-          weaponAtk: 5,
-          hitBonus: 1,
-          dodgeBonus: 2,
-        }),
-        makeParticipant({
-          characterId: 'clusterB',
-          name: '哥布林群B',
-          side: 'enemy',
-          tier: 1,
-          hp: 180,
-          maxHp: 180,
-          attributes: GOBLIN_TEMPLATE.attributes,
-          defense: 8,
-          weaponAtk: 5,
-          hitBonus: 1,
-          dodgeBonus: 2,
-        }),
-      ],
-      environment: '迷雾森林 - 清晨林间空地',
-      d20Rolls: [14, 8, 12, 5],
-    });
-
-    expect(combat.combatId).toContain('combat_');
-    expect(combat.combatType).toBe('标准');
-    expect(combat.status).toBe('active');
-    expect(combat.round).toBe(1);
-    expect(combat.environment).toContain('迷雾森林');
-    expect(combat.participants).toHaveLength(4);
-    // 先攻自动排序
-    expect(combat.turnOrder.length).toBe(4);
-  });
-
-  it('$combat.resolveAttack() — AI 调用攻击的完整管线', () => {
-    // 先创建战斗状态
-    const combat = initCombat({
-      combatType: '标准',
-      allies: [PLAYER],
-      enemies: [
-        makeParticipant({
-          characterId: 'clusterA',
-          name: '哥布林群A',
-          side: 'enemy',
-          tier: 1,
-          hp: 300,
-          maxHp: 300,
-          attributes: GOBLIN_TEMPLATE.attributes,
-          defense: 8,
-          weaponAtk: 5,
-          hitBonus: 1,
-          dodgeBonus: 2,
-        }),
-      ],
-      environment: '迷雾森林',
-      d20Rolls: [14, 12],
-    });
-
-    // AI 调用: $combat.attack({ combat, attackerId: 'player', defenderId: 'clusterA', ... })
-    const result = resolveAttack({
-      combat,
-      attackerId: 'player',
-      defenderId: 'clusterA',
-      userInput: '砍向哥布林群',
-      action: 'attack',
-      skillName: '斩击',
-      skillPower: 60,
-      weaponName: '精钢长剑',
-      weaponAtk: 35,
-      relevantAttribute: 'str',
-      relevantAttributeValue: 14,
-      damageType: '物理',
-      d20Attack: 16,
-      d20Intention: 14,
-      d20Status: 16,
-      costs: { sp: 15 },
-    });
-
-    // 验证结果完整性
-    expect(result.request.action).toBe('attack');
-    expect(result.intention.coefficient).toBe(1.0); // 集群意图免疫
-    expect(result.attackRoll.checkValue).toBeGreaterThan(0);
-    expect(result.damage.finalDamage).toBeGreaterThan(0);
-    expect(result.patches.length).toBeGreaterThan(0);
-    expect(result.panelLines.length).toBeGreaterThan(0);
-    expect(result.description.length).toBeGreaterThan(0);
-  });
-
-  it('$combat.endCombat() — 战斗结束', () => {
-    const combat = initCombat({
-      combatType: '标准',
-      allies: [PLAYER],
-      enemies: [],
-      environment: '迷雾森林',
-      d20Rolls: [14],
-    });
-
-    const ended = endCombat(combat, 'ally');
-    expect(ended.status).toBe('ended');
-    expect(ended.winner).toBe('ally');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════
-// 第十章: 面板生成 — AI 可见的战斗信息
-// ═══════════════════════════════════════════════════════════
-
-describe('🎮 第十章: <action_info> 面板生成', () => {
-  it('buildOverviewPanel: 战况总览包含所有参战者', () => {
-    const combat = initCombat({
-      combatType: '标准',
-      allies: [PLAYER, ALLY],
-      enemies: [
-        makeParticipant({
-          characterId: 'clusterA',
-          name: '哥布林群A',
-          side: 'enemy',
-          tier: 1,
-          hp: 300,
-          maxHp: 300,
-          attributes: GOBLIN_TEMPLATE.attributes,
-        }),
-        makeParticipant({
-          characterId: 'clusterB',
-          name: '哥布林群B',
-          side: 'enemy',
-          tier: 1,
-          hp: 180,
-          maxHp: 180,
-          attributes: GOBLIN_TEMPLATE.attributes,
-        }),
-      ],
-      environment: '迷雾森林 - 20m距离',
-      d20Rolls: [14, 8, 12, 5],
-    });
-
-    const panel = buildOverviewPanel(combat);
-    expect(panel).toContain('<action_info>');
-    expect(panel).toContain('战况总览');
-    expect(panel).toContain('回合: 1');
-    expect(panel).toContain('标准');
-    expect(panel).toContain('艾伦');
-    expect(panel).toContain('莉亚');
-    expect(panel).toContain('哥布林群A');
-    expect(panel).toContain('哥布林群B');
-    expect(panel).toContain('HP');
-  });
-
-  it('buildAttackPanel: 攻击行动面板包含伤害管线', () => {
-    const combat = initCombat({
-      combatType: '标准',
-      allies: [PLAYER],
-      enemies: [
-        makeParticipant({
-          characterId: 'clusterA',
-          name: '哥布林群A',
-          side: 'enemy',
-          tier: 1,
-          hp: 300,
-          maxHp: 300,
-          attributes: GOBLIN_TEMPLATE.attributes,
-        }),
-      ],
-      environment: '迷雾森林',
-      d20Rolls: [14, 12],
-    });
-
-    const result = resolveAttack({
-      combat,
-      attackerId: 'player',
-      defenderId: 'clusterA',
-      userInput: '砍向哥布林群',
-      action: 'attack',
-      skillName: '斩击',
-      skillPower: 60,
-      weaponName: '精钢长剑',
-      weaponAtk: 35,
-      relevantAttribute: 'str',
-      relevantAttributeValue: 14,
-      damageType: '物理',
-      d20Attack: 16,
-      d20Intention: 14,
-      d20Status: 16,
-    });
-
-    // panelLines 由 resolveAttack 内部生成
-    expect(result.panelLines.length).toBeGreaterThan(0);
-    const panel = result.panelLines.join('\n');
-    expect(panel).toContain('<action_info>');
-    expect(panel).toContain('攻击行动');
-    expect(panel).toContain('艾伦');
-    expect(panel).toContain('哥布林群A');
   });
 });
 

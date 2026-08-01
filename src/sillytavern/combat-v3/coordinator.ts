@@ -42,7 +42,7 @@ import type {
   RequiredInput,
   SummonedUnitDefinition,
 } from './types';
-import type { CombatClient, CombatEvent } from '../combat-runner';
+import type { CombatClient, CombatEvent } from '../combat-v2-types';
 import type { ApiEndpoint, StatePatch, AgentContext, IntentionLevel } from '../types';
 
 // ──────────────────────────────────────────────────────────────────────────────
