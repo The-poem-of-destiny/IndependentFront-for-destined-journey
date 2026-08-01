@@ -15,15 +15,29 @@
  * 推进表（plan §3.3）落成 AUTO_PHASES 数据表。
  */
 
-import { applyOutcome, freezeFrame, toView } from './state';
-import { beginEpoch, splitSixty } from './dice-tape';
+import {
+  applyOutcome,
+  applyPending,
+  bumpRevision,
+  freezeFrame,
+  restoreFrame,
+  toView,
+} from './state';
+import { beginEpoch, draw, splitSixty } from './dice-tape';
+import { updateIndex } from './automata/index-active';
+import { compileEffectProgram } from './automata/compile';
 import {
   KernelStuckError,
   type CombatCommand,
   type CombatState,
+  type CombatUnitState,
   type DamageRecomputeCtx,
+  type DomainEvent,
+  type PendingChangeSet,
+  type SummonedUnitDefinition,
 } from './types';
 import { checkTerminal } from './phases/terminal';
+import { evaluateAdjudication } from './adjudication';
 import { handleRoundOpen, handleRoundClose } from './phases/round';
 import { handleInitiative } from './phases/initiative';
 import {
@@ -89,6 +103,11 @@ export function reduce(
     return resumeBlock(state, command);
   }
 
+  // 2.7 SupplyUnit 的 spawn frame 恢复分支（M3.5，A35-1/A35-2）
+  if (command.kind === 'SupplyUnit' && state.resolution?.step === 'spawn') {
+    return resumeSpawn(state, command);
+  }
+
   // 3. SupplyDice 续杯（BeginOutput 应答）
   if (command.kind === 'SupplyDice') {
     return reduceSupplyDice(bundle, state, command);
@@ -100,8 +119,98 @@ export function reduce(
     return commitTransition(state, out);
   }
 
+  // 4.1 Adjudicate —— BoundedAdjudication 有界裁决（M3.5，A35-4/A35-5）
+  // 内核重锤验证（防御纵深：不信任 coordinator 侧结果），通过 → 产 AdjudicationAccepted +
+  // RuleOverridden/MiracleTriggered + 进 journal；未通过 → 产 EffectRejected(code:'ADJUDICATION_REJECTED')
+  if (command.kind === 'Adjudicate') {
+    return adjudicate(bundle, state, command);
+  }
+
   // 5. 正常 dispatch 循环
   return runDispatch(bundle, state, command);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Adjudicate（BoundedAdjudication 有界裁决，M3.5）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 执行一次 Adjudicate（架构 §十一 11.2）。
+ *
+ * 纯 reducer 侧：调 evaluateAdjudication 内核实锤（六步验证），
+ *   - accepted → 产 AdjudicationAccepted（journal 带 reason）+ RuleOverridden / MiracleTriggered
+ *   - rejected → 产 EffectRejected(code:'ADJUDICATION_REJECTED')，不落 journal（零状态变更零骰耗）
+ * Adjudicate.cost='none'，不走槽位。
+ */
+function adjudicate(
+  bundle: CombatDefinitionBundle,
+  state: CombatState,
+  command: Extract<CombatCommand, { kind: 'Adjudicate' }>,
+): CombatTransition {
+  const { adjudication } = command.payload;
+  void bundle;
+  const result = evaluateAdjudication(adjudication, state);
+
+  const next = bumpRevision({ ...state }); // Adjudicate 本身不改变 units/资源，仅 revision 推进
+  const journal = [
+    ...state.journal,
+    {
+      seq: state.journal.length + 1,
+      commandId: command.commandId,
+      kind: 'command' as const,
+      payload: `bounded_adjudication: ${result.kind} — ${result.reason}`,
+    },
+  ];
+
+  if (result.kind === 'rejected') {
+    return {
+      revision: next.revision,
+      snapshot: toView({ ...next, journal }),
+      events: [
+        {
+          kind: 'EffectRejected',
+          code: 'ADJUDICATION_REJECTED',
+          detail: result.reason,
+          window: 'bounded_adjudication',
+        },
+      ],
+      next: { ...next, journal },
+    };
+  }
+
+  // accepted → 产 RuleOverridden / MiracleTriggered + AdjudicationAccepted
+  const events: DomainEvent[] = [
+    {
+      kind: 'AdjudicationAccepted',
+      divinity: adjudication.divinity,
+      reason: result.reason,
+      effectDescription: adjudication.effectDescription,
+      ruleKey: result.effect.eventKind === 'RuleOverridden' ? result.effect.ruleKey : undefined,
+    },
+  ];
+  if (result.effect.eventKind === 'RuleOverridden') {
+    events.push({
+      kind: 'RuleOverridden',
+      ruleKey: result.effect.ruleKey,
+      payload: result.effect.payload,
+      divinity: adjudication.divinity,
+    });
+  } else {
+    events.push({
+      kind: 'MiracleTriggered',
+      effectDescription: adjudication.effectDescription,
+      divinity: adjudication.divinity,
+      payload: result.effect.payload,
+    });
+  }
+
+  const final = { ...next, journal };
+  return {
+    revision: final.revision,
+    snapshot: toView(final),
+    events,
+    next: final,
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -172,6 +281,214 @@ function bundleOf(state: CombatState): CombatDefinitionBundle {
     resourceSnapshots: state.resourceSnapshots,
     rulesetRevision: 'v3-m3',
   };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SupplyUnit spawn frame 恢复（M3.5，A35-1/A35-2）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * SupplyUnit Command 的 spawn frame 恢复分支（plan §6.2 ⑥）。
+ *
+ * 从冻结的 ResolutionFrame（step='spawn'）恢复，把 char_gen 产出的 SummonedUnitDefinition
+ * 实例化为 CombatUnitState 插入 state.units：
+ *   - joinTiming='this_round_tail' → draw(initiative,1) → append 先攻序列尾部
+ *   - actionEconomy 决定本轮槽位（full=1攻1动 / partial=仅动作 / no_action=0）
+ *   - duration → ApplyStatus('召唤时限', rounds)
+ *   - 自带 automaton 走 compileEffectProgram → ActiveEffectIndex 增量 add
+ *   - 与冻结时挂起的 SpendResource(FP,100) 同一次原子提交（不变量④，A35-6）
+ *   ⇒ 产 UnitSummoned + ResourceSpent
+ *
+ * 不重跑前序效果、不重复消费已冻结的骰子（此处只对本轮 this_round_tail 掷 1 颗 initiative）。
+ */
+function resumeSpawn(state: CombatState, command: Extract<CombatCommand, { kind: 'SupplyUnit' }>) {
+  const restored = restoreFrame(state);
+  if (!restored) {
+    return rejection(state, {
+      code: 'INVALID_PHASE',
+      message: 'SupplyUnit 到达但无 spawn frame 可恢复',
+    });
+  }
+  const frame = restored.frame;
+  const cleared = restored.next;
+
+  // requestId 必须与冻结的 CharGenRequest 匹配（幂等键）
+  const req = frame.awaiting.kind === 'CharGenRequest' ? frame.awaiting : undefined;
+  if (!req || req.requestId !== command.payload.requestId) {
+    return rejection(state, {
+      code: 'INVALID_PHASE',
+      message: `SupplyUnit requestId「${command.payload.requestId}」与冻结 CharGenRequest 不匹配`,
+    });
+  }
+
+  const definition = command.payload.definition;
+  const instanceId = uniqueUnitId(cleared, definition);
+
+  const unitState = buildSummonedUnit(instanceId, definition, command.actorId);
+
+  // ① 插入 units（不可变）
+  const units: Record<string, CombatUnitState> = { ...cleared.units, [unitState.id]: unitState };
+
+  // ② 先攻插入（joinTiming 语义：plan §6.2 ⑥ / 架构 §十 10.3）
+  let order: string[];
+  let tape = cleared.dice;
+  if (definition.joinTiming === 'this_round_tail') {
+    // 掷 1 颗 initiative，追加到当前回合先攻序列尾部（A35-2）
+    const r = draw(tape, 'initiative', 1);
+    if ('exhausted' in r) {
+      return rejection(state, {
+        code: 'INVALID_PHASE',
+        message: 'this_round_tail 召唤需 initiative 骰但通道耗尽',
+      });
+    }
+    tape = r.tape;
+    order = [...cleared.initiativeOrder, unitState.id];
+  } else {
+    // next_round_head：追加 id 进序列 base，由下轮 handleInitiative 统一掷（A35-2）
+    order = [...cleared.initiativeOrder, unitState.id];
+  }
+
+  // ③ automaton 编译 + ActiveEffectIndex 增量 add（A35-3 到期摘除用同样 updateIndex）
+  const compiled = compileEffectProgram({
+    owner: unitState.id,
+    source: definition.sourceItem ?? definition.name,
+    idPrefix: unitState.id,
+    divinity: definition.divinity,
+    modifiers: definition.modifiers ?? [],
+    automata: definition.automata,
+  });
+  const activeEffects =
+    compiled.automata.length > 0
+      ? updateIndex(cleared.activeEffects, { add: compiled.automata })
+      : cleared.activeEffects;
+
+  // ④ 组装待提交变更：复用冻结的 pendingChanges（含 SpendResource FP + 动作槽消费），
+  //    叠加「召唤时限」buff（不变量④一次原子提交）
+  const summonPatches: PendingChangeSet['statusPatches'] = definition.duration
+    ? [
+        {
+          op: 'apply',
+          unitId: unitState.id,
+          status: {
+            name: '召唤时限',
+            description: `召唤物持续 ${definition.duration.rounds} 回合后自动消失`,
+            category: '增益',
+            stacks: 1,
+            remainingTime: definition.duration.rounds,
+            timeUnit: '回合',
+            source: `[召唤]-[${frame.commandId}]`,
+            effects: {},
+            lifecycle: '战斗',
+          },
+        },
+      ]
+    : [];
+  const changes: PendingChangeSet = {
+    ...frame.pendingChanges,
+    statusPatches: [...summonPatches, ...frame.pendingChanges.statusPatches],
+  };
+
+  // ⑤ 一次原子提交（不变量④）：插入 units + 先攻 + 效果索引 + buff + FP 记账
+  const base: CombatState = {
+    ...cleared,
+    units,
+    initiativeOrder: order,
+    dice: tape,
+    activeEffects,
+    resolution: undefined,
+  };
+  const applied = applyPending(base, changes);
+
+  // ⑥ 事件：UnitSummoned + ResourceSpent（FP 已在冻结时入 pendingChanges.fpDelta）
+  const events: DomainEvent[] = [];
+  events.push({
+    kind: 'UnitSummoned',
+    unitId: unitState.id,
+    joinTiming: definition.joinTiming,
+    duration: definition.duration?.rounds ?? null,
+    sourceItem: definition.sourceItem,
+  });
+  if (changes.fpDelta !== 0) {
+    events.push({
+      kind: 'ResourceSpent',
+      unitId: command.actorId,
+      resource: 'fp',
+      amount: Math.abs(changes.fpDelta),
+    });
+  }
+
+  // checkTerminal：召唤若致一方全灭（罕见）也正常推进
+  const term = checkTerminal(applied);
+
+  return {
+    revision: applied.revision,
+    snapshot: toView(applied),
+    events,
+    terminal: term ?? undefined,
+    next: applied,
+  };
+}
+
+/** 由 SummonedUnitDefinition 构建运行时 CombatUnitState（补 id / ability / 初始槽位） */
+function buildSummonedUnit(
+  id: string,
+  d: SummonedUnitDefinition,
+  _summonerId: string,
+): CombatUnitState {
+  // actionEconomy 决定本轮槽位（架构 §十 10.2：full=1攻1动 / partial=仅动作 / no_action=0）
+  const economy = d.actionEconomy ?? 'partial';
+  const attacks = economy === 'full' ? 1 : 0;
+  const actions = economy === 'no_action' ? 0 : 1;
+  return {
+    id,
+    name: d.name,
+    side: d.side ?? 'player',
+    tier: d.tier,
+    level: d.level,
+    attributes: {
+      str: d.attributes?.str ?? 10,
+      dex: d.attributes?.dex ?? 10,
+      con: d.attributes?.con ?? 10,
+      int: d.attributes?.int ?? 10,
+      spi: d.attributes?.spi ?? 10,
+    },
+    hp: d.hp,
+    maxHp: d.hp,
+    mp: d.mp,
+    maxMp: d.mp,
+    sp: d.sp,
+    maxSp: d.sp,
+    defense: d.defense,
+    dr: d.dr,
+    penetration: d.penetration,
+    hitBonus: d.hitBonus,
+    dodgeBonus: d.dodgeBonus,
+    speedModifiers: [],
+    fixedInitiativeBonus: 0,
+    weaponAtk: d.weaponAtk,
+    canAct: true,
+    morale: 'steady',
+    attacksRemaining: attacks,
+    actionsRemaining: actions,
+    statusEffects: [],
+    ability: {
+      relevantAttribute: d.attributes?.str ?? 10,
+      skillPower: 0,
+      damageType: '物理',
+      intentionLevel: '常规',
+      multiHitCount: 1,
+      divinity: d.divinity,
+    },
+  };
+}
+
+/** 生成确定性的召唤物唯一实例 id（同名加序号，避免覆盖；零随机） */
+function uniqueUnitId(state: CombatState, d: SummonedUnitDefinition): string {
+  const base = d.name;
+  if (!Object.prototype.hasOwnProperty.call(state.units, base)) return base;
+  let n = 2;
+  while (Object.prototype.hasOwnProperty.call(state.units, `${base}${n}`)) n += 1;
+  return `${base}${n}`;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -376,7 +693,31 @@ function consumePlayerCommand(
           procCheck: 0,
         },
         awaiting: biz.requiredInput,
-        recompute: biz.suspended.recompute as unknown as DamageRecomputeCtx,
+        recompute: ('recompute' in biz.suspended ? biz.suspended.recompute : undefined) as
+          DamageRecomputeCtx | undefined,
+      });
+      return {
+        working: frozen,
+        events: slotOut.events,
+        requiredInput: biz.requiredInput,
+        waitForNext: false,
+      };
+    }
+    // M3.5：CharGenRequest（召唤物创造性生成）→ 冻结 ResolutionFrame（step='spawn'，
+    // pendingChanges 已含 SpendResource(FP,100)，未提交；SupplyUnit 到达时续跑，A35-1）
+    if (biz.requiredInput.kind === 'CharGenRequest' && biz.suspended) {
+      const frozen = freezeFrame(working, {
+        commandId: command.commandId,
+        step: 'spawn',
+        pendingChanges: mergeChanges(slotOut.changes, biz.changes),
+        diceConsumedInFrame: {
+          attackHit: 0,
+          initiative: 0,
+          intentCheck: 0,
+          statusContest: 0,
+          procCheck: 0,
+        },
+        awaiting: biz.requiredInput,
       });
       return {
         working: frozen,

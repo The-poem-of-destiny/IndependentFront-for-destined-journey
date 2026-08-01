@@ -1,11 +1,15 @@
 /**
- * combat-v3/phases/round.ts — RoundOpen / RoundClose handler（M1）
+ * combat-v3/phases/round.ts — RoundOpen / RoundClose handler（M1/M3.5）
  *
- * 架构真源：docs/reference/combat-system-architecture-v3.md §五 5.1（round.open / round.close 窗口）
- * 实施计划：docs/planning/2026-07-31-combat-v3-implementation-plan.md §3.3 / §3.5（M-1）
+ * 架构真源：docs/reference/combat-system-architecture-v3.md §五 5.1（round.open / round.close 窗口）/ §十 10.3
+ * 实施计划：docs/planning/2026-07-31-combat-v3-implementation-plan.md §3.3 / §3.5（M-1）/ §6.2（A35-3）
  *
  * M-1 修复：buff tick 挂 `round.open`（增益） / `round.close`（减益 + DoT）；
  * `remainingTime` 真实递减并到期移除（验收 A1-5）。
+ *
+ * M3.5 扩展（A35-3）：召唤物「召唤时限」到期在 **round.close** 移除——
+ *   产 UnitDespawned + 从 ActiveEffectIndex 摘除其 automaton（updateIndex removeIds）。
+ *   召唤时限 buff 语义独立于通用 buff tick（它在 round.close 而非 round.open 到期）。
  *
  * M1 用最小 buff 语义：
  *   - round.open：所有「增益」/「periodicPositive」类别且 remainingTime !== null 的 buff
@@ -15,9 +19,16 @@
  * windows 调用点就位（evaluateWindow('round.open' / 'round.close')），M3 接索引。
  */
 
-import type { CombatDefinitionBundle, CombatState, PendingChangeSet, StatusPatch } from '../types';
-import type { DomainEvent } from '../types';
+import type {
+  ActiveEffectIndex,
+  CombatDefinitionBundle,
+  CombatState,
+  DomainEvent,
+  PendingChangeSet,
+  StatusPatch,
+} from '../types';
 import { evaluateWindow, makeWindowRuntimeCtx } from '../windows';
+import { updateIndex } from '../automata/index-active';
 import type { PhaseOutcome } from './outcome';
 import { emptyChanges } from './outcome';
 
@@ -59,7 +70,7 @@ export function handleRoundOpen(
 }
 
 /**
- * RoundClose：结算减益 / DoT + 到期移除（M-1）。
+ * RoundClose：结算减益 / DoT + 到期移除（M-1）+ 召唤物「召唤时限」到期移除（M3.5，A35-3）。
  * 返回 PhaseOutcome + 下一 phase（RoundOpen 推进，round+1）。
  */
 export function handleRoundClose(bundle: CombatDefinitionBundle, state: CombatState): PhaseOutcome {
@@ -83,10 +94,80 @@ export function handleRoundClose(bundle: CombatDefinitionBundle, state: CombatSt
   // 减益 buff tick + DoT
   applyBuffTick(state, changes, events, 'negative', 'round.close');
 
+  // M3.5（A35-3）：召唤物「召唤时限」到期 → UnitDespawned + 摘 automaton
+  const expired = expireSummonedUnits(state, changes, events);
+
   events.push({ kind: 'RoundClosed', round: state.round });
 
-  // 推进到下一轮（round +1）
-  return { changes, events, nextPhase: 'RoundOpen', round: state.round + 1 };
+  const out: PhaseOutcome = {
+    changes,
+    events,
+    nextPhase: 'RoundOpen',
+    round: state.round + 1,
+  };
+  if (expired.removeUnitIds.length > 0) {
+    out.removeUnitIds = expired.removeUnitIds;
+    out.activeEffects = expired.activeEffects;
+  }
+  return out;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 召唤物「召唤时限」到期移除（M3.5，A35-3）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 在 round.close 扫描「召唤时限」buff 的召唤物，剩余回合减一；归 0 则：
+ *   - 从 units / initiativeOrder 移除（applyOutcome removeUnitIds）
+ *   - 从其 automaton 从 ActiveEffectIndex 摘除（updateIndex removeIds，按 byOwner[unitId]）
+ *   - 产 UnitDespawned + StatusExpired
+ *
+ * 返回 { removeUnitIds, activeEffects }: removeUnitIds 空数组表示无到期召唤物。
+ * 原子性：与当轮其他变更（减益 DoT 等）在 applyOutcome 一次提交。
+ */
+function expireSummonedUnits(
+  state: CombatState,
+  changes: PendingChangeSet,
+  events: DomainEvent[],
+): { removeUnitIds: string[]; activeEffects: ActiveEffectIndex } {
+  const removeUnitIds: string[] = [];
+  const affected: StatusPatch[] = [];
+
+  for (const [id, unit] of Object.entries(state.units)) {
+    const summonBuff = unit.statusEffects.find((s) => s.name === '召唤时限');
+    if (!summonBuff || summonBuff.remainingTime === null) continue;
+
+    const newTime = summonBuff.remainingTime - 1;
+    if (newTime <= 0) {
+      // 到期：移除单位 + 摘 automaton
+      removeUnitIds.push(id);
+      affected.push({ op: 'remove', unitId: id, statusId: '召唤时限' });
+      events.push({ kind: 'StatusExpired', unitId: id, statusId: '召唤时限' });
+      events.push({ kind: 'UnitDespawned', unitId: id, reason: 'expired' });
+    } else {
+      // 剩余递减写回
+      affected.push({
+        op: 'apply',
+        unitId: id,
+        status: { ...summonBuff, remainingTime: newTime },
+      });
+    }
+  }
+
+  changes.statusPatches.push(...affected);
+
+  if (removeUnitIds.length === 0) return { removeUnitIds, activeEffects: state.activeEffects };
+
+  // 摘除所有到期召唤物所属的 automaton（按 byOwner[unitId] → automaton id 表）
+  const removeIds: string[] = [];
+  for (const id of removeUnitIds) {
+    const ownerIds = state.activeEffects.byOwner[id];
+    if (ownerIds) removeIds.push(...ownerIds);
+  }
+  const activeEffects =
+    removeIds.length > 0 ? updateIndex(state.activeEffects, { removeIds }) : state.activeEffects;
+
+  return { removeUnitIds, activeEffects };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -242,10 +242,24 @@ export function applyPending(state: CombatState, changes: PendingChangeSet): Com
       const existingIdx = u.statusEffects.findIndex((s) => s.name === patch.status.name);
       let next: StatusEffect[];
       if (existingIdx >= 0) {
-        // 去重：同名 buff 合并层数（v2 §五 去重）
+        // 去重：同名 buff 已有。
+        //   生命周期 tick（applyBuffTick / expireSummonedUnits 携带新 remainingTime）→ 更新 remainingTime
+        //   否则（叠加 / 刷新）→ 合并层数（v2 §五 去重）
         const merged: StatusEffect[] = u.statusEffects.slice();
         const old = merged[existingIdx];
-        merged[existingIdx] = { ...old, stacks: old.stacks + patch.status.stacks };
+        // 生命周期 tick：existing 与 patch 的 remainingTime 不同（递减）→ 更新 remainingTime
+        // 否则（同 remainingTime / 叠加）→ 合并层数（v2 §五 去重）
+        const isTick =
+          old.remainingTime !== null &&
+          patch.status.remainingTime !== null &&
+          patch.status.remainingTime !== old.remainingTime;
+        merged[existingIdx] = isTick
+          ? {
+              ...old,
+              remainingTime: patch.status.remainingTime,
+              stacks: patch.status.stacks ?? old.stacks,
+            }
+          : { ...old, stacks: old.stacks + patch.status.stacks };
         next = merged;
       } else {
         next = [...u.statusEffects, { ...patch.status }];
@@ -441,9 +455,28 @@ export function applyOutcome(state: CombatState, outcome: ImportedOutcome): Comb
 
   const next = applyPending(state, outcome.changes);
 
+  // M3.5：移除到期召唤物（A35-3）——从 units 与 initiativeOrder 同步摘除
+  let final = next;
+  if (outcome.removeUnitIds && outcome.removeUnitIds.length > 0) {
+    const removeSet = new Set(outcome.removeUnitIds);
+    const units: Record<string, CombatUnitState> = {};
+    for (const [id, u] of Object.entries(next.units)) {
+      if (!removeSet.has(id)) units[id] = u;
+    }
+    const order = next.initiativeOrder.filter((id) => !removeSet.has(id));
+    let index = next.currentTurnIndex;
+    if (index >= order.length) index = 0;
+    final = { ...next, units, initiativeOrder: order, currentTurnIndex: index };
+  }
+
+  // M3.5：ActiveEffectIndex 覆盖（召唤物摘除后）
+  if (outcome.activeEffects) {
+    final = { ...final, activeEffects: outcome.activeEffects };
+  }
+
   // 应用到 phase 层字段
   const merged = {
-    ...next,
+    ...final,
     ...(outcome.dice ? { dice: outcome.dice } : {}),
     ...(outcome.initiativeOrder ? { initiativeOrder: outcome.initiativeOrder } : {}),
     ...(outcome.currentTurnIndex !== undefined
@@ -476,6 +509,10 @@ export type ImportedOutcome = {
   settlementId?: string;
   nextPhase: CombatState['phase'];
   round?: number;
+  /** M3.5：需移除的单位（召唤时限到期），同时从 initiativeOrder 摘除 */
+  removeUnitIds?: readonly string[];
+  /** M3.5：ActiveEffectIndex 覆盖（召唤物摘除后的索引） */
+  activeEffects?: ActiveEffectIndex;
   events?: readonly unknown[];
 };
 
