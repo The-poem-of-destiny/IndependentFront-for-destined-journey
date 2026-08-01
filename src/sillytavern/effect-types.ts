@@ -54,10 +54,13 @@ export interface ResourceModifier extends ModifierBase {
   amount: number;
 }
 
-/** 检定 —— 命中/闪避/先攻/抵抗/属性修正（五维只能走这类，#265160 铁律） */
+/** 检定 —— 命中/闪避/先攻/抵抗/属性/生产修正（五维只能走这类，#265160 铁律）。
+ *  🆕 checkType='生产'（2026-08-01 制造反向链路 S2）：由物品/技能声明「生产检定修正」，
+ *    进制造链路的 fixedBonus（世界书《生产制作协议》检定加值: 属性+技能+道具+身份）。
+ *    ⚠️ 只进制造，不编译进战斗——combat-v3/automata/compile.ts 对 checkType='生产' 返回 null */
 export interface CheckModifier extends ModifierBase {
   category: '检定';
-  checkType: '命中' | '闪避' | '先攻' | '抵抗' | '属性';
+  checkType: '命中' | '闪避' | '先攻' | '抵抗' | '属性' | '生产';
   /** checkType='属性' 时指定哪一维 */
   attribute?: AttributeName;
   bonus: number;

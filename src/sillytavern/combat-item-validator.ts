@@ -43,8 +43,15 @@ const VALID_PERCENT_TARGETS: ReadonlySet<string> = new Set(['damage', 'heal', 'r
 /** 资源类 resource 合法值（§6.1） */
 const VALID_RESOURCES: ReadonlySet<string> = new Set(['hp', 'mp', 'sp']);
 
-/** 检定类 checkType 合法值（§6.1） */
-const VALID_CHECK_TYPES: ReadonlySet<string> = new Set(['命中', '闪避', '先攻', '抵抗', '属性']);
+/** 检定类 checkType 合法值（§6.1）——🆕 '生产'（2026-08-01 制造反向链路 S2）：由物品/技能声明生产检定修正，只进制造 fixedBonus，不编译进战斗 */
+const VALID_CHECK_TYPES: ReadonlySet<string> = new Set([
+  '命中',
+  '闪避',
+  '先攻',
+  '抵抗',
+  '属性',
+  '生产',
+]);
 
 /** 属性检定的五维合法值（AttributeName） */
 const VALID_ATTRIBUTES: ReadonlySet<string> = new Set(['str', 'dex', 'con', 'int', 'spi']);
@@ -206,7 +213,7 @@ export function validateModifier(mod: unknown): string[] {
     case '检定':
       if (typeof mod.checkType !== 'string' || !VALID_CHECK_TYPES.has(mod.checkType)) {
         reasons.push(
-          `检定类：checkType 必须是 命中/闪避/先攻/抵抗/属性 之一，当前=${JSON.stringify(mod.checkType)}`,
+          `检定类：checkType 必须是 命中/闪避/先攻/抵抗/属性/生产 之一，当前=${JSON.stringify(mod.checkType)}`,
         );
       } else if (mod.checkType === '属性') {
         // checkType='属性' 时必须有 attribute ∈ 五维（§6.1）

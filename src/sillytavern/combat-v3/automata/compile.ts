@@ -247,6 +247,9 @@ function compileModifierPushHandler(
     }
     case '检定': {
       const m = mod as Extract<Modifier, { category: '检定' }>;
+      // 🆕 checkType='生产'（2026-08-01 制造反向链路 S2）：生产检定修正**只进制造** fixedBonus，
+      //   不编译进战斗（否则 slotMap['生产']=undefined 会落到 hitBonus，装备生产加值误成命中）。
+      if (m.checkType === '生产') return null;
       const slotMap: Record<string, 'hitBonus' | 'dodge' | 'initiative' | 'attribute'> = {
         命中: 'hitBonus',
         闪避: 'dodge',

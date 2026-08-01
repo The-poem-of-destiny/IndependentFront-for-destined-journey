@@ -138,6 +138,17 @@ describe('validateModifier · category 与必填字段违规', () => {
     expect(reasons.some((r) => r.includes('checkType'))).toBe(true);
   });
 
+  // 🆕 S2a（2026-08-01 制造反向链路）：checkType='生产' 合法（生产检定修正，只进制造 fixedBonus）
+  it('检定类 checkType=生产 → 合规（生产检定修正）', () => {
+    const reasons = validateModifier({
+      category: '检定',
+      source: '锻造锤',
+      checkType: '生产',
+      bonus: 5,
+    });
+    expect(reasons).toHaveLength(0);
+  });
+
   it('检定类 checkType=属性 但缺 attribute → 违规', () => {
     const reasons = validateModifier({
       category: '检定',

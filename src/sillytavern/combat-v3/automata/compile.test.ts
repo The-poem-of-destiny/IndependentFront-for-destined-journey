@@ -194,6 +194,17 @@ describe('compile — modifiers[] → push-handler（A3-4）', () => {
     expect(automata).toHaveLength(0);
     expect(errors.length).toBeGreaterThan(0);
   });
+
+  // 🆕 S2a 防泄漏（2026-08-01 制造反向链路）：checkType='生产' 不编译进战斗。
+  //    否则 slotMap['生产']=undefined 会落到 hitBonus，装备生产加值误成命中（计划 §5 风险）
+  it('检定 checkType=生产 → 不编译进战斗（零 automaton、零 errors）', () => {
+    const { automata, errors } = compileEffectProgram({
+      ...base,
+      modifiers: [{ category: '检定', checkType: '生产', bonus: 5, source: '锻造锤' }],
+    });
+    expect(automata).toHaveLength(0);
+    expect(errors).toHaveLength(0);
+  });
 });
 
 describe('compile — ParsedEffect → 内建 adapter', () => {
