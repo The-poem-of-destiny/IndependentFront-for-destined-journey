@@ -20,6 +20,7 @@ function makeCtx(partial: Partial<EjsEvalContext> = {}): EjsEvalContext {
     stats: partial.stats ?? {},
     vars: partial.vars ?? {},
     historyText: partial.historyText ?? '',
+    ...(partial.seed !== undefined ? { seed: partial.seed } : {}),
   };
 }
 
@@ -565,14 +566,15 @@ describe('compileEjsEntry — 语法错误抛出', () => {
 
 describe('executeEjsEntry — 运行时错误不外抛', () => {
   it('未注入符号触发 ReferenceError → ok:false', () => {
-    const r = run('<%= lastMessageId %>', makeCtx());
+    const r = run('<%= 完全没有这个符号 %>', makeCtx());
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('ReferenceError');
   });
 
-  it('酒馆助手扩展 API 未注入 → ok:false（走调用方 D8 回退）', () => {
-    const r = run('<% getChatMessages(-1) %>', makeCtx());
-    expect(r.ok).toBe(false);
+  it('别名层之外的酒馆助手 API 仍未注入 → ok:false（走调用方 D8 回退）', () => {
+    // triggerSlash / SillyTavern.* 明确不承接（§5 不承接表）
+    expect(run('<% triggerSlash("/echo") %>', makeCtx()).ok).toBe(false);
+    expect(run('<% SillyTavern.getContext() %>', makeCtx()).ok).toBe(false);
   });
 
   it('显式 throw 被捕获', () => {
@@ -591,7 +593,7 @@ describe('执行失败 → vars 整体回滚', () => {
   it('半途写入被丢弃，且 vars 对象引用不变', () => {
     const ctx = makeCtx({ vars: { 原有: 1 } });
     const before = ctx.vars;
-    const r = run('<% setMessageVar("新写", 2) %><%= lastMessageId %>', ctx);
+    const r = run('<% setMessageVar("新写", 2) %><%= 完全没有这个符号 %>', ctx);
     expect(r.ok).toBe(false);
     expect(ctx.vars).toBe(before); // 引用不变
     expect(ctx.vars).toEqual({ 原有: 1 }); // 内容回滚
@@ -705,6 +707,99 @@ describe('stats 只读隔离（整树读的深改不回流）', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// 代码位 ST 值宏改写
+// ═══════════════════════════════════════════════════════════
+
+describe('代码位 ST 值宏（rewriteCodeMacros）', () => {
+  it('`{{roll}}` 嵌在代码块里能编译并求值（event.json uid 358 形态）', () => {
+    // 上游写法：宏本应由 ST 先展开成字面值。改写前这里是 SyntaxError → 整条目回退原文
+    // 1d100 最小值 1 → 分支恒真，断言与随机无关
+    const tpl = ['<%_ if ({{roll 1d100}} >= 1) { _%>', '命中', '<%_ } _%>'].join('\n');
+    expect(render(tpl)).toBe('命中\n');
+    // 反向：>100 不可能命中
+    const miss = ['<%_ if ({{roll 1d100}} > 100) { _%>', '命中', '<%_ } _%>'].join('\n');
+    expect(render(miss)).toBe('');
+  });
+
+  it('修正量参与计算（1d2+4 ∈ [5,6]，3d2-1 ∈ [2,5]）', () => {
+    for (let i = 0; i < 30; i++) {
+      expect([5, 6]).toContain(Number(render('<%= {{roll 1d2+4}} %>')));
+      const n = Number(render('<%= {{roll 3d2-1}} %>'));
+      expect(n).toBeGreaterThanOrEqual(2);
+      expect(n).toBeLessThanOrEqual(5);
+    }
+  });
+
+  it('`{{roll::1d2}}` 双冒号写法同样识别', () => {
+    for (let i = 0; i < 20; i++) {
+      expect([1, 2]).toContain(Number(render('<%= {{roll::1d2}} %>')));
+    }
+  });
+
+  it('公式不可解析 → 取 0，不抛错不回退', () => {
+    expect(render('<%= {{roll 不是公式}} %>')).toBe('0');
+  });
+
+  it('掷值落在公式区间内（1d6+1 ∈ [2,7]）', () => {
+    for (let i = 0; i < 30; i++) {
+      const n = Number(render('<%= {{roll 1d6+1}} %>'));
+      expect(n).toBeGreaterThanOrEqual(2);
+      expect(n).toBeLessThanOrEqual(7);
+    }
+  });
+
+  it('`{{random::A,B}}` 在代码位取其一；空表取空串', () => {
+    for (let i = 0; i < 20; i++) {
+      expect(['A', 'B']).toContain(render('<%= {{random::A,B}} %>'));
+    }
+    expect(render('<%= {{random::}} %>')).toBe('');
+  });
+
+  it('文本位的宏一律不动 —— 原样留给下游宏链', () => {
+    const tpl = '{{user}} 掷了 {{roll 1d6}} 点，{{getvar::x}}';
+    expect(render(tpl)).toBe(tpl);
+  });
+
+  it('代码位的 `{{user}}` 不改写（多在字符串字面量里，改了反而破坏输出）', () => {
+    expect(render('<%= "{{user}} 抵达" %>')).toBe('{{user}} 抵达');
+  });
+
+  it('宏参数含引号/反斜杠不会拼坏源码', () => {
+    // 不可解析 → 0；关键是编译不炸
+    expect(render('<%= {{roll a"b\\c}} %>')).toBe('0');
+  });
+
+  it('同 seed 同条目 → 逐值一致（T2 起改走种子随机，快照重放可复现）', () => {
+    const compiled = compileEjsEntry('<%= {{roll 1d1000}} %>');
+    const first = executeEjsEntry(compiled, makeCtx({ seed: 'save-1#7' }));
+    for (let i = 0; i < 10; i++) {
+      const again = executeEjsEntry(compiled, makeCtx({ seed: 'save-1#7' }));
+      expect(again).toEqual(first);
+    }
+  });
+
+  it('不同 seed → 序列不同（回合推进后重掷）', () => {
+    const compiled = compileEjsEntry('<%= {{roll 1d1000}} %>');
+    const seen = new Set<string>();
+    for (let turn = 0; turn < 40; turn++) {
+      const r = executeEjsEntry(compiled, makeCtx({ seed: `save-1#${turn}` }));
+      if (!r.ok) throw new Error(r.error);
+      seen.add(r.rendered);
+    }
+    expect(seen.size).toBeGreaterThan(1);
+  });
+
+  it('同 seed 下不同条目互不相关（条目正文进种子）', () => {
+    const ctxA = makeCtx({ seed: 'save-1#7' });
+    const a = executeEjsEntry(compileEjsEntry('<%= {{roll 1d1000}} %>'), ctxA);
+    const b = executeEjsEntry(compileEjsEntry('<%= {{roll 1d1000}} %>/*另一条*/'), ctxA);
+    expect(a.ok && b.ok).toBe(true);
+    // 极小概率同值；用 1d1000 把碰撞压到 0.1%
+    expect(a.ok && a.rendered).not.toBe(b.ok && b.rendered);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
 // 沙盒
 // ═══════════════════════════════════════════════════════════
 
@@ -734,7 +829,7 @@ describe('沙盒注入面', () => {
       'document',
       'fetch',
       'XMLHttpRequest',
-      'localStorage',
+      // 'localStorage' 已由别名层接管（→ local 私有 KV，§5），不再是遮蔽项
       'indexedDB',
       'self',
       'top',

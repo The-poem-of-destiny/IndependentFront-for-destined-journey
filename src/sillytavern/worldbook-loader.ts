@@ -15,6 +15,7 @@ import {
   type CompiledEjsEntry,
   type EjsEvalContext,
 } from './ejs-runtime';
+import { getEjsBackend, type EjsPassEntry } from './ejs-backend';
 
 // ========== 加载 ==========
 
@@ -350,6 +351,77 @@ export function renderWorldBookEntries(
       dynamicParts.push(content);
       fallbackEntries.push({ uid: entry.uid, error: executed.error });
       console.warn(`[worldbook] EJS 执行失败，回退原文注入 uid=${entry.uid}: ${executed.error}`);
+    }
+  }
+
+  return {
+    staticText: staticParts.join('\n\n'),
+    dynamicText: dynamicParts.join('\n\n'),
+    fallbackEntries,
+  };
+}
+
+/**
+ * 异步预渲染 —— **生产装配路径用这个**（能力面设计 §11 切片 T1）。
+ *
+ * 与同步版 `renderWorldBookEntries` 的差别只有两点，其余（静动分层、保序、D8 回退）完全一致：
+ *
+ * 1. 走 `EjsBackend.runPass` → 能跑 `await getwi(...)` 这类 **async 条目**（同步版对它们直接回退），
+ *    也是将来切 QuickJS 的唯一接缝。
+ * 2. 整个 pass 一次交给后端（不是逐条目来回），保住「前条目写→后条目立即可见」的同时，
+ *    把跨边界编组从 N 次压到 1 次。
+ *
+ * 调用方拿到结果后应缓存进 `ctx.ejsPass.loreRender`，让**同步的** `{{LORE_BOOK}}` resolver
+ * 只挑段不求值 —— 这样 `PlaceholderResolver` / `resolveTemplate` 的签名一个字都不用改。
+ */
+export async function prerenderWorldBookEntries(
+  entries: WorldBookEntry[],
+  ejsCtx: EjsEvalContext,
+): Promise<WorldBookRenderResult> {
+  const staticParts: string[] = [];
+  const fallbackEntries: Array<{ uid: number; error: string }> = [];
+
+  const sorted = [...entries].sort((a, b) => a.order - b.order);
+
+  // 静态区直接拼；动态区按序收集后整批交给后端
+  const dynamicSlots: Array<{ uid: number; content: string; needsEval: boolean }> = [];
+  for (const entry of sorted) {
+    const content = entry.content ?? '';
+    if (!hasDynamic(content)) {
+      staticParts.push(content);
+      continue;
+    }
+    // 只含 {{random}}/{{getvar}} 无 EJS → 不求值，原文进动态区交给下游宏剥离
+    dynamicSlots.push({ uid: entry.uid, content, needsEval: content.includes('<%') });
+  }
+
+  const toEval: EjsPassEntry[] = dynamicSlots
+    .filter((s) => s.needsEval)
+    .map((s) => ({ uid: s.uid, content: s.content }));
+
+  const backend = getEjsBackend();
+  const outcomes = toEval.length > 0 ? await backend.runPass(toEval, ejsCtx) : [];
+  const byUid = new Map(outcomes.map((o) => [o.uid, o]));
+
+  const dynamicParts: string[] = [];
+  for (const slot of dynamicSlots) {
+    if (!slot.needsEval) {
+      dynamicParts.push(slot.content);
+      continue;
+    }
+    const outcome = byUid.get(slot.uid);
+    if (!outcome) {
+      // 后端漏了某条（不该发生）→ 按 D8 原文注入，并留痕
+      dynamicParts.push(slot.content);
+      fallbackEntries.push({ uid: slot.uid, error: `后端 ${backend.name} 未返回该条目结果` });
+      continue;
+    }
+    dynamicParts.push(outcome.text);
+    if (!outcome.ok) {
+      fallbackEntries.push({ uid: slot.uid, error: outcome.error ?? '未知错误' });
+      console.warn(
+        `[worldbook] EJS 失败，回退原文注入 uid=${slot.uid}（后端 ${backend.name}）: ${outcome.error}`,
+      );
     }
   }
 
