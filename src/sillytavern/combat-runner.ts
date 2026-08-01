@@ -113,7 +113,37 @@ export type CombatEvent =
   | { type: 'round_narrative'; text: string; round: number }
   | { type: 'round_started'; round: number }
   | { type: 'awaiting_player_input'; unit: string; unitId: string; round: number }
-  | { type: 'combat_ended'; summary: CombatSummaryResult };
+  | { type: 'combat_ended'; summary: CombatSummaryResult }
+  // ─────────────────────────────────────────────────────────────
+  // 🆕 v3 扩展变体（M2，投影 A projectToUi 输出）——v2 仍发老变体，这些只在 v3 路径出现。
+  //    前端组件按需消费，不强制全改；game-store.applyCombatEvent 对老变体的 v2 分支保留。
+  // ─────────────────────────────────────────────────────────────
+  | { type: 'v3_combat_started'; combatId: string; round: number; unitNames: string[] }
+  | { type: 'v3_turn_started'; unit: string; unitId: string; round: number }
+  | { type: 'v3_turn_ended'; unit: string; unitId: string; round: number }
+  | { type: 'v3_round_started'; round: number }
+  | { type: 'v3_round_ended'; round: number }
+  | { type: 'v3_initiative'; round: number; order: string[] }
+  | { type: 'v3_action'; toolName: string; result: Record<string, any>; text?: string }
+  | {
+      type: 'v3_unit_state_changed';
+      unitId: string;
+      unitName: string;
+      hp: number;
+      maxHp: number;
+      side: 'player' | 'enemy';
+    }
+  | { type: 'v3_status_changed'; unitId: string; statusId: string; op: 'applied' | 'removed' }
+  | { type: 'v3_morale_changed'; unitId: string; state: string }
+  | { type: 'v3_roster_changed'; op: 'summoned' | 'despawned'; unitId: string; unitName: string }
+  | { type: 'v3_special_damage'; targetId: string; final: number; kind: string }
+  | { type: 'v3_rule_override'; effectDescription: string; reason?: string }
+  | { type: 'v3_effect_rejected'; code: string; detail: string }
+  | { type: 'v3_dice_epoch'; outputId: string }
+  | { type: 'v3_settlement'; fpDelta: number; reason: string; winner?: string }
+  | { type: 'v3_narrative'; text: string; round: number }
+  | { type: 'v3_awaiting_player_input'; unit: string; unitId: string; round: number }
+  | { type: 'v3_combat_ended'; reason: string; winner?: string };
 
 // ========== 常量 ==========
 

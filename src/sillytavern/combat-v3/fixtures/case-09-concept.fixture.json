@@ -1,0 +1,128 @@
+{
+  "id": "case-09-concept",
+  "sourceCase": "docs/planning/2026-07-31-combat-v3-stress-test/case-09-concept.md",
+  "_synthetic": true,
+  "_provenance": {
+    "purpose": "M2 端到端样本：基础攻击 + 意图对抗 + 士气 + 非 HP 终局。无 automaton（认知剥夺走 M3.5 的裁决，M2 先用内核内部 forceTerminal 桩触发）。",
+    "milestoneTargets": [
+      "roundCount: 4",
+      "damage（真理火球）",
+      "terminal.reason: force_terminal",
+      "fpDelta"
+    ],
+    "notes": [
+      "bundle.units[].attributes 用英文键 str/dex/con/int/spi（M0 FixtureUnit 类型）",
+      "commands 覆盖基础攻击与意图对抗（真理火球伤害里程碑）",
+      "终局 force_terminal 由测试统一用 RestoreCombat 注入 state.terminal（M2 内核内部桩）"
+    ]
+  },
+  "bundle": {
+    "combatId": "fixture-09",
+    "combatType": "标准",
+    "units": [
+      {
+        "name": "理查德",
+        "tier": 2,
+        "hp": 1235,
+        "maxHp": 1235,
+        "mp": 2125,
+        "maxMp": 2125,
+        "sp": 1500,
+        "maxSp": 1500,
+        "attributes": { "str": 6, "dex": 6, "con": 6, "int": 11, "spi": 6 },
+        "equipment": ["奥术导师法袍", "元素法杖"],
+        "skills": ["火球术", "灼热射线", "真理之火"],
+        "divinity": 0,
+        "side": "player"
+      },
+      {
+        "name": "菲希芙",
+        "tier": 2,
+        "hp": 419,
+        "maxHp": 419,
+        "mp": 600,
+        "maxMp": 600,
+        "sp": 350,
+        "maxSp": 350,
+        "attributes": { "str": 3, "dex": 4, "con": 4, "int": 6, "spi": 6 },
+        "equipment": ["梦魇之木法杖"],
+        "skills": ["暗影沼泽"],
+        "divinity": 0,
+        "side": "player"
+      },
+      {
+        "name": "神圣处刑人",
+        "tier": 3,
+        "hp": 4000,
+        "maxHp": 4000,
+        "mp": 1200,
+        "maxMp": 1200,
+        "sp": 1800,
+        "maxSp": 1800,
+        "attributes": { "str": 9, "dex": 7, "con": 8, "int": 5, "spi": 8 },
+        "equipment": ["处刑大剑"],
+        "skills": ["裁决打击"],
+        "divinity": 4,
+        "side": "enemy"
+      },
+      {
+        "name": "受难者",
+        "tier": 1,
+        "hp": 800,
+        "maxHp": 800,
+        "mp": 0,
+        "maxMp": 0,
+        "sp": 200,
+        "maxSp": 200,
+        "attributes": { "str": 3, "dex": 2, "con": 3, "int": 1, "spi": 2 },
+        "equipment": [],
+        "skills": [],
+        "divinity": 0,
+        "side": "enemy"
+      }
+    ],
+    "programs": [],
+    "resourceSnapshots": { "FP": 2400 },
+    "rulesetRevision": "v3-2026-07-31"
+  },
+  "epochs": [
+    {
+      "outputId": "out-1",
+      "dice": [
+        11, 14, 9, 7, 16, 13, 5, 18, 12, 10, 8, 15, 6, 19, 4, 17, 3, 20, 10, 9, 14, 11, 7, 16, 13,
+        5, 18, 12, 10, 8, 15, 6, 19, 4, 17, 3, 20, 10, 9, 14, 11, 7, 16, 13, 5, 18, 12, 10, 8, 15,
+        6, 19, 4, 17, 3, 20, 10, 9, 14, 11
+      ],
+      "channelSplit": {
+        "attackHit": 32,
+        "initiative": 10,
+        "intentCheck": 7,
+        "statusContest": 6,
+        "procCheck": 5
+      }
+    }
+  ],
+  "commands": [
+    {
+      "commandId": "c1",
+      "expectedRevision": 0,
+      "kind": "DeclareAttack",
+      "actorId": "理查德",
+      "cost": "attack",
+      "payload": {
+        "targetId": "神圣处刑人",
+        "skill": "真理之火",
+        "intentionLevel": "机能"
+      }
+    }
+  ],
+  "expected": {
+    "milestones": [
+      { "kind": "roundCount", "value": 4 },
+      { "kind": "damage", "at": "c1", "targetId": "神圣处刑人", "value": 487, "tolerance": 200 },
+      { "kind": "terminal", "reason": "force_terminal", "winner": "player" },
+      { "kind": "fpDelta", "value": 0, "tolerance": 100 }
+    ],
+    "eventHash": null
+  }
+}

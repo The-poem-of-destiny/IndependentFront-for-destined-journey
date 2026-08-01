@@ -448,3 +448,76 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
     expect(store.activeSave?.metadata?.totalTurns).toBe(1);
   });
 });
+
+// ===== M2：v3 战斗接线（submitCombatCommand / abandonCombat） =====
+describe('M2 v3 战斗接线', () => {
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    await initializeDatabase();
+  });
+
+  it('submitCombatCommand：无 Coordinator 时静默忽略（不抛）', async () => {
+    const store = useGameStore();
+    await expect(
+      store.submitCombatCommand({ kind: 'PassAttack', actorId: '甲' }),
+    ).resolves.not.toThrow();
+  });
+
+  it('submitCombatCommand：自动补 commandId + expectedRevision + 转 Coordinator.submit', async () => {
+    const store = useGameStore();
+    const received: {
+      commandId?: string;
+      expectedRevision?: number;
+      kind?: string;
+      actorId?: string;
+      cost?: string;
+    } = {};
+    store.setCombatCoordinator({
+      submit: async (cmd: {
+        commandId?: string;
+        expectedRevision?: number;
+        kind?: string;
+        actorId?: string;
+        cost?: string;
+      }) => {
+        received.commandId = cmd.commandId;
+        received.expectedRevision = cmd.expectedRevision;
+        received.kind = cmd.kind;
+        received.actorId = cmd.actorId;
+        received.cost = cmd.cost;
+      },
+    });
+    await store.submitCombatCommand({ kind: 'DeclareAttack', actorId: '甲' });
+    expect(received.commandId).toBeTruthy();
+    expect(received.expectedRevision).toBeTypeOf('number');
+    expect(received.kind).toBe('DeclareAttack');
+    expect(received.actorId).toBe('甲');
+  });
+
+  it('abandonCombat：清空 v3 战斗态并叫 Coordinator.abandon（C4）', async () => {
+    const store = useGameStore();
+    let abandoned = false;
+    store.setCombatCoordinator({ abandon: () => (abandoned = true) });
+    store.v3ActiveCombat = {} as never; // 模拟进行中的 v3 战斗
+    store.abandonCombat();
+    expect(abandoned).toBe(true);
+    expect(store.v3ActiveCombat).toBeNull();
+    expect(store.combatAwaitingInput).toBeNull();
+  });
+
+  it('应用 v3 战斗事件驱动面板状态', () => {
+    const store = useGameStore();
+    store.applyCombatEvent({
+      type: 'v3_combat_started',
+      combatId: 'c1',
+      round: 1,
+      unitNames: ['甲'],
+    });
+    expect(store.v3ActiveCombat).not.toBeNull();
+    expect(store.isInCombat).toBe(true);
+    store.applyCombatEvent({ type: 'v3_combat_ended', reason: 'hp_zero', winner: 'player' });
+    store.applyCombatEvent({ type: 'v3_settlement', fpDelta: 0, reason: 'hp_zero' });
+    expect(store.v3ActiveCombat?.phase).toBe('SettlementCommitted');
+    expect(store.isInCombat).toBe(false);
+  });
+});

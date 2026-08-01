@@ -2001,6 +2001,22 @@
       "historyLayers": 2,
       "historySlice": 800,
       "template": "{{SYS_PROMPT}}\n\n<!-- combat Agent 由 orchestrator 在 <combat_trigger> 标记出现时独立唤起，不走主 DAG。 -->\n<!-- 上下文由 orchestrator 注入：战斗触发原因 + 参战角色状态 + 当前战斗快照（M4 任务 5.2 接入）。 -->\n\n<参战角色状态>\n{{CHARACTER_STATE}}\n</参战角色状态>\n\n<最近剧情>\n{{NARRATIVE:layers=2}}\n</最近剧情>"
+    },
+    "combat_v3": {
+      "worldBookEnabled": false,
+      "worldBookIds": [],
+      "model": "",
+      "systemPrompt": "你是战斗 v3 的敌方决策 Agent。内核主持战斗流程（状态机/骰子/终局由代码判定），你只负责为敌方单位做战术决策。可以调用工具：declare_attack（攻击）、declare_action（道具/移动/专注/防御）、pass_slot（放弃槽位）、flee（逃跑）。禁止传骰值，禁止判断胜负。一次只提交一个 Command。",
+      "presetId": "",
+      "preset": null,
+      "temperature": 0.7,
+      "topP": 1,
+      "freqPen": 0,
+      "presPen": 0,
+      "maxTokens": 16384,
+      "historyLayers": 2,
+      "historySlice": 800,
+      "template": "{{SYS_PROMPT}}\n\n<!-- combat_v3 Agent 由 v3 Coordinator 在 RequiredInput.PlayerCommand（敌方单位）时唤起，不走主 DAG。 -->\n<!-- 上下文由 coordinator 注入：投影 B 文本战斗面板。内核主持流程，Agent 只做战术决策。 -->\n\n<战斗面板>\n{{COMBAT_PANEL}}\n</战斗面板>"
     }
   }
 }

@@ -10,6 +10,7 @@ import type {
   CombatState,
   SaveProfile,
 } from '@engine/types';
+import type { CombatView, CombatCommand } from '@engine/combat-v3';
 import {
   getSave,
   getSaves,
@@ -82,26 +83,44 @@ export const useGameStore = defineStore('game', () => {
 
   // === 战斗 & 制作 ===
   const activeCombat = ref<CombatState | null>(null);
+
+  // 🆕 v3：独立 v3ActiveCombat ref（CombatView 形状，与 v2 activeCombat 并存）。
+  //   v2 事件写 activeCombat，v3 事件写 v3ActiveCombat；isInCombat 同时看两者。
+  const v3ActiveCombat = ref<CombatView | null>(null);
   const isInCombat = computed(
-    () => activeCombat.value !== null && activeCombat.value.status !== 'ended',
+    () =>
+      (activeCombat.value !== null && activeCombat.value.status !== 'ended') ||
+      (v3ActiveCombat.value !== null && v3ActiveCombat.value.phase !== 'SettlementCommitted'),
   );
 
   // === M5 战斗面板状态 ===
   /** 战斗消息流条目（叙事 + 动作结果卡片 + 回合分隔） */
   const combatLog = ref<CombatLogEntry[]>([]);
-  /** 当前等玩家输入的我方单位（null = 不在等输入） */
-  const combatAwaitingInput = ref<{ unit: string; unitId: string; round: number } | null>(null);
+  /** 当前等玩家输入的我方单位（null = 不在等输入）；v3 扩展 requiredInputKind 供四态 UI 分流 */
+  const combatAwaitingInput = ref<{
+    unit: string;
+    unitId: string;
+    round: number;
+    requiredInputKind?: string;
+  } | null>(null);
   /** 当前行动者 characterId（turn_started 事件更新，单位卡片高亮用） */
   const combatCurrentUnitId = ref<string | null>(null);
   /** runner 注册的玩家文本提交器（pipeline 通过 registerSubmitter 挂入；runner emit 时持有 pendingResolver） */
   const combatSubmitter = ref<((text: string) => void) | null>(null);
+  /** 🆕 v3：Coordinator 句柄（submitCommand / abandon），供前端 Command 路由与放弃（C4） */
+  const combatCoordinator = ref<{
+    submit?: (cmd: CombatCommand) => Promise<void>;
+    abandon?: () => void;
+    waitForCommand?: () => Promise<CombatCommand>;
+  } | null>(null);
 
-  /** 战斗开始：清空面板状态（activeCombat 由 combat_started 事件填） */
+  /** 战斗开始：清空面板状态（activeCombat 由 combat_started 事件填；v3 清 v3 ref） */
   function enterCombat() {
     combatLog.value = [];
     combatAwaitingInput.value = null;
     combatCurrentUnitId.value = null;
     combatSubmitter.value = null;
+    v3ActiveCombat.value = null;
   }
 
   /** 应用 runner 事件流 → 更新面板状态（combat_started / action_resolved / 回合事件 / awaiting） */
@@ -127,13 +146,99 @@ export const useGameStore = defineStore('game', () => {
       case 'turn_started':
         combatCurrentUnitId.value = evt.unitId;
         break;
-      // combat_ended（exitCombat 收尾）
+      // ── v3 扩展变体（投影 A 输出，M2）──
+      case 'v3_combat_started':
+        v3ActiveCombat.value = {
+          revision: 0,
+          phase: 'CombatOpen',
+          round: evt.round,
+          combatId: evt.combatId,
+          initiativeOrder: evt.unitNames,
+          currentTurnIndex: 0,
+          units: {},
+          resourceSnapshots: { FP: 0 },
+        };
+        combatLog.value.push({ id, kind: 'round_divider', round: evt.round });
+        break;
+      case 'v3_round_started':
+        combatLog.value.push({ id, kind: 'round_divider', round: evt.round });
+        if (v3ActiveCombat.value) {
+          v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'RoundOpen', round: evt.round };
+        }
+        break;
+      case 'v3_turn_started':
+        combatCurrentUnitId.value = evt.unitId;
+        break;
+      case 'v3_turn_ended':
+        if (combatCurrentUnitId.value === evt.unitId) combatCurrentUnitId.value = null;
+        break;
+      case 'v3_initiative':
+        if (v3ActiveCombat.value) {
+          v3ActiveCombat.value = { ...v3ActiveCombat.value, initiativeOrder: evt.order };
+        }
+        break;
+      case 'v3_action':
+        combatLog.value.push({ id, kind: 'action', result: evt.result, toolName: evt.toolName });
+        break;
+      case 'v3_narrative':
+        if (evt.text)
+          combatLog.value.push({ id, kind: 'narrative', text: evt.text, round: evt.round });
+        break;
+      case 'v3_awaiting_player_input':
+        combatAwaitingInput.value = {
+          unit: evt.unit,
+          unitId: evt.unitId,
+          round: evt.round,
+          requiredInputKind: 'PlayerCommand',
+        };
+        break;
+      case 'v3_combat_ended':
+        if (v3ActiveCombat.value) {
+          v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'Terminal' };
+        }
+        break;
+      case 'v3_settlement':
+        if (v3ActiveCombat.value) {
+          v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'SettlementCommitted' };
+        }
+        break;
     }
   }
 
   /** pipeline 收到 runner registerSubmitter → 挂入 store */
   function setCombatSubmitter(submit: (text: string) => void) {
     combatSubmitter.value = submit;
+  }
+
+  /** v3：controller 挂 Coordinator 句柄（game-pipeline 在 coordinator 启动时挂） */
+  function setCombatCoordinator(handle: unknown) {
+    combatCoordinator.value = handle as never;
+  }
+
+  /** v3：玩家提交一条 CombatCommand（自动补 commandId + expectedRevision）→ 转 Coordinator */
+  async function submitCombatCommand(partial: Partial<CombatCommand>): Promise<void> {
+    const coordinator = combatCoordinator.value;
+    if (!coordinator?.submit) return;
+    const rev = v3ActiveCombat.value?.revision ?? 0;
+    const cmd = {
+      commandId: partial.commandId ?? `ui-${crypto.randomUUID()}`,
+      expectedRevision: partial.expectedRevision ?? rev,
+      actorId: partial.actorId ?? '',
+      cost: partial.cost ?? 'none',
+      kind: partial.kind ?? 'PassAttack',
+      payload: partial.payload ?? ({} as Record<string, unknown>),
+    } as CombatCommand;
+    await coordinator.submit(cmd);
+  }
+
+  /** v3：放弃战斗（C4）——句柄 abandon → 丢弃 session → exitCombat */
+  function abandonCombat() {
+    v3ActiveCombat.value = null;
+    combatLog.value = [];
+    combatAwaitingInput.value = null;
+    combatCurrentUnitId.value = null;
+    const c = combatCoordinator.value;
+    if (c?.abandon) c.abandon();
   }
 
   /** 玩家发送战斗指令（CombatActionBar 调用）→ 转发 runner → resolve pendingResolver */
@@ -152,6 +257,8 @@ export const useGameStore = defineStore('game', () => {
     combatAwaitingInput.value = null;
     combatCurrentUnitId.value = null;
     combatSubmitter.value = null;
+    combatCoordinator.value = null;
+    v3ActiveCombat.value = null;
   }
 
   // === 元数据 ===
@@ -626,9 +733,14 @@ export const useGameStore = defineStore('game', () => {
     combatLog,
     combatAwaitingInput,
     combatCurrentUnitId,
+    v3ActiveCombat,
+    combatCoordinator,
     enterCombat,
     applyCombatEvent,
     setCombatSubmitter,
+    setCombatCoordinator,
+    submitCombatCommand,
+    abandonCombat,
     submitCombatInput,
     exitCombat,
     saveProfile,

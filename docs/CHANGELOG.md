@@ -9,6 +9,32 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 战斗 v3 M2 — 接线：Coordinator + feature flag + 双投影 + 前端桥 ｜ ✅ 完成（2026-08-01）
+
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§十三 双投影 / §十四 引擎边界 + Coordinator + feature flag + 四态 UI / §十二 FP 协议）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §4。把 M1 的内核骨架接到真实业务路径：Coordinator 驱动完整战斗循环、feature flag 整场切换、投影 A（UI）/B（Agent 文本面板）、前端 Command 桥。v2 路径一行未删（flag 默认 `'v2'`）。
+
+**新建文件（`combat-v3/`）:**
+
+- `index.ts` — **唯一公共出口**：`openCombat(NewCombat | RestoreCombat): CombatSession` + 公共类型 + `runCombatV3`（coordinator 公共 seam）。internal 一律不导出（架构 §十四 14.1）
+- `coordinator.ts` — `runCombatV3(opts)` 协调循环：openCombat → 首注骰 → dispatch 循环（无 requiredInput 则自动推进）→ 终局 RequestSettlement → **一次 `commitChatState`**（A2-1）。`routeRequiredInput` 四路由穷尽 switch（`default: never` 兜底，A2-3）：PlayerCommand（玩家→store / 敌方→Agent）/ BeginOutput（注骰）/ EffectChoice·BoundedAdjudication·CharGenRequest（M2 `throw UnsupportedInM2`）。`abandon()`：session 丢弃、FP 不落库、解除 isGenerating（**C4**）。敌方 Agent 工具预算 `MAX_TOOL_ROUNDS=8`，超限自动 pass
+- `projection-ui.ts` — 投影 A：`projectToUi(events)` 对 **29 个 DomainEvent 穷尽 switch**（A2-6，漏一个编译不过）。v3 新增映射为 `v3_*` CombatEvent 变体（扩展 `combat-runner.ts` 的 CombatEvent 联合），v2 分支保留
+- `projection-agent.ts` — 投影 B：`projectToAgent(view)` 从唯一 CombatView 生成 `<action_info>` 文本面板（M2 基于 CombatView 而非内部 CombatState——kernel 闭包藏 state，已标注为 M3 若需完整状态再调整）
+- `fixtures/case-09-concept.fixture.json` + `case-09.test.ts` — 第 09 场端到端（真理火球 / 处决人 / FP 2400），断言 `roundCount` / `damage` / `terminal.reason: 'force_terminal'` / `fpDelta`
+
+**修改文件:**
+
+- `game-pipeline.ts` — `handleCombatTrigger` 加 **feature flag 分支点**（唯一，架构 §十四 14.5）：`combatEngineVersion === 'v3'` 走 `runCombatV3`，`'v2'` 走现有 `runCombat`（:1196-1225 保留）。v3 分支组装 bundle（`characterToCombatParticipant` 复用 combat-resolver）+ 前端 Command 桥（pending resolver）+ coordinator 句柄暴露给 store
+- `game-store.ts` — 新增 `v3ActiveCombat` / `combatCoordinator` 句柄 / `submitCombatCommand`（自动补 `commandId`+`expectedRevision`）/ `abandonCombat` / `applyCombatEvent` v3 变体分支；v2 分支保留
+- `agent-tools.ts` — 新增 `AGENT_TOOL_MAP['combat_v3']`（6 工具 + 4 只读，§4.4）；**不动** `['combat']`（v2 回滚要用）
+- `agent-config.json` — 新增 `combat_v3` agent 条目（最小可用：逐 Command 决策、不掷骰、不判终局）
+- `combat-runner.ts` — `CombatEvent` 联合扩展 v3 变体（`v3_*`），v2 变体原样保留
+
+**验收:** A2-1 ~ A2-6 全过（v3 端到端一次 commitChatState / v2 行为完全一致 / RequiredInput 四路由穷尽 / abandon 不落库 / 摘要回注 / 29 DomainEvent 全映射）。全量 **5050 测试 / 157 文件全绿**；typecheck 0 错误；vue-tsc 0 错误；lint 0 error。
+
+**M2 修复的 Critical/Major:** C4（abandon 流程）。M1 已修的 C3/C5/C6/C7/M-1/M-3/M-4/M-9 由 A2-1 端到端验证。
+
+**已知遗留（M3 对齐）:** 前端 Vue 组件（CombatActionBar/CombatPanel 等）留最小改动、当前仍走 v2 渲染路径（标注 M2.5 前端完善）；`projectToAgent` 基于 CombatView 而非完整 CombatState（kernel 闭包藏 state）；`toPatches` 只算 FP 结算 patch（EXP/战利品 M4 settlement.before 补）；EffectChoice / BoundedAdjudication / CharGenRequest 三路由 `throw UnsupportedInM2`。
+
 ### 战斗 v3 M1 — 内核骨架：状态机 + 行动槽 + 原子提交 + 唯一终局 ｜ ✅ 完成（2026-08-01）
 
 架构真源: `docs/reference/combat-system-architecture-v3.md`（§二 核心控制模型 / §三 CombatState 与原子提交 / §十三 DomainEvent）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §3。M0 的地基（分通道骰带 + replay harness）之上，把 v2 的「Agent 主持流程」翻转为「代码内核主持流程」的**内核骨架**——所有变更走 `CombatSession.dispatch(command)` 单一入口，v2 代码仍不删（flag 默认 `'v2'`）。

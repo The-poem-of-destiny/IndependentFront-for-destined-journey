@@ -1,0 +1,206 @@
+/**
+ * combat-v3/projection-ui.ts — 投影 A：DomainEvent → CombatEvent（M2）
+ *
+ * 架构真源：docs/reference/combat-system-architecture-v3.md §十三 13.2/13.3
+ * 实施计划：docs/planning/2026-07-31-combat-v3-implementation-plan.md §4.2 / §4.6（映射表）/ §4.11（A2-6）
+ *
+ * 职责：把每次 dispatch 产出的 DomainEvent[] 映射成前端 game-store 认识的 CombatEvent[]，
+ * 保住 v2 的 combat slice 契约。v3 新增 DomainEvent 映射为**新增** CombatEvent 变体
+ *（v9 扩展于 combat-runner.ts），v2 发的还是老 CombatEvent，applyCombatEvent 的 v2 分支保留。
+ *
+ * 约束（plan §4.6 / R6）：projectToUi 对 DomainEvent 做**穷尽 switch**，漏一个变体则 TS 编译失败。
+ * 验收断言 A2-6：29 个 DomainEvent 全部有映射目标，无「静默丢弃」分支。
+ *
+ * 铁律（plan §1.3）：本文件零 Math.random / new Function / eval；纯函数 + 不可变。
+ */
+
+import type { CombatEvent } from '../combat-runner';
+import type { DomainEvent, MoraleState } from './types';
+
+/**
+ * 把一段 DomainEvent[] 投影为一组前端 CombatEvent（保持顺序）。
+ *
+ * 每个 DomainEvent 变体都有对应的 CombatEvent 目标（映射表 plan §4.6）。
+ * 部分结算类事件（SettlementCommitted → v3_settlement）携带终局数据。
+ * 纯函数，无副作用。
+ */
+export function projectToUi(events: readonly DomainEvent[]): CombatEvent[] {
+  const out: CombatEvent[] = [];
+  for (const evt of events) {
+    out.push(mapEvent(evt));
+  }
+  return out;
+}
+
+/** 单个 DomainEvent → CombatEvent 的穷尽映射 */
+function mapEvent(evt: DomainEvent): CombatEvent {
+  switch (evt.kind) {
+    // ── 生命周期（架构 §十三 #1-#8）──
+    case 'CombatOpened':
+      return {
+        type: 'v3_combat_started',
+        combatId: evt.combatId,
+        round: 1,
+        unitNames: [...evt.unitIds],
+      };
+    case 'RoundOpened':
+      return { type: 'v3_round_started', round: evt.round };
+    case 'InitiativeRolled':
+      return {
+        type: 'v3_initiative',
+        round: evt.round,
+        order: evt.order.map((o) => o.unitId),
+      };
+    case 'TurnOpened':
+      return { type: 'v3_turn_started', unit: evt.unitId, unitId: evt.unitId, round: 0 };
+    case 'TurnClosed':
+      return { type: 'v3_turn_ended', unit: evt.unitId, unitId: evt.unitId, round: 0 };
+    case 'RoundClosed':
+      return { type: 'v3_round_ended', round: evt.round };
+    case 'CombatEnded':
+      return { type: 'v3_combat_ended', reason: evt.reason, winner: evt.winner };
+    // SettlementCommitted 是 M2 的终局面板（EXP/FP/战利品）。M1 内核 settle 只算 FP
+    // 净变动；战利品/EXP 由 M2 coordinator 补。这里投影 FP + 原因。
+    case 'SettlementCommitted':
+      return {
+        type: 'v3_settlement',
+        fpDelta: 0,
+        reason: '',
+      };
+
+    // ── 结算（架构 §十三 #9-#19）──
+    case 'AttackDeclared':
+    case 'AttackResolved':
+    case 'DamageApplied': {
+      // 合成一张前端动作卡片（§4.6：AttackDeclared/AttackResolved/DamageApplied → action）
+      return {
+        type: 'v3_action',
+        toolName: 'attack',
+        result: {
+          attackerId: evt.attackerId,
+          targetId: evt.targetId,
+          ...(evt.kind === 'AttackResolved'
+            ? { checkValue: evt.checkValue, rating: evt.rating, hit: evt.hit }
+            : {}),
+          ...('final' in evt && evt.kind === 'DamageApplied'
+            ? {
+                final: evt.final,
+                preReduction: evt.preReduction,
+                damageType: evt.damageType,
+                targetHpBefore: evt.targetHpBefore,
+                targetHpAfter: evt.targetHpAfter,
+              }
+            : {}),
+        },
+      };
+    }
+    case 'HpFloored':
+      return {
+        type: 'v3_unit_state_changed',
+        unitId: evt.unitId,
+        unitName: evt.unitId,
+        hp: evt.hp,
+        maxHp: 0,
+        side: 'player',
+      };
+    case 'UnitDowned':
+    case 'UnitDefeated':
+      return {
+        type: 'v3_unit_state_changed',
+        unitId: evt.unitId,
+        unitName: evt.unitId,
+        hp: 0,
+        maxHp: 0,
+        side: evt.kind === 'UnitDefeated' && evt.winnerSide ? evt.winnerSide : 'player',
+      };
+    case 'StatusApplied':
+      return {
+        type: 'v3_status_changed',
+        unitId: evt.unitId,
+        statusId: evt.statusId,
+        op: 'applied',
+      };
+    case 'StatusRemoved':
+    case 'StatusExpired':
+      return {
+        type: 'v3_status_changed',
+        unitId: evt.unitId,
+        statusId: evt.statusId,
+        op: 'removed',
+      };
+    case 'ResourceSpent':
+      // 并入动作卡片的消耗行（§4.6）。这里单独发一条 v3_action 消耗记录。
+      return {
+        type: 'v3_action',
+        toolName: 'cost',
+        result: { unitId: evt.unitId, resource: evt.resource, amount: evt.amount },
+      };
+    case 'MoraleChanged':
+      return { type: 'v3_morale_changed', unitId: evt.unitId, state: evt.state };
+    case 'FleeAttempt':
+      return {
+        type: 'v3_action',
+        toolName: 'flee',
+        result: { unitId: evt.unitId, success: evt.success, roll: evt.roll },
+      };
+    case 'NarrativeCue':
+      return { type: 'v3_narrative', text: evt.text, round: 0 };
+
+    // ── v3 新增（架构 §十三 #20-#29，M1 已实现 vs 未来的占位结构）──
+    case 'UnitSummoned':
+      return {
+        type: 'v3_roster_changed',
+        op: 'summoned',
+        unitId: evt.unitId,
+        unitName: evt.unitId,
+      };
+    case 'UnitDespawned':
+      return {
+        type: 'v3_roster_changed',
+        op: 'despawned',
+        unitId: evt.unitId,
+        unitName: evt.unitId,
+      };
+    case 'DamagePrevented':
+      return {
+        type: 'v3_special_damage',
+        targetId: evt.unitId,
+        final: evt.amount,
+        kind: 'prevented',
+      };
+    case 'DamageReflected':
+      return {
+        type: 'v3_special_damage',
+        targetId: evt.rootChainId,
+        final: evt.amount,
+        kind: 'reflected',
+      };
+    case 'MiracleTriggered':
+      return { type: 'v3_narrative', text: evt.effectDescription ?? '', round: 0 };
+    case 'AdjudicationAccepted':
+      return {
+        type: 'v3_rule_override',
+        effectDescription: evt.ruleKey ?? '',
+        reason: evt.reason,
+      };
+    case 'RuleOverridden':
+      return {
+        type: 'v3_rule_override',
+        effectDescription: evt.ruleKey,
+        reason: '',
+      };
+    case 'EffectRejected':
+      return { type: 'v3_effect_rejected', code: evt.code, detail: evt.detail };
+    case 'DiceEpochBegan':
+      return { type: 'v3_dice_epoch', outputId: evt.outputId };
+
+    default: {
+      // 穷尽兜底（R6 / A2-6）：新增 DomainEvent 未接映射必须编译报错。
+      const _exhaustive: never = evt;
+      return _exhaustive;
+    }
+  }
+}
+
+// MoraleState 类型留供将来扩展（当前到 string 即可，避免无谓 import）
+export type { MoraleState as _MoraleState };
