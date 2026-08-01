@@ -220,6 +220,9 @@ export async function resolveAttackPipeline(
     defenderMorale: defenderMorale as any,
     isExecutionIntent: intentionLevel === '抹杀' || intentionLevel === '概念',
     nonLethal: input.nonLethal ?? false,
+    // v3 M0 铺路（架构 §1.4 C5）：v2 此处把同一颗 input.d20Intention 喂给攻守两侧，
+    // 即「意图对抗共用一颗骰」bug。M0 保留 v2 行为（同值双喂），真正双骰在 M1
+    // 由内核从 DiceTape intentCheck 通道取两颗独立骰。
     attackerD20: input.d20Intention ?? 10,
     defenderD20: input.d20Intention ?? 10,
   });
@@ -254,7 +257,9 @@ export async function resolveAttackPipeline(
     !defender.canAct ||
     (isShakenOrWorse && intention.verdict === '自动成功');
   const attackCheck = performAttackCheck({
-    d20Roll: d20Final,
+    // v3 M0: 显式传两颗骰（架构 §1.4 M-5）。v2 此处用 Math.random() 内部伪造第二颗，
+    // 这里传同值保持 v2 行为结构。M1 起 v3 由 DiceTape attackHit 通道取真两颗骰。
+    rolls: [d20Final, d20Final],
     attackerTier: attacker.tier,
     defenderTier: defender.tier,
     hitBonus: attacker.hitBonus + hitBonusFromMods,
@@ -347,6 +352,10 @@ export async function resolveAttackPipeline(
         hpRatio,
         ctx.combatType,
         ctx,
+        // v3 M0 铺路（架构 §1.4 M-4）：v2 此处省略实参走函数内默认值 10（战意骰恒 10）。
+        // 函数签名已改为必传，这里显式给 10 保持 v2 行为；M1 起 v3 由 DiceTape
+        // statusContest 通道取真骰。
+        10,
       );
       moraleOutcome = moraleResult.outcome;
     }

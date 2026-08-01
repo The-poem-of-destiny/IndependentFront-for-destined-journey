@@ -309,7 +309,7 @@ describe('runDamagePipeline', () => {
 describe('performAttackCheck', () => {
   it('同层级: 1d20 正常检定', () => {
     const result = performAttackCheck({
-      d20Roll: 15,
+      rolls: [15],
       attackerTier: 3,
       defenderTier: 3,
       hitBonus: 5,
@@ -326,7 +326,10 @@ describe('performAttackCheck', () => {
 
   it('高T对低T: 优势 (2d20取高)', () => {
     const result = performAttackCheck({
-      d20Roll: 10,
+      // v3 M0: 显式传两颗骰（架构 §1.4 M-5）。传同值 10 等效 v2 行为下界，
+      // max(10,10)=10。原 v2 用 Math.random() 伪造第二骰，断言用 >=10 容差，
+      // 改造后 diceUsed 确定为 10，断言仍成立。
+      rolls: [10, 10],
       attackerTier: 5,
       defenderTier: 3,
       hitBonus: 2,
@@ -340,7 +343,10 @@ describe('performAttackCheck', () => {
 
   it('低T对高T: 劣势 (2d20取低)', () => {
     const result = performAttackCheck({
-      d20Roll: 15,
+      // v3 M0: 显式传两颗骰。传同值 15 等效 v2 行为上界，
+      // min(15,15)=15。原 v2 第二骰随机，断言用 <=15 容差，
+      // 改造后 diceUsed 确定为 15，断言仍成立。
+      rolls: [15, 15],
       attackerTier: 2,
       defenderTier: 5,
       hitBonus: 0,
@@ -353,7 +359,7 @@ describe('performAttackCheck', () => {
 
   it('攻方 T > 守方 T+1: 闪避无效', () => {
     const result = performAttackCheck({
-      d20Roll: 12,
+      rolls: [12, 12],
       attackerTier: 5,
       defenderTier: 3, // 5 > 3+1 → 闪避无效
       hitBonus: 2,
@@ -366,7 +372,7 @@ describe('performAttackCheck', () => {
 
   it('强暴击: 检定值 ≥ 25', () => {
     const result = performAttackCheck({
-      d20Roll: 20,
+      rolls: [20, 20],
       attackerTier: 5,
       defenderTier: 3,
       hitBonus: 8,
@@ -380,7 +386,7 @@ describe('performAttackCheck', () => {
 
   it('失手: 检定值 ≤ 3', () => {
     const result = performAttackCheck({
-      d20Roll: 1,
+      rolls: [1, 1],
       attackerTier: 1,
       defenderTier: 5,
       hitBonus: 0,

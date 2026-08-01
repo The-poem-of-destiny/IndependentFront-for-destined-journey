@@ -267,7 +267,9 @@ describe('🎮 第三章: 玩家攻击集群 — resolveAttack 完整管线', ()
 
   it('Step 2: 攻击检定 — T3 vs T1 → 优势 + 闪避无效', () => {
     const check = performAttackCheck({
-      d20Roll: 16,
+      // v3 M0: 传两颗骰（架构 §1.4 M-5）。传同值 16 等效 v2 行为下界，
+      // max(16,16)=16 → 检定值 16+5-0=21 → 暴击(1.3)。
+      rolls: [16, 16],
       attackerTier: 3,
       defenderTier: 1,
       hitBonus: 5,

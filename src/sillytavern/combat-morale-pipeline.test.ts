@@ -59,7 +59,8 @@ describe('runMoraleCheckPipeline', () => {
 
   describe('1. HP 高于阈值', () => {
     it('hpRatio=0.8（标准阈值 0.30）→ triggered=false，无 outcome', async () => {
-      const result = await runMoraleCheckPipeline('goblin', 0.8, '标准', makeCtx(bus));
+      // v3 M0: d20Roll 改为必传（架构 §1.4 M-4），原省略走默认值 10，显式补传保持 v2 行为
+      const result = await runMoraleCheckPipeline('goblin', 0.8, '标准', makeCtx(bus), 10);
 
       expect(result.triggered).toBe(false);
       expect(result.outcome).toBeUndefined();
@@ -67,7 +68,8 @@ describe('runMoraleCheckPipeline', () => {
     });
 
     it('hpRatio=0.6（切磋阈值 0.40）→ triggered=false', async () => {
-      const result = await runMoraleCheckPipeline('goblin', 0.6, '切磋', makeCtx(bus));
+      // v3 M0: d20Roll 改为必传，原省略走默认值 10，显式补传
+      const result = await runMoraleCheckPipeline('goblin', 0.6, '切磋', makeCtx(bus), 10);
 
       expect(result.triggered).toBe(false);
       expect(result.outcome).toBeUndefined();
@@ -126,7 +128,8 @@ describe('runMoraleCheckPipeline', () => {
       });
 
       // hpRatio=0.8 → checkMorale 未触发；但 AI 选了 outcome
-      const result = await runMoraleCheckPipeline('goblin', 0.8, '标准', makeCtx(bus));
+      // v3 M0: d20Roll 改为必传，原省略走默认值 10，显式补传
+      const result = await runMoraleCheckPipeline('goblin', 0.8, '标准', makeCtx(bus), 10);
 
       expect(result.outcome).toBe('撤退');
       // baseResult.triggered=false 但 outcome 有值 → triggered=true
@@ -148,7 +151,8 @@ describe('runMoraleCheckPipeline', () => {
     });
 
     it('高 HP 但无订阅 → triggered=false 无 outcome', async () => {
-      const result = await runMoraleCheckPipeline('goblin', 0.9, '标准', makeCtx(bus));
+      // v3 M0: d20Roll 改为必传，原省略走默认值 10，显式补传
+      const result = await runMoraleCheckPipeline('goblin', 0.9, '标准', makeCtx(bus), 10);
 
       expect(result.triggered).toBe(false);
       expect(result.outcome).toBeUndefined();
@@ -176,7 +180,8 @@ describe('runMoraleCheckPipeline', () => {
         COMBAT_EVENTS.MORALE_RESULT,
       ]);
 
-      await runMoraleCheckPipeline('goblin', 0.9, '标准', makeCtx(bus));
+      // v3 M0: d20Roll 改为必传，原省略走默认值 10，显式补传
+      await runMoraleCheckPipeline('goblin', 0.9, '标准', makeCtx(bus), 10);
 
       // 不管是否触发战意事件本身，emitChain 调用恒发生
       expect(counts[COMBAT_EVENTS.MORALE_CHECK]).toBe(1);
@@ -194,7 +199,8 @@ describe('runMoraleCheckPipeline', () => {
         0.2,
         '切磋',
         makeCtx(bus),
-        // d20 不传（高阈值类型忽略 d20）
+        // v3 M0: d20Roll 改为必传，原省略走默认值 10，显式补传（高阈值类型忽略 d20）
+        10,
       );
 
       expect(result.triggered).toBe(true);
