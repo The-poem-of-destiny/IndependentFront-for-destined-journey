@@ -569,6 +569,15 @@ export interface AppSettings {
    *   现算出来的派生缓存，给它任何持久化字段位都是制造第二真相来源。
    */
   beautifierRules: BeautifierRule[];
+  /**
+   * v3 M0：战斗引擎版本 feature flag（架构 §14.5）。
+   * - `'v2'`（默认）：走现有 `combat-runner` + Agent 主持流程
+   * - `'v3'`：走 `combat-v3` 内核主持流程
+   * 分支点唯一（game-pipeline.handleCombatTrigger），粒度按整场战斗，
+   * openCombat 时冻结进 CombatState.provenance 不可中途变更。
+   * 默认 `'v2'`，M5 才翻转为 `'v3'`。
+   */
+  combatEngineVersion: 'v2' | 'v3';
 }
 
 export const DEFAULT_FORMAT_PROMPT = `你必须严格按照以下 XML 标签格式输出回复，不要使用 Markdown 包裹：
@@ -620,6 +629,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   /** Phase 7e: 输出美化 */
   beautifierEnabled: true,
   beautifierRules: [],
+  /** v3 M0: 战斗引擎版本（默认 v2，M5 才翻 v3） */
+  combatEngineVersion: 'v2',
 };
 
 // ========== Chat Types ==========

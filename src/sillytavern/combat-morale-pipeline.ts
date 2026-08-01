@@ -56,17 +56,21 @@ interface MoraleResultParams {
  * @param defenderHpRatio  守方当前 HP/maxHp（0~1）
  * @param combatType       战斗类型（阈值查 COMBAT_TYPE_MORALE_THRESHOLDS）
  * @param ctx              管道上下文（emitChain 用）
- * @param d20Roll          低阈值类型的 d20（缺省 10）
+ * @param d20Roll          低阈值类型的 d20（必传）
+ *
+ * v3 M0 修复架构 §1.4 M-4：v2 此处为 `d20Roll?: number` 可选 + `d20Roll ?? 10` 默认值，
+ * 导致战意骰恒 10。现改为**必传**，调用方显式给值；v2 调用方传 10 保持行为不变，
+ * M1 起 v3 由内核从 DiceTape statusContest 通道取真骰。
  */
 export async function runMoraleCheckPipeline(
   defenderId: string,
   defenderHpRatio: number,
   combatType: CombatType,
   ctx: PipelineContext,
-  d20Roll?: number,
+  d20Roll: number,
 ): Promise<MoralePipelineResult> {
   // 1. 纯函数判定基础（确定性兜底，RFC Q6）
-  const baseResult = checkMorale(defenderHpRatio, combatType, d20Roll ?? 10);
+  const baseResult = checkMorale(defenderHpRatio, combatType, d20Roll);
 
   // 2. emit combat.morale.check（代码→AI）—— AI 通过 subscribeChain(MORALE_CHECK) 注册的 handler
   //    可改 params.outcome（从结果池选行为）。无订阅者时返回原 initialParams。

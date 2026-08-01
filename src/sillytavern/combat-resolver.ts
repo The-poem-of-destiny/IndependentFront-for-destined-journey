@@ -130,8 +130,12 @@ export function resolveAttack(input: AttackInput): CombatActionResult {
     defenderMorale: defender.morale,
     isExecutionIntent: intentionLevel === '抹杀' || intentionLevel === '概念',
     nonLethal: input.nonLethal ?? false,
+    // v3 M0 铺路（架构 §1.4 C5）：v2 此处攻方用 input.d20Intention ?? 10、守方用
+    // Math.random()（随机）。M0 统一为攻守同值双喂（与 combat-pipeline.ts 对齐），
+    // 保留 v2 「意图对抗共用一颗骰」的等效行为；真正双骰在 M1 由内核从 DiceTape
+    // intentCheck 通道取两颗独立骰。
     attackerD20: input.d20Intention ?? 10,
-    defenderD20: Math.floor(Math.random() * 20) + 1, // deterministic alternative would be better
+    defenderD20: input.d20Intention ?? 10,
   });
 
   // ===== Step 2: 攻击检定 =====
@@ -141,7 +145,9 @@ export function resolveAttack(input: AttackInput): CombatActionResult {
     (isShakenOrWorse && intention.verdict === '自动成功');
 
   const attackCheck = performAttackCheck({
-    d20Roll: input.d20Attack,
+    // v3 M0: 显式传两颗骰（架构 §1.4 M-5）。v2 此处用 Math.random() 内部伪造第二颗，
+    // 这里传同值保持 v2 行为结构。M1 起 v3 由 DiceTape attackHit 通道取真两颗骰。
+    rolls: [input.d20Attack, input.d20Attack],
     attackerTier: attacker.tier,
     defenderTier: defender.tier,
     hitBonus: attacker.hitBonus,
