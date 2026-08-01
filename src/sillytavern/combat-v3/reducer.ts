@@ -15,9 +15,14 @@
  * 推进表（plan §3.3）落成 AUTO_PHASES 数据表。
  */
 
-import { applyOutcome, toView } from './state';
+import { applyOutcome, freezeFrame, toView } from './state';
 import { beginEpoch, splitSixty } from './dice-tape';
-import { KernelStuckError, type CombatCommand, type CombatState } from './types';
+import {
+  KernelStuckError,
+  type CombatCommand,
+  type CombatState,
+  type DamageRecomputeCtx,
+} from './types';
 import { checkTerminal } from './phases/terminal';
 import { handleRoundOpen, handleRoundClose } from './phases/round';
 import { handleInitiative } from './phases/initiative';
@@ -28,7 +33,7 @@ import {
   runMoraleCheck,
   closeUnitTurn,
 } from './phases/unit-turn';
-import { handleAttack } from './phases/attack';
+import { handleAttack, resumeBlockedAttack } from './phases/attack';
 import { handleAction, handleFlee } from './phases/action';
 import { settle } from './phases/terminal';
 import { emptyChanges, mergeChanges } from './phases/outcome';
@@ -79,6 +84,11 @@ export function reduce(
     return rejection(state, early);
   }
 
+  // 2.6 DeclareBlock 的 damage.preview frame 恢复分支（M3，A3-5）
+  if (command.kind === 'DeclareBlock' && state.resolution?.step === 'damage.preview') {
+    return resumeBlock(state, command);
+  }
+
   // 3. SupplyDice 续杯（BeginOutput 应答）
   if (command.kind === 'SupplyDice') {
     return reduceSupplyDice(bundle, state, command);
@@ -92,6 +102,76 @@ export function reduce(
 
   // 5. 正常 dispatch 循环
   return runDispatch(bundle, state, command);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DeclareBlock damage.preview frame 恢复（M3，A3-5）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * DeclareBlock Command 的 damage.preview frame 恢复分支。
+ *
+ * 玩家格挡：从冻结的 ResolutionFrame（step='damage.preview'）恢复，
+ * 回到 damage.compute **重算**（resumeBlockedAttack），并入格挡的资源消耗
+ * （SpendResource SP —— 架构 §5.4 步骤⑦），同一原子提交。不重取骰、不重跑前序。
+ *
+ * 验收 A3-5：487 → DeclareBlock → 重算 → 97。
+ */
+function resumeBlock(
+  state: CombatState,
+  command: Extract<CombatCommand, { kind: 'DeclareBlock' }>,
+) {
+  const frame = state.resolution;
+  const recompute = frame?.recompute;
+  if (!recompute) {
+    return rejection(state, {
+      code: 'INVALID_PHASE',
+      message: 'damage.preview frame 缺少 recompute 上下文',
+    });
+  }
+
+  const out = resumeBlockedAttack(bundleOf(state), state, recompute);
+  if (out.rejection) return rejection(state, out.rejection);
+
+  // 格挡消耗动作槽（DeclareBlock.cost='action'）——进 pendingChanges
+  out.changes.slotConsumptions ??= [];
+  out.changes.slotConsumptions.push({ actorId: command.actorId, slot: 'action' });
+  // 可选 SP 消耗（frame.awaiting.cost.sp）
+  const spCost = frame.awaiting.kind === 'EffectChoice' ? frame.awaiting.cost?.sp : undefined;
+  if (spCost && spCost > 0) {
+    out.changes.spChanges[command.actorId] = (out.changes.spChanges[command.actorId] ?? 0) - spCost;
+    out.events.push({
+      kind: 'ResourceSpent',
+      unitId: command.actorId,
+      resource: 'sp',
+      amount: spCost,
+    });
+  }
+
+  // 清除 resolution（恢复完成）
+  const cleared = { ...state, resolution: undefined };
+  const applied = applyOutcome(cleared, out);
+  const events = out.events as CombatTransition['events'];
+  return {
+    revision: applied.revision,
+    snapshot: toView(applied),
+    events,
+    terminal: applied.terminal,
+    next: applied,
+  } satisfies CombatTransition;
+}
+
+/** DeclareBlock 恢复时重建 bundle（bundle 参与 runDamagePipeline 的 skill 解析；M3 用最小闭包） */
+function bundleOf(state: CombatState): CombatDefinitionBundle {
+  // resumeBlockedAttack 只用 state.units + recompute；bundle 仅供签名，
+  // 传一个最小 bundle 保证纯函数（无副作用）可继续。
+  return {
+    combatId: state.combatId,
+    combatType: '标准',
+    participants: Object.values(state.units as never) as never,
+    resourceSnapshots: state.resourceSnapshots,
+    rulesetRevision: 'v3-m3',
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -282,6 +362,29 @@ function consumePlayerCommand(
     return { working, events: [], rejection: biz.rejection, waitForNext: false };
   }
   if (biz.requiredInput) {
+    // M3：EffectChoice（damage.preview 格挡询问）→ 冻结 ResolutionFrame（不提交半成品）
+    if (biz.requiredInput.kind === 'EffectChoice' && biz.suspended) {
+      const frozen = freezeFrame(working, {
+        commandId: command.commandId,
+        step: 'damage.preview',
+        pendingChanges: mergeChanges(slotOut.changes, biz.changes),
+        diceConsumedInFrame: {
+          attackHit: 0,
+          initiative: 0,
+          intentCheck: 0,
+          statusContest: 0,
+          procCheck: 0,
+        },
+        awaiting: biz.requiredInput,
+        recompute: biz.suspended.recompute as unknown as DamageRecomputeCtx,
+      });
+      return {
+        working: frozen,
+        events: slotOut.events,
+        requiredInput: biz.requiredInput,
+        waitForNext: false,
+      };
+    }
     return {
       working,
       events: slotOut.events,

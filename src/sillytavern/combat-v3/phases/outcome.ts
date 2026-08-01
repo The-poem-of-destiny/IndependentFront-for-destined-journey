@@ -47,6 +47,30 @@ export interface PhaseOutcome {
   settlementId?: string;
   /** 回合变更（round.close 推进到下一轮时 +1） */
   round?: number;
+  /**
+   * M3：damage.preview 触发 RequestChoice 时冻结的挂起上下文（reducer 据它构造 ResolutionFrame）。
+   * 仅 attack phase 用；不进入 state.ts import 的形状（这是 phase 层的即时信息）。
+   */
+  suspended?: {
+    /** 重算所需全部伤害入参 + 格挡因子 */
+    recompute: ImportedRecomputeCtx;
+    /** 暂停时的原始最终伤害（用于 RequiredInput.EffectChoice.damagePreview） */
+    finalDamage: number;
+  };
+}
+
+/** phase 层的重算上下文（避免 types.ts 循环依赖，复用字段名） */
+export interface ImportedRecomputeCtx {
+  attackerId: string;
+  targetId: string;
+  relevantAttribute: number;
+  skillPower: number;
+  weaponAtk: number;
+  multiHitCount: number;
+  intentionCoefficient: number;
+  ratingCoefficient: number;
+  damageTakenFactor: number;
+  fixedDamageAdjust: number;
 }
 
 /** 轻量 settlement 结果（避免循环依赖 types.ts） */

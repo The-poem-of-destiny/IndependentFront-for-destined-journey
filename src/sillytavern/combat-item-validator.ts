@@ -354,6 +354,83 @@ export function validateItemOutput(output: {
 }
 
 // ═══════════════════════════════════════════════════════════
+// v3 编译期校验（M3 战斗 v3，供 automata/compile.ts 调用）
+// ═══════════════════════════════════════════════════════════
+// 保留 v2 运行时入口（validateModifier / validateBuff / validateItemOutput）不删。
+// 这里是战斗 v3 的 EffectAutomaton DSL 编译期共享校验（架构 §七 7.4 / plan §5.5）。
+
+/** 18 个 ReactionWindow 清单（架构 §五 5.1） */
+export const V3_WINDOW_KEYS: ReadonlySet<string> = new Set([
+  'round.open',
+  'round.close',
+  'initiative.before',
+  'initiative.after',
+  'turn.open',
+  'turn.close',
+  'action.declared',
+  'check.intent',
+  'check.hit',
+  'collect_attacker_mods',
+  'collect_defender_mods',
+  'damage.preview',
+  'damage.compute',
+  'damage.after',
+  'unit.beforeDown',
+  'morale.before',
+  'morale.after',
+  'settlement.before',
+]);
+
+/** 8 大类 EffectIntent kind + Outcome 子类（架构 §六 6.1） */
+export const V3_INTENT_KINDS: ReadonlySet<string> = new Set([
+  'AddModifier',
+  'DealDamage',
+  'Heal',
+  'ApplyStatus',
+  'RemoveStatus',
+  'SpendResource',
+  'PreventDeath',
+  'ConsumeCharge',
+  'EmitNarrativeCue',
+  'OverrideIntent',
+  'ScheduleIntent',
+  'SpawnOrDespawnIntent',
+  'RequestChoiceIntent',
+]);
+
+/** closed RuleKey 白名单（架构 §八 8.2） */
+export const V3_RULE_KEYS: ReadonlySet<string> = new Set([
+  'morale.forceState',
+  'terminal.forceTerminal',
+  'action.freezeSlot',
+  'death.threshold',
+]);
+
+/** 校验 subscribe 是否为合法窗口（返回中文违规原因或 null） */
+export function validateV3Window(subscribe: unknown): string | null {
+  if (typeof subscribe !== 'string' || !V3_WINDOW_KEYS.has(subscribe)) {
+    return `subscribe 必须是 18 窗口之一，当前=${JSON.stringify(subscribe)}（架构 §五 5.1）`;
+  }
+  return null;
+}
+
+/** 校验 intent kind 是否 ∈ 8 大类（返回中文违规原因或 null） */
+export function validateV3IntentKind(kind: unknown): string | null {
+  if (typeof kind !== 'string' || !V3_INTENT_KINDS.has(kind)) {
+    return `intents[].kind 必须是 8 大类之一，当前=${JSON.stringify(kind)}（架构 §六 6.1）`;
+  }
+  return null;
+}
+
+/** 校验 OverrideIntent.ruleKey ∈ closed 白名单（返回中文违规原因或 null，合法则 null） */
+export function validateV3RuleKey(ruleKey: unknown): string | null {
+  if (typeof ruleKey !== 'string' || !V3_RULE_KEYS.has(ruleKey)) {
+    return `OverrideIntent.ruleKey 必须在 closed RuleKey 白名单内，当前=${JSON.stringify(ruleKey)}（架构 §八 8.2）`;
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════
 // 类型再导出（仅类型，零运行时依赖）—— 方便调用方一处 import
 // ═══════════════════════════════════════════════════════════
 

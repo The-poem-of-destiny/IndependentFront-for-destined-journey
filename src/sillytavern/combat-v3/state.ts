@@ -36,7 +36,11 @@ import type {
   CombatUnitState,
   CombatUnitView,
   CombatView,
+  DamageRecomputeCtx,
   PendingChangeSet,
+  RequiredInput,
+  ResolutionFrame,
+  ResolutionStep,
   TerminalReason,
 } from './types';
 import type { StatusEffect } from '../types';
@@ -282,6 +286,47 @@ export function applyPending(state: CombatState, changes: PendingChangeSet): Com
  */
 export function bumpRevision(state: CombatState): CombatState {
   return { ...state, revision: state.revision + 1 };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ResolutionFrame 冻结/恢复辅助（M3，架构 §三 3.3）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 冻结一个中断续跑帧（damage.preview 触发 RequestChoice 时，M3）。
+ *
+ * 存储：commandId / step / pendingChanges / diceConsumedInFrame / awaiting / recompute。
+ * 冻结后 dispatch 返回 RequiredInput.EffectChoice；DeclareBlock 恢复时从 frame 续跑，
+ * 不重跑前序效果、不重复消费骰子（架构 §三 3.3）。
+ *
+ * 不可变：返回新 CombatState，入参不被修改。
+ */
+export function freezeFrame(
+  state: CombatState,
+  frame: {
+    commandId: string;
+    step: ResolutionStep;
+    pendingChanges: PendingChangeSet;
+    diceConsumedInFrame: Readonly<Record<DiceChannel, number>>;
+    awaiting: RequiredInput;
+    recompute?: DamageRecomputeCtx;
+  },
+): CombatState {
+  return { ...state, resolution: frame };
+}
+
+/**
+ * 从 frame 恢复：取回 resolution 并清除（DeclareBlock 恢复后不再持有旧帧）。
+ * 返回 { frame, next }：next 是清除 resolution 后的新 CombatState（不可变）。
+ */
+export function restoreFrame(state: CombatState): {
+  frame: ResolutionFrame;
+  next: CombatState;
+} | null {
+  if (!state.resolution) return null;
+  const frame = state.resolution;
+  const { resolution: _res, ...rest } = state;
+  return { frame, next: rest as CombatState };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

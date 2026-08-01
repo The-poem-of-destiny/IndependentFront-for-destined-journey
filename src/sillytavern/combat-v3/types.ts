@@ -623,7 +623,22 @@ export interface JournalEntry {
  */
 export type RequiredInput =
   | { kind: 'PlayerCommand'; unitId: string; unitName: string; round: number }
-  | { kind: 'EffectChoice' }
+  | {
+      kind: 'EffectChoice';
+      /** 选择 id（对应 RequestChoiceIntent.choiceId） */
+      choiceId: string;
+      /** 触发者单位（受击方，格挡方） */
+      unitId: string;
+      /** 伤害预览（格挡询问展示用） */
+      damagePreview: number;
+      /** 选项列表 */
+      options: readonly string[];
+      /** 触发者选择消耗（格挡 = 消耗 SP + 动作槽） */
+      cost?: { sp?: number; slot?: 'action' };
+      /** 若选择格挡，重算时伤害乘的因子（plan §5.4 格挡 intent batch 的 damageTaken -0.8） */
+      blockDamageFactor?: number;
+      damageTakenOverrideId?: string;
+    }
   | { kind: 'BoundedAdjudication' }
   | { kind: 'BeginOutput'; channel: DiceChannel }
   | { kind: 'CharGenRequest' };
@@ -994,7 +1009,19 @@ export type DomainEvent =
       effectDescription?: string;
     }
   | { kind: 'RuleOverridden'; ruleKey: string; payload?: unknown; divinity: number }
-  | { kind: 'EffectRejected'; automatonId?: string; window?: string; code: string; detail: string }
+  | {
+      kind: 'EffectRejected';
+      automatonId?: string;
+      /** 持有者（在场过滤溯源，架构 §6.3） */
+      owner?: string;
+      /** 触发窗口（架构 §6.3） */
+      window?: string;
+      /** rejected code 枚举（EffectRejectCode） */
+      code: string;
+      detail: string;
+      /** 被拒的 intent 列表（若有） */
+      rejectedIntents?: readonly EffectIntent[];
+    }
   | { kind: 'DiceEpochBegan'; outputId: string; batchHash?: string; channelSplit?: unknown };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1030,16 +1057,38 @@ export type WindowKey =
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * 每窗口排序后的 automaton 队列（M1 恒空数组）。
- * 用于 evaluateWindow 的求值排序与在场过滤。
+ * ActiveEffectIndex 内每窗口的一条 automaton（架构 §五 5.3）。
+ * M1 只用元数据字段求值排序；M3 实装后 byWindow 直接放 CompiledAutomaton，
+ * 故 QueuedAutomaton 即 CompiledAutomaton 的别名（保留原字段名兼容 M1 调用点）。
  */
 export interface QueuedAutomaton {
+  /** 稳定 id（求值排序末位兜底） */
   id: string;
-  owner: string;
-  divinity: number;
-  priority: number;
+  name: string;
+  /** static 身份（物品/技能/套装名） */
   source: string;
+  /** 动态持有者 unitId（在场过滤） */
+  owner: string;
+  /** 登神强度 0-8（高者先） */
+  divinity: number;
+  /** 链内声明顺序 */
+  priority: number;
+  /** 订阅窗口 */
+  subscribe: WindowKey;
+  /** 字节稳定的 stable id（求值排序末位兜底，架构 §五 5.3，replay 前提） */
+  stableId: string;
+  /** charges（"X 次/战斗"） */
+  charges?: ChargeTracker;
+  /** 编译后的 trigger AST */
+  triggerAst: ExprAst;
+  /** 编译后的 intent 模板 */
+  intents: readonly EffectIntent[];
+  /** 是否为可信 TS adapter（不走 DSL 解释器） */
+  isAdapter: boolean;
 }
+
+/** 类型别名：QueuedAutomaton 即 CompiledAutomaton */
+export type CompiledAutomaton = QueuedAutomaton;
 
 /**
  * 战斗内效果索引（架构 §七 7.5）。M1 恒空，M3 由 buildIndex 派生填充。
@@ -1087,12 +1136,44 @@ export const EMPTY_EFFECT_INDEX: ActiveEffectIndex = {
 export interface ResolutionFrame {
   /** 触发中断的 Command id */
   commandId: string;
+  /**
+   * 当前微步骤标识（架构 §三 3.3 step）。M3 新增用于 damage.preview 冻结：
+   * 'damage.preview' 表示因 RequestChoice 暂停，恢复后需回到 damage.compute 重算。
+   */
+  step: ResolutionStep;
   /** 已通过验证但未提交的变更（不变量④），恢复后继续 */
   pendingChanges: PendingChangeSet;
   /** 本 frame 已消费的各通道骰数（恢复时不重复消费） */
   diceConsumedInFrame: Readonly<Record<DiceChannel, number>>;
   /** 等待的外部输入 */
   awaiting: RequiredInput;
+  /** 本 frame 待重算的伤害上下文（damage.preview → DeclareBlock 恢复重算用） */
+  recompute?: DamageRecomputeCtx;
+}
+
+/** 微步骤标识（架构 §三 3.3）——M3 只用 'damage.preview' 一个，M4 补 spawn 等 */
+export type ResolutionStep = 'damage.preview';
+
+/**
+ * damage.preview 冻结时暂存的伤害上下文，恢复后用于回到 damage.compute **重算**。
+ *
+ * 架构 §五 5.2 约束 4：格挡减伤必须在管线对应步骤重算，不是在 final 上打折。
+ * 因此 frame 需保留重算所需的全部伤害公式入参（攻击者/守方/意图/命中评级/管线步骤）。
+ */
+export interface DamageRecomputeCtx {
+  attackerId: string;
+  targetId: string;
+  /** 攻击者 ability（关联属性/技能威力/伤害类型/意图） */
+  relevantAttribute: number;
+  skillPower: number;
+  weaponAtk: number;
+  multiHitCount: number;
+  intentionCoefficient: number;
+  ratingCoefficient: number;
+  /** 恢复时注入的减伤因子（如格挡 0.2，即伤害 × 0.2 重算到 damage.compute） */
+  damageTakenFactor: number;
+  /** 额外固定伤害修正（recompute 时并入 Step 6a） */
+  fixedDamageAdjust: number;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1108,3 +1189,342 @@ export class KernelStuckError extends Error {
     this.name = 'KernelStuckError';
   }
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// M3 — 效果系统（架构 §五/§六/§七，plan §5）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * **窗口上下文类型映射**（架构 §七 7.3 / plan §5.2）。
+ *
+ * 每个 WindowKey 只暴露该窗口有意义的字段。plan §5.11 允许 M3 先只精细实装
+ * 5 个高频窗口（check.hit / collect_*_mods / damage.preview / damage.after /
+ * unit.beforeDown），其余窗口用**最小公共集**（UnitCtx + RoundCtx），M4 补全。
+ *
+ * 编译期用 `WindowCtxMap[subscribe]` 的键集校验 automaton 里出现的 `ctx.*` 路径根段
+ * （编译校验 #7，plan §5.5）。
+ */
+export interface UnitCtx {
+  id: string;
+  hp: number;
+  maxHp: number;
+  hpPercent: number;
+  mp: number;
+  sp: number;
+  tier: number;
+  divinity: number;
+  statuses: readonly string[];
+}
+export interface DamageCtx {
+  attackerId: string;
+  targetId: string;
+  /** Step 1 初始伤害（反射基准 R4 取此，架构 §九） */
+  preReduction: number;
+  /** 评级+意图后伤害 */
+  postStep6: number;
+  /** Step 8 最终伤害、未提交 */
+  final: number;
+  type: string;
+  rating: string | number;
+}
+export interface RoundCtx {
+  index: number;
+  phase: string;
+}
+export interface ChargeCtx {
+  remaining: number;
+}
+
+/** 5 个高频窗口的精细分型（架构 §五 5.1 / plan §5.11） */
+export interface CheckCtx {
+  self: UnitCtx;
+  target: UnitCtx;
+  round: RoundCtx;
+  charges: ChargeCtx;
+}
+export interface CollectModsCtx {
+  self: UnitCtx;
+  /** collect_defender_mods 时 target = 攻击者；collect_attacker_mods 时 target = 受击者 */
+  target: UnitCtx;
+  round: RoundCtx;
+  charges: ChargeCtx;
+}
+export interface PreviewCtx {
+  self: UnitCtx;
+  target: UnitCtx;
+  damage: DamageCtx;
+  round: RoundCtx;
+  charges: ChargeCtx;
+}
+export interface AfterCtx {
+  self: UnitCtx;
+  target: UnitCtx;
+  damage: DamageCtx;
+  round: RoundCtx;
+  depth: number;
+  charges: ChargeCtx;
+}
+export interface BeforeDownCtx {
+  self: UnitCtx;
+  damage: DamageCtx;
+  round: RoundCtx;
+  charges: ChargeCtx;
+}
+export interface InitiativeCtx {
+  self: UnitCtx;
+  round: RoundCtx;
+  charges: ChargeCtx;
+}
+
+/**
+ * 每窗口 ctx 分型映射（plan §5.2）。
+ * 未精细实装的窗口用最小公共结构（UnitCtx + RoundCtx + charges）。
+ */
+export interface WindowCtxMap {
+  'round.open': { self: UnitCtx; round: RoundCtx; charges: ChargeCtx };
+  'round.close': { self: UnitCtx; round: RoundCtx; charges: ChargeCtx };
+  'initiative.before': InitiativeCtx;
+  'initiative.after': InitiativeCtx;
+  'turn.open': { self: UnitCtx; round: RoundCtx; charges: ChargeCtx };
+  'turn.close': { self: UnitCtx; round: RoundCtx; charges: ChargeCtx };
+  'action.declared': { self: UnitCtx; round: RoundCtx; charges: ChargeCtx };
+  'check.intent': CheckCtx;
+  'check.hit': CheckCtx;
+  collect_attacker_mods: CollectModsCtx;
+  collect_defender_mods: CollectModsCtx;
+  'damage.preview': PreviewCtx;
+  'damage.compute': PreviewCtx;
+  'damage.after': AfterCtx;
+  'unit.beforeDown': BeforeDownCtx;
+  'morale.before': { self: UnitCtx; round: RoundCtx; charges: ChargeCtx };
+  'morale.after': { self: UnitCtx; round: RoundCtx; charges: ChargeCtx };
+  'settlement.before': { self: UnitCtx; round: RoundCtx; charges: ChargeCtx };
+}
+export type WindowCtx<K extends WindowKey> = WindowCtxMap[K];
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 表达式微文法（架构 §七 7.3 / plan §5.2）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** 白名单内建函数（架构 §七 7.3 表） */
+export type BuiltinFn = 'min' | 'max' | 'floor' | 'ceil' | 'abs' | 'percent' | 'has';
+
+/** 二元运算符（文法只含比较 + 算术 + 逻辑） */
+export type BinOp = '==' | '!=' | '<' | '<=' | '>' | '>=' | '+' | '-' | '*' | '/' | '&&' | '||';
+
+/**
+ * 表达式 AST 节点（plan §5.2）。
+ * `path` 的 segments 是 `ctx` 后去掉的点分路径，如 `ctx.self.hpPercent` → ['self','hpPercent']。
+ */
+export type ExprAst =
+  | { t: 'num'; v: number }
+  | { t: 'str'; v: string }
+  | { t: 'bool'; v: boolean }
+  | { t: 'null' }
+  | { t: 'path'; segments: string[] }
+  | { t: 'call'; fn: BuiltinFn; args: ExprAst[] }
+  | { t: 'unary'; op: '-' | '!'; operand: ExprAst }
+  | { t: 'bin'; op: BinOp; l: ExprAst; r: ExprAst };
+
+/** ctx 解释值（interpreter 对 path 解析的类型化结果） */
+export type ExprValue = number | string | boolean | null | readonly string[];
+
+// ──────────────────────────────────────────────────────────────────────────────
+// EffectIntent 八大类 + Outcome 子类（架构 §六 6.1 / 6.2）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** AddModifier 的管线槽（架构 §六 6.2） */
+export type ModifierSlot =
+  | 'fixedDamage'
+  | 'damageMult'
+  | 'damageTaken'
+  | 'hitBonus'
+  | 'dodge'
+  | 'initiative'
+  | 'dr'
+  | 'penetration'
+  | 'critThreshold'
+  | 'critDmg'
+  | 'attribute';
+
+/** AddModifier 的作用域（架构 §六 6.2：连击每发 / 整体 / 每目标） */
+export type ModifierScope = 'whole_action' | 'per_hit' | 'per_target';
+
+/** divink 差压制入参（架构 §八 8.3，statusContest） */
+export interface ContestInfo {
+  attackerDivinity: number;
+  defenderDivinity: number;
+}
+
+/** DealDamage 命中策略（架构 §六 6.2 / §九 R8） */
+export interface HitPolicy {
+  consumeDice: boolean;
+  advantage?: 'adv' | 'dis' | 'none';
+}
+
+/**
+ * EffectIntent：八大类代数（架构 §六 6.1）。
+ * volume 与数值字段可用字面量或表达式字符串（trigger 同文法，plan §5.2）。
+ */
+export type EffectIntent =
+  | {
+      kind: 'AddModifier';
+      slot: ModifierSlot;
+      value: number | string;
+      scope: ModifierScope;
+      targetId: string;
+      divinity: number;
+    }
+  | {
+      kind: 'DealDamage';
+      targetId: string;
+      amount: number | string;
+      damageType: 'physical' | 'energy' | 'mental' | 'true';
+      bypass?: ModifierSlot[];
+      isReaction?: boolean;
+      doesNotConsumeSlot?: boolean;
+      rootChainId?: string;
+      /** 反射深度：字面量或表达式串（架构 §九 R1，反伤 depth = 'ctx.depth + 1'） */
+      depth?: number | string;
+      hitPolicy?: HitPolicy;
+    }
+  | {
+      kind: 'Heal';
+      targetId: string;
+      amount: number | string;
+    }
+  | {
+      kind: 'ApplyStatus';
+      targetId: string;
+      statusId: string;
+      duration: number | null;
+      layers?: number;
+      contest?: ContestInfo;
+    }
+  | { kind: 'RemoveStatus'; targetId: string; statusId: string }
+  | {
+      kind: 'SpendResource';
+      targetId: string;
+      resource: 'hp' | 'mp' | 'sp' | 'fp';
+      amount: number;
+    }
+  | {
+      kind: 'PreventDeath';
+      targetId: string;
+      hp: number;
+      slot?: 'death.threshold';
+    }
+  | { kind: 'ConsumeCharge'; amount?: number }
+  | { kind: 'EmitNarrativeCue'; text: string; severity?: number }
+  | {
+      kind: 'OverrideIntent';
+      ruleKey: string;
+      payload: unknown;
+      divinity: number;
+    }
+  | {
+      kind: 'ScheduleIntent';
+      delay: number;
+      intent: EffectIntent;
+    }
+  | {
+      kind: 'SpawnOrDespawnIntent';
+      op: 'spawn' | 'despawn';
+      unitId: string;
+      count?: number;
+      duration?: { rounds: number };
+      joinTiming?: 'this_round_tail' | 'next_round_head';
+    }
+  | {
+      kind: 'RequestChoiceIntent';
+      choiceId: string;
+      prompt: string;
+      options: readonly string[];
+      cost?: { sp?: number; slot?: 'action' };
+      blockDamageFactor?: number;
+      damageTakenOverrideId?: string;
+    };
+
+/** EffectIntent 的 kind 枚举（8 大类，供编译校验 #3） */
+export type EffectIntentKind = EffectIntent['kind'];
+
+/** 反射/递归深度上限（架构 §九 9.1 / §五 5.4） */
+export const MAX_REFLECTION_DEPTH = 2;
+export const MAX_WINDOW_RECURSION_DEPTH = 5;
+export const MAX_AUTOMATON_PER_WINDOW = 64;
+
+/**
+ * EffectRejected 的 code 枚举（架构 §六 6.3）。
+ */
+export type EffectRejectCode =
+  | 'TARGET_ILLEGAL'
+  | 'DIVINITY_INSUFFICIENT'
+  | 'RESOURCE_INSUFFICIENT'
+  | 'CHARGE_EXHAUSTED'
+  | 'VALUE_OUT_OF_RANGE'
+  | 'INVARIANT_VIOLATION'
+  | 'UNSUPPORTED_CAPABILITY'
+  | 'EVAL_ERROR'
+  | 'BUDGET_EXCEEDED';
+
+// ──────────────────────────────────────────────────────────────────────────────
+// EffectAutomaton / CompiledAutomaton（架构 §七 7.2 / 7.4）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** IntentTemplate：字面量 EffectIntent 或经表达式编译的 intent 模板（amount/value 可为表达式字符串） */
+export type IntentTemplate = EffectIntent;
+
+/** automaton 分次（"X 次/战斗"，架构 §七 7.2 charges） */
+export interface ChargeTracker {
+  max: number;
+  remaining: number;
+}
+
+/**
+ * EffectAutomaton —— AI 或 item_gen 产出的声明式效果（架构 §七 7.2）。
+ * DSL automaton：trigger 是表达式字符串，intents[] 是 IntentTemplate[]。
+ */
+export interface EffectAutomaton {
+  id: string;
+  name: string;
+  source: string;
+  owner: string;
+  subscribe: WindowKey;
+  trigger: string;
+  priority: number;
+  divinity: number;
+  charges?: ChargeTracker;
+  intents: readonly EffectIntent[];
+}
+
+/** StaticModifier —— modifiers[] 编译为的静态管线修正（不参与窗口，直接并入结算） */
+export interface StaticModifier {
+  slot: ModifierSlot;
+  value: number;
+  scope: ModifierScope;
+  source: string;
+  divinity: number;
+}
+
+/** 编译期错误（plan §5.5 / A3-3） */
+export interface CompileError {
+  /** automaton id；intent 级错误也归到所属 automaton */
+  automatonId: string;
+  /** 错误类别（校验 #1..#9 之一，plan §5.5） */
+  code: RejectSubCode | string;
+  /** 人类可读错误信息（触发表达式错误带列号） */
+  message: string;
+}
+
+/** 编译期剔除子码（plan §5.5 校验 #1..#8 的剔除项） */
+export type RejectSubCode =
+  | 'WINDOW_NOT_FOUND'
+  | 'TRIGGER_SYNTAX'
+  | 'INTENT_KIND_ILLEGAL'
+  | 'RULEKEY_ILLEGAL'
+  | 'DIVINITY_EXCEEDED'
+  | 'CTX_PATH_ILLEGAL'
+  | 'FIVE_DIM_STRAIGHT'
+  | 'UNSUPPORTED_CAPABILITY'
+  | 'WARN_CLAMPED'
+  | 'WARN_PREFIXED';
