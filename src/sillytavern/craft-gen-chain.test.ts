@@ -131,6 +131,41 @@ describe('buildCraftPatches', () => {
     expect((scrap!.value as any).quantity).toBe(3);
   });
 
+  it('④ item_gen 装备带 automata（S3 DSL 自由效果）→ add_item 透传 automata', () => {
+    const itemOutput: ItemGenOutput = {
+      skills: [],
+      equipment: [
+        {
+          slot: '武器',
+          name: '嗜血之刃',
+          description: '剑身残留嗜血意志',
+          stats: { 攻击力: 60 },
+          quality: '传说',
+          automata: [
+            {
+              id: '嗜血之刃.噬血',
+              name: '噬血',
+              source: '嗜血之刃',
+              owner: '<unitId>',
+              subscribe: 'damage.after',
+              trigger: 'ctx.damage.final > 0',
+              priority: 0,
+              divinity: 0,
+              intents: [{ kind: 'Heal', targetId: '<owner>', amount: 'ctx.damage.final * 0.1' }],
+            },
+          ],
+        },
+      ],
+      inventory: [],
+    };
+
+    const patches = buildCraftPatches(makeCraftOutput(), itemOutput, '理查德');
+    const addItem = ops(patches, 'add_item').find((p) => (p.value as any).name === '嗜血之刃');
+    expect(addItem).toBeTruthy();
+    expect((addItem!.value as any).automata).toHaveLength(1);
+    expect((addItem!.value as any).automata[0]).toMatchObject({ subscribe: 'damage.after' });
+  });
+
   it('制作失败 (success=false) → 空 patches，不产出任何物品', () => {
     const patches = buildCraftPatches(
       makeCraftOutput({ success: false, rating: '失败' }),

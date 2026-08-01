@@ -89,6 +89,65 @@ describe('createCombatState / toView', () => {
     );
     expect(total).toBe(0);
   });
+
+  it('🆕 参与者 automata 编译进 activeEffects：AI 产自由效果 DSL 在战斗中生效（S3 链路）', () => {
+    // 甲带一条 damage.after 吸血 automaton（trigger: ctx.damage.final > 0）
+    const bundle = mkBundle({
+      participants: [
+        mkParticipant('甲', {
+          automata: [
+            {
+              id: '嗜血之刃.噬血',
+              name: '噬血',
+              source: '嗜血之刃',
+              owner: '甲',
+              subscribe: 'damage.after',
+              trigger: 'ctx.damage.final > 0',
+              priority: 0,
+              divinity: 0,
+              intents: [{ kind: 'Heal', targetId: '甲', amount: 'ctx.damage.final * 0.1' }],
+            },
+          ],
+        }),
+        mkParticipant('乙', { side: 'enemy', characterId: '乙', name: '乙' }),
+      ],
+    });
+    const state = createCombatState(bundle);
+
+    // damage.after 窗口挂上甲的吸血 automaton
+    const afterMods = state.activeEffects.byWindow['damage.after'] ?? [];
+    expect(afterMods.length).toBeGreaterThan(0);
+    const ownerSet = new Set(afterMods.map((a) => a.owner));
+    expect(ownerSet.has('甲')).toBe(true);
+  });
+
+  it('🆕 automata 不合规（subscribe 越界）→ 编译期剔除，不误入 activeEffects（A3-3）', () => {
+    const bundle = mkBundle({
+      participants: [
+        mkParticipant('甲', {
+          automata: [
+            {
+              id: '坏效果',
+              name: '坏效果',
+              source: '测试',
+              owner: '甲',
+              subscribe: 'bad.window' as never,
+              trigger: 'true',
+              priority: 0,
+              divinity: 0,
+              intents: [{ kind: 'Heal', targetId: '甲', amount: 5 }],
+            },
+          ],
+        }),
+      ],
+    });
+    const state = createCombatState(bundle);
+    const total = Object.values(state.activeEffects.byWindow).reduce(
+      (n, list) => n + list.length,
+      0,
+    );
+    expect(total).toBe(0);
+  });
 });
 
 describe('applyPending（唯一写入 + HP clamp）', () => {

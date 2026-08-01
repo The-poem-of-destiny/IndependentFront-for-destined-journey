@@ -1404,6 +1404,50 @@ describe('StateManager', () => {
       expect(item.divinity).toBe(2);
     });
 
+    // 🆕 S3（2026-08-01 战斗 v3）：add_item 带 automata → 落库保留（AI 产自由效果 DSL）
+    it('add_item 带 automata → 落库保留（S3 DSL 自由效果链路）', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1',
+        name: '理查德',
+        type: 'player',
+        saveId: 's1',
+        inventory: [],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        {
+          op: 'add_item',
+          target: 'characters.理查德',
+          value: {
+            name: '嗜血之刃',
+            description: '剑身残留嗜血意志',
+            automata: [
+              {
+                id: '嗜血之刃.噬血',
+                name: '噬血',
+                source: '嗜血之刃',
+                owner: '<unitId>',
+                subscribe: 'damage.after',
+                trigger: 'ctx.damage.final > 0',
+                priority: 0,
+                divinity: 0,
+                intents: [{ kind: 'Heal', targetId: '<owner>', amount: 'ctx.damage.final * 0.1' }],
+              },
+            ],
+          },
+        },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(char.inventory).toHaveLength(1);
+      const item = char.inventory[0];
+      expect(item.automata).toHaveLength(1);
+      expect(item.automata![0]).toMatchObject({ subscribe: 'damage.after' });
+    });
+
     it('add_item 缺 name → 进 errors[]', async () => {
       const char = buildMockCharacter({
         id: 'uuid-1',

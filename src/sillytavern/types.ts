@@ -7,6 +7,9 @@
 import type { GameTime } from './time-system';
 // type-only 循环安全：effect-types 反向 import 本文件的 AttributeName/DivinityLevel/DamageType 也是 type-only
 import type { Modifier } from './effect-types';
+// type-only 循环安全：combat-v3/types.ts 反向 import 本文件的 CombatParticipant/StatusEffect 也是 type-only
+// EffectAutomaton 定义在 combat-v3/types.ts（v3 内核 DSL），这里只做类型引用不引入运行时
+import type { EffectAutomaton } from './combat-v3/types';
 
 // 音频子系统的接口/seam 类型拆分在 types-audio.ts（本文件已逾 800 行）。
 // 从这里统一再导出，「types.ts 是唯一类型来源」这条 import 路径依然成立。
@@ -779,6 +782,8 @@ export interface Skill {
   effects?: Record<string, string>;
   /** 🆕 脚本注册表: 脚本名→可执行代码 (AI写, 引擎执行) */
   scripts?: Record<string, string>;
+  /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（EffectAutomaton[]，来自 item_gen `<automaton>` JSON） */
+  automata?: EffectAutomaton[];
 }
 
 /** 背包物品 */
@@ -810,6 +815,9 @@ export interface InventoryItem {
   buffs?: StatusEffect[];
   /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备，缺省=0；§6.2 决策 d，冲突仲裁见 resolveDivinityConflict） */
   divinity?: DivinityLevel;
+  /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（EffectAutomaton[]，来自 item_gen `<automaton>` JSON）。
+   *   compileEffectProgram 编译进 activeEffects（走 18 窗口 + trigger 表达式 + intents 解释执行） */
+  automata?: EffectAutomaton[];
 }
 
 /** 状态效果 */
@@ -1928,6 +1936,9 @@ export interface CombatParticipant {
   /** 🆕 战斗 v3 修复：装备/技能的战斗修正声明（item_gen 产出，compileEffectProgram 编译进 activeEffects）。
    *    v2 时代由 combat-resolver 消费；M5 退役 v2 后此链路曾断裂，现由 v3 内核接管。 */
   modifiers?: Modifier[];
+  /** 🆕 战斗 v3 (S3 2026-08-01): 参与者的自由效果 DSL automaton（item_gen 产出 `<automaton>`，
+   *   characterToCombatParticipant 从已装备物品/技能收集，createCombatState 编译进 activeEffects） */
+  automata?: EffectAutomaton[];
   /** 当前回合可用资源 */
   attacksRemaining: number;
   actionsRemaining: number;
@@ -3096,6 +3107,8 @@ export interface CharGenOutput {
     buffs?: StatusEffect[];
     /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8 */
     divinity?: DivinityLevel;
+    /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton */
+    automata?: EffectAutomaton[];
   }>;
   /** 🆕 char_gen 自身生成的装备 */
   equipment: Array<{
@@ -3112,6 +3125,8 @@ export interface CharGenOutput {
     buffs?: StatusEffect[];
     /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备） */
     divinity?: DivinityLevel;
+    /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton */
+    automata?: EffectAutomaton[];
   }>;
   /** 🆕 char_gen 自身生成的背包物品 */
   inventory: Array<{
@@ -3126,6 +3141,8 @@ export interface CharGenOutput {
     buffs?: StatusEffect[];
     /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备） */
     divinity?: DivinityLevel;
+    /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton */
+    automata?: EffectAutomaton[];
   }>;
   /** 🆕 真机 fix(2026-07-18): char_gen 原始 XML 输出，供 item_gen 提取 <item_requests>/<skill_requests>/<equipment_requests> */
   rawXml?: string;
@@ -3155,6 +3172,8 @@ export interface ItemGenOutput {
     buffs?: StatusEffect[];
     /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（神位级技能才填，缺省=0） */
     divinity?: DivinityLevel;
+    /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（来自 item_gen `<automaton>` JSON） */
+    automata?: EffectAutomaton[];
   }>;
   /** 装备列表 */
   equipment: Array<{
@@ -3178,6 +3197,8 @@ export interface ItemGenOutput {
     buffs?: StatusEffect[];
     /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备，缺省=0；§6.2 决策 d） */
     divinity?: DivinityLevel;
+    /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（来自 item_gen `<automaton>` JSON） */
+    automata?: EffectAutomaton[];
   }>;
   /** 背包物品列表 */
   inventory: Array<{
@@ -3197,6 +3218,8 @@ export interface ItemGenOutput {
     buffs?: StatusEffect[];
     /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备，缺省=0；§6.2 决策 d） */
     divinity?: DivinityLevel;
+    /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（来自 item_gen `<automaton>` JSON） */
+    automata?: EffectAutomaton[];
   }>;
   /** 🆕 Phase 9: 登神要素 (含 scripts + effectDescriptions) */
   elements?: Array<

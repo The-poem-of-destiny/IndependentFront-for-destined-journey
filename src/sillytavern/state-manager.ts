@@ -794,6 +794,8 @@ export class StateManager {
         modifiers: value.modifiers,
         buffs: value.buffs,
         divinity: value.divinity,
+        // 🆕 战斗 v3 (S3 2026-08-01): <automaton> DSL 自由效果落库保留（compileEffectProgram 编译进 activeEffects）
+        automata: value.automata,
       });
     }
     await saveCharacter(char);

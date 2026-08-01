@@ -33,6 +33,8 @@ import type {
 import { createDefaultCharacterState } from './types';
 import type { Modifier } from './effect-types';
 import type { DivinityLevel } from './types';
+// 🆕 战斗 v3 (S3 2026-08-01): <automaton> 解析 → EffectAutomaton[]（v3 内核 DSL 类型）
+import type { EffectAutomaton } from './combat-v3/types';
 import { scanCharDetects } from './marker-protocol';
 import { buildAgentMessages } from './agent-templates';
 import { getTierConfig, calcResources } from './tier-constants';
@@ -340,6 +342,10 @@ export function assembleCharacterState(
     level: 1,
     effects: s.effects,
     scripts: s.scripts,
+    // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传到 Skill 落库
+    ...((s as any).automata && (s as any).automata.length > 0
+      ? { automata: (s as any).automata }
+      : {}),
   }));
 
   // 合并装备: char_gen 自产优先
@@ -364,8 +370,11 @@ export function assembleCharacterState(
     ...(e.modifiers ? { modifiers: e.modifiers } : {}),
     ...(e.buffs ? { buffs: e.buffs } : {}),
     ...(e.divinity !== undefined ? { divinity: e.divinity } : {}),
+    // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传到 InventoryItem（v3 编译进 activeEffects）
+    ...((e as any).automata && (e as any).automata.length > 0
+      ? { automata: (e as any).automata }
+      : {}),
   }));
-
   // 合并背包: char_gen 自产优先
   // M3: inventory 物品 effects/scripts 无损传递，废除 id 生成（#45）
   const charInv = charData.inventory ?? [];
@@ -386,6 +395,10 @@ export function assembleCharacterState(
       ...(inv.modifiers ? { modifiers: inv.modifiers } : {}),
       ...(inv.buffs ? { buffs: inv.buffs } : {}),
       ...(inv.divinity !== undefined ? { divinity: inv.divinity } : {}),
+      // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传到 InventoryItem
+      ...((inv as any).automata && (inv as any).automata.length > 0
+        ? { automata: (inv as any).automata }
+        : {}),
     })),
     // M3: 装备产物并入 inventory（equippedSlot 非空 = 已穿戴）
     ...equippedItems,
@@ -755,6 +768,75 @@ function parseModifiersXML(innerContent: string): Modifier[] {
 }
 
 /**
+ * 🆕 战斗 v3 (S3 2026-08-01): 从元素 innerContent 提取 <automaton> 子元素，按行 parse JSON 成 EffectAutomaton[]。
+ *
+ * 格式（item_gen systemPrompt §输出格式，S4 将给具体模板）:
+ *   <automaton>
+ *     {"id":"剑.嗜血","name":"嗜血","source":"剑","owner":"<unitId>","subscribe":"damage.after","trigger":"ctx.damage.final > 0","priority":0,"divinity":0,"intents":[{"kind":"Heal","targetId":"<owner>","amount":"ctx.damage.final * 0.1"}]}
+ *   </automaton>
+ *
+ * 容错（复用 parseModifiersXML 模式）:
+ * - 支持 <automaton/> 自闭合（视为空）
+ * - 跳过空行 / `<!-- 注释 -->` / `// 注释` 行
+ * - 单行 parse 失败 → console.warn 跳过该行，不抛（AI 输出形状不可控，宽容归一）
+ * - 裸 JSON 行（无 `subscribe` 字段）→ 跳过并 warn（非 automaton 形状）
+ *
+ * @param innerContent 元素内部文本（<equip>/<skill>/<item> 的 innerContent）
+ * @returns parse 出的 EffectAutomaton[]（编译期校验由 compileEffectProgram 做，此处只做形状粗判）
+ */
+function parseAutomataXML(innerContent: string): EffectAutomaton[] {
+  // 提取 <automaton>...</automaton> 块（不支持嵌套，automaton 是叶子元素）
+  const blockMatch = innerContent.match(/<automaton\b[^>]*>([\s\S]*?)<\/automaton>/i);
+  if (!blockMatch) {
+    if (/<automaton\b[^>]*\/>/i.test(innerContent)) return [];
+    return [];
+  }
+  const block = blockMatch[1];
+
+  const automata: EffectAutomaton[] = [];
+  const lines = block.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i].trim();
+    if (!raw) continue;
+    if (raw.startsWith('<!--') || raw.startsWith('//') || raw.startsWith('/*')) continue;
+    const commentIdx = raw.indexOf('//');
+    const jsonCandidate = commentIdx > 0 ? raw.slice(0, commentIdx).trim() : raw;
+
+    const braceStart = jsonCandidate.indexOf('{');
+    const braceEnd = jsonCandidate.lastIndexOf('}');
+    if (braceStart < 0 || braceEnd <= braceStart) {
+      console.warn(`[item_gen] <automaton> 第 ${i + 1} 行非 JSON 对象，跳过: ${raw.slice(0, 100)}`);
+      continue;
+    }
+    const jsonStr = jsonCandidate.slice(braceStart, braceEnd + 1);
+
+    let obj: unknown;
+    try {
+      obj = JSON.parse(jsonStr);
+    } catch (e) {
+      console.warn(
+        `[item_gen] <automaton> 第 ${i + 1} 行 JSON parse 失败，跳过: ${(e as Error).message} | 原文: ${raw.slice(0, 120)}`,
+      );
+      continue;
+    }
+
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      console.warn(`[item_gen] <automaton> 第 ${i + 1} 行非对象，跳过: ${raw.slice(0, 100)}`);
+      continue;
+    }
+    // 必须有 subscribe + intents 才算 automaton 形状（判别字段，对齐 EffectAutomaton）
+    if (!('subscribe' in obj) || !('intents' in obj)) {
+      console.warn(
+        `[item_gen] <automaton> 第 ${i + 1} 行缺 subscribe/intents 字段，跳过: ${raw.slice(0, 100)}`,
+      );
+      continue;
+    }
+    automata.push(obj as unknown as EffectAutomaton);
+  }
+  return automata;
+}
+
+/**
  * 解析 char_gen Agent 的输出。
  * 支持两种格式:
  * 1. JSON（旧格式，向后兼容）
@@ -1097,6 +1179,12 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
     // 战斗 v2 (M4 5.5b): JSON 兜底路径也校验 modifiers/buffs（AI 偶尔直出 JSON，同样要守铁律）
     const itModifiers: unknown[] = Array.isArray(it.modifiers) ? it.modifiers : [];
     const itBuffs: unknown[] = Array.isArray(it.buffs) ? it.buffs : [];
+    // 🆕 战斗 v3 (S3 2026-08-01): JSON 兜底也收 automata（形状粗判 subscribe+intents，编译期校验由 compileEffectProgram 做）
+    const itAutomata: EffectAutomaton[] = Array.isArray(it.automata)
+      ? it.automata.filter(
+          (a: any) => a && typeof a === 'object' && 'subscribe' in a && 'intents' in a,
+        )
+      : [];
     const combat: {
       modifiers: Modifier[];
       buffs: NonNullable<ItemGenOutput['equipment'][number]['buffs']>;
@@ -1125,6 +1213,8 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
         ...(combat.modifiers.length > 0 ? { modifiers: combat.modifiers } : {}),
         ...(combat.buffs.length > 0 ? { buffs: combat.buffs } : {}),
         ...(elemDivinity !== undefined ? { divinity: elemDivinity } : {}),
+        // 🆕 战斗 v3 (S3 2026-08-01): automata 透传（JSON 兜底路径）
+        ...(itAutomata.length > 0 ? { automata: itAutomata } : {}),
       });
     } else if (isEquip) {
       out.equipment.push({
@@ -1140,6 +1230,8 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
         ...(combat.modifiers.length > 0 ? { modifiers: combat.modifiers } : {}),
         ...(combat.buffs.length > 0 ? { buffs: combat.buffs } : {}),
         ...(elemDivinity !== undefined ? { divinity: elemDivinity } : {}),
+        // 🆕 战斗 v3 (S3 2026-08-01): automata 透传（JSON 兜底路径）
+        ...(itAutomata.length > 0 ? { automata: itAutomata } : {}),
       } as ItemGenOutput['equipment'][number]);
     } else {
       out.inventory.push({
@@ -1153,6 +1245,8 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
         ...(combat.modifiers.length > 0 ? { modifiers: combat.modifiers } : {}),
         ...(combat.buffs.length > 0 ? { buffs: combat.buffs } : {}),
         ...(elemDivinity !== undefined ? { divinity: elemDivinity } : {}),
+        // 🆕 战斗 v3 (S3 2026-08-01): automata 透传（JSON 兜底路径）
+        ...(itAutomata.length > 0 ? { automata: itAutomata } : {}),
       } as ItemGenOutput['inventory'][number]);
     }
   }
@@ -1213,6 +1307,8 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
       rawModifiers,
       undefined,
     );
+    // 🆕 战斗 v3 (S3 2026-08-01): 提取 <automaton> 子元素 → EffectAutomaton[]（编译期校验由 compileEffectProgram 做）
+    const rawAutomata = parseAutomataXML(innerContent);
 
     // 描述 = 纯文本部分（去除所有嵌套子标签，包括 AI 自造的 <description>/<notes>/<ability> 等）
     // 优先取 <description> 子标签的文本内容，若无则剥所有标签留纯文本
@@ -1222,7 +1318,9 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
     const descText = innerContent
       .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '')
       .replace(/<modifiers\b[^>]*>[\s\S]*?<\/modifiers>/gi, '')
-      .replace(/<modifiers\b[^>]*\/>/gi, '');
+      .replace(/<modifiers\b[^>]*\/>/gi, '')
+      .replace(/<automaton\b[^>]*>[\s\S]*?<\/automaton>/gi, '')
+      .replace(/<automaton\b[^>]*\/>/gi, '');
     const description = descSubTag
       ? descSubTag[1].trim()
       : descText.replace(/<\/?[a-z_][\w-]*[^>]*>/gi, '').trim();
@@ -1247,6 +1345,8 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
       ...(combat.modifiers.length > 0 ? { modifiers: combat.modifiers } : {}),
       ...(combat.buffs.length > 0 ? { buffs: combat.buffs } : {}),
       ...(combat.divinity !== undefined ? { divinity: combat.divinity } : {}),
+      // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传（编译期校验由 compileEffectProgram 做）
+      ...(rawAutomata.length > 0 ? { automata: rawAutomata } : {}),
     });
   }
   return results;
@@ -1282,11 +1382,15 @@ function parseEquipmentXML(xml: string): ItemGenOutput['equipment'] {
       rawModifiers,
       undefined,
     );
+    // 🆕 战斗 v3 (S3 2026-08-01): 提取 <automaton> 子元素 → EffectAutomaton[]
+    const rawAutomata = parseAutomataXML(innerContent);
     // 预剥离 effect/script/modifiers 块，再 stripInnerTags 取纯文本描述
     const descText = innerContent
       .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '')
       .replace(/<modifiers\b[^>]*>[\s\S]*?<\/modifiers>/gi, '')
-      .replace(/<modifiers\b[^>]*\/>/gi, '');
+      .replace(/<modifiers\b[^>]*\/>/gi, '')
+      .replace(/<automaton\b[^>]*>[\s\S]*?<\/automaton>/gi, '')
+      .replace(/<automaton\b[^>]*\/>/gi, '');
     const qualityRaw = attrs['quality'];
     results.push({
       slot: attrs['slot'] ?? '饰品',
@@ -1300,6 +1404,8 @@ function parseEquipmentXML(xml: string): ItemGenOutput['equipment'] {
       ...(combat.modifiers.length > 0 ? { modifiers: combat.modifiers } : {}),
       ...(combat.buffs.length > 0 ? { buffs: combat.buffs } : {}),
       ...(combat.divinity !== undefined ? { divinity: combat.divinity } : {}),
+      // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传
+      ...(rawAutomata.length > 0 ? { automata: rawAutomata } : {}),
     });
   }
   return results;
@@ -1329,11 +1435,15 @@ function parseInventoryXML(xml: string): ItemGenOutput['inventory'] {
       rawModifiers,
       undefined,
     );
+    // 🆕 战斗 v3 (S3 2026-08-01): 提取 <automaton> 子元素 → EffectAutomaton[]
+    const rawAutomata = parseAutomataXML(innerContent);
     // 预剥离 effect/script/modifiers 块，再 stripInnerTags 取纯文本描述
     const descText = innerContent
       .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '')
       .replace(/<modifiers\b[^>]*>[\s\S]*?<\/modifiers>/gi, '')
-      .replace(/<modifiers\b[^>]*\/>/gi, '');
+      .replace(/<modifiers\b[^>]*\/>/gi, '')
+      .replace(/<automaton\b[^>]*>[\s\S]*?<\/automaton>/gi, '')
+      .replace(/<automaton\b[^>]*\/>/gi, '');
     const rarityRaw = attrs['rarity'];
     results.push({
       name: attrs['name'] ?? '未命名物品',
@@ -1346,6 +1456,8 @@ function parseInventoryXML(xml: string): ItemGenOutput['inventory'] {
       ...(combat.modifiers.length > 0 ? { modifiers: combat.modifiers } : {}),
       ...(combat.buffs.length > 0 ? { buffs: combat.buffs } : {}),
       ...(combat.divinity !== undefined ? { divinity: combat.divinity } : {}),
+      // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传
+      ...(rawAutomata.length > 0 ? { automata: rawAutomata } : {}),
     });
   }
   return results;

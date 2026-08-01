@@ -23,6 +23,7 @@ import type {
   CombatType,
   ReadonlyHookSet,
 } from './types';
+import type { EffectAutomaton } from './combat-v3/types';
 import type { EventBus } from './game-event';
 
 // ========== CombatClient / CombatClientResult（原出自 combat-runner.ts） ==========
@@ -156,6 +157,14 @@ export function characterToCombatParticipant(
     .filter((i) => i.equippedSlot)
     .flatMap((i) => i.modifiers ?? []);
 
+  // 🆕 战斗 v3 (S3 2026-08-01): 收集已装备物品 + 技能的 automata（AI 产的自由效果 DSL）
+  //    → CombatParticipant.automata，由 createCombatState 编译进 activeEffects。
+  //    装备 automata 直接收；技能只收被动（主动技能在战斗中由 $combat action 触发，不在被动效果里）。
+  const equippedAutomata: EffectAutomaton[] = [
+    ...char.inventory.filter((i) => i.equippedSlot).flatMap((i) => i.automata ?? []),
+    ...(char.skills ?? []).filter((s) => s.type === 'passive').flatMap((s) => s.automata ?? []),
+  ];
+
   return {
     characterId: char.id,
     name: char.name,
@@ -180,6 +189,7 @@ export function characterToCombatParticipant(
     statusEffects: char.statusEffects,
     weaponAtk: weapon?.stats?.atk ?? 0,
     modifiers: equippedModifiers.length > 0 ? equippedModifiers : undefined,
+    automata: equippedAutomata.length > 0 ? equippedAutomata : undefined,
     side,
     canAct: char.hp > 0,
     ...overrides,

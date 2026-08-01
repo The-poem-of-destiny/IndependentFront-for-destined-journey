@@ -1431,6 +1431,75 @@ describe('parseItemGenOutput — <modifiers> 子元素解析（6 大类 modifier
   });
 });
 
+describe('parseItemGenOutput — <automaton> 子元素解析（战斗 v3 S3）', () => {
+  it('应解析 <equip> 内 <automaton> JSON → automata[]，描述不被污染', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><equipment>',
+      '<equip slot="武器" name="嗜血之刃" quality="传说" stats="攻击力:60">',
+      '  剑身残留嗜血意志。',
+      '  <automaton>',
+      '    {"id":"嗜血之刃.噬血","name":"噬血","source":"嗜血之刃","owner":"<unitId>","subscribe":"damage.after","trigger":"ctx.damage.final > 0","priority":0,"divinity":0,"intents":[{"kind":"Heal","targetId":"<owner>","amount":"ctx.damage.final * 0.1"}]}',
+      '  </automaton>',
+      '</equip>',
+      '</equipment></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment).toHaveLength(1);
+    const auts = out.equipment[0].automata;
+    expect(auts).toBeDefined();
+    expect(auts).toHaveLength(1);
+    expect(auts![0]).toMatchObject({ subscribe: 'damage.after', trigger: 'ctx.damage.final > 0' });
+    expect(auts![0].intents[0]).toMatchObject({ kind: 'Heal' });
+    // 描述不被 automaton JSON 污染
+    expect(out.equipment[0].description.trim()).toBe('剑身残留嗜血意志。');
+    expect(out.equipment[0].description).not.toContain('subscribe');
+  });
+
+  it('<skill> 内 <automaton> 也应解析', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><skills>',
+      '<skill name="猎杀本能" type="passive">',
+      '  对重伤目标本能追击。',
+      '  <automaton>{"id":"猎杀本能.残血","name":"残血追击","source":"猎杀本能","owner":"<unitId>","subscribe":"check.hit","trigger":"ctx.target.hpPercent < 0.5","priority":0,"divinity":0,"intents":[{"kind":"AddModifier","slot":"hitBonus","value":3,"scope":"whole_action","targetId":"<owner>"}]}</automaton>',
+      '</skill>',
+      '</skills></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.skills[0].automata).toHaveLength(1);
+    expect(out.skills[0].automata![0].subscribe).toBe('check.hit');
+  });
+
+  it('无 <automaton> 子元素时 automata 为 undefined（回归）', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><equipment>',
+      '<equip slot="武器" name="木棍" stats="攻击力:2">一根普通木棍。</equip>',
+      '</equipment></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment[0].automata).toBeUndefined();
+  });
+
+  it('缺 subscribe/intents 的 JSON 行被跳过（形状粗判），不中断链路', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><equipment>',
+      '<equip slot="武器" name="测试剑" stats="攻击力:2">',
+      '  <automaton>',
+      '    {"foo":"bar"}',
+      '    {"id":"测试剑.有效","name":"有效","source":"测试剑","owner":"<unitId>","subscribe":"round.open","trigger":"true","priority":0,"divinity":0,"intents":[{"kind":"Heal","targetId":"<owner>","amount":5}]}',
+      '  </automaton>',
+      '</equip>',
+      '</equipment></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment[0].automata).toHaveLength(1);
+    expect(out.equipment[0].automata![0].subscribe).toBe('round.open');
+  });
+});
+
 describe('parseItemGenOutput — 校验接入（违规 warn 不中断）', () => {
   it('非检定类直接改五维（铁律 #265160）→ 违规 modifier 被丢弃，合规的留下，链路不中断', async () => {
     const { parseItemGenOutput } = await import('./char-gen-agent');

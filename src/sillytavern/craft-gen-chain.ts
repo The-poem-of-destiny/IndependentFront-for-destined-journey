@@ -472,6 +472,8 @@ export function buildCraftPatches(
           ...(equip.modifiers ? { modifiers: equip.modifiers } : {}),
           ...(equip.buffs ? { buffs: equip.buffs } : {}),
           ...(equip.divinity !== undefined ? { divinity: equip.divinity } : {}),
+          // 🆕 战斗 v3 (S3 2026-08-01): <automaton> DSL 自由效果透传
+          ...(equip.automata && equip.automata.length > 0 ? { automata: equip.automata } : {}),
         },
       });
     }
@@ -491,6 +493,8 @@ export function buildCraftPatches(
           ...(inv.modifiers ? { modifiers: inv.modifiers } : {}),
           ...(inv.buffs ? { buffs: inv.buffs } : {}),
           ...(inv.divinity !== undefined ? { divinity: inv.divinity } : {}),
+          // 🆕 战斗 v3 (S3 2026-08-01): <automaton> DSL 自由效果透传
+          ...(inv.automata && inv.automata.length > 0 ? { automata: inv.automata } : {}),
         },
       });
     }

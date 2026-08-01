@@ -157,16 +157,19 @@ export function createCombatState(bundle: CombatDefinitionBundle): CombatState {
   // 🆕 战斗 v3 修复：编译参与者携带的 modifiers（item_gen 装备词条）进 activeEffects。
   //     v2 时代由 combat-resolver 消费；M5 退役 v2 后此链路曾断——现由内核接管，
   //     让「命中+5 / 附加流血 / 反弹 30%」等装备效果在战斗中真正生效。
+  // 🆕 战斗 v3 (S3 2026-08-01)：一并编译参与者携带的 automata（AI 产自由效果 DSL，item_gen `<automaton>`）。
   const participantEffects: CompiledAutomaton[] = [];
   for (const p of bundle.participants) {
     const mods = p.modifiers ?? [];
-    if (mods.length === 0) continue;
+    const auts = p.automata ?? [];
+    if (mods.length === 0 && auts.length === 0) continue;
     const compiled = compileEffectProgram({
       owner: p.characterId,
       source: p.name,
       idPrefix: p.characterId,
       divinity: 0,
       modifiers: mods,
+      automata: auts,
     });
     participantEffects.push(...compiled.automata);
   }
