@@ -27,10 +27,12 @@ import {
   getEntriesForAgent,
   filterActiveEntries,
   renderWorldBookEntries,
+  prerenderWorldBookEntries,
 } from './worldbook-loader';
 import { getPreset, assemblePresetContent } from './preset-loader';
 import { buildZoneSection, buildZoneContext } from './context-visibility';
 import { resolveTemplateWithGlobals } from './template-resolver';
+import type { EjsCapabilityInput } from './ejs-capabilities';
 import { getDefaultTemplate } from './placeholder-registry';
 
 // ========== 通用工具 ==========
@@ -172,10 +174,65 @@ export function buildEjsHistoryText(
  *   `draft` 就是返回值里那个对象引用（求值写入后调用方拿到最终态）；`base` 是另一份独立克隆。
  *   往 Map 里 set **不算 mutate 原 ctx 的既有字段**（容器由上游创建并共享）。
  */
+/**
+ * 组装能力面输入（能力面 §3.3-§3.12）。
+ *
+ * 🔴 `lore` 的可见性是**安全相关**的：`getEntriesForAgent` 已经按 Phase 8 分区过滤，
+ * 这里只在它的产出里查 —— EJS 绝不能成为绕过可见性模型的旁路。
+ */
+function buildCapabilityInput(
+  agentId: string,
+  ctx: AgentContext,
+  config: AgentConfig | undefined,
+  configs: AgentConfig[] | undefined,
+  worldBooks: WorldBook[] | undefined,
+): EjsCapabilityInput {
+  const visible =
+    configs && worldBooks
+      ? filterActiveEntries(getEntriesForAgent(agentId, configs, worldBooks))
+      : [];
+  const bookOf = new Map<number, string>();
+  if (worldBooks) {
+    for (const book of worldBooks) {
+      for (const e of book.entries ?? []) bookOf.set(e.uid, book.name);
+    }
+  }
+
+  return {
+    history: (ctx.history ?? []).map((m) => ({ role: m.role, content: m.content ?? '' })),
+    characters: ctx.characters,
+    affections: ctx.affections,
+    gameTime: ctx.gameTime,
+    quests: ctx.quests,
+    focusQuest: ctx.focusQuest,
+    turn: ctx.history?.length ?? 0,
+    charLoreBook: config?.worldBookIds?.[0] ?? '',
+    projectId: 'builtin',
+    engineVersion: undefined,
+    lore: {
+      get: (entryName, bookName) => {
+        const name = String(entryName ?? '');
+        const hit = visible.find(
+          (e) => e.name === name && (bookName === undefined || bookOf.get(e.uid) === bookName),
+        );
+        return hit ? (hit.content ?? '') : null;
+      },
+      list: (bookName) =>
+        visible
+          .filter((e) => bookOf.get(e.uid) === String(bookName ?? ''))
+          .map((e) => e.name ?? ''),
+    },
+    notify: ctx.ejsNotify,
+    log: ctx.ejsLog,
+  };
+}
+
 function buildEjsPassContext(
   agentId: string,
   ctx: AgentContext,
   config: AgentConfig | undefined,
+  configs?: AgentConfig[],
+  worldBooks?: WorldBook[],
 ): NonNullable<AgentContext['ejsPass']> {
   const sysVars = (ctx.variables?.sys ?? {}) as Record<string, any>;
   const draft = deepCloneVars(sysVars);
@@ -188,6 +245,9 @@ function buildEjsPassContext(
     stats: deepCloneVars(ctx.statData ?? {}),
     vars: draft,
     historyText: buildEjsHistoryText(agentId, ctx, config),
+    // 种子**不掺 agentId**：同一回合多个 Agent 装配同一条目时应看到同一个掷骰结果，
+    // 否则「战斗 Agent 与叙事 Agent 对同一事件掷出不同的数」——那是分裂，不是随机（设计 §7）。
+    seed: ctx.ejsSeed,
   };
 }
 
@@ -609,10 +669,13 @@ export function buildAgentMessages(
   // 关键: 不可 mutate 原 ctx (orchestrator 同 stage 多 agent 共享), 用浅拷贝注入 agentConfig
   // 工坊 P2: 同时挂本 pass 的 EJS 求值上下文（stats 克隆 + vars 草稿 + 历史检索面），
   // 供 {{LORE_BOOK}} resolver / buildFallbackMessages 消费。
+  // 🔴 `ctx.ejsPass` 已存在 → **复用**，不重建。
+  //    `buildAgentMessagesAsync` 会先建好 pass 并跑完预渲染（含 vars 草稿写入 + ejsVarsDrafts 登记）；
+  //    这里若重建，那份草稿连同 EJS 的写会被一个空的新草稿顶掉，静默丢状态。
   const tplCtx: AgentContext = {
     ...ctx,
     ...(config ? { agentConfig: config } : {}),
-    ejsPass: buildEjsPassContext(agentId, ctx, config),
+    ejsPass: ctx.ejsPass ?? buildEjsPassContext(agentId, ctx, config, configs, worldBooks),
   };
 
   // Step 1: Get the template string
@@ -720,6 +783,60 @@ export function buildAgentMessages(
   return [{ role: 'system', content: resolved }];
 }
 
+/**
+ * 异步装配入口 —— **生产路径用这个**（能力面设计 §11 切片 T1）。
+ *
+ * 形态是「**异步预渲染 + 同步 resolver**」，刻意不把整条模板链改异步：
+ *
+ * ```
+ * 建 pass 上下文 → await 预渲染世界书（唯一的异步点） → 灌进 ejsPass.loreRender
+ *   → 同步 buildAgentMessages（{{LORE_BOOK}} resolver 只从 memo 挑段，不再求值）
+ * ```
+ *
+ * 收益：`PlaceholderResolver` / `resolveTemplate` 的签名**一个字不改**（否则 227 个单测跟着塌），
+ * 而 `await getwi(...)` 这类 async 条目能跑了，将来切 QuickJS 后端也只动预渲染这一步。
+ *
+ * ⚠️ 同步的 `buildAgentMessages` 仍然可用（测试/极端路径），只是遇到 async 条目会按 D8 回退原文。
+ */
+export async function buildAgentMessagesAsync(
+  agentId: string,
+  ctx: AgentContext,
+  configs?: AgentConfig[],
+  worldBooks?: WorldBook[],
+  presets?: AgentPreset[],
+  localParams?: Record<string, string>,
+): Promise<Array<{ role: string; content: string }> | null> {
+  if (!getAgentTemplate(agentId)) return null;
+
+  const config = configs?.find((c) => c.agentId === agentId);
+  const ejsPass = buildEjsPassContext(agentId, ctx, config, configs, worldBooks);
+
+  if (configs && worldBooks) {
+    const activeEntries = filterActiveEntries(getEntriesForAgent(agentId, configs, worldBooks));
+    const rendered = await prerenderWorldBookEntries(activeEntries, ejsPass);
+    ejsPass.loreRender = {
+      agentId,
+      staticText: rendered.staticText,
+      dynamicText: rendered.dynamicText,
+      fallbackEntries: rendered.fallbackEntries,
+    };
+    if (rendered.fallbackEntries.length > 0) {
+      console.warn(
+        `[LORE_BOOK] agent=${agentId} 有 ${rendered.fallbackEntries.length} 个条目 EJS 失败、已回退原文注入`,
+      );
+    }
+  }
+
+  return buildAgentMessages(
+    agentId,
+    { ...ctx, ejsPass },
+    configs,
+    worldBooks,
+    presets,
+    localParams,
+  );
+}
+
 /** Legacy fallback for agents without templates (backward compatibility) */
 function buildFallbackMessages(
   agentId: string,
@@ -763,7 +880,11 @@ function buildFallbackMessages(
       vars: {},
       historyText: '',
     };
-    const { staticText, dynamicText } = renderWorldBookEntries(activeEntries, ejsCtx);
+    // 预渲染 memo 优先（buildAgentMessagesAsync 已跑过，含 async 条目）——
+    // 没有 memo 才同步求值，那条路遇到 `await` 条目会按 D8 回退原文。
+    const memo = tplCtx.ejsPass?.loreRender;
+    const { staticText, dynamicText } =
+      memo && memo.agentId === agentId ? memo : renderWorldBookEntries(activeEntries, ejsCtx);
     worldBookSection = [staticText, dynamicText].filter(Boolean).join('\n\n');
   }
 

@@ -30,7 +30,7 @@ import type {
 } from './types';
 import { AgentClient } from './agent-client';
 import type { ChatRequest, StreamCallbacks } from './agent-client';
-import { buildAgentMessages, getAgentTemplate } from './agent-templates';
+import { buildAgentMessagesAsync, getAgentTemplate } from './agent-templates';
 import { scanMarkers } from './marker-protocol';
 import { recallMemories } from './memory-store';
 import { buildZoneContext } from './context-visibility';
@@ -410,7 +410,7 @@ export class AgentOrchestrator {
 
     // 构建 messages (Phase 8: 四部分拼接)
     const configsArr = Array.from(this.agentConfigs.values());
-    const messages = buildAgentMessages(
+    const messages = await buildAgentMessagesAsync(
       config.agentId,
       this.context,
       configsArr,
@@ -532,7 +532,7 @@ export class AgentOrchestrator {
 
     // 构建 messages
     const configsArr = Array.from(this.agentConfigs.values());
-    const messages = buildAgentMessages(
+    const messages = await buildAgentMessagesAsync(
       config.agentId,
       this.context,
       configsArr,

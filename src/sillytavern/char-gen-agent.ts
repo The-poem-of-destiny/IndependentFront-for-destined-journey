@@ -36,7 +36,7 @@ import type { DivinityLevel } from './types';
 // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 解析 → EffectAutomaton[]（v3 内核 DSL 类型）
 import type { EffectAutomaton } from './combat-v3/types';
 import { scanCharDetects } from './marker-protocol';
-import { buildAgentMessages } from './agent-templates';
+import { buildAgentMessagesAsync } from './agent-templates';
 import { getTierConfig, calcResources } from './tier-constants';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
 import { normalizeSlot } from './field-enums';
@@ -171,7 +171,7 @@ export async function callCharGenAgent(
   // The marker body is passed via charLocalParams (CHAR_DETECT / CHAR_GEN_REQUEST).
   // 真机修(2026-07-17): configs/worldBooks/presets 透传 — 此前恒 undefined，
   // char_gen 的 systemPrompt 退化为一行 stub + {{LORE_BOOK}} 恒空（命名/格式纪律全失效）。
-  const messages = buildAgentMessages(
+  const messages = await buildAgentMessagesAsync(
     'char_gen',
     request.context,
     request.configs,
@@ -259,7 +259,7 @@ export async function callItemGenAgent(
     if (equipReqMatch) charItemLocalParams.EQUIP_REQUEST = equipReqMatch[1].trim();
   }
 
-  const messages = buildAgentMessages(
+  const messages = await buildAgentMessagesAsync(
     'item_gen',
     contextWithCharData,
     request.configs,
