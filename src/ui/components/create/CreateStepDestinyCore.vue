@@ -27,8 +27,8 @@ function summary(content: string, maxLen = 200): string {
   <section class="step-core">
     <h2 class="step-title">命定核心与工坊内容</h2>
     <p class="step-desc">
-      这一步有两条彼此独立的选择：<b>命定核心</b>只能选一枚，<b>工坊项目</b>可以勾多个。
-      工坊项目不是命定核心的候选项，两者不互相替代。
+      <b>命定核心</b>只能选一枚 —— 内置的与工坊标了「系统」的项目在同一份名单里挑。
+      其余<b>工坊项目</b>是附加内容，可以勾多个。
     </p>
 
     <!-- ═══ 轴一：命定核心（单选） ═══ -->
@@ -112,6 +112,42 @@ function summary(content: string, maxLen = 200): string {
             </div>
           </div>
         </div>
+
+        <!-- ═══ 工坊命定核心：与内置的**同一份名单、同一个单选槽** ═══
+             标了「系统」的工坊项目就是命定核心候选，不是附加内容。它们此前混在下方
+             多选区里，于是选中一个既过不了本步的必选闸门（按钮永远不亮），语义上
+             也说不通 —— 两个命定核心同时生效，设定直接打架。 -->
+        <div
+          v-for="opt in store.workshopSystemOptions"
+          :key="opt.projectId"
+          class="core-row core-row-workshop"
+          :class="{ selected: store.selectedWorkshopCoreProjectId === opt.projectId }"
+          role="radio"
+          :aria-checked="store.selectedWorkshopCoreProjectId === opt.projectId"
+          tabindex="0"
+        >
+          <div
+            class="core-row-body"
+            @click="store.selectWorkshopCore(opt.projectId)"
+            @keydown.enter="store.selectWorkshopCore(opt.projectId)"
+            @keydown.space.prevent="store.selectWorkshopCore(opt.projectId)"
+          >
+            <span
+              class="core-radio"
+              :class="{ checked: store.selectedWorkshopCoreProjectId === opt.projectId }"
+            />
+            <span class="core-name">{{ opt.name }}</span>
+            <span class="core-src">工坊 · {{ opt.authorName || '佚名' }}</span>
+          </div>
+          <div class="core-preview open">
+            <div class="core-preview-inner">
+              {{ opt.description || '作者未填写简介。' }}
+              <span v-if="opt.entryUids.length === 0" class="core-warn">
+                （这个项目没有世界书条目 —— 选它不会带来任何设定内容）
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -125,13 +161,13 @@ function summary(content: string, maxLen = 200): string {
         <span class="axis-badge badge-multi">多选 · 可选</span>
       </h3>
       <p class="axis-desc">
-        来自创意工坊的社区内容，勾选后其全部世界书条目随本存档启用。
-        部分项目可能自带命定核心，与上方内置核心重叠 —— 请对照标签与简介自行判断。
+        来自创意工坊的社区内容，勾选后其全部世界书条目随本存档启用。 标了「系统」的项目不在这里 ——
+        它们是命定核心候选，已并入上方单选名单。
       </p>
       <WorkshopEnableList
-        :options="store.workshopOptions"
+        :options="store.workshopExtraOptions"
         :selected="store.enabledWorkshopProjectIds"
-        empty-text="尚未安装工坊项目 —— 可在首页「创意工坊」中安装"
+        empty-text="没有可作为附加内容的工坊项目 —— 可在首页「创意工坊」中安装"
         @toggle="store.toggleWorkshopProject"
       />
     </div>
@@ -282,6 +318,18 @@ function summary(content: string, maxLen = 200): string {
 }
 
 /* ── 列表容器 ── */
+/* 工坊来源的核心行：同一份名单，但标明出处 —— 社区内容与内置内容信任域不同 */
+.core-row-workshop .core-src {
+  margin-left: auto;
+  padding-left: var(--theme-spacing-sm);
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+  white-space: nowrap;
+}
+.core-warn {
+  color: var(--theme-warning);
+}
+
 .core-list {
   display: flex;
   flex-direction: column;

@@ -129,7 +129,9 @@ export const useCreateStore = defineStore('create', () => {
       race.value !== '' &&
       remainingBP.value >= 0 &&
       remainingAP.value >= 0,
-    2: selectedSystemCoreEntryUid.value !== null, // 命定核心
+    // 命定核心：内置条目**或**工坊系统项目，二者择一即可放行。
+    // 只认前者时，选了工坊核心的用户会卡死在这一步（按钮永远不亮，且没有任何提示）。
+    2: selectedSystemCoreEntryUid.value !== null || selectedWorkshopCoreProjectId.value !== null,
     3: true, // 角色启用（可选）
     4: true, // 装备选择
     5: true, // 背景故事
@@ -377,8 +379,45 @@ export const useCreateStore = defineStore('create', () => {
   /** 已装工坊项目（含各自条目 uid），由 {@link loadWorldBookEntries} 填充 */
   const workshopOptions = ref<WorkshopEnableOption[]>([]);
 
-  /** 勾选的工坊项目 id */
+  /** 勾选的工坊项目 id（**不含**被选作命定核心的那个，见下） */
   const enabledWorkshopProjectIds = ref<Set<string>>(new Set());
+
+  /**
+   * 上游标了「系统」标签的工坊项目 —— 它们是**命定核心候选**，不是附加内容。
+   *
+   * ★ 分成两拨的理由: 命定核心是单选且必选（`stepValid[2]`），而附加内容是多选且
+   * 可选。此前工坊项目一律进多选那拨，于是「选了一个工坊命定核心」既满足不了
+   * 核心的必选闸门（用户卡在这一步过不去），语义上也说不通 —— 两个命定核心同时
+   * 生效，世界观直接打架。
+   */
+  const workshopSystemOptions = computed(() =>
+    workshopOptions.value.filter((o) => o.tags.includes('系统')),
+  );
+
+  /** 其余工坊项目（角色/事件/扩展…）—— 附加内容，多选 */
+  const workshopExtraOptions = computed(() =>
+    workshopOptions.value.filter((o) => !o.tags.includes('系统')),
+  );
+
+  /**
+   * 选作命定核心的工坊项目 id。与 {@link selectedSystemCoreEntryUid} **互斥** ——
+   * 命定核心只有一个，内置的和工坊的抢同一个位置。
+   */
+  const selectedWorkshopCoreProjectId = ref<string | null>(null);
+
+  /** 选中的工坊命定核心（展示用） */
+  const selectedWorkshopCore = computed<WorkshopEnableOption | null>(
+    () =>
+      workshopSystemOptions.value.find(
+        (o) => o.projectId === selectedWorkshopCoreProjectId.value,
+      ) ?? null,
+  );
+
+  /** 单选工坊命定核心（传 null 取消）。选中即清掉内置核心 —— 互斥 */
+  function selectWorkshopCore(projectId: string | null) {
+    selectedWorkshopCoreProjectId.value = projectId;
+    if (projectId !== null) selectedSystemCoreEntryUid.value = null;
+  }
 
   /** toggle 勾选工坊项目（项目级，一次连带其全部条目） */
   function toggleWorkshopProject(projectId: string) {
@@ -421,9 +460,10 @@ export const useCreateStore = defineStore('create', () => {
     }
   }
 
-  /** 单选命定核心（传 null 取消选择） */
+  /** 单选命定核心（传 null 取消选择）。选中即清掉工坊核心 —— 互斥 */
   function selectSystemCoreEntry(uid: number | null) {
     selectedSystemCoreEntryUid.value = uid;
+    if (uid !== null) selectedWorkshopCoreProjectId.value = null;
   }
 
   /** toggle 勾选角色 */
@@ -453,7 +493,15 @@ export const useCreateStore = defineStore('create', () => {
 
     // P1-5: 启用的工坊项目 → 展开成该项目全部条目的 creative_workshop:uid（D12）。
     // 走同一个纯函数，与建档后的每存档面板共用一套展开语义。
-    return applyWorkshopSelection(ids, workshopOptions.value, enabledWorkshopProjectIds.value);
+    //
+    // 工坊命定核心与附加项目在**存储上没有区别**（都是 creative_workshop:uid），
+    // 区别只在捏人页的选择语义（单选/必选 vs 多选/可选）。所以这里合流即可，
+    // 下游 filterBooksByEnabledEntries 不需要知道哪个是核心。
+    const projectIds = new Set(enabledWorkshopProjectIds.value);
+    if (selectedWorkshopCoreProjectId.value !== null) {
+      projectIds.add(selectedWorkshopCoreProjectId.value);
+    }
+    return applyWorkshopSelection(ids, workshopOptions.value, projectIds);
   }
 
   // ═══════════════════════════════════════════════════════
@@ -1747,6 +1795,7 @@ export const useCreateStore = defineStore('create', () => {
     initPlotDefaultsFromSettings();
     showPresetModal.value = false;
     selectedSystemCoreEntryUid.value = null;
+    selectedWorkshopCoreProjectId.value = null;
     enabledCharacterEntryUids.value = new Set();
     enabledWorkshopProjectIds.value = new Set();
     systemCoreEntries.value = [];
@@ -1828,6 +1877,11 @@ export const useCreateStore = defineStore('create', () => {
     systemCoreEntries,
     characterEntries,
     selectedSystemCoreEntryUid,
+    selectedWorkshopCoreProjectId,
+    selectedWorkshopCore,
+    selectWorkshopCore,
+    workshopSystemOptions,
+    workshopExtraOptions,
     selectedSystemCoreEntry,
     enabledCharacterEntryUids,
     loadWorldBookEntries,

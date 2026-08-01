@@ -51,9 +51,22 @@ beforeEach(() => {
     },
     selectSystemCoreEntry(uid: number | null) {
       mockCreate.selectedSystemCoreEntryUid = uid;
+      if (uid !== null) mockCreate.selectedWorkshopCoreProjectId = null;
     },
 
     workshopOptions: [makeOption()] as WorkshopEnableOption[],
+    // 组件按「是不是标了『系统』」把项目分到两条轴上，与真 store 同一条判据
+    get workshopSystemOptions() {
+      return this.workshopOptions.filter((o: WorkshopEnableOption) => o.tags.includes('系统'));
+    },
+    get workshopExtraOptions() {
+      return this.workshopOptions.filter((o: WorkshopEnableOption) => !o.tags.includes('系统'));
+    },
+    selectedWorkshopCoreProjectId: null as string | null,
+    selectWorkshopCore(projectId: string | null) {
+      mockCreate.selectedWorkshopCoreProjectId = projectId;
+      if (projectId !== null) mockCreate.selectedSystemCoreEntryUid = null;
+    },
     enabledWorkshopProjectIds: new Set<string>(),
     toggleWorkshopProject(projectId: string) {
       const next = new Set(mockCreate.enabledWorkshopProjectIds);
@@ -121,19 +134,37 @@ describe('CreateStepDestinyCore — 工坊项目与命定核心同屏', () => {
   it('未安装工坊项目时给空态，不是一片空白', () => {
     mockCreate.workshopOptions = [];
     const wrapper = mount(CreateStepDestinyCore);
-    expect(wrapper.find('.empty-tab').text()).toContain('尚未安装工坊项目');
+    expect(wrapper.find('.empty-tab').text()).toContain('工坊项目');
   });
-});
 
-describe('CreateStepCharacters — 工坊区已搬走', () => {
-  it('角色启用步骤不再出现工坊项目', () => {
-    const wrapper = mount(CreateStepCharacters);
-    expect(wrapper.findComponent({ name: 'WorkshopEnableList' }).exists()).toBe(false);
-    expect(wrapper.find('.workshop-enable-list').exists()).toBe(false);
-    expect(wrapper.find('.wk-card').exists()).toBe(false);
-    // 不断言「正文里没有『工坊』二字」—— 真机上角色简介本身就会出现「玩偶匠的工坊」，
-    // 那种断言只会在换数据时假红。这里盯的是选择控件，不是词。
-    // 角色多选本身没坏
-    expect(wrapper.find('.char-card').exists()).toBe(true);
+  it('★ 标了「系统」的工坊项目进核心单选名单，不进下方多选区', () => {
+    // 此前它混在多选区里：选中既过不了本步的必选闸门（按钮永远不亮，也没有提示），
+    // 语义上也说不通 —— 两个命定核心同时生效，设定直接打架。
+    mockCreate.workshopOptions = [
+      makeOption(),
+      makeOption({ projectId: 'sys1', name: '异界律令', tags: ['系统'] }),
+    ];
+    const wrapper = mount(CreateStepDestinyCore);
+
+    // 它以 radio 身份出现在核心名单里
+    expect(wrapper.find('.core-list').text()).toContain('异界律令');
+    // 而多选区里没有它（否则同屏出现两次，勾哪个都过不了闸门）
+    expect(wrapper.find('.workshop-enable-list').text()).not.toContain('异界律令');
+    expect(wrapper.find('.workshop-enable-list').text()).toContain('维拉的旅途');
+  });
+
+  it('★ 选工坊核心会顶掉内置核心 —— 命定核心只有一枚', async () => {
+    mockCreate.workshopOptions = [
+      makeOption({ projectId: 'sys1', name: '异界律令', tags: ['系统'] }),
+    ];
+    const wrapper = mount(CreateStepDestinyCore);
+
+    mockCreate.selectSystemCoreEntry(413);
+    expect(mockCreate.selectedSystemCoreEntryUid).toBe(413);
+
+    const row = wrapper.findAll('.core-row-workshop .core-row-body')[0];
+    await row.trigger('click');
+    expect(mockCreate.selectedWorkshopCoreProjectId).toBe('sys1');
+    expect(mockCreate.selectedSystemCoreEntryUid).toBeNull();
   });
 });

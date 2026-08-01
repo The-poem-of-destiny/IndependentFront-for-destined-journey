@@ -196,6 +196,35 @@ beautifier-rules.json 预设规则（22 条: 2 内置 + 20 远程）+ 世界书/
 
 ---
 
+### 2026-07-31 — 修复：选工坊命定核心卡在捏人第 3 步
+
+**症状**：新建存档 → 命定核心步骤 → 选一个工坊的命定核心 → **下一步按钮永不亮起**，
+且没有任何提示说明缺什么。
+
+**根因**：`stepValid[2]` 只认 `selectedSystemCoreEntryUid`（内置 `system_core` 条目的
+uid）。工坊项目走的是另一条轴（项目级多选 `enabledWorkshopProjectIds`），选中它不会
+写那个 uid，闸门自然一直关着。上一轮把工坊多选挪到本步同屏时，只搬了位置，没有把
+「工坊系统项目也是命定核心候选」这件事接进闸门。
+
+**修法**（按主人指定）：标了「系统」标签的工坊项目**并入命定核心那份单选名单**，
+与内置核心同等对待 —— 同一个单选槽、互斥、同样满足必选闸门。
+
+- `workshopSystemOptions` / `workshopExtraOptions`：按 `tags.includes('系统')` 一分为二
+- `selectedWorkshopCoreProjectId`：工坊核心的单选槽，与 `selectedSystemCoreEntryUid`
+  **双向互斥**（命定核心只有一枚，选一个就清另一个）
+- `stepValid[2]`：两者任一非空即放行
+- `buildEnabledWorldBookEntries`：工坊核心与附加项目**合流**后交给
+  `applyWorkshopSelection` —— 存储上二者没有区别（都是 `creative_workshop:<uid>`），
+  区别只在捏人页的选择语义，下游 `filterBooksByEnabledEntries` 无需知情
+- 下方多选区改用 `workshopExtraOptions`，同一个项目不会同屏出现两次
+
+涉及文件: `create-store.ts` · `CreateStepDestinyCore.vue`（+ 两处测试）
+
+验证: 141 文件 / 4700 测试全绿（+7）· typecheck & vue-tsc 0 错误 · lint 0 error。
+🔴 仍未真机走查。
+
+---
+
 ### 2026-07-31 — 工坊评审修复 + 减动效开关 + 工坊书对 Agent 可见
 
 Fable 评审（`ed28320..107f80b`）的 7 项发现全部修掉，另加两个功能。

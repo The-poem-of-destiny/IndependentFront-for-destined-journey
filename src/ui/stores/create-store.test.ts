@@ -1632,6 +1632,75 @@ describe('buildEnabledWorldBookEntries 三条启用轴', () => {
     seedWorkshop();
   });
 
+  /** 一个标了「系统」的工坊项目 —— 它是命定核心候选，不是附加内容 */
+  function seedWorkshopSystem() {
+    store.workshopOptions = [
+      ...store.workshopOptions,
+      {
+        projectId: 'sys1',
+        name: '异界律令',
+        description: '一个工坊命定核心',
+        authorName: '作者C',
+        version: '2.0',
+        tags: ['系统'],
+        entryUids: [201, 202],
+      },
+    ];
+  }
+
+  it('★ 工坊「系统」项目进核心单选名单，不进附加多选名单', () => {
+    seedWorkshopSystem();
+    expect(store.workshopSystemOptions.map((o) => o.projectId)).toEqual(['sys1']);
+    // 否则它会在同一屏出现两次，且勾哪个都过不了必选闸门
+    expect(store.workshopExtraOptions.map((o) => o.projectId)).toEqual(['p1', 'p2']);
+  });
+
+  it('★ 选工坊命定核心即可通过本步 —— 这正是此前卡死用户的地方', () => {
+    seedWorkshopSystem();
+    expect(store.stepValid[2]).toBe(false);
+    store.selectWorkshopCore('sys1');
+    expect(store.stepValid[2]).toBe(true);
+  });
+
+  it('★ 内置核心与工坊核心互斥 —— 命定核心只有一枚', () => {
+    seedWorkshopSystem();
+    store.selectSystemCoreEntry(413);
+    store.selectWorkshopCore('sys1');
+    expect(store.selectedSystemCoreEntryUid).toBeNull();
+
+    store.selectSystemCoreEntry(413);
+    expect(store.selectedWorkshopCoreProjectId).toBeNull();
+    expect(store.stepValid[2]).toBe(true);
+  });
+
+  it('工坊核心照常展开成 creative_workshop:<uid>，与附加项目同一套存储', () => {
+    seedWorkshopSystem();
+    store.selectWorkshopCore('sys1');
+    const ids = store.buildEnabledWorldBookEntries();
+    expect(ids).toContain('creative_workshop:201');
+    expect(ids).toContain('creative_workshop:202');
+    // 没选内置核心时不该冒出 system_core: 串
+    expect(ids.some((i) => i.startsWith('system_core:'))).toBe(false);
+  });
+
+  it('工坊核心与附加项目可以并存，互不覆盖', () => {
+    seedWorkshopSystem();
+    store.selectWorkshopCore('sys1');
+    store.toggleWorkshopProject('p1');
+    const ids = store.buildEnabledWorldBookEntries();
+    for (const uid of [201, 202, 105, 106, 107]) {
+      expect(ids).toContain(`creative_workshop:${uid}`);
+    }
+  });
+
+  it('取消工坊核心后闸门重新关上', () => {
+    seedWorkshopSystem();
+    store.selectWorkshopCore('sys1');
+    store.selectWorkshopCore(null);
+    expect(store.stepValid[2]).toBe(false);
+    expect(store.buildEnabledWorldBookEntries()).toEqual([]);
+  });
+
   it('勾一个项目 → 输出该项目全部条目的 creative_workshop:<uid>', () => {
     store.toggleWorkshopProject('p1');
     expect(store.buildEnabledWorldBookEntries()).toEqual([
