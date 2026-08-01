@@ -337,8 +337,18 @@ export function runDamagePipeline(input: DamagePipelineInput): CombatDamageBreak
 // ========== 攻击检定 ==========
 
 export interface AttackCheckInput {
-  /** d20 骰值 */
-  d20Roll: number;
+  /**
+   * 攻击检定的 d20 骰值数组（调用方显式传入）。
+   *
+   * - 同层级：传一颗 `[n]`（或 `[n, undefined]`），只用 `rolls[0]`。
+   * - 层级优势（高T对低T）：传两颗 `[n, m]`，取 `Math.max`。
+   * - 层级劣势（低T对高T）：传两颗 `[n, m]`，取 `Math.min`。
+   *
+   * v3 M0 修复架构 §1.4 M-5：v2 此处用 `Math.random()` 内部伪造第二颗骰，
+   * 现改为调用方显式传入，战斗 v3 由 DiceTape `attackHit` 通道供骰。
+   * v2 行为保持：调用方传入的值正是 v2 内部会自产的那个值（见各调用点）。
+   */
+  rolls: [number, number?];
   /** 攻方层级 */
   attackerTier: number;
   /** 守方层级 */
@@ -387,25 +397,36 @@ export function performAttackCheck(input: AttackCheckInput): AttackCheckResult {
   let advantage = false;
   let disadvantage = false;
 
-  // 层级比较决定优劣势
+  // 层级比较决定优劣势。第二颗骰由调用方显式传入（M0 修复架构 §1.4 M-5，
+  // 取代 v2 内部的 Math.random() 伪造骰值）。
   if (attackerTier > defenderTier) {
-    // 高T对低T → 优势 (2d20取高)
-    const r1 = input.d20Roll;
-    const r2 = Math.max(1, Math.min(20, r1 + Math.floor(Math.random() * 6 - 3))); // simulated second roll
-    diceRolls = [r1, r2];
-    diceUsed = Math.max(r1, r2);
+    // 高T对低T → 优势 (2d20取高)；第二颗缺省时退化为单骰
+    const r1 = input.rolls[0];
+    const r2 = input.rolls[1];
+    if (r2 === undefined) {
+      diceRolls = [r1];
+      diceUsed = r1;
+    } else {
+      diceRolls = [r1, r2];
+      diceUsed = Math.max(r1, r2);
+    }
     advantage = true;
   } else if (attackerTier < defenderTier) {
-    // 低T对高T → 劣势 (2d20取低)
-    const r1 = input.d20Roll;
-    const r2 = Math.max(1, Math.min(20, r1 + Math.floor(Math.random() * 6 - 3))); // simulated second roll
-    diceRolls = [r1, r2];
-    diceUsed = Math.min(r1, r2);
+    // 低T对高T → 劣势 (2d20取低)；第二颗缺省时退化为单骰
+    const r1 = input.rolls[0];
+    const r2 = input.rolls[1];
+    if (r2 === undefined) {
+      diceRolls = [r1];
+      diceUsed = r1;
+    } else {
+      diceRolls = [r1, r2];
+      diceUsed = Math.min(r1, r2);
+    }
     disadvantage = true;
   } else {
     // 同层级 → 1d20
-    diceRolls = [input.d20Roll];
-    diceUsed = input.d20Roll;
+    diceRolls = [input.rolls[0]];
+    diceUsed = input.rolls[0];
   }
 
   // 闪避判定

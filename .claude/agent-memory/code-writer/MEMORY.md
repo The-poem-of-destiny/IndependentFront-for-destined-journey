@@ -13,3 +13,4 @@
 - [真机走查页面换不了视图](browser-pane-raf-blocks-transitions.md) — Browser pane 不显示则无 rAF，Vue transition mode="out-in" 永远卡首屏；先 reload 再打 rAF 补丁再切视图
 - [prettier 基线本来就是红的](prettier-baseline-dirty.md) — CI 跑 format:check 但 HEAD 就有 423 文件不合格；只校自己动过的文件，千万别跑 npm run format
 - [.bat stderr 噪音要换姿势才测得出](bat-stderr-harness-dependent.md) — Start-Process 恒报 0；只有 Git Bash 的 `cmd.exe /c 全路径 2> e.txt < /dev/null` 复现得出。测 dev.bat 先把端口改等长安全值，别碰 5173
+- [v3 M0 签名改造落点](combat-v3-m0-signature-refactor.md) — performAttackCheck 改 rolls[]、morale d20 必传、AppSettings.combatEngineVersion；调用点传同值保 v2 行为；M1 起内核从 DiceTape 取真骰

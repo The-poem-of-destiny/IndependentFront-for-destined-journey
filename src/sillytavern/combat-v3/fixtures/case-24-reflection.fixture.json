@@ -1,0 +1,122 @@
+{
+  "id": "case-24-reflection",
+  "sourceCase": "docs/planning/2026-07-31-combat-v3-stress-test/case-24-reflection.md",
+  "_synthetic": true,
+  "_provenance": {
+    "sampleFile": "reference/战斗对话样本/第24场_行1596-1600_2026-04-16_强度316.md",
+    "sampleLine": 1596,
+    "sampleDicePool": "[1,1,2,6,20,9,3,19,7,4,4,17,2,14,5,19,12,5,14,7,15,4,8,2,2,13,14,3,9,13,18,6,17,16,11,16,2,17,11,19,8,4,17,15,9,10,3,17,18,6,19,18,12,11,7,1,1,3,13,10]",
+    "extractedTurn": "Round 1 — C4 (处刑人→理查德 破甲重弩) + C5 (反伤 理查德→处刑人 虚数反弹)",
+    "diceMapping": {
+      "idx0→initiative": "理查德先攻 d20=1 (行90: 敏13+骰1=14)",
+      "idx1→initiative": "处刑人先攻 d20=1 (行91: 敏12+骰1=13)",
+      "idx2→intentCheck": "处刑人意图攻方 d20=2 (行115: 4层×5+2=22)",
+      "idx3→intentCheck": "理查德意图守方 d20=6 (行115: 5层×5+6+10=41)",
+      "idx4→attackHit": "处刑人命中劣势骰1 d20=20 (行117: 劣势20,9取9)",
+      "idx5→attackHit": "处刑人命中劣势骰2 d20=9 (行117: 取9)",
+      "idx6→attackHit": "反伤命中优势骰1 d20=3 (行139: 优势3,19取19)",
+      "idx7→attackHit": "反伤命中优势骰2 d20=19 (行139: 取19)",
+      "idx8→attackHit": "菲希芙命中 d20=7 (行165: 正常7)",
+      "idx9-59": "填充中位数10（回合1仅消费9颗骰子）"
+    },
+    "unitDefaults": {
+      "理查德装备_缺失字段": "武器从行415为灼热射线场景装备渊核法杖，本案回合1未展示武器名，按回合2面板补",
+      "处刑人_缺失字段": "T4中位数值补五维(力10敏12体10智8精9来自面板行83)"
+    }
+  },
+  "bundle": {
+    "combatId": "fixture-24",
+    "combatType": "死斗",
+    "units": [
+      {
+        "name": "理查德",
+        "tier": 5,
+        "hp": 22069,
+        "maxHp": 30079,
+        "mp": 52500,
+        "maxMp": 63000,
+        "sp": 38500,
+        "maxSp": 45500,
+        "attrs": { "力": 13, "敏": 13, "体": 15, "智": 21, "精": 17 },
+        "equipment": ["真理回响·奥术导师法袍"],
+        "skills": ["真理·虚数偏折"],
+        "divinity": 0,
+        "side": "player"
+      },
+      {
+        "name": "苍棘处刑人集群",
+        "tier": 4,
+        "hp": 2800,
+        "maxHp": 2800,
+        "mp": 1000,
+        "maxMp": 1000,
+        "sp": 1200,
+        "maxSp": 1200,
+        "attrs": { "力": 10, "敏": 12, "体": 10, "智": 8, "精": 9 },
+        "equipment": ["制式重弩", "刺剑"],
+        "skills": ["破甲重弩与血律刺剑"],
+        "divinity": 0,
+        "side": "enemy",
+        "clusterCount": 4
+      }
+    ],
+    "programs": [],
+    "resourceSnapshots": { "FP": 2400 },
+    "rulesetRevision": "v3-2026-07-31"
+  },
+  "epochs": [
+    {
+      "outputId": "out-1",
+      "dice": [1, 1, 2, 6, 20, 9, 3, 19, 7, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
+      "channelSplit": { "attackHit": 32, "initiative": 10, "intentCheck": 7, "statusContest": 6, "procCheck": 5 }
+    }
+  ],
+  "commands": [
+    {
+      "commandId": "c1",
+      "expectedRevision": 0,
+      "kind": "UseSkill",
+      "actorId": "理查德",
+      "cost": "action",
+      "payload": { "targetId": "理查德", "skill": "真理·虚数偏折", "intentionLevel": "常规" }
+    },
+    {
+      "commandId": "c2",
+      "expectedRevision": 1,
+      "kind": "DeclareAttack",
+      "actorId": "苍棘处刑人集群",
+      "cost": "attack",
+      "payload": { "targetId": "理查德", "skill": "破甲重弩与血律刺剑", "intentionLevel": "核心" }
+    }
+  ],
+  "expected": {
+    "milestones": [
+      {
+        "kind": "statusApplied",
+        "at": "c1",
+        "targetId": "理查德",
+        "statusId": "虚数偏折",
+        "duration": 2
+      },
+      {
+        "kind": "damage",
+        "at": "c2",
+        "targetId": "理查德",
+        "value": 582,
+        "tolerance": 5
+      },
+      {
+        "kind": "reflected",
+        "rootChainId": "c2",
+        "depth": 1,
+        "value": 2542,
+        "tolerance": 10
+      },
+      {
+        "kind": "roundCount",
+        "value": 1
+      }
+    ],
+    "eventHash": null
+  }
+}

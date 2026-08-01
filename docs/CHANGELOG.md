@@ -9,6 +9,30 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 战斗 v3 M0 — 地基：分通道骰带 + replay harness + 纯函数签名改造 ｜ ✅ 完成（2026-08-01）
+
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§四 DiceTape / §1.4 五处代码修正）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §2。把 v2 的「Agent 主持流程」翻转为「代码内核主持流程」的地基——所有新代码落 `src/sillytavern/combat-v3/`（deep module，唯一公共出口 `index.ts` 留待 M1），v2 代码 M5 前一行不删，靠 feature flag 整场切换。
+
+**新建 `combat-v3/` deep module:**
+
+- `types.ts` — DiceChannel / DiceEpoch / DiceTapeState / CombatProvenance + CombatFixture 全类型 + `DEFAULT_CHANNEL_SPLIT`（attackHit 32 / initiative 10 / intentCheck 7 / statusContest 6 / procCheck 5，D6 实测加权，RFC §5.7「各 12 颗均分」被推翻）+ CHANNEL_ORDER
+- `dice-tape.ts` — `createTape` / `draw` / `beginEpoch` / `splitSixty` 纯函数（不可变更新）。draw 只推进目标通道 cursor，耗尽不推进任何 cursor；beginEpoch 旧 epoch 进 exhausted、cursor 归零；**不做通道间借用**（架构 §一 1.6 否决项，保 replay 干净）
+- `replay.ts` — `replayCombat(fixture, reducer?)` 纯函数：validateFixture 结构校验 + buildTape 验证骰带可建 + hashFixture 规范化 djb2（忽略 `_synthetic`/`_provenance` 元数据）+ reducer 注入缝（M1 起驱动 commands）
+- `fixtures/case-06-summon.fixture.json` / `case-24-reflection.fixture.json` — 两场简版 fixture，含 `_provenance` 骰值对照表（样本行号→fixture 骰值）+ `_synthetic` 标记
+
+**v2 纯函数签名改造（差分测试地基，v2 行为零变化）:**
+
+- `performAttackCheck`: `d20Roll: number` → `rolls: [number, number?]`，删除两处 `Math.random()` 模拟第二骰（修复架构 §1.4 M-5）
+- `runMoraleCheckPipeline`: `d20Roll` 改必传（修复 M-4 战意骰恒 10）
+- `combat-pipeline.ts` / `combat-resolver.ts` 调用点补传 `rolls:[d20,d20]` / `d20Roll:10`（v2 行为等价）；额外修复 `combat-resolver.ts:134` 守方意图骰的 `Math.random()` 统一为同值双喂
+- `AppSettings.combatEngineVersion: 'v2'|'v3'` 默认 `'v2'`（feature flag，分支点唯一 `game-pipeline.handleCombatTrigger`，M5 才翻 v3）
+
+**反非确定性守卫:** `no-nondeterminism.test.ts` 用 `import.meta.glob` + `?raw` 扫描 `combat-v3/` 全部 `.ts`（排除 test），断言零 `Math.random` / `new Function` / `eval`（铁律 1/2，全链路根除审查报告 C1）。
+
+**验收:** A0-1 ~ A0-8 全过。全量 4757 测试 / 144 文件全绿；typecheck 零错误。combat-v3 新增 57 测试（dice-tape 35 + no-nondeterminism 4 + replay 22，含两场 fixture milestone 断言）；v2 战斗测试 177 个零行为变化。
+
+**已知遗留（M1 对齐）:** fixture command kind 用了 `UseSkill`（非架构 §二 2.2 枚举），M0 replay 不校验 command kind，M1 内核 dispatch 时改 fixture 为 `DeclareAction`。
+
 ### 工坊 P1 — 创意工坊（= Phase 7f） ｜ ✅ 真机走查已过（2026-07-31）
 
 设计: `docs/planning/2026-07-31-creative-workshop-compat-design.md`（v2，D1-D17）；实施计划: `docs/planning/2026-07-31-workshop-phase0-1-implementation-plan.md`。上游是【命定之诗】创意工坊（角色卡内嵌酒馆助手脚本 + Cloudflare Worker 后端），本引擎**不嵌 iframe、不跑上游 JS**，只直连其公开 REST。
