@@ -7,8 +7,11 @@
  * **本模块永不抛异常**（除非调用方传的不是 JSON 可解析值），因为一次上游字段调整
  * 不应该让用户的工坊页整个白屏。
  *
- * 两条解析线各自独立:
+ * 三条解析线各自独立:
  * - `parseProjectMeta()` 吃 `GET /api/projects/{id}` 的 `project` 对象（实测 33 字段）
+ * - `parseSocialMeta()` / `parseToggleAck()` 吃**同一个** project 对象的社交字段，
+ *   与 toggle 端点的回执（D22/D23）—— 独立成线是因为社交面**绝不落库**，
+ *   类型上就不能与落库那半边混在一起
  * - `parsePayload()` 吃 `downloadUrl` 的载荷文件 + 详情响应里的 `regexEntriesPreview`
  *
  * ⚠️ 上游世界书条目有**两种形状**（详见 workshop-types.WorkshopSourceEntry）:
@@ -26,8 +29,10 @@
 import type {
   WorkshopPayload,
   WorkshopProjectMeta,
+  WorkshopSocialMeta,
   WorkshopSourceEntry,
   WorkshopSourceRegex,
+  WorkshopToggleAck,
 } from './workshop-types';
 
 // ═══════════════════════════════════════════════════════════
@@ -144,6 +149,54 @@ export function parseProjectMeta(raw: unknown): WorkshopProjectMeta | null {
   if (coverUrl) meta.coverUrl = coverUrl;
 
   return meta;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 社交面（D22）
+// ═══════════════════════════════════════════════════════════
+
+/** 计数一律非负整数：上游给了负数/小数/数字串都不该原样渲染到按钮旁边 */
+function readCount(source: unknown, keys: string[]): number {
+  return Math.max(0, Math.trunc(readNumber(source, keys, 0)));
+}
+
+/**
+ * 上游 `project` 对象 → {@link WorkshopSocialMeta}（D22）。
+ *
+ * 与 {@link parseProjectMeta} **吃同一个入参**，这是刻意的：社交字段就长在同一个
+ * 响应里，分成两个函数只是为了让「落库的那一半」与「纯内存的那一半」在类型上
+ * 无法混淆（D22）。调用方对同一份 raw 调两次，**不产生任何额外请求**。
+ *
+ * 缺字段一律 0 / false —— 上游未登录时不返回 `userLiked`，异常兜底路径会硬编码
+ * `false`，两种情况我们都只当「不知道」，绝不据此判定用户没赞过（§1.3）。
+ *
+ * @param raw 上游 `project` 对象；也容忍整个详情响应（会自动下钻 `.project`）
+ */
+export function parseSocialMeta(raw: unknown): WorkshopSocialMeta {
+  const source = isRecord(raw) && isRecord(raw.project) ? raw.project : raw;
+  return {
+    likesCount: readCount(source, ['likesCount']),
+    subscribesCount: readCount(source, ['subscribesCount']),
+    downloadsCount: readCount(source, ['downloadsCount']),
+    userLiked: readBoolean(source, ['userLiked'], false),
+    userSubscribed: readBoolean(source, ['userSubscribed'], false),
+  };
+}
+
+/**
+ * toggle 端点回执 → {@link WorkshopToggleAck}。
+ *
+ * 上游两个动作的旗标字段名不同（`liked` / `subscribed`），此处按**两个都试**归一，
+ * 免得调用方为了两行字段名各写一遍解析 —— 上游哪天统一命名，也只改这一处。
+ *
+ * ⚠️ 旗标缺失时回 `false`、计数缺失时回 0，但**调用方不该把这当成成功回执**：
+ * 只有 HTTP 2xx 才代表翻转真的发生了，本函数只负责读字段（永不抛）。
+ */
+export function parseToggleAck(raw: unknown): WorkshopToggleAck {
+  return {
+    active: readBoolean(raw, ['liked', 'subscribed', 'active'], false),
+    count: readCount(raw, ['count', 'likesCount', 'subscribesCount']),
+  };
 }
 
 // ═══════════════════════════════════════════════════════════

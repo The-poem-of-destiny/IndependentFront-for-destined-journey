@@ -157,13 +157,13 @@ const allowedUids = enabledByPartition.get(book.partition);
 
 **启用完全走既有机制**，与 `system_core:413` 无异。不新增 SaveSlot 字段、不改 `filterBooksByEnabledEntries`、不做分区特判。缺省语义沿用现状（分区未出现在 `enabledWorldBookEntries` → 整本放行），与所有导入书一致。
 
-**真正的闸门是 Agent 可见性**（D11），不是存档启用。
+存档是否实际启用仍由第二条轴决定；Agent 可见性不再追加一道手动闸门（D11）。
 
-### D11 — Agent 默认不可见（= 既有规范，非特例）
+### D11 — 安装即授予所有 Agent 可见性
 
-新装工坊书不自动加入任何 Agent 的 `worldBookIds`，须在设置页显式勾选。
+成功安装或更新工坊项目后，其世界书 id **幂等加入所有当前已注册 Agent 的 `worldBookIds`**。
 
-这**不是**为工坊新增的限制：[SettingsPage.vue:1009](../../src/ui/components/settings/SettingsPage.vue:1009) 的 `importWorldBook()` 只往书列表里 push，从不碰 Agent 配置——每一本导入书都是这样。没有 Agent 指向的书，不管存档怎么设置都注入不到任何地方。
+理由：安装是用户明确表达「要使用这份内容」的动作，而项目当前没有可靠的逐 Agent 归属契约；要求用户再为每个 Agent 重复分配，只会制造一个没有领域依据的配置步骤。因此工坊项目默认对全部 Agent 可见，具体存档是否启用仍由 D10 的每存档轴控制。该决策只约束工坊安装流程；设置页的普通世界书导入是另一条入口，不在此处顺带改语义。
 
 ### D12 — UI 粒度是项目，不做冲突拦截
 
@@ -333,11 +333,14 @@ src/sillytavern/
 src/ui/
 ├── lib/workshop-client.ts     唯一网络接触点
 ├── stores/worldbook-store.ts  🆕 Phase 0：Dexie 世界书唯一入口（替代 settings.worldBooks）
-├── stores/workshop-store.ts   执行器：拿 plan 落 DB，不含转换逻辑
-└── components/workshop/       WorkshopPage.vue + 模态子组件
+├── stores/workshop-store.ts   ★深安装 module：取源 / 新鲜度 / 规划 / 冲突暂停 / 重算 / 持久化 / 失败归一
+│                                不含条目转换逻辑；转换仍全部委托给 planInstall
+└── components/workshop/       展示 adapter：忙碌态 / 确认模态 / toast 文案 / 文件选择
 ```
 
 **`planInstall` 纯同步出计划**是关键接缝：安装的全部决策（发哪些 uid、条目怎么转、哪些丢弃、与已装项目冲不冲、哪些条目被用户改过）在无副作用纯函数里算完并可完整断言，store 只负责把计划写进 DB。素材系统已验证此分层。
+
+**安装 lifecycle 的外部 interface 归 `workshop-store` 独占**：网络安装、更新、本地文件导入与覆盖确认都从同一 interface 进入；store 内部拥有取源、首装/更新新鲜度、`planInstall` 调用、冲突暂停、提交前重算、持久化与失败归一。`WorkshopPage` 不再自行编排 `prepare → conflict gate → commit`，只渲染 store 返回的状态并收集用户确认。生产调用与测试跨同一 seam；低阶 prepare/commit 步骤仅属 module implementation，不是第二套公开 interface。
 
 **Phase 0 的消费端改造**：`settings.worldBooks` 的读者全部切到 `worldbook-store` —— `game-pipeline.loadActiveWorldBooks()`、`SettingsPage` 书列表、`create-store.loadWorldBookEntries()`、`setWorldBooks()` 调用点。`filterBooksByEnabledEntries` 及其下游不动，只是拿到的数组变长。
 

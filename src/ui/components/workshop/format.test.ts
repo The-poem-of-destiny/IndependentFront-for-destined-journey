@@ -9,9 +9,12 @@
 import { describe, it, expect } from 'vitest';
 import { groupWorkshopNotes, workshopNote } from '@engine/workshop-types';
 import {
+  DISCORD_FALLBACK_AVATAR,
   WORKSHOP_NOTE_LABEL,
   describeEntryPosition,
   describeSelectiveLogic,
+  discordAvatarUrl,
+  discordDisplayName,
   formatBytes,
   formatDate,
   formatNoteSegment,
@@ -19,6 +22,7 @@ import {
   summarizeNoteGroups,
   truncate,
 } from './format';
+import { WORKSHOP_LOGIN_GUIDE, describeFailure, describeLoginFailure } from './failure-text';
 
 describe('formatBytes / formatDate / formatVersion', () => {
   it('字节分档，0 与非法值给空串', () => {
@@ -107,5 +111,53 @@ describe('装前检视的字段翻译', () => {
     expect(truncate('abcdef', 3)).toBe('abc…');
     expect(truncate('abc', 3)).toBe('abc');
     expect(truncate('')).toBe('');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 登录位与登录文案（Phase 3 / P3c）
+// ═══════════════════════════════════════════════════════════
+
+describe('discordAvatarUrl / discordDisplayName', () => {
+  it('把哈希拼成 URL —— JWT 里给的从来不是 URL', () => {
+    expect(discordAvatarUrl({ userId: 'u1', avatar: 'abc' })).toBe(
+      'https://cdn.discordapp.com/avatars/u1/abc.webp?size=100',
+    );
+  });
+
+  it('★ 缺 id 或没设过头像一律回默认图，绝不回空串', () => {
+    // 空 src 会让浏览器去请求当前页面地址，然后画一个碎图标
+    expect(discordAvatarUrl(null)).toBe(DISCORD_FALLBACK_AVATAR);
+    expect(discordAvatarUrl({ userId: 'u1', avatar: '' })).toBe(DISCORD_FALLBACK_AVATAR);
+    expect(discordAvatarUrl({ userId: '', avatar: 'abc' })).toBe(DISCORD_FALLBACK_AVATAR);
+  });
+
+  it('显示名优先 globalName，缺了才退 username', () => {
+    // 反过来的话，改过显示名的用户会看到一个自己早就不用的旧 ID
+    expect(discordDisplayName({ username: 'vera', globalName: '维拉' })).toBe('维拉');
+    expect(discordDisplayName({ username: 'vera', globalName: '  ' })).toBe('vera');
+    expect(discordDisplayName(null)).toBe('工坊用户');
+  });
+});
+
+describe('登录相关文案（D25）', () => {
+  it('★ 401 不说成「上游出错了」—— 未登录是常态，该给的是去处', () => {
+    const text = describeFailure({ kind: 'unauthorized', status: 401, message: '', url: 'u' });
+    expect(text).toContain('登录');
+    expect(text).not.toContain('出了问题');
+  });
+
+  it('登录失败：上游原话照登，后面补上服务器门槛这个前提', () => {
+    const text = describeLoginFailure('你不在允许的服务器中');
+    expect(text).toContain('你不在允许的服务器中');
+    expect(text).toContain('命定之诗');
+  });
+
+  it('上游一句话都没给时也不能只弹一个空串', () => {
+    expect(describeLoginFailure('')).toContain('登录失败');
+  });
+
+  it('引导语只有一份 —— 卡片、详情、页面共用', () => {
+    expect(WORKSHOP_LOGIN_GUIDE).toContain('Discord 登录');
   });
 });

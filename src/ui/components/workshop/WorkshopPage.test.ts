@@ -30,7 +30,7 @@ vi.mock('../../lib/workshop-client', async () => {
     listProjects: vi.fn(async () => ({
       ok: true,
       fromCache: false,
-      data: { total: 0, page: 0, pageSize: 20, projects: [], droppedCount: 0 },
+      data: { total: 0, page: 0, pageSize: 20, projects: [], droppedCount: 0, socials: {} },
     })),
     fetchProject: vi.fn(async () => ({
       ok: false,
@@ -69,6 +69,44 @@ vi.mock('../../stores/workshop-store', () => ({
       return state.ready;
     },
     getProject: (id: string) => state.projects.find((p) => p.id === id),
+  }),
+}));
+
+/**
+ * social store 同样整层替掉（P3c）。
+ *
+ * 不这么做的话，点一下「Discord 登录」就会经真 store 走到 client 的 `startLogin()`
+ * ——那是一发**真实**网络请求，还会试图开一个弹窗。登录编排本身的时序（双重验签 /
+ * 快路径 / 60 秒超时）在 `workshop-social-store.test.ts` 里守。
+ */
+const socialFns = vi.hoisted(() => ({
+  init: vi.fn(),
+  login: vi.fn(),
+  logout: vi.fn(),
+  toggleLike: vi.fn(),
+  toggleSubscribe: vi.fn(),
+}));
+
+const socialState = reactive<{
+  loggedIn: boolean;
+  phase: 'idle' | 'pending' | 'success' | 'failed';
+  user: { userId: string; username: string; globalName: string; avatar: string } | null;
+}>({ loggedIn: false, phase: 'idle', user: null });
+
+vi.mock('../../stores/workshop-social-store', () => ({
+  useWorkshopSocialStore: () => ({
+    ...socialFns,
+    get isLoggedIn() {
+      return socialState.loggedIn;
+    },
+    get loginPhase() {
+      return socialState.phase;
+    },
+    get user() {
+      return socialState.user;
+    },
+    socialOf: (_id: string, from?: unknown) => from,
+    isBusy: () => false,
   }),
 }));
 
@@ -140,6 +178,10 @@ beforeEach(() => {
   h.fns.init.mockResolvedValue(undefined);
   h.fns.uninstall.mockResolvedValue(true);
   h.fns.commitInstall.mockResolvedValue({ project: makeProject(), plan: makePlan() });
+  socialState.loggedIn = false;
+  socialState.phase = 'idle';
+  socialState.user = null;
+  socialFns.login.mockResolvedValue({ status: 'success', user: null });
 });
 
 /** 找一个文案匹配的按钮 */
@@ -301,6 +343,91 @@ describe('WorkshopPage', () => {
     expect(text).toContain('有更新');
     // D12：标签必须摆在明面上
     expect(text).toContain('命定核心');
+    wrapper.unmount();
+  });
+
+  // ═══ 登录位（P3c / D19·D25） ═══
+
+  it('挂载时也踢一脚 social.init —— 它负责注册 token provider 与恢复登录态', async () => {
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    expect(socialFns.init).toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('未登录时顶栏是一个「Discord 登录」按钮', async () => {
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    expect(findButton(wrapper, 'Discord 登录')).toBeTruthy();
+    expect(wrapper.find('.wk-account').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('点登录交给 store 编排（弹窗/轮询/超时都不在本页）', async () => {
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    await findButton(wrapper, 'Discord 登录')!.trigger('click');
+    await flushPromises();
+    expect(socialFns.login).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('[aria-live="polite"]').text()).toContain('已登录');
+    wrapper.unmount();
+  });
+
+  it('★ 授权途中按钮转圈且不可再点 —— 连点两下会开出两个弹窗', async () => {
+    socialState.phase = 'pending';
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    const btn = findButton(wrapper, '等待 Discord 授权')!;
+    expect(btn.find('.btn-spinner').exists()).toBe(true);
+    expect(btn.attributes('disabled')).toBeDefined();
+    wrapper.unmount();
+  });
+
+  it('★ 登录失败：原话照登 + 补一句 Discord 服务器门槛（D25）', async () => {
+    socialFns.login.mockResolvedValue({
+      status: 'failed',
+      message: '你不在允许的服务器中',
+    });
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    await findButton(wrapper, 'Discord 登录')!.trigger('click');
+    await flushPromises();
+
+    const live = wrapper.find('[aria-live="polite"]').text();
+    expect(live).toContain('你不在允许的服务器中');
+    // 光有上游原话说不清「我该怎么办」
+    expect(live).toContain('命定之诗');
+    wrapper.unmount();
+  });
+
+  it('已登录时顶栏换成头像 + 名字 + 登出', async () => {
+    socialState.loggedIn = true;
+    socialState.user = { userId: 'u1', username: 'vera', globalName: '维拉', avatar: 'abc' };
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+
+    // 头像哈希要自己拼成 URL（JWT 里给的不是 URL）
+    expect(wrapper.find('.wk-avatar').attributes('src')).toContain(
+      'cdn.discordapp.com/avatars/u1/abc.webp',
+    );
+    // globalName 优先：改过显示名的用户不该看到自己早就不用的旧 ID
+    expect(wrapper.find('.wk-account-name').text()).toBe('维拉');
+    expect(findButton(wrapper, 'Discord 登录')).toBeUndefined();
+
+    await findButton(wrapper, '登出')!.trigger('click');
+    expect(socialFns.logout).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('[aria-live="polite"]').text()).toContain('已登出');
+    wrapper.unmount();
+  });
+
+  it('没设过头像时退回 Discord 默认头像，不留一个碎图标', async () => {
+    socialState.loggedIn = true;
+    socialState.user = { userId: 'u1', username: 'vera', globalName: '', avatar: '' };
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    expect(wrapper.find('.wk-avatar').attributes('src')).toContain('embed/avatars/0.png');
+    // globalName 空 → 退回 username
+    expect(wrapper.find('.wk-account-name').text()).toBe('vera');
     wrapper.unmount();
   });
 
@@ -513,12 +640,30 @@ describe('WorkshopPage', () => {
     vi.mocked(listProjects).mockResolvedValue({
       ok: true,
       fromCache: false,
-      data: { total: 1, page: 0, pageSize: 20, projects: [makeProject()], droppedCount: 0 },
+      data: {
+        total: 1,
+        page: 0,
+        pageSize: 20,
+        projects: [makeProject()],
+        droppedCount: 0,
+        socials: {},
+      },
     });
     vi.mocked(fetchProject).mockResolvedValue({
       ok: true,
       fromCache: false,
-      data: { project: makeProject(), regexEntries: [], previewEntries: [] },
+      data: {
+        project: makeProject(),
+        regexEntries: [],
+        previewEntries: [],
+        social: {
+          likesCount: 0,
+          subscribesCount: 0,
+          downloadsCount: 0,
+          userLiked: false,
+          userSubscribed: false,
+        },
+      },
     });
     h.fns.prepareInstall.mockResolvedValue({ ok: true, prepared: makePrepared([]) });
 

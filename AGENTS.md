@@ -326,6 +326,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 工坊 P0b  | 美化规则迁出 localStorage → Dexie v15                  | ✅                  |
 | 工坊 P1   | 创意工坊（浏览/安装/更新/卸载/启用，= 7f）             | 🔒 入口临时下线     |
 | 工坊 P2   | EJS 沙盒 + 只读 stats 投影（ADR-30）                   | ✅ 待真机           |
+| 工坊 P3   | 社交面（Discord 登录/点赞/订阅，D18-D25）              | ✅ 待真机           |
 | 真机迭代  | debug loop 持续修复                                    | 🔄                  |
 
 > 🔒 **工坊入口已临时下线（2026-08-01 安全审计）**：首页「创意工坊」按钮由 `HomePage.vue` 的 `WORKSHOP_ENTRY_ENABLED = false` 隐藏 —— 那是通往 workshop 视图的唯一入口。原因是 SEC-01（工坊正则的 `replaceString` 原样进美化管线、最终由 ChatFlow 的 `v-html` 落 DOM，事件属性会真的执行）与 SEC-02（世界书 EJS 走 `new Function`，`Object.constructor("return globalThis")()` 可拿回真全局，且同步跑主线程、死循环冻 UI），命中即可读到 localStorage 的 API Key、IndexedDB 存档与本地 BFF。**工坊代码一行没删**，沙箱/消毒方案（审计 Gate 0 / Gate 2）落地后把常量改回 `true` 即恢复。⚠️ 这只是暴露面收敛、不是安全边界：已装且已启用的项目仍会照常执行，游戏页侧栏的「工坊」启用面板也仍在。全文见 `docs/reviews/2026-08-01-repository-review.md`。（SEC-02 已由 QuickJS 隔离后端在 `feat/ejs-capability-surface` 收口；入口解封仍等 SEC-01 消毒方案落地。）
@@ -473,7 +474,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── worldbook-migration.ts       ← [工坊 P0] localStorage→Dexie 六步迁移（标志位判定→单事务 bulkPut→逐本回读校验→过了才删源→失败一律不动可重试；dedupeIds 防同 id 静默合并）
 │   ├── beautifier-store.ts          ← [工坊 P0b] 美化规则 Dexie 唯一入口（内置预设走纯内存 ref，不持久化）
 │   ├── beautifier-migration.ts      ← [工坊 P0b] 复用 P0 六步迁移
-│   └── workshop-store.ts            ← [工坊 P1] 执行器：拿 planInstall 的计划落 DB，不含转换逻辑
+│   ├── workshop-store.ts            ← [工坊 P1] 执行器：拿 planInstall 的计划落 DB，不含转换逻辑
+│   └── workshop-social-store.ts     ← [工坊 P3] 社交状态（Bearer JWT 弹窗+轮询登录 / JWT 本地解码 /
+│                                       toggle 乐观→校正→回滚 + 800ms 节流；纯内存展示层，零 Dexie，D22/D23）
 │
 ├── components/
 │   ├── shared/                      ← 通用组件
@@ -507,7 +510,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │       │                                   （与装后已装列表同源，别另写第二套判定）
 │       ├── WorkshopProjectCard.vue    ← tags 一条不折叠（D12，勿改成「更多」）
 │       ├── WorkshopInstalledList.vue / WorkshopConflictModal.vue（更新覆盖前警告）
-│       └── format.ts / failure-text.ts（展示层纯函数）
+│       ├── WorkshopSocialActions.vue  ← [工坊 P3] 点赞/订阅按钮对（卡片 compact / 详情 full 共用
+│       │                                 **唯一**社交动作入口——四条失败分支文案必须同源，别各写一份）
+│       └── format.ts / failure-text.ts（展示层纯函数；P3: +unauthorized 分支 / Discord 头像与登录引导文案）
 │
 └── styles/                          ← base.css / transitions.css / utilities.css
 ```

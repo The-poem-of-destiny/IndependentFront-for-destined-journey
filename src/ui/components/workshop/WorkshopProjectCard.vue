@@ -2,7 +2,13 @@
 /**
  * 工坊项目卡片 —— 浏览模态里的一格（Phase 1 / P1-4）
  *
- * 纯呈现，不碰 store、不发请求: 装没装、能不能装由父组件判定后以 `state` 传进来。
+ * 装没装、能不能装由父组件判定后以 `state` 传进来；本体不碰 store、不发请求。
+ * **唯一的例外**是右下角那对点赞/订阅按钮（P3c）—— 它整块封在
+ * `WorkshopSocialActions` 里，卡片只负责把 `project.id` 与本次响应的社交值递进去。
+ *
+ * ★ **根节点是 `div[role=button]` 而不是 `<button>`**（P3c 改）: 社交按钮嵌在卡片里，
+ * 而 `<button>` 套 `<button>` 是非法 HTML —— 浏览器解析时会把内层按钮**提到外面**，
+ * 卡片的版式当场散架。改用 role + tabindex + 键盘处理保住原来的可访问性。
  *
  * ★ **tags 必须显眼**（设计 D12）。我们**刻意不做**命定核心冲突拦截 —— 上游 tags 是
  * 自由文本（"系统"/"命定核心"/"外挂"/"路边"），没有可靠机器信号，猜必误伤。
@@ -13,8 +19,9 @@
  * 不该让整格塌掉，更不该留下浏览器的碎图标。
  */
 import { computed, ref, watch } from 'vue';
-import type { WorkshopProjectMeta } from '@engine/workshop-types';
+import type { WorkshopProjectMeta, WorkshopSocialMeta } from '@engine/workshop-types';
 import type { WorkshopProject } from '@engine/types';
+import WorkshopSocialActions from './WorkshopSocialActions.vue';
 import { formatBytes, formatVersion } from './format';
 
 const props = defineProps<{
@@ -23,6 +30,8 @@ const props = defineProps<{
   state?: WorkshopProject['installState'];
   /** 已装版本 —— 与上游 version 不同时卡片上直接说清「x → y」 */
   installedVersion?: string;
+  /** 本次列表响应带回的社交计数（D22）。缺省 → 不显示计数，也**不编** 0 */
+  social?: WorkshopSocialMeta;
 }>();
 
 const emit = defineEmits<{ open: [projectId: string] }>();
@@ -55,14 +64,34 @@ const badge = computed<{ text: string; kind: string } | null>(() => {
 
 /** 首字母兜底：中文取首字，英文取首字母 */
 const initial = computed(() => (props.project.name || '?').trim().slice(0, 1));
+
+function open(): void {
+  emit('open', props.project.id);
+}
+
+/**
+ * 回车/空格 = 打开详情（补回 `<button>` 根节点原本白送的那份键盘行为）。
+ *
+ * ★ `target !== currentTarget` 时直接放行: 焦点落在卡内的点赞按钮上时，回车属于
+ * **那个按钮**。不判这一下的话，用键盘赞一个项目会顺手弹出详情模态 —— 与鼠标
+ * 那侧靠 `@click.stop` 拦住的正是同一种误触，只是走的另一条事件通道。
+ */
+function onKey(event: KeyboardEvent): void {
+  if (event.target !== event.currentTarget) return;
+  if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return;
+  event.preventDefault(); // 空格默认滚动页面
+  open();
+}
 </script>
 
 <template>
-  <button
+  <div
     class="wk-card"
-    type="button"
+    role="button"
+    tabindex="0"
     :aria-label="`查看「${project.name}」详情`"
-    @click="emit('open', project.id)"
+    @click="open"
+    @keydown="onKey"
   >
     <div class="wk-cover">
       <img
@@ -102,8 +131,13 @@ const initial = computed(() => (props.project.name || '?').trim().slice(0, 1));
       <p v-if="state === 'update_available' && installedVersion" class="wk-update-line">
         {{ formatVersion(installedVersion) }} → {{ formatVersion(project.version) }}
       </p>
+
+      <!-- 社交动作：点击不冒泡到整卡的「打开详情」（组件内 @click.stop） -->
+      <div class="wk-card-social">
+        <WorkshopSocialActions :project-id="project.id" :social="social" />
+      </div>
     </div>
-  </button>
+  </div>
 </template>
 
 <style scoped>
@@ -255,6 +289,13 @@ const initial = computed(() => (props.project.name || '?').trim().slice(0, 1));
   margin: var(--theme-spacing-xs) 0 0;
   font-size: 0.6875rem;
   color: var(--theme-warning);
+}
+
+/* 社交按钮靠右下角，与上方内容留一口气 */
+.wk-card-social {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--theme-spacing-sm);
 }
 
 @media (prefers-reduced-motion: reduce) {

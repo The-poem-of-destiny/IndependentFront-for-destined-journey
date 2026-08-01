@@ -37,4 +37,9 @@ SettingsPage.vue」已被修掉 —— 现在**任何输出都是你弄坏的**�
 **别在 `src/**` 下 `import 'fs'`** —— 仓库没装 `@types/node`，会让 typecheck 报 TS2307；
 `?raw` 的类型由 `src/env.d.ts` 引的 `vite/client` 提供，直接就是 string。
 
+**再补一道：`npx eslint "src/ui/**/*.{ts,vue}"`。** vue-tsc 与 vitest 都**不**报
+`vue/no-dupe-keys` —— props 里有 `social`、`<script setup>` 里又 `const social = useXStore()`
+时，两处都全绿，只有 eslint 报错（2026-08-01 实测于 WorkshopSocialActions.vue）。
+模板里到底解析到哪一个是运行时才见分晓的事，改 SFC 后顺手跑一次 eslint 最省事。
+
 相关：[[known-flaky-tests]]（测试侧的同类基线）。

@@ -4,7 +4,9 @@
  *
  * 本项目自己的 Vue 模态，直连上游公开 REST。**不嵌 iframe、不跑上游 JS**（D17）。
  *
- * 只读一面: 这里没有点赞/订阅/投稿，Phase 3+ 再说。
+ * 社交面只到「展示 + 转交」为止（P3c）: 计数随同一份列表响应回来（`data.socials`，
+ * 零额外请求），本组件按 id 派给对应卡片；点赞/订阅的动作与状态归
+ * `WorkshopSocialActions` + social store。投稿/管理面仍不做。
  *
  * 三条纪律:
  * 1. **网络只经 `workshop-client`**。组件不碰 `fetch`，也不自己拼 URL —— 上游改路径时
@@ -15,7 +17,7 @@
  * 3. **失败要说人话且给得起重试**。上游是第三方 worker，抽风是常态而非异常路径。
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import type { WorkshopProjectMeta } from '@engine/workshop-types';
+import type { WorkshopProjectMeta, WorkshopSocialMeta } from '@engine/workshop-types';
 import { WORKSHOP_BASE_TAGS } from '@engine/workshop-types';
 import type { WorkshopProject } from '@engine/types';
 import {
@@ -52,8 +54,8 @@ const sort = ref<WorkshopSortMode>(WORKSHOP_DEFAULT_SORT as WorkshopSortMode);
 /**
  * 排序选项。**值**是上游 `z.enum` 的成员（传别的会 400），文案是本地的。
  *
- * 按点赞/订阅/下载排序不需要我们建任何社交状态 —— 它只是个查询参数，计数本身
- * 仍然不消费（属 Phase 3+）。
+ * 按点赞/订阅/下载排序是纯查询参数，与卡片上显示的计数各走各的 —— 排序由服务端
+ * 定序，计数由响应里的 `socials` 给，两者不必也不该互相校验。
  */
 const SORT_OPTIONS: { value: WorkshopSortMode; label: string }[] = [
   { value: 'published', label: '最新发布' },
@@ -64,6 +66,12 @@ const SORT_OPTIONS: { value: WorkshopSortMode; label: string }[] = [
 ];
 
 const projects = ref<WorkshopProjectMeta[]>([]);
+/**
+ * 项目 id → 社交计数（D22）。与 `projects` 分开存而不是并进每个项目里，是因为它
+ * **永不落库**：合进去之后，「这个对象能不能写进 Dexie」就再没有类型上的答案了。
+ * 同一份响应顺带带回来的，零额外请求。
+ */
+const socials = ref<Record<string, WorkshopSocialMeta>>({});
 const total = ref(0);
 const droppedCount = ref(0);
 const loading = ref(false);
@@ -168,6 +176,7 @@ async function load(force = false): Promise<void> {
   }
 
   projects.value = res.data.projects;
+  socials.value = res.data.socials;
   total.value = res.data.total;
   pageSize.value = res.data.pageSize > 0 ? res.data.pageSize : pageSize.value;
   droppedCount.value = res.data.droppedCount;
@@ -347,6 +356,7 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
             :project="p"
             :state="installedById.get(p.id)?.installState"
             :installed-version="installedById.get(p.id)?.installedVersion"
+            :social="socials[p.id]"
             @open="emit('open', $event)"
           />
         </div>

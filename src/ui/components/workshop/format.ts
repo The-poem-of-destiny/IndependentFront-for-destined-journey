@@ -120,6 +120,41 @@ export function describeSelectiveLogic(logic: number): string {
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+// 登录位（Phase 3 / P3c）
+// ═══════════════════════════════════════════════════════════
+
+/** Discord 自带的默认头像 —— 用户没设过头像、或头像加载失败时的兜底 */
+export const DISCORD_FALLBACK_AVATAR = 'https://cdn.discordapp.com/embed/avatars/0.png';
+
+/**
+ * 用户快照 → 头像 URL。
+ *
+ * ⚠️ JWT 里的 `avatar` 是**哈希不是 URL**（见 `WorkshopAuthUser`），必须自己拼。
+ * 拿 `.webp` 而非 `.png`: 同尺寸小一半，且动图头像（`a_` 开头）也能取到静态帧 ——
+ * 顶栏那一格 24px 的圆图不值得为动起来多下几十 KB。
+ *
+ * 拼不出来（没 id / 没哈希）就回默认头像，**不返回空串** —— 空 `src` 会让浏览器
+ * 去请求当前页面地址，然后画一个碎图标。
+ */
+export function discordAvatarUrl(user: { userId: string; avatar: string } | null): string {
+  const id = (user?.userId ?? '').trim();
+  const hash = (user?.avatar ?? '').trim();
+  if (!id || !hash) return DISCORD_FALLBACK_AVATAR;
+  return `https://cdn.discordapp.com/avatars/${id}/${hash}.webp?size=100`;
+}
+
+/**
+ * 顶栏显示名。`globalName` 是 Discord 的显示名，缺了才退回 `username` ——
+ * 反过来的话，改过显示名的用户会在我们这里看到一个他早就不用的旧 ID。
+ */
+export function discordDisplayName(user: { username: string; globalName: string } | null): string {
+  const global = (user?.globalName ?? '').trim();
+  if (global) return global;
+  const name = (user?.username ?? '').trim();
+  return name || '工坊用户';
+}
+
 /** 长文本截断 —— 折叠行的预览段，展开后看全文 */
 export function truncate(text: string, max = 90): string {
   const t = (text ?? '').replace(/\s+/g, ' ').trim();

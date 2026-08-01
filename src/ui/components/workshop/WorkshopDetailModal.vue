@@ -7,7 +7,9 @@
  * 正则数、体积、作者、版本。用户看完自己决定。任何把这些藏进折叠区的改动都是在
  * 悄悄推翻 D12 的前提。
  *
- * 只读一面: 没有点赞/订阅/投稿（Phase 3+）。
+ * 社交面（P3c）: 底栏放大版的点赞/订阅 + 三个计数，值来自**同一份详情响应**的
+ * `social`（零额外请求）。动作与状态封在 `WorkshopSocialActions` 里，与卡片同源。
+ * 投稿/管理面仍不做。
  *
  * 数据来源分工（P1-2 实测，最容易搞错的一处）:
  * - **正则条目** ← 详情响应的 `regexEntriesPreview`（名字里写着 Preview，实测是完整的）
@@ -25,6 +27,7 @@ import { fetchProject } from '../../lib/workshop-client';
 import type { WorkshopFailure, WorkshopProjectDetail } from '../../lib/workshop-client';
 import AppModal from '../shared/AppModal.vue';
 import AppButton from '../shared/AppButton.vue';
+import WorkshopSocialActions from './WorkshopSocialActions.vue';
 import {
   describeEntryPosition,
   describeSelectiveLogic,
@@ -471,6 +474,20 @@ const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInsta
     </div>
 
     <template #footer>
+      <!--
+        社交动作放在底栏最左，与右侧的安装/卸载隔开一整段 auto 间距: 它们是**两类
+        不同后果**的动作（一个改上游计数、一个往本地写世界书），挨在一起排会让人
+        点错。计数在按钮上，下载数跟在后面（仅展示，§1.3 不做逻辑依赖）。
+      -->
+      <div v-if="meta" class="wk-footer-social">
+        <WorkshopSocialActions
+          :project-id="projectId"
+          :social="detail?.social"
+          variant="full"
+          show-downloads
+        />
+      </div>
+
       <AppButton
         v-if="installed"
         variant="danger"
@@ -850,6 +867,11 @@ const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInsta
   margin: 0;
   font-size: 0.75rem;
   color: var(--theme-error);
+}
+
+/* 底栏是 justify-end 的一排；auto 把社交那一组顶到最左 */
+.wk-footer-social {
+  margin-right: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {

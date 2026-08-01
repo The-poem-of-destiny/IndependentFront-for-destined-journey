@@ -16,7 +16,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import type { WorkshopProjectMeta } from '@engine/workshop-types';
+import type { WorkshopProjectMeta, WorkshopSocialMeta } from '@engine/workshop-types';
 import type { WorkshopProject } from '@engine/types';
 import WorkshopBrowseModal from './WorkshopBrowseModal.vue';
 import { listProjects } from '../../lib/workshop-client';
@@ -44,7 +44,7 @@ function meta(over: Partial<WorkshopProjectMeta> = {}): WorkshopProjectMeta {
   };
 }
 
-function page(projects: WorkshopProjectMeta[], over: Record<string, number> = {}) {
+function page(projects: WorkshopProjectMeta[], over: Record<string, unknown> = {}) {
   return {
     ok: true as const,
     fromCache: false,
@@ -54,6 +54,8 @@ function page(projects: WorkshopProjectMeta[], over: Record<string, number> = {}
       pageSize: 20,
       projects,
       droppedCount: 0,
+      // 社交面（D22）默认空 —— 多数用例断言的是浏览/筛选；派发计数另有专门用例
+      socials: {} as Record<string, WorkshopSocialMeta>,
       ...over,
     },
   };
@@ -424,6 +426,41 @@ describe('WorkshopBrowseModal', () => {
     ];
     const wrapper = await open(installed);
     expect(document.body.querySelector('.wk-badge')!.textContent).toContain('已安装');
+    wrapper.unmount();
+  });
+
+  // ═══ 社交计数：同一份响应顺带带回来（D22），本组件只负责按 id 派给卡片 ═══
+
+  it('★ 把响应里的 socials 按 id 派给对应卡片', async () => {
+    listMock.mockResolvedValue(
+      page([meta(), meta({ id: 'p2', name: '另一段外传' })], {
+        socials: {
+          p1: {
+            likesCount: 12,
+            subscribesCount: 4,
+            downloadsCount: 88,
+            userLiked: true,
+            userSubscribed: false,
+          },
+          // p2 上游没给 —— 它那张卡就该一个数字都不显示（§3.3 不编数字）
+        } as Record<string, WorkshopSocialMeta>,
+      }),
+    );
+    const wrapper = await open();
+
+    const cards = [...document.body.querySelectorAll('.wk-card')];
+    expect(cards).toHaveLength(2);
+    const first = [...cards[0].querySelectorAll('.wk-social-count')].map((n) => n.textContent);
+    expect(first).toEqual(['12', '4']);
+    // 派错了 id 的话，第二张卡会拿到第一张的计数 —— 这是最容易犯又最难看出的一种错
+    expect(cards[1].querySelector('.wk-social-count')).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('上游没给 socials 时卡片照常渲染，只是没有计数', async () => {
+    const wrapper = await open();
+    expect(document.body.querySelectorAll('.wk-social-btn')).toHaveLength(2);
+    expect(document.body.querySelector('.wk-social-count')).toBeNull();
     wrapper.unmount();
   });
 

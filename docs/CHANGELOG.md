@@ -394,6 +394,21 @@ Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调
 **M2 修复的 Critical/Major:** C4（abandon 流程）。M1 已修的 C3/C5/C6/C7/M-1/M-3/M-4/M-9 由 A2-1 端到端验证。
 
 **已知遗留（M3 对齐）:** 前端 Vue 组件（CombatActionBar/CombatPanel 等）留最小改动、当前仍走 v2 渲染路径（标注 M2.5 前端完善）；`projectToAgent` 基于 CombatView 而非完整 CombatState（kernel 闭包藏 state）；`toPatches` 只算 FP 结算 patch（EXP/战利品 M4 settlement.before 补）；EffectChoice / BoundedAdjudication / CharGenRequest 三路由 `throw UnsupportedInM2`。
+### 工坊 P3 — 社交面：Discord 登录 + 点赞 + 订阅 ｜ ✅ 完成 待真机（2026-08-01）
+
+设计真源: `docs/planning/2026-08-01-workshop-social-design.md`（D18–D25，接续工坊 D 编号）。上游后端源码已取得（github.com/AkabaneSaki/myrepo，`cloudflare/src/`），全部契约**直接读自源码**并以 file:line 落进设计文档附录——判决：会话是 Bearer JWT（零 Cookie），CORS `ACAO:*` 放行 `Authorization`，**直连 REST 成立**，附录 B iframe 桥永久搁置（D18）。
+
+**引擎/客户端层（P3b）:**
+
+- `workshop-types.ts` + `WorkshopSocialMeta` / `WorkshopToggleAck`；`workshop-manifest.ts` + `parseSocialMeta` / `parseToggleAck` 纯函数（缺字段回 0/false）
+- `workshop-client.ts` — D21 契约修订（`WorkshopFetchInit` 扩 `method/headers/cache`，注释禁令同步改写）；`setWorkshopAuthTokenProvider` 注入缝 + `decodeJwtPayload`；已登录列表/详情 `no-store` + 缓存键身份前缀（`anon:`/`u<id>:`，载荷键刻意不分身份——按版本不可变）；`toggleLike/toggleSubscribe`（无体 POST、**永不重试**——上游是翻转语义非幂等）；`startLogin/pollLogin`；`WorkshopFailureKind` + `'unauthorized'`；双错误体形状解析
+- `workshop-social-store.ts`（新）— 弹窗 + postMessage 快路径（source+state 双验证）+ 2s 轮询兜底 60s 超时（D19）；JWT 本地解码 + exp 判定 + localStorage `workshop-auth`（D20）；per-project 覆盖层 + 乐观→无条件校正→失败回滚 + 800ms（项目×动作）节流（D23）；登出零请求（上游 logout 是 no-op）
+
+**UI 层（P3c）:** `WorkshopSocialActions.vue`（新，卡片/详情共用唯一动作入口）；`WorkshopPage` 顶栏登录位（头像/登出/guild 门槛失败文案 D25）；卡片与详情接 `socials`/`social`（随既有响应捎带，零新增读请求 D22）；卡片根节点 `<button>`→`div[role=button]`（按钮嵌套非法 HTML）。
+
+**请求优化（读后端源码推导，O1–O6）:** 跳过 `/api/auth/me`（其字段就是 JWT payload 回抄）；列表 TTL 45s→120s 对齐上游 `s-maxage=120`；postMessage 快路径每登录省 ~30 次轮询；登出零请求；toggle 响应自带计数零回读；不引入上游自家的 `_=timestamp` 缓存破坏参数。前置小优化（已进 master `097b0e8`）：列表 45s TTL 缓存、安装不再 force 重下载荷、首装吃详情热缓存。
+
+**验收:** 全量 **155 文件 / 5157 tests 全绿**；typecheck / vue-tsc / eslint 零错误。🔴 真机验证待做：真实 Discord OAuth（含不在服务器的 guild 门槛路径）需人工走一遍；社交字段零持久化（D13/D22 存储禁令不动，FullBackup 无变化）。
 
 ### 战斗 v3 M1 — 内核骨架：状态机 + 行动槽 + 原子提交 + 唯一终局 ｜ ✅ 完成（2026-08-01）
 

@@ -16,31 +16,41 @@
  *
  * 页面不碰 Dexie、不碰 `fetch`: 落库经 `workshop-store`，网络经 `workshop-client`。
  *
- * 只做安装侧: 登录/点赞/订阅/投稿属 Phase 3+，本页一个入口都不给。
+ * 社交侧只在本页占**一格**（P3c）: 顶栏的登录位（未登录一个按钮，已登录头像 + 名字 +
+ * 登出）。点赞/订阅长在卡片与详情上，不经过本页；投稿/管理面仍不做。
  * 「哪些工坊项目在这个存档里启用」是另一条轴（P1-5，捏人页 + 每存档面板），不在这里。
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import type { WorkshopProject } from '@engine/types';
 import type { InstallConflict } from '@engine/workshop-types';
 import { groupWorkshopNotes } from '@engine/workshop-types';
 import { useUIStore } from '../../stores/ui-store';
 import { useWorkshopStore } from '../../stores/workshop-store';
 import type { WorkshopPrepared } from '../../stores/workshop-store';
+import { useWorkshopSocialStore } from '../../stores/workshop-social-store';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import WorkshopBrowseModal from './WorkshopBrowseModal.vue';
 import WorkshopDetailModal from './WorkshopDetailModal.vue';
 import WorkshopInstalledList from './WorkshopInstalledList.vue';
 import WorkshopConflictModal from './WorkshopConflictModal.vue';
-import { describeFailure } from './failure-text';
-import { summarizeNoteGroups } from './format';
+import { describeFailure, describeLoginFailure } from './failure-text';
+import {
+  DISCORD_FALLBACK_AVATAR,
+  discordAvatarUrl,
+  discordDisplayName,
+  summarizeNoteGroups,
+} from './format';
 
 const ui = useUIStore();
 const workshop = useWorkshopStore();
+const social = useWorkshopSocialStore();
 
 onMounted(() => {
   // 幂等：init 内部共用同一个 Promise，App.vue 已经踢过的 store 在这里空转
   void workshop.init();
+  // 同样幂等。做两件事：给 client 注册 token provider、从 localStorage 恢复登录态
+  social.init();
 });
 
 const projects = computed<WorkshopProject[]>(() => workshop.projects);
@@ -259,6 +269,45 @@ async function confirmUninstall(): Promise<void> {
   }
 }
 
+// ═══ 登录位（P3c / D19·D25） ═══
+
+/** 头像 URL 拉不动时的兜底标志。换了用户就重置，否则新头像会被上一个人的失败判死 */
+const avatarFailed = ref(false);
+watch(
+  () => social.user?.userId,
+  () => {
+    avatarFailed.value = false;
+  },
+);
+
+const accountName = computed(() => discordDisplayName(social.user));
+const avatarUrl = computed(() =>
+  avatarFailed.value ? DISCORD_FALLBACK_AVATAR : discordAvatarUrl(social.user),
+);
+
+/**
+ * 登录。**不自己编排弹窗/轮询** —— 那一整套（双重验签、快路径、60 秒超时、单飞）
+ * 都在 store 里，本页只把收场翻成一句话。
+ *
+ * 连点两下不会开出两个弹窗: store 的单飞让第二次调用共用同一个 Promise，
+ * 而按钮在 pending 期间本来就是禁用的（`loading`）。
+ */
+async function onLogin(): Promise<void> {
+  const res = await social.login();
+  if (res.status === 'success') {
+    announce(`已登录为 ${accountName.value}`, 'success');
+    return;
+  }
+  // D25：上游原话照登，后面补一句我们自己的前提说明（口径收在 failure-text）
+  announce(describeLoginFailure(res.message), 'error');
+}
+
+/** 登出不发请求（O4）——上游 logout 是纯 no-op，丢掉本地 token 就是登出的全部含义 */
+function onLogout(): void {
+  social.logout();
+  announce('已登出创意工坊账号。', 'info');
+}
+
 // ═══ 详情模态的派生 ═══
 
 const detailInstalled = computed(() => workshop.getProject(detailId.value));
@@ -272,6 +321,28 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
       <AppButton variant="ghost" size="sm" @click="ui.navigate('home')">← 返回</AppButton>
       <h2 class="wk-title">创意工坊</h2>
       <div class="wk-topbar-actions">
+        <!-- ═══ 登录位（P3c） ═══ -->
+        <div v-if="social.isLoggedIn" class="wk-account">
+          <img
+            class="wk-avatar"
+            :src="avatarUrl"
+            alt=""
+            referrerpolicy="no-referrer"
+            @error="avatarFailed = true"
+          />
+          <span class="wk-account-name" :title="accountName">{{ accountName }}</span>
+          <AppButton variant="ghost" size="sm" @click="onLogout">登出</AppButton>
+        </div>
+        <AppButton
+          v-else
+          variant="secondary"
+          size="sm"
+          :loading="social.loginPhase === 'pending'"
+          @click="onLogin"
+        >
+          {{ social.loginPhase === 'pending' ? '等待 Discord 授权…' : 'Discord 登录' }}
+        </AppButton>
+
         <AppButton variant="secondary" size="sm" @click="fileInput?.click()">
           导入本地文件
         </AppButton>
@@ -400,7 +471,37 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
 }
 .wk-topbar-actions {
   display: flex;
+  align-items: center;
   gap: var(--theme-spacing-sm);
+}
+
+/* ── 登录位 ── */
+.wk-account {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+  padding-right: var(--theme-spacing-sm);
+  border-right: 1px solid var(--theme-card-border);
+}
+.wk-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--theme-radius-full);
+  object-fit: cover;
+  background: var(--theme-surface-muted);
+  border: 1px solid var(--theme-card-border);
+}
+/*
+ * 名字给个上限并省略: Discord 显示名可以很长（表情、装饰符号一大串），不封顶的话
+ * 顶栏右边那两个入口会被一路挤到看不见。
+ */
+.wk-account-name {
+  max-width: 10rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.8125rem;
+  color: var(--theme-text-secondary);
 }
 .wk-file-input {
   display: none;
