@@ -9,6 +9,31 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 战斗 v3 M1 — 内核骨架：状态机 + 行动槽 + 原子提交 + 唯一终局 ｜ ✅ 完成（2026-08-01）
+
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§二 核心控制模型 / §三 CombatState 与原子提交 / §十三 DomainEvent）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §3。M0 的地基（分通道骰带 + replay harness）之上，把 v2 的「Agent 主持流程」翻转为「代码内核主持流程」的**内核骨架**——所有变更走 `CombatSession.dispatch(command)` 单一入口，v2 代码仍不删（flag 默认 `'v2'`）。
+
+**新建内核文件（全部在 `combat-v3/`）:**
+
+- `types.ts`（扩）— 追加 `CombatPhase`（10 相位）/ `CombatUnitState` / `CombatState` / `CombatView`（只读投影）/ `ResolutionFrame` / `JournalEntry` / `RequiredInput` / `CombatTransition` / `CombatSession` / `CommandRejection` / `TerminalReason` / `DomainEvent`（M1 子集）/ `ReactionWindow`（18 窗口）/ `ActiveEffectIndex` / `PendingChangeSet` / `CombatDefinitionBundle`。M0 类型保留不动
+- `state.ts` — `createCombatState`（bundle→units + FP 快照 + provenance）/ `toView`（脱敏只读投影）/ `applyPending`（**唯一状态写入**，revision 单调递增、HP clamp `[0,maxHp]`）/ `applyOutcome`（把 `PhaseOutcome` 一次性落 state，rejection 时零变更）
+- `kernel.ts` — `createSession`：持有 state + `Map<commandId, CombatTransition>` 幂等缓存 + dispatch（调 reduce，经 `transition.next` 采纳完整权威状态）+ 熔断 200 微步骤抛 `KernelStuckError`
+- `reducer.ts` — `reduce` 唯一入口：stale revision / Terminal 只收 `RequestSettlement` / 目标在执行者早期校验（A1-2 拒绝须零事件）/ `AUTO_PHASES` 推进表（数据驱动非 if-else）/ `commandUsed` 标志（一次 dispatch 一个 PlayerCommand）/ SupplyDice 续杯 / 一次 Command 一次 revision
+- `phases/round.ts` — 增益 tick（round.open）/ 减益+DoT（round.close）+ buff `remainingTime` 真实递减到期移除（**M-1**）
+- `phases/initiative.ts` — initiative 通道掷骰 → v2 `rollInitiative` → 总值降序、平手字典序；**不调 `rollAndSortInitiative`**（避开其 `Math.random` 兜底）
+- `phases/unit-turn.ts` — 开槽（`canAct && hp>0` 才发槽，**M-3**）/ `consumeSlot`（cost 验证+消费）/ 士气 d20 从 `statusContest` 通道取（**M-4**）/ 线性推进到下一单位或 RoundClose
+- `phases/attack.ts` — 微步骤链 §3.4：① check.intent 取 `intentCheck` **两颗**独立骰 → resolveIntention（**C5**）→ ②③④ collect_mods/check.hit 窗口 → ⑤ damage.compute 管线 + clamp≥0（**C7**）→ ⑥ damage.preview 窗口（M1 空转）→ ⑦ checkNonLethal（**C6**，HP 锁 1 + 昏迷）→ ⑧⑨ beforeDown/damage.after 窗口 → ⑩ 攻守双方资源同批提交（**M-9**）
+- `phases/action.ts` — DeclareAction（道具/移动/专注/防御）+ Flee（statusContest 检定）
+- `phases/terminal.ts` — 终局四出口 `checkTerminal`（HP 全灭/士气溃逃/逃跑成功/forceTerminal）+ `settle` 按 `settlementId` **幂等**（**C3**，同 id 二次调用返回既有结果不产第二套奖励）
+- `rule-keys.ts` — 只注册 `terminal.forceTerminal` RuleKey（divinity≥5），其余三个 M4 补
+- `windows.ts` — **空转版** evaluator：遍历 `ActiveEffectIndex`（此时恒空）返回空 intent 数组；round/attack/unit-turn 各窗口**调用点全就位**，M3 接入时只填索引不用改调用点
+
+**验收:** A1-1 ~ A1-10 全过（行动槽强制/非法命令零事件零骰/同 commandId 幂等/原子提交/round tick/终局四出口/settle 幂等/双意图骰/非致死锁1/负 modifier 不治疗）+ §3.9 熔断。全量 **4792 测试 / 149 文件全绿**；typecheck 零错误；lint 零 error（3 个 `prefer-const` 已 `--fix`）。combat-v3 新增 92 测试（kernel 24 + reducer 22 + phases 28 + terminal 9 + state 9）。
+
+**M1 修复的 Critical/Major:** C3（settle 幂等）/ C5（意图双骰）/ C6（非致死锁 1）/ C7（伤害 clamp≥0）/ M-1（buff tick）/ M-3（行动槽强制）/ M-4（士气骰真源）/ M-9（攻守资源同批）。
+
+**已知遗留（M2 对齐）:** `phases/action.ts` 的 DeclareAction 尚未实现「道具消耗/移动范围/专注」等子类型的具体效果（M1 只消费动作槽 + 产事件）；`fixtures/case-06` 的 command kind `UseSkill`（非架构 §二 2.2 枚举）留待 M2 改 `DeclareAction`；EXP/战利品结算在 `settle` 只算 FP 净值，M2 settlement.before 窗口补全。
+
 ### 战斗 v3 M0 — 地基：分通道骰带 + replay harness + 纯函数签名改造 ｜ ✅ 完成（2026-08-01）
 
 架构真源: `docs/reference/combat-system-architecture-v3.md`（§四 DiceTape / §1.4 五处代码修正）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §2。把 v2 的「Agent 主持流程」翻转为「代码内核主持流程」的地基——所有新代码落 `src/sillytavern/combat-v3/`（deep module，唯一公共出口 `index.ts` 留待 M1），v2 代码 M5 前一行不删，靠 feature flag 整场切换。

@@ -15,3 +15,4 @@
 - [.bat stderr 噪音要换姿势才测得出](bat-stderr-harness-dependent.md) — Start-Process 恒报 0；只有 Git Bash 的 `cmd.exe /c 全路径 2> e.txt < /dev/null` 复现得出。测 dev.bat 先把端口改等长安全值，别碰 5173
 - [EJS 语料回退基线 17.8%](ejs-corpus-fallback-baseline.md) — 45 条含 EJS 里 8 条注定回退；`{{roll}}` 嵌在 EJS 代码块内推翻设计 D1 的宏剥离顺序
 - [v3 M0 签名改造落点](combat-v3-m0-signature-refactor.md) — performAttackCheck 改 rolls[]、morale d20 必传、AppSettings.combatEngineVersion；调用点传同值保 v2 行为；M1 起内核从 DiceTape 取真骰
+- [v3 M1 内核架构落点](combat-v3-m1-kernel-architecture.md) — reducer 经 transition.next 回传完整状态、PhaseOutcome 单次提交、closeUnitTurn 线性推进、commandUsed 标志、validateEarly 早期校验
