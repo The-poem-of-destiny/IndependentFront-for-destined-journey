@@ -207,4 +207,42 @@ describe('复用工具回归保护', () => {
   it('未知工具仍抛错', async () => {
     await expect(executeToolCall('不存在的工具', {}, makeCtx())).rejects.toThrow('未知工具');
   });
+
+  // 🆕 S2b（2026-08-01 制造反向链路）：craft_check 收集装备「生产检定」modifier → toolBonus
+  it('craft_check 装备生产检定 modifier → toolBonus 计入固定加值', async () => {
+    const char = makeCharacter({
+      name: '匠人',
+      tier: 3,
+      attributes: { str: 12, dex: 10, con: 10, int: 10, spi: 10 },
+      inventory: [
+        {
+          name: '锻火铁锤',
+          description: '',
+          quantity: 1,
+          equippedSlot: '武器',
+          modifiers: [
+            { category: '检定', source: '锻火铁锤', checkType: '生产', bonus: 5 },
+            { category: '检定', source: '锻火铁锤', checkType: '命中', bonus: 9 }, // 命中不走制造
+          ],
+        },
+        // 躺背包的生产检定 modifier 不应计入（只有已装备）
+        {
+          name: '闲置模具',
+          description: '',
+          quantity: 1,
+          modifiers: [{ category: '检定', source: '闲置模具', checkType: '生产', bonus: 99 }],
+        },
+      ],
+    });
+    const ctx = makeCtx([char]);
+    const r = await executeToolCall(
+      'craft_check',
+      { characterId: 'char_1', industry: '锻造', productName: '铁剑', materials: [] },
+      ctx,
+    );
+    // coreAttr(12) + toolBonus(5, 生产检定) + d20 = 17 + d20；命中+9 不进制造
+    expect(r.fixedBonus).toBe(17);
+    // 只进加值、不减免 DC（S2c）：普通品质产能减免 1 → finalDC 5（未被 toolBonus 再减）
+    expect(r.finalDC).toBe(5);
+  });
 });

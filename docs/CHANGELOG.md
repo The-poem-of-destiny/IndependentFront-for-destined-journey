@@ -9,6 +9,25 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 词条效果贯穿链路修复 S1+S2 — 物品/技能介入制造 + 落库链路 ｜ ✅ 完成（2026-08-01）
+
+实施计划: `docs/planning/2026-08-01-item-gen-combat-link-plan.md`；待办追踪: `docs/planning/combat-v3-fix-backlog.md`。M5 退役 v2 后排查发现，item_gen 生成的装备词条（modifiers）在 v3 战斗/制造里没生效。本批修正向链路（落库丢 modifiers）+ 反向链路（物品/技能介入制造）。
+
+**S1 正向链路闭环（applyAddItem 落库补收 3 字段）:**
+
+- `state-manager.ts` `applyAddItem` 此前只收 9 字段，丢 `modifiers`/`buffs`/`divinity` → craft_gen→item_gen 产物 + item_gen 独立链（开局/char_gen）装备词条都落不了库。现补齐，一条修复通两条链。
+
+**S2 反向链路（物品/技能介入制造）:**
+
+- `effect-types.ts` `CheckModifier.checkType` 加 `'生产'`（世界书《品质效果限定》检定类含生产检定修正）
+- `combat-item-validator.ts` `VALID_CHECK_TYPES` 加 `'生产'`
+- `agent-tools.ts` `craft_check`/`craft_settle` 新增 `collectCraftToolBonus()`：从已装备物品收集「生产检定」modifier → `toolBonus`（世界书《生产制作协议》检定加值 = 属性+技能+道具+身份）
+- **S2c 世界书语义落地**：`craft-dc.ts` `calcCraftCheck` 把 toolBonus 从 DC 减免拆出——**只进 fixedBonus（检定加值分子），不再同时减免 finalDC**（「检定加值」与「DC 减免」是两条独立声明）
+- **防泄漏**：`compile.ts` 检定分支 `checkType='生产'` → 返回 null（不编译进战斗，否则 slotMap 落到 hitBonus 误成命中）
+- **skillBonus 留 0**：落库 `Skill` 接口无 modifiers 字段，技能生产加值待 S4 补（字段级已支持）
+
+**验收:** S1-1/S1-2（落库保留）、S2-1（装备生产+5 → craft_check 含 +5）、S2-3（回归护栏）、S2-4（战斗不误收）全绿；S2-2（技能生产加值）阻塞待 S4。全量 **5109 测试 / 174 文件全绿**；typecheck 0；prettier 干净。新增 6 用例。
+
 ### 战斗 v3 M5 — 收尾：默认翻 v3 + 退役 v2 + 文档同步 ｜ ✅ 完成（2026-08-01）
 
 架构真源: `docs/reference/combat-system-architecture-v3.md`（§十四 引擎边界 / §十五 模块迁移映射表）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §8。把 v3 从「可选引擎」翻转为「默认引擎」，退役 v2 战斗运行时。**战斗 v3 全里程碑（M0→M5）收尾**。

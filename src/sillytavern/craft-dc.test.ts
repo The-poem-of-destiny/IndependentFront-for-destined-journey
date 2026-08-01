@@ -230,6 +230,29 @@ describe('calcCraftCheck', () => {
     expect(result.fixedBonusBreakdown.tool).toBe(3); // 2+1
     expect(result.fixedBonusBreakdown.identity).toBe(1);
   });
+
+  // 🆕 S2c（2026-08-01 制造反向链路）：toolBonus 只进检定加值（fixedBonus 分子），
+  //    不再同时减免 DC（finalDC 分母）。世界书《生产制作协议》两条独立声明：
+  //    检定加值 = 属性+技能+道具+身份；DC = 基础DC+Σ材料DC-[物品/技能]DC[-X]
+  it('S2c toolBonus 只进检定加值、不减免 DC（世界书语义）', () => {
+    const result = calcCraftCheck({
+      ...basicParams,
+      toolBonus: 5,
+      locationBonus: 0,
+    });
+    // 稀有品质产能减免 (4+5)/2=4：finalDC 不应再被 toolBonus 减掉 → 12 而非 7
+    expect(result.finalDC).toBe(12);
+    // toolBonus 进 fixedBonus
+    expect(result.fixedBonus).toBe(12 + 5);
+    expect(result.fixedBonusBreakdown.tool).toBe(5);
+    expect(result.bonusDCReduction).toBe(4); // 仅产能减免
+  });
+
+  it('S2c 无 toolBonus 时 finalDC 不回归（回归护栏）', () => {
+    const result = calcCraftCheck(basicParams);
+    expect(result.finalDC).toBe(12);
+    expect(result.fixedBonus).toBe(12);
+  });
 });
 
 // ========== Experience ==========

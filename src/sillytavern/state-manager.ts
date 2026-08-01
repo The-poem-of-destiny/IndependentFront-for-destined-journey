@@ -788,6 +788,12 @@ export class StateManager {
         data: value.data,
         effects: value.effects,
         scripts: value.scripts,
+        // 🆕 词条效果链路修复（S1，见 2026-08-01-item-gen-combat-link-plan.md）：
+        //     craft_gen→item_gen 产物 + item_gen 独立链都在 patch.value 写 modifiers/buffs/divinity，
+        //     此前落库只收 9 字段把这三个丢了 → 装备词条效果战斗/制造都不生效。现补齐。
+        modifiers: value.modifiers,
+        buffs: value.buffs,
+        divinity: value.divinity,
       });
     }
     await saveCharacter(char);

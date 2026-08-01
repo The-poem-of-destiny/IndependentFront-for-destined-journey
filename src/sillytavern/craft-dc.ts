@@ -155,7 +155,12 @@ export function calcCraftCheck(params: {
   const baseDC = CRAFT_DC_BASE[targetQuality];
   const materialDCModifier = materials.reduce((sum, m) => sum + m.dcModifier, 0);
   const [dcMin, dcMax] = productionBonus.dcReduction;
-  const bonusDCReduction = toolBonus + locationBonus + Math.floor((dcMin + dcMax) / 2);
+  // S2c（2026-08-01 制造反向链路）：toolBonus 不再同时减 DC。
+  //   世界书《生产制作协议》「检定加值: 属性+技能+道具+身份」与
+  //   「基础DC+Σ材料DC-[物品/技能]DC[-X]」是**两条独立声明**——
+  //   生产检定 modifier（装备道具加值）只进 fixedBonus（分子），不减免 finalDC（分母）。
+  //   DC 减免仅保留品质产能加成 + locationBonus（设施位，现状）。
+  const bonusDCReduction = locationBonus + Math.floor((dcMin + dcMax) / 2);
   const finalDC = Math.max(1, baseDC + materialDCModifier - bonusDCReduction);
 
   // 固定加值

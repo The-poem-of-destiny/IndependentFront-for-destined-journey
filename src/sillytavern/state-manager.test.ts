@@ -1353,6 +1353,57 @@ describe('StateManager', () => {
       expect(result.eventsGenerated[0].type).toBe('item_use');
     });
 
+    // 🆕 S1（2026-08-01 词条效果链路）：add_item 补收 modifiers/buffs/divinity 落库保留
+    it('add_item 带 modifiers/buffs/divinity → 落库保留（词条效果链路）', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1',
+        name: '理查德',
+        type: 'player',
+        saveId: 's1',
+        inventory: [],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        {
+          op: 'add_item',
+          target: 'characters.理查德',
+          value: {
+            name: '锻火铁锤',
+            description: '锤身残留锻火余温',
+            modifiers: [
+              { category: '检定', source: '锻火铁锤', checkType: '生产', bonus: 5 },
+              { category: '固伤', source: '锻火铁锤', amount: 8 },
+            ],
+            buffs: [
+              {
+                name: '灼热',
+                description: '锤击灼伤',
+                category: '减益',
+                stacks: 1,
+                remainingTime: 3,
+                timeUnit: '回合',
+                source: '[减益]-[自己]',
+                effects: { defense: -0.1 },
+              },
+            ],
+            divinity: 2,
+          },
+        },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(char.inventory).toHaveLength(1);
+      const item = char.inventory[0];
+      expect(item.modifiers).toHaveLength(2);
+      expect(item.modifiers![0]).toMatchObject({ category: '检定', checkType: '生产', bonus: 5 });
+      expect(item.buffs).toHaveLength(1);
+      expect(item.buffs![0].name).toBe('灼热');
+      expect(item.divinity).toBe(2);
+    });
+
     it('add_item 缺 name → 进 errors[]', async () => {
       const char = buildMockCharacter({
         id: 'uuid-1',
