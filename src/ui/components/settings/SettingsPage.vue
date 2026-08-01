@@ -3,6 +3,7 @@ import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
 import { useThemeStore } from '../../stores/theme-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useSettingsStore, type ApiEntry, type PresetItem } from '../../stores/settings-store';
+import { useWorldBookStore } from '../../stores/worldbook-store';
 import AppButton from '../shared/AppButton.vue';
 import AppCard from '../shared/AppCard.vue';
 import AppModal from '../shared/AppModal.vue';
@@ -23,6 +24,8 @@ const theme = useThemeStore();
 const ui = useUIStore();
 const cfg = useSettingsStore();
 const s = cfg.settings; // 短别名，模板里用 s.xxx
+// Phase 0：书本体在 Dexie，唯一入口是 worldbook-store（`s.worldBooks` 已不存在）
+const wb = useWorldBookStore();
 
 // ============================================================
 // 主导航
@@ -299,6 +302,13 @@ const activeAgent = ref<string | null>(s.activeAgent);
 
 // Phase 8: 世界书编辑
 const activeWorldBook = ref<WorldBook | null>(null);
+
+// Phase 0: 保证进设置页时世界书已就绪（init() 幂等，App.vue 已踢过一次）
+onMounted(() => {
+  void wb.init().catch(() => {
+    /* 世界书装不起来不该拦住设置页其它分区 */
+  });
+});
 
 // Agent 配置全部从 settings-store 读写，自动持久化
 const agentPromptDraft = ref('');
@@ -990,16 +1000,19 @@ async function saveWorldBookAsDefault(book: WorldBook) {
 
 /** 重置单本内置世界书 → 删除用户副本，重新从本地 JSON 加载 */
 async function resetSingleWorldBook(id: string) {
-  const book = s.worldBooks.find((b: WorldBook) => b.id === id);
+  const book = wb.getBook(id);
   if (!book?.builtIn) return;
   if (!confirm(`确定将"${book.name}"恢复为默认吗？\n\n您对该书的所有修改将被清除。`)) return;
   try {
-    s.worldBooks = s.worldBooks.filter((b: WorldBook) => b.id !== id);
+    // 先取到干净版本再落库：加载不到就什么都不动，绝不先删了再发现拿不回来
     const builtIn = await loadBuiltInWorldBooks();
     const fresh = builtIn.find((b) => b.id === id);
-    if (fresh) {
-      s.worldBooks.push(fresh);
+    if (!fresh) {
+      ui.toast('恢复失败：未找到内置版本', 'error');
+      return;
     }
+    await wb.upsertBook(fresh);
+    if (activeWorldBook.value?.id === id) activeWorldBook.value = wb.getBook(id) ?? null;
     ui.toast(`"${book.name}"已恢复为默认`, 'success');
   } catch {
     ui.toast('恢复失败', 'error');
@@ -1035,7 +1048,7 @@ async function importWorldBook() {
             }))
           : [],
       };
-      s.worldBooks.push(book);
+      await wb.upsertBook(book);
       ui.toast(`已导入 "${book.name}" (${book.entries.length} 条目)`, 'success');
     } catch {
       ui.toast('导入失败：文件格式错误', 'error');
@@ -1044,7 +1057,7 @@ async function importWorldBook() {
   input.click();
 }
 
-function newWorldBook() {
+async function newWorldBook() {
   const name = prompt('世界书名称：');
   if (!name) return;
   const id = name.toLowerCase().replace(/\s+/g, '_');
@@ -1054,13 +1067,18 @@ function newWorldBook() {
     partition: 'world_setting',
     entries: [],
   };
-  s.worldBooks.push(book);
-  activeWorldBook.value = book;
+  try {
+    await wb.upsertBook(book);
+  } catch {
+    ui.toast('创建失败', 'error');
+    return;
+  }
+  activeWorldBook.value = wb.getBook(id) ?? book;
   ui.toast(`已创建 "${name}"`, 'success');
 }
 
-function deleteWorldBook(id: string) {
-  const book = s.worldBooks.find((b: WorldBook) => b.id === id);
+async function deleteWorldBook(id: string) {
+  const book = wb.getBook(id);
   if (!book) return;
   if (
     !confirm(
@@ -1068,7 +1086,13 @@ function deleteWorldBook(id: string) {
     )
   )
     return;
-  s.worldBooks = s.worldBooks.filter((b: WorldBook) => b.id !== id);
+  try {
+    await wb.deleteBook(id);
+  } catch {
+    ui.toast('删除失败', 'error');
+    return;
+  }
+  if (activeWorldBook.value?.id === id) activeWorldBook.value = null;
   ui.toast(`已删除"${book.name}"`, 'warning');
 }
 
@@ -1092,10 +1116,12 @@ async function resetWorldBooks() {
   }
 }
 
-function handleWorldBookUpdate(updated: WorldBook) {
-  const idx = s.worldBooks.findIndex((b: WorldBook) => b.id === updated.id);
-  if (idx >= 0) {
-    s.worldBooks[idx] = updated;
+async function handleWorldBookUpdate(updated: WorldBook) {
+  try {
+    await wb.upsertBook(updated);
+  } catch {
+    ui.toast('保存失败', 'error');
+    return;
   }
   ui.toast('世界书已保存', 'success');
 }
@@ -1516,12 +1542,12 @@ async function clearAll() {
                   </label>
                 </div>
                 <div class="worldbook-select-list">
-                  <template v-if="s.worldBooks.length === 0">
+                  <template v-if="wb.books.length === 0">
                     <p class="text-muted text-sm" style="padding: 20px; text-align: center">
                       暂未导入世界书。请先在「世界书」导航中导入。
                     </p>
                   </template>
-                  <label v-for="book in s.worldBooks" :key="book.id" class="worldbook-checkbox">
+                  <label v-for="book in wb.books" :key="book.id" class="worldbook-checkbox">
                     <input
                       type="checkbox"
                       :checked="(s.agentWorldbookIds[activeAgent] || []).includes(book.id)"
@@ -1875,7 +1901,7 @@ async function clearAll() {
                   </div>
                 </div>
 
-                <AppCard v-if="s.worldBooks.length === 0" padding="md">
+                <AppCard v-if="wb.books.length === 0" padding="md">
                   <p class="text-muted text-sm" style="text-align: center; padding: 40px 0">
                     暂无世界书<br />
                     <span style="font-size: 0.75rem"
@@ -1886,7 +1912,7 @@ async function clearAll() {
 
                 <div v-else class="worldbook-list">
                   <AppCard
-                    v-for="book in s.worldBooks"
+                    v-for="book in wb.books"
                     :key="book.id"
                     padding="md"
                     class="worldbook-card"
@@ -2257,8 +2283,21 @@ async function clearAll() {
                       <option :value="500">很慢 (500ms)</option>
                     </select></label
                   >
-                </div></AppCard
-              >
+                  <div class="form-label">
+                    减少动态效果
+                    <p class="form-hint">
+                      关掉卡片入场、骨架屏脉动、折叠展开等过渡动画。若系统已开启「减少动态效果」，
+                      无需在此重复设置 —— 系统偏好始终独立生效，本开关只是额外强制开启。
+                    </p>
+                    <div class="toggle-row">
+                      <span>{{ s.reducedMotion ? '已开启' : '跟随系统' }}</span>
+                      <label class="toggle-label">
+                        <input v-model="s.reducedMotion" type="checkbox" class="toggle-input" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+                  </div></div
+              ></AppCard>
             </section>
 
             <!-- ========== 消息显示 ========== -->

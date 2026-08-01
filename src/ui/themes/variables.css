@@ -122,13 +122,40 @@
   --z-tooltip: 500;
 }
 
-/* ===== 无障碍: 减少动态效果 ===== */
+/* ===== 无障碍: 减少动态效果 =====
+ *
+ * 两个来源，各自一条选择器:
+ * 1. 系统偏好 `prefers-reduced-motion: reduce`
+ * 2. 应用内开关 —— `<html data-reduced-motion="true">`，由 lib/reduced-motion.ts 单点写入
+ *
+ * ★ `animation-delay` **必须**一起归零，这不是可选项。
+ *   本规则不用 `animation: none`（那会连 `both` 填充的终态一起撤销，带 `both` 的
+ *   入场动画会永远停在 `opacity: 0`），而是"瞬间跑完一轮"。但只压 duration 不压
+ *   delay 的话，元素会在**延迟期间**保持 `from` 关键帧 —— 交错入场（40/80/…/280ms）
+ *   在减动效下就变成"隐身 280ms 再逐个弹出"，恰恰砸在最不想看动效的人脸上。
+ *
+ * JS 侧不受 CSS 管辖的动作（平滑滚动等）走 lib/reduced-motion.ts 的同名判定。
+ */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
   }
+}
+
+:root[data-reduced-motion='true'] *,
+:root[data-reduced-motion='true'] *::before,
+:root[data-reduced-motion='true'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
 }

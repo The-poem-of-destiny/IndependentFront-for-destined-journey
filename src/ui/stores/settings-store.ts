@@ -10,9 +10,6 @@
  */
 import { defineStore } from 'pinia';
 import { ref, watch } from 'vue';
-import type { WorldBook } from '@engine/types';
-import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks';
-import { loadPresetRules, mergeRules } from '@engine/beautifier';
 
 // ===== 类型 =====
 
@@ -100,7 +97,10 @@ function getDefaults(): Record<string, any> {
     activePresetId: '',
 
     // Phase 8: 世界书管理
-    worldBooks: [] as WorldBook[],
+    // 🔴 `worldBooks` 已迁出（Phase 0 / 设计 D2）：书本体在 Dexie `worldBooks` 表，
+    //    唯一入口是 worldbook-store。此处刻意**不留默认值** —— 留个空数组会让消费端
+    //    以为这里仍是真相来源，而 deep watch 又会把它写回 localStorage。
+    //    下面几项是 UI 选择/开关，不是书内容，继续留在设置里。
     activeWorldBookId: null as string | null,
     worldBookDirty: false,
     allowEditBuiltInBooks: false, // 允许编辑内置世界书（默认只读保护）
@@ -127,6 +127,11 @@ function getDefaults(): Record<string, any> {
     // 交互 —— 悬停浮层延迟（ms）。全站 hover-to-display 统一读它：
     // 状态效果气泡、在场角色心声气泡等。0 = 立即弹出。
     hoverDelayMs: 200,
+
+    // 交互 —— 减少动态效果。默认**关**：开着才是特殊要求，不该替所有人做主。
+    // 关掉时系统的 `prefers-reduced-motion` 仍然独立生效（本开关只做"额外强制开启"，
+    // 不做"强制关闭系统偏好"）。判定与写入见 lib/reduced-motion.ts。
+    reducedMotion: false,
 
     // 消息 & 系统事件可见性
     systemEventsVisible: true,
@@ -160,8 +165,11 @@ function getDefaults(): Record<string, any> {
 
     // 输出美化
     beautifierEnabled: true,
-    beautifierRules: [] as any[],
-    beautifierPresetRules: [] as any[],
+    // 🔴 Phase 0b 已迁出，此处刻意**不留默认值**：
+    //   · beautifierRules      → Dexie `beautifierRules` 表（唯一入口 beautifier-store）
+    //   · beautifierPresetRules → 派生缓存，改为 beautifier-store 的纯内存 ref，不再持久化
+    //   留个空数组会让消费端以为这里仍是真相来源，而 deep watch 又会把它写回 localStorage。
+    //   下面这项是几个 id 的开关列表，体积无关紧要，继续留在设置里。
     beautifierBuiltinDisabled: [] as string[],
   };
 }
@@ -182,43 +190,17 @@ export const useSettingsStore = defineStore('settings', () => {
   const defaults = getDefaults();
   const merged = { ...defaults, ...saved };
 
-  // Phase 8: 启动时异步加载内置世界书（运行时 fetch，始终最新）
+  // Phase 0: 内置世界书合并已搬去 worldbook-store 的 init()（设计 D4 第 6 步）——
+  // 必须在 localStorage→Dexie 迁移**之后**、针对 Dexie 执行，否则会把内置书写回
+  // localStorage，源数组在迁移脚下漂移。
   setTimeout(async () => {
-    try {
-      const builtIn = await loadBuiltInWorldBooks();
-      const existing = (settings.value.worldBooks as WorldBook[]) || [];
-      const existingIds = new Set(existing.map((b) => b.id));
-      for (const book of builtIn) {
-        if (!existingIds.has(book.id)) {
-          existing.push(book);
-        }
-        // 已有 → 保留 localStorage 版本（用户编辑不丢）
-      }
-      settings.value.worldBooks = [...existing];
-    } catch {
-      // fetch 不可用时静默跳过
-    }
     // 加载项目默认 Agent 配置
     await loadAgentProjectDefaults();
 
-    // 🆕 初始化美化预设规则（含 autoEnable 解析）—— 修复开局游戏页读到空规则导致正则不生效。
-    // 此前仅 BeautifierSection.onMounted 加载（要打开设置→输出美化才触发），现提到全局启动。
-    // autoEnable 信号来自存档（命定核心选择），启动时无存档上下文 → 传空信号；
-    // 规则定义加载即可，locked 由游戏页/设置页按存档 enabledWorldBookEntries 重算。
-    try {
-      const presetRules = await loadPresetRules();
-      const merged = mergeRules(
-        presetRules,
-        (settings.value.beautifierRules as any[]) ?? [],
-        (settings.value.beautifierBuiltinDisabled as string[]) ?? [],
-        new Set(),
-        new Set(),
-        new Set(),
-      );
-      settings.value.beautifierPresetRules = merged.filter((r: any) => r.isBuiltin);
-    } catch {
-      // 加载失败静默（BeautifierSection 打开时会兜底重算）
-    }
+    // Phase 0b: 美化预设规则的启动加载已搬去 beautifier-store 的 init()。
+    // 必须在 localStorage→Dexie 迁移**之后**跑，否则算出来的 22 条（~378 KB）会被
+    // 塞回 settings.beautifierPresetRules，源对象在迁移脚下漂移。
+    // 现在它只进 beautifier-store 的纯内存 ref，不再持久化。
   }, 0);
 
   const settings = ref<Record<string, any>>(merged);
@@ -251,15 +233,20 @@ export const useSettingsStore = defineStore('settings', () => {
     saveNow();
   }
 
-  /** 恢复世界书为默认：清除旧数据，重新从 data/worldbooks/ 加载 */
+  /**
+   * 恢复世界书为默认：清除旧数据，重新从 data/worldbooks/ 加载。
+   *
+   * Phase 0 起书本体在 Dexie，实现委托给 worldbook-store（唯一入口）。
+   * 这里保留薄壳只为不动既有调用点。动态 import 是为了避开
+   * worldbook-store → settings-store 的循环依赖。
+   */
   async function resetWorldBooksToDefaults() {
     try {
-      const builtIn = await loadBuiltInWorldBooks();
-      settings.value.worldBooks = builtIn;
-      settings.value.activeWorldBookId = null;
+      const { useWorldBookStore } = await import('./worldbook-store');
+      await useWorldBookStore().resetToDefaults();
       saveNow();
     } catch {
-      /* fetch 不可用时静默跳过 */
+      /* fetch / IndexedDB 不可用时静默跳过 */
     }
   }
 

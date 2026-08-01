@@ -242,6 +242,15 @@ function formatTime(ts: number) {
         >
           <i class="btn-icon fa-solid fa-folder-open" aria-hidden="true"></i>读 取 存 档
         </AppButton>
+        <AppButton
+          variant="secondary"
+          size="lg"
+          block
+          class="btn-workshop"
+          @click="ui.navigate('workshop')"
+        >
+          <i class="btn-icon fa-solid fa-puzzle-piece" aria-hidden="true"></i>创 意 工 坊
+        </AppButton>
         <div class="btn-row">
           <AppButton variant="ghost" size="md" class="btn-ghost" @click="ui.navigate('settings')">
             <i class="btn-icon fa-solid fa-gear" aria-hidden="true"></i>设 置
@@ -753,6 +762,16 @@ function formatTime(ts: number) {
   box-shadow: 0 4px 16px color-mix(in srgb, #000 25%, transparent);
 }
 
+.btn-workshop {
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.btn-workshop:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px color-mix(in srgb, #000 25%, transparent);
+}
+
 .btn-ghost {
   transition: transform 0.2s ease;
 }
@@ -1177,11 +1196,13 @@ function formatTime(ts: number) {
   }
   .btn-new-game,
   .btn-load,
+  .btn-workshop,
   .btn-ghost {
     transition: none;
   }
   .btn-new-game:hover,
   .btn-load:hover,
+  .btn-workshop:hover,
   .btn-ghost:hover {
     transform: none;
   }

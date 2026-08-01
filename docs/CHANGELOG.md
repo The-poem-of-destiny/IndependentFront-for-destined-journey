@@ -9,6 +9,98 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 工坊 P1 — 创意工坊（= Phase 7f） ｜ ✅ 真机走查已过（2026-07-31）
+
+设计: `docs/planning/2026-07-31-creative-workshop-compat-design.md`（v2，D1-D17）；实施计划: `docs/planning/2026-07-31-workshop-phase0-1-implementation-plan.md`。上游是【命定之诗】创意工坊（角色卡内嵌酒馆助手脚本 + Cloudflare Worker 后端），本引擎**不嵌 iframe、不跑上游 JS**，只直连其公开 REST。
+
+**新分区 `creative_workshop`**（`WorldBookPartition` 第 16 个成员）。**所有工坊条目一律归此分区**，无论上游标成系统/角色/事件/DLC —— 分区在本引擎是**信任域边界**，不是内容学分类；上游 `tags` 仅作展示与筛选，不参与判定。除分区外工坊条目与其它条目完全一视同仁（同表、同启用机制、同样可编辑、同样进备份），无门禁无特判。
+
+**模块**（照素材系统「纯函数出计划 / 执行器只落库」分层）:
+
+- 引擎纯函数层 `src/sillytavern/`: `workshop-types.ts` / `workshop-manifest.ts`（上游 JSON → 内部形状，容忍字段增删）/ `workshop-regex-map.ts`（ST 正则 → BeautifierRule）/ `workshop-install-plan.ts`（★ `planInstall` 纯同步出计划：发号/转换/匹配/冲突/丢弃全在无副作用函数里算完并可完整断言）
+- UI 层 `src/ui/`: `lib/workshop-client.ts`（唯一网络接触点，判别联合永不抛穿 + 超时 + 取消）/ `lib/workshop-enable.ts`（启用展开纯函数）/ `stores/workshop-store.ts`（执行器，只落库）/ `components/workshop/` 6 组件 + `format.ts`·`failure-text.ts` / `shared/WorkshopEnableList.vue` / `game/WorkshopEnablePanel.vue`（每存档「内容启用」，建档后仍可改）；入口在首页「创意工坊」按钮 + 游戏页侧栏「工坊」 + 捏人页（原「角色启用」步骤改名「内容启用」）
+
+**关键决策**:
+
+- **一项目一本书** —— `worldBooks` 行 `id = workshop:${projectId}`，`partition = 'creative_workshop'`。这是**多本书共用一个分区的第一例**（内置书是 `id === partition` 一一对应）
+- **uid 必须在分区内重新分配** ★否则数据损坏 —— `filterBooksByEnabledEntries()` 以 partition 为键建 uid 允许表，而上游每个项目 uid 都从 0 起编，跨项目撞号是必然。安装时由分区级分配器全局单调发号；上游 uid 降级为 `extra.workshop.sourceUid` 仅溯源
+- **卸载不回收号段** —— 回收会让旧存档的 `enabledWorldBookEntries` 指向新项目的条目（静默内容错位）。游标地板取「在装项目 + 现有书 + **所有存档引用过的号**」三者最大
+- **启用完全走既有机制** —— 写 `SaveSlot.metadata.enabledWorldBookEntries` 的 `creative_workshop:<uid>`，与 `system_core:413` 一视同仁；不新增 SaveSlot 字段、不改 `filterBooksByEnabledEntries`、不做分区特判。真正的闸门是 Agent 可见性（新装书不自动进任何 Agent 的 `worldBookIds`，这是既有规范非工坊特例）
+- **UI 粒度是项目，不做命定核心冲突拦截** —— `tags` 是上游自由文本，无可靠机器信号，猜必误伤；显著展示 tags 与简介由用户判断
+- **正则原样安装、默认启用、不剥离 `<script>`/`<style>`** —— 落进现有输出美化规则库，`group: '创意工坊 · <项目名>'` + `autoEnable.worldBookIds: ['workshop:<id>']`（装了才启用，卸载即失效）。⚠️ **已知并明确接受**: `<style>` 会全局泄漏样式进主题 token 体系；`<script>` 在 `v-html` 中不执行只占字节；内联 `onclick` 会触发
+- **更新按名匹配、覆盖式** —— 存活条目 uid 不变（存档引用无需重写），删除的 uid 退休，新增的领新号；逐条比对 `sourceHash`，**改动过的先弹警告**（`WorkshopConflictModal`）再覆盖
+- **丢弃必须 loud** —— `promptOnly`/`placement`/`minDepth`/`maxDepth`/`substituteRegex`/`runOnEdit`/`trimStrings` 及 `{{getvar::}}` 宏一律记 `droppedNotes`，项目卡片如实展示「N 项未导入」，静默截断会让用户以为装全了
+
+**真机走查已过**: 真实上游 279 项目 14 页，完整跑通 浏览 → 筛选 → 详情 → 安装 → 启用 → 卸载。
+
+🔴 **Phase 2（EJS 沙盒 + 只读 stats 投影）未做** —— 工坊装进来的世界书条目里的 **EJS 目前不会被求值**，正文原样进 Agent 上下文。这不是本次新增的缺陷（内置书今天就这样：`event.json` 297 个 EJS 块、`system_core.json` 252 个），但**工坊内容因此并未真正完整生效**。
+
+**不做（Phase 3+）**: Discord 登录、点赞、订阅、投稿。
+
+**测试**: 135 files / 4611 tests 全绿；`npm run typecheck` 与 `vue-tsc` 均 0 错误。
+
+#### 工坊 P1 实施后修订（2026-07-31）｜ ✅ 真机已复验
+
+真机走查后打的两处补丁。设计文档已同步：D16 追加「实施期修订」小节、D12 追加同屏并列条目。
+
+**① `droppedNotes` 分三类 —— 原口径在撒谎**
+
+装「艾莉亚核心先行版 v3.2.1」时 UI 顶部写「**34 项内容未导入**」，但那 34 条 note 里只有约 14 条是真丢弃；其余 20 条描述的是**已装且已启用、只是渲染受限或有副作用**的正则（Dexie 里 5 条正则全部 `enabled`，世界书也装得好好的）。用户读到只会以为安装失败。
+
+| kind         | 含义                                  | 覆盖                                                                                                                         |
+| ------------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `dropped`    | ST 字段本引擎无对应物，**确实没导入** | `placement` · `maxDepth` · `minDepth` · `runOnEdit` · `promptOnly`（整条跳过）· `substituteRegex` · `trimStrings` · 退休条目 |
+| `degraded`   | **已装**，但渲染不完整                | ` ```html ` 围栏无渲染器 · 完整 HTML 文档被解析器截断 · `<script>` 惰性 · `{{宏}}` 无替换环节 · 上游重名本地改名             |
+| `sideEffect` | **已装**，且有规则自身之外的副作用    | `<style>` 全局生效、可能覆盖应用主题 token                                                                                   |
+
+- `types.ts` 新增 `WorkshopNoteKind` / `WorkshopNote` / `WorkshopNoteLike`
+- `workshop-types.ts` 新增纯函数 `workshopNote` / `normalizeWorkshopNote(s)` / `groupWorkshopNotes` —— ★**向后兼容**：已装项目在 Dexie 里存的是旧 `string[]`，裸字符串与脏 `kind` 一律退回 `dropped`，**绝不抛**
+- `workshop-regex-map.ts` / `workshop-install-plan.ts` 打 kind；文案口径统一在 `components/workshop/format.ts`
+- `WorkshopInstalledList.vue` 折叠行三段分计数（`sideEffect` 带 ⚠ 且最显眼）；`WorkshopPage.vue` toast 同口径
+- **已知后果一条未变** —— 改的只是停止把「已装但受限」误报成「未导入」。「丢弃必须 loud」不变，但 loud 的对象要分得清：把不同性质的事混成一个数字本身就是另一种静默截断
+- **真机复验**：同一批 note 现显示「14 项未导入 · 15 项已装但效果受限 · ⚠ 5 项有全局副作用」，合计仍是 34
+
+**② 捏人页工坊选择挪到「命定核心」步骤**
+
+原先工坊多选在后面的「内容启用」步骤，与命定核心单选隔了一屏。现把工坊区从 `CreateStepCharacters.vue` 挪到 `CreateStepDestinyCore.vue`，拆成并列两轴（`一 · 命定核心` 单选·必选 / `二 · 工坊项目` 多选·可选），步骤名「内容启用」改回「**角色启用**」（即上文 P1 条目中「原『角色启用』步骤改名『内容启用』」一句已被撤回）。
+
+**纯 UI 位置调整** —— `create-store` 三条轴逻辑与 `buildEnabledWorldBookEntries()` 输出**逐字未变**（有测试钉住）。D12「不做命定核心冲突拦截、只显著展示 tags 由用户判断」不变；同屏之后反而更好落实：用户能同时看到两边的 tags 与简介。
+
+🔴 **Phase 2 仍未做** —— 工坊条目正文里的 EJS 依然不求值，本次修订与之无关。
+
+**测试**: 138 files / 4645 tests 全绿；`npm run typecheck` 与 `vue-tsc` 均 0 错误。
+
+### 工坊 P0b — 美化规则迁出 localStorage ｜ ✅
+
+**起因同 P0**: 内置美化规则 22 条 = 386,645 字符（≈378 KB）每次启动都从磁盘重算，却仍被完整写进 localStorage；工坊正则落地后还要再加 ≈494 KB。这一阶段是**实施期间新增的前置**，设计定稿（v2）时未预见。
+
+- Dexie **v15** 新增 `beautifierRules` 表；新增 `beautifier-store.ts`（Dexie 唯一入口）+ `beautifier-migration.ts`（复用 P0 的六步迁移）
+- **`AppSettings.beautifierPresetRules` 字段整个删除** —— 派生缓存不该有持久化字段位，改为纯内存 ref（启动时从磁盘算）
+- `beautifierBuiltinDisabled` 体积小且是真用户意图，**留在 settings 不迁**
+- `FullBackup` 新增 `beautifierRules`（只含用户规则，内置预设不进备份）
+- `beautifier.ts` 的 `processRules` / `mergeRules` **一行未动** —— 换的是存储层，不是规则语义
+
+### 工坊 P0 — 世界书迁出 localStorage ｜ ✅
+
+设计: 同上文档 D1-D5。**起因是三个后果，其中第三个是真缺陷**:
+
+| 问题             | 实测                                                                                                                               |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 配额压力         | 内置世界书紧凑序列化 889,962 字符（≈0.85 MB；localStorage 按 UTF-16 计约 1.7 MB），配额通常 5 MB，且溢出**静默 catch**             |
+| 写放大           | deep watch 在**任何**设置变更时重新 `JSON.stringify` 整个 ≈2 MB 设置对象                                                           |
+| **备份不覆盖** ★ | `exportAllData()` 只做 `db.*.toArray()`，**从不读 localStorage** —— 世界书根本不进备份，而设置页却标注「IndexedDB + localStorage」 |
+
+- Dexie **v14** 新增 `worldBooks` / `workshopProjects` 两表。**死表 `lorebooks`/`settings` 原样保留不删** —— 删表要写 `表名: null`，会永久抹掉老用户可能仍存的 v1–v3 行；放着不花钱，导出也只是空数组
+- 新增 `worldbook-store.ts`（Dexie 唯一入口）+ `worldbook-migration.ts`：**标志位判定**（`worldBooksMigratedAt`，不以「表里有没有行」判定——半失败会留下行看着像完成）→ 单事务 `bulkPut` → **回读逐本校验**（书数 + 条目数）→ 通过才删 localStorage 副本 → 任何一步失败**一律不动**、下次启动重试。不留 localStorage 回滚副本（留着就没释放配额，而释放配额正是迁移目的）
+- 启动顺序：内置书合并必须在迁移**之后**、针对 Dexie 执行，否则源数组在迁移脚下漂移
+- 消费端全部切换: `game-pipeline` / `SettingsPage` / `create-store` / `App.vue`；`filterBooksByEnabledEntries` 及下游不动，只是拿到的数组变长
+- `FullBackup` 加 `worldBooks` + `workshopProjects` 两字段并递增版本，import 采**三态语义**: 字段缺席 → 整表不动（旧备份）· `[]` → 清空 · 有数据 → 覆盖
+
+🔴 **独立审查发现并修复两个会丢数据的缺陷**:
+
+1. **重复 id 的书在迁移中被静默合并** —— `bulkGet(['x','x'])` 对同一行返回两次，数量校验被骗过，`bulkPut` 只写进一行。已加 `dedupeIds`
+2. **导入 pre-v14 旧备份会清空整张 worldBooks 表** —— `Array.isArray` 守卫写在 `clear()` 之后，旧备份没这个字段时表已经被清空了。已改为守卫先行（📌 加表进 FullBackup 时别照抄 clear-then-guard）
+
 ### 战斗 v2 — 战斗系统架构 v2 重构 ｜ ✅ M5 完成，待 M6 真机
 
 战斗系统架构 v2 重构（管道+中间件+同构契约+6 大类效果对齐 #265160+buff 规则对齐 [状态规则]+19 event+Combat Agent+独立战斗面板+计算分工）。魔改不照抄世界书，趣味优先+代码兜底。架构: `docs/reference/combat-system-architecture.md`；计划: `docs/planning/2026-07-28-combat-system-v2-plan.md`。M1-M6 六批次，§十三 待确认清单已全收口。
@@ -101,6 +193,184 @@ beautifier-rules.json 预设规则（22 条: 2 内置 + 20 远程）+ 世界书/
 - **M6** 读方切换 + 双写退役 + 收官
 
 规范: `docs/superpowers/specs/2026-07-16-data-field-conventions-design.md` + `2026-07-16-entity-field-audit.md`。核心铁律: 逻辑键=名字（AI 永不产 id）· 名字解析唯一入口 · AI 填叙事字段 Code 补账务字段 · 每类数据唯一真源 · 枚举中文集中定义。
+
+---
+
+### 2026-07-31 — 修复：选工坊命定核心卡在捏人第 3 步
+
+**症状**：新建存档 → 命定核心步骤 → 选一个工坊的命定核心 → **下一步按钮永不亮起**，
+且没有任何提示说明缺什么。
+
+**根因**：`stepValid[2]` 只认 `selectedSystemCoreEntryUid`（内置 `system_core` 条目的
+uid）。工坊项目走的是另一条轴（项目级多选 `enabledWorkshopProjectIds`），选中它不会
+写那个 uid，闸门自然一直关着。上一轮把工坊多选挪到本步同屏时，只搬了位置，没有把
+「工坊系统项目也是命定核心候选」这件事接进闸门。
+
+**修法**（按主人指定）：标了「系统」标签的工坊项目**并入命定核心那份单选名单**，
+与内置核心同等对待 —— 同一个单选槽、互斥、同样满足必选闸门。
+
+- `workshopSystemOptions` / `workshopExtraOptions`：按 `tags.includes('系统')` 一分为二
+- `selectedWorkshopCoreProjectId`：工坊核心的单选槽，与 `selectedSystemCoreEntryUid`
+  **双向互斥**（命定核心只有一枚，选一个就清另一个）
+- `stepValid[2]`：两者任一非空即放行
+- `buildEnabledWorldBookEntries`：工坊核心与附加项目**合流**后交给
+  `applyWorkshopSelection` —— 存储上二者没有区别（都是 `creative_workshop:<uid>`），
+  区别只在捏人页的选择语义，下游 `filterBooksByEnabledEntries` 无需知情
+- 下方多选区改用 `workshopExtraOptions`，同一个项目不会同屏出现两次
+
+涉及文件: `create-store.ts` · `CreateStepDestinyCore.vue`（+ 两处测试）
+
+验证: 141 文件 / 4700 测试全绿（+7）· typecheck & vue-tsc 0 错误 · lint 0 error。
+🔴 仍未真机走查。
+
+---
+
+### 2026-07-31 — 工坊评审修复 + 减动效开关 + 工坊书对 Agent 可见
+
+Fable 评审（`ed28320..107f80b`）的 7 项发现全部修掉，另加两个功能。
+
+**🔴 三处「我说过的话是错的」**
+
+1. `WorkshopDetailModal` 的 docblock 声称装前预告与装后报告「不可能分家」——**假的**。
+   `mapWorkshopRegexes` 是**索引敏感**的（未命名正则兜底成 `未命名正则 ${序号+1}`），
+   逐条单独调用时序号恒为 0，同一条正则装前显示「未命名正则 1」、装后显示
+   「未命名正则 3」。修：`RegexMapContext` 加 `indexBase`，检视侧传真实序号。
+   （评审用一个失败用例证明的，不是推测。）
+2. 「防抖动」的 `gridKey` **自己就是抖动源**：它由 `sort|tag|search|page` 拼成，
+   全是**输入**，在请求发出前就变了。打字（350ms 防抖）会在一发请求都没出去时
+   重建网格三次并重放入场动画；翻页则先拿上一页卡片演一遍、数据到了再演一遍。
+   修：改成结果落地时 +1 的 `renderSeq`。
+3. 上一条 changelog 说全局减动效规则「兜住了」—— 只兜住一半。它没覆盖
+   `animation-delay`，于是带 `both` 的交错入场在减动效下变成「隐身 280ms 再逐个弹出」，
+   恰好砸在最不想看动效的人脸上。修：全局规则补 `animation-delay` /
+   `transition-delay` / `scroll-behavior`。
+
+**其余修复**
+
+- 两个确认模态的忙碌态是**死代码**：`confirmOverwrite` / `confirmUninstall` 都先关模态
+  再 await，「正在覆盖…」「卸载中…」永远没机会渲染。改成跑完再关，并在写入期间
+  禁掉取消与遮罩关闭（写入不可中断，留个假出口不如禁掉）。
+- 本地文件导入**绕过了忙碌闸门**，能在 60s 载荷下载途中并发跑第二个 commit，
+  先收工的那个把忙碌态清掉、按钮提前解禁。补 `if (busyId) return`。
+- 折叠行收起后**仍在无障碍树里**（0fr + overflow:hidden 只是视觉隐藏），且里面
+  `overflow: auto` 的代码块在 Chrome 下可被 Tab 聚焦。补 `visibility`（延迟到动画
+  结束）+ `aria-controls`。
+- 上游正则 **id 可重复**（不可信输入）：撞号时 `workshopRuleId` 会让后一条静默盖掉
+  前一条（「装了 5 条」实际只有 4 条）。`workshop-manifest` 加 `dedupeRegexIds`，
+  首次出现者保留原 id。
+- 详情模态主按钮不再「卸载时装按钮转圈」（补 `busyAction`）。
+
+**🆕 减少动态效果开关**（设置 → 外观主题，**默认关**）
+
+`settings.reducedMotion` → `<html data-reduced-motion>` → CSS 全站关动画。系统的
+`prefers-reduced-motion` 仍**独立生效**，本开关只做「额外强制开启」，不做「强制关闭
+系统偏好」。JS 侧不受 CSS 管辖的动作（平滑滚动）走 `lib/reduced-motion.ts` 同一判定。
+
+**🆕 工坊书对所有 Agent 可见**
+
+★ 此前是**装了等于没装**：Agent 只读 `AgentConfig.worldBookIds` 点过名的书，而工坊书
+带的是新 id（`workshop:<projectId>`），不在任何 Agent 清单里 —— 于是「装了 + 存档里
+勾了启用」的工坊内容，一个 Agent 都读不到。安装时 `grantWorkshopBookToAgents` 把书
+挂进所有 Agent，卸载时 `revokeWorkshopBookFromAgents` 收回（不收回会积一串死 id）。
+
+只动 `worldBookIds` 名单，**不碰** `agentWorldbookEnabled` —— 那是另一条轴（「这个
+Agent 到底用不用世界书」），项目默认里 memory_recall / plot_pre_check / item_gen /
+combat 是刻意关掉的，替用户翻开会让它们凭空吃下整包工坊内容。条目自身的 `enabled`
+与存档级 `enabledWorldBookEntries` 仍照常过滤。
+
+涉及文件: `workshop-regex-map.ts`(+`indexBase`) · `workshop-manifest.ts`(+去重) ·
+`workshop-types.ts`(+两个 grant/revoke 纯函数) · `workshop-store.ts` ·
+`WorkshopPage.vue` · `WorkshopBrowseModal.vue` · `WorkshopDetailModal.vue` ·
+`WorkshopConflictModal.vue` · `settings-store.ts` · `SettingsPage.vue` · `App.vue` ·
+`themes/variables.css` · 新增 `lib/reduced-motion.ts`
+
+验证: 141 文件 / 4693 测试全绿（+26）· typecheck & vue-tsc 0 错误 · lint 0 error。
+🔴 仍**未做真机走查**（预览面板不合成帧、Chrome 扩展未连接）。
+
+---
+
+### 2026-07-31 — 加载态动画：AppButton 忙碌态 + 水合骨架
+
+补的是「按下去之后什么都没发生」的那段沉默。工坊一次安装要下几百 KB 载荷，
+这段沉默可以长达几十秒。
+
+**`AppButton` 新增 `loading`**（共享组件，可选 prop，不影响既有调用点）
+
+- 转圈 + 自动禁用 + `aria-busy`；转圈用 `em` 与 `currentColor`，三档尺寸 ×
+  四个 variant × 10 主题都不必另配
+- ★ 与 `disabled` **语义不同**，别拿 disabled 顶替：disabled 是「不能做」，
+  loading 是「正在做」。两者长一个样时，用户按下按钮后只看到它变灰，分不清是
+  自己点漏了、还是被拒绝了、还是在跑。故 loading 有自己的压暗度（0.8，
+  btn-disabled 的 0.5 会把转圈也压得看不清）
+
+**转圈只落在按下的那个按钮上**：`WorkshopPage` 的 busy 状态从「项目 id」扩成
+「id + 动作」（`beginBusy`/`endBusy` 成对）。一行并排三个按钮，只按 id 判定会三个
+一起转，用户看不出跑的是「查更新」还是「卸载」—— 卸载不可逆，让它看起来在跑而
+实际在跑别的是会吓到人的。
+
+**🔴 水合骨架（顺带修掉一个真错）**：`WorkshopPage` 此前不看 `store.ready`，
+于是每次进页面的头一瞬都渲染「尚未安装任何工坊项目」+「已安装（0）」——
+对一个装了十个项目的用户来说这两句都是假的。现在水合中渲染骨架行。
+
+**详情模态首屏骨架**替掉一行「正在取详情…」：文字态只有一行高，详情到位后整个模态
+从一行猛涨到满屏，那一下窜动比等待本身更让人不适。
+
+**减动效**：删掉本轮新写的 `animation: none` 局部覆盖，统一交给
+`themes/variables.css` 的全局规则（`animation-duration: .01ms !important` +
+`animation-iteration-count: 1 !important`）。★ 它比 `animation: none` 正确：后者会连
+`both` 的终态一起撤销（卡片会停在 `opacity: 0`，减动效用户看到一片空网格），
+前者是「瞬间跑完一轮」，天然停在终态。
+
+涉及文件: `AppButton.vue`(+`loading`) · `WorkshopPage.vue` · `WorkshopInstalledList.vue`
+(+`busyAction`/`hydrating`) · `WorkshopDetailModal.vue` · `WorkshopConflictModal.vue` ·
+新增 `AppButton.test.ts`
+
+验证: 140 文件 / 4667 测试全绿（+9）· typecheck & vue-tsc 0 错误 · lint 0 error。
+🔴 同上：**未做真机走查**，动画观感待确认。
+
+---
+
+### 2026-07-31 — 工坊 P1 增补：装前检视 / 服务端排序 / 恒定标签条 + 抗抖动
+
+对齐上游插件（`AkabaneSaki/myrepo`）功能盘点后补的三处差距，外加浏览模态的抖动治理。
+
+**装前检视（详情模态）**
+
+- 世界书条目与正则**逐条可展开**，不再只报一个总数。条目展开后给主/次关键词、
+  匹配逻辑、order/position 与完整正文；正则给 pattern、replacement。
+- ★ 每条正则带**处置预告**（不会生效 / 全局副作用），走的是安装时那个
+  `mapWorkshopRegexes` —— 与装后已装列表**同源**。这是本屏比上游多出来的一件事：
+  上游把 ST 字段搬进 ST，没有东西会丢，只需展示 pattern；我们的美化库不是 ST 正则
+  引擎，与其装完再说「N 项未导入」，不如装之前就在每一条上标出来。
+  🔴 若将来有人在这里另写一套判定，用户就会遇到「装前说好好的、装完说没导入」。
+- 长列表先渲 25 行，其余按需 —— 上游有几百条目的项目，一次性展开会让模态卡一拍。
+
+**服务端排序**：`WORKSHOP_SORT_MODES`（published/updated/likes/subscribes/downloads）。
+排序必须服务端做且回到第 0 页，否则会排出「第 2 页的热门项目排在第 1 页的冷门项目之前」。
+社交**计数**仍不消费（Phase 3+），按它们排序只是一个查询参数。
+
+**恒定标签条**：`WORKSHOP_BASE_TAGS`（系统/扩展/角色/事件）替掉「从当前页现采」。
+现采有两处害：翻到不含某标签的页时该标签会消失；条的行数随内容变化，每次翻页都把
+下方整个网格顶上顶下。
+
+**抗抖动 + 动画**（design.md §6.1 口径）
+
+- 结果区 `min-height: 420px` —— 末页条数少时模态不再先塌后弹
+- 首次加载用**骨架屏**替掉一行文字，先把最终布局占住
+- 在飞时旧结果压暗（只动 opacity）而非抽走，屏幕上始终有内容
+- 卡片入场 opacity + translateY(12px)/0.35s，逐格递延 40ms 至第 8 格封顶
+- 折叠行展开走 `grid-template-rows: 0fr→1fr`（禁止 max-height 过渡）
+- 翻页后滚回结果区顶部
+- 全部配 `prefers-reduced-motion`（入场动画关掉时显式把卡片摁回可见，
+  否则 `animation: none` 会连 `both` 的终态一起撤销 → 一片空网格）
+
+涉及文件: `workshop-types.ts`(+`WORKSHOP_BASE_TAGS`) · `workshop-client.ts`
+(+`WORKSHOP_SORT_MODES`) · `WorkshopBrowseModal.vue` · `WorkshopDetailModal.vue` ·
+`format.ts` · 新增 `WorkshopDetailModal.test.ts`
+
+验证: 139 文件 / 4658 测试全绿（+13）· typecheck & vue-tsc 0 错误 · lint 0 error。
+🔴 **未做真机走查** —— 预览面板不合成帧（Vue `<Transition>` 依赖 rAF，导航卡在
+leave 阶段），Chrome 扩展未连接。视觉与动画观感待真机确认。
 
 ---
 

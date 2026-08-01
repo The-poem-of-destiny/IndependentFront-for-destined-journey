@@ -44,9 +44,16 @@ import {
   ATTRIBUTE_NAMES,
   ATTR_CN_TO_EN,
 } from '@engine/start-catalog';
-import { loadBuiltInWorldBooks, loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
+import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
+import { useWorldBookStore } from './worldbook-store';
+import { useWorkshopStore } from './workshop-store';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
 import type { WorldBook, WorldBookEntry } from '@engine/types';
+import {
+  applyWorkshopSelection,
+  buildWorkshopEnableOptions,
+  type WorkshopEnableOption,
+} from '../lib/workshop-enable';
 
 // ===== 类型 =====
 
@@ -122,7 +129,9 @@ export const useCreateStore = defineStore('create', () => {
       race.value !== '' &&
       remainingBP.value >= 0 &&
       remainingAP.value >= 0,
-    2: selectedSystemCoreEntryUid.value !== null, // 命定核心
+    // 命定核心：内置条目**或**工坊系统项目，二者择一即可放行。
+    // 只认前者时，选了工坊核心的用户会卡死在这一步（按钮永远不亮，且没有任何提示）。
+    2: selectedSystemCoreEntryUid.value !== null || selectedWorkshopCoreProjectId.value !== null,
     3: true, // 角色启用（可选）
     4: true, // 装备选择
     5: true, // 背景故事
@@ -361,26 +370,100 @@ export const useCreateStore = defineStore('create', () => {
   /** 勾选的 character entry uids */
   const enabledCharacterEntryUids = ref<Set<number>>(new Set());
 
-  /** 从内置世界书加载 system_core 和 character 条目 */
+  // ── P1-5: 第三条轴 —— 启用的工坊项目（项目级多选，D10/D12）──────────
+  //
+  // 刻意**不**挤命定核心那个单选槽: 一个工坊项目是 N 条条目，塞不进单个 uid 的
+  // `selectedSystemCoreEntryUid`。这里存项目 id，落库时才展开成
+  // `creative_workshop:<uid>` —— 与 system_core / character 同一套机制，无特判。
+
+  /** 已装工坊项目（含各自条目 uid），由 {@link loadWorldBookEntries} 填充 */
+  const workshopOptions = ref<WorkshopEnableOption[]>([]);
+
+  /** 勾选的工坊项目 id（**不含**被选作命定核心的那个，见下） */
+  const enabledWorkshopProjectIds = ref<Set<string>>(new Set());
+
+  /**
+   * 上游标了「系统」标签的工坊项目 —— 它们是**命定核心候选**，不是附加内容。
+   *
+   * ★ 分成两拨的理由: 命定核心是单选且必选（`stepValid[2]`），而附加内容是多选且
+   * 可选。此前工坊项目一律进多选那拨，于是「选了一个工坊命定核心」既满足不了
+   * 核心的必选闸门（用户卡在这一步过不去），语义上也说不通 —— 两个命定核心同时
+   * 生效，世界观直接打架。
+   */
+  const workshopSystemOptions = computed(() =>
+    workshopOptions.value.filter((o) => o.tags.includes('系统')),
+  );
+
+  /** 其余工坊项目（角色/事件/扩展…）—— 附加内容，多选 */
+  const workshopExtraOptions = computed(() =>
+    workshopOptions.value.filter((o) => !o.tags.includes('系统')),
+  );
+
+  /**
+   * 选作命定核心的工坊项目 id。与 {@link selectedSystemCoreEntryUid} **互斥** ——
+   * 命定核心只有一个，内置的和工坊的抢同一个位置。
+   */
+  const selectedWorkshopCoreProjectId = ref<string | null>(null);
+
+  /** 选中的工坊命定核心（展示用） */
+  const selectedWorkshopCore = computed<WorkshopEnableOption | null>(
+    () =>
+      workshopSystemOptions.value.find(
+        (o) => o.projectId === selectedWorkshopCoreProjectId.value,
+      ) ?? null,
+  );
+
+  /** 单选工坊命定核心（传 null 取消）。选中即清掉内置核心 —— 互斥 */
+  function selectWorkshopCore(projectId: string | null) {
+    selectedWorkshopCoreProjectId.value = projectId;
+    if (projectId !== null) selectedSystemCoreEntryUid.value = null;
+  }
+
+  /** toggle 勾选工坊项目（项目级，一次连带其全部条目） */
+  function toggleWorkshopProject(projectId: string) {
+    const next = new Set(enabledWorkshopProjectIds.value);
+    if (next.has(projectId)) {
+      next.delete(projectId);
+    } else {
+      next.add(projectId);
+    }
+    enabledWorkshopProjectIds.value = next;
+  }
+
+  /**
+   * 加载 system_core 和 character 条目。
+   *
+   * Phase 0 起改读 worldbook-store（Dexie 全量：内置 + 用户导入/编辑 + 将来的工坊书），
+   * 不再直读 `data/worldbooks/*.json` —— 此前用户在设置页对内置书的编辑
+   * 进不了捏人页。store 为空（IndexedDB 不可用）时仍回落 fetch 本地 JSON。
+   */
   async function loadWorldBookEntries() {
     try {
-      const books = await loadBuiltInWorldBooks();
+      const wb = useWorldBookStore();
+      await wb.init();
+      const books = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
       systemCoreEntries.value = books
         .filter((b) => b.partition === 'system_core')
         .flatMap((b) => b.entries);
       characterEntries.value = books
         .filter((b) => b.partition === 'character')
         .flatMap((b) => b.entries);
+      // P1-5: 工坊项目走自己的项目级列表（未安装的不出现）
+      const ws = useWorkshopStore();
+      await ws.init();
+      workshopOptions.value = buildWorkshopEnableOptions(ws.projects, books);
     } catch {
       // fetch 不可用时静默跳过，保持空数组
       systemCoreEntries.value = [];
       characterEntries.value = [];
+      workshopOptions.value = [];
     }
   }
 
-  /** 单选命定核心（传 null 取消选择） */
+  /** 单选命定核心（传 null 取消选择）。选中即清掉工坊核心 —— 互斥 */
   function selectSystemCoreEntry(uid: number | null) {
     selectedSystemCoreEntryUid.value = uid;
+    if (uid !== null) selectedWorkshopCoreProjectId.value = null;
   }
 
   /** toggle 勾选角色 */
@@ -408,7 +491,17 @@ export const useCreateStore = defineStore('create', () => {
       ids.push(`character:${uid}`);
     }
 
-    return ids;
+    // P1-5: 启用的工坊项目 → 展开成该项目全部条目的 creative_workshop:uid（D12）。
+    // 走同一个纯函数，与建档后的每存档面板共用一套展开语义。
+    //
+    // 工坊命定核心与附加项目在**存储上没有区别**（都是 creative_workshop:uid），
+    // 区别只在捏人页的选择语义（单选/必选 vs 多选/可选）。所以这里合流即可，
+    // 下游 filterBooksByEnabledEntries 不需要知道哪个是核心。
+    const projectIds = new Set(enabledWorkshopProjectIds.value);
+    if (selectedWorkshopCoreProjectId.value !== null) {
+      projectIds.add(selectedWorkshopCoreProjectId.value);
+    }
+    return applyWorkshopSelection(ids, workshopOptions.value, projectIds);
   }
 
   // ═══════════════════════════════════════════════════════
@@ -882,10 +975,11 @@ export const useCreateStore = defineStore('create', () => {
   /** 加载剧情大纲 Agent 可见的世界书（统一数据源：store 优先 + 文件兜底；worldBookIds + 捏人勾选过滤） */
   async function loadPlotOutlineWorldBooks(agentConfigs: AgentConfig[]): Promise<WorldBook[]> {
     try {
-      // 统一数据源：读 store（含用户在 WorldBookEditor 的 enabled 修改），不再绕过 store 读原始文件
-      const all = await loadWorldBooksWithFallback(
-        useSettingsStore().settings.worldBooks as WorldBook[] | undefined,
-      );
+      // 统一数据源：读 worldbook-store（Dexie，含用户在 WorldBookEditor 的 enabled 修改），
+      // 不再绕过 store 读原始文件
+      const wb = useWorldBookStore();
+      await wb.init();
+      const all = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
       const cfg = agentConfigs.find((c) => c.agentId === 'plot_outline');
       let filtered = all;
       if (cfg && cfg.worldBookIds?.length) {
@@ -1701,9 +1795,12 @@ export const useCreateStore = defineStore('create', () => {
     initPlotDefaultsFromSettings();
     showPresetModal.value = false;
     selectedSystemCoreEntryUid.value = null;
+    selectedWorkshopCoreProjectId.value = null;
     enabledCharacterEntryUids.value = new Set();
+    enabledWorkshopProjectIds.value = new Set();
     systemCoreEntries.value = [];
     characterEntries.value = [];
+    workshopOptions.value = [];
   }
 
   return {
@@ -1780,12 +1877,21 @@ export const useCreateStore = defineStore('create', () => {
     systemCoreEntries,
     characterEntries,
     selectedSystemCoreEntryUid,
+    selectedWorkshopCoreProjectId,
+    selectedWorkshopCore,
+    selectWorkshopCore,
+    workshopSystemOptions,
+    workshopExtraOptions,
     selectedSystemCoreEntry,
     enabledCharacterEntryUids,
     loadWorldBookEntries,
     selectSystemCoreEntry,
     toggleCharacterEntry,
     buildEnabledWorldBookEntries,
+    // P1-5: 工坊项目启用轴（项目级多选）
+    workshopOptions,
+    enabledWorkshopProjectIds,
+    toggleWorkshopProject,
     // 选择 (→ 开场提示词)
     selectedEquipments,
     selectedItems,

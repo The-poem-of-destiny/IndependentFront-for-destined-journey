@@ -1,11 +1,16 @@
 ---
 name: known-flaky-tests
-description: 全量 vitest 跑出来的 2 个既有失败（game-store 大纲回读 ~50% 概率、SelectableCard 品质色），不是新改动弄坏的
+description: 曾经的 2 个既有失败（game-store 大纲回读 ~50% 概率、SelectableCard 品质色）——2026-07-31 全量已 0 failed，别再把它们当基线放过
 metadata:
   type: project
 ---
 
-`npx vitest --run` 全量当前**基线就是 2 failed / 3943 passed**（2026-07-29 实测），两条都与素材子系统无关：
+**2026-07-31 更新：全量 `npx vitest run` 全绿，0 failed**（当日两次实测：125 files / 4351 tests，
+以及工坊 P1-1 落地后的 128 files / 4452 tests；P1-3 workshop-store 落地后 132 files / 4543 tests 同样全绿）。
+下面两条历史失败要么被修了，要么那次没抽中（第 1 条是概率性的）。**现在任何 failed 都要当
+成自己弄坏的来查**，只有第 1 条再次出现且症状完全吻合时才可判为已知抖动。
+
+历史记录（2026-07-29 实测 2 failed / 3943 passed）：
 
 1. `src/ui/stores/game-store.test.ts` → 「loadSave 应并行回读最新大纲与事件树」**约 50% 概率失败**
    （单独跑也会失败）。症状: 期望 `确认版` 实得 `旧版`。

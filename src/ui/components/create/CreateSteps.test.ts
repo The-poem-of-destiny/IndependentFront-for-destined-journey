@@ -41,6 +41,9 @@ describe('CreateSteps', () => {
     });
     const labels = wrapper.findAll('.step-label');
     expect(labels[0].text()).toBe('难度选择');
+    // 工坊多选已并入「命定核心」同屏，第四步回归只管角色
+    expect(labels[2].text()).toBe('命定核心');
+    expect(labels[3].text()).toBe('角色启用');
     expect(labels[6].text()).toBe('剧情规划');
     expect(labels[7].text()).toBe('确认提交');
   });

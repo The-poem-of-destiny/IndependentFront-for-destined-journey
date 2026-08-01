@@ -90,6 +90,7 @@ import type {
   AudioPlaylist,
   AudioHandleRecord,
   AssetMetaRecord,
+  WorkshopProject,
 } from './types';
 import Dexie from 'dexie';
 import { createDefaultCharacterState } from './types';
@@ -110,6 +111,27 @@ function makeMemory(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
     keywords: ['测试', '记忆'],
     relatedCharacterIds: ['char_1'],
     importance: 5,
+    ...overrides,
+  };
+}
+
+function makeWorkshopProject(overrides: Partial<WorkshopProject> = {}): WorkshopProject {
+  return {
+    id: crypto.randomUUID(),
+    rootProjectId: 'root_1',
+    name: '测试工坊项目',
+    description: '测试用二创项目',
+    version: '1.0.0',
+    authorName: '测试作者',
+    tags: ['系统', '外挂'],
+    downloadUrl: 'https://example.invalid/pkg.json',
+    fileSize: 1024,
+    installState: 'installed',
+    installedVersion: '1.0.0',
+    installedAt: Date.now(),
+    fetchedAt: Date.now(),
+    uidRange: { start: 900000, end: 900999 },
+    updatedAt: Date.now(),
     ...overrides,
   };
 }
@@ -788,8 +810,8 @@ describe('exportAllData / importAllData', () => {
     await saveApiEndpoint(makeApiEndpoint({ id: 'exp_api' }));
 
     const backup = await exportAllData();
-    // 跟随 DB_VERSION（v13: 素材子系统两表）—— 每次升版这里同步
-    expect(backup.version).toBe(13);
+    // 跟随 DB_VERSION（v15: 美化规则迁出 localStorage）—— 每次升版这里同步
+    expect(backup.version).toBe(15);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -801,6 +823,8 @@ describe('exportAllData / importAllData', () => {
     expect(Array.isArray(backup.apiEndpoints)).toBe(true);
     expect(Array.isArray(backup.createPresets)).toBe(true);
     expect(Array.isArray(backup.messages)).toBe(true);
+    expect(Array.isArray(backup.worldBooks)).toBe(true);
+    expect(Array.isArray(backup.workshopProjects)).toBe(true);
   });
 
   it('importAllData 应还原数据', async () => {
@@ -863,6 +887,269 @@ describe('exportAllData / importAllData', () => {
     const profile = await db.saveProfiles.get('save_legacy');
     expect(profile).toBeDefined();
     expect(profile!.variables).toEqual({});
+  });
+
+  /**
+   * v14 三态语义（**缺席 ≠ 空数组**）—— 世界书迁进 Dexie 后这两张表装着不可再生的用户数据:
+   *   · 字段缺席（pre-v14 备份）→ 表原样不动，连 clear 都不执行
+   *   · 字段为空数组           → 合法的「用户确实没有」，照常清空
+   *   · 字段有数据             → 正常覆盖
+   * 若把守卫写在 clear() 之后（或用 `?? []` 抹平 undefined），第一条会退化成「清空整张表」，
+   * 「恢复一份旧备份」就会静默抹掉用户全部世界书。以下六条把三态逐一钉死。
+   */
+  describe('importAllData × v14 新表三态语义', () => {
+    /** 预置：worldBooks 两行 + workshopProjects 两行 */
+    async function seedV14Tables() {
+      const db = getDatabase();
+      await db.worldBooks.bulkPut([
+        { id: 'wb_user', name: '用户自建书', partition: 'extra_setting', entries: [] },
+        {
+          id: 'workshop:proj_seed',
+          name: '工坊书',
+          partition: 'creative_workshop',
+          entries: [],
+        },
+      ]);
+      await db.workshopProjects.bulkPut([
+        makeWorkshopProject({ id: 'proj_seed', name: '种子项目' }),
+        makeWorkshopProject({ id: 'proj_seed2', name: '种子项目2' }),
+      ]);
+    }
+
+    it('缺 worldBooks 字段（pre-v14 备份）：整张表逐行原样保留', async () => {
+      await seedV14Tables();
+      const legacyBackup: any = await exportAllData();
+      delete legacyBackup.worldBooks;
+      legacyBackup.version = 13;
+      expect('worldBooks' in legacyBackup).toBe(false);
+
+      await expect(importAllData(legacyBackup)).resolves.toBeUndefined();
+
+      const db = getDatabase();
+      expect(await db.worldBooks.count()).toBe(2);
+      expect((await db.worldBooks.get('wb_user'))!.name).toBe('用户自建书');
+      expect((await db.worldBooks.get('workshop:proj_seed'))!.partition).toBe('creative_workshop');
+    });
+
+    it('worldBooks: [] （字段存在但为空）：表被清空', async () => {
+      await seedV14Tables();
+      const backup = await exportAllData();
+      backup.worldBooks = [];
+
+      await importAllData(backup);
+
+      expect(await getDatabase().worldBooks.count()).toBe(0);
+    });
+
+    it('worldBooks 含数据：正常覆盖', async () => {
+      await seedV14Tables();
+      const backup = await exportAllData();
+      backup.worldBooks = [
+        { id: 'wb_from_backup', name: '备份里的书', partition: 'dlc', entries: [] },
+      ];
+
+      await importAllData(backup);
+
+      const db = getDatabase();
+      expect(await db.worldBooks.count()).toBe(1);
+      expect((await db.worldBooks.get('wb_from_backup'))!.name).toBe('备份里的书');
+      expect(await db.worldBooks.get('wb_user')).toBeUndefined();
+    });
+
+    it('缺 workshopProjects 字段（pre-v14 备份）：整张表逐行原样保留', async () => {
+      await seedV14Tables();
+      const legacyBackup: any = await exportAllData();
+      delete legacyBackup.workshopProjects;
+      legacyBackup.version = 13;
+      expect('workshopProjects' in legacyBackup).toBe(false);
+
+      await expect(importAllData(legacyBackup)).resolves.toBeUndefined();
+
+      const db = getDatabase();
+      expect(await db.workshopProjects.count()).toBe(2);
+      expect((await db.workshopProjects.get('proj_seed'))!.name).toBe('种子项目');
+      expect((await db.workshopProjects.get('proj_seed2'))!.name).toBe('种子项目2');
+    });
+
+    it('workshopProjects: [] （字段存在但为空）：表被清空', async () => {
+      await seedV14Tables();
+      const backup = await exportAllData();
+      backup.workshopProjects = [];
+
+      await importAllData(backup);
+
+      expect(await getDatabase().workshopProjects.count()).toBe(0);
+    });
+
+    it('workshopProjects 含数据：正常覆盖', async () => {
+      await seedV14Tables();
+      const backup = await exportAllData();
+      backup.workshopProjects = [makeWorkshopProject({ id: 'proj_from_backup', name: '备份项目' })];
+
+      await importAllData(backup);
+
+      const db = getDatabase();
+      expect(await db.workshopProjects.count()).toBe(1);
+      expect((await db.workshopProjects.get('proj_from_backup'))!.name).toBe('备份项目');
+      expect(await db.workshopProjects.get('proj_seed')).toBeUndefined();
+    });
+
+    it('两个字段同时缺席（真实 pre-v14 备份形状）：两张表都原样保留，其它表照常导入', async () => {
+      await seedV14Tables();
+      await saveApiEndpoint(makeApiEndpoint({ id: 'api_before' }));
+      const legacyBackup: any = await exportAllData();
+      delete legacyBackup.worldBooks;
+      delete legacyBackup.workshopProjects;
+      legacyBackup.version = 13;
+
+      await expect(importAllData(legacyBackup)).resolves.toBeUndefined();
+
+      const db = getDatabase();
+      expect(await db.worldBooks.count()).toBe(2);
+      expect(await db.workshopProjects.count()).toBe(2);
+      // 其它表仍按整库替换语义正常导入
+      expect((await getApiEndpoints()).map((e) => e.id)).toContain('api_before');
+      expect(await db.presets.count()).toBeGreaterThan(0);
+    });
+  });
+
+  describe('importAllData × v15 beautifierRules 三态语义', () => {
+    /** 预置：两条用户美化规则 */
+    async function seedV15Table() {
+      await getDatabase().beautifierRules.bulkPut([
+        {
+          id: 'rule_user_a',
+          name: '用户规则A',
+          scope: 'maintext',
+          pattern: 'aaa',
+          flags: 'gm',
+          replacement: '<b>aaa</b>',
+          enabled: true,
+          order: 1,
+          isBuiltin: false,
+        },
+        {
+          id: 'rule_user_b',
+          name: '用户规则B',
+          scope: 'global',
+          pattern: 'bbb',
+          flags: 'g',
+          replacement: '<i>bbb</i>',
+          enabled: false,
+          order: 2,
+          isBuiltin: false,
+        },
+      ]);
+    }
+
+    it('缺 beautifierRules 字段（pre-v15 备份）：整张表逐行原样保留', async () => {
+      await seedV15Table();
+      const legacyBackup: any = await exportAllData();
+      delete legacyBackup.beautifierRules;
+      legacyBackup.version = 14;
+      expect('beautifierRules' in legacyBackup).toBe(false);
+
+      await expect(importAllData(legacyBackup)).resolves.toBeUndefined();
+
+      const db = getDatabase();
+      expect(await db.beautifierRules.count()).toBe(2);
+      expect((await db.beautifierRules.get('rule_user_a'))!.replacement).toBe('<b>aaa</b>');
+      expect((await db.beautifierRules.get('rule_user_b'))!.enabled).toBe(false);
+    });
+
+    it('beautifierRules: [] （字段存在但为空）：表被清空', async () => {
+      await seedV15Table();
+      const backup = await exportAllData();
+      backup.beautifierRules = [];
+
+      await importAllData(backup);
+
+      expect(await getDatabase().beautifierRules.count()).toBe(0);
+    });
+
+    it('beautifierRules 含数据：正常覆盖', async () => {
+      await seedV15Table();
+      const backup = await exportAllData();
+      backup.beautifierRules = [
+        {
+          id: 'rule_from_backup',
+          name: '备份里的规则',
+          scope: 'maintext',
+          pattern: 'zzz',
+          flags: 'g',
+          replacement: '<u>zzz</u>',
+          enabled: true,
+          order: 5,
+          isBuiltin: false,
+        },
+      ];
+
+      await importAllData(backup);
+
+      const db = getDatabase();
+      expect(await db.beautifierRules.count()).toBe(1);
+      expect((await db.beautifierRules.get('rule_from_backup'))!.name).toBe('备份里的规则');
+      expect(await db.beautifierRules.get('rule_user_a')).toBeUndefined();
+    });
+
+    it('exportAllData / importAllData 往返保留 beautifierRules', async () => {
+      await seedV15Table();
+      const backup = await exportAllData();
+      expect(backup.beautifierRules).toHaveLength(2);
+
+      await getDatabase().beautifierRules.clear();
+      await importAllData(backup);
+
+      const rows = await getDatabase().beautifierRules.toArray();
+      expect(rows.map((r) => r.id).sort()).toEqual(['rule_user_a', 'rule_user_b']);
+    });
+  });
+
+  it('exportAllData / importAllData 往返应保留 worldBooks 与 workshopProjects', async () => {
+    const db = getDatabase();
+    await db.worldBooks.put({
+      id: 'workshop:proj_1',
+      name: '工坊书',
+      partition: 'creative_workshop',
+      builtIn: false,
+      entries: [
+        {
+          uid: 900001,
+          name: '工坊条目',
+          content: '正文',
+          enabled: true,
+          key: [],
+          keysecondary: [],
+          selectiveLogic: 0,
+          order: 100,
+          position: 0,
+          extra: {
+            workshop: {
+              projectId: 'proj_1',
+              projectName: '测试项目',
+              sourceUid: 42,
+              sourceComment: '上游注释',
+              sourceHash: 'deadbeef',
+            },
+          },
+        },
+      ],
+    });
+    await db.workshopProjects.put(makeWorkshopProject({ id: 'proj_1' }));
+
+    const backup = await exportAllData();
+    await clearAllData();
+    await initializeDatabase();
+    await importAllData(backup);
+
+    const db2 = getDatabase();
+    const book = await db2.worldBooks.get('workshop:proj_1');
+    expect(book).toBeDefined();
+    expect(book!.partition).toBe('creative_workshop');
+    expect(book!.entries[0].extra?.workshop?.sourceHash).toBe('deadbeef');
+    const proj = await db2.workshopProjects.get('proj_1');
+    expect(proj).toBeDefined();
+    expect(proj!.uidRange).toEqual({ start: 900000, end: 900999 });
   });
 });
 
@@ -1506,9 +1793,9 @@ describe('Asset CRUD (v13)', () => {
    *   · 升版路径本身不吃数据（比如误加 upgrade 回调 clear 了某表）
    *   · 表册不缺员（比如误写 `表名: null`，或新表根本没声明）—— 见下方 EXPECTED_V13_TABLES 断言
    */
-  it('v13 升版不得丢数据 —— 以旧版本写入后再打开应逐表保留', async () => {
+  it('升版不得丢数据 —— 以 v12 写入后再以当前版打开应逐表保留', async () => {
     const dbName = getDatabase().name;
-    // 从零起：先销毁 beforeEach 建好的 v13 库
+    // 从零起：先销毁 beforeEach 建好的当前版库
     await clearAllData();
 
     // ---- 以 v12 schema 打开并逐表写入一行 ----
@@ -1552,18 +1839,26 @@ describe('Asset CRUD (v13)', () => {
     }
     legacy.close();
 
-    // ---- 以 v13 (AppDatabase) 打开：触发升版 ----
+    // ---- 以当前版 (AppDatabase) 打开：触发升版 ----
     await initializeDatabase();
     const db = getDatabase();
-    expect(db.verno).toBe(13);
+    expect(db.verno).toBe(15);
 
-    // 表册齐全: v12 的 17 张 + 素材两张，一个不少（误写 `表名: null` 或漏声明会在这里炸）
-    const EXPECTED_V13_TABLES = [...Object.keys(V12_STORES), 'assetMeta', 'assetBlobs'].sort();
-    expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_V13_TABLES);
+    // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张，一个不少
+    //（误写 `表名: null` 或漏声明会在这里炸 —— 尤其 lorebooks/settings 两张死表按 D3 必须保留）
+    const EXPECTED_TABLES = [
+      ...Object.keys(V12_STORES),
+      'assetMeta',
+      'assetBlobs',
+      'worldBooks',
+      'workshopProjects',
+      'beautifierRules',
+    ].sort();
+    expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 
     // 每一张旧表的数据都必须还在（漏写任一表会让这里归零）
     for (const table of Object.keys(V12_STORES)) {
-      expect(await db.table(table).count(), `v13 升版后 ${table} 数据丢失`).toBe(1);
+      expect(await db.table(table).count(), `升版后 ${table} 数据丢失`).toBe(1);
     }
     // 抽查内容而非仅行数
     expect((await db.lorebooks.get('lb1'))!.name).toBe('测试世界书');
@@ -1573,6 +1868,9 @@ describe('Asset CRUD (v13)', () => {
     // 新表就位且为空
     expect(await getAssets()).toHaveLength(0);
     expect(await db.assetBlobs.count()).toBe(0);
+    expect(await db.worldBooks.count()).toBe(0);
+    expect(await db.workshopProjects.count()).toBe(0);
+    expect(await db.beautifierRules.count()).toBe(0);
 
     // 升版后新表可正常写入
     const asset = makeAsset();

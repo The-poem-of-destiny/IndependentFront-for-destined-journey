@@ -21,6 +21,7 @@ const allTools = [
   { id: 'memory', label: '记忆', icon: 'fa-solid fa-brain' },
   { id: 'plot', label: '剧情', icon: 'fa-solid fa-book-open' },
   { id: 'snapshots', label: '快照', icon: 'fa-solid fa-clock-rotate-left' },
+  { id: 'workshop', label: '工坊', icon: 'fa-solid fa-puzzle-piece' },
   { id: 'audio', label: '音乐', icon: 'fa-solid fa-music' },
   { id: 'debug', label: '调试', icon: 'fa-solid fa-bug' },
   { id: 'settings', label: '设置', icon: 'fa-solid fa-gear' },
