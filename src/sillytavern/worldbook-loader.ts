@@ -312,26 +312,63 @@ export function clearEjsCompileCache(): void {
  * @param entries 已激活（`filterActiveEntries` 之后）的条目
  * @param ejsCtx 求值上下文；`ejsCtx.vars` 会被就地修改（草稿按序可见）
  */
-export function renderWorldBookEntries(
-  entries: WorldBookEntry[],
-  ejsCtx: EjsEvalContext,
-): WorldBookRenderResult {
+/** 动态区的一格：`needsEval` 为 false 表示只含宏、不进 EJS（原文透传给下游宏剥离） */
+interface DynamicSlot {
+  uid: number;
+  content: string;
+  needsEval: boolean;
+}
+
+/**
+ * 静/动分区（D7）—— **同步与异步两条渲染路径共用**。
+ *
+ * 曾经两边各抄一份：排序、`hasDynamic` 判定、`includes('<%')` 判定、静态区拼接。
+ * 分区规则是缓存前缀稳定性的地基，一旦两条路径判定漂移，同一批条目在同步/异步下
+ * 会落进不同分区 —— 那是**静默**的缓存击穿，没有任何报错。故只留一份。
+ */
+function partitionEntries(entries: WorldBookEntry[]): {
+  staticParts: string[];
+  slots: DynamicSlot[];
+} {
   const staticParts: string[] = [];
-  const dynamicParts: string[] = [];
-  const fallbackEntries: Array<{ uid: number; error: string }> = [];
-
-  const sorted = [...entries].sort((a, b) => a.order - b.order);
-
-  for (const entry of sorted) {
+  const slots: DynamicSlot[] = [];
+  for (const entry of [...entries].sort((a, b) => a.order - b.order)) {
     const content = entry.content ?? '';
-
     if (!hasDynamic(content)) {
       staticParts.push(content);
       continue;
     }
+    slots.push({ uid: entry.uid, content, needsEval: content.includes('<%') });
+  }
+  return { staticParts, slots };
+}
 
-    // 只含 {{random}}/{{getvar}} 无 EJS → 不求值，原文进动态区交给宏剥离
-    if (!content.includes('<%')) {
+/** 结果组装 —— 两条路径共用（段间分隔符是提示词字节的一部分，必须同口径） */
+function assembleResult(
+  staticParts: string[],
+  dynamicParts: string[],
+  fallbackEntries: Array<{ uid: number; error: string }>,
+): WorldBookRenderResult {
+  return {
+    staticText: staticParts.join('\n\n'),
+    dynamicText: dynamicParts.join('\n\n'),
+    fallbackEntries,
+  };
+}
+
+export function renderWorldBookEntries(
+  entries: WorldBookEntry[],
+  ejsCtx: EjsEvalContext,
+): WorldBookRenderResult {
+  const { staticParts, slots } = partitionEntries(entries);
+  const dynamicParts: string[] = [];
+  const fallbackEntries: Array<{ uid: number; error: string }> = [];
+
+  for (const slot of slots) {
+    const content = slot.content;
+    const entry = { uid: slot.uid };
+
+    if (!slot.needsEval) {
       dynamicParts.push(content);
       continue;
     }
@@ -354,11 +391,7 @@ export function renderWorldBookEntries(
     }
   }
 
-  return {
-    staticText: staticParts.join('\n\n'),
-    dynamicText: dynamicParts.join('\n\n'),
-    fallbackEntries,
-  };
+  return assembleResult(staticParts, dynamicParts, fallbackEntries);
 }
 
 /**
@@ -378,22 +411,9 @@ export async function prerenderWorldBookEntries(
   entries: WorldBookEntry[],
   ejsCtx: EjsEvalContext,
 ): Promise<WorldBookRenderResult> {
-  const staticParts: string[] = [];
+  // 分区与同步版共用（见 partitionEntries）；本函数只多一件事：动态区整批交给后端
+  const { staticParts, slots: dynamicSlots } = partitionEntries(entries);
   const fallbackEntries: Array<{ uid: number; error: string }> = [];
-
-  const sorted = [...entries].sort((a, b) => a.order - b.order);
-
-  // 静态区直接拼；动态区按序收集后整批交给后端
-  const dynamicSlots: Array<{ uid: number; content: string; needsEval: boolean }> = [];
-  for (const entry of sorted) {
-    const content = entry.content ?? '';
-    if (!hasDynamic(content)) {
-      staticParts.push(content);
-      continue;
-    }
-    // 只含 {{random}}/{{getvar}} 无 EJS → 不求值，原文进动态区交给下游宏剥离
-    dynamicSlots.push({ uid: entry.uid, content, needsEval: content.includes('<%') });
-  }
 
   const toEval: EjsPassEntry[] = dynamicSlots
     .filter((s) => s.needsEval)
@@ -425,9 +445,5 @@ export async function prerenderWorldBookEntries(
     }
   }
 
-  return {
-    staticText: staticParts.join('\n\n'),
-    dynamicText: dynamicParts.join('\n\n'),
-    fallbackEntries,
-  };
+  return assembleResult(staticParts, dynamicParts, fallbackEntries);
 }

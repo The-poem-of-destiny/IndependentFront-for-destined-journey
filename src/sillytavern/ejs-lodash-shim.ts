@@ -15,8 +15,8 @@
  * 本模块**只读不写调用方对象**（`pick/pickBy/mapValues` 等一律产出新对象）。
  */
 
-/** 原型污染防御：与 var-resolver.ts 同口径 */
-const DANGEROUS_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
+// 原型污染防御的键集来自 var-resolver（全仓唯一定义）
+import { DANGEROUS_PATH_SEGMENTS } from './var-resolver';
 
 // ========== 内部工具 ==========
 

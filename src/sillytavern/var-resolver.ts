@@ -35,8 +35,16 @@ export type VarNamespace = (typeof VAR_NAMESPACES)[keyof typeof VAR_NAMESPACES];
  * 被提示注入的模型或恶意 VarsPatch 可能写入 `sys.__proto__.polluted` 之类的路径，
  * 从而篡改 Object.prototype 并影响此后所有对象创建。parseVarPath 在此统一拦截，
  * 使 getVar/setVar/delVar/applyVarsPatch 等所有读写入口都共享这道守卫。
+ *
+ * 🔴 **全仓唯一定义**。EJS 侧（`ejs-runtime` / `ejs-capabilities` / `ejs-lodash-shim` /
+ * `agent-templates`）一律从这里 import —— 曾经每处各抄一份 `new Set([...])`，
+ * 五份靠人眼保持一致，加第四个危险键时必漏。本模块无任何 import，可安全被叶子模块引用。
  */
-const DANGEROUS_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
+export const DANGEROUS_PATH_SEGMENTS: ReadonlySet<string> = new Set([
+  '__proto__',
+  'prototype',
+  'constructor',
+]);
 
 /** 解析变量路径 "sys.世界.地点" → { namespace: 'sys', parts: ['世界', '地点'] } */
 export function parseVarPath(path: string): { namespace: string; parts: string[] } | null {
