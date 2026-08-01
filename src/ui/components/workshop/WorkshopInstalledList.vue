@@ -39,6 +39,20 @@ const props = defineProps<{
   projects: WorkshopProject[];
   /** 正在处理中的项目 id（安装/更新/卸载/查更新），用于禁用该行按钮 */
   busyId?: string;
+  /**
+   * 正在跑的是哪个动作 —— 转圈只出现在**用户按的那一个**按钮上。
+   *
+   * 一行并排三个按钮，若只按 id 判定就会三个一起转，用户看不出自己按的是「查更新」
+   * 还是「卸载」。缺省空串时全都不转（只禁用），行为与加这个 prop 之前一致。
+   */
+  busyAction?: '' | 'install' | 'update' | 'check' | 'uninstall';
+  /**
+   * store 还没水合完。
+   *
+   * ★ 这时 `projects` 恒为空，**不能**渲染「尚未安装任何工坊项目」—— 那句话对一个
+   * 装了十个项目的用户来说是错的，而它恰好出现在每次进页面的头一瞬。
+   */
+  hydrating?: boolean;
 }>();
 
 /** 项目 id → 分好组的处置记录。一次算好，模板里三处读同一份 */
@@ -92,7 +106,18 @@ function stateText(p: WorkshopProject): string {
 
 <template>
   <div class="wk-installed">
-    <p v-if="projects.length === 0" class="empty-tab">尚未安装任何工坊项目</p>
+    <!-- 水合中：先占住行的位置，别用空态冒充「你什么都没装」 -->
+    <ul v-if="hydrating" class="wk-list" aria-hidden="true">
+      <li v-for="n in 2" :key="n" class="wk-row wk-row-skeleton">
+        <div class="wk-row-main">
+          <div class="sk-line sk-name"></div>
+          <div class="sk-line sk-meta"></div>
+          <div class="sk-line sk-tags"></div>
+        </div>
+      </li>
+    </ul>
+
+    <p v-else-if="projects.length === 0" class="empty-tab">尚未安装任何工坊项目</p>
 
     <ul v-else class="wk-list">
       <li v-for="p in projects" :key="p.id" class="wk-row">
@@ -173,26 +198,29 @@ function stateText(p: WorkshopProject): string {
             variant="primary"
             size="sm"
             :disabled="busyId === p.id"
+            :loading="busyId === p.id && (busyAction === 'update' || busyAction === 'install')"
             @click="emit('update', p.id)"
           >
-            更新
+            {{ busyId === p.id && busyAction === 'update' ? '更新中…' : '更新' }}
           </AppButton>
           <AppButton
             v-else
             variant="secondary"
             size="sm"
             :disabled="busyId === p.id"
+            :loading="busyId === p.id && busyAction === 'check'"
             @click="emit('check', p.id)"
           >
-            查更新
+            {{ busyId === p.id && busyAction === 'check' ? '查询中…' : '查更新' }}
           </AppButton>
           <AppButton
             variant="ghost"
             size="sm"
             :disabled="busyId === p.id"
+            :loading="busyId === p.id && busyAction === 'uninstall'"
             @click="emit('uninstall', p.id)"
           >
-            卸载
+            {{ busyId === p.id && busyAction === 'uninstall' ? '卸载中…' : '卸载' }}
           </AppButton>
         </div>
       </li>
@@ -438,6 +466,38 @@ function stateText(p: WorkshopProject): string {
   opacity: 0.3;
 }
 
+/* ── 水合骨架 ── */
+.wk-row-skeleton {
+  pointer-events: none;
+}
+.sk-line {
+  height: 11px;
+  border-radius: var(--theme-radius-sm);
+  background: var(--theme-surface-muted);
+  animation: wk-sk-pulse 1.4s ease-in-out infinite;
+}
+.sk-name {
+  width: 38%;
+  height: 14px;
+  margin-bottom: var(--theme-spacing-sm);
+}
+.sk-meta {
+  width: 62%;
+  margin-bottom: var(--theme-spacing-sm);
+}
+.sk-tags {
+  width: 26%;
+}
+@keyframes wk-sk-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .notes-enter-active,
   .notes-leave-active,
@@ -446,5 +506,6 @@ function stateText(p: WorkshopProject): string {
   .wk-notes-toggle {
     transition: none;
   }
+  /* 骨架脉动由 themes/variables.css 的全局减动效规则兜住，别在这里写 animation: none */
 }
 </style>

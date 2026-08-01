@@ -647,17 +647,13 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
     transition: none;
   }
   /*
-   * 入场动画整个关掉。`animation: none` 会连 `both` 的终态一起撤销，所以必须
-   * 显式把卡片摁回可见 —— 否则减动效用户看到的是一片空网格。
+   * 入场动画与骨架脉动**不在这里关**: `themes/variables.css` 的全局减动效规则已用
+   * `animation-duration: .01ms !important` + `animation-iteration-count: 1 !important`
+   * 兜住了全站。
+   *
+   * ★ 别改成 `animation: none` —— 那会连 `both` 的终态一起撤销，卡片停在
+   * `opacity: 0` 上，减动效用户看到的是一片空网格。全局那套则是「瞬间跑完一轮」，
+   * 天然停在终态（卡片可见、骨架不闪、转圈静止），正是我们要的。
    */
-  .wk-grid > *,
-  .wk-skeleton-cover,
-  .wk-skeleton-line {
-    animation: none;
-  }
-  .wk-grid > * {
-    opacity: 1;
-    transform: none;
-  }
 }
 </style>

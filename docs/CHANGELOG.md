@@ -196,6 +196,47 @@ beautifier-rules.json 预设规则（22 条: 2 内置 + 20 远程）+ 世界书/
 
 ---
 
+### 2026-07-31 — 加载态动画：AppButton 忙碌态 + 水合骨架
+
+补的是「按下去之后什么都没发生」的那段沉默。工坊一次安装要下几百 KB 载荷，
+这段沉默可以长达几十秒。
+
+**`AppButton` 新增 `loading`**（共享组件，可选 prop，不影响既有调用点）
+
+- 转圈 + 自动禁用 + `aria-busy`；转圈用 `em` 与 `currentColor`，三档尺寸 ×
+  四个 variant × 10 主题都不必另配
+- ★ 与 `disabled` **语义不同**，别拿 disabled 顶替：disabled 是「不能做」，
+  loading 是「正在做」。两者长一个样时，用户按下按钮后只看到它变灰，分不清是
+  自己点漏了、还是被拒绝了、还是在跑。故 loading 有自己的压暗度（0.8，
+  btn-disabled 的 0.5 会把转圈也压得看不清）
+
+**转圈只落在按下的那个按钮上**：`WorkshopPage` 的 busy 状态从「项目 id」扩成
+「id + 动作」（`beginBusy`/`endBusy` 成对）。一行并排三个按钮，只按 id 判定会三个
+一起转，用户看不出跑的是「查更新」还是「卸载」—— 卸载不可逆，让它看起来在跑而
+实际在跑别的是会吓到人的。
+
+**🔴 水合骨架（顺带修掉一个真错）**：`WorkshopPage` 此前不看 `store.ready`，
+于是每次进页面的头一瞬都渲染「尚未安装任何工坊项目」+「已安装（0）」——
+对一个装了十个项目的用户来说这两句都是假的。现在水合中渲染骨架行。
+
+**详情模态首屏骨架**替掉一行「正在取详情…」：文字态只有一行高，详情到位后整个模态
+从一行猛涨到满屏，那一下窜动比等待本身更让人不适。
+
+**减动效**：删掉本轮新写的 `animation: none` 局部覆盖，统一交给
+`themes/variables.css` 的全局规则（`animation-duration: .01ms !important` +
+`animation-iteration-count: 1 !important`）。★ 它比 `animation: none` 正确：后者会连
+`both` 的终态一起撤销（卡片会停在 `opacity: 0`，减动效用户看到一片空网格），
+前者是「瞬间跑完一轮」，天然停在终态。
+
+涉及文件: `AppButton.vue`(+`loading`) · `WorkshopPage.vue` · `WorkshopInstalledList.vue`
+(+`busyAction`/`hydrating`) · `WorkshopDetailModal.vue` · `WorkshopConflictModal.vue` ·
+新增 `AppButton.test.ts`
+
+验证: 140 文件 / 4667 测试全绿（+9）· typecheck & vue-tsc 0 错误 · lint 0 error。
+🔴 同上：**未做真机走查**，动画观感待确认。
+
+---
+
 ### 2026-07-31 — 工坊 P1 增补：装前检视 / 服务端排序 / 恒定标签条 + 抗抖动
 
 对齐上游插件（`AkabaneSaki/myrepo`）功能盘点后补的三处差距，外加浏览模态的抖动治理。

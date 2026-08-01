@@ -54,6 +54,27 @@ const detailId = ref('');
 /** 正在跑安装/更新/卸载/查更新的项目 id —— 同一时刻只允许一个 */
 const busyId = ref('');
 
+/**
+ * 正在跑的**是哪个动作**。
+ *
+ * 光有 busyId 不够: 一行上并排三个按钮，只按 id 判定会让三个一起转圈，用户看不出
+ * 自己按的是「查更新」还是「卸载」—— 尤其卸载是不可逆的，让它看起来在跑而实际在
+ * 跑别的，是会吓到人的。
+ */
+type BusyAction = '' | 'install' | 'update' | 'check' | 'uninstall';
+const busyAction = ref<BusyAction>('');
+
+/** 起止成对出现，避免哪条路径忘了清而把按钮永久钉在转圈上 */
+function beginBusy(id: string, action: BusyAction): void {
+  busyId.value = id;
+  busyAction.value = action;
+}
+
+function endBusy(): void {
+  busyId.value = '';
+  busyAction.value = '';
+}
+
 /** D15 待确认的覆盖。`prepared` 必须原样留着交给 commitInstall（它会以当下游标重算） */
 const pending = ref<{ prepared: WorkshopPrepared; conflicts: InstallConflict[] } | null>(null);
 const pendingUninstall = ref<WorkshopProject | null>(null);
@@ -84,7 +105,8 @@ function openDetail(projectId: string): void {
  * 会以为自己遇到了两个不同的问题。
  */
 async function commit(prepared: WorkshopPrepared): Promise<void> {
-  busyId.value = prepared.projectId;
+  // 已装的走「更新」，没装的走「安装」—— 两者的按钮不在同一处
+  beginBusy(prepared.projectId, workshop.getProject(prepared.projectId) ? 'update' : 'install');
   try {
     const { project, plan } = await workshop.commitInstall(prepared);
     const groups = groupWorkshopNotes(project.droppedNotes);
@@ -98,7 +120,7 @@ async function commit(prepared: WorkshopPrepared): Promise<void> {
     const reason = err instanceof Error ? err.message : String(err);
     announce(`安装写入失败：${reason}`, 'error');
   } finally {
-    busyId.value = '';
+    endBusy();
   }
 }
 
@@ -118,7 +140,7 @@ async function settlePrepared(prepared: WorkshopPrepared): Promise<void> {
 /** 网络安装/更新。`force: true` 绕开 5 分钟详情缓存 —— 用户按更新就是想要最新的 */
 async function installFromNetwork(projectId: string): Promise<void> {
   if (busyId.value) return;
-  busyId.value = projectId;
+  beginBusy(projectId, workshop.getProject(projectId) ? 'update' : 'install');
   let prepared: WorkshopPrepared | null = null;
   try {
     const prep = await workshop.prepareInstall(projectId, { force: true });
@@ -128,7 +150,7 @@ async function installFromNetwork(projectId: string): Promise<void> {
     }
     prepared = prep.prepared;
   } finally {
-    busyId.value = '';
+    endBusy();
   }
   await settlePrepared(prepared);
 }
@@ -172,7 +194,7 @@ async function onFilePicked(event: Event): Promise<void> {
 
 async function checkUpdate(projectId: string): Promise<void> {
   if (busyId.value) return;
-  busyId.value = projectId;
+  beginBusy(projectId, 'check');
   try {
     const res = await workshop.checkUpdate(projectId, { force: true });
     if (!res.ok) {
@@ -186,7 +208,7 @@ async function checkUpdate(projectId: string): Promise<void> {
       res.hasUpdate ? 'info' : 'success',
     );
   } finally {
-    busyId.value = '';
+    endBusy();
   }
 }
 
@@ -200,7 +222,7 @@ async function confirmUninstall(): Promise<void> {
   const target = pendingUninstall.value;
   if (!target) return;
   pendingUninstall.value = null;
-  busyId.value = target.id;
+  beginBusy(target.id, 'uninstall');
   try {
     const ok = await workshop.uninstall(target.id);
     announce(
@@ -212,7 +234,7 @@ async function confirmUninstall(): Promise<void> {
     const reason = err instanceof Error ? err.message : String(err);
     announce(`卸载失败：${reason}`, 'error');
   } finally {
-    busyId.value = '';
+    endBusy();
   }
 }
 
@@ -252,10 +274,15 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
       </p>
 
       <section class="wk-section">
-        <h3 class="wk-section-title">已安装（{{ projects.length }}）</h3>
+        <!-- 水合完成前不报数：这时 projects 恒为空，报「已安装（0）」是在说假话 -->
+        <h3 class="wk-section-title">
+          已安装<template v-if="workshop.ready">（{{ projects.length }}）</template>
+        </h3>
         <WorkshopInstalledList
           :projects="projects"
           :busy-id="busyId"
+          :busy-action="busyAction"
+          :hydrating="!workshop.ready"
           @detail="openDetail"
           @update="installFromNetwork"
           @check="checkUpdate"
@@ -301,8 +328,22 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
         >」会删掉它的世界书与美化规则。存档里对它的启用记录会失效，但存档本身不受影响。
       </p>
       <template #footer>
-        <AppButton variant="ghost" size="sm" @click="pendingUninstall = null">取消</AppButton>
-        <AppButton variant="danger" size="sm" @click="confirmUninstall">卸载</AppButton>
+        <AppButton
+          variant="ghost"
+          size="sm"
+          :disabled="busyAction === 'uninstall'"
+          @click="pendingUninstall = null"
+        >
+          取消
+        </AppButton>
+        <AppButton
+          variant="danger"
+          size="sm"
+          :loading="busyAction === 'uninstall'"
+          @click="confirmUninstall"
+        >
+          {{ busyAction === 'uninstall' ? '卸载中…' : '卸载' }}
+        </AppButton>
       </template>
     </AppModal>
   </div>

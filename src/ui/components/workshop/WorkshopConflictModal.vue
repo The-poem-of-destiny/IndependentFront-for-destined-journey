@@ -52,8 +52,9 @@ const emit = defineEmits<{
     </div>
 
     <template #footer>
-      <AppButton variant="ghost" size="sm" @click="emit('cancel')">取消</AppButton>
-      <AppButton variant="danger" size="sm" :disabled="busy" @click="emit('confirm')">
+      <!-- 覆盖跑起来之后「取消」已经无效（写入不可中断），禁掉比留个假出口诚实 -->
+      <AppButton variant="ghost" size="sm" :disabled="busy" @click="emit('cancel')">取消</AppButton>
+      <AppButton variant="danger" size="sm" :loading="busy" @click="emit('confirm')">
         {{ busy ? '正在覆盖…' : `覆盖并更新（${conflicts.length} 条）` }}
       </AppButton>
     </template>

@@ -216,7 +216,27 @@ const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInsta
     @update:open="emit('update:open', $event)"
   >
     <div class="wk-detail">
-      <p v-if="loading && !meta" class="empty-tab">正在向创意工坊取详情…</p>
+      <!--
+        首屏骨架而非一行文字: 文字态只有一行高，详情到位后整个模态从一行猛涨到满屏，
+        那一下窜动比等待本身更让人不适。骨架先把最终版式占住。
+      -->
+      <div v-if="loading && !meta" class="wk-sk">
+        <div class="wk-sk-head" aria-hidden="true">
+          <div class="wk-sk-cover"></div>
+          <div class="wk-sk-col">
+            <div class="wk-sk-line sk-w40"></div>
+            <div class="wk-sk-line sk-w70"></div>
+            <div class="wk-sk-line sk-w55"></div>
+          </div>
+        </div>
+        <div class="wk-sk-line sk-w25" aria-hidden="true"></div>
+        <div class="wk-sk-line sk-w90" aria-hidden="true"></div>
+        <div class="wk-sk-line sk-w80" aria-hidden="true"></div>
+        <div class="wk-sk-line sk-w25" aria-hidden="true"></div>
+        <div v-for="n in 3" :key="n" class="wk-sk-row" aria-hidden="true"></div>
+        <!-- 骨架本身对读屏是噪音，所以只让这一句发声 -->
+        <p class="sr-only" role="status">正在向创意工坊取详情…</p>
+      </div>
 
       <template v-else-if="meta">
         <!-- ═══ 头部：封面 + 关键元数据 ═══ -->
@@ -435,11 +455,17 @@ const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInsta
       >
         卸载
       </AppButton>
+      <!--
+        卸载**不给** loading: 它只是打开确认弹窗（askUninstall），本身是瞬时的。
+        给它转圈会暗示"正在卸载"，而这时一行都还没删。
+      -->
+
       <AppButton variant="ghost" size="sm" @click="emit('update:open', false)">关闭</AppButton>
       <AppButton
         variant="primary"
         size="sm"
-        :disabled="busy || (!detail && !installed)"
+        :disabled="!detail && !installed"
+        :loading="busy"
         @click="emit('install', projectId)"
       >
         {{ busy ? '处理中…' : primaryLabel }}
@@ -788,6 +814,7 @@ const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInsta
   .wk-row-body {
     transition: none;
   }
+  /* 骨架脉动由 themes/variables.css 的全局减动效规则兜住，别在这里写 animation: none */
 }
 
 .wk-failure {
@@ -812,6 +839,83 @@ const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInsta
   font-size: 0.75rem;
   color: var(--theme-text-muted);
   word-break: break-all;
+}
+
+/* ── 首屏骨架 ── */
+.wk-sk {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-md);
+}
+.wk-sk-head {
+  display: flex;
+  gap: var(--theme-spacing-lg);
+}
+.wk-sk-cover {
+  width: 160px;
+  aspect-ratio: 16 / 9;
+  flex-shrink: 0;
+  border-radius: var(--theme-radius-md);
+  background: var(--theme-surface-muted);
+}
+.wk-sk-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-sm);
+  padding-top: 4px;
+}
+.wk-sk-line {
+  height: 11px;
+  border-radius: var(--theme-radius-sm);
+  background: var(--theme-surface-muted);
+}
+/* 折叠行的占位：高度按真实行高来，内容到位时不会再窜一次 */
+.wk-sk-row {
+  height: 34px;
+  border-radius: var(--theme-radius-md);
+  background: var(--theme-surface-muted);
+}
+.sk-w25 {
+  width: 25%;
+}
+.sk-w40 {
+  width: 40%;
+}
+.sk-w55 {
+  width: 55%;
+}
+.sk-w70 {
+  width: 70%;
+}
+.sk-w80 {
+  width: 80%;
+}
+.sk-w90 {
+  width: 90%;
+}
+.wk-sk-cover,
+.wk-sk-line,
+.wk-sk-row {
+  animation: wk-sk-pulse 1.4s ease-in-out infinite;
+}
+@keyframes wk-sk-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
 }
 
 .empty-tab {

@@ -51,13 +51,21 @@ const h = vi.hoisted(() => {
   return { fns };
 });
 
-const state = reactive<{ projects: WorkshopProject[] }>({ projects: [] });
+// ready 默认 true：绝大多数用例关心的是水合**之后**的样子。
+// 水合中（ready:false）另有专门用例——那时列表渲染骨架而**不是**空态。
+const state = reactive<{ projects: WorkshopProject[]; ready: boolean }>({
+  projects: [],
+  ready: true,
+});
 
 vi.mock('../../stores/workshop-store', () => ({
   useWorkshopStore: () => ({
     ...h.fns,
     get projects() {
       return state.projects;
+    },
+    get ready() {
+      return state.ready;
     },
     getProject: (id: string) => state.projects.find((p) => p.id === id),
   }),
@@ -127,6 +135,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   setActivePinia(createPinia());
   state.projects = [];
+  state.ready = true;
   h.fns.init.mockResolvedValue(undefined);
   h.fns.uninstall.mockResolvedValue(true);
   h.fns.commitInstall.mockResolvedValue({ project: makeProject(), plan: makePlan() });
@@ -159,6 +168,67 @@ describe('WorkshopPage', () => {
     const empty = wrapper.find('.empty-tab');
     expect(empty.exists()).toBe(true);
     expect(empty.text()).toContain('尚未安装');
+    wrapper.unmount();
+  });
+
+  it('★ 转圈只出现在按下的那个按钮上，不是整行一起转', async () => {
+    // 一行并排「查更新 / 卸载」，若只按 busyId 判定就会一起转，用户看不出跑的是哪个
+    // —— 卸载不可逆，让它看起来在跑而实际在跑别的是会吓到人的。
+    state.projects = [makeProject()];
+    let release: (v: unknown) => void = () => {};
+    h.fns.checkUpdate.mockImplementation(
+      () =>
+        new Promise((r) => {
+          release = r;
+        }),
+    );
+
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    await findButton(wrapper, '查更新')!.trigger('click');
+    await flushPromises();
+
+    const spinning = wrapper
+      .findAll('button')
+      .filter((b) => b.find('.btn-spinner').exists())
+      .map((b) => b.text());
+    expect(spinning).toHaveLength(1);
+    expect(spinning[0]).toContain('查询中');
+    // 卸载按钮同时被禁用（同一行不许并发），但**不**转圈
+    const uninstall = findButton(wrapper, '卸载')!;
+    expect(uninstall.attributes('disabled')).toBeDefined();
+    expect(uninstall.find('.btn-spinner').exists()).toBe(false);
+
+    release({ ok: true, hasUpdate: false, project: makeProject() });
+    await flushPromises();
+    // 收工后一个都不转，按钮回到可点
+    expect(wrapper.findAll('.btn-spinner')).toHaveLength(0);
+    wrapper.unmount();
+  });
+
+  it('★ 水合未完成时渲染骨架，而不是「尚未安装」', async () => {
+    // 这句空态对一个装了十个项目的用户来说是错的，而它恰好出现在每次进页面的头一瞬
+    state.ready = false;
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    expect(wrapper.find('.wk-row-skeleton').exists()).toBe(true);
+    expect(wrapper.find('.empty-tab').exists()).toBe(false);
+    // 这时 projects 恒为空，报「已安装（0）」同样是在说假话
+    expect(wrapper.text()).not.toContain('已安装（0）');
+    wrapper.unmount();
+  });
+
+  it('水合完成后骨架让位给真实内容', async () => {
+    state.ready = false;
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    expect(wrapper.find('.wk-row-skeleton').exists()).toBe(true);
+
+    state.ready = true;
+    state.projects = [makeProject()];
+    await flushPromises();
+    expect(wrapper.find('.wk-row-skeleton').exists()).toBe(false);
+    expect(wrapper.text()).toContain('维拉的旅途');
     wrapper.unmount();
   });
 
