@@ -247,6 +247,123 @@ export function keyBy(collection: any, iteratee?: any): Record<string, any> {
   return out;
 }
 
+// ========== T5 补齐（能力面 §3.13：17 → 26 方法）==========
+//
+// 真机语料实测用到 24 个 lodash 方法，旧 shim 只有 17 个 —— 缺的那几个让
+// `月历球` / `资产管理` / `言灵` 等条目在 `_.cloneDeep is not a function` 上整条回退。
+// 补的**全部是读边**：`_.set` / `_.assign` / `_.merge` 这类写方法**永不提供**
+//（1524 个 EJS 块里出现 0 次；散文里那些是教 AI 写 vars_update 的示例 DSL，与 EJS 无关）。
+
+/** 纯对象判定（排除数组与宿主对象） */
+export function isPlainObject(value: any): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+export function isNumber(value: any): boolean {
+  return typeof value === 'number';
+}
+
+export function isString(value: any): boolean {
+  return typeof value === 'string';
+}
+
+export function isFunction(value: any): boolean {
+  return typeof value === 'function';
+}
+
+/** 集合长度：数组/字符串取 length，对象取自有键数，其余 0 */
+export function size(value: any): number {
+  if (value === null || value === undefined) return 0;
+  if (Array.isArray(value) || typeof value === 'string') return value.length;
+  if (typeof value === 'object') return Object.keys(value).length;
+  return 0;
+}
+
+/**
+ * 深拷贝（纯数据面）。
+ * 危险键就地剔除 —— 拷贝是把数据送进创作者手里，不该顺手把原型污染载体也送过去。
+ * 环用 seen 表兜住（`vars` 是共写草稿，自引用完全可能）。
+ */
+export function cloneDeep<T>(value: T, seen?: WeakMap<object, any>): T {
+  if (value === null || typeof value !== 'object') return value;
+  const node = value as unknown as object;
+  const map = seen ?? new WeakMap<object, any>();
+  if (map.has(node)) return map.get(node) as T;
+  if (Array.isArray(value)) {
+    const arr: any[] = [];
+    map.set(node, arr);
+    for (const v of value) arr.push(cloneDeep(v, map));
+    return arr as unknown as T;
+  }
+  if (value instanceof Date) return new Date(value.getTime()) as unknown as T;
+  if (!isPlainObject(value)) return value;
+  const out: Record<string, any> = {};
+  map.set(node, out);
+  for (const k of Object.keys(value as Record<string, any>)) {
+    if (DANGEROUS_PATH_SEGMENTS.has(k)) continue;
+    out[k] = cloneDeep((value as Record<string, any>)[k], map);
+  }
+  return out as unknown as T;
+}
+
+/** 剔除指定键（`pick` 的反面） */
+export function omit(object: any, ...paths: any[]): Record<string, any> {
+  const drop = new Set(paths.flat().map((p) => String(p)));
+  const out: Record<string, any> = {};
+  if (object === null || typeof object !== 'object') return out;
+  for (const k of Object.keys(object)) {
+    if (drop.has(k) || DANGEROUS_PATH_SEGMENTS.has(k)) continue;
+    out[k] = object[k];
+  }
+  return out;
+}
+
+/** 按 iteratee 重映射键（值不动） */
+export function mapKeys(object: any, iteratee?: any): Record<string, any> {
+  const fn = toIteratee(iteratee);
+  const out: Record<string, any> = {};
+  for (const [k, v] of entriesOf(object)) {
+    const key = String(fn(v, k, object));
+    if (DANGEROUS_PATH_SEGMENTS.has(key)) continue;
+    out[key] = v;
+  }
+  return out;
+}
+
+/** 遍历自有键值；回调返回 `false` 提前中断（对齐 lodash） */
+export function forOwn(object: any, iteratee?: any): any {
+  const fn = toIteratee(iteratee);
+  for (const [k, v] of entriesOf(object)) {
+    if (fn(v, k, object) === false) break;
+  }
+  return object;
+}
+
+/**
+ * `_.random(min, max)` / `_.sample(list)`。
+ *
+ * ⚠️ 用 `Math.random`，**不可复现**。创作者要快照可复现请用 `rng.int` / `rng.pick`
+ *（能力面 §7）。这里保持上游语义是为了存量内容不炸，不是推荐写法。
+ */
+export function random(min?: any, max?: any): number {
+  let lo = Number(min);
+  let hi = Number(max);
+  if (!Number.isFinite(lo)) return Math.random() < 0.5 ? 0 : 1;
+  if (!Number.isFinite(hi)) {
+    hi = lo;
+    lo = 0;
+  }
+  if (hi < lo) [lo, hi] = [hi, lo];
+  return Math.floor(lo + Math.random() * (hi - lo + 1));
+}
+
+export function sample<T>(collection: T[]): T | undefined {
+  if (!Array.isArray(collection) || collection.length === 0) return undefined;
+  return collection[Math.floor(Math.random() * collection.length)];
+}
+
 // ========== chain ==========
 
 /** 可链式调用的方法表（全部形如 `fn(value, ...args)`） */
@@ -312,6 +429,18 @@ export const ejsLodash = {
   keyBy,
   chain,
   toPath,
+  // T5 补齐（能力面 §3.13：17 → 27 方法，**全部读边**）
+  isPlainObject,
+  isNumber,
+  isString,
+  isFunction,
+  size,
+  cloneDeep,
+  omit,
+  mapKeys,
+  forOwn,
+  random,
+  sample,
 } as const;
 
 export type EjsLodash = typeof ejsLodash;
