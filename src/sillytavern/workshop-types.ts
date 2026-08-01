@@ -306,3 +306,55 @@ export interface InstallPlan {
  * 尚未落库（`locked` 是运行时计算字段，本层永不产出）。
  */
 export type BeautifierRuleDraft = Omit<BeautifierRule, 'locked'>;
+
+// ═══════════════════════════════════════════════════════════
+// 工坊书 → Agent 可见性
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 把一本工坊世界书授予**所有** Agent。
+ *
+ * ★ 为什么需要这一步: Agent 只看得见 `AgentConfig.worldBookIds` 里点过名的书
+ * （`worldbook-loader.getEntriesForAgent`）。工坊装进来的书带的是新 id
+ * （`workshop:<projectId>`），不在任何 Agent 的清单里 —— 于是「装了、也在存档里
+ * 勾了启用」的工坊内容，**一个 Agent 都读不到**。用户看到的是「装了等于没装」。
+ *
+ * 本函数只动 `worldBookIds` 名单，**不碰** `agentWorldbookEnabled`（那是另一条轴：
+ * 「这个 Agent 到底用不用世界书」，项目默认里 memory_recall / plot_pre_check /
+ * item_gen / combat 是刻意关掉的，替用户翻开会让它们凭空吃下整包工坊内容）。
+ *
+ * 条目自身的 `enabled` 与存档级 `enabledWorldBookEntries` 仍照常过滤 —— 授予可见性
+ * 不等于强行注入。
+ *
+ * 纯函数: 返回新映射，不改入参。
+ */
+export function grantWorkshopBookToAgents(
+  agentWorldbookIds: Readonly<Record<string, string[]>>,
+  bookId: string,
+): Record<string, string[]> {
+  const next: Record<string, string[]> = {};
+  for (const [agentId, ids] of Object.entries(agentWorldbookIds)) {
+    const list = Array.isArray(ids) ? ids : [];
+    next[agentId] = list.includes(bookId) ? [...list] : [...list, bookId];
+  }
+  return next;
+}
+
+/**
+ * 卸载时收回可见性 —— 与 {@link grantWorkshopBookToAgents} 成对。
+ *
+ * 不收回的话，Agent 清单里会积一堆指向已删书的死 id。今天无害（`getEntriesForAgent`
+ * 按 id 取交集，取不到就跳过），但它会随每次装-卸不断变长，且让用户在设置页的
+ * 世界书勾选列表里看到一串不存在的书。
+ */
+export function revokeWorkshopBookFromAgents(
+  agentWorldbookIds: Readonly<Record<string, string[]>>,
+  bookId: string,
+): Record<string, string[]> {
+  const next: Record<string, string[]> = {};
+  for (const [agentId, ids] of Object.entries(agentWorldbookIds)) {
+    const list = Array.isArray(ids) ? ids : [];
+    next[agentId] = list.filter((id) => id !== bookId);
+  }
+  return next;
+}

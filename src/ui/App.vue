@@ -8,6 +8,7 @@ import { useSettingsStore } from './stores/settings-store';
 import { useWorldBookStore } from './stores/worldbook-store';
 import { useBeautifierStore } from './stores/beautifier-store';
 import { queryForView } from './lib/view-audio';
+import { applyReducedMotion } from './lib/reduced-motion';
 import ToastContainer from './components/shared/ToastContainer.vue';
 
 const theme = useThemeStore();
@@ -38,6 +39,20 @@ void worldbooks.init().catch(() => {
 void beautifier.init().catch(() => {
   /* 同上：不该拦住应用启动 */
 });
+
+// ═══ 减少动态效果（应用内开关）═══════════════════════════
+//
+// 把 `settings.reducedMotion` 同步到 `<html data-reduced-motion>`，CSS 据此关掉全站
+// 动画（themes/variables.css）。`immediate` 是必须的：设置从 localStorage 水合回来
+// 时不会触发变更回调，少了它，开着这个选项的用户重启后会先看到一轮完整动画。
+//
+// 系统的 `prefers-reduced-motion` 由 CSS 那条媒体查询独立负责，与本开关是或的关系
+// —— 所以这里只写 true/false，不去读系统偏好。
+watch(
+  () => settings.settings.reducedMotion as boolean,
+  (enabled) => applyReducedMotion(Boolean(enabled)),
+  { immediate: true },
+);
 
 // ═══ 界面级场景配乐 ═══════════════════════════════════════
 //

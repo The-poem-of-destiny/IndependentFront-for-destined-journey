@@ -128,6 +128,11 @@ function getDefaults(): Record<string, any> {
     // 状态效果气泡、在场角色心声气泡等。0 = 立即弹出。
     hoverDelayMs: 200,
 
+    // 交互 —— 减少动态效果。默认**关**：开着才是特殊要求，不该替所有人做主。
+    // 关掉时系统的 `prefers-reduced-motion` 仍然独立生效（本开关只做"额外强制开启"，
+    // 不做"强制关闭系统偏好"）。判定与写入见 lib/reduced-motion.ts。
+    reducedMotion: false,
+
     // 消息 & 系统事件可见性
     systemEventsVisible: true,
     systemEventFilters: {

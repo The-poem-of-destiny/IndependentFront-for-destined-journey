@@ -51,7 +51,9 @@ import { parsePayload, parseProjectMeta } from '@engine/workshop-manifest';
 import { planInstall } from '@engine/workshop-install-plan';
 import {
   WORKSHOP_PARTITION,
+  grantWorkshopBookToAgents,
   normalizeWorkshopNotes,
+  revokeWorkshopBookFromAgents,
   workshopBookId,
   workshopRuleId,
 } from '@engine/workshop-types';
@@ -387,8 +389,29 @@ export const useWorkshopStore = defineStore('workshop', () => {
       updatedAt: now,
     };
     await putProject(row);
+    grantBookToAllAgents(meta.id);
 
     return { project: row, plan };
+  }
+
+  /**
+   * 把本项目的书挂进**所有** Agent 的可见清单。
+   *
+   * ★ 没有这一步，「装了 + 存档里勾了启用」的工坊内容**一个 Agent 都读不到** ——
+   * Agent 只看 `worldBookIds` 点过名的书，而工坊书带的是新 id。用户看到的是
+   * 「装了等于没装」。
+   *
+   * 只动名单，不动 `agentWorldbookEnabled`（见 `grantWorkshopBookToAgents` 注释）。
+   * 幂等：重装/更新重复调用不会把 id 塞两遍。
+   */
+  function grantBookToAllAgents(projectId: string): void {
+    const settingsStore = useSettingsStore();
+    const current = settingsStore.settings.agentWorldbookIds as Record<string, string[]>;
+    settingsStore.settings.agentWorldbookIds = grantWorkshopBookToAgents(
+      current,
+      workshopBookId(projectId),
+    );
+    settingsStore.saveNow();
   }
 
   /**
@@ -491,6 +514,13 @@ export const useWorkshopStore = defineStore('workshop', () => {
     await replaceProjectRules(projectId, []);
     await getDatabase().workshopProjects.delete(projectId);
     projects.value = projects.value.filter((p) => p.id !== projectId);
+    // 与 grantBookToAllAgents 成对：不收回的话 Agent 清单里会积一串指向已删书的死 id
+    const settingsStore = useSettingsStore();
+    settingsStore.settings.agentWorldbookIds = revokeWorkshopBookFromAgents(
+      settingsStore.settings.agentWorldbookIds as Record<string, string[]>,
+      workshopBookId(projectId),
+    );
+    settingsStore.saveNow();
     return true;
   }
 

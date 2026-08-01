@@ -17,6 +17,8 @@ import {
   normalizeWorkshopNote,
   normalizeWorkshopNotes,
   workshopNote,
+  grantWorkshopBookToAgents,
+  revokeWorkshopBookFromAgents,
 } from './workshop-types';
 
 describe('normalizeWorkshopNote —— 单条归一', () => {
@@ -115,5 +117,58 @@ describe('groupWorkshopNotes —— 分组计数', () => {
 
   it('undefined → 三个空组（没装过 / 老行没这个字段）', () => {
     expect(groupWorkshopNotes(undefined)).toEqual({ dropped: [], degraded: [], sideEffect: [] });
+  });
+});
+
+describe('工坊书 → Agent 可见性', () => {
+  const AGENTS = {
+    story: ['world_setting', 'character'],
+    item_gen: ['world_setting'],
+    combat: [],
+  };
+
+  it('★ 授予后每个 Agent 的清单里都有这本书', () => {
+    // 没有这一步，「装了 + 存档里勾了启用」的工坊内容一个 Agent 都读不到
+    const next = grantWorkshopBookToAgents(AGENTS, 'workshop:p1');
+    expect(next.story).toEqual(['world_setting', 'character', 'workshop:p1']);
+    expect(next.item_gen).toEqual(['world_setting', 'workshop:p1']);
+    expect(next.combat).toEqual(['workshop:p1']);
+  });
+
+  it('幂等 —— 重装/更新不会把同一个 id 塞两遍', () => {
+    const once = grantWorkshopBookToAgents(AGENTS, 'workshop:p1');
+    expect(grantWorkshopBookToAgents(once, 'workshop:p1')).toEqual(once);
+  });
+
+  it('纯函数：不改入参', () => {
+    const input = { story: ['world_setting'] };
+    grantWorkshopBookToAgents(input, 'workshop:p1');
+    expect(input.story).toEqual(['world_setting']);
+  });
+
+  it('卸载收回，且只收回这一本', () => {
+    const granted = grantWorkshopBookToAgents(AGENTS, 'workshop:p1');
+    const both = grantWorkshopBookToAgents(granted, 'workshop:p2');
+    const after = revokeWorkshopBookFromAgents(both, 'workshop:p1');
+    expect(after.story).toEqual(['world_setting', 'character', 'workshop:p2']);
+    expect(after.combat).toEqual(['workshop:p2']);
+  });
+
+  it('装-卸一轮回到原样，清单不会越积越长', () => {
+    const after = revokeWorkshopBookFromAgents(
+      grantWorkshopBookToAgents(AGENTS, 'workshop:p1'),
+      'workshop:p1',
+    );
+    expect(after).toEqual(AGENTS);
+  });
+
+  it('脏值（备份改坏的非数组）不抛，退化成只含本书的清单', () => {
+    const dirty = { story: undefined as unknown as string[] };
+    expect(grantWorkshopBookToAgents(dirty, 'workshop:p1').story).toEqual(['workshop:p1']);
+    expect(revokeWorkshopBookFromAgents(dirty, 'workshop:p1').story).toEqual([]);
+  });
+
+  it('空映射（Agent 配置还没水合）不炸', () => {
+    expect(grantWorkshopBookToAgents({}, 'workshop:p1')).toEqual({});
   });
 });

@@ -43,6 +43,12 @@ const props = defineProps<{
   installed?: WorkshopProject;
   /** 父组件正在为这个项目跑安装/卸载 —— 按钮据此禁用 */
   busy?: boolean;
+  /**
+   * 跑的是哪个动作。缺省空串 → 忙碌时只禁用不转圈（与加这个 prop 之前一致）。
+   *
+   * 有它才能避免「卸载时装按钮在转圈」：`busy` 只按项目 id 判定，动作是什么它不知道。
+   */
+  busyAction?: '' | 'install' | 'update' | 'check' | 'uninstall';
 }>();
 
 const emit = defineEmits<{
@@ -187,12 +193,21 @@ const visibleEntries = computed(() => previewEntries.value.slice(0, entryLimit.v
  */
 const regexRows = computed(() => {
   const list = detail.value?.regexEntries ?? [];
-  const ctx = { projectId: props.projectId, projectName: meta.value?.name ?? '' };
+  const projectName = meta.value?.name ?? '';
   return list.map((entry, index) => {
-    const { rules, droppedNotes } = mapWorkshopRegexes([entry], ctx);
+    // ★ indexBase 必须传真实序号。这个函数是索引敏感的（未命名正则兜底成
+    //   `未命名正则 ${序号+1}`），不传的话每条单独调用时序号恒为 0 —— 同一条正则
+    //   装前显示「未命名正则 1」、装后显示「未命名正则 3」，用户会以为是两条规则。
+    const { rules, droppedNotes } = mapWorkshopRegexes([entry], {
+      projectId: props.projectId,
+      projectName,
+      indexBase: index,
+    });
     const groups = groupWorkshopNotes(droppedNotes);
     return {
-      key: entry.id || `#${index}`,
+      // 带上序号：上游 JSON 不可信，两条正则共用一个 uuid 时若只用 id 作 key，
+      // 展开一条会连带展开另一条（manifest 已去重，这里是第二道保险）
+      key: `${entry.id}@${index}`,
       entry,
       /** 整条被跳过（promptOnly / 表达式编译失败）→ 一条规则都不会产出 */
       willInstall: rules.length > 0,
@@ -326,6 +341,7 @@ const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInsta
                 type="button"
                 class="wk-row-head"
                 :aria-expanded="isOpen(`e${i}`)"
+                :aria-controls="`wk-entry-body-${i}`"
                 @click="toggleRow(`e${i}`)"
               >
                 <span
@@ -338,7 +354,11 @@ const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInsta
                 <span v-if="!e.enabled" class="wk-flag flag-off">默认关闭</span>
                 <span v-if="!isOpen(`e${i}`)" class="wk-row-peek">{{ truncate(e.content) }}</span>
               </button>
-              <div class="wk-row-body" :class="{ 'body-open': isOpen(`e${i}`) }">
+              <div
+                :id="`wk-entry-body-${i}`"
+                class="wk-row-body"
+                :class="{ 'body-open': isOpen(`e${i}`) }"
+              >
                 <div class="wk-row-inner">
                   <div class="wk-chip-block">
                     <span class="wk-chip-k">主要关键词</span>
@@ -386,6 +406,7 @@ const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInsta
                 type="button"
                 class="wk-row-head"
                 :aria-expanded="isOpen(`r${row.key}`)"
+                :aria-controls="`wk-regex-body-${row.key}`"
                 @click="toggleRow(`r${row.key}`)"
               >
                 <span
@@ -401,7 +422,11 @@ const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInsta
                   全局副作用
                 </span>
               </button>
-              <div class="wk-row-body" :class="{ 'body-open': isOpen(`r${row.key}`) }">
+              <div
+                :id="`wk-regex-body-${row.key}`"
+                class="wk-row-body"
+                :class="{ 'body-open': isOpen(`r${row.key}`) }"
+              >
                 <div class="wk-row-inner">
                   <div class="wk-chip-block">
                     <span class="wk-chip-k">匹配</span>
@@ -464,8 +489,8 @@ const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInsta
       <AppButton
         variant="primary"
         size="sm"
-        :disabled="!detail && !installed"
-        :loading="busy"
+        :disabled="busy || (!detail && !installed)"
+        :loading="busy && busyAction !== 'uninstall' && busyAction !== 'check'"
         @click="emit('install', projectId)"
       >
         {{ busy ? '处理中…' : primaryLabel }}
@@ -701,14 +726,32 @@ const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInsta
 .wk-row-body {
   display: grid;
   grid-template-rows: 0fr;
+  opacity: 0;
+  /*
+   * ★ `visibility: hidden` 不是装饰: 只靠 0fr + overflow:hidden 的话，收起的行**仍在
+   * 无障碍树里** —— 读屏会把所有折叠内容一路念完，`aria-expanded="false"` 拦不住它。
+   * 更糟的是里面的 `.wk-row-content` / `.wk-code` 是 `overflow: auto`，Chrome 默认让
+   * 可滚动容器可聚焦，Tab 会落进一个看不见的行里，然后浏览器为了「滚动到焦点」把
+   * 被裁掉的内容顶出来。
+   *
+   * 延迟到展开动画结束再隐藏（`visibility 0s linear <时长>`），否则收起过程第一帧
+   * 内容就消失了，0fr 的收拢动画会演给空气看。
+   */
+  visibility: hidden;
   transition:
     grid-template-rows var(--theme-transition-normal),
-    opacity var(--theme-transition-normal);
-  opacity: 0;
+    opacity var(--theme-transition-normal),
+    visibility 0s linear 0.25s;
 }
 .body-open {
   grid-template-rows: 1fr;
   opacity: 1;
+  visibility: visible;
+  /* 展开时立刻可见，不能等 —— 否则动画期间内容是隐形的 */
+  transition:
+    grid-template-rows var(--theme-transition-normal),
+    opacity var(--theme-transition-normal),
+    visibility 0s;
 }
 .wk-row-inner {
   min-height: 0;
@@ -716,10 +759,11 @@ const regexDropCount = computed(() => regexRows.value.filter((r) => !r.willInsta
   display: flex;
   flex-direction: column;
   gap: var(--theme-spacing-sm);
-  padding: 0 var(--theme-spacing-md);
-}
-.body-open .wk-row-inner {
-  padding-bottom: var(--theme-spacing-md);
+  /*
+   * padding-bottom 常驻，不随展开切换: 切换它会在收起的第一帧让内容高度突变一下
+   * （0fr 已经把整格裁成 0 高，留着这点 padding 完全看不见，却省掉那一下抖）。
+   */
+  padding: 0 var(--theme-spacing-md) var(--theme-spacing-md);
 }
 
 .wk-chip-block {

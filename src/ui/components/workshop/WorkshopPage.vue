@@ -159,8 +159,11 @@ async function installFromNetwork(projectId: string): Promise<void> {
 async function confirmOverwrite(): Promise<void> {
   const p = pending.value;
   if (!p) return;
-  pending.value = null;
+  // ★ 先跑完再关。曾经是先 `pending = null` 再 await —— 模态在写入开始前就消失了，
+  //   于是它的忙碌态（「正在覆盖…」、禁用的取消键）永远没有机会渲染，是死代码；
+  //   而用户在几秒的写入期间对着一个已经关掉的对话框，不知道覆盖到底跑没跑。
   await commit(p.prepared);
+  pending.value = null;
 }
 
 // ═══ 本地文件导入（离线来源，与网络同一条管线） ═══
@@ -173,6 +176,13 @@ async function onFilePicked(event: Event): Promise<void> {
   // 先清空 value：不清的话选同一个文件第二次不会触发 change
   input.value = '';
   if (!file) return;
+
+  // ★ 与网络路径同一道闸: 缺了它，用户能在 60s 载荷下载途中再导入一个文件，
+  //   两个 commit 并发跑，先收工的那个把忙碌态清掉、按钮提前解禁，第三个动作又能进来。
+  if (busyId.value) {
+    announce('正在处理上一个项目，请稍候再导入。', 'info');
+    return;
+  }
 
   let raw: unknown;
   try {
@@ -221,7 +231,7 @@ function askUninstall(projectId: string): void {
 async function confirmUninstall(): Promise<void> {
   const target = pendingUninstall.value;
   if (!target) return;
-  pendingUninstall.value = null;
+  // 同 confirmOverwrite：跑完再关，否则模态上的「卸载中…」是死代码
   beginBusy(target.id, 'uninstall');
   try {
     const ok = await workshop.uninstall(target.id);
@@ -235,6 +245,7 @@ async function confirmUninstall(): Promise<void> {
     announce(`卸载失败：${reason}`, 'error');
   } finally {
     endBusy();
+    pendingUninstall.value = null;
   }
 }
 
@@ -302,6 +313,7 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
       :project-id="detailId"
       :installed="detailInstalled"
       :busy="busyId === detailId"
+      :busy-action="busyAction"
       @install="installFromNetwork"
       @uninstall="askUninstall"
     />
@@ -313,7 +325,7 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
       :conflicts="pending?.conflicts ?? []"
       :busy="busyId !== ''"
       @confirm="confirmOverwrite"
-      @cancel="pending = null"
+      @cancel="busyId ? undefined : (pending = null)"
     />
 
     <!-- ═══ 卸载确认 ═══ -->
@@ -321,7 +333,8 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
       :open="pendingUninstall !== null"
       title="卸载工坊项目"
       size="sm"
-      @update:open="pendingUninstall = null"
+      :closable="busyAction !== 'uninstall'"
+      @update:open="busyAction === 'uninstall' ? undefined : (pendingUninstall = null)"
     >
       <p class="wk-uninstall-text">
         卸载「<strong>{{ pendingUninstall?.name }}</strong

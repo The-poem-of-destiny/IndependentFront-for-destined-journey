@@ -2283,8 +2283,21 @@ async function clearAll() {
                       <option :value="500">很慢 (500ms)</option>
                     </select></label
                   >
-                </div></AppCard
-              >
+                  <div class="form-label">
+                    减少动态效果
+                    <p class="form-hint">
+                      关掉卡片入场、骨架屏脉动、折叠展开等过渡动画。若系统已开启「减少动态效果」，
+                      无需在此重复设置 —— 系统偏好始终独立生效，本开关只是额外强制开启。
+                    </p>
+                    <div class="toggle-row">
+                      <span>{{ s.reducedMotion ? '已开启' : '跟随系统' }}</span>
+                      <label class="toggle-label">
+                        <input v-model="s.reducedMotion" type="checkbox" class="toggle-input" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+                  </div></div
+              ></AppCard>
             </section>
 
             <!-- ========== 消息显示 ========== -->

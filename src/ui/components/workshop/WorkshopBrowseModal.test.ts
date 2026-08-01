@@ -154,6 +154,39 @@ describe('WorkshopBrowseModal', () => {
     wrapper.unmount();
   });
 
+  it('★ 网格只在结果落地时重建，打字期间不重放入场动画', async () => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = mount(WorkshopBrowseModal, {
+        props: { open: true, installed: [] },
+        attachTo: document.body,
+      });
+      await wrapper.setProps({ open: false });
+      await wrapper.setProps({ open: true });
+      await vi.advanceTimersByTimeAsync(0);
+
+      const before = document.body.querySelector('.wk-grid');
+      expect(before).not.toBeNull();
+
+      // 敲三个字：防抖窗口内一发请求都没出去，网格就不该动
+      const input = document.body.querySelector('.wk-search') as HTMLInputElement;
+      for (const ch of ['a', 'ab', 'abc']) {
+        input.value = ch;
+        input.dispatchEvent(new Event('input'));
+        await vi.advanceTimersByTimeAsync(10);
+      }
+      // 同一个 DOM 节点 = 没重建 = 没重放动画（旧实现在这里已经重建三次了）
+      expect(document.body.querySelector('.wk-grid')).toBe(before);
+
+      // 防抖到点、结果落地 → 这时才该换一片新的
+      await vi.advanceTimersByTimeAsync(400);
+      expect(document.body.querySelector('.wk-grid')).not.toBe(before);
+      wrapper.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('排序恒带且改排序回到第 0 页', async () => {
     // total 要够多，「下一页」才是可点的
     listMock.mockResolvedValue(page([meta()], { total: 100 }));

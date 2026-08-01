@@ -254,6 +254,35 @@ export function parsePayload(raw: unknown): WorkshopPayload {
 
   return {
     worldbookEntries: worldbookRaw.filter(isRecord).map(parseSourceEntry),
-    regexEntries: regexRaw.filter(isRecord).map(parseSourceRegex),
+    regexEntries: dedupeRegexIds(regexRaw.filter(isRecord).map(parseSourceRegex)),
   };
+}
+
+/**
+ * 正则 id 在**项目内**唯一化。
+ *
+ * 上游 JSON 是不可信输入，两条正则完全可能共用一个 uuid。缺 id 的那条
+ * `parseSourceRegex` 已用 `#<序号>` 兜底，但**非空的重复 id 从来没人管**，后果有两处:
+ *
+ * - 装前检视里两行拿到同一个 `:key`，展开一条会连带展开另一条（Vue 复用同 key 的节点）
+ * - ★ 更严重: 安装时 `workshopRuleId(projectId, id)` 撞号，后一条规则**静默覆盖**
+ *   前一条 —— 用户看到「装了 5 条正则」，实际库里只有 4 条
+ *
+ * 保留**首次出现者的原 id**（与 `worldbook-migration.dedupeIds` 同一取舍：先到者
+ * 不改号，免得动到已经被引用的那个），其后重复者追加 `#<序号>`。
+ */
+function dedupeRegexIds(entries: WorkshopSourceRegex[]): WorkshopSourceRegex[] {
+  const seen = new Set<string>();
+  return entries.map((entry, index) => {
+    if (!seen.has(entry.id)) {
+      seen.add(entry.id);
+      return entry;
+    }
+    // 兜底串本身也可能再撞（极端构造），所以循环到真正没占用为止
+    let candidate = `${entry.id}#${index}`;
+    let salt = index;
+    while (seen.has(candidate)) candidate = `${entry.id}#${++salt}`;
+    seen.add(candidate);
+    return { ...entry, id: candidate };
+  });
 }

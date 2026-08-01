@@ -206,6 +206,61 @@ describe('WorkshopPage', () => {
     wrapper.unmount();
   });
 
+  it('★ 覆盖警告在写入跑完之前不关闭 —— 它的忙碌态才不是死代码', async () => {
+    state.projects = [makeProject({ installState: 'update_available' })];
+    let release: (v: unknown) => void = () => {};
+    h.fns.prepareInstall.mockResolvedValue({
+      ok: true,
+      prepared: makePrepared([{ uid: 5, name: '被改过的条目' } as InstallConflict]),
+    });
+    h.fns.commitInstall.mockImplementation(
+      () =>
+        new Promise((r) => {
+          release = r;
+        }),
+    );
+
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    await findButton(wrapper, '更新')!.trigger('click');
+    await flushPromises();
+    expect(document.body.textContent).toContain('被改过的条目');
+
+    const confirm = [...document.body.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('覆盖并更新'),
+    ) as HTMLButtonElement;
+    confirm.click();
+    await flushPromises();
+
+    // 写入进行中：模态仍在，按钮转圈，取消被禁 —— 旧实现这时模态早已消失
+    expect(document.body.textContent).toContain('正在覆盖');
+    expect(document.body.querySelector('.btn-spinner')).not.toBeNull();
+
+    release({ project: makeProject(), plan: makePlan() });
+    await flushPromises();
+    expect(document.body.textContent).not.toContain('正在覆盖');
+    wrapper.unmount();
+  });
+
+  it('★ 忙碌时导入本地文件被挡下 —— 两个 commit 并发会互相清掉忙碌态', async () => {
+    state.projects = [makeProject({ installState: 'update_available' })];
+    h.fns.prepareInstall.mockImplementation(() => new Promise(() => {}));
+
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    await findButton(wrapper, '更新')!.trigger('click');
+    await flushPromises();
+
+    const file = new File(['{}'], 'project-x.json', { type: 'application/json' });
+    const input = wrapper.find('input[type="file"]');
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
+    await input.trigger('change');
+    await flushPromises();
+
+    expect(h.fns.prepareInstallFromFile).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it('★ 水合未完成时渲染骨架，而不是「尚未安装」', async () => {
     // 这句空态对一个装了十个项目的用户来说是错的，而它恰好出现在每次进页面的头一瞬
     state.ready = false;

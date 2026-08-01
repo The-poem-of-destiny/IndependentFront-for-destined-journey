@@ -354,3 +354,59 @@ describe('mapWorkshopRegexes —— droppedNotes 必须 loud', () => {
     expect(mapWorkshopRegexes([], CTX)).toEqual({ rules: [], droppedNotes: [] });
   });
 });
+
+describe('indexBase —— 装前逐条检视与整批安装必须报同一个名字', () => {
+  function unnamed(over: Partial<WorkshopSourceRegex> = {}): WorkshopSourceRegex {
+    return {
+      id: 'x',
+      scriptName: '', // 空名 → 触发 `未命名正则 N` 兜底，这正是索引敏感的那条路
+      findRegex: '/a/g',
+      replaceString: 'b',
+      disabled: false,
+      markdownOnly: false,
+      promptOnly: true, // 整条丢弃 → 一定会产出一条带名字的 note
+      runOnEdit: false,
+      trimStrings: [],
+      substituteRegex: 0,
+      minDepth: null,
+      maxDepth: null,
+      placement: [2],
+      ...over,
+    };
+  }
+  const ctx = { projectId: 'p1', projectName: '维拉的旅途' };
+
+  it('★ 单条调用带上真实序号后，与整批调用的文案逐字一致', () => {
+    const entries = [unnamed({ id: 'a' }), unnamed({ id: 'b' }), unnamed({ id: 'c' })];
+    const batch = mapWorkshopRegexes(entries, ctx).droppedNotes.map((n) => n.text);
+    // 装前检视是一条一条单独调用的 —— 必须把它在项目里的真实位置传进去
+    const perRow = entries.map(
+      (e, i) => mapWorkshopRegexes([e], { ...ctx, indexBase: i }).droppedNotes[0].text,
+    );
+    expect(perRow).toEqual(batch);
+    expect(perRow[2]).toContain('未命名正则 3');
+  });
+
+  it('不传 indexBase 的单条调用会说错名字（回归护栏：别把 indexBase 删了）', () => {
+    const entries = [unnamed({ id: 'a' }), unnamed({ id: 'b' })];
+    const naive = mapWorkshopRegexes([entries[1]], ctx).droppedNotes[0].text;
+    const truth = mapWorkshopRegexes(entries, ctx).droppedNotes[1].text;
+    expect(naive).toContain('未命名正则 1');
+    expect(truth).toContain('未命名正则 2');
+    expect(naive).not.toBe(truth);
+  });
+
+  it('order 也跟着真实序号走', () => {
+    const named = unnamed({ scriptName: '染色', promptOnly: false });
+    const batchSecond = mapWorkshopRegexes([named, named], ctx).rules[1].order;
+    const perRowSecond = mapWorkshopRegexes([named], { ...ctx, indexBase: 1 }).rules[0].order;
+    expect(perRowSecond).toBe(batchSecond);
+  });
+
+  it('整批调用不传 indexBase，行为与加这个字段之前完全一致', () => {
+    const named = unnamed({ scriptName: '染色', promptOnly: false });
+    expect(mapWorkshopRegexes([named], ctx).rules[0].order).toBe(
+      mapWorkshopRegexes([named], { ...ctx, indexBase: 0 }).rules[0].order,
+    );
+  });
+});

@@ -101,6 +101,18 @@ export interface RegexMapContext {
   projectName: string;
   /** 规则 order 起始值，默认 `WORKSHOP_RULE_ORDER_BASE` */
   orderBase?: number;
+  /**
+   * 本批 `entries[0]` 在**整个项目**里的序号，默认 0。
+   *
+   * ★ 存在的唯一理由: 本函数是**索引敏感**的 —— 未命名正则兜底成
+   * `未命名正则 ${序号+1}`，`order` 也按序号递增。装前检视要拿「按条归属」的
+   * notes，只能一条一条单独调用，那时批内序号恒为 0；若不把真实序号传进来，
+   * 同一条正则会在装前显示「未命名正则 1」、装后显示「未命名正则 3」，
+   * 用户会以为是两条不同的规则出了问题。
+   *
+   * 整批调用（真正安装那次）不传即可，行为与加这个字段之前完全一致。
+   */
+  indexBase?: number;
 }
 
 export interface RegexMapResult {
@@ -228,8 +240,11 @@ export function mapWorkshopRegexes(
   const rules: BeautifierRuleDraft[] = [];
   const droppedNotes: WorkshopNote[] = [];
   const orderBase = ctx.orderBase ?? WORKSHOP_RULE_ORDER_BASE;
+  const indexBase = ctx.indexBase ?? 0;
 
-  entries.forEach((entry, index) => {
+  entries.forEach((entry, localIndex) => {
+    // 项目内的真实序号：单条调用时靠 indexBase 补回来，整批调用时 indexBase=0
+    const index = indexBase + localIndex;
     const name = entry.scriptName.trim() || `未命名正则 ${index + 1}`;
 
     // ⚠️ 三个 return 分支都是**整条不产出规则** → 货真价实的 dropped。

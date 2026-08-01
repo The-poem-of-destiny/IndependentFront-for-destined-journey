@@ -27,6 +27,7 @@ import type { WorkshopFailure, WorkshopSortMode } from '../../lib/workshop-clien
 import AppModal from '../shared/AppModal.vue';
 import AppButton from '../shared/AppButton.vue';
 import WorkshopProjectCard from './WorkshopProjectCard.vue';
+import { scrollBehavior } from '../../lib/reduced-motion';
 import { describeFailure } from './failure-text';
 
 const props = defineProps<{
@@ -98,14 +99,20 @@ const canNext = computed(() => page.value + 1 < totalPages.value && !loading.val
 const tagOptions = WORKSHOP_BASE_TAGS;
 
 /**
- * 网格的重建键。变一次 → Vue 整片换掉 → 卡片重跑入场动画。
+ * 网格的重建键 —— **只在结果落地时 +1**。
  *
- * 这是「翻页像换了一页纸」而不是「内容原地跳变」的关键: 没有它，Vue 会按 key 复用
- * 卡片 DOM，新旧两页的内容逐格替换，读起来像闪烁。
+ * 变一次 → Vue 整片换掉 → 卡片重跑入场动画，「翻页像换了一页纸」而不是内容原地跳变。
+ *
+ * ★ 曾经它是 `sort|tag|search|page` 拼出来的 computed，那是错的：这些都是**输入**，
+ * 在请求发出之前就变了。后果有两处 ——
+ * - 打字：搜索是 350ms 防抖的，敲「abc」会在一发请求都还没出去时把网格重建三次，
+ *   每次都拿**没变过的旧数据**重放 0.35s 交错入场
+ * - 翻页：按下就重建，先拿**上一页**的卡片演一遍入场，等新数据到了（卡片按 p.id
+ *   为 key，是全新节点）再演第二遍
+ *
+ * 一个「防抖动」的机关，自己成了抖动的来源。绑数据落地就没有这个问题。
  */
-const gridKey = computed(
-  () => `${sort.value}|${activeTag.value}|${search.value.trim()}|${page.value}`,
-);
+const renderSeq = ref(0);
 
 const installedById = computed(() => {
   const map = new Map<string, WorkshopProject>();
@@ -157,6 +164,8 @@ async function load(): Promise<void> {
   pageSize.value = res.data.pageSize > 0 ? res.data.pageSize : pageSize.value;
   droppedCount.value = res.data.droppedCount;
   loadedOnce.value = true;
+  // 结果落地才重建网格 —— 入场动画演的必须是**这一页**，不是上一页
+  renderSeq.value += 1;
 }
 
 /** 用户按「取消」：掐掉请求并退出忙碌态，屏幕保留上一次的结果 */
@@ -209,9 +218,8 @@ function scrollResultsToTop(): void {
   if (!el) return;
   const scroller = el.closest<HTMLElement>('.modal-body') ?? el.parentElement;
   if (!scroller || typeof scroller.scrollTo !== 'function') return;
-  const reduced =
-    typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-  scroller.scrollTo({ top: 0, behavior: reduced ? 'auto' : 'smooth' });
+  // 系统偏好 **或** 应用内开关，判定收在 lib/reduced-motion.ts
+  scroller.scrollTo({ top: 0, behavior: scrollBehavior() });
 }
 
 function goPage(delta: number): void {
@@ -322,7 +330,7 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
         </p>
 
         <!-- :key 让整片网格随查询条件重建 → 卡片重跑入场动画，翻页读起来像换了一页纸 -->
-        <div v-else :key="gridKey" class="wk-grid" :class="{ 'grid-loading': loading }">
+        <div v-else :key="renderSeq" class="wk-grid" :class="{ 'grid-loading': loading }">
           <WorkshopProjectCard
             v-for="p in projects"
             :key="p.id"

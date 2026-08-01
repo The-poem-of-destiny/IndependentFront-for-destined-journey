@@ -422,3 +422,35 @@ describe('parsePayload —— 正则 13 字段', () => {
     expect(rx.replaceString).toBe('r');
   });
 });
+
+describe('正则 id 去重（上游 JSON 不可信）', () => {
+  function payloadWith(ids: (string | undefined)[]) {
+    return parsePayload({
+      regexEntries: ids.map((id) => ({ ...(id === undefined ? {} : { id }), scriptName: 'r' })),
+    });
+  }
+
+  it('★ 重复的非空 id 会被唯一化 —— 否则安装时 workshopRuleId 撞号，后一条静默盖掉前一条', () => {
+    const ids = payloadWith(['dup', 'dup', 'other']).regexEntries.map((r) => r.id);
+    expect(new Set(ids).size).toBe(3);
+    // 首次出现者保留原 id（与 worldbook 迁移同一取舍：先到者不改号）
+    expect(ids[0]).toBe('dup');
+    expect(ids[1]).not.toBe('dup');
+    expect(ids[2]).toBe('other');
+  });
+
+  it('缺 id 的仍走 #序号 兜底，且不与去重产物撞车', () => {
+    const ids = payloadWith([undefined, undefined]).regexEntries.map((r) => r.id);
+    expect(ids).toEqual(['#0', '#1']);
+  });
+
+  it('去重产物本身再撞时继续找下一个空位', () => {
+    // 'a' 重复，其兜底名 'a#1' 又被第三条真身占了
+    const ids = payloadWith(['a', 'a', 'a#1']).regexEntries.map((r) => r.id);
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  it('全不重复时一个 id 都不改', () => {
+    expect(payloadWith(['a', 'b', 'c']).regexEntries.map((r) => r.id)).toEqual(['a', 'b', 'c']);
+  });
+});

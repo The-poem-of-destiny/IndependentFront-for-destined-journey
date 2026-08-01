@@ -196,6 +196,70 @@ beautifier-rules.json 预设规则（22 条: 2 内置 + 20 远程）+ 世界书/
 
 ---
 
+### 2026-07-31 — 工坊评审修复 + 减动效开关 + 工坊书对 Agent 可见
+
+Fable 评审（`ed28320..107f80b`）的 7 项发现全部修掉，另加两个功能。
+
+**🔴 三处「我说过的话是错的」**
+
+1. `WorkshopDetailModal` 的 docblock 声称装前预告与装后报告「不可能分家」——**假的**。
+   `mapWorkshopRegexes` 是**索引敏感**的（未命名正则兜底成 `未命名正则 ${序号+1}`），
+   逐条单独调用时序号恒为 0，同一条正则装前显示「未命名正则 1」、装后显示
+   「未命名正则 3」。修：`RegexMapContext` 加 `indexBase`，检视侧传真实序号。
+   （评审用一个失败用例证明的，不是推测。）
+2. 「防抖动」的 `gridKey` **自己就是抖动源**：它由 `sort|tag|search|page` 拼成，
+   全是**输入**，在请求发出前就变了。打字（350ms 防抖）会在一发请求都没出去时
+   重建网格三次并重放入场动画；翻页则先拿上一页卡片演一遍、数据到了再演一遍。
+   修：改成结果落地时 +1 的 `renderSeq`。
+3. 上一条 changelog 说全局减动效规则「兜住了」—— 只兜住一半。它没覆盖
+   `animation-delay`，于是带 `both` 的交错入场在减动效下变成「隐身 280ms 再逐个弹出」，
+   恰好砸在最不想看动效的人脸上。修：全局规则补 `animation-delay` /
+   `transition-delay` / `scroll-behavior`。
+
+**其余修复**
+
+- 两个确认模态的忙碌态是**死代码**：`confirmOverwrite` / `confirmUninstall` 都先关模态
+  再 await，「正在覆盖…」「卸载中…」永远没机会渲染。改成跑完再关，并在写入期间
+  禁掉取消与遮罩关闭（写入不可中断，留个假出口不如禁掉）。
+- 本地文件导入**绕过了忙碌闸门**，能在 60s 载荷下载途中并发跑第二个 commit，
+  先收工的那个把忙碌态清掉、按钮提前解禁。补 `if (busyId) return`。
+- 折叠行收起后**仍在无障碍树里**（0fr + overflow:hidden 只是视觉隐藏），且里面
+  `overflow: auto` 的代码块在 Chrome 下可被 Tab 聚焦。补 `visibility`（延迟到动画
+  结束）+ `aria-controls`。
+- 上游正则 **id 可重复**（不可信输入）：撞号时 `workshopRuleId` 会让后一条静默盖掉
+  前一条（「装了 5 条」实际只有 4 条）。`workshop-manifest` 加 `dedupeRegexIds`，
+  首次出现者保留原 id。
+- 详情模态主按钮不再「卸载时装按钮转圈」（补 `busyAction`）。
+
+**🆕 减少动态效果开关**（设置 → 外观主题，**默认关**）
+
+`settings.reducedMotion` → `<html data-reduced-motion>` → CSS 全站关动画。系统的
+`prefers-reduced-motion` 仍**独立生效**，本开关只做「额外强制开启」，不做「强制关闭
+系统偏好」。JS 侧不受 CSS 管辖的动作（平滑滚动）走 `lib/reduced-motion.ts` 同一判定。
+
+**🆕 工坊书对所有 Agent 可见**
+
+★ 此前是**装了等于没装**：Agent 只读 `AgentConfig.worldBookIds` 点过名的书，而工坊书
+带的是新 id（`workshop:<projectId>`），不在任何 Agent 清单里 —— 于是「装了 + 存档里
+勾了启用」的工坊内容，一个 Agent 都读不到。安装时 `grantWorkshopBookToAgents` 把书
+挂进所有 Agent，卸载时 `revokeWorkshopBookFromAgents` 收回（不收回会积一串死 id）。
+
+只动 `worldBookIds` 名单，**不碰** `agentWorldbookEnabled` —— 那是另一条轴（「这个
+Agent 到底用不用世界书」），项目默认里 memory_recall / plot_pre_check / item_gen /
+combat 是刻意关掉的，替用户翻开会让它们凭空吃下整包工坊内容。条目自身的 `enabled`
+与存档级 `enabledWorldBookEntries` 仍照常过滤。
+
+涉及文件: `workshop-regex-map.ts`(+`indexBase`) · `workshop-manifest.ts`(+去重) ·
+`workshop-types.ts`(+两个 grant/revoke 纯函数) · `workshop-store.ts` ·
+`WorkshopPage.vue` · `WorkshopBrowseModal.vue` · `WorkshopDetailModal.vue` ·
+`WorkshopConflictModal.vue` · `settings-store.ts` · `SettingsPage.vue` · `App.vue` ·
+`themes/variables.css` · 新增 `lib/reduced-motion.ts`
+
+验证: 141 文件 / 4693 测试全绿（+26）· typecheck & vue-tsc 0 错误 · lint 0 error。
+🔴 仍**未做真机走查**（预览面板不合成帧、Chrome 扩展未连接）。
+
+---
+
 ### 2026-07-31 — 加载态动画：AppButton 忙碌态 + 水合骨架
 
 补的是「按下去之后什么都没发生」的那段沉默。工坊一次安装要下几百 KB 载荷，
