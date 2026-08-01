@@ -166,13 +166,96 @@ describe('buildCraftPatches', () => {
     expect((addItem!.value as any).automata[0]).toMatchObject({ subscribe: 'damage.after' });
   });
 
-  it('制作失败 (success=false) → 空 patches，不产出任何物品', () => {
+  it('制作失败 (success=false) 且无 item_gen 输出 → 空 patches，不产出任何物品（S4d 语义：失败无失败品时为空）', () => {
     const patches = buildCraftPatches(
       makeCraftOutput({ success: false, rating: '失败' }),
       null,
       '理查德',
     );
     expect(patches).toHaveLength(0);
+  });
+
+  it('🆕 S4d 制作失败 (success=false) 但 item_gen 产出失败品 → 只落失败品 add_item，不结算 EXP/FP 也不 auto-equip', () => {
+    const itemOutput: ItemGenOutput = {
+      skills: [],
+      equipment: [
+        {
+          name: '烧焦的剑坯',
+          description: '锻打失败留下的残料，剑身布满裂纹。',
+          slot: '武器',
+          stats: { atk: 1 },
+          quality: '普通',
+          modifiers: [],
+        },
+      ],
+      inventory: [],
+    };
+    const patches = buildCraftPatches(
+      makeCraftOutput({ success: false, rating: '失败' }),
+      itemOutput,
+      '理查德',
+    );
+    const addItem = ops(patches, 'add_item');
+    expect(addItem).toHaveLength(1);
+    const v = addItem[0].value as any;
+    expect(v.name).toBe('烧焦的剑坯');
+    expect(v.rarity).toBe('普通');
+    // 失败品不 auto-equip（不穿上）
+    expect(v.equippedSlot).toBeUndefined();
+    // 不结算 EXP/FP
+    expect(ops(patches, 'update_character')).toHaveLength(0);
+    expect(ops(patches, 'delta_variable')).toHaveLength(0);
+  });
+
+  it('🆕 S4d 制作失败 (success=false) 但 item_gen 产出库存型失败品 → 只落 add_item（材料类）', () => {
+    const itemOutput: ItemGenOutput = {
+      skills: [],
+      equipment: [],
+      inventory: [
+        {
+          name: '炭化的精铁碎片',
+          description: '淬火失败炸裂的铁片，还能回收一点。',
+          quantity: 2,
+          type: '材料',
+          rarity: '普通',
+        },
+      ],
+    };
+    const patches = buildCraftPatches(
+      makeCraftOutput({ success: false, rating: '失败' }),
+      itemOutput,
+      '理查德',
+    );
+    const addItem = ops(patches, 'add_item');
+    expect(addItem).toHaveLength(1);
+    expect((addItem[0].value as any).name).toBe('炭化的精铁碎片');
+    expect((addItem[0].value as any).quantity).toBe(2);
+    expect(ops(patches, 'update_character')).toHaveLength(0);
+    expect(ops(patches, 'delta_variable')).toHaveLength(0);
+  });
+
+  it('成功 (success=true) + item_gen 失败品同名 → 产物正常 auto-equip（回归）', () => {
+    const itemOutput: ItemGenOutput = {
+      skills: [],
+      equipment: [
+        {
+          name: '精钢长剑',
+          description: '一柄锋利的精钢长剑。',
+          slot: '武器',
+          stats: { atk: 30 },
+          quality: '稀有',
+        },
+      ],
+      inventory: [],
+    };
+    const patches = buildCraftPatches(makeCraftOutput(), itemOutput, '理查德');
+    const addItem = ops(patches, 'add_item');
+    expect(addItem).toHaveLength(1);
+    expect((addItem[0].value as any).name).toBe('精钢长剑');
+    expect((addItem[0].value as any).equippedSlot).toBe('武器');
+    // 成功仍结算 EXP/FP
+    expect(ops(patches, 'update_character')).toHaveLength(1);
+    expect(ops(patches, 'delta_variable')).toHaveLength(1);
   });
 
   it('expGained/fpGained 为 0 时不发奖励 patch', () => {

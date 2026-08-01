@@ -275,6 +275,48 @@ describe('assembleCharacterState', () => {
     expect(result.skills[1].name).toBe('技能B');
   });
 
+  it('🆕 S4a 技能 modifiers/buffs/divinity/automata 透传到落库 Skill（生产检定加值收 S2-2）', () => {
+    const charData = makeCharGenOutput();
+    const itemData = makeItemGenOutput({
+      skills: [
+        {
+          name: '锻造辅助',
+          description: '常年在铁匠铺打下手，深谙火候。',
+          type: 'passive',
+          modifiers: [
+            {
+              category: '检定',
+              source: '锻造辅助',
+              checkType: '生产',
+              bonus: 3,
+              divinity: 0,
+            },
+          ],
+          automata: [
+            {
+              id: '锻造辅助.火花',
+              name: '火花',
+              source: '锻造辅助',
+              owner: 'char_1',
+              subscribe: 'damage.after',
+              trigger: 'ctx.damage.final > 0',
+              priority: 0,
+              divinity: 0,
+              intents: [{ kind: 'Heal', targetId: 'char_1', amount: 1 }],
+            },
+          ],
+        },
+      ],
+    });
+    const result = assembleCharacterState(charData, itemData);
+    const skill = result.skills.find((s) => s.name === '锻造辅助');
+    expect(skill).toBeTruthy();
+    expect((skill as any).modifiers).toHaveLength(1);
+    expect((skill as any).modifiers[0]).toMatchObject({ checkType: '生产', bonus: 3 });
+    expect((skill as any).automata).toHaveLength(1);
+    expect((skill as any).automata[0]).toMatchObject({ subscribe: 'damage.after' });
+  });
+
   it('应合并装备列表', () => {
     const charData = makeCharGenOutput();
     const itemData = makeItemGenOutput({

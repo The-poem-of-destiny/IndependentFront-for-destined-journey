@@ -426,33 +426,33 @@ export function buildCraftPatches(
 ): StatePatch[] {
   const patches: StatePatch[] = [];
 
-  // 只有成功才产出物品
-  if (!craftOutput.success) {
-    return patches;
-  }
-
   const productName = craftOutput.productName;
 
-  // 1. 产物写入背包 (add_item)
+  // 1. 主产物写入背包 (add_item) — 仅成功产出完整制品
   // M3: item_gen equipment 已细化同名产物时跳过 — 以 item_gen 的完整数据为准
   // 不再两步落库；stats/durability/maxDurability 直写 value（#7）
-  const productElaboratedByItemGen =
-    itemOutput?.equipment.some((e) => e.name === productName) ?? false;
-  if (!productElaboratedByItemGen) {
-    patches.push({
-      op: 'add_item',
-      target: `characters.${characterId}`,
-      value: {
-        name: productName,
-        description: craftOutput.checkSummary,
-        quantity: craftOutput.craftParams.quantity,
-        type: normalizeItemType('equipment') ?? '装备',
-        rarity: craftOutput.quality,
-      },
-    });
+  // S4d（2026-08-01 失败品链路）：失败时跳过主产物——失败品由 item_gen 以 <item_requests> 产出（下方第 2 步）
+  if (craftOutput.success) {
+    const productElaboratedByItemGen =
+      itemOutput?.equipment.some((e) => e.name === productName) ?? false;
+    if (!productElaboratedByItemGen) {
+      patches.push({
+        op: 'add_item',
+        target: `characters.${characterId}`,
+        value: {
+          name: productName,
+          description: craftOutput.checkSummary,
+          quantity: craftOutput.craftParams.quantity,
+          type: normalizeItemType('equipment') ?? '装备',
+          rarity: craftOutput.quality,
+        },
+      });
+    }
   }
 
   // 2. 合并 item_gen 产出的物品数据（M3: 装备单 add_item 带 equippedSlot，不再两步）
+  // S4d：成功=完整制品；失败=失败品/残料（craft_gen prompt 要求 type="inventory" 材料类）
+  //   ——失败品不 auto-equip（剥离 equippedSlot），也不进装备槽，仅背包可见
   if (itemOutput) {
     for (const equip of itemOutput.equipment) {
       patches.push({
@@ -464,7 +464,10 @@ export function buildCraftPatches(
           quantity: 1,
           type: '装备',
           rarity: equip.quality ?? craftOutput.quality,
-          equippedSlot: normalizeSlot(equip.slot), // M3: slot 归一化
+          // 失败品不 auto-equip（S4d：craft_gen 失败时产物留在背包，不穿上）
+          equippedSlot: craftOutput.success
+            ? normalizeSlot(equip.slot) // M3: slot 归一化
+            : undefined,
           stats: equip.stats, // M3: stats 归位 value（#7）
           durability: equip.durability, // M3: durability 归位 value（#7）
           maxDurability: equip.durability,
@@ -501,7 +504,8 @@ export function buildCraftPatches(
   }
 
   // 3. 经验奖励 → update_character delta（M3: 不再走 delta_variable，#12 exp 侧）
-  if (craftOutput.craftParams.expGained > 0) {
+  // S4d：失败/大失败不结算 EXP/FP（craft_gen 失败时 expGained/fpGained 为 0，这里双重保险）
+  if (craftOutput.success && craftOutput.craftParams.expGained > 0) {
     patches.push({
       op: 'update_character',
       target: `characters.${characterId}`,
@@ -510,7 +514,7 @@ export function buildCraftPatches(
     });
   }
   // 4. FP 奖励 → delta_variable profile.fp（M5 改 FP op 前保持现状）
-  if (craftOutput.craftParams.fpGained > 0) {
+  if (craftOutput.success && craftOutput.craftParams.fpGained > 0) {
     patches.push({
       op: 'delta_variable',
       target: 'profile.fp',
@@ -539,9 +543,12 @@ export async function runCraftGenChain(
   // Step 1: callCraftGenAgent
   const craftOutput = await callCraftGenAgent(request, deps);
 
-  // Step 2: callItemGenForCraft (only if successful and has item_requests)
+  // Step 2: callItemGenForCraft
+  // S4d（2026-08-01 失败品链路）：成功/失败都发 item_gen——
+  //   craft_gen prompt 要求失败时也输出 <item_requests>（失败品/残料，type="inventory" 材料类），
+  //   item_gen 为失败品写数值（品质普通/低值），buildCraftPatches 落库但不 auto-equip、不结算 EXP/FP。
   let itemOutput: ItemGenOutput | null = null;
-  if (craftOutput.success && craftOutput.itemRequests.length > 0) {
+  if (craftOutput.itemRequests.length > 0) {
     itemOutput = await callItemGenForCraft(craftOutput, request, deps);
   }
 

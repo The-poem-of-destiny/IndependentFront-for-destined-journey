@@ -32,7 +32,7 @@ import type { EventBus } from './game-event';
 import type { StatusApplyIntent, StatusRemoveIntent } from './status-api';
 import { d20, d100, roll, executeDiceRoll } from './dice';
 import { collectChecks } from './effect-types';
-import type { CheckModifier } from './effect-types';
+import type { Modifier, CheckModifier } from './effect-types';
 import {
   randomName,
   randomHairColor,
@@ -661,8 +661,8 @@ export async function executeToolCall(
         resourceCosts: { hp: 0, mp: 0, sp: 0 },
         currentResources: { hp: character.hp, mp: character.mp, sp: character.sp },
         d20Rolls: [], // Will be rolled inside craftResolver
-        // 🆕 制造反向链路 S2（2026-08-01）：装备「生产检定」modifier → 道具加值（世界书检定加值 C 位）
-        toolBonus: collectCraftToolBonus(character),
+        // 🆕 制造反向链路 S2+S4（2026-08-01）：装备「生产检定」modifier → 道具加值（C 位）+ 技能「生产检定」→ 技能加值（B 位）
+        ...collectCraftBonuses(character),
       };
 
       // 先跑 validate 获取准备阶段的问题（品质继承/层级封顶/管制物等）
@@ -722,8 +722,8 @@ export async function executeToolCall(
         resourceCosts: { hp: 0, mp: 0, sp: 0 },
         currentResources: { hp: character.hp, mp: character.mp, sp: character.sp },
         d20Rolls: [],
-        // 🆕 制造反向链路 S2（2026-08-01）：装备「生产检定」modifier → 道具加值
-        toolBonus: collectCraftToolBonus(character),
+        // 🆕 制造反向链路 S2+S4（2026-08-01）：装备「生产检定」modifier → 道具加值（C 位）+ 技能「生产检定」→ 技能加值（B 位）
+        ...collectCraftBonuses(character),
       };
 
       const result = $craft.startProject(request);
@@ -1050,20 +1050,29 @@ function getCoreAttribute(char: CharacterState, industry?: string): number {
 }
 
 /**
- * 🆕 制造反向链路 S2（2026-08-01，见 2026-08-01-item-gen-combat-link-plan.md §3 S2b）：
- * 从角色「已装备物品」收集「生产检定」modifier → toolBonus。
+ * 🆕 制造反向链路 S2+S4（2026-08-01，见 2026-08-01-item-gen-combat-link-plan.md §3 S2b）：
+ * 从角色收集「生产检定」modifier → 检定加值。
  *
  * 世界书依据：
  *  - 《品质效果限定》检定类含「生产检定修正」（稀+[2-4]/史+[5-7]/传+[8-10]/神+[11-15]）
  *  - 《生产制作协议》检定加值 = 属性[A] + 技能[B] + 道具[C] + 身份[D] → 进 fixedBonus
  *
- * 只统计 equippedSlot 非空的物品（道具 C 位；躺背包不算正在使用）。
+ * - toolBonus（道具 C 位）：只统计 equippedSlot 非空的物品（躺背包不算正在使用）
+ * - skillBonus（技能 B 位）：技能「生产检定」modifier（S4 补 Skill 落库 modifiers 字段后收 S2-2）
+ *   ——此前 Skill 接口无 modifiers 字段，技能生产加值留 0；S4a 已补字段落库，此处闭环。
  * checkType='生产' 不编译进战斗（compile.ts 已剔除），这里只服务制造链路。
  */
-function collectCraftToolBonus(char: CharacterState): number {
-  return char.inventory
+function collectCraftBonuses(char: CharacterState): { toolBonus: number; skillBonus: number } {
+  const isCraftCheck = (m: Modifier): m is CheckModifier =>
+    m.category === '检定' && m.checkType === '生产';
+  const toolBonus = char.inventory
     .filter((i) => i.equippedSlot)
     .flatMap((i) => i.modifiers ?? [])
-    .filter((m): m is CheckModifier => m.category === '检定' && m.checkType === '生产')
+    .filter(isCraftCheck)
     .reduce((sum, m) => sum + m.bonus, 0);
+  const skillBonus = (char.skills ?? [])
+    .flatMap((s) => s.modifiers ?? [])
+    .filter(isCraftCheck)
+    .reduce((sum, m) => sum + m.bonus, 0);
+  return { toolBonus, skillBonus };
 }

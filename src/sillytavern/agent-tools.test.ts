@@ -245,4 +245,39 @@ describe('复用工具回归保护', () => {
     // 只进加值、不减免 DC（S2c）：普通品质产能减免 1 → finalDC 5（未被 toolBonus 再减）
     expect(r.finalDC).toBe(5);
   });
+
+  // 🆕 S4a（2026-08-01）：技能「生产检定」modifier → skillBonus 计入固定加值（收 S2-2）
+  it('craft_check 技能生产检定 modifier → skillBonus 计入固定加值', async () => {
+    const char = makeCharacter({
+      name: '匠人学徒',
+      tier: 3,
+      attributes: { str: 12, dex: 10, con: 10, int: 10, spi: 10 },
+      inventory: [],
+      skills: [
+        {
+          name: '锻造辅助',
+          description: '深谙火候与锻打手法。',
+          type: 'passive',
+          modifiers: [
+            { category: '检定', source: '锻造辅助', checkType: '生产', bonus: 3 },
+            { category: '检定', source: '锻造辅助', checkType: '命中', bonus: 9 }, // 命中不走制造
+          ],
+        },
+        {
+          name: '战斗本能',
+          description: '',
+          type: 'passive',
+          modifiers: [{ category: '检定', source: '战斗本能', checkType: '命中', bonus: 99 }],
+        },
+      ],
+    });
+    const ctx = makeCtx([char]);
+    const r = await executeToolCall(
+      'craft_check',
+      { characterId: 'char_1', industry: '锻造', productName: '铁剑', materials: [] },
+      ctx,
+    );
+    // coreAttr(12) + skillBonus(3, 生产检定) + d20 = 15 + d20；命中不加
+    expect(r.fixedBonus).toBe(15);
+  });
 });

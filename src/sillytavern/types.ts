@@ -782,6 +782,13 @@ export interface Skill {
   effects?: Record<string, string>;
   /** 🆕 脚本注册表: 脚本名→可执行代码 (AI写, 引擎执行) */
   scripts?: Record<string, string>;
+  /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier，来自 item_gen `<modifiers>` 子元素）。
+   *  S4 (2026-08-01): 落库补收——技能「生产检定」modifier 在此落库，craft_check/craft_settle 的 skillBonus 位消费（S2-2 闭环） */
+  modifiers?: Modifier[];
+  /** 🆕 战斗 v2 (M4 5.5b): 该技能附带的 buff 定义 */
+  buffs?: StatusEffect[];
+  /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（神位级技能才填，缺省=0） */
+  divinity?: DivinityLevel;
   /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（EffectAutomaton[]，来自 item_gen `<automaton>` JSON） */
   automata?: EffectAutomaton[];
 }

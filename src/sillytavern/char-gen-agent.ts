@@ -342,6 +342,12 @@ export function assembleCharacterState(
     level: 1,
     effects: s.effects,
     scripts: s.scripts,
+    // 战斗 v2 (M4 5.5b): <modifiers>/<buffs>/<divinity> 透传（技能生产检定加值落库，S4 收 S2-2）
+    ...((s as any).modifiers && (s as any).modifiers.length > 0
+      ? { modifiers: (s as any).modifiers }
+      : {}),
+    ...((s as any).buffs && (s as any).buffs.length > 0 ? { buffs: (s as any).buffs } : {}),
+    ...((s as any).divinity !== undefined ? { divinity: (s as any).divinity } : {}),
     // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传到 Skill 落库
     ...((s as any).automata && (s as any).automata.length > 0
       ? { automata: (s as any).automata }
