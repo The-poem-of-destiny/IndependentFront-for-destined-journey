@@ -188,7 +188,8 @@ describe('QuickJS 后端 · 安全属性（SEC-02）', () => {
 
   it('预算默认值符合 §6.2', () => {
     expect(DEFAULT_QUICKJS_BUDGET.entryTimeoutMs).toBe(50);
-    expect(DEFAULT_QUICKJS_BUDGET.passTimeoutMs).toBe(1500);
+    // 5s：实测全语料单 pass 348-583ms，留约 10 倍余量（原 1500ms 只有 3 倍，是拍的）
+    expect(DEFAULT_QUICKJS_BUDGET.passTimeoutMs).toBe(5000);
     expect(DEFAULT_QUICKJS_BUDGET.memoryLimitBytes).toBe(64 * 1024 * 1024);
   });
 });

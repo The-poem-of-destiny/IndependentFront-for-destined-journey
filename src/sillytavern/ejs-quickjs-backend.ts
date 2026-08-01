@@ -57,8 +57,18 @@ export interface QuickJsBudget {
 
 export const DEFAULT_QUICKJS_BUDGET: QuickJsBudget = {
   entryTimeoutMs: 50,
-  // 🔴 没有 pass 天花板时，109 个动态条目各吃满 50ms = 5.5 秒主线程冻结
-  passTimeoutMs: 1500,
+  /**
+   * pass 天花板 5s（2026-08-01 上调，原值 1500ms 是拍的）。
+   *
+   * 实测依据：内置全语料 109 条目单 pass **348-583ms**（预热后；同口径 Legacy 6-73ms）。
+   * 1500ms 只有 3 倍余量 —— 世界书动态条目再多两三倍的用户会**整片撞上天花板 → 大面积回退**，
+   * 而回退是静默的。5s 给到约 10 倍余量。
+   *
+   * 上调的代价是**最坏情况的主线程冻结变长**。可接受的理由：这是 DoS 防线不是性能项，
+   * 单条目 50ms 的闸门才是常态下的约束；能吃满 5s 的只有「上百个各自逼近 50ms 的条目」，
+   * 那种书本身就该被作者优化，而不是被引擎腰斩成一堆原文注入。
+   */
+  passTimeoutMs: 5000,
   memoryLimitBytes: 64 * 1024 * 1024,
   maxStackBytes: 512 * 1024,
 };
