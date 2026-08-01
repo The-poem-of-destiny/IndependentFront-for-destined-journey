@@ -394,6 +394,7 @@ Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调
 **M2 修复的 Critical/Major:** C4（abandon 流程）。M1 已修的 C3/C5/C6/C7/M-1/M-3/M-4/M-9 由 A2-1 端到端验证。
 
 **已知遗留（M3 对齐）:** 前端 Vue 组件（CombatActionBar/CombatPanel 等）留最小改动、当前仍走 v2 渲染路径（标注 M2.5 前端完善）；`projectToAgent` 基于 CombatView 而非完整 CombatState（kernel 闭包藏 state）；`toPatches` 只算 FP 结算 patch（EXP/战利品 M4 settlement.before 补）；EffectChoice / BoundedAdjudication / CharGenRequest 三路由 `throw UnsupportedInM2`。
+
 ### 工坊 P4 — 上游功能对齐（B1–B5）｜ ✅ 完成 待真机（2026-08-01）
 
 参照物: 上游工坊自己的两个客户端（`github.com/AkabaneSaki/myrepo`，本地克隆 `E:\Projects\myrepo`）——
