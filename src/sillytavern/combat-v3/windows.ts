@@ -31,6 +31,7 @@ import type {
 } from './types';
 import { MAX_AUTOMATON_PER_WINDOW, MAX_REFLECTION_DEPTH } from './types';
 import { evaluate, ExprEvalError } from './automata/interpreter';
+import { parseExpression } from './automata/parser';
 import { validateBatch } from './intents';
 
 /** 单窗口求值结果 */
@@ -168,12 +169,22 @@ function makeReject(a: QueuedAutomaton, code: EffectRejectCode, detail: string):
  * 这是 M1「窗口调用点全部就位」的适配层：phases 只需传 selfId / targetId / round，
  * 本函数负责构建窗口分型的 ctx + 注入 state 访问器（present / charges / resolveNumber）。
  *
- * 表达式解析：intent 里的 `ctx.xxx` 字符串在 M3 尚未全量求值（damage.preview 除外），
- * 这里 resolveNumber 对数字字面量返回自身，对非数字立即返回 fallback（保守，不抛）。
+ * 表达式解析（M4）：intent 里的 `ctx.*` 字符串表达式（如反伤 amount
+ * `'ctx.damage.preReduction * 0.5'`）先 `parseExpression` 编译成 AST，再 `evaluate`
+ * 于**带真实伤害覆盖**的窗口 ctx 上解析为数字。本层 resolveNumber 兼任 intent 数值
+ * 表达式的求值入口（供 applyIntents 的 coerceAmount 复用）。求值失败（语法错 /
+ * 路径未定义 / 类型不可算）一律回退 fallback，**不抛出**（错误隔离语义，保守）。
  */
 export function makeWindowRuntimeCtx(
   state: CombatState,
-  opts: { selfId?: string; targetId?: string; round: number; window: WindowKey },
+  opts: {
+    selfId?: string;
+    targetId?: string;
+    round: number;
+    window: WindowKey;
+    /** M4：本窗口的伤害覆盖（damage.after / unit.beforeDown 等伤害窗口传真实 preReduction/postStep6/final） */
+    damage?: Partial<DamageCtxLike>;
+  },
 ): RuntimeWindowCtx<WindowKey> {
   const selfU = opts.selfId ? state.units[opts.selfId] : undefined;
   const targetU = opts.targetId ? state.units[opts.targetId] : undefined;
@@ -203,11 +214,11 @@ export function makeWindowRuntimeCtx(
     damage: {
       attackerId: opts.selfId ?? '',
       targetId: opts.targetId ?? '',
-      preReduction: 0,
-      postStep6: 0,
-      final: 0,
-      type: '物理',
-      rating: '有效',
+      preReduction: opts.damage?.preReduction ?? 0,
+      postStep6: opts.damage?.postStep6 ?? 0,
+      final: opts.damage?.final ?? 0,
+      type: opts.damage?.type ?? '物理',
+      rating: opts.damage?.rating ?? '有效',
     },
   } as WindowCtx<WindowKey>;
 
@@ -217,13 +228,47 @@ export function makeWindowRuntimeCtx(
       const u = state.units[unitId];
       return !!u && u.hp > 0;
     },
-    resolveNumber: (expr, fallback) => {
-      const n = Number(expr);
-      return Number.isFinite(n) ? n : fallback;
-    },
+    resolveNumber: (expr, fallback) => resolveNumberExpr(expr, base, fallback),
     chargesAvailable: (a) => !a.charges || a.charges.remaining > 0,
     depthBase: 0,
   };
+}
+
+/**
+ * 解析一个数值表达式串（字面量或 `ctx.*` 表达式）为数字。
+ *
+ * - 数字字面量（含整数串）→ 直接返回
+ * - 表达式串 → parseExpression → evaluate 于窗口 ctx（伤害值已在 base.damage）
+ * - 任何求值失败 → 回退 fallback（不抛出，错误隔离）
+ *
+ * exporter：供 applyIntents 构造 IntentApplyCtx.resolveNumber 以及攻击接线层复用，
+ * 保证「amount='ctx.damage.preReduction * 0.5'」这类表达式能被同一套解析器算出来。
+ */
+export function resolveNumberExpr(
+  expr: string,
+  ctx: WindowCtx<WindowKey>,
+  fallback: number,
+): number {
+  const direct = Number(expr);
+  if (typeof expr === 'string' && Number.isFinite(direct)) return direct;
+  try {
+    const ast = parseExpression(expr);
+    const v = evaluate(ast, ctx);
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  } catch {
+    // ExprSyntaxError / ExprEvalError —— 保守回退 fallback（错误隔离，不抛出）
+    return fallback;
+  }
+}
+
+/** DamageCtx 子集（供 damage 覆盖类型，避免把完整 DamageCtx 依赖进本文件造成类型发散） */
+interface DamageCtxLike {
+  preReduction: number;
+  postStep6: number;
+  final: number;
+  type: string;
+  rating: string | number;
 }
 
 /** 反射深度 > MAX → 该 automaton 的反伤不再触发（架构 §九 R6） */

@@ -24,6 +24,7 @@ import type {
   CombatDefinitionBundle,
   CombatState,
   DomainEvent,
+  FrozenSlot,
   PendingChangeSet,
   StatusPatch,
 } from '../types';
@@ -105,11 +106,25 @@ export function handleRoundClose(bundle: CombatDefinitionBundle, state: CombatSt
     nextPhase: 'RoundOpen',
     round: state.round + 1,
   };
+  // A4-3：槽位冻结回合递减（round.close 减 1，归 0 剔除）
+  out.frozenSlots = tickFrozenSlots(state);
   if (expired.removeUnitIds.length > 0) {
     out.removeUnitIds = expired.removeUnitIds;
     out.activeEffects = expired.activeEffects;
   }
   return out;
+}
+
+/**
+ * A4-3：槽位冻结回合递减。每轮 close 对 state.frozenSlots 的每条 rounds −1，
+ * 归 0 的记录剔除；无冻结返回原引用（避免不必要的新对象）。
+ */
+function tickFrozenSlots(state: CombatState): readonly FrozenSlot[] | undefined {
+  if (!state.frozenSlots || state.frozenSlots.length === 0) return undefined;
+  const next = state.frozenSlots
+    .map((f) => (f.rounds > 0 ? { ...f, rounds: f.rounds - 1 } : f))
+    .filter((f) => f.rounds > 0);
+  return next.length === 0 ? [] : next;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

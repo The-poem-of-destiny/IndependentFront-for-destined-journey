@@ -19,6 +19,8 @@
 import { draw } from '../dice-tape';
 import { checkMorale, getMoraleThreshold } from '../../morale-system';
 import { toParticipant } from './initiative';
+import { evaluateWindow, makeWindowRuntimeCtx } from '../windows';
+import { applyIntents } from '../intents';
 import type { CombatCommand, CombatDefinitionBundle, CombatState, DomainEvent } from '../types';
 import { emptyChanges, type PhaseOutcome } from './outcome';
 
@@ -48,9 +50,21 @@ export function openUnitTurn(bundle: CombatDefinitionBundle, state: CombatState)
     return out;
   }
   const u = state.units[id];
+
+  // A4-3（架构 §八 8.2 action.freezeSlot 窗口触发源）：turn.open 窗口求值并应用
+  // OverrideIntent(action.freezeSlot) → out.changes.freezeSlotPatches → applyPending 合并进
+  // state.frozenSlots。当前单位（如时间收割者）通过 turn.open 冻结敌方（如理查德）槽位，
+  // 生效点在**后续**单位的 openUnitTurn（activeFrozenFor 读 state.frozenSlots）。
+  // 本次冻结对当前单位自身本轮 open 无效（activeFrozenFor 用应用前的 state），符合设计。
+  applyTurnOpenIntents(out, state, id);
+
   const activatable = u.hp > 0 && u.canAct;
-  const attacks = activatable ? 1 : 0;
-  const actions = activatable ? 1 : 0;
+  // A4-3（架构 §八 8.2 action.freezeSlot）：被冻结的单位槽位不发，TurnClosed 直接跳过
+  const frozen = activeFrozenFor(state, id);
+  const freezeAttack = activatable && !frozen.attack;
+  const freezeAction = activatable && !frozen.action;
+  const attacks = freezeAttack ? 1 : 0;
+  const actions = freezeAction ? 1 : 0;
 
   out.changes.turnOpenSlots = [{ actorId: id, attacks, actions }];
   out.events.push({
@@ -60,11 +74,80 @@ export function openUnitTurn(bundle: CombatDefinitionBundle, state: CombatState)
     actionsRemaining: actions,
   });
 
-  // 不行动单位自动跳过两槽 → 进入 MoraleCheck
-  if (!activatable) {
+  // 不行动单位（含两槽全冻结）自动跳过两槽 → 进入 MoraleCheck
+  if (attacks === 0 && actions === 0) {
     out.nextPhase = 'MoraleCheck';
   }
   return out;
+}
+
+/**
+ * A4-3：turn.open 窗口求值并应用 OverrideIntent（action.freezeSlot）。
+ *
+ * 触发源：当前单位开回合时，其挂 turn.open 的 automaton（如时间暂停）产
+ * OverrideIntent(ruleKey='action.freezeSlot')，经 applyIntents 的 OverrideIntent 分支
+ * 写入 out.changes.freezeSlotPatches（applyPending 合并进 state.frozenSlots，max_rounds）。
+ *
+ * 错误隔离：单个 automaton 抛错不打断开回合（rejections 收集进 out.events）。
+ */
+function applyTurnOpenIntents(out: PhaseOutcome, state: CombatState, unitId: string): void {
+  const winCtx = makeWindowRuntimeCtx(state, {
+    selfId: unitId,
+    round: state.round,
+    window: 'turn.open',
+  });
+  const evalResult = evaluateWindow(state.activeEffects, 'turn.open', winCtx);
+  out.events.push(...evalResult.rejections);
+
+  // 逐批：非 OverrideIntent 的统一忽略（本轮 open 只消费 freezeSlot override）
+  for (const raw of evalResult.intents) {
+    const freezeOverrides = raw.intents.filter(
+      (i) => i.kind === 'OverrideIntent' && i.ruleKey === 'action.freezeSlot',
+    );
+    if (freezeOverrides.length === 0) continue;
+    const r = applyIntents(
+      {
+        state,
+        automatonOwner: raw.owner,
+        resolveNumber: (expr, fb) => {
+          // turn.open 窗口无 damage，直接按字面量 fallback（OverrideIntent 载荷为字面量）
+          const n = Number(expr);
+          return Number.isFinite(n) ? n : fb;
+        },
+        present: (id2) => Object.prototype.hasOwnProperty.call(state.units, id2),
+      },
+      freezeOverrides,
+      {
+        hpChanges: out.changes.hpChanges,
+        mpChanges: out.changes.mpChanges,
+        spChanges: out.changes.spChanges,
+        fpDelta: out.changes.fpDelta,
+        statusPatches: out.changes.statusPatches,
+        freezeSlotPatches: out.changes.freezeSlotPatches,
+        slotConsumptions: out.changes.slotConsumptions,
+      },
+    );
+    out.changes.fpDelta = r.changes.fpDelta;
+    out.changes.statusPatches = r.changes.statusPatches;
+    out.changes.freezeSlotPatches = r.changes.freezeSlotPatches;
+  }
+}
+
+/**
+ * 查询某单位当前是否被冻结了攻击/动作槽（A4-3）。
+ * 遍历 state.frozenSlots，命中 slotType='both' 或对应槽 → 该槽冻结。
+ */
+function activeFrozenFor(state: CombatState, unitId: string): { attack: boolean; action: boolean } {
+  const frozen = state.frozenSlots ?? [];
+  let attack = false;
+  let action = false;
+  for (const f of frozen) {
+    if (f.targetId !== unitId) continue;
+    if (f.rounds < 1) continue; // 已过期
+    if (f.slotType === 'both' || f.slotType === 'attack') attack = true;
+    if (f.slotType === 'both' || f.slotType === 'action') action = true;
+  }
+  return { attack, action };
 }
 
 /**

@@ -1,0 +1,210 @@
+{
+  "id": "case-13-time-freeze",
+  "sourceCase": "docs/planning/2026-07-31-combat-v3-stress-test/case-13-time-freeze.md",
+  "source": true,
+  "_provenance": {
+    "mechanism": [
+      "时间暂停（turn.open 窗口触发 action.freezeSlot 冻结敌方槽位，A4-3）",
+      "freezeSlot 触发源：openUnitTurn 求值 turn.open 窗口 → OverrideIntent(freezeSlot) → applyPending 合并进 state.frozenSlots → 后续单位 openUnitTurn 读 frozenSlots 不发冻结槽"
+    ],
+    "diceMapping": [
+      "确定性骰；时间收割者（dex 高）先动",
+      "枯萎时间收割者开回合 → turn.open 求值 freeze 冻结理查德全槽（rounds：本场+1）",
+      "理查德开回合 → 槽位全冻结 → 自动跳过（不发 0 槽外任何行动）",
+      "断言伤害 + 冻结生效（理查德槽位被冻结）"
+    ],
+    "kernelLimit": "前版：freezeSlot 生效点（openUnitTurn 读 frozenSlots）已接线但无触发源（归 M5）；现版 openUnitTurn 已接 turn.open 窗口求值（M4）"
+  },
+  "bundle": {
+    "combatId": "fixture-13",
+    "combatType": "围困",
+    "units": [
+      {
+        "name": "时间收割者",
+        "tier": 5,
+        "hp": 20000,
+        "maxHp": 20000,
+        "mp": 3000,
+        "maxMp": 3000,
+        "sp": 3000,
+        "maxSp": 3000,
+        "attributes": {
+          "str": 20,
+          "dex": 16,
+          "con": 15,
+          "int": 14,
+          "spi": 12
+        },
+        "side": "enemy",
+        "hitBonus": 12,
+        "defense": 90,
+        "dr": 0.1,
+        "weaponAtk": 120,
+        "automata": [
+          {
+            "id": "timegrain.freeze",
+            "name": "时间暂停",
+            "source": "时停引擎",
+            "owner": "时间收割者",
+            "subscribe": "turn.open",
+            "trigger": "ctx.self.id == '时间收割者'",
+            "priority": 0,
+            "divinity": 0,
+            "intents": [
+              {
+                "kind": "OverrideIntent",
+                "ruleKey": "action.freezeSlot",
+                "payload": {
+                  "targetId": "理查德",
+                  "slotType": "both",
+                  "rounds": 1
+                },
+                "divinity": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "理查德",
+        "tier": 5,
+        "hp": 30000,
+        "maxHp": 30000,
+        "mp": 5300,
+        "maxMp": 5300,
+        "sp": 3900,
+        "maxSp": 3900,
+        "attributes": {
+          "str": 18,
+          "dex": 14,
+          "con": 15,
+          "int": 21,
+          "spi": 17
+        },
+        "side": "player",
+        "hitBonus": 12,
+        "defense": 100,
+        "dr": 0.1,
+        "weaponAtk": 120
+      }
+    ],
+    "programs": [],
+    "resourceSnapshots": {
+      "FP": 2400
+    },
+    "rulesetRevision": "v3-2026-07-31"
+  },
+  "epochs": [
+    {
+      "outputId": "out-1",
+      "dice": [
+        16,
+        12,
+        11,
+        15,
+        15,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        18,
+        13,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "channelSplit": {
+        "attackHit": 32,
+        "initiative": 10,
+        "intentCheck": 7,
+        "statusContest": 6,
+        "procCheck": 5
+      }
+    }
+  ],
+  "commands": [
+    {
+      "commandId": "t1",
+      "expectedRevision": 0,
+      "kind": "DeclareAttack",
+      "actorId": "时间收割者",
+      "cost": "attack",
+      "payload": {
+        "targetId": "理查德",
+        "skill": "时停斩",
+        "intentionLevel": "核心",
+        "costs": {}
+      }
+    },
+    {
+      "commandId": "t2",
+      "expectedRevision": 0,
+      "kind": "PassAction",
+      "actorId": "时间收割者",
+      "cost": "action",
+      "payload": {}
+    }
+  ],
+  "expected": {
+    "milestones": [
+      {
+        "kind": "damage",
+        "at": "t1",
+        "targetId": "理查德",
+        "value": 0,
+        "tolerance": 500000
+      },
+      {
+        "kind": "roundCount",
+        "value": 1
+      }
+    ],
+    "eventHash": "hmd2z3a"
+  }
+}

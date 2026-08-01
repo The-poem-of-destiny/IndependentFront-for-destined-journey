@@ -204,7 +204,21 @@ function adjudicate(
     });
   }
 
-  const final = { ...next, journal };
+  // A1-6 forceTerminal 出口（架构 §八 8.2 terminal.forceTerminal）：裁决产出概念级终局时，
+  // 把 state.terminal 落定，让后续 runDispatch 的 checkTerminal 拾取进 Terminal 相位（case-09）。
+  // 载荷 reason/winner 优先取 RuleOverridden payload（若裁决方给出），否则用 'force_terminal'。
+  let judgeTerminal: { reason: 'force_terminal'; winner?: string } | undefined;
+  if (
+    result.effect.eventKind === 'RuleOverridden' &&
+    result.effect.ruleKey === 'terminal.forceTerminal'
+  ) {
+    const p = result.effect.payload as { reason?: string; winner?: string } | null | undefined;
+    judgeTerminal = { reason: 'force_terminal', winner: p?.winner };
+  }
+
+  const final = judgeTerminal
+    ? { ...next, journal, terminal: judgeTerminal }
+    : { ...next, journal };
   return {
     revision: final.revision,
     snapshot: toView(final),

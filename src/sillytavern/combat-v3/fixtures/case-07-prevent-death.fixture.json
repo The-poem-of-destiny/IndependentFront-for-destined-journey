@@ -1,0 +1,196 @@
+{
+  "id": "case-07-prevent-death",
+  "sourceCase": "docs/planning/2026-07-31-combat-v3-stress-test/case-07-prevent-death.md",
+  "source": true,
+  "_provenance": {
+    "mechanism": [
+      "PreventDeath（unit.beforeDown → death.threshold）保命",
+      "真伤 bypass 由 damageType 决定"
+    ],
+    "diceMapping": [
+      "攻方 T7 高 str/weapon → 一击远超守方 HP → 守方必被打至 0 → 触发 beforeDown",
+      "守方 automata: unit.beforeDown PreventDeath(hp: 留存值, slot:'death.threshold')",
+      "确定性骰；断言 DamagePrevented + 守方存活"
+    ],
+    "kernelLimit": "样本的 PreventDeath×2 + 真伤 bypass + 集群×1.5 + 9 次续杯依赖长回合精细骰回推，当前内核可驱动但精确复现成本高 ⇒ 本全量版验『PreventDeath 保命』核心机制；×2/9续杯 milestone 归 M5"
+  },
+  "bundle": {
+    "combatId": "fixture-07",
+    "combatType": "标准",
+    "units": [
+      {
+        "name": "霜刃骑将",
+        "tier": 7,
+        "hp": 50000,
+        "maxHp": 50000,
+        "mp": 4000,
+        "maxMp": 4000,
+        "sp": 4000,
+        "maxSp": 4000,
+        "attributes": {
+          "str": 28,
+          "dex": 16,
+          "con": 24,
+          "int": 10,
+          "spi": 12
+        },
+        "side": "enemy",
+        "hitBonus": 20,
+        "defense": 100,
+        "dr": 0.1,
+        "weaponAtk": 2500
+      },
+      {
+        "name": "理查德",
+        "tier": 7,
+        "hp": 1200,
+        "maxHp": 1200,
+        "mp": 5000,
+        "maxMp": 5000,
+        "sp": 5000,
+        "maxSp": 5000,
+        "attributes": {
+          "str": 20,
+          "dex": 12,
+          "con": 24,
+          "int": 21,
+          "spi": 17
+        },
+        "side": "player",
+        "hitBonus": 12,
+        "defense": 100,
+        "dr": 0.1,
+        "weaponAtk": 80,
+        "divinity": 6,
+        "automata": [
+          {
+            "id": "last-stand",
+            "name": "意志壁垒",
+            "subscribe": "unit.beforeDown",
+            "trigger": "true",
+            "priority": 0,
+            "divinity": 6,
+            "intents": [
+              {
+                "kind": "PreventDeath",
+                "targetId": "理查德",
+                "hp": 400,
+                "slot": "death.threshold"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "programs": [],
+    "resourceSnapshots": {
+      "FP": 2000
+    },
+    "rulesetRevision": "v3-2026-07-31"
+  },
+  "epochs": [
+    {
+      "outputId": "out-1",
+      "dice": [
+        16,
+        12,
+        11,
+        15,
+        15,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        18,
+        13,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "channelSplit": {
+        "attackHit": 32,
+        "initiative": 10,
+        "intentCheck": 7,
+        "statusContest": 6,
+        "procCheck": 5
+      }
+    }
+  ],
+  "commands": [
+    {
+      "commandId": "p1",
+      "expectedRevision": 0,
+      "kind": "DeclareAttack",
+      "actorId": "霜刃骑将",
+      "cost": "attack",
+      "payload": {
+        "targetId": "理查德",
+        "skill": "霜刃劈砍",
+        "intentionLevel": "处决",
+        "costs": {}
+      }
+    }
+  ],
+  "expected": {
+    "milestones": [
+      {
+        "kind": "prevented",
+        "at": "p1",
+        "targetId": "理查德",
+        "value": 400,
+        "tolerance": 50
+      },
+      {
+        "kind": "roundCount",
+        "value": 1
+      }
+    ],
+    "eventHash": "h1qh725l"
+  }
+}

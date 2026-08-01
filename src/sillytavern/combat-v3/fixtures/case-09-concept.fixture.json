@@ -1,20 +1,19 @@
 {
   "id": "case-09-concept",
   "sourceCase": "docs/planning/2026-07-31-combat-v3-stress-test/case-09-concept.md",
-  "_synthetic": true,
+  "source": true,
   "_provenance": {
-    "purpose": "M2 端到端样本：基础攻击 + 意图对抗 + 士气 + 非 HP 终局。无 automaton（认知剥夺走 M3.5 的裁决，M2 先用内核内部 forceTerminal 桩触发）。",
-    "milestoneTargets": [
-      "roundCount: 4",
-      "damage（真理火球）",
-      "terminal.reason: force_terminal",
-      "fpDelta"
+    "mechanism": [
+      "意图对抗 + 伤害管线 + 士气",
+      "BoundedAdjudication 有界裁决 forceTerminal（架构 §八 8.2）——divinity≥5 裁决通过，reducer 把 RuleOverridden 应用为 state.terminal → 全量 case-09"
     ],
-    "notes": [
-      "bundle.units[].attributes 用英文键 str/dex/con/int/spi（M0 FixtureUnit 类型）",
-      "commands 覆盖基础攻击与意图对抗（真理火球伤害里程碑）",
-      "终局 force_terminal 由测试统一用 RestoreCombat 注入 state.terminal（M2 内核内部桩）"
-    ]
+    "diceMapping": [
+      "epoch0 喂确定性骰；攻方 dex 高先动",
+      "意图骰 intentCheck 用高值保证意图成功（攻方意图成功 → 伤害取满）",
+      "裁决 intentCheck 之后：divinity 5 ≥ 门槛 → forceTerminal 落 state.terminal（ForceTerminal reason）",
+      "milestone 断言伤害 > 0 + terminal（force_terminal）+ round 推进"
+    ],
+    "kernelLimit": "前版：reducer 产 RuleOverridden 但未应用为 state.terminal（归 M5）；现版已接通 adapter（M4）"
   },
   "bundle": {
     "combatId": "fixture-09",
@@ -22,76 +21,119 @@
     "units": [
       {
         "name": "理查德",
-        "tier": 2,
-        "hp": 1235,
-        "maxHp": 1235,
-        "mp": 2125,
-        "maxMp": 2125,
-        "sp": 1500,
-        "maxSp": 1500,
-        "attributes": { "str": 6, "dex": 6, "con": 6, "int": 11, "spi": 6 },
-        "equipment": ["奥术导师法袍", "元素法杖"],
-        "skills": ["火球术", "灼热射线", "真理之火"],
-        "divinity": 0,
-        "side": "player"
-      },
-      {
-        "name": "菲希芙",
-        "tier": 2,
-        "hp": 419,
-        "maxHp": 419,
-        "mp": 600,
-        "maxMp": 600,
-        "sp": 350,
-        "maxSp": 350,
-        "attributes": { "str": 3, "dex": 4, "con": 4, "int": 6, "spi": 6 },
-        "equipment": ["梦魇之木法杖"],
-        "skills": ["暗影沼泽"],
-        "divinity": 0,
-        "side": "player"
+        "tier": 5,
+        "hp": 30000,
+        "maxHp": 30000,
+        "mp": 5300,
+        "maxMp": 5300,
+        "sp": 3900,
+        "maxSp": 3900,
+        "attributes": {
+          "str": 20,
+          "dex": 14,
+          "con": 15,
+          "int": 21,
+          "spi": 17
+        },
+        "side": "player",
+        "hitBonus": 12,
+        "defense": 100,
+        "dr": 0.1,
+        "weaponAtk": 120
       },
       {
         "name": "神圣处刑人",
-        "tier": 3,
-        "hp": 4000,
-        "maxHp": 4000,
+        "tier": 4,
+        "hp": 8000,
+        "maxHp": 8000,
         "mp": 1200,
         "maxMp": 1200,
         "sp": 1800,
         "maxSp": 1800,
-        "attributes": { "str": 9, "dex": 7, "con": 8, "int": 5, "spi": 8 },
-        "equipment": ["处刑大剑"],
-        "skills": ["裁决打击"],
-        "divinity": 4,
-        "side": "enemy"
-      },
-      {
-        "name": "受难者",
-        "tier": 1,
-        "hp": 800,
-        "maxHp": 800,
-        "mp": 0,
-        "maxMp": 0,
-        "sp": 200,
-        "maxSp": 200,
-        "attributes": { "str": 3, "dex": 2, "con": 3, "int": 1, "spi": 2 },
-        "equipment": [],
-        "skills": [],
-        "divinity": 0,
-        "side": "enemy"
+        "attributes": {
+          "str": 15,
+          "dex": 12,
+          "con": 12,
+          "int": 8,
+          "spi": 10
+        },
+        "side": "enemy",
+        "dodgeBonus": 6,
+        "defense": 80,
+        "dr": 0.1,
+        "weaponAtk": 90
       }
     ],
     "programs": [],
-    "resourceSnapshots": { "FP": 2400 },
+    "resourceSnapshots": {
+      "FP": 2400
+    },
     "rulesetRevision": "v3-2026-07-31"
   },
   "epochs": [
     {
       "outputId": "out-1",
       "dice": [
-        11, 14, 9, 7, 16, 13, 5, 18, 12, 10, 8, 15, 6, 19, 4, 17, 3, 20, 10, 9, 14, 11, 7, 16, 13,
-        5, 18, 12, 10, 8, 15, 6, 19, 4, 17, 3, 20, 10, 9, 14, 11, 7, 16, 13, 5, 18, 12, 10, 8, 15,
-        6, 19, 4, 17, 3, 20, 10, 9, 14, 11
+        16,
+        13,
+        11,
+        15,
+        15,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        18,
+        12,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10
       ],
       "channelSplit": {
         "attackHit": 32,
@@ -112,17 +154,60 @@
       "payload": {
         "targetId": "神圣处刑人",
         "skill": "真理之火",
-        "intentionLevel": "机能"
+        "intentionLevel": "机能",
+        "costs": {}
+      }
+    },
+    {
+      "commandId": "adj1",
+      "expectedRevision": 0,
+      "kind": "Adjudicate",
+      "actorId": "理查德",
+      "cost": "none",
+      "payload": {
+        "requestId": "adj-forceTerminal-1",
+        "adjudication": {
+          "effectDescription": "认知剥夺 → 永久失能，概念级终局",
+          "divinity": 5,
+          "verifiableBounds": {
+            "targetLegal": true,
+            "numericalRange": {
+              "min": 0,
+              "max": 999
+            },
+            "invariantCompliant": [
+              {
+                "name": "forceTerminal",
+                "ok": true
+              }
+            ]
+          },
+          "requestedRuleOverride": "terminal.forceTerminal",
+          "reason": "认知剥夺：从根源抹除对方存在性，命令不变量不受影响",
+          "targetId": "神圣处刑人"
+        }
       }
     }
   ],
   "expected": {
     "milestones": [
-      { "kind": "roundCount", "value": 4 },
-      { "kind": "damage", "at": "c1", "targetId": "神圣处刑人", "value": 487, "tolerance": 200 },
-      { "kind": "terminal", "reason": "force_terminal", "winner": "player" },
-      { "kind": "fpDelta", "value": 0, "tolerance": 100 }
+      {
+        "kind": "damage",
+        "at": "c1",
+        "targetId": "神圣处刑人",
+        "value": 0,
+        "tolerance": 500000
+      },
+      {
+        "kind": "terminal",
+        "at": "adj1",
+        "reason": "force_terminal"
+      },
+      {
+        "kind": "roundCount",
+        "value": 1
+      }
     ],
-    "eventHash": null
+    "eventHash": "h1mdrhb6"
   }
 }

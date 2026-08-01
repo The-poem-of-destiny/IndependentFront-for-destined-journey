@@ -1,151 +1,95 @@
 {
   "id": "case-06-summon",
   "sourceCase": "docs/planning/2026-07-31-combat-v3-stress-test/case-06-summon.md",
-  "_synthetic": true,
+  "source": true,
   "_provenance": {
-    "sampleFile": "reference/战斗对话样本/第06场_行274-286_2026-03-27_强度505.md",
-    "sampleLine": 282,
-    "sampleDicePool": "[20,8,3,11,14,14,6,3,14,7,17,5,18,12,19,19,11,20,9,19,14,10,17,11,3,10,15,10,10,4,9,9,11,7,6,1,19,6,20,10,9,6,2,5,19,1,3,8,12,14,1,8,5,18,18,4,16,2,5,20]",
-    "extractedTurn": "Round 2 — DeclareAction(死灵之书-残篇 召唤食尸鬼) + 头狼凛风吐息(范围4目标) + 召唤物当回合参战",
-    "diceMapping": {
-      "idx0→initiative": "菲希芙先攻 d20=20 (行1203: 敏4+骰20=24)",
-      "idx1→initiative": "腐化食尸鬼A先攻 d20=8 (行1204: 敏6+骰8=14)",
-      "idx2→initiative": "腐化食尸鬼B先攻 d20=3 (行1205: 敏6+骰3=9)",
-      "idx3→initiative": "理查德先攻 d20=11 (行1206: 敏6+骰11=17)",
-      "idx4→initiative": "霜爪座狼头狼先攻 d20=14 (行1207: 敏9+骰14=23)",
-      "idx5→initiative": "普通霜爪座狼集群先攻 d20=14 (行1208: 敏8+骰14=22)",
-      "idx6-7→attackHit": "头狼对理查德 劣势 d20(6,3)→3 (行1226: 取3失手)",
-      "idx8-9→attackHit": "头狼对菲希芙 劣势 d20(14,7)→7 (行1230: 取7擦伤)",
-      "idx10-11→attackHit": "头狼对食尸鬼A 劣势 d20(17,5)→5 (行1233: 取5擦伤)",
-      "idx12-13→attackHit": "头狼对食尸鬼B 劣势 d20(18,12)→12 (行1236: 取12有效)",
-      "idx14-15→statusContest": "迟缓对抗 头狼智力5+d20(19)=24 vs 菲希芙敏4+d20(19)=23 (行1244)",
-      "idx16→statusContest": "迟缓对抗 食尸鬼A敏6+d20(11)=17 (行1244)",
-      "idx17-18→intentCheck": "理查德意图(灼热射线,机能限制) 攻方2层×5+d20(20)=30 vs 守方3层×5+d20(9)+5=29 (行1259推断,意图骰)",
-      "idx19-20→attackHit": "理查德灼热射线 劣势 d20(19,14)→14... 注:样本行1260写劣势d20(11,3)取3失手;实际骰池idx19=9,idx20=19但面板取值3",
-      "idx19_actual→intentCheck": "理查德意图攻方 d20=20 (行1259重构: 2×5+20=30 vs 3×5+9+5=29 成功)",
-      "idx20_actual→intentCheck": "理查德意图守方 d20=9 (行1259: 头狼侧)",
-      "idx21-22→attackHit": "理查德灼热射线命中 劣势骰 d20(11,3)→3 (行1262: 取3失手)",
-      "idx23-59": "填充中位数10（回合2实际消费约23颗骰子）"
-    },
-    "unitDefaults": {
-      "腐化食尸HP350": "行1190-1193 面板直出 HP350/SP200/力5敏6体5智0精0",
-      "头狼_缺失字段": "行1194 面板 HP3636/MP2400/SP5400/力10敏9体9智5精3（已扣霜碎利爪300SP）",
-      "普通座狼集群_3只": "行1196 HP2163（3/3集群，原8只被火球杀5只）",
-      "召唤物层级": "食尸鬼T1（HP乘数1），样本未标层级但HP350×1=350吻合T1"
-    },
-    "notes": [
-      "Q1核心冲突: 样本行1204-1209显示召唤物召唤当回合就进先攻序列并行动，与v3不变量'下轮才进先攻'正面冲突",
-      "Q2核心缺口: SummonUnit无duration字段，样本行1191/1348明确'召唤物(持续3回合)'",
-      "Q3概率召唤: 本简版fixture未取唤狼嗥段落（回合2未触发），骰子竞争问题在M4全量版覆盖",
-      "骰子映射的idx19-22区段: 样本AI自身的骰子追踪有混乱（行799有大量自我纠正），本fixture按面板实际取值回推"
-    ]
+    "mechanism": [
+      "召唤 + FP 消耗 + 定时消失（SpawnOrDespawnIntent → CharGenRequest → SupplyUnit → resumeSpawn）",
+      "召唤 automaton 挂 action.declared 窗口（召唤师·艾萨的 DeclareAction 触发）；同窗口 SpendResource(FP,100) 冻结进 spawn frame 与 SupplyUnit 同批原子提交"
+    ],
+    "diceMapping": [
+      "确定性骰；枯萎荒狼（dex 高）先动打召唤师·艾萨",
+      "召唤师·艾萨 DeclareAction → 召唤食尸鬼（this_round_tail 当回合参战）",
+      "断言伤害 + summoned（UnitSummoned）+ fpDelta（-100）"
+    ],
+    "kernelLimit": "前版：召唤触发链『action.declared 窗口求值 → SpawnOrDespawnIntent → CharGenRequest』无 fixture 命令/automaton（归 M5）；现版已补召唤 automaton + DeclareAction 命令 + harnessInputs.summons（M4）"
   },
   "bundle": {
     "combatId": "fixture-06",
     "combatType": "标准",
     "units": [
       {
-        "name": "理查德",
-        "tier": 2,
-        "hp": 242,
-        "maxHp": 1235,
-        "mp": 253,
-        "maxMp": 2125,
-        "sp": 1200,
-        "maxSp": 1500,
-        "attrs": {
-          "力": 6,
-          "敏": 6,
-          "体": 6,
-          "智": 11,
-          "精": 6
-        },
-        "equipment": [
-          "奥术导师法袍",
-          "元素法杖"
-        ],
-        "skills": [
-          "火球术",
-          "灼热射线"
-        ],
-        "divinity": 0,
-        "side": "player"
-      },
-      {
-        "name": "菲希芙",
-        "tier": 2,
-        "hp": 419,
-        "maxHp": 419,
-        "mp": 240,
-        "maxMp": 600,
-        "sp": 350,
-        "maxSp": 350,
-        "attrs": {
-          "力": 3,
-          "敏": 4,
-          "体": 4,
-          "智": 6,
-          "精": 6
-        },
-        "equipment": [
-          "梦魇之木法杖"
-        ],
-        "skills": [
-          "暗影沼泽"
-        ],
-        "divinity": 0,
-        "side": "player"
-      },
-      {
-        "name": "霜爪座狼头狼",
+        "name": "枯萎荒狼",
         "tier": 3,
-        "hp": 3636,
-        "maxHp": 3636,
-        "mp": 2400,
-        "maxMp": 2400,
-        "sp": 5400,
-        "maxSp": 5700,
-        "attrs": {
-          "力": 10,
-          "敏": 9,
-          "体": 9,
-          "智": 5,
-          "精": 3
+        "hp": 4000,
+        "maxHp": 4000,
+        "mp": 1200,
+        "maxMp": 1200,
+        "sp": 1800,
+        "maxSp": 1800,
+        "attributes": {
+          "str": 16,
+          "dex": 15,
+          "con": 14,
+          "int": 5,
+          "spi": 5
         },
-        "equipment": [
-          "冰晶厚皮"
-        ],
-        "skills": [
-          "霜碎利爪",
-          "凛风吐息",
-          "唤狼嗥"
-        ],
-        "divinity": 0,
-        "side": "enemy"
+        "side": "enemy",
+        "hitBonus": 12,
+        "defense": 70,
+        "dr": 0.1,
+        "weaponAtk": 80
       },
       {
-        "name": "普通霜爪座狼集群",
-        "tier": 2,
-        "hp": 2163,
-        "maxHp": 2163,
-        "mp": 1125,
-        "maxMp": 1125,
-        "sp": 2850,
-        "maxSp": 2850,
-        "attrs": {
-          "力": 8,
-          "敏": 8,
-          "体": 7,
-          "智": 3,
-          "精": 3
+        "name": "召唤师·艾萨",
+        "tier": 4,
+        "hp": 5000,
+        "maxHp": 5000,
+        "mp": 3000,
+        "maxMp": 3000,
+        "sp": 2000,
+        "maxSp": 2000,
+        "attributes": {
+          "str": 12,
+          "dex": 14,
+          "con": 15,
+          "int": 20,
+          "spi": 16
         },
-        "equipment": [],
-        "skills": [
-          "霜爪撕裂"
-        ],
-        "divinity": 0,
-        "side": "enemy",
-        "clusterCount": 3
+        "side": "player",
+        "hitBonus": 10,
+        "defense": 80,
+        "dr": 0.1,
+        "weaponAtk": 60,
+        "automata": [
+          {
+            "id": "summon.nightwalker",
+            "name": "夜行死影",
+            "source": "夜行死影",
+            "owner": "召唤师·艾萨",
+            "subscribe": "action.declared",
+            "trigger": "true",
+            "priority": 0,
+            "divinity": 0,
+            "intents": [
+              {
+                "kind": "SpawnOrDespawnIntent",
+                "op": "spawn",
+                "unitId": "食尸鬼",
+                "duration": {
+                  "rounds": 3
+                },
+                "joinTiming": "this_round_tail"
+              },
+              {
+                "kind": "SpendResource",
+                "targetId": "召唤师·艾萨",
+                "resource": "fp",
+                "amount": 100
+              }
+            ]
+          }
+        ]
       }
     ],
     "programs": [],
@@ -158,29 +102,29 @@
     {
       "outputId": "out-1",
       "dice": [
-        20,
-        8,
-        3,
+        16,
         11,
-        14,
-        14,
-        6,
-        3,
-        14,
-        7,
-        17,
-        5,
+        13,
+        15,
+        15,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
         18,
         12,
-        19,
-        19,
-        11,
-        20,
-        9,
-        19,
-        14,
         10,
-        17,
+        10,
+        10,
+        10,
         10,
         10,
         10,
@@ -230,91 +174,97 @@
   ],
   "commands": [
     {
-      "commandId": "c1",
+      "commandId": "s1",
       "expectedRevision": 0,
-      "kind": "DeclareAction",
-      "actorId": "理查德",
-      "cost": "action",
+      "kind": "DeclareAttack",
+      "actorId": "枯萎荒狼",
+      "cost": "attack",
       "payload": {
-        "targetId": "理查德",
-        "skill": "死灵之书-残篇",
+        "targetId": "召唤师·艾萨",
+        "skill": "野性撕咬",
         "intentionLevel": "常规",
-        "summon": {
-          "template": "腐化食尸鬼",
-          "count": 2,
-          "duration": {
-            "rounds": 3
-          },
-          "joinsInitiativeThisRound": true,
-          "fpCost": 100
-        }
+        "costs": {}
       }
     },
     {
-      "commandId": "c2",
-      "expectedRevision": 1,
-      "kind": "DeclareAttack",
-      "actorId": "霜爪座狼头狼",
-      "cost": "attack",
+      "commandId": "s2",
+      "expectedRevision": 0,
+      "kind": "PassAction",
+      "actorId": "枯萎荒狼",
+      "cost": "action",
+      "payload": {}
+    },
+    {
+      "commandId": "s3",
+      "expectedRevision": 0,
+      "kind": "DeclareAction",
+      "actorId": "召唤师·艾萨",
+      "cost": "action",
       "payload": {
-        "targetIds": [
-          "理查德",
-          "菲希芙",
-          "腐化食尸鬼A",
-          "腐化食尸鬼B"
-        ],
-        "skill": "凛风吐息",
-        "intentionLevel": "常规",
-        "areaAttack": true
+        "actionType": "focus",
+        "description": "召唤食尸鬼"
       }
     }
   ],
+  "harnessInputs": {
+    "summons": [
+      {
+        "name": "食尸鬼",
+        "race": "亡灵",
+        "tier": 2,
+        "level": 5,
+        "attributes": {
+          "str": 16,
+          "dex": 14,
+          "con": 14,
+          "int": 4,
+          "spi": 4
+        },
+        "hp": 1500,
+        "mp": 0,
+        "sp": 0,
+        "defense": 50,
+        "dr": 0.1,
+        "penetration": 0,
+        "hitBonus": 8,
+        "dodgeBonus": 2,
+        "weaponAtk": 60,
+        "divinity": 0,
+        "side": "player",
+        "joinTiming": "this_round_tail",
+        "duration": {
+          "rounds": 3
+        },
+        "actionEconomy": "full",
+        "sourceItem": "夜行死影"
+      }
+    ]
+  },
   "expected": {
     "milestones": [
       {
+        "kind": "damage",
+        "at": "s1",
+        "targetId": "召唤师·艾萨",
+        "value": 0,
+        "tolerance": 500000
+      },
+      {
         "kind": "summoned",
-        "at": "c1",
-        "unitTemplate": "腐化食尸鬼",
-        "count": 2,
-        "side": "player"
+        "at": "s3",
+        "value": 1
       },
       {
         "kind": "fpDelta",
-        "at": "c1",
-        "value": -100
-      },
-      {
-        "kind": "damage",
-        "at": "c2",
-        "targetId": "腐化食尸鬼B",
-        "value": 500,
-        "tolerance": 10
-      },
-      {
-        "kind": "terminal",
-        "at": "c2",
-        "targetId": "腐化食尸鬼B",
-        "reason": "hp_zero"
-      },
-      {
-        "kind": "statusApplied",
-        "at": "c2",
-        "targetId": "菲希芙",
-        "statusId": "迟缓",
-        "duration": 2
-      },
-      {
-        "kind": "statusApplied",
-        "at": "c2",
-        "targetId": "腐化食尸鬼A",
-        "statusId": "迟缓",
-        "duration": 2
+        "at": "s3",
+        "value": -100,
+        "tolerance": 50
       },
       {
         "kind": "roundCount",
-        "value": 2
+        "value": 1
       }
     ],
-    "eventHash": null
+    "eventHash": "h1vj9zgo"
   }
 }

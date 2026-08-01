@@ -186,7 +186,7 @@ export interface FixtureUnit {
   sp?: number;
   /** 最大 SP */
   maxSp?: number;
-  /** 五维（力量/敏捷/体质/智力/感知），可选 */
+  /** 五维（英文键 str/dex/con/int/spi），可选 */
   attributes?: Readonly<Record<string, number>>;
   /** 装备名列表（逻辑键） */
   equipment?: readonly string[];
@@ -196,6 +196,36 @@ export interface FixtureUnit {
   divinity?: number;
   /** 集群数量（v2 §六 6.x，第 07 场用，M4 补正式字段） */
   clusterCount?: number;
+  /** 增补的固定数值字段（命中等），harness 转 CombatParticipant 时并入。可选。 */
+  hitBonus?: number;
+  /** 闪避加值 */
+  dodgeBonus?: number;
+  /** 防御 */
+  defense?: number;
+  /** DR（0~1） */
+  dr?: number;
+  /** 武器攻击力 */
+  weaponAtk?: number;
+  /** 命中等级（intentionLevel 相关，供 attack ability 解析） */
+  intentionLevel?: string;
+  /** 一方角色（'player' | 'enemy'），缺省 enemy */
+  side?: 'player' | 'enemy';
+  /**
+   * 单位自带的声明式效果（ParsedEffect-like，M4）。
+   * harness 经 builtins compileParsedEffect 编译成 automaton 注入 activeEffects——
+   * 如反伤被动 `{ key:'reflect', value:50, isPercentage:true }`（第 24 场虚数偏折）。
+   */
+  effects?: readonly {
+    key: string;
+    value: number;
+    isPercentage: boolean;
+  }[];
+  /**
+   * 单位自带的自由 automaton JSON（EffectAutomaton 形状，M4）。
+   * harness 经 compileEffectProgram 编译进 activeEffects——用于 builtins 覆盖不了的
+   * 机制（PreventDeath / OverrideIntent(freezeSlot) 等）。intents 用 EffectIntent 判别联合。
+   */
+  automata?: readonly EffectAutomatonDecl[];
 }
 
 /**
@@ -310,6 +340,54 @@ export interface FixtureExpected {
 }
 
 /**
+ * replay harness 对外部输入（RequiredInput）的自动应答源（M4）。
+ *
+ * 只有「需求创造性或玩家决策」的 RequiredInput 需要 fixture 预置答案；
+ * BeginOutput（续杯）与 PlayerCommand（行动）由 harness 自动从 epochs / commands 推导。
+ */
+export interface HarnessInputs {
+  /** CharGenRequest 应答：自动 SupplyUnit 的召唤物定义（按键序取） */
+  summons?: readonly SummonedUnitDefinition[];
+  /** EffectChoice 应答：自动 Choose 的选项（按 choiceId 匹配） */
+  choices?: readonly { choiceId: string; option: string }[];
+  /** BoundedAdjudication 应答：自动 Adjudicate 的提案（按键序） */
+  adjudications?: readonly ImportedAdjudication[];
+  /** 最大续杯数（BeginOutput 应答上限，熔断防死循环），缺省 12 */
+  maxEpochs?: number;
+}
+
+/** HarnessInputs 可接受的裁决提案子集（规避循环依赖，只在 harness 层用） */
+export interface ImportedAdjudication {
+  effectDescription: string;
+  divinity: number;
+  verifiableBounds: {
+    targetLegal: boolean;
+    numericalRange?: { min: number; max: number };
+    invariantCompliant: readonly { name: string; ok: boolean; detail?: string }[];
+  };
+  requestedRuleOverride?: string;
+  reason: string;
+  targetId?: string;
+}
+
+/**
+ * FixtureUnit.automata 的自由 automaton JSON（EffectAutomaton 的 JSON-safe 投影）。
+ * 与运行时 CompiledAutomaton 的区别：trigger 是表达式字符串（由 harness 编译成 AST）。
+ */
+export interface EffectAutomatonDecl {
+  id: string;
+  name?: string;
+  source?: string;
+  owner?: string;
+  subscribe: WindowKey;
+  trigger: string;
+  priority?: number;
+  divinity?: number;
+  charges?: { max: number; remaining: number };
+  intents: readonly EffectIntent[];
+}
+
+/**
  * CombatFixture：M0 冻结的 replay 输入格式（plan §2.3）。
  *
  * 一条 fixture = bundle + epochs + commands + expected milestones。
@@ -328,6 +406,8 @@ export interface CombatFixture {
   commands: readonly FixtureCommand[];
   /** 期望的 milestone 断言 */
   expected: FixtureExpected;
+  /** 自动外部输入应答（M4；只有需要创造性/决策的 RequiredInput 才预置） */
+  harnessInputs?: HarnessInputs;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -451,8 +531,24 @@ export interface CombatUnitState {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// CombatState（架构 §三 3.1）
+// FrozenSlot（A4-3 action.freezeSlot，第 13 场）
 // ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 一条槽位冻结记录（架构 §八 8.2 action.freezeSlot）。
+ *
+ * 由 `OverrideIntent { ruleKey:'action.freezeSlot' }` / 裁决生效时写入
+ * CombatState.frozenSlots；`unit-turn.openUnitTurn` 据此对目标单位不发冻结槽。
+ * merge policy：同目标同槽取 rounds 最大（max_rounds）。
+ */
+export interface FrozenSlot {
+  /** 被冻结的目标单位（逻辑键名字，铁律 ①） */
+  targetId: string;
+  /** 冻结的槽位类型 */
+  slotType: 'attack' | 'action' | 'both';
+  /** 剩余冻结回合数（每轮 close 递减） */
+  rounds: number;
+}
 
 /**
  * 战斗唯一权威状态（架构 §一 1.2 P1）。
@@ -481,6 +577,12 @@ export interface CombatState {
   dice: DiceTapeState;
   /** 存档级资源快照（FP 唯一权威，架构 §十二） */
   resourceSnapshots: { FP: number };
+  /**
+   * 槽位冻结（A4-3 action.freezeSlot，第 13 场时间暂停）。
+   * 时序型条目：目标单位被冻结的槽位不产、TurnClosed 跳过。可选字段——
+   * 大多数战斗/既有 state 无冻结，缺省 undefined（不破坏既有构造）。
+   */
+  frozenSlots?: readonly FrozenSlot[];
   /** 中断续跑帧（ResolveChoice / BeginOutput 用） */
   resolution?: ResolutionFrame;
   /** 只追加变更日志（架构 §三 3.4） */
@@ -557,6 +659,8 @@ export type PendingChangeSet = {
   slotConsumptions: { actorId: string; slot: 'attack' | 'action' }[];
   /** 回合开始时给单位发槽（M-3：只给 canAct && hp>0 的单位发满，其余发 0） */
   turnOpenSlots?: { actorId: string; attacks: number; actions: number }[];
+  /** 槽位冻结补丁（A4-3 action.freezeSlot）：applyPending 合并进 state.frozenSlots（max_rounds） */
+  freezeSlotPatches?: FrozenSlot[];
   /** 终局触发（checkTerminal 在 phases/terminal.ts 内应用） */
   terminal?: { reason: TerminalReason; winner?: string };
 };
