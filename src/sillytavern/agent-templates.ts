@@ -20,6 +20,7 @@ import type {
   AgentConfig,
   AgentPreset,
   WorldBook,
+  WorldBookEntry,
 } from './types';
 import type { GameTime } from './time-system';
 import { MONTH_NAMES } from './time-system';
@@ -186,16 +187,27 @@ function buildCapabilityInput(
   configs: AgentConfig[] | undefined,
   worldBooks: WorldBook[] | undefined,
 ): EjsCapabilityInput {
-  const visible =
-    configs && worldBooks
-      ? filterActiveEntries(getEntriesForAgent(agentId, configs, worldBooks))
-      : [];
-  const bookOf = new Map<number, string>();
-  if (worldBooks) {
-    for (const book of worldBooks) {
+  /**
+   * 可见条目 + uid→书名 索引，**惰性建、建一次**。
+   *
+   * 为什么不在函数体里直接算：本函数是**每 Agent 每回合**都会跑的热路径，而这两样
+   * 只有 `lore.get/list` 用得上 —— 真机语料里绝大多数条目一次都不调。
+   * 急切构建等于给每一次提示装配平白加一遍全量条目扫描（内置书 600+ 条目）。
+   */
+  let loreIndex: { visible: WorldBookEntry[]; bookOf: Map<number, string> } | null = null;
+  const getLoreIndex = () => {
+    if (loreIndex) return loreIndex;
+    const visible =
+      configs && worldBooks
+        ? filterActiveEntries(getEntriesForAgent(agentId, configs, worldBooks))
+        : [];
+    const bookOf = new Map<number, string>();
+    for (const book of worldBooks ?? []) {
       for (const e of book.entries ?? []) bookOf.set(e.uid, book.name);
     }
-  }
+    loreIndex = { visible, bookOf };
+    return loreIndex;
+  };
 
   return {
     history: (ctx.history ?? []).map((m) => ({ role: m.role, content: m.content ?? '' })),
@@ -210,16 +222,19 @@ function buildCapabilityInput(
     engineVersion: undefined,
     lore: {
       get: (entryName, bookName) => {
+        const { visible, bookOf } = getLoreIndex();
         const name = String(entryName ?? '');
         const hit = visible.find(
           (e) => e.name === name && (bookName === undefined || bookOf.get(e.uid) === bookName),
         );
         return hit ? (hit.content ?? '') : null;
       },
-      list: (bookName) =>
-        visible
+      list: (bookName) => {
+        const { visible, bookOf } = getLoreIndex();
+        return visible
           .filter((e) => bookOf.get(e.uid) === String(bookName ?? ''))
-          .map((e) => e.name ?? ''),
+          .map((e) => e.name ?? '');
+      },
     },
     notify: ctx.ejsNotify,
     log: ctx.ejsLog,
@@ -252,6 +267,32 @@ function buildEjsPassContext(
     // 否则「战斗 Agent 与叙事 Agent 对同一事件掷出不同的数」——那是分裂，不是随机（设计 §7）。
     seed: ctx.ejsSeed,
   };
+}
+
+/**
+ * 把 EJS 回退条目送进 `ctx.ejsFallback`（带上书名，光有 uid 在 UI 上没法读）。
+ *
+ * 永不抛：诊断出口挂了不能反过来打断提示装配。
+ */
+function reportEjsFallback(
+  agentId: string,
+  ctx: AgentContext,
+  entries: Array<{ uid: number; error: string }>,
+  worldBooks: WorldBook[] | undefined,
+): void {
+  if (!ctx.ejsFallback || entries.length === 0) return;
+  const bookOf = new Map<number, string>();
+  for (const book of worldBooks ?? []) {
+    for (const e of book.entries ?? []) bookOf.set(e.uid, book.name);
+  }
+  try {
+    ctx.ejsFallback({
+      agentId,
+      entries: entries.map((f) => ({ uid: f.uid, bookName: bookOf.get(f.uid), error: f.error })),
+    });
+  } catch (err) {
+    console.warn('[LORE_BOOK] EJS 回退诊断出口抛错（已忽略）:', err);
+  }
 }
 
 function formatCharacters(ctx: AgentContext): string {
@@ -827,6 +868,8 @@ export async function buildAgentMessagesAsync(
       console.warn(
         `[LORE_BOOK] agent=${agentId} 有 ${rendered.fallbackEntries.length} 个条目 EJS 失败、已回退原文注入`,
       );
+      // 同时送进诊断出口 —— console.warn 没人翻，DebugPanel 与导出 JSON 才是能被看到的地方
+      reportEjsFallback(agentId, ctx, rendered.fallbackEntries, worldBooks);
     }
   }
 

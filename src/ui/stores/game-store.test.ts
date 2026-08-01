@@ -521,3 +521,61 @@ describe('M2 v3 战斗接线', () => {
     expect(store.isInCombat).toBe(false);
   });
 });
+
+// ===== EJS 诊断（工坊 P2 / 能力面）=====
+
+/**
+ * 这三样都是**静默失效**的诊断：条目回退、变量丢弃、内容自打的 log。
+ * 它们不影响游戏能不能跑，只影响「坏了之后能不能查」—— 而调试循环手册的口径是
+ * 「游玩 → 导出 → 分析」，所以它们必须**留在内存里到导出那一刻**，不能随轮清空。
+ */
+describe('EJS 诊断累计', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('回退：同 agent+uid 累加计数，不同条目各占一行', () => {
+    const game = useGameStore();
+    game.recordEjsFallback('story', [
+      { uid: 101, bookName: '主世界观', error: 'SyntaxError: x' },
+      { uid: 102, bookName: '数值', error: 'ReferenceError: y' },
+    ]);
+    game.recordEjsFallback('story', [{ uid: 101, bookName: '主世界观', error: 'SyntaxError: z' }]);
+
+    expect(game.ejsFallbacks).toHaveLength(2);
+    const first = game.ejsFallbacks.find((f) => f.uid === 101)!;
+    expect(first.count).toBe(2);
+    // 留最近一次错因 —— 同条目换个错更值得看
+    expect(first.error).toBe('SyntaxError: z');
+    expect(game.ejsFallbacks.find((f) => f.uid === 102)!.count).toBe(1);
+  });
+
+  it('回退：不同 Agent 的同一条目分开记（可见性分区不同，失败原因可能不同）', () => {
+    const game = useGameStore();
+    game.recordEjsFallback('story', [{ uid: 7, error: 'e1' }]);
+    game.recordEjsFallback('vars_update', [{ uid: 7, error: 'e2' }]);
+    expect(game.ejsFallbacks).toHaveLength(2);
+  });
+
+  it('ui.log：按序累积，且有会话级天花板（512）', () => {
+    const game = useGameStore();
+    for (let i = 0; i < 600; i++) game.recordEjsUiLog(`line-${i}`);
+    expect(game.ejsUiLog).toHaveLength(512);
+    // 丢的是最旧的
+    expect(game.ejsUiLog[0]).toBe('line-88');
+    expect(game.ejsUiLog[511]).toBe('line-599');
+  });
+
+  it('三样都是整局累计 —— 不随轮清空（clearAgentLog 不碰它们）', () => {
+    const game = useGameStore();
+    game.recordEjsFallback('story', [{ uid: 1, error: 'e' }]);
+    game.recordEjsVarsRejection('story', '正文', 999);
+    game.recordEjsUiLog('hello');
+
+    game.clearAgentLog();
+
+    expect(game.ejsFallbacks).toHaveLength(1);
+    expect(game.ejsVarsRejections).toHaveLength(1);
+    expect(game.ejsUiLog).toHaveLength(1);
+  });
+});

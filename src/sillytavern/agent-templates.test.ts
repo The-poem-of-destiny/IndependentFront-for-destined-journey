@@ -848,3 +848,84 @@ describe('buildAgentMessages × 能力面接线', () => {
     expect(render('说=<%= getChatMessage(-1, "user") %>', ctx)).toContain('说=第一句');
   });
 });
+
+// ========== EJS 回退诊断出口（D8）==========
+
+/**
+ * 回退是**静默**的：条目照常进提示词，只是没被求值。`console.warn` 没人翻，
+ * 所以诊断出口是唯一能让它被看见的路（DebugPanel + 导出 JSON）。
+ * 这里断言的是**接线**，不是回退本身的正确性（那在 worldbook-loader 测）。
+ */
+describe('buildAgentMessages × EJS 回退诊断出口', () => {
+  function brokenBook(): WorldBook {
+    return {
+      id: 'wb_broken',
+      name: '坏书',
+      partition: 'world_setting',
+      entries: [
+        {
+          uid: 42,
+          name: '坏条目',
+          content: '<% 不存在的符号() %>',
+          enabled: true,
+          key: [],
+          keysecondary: [],
+          selectiveLogic: 0,
+          order: 1,
+          position: 0,
+        },
+      ],
+    };
+  }
+
+  it('条目求值失败 → ejsFallback 收到 uid / 书名 / 错因', () => {
+    const seen: Array<{ agentId: string; entries: Array<{ uid: number; bookName?: string }> }> = [];
+    const ctx = makeContext({ ejsFallback: (info) => seen.push(info) });
+    const cfg = makeCfg('story', { worldBookIds: ['wb_broken'] });
+
+    const msgs = buildAgentMessages('story', ctx, [cfg], [brokenBook()]);
+
+    // 正文里是原文注入（D8），不是渲染结果
+    expect(msgs![0].content).toContain('<% 不存在的符号() %>');
+    // 而且诊断确实送出去了
+    expect(seen).toHaveLength(1);
+    expect(seen[0].agentId).toBe('story');
+    expect(seen[0].entries[0]).toMatchObject({ uid: 42, bookName: '坏书' });
+  });
+
+  it('条目正常 → 不打扰（出口零调用）', () => {
+    const seen: unknown[] = [];
+    const ctx = makeContext({ ejsFallback: () => seen.push(1) });
+    const cfg = makeCfg('story', { worldBookIds: ['wb_ok'] });
+    const ok: WorldBook = {
+      id: 'wb_ok',
+      name: '好书',
+      partition: 'world_setting',
+      entries: [
+        {
+          uid: 1,
+          name: '好条目',
+          content: '<%= 1 + 1 %>',
+          enabled: true,
+          key: [],
+          keysecondary: [],
+          selectiveLogic: 0,
+          order: 1,
+          position: 0,
+        },
+      ],
+    };
+    expect(buildAgentMessages('story', ctx, [cfg], [ok])![0].content).toContain('2');
+    expect(seen).toHaveLength(0);
+  });
+
+  it('出口自己抛错也不能打断提示装配', () => {
+    const ctx = makeContext({
+      ejsFallback: () => {
+        throw new Error('诊断挂了');
+      },
+    });
+    const cfg = makeCfg('story', { worldBookIds: ['wb_broken'] });
+    expect(() => buildAgentMessages('story', ctx, [cfg], [brokenBook()])).not.toThrow();
+  });
+});

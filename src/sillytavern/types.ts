@@ -1378,6 +1378,17 @@ export interface AgentContext {
   /** EJS `ui.log` 的出口（不给 = 丢弃）。**绝不落真 console**，免得刷屏 */
   ejsLog?: (args: unknown[]) => void;
   /**
+   * 世界书条目 EJS 求值失败、已按 D8 回退原文注入的诊断出口（不给 = 只留 console.warn）。
+   *
+   * 为什么要有：回退是**静默**的 —— 条目照常进提示词，只是没被求值。玩家看到的现象是
+   * 「世界书里那段状态面板变成了一堆 `<% %>` 源码」或者干脆什么都没变，
+   * 而 `console.warn` 没人会去翻。接到 DebugPanel 才能在导出 JSON 里被带走（调试循环手册的口径）。
+   */
+  ejsFallback?: (info: {
+    agentId: string;
+    entries: Array<{ uid: number; bookName?: string; error: string }>;
+  }) => void;
+  /**
    * 轴②`vars` 草稿暂存 —— **仅持 `ejsVarsCommit` 权的 Agent** 的 pass 会写入本表（keyed by agentId）。
    *
    * 容器由 game-pipeline 创建（`new Map()`），`buildAgentMessages` 每 pass 往里 set；

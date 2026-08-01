@@ -169,6 +169,19 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
           `[LORE_BOOK] agent=${agentId} 有 ${rendered.fallbackEntries.length} 个条目 EJS 失败、已回退原文注入: ` +
             rendered.fallbackEntries.map((f) => `${bookNameOfUid(f.uid)}#${f.uid}`).join(', '),
         );
+        // 同步送进诊断出口（同步 resolver 这条路；异步预渲染那条在 agent-templates）
+        try {
+          ctx.ejsFallback?.({
+            agentId,
+            entries: rendered.fallbackEntries.map((f) => ({
+              uid: f.uid,
+              bookName: bookNameOfUid(f.uid),
+              error: f.error,
+            })),
+          });
+        } catch (err) {
+          console.warn('[LORE_BOOK] EJS 回退诊断出口抛错（已忽略）:', err);
+        }
       }
     }
 
