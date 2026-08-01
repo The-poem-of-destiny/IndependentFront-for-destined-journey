@@ -20,6 +20,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import type { WorkshopProject } from '@engine/types';
 import type { InstallConflict, InstallPlan } from '@engine/workshop-types';
 import WorkshopPage from './WorkshopPage.vue';
+import { fetchProject, listProjects } from '../../lib/workshop-client';
 
 // ── 网络层：整层替掉，一发请求都不许出去 ──
 vi.mock('../../lib/workshop-client', async () => {
@@ -488,6 +489,49 @@ describe('WorkshopPage', () => {
 
     expect(document.body.textContent).not.toContain('确认覆盖你修改过的条目');
     expect(h.fns.commitInstall).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  // ═══ force：只有「更新」该越过 5 分钟详情缓存 ═══
+
+  it('★ 更新已装项目时 force —— 按钮上写的版本必须是刚拉回来的那个', async () => {
+    state.projects = [makeProject({ installState: 'update_available' })];
+    h.fns.prepareInstall.mockResolvedValue({ ok: true, prepared: makePrepared([]) });
+
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    await findButton(wrapper, '更新')!.trigger('click');
+    await flushPromises();
+
+    expect(h.fns.prepareInstall).toHaveBeenCalledWith('p1', { force: true });
+    wrapper.unmount();
+  });
+
+  it('★ 首次安装不 force —— 用户几秒前在详情里看到的就是他同意装的那一份', async () => {
+    // 走真实入口：浏览列表 → 点卡片开详情 → 按「安装」。此时 getProject 找不到它，
+    // 页面就该沿用刚刚那份热缓存，而不是让「安装」比「浏览」多等一个往返。
+    vi.mocked(listProjects).mockResolvedValue({
+      ok: true,
+      fromCache: false,
+      data: { total: 1, page: 0, pageSize: 20, projects: [makeProject()], droppedCount: 0 },
+    });
+    vi.mocked(fetchProject).mockResolvedValue({
+      ok: true,
+      fromCache: false,
+      data: { project: makeProject(), regexEntries: [], previewEntries: [] },
+    });
+    h.fns.prepareInstall.mockResolvedValue({ ok: true, prepared: makePrepared([]) });
+
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    await findButton(wrapper, '浏览工坊')!.trigger('click');
+    await flushPromises();
+    (document.body.querySelector('.wk-card') as HTMLButtonElement).click();
+    await flushPromises();
+    findBodyButton('安装')!.click();
+    await flushPromises();
+
+    expect(h.fns.prepareInstall).toHaveBeenCalledWith('p1', { force: false });
     wrapper.unmount();
   });
 

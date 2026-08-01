@@ -127,7 +127,15 @@ function abortInflight(): void {
   inflight = null;
 }
 
-async function load(): Promise<void> {
+/**
+ * 拉一页。
+ *
+ * `force` = 越过 `listProjects` 的 45 秒列表缓存。**只有工具条上的「刷新」传 true**：
+ * 那是用户明确表达「我要最新的」的唯一入口。翻页/改搜索词/切标签都不传 —— 它们各自
+ * 是不同的缓存键，本来就拉的是新内容；而「翻回上一页」这种原地打转命中缓存正是我们
+ * 想要的省。失败从不入缓存，所以失败态里的「重试」也不需要 force。
+ */
+async function load(force = false): Promise<void> {
   abortInflight();
   const Ctor = (globalThis as { AbortController?: typeof AbortController }).AbortController;
   const ctrl = typeof Ctor === 'function' ? new Ctor() : null;
@@ -144,7 +152,7 @@ async function load(): Promise<void> {
       tag: activeTag.value || undefined,
       search: search.value.trim() || undefined,
     },
-    { signal: ctrl?.signal },
+    { signal: ctrl?.signal, force },
   );
 
   // 已被后来者掐掉 → 这份结果属于上一个查询，一个字都不许写进屏幕状态
@@ -233,7 +241,8 @@ watch(
   () => props.open,
   (isOpen) => {
     if (isOpen) {
-      // 每次打开都重拉：列表是上游变动最频繁的一面，且 listProjects 本就不缓存
+      // 每次打开都拉一次，但**不 force**: 关掉又立刻打开（找错项目、回去看一眼）是常见
+      // 动作，45 秒内的这一发本就该命中缓存。要最新的按工具条上的「刷新」。
       void load();
     } else {
       abortInflight();
@@ -277,7 +286,8 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
         <AppButton v-if="loading" variant="secondary" size="sm" @click="cancelLoad">
           取消
         </AppButton>
-        <AppButton v-else variant="secondary" size="sm" @click="load()"> 刷新 </AppButton>
+        <!-- 「刷新」是用户表达「我要最新的」的唯一入口 → 唯一一处传 force -->
+        <AppButton v-else variant="secondary" size="sm" @click="load(true)"> 刷新 </AppButton>
       </div>
 
       <!-- ═══ 标签筛选（恒定四项，不随当前页漂移） ═══ -->

@@ -69,6 +69,22 @@ export const WORKSHOP_DETAIL_TTL_MS = 5 * 60 * 1000;
  */
 export const WORKSHOP_PAYLOAD_TTL_MS = 15 * 60 * 60 * 1000;
 
+/**
+ * 列表 TTL —— 45 秒。
+ *
+ * 为什么列表也值得缓存: 浏览模态上的往返有很强的「原地打转」特征 —— 第 1 页翻到
+ * 第 2 页再翻回第 1 页、同一个标签点开又点掉、模态关掉几秒后重新打开。这几串动作
+ * 发出的是**参数完全相同的同一个 URL**，中间没有任何用户输入变化，重拉只是把同样
+ * 一屏内容再传一遍。缓存键是完整列表 URL，所以「按了下一页却看见上一页」这类事故
+ * 在结构上不可能发生 —— 页码不同就是不同的键。
+ *
+ * 为什么只有 45 秒: 列表确实是上游变动最频繁的一面。45 秒短到「上游刚发布的新项目」
+ * 最多迟到一屏的时间，不至于让人以为工坊是死的；又长到足够吃掉上面那一整串往返。
+ *
+ * 用户想立刻看到最新的那条路始终畅通: 工具条上的「刷新」传 `force`，直接越过缓存。
+ */
+export const WORKSHOP_LIST_TTL_MS = 45_000;
+
 /** `GET /api/projects` 的服务端缺省（附录 C），我们显式带上以便请求可复现 */
 export const WORKSHOP_DEFAULT_PAGE_SIZE = 20;
 export const WORKSHOP_DEFAULT_SORT = 'published';
@@ -576,44 +592,59 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * 项目列表（公开，无需认证 —— 未登录不会 401，只是 `userLiked` 恒 false）。
  *
- * **不缓存**: 搜索/翻页要即时反映用户输入，而列表本身是上游变动最频繁的一面。
- * 缓存它换来的那点往返，代价是用户按了下一页却看见上一页。
+ * TTL 45 秒（{@link WORKSHOP_LIST_TTL_MS}），缓存键是**完整列表 URL**。
+ *
+ * ⚠️ 「缓存列表」听起来像是拿新鲜度换往返，实际上并不是: 页码、标签、搜索词、
+ * 排序任何一项不同都是不同的键，所以「按了下一页却看见上一页」在结构上不可能发生。
+ * 被吃掉的只有**参数一模一样**的那些重复往返 —— 翻回上一页、把标签点掉、关掉模态
+ * 几秒后再打开。用户的输入变了就一定是新请求。
+ *
+ * 想强制拿最新的一屏走 `force`（浏览模态工具条上的「刷新」就是这么按的）。
  */
 export async function listProjects(
   query: WorkshopListQuery = {},
-  opts: WorkshopAbortable = {},
+  opts: { force?: boolean } & WorkshopAbortable = {},
 ): Promise<WorkshopResult<WorkshopListPage>> {
   const url = buildListUrl(query);
-  const res = await fetchJson(url, { signal: opts.signal });
-  if (!res.ok) return res;
 
-  const raw = res.data;
-  const rawProjects = isRecord(raw) && Array.isArray(raw.projects) ? raw.projects : [];
-  // 上游偶尔把数组直接返回（未来形状变动的最常见方向），一并吃下
-  const list = rawProjects.length === 0 && Array.isArray(raw) ? raw : rawProjects;
+  return withCache<WorkshopListPage>(
+    `list:${url}`,
+    WORKSHOP_LIST_TTL_MS,
+    opts.force === true,
+    async () => {
+      const res = await fetchJson(url, { signal: opts.signal });
+      if (!res.ok) return res;
 
-  const projects: WorkshopProjectMeta[] = [];
-  for (const item of list) {
-    const meta = parseProjectMeta(item);
-    if (meta) projects.push(meta);
-  }
+      const raw = res.data;
+      const rawProjects = isRecord(raw) && Array.isArray(raw.projects) ? raw.projects : [];
+      // 上游偶尔把数组直接返回（未来形状变动的最常见方向），一并吃下
+      const list = rawProjects.length === 0 && Array.isArray(raw) ? raw : rawProjects;
 
-  const readNum = (key: string, fallback: number): number => {
-    const value = isRecord(raw) ? raw[key] : undefined;
-    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-  };
+      const projects: WorkshopProjectMeta[] = [];
+      for (const item of list) {
+        const meta = parseProjectMeta(item);
+        if (meta) projects.push(meta);
+      }
 
-  return {
-    ok: true,
-    fromCache: false,
-    data: {
-      total: readNum('total', projects.length),
-      page: readNum('page', normalizePage(query.page)),
-      pageSize: readNum('pageSize', normalizePageSize(query.pageSize)),
-      projects,
-      droppedCount: list.length - projects.length,
+      const readNum = (key: string, fallback: number): number => {
+        const value = isRecord(raw) ? raw[key] : undefined;
+        return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+      };
+
+      return {
+        ok: true,
+        fromCache: false,
+        data: {
+          total: readNum('total', projects.length),
+          page: readNum('page', normalizePage(query.page)),
+          pageSize: readNum('pageSize', normalizePageSize(query.pageSize)),
+          projects,
+          droppedCount: list.length - projects.length,
+        },
+      };
     },
-  };
+    opts.signal !== undefined,
+  );
 }
 
 /**
@@ -706,6 +737,11 @@ export async function downloadPayload(
  *
  * 若下载**失败**则整体失败（而不是偷偷降级到预览）: 用半份内容装出来的项目，
  * 之后每次「更新」都会与上游 diff 不上，比装不上更难查。
+ *
+ * ⚠️ `force` **只往详情那一侧传，不往载荷传**（见下方调用点）。载荷是版本内不可变的
+ * 内容，而它的缓存键是完整 `downloadUrl` —— 上游发新版必换 URL，天然就是新键、
+ * 天然 miss。所以强制重下**不可能**拿到更新的字节，只会在每次重装/更新时白白重传
+ * 一份最大 340 KB 的同样内容。
  */
 export async function fetchInstallInput(
   projectId: string,
@@ -721,7 +757,9 @@ export async function fetchInstallInput(
   let entriesSource: WorkshopBundle['entriesSource'];
 
   if (project.downloadUrl) {
-    const payload = await downloadPayload(project.downloadUrl, opts);
+    // ★ 只透传 signal，**不透传 force**: 新版本 = 新 downloadUrl = 新缓存键，
+    //   强制重下换不来任何更新的字节（理由详见本函数文档注释）
+    const payload = await downloadPayload(project.downloadUrl, { signal: opts.signal });
     if (!payload.ok) return payload;
     worldbookEntries = payload.data.worldbookEntries;
     entriesSource = 'download';

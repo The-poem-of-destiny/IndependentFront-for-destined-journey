@@ -12,6 +12,7 @@ import {
   WORKSHOP_API_BASE,
   WORKSHOP_DEFAULT_PAGE_SIZE,
   WORKSHOP_DETAIL_TTL_MS,
+  WORKSHOP_LIST_TTL_MS,
   WORKSHOP_PAYLOAD_TTL_MS,
   WORKSHOP_PAYLOAD_TIMEOUT_MS,
   WORKSHOP_REQUEST_TIMEOUT_MS,
@@ -245,15 +246,68 @@ describe('listProjects', () => {
     expect(calls[0]).toContain('search=');
   });
 
-  it('列表不缓存 —— 翻页/搜索必须每次真的发请求', async () => {
+  it('TTL 内的同一查询命中缓存 —— 翻回上一页/点掉标签不再发请求', async () => {
+    const { impl, calls } = routedFetch([
+      [`${WORKSHOP_API_BASE}/api/projects?`, () => jsonResponse({ projects: [], total: 0 })],
+    ]);
+    setWorkshopFetch(impl);
+
+    const first = await listProjects();
+    expect(first.ok && first.fromCache).toBe(false);
+
+    now += WORKSHOP_LIST_TTL_MS - 1;
+    const second = await listProjects();
+    expect(second.ok && second.fromCache).toBe(true);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('force 越过缓存 —— 工具条上的「刷新」按了就必须真的去拉', async () => {
     const { impl, calls } = routedFetch([
       [`${WORKSHOP_API_BASE}/api/projects?`, () => jsonResponse({ projects: [], total: 0 })],
     ]);
     setWorkshopFetch(impl);
 
     await listProjects();
-    await listProjects();
+    const forced = await listProjects({}, { force: true });
+    expect(forced.ok && forced.fromCache).toBe(false);
     expect(calls).toHaveLength(2);
+  });
+
+  it('TTL 过期后重新拉取（45 秒之外的「打开模态」是新鲜的一屏）', async () => {
+    const { impl, calls } = routedFetch([
+      [`${WORKSHOP_API_BASE}/api/projects?`, () => jsonResponse({ projects: [], total: 0 })],
+    ]);
+    setWorkshopFetch(impl);
+
+    await listProjects();
+    now += WORKSHOP_LIST_TTL_MS;
+    const again = await listProjects();
+    expect(again.ok && again.fromCache).toBe(false);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('★ 查询参数不同即不同的键 —— 第 2 页绝不会吃到第 1 页的缓存', async () => {
+    // 按 page 参数返回不同内容：串了缓存的话这里会当场露馅
+    const calls: string[] = [];
+    const byPage: WorkshopFetchLike = async (url) => {
+      calls.push(url);
+      const page = new URL(url).searchParams.get('page');
+      return jsonResponse({ projects: [], total: page === '1' ? 111 : 0 });
+    };
+    setWorkshopFetch(byPage);
+
+    const p0 = await listProjects({ page: 0 });
+    const p1 = await listProjects({ page: 1 });
+    const p0Again = await listProjects({ page: 0 });
+
+    expect(p0.ok && p0.data.total).toBe(0);
+    expect(p1.ok && p1.data.total).toBe(111);
+    // 换搜索词同理：又是一把新钥匙
+    const searched = await listProjects({ search: '维拉' });
+    expect(searched.ok && searched.fromCache).toBe(false);
+    // 回到第 0 页才是命中（同一把钥匙）
+    expect(p0Again.ok && p0Again.fromCache).toBe(true);
+    expect(calls).toHaveLength(3);
   });
 
   it('projects 缺失时退化为空列表而非报错', async () => {
@@ -529,6 +583,26 @@ describe('fetchInstallInput', () => {
     const again = await fetchInstallInput(PROJECT_ID);
     expect(again.ok && again.fromCache).toBe(true);
     expect(calls).toHaveLength(2); // 详情 1 + 载荷 1，第二轮全命中
+  });
+
+  it('★ force 只重拉详情，不重下载荷 —— 版本内不可变的字节重下也是同一份', async () => {
+    // 新版本 = 新 downloadUrl = 新缓存键，所以强制重下**不可能**换来更新的内容，
+    // 只会在每次「更新」时白白重传一份最大 340 KB 的同样载荷。
+    const { impl, calls } = happyFetch();
+    setWorkshopFetch(impl);
+    const detailUrl = buildProjectUrl(PROJECT_ID);
+    const countOf = (prefix: string): number => calls.filter((u) => u.startsWith(prefix)).length;
+
+    await fetchInstallInput(PROJECT_ID);
+    expect(countOf(detailUrl)).toBe(1);
+    expect(countOf(DOWNLOAD_URL)).toBe(1);
+
+    const forced = await fetchInstallInput(PROJECT_ID, { force: true });
+    expect(forced.ok).toBe(true);
+    // 详情确实重拉了（版本号/计数是随时会动的元数据）…
+    expect(countOf(detailUrl)).toBe(2);
+    // …载荷一次都没再下
+    expect(countOf(DOWNLOAD_URL)).toBe(1);
   });
 
   it('无 downloadUrl 时显式回退到详情预览，并记 note', async () => {

@@ -137,13 +137,23 @@ async function settlePrepared(prepared: WorkshopPrepared): Promise<void> {
   await commit(prepared);
 }
 
-/** 网络安装/更新。`force: true` 绕开 5 分钟详情缓存 —— 用户按更新就是想要最新的 */
+/**
+ * 网络安装/更新。
+ *
+ * ★ `force`（绕开 5 分钟详情缓存）**只在更新时给**，首装不给:
+ * - **更新**：用户按下「更新」就是冲着最新版本元数据来的，这时缓存该让路 —— 拿一份
+ *   五分钟前的版本号去装，会装出与按钮上写的版本对不上的东西。
+ * - **首装**：用户几秒前刚在详情模态里看过这个项目（详情缓存正热），他点头同意装的
+ *   就是**刚刚看到的那一份**。重拉一次既换不来他没看过的信息，还让「安装」比「浏览」
+ *   多等一个往返 —— 恰好是最没耐心的那一刻。
+ */
 async function installFromNetwork(projectId: string): Promise<void> {
   if (busyId.value) return;
-  beginBusy(projectId, workshop.getProject(projectId) ? 'update' : 'install');
+  const isUpdate = workshop.getProject(projectId) !== undefined;
+  beginBusy(projectId, isUpdate ? 'update' : 'install');
   let prepared: WorkshopPrepared | null = null;
   try {
-    const prep = await workshop.prepareInstall(projectId, { force: true });
+    const prep = await workshop.prepareInstall(projectId, { force: isUpdate });
     if (!prep.ok) {
       if (prep.error.kind !== 'cancelled') announce(describeFailure(prep.error), 'error');
       return;

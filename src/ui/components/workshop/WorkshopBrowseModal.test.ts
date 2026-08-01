@@ -74,6 +74,11 @@ function lastQuery(): Record<string, unknown> {
   return listMock.mock.calls[listMock.mock.calls.length - 1][0] as Record<string, unknown>;
 }
 
+/** 最后一次调用传给 client 的第二参数（signal + force） */
+function lastOpts(): Record<string, unknown> {
+  return listMock.mock.calls[listMock.mock.calls.length - 1][1] as Record<string, unknown>;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   setActivePinia(createPinia());
@@ -94,6 +99,48 @@ describe('WorkshopBrowseModal', () => {
     expect(document.body.textContent).toContain('维拉的旅途');
     expect(document.body.textContent).toContain('某位作者');
     expect(document.body.textContent).toContain('v1.2.0');
+    wrapper.unmount();
+  });
+
+  it('★ 只有「刷新」传 force —— 打开/翻页都乐意吃 45 秒列表缓存', async () => {
+    listMock.mockResolvedValue(page([meta()], { total: 100 }));
+    const wrapper = await open();
+    // 打开模态：关掉又立刻打开是常见动作，这一发本就该命中缓存
+    expect(lastOpts()).toMatchObject({ force: false });
+
+    const next = [...document.body.querySelectorAll('.wk-pager button')].find((b) =>
+      b.textContent?.includes('下一页'),
+    ) as HTMLButtonElement;
+    next.click();
+    await flushPromises();
+    // 翻页是另一把缓存钥匙，本来就拉的是新内容，不需要 force
+    expect(lastOpts()).toMatchObject({ force: false });
+
+    const refresh = [...document.body.querySelectorAll('.wk-toolbar button')].find((b) =>
+      b.textContent?.includes('刷新'),
+    ) as HTMLButtonElement;
+    refresh.click();
+    await flushPromises();
+    // 「刷新」是用户说「我要最新的」的唯一入口 —— 唯一一处 force
+    expect(lastOpts()).toMatchObject({ force: true });
+    wrapper.unmount();
+  });
+
+  it('失败态的「重试」不必 force —— 失败从不入缓存，重试天然是真请求', async () => {
+    listMock.mockResolvedValue({
+      ok: false,
+      error: { kind: 'network', message: 'Failed to fetch', url: 'u' },
+    });
+    const wrapper = await open();
+
+    listMock.mockResolvedValue(page([meta()]));
+    const retry = [...document.body.querySelectorAll('.wk-failure button')].find((b) =>
+      b.textContent?.includes('重试'),
+    ) as HTMLButtonElement;
+    retry.click();
+    await flushPromises();
+    expect(lastOpts()).toMatchObject({ force: false });
+    expect(document.body.querySelectorAll('.wk-card')).toHaveLength(1);
     wrapper.unmount();
   });
 
