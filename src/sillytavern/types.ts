@@ -1351,6 +1351,23 @@ export interface AgentContext {
     stats: Record<string, any>;
     vars: Record<string, any>;
     historyText: string;
+    /**
+     * pass 级 `{{LORE_BOOK}}` 渲染 memo（**由 resolver 自己填写**，其他人只读）。
+     *
+     * 为什么必须有：D7 明文支持把 `{{LORE_BOOK:section=static}}` 与 `:section=dynamic`
+     * 拆到模板两处 —— 同一 pass 里 resolver 就会被调用两次。EJS 条目**不保证幂等**
+     * （`setMessageVar("计数", 计数+1)` 这类写法在语料里合法），重复求值会让写翻倍落库。
+     * 故首次求值后把整份结果缓存在本 pass 上，后续出现只挑段、不再求值。
+     *
+     * `agentId` 是自校验：ejsPass 本就是 per-pass 新建（天然按 Agent 隔离），
+     * 万一将来有人复用同一个 ejsPass 跨 Agent，这个字段会让 memo 失效而不是串味。
+     */
+    loreRender?: {
+      agentId: string;
+      staticText: string;
+      dynamicText: string;
+      fallbackEntries: Array<{ uid: number; error: string }>;
+    };
   };
 }
 

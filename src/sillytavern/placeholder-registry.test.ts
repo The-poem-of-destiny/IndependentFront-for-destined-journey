@@ -1034,6 +1034,93 @@ describe('LORE_BOOK EJS 分层与求值', () => {
     const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctx, ejsConfig());
     expect(result).toContain('主角生命值：42');
   });
+
+  // 🔴 回归锚（P1-1）：D7 允许把两区拆到模板两处 → 同 pass 内 resolver 被调两次。
+  // EJS 条目不保证幂等，重复求值会让非幂等写翻倍落库。
+  describe('pass 级 memo — 同模板出现两次不重复求值', () => {
+    /** 造一本含「计数器式非幂等写」的书（静态条目 + 计数条目各一） */
+    function makeCounterBook(): WorldBook[] {
+      return [
+        {
+          id: 'wb_ejs',
+          name: 'EJS 测试书',
+          partition: 'world_setting',
+          entries: [
+            {
+              uid: 50,
+              name: '静态条目',
+              content: '白曜城是北方重镇。',
+              enabled: true,
+              key: [],
+              keysecondary: [],
+              selectiveLogic: 0,
+              order: 1,
+              position: 0,
+            },
+            {
+              uid: 51,
+              name: '计数条目',
+              content: '<% setMessageVar("计数", (getMessageVar("计数") ?? 0) + 1) %>次数已记',
+              enabled: true,
+              key: [],
+              keysecondary: [],
+              selectiveLogic: 0,
+              order: 2,
+              position: 0,
+            },
+          ],
+        },
+      ];
+    }
+
+    beforeEach(() => {
+      setPlaceholderGlobals(makeCounterBook(), [
+        mockConfig({ agentId: 'story', worldBookIds: ['wb_ejs'] }),
+      ]);
+    });
+
+    it('模板含 section=static + section=dynamic 各一次 → 计数器只加一次', () => {
+      const draft: Record<string, any> = {};
+      const ctx = mockCtx({ ejsPass: { stats: {}, vars: draft, historyText: '' } });
+      const out = resolveTemplate(
+        '前：{{LORE_BOOK:section=static}}\n后：{{LORE_BOOK:section=dynamic}}',
+        'story',
+        ctx,
+        ejsConfig(),
+      );
+      expect(draft.计数).toBe(1);
+      // 两区仍各自出现在正确位置（memo 只跳过求值，不改分层语义）
+      expect(out).toContain('白曜城是北方重镇。');
+      expect(out).toContain('次数已记');
+      expect(out.indexOf('白曜城')).toBeLessThan(out.indexOf('次数已记'));
+    });
+
+    it('不带 section 的重复出现同样只求值一次', () => {
+      const draft: Record<string, any> = {};
+      const ctx = mockCtx({ ejsPass: { stats: {}, vars: draft, historyText: '' } });
+      resolveTemplate('{{LORE_BOOK}}\n{{LORE_BOOK}}', 'story', ctx, ejsConfig());
+      expect(draft.计数).toBe(1);
+    });
+
+    it('不同 pass（各自新建 ejsPass）互不复用 memo —— 每 pass 各加一次', () => {
+      const draftA: Record<string, any> = {};
+      const draftB: Record<string, any> = {};
+      resolveTemplate(
+        '{{LORE_BOOK}}',
+        'story',
+        mockCtx({ ejsPass: { stats: {}, vars: draftA, historyText: '' } }),
+        ejsConfig(),
+      );
+      resolveTemplate(
+        '{{LORE_BOOK}}',
+        'story',
+        mockCtx({ ejsPass: { stats: {}, vars: draftB, historyText: '' } }),
+        ejsConfig(),
+      );
+      expect(draftA.计数).toBe(1);
+      expect(draftB.计数).toBe(1);
+    });
+  });
 });
 
 // ========== Chain Placeholders (localParams) ==========

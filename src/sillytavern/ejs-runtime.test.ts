@@ -625,6 +625,86 @@ describe('执行失败 → vars 整体回滚', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// 环安全 —— 回归锚（P1-3）
+// 条目 A 把草稿写成自引用后，条目 B 取回滚快照时旧实现会 RangeError 直接漏出，
+// 违反「executeEjsEntry 永不抛」的契约。
+// ═══════════════════════════════════════════════════════════
+
+describe('环安全（自引用草稿）', () => {
+  it('条目 A 写入自引用后，条目 B 照常执行、不抛', () => {
+    const ctx = makeCtx({ vars: {} });
+    const a = run('<% vars.自引 = vars %>A', ctx);
+    expect(a.ok).toBe(true);
+    expect(ctx.vars.自引).toBe(ctx.vars);
+
+    const b = run('<% setMessageVar("正常", 1) %>B', ctx);
+    expect(b).toEqual({ ok: true, rendered: 'B' });
+    expect(ctx.vars.正常).toBe(1);
+  });
+
+  it('草稿含环时条目失败 → 回滚不炸，半途写被丢弃', () => {
+    const ctx = makeCtx({ vars: { 原有: 1 } });
+    run('<% vars.自引 = vars %>', ctx);
+    const before = ctx.vars;
+
+    const r = run('<% setMessageVar("脏", 9) %><% throw new Error("x") %>', ctx);
+    expect(r.ok).toBe(false);
+    expect(ctx.vars).toBe(before); // 引用不变
+    expect(ctx.vars.脏).toBeUndefined(); // 半途写回滚
+    expect(ctx.vars.原有).toBe(1);
+    expect(ctx.vars.自引).toBeDefined(); // 环那一支仍在（内容回滚，不保自引用身份）
+  });
+
+  it('互指子树（间接环）也能安全快照', () => {
+    const ctx = makeCtx({ vars: {} });
+    const a = run(
+      '<% vars.甲 = { 名: "甲" }; vars.乙 = { 名: "乙", 指: vars.甲 }; vars.甲.指 = vars.乙 %>',
+      ctx,
+    );
+    expect(a.ok).toBe(true);
+    expect(run('<%= getMessageVar("甲.名") %>', ctx)).toEqual({ ok: true, rendered: '甲' });
+  });
+
+  it('含环的 stats 子树读不死循环', () => {
+    const 环: any = { 名: '环' };
+    环.自己 = 环;
+    const ctx = makeCtx({ stats: { 节点: 环 } });
+    expect(render('<%= getMessageVar("stat_data.节点").名 %>', ctx)).toBe('环');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// stats 只读隔离 —— 回归锚（P2-1）
+// 整树读（空路径 / 裸 variables.stat_data）此前把 stats 顶层子树以活引用暴露，
+// 模板深改会污染 pass 级共享 stats。
+// ═══════════════════════════════════════════════════════════
+
+describe('stats 只读隔离（整树读的深改不回流）', () => {
+  it('经 variables.stat_data 深改后，同 ctx 下一条目读 stats 原值不脏', () => {
+    const ctx = makeCtx({ stats: { 主角: { 生命值: 100 } } });
+    const a = run('<% variables.stat_data.主角.生命值 = 999 %>改完', ctx);
+    expect(a.ok).toBe(true);
+
+    expect(ctx.stats.主角.生命值).toBe(100); // 共享 stats 未被污染
+    expect(render('<%= stats.主角.生命值 %>', ctx)).toBe('100');
+    expect(render('<%= getMessageVar("stat_data.主角.生命值") %>', ctx)).toBe('100');
+  });
+
+  it('空路径整树读的深改同样不回流', () => {
+    const ctx = makeCtx({ stats: { 主角: { 生命值: 100 } } });
+    run('<% getMessageVar("stat_data").主角.生命值 = 1 %>', ctx);
+    expect(ctx.stats.主角.生命值).toBe(100);
+  });
+
+  it('vars 侧仍是活引用 —— 共写草稿，深改就是真实写（契约内行为）', () => {
+    const ctx = makeCtx({ vars: { 事件: { 阶段: 1 } } });
+    const r = run('<% variables.stat_data.事件.阶段 = 5 %>', ctx);
+    expect(r.ok).toBe(true);
+    expect(ctx.vars.事件.阶段).toBe(5);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
 // 沙盒
 // ═══════════════════════════════════════════════════════════
 
@@ -665,6 +745,19 @@ describe('沙盒注入面', () => {
     ]) {
       expect(render(`<%= typeof ${name} %>`)).toBe('undefined');
     }
+  });
+
+  // 🔴 回归锚（P1-2）：遮蔽名单必须与 script-executor.ts 的 SANDBOX_SHADOW_GLOBALS 同口径（设计 D3）。
+  // Function 是最直接的构造器逃逸写法，定时器/长连接则会让「条目跑完还在后台跑」。
+  it('与 script-executor 对齐的补充名单同样被遮蔽', () => {
+    for (const name of ['Function', 'setTimeout', 'setInterval', 'WebSocket', 'sessionStorage']) {
+      expect(render(`<%= typeof ${name} %>`)).toBe('undefined');
+    }
+  });
+
+  it('遮蔽 Function 不影响编译器自身（外层 new Function 照常工作）', () => {
+    // 形参遮蔽只作用于模板代码作用域；本条能渲染出来即证明编译链未受影响
+    expect(render('编译正常 <%= 1 + 1 %>')).toBe('编译正常 2');
   });
 
   it('严格模式：给未声明变量赋值抛错而非泄成全局', () => {

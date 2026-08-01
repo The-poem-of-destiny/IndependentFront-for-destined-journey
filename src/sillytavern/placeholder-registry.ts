@@ -127,6 +127,12 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
    * 宏链（parseSetvars → resolveGetvars → resolveRandoms）位置**不动**，仍在 EJS 之后，
    * 对**本次返回的那段文本**独立跑。⚠️ 用 `section=` 拆开时两区各自成一次宏作用域——
    * 静态区定义的 `{{setvar}}` 不再对动态区的 `{{getvar}}` 可见，这是拆分的固有代价。
+   *
+   * 🔴 **pass 级 memo（幂等保障）**：拆分写法让本 resolver 在同一 pass 被调多次，
+   * 而 EJS 条目不保证幂等（计数器式 `setMessageVar` 在语料里合法）——重复求值 = 写翻倍落库。
+   * 故首次求值把整份 `renderWorldBookEntries` 结果缓存到 `ctx.ejsPass.loreRender`，
+   * 后续出现（无论 section 参数）只从缓存挑段。不同 Agent 的 pass 各自新建 ejsPass，天然隔离。
+   * 无 ejsPass 的退化路径不缓存——一次性上下文没有二次出现问题（写即弃）。
    */
   LORE_BOOK: (ctx, config, params) => {
     if (_worldBooks.length === 0 || _configs.length === 0) return '';
@@ -138,16 +144,32 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     // 求值上下文取本次装配 pass 的草稿（buildAgentMessages 挂在 tplCtx.ejsPass 上）。
     // 极端路径（外部直接调 resolver / 老测试）无草稿 → 退化为一次性空草稿：求值照跑，写即弃。
     const ejsCtx = ctx.ejsPass ?? { stats: ctx.statData ?? {}, vars: {}, historyText: '' };
-    const { staticText, dynamicText, fallbackEntries } = renderWorldBookEntries(
-      activeEntries,
-      ejsCtx,
-    );
 
-    if (fallbackEntries.length > 0) {
-      console.warn(
-        `[LORE_BOOK] agent=${agentId} 有 ${fallbackEntries.length} 个条目 EJS 失败、已回退原文注入: ` +
-          fallbackEntries.map((f) => `${bookNameOfUid(f.uid)}#${f.uid}`).join(', '),
-      );
+    const memo = ctx.ejsPass?.loreRender;
+    let staticText: string;
+    let dynamicText: string;
+    if (memo && memo.agentId === agentId) {
+      // 本 pass 已求值过 —— 直接复用，绝不二次执行 EJS（回退告警也已在首次打过）
+      staticText = memo.staticText;
+      dynamicText = memo.dynamicText;
+    } else {
+      const rendered = renderWorldBookEntries(activeEntries, ejsCtx);
+      staticText = rendered.staticText;
+      dynamicText = rendered.dynamicText;
+      if (ctx.ejsPass) {
+        ctx.ejsPass.loreRender = {
+          agentId,
+          staticText,
+          dynamicText,
+          fallbackEntries: rendered.fallbackEntries,
+        };
+      }
+      if (rendered.fallbackEntries.length > 0) {
+        console.warn(
+          `[LORE_BOOK] agent=${agentId} 有 ${rendered.fallbackEntries.length} 个条目 EJS 失败、已回退原文注入: ` +
+            rendered.fallbackEntries.map((f) => `${bookNameOfUid(f.uid)}#${f.uid}`).join(', '),
+        );
+      }
     }
 
     const section = params?.section;

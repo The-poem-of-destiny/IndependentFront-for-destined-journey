@@ -233,6 +233,14 @@ const SHADOWED_GLOBALS = [
   'frames',
   'navigator',
   'location',
+  // 对齐 script-executor.ts 的同款名单（设计 D3 要求两处沙盒同口径）：
+  // `Function` 遮蔽掉最直接的构造器逃逸写法；定时器/长连接遮蔽掉「条目跑完还在后台跑」的手滑。
+  // ⚠️ 编译期用的是本模块外层作用域的 `new Function`，形参遮蔽只作用于模板代码作用域，编译不受影响。
+  'Function',
+  'setTimeout',
+  'setInterval',
+  'WebSocket',
+  'sessionStorage',
 ] as const;
 
 /** token 序列 → 单个函数体（整片编译的核心） */
@@ -328,30 +336,64 @@ function getByPath(root: any, parts: string[]): any {
 /**
  * 深拷贝（纯数据面）：数组/Date/纯对象递归，其余（函数、类实例）原样返回。
  * 用途有二：stats 侧子树读的隔离拷贝；执行失败回滚的 vars 快照。
+ *
+ * **环安全**：`vars` 是 AI 与 EJS 共写的草稿，条目完全可能写出 `vars.a = vars` 这类自引用
+ * （旧实现会在下一条目取快照时栈溢出，异常越过 `executeEjsEntry` 漏给调用方）。
+ * 这里用 `seen` 表记已克隆节点，**环按引用保留** —— 克隆图里对应位置仍然成环
+ * （语义对齐 `structuredClone`），不断开、不抛错。
  */
-function deepClone<T>(value: T): T {
+function deepClone<T>(value: T, seen?: WeakMap<object, any>): T {
   if (value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.map((v) => deepClone(v)) as unknown as T;
+  const node = value as unknown as object;
+  const map = seen ?? new WeakMap<object, any>();
+  if (map.has(node)) return map.get(node) as T;
+
+  if (Array.isArray(value)) {
+    const arr: any[] = [];
+    map.set(node, arr);
+    for (const v of value) arr.push(deepClone(v, map));
+    return arr as unknown as T;
+  }
   if (value instanceof Date) return new Date(value.getTime()) as unknown as T;
   const proto = Object.getPrototypeOf(value);
   if (proto !== Object.prototype && proto !== null) return value;
+
   const out: Record<string, any> = {};
+  map.set(node, out);
   for (const k of Object.keys(value as Record<string, any>)) {
     if (DANGEROUS_PATH_SEGMENTS.has(k)) continue;
-    out[k] = deepClone((value as Record<string, any>)[k]);
+    out[k] = deepClone((value as Record<string, any>)[k], map);
   }
   return out as unknown as T;
 }
 
 /**
+ * 整树读（空路径 / 裸 `variables.stat_data`）的合并面。
+ *
+ * - `vars` 侧保**活引用** —— 那是共写草稿，模板深改它就是契约内的写。
+ * - `stats` 侧顶层值**深克隆** —— 只读契约：模板做 `variables.stat_data.主角.生命值 = 999`
+ *   这类深改时，绝不能污染 pass 级共享的 stats（同 pass 后续条目必须读到原值）。
+ * - stats 顶层键胜出（同名时只读面优先）。
+ */
+function mergeVarsWithClonedStats(ctx: EjsEvalContext): Record<string, any> {
+  const out: Record<string, any> = { ...ctx.vars };
+  const stats = ctx.stats ?? {};
+  for (const k of Object.keys(stats)) {
+    if (DANGEROUS_PATH_SEGMENTS.has(k)) continue;
+    out[k] = deepClone(stats[k]);
+  }
+  return out;
+}
+
+/**
  * 统一读链（设计 D5 三种读形）：
- * 1. 空路径 → 浅合并 `{ ...vars, ...stats }`（stats 顶层键胜出）
+ * 1. 空路径 → 合并 `vars`(活引用) + `stats`(顶层深克隆，见 `mergeVarsWithClonedStats`)
  * 2. stats 上取到非 undefined → **stats 命中**，返回深克隆（只读隔离）
  * 3. 否则落 vars → 返回**活引用**（对其属性赋值就是真实草稿写）
  * 4. 都没有 → `opts.defaults`
  */
 function readPath(ctx: EjsEvalContext, parts: string[], defaults?: any): any {
-  if (parts.length === 0) return { ...ctx.vars, ...ctx.stats };
+  if (parts.length === 0) return mergeVarsWithClonedStats(ctx);
 
   const fromStats = getByPath(ctx.stats, parts);
   if (fromStats !== undefined) return deepClone(fromStats);
@@ -414,7 +456,8 @@ function buildSandboxArgs(ctx: EjsEvalContext): any[] {
   };
 
   // 裸全局 `variables`：语料形态是 `_.get(variables, 'stat_data.关系列表', {})`
-  const variables = { stat_data: { ...ctx.vars, ...ctx.stats } };
+  // stats 侧顶层深克隆（只读契约），vars 侧活引用（共写草稿）——见 mergeVarsWithClonedStats
+  const variables = { stat_data: mergeVarsWithClonedStats(ctx) };
 
   const matchChatMessages = (pattern: unknown): boolean => {
     const text = ctx.historyText ?? '';
@@ -450,10 +493,24 @@ function buildSandboxArgs(ctx: EjsEvalContext): any[] {
   ];
 }
 
-/** 就地恢复 vars（保持对象引用不变——调用方持有的是同一引用） */
+/**
+ * 就地恢复 vars（保持对象引用不变——调用方持有的是同一引用）。
+ * 只动顶层键，不递归 —— 快照本身可能含环（见 `deepClone`），这里天然环安全。
+ * 注意：草稿原本自引用（`vars.a === vars`）时，恢复后 `vars.a` 指向的是快照那份克隆，
+ * 不再回指 `vars` 本身。回滚保的是**内容**，不保自引用的身份。
+ */
 function restoreInPlace(target: Record<string, any>, snapshot: Record<string, any>): void {
   for (const k of Object.keys(target)) delete target[k];
   Object.assign(target, snapshot);
+}
+
+/** 把任意抛出物压成可读字符串——`String(err)` 自身也可能抛（throwing toString），故再包一层 */
+function describeError(err: unknown): string {
+  try {
+    return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  } catch {
+    return 'UnknownError: 抛出物无法字符串化';
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -470,14 +527,26 @@ function restoreInPlace(target: Record<string, any>, snapshot: Record<string, an
  * @param ctx 求值上下文（`ctx.vars` 会被就地修改）
  */
 export function executeEjsEntry(compiled: CompiledEjsEntry, ctx: EjsEvalContext): EjsExecuteResult {
-  const snapshot = deepClone(ctx.vars);
+  // ⚠️ P2 性能项（已知取舍，刻意不优化）：快照成本 O(条目数 × 草稿树体积)——每个动态条目
+  // 都全量深克隆一次 vars。真机实测（大草稿 × 数十动态条目）之前不引入写缓冲/首写才克隆，
+  // 那会把「条目按序写→读立即可见」的简单语义换成代理层复杂度。等实测数据再谈。
+  let snapshot: Record<string, any> | undefined;
   try {
+    // 🔴 快照必须在 try 内：上一条目可能已把草稿写成自引用结构或带抛错 getter，
+    // 克隆本身就可能抛；漏出去就违反「executeEjsEntry 永不抛」的契约（环已由 deepClone 兜住，
+    // 这层 try 兜的是剩余未知抛点）。
+    snapshot = deepClone(ctx.vars);
     const args = buildSandboxArgs(ctx);
     const rendered = compiled.fn(...args, ...SHADOWED_GLOBALS.map(() => undefined));
     return { ok: true, rendered: typeof rendered === 'string' ? rendered : String(rendered ?? '') };
   } catch (err) {
-    restoreInPlace(ctx.vars, snapshot);
-    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-    return { ok: false, error: msg };
+    if (snapshot !== undefined) {
+      try {
+        restoreInPlace(ctx.vars, snapshot);
+      } catch {
+        // 回滚自身也失败（冻结/不可配置属性等）→ 草稿状态不可信，但仍不外抛
+      }
+    }
+    return { ok: false, error: describeError(err) };
   }
 }

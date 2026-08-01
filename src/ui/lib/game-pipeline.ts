@@ -458,8 +458,11 @@ export class GamePipeline {
         // localStorage 可能有用户编辑过的版本，作为 fallback。
         systemPrompt: systemPrompt || (s.agentPrompts as Record<string, string>)[agentId],
         template: template || (s.agentTemplates as Record<string, string>)[agentId],
-        // 工坊 P2: 只有持权 Agent 的装配 pass 产出 EJS vars 提交候选
-        ejsVarsCommit: defaults.ejsVarsCommit === true,
+        // 工坊 P2 (ADR-30 D5): 只有持权 Agent 的装配 pass 产出 EJS vars 提交候选。
+        // 代码级兜底：agent-config.json 没加载上（fetch 失败/离线）或该 agent 未声明本字段时，
+        // story 默认持权 —— 与设计「默认仅 story 持权」一致。否则一次网络抖动就让整条
+        // EJS→vars 提交链静默哑火（EJS 照跑、写照丢，无任何征兆）。显式 false 仍然生效。
+        ejsVarsCommit: defaults.ejsVarsCommit ?? isStory,
         toolsEnabled: ['craft_gen', 'char_gen', 'item_gen'].includes(agentId),
         maxToolCallRounds: 10,
         // 🆕 流式 + abort 信号
@@ -589,13 +592,24 @@ export class GamePipeline {
             presetId: e.presetId || undefined,
             systemPrompt: e.systemPrompt || undefined,
             template: e.template || undefined,
-            // 工坊 P2 (ADR-30 D5): EJS vars 提交权（出厂仅 story 置 true）
-            ejsVarsCommit: e.ejsVarsCommit === true,
+            // 工坊 P2 (ADR-30 D5): EJS vars 提交权（出厂仅 story 置 true）。
+            // 字段缺席时保留 undefined（不塌成 false）——由 buildAgentConfigs 走代码级兜底。
+            ejsVarsCommit: typeof e.ejsVarsCommit === 'boolean' ? e.ejsVarsCommit : undefined,
           };
         }
+      } else {
+        console.warn(
+          `[GamePipeline] agent-config.json 请求失败 (HTTP ${res.status})，Agent 默认配置回落（EJS vars 提交权走代码兜底）`,
+        );
       }
-    } catch {
-      // 静默跳过
+    } catch (err) {
+      // 不再静默：这份配置是 systemPrompt / template / ejsVarsCommit 的唯一来源，
+      // 加载失败会让各 Agent 回落到 localStorage 版本、并让 EJS vars 提交权走代码级兜底
+      // （见 buildAgentConfigs 的 `defaults.ejsVarsCommit ?? isStory`）。必须留痕。
+      console.warn(
+        '[GamePipeline] agent-config.json 加载失败，Agent 默认配置回落（EJS vars 提交权走代码兜底）:',
+        err,
+      );
     }
 
     return { presets, agentDefaults };
