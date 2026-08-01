@@ -9,6 +9,27 @@ import AppModal from '../shared/AppModal.vue';
 const game = useGameStore();
 const ui = useUIStore();
 
+/**
+ * 🔒 创意工坊入口临时下线（2026-08-01 安全审计 SEC-01 / SEC-02，
+ * 见 `docs/reviews/2026-08-01-repository-review.md`）
+ *
+ * 为什么：工坊内容目前是**以应用同源权限执行的代码**，不是纯数据 ——
+ *   · SEC-01 工坊正则的 replaceString 原样进美化管线，最终经 ChatFlow 的 `v-html` 落 DOM，
+ *     `<img src=x onerror=…>` 这类事件属性会真的执行（转义原始模型正文挡不住替换串）；
+ *   · SEC-02 世界书 EJS 走 `new Function`，`Object.constructor("return globalThis")()`
+ *     可拿回真全局；且同步跑在主线程，死循环能直接冻住 UI。
+ * 一旦命中，localStorage 里的 API Key、IndexedDB 存档、本地 BFF 都在射程内。
+ *
+ * 所以这里只**隐藏入口**（唯一通往 workshop 视图的按钮），不删任何工坊代码：
+ * 已安装项目的启用面板、store、client 全部原样保留，沙箱/消毒方案落地后
+ * 把这个常量改回 `true` 即可恢复。
+ *
+ * ⚠️ 这不是安全边界，只是暴露面收敛：已经装好并启用的项目仍会照常执行，
+ * 游戏页侧栏的「工坊」按钮（每存档启用面板）也仍在。真正的修复是
+ * 审计报告 Gate 0 / Gate 2 那两组。
+ */
+const WORKSHOP_ENTRY_ENABLED = false;
+
 // === 读取存档 ===
 const showSaveModal = ref(false);
 const showCreditsModal = ref(false);
@@ -242,7 +263,9 @@ function formatTime(ts: number) {
         >
           <i class="btn-icon fa-solid fa-folder-open" aria-hidden="true"></i>读 取 存 档
         </AppButton>
+        <!-- 🔒 临时下线：见 script 里的 WORKSHOP_ENTRY_ENABLED -->
         <AppButton
+          v-if="WORKSHOP_ENTRY_ENABLED"
           variant="secondary"
           size="lg"
           block
