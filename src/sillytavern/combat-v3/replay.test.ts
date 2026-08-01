@@ -101,9 +101,7 @@ describe('replayCombat — 合法路径', () => {
 
   it('改 fixture 核心字段 → hash 变（hash 敏感性）', () => {
     const r1 = replayCombat(case24);
-    const cloned: CombatFixture = JSON.parse(
-      JSON.stringify(case24),
-    ) as CombatFixture;
+    const cloned: CombatFixture = JSON.parse(JSON.stringify(case24)) as CombatFixture;
     cloned.id = 'changed-id';
     const r2 = replayCombat(cloned);
     expect(r1.hash).not.toBe(r2.hash);
@@ -111,9 +109,7 @@ describe('replayCombat — 合法路径', () => {
 
   it('忽略元数据字段：_synthetic/_provenance 不影响 hash', () => {
     const r1 = replayCombat(case24);
-    const cloned: CombatFixture = JSON.parse(
-      JSON.stringify(case24),
-    ) as CombatFixture;
+    const cloned: CombatFixture = JSON.parse(JSON.stringify(case24)) as CombatFixture;
     // 加一个无关顶层元数据字段
     (cloned as unknown as { _comment: string })._comment = 'changed comment';
     const r2 = replayCombat(cloned);
@@ -191,25 +187,19 @@ describe('validateFixture — 非法输入', () => {
 
   it('dice 含越界值（0）抛错', () => {
     const f = makeMinimalFixture();
-    (f.epochs[0] as unknown as { dice: number[] }).dice = Array(59)
-      .fill(10)
-      .concat([0]);
+    (f.epochs[0] as unknown as { dice: number[] }).dice = Array(59).fill(10).concat([0]);
     expect(() => validateFixture(f)).toThrow(/1\.\.20/);
   });
 
   it('dice 含越界值（21）抛错', () => {
     const f = makeMinimalFixture();
-    (f.epochs[0] as unknown as { dice: number[] }).dice = Array(59)
-      .fill(10)
-      .concat([21]);
+    (f.epochs[0] as unknown as { dice: number[] }).dice = Array(59).fill(10).concat([21]);
     expect(() => validateFixture(f)).toThrow(/1\.\.20/);
   });
 
   it('channelSplit 非默认预算抛错', () => {
     const f = makeMinimalFixture();
-    (
-      f.epochs[0] as unknown as { channelSplit: Record<DiceChannel, number> }
-    ).channelSplit = {
+    (f.epochs[0] as unknown as { channelSplit: Record<DiceChannel, number> }).channelSplit = {
       attackHit: 31,
       initiative: 11,
       intentCheck: 7,

@@ -32,14 +32,11 @@ import { describe, expect, it } from 'vitest';
  * glob 模式 '@engine/combat-v3/(双星号斜杠).ts' 走 tsconfig 已注册的 @engine 别名，
  * 真解析不到时是导入期硬报错，不会静默退化。
  */
-const SOURCES: Record<string, string> = import.meta.glob(
-  '@engine/combat-v3/**/*.ts',
-  {
-    eager: true,
-    query: '?raw',
-    import: 'default',
-  },
-) as Record<string, string>;
+const SOURCES: Record<string, string> = import.meta.glob('@engine/combat-v3/**/*.ts', {
+  eager: true,
+  query: '?raw',
+  import: 'default',
+}) as Record<string, string>;
 
 /**
  * 过滤出非测试源文件（排除 *.test.ts）。

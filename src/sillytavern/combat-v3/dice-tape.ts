@@ -36,8 +36,7 @@ import {
  *         （架构 §四 4.4：dispatch 冻结 frame + 返回 BeginOutput，由 coordinator 注骰）
  */
 export type DrawResult =
-  | { rolls: number[]; tape: DiceTapeState }
-  | { exhausted: true; channel: DiceChannel };
+  { rolls: number[]; tape: DiceTapeState } | { exhausted: true; channel: DiceChannel };
 
 // ──────────────────────────────────────────────────────────────────────────────
 // createTape
@@ -98,15 +97,9 @@ export function createTape(epoch: DiceEpoch): DiceTapeState {
  * n 必须 ≥ 0（负数抛错）。n = 0 是合法的空取（返回空数组，cursor 不动）。
  * 部分越界（cursor + n 超出但 n 大于剩余骰数）同样视为耗尽——不做部分推进。
  */
-export function draw(
-  tape: DiceTapeState,
-  channel: DiceChannel,
-  n: number,
-): DrawResult {
+export function draw(tape: DiceTapeState, channel: DiceChannel, n: number): DrawResult {
   if (!Number.isInteger(n) || n < 0) {
-    throw new Error(
-      `[combat-v3/dice-tape] draw: n 必须是非负整数，实际 ${n}`,
-    );
+    throw new Error(`[combat-v3/dice-tape] draw: n 必须是非负整数，实际 ${n}`);
   }
 
   const current = tape.current;
@@ -167,10 +160,7 @@ export function draw(
  * 入参 epoch 同样走 createTape 内部的通道长度校验（复用 normalize 逻辑），
  * 保证新 epoch 的 channels 长度合法。
  */
-export function beginEpoch(
-  tape: DiceTapeState,
-  epoch: DiceEpoch,
-): DiceTapeState {
+export function beginEpoch(tape: DiceTapeState, epoch: DiceEpoch): DiceTapeState {
   // 校验新 epoch 通道长度（与 createTape 同款校验）
   for (const channel of CHANNEL_ORDER) {
     const expected = DEFAULT_CHANNEL_SPLIT[channel];
@@ -213,9 +203,7 @@ export function beginEpoch(
  */
 export function splitSixty(dice: number[]): Record<DiceChannel, number[]> {
   if (dice.length !== 60) {
-    throw new Error(
-      `[combat-v3/dice-tape] splitSixty: 输入长度必须为 60，实际 ${dice.length}`,
-    );
+    throw new Error(`[combat-v3/dice-tape] splitSixty: 输入长度必须为 60，实际 ${dice.length}`);
   }
 
   const result = {} as Record<DiceChannel, number[]>;
@@ -228,9 +216,7 @@ export function splitSixty(dice: number[]): Record<DiceChannel, number[]> {
 
   // 防御性断言：切完应该正好用完 60 颗
   if (offset !== 60) {
-    throw new Error(
-      `[combat-v3/dice-tape] splitSixty: 内部错误，切分总长度 ${offset} ≠ 60`,
-    );
+    throw new Error(`[combat-v3/dice-tape] splitSixty: 内部错误，切分总长度 ${offset} ≠ 60`);
   }
 
   return result;

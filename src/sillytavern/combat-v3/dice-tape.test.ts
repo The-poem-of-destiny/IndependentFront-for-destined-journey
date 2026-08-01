@@ -26,10 +26,7 @@ import { beginEpoch, createTape, draw, splitSixty } from './dice-tape';
 // ──────────────────────────────────────────────────────────────────────────────
 
 /** 构造一个全 10 的合法 epoch（各通道长度等于 DEFAULT_CHANNEL_SPLIT） */
-function makeEpoch(
-  outputId = 'out-1',
-  diceValue = 10,
-): DiceEpoch {
+function makeEpoch(outputId = 'out-1', diceValue = 10): DiceEpoch {
   const channels: Record<DiceChannel, number[]> = {
     attackHit: Array(DEFAULT_CHANNEL_SPLIT.attackHit).fill(diceValue),
     initiative: Array(DEFAULT_CHANNEL_SPLIT.initiative).fill(diceValue),
@@ -341,9 +338,7 @@ describe('draw - 多次跨通道互不干扰', () => {
     expect('rolls' in result).toBe(true);
     if ('rolls' in result) {
       expect(result.rolls.length).toBe(DEFAULT_CHANNEL_SPLIT.attackHit);
-      expect(result.tape.current.cursors.attackHit).toBe(
-        DEFAULT_CHANNEL_SPLIT.attackHit,
-      );
+      expect(result.tape.current.cursors.attackHit).toBe(DEFAULT_CHANNEL_SPLIT.attackHit);
     }
   });
 });
@@ -392,9 +387,7 @@ describe('beginEpoch - 续杯归档', () => {
     const newTape = beginEpoch(beforeTape, makeEpoch('out-2'));
 
     // 新 tape 的 attackHit 通道是全新的 32 颗，不是旧 epoch 剩下的 22 颗
-    expect(newTape.current.channels.attackHit.length).toBe(
-      DEFAULT_CHANNEL_SPLIT.attackHit,
-    );
+    expect(newTape.current.channels.attackHit.length).toBe(DEFAULT_CHANNEL_SPLIT.attackHit);
     expect(newTape.current.cursors.attackHit).toBe(0);
 
     // 可以在新 epoch 里正常取 32 颗

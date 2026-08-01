@@ -27,11 +27,7 @@
  * 枚举顺序与通道预算表（架构 §四 4.3）一一对应。
  */
 export type DiceChannel =
-  | 'initiative'
-  | 'attackHit'
-  | 'statusContest'
-  | 'procCheck'
-  | 'intentCheck';
+  'initiative' | 'attackHit' | 'statusContest' | 'procCheck' | 'intentCheck';
 
 /**
  * 60 颗 d20 的默认分通道预算（架构 §四 4.3，决策 D6）。

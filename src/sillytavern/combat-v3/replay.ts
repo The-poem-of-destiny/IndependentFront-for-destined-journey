@@ -62,7 +62,10 @@ export interface ReplayResult {
  * reducer 负责消费 tape 的骰子并产出 DomainEvent[] + 最终 tape。
  */
 export interface ReplayReducer {
-  (fixture: CombatFixture, tape: DiceTapeState): {
+  (
+    fixture: CombatFixture,
+    tape: DiceTapeState,
+  ): {
     events: readonly unknown[];
     tape: DiceTapeState;
   };
@@ -78,10 +81,7 @@ export interface ReplayReducer {
  * M0：reducer 未就位，events 恒为 []，commands 不驱动；只验证 fixture 合法 +
  * 骰带可建 + 计算 hash + 回显 milestones。M1 起传 reducer 即可驱动完整流程。
  */
-export function replayCombat(
-  fixture: CombatFixture,
-  _reducer?: ReplayReducer,
-): ReplayResult {
+export function replayCombat(fixture: CombatFixture, _reducer?: ReplayReducer): ReplayResult {
   validateFixture(fixture);
 
   const tape = buildTape(fixture.epochs);
@@ -151,10 +151,7 @@ export function validateFixture(fixture: CombatFixture): void {
   if (!Array.isArray(fixture.commands)) {
     throw new FixtureValidationError('fixture.commands 必须是数组');
   }
-  if (
-    !fixture.expected ||
-    !Array.isArray(fixture.expected.milestones)
-  ) {
+  if (!fixture.expected || !Array.isArray(fixture.expected.milestones)) {
     throw new FixtureValidationError('fixture.expected.milestones 必须是数组');
   }
 
@@ -166,28 +163,18 @@ export function validateFixture(fixture: CombatFixture): void {
   for (let i = 0; i < fixture.commands.length; i++) {
     const cmd = fixture.commands[i];
     if (!cmd || typeof cmd.commandId !== 'string' || cmd.commandId.length === 0) {
-      throw new FixtureValidationError(
-        `commands[${i}].commandId 必须是非空字符串`,
-      );
+      throw new FixtureValidationError(`commands[${i}].commandId 必须是非空字符串`);
     }
     if (seenCommandIds.has(cmd.commandId)) {
-      throw new FixtureValidationError(
-        `commands[${i}].commandId 重复：「${cmd.commandId}」`,
-      );
+      throw new FixtureValidationError(`commands[${i}].commandId 重复：「${cmd.commandId}」`);
     }
     seenCommandIds.add(cmd.commandId);
   }
 
   for (let i = 0; i < fixture.expected.milestones.length; i++) {
     const m = fixture.expected.milestones[i];
-    if (
-      !m ||
-      typeof m.kind !== 'string' ||
-      !VALID_MILESTONE_KINDS.has(m.kind as MilestoneKind)
-    ) {
-      throw new FixtureValidationError(
-        `expected.milestones[${i}].kind 非法：「${m?.kind}」`,
-      );
+    if (!m || typeof m.kind !== 'string' || !VALID_MILESTONE_KINDS.has(m.kind as MilestoneKind)) {
+      throw new FixtureValidationError(`expected.milestones[${i}].kind 非法：「${m?.kind}」`);
     }
   }
 }
@@ -229,9 +216,7 @@ function validateEpoch(ep: CombatFixture['epochs'][number], index: number): void
  * 验证骰带可建（A0-8 前置）——如果 splitSixty/createTape 抛错，说明 fixture
  * 的 dice 或 channelSplit 有问题。
  */
-function buildTape(
-  epochs: readonly CombatFixture['epochs'][number][],
-): DiceTapeState {
+function buildTape(epochs: readonly CombatFixture['epochs'][number][]): DiceTapeState {
   let tape: DiceTapeState | null = null;
   for (const ep of epochs) {
     const channels = splitSixty([...ep.dice]);
@@ -274,7 +259,7 @@ function hashFixture(fixture: CombatFixture): string {
   const canonical = canonicalStringify({
     id: fixture.id,
     bundle: fixture.bundle,
-    epochs: fixture.epochs.map(ep => ({
+    epochs: fixture.epochs.map((ep) => ({
       outputId: ep.outputId,
       dice: [...ep.dice],
       channelSplit: ep.channelSplit,
@@ -302,11 +287,7 @@ function canonicalStringify(value: unknown): string {
   const obj = value as Record<string, unknown>;
   const keys = Object.keys(obj).sort();
   return (
-    '{' +
-    keys
-      .map(k => JSON.stringify(k) + ':' + canonicalStringify(obj[k]))
-      .join(',') +
-    '}'
+    '{' + keys.map((k) => JSON.stringify(k) + ':' + canonicalStringify(obj[k])).join(',') + '}'
   );
 }
 
