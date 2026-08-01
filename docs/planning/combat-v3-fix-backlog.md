@@ -30,11 +30,11 @@
 - **落点**：craft_check/craft_settle 从角色已装备物品收集「生产检定」modifier → 填 bonus；modifier 的 checkType 补 `'生产'`。
 - **状态**：✅ 已完成（S2，2026-08-01）。**含 S2c**：toolBonus 只进检定加值（fixedBonus 分子），不再同时减免 DC（finalDC 分母）——对齐世界书《生产制作协议》「检定加值」与「DC 减免」两条独立声明。**防泄漏**：checkType='生产' 不编译进战斗（compile.ts 返回 null，否则 slotMap 落到 hitBonus 误成命中）。
 
-### ⚠️ `<automaton>` JSON 块无人消费（问题 1，计划中）
+### ✅ `<automaton>` JSON 块无人消费（问题 1，已修 2026-08-01）
 
 - **问题**：M3.5 加的 item_gen prompt 里 `<automaton>` 段只有注释引导、无具体模板，且 `parseEquipmentXML`/`parseSkillsXML` 都没解析——AI 输出了也不进战斗。
 - **落点**：parseEquipmentXML 解析 automaton 块 + `ItemGenOutput`/`InventoryItem` 加 `automata` 字段 + `characterToCombatParticipant`/`createCombatState` 编译 automata（复用 modifiers 编译路径）。
-- **状态**：📝 计划中（实施计划 §4）。
+- **状态**：✅ 已完成（S3，2026-08-01）。解析（XML+JSON 兜底）/ 类型（ItemGenOutput/InventoryItem/Skill/CombatParticipant）/ 落库（assemble/applyAddItem/buildCraftPatches）/ 编译（characterToCombatParticipant 收集装备+被动技能 automata，createCombatState 编译进 activeEffects）全链路打通。
 
 ### ⚠️ item_gen prompt 缺 automaton 具体模板（问题 2，计划中）
 

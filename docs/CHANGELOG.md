@@ -9,6 +9,23 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 词条效果贯穿链路修复 S3 — `<automaton>` DSL 自由效果进 v3 战斗 ｜ ✅ 完成（2026-08-01）
+
+实施计划: `docs/planning/2026-08-01-item-gen-combat-link-plan.md` §3；待办追踪: `docs/planning/combat-v3-fix-backlog.md`。S1/S2 打通 modifiers 链路后，S3 让 AI 产的自由效果 DSL automaton（`<automaton>` JSON）走通「解析 → 落库 → 编译 → 战斗生效」全链路（问题 1）。
+
+**解析**：
+
+- `char-gen-agent.ts` 新增 `parseAutomataXML`（复用 parseModifiersXML 容错模式：自闭合视为空 / 跳过注释 / 单行 parse 失败 warn 跳过 / 缺 subscribe+intents 判别跳过）
+- 接入 `parseSkillsXML`/`parseEquipmentXML`/`parseInventoryXML` + JSON 兜底 `parseItemGenJSONLoose`；描述预剥离 automaton 块防污染
+
+**类型**：`ItemGenOutput`（skills/equipment/inventory 三组元素）+ `InventoryItem` + `Skill` + `CombatParticipant` 加 `automata?: EffectAutomaton[]`（type-only import combat-v3/types）
+
+**落库**：`assembleCharacterState`（三处透传）+ `applyAddItem`（补收 automata）+ `buildCraftPatches`（equipment/inventory 透传）
+
+**编译**：`characterToCombatParticipant` 收集已装备物品 automata + **被动技能** automata（主动技能不走被动效果）→ `CombatParticipant.automata`；`createCombatState` `compileEffectProgram({...automata})` 编译进 activeEffects。DSL 编译期 9 条校验（A3-3）自动兜底不合规 automaton（subscribe 越界等剔除）。
+
+**验收**: S3-1 ~ S3-4 全绿（解析 4 用例 + 编译 2 用例 + 落库 2 用例 + participant 收集 4 用例）。全量 **5121 测试 / 175 文件全绿**（+12）；typecheck 0；prettier 干净。
+
 ### 词条效果贯穿链路修复 S1+S2 — 物品/技能介入制造 + 落库链路 ｜ ✅ 完成（2026-08-01）
 
 实施计划: `docs/planning/2026-08-01-item-gen-combat-link-plan.md`；待办追踪: `docs/planning/combat-v3-fix-backlog.md`。M5 退役 v2 后排查发现，item_gen 生成的装备词条（modifiers）在 v3 战斗/制造里没生效。本批修正向链路（落库丢 modifiers）+ 反向链路（物品/技能介入制造）。

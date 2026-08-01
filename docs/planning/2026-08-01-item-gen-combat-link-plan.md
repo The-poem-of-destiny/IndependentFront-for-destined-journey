@@ -1,7 +1,7 @@
 # 词条效果贯穿链路实施计划（item_gen / craft / 战斗）
 
 > 📅 **日期**：2026-08-01
-> 📌 **状态**：**S1+S2 已完成**（2026-08-01，5109 tests 全绿）。S3/S4 单列后续。
+> 📌 **状态**：**S1+S2+S3 已完成**（2026-08-01，5121 tests 全绿）。S4 单列后续。
 > 🔗 **关联**：`docs/planning/combat-v3-fix-backlog.md`（待办追踪）· `docs/reference/combat-system-architecture-v3.md`（v3 架构）· 世界书《品质效果限定》《生产制作协议》《核心数值表》《技能装备道具生成规则》
 >
 > **背景**：M5 退役 v2 后排查发现，item_gen 生成的装备词条（modifiers）在 v3 战斗/制造里没生效。本计划分 4 阶段把「AI 生成 → 解析 → 落库 → 战斗/制造消费」全链路打通。
@@ -54,7 +54,7 @@ craft_resolver → 产物 effects: []（未接）
 
 ---
 
-## 3. S1 + S2：制造链路修复
+## 3. S1 + S2 + S3：制造 + 词条效果链路修复
 
 > ✅ **已完成 2026-08-01**（5109 tests 全绿）。下方为实施细节留档；实作要点有 3 处与原始计划不同：
 >
@@ -131,10 +131,21 @@ function collectCraftBonuses(char: CharacterState): {
 - `agent-tools.test.ts`：craft_check 工具传 toolBonus 生效
 - 集成：装备「锻造 +5」→ craft_check 的总值含 +5
 
-### S3 + S4（后续，单列）
+### S3: automaton 解析 + 落库 + 编译（问题 1）— ✅ 已完成 2026-08-01
 
-- S3: automaton 解析/落库/编译（parseEquipmentXML 解析 automaton + ItemGenOutput/InventoryItem 加 automata + characterToCombatParticipant/createCombatState 编译 automata）
-- S4: item_gen prompt 加 automaton 模板 + craft_gen `<affix>` 词条意图 + item_gen 落地说明
+> **解析**：`char-gen-agent.ts` 新增 `parseAutomataXML`（复用 parseModifiersXML 容错模式：自闭合视为空 / 跳过注释 / 单行 JSON parse 失败 warn 跳过 / 缺 subscribe+intents 判别跳过）；接入 `parseSkillsXML`/`parseEquipmentXML`/`parseInventoryXML` + JSON 兜底 `parseItemGenJSONLoose`；描述预剥离 automaton 块防污染。
+>
+> **类型**：`ItemGenOutput`（skills/equipment/inventory 三组元素）+ `InventoryItem` + `Skill` + `CombatParticipant` 加 `automata?: EffectAutomaton[]`。
+>
+> **落库**：`assembleCharacterState`（equipment/inventory/skills 三处透传）+ `applyAddItem`（补收 automata）+ `buildCraftPatches`（equipment/inventory 透传）。
+>
+> **编译**：`characterToCombatParticipant` 收集已装备物品 automata + **被动技能** automata（主动技能不走被动效果）→ `CombatParticipant.automata`；`createCombatState` `compileEffectProgram({...automata})` 编译进 activeEffects。DSL 编译期 9 条校验（A3-3）自动兜底不合规 automaton。
+>
+> **验收**：解析 4 用例（equip/skill/无 automaton/形状粗判）+ 编译 2 用例（damage.after 生效 / subscribe 越界剔除）+ 落库 2 用例（add_item 保留 / buildCraftPatches 透传）+ characterToCombatParticipant 4 用例。5121 tests 全绿。
+
+### S4（后续，单列）
+
+- S4: item_gen prompt 加 automaton 模板 + craft_gen `<affix>` 词条意图 + item_gen 落地说明 + Skill 落库补 modifiers/automata（收 S2-2 技能生产加值）
 
 ---
 
@@ -170,3 +181,7 @@ function collectCraftBonuses(char: CharacterState): {
 | S2-2 | 技能「锻造辅助 +3」→ craft_check 含 +3                              | 🟡 阻塞：Skill 接口无 modifiers 字段，待 S4 补                |
 | S2-3 | 无加成角色 → 检定值不变（回归）                                     | ✅ 有测试（craft-dc.test.ts 回归护栏）                        |
 | S2-4 | 战斗侧不误收「生产检定」modifier                                    | ✅ 有测试（compile.test.ts：checkType='生产' → 零 automaton） |
+| S3-1 | `<equip>`/`<skill>` 内 `<automaton>` JSON → 解析进 automata[]       | ✅ 有测试（char-gen-agent.test.ts 解析 4 用例）               |
+| S3-2 | automata 落库保留（add_item / buildCraftPatches）                   | ✅ 有测试（state-manager / craft-gen-chain）                  |
+| S3-3 | characterToCombatParticipant 收集装备 + 被动技能 automata           | ✅ 有测试（combat-v2-types.test.ts）                          |
+| S3-4 | createCombatState 编译 automata 进 activeEffects                    | ✅ 有测试（state.test.ts：damage.after 生效 / 越界剔除）      |
