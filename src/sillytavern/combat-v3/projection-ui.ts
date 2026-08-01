@@ -14,7 +14,7 @@
  * 铁律（plan §1.3）：本文件零 Math.random / new Function / eval；纯函数 + 不可变。
  */
 
-import type { CombatEvent } from '../combat-runner';
+import type { CombatEvent } from '../combat-v2-types';
 import type { DomainEvent, MoraleState } from './types';
 
 /**

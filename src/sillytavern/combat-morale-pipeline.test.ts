@@ -15,8 +15,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { EventBus } from './game-event';
 import { runMoraleCheckPipeline } from './combat-morale-pipeline';
-import { COMBAT_EVENTS } from './combat-pipeline';
-import type { PipelineContext } from './combat-pipeline';
+import { COMBAT_EVENTS } from './combat-v2-types';
+import type { PipelineContext } from './combat-v2-types';
 import type { CombatType } from './types';
 
 // ========== 工具: 造 ctx ==========

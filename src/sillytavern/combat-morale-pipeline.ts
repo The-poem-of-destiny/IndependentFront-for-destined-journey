@@ -14,8 +14,8 @@
  * @see docs/planning/2026-07-28-combat-v2-m3-rfc.md §3 D8 / Q6
  */
 
-import type { PipelineContext } from './combat-pipeline';
-import { COMBAT_EVENTS } from './combat-pipeline';
+import type { PipelineContext } from './combat-v2-types';
+import { COMBAT_EVENTS } from './combat-v2-types';
 import type { MoraleState, CombatType } from './types';
 import { checkMorale, getMoraleOutcomePool } from './morale-system';
 

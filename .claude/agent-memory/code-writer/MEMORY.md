@@ -20,3 +20,4 @@
 - [反射窗口 intents 未接](combat-v3-reflection-window-intents-not-wired.md) — M4 发现 attack.finalizeAttack 的 damage.after/unit.beforeDown 求值被丢弃，反射/PreventDeath 端到端未通；M4 续跑先补窗口 intents→applyIntents 集成层
 - [M4 机制层已落地](combat-v3-m4-mechanism-done.md) — rule-keys 4锁+divinity压制+freezeSlot引擎+death.threshold引擎全绿32测试；replay harness/7fixture/contract测试留 M4 续跑
 - [M4 第二部分已落地](combat-v3-m4-part2-harness-wiring.md) — 窗口接线层(反射/PreventDeath排原子提交)+replayCombat升级真内核harness；4 缺口(互反熔断/forceTerminal/召唤/freezeSlot触发源)已全闭合，5245 tests 全绿
+- [M5-PR2 v2 运行时已退役](combat-v3-m5-pr2-v2-retired.md) — 真正退役 v2 战斗：删 6 文件+测试、类型迁 combat-v2-types.ts、v2 分支优雅提示；tools 5245→5101 全绿；agent-config 在 data/defaults 非 src/sillytavern
