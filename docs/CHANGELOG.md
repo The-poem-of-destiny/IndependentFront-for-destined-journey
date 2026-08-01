@@ -9,6 +9,37 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 词条效果贯穿链路修复 S4 — prompt 模板 + 失败品链路 + Skill 落库补字段 ｜ ✅ 完成（2026-08-01）
+
+实施计划: `docs/planning/2026-08-01-item-gen-combat-link-plan.md` §3 S4；待办追踪: `docs/planning/combat-v3-fix-backlog.md`。S1-S3 打通 modifiers/automaton 代码链路后，S4 补齐 AI 侧模板 + 失败体验 + 技能生产加值落库（问题 2 + S2-2 收口）。
+
+**S4a Skill 落库补 modifiers（收 S2-2 技能生产加值）:**
+
+- `types.ts` `Skill` 接口补 `modifiers`/`buffs`/`divinity` 字段（S3 已加 automata）
+- `char-gen-agent.ts` `assembleCharacterState` skills 映射透传 modifiers/buffs/divinity
+- `agent-tools.ts` `collectCraftToolBonus` → `collectCraftBonuses`：同时收集**装备**（toolBonus，C 位）+ **技能**（skillBonus，B 位）「生产检定」modifier → craft_check/craft_settle 两处接线
+- **S2-2 闭环**：技能「锻造辅助 生产+3」→ craft_check fixedBonus 含 +3（此前 skillBonus 恒 0）
+
+**S4b craft_gen prompt（agent-config.json）:**
+
+- `<item_requests>` 的 `<request>` 加 `<affix>` 词条意图子元素（`<affix>锻火余温：命中+2</affix>`），成功示例更新
+- **失败/大失败也输出 `<item_requests>`**：失败品/残料（type="inventory"、quality=普通），失败 XML 示例 + 标签说明表 + 自检清单同步
+- 失败品是象征性补偿，不结算 EXP/FP、不写战斗词条
+
+**S4c item_gen prompt（agent-config.json）:**
+
+- M3.5 的 `<automaton>` 注释段 → **具体 JSON 模板 + 2 示例**（damage.after 吸血 / check.hit 残血追击）+ 18 窗口清单 + trigger 封闭文法 + intents 8 大类 + ctx 根段白名单（防止 AI 产出不合规 JSON 被编译期静默剔除）
+- 新增「收到 `<affix>` 必须翻译成 modifiers/automaton」硬性规则；生产向词条 → 检定类 `checkType='生产'` 说明
+- `<equip>` 输出格式示例补完整 `<modifiers>`（含 checkType='生产'）+ `<automaton>` 块
+
+**S4d 失败品链路（craft-gen-chain.ts）:**
+
+- `runCraftGenChain`：item_gen 调用条件从 `success && itemRequests.length>0` → `itemRequests.length>0`（成功/失败都发）
+- `buildCraftPatches`：失败时只落失败品 add_item（**不 auto-equip** / 不结算 EXP/FP）；成功路径保持 auto-equip + 结算
+- 新测试 3 用例（失败装备失败品 / 失败库存失败品 / 成功回归不破坏 auto-equip）
+
+**验收:** S4a（技能生产加值落库 + craft_check 生效）、S4d（失败品落库 / 成功回归）全绿。全量 **5126 测试 / 175 文件全绿**（+5）；typecheck 0；prettier 干净（agent-config.json 经 restringify 字节稳定验证，未跑 prettier）。
+
 ### 词条效果贯穿链路修复 S3 — `<automaton>` DSL 自由效果进 v3 战斗 ｜ ✅ 完成（2026-08-01）
 
 实施计划: `docs/planning/2026-08-01-item-gen-combat-link-plan.md` §3；待办追踪: `docs/planning/combat-v3-fix-backlog.md`。S1/S2 打通 modifiers 链路后，S3 让 AI 产的自由效果 DSL automaton（`<automaton>` JSON）走通「解析 → 落库 → 编译 → 战斗生效」全链路（问题 1）。

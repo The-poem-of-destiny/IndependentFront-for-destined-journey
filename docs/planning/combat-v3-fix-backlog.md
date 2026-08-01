@@ -36,17 +36,29 @@
 - **落点**：parseEquipmentXML 解析 automaton 块 + `ItemGenOutput`/`InventoryItem` 加 `automata` 字段 + `characterToCombatParticipant`/`createCombatState` 编译 automata（复用 modifiers 编译路径）。
 - **状态**：✅ 已完成（S3，2026-08-01）。解析（XML+JSON 兜底）/ 类型（ItemGenOutput/InventoryItem/Skill/CombatParticipant）/ 落库（assemble/applyAddItem/buildCraftPatches）/ 编译（characterToCombatParticipant 收集装备+被动技能 automata，createCombatState 编译进 activeEffects）全链路打通。
 
-### ⚠️ item_gen prompt 缺 automaton 具体模板（问题 2，计划中）
+### ✅ item_gen prompt 缺 automaton 具体模板（问题 2，已修 2026-08-01 S4c）
 
 - **问题**：prompt 里 automaton 只是注释说明，AI 大概率产出不合规 JSON。
-- **落点**：item_gen prompt 加 `<automaton>` 具体 JSON 模板 + 示例（subscribe 窗口清单 / trigger 封闭文法 / intents 8 大类 / divinity 限制）。
-- **状态**：📝 计划中（实施计划 §5）。
+- **修复**：item_gen prompt 补 `<automaton>` 具体 JSON 模板 + 2 示例（damage.after 吸血 / check.hit 残血追击）+ 18 窗口清单 + trigger 封闭文法 + intents 8 大类 + ctx 根段白名单。不合规 JSON 仍由 DSL 编译期 9 条校验兜底剔除。
+- **状态**：✅ 已完成（S4c，5126 tests 全绿）。
 
-### 🟡 craft_gen 创意词条 → item_gen 落地没有机制保证
+### ✅ craft_gen 创意词条 → item_gen 落地没有机制保证（已修 2026-08-01 S4b/S4c）
 
-- **问题**：craft_gen 在 `<item_requests>` 写自然语言（如「锻火余温，剑身残留暖意」），item_gen 要不要把它翻译成 `<modifiers>` 全凭自觉。架构上该让 craft_gen 显式声明「词条意图」（affix 块），item_gen 负责落地。
-- **落点**：craft_gen prompt 的 `<item_requests>` 加 `<affix>` 子元素 + item_gen prompt 说明收到 affix 必须翻译成 modifiers。
-- **状态**：📝 待排期（可与问题 2 一起做）。
+- **问题**：craft_gen 在 `<item_requests>` 写自然语言（如「锻火余温，剑身残留暖意」），item_gen 要不要把它翻译成 `<modifiers>` 全凭自觉。
+- **修复**：craft_gen prompt 的 `<item_requests>` 加 `<affix>` 词条意图子元素（成功 + 失败品都写）；item_gen prompt 新增「收到 `<affix>` 必须翻译成 modifiers/automaton」硬性规则。
+- **状态**：✅ 已完成（S4b/S4c）。
+
+### ✅ 制作失败无产物（已修 2026-08-01 S4d）
+
+- **问题**：craft_gen 失败 → `<item_requests>` 省略 → buildCraftPatches 返回空，玩家背包啥也没有，失败体验单薄。
+- **修复**：craft_gen prompt 失败/大失败时也输出 `<item_requests>`（失败品/残料，type="inventory"、quality=普通）；`runCraftGenChain` item_gen 成功/失败都发；`buildCraftPatches` 失败时只落失败品 add_item（不 auto-equip / 不结算 EXP/FP）。
+- **状态**：✅ 已完成（S4d）。
+
+### ✅ Skill 落库缺 modifiers 字段（已修 2026-08-01 S4a）
+
+- **问题**：`Skill` 接口无 modifiers 字段（S3 只加了 automata），技能「生产检定」加值落不了库 → S2-2 阻塞。
+- **修复**：`Skill` 补 modifiers/buffs/divinity 字段 + `assembleCharacterState` skills 透传 + `agent-tools.collectCraftBonuses` 收集技能生产加值 → craft_check/craft_settle 的 skillBonus 生效。
+- **状态**：✅ 已完成（S4a，S2-2 闭环）。
 
 ### 🟡 前端 ItemsPanel 缺 modifiers 展示
 

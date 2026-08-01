@@ -1,7 +1,7 @@
 # 词条效果贯穿链路实施计划（item_gen / craft / 战斗）
 
 > 📅 **日期**：2026-08-01
-> 📌 **状态**：**S1+S2+S3 已完成**（2026-08-01，5121 tests 全绿）。S4 单列后续。
+> 📌 **状态**：**S1+S2+S3+S4 已完成**（2026-08-01，5126 tests 全绿）。
 > 🔗 **关联**：`docs/planning/combat-v3-fix-backlog.md`（待办追踪）· `docs/reference/combat-system-architecture-v3.md`（v3 架构）· 世界书《品质效果限定》《生产制作协议》《核心数值表》《技能装备道具生成规则》
 >
 > **背景**：M5 退役 v2 后排查发现，item_gen 生成的装备词条（modifiers）在 v3 战斗/制造里没生效。本计划分 4 阶段把「AI 生成 → 解析 → 落库 → 战斗/制造消费」全链路打通。
@@ -50,7 +50,7 @@ craft_resolver → 产物 effects: []（未接）
 | S3   | automaton 解析 + 落库 + 编译（问题 1）             | AI 输出的 automaton 进 v3 战斗                    |
 | S4   | item_gen/craft_gen prompt 模板（问题 2）           | AI 能产出合规 automaton + affix 词条              |
 
-**本计划先做 S1 + S2**（主人拍板：先评估制造兼容，架构没问题后做 1/2）。S3/S4 单列后续。
+**实施顺序**：S1+S2 先行（主人拍板：先评估制造兼容）→ S3 automaton 链路 → S4 prompt 模板 + 失败品 + Skill 落库。四阶段全部完成。
 
 ---
 
@@ -143,23 +143,36 @@ function collectCraftBonuses(char: CharacterState): {
 >
 > **验收**：解析 4 用例（equip/skill/无 automaton/形状粗判）+ 编译 2 用例（damage.after 生效 / subscribe 越界剔除）+ 落库 2 用例（add_item 保留 / buildCraftPatches 透传）+ characterToCombatParticipant 4 用例。5121 tests 全绿。
 
-### S4（后续，单列）
+### S4（✅ 已完成 2026-08-01，5126 tests 全绿）
 
-- S4: item_gen prompt 加 automaton 模板 + craft_gen `<affix>` 词条意图 + item_gen 落地说明 + Skill 落库补 modifiers/automata（收 S2-2 技能生产加值）
+> **S4a Skill 落库补 modifiers**：`Skill` 接口补 `modifiers`/`buffs`/`divinity` 字段（S3 已加 automata）+ `assembleCharacterState` skills 映射透传 → 技能「生产检定」modifier 落库 → `agent-tools.collectCraftBonuses` 收集技能生产加值 → craft_check/craft_settle 的 `skillBonus` 位生效（**S2-2 闭环**）。
+>
+> **S4b craft_gen prompt**：`<item_requests>` 的 `<request>` 加 `<affix>` 词条意图子元素（成功 + 失败品都写）；失败/大失败时也输出 `<item_requests>`（失败品/残料，type="inventory"、quality=普通）；成功/失败 XML 示例 + 自检清单同步。
+>
+> **S4c item_gen prompt**：M3.5 的 `<automaton>` 注释段补**具体 JSON 模板 + 2 示例**（damage.after 吸血 / check.hit 残血追击）+ 18 窗口清单 + trigger 封闭文法 + intents 8 大类 + ctx 根段白名单；新增「收到 `<affix>` 必须翻译成 modifiers/automaton」硬性规则；`<equip>` 示例补完整 `<modifiers>`（含 checkType='生产'）+ `<automaton>` 块。
+>
+> **S4d 失败品链路**：`runCraftGenChain` item_gen 调用条件从 `success && itemRequests.length>0` 改为 `itemRequests.length>0`（成功/失败都发）；`buildCraftPatches` 失败时只落失败品 add_item（不 auto-equip / 不结算 EXP/FP），成功路径保持 auto-equip + 结算。测试 3 个新用例（失败装备失败品 / 失败库存失败品 / 成功回归）。
+>
+> **改动文件**：`types.ts`（Skill 补 modifiers/buffs/divinity）、`char-gen-agent.ts`（assemble 透传）、`agent-tools.ts`（collectCraftBonuses 收集技能加值）、`craft-gen-chain.ts`（失败品链路）、`agent-config.json`（craft_gen/item_gen systemPrompt）、3 个测试文件。5126 tests 全绿。
 
 ---
 
 ## 4. 文件改动清单
 
-| 文件                                       | 动作                                                                       |
-| ------------------------------------------ | -------------------------------------------------------------------------- |
-| `src/sillytavern/state-manager.ts`         | S1: applyAddItem 补收 modifiers/buffs/divinity                             |
-| `src/sillytavern/state-manager.test.ts`    | S1: add_item 带 modifiers 落库用例                                         |
-| `src/sillytavern/effect-types.ts`          | S2a: CheckModifier.checkType 加 '生产'                                     |
-| `src/sillytavern/combat-item-validator.ts` | S2a: VALID_CHECK_TYPES 加 '生产'                                           |
-| `src/sillytavern/agent-tools.ts`           | S2b: craft_check/craft_settle 收集生产检定 modifier → toolBonus/skillBonus |
-| `src/sillytavern/craft-resolver.test.ts`   | S2d: 生产检定 modifier 影响检定                                            |
-| `src/sillytavern/agent-tools.test.ts`      | S2d: craft_check toolBonus 生效                                            |
+| 文件                                       | 动作                                                                        |
+| ------------------------------------------ | --------------------------------------------------------------------------- |
+| `src/sillytavern/state-manager.ts`         | S1: applyAddItem 补收 modifiers/buffs/divinity                              |
+| `src/sillytavern/state-manager.test.ts`    | S1: add_item 带 modifiers 落库用例                                          |
+| `src/sillytavern/effect-types.ts`          | S2a: CheckModifier.checkType 加 '生产'                                      |
+| `src/sillytavern/combat-item-validator.ts` | S2a: VALID_CHECK_TYPES 加 '生产'                                            |
+| `src/sillytavern/agent-tools.ts`           | S2b: craft_check/craft_settle 收集生产检定 modifier → toolBonus/skillBonus  |
+| `src/sillytavern/craft-resolver.test.ts`   | S2d: 生产检定 modifier 影响检定                                             |
+| `src/sillytavern/agent-tools.test.ts`      | S2d: craft_check toolBonus 生效                                             |
+| `src/sillytavern/types.ts`                 | S4a: Skill 补 modifiers/buffs/divinity 字段                                 |
+| `src/sillytavern/char-gen-agent.ts`        | S4a: assembleCharacterState skills 透传 modifiers/buffs/divinity            |
+| `src/sillytavern/agent-tools.ts`           | S4a: collectCraftBonuses 收集技能生产加值 → skillBonus                      |
+| `src/sillytavern/craft-gen-chain.ts`       | S4d: 失败品链路（item_gen 成功/失败都发 + buildCraftPatches 失败落失败品）  |
+| `data/defaults/agent-config.json`          | S4b/S4c: craft_gen/item_gen systemPrompt（affix + 失败品 + automaton 模板） |
 
 ---
 
