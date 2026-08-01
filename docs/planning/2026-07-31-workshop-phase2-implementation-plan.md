@@ -1,6 +1,6 @@
 # 工坊 Phase 2 实施计划（lean-delegation 版）
 
-> ✅ **T1-T6 已完成（2026-07-31），T7 验收进行中；真机走查未做。** 交付纪要见 `docs/CHANGELOG.md`「工坊 P2」。
+> ✅ **T1-T7 全部完成（2026-07-31）；真机走查未做。** T7 验收结论「可提交」：145 files / 4928 tests 全绿、三项契约级抽查（EJS→AI 补丁顺序 / flush→markers 顺序 / 宏链在 EJS 后）逐行核实、改动面零溢出零缺失。交付纪要见 `docs/CHANGELOG.md`「工坊 P2」；交付 commit `b80e0f0`（分支 `ejs-support`）。
 >
 > 设计真源：`docs/planning/2026-07-31-workshop-phase2-ejs-design.md`（v1.2 拷问定稿）· ADR-30（AGENTS.md）· 词汇 `CONTEXT.md`
 > 执行模式：主会话只做计划/派单/验收；**全部实现由 Opus（medium effort）子 Agent 完成**，子 Agent 不得再派子 Agent。每单报告 ≤15 行（改了哪些文件一行一个 + 验证命令与结果 + 阻塞点），**不回贴代码/diff/文件内容**。
