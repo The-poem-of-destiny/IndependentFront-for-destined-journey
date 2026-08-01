@@ -209,6 +209,7 @@ npm run dev            # 开发服务器（dev.bat：自动杀残留进程 + 固
 - **StateManager 为唯一写入入口 (ADR-21)**：所有状态变更通过 `commitChatState()`，替代分散的 `saveChat()`。
   - 📌 **受控例外 (P1-09)**：SaveProfile 的纯 UI 辅助字段（`focusQuest` 焦点任务选择、`news[].read` 已读标记）允许 UI 层直写，但必须走 `updateProfile()` / `markNewsRead()` 统一写入函数（非裸 `db.put`）并带 try/catch。AI 产生的 SaveProfile 变更仍必须走 `vars_update` 语义 op，不在此例外内。
 - **世界书实现理念 (ADR-28)**：世界书是给**纯文本 AI** 的协议——骰子池/action_info 文本面板/`{{roll}}` 文本注入都是因为没有 Code 层才用的文本手段。我们有 Code 纯函数 + 工具调用 + script 沙盒，**中间结构不必照抄**；目标：输入→流程→**结果**模仿世界书，中间实现用工程手段。script 是"让世界书自由文本效果代码化"的**妥协桥梁**，不是追求完美复现每个机制的借口。
+- **EJS 世界书求值契约 (ADR-30)**：世界书条目正文 EJS 由 Code 在提示装配期求值（承 ADR-04），契约自主设计、不承诺 MVU/酒馆助手兼容（上游函数名仅作别名层）。**两轴**：`stats` 只读面（纯代码推导数值：资源/等级/五维/命运点数/时间）+ `vars` 共写叙事变量空间（= `variables.sys` 草稿，AI 与 EJS 双写同一棵树，**冲突 AI 赢**——EJS 差量先落、vars_update 补丁后落）。提交权按 Agent 声明（`ejsVarsCommit`，默认仅 story——前瞻扩展设计）。缓存分层：含 `<%`/`{{random`/`{{getvar` 的条目沉到 LORE_BOOK 展开尾部，静态前缀保字节稳定；EJS 失败条目原文注入（零回归兜底）。设计全文：`docs/planning/2026-07-31-workshop-phase2-ejs-design.md`；词汇：根目录 `CONTEXT.md`。
 
 ## 事件驱动架构（Phase 4.5-8 实现）
 
@@ -315,10 +316,10 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 工坊 P0   | 世界书迁出 localStorage → Dexie v14（+ 进 FullBackup） | ✅                  |
 | 工坊 P0b  | 美化规则迁出 localStorage → Dexie v15                  | ✅                  |
 | 工坊 P1   | 创意工坊（浏览/安装/更新/卸载/启用，= 7f）             | ✅ 真机已过         |
-| 工坊 P2   | EJS 沙盒 + 只读 stats 投影                             | ⬜ 未做             |
+| 工坊 P2   | EJS 沙盒 + 只读 stats 投影（ADR-30）                   | 📋 设计已拷问定稿   |
 | 真机迭代  | debug loop 持续修复                                    | 🔄                  |
 
-> 🔴 **工坊 P2 未做**：工坊装进来的世界书条目里的 EJS **目前不会被求值**，正文原样进 Agent 上下文。这与内置世界书现状一致（`event.json` 297 个 EJS 块、`system_core.json` 252 个），不是工坊新增的缺陷，但也**不要对外宣称工坊内容已完整生效**。
+> 🔴 **工坊 P2 未实施**：工坊装进来的世界书条目里的 EJS **目前不会被求值**，正文原样进 Agent 上下文。这与内置世界书现状一致（`event.json` 297 个 EJS 块、`system_core.json` 252 个），不是工坊新增的缺陷，但也**不要对外宣称工坊内容已完整生效**。设计已拷问定稿（ADR-30：两轴契约 + AI 赢仲裁 + 条目沉底缓存分层）见 `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`。
 
 ## 架构（已实现部分）
 
