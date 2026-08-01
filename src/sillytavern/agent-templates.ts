@@ -33,6 +33,7 @@ import { getPreset, assemblePresetContent } from './preset-loader';
 import { buildZoneSection, buildZoneContext } from './context-visibility';
 import { resolveTemplateWithGlobals } from './template-resolver';
 import type { EjsCapabilityInput } from './ejs-capabilities';
+import { DANGEROUS_PATH_SEGMENTS } from './var-resolver';
 import { getDefaultTemplate } from './placeholder-registry';
 
 // ========== 通用工具 ==========
@@ -123,12 +124,10 @@ function recentHistoryBlock(ctx: AgentContext): string {
 
 // ========== 工坊 Phase 2 / ADR-30: EJS 求值 pass 上下文 ==========
 
-/** 🔒 原型污染防御 —— 与 var-resolver / ejs-runtime 同口径 */
-const EJS_DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
-
 /**
  * 深拷贝（纯数据面）：数组/Date/纯对象递归，其余（函数、类实例）原样返回；危险键剔除。
  * 语义对齐 `ejs-runtime.ts` 的同名私有函数（那边不导出，此处不跨模块耦合，各留一份十行实现）。
+ * 危险键集来自 `var-resolver`（全仓唯一定义）。
  */
 function deepCloneVars<T>(value: T): T {
   if (value === null || typeof value !== 'object') return value;
@@ -138,7 +137,7 @@ function deepCloneVars<T>(value: T): T {
   if (proto !== Object.prototype && proto !== null) return value;
   const out: Record<string, any> = {};
   for (const k of Object.keys(value as Record<string, any>)) {
-    if (EJS_DANGEROUS_KEYS.has(k)) continue;
+    if (DANGEROUS_PATH_SEGMENTS.has(k)) continue;
     out[k] = deepCloneVars((value as Record<string, any>)[k]);
   }
   return out as unknown as T;
@@ -245,6 +244,10 @@ function buildEjsPassContext(
     stats: deepCloneVars(ctx.statData ?? {}),
     vars: draft,
     historyText: buildEjsHistoryText(agentId, ctx, config),
+    // 🔴 少了这一行，§3.5-§3.12 的八个 namespace 在生产里全取默认空值：
+    // `char.all()` 空数组、`quest.has()` 恒 false、`lore.get()` 恒 null、`ui.notify` 无出口。
+    // 字段可选，所以漏接**编译期不报**——由 backend-parity 与 wiring 测试盯住（见 agent-templates.test.ts）。
+    capabilities: buildCapabilityInput(agentId, ctx, config, configs, worldBooks),
     // 种子**不掺 agentId**：同一回合多个 Agent 装配同一条目时应看到同一个掷骰结果，
     // 否则「战斗 Agent 与叙事 Agent 对同一事件掷出不同的数」——那是分裂，不是随机（设计 §7）。
     seed: ctx.ejsSeed,

@@ -1397,6 +1397,14 @@ export interface AgentContext {
     vars: Record<string, any>;
     historyText: string;
     /**
+     * 宿主能力面输入（能力面 §3.5-§3.12：chat/char/world/quest/lore/local/ui/engine）。
+     *
+     * 类型是 `EjsCapabilityInput`，但这里刻意写成结构宽松的形状——`types.ts` 是全仓
+     * 唯一类型来源，不该反向 import 具体实现模块。缺省（`undefined`）时能力面整体退化为
+     * 空值而**不报错**，所以漏接不会被编译器抓到，只能靠测试盯（见 agent-templates.test.ts）。
+     */
+    capabilities?: Record<string, any>;
+    /**
      * pass 级 `{{LORE_BOOK}}` 渲染 memo（**由 resolver 自己填写**，其他人只读）。
      *
      * 为什么必须有：D7 明文支持把 `{{LORE_BOOK:section=static}}` 与 `:section=dynamic`
