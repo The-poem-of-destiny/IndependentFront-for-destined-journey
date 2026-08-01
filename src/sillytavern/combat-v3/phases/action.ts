@@ -13,7 +13,7 @@
  */
 
 import { draw } from '../dice-tape';
-import { evaluateWindow } from '../windows';
+import { evaluateWindow, makeWindowRuntimeCtx } from '../windows';
 import type { CombatCommand, CombatDefinitionBundle, CombatState } from '../types';
 import { emptyChanges, type PhaseOutcome } from './outcome';
 
@@ -35,10 +35,15 @@ export function handleAction(
     nextPhase: 'SlotConsume',
   };
 
-  evaluateWindow(state.activeEffects, 'action.declared', {
-    selfId: command.actorId,
-    round: state.round,
-  });
+  evaluateWindow(
+    state.activeEffects,
+    'action.declared',
+    makeWindowRuntimeCtx(state, {
+      selfId: command.actorId,
+      round: state.round,
+      window: 'action.declared',
+    }),
+  );
 
   const actionType: TacticalActionType = command.payload.actionType;
   const actor = state.units[command.actorId];

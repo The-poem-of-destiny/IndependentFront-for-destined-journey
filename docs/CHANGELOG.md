@@ -9,6 +9,31 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 战斗 v3 M3 — 效果系统：DSL + 编译链 + windows 实装 + damage.preview ｜ ✅ 完成（2026-08-01）
+
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§五 ReactionWindow / §六 EffectIntent / §七 EffectAutomaton DSL + 编译链 / §九 反射专项）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §5。把「效果」从 v2 的任意 JS 脚本（`new Function` 执行）翻转为**声明式 automaton + 封闭微文法表达式**，`windows.ts` 从空转变实装。**战斗内全链路零 `new Function` / `eval`**（铁律 2，C1 战斗内消解）。
+
+**新建 `combat-v3/automata/` 子目录 + 2 文件:**
+
+- `automata/parser.ts` — 递归下降 parser：token 集封闭、词法期拒绝白名单外 token（`=`/`[`/`{`/反引号/`;`/`new`/`function`/`this`/未知标识符）、`ctx.` 点分路径合并、`parseCmp` 非结合（`a<b<c` 报错）、**`ExprSyntaxError` 带 1-based 列号**（A3-1）
+- `automata/interpreter.ts` — 零 eval AST 解释器：字面量/路径/白名单函数（min/max/floor/ceil/abs/percent/has）/一元/二元；除零返回 0；未定义 ctx 路径抛 `ExprEvalError`（错误隔离）
+- `automata/compile.ts` — `compileEffectProgram` 三来源编译链（① `modifiers[]` → push-handler automaton（ADR-29）/ ② `ParsedEffect` → 内建 adapter / ③ AI automaton JSON）+ **9 条编译期校验**（窗口存在/trigger 文法/kind∈8 大类/RuleKey 白名单/divinity≤所有者/数值 clamp/ctx 路径根段/五维直改/前缀，A3-3）
+- `automata/builtins.ts` — 15 条内建映射（固伤/伤害%/受到伤害-%（修 M-6）/命中/闪避/先攻/DR/穿透/反伤/吸血/护盾/DoT/HoT/暴击率/次数）
+- `automata/index-active.ts` — `buildIndex`/`updateIndex`：按窗口分组并按 §5.3 排序、离场移除
+- `automata/reflection.ts` — 反射专项（§九）：R4 preReduction 基准 / R6 depth=2 熔断产 `NarrativeCue('反射湮灭')` / R7 基准不放大 / R8 attackHit 通道
+- `intents.ts` — `validateBatch`（batch 内一个非法 ⇒ 整批 reject + `EffectRejected`，**不取消**核心攻击与同窗口其他 automaton，A3-7）+ `applyIntents` 解释执行
+- `windows.ts`（实装）— 求值顺序（窗口→divinity→priority→stable id）/ 在场过滤 / charges 耗尽跳过 / trigger 错误隔离 / batch 原子性 / **预算 64 截断 + BUDGET_EXCEEDED**
+
+**damage.preview 全流程（§5.4）:** `phases/attack.ts` 步骤⑥ 接 `RequestChoice`：`hasSubscribers` 判空 → 有订阅者则冻结 `ResolutionFrame` → 返回 `RequiredInput.EffectChoice`；`reducer.ts` 加 `DeclareBlock` frame 恢复分支 → 格挡 intent batch → **回到 `damage.compute` 重算**（不在 final 上打折）→ 487→97 比例。无订阅者**不暂停**（A3-6）。
+
+**修改文件:** `combat-item-validator.ts` 新增 v3 共享常量（`V3_WINDOW_KEYS`/`V3_INTENT_KINDS`/`V3_RULE_KEYS`），**v2 运行时入口保留不删**；`phases/outcome.ts`/`round.ts`/`action.ts` 适配 Windows ctx；`state.ts` 加 `freezeFrame`/`restoreFrame`。
+
+**验收:** A3-1 ~ A3-8 全过（parser 列号 / evaluate 零 eval / 编译期剔除 / modifier push-handler / 487→97 重算 / 无订阅不暂停 / batch 原子性 / 第 24 场反伤 depth=2 熔断）。全量 **5166 测试 / 166 文件全绿**；typecheck 0 错误；lint 0 error。
+
+**M3 修复的 Critical/Major:** C1（战斗内消解：全链路零 `new Function`）/ M-6（守方百分比进 `collect_defender_mods`）/ M-2（ActiveEffectIndex 通电）/ M-12（窗口递归 ≤5 + 反射 depth ≤2 + 预算 64）/ M-15（automaton 返回 undefined 视为空 batch）。
+
+**已知遗留（M3.5 对齐）:** Coordinator 的 `EffectChoice` 路由仍 `throw UnsupportedInM2`（M3 只做内核，M3.5 接 game-store→UI 格挡询问）；`makeWindowRuntimeCtx.resolveNumber` 对非数字表达式返回 fallback（M3 范围限于 damage.preview 全量求值，其余窗口表达式求值 M3.5/M4 补全）；`reflection`/`charges` 内建特判。
+
 ### 战斗 v3 M2 — 接线：Coordinator + feature flag + 双投影 + 前端桥 ｜ ✅ 完成（2026-08-01）
 
 架构真源: `docs/reference/combat-system-architecture-v3.md`（§十三 双投影 / §十四 引擎边界 + Coordinator + feature flag + 四态 UI / §十二 FP 协议）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §4。把 M1 的内核骨架接到真实业务路径：Coordinator 驱动完整战斗循环、feature flag 整场切换、投影 A（UI）/B（Agent 文本面板）、前端 Command 桥。v2 路径一行未删（flag 默认 `'v2'`）。

@@ -17,7 +17,7 @@
 
 import type { CombatDefinitionBundle, CombatState, PendingChangeSet, StatusPatch } from '../types';
 import type { DomainEvent } from '../types';
-import { evaluateWindow } from '../windows';
+import { evaluateWindow, makeWindowRuntimeCtx } from '../windows';
 import type { PhaseOutcome } from './outcome';
 import { emptyChanges } from './outcome';
 
@@ -46,7 +46,11 @@ export function handleRoundOpen(
   events.push({ kind: 'RoundOpened', round: state.round });
 
   // round.open 窗口（M3 接索引，M1 空转）
-  evaluateWindow(state.activeEffects, 'round.open', { selfId: undefined, round: state.round });
+  evaluateWindow(
+    state.activeEffects,
+    'round.open',
+    makeWindowRuntimeCtx(state, { selfId: undefined, round: state.round, window: 'round.open' }),
+  );
 
   // 增益 buff tick：remainingTime 递减，到期移除
   applyBuffTick(state, changes, events, 'positive', 'round.open');
@@ -70,7 +74,11 @@ export function handleRoundClose(bundle: CombatDefinitionBundle, state: CombatSt
   const events: DomainEvent[] = [];
 
   // round.close 窗口（M3 接索引，M1 空转）
-  evaluateWindow(state.activeEffects, 'round.close', { selfId: undefined, round: state.round });
+  evaluateWindow(
+    state.activeEffects,
+    'round.close',
+    makeWindowRuntimeCtx(state, { selfId: undefined, round: state.round, window: 'round.close' }),
+  );
 
   // 减益 buff tick + DoT
   applyBuffTick(state, changes, events, 'negative', 'round.close');
