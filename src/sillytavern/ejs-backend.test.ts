@@ -16,6 +16,7 @@ import {
   getCompiledEntry,
   clearEjsBackendCache,
   LegacyBackend,
+  FailClosedBackend,
   installProductionEjsBackend,
   type EjsBackend,
 } from './ejs-backend';
@@ -165,6 +166,28 @@ describe('LegacyBackend.runPass', () => {
 // 生产切换
 // ═══════════════════════════════════════════════════════════
 
+describe('FailClosedBackend', () => {
+  it('全部条目原文注入 + 带可读原因（D8 语义）', async () => {
+    const b = new FailClosedBackend('测试原因');
+    const out = await b.runPass(
+      [
+        { uid: 1, content: '<%= 1 + 1 %>' },
+        { uid: 2, content: '纯文本' },
+      ],
+      ctx(),
+    );
+    expect(out.map((o) => o.ok)).toEqual([false, false]);
+    expect(out.map((o) => o.text)).toEqual(['<%= 1 + 1 %>', '纯文本']);
+    expect(out[0].error).toContain('测试原因');
+  });
+
+  it('一行 EJS 都不执行 —— 草稿一个字节都不动', async () => {
+    const c = ctx();
+    await new FailClosedBackend('x').runPass([{ uid: 1, content: '<% vars.写了 = 1 %>' }], c);
+    expect(c.vars).toEqual({});
+  });
+});
+
 describe('installProductionEjsBackend', () => {
   it('装载成功 → 切到隔离后端', async () => {
     const ok = await installProductionEjsBackend();
@@ -177,5 +200,40 @@ describe('installProductionEjsBackend', () => {
     const first = getEjsBackend();
     await installProductionEjsBackend();
     expect(getEjsBackend().name).toBe(first.name);
+  }, 30000);
+
+  it('🔒 装载失败 → fail closed，**不退回 Legacy**', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // 真让动态 import 炸掉（模拟 wasm 取不到 / 浏览器不支持 / CSP 拦截）
+    vi.doMock('./ejs-quickjs-backend', () => {
+      throw new Error('模拟 wasm 装载失败');
+    });
+    try {
+      const ok = await installProductionEjsBackend();
+      expect(ok).toBe(false);
+      // 关键：终态是 fail-closed 而不是 legacy
+      expect(getEjsBackend().name).toContain('fail-closed');
+      expect(getEjsBackend().name).not.toContain('legacy');
+      // 而且真的一行 EJS 都不跑
+      const c = ctx();
+      const out = await getEjsBackend().runPass([{ uid: 1, content: '<% vars.写了 = 1 %>' }], c);
+      expect(out[0]).toMatchObject({ ok: false, text: '<% vars.写了 = 1 %>' });
+      expect(c.vars).toEqual({});
+      // 失败必须留痕（console.error，不是 warn —— 这是安全相关状态）
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      vi.doUnmock('./ejs-quickjs-backend');
+      vi.resetModules();
+      spy.mockRestore();
+    }
+  }, 30000);
+
+  it('🔒 装载**期间**就已 fail closed —— 不留「先用 Legacy 渲染一轮」的窗口', async () => {
+    const pending = installProductionEjsBackend();
+    // 同步紧跟其后：此刻 wasm 还没装完
+    const during = getEjsBackend();
+    expect(during.name).toContain('fail-closed');
+    expect(during.name).not.toContain('legacy');
+    await pending;
   }, 30000);
 });

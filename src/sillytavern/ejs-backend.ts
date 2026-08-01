@@ -9,10 +9,12 @@
  * 故先立缝：能力面按本接口写，两个后端各自实现，跑**同一套测试**。
  * 换后端时上层一行不改；后端出问题也能一行切回去。
  *
- * ## 两个实现
+ * ## 三个实现
+ * - `QuickJsBackend`：**生产唯一**。realm 隔离、可中断、有内存上限。
+ * - `FailClosedBackend`（本文件）：隔离装不上时的生产形态 —— 条目原文注入，**不退回 Legacy**。
  * - `LegacyBackend`（本文件）：现行 `new Function`。快、无依赖，**不是安全边界**、不可中断。
- *   测试默认跑它（5000+ 用例不必背 wasm 启动成本）。
- * - `QuickJsBackend`（T7）：生产默认。
+ *   **只服务测试**（5000+ 用例不必背 wasm 启动成本）+ 真机走查期间当诊断参照物。
+ *   走查结束、语料基线在 QuickJS 上重建之后即删除（能力面 §11.2 ③）。
  *
  * ## pass 粒度不是条目粒度
  * `runPass` 一次吃下整个装配 pass 的全部条目。理由是 QuickJS 后端的编组开销按**次**算而非按量算：
@@ -134,16 +136,57 @@ export class LegacyBackend implements EjsBackend {
 }
 
 // ═══════════════════════════════════════════════════════════
+// FailClosedBackend —— 隔离不可用时的**唯一**生产形态
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 什么都不求值：全部条目按 D8 原文注入。
+ *
+ * ## 为什么不是「退回 Legacy」
+ * 曾经的 `installProductionEjsBackend` 在装 wasm 失败时**静默退回 `new Function`**，
+ * 只留一行 `console.warn`，而 `main.ts` 连返回值都丢了。那比「没有隔离」更糟：
+ * 没有隔离时你知道自己没有；有一个会静默失效的隔离，你会**按「有隔离」去做决策**
+ * （比如据此解封工坊入口）。
+ *
+ * 回退原文 = 今天的现状，**最坏情况等于 EJS 没上线**（D8 一直就是这个语义）——
+ * 拿它换掉「无声地把 API Key / 存档 / 本地 BFF 暴露给内容作者」，这笔交易不用犹豫。
+ */
+export class FailClosedBackend implements EjsBackend {
+  readonly name = 'fail-closed(隔离不可用)';
+  readonly interruptible = true; // 什么都不跑，自然不会被卡住
+
+  constructor(private readonly reason: string) {}
+
+  async runPass(entries: EjsPassEntry[], _ctx: EjsEvalContext): Promise<EjsEntryOutcome[]> {
+    return entries.map((e) => ({
+      uid: e.uid,
+      text: e.content,
+      ok: false,
+      error: `EJS 未求值（${this.reason}）`,
+    }));
+  }
+
+  dispose(): void {
+    /* 无资源可释放 */
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // 当前后端（单例 + 可替换）
 // ═══════════════════════════════════════════════════════════
 
 /**
  * 当前后端。
  *
- * **默认 Legacy**，生产由应用启动时显式切到 QuickJS（`installProductionEjsBackend()`）。
- * 为什么不把 QuickJS 设成默认值：这个模块被 5000+ 单测直接/间接 import，
+ * **默认 Legacy，且这个默认值只服务测试**：本模块被 5000+ 单测直接/间接 import，
  * 默认加载 wasm 会让每个测试文件都背上启动成本，而绝大多数测试跑的是渲染语义不是隔离属性。
- * 隔离属性由 `ejs-quickjs-backend.test.ts` 专门验。
+ *
+ * 🔴 **生产永远不会停在这个默认值上**：`installProductionEjsBackend()` 第一件事就是
+ * 把它换成 `FailClosedBackend`（关掉「装载期间悄悄用 Legacy 渲染」的时间窗），
+ * 装成功再换 QuickJS，装失败就**留在 fail-closed**。
+ *
+ * 待办（能力面 §11.2 ③）：真机走查 + 语料基线重建之后删掉 Legacy，
+ * 这里的默认值改成 `FailClosedBackend`，测试改为显式 `setEjsBackend(...)`。
  */
 let current: EjsBackend = new LegacyBackend();
 
@@ -153,7 +196,7 @@ export function getEjsBackend(): EjsBackend {
 }
 
 /**
- * 换后端（T7 切 QuickJS / 测试注入假后端）。
+ * 换后端（生产切 QuickJS / 测试注入假后端）。
  * 会 `dispose()` 旧后端 —— 换的时候旧的 wasm 实例必须放掉。
  */
 export function setEjsBackend(backend: EjsBackend): void {
@@ -166,27 +209,52 @@ export function setEjsBackend(backend: EjsBackend): void {
   current = backend;
 }
 
-/** 恢复默认（Legacy）后端 —— 测试 teardown 用 */
+/**
+ * 恢复默认（Legacy）后端 —— **测试 teardown 专用**。
+ * 生产代码不该调它：调了就等于把隔离关掉（见 `current` 的说明）。
+ */
 export function resetEjsBackend(): void {
+  installPromise = null;
   setEjsBackend(new LegacyBackend());
 }
 
 /**
- * 生产装配：切到隔离后端（能力面 §11 切片 T8）。
- *
- * 由应用入口调用一次。**失败不阻断启动** —— 装不上 wasm 时留在 Legacy 上，
- * 世界书照常渲染，只是没有隔离；比整个应用起不来好。
- * 但这条路径**必须留痕**：调用方据返回值决定要不要提示用户「当前无隔离」。
- *
- * @returns 是否成功切到隔离后端
+ * 装配结果记忆 —— 重复调用不会把**正在服役的** QuickJS 后端 dispose 掉再重建一个。
+ * `resetEjsBackend()` 会清掉它（测试要能重跑装配）。
  */
-export async function installProductionEjsBackend(): Promise<boolean> {
+let installPromise: Promise<boolean> | null = null;
+
+/**
+ * 生产装配：切到隔离后端（能力面 §11 切片 T8 / §11.2 ①）。
+ *
+ * 由应用入口调用一次，**必须 await 或接住返回值**。
+ *
+ * ## 失败时 fail closed，不退回 Legacy
+ * 装不上 wasm → `FailClosedBackend` → 世界书条目**原文注入**（D8 语义，最坏等于 EJS 没上线）。
+ * 刻意不退回 `new Function`：那会在用户毫不知情的情况下把隔离摘掉，
+ * 而下游（例如工坊入口的解封判断）是**按「有隔离」在做决策**的。宁可不求值，不可假装安全。
+ *
+ * 装载期间也已经是 fail-closed —— 不留「还没装完所以先用 Legacy 渲染一轮」的窗口。
+ *
+ * @returns 是否成功切到隔离后端；`false` 时调用方应向用户明示「EJS 未启用」
+ */
+export function installProductionEjsBackend(): Promise<boolean> {
+  if (installPromise) return installPromise;
+  // 先关窗：装载是异步的，这期间任何 runPass 都必须 fail closed 而不是落到 Legacy
+  setEjsBackend(new FailClosedBackend('隔离后端装载中'));
+  installPromise = doInstall();
+  return installPromise;
+}
+
+async function doInstall(): Promise<boolean> {
   try {
     const { createQuickJsBackend } = await import('./ejs-quickjs-backend');
     setEjsBackend(createQuickJsBackend());
     return true;
   } catch (err) {
-    console.warn('[EJS] 隔离后端装载失败，退回 new Function（无隔离）:', err);
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error('[EJS] 隔离后端装载失败，EJS 停用（条目原文注入）:', err);
+    setEjsBackend(new FailClosedBackend(`隔离后端装载失败: ${reason}`));
     return false;
   }
 }
