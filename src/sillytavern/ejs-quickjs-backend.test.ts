@@ -113,12 +113,32 @@ describe('QuickJS 后端 · 安全属性（SEC-02）', () => {
       // guest realm 里也有 globalThis，但那是 **guest 自己的**：没有 fetch / localStorage / document
       expect(r.text).toBe('undefined');
 
-      for (const probe of ['fetch', 'localStorage', 'document', 'XMLHttpRequest', 'indexedDB']) {
+      // ⚠️ `localStorage` **不在这张表里**，因为别名层刻意用同名 shim 占了这个位置（§5）。
+      // 它的安全性由下一个用例单独证明：占位的是映射到 local 的 shim，不是宿主那个。
+      for (const probe of ['fetch', 'document', 'XMLHttpRequest', 'indexedDB']) {
         const out = await render(
           `<%= typeof (({}).constructor.constructor("return globalThis")())["${probe}"] %>`,
         );
         expect(out.text, `${probe} 不该可达`).toBe('undefined');
       }
+    },
+    SLOW,
+  );
+
+  it(
+    'localStorage 这个名字被 shim 占着 —— 拿到的不是宿主那个（API Key 就躺在宿主那个里）',
+    async () => {
+      const ctx = makeCtx({ capabilities: { projectId: 'p1' } });
+      // 只有三个方法，没有 length / key / clear —— 真 Storage 一定有
+      expect((await render('<%= typeof localStorage.length %>', ctx)).text).toBe('undefined');
+      expect((await render('<%= typeof localStorage.clear %>', ctx)).text).toBe('undefined');
+      // 读任何键都拿不到宿主的值
+      expect((await render('<%= String(localStorage.getItem("apiKey")) %>', ctx)).text).toBe(
+        'null',
+      );
+      // 写进去的东西落在项目私有 local 命名空间，不是宿主 Storage
+      await backend.runPass([{ uid: 1, content: '<% localStorage.setItem("k", "v") %>' }], ctx);
+      expect(ctx.vars._local?.p1?.k).toBe('v');
     },
     SLOW,
   );

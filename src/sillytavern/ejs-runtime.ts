@@ -34,6 +34,7 @@ import { ejsLodash } from './ejs-lodash-shim';
 import { createEjsRng } from './ejs-rng';
 import { ejsFmt } from './ejs-fmt';
 import { buildEjsCapabilities, type EjsCapabilityInput } from './ejs-capabilities';
+import { DANGEROUS_PATH_SEGMENTS } from './var-resolver';
 
 // ═══════════════════════════════════════════════════════════
 // 公开类型
@@ -214,8 +215,14 @@ const CODE_MACRO_REWRITES: ReadonlyArray<{ re: RegExp; fn: string }> = [
   { re: /\{\{random::([^{}]*?)\}\}/gi, fn: '__random' },
 ];
 
-/** 把代码位里的自足值宏改写成沙盒调用；无命中时原样返回 */
-function rewriteCodeMacros(code: string): string {
+/**
+ * 把代码位里的自足值宏改写成沙盒调用；无命中时原样返回。
+ *
+ * 🔴 **导出给 QuickJS 后端复用**：那边自建了一套 guest 侧编译器，一开始漏了这一步，
+ * 结果同一条 `{{roll 1d100}}` 在 Legacy 下渲染正常、在 QuickJS 下报
+ * `SyntaxError: invalid property name`（真机语料命中 4 条）。两个后端**必须共用同一套改写规则**。
+ */
+export function rewriteCodeMacros(code: string): string {
   if (!code.includes('{{')) return code;
   let out = code;
   for (const { re, fn } of CODE_MACRO_REWRITES) {
@@ -406,8 +413,7 @@ const AsyncFunctionCtor = Object.getPrototypeOf(async function () {})
 // 沙盒注入面
 // ═══════════════════════════════════════════════════════════
 
-/** 原型污染防御：与 var-resolver.ts 同口径（命中即**整次写入**静默拒绝） */
-const DANGEROUS_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
+// 原型污染防御的键集来自 var-resolver（全仓唯一定义）；命中即**整次写入**静默拒绝
 
 /** 读选项——`scope` / `noCache` 静默忽略（设计 §4 降级清单） */
 interface EjsReadOptions {
