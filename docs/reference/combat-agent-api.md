@@ -1,6 +1,15 @@
 # 战斗 Agent ↔ 引擎 接口规格（Combat Agent API Contract）
 
-> 📌 **文档定位**：M4 的**共同真源**。Combat Agent 的 systemPrompt、工具注册（`agent-tools.ts`）、item_gen 增强、schema 校验，全部以本文件为依据。
+> ⚠️ **v2 专用，已退役（2026-08-01）**：本文档描述的是 **v2 战斗系统**的 Agent 接口（`combat` Agent + `AGENT_TOOL_MAP['combat']` + 19 event 协议 + 四步流程）。v3 已取代——战斗走代码内核，Agent 只做**逐步决策 + 叙事摘要**。
+>
+> 📌 **v3 Agent 接口所在**（本文档不再更新）：
+> - `combat_v3` Agent systemPrompt → `data/defaults/agent-config.json`（`combat_v3` 条目）
+> - 工具注册 → `agent-tools.ts` 的 `AGENT_TOOL_MAP['combat_v3']`（6 工具 + 4 只读）
+> - 引擎→Agent 数据包 → `combat-v3/projection-agent.ts`（脱敏文本面板）+ `combat-v3/projection-ui.ts`（UI 事件）
+> - 输出追踪 → `reference/agent流程测试/agent预期分析.md` §5.5（combat_v3 完整输出追踪）
+> - 架构 → `combat-system-architecture-v3.md` §十三（双投影）/ §十四（引擎边界）
+>
+> 📌 **本文档定位**：v2 时代的 Agent 接口**共同真源**，保留作为历史参考（理解 v2 如何工作、`combat` Agent 旧条目）。写 v3 战斗 Agent 请读上面的 v3 接口清单。
 >
 > 📖 **读者**：① 写 `combat` Agent systemPrompt 的人 ② 注册 combat 工具的代码 ③ 增强 item_gen 输出契约的代码 ④ 写 schema 校验的代码。
 >

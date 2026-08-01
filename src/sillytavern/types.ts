@@ -575,7 +575,7 @@ export interface AppSettings {
    * - `'v3'`：走 `combat-v3` 内核主持流程
    * 分支点唯一（game-pipeline.handleCombatTrigger），粒度按整场战斗，
    * openCombat 时冻结进 CombatState.provenance 不可中途变更。
-   * 默认 `'v2'`，M5 才翻转为 `'v3'`。
+   * M5 已翻转为 `'v3'`（默认走 v3 内核）。打回 `'v2'` 仍可用（保留一个版本周期）。
    */
   combatEngineVersion: 'v2' | 'v3';
 }
@@ -629,8 +629,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   /** Phase 7e: 输出美化 */
   beautifierEnabled: true,
   beautifierRules: [],
-  /** v3 M0: 战斗引擎版本（默认 v2，M5 才翻 v3） */
-  combatEngineVersion: 'v2',
+  /** v3 M5: 战斗引擎版本（M5 翻为 v3 默认；打回 v2 仍可用，保留一个版本周期） */
+  combatEngineVersion: 'v3',
 };
 
 // ========== Chat Types ==========

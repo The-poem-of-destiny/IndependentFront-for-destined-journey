@@ -1189,7 +1189,7 @@ export class GamePipeline {
     storyOutput: string,
   ): Promise<CombatSummaryResult | null> {
     // 🆕 M2 feature flag（架构 §十四 14.5）：分支点唯一，v2 走现有 runCombat，v3 走 coordinator
-    const engineVersion = this.settings?.settings?.combatEngineVersion ?? 'v2';
+    const engineVersion = this.settings?.settings?.combatEngineVersion ?? 'v3';
     if (engineVersion === 'v3') {
       return this.handleCombatTriggerV3(marker, storyOutput);
     }
