@@ -9,6 +9,49 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 战斗 v3 M4 — 压力测试：7 场 fixture 全绿 + RuleKey 补全 + divinity 泛化 + eventHash 冻结 ｜ ✅ 完成（2026-08-01）
+
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§八 closed RuleKey 与 divinity 压制 / §九 反射专项 R1-R8 / §十三 DomainEvent）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §7。这是**最重的一个里程碑**——机制层（4 RuleKey + divinity 泛化）+ 窗口接线层（修 M3 真实缺口）+ replay harness 升级 + 7 场 fixture 端到端 + eventHash 冻结。
+
+**机制层（A4-3/A4-4）:**
+
+- `rule-keys.ts` — 四把 RuleKey 全注册（terminal.forceTerminal / morale.forceState / action.freezeSlot / death.threshold，各带 schema + divinity 门槛 + merge policy）+ `resolveOverride` 真正解析 + **`divinitySuppression(atk, def)`** 泛化：差 1~4 级 → ±20%/40%/60%/80%，≥5 级 → `{ certain: true }`（必成/必败，**不消费骰子**）
+- `phases/attack.ts` — check.intent 意图对抗接压制（差≥5 跳过 intentCheck 骰，A4-4）+ unit.beforeDown 接 death.threshold（PreventDeath → DamagePrevented + 同批原子提交，A4-3）
+- `intents.ts` — ApplyStatus.contest 接压制（守方 div 高≥5 状态抵抗）+ OverrideIntent → freezeSlotPatches
+- `unit-turn.ts` — action.freezeSlot 生效（被冻结槽位不发）+ turn.open 窗口触发源
+- `state.ts` — applyPending 合并 frozenSlots（max_rounds）+ applyOutcome 落 frozenSlots
+
+**窗口接线层（修 M3 真实缺口）:**
+
+- `attack.ts` `finalizeAttack` ⑨ damage.after **不再丢弃 evaluateWindow 结果** → `applyAfterWindow` 接 applyIntents（**M3 遗留：反射 intent 从未落地**，case-24/x1 跑不通的根因）
+- **`reflectChain` 链式反伤递归**：depth 传播 + 每轮查新受击方被动 + R6 depth≥2 → `mutual_cancel` + `NarrativeCue('反射湮灭')`（case-x1 互反熔断，A4-2）
+- R8 反伤命中骰 attackHit 通道 + 优势/劣势 + BeginOutput 续杯
+- `windows.ts` resolveNumber 补全：parseExpression → evaluate → fallback（错误隔离不抛出），`ctx.damage.preReduction * N` 表达式可求值
+
+**replay harness 升级（A4-1 地基）:**
+
+- `replay.ts` — **M0 空转 → 驱动真实内核**（openCombat + dispatch 循环），RequiredInput 自动处理（BeginOutput 续杯 / PlayerCommand / CharGenRequest / EffectChoice / BoundedAdjudication）
+- hash 基于 **DomainEvent 序列**（A4-5）；`fixtureBundle` 统一英文 attrs
+- `reducer.ts` `adjudicate` — `terminal.forceTerminal` 落 `state.terminal`（case-09 认知剥夺终局生效）
+
+**7 场 fixture + contract test（A4-1/A4-2）:**
+
+| fixture                               | 断言重点                                                                    |
+| ------------------------------------- | --------------------------------------------------------------------------- |
+| case-06-summon（全量）                | 召唤端到端：UnitSummoned + this_round_tail 当回合参战 + FP 300→200          |
+| case-07-prevent-death（全量）         | PreventDeath 保命（death.threshold）                                        |
+| case-09-concept（全量）               | damage + roundCount + forceTerminal 落 state（Adjudicate → RuleOverridden） |
+| case-13-time-freeze                   | freezeSlot 端到端：理查德 TurnOpened 0 攻 0 动                              |
+| case-24-reflection（全量）            | 反射 depth=1 落地 + 攻方 HP 扣减                                            |
+| **case-x1-mutual-reflection**（新增） | 双方 30% 反伤 → depth 2 熔断 → 反射湮灭 + 无 depth≥2 事件                   |
+| **case-x2-true-death-revive**（新增） | HP→0 → death.threshold（divinity 6）→ 保命 + DamagePrevented                |
+
+**eventHash 冻结（A4-5）:** 7 场 fixture 的 `expected.eventHash` 从 null 升级为具体 hash（h1vj9zgo 等），contract test 断言 `result.hash === fixture.expected.eventHash`——此后任何改动导致 hash 变化必须在 PR 说明。
+
+**顺手修的:** `applyPending` 同名 buff tick 语义（remainingTime 不同=覆盖/相同=叠层）；DamageReflected.depth 用本轮深度（修 OBO 偏移）。
+
+**验收:** A4-1 ~ A4-6 全过（5 场全量 + 2 极端 + 4 RuleKey + divinity 泛化 + eventHash 冻结 + 第 07 场续杯）。全量 **5245 测试 / 180 文件全绿**（combat-v3 291 / 35 files）；typecheck 0；prettier 干净；no-nondeterminism 守卫通过。
+
 ### 战斗 v3 M3.5 — 开放性出口：CharGenRequest + BoundedAdjudication + prompt 改写 ｜ ✅ 完成（2026-08-01）
 
 架构真源: `docs/reference/combat-system-architecture-v3.md`（§十 char_gen 战斗中调用 / §十一 BoundedAdjudication 有界裁决）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §6。把 v3 内核从「封闭战斗」打开——召唤走 char_gen（CharGenRequest），创意效果走有界裁决（BoundedAdjudication），并改写 `combat_v3` / `item_gen` / `char_gen` 三个 prompt。

@@ -1,5 +1,7 @@
 # 战斗 v3 架构交接地图（给 plan 作者）
 
+> ✅ **已完成历史使命（2026-08-01，M5 收尾）**：v3 实施计划已按本地图写完并落地（M0→M5 全部合并）。§2「待补完」6 项已在 `docs/reference/combat-system-architecture-v3.md` 补齐（D1-D6）并由各 M 实现——**架构见 v3 文档，本文件仅供追溯 plan 编写过程**。
+>
 > 📌 本文件是给**写实施 plan 的开发者**的导航地图。v3 架构资料现在散在 4 份文档 + 本喵瞄刚落的 RFC/案例集，本地图帮你快速定位"架构现在在哪、还缺什么、v2 现状、前后端边界、写 plan 从哪切入"。
 >
 > **自包含**：读这一份就能上手写 plan，按需查链接的详细文档。
@@ -50,16 +52,16 @@ v3 = 把 v2「Agent 主持流程、代码辅助结算」翻转为「**代码内�
 | **char_gen 战斗中调用** | `RequiredInput.CharGenRequest`；SummonedUnitDefinition 带 joinTiming/duration/actionEconomy                                                                                                                                                | RFC §5.1                  |
 | **BoundedAdjudication** | 战斗 Agent 提 ProposedAdjudication；内核验边界（divinity/目标/数值/不变量）不验创造性                                                                                                                                                      | RFC §5.2                  |
 
-### 🔧 待 plan 作者补完（提案没覆盖，写 plan 时要设计）
+### ✅ 已补完（→ 架构 v3 文档节号，M0-M5 已落地）
 
-| 维度                            | 待补完                                                                                                                                   | 提示                                                                            |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| **CombatSession 生命周期**      | openCombat → 多回合 → commitSettlement → readonly 的完整状态转换；与现有 Agent 编排（agent-orchestrator / request_dispatcher）的对接时序 | 参考提案 §迁移映射表，combat-runner 降为 CombatSessionCoordinator               |
-| **EffectAutomaton DSL 语法**    | 声明式 trigger/condition AST 的具体语法；与现有 `effect-parser.ts` / `effect-runtime.ts` 的关系                                          | 现有 ScriptEffects 已接近"效果意图雏形"（提案 §Part1 末尾），可演进而非从零设计 |
-| **EffectProgram 编译链**        | 物品/技能/buff 的 modifiers[] 如何编译成 EffectProgram；可信内建效果用 TS adapter，非可信走 DSL interpreter                              | 替换 `script-executor.ts` 的 `new Function` 路径                                |
-| **DomainEvent → UI projection** | DomainEvent 清单（DamageApplied/HpFloored/UnitSummoned/MiracleTriggered/...）→ CombatEvent（UI 可读）的投影规则                          | 前端 CombatEvent 是现成通道，改 projection adapter 而非重写展示层               |
-| **contract test 黄金参照系**    | M0 的 contract tests 用什么对齐？建议用 v2 真机输出 + 本案例集 5 场样本                                                                  | RFC §7.2 M0                                                                     |
-| **DiceTape 通道预算分配**       | 60 颗按通道怎么分（initiative/attackHit/statusContest/procCheck/intentCheck 各多少）                                                     | 需统计真实样本通道消耗比例（RFC §8 开放问题 5）                                 |
+| 维度                            | 补完落点（架构 v3）                                                               | 落地里程碑 |
+| ------------------------------- | --------------------------------------------------------------------------------- | ---------- |
+| **CombatSession 生命周期**      | §二 核心控制模型（openCombat/dispatch/RequiredInput）+ §三 原子提交               | M1         |
+| **EffectAutomaton DSL 语法**    | §七 7.3 表达式微文法（parser/interpreter）+ `automata/parser.ts`                  | M3         |
+| **EffectProgram 编译链**        | §七 7.4 编译链（compileEffectProgram 9 校验）+ `automata/compile.ts`              | M3         |
+| **DomainEvent → UI projection** | §十三 双投影（projection-ui / projection-agent）+ 29 事件清单                     | M2         |
+| **contract test 黄金参照系**    | §四 4.6 replay 语义 + 7 场 fixture（case-06/07/09/13/24/x1/x2）contract test 全绿 | M4         |
+| **DiceTape 通道预算分配**       | §四 4.1 五通道 32/10/7/6/5 + `dice-tape.ts` splitSixty                            | M0         |
 
 ---
 

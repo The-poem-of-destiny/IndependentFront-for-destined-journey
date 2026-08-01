@@ -205,7 +205,7 @@ npm run dev            # 开发服务器（dev.bat：自动杀残留进程 + 固
 - **必须写测试** — 每个新模块必须配套 `*.test.ts`。测试框架 **Vitest**，DB 测试用 **fake-indexeddb**。`npm test` 必须全部通过。代码审查前先跑测试。
 - **Prompt vs Code 边界 (ADR-11)**：确定性逻辑（战斗/制作/数值/骰池/状态结算）归 Code；创造性逻辑（叙事/角色/记忆/剧情判断）归 Prompt。
 - **$ API 语义级抽象 (ADR-19)**：AI 调 `$combat.attack()`声明意图，Code 内部执行公式。不暴露`modifyHp()` 等 CRUD 原语给 AI。
-- **声明式优先 (ADR-20)**：效果系统先用 VarsPatch + StatusEffect 声明式格式。复杂动态逻辑通过 `script-executor.ts` 脚本沙盒实现（`$event.on/off` 持久订阅、`$call` 跨对象引用、`init/cleanup` 生命周期）。
+- **声明式优先 (ADR-20)**：效果系统先用 VarsPatch + StatusEffect 声明式格式。复杂动态逻辑通过 `script-executor.ts` 脚本沙盒实现（`$event.on/off` 持久订阅、`$call` 跨对象引用、`init/cleanup` 生命周期）。**战斗内走 EffectAutomaton DSL**（v3 废止任意 JS，见 `combat-v3/automata/`）。
 - **StateManager 为唯一写入入口 (ADR-21)**：所有状态变更通过 `commitChatState()`，替代分散的 `saveChat()`。
   - 📌 **受控例外 (P1-09)**：SaveProfile 的纯 UI 辅助字段（`focusQuest` 焦点任务选择、`news[].read` 已读标记）允许 UI 层直写，但必须走 `updateProfile()` / `markNewsRead()` 统一写入函数（非裸 `db.put`）并带 try/catch。AI 产生的 SaveProfile 变更仍必须走 `vars_update` 语义 op，不在此例外内。
 - **世界书实现理念 (ADR-28)**：世界书是给**纯文本 AI** 的协议——骰子池/action_info 文本面板/`{{roll}}` 文本注入都是因为没有 Code 层才用的文本手段。我们有 Code 纯函数 + 工具调用 + script 沙盒，**中间结构不必照抄**；目标：输入→流程→**结果**模仿世界书，中间实现用工程手段。script 是"让世界书自由文本效果代码化"的**妥协桥梁**，不是追求完美复现每个机制的借口。
@@ -242,6 +242,8 @@ Layer 1  原语级 状态读写        StateManager.commitChatState() / $validat
 ### 效果系统统一框架（战斗+制作共用，ADR-29）
 
 战斗 v2 (M1-M5) 已验证一套**统一 subscribeChain 链式管道**机制，制作系统直接复用，不发明第二套。完整设计见 `docs/planning/unified-effect-system-framework.md`。
+
+> 📌 **v3 演进**：战斗内已由 v3 内核接管（`combat-v3/`），效果走 **EffectAutomaton DSL**（18 窗口 + 8 大类 intent + 封闭表达式文法），不再走 emitChain/script-executor。**本框架仍是制作系统与战斗外的效果基座**（ADR-29 继续适用）。
 
 - **统一机制**：`EventBus.emitChain(type, params, ctx)` 链式参数管道——`(priority, order, 注册序)` 稳定排序、`ctx.combatants`+`subscription.owner` 在场过滤、错误隔离、递归保护
 - **两个注册 facade**（互不干扰）：`ScriptRegistry`（声明式，物品装备/卸下）+ `SubscriptionManager`（动态，AI script 运行时 `$event.on`）
@@ -312,7 +314,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | Audio     | 音频系统 v1.0（双通道+三后端+按名寻址+场景配乐）       | ✅                  |
 | 素材      | 素材管理系统 v1.0（渲染面+大画像+裁剪台+画像弹窗）     | ✅                  |
 | 战斗 v2   | 战斗系统架构 v2（管道+中间件+6大类+19event+独立面板）  | ✅ M5完成 待M6真机  |
-| 战斗 v3   | 代码内核主持流程（Kernel+DiceTape+EffectIntent+DSL）   | 🔄 M3.5完成 待M4    |
+| 战斗 v3   | 代码内核主持流程（Kernel+DiceTape+EffectIntent+DSL）   | 🔄 M4完成 待M5      |
 | 工坊 P0   | 世界书迁出 localStorage → Dexie v14（+ 进 FullBackup） | ✅                  |
 | 工坊 P0b  | 美化规则迁出 localStorage → Dexie v15                  | ✅                  |
 | 工坊 P1   | 创意工坊（浏览/安装/更新/卸载/启用，= 7f）             | 🔒 入口临时下线     |
@@ -376,6 +378,17 @@ src/sillytavern/                    ← 核心引擎
   ├── dice.ts / memory-store.ts / memory-summarizer.ts / plot-outline.ts / plot-engine.ts / location-db.ts
   │
   ├── combat-intention.ts / combat-damage.ts / combat-turn.ts / combat-panel.ts / combat-resolver.ts
+  │   └── (以上为 v2 战斗纯计算函数，v3 内核仍调用；v2 编排层 combat-runner/combat-pipeline 由 M5 删除)
+  │   └── combat-v3/               ← [战斗 v3] 代码内核主持流程（M0-M5 已合入）
+  │       ├── kernel.ts / reducer.ts / state.ts     ← 状态机 + 原子提交 + 5 不变量
+  │       ├── dice-tape.ts                          ← 分通道骰带（32/10/7/6/5）
+  │       ├── coordinator.ts                        ← 战斗循环 + RequiredInput 路由
+  │       ├── windows.ts / intents.ts               ← 18 窗口求值 + EffectIntent 解释执行
+  │       ├── adjudication.ts / rule-keys.ts        ← BoundedAdjudication + 4 RuleKey
+  │       ├── automata/                             ← DSL parser/interpreter/compile/builtins/reflection
+  │       ├── projection-ui.ts / projection-agent.ts← 双投影（UI 事件 + Agent 文本面板）
+  │       ├── replay.ts / contract/                 ← contract harness + 7 场 fixture
+  │       └── index.ts                              ← 唯一公共出口（openCombat / runCombatV3）
   ├── craft-quality.ts / craft-dc.ts / craft-resolver.ts
   ├── cluster-system.ts / morale-system.ts / affection-system.ts
   ├── marker-protocol.ts            ← [Phase 6e+Audio] XML 标记检测（含 <play_audio>）
@@ -405,7 +418,7 @@ src/sillytavern/                    ← 核心引擎
   ├── lorebook-engine.ts / prompt-assembler.ts / importer.ts / variables.ts / vars-merger.ts
   ├── stream-parser.ts / api-router.ts / api-tools.ts / editor-utils.ts
   │
-  └── (战斗 v2 M1-M5 模块见 docs/reference/combat-system-architecture.md)
+  └── (战斗 v2 纯计算规则见 docs/reference/combat-system-architecture.md；v3 内核见 docs/reference/combat-system-architecture-v3.md)
 
 src/vanilla/sillytavern-store.ts    ← 框架无关响应式 Store
 ```
