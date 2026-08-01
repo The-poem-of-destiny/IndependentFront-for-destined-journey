@@ -26,7 +26,7 @@ import { MONTH_NAMES } from './time-system';
 import {
   getEntriesForAgent,
   filterActiveEntries,
-  formatWorldBookEntries,
+  renderWorldBookEntries,
 } from './worldbook-loader';
 import { getPreset, assemblePresetContent } from './preset-loader';
 import { buildZoneSection, buildZoneContext } from './context-visibility';
@@ -117,6 +117,78 @@ function formatHistory(ctx: AgentContext): string {
 function recentHistoryBlock(ctx: AgentContext): string {
   const h = formatHistory(ctx);
   return h ? `**最近对话:**\n${h}\n\n` : '';
+}
+
+// ========== 工坊 Phase 2 / ADR-30: EJS 求值 pass 上下文 ==========
+
+/** 🔒 原型污染防御 —— 与 var-resolver / ejs-runtime 同口径 */
+const EJS_DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+/**
+ * 深拷贝（纯数据面）：数组/Date/纯对象递归，其余（函数、类实例）原样返回；危险键剔除。
+ * 语义对齐 `ejs-runtime.ts` 的同名私有函数（那边不导出，此处不跨模块耦合，各留一份十行实现）。
+ */
+function deepCloneVars<T>(value: T): T {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((v) => deepCloneVars(v)) as unknown as T;
+  if (value instanceof Date) return new Date(value.getTime()) as unknown as T;
+  const proto = Object.getPrototypeOf(value) as object | null;
+  if (proto !== Object.prototype && proto !== null) return value;
+  const out: Record<string, any> = {};
+  for (const k of Object.keys(value as Record<string, any>)) {
+    if (EJS_DANGEROUS_KEYS.has(k)) continue;
+    out[k] = deepCloneVars((value as Record<string, any>)[k]);
+  }
+  return out as unknown as T;
+}
+
+/**
+ * `matchChatMessages()` 的检索面：该 Agent 历史窗口内的消息正文拼接串。
+ *
+ * 窗口口径**复用历史注入口径**（`config.historyLayers` → `defaultHistoryLayers(agentId)`，
+ * 层数 N → 最近 N*2 条），与提示里实际能看到的历史一致（设计 §4 降级：上游可查全聊天记录，我们查注入窗口）。
+ * 刻意**不套 `historySlice` 截断**——那是给 AI 看的省字数手段，用来做子串/正则命中会误判「没提到」。
+ */
+export function buildEjsHistoryText(
+  agentId: string,
+  ctx: AgentContext,
+  config?: AgentConfig,
+): string {
+  const layers =
+    config?.historyLayers ?? ctx.agentConfig?.historyLayers ?? defaultHistoryLayers(agentId);
+  if (layers <= 0 || !ctx.history?.length) return '';
+  return ctx.history
+    .slice(-layers * 2)
+    .map((m) => m.content ?? '')
+    .join('\n');
+}
+
+/**
+ * 构造本次装配 pass 的 EJS 求值上下文（设计 D4/D5/D6）。
+ *
+ * - `stats`：`ctx.statData` 的 **pass 级克隆**（回合级投影只建一次，克隆杜绝跨 pass 写泄漏）
+ * - `vars`：`ctx.variables.sys` 的 pass 级草稿；条目按序在其上读写，后续条目立即可见
+ * - 持 `ejsVarsCommit` 权且 `ctx.ejsVarsDrafts` 存在 → 把 `{ base, draft }` 登记进表。
+ *   `draft` 就是返回值里那个对象引用（求值写入后调用方拿到最终态）；`base` 是另一份独立克隆。
+ *   往 Map 里 set **不算 mutate 原 ctx 的既有字段**（容器由上游创建并共享）。
+ */
+function buildEjsPassContext(
+  agentId: string,
+  ctx: AgentContext,
+  config: AgentConfig | undefined,
+): NonNullable<AgentContext['ejsPass']> {
+  const sysVars = (ctx.variables?.sys ?? {}) as Record<string, any>;
+  const draft = deepCloneVars(sysVars);
+
+  if (config?.ejsVarsCommit === true && ctx.ejsVarsDrafts) {
+    ctx.ejsVarsDrafts.set(agentId, { base: deepCloneVars(sysVars), draft });
+  }
+
+  return {
+    stats: deepCloneVars(ctx.statData ?? {}),
+    vars: draft,
+    historyText: buildEjsHistoryText(agentId, ctx, config),
+  };
 }
 
 function formatCharacters(ctx: AgentContext): string {
@@ -535,7 +607,13 @@ export function buildAgentMessages(
   // Phase 8.6: 提前找到本 agent 的 config (供预设/世界书/历史注入共用)
   const config = configs?.find((c) => c.agentId === agentId);
   // 关键: 不可 mutate 原 ctx (orchestrator 同 stage 多 agent 共享), 用浅拷贝注入 agentConfig
-  const tplCtx: AgentContext = config ? { ...ctx, agentConfig: config } : ctx;
+  // 工坊 P2: 同时挂本 pass 的 EJS 求值上下文（stats 克隆 + vars 草稿 + 历史检索面），
+  // 供 {{LORE_BOOK}} resolver / buildFallbackMessages 消费。
+  const tplCtx: AgentContext = {
+    ...ctx,
+    ...(config ? { agentConfig: config } : {}),
+    ejsPass: buildEjsPassContext(agentId, ctx, config),
+  };
 
   // Step 1: Get the template string
   // Priority: 1) agent-config.json template field  2) getDefaultTemplate from placeholder-registry  3) empty string
@@ -674,12 +752,19 @@ function buildFallbackMessages(
     sysPromptContent = [tpl.fixedSystem, tpl.fixedExamples].filter(Boolean).join('\n\n');
   }
 
-  // Step 2: 世界书
+  // Step 2: 世界书（工坊 P2: 改走 renderWorldBookEntries —— 静/动分层 + EJS 求值，静态区在前）
   let worldBookSection = '';
   if (configs && worldBooks) {
     const entries = getEntriesForAgent(agentId, configs, worldBooks);
     const activeEntries = filterActiveEntries(entries);
-    worldBookSection = formatWorldBookEntries(activeEntries);
+    // ejsPass 由 buildAgentMessages 挂在 tplCtx 上；直接调本函数的极端路径退化为一次性空草稿。
+    const ejsCtx = tplCtx.ejsPass ?? {
+      stats: tplCtx.statData ?? {},
+      vars: {},
+      historyText: '',
+    };
+    const { staticText, dynamicText } = renderWorldBookEntries(activeEntries, ejsCtx);
+    worldBookSection = [staticText, dynamicText].filter(Boolean).join('\n\n');
   }
 
   // Step 3: 变量区 (动态上下文)

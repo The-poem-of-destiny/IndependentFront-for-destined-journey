@@ -57,7 +57,7 @@ docs/
 │                                       #      现行 UI 未经真机走查）；审查轮 §15.11
 ├── planning/2026-07-31-creative-workshop-compat-design.md
 │                                       # 🆕 创意工坊兼容层设计 v2（D1-D17）← 改工坊/世界书存储必读
-│                                       #    Phase 0 世界书迁 Dexie · Phase 1 工坊 · Phase 2 EJS 沙盒（未做）
+│                                       #    Phase 0 世界书迁 Dexie · Phase 1 工坊 · Phase 2 EJS 沙盒（✅ 待真机）
 └── story_preset_format.md          # 🆕 Story Agent 预设编写指南（输出标签顺序 + 占位符排列 + 可用宏）
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
@@ -316,10 +316,10 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 工坊 P0   | 世界书迁出 localStorage → Dexie v14（+ 进 FullBackup） | ✅                  |
 | 工坊 P0b  | 美化规则迁出 localStorage → Dexie v15                  | ✅                  |
 | 工坊 P1   | 创意工坊（浏览/安装/更新/卸载/启用，= 7f）             | ✅ 真机已过         |
-| 工坊 P2   | EJS 沙盒 + 只读 stats 投影（ADR-30）                   | 📋 设计已拷问定稿   |
+| 工坊 P2   | EJS 沙盒 + 只读 stats 投影（ADR-30）                   | ✅ 待真机           |
 | 真机迭代  | debug loop 持续修复                                    | 🔄                  |
 
-> 🔴 **工坊 P2 未实施**：工坊装进来的世界书条目里的 EJS **目前不会被求值**，正文原样进 Agent 上下文。这与内置世界书现状一致（`event.json` 297 个 EJS 块、`system_core.json` 252 个），不是工坊新增的缺陷，但也**不要对外宣称工坊内容已完整生效**。设计已拷问定稿（ADR-30：两轴契约 + AI 赢仲裁 + 条目沉底缓存分层）见 `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`。
+> 🟡 **工坊 P2 已实施（T1-T6），真机走查未做**：世界书条目正文的 EJS 现在**会在提示装配期求值**（ADR-30 两轴契约：只读 `stats` + 共写 `vars`，冲突 AI 赢；动态条目沉底、静态前缀字节稳定）。全语料冒烟 509 条目 / 61 动态 / **8 条已知回退**（白名单 uid 343·353·357·358·417·421·477·505 —— 6 条依赖缺失的酒馆助手 API、1 条 await、1 条 `{{roll}}` 宏嵌在 EJS 块内），回退条目原文注入不阻断。回退率 / 缓存命中字节 / 跨回合链尚未真机验证，设计全文见 `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`。
 
 ## 架构（已实现部分）
 
@@ -363,7 +363,12 @@ src/sillytavern/                    ← 核心引擎
   ├── resource-calc.ts / var-resolver.ts / namespace-normalizer.ts / time-system.ts
   │
   ├── save-profile.ts               ← [Phase 4.6] 存档级 FP 元货币（M5: +variables 变量唯一真源）
-  ├── fp-system.ts / ejs-runtime.ts / effect-parser.ts / effect-runtime.ts
+  ├── fp-system.ts / effect-parser.ts / effect-runtime.ts
+  ├── ejs-runtime.ts                ← [工坊 P2] 整片编译（全条目 token 编进同一函数体，跨块 if/for 成立）
+  │                                    compileEjsEntry / executeEjsEntry；两轴注入 + 失败回滚
+  ├── ejs-lodash-shim.ts            ← [工坊 P2] `_` 纯读边 17 方法 + chain（不含任何写方法）
+  ├── stat-projection.ts            ← [工坊 P2] buildStatData：主角资源/等级/五维/命运点数/世界.时间（只读快照）
+  ├── ejs-vars-diff.ts              ← [工坊 P2] 草稿深 diff → {replace,remove} 喂 applyVarsPatch；256KB 护栏
   ├── game-event.ts                 ← [Phase 4.5] EventBus 按存档隔离（+ emitChain 链式管道 ADR-29）
   ├── state-manager.ts              ← 唯一状态写入入口（M2按名寻址 M4名字唯一化 M5变量迁profile+快照重建）
   ├── dice.ts / memory-store.ts / memory-summarizer.ts / plot-outline.ts / plot-engine.ts / location-db.ts

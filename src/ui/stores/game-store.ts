@@ -262,6 +262,30 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
+   * 工坊 P2 (ADR-30 D5) — EJS 变量差量被体积护栏**整份拒绝**的诊断行。
+   *
+   * 存在的理由: 拒绝是静默的簿记失灵，只 toast 一次事后就查不到了；杜绝
+   * 「状态机不动了，只能从剧情怪异反推」的最坏调试体验。**内存级、随会话丢弃**
+   * （不落库、不进备份），随 DebugPanel 的 JSON 导出一起被带走。
+   * 与 agentLog 不同，**不随每轮清空** —— 它是整局的累计计数。
+   */
+  const ejsVarsRejections = ref<
+    Array<{ agentId: string; label: string; count: number; lastAt: number; lastSize: number }>
+  >([]);
+
+  /** 记一次 EJS 差量拒绝（同来源累加计数、刷新时间戳与体积） */
+  function recordEjsVarsRejection(agentId: string, label: string, size: number) {
+    const hit = ejsVarsRejections.value.find((r) => r.agentId === agentId);
+    if (hit) {
+      hit.count += 1;
+      hit.lastAt = Date.now();
+      hit.lastSize = size;
+      return;
+    }
+    ejsVarsRejections.value.push({ agentId, label, count: 1, lastAt: Date.now(), lastSize: size });
+  }
+
+  /**
    * 改写本存档的世界书条目启用轴（`metadata.enabledWorldBookEntries`）。
    *
    * ADR-21 的受控例外（P1-09）：这是**纯 UI 辅助字段**，与 `markOpeningPromptConsumed`
@@ -646,6 +670,8 @@ export const useGameStore = defineStore('game', () => {
     agentLog,
     addAgentLogEntry,
     clearAgentLog,
+    ejsVarsRejections,
+    recordEjsVarsRejection,
     persistMessage,
     restoreMessages,
     rollbackOneTurn,

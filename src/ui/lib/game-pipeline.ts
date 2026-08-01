@@ -31,10 +31,14 @@ import { createStateManager } from '@engine/state-manager';
 import { stripPlayAudioMarkers } from '@engine/marker-protocol';
 import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
+import { buildStatData } from '@engine/stat-projection';
+import { diffVars, measureDiffSize, EJS_DIFF_SIZE_LIMIT } from '@engine/ejs-vars-diff';
+import type { EjsVarsDiff } from '@engine/ejs-vars-diff';
 import type { useGameStore } from '../stores/game-store';
 import type { useSettingsStore } from '../stores/settings-store';
 import { useAudioStore } from '../stores/audio-store';
 import { useWorldBookStore } from '../stores/worldbook-store';
+import { useUIStore } from '../stores/ui-store';
 
 export interface GamePipelineDeps {
   gameStore: ReturnType<typeof useGameStore>;
@@ -110,6 +114,14 @@ export class GamePipeline {
    * 同一地点里来回走动不该反复触发。空串表示还没选过。
    */
   private lastAudioLocation = '';
+  /**
+   * 工坊 P2 (D5) 体积护栏: 已经因超限被拒过的来源 Agent。
+   *
+   * **每存档每来源只 toast 一次** —— 一个失控的世界书状态机会轮轮超限，
+   * 每轮弹一次只会把玩家逼到关掉通知。内存级即可（本实例随存档创建），
+   * 不新增任何持久化字段；累计诊断在 `game.ejsVarsRejections`。
+   */
+  private ejsRejectToasted = new Set<string>();
 
   constructor(deps: GamePipelineDeps) {
     this.game = deps.gameStore;
@@ -349,7 +361,10 @@ export class GamePipeline {
   // ===== 私有方法 =====
 
   private buildAgentConfigs(
-    agentDefaults: Record<string, { presetId?: string; systemPrompt?: string; template?: string }>,
+    agentDefaults: Record<
+      string,
+      { presetId?: string; systemPrompt?: string; template?: string; ejsVarsCommit?: boolean }
+    >,
     onStoryChunk?: StoryChunkCallback,
   ): AgentConfig[] {
     const s = this.settings.settings;
@@ -443,6 +458,11 @@ export class GamePipeline {
         // localStorage 可能有用户编辑过的版本，作为 fallback。
         systemPrompt: systemPrompt || (s.agentPrompts as Record<string, string>)[agentId],
         template: template || (s.agentTemplates as Record<string, string>)[agentId],
+        // 工坊 P2 (ADR-30 D5): 只有持权 Agent 的装配 pass 产出 EJS vars 提交候选。
+        // 代码级兜底：agent-config.json 没加载上（fetch 失败/离线）或该 agent 未声明本字段时，
+        // story 默认持权 —— 与设计「默认仅 story 持权」一致。否则一次网络抖动就让整条
+        // EJS→vars 提交链静默哑火（EJS 照跑、写照丢，无任何征兆）。显式 false 仍然生效。
+        ejsVarsCommit: defaults.ejsVarsCommit ?? isStory,
         toolsEnabled: ['craft_gen', 'char_gen', 'item_gen'].includes(agentId),
         maxToolCallRounds: 10,
         // 🆕 流式 + abort 信号
@@ -494,6 +514,15 @@ export class GamePipeline {
       agentOutputs: new Map(),
       plotSettings,
       gameTime: this.game.gameTime ?? undefined,
+      // 工坊 P2 (ADR-30 D4/D9): stats 只读投影每回合构建一次，同回合多 Agent 装配复用
+      //（各 pass 在 buildAgentMessages 内再克隆一份，杜绝跨 pass 写泄漏）
+      statData: buildStatData({
+        characters: this.game.characters,
+        gameTime: this.game.saveProfile?.gameTime,
+        fp: this.game.saveProfile?.fp,
+      }),
+      // 工坊 P2 (ADR-30 D5): 持权 Agent 的 vars 草稿运输容器；提交由回合结算消费（T6）
+      ejsVarsDrafts: new Map(),
     };
   }
 
@@ -518,12 +547,15 @@ export class GamePipeline {
    *  自给自足 fetch agent-config.json，不依赖 store 的 projectAgentDefaults 异步加载时序。 */
   private async loadPresets(): Promise<{
     presets: AgentPreset[];
-    agentDefaults: Record<string, { presetId?: string; systemPrompt?: string; template?: string }>;
+    agentDefaults: Record<
+      string,
+      { presetId?: string; systemPrompt?: string; template?: string; ejsVarsCommit?: boolean }
+    >;
   }> {
     let presets: AgentPreset[] = [];
     const agentDefaults: Record<
       string,
-      { presetId?: string; systemPrompt?: string; template?: string }
+      { presetId?: string; systemPrompt?: string; template?: string; ejsVarsCommit?: boolean }
     > = {};
 
     // 1. DB 优先：用户可能通过设置页修改过预设
@@ -560,11 +592,24 @@ export class GamePipeline {
             presetId: e.presetId || undefined,
             systemPrompt: e.systemPrompt || undefined,
             template: e.template || undefined,
+            // 工坊 P2 (ADR-30 D5): EJS vars 提交权（出厂仅 story 置 true）。
+            // 字段缺席时保留 undefined（不塌成 false）——由 buildAgentConfigs 走代码级兜底。
+            ejsVarsCommit: typeof e.ejsVarsCommit === 'boolean' ? e.ejsVarsCommit : undefined,
           };
         }
+      } else {
+        console.warn(
+          `[GamePipeline] agent-config.json 请求失败 (HTTP ${res.status})，Agent 默认配置回落（EJS vars 提交权走代码兜底）`,
+        );
       }
-    } catch {
-      // 静默跳过
+    } catch (err) {
+      // 不再静默：这份配置是 systemPrompt / template / ejsVarsCommit 的唯一来源，
+      // 加载失败会让各 Agent 回落到 localStorage 版本、并让 EJS vars 提交权走代码级兜底
+      // （见 buildAgentConfigs 的 `defaults.ejsVarsCommit ?? isStory`）。必须留痕。
+      console.warn(
+        '[GamePipeline] agent-config.json 加载失败，Agent 默认配置回落（EJS vars 提交权走代码兜底）:',
+        err,
+      );
     }
 
     return { presets, agentDefaults };
@@ -710,6 +755,96 @@ export class GamePipeline {
     };
   }
 
+  // ===== 工坊 P2 (ADR-30 D5): EJS `vars` 差量提交 =====
+
+  /**
+   * 把一个 stage 内持权 Agent 的 EJS `vars` 草稿差量落库。
+   *
+   * **由 Orchestrator 在「本 stage 的 Agent 全跑完、标记处理之前」await 调用**——
+   * vars_update / request_dispatcher 的 AI 变量补丁正是在标记处理里提交的，
+   * 所以这个位置就是契约里那句「EJS 差量先落、AI 补丁后落」的物理落点：
+   * 同路径冲突时 AI 覆盖 EJS（设计 §0 / D5）。
+   *
+   * 顺序口径: **管线阶段序**（本方法每 stage 调一次，天然按阶段推进）
+   * + **同阶段 agentId 字典序**（下面的 `.sort()`）。与 D5 白纸黑字一致。
+   *
+   * 整条路径不抛错 —— EJS 是簿记旁路，出问题不该吞掉本轮正文。
+   */
+  private async flushEjsVarsDiffs(agentIds: string[]): Promise<void> {
+    const drafts = this.currentContext?.ejsVarsDrafts;
+    if (!drafts || drafts.size === 0) return;
+
+    // 同阶段字典序 —— 多个持权 Agent 时后者同路径覆盖前者，顺序必须确定
+    const ordered = [...agentIds].filter((id) => drafts.has(id)).sort();
+    if (ordered.length === 0) return;
+
+    const diffs: EjsVarsDiff[] = [];
+    for (const agentId of ordered) {
+      const entry = drafts.get(agentId);
+      // 消费即摘表: 同一份草稿不会在后续 stage 被重复提交
+      drafts.delete(agentId);
+      if (!entry) continue;
+
+      let diff: EjsVarsDiff;
+      try {
+        diff = diffVars(entry.base ?? {}, entry.draft ?? {});
+      } catch (err) {
+        console.warn(`[GamePipeline] EJS 变量差量计算失败（来源 ${agentId}），跳过:`, err);
+        continue;
+      }
+      // 空 diff 不传 —— 绝大多数回合世界书只读不写，不该白跑一次写事务
+      if (diff.replace.length === 0 && diff.remove.length === 0) continue;
+
+      const size = measureDiffSize(diff);
+      if (size > EJS_DIFF_SIZE_LIMIT) {
+        // 整份拒绝: 不截断、不部分提交（截断状态机的半棵写入比冻结它更糟）
+        this.rejectEjsVarsDiff(agentId, size);
+        continue;
+      }
+      diffs.push(diff);
+    }
+
+    if (diffs.length === 0) return;
+
+    try {
+      const result = await createStateManager(this.saveId).commitChatState([], {
+        ejsVarsDiffs: diffs,
+      });
+      if (result.errors.length > 0) {
+        console.warn('[GamePipeline] EJS 变量差量落库报错:', result.errors);
+      }
+    } catch (err) {
+      console.warn('[GamePipeline] EJS 变量差量落库失败（不阻塞本轮）:', err);
+    }
+  }
+
+  /** 体积护栏拒绝: console.warn + 累计诊断行 + 每存档每来源一次 toast */
+  private rejectEjsVarsDiff(agentId: string, size: number): void {
+    const label = AGENT_LABELS[agentId] ?? agentId;
+    console.warn(
+      `[GamePipeline] EJS 变量差量超限，整份拒绝 —— 来源 ${agentId} · ${size} 字节 > 上限 ${EJS_DIFF_SIZE_LIMIT}`,
+    );
+
+    // 诊断行（DebugPanel 可查、随导出 JSON 带走）—— 拒绝不能只活在一次 toast 里
+    try {
+      this.game.recordEjsVarsRejection?.(agentId, label, size);
+    } catch (err) {
+      console.warn('[GamePipeline] 记录 EJS 拒绝诊断失败:', err);
+    }
+
+    if (this.ejsRejectToasted.has(agentId)) return;
+    this.ejsRejectToasted.add(agentId);
+    try {
+      useUIStore().toast(
+        `「${label}」的世界书变量写入超出 ${Math.round(EJS_DIFF_SIZE_LIMIT / 1024)} KB 上限，本轮整份丢弃（详情见调试面板）`,
+        'warning',
+        6000,
+      );
+    } catch (err) {
+      console.warn('[GamePipeline] EJS 拒绝提示失败:', err);
+    }
+  }
+
   /** 获取（或懒创建）StateManager 实例 */
   private getStateManager() {
     const sm = createStateManager(this.saveId);
@@ -784,6 +919,9 @@ export class GamePipeline {
       onPlayAudio: (marker) => {
         this.pendingAudioMarker = marker;
       },
+
+      // 工坊 P2 (D5): stage 跑完 → EJS 差量落库 → 才轮到本 stage 的 AI 补丁
+      onEjsVarsFlush: (agentIds) => this.flushEjsVarsDiffs(agentIds),
 
       // === Stage 回调 ===
       onAgentStart: (agentId, config) => {

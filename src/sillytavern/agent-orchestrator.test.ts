@@ -1407,3 +1407,112 @@ describe('AgentOrchestrator — onStateCommitError 上浮', () => {
     expect(onStateCommitError).not.toHaveBeenCalled();
   });
 });
+
+// ========== 工坊 P2 (ADR-30 D5): onEjsVarsFlush 时序 ==========
+
+describe('AgentOrchestrator — onEjsVarsFlush (工坊 P2 / D5)', () => {
+  beforeEach(() => {
+    commitChatStateMock.mockClear();
+    commitChatStateMock.mockImplementation(async (patches: any[]) => ({
+      success: true,
+      patchesApplied: patches.length,
+      eventsGenerated: [],
+      errors: [],
+    }));
+  });
+
+  it('每个 stage 跑完各调一次，参数是该 stage 的 agentId 列表', async () => {
+    globalThis.fetch = mockFetch('正文');
+    const seen: string[][] = [];
+    const orch = new AgentOrchestrator(
+      {
+        pipeline: {
+          timeout: 30000,
+          retryOnFail: false,
+          stages: [
+            { agents: ['story'], waitFor: [] },
+            { agents: ['memory_summary'], waitFor: [] },
+          ],
+        },
+        context: makeContext(),
+        agentConfigs: [
+          makeAgentConfig({ agentId: 'story' }),
+          makeAgentConfig({ agentId: 'memory_summary' }),
+        ],
+        endpoints: [makeEndpoint()],
+        saveId: 'save_ejs',
+      },
+      { onEjsVarsFlush: (ids) => void seen.push([...ids]) },
+    );
+    await orch.run();
+    expect(seen).toEqual([['story'], ['memory_summary']]);
+  });
+
+  it('🔒 顺序契约: story stage 的 flush 早于 vars_update 的 AI 补丁提交', async () => {
+    globalThis.fetch = mockFetch(
+      varsJsonOutput({
+        characters: {
+          replace: [{ name: 'c1', path: 'location', value: '熔火裂谷' }],
+          delta: [],
+          add: [],
+          remove: [],
+        },
+        items: {},
+      }),
+    );
+    const order: string[] = [];
+    commitChatStateMock.mockImplementation(async (patches: any[]) => {
+      order.push('commit');
+      return { success: true, patchesApplied: patches.length, eventsGenerated: [], errors: [] };
+    });
+
+    const orch = new AgentOrchestrator(
+      {
+        pipeline: {
+          timeout: 30000,
+          retryOnFail: false,
+          stages: [
+            { agents: ['story'], waitFor: [] },
+            { agents: ['vars_update'], waitFor: [] },
+          ],
+        },
+        context: makeContext(),
+        agentConfigs: [
+          makeAgentConfig({ agentId: 'story' }),
+          makeAgentConfig({ agentId: 'vars_update' }),
+        ],
+        endpoints: [makeEndpoint()],
+        saveId: 'save_ejs2',
+      },
+      {
+        onEjsVarsFlush: async (ids) => {
+          if (ids.includes('story')) order.push('flush:story');
+        },
+      },
+    );
+    await orch.run();
+
+    expect(order[0]).toBe('flush:story');
+    expect(order).toContain('commit');
+  });
+
+  it('flush 抛错不让 stage 失败（簿记旁路不吞正文）', async () => {
+    globalThis.fetch = mockFetch('正文');
+    const orch = new AgentOrchestrator(
+      {
+        pipeline: makeSimplePipeline(['story']),
+        context: makeContext(),
+        agentConfigs: [makeAgentConfig({ agentId: 'story' })],
+        endpoints: [makeEndpoint()],
+        saveId: 'save_ejs3',
+      },
+      {
+        onEjsVarsFlush: async () => {
+          throw new Error('落库炸了');
+        },
+      },
+    );
+    const run = await orch.run();
+    expect(run.status).toBe('completed');
+  });
+});

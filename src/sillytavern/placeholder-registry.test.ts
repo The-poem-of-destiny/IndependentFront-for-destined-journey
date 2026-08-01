@@ -897,6 +897,232 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
   });
 });
 
+// ========== LORE_BOOK × EJS 静/动分层（工坊 P2 / ADR-30 D1/D7）==========
+
+describe('LORE_BOOK EJS 分层与求值', () => {
+  /** 造一本书：静态条目(order 1) + EJS 条目(order 2) + 语法错误条目(order 3) */
+  function makeEjsBook(): WorldBook[] {
+    return [
+      {
+        id: 'wb_ejs',
+        name: 'EJS 测试书',
+        partition: 'world_setting',
+        entries: [
+          {
+            uid: 10,
+            name: '静态条目',
+            content: '白曜城是北方重镇。',
+            enabled: true,
+            key: [],
+            keysecondary: [],
+            selectiveLogic: 0,
+            order: 1,
+            position: 0,
+          },
+          {
+            uid: 20,
+            name: '动态条目',
+            content: '主角生命值：<%= stats.主角.生命值 %>',
+            enabled: true,
+            key: [],
+            keysecondary: [],
+            selectiveLogic: 0,
+            order: 2,
+            position: 0,
+          },
+          {
+            uid: 30,
+            name: '坏条目',
+            content: '坏块：<% if ( %>',
+            enabled: true,
+            key: [],
+            keysecondary: [],
+            selectiveLogic: 0,
+            order: 3,
+            position: 0,
+          },
+        ],
+      },
+    ];
+  }
+
+  const ejsConfig = () => mockConfig({ agentId: 'story' });
+
+  beforeEach(() => {
+    resetPlaceholderGlobals();
+    setPlaceholderGlobals(makeEjsBook(), [
+      mockConfig({ agentId: 'story', worldBookIds: ['wb_ejs'] }),
+    ]);
+  });
+
+  function ctxWithPass(): AgentContext {
+    return mockCtx({
+      ejsPass: { stats: { 主角: { 生命值: 77 } }, vars: {}, historyText: '' },
+    });
+  }
+
+  it('无 section → 静态区 + 动态区连拼，静态在前', () => {
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctxWithPass(), ejsConfig());
+    expect(result).toContain('白曜城是北方重镇。');
+    expect(result).toContain('主角生命值：77');
+    expect(result.indexOf('白曜城')).toBeLessThan(result.indexOf('主角生命值'));
+  });
+
+  it('section=static → 只含静态条目，动态条目一概不出现', () => {
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctxWithPass(), ejsConfig(), {
+      section: 'static',
+    });
+    expect(result).toContain('白曜城是北方重镇。');
+    expect(result).not.toContain('主角生命值');
+    expect(result).not.toContain('坏块');
+  });
+
+  it('section=dynamic → 只含动态区（求值结果 + 回退原文），不含静态条目', () => {
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctxWithPass(), ejsConfig(), {
+      section: 'dynamic',
+    });
+    expect(result).not.toContain('白曜城');
+    expect(result).toContain('主角生命值：77');
+  });
+
+  it('动态条目输出的是求值结果，不是 EJS 源码', () => {
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctxWithPass(), ejsConfig());
+    expect(result).not.toContain('<%=');
+    expect(result).not.toContain('stats.主角.生命值');
+  });
+
+  it('编译失败条目回退原文注入（零回归兜底 D8）', () => {
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctxWithPass(), ejsConfig());
+    // 原文（含未闭合的 EJS 块）原样出现，其余条目不受影响
+    expect(result).toContain('坏块：<% if ( %>');
+    expect(result).toContain('白曜城是北方重镇。');
+  });
+
+  it('EJS 写 vars 落在 ctx.ejsPass.vars 草稿上（同一对象引用）', () => {
+    setPlaceholderGlobals(
+      [
+        {
+          id: 'wb_ejs',
+          name: 'EJS 测试书',
+          partition: 'world_setting',
+          entries: [
+            {
+              uid: 40,
+              name: '写变量',
+              content: '<% setMessageVar("事件.冰之歌", 1) %>已记录',
+              enabled: true,
+              key: [],
+              keysecondary: [],
+              selectiveLogic: 0,
+              order: 1,
+              position: 0,
+            },
+          ],
+        },
+      ],
+      [mockConfig({ agentId: 'story', worldBookIds: ['wb_ejs'] })],
+    );
+    const draft: Record<string, any> = {};
+    const ctx = mockCtx({ ejsPass: { stats: {}, vars: draft, historyText: '' } });
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctx, ejsConfig());
+    expect(result).toContain('已记录');
+    expect(draft.事件.冰之歌).toBe(1);
+  });
+
+  it('无 ejsPass（外部直接调 resolver）→ 退化为空草稿，statData 仍供 stats 读', () => {
+    const ctx = mockCtx({ statData: { 主角: { 生命值: 42 } } });
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctx, ejsConfig());
+    expect(result).toContain('主角生命值：42');
+  });
+
+  // 🔴 回归锚（P1-1）：D7 允许把两区拆到模板两处 → 同 pass 内 resolver 被调两次。
+  // EJS 条目不保证幂等，重复求值会让非幂等写翻倍落库。
+  describe('pass 级 memo — 同模板出现两次不重复求值', () => {
+    /** 造一本含「计数器式非幂等写」的书（静态条目 + 计数条目各一） */
+    function makeCounterBook(): WorldBook[] {
+      return [
+        {
+          id: 'wb_ejs',
+          name: 'EJS 测试书',
+          partition: 'world_setting',
+          entries: [
+            {
+              uid: 50,
+              name: '静态条目',
+              content: '白曜城是北方重镇。',
+              enabled: true,
+              key: [],
+              keysecondary: [],
+              selectiveLogic: 0,
+              order: 1,
+              position: 0,
+            },
+            {
+              uid: 51,
+              name: '计数条目',
+              content: '<% setMessageVar("计数", (getMessageVar("计数") ?? 0) + 1) %>次数已记',
+              enabled: true,
+              key: [],
+              keysecondary: [],
+              selectiveLogic: 0,
+              order: 2,
+              position: 0,
+            },
+          ],
+        },
+      ];
+    }
+
+    beforeEach(() => {
+      setPlaceholderGlobals(makeCounterBook(), [
+        mockConfig({ agentId: 'story', worldBookIds: ['wb_ejs'] }),
+      ]);
+    });
+
+    it('模板含 section=static + section=dynamic 各一次 → 计数器只加一次', () => {
+      const draft: Record<string, any> = {};
+      const ctx = mockCtx({ ejsPass: { stats: {}, vars: draft, historyText: '' } });
+      const out = resolveTemplate(
+        '前：{{LORE_BOOK:section=static}}\n后：{{LORE_BOOK:section=dynamic}}',
+        'story',
+        ctx,
+        ejsConfig(),
+      );
+      expect(draft.计数).toBe(1);
+      // 两区仍各自出现在正确位置（memo 只跳过求值，不改分层语义）
+      expect(out).toContain('白曜城是北方重镇。');
+      expect(out).toContain('次数已记');
+      expect(out.indexOf('白曜城')).toBeLessThan(out.indexOf('次数已记'));
+    });
+
+    it('不带 section 的重复出现同样只求值一次', () => {
+      const draft: Record<string, any> = {};
+      const ctx = mockCtx({ ejsPass: { stats: {}, vars: draft, historyText: '' } });
+      resolveTemplate('{{LORE_BOOK}}\n{{LORE_BOOK}}', 'story', ctx, ejsConfig());
+      expect(draft.计数).toBe(1);
+    });
+
+    it('不同 pass（各自新建 ejsPass）互不复用 memo —— 每 pass 各加一次', () => {
+      const draftA: Record<string, any> = {};
+      const draftB: Record<string, any> = {};
+      resolveTemplate(
+        '{{LORE_BOOK}}',
+        'story',
+        mockCtx({ ejsPass: { stats: {}, vars: draftA, historyText: '' } }),
+        ejsConfig(),
+      );
+      resolveTemplate(
+        '{{LORE_BOOK}}',
+        'story',
+        mockCtx({ ejsPass: { stats: {}, vars: draftB, historyText: '' } }),
+        ejsConfig(),
+      );
+      expect(draftA.计数).toBe(1);
+      expect(draftB.计数).toBe(1);
+    });
+  });
+});
+
 // ========== Chain Placeholders (localParams) ==========
 
 describe('Chain communication placeholders', () => {

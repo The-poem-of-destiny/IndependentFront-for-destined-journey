@@ -2,6 +2,7 @@
   "version": 1,
   "agents": {
     "story": {
+      "ejsVarsCommit": true,
       "worldBookEnabled": true,
       "worldBookIds": [
         "character_detail",

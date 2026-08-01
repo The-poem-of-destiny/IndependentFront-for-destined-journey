@@ -73,7 +73,16 @@ async function buildExportData() {
       enableThinking: ep.enableThinking,
     })),
     agentModels: sysSettings.agentModels,
+    // 工坊 P2 (D5): EJS 变量差量被体积护栏整份拒绝的累计诊断（空数组=本局没发生过）
+    ejsVarsRejections: game.ejsVarsRejections.map((r) => ({
+      ...r,
+      lastAtISO: new Date(r.lastAt).toISOString(),
+    })),
   };
+}
+
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString();
 }
 
 async function downloadJson() {
@@ -125,6 +134,15 @@ function truncate(str: string, max: number): string {
         >{{ game.activeSave?.name ?? '—' }} | slot={{ game.activeSave?.slot }} | id={{
           game.activeSaveId
         }}</pre>
+    </div>
+
+    <!-- EJS 变量差量拒绝（只在发生过时出现） -->
+    <div v-if="game.ejsVarsRejections.length > 0" class="debug-section">
+      <h4>世界书变量写入被丢弃 ({{ game.ejsVarsRejections.length }})</h4>
+      <pre v-for="r in game.ejsVarsRejections" :key="r.agentId"
+        >{{ r.label }} ({{ r.agentId }}) | 累计 {{ r.count }} 次 | 最近 {{
+          formatTime(r.lastAt)
+        }} | 体积 {{ r.lastSize }} 字节</pre>
     </div>
 
     <!-- Agent 调用日志 -->

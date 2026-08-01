@@ -9,6 +9,7 @@ import {
   REGISTERED_AGENT_IDS,
   defaultHistoryLayers,
   defaultHistorySlice,
+  buildEjsHistoryText,
 } from './agent-templates';
 import { getDefaultTemplate } from './placeholder-registry';
 import type { AgentContext, AgentConfig, AgentPreset, WorldBook, WorldBookEntry } from './types';
@@ -595,5 +596,96 @@ describe('formatHistory 读取 per-agent 配置', () => {
     buildAgentMessages('story', ctx, [cfgStory]);
     // 调用后 ctx 不应被注入 agentConfig (orchestrator 同 stage 多 agent 共享 ctx)
     expect(ctx.agentConfig).toBeUndefined();
+  });
+});
+
+// ========== 工坊 P2: EJS pass 上下文（statData / vars 草稿 / 提交权）==========
+
+describe('buildAgentMessages × EJS pass 上下文 (ADR-30 D4/D5)', () => {
+  /** 读 stats + 写 vars 的动态条目 */
+  function makeEjsWorldBook(): WorldBook {
+    return {
+      id: 'wb_ejs',
+      name: 'EJS 书',
+      partition: 'world_setting',
+      entries: [
+        {
+          uid: 1,
+          name: '动态条目',
+          content:
+            '<% setMessageVar("计数", (getMessageVar("计数") ?? 0) + 1) %>HP=<%= stats.主角.生命值 %>',
+          enabled: true,
+          key: [],
+          keysecondary: [],
+          selectiveLogic: 0,
+          order: 1,
+          position: 0,
+        },
+      ],
+    };
+  }
+
+  it('ctx.statData 注入 → EJS 读得到 stats 面', () => {
+    const ctx = makeContext({ statData: { 主角: { 生命值: 66 } } });
+    const cfg = makeCfg('story', { worldBookIds: ['wb_ejs'] });
+    const msgs = buildAgentMessages('story', ctx, [cfg], [makeEjsWorldBook()]);
+    expect(msgs![0].content).toContain('HP=66');
+  });
+
+  it('ejsVarsDrafts 只在持权 Agent 的 pass 被填充', () => {
+    const drafts = new Map<string, { base: Record<string, any>; draft: Record<string, any> }>();
+    const ctx = makeContext({
+      statData: { 主角: { 生命值: 1 } },
+      variables: { sys: { 计数: 5 } },
+      ejsVarsDrafts: drafts,
+    });
+    const wb = makeEjsWorldBook();
+
+    // 无权 Agent：求值照跑，但不登记草稿
+    const noRight = makeCfg('request_dispatcher', { worldBookIds: ['wb_ejs'] });
+    buildAgentMessages('request_dispatcher', ctx, [noRight], [wb]);
+    expect(drafts.size).toBe(0);
+
+    // 持权 Agent：登记 { base, draft }，draft 带上 EJS 的写
+    const withRight = makeCfg('story', { worldBookIds: ['wb_ejs'], ejsVarsCommit: true });
+    buildAgentMessages('story', ctx, [withRight], [wb]);
+    expect([...drafts.keys()]).toEqual(['story']);
+    expect(drafts.get('story')!.base.计数).toBe(5);
+    expect(drafts.get('story')!.draft.计数).toBe(6);
+  });
+
+  it('草稿是克隆 —— EJS 的写不回流 ctx.variables.sys（提交由回合结算负责）', () => {
+    const drafts = new Map<string, { base: Record<string, any>; draft: Record<string, any> }>();
+    const sys = { 计数: 5 };
+    const ctx = makeContext({
+      statData: {},
+      variables: { sys },
+      ejsVarsDrafts: drafts,
+    });
+    const cfg = makeCfg('story', { worldBookIds: ['wb_ejs'], ejsVarsCommit: true });
+    buildAgentMessages('story', ctx, [cfg], [makeEjsWorldBook()]);
+    expect(sys.计数).toBe(5);
+  });
+
+  it('无 ejsVarsDrafts 容器（老调用方）→ 持权 Agent 也不炸', () => {
+    const ctx = makeContext({ statData: {}, variables: { sys: {} } });
+    const cfg = makeCfg('story', { worldBookIds: ['wb_ejs'], ejsVarsCommit: true });
+    expect(() => buildAgentMessages('story', ctx, [cfg], [makeEjsWorldBook()])).not.toThrow();
+  });
+
+  it('buildEjsHistoryText 按 historyLayers 取窗口、拼正文、不截断', () => {
+    const long = '文'.repeat(3000);
+    const ctx = makeContext({
+      history: [
+        { role: 'user', content: '第一条' } as any,
+        { role: 'assistant', content: '第二条' } as any,
+        { role: 'user', content: long } as any,
+      ],
+    });
+    const text = buildEjsHistoryText('story', ctx, makeCfg('story', { historyLayers: 1 }));
+    expect(text).not.toContain('第一条');
+    expect(text).toContain('第二条');
+    expect((text.match(/文/g) || []).length).toBe(3000);
+    expect(buildEjsHistoryText('story', ctx, makeCfg('story', { historyLayers: 0 }))).toBe('');
   });
 });

@@ -67,6 +67,20 @@ export interface OrchestratorEvents {
   /** StatePatch 提交后存在失败项时触发（source = 'request_dispatcher' | 'vars_update' 等） */
   onStateCommitError?: (source: string, errors: string[]) => void;
 
+  /**
+   * 🆕 工坊 P2 (ADR-30 D5): 一个 stage 的 Agent 全部跑完、**在本 stage 的标记处理
+   * 与任何后续 stage 之前** 触发，把该 stage 内持权 Agent 的 EJS `vars` 草稿差量
+   * 落库。
+   *
+   * 为什么钉在这里: vars_update / request_dispatcher 的 AI 变量补丁在
+   * `processStageMarkers()` 里提交；EJS 差量必须**先于**它们落，路径冲突时才能
+   * 由 AI 覆盖 EJS（契约级顺序，见设计 §0 / D5）。
+   *
+   * **被 await**（差量必须先落完）但**永不让 stage 失败** —— 内部抛错只 warn。
+   * 参数是本 stage 的 agentId 列表；实际有没有草稿由调用方按表内存在性过滤。
+   */
+  onEjsVarsFlush?: (agentIds: string[]) => void | Promise<void>;
+
   // ===== Phase 6e: Marker Protocol 回调 (旧格式，向后兼容) =====
 
   /**
@@ -229,6 +243,15 @@ export class AgentOrchestrator {
       try {
         await this.executeStage(stage, i);
         this.completedStages.push(`stage_${i}`);
+
+        // 工坊 P2 (D5): EJS vars 差量在本 stage 的标记处理（= AI 补丁提交）之前落库。
+        // 永不让 stage 失败 —— 簿记旁路出问题不该吞掉本轮正文。
+        try {
+          await this.events.onEjsVarsFlush?.([...stage.agents]);
+        } catch (err) {
+          console.warn('[Orchestrator] EJS vars 差量提交失败（不阻塞管线）:', err);
+        }
+
         this.events.onStageComplete?.(i);
 
         // Phase 6e: 处理标记 (craft_request / combat_trigger / char_detect)
