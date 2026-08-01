@@ -13,6 +13,7 @@ import {
   callCharGenAgent,
   callItemGenAgent,
   runCharGenChain,
+  runCharGenForCombat,
   $chargen,
 } from './char-gen-agent';
 import type { CharGenRequest, CharGenAgentDeps, CharGenClient } from './char-gen-agent';
@@ -626,6 +627,66 @@ describe('runCharGenChain', () => {
 
     const result = await runCharGenChain(makeRequest(), deps);
     expect(result.character).toBeDefined();
+  });
+});
+
+// ========== runCharGenForCombat (M3.5：战斗中单召唤、不落库) ==========
+
+describe('runCharGenForCombat', () => {
+  it('复用 char_gen→item_gen 链，输出 SummonedUnitDefinition，不提交 stateManager', async () => {
+    const charClient = makeMockClient(makeCharGenOutput());
+    const itemClient = makeMockClient(makeItemGenOutput());
+    const commit = vi.fn().mockResolvedValue(undefined);
+
+    const deps: CharGenAgentDeps = {
+      clientFactory: (agentId: string) => (agentId === 'char_gen' ? charClient : itemClient),
+      stateManager: { commitChatState: commit },
+    };
+
+    const def = await runCharGenForCombat(
+      {
+        prompt: {
+          race: '亡灵',
+          tier: 1,
+          role: '近战',
+          sourceItem: '死灵之书-残篇',
+          summonerIntent: '召唤食尸鬼为己作战',
+        },
+        constraints: { divinityCap: 3, attributeBudget: 300, durationRounds: 2 },
+        base: makeRequest(),
+      },
+      deps,
+    );
+
+    // ★ 不落库：stateManager.commitChatState 绝不被调用
+    expect(commit).not.toHaveBeenCalled();
+    // 产出 SummonedUnitDefinition
+    expect(def).toBeDefined();
+    expect(def.name).toBe('艾琳');
+    expect(charClient.chat).toHaveBeenCalledTimes(1);
+    expect(itemClient.chat).toHaveBeenCalledTimes(1);
+  });
+
+  it('返回的 definition 字段齐全（参战时机/持续/预算）', async () => {
+    const deps: CharGenAgentDeps = {
+      clientFactory: (agentId: string) =>
+        (agentId === 'char_gen'
+          ? makeMockClient(makeCharGenOutput())
+          : makeMockClient(makeItemGenOutput())) as CharGenClient,
+    };
+
+    const def = await runCharGenForCombat(
+      {
+        prompt: { sourceItem: '死灵之书', summonerIntent: 'x' },
+        constraints: { divinityCap: 5, attributeBudget: 300, durationRounds: 3 },
+        base: makeRequest(),
+      },
+      deps,
+    );
+
+    expect(def.duration?.rounds).toBe(3);
+    expect(def.joinTiming).toBe('next_round_head'); // 默认下轮参与（保不变量①）
+    expect(def.skills).toBeDefined();
   });
 });
 

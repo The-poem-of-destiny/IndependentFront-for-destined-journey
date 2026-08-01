@@ -514,6 +514,103 @@ export async function runCharGenChain(
   return { character, patches, narrativeSummary };
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// 战斗 v3 召唤入口（M3.5，架构 §十 10.2 / plan §6.3）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 战斗 v3 的新单位生成入口 — char_gen 战斗中调用（架构 §十 10.2，plan §6.3）。
+ *
+ * 与 runCharGenChain 并列存在，不改现有入口。差异：
+ *   - 「战斗中、单个、**不落库**」——召唤物只活在 CombatState 内（ADR-11：单位属性/参战时机/
+ *     持续时长 = 创造性归 char_gen；插入先攻/扣血/到期移除 = 确定性归内核）
+ *   - 复用 callCharGenAgent → callItemGenAgent → assembleCharacterState 的现有链路，
+ *     但**跳过 buildCharGenPatches / commitChatState**（不产生 add_character patch、不写 DB）
+ *   - 输出 SummonedUnitDefinition（供 coordinator 构造 SupplyUnit 提交内核）
+ *
+ * @param req.prompt      召唤引导（种族/层级/定位/来源物品/召唤者意图）
+ * @param req.constraints 边界（divinityCap 属性预算 持续轮数）——仅供 prompt 引导与 coordinator clamp
+ * @param req.base        基础 CharGenRequest（saveId/context/endpoint/configs/worldBooks/presets）——复用上游请求上下文
+ */
+export async function runCharGenForCombat(
+  req: {
+    prompt: {
+      race?: string;
+      tier?: number;
+      role?: string;
+      sourceItem: string;
+      summonerIntent: string;
+    };
+    constraints: { divinityCap: number; attributeBudget: number; durationRounds?: number };
+    base: CharGenRequest;
+  },
+  deps: CharGenAgentDeps,
+): Promise<import('./combat-v3/types').SummonedUnitDefinition> {
+  // 构造一个 char_gen 可消费的 marker（bodyText 携带召唤引导，attribute 携带指定信息）
+  const tierStr = req.prompt.tier !== undefined ? String(req.prompt.tier) : undefined;
+  const rawContent = [
+    '<char_gen_request race="' + (req.prompt.race ?? '') + '" tier="' + (tierStr ?? '') + '">',
+    `来源物品: ${req.prompt.sourceItem}`,
+    req.prompt.role ? `战斗定位: ${req.prompt.role}` : '',
+    `召唤者意图: ${req.prompt.summonerIntent}`,
+    req.constraints.durationRounds ? `持续回合: ${req.constraints.durationRounds}` : '',
+    '</char_gen_request>',
+  ]
+    .filter((s) => s !== '')
+    .join('\n');
+
+  const marker: CharGenRequestMarker = {
+    type: 'char_gen_request',
+    attributes: {
+      characterName: undefined,
+      race: req.prompt.race,
+      tier: tierStr,
+      characterType: 'summon',
+      faction: undefined,
+    },
+    bodyText: rawContent,
+    rawContent,
+    position: 0,
+  };
+
+  const request: CharGenRequest = { ...req.base, marker };
+
+  // 链：char_gen → item_gen → assemble（无 buildPatches / 无 commitChatState）
+  const charData = await callCharGenAgent(request, deps);
+  const itemData = await callItemGenAgent(charData, request, deps);
+  const character = assembleCharacterState(charData, itemData, { present: true });
+
+  // 映射为 SummonedUnitDefinition（不落库）。CharacterState 无 defense/dr（那些在
+  // CombatParticipant），召唤物防御/DR 走保守默认，由内核/后续战斗管线逐步精化。
+  return {
+    name: character.name,
+    race: character.race,
+    tier: character.tier,
+    level: character.level,
+    attributes: { ...character.attributes },
+    hp: character.maxHp,
+    mp: character.maxMp,
+    sp: character.maxSp,
+    defense: 0,
+    dr: 0,
+    penetration: 0,
+    hitBonus: 10,
+    dodgeBonus: 5,
+    weaponAtk: 30,
+    // 召唤物自身的登神强度：CharGenOutput 无顶层 divinity，按层级保守推导（T2+ 才非零），
+    // 并严格 clamp 到约束 cap（架构 §6.2 ④ divinity ≤ 物品自身声明）
+    divinity: Math.min(req.constraints.divinityCap, Math.max(0, charData.tier - 1)),
+    side: 'player',
+    joinTiming: 'next_round_head',
+    ...(req.constraints.durationRounds
+      ? { duration: { rounds: req.constraints.durationRounds } }
+      : {}),
+    actionEconomy: 'full',
+    skills: charData.skills.map((s) => s.name),
+    sourceItem: req.prompt.sourceItem,
+  };
+}
+
 // ========== Internal Helpers ==========
 
 // ── 战斗 v2 (M4 5.5b): <modifiers> 子元素解析 + 校验接入 ──

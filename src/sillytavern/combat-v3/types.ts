@@ -639,9 +639,143 @@ export type RequiredInput =
       blockDamageFactor?: number;
       damageTakenOverrideId?: string;
     }
-  | { kind: 'BoundedAdjudication' }
+  | {
+      kind: 'BoundedAdjudication';
+      /** 由 evaluateAdjudication 校验的提案（架构 §十一 11.2） */
+      proposal: ProposedAdjudication;
+      /** 触发者 id（提交裁决的战斗 Agent / 单位） */
+      unitId: string;
+    }
   | { kind: 'BeginOutput'; channel: DiceChannel }
-  | { kind: 'CharGenRequest' };
+  | {
+      kind: 'CharGenRequest';
+      /** 幂等键：SupplyUnit 用它从 frame 恢复（架构 §十 10.2 / plan §6.2 ②） */
+      requestId: string;
+      prompt: {
+        race?: string;
+        tier?: number;
+        role?: string;
+        sourceItem: string;
+        summonerIntent: string;
+      };
+      constraints: {
+        divinityCap: number;
+        attributeBudget: number;
+        durationRounds?: number;
+      };
+    };
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SummonedUnitDefinition（架构 §十 10.2，char_gen 战斗中调用产出）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 召唤物的定义（由 char_gen Agent 产出，战斗中不落库）。
+ *
+ * 与 CombatUnitState 的关系：此对象是「定义」，coordinator/reducer 把它转成运行时
+ * CombatUnitState（补 id / statusEffects[] / ability / 槽位）插进 state.units。
+ *
+ * 参战时机 / 持续时长 / 行动预算 = 创造性（char_gen 判定，架构 §十 10.2 —— ADR-11）；
+ * 插入先攻 / 扣血 / 到期移除 / 槽位记账 = 确定性（内核）。
+ */
+export interface SummonedUnitDefinition {
+  /** 展示名（逻辑键，铁律 ①；实例化时补唯一 id） */
+  name: string;
+  /** 种族 */
+  race: string;
+  /** 生命层级 1-7 */
+  tier: number;
+  /** 等级 */
+  level: number;
+  /** 五维 */
+  attributes: { str: number; dex: number; con: number; int: number; spi: number };
+  /** HP / MP / SP（当前=最大，入编满状态） */
+  hp: number;
+  mp: number;
+  sp: number;
+  /** 防御 / DR / 穿透 */
+  defense: number;
+  dr: number;
+  penetration: number;
+  /** 命中 / 闪避加值 */
+  hitBonus: number;
+  dodgeBonus: number;
+  /** 武器攻击力 */
+  weaponAtk: number;
+  /** 登神强度 0-8（v2 §四 4.2） */
+  divinity: number;
+  /** 阵营（默认 player，由召唤者阵营推导，构建时选） */
+  side?: 'player' | 'enemy';
+  /** 技能名列表（供攻击 slot 解析能力） */
+  skills?: readonly string[];
+  /** 参战时机（架构 §十 10.2，缺省内核取 next_round_head 保不变量①纯洁） */
+  joinTiming?: 'this_round_tail' | 'next_round_head';
+  /** 定时消失（架构 §十 10.2 / §十 10.3 到期移除） */
+  duration?: { rounds: number };
+  /** 本轮行动预算（架构 §十 10.2：full=1攻1动 / partial=仅动作 / no_action=0） */
+  actionEconomy?: 'full' | 'partial' | 'no_action';
+  /** 召唤物自带的 DSL automaton（走 compileEffectProgram 编译，失败剔除不阻断） */
+  automata?: readonly EffectAutomaton[];
+  /** 静态管线修正（modifiers[] 编译的 push-handler 已进 automata，此处语义保留给 runCharGenForCombat 透传） */
+  modifiers?: readonly unknown[];
+  /** 召唤来源物品/技能（叙事溯源，进 UnitSummoned.sourceItem） */
+  sourceItem?: string;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// BoundedAdjudication / 有界裁决（架构 §十一 11.2）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** 一条不变量检查结果（ProposedAdjudication 自带，内核只验是否全 true） */
+export interface InvariantCheck {
+  name: string;
+  ok: boolean;
+  detail?: string;
+}
+
+/**
+ * 战斗 Agent 提交的有界裁决提案（架构 §十一 11.2）。
+ *
+ * 「不验证创造性」——内核只验 verifiableBounds 边界，创造性的效果描述/reason 直进 journal。
+ */
+export interface ProposedAdjudication {
+  /** 自然语言效果描述（"认知丧失 → 永久失能"），不验证，进 journal */
+  effectDescription: string;
+  /** 神性优先级，内核验证是否够压目标（divinity ≥ target.divinity） */
+  divinity: number;
+  /** 🔒 内核只验这部分 */
+  verifiableBounds: {
+    /** 目标是否合法（在场 / 类型可约束） */
+    targetLegal: boolean;
+    /** 数值范围（v2 §13.2 决策 j：超品质上限 clamp，不 reject） */
+    numericalRange?: { min: number; max: number };
+    /** 不变量检查列表（全 true 才算合规） */
+    invariantCompliant: readonly InvariantCheck[];
+  };
+  /** 请求覆盖的 closed RuleKey（如 'terminal.forceTerminal' / 'action.freezeSlot'），可选。
+   *  用 string 而非 rule-keys 的 RuleKey 联合避免循环依赖（rule-keys.ts import 本文件）；
+   *  合法性在 evaluateAdjudication 内由 V3_RULE_KEYS 白名单校验。 */
+  requestedRuleOverride?: string;
+  /** 裁判理由，进 journal 供审计 / 回放（架构 §十一 11.2） */
+  reason: string;
+  /** 目标单位 id（divinity 对比用） */
+  targetId?: string;
+}
+
+/**
+ * 内核实锤的裁决结果（纯函数 evaluateAdjudication 产出）。
+ */
+export type AdjudicationResult =
+  | {
+      kind: 'accepted';
+      /** 产出的终局/override 事件策略 */
+      effect:
+        | { eventKind: 'RuleOverridden'; ruleKey: string; payload?: unknown }
+        | { eventKind: 'MiracleTriggered'; payload?: unknown };
+      /** 进 journal 的理由（ProposedAdjudication.reason 原样透传） */
+      reason: string;
+    }
+  | { kind: 'rejected'; reason: string };
 
 // ──────────────────────────────────────────────────────────────────────────────
 // CombatCommand / CommandRejection / CombatTransition
@@ -724,7 +858,7 @@ export type CombatCommand =
       kind: 'Adjudicate';
       actorId: string;
       cost: 'none';
-      payload: unknown;
+      payload: { requestId: string; adjudication: ProposedAdjudication };
     }
   | {
       commandId: string;
@@ -744,7 +878,7 @@ export type CombatCommand =
       kind: 'SupplyUnit';
       actorId: string;
       cost: 'none';
-      payload: unknown;
+      payload: { requestId: string; definition: SummonedUnitDefinition };
     }
   | {
       commandId: string;
@@ -1151,8 +1285,8 @@ export interface ResolutionFrame {
   recompute?: DamageRecomputeCtx;
 }
 
-/** 微步骤标识（架构 §三 3.3）——M3 只用 'damage.preview' 一个，M4 补 spawn 等 */
-export type ResolutionStep = 'damage.preview';
+/** 微步骤标识（架构 §三 3.3）——M3 用 'damage.preview'，M3.5 加 'spawn'（CharGenRequest 冻结） */
+export type ResolutionStep = 'damage.preview' | 'spawn';
 
 /**
  * damage.preview 冻结时暂存的伤害上下文，恢复后用于回到 damage.compute **重算**。
@@ -1434,6 +1568,8 @@ export type EffectIntent =
       count?: number;
       duration?: { rounds: number };
       joinTiming?: 'this_round_tail' | 'next_round_head';
+      /** 模板引用：命中预生成召唤物池（§6.4）直接实例化，缺省触发 CharGenRequest（A35-1） */
+      templateRef?: string;
     }
   | {
       kind: 'RequestChoiceIntent';
@@ -1447,6 +1583,9 @@ export type EffectIntent =
 
 /** EffectIntent 的 kind 枚举（8 大类，供编译校验 #3） */
 export type EffectIntentKind = EffectIntent['kind'];
+
+/** SpawnOrDespawnIntent 收敛（召唤出口，M3.5） */
+export type SpawnOrDespawnIntent = Extract<EffectIntent, { kind: 'SpawnOrDespawnIntent' }>;
 
 /** 反射/递归深度上限（架构 §九 9.1 / §五 5.4） */
 export const MAX_REFLECTION_DEPTH = 2;

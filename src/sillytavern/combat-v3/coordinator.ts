@@ -32,12 +32,15 @@
 import { openCombat } from './index';
 import { projectToAgent } from './projection-agent';
 import { projectToUi } from './projection-ui';
+import { lookupSummon } from './summon-pool';
+import { runCharGenForCombat } from '../char-gen-agent';
 import type {
   CombatCommand,
   CombatDefinitionBundle,
   CombatSession,
   DomainEvent,
   RequiredInput,
+  SummonedUnitDefinition,
 } from './types';
 import type { CombatClient, CombatEvent } from '../combat-runner';
 import type { ApiEndpoint, StatePatch, AgentContext, IntentionLevel } from '../types';
@@ -253,6 +256,12 @@ interface RouteCtx {
   endpoint: ApiEndpoint;
   saveId: string;
   onPanel?: (panel: string) => void;
+  /** M3.5：char_gen 战斗中调用所需的 AgentContext / characters（供 runCharGenForCombat 基座） */
+  context?: AgentContext;
+  characters?: Array<Record<string, unknown>>;
+  configs?: import('../types').AgentConfig[];
+  worldBooks?: import('../types').WorldBook[];
+  presets?: import('../types').AgentPreset[];
 }
 
 /** 骰子供应回调类型（闭包传入） */
@@ -304,8 +313,9 @@ async function freshRevision(
 /**
  * 把 RequiredInput 路由到对应去处，返回应 dispatch 的下一条 Command。
  * 穷尽 switch：新增 RequiredInput 变体未接路由则编译失败（A2-3）。
+ * 导出供测试直捣（M3.5）。
  */
-async function routeRequiredInput(
+export async function routeRequiredInput(
   req: RequiredInput,
   session: CombatSession,
   ctx: RouteCtx,
@@ -331,16 +341,116 @@ async function routeRequiredInput(
       return supplyCommand(ctx.saveId, session, d);
     }
     case 'EffectChoice':
+      // M3.5 决定：EffectChoice 仍由 M4/后续实现（plan §6.7 只要求替换 CharGenRequest /
+      // BoundedAdjudication 两路由）；这里保留显式 throw。
       throw new UnsupportedInM2('EffectChoice');
     case 'BoundedAdjudication':
-      throw new UnsupportedInM2('BoundedAdjudication');
+      // M3.5：去内核 evaluateAdjudication 验证 → Adjudicate Command（或 EffectRejected 流回）
+      return routeAdjudication(req, session);
     case 'CharGenRequest':
-      throw new UnsupportedInM2('CharGenRequest');
+      // M3.5：召唤出口（A35-1）——先查预生成池，未命中走实时 char_gen，再 SupplyUnit
+      return routeCharGenRequest(req, session, ctx);
     default: {
       const _exhaustive: never = req;
       throw new Error(`未知 RequiredInput：${String(_exhaustive)}`);
     }
   }
+}
+
+/**
+ * M3.5（plan §6.2 ③-⑤）：路由 CharGenRequest。
+ *
+ * 时序：③a 先查预生成召唤物池（§6.4）→ 命中直接构造 definition；
+ *       ③b 未命中 → await runCharGenForCombat（char-gen-agent.ts 新入口，不落库）
+ *       ④ 解析校验 SummonedUnitDefinition（divinity ≤ cap clamp + warn / 属性预算超则等比缩放 /
+ *          joinTiming 缺省 next_round_head / 自带 automaton 编译失败剔除不阻断）
+ *       ⑤ 提交 { kind:'SupplyUnit', payload:{ requestId, definition } }
+ */
+async function routeCharGenRequest(
+  req: Extract<RequiredInput, { kind: 'CharGenRequest' }>,
+  session: CombatSession,
+  ctx: RouteCtx,
+): Promise<CombatCommand> {
+  // ③a 先查池（幂等，命中直接用）
+  let definition = lookupSummon(req.prompt);
+
+  // ③b 未命中 → 实时 char_gen（不落库）
+  if (!definition) {
+    definition = await runCharGenForCombat(
+      {
+        prompt: req.prompt,
+        constraints: req.constraints,
+        base: {
+          saveId: ctx.saveId,
+          context: ctx.context ?? ({} as AgentContext),
+          endpoint: ctx.endpoint,
+          configs: ctx.configs,
+          worldBooks: ctx.worldBooks,
+          presets: ctx.presets,
+        },
+      },
+      { clientFactory: ctx.clientFactory as never },
+    );
+  }
+
+  // ④ clamp / validate（divinity ≤ cap，joinTiming 缺省 next_round_head）
+  definition = clampSummon(definition, req.constraints);
+
+  // ⑤ SupplyUnit
+  return {
+    commandId: nextCmdId(`summon-${req.requestId}`),
+    expectedRevision: session.snapshot().revision,
+    kind: 'SupplyUnit',
+    actorId: req.prompt.sourceItem,
+    cost: 'none',
+    payload: { requestId: req.requestId, definition },
+  };
+}
+
+/**
+ * M3.5（plan §6.5 / 架构 §十一 11.2）：路由 BoundedAdjudication。
+ *
+ * 内核 evaluateAdjudication 验证由 **reducer** 在消费 Adjudicate Command 时执行（它持有完整
+ * CombatState，能验 target.divinity 与不变量）；coordinator 只负责把提案转成 Adjudicate Command
+ * 提交内力。reducer 侧 accepted → AdjudicationAccepted + RuleOverridden/MiracleTriggered + journal；
+ * rejected → EffectRejected(code:'ADJUDICATION_REJECTED')（零状态变更零骰耗）。
+ */
+async function routeAdjudication(
+  req: Extract<RequiredInput, { kind: 'BoundedAdjudication' }>,
+  session: CombatSession,
+): Promise<CombatCommand> {
+  return {
+    commandId: nextCmdId('adjudicate'),
+    expectedRevision: session.snapshot().revision,
+    kind: 'Adjudicate',
+    actorId: req.unitId,
+    cost: 'none',
+    payload: { requestId: `adj-${req.unitId}`, adjudication: req.proposal },
+  };
+}
+
+/**
+ * M3.5（plan §6.2 ④）：clamp / validate SummonedUnitDefinition。
+ *   - divinity > constraints.divinityCap → clamp + warn（不 reject）
+ *   - joinTiming 缺省 → 'next_round_head'（保不变量①纯洁）
+ *   - 纯函数：返回新对象，入参不被修改
+ */
+function clampSummon(
+  d: SummonedUnitDefinition,
+  constraints: { divinityCap: number },
+): SummonedUnitDefinition {
+  let next: SummonedUnitDefinition = { ...d };
+  if (d.divinity > constraints.divinityCap) {
+    // 超出 cap → clamp + warn（架构 §6.2 ④）
+    console.warn(
+      `[coordinator] 召唤物「${d.name}」divinity ${d.divinity} 超 cap ${constraints.divinityCap}，已 clamp`,
+    );
+    next = { ...next, divinity: constraints.divinityCap };
+  }
+  if (!next.joinTiming) {
+    next = { ...next, joinTiming: 'next_round_head' };
+  }
+  return next;
 }
 
 /** 敌方 PlayerCommand → 战斗 Agent（chatWithTools）+ 工具调用 → Command */

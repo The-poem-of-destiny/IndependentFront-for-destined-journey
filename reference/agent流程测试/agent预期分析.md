@@ -565,12 +565,16 @@ agent-client.ts: chatWithTools()
 2. `assembleCharacterState(charData, itemData)` → 合并 char_gen + item_gen 输出为完整 `CharacterState`
 3. `buildCharGenPatches(character)` → 生成 `StatePatch[]`（add_character + add_skill×N + add_item×N + equip_item×N）
 4. 通过 `stateManager.commitChatState(patches)` 写入
+5. **🆕 M3.5**: 战斗召唤走并列入口 `runCharGenForCombat`（战斗中、单个、**不落库**）→ 复用 1→2、
+   跳过 3→4，产出 `SummonedUnitDefinition`。char_gen 模板新增 `<combatParticipation ...>` 输出段
+   （choose `joinTiming` / `duration_rounds` / `action_economy`，仅召唤物参战元输出）。
 
 **⚠️ 调试检查点**:
 - `<char_detect>` 标记是否被 story Agent 输出
 - 查重是否正确（避免生成同名角色）
 - `roll_attributes` 返回的属性是否在层级约束范围内
 - 性格编码格式是否符合 `wOaGz(A)` 模式
+- **🆕 M3.5**: `runCharGenForCombat` 是否误落库（若是必 bug）；召唤物 `joinTiming`/`duration`/`actionEconomy` 是否带进 `SummonedUnitDefinition`
 
 ---
 
@@ -749,6 +753,84 @@ interface Skill {
 - `parseSkillsXML` 是否丢失了 effect/script 子元素
 - `assembleCharacterState` 生成的 Skill 对象是否为空壳（缺 effects/scripts）
 - 模板是否需要更新以指导 AI 输出 `<effect>` 和 `<script>` 子元素
+- **🆕 M3.5**: item_gen 模板已新增 `<automaton>` JSON 块（战斗 v3 DSL 编译链消费，`subscribe` 取窗口清单 /
+  `trigger` 封闭文法 / `intents` 8 大类 / `divinity` ≤ 元素自身声明）。标准 `<script>`（$ API）保留给战斗外路径。
+
+---
+
+## 5.5 combat_v3 Agent — 战斗 v3 敌方决策（M3.5 新增）
+
+### 定位
+
+`combat_v3` 是战斗 v3 内核主持流程下的**敌方决策 Agent**（架构 §十四 14.7）。它不是 DAG 编排的 Stage Agent，
+而是 `coordinator` 在 `RequiredInput.PlayerCommand`（敌方单位），或裁决/召唤等开放性出口时按需唤起。
+
+**内核实锤、Agent 只决策**（ADR-11）：状态机推进 / 骰子 / 终局（hp_zero / morale_routed / flee_success /
+force_terminal）由内核 code 判定；Agent 只负责为敌方单位选动作、或在无法用标准动作表达时提交裁决。
+
+### 可用工具及其 Schema
+
+`AGENT_TOOL_MAP['combat_v3']`（`agent-tools.ts:865-871`）：
+
+| 工具 | 用途 |
+|------|------|
+| `declare_attack` | 声明攻击（传 targetName/skillName/intentionLevel；**禁止传骰值**） |
+| `declare_action` | 战术动作（道具/移动/专注/防御） |
+| `pass_slot` | 放弃攻击 or 动作槽位 |
+| `flee` | 逃跑 |
+| `submit_adjudication` | **M3.5 启用**：提交 BoundedAdjudication 有界裁决（仅当 divinity ≥ 5 法则级） |
+| `write_summary` | 战斗结束/需要时输出 ≤500 字摘要 |
+
+### 完整输出追踪（决策轮示例）
+
+**思维链**:
+```
+<thinking>
+- 轮到敌方「霜爪座狼头狼」行动
+- 面板: 我方 HP 已低于半血，头狼满血且技能(霜碎利爪/凛风吐息)可用
+- 决策: 用凛风吐息做范围攻击, 预期清掉我方召唤物
+</thinking>
+```
+
+**工具调用序列**（一次只提交一个 Command，MAX_TOOL_ROUNDS=8）:
+```
+declare_attack({ actorName: "霜爪座狼头狼", targetName: "召唤物", skillName: "凛风吐息", intentionLevel: "常规" })
+→ coordinator.toolCallToCommand → DeclareAttack Command → 内核走微步骤链（骰子从 DiceTape 通道取，Agent 不得传值）
+```
+
+**M3.5 开放出口分支**:
+```
+场景: 敌方要施展剧情级「概念抹杀」，无法用标准动作表达
+submit_adjudication({
+  effectDescription: "认知丧失 → 永久失能",
+  divinity: 6,                        // ≥ 5 法则级，未达标 won't pass 内核
+  verifiableBounds: { targetLegal: true, invariantCompliant: [{name:"x",ok:true}] },
+  requestedRuleOverride: "terminal.forceTerminal",
+  reason: "概念宕机"
+})
+→ coordinator.routeAdjudication → Adjudicate Command
+   → reducer.adjudicate 内核 evaluateAdjudication（六步验证）
+   → accepted: AdjudicationAccepted + RuleOverridden/MiracleTriggered (journal 带 reason)
+   → rejected: EffectRejected(code:'ADJUDICATION_REJECTED')
+```
+
+### 下游解析链路
+
+`coordinator.ts`:
+1. `routeEnemyCommand` → `chatWithTools`（工具按 AGENT_TOOL_MAP['combat_v3'] 注入）
+2. `toolCallToCommand` → 把工具调用翻译成内核 `CombatCommand`（DeclareAttack/DeclareAction/Pass*/Flee）
+3. `routeAdjudication`（M3.5）→ `submit_adjudication` → `Adjudicate` Command → reducer 内核 evaluateAdjudication
+4. `routeCharGenRequest`（M3.5）→ 召唤: ①查预生成池 `summon-pool.ts` ②未命中 `runCharGenForCombat`（char-gen-agent，不落库）
+   vs `runCharGenForCombat` → SummonedUnitDefinition → `SupplyUnit` Command → reducer `resumeSpawn`（插 units / 先攻尾 / 召唤时限 / 摘 automaton）
+
+`runCharGenForCombat` 与 `runCharGenChain` **并列**（不改现有入口）：前者「战斗中、单个、不落库」，只产出
+`SummonedUnitDefinition`（供内核 Lifecycle 管理），不 `buildCharGenPatches`、不 `commitChatState`。
+
+**⚠️ 调试检查点**:
+- Agent 是否传骰值 / 调 combat_end（M3.5 prompt 已禁止，应由内核判）
+- `submit_adjudication` 的 `divinity < 5` 是否被内核 reject（A35-4 硬门槛）
+- 单场 `AdjudicationAccepted` 数 > `AttackResolved` 20% → 词汇缺口告警（架构 §十一 11.4）
+- 召唤是否经 `runCharGenForCombat` 不落库（若误落 add_character patch 即 bug）
 
 ---
 

@@ -7,6 +7,7 @@
  */
 
 import type {
+  ActiveEffectIndex,
   CombatPhase,
   CommandRejection,
   DiceTapeState,
@@ -48,15 +49,24 @@ export interface PhaseOutcome {
   /** 回合变更（round.close 推进到下一轮时 +1） */
   round?: number;
   /**
-   * M3：damage.preview 触发 RequestChoice 时冻结的挂起上下文（reducer 据它构造 ResolutionFrame）。
-   * 仅 attack phase 用；不进入 state.ts import 的形状（这是 phase 层的即时信息）。
+   * M3.5：需从 state.units 移除的单位 id（召唤时限到期 UnitDespawned，A35-3）。
+   * applyOutcome 会同步从 initiativeOrder 移除；随同 activeEffects 里对应的 automaton 摘除。
    */
-  suspended?: {
-    /** 重算所需全部伤害入参 + 格挡因子 */
-    recompute: ImportedRecomputeCtx;
-    /** 暂停时的原始最终伤害（用于 RequiredInput.EffectChoice.damagePreview） */
-    finalDamage: number;
-  };
+  removeUnitIds?: readonly string[];
+  /** M3.5：ActiveEffectIndex 覆盖（召唤物 automaton 增量/摘除用 updateIndex 结果） */
+  activeEffects?: ActiveEffectIndex;
+  /**
+   * M3/M3.5：phase 挂起上下文（reducer 据此构造 ResolutionFrame）：
+   *   - damage.preview 冻结（EffectChoice）：recompute + finalDamage
+   *   - spawn 冻结（CharGenRequest）：spawn 标记（requiredInput 已带 requestId/prompt/constraints）
+   * 仅 attack / action phase 用；不进入 state.ts import 的形状（这是 phase 层的即时信息）。
+   */
+  suspended?:
+    | {
+        recompute: ImportedRecomputeCtx;
+        finalDamage: number;
+      }
+    | { spawn: boolean };
 }
 
 /** phase 层的重算上下文（避免 types.ts 循环依赖，复用字段名） */
