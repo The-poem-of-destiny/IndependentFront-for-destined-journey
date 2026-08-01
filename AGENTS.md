@@ -312,7 +312,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | Audio     | 音频系统 v1.0（双通道+三后端+按名寻址+场景配乐）       | ✅                  |
 | 素材      | 素材管理系统 v1.0（渲染面+大画像+裁剪台+画像弹窗）     | ✅                  |
 | 战斗 v2   | 战斗系统架构 v2（管道+中间件+6大类+19event+独立面板）  | ✅ M5完成 待M6真机  |
-| 战斗 v3   | 代码内核主持流程（Kernel+DiceTape+EffectIntent+DSL）   | 🔄 M3完成 待M3.5    |
+| 战斗 v3   | 代码内核主持流程（Kernel+DiceTape+EffectIntent+DSL）   | 🔄 M3.5完成 待M4    |
 | 工坊 P0   | 世界书迁出 localStorage → Dexie v14（+ 进 FullBackup） | ✅                  |
 | 工坊 P0b  | 美化规则迁出 localStorage → Dexie v15                  | ✅                  |
 | 工坊 P1   | 创意工坊（浏览/安装/更新/卸载/启用，= 7f）             | 🔒 入口临时下线     |

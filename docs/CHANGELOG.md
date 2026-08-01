@@ -9,6 +9,34 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 战斗 v3 M3.5 — 开放性出口：CharGenRequest + BoundedAdjudication + prompt 改写 ｜ ✅ 完成（2026-08-01）
+
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§十 char_gen 战斗中调用 / §十一 BoundedAdjudication 有界裁决）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §6。把 v3 内核从「封闭战斗」打开——召唤走 char_gen（CharGenRequest），创意效果走有界裁决（BoundedAdjudication），并改写 `combat_v3` / `item_gen` / `char_gen` 三个 prompt。
+
+**新建 3 文件:**
+
+- `combat-v3/adjudication.ts` — `evaluateAdjudication(p, state)` 纯函数六步验证（照架构 §11.2）：divinity 硬门槛 <5 reject（**A35-4**）/ 目标合法 / RuleKey 已注册 / 不变量 / 边界 / 冲突检测；通过产 `AdjudicationAccepted` + `RuleOverridden`（或 `MiracleTriggered`）+ journal 带 reason（A35-5）
+- `combat-v3/summon-pool.ts` — §6.4 预生成召唤物池最小实现（key 归一化 + `lookupSummon`），内容留空走实时 char_gen（「M3.5 不做也能验收」）
+- `combat-v3/phases/spawn.test.ts` — A35-1/2/3 + actionEconomy 三态 + FP 原子扣费
+
+**关键改动:**
+
+- `coordinator.ts` — 替换 M2 两处 `throw UnsupportedInM2`：**CharGenRequest** 路由（③a 先查池 → ③b `await runCharGenForCombat` → ④ 解析校验 `SummonedUnitDefinition`（divinity≤cap clamp / 属性总和≤budget 等比缩放 / joinTiming 缺省 next_round_head / automaton 走 compileEffectProgram 失败剔除不阻断）→ ⑤ 提交 `SupplyUnit`）；**BoundedAdjudication** 路由（调 evaluateAdjudication，reject → EffectRejected(ADJUDICATION_REJECTED) 流回；通过 → 提交 `Adjudicate`）。**EffectChoice 保留 throw**（plan §6.7 只要求替换另两路）
+- `reducer.ts` — `SupplyUnit` frame 恢复分支（plan §6.2 ⑥）：从冻结 frame 续跑 → 插 state.units → joinTiming='this_round_tail' `draw(initiative,1)` 插先攻序列尾部 / 'next_round_head' 下轮参与 → actionEconomy 三态槽位 → duration → `ApplyStatus('召唤时限', rounds)` → automaton 增量进 ActiveEffectIndex → **与 SpendResource(FP,100) 同一次原子提交**（不变量④）→ `UnitSummoned` + `ResourceSpent`；`Adjudicate` 内核重锤验证（持完整 CombatState 验 target.divinity）产事件 + journal
+- `phases/action.ts` — `SpawnOrDespawnIntent` 且 `templateRef` 缺省 ⇒ freeze spawn frame 返回 `RequiredInput.CharGenRequest`（A35-1，内核不存 Promise）；命中 ⇒ 直接产 UnitSummoned
+- `phases/round.ts` — 召唤时限到期 `round.close` 移除 → `UnitDespawned` + updateIndex 摘 automaton（A35-3）
+- `char-gen-agent.ts` — 新增 `runCharGenForCombat`（战斗中、单个、**不落库**，复用现有链跳过 buildPatches/DB）；与 `runCharGenChain` 并列，不改现有入口
+- `types.ts` — 定型 `Adjudicate`/`SupplyUnit` payload、`RequiredInput.CharGenRequest`/`BoundedAdjudication` 完整形状、新增 `SummonedUnitDefinition`/`ProposedAdjudication`/`AdjudicationResult`
+- `state.ts` / `phases/outcome.ts` — `removeUnitIds`/`activeEffects` 收进 `applyOutcome`；修 `applyPending` 同名 buff tick 语义（remainingTime 不同=覆盖，相同=叠层）
+
+**prompt 改写（`data/defaults/agent-config.json`，raw slicing 禁 prettier）:** `combat_v3` 删除掷骰指令（骰值由内核提供）+ 删除判输赢调 combat_end（终局内核判）+ 改为逐步决策模式（每次一个 Command）+ 新增「无法用标准动作表达 ⇒ submit_adjudication，且仅当 divinity ≥ 法则级」+ 保留叙事摘要（write_summary ≤500 字）；`item_gen` 输出改 `<automaton>` JSON 块 + 格式约束段（subscribe 窗口清单 / trigger 封闭文法 / intents 8 大类 / divinity ≤ 物品声明）；`char_gen` 新增 `combatParticipation` 输出段。**采 additive**：新增段为可选，保留 `<script>` 主链（避免破坏 assembleCharacterState 与既有测试）。
+
+**`reference/agent流程测试/agent预期分析.md`:** 新增 §5.5 combat_v3 完整输出追踪（思维链 → 工具调用序列 → JSON）+ 下游解析链路。
+
+**验收:** A35-1 ~ A35-5 全过（templateRef 缺省触发 / joinTiming 时序 / 时限到期移除 / divinity<5 reject / 通过产事件+journal）。全量 **5191 测试 / 169 文件全绿**（新增 25）；typecheck 0 错误；prettier 干净。
+
+**已知遗留（M4 对齐）:** 第 06 场 fixture 端到端（A35-6）未做——fixture 是 concept 版（`_synthetic`，用老 DeclareAction+summon payload 结构），与 SpawnOrDespawnIntent 内核流不对接，M4 重做；`<automaton>` JSON 实装消费（compile → windows 求值）归 M4；`runCharGenForCombat` 召唤物防御/DR 用保守默认 0，后续精化。
+
 ### 战斗 v3 M3 — 效果系统：DSL + 编译链 + windows 实装 + damage.preview ｜ ✅ 完成（2026-08-01）
 
 架构真源: `docs/reference/combat-system-architecture-v3.md`（§五 ReactionWindow / §六 EffectIntent / §七 EffectAutomaton DSL + 编译链 / §九 反射专项）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §5。把「效果」从 v2 的任意 JS 脚本（`new Function` 执行）翻转为**声明式 automaton + 封闭微文法表达式**，`windows.ts` 从空转变实装。**战斗内全链路零 `new Function` / `eval`**（铁律 2，C1 战斗内消解）。
