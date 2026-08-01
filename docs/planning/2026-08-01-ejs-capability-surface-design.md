@@ -621,7 +621,40 @@ T7 那行写着「两后端逐条目字节比对闸门（§3.14）」—— **�
 同轮补齐：`ejs-backend.test.ts`（接缝本身此前无测试）、lodash T5 十个方法的测试、
 `agent-templates.test.ts` 的能力面接线回归（含「`lore.get` 读不到该 Agent 看不见的书」这条安全断言）。
 
-**：EJS 侧（本设计）已具备边界 ——
+### 11.2 Legacy 后端的退场路线（2026-08-01 裁定）
+
+问：既然 QuickJS 是边界，Legacy 还留着干嘛？答：**该删的先是「自动回退」，不是 Legacy 本身** —— 这两件事之前被混在一起。
+
+原形态是**静默安全降级**：wasm 装不上 → 退回 `new Function` → 世界书照常渲染 → 用户毫不知情。
+`installProductionEjsBackend` 的注释写着「调用方据返回值决定要不要提示用户」，
+而 `main.ts` 写的是 `void installProductionEjsBackend();` —— **返回值被丢掉了**。
+
+这比「没有隔离」更糟：没有隔离时你知道自己没有；有一个会静默失效的隔离，
+你会**按「有隔离」去做决策**（比如据此解封工坊入口）。
+
+**① 已完成（本轮）**
+
+- 新增 `FailClosedBackend`：不求值，全部条目原文注入（D8 语义，最坏等于 EJS 没上线）
+- `installProductionEjsBackend()` **第一件事**就是切到 fail-closed，关掉「装载期间悄悄用 Legacy 渲染」的时间窗；
+  装成功换 QuickJS，装失败**留在 fail-closed**，且从 `console.warn` 升级成 `console.error`
+- `main.ts` 接住返回值，失败时弹**不自动消失**的错误 toast
+- 装配结果记忆化：重复调用不会把正在服役的 QuickJS 实例 dispose 掉重建
+- 真浏览器验证：无 error、无降级 toast，隔离后端正常装载
+
+**② 待做：真机走查。** 走查期间 Legacy 是**诊断参照物** —— 发现「某条目渲染不对」时，
+能立刻问「Legacy 渲染对吗」，一问就把「QuickJS 的 bug」和「内容本身的 bug」分开。
+这个价值在走查结束的那一刻归零。
+
+**③ 走查之后：删 Legacy。** 连同 `buildSandboxArgs` / `SANDBOX_PARAM_NAMES` / `SHADOWED_GLOBALS`
+那一套宿主形参注入（约四百行）与 parity 测试一起删，语料基线在 QuickJS 上重建。
+项目仍处**预发布**，没有存量用户、没有内容作者的输出预期被钉死 —— 这是删它成本最低的窗口，别拖。
+删掉之后能力面只剩**一份**实现（guest facade）；§11.1 那八条缺陷里有五条的成因就是「同一件事写两遍，第二遍漏了」。
+
+**顺带（同一窗口内该定的）**：`passTimeoutMs = 1500` 是拍的，而全语料实测单 pass **348–583ms**
+（109 条目，预热后；同口径 Legacy 为 6–73ms）。余量只有 3 倍且跑在主线程。
+这个数一旦被内容依赖（作者按「我的书能跑完」写），再改就是破坏性变更。真机走查时一并量。
+
+**工坊入口的解封条件**：EJS 侧（本设计）已具备边界 ——
 但 **SEC-01（正则 replaceString → `v-html` 的 XSS）尚未修复**，它与 EJS 无关、独立成链。
 故 `WORKSHOP_ENTRY_ENABLED` 仍应保持 `false`，直到 SEC-01 落地。
 
