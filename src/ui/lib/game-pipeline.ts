@@ -39,6 +39,7 @@ import type { useSettingsStore } from '../stores/settings-store';
 import { useAudioStore } from '../stores/audio-store';
 import { useWorldBookStore } from '../stores/worldbook-store';
 import { useUIStore } from '../stores/ui-store';
+import type { CombatCommand } from '@engine/combat-v3';
 
 export interface GamePipelineDeps {
   gameStore: ReturnType<typeof useGameStore>;
@@ -1187,6 +1188,11 @@ export class GamePipeline {
     marker: CombatTriggerMarker,
     storyOutput: string,
   ): Promise<CombatSummaryResult | null> {
+    // 🆕 M2 feature flag（架构 §十四 14.5）：分支点唯一，v2 走现有 runCombat，v3 走 coordinator
+    const engineVersion = this.settings?.settings?.combatEngineVersion ?? 'v2';
+    if (engineVersion === 'v3') {
+      return this.handleCombatTriggerV3(marker, storyOutput);
+    }
     const endpoint = this.getEndpointForAgent('combat');
     if (!endpoint) {
       console.warn('[GamePipeline] combat 跳过: 未配置 API endpoint');
@@ -1237,6 +1243,115 @@ export class GamePipeline {
       // M5: 出错也要关面板，否则覆盖层卡住
       this.game.exitCombat();
       console.error('[GamePipeline] combat 失败:', err);
+      return null;
+    }
+  }
+
+  /** 🆕 M2 v3 分支：走 v3 Coordinator（openCombat + runCombatV3）。 */
+  private async handleCombatTriggerV3(
+    marker: CombatTriggerMarker,
+    _storyOutput: string,
+  ): Promise<CombatSummaryResult | null> {
+    const endpoint = this.getEndpointForAgent('combat_v3') ?? this.getEndpointForAgent('combat');
+    if (!endpoint) {
+      console.warn('[GamePipeline] combat_v3 跳过: 未配置 API endpoint');
+      return null;
+    }
+    try {
+      const context = this.currentContext ?? this.buildContext('');
+      this.game.enterCombat();
+      this.game.updateAgentStatus('combat_v3');
+
+      const { runCombatV3 } = await import('@engine/combat-v3');
+      const { characterToCombatParticipant } = await import('@engine/combat-resolver');
+
+      // 组装 bundle：全部人物 → CombatParticipant（player → ally，其余 → enemy）
+      const playerC = this.game.characters.find((c) => c.type === 'player');
+      const participants = this.game.characters
+        .filter((c) => c.hp > 0)
+        .map((c) => characterToCombatParticipant(c, c.type === 'player' ? 'ally' : 'enemy'));
+      const fpSnapshot = this.game.fp ?? 0;
+      const bundle = {
+        combatId: `v3-${Date.now()}-${this.saveId}`,
+        combatType: (marker.combatType ?? '标准') as '标准',
+        participants,
+        rulesetRevision: 'v3-2026-07-31',
+        resourceSnapshots: { FP: fpSnapshot },
+      };
+      if (participants.length === 0 || !playerC) {
+        this.game.exitCombat();
+        this.game.clearAgentStatus('combat_v3');
+        return null;
+      }
+
+      // 前端 Command 桥：pending resolver，store.submitCombatCommand → coordinator.submit → resolve
+      let pendingResolve: ((c: CombatCommand) => void) | null = null;
+      const waitForCommand = () =>
+        new Promise<CombatCommand>((resolve) => (pendingResolve = resolve));
+
+      const result = await runCombatV3({
+        saveId: this.saveId,
+        bundle,
+        deps: {
+          clientFactory: this.getClientFactory(),
+          endpoint,
+          stateManager: this.getStateManager(),
+          characters: this.game.characters,
+          variables: context.variables,
+          context,
+          submitCommand: async () => {}, // 等待态由 v3_awaiting_player_input 事件驱动 store
+          waitForCommand,
+          abandon: () => {},
+          // M2 缺省确定性骰源；后续可注入真实骰源
+        },
+        onCombatEvent: (evt) => this.game.applyCombatEvent(evt),
+      });
+
+      // 暴露 coordinator 句柄给 store（前端提交/放弃）
+      this.game.setCombatCoordinator({
+        submit: async (cmd: CombatCommand) => {
+          if (pendingResolve) {
+            const r = pendingResolve;
+            pendingResolve = null;
+            r(cmd);
+          }
+        },
+        abandon: () => {
+          if (pendingResolve) {
+            const r = pendingResolve;
+            pendingResolve = null;
+            r({
+              commandId: 'abandon',
+              expectedRevision: 0,
+              kind: 'PassAttack',
+              actorId: '',
+              cost: 'attack',
+              payload: {},
+            } as CombatCommand);
+          }
+        },
+        waitForCommand,
+      });
+
+      this.game.clearAgentStatus('combat_v3');
+      this.game.exitCombat(); // 战斗结束关面板（终局已由 onCombatEvent 置 v3ActiveCombat）
+      if (result.narrativeSummary) {
+        this.game.addMessage(`【战斗摘要】${result.narrativeSummary}`, 'assistant');
+      }
+      const summary: CombatSummaryResult = {
+        narrativeSummary: result.narrativeSummary,
+        patches: result.patches,
+        totalExp: result.totalExp,
+        totalFp: result.totalFp,
+        loot: (result.loot as CombatSummaryResult['loot']) ?? [],
+        rounds: result.rounds,
+        outcome: result.outcome,
+      };
+      return summary;
+    } catch (err) {
+      this.game.clearAgentStatus('combat_v3', String(err));
+      this.game.exitCombat();
+      console.error('[GamePipeline] combat_v3 失败:', err);
       return null;
     }
   }

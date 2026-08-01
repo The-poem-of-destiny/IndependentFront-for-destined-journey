@@ -955,7 +955,47 @@ export type DomainEvent =
       state: MoraleState;
     }
   | { kind: 'NarrativeCue'; text: string; severity?: number }
-  | { kind: 'FleeAttempt'; unitId: string; success: boolean; roll: number };
+  | { kind: 'FleeAttempt'; unitId: string; success: boolean; roll: number }
+  // ─────────────────────────────────────────────────────────────
+  // M2 扩展：投影 A（projection-ui）需要给 29 个 DomainEvent 全量建映射目标（A2-6），
+  // 故先把 M1 之外的 v3 新增 + settlement 事件补全为结构占位。
+  // 运行时只有 M1 已实现 + 部分会在 v3 路径出现；其余待 M3/M3.5 实装时填充字段。
+  // ─────────────────────────────────────────────────────────────
+  | {
+      kind: 'SettlementCommitted';
+      settlementId: string;
+      fpDelta: number;
+      reason: TerminalReason;
+      winner?: string;
+      exp?: number;
+    }
+  | {
+      kind: 'UnitSummoned';
+      unitId: string;
+      joinTiming?: string;
+      duration?: number | null;
+      sourceItem?: string;
+    }
+  | { kind: 'UnitDespawned'; unitId: string; reason?: 'expired' | 'active' | 'summoner_down' }
+  | { kind: 'DamagePrevented'; unitId: string; amount: number; keptHp: number }
+  | {
+      kind: 'DamageReflected';
+      rootChainId: string;
+      depth: number;
+      base: number;
+      amount: number;
+    }
+  | { kind: 'MiracleTriggered'; effectDescription?: string; divinity: number; payload?: unknown }
+  | {
+      kind: 'AdjudicationAccepted';
+      ruleKey?: string;
+      divinity: number;
+      reason?: string;
+      effectDescription?: string;
+    }
+  | { kind: 'RuleOverridden'; ruleKey: string; payload?: unknown; divinity: number }
+  | { kind: 'EffectRejected'; automatonId?: string; window?: string; code: string; detail: string }
+  | { kind: 'DiceEpochBegan'; outputId: string; batchHash?: string; channelSplit?: unknown };
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ReactionWindow（架构 §五 5.1，M1 枚举冻结；M1 空转，M3 实装）

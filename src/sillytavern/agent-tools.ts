@@ -666,6 +666,128 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
 
+  // ── Combat V3 工具集（M2 新增，对应 AGENT_TOOL_MAP['combat_v3']）──
+  //   v3 工具集只有 6 个（§4.4），一次工具调用 = 一个 Command = 一个槽位或一次 pass。
+  //   v2 的 19 个 combat 工具（AGENT_TOOL_MAP['combat']）保留不动（v2 回滚要用）。
+  {
+    type: 'function',
+    function: {
+      name: 'declare_attack',
+      description:
+        '（v3）声明一次攻击/技能攻击。为当前行动单位填入目标、技能名、意图层级。骰值与伤害由内核真实计算，你只负责战术决策——禁止传骰值。',
+      parameters: {
+        type: 'object',
+        properties: {
+          actorName: { type: 'string', description: '攻击方角色名（当前行动单位）' },
+          targetName: { type: 'string', description: '目标角色名' },
+          skillName: { type: 'string', description: '使用的技能名（可选，缺省为普通攻击）' },
+          intentionLevel: {
+            type: 'string',
+            description: '意图层级：非致死/常规/战术/机能/核心/抹杀/概念/处决',
+          },
+          costs: {
+            type: 'object',
+            properties: {
+              mp: { type: 'integer', description: '本次攻击消耗的 MP（可选）' },
+              sp: { type: 'integer', description: '本次攻击消耗的 SP（可选）' },
+            },
+          },
+        },
+        required: ['actorName', 'targetName', 'intentionLevel'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'declare_action',
+      description: '（v3）执行一个战术动作：道具 / 移动 / 专注 / 防御 / 格挡。占据动作槽。',
+      parameters: {
+        type: 'object',
+        properties: {
+          actorName: { type: 'string', description: '执行者角色名' },
+          actionType: {
+            type: 'string',
+            enum: ['道具', '移动', '专注', '防御', '格挡'],
+            description: '动作类型',
+          },
+          payload: {
+            type: 'object',
+            description: '动作载荷（如道具名 / 移动目标）',
+          },
+        },
+        required: ['actorName', 'actionType'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'pass_slot',
+      description: '（v3）显式放弃当前行动单位的某个行动槽（1 攻击 或 1 动作）。放弃仍消费槽位。',
+      parameters: {
+        type: 'object',
+        properties: {
+          actorName: { type: 'string', description: '角色名' },
+          slot: {
+            type: 'string',
+            enum: ['attack', 'action'],
+            description: '放弃的槽位：attack=攻击槽 / action=动作槽',
+          },
+        },
+        required: ['actorName', 'slot'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'flee',
+      description: '（v3）当前行动单位尝试逃跑。消耗攻击+动作双槽，做逃跑检定。',
+      parameters: {
+        type: 'object',
+        properties: {
+          actorName: { type: 'string', description: '逃跑者角色名' },
+        },
+        required: ['actorName'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'submit_adjudication',
+      description:
+        '（v3）提出有界裁决：当标准动作无法表达一个创意效果时，用此工具申请法则级裁决。M2 先定义 schema，执行暂不支持。',
+      parameters: {
+        type: 'object',
+        properties: {
+          effectDescription: { type: 'string', description: '期望达成的效果描述' },
+          divinity: { type: 'integer', minimum: 0, maximum: 8, description: '登神强度' },
+          verifiableBounds: { type: 'object', description: '可验证的数值边界' },
+          requestedRuleOverride: { type: 'string', description: '请求覆盖的 RuleKey（可选）' },
+          reason: { type: 'string', description: '裁决理由' },
+        },
+        required: ['effectDescription', 'divinity', 'verifiableBounds', 'reason'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'write_summary',
+      description:
+        '（v3）在战斗终局写一段不超过 500 字的战斗摘要，供回注 Story。这是收尾动作，不产出 Command。',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: '战斗摘要（≤500 字）' },
+        },
+        required: ['text'],
+      },
+    },
+  },
+
   // ── Combat Query (只读查询, M4 任务 5.3 新建) ──
   {
     type: 'function',
@@ -733,6 +855,22 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
     'roll_d100',
     'roll_dice',
     // 只读查询（复用现有 + 新建 get_combat_state）
+    'get_character',
+    'get_hp_percent',
+    'get_inventory',
+    'get_combat_state',
+  ],
+  // Combat Agent V3（M2 新增，对应 v3 内核）— 见 docs/reference/combat-system-architecture-v3.md §4.4
+  //   v3 工具集只有 6+4 个（6 个战斗工具 + 4 个只读）。v2 的 ['combat'] 保留不动（v2 回滚要用）。
+  combat_v3: [
+    // 战斗控制（一次工具调用 = 一个 Command）
+    'declare_attack',
+    'declare_action',
+    'pass_slot',
+    'flee',
+    'submit_adjudication',
+    'write_summary',
+    // 只读查询（复用现有）
     'get_character',
     'get_hp_percent',
     'get_inventory',
