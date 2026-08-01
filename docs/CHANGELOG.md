@@ -9,6 +9,26 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 战斗 v3 M5 — 收尾：默认翻 v3 + 退役 v2 + 文档同步 ｜ ✅ 完成（2026-08-01）
+
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§十四 引擎边界 / §十五 模块迁移映射表）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §8。把 v3 从「可选引擎」翻转为「默认引擎」，退役 v2 战斗运行时。**战斗 v3 全里程碑（M0→M5）收尾**。
+
+**PR1（翻默认 + 文档，不删代码，观察一版本周期）:**
+
+- `types.ts` `combatEngineVersion` 默认 `'v2'` → `'v3'`（A5-1）；`game-pipeline.ts` 分支点兜底 `?? 'v3'`（旧存档无字段也走 v3）
+- 文档同步（A5-4）：v2 架构文档加退役横幅（保留作为纯计算规则引用）/ `combat-agent-api.md` 标 v2 专用 + 指向 v3 接口 / handoff 文档收尾 + §2 待补完表标 ✅ 指向架构节号 / AGENTS.md 架构图加 `combat-v3/` 子目录 + ADR-20/29 补战斗内走 DSL
+
+**PR2（真正退役 v2，主人拍板选 A）:**
+
+- 🗑 删 6 文件（含测试 12 个）：`combat-runner` / `combat-pipeline` / `combat-actions-pipeline` / `combat-modifier-inject` / `combat-resolver` / `combat-settlement-pipeline`（职责已由 v3 接管）
+- 🆕 `combat-v2-types.ts`：迁移存活契约（CombatClient/CombatEvent/PipelineContext/COMBAT_EVENTS/characterToCombatParticipant），v3/agent-tools/game-store/morale-pipeline 改指
+- v2 分支优雅退役：`game-pipeline.ts` 打回 'v2' → 优雅提示（不炸、无悬空 import，A5-2）；`agent-tools.ts` 删 `AGENT_TOOL_MAP['combat']` + executeCombatToolCall + 19 v2 工具（保留 `combat_v3`）；`agent-config.json` 删 combat 条目（python 精确切片，保留 combat_v3）
+- ✅ 保留（v3 内核在调）：`combat-panel` / `combat-damage` / `combat-intention` / `combat-turn` / `combat-morale-pipeline` / `combat-item-validator`
+
+**验收:** A5-1 ~ A5-4 全过（默认 v3 / v2 优雅退役可打回 / typecheck+test 全绿 / 文档 4 处同步）。全量 **5101 测试 / 174 文件全绿**（5245 - 144 v2 测试块）；typecheck 0；prettier 干净；零残留引用。
+
+**遗留:** `game-pipeline.ts` 的 flag 分支结构保留一个版本周期（下个周期再删 'v2' 分支与 flag 本身）。
+
 ### 战斗 v3 M4 — 压力测试：7 场 fixture 全绿 + RuleKey 补全 + divinity 泛化 + eventHash 冻结 ｜ ✅ 完成（2026-08-01）
 
 架构真源: `docs/reference/combat-system-architecture-v3.md`（§八 closed RuleKey 与 divinity 压制 / §九 反射专项 R1-R8 / §十三 DomainEvent）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §7。这是**最重的一个里程碑**——机制层（4 RuleKey + divinity 泛化）+ 窗口接线层（修 M3 真实缺口）+ replay harness 升级 + 7 场 fixture 端到端 + eventHash 冻结。

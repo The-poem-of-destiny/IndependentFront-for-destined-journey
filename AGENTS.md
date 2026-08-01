@@ -313,8 +313,8 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | M1-M6     | 数据字段规范迁移（2787 tests 全绿）                    | ✅                  |
 | Audio     | 音频系统 v1.0（双通道+三后端+按名寻址+场景配乐）       | ✅                  |
 | 素材      | 素材管理系统 v1.0（渲染面+大画像+裁剪台+画像弹窗）     | ✅                  |
-| 战斗 v2   | 战斗系统架构 v2（管道+中间件+6大类+19event+独立面板）  | ✅ M5完成 待M6真机  |
-| 战斗 v3   | 代码内核主持流程（Kernel+DiceTape+EffectIntent+DSL）   | 🔄 M4完成 待M5      |
+| 战斗 v2   | 战斗系统架构 v2（管道+中间件+6大类+19event+独立面板）  | ✅ 已退役（M5 删）  |
+| 战斗 v3   | 代码内核主持流程（Kernel+DiceTape+EffectIntent+DSL）   | ✅ M5完成 全量合入  |
 | 工坊 P0   | 世界书迁出 localStorage → Dexie v14（+ 进 FullBackup） | ✅                  |
 | 工坊 P0b  | 美化规则迁出 localStorage → Dexie v15                  | ✅                  |
 | 工坊 P1   | 创意工坊（浏览/安装/更新/卸载/启用，= 7f）             | 🔒 入口临时下线     |
