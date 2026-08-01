@@ -1,0 +1,197 @@
+{
+  "id": "case-x2-true-death-revive",
+  "sourceCase": "docs/planning/2026-07-31-combat-v3-stress-test/case-24-reflection.md（复活脑测）",
+  "source": true,
+  "_provenance": {
+    "mechanism": [
+      "真正死亡触发复活：攻方一击把守方打至 HP≤0 → unit.beforeDown 窗口 PrevDentDeath(death.threshold)",
+      "PreventDeath 把 HP 截断到守方存活值（同一次原子提交，架构 §八 8.2 显式修订 v2 死亡红线）",
+      "产 DamagePrevented 事件（amount + keptHp）"
+    ],
+    "diceMapping": [
+      "攻方 T7 高 str/weapon → 一击远超守方 100 HP → 守方必然被打至 0 → 触发 beforeDown",
+      "守方 automata: [{ subscribe:'unit.beforeDown', trigger:'true', intents:[PreventDeath(hp:50, slot:'death.threshold')] }]",
+      "确定性骰；断言 DamagePrevented 且守方 hp>0"
+    ],
+    "kernelLimit": "death.threshold 只对『主攻击结算的 targetHpAfter≤0』生效（架构 §八）；ConsumeCharge 在窗口层消耗，本自动机未带 charges（复活一次性语义由 fixture 保证）"
+  },
+  "bundle": {
+    "combatId": "fixture-x2",
+    "combatType": "死斗",
+    "units": [
+      {
+        "name": "处刑魔将",
+        "tier": 7,
+        "hp": 100000,
+        "maxHp": 100000,
+        "mp": 5000,
+        "maxMp": 5000,
+        "sp": 5000,
+        "maxSp": 5000,
+        "attributes": {
+          "str": 30,
+          "dex": 16,
+          "con": 25,
+          "int": 10,
+          "spi": 10
+        },
+        "side": "enemy",
+        "hitBonus": 20,
+        "defense": 100,
+        "dr": 0.1,
+        "weaponAtk": 3000
+      },
+      {
+        "name": "理查德",
+        "tier": 7,
+        "hp": 100,
+        "maxHp": 100,
+        "mp": 5000,
+        "maxMp": 5000,
+        "sp": 5000,
+        "maxSp": 5000,
+        "attributes": {
+          "str": 20,
+          "dex": 12,
+          "con": 25,
+          "int": 21,
+          "spi": 17
+        },
+        "side": "player",
+        "hitBonus": 10,
+        "defense": 100,
+        "dr": 0.1,
+        "weaponAtk": 50,
+        "divinity": 6,
+        "automata": [
+          {
+            "id": "revive",
+            "name": "真·复活",
+            "subscribe": "unit.beforeDown",
+            "trigger": "true",
+            "priority": 0,
+            "divinity": 6,
+            "intents": [
+              {
+                "kind": "PreventDeath",
+                "targetId": "理查德",
+                "hp": 30,
+                "slot": "death.threshold"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "programs": [],
+    "resourceSnapshots": {
+      "FP": 2400
+    },
+    "rulesetRevision": "v3-2026-07-31"
+  },
+  "epochs": [
+    {
+      "outputId": "out-1",
+      "dice": [
+        16,
+        12,
+        11,
+        15,
+        15,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        18,
+        12,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "channelSplit": {
+        "attackHit": 32,
+        "initiative": 10,
+        "intentCheck": 7,
+        "statusContest": 6,
+        "procCheck": 5
+      }
+    }
+  ],
+  "commands": [
+    {
+      "commandId": "k1",
+      "expectedRevision": 0,
+      "kind": "DeclareAttack",
+      "actorId": "处刑魔将",
+      "cost": "attack",
+      "payload": {
+        "targetId": "理查德",
+        "skill": "处决",
+        "intentionLevel": "处决",
+        "costs": {}
+      }
+    }
+  ],
+  "expected": {
+    "milestones": [
+      {
+        "kind": "prevented",
+        "at": "k1",
+        "targetId": "理查德",
+        "value": 30,
+        "tolerance": 10
+      },
+      {
+        "kind": "roundCount",
+        "value": 1
+      }
+    ],
+    "eventHash": "hd8x6hj"
+  }
+}

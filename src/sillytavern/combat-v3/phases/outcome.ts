@@ -12,6 +12,7 @@ import type {
   CommandRejection,
   DiceTapeState,
   DomainEvent,
+  FrozenSlot,
   PendingChangeSet,
   RequiredInput,
   TerminalReason,
@@ -48,6 +49,8 @@ export interface PhaseOutcome {
   settlementId?: string;
   /** 回合变更（round.close 推进到下一轮时 +1） */
   round?: number;
+  /** A4-3：槽位冻结记录（round.close 递减 后写回 / openUnitTurn 消费；applyOutcome 直接落 state.frozenSlots） */
+  frozenSlots?: readonly FrozenSlot[];
   /**
    * M3.5：需从 state.units 移除的单位 id（召唤时限到期 UnitDespawned，A35-3）。
    * applyOutcome 会同步从 initiativeOrder 移除；随同 activeEffects 里对应的 automaton 摘除。
@@ -144,6 +147,7 @@ export function mergeChanges(base: PendingChangeSet, add: PendingChangeSet): Pen
     statusPatches: [...base.statusPatches, ...add.statusPatches],
     slotConsumptions: [...base.slotConsumptions, ...add.slotConsumptions],
     turnOpenSlots: [...(base.turnOpenSlots ?? []), ...(add.turnOpenSlots ?? [])],
+    freezeSlotPatches: [...(base.freezeSlotPatches ?? []), ...(add.freezeSlotPatches ?? [])],
     terminal: add.terminal ?? base.terminal,
   };
 }

@@ -37,6 +37,7 @@ import type {
   CombatUnitView,
   CombatView,
   DamageRecomputeCtx,
+  FrozenSlot,
   PendingChangeSet,
   RequiredInput,
   ResolutionFrame,
@@ -280,12 +281,41 @@ export function applyPending(state: CombatState, changes: PendingChangeSet): Com
     FP: state.resourceSnapshots.FP + changes.fpDelta,
   };
 
+  // A4-3：槽位冻结合并（max_rounds —— 同目标同槽取 rounds 最大）
+  let frozenSlots: readonly FrozenSlot[] | undefined = state.frozenSlots;
+  if (changes.freezeSlotPatches && changes.freezeSlotPatches.length > 0) {
+    const merged: FrozenSlot[] = [];
+    for (const p of changes.freezeSlotPatches) {
+      const existing = merged.find((m) => m.targetId === p.targetId && m.slotType === p.slotType);
+      if (existing) {
+        existing.rounds = Math.max(existing.rounds, p.rounds);
+      } else {
+        merged.push({ targetId: p.targetId, slotType: p.slotType, rounds: p.rounds });
+      }
+    }
+    const prior = [...(state.frozenSlots ?? [])];
+    for (const m of merged) {
+      const priorIdx = prior.findIndex(
+        (x) => x.targetId === m.targetId && x.slotType === m.slotType,
+      );
+      if (priorIdx >= 0) {
+        prior[priorIdx] = {
+          ...prior[priorIdx],
+          rounds: Math.max(prior[priorIdx].rounds, m.rounds),
+        };
+      } else {
+        prior.push(m);
+      }
+    }
+    frozenSlots = prior;
+  }
+
   return {
     ...state,
     revision: state.revision + 1,
     units,
     resourceSnapshots,
-    // terminal 延后由 checkTerminal 判定；这里若显式给 terminal 则直接落
+    ...(frozenSlots ? { frozenSlots } : { frozenSlots: undefined }),
     ...(changes.terminal ? { terminal: changes.terminal } : {}),
   };
 }
@@ -486,6 +516,7 @@ export function applyOutcome(state: CombatState, outcome: ImportedOutcome): Comb
     ...(outcome.settlement ? { settlement: outcome.settlement } : {}),
     ...(outcome.settlementId ? { settlementId: outcome.settlementId } : {}),
     ...(outcome.round !== undefined ? { round: outcome.round } : {}),
+    ...(outcome.frozenSlots ? { frozenSlots: outcome.frozenSlots } : {}),
     phase: outcome.nextPhase,
   };
   // revision 已由 applyPending +1；phase 变更不额外递增，保持单次提交一次递增
@@ -513,6 +544,8 @@ export type ImportedOutcome = {
   removeUnitIds?: readonly string[];
   /** M3.5：ActiveEffectIndex 覆盖（召唤物摘除后的索引） */
   activeEffects?: ActiveEffectIndex;
+  /** A4-3：槽位冻结直接覆盖（round.close 递减后写回） */
+  frozenSlots?: readonly FrozenSlot[];
   events?: readonly unknown[];
 };
 

@@ -17,3 +17,6 @@
 - [v3 M0 签名改造落点](combat-v3-m0-signature-refactor.md) — performAttackCheck 改 rolls[]、morale d20 必传、AppSettings.combatEngineVersion；调用点传同值保 v2 行为；M1 起内核从 DiceTape 取真骰
 - [v3 M1 内核架构落点](combat-v3-m1-kernel-architecture.md) — reducer 经 transition.next 回传完整状态、PhaseOutcome 单次提交、closeUnitTurn 线性推进、commandUsed 标志、validateEarly 早期校验
 - [v3 M2 内核行为](combat-v3-m2-kernel-behaviors.md) — SupplyDice 不 auto-advance / 单位需消费两槽才推进 / settle 不产 SettlementCommitted / completed 在 Terminal 就 true；coordinator 写死前必看
+- [反射窗口 intents 未接](combat-v3-reflection-window-intents-not-wired.md) — M4 发现 attack.finalizeAttack 的 damage.after/unit.beforeDown 求值被丢弃，反射/PreventDeath 端到端未通；M4 续跑先补窗口 intents→applyIntents 集成层
+- [M4 机制层已落地](combat-v3-m4-mechanism-done.md) — rule-keys 4锁+divinity压制+freezeSlot引擎+death.threshold引擎全绿32测试；replay harness/7fixture/contract测试留 M4 续跑
+- [M4 第二部分已落地](combat-v3-m4-part2-harness-wiring.md) — 窗口接线层(反射/PreventDeath排原子提交)+replayCombat升级真内核harness；4 缺口(互反熔断/forceTerminal/召唤/freezeSlot触发源)已全闭合，5245 tests 全绿

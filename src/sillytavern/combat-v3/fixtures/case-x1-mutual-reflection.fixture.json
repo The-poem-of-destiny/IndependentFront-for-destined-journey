@@ -1,71 +1,78 @@
 {
-  "id": "case-24-reflection",
-  "sourceCase": "docs/planning/2026-07-31-combat-v3-stress-test/case-24-reflection.md",
+  "id": "case-x1-mutual-reflection",
+  "sourceCase": "docs/planning/2026-07-31-combat-v3-stress-test/case-24-reflection.md（互反脑测）",
   "source": true,
   "_provenance": {
     "mechanism": [
-      "反射（damage.after → ScheduleIntent(DealDamage isReaction)）",
-      "守方带 50% 反伤被动（{ key:'reflect', value:50 }），攻方打之 → 攻方被反伤",
-      "基准取 preReduction（架构 §九 R4），R8 反伤命中骰走 attackHit 通道"
+      "双方各带 30% 反伤被动",
+      "链式反伤：根攻击 depth0 → 乙反甲 depth1 → 甲反伤被动触发 depth2 → mutual_cancel + 反射湮灭（R6，A4-2）",
+      "owner 门控：每层只认受击方的反伤被动（R5）"
     ],
     "diceMapping": [
-      "epoch0: idx0-9 initiative / idx10-16 intentCheck / idx17-48 attackHit（攻方先攻+命中+反伤命中）",
-      "攻方 dex 高 → 先动打守方；守方反伤自动触发",
-      "确定性骰（中位数 10 为主），不追求精确复现样本数值——milestone 断言机制是否落地"
+      "攻方甲打守方乙 → 乙 30% 反伤甲（depth 1，R8 命中骰）",
+      "反伤落地甲后，甲的反伤被动以乙为源继续传播（depth 2）→ resolveReflection(2) 熔断",
+      "确定性骰；断言反射事件 + 攻方 HP 下降 + 湮灭叙事"
     ],
-    "kernelLimit": "depth≥2 的互反熔断需递归 damage.after，当前内核不重入窗口（M5）；本场只验单次反伤"
+    "kernelLimit": "前版：damage.after 不重入窗口，depth 2 不可达归 M5；现版 reflectChain 链式反伤已接通（M4）"
   },
   "bundle": {
-    "combatId": "fixture-24",
+    "combatId": "fixture-x1",
     "combatType": "死斗",
     "units": [
       {
-        "name": "处刑人",
+        "name": "甲",
         "tier": 4,
-        "hp": 3000,
-        "maxHp": 3000,
+        "hp": 5000,
+        "maxHp": 5000,
         "mp": 1000,
         "maxMp": 1000,
-        "sp": 1200,
-        "maxSp": 1200,
+        "sp": 1000,
+        "maxSp": 1000,
         "attributes": {
           "str": 20,
-          "dex": 14,
+          "dex": 15,
           "con": 15,
           "int": 8,
-          "spi": 9
+          "spi": 8
         },
         "side": "enemy",
-        "hitBonus": 12,
+        "hitBonus": 10,
         "defense": 60,
         "dr": 0.1,
-        "weaponAtk": 100
-      },
-      {
-        "name": "理查德",
-        "tier": 5,
-        "hp": 30000,
-        "maxHp": 30000,
-        "mp": 5300,
-        "maxMp": 5300,
-        "sp": 3900,
-        "maxSp": 3900,
-        "attributes": {
-          "str": 13,
-          "dex": 13,
-          "con": 15,
-          "int": 21,
-          "spi": 17
-        },
-        "side": "player",
-        "hitBonus": 10,
-        "defense": 100,
-        "dr": 0.1,
-        "weaponAtk": 80,
+        "weaponAtk": 100,
         "effects": [
           {
             "key": "reflect",
-            "value": 50,
+            "value": 30,
+            "isPercentage": true
+          }
+        ]
+      },
+      {
+        "name": "乙",
+        "tier": 4,
+        "hp": 5000,
+        "maxHp": 5000,
+        "mp": 1000,
+        "maxMp": 1000,
+        "sp": 1000,
+        "maxSp": 1000,
+        "attributes": {
+          "str": 20,
+          "dex": 12,
+          "con": 15,
+          "int": 8,
+          "spi": 8
+        },
+        "side": "player",
+        "hitBonus": 10,
+        "defense": 60,
+        "dr": 0.1,
+        "weaponAtk": 100,
+        "effects": [
+          {
+            "key": "reflect",
+            "value": 30,
             "isPercentage": true
           }
         ]
@@ -73,7 +80,7 @@
     ],
     "programs": [],
     "resourceSnapshots": {
-      "FP": 2400
+      "FP": 2000
     },
     "rulesetRevision": "v3-2026-07-31"
   },
@@ -82,23 +89,23 @@
       "outputId": "out-1",
       "dice": [
         16,
-        13,
-        11,
-        10,
-        10,
-        10,
-        10,
-        10,
-        10,
-        10,
-        10,
-        10,
-        10,
-        10,
-        10,
-        10,
-        10,
         12,
+        11,
+        15,
+        15,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        18,
         14,
         10,
         10,
@@ -153,14 +160,14 @@
   ],
   "commands": [
     {
-      "commandId": "c1",
+      "commandId": "m1",
       "expectedRevision": 0,
       "kind": "DeclareAttack",
-      "actorId": "处刑人",
+      "actorId": "甲",
       "cost": "attack",
       "payload": {
-        "targetId": "理查德",
-        "skill": "破甲重弩",
+        "targetId": "乙",
+        "skill": "破甲",
         "intentionLevel": "核心",
         "costs": {}
       }
@@ -170,14 +177,14 @@
     "milestones": [
       {
         "kind": "damage",
-        "at": "c1",
-        "targetId": "理查德",
+        "at": "m1",
+        "targetId": "乙",
         "value": 0,
-        "tolerance": 40000
+        "tolerance": 200000
       },
       {
         "kind": "reflected",
-        "at": "c1",
+        "at": "m1",
         "depth": 1,
         "value": 0,
         "tolerance": 100000
@@ -187,6 +194,6 @@
         "value": 1
       }
     ],
-    "eventHash": "hapvu1j"
+    "eventHash": "hvfzy9o"
   }
 }

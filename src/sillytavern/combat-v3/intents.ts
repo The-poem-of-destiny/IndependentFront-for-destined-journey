@@ -19,6 +19,7 @@
 
 import type { CombatState, EffectRejectCode, EffectIntent, PendingChangeSet } from './types';
 import { resolveReflection, REFLECTION_ANNIHILATION_CUE } from './automata/reflection';
+import { divinitySuppression } from './rule-keys';
 import type { DamageCtx } from './types';
 
 /** 单条 intent 验证结果（可通过 or 拒绝） */
@@ -218,6 +219,20 @@ function applyOne(
     case 'ApplyStatus': {
       const target = intent.targetId;
       if (!ctx.present(target)) return { narrative: [], consumedCharge: false };
+      // A4-4（架构 §八 8.3）：状态对抗（ApplyStatus.contest）divinity 压制。
+      //   - 差 ≥5 且攻方 div 高 → 必成（状态照常施加）
+      //   - 差 ≥5 且守方 div 高 → 必败（守方抵抗，状态不施加）
+      //   - 差 1~4 → 软压制（本层不建对抗骰，照常施加；幅度作为叙事提示）
+      //   ±100% 必败时**不消费骰子**（contest 层无独立骰，走 intent 层直接跳过）。
+      if (intent.contest) {
+        const supp = divinitySuppression(
+          intent.contest.attackerDivinity,
+          intent.contest.defenderDivinity,
+        );
+        if (supp.certain && supp.direction === -1) {
+          return { narrative: [], consumedCharge: false }; // 守方 div 高 ≥5 → 状态抵抗，不施加
+        }
+      }
       base.statusPatches.push({
         op: 'apply',
         unitId: target,
@@ -269,6 +284,26 @@ function applyOne(
     case 'RequestChoiceIntent':
       // M3 范围：这些要么由 damage.preview 单独处理（RequestChoice），要么 M4 实现。
       return { narrative: [], consumedCharge: false };
+    case 'OverrideIntent': {
+      // A4-3：closed RuleKey override 落地。经 resolveOverride 校验后写入 kernel 状态。
+      //   仅支持 action.freezeSlot（写入 PendingChangeSet.freezeSlotPatches，applyPending → state.frozenSlots）；
+      //   terminal.forceTerminal / death.threshold / morale.forceState 由对应窗口/相位消费，此处 no-op。
+      if (intent.ruleKey === 'action.freezeSlot') {
+        const p = intent.payload as { targetId?: string; slotType?: string; rounds?: number };
+        if (typeof p?.targetId === 'string' && typeof p.rounds === 'number') {
+          const slotType =
+            p.slotType === 'action' || p.slotType === 'both'
+              ? (p.slotType as 'action' | 'both')
+              : 'attack';
+          (base.freezeSlotPatches ??= []).push({
+            targetId: p.targetId,
+            slotType: slotType as 'attack' | 'action' | 'both',
+            rounds: Math.max(1, Math.floor(p.rounds)),
+          });
+        }
+      }
+      return { narrative: [], consumedCharge: false };
+    }
     default:
       return { narrative: [], consumedCharge: false };
   }
