@@ -27,10 +27,10 @@
 
 **契约总纲（主人指定，两轴）**：
 
-| 轴 | 名字 | 权限 | 内容 |
-| -- | ---- | ---- | ---- |
-| ① | **`stats`** 只读面 | EJS 只读 | **纯代码推导数值**：HP/MP/SP（含上限）、等级/层级/经验、五维、命运点数、游戏时间。**不含**叙事变量；背包/技能/装备**暂缓**（主人未定，§5） |
-| ② | **`vars`** 变量沙盒 | EJS 读写 | **与 AI 共写的叙事变量空间** = `SaveProfile.variables.sys` 的草稿视图——任意形状、任意路径、跨回合持久；`事件.*` 等全部叙事状态都住这里 |
+| 轴  | 名字                | 权限     | 内容                                                                                                                                       |
+| --- | ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| ①   | **`stats`** 只读面  | EJS 只读 | **纯代码推导数值**：HP/MP/SP（含上限）、等级/层级/经验、五维、命运点数、游戏时间。**不含**叙事变量；背包/技能/装备**暂缓**（主人未定，§5） |
+| ②   | **`vars`** 变量沙盒 | EJS 读写 | **与 AI 共写的叙事变量空间** = `SaveProfile.variables.sys` 的草稿视图——任意形状、任意路径、跨回合持久；`事件.*` 等全部叙事状态都住这里     |
 
 EJS 永远写不到**引擎真源实体**（角色/物品/资源/任务等，ADR-21 无涉）；叙事变量空间是 AI 与 EJS 的**共写域**，提交顺序固定：**EJS 差量先落，vars_update 补丁后落 → 路径冲突时 AI 覆盖 EJS**。理由：EJS 在装配期基于回合开始的旧状态计算，AI 补丁反映本回合正文，更新鲜；且语料里 EJS 写全是守卫式初始化与自有簿记，真实冲突面≈0。上游 MVU 名字（`getMessageVar/setMessageVar/getLocalVar/setLocalVar/getvar/setvar`）保留为**别名层**映射到两轴（D5）；映射不了的上游 API 走错误隔离回退（D8），**不为兼容而扭曲契约**。
 
@@ -44,43 +44,43 @@ EJS 永远写不到**引擎真源实体**（角色/物品/资源/任务等，ADR
 
 ### 1.1 块数分布
 
-| 世界书 | EJS 块数 | 条目数备注 |
-| ------ | -------- | ---------- |
-| `event.json` | 284 | 19 条目，重度事件状态机 |
-| `system_core.json` | 252 | 系统皮肤/人格分支 |
-| `dlc.json` | 71 | |
-| `character.json` | 53 | |
-| 其余 11 本 | 0–4 | `variable.json` 为空 |
-| **合计** | **≈660** | |
+| 世界书             | EJS 块数 | 条目数备注              |
+| ------------------ | -------- | ----------------------- |
+| `event.json`       | 284      | 19 条目，重度事件状态机 |
+| `system_core.json` | 252      | 系统皮肤/人格分支       |
+| `dlc.json`         | 71       |                         |
+| `character.json`   | 53       |                         |
+| 其余 11 本         | 0–4      | `variable.json` 为空    |
+| **合计**           | **≈660** |                         |
 
 ### 1.2 EJS 内调用的函数（按出现次数）
 
 **上游运行时内建**（酒馆助手/MVU 提供，本引擎以别名层承接）：
 
-| 函数 | 次数 | 说明 |
-| ---- | ---- | ---- |
-| `getMessageVar(path, opts?)` | 109 | 读 `stat_data.*`；**33 处带 `{ defaults }` 第二参数**，必须支持 |
-| `getLocalVar` / `setLocalVar` | 41 | 上游为聊天域持久局部变量 |
-| `matchChatMessages(pattern)` | 15 | 检测近期聊天正文是否命中关键词 |
-| `setMessageVar(path, val)` | ≥11 | 写 `stat_data.*`（语料中两类用途：默认值初始化、触发时间/楼层类自有簿记） |
-| `getvar(key, opts?)` / `setvar(key, val)` | 21 / 3 | **JS 函数形态**（非 `{{getvar::}}` 宏）：既读 `stat_data.*` 路径也读扁平聊天变量键（`系统名`/`阿南刻`/`dialog_beauty.story`…）；opts 见过 `{ scope, defaults, noCache }` |
-| `variables` | 2 | 裸全局对象，`_.get(variables, 'stat_data.关系列表', {})` 形态 |
-| `_`（lodash） | ~50 | **块内实测全部是读边**：`get(23)/trim(5)/isArray(3)/isObject(2)/isEmpty(2)` + `isObjectLike/mapValues/find/flatMap/pick/pickBy/values/keys/has/uniq/keyBy/chain` 各 1。⚠️ 初稿census 误记的 `_.set/_.insert/_.assign` **不在 EJS 块内**——它们是散文里教 AI 写 MVU 补丁的示例 DSL（`_.set(路径, 旧值, 新值)` 三参形态），走 vars_update 链路，与 EJS 无关 |
-| `getChatMessages` | 1 | 酒馆助手 API，不承接（D8 回退） |
-| 标准全局 | 多 | `Math` / `JSON` / `String` / `Number` / `Boolean` / `RegExp` |
+| 函数                                      | 次数   | 说明                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `getMessageVar(path, opts?)`              | 109    | 读 `stat_data.*`；**33 处带 `{ defaults }` 第二参数**，必须支持                                                                                                                                                                                                                                                                                          |
+| `getLocalVar` / `setLocalVar`             | 41     | 上游为聊天域持久局部变量                                                                                                                                                                                                                                                                                                                                 |
+| `matchChatMessages(pattern)`              | 15     | 检测近期聊天正文是否命中关键词                                                                                                                                                                                                                                                                                                                           |
+| `setMessageVar(path, val)`                | ≥11    | 写 `stat_data.*`（语料中两类用途：默认值初始化、触发时间/楼层类自有簿记）                                                                                                                                                                                                                                                                                |
+| `getvar(key, opts?)` / `setvar(key, val)` | 21 / 3 | **JS 函数形态**（非 `{{getvar::}}` 宏）：既读 `stat_data.*` 路径也读扁平聊天变量键（`系统名`/`阿南刻`/`dialog_beauty.story`…）；opts 见过 `{ scope, defaults, noCache }`                                                                                                                                                                                 |
+| `variables`                               | 2      | 裸全局对象，`_.get(variables, 'stat_data.关系列表', {})` 形态                                                                                                                                                                                                                                                                                            |
+| `_`（lodash）                             | ~50    | **块内实测全部是读边**：`get(23)/trim(5)/isArray(3)/isObject(2)/isEmpty(2)` + `isObjectLike/mapValues/find/flatMap/pick/pickBy/values/keys/has/uniq/keyBy/chain` 各 1。⚠️ 初稿census 误记的 `_.set/_.insert/_.assign` **不在 EJS 块内**——它们是散文里教 AI 写 MVU 补丁的示例 DSL（`_.set(路径, 旧值, 新值)` 三参形态），走 vars_update 链路，与 EJS 无关 |
+| `getChatMessages`                         | 1      | 酒馆助手 API，不承接（D8 回退）                                                                                                                                                                                                                                                                                                                          |
+| 标准全局                                  | 多     | `Math` / `JSON` / `String` / `Number` / `Boolean` / `RegExp`                                                                                                                                                                                                                                                                                             |
 
 **条目内自定义**（条目正文里 `function xx(){}` / `const SIG = {...}` 自带定义）：`SIG`、`gotoSignal`、`genTask` 等。**已验证自足**：`SIG` 定义于 event.json uid 349/350/351/359，`SIG.` 引用只出现在 351/359——**没有任何条目引用其它条目定义的符号**。条目 = 独立编译单元成立。
 
 ### 1.3 `getMessageVar` 读取的 `stat_data` 路径（Top）
 
-| 路径 | 次数 | 引擎侧真源 |
-| ---- | ---- | ---------- |
-| `stat_data.事件.*`（阶段/信号/标题/开启/已完成…） | 60+ | `SaveProfile.variables.sys.事件.*`（vars_update 写入） |
-| `stat_data.主角.*`（等级/状态效果/背包/技能/装备） | 17 | 玩家 `CharacterState`（`type === 'player'`） |
-| `stat_data.世界.地点` / `stat_data.世界.时间` | 10 | `variables.sys.世界.地点` / `SaveProfile.gameTime` |
-| `stat_data.关系列表` | 5 | `SaveProfile.affections` + `CharacterState` |
-| `stat_data.命运点数` | 2 | `SaveProfile.fp` |
-| `stat_data.任务列表` | 2 | `SaveProfile.quests` |
+| 路径                                               | 次数 | 引擎侧真源                                             |
+| -------------------------------------------------- | ---- | ------------------------------------------------------ |
+| `stat_data.事件.*`（阶段/信号/标题/开启/已完成…）  | 60+  | `SaveProfile.variables.sys.事件.*`（vars_update 写入） |
+| `stat_data.主角.*`（等级/状态效果/背包/技能/装备） | 17   | 玩家 `CharacterState`（`type === 'player'`）           |
+| `stat_data.世界.地点` / `stat_data.世界.时间`      | 10   | `variables.sys.世界.地点` / `SaveProfile.gameTime`     |
+| `stat_data.关系列表`                               | 5    | `SaveProfile.affections` + `CharacterState`            |
+| `stat_data.命运点数`                               | 2    | `SaveProfile.fp`                                       |
+| `stat_data.任务列表`                               | 2    | `SaveProfile.quests`                                   |
 
 **写路径**（`setMessageVar` 全部实例）：`事件.信号` 置 `[]`（默认值初始化，均有 `if (!Array.isArray(...))` 守卫）、`事件.冰之歌.触发时间/楼层`（EJS 自有簿记，引擎从不写这些路径）。→ 这佐证了两轴契约：**语料的写全部属于「EJS 自有簿记」域**，没有一处真的想改引擎真源。
 
@@ -156,13 +156,13 @@ buildStatData(input: {
 
 **范围（主人定）：纯代码推导数值，仅此而已**：
 
-| `stats` 路径 | 来源 |
-| ------------ | ---- |
-| `主角.生命值/生命值上限/法力值/法力值上限/体力值/体力值上限` | 玩家 `CharacterState.hp/maxHp/mp/maxMp/sp/maxSp` |
-| `主角.等级/生命层级/累计经验值/升级所需经验` | `level/tier(+tierName)/totalExp/expToNext` |
-| `主角.属性.力量/敏捷/体质/智力/精神` + `属性.属性点` | `attributes.*` + `freeAttrPoints` |
-| `命运点数` | `SaveProfile.fp` |
-| `世界.时间` | `formatGameTime(gameTime)`——引擎既有规范串（`复兴纪元001年-05月-24日-周日-15:30`）。语料核对过：2 处不解析只存取，1 处仅用 `/(\d+)\s*年/` 抽年份，此格式命中；无季节/月名解析 |
+| `stats` 路径                                                 | 来源                                                                                                                                                                          |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `主角.生命值/生命值上限/法力值/法力值上限/体力值/体力值上限` | 玩家 `CharacterState.hp/maxHp/mp/maxMp/sp/maxSp`                                                                                                                              |
+| `主角.等级/生命层级/累计经验值/升级所需经验`                 | `level/tier(+tierName)/totalExp/expToNext`                                                                                                                                    |
+| `主角.属性.力量/敏捷/体质/智力/精神` + `属性.属性点`         | `attributes.*` + `freeAttrPoints`                                                                                                                                             |
+| `命运点数`                                                   | `SaveProfile.fp`                                                                                                                                                              |
+| `世界.时间`                                                  | `formatGameTime(gameTime)`——引擎既有规范串（`复兴纪元001年-05月-24日-周日-15:30`）。语料核对过：2 处不解析只存取，1 处仅用 `/(\d+)\s*年/` 抽年份，此格式命中；无季节/月名解析 |
 
 键名用**上游中文键**（对照语料与卡片 MVU init 的 `角色.*` 命名，实施时二选一定死并写进 golden 用例）。**不含**：叙事变量（住 `vars`）、背包/技能/装备/状态效果（**暂缓**，主人未定，§5）、任务列表/关系列表（AI 内容实体，且上游结构与我们的实体形状不同，投影了也对不上——语料读取全部带守卫，缺失时走默认分支，进 §4 降级清单）。
 
@@ -190,14 +190,14 @@ buildStatData(input: {
 
 **别名层**（承接存量语料，全部映射到两轴，不引入第三种状态）：
 
-| 上游名 | 映射 |
-| ------ | ---- |
-| `getMessageVar(path, opts?)` | 剥 `stat_data.` 前缀 → 上述三种读形 |
-| `setMessageVar(path, val)` | 剥前缀 → **写 `vars` 草稿**（永不触碰 stats） |
+| 上游名                                    | 映射                                                                                                                                                                                             |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `getMessageVar(path, opts?)`              | 剥 `stat_data.` 前缀 → 上述三种读形                                                                                                                                                              |
+| `setMessageVar(path, val)`                | 剥前缀 → **写 `vars` 草稿**（永不触碰 stats）                                                                                                                                                    |
 | `getvar(key, opts?)` / `setvar(key, val)` | `key` 带 `stat_data.` 前缀 → 同 getMessageVar/setMessageVar；扁平键（`系统名`/`阿南刻`…）→ 同链不剥前缀（`stats[key] ?? vars[key]` / 写草稿）。opts 的 `scope/noCache` **忽略**，`defaults` 支持 |
-| `getLocalVar(k)` / `setLocalVar(k, v)` | 读写 `vars._local[k]`（= `sys._local.*` 保留子树；上游聊天域持久语义由共写树持久化天然满足） |
-| `variables` | 裸全局（语料 2 处 `_.get(variables, 'stat_data.…')`）：提供 `{ stat_data: 整树读视图 }` |
-| `matchChatMessages(pattern)` | 独立辅助函数：对 `ctx.history` 近 N 层正文做子串/正则命中（N 对齐该 Agent historyLayers） |
+| `getLocalVar(k)` / `setLocalVar(k, v)`    | 读写 `vars._local[k]`（= `sys._local.*` 保留子树；上游聊天域持久语义由共写树持久化天然满足）                                                                                                     |
+| `variables`                               | 裸全局（语料 2 处 `_.get(variables, 'stat_data.…')`）：提供 `{ stat_data: 整树读视图 }`                                                                                                          |
+| `matchChatMessages(pattern)`              | 独立辅助函数：对 `ctx.history` 近 N 层正文做子串/正则命中（N 对齐该 Agent historyLayers）                                                                                                        |
 
 读链 `stats ?? vars` 的正确性核对过语料两类写：默认值初始化（`事件.信号` 置 `[]`）有 `if (!Array.isArray(getMessageVar(...)))` 守卫——sys 树有值读到真值不写、无值写草稿再读草稿，两支都对；自有簿记（`冰之歌.*`）AI 从不写同路径，无碰撞；共写树上**不存在** v1.1 孤岛方案的「旧影子遮新值」问题。**新内容（工坊作者）建议直接用 `stats`/`vars` 双轴，别名层只为存量语料存在**——工坊文档如此宣传。
 
@@ -250,16 +250,16 @@ hasDynamic(content)  ≡  /<%|\{\{random|\{\{getvar/.test(content)
 
 ### D10 — 测试策略
 
-| 层 | 内容 |
-| -- | ---- |
-| 运行时单测 | 跨块 if/for、`<%_ _%>` trim、`<%=`/`<%-`、错误隔离、条目失败写缓冲丢弃 |
-| shim 单测 | 19 个 lodash 方法 + `_.insert` 全量 |
-| 投影单测 | 合成规则/覆盖层冲突/深拷贝隔离（改投影不脏引擎状态） |
-| 沙盒单测 | `vars` 草稿按序可见、三种读形（叶子/子树活引用/整树浅合并）、`_local` 子树、原型污染键剔除、深 diff 正确性（set/del）、体积护栏拒绝差量 |
-| 提交/回退 | story pass 差量随 `commitChatState` 落库；非 story pass 不落；**仲裁顺序**（同路径 EJS+AI 双写 → AI 终值）；快照回退后 sys 树重建 |
-| **全语料冒烟** ★ | 加载全部内置书真实条目 + fixture stats → `renderWorldBookEntries` 全跑：不抛、统计回退率、断言回退率上限（初值 5%，实测收紧） |
-| golden 用例 | 从 event.json 抽 3-5 个真实条目（斯芬克斯支线/冰之歌/信号机）配 fixture 断言渲染结果——冰之歌用例须覆盖「触发时间写 vars → 下回合读回」跨回合链 |
-| 分层测试 | 静/动分区、区内保序、`section=` 参数、EJS 相对顺序不变 |
+| 层               | 内容                                                                                                                                           |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 运行时单测       | 跨块 if/for、`<%_ _%>` trim、`<%=`/`<%-`、错误隔离、条目失败写缓冲丢弃                                                                         |
+| shim 单测        | 19 个 lodash 方法 + `_.insert` 全量                                                                                                            |
+| 投影单测         | 合成规则/覆盖层冲突/深拷贝隔离（改投影不脏引擎状态）                                                                                           |
+| 沙盒单测         | `vars` 草稿按序可见、三种读形（叶子/子树活引用/整树浅合并）、`_local` 子树、原型污染键剔除、深 diff 正确性（set/del）、体积护栏拒绝差量        |
+| 提交/回退        | story pass 差量随 `commitChatState` 落库；非 story pass 不落；**仲裁顺序**（同路径 EJS+AI 双写 → AI 终值）；快照回退后 sys 树重建              |
+| **全语料冒烟** ★ | 加载全部内置书真实条目 + fixture stats → `renderWorldBookEntries` 全跑：不抛、统计回退率、断言回退率上限（初值 5%，实测收紧）                  |
+| golden 用例      | 从 event.json 抽 3-5 个真实条目（斯芬克斯支线/冰之歌/信号机）配 fixture 断言渲染结果——冰之歌用例须覆盖「触发时间写 vars → 下回合读回」跨回合链 |
+| 分层测试         | 静/动分区、区内保序、`section=` 参数、EJS 相对顺序不变                                                                                         |
 
 ---
 
@@ -288,32 +288,32 @@ ejsCtx: { stats: ctx.statData, vars: sys 草稿, history: ctx.history }
 
 新增/改动模块清单：
 
-| 模块 | 动作 |
-| ---- | ---- |
-| `src/sillytavern/ejs-runtime.ts` | 重写执行层为整片编译（D2）+ 沙盒参数遮蔽（D3）+ 两轴/别名注入（D4/D5） |
-| `src/sillytavern/ejs-lodash-shim.ts` | 🆕 19+1 方法 shim |
-| `src/sillytavern/stat-projection.ts` | 🆕 `buildStatData` 投影 |
-| `src/sillytavern/worldbook-loader.ts` | 🆕 `renderWorldBookEntries` + `hasDynamic`；`formatWorldBookEntries` 不动 |
-| `src/sillytavern/placeholder-registry.ts` | `LORE_BOOK` 改调 `renderWorldBookEntries`，支持 `section=` 参数 |
-| `src/sillytavern/agent-templates.ts` | `buildFallbackMessages` 同步改调 |
-| `src/sillytavern/types.ts` | `AgentContext.statData?`；`AgentConfig.ejsVarsCommit?`（默认仅 story 置 true） |
-| `src/sillytavern/ejs-vars-diff.ts` | 🆕 深 diff（回合开始克隆 vs 最终草稿）→ set/del VarsPatch 纯函数 + 体积护栏 |
-| `src/sillytavern/state-manager.ts` | `commitChatState` payload 加可选 EJS 差量；应用顺序钉死「EJS 差量 → AI 补丁」 |
-| `src/ui/lib/game-pipeline.ts` | ctx 注入 `statData`；story pass 草稿暂存 → diff → 结算提交 |
+| 模块                                      | 动作                                                                           |
+| ----------------------------------------- | ------------------------------------------------------------------------------ |
+| `src/sillytavern/ejs-runtime.ts`          | 重写执行层为整片编译（D2）+ 沙盒参数遮蔽（D3）+ 两轴/别名注入（D4/D5）         |
+| `src/sillytavern/ejs-lodash-shim.ts`      | 🆕 19+1 方法 shim                                                              |
+| `src/sillytavern/stat-projection.ts`      | 🆕 `buildStatData` 投影                                                        |
+| `src/sillytavern/worldbook-loader.ts`     | 🆕 `renderWorldBookEntries` + `hasDynamic`；`formatWorldBookEntries` 不动      |
+| `src/sillytavern/placeholder-registry.ts` | `LORE_BOOK` 改调 `renderWorldBookEntries`，支持 `section=` 参数                |
+| `src/sillytavern/agent-templates.ts`      | `buildFallbackMessages` 同步改调                                               |
+| `src/sillytavern/types.ts`                | `AgentContext.statData?`；`AgentConfig.ejsVarsCommit?`（默认仅 story 置 true） |
+| `src/sillytavern/ejs-vars-diff.ts`        | 🆕 深 diff（回合开始克隆 vs 最终草稿）→ set/del VarsPatch 纯函数 + 体积护栏    |
+| `src/sillytavern/state-manager.ts`        | `commitChatState` payload 加可选 EJS 差量；应用顺序钉死「EJS 差量 → AI 补丁」  |
+| `src/ui/lib/game-pipeline.ts`             | ctx 注入 `statData`；story pass 草稿暂存 → diff → 结算提交                     |
 
 ---
 
 ## 4. 已知降级清单（相对上游语义，明确接受）
 
-| 降级 | 后果 | 处置 |
-| ---- | ---- | ---- |
-| 不支持 `await` | 语料 ≤1 处，中招条目回退原文 | 接受 |
-| `matchChatMessages` 窗口 = historyLayers | 上游可查全聊天记录，我们查注入窗口 | 接受 |
-| 酒馆助手扩展 API 未注入（`getChatMessages` 等） | 工坊条目用到 → 该条目回退原文（D8） | 可选预检，后续 |
-| 无提交权 Agent 的 pass 写 `vars` 不落库（默认仅 story 持权） | 该 pass 内 EJS 写只在本 pass 生效；需要时给对应 Agent 发 `ejsVarsCommit` 权即可 | 按设计（per-Agent 提交权，D5） |
-| `主角.背包/技能/装备/状态效果` 读不到（stats 暂缓 + sys 树无对应数据） | 语料 17 处读全带守卫 → 走默认分支（如钥匙类条目当「未持有」处理） | 待主人定夺（§5） |
-| `关系列表`/`任务列表` 读不到 | 上游结构与我们的实体形状不同，投影也对不上；语料读取全带守卫 → 默认分支 | 接受，真机观察 |
-| `getvar` 的 `scope/noCache` 选项忽略 | 语料语义上不受影响（我们无缓存分层可绕） | 接受 |
+| 降级                                                                   | 后果                                                                            | 处置                           |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------ |
+| 不支持 `await`                                                         | 语料 ≤1 处，中招条目回退原文                                                    | 接受                           |
+| `matchChatMessages` 窗口 = historyLayers                               | 上游可查全聊天记录，我们查注入窗口                                              | 接受                           |
+| 酒馆助手扩展 API 未注入（`getChatMessages` 等）                        | 工坊条目用到 → 该条目回退原文（D8）                                             | 可选预检，后续                 |
+| 无提交权 Agent 的 pass 写 `vars` 不落库（默认仅 story 持权）           | 该 pass 内 EJS 写只在本 pass 生效；需要时给对应 Agent 发 `ejsVarsCommit` 权即可 | 按设计（per-Agent 提交权，D5） |
+| `主角.背包/技能/装备/状态效果` 读不到（stats 暂缓 + sys 树无对应数据） | 语料 17 处读全带守卫 → 走默认分支（如钥匙类条目当「未持有」处理）               | 待主人定夺（§5）               |
+| `关系列表`/`任务列表` 读不到                                           | 上游结构与我们的实体形状不同，投影也对不上；语料读取全带守卫 → 默认分支         | 接受，真机观察                 |
+| `getvar` 的 `scope/noCache` 选项忽略                                   | 语料语义上不受影响（我们无缓存分层可绕）                                        | 接受                           |
 
 > v1 草案中「setMessageVar 不跨回合持久」「localVar 仅 pass 域」两条降级已被共写树契约**消除**。
 
