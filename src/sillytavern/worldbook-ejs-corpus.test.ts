@@ -15,7 +15,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { renderWorldBookEntries, hasDynamic, clearEjsCompileCache } from './worldbook-loader';
+import {
+  renderWorldBookEntries,
+  prerenderWorldBookEntries,
+  hasDynamic,
+  clearEjsCompileCache,
+} from './worldbook-loader';
 import { buildStatData } from './stat-projection';
 import { createDefaultCharacterState } from './types';
 import type { WorldBook, WorldBookEntry, CharacterState } from './types';
@@ -91,24 +96,17 @@ function makeStats(overrides: Partial<CharacterState> = {}): Record<string, any>
 // ========== 已知回退白名单（回归闸门）==========
 
 /**
- * 实测钉死的 8 条注定回退条目（509 条目中，1.6%）。
+ * 实测钉死的 7 条注定回退条目（509 条目中，1.4%）。
  * 全部是**内容侧缺口**，不是引擎缺陷——见设计 §4 降级清单。
  *
  * 出现白名单外的新 uid = 本次改动引入了回归，测试必须红。
  * 反向也管：白名单里的条目哪天修好了（不再回退），也要来这里删行。
  */
 const KNOWN_FALLBACK_UIDS: ReadonlyArray<{ uid: number; where: string; why: string }> = [
-  // —— 酒馆助手扩展 API 未注入（6 条，设计 §4 第 3 行）——
-  { uid: 477, where: 'dlc.json 月历球', why: 'YAML is not defined' },
-  { uid: 505, where: 'dlc.json 边陲之国-莉莉', why: 'message_id is not defined' },
-  { uid: 343, where: 'event.json 冰之歌', why: 'lastMessageId is not defined' },
-  { uid: 353, where: 'event.json 群山回响-入口', why: 'TavernHelper is not defined' },
-  { uid: 357, where: 'event.json 血姬-入口', why: 'TavernHelper is not defined' },
-  { uid: 421, where: 'system_core.json 读者核心', why: 'getChatMessage is not defined' },
-  // —— 语言特性不支持（1 条，设计 §4 第 1 行）——
-  { uid: 417, where: 'system_core.json 艾莉亚核心', why: 'await 不支持（同步执行）' },
-  // —— ST 宏嵌在 EJS 代码块内（1 条，设计 §4 第 4 行：注定回退，已裁定接受）——
-  { uid: 358, where: 'event.json 血姬-本体', why: '`if ({{roll 1d100}} >= 100)` → SyntaxError' },
+  // 🟢 **空表**（2026-08-01，能力面 T4/T5）：原先 7 条回退全部由新能力接管 ——
+  //    TavernHelper / getChatMessage / lastMessageId / message_id / YAML / localStorage / toastr
+  //    进了别名层（§5），await 由 T1 的 AsyncFunction 接住。内置全语料 **零回退**。
+  //    这里一旦冒出新条目 = 引入了回归。
 ];
 
 const KNOWN_FALLBACK_UID_SET = new Set(KNOWN_FALLBACK_UIDS.map((x) => x.uid));
@@ -146,9 +144,11 @@ describe('全语料冒烟 — renderWorldBookEntries × 内置世界书', () => 
     expect(dynamicCount).toBeLessThan(entries.length);
   });
 
-  it('回退条目集合 ⊆ 已知白名单（回归闸门）', () => {
+  it('回退条目集合 ⊆ 已知白名单（回归闸门，走生产的异步预渲染路径）', async () => {
     clearEjsCompileCache();
-    const result = renderWorldBookEntries(entries, {
+    // 🔴 必须用 prerenderWorldBookEntries：同步路径吃不下 async 条目（T1 起 await 走异步入口），
+    //    拿同步路径当闸门会把「生产能跑」的条目误报成回退。
+    const result = await prerenderWorldBookEntries(entries, {
       stats: makeStats(),
       vars: {},
       historyText: '',
@@ -259,40 +259,37 @@ describe('golden — event.json#343 冰之歌', () => {
   const iceEntry = pickEventEntry(343);
 
   /**
-   * 🔴 生产真相：该条目读裸标识符 `lastMessageId`（酒馆助手楼层号，我们不注入），
-   * 严格模式下 `ReferenceError` → 白名单回退。这是**当前的正确行为**，不是缺陷。
+   * 🟢 T5 起 `lastMessageId` 由别名层提供（→ `world.回合`），该条目在**生产 ctx 下直接跑通**，
+   * 不再回退。此前它是「白名单回退」的样板，现在是「能力接管」的样板。
    */
-  it('生产 ctx 下回退原文，且半途写入整体回滚（vars 保持干净）', () => {
+  it('生产 ctx 下正常求值（lastMessageId 已由别名层接管）', () => {
     clearEjsCompileCache();
     const vars: Record<string, any> = {};
     const result = renderWorldBookEntries([iceEntry], {
       stats: makeStats({ level: 12 }),
       vars,
       historyText: '',
+      capabilities: { turn: 7 },
     });
-    expect(result.fallbackEntries).toEqual([
-      { uid: 343, error: 'ReferenceError: lastMessageId is not defined' },
-    ]);
-    expect(result.dynamicText).toBe(iceEntry.content);
-    expect(vars).toEqual({});
+    expect(result.fallbackEntries).toEqual([]);
+    expect(result.dynamicText).not.toBe(iceEntry.content);
+    expect(vars['事件']['冰之歌']['触发楼层']).toBe(7);
   });
 
   /**
-   * 目标行为验证：把缺失的 `lastMessageId` 临时补上（模拟「酒馆助手 API 存在」的世界），
-   * 再验条目自身的簿记链——`主角.等级 >= 10` → 首次触发时把 `世界.时间` 写进 vars 草稿。
-   * ⚠️ 这条断言依赖测试期的 globalThis 垫片，**不代表生产路径当前可用**（见上一条）。
+   * 条目自身的簿记链：`主角.等级 >= 10` → 首次触发时把 `世界.时间` 写进 vars 草稿。
+   * 楼层号经 `capabilities.turn` 供给（别名层把它映射成 `lastMessageId` / `message_id`）。
    */
-  it('补上 lastMessageId 后：等级 ≥10 把 世界.时间 写进 事件.冰之歌.触发时间', () => {
+  it('等级 ≥10 把 世界.时间 写进 事件.冰之歌.触发时间', () => {
     clearEjsCompileCache();
     const vars: Record<string, any> = {};
     const stats = makeStats({ level: 12 });
-    (globalThis as any).lastMessageId = 7;
-    let result;
-    try {
-      result = renderWorldBookEntries([iceEntry], { stats, vars, historyText: '' });
-    } finally {
-      delete (globalThis as any).lastMessageId;
-    }
+    const result = renderWorldBookEntries([iceEntry], {
+      stats,
+      vars,
+      historyText: '',
+      capabilities: { turn: 7 },
+    });
 
     expect(result.fallbackEntries).toEqual([]);
     expect(stats['世界']['时间']).toBe(TIME_TEXT);
