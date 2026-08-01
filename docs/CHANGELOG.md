@@ -9,6 +9,43 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### EJS 能力面 · 评审修复轮（PR #22）｜ ✅ 完成（2026-08-01）
+
+外部评审在 PR #22 上 request changes，8 条全部核实属实（读代码 + 真后端探针取证），另外自查出 3 条评审没抓到的。
+
+**修的**
+
+- **能力面接生产**：`buildCapabilityInput()` 此前写好了但**零调用点**，`buildEjsPassContext()` 漏了 `capabilities` 字段
+  —— 生产里 `char`/`quest`/`lore`/`local`/`ui`/`engine` 全取默认空值。字段可选 → 编译期不报 → 全绿 CI 掩护着空能力面上线。
+- **QuickJS 补齐别名层**：guest 里 `getMessageVar`/`getvar`/`setvar`/`getLocalVar`/`getwi`/`getChatMessage`/
+  `matchChatMessages`/`variables`/`YAML`/`TavernHelper`/`toastr`/`alert`/`localStorage`/`console`/`print` **全部缺席**，
+  38 个真机片段里 27 个 `ReferenceError`。语义逐条对齐 `buildSandboxArgs`（读取优先级 stats→vars→defaults、危险键、默认值）。
+- **QuickJS 支持 `await`**：改 async IIFE + 微任务泵（泵轮数有上限，自我调度的 job 链不能变成绕过 interrupt 的通道）。
+- **QuickJS 接上代码位宏改写**：`rewriteCodeMacros` 从 `ejs-runtime` 导出，两个编译器共用同一套规则。
+- **QuickJS 逐条目回滚**：进 guest 前存 `vars` 快照 + 宿主侧 `_local` 快照，失败即恢复（对齐 D8）。
+- **QuickJS 逐条目播种**：`seed ‖ 条目正文`，与 Legacy 同口径；此前整 pass 一条序列，条目换个位置就换个结果。
+- **QuickJS 对齐严格模式**：guest body 加 `'use strict'`。此前未声明赋值在 Legacy 下 `ReferenceError`、在 guest 下静默建全局。
+- **🔴 句柄泄漏**：装配期 `unwrapResult` 的完成值句柄没释放，同步条目的 `.catch` reaction job 从没泵过 ——
+  `runtime.dispose()` 时 QuickJS 断言 `list_empty(&rt->gc_obj_list)` 失败并 `abort()` 整个 wasm 实例。
+  而 dispose 外面那圈 `try/catch` 把异常**咽掉了**：测试全绿，stderr 刷 38 行 `Aborted` 没人看见。
+- **三处重复**：危险键集 5 份抄写收敛到 `var-resolver` 唯一导出；`worldbook-loader` 同/异步渲染共用 `partitionEntries` +
+  `assembleResult`（分区规则是缓存前缀稳定性的地基，两条路径判定漂移 = 静默缓存击穿）。
+
+**补的测试**
+
+- `ejs-backend-parity.test.ts`（新）—— 根因修复。此前渲染正确性全测 Legacy、QuickJS 只测安全属性，
+  「两后端渲染不同」这一整类缺陷结构性无人看守。断言统一为 `legacy(x) === quickjs(x)`（文本 + 成败 + 草稿末态）。
+  C 档已登记差异显式豁免并**断言豁免数 ≤ 3**。
+- `ejs-backend.test.ts`（新）—— 接缝此前无测试，违反「每个新模块必须配套 `*.test.ts`」。
+- lodash T5 十个方法的测试（含 `cloneDeep` 的环 / 危险键）+「写方法一个都不提供」的守卫。
+- `agent-templates.test.ts` 能力面接线回归 —— 穿过 `buildAgentMessages` 断言，含「`lore.get` 读不到该 Agent
+  看不见的书」这条安全断言。
+- `localStorage` shim 的安全用例：这个名字被别名层刻意占着，需单独证明占位的不是宿主那个。
+
+**验证**：184 文件 / 5348 通过 + 3 跳过，`Aborted` 0 次，typecheck / lint（0 error）干净。
+
+**仍未做**：真机走查；`ejs-preflight` 的 UI 接入；SEC-01（与 EJS 无关，`WORKSHOP_ENTRY_ENABLED` 继续 `false`）。
+
 ### EJS 能力面 T1-T8 — 隔离后端 + 12 个创作者 namespace ｜ ✅ 完成（2026-08-01）
 
 设计真源: `docs/planning/2026-08-01-ejs-capability-surface-design.md`（含实测数据与全部裁定）。
