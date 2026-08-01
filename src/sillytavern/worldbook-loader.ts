@@ -9,6 +9,12 @@
  */
 
 import type { WorldBook, WorldBookEntry, AgentConfig } from './types';
+import {
+  compileEjsEntry,
+  executeEjsEntry,
+  type CompiledEjsEntry,
+  type EjsEvalContext,
+} from './ejs-runtime';
 
 // ========== 加载 ==========
 
@@ -232,4 +238,124 @@ export function formatWorldBookEntries(entries: WorldBookEntry[]): string {
   const sorted = [...entries].sort((a, b) => a.order - b.order);
 
   return sorted.map((entry) => entry.content).join('\n\n');
+}
+
+// ========== 静/动分层 + EJS 求值（工坊 Phase 2 / ADR-30 D7-D9）==========
+
+/**
+ * 条目是否「动态」——含任一会随回合漂移的语法特征（设计 D7 三根针）。
+ *
+ * - `<%`：EJS 本体，求值结果随 stats/vars 变化
+ * - `{{random`：`resolveRandoms` 每次装配重掷
+ * - `{{getvar`：取值可能来自动态区 setvar / EJS 产出，字节随之漂移
+ *
+ * 判定按**语法**不按求值结果（某块「恰好每回合输出相同」也算动态）：
+ * 简单、可预测、零误判成本。`{{setvar}}` 定义本身无害（确定性剥离），刻意不扫。
+ */
+export function hasDynamic(content: string): boolean {
+  return /<%|\{\{random|\{\{getvar/.test(content ?? '');
+}
+
+/** `renderWorldBookEntries` 的产物 */
+export interface WorldBookRenderResult {
+  /** 静态区：无动态特征的条目按 order 拼接——**可证明地**逐字节稳定，最大化 prompt cache 前缀 */
+  staticText: string;
+  /** 动态区：含动态特征的条目按 order 拼接（EJS 已求值 / 失败者原文） */
+  dynamicText: string;
+  /** 编译或执行失败、已回退原文注入的条目（设计 D8） */
+  fallbackEntries: Array<{ uid: number; error: string }>;
+}
+
+/** 编译缓存项：失败也缓存，避免每回合重编译炸一遍（设计 D9） */
+type CompileCacheHit = { ok: true; compiled: CompiledEjsEntry } | { ok: false; error: string };
+
+/**
+ * session 级编译缓存，key = 条目正文原文。
+ * 不淘汰——全语料 ≈660 块，无内存压力（设计 D9）。
+ */
+const ejsCompileCache = new Map<string, CompileCacheHit>();
+
+/** 取（或建）编译产物；语法错误缓存为失败项。 */
+function getCompiled(content: string): CompileCacheHit {
+  const cached = ejsCompileCache.get(content);
+  if (cached) return cached;
+
+  let result: CompileCacheHit;
+  try {
+    result = { ok: true, compiled: compileEjsEntry(content) };
+  } catch (err) {
+    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    result = { ok: false, error: msg };
+  }
+  ejsCompileCache.set(content, result);
+  return result;
+}
+
+/** 清空编译缓存（测试/性能计时用；生产路径无需调用） */
+export function clearEjsCompileCache(): void {
+  ejsCompileCache.clear();
+}
+
+/**
+ * 激活条目 → 静/动两区文本（设计 D7 缓存分层 + D2 整片编译 + D8 条目级回退）。
+ *
+ * 流程：
+ * 1. 全部条目按 `order` 稳定排序（同 order 保持入参顺序）
+ * 2. `hasDynamic` 一分为二；两区**内部各自保序**，EJS 条目相对顺序不变 →
+ *    pass 内 `vars` 草稿的写→读链不受分层影响
+ * 3. 动态区里**只有含 `<%` 的条目才求值**；只含 `{{random}}`/`{{getvar}}` 的
+ *    交给下游宏剥离（`resolveRandoms`/`resolveGetvars`），此处原文透传
+ * 4. 编译抛错 / 执行 `ok:false` → **原文注入** + 记入 `fallbackEntries`（回退 = 今天的现状，
+ *    最坏情况等于不上线；失败条目对 `ejsCtx.vars` 的半途写入由运行时整体回滚）
+ *
+ * @param entries 已激活（`filterActiveEntries` 之后）的条目
+ * @param ejsCtx 求值上下文；`ejsCtx.vars` 会被就地修改（草稿按序可见）
+ */
+export function renderWorldBookEntries(
+  entries: WorldBookEntry[],
+  ejsCtx: EjsEvalContext,
+): WorldBookRenderResult {
+  const staticParts: string[] = [];
+  const dynamicParts: string[] = [];
+  const fallbackEntries: Array<{ uid: number; error: string }> = [];
+
+  const sorted = [...entries].sort((a, b) => a.order - b.order);
+
+  for (const entry of sorted) {
+    const content = entry.content ?? '';
+
+    if (!hasDynamic(content)) {
+      staticParts.push(content);
+      continue;
+    }
+
+    // 只含 {{random}}/{{getvar}} 无 EJS → 不求值，原文进动态区交给宏剥离
+    if (!content.includes('<%')) {
+      dynamicParts.push(content);
+      continue;
+    }
+
+    const compiled = getCompiled(content);
+    if (!compiled.ok) {
+      dynamicParts.push(content);
+      fallbackEntries.push({ uid: entry.uid, error: compiled.error });
+      console.warn(`[worldbook] EJS 编译失败，回退原文注入 uid=${entry.uid}: ${compiled.error}`);
+      continue;
+    }
+
+    const executed = executeEjsEntry(compiled.compiled, ejsCtx);
+    if (executed.ok) {
+      dynamicParts.push(executed.rendered);
+    } else {
+      dynamicParts.push(content);
+      fallbackEntries.push({ uid: entry.uid, error: executed.error });
+      console.warn(`[worldbook] EJS 执行失败，回退原文注入 uid=${entry.uid}: ${executed.error}`);
+    }
+  }
+
+  return {
+    staticText: staticParts.join('\n\n'),
+    dynamicText: dynamicParts.join('\n\n'),
+    fallbackEntries,
+  };
 }

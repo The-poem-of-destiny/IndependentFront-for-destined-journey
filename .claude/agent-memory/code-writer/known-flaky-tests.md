@@ -5,8 +5,9 @@ metadata:
   type: project
 ---
 
-**2026-07-31 更新：全量 `npx vitest run` 全绿，0 failed**（当日两次实测：125 files / 4351 tests，
-以及工坊 P1-1 落地后的 128 files / 4452 tests；P1-3 workshop-store 落地后 132 files / 4543 tests 同样全绿）。
+**2026-07-31 更新：全量 `npx vitest run` 全绿，0 failed**（当日多次实测：125 files / 4351 tests、
+工坊 P1-1 后 128 files / 4452 tests、P1-3 workshop-store 后 132 files / 4543 tests、
+工坊 P2-T6（EJS 差量提交）后 **145 files / 4928 tests** 连跑两次同样全绿）。
 下面两条历史失败要么被修了，要么那次没抽中（第 1 条是概率性的）。**现在任何 failed 都要当
 成自己弄坏的来查**，只有第 1 条再次出现且症状完全吻合时才可判为已知抖动。
 

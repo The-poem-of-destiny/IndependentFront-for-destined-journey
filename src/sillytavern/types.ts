@@ -363,6 +363,10 @@ export interface AgentConfig {
   /** 🆕 Phase 10: Custom template string with {{PLACEHOLDER}} references.
    *  If not set, the default template from placeholder-registry.ts is used. */
   template?: string;
+  /** 🆕 工坊 Phase 2 / ADR-30 D5: 该 Agent 的装配 pass 是否产出 EJS `vars` 差量提交候选。
+   *  默认只有 story 持权（agent-config.json 置 true）；无权 pass 求值照常、草稿即弃。
+   *  机制是逐 Agent 声明的前瞻设计——将来某工坊书需要「对特定 Agent 可见 + 持久状态机」时发权即可。 */
+  ejsVarsCommit?: boolean;
   /** 🆕 Phase 7e: AbortSignal for external cancellation（用于 GamePipeline abort） */
   abortSignal?: AbortSignal;
   /** 🆕 Phase 7e: 流式回调 — 设置后编排器使用 chatStream() 替代 chat() */
@@ -1322,6 +1326,32 @@ export interface AgentContext {
 
   /** 存档级游戏时间（供 memory_summary 等 Agent 注入时间上下文） */
   gameTime?: GameTime;
+
+  // --- 工坊 Phase 2 / ADR-30: 世界书 EJS 求值两轴 ---
+  /**
+   * 轴①`stats` 只读面快照（`buildStatData()` 产出）。
+   * 每回合在 game-pipeline 构建一次，同回合多 Agent 复用；
+   * 每个装配 pass 再克隆一份进 `ejsPass.stats`，杜绝跨 pass 写泄漏（设计 D4/D9）。
+   */
+  statData?: Record<string, any>;
+  /**
+   * 轴②`vars` 草稿暂存 —— **仅持 `ejsVarsCommit` 权的 Agent** 的 pass 会写入本表（keyed by agentId）。
+   *
+   * 容器由 game-pipeline 创建（`new Map()`），`buildAgentMessages` 每 pass 往里 set；
+   * `draft` 与该 pass `ejsPass.vars` 是**同一对象引用** —— EJS 求值写入后这里拿到的就是最终态。
+   * `base` 是 pass 开始时的独立克隆，供回合结算做深 diff（消费方见 T6/game-pipeline，本表只负责运输）。
+   */
+  ejsVarsDrafts?: Map<string, { base: Record<string, any>; draft: Record<string, any> }>;
+  /**
+   * 本次装配 pass 的 EJS 求值上下文 —— 由 `buildAgentMessages` 构造并挂在**浅拷贝** tplCtx 上，
+   * 供 `{{LORE_BOOK}}` resolver / `buildFallbackMessages` 消费。形状对齐 `ejs-runtime` 的 `EjsEvalContext`。
+   * 缺席（外部直接调 resolver 等极端路径）时调用方退化为一次性空草稿。
+   */
+  ejsPass?: {
+    stats: Record<string, any>;
+    vars: Record<string, any>;
+    historyText: string;
+  };
 }
 
 /** 单个 Agent 的运行结果 */

@@ -9,6 +9,26 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 工坊 P2 — EJS 沙盒 + 只读 stats 投影（ADR-30）｜ ✅ 待真机（2026-07-31）
+
+设计: `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`（v1.2 拷问定稿，五轮）；实施计划: `docs/planning/2026-07-31-workshop-phase2-implementation-plan.md`（波次 T1-T6）。世界书条目正文的 EJS 从「原样进上下文」变成「**提示装配期求值**」。
+
+**两轴契约**（自主设计，不承诺 MVU/酒馆助手兼容，上游函数名仅作别名层）: `stats` 是**只读**面，纯代码推导数值（主角资源/等级/五维/命运点数/`世界.时间` = `formatGameTime` 规范串）；`vars` 是**与 AI 共写**的叙事变量空间（= `variables.sys` 草稿），EJS 与 AI 双写同一棵树，**冲突 AI 赢**。
+
+**模块**:
+
+- `ejs-runtime.ts` **重写**为整片编译 —— 一个条目的全部 token 编进**同一个函数体**，跨块 `if`/`for` 由此成立（旧的逐块 `new Function` 做不到，这是重写的存在理由）。tokenizer 一并重写，顺带修掉 `<%= x _%>` 的切词缺陷；含 `print()` 与 `"use strict"`；API 为 `compileEjsEntry` / `executeEjsEntry`，执行失败**回滚草稿**不留半截写入
+- 新增 `ejs-lodash-shim.ts`（`_` 纯读边 17 方法 + `chain`，无任何写方法）· `stat-projection.ts`（`buildStatData` 出只读快照）· `ejs-vars-diff.ts`（草稿深 diff → `{replace,remove}` 交给 var-resolver 的 `applyVarsPatch`；`EJS_DIFF_SIZE_LIMIT = 256KB`）
+- `worldbook-loader.ts` 新增 `hasDynamic`（三根针 `<%` / `{{random` / `{{getvar`）+ `renderWorldBookEntries`
+
+**缓存分层与回退**: 静态区在前、**动态条目沉底**，使静态前缀字节稳定、前缀缓存不被动态内容击穿；编译结果按条目缓存。求值失败**按条目隔离**并注入原文（零回归兜底）。全语料冒烟 509 条目 / 61 动态 / **8 条已知回退白名单**（uid 343·353·357·358·417·421·477·505 —— 6 条依赖本引擎没有的酒馆助手 API、1 条 `await`、1 条 `{{roll}}` 宏嵌在 EJS 代码块内）。⚠️ 最后一条推翻了设计 D1 的宏剥离顺序假设，已裁定接受。
+
+**接线与提交仲裁**: `LORE_BOOK` resolver 走 `renderWorldBookEntries` 并新增 `section=static|dynamic` 参数，`buildFallbackMessages` 同步；`AgentContext` 加 `statData`/`ejsVarsDrafts`/`ejsPass`，`AgentConfig` 加 `ejsVarsCommit`（**默认仅 story 为 true**，per-Agent 声明是前瞻扩展设计）。orchestrator 新增 `onEjsVarsFlush` 事件，在**每个 stage 跑完、`processStageMarkers` 之前**触发 → game-pipeline 算差量/护栏/落库 → `commitChatState(patches, { ejsVarsDiffs })`：**EJS 差量先落、AI 补丁后落**，同路径 AI 赢。差量顺序 = 管线阶段序 + 同阶段 `agentId` 字典序（钉死可复现）。超限**整份拒绝不截断** + toast 一次（每存档每来源）+ game-store `ejsVarsRejections` 持久诊断（DebugPanel 展示并进导出）。
+
+**测试**: 145 files / 4928 tests 全绿；`npm run typecheck` 与 `vue-tsc` 均 0 错误。
+
+🔴 **真机走查尚未做** —— 回退率、`cacheHitTokens` 前后对比、story 首包延迟、冰之歌跨回合链四项均未验证，状态口径按「✅ 待真机」而非「已交付」。
+
 ### 工坊 P1 — 创意工坊（= Phase 7f） ｜ ✅ 真机走查已过（2026-07-31）
 
 设计: `docs/planning/2026-07-31-creative-workshop-compat-design.md`（v2，D1-D17）；实施计划: `docs/planning/2026-07-31-workshop-phase0-1-implementation-plan.md`。上游是【命定之诗】创意工坊（角色卡内嵌酒馆助手脚本 + Cloudflare Worker 后端），本引擎**不嵌 iframe、不跑上游 JS**，只直连其公开 REST。

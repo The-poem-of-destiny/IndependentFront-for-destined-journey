@@ -373,6 +373,112 @@ describe('StateManager', () => {
   });
 
   // ===================================================================
+  // 3b. 工坊 P2 (ADR-30 D5) — EJS vars 差量提交 + 仲裁顺序
+  // ===================================================================
+  describe('commitChatState — EJS vars 差量 (工坊 P2 / D5)', () => {
+    it('差量落进 profile.variables.sys（提交结果进真源，快照回退随 profile 深拷贝回滚）', async () => {
+      const sm = new StateManager({ saveId: 'save-ejs-1' });
+      const result = await sm.commitChatState([], {
+        ejsVarsDiffs: [
+          {
+            replace: [{ path: 'sys.村庄.好感', value: 3 }],
+            remove: [],
+          },
+        ],
+      });
+      expect(result.success).toBe(true);
+      const profile = await saveProfile.getProfile('save-ejs-1');
+      expect(profile.variables.sys?.村庄?.好感).toBe(3);
+    });
+
+    it('🔒 仲裁顺序: 同路径 EJS 写 + AI 补丁 → AI 终值（AI 覆盖 EJS）', async () => {
+      const sm = new StateManager({ saveId: 'save-ejs-order' });
+      // 参数里 patches 在前、diffs 在后 —— 顺序由实现钉死，不由参数顺序决定
+      await sm.commitChatState(
+        [{ op: 'set_variable', target: 'variables.sys.天气', value: '晴' }],
+        {
+          ejsVarsDiffs: [{ replace: [{ path: 'sys.天气', value: '暴雨' }], remove: [] }],
+        },
+      );
+      const profile = await saveProfile.getProfile('save-ejs-order');
+      expect(profile.variables.sys?.天气).toBe('晴');
+    });
+
+    it('非冲突路径两边都保留（EJS 写自有簿记，AI 写正文状态）', async () => {
+      const sm = new StateManager({ saveId: 'save-ejs-both' });
+      await sm.commitChatState([{ op: 'set_variable', target: 'variables.sys.金币', value: 50 }], {
+        ejsVarsDiffs: [{ replace: [{ path: 'sys.计数器', value: 7 }], remove: [] }],
+      });
+      const profile = await saveProfile.getProfile('save-ejs-both');
+      expect(profile.variables.sys?.金币).toBe(50);
+      expect(profile.variables.sys?.计数器).toBe(7);
+    });
+
+    it('多份差量按列表序应用 —— 后者同路径覆盖前者', async () => {
+      const sm = new StateManager({ saveId: 'save-ejs-multi' });
+      await sm.commitChatState([], {
+        ejsVarsDiffs: [
+          { replace: [{ path: 'sys.标记', value: '先' }], remove: [] },
+          { replace: [{ path: 'sys.标记', value: '后' }], remove: [] },
+        ],
+      });
+      const profile = await saveProfile.getProfile('save-ejs-multi');
+      expect(profile.variables.sys?.标记).toBe('后');
+    });
+
+    it('remove 路径能删掉已有键', async () => {
+      const sm = new StateManager({ saveId: 'save-ejs-del' });
+      await sm.commitChatState([{ op: 'set_variable', target: 'variables.sys.临时', value: 1 }]);
+      await sm.commitChatState([], {
+        ejsVarsDiffs: [{ replace: [], remove: [{ path: 'sys.临时' }] }],
+      });
+      const profile = await saveProfile.getProfile('save-ejs-del');
+      expect(profile.variables.sys?.临时).toBeUndefined();
+    });
+
+    it('空 diff（无 replace 无 remove）不触发写入', async () => {
+      const sm = new StateManager({ saveId: 'save-ejs-empty' });
+      vi.mocked(saveProfile.updateProfile).mockClear();
+      const result = await sm.commitChatState([], {
+        ejsVarsDiffs: [{ replace: [], remove: [] }],
+      });
+      expect(result.success).toBe(true);
+      expect(result.patchesApplied).toBe(0);
+      expect(vi.mocked(saveProfile.updateProfile)).not.toHaveBeenCalled();
+    });
+
+    it('无 options 的老调用方行为不变（空 patches 直接短路）', async () => {
+      const sm = new StateManager({ saveId: 'save-ejs-none' });
+      vi.mocked(saveProfile.updateProfile).mockClear();
+      const result = await sm.commitChatState([]);
+      expect(result.success).toBe(true);
+      expect(vi.mocked(saveProfile.updateProfile)).not.toHaveBeenCalled();
+    });
+
+    it('差量应用抛错不阻塞 AI 补丁（进 errors[]，patches 照落）', async () => {
+      const sm = new StateManager({ saveId: 'save-ejs-boom' });
+      const realGet = vi.mocked(saveProfile.getProfile).getMockImplementation()!;
+      let first = true;
+      vi.mocked(saveProfile.getProfile).mockImplementation(async (saveId: string) => {
+        if (first && saveId === 'save-ejs-boom') {
+          first = false;
+          throw new Error('profile 读取炸了');
+        }
+        return realGet(saveId);
+      });
+      const result = await sm.commitChatState(
+        [{ op: 'set_variable', target: 'variables.sys.金币', value: 9 }],
+        { ejsVarsDiffs: [{ replace: [{ path: 'sys.计数器', value: 1 }], remove: [] }] },
+      );
+      expect(result.success).toBe(false);
+      expect(result.errors.some((e) => e.includes('EJS vars 差量应用失败'))).toBe(true);
+      const profile = await saveProfile.getProfile('save-ejs-boom');
+      expect(profile.variables.sys?.金币).toBe(9);
+      vi.mocked(saveProfile.getProfile).mockImplementation(realGet);
+    });
+  });
+
+  // ===================================================================
   // 4. update_character
   // ===================================================================
   describe('commitChatState — update_character', () => {
@@ -2494,6 +2600,38 @@ describe('StateManager', () => {
   // 14b. 快照恢复 — restoreSnapshot 覆写 + 对话回滚 (M5 §11.2, #2 #49)
   // ===================================================================
   describe('restoreSnapshot — 覆写 + 对话回滚 (M5)', () => {
+    it('工坊 P2 (D5): 已提交的 EJS 写进快照 → 回退后 sys 树仍带它（随 saveProfile 整体回滚）', async () => {
+      const save = buildMockSaveSlot({ id: 'save-ejs-snap' });
+      vi.mocked(db.getSave).mockResolvedValue(save);
+      const sm = new StateManager({ saveId: 'save-ejs-snap' });
+
+      // 回合 N: EJS 差量 + AI 补丁双双落库
+      await sm.commitChatState([{ op: 'set_variable', target: 'variables.sys.金币', value: 10 }], {
+        ejsVarsDiffs: [{ replace: [{ path: 'sys.簿记.已访问', value: ['旧镇'] }], remove: [] }],
+      });
+      const snap = await sm.createSnapshot('turn', 5);
+      expect(snap.saveProfile.variables.sys.簿记.已访问).toEqual(['旧镇']);
+
+      // 回合 N+1: 状态又往前走了
+      await sm.commitChatState([], {
+        ejsVarsDiffs: [
+          { replace: [{ path: 'sys.簿记.已访问', value: ['旧镇', '新港'] }], remove: [] },
+        ],
+      });
+      expect((await saveProfile.getProfile('save-ejs-snap')).variables.sys.簿记.已访问).toEqual([
+        '旧镇',
+        '新港',
+      ]);
+
+      // 回退到 N
+      vi.mocked(db.getSnapshot).mockResolvedValue(snap as any);
+      const result = await sm.restoreSnapshot(snap.id);
+      expect(result.success).toBe(true);
+      const restored = await saveProfile.getProfile('save-ejs-snap');
+      expect(restored.variables.sys.簿记.已访问).toEqual(['旧镇']);
+      expect(restored.variables.sys.金币).toBe(10);
+    });
+
     it('恢复: 角色整体覆写 + profile 覆写 + 按 turn 截断消息 + activeSnapshotId 指向', async () => {
       // 当前世界: 主角 hp=30 + 一个快照之后才加入的 NPC
       const hero = buildMockCharacter({ id: 'hero-1', name: '主角', saveId: 'save-001', hp: 30 });

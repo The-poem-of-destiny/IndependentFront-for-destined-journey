@@ -897,6 +897,145 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
   });
 });
 
+// ========== LORE_BOOK × EJS 静/动分层（工坊 P2 / ADR-30 D1/D7）==========
+
+describe('LORE_BOOK EJS 分层与求值', () => {
+  /** 造一本书：静态条目(order 1) + EJS 条目(order 2) + 语法错误条目(order 3) */
+  function makeEjsBook(): WorldBook[] {
+    return [
+      {
+        id: 'wb_ejs',
+        name: 'EJS 测试书',
+        partition: 'world_setting',
+        entries: [
+          {
+            uid: 10,
+            name: '静态条目',
+            content: '白曜城是北方重镇。',
+            enabled: true,
+            key: [],
+            keysecondary: [],
+            selectiveLogic: 0,
+            order: 1,
+            position: 0,
+          },
+          {
+            uid: 20,
+            name: '动态条目',
+            content: '主角生命值：<%= stats.主角.生命值 %>',
+            enabled: true,
+            key: [],
+            keysecondary: [],
+            selectiveLogic: 0,
+            order: 2,
+            position: 0,
+          },
+          {
+            uid: 30,
+            name: '坏条目',
+            content: '坏块：<% if ( %>',
+            enabled: true,
+            key: [],
+            keysecondary: [],
+            selectiveLogic: 0,
+            order: 3,
+            position: 0,
+          },
+        ],
+      },
+    ];
+  }
+
+  const ejsConfig = () => mockConfig({ agentId: 'story' });
+
+  beforeEach(() => {
+    resetPlaceholderGlobals();
+    setPlaceholderGlobals(makeEjsBook(), [
+      mockConfig({ agentId: 'story', worldBookIds: ['wb_ejs'] }),
+    ]);
+  });
+
+  function ctxWithPass(): AgentContext {
+    return mockCtx({
+      ejsPass: { stats: { 主角: { 生命值: 77 } }, vars: {}, historyText: '' },
+    });
+  }
+
+  it('无 section → 静态区 + 动态区连拼，静态在前', () => {
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctxWithPass(), ejsConfig());
+    expect(result).toContain('白曜城是北方重镇。');
+    expect(result).toContain('主角生命值：77');
+    expect(result.indexOf('白曜城')).toBeLessThan(result.indexOf('主角生命值'));
+  });
+
+  it('section=static → 只含静态条目，动态条目一概不出现', () => {
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctxWithPass(), ejsConfig(), {
+      section: 'static',
+    });
+    expect(result).toContain('白曜城是北方重镇。');
+    expect(result).not.toContain('主角生命值');
+    expect(result).not.toContain('坏块');
+  });
+
+  it('section=dynamic → 只含动态区（求值结果 + 回退原文），不含静态条目', () => {
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctxWithPass(), ejsConfig(), {
+      section: 'dynamic',
+    });
+    expect(result).not.toContain('白曜城');
+    expect(result).toContain('主角生命值：77');
+  });
+
+  it('动态条目输出的是求值结果，不是 EJS 源码', () => {
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctxWithPass(), ejsConfig());
+    expect(result).not.toContain('<%=');
+    expect(result).not.toContain('stats.主角.生命值');
+  });
+
+  it('编译失败条目回退原文注入（零回归兜底 D8）', () => {
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctxWithPass(), ejsConfig());
+    // 原文（含未闭合的 EJS 块）原样出现，其余条目不受影响
+    expect(result).toContain('坏块：<% if ( %>');
+    expect(result).toContain('白曜城是北方重镇。');
+  });
+
+  it('EJS 写 vars 落在 ctx.ejsPass.vars 草稿上（同一对象引用）', () => {
+    setPlaceholderGlobals(
+      [
+        {
+          id: 'wb_ejs',
+          name: 'EJS 测试书',
+          partition: 'world_setting',
+          entries: [
+            {
+              uid: 40,
+              name: '写变量',
+              content: '<% setMessageVar("事件.冰之歌", 1) %>已记录',
+              enabled: true,
+              key: [],
+              keysecondary: [],
+              selectiveLogic: 0,
+              order: 1,
+              position: 0,
+            },
+          ],
+        },
+      ],
+      [mockConfig({ agentId: 'story', worldBookIds: ['wb_ejs'] })],
+    );
+    const draft: Record<string, any> = {};
+    const ctx = mockCtx({ ejsPass: { stats: {}, vars: draft, historyText: '' } });
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctx, ejsConfig());
+    expect(result).toContain('已记录');
+    expect(draft.事件.冰之歌).toBe(1);
+  });
+
+  it('无 ejsPass（外部直接调 resolver）→ 退化为空草稿，statData 仍供 stats 读', () => {
+    const ctx = mockCtx({ statData: { 主角: { 生命值: 42 } } });
+    const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](ctx, ejsConfig());
+    expect(result).toContain('主角生命值：42');
+  });
+});
+
 // ========== Chain Placeholders (localParams) ==========
 
 describe('Chain communication placeholders', () => {

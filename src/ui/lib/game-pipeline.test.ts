@@ -36,6 +36,29 @@ vi.mock('@engine/database', () => ({
   getPresets: vi.fn(async () => []),
 }));
 
+// 工坊 P2 (D5): EJS 差量落库走 createStateManager(...).commitChatState —— 拦下来验载荷
+const { commitSpy, advanceTurnSpy, toastSpy } = vi.hoisted(() => ({
+  commitSpy: vi.fn(async () => ({
+    success: true,
+    patchesApplied: 0,
+    eventsGenerated: [],
+    errors: [] as string[],
+  })),
+  advanceTurnSpy: vi.fn(async () => {}),
+  toastSpy: vi.fn(),
+}));
+
+vi.mock('@engine/state-manager', () => ({
+  createStateManager: vi.fn(() => ({
+    commitChatState: commitSpy,
+    advanceTurn: advanceTurnSpy,
+  })),
+}));
+
+vi.mock('../stores/ui-store', () => ({
+  useUIStore: () => ({ toast: toastSpy }),
+}));
+
 import { preCheckPlot, postCheckPlot } from '@engine/plot-engine';
 
 function makeGameStore(overrides: Record<string, any> = {}) {
@@ -59,6 +82,7 @@ function makeGameStore(overrides: Record<string, any> = {}) {
     addAgentLogEntry: vi.fn(),
     refreshFromDb: vi.fn(async () => {}),
     markOpeningPromptConsumed: vi.fn(async () => {}),
+    recordEjsVarsRejection: vi.fn(),
     ...overrides,
   } as any;
 }
@@ -188,6 +212,56 @@ describe('buildContext — plotSettings (步5)', () => {
     const pipeline = makePipeline({ activeSave: null });
     const ctx = (pipeline as any).buildContext('输入');
     expect(ctx.plotSettings.mode).toBe('off');
+  });
+});
+
+describe('buildContext — EJS 两轴注入 (工坊 P2 / ADR-30)', () => {
+  const player = {
+    id: 'c1',
+    type: 'player',
+    name: '主角',
+    hp: 80,
+    maxHp: 100,
+    mp: 10,
+    maxMp: 20,
+    sp: 5,
+    maxSp: 10,
+    level: 3,
+    tierName: '普通',
+    totalExp: 120,
+    expToNext: 300,
+    freeAttrPoints: 2,
+    attributes: { str: 10, dex: 9, con: 8, int: 7, spi: 6 },
+  } as any;
+
+  it('注入 statData（读 saveProfile 的 gameTime/fp）', () => {
+    const pipeline = makePipeline({
+      characters: [player],
+      saveProfile: {
+        fp: 7,
+        gameTime: { year: 1, month: 5, day: 24, hour: 15, minute: 30 },
+        variables: { sys: {} },
+      },
+    });
+    const ctx = (pipeline as any).buildContext('输入');
+    expect(ctx.statData.主角.生命值).toBe(80);
+    expect(ctx.statData.主角.属性.力量).toBe(10);
+    expect(ctx.statData.命运点数).toBe(7);
+    expect(ctx.statData.世界.时间).toBeTruthy();
+  });
+
+  it('statData 是孤儿深拷贝 —— 改它不脏 store 里的角色', () => {
+    const pipeline = makePipeline({ characters: [player], saveProfile: null });
+    const ctx = (pipeline as any).buildContext('输入');
+    ctx.statData.主角.生命值 = 1;
+    expect(player.hp).toBe(80);
+  });
+
+  it('注入空的 ejsVarsDrafts 容器（供持权 Agent 的 pass 登记草稿）', () => {
+    const pipeline = makePipeline({ characters: [], saveProfile: null });
+    const ctx = (pipeline as any).buildContext('输入');
+    expect(ctx.ejsVarsDrafts).toBeInstanceOf(Map);
+    expect(ctx.ejsVarsDrafts.size).toBe(0);
   });
 });
 
@@ -446,5 +520,157 @@ describe('GamePipeline — 场景配乐触发', () => {
     await Promise.resolve();
     expect(audioStopCalls.n).toBe(1);
     expect(audioCalls).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// 工坊 P2 (ADR-30 D5) — EJS vars 差量提交 + 体积护栏
+// ============================================================================
+
+describe('flushEjsVarsDiffs — EJS vars 差量提交 (工坊 P2 / D5)', () => {
+  type Draft = { base: Record<string, any>; draft: Record<string, any> };
+
+  /** 造一个已备好 currentContext + 草稿表的管线 */
+  function primed(drafts: Record<string, Draft>, gameOverrides: Record<string, any> = {}) {
+    const pipeline = makePipeline(gameOverrides);
+    const ctx = (pipeline as any).buildContext('输入');
+    for (const [agentId, entry] of Object.entries(drafts)) {
+      ctx.ejsVarsDrafts.set(agentId, entry);
+    }
+    (pipeline as any).currentContext = ctx;
+    return pipeline;
+  }
+
+  /** 最近一次 commitChatState 的 ejsVarsDiffs 载荷 */
+  function lastDiffs() {
+    const call = commitSpy.mock.calls[commitSpy.mock.calls.length - 1] as any[];
+    return call[1].ejsVarsDiffs;
+  }
+
+  beforeEach(() => {
+    commitSpy.mockClear();
+    toastSpy.mockClear();
+  });
+
+  it('有写入 → 差量随 commitChatState 落库（patches 为空，只带 ejsVarsDiffs）', async () => {
+    const pipeline = primed({
+      story: { base: { 计数器: 1 }, draft: { 计数器: 2, 新键: '值' } },
+    });
+    await (pipeline as any).flushEjsVarsDiffs(['story']);
+
+    expect(commitSpy).toHaveBeenCalledTimes(1);
+    const [patches, options] = commitSpy.mock.calls[0] as any[];
+    expect(patches).toEqual([]);
+    expect(options.ejsVarsDiffs).toHaveLength(1);
+    // 路径带 sys. 前缀（diffVars 契约）
+    expect(options.ejsVarsDiffs[0].replace).toEqual(
+      expect.arrayContaining([
+        { path: 'sys.计数器', value: 2 },
+        { path: 'sys.新键', value: '值' },
+      ]),
+    );
+  });
+
+  it('删除也进差量（base 有 draft 无 → remove）', async () => {
+    const pipeline = primed({ story: { base: { 旧键: 1 }, draft: {} } });
+    await (pipeline as any).flushEjsVarsDiffs(['story']);
+    expect(lastDiffs()[0].remove).toEqual([{ path: 'sys.旧键' }]);
+  });
+
+  it('空 diff 不传 —— 没写过就根本不调 commitChatState', async () => {
+    const pipeline = primed({ story: { base: { a: 1 }, draft: { a: 1 } } });
+    await (pipeline as any).flushEjsVarsDiffs(['story']);
+    expect(commitSpy).not.toHaveBeenCalled();
+  });
+
+  it('没有草稿表 / 本 stage 无持权 Agent → 静默跳过', async () => {
+    const bare = makePipeline();
+    await (bare as any).flushEjsVarsDiffs(['story']);
+    expect(commitSpy).not.toHaveBeenCalled();
+
+    const pipeline = primed({ story: { base: {}, draft: { a: 1 } } });
+    await (pipeline as any).flushEjsVarsDiffs(['vars_update']);
+    expect(commitSpy).not.toHaveBeenCalled();
+  });
+
+  it('同阶段多个持权 Agent 按 agentId 字典序 —— 后者同路径覆盖前者', async () => {
+    const pipeline = primed({
+      story: { base: {}, draft: { 标记: '来自 story' } },
+      alpha: { base: {}, draft: { 标记: '来自 alpha' } },
+    });
+    // 传入顺序刻意反着写，验证排序不看调用方顺序
+    await (pipeline as any).flushEjsVarsDiffs(['story', 'alpha']);
+
+    const diffs = lastDiffs();
+    expect(diffs).toHaveLength(2);
+    expect(diffs[0].replace[0].value).toBe('来自 alpha'); // a < s
+    expect(diffs[1].replace[0].value).toBe('来自 story');
+  });
+
+  it('消费即摘表 —— 同一份草稿不会被后续 stage 重复提交', async () => {
+    const pipeline = primed({ story: { base: {}, draft: { a: 1 } } });
+    await (pipeline as any).flushEjsVarsDiffs(['story']);
+    await (pipeline as any).flushEjsVarsDiffs(['story']);
+    expect(commitSpy).toHaveBeenCalledTimes(1);
+    expect((pipeline as any).currentContext.ejsVarsDrafts.size).toBe(0);
+  });
+
+  it('落库抛错不外溢（簿记旁路不该吞掉本轮正文）', async () => {
+    commitSpy.mockRejectedValueOnce(new Error('DB 炸了') as never);
+    const pipeline = primed({ story: { base: {}, draft: { a: 1 } } });
+    await expect((pipeline as any).flushEjsVarsDiffs(['story'])).resolves.toBeUndefined();
+  });
+
+  // ===== 体积护栏 =====
+
+  it('超上限 → 整份拒绝：不落库 + toast + 诊断计数', async () => {
+    const record = vi.fn();
+    const huge = 'x'.repeat(300 * 1024); // > EJS_DIFF_SIZE_LIMIT (256 KB)
+    const pipeline = primed(
+      { story: { base: {}, draft: { 巨块: huge } } },
+      { recordEjsVarsRejection: record },
+    );
+    await (pipeline as any).flushEjsVarsDiffs(['story']);
+
+    expect(commitSpy).not.toHaveBeenCalled(); // 不截断、不部分提交
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record.mock.calls[0][0]).toBe('story');
+    expect(record.mock.calls[0][2]).toBeGreaterThan(256 * 1024);
+    expect(toastSpy).toHaveBeenCalledTimes(1);
+    expect(String(toastSpy.mock.calls[0][0])).toContain('叙事生成'); // 文案点名来源
+  });
+
+  it('同来源第二次超限：诊断计数照记，toast 不再弹（每存档每来源一次）', async () => {
+    const record = vi.fn();
+    const huge = 'x'.repeat(300 * 1024);
+    const pipeline = primed(
+      { story: { base: {}, draft: { 巨块: huge } } },
+      { recordEjsVarsRejection: record },
+    );
+    await (pipeline as any).flushEjsVarsDiffs(['story']);
+    // 第二轮：同一来源再超一次
+    (pipeline as any).currentContext.ejsVarsDrafts.set('story', {
+      base: {},
+      draft: { 巨块: huge },
+    });
+    await (pipeline as any).flushEjsVarsDiffs(['story']);
+
+    expect(record).toHaveBeenCalledTimes(2);
+    expect(toastSpy).toHaveBeenCalledTimes(1);
+    expect(commitSpy).not.toHaveBeenCalled();
+  });
+
+  it('一份超限不牵连同批的另一份（逐份判定）', async () => {
+    const huge = 'x'.repeat(300 * 1024);
+    const pipeline = primed({
+      alpha: { base: {}, draft: { 巨块: huge } },
+      story: { base: {}, draft: { 小键: 1 } },
+    });
+    await (pipeline as any).flushEjsVarsDiffs(['alpha', 'story']);
+
+    expect(commitSpy).toHaveBeenCalledTimes(1);
+    const diffs = lastDiffs();
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0].replace).toEqual([{ path: 'sys.小键', value: 1 }]);
   });
 });

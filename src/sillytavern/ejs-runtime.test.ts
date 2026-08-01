@@ -1,497 +1,723 @@
 /**
- * ejs-runtime.ts — EJS 沙盒模板评估器测试
+ * ejs-runtime.ts 测试 — 整片编译运行时（工坊 Phase 2 / D2、D5、D8、D10）
  *
- * Phase 4.6: 纯函数测试，无需 DB/浏览器环境。
- * 覆盖所有导出: EjsRuntime (render / renderAll / getMutations), renderEjs
- *
- * 重要: 沙盒仅暴露 getMessageVar / setMessageVar / Math / JSON，
- * 不直接暴露变量名。每个 <% %> 块是独立的 new Function，不支持跨块控制流。
+ * 覆盖：跨块控制流、`<%_ _%>` 空白吞噬、输出标签空值、三种读形、别名全表、
+ * 执行失败 vars 回滚（引用不变）、危险路径段拒写、沙盒遮蔽。
  */
+
 import { describe, it, expect } from 'vitest';
-import { EjsRuntime, renderEjs } from './ejs-runtime';
+import {
+  compileEjsEntry,
+  executeEjsEntry,
+  type EjsEvalContext,
+  type CompiledEjsEntry,
+} from './ejs-runtime';
 
-// ========== 纯文本 & 基础输出 ==========
+// ========== 测试工具 ==========
 
-describe('renderEjs — 纯文本/基础', () => {
-  it('纯文本无 EJS 标签时原样返回', () => {
-    const result = renderEjs('Hello, World!', {});
-    expect(result.rendered).toBe('Hello, World!');
-    expect(result.errors).toEqual([]);
-    expect(result.mutations).toEqual({});
+function makeCtx(partial: Partial<EjsEvalContext> = {}): EjsEvalContext {
+  return {
+    stats: partial.stats ?? {},
+    vars: partial.vars ?? {},
+    historyText: partial.historyText ?? '',
+  };
+}
+
+/** 编译 + 执行，断言成功并返回渲染串 */
+function render(content: string, ctx: EjsEvalContext = makeCtx()): string {
+  const result = executeEjsEntry(compileEjsEntry(content), ctx);
+  if (!result.ok) throw new Error(`预期渲染成功但失败了: ${result.error}`);
+  return result.rendered;
+}
+
+/** 编译 + 执行，返回原始结果（允许失败） */
+function run(content: string, ctx: EjsEvalContext) {
+  return executeEjsEntry(compileEjsEntry(content), ctx);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 基础渲染
+// ═══════════════════════════════════════════════════════════
+
+describe('基础渲染', () => {
+  it('纯文本原样输出', () => {
+    expect(render('Hello, World!')).toBe('Hello, World!');
   });
 
-  it('空模板返回空字符串', () => {
-    const result = renderEjs('', {});
-    expect(result.rendered).toBe('');
-    expect(result.errors).toEqual([]);
+  it('空模板输出空串', () => {
+    expect(render('')).toBe('');
   });
 
-  it('<%= expr %> 将表达式结果转为字符串输出', () => {
-    const result = renderEjs('Hello <%= "World" %>!', {});
-    expect(result.rendered).toBe('Hello World!');
-    expect(result.errors).toHaveLength(0);
+  it('<%= 输出表达式', () => {
+    expect(render('Hello <%= "World" %>!')).toBe('Hello World!');
   });
 
-  it('<%= expr %> 数字表达式可正常输出', () => {
-    const result = renderEjs('Count: <%= 1 + 2 %>', {});
-    expect(result.rendered).toBe('Count: 3');
+  it('<%= 算术表达式', () => {
+    expect(render('Count: <%= 1 + 2 %>')).toBe('Count: 3');
   });
 
-  it('<%= expr %> 通过 getMessageVar 读取变量并输出', () => {
-    const result = renderEjs('Hello <%= getMessageVar("name") %>!', { name: '主人' });
-    expect(result.rendered).toBe('Hello 主人!');
-    expect(result.errors).toHaveLength(0);
+  it('<%- 与 <%= 同义（提示词纯文本，不做 HTML 转义）', () => {
+    expect(render('<%- "<b>x</b>" %>')).toBe('<b>x</b>');
+    expect(render('<%= "<b>x</b>" %>')).toBe('<b>x</b>');
   });
 
-  it('<%- unescaped %> 与 <%= %> 行为一致，直接输出字符串', () => {
-    const result = renderEjs('Value: <%- getMessageVar("val") %>.', { val: 99 });
-    expect(result.rendered).toBe('Value: 99.');
-    expect(result.errors).toHaveLength(0);
+  it('<%= null 输出空串', () => {
+    expect(render('Before<%= null %>After')).toBe('BeforeAfter');
   });
 
-  it('<%= expr %> 对 null 值不输出任何内容', () => {
-    const result = renderEjs('Before<%= null %>After', {});
-    expect(result.rendered).toBe('BeforeAfter');
+  it('<%= undefined 输出空串', () => {
+    expect(render('Before<%= undefined %>After')).toBe('BeforeAfter');
   });
 
-  it('<%= expr %> 对 undefined 值不输出任何内容', () => {
-    const result = renderEjs('Before<%= undefined %>After', {});
-    expect(result.rendered).toBe('BeforeAfter');
+  it('<%= 0 / false 正常输出（不被当空值吞掉）', () => {
+    expect(render('<%= 0 %>|<%= false %>')).toBe('0|false');
   });
 
-  it('<%= expr %> 布尔值 true 输出字符串 "true"', () => {
-    const result = renderEjs('<%= true %>', {});
-    expect(result.rendered).toBe('true');
+  it('<%= 空表达式输出空串', () => {
+    expect(render('a<%= %>b')).toBe('ab');
   });
 
-  it('<%= expr %> 数字 0 输出字符串 "0"（0 不是 null/undefined）', () => {
-    const result = renderEjs('<%= 0 %>', {});
-    expect(result.rendered).toBe('0');
-  });
-});
-
-// ========== 代码块执行 ==========
-
-describe('renderEjs — 代码块', () => {
-  it('<% code %> 执行代码但不输出任何内容', () => {
-    const result = renderEjs('<% setMessageVar("x", 42) %>done', {});
-    expect(result.rendered).toBe('done');
-    expect(result.mutations).toHaveProperty('x', 42);
+  it('<% 代码块不产出输出', () => {
+    expect(render('<% const x = 1; %>done')).toBe('done');
   });
 
-  it('<%_ code _%> trim-mode 代码块执行无输出', () => {
-    const result = renderEjs('<%_ setMessageVar("y", 100) _%>end', {});
-    expect(result.rendered).toBe('end');
-    expect(result.mutations).toHaveProperty('y', 100);
+  it('<%# 注释块不产出输出', () => {
+    expect(render('a<%# 这是注释 %>b')).toBe('ab');
   });
 
-  it('if/else 条件渲染 — 三元表达式走 if 分支', () => {
-    // 每个 <% %> 是独立 new Function，不支持跨块控制流。
-    // 条件渲染必须用单块三元表达式。
-    const template = '<%= getMessageVar("score") >= 60 ? "及格" : "不及格" %>';
-    const result = renderEjs(template, { score: 80 });
-    expect(result.rendered).toBe('及格');
+  it('print() 追加输出（EJS 自带输出函数，语料 dlc.json#477 用到）', () => {
+    expect(render('<% print("a"); print(1) %>|')).toBe('a1|');
   });
 
-  it('if/else 条件渲染 — 三元表达式走 else 分支', () => {
-    const template = '<%= getMessageVar("score") >= 60 ? "及格" : "不及格" %>';
-    const result = renderEjs(template, { score: 30 });
-    expect(result.rendered).toBe('不及格');
+  it('print(null/undefined) 输出空串', () => {
+    expect(render('[<% print(null); print(undefined) %>]')).toBe('[]');
   });
 
-  it('for 循环在单个代码块内构建结果，通过 setMessageVar 输出', () => {
-    // 单块内完成循环 + setMessageVar，再用 output 块输出
-    const template =
-      '<% let arr = []; for (let i = 0; i < getMessageVar("count"); i++) { arr.push("[" + i + "]"); } setMessageVar("out", arr.join("")); %><%= getMessageVar("out") %>';
-    const result = renderEjs(template, { count: 3 });
-    expect(result.rendered).toBe('[0][1][2]');
+  it('print 与文本、<%= 按位置交织', () => {
+    expect(render('1<% print("2") %>3<%= 4 %>')).toBe('1234');
   });
 
-  it('for 循环遍历数组在单块内构建结果', () => {
-    const template =
-      '<% let s = ""; for (const item of getMessageVar("items")) { s += "-" + item; } setMessageVar("out", s); %><%= getMessageVar("out") %>';
-    const result = renderEjs(template, { items: ['a', 'b', 'c'] });
-    expect(result.rendered).toBe('-a-b-c');
+  it('<%% 转义为字面 <%', () => {
+    expect(render('a<%%b')).toBe('a<%b');
   });
 
-  it('代码块内可使用 let/const 声明局部变量（不跨块共享）', () => {
-    const template =
-      '<% let result = []; for (let i = 0; i < 3; i++) { result.push(i * 2); } setMessageVar("doubled", result.join(",")); %><%= getMessageVar("doubled") %>';
-    const result = renderEjs(template, {});
-    expect(result.rendered).toBe('0,2,4');
+  it('未闭合的 <% 原样降级为文本（不吞内容）', () => {
+    expect(render('start <% incomplete')).toBe('start <% incomplete');
+    expect(render('<%= unfinished')).toBe('<%= unfinished');
+  });
+
+  it('多个块顺序拼接', () => {
+    expect(render('<%= 1 %>-<%= 2 %>-<%= 3 %>')).toBe('1-2-3');
   });
 });
 
-// ========== getMessageVar / setMessageVar ==========
+// ═══════════════════════════════════════════════════════════
+// 跨块控制流 —— 整片编译的存在理由（D2）
+// ═══════════════════════════════════════════════════════════
 
-describe('EjsRuntime — getMessageVar / setMessageVar', () => {
-  it('getMessageVar 读取顶层变量', () => {
-    const result = renderEjs('<%= getMessageVar("name") %>', { name: 'Alice' });
-    expect(result.rendered).toBe('Alice');
+describe('跨块控制流（整片编译）', () => {
+  it('跨块 if 为真时输出正文', () => {
+    const tpl = '<%_ if (getMessageVar("flag")) { _%>YES<%_ } _%>';
+    expect(render(tpl, makeCtx({ vars: { flag: true } }))).toBe('YES');
   });
 
-  it('getMessageVar 支持嵌套对象路径', () => {
-    const vars = { user: { profile: { hp: 100 } } };
-    const result = renderEjs('<%= getMessageVar("user.profile.hp") %>', vars);
-    expect(result.rendered).toBe('100');
+  it('跨块 if 为假时正文不泄出（旧实现的致命回归点）', () => {
+    const tpl = '<%_ if (getMessageVar("flag")) { _%>YES<%_ } _%>';
+    expect(render(tpl, makeCtx({ vars: { flag: false } }))).toBe('');
   });
 
-  it('getMessageVar 路径不存在时返回 undefined，不输出内容', () => {
-    const result = renderEjs('<%= getMessageVar("nested.missing.path") %>', {});
-    expect(result.rendered).toBe('');
-    expect(result.errors).toHaveLength(0);
+  it('跨块 if/else', () => {
+    const tpl = '<%_ if (n > 5) { _%>大<%_ } else { _%>小<%_ } _%>';
+    expect(render(`<% const n = 9; %>${tpl}`)).toBe('大');
+    expect(render(`<% const n = 1; %>${tpl}`)).toBe('小');
   });
 
-  it('getMessageVar 中间值为 null 时返回 undefined', () => {
-    const vars = { user: null };
-    const result = renderEjs('<%= getMessageVar("user.name") %>', vars);
-    expect(result.rendered).toBe('');
-    expect(result.errors).toHaveLength(0);
+  it('跨块 else if 三分支', () => {
+    const tpl =
+      '<%_ if (n === 1) { _%>一<%_ } else if (n === 2) { _%>二<%_ } else { _%>其他<%_ } _%>';
+    expect(render(`<% const n = 2; %>${tpl}`)).toBe('二');
   });
 
-  it('getMessageVar 中间值为非对象时返回 undefined', () => {
-    const vars = { user: 42 };
-    const result = renderEjs('<%= getMessageVar("user.name") %>', vars);
-    expect(result.rendered).toBe('');
-    expect(result.errors).toHaveLength(0);
+  it('跨块 for 循环重复输出正文', () => {
+    const tpl = '<%_ for (let i = 0; i < 3; i++) { _%>[<%= i %>]<%_ } _%>';
+    expect(render(tpl)).toBe('[0][1][2]');
   });
 
-  it('getMessageVar 自动去除 stat_data. 前缀', () => {
-    const vars = { hp: 150 };
-    const result = renderEjs('<%= getMessageVar("stat_data.hp") %>', vars);
-    expect(result.rendered).toBe('150');
+  it('跨块 forEach 闭包', () => {
+    const tpl = '<%_ items.forEach((it) => { _%><%= it %>;<%_ }); _%>';
+    expect(render(`<% const items = ["a","b"]; %>${tpl}`)).toBe('a;b;');
   });
 
-  it('setMessageVar 写入 mutations 缓冲区', () => {
-    const runtime = new EjsRuntime({ variables: {} });
-    runtime.render('<% setMessageVar("gold", 500) %>');
-    expect(runtime.getMutations()).toHaveProperty('gold', 500);
+  it('跨块嵌套 if + for', () => {
+    const tpl = '<%_ for (const n of [1,2,3]) { _%><%_ if (n % 2) { _%><%= n %><%_ } _%><%_ } _%>';
+    expect(render(tpl)).toBe('13');
   });
 
-  it('setMessageVar 支持嵌套对象写入', () => {
-    const runtime = new EjsRuntime({ variables: {} });
-    runtime.render('<% setMessageVar("player.stats.hp", 75) %>');
-    const muts = runtime.getMutations();
-    expect(muts).toEqual({ player: { stats: { hp: 75 } } });
+  it('语料形态：裸块包住整条目避免变量名冲突', () => {
+    const tpl = '<%_ { const t = "内"; _%><%= t %><%_ } _%>';
+    expect(render(tpl)).toBe('内');
   });
 
-  it('setMessageVar 自动去除 stat_data. 前缀', () => {
-    const runtime = new EjsRuntime({ variables: {} });
-    runtime.render('<% setMessageVar("stat_data.mana", 200) %>');
-    expect(runtime.getMutations()).toHaveProperty('mana', 200);
-  });
-
-  it('mutations 在多次 render 调用间累积', () => {
-    const runtime = new EjsRuntime({ variables: {} });
-    runtime.render('<% setMessageVar("a", 1) %>');
-    runtime.render('<% setMessageVar("b", 2) %>');
-    const muts = runtime.getMutations();
-    expect(muts).toEqual({ a: 1, b: 2 });
-  });
-
-  it('setMessageVar 写入后 getMessageVar 可在同一 render 中读取', () => {
-    const template = '<% setMessageVar("hp", 50) %><%= getMessageVar("hp") %>';
-    const result = renderEjs(template, {});
-    expect(result.rendered).toBe('50');
-  });
-
-  it('setMessageVar 写入后 getMessageVar 可在后续 render 中读取', () => {
-    const runtime = new EjsRuntime({ variables: {} });
-    runtime.render('<% setMessageVar("gold", 100) %>');
-    const result = runtime.render('<%= getMessageVar("gold") %>');
-    expect(result.rendered).toBe('100');
-  });
-
-  it('getMessageVar 先查 mutations 再查 variables（mutations 优先）', () => {
-    const runtime = new EjsRuntime({ variables: { color: 'red' } });
-    runtime.render('<% setMessageVar("color", "blue") %>');
-    const result = runtime.render('<%= getMessageVar("color") %>');
-    expect(result.rendered).toBe('blue');
-  });
-
-  it('getMessageVar 读取变量中数字类型的值', () => {
-    const result = renderEjs('<%= getMessageVar("hp") + 10 %>', { hp: 90 });
-    expect(result.rendered).toBe('100');
-  });
-
-  it('getMessageVar 读取变量中布尔类型的值', () => {
-    const result = renderEjs('<%= getMessageVar("alive") %>', { alive: true });
-    expect(result.rendered).toBe('true');
-  });
-
-  it('setMessageVar 覆盖已存在的 mutation 键', () => {
-    const runtime = new EjsRuntime({ variables: {} });
-    runtime.render('<% setMessageVar("x", 1) %>');
-    runtime.render('<% setMessageVar("x", 2) %>');
-    expect(runtime.getMutations()).toHaveProperty('x', 2);
+  it('前一块定义的函数在后一块可用', () => {
+    const tpl = '<%_ function greet(n) { return "hi " + n; } _%><%= greet("x") %>';
+    expect(render(tpl)).toBe('hi x');
   });
 });
 
-// ========== 沙盒 API ==========
+// ═══════════════════════════════════════════════════════════
+// 空白吞噬（<%_ / _%> / -%>）
+// ═══════════════════════════════════════════════════════════
 
-describe('EjsRuntime — 沙盒 API', () => {
-  it('Math.random() 在沙盒中可用且返回 0~1 之间的数值', () => {
-    const result = renderEjs('<%= Math.random() %>', {});
-    const num = parseFloat(result.rendered);
-    expect(num).toBeGreaterThanOrEqual(0);
-    expect(num).toBeLessThan(1);
-    expect(result.errors).toHaveLength(0);
+describe('空白吞噬', () => {
+  it('_%> 吞掉紧邻的行内空白与一个换行', () => {
+    expect(render('<%_ ; _%>\n正文')).toBe('正文');
+    expect(render('<%_ ; _%>   \n正文')).toBe('正文');
   });
 
-  it('JSON.stringify 在沙盒中可用', () => {
-    const vars = { data: { x: 1, y: 2 } };
-    const result = renderEjs('<%= JSON.stringify(getMessageVar("data")) %>', vars);
-    const parsed = JSON.parse(result.rendered);
-    expect(parsed).toEqual({ x: 1, y: 2 });
+  it('<%_ 吞掉紧邻前文的行内空白（不吞换行）', () => {
+    expect(render('正文\n   <%_ ; _%>')).toBe('正文\n');
   });
 
-  it('Math.floor 在沙盒中可用', () => {
-    const result = renderEjs('<%= Math.floor(3.14) %>', {});
-    expect(result.rendered).toBe('3');
+  it('普通 %> 不吞任何空白', () => {
+    expect(render('<% ; %>\n正文')).toBe('\n正文');
   });
 
-  it('Math.max / Math.min 在沙盒中可用', () => {
-    const result = renderEjs('<%= Math.max(10, 20) %>,<%= Math.min(5, 3) %>', {});
-    expect(result.rendered).toBe('20,3');
+  it('-%> 只吞一个换行，不吞行内空白', () => {
+    expect(render('<% ; -%>  \n正文')).toBe('  \n正文');
+    expect(render('<% ; -%>\n正文')).toBe('正文');
   });
 
-  it('代码块内可调用多个沙盒 API 组合', () => {
-    const template =
-      '<% setMessageVar("randomValue", Math.floor(Math.random() * 100)); %><%= getMessageVar("randomValue") %>';
-    const result = renderEjs(template, {});
-    const val = parseInt(result.rendered, 10);
-    expect(val).toBeGreaterThanOrEqual(0);
-    expect(val).toBeLessThan(100);
-  });
-});
-
-// ========== 错误隔离 ==========
-
-describe('EjsRuntime — 错误隔离', () => {
-  it('未闭合的 EJS 标签作为纯文本输出', () => {
-    const result = renderEjs('Hello <%= name !>', { name: 'World' });
-    expect(result.rendered).toBe('Hello <%= name !>');
-    expect(result.errors).toHaveLength(0);
+  it('_%> 只吞一个换行（第二个换行保留）', () => {
+    expect(render('<%_ ; _%>\n\n正文')).toBe('\n正文');
   });
 
-  it('未闭合的 EJS 标签在模板开头时作为纯文本', () => {
-    const result = renderEjs('<%= unfinished', {});
-    expect(result.rendered).toBe('<%= unfinished');
-    expect(result.errors).toHaveLength(0);
+  it('语料形态：跨块 if 的行首缩进被吞净', () => {
+    const tpl = ['<%_ if (true) { _%>', '  <条目>内容</条目>', '<%_ } _%>', ''].join('\n');
+    expect(render(tpl)).toBe('  <条目>内容</条目>\n');
   });
 
-  it('未闭合的 <% 无匹配时整体作为纯文本', () => {
-    const result = renderEjs('start <% incomplete', {});
-    expect(result.rendered).toBe('start <% incomplete');
-    expect(result.errors).toHaveLength(0);
-  });
-
-  it('EJS 代码块运行时错误记录到 errors 数组', () => {
-    const template = 'start<% throw new Error("故意的错误") %>end';
-    const result = renderEjs(template, {});
-    expect(result.rendered).toBe('startend');
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors[0]).toContain('EJS 块错误');
-    expect(result.errors[0]).toContain('故意的错误');
-  });
-
-  it('EJS 输出块表达式错误记录到 errors 数组', () => {
-    const template = 'before<%= nonExistentVar %>after';
-    const result = renderEjs(template, {});
-    // nonExistentVar 未定义，ReferenceError
-    expect(result.rendered).toBe('beforeafter');
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors[0]).toContain('EJS 块错误');
-    expect(result.errors[0]).toContain('nonExistentVar');
-  });
-
-  it('代码块语法错误记录到 errors 数组', () => {
-    const template = '<% let x = ; %>done';
-    const result = renderEjs(template, {});
-    expect(result.rendered).toBe('done');
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors[0]).toContain('EJS 块错误');
-  });
-
-  it('EJS 块错误不影响同模板中其他正常块', () => {
-    const template = '<%= "good1" %><% throw new Error("bad") %><%= "good2" %>';
-    const result = renderEjs(template, {});
-    expect(result.rendered).toBe('good1good2');
-    expect(result.errors.length).toBeGreaterThan(0);
-  });
-
-  it('错误信息超过 100 字符时自动截断', () => {
-    const longMsg = 'A'.repeat(200);
-    const template = `<% throw new Error("${longMsg}") %>`;
-    const result = renderEjs(template, {});
-    expect(result.errors.length).toBeGreaterThan(0);
-    // "EJS 块错误: " 前缀 9 字符 + 最多 100 字符错误信息
-    expect(result.errors[0].length).toBeLessThanOrEqual(9 + 100);
+  it('<%= 也能用 _%> 闭合（语料 `<%= time _%>` 形态）', () => {
+    const ctx = makeCtx({ vars: { t: '早晨' } });
+    expect(render('[<%= getMessageVar("t") _%>]', ctx)).toBe('[早晨]');
   });
 });
 
-// ========== EjsRuntime 类方法 ==========
+// ═══════════════════════════════════════════════════════════
+// 两轴：stats / vars 直传
+// ═══════════════════════════════════════════════════════════
 
-describe('EjsRuntime 类', () => {
-  it('构造时可传入预置 mutations，render 中可见', () => {
-    const runtime = new EjsRuntime({
-      variables: {},
-      mutations: { existing: 99 },
+describe('两轴注入', () => {
+  it('stats 作为顶层标识符可读', () => {
+    const ctx = makeCtx({ stats: { 主角: { 等级: 12 } } });
+    expect(render('<%= stats.主角.等级 %>', ctx)).toBe('12');
+  });
+
+  it('vars 作为顶层标识符可读写，写的是调用方持有的同一对象', () => {
+    const ctx = makeCtx({ vars: { 计数: 1 } });
+    expect(render('<% vars.计数 = vars.计数 + 1 %><%= vars.计数 %>', ctx)).toBe('2');
+    expect(ctx.vars.计数).toBe(2);
+  });
+
+  it('stats 是 pass 级孤儿快照：就地改不抛，pass 结束即弃', () => {
+    const ctx = makeCtx({ stats: { a: 1 } });
+    render('<% stats.a = 999 %>', ctx);
+    expect(ctx.stats.a).toBe(999);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 别名层：getMessageVar 三种读形（D5）
+// ═══════════════════════════════════════════════════════════
+
+describe('getMessageVar — 读形①叶子读', () => {
+  it('stats 命中优先于 vars', () => {
+    const ctx = makeCtx({ stats: { 主角: { 等级: 20 } }, vars: { 主角: { 等级: 3 } } });
+    expect(render('<%= getMessageVar("stat_data.主角.等级") %>', ctx)).toBe('20');
+  });
+
+  it('stats 未命中落 vars', () => {
+    const ctx = makeCtx({ stats: {}, vars: { 事件: { 阶段: 2 } } });
+    expect(render('<%= getMessageVar("stat_data.事件.阶段") %>', ctx)).toBe('2');
+  });
+
+  it('都未命中返回 opts.defaults', () => {
+    const ctx = makeCtx();
+    expect(render('<%= getMessageVar("stat_data.主角.等级", { defaults: 0 }) %>', ctx)).toBe('0');
+  });
+
+  it('都未命中且无 defaults 输出空串', () => {
+    expect(render('[<%= getMessageVar("stat_data.无.此.路径") %>]')).toBe('[]');
+  });
+
+  it('不带 stat_data 前缀同样可读', () => {
+    const ctx = makeCtx({ vars: { hp: 30 } });
+    expect(render('<%= getMessageVar("hp") %>', ctx)).toBe('30');
+  });
+
+  it('stats 上值为 null 即算命中（不再落 vars）', () => {
+    const ctx = makeCtx({ stats: { a: null }, vars: { a: 'fromVars' } });
+    expect(render('[<%= getMessageVar("a") %>]', ctx)).toBe('[]');
+  });
+});
+
+describe('getMessageVar — 读形②子树读', () => {
+  it('stats 命中的子树返回深克隆，改它不污染 stats', () => {
+    const ctx = makeCtx({ stats: { 主角: { 属性: { 力量: 5 } } } });
+    render('<% const a = getMessageVar("stat_data.主角.属性"); a.力量 = 999 %>', ctx);
+    expect(ctx.stats.主角.属性.力量).toBe(5);
+  });
+
+  it('stats 命中的子树每次读都是独立拷贝', () => {
+    const ctx = makeCtx({ stats: { s: { n: 1 } } });
+    const out = render(
+      '<% const a = getMessageVar("s"); const b = getMessageVar("s"); a.n = 2 %><%= b.n %>',
+      ctx,
+    );
+    expect(out).toBe('1');
+  });
+
+  it('vars 侧子树返回活引用，改它就是真实草稿写', () => {
+    const ctx = makeCtx({ vars: { 事件: { 阶段: 1 } } });
+    render('<% const e = getMessageVar("stat_data.事件"); e.阶段 = 7 %>', ctx);
+    expect(ctx.vars.事件.阶段).toBe(7);
+  });
+
+  it('vars 侧数组子树也是活引用', () => {
+    const ctx = makeCtx({ vars: { 事件: { 信号: ['a'] } } });
+    render('<% getMessageVar("stat_data.事件.信号").push("b") %>', ctx);
+    expect(ctx.vars.事件.信号).toEqual(['a', 'b']);
+  });
+});
+
+describe('getMessageVar — 读形③空路径整树读', () => {
+  it('"stat_data" 返回 vars + stats 浅合并', () => {
+    const ctx = makeCtx({ stats: { 主角: { 等级: 9 } }, vars: { 事件: { 阶段: 1 } } });
+    const out = render('<%= Object.keys(getMessageVar("stat_data")).sort().join(",") %>', ctx);
+    expect(out.split(',').sort()).toEqual(['主角', '事件'].sort());
+  });
+
+  it('stats 顶层键覆盖 vars 同名键', () => {
+    const ctx = makeCtx({ stats: { 主角: 'fromStats' }, vars: { 主角: 'fromVars' } });
+    expect(render('<%= getMessageVar("stat_data").主角 %>', ctx)).toBe('fromStats');
+  });
+
+  it('空串路径同样走整树读', () => {
+    const ctx = makeCtx({ vars: { a: 1 } });
+    expect(render('<%= getMessageVar("").a %>', ctx)).toBe('1');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 别名层：setMessageVar
+// ═══════════════════════════════════════════════════════════
+
+describe('setMessageVar', () => {
+  it('写 vars 草稿，同条目内立即可读回', () => {
+    const ctx = makeCtx();
+    expect(
+      render(
+        '<% setMessageVar("stat_data.事件.冰之歌.触发时间", "子夜") %><%= getMessageVar("stat_data.事件.冰之歌.触发时间") %>',
+        ctx,
+      ),
+    ).toBe('子夜');
+    expect(ctx.vars.事件.冰之歌.触发时间).toBe('子夜');
+  });
+
+  it('中间节点缺失时自动建对象', () => {
+    const ctx = makeCtx();
+    render('<% setMessageVar("a.b.c", 1) %>', ctx);
+    expect(ctx.vars).toEqual({ a: { b: { c: 1 } } });
+  });
+
+  it('中间节点是标量时被替换为对象', () => {
+    const ctx = makeCtx({ vars: { a: 5 } });
+    render('<% setMessageVar("a.b", 1) %>', ctx);
+    expect(ctx.vars.a).toEqual({ b: 1 });
+  });
+
+  it('永不触碰 stats', () => {
+    const ctx = makeCtx({ stats: { 主角: { 等级: 1 } } });
+    render('<% setMessageVar("stat_data.主角.等级", 99) %>', ctx);
+    expect(ctx.stats.主角.等级).toBe(1);
+    expect(ctx.vars.主角.等级).toBe(99);
+  });
+
+  it('语料形态：默认值初始化守卫两支都正确', () => {
+    const tpl =
+      '<%_ if (!Array.isArray(getMessageVar("stat_data.事件.信号"))) { setMessageVar("stat_data.事件.信号", []) } _%><%= getMessageVar("stat_data.事件.信号").length %>';
+    // 无值 → 写草稿再读草稿
+    const empty = makeCtx();
+    expect(render(tpl, empty)).toBe('0');
+    // 有值 → 读到真值不写
+    const filled = makeCtx({ vars: { 事件: { 信号: ['x', 'y'] } } });
+    expect(render(tpl, filled)).toBe('2');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 别名层：getvar / setvar
+// ═══════════════════════════════════════════════════════════
+
+describe('getvar / setvar', () => {
+  it('带 stat_data 前缀时与 getMessageVar 同义', () => {
+    const ctx = makeCtx({ stats: { 主角: { 等级: 6 } } });
+    expect(render('<%= getvar("stat_data.主角.等级") %>', ctx)).toBe('6');
+  });
+
+  it('扁平键不剥前缀，走同一读链', () => {
+    const ctx = makeCtx({ vars: { 系统名: '阿南刻' } });
+    expect(render('<%= getvar("系统名") %>', ctx)).toBe('阿南刻');
+  });
+
+  it('扁平键也吃 stats 优先', () => {
+    const ctx = makeCtx({ stats: { 命运点数: 7 }, vars: { 命运点数: 1 } });
+    expect(render('<%= getvar("命运点数") %>', ctx)).toBe('7');
+  });
+
+  it('扁平键的点路径形态（dialog_beauty.story）', () => {
+    const ctx = makeCtx({ vars: { dialog_beauty: { story: 'on' } } });
+    expect(render('<%= getvar("dialog_beauty.story") %>', ctx)).toBe('on');
+  });
+
+  it('opts.defaults 生效', () => {
+    expect(render('<%= getvar("缺失键", { defaults: "兜底" }) %>')).toBe('兜底');
+  });
+
+  it('opts 的 scope / noCache 被静默忽略', () => {
+    const ctx = makeCtx({ vars: { k: 'v' } });
+    expect(render('<%= getvar("k", { scope: "global", noCache: true }) %>', ctx)).toBe('v');
+  });
+
+  it('setvar 扁平键写草稿', () => {
+    const ctx = makeCtx();
+    render('<% setvar("系统名", "阿南刻") %>', ctx);
+    expect(ctx.vars.系统名).toBe('阿南刻');
+  });
+
+  it('setvar 带 stat_data 前缀时剥前缀', () => {
+    const ctx = makeCtx();
+    render('<% setvar("stat_data.事件.x", 1) %>', ctx);
+    expect(ctx.vars).toEqual({ 事件: { x: 1 } });
+  });
+
+  it('stat_dataX 不算前缀（不误剥）', () => {
+    const ctx = makeCtx({ vars: { stat_dataX: 'v' } });
+    expect(render('<%= getvar("stat_dataX") %>', ctx)).toBe('v');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 别名层：getLocalVar / setLocalVar / variables / matchChatMessages
+// ═══════════════════════════════════════════════════════════
+
+describe('getLocalVar / setLocalVar', () => {
+  it('读写 vars._local 子树', () => {
+    const ctx = makeCtx();
+    render('<% setLocalVar("旗标", 3) %>', ctx);
+    expect(ctx.vars._local).toEqual({ 旗标: 3 });
+  });
+
+  it('同条目内写后可读回', () => {
+    expect(render('<% setLocalVar("k", "v") %><%= getLocalVar("k") %>')).toBe('v');
+  });
+
+  it('读预置的 _local', () => {
+    const ctx = makeCtx({ vars: { _local: { 已触发: true } } });
+    expect(render('<%= getLocalVar("已触发") %>', ctx)).toBe('true');
+  });
+
+  it('缺失时返回 undefined（输出空串），支持 defaults', () => {
+    expect(render('[<%= getLocalVar("无") %>]')).toBe('[]');
+    expect(render('<%= getLocalVar("无", { defaults: 0 }) %>')).toBe('0');
+  });
+
+  it('key 是单键不是路径', () => {
+    const ctx = makeCtx();
+    render('<% setLocalVar("a.b", 1) %>', ctx);
+    expect(ctx.vars._local).toEqual({ 'a.b': 1 });
+  });
+
+  it('_local 原为标量时被替换为对象', () => {
+    const ctx = makeCtx({ vars: { _local: 'oops' } });
+    render('<% setLocalVar("k", 1) %>', ctx);
+    expect(ctx.vars._local).toEqual({ k: 1 });
+  });
+});
+
+describe('variables', () => {
+  it('提供 stat_data 整树读视图（语料 _.get(variables, ...) 形态）', () => {
+    const ctx = makeCtx({ stats: { 主角: { 等级: 4 } }, vars: { 关系列表: { a: 1 } } });
+    expect(render('<%= _.get(variables, "stat_data.主角.等级") %>', ctx)).toBe('4');
+    expect(render('<%= _.get(variables, "stat_data.关系列表.a") %>', ctx)).toBe('1');
+  });
+
+  it('缺失路径落 _.get 的默认值', () => {
+    expect(render('<%= JSON.stringify(_.get(variables, "stat_data.任务列表", {})) %>')).toBe('{}');
+  });
+
+  it('stats 顶层键覆盖 vars 同名键', () => {
+    const ctx = makeCtx({ stats: { k: 'S' }, vars: { k: 'V' } });
+    expect(render('<%= variables.stat_data.k %>', ctx)).toBe('S');
+  });
+});
+
+describe('matchChatMessages', () => {
+  it('字符串 pattern 走子串匹配', () => {
+    const ctx = makeCtx({ historyText: '你走进了北境的雪原' });
+    expect(render('<%= matchChatMessages("北境") %>', ctx)).toBe('true');
+    expect(render('<%= matchChatMessages("南海") %>', ctx)).toBe('false');
+  });
+
+  it('RegExp pattern 走正则匹配', () => {
+    const ctx = makeCtx({ historyText: '等级提升到 12 级' });
+    expect(render('<%= matchChatMessages(/\\d+ 级/) %>', ctx)).toBe('true');
+    expect(render('<%= matchChatMessages(/^开局/) %>', ctx)).toBe('false');
+  });
+
+  it('带 g 标志的正则连续调用结果稳定（lastIndex 不漂移）', () => {
+    const ctx = makeCtx({ historyText: 'aa' });
+    expect(
+      render('<% const re = /a/g %><%= matchChatMessages(re) %><%= matchChatMessages(re) %>', ctx),
+    ).toBe('truetrue');
+  });
+
+  it('历史为空时字符串不命中', () => {
+    expect(render('<%= matchChatMessages("x") %>')).toBe('false');
+  });
+
+  it('非字符串非正则返回 false', () => {
+    expect(render('<%= matchChatMessages(123) %>')).toBe('false');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 原型污染防御
+// ═══════════════════════════════════════════════════════════
+
+describe('危险路径段拒写', () => {
+  it('setMessageVar 命中 __proto__ 整次拒绝', () => {
+    const ctx = makeCtx();
+    render('<% setMessageVar("__proto__.polluted", 1) %>', ctx);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it('危险段在中途也整次拒绝（不做部分写）', () => {
+    const ctx = makeCtx();
+    render('<% setMessageVar("a.constructor.b", 1) %>', ctx);
+    expect(ctx.vars.a).toBeUndefined();
+  });
+
+  it('prototype 段拒写', () => {
+    const ctx = makeCtx();
+    render('<% setMessageVar("x.prototype", 1) %>', ctx);
+    expect(ctx.vars.x).toBeUndefined();
+  });
+
+  it('setvar 同样受保护', () => {
+    const ctx = makeCtx();
+    render('<% setvar("__proto__.bad", 1) %>', ctx);
+    expect(({} as Record<string, unknown>).bad).toBeUndefined();
+  });
+
+  it('setLocalVar 危险键拒写', () => {
+    const ctx = makeCtx();
+    render('<% setLocalVar("__proto__", 1) %>', ctx);
+    expect(ctx.vars._local).toBeUndefined();
+  });
+
+  it('正常路径不受影响', () => {
+    const ctx = makeCtx();
+    render('<% setMessageVar("a.b", 1) %>', ctx);
+    expect(ctx.vars.a.b).toBe(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 编译失败 / 执行失败（D8）
+// ═══════════════════════════════════════════════════════════
+
+describe('compileEjsEntry — 语法错误抛出', () => {
+  it('块内 JS 语法错误抛错', () => {
+    expect(() => compileEjsEntry('<% const = %>')).toThrow();
+  });
+
+  it('未闭合大括号抛错（整片编译能看见这类跨块错误）', () => {
+    expect(() => compileEjsEntry('<%_ if (true) { _%>x')).toThrow();
+  });
+
+  it('输出表达式语法错误抛错', () => {
+    expect(() => compileEjsEntry('<%= 1 + + + %>')).toThrow();
+  });
+
+  it('合法模板不抛，返回带 source/body/fn 的产物', () => {
+    const c: CompiledEjsEntry = compileEjsEntry('hi <%= 1 %>');
+    expect(c.source).toBe('hi <%= 1 %>');
+    expect(typeof c.fn).toBe('function');
+    expect(c.body).toContain('__ejsOut');
+  });
+
+  it('编译产物可复用多次执行', () => {
+    const c = compileEjsEntry('<%= getMessageVar("k") %>');
+    expect(executeEjsEntry(c, makeCtx({ vars: { k: 'A' } }))).toEqual({ ok: true, rendered: 'A' });
+    expect(executeEjsEntry(c, makeCtx({ vars: { k: 'B' } }))).toEqual({ ok: true, rendered: 'B' });
+  });
+});
+
+describe('executeEjsEntry — 运行时错误不外抛', () => {
+  it('未注入符号触发 ReferenceError → ok:false', () => {
+    const r = run('<%= lastMessageId %>', makeCtx());
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('ReferenceError');
+  });
+
+  it('酒馆助手扩展 API 未注入 → ok:false（走调用方 D8 回退）', () => {
+    const r = run('<% getChatMessages(-1) %>', makeCtx());
+    expect(r.ok).toBe(false);
+  });
+
+  it('显式 throw 被捕获', () => {
+    const r = run('<% throw new Error("boom") %>', makeCtx());
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('boom');
+  });
+
+  it('访问 undefined 的属性 → ok:false', () => {
+    const r = run('<%= getMessageVar("无").深 %>', makeCtx());
+    expect(r.ok).toBe(false);
+  });
+});
+
+describe('执行失败 → vars 整体回滚', () => {
+  it('半途写入被丢弃，且 vars 对象引用不变', () => {
+    const ctx = makeCtx({ vars: { 原有: 1 } });
+    const before = ctx.vars;
+    const r = run('<% setMessageVar("新写", 2) %><%= lastMessageId %>', ctx);
+    expect(r.ok).toBe(false);
+    expect(ctx.vars).toBe(before); // 引用不变
+    expect(ctx.vars).toEqual({ 原有: 1 }); // 内容回滚
+  });
+
+  it('对活引用子树的写也被回滚', () => {
+    const ctx = makeCtx({ vars: { 事件: { 阶段: 1 } } });
+    const r = run('<% getMessageVar("stat_data.事件").阶段 = 99 %><% throw new Error("x") %>', ctx);
+    expect(r.ok).toBe(false);
+    expect(ctx.vars.事件.阶段).toBe(1);
+  });
+
+  it('回滚会删掉失败前新增的顶层键', () => {
+    const ctx = makeCtx({ vars: {} });
+    run('<% vars.脏 = 1 %><% throw new Error("x") %>', ctx);
+    expect(Object.keys(ctx.vars)).toEqual([]);
+  });
+
+  it('数组内容回滚', () => {
+    const ctx = makeCtx({ vars: { 信号: ['a'] } });
+    run('<% getMessageVar("信号").push("b") %><% throw new Error("x") %>', ctx);
+    expect(ctx.vars.信号).toEqual(['a']);
+  });
+
+  it('成功执行时写入保留', () => {
+    const ctx = makeCtx({ vars: {} });
+    const r = run('<% setMessageVar("留下", 1) %>ok', ctx);
+    expect(r).toEqual({ ok: true, rendered: 'ok' });
+    expect(ctx.vars.留下).toBe(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 沙盒
+// ═══════════════════════════════════════════════════════════
+
+describe('沙盒注入面', () => {
+  it('原生 Math / JSON 可用', () => {
+    expect(render('<%= Math.max(3, 7) %>')).toBe('7');
+    expect(render('<%= JSON.stringify({ a: 1 }) %>')).toBe('{"a":1}');
+  });
+
+  it('String / Number / Boolean / RegExp / Array / Object 可用', () => {
+    expect(render('<%= String(1) + Number("2") + Boolean(1) %>')).toBe('12true');
+    expect(render('<%= new RegExp("a").test("bab") %>')).toBe('true');
+    expect(render('<%= Array.isArray([]) %>')).toBe('true');
+    expect(render('<%= Object.keys({ a: 1 }).join() %>')).toBe('a');
+  });
+
+  it('_ 是自研 lodash shim', () => {
+    const ctx = makeCtx({ vars: { list: [3, 1, 3] } });
+    expect(render('<%= _.uniq(getMessageVar("list")).join("-") %>', ctx)).toBe('3-1');
+    expect(render('<%= _.trim("  x  ") %>')).toBe('x');
+  });
+
+  it('危险全局被遮蔽为 undefined（失误防护，非安全边界）', () => {
+    for (const name of [
+      'globalThis',
+      'window',
+      'document',
+      'fetch',
+      'XMLHttpRequest',
+      'localStorage',
+      'indexedDB',
+      'self',
+      'top',
+      'parent',
+      'frames',
+      'navigator',
+      'location',
+    ]) {
+      expect(render(`<%= typeof ${name} %>`)).toBe('undefined');
+    }
+  });
+
+  it('严格模式：给未声明变量赋值抛错而非泄成全局', () => {
+    const r = run('<% 泄漏 = 1 %>', makeCtx());
+    expect(r.ok).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 语料形态综合（golden 雏形）
+// ═══════════════════════════════════════════════════════════
+
+describe('语料形态综合', () => {
+  it('冰之歌骨架：等级门槛 + 触发时间簿记 + 跨块条件正文', () => {
+    const tpl = [
+      '<%_',
+      "let time = getMessageVar('stat_data.事件.冰之歌.触发时间') || null;",
+      "const level = getMessageVar('stat_data.主角.等级', { defaults: 0 });",
+      'if (level >= 10 && time == null) {',
+      "  time = getMessageVar('stat_data.世界.时间') || null;",
+      "  setMessageVar('stat_data.事件.冰之歌.触发时间', time);",
+      '}',
+      '_%>',
+      '<%_ if (time != null) { _%>',
+      '- [<%= time _%>] 北境长垣防线崩溃',
+      '<%_ } _%>',
+    ].join('\n');
+
+    // 等级不足 → 不簿记、不输出
+    const low = makeCtx({
+      stats: { 主角: { 等级: 3 }, 世界: { 时间: '复兴纪元001年-05月-24日' } },
     });
-    const result = runtime.render('<%= getMessageVar("existing") %>');
-    expect(result.rendered).toBe('99');
-  });
+    expect(render(tpl, low)).toBe('');
+    expect(low.vars).toEqual({});
 
-  it('getMutations 返回当前 mutations 快照（浅拷贝）', () => {
-    const runtime = new EjsRuntime({ variables: {} });
-    runtime.render('<% setMessageVar("k", "v") %>');
-    const a = runtime.getMutations();
-    const b = runtime.getMutations();
-    expect(a).toEqual({ k: 'v' });
-    expect(a).not.toBe(b); // 不同引用，说明是副本
-  });
-
-  it('renderAll 合并多个模板的渲染结果', () => {
-    const runtime = new EjsRuntime({ variables: {} });
-    const result = runtime.renderAll(['Hello <%= "Alice" %>', 'World <%= "Bob" %>']);
-    expect(result.rendered).toBe('Hello Alice\nWorld Bob\n');
-    expect(result.errors).toHaveLength(0);
-    expect(result.mutations).toEqual({});
-  });
-
-  it('renderAll 合并多个模板的 mutations', () => {
-    const runtime = new EjsRuntime({ variables: {} });
-    const result = runtime.renderAll([
-      '<% setMessageVar("a", 1) %>first',
-      '<% setMessageVar("b", 2) %>second',
-    ]);
-    expect(result.rendered).toBe('first\nsecond\n');
-    expect(result.mutations).toEqual({ a: 1, b: 2 });
-  });
-
-  it('renderAll 中前一个模板的 setMessageVar 影响后续模板', () => {
-    const runtime = new EjsRuntime({ variables: {} });
-    const result = runtime.renderAll(['<% setMessageVar("x", 10) %>', '<%= getMessageVar("x") %>']);
-    expect(result.rendered).toContain('10');
-  });
-
-  it('renderAll 收集所有模板的错误', () => {
-    const runtime = new EjsRuntime({ variables: {} });
-    const result = runtime.renderAll([
-      '<% throw new Error("err1") %>a',
-      '<% throw new Error("err2") %>b',
-      'c',
-    ]);
-    expect(result.rendered).toBe('a\nb\nc\n');
-    expect(result.errors.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('renderAll 空数组返回空结果', () => {
-    const runtime = new EjsRuntime({ variables: {} });
-    const result = runtime.renderAll([]);
-    expect(result.rendered).toBe('');
-    expect(result.mutations).toEqual({});
-    expect(result.errors).toHaveLength(0);
-  });
-
-  it('renderAll 在初始有 mutations 时正确合并', () => {
-    const runtime = new EjsRuntime({
-      variables: {},
-      mutations: { base: 'original' },
+    // 等级达标 → 首次簿记并输出
+    const hit = makeCtx({
+      stats: { 主角: { 等级: 12 }, 世界: { 时间: '复兴纪元001年-05月-24日' } },
     });
-    runtime.renderAll(['<% setMessageVar("added", "new") %>x']);
-    const muts = runtime.getMutations();
-    expect(muts).toEqual({ base: 'original', added: 'new' });
+    expect(render(tpl, hit)).toBe('- [复兴纪元001年-05月-24日] 北境长垣防线崩溃\n');
+    expect(hit.vars.事件.冰之歌.触发时间).toBe('复兴纪元001年-05月-24日');
+
+    // 跨回合读回：vars 已有触发时间，时间推进后仍输出首次触发的时间戳
+    const later = makeCtx({
+      stats: { 主角: { 等级: 12 }, 世界: { 时间: '复兴纪元001年-06月-01日' } },
+      vars: { 事件: { 冰之歌: { 触发时间: '复兴纪元001年-05月-24日' } } },
+    });
+    expect(render(tpl, later)).toBe('- [复兴纪元001年-05月-24日] 北境长垣防线崩溃\n');
   });
 
-  it('render 返回结果结构包含 rendered / mutations / errors', () => {
-    const runtime = new EjsRuntime({ variables: {} });
-    const result = runtime.render('<%= 1 + 1 %>');
-    expect(result).toHaveProperty('rendered');
-    expect(result).toHaveProperty('mutations');
-    expect(result).toHaveProperty('errors');
-    expect(result.rendered).toBe('2');
-  });
-});
-
-// ========== renderEjs 便捷函数 ==========
-
-describe('renderEjs 便捷函数', () => {
-  it('renderEjs 通过变量渲染模板', () => {
-    const result = renderEjs('Hello <%= getMessageVar("name") %>!', { name: '主人' });
-    expect(result.rendered).toBe('Hello 主人!');
-    expect(result.errors).toHaveLength(0);
-  });
-
-  it('renderEjs 返回结果包含 rendered / mutations / errors', () => {
-    const result = renderEjs('<%= 1 + 1 %>', {});
-    expect(result).toHaveProperty('rendered');
-    expect(result).toHaveProperty('mutations');
-    expect(result).toHaveProperty('errors');
-    expect(result.rendered).toBe('2');
-  });
-
-  it('renderEjs 每次调用创建新实例，mutations 不跨调用共享', () => {
-    const r1 = renderEjs('<% setMessageVar("x", 1) %>', {});
-    const r2 = renderEjs('<%= getMessageVar("x") %>', {});
-    // r2 是新实例，r1 的 mutations 不可见
-    expect(r2.rendered).toBe('');
-  });
-
-  it('renderEjs 的 mutations 在单次调用内可通过 getMessageVar 读取', () => {
-    const result = renderEjs('<% setMessageVar("hp", 30) %><%= getMessageVar("hp") %>', {});
-    expect(result.rendered).toBe('30');
-    expect(result.mutations).toHaveProperty('hp', 30);
-  });
-});
-
-// ========== 混合模板场景 ==========
-
-describe('EjsRuntime — 混合模板场景', () => {
-  it('同一模板中文本、code、output 三者混合正确', () => {
-    const template =
-      '前缀' +
-      '<% let items = []; for (let i = 0; i < 3; i++) { items.push(i); } setMessageVar("result", items.join(",")); %>' +
-      '<%= getMessageVar("result") %>' +
-      '后缀';
-    const result = renderEjs(template, {});
-    expect(result.rendered).toBe('前缀0,1,2后缀');
-  });
-
-  it('嵌套变量对象通过 getMessageVar 正确渲染', () => {
-    const vars = { player: { name: 'Hero', level: 5 } };
-    const template =
-      '<%= getMessageVar("player.name") %>' + ' Lv.' + '<%= getMessageVar("player.level") %>';
-    const result = renderEjs(template, vars);
-    expect(result.rendered).toBe('Hero Lv.5');
-  });
-
-  it('多个独立 EJS 输出块有序拼接', () => {
-    const template = '<%= "A" %><%= "B" %><%= "C" %>';
-    const result = renderEjs(template, {});
-    expect(result.rendered).toBe('ABC');
-  });
-
-  it('各 EJS 块之间变量不跨块共享（独立 new Function 作用域）', () => {
-    // 第一个代码块声明 let name = "test"，第二个输出块无法访问
-    const template =
-      '<% let localVar = "secret"; %><%= typeof localVar === "undefined" ? "isolated" : "shared" %>';
-    const result = renderEjs(template, {});
-    expect(result.rendered).toBe('isolated');
-  });
-
-  it('复杂混合模板：计算并输出角色状态摘要', () => {
-    const vars = {
-      player: { name: 'Hero', hp: 80, maxHp: 100 },
-    };
-    const template =
-      '<%= getMessageVar("player.name") %> ' +
-      '<% const hp = getMessageVar("player.hp"); const maxHp = getMessageVar("player.maxHp"); setMessageVar("hpPercent", Math.floor(hp / maxHp * 100)); %>' +
-      'HP: <%= getMessageVar("player.hp") %>/<%= getMessageVar("player.maxHp") %> ' +
-      '(<%= getMessageVar("hpPercent") %>%)';
-    const result = renderEjs(template, vars);
-    // The const declaration uses 'const' but the second block needs getMessageVar
-    // Wait, the third block needs hpPercent from mutations, that works because setMessageVar wrote it there
-    expect(result.rendered).toBe('Hero HP: 80/100 (80%)');
+  it('pass 内状态机：同一 ctx 上前条目的写后条目立即可见', () => {
+    const ctx = makeCtx();
+    render('<% setMessageVar("事件.阶段", 2) %>', ctx);
+    expect(render('<%= getMessageVar("stat_data.事件.阶段") %>', ctx)).toBe('2');
   });
 });

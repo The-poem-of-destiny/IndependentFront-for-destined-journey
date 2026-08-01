@@ -15,7 +15,7 @@
  * 可见性规则:
  * - NARRATIVE 使用 defaultHistoryLayers / defaultHistorySlice（从 agent-templates 导入）
  * - CHARACTER_STATE 使用 buildZoneContext + filterZoneContent（从 context-visibility 导入）
- * - LORE_BOOK 使用 worldbook-loader 的 getEntriesForAgent / filterActiveEntries / formatWorldBookEntries
+ * - LORE_BOOK 使用 worldbook-loader 的 getEntriesForAgent / filterActiveEntries / renderWorldBookEntries
  * - formatHistory / formatCharacters / formatMemories / formatPlotEvents 等私有函数在此模块内镜像实现
  */
 
@@ -29,7 +29,7 @@ import type {
 import {
   getEntriesForAgent,
   filterActiveEntries,
-  formatWorldBookEntries,
+  renderWorldBookEntries,
 } from './worldbook-loader';
 import { parseSetvars, resolveGetvars, resolveRandoms } from './preset-loader';
 import { buildZoneContext, filterZoneContent, getAgentZoneVisibility } from './context-visibility';
@@ -55,6 +55,17 @@ export function resetPlaceholderGlobals(): void {
 // ═══════════════════════════════════════════════════════════
 // Private Formatting Helpers (mirror functions from agent-templates.ts)
 // ═══════════════════════════════════════════════════════════
+
+/**
+ * uid → 所属世界书名（仅用于 EJS 回退告警的可读性）。
+ * uid 在跨书场景可能重复，取首个命中即可——这是日志文案不是寻址。
+ */
+function bookNameOfUid(uid: number): string {
+  for (const book of _worldBooks) {
+    if (book.entries?.some((e) => e.uid === uid)) return book.name || book.id;
+  }
+  return '?';
+}
 
 /** Mirror of agent-templates.ts formatCharacters (private, not exported) */
 function formatCharacters(ctx: AgentContext): string {
@@ -102,14 +113,49 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     return config.systemPrompt || '';
   },
 
-  /** {{LORE_BOOK}} — 世界书条目过滤+格式化 */
+  /**
+   * {{LORE_BOOK}} — 世界书条目过滤 + 静/动分层 + EJS 求值 + 宏剥离。
+   *
+   * 工坊 P2 (ADR-30 D1/D7)：条目过滤后走 `renderWorldBookEntries` —— 静态区（无 `<%`/`{{random`/
+   * `{{getvar}}` 特征）字节稳定排在前，动态区 EJS 求值后沉到尾部，最大化 prompt cache 前缀。
+   *
+   * 参数：
+   * - `section=static` / `section=dynamic` → 只返回该区（自定义模板可把两区拆到不同位置）
+   * - 不传 → 静态区 + 动态区顺序连拼（默认行为，普通用户无感）
+   * - `limit=N` → 行为不变，对最终文本截断
+   *
+   * 宏链（parseSetvars → resolveGetvars → resolveRandoms）位置**不动**，仍在 EJS 之后，
+   * 对**本次返回的那段文本**独立跑。⚠️ 用 `section=` 拆开时两区各自成一次宏作用域——
+   * 静态区定义的 `{{setvar}}` 不再对动态区的 `{{getvar}}` 可见，这是拆分的固有代价。
+   */
   LORE_BOOK: (ctx, config, params) => {
     if (_worldBooks.length === 0 || _configs.length === 0) return '';
     const agentId = config.agentId || '';
     const entries = getEntriesForAgent(agentId, _configs, _worldBooks);
     if (entries.length === 0) return '';
     const activeEntries = filterActiveEntries(entries);
-    let formatted = formatWorldBookEntries(activeEntries);
+
+    // 求值上下文取本次装配 pass 的草稿（buildAgentMessages 挂在 tplCtx.ejsPass 上）。
+    // 极端路径（外部直接调 resolver / 老测试）无草稿 → 退化为一次性空草稿：求值照跑，写即弃。
+    const ejsCtx = ctx.ejsPass ?? { stats: ctx.statData ?? {}, vars: {}, historyText: '' };
+    const { staticText, dynamicText, fallbackEntries } = renderWorldBookEntries(
+      activeEntries,
+      ejsCtx,
+    );
+
+    if (fallbackEntries.length > 0) {
+      console.warn(
+        `[LORE_BOOK] agent=${agentId} 有 ${fallbackEntries.length} 个条目 EJS 失败、已回退原文注入: ` +
+          fallbackEntries.map((f) => `${bookNameOfUid(f.uid)}#${f.uid}`).join(', '),
+      );
+    }
+
+    const section = params?.section;
+    let formatted: string;
+    if (section === 'static') formatted = staticText;
+    else if (section === 'dynamic') formatted = dynamicText;
+    else formatted = [staticText, dynamicText].filter(Boolean).join('\n\n');
+
     // 真机修(2026-07-18): 原 ST 角色卡世界书正文自带 {{setvar/getvar/random}} 宏（MVU 机制遗留）
     // → 注入前收集 setvar 变量表并剥离定义、替换 getvar 引用、解析 random——
     //   世界书内自洽的 setvar/getvar 对仍正常工作，孤立宏不再作为噪音喂给 AI（实测 story 系统消息含 25+36 处残留）

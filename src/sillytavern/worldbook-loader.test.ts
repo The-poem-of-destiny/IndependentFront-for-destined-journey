@@ -2,7 +2,7 @@
  * worldbook-loader 测试 (Phase 8)
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   loadWorldBooksSync,
   getEntriesForAgent,
@@ -10,8 +10,12 @@ import {
   filterBooksByEnabledEntries,
   matchKeyword,
   formatWorldBookEntries,
+  hasDynamic,
+  renderWorldBookEntries,
+  clearEjsCompileCache,
 } from './worldbook-loader';
 import type { WorldBook, WorldBookEntry, AgentConfig } from './types';
+import type { EjsEvalContext } from './ejs-runtime';
 
 // ========== Helpers ==========
 
@@ -317,5 +321,144 @@ describe('filterBooksByEnabledEntries', () => {
     const originalLength = books[0].entries.length;
     filterBooksByEnabledEntries(books, ['system_core:413']);
     expect(books[0].entries).toHaveLength(originalLength);
+  });
+});
+
+// ========== 静/动分层 + EJS 求值（工坊 Phase 2 / ADR-30 D7-D9）==========
+
+/** 一个最小求值上下文；`vars` 每次新建，避免用例间串味 */
+function makeCtx(overrides: Partial<EjsEvalContext> = {}): EjsEvalContext {
+  return { stats: {}, vars: {}, historyText: '', ...overrides };
+}
+
+describe('hasDynamic — D7 三根针', () => {
+  it('三种动态特征各自命中', () => {
+    expect(hasDynamic('前<% x %>后')).toBe(true);
+    expect(hasDynamic('掷一下 {{random: a, b}}')).toBe(true);
+    expect(hasDynamic('取值 {{getvar::foo}}')).toBe(true);
+  });
+
+  it('纯文本 / `{{setvar}}` 定义不算动态', () => {
+    expect(hasDynamic('普通设定正文')).toBe(false);
+    // setvar 定义确定性剥离，刻意不扫（D7 明文）
+    expect(hasDynamic('{{setvar::foo::1}}')).toBe(false);
+    expect(hasDynamic('')).toBe(false);
+  });
+});
+
+describe('renderWorldBookEntries — 分层与保序', () => {
+  beforeEach(() => clearEjsCompileCache());
+
+  it('无动态特征的条目全部落静态区，动态区为空', () => {
+    const entries = [makeEntry({ uid: 1, content: 'A' }), makeEntry({ uid: 2, content: 'B' })];
+    const r = renderWorldBookEntries(entries, makeCtx());
+    expect(r.staticText).toBe('A\n\nB');
+    expect(r.dynamicText).toBe('');
+    expect(r.fallbackEntries).toEqual([]);
+  });
+
+  it('两区内部各自按 order 排序，同 order 保持入参顺序', () => {
+    const entries = [
+      makeEntry({ uid: 1, content: '静C', order: 300 }),
+      makeEntry({ uid: 2, content: '动<%= 2 %>', order: 200 }),
+      makeEntry({ uid: 3, content: '静A', order: 100 }),
+      makeEntry({ uid: 4, content: '动<%= 1 %>', order: 100 }),
+      makeEntry({ uid: 5, content: '静B', order: 100 }), // 与「静A」同 order → 稳定排序
+    ];
+    const r = renderWorldBookEntries(entries, makeCtx());
+    expect(r.staticText).toBe('静A\n\n静B\n\n静C');
+    expect(r.dynamicText).toBe('动1\n\n动2');
+  });
+
+  it('只含 {{random}}/{{getvar}} 无 `<%` 的条目：进动态区但不求值，原文透传', () => {
+    const entries = [
+      makeEntry({ uid: 1, content: '{{random: 甲, 乙}}', order: 10 }),
+      makeEntry({ uid: 2, content: '{{getvar::foo}}', order: 20 }),
+    ];
+    const r = renderWorldBookEntries(entries, makeCtx());
+    expect(r.staticText).toBe('');
+    expect(r.dynamicText).toBe('{{random: 甲, 乙}}\n\n{{getvar::foo}}');
+    expect(r.fallbackEntries).toEqual([]);
+  });
+
+  it('EJS 条目相对顺序不变 → vars 写→读链按序可见', () => {
+    const entries = [
+      makeEntry({ uid: 1, content: '静态占位', order: 50 }),
+      makeEntry({ uid: 2, content: '<% setvar("n", 7) %>写', order: 100 }),
+      makeEntry({ uid: 3, content: '读<%= getvar("n") %>', order: 200 }),
+    ];
+    const vars: Record<string, any> = {};
+    const r = renderWorldBookEntries(entries, makeCtx({ vars }));
+    expect(r.dynamicText).toBe('写\n\n读7');
+    expect(vars.n).toBe(7);
+  });
+
+  it('编译失败 → 原文注入 + 记入 fallbackEntries，其余条目照常', () => {
+    const entries = [
+      makeEntry({ uid: 1, content: '好<%= 1 + 1 %>', order: 10 }),
+      makeEntry({ uid: 2, content: '坏<% if ( %>', order: 20 }),
+      makeEntry({ uid: 3, content: '好<%= 3 %>', order: 30 }),
+    ];
+    const r = renderWorldBookEntries(entries, makeCtx());
+    expect(r.dynamicText).toBe('好2\n\n坏<% if ( %>\n\n好3');
+    expect(r.fallbackEntries).toHaveLength(1);
+    expect(r.fallbackEntries[0].uid).toBe(2);
+    expect(r.fallbackEntries[0].error).toMatch(/SyntaxError/);
+  });
+
+  it('执行失败 → 原文注入且该条目对 vars 的半途写入整体回滚', () => {
+    const entries = [
+      makeEntry({ uid: 1, content: '<% setvar("keep", 1) %>ok', order: 10 }),
+      makeEntry({ uid: 2, content: '<% setvar("gone", 1); undefinedSymbol(); %>never', order: 20 }),
+    ];
+    const vars: Record<string, any> = {};
+    const r = renderWorldBookEntries(entries, makeCtx({ vars }));
+    expect(r.fallbackEntries).toHaveLength(1);
+    expect(r.fallbackEntries[0].uid).toBe(2);
+    expect(r.dynamicText).toContain('<% setvar("gone", 1); undefinedSymbol(); %>never');
+    expect(vars.keep).toBe(1);
+    expect(vars.gone).toBeUndefined();
+  });
+
+  it('回退条目仍留在动态区原位（不被挪到末尾）', () => {
+    const entries = [
+      makeEntry({ uid: 1, content: '<%= "甲" %>', order: 10 }),
+      makeEntry({ uid: 2, content: '<% if ( %>', order: 20 }),
+      makeEntry({ uid: 3, content: '<%= "丙" %>', order: 30 }),
+    ];
+    const r = renderWorldBookEntries(entries, makeCtx());
+    expect(r.dynamicText.split('\n\n')).toEqual(['甲', '<% if ( %>', '丙']);
+  });
+
+  it('空入参 → 两区皆空串（对齐 formatWorldBookEntries）', () => {
+    const r = renderWorldBookEntries([], makeCtx());
+    expect(r.staticText).toBe('');
+    expect(r.dynamicText).toBe('');
+    expect(r.fallbackEntries).toEqual([]);
+  });
+
+  it('不修改入参数组顺序', () => {
+    const entries = [
+      makeEntry({ uid: 1, content: 'B', order: 200 }),
+      makeEntry({ uid: 2, content: 'A', order: 100 }),
+    ];
+    renderWorldBookEntries(entries, makeCtx());
+    expect(entries.map((e) => e.uid)).toEqual([1, 2]);
+  });
+
+  it('编译缓存：同一正文重复出现只编译一次（清缓存后结果不变）', () => {
+    const same = '<%= getvar("k") %>';
+    const entries = [
+      makeEntry({ uid: 1, content: same, order: 10 }),
+      makeEntry({ uid: 2, content: same, order: 20 }),
+    ];
+    const first = renderWorldBookEntries(entries, makeCtx({ vars: { k: 'x' } }));
+    expect(first.dynamicText).toBe('x\n\nx');
+    // 缓存命中不跳过执行 → 新 ctx 出新值
+    const second = renderWorldBookEntries(entries, makeCtx({ vars: { k: 'y' } }));
+    expect(second.dynamicText).toBe('y\n\ny');
+    clearEjsCompileCache();
+    const third = renderWorldBookEntries(entries, makeCtx({ vars: { k: 'z' } }));
+    expect(third.dynamicText).toBe('z\n\nz');
   });
 });

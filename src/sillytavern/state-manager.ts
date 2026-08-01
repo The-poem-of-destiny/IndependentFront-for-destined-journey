@@ -43,7 +43,8 @@ import {
   deleteMessagesAfterTurn,
   getDatabase,
 } from './database';
-import { getVar, setVar, delVar, insertVar } from './var-resolver';
+import { getVar, setVar, delVar, insertVar, applyVarsPatch } from './var-resolver';
+import type { EjsVarsDiff } from './ejs-vars-diff';
 import {
   normalizeQuestStatus,
   normalizeStatusCategory,
@@ -56,6 +57,21 @@ import {
 
 export interface StateManagerConfig {
   saveId: string;
+}
+
+/** commitChatState 的可选载荷（工坊 P2 / ADR-30 D5） */
+export interface CommitChatStateOptions {
+  /**
+   * EJS `vars` 草稿差量，**有序**。
+   *
+   * 应用顺序钉死（契约级，设计 D5 / §0）: 本列表按序逐个应用 → **然后**才是
+   * `patches`（vars_update 的 AI 补丁）。同路径冲突时 **AI 覆盖 EJS** ——
+   * EJS 在装配期基于回合开始的旧状态计算，AI 补丁反映本回合正文，更新鲜。
+   *
+   * 体积护栏（整份拒绝）在调用方（GamePipeline）判定 —— 只有那里知道差量来源
+   * 是哪个 Agent，能把拒绝点名报给用户。
+   */
+  ejsVarsDiffs?: EjsVarsDiff[];
 }
 
 /** 单个 Patch 的应用结果 */
@@ -160,6 +176,8 @@ export class StateManager {
    * 提交状态变更 — 唯一写入入口
    *
    * 流程:
+   * 0. 🆕 工坊 P2 (D5): 先应用 EJS vars 差量（有序），**再**应用 patches ——
+   *    同路径冲突时 AI 补丁覆盖 EJS，顺序钉死不可调换
    * 1. 验证所有 patches
    * 2. 依次应用每个 patch（读写数据库）
    * 3. 返回结果
@@ -167,13 +185,36 @@ export class StateManager {
    * M5: 不再自动创建快照（杀 #28 patchCount%N 即建即抛），
    * 快照由 createSnapshot()/advanceTurn() 显式触发（GamePipeline 每轮一拍）。
    */
-  async commitChatState(patches: StatePatch[]): Promise<StateCommitResult> {
-    if (!patches.length) {
+  async commitChatState(
+    patches: StatePatch[],
+    options?: CommitChatStateOptions,
+  ): Promise<StateCommitResult> {
+    const ejsDiffs = (options?.ejsVarsDiffs ?? []).filter(
+      (d) => (d?.replace?.length ?? 0) > 0 || (d?.remove?.length ?? 0) > 0,
+    );
+
+    if (!patches.length && !ejsDiffs.length) {
       return { success: true, patchesApplied: 0, eventsGenerated: [], errors: [] };
     }
 
     const results: PatchApplicationResult[] = [];
     const errors: string[] = [];
+
+    // ===== Step 0: EJS 差量先落（D5 仲裁顺序） =====
+    if (ejsDiffs.length) {
+      try {
+        let vars = await this.getCurrentVariables();
+        for (const diff of ejsDiffs) {
+          vars = applyVarsPatch(vars, diff);
+        }
+        await this.persistVariables(vars);
+      } catch (err) {
+        // 不阻塞 AI 补丁 —— EJS 是簿记旁路，正文状态更重要
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`EJS vars 差量应用失败: ${msg}`);
+        console.warn('[StateManager] EJS vars 差量应用失败（不阻塞 AI 补丁）:', err);
+      }
+    }
 
     for (const patch of patches) {
       try {
