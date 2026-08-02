@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { qualityVar } from '../../lib/quality-colors';
+import ItemDetailModal from './ItemDetailModal.vue';
 
 const game = useGameStore();
 
@@ -118,6 +119,11 @@ onMounted(applyItemFocus);
 // ═══ 选中物品 ═══
 const selected = computed(() => sortedItems.value[selectedIdx.value] || null);
 
+const detailOpen = ref(false);
+function openDetail() {
+  if (selected.value) detailOpen.value = true;
+}
+
 const selQuality = computed(() => {
   const item: any = selected.value;
   if (!item) return '普通';
@@ -205,7 +211,7 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
           :key="(item as any).name || i"
           class="item-row"
           :class="{ selected: i === selectedIdx }"
-          @click="selectedIdx = i"
+          @click="selectedIdx = i; openDetail()"
         >
           <span
             class="dot"
@@ -298,6 +304,12 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
     </div>
   </div>
   <div v-else class="empty">未加载角色数据</div>
+  <ItemDetailModal
+    :open="detailOpen"
+    :item="selected"
+    :category="activeCategory"
+    @update:open="detailOpen = $event"
+  />
 </template>
 
 <style scoped>
