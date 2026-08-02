@@ -14,13 +14,15 @@
  * `src/env.d.ts` 引的 `vite/client` 提供。
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   renderWorldBookEntries,
   prerenderWorldBookEntries,
   hasDynamic,
   clearEjsCompileCache,
 } from './worldbook-loader';
+import { LegacyBackend, clearEjsBackendCache, resetEjsBackend, setEjsBackend } from './ejs-backend';
+import { createQuickJsBackend } from './ejs-quickjs-backend';
 import { buildStatData } from './stat-projection';
 import { createDefaultCharacterState } from './types';
 import type { WorldBook, WorldBookEntry, CharacterState } from './types';
@@ -110,6 +112,34 @@ const KNOWN_FALLBACK_UIDS: ReadonlyArray<{ uid: number; where: string; why: stri
 ];
 
 const KNOWN_FALLBACK_UID_SET = new Set(KNOWN_FALLBACK_UIDS.map((x) => x.uid));
+
+/**
+ * **QuickJS 后端**的独立基线（F11）。
+ *
+ * 上面那张表跑的是 `LegacyBackend`（本模块的默认值），而**生产跑的是 QuickJS** ——
+ * 只测 Legacy 等于给隔离后端留了一整块无闸门区：QuickJS 独有的回归（编组丢失、
+ * 能力面没接上 guest、预算掐断）在全绿的测试下也照样能上线。
+ *
+ * 期望两张表**相等**：能力面在两个后端上是同一套语义（T4/T5 的全部意义）。
+ * 不等 = 后端间出现了语义漂移，要么补 shim 要么在这里写明白是哪条后端限制。
+ */
+const QUICKJS_KNOWN_FALLBACK_UIDS: ReadonlyArray<{ uid: number; where: string; why: string }> = [
+  // 🟢 **空表**（2026-08-01）：唯一一条 dlc#477（月历球 › 当前月历内容展示）已修 ——
+  //    guest 侧 lodash shim 补上了 `_.chain` / `.value()`（与 `ejs-lodash-shim.ts` 的
+  //    CHAIN_METHODS 同一张表）。两张白名单现在都是空的 = 两后端零漂移，正是 T4/T5 的目标态。
+];
+
+const QUICKJS_KNOWN_FALLBACK_UID_SET = new Set(QUICKJS_KNOWN_FALLBACK_UIDS.map((x) => x.uid));
+
+/**
+ * 两后端**登记在案**的基线差异（= QuickJS 白名单 − Legacy 白名单，双向）。
+ * 跨后端对拍用它当预期，而不是硬写 uid：改任一张白名单，这里自动跟着走。
+ */
+const BACKEND_DIVERGENCE = new Set(
+  [...QUICKJS_KNOWN_FALLBACK_UID_SET, ...KNOWN_FALLBACK_UID_SET].filter(
+    (uid) => QUICKJS_KNOWN_FALLBACK_UID_SET.has(uid) !== KNOWN_FALLBACK_UID_SET.has(uid),
+  ),
+);
 
 // ═══════════════════════════════════════════════════════════
 // 全语料冒烟
@@ -208,6 +238,105 @@ describe('全语料冒烟 — renderWorldBookEntries × 内置世界书', () => 
       first.fallbackEntries.map((f) => f.uid),
     );
   });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 全语料冒烟 × QuickJS 后端（生产真身）
+// ═══════════════════════════════════════════════════════════
+
+describe('全语料冒烟 — prerenderWorldBookEntries × QuickJS 后端', () => {
+  const corpus = loadCorpus();
+  const entries = corpus.map((c) => c.entry);
+  /** 真 wasm 后端：整份语料一个 pass，首次装载有秒级开销 */
+  const backend = createQuickJsBackend();
+  /** wasm 装载 + 509 条目一趟 pass —— 比 Legacy 慢一个量级，给宽裕的超时 */
+  const SLOW = 120_000;
+
+  beforeAll(() => {
+    // 编译缓存是后端间共享的（键=正文），但 QuickJS 在 guest 侧自己编译，
+    // 这里清一次只为让两条基线各自从干净状态起跑。
+    clearEjsCompileCache();
+    clearEjsBackendCache();
+    setEjsBackend(backend);
+  });
+
+  afterAll(() => {
+    // 🔴 必须还原：`current` 是模块级单例，留着 QuickJS 会把同进程内其余测试文件
+    //    （尤其走同步 `renderWorldBookEntries` 的那些）全部推进 fail-closed 分支。
+    resetEjsBackend();
+    clearEjsCompileCache();
+    clearEjsBackendCache();
+  });
+
+  it(
+    '回退条目集合 == QuickJS 已知白名单（双向闸门）',
+    async () => {
+      const result = await prerenderWorldBookEntries(entries, {
+        stats: makeStats(),
+        vars: {},
+        historyText: '',
+      });
+
+      const byUid = new Map(corpus.map((c) => [c.entry.uid, c]));
+      const unexpected = result.fallbackEntries
+        .filter((f) => !QUICKJS_KNOWN_FALLBACK_UID_SET.has(f.uid))
+        .map(
+          (f) => `${byUid.get(f.uid)?.file}#${f.uid} ${byUid.get(f.uid)?.entry.name} :: ${f.error}`,
+        );
+
+      expect(unexpected, 'QuickJS 下冒出白名单外的回退 = 隔离后端出现回归').toEqual([]);
+      // 反向闸门：白名单条目被修好了也要来删行
+      expect(new Set(result.fallbackEntries.map((f) => f.uid))).toEqual(
+        QUICKJS_KNOWN_FALLBACK_UID_SET,
+      );
+    },
+    SLOW,
+  );
+
+  it(
+    '两后端基线只差登记在案的那几条（能力面语义漂移闸门）',
+    async () => {
+      const quick = await prerenderWorldBookEntries(entries, {
+        stats: makeStats(),
+        vars: {},
+        historyText: '',
+      });
+      // 临时切回 Legacy 量同一份语料，量完立刻切回来 —— 两条基线用同一批条目、同一份 ctx 形状
+      setEjsBackend(new LegacyBackend());
+      let legacy;
+      try {
+        legacy = await prerenderWorldBookEntries(entries, {
+          stats: makeStats(),
+          vars: {},
+          historyText: '',
+        });
+      } finally {
+        setEjsBackend(backend);
+      }
+      const q = new Set(quick.fallbackEntries.map((f) => f.uid));
+      const l = new Set(legacy.fallbackEntries.map((f) => f.uid));
+      const diff = new Set([...q, ...l].filter((uid) => q.has(uid) !== l.has(uid)));
+      expect(diff, '两后端出现未登记的语义漂移 —— 去两张白名单里对账').toEqual(BACKEND_DIVERGENCE);
+    },
+    SLOW,
+  );
+
+  it(
+    'QuickJS 下 EJS 真的求过值（vars 草稿被写 + 静态区无动态残留）',
+    async () => {
+      const vars: Record<string, any> = {};
+      const result = await prerenderWorldBookEntries(entries, {
+        stats: makeStats(),
+        vars,
+        historyText: '',
+      });
+      // 编组回传不是空转：斯芬克斯信号守卫的初始化必须跨 wasm 边界传回宿主草稿
+      expect(vars['事件']?.['信号']).toEqual([]);
+      expect(result.staticText).not.toContain('<%');
+      expect(result.dynamicText).not.toContain('<%=');
+    },
+    SLOW,
+  );
 });
 
 // ═══════════════════════════════════════════════════════════

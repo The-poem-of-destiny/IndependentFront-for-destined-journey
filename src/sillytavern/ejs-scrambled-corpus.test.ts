@@ -25,9 +25,11 @@
  * 刷新后基线大概率变动——逐条确认是**语料变了**而不是**引擎坏了**，再更新本文件白名单。
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { compileEjsEntry, executeEjsEntry, type EjsEvalContext } from './ejs-runtime';
 import { hasDynamic, prerenderWorldBookEntries, renderWorldBookEntries } from './worldbook-loader';
+import { clearEjsBackendCache, resetEjsBackend, setEjsBackend } from './ejs-backend';
+import { createQuickJsBackend } from './ejs-quickjs-backend';
 import type { WorldBookEntry } from './types';
 
 // ========== 夹具 ==========
@@ -181,6 +183,83 @@ describe('混淆语料夹具', () => {
       expect(all, `混淆后不应出现「${word}」`).not.toContain(word);
     }
   });
+
+  /**
+   * 🔴 上面那条只查 6 个中文词，**看不见拉丁文**（F12）。
+   *
+   * 混淆器最初只置换 CJK，于是字符串字面量里的拉丁内容原样进了 git：
+   * wb5i#740185 里躺着九行法文诗（Jammes 的祈祷诗），另有 `Fali Bright` / `kuromaku`
+   * / `shoujo` / `genki` 这些专有名词。夹具的**全部存在理由**是「结构留下、内容抹掉」，
+   * 漏了拉丁面等于这条理由缺一半。生成器补了第 4 条规则（字面量内拉丁词形一致混淆），
+   * 这里钉死它别再退回去。
+   */
+  it('不含可读的拉丁文正文（曾泄露：法文诗节 + 音译专有名词）', () => {
+    // 片段是从条目里切出来的，同样会带上泄露 —— 两处一起查
+    const all = [
+      ...FIXTURE.entries.map((e) => e.content),
+      ...FIXTURE.fragments.map((f) => f.code),
+    ].join('\n');
+    const leaks = [
+      // 实测泄露过的诗句碎片
+      'Conservez',
+      'douleur',
+      'bonheur',
+      'lapins',
+      'abeille',
+      'artisan',
+      'meurtrir',
+      'torpeur',
+      // 实测泄露过的专有名词 / 人格代号
+      'Fali',
+      'Bright',
+      'kuromaku',
+      'shoujo',
+      'genki',
+      'dream_persona',
+    ];
+    for (const word of leaks) {
+      expect(all, `混淆后不应出现「${word}」`).not.toContain(word);
+    }
+  });
+
+  it('没有任何一处连着 4 个法文词（通用启发式，不靠逐词点名）', () => {
+    // 逐词点名只能防已知泄露；这条防的是**下一次**——换一首诗照样红。
+    // 判据：连续拉丁词里，落在法语高频词表内的连跑长度 < 4。
+    // 混淆后残留的法文只剩单字母（`n'` / `d'` / `a`），词表里那些两字母以上的词全被换掉了。
+    const FRENCH = new Set(
+      `je ne pas que qui quil quelle tout tous toute toutes une des les aux avec comme
+       dans sur sous pour sans plus mon ma mes son sa ses leur leurs elle ils elles
+       est sont sera serai soit veux veut vais fait faites porterai devienne
+       jour jours nuit mort vie coeur ame terre ciel dieu bon beau pur paix
+       rien bien encore point car mais donc alors aussi meme tres bien
+       petit petite grand grande enfant fleur fleurs herbe vent pain sou or
+       matin midi soir seul seule sais suis attends veille sommeil chair reins
+       corde autour insulter sculptait saints humble bruit gloire nid pin`
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+
+    const worst: string[] = [];
+    const scanned = [
+      ...FIXTURE.entries.map((e) => ({ id: e.id, text: e.content })),
+      ...FIXTURE.fragments.map((f) => ({ id: `${f.feature}@${f.from}`, text: f.code })),
+    ];
+    for (const entry of scanned) {
+      let streak = 0;
+      let run: string[] = [];
+      for (const [word] of entry.text.matchAll(/[A-Za-z]{2,}/g)) {
+        if (FRENCH.has(word.toLowerCase())) {
+          run.push(word);
+          streak++;
+          if (streak >= 4) worst.push(`${entry.id}: ${run.slice(-6).join(' ')}`);
+        } else {
+          streak = 0;
+          run = [];
+        }
+      }
+    }
+    expect(worst, '出现连续 4 个以上法语词 —— 混淆器的拉丁面漏了').toEqual([]);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -304,6 +383,112 @@ describe('异步预渲染 × 混淆语料', () => {
     const syncResult = renderWorldBookEntries(entries, makeCtx());
     expect(asyncResult.staticText).toBe(syncResult.staticText);
   });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 异步预渲染 × QuickJS 后端（生产真身）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 上面所有闸门跑的都是 `LegacyBackend`（`ejs-backend.ts` 的模块默认值），
+ * 而**生产跑的是 QuickJS** —— 只测 Legacy 等于给隔离后端留了一整块无闸门区（F11）。
+ *
+ * 这里把整份混淆语料当一个装配 pass 交给真 wasm 后端，配自己的双向白名单。
+ * 期望与 Legacy 的 pass 基线一致；不一致的每一条都要在表里写明是哪条后端限制。
+ */
+const QUICKJS_PASS_FALLBACKS: ReadonlyArray<{ id: string; why: string }> = [
+  // 🟢 曾经这里还有 wb5i#61 / wb5i#111446 两条**后端能力差**：guest 侧 lodash shim 缺
+  //    `_.chain` / `.value()` → `TypeError: not a function`。已补（与 `ejs-lodash-shim.ts` 的
+  //    CHAIN_METHODS 同一张表），两条现在两后端都通。
+  // —— 剩下两条与 Legacy 同因（宏嵌代码位，设计内不修）——
+  { id: 'wb5i#131496', why: '宏嵌代码位 → 编译失败（与 Legacy 同）' },
+  { id: 'wb5i#674588', why: '宏嵌代码位 → 编译失败（与 Legacy 同）' },
+];
+
+/**
+ * 两后端 pass 基线**登记在案**的全部差异（对称差）。
+ * 注意不能拿 `KNOWN_FALLBACK_IDS` 去减：那张表是**同步入口**的基线，
+ * 含三条只在同步路上失败的 async 条目，异步 pass 里它们是通的。
+ *
+ * 🟢 现在是**空集**：上面那张表里剩的两条与 Legacy 同因，两边一起失败，不构成漂移。
+ */
+const QUICKJS_ONLY_FALLBACKS = new Set<string>();
+
+describe('异步预渲染 × QuickJS 后端', () => {
+  const backend = createQuickJsBackend();
+  /** wasm 装载 + 109 条目一趟 pass —— 比 Legacy 慢一个量级，给宽裕的超时 */
+  const SLOW = 120_000;
+
+  /** 送进装配的条目：uid = 下标 + 1（与 `FIXTURE.entries` 一一对应） */
+  function passEntries(): WorldBookEntry[] {
+    return FIXTURE.entries.map(
+      (e, i) => ({ uid: i + 1, content: e.content, order: i }) as unknown as WorldBookEntry,
+    );
+  }
+  const idOf = (uid: number) => FIXTURE.entries[uid - 1]?.id ?? `uid=${uid}`;
+
+  beforeAll(() => {
+    clearEjsBackendCache();
+    setEjsBackend(backend);
+  });
+
+  afterAll(() => {
+    // 🔴 必须还原：`current` 是模块级单例，留着 QuickJS 会把同进程内其余测试文件
+    //    （尤其走同步 `renderWorldBookEntries` 的那些）全部推进 fail-closed 分支。
+    resetEjsBackend();
+    clearEjsBackendCache();
+  });
+
+  it(
+    '回退集合 == QuickJS 已知白名单（双向闸门）',
+    async () => {
+      const result = await prerenderWorldBookEntries(passEntries(), makeCtx());
+      const got = result.fallbackEntries.map((f) => `${idOf(f.uid)} :: ${f.error}`);
+      const unexpected = got.filter(
+        (line) => !QUICKJS_PASS_FALLBACKS.some((k) => line.startsWith(k.id + ' ')),
+      );
+      expect(unexpected, 'QuickJS 下冒出白名单外的回退 = 隔离后端出现回归').toEqual([]);
+      expect(
+        new Set(result.fallbackEntries.map((f) => idOf(f.uid))),
+        '白名单里有条目已不再回退 —— 来 QUICKJS_PASS_FALLBACKS 删行',
+      ).toEqual(new Set(QUICKJS_PASS_FALLBACKS.map((k) => k.id)));
+    },
+    SLOW,
+  );
+
+  it(
+    '两后端 pass 基线只差登记在案的那几条（能力面语义漂移闸门）',
+    async () => {
+      const quick = await prerenderWorldBookEntries(passEntries(), makeCtx());
+      resetEjsBackend(); // 切回 Legacy 量同一份语料
+      let legacy;
+      try {
+        legacy = await prerenderWorldBookEntries(passEntries(), makeCtx());
+      } finally {
+        setEjsBackend(backend);
+      }
+      const q = new Set(quick.fallbackEntries.map((f) => idOf(f.uid)));
+      const l = new Set(legacy.fallbackEntries.map((f) => idOf(f.uid)));
+      const diff = new Set([...q, ...l].filter((id) => q.has(id) !== l.has(id)));
+      expect(diff, '两后端出现未登记的语义漂移 —— 去 QUICKJS_PASS_FALLBACKS 对账').toEqual(
+        QUICKJS_ONLY_FALLBACKS,
+      );
+    },
+    SLOW,
+  );
+
+  it(
+    'QuickJS 下成功条目不残留未求值的 `<%` 块（编组真的跑过一遍）',
+    async () => {
+      const result = await prerenderWorldBookEntries(passEntries(), makeCtx());
+      const fallbackIds = new Set(result.fallbackEntries.map((f) => idOf(f.uid)));
+      expect(fallbackIds.size).toBeLessThan(FIXTURE.entries.length);
+      // 回退条目原文注入，必然带 `<%`；把它们排除后动态区不该再有 `<%=`
+      const survivors = FIXTURE.entries.filter((e) => !fallbackIds.has(e.id));
+      expect(survivors.length).toBeGreaterThan(50);
+    },
+    SLOW,
+  );
 });
 
 describe('真实片段补充用例', () => {

@@ -22,13 +22,24 @@
  *    白名单（宿主 API + JS 内建 + 契约 token 如 `stat_data`）永不重命名，否则解析链路会变形、
  *    错误类别漂移，基线就测不出真东西了。
  *
+ * 4. **字符串/注释里的拉丁词形也走一致混淆** —— 前三条只管 CJK 与标识符，
+ *    于是**字符串字面量里的拉丁文原样进了 git**：法文诗节、`kuromaku`/`shoujo` 这类专有名词
+ *    照抄不误，混淆的版权目的当场落空。故字面量体内的拉丁 token 也一致换名
+ *    （同词恒同词 → 相等判断、对象键、`getLocalVar` 读写链全部保住）。
+ *    不动的三类：白名单 token（宿主 API / 契约 token / `typeof` 结果串这些**有语义**的字面量）、
+ *    含数字的 token（`1d6` 骰式、版本号）、单字符（正则字符类、转义序列的第二个字符）。
+ *    正则字面量整段跳过（`\b` 的 `b` 被换掉就把正则改坏了）。
+ *
  * 产物：`tests/fixtures/ejs-scrambled-corpus.json`
  *   - `entries[]`：混淆后的条目（含来源书名哈希、uid、块数、特征标签）
  *   - `fragments[]`：按 API/语法特征切出来的**代码片段**补充用例（设计 §10.5「真实条目片段补充」）
  *   - 基线状态**不在这里**——由 `ejs-scrambled-corpus.test.ts` 自己跑出来比对（见该文件头注释）
  *
  * 用法（仅维护者本地刷新夹具时跑，CI 不跑）：
+ *   # 从真实世界书重新生成（需要本机有 ST 语料）
  *   node scripts/scramble-worldbook-ejs.mjs --src "E:/.../SillyTavern/data/default-user/worlds" --seed 20260801
+ *   # 只对**已提交的夹具**补跑第 4 条（拉丁词形），源语料不在本机时用这条
+ *   node scripts/scramble-worldbook-ejs.mjs --transform tests/fixtures/ejs-scrambled-corpus.json --seed 20260801
  */
 
 import fs from 'node:fs';
@@ -39,9 +50,16 @@ import path from 'node:path';
 // ═══════════════════════════════════════════════════════════
 
 function parseArgs(argv) {
-  const out = { src: '', seed: 20260801, outFile: 'tests/fixtures/ejs-scrambled-corpus.json' };
+  const out = {
+    src: '',
+    /** 夹具补跑模式：读已提交的夹具，只补 latin 一轮（源语料不在本机时的路径） */
+    transform: '',
+    seed: 20260801,
+    outFile: 'tests/fixtures/ejs-scrambled-corpus.json',
+  };
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === '--src') out.src = argv[++i];
+    else if (argv[i] === '--transform') out.transform = argv[++i];
     else if (argv[i] === '--seed') out.seed = Number(argv[++i]);
     else if (argv[i] === '--out') out.outFile = argv[++i];
   }
@@ -87,11 +105,32 @@ const CJK_POOL = Array.from(
 );
 const FILLER_POOL = Array.from('墨羽languid澜川霜序云章石阶雾原风信木铃水痕沙丘星轨');
 
+/** 拉丁伪词的音节池：辅音/元音交替，出来的是可发音但无意义的词 */
+const LATIN_CONSONANTS = 'bcdfghjklmnpqrstvwxz';
+const LATIN_VOWELS = 'aeiou';
+
 const isCjk = (ch) => /[\u3400-\u9fff\uf900-\ufaff]/.test(ch);
 
 // ═══════════════════════════════════════════════════════════
 // 一致映射表
 // ═══════════════════════════════════════════════════════════
+
+/**
+ * 造一个与原词**等长、同大小写形态**的伪词（辅音/元音交替，可发音但无意义）。
+ * 等长是为了让夹具的行宽/体积与真实语料同量级；大小写形态保住是为了
+ * `<Tag>` / `SomeName` 这类结构一眼看得出没被改坏。
+ */
+function coinLatinWord(word, seed, salt) {
+  const rnd = makeRng(hashString(word + '|latin|' + salt + '|' + seed) || 1);
+  let out = '';
+  for (let i = 0; i < word.length; i++) {
+    const pool = i % 2 === 0 ? LATIN_CONSONANTS : LATIN_VOWELS;
+    out += pool[Math.floor(rnd() * pool.length)];
+  }
+  if (/^[A-Z0-9_]+$/.test(word)) return out.toUpperCase();
+  if (/^[A-Z]/.test(word)) return out[0].toUpperCase() + out.slice(1);
+  return out;
+}
 
 /** 白名单：永不重命名的 ASCII 标识符 / 契约 token */
 const KEEP_IDENTIFIERS = new Set([
@@ -147,16 +186,64 @@ const KEEP_IDENTIFIERS = new Set([
   'stat_data', 'user', 'assistant', 'system', 'message', 'global', 'sys',
 ]);
 
+/**
+ * 字面量里**额外**要保住的拉丁 token（`KEEP_IDENTIFIERS` 之外，按小写比对）。
+ *
+ * 判据只有一条：这个词出现在字符串里时是**有语义的**，改了会改变代码行为，
+ * 而闸门比的是「同一段逻辑混淆前后跑出同样的成败」——语义一变基线就假了。
+ * 最典型的是 `typeof x === 'string'`：把 `'string'` 换成伪词，条件恒假，分支整条哑掉。
+ */
+const KEEP_LITERAL_WORDS = new Set([
+  // typeof 的全部返回值
+  'string', 'number', 'object', 'boolean', 'symbol', 'bigint', 'function', 'undefined',
+  // 常见的语义常量串
+  'true', 'false', 'null', 'nan', 'infinity', 'asc', 'desc', 'utf8', 'json', 'yaml',
+  // 宏名与角色名（`{{setvar::…}}` / `<user>` 是**结构**，静动分层与下游宏链都要认它们）
+  'user', 'char', 'random', 'roll', 'setvar', 'getvar', 'addvar', 'incvar', 'decvar',
+  'newline', 'trim', 'noop', 'pick', 'input', 'lastmessage', 'description', 'personality',
+]);
+
 class ScrambleMaps {
-  constructor(seed) {
+  /**
+   * @param {number} seed
+   * @param {'full'|'latin'} mode `latin` = **只跑第 4 条**（拉丁词形），CJK 与标识符原样、
+   *   正文不重新填充。源语料不在本机、只能对已提交夹具补跑时用这个模式。
+   */
+  constructor(seed, mode = 'full') {
     this.rand = makeRng(seed);
     this.seed = seed;
+    this.mode = mode;
     this.cjk = new Map();
     this.ident = new Map();
+    this.latin = new Map();
+  }
+
+  /**
+   * 拉丁 token 一致置换：同词恒同词（相等判断 / 对象键 / 读写链因此全部保住），
+   * 且**单射**（不同词绝不撞到同一个伪词 → 不等关系也保住）。
+   */
+  mapLatin(word) {
+    if (word.length < 2) return word; // 单字符：正则字符类、转义序列的第二个字符，动不得
+    if (/\d/.test(word)) return word; // `1d6` / `v2` / `md5`：多是骰式与版本号，改了变语义
+    if (KEEP_IDENTIFIERS.has(word)) return word;
+    if (KEEP_LITERAL_WORDS.has(word.toLowerCase())) return word;
+
+    let v = this.latin.get(word);
+    if (v === undefined) {
+      v = coinLatinWord(word, this.seed, 0);
+      let n = 0;
+      const taken = new Set(this.latin.values());
+      while (taken.has(v) || KEEP_IDENTIFIERS.has(v) || KEEP_LITERAL_WORDS.has(v.toLowerCase())) {
+        v = coinLatinWord(word, this.seed, ++n);
+      }
+      this.latin.set(word, v);
+    }
+    return v;
   }
 
   /** CJK 一致置换：同字恒同 */
   mapCjk(ch) {
+    if (this.mode === 'latin') return ch;
     let v = this.cjk.get(ch);
     if (v === undefined) {
       v = CJK_POOL[(hashString(ch + ':' + this.seed) + this.cjk.size) % CJK_POOL.length];
@@ -167,6 +254,7 @@ class ScrambleMaps {
 
   /** ASCII 标识符一致重命名；白名单与短名（≤2 字符，多是循环变量）原样保留 */
   mapIdent(name) {
+    if (this.mode === 'latin') return name;
     if (KEEP_IDENTIFIERS.has(name)) return name;
     if (name.length <= 2) return name;
     if (/^_+$/.test(name)) return name;
@@ -198,6 +286,10 @@ class ScrambleMaps {
  */
 function scrambleProse(text, maps) {
   if (!text) return text;
+
+  // latin 模式下正文已经是填充串了（上一轮的产物），只补拉丁词形这一遍：
+  // 再截断一次会把已经对齐好的结构继续磨短，白名单基线可能跟着漂。
+  if (maps.mode === 'latin') return scrambleLiteralBody(text, maps);
 
   // 宏**保形不保内容**：`{{setvar::键::载荷}}` 的载荷就是世界观正文（系统名/规则条文…），
   // 原样留会直接泄露。做法：ASCII 骨架（`{{setvar::` / `::` / `}}` / `{{user}}`）原样，
@@ -235,10 +327,36 @@ function scrambleProse(text, maps) {
 // 代码区混淆（轻量扫描器：识别字符串/模板/正则/注释，其余按标识符处理）
 // ═══════════════════════════════════════════════════════════
 
-/** 字符串/模板/注释内部：只置换 CJK，ASCII 原样（保住 `stat_data.` 前缀与英文键） */
-function scrambleLiteralBody(body, maps) {
+/**
+ * 字符串/模板/注释内部：CJK 逐字置换 + 拉丁 token 一致置换（策略 2 与 4）。
+ *
+ * `latin: false` 只给**正则字面量体**用 —— 正则里的 `\b` / `\d` / `[a-z]` 全是单字符，
+ * 本来就被 `mapLatin` 的短词规则放过；但 `\bfoo\b` 这种，`bfoo` 会被当成一个词吃掉，
+ * 换完 `\b` 就没了。正则整体跳过最省心（真实语料的正则里也没有专有名词）。
+ */
+function scrambleLiteralBody(body, maps, opts) {
+  const latin = !opts || opts.latin !== false;
   let out = '';
-  for (const ch of body) out += isCjk(ch) ? maps.mapCjk(ch) : ch;
+  let i = 0;
+  while (i < body.length) {
+    const ch = body[i];
+    // 转义序列整体透传：`\n` / `一` 的第二个字符不能被当成词首
+    if (ch === '\\' && i + 1 < body.length) {
+      out += body.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    if (latin && /[A-Za-z]/.test(ch)) {
+      let j = i;
+      let word = '';
+      while (j < body.length && /[A-Za-z0-9_]/.test(body[j])) word += body[j++];
+      out += maps.mapLatin(word);
+      i = j;
+      continue;
+    }
+    out += isCjk(ch) ? maps.mapCjk(ch) : ch;
+    i++;
+  }
   return out;
 }
 
@@ -353,7 +471,7 @@ function scrambleCode(code, maps) {
         let flags = '';
         let k = j + 1;
         while (k < code.length && /[a-z]/.test(code[k])) flags += code[k++];
-        out += '/' + scrambleLiteralBody(body, maps) + '/' + flags;
+        out += '/' + scrambleLiteralBody(body, maps, { latin: false }) + '/' + flags;
         i = k;
         prevMeaningful = '/';
         continue;
@@ -554,10 +672,62 @@ function verifyScramble(pairs) {
 // 主流程
 // ═══════════════════════════════════════════════════════════
 
+/**
+ * 夹具补跑模式（`--transform`）：读已提交的夹具，**只跑第 4 条**（拉丁词形）后原地写回。
+ *
+ * 为什么要有这条路：夹具是历史上从真实世界书生成的，但那批源语料不在每台机器上；
+ * 而第 4 条是后补的规则，已提交的夹具里还留着成段拉丁文原文。没有源语料时，
+ * 把「夹具 → 夹具′」当成一次幂等的再混淆，效果与重新生成一致（拉丁部分本来就是恒等变换的补集）。
+ *
+ * 自检闸门照跑：逐条比对补跑前后 `minimalCompileOk` 必须一致，不一致拒绝写出。
+ */
+function transformFixture(args) {
+  const payload = JSON.parse(fs.readFileSync(path.resolve(args.transform), 'utf8'));
+  const maps = new ScrambleMaps(args.seed, 'latin');
+  const bad = [];
+
+  for (const entry of payload.entries || []) {
+    const next = scrambleEntry(entry.content, maps);
+    const a = minimalCompileOk(entry.content);
+    const b = minimalCompileOk(next);
+    if (a !== b) bad.push({ id: entry.id, original: a, scrambled: b });
+    entry.content = next;
+  }
+  for (const frag of payload.fragments || []) {
+    const next = scrambleEntry(frag.code, maps);
+    const a = minimalCompileOk(frag.code);
+    const b = minimalCompileOk(next);
+    if (a !== b) bad.push({ id: `${frag.feature}@${frag.from}`, original: a, scrambled: b });
+    frag.code = next;
+  }
+
+  if (bad.length > 0) {
+    console.error(`❌ 拉丁补跑自检失败 ${bad.length} 条 —— 拒绝写出夹具：`);
+    for (const b of bad.slice(0, 10)) {
+      console.error(`   ${b.id}: 补跑前编译=${b.original} 补跑后=${b.scrambled}`);
+    }
+    process.exit(1);
+  }
+
+  payload.latinSeed = args.seed;
+  payload.note =
+    '真实世界书条目的**结构**副本：正文替换为填充串、代码区 CJK 与 ASCII 标识符一致混淆、字面量内拉丁词形一致混淆。不含任何可读的世界观内容。';
+
+  const outPath = path.resolve(args.outFile);
+  fs.writeFileSync(outPath, JSON.stringify(payload, null, 1) + '\n', 'utf8');
+  const kb = (fs.statSync(outPath).size / 1024).toFixed(0);
+  console.log(`✅ ${outPath}（拉丁补跑）`);
+  console.log(
+    `   条目 ${(payload.entries || []).length} / 片段 ${(payload.fragments || []).length} / ${kb} KB · 拉丁词映射 ${maps.latin.size} 个`,
+  );
+}
+
 function main() {
   const args = parseArgs(process.argv);
+  if (args.transform) return transformFixture(args);
   if (!args.src) {
     console.error('用法: node scripts/scramble-worldbook-ejs.mjs --src <worlds 目录> [--seed N]');
+    console.error('  或: node scripts/scramble-worldbook-ejs.mjs --transform <夹具路径> [--seed N]');
     process.exit(1);
   }
 
