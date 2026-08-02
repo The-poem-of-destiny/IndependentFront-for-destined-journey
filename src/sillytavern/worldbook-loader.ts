@@ -15,7 +15,7 @@ import {
   type CompiledEjsEntry,
   type EjsEvalContext,
 } from './ejs-runtime';
-import { getEjsBackend, type EjsPassEntry } from './ejs-backend';
+import { getEjsBackend, LegacyBackend, type EjsPassEntry } from './ejs-backend';
 
 // ========== 加载 ==========
 
@@ -364,12 +364,34 @@ export function renderWorldBookEntries(
   const dynamicParts: string[] = [];
   const fallbackEntries: Array<{ uid: number; error: string }> = [];
 
+  // 🔴 同步路径的 fail-closed 闸门（2026-08-01 修 F3）
+  //
+  // 本函数的求值走 `compileEjsEntry`/`executeEjsEntry` —— **宿主 realm 的 `new Function`**：
+  // 没有中断、没有执行预算、`Object.constructor("return globalThis")()` 能拿回真全局（SEC-02）。
+  // 生产一旦通过 `installProductionEjsBackend()` 切到隔离/停用后端，这条同步路必须**跟着停**，
+  // 否则任何还在调同步装配的入口（历史上就有：捏人页大纲）都会绕开隔离，
+  // 而应用对外仍报告「已隔离」——那比没有隔离更糟。
+  //
+  // 判据取**当前后端身份**而非调用方：只有后端本身就是 `LegacyBackend`（测试默认值，
+  // 本就没有边界可破）时才允许宿主求值；QuickJS / fail-closed 一律按 D8 原文注入并记回退。
+  // 生产装配请走 `buildAgentMessagesAsync` —— 它预渲染出 memo，`{{LORE_BOOK}}` 只挑段不求值，
+  // 根本不会落到这里。
+  const backendName = getEjsBackend().name;
+  const hostEvalAllowed = getEjsBackend() instanceof LegacyBackend;
+
   for (const slot of slots) {
     const content = slot.content;
     const entry = { uid: slot.uid };
 
     if (!slot.needsEval) {
       dynamicParts.push(content);
+      continue;
+    }
+
+    if (!hostEvalAllowed) {
+      const error = `EJS 未求值（同步路径不在宿主 realm 求值；当前后端 ${backendName}）`;
+      dynamicParts.push(content);
+      fallbackEntries.push({ uid: entry.uid, error });
       continue;
     }
 
@@ -421,15 +443,24 @@ export async function prerenderWorldBookEntries(
 
   const backend = getEjsBackend();
   const outcomes = toEval.length > 0 ? await backend.runPass(toEval, ejsCtx) : [];
-  const byUid = new Map(outcomes.map((o) => [o.uid, o]));
 
+  // 🔴 按**下标**回填，绝不按 uid 建 Map（2026-08-01 修 F4）
+  //
+  // uid 只在单本书内唯一：内置书是 1–509，而 ST 导出的用户书 entries 是每本各自 0..N-1，
+  // 设置页导入时又用 `uid || Date.now()` 补号 —— 跨书撞号是常态而非意外。
+  // 一旦按 uid 建 Map，撞号的两条里会有一条的渲染结果被注入两次、另一条被静默吞掉，
+  // 且**没有任何报错**（同步旧路径从不按 uid 寻址，这是异步路引入的回归）。
+  //
+  // 位置对齐的依据是 `EjsBackend.runPass` 的契约：条目按序执行、返回与入参一一对应且同序。
+  // 万一某后端违约（长度对不上），下面的 `!outcome` 分支照 D8 原文注入并留痕。
   const dynamicParts: string[] = [];
+  let evalIndex = 0;
   for (const slot of dynamicSlots) {
     if (!slot.needsEval) {
       dynamicParts.push(slot.content);
       continue;
     }
-    const outcome = byUid.get(slot.uid);
+    const outcome = outcomes[evalIndex++];
     if (!outcome) {
       // 后端漏了某条（不该发生）→ 按 D8 原文注入，并留痕
       dynamicParts.push(slot.content);

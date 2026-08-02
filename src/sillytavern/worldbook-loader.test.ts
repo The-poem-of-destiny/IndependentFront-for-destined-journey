@@ -2,7 +2,7 @@
  * worldbook-loader 测试 (Phase 8)
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   loadWorldBooksSync,
   getEntriesForAgent,
@@ -12,8 +12,15 @@ import {
   formatWorldBookEntries,
   hasDynamic,
   renderWorldBookEntries,
+  prerenderWorldBookEntries,
   clearEjsCompileCache,
 } from './worldbook-loader';
+import {
+  setEjsBackend,
+  resetEjsBackend,
+  FailClosedBackend,
+  clearEjsBackendCache,
+} from './ejs-backend';
 import type { WorldBook, WorldBookEntry, AgentConfig } from './types';
 import type { EjsEvalContext } from './ejs-runtime';
 
@@ -460,5 +467,104 @@ describe('renderWorldBookEntries — 分层与保序', () => {
     clearEjsCompileCache();
     const third = renderWorldBookEntries(entries, makeCtx({ vars: { k: 'z' } }));
     expect(third.dynamicText).toBe('z\n\nz');
+  });
+});
+
+describe('renderWorldBookEntries — 同步路径的 fail-closed 闸门（F3）', () => {
+  beforeEach(() => {
+    clearEjsCompileCache();
+    clearEjsBackendCache();
+  });
+  afterEach(() => resetEjsBackend());
+
+  it('后端不是 Legacy 时同步路径不在宿主 realm 求值 → 原文注入 + 记回退', () => {
+    setEjsBackend(new FailClosedBackend('隔离后端装载失败: 模拟'));
+    const entries = [
+      makeEntry({ uid: 1, content: '静态', order: 10 }),
+      makeEntry({ uid: 2, content: '<%= 1 + 1 %>', order: 20 }),
+    ];
+    const r = renderWorldBookEntries(entries, makeCtx());
+    expect(r.staticText).toBe('静态');
+    // 未求值 → 原文（不是 "2"）
+    expect(r.dynamicText).toBe('<%= 1 + 1 %>');
+    expect(r.fallbackEntries).toHaveLength(1);
+    expect(r.fallbackEntries[0].uid).toBe(2);
+    expect(r.fallbackEntries[0].error).toContain('未求值');
+  });
+
+  it('闸门只挡 EJS —— 只含 {{random}}/{{getvar}} 的条目照旧原文透传、不记回退', () => {
+    setEjsBackend(new FailClosedBackend('x'));
+    const entries = [makeEntry({ uid: 1, content: '{{getvar::foo}}', order: 10 })];
+    const r = renderWorldBookEntries(entries, makeCtx());
+    expect(r.dynamicText).toBe('{{getvar::foo}}');
+    expect(r.fallbackEntries).toEqual([]);
+  });
+
+  it('默认 Legacy 后端（测试基线）下行为不变，照常求值', () => {
+    const entries = [makeEntry({ uid: 1, content: '<%= 1 + 1 %>', order: 10 })];
+    expect(renderWorldBookEntries(entries, makeCtx()).dynamicText).toBe('2');
+  });
+});
+
+describe('prerenderWorldBookEntries — 结果按下标回填（F4 回归）', () => {
+  beforeEach(() => {
+    clearEjsCompileCache();
+    clearEjsBackendCache();
+  });
+  afterEach(() => resetEjsBackend());
+
+  it('🔴 两本书的动态条目 uid 撞号时，各自渲染各自的正文、各出现一次', async () => {
+    // 真机场景：内置书 uid 1–509，用户导入书 ST 导出是每本 0..N-1 →
+    // 跨书撞号是常态。按 uid 建 Map 会让一条注入两次、另一条被静默吞掉。
+    const entries = [
+      makeEntry({ uid: 7, content: '甲书<%= 1 + 1 %>', order: 10 }),
+      makeEntry({ uid: 7, content: '乙书<%= 20 + 2 %>', order: 20 }),
+    ];
+    const r = await prerenderWorldBookEntries(entries, makeCtx());
+    expect(r.dynamicText.split('\n\n')).toEqual(['甲书2', '乙书22']);
+    expect(r.fallbackEntries).toEqual([]);
+  });
+
+  it('撞号 + 其中一条失败：只有失败那条回退，另一条正常渲染', async () => {
+    const entries = [
+      makeEntry({ uid: 3, content: '好<%= "甲" %>', order: 10 }),
+      makeEntry({ uid: 3, content: '坏<% if ( %>', order: 20 }),
+      makeEntry({ uid: 3, content: '好<%= "丙" %>', order: 30 }),
+    ];
+    const r = await prerenderWorldBookEntries(entries, makeCtx());
+    expect(r.dynamicText.split('\n\n')).toEqual(['好甲', '坏<% if ( %>', '好丙']);
+    expect(r.fallbackEntries).toHaveLength(1);
+    expect(r.fallbackEntries[0].uid).toBe(3);
+    expect(r.fallbackEntries[0].error).toMatch(/SyntaxError/);
+  });
+
+  it('撞号条目夹着不需求值的宏条目时，下标仍不错位', async () => {
+    const entries = [
+      makeEntry({ uid: 5, content: '<%= "一" %>', order: 10 }),
+      makeEntry({ uid: 5, content: '{{getvar::foo}}', order: 20 }), // 不进后端
+      makeEntry({ uid: 5, content: '<%= "二" %>', order: 30 }),
+    ];
+    const r = await prerenderWorldBookEntries(entries, makeCtx());
+    expect(r.dynamicText.split('\n\n')).toEqual(['一', '{{getvar::foo}}', '二']);
+  });
+
+  it('后端违约少返结果时按 D8 原文注入并留痕（不静默错位）', async () => {
+    setEjsBackend({
+      name: 'broken(测试桩)',
+      interruptible: true,
+      async runPass(list) {
+        // 故意只返第一条 —— 下标回填必须让第二条走 `!outcome` 分支
+        return list.slice(0, 1).map((e) => ({ uid: e.uid, text: '已渲染', ok: true }));
+      },
+      dispose() {},
+    });
+    const entries = [
+      makeEntry({ uid: 9, content: '<%= 1 %>', order: 10 }),
+      makeEntry({ uid: 9, content: '<%= 2 %>', order: 20 }),
+    ];
+    const r = await prerenderWorldBookEntries(entries, makeCtx());
+    expect(r.dynamicText.split('\n\n')).toEqual(['已渲染', '<%= 2 %>']);
+    expect(r.fallbackEntries).toHaveLength(1);
+    expect(r.fallbackEntries[0].error).toContain('未返回该条目结果');
   });
 });

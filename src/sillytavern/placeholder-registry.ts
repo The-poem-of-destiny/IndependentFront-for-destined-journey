@@ -153,6 +153,12 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
       staticText = memo.staticText;
       dynamicText = memo.dynamicText;
     } else {
+      // 无 memo 的同步兜底路（2026-08-01 修 F3 的裁定）：
+      // 生产装配一律走 `buildAgentMessagesAsync` —— 它预渲染完把结果灌进 `ejsPass.loreRender`，
+      // 上面那条 memo 分支才是生产的正常路径，这里只剩测试与外部直接调 resolver 的极端路径。
+      // 保留调用而不删，是因为 `renderWorldBookEntries` 自身已带 fail-closed 闸门：
+      // 当前后端不是 `LegacyBackend`（= 生产的 QuickJS / fail-closed）时它**不在宿主 realm 求值**，
+      // 按 D8 原文注入并记回退。故这里不会成为绕过隔离的后门；测试默认 Legacy 后端下行为不变。
       const rendered = renderWorldBookEntries(activeEntries, ejsCtx);
       staticText = rendered.staticText;
       dynamicText = rendered.dynamicText;
