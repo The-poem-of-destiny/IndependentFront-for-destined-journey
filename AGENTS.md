@@ -328,9 +328,9 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 工坊 P2   | EJS 沙盒 + 只读 stats 投影（ADR-30）                   | ✅ 待真机           |
 | 真机迭代  | debug loop 持续修复                                    | 🔄                  |
 
-> 🔒 **工坊入口已临时下线（2026-08-01 安全审计）**：首页「创意工坊」按钮由 `HomePage.vue` 的 `WORKSHOP_ENTRY_ENABLED = false` 隐藏 —— 那是通往 workshop 视图的唯一入口。原因是 SEC-01（工坊正则的 `replaceString` 原样进美化管线、最终由 ChatFlow 的 `v-html` 落 DOM，事件属性会真的执行）与 SEC-02（世界书 EJS 走 `new Function`，`Object.constructor("return globalThis")()` 可拿回真全局，且同步跑主线程、死循环冻 UI），命中即可读到 localStorage 的 API Key、IndexedDB 存档与本地 BFF。**工坊代码一行没删**，沙箱/消毒方案（审计 Gate 0 / Gate 2）落地后把常量改回 `true` 即恢复。⚠️ 这只是暴露面收敛、不是安全边界：已装且已启用的项目仍会照常执行，游戏页侧栏的「工坊」启用面板也仍在。全文见 `docs/reviews/2026-08-01-repository-review.md`。
+> 🔒 **工坊入口已临时下线（2026-08-01 安全审计）**：首页「创意工坊」按钮由 `HomePage.vue` 的 `WORKSHOP_ENTRY_ENABLED = false` 隐藏 —— 那是通往 workshop 视图的唯一入口。原因是 SEC-01（工坊正则的 `replaceString` 原样进美化管线、最终由 ChatFlow 的 `v-html` 落 DOM，事件属性会真的执行）与 SEC-02（世界书 EJS 走 `new Function`，`Object.constructor("return globalThis")()` 可拿回真全局，且同步跑主线程、死循环冻 UI），命中即可读到 localStorage 的 API Key、IndexedDB 存档与本地 BFF。**工坊代码一行没删**，沙箱/消毒方案（审计 Gate 0 / Gate 2）落地后把常量改回 `true` 即恢复。⚠️ 这只是暴露面收敛、不是安全边界：已装且已启用的项目仍会照常执行，游戏页侧栏的「工坊」启用面板也仍在。全文见 `docs/reviews/2026-08-01-repository-review.md`。（SEC-02 已由 QuickJS 隔离后端在 `feat/ejs-capability-surface` 收口；入口解封仍等 SEC-01 消毒方案落地。）
 
-> 🟡 **工坊 P2 已实施（T1-T6），真机走查未做**：世界书条目正文的 EJS 现在**会在提示装配期求值**（ADR-30 两轴契约：只读 `stats` + 共写 `vars`，冲突 AI 赢；动态条目沉底、静态前缀字节稳定）。全语料冒烟 509 条目 / 61 动态 / **7 条已知回退**（白名单 uid 343·353·357·417·421·477·505 —— 6 条依赖缺失的酒馆助手 API、1 条 await），回退条目原文注入不阻断。代码位内嵌的 ST 值宏（`{{roll}}`/`{{random::}}`）已在编译期降成沙盒调用（`rewriteCodeMacros`），uid 358 出列。回退率 / 缓存命中字节 / 跨回合链尚未真机验证，设计全文见 `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`。
+> 🟡 **工坊 P2 已实施（T1-T6），真机走查未做**：世界书条目正文的 EJS 现在**会在提示装配期求值**（ADR-30 两轴契约：只读 `stats` + 共写 `vars`，冲突 AI 赢；动态条目沉底、静态前缀字节稳定）。全语料冒烟 509 条目 / 61 动态 / **0 回退**（能力面别名层落地后 7 → 0，白名单已清空；语料门现按 **Legacy 与 QuickJS 双后端**各自跑双向白名单，基线一致），回退条目原文注入不阻断。代码位内嵌的 ST 值宏（`{{roll}}`/`{{random::}}`）已在编译期降成沙盒调用（`rewriteCodeMacros`），uid 358 出列。回退率 / 缓存命中字节 / 跨回合链尚未真机验证，设计全文见 `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`。
 
 ## 架构（已实现部分）
 

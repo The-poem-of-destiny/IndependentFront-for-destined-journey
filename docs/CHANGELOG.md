@@ -96,7 +96,7 @@ Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调
 
 **T8 上线 + 创作者体验**
 
-- `installProductionEjsBackend()` 在 `main.ts` 里**不 await** 地切换；装载失败退回 Legacy 并 `console.warn` 留痕
+- `installProductionEjsBackend()` 在 `main.ts` 里**不 await** 地切换；现会**急加载 wasm 并跑探针**（审查轮修复），失败 **fail-closed**（不退回 Legacy）：动态条目按原文注入 + `console.error` + 首页 toast 提示
 - `public/poem-ejs.d.ts`：创作者类型定义（12 namespace + 别名层全部标 `@deprecated` 并指向新写法）
 - `ejs-preflight.ts`：装前预检。语法 / 未知符号 / 跨后端不一致 / 不可复现随机 / 代码位内嵌宏，
   逐条给**可执行的替代建议**。**不阻断安装** —— 职责是让人看见后果，不是替人做决定
@@ -106,6 +106,21 @@ Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调
 
 **验证**：全仓 **182 文件 / 5301 tests + 3 skip**，typecheck / eslint 零错误。
 新增依赖 `quickjs-emscripten@^0.32`。
+
+**审查轮修复（2026-08-01，PR #22 评审 1-12 项）**
+
+- 沙盒边界收口：vars 快照 / `readBackVars` 窗口补挂 interrupt（堵掉 `vars.toJSON` 死循环冻 UI）；
+  `runPass` 创建期收进 try（永不抛穿）；`executePendingJobs` 改真实 `DisposableResult` 形状（空队列早退恢复 + 错误句柄 dispose）；
+  install 急加载 wasm + 探针，失败 fail-closed 返 `false`
+- 双后端 parity 对齐：`chat.match(RegExp)` 结构化跨界重建、能力预算逐条目重建、`world.isDaytime` guest shim、
+  guest lodash 补 `_.chain/.value()`（内置 `dlc.json#477` 生产回退修复）、Legacy `stats` 逐条目深克隆
+- 契约修正：`char.affection` 按名索引（原按 id 恒 0）；`quest` 投影改读真实字段（`detail/objective/reward`）；
+  `getLocalVar/setLocalVar` 别名统一走 `local.*` 项目桶与护栏
+- 装配接线：捏人页大纲改走 `buildAgentMessagesAsync`（不再绕过隔离后端）；同步渲染路径 fail-closed 闸门；
+  异步路径 outcome 改按位置配对（uid 撞号不再串文）
+- 语料与夹具：语料门 Legacy/QuickJS 双后端双向白名单（QuickJS 侧 0 回退）；混淆器补种子化拉丁词替换 +
+  `--transform` 模式，法语诗句/专有名词泄漏清除，防泄漏测试升级
+- 验证：**185 文件 / 5399 tests + 3 skip**，typecheck / typecheck:vue 零错误
 
 > 🔒 **工坊入口仍保持下线**：EJS 侧边界已具备，但 **SEC-01（正则 `replaceString` → `v-html` 的 XSS）
 > 尚未修复**，它与 EJS 无关、独立成链。
