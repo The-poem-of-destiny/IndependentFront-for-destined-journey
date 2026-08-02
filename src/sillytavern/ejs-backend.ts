@@ -28,6 +28,8 @@ import {
   type CompiledEjsEntry,
   type EjsEvalContext,
 } from './ejs-runtime';
+// 仅类型（编译期擦除）：生产装配走下面的**动态** import，wasm 不能被静态图拖进来
+import type { QuickJsBackend } from './ejs-quickjs-backend';
 
 // ═══════════════════════════════════════════════════════════
 // 契约
@@ -236,6 +238,10 @@ let installPromise: Promise<boolean> | null = null;
  *
  * 装载期间也已经是 fail-closed —— 不留「还没装完所以先用 Legacy 渲染一轮」的窗口。
  *
+ * ## `true` 的含义是「wasm 真的起来了」
+ * 不是「JS 模块 import 成功了」。返回值被下游当作「隔离是真的」在用，所以装配必须**预热**
+ * （`QuickJsBackend.warmup()`）—— 见 `doInstall` 里那段注释。
+ *
  * @returns 是否成功切到隔离后端；`false` 时调用方应向用户明示「EJS 未启用」
  */
 export function installProductionEjsBackend(): Promise<boolean> {
@@ -247,11 +253,28 @@ export function installProductionEjsBackend(): Promise<boolean> {
 }
 
 async function doInstall(): Promise<boolean> {
+  let backend: QuickJsBackend | null = null;
   try {
     const { createQuickJsBackend } = await import('./ejs-quickjs-backend');
-    setEjsBackend(createQuickJsBackend());
+    backend = createQuickJsBackend();
+    /**
+     * 🔴 **必须在这里把 wasm 真的装起来**，不能只 import 到 JS 模块就报成功。
+     *
+     * QuickJS 后端是惰性装 wasm 的（首次 `runPass` 才取）。曾经装配止步于 import：
+     * wasm 取不到（CDN 挂 / CSP 拦 / 浏览器不支持）时这里照样 `return true`，
+     * `main.ts` 一个失败提示都不弹，此后每个 pass 静默退化成原文注入 ——
+     * 而下游是**按「隔离是真的」**在做决策的（工坊入口解封判断等）。
+     * 那正是本文件开头 `FailClosedBackend` 那段注释在骂的失效形态，只是换了个位置复发。
+     */
+    await backend.warmup();
+    setEjsBackend(backend);
     return true;
   } catch (err) {
+    try {
+      backend?.dispose();
+    } catch {
+      // 释放失败不该阻断降级
+    }
     const reason = err instanceof Error ? err.message : String(err);
     console.error('[EJS] 隔离后端装载失败，EJS 停用（条目原文注入）:', err);
     setEjsBackend(new FailClosedBackend(`隔离后端装载失败: ${reason}`));

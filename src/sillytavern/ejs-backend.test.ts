@@ -189,10 +189,16 @@ describe('FailClosedBackend', () => {
 });
 
 describe('installProductionEjsBackend', () => {
-  it('装载成功 → 切到隔离后端', async () => {
+  it('装载成功 → 切到隔离后端，且 wasm 真的起来了', async () => {
     const ok = await installProductionEjsBackend();
     expect(ok).toBe(true);
     expect(getEjsBackend().interruptible).toBe(true);
+    expect(getEjsBackend().name).toContain('quickjs');
+    // 🔴 光看 name / interruptible 是不够的：那两样在 wasm 根本没装起来时也照样对。
+    // 真跑一趟才能证明 `true` 的含义是「隔离在服役」而不是「JS 模块 import 成功了」。
+    const c = ctx();
+    const out = await getEjsBackend().runPass([{ uid: 1, content: '<%= 40 + 2 %>' }], c);
+    expect(out[0]).toMatchObject({ ok: true, text: '42' });
   }, 30000);
 
   it('多次调用幂等（重复装不会把后端搞坏）', async () => {
@@ -220,6 +226,45 @@ describe('installProductionEjsBackend', () => {
       expect(out[0]).toMatchObject({ ok: false, text: '<% vars.写了 = 1 %>' });
       expect(c.vars).toEqual({});
       // 失败必须留痕（console.error，不是 warn —— 这是安全相关状态）
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      vi.doUnmock('./ejs-quickjs-backend');
+      vi.resetModules();
+      spy.mockRestore();
+    }
+  }, 30000);
+
+  it('🔒 模块 import 得到但 **wasm 装不起来** → 同样 fail closed（不是报成功）', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // 这一条与上一条的区别正是缺陷所在：JS 模块好好的，wasm 取不到（CDN 挂 / CSP 拦 / 不支持）。
+    // 曾经装配只 import 不预热，于是这里会 **return true**、main.ts 一声不吭，
+    // 而此后每个 pass 都静默退化成原文注入 —— 下游却按「隔离是真的」在做决策。
+    let disposed = 0;
+    vi.doMock('./ejs-quickjs-backend', () => ({
+      createQuickJsBackend: () => ({
+        name: 'quickjs(wasm)',
+        interruptible: true,
+        runPass: async () => [],
+        dispose: () => {
+          disposed++;
+        },
+        warmup: async () => {
+          throw new Error('模拟 wasm 取不到');
+        },
+      }),
+    }));
+    try {
+      const ok = await installProductionEjsBackend();
+      expect(ok).toBe(false);
+      expect(getEjsBackend().name).toContain('fail-closed');
+      expect(getEjsBackend().name).not.toContain('quickjs');
+      // 而且真的一行 EJS 都不跑
+      const c = ctx();
+      const out = await getEjsBackend().runPass([{ uid: 1, content: '<% vars.写了 = 1 %>' }], c);
+      expect(out[0]).toMatchObject({ ok: false, text: '<% vars.写了 = 1 %>' });
+      expect(c.vars).toEqual({});
+      // 半成品后端必须被放掉，不能留一个悬着的 wasm 实例
+      expect(disposed).toBe(1);
       expect(spy).toHaveBeenCalled();
     } finally {
       vi.doUnmock('./ejs-quickjs-backend');

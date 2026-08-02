@@ -195,6 +195,176 @@ describe('QuickJS 后端 · 安全属性（SEC-02）', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// 🔒 回归：interrupt 的两个「没装上」的窗口
+// ═══════════════════════════════════════════════════════════
+
+describe('QuickJS 后端 · interrupt 覆盖面', () => {
+  it(
+    'guest 种下死循环 `vars.toJSON` —— 快照与回传都被掐住，runPass 按时返回',
+    async () => {
+      // 快照那句是 `JSON.stringify(globalThis.vars)`，会调用 guest 自己种的 toJSON。
+      // 曾经 interrupt 只装在条目正文那一段：快照在装它**之前**跑、回传在摘掉它**之后**跑，
+      // 于是这两个窗口里死循环能永久冻住主线程 —— 「可中断」在那里整个是假的。
+      const tiny = createQuickJsBackend({ budget: { entryTimeoutMs: 50, passTimeoutMs: 3000 } });
+      const ctx = makeCtx();
+      const started = Date.now();
+      const outcomes = await tiny.runPass(
+        [
+          { uid: 1, content: '<% vars.toJSON = function () { while (true) {} } %>' },
+          { uid: 2, content: '之后的正常条目' },
+        ],
+        ctx,
+      );
+      // 最要紧的断言是「它返回了」——修之前这里永久挂死，vitest 的超时都收不掉主线程。
+      // 时限也是断言的一部分：两个窗口各被 entryTimeoutMs 兜住，量级就是几十毫秒。
+      expect(Date.now() - started).toBeLessThan(5000);
+      expect(outcomes).toHaveLength(2);
+      expect(outcomes[0].ok).toBe(true); // 种毒的那条自己是「成功」的
+      // 后续条目照跑（只是丢了快照能力，D8 的回滚保证降级为「不回滚」）
+      expect(outcomes[1].text).toBe('之后的正常条目');
+      // 🔴 回传被掐 → 草稿保持 pass 开始的样子，不半写。
+      //    这一条同时证明 readBackVars 那段真的装了 interrupt：没装就是永久冻结。
+      expect(ctx.vars).toEqual({});
+    },
+    SLOW,
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
+// 🔒 回归：runPass 永不抛 + 微任务泵的返回值
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 造一个够跑完一趟 pass 的**假模块**（完全不碰 wasm）。
+ * 专门用来打桩那些真模块里很难触发的边界：建 runtime/context 失败、`executePendingJobs` 的返回形状。
+ *
+ * `dump` 恒返回 `'0'` → `__ejsState` 永远是 0 → 条目永远「未落定」，pump 与 drain 两条路径都会走到。
+ */
+function makeFakeModule(
+  options: {
+    onNewRuntime?: () => void;
+    onNewContext?: () => void;
+    pendingJobs?: () => unknown;
+  } = {},
+) {
+  const stats = { pumpCalls: 0, runtimeDisposed: 0, contextDisposed: 0 };
+  const handle = () => ({ dispose: () => {} });
+  const context = {
+    evalCode: () => ({ value: handle() }),
+    unwrapResult: (r: { value?: unknown }) => r.value,
+    dump: () => '0',
+    newFunction: () => handle(),
+    newString: () => handle(),
+    setProp: () => {},
+    getProp: () => handle(),
+    global: {},
+    undefined: {},
+    dispose: () => {
+      stats.contextDisposed++;
+    },
+  };
+  const runtime = {
+    setMemoryLimit: () => {},
+    setMaxStackSize: () => {},
+    setInterruptHandler: () => {},
+    removeInterruptHandler: () => {},
+    newContext: () => {
+      options.onNewContext?.();
+      return context;
+    },
+    executePendingJobs: () => {
+      stats.pumpCalls++;
+      return options.pendingJobs?.() as never;
+    },
+    dispose: () => {
+      stats.runtimeDisposed++;
+    },
+  };
+  const module = {
+    newRuntime: () => {
+      options.onNewRuntime?.();
+      return runtime;
+    },
+  };
+  return { stats, loadModule: async () => module };
+}
+
+describe('QuickJS 后端 · runPass 永不抛（契约）', () => {
+  it('newRuntime 抛 → 整 pass 回退原文，不抛穿', async () => {
+    const fake = makeFakeModule({
+      onNewRuntime: () => {
+        throw new Error('模拟 newRuntime 失败');
+      },
+    });
+    const b = createQuickJsBackend({ loadModule: fake.loadModule });
+    const outcomes = await b.runPass(
+      [
+        { uid: 1, content: '<%= 1 + 1 %>' },
+        { uid: 2, content: '文本' },
+      ],
+      makeCtx(),
+    );
+    expect(outcomes.map((o) => o.ok)).toEqual([false, false]);
+    expect(outcomes.map((o) => o.text)).toEqual(['<%= 1 + 1 %>', '文本']);
+    expect(outcomes[0].error).toContain('运行时创建失败');
+  });
+
+  it('newContext 抛 → 回退原文，且**已建起来的 runtime 被放掉**（否则漏一个 wasm 实例）', async () => {
+    const fake = makeFakeModule({
+      onNewContext: () => {
+        throw new Error('模拟 newContext 失败');
+      },
+    });
+    const b = createQuickJsBackend({ loadModule: fake.loadModule });
+    const outcomes = await b.runPass([{ uid: 1, content: '<%= 1 %>' }], makeCtx());
+    expect(outcomes[0]).toMatchObject({ ok: false, text: '<%= 1 %>' });
+    expect(outcomes[0].error).toContain('上下文创建失败');
+    expect(fake.stats.runtimeDisposed).toBe(1);
+  });
+});
+
+describe('QuickJS 后端 · executePendingJobs 返回的是 DisposableResult 不是 number', () => {
+  it('成功分支 `{ value: 0 }` → 「队列已空」早退真的触发（曾经恒不成立，空转满 64 轮）', async () => {
+    const fake = makeFakeModule({ pendingJobs: () => ({ value: 0, dispose: () => {} }) });
+    // 预算给得很宽：能早退就一定是靠 value === 0 判出来的，不是被 deadline 兜住的
+    const b = createQuickJsBackend({
+      loadModule: fake.loadModule,
+      budget: { entryTimeoutMs: 5000, passTimeoutMs: 10_000 },
+    });
+    const started = Date.now();
+    const outcomes = await b.runPass([{ uid: 1, content: '<% 1 %>' }], makeCtx());
+    expect(outcomes[0].ok).toBe(false); // dump 恒 '0' → 永远未落定
+    expect(outcomes[0].error).toContain('未落定');
+    // pump 循环一轮 + drainJobs 一轮 = 2；曾经是 1 + MAX_DRAIN_ROUNDS(64)
+    expect(fake.stats.pumpCalls).toBe(2);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it('失败分支的错误句柄被释放（不释放 = runtime.dispose 断言失败并 Abort 整个 wasm 实例）', async () => {
+    let errorDisposed = 0;
+    const fake = makeFakeModule({
+      pendingJobs: () => {
+        // 仿上游 DisposableFail：它自己的 dispose() 负责放掉 error 句柄
+        const error = {
+          dispose: () => {
+            errorDisposed++;
+          },
+        };
+        return { error, dispose: () => error.dispose() };
+      },
+    });
+    const b = createQuickJsBackend({
+      loadModule: fake.loadModule,
+      budget: { entryTimeoutMs: 5000, passTimeoutMs: 10_000 },
+    });
+    await b.runPass([{ uid: 1, content: '<% 1 %>' }], makeCtx());
+    expect(fake.stats.pumpCalls).toBe(2);
+    // 每一次返回的失败结果都必须被释放，一个都不能漏
+    expect(errorDisposed).toBe(fake.stats.pumpCalls);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
 // 能力面在 guest 侧可用
 // ═══════════════════════════════════════════════════════════
 

@@ -225,6 +225,96 @@ describe('渲染语义对齐', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// 回归：编组把语义吃掉的三条
+// ═══════════════════════════════════════════════════════════
+
+describe('回归：编组层丢语义导致的后端分叉', () => {
+  it(
+    'chat.match 收真正则（曾经只送 source 串，宿主退化成 includes 子串搜索）',
+    async () => {
+      const over = { historyText: '我推开门走进咖啡馆，你抬起头' };
+      // 分组 / 交替：子串搜索必然判 false，真正则判 true —— 而两边当时都报 ok:true（静默分叉）
+      const hit = await expectSame('<%= chat.match(/咖啡(馆|厅)/) %>', over);
+      expect(hit.quickjsText).toEqual(['true']);
+      const miss = await expectSame('<%= chat.match(/茶楼|酒馆/) %>', over);
+      expect(miss.quickjsText).toEqual(['false']);
+      // 带 flags 的也得一致（能力面会剥掉 g/y，两边同样口径）
+      await expectSame('<%= chat.match(/咖啡/gi) %>', over);
+      // 字符串形态不受影响
+      await expectSame('<%= chat.match("咖啡馆") %>', over);
+      // 别名层同一条路
+      await expectSame('<%= matchChatMessages(/推开(门|窗)/) %>', over);
+    },
+    SLOW,
+  );
+
+  it(
+    'lore 预算是**条目级**（曾经整 pass 只建一份能力面，第 9 条起静默返空串）',
+    async () => {
+      // LORE_GET_PER_ENTRY = 8：10 个条目各调一次，只有预算按条目重置才可能全部命中
+      const capabilities = {
+        lore: { get: (n: string) => (n === '设计' ? '设计正文' : null), list: () => ['设计'] },
+      } as never;
+      const entries = Array.from({ length: 10 }, (_, i) => ({
+        uid: i + 1,
+        content: '<%= lore.get("设计") %>',
+      }));
+      const r = await bothBackends(entries, { capabilities });
+      expect(r.quickjsText).toEqual(r.legacyText);
+      expect(r.quickjsOk).toEqual(r.legacyOk);
+      expect(r.quickjsText).toEqual(Array.from({ length: 10 }, () => '设计正文'));
+    },
+    SLOW,
+  );
+
+  it(
+    '_.chain(...).value() 两边同解（曾经 guest 侧根本没有 chain → TypeError 整条目回退）',
+    async () => {
+      // 形状照抄真机中招的三条（dlc#477 月历球 / wb5i#61 / wb5i#111446）：
+      // chain → pickBy(谓词) → mapValues(变换) → pickBy(非空) → value()
+      const 月历 = `<%
+        var 桶 = { 甲: { 可见: true, 标题: '春祭' }, 乙: { 可见: false, 标题: '密约' }, 丙: { 可见: true, 标题: '' } };
+        var 结果 = _.chain(_.isObject(桶) ? 桶 : {})
+          .pickBy(function (e) { return e.可见; })
+          .mapValues(function (e) { return _.pickBy({ 标题: e.标题 }, function (v) { return !!v; }); })
+          .pickBy(function (e) { return !_.isEmpty(e); })
+          .value();
+      %><%= JSON.stringify(结果) %>`;
+      const r = await expectSame(月历);
+      expect(r.quickjsOk).toEqual([true]);
+      expect(r.quickjsText).toEqual(['{"甲":{"标题":"春祭"}}']);
+
+      // 链上其余方法与终结语义也要对齐（.value() 取当前值，不是重新求值）
+      await expectSame('<%= _.chain([3,1,3,2]).uniq().values().value().join("-") %>');
+      await expectSame('<%= _.chain({ a: { b: 7 } }).get("a.b").value() %>');
+      await expectSame('<%= JSON.stringify(_.chain({ x: 1, y: 2 }).keys().value()) %>');
+      // 未落在 CHAIN_METHODS 表里的方法两边都不该有（否则就是 shim 表漂了）
+      await expectSame('<%= typeof _.chain([1]).cloneDeep %>');
+    },
+    SLOW,
+  );
+
+  it(
+    'world.isDaytime 是函数：JSON 编组会整个丢掉它（曾经 QuickJS 下 TypeError → 整条目回退）',
+    async () => {
+      const at = (hour: number): Partial<EjsEvalContext> => ({
+        capabilities: {
+          gameTime: { era: '复兴纪元', year: 1, month: 5, day: 24, weekday: 1, hour, minute: 0 },
+        },
+      });
+      const day = at(10);
+      const night = at(23);
+      const d = await expectSame('<%= world.isDaytime() %>', day);
+      expect(d.quickjsOk).toEqual([true]);
+      expect(d.quickjsText).toEqual(['true']);
+      const n = await expectSame('<%= world.isDaytime() %>', night);
+      expect(n.quickjsText).toEqual(['false']);
+    },
+    SLOW,
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
 // 真实语料片段
 // ═══════════════════════════════════════════════════════════
 

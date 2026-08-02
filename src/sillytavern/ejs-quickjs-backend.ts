@@ -35,7 +35,7 @@
 
 import type { EjsBackend, EjsEntryOutcome, EjsPassEntry } from './ejs-backend';
 import { rewriteCodeMacros, type EjsEvalContext } from './ejs-runtime';
-import { buildEjsCapabilities, LOCAL_ROOT } from './ejs-capabilities';
+import { buildEjsCapabilities, LOCAL_ROOT, type EjsCapabilities } from './ejs-capabilities';
 import { createEjsRng, type EjsRng } from './ejs-rng';
 import { ejsFmt } from './ejs-fmt';
 import { ejsLodash } from './ejs-lodash-shim';
@@ -91,13 +91,58 @@ interface QuickJsRuntimeLike {
   removeInterruptHandler?(): void;
   newContext(): QuickJsContextLike;
   /**
-   * 跑 guest 的微任务队列，返回本轮执行的 job 数。
+   * 跑 guest 的微任务队列。
    *
    * 可选：假模块（测试注入）不实现它时，`await` 条目会走「未落定」分支回退原文，
    * 而不是崩掉——降级路径与真实模块缺席时一致。
    */
-  executePendingJobs?(maxJobs?: number): number;
+  executePendingJobs?(maxJobs?: number): PendingJobsResultLike | undefined;
   dispose(): void;
+}
+
+/**
+ * `executePendingJobs` 的真实返回形状。
+ *
+ * 上游给的是 `DisposableResult<number, QuickJSHandle & { context }>`，
+ * 也就是 `{ value: number } | { error: 句柄 }` 外加一个 `dispose()`，**不是 `number`**。
+ *
+ * 🔴 这里曾经按 `number` 声明，于是所有 `=== 0` / `<= 0` 判断**恒不成立**（实测 `typeof` 是
+ * `'object'`），三个后果全部是静默的：
+ * 1. pump 循环的「队列已空就早退」永远不触发 —— 一个悬挂 promise 的条目要烧满整条目预算；
+ * 2. `drainJobs` 每条目都空转满 `MAX_DRAIN_ROUNDS` 轮；
+ * 3. 失败分支里那个**活着的** QuickJSHandle 从没人释放 —— 正是 `runEntry` 里那段注释说会让
+ *    `runtime.dispose()` 断言失败、Abort 整个 wasm 实例的同一类泄漏。
+ *
+ * 联合里保留 `number` 是给注入的假模块留的余地：朴素返回也吃得下，不逼测试去仿 DisposableResult。
+ */
+type PendingJobsResultLike =
+  | number
+  | {
+      /** 成功分支：本轮执行的 job 数 */
+      value?: number;
+      /** 失败分支：**活着的**错误句柄，靠 `dispose()` 释放 */
+      error?: unknown;
+      dispose?(): void;
+    };
+
+/**
+ * 归一化 `executePendingJobs` 的返回 → 本轮执行的 job 数（`undefined` = 拿不出数，按「不能再推进」处理）。
+ *
+ * 两个分支都调 `dispose()`：成功分支的值是数字，上游的 `DisposableSuccess.dispose()` 是空操作；
+ * 失败分支的 `DisposableFail.dispose()` 才是真正释放错误句柄的那一下。
+ */
+function readPumpedCount(result: PendingJobsResultLike | undefined | null): number | undefined {
+  if (result === undefined || result === null) return undefined;
+  if (typeof result === 'number') return result;
+  const failed = result.error !== undefined && result.error !== null;
+  try {
+    result.dispose?.();
+  } catch {
+    /* 释放失败不该盖住条目结果 */
+  }
+  if (failed) return 0; // job 自己抛了：本轮没有可继续推进的东西
+  const n = Number(result.value);
+  return Number.isFinite(n) ? n : undefined;
 }
 interface QuickJsContextLike {
   evalCode(code: string, filename?: string): { error?: any; value?: any };
@@ -144,6 +189,32 @@ function toGuestJson(value: unknown): string | undefined {
     return typeof s === 'string' ? s : undefined;
   } catch {
     return undefined;
+  }
+}
+
+/** guest 侧把 RegExp 编组成的标记形状（JSON 过不了 RegExp，见 `reviveGuestPattern`） */
+const GUEST_REGEX_MARKER = '__ejsRegex';
+
+/**
+ * 还原 guest 编组过来的正则。
+ *
+ * 🔴 曾经 guest 门面直接送 `p.source` **字符串**过来，宿主 `chat.match` 于是走字符串分支做
+ * `includes()`：`chat.match(/咖啡(馆|厅)/)` 在 Legacy 下 `true`、在 QuickJS 下 `false`，
+ * 而**两边都 `ok: true`** —— 静默分叉，条目照渲染，只是判断反了。
+ *
+ * ⚠️ 残留风险登记：还原出来的正则跑在**宿主**上，宿主没有 interrupt，灾难性回溯会冻住主线程。
+ * 这与 Legacy 后端的暴露面**完全一致**（Legacy 本来就把创作者的正则直接交给宿主 V8），
+ * 不是本次改动新开的面；写在条目里的正则**字面量**仍然跑在 guest 内、受 interrupt 约束。
+ */
+function reviveGuestPattern(pattern: unknown): unknown {
+  if (pattern === null || typeof pattern !== 'object') return pattern;
+  const marker = pattern as Record<string, unknown>;
+  const source = marker[GUEST_REGEX_MARKER];
+  if (typeof source !== 'string') return pattern;
+  try {
+    return new RegExp(source, typeof marker['flags'] === 'string' ? marker['flags'] : '');
+  } catch {
+    return source; // 源串本身非法 → 退回字符串语义，绝不抛
   }
 }
 
@@ -196,30 +267,96 @@ export class QuickJsBackend implements EjsBackend {
     return this.modulePromise;
   }
 
+  /**
+   * 预热：**真的把 wasm 装起来并跑一次探针求值**。
+   *
+   * 🔴 `installProductionEjsBackend()` 必须 await 它。曾经装配只 `import` 了这个 JS 模块就
+   * `return true`，而 wasm 是首次 `runPass` 才惰性取的 —— wasm 取不到（CDN 挂了 / CSP 拦了 /
+   * 浏览器不支持）时装配照样报成功、`main.ts` 一个失败提示都不弹，此后每个 pass 静默退化成
+   * 原文注入，而下游（工坊入口解封判断等）是**按「隔离是真的」**在做决策的。
+   *
+   * 失败即抛，由调用方转成 fail-closed。
+   */
+  async warmup(): Promise<void> {
+    const QuickJS = await this.module();
+    const runtime = QuickJS.newRuntime();
+    try {
+      runtime.setMemoryLimit(this.budget.memoryLimitBytes);
+      runtime.setMaxStackSize(this.budget.maxStackBytes);
+      const context = runtime.newContext();
+      try {
+        // 探针：wasm 真的能编译并执行字节码，才算「隔离到位」
+        const r = context.evalCode('1');
+        if (r.error) {
+          r.error.dispose?.();
+          throw new Error('QuickJS 探针求值失败');
+        }
+        r.value?.dispose?.();
+      } finally {
+        context.dispose();
+      }
+    } finally {
+      runtime.dispose();
+    }
+  }
+
   async runPass(entries: EjsPassEntry[], ctx: EjsEvalContext): Promise<EjsEntryOutcome[]> {
     if (entries.length === 0) return [];
+
+    /** 整 pass 回退原文（D8）—— `runPass` 契约是**永不抛** */
+    const allFallback = (reason: string): EjsEntryOutcome[] =>
+      entries.map((e) => ({ uid: e.uid, text: e.content, ok: false, error: reason }));
 
     let QuickJS: QuickJsModuleLike;
     try {
       QuickJS = await this.module();
     } catch (err) {
       // 装载失败 → 整 pass 回退原文（D8），不抛穿
-      const reason = `QuickJS 装载失败: ${err instanceof Error ? err.message : String(err)}`;
-      return entries.map((e) => ({ uid: e.uid, text: e.content, ok: false, error: reason }));
+      return allFallback(`QuickJS 装载失败: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    const runtime = QuickJS.newRuntime();
-    runtime.setMemoryLimit(this.budget.memoryLimitBytes);
-    runtime.setMaxStackSize(this.budget.maxStackBytes);
+    // 🔴 建 runtime/context 必须在 try 内。曾经这三行裸在外面：`newRuntime()` 撞内存上限、
+    // `newContext()` 半路失败都会**直接抛穿 runPass**，把「永不抛」的契约打破 ——
+    // 调用方（worldbook-loader 的 D8）只准备了「拿到一批 ok:false」，没准备接异常。
+    let runtime: QuickJsRuntimeLike;
+    let context: QuickJsContextLike;
+    try {
+      runtime = QuickJS.newRuntime();
+      runtime.setMemoryLimit(this.budget.memoryLimitBytes);
+      runtime.setMaxStackSize(this.budget.maxStackBytes);
+    } catch (err) {
+      return allFallback(
+        `QuickJS 运行时创建失败: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    try {
+      context = runtime.newContext();
+    } catch (err) {
+      // runtime 已经建起来了 —— 不放掉就是泄漏一个 wasm 实例
+      try {
+        runtime.dispose();
+      } catch {
+        /* 释放失败不该盖住降级 */
+      }
+      return allFallback(
+        `QuickJS 上下文创建失败: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
 
-    const context = runtime.newContext();
     const out: EjsEntryOutcome[] = [];
     const passStart = Date.now();
     // 逐条目换序列（`runEntry` 负责换）；holder 而非实例字段——并发 runPass 各持一份，不串味
     const rngRef = { current: createEjsRng(`${ctx.seed ?? 'no-seed'}|`) };
+    // 🔴 能力面也逐条目换（同样由 `runEntry` 负责）。`buildEjsCapabilities` 的契约写得很清楚是
+    // **每条目一份**：`lore.get` 的 8 次预算、`ui.notify` 的 3 条限频与去重集都是条目级的。
+    // 曾经整 pass 只建一份 → 预算变成 pass 级：实测 10 条目各调一次 `lore.get`，
+    // 第 9、10 条拿到的是 `''` 而 `ok` 仍为 `true`（静默失效，Legacy 下则全部正常）。
+    const capsRef = {
+      current: buildEjsCapabilities(ctx.vars, ctx.historyText ?? '', ctx.capabilities),
+    };
 
     try {
-      this.installCapabilities(context, ctx, rngRef);
+      this.installCapabilities(context, ctx, rngRef, capsRef);
 
       for (const entry of entries) {
         // pass 天花板：剩余条目一律回退，不再进 guest
@@ -232,11 +369,11 @@ export class QuickJsBackend implements EjsBackend {
           });
           continue;
         }
-        out.push(this.runEntry(runtime, context, entry, ctx, rngRef));
+        out.push(this.runEntry(runtime, context, entry, ctx, rngRef, capsRef));
       }
 
       // 草稿整体回传（pass 内一直留在 guest，到这里才过境一次）
-      this.readBackVars(context, ctx);
+      this.readBackVars(runtime, context, ctx);
     } catch (err) {
       const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
       for (const entry of entries.slice(out.length)) {
@@ -267,13 +404,18 @@ export class QuickJsBackend implements EjsBackend {
    *   （`_.mapValues` 等）在 guest 侧用 JSON 往返退化为「先取值再自己遍历」。
    * - **数据**（`stats` / `vars` / `world` / …）→ JSON 一次性过境。
    * - **宿主查询**（`lore` / `chat` / `ui`）→ 桥接函数，同步返回。
+   *
+   * 桥接函数一律读 `capsRef.current` 而不是闭包捕获某一份实例 —— `runEntry` 每条目换一次
+   * （条目级预算，见 `runPass` 里 `capsRef` 的说明）。
    */
   private installCapabilities(
     context: QuickJsContextLike,
     ctx: EjsEvalContext,
     rngRef: { current: EjsRng },
+    capsRef: { current: EjsCapabilities },
   ): void {
-    const caps = buildEjsCapabilities(ctx.vars, ctx.historyText ?? '', ctx.capabilities);
+    // 数据轴只在这里过境一次，用 pass 开头这份即可：world / engine / charLoreBook 与条目无关
+    const caps = capsRef.current;
 
     // 前导 + 数据轴
     this.evalSetup(context, GUEST_PRELUDE, '前导');
@@ -292,12 +434,22 @@ export class QuickJsBackend implements EjsBackend {
     };
     const json = toGuestJson(data);
     if (json === undefined) throw new Error('EJS 数据轴不可序列化（含环或宿主对象）');
+    // 🔴 `world.isDaytime` 是**函数**，JSON 编组会把它整个丢掉 —— guest 里 `world.isDaytime()`
+    // 于是抛 `TypeError: not a function`，整条目回退原文，而 Legacy 下它工作得好好的。
+    // 结果只取决于 `world.时间详情.时`（pass 内不变），故预先算好布尔值、在 guest 侧补个同值 shim。
+    let isDaytime = true;
+    try {
+      isDaytime = !!(caps.world['isDaytime'] as (() => boolean) | undefined)?.();
+    } catch {
+      /* 能力面承诺永不抛，这里只是兜底 */
+    }
     this.evalSetup(
       context,
       `globalThis.__ejsData = ${json};
 globalThis.stats = __ejsData.stats;
 globalThis.vars = __ejsData.vars;
 globalThis.world = __ejsData.world;
+globalThis.world.isDaytime = function () { return ${isDaytime ? 'true' : 'false'}; };
 globalThis.charLoreBook = __ejsData.charLoreBook;
 globalThis.engine = __ejsData.engine;`,
       '数据轴',
@@ -319,80 +471,85 @@ globalThis.engine = __ejsData.engine;`,
       handle.dispose?.();
     };
 
-    bridge('__b_chat_at', (i, role) => caps.chat.at(Number(i), role as string | undefined));
-    bridge('__b_chat_slice', (a, b, role) =>
-      caps.chat.slice(Number(a), Number(b), role as string | undefined),
+    bridge('__b_chat_at', (i, role) =>
+      capsRef.current.chat.at(Number(i), role as string | undefined),
     );
-    bridge('__b_chat_match', (p) => caps.chat.match(p));
-    bridge('__b_chat_text', () => caps.chat.text());
+    bridge('__b_chat_slice', (a, b, role) =>
+      capsRef.current.chat.slice(Number(a), Number(b), role as string | undefined),
+    );
+    // 正则经 `{__ejsRegex, flags}` 标记过境，这里还原成宿主 RegExp（见 reviveGuestPattern）
+    bridge('__b_chat_match', (p) => capsRef.current.chat.match(reviveGuestPattern(p)));
+    bridge('__b_chat_text', () => capsRef.current.chat.text());
     bridge('__b_char', (op, name) => {
+      const char = capsRef.current.char;
       switch (op) {
         case 'player':
-          return caps.char.player();
+          return char.player();
         case 'get':
-          return caps.char.get(String(name ?? ''));
+          return char.get(String(name ?? ''));
         case 'present':
-          return caps.char.present();
+          return char.present();
         case 'all':
-          return caps.char.all();
+          return char.all();
         case 'has':
-          return caps.char.has(String(name ?? ''));
+          return char.has(String(name ?? ''));
         case 'affection':
-          return caps.char.affection(String(name ?? ''));
+          return char.affection(String(name ?? ''));
         case 'affectionLabel':
-          return caps.char.affectionLabel(String(name ?? ''));
+          return char.affectionLabel(String(name ?? ''));
         default:
           return null;
       }
     });
     bridge('__b_quest', (op, name) => {
+      const quest = capsRef.current.quest;
       switch (op) {
         case 'all':
-          return caps.quest.all();
+          return quest.all();
         case 'active':
-          return caps.quest.active();
+          return quest.active();
         case 'get':
-          return caps.quest.get(String(name ?? ''));
+          return quest.get(String(name ?? ''));
         case 'has':
-          return caps.quest.has(String(name ?? ''));
+          return quest.has(String(name ?? ''));
         case 'focus':
-          return caps.quest.focus();
+          return quest.focus();
         default:
           return null;
       }
     });
     bridge('__b_lore', (op, a, b) => {
-      if (op === 'get')
-        return caps.lore.get(String(a ?? ''), b === undefined ? undefined : String(b));
-      if (op === 'has')
-        return caps.lore.has(String(a ?? ''), b === undefined ? undefined : String(b));
-      if (op === 'list') return caps.lore.list(String(a ?? ''));
+      const lore = capsRef.current.lore;
+      if (op === 'get') return lore.get(String(a ?? ''), b === undefined ? undefined : String(b));
+      if (op === 'has') return lore.has(String(a ?? ''), b === undefined ? undefined : String(b));
+      if (op === 'list') return lore.list(String(a ?? ''));
       return null;
     });
     bridge('__b_local', (op, key, value) => {
+      const local = capsRef.current.local;
       switch (op) {
         case 'get':
-          return caps.local.get(String(key ?? ''), value);
+          return local.get(String(key ?? ''), value);
         case 'set':
-          caps.local.set(String(key ?? ''), value);
+          local.set(String(key ?? ''), value);
           return null;
         case 'has':
-          return caps.local.has(String(key ?? ''));
+          return local.has(String(key ?? ''));
         case 'remove':
-          caps.local.remove(String(key ?? ''));
+          local.remove(String(key ?? ''));
           return null;
         case 'keys':
-          return caps.local.keys();
+          return local.keys();
         default:
           return null;
       }
     });
     bridge('__b_ui', (op, msg, level) => {
-      if (op === 'notify') caps.ui.notify(String(msg ?? ''), level as any);
-      else caps.ui.log(msg);
+      if (op === 'notify') capsRef.current.ui.notify(String(msg ?? ''), level as any);
+      else capsRef.current.ui.log(msg);
       return null;
     });
-    bridge('__b_engine_has', (path) => caps.engine.has(path));
+    bridge('__b_engine_has', (path) => capsRef.current.engine['has'](path));
     bridge('__b_fmt', (op, ...args) => (ejsFmt as any)[String(op)]?.(...args) ?? '');
     // 读 `rngRef.current` 而不是闭包捕获某一条序列 —— runEntry 每条目换一次
     bridge('__b_rng', (op, ...args) => (rngRef.current as any)[String(op)]?.(...args) ?? null);
@@ -427,6 +584,7 @@ globalThis.engine = __ejsData.engine;`,
    *    失败即恢复。曾经失败条目的半途写留在草稿里，被 pass 末尾的 `readBackVars` 一起落库。
    * 3. **异步条目照跑**。body 统一包进 async IIFE 并 pump 微任务队列；
    *    曾经直接塞进同步 IIFE，`await` 一律 `SyntaxError`（真机语料 3 条）。
+   * 4. **interrupt 全程装着**（含快照与回滚）。见下方 deadline 那段的说明。
    */
   private runEntry(
     runtime: QuickJsRuntimeLike,
@@ -434,17 +592,25 @@ globalThis.engine = __ejsData.engine;`,
     entry: EjsPassEntry,
     ctx: EjsEvalContext,
     rngRef: { current: EjsRng },
+    capsRef: { current: EjsCapabilities },
   ): EjsEntryOutcome {
     const source = entry.content ?? '';
     // 不变式 1：与 Legacy 同口径的逐条目种子
     rngRef.current = createEjsRng(`${ctx.seed ?? 'no-seed'}|${source}`);
+    // 能力面同样逐条目换：`lore.get` / `ui.notify` 的预算与去重集是条目级的（见 runPass 的 capsRef）
+    capsRef.current = buildEjsCapabilities(ctx.vars, ctx.historyText ?? '', ctx.capabilities);
+
+    // 🔴 deadline + interrupt 必须装在**快照之前**，而不是等到跑条目正文才装。
+    // 快照那句是 `JSON.stringify(globalThis.vars)` —— 它会调用 guest 自己种下的 `vars.toJSON`。
+    // 前一条目只要写一行 `vars.toJSON = function () { while (true) {} }`，
+    // 后续每条目的快照（以及 pass 末尾的 `readBackVars`）就永久冻住主线程，
+    // interrupt 一次开口的机会都没有 —— 「可中断」这个卖点在那两个窗口里整个是假的。
+    const deadline = Date.now() + this.budget.entryTimeoutMs;
+    runtime.setInterruptHandler(() => Date.now() > deadline);
 
     // 不变式 2：guest 侧 vars + 宿主侧 _local 双快照（`local.*` 走桥接直写宿主，不在 guest 树里）
     const localSnapshot = toGuestJson(ctx.vars?.[LOCAL_ROOT] ?? null);
-    const snapOk = this.evalVoid(
-      context,
-      `globalThis.__ejsSnap = JSON.stringify(globalThis.vars);`,
-    );
+    let snapOk = false;
 
     const restore = (): void => {
       if (snapOk) this.evalVoid(context, `globalThis.vars = JSON.parse(globalThis.__ejsSnap);`);
@@ -459,9 +625,8 @@ globalThis.engine = __ejsData.engine;`,
       }
     };
 
-    const deadline = Date.now() + this.budget.entryTimeoutMs;
-    runtime.setInterruptHandler(() => Date.now() > deadline);
     try {
+      snapOk = this.evalVoid(context, `globalThis.__ejsSnap = JSON.stringify(globalThis.vars);`);
       // 不变式 3：async IIFE + 微任务泵。**无条件**走异步壳（不去嗅探 `await`）——
       // 嗅探要么误判（正文里的 "await" 字样），要么就得再写一个 token 扫描器；
       // 同步条目走这条路的额外成本只有一次「队列已空」的 pump。
@@ -492,7 +657,8 @@ globalThis.engine = __ejsData.engine;`,
       // 循环仍以 deadline 收口——guest 里 `new Promise(() => {})` 永不落定。
       let state = this.readNumber(context, 'globalThis.__ejsState');
       while (state === 0 && Date.now() <= deadline) {
-        const pumped = runtime.executePendingJobs?.();
+        // 归一化必不可少：上游返回的是 DisposableResult 不是 number（见 readPumpedCount）
+        const pumped = readPumpedCount(runtime.executePendingJobs?.());
         state = this.readNumber(context, 'globalThis.__ejsState');
         // 队列空了还没落定 = 悬挂 promise，再泵也没用
         if (state === 0 && (pumped === undefined || pumped === 0)) break;
@@ -538,7 +704,7 @@ globalThis.engine = __ejsData.engine;`,
       if (Date.now() > deadline) return;
       let pumped: number;
       try {
-        pumped = runtime.executePendingJobs() ?? 0;
+        pumped = readPumpedCount(runtime.executePendingJobs()) ?? 0;
       } catch {
         return; // 队列里的 job 自己抛了 —— 与条目结果无关，咽掉
       }
@@ -595,20 +761,62 @@ globalThis.engine = __ejsData.engine;`,
     }
   }
 
+  /**
+   * 给一段**会执行 guest 代码**的求值套上「新鲜 deadline + 已装的 interrupt」。
+   *
+   * 条目正文之外还有两处会跑 guest 代码，且都很容易被忽略：`JSON.stringify(vars)`（快照 / 回传）
+   * 会调 guest 种的 `vars.toJSON`。凡是这类求值都必须走本方法或 `runEntry` 里那条 deadline，
+   * 否则「可中断」在那个窗口里就是空头承诺。求值本身抛了不外传 —— 返回 `undefined` 交调用方兜。
+   */
+  private armed<T>(runtime: QuickJsRuntimeLike, fn: () => T | undefined): T | undefined {
+    const deadline = Date.now() + this.budget.entryTimeoutMs;
+    try {
+      runtime.setInterruptHandler(() => Date.now() > deadline);
+    } catch {
+      return undefined; // 装不上 interrupt 就不跑 —— 宁可不回传，也不开一个冻主线程的窗口
+    }
+    try {
+      return fn();
+    } catch {
+      return undefined;
+    } finally {
+      try {
+        runtime.removeInterruptHandler?.();
+      } catch {
+        /* 摘不掉不该盖住结果 */
+      }
+    }
+  }
+
   private readNumber(context: QuickJsContextLike, expr: string): number {
     const n = Number(this.readString(context, expr));
     return Number.isFinite(n) ? n : 0;
   }
 
-  /** pass 结束把 guest 侧的 `vars` 草稿整体搬回宿主对象（**就地**，调用方持有同一引用） */
-  private readBackVars(context: QuickJsContextLike, ctx: EjsEvalContext): void {
-    const r = context.evalCode('JSON.stringify(globalThis.vars)');
-    if (r.error) {
-      r.error.dispose?.();
-      return;
-    }
-    const raw = String(context.dump(r.value) ?? '');
-    r.value.dispose?.();
+  /**
+   * pass 结束把 guest 侧的 `vars` 草稿整体搬回宿主对象（**就地**，调用方持有同一引用）。
+   *
+   * 🔴 这里**会执行 guest 代码**（`JSON.stringify` 调 `vars.toJSON`），所以必须自带
+   * 一条新鲜 deadline + 已装的 interrupt —— `runEntry` 的那个已经在它的 `finally` 里摘掉了。
+   * 少了这一层，条目里种一个死循环 `toJSON` 就能在 pass 收尾处永久冻住主线程。
+   * 中断即视作回传失败：草稿保持 pass 开始的样子，不半写。
+   */
+  private readBackVars(
+    runtime: QuickJsRuntimeLike,
+    context: QuickJsContextLike,
+    ctx: EjsEvalContext,
+  ): void {
+    const raw = this.armed(runtime, () => {
+      const r = context.evalCode('JSON.stringify(globalThis.vars)');
+      if (r.error) {
+        r.error.dispose?.();
+        return undefined;
+      }
+      const s = String(context.dump(r.value) ?? '');
+      r.value?.dispose?.();
+      return s;
+    });
+    if (raw === undefined) return;
     try {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       // 🔴 `_local` 不参与回传：`local.*` 走的是**宿主桥接**（要走预算与序列化校验），
@@ -634,11 +842,17 @@ const GUEST_FACADE = `
 (function () {
   'use strict';
   var P = function (s) { try { return JSON.parse(s); } catch (e) { return null; } };
+  // 正则过不了 JSON：编成 { ${GUEST_REGEX_MARKER}, flags } 标记，宿主侧 reviveGuestPattern 还原。
+  // 曾经这里送的是 p.source 裸字符串，宿主于是走字符串分支做 includes() ——
+  // chat.match(/咖啡(馆|厅)/) 在 Legacy 下 true、在这里 false，两边还都报 ok。
+  var RX = function (p) {
+    return p instanceof RegExp ? { ${GUEST_REGEX_MARKER}: p.source, flags: p.flags } : p;
+  };
   globalThis.chat = {
     at: function (i, role) { return P(__b_chat_at(i, role)) || ''; },
     last: function (role) { return P(__b_chat_at(-1, role)) || ''; },
     slice: function (a, b, role) { return P(__b_chat_slice(a, b, role)) || []; },
-    match: function (p) { return !!P(__b_chat_match(p instanceof RegExp ? p.source : p)); },
+    match: function (p) { return !!P(__b_chat_match(RX(p))); },
     text: function () { return P(__b_chat_text()) || ''; },
   };
   globalThis.char = {
@@ -696,6 +910,25 @@ const GUEST_FACADE = `
   lo.find = function (c, f) { return (c || []).filter(function (x, i) { return f(x, i); })[0]; };
   lo.flatMap = function (c, f) { return (c || []).map(f).reduce(function (a, b) { return a.concat(b); }, []); };
   lo.keyBy = function (c, f) { var r = {}; (c || []).forEach(function (x) { r[String(typeof f === 'function' ? f(x) : x[f])] = x; }); return r; };
+
+  // _.chain(v).xxx().value() —— 与 Legacy 的 ejs-lodash-shim.CHAIN_METHODS **同一张表**（16 个读边方法）。
+  // 曾经整个漏了：guest 里只有那 24 个散方法，链式写法一律 TypeError: not a function → 整条目回退，
+  // 而 Legacy 下它工作得好好的（内置 dlc#477「月历球」+ 混淆语料 wb5i#61 / #111446 三条真机条目中招）。
+  // 语义同 Legacy：每一步**即时求值**再重新包裹，.value() 取出当前值；链上方法之外的一律没有。
+  var CHAIN_METHODS = ['get','trim','isArray','isObject','isObjectLike','isEmpty','mapValues',
+    'find','flatMap','pick','pickBy','values','keys','has','uniq','keyBy'];
+  lo.chain = function (value) {
+    var wrap = function (v) {
+      var w = { value: function () { return v; } };
+      CHAIN_METHODS.forEach(function (n) {
+        w[n] = function () {
+          return wrap(lo[n].apply(null, [v].concat(Array.prototype.slice.call(arguments))));
+        };
+      });
+      return w;
+    };
+    return wrap(value);
+  };
   globalThis._ = lo;
 
   // rewriteCodeMacros 的两个降级落点（模板作者不直接写，由编译期生成调用）
@@ -766,7 +999,7 @@ const GUEST_FACADE = `
   Object.defineProperty(globalThis, 'variables', {
     get: function () { return { stat_data: mergedView() }; },
   });
-  globalThis.matchChatMessages = function (p) { return !!P(__b_chat_match(p)); };
+  globalThis.matchChatMessages = function (p) { return !!P(__b_chat_match(RX(p))); };
   globalThis.getChatMessage = function (i, role) { return P(__b_chat_at(i, role)); };
   globalThis.getChatMessages = function (a, b, role) {
     var arr = P(__b_chat_slice(a, b, role)) || [];
