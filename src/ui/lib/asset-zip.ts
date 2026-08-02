@@ -71,8 +71,22 @@ import { hashMediaBytes, isMediaHashAvailable } from './media-hash';
 // 常量
 // ═══════════════════════════════════════════════════════════
 
-/** 单条目解压后上限 —— 10 MB（§5.1） */
+/** 单条目解压后上限 —— 10 MB（§5.1）。**不含音频**，音频走下面那条 */
 export const ASSET_ZIP_MAX_ENTRY_BYTES = 10 * 1024 * 1024;
+
+/**
+ * 单条**音频**解压后上限 —— 128 MB。
+ *
+ * 为什么音频要单独一条、而且高一个量级: 10 MB 是照着立绘/头像定的，一张 PNG 到
+ * 10 MB 已经不正常了；而一首 5 分钟的 mp3 就 5–9 MB，无损（flac/wav）或长循环
+ * BGM 轻松过 10 MB —— 用同一条线卡音频，等于把「导入一包配乐」判死，而它本来
+ * 就是这个导入口的主要用途之一（音频分区那个「素材包」入口）。
+ *
+ * 代价说清楚: 这条线同时是解压炸弹的防线，放宽到 128 MB 意味着一枚伪装成 `.mp3`
+ * 的炸弹最多能把 128 MB 塞进内存才被拦下（而不是 10 MB）。仍然是**中途终止**，
+ * 不是读完再判；整包 2 GB 的总量上限也一个字没动，所以最坏情况仍然有界。
+ */
+export const ASSET_ZIP_MAX_AUDIO_ENTRY_BYTES = 128 * 1024 * 1024;
 
 /** 整包解压后上限 —— 2 GB（§5.1） */
 export const ASSET_ZIP_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
@@ -153,8 +167,19 @@ export interface ReadAssetZipResult {
 }
 
 export interface ReadAssetZipOptions {
-  /** 单条目解压上限，默认 {@link ASSET_ZIP_MAX_ENTRY_BYTES}。只作用于可导入条目 */
+  /**
+   * 单条目解压上限，默认 {@link ASSET_ZIP_MAX_ENTRY_BYTES}。只作用于可导入条目，
+   * 且**不含音频** —— 音频看 {@link maxAudioEntryBytes}。
+   */
   maxEntryBytes?: number;
+  /**
+   * 单条**音频**解压上限，默认 {@link ASSET_ZIP_MAX_AUDIO_ENTRY_BYTES}。
+   *
+   * 🔴 与 {@link maxEntryBytes} **互相独立**: 只传 `maxEntryBytes` 不会连带收紧音频。
+   * 刻意不做「取两者较小值」之类的联动 —— 那样一来两条线里到底哪条在生效就得靠推
+   * 而不是靠读，而这是个会让整包导入失败的判定。要卡全部，两条都传。
+   */
+  maxAudioEntryBytes?: number;
   /** 整包解压上限，默认 {@link ASSET_ZIP_MAX_TOTAL_BYTES}。只作用于可导入条目 */
   maxTotalBytes?: number;
   /**
@@ -259,10 +284,27 @@ function extensionOf(basename: string): string {
  * 套归一化查共享表。
  */
 function isImportableName(basename: string): boolean {
-  const raw = extensionOf(basename).trim().toLowerCase();
-  const ext = raw.startsWith('.') ? raw.slice(1) : raw;
+  const ext = normalizedExtensionOf(basename);
   if (!ext) return false;
   return isAssetExtension(ext) || AUDIO_EXTENSIONS.has(ext);
+}
+
+/** 归一化后的扩展名（trim + 去点 + 小写）；无扩展名返回空串。名字本身绝不动 */
+function normalizedExtensionOf(basename: string): string {
+  const raw = extensionOf(basename).trim().toLowerCase();
+  return raw.startsWith('.') ? raw.slice(1) : raw;
+}
+
+/**
+ * 这条目走不走音频那条上限。
+ *
+ * 判据**只有扩展名在音频表里**，且与 `asset-import-plan.ts` 的路由同序 ——
+ * 那边也是音频表先查（D8: `webm` 归 `audio/webm`）。两处必须同一个口径，否则会出现
+ * 「按素材的 10 MB 拦下来、可它最后本来要落成一条音轨」这种解释不通的失败。
+ */
+function isAudioEntryName(basename: string): boolean {
+  const ext = normalizedExtensionOf(basename);
+  return ext !== '' && AUDIO_EXTENSIONS.has(ext);
 }
 
 /**
@@ -463,6 +505,7 @@ interface InflateResult {
 
 interface InflateConfig {
   maxEntryBytes: number;
+  maxAudioEntryBytes: number;
   maxTotalBytes: number;
   stallTimeoutMs: number;
   signal?: AbortSignal;
@@ -515,7 +558,8 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
  * 丢缓冲 → 停止 push → reject，只是错误码不同。
  */
 function inflateStreaming(source: Uint8Array, cfg: InflateConfig): Promise<InflateResult> {
-  const { maxEntryBytes, maxTotalBytes, stallTimeoutMs, signal, onProgress } = cfg;
+  const { maxEntryBytes, maxAudioEntryBytes, maxTotalBytes, stallTimeoutMs, signal, onProgress } =
+    cfg;
   return new Promise<InflateResult>((resolve, reject) => {
     const entries: RawEntry[] = [];
     const skippedNoise: string[] = [];
@@ -616,13 +660,19 @@ function inflateStreaming(source: Uint8Array, cfg: InflateConfig): Promise<Infla
         return;
       }
 
-      if (typeof file.originalSize === 'number' && file.originalSize > maxEntryBytes) {
+      // 音频与素材各有一条线（音频高一个量级，见 ASSET_ZIP_MAX_AUDIO_ENTRY_BYTES）。
+      // 根 manifest.json 不是音频，照素材那条算 —— 一份清单不该有几十兆。
+      const entryLimit = isAudioEntryName(basenameOf(file.name))
+        ? maxAudioEntryBytes
+        : maxEntryBytes;
+
+      if (typeof file.originalSize === 'number' && file.originalSize > entryLimit) {
         abort(
           new AssetZipError(
             'entry-too-large',
-            `压缩包内 ${file.name} 解压后 ${file.originalSize} 字节，超过单文件上限 ${maxEntryBytes} 字节`,
+            `压缩包内 ${file.name} 解压后 ${file.originalSize} 字节，超过单文件上限 ${entryLimit} 字节`,
             file.name,
-            maxEntryBytes,
+            entryLimit,
           ),
         );
         return;
@@ -655,13 +705,13 @@ function inflateStreaming(source: Uint8Array, cfg: InflateConfig): Promise<Infla
         if (data && data.length) {
           size += data.length;
           totalBytes += data.length;
-          if (size > maxEntryBytes) {
+          if (size > entryLimit) {
             abort(
               new AssetZipError(
                 'entry-too-large',
-                `压缩包内 ${file.name} 解压后超过单文件上限 ${maxEntryBytes} 字节`,
+                `压缩包内 ${file.name} 解压后超过单文件上限 ${entryLimit} 字节`,
                 file.name,
-                maxEntryBytes,
+                entryLimit,
               ),
             );
             return;
@@ -765,6 +815,7 @@ export async function readAssetZip(
 
   const raw = await inflateStreaming(source, {
     maxEntryBytes: options.maxEntryBytes ?? ASSET_ZIP_MAX_ENTRY_BYTES,
+    maxAudioEntryBytes: options.maxAudioEntryBytes ?? ASSET_ZIP_MAX_AUDIO_ENTRY_BYTES,
     maxTotalBytes: options.maxTotalBytes ?? ASSET_ZIP_MAX_TOTAL_BYTES,
     stallTimeoutMs: options.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS,
     signal,

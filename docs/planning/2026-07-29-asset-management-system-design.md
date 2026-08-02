@@ -434,7 +434,11 @@ files and a zip with `assets/`+`audio/` subfolders behave identically.
 rejection.
 
 **Zip bombs are real**, and the caps belong **in `asset-zip.ts`, not in the planner.** Cap total decompressed bytes
-(2 GB) and per-entry (10 MB), enforced against fflate's streaming callbacks so decompression **aborts mid-flight**.
+(2 GB) and per-entry, enforced against fflate's streaming callbacks so decompression **aborts mid-flight**.
+The per-entry cap is **per kind**: 10 MB for images/other, **128 MB for audio** — 10 MB is sized for a 立绘/头像
+(a PNG that big is already pathological), while a 5-minute mp3 is 5–9 MB and lossless or long-loop BGM clears
+10 MB routinely, so one shared line would have made "import a pack of BGM" impossible. Both are still mid-flight
+aborts, and the 2 GB whole-pack cap is unchanged, so the worst case stays bounded.
 The planner receives already-decoded entries and cannot abort decompression that has already completed — putting
 the cap there would mean the bomb has already filled memory before anything checks. Tests live with `asset-zip`
 accordingly (§9).

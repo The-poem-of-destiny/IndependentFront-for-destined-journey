@@ -15,6 +15,8 @@ import {
   parseAssetZipManifest,
   AssetZipError,
   ASSET_ZIP_MANIFEST_NAME,
+  ASSET_ZIP_MAX_ENTRY_BYTES,
+  ASSET_ZIP_MAX_AUDIO_ENTRY_BYTES,
   type AssetZipManifest,
   type AssetZipWarning,
 } from './asset-zip';
@@ -747,6 +749,75 @@ describe('解压体积上限', () => {
     const zipped = zipSync({ 'a.png': fakeBytes(5, size) });
     const result = await readAssetZip(zipped, { maxEntryBytes: size, maxTotalBytes: size });
     expect(result.entries[0].bytes.length).toBe(size);
+  });
+
+  // ── 音频单独一条上限（比素材高一个量级）──
+
+  it('音频与素材两条上限是两个数，且音频那条高一个量级', () => {
+    expect(ASSET_ZIP_MAX_ENTRY_BYTES).toBe(10 * 1024 * 1024);
+    expect(ASSET_ZIP_MAX_AUDIO_ENTRY_BYTES).toBe(128 * 1024 * 1024);
+  });
+
+  it('12MB 的 mp3 照常导入，而同样大的 png 以 entry-too-large 判死（默认上限）', async () => {
+    const big = 12 * 1024 * 1024;
+
+    const okZip = zipSync({ '战斗主题.mp3': compressible(big) }, { level: 9 });
+    const result = await readAssetZip(okZip);
+    expect(result.entries.map((e) => e.path)).toEqual(['战斗主题.mp3']);
+    expect(result.entries[0].bytes.length).toBe(big);
+
+    const badZip = zipSync({ '苏婉_立绘.png': compressible(big) }, { level: 9 });
+    const error = await readAssetZip(badZip).catch((e: unknown) => e);
+    expect(error).toMatchObject({
+      code: 'entry-too-large',
+      path: '苏婉_立绘.png',
+      limit: ASSET_ZIP_MAX_ENTRY_BYTES, // 报的是**素材**那条线，不是音频那条
+    });
+  });
+
+  it('音频那条线由 maxAudioEntryBytes 单独控制 —— 只收紧 maxEntryBytes 管不到音频', async () => {
+    const zipped = zipSync({ '战斗主题.mp3': compressible(256 * 1024) }, { level: 9 });
+
+    // 素材那条线压到 1KB，音频照过 —— 两条线互相独立
+    const passed = await readAssetZip(zipped, { maxEntryBytes: 1024 });
+    expect(passed.entries.map((e) => e.path)).toEqual(['战斗主题.mp3']);
+
+    // 收紧音频那条才拦得住，且 limit 报的是音频那条
+    const error = await readAssetZip(zipped, { maxAudioEntryBytes: 1024 }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AssetZipError);
+    expect(error).toMatchObject({
+      code: 'entry-too-large',
+      path: '战斗主题.mp3',
+      limit: 1024,
+    });
+  });
+
+  it('根 manifest.json 走素材那条线 —— 一份清单不该有几十兆', async () => {
+    const zipped = zipSync(
+      { 'manifest.json': compressible(2 * 1024 * 1024), 'a.mp3': fakeBytes(1, 64) },
+      { level: 9 },
+    );
+    const error = await readAssetZip(zipped, { maxEntryBytes: 1024 }).catch((e: unknown) => e);
+    expect(error).toMatchObject({
+      code: 'entry-too-large',
+      path: 'manifest.json',
+      limit: 1024,
+    });
+  });
+
+  it('总量上限对音频照样生效 —— 放宽单条不等于放开整包', async () => {
+    const zipped = zipSync(
+      {
+        'a.mp3': compressible(900 * 1024),
+        'b.mp3': compressible(900 * 1024),
+        'c.mp3': compressible(900 * 1024),
+      },
+      { level: 9 },
+    );
+    const error = await readAssetZip(zipped, { maxTotalBytes: 2 * 1024 * 1024 }).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toMatchObject({ code: 'total-too-large', limit: 2 * 1024 * 1024 });
   });
 
   it('空输入抛 read-failed 而不是静默返回空列表', async () => {
