@@ -34,7 +34,7 @@
  */
 
 import type { EjsBackend, EjsEntryOutcome, EjsPassEntry } from './ejs-backend';
-import { rewriteCodeMacros, type EjsEvalContext } from './ejs-runtime';
+import { tokenizeTrimmed, type EjsEvalContext } from './ejs-runtime';
 import { buildEjsCapabilities, LOCAL_ROOT, type EjsCapabilities } from './ejs-capabilities';
 import { createEjsRng, type EjsRng } from './ejs-rng';
 import { ejsFmt } from './ejs-fmt';
@@ -941,8 +941,18 @@ const GUEST_FACADE = `
   // 于是每一条用别名写法的存量条目在 QuickJS 下都是 ReferenceError → 回退原文。
   // 内置全语料靠这层才把回退做到 0，漏掉它等于把那个成果整个吐回去。
   // 语义必须与 ejs-runtime.buildSandboxArgs 的同名实现逐条对齐（读取优先级、危险键、默认值）。
-  var DANGER = { __proto__: 1, prototype: 1, constructor: 1 };
-  function isDanger(k) { return Object.prototype.hasOwnProperty.call(DANGER, k); }
+  // 镜像宿主 ejs-lodash-shim 的 DANGEROUS_PATH_SEGMENTS：用**段值相等**判定，
+  // 绝不走对象属性查找。写成对象字面量 { __proto__: 1 } 时 __proto__ 根本不是自有属性，
+  // hasOwnProperty 永远 false → isDanger 漏判 __proto__ → writePath 走进 guest realm 的
+  // Object.prototype（跨条目污染 + 合法 __proto__.桶 写入被 diff 静默丢弃，见 DEFECT B）。
+  // 注意：本段处在模板字面量内，注释里不能出现反引号。
+  var DANGER_SEGMENTS = ['__proto__', 'prototype', 'constructor'];
+  function isDanger(k) {
+    for (var __di = 0; __di < DANGER_SEGMENTS.length; __di++) {
+      if (DANGER_SEGMENTS[__di] === k) return true;
+    }
+    return false;
+  }
   function splitPath(p) {
     if (typeof p !== 'string') return [];
     return p.trim().split('.').filter(function (x) { return x.length > 0; });
@@ -1044,53 +1054,32 @@ const GUEST_FACADE = `
 /**
  * EJS 正文 → guest 侧函数体。
  *
- * 与 `ejs-runtime.buildFnBody` **同一套规则**（文本 push、代码内联、`<%=` push(String(expr))），
- * 但输出走 guest 的 `__ejs` 收集器。刻意重写而非复用：那边的产物绑在宿主 `new Function` 的
- * 形参注入模型上，这边的能力是 guest 全局，两套装配方式不同，硬合并只会让两边都别扭。
+ * 分词/trim/宏改写**全部复用 `ejs-runtime.tokenizeTrimmed`**（唯一真源），只把产物按 guest
+ * 的 `__ejs` 收集器装配。曾经这里自建一套分词器，只跳过 `<%_`/`_%>`/`-%>` 的标记字符却没吞
+ * 空白——同一模板在两后端渲染出不同字节。共用分词器后 trim 语义逐字节对齐（见 DEFECT A）。
  */
 function compileToGuestBody(source: string): string {
   // `print` 是**函数体局部**而非全局（对齐 Legacy 的 buildFnBody）：它得往本条目的收集器里推，
   // 挂全局会让并发/嵌套语义变模糊。漏了它 → 用 `print()` 的条目在 QuickJS 下 ReferenceError。
   const parts: string[] = ['var print = function (v) { __ejs.push(v); };'];
-  let pos = 0;
-  while (pos < source.length) {
-    const open = source.indexOf('<%', pos);
-    if (open === -1) {
-      parts.push(`__ejs.push(${JSON.stringify(source.slice(pos))});`);
-      break;
+  for (const t of tokenizeTrimmed(source)) {
+    switch (t.type) {
+      case 'text':
+        // tokenize 已把 `<%%` 归成字面文本 '<%'，空文本 token 不会产生
+        if (t.content.length > 0) parts.push(`__ejs.push(${JSON.stringify(t.content)});`);
+        break;
+      case 'code':
+        // 原样内联 —— 跨块 if/for 由此天然成立（content 已 rewriteCodeMacros）
+        parts.push(t.content);
+        break;
+      case 'output':
+      case 'unescaped':
+        // `<%=` 与 `<%-` 同义：注入的是提示词纯文本，不做 HTML 转义
+        parts.push(`__ejs.push(${t.content.length > 0 ? t.content : 'undefined'});`);
+        break;
+      case 'comment':
+        break;
     }
-    if (open > pos) parts.push(`__ejs.push(${JSON.stringify(source.slice(pos, open))});`);
-    if (source[open + 2] === '%') {
-      parts.push('__ejs.push("<%");');
-      pos = open + 3;
-      continue;
-    }
-    let cursor = open + 2;
-    let kind: 'code' | 'out' | 'comment' = 'code';
-    const marker = source[cursor];
-    if (marker === '_') cursor++;
-    else if (marker === '=' || marker === '-') {
-      kind = 'out';
-      cursor++;
-    } else if (marker === '#') {
-      kind = 'comment';
-      cursor++;
-    }
-    const close = source.indexOf('%>', cursor);
-    if (close === -1) {
-      parts.push(`__ejs.push(${JSON.stringify(source.slice(open))});`);
-      break;
-    }
-    let end = close;
-    const prev = source[close - 1];
-    if (prev === '_' || prev === '-') end = close - 1;
-    // 🔴 与 Legacy 共用同一套代码位宏改写：`{{roll 1d100}}` → `__roll("1d100")`。
-    // 注释位不改写（整块丢弃）。漏了这一步 → 宏原样进 JS → `SyntaxError: invalid property name`。
-    const raw =
-      kind === 'comment' ? source.slice(cursor, end) : rewriteCodeMacros(source.slice(cursor, end));
-    if (kind === 'code') parts.push(raw);
-    else if (kind === 'out') parts.push(`__ejs.push(${raw.trim() || 'undefined'});`);
-    pos = close + 2;
   }
   return parts.join('\n');
 }

@@ -89,7 +89,7 @@ type EjsTokenType = 'text' | 'code' | 'output' | 'unescaped' | 'comment';
 /** 右侧空白处置：`_%>` 吞空白+一个换行；`-%>` 只吞一个换行 */
 type TrimRightMode = 'none' | 'slurp' | 'newline';
 
-interface EjsToken {
+export interface EjsToken {
   type: EjsTokenType;
   content: string;
   /** 来自 `<%_`：吞掉紧邻前文的行内空白 */
@@ -259,6 +259,18 @@ function applyTrim(tokens: EjsToken[]): EjsToken[] {
     }
   }
   return tokens;
+}
+
+/**
+ * 切分模板并应用 trim 语义，产出可直接编译的 token 序列。
+ *
+ * 🔴 **导出给 QuickJS 后端复用**：guest 侧曾自建一套编译器，只跳过 `<%_`/`_%>`/`-%>`
+ * 的标记字符却**没吞空白**，同一条 `甲\n<%_ x _%>\n乙` 在 Legacy 下渲染 `甲\n乙`、
+ * 在 QuickJS 下多出一行 `甲\n\n乙`（scrambled 语料 107/109 命中）。两个后端共用本函数后，
+ * trim 语义与宏改写（tokenize 内已 rewriteCodeMacros）逐字节对齐。
+ */
+export function tokenizeTrimmed(template: string): EjsToken[] {
+  return applyTrim(tokenize(template ?? ''));
 }
 
 // ═══════════════════════════════════════════════════════════

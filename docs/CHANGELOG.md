@@ -122,6 +122,19 @@ Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调
   `--transform` 模式，法语诗句/专有名词泄漏清除，防泄漏测试升级
 - 验证：**185 文件 / 5399 tests + 3 skip**，typecheck / typecheck:vue 零错误
 
+**审查轮补修（2026-08-01，二次评审复现的两条后端分叉）**
+
+- **trim 语义对齐**：`compileToGuestBody` 原先只跳过 `<%_`/`_%>`/`-%>` 标记字符、不做 trim，
+  QuickJS 下大量条目多出空行（107/109 语料条目用 trim 标记）。改为与 Legacy 共用 `tokenizeTrimmed`
+  （= `tokenize` + `applyTrim`），两路渲染字节一致
+- **guest `__proto__` 漏拦**：guest DANGER 表 `{ __proto__: 1, ... }` 的 `__proto__` 不产生自有属性，
+  `isDanger('__proto__')` 恒 false，writePath 能污染 guest `Object.prototype`（同 pass 跨条目串扰 +
+  合法 `vars` 写入静默丢进原型）。改用不依赖自有属性的冻结列表分段判定，对齐宿主 `DANGEROUS_PATH_SEGMENTS`
+  （**非沙盒逃逸**：realm 边界成立、不跨 pass、不碰宿主全局）
+- **渲染字节 parity 门**：原语料门只比回退集合、不比渲染字节，正是上面两条漏网的根因。新增采样字节门
+  （排除 19/109 用 `Math.random()` 的条目——未种子化的原生 PRNG 是已知后端差异，可复现路径是 `rng` 命名空间）
+- 验证：**185 文件 / 5406 tests + 3 skip**，typecheck / typecheck:vue / prettier 零错误
+
 > 🔒 **工坊入口仍保持下线**：EJS 侧边界已具备，但 **SEC-01（正则 `replaceString` → `v-html` 的 XSS）
 > 尚未修复**，它与 EJS 无关、独立成链。
 

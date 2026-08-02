@@ -120,6 +120,95 @@ describe('回归：评审揪出的四条后端分叉', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// 回归 DEFECT A —— trim 标记的空白吞噬（曾经 QuickJS 只跳标记字符不吞空白）
+// ═══════════════════════════════════════════════════════════
+
+describe('回归：trim 标记两后端逐字节一致（DEFECT A）', () => {
+  it(
+    '<%_ 吞紧邻前文行内空白（不吞换行）',
+    async () => {
+      // 行首三空格被 `<%_` 吞掉，代码块无输出 → `行首尾`
+      const r = await expectSame('行首   <%_ var a = 1 %>尾');
+      expect(r.quickjsText).toEqual(['行首尾']);
+      // 缩进块：`  <%_` 前的两空格被吞
+      const r2 = await expectSame('  <%_ var x = 1 _%>内容');
+      expect(r2.quickjsText).toEqual(['内容']);
+    },
+    SLOW,
+  );
+
+  it(
+    '_%> 吞后随行内空白 + 一个换行',
+    async () => {
+      const r = await expectSame('甲<% var b = 2 _%>   \n乙');
+      expect(r.quickjsText).toEqual(['甲乙']);
+      // 行尾空格：`_%>` 后只有空格也照吞
+      const r2 = await expectSame('内容<% var z = 1 _%>  ');
+      expect(r2.quickjsText).toEqual(['内容']);
+    },
+    SLOW,
+  );
+
+  it(
+    '-%> 只吞紧邻的一个换行（不吞行内空格）',
+    async () => {
+      const r = await expectSame('甲\n<%= 1 -%>\n乙');
+      expect(r.quickjsText).toEqual(['甲\n1乙']);
+      // 缺陷复现里的原型：`甲\n<%_ q _%>\n乙` → `甲\n乙`（曾经 QuickJS 多一个空行）
+      const r2 = await expectSame('甲\n<%_ var q = 1; _%>\n乙');
+      expect(r2.quickjsText).toEqual(['甲\n乙']);
+    },
+    SLOW,
+  );
+
+  it(
+    '多行缩进控制流：trim 后无多余空白行',
+    async () => {
+      const r = await expectSame('<%_ for (var i = 0; i < 3; i++) { _%>\n  行<%= i %>\n<%_ } _%>');
+      expect(r.quickjsText).toEqual(['  行0\n  行1\n  行2\n']);
+    },
+    SLOW,
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
+// 回归 DEFECT B —— __proto__ 段（曾经 guest DANGER 表把 __proto__ 写成原型键，漏判）
+// ═══════════════════════════════════════════════════════════
+
+describe('回归：__proto__ 段两后端一致（DEFECT B）', () => {
+  it(
+    '__proto__ 写不进 guest 原型，不跨条目污染',
+    async () => {
+      const r = await bothBackends([
+        { uid: 1, content: '<% setvar("__proto__.POLL", "POLLUTED") %>' },
+        { uid: 2, content: '<%= ({}).POLL === "POLLUTED" ? "脏" : "净" %>' },
+      ]);
+      expect(r.quickjsText).toEqual(r.legacyText);
+      // 曾经 QuickJS 下 __proto__.POLL 落到 guest realm 的 Object.prototype → 第二条读到 "脏"
+      expect(r.quickjsText[1]).toBe('净');
+      expect(({} as Record<string, unknown>).POLL, '宿主原型也不该被污染').toBeUndefined();
+    },
+    SLOW,
+  );
+
+  it(
+    '__proto__ 整次写被拒后，同名普通键的后续写仍保留（末态草稿一致）',
+    async () => {
+      const r = await bothBackends([
+        { uid: 1, content: '<% setvar("__proto__.桶", {}) %>' },
+        { uid: 2, content: '<% setvar("桶.键", 42) %>' },
+      ]);
+      expect(r.quickjsText).toEqual(r.legacyText);
+      // Legacy：第一条整次拒绝、第二条正常建 桶.键；曾经 QuickJS 第一条写进原型，
+      // 第二条经原型链落到原型上 → own diff 为空 → 写被静默丢弃（末态 {}）。
+      expect(r.legacyVars).toEqual({ 桶: { 键: 42 } });
+      expect(r.quickjsVars).toEqual(r.legacyVars);
+    },
+    SLOW,
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
 // 语义面对齐
 // ═══════════════════════════════════════════════════════════
 
@@ -331,7 +420,45 @@ describe('真实语料片段两后端一致', () => {
     import: 'default',
     eager: true,
   }) as Record<string, string>;
-  const corpus = JSON.parse(Object.values(RAW)[0]) as { fragments: Fragment[] };
+  interface CorpusEntry {
+    id: string;
+    features: string[];
+    content: string;
+  }
+  const corpus = JSON.parse(Object.values(RAW)[0]) as {
+    fragments: Fragment[];
+    entries: CorpusEntry[];
+  };
+
+  it(
+    '整条目渲染字节两后端一致（采样，防 trim/原型等只在成功路径上暴露的分叉）',
+    async () => {
+      // 现有闸门比的是**回退集合**，成功条目的渲染字节无人看守 —— DEFECT A 的 trim 分叉
+      // （107/109 条目命中 trim 标记）正是从这个缝里溜过去的。这里对整条目逐字节比对。
+      // 采样而非全量：整份语料两后端各跑一趟 wasm 太慢，隔条抽约 12 条已足够代表。
+      // 跳过 await 条目（同步/异步路径差异归专门的 async 闸门）。
+      // 跳过含 Math.random 的条目：**已登记的后端限制**。Math.random 是未播种的原生逃生口，
+      // 两后端各有独立的 PRNG 流（甚至同后端两次运行都不同）——注定字节不一致，且这不是缺陷。
+      // 可复现的随机走 `rng` 命名空间（ejs-rng.ts，快照重放一致）。语料里 19/109 条用了 Math.random。
+      const sample = corpus.entries
+        .filter((e) => !e.features.includes('await'))
+        .filter((e) => !/Math\.random/.test(e.content))
+        .filter((_, i) => i % 4 === 0)
+        .slice(0, 12);
+      expect(sample.length, '语料应抽得到样本').toBeGreaterThan(5);
+
+      const r = await bothBackends(sample.map((e, i) => ({ uid: i + 1, content: e.content })));
+      const mismatches: string[] = [];
+      for (let i = 0; i < sample.length; i++) {
+        if (r.quickjsText[i] !== r.legacyText[i]) {
+          mismatches.push(`${sample[i].id}: 渲染字节不一致`);
+        }
+      }
+      // 一条都不许有 —— 若出现 trim 之外的新分叉，报出 id 与成因，别做白名单
+      expect(mismatches, `字节级后端分叉: ${mismatches.join(' | ')}`).toEqual([]);
+    },
+    SLOW,
+  );
 
   it(
     '逐片段比对文本、成败与草稿末态',
