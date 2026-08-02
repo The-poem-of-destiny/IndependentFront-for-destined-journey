@@ -10,9 +10,18 @@
 
 import type { Modifier } from './effect-types';
 
+/** AttributeName（拉丁键）→ 中文 */
+const ATTRIBUTE_CN: Record<string, string> = {
+  str: '力量',
+  dex: '敏捷',
+  con: '体质',
+  int: '智力',
+  spi: '精神',
+};
+
 /** 检定类型 → 中文措辞（attribute 存在时覆盖 checkType） */
 function checkLabel(m: Extract<Modifier, { category: '检定' }>): string {
-  return m.attribute ? `${m.attribute}检定` : `${m.checkType}检定`;
+  return m.attribute ? `${ATTRIBUTE_CN[m.attribute] ?? m.attribute}检定` : `${m.checkType}检定`;
 }
 
 /** 单个 modifier → 中文行；无法描述（amount=0 等）返回 ''（调用方过滤） */

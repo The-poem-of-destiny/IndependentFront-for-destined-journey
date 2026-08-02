@@ -47,8 +47,7 @@ describe('describeModifier 检定', () => {
     ).toBe('命中检定 +5');
   });
   it('属性检定带 attribute', () => {
-    // attribute 实为 AttributeName（str/dex/con/int/spi），brief 用中文标签 `力量` 断言展示层，
-    // 直传会与真实联合类型冲突，故按真实类型收窄断言字符串（见 task-1-report concerns）
+    // attribute 实为 AttributeName（str/dex/con/int/spi），ATTRIBUTE_CN 映射为中文
     const m: Modifier = {
       category: '检定',
       source: '',
@@ -56,7 +55,7 @@ describe('describeModifier 检定', () => {
       attribute: 'str',
       bonus: 3,
     };
-    expect(describeModifier(m)).toBe('str检定 +3');
+    expect(describeModifier(m)).toBe('力量检定 +3');
   });
 });
 
