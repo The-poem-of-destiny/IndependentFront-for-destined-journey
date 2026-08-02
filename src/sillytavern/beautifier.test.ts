@@ -8,7 +8,7 @@
  * 但消费方（useBeautify）不依赖它做游戏内判断。
  */
 import { describe, it, expect } from 'vitest';
-import { resolveAutoEnable, collectActiveSignalsFromEntries } from './beautifier';
+import { resolveAutoEnable, collectActiveSignalsFromEntries, processRules } from './beautifier';
 import type { BeautifierRule } from './types';
 
 function rule(over: Partial<BeautifierRule>): BeautifierRule {
@@ -114,5 +114,130 @@ describe('resolveAutoEnable — 三维 OR 匹配', () => {
     const [out] = resolveAutoEnable([r], new Set(), new Set(), new Set());
     expect(out.enabled).toBe(false);
     expect(out.locked).toBe(false);
+  });
+});
+
+// ========== processRules ==========
+
+describe('processRules — 原文匹配 + 占位符保护 (2026-08-02 回归)', () => {
+  function tagRule(over: Partial<BeautifierRule> = {}): BeautifierRule {
+    return rule({
+      pattern: '<dalian name="(.*?)" mood="(.*?)">\\s*([\\s\\S]*?)\\s*<\\/dalian>',
+      replacement: '<div class="phantom">$1-$2-$3</div>',
+      enabled: true,
+      ...over,
+    });
+  }
+
+  it('🔴 回归: 依赖字面尖括号的标签规则必须匹配（先整体 escape 会让它失效）', () => {
+    // 2026-08-02: d185286 的 P1-01 在 processRules 开头 escapeHtmlBasic(text)，
+    // `<dalian>` 变 `&lt;dalian&gt;` → 22 条规则里 13 条标签规则全部失配。
+    const out = processRules(
+      '<dalian name="妲丽安" mood="思考"> 你好。 </dalian>',
+      'maintext',
+      [tagRule()],
+    );
+    expect(out).toContain('<div class="phantom">');
+    expect(out).toContain('妲丽安-思考-你好。');
+    // 原始标签应被消费掉，不再出现
+    expect(out).not.toContain('<dalian');
+    expect(out).not.toContain('&lt;dalian');
+  });
+
+  it('捕获组内容转义后代入 replacement（$1 里的 < > 不成真标签）', () => {
+    const r = tagRule();
+    const out = processRules('<dalian name="<x>" mood="m"> 文本 </dalian>', 'maintext', [r]);
+    expect(out).toContain('&lt;x&gt;');
+    // 捕获组转义后安全代入（不会因为 < > 拆坏 HTML 结构）
+    expect(out).toContain('<div class="phantom">');
+    expect(out).toContain('&lt;x&gt;-m-文本');
+  });
+
+  it('🔴 未匹配的原文恶意片段必须被转义成纯文本实体（P1-01 XSS 防线不降级）', () => {
+    const out = processRules('<img src=x onerror=alert(1)>', 'maintext', [tagRule()]);
+    expect(out).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(out).not.toContain('<img');
+  });
+
+  it('正常正文原样保留（无匹配时不被误伤）', () => {
+    const out = processRules('夜色渐深。', 'maintext', [tagRule()]);
+    expect(out).toBe('夜色渐深。');
+  });
+
+  it('对话卡片规则（方括号格式）在原文匹配下正常工作', () => {
+    const r = rule({
+      pattern: '\\[([^\\]]+)\\](?:\\{([^}]*)\\})?\\("([^"]*)"\\)',
+      replacement: '<div class="dialogue-card">$1: $3</div>',
+      enabled: true,
+    });
+    const out = processRules('[妲丽安]{思考}("你来了")', 'maintext', [r]);
+    expect(out).toContain('<div class="dialogue-card">');
+    expect(out).toContain('妲丽安: 你来了');
+  });
+
+  it('多条规则按 order 升序执行（先小 order 后大 order）', () => {
+    // 同 pattern 两条规则，先跑的那条消费原文 → 断言低 order 的先执行
+    const r1 = rule({ pattern: '危险', replacement: '警示', enabled: true, order: 1 });
+    const r2 = rule({ pattern: '危险', replacement: '警告', enabled: true, order: 2 });
+    const out = processRules('前方危险！', 'maintext', [r2, r1]); // 传入顺序打乱
+    expect(out).toBe('前方警示！'); // order 1 先消费原文，order 2 失配
+  });
+});
+
+// ========== item_info / task_info 卡片放行 + 消毒 (2026-08-02) ==========
+
+describe('processRules — item_info/task_info 卡片', () => {
+  it('🔴 回归: <item_info> 内 HTML 放行渲染（不再转义成 &lt;item_info&gt; 文本）', () => {
+    const html = `<item_info>
+<div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:8px;padding:12px;">
+<div style="font-weight:bold;color:#7eb3ff;">🎒 初始行囊</div>
+<div><b style="color:#b8d4ff;">📜 法师长袍</b> <span style="color:#9acd32;">◆ 优良</span></div>
+</div>
+</item_info>`;
+    const out = processRules(`正文前。\n\n${html}\n\n正文后。`, 'maintext', []);
+    // 卡片 HTML 原样渲染（含内联样式），标签不再漏出
+    expect(out).toContain('linear-gradient(135deg,#1a1a2e');
+    expect(out).toContain('🎒 初始行囊');
+    expect(out).toContain('法师长袍');
+    expect(out).not.toContain('&lt;item_info&gt;');
+    expect(out).not.toContain('</item_info>');
+  });
+
+  it('🔴 回归: <task_info> 同样放行', () => {
+    const html = `<task_info><div style="color:#fff;">📖 主线委托</div></task_info>`;
+    const out = processRules(html, 'maintext', []);
+    expect(out).toContain('📖 主线委托');
+    expect(out).not.toContain('&lt;task_info&gt;');
+  });
+
+  it('🔴 消毒: <script> 内容被整体删除（不落 DOM、不执行）', () => {
+    const html = `<item_info><div>安全内容</div><script>alert(1)</script></item_info>`;
+    const out = processRules(html, 'maintext', []);
+    expect(out).toContain('安全内容');
+    expect(out).not.toContain('script');
+    expect(out).not.toContain('alert(1)');
+  });
+
+  it('🔴 消毒: onerror/onclick 事件属性被剥离（P1-01 XSS 防线）', () => {
+    const html = `<item_info><img src=x onerror=alert(1)><div onclick="steal()">卡</div></item_info>`;
+    const out = processRules(html, 'maintext', []);
+    // 事件属性消失，但卡片结构保留
+    expect(out).not.toContain('onerror');
+    expect(out).not.toContain('onclick');
+    expect(out).toContain('卡');
+  });
+
+  it('🔴 消毒: javascript: URL 被剥离', () => {
+    const html = `<item_info><a href="javascript:alert(1)">点我</a></item_info>`;
+    const out = processRules(html, 'maintext', []);
+    expect(out).not.toContain('javascript:');
+    expect(out).toContain('点我');
+  });
+
+  it('未闭合 <item_info>（AI 漏写闭合标签）→ 保持原文转义，不崩溃', () => {
+    const out = processRules('<item_info>没闭合的卡片', 'maintext', []);
+    // 不崩溃，未匹配原文被转义成纯文本
+    expect(typeof out).toBe('string');
+    expect(out).toContain('&lt;item_info&gt;');
   });
 });

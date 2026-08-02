@@ -40,6 +40,40 @@ export function escapeHtmlBasic(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/**
+ * 🔒 item_info / task_info 卡片 HTML 消毒（2026-08-02 新增）。
+ *
+ * story 预设（agent-config.json prompts[65]/[77]/[85]）引导 AI 在"查看/获得物品/任务"时
+ * 输出 `<item_info>...</item_info>` / `<task_info>...</task_info>` 美化卡片（标准 HTML +
+ * 内联 CSS）。此前引擎不处理这个标签，`<` `>` 被整体转义 → 玩家眼前出现 `</item_info>` 文本。
+ *
+ * 安全：AI 生成的 HTML 不能原样进 v-html，必须消毒。策略是**剥掉执行面、保留样式面**：
+ *  - 危险标签（script/style 事件类 iframe/object/embed/form 等）整体删除（含内容）
+ *  - 事件属性（on*）和危险 URL（javascript:/data:）剥离
+ *  - 其余标签/内联样式保留 —— story 预设的卡片就是 div/b/span + style 属性，
+ *    style 里只有 CSS 声明（无 url(...) 执行面），可安全放行
+ */
+export function sanitizeCardHtml(html: string): string {
+  if (!html) return '';
+  let out = html;
+  // 1. 删除危险标签及其内容（script / iframe / object / embed / form / input 等执行或交互面）
+  out = out.replace(
+    /<\s*(script|iframe|object|embed|form|input|button|select|textarea|link|meta|base)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi,
+    '',
+  );
+  // 自闭合危险标签
+  out = out.replace(/<\s*(script|iframe|object|embed|input|link|meta|base)[^>]*\/?\s*>/gi, '');
+  // 2. 剥离事件属性 on*（onerror/onclick/onload 等）——值可能含引号，需连同属性一起删
+  out = out.replace(/\s+on[a-z]+\s*=\s*("(?:[^"]*)"|'(?:[^']*)'|[^\s>]+)/gi, '');
+  // 3. 剥离 javascript: / data: 等危险 URL（src/href/style 里都可能出现）
+  out = out.replace(/\s+(src|href|action|formaction)\s*=\s*("javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi, '');
+  out = out.replace(/\s+(src|href|action|formaction)\s*=\s*("data:[^"]*"|'data:[^']*'|data:[^\s>]+)/gi, '');
+  // 4. style 属性里剥掉 url(...) / expression(...)（CSS 注入面）
+  out = out.replace(/(style\s*=\s*"[^"]*?)\burl\s*\([^)]*\)([^"]*")/gi, '$1$2');
+  out = out.replace(/(style\s*=\s*"[^"]*?)\bexpression\s*\([^)]*\)([^"]*")/gi, '$1$2');
+  return out;
+}
+
 // ========== Built-in Rules (Legacy) ==========
 
 /**
@@ -286,11 +320,29 @@ export function mergeRules(
  * @returns 处理后的文本
  */
 export function processRules(text: string, scope: string, rules: BeautifierRule[]): string {
-  // 🔒 P1-01 XSS 防御：先对原始模型文本做 HTML 转义（仅 & < >，见 escapeHtmlBasic 注释）。
-  // 模型响应可能含 <img onerror=...> 等恶意片段；若不先 escape，未被任何规则匹配的原文会
-  // 原样进入 v-html，导致存储型与流式 XSS。转义后所有原始尖括号都成为纯文本实体，
-  // 只有下方规则 replacement 模板里的 HTML 结构才是会被浏览器解析的真标签。
-  let result = escapeHtmlBasic(text);
+  // 🔒 P1-01 XSS 防御 —— 但**不能在原文上先整体 escape**：
+  // 预设规则的 pattern 大量依赖字面尖括号匹配模型标签（`<dalian ...>`、`<revue>...` 等），
+  // 先 escape 成 `&lt;dalian&gt;` 会让这 13+ 条标签规则全部失效（2026-08-02 回归，d185286 引入）。
+  //
+  // 正确姿势 = **原文跑正则 + 占位符保护 + 收尾整体转义**（三步）：
+  //   1. 原文上跑规则，匹配到的片段代入已转义的捕获组（`escapeHtml` 每个 $N），
+  //      产出的 replacement HTML 是开发可控的信任模板 —— 立刻换成占位符 `\x00BEAUTIFY_n\x00`
+  //      （NUL 字符不含 & < >，能安然穿过后面的整体转义；同款 idiom 见 useBeautify.wrapParagraphs）。
+  //   2. 全部规则跑完后，对整份结果 `escapeHtmlBasic` —— 未被任何规则消费的模型原文
+  //      （可能含 `<img onerror=...>` 等恶意片段）在这里全部转义成纯文本实体，XSS 堵死。
+  //   3. 把占位符还原成规则产出的信任 HTML。
+  const protectedHtml: string[] = [];
+  let result = text;
+
+  // 🔒 item_info / task_info 卡片放行（2026-08-02 新增，见 sanitizeCardHtml 注释）。
+  // story 预设引导 AI 输出 `<item_info>...</item_info>` 美化卡片；此前不处理 → 标签被整体
+  // 转义成 `&lt;item_info&gt;` 文本。这里在规则循环前**先提取卡片块**：消毒内部 HTML →
+  // 存进 protectedHtml 占位符（收尾 escapeHtmlBasic 不碰它）→ 还原。消毒保证 XSS 防线不降级。
+  result = result.replace(/<\s*(item_info|task_info)\s*>([\s\S]*?)<\s*\/\s*\1\s*>/gi, (_, tag, inner) => {
+    // 整块替换成占位符：外层标签本身也由占位符代表（不单独转义）
+    protectedHtml.push(`<div class="st-card st-${String(tag).toLowerCase()}">${sanitizeCardHtml(inner)}</div>`);
+    return `\x00BEAUTIFY_${protectedHtml.length - 1}\x00`;
+  });
 
   const active = rules
     .filter((r) => r.enabled && (r.scope === 'global' || r.scope === scope))
@@ -299,15 +351,24 @@ export function processRules(text: string, scope: string, rules: BeautifierRule[
   for (const rule of active) {
     try {
       const re = new RegExp(rule.pattern, rule.flags);
-      // 捕获组现在匹配的是已转义文本，replacement 里的 $1/$2 会被替换为已转义内容，
-      // 故内置规则与用户规则走同一路径，均无需二次 escape。
-      result = result.replace(re, rule.replacement);
+      result = result.replace(re, (...args: (string | number | undefined)[]) => {
+        const groupCount = args.length > 2 ? args.length - 3 : 0;
+        let html = rule.replacement;
+        for (let i = 1; i <= groupCount; i++) {
+          const value = String(args[i] ?? '');
+          html = html.split(`$${i}`).join(escapeHtml(value));
+        }
+        protectedHtml.push(html);
+        return `\x00BEAUTIFY_${protectedHtml.length - 1}\x00`;
+      });
     } catch {
       // 规则编译失败静默跳过，不阻断管道
     }
   }
 
-  return result;
+  result = escapeHtmlBasic(result);
+
+  return result.replace(/\x00BEAUTIFY_(\d+)\x00/g, (_, i) => protectedHtml[Number(i)] ?? '');
 }
 
 /**

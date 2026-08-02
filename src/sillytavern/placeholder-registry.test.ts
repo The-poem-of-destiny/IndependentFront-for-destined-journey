@@ -1534,3 +1534,75 @@ describe('resolveTemplate for chain placeholders', () => {
     expect(result).toBe('');
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// SKILL_STATE — 初始技能走 item_gen 链路（2026-08-02 新增）
+// ═══════════════════════════════════════════════════════════
+
+describe('SKILL_STATE', () => {
+  function skillState(openingPrompt?: string, chars: CharacterState[] = []) {
+    const ctx = mockCtx({ openingPrompt, characters: chars });
+    return PLACEHOLDER_REGISTRY['SKILL_STATE'](ctx, mockConfig());
+  }
+
+  it('空技能/空 openingPrompt → 空输出', () => {
+    expect(skillState(undefined)).toBe('');
+    expect(skillState('')).toBe('');
+  });
+
+  it('🔴 回归: 从 openingPrompt 提取开局初始技能声明（主角 skills 落库为空的路径）', () => {
+    const opening = `【创角完成，奥利雅思 的初始数据】
+
+--- 初始装备 ---
+  法师长袍（防具·uncommon (布甲, 防御: 60)）：厚实的蓝色天鹅绒制成。
+
+--- 初始技能 ---
+  灼热射线（主动·uncommon (智力, 单体, 伤害, 威力: 150, 塑能, 持续)）：一道远比火焰箭更加炽热凝练的能量射线。 [能量伤害:造成100%能量伤害]
+  火球术（主动·rare (智力, 范围:5, 伤害, 威力: 400, 塑能)）：一个明亮炽热的火球从你指尖飞驰而出。 [范围伤害:造成100%能量伤害]
+  高等材料学（被动·rare (智力, 自身, 增益, 功能)）：你充沛的材料学知识让你在任何生产制作中得心应手。 [材料分析:进行任意生产制作时DC-4]
+
+--- 开局时间 ---
+复兴纪元0488年-01月`;
+    const out = skillState(opening, []);
+    // 关键断言: 初始技能声明被完整提取，含全部 3 个技能名
+    expect(out).toContain('灼热射线');
+    expect(out).toContain('火球术');
+    expect(out).toContain('高等材料学');
+    expect(out).toContain('开局初始技能声明');
+    // 装备段不应泄漏进技能区
+    expect(out).not.toContain('法师长袍');
+    // 时间段不应泄漏进技能区
+    expect(out).not.toContain('复兴纪元');
+  });
+
+  it('已有角色的落库技能一并列出', () => {
+    const char = makeChar({
+      name: '奥利雅思',
+      skills: [
+        {
+          name: '灼热射线',
+          description: '能量射线',
+          type: 'active',
+          effects: { 能量伤害: '100%' },
+        } as any,
+      ],
+    });
+    const out = skillState(undefined, [char]);
+    expect(out).toContain('[奥利雅思] 技能:');
+    expect(out).toContain('灼热射线');
+    expect(out).toContain('主动');
+  });
+
+  it('落库技能 + 初始声明双源合并输出', () => {
+    const opening = `--- 初始技能 ---
+  火球术（主动·rare (智力, 范围:5, 伤害, 威力: 400, 塑能)）`;
+    const char = makeChar({
+      name: '奥利雅思',
+      skills: [{ name: '灼热射线', description: '', type: 'active' } as any],
+    });
+    const out = skillState(opening, [char]);
+    expect(out).toContain('灼热射线'); // 落库
+    expect(out).toContain('火球术'); // 初始声明
+    expect(out).toContain('开局初始技能声明');
+  });
+});

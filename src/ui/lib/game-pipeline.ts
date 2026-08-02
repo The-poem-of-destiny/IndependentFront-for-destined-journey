@@ -64,11 +64,16 @@ export type StoryChunkCallback = (chunk: string, isComplete: boolean) => void;
  */
 export function extractStoryOptions(raw: string): { content: string; options: string[] } {
   const match = raw.match(/<options>([\s\S]*?)<\/options>/i);
-  // 剥离 <maintext> 包裹（无匹配则保留原文）
+  // 剥离 <maintext> 包裹。真机（2026-08-02）：AI 常只写开标签 `<maintext>` 而**不写闭合
+  // `</maintext>`** —— 正则若要求闭合就匹配不上，标签漏进正文。故分两段处理：
+  //   1. 有闭合标签 → 剥掉首尾标签保留正文
+  //   2. 无闭合标签 → 把开标签起的整段（到 </options> 前或末尾）剥成纯正文
   const withoutMaintext = raw
     .replace(/<maintext>[\s\S]*?<\/maintext>/gi, (m) =>
       m.replace(/^<maintext>/i, '').replace(/<\/maintext>$/i, ''),
     )
+    // 未闭合形态：`<maintext>\n...正文...` → 剥掉 `<maintext>` 前缀标签
+    .replace(/^\s*<maintext>\s*/i, '')
     .trim();
   if (!match) return { content: withoutMaintext, options: [] };
   const options = match[1]
@@ -542,6 +547,10 @@ export class GamePipeline {
       agentOutputs: new Map(),
       plotSettings,
       gameTime: this.game.gameTime ?? undefined,
+      // 🔴 2026-08-02 修: 初始技能走 item_gen 链路 —— request_dispatcher 的 {{SKILL_STATE}}
+      //    需要读到捏人页选的初始技能声明（存在 openingPrompt 里），否则主角 skills 落库为空的
+      //    开局永远发不出 `<item_gen_request itemType="skill">`，技能没有 modifiers/automata。
+      openingPrompt: this.game.openingPrompt ?? undefined,
       // 工坊 P2 (ADR-30 D4/D9): stats 只读投影每回合构建一次，同回合多 Agent 装配复用
       //（各 pass 在 buildAgentMessages 内再克隆一份，杜绝跨 pass 写泄漏）
       statData: buildStatData({
@@ -721,7 +730,15 @@ export class GamePipeline {
     const saveId = this.saveId;
     const game = this.game;
     return (agentId: string, endpoint: ApiEndpoint, _saveId: string) => {
-      const real = new AgentClient({ endpoint, agentId, saveId });
+      // 🔴 2026-08-02: item_gen 批量生成后单次调用耗时暴涨（9 个请求一次生成 ≈ 240s+），
+      // API 池默认 timeout 60s 会掐断。item_gen 独立链（不走 orchestrator 的 config.timeout）
+      // 在 client 构造时单独放大超时，避免"思考完没来得及输出"就超时。
+      const real = new AgentClient({
+        endpoint,
+        agentId,
+        saveId,
+        timeout: agentId === 'item_gen' ? 300000 : undefined, // 300s；其余 agent 沿用 endpoint.timeout
+      });
       const label = AGENT_LABELS[agentId] ?? agentId;
       let callSeq = 0;
 
@@ -1480,11 +1497,22 @@ export class GamePipeline {
     }
   }
 
+  /**
+   * 🔴 2026-08-02 批量 item_gen 的单批上限。
+   *
+   * 一次打包过多请求会让 item_gen 单次调用耗时暴涨（9 个请求 ≈ 240s+，见
+   * fated-poem-debug-2743e219），且 AI 思考过重（7817 字 reasoning）容易撞超时。
+   * 超上限时按此值分批，每批仍是一次调用（相对逐条 N 次已大幅缩减）。
+   * 5 个/批 ≈ 2 批，总耗时 ≈ 2 × 单批时间，比 9 个挤一批更稳。
+   */
+  private static readonly ITEM_GEN_BATCH_SIZE = 5;
+
   /** 处理独立物品生成链 (request_dispatcher 的 <item_gen_request>) */
   private async handleItemGen(
     markers: import('@engine/types').ItemGenRequestMarker[],
     ctx: AgentContext,
   ) {
+    if (markers.length === 0) return;
     const endpoint = this.getEndpointForAgent('item_gen');
     if (!endpoint) {
       console.warn('[GamePipeline] item_gen 跳过: 未配置 API endpoint');
@@ -1496,13 +1524,20 @@ export class GamePipeline {
     const stateManager = this.getStateManager();
     const storyOutput = ctx.agentOutputs?.get('story') ?? '';
 
-    // 真机修(2026-07-17): try/catch 进循环 — 单物品链失败不阻断后续
-    for (const marker of markers) {
+    // 🔴 2026-08-02 批量生成: 此前对每个 marker 串行调 item_gen（N 请求 = N 次调用，
+    // 每个 40-60s，开局 5 技能 4 装备 1 消耗品 = 6-10 分钟）。现在把 markers 打包成
+    // 一次调用（模板契约「N 个 <request> = N 个输出条目」），调用次数 N → ceil(N/5)。
+    //
+    // 容错策略: 每批失败不阻断主流程（try/catch 包住）；失败批不落库，下一回合
+    // request_dispatcher 会重新识别未落库的请求。
+    const size = GamePipeline.ITEM_GEN_BATCH_SIZE;
+    for (let start = 0; start < markers.length; start += size) {
+      const batch = markers.slice(start, start + size);
+      this.game.updateAgentStatus('item_gen');
       try {
-        this.game.updateAgentStatus('item_gen');
         const request = {
           saveId: this.saveId,
-          marker,
+          markers: batch,
           storyOutput,
           context: ctx,
           endpoint,
@@ -1520,7 +1555,7 @@ export class GamePipeline {
         // 最新 characters（含新物品/装备）回读进 Pinia，前端面板随之刷新。
       } catch (err) {
         this.game.clearAgentStatus('item_gen', String(err));
-        console.error('[GamePipeline] item_gen 链失败，继续处理剩余请求:', err);
+        console.error('[GamePipeline] item_gen 批量链失败（本批不落库，下回合重试）:', err);
       }
     }
   }

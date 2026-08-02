@@ -100,9 +100,16 @@ export class AgentClient {
     return this.endpoint.baseUrl.trim().replace(/\/$/, '');
   }
 
-  /** 每 Agent 独立 userId — DeepSeek 缓存隔离的关键 */
+  /**
+   * 每 Agent 独立 userId — DeepSeek KVCache 缓存隔离的关键。
+   *
+   * 🔴 2026-08-02 修: **不再含 saveId**，只按 agent 区分。
+   * 此前 `fp|saveId|agentId` 让每个存档都有不同 userId → DeepSeek KVCache 跨存档
+   * 完全 miss（文档: user_id 参与缓存隔离），开新档每次全价重算（~0.5 元/次）。
+   * 改成 `fp|agentId` 后同一 agent 的缓存跨存档复用（systemPrompt 静态前缀命中）。
+   */
   get userId(): string {
-    return `fp|${this.saveId}|${this.agentId}`;
+    return `fp|${this.agentId}`;
   }
 
   /**
@@ -696,16 +703,30 @@ export class AgentClient {
 
 // ========== UserId 工具函数 ==========
 
-/** 构建标准 userId 用于 DeepSeek 缓存隔离 */
+/**
+ * 构建 userId —— 只按 agent 区分，不区分存档。
+ *
+ * 🔴 2026-08-02 修: 去掉 saveId。此前 `fp|saveId|agentId` 导致 DeepSeek KVCache
+ * 跨存档全 miss（user_id 参与缓存隔离），开新档每次全价重算。现在同一 agent
+ * 的缓存跨存档复用。
+ */
 export function buildUserId(saveId: string, agentId: string): string {
-  return `fp|${saveId}|${agentId}`;
+  // saveId 参数保留以兼容调用方；实际返回只含 agentId
+  void saveId;
+  return `fp|${agentId}`;
 }
 
-/** 从 userId 解析 saveId 和 agentId */
+/** 从 userId 解析 agentId（saveId 已废弃 —— 2026-08-02 起 userId 不再区分存档） */
 export function parseUserId(userId: string): { saveId: string; agentId: string } | null {
   const parts = userId.split('|');
-  if (parts.length === 3 && parts[0] === 'fp') {
+  if (parts[0] !== 'fp') return null;
+  if (parts.length === 3) {
+    // 兼容旧格式 fp|saveId|agentId（老数据回溯）
     return { saveId: parts[1], agentId: parts[2] };
+  }
+  if (parts.length === 2) {
+    // 新格式 fp|agentId
+    return { saveId: '', agentId: parts[1] };
   }
   return null;
 }

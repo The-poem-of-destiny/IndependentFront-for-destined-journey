@@ -9,6 +9,44 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 真机 debug 修复轮 · 开局链路（美化/item_gen 批量/词条落库/userId 缓存）｜ ✅ 完成（2026-08-02）
+
+基于 4 份真机 debug 导出（`484c6363` / `0b7f8f6e` / `2743e219` / `e91825e1` / `e91825e1`）逐项定位并修复开局链路的六类问题：
+
+**1. 正文美化完全不生效（🔴 回归，`d185286` 引入）** — `beautifier.ts`
+- 根因：P1-01 安全修复在 `processRules` 开头整体 `escapeHtmlBasic(text)`，22 条规则里 13 条依赖字面尖括号（`<dalian>`/`<revue>`/`<lilith>` 等）全部失配。
+- 修复：改「原文跑正则 + 占位符保护 + 收尾整体转义」三步 —— 标签规则恢复、XSS 防线不降级。
+
+**2. 技能效果一字一个（🔴）** — `item-effects.ts`（新）
+- 根因：item_gen 落库的 `effects` 是**字符串**（`"材料分析:进行任意生产制作时DC-4"`），ItemsPanel 按 `Record<string,string>` 用 `v-for` 迭代 → 按字符拆行。
+- 修复：新增 `normalizeEffects` 纯函数，兼容字符串/数组/对象三种形态，抽到 `item-effects.ts` 便于单测。
+
+**3. `<maintext>` 标签漏进正文（🔴）** — `game-pipeline.ts`
+- 根因：AI 输出只有开标签 `<maintext>` 无闭合 `</maintext>`，剥离正则要求闭合才匹配 → 标签漏进 message。
+- 修复：`extractStoryOptions` 增加未闭合形态剥离。
+
+**4. 初始技能走 item_gen 链路（🔴 断链三处）** — `placeholder-registry.ts` + `agent-config.json`
+- 根因：主角 skills 落库为空（留 item_gen）、request_dispatcher 模板**无历史/初始内容注入**、prompt 缺"技能判断"规则段 → 初始技能永不生成。
+- 修复：新增 `{{SKILL_STATE}}` 占位符（从 openingPrompt 提取初始技能声明）+ request_dispatcher 模板加 `<已有技能>` 区块 + systemPrompt 加"技能判断"规则段（逐条发 `<item_gen_request itemType="skill">`）。
+
+**5. item_gen 批量生成 + 超时（🔴）** — `item-gen-chain.ts` + `game-pipeline.ts` + `agent-client.ts`
+- 串行→批量：`handleItemGen` 从「每 marker 一次调用」改为「批量打包」+ 单批上限 5（调用次数 N → ceil(N/5)），新增 `buildItemRequestsXML` 纯函数。
+- 超时：批量后单次调用 240s+ 撞 API 池 60s 默认超时 → `getClientFactory` 给 item_gen 传 300s。
+- AI 思考过重：item_gen prompt「思考深度要求」段加批量优先规则（每条目 30-80 字，保证产出 `<item_result>` 优先）。
+- `applyAddSkill` 补透传 `modifiers/buffs/divinity/automata`（此前只收 8 字段，item_gen 合法产出的技能 modifiers 落库即丢 → 生产检定加值不生效，与 `applyAddItem` S1/S3 对齐）。
+
+**6. item_info 卡片放行 + 消毒（🔴）** — `beautifier.ts`
+- story 预设引导 AI 输出 `<item_info>`/`<task_info>` HTML 美化卡片，但引擎不处理 → 标签被转义成文本。
+- 修复：新增 `sanitizeCardHtml`（剥 script/on*/javascript: 等执行面、保留样式面）+ `processRules` 规则循环前提取卡片块保护。
+
+**7. userId 缓存跨存档复用（🟢 降本）** — `agent-client.ts`
+- 根因：DeepSeek `user_id` 参与 KVCache 缓存隔离，`fp|saveId|agentId` 让每个存档缓存全 miss → 开新档全价重算（~0.5 元/次）。
+- 修复：改为 `fp|agentId`（只按 agent 区分），`parseUserId` 兼容新旧格式回溯。
+
+**回归防护**：beautifier 标签规则/XSS/item_info 消毒、normalizeEffects 三形态、未闭合 maintext、SKILL_STATE 提取、item_gen 批量打包、applyAddSkill 透传、userId 新格式 —— 全部补测试钉死。**5701 tests 全绿，typecheck 0 错误。**
+
+---
+
 ### 工坊 P3+P4 · 真机走查 + 评审修复轮（PR #23）｜ ✅ 完成（2026-08-02）
 
 分支 rebase 到 master（`04ffd80` 之上）—— 分支上原有的 11 个 EJS 提交是 PR #22 的旧版草稿，随 rebase 丢弃，保留 master 上经过评审的那版（回退白名单 7 → 0）。

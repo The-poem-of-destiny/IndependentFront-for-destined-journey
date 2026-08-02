@@ -201,6 +201,41 @@ describe('extractStoryOptions', () => {
     const { content } = extractStoryOptions(raw);
     expect(content).toBe(raw);
   });
+
+  it('🔴 回归: 未闭合 <maintext>（AI 只写开标签）也要剥离', () => {
+    // 真机 2026-08-02: 模型输出只有 `<maintext>` 开头、无 `</maintext>` 闭合，
+    // 旧正则要求闭合标签才匹配 → 标签原样漏进 message。
+    const raw = `<maintext>寒冷先于意识抵达。
+
+你睁开眼睛。
+
+奥利雅思("这个世界到底是什么地方？")
+
+<dalian name="妲丽安" mood="思考"> 阿斯塔利亚。 </dalian></maintext>`;
+    const { content } = extractStoryOptions(raw);
+    expect(content).not.toContain('<maintext>');
+    expect(content).not.toContain('</maintext>');
+    expect(content).toContain('寒冷先于意识抵达');
+    expect(content).toContain('你睁开眼睛');
+  });
+
+  it('未闭合 maintext + 带 <options> 时正文剥干净、选项独立提取', () => {
+    const raw = `<maintext>正文第一句。
+
+有人来了。
+
+\`\`\`
+
+<options>
+1. 上前查看
+2. 保持距离
+</options>`;
+    const { content, options } = extractStoryOptions(raw);
+    expect(content).not.toContain('<maintext>');
+    expect(content).not.toContain('<options>');
+    expect(options).toEqual(['上前查看', '保持距离']);
+    expect(content).toContain('正文第一句');
+  });
 });
 
 describe('buildContext — plotSettings (步5)', () => {

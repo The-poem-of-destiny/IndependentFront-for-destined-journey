@@ -1021,6 +1021,13 @@ export class StateManager {
         level: value.level,
         effects: value.effects,
         scripts: value.scripts,
+        // 🔴 2026-08-02 修: 补战斗声明透传 —— 此前只收 8 字段丢 modifiers/buffs/divinity/automata，
+        //   item_gen 合法产出的技能 modifiers（如高等材料学 checkType:"生产" bonus:4）落库即丢，
+        //   生产检定加值不生效。与 applyAddItem（S1/S3 已补）对齐。
+        modifiers: value.modifiers,
+        buffs: value.buffs,
+        divinity: value.divinity,
+        automata: value.automata,
       });
     }
     await saveCharacter(char);

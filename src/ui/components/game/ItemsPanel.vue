@@ -4,6 +4,7 @@ import { useGameStore } from '../../stores/game-store';
 import { qualityVar } from '../../lib/quality-colors';
 import { describeModifiers } from '@engine/describe-modifier';
 import { describeAutomata } from '@engine/describe-automaton';
+import { normalizeEffects } from '../../lib/item-effects';
 
 const game = useGameStore();
 
@@ -148,9 +149,10 @@ const selExtra = computed(() => {
   return `Lv.${item.level || 1}${item.cost ? ` · ${item.cost.amount}${item.cost.type}` : ''}`;
 });
 
-const selEffects = computed(
-  () => (selected.value as any)?.effects as Record<string, string> | undefined,
-);
+const selEffects = computed(() => {
+  const raw = (selected.value as any)?.effects;
+  return normalizeEffects(raw);
+});
 const selScripts = computed(
   () => (selected.value as any)?.scripts as Record<string, string> | undefined,
 );

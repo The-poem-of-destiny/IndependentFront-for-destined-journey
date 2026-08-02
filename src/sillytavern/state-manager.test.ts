@@ -2277,6 +2277,51 @@ describe('StateManager', () => {
       expect(result.eventsGenerated[0].type).toBe('skill_use');
     });
 
+    it('🔴 回归: add_skill 透传 modifiers/automata（item_gen 合法产出的战斗声明不丢）', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1',
+        name: '奥利雅思',
+        type: 'player',
+        saveId: 's1',
+        skills: [],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        {
+          op: 'add_skill',
+          target: 'characters.奥利雅思',
+          value: {
+            name: '高等材料学',
+            description: '材料学知识',
+            type: 'passive',
+            effects: { 材料辨识: '进行[生产制作]时DC-4' },
+            // item_gen rawResponse 合法产出（fated-poem-debug-e91825e1）
+            modifiers: [
+              {
+                category: '检定',
+                source: '高等材料学',
+                checkType: '生产',
+                bonus: 4,
+                divinity: 0,
+              } as any,
+            ],
+            automata: [{ id: 'a1', trigger: { window: 'on_attack' }, effect: { intent: 'damage', value: 5 } }],
+          },
+        },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.skills).toHaveLength(1);
+      const skill = char.skills[0] as any;
+      // 2026-08-02 断点: 此前只收 8 字段，modifiers 落库即丢 → 生产检定加值不生效
+      expect(skill.modifiers).toHaveLength(1);
+      expect(skill.modifiers[0].checkType).toBe('生产');
+      expect(skill.modifiers[0].bonus).toBe(4);
+      expect(skill.automata).toHaveLength(1);
+    });
+
     it('同名 add_skill = 覆盖升级：提供的字段覆盖，未提供的保留，不重复插入（规范 §4）', async () => {
       const existing: Skill = {
         name: '斩击',

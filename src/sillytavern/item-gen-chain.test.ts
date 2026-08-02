@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { runItemGenChain, buildItemGenPatches } from './item-gen-chain';
+import { runItemGenChain, buildItemGenPatches, buildItemRequestsXML } from './item-gen-chain';
 import type { ItemGenChainClient, ItemGenChainDeps } from './item-gen-chain';
 import type { ItemGenRequestMarker, ItemGenOutput, ApiEndpoint, AgentContext } from './types';
 
@@ -95,6 +95,26 @@ function makeRequest(marker: ItemGenRequestMarker) {
   };
 }
 
+/** 最小 AgentConfig —— 让 buildAgentMessagesAsync 走生产路径（模板渲染 ITEM_REQUEST） */
+function makeItemGenConfig() {
+  return {
+    agentId: 'item_gen',
+    apiEndpointId: 'ep-test',
+    model: 'test-model',
+    enabled: true,
+    worldBookIds: [],
+    temperature: 0.7,
+    maxTokens: 4096,
+    topP: 1,
+    frequencyPenalty: 0,
+    presencePenalty: 0,
+    retryOnFail: true,
+    timeout: 30000,
+    userId: 'test-user',
+    promptTemplate: { fixedSystem: '', fixedExamples: '' },
+  } as any;
+}
+
 // ========== buildItemGenPatches (纯函数) ==========
 
 describe('buildItemGenPatches', () => {
@@ -176,6 +196,71 @@ describe('buildItemGenPatches', () => {
   it('空输出返回空 patches', () => {
     const patches = buildItemGenPatches({ skills: [], equipment: [], inventory: [] }, 'char-001');
     expect(patches).toEqual([]);
+  });
+
+  it('🔴 回归: 装备的 modifiers/automata/effects/scripts 透传落库（此前只落 stats/durability）', () => {
+    const itemOutput: ItemGenOutput = {
+      skills: [],
+      equipment: [
+        {
+          slot: '身体',
+          name: '金色钥匙吊坠',
+          description: '妲丽安赠予的信物',
+          stats: { 防御力: 90 },
+          durability: 100,
+          quality: '稀有',
+          effects: { 书库之钥: '迷宫书库的钥匙' },
+          modifiers: [
+            {
+              category: '检定',
+              source: '金色钥匙吊坠',
+              checkType: '抵抗',
+              bonus: 3,
+              divinity: 0,
+            } as any,
+          ],
+          automata: [{ id: 'a1', trigger: { window: 'on_attack' }, effect: { intent: 'damage', value: 5 } } as any],
+        },
+      ],
+      inventory: [],
+    };
+    const patches = buildItemGenPatches(itemOutput, 'char-001');
+    const addItem = patches[0].value as any;
+    // 2026-08-02 断链点: 这些字段之前全被丢弃 → 前端「战斗修正」恒空
+    expect(addItem.modifiers).toHaveLength(1);
+    expect(addItem.modifiers[0].category).toBe('检定');
+    expect(addItem.modifiers[0].bonus).toBe(3);
+    expect(addItem.automata).toHaveLength(1);
+    expect(addItem.effects).toEqual({ 书库之钥: '迷宫书库的钥匙' });
+  });
+
+  it('🔴 回归: 技能的 modifiers 透传落库（S4 生产检定 modifier 位）', () => {
+    const itemOutput: ItemGenOutput = {
+      skills: [
+        {
+          name: '高等材料学',
+          description: '材料学知识',
+          type: 'passive',
+          effects: { 材料分析: '进行任意生产制作时DC-4' },
+          modifiers: [
+            {
+              category: '检定',
+              source: '高等材料学',
+              checkType: '生产制作',
+              bonus: -4,
+              divinity: 0,
+            } as any,
+          ],
+        },
+      ],
+      equipment: [],
+      inventory: [],
+    };
+    const patches = buildItemGenPatches(itemOutput, 'char-001');
+    const skill = patches[0].value as any;
+    expect(skill.modifiers).toHaveLength(1);
+    expect(skill.modifiers[0].checkType).toBe('生产制作');
+    expect(skill.modifiers[0].bonus).toBe(-4);
   });
 
   it('target 指向 owner 角色字符路径', () => {
@@ -287,5 +372,48 @@ describe('runItemGenChain', () => {
     const result = await runItemGenChain(request, deps);
     expect(result.patches.length).toBeGreaterThan(0);
     expect(result.patches.every((p) => p.target === 'characters.阿尔萨斯')).toBe(true);
+  });
+
+  it('🔴 批量: markers 数组一次调用生成全部条目（不重复 patches，调用仅 1 次）', async () => {
+    const client = makeMockClient(makeItemGenXML());
+    const commitChatState = vi.fn().mockResolvedValue(undefined);
+    const deps: ItemGenChainDeps = {
+      clientFactory: () => client,
+      stateManager: { commitChatState },
+    };
+    const markers = [
+      makeMarker({ attributes: { itemType: 'skill', source: 'story', owner: 'char-001' } }),
+      makeMarker({ attributes: { itemType: 'equipment', source: 'story', owner: 'char-001' } }),
+    ];
+    const request = makeRequest(markers[0]);
+    (request as any).markers = markers; // 批量路径
+    (request as any).marker = undefined;
+
+    const result = await runItemGenChain(request, deps);
+
+    // 关键断言: 调用仅 1 次（此前 N markers = N 次调用 → 6 分钟等待）
+    expect(client.chat).toHaveBeenCalledTimes(1);
+    // 不重复: makeItemGenXML 产 3 条目（1 技能 + 1 装备 + 1 物品），批量也只落 3 patches
+    expect(result.patches).toHaveLength(3);
+    expect(commitChatState).toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 批量: 所有 markers 打包进 {{ITEM_REQUEST}}（N 个 <request>）', async () => {
+    const markers = [
+      makeMarker({ attributes: { itemType: 'skill', source: 'story', owner: 'char-001' }, bodyText: '灼热射线技能描述' }),
+      makeMarker({ attributes: { itemType: 'equipment', source: 'story', owner: 'char-001' }, bodyText: '法师长袍装备描述' }),
+    ];
+    const xml = buildItemRequestsXML(markers);
+
+    // 两个 request 都在同一个 <item_requests> 里（N marker = N <request>）
+    expect(xml).toContain('<item_requests>');
+    expect(xml).toContain('<request type="skill">');
+    expect(xml).toContain('<request type="equipment"');
+    expect(xml).toContain('灼热射线技能描述');
+    expect(xml).toContain('法师长袍装备描述');
+    // 2 个 marker → 2 个 <request>（skill 无 slot + equipment 带 slot 属性）
+    expect(xml.match(/<request type="skill">/g)).toHaveLength(1);
+    expect(xml.match(/<request type="equipment"[^>]*>/g)).toHaveLength(1);
+    expect(xml.match(/<\/item_requests>/g)).toHaveLength(1);
   });
 });

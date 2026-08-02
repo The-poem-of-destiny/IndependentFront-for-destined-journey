@@ -32,24 +32,33 @@ function mockFetch(response: any, status = 200) {
 // ========== buildUserId / parseUserId ==========
 
 describe('buildUserId', () => {
-  it('应返回 fp|saveId|agentId 格式', () => {
-    expect(buildUserId('save_1', 'story')).toBe('fp|save_1|story');
+  it('🔴 回归: 只按 agent 区分，不含 saveId（DeepSeek KVCache 跨存档复用）', () => {
+    expect(buildUserId('save_1', 'story')).toBe('fp|story');
+  });
+
+  it('同一 agent 不同存档 → 相同 userId（缓存可跨存档命中）', () => {
+    expect(buildUserId('save_1', 'story')).toBe(buildUserId('save_2', 'story'));
   });
 
   it('应支持各种 agentId', () => {
-    expect(buildUserId('s1', 'memory_recall')).toBe('fp|s1|memory_recall');
-    expect(buildUserId('s1', 'request_dispatcher')).toBe('fp|s1|request_dispatcher');
+    expect(buildUserId('s1', 'memory_recall')).toBe('fp|memory_recall');
+    expect(buildUserId('s1', 'request_dispatcher')).toBe('fp|request_dispatcher');
   });
 });
 
 describe('parseUserId', () => {
-  it('应正确解析有效 userId', () => {
+  it('应正确解析新格式 fp|agentId', () => {
+    expect(parseUserId('fp|story')).toEqual({ saveId: '', agentId: 'story' });
+    expect(parseUserId('fp|memory_recall')).toEqual({ saveId: '', agentId: 'memory_recall' });
+  });
+
+  it('兼容旧格式 fp|saveId|agentId（老数据回溯）', () => {
     expect(parseUserId('fp|save_1|story')).toEqual({ saveId: 'save_1', agentId: 'story' });
   });
 
   it('无效格式返回 null', () => {
     expect(parseUserId('invalid')).toBeNull();
-    expect(parseUserId('x|y|z')).toBeNull();
+    expect(parseUserId('x|y')).toBeNull();
     expect(parseUserId('')).toBeNull();
   });
 });
@@ -70,8 +79,8 @@ describe('AgentClient', () => {
   });
 
   describe('userId', () => {
-    it('应返回正确的缓存隔离 userId', () => {
-      expect(client.userId).toBe('fp|save_test|story');
+    it('🔴 回归: 只按 agent 区分，不含 saveId（DeepSeek KVCache 跨存档复用）', () => {
+      expect(client.userId).toBe('fp|story');
     });
   });
 
@@ -128,7 +137,7 @@ describe('AgentClient', () => {
       await client.chat({ messages: [{ role: 'user', content: 'test' }] });
 
       const body = JSON.parse(mockFn.mock.calls[0][1].body);
-      expect(body.user_id).toBe('fp|save_test|story');
+      expect(body.user_id).toBe('fp|story');
     });
 
     it('应解包 Cline 网关的 data 信封（非流式响应包在顶层 data 里）', async () => {

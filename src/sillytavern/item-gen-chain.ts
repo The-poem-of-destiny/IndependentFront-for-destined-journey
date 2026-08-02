@@ -44,7 +44,15 @@ import type { ToolExecutionContext } from './types';
 
 export interface ItemGenChainRequest {
   saveId: string;
-  marker: ItemGenRequestMarker;
+  /** 单个 marker（兼容旧调用方） */
+  marker?: ItemGenRequestMarker;
+  /**
+   * 🔴 2026-08-02 批量生成: 多个 marker 一次打包给 item_gen。
+   * 此前 GamePipeline 对每个 marker 串行调一次 item_gen（N 个请求 = N 次调用，
+   * 每个 40-60s，开局 5 技能 4 装备 1 消耗品 = 6-10 分钟）。批量打包后
+   * item_gen 一次生成全部条目，调用次数从 N → 1。
+   */
+  markers?: ItemGenRequestMarker[];
   storyOutput: string;
   context: AgentContext;
   endpoint: ApiEndpoint;
@@ -108,6 +116,9 @@ export interface ItemGenChainResult {
  * 1. callItemGenForRequest() — 调 item_gen Agent 生成 skills/equipment/inventory
  * 2. buildItemGenPatches() — 转成 StatePatch[] (补 id)
  * 3. 可选持久化 (stateManager.commitChatState)
+ *
+ * 🔴 2026-08-02 批量: request.markers（数组）存在时一次生成全部（调用次数 N → 1）；
+ * 仅 request.marker（单个）时为旧路径（兼容测试与单请求场景）。
  */
 export async function runItemGenChain(
   request: ItemGenChainRequest,
@@ -116,14 +127,19 @@ export async function runItemGenChain(
   // Step 1: 调 item_gen Agent
   const itemOutput = await callItemGenForRequest(request, deps);
 
-  // Step 2: 转成 patches（owner 来自 marker.attributes.owner，缺省取 context 玩家名；#6 player_1 灭绝）
-  const ownerFromMarker = request.marker.attributes.owner;
+  // Step 2: 转成 patches（owner 来自 marker.attributes.owner，缺省取 context 玩家名；#6 player_1 灭绝）。
+  // 🔴 批量路径: itemOutput 是整批 item_gen 的一次性结果，**只 build 一次**（在 markers 里循环
+  // build 会重复 N 份 patches —— 10 个 marker 就把 5 技能 4 装备重复 10 遍）。
+  // 批量假定所有 marker 同一 owner（request_dispatcher 开局通常全归主角）；
+  // 跨角色多 owner 的精细分流属未来增强，当前场景不触及。
+  const markers = request.markers?.length ? request.markers : request.marker ? [request.marker] : [];
   const playerName = request.context.characters?.find((c) => c.type === 'player')?.name;
-  const characterId = ownerFromMarker ?? playerName;
+  const firstMarker = markers[0];
+  const characterId = firstMarker?.attributes.owner ?? playerName;
   if (!characterId) {
     console.warn(
       '[item-gen-chain] 无 owner 且无玩家角色，跳过该 item_gen_request:',
-      request.marker.bodyText.slice(0, 50),
+      firstMarker?.bodyText.slice(0, 50),
     );
     return { patches: [], itemOutput: { skills: [], equipment: [], inventory: [] } };
   }
@@ -141,28 +157,40 @@ export async function runItemGenChain(
 }
 
 /**
- * 调用 item_gen Agent — 根据独立 item_gen_request marker 生成物品/技能/装备。
+ * 把 markers 打包成 `<item_requests>` XML（纯函数，便于单测）。
+ * 🔴 2026-08-02 批量: N 个 marker → N 个 `<request>` 子元素，item_gen 一次生成全部。
+ */
+export function buildItemRequestsXML(markers: ItemGenRequestMarker[]): string {
+  const requestLines: string[] = ['<item_requests>'];
+  for (const marker of markers) {
+    const itemType = marker.attributes.itemType ?? 'equipment';
+    const slotAttr =
+      itemType === 'equipment' ? ` slot="${guessSlot(marker.bodyText, itemType)}"` : '';
+    requestLines.push(`  <request type="${itemType}"${slotAttr}>`);
+    requestLines.push(`    ${marker.bodyText.trim()}`);
+    requestLines.push(`  </request>`);
+  }
+  requestLines.push('</item_requests>');
+  return requestLines.join('\n');
+}
+
+/**
+ * 调用 item_gen Agent — 生成物品/技能/装备。
  *
- * 将 marker 的描述包成 <item_requests> 注入 item_gen 模板的 {{ITEM_REQUEST}} 占位符。
- * agentOutputs['story'] 传正文，供 item_gen 参考（与 char/craft 链一致）。
+ * 将 marker（单个或批量）的描述包成 <item_requests> 注入 item_gen 模板的 {{ITEM_REQUEST}}
+ * 占位符。agentOutputs['story'] 传正文，供 item_gen 参考（与 char/craft 链一致）。
  * Agentic 路径 (function calling) 优先，回退到普通 chat。
+ *
+ * 🔴 2026-08-02 批量: 传入多个 markers 时一次打包所有 <request>（item_gen 模板契约
+ * 「N 个 <request> = N 个输出条目」），调用次数从 N → 1。
  */
 async function callItemGenForRequest(
   request: ItemGenChainRequest,
   deps: ItemGenChainDeps,
 ): Promise<ItemGenOutput> {
-  const marker = request.marker;
-  const itemType = marker.attributes.itemType ?? 'equipment';
-  const slotAttr =
-    itemType === 'equipment' ? ` slot="${guessSlot(marker.bodyText, itemType)}"` : '';
-  // item_gen 模板的 <request> 子元素期望含描述；type 约束它生成的条目类别。
-  const itemRequestsXML = [
-    `<item_requests>`,
-    `  <request type="${itemType}"${slotAttr}>`,
-    `    ${marker.bodyText.trim()}`,
-    `  </request>`,
-    `</item_requests>`,
-  ].join('\n');
+  // 批量优先：request.markers 存在 → 打包全部；否则退单个 marker
+  const markers = request.markers?.length ? request.markers : request.marker ? [request.marker] : [];
+  const itemRequestsXML = buildItemRequestsXML(markers);
 
   const itemLocalParams: Record<string, string> = {
     ITEM_REQUEST: itemRequestsXML,
@@ -268,6 +296,17 @@ export function buildItemGenPatches(itemOutput: ItemGenOutput, characterId: stri
         stats: equip.stats,
         durability: equip.durability,
         maxDurability: equip.durability,
+        // 🔴 2026-08-02 修: 透传 item_gen 的战斗声明 —— 此前只落 stats/durability，
+        //   解析出来的 modifiers/automata/effects/scripts 全被丢弃，前端「战斗修正」恒空。
+        //   S4 (2026-08-01) 语义: 装备的 modifier/automaton 编译进 v3 战斗 activeEffects。
+        ...(equip.effects && Object.keys(equip.effects).length > 0
+          ? { effects: equip.effects }
+          : {}),
+        ...(equip.scripts && Object.keys(equip.scripts).length > 0 ? { scripts: equip.scripts } : {}),
+        ...(equip.modifiers?.length ? { modifiers: equip.modifiers } : {}),
+        ...(equip.buffs?.length ? { buffs: equip.buffs } : {}),
+        ...(equip.divinity !== undefined ? { divinity: equip.divinity } : {}),
+        ...(equip.automata?.length ? { automata: equip.automata } : {}),
       },
       metadata: { source: 'item_gen', kind: 'equipment' },
     });
@@ -284,6 +323,13 @@ export function buildItemGenPatches(itemOutput: ItemGenOutput, characterId: stri
         quantity: inv.quantity,
         type: inv.type,
         rarity: inv.rarity,
+        // 🔴 同上: 透传战斗声明
+        ...(inv.effects && Object.keys(inv.effects).length > 0 ? { effects: inv.effects } : {}),
+        ...(inv.scripts && Object.keys(inv.scripts).length > 0 ? { scripts: inv.scripts } : {}),
+        ...(inv.modifiers?.length ? { modifiers: inv.modifiers } : {}),
+        ...(inv.buffs?.length ? { buffs: inv.buffs } : {}),
+        ...(inv.divinity !== undefined ? { divinity: inv.divinity } : {}),
+        ...(inv.automata?.length ? { automata: inv.automata } : {}),
       },
       metadata: { source: 'item_gen', kind: 'inventory' },
     });
@@ -302,6 +348,11 @@ export function buildItemGenPatches(itemOutput: ItemGenOutput, characterId: stri
         cooldown: skill.cooldown,
         effects: skill.effects,
         scripts: skill.scripts,
+        // 🔴 同上: 透传战斗声明（S4 生产检定 modifier 在此落库，craft_check/settle 消费）
+        ...(skill.modifiers?.length ? { modifiers: skill.modifiers } : {}),
+        ...(skill.buffs?.length ? { buffs: skill.buffs } : {}),
+        ...(skill.divinity !== undefined ? { divinity: skill.divinity } : {}),
+        ...(skill.automata?.length ? { automata: skill.automata } : {}),
       },
       metadata: { source: 'item_gen', kind: 'skill' },
     });

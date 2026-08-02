@@ -1353,6 +1353,13 @@ export interface AgentContext {
   /** 存档级游戏时间（供 memory_summary 等 Agent 注入时间上下文） */
   gameTime?: GameTime;
 
+  /**
+   * 存档开局提示词原文（save.metadata.openingPrompt）——含捏人页选的初始技能/装备
+   * 声明（`--- 初始技能 ---` 自然语言段）。request_dispatcher 的 {{SKILL_STATE}} 用它
+   * 补出「主角落库 skills 为空」时的初始技能清单，引导发 `<item_gen_request itemType="skill">`。
+   */
+  openingPrompt?: string;
+
   // --- 工坊 Phase 2 / ADR-30: 世界书 EJS 求值两轴 ---
   /**
    * 轴①`stats` 只读面快照（`buildStatData()` 产出）。

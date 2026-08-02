@@ -299,6 +299,45 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     return lines.join('\n');
   },
 
+  /** {{SKILL_STATE}} — 主角/在场角色的技能清单（含开局初始技能声明） */
+  SKILL_STATE: (ctx, _config, _params) => {
+    const lines: string[] = [];
+
+    // ① 落库技能（item_gen 已生成的 / 已有角色的技能）
+    for (const char of ctx.characters ?? []) {
+      const skills = char.skills ?? [];
+      if (skills.length === 0) continue;
+      lines.push(`[${char.name}] 技能:`);
+      for (const sk of skills) {
+        const typeLabel = sk.type === 'active' ? '主动' : sk.type === 'passive' ? '被动' : '';
+        const effs = sk.effects
+          ? ` [${Object.entries(sk.effects)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join(', ')}]`
+          : '';
+        lines.push(`  [${typeLabel}] ${sk.name} — ${sk.description || ''}${effs}`);
+        // 不显示 cost/cooldown/scripts（同 CHARACTER_STATE KEYS 策略）
+      }
+    }
+
+    // ② 开局初始技能声明（openingPrompt 的 `--- 初始技能 ---` 段）。
+    //    主角 skills 落库为空（交给 item_gen 生成），request_dispatcher 必须从这份
+    //    声明里识别初始技能并逐条发 `<item_gen_request itemType="skill">`。
+    const opening = ctx.openingPrompt ?? '';
+    if (opening) {
+      const segMatch = opening.match(/---\s*初始技能\s*---([\s\S]*?)(?=\n---\s*|\n\n*---|$)/);
+      const seg = segMatch?.[1] ?? '';
+      const lines2 = seg.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+      if (lines2.length > 0) {
+        lines.push('');
+        lines.push('【开局初始技能声明】（尚未落库，需生成）:');
+        lines.push(...lines2);
+      }
+    }
+
+    return lines.join('\n');
+  },
+
   /** {{QUEST_STATE}} — 当前所有任务 (Phase 10g) */
   QUEST_STATE: (ctx, _config, _params) => {
     const quests = ctx.quests ?? {};
@@ -467,7 +506,7 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   plot_pre_check:
     '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你判断剧情触发所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<剧情事件库>\n{{PLOT_EVENTS}}\n</剧情事件库>\n<!-- 引擎注入的剧情全景数据，内含三个子区块：<剧情大纲>(标题/版本/当前章节/章节进度/正文节选)、\n     <剧情事件列表>(全部活跃与待触发事件的标题+描述+状态+触发条件——含尚未向玩家揭示的 hidden 事件，\n     防剧透只在 UI 层，你必须全量审视)、<当前状态>(时间/位置/主角层级一行摘要)。\n     这是你触发判断的唯一事件来源——triggeredEvents 的 title 必须与 <剧情事件列表> 逐字一致。\n     区块为空或缺大纲时（如支线模式初期）以现有内容为准，保守判断，不编造事件。-->\n\n<记忆召回>\n{{AGENT.MEMORY_RECALL}}\n</记忆召回>\n<!-- 上游记忆召回 Agent 给出的相关历史记忆。用于核对触发条件中的历史前提\n     （如「与铁匠建立信任之后」）。为空表示本轮无相关记忆——缺证据时按条件未满足处理。-->\n\n<最近对话>\n{{NARRATIVE:layers=3}}\n</最近对话>\n<!-- 🔴 每轮变化。最近 3 轮正文与玩家输入。评估证据强度时它是第二优先级——\n     低于本轮 <用户输入> 的明确行动，高于 <记忆召回> 中的旧线索。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 🔴 每轮变化。本轮玩家的行动宣言——触发判断的首要证据来源。-->',
   request_dispatcher:
-    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你完成变量调度所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖世界观设定、种族特性、势力文化、地理信息等。\n     判断角色种族和势力归属时参考此处。——稳定数据，优先查阅。-->\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n<!-- 当前存档中所有已有角色的列表（ID/Name/Race/Type/Tier/Location）。\n     这是你判断\"新角色 vs 已有角色\"的唯一依据——\n     角色名不在此表中 → 新角色 → <char_gen_request>；\n     角色名在此表中 → 已有角色 → <char_update_request>。-->\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n<!-- 所有角色背包中的物品、装备、材料清单。\n     这是你判断\"新物品 vs 已有物品\"的唯一依据——\n     物品名不在背包中 → 新物品 → <item_gen_request>；\n     物品名在背包中 → 已有物品 → <item_update_request>。-->\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n<!-- 世界书中含 EJS/宏的动态条目（状态面板等），可能每回合变化。 -->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n<!-- 🔴 高频变化：本回合 Story Agent 生成的叙事正文。\n     仔细阅读全文，从中提取所有变量变化、新角色/物品出现、制作场景。——这是你的核心输入。-->',
+    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你完成变量调度所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖世界观设定、种族特性、势力文化、地理信息等。\n     判断角色种族和势力归属时参考此处。——稳定数据，优先查阅。-->\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n<!-- 当前存档中所有已有角色的列表（ID/Name/Race/Type/Tier/Location）。\n     这是你判断\"新角色 vs 已有角色\"的唯一依据——\n     角色名不在此表中 → 新角色 → <char_gen_request>；\n     角色名在此表中 → 已有角色 → <char_update_request>。-->\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n<!-- 所有角色背包中的物品、装备、材料清单。\n     这是你判断\"新物品 vs 已有物品\"的唯一依据——\n     物品名不在背包中 → 新物品 → <item_gen_request>；\n     物品名在背包中 → 已有物品 → <item_update_request>。-->\n\n<已有技能>\n{{SKILL_STATE}}\n</已有技能>\n<!-- 🔴 2026-08-02 新增: 所有角色的技能清单（含开局初始技能声明）。\n     这是你判断\"新技能 vs 已有技能\"的唯一依据——\n     技能名不在下表中 → 新技能 → <item_gen_request itemType="skill">（逐条单独发）；\n     技能名已在表中 → 已有技能，不重复生成。\n     开局初始技能声明标了「尚未落库，需生成」→ 逐条发 <item_gen_request itemType="skill">\n     让 item_gen 生成 stats/modifiers/automata。-->\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n<!-- 世界书中含 EJS/宏的动态条目（状态面板等），可能每回合变化。 -->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n<!-- 🔴 高频变化：本回合 Story Agent 生成的叙事正文。\n     仔细阅读全文，从中提取所有变量变化、新角色/物品出现、制作场景。——这是你的核心输入。-->',
   vars_update:
     '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你更新角色/物品状态的完整上下文数据。       -->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。         -->\n<!-- ⚠️ 需要写脚本时调用 get_script_reference 工具。     -->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n\n<调度器输出>\n{{AGENT.REQUEST_DISPATCHER}}\n</调度器输出>\n<!-- request_dispatcher 的完整输出，包含 <char_update_request> 和 <item_update_request> 标签。\n     逐条读取每个标签，这是你需要处理的变更清单。-->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n\n<最近对话>\n{{NARRATIVE:layers=1}}\n</最近对话>',
   memory_summary: '{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{NARRATIVE:layers=4}}',
