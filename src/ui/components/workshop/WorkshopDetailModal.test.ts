@@ -197,14 +197,24 @@ describe('WorkshopDetailModal 装前检视', () => {
     wrapper.unmount();
   });
 
-  it('replacement 里的 <style> 装前就标出全局副作用（D16 已接受，但必须先说）', async () => {
+  it('iframe 内样式与外部资源不再误报降级', async () => {
     fetchMock.mockResolvedValue(
-      detail([entry()], [regex({ replaceString: '<style>body{color:red}</style>$1' })]),
+      detail(
+        [entry()],
+        [
+          regex({
+            replaceString:
+              '<style>body{color:red}</style><img src="https://cdn.example/image.png">$1',
+          }),
+        ],
+      ),
     );
     const wrapper = await open();
-    expect(document.body.querySelector('.flag-side')?.textContent).toContain('全局副作用');
-    // 它**装得上**，所以不该同时被判成「不会生效」
+    expect(document.body.querySelector('.flag-side')).toBeNull();
     expect(document.body.querySelector('.flag-drop')).toBeNull();
+    heads()[1].click();
+    await flushPromises();
+    expect(document.body.querySelector('.note-degraded')).toBeNull();
     wrapper.unmount();
   });
 

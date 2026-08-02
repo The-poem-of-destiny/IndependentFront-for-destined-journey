@@ -81,6 +81,18 @@ describe('normalizeWorkshopNotes —— 整组归一', () => {
     ]);
   });
 
+  it('filters the obsolete offline warning from already-installed projects', () => {
+    expect(
+      normalizeWorkshopNotes([
+        workshopNote(
+          'degraded',
+          '「旧规则」引用 2 个外部来源：隔离框禁止联网，远程图片、字体、样式或脚本不会加载',
+        ),
+        workshopNote('degraded', '仍然有效的限制'),
+      ]),
+    ).toEqual([workshopNote('degraded', '仍然有效的限制')]);
+  });
+
   it('数组里的 null / undefined 跳过而不是炸', () => {
     const holey = ['甲', null, undefined, '乙'] as unknown as WorkshopNoteLike[];
     expect(normalizeWorkshopNotes(holey).map((n) => n.text)).toEqual(['甲', '乙']);

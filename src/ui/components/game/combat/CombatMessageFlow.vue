@@ -4,7 +4,7 @@
  *
  * 职责: 渲染战斗消息流（时间顺序），包含三种 entry：
  *   - round_divider: 居中装饰线 "── 第 N 回合 ──"
- *   - narrative:     叙事气泡（agent 每回合叙事），用 useBeautify.beautifyPlain 美化
+ *   - narrative:     叙事气泡（agent 每回合叙事），走统一美化渲染面
  *   - action:        动作结果卡片，渲染 <CombatActionCard>
  *
  * 这是战斗面板的主区域（flex:1），自动滚到底。
@@ -14,14 +14,12 @@
  */
 import { ref, watch, nextTick } from 'vue';
 import type { CombatLogEntry } from '../../../stores/game-store';
-import { useBeautify } from '../../../composables/useBeautify';
+import BeautifiedNarrative from '../BeautifiedNarrative.vue';
 import CombatActionCard from './CombatActionCard.vue';
 
 const props = defineProps<{
   entries: CombatLogEntry[];
 }>();
-
-const { beautifyPlain } = useBeautify();
 
 /* ── 自动滚到底（参考 ChatFlow.vue watch 写法） ── */
 const container = ref<HTMLDivElement>();
@@ -58,7 +56,11 @@ watch(
         <!-- 叙事气泡 -->
         <div v-else-if="entry.kind === 'narrative'" class="bubble-row bubble-row-narrative">
           <div class="bubble bubble-narrative-full">
-            <div class="narrative-body" v-html="beautifyPlain(entry.text ?? '')" />
+            <BeautifiedNarrative
+              class="narrative-body"
+              :text="entry.text ?? ''"
+              @resize="container && (container.scrollTop = container.scrollHeight)"
+            />
           </div>
         </div>
 

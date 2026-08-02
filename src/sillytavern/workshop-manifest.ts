@@ -305,7 +305,7 @@ function parseSourceRegex(raw: unknown, index: number): WorkshopSourceRegex {
     runOnEdit: readBoolean(raw, ['runOnEdit'], false),
     trimStrings: readStringArray(raw, ['trimStrings']),
     // ⚠️ 枚举非布尔（实测 0 / 2）。若上游哪天真给了布尔，true→1 / false→0，
-    // 不让类型谎报；反正本引擎丢弃它，只用于「要不要记 note」。
+    // 不让类型谎报；mapper 只在 findRegex 真含宏、该模式可达时报告缺口。
     substituteRegex: (() => {
       const value = pick(raw, 'substituteRegex');
       if (typeof value === 'boolean') return value ? 1 : 0;

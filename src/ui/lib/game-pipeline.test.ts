@@ -239,6 +239,23 @@ describe('extractStoryOptions', () => {
 });
 
 describe('buildContext — plotSettings (步5)', () => {
+  it('当前输入只进入 userInput，不混入既有历史', () => {
+    const pipeline = makePipeline({
+      messages: [
+        { id: 'u1', role: 'user', content: '上一轮输入', timestamp: 1 },
+        { id: 'a1', role: 'assistant', content: '上一轮正文', timestamp: 2 },
+      ],
+    });
+
+    const ctx = (pipeline as any).buildContext('当前输入');
+
+    expect(ctx.userInput).toBe('当前输入');
+    expect(ctx.history.map((message: { content: string }) => message.content)).toEqual([
+      '上一轮输入',
+      '上一轮正文',
+    ]);
+  });
+
   it('读取 activeSave.metadata.plotSettings', () => {
     const plotSettings = {
       mode: 'main',
@@ -269,6 +286,76 @@ describe('buildContext — plotSettings (步5)', () => {
     const pipeline = makePipeline({ activeSave: null });
     const ctx = (pipeline as any).buildContext('输入');
     expect(ctx.plotSettings.mode).toBe('off');
+  });
+});
+
+describe('buildAgentConfigs — story 流式投影', () => {
+  it('回调接收累计的玩家可见正文，不暴露结构标签', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const pipeline = makePipeline();
+    (pipeline as any).settings.settings.apiPool = [
+      {
+        id: 'ep',
+        name: 'test',
+        provider: 'openai',
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'test',
+        defaultModel: 'model',
+      },
+    ];
+    const chunks: Array<[string, boolean]> = [];
+    const configs = (pipeline as any).buildAgentConfigs(
+      {},
+      (text: string, complete: boolean) => chunks.push([text, complete]),
+    );
+    const stream = configs.find((config: { agentId: string }) => config.agentId === 'story')
+      .streamCallbacks;
+
+    stream.onChunk('<main', false);
+    stream.onChunk('text>夜色渐深', false);
+    stream.onChunk('</maintext><options>\n1. 前进', false);
+    stream.onChunk('<maintext>夜色渐深</maintext><options>\n1. 前进', true);
+    stream.onError('断流');
+
+    expect(chunks).toEqual([
+      ['', false],
+      ['夜色渐深', false],
+      ['夜色渐深', false],
+      ['', true],
+      ['', true],
+    ]);
+    warn.mockRestore();
+  });
+});
+
+describe('handleAgentResult — story 正文投影', () => {
+  it('持久化正文与选项，但不持久化控制区块和音频标记', async () => {
+    const addMessage = vi.fn();
+    const setPendingOptions = vi.fn();
+    const pipeline = makePipeline({ addMessage, setPendingOptions });
+    const raw = `<thinking>隐藏分析</thinking>
+<maintext>夜色渐深。<play_audio mood="安静"/></maintext>
+<options>
+1. 前进
+2. 等待
+</options>`;
+
+    await (pipeline as any).handleAgentResult(makeResult('story', raw));
+
+    expect(setPendingOptions).toHaveBeenCalledWith(['前进', '等待']);
+    expect(addMessage).toHaveBeenCalledWith('夜色渐深。', 'assistant');
+  });
+
+  it('rejects a nonblank envelope with no player-visible narrative', async () => {
+    const addMessage = vi.fn();
+    const pipeline = makePipeline({ addMessage });
+
+    await expect(
+      (pipeline as any).handleAgentResult(
+        makeResult('story', '<maintext>   </maintext><options>1. 等待</options>'),
+      ),
+    ).rejects.toThrow('no player-visible narrative');
+    expect(addMessage).not.toHaveBeenCalled();
   });
 });
 

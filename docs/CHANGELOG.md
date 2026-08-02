@@ -9,6 +9,18 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 生成链路 / Agent / 正文渲染审查与收口｜ ✅ 完成（2026-08-02）
+
+- **管线成功契约**：默认 `story` 为必需 Agent；缺失、报错、`null`、空白输出或完成处理失败时不再推进回合。`onAgentComplete` 支持异步并由编排器等待，记忆与剧情持久化不再与下一阶段竞速。
+- **SSE 结算**：支持 CRLF、多 `data:` 字段、`[DONE]`、尾部 usage 与 EOF；完成/错误只结算一次。`finish_reason` 后有 1 秒尾包窗口，异常常开连接会主动收口，不再无限挂起。
+- **正文唯一投影**：新增 `story-output.ts`，流式预览与最终入库共用 `<maintext>` / `<option(s)>` / 控制区块解析；开标签前的内容先缓冲，投影后无可见正文则整轮失败；当前玩家输入只进 `userInput`，不再同时重复进历史区。
+- **Agent 工具寻址**：角色名优先、旧 UUID 兼容；制作补丁统一使用角色逻辑名；物品筛选复用字段枚举别名，未知类型显式失败。
+- **美化兼容边界**：撤销 DOM 消毒方案。正文编译为转义文本与原样富匹配片段；同一条已提交消息的全部片段进入一个无 same-origin、`credentialless`、`no-referrer` 的 `allow-scripts` iframe，使跨命中脚本与 inline replacement 共享原有 message DOM。外部 HTTP(S) 资源与原生网络 API 放行；form、popup、download、top navigation、嵌套 frame、parent DOM 与应用存储仍隔离，应用 `/api` 拒绝 `Origin: null`。规则 replacement、捕获组、HTML/CSS/script、事件属性、SVG/控件及完整文档保持原样；流式阶段不执行脚本，提交后才创建 frame。向远程/本地网络请求以及外传正文/frame-local 数据是明确接受的兼容代价。
+- **工坊正则元数据**：只把包含 AI-output `placement=2` 的规则接入 assistant 正文，避免 user-only 规则误投；`minDepth`/`maxDepth` 以最新 user/assistant 消息为 0、忽略 system event、含边界执行。公共语料里 `runOnEdit` 当前不可达，非零 `substituteRegex` 均因 findRegex 无宏而惰性。
+- **API Key 迁移**：API Key 从 `fated-poem-settings` localStorage 快照迁入 Dexie `apiEndpoints`；事务写入并回读验证成功后才清理旧 key，任一阶段失败则保留唯一可恢复副本并在设置页提示。API CRUD 改为 Dexie-first。
+- **全量工坊语料**：新增可复现抓取/分析脚本；2026-08-02 匿名公共快照覆盖 303/303 项目详情、303/303 payload 响应与 99 条正则（0 编译失败，最高 `$39`）。本地 41.6 MB 语料位于 gitignored `reference/workshop-reference/`；60 条外部资源规则已按联网契约放行，16 条父页面耦合与 14 条宿主 API 耦合仍明确报告降级；历史项目里已持久化的旧「禁止联网」提示会被过滤。
+- **验证**：全量 Vitest 205 文件、5789 通过 / 3 跳过；`tsc --noEmit`、`vue-tsc --noEmit`、Vite production build 与浏览器真机 iframe 探针通过。
+
 ### 真机 debug 修复轮 · 开局链路（美化/item_gen 批量/词条落库/userId 缓存）｜ ✅ 完成（2026-08-02）
 
 基于 4 份真机 debug 导出（`484c6363` / `0b7f8f6e` / `2743e219` / `e91825e1` / `e91825e1`）逐项定位并修复开局链路的六类问题：
@@ -40,17 +52,17 @@
 - AI 思考过重：item_gen prompt「思考深度要求」段加批量优先规则（每条目 30-80 字，保证产出 `<item_result>` 优先）。
 - `applyAddSkill` 补透传 `modifiers/buffs/divinity/automata`（此前只收 8 字段，item_gen 合法产出的技能 modifiers 落库即丢 → 生产检定加值不生效，与 `applyAddItem` S1/S3 对齐）。
 
-**6. item_info 卡片放行 + 消毒（🔴）** — `beautifier.ts`
+**6. item_info / task_info 卡片结构化渲染（🔴）** — `beautifier.ts`
 
 - story 预设引导 AI 输出 `<item_info>`/`<task_info>` HTML 美化卡片，但引擎不处理 → 标签被转义成文本。
-- 修复：新增 `sanitizeCardHtml`（剥 script/on*/javascript: 等执行面、保留样式面）+ `processRules` 规则循环前提取卡片块保护。
+- 修复：规则循环前提取卡片块为富匹配片段，交由同一隔离 iframe renderer；不再使用正则或 DOM sanitizer。
 
 **7. userId 缓存跨存档复用（🟢 降本）** — `agent-client.ts`
 
 - 根因：DeepSeek `user_id` 参与 KVCache 缓存隔离，`fp|saveId|agentId` 让每个存档缓存全 miss → 开新档全价重算（~0.5 元/次）。
 - 修复：改为 `fp|agentId`（只按 agent 区分），`parseUserId` 兼容新旧格式回溯。
 
-**回归防护**：beautifier 标签规则/XSS/item_info 消毒、normalizeEffects 三形态、未闭合 maintext、SKILL_STATE 提取、item_gen 批量打包、applyAddSkill 透传、userId 新格式 —— 全部补测试钉死。**5701 tests 全绿，typecheck 0 错误。**
+**回归防护**：beautifier 标签规则/结构化片段/item_info、normalizeEffects 三形态、未闭合 maintext、SKILL_STATE 提取、item_gen 批量打包、applyAddSkill 透传、userId 新格式 —— 全部补测试钉死。**5701 tests 全绿，typecheck 0 错误。**
 
 ---
 

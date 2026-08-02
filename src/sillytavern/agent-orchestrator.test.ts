@@ -147,6 +147,158 @@ describe('AgentOrchestrator — 管线验证', () => {
     const run = await orch.run();
     expect(run.status).toBe('failed');
   });
+
+  it('等待异步完成回调后才结束管线', async () => {
+    globalThis.fetch = mockFetch('ok');
+    let release!: () => void;
+    const persisted = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const onAgentComplete = vi.fn(() => persisted);
+    const orch = new AgentOrchestrator(
+      {
+        pipeline: makeSimplePipeline(['story']),
+        context: makeContext(),
+        agentConfigs: [makeAgentConfig({ agentId: 'story' })],
+        endpoints: [makeEndpoint()],
+        saveId: 'test',
+      },
+      { onAgentComplete },
+    );
+
+    let settled = false;
+    const run = orch.run().then((result) => {
+      settled = true;
+      return result;
+    });
+    await vi.waitFor(() => expect(onAgentComplete).toHaveBeenCalledOnce());
+    expect(settled).toBe(false);
+
+    release();
+    await expect(run).resolves.toMatchObject({ status: 'completed' });
+  });
+
+  it('fails a required agent when its completion handler rejects', async () => {
+    globalThis.fetch = mockFetch('ok');
+    const pipeline: Pipeline = {
+      timeout: 30000,
+      retryOnFail: true,
+      requiredAgents: ['story'],
+      stages: [
+        { agents: ['memory_recall'], waitFor: [] },
+        { agents: ['story'], waitFor: ['memory_recall'] },
+        { agents: ['request_dispatcher'], waitFor: ['story'] },
+      ],
+    };
+    const orch = new AgentOrchestrator(
+      {
+        pipeline,
+        context: makeContext(),
+        agentConfigs: [
+          makeAgentConfig({ agentId: 'memory_recall' }),
+          makeAgentConfig({ agentId: 'story' }),
+          makeAgentConfig({ agentId: 'request_dispatcher' }),
+        ],
+        endpoints: [makeEndpoint()],
+        saveId: 'test',
+      },
+      {
+        onAgentComplete: (result) => {
+          if (result.agentId === 'story') throw new Error('persistence failed');
+        },
+      },
+    );
+
+    const run = await orch.run();
+    const results = orch.getResults();
+
+    expect(run.status).toBe('failed');
+    expect(results.get('story')?.error).toContain('persistence failed');
+    expect(results.get('request_dispatcher')).toBeUndefined();
+  });
+});
+
+describe('AgentOrchestrator — 流式回调桥接', () => {
+  function makeStreamingOrchestrator() {
+    return new AgentOrchestrator({
+      pipeline: makeSimplePipeline(['story']),
+      context: makeContext(),
+      agentConfigs: [makeAgentConfig({ agentId: 'story' })],
+      endpoints: [makeEndpoint()],
+      saveId: 'test',
+    });
+  }
+
+  it('向配置层转发 chunk、tool call 与完成事件', async () => {
+    const onChunk = vi.fn();
+    const onToolCall = vi.fn();
+    const onComplete = vi.fn();
+    const onError = vi.fn();
+    const config = makeAgentConfig({
+      agentId: 'story',
+      streamCallbacks: { onChunk, onToolCall, onComplete, onError },
+    });
+    const streamResult = {
+      fullText: '正文',
+      toolCalls: [],
+      reasoning: '',
+      tokensUsed: 3,
+      cacheHit: false,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
+      completionTokens: 2,
+      duration: 10,
+    };
+    const client = {
+      chatStream: vi.fn(
+        async (_request: unknown, callbacks: import('./agent-client').StreamCallbacks) => {
+          callbacks.onChunk('正文', false);
+          callbacks.onToolCall?.({ id: 'call', name: 'tool', arguments: '{}' });
+          callbacks.onComplete(streamResult);
+        },
+      ),
+    };
+
+    const result = await (makeStreamingOrchestrator() as any).callAgentStreaming(
+      client,
+      { messages: [] },
+      config,
+    );
+
+    expect(onChunk).toHaveBeenCalledWith('正文', false);
+    expect(onToolCall).toHaveBeenCalledWith({ id: 'call', name: 'tool', arguments: '{}' });
+    expect(onComplete).toHaveBeenCalledWith(streamResult);
+    expect(onError).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ output: '正文', rawResponse: '正文', tokensUsed: 3 });
+  });
+
+  it('向配置层转发错误并结算为失败结果', async () => {
+    const onError = vi.fn();
+    const config = makeAgentConfig({
+      agentId: 'story',
+      streamCallbacks: {
+        onChunk: vi.fn(),
+        onComplete: vi.fn(),
+        onError,
+      },
+    });
+    const client = {
+      chatStream: vi.fn(
+        async (_request: unknown, callbacks: import('./agent-client').StreamCallbacks) => {
+          callbacks.onError('stream failed');
+        },
+      ),
+    };
+
+    const result = await (makeStreamingOrchestrator() as any).callAgentStreaming(
+      client,
+      { messages: [] },
+      config,
+    );
+
+    expect(onError).toHaveBeenCalledWith('stream failed');
+    expect(result).toMatchObject({ output: null, error: 'stream failed' });
+  });
 });
 
 // ========== Basic Execution ==========
@@ -326,6 +478,7 @@ describe('AgentOrchestrator — 错误处理', () => {
     const pipeline: Pipeline = {
       timeout: 30000,
       retryOnFail: true,
+      requiredAgents: ['story'],
       stages: [
         { agents: ['memory_recall', 'plot_check'], waitFor: [] },
         { agents: ['story'], waitFor: ['memory_recall', 'plot_check'] },
@@ -344,7 +497,7 @@ describe('AgentOrchestrator — 错误处理', () => {
       saveId: 'test',
     });
 
-    await orch.run();
+    const run = await orch.run();
     const results = orch.getResults();
     // memory_recall failed (HTTP 500 error)
     expect(results.get('memory_recall')!.error).toBeDefined();
@@ -353,6 +506,140 @@ describe('AgentOrchestrator — 错误处理', () => {
     // story stage depends on memory_recall which failed
     // stageDependenciesMet returns false → story stage skipped → no result recorded
     expect(results.has('story')).toBe(false);
+    expect(run.status).toBe('failed');
+  });
+
+  it('required Agent 返回 null 时整条管线应失败', async () => {
+    globalThis.fetch = mockFetch('unused');
+    const pipeline: Pipeline = {
+      ...makeSimplePipeline(['story']),
+      requiredAgents: ['story'],
+    };
+    const orch = new AgentOrchestrator({
+      pipeline,
+      context: makeContext({ plotSettings: { mode: 'off', tabooContent: '' } }),
+      agentConfigs: [makeAgentConfig({ agentId: 'story', enabled: false })],
+      endpoints: [makeEndpoint()],
+      saveId: 'test',
+    });
+
+    const run = await orch.run();
+
+    expect(orch.getResults().get('story')?.output).toBeNull();
+    expect(run.status).toBe('failed');
+  });
+
+  it('required Agent 返回空白字符串时整条管线应失败', async () => {
+    globalThis.fetch = mockFetch('   ');
+    const pipeline: Pipeline = {
+      ...makeSimplePipeline(['story']),
+      requiredAgents: ['story'],
+    };
+    const orch = new AgentOrchestrator({
+      pipeline,
+      context: makeContext(),
+      agentConfigs: [makeAgentConfig({ agentId: 'story', retryOnFail: false })],
+      endpoints: [makeEndpoint()],
+      saveId: 'test',
+    });
+
+    const run = await orch.run();
+
+    expect(run.agentResults.get('story')?.output).toBe('   ');
+    expect(run.status).toBe('failed');
+  });
+
+  it('required Agent 报错时整条管线应失败', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: 'memory ok' } }],
+          usage: { total_tokens: 10 },
+        }),
+        text: async () => '',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        headers: new Headers(),
+        json: async () => ({}),
+        text: async () => 'story failed',
+      });
+    const pipeline: Pipeline = {
+      timeout: 30000,
+      retryOnFail: true,
+      requiredAgents: ['story'],
+      stages: [
+        { agents: ['memory_recall'], waitFor: [] },
+        { agents: ['story'], waitFor: ['memory_recall'] },
+      ],
+    };
+    const orch = new AgentOrchestrator({
+      pipeline,
+      context: makeContext(),
+      agentConfigs: [
+        makeAgentConfig({ agentId: 'memory_recall', retryOnFail: false }),
+        makeAgentConfig({ agentId: 'story', retryOnFail: false }),
+      ],
+      endpoints: [makeEndpoint()],
+      saveId: 'test',
+    });
+
+    const run = await orch.run();
+
+    expect(run.agentResults.get('story')?.error).toBeDefined();
+    expect(run.status).toBe('failed');
+  });
+
+  it('required story 有效时，下游可选 Agent 失败仍应完成', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: '<maintext>有效正文</maintext>' } }],
+          usage: { total_tokens: 10 },
+        }),
+        text: async () => '',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        headers: new Headers(),
+        json: async () => ({}),
+        text: async () => 'summary failed',
+      });
+    const pipeline: Pipeline = {
+      timeout: 30000,
+      retryOnFail: true,
+      requiredAgents: ['story'],
+      stages: [
+        { agents: ['story'], waitFor: [] },
+        { agents: ['memory_summary'], waitFor: ['story'] },
+      ],
+    };
+    const orch = new AgentOrchestrator({
+      pipeline,
+      context: makeContext(),
+      agentConfigs: [
+        makeAgentConfig({ agentId: 'story', retryOnFail: false }),
+        makeAgentConfig({ agentId: 'memory_summary', retryOnFail: false }),
+      ],
+      endpoints: [makeEndpoint()],
+      saveId: 'test',
+    });
+
+    const run = await orch.run();
+
+    expect(run.agentResults.get('story')?.error).toBeUndefined();
+    expect(run.agentResults.get('memory_summary')?.error).toBeDefined();
+    expect(run.status).toBe('completed');
   });
 });
 

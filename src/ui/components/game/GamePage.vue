@@ -39,6 +39,8 @@ onMounted(async () => {
   if (ui.activeSaveId) {
     console.log('[GamePage] loading save...');
     await game.loadSave(ui.activeSaveId);
+    // API endpoint construction is synchronous, so hydrate/migrate its secrets before creating it.
+    await settings.initApiSecrets();
     console.log(
       '[GamePage] save loaded, hasOpeningPromptConsumed:',
       game.hasOpeningPromptConsumed,
@@ -65,7 +67,7 @@ onMounted(async () => {
         if (isComplete) {
           streamingText.value = '';
         } else {
-          streamingText.value += chunk;
+          streamingText.value = chunk;
         }
       });
     } else {
@@ -142,7 +144,7 @@ async function handleSend(content: string) {
     if (isComplete) {
       streamingText.value = '';
     } else {
-      streamingText.value += chunk;
+      streamingText.value = chunk;
     }
   });
 }

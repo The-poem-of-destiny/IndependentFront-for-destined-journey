@@ -4,17 +4,17 @@
  *
  * ★ **`droppedNotes` 是本组件的重点，不是脚注。**
  *
- * 安装从来不是无损的: ST 正则的 `promptOnly` / `placement` / `minDepth` / `maxDepth`
- * / `substituteRegex` / `runOnEdit` / `trimStrings` 在本引擎里没有对应物，一律丢弃
- * （设计 D16）；`<script>` 在 `v-html` 里不会执行；载荷缺失时条目取自详情预览……
- * 每一条都写进了 `WorkshopProject.droppedNotes`。
+ * 安装从来不是无损的：AI-output placement 与消息深度已经接线；`promptOnly`、user-only
+ * placement、`trimStrings` 与提示词侧改写仍会丢失。隔离 iframe 允许远程资源与网络 API，
+ * 但 parent/宿主 API 与持久 storage 仍会降级；
+ * 载荷缺失时条目取自详情预览……每一条都写进了 `WorkshopProject.droppedNotes`。
  *
  * **丢弃必须 loud**（D16 原话）: 折叠态就把数字摆在行上，一次点击即可看全文。
  * 静默截断会让用户以为装全了，然后花一晚上找"为什么这个正则不生效"。
  *
  * ★ **但 loud ≠ 一律说「未导入」。** 首版把三种处置合流成一个数字，真机上一个
- * 项目报「34 项内容未导入」，其中 20 多条其实是「装了、也启用了，只是 `<script>`
- * 不执行 / `<style>` 会全局生效」—— 用户读到的是安装失败。现在按 `kind` 分三组
+ * 项目报「34 项内容未导入」，其中 20 多条其实是「装了、也启用了，只是执行环境
+ * 降级」—— 用户读到的是安装失败。现在按 `kind` 分三组
  * 各自计数：只有 `dropped` 叫「未导入」，`sideEffect` 因为会波及整个界面而最显眼。
  *
  * 老项目行的 `droppedNotes` 是裸 `string[]`（P1 首版落库形态），`groupWorkshopNotes`

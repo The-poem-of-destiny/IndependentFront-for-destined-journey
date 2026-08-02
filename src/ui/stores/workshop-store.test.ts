@@ -129,7 +129,7 @@ function regexEntry(id: string, scriptName: string, over: Record<string, unknown
     substituteRegex: 0,
     minDepth: null,
     maxDepth: null,
-    placement: [1],
+    placement: [2],
     ...over,
   };
 }

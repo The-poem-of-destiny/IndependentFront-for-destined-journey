@@ -29,9 +29,10 @@ const showEditor = ref(false);
 const editingRule = ref<BeautifierRule | null>(null);
 const libraryExpanded = ref(false);
 const presetRules = ref<BeautifierRule[]>([]);
+const sourcePresetRules = ref<BeautifierRule[]>([]);
 const loading = ref(true);
 
-// 内置规则禁用列表
+// 历史字段名；实际语义是相对内置 defaultEnabled 的手动翻转列表。
 const builtinDisabled = computed<string[]>(() => s.beautifierBuiltinDisabled ?? []);
 
 // 用户规则（Dexie 真源的响应式投影）
@@ -53,8 +54,9 @@ onMounted(async () => {
     // 先确保 store 已 hydrate（迁移 + 读 Dexie），否则 userRules 还是空的
     await beautifier.init();
     const { activeWorldBookIds, activeEntryUids } = getActiveWorldBookState();
+    sourcePresetRules.value = await loadPresetRules();
     const merged = mergeRules(
-      await loadPresetRules(),
+      sourcePresetRules.value,
       userRules.value,
       builtinDisabled.value,
       activeWorldBookIds,
@@ -153,11 +155,7 @@ function deleteRule(rule: BeautifierRule) {
 function refreshPresetRules() {
   const { activeWorldBookIds, activeEntryUids } = getActiveWorldBookState();
   const merged = mergeRules(
-    presetRules.value.map((r) => {
-      // 从 store 的预设缓存中恢复原始 autoEnable 状态
-      const orig = beautifier.presetRules.find((pr) => pr.id === r.id);
-      return { ...r, autoEnable: orig?.autoEnable ?? r.autoEnable };
-    }),
+    sourcePresetRules.value,
     userRules.value,
     builtinDisabled.value,
     activeWorldBookIds,

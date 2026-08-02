@@ -56,3 +56,6 @@ public/audio/**/*.ogg
 public/audio/**/*.wav
 public/audio/**/*.m4a
 public/audio/**/*.flac
+
+# Local mirror of public workshop entries used for compatibility research.
+reference/workshop-reference/

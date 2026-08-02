@@ -6,7 +6,7 @@
  *
  * 设计决策:
  * - 纯函数模块，无副作用，无外部依赖
- * - 内置规则使用 HTML 转义捕获组，防止注入
+ * - 规则替换保持原样，由 UI 的网络可用 opaque iframe 承担执行边界
  * - 编译失败静默跳过，不阻断管道
  */
 
@@ -38,46 +38,6 @@ export function escapeHtml(str: string): string {
  */
 export function escapeHtmlBasic(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-/**
- * 🔒 item_info / task_info 卡片 HTML 消毒（2026-08-02 新增）。
- *
- * story 预设（agent-config.json prompts[65]/[77]/[85]）引导 AI 在"查看/获得物品/任务"时
- * 输出 `<item_info>...</item_info>` / `<task_info>...</task_info>` 美化卡片（标准 HTML +
- * 内联 CSS）。此前引擎不处理这个标签，`<` `>` 被整体转义 → 玩家眼前出现 `</item_info>` 文本。
- *
- * 安全：AI 生成的 HTML 不能原样进 v-html，必须消毒。策略是**剥掉执行面、保留样式面**：
- *  - 危险标签（script/style 事件类 iframe/object/embed/form 等）整体删除（含内容）
- *  - 事件属性（on*）和危险 URL（javascript:/data:）剥离
- *  - 其余标签/内联样式保留 —— story 预设的卡片就是 div/b/span + style 属性，
- *    style 里只有 CSS 声明（无 url(...) 执行面），可安全放行
- */
-export function sanitizeCardHtml(html: string): string {
-  if (!html) return '';
-  let out = html;
-  // 1. 删除危险标签及其内容（script / iframe / object / embed / form / input 等执行或交互面）
-  out = out.replace(
-    /<\s*(script|iframe|object|embed|form|input|button|select|textarea|link|meta|base)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi,
-    '',
-  );
-  // 自闭合危险标签
-  out = out.replace(/<\s*(script|iframe|object|embed|input|link|meta|base)[^>]*\/?\s*>/gi, '');
-  // 2. 剥离事件属性 on*（onerror/onclick/onload 等）——值可能含引号，需连同属性一起删
-  out = out.replace(/\s+on[a-z]+\s*=\s*("(?:[^"]*)"|'(?:[^']*)'|[^\s>]+)/gi, '');
-  // 3. 剥离 javascript: / data: 等危险 URL（src/href/style 里都可能出现）
-  out = out.replace(
-    /\s+(src|href|action|formaction)\s*=\s*("javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi,
-    '',
-  );
-  out = out.replace(
-    /\s+(src|href|action|formaction)\s*=\s*("data:[^"]*"|'data:[^']*'|data:[^\s>]+)/gi,
-    '',
-  );
-  // 4. style 属性里剥掉 url(...) / expression(...)（CSS 注入面）
-  out = out.replace(/(style\s*=\s*"[^"]*?)\burl\s*\([^)]*\)([^"]*")/gi, '$1$2');
-  out = out.replace(/(style\s*=\s*"[^"]*?)\bexpression\s*\([^)]*\)([^"]*")/gi, '$1$2');
-  return out;
 }
 
 // ========== Built-in Rules (Legacy) ==========
@@ -151,6 +111,8 @@ export async function loadPresetRules(): Promise<BeautifierRule[]> {
           enabled: r.defaultEnabled ?? false,
           order: r.order ?? 99,
           isBuiltin: r.isBuiltin ?? true,
+          minDepth: Number.isFinite(r.minDepth) ? r.minDepth : undefined,
+          maxDepth: Number.isFinite(r.maxDepth) ? r.maxDepth : undefined,
           autoEnable: r.autoEnable,
           group: r.group,
           locked: false,
@@ -265,7 +227,8 @@ export function resolveAutoEnable(
  *
  * 合并逻辑:
  * 1. 预设规则默认状态 → 应用 auto-enable 覆盖
- * 2. 用户在 builtinDisabled 中禁掉的规则 → enabled = false（除非 locked）
+ * 2. `builtinDisabled` 是历史字段名，现表示「相对内置默认值翻转」的规则 ID；
+ *    因而既能关掉默认开启规则，也能开启默认关闭规则（locked 除外）
  * 3. 用户自定义规则追加（同名 ID 用户优先）
  *
  * @param presetRules      loadPresetRules() 返回的预设规则
@@ -292,11 +255,12 @@ export function mergeRules(
     activeCharacterNames,
   );
 
-  // Step 2: 应用用户禁用列表（locked 的规则不受影响）
-  const disabledSet = new Set(builtinDisabled);
+  // Step 2: 应用用户手动覆盖。字段名沿用历史契约，但语义是默认状态 XOR，
+  // 否则 21 条 defaultEnabled=false 的预设永远无法从设置页开启。
+  const overrideSet = new Set(builtinDisabled);
   const merged = resolved.map((r) => {
     if (r.locked) return r;
-    if (disabledSet.has(r.id)) return { ...r, enabled: false };
+    if (overrideSet.has(r.id)) return { ...r, enabled: !r.enabled };
     return r;
   });
 
@@ -309,15 +273,317 @@ export function mergeRules(
 
 // ========== Processing Pipeline ==========
 
+export interface BeautifierTextSegment {
+  kind: 'text';
+  /** Raw unmatched source. Escaping is deferred to serialization. */
+  text: string;
+}
+
+export interface BeautifierMatchSegment {
+  kind: 'match';
+  ruleId: string;
+  ruleName: string;
+  /** Zero-based occurrence within this rule, in source order. */
+  occurrence: number;
+  /** Raw full match and capture groups for structured renderers. */
+  source: string;
+  captures: string[];
+  /** Rule replacement after capture expansion; rule-authored markup is retained verbatim. */
+  replacement: string;
+}
+
+export type BeautifierSegment = BeautifierTextSegment | BeautifierMatchSegment;
+
+export interface BeautifierCompileOptions {
+  /** Zero-based conversational depth from the newest user/assistant message. */
+  depth?: number;
+}
+
+const CARD_PATTERN = /<\s*(item_info|task_info)\s*>([\s\S]*?)<\s*\/\s*\1\s*>/gi;
+
+function appendText(segments: BeautifierSegment[], text: string): void {
+  if (!text) return;
+  const previous = segments[segments.length - 1];
+  if (previous?.kind === 'text') previous.text += text;
+  else segments.push({ kind: 'text', text });
+}
+
+function nextOccurrence(occurrences: Map<string, number>, ruleId: string): number {
+  const occurrence = occurrences.get(ruleId) ?? 0;
+  occurrences.set(ruleId, occurrence + 1);
+  return occurrence;
+}
+
+/** Native JavaScript replacement-string expansion (`$$`, `$&`, `$1..$99`, named groups, etc.). */
+function expandReplacement(
+  template: string,
+  match: RegExpExecArray,
+  input: string,
+  matchIndex: number,
+): string {
+  const captures = match.slice(1).map((capture) => String(capture ?? ''));
+  return template.replace(/\$([$&'`]|\d{1,2}|<[^>]*>)/g, (token, marker: string) => {
+    if (marker === '$') return '$';
+    if (marker === '&') return match[0];
+    if (marker === '`') return input.slice(0, matchIndex);
+    if (marker === "'") return input.slice(matchIndex + match[0].length);
+    if (marker.startsWith('<')) {
+      if (!match.groups) return token;
+      return String(match.groups[marker.slice(1, -1)] ?? '');
+    }
+
+    const index = Number(marker);
+    if (index > 0 && index <= captures.length) return captures[index - 1];
+    if (marker.length === 2) {
+      const first = Number(marker[0]);
+      if (first > 0 && first <= captures.length) return `${captures[first - 1]}${marker[1]}`;
+    }
+    return token;
+  });
+}
+
+function advanceStringIndex(text: string, index: number, unicode: boolean): number {
+  if (!unicode || index + 1 >= text.length) return index + 1;
+  const first = text.charCodeAt(index);
+  if (first < 0xd800 || first > 0xdbff) return index + 1;
+  const second = text.charCodeAt(index + 1);
+  return second >= 0xdc00 && second <= 0xdfff ? index + 2 : index + 1;
+}
+
+function findMatches(text: string, expression: RegExp): RegExpExecArray[] {
+  const matcher = new RegExp(expression.source, expression.flags);
+  if (!matcher.global) {
+    const match = matcher.exec(text);
+    return match ? [match] : [];
+  }
+
+  const matches: RegExpExecArray[] = [];
+  const unicode = matcher.flags.includes('u') || matcher.flags.includes('v');
+  let match: RegExpExecArray | null;
+  while ((match = matcher.exec(text)) !== null) {
+    matches.push(match);
+    if (match[0] === '') {
+      matcher.lastIndex = advanceStringIndex(text, matcher.lastIndex, unicode);
+    }
+  }
+  return matches;
+}
+
+interface TextRange {
+  segmentIndex: number;
+  start: number;
+  end: number;
+}
+
+interface EligibleMatch {
+  segmentIndex: number;
+  localIndex: number;
+  match: RegExpExecArray;
+}
+
+function projectSegments(segments: BeautifierSegment[]): {
+  text: string;
+  ranges: TextRange[];
+} {
+  let text = '';
+  const ranges: TextRange[] = [];
+  segments.forEach((segment, segmentIndex) => {
+    if (segment.kind === 'match') {
+      text += `\x00BEAUTIFY_${segmentIndex}\x00`;
+      return;
+    }
+    const start = text.length;
+    text += segment.text;
+    ranges.push({ segmentIndex, start, end: text.length });
+  });
+  return { text, ranges };
+}
+
+function findEligibleMatches(
+  projection: string,
+  ranges: TextRange[],
+  expression: RegExp,
+): EligibleMatch[] {
+  if (expression.sticky) {
+    const found = findMatches(projection, expression);
+    const eligible: EligibleMatch[] = [];
+    for (const match of found) {
+      const end = match.index + match[0].length;
+      const range = ranges.find(
+        ({ start, end: rangeEnd }) => match.index >= start && end <= rangeEnd,
+      );
+      if (!range) continue;
+      eligible.push({
+        segmentIndex: range.segmentIndex,
+        localIndex: match.index - range.start,
+        match,
+      });
+      if (!expression.global) break;
+    }
+    return eligible;
+  }
+
+  const flags = expression.global ? expression.flags : `${expression.flags}g`;
+  const matcher = new RegExp(expression.source, flags);
+  const unicode = matcher.flags.includes('u') || matcher.flags.includes('v');
+  const eligible: EligibleMatch[] = [];
+
+  for (const range of ranges) {
+    let searchIndex = range.start;
+    while (searchIndex <= range.end) {
+      matcher.lastIndex = searchIndex;
+      const match = matcher.exec(projection);
+      if (!match || match.index > range.end) break;
+      const matchEnd = match.index + match[0].length;
+      if (matchEnd <= range.end) {
+        eligible.push({
+          segmentIndex: range.segmentIndex,
+          localIndex: match.index - range.start,
+          match,
+        });
+        if (!expression.global) return eligible;
+        searchIndex =
+          match[0] === ''
+            ? advanceStringIndex(projection, matcher.lastIndex, unicode)
+            : matcher.lastIndex;
+        continue;
+      }
+      searchIndex = advanceStringIndex(projection, match.index, unicode);
+    }
+  }
+
+  return eligible;
+}
+
+function extractCardSegments(text: string, occurrences: Map<string, number>): BeautifierSegment[] {
+  const segments: BeautifierSegment[] = [];
+  let cursor = 0;
+  CARD_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = CARD_PATTERN.exec(text)) !== null) {
+    appendText(segments, text.slice(cursor, match.index));
+    const tag = match[1].toLowerCase();
+    const inner = match[2];
+    const ruleId = `builtin:${tag}`;
+    segments.push({
+      kind: 'match',
+      ruleId,
+      ruleName: tag,
+      occurrence: nextOccurrence(occurrences, ruleId),
+      source: match[0],
+      captures: [inner],
+      replacement: `<div class="st-card st-${tag}">${inner}</div>`,
+    });
+    cursor = match.index + match[0].length;
+  }
+  appendText(segments, text.slice(cursor));
+  if (segments.length === 0) segments.push({ kind: 'text', text: '' });
+  return segments;
+}
+
+function applyRule(
+  segments: BeautifierSegment[],
+  rule: BeautifierRule,
+  expression: RegExp,
+  occurrences: Map<string, number>,
+): BeautifierSegment[] {
+  const { text: projection, ranges } = projectSegments(segments);
+  const eligible = findEligibleMatches(projection, ranges, expression);
+  if (eligible.length === 0) return segments;
+
+  const bySegment = new Map<number, EligibleMatch[]>();
+  for (const found of eligible) {
+    const group = bySegment.get(found.segmentIndex);
+    if (group) group.push(found);
+    else bySegment.set(found.segmentIndex, [found]);
+  }
+
+  const next: BeautifierSegment[] = [];
+  segments.forEach((segment, segmentIndex) => {
+    if (segment.kind === 'match') {
+      next.push(segment);
+      return;
+    }
+
+    const found = bySegment.get(segmentIndex);
+    if (!found) {
+      appendText(next, segment.text);
+      return;
+    }
+
+    let cursor = 0;
+    for (const { localIndex, match } of found) {
+      appendText(next, segment.text.slice(cursor, localIndex));
+      const captures = match.slice(1).map((capture) => String(capture ?? ''));
+      next.push({
+        kind: 'match',
+        ruleId: rule.id,
+        ruleName: rule.name,
+        occurrence: nextOccurrence(occurrences, rule.id),
+        source: match[0],
+        captures,
+        replacement: expandReplacement(rule.replacement, match, segment.text, localIndex),
+      });
+      cursor = localIndex + match[0].length;
+    }
+    appendText(next, segment.text.slice(cursor));
+  });
+
+  return next;
+}
+
+/**
+ * Compile raw narrative into unmatched text and one structured segment per matched rule occurrence.
+ * Rules run in ascending order and can only consume unmatched text; prior replacements stay opaque.
+ */
+export function compileBeautifierSegments(
+  text: string,
+  scope: string,
+  rules: BeautifierRule[],
+  options: BeautifierCompileOptions = {},
+): BeautifierSegment[] {
+  const occurrences = new Map<string, number>();
+  let segments = extractCardSegments(text, occurrences);
+  const depth = options.depth ?? 0;
+  const active = rules
+    .filter(
+      (rule) =>
+        rule.enabled &&
+        (rule.scope === 'global' || rule.scope === scope) &&
+        (rule.minDepth === undefined || depth >= rule.minDepth) &&
+        (rule.maxDepth === undefined || depth <= rule.maxDepth),
+    )
+    .sort((left, right) => left.order - right.order);
+
+  for (const rule of active) {
+    try {
+      segments = applyRule(segments, rule, new RegExp(rule.pattern, rule.flags), occurrences);
+    } catch {
+      // Invalid rules are inert and do not block the remaining pipeline.
+    }
+  }
+
+  return segments;
+}
+
+/** Serialize compiled segments to the legacy HTML string consumed by existing callers. */
+export function serializeBeautifierSegments(segments: readonly BeautifierSegment[]): string {
+  return segments
+    .map((segment) =>
+      segment.kind === 'text' ? escapeHtmlBasic(segment.text) : segment.replacement,
+    )
+    .join('');
+}
+
 /**
  * 对文本应用指定 scope 的活跃规则。
  *
  * 处理流程:
  * 1. 筛选 scope 匹配（或 global）且 enabled 的规则
  * 2. 按 order 升序排序
- * 3. 依次编译正则并替换
- *    - 内置规则: 先对捕获组做 HTML 转义，再代入 replacement
- *    - 用户规则: 直接字符串替换
+ * 3. 依次编译正则，把每次匹配保留为独立结构化片段
+ *    - 替换字符串按原生 JavaScript 语义展开（`$1..$99`、`$&`、`$$` 等）
+ *    - 捕获内容不清洗；富文本片段由 UI 放入隔离 iframe
  * 4. 编译失败静默跳过
  *
  * @param text  原始文本
@@ -325,61 +591,13 @@ export function mergeRules(
  * @param rules 全量规则列表（含内置 + 用户）
  * @returns 处理后的文本
  */
-export function processRules(text: string, scope: string, rules: BeautifierRule[]): string {
-  // 🔒 P1-01 XSS 防御 —— 但**不能在原文上先整体 escape**：
-  // 预设规则的 pattern 大量依赖字面尖括号匹配模型标签（`<dalian ...>`、`<revue>...` 等），
-  // 先 escape 成 `&lt;dalian&gt;` 会让这 13+ 条标签规则全部失效（2026-08-02 回归，d185286 引入）。
-  //
-  // 正确姿势 = **原文跑正则 + 占位符保护 + 收尾整体转义**（三步）：
-  //   1. 原文上跑规则，匹配到的片段代入已转义的捕获组（`escapeHtml` 每个 $N），
-  //      产出的 replacement HTML 是开发可控的信任模板 —— 立刻换成占位符 `\x00BEAUTIFY_n\x00`
-  //      （NUL 字符不含 & < >，能安然穿过后面的整体转义；同款 idiom 见 useBeautify.wrapParagraphs）。
-  //   2. 全部规则跑完后，对整份结果 `escapeHtmlBasic` —— 未被任何规则消费的模型原文
-  //      （可能含 `<img onerror=...>` 等恶意片段）在这里全部转义成纯文本实体，XSS 堵死。
-  //   3. 把占位符还原成规则产出的信任 HTML。
-  const protectedHtml: string[] = [];
-  let result = text;
-
-  // 🔒 item_info / task_info 卡片放行（2026-08-02 新增，见 sanitizeCardHtml 注释）。
-  // story 预设引导 AI 输出 `<item_info>...</item_info>` 美化卡片；此前不处理 → 标签被整体
-  // 转义成 `&lt;item_info&gt;` 文本。这里在规则循环前**先提取卡片块**：消毒内部 HTML →
-  // 存进 protectedHtml 占位符（收尾 escapeHtmlBasic 不碰它）→ 还原。消毒保证 XSS 防线不降级。
-  result = result.replace(
-    /<\s*(item_info|task_info)\s*>([\s\S]*?)<\s*\/\s*\1\s*>/gi,
-    (_, tag, inner) => {
-      // 整块替换成占位符：外层标签本身也由占位符代表（不单独转义）
-      protectedHtml.push(
-        `<div class="st-card st-${String(tag).toLowerCase()}">${sanitizeCardHtml(inner)}</div>`,
-      );
-      return `\x00BEAUTIFY_${protectedHtml.length - 1}\x00`;
-    },
-  );
-
-  const active = rules
-    .filter((r) => r.enabled && (r.scope === 'global' || r.scope === scope))
-    .sort((a, b) => a.order - b.order);
-
-  for (const rule of active) {
-    try {
-      const re = new RegExp(rule.pattern, rule.flags);
-      result = result.replace(re, (...args: (string | number | undefined)[]) => {
-        const groupCount = args.length > 2 ? args.length - 3 : 0;
-        let html = rule.replacement;
-        for (let i = 1; i <= groupCount; i++) {
-          const value = String(args[i] ?? '');
-          html = html.split(`$${i}`).join(escapeHtml(value));
-        }
-        protectedHtml.push(html);
-        return `\x00BEAUTIFY_${protectedHtml.length - 1}\x00`;
-      });
-    } catch {
-      // 规则编译失败静默跳过，不阻断管道
-    }
-  }
-
-  result = escapeHtmlBasic(result);
-
-  return result.replace(/\x00BEAUTIFY_(\d+)\x00/g, (_, i) => protectedHtml[Number(i)] ?? '');
+export function processRules(
+  text: string,
+  scope: string,
+  rules: BeautifierRule[],
+  options: BeautifierCompileOptions = {},
+): string {
+  return serializeBeautifierSegments(compileBeautifierSegments(text, scope, rules, options));
 }
 
 /**

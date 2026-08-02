@@ -4,8 +4,8 @@
  * Phase 10h: 连接 GamePage UI 和引擎 Agent 管线。
  * 封装: AgentConfig 组装 / AgentContext 构建 / 编排器创建 / 回调处理。
  *
- * Phase 7e: 🆕 流式渲染支持 — story agent 使用 chatStream() 逐块回调，
- * 通过 onStoryChunk 将增量文本实时推送到前端 UI。
+ * Phase 7e: story agent 使用 chatStream() 逐块接收原文，
+ * 通过 onStoryChunk 将累计的玩家可见投影实时推送到前端 UI。
  */
 import { AgentOrchestrator } from '@engine/agent-orchestrator';
 import type { OrchestratorOptions, OrchestratorEvents } from '@engine/agent-orchestrator';
@@ -28,7 +28,7 @@ import type {
 import { AgentClient } from '@engine/agent-client';
 import type { StreamCallbacks } from '@engine/agent-client';
 import { createStateManager } from '@engine/state-manager';
-import { stripPlayAudioMarkers } from '@engine/marker-protocol';
+import { projectStoryOutput, projectStreamingStory } from '@engine/story-output';
 import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
 import { buildStatData } from '@engine/stat-projection';
@@ -50,46 +50,12 @@ export interface GamePipelineDeps {
   saveId: string;
 }
 
-/** 流式回调 — 由 GamePage 提供实时渲染。isComplete=true 表示流式传输已结束 */
+/** 流式回调 — chunk 是累计的可见正文快照；isComplete=true 表示清理临时预览。 */
 export type StoryChunkCallback = (chunk: string, isComplete: boolean) => void;
 
-/**
- * 从 story 正文中提取 <options> 行动选项块。
- * 格式约定（story systemPrompt <option_format>）: <options> 内每行 "数字. 内容"。
- * 返回剥离选项块后的正文 + 选项列表。
- *
- * 🔴 2026-08-02 修：AI 输出格式约定正文用 `<maintext>...</maintext>` 包裹
- * （DEFAULT_FORMAT_PROMPT），此处剥离标签取正文 —— 之前只剥 <options>，
- * `<maintext>` 标签原样漏进 message，玩家眼前出现尖括号。
- */
+/** 兼容旧调用名；正文、控制区块与 `<option(s)>` 统一由 story-output 投影。 */
 export function extractStoryOptions(raw: string): { content: string; options: string[] } {
-  const match = raw.match(/<options>([\s\S]*?)<\/options>/i);
-  // 剥离 <maintext> 包裹。真机（2026-08-02）：AI 常只写开标签 `<maintext>` 而**不写闭合
-  // `</maintext>`** —— 正则若要求闭合就匹配不上，标签漏进正文。故分两段处理：
-  //   1. 有闭合标签 → 剥掉首尾标签保留正文
-  //   2. 无闭合标签 → 把开标签起的整段（到 </options> 前或末尾）剥成纯正文
-  const withoutMaintext = raw
-    .replace(/<maintext>[\s\S]*?<\/maintext>/gi, (m) =>
-      m.replace(/^<maintext>/i, '').replace(/<\/maintext>$/i, ''),
-    )
-    // 未闭合形态：`<maintext>\n...正文...` → 剥掉 `<maintext>` 前缀标签
-    .replace(/^\s*<maintext>\s*/i, '')
-    .trim();
-  if (!match) return { content: withoutMaintext, options: [] };
-  const options = match[1]
-    .split('\n')
-    .map((line) =>
-      line
-        .trim()
-        .match(/^\d+\s*[.、)．]\s*(.+)$/)?.[1]
-        ?.trim(),
-    )
-    .filter((s): s is string => !!s);
-  const content = withoutMaintext
-    .replace(/<options>[\s\S]*?<\/options>/gi, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  return { content, options };
+  return projectStoryOutput(raw);
 }
 
 /** 各 Agent 的中文标签（供调试日志 / DebugPanel 显示） */
@@ -208,7 +174,10 @@ export class GamePipeline {
     this.game.isGenerating = true;
 
     try {
-      // 1. 添加用户消息（非用户消息仅注入 context 不渲染）
+      // 1. 先快照既有历史；当前输入只走 userInput，避免同时出现在 NARRATIVE 与 USER_INPUT。
+      const context = this.buildContext(userInput);
+
+      // 添加用户消息（非用户消息仅注入 context 不渲染）
       if (isUserMessage) {
         this.game.addMessage(userInput, 'user');
       }
@@ -221,7 +190,6 @@ export class GamePipeline {
 
       // 2. 构建 endpoints & context
       const endpoints = this.buildEndpoints();
-      const context = this.buildContext(userInput);
       this.currentContext = context;
       this.pendingPlotTasks = [];
       this.pendingAudioMarker = null;
@@ -440,15 +408,22 @@ export class GamePipeline {
       // 🆕 为 story agent 构建流式回调（如果提供了 onStoryChunk）
       let streamCallbacks: StreamCallbacks | undefined;
       if (isStory && onStoryChunk) {
+        let streamedRaw = '';
         streamCallbacks = {
           onChunk: (text: string, isComplete: boolean) => {
-            onStoryChunk(text, isComplete);
+            if (isComplete) {
+              onStoryChunk('', true);
+              return;
+            }
+            streamedRaw += text;
+            onStoryChunk(projectStreamingStory(streamedRaw), false);
           },
           onComplete: () => {
             // 流式完成 — 最终结果由 handleAgentResult 处理
           },
           onError: (error: string) => {
             console.warn('[GamePipeline] story 流式错误:', error);
+            onStoryChunk('', true);
           },
         };
       }
@@ -1025,7 +1000,7 @@ export class GamePipeline {
           duration: 0,
         });
       },
-      onAgentComplete: (result) => {
+      onAgentComplete: async (result) => {
         this.game.clearAgentStatus(result.agentId, result.error);
         // 补全本轮已启动日志的剩余字段（保留 onAgentStart 写入的占位条目）
         const prev = this.game.agentLog.find((e) => e.agentId === result.agentId);
@@ -1047,7 +1022,7 @@ export class GamePipeline {
           completionTokens: result.completionTokens,
           duration: result.duration,
         });
-        this.handleAgentResult(result);
+        await this.handleAgentResult(result);
       },
       onAgentError: (agentId, error) => {
         console.error(`[GamePipeline] Agent 错误: ${agentId}`, error);
@@ -1099,12 +1074,10 @@ export class GamePipeline {
     switch (result.agentId) {
       case 'story': {
         // rawResponse 直接就是 AI 返回的字符串正文（流式模式下也是完整文本）
-        if (result.rawResponse) {
-          const { content, options } = extractStoryOptions(result.rawResponse);
-          this.game.setPendingOptions(options);
-          // 配乐标记没有渲染意义，漏出去就是玩家眼前的一行尖括号
-          this.game.addMessage(stripPlayAudioMarkers(content).trim(), 'assistant');
-        }
+        const { content, options } = extractStoryOptions(result.rawResponse || '');
+        if (!content) throw new Error('story produced no player-visible narrative');
+        this.game.setPendingOptions(options);
+        this.game.addMessage(content, 'assistant');
         break;
       }
       case 'memory_summary': {

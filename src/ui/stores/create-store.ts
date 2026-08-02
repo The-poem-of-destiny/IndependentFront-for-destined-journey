@@ -1054,6 +1054,7 @@ export const useCreateStore = defineStore('create', () => {
   /** 核心生成循环: 通过模板系统 buildAgentMessagesAsync 构建上下文，selfCritique.score < 6 时重试（最多 2 次调用） */
   async function runOutlineGeneration(initialUserMessage: string): Promise<boolean> {
     plotGenerationError.value = null;
+    await useSettingsStore().initApiSecrets();
     const endpoint = resolvePlotOutlineEndpoint();
     if (!endpoint || !endpoint.defaultModel) {
       plotGenerationError.value = '未配置 API 端点或模型，请在设置页为「大纲生成」Agent 配置 API';

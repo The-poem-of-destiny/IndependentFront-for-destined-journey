@@ -10,6 +10,13 @@
  */
 import { defineStore } from 'pinia';
 import { ref, watch } from 'vue';
+import { deleteApiEndpoint, getApiEndpoints, saveApiEndpoint } from '@engine/database';
+import {
+  apiEndpointToEntry,
+  apiEntryToEndpoint,
+  migrateApiKeysToDexie,
+  type ApiKeyMigrationOutcome,
+} from './api-key-migration';
 
 // ===== 类型 =====
 
@@ -65,6 +72,32 @@ export interface AgentProjectDefaults {
 // ===== 默认值 =====
 
 const STORAGE_KEY = 'fated-poem-settings';
+
+function containsApiPoolKey(settings: Record<string, unknown>): boolean {
+  return (
+    Array.isArray(settings.apiPool) &&
+    settings.apiPool.some(
+      (entry) =>
+        Boolean(entry) &&
+        typeof entry === 'object' &&
+        typeof (entry as Record<string, unknown>).apiKey === 'string' &&
+        ((entry as Record<string, unknown>).apiKey as string).length > 0,
+    )
+  );
+}
+
+/** localStorage is configuration metadata only; API secrets live in Dexie `apiEndpoints`. */
+export function serializeSettingsForLocalStorage(settings: Record<string, unknown>): string {
+  const copy = JSON.parse(JSON.stringify(settings)) as Record<string, unknown>;
+  if (Array.isArray(copy.apiPool)) {
+    for (const entry of copy.apiPool) {
+      if (entry && typeof entry === 'object' && 'apiKey' in entry) {
+        (entry as Record<string, unknown>).apiKey = '';
+      }
+    }
+  }
+  return JSON.stringify(copy);
+}
 
 function getDefaults(): Record<string, any> {
   return {
@@ -204,27 +237,100 @@ export const useSettingsStore = defineStore('settings', () => {
   }, 0);
 
   const settings = ref<Record<string, any>>(merged);
+  const apiSecretsReady = ref(false);
+  const apiSecretsError = ref<string | null>(null);
+  const lastApiKeyMigration = ref<ApiKeyMigrationOutcome | null>(null);
+  // New/sanitized profiles can persist immediately. Legacy profiles pause until their only key
+  // copy has been verified in Dexie.
+  let settingsPersistenceEnabled = !containsApiPoolKey(saved);
+  let apiInitPromise: Promise<ApiKeyMigrationOutcome> | null = null;
+
+  function persistRedactedSettings(): boolean {
+    try {
+      localStorage.setItem(STORAGE_KEY, serializeSettingsForLocalStorage(settings.value));
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   // deep watch → 自动存
   watch(
     settings,
-    (val) => {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
-      } catch {
-        /* quota exceeded 等极端情况静默失败 */
-      }
+    () => {
+      saveNow();
     },
     { deep: true },
   );
 
   /** 手动触发存储（正常情况下不需要调用，deep watch 自动处理） */
-  function saveNow() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings.value));
-    } catch {
-      /* 静默 */
+  function saveNow(): boolean {
+    // Before migration succeeds, overwriting localStorage could destroy the only key copy.
+    if (!settingsPersistenceEnabled) return false;
+    return persistRedactedSettings();
+  }
+
+  async function initApiSecrets(): Promise<ApiKeyMigrationOutcome> {
+    if (!apiInitPromise) apiInitPromise = doInitApiSecrets();
+    const outcome = await apiInitPromise;
+    if (outcome.status === 'failed') apiInitPromise = null;
+    return outcome;
+  }
+
+  async function doInitApiSecrets(): Promise<ApiKeyMigrationOutcome> {
+    const outcome = await migrateApiKeysToDexie({
+      settings: settings.value,
+      persistSettings: persistRedactedSettings,
+    });
+    lastApiKeyMigration.value = outcome;
+    apiSecretsReady.value = true;
+
+    if (outcome.status === 'failed') {
+      apiSecretsError.value = outcome.message;
+      // With no legacy secret at risk, unrelated settings may still be persisted safely.
+      settingsPersistenceEnabled = !outcome.legacyKeysRetained;
+      return outcome;
     }
+
+    settings.value.apiPool = outcome.entries;
+    apiSecretsError.value = null;
+    settingsPersistenceEnabled = true;
+    persistRedactedSettings();
+    return outcome;
+  }
+
+  async function saveApiEntry(entry: ApiEntry): Promise<void> {
+    const initialized = await initApiSecrets();
+    if (initialized.status === 'failed') {
+      throw new Error(`API key storage is unavailable: ${initialized.message}`);
+    }
+    const copy = JSON.parse(JSON.stringify(entry)) as ApiEntry;
+    await saveApiEndpoint(apiEntryToEndpoint(copy));
+    const index = (settings.value.apiPool as ApiEntry[]).findIndex((item) => item.id === copy.id);
+    if (index >= 0) settings.value.apiPool[index] = copy;
+    else settings.value.apiPool.push(copy);
+    persistRedactedSettings();
+  }
+
+  async function removeApiEntry(id: string): Promise<void> {
+    const initialized = await initApiSecrets();
+    if (initialized.status === 'failed') {
+      throw new Error(`API key storage is unavailable: ${initialized.message}`);
+    }
+    await deleteApiEndpoint(id);
+    settings.value.apiPool = (settings.value.apiPool as ApiEntry[]).filter(
+      (entry) => entry.id !== id,
+    );
+    persistRedactedSettings();
+  }
+
+  async function reloadApiEntries(): Promise<void> {
+    const rows = await getApiEndpoints();
+    settings.value.apiPool = rows.map((row) => apiEndpointToEntry(row));
+    settingsPersistenceEnabled = true;
+    apiSecretsError.value = null;
+    apiSecretsReady.value = true;
+    persistRedactedSettings();
   }
 
   /** 重置所有设置为默认值 */
@@ -395,7 +501,14 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return {
     settings,
+    apiSecretsReady,
+    apiSecretsError,
+    lastApiKeyMigration,
     saveNow,
+    initApiSecrets,
+    saveApiEntry,
+    removeApiEntry,
+    reloadApiEntries,
     resetAll,
     resetWorldBooksToDefaults,
     getStorageUsage,

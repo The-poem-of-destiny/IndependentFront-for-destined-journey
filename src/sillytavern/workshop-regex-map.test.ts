@@ -36,7 +36,7 @@ function regex(over: Partial<WorkshopSourceRegex> = {}): WorkshopSourceRegex {
     substituteRegex: 0,
     minDepth: null,
     maxDepth: null,
-    placement: [],
+    placement: [2],
     ...over,
   };
 }
@@ -252,7 +252,7 @@ describe('mapWorkshopRegexes —— droppedNotes 必须 loud', () => {
     expect(textOfKind(droppedNotes, 'dropped')).toContain('findRegex 为空');
   });
 
-  it('placement / minDepth / maxDepth / runOnEdit / trimStrings 各记一条', () => {
+  it('保留 AI output placement 与深度边界；不可达 runOnEdit 不误报，只记录 trimStrings', () => {
     const { rules, droppedNotes } = mapWorkshopRegexes(
       [
         regex({
@@ -266,22 +266,37 @@ describe('mapWorkshopRegexes —— droppedNotes 必须 loud', () => {
       CTX,
     );
     expect(rules).toHaveLength(1); // 丢弃字段不影响规则本体落地
-    // ★ 五项全是真丢弃 —— 一条 degraded/sideEffect 都不该混进来
+    expect(rules[0]).toMatchObject({ minDepth: 1, maxDepth: 10 });
     expect(new Set(droppedNotes.map((n) => n.kind))).toEqual(new Set(['dropped']));
     const joined = textOfKind(droppedNotes, 'dropped');
-    expect(joined).toContain('placement=[1,2]');
-    expect(joined).toContain('minDepth=1');
-    expect(joined).toContain('maxDepth=10');
-    expect(joined).toContain('runOnEdit');
     expect(joined).toContain('trimStrings');
+    expect(joined).not.toContain('placement');
+    expect(joined).not.toContain('minDepth');
+    expect(joined).not.toContain('maxDepth');
+    expect(joined).not.toContain('runOnEdit');
   });
 
-  it('★ 坑 2：substituteRegex 非 0 才记 note（0 = 不替换，丢弃无损）', () => {
+  it('★ 坑 2：substituteRegex 只有 pattern 真含宏时才是可达缺口', () => {
     expect(
       textOf(mapWorkshopRegexes([regex({ substituteRegex: 0 })], CTX).droppedNotes),
     ).not.toContain('substituteRegex');
-    const notes = mapWorkshopRegexes([regex({ substituteRegex: 2 })], CTX).droppedNotes;
+    expect(
+      textOf(mapWorkshopRegexes([regex({ substituteRegex: 2 })], CTX).droppedNotes),
+    ).not.toContain('substituteRegex');
+    const notes = mapWorkshopRegexes(
+      [regex({ findRegex: '{{character}}', substituteRegex: 2 })],
+      CTX,
+    ).droppedNotes;
     expect(textOfKind(notes, 'dropped')).toContain('substituteRegex=2');
+  });
+
+  it('只映射含 AI output placement=2 的规则，避免把 user-only 规则错投到正文', () => {
+    expect(mapWorkshopRegexes([regex({ placement: [2] })], CTX).rules).toHaveLength(1);
+    expect(mapWorkshopRegexes([regex({ placement: [1, 2] })], CTX).rules).toHaveLength(1);
+
+    const userOnly = mapWorkshopRegexes([regex({ placement: [1] })], CTX);
+    expect(userOnly.rules).toHaveLength(0);
+    expect(textOfKind(userOnly.droppedNotes, 'dropped')).toContain('不包含 AI 输出位置 2');
   });
 
   it('无信息可丢的干净条目 → 零 note（不刷屏，否则真丢弃项会被淹没）', () => {
@@ -294,7 +309,7 @@ describe('mapWorkshopRegexes —— droppedNotes 必须 loud', () => {
     expect(textOfKind(droppedNotes, 'dropped')).toContain('markdownOnly 为 false');
   });
 
-  it('已知后果如实记录：script / style / 围栏 / 完整 HTML 文档 / 宏', () => {
+  it('iframe 已支持 script / style / 围栏 / 完整文档，仅未求值宏记降级', () => {
     const { rules, droppedNotes } = mapWorkshopRegexes(
       [
         regex({
@@ -309,25 +324,20 @@ describe('mapWorkshopRegexes —— droppedNotes 必须 loud', () => {
     expect(rules[0].enabled).toBe(true);
     expect(droppedNotes.filter((n) => n.kind === 'dropped')).toHaveLength(0);
 
-    // <style> 溢出到规则之外 → 单独成类
-    const side = droppedNotes.filter((n) => n.kind === 'sideEffect');
-    expect(side).toHaveLength(1);
-    expect(side[0].text).toContain('<style>');
-
-    // 其余四条都是「装了但渲染不完整」
+    expect(droppedNotes.filter((n) => n.kind === 'sideEffect')).toHaveLength(0);
     const degraded = textOfKind(droppedNotes, 'degraded');
-    expect(degraded).toContain('<script>');
-    expect(degraded).toContain('围栏');
-    expect(degraded).toContain('完整 HTML 文档');
     expect(degraded).toContain('2 处 {{...}} 宏');
+    expect(degraded).not.toContain('<script>');
+    expect(degraded).not.toContain('<style>');
   });
 
-  it('★ 一条正则同时产出三类 note —— 分类互不串', () => {
+  it('只报告可达的 iframe 限制，且不混进真正丢弃计数', () => {
     const { rules, droppedNotes } = mapWorkshopRegexes(
       [
         regex({
-          runOnEdit: true, // dropped
-          replaceString: '<style>a{}</style><script>x</script>', // sideEffect + degraded
+          runOnEdit: true, // 当前没有消息编辑入口，不改变首次渲染
+          replaceString:
+            '<img src="https://cdn.example/image.png"><script>parent.document;localStorage.setItem("x","y")</script>',
         }),
       ],
       CTX,
@@ -335,16 +345,18 @@ describe('mapWorkshopRegexes —— droppedNotes 必须 loud', () => {
     expect(rules).toHaveLength(1);
     const count = (kind: WorkshopNoteKind): number =>
       droppedNotes.filter((n) => n.kind === kind).length;
-    expect(count('dropped')).toBe(1);
-    expect(count('degraded')).toBe(1);
-    expect(count('sideEffect')).toBe(1);
-    expect(textOfKind(droppedNotes, 'dropped')).not.toContain('<style>');
-    expect(textOfKind(droppedNotes, 'sideEffect')).not.toContain('runOnEdit');
+    expect(count('dropped')).toBe(0);
+    expect(count('degraded')).toBe(2);
+    expect(count('sideEffect')).toBe(0);
+    expect(textOfKind(droppedNotes, 'degraded')).not.toContain('外部来源');
+    expect(textOfKind(droppedNotes, 'degraded')).toContain('父页面或酒馆 API');
+    expect(textOfKind(droppedNotes, 'degraded')).toContain('临时有效');
+    expect(textOfKind(droppedNotes, 'dropped')).not.toContain('外部来源');
   });
 
   it('note 里带条目名，用户能对上是哪条', () => {
     const { droppedNotes } = mapWorkshopRegexes(
-      [regex({ scriptName: '维拉占卜美化', runOnEdit: true })],
+      [regex({ scriptName: '维拉占卜美化', trimStrings: ['legacy'] })],
       CTX,
     );
     expect(droppedNotes[0].text).toContain('维拉占卜美化');

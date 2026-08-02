@@ -87,16 +87,16 @@ export interface WorldBook {
  * 一条处置记录的类别 —— **「丢了」和「装上了但会这样」不是一回事**。
  *
  * 首版把两者合流成一个 `string[]`，UI 统一按「N 项内容未导入」报数，于是一条
- * 装好了、也启用了、只是 `<script>` 不执行的正则，会被算进「未导入」——
+ * 装好了、也启用了、只是执行环境受限的正则，会被算进「未导入」——
  * 用户读到的是安装失败，实际内容装得好好的。类别就是为了让 UI 不再说这个谎。
  *
- * - `dropped` —— ST 字段在本引擎无对应物，**确实丢了**（`placement` / `minDepth`
- *   / `maxDepth` / `runOnEdit` / `substituteRegex` / `trimStrings`；`promptOnly`
- *   更是整条不产出规则）
- * - `degraded` —— **装了**，但渲染不完整（```` ``` ```` 围栏无渲染器、完整 HTML
- *   文档被解析器截断、`<script>` 在 v-html 里惰性、`{{...}}` 宏原样输出）
- * - `sideEffect` —— **装了**，且有**规则自身之外**的副作用（`<style>` 全局生效，
- *   可能覆盖应用主题 token）。单独成类是因为它是唯一会影响其它 UI 的，该最显眼。
+ * - `dropped` —— 上游语义在当前显示路径**确实丢了**（`promptOnly`、不含 AI 输出
+ *   位置 2 的规则、`trimStrings`、可达的 findRegex 宏替换；`markdownOnly=false`
+ *   的提示词侧改写也只保留显示侧）
+ * - `degraded` —— **装了**，但受隔离契约限制（parent/宿主 API 不开放、storage 仅临时
+ *   有效、`{{...}}` 宏原样输出；远程资源与网络 API 已开放）
+ * - `sideEffect` —— **装了**，且有**规则自身之外**的副作用。富 replacement 进入独立
+ *   iframe 后，现行 mapper 不再为 `<style>` 产生这类记录；类型保留以兼容历史行。
  */
 export type WorkshopNoteKind = 'dropped' | 'degraded' | 'sideEffect';
 
@@ -425,6 +425,8 @@ export interface PipelineStage {
 
 export interface Pipeline {
   stages: PipelineStage[]; // 顺序执行的阶段
+  /** 必须成功产出非空结果的 Agent；缺席时保持旧的“任一阶段完成即成功”语义 */
+  requiredAgents?: string[];
   timeout: number; // 整体超时 ms
   retryOnFail: boolean; // 失败重试策略
 }
@@ -433,6 +435,7 @@ export interface Pipeline {
 export const DEFAULT_AGENT_PIPELINE: Pipeline = {
   timeout: 120000,
   retryOnFail: true,
+  requiredAgents: ['story'],
   stages: [
     // Stage 0: 记忆召回 + 剧情触发检查（并行）
     { agents: ['memory_recall', 'plot_pre_check'], waitFor: [] },
@@ -728,6 +731,10 @@ export interface BeautifierRule {
   enabled: boolean;
   order: number;
   isBuiltin: boolean;
+  /** 从最新对话消息起算的零基深度下限（ST regex minDepth 兼容）。 */
+  minDepth?: number;
+  /** 从最新对话消息起算的零基深度上限（ST regex maxDepth 兼容）。 */
+  maxDepth?: number;
   /** 自动启用绑定 — 匹配时规则自动 enable 且不可手动关 */
   autoEnable?: {
     /** 世界书 ID 集合（如 ['system_core']） */

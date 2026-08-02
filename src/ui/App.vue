@@ -7,6 +7,7 @@ import { useAssetStore } from './stores/asset-store';
 import { useSettingsStore } from './stores/settings-store';
 import { useWorldBookStore } from './stores/worldbook-store';
 import { useBeautifierStore } from './stores/beautifier-store';
+import { useWorkshopStore } from './stores/workshop-store';
 import { queryForView } from './lib/view-audio';
 import { applyReducedMotion } from './lib/reduced-motion';
 import ToastContainer from './components/shared/ToastContainer.vue';
@@ -18,6 +19,16 @@ const assets = useAssetStore();
 const settings = useSettingsStore();
 const worldbooks = useWorldBookStore();
 const beautifier = useBeautifierStore();
+const workshop = useWorkshopStore();
+
+void settings.initApiSecrets().then((outcome) => {
+  if (outcome.status === 'failed') {
+    ui.toast(
+      'API 密钥无法迁移到安全存储；旧密钥仍保留，本次会话不会覆盖原设置。请检查浏览器存储后重试。',
+      'error',
+    );
+  }
+});
 
 // ═══ 世界书（Phase 0 / 设计 D4）═══════════════════════════
 //
@@ -29,6 +40,15 @@ const beautifier = useBeautifierStore();
 void worldbooks.init().catch(() => {
   /* 迁移例程内部永不抛；这里兜 hydrate/内置合并的意外，不该拦住应用启动 */
 });
+
+// 工坊正则按「当前存档启用了哪个工坊项目」隔离；启动时先水合项目元数据，
+// 让首屏正文就能把 creative_workshop:<uid> 还原成 workshop:<projectId>。
+void worldbooks
+  .init()
+  .then(() => workshop.init())
+  .catch(() => {
+    /* 工坊元数据不可用时规则保持关闭，不影响普通正文 */
+  });
 
 // ═══ 美化规则（Phase 0b）═════════════════════════════════
 //

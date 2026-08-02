@@ -293,6 +293,20 @@ entry.extra = {
 
 **真机复验**：同一批 note 现在显示为「14 项未导入 · 15 项已装但效果受限 · ⚠ 5 项有全局副作用」，合计仍是 34。**「丢弃必须 loud」不变**，改的是 loud 的对象要分得清 —— 把不同性质的事混成一个数字，本身就是另一种静默截断。
 
+#### D16 二次修订 —— opaque 联网 iframe（2026-08-02）
+
+上面的 `v-html`「已知后果」已被新 renderer **取代，不再描述现行行为**。303 个公共项目的完整快照得到 99 条正则：90 条 HTML、82 条 `<style>`、35 条 `<script>`、37 条完整文档，最高捕获引用 `$39`。消毒或 parent DOM 渲染无法同时满足这套语料与隔离要求，现行裁定是：
+
+- replacement 原样保留；每条已提交消息只建一个无 same-origin、`credentialless`、`no-referrer` 的 `sandbox="allow-scripts"` iframe，全部命中共享 message DOM，未命中原文先转义再组装。
+- `<style>` 只影响自己的 frame；script、inline handler、完整文档与外层 HTML 围栏均可执行/渲染。
+- CSP 放行外部 HTTP(S) 资源与原生网络 API；form、popup、download、top navigation 与嵌套 frame 仍不开放。流式阶段不创建 frame。
+- local/session storage 是 per-frame 临时内存；parent DOM、真实 storage、Dexie 与模型调用不开放，应用自有 `/api` 拒绝 `Origin: null`。
+- 网络是刻意放开的兼容面：远程/本地网络请求，以及外传正文与 frame-local 数据，是当前威胁模型明确接受的暴露。
+- 因此 `<script>` / `<style>` / 围栏 / 完整文档 / 60 条外部资源规则**不再产出 note**；16 条 parent 耦合、14 条宿主 API 与 8 条 storage 用户仍按真实限制记 `degraded`，已持久化的旧「禁止联网」提示在读取时过滤。`sideEffect` 类型只为历史行兼容保留。
+- AI-output `placement=2` 与含边界消息深度已经接线；user-only placement 不再误投 assistant 正文。现有语料的 `runOnEdit` 不可达，三个非零 `substituteRegex` 因 findRegex 无宏而惰性。prompt/history 改写、user-side 显示与 `trimStrings` 仍是独立缺口。
+
+完整语料与验证门见 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
+
 ---
 
 ## 7. 获取形态

@@ -80,6 +80,10 @@ export const WORKSHOP_NOTE_KINDS: readonly WorkshopNoteKind[] = [
   'sideEffect',
 ] as const;
 
+// Installed rows can retain this generated note from the former offline policy.
+// Filtering it at the read boundary fixes existing projects without a Dexie rewrite.
+const OBSOLETE_OFFLINE_NOTE = '隔离框禁止联网，远程图片、字体、样式或脚本不会加载';
+
 /** 造一条处置记录（产出侧的糖，省得每处都写字面量） */
 export function workshopNote(kind: WorkshopNoteKind, text: string): WorkshopNote {
   return { kind, text };
@@ -118,7 +122,7 @@ export function normalizeWorkshopNotes(
   return notes
     .filter((n) => n !== null && n !== undefined)
     .map((n) => normalizeWorkshopNote(n))
-    .filter((n) => n.text.length > 0);
+    .filter((n) => n.text.length > 0 && !n.text.includes(OBSOLETE_OFFLINE_NOTE));
 }
 
 /** 按类别分好的处置记录 —— 三个键恒在（空组给空数组），UI 直接 `.length` 取数 */
@@ -311,7 +315,7 @@ export interface WorkshopSourceRegex {
   promptOnly: boolean;
   runOnEdit: boolean;
   trimStrings: string[];
-  /** ⚠️ 枚举非布尔（实测 0 / 2）—— 本引擎无对应物，丢弃并记 note */
+  /** ⚠️ 枚举非布尔（实测 0 / 1 / 2）；findRegex 含宏时才会影响当前显示路径。 */
   substituteRegex: number;
   minDepth: number | null;
   maxDepth: number | null;

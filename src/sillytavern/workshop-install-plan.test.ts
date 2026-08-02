@@ -409,7 +409,7 @@ describe('planInstall —— droppedNotes 汇总', () => {
       substituteRegex: 0,
       minDepth: null,
       maxDepth: null,
-      placement: [],
+      placement: [2],
       ...over,
     };
   }
@@ -425,14 +425,22 @@ describe('planInstall —— droppedNotes 汇总', () => {
     expect(noteText(plan)).toContain('promptOnly');
   });
 
-  it('正则侧的 degraded / sideEffect 不被算成丢弃', () => {
+  it('正则侧的 iframe 降级不被算成丢弃', () => {
     const plan = planInstall(
-      input([source('a')], [rx({ replaceString: '<style>a{}</style><script>x</script>' })]),
+      input(
+        [source('a')],
+        [
+          rx({
+            replaceString:
+              '<img src="https://cdn.example/image.png"><script>parent.document</script>',
+          }),
+        ],
+      ),
       FRESH,
     );
     expect(plan.rules).toHaveLength(1); // 装上了
     expect(plan.droppedNotes.filter((n) => n.kind === 'dropped')).toHaveLength(0);
-    expect(plan.droppedNotes.map((n) => n.kind).sort()).toEqual(['degraded', 'sideEffect']);
+    expect(plan.droppedNotes.map((n) => n.kind)).toEqual(['degraded']);
   });
 
   it('退休条目记一条 dropped，带 uid 与「不再复用」', () => {
@@ -481,7 +489,7 @@ describe('planInstall —— 正则映射接入（D16）', () => {
             substituteRegex: 0,
             minDepth: null,
             maxDepth: null,
-            placement: [],
+            placement: [2],
           },
         ],
       ),

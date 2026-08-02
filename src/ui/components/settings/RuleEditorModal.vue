@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import type { BeautifierRule } from '@engine/types';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
+import BeautifiedNarrative from '../game/BeautifiedNarrative.vue';
 
 const props = defineProps<{ rule: BeautifierRule | null }>();
 const emit = defineEmits<{
@@ -26,18 +27,31 @@ const testPlaceholder = computed(() => {
   return '输入测试文本...';
 });
 
-const previewHtml = computed(() => {
-  if (!testInput.value || !form.value.pattern) return '';
+const previewRule = computed<BeautifierRule>(() => ({
+  id: 'preview-rule',
+  name: form.value.name || '预览规则',
+  scope: form.value.scope,
+  pattern: form.value.pattern,
+  flags: form.value.flags,
+  replacement: form.value.replacement,
+  enabled: true,
+  order: 0,
+  isBuiltin: false,
+}));
+
+const previewState = computed<'empty' | 'invalid' | 'unmatched' | 'matched'>(() => {
+  if (!testInput.value || !form.value.pattern) return 'empty';
   try {
     const re = new RegExp(form.value.pattern, form.value.flags);
-    return testInput.value.replace(re, form.value.replacement);
+    return re.test(testInput.value) ? 'matched' : 'unmatched';
   } catch {
-    return '<span style="color:var(--theme-error)">正则表达式有误</span>';
+    return 'invalid';
   }
 });
 
 function handleSave() {
   const rule: BeautifierRule = {
+    ...(props.rule ?? {}),
     id: props.rule?.id ?? crypto.randomUUID(),
     name: form.value.name,
     scope: form.value.scope,
@@ -99,7 +113,9 @@ function handleSave() {
           placeholder='如: &lt;span class="my-class"&gt;$1&lt;/span&gt;'
           style="font-family: monospace; font-size: 0.8rem"
         />
-        <p class="form-hint">支持 $1, $2... 代表捕获组。这会作为 HTML 直接渲染。</p>
+        <p class="form-hint">
+          支持 $1, $2... 捕获组；HTML、CSS、脚本与远程资源在仅临时存储的隔离框中运行。联网内容可发送框内正文，但无法访问应用数据。
+        </p>
       </label>
 
       <!-- Preview -->
@@ -108,12 +124,13 @@ function handleSave() {
         <input v-model="testInput" class="form-input" :placeholder="testPlaceholder" />
         <p class="form-hint" style="margin-top: 2px">输入测试文本查看匹配效果</p>
       </label>
-      <div v-if="previewHtml" class="preview-box" v-html="previewHtml" />
-      <div
-        v-else-if="testInput && !previewHtml"
-        class="preview-box text-muted"
-        style="font-style: italic"
-      >
+      <div v-if="previewState === 'matched'" class="preview-box">
+        <BeautifiedNarrative :text="testInput" :rules="[previewRule]" force />
+      </div>
+      <div v-else-if="previewState === 'invalid'" class="preview-box preview-error">
+        正则表达式有误
+      </div>
+      <div v-else-if="previewState === 'unmatched'" class="preview-box text-muted preview-empty">
         未匹配到任何内容
       </div>
     </div>
@@ -178,6 +195,12 @@ function handleSave() {
 }
 .preview-box code {
   font-size: 0.8rem;
+}
+.preview-error {
+  color: var(--theme-error);
+}
+.preview-empty {
+  font-style: italic;
 }
 .text-muted {
   color: var(--theme-text-muted);
