@@ -219,7 +219,13 @@ describe('buildItemGenPatches', () => {
               divinity: 0,
             } as any,
           ],
-          automata: [{ id: 'a1', trigger: { window: 'on_attack' }, effect: { intent: 'damage', value: 5 } } as any],
+          automata: [
+            {
+              id: 'a1',
+              trigger: { window: 'on_attack' },
+              effect: { intent: 'damage', value: 5 },
+            } as any,
+          ],
         },
       ],
       inventory: [],
@@ -400,8 +406,14 @@ describe('runItemGenChain', () => {
 
   it('🔴 批量: 所有 markers 打包进 {{ITEM_REQUEST}}（N 个 <request>）', async () => {
     const markers = [
-      makeMarker({ attributes: { itemType: 'skill', source: 'story', owner: 'char-001' }, bodyText: '灼热射线技能描述' }),
-      makeMarker({ attributes: { itemType: 'equipment', source: 'story', owner: 'char-001' }, bodyText: '法师长袍装备描述' }),
+      makeMarker({
+        attributes: { itemType: 'skill', source: 'story', owner: 'char-001' },
+        bodyText: '灼热射线技能描述',
+      }),
+      makeMarker({
+        attributes: { itemType: 'equipment', source: 'story', owner: 'char-001' },
+        bodyText: '法师长袍装备描述',
+      }),
     ];
     const xml = buildItemRequestsXML(markers);
 

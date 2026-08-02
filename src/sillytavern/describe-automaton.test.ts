@@ -45,7 +45,16 @@ describe('describeAutomaton intents 13 类', () => {
   });
   it('AddModifier hitBonus', () => {
     const a = makeA({
-      intents: [{ kind: 'AddModifier', slot: 'hitBonus', value: 5, scope: 'whole_action', targetId: 'self', divinity: 0 }],
+      intents: [
+        {
+          kind: 'AddModifier',
+          slot: 'hitBonus',
+          value: 5,
+          scope: 'whole_action',
+          targetId: 'self',
+          divinity: 0,
+        },
+      ],
     });
     expect(describeAutomaton(a)[0]).toContain('命中 +5');
   });
@@ -54,11 +63,17 @@ describe('describeAutomaton intents 13 类', () => {
     expect(describeAutomaton(a)[0]).toContain('回复 20 点HP');
   });
   it('ApplyStatus', () => {
-    const a = makeA({ intents: [{ kind: 'ApplyStatus', targetId: 'target', statusId: 'bleed', duration: 3, layers: 2 }] });
+    const a = makeA({
+      intents: [
+        { kind: 'ApplyStatus', targetId: 'target', statusId: 'bleed', duration: 3, layers: 2 },
+      ],
+    });
     expect(describeAutomaton(a)[0]).toContain('附加 流血 2层');
   });
   it('ApplyStatus 无层数', () => {
-    const a = makeA({ intents: [{ kind: 'ApplyStatus', targetId: 'target', statusId: 'poison', duration: 2 }] });
+    const a = makeA({
+      intents: [{ kind: 'ApplyStatus', targetId: 'target', statusId: 'poison', duration: 2 }],
+    });
     expect(describeAutomaton(a)[0]).toContain('附加 中毒');
   });
   it('RemoveStatus', () => {
@@ -66,7 +81,9 @@ describe('describeAutomaton intents 13 类', () => {
     expect(describeAutomaton(a)[0]).toContain('移除流血');
   });
   it('SpendResource', () => {
-    const a = makeA({ intents: [{ kind: 'SpendResource', targetId: 'self', resource: 'mp', amount: 5 }] });
+    const a = makeA({
+      intents: [{ kind: 'SpendResource', targetId: 'self', resource: 'mp', amount: 5 }],
+    });
     expect(describeAutomaton(a)[0]).toContain('消耗 5 点MP');
   });
   it('PreventDeath', () => {
@@ -86,12 +103,20 @@ describe('describeAutomaton intents 13 类', () => {
     expect(describeAutomaton(a)[0]).toContain('提示：寒光乍现');
   });
   it('OverrideIntent', () => {
-    const a = makeA({ intents: [{ kind: 'OverrideIntent', ruleKey: 'freezeSlot', payload: {}, divinity: 0 }] });
+    const a = makeA({
+      intents: [{ kind: 'OverrideIntent', ruleKey: 'freezeSlot', payload: {}, divinity: 0 }],
+    });
     expect(describeAutomaton(a)[0]).toContain('覆盖freezeSlot行动');
   });
   it('ScheduleIntent 延后', () => {
     const a = makeA({
-      intents: [{ kind: 'ScheduleIntent', delay: 1, intent: { kind: 'DealDamage', targetId: 'target', amount: 3, damageType: 'physical' } }],
+      intents: [
+        {
+          kind: 'ScheduleIntent',
+          delay: 1,
+          intent: { kind: 'DealDamage', targetId: 'target', amount: 3, damageType: 'physical' },
+        },
+      ],
     });
     expect(describeAutomaton(a)[0]).toContain('延后：');
   });
@@ -100,12 +125,21 @@ describe('describeAutomaton intents 13 类', () => {
     expect(describeAutomaton(a)[0]).toContain('召唤 unit-1');
   });
   it('SpawnOrDespawnIntent 移除', () => {
-    const a = makeA({ intents: [{ kind: 'SpawnOrDespawnIntent', op: 'despawn', unitId: 'unit-1' }] });
+    const a = makeA({
+      intents: [{ kind: 'SpawnOrDespawnIntent', op: 'despawn', unitId: 'unit-1' }],
+    });
     expect(describeAutomaton(a)[0]).toContain('移除 unit-1');
   });
   it('RequestChoiceIntent', () => {
     const a = makeA({
-      intents: [{ kind: 'RequestChoiceIntent', choiceId: 'c1', prompt: '要躲避还是硬抗？', options: ['躲避', '硬抗'] }],
+      intents: [
+        {
+          kind: 'RequestChoiceIntent',
+          choiceId: 'c1',
+          prompt: '要躲避还是硬抗？',
+          options: ['躲避', '硬抗'],
+        },
+      ],
     });
     expect(describeAutomaton(a)[0]).toContain('要求选择：要躲避还是硬抗？');
   });

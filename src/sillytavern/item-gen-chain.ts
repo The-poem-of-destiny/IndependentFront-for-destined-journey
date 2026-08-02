@@ -132,7 +132,11 @@ export async function runItemGenChain(
   // build 会重复 N 份 patches —— 10 个 marker 就把 5 技能 4 装备重复 10 遍）。
   // 批量假定所有 marker 同一 owner（request_dispatcher 开局通常全归主角）；
   // 跨角色多 owner 的精细分流属未来增强，当前场景不触及。
-  const markers = request.markers?.length ? request.markers : request.marker ? [request.marker] : [];
+  const markers = request.markers?.length
+    ? request.markers
+    : request.marker
+      ? [request.marker]
+      : [];
   const playerName = request.context.characters?.find((c) => c.type === 'player')?.name;
   const firstMarker = markers[0];
   const characterId = firstMarker?.attributes.owner ?? playerName;
@@ -189,7 +193,11 @@ async function callItemGenForRequest(
   deps: ItemGenChainDeps,
 ): Promise<ItemGenOutput> {
   // 批量优先：request.markers 存在 → 打包全部；否则退单个 marker
-  const markers = request.markers?.length ? request.markers : request.marker ? [request.marker] : [];
+  const markers = request.markers?.length
+    ? request.markers
+    : request.marker
+      ? [request.marker]
+      : [];
   const itemRequestsXML = buildItemRequestsXML(markers);
 
   const itemLocalParams: Record<string, string> = {
@@ -302,7 +310,9 @@ export function buildItemGenPatches(itemOutput: ItemGenOutput, characterId: stri
         ...(equip.effects && Object.keys(equip.effects).length > 0
           ? { effects: equip.effects }
           : {}),
-        ...(equip.scripts && Object.keys(equip.scripts).length > 0 ? { scripts: equip.scripts } : {}),
+        ...(equip.scripts && Object.keys(equip.scripts).length > 0
+          ? { scripts: equip.scripts }
+          : {}),
         ...(equip.modifiers?.length ? { modifiers: equip.modifiers } : {}),
         ...(equip.buffs?.length ? { buffs: equip.buffs } : {}),
         ...(equip.divinity !== undefined ? { divinity: equip.divinity } : {}),

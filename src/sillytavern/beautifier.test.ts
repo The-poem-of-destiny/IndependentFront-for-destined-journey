@@ -132,11 +132,9 @@ describe('processRules — 原文匹配 + 占位符保护 (2026-08-02 回归)', 
   it('🔴 回归: 依赖字面尖括号的标签规则必须匹配（先整体 escape 会让它失效）', () => {
     // 2026-08-02: d185286 的 P1-01 在 processRules 开头 escapeHtmlBasic(text)，
     // `<dalian>` 变 `&lt;dalian&gt;` → 22 条规则里 13 条标签规则全部失配。
-    const out = processRules(
-      '<dalian name="妲丽安" mood="思考"> 你好。 </dalian>',
-      'maintext',
-      [tagRule()],
-    );
+    const out = processRules('<dalian name="妲丽安" mood="思考"> 你好。 </dalian>', 'maintext', [
+      tagRule(),
+    ]);
     expect(out).toContain('<div class="phantom">');
     expect(out).toContain('妲丽安-思考-你好。');
     // 原始标签应被消费掉，不再出现

@@ -8,12 +8,7 @@
  * 设计：docs/superpowers/specs/2026-08-02-item-detail-summary-design.md §3.2
  */
 
-import type {
-  EffectAutomatonDecl,
-  EffectIntent,
-  ModifierSlot,
-  WindowKey,
-} from './combat-v3/types';
+import type { EffectAutomatonDecl, EffectIntent, ModifierSlot, WindowKey } from './combat-v3/types';
 
 /** 18 窗口 → 中文（按 combat-v3/types.ts WindowKey 全量） */
 const WINDOW_CN: Record<WindowKey, string> = {

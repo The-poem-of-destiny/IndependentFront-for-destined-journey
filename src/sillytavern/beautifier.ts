@@ -66,8 +66,14 @@ export function sanitizeCardHtml(html: string): string {
   // 2. 剥离事件属性 on*（onerror/onclick/onload 等）——值可能含引号，需连同属性一起删
   out = out.replace(/\s+on[a-z]+\s*=\s*("(?:[^"]*)"|'(?:[^']*)'|[^\s>]+)/gi, '');
   // 3. 剥离 javascript: / data: 等危险 URL（src/href/style 里都可能出现）
-  out = out.replace(/\s+(src|href|action|formaction)\s*=\s*("javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi, '');
-  out = out.replace(/\s+(src|href|action|formaction)\s*=\s*("data:[^"]*"|'data:[^']*'|data:[^\s>]+)/gi, '');
+  out = out.replace(
+    /\s+(src|href|action|formaction)\s*=\s*("javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi,
+    '',
+  );
+  out = out.replace(
+    /\s+(src|href|action|formaction)\s*=\s*("data:[^"]*"|'data:[^']*'|data:[^\s>]+)/gi,
+    '',
+  );
   // 4. style 属性里剥掉 url(...) / expression(...)（CSS 注入面）
   out = out.replace(/(style\s*=\s*"[^"]*?)\burl\s*\([^)]*\)([^"]*")/gi, '$1$2');
   out = out.replace(/(style\s*=\s*"[^"]*?)\bexpression\s*\([^)]*\)([^"]*")/gi, '$1$2');
@@ -338,11 +344,16 @@ export function processRules(text: string, scope: string, rules: BeautifierRule[
   // story 预设引导 AI 输出 `<item_info>...</item_info>` 美化卡片；此前不处理 → 标签被整体
   // 转义成 `&lt;item_info&gt;` 文本。这里在规则循环前**先提取卡片块**：消毒内部 HTML →
   // 存进 protectedHtml 占位符（收尾 escapeHtmlBasic 不碰它）→ 还原。消毒保证 XSS 防线不降级。
-  result = result.replace(/<\s*(item_info|task_info)\s*>([\s\S]*?)<\s*\/\s*\1\s*>/gi, (_, tag, inner) => {
-    // 整块替换成占位符：外层标签本身也由占位符代表（不单独转义）
-    protectedHtml.push(`<div class="st-card st-${String(tag).toLowerCase()}">${sanitizeCardHtml(inner)}</div>`);
-    return `\x00BEAUTIFY_${protectedHtml.length - 1}\x00`;
-  });
+  result = result.replace(
+    /<\s*(item_info|task_info)\s*>([\s\S]*?)<\s*\/\s*\1\s*>/gi,
+    (_, tag, inner) => {
+      // 整块替换成占位符：外层标签本身也由占位符代表（不单独转义）
+      protectedHtml.push(
+        `<div class="st-card st-${String(tag).toLowerCase()}">${sanitizeCardHtml(inner)}</div>`,
+      );
+      return `\x00BEAUTIFY_${protectedHtml.length - 1}\x00`;
+    },
+  );
 
   const active = rules
     .filter((r) => r.enabled && (r.scope === 'global' || r.scope === scope))

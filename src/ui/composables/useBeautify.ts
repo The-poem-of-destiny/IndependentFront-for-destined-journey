@@ -7,7 +7,12 @@
  *
  * 对齐 docs/design.md §2.5（首行缩进）/ §1（叙事衬线）。
  */
-import { processRules, escapeHtml, collectActiveSignalsFromEntries, resolveAutoEnable } from '@engine/beautifier';
+import {
+  processRules,
+  escapeHtml,
+  collectActiveSignalsFromEntries,
+  resolveAutoEnable,
+} from '@engine/beautifier';
 import type { BeautifierRule, ChatMessage } from '@engine/types';
 import { useSettingsStore } from '../stores/settings-store';
 import { useGameStore } from '../stores/game-store';
@@ -35,8 +40,7 @@ export function useBeautify() {
 
     const enabledEntries: string[] =
       (game.activeSave?.metadata as any)?.enabledWorldBookEntries ?? [];
-    const { activeWorldBookIds, activeEntryUids } =
-      collectActiveSignalsFromEntries(enabledEntries);
+    const { activeWorldBookIds, activeEntryUids } = collectActiveSignalsFromEntries(enabledEntries);
 
     // 美化绑定启用的世界书（worldBookIds / worldBookEntryUids 二维），
     // 不按角色名 —— 角色是否在场不影响规则激活。

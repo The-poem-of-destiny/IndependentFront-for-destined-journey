@@ -42,9 +42,9 @@ describe('describeModifier 资源', () => {
 
 describe('describeModifier 检定', () => {
   it('命中检定 +5', () => {
-    expect(
-      describeModifier({ category: '检定', source: '', checkType: '命中', bonus: 5 }),
-    ).toBe('命中检定 +5');
+    expect(describeModifier({ category: '检定', source: '', checkType: '命中', bonus: 5 })).toBe(
+      '命中检定 +5',
+    );
   });
   it('属性检定带 attribute', () => {
     // attribute 实为 AttributeName（str/dex/con/int/spi），ATTRIBUTE_CN 映射为中文
@@ -62,7 +62,13 @@ describe('describeModifier 检定', () => {
 describe('describeModifier 附加效果', () => {
   it('附加状态', () => {
     expect(
-      describeModifier({ category: '附加效果', source: '', sourceKey: '', buffName: '流血', stacks: 2 }),
+      describeModifier({
+        category: '附加效果',
+        source: '',
+        sourceKey: '',
+        buffName: '流血',
+        stacks: 2,
+      }),
     ).toBe('附加 流血 2层');
   });
 });

@@ -2307,7 +2307,13 @@ describe('StateManager', () => {
                 divinity: 0,
               } as any,
             ],
-            automata: [{ id: 'a1', trigger: { window: 'on_attack' }, effect: { intent: 'damage', value: 5 } }],
+            automata: [
+              {
+                id: 'a1',
+                trigger: { window: 'on_attack' },
+                effect: { intent: 'damage', value: 5 },
+              },
+            ],
           },
         },
       ]);

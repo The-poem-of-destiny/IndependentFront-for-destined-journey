@@ -24,10 +24,12 @@
 ### Task 1: describe-modifier.ts —— Modifier 6 大类中文翻译
 
 **Files:**
+
 - Create: `src/sillytavern/describe-modifier.ts`
 - Test: `src/sillytavern/describe-modifier.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Modifier`（`src/sillytavern/effect-types.ts`，6 大类判别联合）
 - Produces: `describeModifier(m: Modifier): string` — 单条 modifier → 中文行；`describeModifiers(list: Modifier[]): string[]` — 批量，过滤空
 
@@ -78,13 +80,19 @@ describe('describeModifier 资源', () => {
 
 describe('describeModifier 检定', () => {
   it('命中检定 +5', () => {
-    expect(
-      describeModifier({ category: '检定', source: '', checkType: '命中', bonus: 5 }),
-    ).toBe('命中检定 +5');
+    expect(describeModifier({ category: '检定', source: '', checkType: '命中', bonus: 5 })).toBe(
+      '命中检定 +5',
+    );
   });
   it('属性检定带 attribute', () => {
     expect(
-      describeModifier({ category: '检定', source: '', checkType: '属性', attribute: '力量', bonus: 3 }),
+      describeModifier({
+        category: '检定',
+        source: '',
+        checkType: '属性',
+        attribute: '力量',
+        bonus: 3,
+      }),
     ).toBe('力量检定 +3');
   });
 });
@@ -256,10 +264,12 @@ git commit -m "feat(items): describe-modifier 纯函数 —— Modifier 6 大类
 ### Task 2: describe-automaton.ts —— EffectAutomatonDecl 中文翻译
 
 **Files:**
+
 - Create: `src/sillytavern/describe-automaton.ts`
 - Test: `src/sillytavern/describe-automaton.test.ts`
 
 **Interfaces:**
+
 - Consumes: `EffectAutomatonDecl` / `EffectIntent` / `WindowKey` / `ModifierSlot`（`src/sillytavern/combat-v3/types.ts`）
 - Produces: `describeAutomaton(a: EffectAutomatonDecl): string[]` — 一个 automaton → 中文行数组（按 intent 展开，每 intent 一行）；`describeAutomata(list: EffectAutomatonDecl[] | undefined): string[]` — 批量
 
@@ -313,7 +323,16 @@ describe('describeAutomaton intents 13 类', () => {
   });
   it('AddModifier hitBonus', () => {
     const a = makeA({
-      intents: [{ kind: 'AddModifier', slot: 'hitBonus', value: 5, scope: 'whole_action', targetId: 'self', divinity: 0 }],
+      intents: [
+        {
+          kind: 'AddModifier',
+          slot: 'hitBonus',
+          value: 5,
+          scope: 'whole_action',
+          targetId: 'self',
+          divinity: 0,
+        },
+      ],
     });
     expect(describeAutomaton(a)[0]).toContain('命中 +5');
   });
@@ -322,11 +341,17 @@ describe('describeAutomaton intents 13 类', () => {
     expect(describeAutomaton(a)[0]).toContain('回复 20 点HP');
   });
   it('ApplyStatus', () => {
-    const a = makeA({ intents: [{ kind: 'ApplyStatus', targetId: 'target', statusId: 'bleed', duration: 3, layers: 2 }] });
+    const a = makeA({
+      intents: [
+        { kind: 'ApplyStatus', targetId: 'target', statusId: 'bleed', duration: 3, layers: 2 },
+      ],
+    });
     expect(describeAutomaton(a)[0]).toContain('附加 流血 2层');
   });
   it('ApplyStatus 无层数', () => {
-    const a = makeA({ intents: [{ kind: 'ApplyStatus', targetId: 'target', statusId: 'poison', duration: 2 }] });
+    const a = makeA({
+      intents: [{ kind: 'ApplyStatus', targetId: 'target', statusId: 'poison', duration: 2 }],
+    });
     expect(describeAutomaton(a)[0]).toContain('附加 中毒');
   });
 });
@@ -361,12 +386,7 @@ Expected: FAIL — `Cannot find module './describe-automaton'`
  * 设计：docs/superpowers/specs/2026-08-02-item-detail-summary-design.md §3.2
  */
 
-import type {
-  EffectAutomatonDecl,
-  EffectIntent,
-  ModifierSlot,
-  WindowKey,
-} from './combat-v3/types';
+import type { EffectAutomatonDecl, EffectIntent, ModifierSlot, WindowKey } from './combat-v3/types';
 
 /** 18 窗口 → 中文（按 combat-v3/types.ts WindowKey 全量） */
 const WINDOW_CN: Record<WindowKey, string> = {
@@ -513,10 +533,12 @@ git commit -m "feat(items): describe-automaton 纯函数 —— 18 窗口 + 13 �
 ### Task 3: ItemDetailModal.vue + ItemsPanel 接线
 
 **Files:**
+
 - Create: `src/ui/components/game/ItemDetailModal.vue`
 - Modify: `src/ui/components/game/ItemsPanel.vue`
 
 **Interfaces:**
+
 - Consumes: `describeModifiers`（Task 1）、`describeAutomata`（Task 2）、`AppModal`（`src/ui/components/shared/AppModal.vue`）、`qualityVar`（`src/ui/lib/quality-colors.ts`）
 - Produces: `ItemDetailModal` 组件（props: `open` / `item: any` / `category`；emits: `update:open`）
 
@@ -612,9 +634,7 @@ watch(
       <!-- 元信息行 -->
       <div class="idm-meta">
         <span>{{ selTypeLabel }}</span>
-        <span class="idm-quality" :style="{ color: qualityVar(selQuality) }">{{
-          selQuality
-        }}</span>
+        <span class="idm-quality" :style="{ color: qualityVar(selQuality) }">{{ selQuality }}</span>
         <span>{{ selExtra }}</span>
       </div>
 
@@ -622,7 +642,8 @@ watch(
       <div v-if="hasEffects" class="idm-section">
         <div class="idm-label">效果</div>
         <div v-for="(desc, name) in effects" :key="name" class="idm-row">
-          <span class="idm-k">{{ name }}</span><span>{{ desc }}</span>
+          <span class="idm-k">{{ name }}</span
+          ><span>{{ desc }}</span>
         </div>
       </div>
 
@@ -713,7 +734,7 @@ function openDetail() {
   class="item-row"
   :class="{ selected: i === selectedIdx }"
   @click="selectedIdx = i; openDetail()"
->
+></div>
 ```
 
 - [ ] **Step 4: 样式**（追加到 ItemsPanel.vue 的 `<style scoped>` 末尾，或 ItemDetailModal 自己的 scoped style）
@@ -892,6 +913,7 @@ git commit -m "feat(items): 详情弹窗 ItemDetailModal + ItemsPanel 接线
 ### Task 4: 集成验证 + backlog 同步
 
 **Files:**
+
 - Modify: `docs/planning/combat-v3-fix-backlog.md`（标 ✅）
 - Test: 全量测试
 

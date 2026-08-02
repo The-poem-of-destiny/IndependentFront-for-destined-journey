@@ -327,7 +327,10 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     if (opening) {
       const segMatch = opening.match(/---\s*初始技能\s*---([\s\S]*?)(?=\n---\s*|\n\n*---|$)/);
       const seg = segMatch?.[1] ?? '';
-      const lines2 = seg.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+      const lines2 = seg
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
       if (lines2.length > 0) {
         lines.push('');
         lines.push('【开局初始技能声明】（尚未落库，需生成）:');

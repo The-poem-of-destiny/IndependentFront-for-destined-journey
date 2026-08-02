@@ -13,7 +13,9 @@ describe('normalizeEffects', () => {
   });
 
   it('多词条分号分隔', () => {
-    const out = normalizeEffects('能量伤害:造成100%能量伤害; 持续伤害:目标回合开始时造成30点能量伤害，持续2回合');
+    const out = normalizeEffects(
+      '能量伤害:造成100%能量伤害; 持续伤害:目标回合开始时造成30点能量伤害，持续2回合',
+    );
     expect(out).toEqual({
       能量伤害: '造成100%能量伤害',
       持续伤害: '目标回合开始时造成30点能量伤害，持续2回合',
