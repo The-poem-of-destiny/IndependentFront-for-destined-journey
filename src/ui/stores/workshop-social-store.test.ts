@@ -731,6 +731,83 @@ describe('toggleLike / toggleSubscribe', () => {
     expect(social?.userLiked).toBe(true);
   });
 
+  // ── 并发：两个动作同时在飞 ──
+  // 节流键刻意按（项目 × 动作）分开（见上一条），所以「点完赞马上点订阅」是**受支持的**
+  // 路径 —— 两枪会同时在飞。校正/回滚都必须只动自己那一对字段，且要基于**落地时**的
+  // 覆盖层，不能拿动作起飞时抓的那份快照整个盖回去（那会把对方的成果一起抹掉）。
+  it('★ 并发：两个都成功，后落地的不许把先落地的成果重置回起飞前', async () => {
+    let releaseLike: (() => void) | undefined;
+    let releaseSub: (() => void) | undefined;
+    routes.push([
+      LIKE_URL,
+      () =>
+        new Promise<WorkshopResponseLike>((resolve) => {
+          releaseLike = () => resolve(json({ liked: true, count: 6 }));
+        }),
+    ]);
+    routes.push([
+      SUB_URL,
+      () =>
+        new Promise<WorkshopResponseLike>((resolve) => {
+          releaseSub = () => resolve(json({ subscribed: true, count: 3 }));
+        }),
+    ]);
+    const store = loggedIn();
+
+    const likeTask = store.toggleLike(PROJECT_ID, meta({ likesCount: 5 }));
+    const subTask = store.toggleSubscribe(PROJECT_ID, meta({ likesCount: 5 }));
+    await flush();
+
+    releaseSub?.(); // 订阅先落地
+    await subTask;
+    releaseLike?.(); // 点赞后落地
+    await likeTask;
+
+    const social = store.socialOf(PROJECT_ID);
+    expect(social?.likesCount).toBe(6);
+    expect(social?.userLiked).toBe(true);
+    // 订阅是先落地的那个，不该被后落地的点赞用陈旧快照重置回 0/false
+    expect(social?.subscribesCount).toBe(3);
+    expect(social?.userSubscribed).toBe(true);
+  });
+
+  it('★ 并发：点赞失败回滚不许连累订阅，也不许给订阅留下一个幻影赞', async () => {
+    let failLike: (() => void) | undefined;
+    let releaseSub: (() => void) | undefined;
+    routes.push([
+      LIKE_URL,
+      () =>
+        new Promise<WorkshopResponseLike>((_resolve, reject) => {
+          failLike = () => reject(new Error('模拟断网'));
+        }),
+    ]);
+    routes.push([
+      SUB_URL,
+      () =>
+        new Promise<WorkshopResponseLike>((resolve) => {
+          releaseSub = () => resolve(json({ subscribed: true, count: 3 }));
+        }),
+    ]);
+    const store = loggedIn();
+
+    const likeTask = store.toggleLike(PROJECT_ID, meta({ likesCount: 5 }));
+    const subTask = store.toggleSubscribe(PROJECT_ID, meta({ likesCount: 5 }));
+    await flush();
+
+    failLike?.();
+    expect((await likeTask).status).toBe('failed');
+    releaseSub?.();
+    await subTask;
+
+    const social = store.socialOf(PROJECT_ID);
+    // 赞没成功 —— 覆盖层里不许留下服务端从没记过的那一个
+    expect(social?.userLiked).toBe(false);
+    expect(social?.likesCount).toBe(5);
+    // 订阅成功了 —— 不许被点赞的回滚顺手清掉
+    expect(social?.userSubscribed).toBe(true);
+    expect(social?.subscribesCount).toBe(3);
+  });
+
   it('取消点赞时乐观计数不许算成负数', async () => {
     let release: (() => void) | undefined;
     routes.push([

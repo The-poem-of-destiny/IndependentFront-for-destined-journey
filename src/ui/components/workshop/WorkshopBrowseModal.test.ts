@@ -737,6 +737,40 @@ describe('WorkshopBrowseModal', () => {
     }
   });
 
+  it('★ 回归：「编辑」转达的是上游整行，不是光一个 id', async () => {
+    /*
+     * 页面拿这个载荷填表单，而「提交修改」是整份 PUT。只给 id 的话，页面只能回头
+     * 查本地已装库 —— 而「我的项目」里绝大多数项目根本没装过，查空就开出空表单，
+     * 一提交就把上游还在的简介清成空串、标签清光。
+     */
+    socialState.userId = 'me';
+    const row = meta({
+      id: 'p1',
+      name: '维拉的旅途',
+      description: '一段外传，写了很久',
+      version: '2.1.0',
+      tags: ['剧情', '角色'],
+    });
+    myMock.mockResolvedValue(page([row], { listings: mineListing('p1') }));
+    const wrapper = await open(); // 注意：installed 为空 —— 这个项目没在本地装过
+    scopeButton('我的项目').click();
+    await flushPromises();
+
+    const edit = [...document.body.querySelectorAll('.wk-manage-btn')].find(
+      (b) => b.textContent?.trim() === '编辑',
+    ) as HTMLButtonElement;
+    edit.click();
+    await flushPromises();
+
+    const payload = wrapper.emitted('edit')?.[0]?.[0] as WorkshopProjectMeta;
+    expect(payload).toBeTruthy();
+    expect(payload.id).toBe('p1');
+    expect(payload.description).toBe('一段外传，写了很久');
+    expect(payload.version).toBe('2.1.0');
+    expect(payload.tags).toEqual(['剧情', '角色']);
+    wrapper.unmount();
+  });
+
   it('在确认框上取消：一行都不删', async () => {
     socialState.userId = 'me';
     myMock.mockResolvedValue(

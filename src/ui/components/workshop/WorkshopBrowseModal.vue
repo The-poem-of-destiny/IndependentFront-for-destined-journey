@@ -51,8 +51,14 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:open': [value: boolean];
   open: [projectId: string];
-  /** 作者要编辑自己的项目（B4）—— 表单归页面持有，本模态只转达 */
-  edit: [projectId: string];
+  /**
+   * 作者要编辑自己的项目（B4）—— 表单归页面持有，本模态只转达。
+   *
+   * ⚠️ 转达的是**上游那一行**，不是光一个 id：「我的项目」列的是作者名下的全部项目，
+   * 未必在本地装过，页面拿 id 去查本地库会查空 → 表单开成空白 → 提交就把上游的
+   * 简介和标签清了（PUT 是整份覆盖）。上游列表响应本来就带 description/version/tags。
+   */
+  edit: [project: WorkshopProjectMeta];
   /** 一句要给用户看的话（成功/失败），由页面统一 toast */
   notify: [message: string, kind: 'success' | 'error'];
 }>();
@@ -380,6 +386,12 @@ async function onToggleVisibility(projectId: string): Promise<void> {
 const pendingDelete = ref<WorkshopProjectMeta | null>(null);
 const deleting = ref(false);
 
+/** 卡片只知道自己的 id，这里补回上游那一行再往上转达（见 `edit` 的声明） */
+function onEdit(projectId: string): void {
+  const row = projects.value.find((p) => p.id === projectId);
+  if (row) emit('edit', row);
+}
+
 function onRemove(projectId: string): void {
   pendingDelete.value =
     projects.value.find((p) => p.id === projectId) ??
@@ -635,7 +647,7 @@ const failureText = computed(() => (failure.value ? describeFailure(failure.valu
             :listing="listings[p.id]"
             :can-manage="canManage(p.id)"
             @open="emit('open', $event)"
-            @edit="emit('edit', $event)"
+            @edit="onEdit"
             @remove="onRemove"
             @toggle-visibility="onToggleVisibility"
           />

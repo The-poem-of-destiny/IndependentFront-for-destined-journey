@@ -561,9 +561,7 @@ export const useWorkshopSocialStore = defineStore('workshop-social', () => {
       const res = kind === 'like' ? await clientToggleLike(id) : await clientToggleSubscribe(id);
 
       if (!res.ok) {
-        // 回滚到操作前：之前没有 override 的就要**删掉**，不能留一个凭空造出来的全 0
-        if (previous) writeOverride(id, previous);
-        else removeOverride(id);
+        rollback(id, kind, base, previous);
 
         if (res.error.kind === 'unauthorized') {
           // token 被上游拒了（7 天到期 / 服务端换密钥）。留着它只会让接下来每一次
@@ -574,7 +572,15 @@ export const useWorkshopSocialStore = defineStore('workshop-social', () => {
         return { status: 'failed', message: res.error.message };
       }
 
-      const corrected = applyToggle(base, kind, res.data.active, res.data.count);
+      // ⚠️ 基线取**落地这一刻**的覆盖层，不是起飞时抓的 `base` —— 节流键按
+      //    （项目 × 动作）分开，点赞与订阅可以同时在飞，拿陈旧快照整个盖回去会把
+      //    对方期间落地的成果一起重置（applyToggle 只换自己那一对，剩下的是原样 spread）
+      const corrected = applyToggle(
+        overrides.value[id] ?? base,
+        kind,
+        res.data.active,
+        res.data.count,
+      );
       writeOverride(id, corrected);
       return { status: 'ok', social: corrected };
     } finally {
@@ -590,8 +596,46 @@ export const useWorkshopSocialStore = defineStore('workshop-social', () => {
     kind: WorkshopToggleKind,
     active: boolean,
   ): number {
-    const current = kind === 'like' ? base.likesCount : base.subscribesCount;
-    return Math.max(0, current + (active ? 1 : -1));
+    return Math.max(0, countOf(base, kind) + (active ? 1 : -1));
+  }
+
+  /**
+   * 失败回滚：只把**本动作那一对字段**放回起飞前的值，另一对原样留着 ——
+   * 并发的另一个动作可能已经在这期间落地，整份盖回去/整份删掉都会误伤它。
+   *
+   * 删除覆盖层的条件也随之收紧：只有「起飞前本来就没有覆盖层」**且**「放回去之后
+   * 恰好等于起飞时那份基线」才删 —— 后者不成立就说明期间有别的动作写过，得留着。
+   */
+  function rollback(
+    projectId: string,
+    kind: WorkshopToggleKind,
+    base: WorkshopSocialMeta,
+    previous: WorkshopSocialMeta | undefined,
+  ): void {
+    const current = overrides.value[projectId];
+    if (!current) return; // 已经被别处清干净了，没什么可放回的
+
+    const restored = applyToggle(current, kind, flagOf(base, kind), countOf(base, kind));
+    if (previous === undefined && sameSocial(restored, base)) removeOverride(projectId);
+    else writeOverride(projectId, restored);
+  }
+
+  function flagOf(social: WorkshopSocialMeta, kind: WorkshopToggleKind): boolean {
+    return kind === 'like' ? social.userLiked : social.userSubscribed;
+  }
+
+  function countOf(social: WorkshopSocialMeta, kind: WorkshopToggleKind): number {
+    return kind === 'like' ? social.likesCount : social.subscribesCount;
+  }
+
+  function sameSocial(a: WorkshopSocialMeta, b: WorkshopSocialMeta): boolean {
+    return (
+      a.userLiked === b.userLiked &&
+      a.likesCount === b.likesCount &&
+      a.userSubscribed === b.userSubscribed &&
+      a.subscribesCount === b.subscribesCount &&
+      a.downloadsCount === b.downloadsCount
+    );
   }
 
   /** 只动本动作那一对字段，另一对（以及 downloadsCount）原样保留 */

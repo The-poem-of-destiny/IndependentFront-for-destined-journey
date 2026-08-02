@@ -22,7 +22,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import type { WorkshopProject } from '@engine/types';
-import type { InstallConflict } from '@engine/workshop-types';
+import type { InstallConflict, WorkshopProjectMeta } from '@engine/workshop-types';
 import type { WorkshopUpdateDiff } from '@engine/workshop-diff';
 import { groupWorkshopNotes } from '@engine/workshop-types';
 import { useUIStore } from '../../stores/ui-store';
@@ -314,18 +314,21 @@ function openSubmit(): void {
 /**
  * 从浏览模态里点「编辑」。
  *
- * 表单初值取**本地已装的那份**（如果装过），否则只带 id —— 上游的完整元数据在
- * 列表响应里有，但那份不含描述全文；与其填一半，不如让作者在表单里看到空白后
- * 自己补，至少不会误以为「我明明写过简介，怎么没了」。
+ * 表单初值以**上游那一行**为准（模态转达过来的，`/api/projects` 与 `/api/my/projects`
+ * 都带 description/version/tags），本地已装的那份只做兜底。
+ *
+ * 🔴 顺序不能反：「我的项目」列的是作者名下全部项目，**未必在本地装过**。以本地为准
+ * 时那种项目会开出一张空表单，而「提交修改」是整份 PUT —— 一次没留神就把上游的简介
+ * 清空、标签清光。宁可少填一个字段，也不能拿空串去覆盖线上还在的内容。
  */
-function openEdit(projectId: string): void {
-  const local = workshop.getProject(projectId);
+function openEdit(project: WorkshopProjectMeta): void {
+  const local = workshop.getProject(project.id);
   submitEditing.value = {
-    id: projectId,
-    name: local?.name ?? '',
-    description: local?.description ?? '',
-    version: local?.version ?? '1.0.0',
-    tags: [...(local?.tags ?? [])],
+    id: project.id,
+    name: project.name || (local?.name ?? ''),
+    description: project.description || (local?.description ?? ''),
+    version: project.version || (local?.version ?? '1.0.0'),
+    tags: [...(project.tags.length > 0 ? project.tags : (local?.tags ?? []))],
   };
   submitOpen.value = true;
 }
