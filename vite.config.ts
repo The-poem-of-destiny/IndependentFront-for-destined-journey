@@ -116,6 +116,13 @@ export default defineConfig({
       '@ui': resolve(__dirname, 'src/ui'),
     },
   },
+  optimizeDeps: {
+    // 🔴 quickjs-emscripten 必须排除出依赖预打包：它的 wasm 是独立文件、
+    // 靠 import.meta.url 相对定位。预打包会把 JS 挪进 .vite/deps/，相对路径断掉后
+    // 取 wasm 的请求落到 SPA fallback（拿回 index.html，魔数 3c 21 44 4f = "<!DO"），
+    // EJS 隔离后端装载即失败 → fail-closed（真机 2026-08-02 实测）。
+    exclude: ['quickjs-emscripten'],
+  },
   server: {
     port: 5173,
     open: true,
