@@ -61,6 +61,54 @@ describe('describeAutomaton intents 13 类', () => {
     const a = makeA({ intents: [{ kind: 'ApplyStatus', targetId: 'target', statusId: 'poison', duration: 2 }] });
     expect(describeAutomaton(a)[0]).toContain('附加 中毒');
   });
+  it('RemoveStatus', () => {
+    const a = makeA({ intents: [{ kind: 'RemoveStatus', targetId: 'target', statusId: 'bleed' }] });
+    expect(describeAutomaton(a)[0]).toContain('移除流血');
+  });
+  it('SpendResource', () => {
+    const a = makeA({ intents: [{ kind: 'SpendResource', targetId: 'self', resource: 'mp', amount: 5 }] });
+    expect(describeAutomaton(a)[0]).toContain('消耗 5 点MP');
+  });
+  it('PreventDeath', () => {
+    const a = makeA({ intents: [{ kind: 'PreventDeath', targetId: 'target', hp: 1 }] });
+    expect(describeAutomaton(a)[0]).toContain('免死一次');
+  });
+  it('ConsumeCharge', () => {
+    const a = makeA({ intents: [{ kind: 'ConsumeCharge' }] });
+    expect(describeAutomaton(a)[0]).toContain('消耗 1 次充能');
+  });
+  it('ConsumeCharge 指定次数', () => {
+    const a = makeA({ intents: [{ kind: 'ConsumeCharge', amount: 3 }] });
+    expect(describeAutomaton(a)[0]).toContain('消耗 3 次充能');
+  });
+  it('EmitNarrativeCue', () => {
+    const a = makeA({ intents: [{ kind: 'EmitNarrativeCue', text: '寒光乍现' }] });
+    expect(describeAutomaton(a)[0]).toContain('提示：寒光乍现');
+  });
+  it('OverrideIntent', () => {
+    const a = makeA({ intents: [{ kind: 'OverrideIntent', ruleKey: 'freezeSlot', payload: {}, divinity: 0 }] });
+    expect(describeAutomaton(a)[0]).toContain('覆盖freezeSlot行动');
+  });
+  it('ScheduleIntent 延后', () => {
+    const a = makeA({
+      intents: [{ kind: 'ScheduleIntent', delay: 1, intent: { kind: 'DealDamage', targetId: 'target', amount: 3, damageType: 'physical' } }],
+    });
+    expect(describeAutomaton(a)[0]).toContain('延后：');
+  });
+  it('SpawnOrDespawnIntent 召唤', () => {
+    const a = makeA({ intents: [{ kind: 'SpawnOrDespawnIntent', op: 'spawn', unitId: 'unit-1' }] });
+    expect(describeAutomaton(a)[0]).toContain('召唤 unit-1');
+  });
+  it('SpawnOrDespawnIntent 移除', () => {
+    const a = makeA({ intents: [{ kind: 'SpawnOrDespawnIntent', op: 'despawn', unitId: 'unit-1' }] });
+    expect(describeAutomaton(a)[0]).toContain('移除 unit-1');
+  });
+  it('RequestChoiceIntent', () => {
+    const a = makeA({
+      intents: [{ kind: 'RequestChoiceIntent', choiceId: 'c1', prompt: '要躲避还是硬抗？', options: ['躲避', '硬抗'] }],
+    });
+    expect(describeAutomaton(a)[0]).toContain('要求选择：要躲避还是硬抗？');
+  });
 });
 
 describe('describeAutomata 批量', () => {
