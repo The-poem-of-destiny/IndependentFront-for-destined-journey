@@ -166,6 +166,8 @@ export function describeModifier(m: Modifier): string {
   let body: string;
   switch (m.category) {
     case '固伤':
+      // amount<=0 无意义，返回 '' 由 describeModifiers 过滤
+      if (m.amount <= 0) return '';
       body = m.damageType ? `造成 ${m.amount} 点${m.damageType}伤害` : `造成 ${m.amount} 点伤害`;
       break;
     case '百分比': {
@@ -323,6 +325,10 @@ describe('describeAutomaton intents 13 类', () => {
     const a = makeA({ intents: [{ kind: 'ApplyStatus', targetId: 'target', statusId: 'bleed', duration: 3, layers: 2 }] });
     expect(describeAutomaton(a)[0]).toContain('附加 流血 2层');
   });
+  it('ApplyStatus 无层数', () => {
+    const a = makeA({ intents: [{ kind: 'ApplyStatus', targetId: 'target', statusId: 'poison', duration: 2 }] });
+    expect(describeAutomaton(a)[0]).toContain('附加 中毒');
+  });
 });
 
 describe('describeAutomata 批量', () => {
@@ -410,19 +416,35 @@ function damageTypeCN(t: string): string {
   return map[t] ?? t;
 }
 
+/** statusId → 中文（常见状态名的英文 id；未知原样透传） */
+const STATUS_CN: Record<string, string> = {
+  bleed: '流血',
+  poison: '中毒',
+  burn: '灼烧',
+  stun: '眩晕',
+  freeze: '冰冻',
+  slow: '减速',
+  weaken: '虚弱',
+  shield: '护盾',
+  regen: '再生',
+};
+
 /** 单个 intent → 中文 */
 function describeIntent(intent: EffectIntent): string {
   switch (intent.kind) {
-    case 'AddModifier':
-      return `${SLOT_CN[intent.slot] ?? intent.slot} ${intent.value >= 0 ? '+' : ''}${intent.value}`;
+    case 'AddModifier': {
+      const v = intent.value;
+      const sign = typeof v === 'number' && v >= 0 ? '+' : '';
+      return `${SLOT_CN[intent.slot] ?? intent.slot} ${sign}${v}`;
+    }
     case 'DealDamage':
       return `造成 ${intent.amount} 点${damageTypeCN(intent.damageType)}伤害`;
     case 'Heal':
       return `回复 ${intent.amount} 点HP`;
     case 'ApplyStatus':
-      return `附加 ${intent.statusId}${intent.layers && intent.layers > 1 ? ` ${intent.layers}层` : ''}`;
+      return `附加 ${STATUS_CN[intent.statusId] ?? intent.statusId}${intent.layers && intent.layers > 1 ? ` ${intent.layers}层` : ''}`;
     case 'RemoveStatus':
-      return `移除${intent.statusId}`;
+      return `移除${STATUS_CN[intent.statusId] ?? intent.statusId}`;
     case 'SpendResource':
       return `消耗 ${intent.amount} 点${intent.resource.toUpperCase()}`;
     case 'PreventDeath':
