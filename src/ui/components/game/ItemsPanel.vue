@@ -2,7 +2,8 @@
 import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { qualityVar } from '../../lib/quality-colors';
-import ItemDetailModal from './ItemDetailModal.vue';
+import { describeModifiers } from '@engine/describe-modifier';
+import { describeAutomata } from '@engine/describe-automaton';
 
 const game = useGameStore();
 
@@ -10,7 +11,6 @@ type Category = 'inventory' | 'equipment' | 'skills';
 const activeCategory = ref<Category>('inventory');
 const activeFilter = ref('全部');
 const selectedIdx = ref(0);
-const showScripts = ref(false);
 
 const player = computed(() => game.player);
 
@@ -98,7 +98,7 @@ const sortedItems = computed(() => {
 
 watch([activeCategory, activeFilter], () => {
   selectedIdx.value = 0;
-  showScripts.value = false;
+  showRaw.value = false;
 });
 
 // ═══ 外部聚焦 — StatusOverview 点击持有物 → 切类目并选中该物品 ═══
@@ -118,11 +118,6 @@ onMounted(applyItemFocus);
 
 // ═══ 选中物品 ═══
 const selected = computed(() => sortedItems.value[selectedIdx.value] || null);
-
-const detailOpen = ref(false);
-function openDetail() {
-  if (selected.value) detailOpen.value = true;
-}
 
 const selQuality = computed(() => {
   const item: any = selected.value;
@@ -160,6 +155,28 @@ const selScripts = computed(
   () => (selected.value as any)?.scripts as Record<string, string> | undefined,
 );
 const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.value).length > 0);
+
+// ═══ 战斗修正（modifiers + automata 中文摘要）═══
+const modifierLines = computed(() => describeModifiers((selected.value as any)?.modifiers));
+const automatonLines = computed(() => describeAutomata((selected.value as any)?.automata));
+const combatLines = computed(() => [...modifierLines.value, ...automatonLines.value]);
+const hasCombat = computed(() => combatLines.value.length > 0);
+
+// ═══ 原始数据折叠（modifiers + automata JSON）═══
+const showRaw = ref(false);
+const rawCombatJson = computed(() => {
+  const item = selected.value as any;
+  if (!item) return '';
+  const parts: string[] = [];
+  if (item.modifiers?.length) parts.push(JSON.stringify(item.modifiers, null, 2));
+  if (item.automata?.length) parts.push(JSON.stringify(item.automata, null, 2));
+  return parts.join('\n\n');
+});
+
+// 切换选中物品时收起原始数据折叠
+watch([selectedIdx, activeCategory], () => {
+  showRaw.value = false;
+});
 </script>
 
 <template>
@@ -211,7 +228,7 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
           :key="(item as any).name || i"
           class="item-row"
           :class="{ selected: i === selectedIdx }"
-          @click="selectedIdx = i; openDetail()"
+          @click="selectedIdx = i"
         >
           <span
             class="dot"
@@ -278,25 +295,43 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
           </div>
         </div>
 
+        <!-- 战斗修正（modifiers + automata 中文摘要） -->
+        <div class="fx-section">
+          <div class="d-label">战斗修正</div>
+          <div v-if="hasCombat" class="combat-list">
+            <div v-for="(line, i) in combatLines" :key="i" class="combat-row">
+              <span class="combat-icon" aria-hidden="true">⚔</span>
+              <span>{{ line }}</span>
+            </div>
+          </div>
+          <div v-else class="fx-empty">该物品无战斗效果</div>
+        </div>
+
         <!-- 描述 -->
         <div v-if="(selected as any).description" class="desc-section">
           <div class="d-label">描述</div>
           <p class="d-desc">{{ (selected as any).description }}</p>
         </div>
 
-        <!-- 脚本 -->
+        <!-- 脚本 / 原始数据 -->
         <div class="script-section">
-          <button class="script-toggle" @click="showScripts = !showScripts">
-            {{ showScripts ? '收起脚本' : '查看脚本' }}
+          <button class="script-toggle" @click="showRaw = !showRaw">
+            {{ showRaw ? '收起原始数据' : '查看原始数据' }}
           </button>
-          <div v-if="showScripts" class="script-body">
-            <template v-if="hasScripts">
-              <div v-for="(code, name) in selScripts" :key="name" class="script-block">
-                <div class="script-label">{{ name }}</div>
-                <pre class="script-code">{{ code }}</pre>
+          <div v-if="showRaw" class="script-body">
+            <template v-if="rawCombatJson || hasScripts">
+              <div v-if="rawCombatJson" class="script-block">
+                <div class="script-label">modifiers / automata</div>
+                <pre class="script-code">{{ rawCombatJson }}</pre>
+              </div>
+              <div v-if="hasScripts" class="script-block">
+                <div v-for="(code, name) in selScripts" :key="name" class="script-block">
+                  <div class="script-label">{{ name }}</div>
+                  <pre class="script-code">{{ code }}</pre>
+                </div>
               </div>
             </template>
-            <div v-else class="script-empty">(该物品无脚本效果)</div>
+            <div v-else class="script-empty">(该物品无原始数据)</div>
           </div>
         </div>
       </div>
@@ -304,12 +339,6 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
     </div>
   </div>
   <div v-else class="empty">未加载角色数据</div>
-  <ItemDetailModal
-    :open="detailOpen"
-    :item="selected"
-    :category="activeCategory"
-    @update:open="detailOpen = $event"
-  />
 </template>
 
 <style scoped>
@@ -606,6 +635,36 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
 }
 .fx-desc {
   color: var(--theme-text-primary);
+}
+
+/* 战斗修正（modifiers + automata 摘要行） */
+.combat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.combat-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 0.8125rem;
+  color: var(--theme-text-primary);
+  border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border) 40%, transparent);
+}
+.combat-row:last-child {
+  border-bottom: none;
+}
+.combat-icon {
+  color: var(--theme-primary, #c9a24b);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+.fx-empty {
+  font-size: 0.75rem;
+  color: var(--theme-text-muted);
+  font-style: italic;
+  padding: 3px 0;
 }
 
 .d-desc {

@@ -64,8 +64,9 @@
 
 - **问题**：ItemsPanel 已有详情界面（名字/品质/词条/描述/脚本折叠），但**缺 modifiers（战斗修正）展示**。玩家看不到「命中+5、附加流血」。
 - **建议**：v3 编译时产出人类可读效果描述，前端只渲染；automaton 是 DSL 内部表示**不裸展示**。独立详情页属 Phase 7e UI 精化可后置。
-- **状态**：✅ 已完成（详情弹窗轻量摘要，见 spec `2026-08-02-item-detail-summary-design` + 实现计划）。
-  - **落点**：`src/sillytavern/describe-modifier.ts`（`describeModifiers` 中文摘要）+ `src/sillytavern/describe-automaton.ts`（`describeAutomata`）/combined entries 项展示（18 窗口 + 13 类 EffectIntent 中文映射）；详情弹窗 `ItemDetailModal.vue` + ItemsPanel 接线（modifiers/automata 行 +「查看原始数据」暴露 JSON + 关闭叉叉）。两组单测 37 条全 PASS。
+- **状态**：✅ 已完成（右侧详情面板内「战斗修正」区块 + 「查看原始数据」折叠，见 spec `2026-08-02-item-detail-summary-design` v1.1 修订 + 实现计划）。
+  - **落点**：`src/sillytavern/describe-modifier.ts`（`describeModifiers` 中文摘要）+ `src/sillytavern/describe-automaton.ts`（`describeAutomata`）/combined entries 项展示（18 窗口 + 13 类 EffectIntent 中文映射）；`ItemsPanel.vue` 右侧详情面板「战斗修正」区块（modifiers/automata 中文行）+「查看原始数据」折叠（modifiers/automata JSON + scripts 代码）。两组单测 37 条全 PASS。
+  - **v1.1 修订**：实现后主人复核，原独立弹窗（`ItemDetailModal.vue`）与右侧详情面板内容重复、空间本就够用，改为**面板内区块**（弹窗组件已删，引擎侧纯函数保留）。
 
 ---
 

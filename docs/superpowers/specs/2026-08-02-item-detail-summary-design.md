@@ -3,9 +3,18 @@
 > 📅 2026-08-02 · 对应 `docs/planning/combat-v3-fix-backlog.md` 最后一项
 > 「前端 ItemsPanel 缺 modifiers 展示」
 >
-> **一句话**：点击物品/技能/装备后弹独立小弹窗，默认展示**人读的轻量摘要**
-> （modifiers + automata 中文翻译行），右上角叉叉关闭；点「查看原始数据」
+> **一句话**：点击物品/技能/装备后，在 ItemsPanel 右侧详情面板内展示**人读的轻量摘要**
+> （modifiers + automata 中文翻译行）；点「查看原始数据」
 > 才暴露 modifiers/automata/scripts 的原始 JSON 与代码。
+
+---
+
+> 🔄 **v1.1 修订（2026-08-02，实现后主人复核）**：交互形态从「独立小弹窗」改为
+> **右侧详情面板内区块**。原因：ItemsPanel 本就是 Master-Detail 布局，右侧详情面板
+> 空间足够承载战斗修正摘要，额外弹窗反而与面板内容重复、遮挡。**引擎侧两个纯函数
+> （describe-modifier / describe-automaton）完全保留**，仅前端从弹窗组件改为面板内区块
+> （`ItemDetailModal.vue` 删除，逻辑并入 `ItemsPanel.vue` 详情面板）。本文下方 §2/§3.3
+> 保留 v1.0 弹窗方案的原始设计，作为决策历史；以本修订为准。
 
 ---
 
