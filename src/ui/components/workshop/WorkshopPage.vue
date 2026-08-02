@@ -10,37 +10,50 @@
  *   prepare（不写任何一行）→ 看 `plan.conflicts` → 非空则弹警告，等用户点头
  *                                              → 空则直接 commitInstall
  *
- *   网络安装、本地文件导入、覆盖确认后的提交，三个入口汇合于 {@link settlePrepared} /
+ *   网络安装与覆盖确认后的提交，两个入口汇合于 {@link settlePrepared} /
  *   {@link commit} 这一对函数。第二条提交路径就是第二条绕过警告的路径 —— 而被绕过的
  *   后果是用户亲手写的世界书条目被上游版本静默盖掉，事后无从追回。
  *
  * 页面不碰 Dexie、不碰 `fetch`: 落库经 `workshop-store`，网络经 `workshop-client`。
  *
- * 只做安装侧: 登录/点赞/订阅/投稿属 Phase 3+，本页一个入口都不给。
+ * 社交侧只在本页占**一格**（P3c）: 顶栏的登录位（未登录一个按钮，已登录头像 + 名字 +
+ * 登出）。点赞/订阅长在卡片与详情上，不经过本页；投稿/管理面仍不做。
  * 「哪些工坊项目在这个存档里启用」是另一条轴（P1-5，捏人页 + 每存档面板），不在这里。
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import type { WorkshopProject } from '@engine/types';
-import type { InstallConflict } from '@engine/workshop-types';
+import type { InstallConflict, WorkshopProjectMeta } from '@engine/workshop-types';
+import type { WorkshopUpdateDiff } from '@engine/workshop-diff';
 import { groupWorkshopNotes } from '@engine/workshop-types';
 import { useUIStore } from '../../stores/ui-store';
 import { useWorkshopStore } from '../../stores/workshop-store';
 import type { WorkshopPrepared } from '../../stores/workshop-store';
+import { useWorkshopSocialStore } from '../../stores/workshop-social-store';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import WorkshopBrowseModal from './WorkshopBrowseModal.vue';
+import WorkshopSubmitModal from './WorkshopSubmitModal.vue';
+import WorkshopAdminModal from './WorkshopAdminModal.vue';
 import WorkshopDetailModal from './WorkshopDetailModal.vue';
 import WorkshopInstalledList from './WorkshopInstalledList.vue';
 import WorkshopConflictModal from './WorkshopConflictModal.vue';
-import { describeFailure } from './failure-text';
-import { summarizeNoteGroups } from './format';
+import { describeFailure, describeLoginFailure } from './failure-text';
+import {
+  DISCORD_FALLBACK_AVATAR,
+  discordAvatarUrl,
+  discordDisplayName,
+  summarizeNoteGroups,
+} from './format';
 
 const ui = useUIStore();
 const workshop = useWorkshopStore();
+const social = useWorkshopSocialStore();
 
 onMounted(() => {
   // 幂等：init 内部共用同一个 Promise，App.vue 已经踢过的 store 在这里空转
   void workshop.init();
+  // 同样幂等。做两件事：给 client 注册 token provider、从 localStorage 恢复登录态
+  social.init();
 });
 
 const projects = computed<WorkshopProject[]>(() => workshop.projects);
@@ -76,7 +89,12 @@ function endBusy(): void {
 }
 
 /** D15 待确认的覆盖。`prepared` 必须原样留着交给 commitInstall（它会以当下游标重算） */
-const pending = ref<{ prepared: WorkshopPrepared; conflicts: InstallConflict[] } | null>(null);
+const pending = ref<{
+  prepared: WorkshopPrepared;
+  conflicts: InstallConflict[];
+  /** 改动预告（B3）。首装为 null —— 没有可比的对象 */
+  diff: WorkshopUpdateDiff | null;
+} | null>(null);
 const pendingUninstall = ref<WorkshopProject | null>(null);
 
 /** 唯一的状态播报区 */
@@ -130,8 +148,18 @@ async function commit(prepared: WorkshopPrepared): Promise<void> {
  * 返回值只给调用方看「有没有走到落库」，不承担别的语义。
  */
 async function settlePrepared(prepared: WorkshopPrepared): Promise<void> {
-  if (prepared.plan.conflicts.length > 0) {
-    pending.value = { prepared, conflicts: prepared.plan.conflicts };
+  const conflicts = prepared.plan.conflicts;
+
+  /*
+   * ★ 更新**一律**先停下给预告（B3），不再只在有冲突时才停。
+   *
+   * 「更新」这个动作会静默改掉用户已经在玩的内容 —— 加条目、删条目、换正文。
+   * 冲突警告只覆盖其中一种后果（他自己改过的那几条），另外几种同样不可逆，
+   * 却此前一个字都不说。首装不走这道闸: 那时全部内容都是新的，预告等于把详情
+   * 模态里刚看过的东西再念一遍，纯粹的摩擦。
+   */
+  if (prepared.plan.isUpdate || conflicts.length > 0) {
+    pending.value = { prepared, conflicts, diff: workshop.previewUpdate(prepared) };
     return;
   }
   await commit(prepared);
@@ -174,40 +202,6 @@ async function confirmOverwrite(): Promise<void> {
   //   而用户在几秒的写入期间对着一个已经关掉的对话框，不知道覆盖到底跑没跑。
   await commit(p.prepared);
   pending.value = null;
-}
-
-// ═══ 本地文件导入（离线来源，与网络同一条管线） ═══
-
-const fileInput = ref<HTMLInputElement | null>(null);
-
-async function onFilePicked(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  // 先清空 value：不清的话选同一个文件第二次不会触发 change
-  input.value = '';
-  if (!file) return;
-
-  // ★ 与网络路径同一道闸: 缺了它，用户能在 60s 载荷下载途中再导入一个文件，
-  //   两个 commit 并发跑，先收工的那个把忙碌态清掉、按钮提前解禁，第三个动作又能进来。
-  if (busyId.value) {
-    announce('正在处理上一个项目，请稍候再导入。', 'info');
-    return;
-  }
-
-  let raw: unknown;
-  try {
-    raw = JSON.parse(await file.text()) as unknown;
-  } catch {
-    announce(`「${file.name}」不是合法的 JSON 文件。`, 'error');
-    return;
-  }
-
-  const prep = workshop.prepareInstallFromFile(raw);
-  if (!prep.ok) {
-    announce(describeFailure(prep.error), 'error');
-    return;
-  }
-  await settlePrepared(prep.prepared);
 }
 
 // ═══ 查更新 / 卸载 ═══
@@ -259,7 +253,98 @@ async function confirmUninstall(): Promise<void> {
   }
 }
 
+// ═══ 登录位（P3c / D19·D25） ═══
+
+/** 头像 URL 拉不动时的兜底标志。换了用户就重置，否则新头像会被上一个人的失败判死 */
+const avatarFailed = ref(false);
+watch(
+  () => social.user?.userId,
+  () => {
+    avatarFailed.value = false;
+  },
+);
+
+const accountName = computed(() => discordDisplayName(social.user));
+const avatarUrl = computed(() =>
+  avatarFailed.value ? DISCORD_FALLBACK_AVATAR : discordAvatarUrl(social.user),
+);
+
+/**
+ * 登录。**不自己编排弹窗/轮询** —— 那一整套（双重验签、快路径、60 秒超时、单飞）
+ * 都在 store 里，本页只把收场翻成一句话。
+ *
+ * 连点两下不会开出两个弹窗: store 的单飞让第二次调用共用同一个 Promise，
+ * 而按钮在 pending 期间本来就是禁用的（`loading`）。
+ */
+async function onLogin(): Promise<void> {
+  const res = await social.login();
+  if (res.status === 'success') {
+    announce(`已登录为 ${accountName.value}`, 'success');
+    return;
+  }
+  // D25：上游原话照登，后面补一句我们自己的前提说明（口径收在 failure-text）
+  announce(describeLoginFailure(res.message), 'error');
+}
+
+/** 登出不发请求（O4）——上游 logout 是纯 no-op，丢掉本地 token 就是登出的全部含义 */
+function onLogout(): void {
+  social.logout();
+  announce('已登出创意工坊账号。', 'info');
+}
+
 // ═══ 详情模态的派生 ═══
+
+// ═══ 投稿 / 编辑（B4） ═══
+
+const submitOpen = ref(false);
+/** 有值 = 编辑那一份；null = 新建投稿 */
+const submitEditing = ref<{
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  tags: string[];
+} | null>(null);
+
+function openSubmit(): void {
+  submitEditing.value = null;
+  submitOpen.value = true;
+}
+
+/**
+ * 从浏览模态里点「编辑」。
+ *
+ * 表单初值以**上游那一行**为准（模态转达过来的，`/api/projects` 与 `/api/my/projects`
+ * 都带 description/version/tags），本地已装的那份只做兜底。
+ *
+ * 🔴 顺序不能反：「我的项目」列的是作者名下全部项目，**未必在本地装过**。以本地为准
+ * 时那种项目会开出一张空表单，而「提交修改」是整份 PUT —— 一次没留神就把上游的简介
+ * 清空、标签清光。宁可少填一个字段，也不能拿空串去覆盖线上还在的内容。
+ */
+function openEdit(project: WorkshopProjectMeta): void {
+  const local = workshop.getProject(project.id);
+  submitEditing.value = {
+    id: project.id,
+    name: project.name || (local?.name ?? ''),
+    description: project.description || (local?.description ?? ''),
+    version: project.version || (local?.version ?? '1.0.0'),
+    tags: [...(project.tags.length > 0 ? project.tags : (local?.tags ?? []))],
+  };
+  submitOpen.value = true;
+}
+
+function onSubmitted(): void {
+  announce('已提交到创意工坊，等待审核。', 'success');
+}
+
+// ═══ 审核面板（B5，仅管理员） ═══
+
+const adminOpen = ref(false);
+/**
+ * 只决定**画不画这个入口**，不是权限边界 —— 真正的门禁在上游的 403 上
+ * （见 WorkshopAdminModal 的文件头）。
+ */
+const isAdmin = computed(() => social.user?.isAdmin === true);
 
 const detailInstalled = computed(() => workshop.getProject(detailId.value));
 const pendingName = computed(() => pending.value?.prepared.input.project.name ?? '');
@@ -267,24 +352,15 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
 
 <template>
   <div class="workshop-page">
-    <!-- ═══ 顶栏 ═══ -->
+    <!--
+      ═══ 顶栏 ═══
+      只留导航与标题。动作按钮曾经全挤在这一条右侧，窄屏下会折行把标题顶掉，
+      而且「浏览工坊」这个主动作藏在页面最边角 —— 它其实是这一页的主要入口。
+      2026-08-01 全部下沉进页面本体。
+    -->
     <header class="wk-topbar">
       <AppButton variant="ghost" size="sm" @click="ui.navigate('home')">← 返回</AppButton>
       <h2 class="wk-title">创意工坊</h2>
-      <div class="wk-topbar-actions">
-        <AppButton variant="secondary" size="sm" @click="fileInput?.click()">
-          导入本地文件
-        </AppButton>
-        <AppButton variant="primary" size="sm" @click="browseOpen = true">浏览工坊</AppButton>
-      </div>
-      <input
-        ref="fileInput"
-        type="file"
-        accept=".json,application/json"
-        class="wk-file-input"
-        aria-label="导入 project-xxx.json"
-        @change="onFilePicked"
-      />
     </header>
 
     <main class="wk-main">
@@ -293,6 +369,50 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
         <strong>创意工坊</strong> 分区（与内置内容彼此隔离），正则会进入「输出美化」规则库。
         装了还不等于生效 —— 还要在存档里勾选启用。
       </p>
+
+      <!--
+        ═══ 动作区 ═══
+        左：身份（登录 / 头像 + 登出）。右：动作，「浏览工坊」作为主动作排在最后
+        （视线终点，也是最常按的那个）。
+      -->
+      <section class="wk-actionbar">
+        <div class="wk-actionbar-identity">
+          <!-- ═══ 登录位（P3c） ═══ -->
+          <div v-if="social.isLoggedIn" class="wk-account">
+            <img
+              class="wk-avatar"
+              :src="avatarUrl"
+              alt=""
+              referrerpolicy="no-referrer"
+              @error="avatarFailed = true"
+            />
+            <span class="wk-account-name" :title="accountName">{{ accountName }}</span>
+            <AppButton variant="ghost" size="sm" @click="onLogout">登出</AppButton>
+          </div>
+          <AppButton
+            v-else
+            variant="secondary"
+            size="sm"
+            :loading="social.loginPhase === 'pending'"
+            @click="onLogin"
+          >
+            {{ social.loginPhase === 'pending' ? '等待 Discord 授权…' : 'Discord 登录' }}
+          </AppButton>
+        </div>
+
+        <div class="wk-actionbar-actions">
+          <AppButton v-if="isAdmin" variant="secondary" size="sm" @click="adminOpen = true">
+            审核
+          </AppButton>
+
+          <!-- 投稿要有身份可署名，未登录时不出这个按钮（点了也只会 401） -->
+          <AppButton v-if="social.isLoggedIn" variant="secondary" size="sm" @click="openSubmit">
+            投稿
+          </AppButton>
+
+          <AppButton variant="primary" size="sm" @click="browseOpen = true">浏览工坊</AppButton>
+        </div>
+      </section>
 
       <section class="wk-section">
         <!-- 水合完成前不报数：这时 projects 恒为空，报「已安装（0）」是在说假话 -->
@@ -315,7 +435,23 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
     </main>
 
     <!-- ═══ 浏览 ═══ -->
-    <WorkshopBrowseModal v-model:open="browseOpen" :installed="projects" @open="openDetail" />
+    <WorkshopBrowseModal
+      v-model:open="browseOpen"
+      :installed="projects"
+      @open="openDetail"
+      @edit="openEdit"
+      @notify="announce"
+    />
+
+    <!-- ═══ 审核面板（B5） ═══ -->
+    <WorkshopAdminModal v-model:open="adminOpen" @notify="announce" />
+
+    <!-- ═══ 投稿 / 编辑（B4） ═══ -->
+    <WorkshopSubmitModal
+      v-model:open="submitOpen"
+      :editing="submitEditing ?? undefined"
+      @submitted="onSubmitted"
+    />
 
     <!-- ═══ 详情 ═══ -->
     <WorkshopDetailModal
@@ -333,6 +469,7 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
       :open="pending !== null"
       :project-name="pendingName"
       :conflicts="pending?.conflicts ?? []"
+      :diff="pending?.diff ?? null"
       :busy="busyId !== ''"
       @confirm="confirmOverwrite"
       @cancel="busyId ? undefined : (pending = null)"
@@ -398,14 +535,58 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
   letter-spacing: 0.04em;
   color: var(--theme-text-primary);
 }
-.wk-topbar-actions {
+/*
+ * ── 动作区（2026-08-01 从顶栏下沉） ──
+ *
+ * 一行两组、中间自动撑开。窄屏折成两行而不是把按钮挤成一列 —— 竖着排四个按钮
+ * 会把「已安装」整块推到首屏之外。
+ */
+.wk-actionbar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--theme-spacing-sm);
+  margin-bottom: var(--theme-spacing-lg);
+  padding: var(--theme-spacing-md);
+  background: var(--theme-card-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-lg);
+}
+.wk-actionbar-identity,
+.wk-actionbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--theme-spacing-sm);
 }
-.wk-file-input {
-  display: none;
-}
 
+/* ── 登录位 ── */
+.wk-account {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+}
+.wk-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--theme-radius-full);
+  object-fit: cover;
+  background: var(--theme-surface-muted);
+  border: 1px solid var(--theme-card-border);
+}
+/*
+ * 名字给个上限并省略: Discord 显示名可以很长（表情、装饰符号一大串），不封顶的话
+ * 会把同一行右边的动作按钮一路挤到折行。
+ */
+.wk-account-name {
+  max-width: 10rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.8125rem;
+  color: var(--theme-text-secondary);
+}
 /* ── 主体 ── */
 .wk-main {
   flex: 1;

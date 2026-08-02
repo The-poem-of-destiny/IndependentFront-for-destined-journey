@@ -12,7 +12,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseProjectMeta, parsePayload } from './workshop-manifest';
+import {
+  parseProjectMeta,
+  parsePayload,
+  parseListingMeta,
+  parseSocialMeta,
+  parseToggleAck,
+} from './workshop-manifest';
 
 /** 真实样本：命定核心-言灵（重置），字段名与形态照抄，长文本截断 */
 const REAL_PROJECT = {
@@ -452,5 +458,152 @@ describe('正则 id 去重（上游 JSON 不可信）', () => {
 
   it('全不重复时一个 id 都不改', () => {
     expect(payloadWith(['a', 'b', 'c']).regexEntries.map((r) => r.id)).toEqual(['a', 'b', 'c']);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 社交面（D22 / Phase 3）
+// ═══════════════════════════════════════════════════════════
+//
+// 这一组的核心不是「能读出数字」，而是**缺字段与脏值一律得安全缺省** ——
+// 未登录时上游根本不返回 `userLiked`，异常兜底路径又会硬编码 `false`（§1.3），
+// 两种情况都不该让 UI 拿到 `undefined` 去做算术或者渲染成 "NaN"。
+
+describe('parseSocialMeta', () => {
+  it('读全五个字段', () => {
+    expect(
+      parseSocialMeta({
+        likesCount: 3,
+        subscribesCount: 7,
+        downloadsCount: 16,
+        userLiked: true,
+        userSubscribed: true,
+      }),
+    ).toEqual({
+      likesCount: 3,
+      subscribesCount: 7,
+      downloadsCount: 16,
+      userLiked: true,
+      userSubscribed: true,
+    });
+  });
+
+  it('★ 全部缺字段 → 0 / false，而不是 undefined', () => {
+    expect(parseSocialMeta({})).toEqual({
+      likesCount: 0,
+      subscribesCount: 0,
+      downloadsCount: 0,
+      userLiked: false,
+      userSubscribed: false,
+    });
+  });
+
+  it('null / 字符串 / 数组等非对象输入都不炸', () => {
+    for (const raw of [null, undefined, '', 42, [], 'nope']) {
+      expect(parseSocialMeta(raw).likesCount).toBe(0);
+      expect(parseSocialMeta(raw).userLiked).toBe(false);
+    }
+  });
+
+  it('与 parseProjectMeta 一样容忍整个详情响应（自动下钻 .project）', () => {
+    const detail = { success: true, project: { id: 'p1', likesCount: 9, userLiked: true } };
+    expect(parseSocialMeta(detail).likesCount).toBe(9);
+    expect(parseSocialMeta(detail).userLiked).toBe(true);
+  });
+
+  it('★ 真实样本的社交字段能被读出（与 parseProjectMeta 吃同一个对象，零额外请求）', () => {
+    expect(parseSocialMeta(REAL_PROJECT).likesCount).toBe(REAL_PROJECT.likesCount);
+    expect(parseSocialMeta(REAL_PROJECT).downloadsCount).toBe(REAL_PROJECT.downloadsCount);
+    // 而落库那一半绝不含社交字段（D13/D22）
+    expect(parseProjectMeta(REAL_PROJECT)).not.toHaveProperty('likesCount');
+  });
+
+  it('负数 / 小数 / 数字串都归一成非负整数 —— 不把脏值渲染到按钮旁边', () => {
+    const meta = parseSocialMeta({ likesCount: -5, subscribesCount: 2.9, downloadsCount: '12' });
+    expect(meta.likesCount).toBe(0);
+    expect(meta.subscribesCount).toBe(2);
+    expect(meta.downloadsCount).toBe(12);
+  });
+
+  it('旗标是非布尔脏值时退回 false（只有真 boolean 才算数）', () => {
+    const meta = parseSocialMeta({ userLiked: 'true', userSubscribed: 1 });
+    expect(meta.userLiked).toBe(false);
+    expect(meta.userSubscribed).toBe(false);
+  });
+});
+
+describe('parseToggleAck', () => {
+  it('点赞回执 `{liked, count}`', () => {
+    expect(parseToggleAck({ liked: true, count: 4 })).toEqual({ active: true, count: 4 });
+  });
+
+  it('订阅回执 `{subscribed, count}` —— 字段名不同，读法只有一套', () => {
+    expect(parseToggleAck({ subscribed: false, count: 0 })).toEqual({ active: false, count: 0 });
+  });
+
+  it('缺字段 → false / 0，且永不抛', () => {
+    expect(parseToggleAck({})).toEqual({ active: false, count: 0 });
+    expect(parseToggleAck(null)).toEqual({ active: false, count: 0 });
+  });
+});
+
+describe('parseListingMeta（Phase 4）', () => {
+  it('完整 URL 的头像原样用', () => {
+    const meta = parseListingMeta({
+      authorId: '123',
+      authorAvatar: 'https://cdn.discordapp.com/avatars/123/abc.webp?size=100',
+    });
+    expect(meta.authorAvatarUrl).toBe('https://cdn.discordapp.com/avatars/123/abc.webp?size=100');
+  });
+
+  it('★ 裸哈希也吃 —— 上游若回退到直出 DB 列，这里替它拼出 CDN 地址', () => {
+    const meta = parseListingMeta({ authorId: '123', authorAvatar: 'abc' });
+    expect(meta.authorAvatarUrl).toBe('https://cdn.discordapp.com/avatars/123/abc.webp?size=100');
+  });
+
+  it('★ 拼不出来一律空串 —— 绝不返回半截 URL', () => {
+    expect(parseListingMeta({ authorAvatar: 'abc' }).authorAvatarUrl).toBe('');
+    expect(parseListingMeta({ authorId: '123' }).authorAvatarUrl).toBe('');
+    expect(parseListingMeta(null).authorAvatarUrl).toBe('');
+  });
+
+  it('审核字段照读，未知状态原样保留', () => {
+    const meta = parseListingMeta({
+      status: 'rejected',
+      reviewTarget: 'draft',
+      rejectReason: '与命定核心冲突',
+      hasPendingDraft: true,
+      visibility: false,
+    });
+    expect(meta).toMatchObject({
+      status: 'rejected',
+      reviewTarget: 'draft',
+      rejectReason: '与命定核心冲突',
+      hasPendingDraft: true,
+      visibility: false,
+    });
+  });
+
+  it('★ visibility 缺省为 true —— 公开列表根本不带这个字段', () => {
+    expect(parseListingMeta({ status: 'approved' }).visibility).toBe(true);
+  });
+
+  it('详情响应会自动下钻 .project（与 parseSocialMeta 同款）', () => {
+    const meta = parseListingMeta({ project: { status: 'pending', authorId: 'a1' } });
+    expect(meta.status).toBe('pending');
+    expect(meta.authorId).toBe('a1');
+  });
+
+  it('缺字段一律空串 / false，且永不抛', () => {
+    expect(parseListingMeta(undefined)).toEqual({
+      authorId: '',
+      authorAvatarUrl: '',
+      status: '',
+      reviewTarget: '',
+      rejectReason: '',
+      hasPendingDraft: false,
+      visibility: true,
+      updatedAt: '',
+    });
   });
 });

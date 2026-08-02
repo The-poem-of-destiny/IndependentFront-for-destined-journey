@@ -148,9 +148,13 @@ export function groupWorkshopNotes(
  * 用 `Pick<WorkshopProject, ...>` 而非重新写一遍字段，是为了让「上游侧字段」与
  * 落库实体永远同形 —— types.ts 改字段类型时这里跟着红，不会悄悄漂移。
  *
- * 其余 17 个上游字段（`publishedProjectId` `authorId` `status` `reviewedAt`
- * `likesCount` `userLiked` …）属身份/审核/社交面，**刻意丢弃**，Phase 3+ 再说。
- * 上游原始响应不整包存库 —— 否则即第二真相来源，违反铁律 4。
+ * 其余上游字段（`publishedProjectId` `authorId` `status` `reviewedAt` …）属身份/
+ * 审核面，**刻意丢弃**。上游原始响应不整包存库 —— 否则即第二真相来源，违反铁律 4。
+ *
+ * ⚠️ 社交计数（`likesCount` / `userLiked` / …）在 Phase 3 起**被解析**，但落点是
+ * 另一个类型 {@link WorkshopSocialMeta}，**不并入本类型**。理由见那边的注释：
+ * 本类型是落库实体的投影，社交面是纯内存展示层，混在一起就等于把一份会随时变、
+ * 且随调用者身份变的数据写进了库。
  */
 export type WorkshopProjectMeta = Pick<
   WorkshopProject,
@@ -165,6 +169,101 @@ export type WorkshopProjectMeta = Pick<
   | 'downloadUrl'
   | 'fileSize'
 >;
+
+// ═══════════════════════════════════════════════════════════
+// 上游 → 内部：社交面（D22，Phase 3）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 一个项目的社交计数与「我」的旗标（D22）。
+ *
+ * 🔴 **纯内存展示层，绝不落库**。D13 的存储禁令一个字都没松动：
+ * 本类型不进 {@link WorkshopProjectMeta}、不进 `WorkshopProject`、不进 Dexie、
+ * 不进 FullBackup，`workshopProjects` 表结构零改动。
+ *
+ * 为什么它必须留在内存里，而不是「顺手存一份省得每次拉」:
+ * - `userLiked` / `userSubscribed` 是**按调用者的 JWT 填充**的（上游 `utils/db.ts`）。
+ *   落库就等于把「当前这个人的旗标」写成了「这个项目的属性」—— 换个账号登录、
+ *   或者登出之后，库里那个 `true` 会继续告诉 UI「你赞过」。
+ * - 三个计数每时每刻都在被别人改。库里的数字从写入那一刻起就是错的，
+ *   而 UI 上一个静止的错数字比没有数字更糟。
+ *
+ * 所以它只有两个来源：列表/详情响应顺带解析（零新增请求，D22），以及 toggle
+ * 响应的权威回值（D23）。刷新页面即消失，正是我们想要的。
+ *
+ * 缺字段一律 0 / false（见 `workshop-manifest.parseSocialMeta`）。
+ * ⚠️ `false` **不是权威负证据** —— 上游异常兜底路径会硬编码 `userLiked: false`
+ * （§1.3），未登录时它也恒为 false。只有 toggle 响应说的才算数。
+ */
+export interface WorkshopSocialMeta {
+  likesCount: number;
+  subscribesCount: number;
+  /**
+   * 下载计数。⚠️ **仅供展示，不做任何逻辑依赖** —— 上游只在拉载荷文件时 +1，
+   * 而载荷带 `s-maxage=86400`，绝大多数下载被边缘缓存挡在计数之前（§1.3）。
+   */
+  downloadsCount: number;
+  /** 「我」赞过没有。未登录恒 false */
+  userLiked: boolean;
+  /** 「我」订阅了没有。未登录恒 false */
+  userSubscribed: boolean;
+}
+
+/**
+ * 一个项目的**目录展示面**（Phase 4）—— 作者身份与审核状态。
+ *
+ * 🔴 与 {@link WorkshopSocialMeta} 同一条纪律：**纯内存展示层，绝不落库**。
+ * 不进 {@link WorkshopProjectMeta}、不进 `WorkshopProject`、不进 Dexie、不进 FullBackup。
+ *
+ * 为什么这些字段不能并进 `WorkshopProjectMeta`: 那个类型是**落库实体的投影**
+ * （`Pick<WorkshopProject, …>`），进去的每个字段都会被写进 `workshopProjects` 表。
+ * 而这里的每一项都会变:
+ * - `status` / `reviewTarget` / `rejectReason` —— 审核状态，作者改一版就翻篇。存下来
+ *   等于让用户在「已安装」列表里永远看到一条三个月前的「审核中」。
+ * - `visibility` / `hasPendingDraft` —— 同上，且只对作者本人有意义。
+ * - `authorAvatarUrl` —— Discord 头像哈希换了旧 URL 就 404。
+ *
+ * 与社交面并列成第二个 sidecar 而不是塞进同一个: 两者的**来源不同**。社交面还有
+ * toggle 回执这条权威更新路径（D23），本类型只有列表/详情响应一条。混在一起之后，
+ * 「toggle 回来该覆盖哪几个字段」就再没有类型上的答案了。
+ */
+export interface WorkshopListingMeta {
+  /** 上游作者 id（Discord snowflake）。用于判「这是不是我的项目」 */
+  authorId: string;
+  /**
+   * 作者头像的**完整 URL**。上游 `/api/projects` 与 `/api/my/projects` 都已在服务端
+   * 拼好（`cdn.discordapp.com/avatars/<id>/<hash>.webp`），我们不重复拼；万一将来
+   * 上游改回只给哈希，`parseListingMeta` 会替我们兜住。拿不到就空串（调用方据此
+   * 走默认头像，**不渲染空 src**）。
+   */
+  authorAvatarUrl: string;
+  /** 上游审核状态：`approved` / `pending` / `rejected`。未知值原样保留 */
+  status: string;
+  /** 审核对象：`project`（项目本体）/ `draft`（新版本草稿） */
+  reviewTarget: string;
+  /** 被拒原因。没有就空串 */
+  rejectReason: string;
+  /** 有一个待审核的新版本草稿 */
+  hasPendingDraft: boolean;
+  /** 作者是否把它设为公开 */
+  visibility: boolean;
+  /** 上游的更新时间戳（ISO 串）。用作封面的缓存版本号，见 lib/workshop-cover.ts */
+  updatedAt: string;
+}
+
+/**
+ * toggle 端点（点赞/订阅）的回执 —— 上游返回 `{liked|subscribed, count}`，
+ * 两个动作的字段名不同但语义同构，故在读侧统一成一个形状。
+ *
+ * ★ 它是社交值**唯一的权威来源**：翻转语义（有行删、无行插、再重数）下，
+ * 本地推算的「+1」只是乐观显示，服务端数到几就是几（D23）。
+ */
+export interface WorkshopToggleAck {
+  /** 翻转后的状态：true = 现在赞着/订阅着 */
+  active: boolean;
+  /** 翻转后的总数（服务端重数的结果） */
+  count: number;
+}
 
 // ═══════════════════════════════════════════════════════════
 // 上游 → 内部：载荷（规范化后的 ST 形状）

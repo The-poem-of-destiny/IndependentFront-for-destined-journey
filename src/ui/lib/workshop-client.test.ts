@@ -18,13 +18,21 @@ import {
   WORKSHOP_REQUEST_TIMEOUT_MS,
   buildListUrl,
   buildProjectUrl,
+  decodeJwtPayload,
   downloadPayload,
   fetchInstallInput,
   fetchProject,
+  invalidateWorkshopProject,
   listProjects,
+  pollLogin,
   resetWorkshopClient,
+  setWorkshopAuthTokenProvider,
   setWorkshopClock,
   setWorkshopFetch,
+  startLogin,
+  toggleLike,
+  toggleSubscribe,
+  type WorkshopFetchInit,
   type WorkshopFetchLike,
   type WorkshopResponseLike,
 } from './workshop-client';
@@ -822,5 +830,589 @@ describe('取消', () => {
     expect(resA.ok).toBe(false);
     if (!resA.ok) expect(resA.error.kind).toBe('cancelled');
     expect(resB.ok).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 社交面 + 认证（Phase 3 / P3b）
+// ═══════════════════════════════════════════════════════════
+
+/** 造一个真 JWT 形状的串（只有 payload 段是我们关心的；签名段随便填） */
+function makeJwt(payload: Record<string, unknown>): string {
+  const seg = (obj: unknown): string => {
+    const bytes = new TextEncoder().encode(JSON.stringify(obj));
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  };
+  return `${seg({ alg: 'HS256', typ: 'JWT' })}.${seg(payload)}.c2ln`;
+}
+
+const USER_ID = '1460747861682688006';
+const TOKEN = makeJwt({
+  userId: USER_ID,
+  username: 'yejianzai',
+  globalName: '夜见哉川',
+  avatar: '2a52ed39',
+  isAdmin: false,
+  isSuperAdmin: false,
+  exp: 4_102_444_800, // 2100 年，测试期内不会过期
+});
+
+/** 记录每一发请求的 url **与 init** —— 认证附着只能从 init 上验 */
+function recordingFetch(respond: (url: string) => WorkshopResponseLike): {
+  impl: WorkshopFetchLike;
+  seen: Array<{ url: string; init?: WorkshopFetchInit }>;
+} {
+  const seen: Array<{ url: string; init?: WorkshopFetchInit }> = [];
+  const impl: WorkshopFetchLike = async (url, init) => {
+    seen.push({ url, init });
+    return respond(url);
+  };
+  return { impl, seen };
+}
+
+function errorResponse(status: number, body: unknown): WorkshopResponseLike {
+  return {
+    ok: false,
+    status,
+    statusText: status === 401 ? 'Unauthorized' : 'Bad Request',
+    text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+  };
+}
+
+describe('decodeJwtPayload', () => {
+  it('解出 payload，且中文昵称不是乱码（atob 出来是 latin1 字节串，必须过 UTF-8）', () => {
+    const payload = decodeJwtPayload(TOKEN);
+    expect(payload?.userId).toBe(USER_ID);
+    expect(payload?.globalName).toBe('夜见哉川');
+  });
+
+  it('畸形串一律 null（手改过的 localStorage / 截断的 token），永不抛', () => {
+    for (const bad of ['', 'not-a-jwt', 'a.b', 'a.@@@@.c']) {
+      expect(decodeJwtPayload(bad)).toBeNull();
+    }
+  });
+
+  it('payload 段不是对象（是数组/数字）也回 null', () => {
+    expect(decodeJwtPayload(makeJwt([1, 2] as unknown as Record<string, unknown>))).toBeNull();
+  });
+});
+
+describe('认证附着（D21/D24）', () => {
+  it('★ 未注册 token provider → 一个 header 都不挂，请求形状与 Phase 1 一字不差', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse(detailResponse()));
+    setWorkshopFetch(impl);
+
+    await fetchProject(PROJECT_ID);
+    expect(seen[0].init?.headers).toBeUndefined();
+    expect(seen[0].init?.cache).toBeUndefined();
+  });
+
+  it('★ 已登录 → Authorization: Bearer + cache:no-store（上游缺 Vary: Authorization）', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse(detailResponse()));
+    setWorkshopFetch(impl);
+    setWorkshopAuthTokenProvider(() => TOKEN);
+
+    await fetchProject(PROJECT_ID);
+    expect(seen[0].init?.headers?.Authorization).toBe(`Bearer ${TOKEN}`);
+    expect(seen[0].init?.cache).toBe('no-store');
+  });
+
+  it('provider 返回空串/null 一律按未登录处理', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse({ projects: [] }));
+    setWorkshopFetch(impl);
+
+    setWorkshopAuthTokenProvider(() => '  ');
+    await listProjects();
+    setWorkshopAuthTokenProvider(() => null);
+    await listProjects({ page: 1 });
+    expect(seen.every((s) => s.init?.headers === undefined)).toBe(true);
+  });
+
+  it('provider 自己抛异常也不该炸掉一次列表请求', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse({ projects: [] }));
+    setWorkshopFetch(impl);
+    setWorkshopAuthTokenProvider(() => {
+      throw new Error('store 还没 init');
+    });
+
+    const res = await listProjects();
+    expect(res.ok).toBe(true);
+    expect(seen[0].init?.headers).toBeUndefined();
+  });
+
+  it('★ 载荷请求永不带身份（/api/files/* 是公开的、对所有人同一份字节）', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse(payloadResponse()));
+    setWorkshopFetch(impl);
+    setWorkshopAuthTokenProvider(() => TOKEN);
+
+    await downloadPayload(DOWNLOAD_URL);
+    expect(seen[0].init?.headers).toBeUndefined();
+    expect(seen[0].init?.cache).toBeUndefined();
+  });
+
+  it('resetWorkshopClient 会复位 provider —— 否则上个用例的登录态会漏进下一个', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse(detailResponse()));
+    setWorkshopAuthTokenProvider(() => TOKEN);
+    resetWorkshopClient();
+    setWorkshopFetch(impl);
+    setWorkshopClock(() => now);
+
+    await fetchProject(PROJECT_ID);
+    expect(seen[0].init?.headers).toBeUndefined();
+  });
+});
+
+describe('缓存键的身份前缀（D24）', () => {
+  it('★ 未登录与已登录互不命中 —— 否则登出后还会看见自己赞过的红心', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse({ projects: [], total: 0 }));
+    setWorkshopFetch(impl);
+
+    // 匿名拉一屏
+    const anon = await listProjects();
+    expect(anon.ok && anon.fromCache).toBe(false);
+
+    // 登录后同一个 URL：必须真的重拉（旗标是按 JWT 填的，匿名那份不是「我」的）
+    setWorkshopAuthTokenProvider(() => TOKEN);
+    const authed = await listProjects();
+    expect(authed.ok && authed.fromCache).toBe(false);
+    expect(seen).toHaveLength(2);
+
+    // 同一身份内仍然吃缓存（TTL 的意义没被身份前缀抵消掉）
+    const again = await listProjects();
+    expect(again.ok && again.fromCache).toBe(true);
+
+    // 登出回到匿名桶：那一份还在，命中
+    setWorkshopAuthTokenProvider(undefined);
+    const backToAnon = await listProjects();
+    expect(backToAnon.ok && backToAnon.fromCache).toBe(true);
+    expect(seen).toHaveLength(2);
+  });
+
+  it('详情同样分桶', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse(detailResponse()));
+    setWorkshopFetch(impl);
+
+    await fetchProject(PROJECT_ID);
+    setWorkshopAuthTokenProvider(() => TOKEN);
+    const authed = await fetchProject(PROJECT_ID);
+    expect(authed.ok && authed.fromCache).toBe(false);
+    expect(seen).toHaveLength(2);
+  });
+
+  it('★ 载荷**不**分桶 —— 同一份不可变字节没必要在登录前后各下一遍', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse(payloadResponse()));
+    setWorkshopFetch(impl);
+
+    await downloadPayload(DOWNLOAD_URL);
+    setWorkshopAuthTokenProvider(() => TOKEN);
+    const hit = await downloadPayload(DOWNLOAD_URL);
+    expect(hit.ok && hit.fromCache).toBe(true);
+    expect(seen).toHaveLength(1);
+  });
+
+  it('两个不同用户不共用一个桶', async () => {
+    const other = makeJwt({ userId: 'someone-else', exp: 4_102_444_800 });
+    const { impl, seen } = recordingFetch(() => jsonResponse(detailResponse()));
+    setWorkshopFetch(impl);
+
+    setWorkshopAuthTokenProvider(() => TOKEN);
+    await fetchProject(PROJECT_ID);
+    setWorkshopAuthTokenProvider(() => other);
+    const second = await fetchProject(PROJECT_ID);
+    expect(second.ok && second.fromCache).toBe(false);
+    expect(seen).toHaveLength(2);
+  });
+
+  it('token 解不出 userId 时落在 auth 桶而不是 anon 桶（那一发确实带了身份）', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse(detailResponse()));
+    setWorkshopFetch(impl);
+
+    setWorkshopAuthTokenProvider(() => 'garbage-token');
+    await fetchProject(PROJECT_ID);
+    setWorkshopAuthTokenProvider(undefined);
+    const anon = await fetchProject(PROJECT_ID);
+    expect(anon.ok && anon.fromCache).toBe(false);
+    expect(seen).toHaveLength(2);
+  });
+});
+
+describe('社交计数随读取顺带解析（D22）', () => {
+  it('列表返回 socials（按项目 id 索引），零额外请求', async () => {
+    const { impl, seen } = recordingFetch(() =>
+      jsonResponse({
+        total: 1,
+        projects: [detailResponse().project, { name: '没有 id 的野项目', likesCount: 99 }],
+      }),
+    );
+    setWorkshopFetch(impl);
+
+    const res = await listProjects();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.socials[PROJECT_ID]).toEqual({
+      likesCount: 3,
+      subscribesCount: 1,
+      downloadsCount: 12,
+      userLiked: false,
+      userSubscribed: false,
+    });
+    // 被丢弃的野项目没有 id，也就无从索引
+    expect(Object.keys(res.data.socials)).toEqual([PROJECT_ID]);
+    expect(seen).toHaveLength(1);
+    // ★ 社交字段绝不混进落库那一半
+    expect(res.data.projects[0]).not.toHaveProperty('likesCount');
+  });
+
+  it('详情返回 social，同样零额外请求', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse(detailResponse()));
+    setWorkshopFetch(impl);
+
+    const res = await fetchProject(PROJECT_ID);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.social.likesCount).toBe(3);
+    expect(res.data.social.downloadsCount).toBe(12);
+    expect(seen).toHaveLength(1);
+  });
+
+  it('上游没给社交字段时全 0 / false，而不是缺键', async () => {
+    const detail = detailResponse();
+    for (const key of ['likesCount', 'subscribesCount', 'downloadsCount', 'userLiked']) {
+      delete (detail.project as Record<string, unknown>)[key];
+    }
+    setWorkshopFetch(routedFetch([[WORKSHOP_API_BASE, () => jsonResponse(detail)]]).impl);
+
+    const res = await fetchProject(PROJECT_ID);
+    expect(res.ok && res.data.social.likesCount).toBe(0);
+    expect(res.ok && res.data.social.userLiked).toBe(false);
+  });
+});
+
+describe('toggleLike / toggleSubscribe（D23）', () => {
+  const LIKE_URL = `${WORKSHOP_API_BASE}/api/projects/${PROJECT_ID}/like`;
+  const SUB_URL = `${WORKSHOP_API_BASE}/api/projects/${PROJECT_ID}/subscribe`;
+
+  it('POST 到 /like，无体，带身份；回执归一成 {active, count}', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse({ liked: true, count: 4 }));
+    setWorkshopFetch(impl);
+    setWorkshopAuthTokenProvider(() => TOKEN);
+
+    const res = await toggleLike(PROJECT_ID);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data).toEqual({ active: true, count: 4 });
+    expect(seen[0].url).toBe(LIKE_URL);
+    expect(seen[0].init?.method).toBe('POST');
+    expect(seen[0].init?.headers?.Authorization).toBe(`Bearer ${TOKEN}`);
+    // O6：URL 上不挂 `_=<timestamp>` 之类的缓存破坏参数
+    expect(seen[0].url).not.toContain('_=');
+  });
+
+  it('订阅走 /subscribe，读的是 `subscribed` 字段', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse({ subscribed: false, count: 0 }));
+    setWorkshopFetch(impl);
+
+    const res = await toggleSubscribe(PROJECT_ID);
+    expect(res.ok && res.data).toEqual({ active: false, count: 0 });
+    expect(seen[0].url).toBe(SUB_URL);
+  });
+
+  it('★ 绝不进缓存 —— 连点两次就是两发请求（点赞→取消，不许被去重成一次）', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse({ liked: true, count: 1 }));
+    setWorkshopFetch(impl);
+
+    await toggleLike(PROJECT_ID);
+    await toggleLike(PROJECT_ID);
+    expect(seen).toHaveLength(2);
+  });
+
+  it('并发的两发也不去重（翻转语义下合并 = 少发一次操作）', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse({ liked: true, count: 1 }));
+    setWorkshopFetch(impl);
+
+    await Promise.all([toggleLike(PROJECT_ID), toggleLike(PROJECT_ID)]);
+    expect(seen).toHaveLength(2);
+  });
+
+  it('★ 401 → unauthorized（不是 http）—— UI 引导登录而非报红', async () => {
+    setWorkshopFetch(async () => errorResponse(401, { error: 'Unauthorized' }));
+    const res = await toggleLike(PROJECT_ID);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error.kind).toBe('unauthorized');
+    expect(res.error.status).toBe(401);
+    expect(res.error.message).toContain('Unauthorized');
+  });
+
+  it('★ 网络失败绝不重试 —— fetch 调用数恒为 1（重试可能把刚点的赞又取消）', async () => {
+    let calls = 0;
+    setWorkshopFetch(async () => {
+      calls += 1;
+      throw new TypeError('Failed to fetch');
+    });
+
+    const res = await toggleLike(PROJECT_ID);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.kind).toBe('network');
+    expect(calls).toBe(1);
+  });
+
+  it('超时同样只发一次，且分类为 timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      setWorkshopFetch((_url, init) => {
+        calls += 1;
+        return new Promise<WorkshopResponseLike>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+      });
+      const pending = toggleLike(PROJECT_ID);
+      await vi.advanceTimersByTimeAsync(WORKSHOP_REQUEST_TIMEOUT_MS + 10);
+      const res = await pending;
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.error.kind).toBe('timeout');
+      expect(calls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('空 id 直接 malformed，不发请求', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse({ liked: true, count: 1 }));
+    setWorkshopFetch(impl);
+    const res = await toggleLike('   ');
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.kind).toBe('malformed');
+    expect(seen).toHaveLength(0);
+  });
+});
+
+describe('错误体的两种形状（§1.4）', () => {
+  it('手写路由的 `{"error": "..."}` 进 message', async () => {
+    setWorkshopFetch(async () => errorResponse(404, { error: 'Project not found' }));
+    const res = await fetchProject(PROJECT_ID);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error.kind).toBe('http');
+    expect(res.error.message).toContain('Project not found');
+  });
+
+  it('chanfana 校验失败的 `{success:false, errors:[…]}` 也能说出人话', async () => {
+    setWorkshopFetch(async () =>
+      errorResponse(400, {
+        success: false,
+        errors: [{ code: 7, message: 'Invalid enum value', path: ['query', 'sort'] }],
+      }),
+    );
+    const res = await listProjects({ sort: '乱填' });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error.message).toContain('Invalid enum value');
+    expect(res.error.message).toContain('query.sort');
+  });
+
+  it('HTML 拦截页 / 空体 → 只报状态码，绝不编内容', async () => {
+    setWorkshopFetch(async () => errorResponse(502, '<!DOCTYPE html><html>bad gateway</html>'));
+    const res = await fetchProject(PROJECT_ID);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error.message).toContain('502');
+    expect(res.error.message).not.toContain('DOCTYPE');
+  });
+
+  it('读错误体本身失败也不该把失败变成另一种失败', async () => {
+    setWorkshopFetch(async () => ({
+      ok: false,
+      status: 500,
+      statusText: 'Server Error',
+      text: async (): Promise<string> => {
+        throw new Error('body 读不动');
+      },
+    }));
+    const res = await fetchProject(PROJECT_ID);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error.kind).toBe('http');
+    expect(res.error.status).toBe(500);
+  });
+});
+
+describe('登录三段式（D19/D25）', () => {
+  const LOGIN_URL = `${WORKSHOP_API_BASE}/api/auth/login`;
+  const STATE = 'state-uuid-1';
+
+  it('startLogin 解出 {url, state}，且不带身份（此时还没有 token）', async () => {
+    const { impl, seen } = recordingFetch(() =>
+      jsonResponse({ url: 'https://discord.com/oauth2/authorize?x=1', state: STATE }),
+    );
+    setWorkshopFetch(impl);
+    setWorkshopAuthTokenProvider(() => TOKEN);
+
+    const res = await startLogin();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.state).toBe(STATE);
+    expect(res.data.url).toContain('discord.com');
+    expect(seen[0].url).toBe(LOGIN_URL);
+    expect(seen[0].init?.headers).toBeUndefined();
+  });
+
+  it('★ startLogin 绝不缓存 —— 缓存住一把用过的 state 会让第二次登录永远等不到结果', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse({ url: 'https://d/', state: STATE }));
+    setWorkshopFetch(impl);
+
+    await startLogin();
+    await startLogin();
+    expect(seen).toHaveLength(2);
+  });
+
+  it('响应缺 url/state → malformed', async () => {
+    setWorkshopFetch(async () => jsonResponse({ url: 'https://d/' }));
+    const res = await startLogin();
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.kind).toBe('malformed');
+  });
+
+  it('poll 未就绪 → pending', async () => {
+    setWorkshopFetch(async () => jsonResponse({ ready: false }));
+    const res = await pollLogin(STATE);
+    expect(res.ok && res.data.phase).toBe('pending');
+  });
+
+  it('poll 就绪且成功 → success，带 token 与用户快照', async () => {
+    const { impl, seen } = recordingFetch(() =>
+      jsonResponse({
+        ready: true,
+        success: true,
+        token: TOKEN,
+        user: { userId: USER_ID, username: 'yejianzai', globalName: '夜见哉川', avatar: 'h' },
+      }),
+    );
+    setWorkshopFetch(impl);
+
+    const res = await pollLogin(STATE);
+    expect(res.ok).toBe(true);
+    if (!res.ok || res.data.phase !== 'success') return;
+    expect(res.data.token).toBe(TOKEN);
+    expect(res.data.user?.globalName).toBe('夜见哉川');
+    expect(seen[0].url).toContain(`key=${STATE}`);
+  });
+
+  it('★ poll 就绪但失败 → failure，message 原样带出（多为 Discord 服务器门槛）', async () => {
+    setWorkshopFetch(async () =>
+      jsonResponse({ ready: true, success: false, message: '你不在允许的服务器中' }),
+    );
+    const res = await pollLogin(STATE);
+    expect(res.ok).toBe(true);
+    if (!res.ok || res.data.phase !== 'failure') return;
+    expect(res.data.message).toBe('你不在允许的服务器中');
+  });
+
+  it('就绪却没给 token 也算 failure —— 不让 UI 收下一个空 token', async () => {
+    setWorkshopFetch(async () => jsonResponse({ ready: true, success: true }));
+    const res = await pollLogin(STATE);
+    expect(res.ok && res.data.phase).toBe('failure');
+  });
+
+  it('★ poll 绝不缓存也不去重（单次消费：叠了会互相吃结果）', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse({ ready: false }));
+    setWorkshopFetch(impl);
+
+    await pollLogin(STATE);
+    await Promise.all([pollLogin(STATE), pollLogin(STATE)]);
+    expect(seen).toHaveLength(3);
+  });
+
+  it('传输层失败仍是 ok:false（调用方据此继续轮询，而不是把登录判死）', async () => {
+    setWorkshopFetch(async () => {
+      throw new Error('offline');
+    });
+    const res = await pollLogin(STATE);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.kind).toBe('network');
+  });
+
+  it('空 state 直接 malformed，不发请求', async () => {
+    const { impl, seen } = recordingFetch(() => jsonResponse({ ready: false }));
+    setWorkshopFetch(impl);
+    const res = await pollLogin('  ');
+    expect(res.ok).toBe(false);
+    expect(seen).toHaveLength(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// invalidateWorkshopProject（真机反馈 2026-08-01）
+// ═══════════════════════════════════════════════════════════
+
+describe('invalidateWorkshopProject', () => {
+  it('★ 丢掉该项目的详情 —— 作者改完点进去看到的必须是新的，不是 5 分钟前的副本', async () => {
+    const { impl, calls } = routedFetch([
+      [`${WORKSHOP_API_BASE}/api/projects/${PROJECT_ID}`, () => jsonResponse(detailResponse())],
+    ]);
+    setWorkshopFetch(impl);
+
+    await fetchProject(PROJECT_ID);
+    // 第二次本该吃缓存
+    const cached = await fetchProject(PROJECT_ID);
+    expect(cached.ok && cached.fromCache).toBe(true);
+    expect(calls).toHaveLength(1);
+
+    invalidateWorkshopProject(PROJECT_ID);
+
+    const fresh = await fetchProject(PROJECT_ID);
+    expect(fresh.ok && fresh.fromCache).toBe(false);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('★ 列表**全部**丢掉 —— 改一个名字会影响哪几页是算不出来的', async () => {
+    const { impl, calls } = routedFetch([
+      [`${WORKSHOP_API_BASE}/api/projects?`, () => jsonResponse({ projects: [], total: 0 })],
+    ]);
+    setWorkshopFetch(impl);
+
+    await listProjects({ page: 0 });
+    await listProjects({ page: 1 });
+    expect(calls).toHaveLength(2);
+    // 两页都该命中缓存
+    await listProjects({ page: 0 });
+    await listProjects({ page: 1 });
+    expect(calls).toHaveLength(2);
+
+    invalidateWorkshopProject(PROJECT_ID);
+
+    await listProjects({ page: 0 });
+    await listProjects({ page: 1 });
+    expect(calls).toHaveLength(4);
+  });
+
+  it('★ 载荷刻意不丢 —— 它按 downloadUrl 存键，上游发新版天然是另一把钥匙', async () => {
+    const { impl, calls } = routedFetch([[DOWNLOAD_URL, () => jsonResponse(payloadResponse())]]);
+    setWorkshopFetch(impl);
+
+    await downloadPayload(DOWNLOAD_URL);
+    invalidateWorkshopProject(PROJECT_ID);
+    const after = await downloadPayload(DOWNLOAD_URL);
+
+    expect(after.ok && after.fromCache).toBe(true);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('别的项目的详情不受牵连', async () => {
+    const OTHER = '99999999-8888-7777-6666-555555555555';
+    const { impl, calls } = routedFetch([
+      [`${WORKSHOP_API_BASE}/api/projects/${OTHER}`, () => jsonResponse(detailResponse())],
+    ]);
+    setWorkshopFetch(impl);
+
+    await fetchProject(OTHER);
+    invalidateWorkshopProject(PROJECT_ID);
+    const again = await fetchProject(OTHER);
+
+    expect(again.ok && again.fromCache).toBe(true);
+    expect(calls).toHaveLength(1);
   });
 });

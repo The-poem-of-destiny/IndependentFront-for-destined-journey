@@ -17,7 +17,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import type { WorkshopProjectMeta, WorkshopSourceRegex } from '@engine/workshop-types';
+import type {
+  WorkshopProjectMeta,
+  WorkshopSocialMeta,
+  WorkshopSourceRegex,
+} from '@engine/workshop-types';
 import type { WorkshopSourceEntry } from '@engine/workshop-types';
 import WorkshopDetailModal from './WorkshopDetailModal.vue';
 import { fetchProject } from '../../lib/workshop-client';
@@ -82,11 +86,35 @@ function regex(over: Partial<WorkshopSourceRegex> = {}): WorkshopSourceRegex {
 function detail(
   entries: WorkshopSourceEntry[] = [entry()],
   regexes: WorkshopSourceRegex[] = [regex()],
+  social: Partial<WorkshopSocialMeta> = {},
 ) {
   return {
     ok: true as const,
     fromCache: false,
-    data: { project: meta(), regexEntries: regexes, previewEntries: entries },
+    data: {
+      project: meta(),
+      regexEntries: regexes,
+      previewEntries: entries,
+      // 社交面（D22）：多数用例断言装前检视，计数一律 0/false
+      listing: {
+        authorId: '',
+        authorAvatarUrl: '',
+        status: 'approved',
+        reviewTarget: 'project',
+        rejectReason: '',
+        hasPendingDraft: false,
+        visibility: true,
+        updatedAt: '',
+      },
+      social: {
+        likesCount: 0,
+        subscribesCount: 0,
+        downloadsCount: 0,
+        userLiked: false,
+        userSubscribed: false,
+        ...social,
+      },
+    },
   };
 }
 
@@ -194,6 +222,60 @@ describe('WorkshopDetailModal 装前检视', () => {
     more.click();
     await flushPromises();
     expect(heads()).toHaveLength(60);
+    wrapper.unmount();
+  });
+
+  // ═══ 社交面（P3c）：同一份详情响应顺带带回来，零额外请求 ═══
+
+  it('★ 三个计数摊在底栏，点赞/订阅是放大版按钮', async () => {
+    fetchMock.mockResolvedValue(
+      detail([entry()], [regex()], {
+        likesCount: 12,
+        subscribesCount: 4,
+        downloadsCount: 88,
+        userSubscribed: true,
+      }),
+    );
+    const wrapper = await open();
+
+    const footer = document.body.querySelector('.modal-footer')!;
+    const btns = [...footer.querySelectorAll('.wk-social-btn')] as HTMLButtonElement[];
+    expect(btns).toHaveLength(2);
+    expect(btns[0].textContent).toContain('点赞');
+    expect(btns[0].textContent).toContain('12');
+    expect(btns[1].textContent).toContain('订阅');
+    expect(btns[1].textContent).toContain('4');
+    // 「我」订阅着 → 按下态（aria-pressed 而不是只靠颜色）
+    expect(btns[1].getAttribute('aria-pressed')).toBe('true');
+    expect(btns[0].getAttribute('aria-pressed')).toBe('false');
+    // 下载数只在详情露面，且只是展示（§1.3：绝大多数下载被边缘缓存挡在计数之前）
+    expect(footer.querySelector('.wk-social-downloads')!.textContent).toContain('88');
+    wrapper.unmount();
+  });
+
+  it('★ 未登录点赞：只给引导，不发请求（fetchProject 调用数不变）', async () => {
+    const wrapper = await open();
+    const before = fetchMock.mock.calls.length;
+
+    const like = document.body.querySelector('.wk-social-btn') as HTMLButtonElement;
+    like.click();
+    await flushPromises();
+
+    expect(fetchMock.mock.calls).toHaveLength(before);
+    // 引导走 toast（本组件不自带播报区），断言它没有变成一次网络往返即可
+    expect(document.body.querySelector('.wk-social-btn')!.getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+    wrapper.unmount();
+  });
+
+  it('拉不到详情、也没装过时不出社交按钮 —— 项目本身都还没落地', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      error: { kind: 'network', message: 'Failed to fetch', url: 'u' },
+    });
+    const wrapper = await open();
+    expect(document.body.querySelector('.wk-social-btn')).toBeNull();
     wrapper.unmount();
   });
 

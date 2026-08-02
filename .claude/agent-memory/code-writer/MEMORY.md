@@ -3,7 +3,7 @@
 - [item_gen modifier 解析接入](combat-v2-itemgen-modifiers.md) — M4 5.5b: <modifiers> 子元素→parse→validate→patch 全链路；buff 不独立产出（附加效果类 modifier 带）；divinity 取 max；违规 warn 不中断
 - [Dexie stores() 是累加的](dexie-stores-cumulative.md) — database.ts v12 注释「漏写表即删表」对 Dexie 4 是错的；删表必须显式 `表名: null`（v9 chats 即先例）
 - [全量测试的既有失败基线](known-flaky-tests.md) — game-store 大纲回读 ~50% 概率失败 + SelectableCard 品质色；全量 2 failed 是基线，不是新改动弄坏的
-- [typecheck 查不到 .vue](typecheck-skips-vue-sfc.md) — 裸 tsc 不解析 SFC，改 Vue 必须另跑 pin 住 TS 的 vue-tsc；输出有 ~40 条既有错误基线
+- [typecheck 查不到 .vue](typecheck-skips-vue-sfc.md) — 裸 tsc 不解析 SFC，改 Vue 必须另跑 `npm run typecheck:vue`；基线 0 条，有输出就是你弄坏的
 - [store mock 必须 reactive](reactive-store-mock-vacuous.md) — 裸对象 mock 切断响应式链，「落库后 UI 自己刷新」的断言恒真/恒假；去掉 reactive 必须变红
 - [图像上不放控件](feedback-no-furniture-on-media.md) — 画像位保持纯净（无旋钮/徽章/浮层），调节收进 Modal 内含实时预览；两层 Modal 用 `open && !childOpen` 收父层
 - [Blob/Uint8Array typecheck 陷阱](blob-uint8array-typecheck-trap.md) — new Blob([变量 Uint8Array]) 测试绿但 tsc 红；写成 bytes.slice().buffer as ArrayBuffer
