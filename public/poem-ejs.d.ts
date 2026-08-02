@@ -197,10 +197,15 @@ declare const world: {
 interface PoemQuest {
   名字: string;
   状态: string;
+  /** 任务详情 */
   描述: string;
+  /** 引擎里的目标是**一条**描述，这里统一包成数组；没写目标时是空表 */
   目标: unknown[];
   进度: unknown;
+  /** 同 `目标`：一条奖励描述包成数组，没写时空表 */
   奖励: unknown[];
+  /** 关注度：`高` / `中` / `低`；没写返回空串 */
+  关注度: string;
 }
 
 declare const quest: {

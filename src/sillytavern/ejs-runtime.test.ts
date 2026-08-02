@@ -12,6 +12,7 @@ import {
   type EjsEvalContext,
   type CompiledEjsEntry,
 } from './ejs-runtime';
+import { LOCAL_KEY_MAX_BYTES } from './ejs-capabilities';
 
 // ========== 测试工具 ==========
 
@@ -21,6 +22,7 @@ function makeCtx(partial: Partial<EjsEvalContext> = {}): EjsEvalContext {
     vars: partial.vars ?? {},
     historyText: partial.historyText ?? '',
     ...(partial.seed !== undefined ? { seed: partial.seed } : {}),
+    ...(partial.capabilities !== undefined ? { capabilities: partial.capabilities } : {}),
   };
 }
 
@@ -219,10 +221,10 @@ describe('两轴注入', () => {
     expect(ctx.vars.计数).toBe(2);
   });
 
-  it('stats 是 pass 级孤儿快照：就地改不抛，pass 结束即弃', () => {
+  it('stats 是**条目级**孤儿拷贝：就地改不抛，也不回流 ctx.stats', () => {
     const ctx = makeCtx({ stats: { a: 1 } });
     render('<% stats.a = 999 %>', ctx);
-    expect(ctx.stats.a).toBe(999);
+    expect(ctx.stats.a).toBe(1);
   });
 });
 
@@ -411,19 +413,47 @@ describe('getvar / setvar', () => {
 // 别名层：getLocalVar / setLocalVar / variables / matchChatMessages
 // ═══════════════════════════════════════════════════════════
 
-describe('getLocalVar / setLocalVar', () => {
-  it('读写 vars._local 子树', () => {
+describe('getLocalVar / setLocalVar（= local.* 的别名，同桶同护栏）', () => {
+  it('读写 vars._local.<projectId> 子树（不是扁平 _local）', () => {
     const ctx = makeCtx();
     render('<% setLocalVar("旗标", 3) %>', ctx);
-    expect(ctx.vars._local).toEqual({ 旗标: 3 });
+    // 缺省 projectId = 'builtin'
+    expect(ctx.vars._local).toEqual({ builtin: { 旗标: 3 } });
   });
 
   it('同条目内写后可读回', () => {
     expect(render('<% setLocalVar("k", "v") %><%= getLocalVar("k") %>')).toBe('v');
   });
 
-  it('读预置的 _local', () => {
-    const ctx = makeCtx({ vars: { _local: { 已触发: true } } });
+  it('与 local.* 互相可见（同一个桶）', () => {
+    const ctx = makeCtx({ capabilities: { projectId: 'proj-a' } });
+    expect(render('<% local.set("皮肤", "深色") %><%= getLocalVar("皮肤") %>', ctx)).toBe('深色');
+    expect(render('<% setLocalVar("字号", 14) %><%= local.get("字号") %>', ctx)).toBe('14');
+    expect(ctx.vars._local['proj-a']).toEqual({ 皮肤: '深色', 字号: 14 });
+  });
+
+  it('别名同样受项目隔离（别的项目读不到）', () => {
+    const vars: Record<string, any> = {};
+    render('<% setLocalVar("k", "A 的值") %>', makeCtx({ vars, capabilities: { projectId: 'a' } }));
+    expect(render('[<%= getLocalVar("k") %>]', makeCtx({ vars, capabilities: { projectId: 'b' } }))).toBe(
+      '[]',
+    );
+  });
+
+  it('别名走 local 的体积护栏：单键超限静默忽略', () => {
+    const ctx = makeCtx();
+    render(`<% setLocalVar("大", "x".repeat(${LOCAL_KEY_MAX_BYTES + 100})) %>`, ctx);
+    expect(ctx.vars._local?.builtin?.大).toBeUndefined();
+  });
+
+  it('别名走 local 的可序列化校验：环状值被拒', () => {
+    const ctx = makeCtx();
+    render('<% const c = {}; c.self = c; setLocalVar("环", c) %>', ctx);
+    expect(ctx.vars._local?.builtin?.环).toBeUndefined();
+  });
+
+  it('读预置的 _local.<projectId>', () => {
+    const ctx = makeCtx({ vars: { _local: { builtin: { 已触发: true } } } });
     expect(render('<%= getLocalVar("已触发") %>', ctx)).toBe('true');
   });
 
@@ -435,13 +465,13 @@ describe('getLocalVar / setLocalVar', () => {
   it('key 是单键不是路径', () => {
     const ctx = makeCtx();
     render('<% setLocalVar("a.b", 1) %>', ctx);
-    expect(ctx.vars._local).toEqual({ 'a.b': 1 });
+    expect(ctx.vars._local).toEqual({ builtin: { 'a.b': 1 } });
   });
 
   it('_local 原为标量时被替换为对象', () => {
     const ctx = makeCtx({ vars: { _local: 'oops' } });
     render('<% setLocalVar("k", 1) %>', ctx);
-    expect(ctx.vars._local).toEqual({ k: 1 });
+    expect(ctx.vars._local).toEqual({ builtin: { k: 1 } });
   });
 });
 
@@ -696,6 +726,15 @@ describe('stats 只读隔离（整树读的深改不回流）', () => {
     const ctx = makeCtx({ stats: { 主角: { 生命值: 100 } } });
     run('<% getMessageVar("stat_data").主角.生命值 = 1 %>', ctx);
     expect(ctx.stats.主角.生命值).toBe(100);
+  });
+
+  it('条目间隔离：条目 1 改 stats，同 pass 的条目 2 读到的仍是原值', () => {
+    const ctx = makeCtx({ stats: { 主角: { 生命值: 100, 背包: [{ 名字: '面包' }] } } });
+    const a = run('<% stats.主角.生命值 = 1; stats.主角.背包.push({ 名字: "脏数据" }) %>A', ctx);
+    expect(a.ok).toBe(true);
+    // 直传引用时这里会读到 1 / 2 —— 既背离 d.ts 的「拿到的是一份拷贝」，也与 QuickJS 后端分叉
+    expect(render('<%= stats.主角.生命值 %>|<%= stats.主角.背包.length %>', ctx)).toBe('100|1');
+    expect(ctx.stats.主角.背包).toHaveLength(1);
   });
 
   it('vars 侧仍是活引用 —— 共写草稿，深改就是真实写（契约内行为）', () => {

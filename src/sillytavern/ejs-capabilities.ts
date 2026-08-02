@@ -35,7 +35,12 @@ export interface EjsCapabilityInput {
   history?: Array<{ role: string; content: string }>;
   /** 本 Agent 上下文可见的角色 */
   characters?: CharacterState[];
-  /** 好感度表（characterId → -100..100） */
+  /**
+   * 好感度表（**角色名字** → -100..100）。
+   *
+   * 🔴 键是名字不是 id —— `SaveProfile.affections` 由 `state-manager` 按 `charName` 写入
+   * （改名迁移也按名字搬键）。早先这里按 `c.id` 取，真实存档一次都取不中、永远返回 0。
+   */
   affections?: Record<string, number>;
   gameTime?: GameTime;
   /** 任务表（名字 → Quest） */
@@ -211,16 +216,18 @@ function buildChar(input: EjsCapabilityInput): EjsChar {
     present: () => chars.filter((c) => c.hp > 0).map(projectChar),
     all: () => chars.map(projectChar),
     has: (name) => find(name) !== undefined,
+    // 好感表按**名字**索引（见 EjsCapabilityInput.affections）。这里仍先经 find() 解析一道，
+    // 是为了让别名/空白等入参归一化后再查表，且查不到的人稳稳落回 0 / ''。
     affection: (name) => {
       const c = find(name);
       if (!c) return 0;
-      const v = input.affections?.[c.id];
+      const v = input.affections?.[c.name];
       return typeof v === 'number' ? v : 0;
     },
     affectionLabel: (name) => {
       const c = find(name);
       if (!c) return '';
-      const v = input.affections?.[c.id];
+      const v = input.affections?.[c.name];
       return getAffectionLabel(typeof v === 'number' ? v : 0);
     },
   };
@@ -259,15 +266,40 @@ function buildWorld(input: EjsCapabilityInput): Record<string, any> {
 // quest（§3.6）
 // ═══════════════════════════════════════════════════════════
 
+/**
+ * 任务只读投影。
+ *
+ * 🔴 字段一律取 `Quest`（types.ts）的**真字段**：`status` / `detail` / `objective` /
+ * `progress` / `reward` / `priority`。早先这里读的是 `description` / `objectives` /
+ * `rewards` —— 引擎里根本没有这三个字段，真实任务表投出来永远是 描述 '' / 目标 [] / 奖励 []。
+ *
+ * `objective` / `reward` 在引擎里是**单数串**，但契约（`public/poem-ejs.d.ts`）承诺数组，
+ * 故在这里包一层（空串 → 空表，创作者的 `for` 循环天然跳过）。
+ */
 function projectQuest(name: string, q: Quest): Record<string, any> {
   const anyQ = q as unknown as Record<string, any>;
+  /** 取第一个非空串（中文键兜底：存量内容可能直接塞中文键的任务对象） */
+  const pickStr = (...keys: string[]): string => {
+    for (const k of keys) {
+      const v = anyQ[k];
+      if (typeof v === 'string' && v !== '') return v;
+    }
+    return '';
+  };
+  /** 单值 → 数组（已是数组则原样深拷贝） */
+  const toList = (v: unknown): unknown[] => {
+    if (Array.isArray(v)) return clone(v);
+    if (v === undefined || v === null || v === '') return [];
+    return [clone(v)];
+  };
   return {
     名字: name,
-    状态: anyQ['status'] ?? anyQ['状态'] ?? '',
-    描述: anyQ['description'] ?? anyQ['描述'] ?? '',
-    目标: clone(anyQ['objectives'] ?? anyQ['目标'] ?? []),
+    状态: pickStr('status', '状态'),
+    描述: pickStr('detail', '详情', '描述'),
+    目标: toList(anyQ['objective'] ?? anyQ['目标']),
     进度: anyQ['progress'] ?? anyQ['进度'] ?? '',
-    奖励: clone(anyQ['rewards'] ?? anyQ['奖励'] ?? []),
+    奖励: toList(anyQ['reward'] ?? anyQ['奖励']),
+    关注度: pickStr('priority', '关注度'),
   };
 }
 

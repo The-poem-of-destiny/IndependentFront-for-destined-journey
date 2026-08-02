@@ -17,7 +17,7 @@ import {
   EJS_SURFACE_VERSION,
   type EjsCapabilityInput,
 } from './ejs-capabilities';
-import { createDefaultCharacterState } from './types';
+import { createDefaultCharacterState, createDefaultQuest, type Quest } from './types';
 import type { GameTime } from './time-system';
 
 const TIME: GameTime = {
@@ -91,7 +91,9 @@ describe('char（§3.4）', () => {
   const downed = createDefaultCharacterState({ id: 'd1', type: 'npc', name: '倒地者', hp: 0 });
   const input: EjsCapabilityInput = {
     characters: [player, ally, downed],
-    affections: { a1: 75, d1: -80 },
+    // 🔴 好感表按**名字**索引（`SaveProfile.affections` 的真实形状）；早先这里按 id 建 fixture，
+    //    把「投影按 c.id 取值」的 bug 一起盖住了
+    affections: { 艾波丽斯: 75, 倒地者: -80 },
   };
 
   it('player / get / has 按名解析', () => {
@@ -108,10 +110,13 @@ describe('char（§3.4）', () => {
     expect(caps.char.all()).toHaveLength(3);
   });
 
-  it('affection / affectionLabel；查不到的人给 0 与空串，不抛', () => {
+  it('affection / affectionLabel 按名字索引好感表；查不到的人给 0 与空串，不抛', () => {
     const { caps } = build(input);
     expect(caps.char.affection('艾波丽斯')).toBe(75);
     expect(caps.char.affectionLabel('艾波丽斯')).toBeTruthy();
+    expect(caps.char.affection('倒地者')).toBe(-80);
+    // id 键不该被当好感表键用（真实存档里没有这种键）
+    expect(build({ ...input, affections: { a1: 75 } }).caps.char.affection('艾波丽斯')).toBe(0);
     expect(caps.char.affection('不存在')).toBe(0);
     expect(caps.char.affectionLabel('不存在')).toBe('');
     expect(caps.char.get('')).toBeNull();
@@ -166,10 +171,19 @@ describe('world（§3.5）', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('quest（§3.6）', () => {
-  const quests = {
-    寻找失落的琴弦: { status: '进行中', description: '找琴弦' },
-    旧日之约: { status: '已完成', description: '完成了' },
-  } as never;
+  // 真 `Quest` 形状（types.ts）：detail / objective / reward 都是**单数串**
+  const quests: Record<string, Quest> = {
+    寻找失落的琴弦: {
+      ...createDefaultQuest(),
+      status: '进行中',
+      priority: '高',
+      progress: '已问过三个乐师',
+      detail: '找回被拆走的第七根琴弦',
+      objective: '找到琴弦',
+      reward: '晨曦镇声望 + 一枚旧银币',
+    },
+    旧日之约: { ...createDefaultQuest(), status: '已完成', detail: '完成了' },
+  };
 
   it('all / active / get / has / focus', () => {
     const { caps } = build({ quests, focusQuest: '寻找失落的琴弦' });
@@ -179,6 +193,23 @@ describe('quest（§3.6）', () => {
     expect(caps.quest.has('旧日之约')).toBe(true);
     expect(caps.quest.has('没有这个')).toBe(false);
     expect(caps.quest.focus()?.名字).toBe('寻找失落的琴弦');
+  });
+
+  it('投影读的是 Quest 真字段（detail/objective/reward/priority），单数串包成数组', () => {
+    const { caps } = build({ quests });
+    const q = caps.quest.get('寻找失落的琴弦')!;
+    expect(q.描述).toBe('找回被拆走的第七根琴弦');
+    expect(q.目标).toEqual(['找到琴弦']);
+    expect(q.奖励).toEqual(['晨曦镇声望 + 一枚旧银币']);
+    expect(q.进度).toBe('已问过三个乐师');
+    expect(q.关注度).toBe('高');
+  });
+
+  it('空的 objective / reward → 空表（不是 [""]）', () => {
+    const { caps } = build({ quests });
+    const q = caps.quest.get('旧日之约')!;
+    expect(q.目标).toEqual([]);
+    expect(q.奖励).toEqual([]);
   });
 
   it('无任务表 → 空表 / null，不抛', () => {

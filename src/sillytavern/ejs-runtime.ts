@@ -542,6 +542,10 @@ function writePath(ctx: EjsEvalContext, parts: string[], value: any): void {
  */
 function buildSandboxArgs(ctx: EjsEvalContext, sourceKey: string): any[] {
   const rng = createEjsRng(`${ctx.seed ?? 'no-seed'}|${sourceKey}`);
+
+  // —— 能力面（§3）。**必须早于别名层构建**：`getLocalVar` / `setLocalVar` 等别名直接转发到这里 ——
+  const caps = buildEjsCapabilities(ctx.vars, ctx.historyText ?? '', ctx.capabilities);
+
   const getMessageVar = (path: string, opts?: EjsReadOptions): any =>
     readPath(ctx, splitPath(stripStatDataPrefix(String(path ?? ''))), opts?.defaults);
 
@@ -560,20 +564,24 @@ function buildSandboxArgs(ctx: EjsEvalContext, sourceKey: string): any[] {
   const setvar = (key: string, value: any): void =>
     writePath(ctx, splitPath(normalizeVarKey(key)), value);
 
+  /**
+   * `getLocalVar` / `setLocalVar` —— **直接转 `local.*`**，不另开一套键空间。
+   *
+   * 🔴 早先这俩别名读写的是扁平的 `vars._local[key]`，而 `local.*` 落的是
+   * `vars._local.<projectId>[key]`：同一个键，一个存进去另一个看不见；
+   * 而且别名那条路绕开了单键 / 单项目体积上限与可序列化校验。
+   * 现在两条路共用同一个桶、同一套护栏（口径也与 QuickJS 后端的 guest 侧别名一致）。
+   */
   const getLocalVar = (key: string, opts?: EjsReadOptions): any => {
-    const local = ctx.vars._local;
-    const v =
-      local !== null && typeof local === 'object'
-        ? (local as Record<string, any>)[String(key)]
-        : undefined;
-    return v === undefined ? opts?.defaults : v;
+    const v = caps.local.get(String(key), undefined);
+    // `local.get` 查不到给 null；别名的历史语义是「没有就落 defaults（可为 undefined）」
+    return v === null || v === undefined ? opts?.defaults : v;
   };
 
   const setLocalVar = (key: string, value: any): void => {
     const k = String(key);
     if (DANGEROUS_PATH_SEGMENTS.has(k)) return;
-    if (ctx.vars._local === null || typeof ctx.vars._local !== 'object') ctx.vars._local = {};
-    (ctx.vars._local as Record<string, any>)[k] = value;
+    caps.local.set(k, value);
   };
 
   // 裸全局 `variables`：语料形态是 `_.get(variables, 'stat_data.关系列表', {})`
@@ -606,9 +614,6 @@ function buildSandboxArgs(ctx: EjsEvalContext, sourceKey: string): any[] {
       .filter(Boolean);
     return rng.pick(parts) ?? '';
   };
-
-  // —— 能力面（§3）——
-  const caps = buildEjsCapabilities(ctx.vars, ctx.historyText ?? '', ctx.capabilities);
 
   // —— 上游别名层（§5）：全部映射到上面的能力，不引入第三种状态 ——
   const YAML = { stringify: (v: unknown, o?: any) => ejsFmt.yaml(v, o) };
@@ -644,7 +649,11 @@ function buildSandboxArgs(ctx: EjsEvalContext, sourceKey: string): any[] {
   };
 
   return [
-    ctx.stats,
+    // 🔴 **每条目一份深拷贝**：`stats` 是 pass 级共享对象，直传引用时条目 A 的
+    //    `stats.主角.背包.push(...)` 会被同 pass 的条目 B 看见 —— 既背离
+    //    `poem-ejs.d.ts` 的「拿到的是一份拷贝」承诺，也与 QuickJS 后端（每条目 JSON 编组）分叉。
+    //    stats 是小投影，克隆成本可忽略；口径与 `mergeVarsWithClonedStats` 一致。
+    deepClone(ctx.stats ?? {}),
     ctx.vars,
     getMessageVar,
     setMessageVar,
