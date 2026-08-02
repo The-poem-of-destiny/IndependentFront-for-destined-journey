@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { useGameStore, type DebugAgentEntry } from '../../stores/game-store';
 import { useSettingsStore } from '../../stores/settings-store';
-import AppModal from '../shared/AppModal.vue';
+import { getEjsBackend } from '@engine/ejs-backend';
 
 const game = useGameStore();
 const settings = useSettingsStore();
@@ -17,6 +17,28 @@ const tokenSummary = computed(() => {
     miss: sum((e) => e.cacheMissTokens),
     completion: sum((e) => e.completionTokens),
     count: entries.length,
+  };
+});
+
+/**
+ * 当前 EJS 求值后端。
+ *
+ * 为什么值得在调试面板里占一行：`quickjs` 之外的两种都是**降级态**且**静默** ——
+ * `fail-closed` 是 wasm 没装上（世界书动态内容整体停用），`legacy` 是没有隔离边界。
+ * 出问题时第一个该确认的就是这里，否则会拿着「世界书不生效」去查世界书本身。
+ */
+const ejsBackend = computed(() => {
+  const b = getEjsBackend();
+  const isolated = b.name.includes('quickjs');
+  return {
+    name: b.name,
+    interruptible: b.interruptible,
+    isolated,
+    hint: isolated
+      ? '隔离正常'
+      : b.name.includes('fail-closed')
+        ? '⚠ 隔离未装载 → 世界书 EJS 已整体停用（条目按原文注入）'
+        : '⚠ 无隔离边界（仅测试环境应出现）',
   };
 });
 
@@ -73,7 +95,23 @@ async function buildExportData() {
       enableThinking: ep.enableThinking,
     })),
     agentModels: sysSettings.agentModels,
-    // 工坊 P2 (D5): EJS 变量差量被体积护栏整份拒绝的累计诊断（空数组=本局没发生过）
+    // 工坊 P2 / 能力面：EJS 三类诊断（空 = 本局没发生过）
+    ejs: {
+      backend: ejsBackend.value,
+      // D5: 变量差量被体积护栏整份拒绝
+      varsRejections: game.ejsVarsRejections.map((r) => ({
+        ...r,
+        lastAtISO: new Date(r.lastAt).toISOString(),
+      })),
+      // D8: 条目求值失败、已回退原文注入
+      fallbacks: game.ejsFallbacks.map((r) => ({
+        ...r,
+        lastAtISO: new Date(r.lastAt).toISOString(),
+      })),
+      // §3.11: 内容作者自己打的 ui.log
+      uiLog: [...game.ejsUiLog],
+    },
+    // 保留顶层旧字段：调试循环手册里的分析脚本按它取（同一份数据，勿删）
     ejsVarsRejections: game.ejsVarsRejections.map((r) => ({
       ...r,
       lastAtISO: new Date(r.lastAt).toISOString(),
@@ -136,13 +174,48 @@ function truncate(str: string, max: number): string {
         }}</pre>
     </div>
 
-    <!-- EJS 变量差量拒绝（只在发生过时出现） -->
-    <div v-if="game.ejsVarsRejections.length > 0" class="debug-section">
-      <h4>世界书变量写入被丢弃 ({{ game.ejsVarsRejections.length }})</h4>
-      <pre v-for="r in game.ejsVarsRejections" :key="r.agentId"
-        >{{ r.label }} ({{ r.agentId }}) | 累计 {{ r.count }} 次 | 最近 {{
-          formatTime(r.lastAt)
-        }} | 体积 {{ r.lastSize }} 字节</pre>
+    <!-- 世界书 EJS：后端身份 + 三类静默失效 -->
+    <div class="debug-section">
+      <h4>世界书 EJS</h4>
+      <pre :class="{ 'debug-warn': !ejsBackend.isolated }">
+求值后端: {{ ejsBackend.name }} | 可中断: {{ ejsBackend.interruptible ? '是' : '否' }}
+{{ ejsBackend.hint }}</pre>
+
+      <!-- 条目回退：静默失效之一 —— 条目照常进提示词，只是没被求值 -->
+      <template v-if="game.ejsFallbacks.length > 0">
+        <h5 class="debug-sub-h">条目求值失败、已回退原文 ({{ game.ejsFallbacks.length }})</h5>
+        <pre v-for="f in game.ejsFallbacks" :key="`${f.agentId}#${f.uid}`" class="debug-warn"
+          >{{ f.bookName ?? '?' }}#{{ f.uid }} ({{ f.agentId }}) | 累计 {{ f.count }} 次 | 最近 {{
+            formatTime(f.lastAt)
+          }}
+  {{ f.error }}</pre>
+      </template>
+
+      <!-- 变量差量被体积护栏整份拒绝 -->
+      <template v-if="game.ejsVarsRejections.length > 0">
+        <h5 class="debug-sub-h">变量写入被丢弃 ({{ game.ejsVarsRejections.length }})</h5>
+        <pre v-for="r in game.ejsVarsRejections" :key="r.agentId" class="debug-warn"
+          >{{ r.label }} ({{ r.agentId }}) | 累计 {{ r.count }} 次 | 最近 {{
+            formatTime(r.lastAt)
+          }} | 体积 {{ r.lastSize }} 字节</pre>
+      </template>
+
+      <!-- 内容作者自己打的 ui.log -->
+      <details v-if="game.ejsUiLog.length > 0" class="debug-agent-details">
+        <summary>内容调试输出 ui.log ({{ game.ejsUiLog.length }})</summary>
+        <pre class="debug-uilog">{{ game.ejsUiLog.join('\n') }}</pre>
+      </details>
+
+      <div
+        v-if="
+          game.ejsFallbacks.length === 0 &&
+          game.ejsVarsRejections.length === 0 &&
+          game.ejsUiLog.length === 0
+        "
+        class="debug-empty"
+      >
+        本局未出现回退 / 丢弃，内容也没打过调试输出
+      </div>
     </div>
 
     <!-- Agent 调用日志 -->
@@ -246,6 +319,25 @@ function truncate(str: string, max: number): string {
   font-size: 0.75rem;
   color: var(--theme-text-muted);
   font-style: italic;
+}
+/* 降级/失效态：跟正常诊断行拉开色差，扫一眼就能看见 */
+.debug-warn {
+  color: color-mix(in srgb, var(--theme-error) 80%, var(--theme-text-primary)) !important;
+}
+.debug-sub-h {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  margin: 8px 0 4px;
+  color: var(--theme-text-muted);
+}
+.debug-uilog {
+  font-size: 0.625rem;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--theme-card-bg);
+  padding: 4px 6px;
+  border-radius: 3px;
+  margin-top: 4px;
 }
 .debug-token-summary {
   font-size: 0.72rem;

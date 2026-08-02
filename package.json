@@ -15,6 +15,7 @@
     "preview": "vite preview",
     "format": "prettier --write \"src/**/*.{ts,vue,css}\" \"*.json\" \"*.md\" \"docs/**/*.md\"",
     "format:check": "prettier --check \"src/**/*.{ts,vue,css}\" \"*.json\" \"*.md\" \"docs/**/*.md\"",
+    "ejs:fixture": "node scripts/scramble-worldbook-ejs.mjs",
     "lint": "eslint \"src/**/*.{ts,vue}\"",
     "lint:fix": "eslint \"src/**/*.{ts,vue}\" --fix"
   },
@@ -32,6 +33,7 @@
     "hono": "^4.12.32",
     "openseadragon": "^6.0.2",
     "pinia": "^2.3.1",
+    "quickjs-emscripten": "^0.32.0",
     "vue": "^3.5.38",
     "vue-router": "^4.6.4"
   },

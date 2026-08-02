@@ -1361,6 +1361,34 @@ export interface AgentContext {
    */
   statData?: Record<string, any>;
   /**
+   * EJS 随机种子的来源（能力面设计 §7 / 切片 T2）。
+   *
+   * `rng.*` 与 `{{roll}}` / `{{random::}}` 的序列由 `(ejsSeed ‖ 条目正文)` 决定 ——
+   * 快照回退重放必须产出**同一份**世界书正文，否则玩家会看到「同一时间点、不同的世界内容」，
+   * 且 debug loop 无法复现。由 game-pipeline 按 `buildPassSeed(saveId, 回合号)` 填。
+   * 缺省 → 退化为固定串（同一次运行内仍确定，只是不跨会话复现）。
+   */
+  ejsSeed?: string;
+  /** 好感度表（characterId → -100..100），供 EJS `char.affection` 用 */
+  affections?: Record<string, number>;
+  /** 玩家选中的焦点任务名，供 EJS `quest.focus()` 用 */
+  focusQuest?: string;
+  /** EJS `ui.notify` 的出口（不给 = 静默丢弃）。由 game-pipeline 接到 Toast */
+  ejsNotify?: (message: string, level: 'info' | 'success' | 'warning' | 'error') => void;
+  /** EJS `ui.log` 的出口（不给 = 丢弃）。**绝不落真 console**，免得刷屏 */
+  ejsLog?: (args: unknown[]) => void;
+  /**
+   * 世界书条目 EJS 求值失败、已按 D8 回退原文注入的诊断出口（不给 = 只留 console.warn）。
+   *
+   * 为什么要有：回退是**静默**的 —— 条目照常进提示词，只是没被求值。玩家看到的现象是
+   * 「世界书里那段状态面板变成了一堆 `<% %>` 源码」或者干脆什么都没变，
+   * 而 `console.warn` 没人会去翻。接到 DebugPanel 才能在导出 JSON 里被带走（调试循环手册的口径）。
+   */
+  ejsFallback?: (info: {
+    agentId: string;
+    entries: Array<{ uid: number; bookName?: string; error: string }>;
+  }) => void;
+  /**
    * 轴②`vars` 草稿暂存 —— **仅持 `ejsVarsCommit` 权的 Agent** 的 pass 会写入本表（keyed by agentId）。
    *
    * 容器由 game-pipeline 创建（`new Map()`），`buildAgentMessages` 每 pass 往里 set；
@@ -1374,9 +1402,19 @@ export interface AgentContext {
    * 缺席（外部直接调 resolver 等极端路径）时调用方退化为一次性空草稿。
    */
   ejsPass?: {
+    /** 本 pass 的随机种子串（= `ctx.ejsSeed`，能力面 §7） */
+    seed?: string;
     stats: Record<string, any>;
     vars: Record<string, any>;
     historyText: string;
+    /**
+     * 宿主能力面输入（能力面 §3.5-§3.12：chat/char/world/quest/lore/local/ui/engine）。
+     *
+     * 类型是 `EjsCapabilityInput`，但这里刻意写成结构宽松的形状——`types.ts` 是全仓
+     * 唯一类型来源，不该反向 import 具体实现模块。缺省（`undefined`）时能力面整体退化为
+     * 空值而**不报错**，所以漏接不会被编译器抓到，只能靠测试盯（见 agent-templates.test.ts）。
+     */
+    capabilities?: Record<string, any>;
     /**
      * pass 级 `{{LORE_BOOK}}` 渲染 memo（**由 resolver 自己填写**，其他人只读）。
      *

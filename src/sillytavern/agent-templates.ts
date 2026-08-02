@@ -20,6 +20,7 @@ import type {
   AgentConfig,
   AgentPreset,
   WorldBook,
+  WorldBookEntry,
 } from './types';
 import type { GameTime } from './time-system';
 import { MONTH_NAMES } from './time-system';
@@ -27,10 +28,13 @@ import {
   getEntriesForAgent,
   filterActiveEntries,
   renderWorldBookEntries,
+  prerenderWorldBookEntries,
 } from './worldbook-loader';
 import { getPreset, assemblePresetContent } from './preset-loader';
 import { buildZoneSection, buildZoneContext } from './context-visibility';
 import { resolveTemplateWithGlobals } from './template-resolver';
+import type { EjsCapabilityInput } from './ejs-capabilities';
+import { DANGEROUS_PATH_SEGMENTS } from './var-resolver';
 import { getDefaultTemplate } from './placeholder-registry';
 
 // ========== 通用工具 ==========
@@ -121,12 +125,10 @@ function recentHistoryBlock(ctx: AgentContext): string {
 
 // ========== 工坊 Phase 2 / ADR-30: EJS 求值 pass 上下文 ==========
 
-/** 🔒 原型污染防御 —— 与 var-resolver / ejs-runtime 同口径 */
-const EJS_DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
-
 /**
  * 深拷贝（纯数据面）：数组/Date/纯对象递归，其余（函数、类实例）原样返回；危险键剔除。
  * 语义对齐 `ejs-runtime.ts` 的同名私有函数（那边不导出，此处不跨模块耦合，各留一份十行实现）。
+ * 危险键集来自 `var-resolver`（全仓唯一定义）。
  */
 function deepCloneVars<T>(value: T): T {
   if (value === null || typeof value !== 'object') return value;
@@ -136,7 +138,7 @@ function deepCloneVars<T>(value: T): T {
   if (proto !== Object.prototype && proto !== null) return value;
   const out: Record<string, any> = {};
   for (const k of Object.keys(value as Record<string, any>)) {
-    if (EJS_DANGEROUS_KEYS.has(k)) continue;
+    if (DANGEROUS_PATH_SEGMENTS.has(k)) continue;
     out[k] = deepCloneVars((value as Record<string, any>)[k]);
   }
   return out as unknown as T;
@@ -172,10 +174,79 @@ export function buildEjsHistoryText(
  *   `draft` 就是返回值里那个对象引用（求值写入后调用方拿到最终态）；`base` 是另一份独立克隆。
  *   往 Map 里 set **不算 mutate 原 ctx 的既有字段**（容器由上游创建并共享）。
  */
+/**
+ * 组装能力面输入（能力面 §3.3-§3.12）。
+ *
+ * 🔴 `lore` 的可见性是**安全相关**的：`getEntriesForAgent` 已经按 Phase 8 分区过滤，
+ * 这里只在它的产出里查 —— EJS 绝不能成为绕过可见性模型的旁路。
+ */
+function buildCapabilityInput(
+  agentId: string,
+  ctx: AgentContext,
+  config: AgentConfig | undefined,
+  configs: AgentConfig[] | undefined,
+  worldBooks: WorldBook[] | undefined,
+): EjsCapabilityInput {
+  /**
+   * 可见条目 + uid→书名 索引，**惰性建、建一次**。
+   *
+   * 为什么不在函数体里直接算：本函数是**每 Agent 每回合**都会跑的热路径，而这两样
+   * 只有 `lore.get/list` 用得上 —— 真机语料里绝大多数条目一次都不调。
+   * 急切构建等于给每一次提示装配平白加一遍全量条目扫描（内置书 600+ 条目）。
+   */
+  let loreIndex: { visible: WorldBookEntry[]; bookOf: Map<number, string> } | null = null;
+  const getLoreIndex = () => {
+    if (loreIndex) return loreIndex;
+    const visible =
+      configs && worldBooks
+        ? filterActiveEntries(getEntriesForAgent(agentId, configs, worldBooks))
+        : [];
+    const bookOf = new Map<number, string>();
+    for (const book of worldBooks ?? []) {
+      for (const e of book.entries ?? []) bookOf.set(e.uid, book.name);
+    }
+    loreIndex = { visible, bookOf };
+    return loreIndex;
+  };
+
+  return {
+    history: (ctx.history ?? []).map((m) => ({ role: m.role, content: m.content ?? '' })),
+    characters: ctx.characters,
+    affections: ctx.affections,
+    gameTime: ctx.gameTime,
+    quests: ctx.quests,
+    focusQuest: ctx.focusQuest,
+    turn: ctx.history?.length ?? 0,
+    charLoreBook: config?.worldBookIds?.[0] ?? '',
+    projectId: 'builtin',
+    engineVersion: undefined,
+    lore: {
+      get: (entryName, bookName) => {
+        const { visible, bookOf } = getLoreIndex();
+        const name = String(entryName ?? '');
+        const hit = visible.find(
+          (e) => e.name === name && (bookName === undefined || bookOf.get(e.uid) === bookName),
+        );
+        return hit ? (hit.content ?? '') : null;
+      },
+      list: (bookName) => {
+        const { visible, bookOf } = getLoreIndex();
+        return visible
+          .filter((e) => bookOf.get(e.uid) === String(bookName ?? ''))
+          .map((e) => e.name ?? '');
+      },
+    },
+    notify: ctx.ejsNotify,
+    log: ctx.ejsLog,
+  };
+}
+
 function buildEjsPassContext(
   agentId: string,
   ctx: AgentContext,
   config: AgentConfig | undefined,
+  configs?: AgentConfig[],
+  worldBooks?: WorldBook[],
 ): NonNullable<AgentContext['ejsPass']> {
   const sysVars = (ctx.variables?.sys ?? {}) as Record<string, any>;
   const draft = deepCloneVars(sysVars);
@@ -188,7 +259,40 @@ function buildEjsPassContext(
     stats: deepCloneVars(ctx.statData ?? {}),
     vars: draft,
     historyText: buildEjsHistoryText(agentId, ctx, config),
+    // 🔴 少了这一行，§3.5-§3.12 的八个 namespace 在生产里全取默认空值：
+    // `char.all()` 空数组、`quest.has()` 恒 false、`lore.get()` 恒 null、`ui.notify` 无出口。
+    // 字段可选，所以漏接**编译期不报**——由 backend-parity 与 wiring 测试盯住（见 agent-templates.test.ts）。
+    capabilities: buildCapabilityInput(agentId, ctx, config, configs, worldBooks),
+    // 种子**不掺 agentId**：同一回合多个 Agent 装配同一条目时应看到同一个掷骰结果，
+    // 否则「战斗 Agent 与叙事 Agent 对同一事件掷出不同的数」——那是分裂，不是随机（设计 §7）。
+    seed: ctx.ejsSeed,
   };
+}
+
+/**
+ * 把 EJS 回退条目送进 `ctx.ejsFallback`（带上书名，光有 uid 在 UI 上没法读）。
+ *
+ * 永不抛：诊断出口挂了不能反过来打断提示装配。
+ */
+function reportEjsFallback(
+  agentId: string,
+  ctx: AgentContext,
+  entries: Array<{ uid: number; error: string }>,
+  worldBooks: WorldBook[] | undefined,
+): void {
+  if (!ctx.ejsFallback || entries.length === 0) return;
+  const bookOf = new Map<number, string>();
+  for (const book of worldBooks ?? []) {
+    for (const e of book.entries ?? []) bookOf.set(e.uid, book.name);
+  }
+  try {
+    ctx.ejsFallback({
+      agentId,
+      entries: entries.map((f) => ({ uid: f.uid, bookName: bookOf.get(f.uid), error: f.error })),
+    });
+  } catch (err) {
+    console.warn('[LORE_BOOK] EJS 回退诊断出口抛错（已忽略）:', err);
+  }
 }
 
 function formatCharacters(ctx: AgentContext): string {
@@ -580,7 +684,7 @@ const PLOT_AGENT_IDS = new Set(['plot_pre_check', 'plot_post_check', 'plot_outli
  * 未命中（纯 ST 预设 / 测试桩）→ 走默认 template 追加兜底。
  */
 const STORY_PRESET_PLACEHOLDER_RE =
-  /\{\{(?:LORE_BOOK|USER_INPUT|CHARACTER_STATE|GAME_TIME|NARRATIVE|AGENT\.MEMORY_RECALL|AGENT\.PLOT_PRE_CHECK)\}\}/;
+  /\{\{(?:LORE_BOOK|LORE_BOOK_STATIC|LORE_BOOK_DYNAMIC|USER_INPUT|CHARACTER_STATE|GAME_TIME|NARRATIVE|AGENT\.MEMORY_RECALL|AGENT\.PLOT_PRE_CHECK)\}\}/;
 
 /**
  * Phase 10: Build agent messages using the placeholder template system.
@@ -609,10 +713,13 @@ export function buildAgentMessages(
   // 关键: 不可 mutate 原 ctx (orchestrator 同 stage 多 agent 共享), 用浅拷贝注入 agentConfig
   // 工坊 P2: 同时挂本 pass 的 EJS 求值上下文（stats 克隆 + vars 草稿 + 历史检索面），
   // 供 {{LORE_BOOK}} resolver / buildFallbackMessages 消费。
+  // 🔴 `ctx.ejsPass` 已存在 → **复用**，不重建。
+  //    `buildAgentMessagesAsync` 会先建好 pass 并跑完预渲染（含 vars 草稿写入 + ejsVarsDrafts 登记）；
+  //    这里若重建，那份草稿连同 EJS 的写会被一个空的新草稿顶掉，静默丢状态。
   const tplCtx: AgentContext = {
     ...ctx,
     ...(config ? { agentConfig: config } : {}),
-    ejsPass: buildEjsPassContext(agentId, ctx, config),
+    ejsPass: ctx.ejsPass ?? buildEjsPassContext(agentId, ctx, config, configs, worldBooks),
   };
 
   // Step 1: Get the template string
@@ -646,7 +753,11 @@ export function buildAgentMessages(
     // Story Agent: assemble from preset
     const preset = getPreset(config.presetId, presets);
     if (preset) {
-      // 传 '' 阻止 DEFAULT_STORY_CONTEXT_BLOCK 注入 — 数据由预设内部占位符或外层 template 提供。
+      // ⚠️ 传 '' 并**不能**阻止默认块：assemblePresetContent 内部是
+      //    `defaultContextBlock || DEFAULT_STORY_CONTEXT_BLOCK`，空串会落回默认块。
+      //    实际行为：预设自带占位符 → 直接返回原文，不追加；预设不带占位符 → 追加
+      //    DEFAULT_STORY_CONTEXT_BLOCK，随后下面的检测必然命中、走预解析把它就地渲染。
+      //    两条路都不会重复渲染同一段数据，故结果正确，只是这里的 '' 是无效参数。
       const presetContent = assemblePresetContent(preset, '');
       storyPresetHasPlaceholders = STORY_PRESET_PLACEHOLDER_RE.test(presetContent);
       if (storyPresetHasPlaceholders) {
@@ -720,6 +831,62 @@ export function buildAgentMessages(
   return [{ role: 'system', content: resolved }];
 }
 
+/**
+ * 异步装配入口 —— **生产路径用这个**（能力面设计 §11 切片 T1）。
+ *
+ * 形态是「**异步预渲染 + 同步 resolver**」，刻意不把整条模板链改异步：
+ *
+ * ```
+ * 建 pass 上下文 → await 预渲染世界书（唯一的异步点） → 灌进 ejsPass.loreRender
+ *   → 同步 buildAgentMessages（{{LORE_BOOK}} resolver 只从 memo 挑段，不再求值）
+ * ```
+ *
+ * 收益：`PlaceholderResolver` / `resolveTemplate` 的签名**一个字不改**（否则 227 个单测跟着塌），
+ * 而 `await getwi(...)` 这类 async 条目能跑了，将来切 QuickJS 后端也只动预渲染这一步。
+ *
+ * ⚠️ 同步的 `buildAgentMessages` 仍然可用（测试/极端路径），只是遇到 async 条目会按 D8 回退原文。
+ */
+export async function buildAgentMessagesAsync(
+  agentId: string,
+  ctx: AgentContext,
+  configs?: AgentConfig[],
+  worldBooks?: WorldBook[],
+  presets?: AgentPreset[],
+  localParams?: Record<string, string>,
+): Promise<Array<{ role: string; content: string }> | null> {
+  if (!getAgentTemplate(agentId)) return null;
+
+  const config = configs?.find((c) => c.agentId === agentId);
+  const ejsPass = buildEjsPassContext(agentId, ctx, config, configs, worldBooks);
+
+  if (configs && worldBooks) {
+    const activeEntries = filterActiveEntries(getEntriesForAgent(agentId, configs, worldBooks));
+    const rendered = await prerenderWorldBookEntries(activeEntries, ejsPass);
+    ejsPass.loreRender = {
+      agentId,
+      staticText: rendered.staticText,
+      dynamicText: rendered.dynamicText,
+      fallbackEntries: rendered.fallbackEntries,
+    };
+    if (rendered.fallbackEntries.length > 0) {
+      console.warn(
+        `[LORE_BOOK] agent=${agentId} 有 ${rendered.fallbackEntries.length} 个条目 EJS 失败、已回退原文注入`,
+      );
+      // 同时送进诊断出口 —— console.warn 没人翻，DebugPanel 与导出 JSON 才是能被看到的地方
+      reportEjsFallback(agentId, ctx, rendered.fallbackEntries, worldBooks);
+    }
+  }
+
+  return buildAgentMessages(
+    agentId,
+    { ...ctx, ejsPass },
+    configs,
+    worldBooks,
+    presets,
+    localParams,
+  );
+}
+
 /** Legacy fallback for agents without templates (backward compatibility) */
 function buildFallbackMessages(
   agentId: string,
@@ -763,7 +930,11 @@ function buildFallbackMessages(
       vars: {},
       historyText: '',
     };
-    const { staticText, dynamicText } = renderWorldBookEntries(activeEntries, ejsCtx);
+    // 预渲染 memo 优先（buildAgentMessagesAsync 已跑过，含 async 条目）——
+    // 没有 memo 才同步求值，那条路遇到 `await` 条目会按 D8 回退原文。
+    const memo = tplCtx.ejsPass?.loreRender;
+    const { staticText, dynamicText } =
+      memo && memo.agentId === agentId ? memo : renderWorldBookEntries(activeEntries, ejsCtx);
     worldBookSection = [staticText, dynamicText].filter(Boolean).join('\n\n');
   }
 

@@ -32,6 +32,9 @@ import { stripPlayAudioMarkers } from '@engine/marker-protocol';
 import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
 import { buildStatData } from '@engine/stat-projection';
+import { buildPassSeed } from '@engine/ejs-rng';
+
+/** EJS `ui.log` 环形缓冲上限（能力面 §6.2） */
 import { diffVars, measureDiffSize, EJS_DIFF_SIZE_LIMIT } from '@engine/ejs-vars-diff';
 import type { EjsVarsDiff } from '@engine/ejs-vars-diff';
 import type { useGameStore } from '../stores/game-store';
@@ -123,6 +126,20 @@ export class GamePipeline {
    * 不新增任何持久化字段；累计诊断在 `game.ejsVarsRejections`。
    */
   private ejsRejectToasted = new Set<string>();
+
+  /**
+   * 取 EJS `ui.log` 调试日志快照（能力面 §3.11）。
+   *
+   * 环形缓冲**住在 game-store**（`ejsUiLog`）而不是本实例：之前它是这里的私有字段，
+   * `getEjsDebugLog()` 全仓零调用点 —— 收集了、没人读。挪去 store 之后 DebugPanel
+   * 直接读，也随导出 JSON 一起被带走。
+   *
+   * 刻意**不落真 console**：真机语料 5 个条目在用 `console.log` 调试，
+   * 每回合每 Agent 都刷一遍，会把真正的报错淹掉。
+   */
+  getEjsDebugLog(): string[] {
+    return [...(this.game.ejsUiLog ?? [])];
+  }
 
   constructor(deps: GamePipelineDeps) {
     this.game = deps.gameStore;
@@ -521,7 +538,45 @@ export class GamePipeline {
         characters: this.game.characters,
         gameTime: this.game.saveProfile?.gameTime,
         fp: this.game.saveProfile?.fp,
+        turn: history.length,
       }),
+      // 能力面 T2 (§7): EJS 随机种子 = (存档, 回合号)。快照回退重放同一回合 → 同一份世界书正文。
+      // 回合号取历史长度：它随回合单调增长，且快照回退时会连同历史一起回到旧值 —— 正是我们要的。
+      ejsSeed: buildPassSeed(this.game.activeSaveId ?? undefined, history.length),
+      // 能力面 T5 (§3.4/§3.6/§3.11): char.affection / quest.focus / ui.* 的数据与出口
+      affections: this.game.saveProfile?.affections,
+      focusQuest: this.game.saveProfile?.focusQuest,
+      ejsNotify: (message, level) => {
+        // 🔴 **强制来源前缀**：项目名可能伪装成「系统提示」（§12 待拷问 6）。
+        //    玩家必须一眼看出这句话是世界书内容说的，不是引擎说的。
+        try {
+          useUIStore().toast(
+            `内容说：${message}`,
+            level === 'error' ? 'error' : level === 'warning' ? 'warning' : 'info',
+            5000,
+          );
+        } catch (err) {
+          console.warn('[GamePipeline] EJS ui.notify 失败:', err);
+        }
+      },
+      ejsLog: (args) => {
+        // 进 store 的环形缓冲，**不落真 console**（世界书刷屏会淹掉真正的报错）
+        try {
+          this.game.recordEjsUiLog?.(
+            args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '),
+          );
+        } catch {
+          // 诊断出口不能反过来打断提示装配
+        }
+      },
+      // 条目 EJS 失败已回退原文注入 —— 静默失效，必须能在 DebugPanel 与导出 JSON 里看到
+      ejsFallback: ({ agentId, entries }) => {
+        try {
+          this.game.recordEjsFallback?.(agentId, entries);
+        } catch (err) {
+          console.warn('[GamePipeline] 记录 EJS 回退诊断失败:', err);
+        }
+      },
       // 工坊 P2 (ADR-30 D5): 持权 Agent 的 vars 草稿运输容器；提交由回合结算消费（T6）
       ejsVarsDrafts: new Map(),
     };

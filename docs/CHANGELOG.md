@@ -9,6 +9,183 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### EJS 能力面 · 评审修复轮（PR #22）｜ ✅ 完成（2026-08-01）
+
+外部评审在 PR #22 上 request changes，8 条全部核实属实（读代码 + 真后端探针取证），另外自查出 3 条评审没抓到的。
+
+**修的**
+
+- **能力面接生产**：`buildCapabilityInput()` 此前写好了但**零调用点**，`buildEjsPassContext()` 漏了 `capabilities` 字段
+  —— 生产里 `char`/`quest`/`lore`/`local`/`ui`/`engine` 全取默认空值。字段可选 → 编译期不报 → 全绿 CI 掩护着空能力面上线。
+- **QuickJS 补齐别名层**：guest 里 `getMessageVar`/`getvar`/`setvar`/`getLocalVar`/`getwi`/`getChatMessage`/
+  `matchChatMessages`/`variables`/`YAML`/`TavernHelper`/`toastr`/`alert`/`localStorage`/`console`/`print` **全部缺席**，
+  38 个真机片段里 27 个 `ReferenceError`。语义逐条对齐 `buildSandboxArgs`（读取优先级 stats→vars→defaults、危险键、默认值）。
+- **QuickJS 支持 `await`**：改 async IIFE + 微任务泵（泵轮数有上限，自我调度的 job 链不能变成绕过 interrupt 的通道）。
+- **QuickJS 接上代码位宏改写**：`rewriteCodeMacros` 从 `ejs-runtime` 导出，两个编译器共用同一套规则。
+- **QuickJS 逐条目回滚**：进 guest 前存 `vars` 快照 + 宿主侧 `_local` 快照，失败即恢复（对齐 D8）。
+- **QuickJS 逐条目播种**：`seed ‖ 条目正文`，与 Legacy 同口径；此前整 pass 一条序列，条目换个位置就换个结果。
+- **QuickJS 对齐严格模式**：guest body 加 `'use strict'`。此前未声明赋值在 Legacy 下 `ReferenceError`、在 guest 下静默建全局。
+- **🔴 句柄泄漏**：装配期 `unwrapResult` 的完成值句柄没释放，同步条目的 `.catch` reaction job 从没泵过 ——
+  `runtime.dispose()` 时 QuickJS 断言 `list_empty(&rt->gc_obj_list)` 失败并 `abort()` 整个 wasm 实例。
+  而 dispose 外面那圈 `try/catch` 把异常**咽掉了**：测试全绿，stderr 刷 38 行 `Aborted` 没人看见。
+- **三处重复**：危险键集 5 份抄写收敛到 `var-resolver` 唯一导出；`worldbook-loader` 同/异步渲染共用 `partitionEntries` +
+  `assembleResult`（分区规则是缓存前缀稳定性的地基，两条路径判定漂移 = 静默缓存击穿）。
+
+**补的测试**
+
+- `ejs-backend-parity.test.ts`（新）—— 根因修复。此前渲染正确性全测 Legacy、QuickJS 只测安全属性，
+  「两后端渲染不同」这一整类缺陷结构性无人看守。断言统一为 `legacy(x) === quickjs(x)`（文本 + 成败 + 草稿末态）。
+  C 档已登记差异显式豁免并**断言豁免数 ≤ 3**。
+- `ejs-backend.test.ts`（新）—— 接缝此前无测试，违反「每个新模块必须配套 `*.test.ts`」。
+- lodash T5 十个方法的测试（含 `cloneDeep` 的环 / 危险键）+「写方法一个都不提供」的守卫。
+- `agent-templates.test.ts` 能力面接线回归 —— 穿过 `buildAgentMessages` 断言，含「`lore.get` 读不到该 Agent
+  看不见的书」这条安全断言。
+- `localStorage` shim 的安全用例：这个名字被别名层刻意占着，需单独证明占位的不是宿主那个。
+
+**验证**：184 文件 / 5348 通过 + 3 跳过，`Aborted` 0 次，typecheck / lint（0 error）干净。
+
+**仍未做**：真机走查；`ejs-preflight` 的 UI 接入；SEC-01（与 EJS 无关，`WORKSHOP_ENTRY_ENABLED` 继续 `false`）。
+
+### EJS 能力面 T1-T8 — 隔离后端 + 12 个创作者 namespace ｜ ✅ 完成（2026-08-01）
+
+设计真源: `docs/planning/2026-08-01-ejs-capability-surface-design.md`（含实测数据与全部裁定）。
+
+**一句话**：世界书 EJS 从「参数遮蔽的伪沙盒」变成 **QuickJS realm 隔离 + 12 个显式能力**，
+SEC-02 的四条攻击全部实测堵住，同时内置全语料回退 **7 → 0**。
+
+**T1 异步 + 后端接缝**
+
+- `ejs-backend.ts`：`EjsBackend` 接口 + `LegacyBackend`（现行 `new Function`）+ 可替换单例
+- 含 `await` 的条目编译成 **`AsyncFunction`**（真机 3 条 `await getwi(...)`）；同步入口对它们给
+  可读失败而非假装成功。**不无脑全用 AsyncFunction** —— 那会让上百处同步调用点连同 123 个单测一起塌
+- `prerenderWorldBookEntries` 异步预渲染 + `buildAgentMessagesAsync`：
+  **`PlaceholderResolver` / `resolveTemplate` 签名一个字没动**（否则 227 个单测跟着改）
+
+**T2 种子随机** — `ejs-rng.ts`。种子 = `hash(saveId ‖ 回合号 ‖ 条目正文)`。
+快照回退重放产出**同一份**世界书正文；`{{roll}}` / `{{random::}}` 与 `_.random` 全部改走它。
+
+**T3 stats 扩面** — 背包/装备/技能/状态效果/登神长阶/金钱/队伍/世界(时段·回合·天气·地点)。
+P2 设计 D4 曾把这些挂起，实际后果是语料 17 处读全走守卫默认分支 ——
+对创作者是**沉默的错误**不是降级。仍不投 `effects/scripts/modifiers/automata`（引擎内部形状，不做承诺）。
+
+**T4/T5 能力面 12 个 namespace**
+
+- `ejs-capabilities.ts`：`chat` / `char` / `world` / `quest` / `lore` / `local` / `ui` / `engine`
+- `ejs-fmt.ts`：`fmt.yaml`（语料 5 条刚需）+ 表格/数值/进度条 + **不依赖 `localeCompare` 的 `compareName`**
+- `_` shim 17 → **27 方法**（补 `cloneDeep`/`isPlainObject`/`size`/`omit`/`mapKeys`/`forOwn`… 全读边）
+- 边界：`lore` 遵守 Phase 8 可见性分区、每条目 8 次预算；`local` 按项目隔离、16/64 KB 上限；
+  `ui.notify` 每 pass 3 条 + 同文去重 + **强制「内容说：」前缀**（防项目名伪装成系统提示）
+
+**T6 别名层重接** — `getChatMessage` / `getwi` / `YAML` / `TavernHelper` / `toastr` / `alert` /
+`localStorage` / `console` / `message_id` / `lastMessageId` 全部映射到能力面。
+`localStorage` **永远碰不到真的 `window.localStorage`**（那里躺着 API Key）。
+🟢 **内置全语料（509 条目）回退 7 → 0**。
+
+**T7 QuickJS 后端** — `ejs-quickjs-backend.ts`（quickjs-emscripten 0.32，**主线程**）。实测：
+
+| 攻击                                              | Legacy          | QuickJS                    |
+| ------------------------------------------------- | --------------- | -------------------------- |
+| `Object.constructor("return globalThis")().fetch` | 拿得到真全局 ❌ | `undefined` ✅             |
+| `while(true){}`                                   | 冻死进程 ❌     | interrupt 掐断 ✅          |
+| `/(a+)+b/.test("a".repeat(40))`                   | 冻死进程 ❌     | interrupt 掐断 ✅（762ms） |
+| `"x".repeat(1e9)`                                 | OOM ❌          | 内存上限拒绝 ✅            |
+
+第三条是 **AST 白名单方案结构性做不到**的（单表达式无循环，`__tick` 执行不到），
+而真机 19 个条目用正则字面量 —— 这是选 QuickJS 的决定性证据。
+Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调用因此保持同步。
+
+**T8 上线 + 创作者体验**
+
+- `installProductionEjsBackend()` 在 `main.ts` 里**不 await** 地切换；现会**急加载 wasm 并跑探针**（审查轮修复），失败 **fail-closed**（不退回 Legacy）：动态条目按原文注入 + `console.error` + 首页 toast 提示
+- `public/poem-ejs.d.ts`：创作者类型定义（12 namespace + 别名层全部标 `@deprecated` 并指向新写法）
+- `ejs-preflight.ts`：装前预检。语法 / 未知符号 / 跨后端不一致 / 不可复现随机 / 代码位内嵌宏，
+  逐条给**可执行的替代建议**。**不阻断安装** —— 职责是让人看见后果，不是替人做决定
+
+**已知能力差异**（QuickJS，§3.14 登记）：无 `Intl` / `structuredClone`；`localeCompare` 非本地化；
+**命名捕获组不可用**（真机语料 0 处使用）。全部有 `fmt.*` 替代且预检会标出。
+
+**验证**：全仓 **182 文件 / 5301 tests + 3 skip**，typecheck / eslint 零错误。
+新增依赖 `quickjs-emscripten@^0.32`。
+
+**审查轮修复（2026-08-01，PR #22 评审 1-12 项）**
+
+- 沙盒边界收口：vars 快照 / `readBackVars` 窗口补挂 interrupt（堵掉 `vars.toJSON` 死循环冻 UI）；
+  `runPass` 创建期收进 try（永不抛穿）；`executePendingJobs` 改真实 `DisposableResult` 形状（空队列早退恢复 + 错误句柄 dispose）；
+  install 急加载 wasm + 探针，失败 fail-closed 返 `false`
+- 双后端 parity 对齐：`chat.match(RegExp)` 结构化跨界重建、能力预算逐条目重建、`world.isDaytime` guest shim、
+  guest lodash 补 `_.chain/.value()`（内置 `dlc.json#477` 生产回退修复）、Legacy `stats` 逐条目深克隆
+- 契约修正：`char.affection` 按名索引（原按 id 恒 0）；`quest` 投影改读真实字段（`detail/objective/reward`）；
+  `getLocalVar/setLocalVar` 别名统一走 `local.*` 项目桶与护栏
+- 装配接线：捏人页大纲改走 `buildAgentMessagesAsync`（不再绕过隔离后端）；同步渲染路径 fail-closed 闸门；
+  异步路径 outcome 改按位置配对（uid 撞号不再串文）
+- 语料与夹具：语料门 Legacy/QuickJS 双后端双向白名单（QuickJS 侧 0 回退）；混淆器补种子化拉丁词替换 +
+  `--transform` 模式，法语诗句/专有名词泄漏清除，防泄漏测试升级
+- 验证：**185 文件 / 5399 tests + 3 skip**，typecheck / typecheck:vue 零错误
+
+**审查轮补修（2026-08-01，二次评审复现的两条后端分叉）**
+
+- **trim 语义对齐**：`compileToGuestBody` 原先只跳过 `<%_`/`_%>`/`-%>` 标记字符、不做 trim，
+  QuickJS 下大量条目多出空行（107/109 语料条目用 trim 标记）。改为与 Legacy 共用 `tokenizeTrimmed`
+  （= `tokenize` + `applyTrim`），两路渲染字节一致
+- **guest `__proto__` 漏拦**：guest DANGER 表 `{ __proto__: 1, ... }` 的 `__proto__` 不产生自有属性，
+  `isDanger('__proto__')` 恒 false，writePath 能污染 guest `Object.prototype`（同 pass 跨条目串扰 +
+  合法 `vars` 写入静默丢进原型）。改用不依赖自有属性的冻结列表分段判定，对齐宿主 `DANGEROUS_PATH_SEGMENTS`
+  （**非沙盒逃逸**：realm 边界成立、不跨 pass、不碰宿主全局）
+- **渲染字节 parity 门**：原语料门只比回退集合、不比渲染字节，正是上面两条漏网的根因。新增采样字节门
+  （排除 19/109 用 `Math.random()` 的条目——未种子化的原生 PRNG 是已知后端差异，可复现路径是 `rng` 命名空间）
+- 验证：**185 文件 / 5406 tests + 3 skip**，typecheck / typecheck:vue / prettier 零错误
+
+> 🔒 **工坊入口仍保持下线**：EJS 侧边界已具备，但 **SEC-01（正则 `replaceString` → `v-html` 的 XSS）
+> 尚未修复**，它与 EJS 无关、独立成链。
+
+### EJS 能力面 T0 — 混淆真实语料 + 合成语料双闸门（全 CI，零人工）｜ ✅ 完成（2026-08-01）
+
+设计真源: `docs/planning/2026-08-01-ejs-capability-surface-design.md`（§10.5 测试策略 + §11 切片 T0）。
+
+**背景**：仓库 `data/worldbooks/`（509 条目 / 45 含 EJS）只有真机语料的 **4 成**——真机三本命定之诗世界书是 754 条目 / 109 含 EJS / 1524 块。但真实内容不能进 git（4.4 MB + 内容授权协议），且良性语料**测不到危险路径**（`.constructor` / 死循环 / ReDoS 全是 0 命中）。
+
+**交付两套互补语料，都在 CI 跑：**
+
+**① 混淆真实语料**（`scripts/scramble-worldbook-ejs.mjs` + `tests/fixtures/ejs-scrambled-corpus.json` 660 KB）
+
+- 正文**整体换填充串**（不做字符置换——置换保留字频、可被频率分析还原）；`{{宏}}` 保形不保内容（`{{setvar::系统名::XXX}}` 的载荷就是世界观正文）
+- 代码区 **CJK 一致置换**：同字恒同 → `getvar('X')` 与 `=== 'X'` 仍相等、`setMessageVar`→`getMessageVar` 读写链仍通
+- **ASCII 标识符一致重命名**：抹掉音译人名。白名单含 JS 内建 / 宿主 API / **lodash 方法名** / `localeCompare` 等宿主成员 / 契约 token（`stat_data`）
+  - 🔴 实施期踩到两次：漏 lodash 方法名 → `_.chain` 变 `_.n1dbx`，测出来是「方法名被改坏」不是「shim 缺方法」；漏 `localeCompare` / `lastMessageId` 同理。**白名单不全 = 基线失真**
+- **生成器自带闸门**：逐条目比对「原文编译结果 == 混淆后编译结果」，不一致拒绝写出
+- 测试闸门：双向白名单（16 条已知回退，每条带 `fixedBy` 指向切片）+ 执行不抛穿 + 无残留 `<%` + 失败条目 vars 零残留 + 状态稳定 + **混淆有效性抽查**（9 个专有名词零出现）
+- 片段补充：38 个**自足**代码块（跨块 `if {` 半截块由自足性闸门滤掉），含 6 个 `await` 片段作 T1 反向闸门
+
+**② 合成语料**（`ejs-synthetic-corpus.test.ts`，36 例 + 3 skip）
+
+- **A 语法覆盖 15 例**：按真机特征表逐项（跨块 if/for、IIFE、模板串、`String.raw`、展开、可选链、计算下标、命名捕获组、try/catch、`<%#`、`<%%`、未闭合降级…）
+- **D 契约不变式 13 例**：pass 内写→读可见、stats 优先、写永不穿透 stats、只读隔离、失败整体回滚（引用不变）、危险段拒写、环安全、静动分层字节稳定、差量前缀与体积护栏、代码位宏改写
+- **E 对抗 8 例**：原型污染（写入侧 + 出境侧）、深递归、不可字符串化抛出物、超大输出；**3 例按 `INTERRUPTIBLE_BACKEND` 开关 skip**（死循环 / 灾难回溯 / `repeat(1e9)`——当前后端同步不可中断，真跑会挂死测试进程，vitest 超时救不了），并配**元测试保险丝**盯着开关
+- 🔴 **两条「已知洞」用例断言当前事实并要求反转**：构造器逃逸目前**可以**拿回真全局（SEC-02）、`await` 目前编译失败。隔离后端 / AsyncFunction 落地时会红，逼实现者回来更新
+
+**基线（16 条回退，全部有主）**：YAML×2 / getChatMessage×3 / lastMessageId×2 / message_id×1 / `_.cloneDeep`×2（shim 缺 9 方法）/ await×3 / 宏嵌代码位×3（设计内不修）。
+
+**验证**：全仓 **177 文件 / 5186 tests 绿 + 3 skip**，typecheck / eslint 零错误。新增 `npm run ejs:fixture` 刷新夹具。
+
+### 工坊 P2 补丁 — 代码位内嵌 ST 值宏改写（`{{roll}}` / `{{random::}}`）｜ ✅ 完成（2026-08-01）
+
+设计真源: `docs/planning/2026-07-31-workshop-phase2-ejs-design.md` §4（原「注定回退」行已改写为已解决）。
+
+**问题**：上游（ST + 酒馆助手）宏由 ST 核心**先**展开、EJS **后**求值，所以语料写得出 `<%_ if ({{roll 1d100}} >= 100) { _%>`（event.json uid 358）。本引擎 ADR-30 D1 的顺序是反的（EJS 在前、宏剥离在后），照直编译即 SyntaxError → 整条目回退原文注入，模板源码直喂 AI。
+
+**修法**（不动 D1 顺序）：`ejs-runtime.ts` 编译期新增 `rewriteCodeMacros` —— 把**代码位**（`<% %>` / `<%= %>` / `<%- %>`）里的**自足值宏**降成沙盒调用：
+
+- `{{roll 1d100}}` / `{{roll::1d100}}` → `__roll("1d100")`（复用 `dice.ts` 的 `parseDiceFormula` + `rollDice`，公式不可解析取 0 不抛错）
+- `{{random::A,B,C}}` → `__random("A,B,C")`（语义对齐 `preset-loader.resolveRandoms`）
+
+**三条不变式**（写进源码头注释，改前必读）：
+
+1. **只动代码位** —— 文本位的宏原样交下游宏链，`{{user}}`/`{{getvar}}`/`{{setvar}}` 既有行为零改动
+2. **只认自足值宏** —— `{{user}}` 在代码位多嵌于字符串字面量（实测 dlc#479 / system_core#417 共 5 处），改写反而破坏输出；`{{getvar}}` 取值依赖宏链 setvar 表，求值时机不安全
+3. **改写成调用而非字面值** —— 正文字节不变 → `getCompiled` 的 session 级编译缓存照常命中，且每次执行真正重掷（字面值代换会把首轮结果冻死在缓存里）
+
+**验证**：`ejs-runtime.test.ts` 新增 9 例（uid 358 形态、修正量、双冒号写法、不可解析取 0、区间、文本位不动、代码位 `{{user}}` 不动、引号注入、缓存不冻结）；全语料冒烟白名单 **8 → 7 条**（uid 358 出列，反向闸门已验证它真的不再回退）。全仓 175 文件 / 5136 tests 绿，typecheck 零错误。
+
 ### 词条效果贯穿链路修复 S4 — prompt 模板 + 失败品链路 + Skill 落库补字段 ｜ ✅ 完成（2026-08-01）
 
 实施计划: `docs/planning/2026-08-01-item-gen-combat-link-plan.md` §3 S4；待办追踪: `docs/planning/combat-v3-fix-backlog.md`。S1-S3 打通 modifiers/automaton 代码链路后，S4 补齐 AI 侧模板 + 失败体验 + 技能生产加值落库（问题 2 + S2-2 收口）。

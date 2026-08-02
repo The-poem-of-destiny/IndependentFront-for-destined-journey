@@ -25,6 +25,17 @@ import {
   keyBy,
   chain,
   ejsLodash,
+  isPlainObject,
+  isNumber,
+  isString,
+  isFunction,
+  size,
+  cloneDeep,
+  omit,
+  mapKeys,
+  forOwn,
+  random,
+  sample,
 } from './ejs-lodash-shim';
 
 describe('toPath', () => {
@@ -418,6 +429,142 @@ describe('ejsLodash 注入面', () => {
       'toPath',
     ]) {
       expect(typeof (ejsLodash as any)[name]).toBe('function');
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// T5 补齐的 10 个方法（能力面 §3.13：17 → 27）
+//
+// 这批方法当初随 shim 一起加进来，**测试一行没补** —— 其中 `cloneDeep` 还带环检测
+// 与危险键剔除两处非平凡逻辑。评审点名后补上。
+// ═══════════════════════════════════════════════════════════
+
+describe('T5 补齐方法', () => {
+  it('isPlainObject 只认纯对象（数组/null/类实例/Date 都不算）', () => {
+    expect(isPlainObject({})).toBe(true);
+    expect(isPlainObject(Object.create(null))).toBe(true);
+    expect(isPlainObject([])).toBe(false);
+    expect(isPlainObject(null)).toBe(false);
+    expect(isPlainObject(new Date())).toBe(false);
+    expect(isPlainObject(new (class Foo {})())).toBe(false);
+    expect(isPlainObject('x')).toBe(false);
+  });
+
+  it('isNumber / isString / isFunction 按 typeof 判', () => {
+    expect(isNumber(1)).toBe(true);
+    expect(isNumber(NaN)).toBe(true); // 与 lodash 一致：NaN 也是 number
+    expect(isNumber('1')).toBe(false);
+    expect(isString('')).toBe(true);
+    expect(isString(1)).toBe(false);
+    expect(isFunction(() => {})).toBe(true);
+    expect(isFunction({})).toBe(false);
+  });
+
+  it('size：数组/字符串取 length，对象取自有键数，空值 0', () => {
+    expect(size([1, 2, 3])).toBe(3);
+    expect(size('中文字')).toBe(3);
+    expect(size({ a: 1, b: 2 })).toBe(2);
+    expect(size(null)).toBe(0);
+    expect(size(undefined)).toBe(0);
+    expect(size(42)).toBe(0);
+  });
+
+  it('cloneDeep：深拷贝且与源断开', () => {
+    const src: { a: { b: Array<{ c: number }> }; d: Date } = {
+      a: { b: [{ c: 2 }] },
+      d: new Date(0),
+    };
+    const out = cloneDeep(src);
+    expect(out).toEqual(src);
+    expect(out.a).not.toBe(src.a);
+    out.a.b[0].c = 99;
+    expect(src.a.b[0].c).toBe(2);
+  });
+
+  it('cloneDeep：环不炸（vars 是共写草稿，自引用完全可能）', () => {
+    const src: Record<string, any> = { name: 'x' };
+    src.self = src;
+    const out = cloneDeep(src);
+    expect(out.name).toBe('x');
+    expect(out.self).toBe(out); // 环被保留成指向副本自身，而不是无限展开
+  });
+
+  it('cloneDeep：危险键就地剔除（拷贝不该顺手把污染载体一起递出去）', () => {
+    const src = JSON.parse('{"good":1,"__proto__":{"polluted":1}}');
+    const out = cloneDeep(src) as Record<string, unknown>;
+    expect(out.good).toBe(1);
+    expect(Object.prototype.hasOwnProperty.call(out, '__proto__')).toBe(false);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it('omit：去掉指定键，其余保留（不改源）', () => {
+    const src = { a: 1, b: 2, c: 3 };
+    expect(omit(src, 'b')).toEqual({ a: 1, c: 3 });
+    expect(omit(src, ['a', 'c'])).toEqual({ b: 2 });
+    expect(src).toEqual({ a: 1, b: 2, c: 3 });
+  });
+
+  it('mapKeys / forOwn 遍历自有键', () => {
+    expect(mapKeys({ a: 1, b: 2 }, (_v: number, k: string) => k.toUpperCase())).toEqual({
+      A: 1,
+      B: 2,
+    });
+    const seen: string[] = [];
+    forOwn({ x: 1, y: 2 }, (_v: number, k: string) => seen.push(k));
+    expect(seen).toEqual(['x', 'y']);
+  });
+
+  it('random / sample 落在合法范围（不保证可复现 —— 那是 rng.* 的活）', () => {
+    for (let i = 0; i < 20; i++) {
+      const n = random(1, 6);
+      expect(n).toBeGreaterThanOrEqual(1);
+      expect(n).toBeLessThanOrEqual(6);
+    }
+    expect([1, 2, 3]).toContain(sample([1, 2, 3]));
+    expect(sample([])).toBeUndefined();
+  });
+
+  it('导出面覆盖全部 27 个方法 + chain/toPath', () => {
+    const expected = [
+      'get',
+      'trim',
+      'isArray',
+      'isObject',
+      'isObjectLike',
+      'isEmpty',
+      'mapValues',
+      'find',
+      'flatMap',
+      'pick',
+      'pickBy',
+      'values',
+      'keys',
+      'has',
+      'uniq',
+      'keyBy',
+      'isPlainObject',
+      'isNumber',
+      'isString',
+      'isFunction',
+      'size',
+      'cloneDeep',
+      'omit',
+      'mapKeys',
+      'forOwn',
+      'random',
+      'sample',
+      'chain',
+      'toPath',
+    ];
+    for (const name of expected) {
+      expect(typeof (ejsLodash as any)[name], `缺方法 ${name}`).toBe('function');
+    }
+  });
+
+  it('🔒 写方法一个都不提供 —— EJS 改不了引擎状态这条线由这里守着', () => {
+    for (const forbidden of ['set', 'assign', 'merge', 'update', 'unset', 'defaults', 'extend']) {
+      expect((ejsLodash as any)[forbidden], `${forbidden} 不该存在`).toBeUndefined();
     }
   });
 });

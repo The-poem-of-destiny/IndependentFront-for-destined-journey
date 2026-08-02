@@ -1,0 +1,491 @@
+/**
+ * 跨后端一致性 —— Legacy vs QuickJS（能力面 §0.1）
+ *
+ * ## 为什么必须有这个文件
+ * 原本的测试布局是：**渲染正确性全测 Legacy，QuickJS 只测安全属性**。
+ * 于是「两个后端渲染结果不同」这一整类缺陷结构性无人看守 —— 评审一次性揪出四条：
+ *
+ * | 缺陷 | Legacy | 当时的 QuickJS |
+ * |---|---|---|
+ * | `await` 条目 | 正常渲染 | `SyntaxError`（语料 3 条） |
+ * | 代码位 `{{roll}}` | 正常渲染 | `SyntaxError`（语料 4 条） |
+ * | 失败条目的半途写 | 整体回滚 | 残留并落库 |
+ * | `rng` 播种 | 逐条目 | 整 pass 一条序列（位置一变结果就变） |
+ *
+ * 四条全部**只在两个后端并排跑同一份输入时**才暴露。故本文件的断言形式统一是
+ * `legacy(x) === quickjs(x)`，而不是 `quickjs(x) === 某个字面量`：
+ * 后者每加一个能力就要手写一遍期望值，前者天然覆盖将来新增的一切。
+ *
+ * ⚠️ 真跑 wasm，比纯 Legacy 的用例慢一个量级。放在这里的必须是**对齐语义**的用例，
+ * 单后端就能测的（语法、契约、对抗）留在各自的文件里。
+ */
+
+import { describe, it, expect } from 'vitest';
+import { LegacyBackend, type EjsBackend } from './ejs-backend';
+import { createQuickJsBackend } from './ejs-quickjs-backend';
+import type { EjsEvalContext } from './ejs-runtime';
+
+const legacy: EjsBackend = new LegacyBackend();
+const quickjs: EjsBackend = createQuickJsBackend();
+const SLOW = 60_000;
+
+const makeCtx = (over: Partial<EjsEvalContext> = {}): EjsEvalContext => ({
+  stats: over.stats ?? { 主角: { 等级: 12, 生命值: 71, 姓名: '测试者' } },
+  vars: over.vars ?? {},
+  historyText: over.historyText ?? '我推开门\n你抬起头',
+  seed: over.seed ?? 'save-parity#3',
+  ...(over.capabilities !== undefined ? { capabilities: over.capabilities } : {}),
+});
+
+/** 同一批条目在两个后端各跑一次；返回 {文本, 是否成功, 末态草稿} 两份，供逐字段比对 */
+async function bothBackends(
+  entries: Array<{ uid: number; content: string }>,
+  over: Partial<EjsEvalContext> = {},
+) {
+  const lc = makeCtx(over);
+  const qc = makeCtx(over);
+  const l = await legacy.runPass(entries, lc);
+  const q = await quickjs.runPass(entries, qc);
+  return {
+    legacyText: l.map((o) => o.text),
+    quickjsText: q.map((o) => o.text),
+    legacyOk: l.map((o) => o.ok),
+    quickjsOk: q.map((o) => o.ok),
+    legacyVars: lc.vars,
+    quickjsVars: qc.vars,
+  };
+}
+
+/** 单条目对齐断言：文本、成败、草稿末态三样都必须一致 */
+async function expectSame(content: string, over: Partial<EjsEvalContext> = {}) {
+  const r = await bothBackends([{ uid: 1, content }], over);
+  expect(r.quickjsOk, `成败不一致: ${content.slice(0, 60)}`).toEqual(r.legacyOk);
+  expect(r.quickjsText, `文本不一致: ${content.slice(0, 60)}`).toEqual(r.legacyText);
+  expect(r.quickjsVars, `草稿末态不一致: ${content.slice(0, 60)}`).toEqual(r.legacyVars);
+  return r;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 四条回归 —— 每一条都对应一个真实缺陷
+// ═══════════════════════════════════════════════════════════
+
+describe('回归：评审揪出的四条后端分叉', () => {
+  it(
+    'await 条目两边都渲染（曾经 QuickJS 一律 SyntaxError）',
+    async () => {
+      const r = await expectSame('<%= await 41 + 1 %>');
+      expect(r.quickjsText).toEqual(['42']);
+    },
+    SLOW,
+  );
+
+  it(
+    '代码位 {{roll}} / {{random::}} 两边都降级成调用（曾经 QuickJS 报 invalid property name）',
+    async () => {
+      const r = await expectSame('<%_ if ({{roll 1d100}} >= 1) { _%>命中<%_ } _%>');
+      expect(r.quickjsText).toEqual(['命中']);
+      await expectSame('<%= {{random::甲,乙,丙}} %>');
+    },
+    SLOW,
+  );
+
+  it(
+    '失败条目的半途写两边都整体回滚（曾经 QuickJS 残留并落库）',
+    async () => {
+      const r = await expectSame('<% vars.脏 = 1; 不存在的符号() %>');
+      expect(r.quickjsOk).toEqual([false]);
+      expect(r.quickjsVars.脏, '失败条目的写不该留下').toBeUndefined();
+    },
+    SLOW,
+  );
+
+  it(
+    'rng 逐条目播种：同正文条目的结果与它在 pass 中的位置无关（曾经 QuickJS 整 pass 一条序列）',
+    async () => {
+      const target = { uid: 2, content: '<%= rng.roll("1d100") %>' };
+      const withPrefix = await bothBackends([
+        { uid: 1, content: '<%= rng.roll("1d20") %>' },
+        target,
+      ]);
+      const alone = await bothBackends([target]);
+
+      // 两个后端各自对齐
+      expect(withPrefix.quickjsText).toEqual(withPrefix.legacyText);
+      expect(alone.quickjsText).toEqual(alone.legacyText);
+      // 且「前面跑没跑过别的条目」不影响本条目的值
+      expect(withPrefix.quickjsText[1]).toBe(alone.quickjsText[0]);
+    },
+    SLOW,
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
+// 回归 DEFECT A —— trim 标记的空白吞噬（曾经 QuickJS 只跳标记字符不吞空白）
+// ═══════════════════════════════════════════════════════════
+
+describe('回归：trim 标记两后端逐字节一致（DEFECT A）', () => {
+  it(
+    '<%_ 吞紧邻前文行内空白（不吞换行）',
+    async () => {
+      // 行首三空格被 `<%_` 吞掉，代码块无输出 → `行首尾`
+      const r = await expectSame('行首   <%_ var a = 1 %>尾');
+      expect(r.quickjsText).toEqual(['行首尾']);
+      // 缩进块：`  <%_` 前的两空格被吞
+      const r2 = await expectSame('  <%_ var x = 1 _%>内容');
+      expect(r2.quickjsText).toEqual(['内容']);
+    },
+    SLOW,
+  );
+
+  it(
+    '_%> 吞后随行内空白 + 一个换行',
+    async () => {
+      const r = await expectSame('甲<% var b = 2 _%>   \n乙');
+      expect(r.quickjsText).toEqual(['甲乙']);
+      // 行尾空格：`_%>` 后只有空格也照吞
+      const r2 = await expectSame('内容<% var z = 1 _%>  ');
+      expect(r2.quickjsText).toEqual(['内容']);
+    },
+    SLOW,
+  );
+
+  it(
+    '-%> 只吞紧邻的一个换行（不吞行内空格）',
+    async () => {
+      const r = await expectSame('甲\n<%= 1 -%>\n乙');
+      expect(r.quickjsText).toEqual(['甲\n1乙']);
+      // 缺陷复现里的原型：`甲\n<%_ q _%>\n乙` → `甲\n乙`（曾经 QuickJS 多一个空行）
+      const r2 = await expectSame('甲\n<%_ var q = 1; _%>\n乙');
+      expect(r2.quickjsText).toEqual(['甲\n乙']);
+    },
+    SLOW,
+  );
+
+  it(
+    '多行缩进控制流：trim 后无多余空白行',
+    async () => {
+      const r = await expectSame('<%_ for (var i = 0; i < 3; i++) { _%>\n  行<%= i %>\n<%_ } _%>');
+      expect(r.quickjsText).toEqual(['  行0\n  行1\n  行2\n']);
+    },
+    SLOW,
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
+// 回归 DEFECT B —— __proto__ 段（曾经 guest DANGER 表把 __proto__ 写成原型键，漏判）
+// ═══════════════════════════════════════════════════════════
+
+describe('回归：__proto__ 段两后端一致（DEFECT B）', () => {
+  it(
+    '__proto__ 写不进 guest 原型，不跨条目污染',
+    async () => {
+      const r = await bothBackends([
+        { uid: 1, content: '<% setvar("__proto__.POLL", "POLLUTED") %>' },
+        { uid: 2, content: '<%= ({}).POLL === "POLLUTED" ? "脏" : "净" %>' },
+      ]);
+      expect(r.quickjsText).toEqual(r.legacyText);
+      // 曾经 QuickJS 下 __proto__.POLL 落到 guest realm 的 Object.prototype → 第二条读到 "脏"
+      expect(r.quickjsText[1]).toBe('净');
+      expect(({} as Record<string, unknown>).POLL, '宿主原型也不该被污染').toBeUndefined();
+    },
+    SLOW,
+  );
+
+  it(
+    '__proto__ 整次写被拒后，同名普通键的后续写仍保留（末态草稿一致）',
+    async () => {
+      const r = await bothBackends([
+        { uid: 1, content: '<% setvar("__proto__.桶", {}) %>' },
+        { uid: 2, content: '<% setvar("桶.键", 42) %>' },
+      ]);
+      expect(r.quickjsText).toEqual(r.legacyText);
+      // Legacy：第一条整次拒绝、第二条正常建 桶.键；曾经 QuickJS 第一条写进原型，
+      // 第二条经原型链落到原型上 → own diff 为空 → 写被静默丢弃（末态 {}）。
+      expect(r.legacyVars).toEqual({ 桶: { 键: 42 } });
+      expect(r.quickjsVars).toEqual(r.legacyVars);
+    },
+    SLOW,
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
+// 语义面对齐
+// ═══════════════════════════════════════════════════════════
+
+describe('渲染语义对齐', () => {
+  it(
+    '文本 / 表达式 / 跨块控制流 / 注释 / 转义',
+    async () => {
+      await expectSame('纯文本');
+      await expectSame('<%= 1 + 2 %>');
+      await expectSame('<%_ if (stats.主角.等级 >= 10) { _%>达标<%_ } else { _%>未达标<%_ } _%>');
+      await expectSame('<%_ for (let i = 0; i < 3; i++) { _%>[<%= i %>]<%_ } _%>');
+      await expectSame('<%# 这是注释 %>只剩正文');
+      await expectSame('<%%= 不求值 %>');
+    },
+    SLOW,
+  );
+
+  it(
+    'vars 草稿：写、读、跨条目可见',
+    async () => {
+      const r = await bothBackends([
+        { uid: 1, content: '<% vars.队伍 = { 人数: 3 } %>' },
+        { uid: 2, content: '<%= vars.队伍.人数 %>' },
+      ]);
+      expect(r.quickjsText).toEqual(r.legacyText);
+      expect(r.quickjsVars).toEqual(r.legacyVars);
+      expect(r.quickjsText[1]).toBe('3');
+    },
+    SLOW,
+  );
+
+  it(
+    '危险键在两边都写不进草稿（原型污染）',
+    async () => {
+      const r = await expectSame('<% setvar("__proto__.polluted", 1) %>');
+      // 宿主 Object.prototype 没被污染
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+      // 草稿上也没多出一个**自有**的 __proto__ 键（`vars.__proto__` 读到的永远是原型，不能拿来断言）
+      expect(Object.prototype.hasOwnProperty.call(r.quickjsVars, '__proto__')).toBe(false);
+      expect(Object.keys(r.quickjsVars)).toEqual([]);
+    },
+    SLOW,
+  );
+
+  it(
+    'stats 只读面 / fmt / lodash 取值一致',
+    async () => {
+      await expectSame('<%= stats.主角.姓名 %> Lv.<%= stats.主角.等级 %>');
+      await expectSame('<%= fmt.num(1234567) %> | <%= fmt.pct(0.25) %> | <%= fmt.bar(3, 10) %>');
+      await expectSame('<%= _.size([1,2,3]) %> <%= _.get(stats, "主角.生命值") %>');
+      await expectSame('<%= JSON.stringify(_.mapValues({a:1,b:2}, (v) => v * 2)) %>');
+    },
+    SLOW,
+  );
+
+  it(
+    '宿主查询面（chat / char / quest / lore / engine）一致',
+    async () => {
+      const capabilities = {
+        history: [
+          { role: 'user', content: '我去咖啡馆' },
+          { role: 'assistant', content: '你推开门' },
+        ],
+        characters: [{ name: '琴师', type: 'npc' }],
+        quests: { 寻琴: { status: '进行中' } },
+        lore: { get: (n: string) => (n === '设计' ? '设计正文' : null), list: () => ['设计'] },
+        turn: 9,
+      } as never;
+      await expectSame('<%= chat.last("user") %>', { capabilities });
+      await expectSame('<%= chat.match("咖啡馆") %>', { capabilities });
+      await expectSame('<%= quest.has("寻琴") %>', { capabilities });
+      await expectSame('<%= lore.get("设计") %>', { capabilities });
+      await expectSame('<%= world.回合 %>', { capabilities });
+      await expectSame('<%= engine.name %>/<%= engine.has("lore.get") %>', { capabilities });
+    },
+    SLOW,
+  );
+
+  it(
+    '失败形态一致：语法错误 / 未知符号 / 抛错都回退原文',
+    async () => {
+      for (const bad of ['<% if ( %>', '<% 完全不存在() %>', '<% throw new Error("boom") %>']) {
+        const r = await expectSame(bad);
+        expect(r.quickjsOk).toEqual([false]);
+        expect(r.quickjsText).toEqual([bad]);
+      }
+    },
+    SLOW,
+  );
+
+  it(
+    '别名层（getMessageVar / getvar / setvar / getChatMessage）一致',
+    async () => {
+      const capabilities = {
+        history: [{ role: 'user', content: '第一句' }],
+      } as never;
+      await expectSame('<% setvar("进度", 5) %><%= getvar("进度") %>');
+      await expectSame('<%= getMessageVar("stat_data.主角.等级") %>');
+      await expectSame('<%= getChatMessage(-1, "user") %>', { capabilities });
+    },
+    SLOW,
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
+// 回归：编组把语义吃掉的三条
+// ═══════════════════════════════════════════════════════════
+
+describe('回归：编组层丢语义导致的后端分叉', () => {
+  it(
+    'chat.match 收真正则（曾经只送 source 串，宿主退化成 includes 子串搜索）',
+    async () => {
+      const over = { historyText: '我推开门走进咖啡馆，你抬起头' };
+      // 分组 / 交替：子串搜索必然判 false，真正则判 true —— 而两边当时都报 ok:true（静默分叉）
+      const hit = await expectSame('<%= chat.match(/咖啡(馆|厅)/) %>', over);
+      expect(hit.quickjsText).toEqual(['true']);
+      const miss = await expectSame('<%= chat.match(/茶楼|酒馆/) %>', over);
+      expect(miss.quickjsText).toEqual(['false']);
+      // 带 flags 的也得一致（能力面会剥掉 g/y，两边同样口径）
+      await expectSame('<%= chat.match(/咖啡/gi) %>', over);
+      // 字符串形态不受影响
+      await expectSame('<%= chat.match("咖啡馆") %>', over);
+      // 别名层同一条路
+      await expectSame('<%= matchChatMessages(/推开(门|窗)/) %>', over);
+    },
+    SLOW,
+  );
+
+  it(
+    'lore 预算是**条目级**（曾经整 pass 只建一份能力面，第 9 条起静默返空串）',
+    async () => {
+      // LORE_GET_PER_ENTRY = 8：10 个条目各调一次，只有预算按条目重置才可能全部命中
+      const capabilities = {
+        lore: { get: (n: string) => (n === '设计' ? '设计正文' : null), list: () => ['设计'] },
+      } as never;
+      const entries = Array.from({ length: 10 }, (_, i) => ({
+        uid: i + 1,
+        content: '<%= lore.get("设计") %>',
+      }));
+      const r = await bothBackends(entries, { capabilities });
+      expect(r.quickjsText).toEqual(r.legacyText);
+      expect(r.quickjsOk).toEqual(r.legacyOk);
+      expect(r.quickjsText).toEqual(Array.from({ length: 10 }, () => '设计正文'));
+    },
+    SLOW,
+  );
+
+  it(
+    '_.chain(...).value() 两边同解（曾经 guest 侧根本没有 chain → TypeError 整条目回退）',
+    async () => {
+      // 形状照抄真机中招的三条（dlc#477 月历球 / wb5i#61 / wb5i#111446）：
+      // chain → pickBy(谓词) → mapValues(变换) → pickBy(非空) → value()
+      const 月历 = `<%
+        var 桶 = { 甲: { 可见: true, 标题: '春祭' }, 乙: { 可见: false, 标题: '密约' }, 丙: { 可见: true, 标题: '' } };
+        var 结果 = _.chain(_.isObject(桶) ? 桶 : {})
+          .pickBy(function (e) { return e.可见; })
+          .mapValues(function (e) { return _.pickBy({ 标题: e.标题 }, function (v) { return !!v; }); })
+          .pickBy(function (e) { return !_.isEmpty(e); })
+          .value();
+      %><%= JSON.stringify(结果) %>`;
+      const r = await expectSame(月历);
+      expect(r.quickjsOk).toEqual([true]);
+      expect(r.quickjsText).toEqual(['{"甲":{"标题":"春祭"}}']);
+
+      // 链上其余方法与终结语义也要对齐（.value() 取当前值，不是重新求值）
+      await expectSame('<%= _.chain([3,1,3,2]).uniq().values().value().join("-") %>');
+      await expectSame('<%= _.chain({ a: { b: 7 } }).get("a.b").value() %>');
+      await expectSame('<%= JSON.stringify(_.chain({ x: 1, y: 2 }).keys().value()) %>');
+      // 未落在 CHAIN_METHODS 表里的方法两边都不该有（否则就是 shim 表漂了）
+      await expectSame('<%= typeof _.chain([1]).cloneDeep %>');
+    },
+    SLOW,
+  );
+
+  it(
+    'world.isDaytime 是函数：JSON 编组会整个丢掉它（曾经 QuickJS 下 TypeError → 整条目回退）',
+    async () => {
+      const at = (hour: number): Partial<EjsEvalContext> => ({
+        capabilities: {
+          gameTime: { era: '复兴纪元', year: 1, month: 5, day: 24, weekday: 1, hour, minute: 0 },
+        },
+      });
+      const day = at(10);
+      const night = at(23);
+      const d = await expectSame('<%= world.isDaytime() %>', day);
+      expect(d.quickjsOk).toEqual([true]);
+      expect(d.quickjsText).toEqual(['true']);
+      const n = await expectSame('<%= world.isDaytime() %>', night);
+      expect(n.quickjsText).toEqual(['false']);
+    },
+    SLOW,
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
+// 真实语料片段
+// ═══════════════════════════════════════════════════════════
+
+describe('真实语料片段两后端一致', () => {
+  interface Fragment {
+    feature: string;
+    from: string;
+    code: string;
+    needsAsync: boolean;
+  }
+  // 夹具走 Vite 的 `?raw` glob，不用 node:fs（仓库没装 @types/node，裸 tsc 会 TS2307）
+  const RAW = import.meta.glob('../../tests/fixtures/ejs-scrambled-corpus.json', {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  }) as Record<string, string>;
+  interface CorpusEntry {
+    id: string;
+    features: string[];
+    content: string;
+  }
+  const corpus = JSON.parse(Object.values(RAW)[0]) as {
+    fragments: Fragment[];
+    entries: CorpusEntry[];
+  };
+
+  it(
+    '整条目渲染字节两后端一致（采样，防 trim/原型等只在成功路径上暴露的分叉）',
+    async () => {
+      // 现有闸门比的是**回退集合**，成功条目的渲染字节无人看守 —— DEFECT A 的 trim 分叉
+      // （107/109 条目命中 trim 标记）正是从这个缝里溜过去的。这里对整条目逐字节比对。
+      // 采样而非全量：整份语料两后端各跑一趟 wasm 太慢，隔条抽约 12 条已足够代表。
+      // 跳过 await 条目（同步/异步路径差异归专门的 async 闸门）。
+      // 跳过含 Math.random 的条目：**已登记的后端限制**。Math.random 是未播种的原生逃生口，
+      // 两后端各有独立的 PRNG 流（甚至同后端两次运行都不同）——注定字节不一致，且这不是缺陷。
+      // 可复现的随机走 `rng` 命名空间（ejs-rng.ts，快照重放一致）。语料里 19/109 条用了 Math.random。
+      const sample = corpus.entries
+        .filter((e) => !e.features.includes('await'))
+        .filter((e) => !/Math\.random/.test(e.content))
+        .filter((_, i) => i % 4 === 0)
+        .slice(0, 12);
+      expect(sample.length, '语料应抽得到样本').toBeGreaterThan(5);
+
+      const r = await bothBackends(sample.map((e, i) => ({ uid: i + 1, content: e.content })));
+      const mismatches: string[] = [];
+      for (let i = 0; i < sample.length; i++) {
+        if (r.quickjsText[i] !== r.legacyText[i]) {
+          mismatches.push(`${sample[i].id}: 渲染字节不一致`);
+        }
+      }
+      // 一条都不许有 —— 若出现 trim 之外的新分叉，报出 id 与成因，别做白名单
+      expect(mismatches, `字节级后端分叉: ${mismatches.join(' | ')}`).toEqual([]);
+    },
+    SLOW,
+  );
+
+  it(
+    '逐片段比对文本、成败与草稿末态',
+    async () => {
+      const mismatches: string[] = [];
+      const tolerated: string[] = [];
+      for (const f of corpus.fragments) {
+        // §3.14 C 档：**已登记且刻意不修**的跨后端差异。QuickJS 无完整 ICU，
+        // `localeCompare('zh-CN')` 的排序口径与 V8 不同 → 排序类条目输出必然不同。
+        // 修不了（除非自带 CJK 排序表），故不假装一致——列出来，并由预检提醒创作者改用 fmt.compareName。
+        if (/localeCompare|toLocaleString|Intl|\(\?</.test(f.code)) {
+          tolerated.push(`${f.from}(${f.feature})`);
+          continue;
+        }
+        const lc = makeCtx();
+        const qc = makeCtx();
+        const [l] = await legacy.runPass([{ uid: 1, content: f.code }], lc);
+        const [q] = await quickjs.runPass([{ uid: 1, content: f.code }], qc);
+        if (l.text !== q.text || l.ok !== q.ok) {
+          mismatches.push(`${f.from}(${f.feature}): legacy ok=${l.ok} / quickjs ok=${q.ok}`);
+        }
+      }
+      // 一条都不许有 —— 片段是真机形态，这里出分叉等于线上出分叉
+      expect(mismatches).toEqual([]);
+      // 豁免名单必须**很短**且成因单一。它一旦变长，说明「已登记差异」正在变成垃圾桶。
+      expect(tolerated.length, `C 档豁免: ${tolerated.join(', ')}`).toBeLessThanOrEqual(3);
+    },
+    SLOW,
+  );
+});

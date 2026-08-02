@@ -13,6 +13,7 @@ import {
 } from './agent-templates';
 import { getDefaultTemplate } from './placeholder-registry';
 import type { AgentContext, AgentConfig, AgentPreset, WorldBook, WorldBookEntry } from './types';
+import { createDefaultCharacterState } from './types';
 
 // ========== Test Context ==========
 
@@ -420,6 +421,28 @@ describe('buildAgentMessages — SYS_PROMPT assembly', () => {
     // 去重: template 已简化为 {{SYS_PROMPT}}，不再追加重复的 {{USER_INPUT}} → 用户输入只出现一次
     expect(content.split('探索古墓').length - 1).toBe(1);
   });
+
+  // 裸名分区占位符必须进 STORY_PRESET_PLACEHOLDER_RE，否则只用它们的预设不走预解析、原样裸奔给 AI
+  it('story + 预设只含裸名分区占位符 → 仍判定为规范预设并预解析', () => {
+    const ctx = makeContext({ userInput: '探索古墓' });
+    const cfg = makeCfg('story', { presetId: 'split-preset' });
+    const presets: AgentPreset[] = [
+      {
+        id: 'split-preset',
+        name: 'Split Preset',
+        fixedSystem:
+          '核心提示词。\n<静态区>{{LORE_BOOK_STATIC}}</静态区>\n<动态区>{{LORE_BOOK_DYNAMIC}}</动态区>',
+        fixedExamples: '',
+      } as AgentPreset,
+    ];
+    const messages = buildAgentMessages('story', ctx, [cfg], [], presets);
+    expect(messages).not.toBeNull();
+    const content = messages![0].content;
+    // 预解析已把裸名占位符就地渲染（无世界书 → 渲染成空），不残留裸占位符
+    expect(content).not.toContain('{{LORE_BOOK_STATIC}}');
+    expect(content).not.toContain('{{LORE_BOOK_DYNAMIC}}');
+    expect(content).toContain('核心提示词。');
+  });
 });
 
 // ========== Phase 10: 单消息返回格式 ==========
@@ -687,5 +710,244 @@ describe('buildAgentMessages × EJS pass 上下文 (ADR-30 D4/D5)', () => {
     expect(text).toContain('第二条');
     expect((text.match(/文/g) || []).length).toBe(3000);
     expect(buildEjsHistoryText('story', ctx, makeCfg('story', { historyLayers: 0 }))).toBe('');
+  });
+});
+
+// ========== 能力面接线（能力面 §3.5-§3.12 / 切片 T4-T6）==========
+
+/**
+ * 🔴 这一组是**接线回归**，不是能力面本身的功能测试。
+ *
+ * 能力面各 namespace 的行为由 `ejs-capabilities.test.ts` 覆盖（那边直接传输入）。
+ * 但那种测法**测不到「生产路径有没有把输入传进去」** —— 实际情况正是：
+ * `buildCapabilityInput()` 写好了却一次都没被调用，`buildEjsPassContext()` 漏了
+ * `capabilities` 字段。字段可选 → 编译期不报 → 全绿的 CI 掩护着八个空 namespace 上线。
+ *
+ * 所以这里的断言一律**穿过 buildAgentMessages**，用真实条目正文去要那些能力。
+ */
+describe('buildAgentMessages × 能力面接线', () => {
+  function bookWith(content: string): WorldBook {
+    return {
+      id: 'wb_cap',
+      name: '能力面书',
+      partition: 'world_setting',
+      entries: [
+        {
+          uid: 1,
+          name: '能力条目',
+          content,
+          enabled: true,
+          key: [],
+          keysecondary: [],
+          selectiveLogic: 0,
+          order: 1,
+          position: 0,
+        },
+      ],
+    };
+  }
+
+  const render = (content: string, ctx: AgentContext): string => {
+    const cfg = makeCfg('story', { worldBookIds: ['wb_cap'] });
+    return buildAgentMessages('story', ctx, [cfg], [bookWith(content)])![0].content;
+  };
+
+  it('chat：拿得到历史（不是空串）', () => {
+    const ctx = makeContext({
+      history: [
+        { role: 'user', content: '我去咖啡馆' } as any,
+        { role: 'assistant', content: '你推开门' } as any,
+      ],
+    });
+    expect(render('最近：<%= chat.last("user") %>', ctx)).toContain('最近：我去咖啡馆');
+  });
+
+  it('char：拿得到角色（不是空数组）', () => {
+    // 用真的 CharacterState —— 装配链路上的叙事格式化器会读五维等字段
+    const ctx = makeContext({
+      characters: [createDefaultCharacterState({ name: '琴师', type: 'npc' })],
+    });
+    expect(render('人数=<%= char.all().length %>', ctx)).toContain('人数=1');
+  });
+
+  it('quest：拿得到任务（不是恒 false）', () => {
+    const ctx = makeContext({ quests: { 寻琴: { status: '进行中' } } as never });
+    expect(render('有寻琴=<%= quest.has("寻琴") %>', ctx)).toContain('有寻琴=true');
+  });
+
+  it('world.回合：跟着历史长度走（不是恒 0）', () => {
+    const ctx = makeContext({
+      history: [
+        { role: 'user', content: 'a' } as any,
+        { role: 'assistant', content: 'b' } as any,
+        { role: 'user', content: 'c' } as any,
+      ],
+    });
+    expect(render('回合=<%= world.回合 %>', ctx)).toContain('回合=3');
+  });
+
+  it('lore.get：读得到**该 Agent 可见**的条目', () => {
+    const ctx = makeContext();
+    const cfg = makeCfg('story', { worldBookIds: ['wb_cap', 'wb_other'] });
+    const other: WorldBook = {
+      id: 'wb_other',
+      name: '另一本',
+      partition: 'world_setting',
+      entries: [
+        {
+          uid: 9,
+          name: '被引条目',
+          content: '被引正文',
+          enabled: true,
+          key: [],
+          keysecondary: [],
+          selectiveLogic: 0,
+          order: 2,
+          position: 0,
+        },
+      ],
+    };
+    const msgs = buildAgentMessages(
+      'story',
+      ctx,
+      [cfg],
+      [bookWith('引用=<%= lore.get("被引条目") %>'), other],
+    );
+    expect(msgs![0].content).toContain('引用=被引正文');
+  });
+
+  it('🔒 lore.get 读不到该 Agent **看不见**的书 —— EJS 不能成为绕过 Phase 8 分区的旁路', () => {
+    const ctx = makeContext();
+    // story 只挂 wb_cap；密书没进它的 worldBookIds
+    const cfg = makeCfg('story', { worldBookIds: ['wb_cap'] });
+    const secret: WorldBook = {
+      id: 'wb_secret',
+      name: '密书',
+      partition: 'world_setting',
+      entries: [
+        {
+          uid: 99,
+          name: '机密条目',
+          content: '机密正文',
+          enabled: true,
+          key: [],
+          keysecondary: [],
+          selectiveLogic: 0,
+          order: 2,
+          position: 0,
+        },
+      ],
+    };
+    const msgs = buildAgentMessages(
+      'story',
+      ctx,
+      [cfg],
+      [bookWith('泄露=[<%= lore.get("机密条目") ?? "" %>]'), secret],
+    );
+    expect(msgs![0].content).toContain('泄露=[]');
+    expect(msgs![0].content).not.toContain('机密正文');
+  });
+
+  it('ui.notify：接到 ctx.ejsNotify 出口', () => {
+    const seen: string[] = [];
+    const ctx = makeContext({ ejsNotify: (m: string) => seen.push(m) });
+    render('<% ui.notify("提示一句") %>', ctx);
+    expect(seen).toEqual(['提示一句']);
+  });
+
+  it('engine：拿得到引擎标识与能力探测', () => {
+    const ctx = makeContext();
+    const out = render('<%= engine.name %>|<%= engine.has("lore.get") %>', ctx);
+    expect(out).toContain('poem-of-destiny|true');
+  });
+
+  it('别名层同样接线（存量条目走的是这条）', () => {
+    const ctx = makeContext({
+      statData: { 主角: { 等级: 7 } },
+      history: [{ role: 'user', content: '第一句' } as any],
+    });
+    expect(render('Lv<%= getMessageVar("stat_data.主角.等级") %>', ctx)).toContain('Lv7');
+    expect(render('说=<%= getChatMessage(-1, "user") %>', ctx)).toContain('说=第一句');
+  });
+});
+
+// ========== EJS 回退诊断出口（D8）==========
+
+/**
+ * 回退是**静默**的：条目照常进提示词，只是没被求值。`console.warn` 没人翻，
+ * 所以诊断出口是唯一能让它被看见的路（DebugPanel + 导出 JSON）。
+ * 这里断言的是**接线**，不是回退本身的正确性（那在 worldbook-loader 测）。
+ */
+describe('buildAgentMessages × EJS 回退诊断出口', () => {
+  function brokenBook(): WorldBook {
+    return {
+      id: 'wb_broken',
+      name: '坏书',
+      partition: 'world_setting',
+      entries: [
+        {
+          uid: 42,
+          name: '坏条目',
+          content: '<% 不存在的符号() %>',
+          enabled: true,
+          key: [],
+          keysecondary: [],
+          selectiveLogic: 0,
+          order: 1,
+          position: 0,
+        },
+      ],
+    };
+  }
+
+  it('条目求值失败 → ejsFallback 收到 uid / 书名 / 错因', () => {
+    const seen: Array<{ agentId: string; entries: Array<{ uid: number; bookName?: string }> }> = [];
+    const ctx = makeContext({ ejsFallback: (info) => seen.push(info) });
+    const cfg = makeCfg('story', { worldBookIds: ['wb_broken'] });
+
+    const msgs = buildAgentMessages('story', ctx, [cfg], [brokenBook()]);
+
+    // 正文里是原文注入（D8），不是渲染结果
+    expect(msgs![0].content).toContain('<% 不存在的符号() %>');
+    // 而且诊断确实送出去了
+    expect(seen).toHaveLength(1);
+    expect(seen[0].agentId).toBe('story');
+    expect(seen[0].entries[0]).toMatchObject({ uid: 42, bookName: '坏书' });
+  });
+
+  it('条目正常 → 不打扰（出口零调用）', () => {
+    const seen: unknown[] = [];
+    const ctx = makeContext({ ejsFallback: () => seen.push(1) });
+    const cfg = makeCfg('story', { worldBookIds: ['wb_ok'] });
+    const ok: WorldBook = {
+      id: 'wb_ok',
+      name: '好书',
+      partition: 'world_setting',
+      entries: [
+        {
+          uid: 1,
+          name: '好条目',
+          content: '<%= 1 + 1 %>',
+          enabled: true,
+          key: [],
+          keysecondary: [],
+          selectiveLogic: 0,
+          order: 1,
+          position: 0,
+        },
+      ],
+    };
+    expect(buildAgentMessages('story', ctx, [cfg], [ok])![0].content).toContain('2');
+    expect(seen).toHaveLength(0);
+  });
+
+  it('出口自己抛错也不能打断提示装配', () => {
+    const ctx = makeContext({
+      ejsFallback: () => {
+        throw new Error('诊断挂了');
+      },
+    });
+    const cfg = makeCfg('story', { worldBookIds: ['wb_broken'] });
+    expect(() => buildAgentMessages('story', ctx, [cfg], [brokenBook()])).not.toThrow();
   });
 });

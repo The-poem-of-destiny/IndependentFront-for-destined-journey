@@ -2,7 +2,7 @@
  * Phase 10: Placeholder Registry — Unified Agent Template System
  *
  * 职责:
- * 1. 定义 PLACEHOLDER_REGISTRY — 16 个 {{PLACEHOLDER}} → 解析函数的映射
+ * 1. 定义 PLACEHOLDER_REGISTRY — 18 个 {{PLACEHOLDER}} → 解析函数的映射
  * 2. getDefaultTemplate(agentId) — 为每个 Agent 返回默认模板字符串
  * 3. setPlaceholderGlobals / resetPlaceholderGlobals — 管理跨函数共享的世界书/配置数据
  *
@@ -102,11 +102,121 @@ function formatPlotEventsEntries(ctx: AgentContext): string {
 }
 
 // ═══════════════════════════════════════════════════════════
+// LORE_BOOK 共享实现（{{LORE_BOOK}} / {{LORE_BOOK_STATIC}} / {{LORE_BOOK_DYNAMIC}} 三者同源）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 世界书条目过滤 + 静/动分层 + EJS 求值 + 宏剥离 —— 三个 LORE_BOOK 占位符的唯一实现。
+ *
+ * 工坊 P2 (ADR-30 D1/D7)：条目过滤后走 `renderWorldBookEntries` —— 静态区（无 `<%`/`{{random`/
+ * `{{getvar}}` 特征）字节稳定排在前，动态区 EJS 求值后沉到尾部，最大化 prompt cache 前缀。
+ *
+ * 分区选择：
+ * - `forcedSection` 传入 → 忽略 `params.section`，只返回该区（供裸名占位符 `{{LORE_BOOK_STATIC}}` /
+ *   `{{LORE_BOOK_DYNAMIC}}` 钉死分区用；裸名不接受用户改区）
+ * - 否则看 `params.section`（`static` / `dynamic`）
+ * - 两者都没有 → 静态区 + 动态区顺序连拼（默认行为，普通用户无感）
+ * - `limit=N` → 三种写法通用，对最终文本截断
+ *
+ * 宏链（parseSetvars → resolveGetvars → resolveRandoms）位置**不动**，仍在 EJS 之后，
+ * 对**本次返回的那段文本**独立跑。⚠️ 拆开两区时两区各自成一次宏作用域——
+ * 静态区定义的 `{{setvar}}` 不再对动态区的 `{{getvar}}` 可见，这是拆分的固有代价。
+ *
+ * 🔴 **pass 级 memo（幂等保障）**：拆分写法让本函数在同一 pass 被调多次，
+ * 而 EJS 条目不保证幂等（计数器式 `setMessageVar` 在语料里合法）——重复求值 = 写翻倍落库。
+ * 故首次求值把整份 `renderWorldBookEntries` 结果缓存到 `ctx.ejsPass.loreRender`，
+ * 后续出现（无论哪个占位符、哪个分区）只从缓存挑段。不同 Agent 的 pass 各自新建 ejsPass，天然隔离。
+ * 无 ejsPass 的退化路径不缓存——一次性上下文没有二次出现问题（写即弃）。
+ */
+function resolveLoreBookSection(
+  ctx: AgentContext,
+  config: AgentConfig,
+  params: Record<string, string> | undefined,
+  forcedSection?: 'static' | 'dynamic',
+): string {
+  if (_worldBooks.length === 0 || _configs.length === 0) return '';
+  const agentId = config.agentId || '';
+  const entries = getEntriesForAgent(agentId, _configs, _worldBooks);
+  if (entries.length === 0) return '';
+  const activeEntries = filterActiveEntries(entries);
+
+  // 求值上下文取本次装配 pass 的草稿（buildAgentMessages 挂在 tplCtx.ejsPass 上）。
+  // 极端路径（外部直接调 resolver / 老测试）无草稿 → 退化为一次性空草稿：求值照跑，写即弃。
+  const ejsCtx = ctx.ejsPass ?? { stats: ctx.statData ?? {}, vars: {}, historyText: '' };
+
+  const memo = ctx.ejsPass?.loreRender;
+  let staticText: string;
+  let dynamicText: string;
+  if (memo && memo.agentId === agentId) {
+    // 本 pass 已求值过 —— 直接复用，绝不二次执行 EJS（回退告警也已在首次打过）
+    staticText = memo.staticText;
+    dynamicText = memo.dynamicText;
+  } else {
+    // 无 memo 的同步兜底路（2026-08-01 修 F3 的裁定）：
+    // 生产装配一律走 `buildAgentMessagesAsync` —— 它预渲染完把结果灌进 `ejsPass.loreRender`，
+    // 上面那条 memo 分支才是生产的正常路径，这里只剩测试与外部直接调 resolver 的极端路径。
+    // 保留调用而不删，是因为 `renderWorldBookEntries` 自身已带 fail-closed 闸门：
+    // 当前后端不是 `LegacyBackend`（= 生产的 QuickJS / fail-closed）时它**不在宿主 realm 求值**，
+    // 按 D8 原文注入并记回退。故这里不会成为绕过隔离的后门；测试默认 Legacy 后端下行为不变。
+    const rendered = renderWorldBookEntries(activeEntries, ejsCtx);
+    staticText = rendered.staticText;
+    dynamicText = rendered.dynamicText;
+    if (ctx.ejsPass) {
+      ctx.ejsPass.loreRender = {
+        agentId,
+        staticText,
+        dynamicText,
+        fallbackEntries: rendered.fallbackEntries,
+      };
+    }
+    if (rendered.fallbackEntries.length > 0) {
+      console.warn(
+        `[LORE_BOOK] agent=${agentId} 有 ${rendered.fallbackEntries.length} 个条目 EJS 失败、已回退原文注入: ` +
+          rendered.fallbackEntries.map((f) => `${bookNameOfUid(f.uid)}#${f.uid}`).join(', '),
+      );
+      // 同步送进诊断出口（同步 resolver 这条路；异步预渲染那条在 agent-templates）
+      try {
+        ctx.ejsFallback?.({
+          agentId,
+          entries: rendered.fallbackEntries.map((f) => ({
+            uid: f.uid,
+            bookName: bookNameOfUid(f.uid),
+            error: f.error,
+          })),
+        });
+      } catch (err) {
+        console.warn('[LORE_BOOK] EJS 回退诊断出口抛错（已忽略）:', err);
+      }
+    }
+  }
+
+  // 裸名占位符钉死分区，优先级高于 params.section（用户给 {{LORE_BOOK_STATIC:section=dynamic}} 也不改区）
+  const section = forcedSection ?? params?.section;
+  let formatted: string;
+  if (section === 'static') formatted = staticText;
+  else if (section === 'dynamic') formatted = dynamicText;
+  else formatted = [staticText, dynamicText].filter(Boolean).join('\n\n');
+
+  // 真机修(2026-07-18): 原 ST 角色卡世界书正文自带 {{setvar/getvar/random}} 宏（MVU 机制遗留）
+  // → 注入前收集 setvar 变量表并剥离定义、替换 getvar 引用、解析 random——
+  //   世界书内自洽的 setvar/getvar 对仍正常工作，孤立宏不再作为噪音喂给 AI（实测 story 系统消息含 25+36 处残留）
+  const { variables: wbVars, stripped } = parseSetvars(formatted);
+  formatted = resolveRandoms(resolveGetvars(stripped, wbVars));
+  if (params?.limit) {
+    const limit = parseInt(params.limit, 10);
+    if (!isNaN(limit) && limit > 0) {
+      return formatted.slice(0, limit);
+    }
+  }
+  return formatted;
+}
+
+// ═══════════════════════════════════════════════════════════
 // Placeholder Registry
 // ═══════════════════════════════════════════════════════════
 
 export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
-  // ---- Global Placeholders (10) ----
+  // ---- Global Placeholders (12) ----
 
   /** {{SYS_PROMPT}} — Agent 的 systemPrompt，来自 agent-config.json */
   SYS_PROMPT: (ctx, config, _params) => {
@@ -114,83 +224,33 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
   },
 
   /**
-   * {{LORE_BOOK}} — 世界书条目过滤 + 静/动分层 + EJS 求值 + 宏剥离。
-   *
-   * 工坊 P2 (ADR-30 D1/D7)：条目过滤后走 `renderWorldBookEntries` —— 静态区（无 `<%`/`{{random`/
-   * `{{getvar}}` 特征）字节稳定排在前，动态区 EJS 求值后沉到尾部，最大化 prompt cache 前缀。
-   *
-   * 参数：
-   * - `section=static` / `section=dynamic` → 只返回该区（自定义模板可把两区拆到不同位置）
-   * - 不传 → 静态区 + 动态区顺序连拼（默认行为，普通用户无感）
-   * - `limit=N` → 行为不变，对最终文本截断
-   *
-   * 宏链（parseSetvars → resolveGetvars → resolveRandoms）位置**不动**，仍在 EJS 之后，
-   * 对**本次返回的那段文本**独立跑。⚠️ 用 `section=` 拆开时两区各自成一次宏作用域——
-   * 静态区定义的 `{{setvar}}` 不再对动态区的 `{{getvar}}` 可见，这是拆分的固有代价。
-   *
-   * 🔴 **pass 级 memo（幂等保障）**：拆分写法让本 resolver 在同一 pass 被调多次，
-   * 而 EJS 条目不保证幂等（计数器式 `setMessageVar` 在语料里合法）——重复求值 = 写翻倍落库。
-   * 故首次求值把整份 `renderWorldBookEntries` 结果缓存到 `ctx.ejsPass.loreRender`，
-   * 后续出现（无论 section 参数）只从缓存挑段。不同 Agent 的 pass 各自新建 ejsPass，天然隔离。
-   * 无 ejsPass 的退化路径不缓存——一次性上下文没有二次出现问题（写即弃）。
+   * {{LORE_BOOK}} — 世界书条目（静态区 + 动态区连拼）。
+   * 支持 `section=static` / `section=dynamic` 参数化拆区，以及 `limit=N` 截断。
+   * 完整语义（分层 / 宏作用域 / pass 级 memo）见 `resolveLoreBookSection`。
    */
-  LORE_BOOK: (ctx, config, params) => {
-    if (_worldBooks.length === 0 || _configs.length === 0) return '';
-    const agentId = config.agentId || '';
-    const entries = getEntriesForAgent(agentId, _configs, _worldBooks);
-    if (entries.length === 0) return '';
-    const activeEntries = filterActiveEntries(entries);
+  LORE_BOOK: (ctx, config, params) => resolveLoreBookSection(ctx, config, params),
 
-    // 求值上下文取本次装配 pass 的草稿（buildAgentMessages 挂在 tplCtx.ejsPass 上）。
-    // 极端路径（外部直接调 resolver / 老测试）无草稿 → 退化为一次性空草稿：求值照跑，写即弃。
-    const ejsCtx = ctx.ejsPass ?? { stats: ctx.statData ?? {}, vars: {}, historyText: '' };
+  /**
+   * {{LORE_BOOK_STATIC}} — 等价于 `{{LORE_BOOK:section=static}}` 的裸名写法。
+   *
+   * 存在理由：参数化写法在 story 预设链路上会被剥离/漏检（preset-loader 与 agent-templates 的
+   * 白名单都按精确 `{{名字}}` 匹配），裸名才能穿过全部正则闸门。行为与参数化形态完全一致：
+   * 共用同一份 pass 级 memo（同 pass 内与 `{{LORE_BOOK_DYNAMIC}}` 同时出现也只求值一次 EJS），
+   * 同样支持 `limit=N`。
+   *
+   * ⚠️ 与参数化拆区同样的固有代价：静/动两区各自成一次宏作用域——
+   * 静态区定义的 `{{setvar}}` 不再对动态区的 `{{getvar}}` 可见。
+   */
+  LORE_BOOK_STATIC: (ctx, config, params) => resolveLoreBookSection(ctx, config, params, 'static'),
 
-    const memo = ctx.ejsPass?.loreRender;
-    let staticText: string;
-    let dynamicText: string;
-    if (memo && memo.agentId === agentId) {
-      // 本 pass 已求值过 —— 直接复用，绝不二次执行 EJS（回退告警也已在首次打过）
-      staticText = memo.staticText;
-      dynamicText = memo.dynamicText;
-    } else {
-      const rendered = renderWorldBookEntries(activeEntries, ejsCtx);
-      staticText = rendered.staticText;
-      dynamicText = rendered.dynamicText;
-      if (ctx.ejsPass) {
-        ctx.ejsPass.loreRender = {
-          agentId,
-          staticText,
-          dynamicText,
-          fallbackEntries: rendered.fallbackEntries,
-        };
-      }
-      if (rendered.fallbackEntries.length > 0) {
-        console.warn(
-          `[LORE_BOOK] agent=${agentId} 有 ${rendered.fallbackEntries.length} 个条目 EJS 失败、已回退原文注入: ` +
-            rendered.fallbackEntries.map((f) => `${bookNameOfUid(f.uid)}#${f.uid}`).join(', '),
-        );
-      }
-    }
-
-    const section = params?.section;
-    let formatted: string;
-    if (section === 'static') formatted = staticText;
-    else if (section === 'dynamic') formatted = dynamicText;
-    else formatted = [staticText, dynamicText].filter(Boolean).join('\n\n');
-
-    // 真机修(2026-07-18): 原 ST 角色卡世界书正文自带 {{setvar/getvar/random}} 宏（MVU 机制遗留）
-    // → 注入前收集 setvar 变量表并剥离定义、替换 getvar 引用、解析 random——
-    //   世界书内自洽的 setvar/getvar 对仍正常工作，孤立宏不再作为噪音喂给 AI（实测 story 系统消息含 25+36 处残留）
-    const { variables: wbVars, stripped } = parseSetvars(formatted);
-    formatted = resolveRandoms(resolveGetvars(stripped, wbVars));
-    if (params?.limit) {
-      const limit = parseInt(params.limit, 10);
-      if (!isNaN(limit) && limit > 0) {
-        return formatted.slice(0, limit);
-      }
-    }
-    return formatted;
-  },
+  /**
+   * {{LORE_BOOK_DYNAMIC}} — 等价于 `{{LORE_BOOK:section=dynamic}}` 的裸名写法。
+   * 存在理由、memo 共享与 `limit=N` 支持同 {{LORE_BOOK_STATIC}}。
+   *
+   * ⚠️ 同样各自成一次宏作用域：本区的 `{{getvar}}` 看不到静态区定义的 `{{setvar}}`。
+   */
+  LORE_BOOK_DYNAMIC: (ctx, config, params) =>
+    resolveLoreBookSection(ctx, config, params, 'dynamic'),
 
   /** {{NARRATIVE}} — 格式化最近对话历史，支持 layers 参数（:slice 已废弃，再不截断） */
   NARRATIVE: (ctx, config, params) => {

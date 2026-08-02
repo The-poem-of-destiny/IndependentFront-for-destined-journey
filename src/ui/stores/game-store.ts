@@ -393,6 +393,65 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
+   * 世界书条目 EJS 求值失败、已回退原文注入的诊断行（工坊 P2 / 能力面 D8）。
+   *
+   * 存在的理由与 `ejsVarsRejections` 同源：**回退是静默的** —— 条目照常进提示词，
+   * 只是没被求值，玩家看到的现象往往是「那段状态面板变成了一堆源码」或者干脆没反应，
+   * 而 `console.warn` 没人会去翻。内存级、随会话丢弃、**整局累计不随轮清空**，
+   * 随 DebugPanel 的 JSON 导出一起被带走。
+   */
+  const ejsFallbacks = ref<
+    Array<{
+      agentId: string;
+      uid: number;
+      bookName?: string;
+      error: string;
+      count: number;
+      lastAt: number;
+    }>
+  >([]);
+
+  /** 记一次 EJS 条目回退（同 agent+uid 累加计数） */
+  function recordEjsFallback(
+    agentId: string,
+    entries: Array<{ uid: number; bookName?: string; error: string }>,
+  ) {
+    for (const e of entries) {
+      const hit = ejsFallbacks.value.find((r) => r.agentId === agentId && r.uid === e.uid);
+      if (hit) {
+        hit.count += 1;
+        hit.lastAt = Date.now();
+        hit.error = e.error; // 留最近一次的错因（同条目换个错更值得看）
+        continue;
+      }
+      ejsFallbacks.value.push({
+        agentId,
+        uid: e.uid,
+        bookName: e.bookName,
+        error: e.error,
+        count: 1,
+        lastAt: Date.now(),
+      });
+    }
+  }
+
+  /**
+   * EJS `ui.log` 的环形缓冲（能力面 §3.11）—— **内容作者自己打的调试输出**。
+   *
+   * 之前它只活在 `GamePipeline` 的私有字段里，`getEjsDebugLog()` 全仓零调用点：
+   * 收集了、没人读。store 这一份是唯一的家，DebugPanel 直接读。
+   */
+  const ejsUiLog = ref<string[]>([]);
+  /** 会话级天花板（在能力面 §3.11 的每 pass 限频之外再加一道） */
+  const EJS_UI_LOG_MAX = 512;
+
+  /** 记一行 EJS `ui.log` 输出（超出上限丢最旧的） */
+  function recordEjsUiLog(line: string) {
+    ejsUiLog.value.push(line);
+    if (ejsUiLog.value.length > EJS_UI_LOG_MAX) ejsUiLog.value.shift();
+  }
+
+  /**
    * 改写本存档的世界书条目启用轴（`metadata.enabledWorldBookEntries`）。
    *
    * ADR-21 的受控例外（P1-09）：这是**纯 UI 辅助字段**，与 `markOpeningPromptConsumed`
@@ -784,6 +843,10 @@ export const useGameStore = defineStore('game', () => {
     clearAgentLog,
     ejsVarsRejections,
     recordEjsVarsRejection,
+    ejsFallbacks,
+    recordEjsFallback,
+    ejsUiLog,
+    recordEjsUiLog,
     persistMessage,
     restoreMessages,
     rollbackOneTurn,

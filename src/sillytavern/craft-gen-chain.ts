@@ -31,7 +31,7 @@ import type {
   CraftIndustry,
   ToolDefinition,
 } from './types';
-import { buildAgentMessages } from './agent-templates';
+import { buildAgentMessagesAsync } from './agent-templates';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
 import { normalizeSlot, normalizeItemType } from './field-enums';
 import type { ToolExecutionContext } from './types';
@@ -190,7 +190,7 @@ export async function callCraftGenAgent(
   };
 
   // 真机修(2026-07-17): configs/worldBooks/presets 透传
-  const messages = buildAgentMessages(
+  const messages = await buildAgentMessagesAsync(
     'craft_gen',
     ctxWithStory,
     request.configs,
@@ -312,7 +312,7 @@ export async function callItemGenForCraft(
     };
 
     // 真机修(2026-07-17): configs/worldBooks/presets 透传
-    const messages = buildAgentMessages(
+    const messages = await buildAgentMessagesAsync(
       'item_gen',
       contextWithCraftData,
       request.configs,

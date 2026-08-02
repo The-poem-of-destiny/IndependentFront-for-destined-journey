@@ -15,6 +15,7 @@ import {
   type CompiledEjsEntry,
   type EjsEvalContext,
 } from './ejs-runtime';
+import { getEjsBackend, LegacyBackend, type EjsPassEntry } from './ejs-backend';
 
 // ========== 加载 ==========
 
@@ -311,27 +312,86 @@ export function clearEjsCompileCache(): void {
  * @param entries 已激活（`filterActiveEntries` 之后）的条目
  * @param ejsCtx 求值上下文；`ejsCtx.vars` 会被就地修改（草稿按序可见）
  */
-export function renderWorldBookEntries(
-  entries: WorldBookEntry[],
-  ejsCtx: EjsEvalContext,
-): WorldBookRenderResult {
+/** 动态区的一格：`needsEval` 为 false 表示只含宏、不进 EJS（原文透传给下游宏剥离） */
+interface DynamicSlot {
+  uid: number;
+  content: string;
+  needsEval: boolean;
+}
+
+/**
+ * 静/动分区（D7）—— **同步与异步两条渲染路径共用**。
+ *
+ * 曾经两边各抄一份：排序、`hasDynamic` 判定、`includes('<%')` 判定、静态区拼接。
+ * 分区规则是缓存前缀稳定性的地基，一旦两条路径判定漂移，同一批条目在同步/异步下
+ * 会落进不同分区 —— 那是**静默**的缓存击穿，没有任何报错。故只留一份。
+ */
+function partitionEntries(entries: WorldBookEntry[]): {
+  staticParts: string[];
+  slots: DynamicSlot[];
+} {
   const staticParts: string[] = [];
-  const dynamicParts: string[] = [];
-  const fallbackEntries: Array<{ uid: number; error: string }> = [];
-
-  const sorted = [...entries].sort((a, b) => a.order - b.order);
-
-  for (const entry of sorted) {
+  const slots: DynamicSlot[] = [];
+  for (const entry of [...entries].sort((a, b) => a.order - b.order)) {
     const content = entry.content ?? '';
-
     if (!hasDynamic(content)) {
       staticParts.push(content);
       continue;
     }
+    slots.push({ uid: entry.uid, content, needsEval: content.includes('<%') });
+  }
+  return { staticParts, slots };
+}
 
-    // 只含 {{random}}/{{getvar}} 无 EJS → 不求值，原文进动态区交给宏剥离
-    if (!content.includes('<%')) {
+/** 结果组装 —— 两条路径共用（段间分隔符是提示词字节的一部分，必须同口径） */
+function assembleResult(
+  staticParts: string[],
+  dynamicParts: string[],
+  fallbackEntries: Array<{ uid: number; error: string }>,
+): WorldBookRenderResult {
+  return {
+    staticText: staticParts.join('\n\n'),
+    dynamicText: dynamicParts.join('\n\n'),
+    fallbackEntries,
+  };
+}
+
+export function renderWorldBookEntries(
+  entries: WorldBookEntry[],
+  ejsCtx: EjsEvalContext,
+): WorldBookRenderResult {
+  const { staticParts, slots } = partitionEntries(entries);
+  const dynamicParts: string[] = [];
+  const fallbackEntries: Array<{ uid: number; error: string }> = [];
+
+  // 🔴 同步路径的 fail-closed 闸门（2026-08-01 修 F3）
+  //
+  // 本函数的求值走 `compileEjsEntry`/`executeEjsEntry` —— **宿主 realm 的 `new Function`**：
+  // 没有中断、没有执行预算、`Object.constructor("return globalThis")()` 能拿回真全局（SEC-02）。
+  // 生产一旦通过 `installProductionEjsBackend()` 切到隔离/停用后端，这条同步路必须**跟着停**，
+  // 否则任何还在调同步装配的入口（历史上就有：捏人页大纲）都会绕开隔离，
+  // 而应用对外仍报告「已隔离」——那比没有隔离更糟。
+  //
+  // 判据取**当前后端身份**而非调用方：只有后端本身就是 `LegacyBackend`（测试默认值，
+  // 本就没有边界可破）时才允许宿主求值；QuickJS / fail-closed 一律按 D8 原文注入并记回退。
+  // 生产装配请走 `buildAgentMessagesAsync` —— 它预渲染出 memo，`{{LORE_BOOK}}` 只挑段不求值，
+  // 根本不会落到这里。
+  const backendName = getEjsBackend().name;
+  const hostEvalAllowed = getEjsBackend() instanceof LegacyBackend;
+
+  for (const slot of slots) {
+    const content = slot.content;
+    const entry = { uid: slot.uid };
+
+    if (!slot.needsEval) {
       dynamicParts.push(content);
+      continue;
+    }
+
+    if (!hostEvalAllowed) {
+      const error = `EJS 未求值（同步路径不在宿主 realm 求值；当前后端 ${backendName}）`;
+      dynamicParts.push(content);
+      fallbackEntries.push({ uid: entry.uid, error });
       continue;
     }
 
@@ -353,9 +413,68 @@ export function renderWorldBookEntries(
     }
   }
 
-  return {
-    staticText: staticParts.join('\n\n'),
-    dynamicText: dynamicParts.join('\n\n'),
-    fallbackEntries,
-  };
+  return assembleResult(staticParts, dynamicParts, fallbackEntries);
+}
+
+/**
+ * 异步预渲染 —— **生产装配路径用这个**（能力面设计 §11 切片 T1）。
+ *
+ * 与同步版 `renderWorldBookEntries` 的差别只有两点，其余（静动分层、保序、D8 回退）完全一致：
+ *
+ * 1. 走 `EjsBackend.runPass` → 能跑 `await getwi(...)` 这类 **async 条目**（同步版对它们直接回退），
+ *    也是将来切 QuickJS 的唯一接缝。
+ * 2. 整个 pass 一次交给后端（不是逐条目来回），保住「前条目写→后条目立即可见」的同时，
+ *    把跨边界编组从 N 次压到 1 次。
+ *
+ * 调用方拿到结果后应缓存进 `ctx.ejsPass.loreRender`，让**同步的** `{{LORE_BOOK}}` resolver
+ * 只挑段不求值 —— 这样 `PlaceholderResolver` / `resolveTemplate` 的签名一个字都不用改。
+ */
+export async function prerenderWorldBookEntries(
+  entries: WorldBookEntry[],
+  ejsCtx: EjsEvalContext,
+): Promise<WorldBookRenderResult> {
+  // 分区与同步版共用（见 partitionEntries）；本函数只多一件事：动态区整批交给后端
+  const { staticParts, slots: dynamicSlots } = partitionEntries(entries);
+  const fallbackEntries: Array<{ uid: number; error: string }> = [];
+
+  const toEval: EjsPassEntry[] = dynamicSlots
+    .filter((s) => s.needsEval)
+    .map((s) => ({ uid: s.uid, content: s.content }));
+
+  const backend = getEjsBackend();
+  const outcomes = toEval.length > 0 ? await backend.runPass(toEval, ejsCtx) : [];
+
+  // 🔴 按**下标**回填，绝不按 uid 建 Map（2026-08-01 修 F4）
+  //
+  // uid 只在单本书内唯一：内置书是 1–509，而 ST 导出的用户书 entries 是每本各自 0..N-1，
+  // 设置页导入时又用 `uid || Date.now()` 补号 —— 跨书撞号是常态而非意外。
+  // 一旦按 uid 建 Map，撞号的两条里会有一条的渲染结果被注入两次、另一条被静默吞掉，
+  // 且**没有任何报错**（同步旧路径从不按 uid 寻址，这是异步路引入的回归）。
+  //
+  // 位置对齐的依据是 `EjsBackend.runPass` 的契约：条目按序执行、返回与入参一一对应且同序。
+  // 万一某后端违约（长度对不上），下面的 `!outcome` 分支照 D8 原文注入并留痕。
+  const dynamicParts: string[] = [];
+  let evalIndex = 0;
+  for (const slot of dynamicSlots) {
+    if (!slot.needsEval) {
+      dynamicParts.push(slot.content);
+      continue;
+    }
+    const outcome = outcomes[evalIndex++];
+    if (!outcome) {
+      // 后端漏了某条（不该发生）→ 按 D8 原文注入，并留痕
+      dynamicParts.push(slot.content);
+      fallbackEntries.push({ uid: slot.uid, error: `后端 ${backend.name} 未返回该条目结果` });
+      continue;
+    }
+    dynamicParts.push(outcome.text);
+    if (!outcome.ok) {
+      fallbackEntries.push({ uid: slot.uid, error: outcome.error ?? '未知错误' });
+      console.warn(
+        `[worldbook] EJS 失败，回退原文注入 uid=${slot.uid}（后端 ${backend.name}）: ${outcome.error}`,
+      );
+    }
+  }
+
+  return assembleResult(staticParts, dynamicParts, fallbackEntries);
 }

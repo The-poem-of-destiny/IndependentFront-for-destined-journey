@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildStatData } from './stat-projection';
 import { createDefaultCharacterState } from './types';
-import { formatGameTime, type GameTime } from './time-system';
+import { formatGameTime, getTimeOfDay, type GameTime } from './time-system';
 import type { CharacterState } from './types';
 
 /** 一个数值全部互不相同的玩家角色——任何字段错位都会被断言抓到 */
@@ -70,10 +70,146 @@ describe('buildStatData — 完整映射', () => {
           精神: 9,
           属性点: 4,
         },
+        // T3 扩面：默认角色的这几项都是空集，但**键必须在** ——
+        // 创作者写 `stats.主角.背包.some(...)` 不该因为背包空就炸
+        金钱: 0,
+        背包: [],
+        装备: {},
+        技能: [],
+        状态效果: [],
+        登神长阶: { 已开启: false, 要素: [], 权能: [], 法则: [], 神位: '', 神国: '' },
       },
       命运点数: 7,
-      世界: { 时间: formatGameTime(TIME) },
+      世界: { 时间: formatGameTime(TIME), 时段: getTimeOfDay(TIME) },
     });
+  });
+
+  it('T3 扩面：背包/装备/技能/状态效果 逐字段投影', () => {
+    const player = makePlayer({
+      money: 250,
+      inventory: [
+        {
+          id: 'i1',
+          name: '青铜钥匙',
+          description: '锈迹斑斑',
+          quantity: 2,
+          type: 'quest',
+          rarity: '稀有',
+        } as never,
+        { id: 'i2', name: '铁剑', quantity: 1, equippedSlot: '武器' } as never,
+      ],
+      skills: [
+        {
+          id: 's1',
+          name: '斩击',
+          description: '劈砍',
+          type: 'active',
+          level: 3,
+          cooldown: 2,
+        } as never,
+        { id: 's2', name: '坚韧', description: '被动减伤', type: 'passive' } as never,
+      ],
+      statusEffects: [
+        {
+          id: 'e1',
+          name: '中毒',
+          description: '每回合掉血',
+          category: '减益',
+          stacks: 2,
+          remainingTime: 3,
+          timeUnit: '回合',
+        } as never,
+      ],
+    });
+    const stats = buildStatData({ characters: [player] });
+    const 主角 = stats['主角'];
+
+    expect(主角['金钱']).toBe(250);
+    expect(主角['背包']).toEqual([
+      { 名字: '青铜钥匙', 类型: 'quest', 品质: '稀有', 数量: 2, 装备槽位: '', 描述: '锈迹斑斑' },
+      { 名字: '铁剑', 类型: '', 品质: '普通', 数量: 1, 装备槽位: '武器', 描述: '' },
+    ]);
+    // 装备是背包的索引视图，不是第二份真源
+    expect(主角['装备']).toEqual({ 武器: '铁剑' });
+    expect(主角['技能']).toEqual([
+      { 名字: '斩击', 类型: '主动', 等级: 3, 描述: '劈砍', 剩余冷却: 2 },
+      { 名字: '坚韧', 类型: '被动', 等级: 1, 描述: '被动减伤', 剩余冷却: 0 },
+    ]);
+    expect(主角['状态效果']).toEqual([
+      { 名字: '中毒', 分类: '减益', 层数: 2, 剩余时间: 3, 时间单位: '回合', 描述: '每回合掉血' },
+    ]);
+  });
+
+  it('T3：状态效果的 剩余时间 保留 null（= 永久），不塞 0/-1 特殊值', () => {
+    const player = makePlayer({
+      statusEffects: [
+        {
+          id: 'e1',
+          name: '祝福',
+          description: '',
+          category: '增益',
+          stacks: 1,
+          remainingTime: null,
+          timeUnit: '回合',
+        } as never,
+      ],
+    });
+    expect(buildStatData({ characters: [player] })['主角']['状态效果'][0]['剩余时间']).toBeNull();
+  });
+
+  it('T3：不投效果编译输入（effects/scripts/modifiers/automata 不是对创作者的承诺）', () => {
+    const player = makePlayer({
+      inventory: [
+        {
+          id: 'i1',
+          name: '魔剑',
+          quantity: 1,
+          effects: { 攻击: '+5' },
+          scripts: { init: 'x' },
+          modifiers: [{ k: 'v' }],
+          automata: [{ a: 1 }],
+        } as never,
+      ],
+    });
+    const item = buildStatData({ characters: [player] })['主角']['背包'][0];
+    for (const forbidden of ['effects', 'scripts', 'modifiers', 'automata', 'id']) {
+      expect(item).not.toHaveProperty(forbidden);
+    }
+  });
+
+  it('T3 队伍：在场同伴进 stats.队伍，怪物与倒地者不进', () => {
+    const ally = createDefaultCharacterState({
+      id: 'a1',
+      type: 'npc',
+      name: '艾波丽斯',
+      hp: 50,
+      maxHp: 60,
+      level: 9,
+      tierName: '中坚',
+      race: '智人种',
+    });
+    const downed = createDefaultCharacterState({ id: 'a2', type: 'npc', name: '倒地者', hp: 0 });
+    const monster = createDefaultCharacterState({ id: 'm1', type: 'monster', name: '狼', hp: 30 });
+    const stats = buildStatData({ characters: [makePlayer(), ally, downed, monster] });
+
+    expect(stats['队伍']).toEqual([
+      { 名字: '艾波丽斯', 生命值: 50, 生命值上限: 60, 等级: 9, 生命层级: '中坚', 种族: '智人种' },
+    ]);
+  });
+
+  it('T3 世界：回合 / 天气 / 地点 各自独立缺省', () => {
+    const player = makePlayer({ location: '晨曦镇' });
+    const full = buildStatData({ characters: [player], gameTime: TIME, turn: 12, weather: '小雨' });
+    expect(full['世界']).toEqual({
+      时间: formatGameTime(TIME),
+      时段: getTimeOfDay(TIME),
+      回合: 12,
+      天气: '小雨',
+      地点: '晨曦镇',
+    });
+
+    // 只有回合时也建 世界 键（不再是「无 gameTime 就没有世界」）
+    expect(buildStatData({ characters: [], turn: 3 })['世界']).toEqual({ 回合: 3 });
   });
 
   it('世界.时间 用引擎既有规范串，不自造格式', () => {
@@ -167,8 +303,8 @@ describe('buildStatData — 深拷贝隔离', () => {
   });
 });
 
-describe('buildStatData — 范围栅栏（D4 钉死，§5 挂起项不得投影）', () => {
-  it('主角 只含约定的 11 个键，不含背包/技能/装备/状态效果/任务/关系', () => {
+describe('buildStatData — 范围栅栏（能力面 §3.1 T3 扩面口径）', () => {
+  it('主角 只含约定的 17 个键；任务/关系/位置 仍不在 stats 内', () => {
     const player = makePlayer({
       inventory: [{ id: 'i1', name: '铁剑' } as never],
       skills: [{ id: 's1', name: '斩击' } as never],
@@ -189,9 +325,17 @@ describe('buildStatData — 范围栅栏（D4 钉死，§5 挂起项不得投影
         '累计经验值',
         '升级所需经验',
         '属性',
+        // —— T3 扩面（能力面 §3.1）——
+        '金钱',
+        '背包',
+        '装备',
+        '技能',
+        '状态效果',
+        '登神长阶',
       ].sort(),
     );
-    for (const forbidden of ['背包', '技能', '装备', '状态效果', '任务', '关系', '金钱', '位置']) {
+    // 仍然不投的：任务/关系走 quest / char 命名空间；位置在 世界.地点
+    for (const forbidden of ['任务', '关系', '位置', '任务列表', '关系列表']) {
       expect(stats['主角']).not.toHaveProperty(forbidden);
     }
   });

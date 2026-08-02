@@ -896,7 +896,7 @@ export const useCreateStore = defineStore('create', () => {
   if (typeof localStorage !== 'undefined') tryRestoreDraft();
 
   // ═══════════════════════════════════════════════════════
-  // 剧情大纲生成 — 捏人页走模板系统 (buildAgentMessages)
+  // 剧情大纲生成 — 捏人页走模板系统 (buildAgentMessagesAsync)
   // ═══════════════════════════════════════════════════════
 
   /** 端点解析（对齐 game-pipeline.buildEndpoints: agentModels 存 API 池 id，ApiEntry.model → defaultModel） */
@@ -1051,7 +1051,7 @@ export const useCreateStore = defineStore('create', () => {
     }
   }
 
-  /** 核心生成循环: 通过模板系统 buildAgentMessages 构建上下文，selfCritique.score < 6 时重试（最多 2 次调用） */
+  /** 核心生成循环: 通过模板系统 buildAgentMessagesAsync 构建上下文，selfCritique.score < 6 时重试（最多 2 次调用） */
   async function runOutlineGeneration(initialUserMessage: string): Promise<boolean> {
     plotGenerationError.value = null;
     const endpoint = resolvePlotOutlineEndpoint();
@@ -1065,7 +1065,11 @@ export const useCreateStore = defineStore('create', () => {
       const settings = useSettingsStore().settings;
 
       // 加载模板系统依赖: Agent 配置 + 世界书
-      const { buildAgentMessages } = await import('@engine/agent-templates');
+      // 🔴 必须用 **Async** 版（2026-08-01 修 F3）：plot_outline 可见的世界书里有 22 条含 EJS 的条目，
+      //    同步的 `buildAgentMessages` 会在宿主 realm 直接 `new Function` 求值它们 ——
+      //    绕开 `getEjsBackend()` 的隔离后端（无中断、无预算、构造器可逃逸），
+      //    而应用此时对外报告的是「已隔离」。异步版先预渲染再灌 memo，EJS 只在后端里跑。
+      const { buildAgentMessagesAsync } = await import('@engine/agent-templates');
       const agentConfigs = await loadOutlineAgentConfigs();
       const worldBooks = await loadPlotOutlineWorldBooks(agentConfigs);
 
@@ -1088,7 +1092,7 @@ export const useCreateStore = defineStore('create', () => {
         PLOT_EVENTS: buildOutlinePlotSettingsText(),
       };
 
-      const baseMessages = buildAgentMessages(
+      const baseMessages = await buildAgentMessagesAsync(
         'plot_outline',
         ctx,
         agentConfigs,

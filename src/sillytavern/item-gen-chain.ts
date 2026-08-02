@@ -35,7 +35,7 @@ import type {
   StatePatch,
   ToolDefinition,
 } from './types';
-import { buildAgentMessages } from './agent-templates';
+import { buildAgentMessagesAsync } from './agent-templates';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
 import { normalizeSlot } from './field-enums';
 import type { ToolExecutionContext } from './types';
@@ -180,7 +180,7 @@ async function callItemGenForRequest(
 
   try {
     // 真机修(2026-07-17): configs/worldBooks/presets 透传 — 此前恒 undefined（systemPrompt 退化 stub）
-    const messages = buildAgentMessages(
+    const messages = await buildAgentMessagesAsync(
       'item_gen',
       contextWithStory,
       request.configs,
