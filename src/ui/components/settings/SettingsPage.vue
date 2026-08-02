@@ -507,8 +507,9 @@ function getStoryContextTemplate(): string {
   return [
     '{{AGENT.MEMORY_RECALL}}',
     '{{AGENT.PLOT_PRE_CHECK}}',
-    '{{LORE_BOOK}}',
+    '{{LORE_BOOK_STATIC}}',
     '{{CHARACTER_STATE}}',
+    '{{LORE_BOOK_DYNAMIC}}',
     '{{GAME_TIME}}',
     '{{NARRATIVE}}',
     '{{USER_INPUT}}',

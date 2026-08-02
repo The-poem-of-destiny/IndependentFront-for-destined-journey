@@ -1315,7 +1315,8 @@ describe('getDefaultTemplate', () => {
     expect(tmpl).toContain('{{SYS_PROMPT}}');
     expect(tmpl).toContain('{{AGENT.MEMORY_RECALL}}');
     expect(tmpl).toContain('{{AGENT.PLOT_PRE_CHECK}}');
-    expect(tmpl).toContain('{{LORE_BOOK}}');
+    expect(tmpl).toContain('{{LORE_BOOK_STATIC}}');
+    expect(tmpl).toContain('{{LORE_BOOK_DYNAMIC}}');
     expect(tmpl).toContain('{{CHARACTER_STATE}}');
     expect(tmpl).toContain('{{GAME_TIME}}');
     expect(tmpl).toContain('{{NARRATIVE}}');
@@ -1342,7 +1343,8 @@ describe('getDefaultTemplate', () => {
     expect(tmpl).toContain('{{SYS_PROMPT}}');
     expect(tmpl).toContain('{{AGENT.STORY}}');
     expect(tmpl).toContain('{{CHARACTER_STATE}}');
-    expect(tmpl).toContain('{{LORE_BOOK}}');
+    expect(tmpl).toContain('{{LORE_BOOK_STATIC}}');
+    expect(tmpl).toContain('{{LORE_BOOK_DYNAMIC}}');
   });
 
   it('returns non-empty template for vars_update', () => {
@@ -1377,7 +1379,8 @@ describe('getDefaultTemplate', () => {
     expect(tmpl).toContain('<剧情配置>');
     expect(tmpl).toContain('{{PLOT_EVENTS}}');
     expect(tmpl).toContain('<世界设定>');
-    expect(tmpl).toContain('{{LORE_BOOK}}');
+    expect(tmpl).toContain('{{LORE_BOOK_STATIC}}');
+    expect(tmpl).toContain('{{LORE_BOOK_DYNAMIC}}');
     expect(tmpl).toContain('<用户指令>');
     expect(tmpl).toContain('{{USER_INPUT}}');
     expect(tmpl).toContain('<!--');
@@ -1390,7 +1393,8 @@ describe('getDefaultTemplate', () => {
     expect(tmpl).toContain('{{CRAFT_REQUEST}}');
     expect(tmpl).toContain('{{INVENTORY}}');
     expect(tmpl).toContain('{{CHARACTER_STATE}}');
-    expect(tmpl).toContain('{{LORE_BOOK}}');
+    expect(tmpl).toContain('{{LORE_BOOK_STATIC}}');
+    expect(tmpl).toContain('{{LORE_BOOK_DYNAMIC}}');
   });
 
   it('returns non-empty template for char_gen', () => {
@@ -1398,7 +1402,8 @@ describe('getDefaultTemplate', () => {
     expect(tmpl).toContain('{{SYS_PROMPT}}');
     expect(tmpl).toContain('{{CHAR_DETECT}}');
     expect(tmpl).toContain('{{CHARACTER_STATE}}');
-    expect(tmpl).toContain('{{LORE_BOOK}}');
+    expect(tmpl).toContain('{{LORE_BOOK_STATIC}}');
+    expect(tmpl).toContain('{{LORE_BOOK_DYNAMIC}}');
   });
 
   it('returns non-empty template for item_gen', () => {
