@@ -421,6 +421,28 @@ describe('buildAgentMessages — SYS_PROMPT assembly', () => {
     // 去重: template 已简化为 {{SYS_PROMPT}}，不再追加重复的 {{USER_INPUT}} → 用户输入只出现一次
     expect(content.split('探索古墓').length - 1).toBe(1);
   });
+
+  // 裸名分区占位符必须进 STORY_PRESET_PLACEHOLDER_RE，否则只用它们的预设不走预解析、原样裸奔给 AI
+  it('story + 预设只含裸名分区占位符 → 仍判定为规范预设并预解析', () => {
+    const ctx = makeContext({ userInput: '探索古墓' });
+    const cfg = makeCfg('story', { presetId: 'split-preset' });
+    const presets: AgentPreset[] = [
+      {
+        id: 'split-preset',
+        name: 'Split Preset',
+        fixedSystem:
+          '核心提示词。\n<静态区>{{LORE_BOOK_STATIC}}</静态区>\n<动态区>{{LORE_BOOK_DYNAMIC}}</动态区>',
+        fixedExamples: '',
+      } as AgentPreset,
+    ];
+    const messages = buildAgentMessages('story', ctx, [cfg], [], presets);
+    expect(messages).not.toBeNull();
+    const content = messages![0].content;
+    // 预解析已把裸名占位符就地渲染（无世界书 → 渲染成空），不残留裸占位符
+    expect(content).not.toContain('{{LORE_BOOK_STATIC}}');
+    expect(content).not.toContain('{{LORE_BOOK_DYNAMIC}}');
+    expect(content).toContain('核心提示词。');
+  });
 });
 
 // ========== Phase 10: 单消息返回格式 ==========

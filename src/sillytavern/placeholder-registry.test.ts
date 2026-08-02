@@ -1121,6 +1121,134 @@ describe('LORE_BOOK EJS 分层与求值', () => {
       expect(draftB.计数).toBe(1);
     });
   });
+
+  // 裸名分区占位符 —— 等价于 {{LORE_BOOK:section=static|dynamic}}，但能穿过预设链路的精确名白名单
+  describe('{{LORE_BOOK_STATIC}} / {{LORE_BOOK_DYNAMIC}} 裸名分区', () => {
+    it('LORE_BOOK_STATIC 只返回静态区', () => {
+      const result = PLACEHOLDER_REGISTRY['LORE_BOOK_STATIC'](ctxWithPass(), ejsConfig());
+      expect(result).toContain('白曜城是北方重镇。');
+      expect(result).not.toContain('主角生命值');
+      expect(result).not.toContain('坏块');
+    });
+
+    it('LORE_BOOK_DYNAMIC 只返回动态区（求值结果 + 回退原文）', () => {
+      const result = PLACEHOLDER_REGISTRY['LORE_BOOK_DYNAMIC'](ctxWithPass(), ejsConfig());
+      expect(result).not.toContain('白曜城');
+      expect(result).toContain('主角生命值：77');
+      expect(result).toContain('坏块：<% if ( %>');
+    });
+
+    it('与参数化写法逐字等价', () => {
+      expect(PLACEHOLDER_REGISTRY['LORE_BOOK_STATIC'](ctxWithPass(), ejsConfig())).toBe(
+        PLACEHOLDER_REGISTRY['LORE_BOOK'](ctxWithPass(), ejsConfig(), { section: 'static' }),
+      );
+      expect(PLACEHOLDER_REGISTRY['LORE_BOOK_DYNAMIC'](ctxWithPass(), ejsConfig())).toBe(
+        PLACEHOLDER_REGISTRY['LORE_BOOK'](ctxWithPass(), ejsConfig(), { section: 'dynamic' }),
+      );
+    });
+
+    it('钉死的分区不被 section 参数翻转', () => {
+      const result = PLACEHOLDER_REGISTRY['LORE_BOOK_STATIC'](ctxWithPass(), ejsConfig(), {
+        section: 'dynamic',
+      });
+      expect(result).toContain('白曜城是北方重镇。');
+      expect(result).not.toContain('主角生命值');
+    });
+
+    it('limit 参数对裸名同样生效', () => {
+      const full = PLACEHOLDER_REGISTRY['LORE_BOOK_STATIC'](ctxWithPass(), ejsConfig());
+      const limited = PLACEHOLDER_REGISTRY['LORE_BOOK_STATIC'](ctxWithPass(), ejsConfig(), {
+        limit: '3',
+      });
+      expect(limited).toBe(full.slice(0, 3));
+      expect(limited.length).toBe(3);
+    });
+
+    it('同一 pass 内两个裸名共用 memo —— 非幂等 EJS 只求值一次', () => {
+      // 换成含计数器写的书（与上面 memo 组同一套 fixture 语义）
+      setPlaceholderGlobals(
+        [
+          {
+            id: 'wb_ejs',
+            name: 'EJS 测试书',
+            partition: 'world_setting',
+            entries: [
+              {
+                uid: 60,
+                name: '静态条目',
+                content: '白曜城是北方重镇。',
+                enabled: true,
+                key: [],
+                keysecondary: [],
+                selectiveLogic: 0,
+                order: 1,
+                position: 0,
+              },
+              {
+                uid: 61,
+                name: '计数条目',
+                content: '<% setMessageVar("计数", (getMessageVar("计数") ?? 0) + 1) %>次数已记',
+                enabled: true,
+                key: [],
+                keysecondary: [],
+                selectiveLogic: 0,
+                order: 2,
+                position: 0,
+              },
+            ],
+          },
+        ],
+        [mockConfig({ agentId: 'story', worldBookIds: ['wb_ejs'] })],
+      );
+      const draft: Record<string, any> = {};
+      const ctx = mockCtx({ ejsPass: { stats: {}, vars: draft, historyText: '' } });
+      const out = resolveTemplate(
+        '前：{{LORE_BOOK_STATIC}}\n后：{{LORE_BOOK_DYNAMIC}}',
+        'story',
+        ctx,
+        ejsConfig(),
+      );
+      expect(draft.计数).toBe(1);
+      expect(out).toContain('白曜城是北方重镇。');
+      expect(out).toContain('次数已记');
+      expect(out.indexOf('白曜城')).toBeLessThan(out.indexOf('次数已记'));
+    });
+
+    it('裸名与参数化混用也共用同一份 memo', () => {
+      setPlaceholderGlobals(
+        [
+          {
+            id: 'wb_ejs',
+            name: 'EJS 测试书',
+            partition: 'world_setting',
+            entries: [
+              {
+                uid: 62,
+                name: '计数条目',
+                content: '<% setMessageVar("计数", (getMessageVar("计数") ?? 0) + 1) %>次数已记',
+                enabled: true,
+                key: [],
+                keysecondary: [],
+                selectiveLogic: 0,
+                order: 1,
+                position: 0,
+              },
+            ],
+          },
+        ],
+        [mockConfig({ agentId: 'story', worldBookIds: ['wb_ejs'] })],
+      );
+      const draft: Record<string, any> = {};
+      const ctx = mockCtx({ ejsPass: { stats: {}, vars: draft, historyText: '' } });
+      resolveTemplate(
+        '{{LORE_BOOK_DYNAMIC}}\n{{LORE_BOOK:section=dynamic}}\n{{LORE_BOOK}}',
+        'story',
+        ctx,
+        ejsConfig(),
+      );
+      expect(draft.计数).toBe(1);
+    });
+  });
 });
 
 // ========== Chain Placeholders (localParams) ==========

@@ -338,6 +338,18 @@ const ALL_PLACEHOLDER_META: PlaceholderBadge[] = [
     category: '自身',
   },
   { key: 'LORE_BOOK', color: '#4caf50', desc: '世界书 — keyword 激活条目', category: '世界' },
+  {
+    key: 'LORE_BOOK_STATIC',
+    color: '#4caf50',
+    desc: '世界书静态区 — 字节稳定条目',
+    category: '世界',
+  },
+  {
+    key: 'LORE_BOOK_DYNAMIC',
+    color: '#4caf50',
+    desc: '世界书动态区 — 含 EJS，装配时求值',
+    category: '世界',
+  },
   { key: 'NARRATIVE', color: '#ab47bc', desc: '对话历史 — 最近 N 轮消息', category: '叙事' },
   { key: 'USER_INPUT', color: '#ab47bc', desc: '用户输入 — 当前轮输入', category: '叙事' },
   { key: 'CHARACTER_STATE', color: '#ff9800', desc: '角色状态 — 属性/装备/技能', category: '角色' },
@@ -412,6 +424,8 @@ function getPlaceholdersForAgent(agentId: string): PlaceholderBadge[] {
     const commonKeys = [
       'SYS_PROMPT',
       'LORE_BOOK',
+      'LORE_BOOK_STATIC',
+      'LORE_BOOK_DYNAMIC',
       'NARRATIVE',
       'USER_INPUT',
       'CHARACTER_STATE',

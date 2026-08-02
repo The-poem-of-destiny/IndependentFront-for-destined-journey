@@ -51,6 +51,16 @@ const PLACEHOLDER_META: Record<string, PlaceholderMeta> = {
     color: 'var(--color-success, var(--theme-success))',
     category: 'world',
   },
+  LORE_BOOK_STATIC: {
+    label: '世界书静态区 — 字节稳定的条目（等价 LORE_BOOK:section=static）',
+    color: 'var(--color-success, var(--theme-success))',
+    category: 'world',
+  },
+  LORE_BOOK_DYNAMIC: {
+    label: '世界书动态区 — 含 EJS、装配时求值（等价 LORE_BOOK:section=dynamic）',
+    color: 'var(--color-success, var(--theme-success))',
+    category: 'world',
+  },
   GAME_TIME: {
     label: '世界状态 — 时间/位置/天气/纪元',
     color: 'var(--color-success, var(--theme-success))',

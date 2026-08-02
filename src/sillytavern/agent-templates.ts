@@ -684,7 +684,7 @@ const PLOT_AGENT_IDS = new Set(['plot_pre_check', 'plot_post_check', 'plot_outli
  * 未命中（纯 ST 预设 / 测试桩）→ 走默认 template 追加兜底。
  */
 const STORY_PRESET_PLACEHOLDER_RE =
-  /\{\{(?:LORE_BOOK|USER_INPUT|CHARACTER_STATE|GAME_TIME|NARRATIVE|AGENT\.MEMORY_RECALL|AGENT\.PLOT_PRE_CHECK)\}\}/;
+  /\{\{(?:LORE_BOOK|LORE_BOOK_STATIC|LORE_BOOK_DYNAMIC|USER_INPUT|CHARACTER_STATE|GAME_TIME|NARRATIVE|AGENT\.MEMORY_RECALL|AGENT\.PLOT_PRE_CHECK)\}\}/;
 
 /**
  * Phase 10: Build agent messages using the placeholder template system.
@@ -753,7 +753,11 @@ export function buildAgentMessages(
     // Story Agent: assemble from preset
     const preset = getPreset(config.presetId, presets);
     if (preset) {
-      // 传 '' 阻止 DEFAULT_STORY_CONTEXT_BLOCK 注入 — 数据由预设内部占位符或外层 template 提供。
+      // ⚠️ 传 '' 并**不能**阻止默认块：assemblePresetContent 内部是
+      //    `defaultContextBlock || DEFAULT_STORY_CONTEXT_BLOCK`，空串会落回默认块。
+      //    实际行为：预设自带占位符 → 直接返回原文，不追加；预设不带占位符 → 追加
+      //    DEFAULT_STORY_CONTEXT_BLOCK，随后下面的检测必然命中、走预解析把它就地渲染。
+      //    两条路都不会重复渲染同一段数据，故结果正确，只是这里的 '' 是无效参数。
       const presetContent = assemblePresetContent(preset, '');
       storyPresetHasPlaceholders = STORY_PRESET_PLACEHOLDER_RE.test(presetContent);
       if (storyPresetHasPlaceholders) {

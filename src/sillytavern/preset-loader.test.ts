@@ -13,6 +13,7 @@ import {
   resolveRandoms,
   replaceCharUser,
   preprocessEntry,
+  preprocessPresetForPreview,
   hasSTMacros,
   DEFAULT_STORY_CONTEXT_BLOCK,
 } from './preset-loader';
@@ -371,6 +372,39 @@ describe('preprocessEntry', () => {
     const result = preprocessEntry('{{setvar::抢话::}}{{setvar::转述::}}text', {});
     expect(result.trim()).toBe('text');
   });
+
+  // 裸名分区占位符必须穿过第 7 步的精确名白名单，否则预设里写了会被整条剥成空字符串
+  it('preserves {{LORE_BOOK_STATIC}} / {{LORE_BOOK_DYNAMIC}}', () => {
+    const result = preprocessEntry(
+      '{{//注释}}静态：{{LORE_BOOK_STATIC}}\n动态：{{LORE_BOOK_DYNAMIC}}\n{{LORE_BOOK}}',
+      {},
+    );
+    expect(result).toContain('{{LORE_BOOK_STATIC}}');
+    expect(result).toContain('{{LORE_BOOK_DYNAMIC}}');
+    expect(result).toContain('{{LORE_BOOK}}');
+  });
+});
+
+describe('preprocessPresetForPreview', () => {
+  it('preserves {{LORE_BOOK_STATIC}} / {{LORE_BOOK_DYNAMIC}} in preview', () => {
+    const preset = makePreset({ fixedSystem: '', fixedExamples: '' });
+    (preset as any).settings = {
+      prompts: [
+        {
+          name: 'ctx',
+          content: '{{//注释}}{{LORE_BOOK_STATIC}}\n{{LORE_BOOK_DYNAMIC}}\n{{未知占位符}}',
+          enabled: true,
+          role: 'system',
+          injection_order: 0,
+        },
+      ],
+    };
+    const result = preprocessPresetForPreview(preset);
+    expect(result).toContain('{{LORE_BOOK_STATIC}}');
+    expect(result).toContain('{{LORE_BOOK_DYNAMIC}}');
+    expect(result).not.toContain('{{未知占位符}}');
+    expect(result).not.toContain('{{//');
+  });
 });
 
 describe('hasSTMacros', () => {
@@ -554,5 +588,27 @@ describe('assemblePresetContent (Phase 10 extended)', () => {
     };
     const result = assemblePresetContent(preset);
     expect(result).toMatch(/Pick: [ABCD]/);
+  });
+
+  // hasOurPlaceholders 曾用 `LORE_BOOK\b`，`\b` 在 `_` 前不成立 → 裸名分区占位符检测不到、被误追加默认块
+  it('只写裸名分区占位符的预设被认作「已有占位符」，不追加默认块', () => {
+    const preset = makePreset({ fixedSystem: '', fixedExamples: '' });
+    (preset as any).settings = {
+      prompts: [
+        {
+          name: 'ctx',
+          content: '静态：{{LORE_BOOK_STATIC}}\n动态：{{LORE_BOOK_DYNAMIC}}',
+          enabled: true,
+          role: 'system',
+          injection_order: 0,
+        },
+      ],
+    };
+    const result = assemblePresetContent(preset);
+    expect(result).toContain('{{LORE_BOOK_STATIC}}');
+    expect(result).toContain('{{LORE_BOOK_DYNAMIC}}');
+    expect(result).not.toContain(DEFAULT_STORY_CONTEXT_BLOCK);
+    expect(result).not.toContain('{{NARRATIVE}}');
+    expect(result).not.toContain('{{USER_INPUT}}');
   });
 });
