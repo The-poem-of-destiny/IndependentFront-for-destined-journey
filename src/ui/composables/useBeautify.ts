@@ -2,19 +2,12 @@
  * useBeautify — 文本美化 composable（从 ChatFlow.vue 抽出，CombatMessageFlow 复用）
  *
  * 职责: 合并预设规则 + 用户规则 → processRules 美化 → 段落包裹 <p>。
- * autoEnable 解析以当前存档为准（命定核心 uid + 启用角色名 + 世界书），
- * 复用引擎侧完整的 `resolveAutoEnable`（覆盖 worldBookIds / worldBookEntryUids /
- * characterNames 三维），不再手写残缺解析（2026-08-02 修：旧版只看 uids，
- * 导致 `characterNames` 驱动的角色标签美化如 `<dalian>` 永不激活）。
+ * autoEnable 解析以当前存档为准（命定核心/启用角色的世界书条目 uid），
+ * 与 BeautifierSection 同口径：美化绑定**启用的世界书条目**，不按角色名。
  *
  * 对齐 docs/design.md §2.5（首行缩进）/ §1（叙事衬线）。
  */
-import {
-  processRules,
-  escapeHtml,
-  collectActiveSignalsFromEntries,
-  resolveAutoEnable,
-} from '@engine/beautifier';
+import { processRules, escapeHtml, collectActiveSignalsFromEntries, resolveAutoEnable } from '@engine/beautifier';
 import type { BeautifierRule, ChatMessage } from '@engine/types';
 import { useSettingsStore } from '../stores/settings-store';
 import { useGameStore } from '../stores/game-store';
@@ -32,9 +25,8 @@ export function useBeautify() {
    * 合并预设规则 + 用户规则，返回完整美化规则列表。
    *
    * autoEnable 以当前存档为准：命定核心选择走独立 uid（不改世界书条目 enabled），
-   * 存于 save.metadata.enabledWorldBookEntries；角色名取当前存档在场的角色。
-   * 三个维度（worldBookIds / worldBookEntryUids / characterNames）经引擎侧
-   * `resolveAutoEnable` 完整解析（OR 匹配，任一命中即激活）。
+   * 存于 save.metadata.enabledWorldBookEntries。规则按**启用的世界书条目 uid**
+   * 匹配激活（与 BeautifierSection 同源信号）。
    */
   function getBeautifierRules(): BeautifierRule[] {
     const preset = beautifier.presetRules;
@@ -45,18 +37,10 @@ export function useBeautify() {
       (game.activeSave?.metadata as any)?.enabledWorldBookEntries ?? [];
     const { activeWorldBookIds, activeEntryUids } =
       collectActiveSignalsFromEntries(enabledEntries);
-    // 角色名信号：当前存档在场角色（player + npc）。这是 characterNames 维度
-    // autoEnable（如 `<dalian>`/`<giraffe>`/`<ellia>` 标签美化）的激活依据。
-    const activeCharacterNames = new Set(
-      (game.characters ?? []).map((c) => c.name).filter(Boolean),
-    );
 
-    const resolved = resolveAutoEnable(
-      preset,
-      activeWorldBookIds,
-      activeEntryUids,
-      activeCharacterNames,
-    );
+    // 美化绑定启用的世界书（worldBookIds / worldBookEntryUids 二维），
+    // 不按角色名 —— 角色是否在场不影响规则激活。
+    const resolved = resolveAutoEnable(preset, activeWorldBookIds, activeEntryUids, new Set());
 
     return [...resolved, ...user.filter((r) => !presetIds.has(r.id))];
   }

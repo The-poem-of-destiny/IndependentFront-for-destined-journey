@@ -42,14 +42,10 @@ const userRules = computed<BeautifierRule[]>(() => beautifier.userRules);
 /** 从当前存档的 enabledWorldBookEntries 提取激活信号（命定核心 + 启用角色）。
  *  命定核心选择走独立 uid（不改 worldBooks 条目 enabled），须以存档为准；
  *  worldBooks.enabled 是「是否注入 prompt」的开关，核心书里几乎全 enabled，不能作为 autoEnable 信号。
- *  characterNames 取当前存档在场角色（player + npc）—— 角色标签美化（`<dalian>` 等）的激活依据。 */
+ *  autoEnable 绑定**启用的世界书条目 uid**，不按角色名。 */
 function getActiveWorldBookState() {
   const entries: string[] = (game.activeSave?.metadata as any)?.enabledWorldBookEntries ?? [];
   return collectActiveSignalsFromEntries(entries);
-}
-
-function getActiveCharacterNames(): Set<string> {
-  return new Set((game.characters ?? []).map((c) => c.name).filter(Boolean));
 }
 
 onMounted(async () => {
@@ -63,7 +59,7 @@ onMounted(async () => {
       builtinDisabled.value,
       activeWorldBookIds,
       activeEntryUids,
-      getActiveCharacterNames(), // characterNames — 当前存档在场角色
+      new Set(), // characterNames — 美化绑定世界书，不按角色名
     );
     presetRules.value = merged.filter((r) => r.isBuiltin);
     // 派生缓存只进 store 的内存 ref，**不再写 settings**（那是 ~378 KB 的白存）

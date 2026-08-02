@@ -1,9 +1,11 @@
 /**
  * beautifier.test.ts —— 美化器核心纯函数（autoEnable 解析 + 信号提取）
  *
- * 🔴 2026-08-02 回归防护：`resolveAutoEnable` 的 characterNames 维度曾被
- * `useBeautify` 的手写残缺解析绕过（只看 worldBookEntryUids），导致 `<dalian>` 等
- * 角色标签美化永不激活。本文件把三维匹配钉死为契约，防止任何消费方再写残缺版。
+ * 🔴 2026-08-02 回归防护：`resolveAutoEnable` 三维匹配契约钉死。
+ * 注意：**游戏内激活信号按「启用的世界书条目」**（useBeautify 只传 worldBookIds/
+ * worldBookEntryUids，不传 characterNames）——角色是否在场不影响规则激活。
+ * characterNames 维度仍保留为引擎函数能力（部分角色标签美化规则同时绑了 uid），
+ * 但消费方（useBeautify）不依赖它做游戏内判断。
  */
 import { describe, it, expect } from 'vitest';
 import { resolveAutoEnable, collectActiveSignalsFromEntries } from './beautifier';

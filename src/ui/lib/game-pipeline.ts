@@ -57,10 +57,20 @@ export type StoryChunkCallback = (chunk: string, isComplete: boolean) => void;
  * 从 story 正文中提取 <options> 行动选项块。
  * 格式约定（story systemPrompt <option_format>）: <options> 内每行 "数字. 内容"。
  * 返回剥离选项块后的正文 + 选项列表。
+ *
+ * 🔴 2026-08-02 修：AI 输出格式约定正文用 `<maintext>...</maintext>` 包裹
+ * （DEFAULT_FORMAT_PROMPT），此处剥离标签取正文 —— 之前只剥 <options>，
+ * `<maintext>` 标签原样漏进 message，玩家眼前出现尖括号。
  */
 export function extractStoryOptions(raw: string): { content: string; options: string[] } {
   const match = raw.match(/<options>([\s\S]*?)<\/options>/i);
-  if (!match) return { content: raw, options: [] };
+  // 剥离 <maintext> 包裹（无匹配则保留原文）
+  const withoutMaintext = raw
+    .replace(/<maintext>[\s\S]*?<\/maintext>/gi, (m) =>
+      m.replace(/^<maintext>/i, '').replace(/<\/maintext>$/i, ''),
+    )
+    .trim();
+  if (!match) return { content: withoutMaintext, options: [] };
   const options = match[1]
     .split('\n')
     .map((line) =>
@@ -70,7 +80,7 @@ export function extractStoryOptions(raw: string): { content: string; options: st
         ?.trim(),
     )
     .filter((s): s is string => !!s);
-  const content = raw
+  const content = withoutMaintext
     .replace(/<options>[\s\S]*?<\/options>/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();

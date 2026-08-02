@@ -179,6 +179,28 @@ describe('extractStoryOptions', () => {
     const { content } = extractStoryOptions(raw);
     expect(content).toBe('第一段。\n\n第二段。');
   });
+
+  it('剥离 <maintext> 包裹标签（2026-08-02 修：正文标签泄漏）', () => {
+    const raw = `<maintext>妲丽安轻轻推开门，月光洒进屋内。
+
+她望向窗边。</maintext>
+
+<options>
+1. 上前搭话
+2. 保持沉默
+</options>`;
+    const { content } = extractStoryOptions(raw);
+    expect(content).not.toContain('<maintext>');
+    expect(content).not.toContain('</maintext>');
+    expect(content).toContain('妲丽安轻轻推开门');
+    expect(content).toContain('她望向窗边');
+  });
+
+  it('无 maintext 包裹时原样保留正文', () => {
+    const raw = '平静的一天过去了。';
+    const { content } = extractStoryOptions(raw);
+    expect(content).toBe(raw);
+  });
 });
 
 describe('buildContext — plotSettings (步5)', () => {
