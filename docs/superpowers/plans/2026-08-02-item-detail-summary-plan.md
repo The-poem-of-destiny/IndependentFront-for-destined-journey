@@ -923,3 +923,19 @@ git commit -m "docs(backlog): ItemsPanel modifiers 展示 ✅ 完成（详情弹
 - **Spec 覆盖**：spec §2 交互（弹窗+叉叉）→ Task 3；§3.1 describe-modifier → Task 1；§3.2 describe-automaton → Task 2；§3.3 弹窗组件 → Task 3；§3.4 ItemsPanel 接线 → Task 3；§4 测试 → Task 1/2/4。全部覆盖 ✓
 - **Placeholder 扫描**：无 TBD/TODO；每步含实际代码 ✓
 - **类型一致性**：`describeModifier`/`describeModifiers`/`describeAutomaton`/`describeAutomata` 签名在 Task 1/2/3 间一致；`AppModal` props/emits 与现有组件一致；`Modifier`/`EffectAutomatonDecl` 字段与 spec 引用的代码一致 ✓
+
+### 补测轮（2026-08-02）
+
+reviewer 指出 Task 2 测试初始只断言 4 类 EffectIntent（AddModifier/DealDamage/Heal/ApplyStatus），其余 9 类已在 `describe-automaton.ts` 实现却未测。本轮补齐（实现零改动，只加断言）：
+
+- 新增 9 个 `it`（`describeAutomaton intents` describe 内）：
+  - `RemoveStatus` → `移除流血`
+  - `SpendResource` → `消耗 5 点MP`
+  - `PreventDeath` → `免死一次`
+  - `ConsumeCharge`（含 amount 省略默认 1 与指定 3 两种）
+  - `EmitNarrativeCue` → `提示：寒光乍现`
+  - `OverrideIntent`（ruleKey: 'freezeSlot'）→ `覆盖freezeSlot行动`
+  - `ScheduleIntent`（内层 DealDamage）→ `延后：`
+  - `SpawnOrDespawnIntent`（op: 'spawn'/'despawn' 双测）→ `召唤 unit-1` / `移除 unit-1`
+  - `RequestChoiceIntent` → `要求选择：要躲避还是硬抗？`
+- 至此 13 类 EffectIntent 全覆盖；`describe-automaton.test.ts` 23 tests 全 PASS（`npx vitest run src/sillytavern/describe-automaton.test.ts`）
