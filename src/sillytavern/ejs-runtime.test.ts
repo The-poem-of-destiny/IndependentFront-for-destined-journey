@@ -435,9 +435,9 @@ describe('getLocalVar / setLocalVar（= local.* 的别名，同桶同护栏）',
   it('别名同样受项目隔离（别的项目读不到）', () => {
     const vars: Record<string, any> = {};
     render('<% setLocalVar("k", "A 的值") %>', makeCtx({ vars, capabilities: { projectId: 'a' } }));
-    expect(render('[<%= getLocalVar("k") %>]', makeCtx({ vars, capabilities: { projectId: 'b' } }))).toBe(
-      '[]',
-    );
+    expect(
+      render('[<%= getLocalVar("k") %>]', makeCtx({ vars, capabilities: { projectId: 'b' } })),
+    ).toBe('[]');
   });
 
   it('别名走 local 的体积护栏：单键超限静默忽略', () => {
