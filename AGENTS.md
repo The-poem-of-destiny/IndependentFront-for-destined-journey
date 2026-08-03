@@ -258,7 +258,8 @@ Layer 1  原语级 状态读写        StateManager.commitChatState() / $validat
 - **两个注册 facade**（互不干扰）：`ScriptRegistry`（声明式，物品装备/卸下）+ `SubscriptionManager`（动态，AI script 运行时 `$event.on`）
 - **modifier 不是第二套系统**：物品 `modifiers[]` 在装备时由 ScriptRegistry 注册成"push handler"，走同一条 emitChain
 - **核心模式：纯函数兜底 + AI subscribeChain 覆盖**：Code 算基础 → emitChain 传 AI → AI handler 改 outcome → AI 不响应走兜底
-- **🔴 P1-11 真相**：基础设施全部齐全，**唯一缺口是"装备/卸下/存档加载时调 executeInit → ScriptRegistry.registerAll"接线**
+- **✅ P1-11 已接线（Q-07, 2026-08-03）**：战斗外效果系统已由 `effect-wiring.ts` 接进生产——`wireEffectSystem(saveId, characters)` 在存档加载时对已装备物品/技能执行 `executeInit` + `$event.on` 订阅注册，装备/卸下经 `state-manager` 的 equip/unequip handler 调 `wireObject`/`unwireObject`。`getEventBus(saveId)` 按存档实例化，`ScriptRegistry` + `SubscriptionManager` 双 facade 随存档生命周期。
+  **边界**：本接线只建立「注册面」（脚本能进系统、订阅能触发），**战斗外的事件 emit 源**（谁触发 `npc_talk` 等业务事件）是后续业务层的事；脚本里的 hpChanges/statChanges 效果收集仍须经 `state-manager.commitChatState` 提交（ADR-21 唯一写入口，本接线不开第二条写路径）。
 
 ## v4 三层子系统分流 (ADR-24/25/26)
 
@@ -420,12 +421,15 @@ src/sillytavern/                    ← 核心引擎
   │       └── index.ts                              ← 唯一公共出口（openCombat / runCombatV3）
   ├── craft-quality.ts / craft-dc.ts / craft-resolver.ts
   ├── morale-system.ts / affection-system.ts
+  ├── start-catalog.ts              ← [Q-30] 捏人页目录入口（类型/常量/品质映射）+ start-catalog-data.ts（纯数据，CDN 生成）
   ├── marker-protocol.ts            ← [Phase 6e+Audio] XML 标记检测（含 <play_audio>）
   ├── char-gen-agent.ts             ← [Phase 6e] 角色生成编排（M3 单patch落库/正式字段直写/零id）
   ├── craft-gen-chain.ts            ← [Phase 9b] 制作生成编排（M3 零id/type归一化/单patch）
   │
   ├── script-executor.ts            ← [Phase 7e+8] 脚本沙盒（$event.on/off / $call / @parent / init·cleanup）
   ├── subscription-manager.ts       ← [Phase 7e+8] 持久订阅管理器（递归保护≤10 + 僵尸兜底）
+  ├── effect-wiring.ts              ← [Q-07] 战斗外效果接线（存档加载 wireEffectSystem / 装备卸下 wire-unwireObject）
+  │                                    EventBus 按存档实例化 + ScriptRegistry/SubscriptionManager 双 facade
   │
   ├── audio-channels.ts             ← [Audio] MusicChannel 音序器 + SfxChannel 声池（加载世代号竞态保护）
   ├── audio-manager.ts              ← [Audio] 音轨库注册表 + 主音量 + 手势解锁 + playByTag AI 钩子

@@ -165,6 +165,8 @@ const UPDATE_CHAR_NUMERIC_FIELDS = new Set<string>([
 export class StateManager {
   private saveId: string;
   private events: GameEvent[] = [];
+  /** Q-07：已装备物品的脚本注销函数缓存（key=ownerKey，卸下时调用） */
+  private _itemUnsubs: Map<string, () => void> = new Map();
 
   constructor(config: StateManagerConfig) {
     this.saveId = config.saveId;
@@ -969,6 +971,18 @@ export class StateManager {
     item.equippedSlot = slot;
     await saveCharacter(char);
 
+    // Q-07：装备时接线 —— init 脚本 + $event.on 持久订阅（战斗外效果系统）
+    try {
+      const { wireObject, ownerKeyOf } = await import('./effect-wiring');
+      const unsub = wireObject(this.saveId, char, 'item', item.name, item.scripts);
+      // 暂存注销函数，供同物品卸下时用（挂内存，不落库）
+      if (unsub) {
+        this._itemUnsubs.set(ownerKeyOf(char.id, 'item', item.name), unsub);
+      }
+    } catch (err) {
+      console.warn('[StateManager] equip_item 效果接线失败（不阻断落库）:', err);
+    }
+
     return this.createEvent('item_use', patch);
   }
 
@@ -1000,6 +1014,19 @@ export class StateManager {
 
     item.equippedSlot = null;
     await saveCharacter(char);
+
+    // Q-07：卸下时拆除接线 —— cleanup 脚本 + 注销 $event.on 持久订阅
+    try {
+      const { unwireObject, ownerKeyOf } = await import('./effect-wiring');
+      const unsub = this._itemUnsubs.get(ownerKeyOf(char.id, 'item', item.name));
+      if (unsub) {
+        unsub();
+        this._itemUnsubs.delete(ownerKeyOf(char.id, 'item', item.name));
+      }
+      unwireObject(this.saveId, char, 'item', item.name, item.scripts);
+    } catch (err) {
+      console.warn('[StateManager] unequip_item 效果拆除失败（不阻断落库）:', err);
+    }
 
     return this.createEvent('item_use', patch);
   }
