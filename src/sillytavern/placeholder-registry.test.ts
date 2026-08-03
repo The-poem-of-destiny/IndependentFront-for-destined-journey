@@ -35,7 +35,6 @@ function mockCtx(overrides?: Partial<AgentContext>): AgentContext {
     plotEvents: [],
     variables: {},
     agentOutputs: new Map(),
-    lorebookMatches: [],
     worldBooks: [],
     ...overrides,
   } as AgentContext;

@@ -21,7 +21,6 @@ function makeContext(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
     userInput: '测试输入',
     history: [],
-    lorebookMatches: [],
     worldBooks: [],
     characters: [],
     variables: {},
@@ -85,16 +84,10 @@ describe('AGENT_TEMPLATES', () => {
         expect(AGENT_TEMPLATES[agentId].fixedSystem.length).toBeGreaterThan(0);
       });
 
-      it('variableContext 应返回字符串 (Phase 10: 可为空)', () => {
-        const ctx = makeContext();
-        const result = AGENT_TEMPLATES[agentId].variableContext(ctx);
-        expect(typeof result).toBe('string');
-      });
-
-      it('variableInstruction 应返回字符串 (Phase 10: 可为空)', () => {
-        const ctx = makeContext({ agentOutputs: new Map([['story', '测试正文输出']]) });
-        const result = AGENT_TEMPLATES[agentId].variableInstruction(ctx);
-        expect(typeof result).toBe('string');
+      // Q-04: 每个 Agent 都必须有默认模板 —— 这是「buildAgentMessages 只剩一条路」的前提。
+      // 有 Agent 漏了模板，它在生产里会静默返回 null（而不是像以前那样落到手拼兜底）。
+      it('应有默认模板（无模板 = buildAgentMessages 返回 null）', () => {
+        expect(getDefaultTemplate(agentId).length).toBeGreaterThan(0);
       });
     });
   }
@@ -156,11 +149,12 @@ describe('buildAgentMessages', () => {
     expect(messages![0].content).toContain(AGENT_TEMPLATES.memory_recall.fixedExamples);
   });
 
-  it('variableContext 可返回空字符串 (Phase 10: 模板已外部化)', () => {
-    const ctx = makeContext({ variables: { HP: 80, MP: 50, 位置: '白曜城' } });
-    // request_dispatcher has empty variableContext in Phase 10
-    const result = AGENT_TEMPLATES.request_dispatcher.variableContext(ctx);
-    expect(result).toBe('');
+  // Q-04 回归：AGENT_TEMPLATES 只剩两个兜底文本字段，不得再长出提示词闭包
+  // （闭包会被 placeholder 模板绕过，改了没效果，是最贵的一类 debug）
+  it('模板条目只有 fixedSystem / fixedExamples 两个字段', () => {
+    for (const [agentId, tpl] of Object.entries(AGENT_TEMPLATES)) {
+      expect(Object.keys(tpl).sort(), agentId).toEqual(['fixedExamples', 'fixedSystem']);
+    }
   });
 
   it('用户输入应出现在模板解析结果中 (Phase 10: via {{USER_INPUT}})', () => {

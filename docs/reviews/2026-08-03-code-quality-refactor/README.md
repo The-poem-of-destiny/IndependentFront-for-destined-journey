@@ -41,13 +41,13 @@
 | 🔄   | 部分完成，剩余项见下方明细               |
 | ⬜   | 未开始（下表备注里附本次核对的抽查结果） |
 
-**核对基线**：`master` @ `eab3729`（2026-08-03 核对）· `typecheck` 0 错误 · 203 个测试文件 · 5678 passed / 3 skipped
+**核对基线**：`master`（2026-08-03，随修复滚动）· `typecheck` / `typecheck:vue` / `typecheck:tools` / `lint` 全绿 · 203 个测试文件 · 5664 passed / 3 skipped
 
 ### 按路线图步骤
 
 | 步骤                                      | 包含                   | 状态 | 备注                                                                                  |
 | ----------------------------------------- | ---------------------- | ---- | ------------------------------------------------------------------------------------- |
-| [步骤 1](roadmap.md) 清尸体 + 补工具链网  | Q-04、Q-15             | 🔄   | 僵尸删了三批；工具链只落了 `tsconfig.tools.json`，清仓（PR 2）零进度                  |
+| [步骤 1](roadmap.md) 清尸体 + 补工具链网  | Q-04、Q-15             | ✅   | 四批僵尸清完 + 补网与清仓两个 PR 都落地                                               |
 | [步骤 2](roadmap.md) 修静默出错的生产路径 | Q-01、Q-02             | ✅   | 两条全部兑现（`a0c3d5d`），骰子那条建议仍需真机打一场复核                             |
 | [步骤 3](roadmap.md) 三处去留裁定         | Q-07、Q-03、Q-30       | 🔄   | 三条裁定均已拍板；Q-03 / Q-30 已落地，Q-07 只落了注册面                               |
 | [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | ⬜   | —                                                                                     |
@@ -57,17 +57,7 @@
 | [步骤 8](roadmap.md) 巨石拆分第一刀       | Q-23、Q-19             | ⬜   | 硬前置未清：步骤 1 的删尸体与步骤 3 的效果层都还没收尾                                |
 | [后续批次](roadmap.md#后续批次不进前八步) | 其余 9 条              | ⬜   | —                                                                                     |
 
-### 🔄 三条的剩余明细
-
-**Q-04（僵尸）** — 已删：`editor-utils` / `combat-morale-pipeline` / `death-system` / `fp-system` / `combat-panel` / `cluster-system` / `lorebook-engine` / `prompt-assembler` / `importer` / `stream-parser` 及各自测试。剩余两项：
-
-- `agent-templates.ts` 里 13 个 Agent 的 `variableContext` / `variableInstruction` 闭包仍在（`:442-648`），且仍是 `buildAgentPrompt`（`:944-950`）在 `ctx.zones` 缺失时的回退分支——删之前要先确认这条回退在生产里是否还会被走到。
-- `MatchedEntry` / `lorebookMatches` 死类型仍钉在 `types.ts`（20 处引用横跨 16 文件），提交时标注为「留待 owner 决策批次」。
-
-**Q-15（质量网）** — 已做：新增 `tsconfig.tools.json`（`extends` 主配置，纳入 `server/` `tests/` `*.config.ts`）。剩余按原建议的两个 PR 拆：
-
-- PR 1 未完：`package.json` 里没有 `typecheck:tools` 脚本，`ci.yml` 仍是原来五步；`lint` / `format` / `format:check` 的 glob 仍只盖 `src/**`。已知阻塞：`tests/agent-framework` 两个 CLI 脚本引用了已删的引擎 API（`calcHP` / `equipment`），要先修才能让 `typecheck:tools` 全绿。
-- PR 2 未开始：`tmp/` 59 个 tracked 文件、`_msg_story.json`、`bash.exe.stackdump`、`data/defaults/agent-config.json.bak`、`src/components/SillyTavern/index.html` 全部原样在库；`reference/` 两份 jsonl 合计约 100 MB 也还在。AGENTS.md 架构图里那行 `src/vanilla/sillytavern-store.ts`（目录已不存在）尚未删。
+### 🔄 剩余明细
 
 **Q-07（效果层）** — 裁定为「完整接线」。已做：新增 `effect-wiring.ts`，按存档实例化 EventBus，装备 / 卸下 / 存档加载三处接上 `executeInit` 与 `$event.on` 订阅注册，3 条回归测试。剩余两项：
 
@@ -76,14 +66,17 @@
 
 ### 已落地的提交
 
-| 提交      | 覆盖                   | 说明                                                                               |
-| --------- | ---------------------- | ---------------------------------------------------------------------------------- |
-| `a0c3d5d` | Q-01、Q-02             | `drawDice` 改必填依赖、删 `sysDrawSixty`；`applyTimeAdvance` 的 patches 末尾自提交 |
-| `cfc9cd2` | Q-04(部分)、Q-15(部分) | 三批僵尸删除 + 文档同步；新增 `tsconfig.tools.json`                                |
-| `ecd68a1` | —                      | prettier 修复（CI `format:check` 红灯）                                            |
-| `9fd5a3b` | Q-30                   | 数据拆 `start-catalog-data.ts`；`Rarity` → `CatalogRarityCode`；加防分叉闸门测试   |
-| `0a6e7b6` | Q-03                   | 裁定：hiddenLine 保留 + 门槛统一 100 字 + embedding 接线；MEM 编号收敛到一套发号器 |
-| `eab3729` | Q-07(部分)             | 裁定：完整接线；新增 `effect-wiring.ts`，装备/卸下/存档加载三处接上注册面          |
+| 提交      | 覆盖                     | 说明                                                                                                                                                                                                           |
+| --------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `a0c3d5d` | Q-01、Q-02               | `drawDice` 改必填依赖、删 `sysDrawSixty`；`applyTimeAdvance` 的 patches 末尾自提交                                                                                                                             |
+| `cfc9cd2` | Q-04(1-3 批)、Q-15(部分) | 三批僵尸删除 + 文档同步；新增 `tsconfig.tools.json`                                                                                                                                                            |
+| `ecd68a1` | —                        | prettier 修复（CI `format:check` 红灯）                                                                                                                                                                        |
+| `9fd5a3b` | Q-30                     | 数据拆 `start-catalog-data.ts`；`Rarity` → `CatalogRarityCode`；加防分叉闸门测试                                                                                                                               |
+| `0a6e7b6` | Q-03                     | 裁定：hiddenLine 保留 + 门槛统一 100 字 + embedding 接线；MEM 编号收敛到一套发号器                                                                                                                             |
+| `eab3729` | Q-07(部分)               | 裁定：完整接线；新增 `effect-wiring.ts`，装备/卸下/存档加载三处接上注册面                                                                                                                                      |
+| `ebb2cf9` | —                        | 本进度追踪面                                                                                                                                                                                                   |
+| `316acb8` | Q-15 ✅                  | 补网（`typecheck:tools` 进 CI / lint·format 扩到 server·tests·scripts）+ 清仓；补网当场逮到三处过期，含 CharGenSystemCard 把 `string[]` 当字典渲染                                                             |
+| _本次_    | Q-04 ✅                  | 第四批：删 `variableContext`/`variableInstruction` 闭包与 `buildFallbackMessages`，`DEFAULT_TEMPLATES` 补齐三个退役 Agent；顺带删净 `MatchedEntry`/`lorebookMatches`/`targetCharacterId` 与 `buildZoneSection` |
 
 ## 结论摘要
 
@@ -103,7 +96,7 @@
 
 **建议的第一刀**：删尸体 + 补工具链网（Q-04、Q-15，工作量 S，无需裁定），紧接着修两条静默出错的生产路径（Q-01、Q-02，工作量 S）。这四条不依赖任何架构决策，且删除面已由排除测试文件的全仓 grep 逐个反证。
 
-> 〔进度〕这一刀已切下一半：Q-01 / Q-02 全部兑现，Q-04 删了三批，Q-15 只落了 `tsconfig.tools.json`——**清仓那半（PR 2）尚未开始，而它正是「先删尸体再拆巨石」这条硬约束的实际卡点**。明细见[进度追踪](#进度追踪)。
+> 〔进度〕这一刀已全部切下：Q-04 / Q-15 / Q-01 / Q-02 四条完成，「先删尸体再拆巨石」这条硬约束的前置已清。见[进度追踪](#进度追踪)。
 
 ## 严重度定义
 
@@ -164,7 +157,7 @@
 | [Q-01](findings-t1-wiring-gap.md#q-01)    | 高     | T1   | 生产战斗从未拿到真骰子，live 战斗里每个 d20 都是常量 10                                  | 步骤 2   | ✅   |
 | [Q-02](findings-t1-wiring-gap.md#q-02)    | 高     | T1   | `applyTimeAdvance` 算出的 patches 在唯一调用点被丢弃，`onRemove` 脚本在生产中等于没写    | 步骤 2   | ✅   |
 | [Q-03](findings-t1-wiring-gap.md#q-03)    | 高     | T1   | 记忆子系统被 UI 层重新实现一遍，`memory-summarizer.ts` 生产零调用，两套 MEM 编号不兼容   | 步骤 3   | ✅   |
-| [Q-04](findings-t4-corpses.md#q-04)       | 中     | T4   | 五处僵尸模块零生产引用却仍带测试与提示词正文                                             | 步骤 1   | 🔄   |
+| [Q-04](findings-t4-corpses.md#q-04)       | 中     | T4   | 五处僵尸模块零生产引用却仍带测试与提示词正文                                             | 步骤 1   | ✅   |
 | [Q-05](findings-t2-ai-boundary.md#q-05)   | 高     | T2   | AI 输出解析没有共享缝：15+ 份拷贝，同名 `extractTag` 语义相反，effect 正则已漂出数据丢失 | 步骤 4   | ⬜   |
 | [Q-06](findings-t3-single-source.md#q-06) | 中     | T3   | 设置有两个真源，只有两个字段被手写桥搬运，引擎侧读到的是永远停在默认值的影子配置         | 步骤 6   | ⬜   |
 | [Q-07](findings-t1-wiring-gap.md#q-07)    | 高     | T1   | 两层效果系统都是空的：13 个「封闭枚举」窗口惰性，emitChain 事件层从未被实例化            | 步骤 3   | 🔄   |
@@ -175,7 +168,7 @@
 | [Q-12](findings-t3-single-source.md#q-12) | 中     | T3   | 两个同名 `applyVarsPatch` 契约互斥，其中一份的宿主已是零引用僵尸                         | 步骤 5   | ⬜   |
 | [Q-13](findings-t2-ai-boundary.md#q-13)   | 中     | T2   | `assembleCharacterState` 里 14 处无谓的 `as any`，同一字面量一半字段带转型               | 步骤 4   | ⬜   |
 | [Q-14](findings-t2-ai-boundary.md#q-14)   | 中     | T2   | 失败回执三处口径各异，落库失败会伪装成解析失败                                           | 步骤 4   | ⬜   |
-| [Q-15](findings-t6-safety-net.md#q-15)    | 中     | T6   | 15 个源文件在 tsc/ESLint/Prettier 三张网之外，59 个 tracked 临时脚本与 ~120MB 大文件     | 步骤 1   | 🔄   |
+| [Q-15](findings-t6-safety-net.md#q-15)    | 中     | T6   | 15 个源文件在 tsc/ESLint/Prettier 三张网之外，59 个 tracked 临时脚本与 ~120MB 大文件     | 步骤 1   | ✅   |
 | [Q-16](findings-t3-single-source.md#q-16) | 中     | T3   | store 层没有共享工具层：detach helper 复制 8 份，两个同名 `toRow` 语义还不同             | 步骤 5   | ⬜   |
 | [Q-17](findings-t2-ai-boundary.md#q-17)   | 中     | T2   | `agent-client` 的流式与非流式路径各写一份请求体装配、fetch 与错误翻译                    | 步骤 4   | ⬜   |
 | [Q-18](findings-t6-safety-net.md#q-18)    | 中     | T6   | 最热的状态零编译期保护：settings 是 `Record<string, any>`，per-Agent 摊成 13 张并行 map  | 步骤 6   | ⬜   |

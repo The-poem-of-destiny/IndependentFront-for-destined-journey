@@ -276,11 +276,9 @@ export interface SillyTavernLorebookExport {
   };
 }
 
-export interface MatchedEntry {
-  entry: LorebookEntry;
-  score: number;
-  matchedKeywords: string[];
-}
+// 🪦 Q-04：`MatchedEntry` 已删除。它是 v3 世界书栈（lorebook-engine/prompt-assembler，
+//    已在前一批清掉）的匹配结果类型，此后唯一的活引用是 `AgentContext.lorebookMatches`，
+//    而那个字段只有 8 处「写空数组」、零处读。现役世界书匹配走 `worldbook-loader.ts`。
 
 // ========== Preset Types ==========
 
@@ -394,19 +392,17 @@ export interface AgentPreset {
 
 /**
  * Agent Prompt 模板（运行时使用）
- * @deprecated Phase 10: Replaced by placeholder-based template system.
- *   fixedSystem/fixedExamples kept as fallback for agents without agent-config.json entries.
- *   variableContext/variableInstruction are no longer used.
+ *
+ * Phase 10 起提示词装配由 placeholder 模板系统承担（`placeholder-registry.ts`）；
+ * 本结构只剩「systemPrompt 缺失时的兜底文本」这一个职责。
+ *
+ * 🪦 Q-04：`variableContext` / `variableInstruction` 两个闭包已删除 —— 它们唯一的调用点
+ *    `buildFallbackMessages` 只在「无模板」时才走，而 DEFAULT_TEMPLATES 已覆盖全部 Agent。
  */
 export interface AgentPromptTemplate {
   /** 固定部分（缓存敏感 — 不变则命中） */
   fixedSystem: string;
   fixedExamples: string;
-  /** 可变部分（每轮变化 — 不影响缓存前缀）
-   * @deprecated Use {{PLACEHOLDER}} template instead */
-  variableContext: (ctx: AgentContext) => string;
-  /** @deprecated Use {{PLACEHOLDER}} template instead */
-  variableInstruction: (ctx: AgentContext) => string;
 }
 
 /** Phase 10: Placeholder resolver function signature */
@@ -1348,8 +1344,6 @@ export interface ZoneVisibilityMatrix {
 export interface AgentContext {
   userInput: string;
   history: ChatMessage[];
-  /** @deprecated Phase 8: 用 worldBooks 替代 */
-  lorebookMatches: MatchedEntry[];
   worldBooks: WorldBookEntry[]; // Phase 8: 本 Agent 可见的世界书条目
   characters: CharacterState[];
   variables: Record<string, any>;
@@ -1366,8 +1360,11 @@ export interface AgentContext {
   // --- Phase 8: Variable Zone 可见性系统 ---
   /** 8-zone 变量区（由 buildZoneContext() 组装） */
   zones?: Record<ZoneId, VariableZone>;
-  /** per-call 过滤 — vars_update 并行时指定当前目标角色 ID */
-  targetCharacterId?: string;
+  // 🪦 Q-04：`targetCharacterId`（"per-call 过滤 — vars_update 并行时指定当前目标角色"）已删除。
+  //    消费它的只有 context-visibility 的 Group F，而 Group F 只被 buildZoneSection 调用、
+  //    buildZoneSection 只被 buildFallbackMessages 调用 —— 整条链都在生产之外。**这个特性
+  //    从来没在生产里跑过**：现役的 {{CHARACTER_STATE}} resolver 不看目标角色，vars_update
+  //    并行调用拿到的一直是全量 npc zone。真要做 per-call 过滤得在 resolver 那侧重做。
 
   // --- Phase 8.6: per-Agent 可调上下文（由 buildAgentMessages 注入，读 AgentConfig） ---
   /** 当前 Agent 的配置（含 historyLayers/historySlice 等），模板函数借此读 per-agent 设置 */

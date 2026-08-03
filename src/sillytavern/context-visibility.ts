@@ -788,74 +788,8 @@ function formatVariableKeys(content: Record<string, any>): string {
   return `📦 自由变量索引: ${allKeys.join(', ')}`;
 }
 
-// ═══════════════════════════════════════════════════════════
-// Group E: Zone Section 组装 — 替代 tpl.variableContext()
-// ═══════════════════════════════════════════════════════════
-
-/** 包装一个 zone 段落 */
-function wrapZoneSection(zoneId: string, level: string, body: string): string {
-  return `\n--- ${zoneId} (${level}) ---\n${body}`;
-}
-
-/**
- * 为指定 Agent 构建 zone 注入段落。
- * 如果 ctx.zones 未定义，返回空字符串（调用方应回退到旧的 variableContext()）。
- */
-export function buildZoneSection(agentId: string, ctx: AgentContext): string {
-  if (!ctx.zones) return '';
-
-  const visibility = getAgentZoneVisibility(agentId);
-  const sections: string[] = [];
-  const headNote = ctx.targetCharacterId ? `> 目标角色: ${ctx.targetCharacterId}\n` : '';
-
-  for (const zoneId of ZONE_IDS) {
-    const level = visibility[zoneId];
-    if (level === 'NONE') continue;
-
-    const zone = ctx.zones[zoneId];
-    if (!zone) continue;
-
-    // vars_update per-call 过滤
-    let filteredContent = zone.content;
-    if (zoneId === 'npc' && agentId === 'vars_update' && ctx.targetCharacterId) {
-      filteredContent = filterNpcForTarget(zone.content, ctx.targetCharacterId);
-      const formatted = filterZoneContent(zoneId, filteredContent, 'FULL', agentId, ctx);
-      if (formatted) {
-        sections.push(
-          wrapZoneSection(
-            zoneId,
-            'FULL (目标角色)',
-            formatNpcKeys({ characters: filterNonTargets(zone.content, ctx.targetCharacterId) }) +
-              '\n\n' +
-              formatted,
-          ),
-        );
-      }
-      continue;
-    }
-
-    const formatted = filterZoneContent(zoneId, filteredContent, level, agentId, ctx);
-    if (formatted) {
-      sections.push(wrapZoneSection(zoneId, level, formatted));
-    }
-  }
-
-  return headNote + sections.join('\n');
-}
-
-// ═══════════════════════════════════════════════════════════
-// Group F: char_update 专用 per-call 过滤
-// ═══════════════════════════════════════════════════════════
-
-/** 从 npc zone 中提取目标角色的内容（用于 FULL 格式化） */
-function filterNpcForTarget(content: Record<string, any>, targetId: string): Record<string, any> {
-  const allChars = content.characters ?? [];
-  const target = allChars.find((c: CharacterState) => c.id === targetId);
-  return { characters: target ? [target] : [] };
-}
-
-/** 从 npc zone 中提取非目标角色的列表（用于 KEYS 显示） */
-function filterNonTargets(content: Record<string, any>, targetId: string): CharacterState[] {
-  const allChars = content.characters ?? [];
-  return allChars.filter((c: CharacterState) => c.id !== targetId);
-}
+// 🪦 Q-04：Group E（buildZoneSection/wrapZoneSection）与 Group F（filterNpcForTarget/
+//    filterNonTargets）已删除。buildZoneSection 唯一的调用点是 agent-templates 的
+//    buildFallbackMessages，随该函数一起退场；Group F 两个私有过滤器只服务它。
+//    现役的 zone 注入面是 placeholder-registry 的 {{CHARACTER_STATE}}（走 buildZoneContext
+//    + filterZoneContent，两者仍在本文件里）。

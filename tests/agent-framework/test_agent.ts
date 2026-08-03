@@ -428,7 +428,6 @@ function buildContextFromSave(backup: any, overrideUserInput?: string): TestAgen
   return {
     userInput,
     history: history.map((m: any) => ({ role: m.role, content: m.content })),
-    lorebookMatches: [],
     worldBooks: [],
     characters: (backup.characters || []) as CharacterState[],
     variables: chat.variables || {},

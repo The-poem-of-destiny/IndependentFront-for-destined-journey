@@ -585,7 +585,6 @@ export class GamePipeline {
     return {
       userInput,
       history,
-      lorebookMatches: [],
       worldBooks: [],
       characters: this.game.characters,
       variables: this.game.saveProfile?.variables ?? {}, // M5 §12: 变量唯一真源 SaveProfile.variables（M6 收官接线）

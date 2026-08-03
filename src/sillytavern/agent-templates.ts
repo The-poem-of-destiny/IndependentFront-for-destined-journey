@@ -31,7 +31,7 @@ import {
   prerenderWorldBookEntries,
 } from './worldbook-loader';
 import { getPreset, assemblePresetContent } from './preset-loader';
-import { buildZoneSection, buildZoneContext } from './context-visibility';
+import { buildZoneContext } from './context-visibility';
 import { resolveTemplateWithGlobals } from './template-resolver';
 import type { EjsCapabilityInput } from './ejs-capabilities';
 import { DANGEROUS_PATH_SEGMENTS } from './var-resolver';
@@ -305,34 +305,12 @@ function formatCharacters(ctx: AgentContext): string {
     .join('\n');
 }
 
-function formatMemories(ctx: AgentContext): string {
-  if (!ctx.memories?.length) return '暂无相关记忆';
-  return ctx.memories
-    .map(
-      (m) =>
-        `[${m.id}] ${m.timeRange.start}~${m.timeRange.end} | 重要度:${m.importance}\n正文: ${m.content.slice(0, 300)}`,
-    )
-    .join('\n---\n');
-}
-
 function formatPlotEvents(ctx: AgentContext): string {
   if (!ctx.plotEvents?.length) return '暂无活跃剧情事件';
   return ctx.plotEvents
     .filter((e) => e.status === 'active' || e.status === 'pending')
     .map((e) => `[${e.id}] ${e.title} (${e.status})\n${e.description.slice(0, 200)}`)
     .join('\n---\n');
-}
-
-function formatVariables(ctx: AgentContext): string {
-  const vars = ctx.variables ?? {};
-  const keys = Object.keys(vars);
-  if (keys.length === 0) return '暂无变量';
-  return keys.map((k) => `${k}: ${JSON.stringify(vars[k])}`).join('\n');
-}
-
-function formatLorebook(ctx: AgentContext): string {
-  if (!ctx.lorebookMatches?.length) return '';
-  return ctx.lorebookMatches.map((m) => m.entry.content).join('\n\n');
 }
 
 function formatGameTime(gt?: GameTime): string {
@@ -429,9 +407,13 @@ function formatPlotSettingsContext(ctx: AgentContext): string {
 // 完整提示词存放位置:
 //   - Story Agent: agent-config.json 的 preset → assemblePresetContent()
 //   - 其他 Agent: agent-config.json 的 systemPrompt 字段
-//   - 未来: placeholder-registry 的 {{PLACEHOLDER}} 模板
-// fixedSystem/fixedExamples 仅作类型占位和 fallback 兜底,
-// variableContext/variableInstruction 已迁移到 placeholder-registry 模板系统.
+//   - 模板: placeholder-registry 的 {{PLACEHOLDER}} 模板（DEFAULT_TEMPLATES 覆盖全部 Agent）
+// fixedSystem/fixedExamples 仅作类型占位和 systemPrompt 缺失时的兜底。
+//
+// 🪦 Q-04：variableContext/variableInstruction 两个闭包已删除。它们在 Phase 10 就被
+//    placeholder-registry 取代，此后唯一调用点是 buildFallbackMessages —— 而那条路只在
+//    「config.template 与 DEFAULT_TEMPLATES 双双为空」时才走，DEFAULT_TEMPLATES 补齐后
+//    不再存在这样的 Agent。留着的后果是：改提示词的人改了闭包里的句子却毫无效果。
 
 export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
   // ---- memory_recall: 记忆召回 ----
@@ -439,10 +421,6 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
     fixedSystem:
       '记忆召回系统。你从记忆库中筛选与用户输入最相关的记忆条目，只返回真正相关的记忆，宁缺毋滥。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples: '{"memories": [{"id": "MEM000001", "relevance": 0.95, "reason": "匹配原因"}]}',
-    variableContext: (ctx: AgentContext) =>
-      formatMemories(ctx) ? `**当前记忆库:**\n${formatMemories(ctx)}` : '',
-    variableInstruction: (ctx: AgentContext) =>
-      `用户输入: ${ctx.userInput}\n\n请从记忆库中召回与此相关的记忆条目。`,
   },
 
   // ---- plot_pre_check: 剧情触发检查（正文前，Phase 4） ----
@@ -451,23 +429,6 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
       '剧情触发检查系统。根据剧情大纲和当前状况，判断需要触发哪些剧情事件、需要召回哪些剧情背景信息。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples:
       '{"triggeredEvents": [{"title": "事件标题", "reason": "触发原因"}], "relevantBackground": "剧情背景摘要", "directive": "本轮推进建议"}',
-    variableContext: (ctx: AgentContext) => {
-      const parts: string[] = [];
-      const outline = formatPlotOutline(ctx);
-      if (outline) parts.push(`<剧情大纲>\n${outline}\n</剧情大纲>`);
-      const events = formatPlotEventsFull(ctx);
-      if (events) parts.push(`<剧情事件列表>\n${events}\n</剧情事件列表>`);
-      const state = formatStateSummary(ctx);
-      if (state) parts.push(`<当前状态>\n${state}\n</当前状态>`);
-      const history = ctx.history
-        .slice(-4)
-        .map((m) => `[${m.role === 'system' ? 'assistant' : m.role}]: ${m.content.slice(0, 1000)}`)
-        .join('\n');
-      if (history) parts.push(`<最近对话>\n${history}\n</最近对话>`);
-      return parts.join('\n\n');
-    },
-    variableInstruction: (ctx: AgentContext) =>
-      `**用户输入:** ${ctx.userInput}\n\n请根据剧情大纲和当前状况，判断需要触发哪些剧情事件（事件寻址只用标题）。`,
   },
 
   // ---- story: 正文 AI (核心) ----
@@ -476,10 +437,6 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
       '命定之诗叙事引擎。你生成下一段剧情正文，输出 <maintext>/<option>/<sum>/<vars> XML。使用第二人称"你"叙事，保持世界观一致性。完整提示词见 agent-config.json 和预设系统。',
     fixedExamples:
       '<maintext>示例正文</maintext>\n<option>选项A\n选项B</option>\n<sum>示例总结</sum>',
-    variableContext: (ctx: AgentContext) =>
-      formatLorebook(ctx) ? `**世界设定:**\n${formatLorebook(ctx)}` : '',
-    variableInstruction: (ctx: AgentContext) =>
-      `**最近对话:**\n${formatHistory(ctx)}\n\n**玩家输入:** ${ctx.userInput}\n\n请生成下一段剧情。`,
   },
 
   // ---- request_dispatcher: 请求调度器（原 vars_update）----
@@ -488,11 +445,6 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
       '请求调度系统。分析正文后判断新-vs-已有角色/物品/制作，输出 <json> 全局变量 + XML request 标签分派给下游 Agent。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples:
       '{"replace": [{"path": "位置", "value": "白曜城"}], "delta": [{"path": "金钱", "amount": -50}]}',
-    variableContext: (ctx: AgentContext) => '',
-    variableInstruction: (ctx: AgentContext) => {
-      const storyOutput = ctx.agentOutputs?.get('story') ?? '';
-      return `${recentHistoryBlock(ctx)}**正文 AI 输出:**\n${storyOutput}\n\n请提取变量变更并分派 request 标签。`;
-    },
   },
 
   // ---- vars_update: 变量更新（合并原 char_update + item_update，可选 Agentic）----
@@ -501,11 +453,6 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
       '角色/物品状态更新系统。根据请求调度器的标签更新角色状态和物品状态，必要时调用工具编写状态效果脚本。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples:
       '{"characters": {"replace": [{"name": "理查德", "path": "hp", "value": 88}]}, "items": {"consume": [{"owner": "理查德", "target": "治疗药水", "quantity": 1}]}}',
-    variableContext: (ctx: AgentContext) => '',
-    variableInstruction: (ctx: AgentContext) => {
-      const dispatcherOutput = ctx.agentOutputs?.get('request_dispatcher') ?? '';
-      return `${recentHistoryBlock(ctx)}**调度器输出:**\n${dispatcherOutput}\n\n请处理所有 request 标签，生成状态更新结果。`;
-    },
   },
 
   // ---- memory_summary: 记忆总结 ----
@@ -514,22 +461,6 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
       '记忆压缩系统。每轮对话结束后将重要事件总结为结构化记忆（content/hiddenLine/keywords/importance）。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples:
       '{"content": "详细记忆正文(>=200字)", "hiddenLine": "暗线线索", "keywords": ["关键词1", "关键词2"], "importance": 5}',
-    variableContext: (ctx: AgentContext) => {
-      const parts: string[] = [];
-      const time = formatGameTime(ctx.gameTime);
-      if (time) parts.push(`<当前时间>\n${time}\n</当前时间>`);
-      else parts.push('<当前时间>\n(无记录)\n</当前时间>');
-      const plots = formatPlotEvents(ctx);
-      if (plots && plots !== '暂无活跃剧情事件')
-        parts.push(`<活跃剧情事件>\n${plots}\n</活跃剧情事件>`);
-      const chars = formatCharacters(ctx);
-      if (chars && chars !== '无角色数据') parts.push(`<角色状态>\n${chars}\n</角色状态>`);
-      return parts.join('\n\n');
-    },
-    variableInstruction: (ctx: AgentContext) => {
-      const storyOutput = ctx.agentOutputs?.get('story') ?? '';
-      return `**本轮正文 AI 输出:**\n${storyOutput}\n\n**用户输入:** ${ctx.userInput}\n\n请为本轮对话生成一条记忆记录。`;
-    },
   },
 
   // ---- plot_post_check: 剧情修正（正文后，Phase 4） ----
@@ -538,20 +469,6 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
       '世界线修正系统。分析剧情发展是否导致世界线变动，判断是否需要修改剧情大纲和事件状态（minor/moderate/major）。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples:
       '{"worldLineChanged": false, "changeLevel": "none", "outlineChanges": {"action": "none", "changes": ""}, "eventUpdates": [{"title": "事件标题", "action": "complete"}], "newChildEvents": []}',
-    variableContext: (ctx: AgentContext) => {
-      const parts: string[] = [];
-      const outline = formatPlotOutline(ctx);
-      if (outline) parts.push(`<剧情大纲>\n${outline}\n</剧情大纲>`);
-      const events = formatPlotEventsFull(ctx);
-      if (events) parts.push(`<剧情事件列表>\n${events}\n</剧情事件列表>`);
-      const state = formatStateSummary(ctx);
-      if (state) parts.push(`<当前状态>\n${state}\n</当前状态>`);
-      return parts.join('\n\n');
-    },
-    variableInstruction: (ctx: AgentContext) => {
-      const storyOutput = ctx.agentOutputs?.get('story') ?? '';
-      return `**本轮正文 AI 输出:**\n${storyOutput}\n\n**用户输入:** ${ctx.userInput}\n\n请分析是否有世界线变动，更新剧情事件状态（事件寻址只用标题）。`;
-    },
   },
 
   // ---- plot_outline: 大纲生成（Phase 4） ----
@@ -560,23 +477,6 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
       '大纲生成系统。根据剧情配置、世界观设定和角色信息生成完整剧情大纲（含章节划分和自检报告JSON）。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples:
       '{"title": "大纲标题", "summary": "一句话摘要", "content": "# 大纲内容...", "chapters": [{"title": "章节标题", "summary": "章节摘要", "keyEvents": [{"title": "", "description": "", "triggerHint": ""}]}], "selfCritique": {"score": 7}}',
-    variableContext: (ctx: AgentContext) => {
-      const parts: string[] = [];
-      const settings = formatPlotSettingsContext(ctx);
-      if (settings) parts.push(`<剧情配置>\n${settings}\n</剧情配置>`);
-      const state = formatStateSummary(ctx);
-      if (state) parts.push(`<当前状态>\n${state}\n</当前状态>`);
-      const chars = formatCharacters(ctx);
-      if (chars && chars !== '无角色数据') parts.push(`<角色信息>\n${chars}\n</角色信息>`);
-      const memories = ctx.memories
-        ?.slice(-5)
-        .map((m) => `${m.timeRange.start}~${m.timeRange.end}: ${m.content.slice(0, 200)}`)
-        .join('\n');
-      if (memories) parts.push(`<近期剧情摘要>\n${memories}\n</近期剧情摘要>`);
-      return parts.join('\n\n');
-    },
-    variableInstruction: (ctx: AgentContext) =>
-      `**用户输入:** ${ctx.userInput}\n\n请根据以上信息生成一份剧情大纲。`,
   },
 
   // ---- craft_gen: 制作效果生成 (Phase 6e, Phase 9b 重写) ----
@@ -586,11 +486,6 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
     fixedSystem:
       '制作系统。通过 tools 调用获取真实数据生成制作结果，输出 <craft_result> XML。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples: '',
-    variableContext: (ctx: AgentContext) => '',
-    variableInstruction: (ctx: AgentContext) => {
-      const storyOutput = ctx.agentOutputs?.get('story') ?? '';
-      return `${recentHistoryBlock(ctx)}**正文输出 (含 <craft_request> 标记):**\n${storyOutput}${ctx.agentConfig && (ctx.agentConfig as any)._craftRequest ? '\n\n<craft_request>' + (ctx.agentConfig as any)._craftRequest + '</craft_request>' : ''}\n\n请调用工具获取真实数据，输出 <craft_result> XML。`;
-    },
   },
 
   // ---- char_gen: 角色生成 (Phase 6e) ----
@@ -600,11 +495,6 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
     fixedSystem:
       '角色生成系统。通过 tools 调用获取真实随机值生成角色，输出 <char_result> XML。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples: '',
-    variableContext: (ctx: AgentContext) => '',
-    variableInstruction: (ctx: AgentContext) => {
-      const storyOutput = ctx.agentOutputs?.get('story') ?? '';
-      return `${recentHistoryBlock(ctx)}**正文输出:**\n${storyOutput}\n\n请调用工具获取随机值，只输出 <char_result> XML。如果上文没有角色生成请求（<char_gen_request>），输出 <char_result><error>no char_gen_request found</error></char_result>。`;
-    },
   },
 
   // ---- item_gen: 物品生成 (Phase 9) ----
@@ -614,12 +504,6 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
     fixedSystem:
       '物品生成系统。基于 char_gen 输出通过 tools 生成技能/装备/道具，输出 <item_result> XML。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples: '',
-    variableContext: (ctx: AgentContext) => '',
-    variableInstruction: (ctx: AgentContext) => {
-      const charGenOutput = ctx.agentOutputs?.get('char_gen') ?? '';
-      const storyOutput = ctx.agentOutputs?.get('story') ?? '';
-      return `${recentHistoryBlock(ctx)}**生成的角色的数据 (char_gen 输出):**\n${charGenOutput}\n\n**正文上下文:**\n${storyOutput}\n\n请为该角色生成合适的装备、技能和背包物品。`;
-    },
   },
 
   // ---- combat: 战斗主持人 (M4 战斗 v2) ----
@@ -629,23 +513,17 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
     fixedSystem:
       '战斗主持人系统。通过 tools 调用执行战斗动作（数值由代码计算），每回合输出战斗叙事，结束时输出 <combat_summary>。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples: '',
-    variableContext: (ctx: AgentContext) => '',
-    variableInstruction: (ctx: AgentContext) => '',
   },
 
   // ---- v3 兼容别名: plot_check / plot_correct ----
   plot_check: {
     fixedSystem: '剧情规划系统。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples: '',
-    variableContext: (_ctx: AgentContext) => '',
-    variableInstruction: (_ctx: AgentContext) => '',
   },
 
   plot_correct: {
     fixedSystem: '剧情修正系统。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples: '',
-    variableContext: (_ctx: AgentContext) => '',
-    variableInstruction: (_ctx: AgentContext) => '',
   },
 };
 
@@ -731,19 +609,9 @@ export function buildAgentMessages(
     configuredTemplate.replace(/\r\n/g, '\n').trim() ===
       defaultTemplate.replace(/\r\n/g, '\n').trim();
   let template = configuredTemplate || defaultTemplate;
-  if (!template) {
-    // Fallback: old-style assembly for agents with no template
-    return buildFallbackMessages(
-      agentId,
-      tplCtx,
-      tpl,
-      config,
-      configs,
-      worldBooks,
-      presets,
-      localParams,
-    );
-  }
+  // Q-04: 曾经这里落到 buildFallbackMessages（用 tpl.variableContext/variableInstruction 手工拼）。
+  // DEFAULT_TEMPLATES 补齐全部 Agent 后不存在无模板的 Agent，「没模板 → null」是唯一分支。
+  if (!template) return null;
 
   // Step 2: Assemble SYS_PROMPT content (Story uses preset, others use systemPrompt)
   let sysPromptContent = '';
@@ -887,76 +755,6 @@ export async function buildAgentMessagesAsync(
     presets,
     localParams,
   );
-}
-
-/** Legacy fallback for agents without templates (backward compatibility) */
-function buildFallbackMessages(
-  agentId: string,
-  tplCtx: AgentContext,
-  tpl: AgentPromptTemplate,
-  config: AgentConfig | undefined,
-  configs: AgentConfig[] | undefined,
-  worldBooks: WorldBook[] | undefined,
-  presets: AgentPreset[] | undefined,
-  _localParams: Record<string, string> | undefined,
-): Array<{ role: string; content: string }> | null {
-  // Step 1: Assemble SYS_PROMPT (preset > systemPrompt > fixedSystem fallback)
-  let sysPromptContent = '';
-
-  if (agentId === 'story' && presets && config?.presetId) {
-    // Story Agent: assemble from preset
-    const preset = getPreset(config.presetId, presets);
-    if (preset) {
-      sysPromptContent = assemblePresetContent(preset);
-    }
-  }
-
-  if (!sysPromptContent && config?.systemPrompt) {
-    // Other agents: use systemPrompt from agent-config.json
-    sysPromptContent = config.systemPrompt;
-  }
-
-  if (!sysPromptContent) {
-    // Fallback to old fixedSystem + fixedExamples (backward compatibility)
-    sysPromptContent = [tpl.fixedSystem, tpl.fixedExamples].filter(Boolean).join('\n\n');
-  }
-
-  // Step 2: 世界书（工坊 P2: 改走 renderWorldBookEntries —— 静/动分层 + EJS 求值，静态区在前）
-  let worldBookSection = '';
-  if (configs && worldBooks) {
-    const entries = getEntriesForAgent(agentId, configs, worldBooks);
-    const activeEntries = filterActiveEntries(entries);
-    // ejsPass 由 buildAgentMessages 挂在 tplCtx 上；直接调本函数的极端路径退化为一次性空草稿。
-    const ejsCtx = tplCtx.ejsPass ?? {
-      stats: tplCtx.statData ?? {},
-      vars: {},
-      historyText: '',
-    };
-    // 预渲染 memo 优先（buildAgentMessagesAsync 已跑过，含 async 条目）——
-    // 没有 memo 才同步求值，那条路遇到 `await` 条目会按 D8 回退原文。
-    const memo = tplCtx.ejsPass?.loreRender;
-    const { staticText, dynamicText } =
-      memo && memo.agentId === agentId ? memo : renderWorldBookEntries(activeEntries, ejsCtx);
-    worldBookSection = [staticText, dynamicText].filter(Boolean).join('\n\n');
-  }
-
-  // Step 3: 变量区 (动态上下文)
-  // Phase 8: 优先使用 zone-based 注入，未传 zones 时回退到旧的 variableContext()
-  const variableSection = tplCtx.zones
-    ? buildZoneSection(agentId, tplCtx)
-    : tpl.variableContext(tplCtx);
-
-  // Step 4: 正文/用户输入
-  const bodySection = tpl.variableInstruction(tplCtx);
-
-  const systemContent = [sysPromptContent, worldBookSection, variableSection]
-    .filter(Boolean)
-    .join('\n\n');
-
-  return [
-    { role: 'system', content: systemContent },
-    { role: 'user', content: bodySection },
-  ];
 }
 
 /** 所有已注册的 Agent ID 列表 */

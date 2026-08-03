@@ -350,6 +350,7 @@ LLM API 的 prompt caching 从头部做前缀匹配。把**不常变**的放上�
 ### Step 4: 精简 agent-templates.ts（Phase 10 之后基本不需要改）
 
 旧代码（~700 行）：
+
 ```typescript
 char_gen: {
   fixedSystem: `你是一个角色生成 AI...（万字长文）...`,
@@ -359,15 +360,21 @@ char_gen: {
 }
 ```
 
-新代码（~10 行）：
+新代码（~4 行）：
+
 ```typescript
 char_gen: {
   fixedSystem: `角色生成 (Agentic) — 完整 systemPrompt 已通过 agent-config.json 注入。`,
   fixedExamples: '',
-  variableContext: () => '',    // Phase 10: 由模板占位符替代
-  variableInstruction: () => '', // Phase 10: 由模板占位符替代
 }
 ```
+
+> 🪦 **Q-04（2026-08-03）**：`variableContext` / `variableInstruction` 已从 `AgentPromptTemplate`
+> **彻底删除**，不再是「留个空闭包」。原因是它们的唯一调用点 `buildFallbackMessages` 只在
+> 「`config.template` 与 `DEFAULT_TEMPLATES` 双双为空」时才走，而 `DEFAULT_TEMPLATES` 现已覆盖
+> 全部 Agent —— 也就是说，那两个闭包里写的提示词**永远不会进 prompt**。
+> 要改动态上下文，只有两条路：改 `agent-config.json` 的 `template`，或改
+> `placeholder-registry.ts` 的 `DEFAULT_TEMPLATES` / resolver。
 
 ### Step 5: 验证
 

@@ -1084,7 +1084,6 @@ export const useCreateStore = defineStore('create', () => {
         plotSettings: plotSettings.value,
         variables: {},
         agentOutputs: new Map(),
-        lorebookMatches: [],
         worldBooks: [],
       };
 

@@ -185,7 +185,7 @@ createSillytavernStore()
 │  · constant 条目始终包含                            │
 │  · probability 概率掷骰                             │
 │  · recursiveScan: 匹配内容可触发新一轮扫描 (max 3)   │
-│  → 输出: MatchedEntry[] (按 score 排序、去重)       │
+│  → 输出: WorldBookEntry[] (按 order 排序、去重)     │
 └───────┬──────────────────────────────────────────┘
         │
 ┌───────▼──────────────────────────────────────────┐

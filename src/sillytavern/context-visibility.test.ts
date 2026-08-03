@@ -9,7 +9,6 @@ import {
   getAgentZoneVisibility,
   buildZoneContext,
   filterZoneContent,
-  buildZoneSection,
 } from './context-visibility';
 import type {
   AgentContext,
@@ -164,7 +163,6 @@ function makeAgentContext(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
     userInput: '我推开铁匠铺的门',
     history: [],
-    lorebookMatches: [],
     worldBooks: [],
     characters: [makeCharacter({ id: 'player', type: 'player', name: '凯恩' })],
     variables: {
@@ -577,89 +575,13 @@ describe('filterZoneContent — NARRATIVE', () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════
-// 9. buildZoneSection — 向后兼容
-// ═══════════════════════════════════════════════════════════
-
-describe('buildZoneSection backward compatibility', () => {
-  it('returns empty string when ctx.zones is undefined', () => {
-    const ctx = makeAgentContext();
-    ctx.zones = undefined;
-    const result = buildZoneSection('story', ctx);
-    expect(result).toBe('');
-  });
-
-  it('returns non-empty string when ctx.zones is populated', () => {
-    const ctx = makeAgentContext();
-    ctx.zones = buildZoneContext(ctx);
-    const result = buildZoneSection('story', ctx);
-    expect(result).not.toBe('');
-    // Story agent sees NARRATIVE npc
-    expect(result).toContain('凯恩');
-  });
-
-  it('respects visibility levels — story does not see variable zone', () => {
-    const ctx = makeAgentContext({
-      variables: { 'user.flag': true, 时间: '16:30', 位置: '铁匠铺' },
-    });
-    ctx.zones = buildZoneContext(ctx);
-    const result = buildZoneSection('story', ctx);
-    // Story has variable: NONE, should not appear
-    expect(result).not.toContain('user.flag');
-    // But world state should appear (FULL)
-    expect(result).toContain('16:30');
-  });
-
-  it('respects visibility levels — char_gen only sees npc KEYS', () => {
-    const ctx = makeAgentContext();
-    ctx.zones = buildZoneContext(ctx);
-    const result = buildZoneSection('char_gen', ctx);
-    // Should show name/race/type
-    expect(result).toContain('凯恩');
-    // Should NOT show equipment scripts
-    expect(result).not.toContain('$resource');
-  });
-});
+// 🪦 Q-04：原第 9/10 节（buildZoneSection 向后兼容、vars_update per-call 过滤）随
+//    buildZoneSection 与 Group F 一起删除 —— 那条链只被 buildFallbackMessages 调用，
+//    从来没进过生产。原第 11 节测的是**真行为**（NARRATIVE 档剥数值与脚本、留风味文本），
+//    故改写为直接打 filterZoneContent 保留下来。
 
 // ═══════════════════════════════════════════════════════════
-// 10. vars_update per-call filtering
-// ═══════════════════════════════════════════════════════════
-
-describe('vars_update per-call filtering', () => {
-  it('target character gets FULL format, others get KEYS', () => {
-    const ctx = makeAgentContext({
-      characters: [
-        makeCharacter({ id: 'player', type: 'player', name: '凯恩' }),
-        makeCharacter({ id: 'npc_001', type: 'npc', name: '老铁匠' }),
-      ],
-      targetCharacterId: 'player',
-    });
-    ctx.zones = buildZoneContext(ctx);
-    const result = buildZoneSection('request_dispatcher', ctx);
-
-    // Target (player) gets FULL — should see attributes
-    expect(result).toContain('目标角色: player');
-    // Others (npc_001) should appear as KEYS only
-    expect(result).toContain('老铁匠');
-  });
-
-  it('without targetCharacterId, all characters go through normal filter', () => {
-    const ctx = makeAgentContext({
-      characters: [
-        makeCharacter({ id: 'player', type: 'player', name: '凯恩' }),
-        makeCharacter({ id: 'npc_001', type: 'npc', name: '老铁匠' }),
-      ],
-    });
-    ctx.zones = buildZoneContext(ctx);
-    const result = buildZoneSection('request_dispatcher', ctx);
-    // All characters should be present
-    expect(result).toContain('凯恩');
-    expect(result).toContain('老铁匠');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════
-// 11. Integration — story Agent NARRATIVE output
+// 9. Integration — story Agent NARRATIVE 档输出
 // ═══════════════════════════════════════════════════════════
 
 describe('Integration: story Agent NARRATIVE output', () => {
@@ -686,29 +608,28 @@ describe('Integration: story Agent NARRATIVE output', () => {
         }),
       ],
     });
-    ctx.zones = buildZoneContext(ctx);
-    const result = buildZoneSection('story', ctx);
+    const zones = buildZoneContext(ctx);
+    const result = filterZoneContent('npc', zones.npc!.content, 'NARRATIVE', 'story', ctx) ?? '';
 
-    // Basic character info
+    // 基础角色信息
     expect(result).toContain('凯恩');
     expect(result).toContain('人类');
     expect(result).toContain('T2');
 
-    // Equipment flavor text — YES
+    // 装备风味文本 —— 要
     expect(result).toContain('精铁长剑');
     expect(result).toContain('剑刃闪烁着冷冽的寒光');
     expect(result).toContain('锋刃');
 
-    // Equipment numeric stats — NO (stats 字典不渲染)
+    // 装备数值 —— 不要（stats 字典不渲染）
     expect(result).not.toContain('+15攻击');
-    // Effects description value may contain '攻击' in narrative context but not as a stat
     expect(result).not.toContain('stats');
 
-    // Scripts — NO
+    // 脚本 —— 不要
     expect(result).not.toContain('$resource');
     expect(result).not.toContain('onCrit');
 
-    // Warning note
+    // 提示注记
     expect(result).toContain('自然语言描述');
   });
 });
