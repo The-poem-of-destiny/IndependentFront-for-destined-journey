@@ -19,9 +19,10 @@
 - **正则专用持久存储**：Dexie v16 新增 `regexStorage`，整张表就是所有正则、信任级别与规则预览共享的唯一不可信命名空间；工坊更新/卸载不清理，并纳入 `FullBackup`（pre-v16 缺字段时保留现表）。宿主在 authored `<head>` script 执行前完成 hydration，iframe 以同步 `localStorage` 镜像及 `window.regexStorage` 别名读写，mutation 异步落库并向其它 frame 广播；`sessionStorage` 仍是 frame-ephemeral，IndexedDB、应用 storage/Dexie 与 API Key 不开放。配额为每命名空间 5 MiB、1024 keys、单 key 4096 UTF-8 bytes。
 - **工坊正则元数据**：只把包含 AI-output `placement=2` 的规则接入 assistant 正文，避免 user-only 规则误投；`minDepth`/`maxDepth` 以最新 user/assistant 消息为 0、忽略 system event、含边界执行。公共语料里 `runOnEdit` 当前不可达，非零 `substituteRegex` 均因 findRegex 无宏而惰性。
 - **API Key 迁移**：API Key 从 `fated-poem-settings` localStorage 快照迁入 Dexie `apiEndpoints`；事务写入并回读验证成功后才清理旧 key，任一阶段失败则保留唯一可恢复副本并在设置页提示。API CRUD 改为 Dexie-first。
+- **BFF 响应编码**：Node `fetch` 会自动解压上游 gzip/deflate/Brotli 响应但保留 `content-encoding`；代理现与 `content-length` 一并剥离该失效头，避免浏览器二次解压并报 `ERR_CONTENT_DECODING_FAILED`。新增本地 Brotli 上游回归测试覆盖真实转发链路。
 - **全量工坊语料**：2026-08-02 完成一次性匿名公共快照审查，覆盖 303/303 项目详情、303/303 payload 响应与 99 条正则（0 编译失败，最高 `$39`）。本地 41.6 MB 语料位于 gitignored `reference/workshop-reference/`；60 条外部资源规则已按联网契约放行，16 条父页面耦合与 14 条宿主 API 耦合仍明确报告降级；历史项目里已持久化的旧「禁止联网」提示会被过滤。storage 报表的 8 条是词法命中；逐条审查确认 5 个项目共 6 条 active、另 2 条只在注释中出现，active 全部仅调用 `localStorage.getItem`/`setItem`/`removeItem`，现由共享持久镜像覆盖。
 - **创作者契约**：新增 `docs/reference/worldbook-ejs-regex-authoring-guide.md`，以中文统一规定世界书激活与排序、EJS 语法/能力/持久化/预算/回退、ST 正则字段映射、原生 replacement 语义、联网 iframe 与共享 `regexStorage`。同步校正 `poem-ejs.d.ts` 和文档导航，明确 EJS `local` 当前是每存档共享桶、QuickJS fail-closed 与 50 ms/5 s 预算、99 条语料中 94 条可落地，以及纯正则项目当前缺少存档启用信号。
-- **验证**：全量 Vitest 207 文件、5805 通过 / 3 跳过；`tsc --noEmit`、`vue-tsc --noEmit`、Vite production build 与浏览器真机 iframe 探针通过。真机覆盖 pre-head hydration、同 frame 不重载、跨 frame 广播、页面重载持久、sessionStorage 重载清空，以及 parent DOM / IndexedDB / 应用 API 继续不可达。
+- **验证**：全量 Vitest 207 文件、5806 通过 / 3 跳过；`tsc --noEmit`、`vue-tsc --noEmit`、Vite production build 与浏览器真机 iframe 探针通过。真机覆盖 pre-head hydration、同 frame 不重载、跨 frame 广播、页面重载持久、sessionStorage 重载清空，以及 parent DOM / IndexedDB / 应用 API 继续不可达。
 
 ### 真机 debug 修复轮 · 开局链路（美化/item_gen 批量/词条落库/userId 缓存）｜ ✅ 完成（2026-08-02）
 

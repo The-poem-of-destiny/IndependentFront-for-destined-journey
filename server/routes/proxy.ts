@@ -7,6 +7,9 @@ import type { Context } from 'hono'
 const STRIP_RESP_HEADERS = new Set([
   'transfer-encoding',
   'content-length',
+  // Node fetch transparently decompresses gzip/deflate/br but keeps this
+  // upstream header. Forwarding it makes the browser decode plain bytes again.
+  'content-encoding',
   'connection',
   'keep-alive',
 ])
