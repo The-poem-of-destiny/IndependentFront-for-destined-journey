@@ -16,7 +16,7 @@
 
 import { computed } from 'vue';
 import type { CombatParticipant, StatusEffect } from '@engine/types';
-import { qualityVar } from '../../../lib/quality-colors';
+import { qualityLabelForTier, qualityVar } from '../../../lib/quality-colors';
 import ResourceBar from '../../shared/ResourceBar.vue';
 import BuffChip from '../../shared/BuffChip.vue';
 
@@ -30,22 +30,9 @@ const props = withDefaults(
   { isCurrentTurn: false },
 );
 
-// ── tier(number 1-7) → 中文品质名（对齐世界书层级 T1-T7 = 普通~唯一）──
-const TIER_TO_QUALITY: readonly string[] = [
-  '', // 0 占位（tier 从 1 起）
-  '普通', // T1
-  '优良', // T2
-  '稀有', // T3
-  '史诗', // T4
-  '传说', // T5
-  '神话', // T6
-  '唯一', // T7
-];
-
-/** tier 数字 → 中文品质名，越界兜底「普通」 */
-function tierToQuality(tier: number): string {
-  return TIER_TO_QUALITY[tier] ?? '普通';
-}
+// Q-11: tier(1-7) → 中文品质名（世界书 T1-T7 = 普通~唯一）走唯一入口，
+// 此前本文件自带一张带 0 号占位的平行表。
+const tierToQuality = qualityLabelForTier;
 
 // ── 派生状态 ──
 

@@ -1,18 +1,19 @@
 <script setup lang="ts">
 import type { CatalogRarityCode } from '@engine/start-catalog';
+import { RARITY_LABELS } from '@engine/start-catalog';
+// Q-11: 标签与颜色都从唯一入口派生 —— 此前这里内联了第三份七级表
+import { qualityLabelFromRarity, qualityVarFromRarity } from '../../lib/quality-colors';
 
 defineProps<{ modelValue: CatalogRarityCode | 'all' }>();
 defineEmits<{ 'update:modelValue': [val: CatalogRarityCode | 'all'] }>();
 
 const FILTER_OPTIONS: { key: CatalogRarityCode | 'all'; label: string; color: string }[] = [
   { key: 'all', label: '全部', color: 'var(--theme-text-secondary)' },
-  { key: 'common', label: '普通', color: 'var(--theme-quality-common)' },
-  { key: 'uncommon', label: '优良', color: 'var(--theme-quality-uncommon)' },
-  { key: 'rare', label: '稀有', color: 'var(--theme-quality-rare)' },
-  { key: 'epic', label: '史诗', color: 'var(--theme-quality-epic)' },
-  { key: 'legendary', label: '传说', color: 'var(--theme-quality-legendary)' },
-  { key: 'mythic', label: '神话', color: 'var(--theme-quality-mythic)' },
-  { key: 'only', label: '唯一', color: 'var(--theme-quality-unique)' },
+  ...RARITY_LABELS.map((code) => ({
+    key: code,
+    label: qualityLabelFromRarity(code),
+    color: qualityVarFromRarity(code),
+  })),
 ];
 </script>
 

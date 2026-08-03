@@ -4,6 +4,11 @@
  * v4: 多 Agent 引擎架构 — 新增角色/记忆/剧情/存档/Agent 管线类型
  */
 
+// Q-11：本文件唯一的**运行时** import。field-enums 自己零 import（叶子模块），
+// 所以这条边不成环。品质集合是铁律 5 指定的中文枚举 SSOT，`QualityLevel` /
+// `QUALITY_RANK` / `QUALITY_BY_RANK` 一律从它派生，不再手抄第二份。
+import { RARITY_LEVELS, type Rarity } from './field-enums';
+
 import type { GameTime } from './time-system';
 // type-only 循环安全：effect-types 反向 import 本文件的 AttributeName/DivinityLevel/DamageType 也是 type-only
 import type { Modifier } from './effect-types';
@@ -2231,29 +2236,26 @@ export interface CombatDamageBreakdown {
 // ========== Unified Quality Type ==========
 
 /** 7 级品质体系 (对齐世界书) */
-export type QualityLevel = '普通' | '优良' | '稀有' | '史诗' | '传说' | '神话' | '唯一';
+/**
+ * 7 级品质。
+ *
+ * Q-11：这里曾是**另写一遍**的同一个联合，与 `field-enums.RARITY_LEVELS` 派生的
+ * `Rarity` 并行存在（还有 start-catalog 的英文 `CatalogRarityCode` 是第三套编码）。
+ * 铁律 5 指定枚举中文集中定义在 field-enums，所以这里退化成别名 —— **改品质集合只动
+ * `RARITY_LEVELS`**，下面两张表和 `quality-colors` 都从它派生，加第八级不可能漏。
+ *
+ * 名字保留是因为 13 个文件在用，且 `QualityLevel` 在制作/战斗语境下读起来比
+ * `Rarity`（物品稀有度）更贴切；两者就是同一个类型。
+ */
+export type QualityLevel = Rarity;
 
-/** 品质等级数值索引 (普通=0 → 唯一=6) */
-export const QUALITY_RANK: Record<QualityLevel, number> = {
-  普通: 0,
-  优良: 1,
-  稀有: 2,
-  史诗: 3,
-  传说: 4,
-  神话: 5,
-  唯一: 6,
-};
+/** 品质等级数值索引 (普通=0 → 唯一=6)。由 `RARITY_LEVELS` 派生，不再手抄 */
+export const QUALITY_RANK: Record<QualityLevel, number> = Object.fromEntries(
+  RARITY_LEVELS.map((q, i) => [q, i]),
+) as Record<QualityLevel, number>;
 
-/** 按 rank 索引取品质名 */
-export const QUALITY_BY_RANK: QualityLevel[] = [
-  '普通',
-  '优良',
-  '稀有',
-  '史诗',
-  '传说',
-  '神话',
-  '唯一',
-];
+/** 按 rank 索引取品质名。就是 `RARITY_LEVELS` 本身（可变副本，历史签名如此） */
+export const QUALITY_BY_RANK: QualityLevel[] = [...RARITY_LEVELS];
 
 // ========== Craft Industry & Stage ==========
 

@@ -1,22 +1,11 @@
 /**
- * 名字 hash 首字母头像配色工具。
- * 纯函数、无副作用、无外部依赖，供 AvatarPanel 等组件复用。
- * 颜色池与 src/ui/lib/quality-colors.ts 的 QUALITY_TO_VAR 保持同步。
+ * 名字 hash 首字母头像配色工具。纯函数、无副作用，供 AvatarPanel 等组件复用。
+ *
+ * Q-11：颜色池此前在这里手抄了一份，文件头写着「与 quality-colors.ts 的
+ * QUALITY_TO_VAR 保持同步」—— 那句话就是它该 import 而不是抄的理由。现在直接用
+ * `QUALITY_VAR_POOL`，调色板扩容时这里自动跟上（取模的基数也跟着变）。
  */
-
-/**
- * 与 quality-colors.ts QUALITY_TO_VAR 保持同步的 7 个品质 CSS 变量名池。
- * 顺序固定: 普通→唯一，按 hash 结果取模 7 选用其中一个。
- */
-const QUALITY_VAR_POOL: readonly string[] = [
-  '--theme-quality-common',
-  '--theme-quality-uncommon',
-  '--theme-quality-rare',
-  '--theme-quality-epic',
-  '--theme-quality-legendary',
-  '--theme-quality-mythic',
-  '--theme-quality-unique',
-] as const;
+import { QUALITY_VAR_POOL } from '../lib/quality-colors';
 
 /**
  * DJB2-ish 哈希：循环左移 5 位 + charCodeAt 累加。

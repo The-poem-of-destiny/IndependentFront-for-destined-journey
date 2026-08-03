@@ -157,3 +157,42 @@ describe('原型键安全（M2 硬前置: AI 提名值可能是任意字符串�
     expect(normalizeItemType('道具')).toBe('特殊');
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// 品质编码防分叉闸门（Q-11）
+// ═══════════════════════════════════════════════════════════
+
+describe('品质编码只有一套 —— 防再次分叉的闸门', () => {
+  it('start-catalog 池里出现过的每一个 rarity 码，normalizeRarity 都必须认得', async () => {
+    // 目录是 CDN 生成的（start-catalog-data.ts），下次重生成可能带进新编码。
+    // 这条测试直接扫真实数据，而不是手抄一份码表 —— 手抄的那份就是第二真源。
+    const { DEFAULT_EQUIPMENT_POOL, DEFAULT_ITEM_POOL, DEFAULT_SKILL_POOL } =
+      await import('./start-catalog-data');
+    const codes = new Set<string>();
+    for (const row of [...DEFAULT_EQUIPMENT_POOL, ...DEFAULT_ITEM_POOL, ...DEFAULT_SKILL_POOL]) {
+      if (row.rarity) codes.add(row.rarity);
+    }
+    expect(codes.size).toBeGreaterThan(0);
+    for (const code of codes) {
+      expect(normalizeRarity(code), `未知 rarity 码: ${code}`).toBeDefined();
+    }
+  });
+
+  it('英文码与中文名一一对应，且第七级两种写法都落到「唯一」', () => {
+    expect(normalizeRarity('common')).toBe('普通');
+    expect(normalizeRarity('uncommon')).toBe('优良');
+    expect(normalizeRarity('rare')).toBe('稀有');
+    expect(normalizeRarity('epic')).toBe('史诗');
+    expect(normalizeRarity('legendary')).toBe('传说');
+    expect(normalizeRarity('mythic')).toBe('神话');
+    // `only` 是 CDN 数据遗留写法，`unique` 是别处的写法，两者同义
+    expect(normalizeRarity('only')).toBe('唯一');
+    expect(normalizeRarity('unique')).toBe('唯一');
+  });
+
+  it('QualityLevel 的序号表由 RARITY_LEVELS 派生，不许再手抄一份', async () => {
+    const { QUALITY_RANK, QUALITY_BY_RANK } = await import('./types');
+    expect(QUALITY_BY_RANK).toEqual([...RARITY_LEVELS]);
+    RARITY_LEVELS.forEach((q, i) => expect(QUALITY_RANK[q]).toBe(i));
+  });
+});

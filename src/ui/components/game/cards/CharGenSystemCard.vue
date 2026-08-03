@@ -1,89 +1,26 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { CharGenSystemEvent } from '@engine/types';
+import { tierVar } from '../../../lib/quality-colors';
+import { nameColorVar } from '../../../utils/name-color';
 
 const props = defineProps<{ event: CharGenSystemEvent }>();
 const emit = defineEmits<{ collapse: [] }>();
 
-// ═══ 色彩常量（原版精确值） ═══
+// ═══ 色彩 ═══
+//
+// Q-11：这里此前是两张裸 hex 表 —— 7 项 TIER_COLORS + 40 项 RACE_COLORS，
+// 外加三处硬编码兜底色。它们**完全不跟随主题**（design.md §1/§8 明文禁止），
+// 在 indigo / ivory 等浅色主题下 #FFD700 / #00FFFF 徽章根本读不出来，
+// 也是 components/ 里 144 个 hex 字面量的最大来源。
+//
+// 层级 → 与品质同一条调色板（tierVar，经 TIER_CONFIGS 派生）。
+// 种族 → 不再维护 40 条对应关系：那需要 40 个 --theme-race-* token × 10 套主题，
+//        没人会去同步。改走 nameColorVar —— 按名字 hash 在品质调色板里取一档，
+//        同一种族恒定同色、跨主题自动适配，视觉意图（不同种族一眼可分）不变。
 
-const TIER_COLORS: Record<number, string> = {
-  1: '#57595D',
-  2: '#50C878',
-  3: '#2196F3',
-  4: '#9932CC',
-  5: '#FFD700',
-  6: '#DC143C',
-  7: '#00FFFF',
-};
-
-const RACE_COLORS: Record<string, string> = {
-  人类: '#FFDAB9',
-  矮人: '#D2691E',
-  精灵: '#00FF7F',
-  极北精灵: '#00FF7F',
-  暗夜精灵: '#9370DB',
-  半精灵: '#90EE90',
-  龙族: '#FFD700',
-  龙姬: '#FFD700',
-  龙裔: '#FFA500',
-  巨龙: '#FFD700',
-  古龙: '#FFD700',
-  亚龙: '#FFAE42',
-  半龙人: '#FFAE42',
-  血姬: '#FF0000',
-  血族: '#DC143C',
-  兽族: '#FF4500',
-  半兽人: '#FF8C00',
-  半人马: '#FF8C00',
-  翼民: '#00BFFF',
-  翼族: '#00BFFF',
-  堕羽民: '#9370DB',
-  人鱼: '#00FFFF',
-  蛇女: '#00FF7F',
-  汐海妖精: '#00FFFF',
-  宁芙: '#FF00FF',
-  妖精: '#FF00FF',
-  光翅妖精: '#FFFF00',
-  地精: '#32CD32',
-  半身人: '#FFD700',
-  黑角民: '#00CED1',
-  女妖: '#FF1493',
-  亡灵种族: '#32CD32',
-  不死生物: '#32CD32',
-  深渊魔族: '#9400D3',
-  魔物: '#8A2BE2',
-  巨人: '#D2691E',
-  半巨人: '#D2691E',
-  小巨人: '#D2691E',
-  霜巨人: '#00BFFF',
-  山妖: '#DAA520',
-  食人魔: '#7CFC00',
-  巨魔: '#7CFC00',
-  雪怪: '#E0FFFF',
-  神祗: '#FFFFFF',
-  英灵: '#00BFFF',
-  从者: '#00BFFF',
-  诗灵: '#EE82EE',
-  构装体: '#00CED1',
-  人造生物: '#00FF7F',
-  元素生物: '#FF0000',
-  植物生物: '#00FF00',
-  不定形生物: '#7CFC00',
-  异域生物: '#FF00FF',
-  泰坦人族: '#FFD700',
-};
-
-function getRaceColor(race: string): string {
-  for (const [key, color] of Object.entries(RACE_COLORS)) {
-    if (race.includes(key)) return color;
-  }
-  return '#E0E0E0';
-}
-
-function getTierColor(tier: number): string {
-  return TIER_COLORS[tier] ?? '#57595D';
-}
+const tierColor = computed(() => tierVar(props.event.tier));
+const raceColor = computed(() => nameColorVar(props.event.race));
 
 function qualityGlowClass(quality?: string): string {
   if (!quality) return '';
@@ -112,9 +49,6 @@ const ATTR_COLORS: Record<string, string> = {
   int: '#63b3ed',
   spi: '#b794f4',
 };
-
-const tierColor = computed(() => getTierColor(props.event.tier));
-const raceColor = computed(() => getRaceColor(props.event.race));
 
 const inventoryGroups = computed(() => {
   const items = props.event.details.inventory;

@@ -49,12 +49,8 @@ export const QUALITY_BASE_DC: Record<string, number> = {
 };
 export const DESTINY_CORE_WORLDBOOK_MAP: Record<string, string[]> = {};
 
-export const RARITY_TO_QUALITY: Record<string, string> = {
-  common: '普通',
-  uncommon: '优良',
-  rare: '稀有',
-  epic: '史诗',
-  legendary: '传说',
-  mythic: '神话',
-  only: '唯一',
-};
+// 🪦 Q-11：`RARITY_TO_QUALITY` 已删。它是英文码 → 中文品质名的**第二张**表
+//    （`field-enums.RARITY_ALIASES` 是第一张，且它还多认 `unique`），值类型是裸
+//    `string`，于是四个调用点只能 `as QualityLevel` 强转。现在一律走
+//    `normalizeRarity`（前端封装为 `quality-colors.qualityLabelFromRarity`），
+//    返回类型即 `Rarity`，强转自然消失。

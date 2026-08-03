@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import type { CatalogItem, CatalogRarityCode } from '@engine/start-catalog';
-import { RARITY_LABELS, RARITY_TO_QUALITY } from '@engine/start-catalog';
+import { RARITY_LABELS } from '@engine/start-catalog';
+// Q-11: 英文码 → 中文名走唯一入口（RARITY_TO_QUALITY 已删）
+import { qualityLabelFromRarity } from '../../lib/quality-colors';
 import AppModal from '../shared/AppModal.vue';
 import AppButton from '../shared/AppButton.vue';
 import FormInput from '../shared/form/FormInput.vue';
@@ -14,7 +16,7 @@ const emit = defineEmits<{
   close: [];
 }>();
 
-const RARITY_OPTIONS = RARITY_LABELS.map((r) => ({ label: RARITY_TO_QUALITY[r], value: r }));
+const RARITY_OPTIONS = RARITY_LABELS.map((r) => ({ label: qualityLabelFromRarity(r), value: r }));
 
 // 分类
 const category = ref<'equipment' | 'item' | 'skill'>('equipment');

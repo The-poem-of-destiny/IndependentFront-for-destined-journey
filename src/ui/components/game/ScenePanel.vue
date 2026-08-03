@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useGameStore } from '../../stores/game-store';
+import { tierVarByName } from '../../lib/quality-colors';
 import { useHoverPopup } from '../../composables/useHoverPopup';
 import AssetMedia from '../shared/AssetMedia.vue';
 import { ASSET_TYPE_FALLBACK_CHAIN } from '@engine/asset-resolve';
@@ -130,19 +131,15 @@ const popThought = computed(() =>
   popChar.value ? game.getThoughts(popChar.value) || '此刻风平浪静，无声可闻…' : '',
 );
 
-/** tier 名 → CSS 变量描边色；tierName 未在品质池时降级默认色。 */
-const TIER_COLOR: Record<string, string> = {
-  普通: 'var(--theme-quality-common)',
-  优良: 'var(--theme-quality-uncommon)',
-  稀有: 'var(--theme-quality-rare)',
-  史诗: 'var(--theme-quality-epic)',
-  传说: 'var(--theme-quality-legendary)',
-  神话: 'var(--theme-quality-mythic)',
-};
-function tierColor(tierName?: string): string {
-  if (tierName && TIER_COLOR[tierName]) return TIER_COLOR[tierName];
-  return 'var(--theme-text-muted)';
-}
+/**
+ * 层级名 → CSS 变量描边色。
+ *
+ * Q-11 修：这里此前是一张按**品质名**（普通/优良/稀有/…）建的六项表，却拿
+ * `tierName`（普通/中坚/精英/史诗/传说/神话/神祗）去查 —— T2 中坚 / T3 精英 /
+ * T7 神祗 三级永远查不着、落到静音灰，其余几级靠词形巧合碰对。
+ * 现在走 `tierVarByName`，它经 `TIER_CONFIGS` 反查序号，不依赖词形。
+ */
+const tierColor = tierVarByName;
 
 // ═══ 好感度 ═══
 // 真源是 saveProfile.affections，按**角色名**索引（M2/M5 起，rename_character 随迁）

@@ -2,9 +2,14 @@
 import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { qualityVar } from '../../lib/quality-colors';
+// Q-11: 品质推断是确定性游戏规则（ADR-11），已下沉引擎侧；这里与
+// CharacterListPanel 曾各存一份逐字相同的实现，两份阈值一致纯属运气。
+import { inferQualityFromStats as inferQuality } from '@engine/quality-inference';
 import { describeModifiers } from '@engine/describe-modifier';
 import { describeAutomata } from '@engine/describe-automaton';
 import { normalizeEffects } from '../../lib/item-effects';
+import type { InventoryItem, QualityLevel, Skill } from '@engine/types';
+import { QUALITY_RANK } from '@engine/types';
 
 const game = useGameStore();
 
@@ -15,17 +20,6 @@ const selectedIdx = ref(0);
 
 const player = computed(() => game.player);
 
-// ═══ 品质推断 ═══
-function inferQuality(stats?: Record<string, number>): string {
-  if (!stats) return '普通';
-  const total = Object.values(stats).reduce((s, v) => s + Math.abs(v), 0);
-  if (total >= 50) return '传说';
-  if (total >= 30) return '史诗';
-  if (total >= 20) return '稀有';
-  if (total >= 10) return '优良';
-  return '普通';
-}
-
 // ═══ 数据 ═══
 // M6 完整重构: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3），最小适配 filter 惯用式
 const inventoryItems = computed(() => player.value?.inventory || []);
@@ -34,32 +28,71 @@ const equipmentItems = computed(() =>
 );
 const skillItems = computed(() => player.value?.skills || []);
 
-const currentItems = computed<any[]>(() => {
+/**
+ * 面板里的一行 —— 判别联合（Q-11）。
+ *
+ * 此前 `currentItems` 是 `computed<any[]>`，类型擦除一路漏到模板：18 处
+ * `(item as any).xxx`。代价是**引擎里改个字段名（比如 equippedSlot）会在 typecheck
+ * 全绿的情况下让背包面板运行时炸掉**。
+ *
+ * 物品与技能是两种真实不同的形状（quantity/equippedSlot/rarity/stats vs
+ * cost/level/type:'active'|'passive'），所以不是「取交集」而是判别联合。
+ */
+type PanelEntry = { kind: 'item'; row: InventoryItem } | { kind: 'skill'; row: Skill };
+
+const currentItems = computed<PanelEntry[]>(() => {
   const inv = Array.isArray(player.value?.inventory) ? player.value.inventory : [];
-  const equip = inv.filter((i) => i.equippedSlot);
   const skills = Array.isArray(player.value?.skills) ? player.value.skills : [];
   switch (activeCategory.value) {
     case 'inventory':
-      return inv;
+      return inv.map((row) => ({ kind: 'item' as const, row }));
     case 'equipment':
-      return equip;
+      return inv.filter((i) => i.equippedSlot).map((row) => ({ kind: 'item' as const, row }));
     case 'skills':
-      return skills;
+      return skills.map((row) => ({ kind: 'skill' as const, row }));
   }
   return []; // ← 防御
 });
 
+/**
+ * 这一行归到哪个子分类 —— 筛选选项与筛选判据**共用同一份**（Q-11）。
+ *
+ * 刻意**不**把 `selTypeLabel` 并进来：那个返回「主动技能」「被动技能」并对缺失值
+ * 回退「装备」「物品」，是详情头的展示文案，合并会改掉界面上的字。
+ */
+function facetOf(entry: PanelEntry): string | undefined {
+  if (activeCategory.value === 'equipment') {
+    return entry.kind === 'item' ? (entry.row.equippedSlot ?? undefined) : undefined;
+  }
+  if (entry.kind === 'skill') return entry.row.type === 'active' ? '主动' : '被动';
+  return entry.row.type;
+}
+
+/**
+ * 这一行的品质：优先存储的 rarity，缺失才推断（推断规则在 @engine/quality-inference）。
+ *
+ * ⚠️ 顺带统一了一处**列表与详情不一致**：技能没有 rarity 字段，旧代码里详情头
+ * （`selQuality`）给技能返回「史诗」，而列表的色点/名字色却走 `inferQuality(undefined)`
+ * 得到「普通」——同一个技能左边是灰点、右边写着史诗。现在两处共用本函数，
+ * 技能列表的色点随之从灰变成史诗色。
+ */
+function qualityOf(entry: PanelEntry): string {
+  if (entry.kind === 'skill') return '史诗';
+  return entry.row.rarity || inferQuality(entry.row.stats);
+}
+
+/** 列表行尾部的那点补充信息 */
+function listExtra(entry: PanelEntry): string {
+  if (entry.kind === 'skill') return `Lv.${entry.row.level ?? 1}`;
+  return activeCategory.value === 'equipment'
+    ? `[${entry.row.equippedSlot}]`
+    : `×${entry.row.quantity}`;
+}
+
 const filterOptions = computed(() => {
   const types = new Set<string>();
-  for (const item of currentItems.value) {
-    const t =
-      activeCategory.value === 'equipment'
-        ? item.equippedSlot
-        : activeCategory.value === 'skills'
-          ? item.type === 'active'
-            ? '主动'
-            : '被动'
-          : item.type;
+  for (const entry of currentItems.value) {
+    const t = facetOf(entry);
     if (t) types.add(t);
   }
   return ['全部', ...Array.from(types)];
@@ -67,33 +100,16 @@ const filterOptions = computed(() => {
 
 const filteredItems = computed(() => {
   if (activeFilter.value === '全部') return currentItems.value;
-  return currentItems.value.filter((item) => {
-    const t =
-      activeCategory.value === 'equipment'
-        ? item.equippedSlot
-        : activeCategory.value === 'skills'
-          ? item.type === 'active'
-            ? '主动'
-            : '被动'
-          : item.type;
-    return t === activeFilter.value;
-  });
+  return currentItems.value.filter((entry) => facetOf(entry) === activeFilter.value);
 });
 
 const sortedItems = computed(() => {
-  const rank: Record<string, number> = {
-    唯一: 7,
-    神话: 6,
-    传说: 5,
-    史诗: 4,
-    稀有: 3,
-    优良: 2,
-    普通: 1,
-  };
-  return [...filteredItems.value].sort((a: any, b: any) => {
-    const qa = rank[a.rarity || inferQuality(a.stats)] || 0;
-    const qb = rank[b.rarity || inferQuality(b.stats)] || 0;
-    return qb - qa || (a.name || '').localeCompare(b.name || '');
+  // 品质序号走引擎的唯一真源（Q-11：此前这里内联了一张 1 起、字面倒序的第二张 rank 表，
+  // 与 types.ts 的 QUALITY_RANK（0 起）并存）
+  return [...filteredItems.value].sort((a, b) => {
+    const qb = QUALITY_RANK[qualityOf(b) as QualityLevel] ?? -1;
+    const qa = QUALITY_RANK[qualityOf(a) as QualityLevel] ?? -1;
+    return qb - qa || a.row.name.localeCompare(b.row.name);
   });
 });
 
@@ -109,7 +125,7 @@ function applyItemFocus() {
   activeCategory.value = focus.category;
   activeFilter.value = '全部';
   nextTick(() => {
-    const idx = sortedItems.value.findIndex((i: any) => i.name === focus.itemName);
+    const idx = sortedItems.value.findIndex((e) => e.row.name === focus.itemName);
     if (idx >= 0) selectedIdx.value = idx;
     game.clearItemFocus();
   });
@@ -120,58 +136,52 @@ onMounted(applyItemFocus);
 // ═══ 选中物品 ═══
 const selected = computed(() => sortedItems.value[selectedIdx.value] || null);
 
-const selQuality = computed(() => {
-  const item: any = selected.value;
-  if (!item) return '普通';
-  // 所有分类优先使用存储的 rarity 字段，只有缺失时才回退到推断
-  if (item.rarity) return item.rarity;
-  if (activeCategory.value === 'skills') return '史诗';
-  return inferQuality(item.stats);
-});
+const selQuality = computed(() => (selected.value ? qualityOf(selected.value) : '普通'));
 
+/**
+ * 详情头的类型文案。**不与 `facetOf` 合并**：这里返回「主动技能」「被动技能」，
+ * 并对缺失值回退「装备」「物品」—— 是给人看的字，不是筛选键。
+ */
 const selTypeLabel = computed(() => {
-  const item: any = selected.value;
-  if (!item) return '';
-  if (activeCategory.value === 'equipment') {
-    // M6 完整重构: equippedSlot 已是中文槽位枚举，直接展示
-    return item.equippedSlot || '装备';
-  }
-  if (activeCategory.value === 'skills') return item.type === 'active' ? '主动技能' : '被动技能';
-  return item.type || '物品';
+  const entry = selected.value;
+  if (!entry) return '';
+  if (entry.kind === 'skill') return entry.row.type === 'active' ? '主动技能' : '被动技能';
+  // M6 完整重构: equippedSlot 已是中文槽位枚举，直接展示
+  if (activeCategory.value === 'equipment') return entry.row.equippedSlot || '装备';
+  return entry.row.type || '物品';
 });
 
 const selExtra = computed(() => {
-  const item: any = selected.value;
-  if (!item) return '';
-  if (activeCategory.value === 'inventory') return `×${item.quantity || 1}`;
-  if (activeCategory.value === 'equipment')
-    return `${item.durability || '?'}/${item.maxDurability || '?'} 耐久`;
-  return `Lv.${item.level || 1}${item.cost ? ` · ${item.cost.amount}${item.cost.type}` : ''}`;
+  const entry = selected.value;
+  if (!entry) return '';
+  if (entry.kind === 'skill') {
+    const cost = entry.row.cost;
+    return `Lv.${entry.row.level || 1}${cost ? ` · ${cost.amount}${cost.type}` : ''}`;
+  }
+  if (activeCategory.value === 'equipment') {
+    return `${entry.row.durability || '?'}/${entry.row.maxDurability || '?'} 耐久`;
+  }
+  return `×${entry.row.quantity || 1}`;
 });
 
-const selEffects = computed(() => {
-  const raw = (selected.value as any)?.effects;
-  return normalizeEffects(raw);
-});
-const selScripts = computed(
-  () => (selected.value as any)?.scripts as Record<string, string> | undefined,
-);
+const selEffects = computed(() => normalizeEffects(selected.value?.row.effects));
+const selScripts = computed(() => selected.value?.row.scripts);
 const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.value).length > 0);
 
 // ═══ 战斗修正（modifiers + automata 中文摘要）═══
-const modifierLines = computed(() => describeModifiers((selected.value as any)?.modifiers));
-const automatonLines = computed(() => describeAutomata((selected.value as any)?.automata));
+const modifierLines = computed(() => describeModifiers(selected.value?.row.modifiers));
+const automatonLines = computed(() => describeAutomata(selected.value?.row.automata));
 const combatLines = computed(() => [...modifierLines.value, ...automatonLines.value]);
 const hasCombat = computed(() => combatLines.value.length > 0);
 
 // ═══ 原始数据折叠（modifiers + automata JSON）═══
 const showRaw = ref(false);
 const rawCombatJson = computed(() => {
-  const item = selected.value as any;
-  if (!item) return '';
+  const row = selected.value?.row;
+  if (!row) return '';
   const parts: string[] = [];
-  if (item.modifiers?.length) parts.push(JSON.stringify(item.modifiers, null, 2));
-  if (item.automata?.length) parts.push(JSON.stringify(item.automata, null, 2));
+  if (row.modifiers?.length) parts.push(JSON.stringify(row.modifiers, null, 2));
+  if (row.automata?.length) parts.push(JSON.stringify(row.automata, null, 2));
   return parts.join('\n\n');
 });
 
@@ -226,41 +236,18 @@ watch([selectedIdx, activeCategory], () => {
       <div class="item-list">
         <div v-if="sortedItems.length === 0" class="empty-list">暂无物品</div>
         <div
-          v-for="(item, i) in sortedItems"
-          :key="(item as any).name || i"
+          v-for="(entry, i) in sortedItems"
+          :key="entry.row.name || i"
           class="item-row"
           :class="{ selected: i === selectedIdx }"
           @click="selectedIdx = i"
         >
-          <span
-            class="dot"
-            :style="{
-              background: qualityVar((item as any).rarity || inferQuality((item as any).stats)),
-            }"
-          />
-          <span
-            class="i-name"
-            :style="{
-              color: qualityVar((item as any).rarity || inferQuality((item as any).stats)),
-            }"
-            >{{ (item as any).name }}</span
-          >
-          <span class="i-tag">{{
-            activeCategory === 'equipment'
-              ? (item as any).equippedSlot
-              : activeCategory === 'skills'
-                ? (item as any).type === 'active'
-                  ? '主动'
-                  : '被动'
-                : (item as any).type
+          <span class="dot" :style="{ background: qualityVar(qualityOf(entry)) }" />
+          <span class="i-name" :style="{ color: qualityVar(qualityOf(entry)) }">{{
+            entry.row.name
           }}</span>
-          <span v-if="activeCategory === 'inventory'" class="i-extra"
-            >×{{ (item as any).quantity }}</span
-          >
-          <span v-else-if="activeCategory === 'equipment'" class="i-extra"
-            >[{{ (item as any).equippedSlot }}]</span
-          >
-          <span v-else class="i-extra">Lv.{{ (item as any).level }}</span>
+          <span class="i-tag">{{ facetOf(entry) }}</span>
+          <span class="i-extra">{{ listExtra(entry) }}</span>
         </div>
       </div>
 
@@ -275,7 +262,7 @@ watch([selectedIdx, activeCategory], () => {
       >
         <div class="d-header">
           <span class="d-name" :style="{ color: qualityVar(selQuality) }">{{
-            (selected as any).name
+            selected.row.name
           }}</span>
           <span
             class="d-quality"
@@ -310,9 +297,9 @@ watch([selectedIdx, activeCategory], () => {
         </div>
 
         <!-- 描述 -->
-        <div v-if="(selected as any).description" class="desc-section">
+        <div v-if="selected.row.description" class="desc-section">
           <div class="d-label">描述</div>
-          <p class="d-desc">{{ (selected as any).description }}</p>
+          <p class="d-desc">{{ selected.row.description }}</p>
         </div>
 
         <!-- 脚本 / 原始数据 -->

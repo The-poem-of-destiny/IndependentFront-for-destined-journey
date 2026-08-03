@@ -5,21 +5,12 @@ import AssetMedia from '../shared/AssetMedia.vue';
 import { ASSET_TYPE_AVATAR_CHAIN } from '@engine/asset-resolve';
 import { getAffectionLabel } from '@engine/affection-system';
 import { qualityVar } from '../../lib/quality-colors';
+// Q-11: 见 quality-inference 的文件头 —— 这条规则不再住在视图组件里
+import { inferQualityFromStats as inferQuality } from '@engine/quality-inference';
 import ResourceBar from '../shared/ResourceBar.vue';
 import BuffChip from '../shared/BuffChip.vue';
 
 const game = useGameStore();
-
-// ═══ 品质推断 ═══
-function inferQuality(stats?: Record<string, number>): string {
-  if (!stats) return '普通';
-  const total = Object.values(stats).reduce((s, v) => s + Math.abs(v), 0);
-  if (total >= 50) return '传说';
-  if (total >= 30) return '史诗';
-  if (total >= 20) return '稀有';
-  if (total >= 10) return '优良';
-  return '普通';
-}
 
 // ═══ NPC 列表 ═══
 const selectedIdx = ref(0);

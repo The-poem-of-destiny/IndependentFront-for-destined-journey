@@ -5,8 +5,9 @@
  * 对齐原版: 三区聚合 (装备/道具/技能) + 始终可见 + 消耗汇总
  */
 import type { CatalogItem } from '@engine/start-catalog';
-import { RARITY_TO_QUALITY } from '@engine/start-catalog';
 import type { QualityLevel } from '@engine/types';
+// Q-11: 走归一化入口，返回类型就是 Rarity(=QualityLevel)，强转自然消失
+import { qualityLabelFromRarity } from '../../lib/quality-colors';
 import QualityBadge from '../shared/QualityBadge.vue';
 import { computed } from 'vue';
 
@@ -29,7 +30,7 @@ defineEmits<{
 }>();
 
 function qualityLabel(item: CatalogItem): QualityLevel {
-  return RARITY_TO_QUALITY[item.rarity] as QualityLevel;
+  return qualityLabelFromRarity(item.rarity);
 }
 
 const totalCost = computed(

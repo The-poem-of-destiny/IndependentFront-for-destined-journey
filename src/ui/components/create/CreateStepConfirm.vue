@@ -2,8 +2,10 @@
 import { useCreateStore } from '../../stores/create-store';
 import { useAssetImage } from '../../composables/useAssetImage';
 import { ASSET_TYPE_AVATAR_CHAIN } from '@engine/asset-resolve';
-import { ATTRIBUTE_NAMES, RARITY_TO_QUALITY } from '@engine/start-catalog';
-import type { QualityLevel } from '@engine/types';
+import { ATTRIBUTE_NAMES } from '@engine/start-catalog';
+// Q-11: 两处 `as QualityLevel` 强转是因为 RARITY_TO_QUALITY 的值类型是裸 string；
+// 换成归一化入口后返回类型已经是 Rarity，模板里不必再强转，也不必再 `|| '普通'`。
+import { qualityLabelFromRarity } from '../../lib/quality-colors';
 import AvatarPanel from '../shared/AvatarPanel.vue';
 import QualityBadge from '../shared/QualityBadge.vue';
 
@@ -99,20 +101,14 @@ const { url: portraitUrl, isVideo: portraitIsVideo } = useAssetImage(
         <h4>装备</h4>
         <span v-for="e in store.selectedEquipments" :key="e.id" class="item-chip">
           {{ e.name }}
-          <QualityBadge
-            :quality="(RARITY_TO_QUALITY[e.rarity] || '普通') as QualityLevel"
-            size="sm"
-          />
+          <QualityBadge :quality="qualityLabelFromRarity(e.rarity)" size="sm" />
         </span>
       </div>
       <div v-if="store.selectedSkills.length" class="items-summary">
         <h4>技能</h4>
         <span v-for="s in store.selectedSkills" :key="s.id" class="item-chip">
           {{ s.name }}
-          <QualityBadge
-            :quality="(RARITY_TO_QUALITY[s.rarity] || '普通') as QualityLevel"
-            size="sm"
-          />
+          <QualityBadge :quality="qualityLabelFromRarity(s.rarity)" size="sm" />
         </span>
       </div>
       <div v-if="store.selectedItems.length" class="items-summary">

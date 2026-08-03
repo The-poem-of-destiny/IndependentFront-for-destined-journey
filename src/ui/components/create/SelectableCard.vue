@@ -1,30 +1,17 @@
 <script setup lang="ts">
-import type { CatalogItem, CatalogRarityCode } from '@engine/start-catalog';
-import { RARITY_TO_QUALITY } from '@engine/start-catalog';
-import type { QualityLevel } from '@engine/types';
+import type { CatalogItem } from '@engine/start-catalog';
 import QualityBadge from '../shared/QualityBadge.vue';
 import AppButton from '../shared/AppButton.vue';
 import { computed } from 'vue';
+// Q-11: 英文码 → 中文名 / 主题令牌都走唯一入口（此前本文件自带一张英文键颜色表 +
+// 两处 `as QualityLevel` 强转；强转是因为 RARITY_TO_QUALITY 的值类型是裸 string）
+import { qualityLabelFromRarity, qualityVarFromRarity } from '../../lib/quality-colors';
 
 const props = defineProps<{ item: CatalogItem; selected: boolean; disabled?: boolean }>();
 defineEmits<{ select: [item: CatalogItem]; remove: [item: CatalogItem] }>();
 
-const qualityLabel = computed(() => RARITY_TO_QUALITY[props.item.rarity] as QualityLevel);
-
-// 稀有度 → 主题品质令牌（色点 + 名字着色）
-const RARITY_QUALITY_VAR: Record<string, string> = {
-  common: '--theme-quality-common',
-  uncommon: '--theme-quality-uncommon',
-  rare: '--theme-quality-rare',
-  epic: '--theme-quality-epic',
-  legendary: '--theme-quality-legendary',
-  mythic: '--theme-quality-mythic',
-  only: '--theme-quality-unique',
-};
-
-const qualityColor = computed(
-  () => `var(${RARITY_QUALITY_VAR[props.item.rarity] ?? '--theme-quality-common'})`,
-);
+const qualityLabel = computed(() => qualityLabelFromRarity(props.item.rarity));
+const qualityColor = computed(() => qualityVarFromRarity(props.item.rarity));
 </script>
 
 <template>
