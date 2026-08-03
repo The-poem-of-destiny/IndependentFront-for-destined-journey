@@ -35,6 +35,7 @@ import {
   parseMemorySummaryOutput,
   summarizeAndSave,
   createCompressionSummaryMemory,
+  MEMORY_MIN_CHARS,
 } from './memory-summarizer';
 import type { MemorySummaryOutput } from './memory-summarizer';
 
@@ -84,18 +85,18 @@ describe('validateMemoryContent', () => {
     expect(r.reason).toContain('为空');
   });
 
-  it('内容不足默认 200 字应返回 valid=false 并报告字数', () => {
+  it('内容不足默认门槛应返回 valid=false 并报告字数（Q-03 统一 100 字）', () => {
     const short = '短内容';
     const r = validateMemoryContent(short);
     expect(r.valid).toBe(false);
     expect(r.reason).toContain('不足');
-    expect(r.reason).toContain('200');
+    expect(r.reason).toContain(String(MEMORY_MIN_CHARS));
     expect(r.reason).toContain(String(short.length));
   });
 
-  it('内容刚好满足默认 200 字应返回 valid=true', () => {
-    const exact200 = 'A'.repeat(200);
-    const r = validateMemoryContent(exact200);
+  it('内容刚好满足默认门槛应返回 valid=true（Q-03 统一 100 字）', () => {
+    const exact = 'A'.repeat(MEMORY_MIN_CHARS);
+    const r = validateMemoryContent(exact);
     expect(r.valid).toBe(true);
     expect(r.reason).toBeUndefined();
   });
@@ -193,6 +194,18 @@ describe('parseMemorySummaryOutput', () => {
     expect(result).not.toBeNull();
     expect(result!.timeRangeStart).toBe('未知');
     expect(result!.timeRangeEnd).toBe('未知');
+  });
+
+  it('Q-03: <json> 围栏包裹的 AI 输出应被剥壳后解析（UI 侧方言下沉）', () => {
+    const wrapped = `<json>${JSON.stringify({
+      content: longContent('被围栏包裹'),
+      hiddenLine: '暗线',
+      keywords: ['剥壳'],
+    })}</json>`;
+    const result = parseMemorySummaryOutput(wrapped);
+    expect(result).not.toBeNull();
+    expect(result!.content).toBe(longContent('被围栏包裹'));
+    expect(result!.keywords).toEqual(['剥壳']);
   });
 
   it('importance 超出 1-10 范围时应 clamp', () => {

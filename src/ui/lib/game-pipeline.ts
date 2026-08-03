@@ -254,6 +254,15 @@ export class GamePipeline {
       // 把这三个值挂实例传给事件回调（回调通过闭包捕获 run() 局部变量）。
       this.chainData = { agentConfigs, worldBooks, presets };
 
+      // Q-07：战斗外效果系统接线 —— 对当前存档已装备物品执行 init + 注册
+      // （幂等；存档切换时由 unwireEffectSystem 拆除后重建）
+      try {
+        const { wireEffectSystem } = await import('@engine/effect-wiring');
+        wireEffectSystem(this.saveId, this.game.characters);
+      } catch (err) {
+        console.warn('[GamePipeline] 效果系统接线失败（不阻塞本轮）:', err);
+      }
+
       // 3. 创建编排器
       const options: OrchestratorOptions = {
         pipeline: DEFAULT_AGENT_PIPELINE,
@@ -1246,13 +1255,15 @@ export class GamePipeline {
       );
       if (terminal.length > 0) {
         const { saveMemory } = await import('@engine/database');
+        const { generateMemoryId } = await import('@engine/memory-summarizer');
         const gt = this.currentContext?.gameTime;
         const timeStr = gt ? `${gt.era}${gt.year}年${gt.month}月${gt.day}日` : '未知';
         for (const event of terminal) {
           const mem = eventToMemory(event, this.saveId, { start: timeStr, end: timeStr });
+          // Q-03：与 memory_summary 共用同一 id 发号器（MEM6位流水号），不再用 base36 时间戳
           await saveMemory({
             ...mem,
-            id: `MEM${Date.now().toString(36).toUpperCase()}${Math.floor(Math.random() * 100)}`,
+            id: await generateMemoryId(this.saveId),
           } as MemoryRecord);
         }
         console.log(
@@ -1269,52 +1280,51 @@ export class GamePipeline {
     }
   }
 
-  /** 解析 memory_summary 输出并持久化到 IndexedDB */
+  /** 解析 memory_summary 输出并持久化到 IndexedDB
+   *  Q-03：收回引擎 —— 解析/校验/id 生成/embedding 全走 memory-summarizer.summarizeAndSave，
+   *  本方法只负责喂入 Agent 输出与 embedding 端点。门槛统一 MEMORY_MIN_CHARS（100 字）。 */
   private async persistMemorySummary(result: AgentResult) {
     try {
+      const { summarizeAndSave } = await import('@engine/memory-summarizer');
       const raw = result.rawResponse || '';
-      // 兼容 <json>...</json> 和裸 JSON 两种格式
-      const jsonMatch = raw.match(/<json>([\s\S]*?)<\/json>/);
-      const jsonStr = jsonMatch ? jsonMatch[1].trim() : raw;
-      const parsed = JSON.parse(jsonStr);
 
-      if (!parsed.content || parsed.content.length < 50) {
-        console.warn(
-          '[GamePipeline] memory_summary content 过短，跳过落库:',
-          parsed.content?.length,
-        );
-        return;
-      }
+      // 从设置构建 embedding 端点（embeddingEndpointId 指向 API 池，model 覆盖默认）
+      const embeddingEndpoint = this.buildEmbeddingEndpoint();
 
-      const { saveMemory } = await import('@engine/database');
-      const now = Date.now();
-      const id = `MEM${now.toString(36).toUpperCase()}`;
-
-      const memory: MemoryRecord = {
-        id,
+      const memory = await summarizeAndSave({
         saveId: this.saveId,
-        createdAt: now,
-        realTimestamp: now,
-        content: parsed.content || '',
-        hiddenLine: parsed.hiddenLine || '',
-        keywords: parsed.keywords || [],
-        relatedCharacterIds: parsed.relatedCharacterIds || [],
-        importance: typeof parsed.importance === 'number' ? parsed.importance : 5,
-        timeRange: {
-          start: parsed.timeRangeStart || '',
-          end: parsed.timeRangeEnd || '',
-        },
-      };
+        agentRawOutput: raw,
+        gameTimeRange: this.currentContext?.gameTime ? { start: '未知', end: '未知' } : undefined,
+        embeddingEndpoint,
+      });
 
-      await saveMemory(memory);
       // 更新本地 recentMemories 供下一轮召回
-      this.game.recentMemories = [...(this.game.recentMemories || []), memory];
-      console.log(
-        `[GamePipeline] memory_summary 落库成功: ${id} importance=${memory.importance} keywords=${memory.keywords.join(',')}`,
-      );
+      if (memory) {
+        this.game.recentMemories = [...(this.game.recentMemories || []), memory];
+        console.log(
+          `[GamePipeline] memory_summary 落库成功: ${memory.id} importance=${memory.importance} keywords=${memory.keywords.join(',')}`,
+        );
+      }
     } catch (e) {
       console.error('[GamePipeline] memory_summary 解析/存储失败:', e);
     }
+  }
+
+  /** 从设置构建 embedding 端点（Q-03 embedding 接线）。
+   *  embeddingEndpointId → API 池对应 endpoint；embeddingModel 覆盖 defaultModel。
+   *  未配置 embedding endpoint → 返回 undefined（summarizeAndSave 不计算向量，退化为重要度排序）。 */
+  private buildEmbeddingEndpoint():
+    { baseUrl: string; apiKey: string; defaultModel: string } | undefined {
+    const s = this.settings.settings;
+    const endpointId = s.embeddingEndpointId as string | null;
+    if (!endpointId) return undefined;
+    const ep = this.buildEndpoints().find((e) => e.id === endpointId);
+    if (!ep) return undefined;
+    return {
+      baseUrl: ep.baseUrl,
+      apiKey: ep.apiKey,
+      defaultModel: (s.embeddingModel as string) || ep.defaultModel,
+    };
   }
 
   /** 处理战斗触发 — 唤起 combo v3 Coordinator（v2 分支 M5 已退役 → 优雅提示） */

@@ -13,6 +13,14 @@ import type { MemoryRecord, AgentContext } from './types';
 import { getMemories, saveMemory } from './database';
 import { computeEmbedding } from './memory-store';
 
+// ========== 常量 ==========
+
+/**
+ * 记忆正文最低字数门槛（Q-03 裁定：引擎侧 200 与 UI 侧 50 的分歧，统一取 100）。
+ * 唯一真源 —— UI 侧（game-pipeline.persistMemorySummary）不得自带阈值。
+ */
+export const MEMORY_MIN_CHARS = 100;
+
 // ========== MEM 编号 ==========
 
 /** 生成下一条记忆的 ID（格式: MEM + 6 位编号） */
@@ -34,10 +42,10 @@ export async function generateMemoryId(saveId: string): Promise<string> {
 
 // ========== 校验 ==========
 
-/** 校验记忆正文是否满足最低字数要求 */
+/** 校验记忆正文是否满足最低字数要求（门槛统一取 MEMORY_MIN_CHARS，Q-03） */
 export function validateMemoryContent(
   content: string,
-  minChars: number = 200,
+  minChars: number = MEMORY_MIN_CHARS,
 ): {
   valid: boolean;
   reason?: string;
@@ -56,6 +64,15 @@ export function validateMemoryContent(
 
 // ========== Agent 输出解析 ==========
 
+/**
+ * 剥掉 AI 输出外层可能包裹的 <json>...</json> 围栏（Q-03 下沉 UI 侧方言）。
+ * UI 侧（game-pipeline.persistMemorySummary）曾有内联剥壳，现统一在此。
+ */
+export function stripJsonEnvelope(raw: string): string {
+  const m = raw.match(/<json>([\s\S]*?)<\/json>/);
+  return m ? m[1].trim() : raw.trim();
+}
+
 /** memory_summary Agent 的输出结构 */
 export interface MemorySummaryOutput {
   content: string;
@@ -66,11 +83,12 @@ export interface MemorySummaryOutput {
   timeRangeEnd: string;
 }
 
-/** 解析 memory_summary Agent 的 JSON 输出 */
+/** 解析 memory_summary Agent 的 JSON 输出（先过 stripJsonEnvelope 剥壳，Q-03） */
 export function parseMemorySummaryOutput(rawOutput: string): MemorySummaryOutput | null {
+  const raw = stripJsonEnvelope(rawOutput);
   try {
     // 尝试直接解析 JSON
-    const parsed = JSON.parse(rawOutput) as MemorySummaryOutput;
+    const parsed = JSON.parse(raw) as MemorySummaryOutput;
 
     if (!parsed.content || !parsed.hiddenLine || !Array.isArray(parsed.keywords)) {
       return null;
@@ -86,7 +104,7 @@ export function parseMemorySummaryOutput(rawOutput: string): MemorySummaryOutput
     };
   } catch {
     // 尝试从文本中提取 JSON
-    const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
 
     try {
