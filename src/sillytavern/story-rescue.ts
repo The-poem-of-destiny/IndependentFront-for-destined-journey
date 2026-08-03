@@ -17,9 +17,9 @@
  * - 场景 1 的 raw 空门控保证正常轮（rawResponse 有值）完全不受影响。
  * - 场景 2 仅在 rawResponse 含 <maintext 且不在开头时才截；裸正文（无标签）不动。
  *
- * 流式局限：本模块只修正最终 AgentResult，不重写流式过程中已推给前端的
- * onChunk 增量。场景 1 流式时前端会短暂空白，场景 2 流式时前端会先看到
- * 泄漏的思维链，待流结束后以最终 result 重渲染修正。
+ * 流式边界：本模块只修正最终 AgentResult，不改传输层的 onChunk 增量。
+ * GamePipeline 会把累计原文交给 story-output 投影；`<maintext>` 到达前的内容会缓冲，
+ * 到达后只显示正文。场景 1 的正文仍要等最终救援后才可见。
  */
 
 import type { AgentResult } from './types';

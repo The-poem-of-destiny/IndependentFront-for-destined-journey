@@ -29,6 +29,26 @@ function mockFetch(response: any, status = 200) {
   });
 }
 
+function mockStreamingFetch(chunks: string[], close = true) {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      if (close) controller.close();
+    },
+  });
+
+  return vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    headers: new Headers(),
+    body,
+    text: async () => '',
+  });
+}
+
 // ========== buildUserId / parseUserId ==========
 
 describe('buildUserId', () => {
@@ -76,6 +96,10 @@ describe('AgentClient', () => {
       timeout: 5000,
       maxRetries: 0,
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe('userId', () => {
@@ -279,6 +303,196 @@ describe('AgentClient', () => {
         controller.signal,
       );
       expect(result.error).toBeDefined();
+    });
+  });
+
+  describe('chatStream — SSE settlement', () => {
+    it('supports CRLF and data without a space, then includes usage sent after finish_reason', async () => {
+      const onChunk = vi.fn();
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+      globalThis.fetch = mockStreamingFetch([
+        [
+          `data: ${JSON.stringify({
+            choices: [{ delta: { content: 'Hello' }, finish_reason: null }],
+          })}\r\n\r\n`,
+          `data:${JSON.stringify({
+            choices: [{ delta: {}, finish_reason: 'stop' }],
+          })}\r\n\r\n`,
+          `data: ${JSON.stringify({
+            choices: [],
+            usage: {
+              total_tokens: 42,
+              prompt_cache_hit_tokens: 12,
+              prompt_cache_miss_tokens: 5,
+              completion_tokens: 7,
+            },
+          })}\r\n\r\n`,
+          'data:[DONE]\r\n\r\n',
+        ].join(''),
+      ]);
+
+      await client.chatStream(
+        { messages: [{ role: 'user', content: 'test' }] },
+        { onChunk, onComplete, onError },
+      );
+
+      expect(onError).not.toHaveBeenCalled();
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(onComplete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fullText: 'Hello',
+          tokensUsed: 42,
+          cacheHit: true,
+          cacheHitTokens: 12,
+          cacheMissTokens: 5,
+          completionTokens: 7,
+        }),
+      );
+      expect(onChunk.mock.calls).toEqual([
+        ['Hello', false],
+        ['Hello', true],
+      ]);
+    });
+
+    it('concatenates multiple CRLF data fields in one SSE event before parsing JSON', async () => {
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+      globalThis.fetch = mockStreamingFetch([
+        [
+          'data: {"choices":[{"delta":\r\n',
+          'data: {"content":"split"},"finish_reason":null}]}\r\n\r\n',
+          `data: ${JSON.stringify({
+            choices: [{ delta: {}, finish_reason: 'stop' }],
+          })}\r\n\r\n`,
+          'data: [DONE]\r\n\r\n',
+        ].join(''),
+      ]);
+
+      await client.chatStream(
+        { messages: [{ role: 'user', content: 'test' }] },
+        { onChunk: vi.fn(), onComplete, onError },
+      );
+
+      expect(onError).not.toHaveBeenCalled();
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ fullText: 'split' }));
+    });
+
+    it('completes after a bounded grace period when finish_reason arrives but the body stays open', async () => {
+      vi.useFakeTimers();
+      const onChunk = vi.fn();
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+      globalThis.fetch = mockStreamingFetch(
+        [
+          `data: ${JSON.stringify({
+            choices: [{ delta: { content: 'final' }, finish_reason: 'stop' }],
+          })}\n\n`,
+        ],
+        false,
+      );
+
+      const streamPromise = client.chatStream(
+        { messages: [{ role: 'user', content: 'test' }] },
+        { onChunk, onComplete, onError },
+      );
+      for (let i = 0; i < 10 && onChunk.mock.calls.length === 0; i++) {
+        await Promise.resolve();
+      }
+
+      expect(onChunk).toHaveBeenCalledWith('final', false);
+      expect(onComplete).not.toHaveBeenCalled();
+      await vi.runOnlyPendingTimersAsync();
+      await streamPromise;
+
+      expect(onError).not.toHaveBeenCalled();
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ fullText: 'final' }));
+    });
+
+    it('completes on [DONE] even when no finish_reason was sent', async () => {
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+      globalThis.fetch = mockStreamingFetch([
+        `data: ${JSON.stringify({
+          choices: [{ delta: { content: 'done' }, finish_reason: null }],
+        })}\n\ndata: [DONE]\n\n`,
+      ]);
+
+      await client.chatStream(
+        { messages: [{ role: 'user', content: 'test' }] },
+        { onChunk: vi.fn(), onComplete, onError },
+      );
+
+      expect(onError).not.toHaveBeenCalled();
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ fullText: 'done' }));
+    });
+
+    it('flushes the final unterminated event at EOF and preserves accumulated tool calls', async () => {
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+      globalThis.fetch = mockStreamingFetch([
+        `data: ${JSON.stringify({
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_1',
+                    function: { name: 'lookup', arguments: '{"name":' },
+                  },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+        })}\n\n`,
+        `data:${JSON.stringify({
+          choices: [
+            {
+              delta: {
+                tool_calls: [{ index: 0, function: { arguments: '"Luna"}' } }],
+              },
+              finish_reason: 'tool_calls',
+            },
+          ],
+        })}`,
+      ]);
+
+      await client.chatStream(
+        { messages: [{ role: 'user', content: 'test' }] },
+        { onChunk: vi.fn(), onComplete, onError },
+      );
+
+      expect(onError).not.toHaveBeenCalled();
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(onComplete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          toolCalls: [{ id: 'call_1', name: 'lookup', arguments: { name: 'Luna' } }],
+        }),
+      );
+    });
+
+    it('reports an unexpected EOF exactly once when neither finish_reason nor [DONE] arrives', async () => {
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+      globalThis.fetch = mockStreamingFetch([
+        `data: ${JSON.stringify({
+          choices: [{ delta: { content: 'partial' }, finish_reason: null }],
+        })}\n\n`,
+      ]);
+
+      await client.chatStream(
+        { messages: [{ role: 'user', content: 'test' }] },
+        { onChunk: vi.fn(), onComplete, onError },
+      );
+
+      expect(onComplete).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith('Stream ended unexpectedly before completion');
     });
   });
 });

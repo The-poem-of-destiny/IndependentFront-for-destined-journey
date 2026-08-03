@@ -8,7 +8,12 @@
  * 但消费方（useBeautify）不依赖它做游戏内判断。
  */
 import { describe, it, expect } from 'vitest';
-import { resolveAutoEnable, collectActiveSignalsFromEntries, processRules } from './beautifier';
+import {
+  resolveAutoEnable,
+  collectActiveSignalsFromEntries,
+  mergeRules,
+  processRules,
+} from './beautifier';
 import type { BeautifierRule } from './types';
 
 function rule(over: Partial<BeautifierRule>): BeautifierRule {
@@ -117,6 +122,35 @@ describe('resolveAutoEnable — 三维 OR 匹配', () => {
   });
 });
 
+describe('mergeRules — 手动翻转内置默认状态', () => {
+  it('同一份兼容 ID 列表可关闭默认开启规则并开启默认关闭规则', () => {
+    const enabledByDefault = rule({ id: 'on', enabled: true });
+    const disabledByDefault = rule({ id: 'off', enabled: false });
+    const merged = mergeRules(
+      [enabledByDefault, disabledByDefault],
+      [],
+      ['on', 'off'],
+      new Set(),
+      new Set(),
+      new Set(),
+    );
+
+    expect(merged.find(({ id }) => id === 'on')?.enabled).toBe(false);
+    expect(merged.find(({ id }) => id === 'off')?.enabled).toBe(true);
+  });
+
+  it('auto-enabled locked rules cannot be flipped off', () => {
+    const preset = rule({
+      id: 'auto',
+      enabled: false,
+      autoEnable: { worldBookEntryUids: [413] },
+    });
+    const [merged] = mergeRules([preset], [], ['auto'], new Set(), new Set([413]), new Set());
+
+    expect(merged).toMatchObject({ enabled: true, locked: true });
+  });
+});
+
 // ========== processRules ==========
 
 describe('processRules — 原文匹配 + 占位符保护 (2026-08-02 回归)', () => {
@@ -142,13 +176,12 @@ describe('processRules — 原文匹配 + 占位符保护 (2026-08-02 回归)', 
     expect(out).not.toContain('&lt;dalian');
   });
 
-  it('捕获组内容转义后代入 replacement（$1 里的 < > 不成真标签）', () => {
+  it('捕获组按原生 JS replace 语义原样代入，交由隔离渲染面承载', () => {
     const r = tagRule();
     const out = processRules('<dalian name="<x>" mood="m"> 文本 </dalian>', 'maintext', [r]);
-    expect(out).toContain('&lt;x&gt;');
-    // 捕获组转义后安全代入（不会因为 < > 拆坏 HTML 结构）
+    expect(out).toContain('<x>');
     expect(out).toContain('<div class="phantom">');
-    expect(out).toContain('&lt;x&gt;-m-文本');
+    expect(out).toContain('<x>-m-文本');
   });
 
   it('🔴 未匹配的原文恶意片段必须被转义成纯文本实体（P1-01 XSS 防线不降级）', () => {
@@ -182,7 +215,7 @@ describe('processRules — 原文匹配 + 占位符保护 (2026-08-02 回归)', 
   });
 });
 
-// ========== item_info / task_info 卡片放行 + 消毒 (2026-08-02) ==========
+// ========== item_info / task_info 卡片放行 (2026-08-02) ==========
 
 describe('processRules — item_info/task_info 卡片', () => {
   it('🔴 回归: <item_info> 内 HTML 放行渲染（不再转义成 &lt;item_info&gt; 文本）', () => {
@@ -208,27 +241,25 @@ describe('processRules — item_info/task_info 卡片', () => {
     expect(out).not.toContain('&lt;task_info&gt;');
   });
 
-  it('🔴 消毒: <script> 内容被整体删除（不落 DOM、不执行）', () => {
+  it('保留 <script> 结构，由 UI opaque iframe 隔离执行', () => {
     const html = `<item_info><div>安全内容</div><script>alert(1)</script></item_info>`;
     const out = processRules(html, 'maintext', []);
     expect(out).toContain('安全内容');
-    expect(out).not.toContain('script');
-    expect(out).not.toContain('alert(1)');
+    expect(out).toContain('<script>alert(1)</script>');
   });
 
-  it('🔴 消毒: onerror/onclick 事件属性被剥离（P1-01 XSS 防线）', () => {
+  it('保留事件属性，由 UI opaque iframe 隔离执行', () => {
     const html = `<item_info><img src=x onerror=alert(1)><div onclick="steal()">卡</div></item_info>`;
     const out = processRules(html, 'maintext', []);
-    // 事件属性消失，但卡片结构保留
-    expect(out).not.toContain('onerror');
-    expect(out).not.toContain('onclick');
+    expect(out).toContain('onerror=alert(1)');
+    expect(out).toContain('onclick="steal()"');
     expect(out).toContain('卡');
   });
 
-  it('🔴 消毒: javascript: URL 被剥离', () => {
+  it('保留 URL 结构，但不把它放进应用 DOM', () => {
     const html = `<item_info><a href="javascript:alert(1)">点我</a></item_info>`;
     const out = processRules(html, 'maintext', []);
-    expect(out).not.toContain('javascript:');
+    expect(out).toContain('javascript:alert(1)');
     expect(out).toContain('点我');
   });
 

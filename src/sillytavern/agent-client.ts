@@ -56,6 +56,8 @@ export interface ChatWithToolsOptions {
 
 // ========== Streaming Types ==========
 
+const POST_FINISH_GRACE_MS = 1000;
+
 /** 流式响应回调集合 */
 export interface StreamCallbacks {
   /** 增量文本块（delta），isComplete 在最后一块为 true */
@@ -322,6 +324,21 @@ export class AgentClient {
     signal?: AbortSignal,
   ): Promise<void> {
     const startTime = Date.now();
+    let settled = false;
+    let postFinishTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const clearPostFinishTimer = () => {
+      if (postFinishTimer === undefined) return;
+      clearTimeout(postFinishTimer);
+      postFinishTimer = undefined;
+    };
+
+    const settleError = (message: string) => {
+      if (settled) return;
+      settled = true;
+      clearPostFinishTimer();
+      callbacks.onError(message);
+    };
 
     const controller = new AbortController();
     let abortedByTimeout = false;
@@ -408,13 +425,164 @@ export class AgentClient {
       let cacheHitTokens = 0;
       let cacheMissTokens = 0;
       let completionTokens = 0;
+      let sawFinishReason = false;
 
       // Accumulate tool calls by index
       const toolCallAccum: Map<number, { id: string; name: string; arguments: string }> = new Map();
 
+      const complete = () => {
+        if (settled) return;
+        settled = true;
+        clearPostFinishTimer();
+
+        const toolCalls: Array<{
+          id: string;
+          name: string;
+          arguments: Record<string, any>;
+        }> = [];
+        for (const [, acc] of toolCallAccum) {
+          let parsedArgs: Record<string, any> = {};
+          try {
+            parsedArgs = JSON.parse(acc.arguments || '{}');
+          } catch {
+            parsedArgs = {};
+          }
+          toolCalls.push({
+            id: acc.id,
+            name: acc.name,
+            arguments: parsedArgs,
+          });
+        }
+
+        try {
+          callbacks.onChunk(fullText, true);
+        } finally {
+          callbacks.onComplete({
+            fullText,
+            toolCalls,
+            reasoning: fullReasoning,
+            tokensUsed,
+            cacheHit,
+            cacheHitTokens,
+            cacheMissTokens,
+            completionTokens,
+            duration: Date.now() - startTime,
+          });
+        }
+      };
+
+      const armPostFinishTimer = () => {
+        clearPostFinishTimer();
+        postFinishTimer = setTimeout(() => {
+          if (settled) return;
+          void reader.cancel().catch(() => undefined);
+          controller.abort();
+          complete();
+        }, POST_FINISH_GRACE_MS);
+      };
+
+      const processData = (dataStr: string) => {
+        if (dataStr === '[DONE]') {
+          complete();
+          return;
+        }
+
+        let chunk: any;
+        try {
+          chunk = JSON.parse(dataStr);
+        } catch {
+          // Skip unparseable chunks gracefully
+          return;
+        }
+
+        if (typeof chunk.usage?.total_tokens === 'number') {
+          tokensUsed = chunk.usage.total_tokens;
+        }
+        if (typeof chunk.usage?.prompt_cache_hit_tokens === 'number') {
+          cacheHitTokens = chunk.usage.prompt_cache_hit_tokens;
+        }
+        if (typeof chunk.usage?.prompt_cache_miss_tokens === 'number') {
+          cacheMissTokens = chunk.usage.prompt_cache_miss_tokens;
+        }
+        if (typeof chunk.usage?.completion_tokens === 'number') {
+          completionTokens = chunk.usage.completion_tokens;
+        }
+
+        if (chunk.cache_hit === true || chunk.usage?.prompt_cache_hit_tokens > 0) {
+          cacheHit = true;
+        }
+
+        const delta = chunk.choices?.[0]?.delta;
+        const finishReason = chunk.choices?.[0]?.finish_reason;
+
+        if (delta) {
+          if (delta.content) {
+            fullText += delta.content;
+            callbacks.onChunk(delta.content, false);
+          }
+
+          if (delta.reasoning_content) {
+            fullReasoning += delta.reasoning_content;
+          }
+
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const idx: number = tc.index ?? 0;
+
+              let acc = toolCallAccum.get(idx);
+              if (!acc) {
+                acc = { id: '', name: '', arguments: '' };
+                toolCallAccum.set(idx, acc);
+              }
+
+              if (tc.id) acc.id = tc.id;
+              if (tc.function?.name) acc.name = tc.function.name;
+              if (tc.function?.arguments) {
+                acc.arguments += tc.function.arguments;
+              }
+
+              callbacks.onToolCall?.({
+                id: acc.id,
+                name: acc.name,
+                arguments: acc.arguments,
+              });
+            }
+          }
+        }
+
+        if (finishReason !== null && finishReason !== undefined) {
+          sawFinishReason = true;
+        }
+        if (sawFinishReason) {
+          armPostFinishTimer();
+        }
+      };
+
+      const processEvent = (event: string) => {
+        if (!event.trim() || settled) return;
+
+        const dataLines: string[] = [];
+        for (const line of event.split(/\r?\n/)) {
+          if (!line.startsWith('data:')) continue;
+          dataLines.push(line.slice(5).trimStart());
+        }
+        if (dataLines.length > 0) {
+          processData(dataLines.join('\n'));
+        }
+      };
+
+      const processCompleteEvents = () => {
+        const events = buffer.split(/\r?\n\r?\n/);
+        buffer = events.pop() ?? '';
+        for (const event of events) {
+          processEvent(event);
+          if (settled) break;
+        }
+      };
+
       try {
         let firstChunkReceived = false;
-        while (true) {
+        while (!settled) {
           // Check for external abort between reads
           if (signal?.aborted) {
             throw new DOMException('Aborted by external signal', 'AbortError');
@@ -430,124 +598,23 @@ export class AgentClient {
           }
 
           buffer += decoder.decode(value, { stream: true });
+          processCompleteEvents();
+        }
 
-          // Split on double-newline (SSE event boundary)
-          const events = buffer.split('\n\n');
-          // The last element may be incomplete — keep it in buffer
-          buffer = events.pop() ?? '';
+        if (!settled) {
+          buffer += decoder.decode();
+          processCompleteEvents();
+          if (buffer.trim()) {
+            processEvent(buffer);
+            buffer = '';
+          }
+        }
 
-          for (const event of events) {
-            if (!event.trim()) continue;
-
-            for (const line of event.split('\n')) {
-              if (!line.startsWith('data: ')) continue;
-
-              const dataStr = line.slice(6); // strip "data: "
-              if (dataStr === '[DONE]') continue;
-
-              try {
-                const chunk = JSON.parse(dataStr);
-
-                // Track usage if present
-                if (chunk.usage?.total_tokens) {
-                  tokensUsed = chunk.usage.total_tokens;
-                }
-                if (chunk.usage?.prompt_cache_hit_tokens) {
-                  cacheHitTokens = chunk.usage.prompt_cache_hit_tokens;
-                }
-                if (chunk.usage?.prompt_cache_miss_tokens) {
-                  cacheMissTokens = chunk.usage.prompt_cache_miss_tokens;
-                }
-                if (chunk.usage?.completion_tokens) {
-                  completionTokens = chunk.usage.completion_tokens;
-                }
-
-                // Detect cache hit from chunk headers (DeepSeek)
-                if (chunk.cache_hit === true || chunk.usage?.prompt_cache_hit_tokens > 0) {
-                  cacheHit = true;
-                }
-
-                const delta = chunk.choices?.[0]?.delta;
-                const finishReason = chunk.choices?.[0]?.finish_reason;
-
-                if (delta) {
-                  // Text content delta
-                  if (delta.content) {
-                    fullText += delta.content;
-                    callbacks.onChunk(delta.content, false);
-                  }
-
-                  // Reasoning content delta (DeepSeek)
-                  if (delta.reasoning_content) {
-                    fullReasoning += delta.reasoning_content;
-                  }
-
-                  // Tool call deltas
-                  if (delta.tool_calls) {
-                    for (const tc of delta.tool_calls) {
-                      const idx: number = tc.index ?? 0;
-
-                      let acc = toolCallAccum.get(idx);
-                      if (!acc) {
-                        acc = { id: '', name: '', arguments: '' };
-                        toolCallAccum.set(idx, acc);
-                      }
-
-                      if (tc.id) acc.id = tc.id;
-                      if (tc.function?.name) acc.name = tc.function.name;
-                      if (tc.function?.arguments) {
-                        acc.arguments += tc.function.arguments;
-                      }
-
-                      // Notify with current accumulated args
-                      callbacks.onToolCall?.({
-                        id: acc.id,
-                        name: acc.name,
-                        arguments: acc.arguments,
-                      });
-                    }
-                  }
-                }
-
-                // Check finish_reason
-                if (finishReason !== null && finishReason !== undefined) {
-                  // Build final tool calls array
-                  const toolCalls: Array<{
-                    id: string;
-                    name: string;
-                    arguments: Record<string, any>;
-                  }> = [];
-                  for (const [, acc] of toolCallAccum) {
-                    let parsedArgs: Record<string, any> = {};
-                    try {
-                      parsedArgs = JSON.parse(acc.arguments || '{}');
-                    } catch {
-                      parsedArgs = {};
-                    }
-                    toolCalls.push({
-                      id: acc.id,
-                      name: acc.name,
-                      arguments: parsedArgs,
-                    });
-                  }
-
-                  callbacks.onChunk(fullText, true);
-                  callbacks.onComplete({
-                    fullText,
-                    toolCalls,
-                    reasoning: fullReasoning,
-                    tokensUsed,
-                    cacheHit,
-                    cacheHitTokens,
-                    cacheMissTokens,
-                    completionTokens,
-                    duration: Date.now() - startTime,
-                  });
-                }
-              } catch {
-                // Skip unparseable chunks gracefully
-              }
-            }
+        if (!settled) {
+          if (sawFinishReason) {
+            complete();
+          } else {
+            settleError('Stream ended unexpectedly before completion');
           }
         }
       } finally {
@@ -556,17 +623,18 @@ export class AgentClient {
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
         if (abortedByTimeout) {
-          callbacks.onError(
+          settleError(
             `请求超时（${Math.round(streamTimeout / 1000)}秒内未收到响应），请重试或减少上下文注入`,
           );
         } else {
-          callbacks.onError('Request aborted');
+          settleError('Request aborted');
         }
       } else {
-        callbacks.onError(e instanceof Error ? e.message : String(e));
+        settleError(e instanceof Error ? e.message : String(e));
       }
     } finally {
       clearTimeout(timeoutId);
+      clearPostFinishTimer();
       signal?.removeEventListener('abort', onExternalAbort);
     }
   }

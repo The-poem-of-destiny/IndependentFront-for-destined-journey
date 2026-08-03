@@ -1,5 +1,7 @@
 # 创意工坊兼容层设计 v2
 
+> **创作者入口**：[世界书 EJS 与输出美化正则创作指南](../reference/worldbook-ejs-regex-authoring-guide.md)。本文记录工坊架构决策；D16 的早期 `v-html` 结论已由“D16 二次修订”取代。
+>
 > 状态：**已实施（Phase 0 / 0b / 1 全部落地，2026-07-31）** · 分支 `creative-workshop-integration-v1`
 > 设计本身评审通过于 2026-07-31 拷问定稿；实施纪要见 `docs/CHANGELOG.md`「工坊 P0 / P0b / P1」。
 >
@@ -12,6 +14,7 @@
 >
 > 1. **新增 Phase 0b —— 美化规则迁出 localStorage**（Dexie v15 `beautifierRules` 表 + `AppSettings.beautifierPresetRules` 字段整个删除）。定稿时未预见：§1 D5 把「美化规则仍只在 localStorage」列为**范围外**，实施中发现内置规则 22 条 = 386,645 字符（≈378 KB）与工坊正则（再 ≈494 KB）困在同一个配额里，与 Phase 0 是同一个缺陷，遂就地补做。
 > 2. Phase 0 迁移在审查中修掉两个会丢数据的缺陷（重复 id 静默合并 / 导入旧备份清空 worldBooks 表），详见 CHANGELOG。
+> 3. **新增正则专用持久存储**（Dexie v16 `regexStorage`）：所有正则、信任级别与规则预览共享一个隔离的不可信命名空间，以同步 `localStorage` 镜像兼容既有 replacement；它不是应用 storage 或任意 Dexie 访问权。
 >
 > **该取舍已解除**：§0 那句「Phase 1 装进来的世界书条目在 Phase 2 落地前不会被求值」**不再是现状** —— **Phase 2 已实施（待真机）**，工坊与内置条目正文里的 EJS 现在都在提示装配期求值（ADR-30 两轴契约），设计与实施细节见 `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`。
 
@@ -23,6 +26,7 @@
 | ------------ | --------------------------------------------------------------------------------------- | -------------------------------------- | ------------------------ |
 | **Phase 0**  | 世界书从 localStorage 迁移到 Dexie                                                      | 无 —— 独立价值，且是 Phase 1 的前置    | ✅ 已实施（Dexie v14）   |
 | **Phase 0b** | 美化规则从 localStorage 迁移到 Dexie                                                    | 无 —— **实施期新增**，定稿时未预见     | ✅ 已实施（Dexie v15）   |
+| **正则存储** | 共享隔离 KV：同步 iframe 镜像 + Dexie 持久化/广播                                       | D16 iframe                             | ✅ 已实施（Dexie v16）   |
 | **Phase 1**  | 创意工坊：浏览 · 下载 · 安装 · 更新 · 卸载                                              | Phase 0                                | ✅ 已实施 + 真机走查已过 |
 | **Phase 2**  | EJS 沙盒 + 只读 stats 投影（ADR-30，设计见 `2026-07-31-workshop-phase2-ejs-design.md`） | 无强依赖，但工坊内容需要它才能真正生效 | ✅ 已实施（待真机）      |
 
@@ -90,6 +94,8 @@ this.version(14).stores({
 **范围外（另行跟踪）**：Agent 配置、美化规则、主题仍然只在 localStorage、仍然不进备份。这是同一个缺陷的另一半，但扩进本次工作会失控。
 
 > 📌 **实施期修正**：其中**美化规则已在 Phase 0b 补做完毕**（Dexie v15 `beautifierRules` 表 + 进 FullBackup）。Agent 配置与主题**仍在 localStorage、仍不进备份**，缺陷剩这一半。
+
+> 📌 **2026-08-02 增补**：Dexie v16 `regexStorage` 也进入 `FullBackup`，导入采用相同三态语义（pre-v16 字段缺失 → 保留现表，`[]` → 清空，有行 → 覆盖）。工坊更新与卸载不清理该表，使正则 UI 偏好与自有数据跨版本保留。
 
 ---
 
@@ -168,7 +174,7 @@ const allowedUids = enabledByPartition.get(book.partition);
 ### D12 — UI 粒度是项目，不做冲突拦截
 
 - 勾一个项目 → 写入其全部条目的 `creative_workshop:<uid>`。用户不需要在维拉的 12 条里挑 11 条；那 12 条是一个作品。
-- **不做命定核心冲突检测**：工坊项目可能自带命定核心，与内置单选的那个撞。但 `tags` 是上游自由文本（"系统"/"命定核心"/"外挂"/"路边"），无可靠机器信号，猜必误伤。**UI 显著展示 tags 与简介，由用户判断。**
+- **不做命定核心冲突检测**：工坊项目可能自带命定核心，与内置单选的那个撞。普通 `tags` 仍是上游自由文本（"系统"/"命定核心"/"外挂"/"路边"），不据此猜测或拦截；**UI 显著展示 tags 与简介，由用户判断。** 2026-08-03 起仅保留精确标签 `system/core` 作为机器语义：当前存档启用该项目条目时，将对应工坊书授予 Story 与 `char_gen`，但仍不做冲突检测或自动替用户停用其它核心。
 - 捏人页现有的命定核心是**单选一个 uid**（`selectedSystemCoreEntryUid`），项目是 N 条条目，塞不进那个槽 —— 工坊走自己的多选列表。
 - **实施期 UX 调整（2026-07-31）**：工坊多选列表与命定核心单选**同屏并列**，都在捏人页「命定核心」步骤里，拆成视觉上分开的两轴（`一 · 命定核心` 单选·必选 / `二 · 工坊项目` 多选·可选）；工坊区从 `CreateStepCharacters.vue` 挪到 `CreateStepDestinyCore.vue`，原步骤名「内容启用」改回「角色启用」。**仍不做冲突拦截** —— 同屏之后反而更好落实本条决策：用户能同时看到内置命定核心与工坊项目的 tags 与简介，自行判断是否撞车。纯 UI 位置调整，`create-store` 三条轴逻辑与 `buildEnabledWorldBookEntries()` 输出逐字未变（有测试钉住）。
 - 建档后须可改（工坊项目是玩到一半装的），因此除捏人页外还需一个每存档的启用面板。
@@ -189,7 +195,7 @@ export interface WorkshopProject {
   description: string;
   version: string; // 上游自由填，本引擎只做串比对不解析
   authorName: string; // authorGlobalName 优先，回退 authorName
-  tags: string[]; // 仅展示与筛选，不参与 partition（D6）
+  tags: string[]; // 展示/筛选；保留标签 system/core 会授予 Story 与 char_gen 可见性
   coverUrl?: string;
   downloadUrl: string;
   fileSize: number;
@@ -293,6 +299,21 @@ entry.extra = {
 
 **真机复验**：同一批 note 现在显示为「14 项未导入 · 15 项已装但效果受限 · ⚠ 5 项有全局副作用」，合计仍是 34。**「丢弃必须 loud」不变**，改的是 loud 的对象要分得清 —— 把不同性质的事混成一个数字，本身就是另一种静默截断。
 
+#### D16 二次修订 —— opaque 联网 iframe（2026-08-02）
+
+上面的 `v-html`「已知后果」已被新 renderer **取代，不再描述现行行为**。303 个公共项目的完整快照得到 99 条正则：90 条 HTML、82 条 `<style>`、35 条 `<script>`、37 条完整文档，最高捕获引用 `$39`。消毒或 parent DOM 渲染无法同时满足这套语料与隔离要求，现行裁定是：
+
+- replacement 原样保留；每次富命中各建一个无 same-origin、`credentialless`、`no-referrer` 的 `sandbox="allow-scripts"` iframe，未命中原文留在宿主原生文本面。规则 CSS/布局不能触及普通正文或其它命中；明确放弃跨命中 message DOM 查询兼容。
+- `<style>` 只影响自己的 frame；script、inline handler、完整文档与外层 HTML 围栏均可执行/渲染。
+- CSP 放行外部 HTTP(S) 资源与原生网络 API；form、popup、download、top navigation 与嵌套 frame 仍不开放。流式阶段不创建 frame。
+- `localStorage` 是 Dexie v16 `regexStorage` 的同步镜像，并提供同对象的 `window.regexStorage` 别名。整张表就是所有正则、信任级别与规则预览共享的唯一不可信命名空间；宿主必须在 authored `<head>` script 前完成 hydration，mutation 异步落库并广播到其它 frame。
+- 共享命名空间配额为 5 MiB / 1024 keys / 单 key 4096 UTF-8 bytes，随 `FullBackup` 迁移，工坊更新/卸载不清理。`sessionStorage` 仍是 per-frame 临时内存；parent DOM、IndexedDB、应用 storage/Dexie 与模型调用不开放，应用自有 `/api` 拒绝 `Origin: null`。
+- 网络是刻意放开的兼容面：远程/本地网络请求，以及外传正文与 regex-namespace 数据，是当前威胁模型明确接受的暴露。
+- 因此 `<script>` / `<style>` / 围栏 / 完整文档 / 60 条外部资源规则**不再产出 note**；16 条 parent 耦合与 14 条宿主 API 仍按真实限制记 `degraded`，已持久化的旧「禁止联网」提示在读取时过滤。storage 报表的 8 条是词法命中，精查为 5 项目 6 条 active + 2 条注释误报；active 全部只用 `getItem`/`setItem`/`removeItem`，由共享持久镜像兼容，不再因 `localStorage` 记 degraded。`sideEffect` 类型只为历史行兼容保留。
+- AI-output `placement=2` 与含边界消息深度已经接线；user-only placement 不再误投 assistant 正文。现有语料的 `runOnEdit` 不可达，三个非零 `substituteRegex` 因 findRegex 无宏而惰性。prompt/history 改写、user-side 显示与 `trimStrings` 仍是独立缺口。
+
+完整语料与验证门见 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
+
 ---
 
 ## 7. 获取形态
@@ -332,6 +353,7 @@ src/sillytavern/
 
 src/ui/
 ├── lib/workshop-client.ts     唯一网络接触点
+├── lib/beautifier-storage.ts  Dexie v16 regexStorage 会话：hydrate / 有序 mutation / 跨 frame 广播 / 配额
 ├── stores/worldbook-store.ts  🆕 Phase 0：Dexie 世界书唯一入口（替代 settings.worldBooks）
 ├── stores/workshop-store.ts   ★深安装 module：取源 / 新鲜度 / 规划 / 冲突暂停 / 重算 / 持久化 / 失败归一
 │                                不含条目转换逻辑；转换仍全部委托给 planInstall

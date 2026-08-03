@@ -810,8 +810,8 @@ describe('exportAllData / importAllData', () => {
     await saveApiEndpoint(makeApiEndpoint({ id: 'exp_api' }));
 
     const backup = await exportAllData();
-    // 跟随 DB_VERSION（v15: 美化规则迁出 localStorage）—— 每次升版这里同步
-    expect(backup.version).toBe(15);
+    // 跟随 DB_VERSION（v16: 隔离正则持久 KV）—— 每次升版这里同步
+    expect(backup.version).toBe(16);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -825,6 +825,7 @@ describe('exportAllData / importAllData', () => {
     expect(Array.isArray(backup.messages)).toBe(true);
     expect(Array.isArray(backup.worldBooks)).toBe(true);
     expect(Array.isArray(backup.workshopProjects)).toBe(true);
+    expect(Array.isArray(backup.regexStorage)).toBe(true);
   });
 
   it('importAllData 应还原数据', async () => {
@@ -1102,6 +1103,65 @@ describe('exportAllData / importAllData', () => {
 
       const rows = await getDatabase().beautifierRules.toArray();
       expect(rows.map((r) => r.id).sort()).toEqual(['rule_user_a', 'rule_user_b']);
+    });
+  });
+
+  describe('importAllData × v16 regexStorage 三态语义', () => {
+    async function seedV16Table() {
+      await getDatabase().regexStorage.bulkPut([
+        { key: 'theme', value: 'dark', updatedAt: 1 },
+        { key: 'viewer-state', value: '{"tab":"inventory"}', updatedAt: 2 },
+      ]);
+    }
+
+    it('缺 regexStorage 字段（pre-v16 备份）：整张表逐行原样保留', async () => {
+      await seedV16Table();
+      const legacyBackup: any = await exportAllData();
+      delete legacyBackup.regexStorage;
+      legacyBackup.version = 15;
+
+      await expect(importAllData(legacyBackup)).resolves.toBeUndefined();
+
+      const rows = await getDatabase().regexStorage.toArray();
+      expect(rows).toHaveLength(2);
+      expect((await getDatabase().regexStorage.get('theme'))?.value).toBe('dark');
+    });
+
+    it('regexStorage: []（字段存在但为空）：表被清空', async () => {
+      await seedV16Table();
+      const backup = await exportAllData();
+      backup.regexStorage = [];
+
+      await importAllData(backup);
+
+      expect(await getDatabase().regexStorage.count()).toBe(0);
+    });
+
+    it('regexStorage 含数据：正常覆盖', async () => {
+      await seedV16Table();
+      const backup = await exportAllData();
+      backup.regexStorage = [{ key: 'fresh', value: 'restored', updatedAt: 3 }];
+
+      await importAllData(backup);
+
+      const db = getDatabase();
+      expect(await db.regexStorage.count()).toBe(1);
+      expect((await db.regexStorage.get('fresh'))?.value).toBe('restored');
+      expect(await db.regexStorage.get('theme')).toBeUndefined();
+    });
+
+    it('exportAllData / importAllData 往返保留 regexStorage', async () => {
+      await seedV16Table();
+      const backup = await exportAllData();
+      await getDatabase().regexStorage.clear();
+
+      await importAllData(backup);
+
+      const rows = await getDatabase().regexStorage.toArray();
+      expect(rows.map((row) => [row.key, row.value])).toEqual([
+        ['theme', 'dark'],
+        ['viewer-state', '{"tab":"inventory"}'],
+      ]);
     });
   });
 
@@ -1842,9 +1902,9 @@ describe('Asset CRUD (v13)', () => {
     // ---- 以当前版 (AppDatabase) 打开：触发升版 ----
     await initializeDatabase();
     const db = getDatabase();
-    expect(db.verno).toBe(15);
+    expect(db.verno).toBe(16);
 
-    // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张，一个不少
+    // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张，一个不少
     //（误写 `表名: null` 或漏声明会在这里炸 —— 尤其 lorebooks/settings 两张死表按 D3 必须保留）
     const EXPECTED_TABLES = [
       ...Object.keys(V12_STORES),
@@ -1853,6 +1913,7 @@ describe('Asset CRUD (v13)', () => {
       'worldBooks',
       'workshopProjects',
       'beautifierRules',
+      'regexStorage',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 
@@ -1871,10 +1932,13 @@ describe('Asset CRUD (v13)', () => {
     expect(await db.worldBooks.count()).toBe(0);
     expect(await db.workshopProjects.count()).toBe(0);
     expect(await db.beautifierRules.count()).toBe(0);
+    expect(await db.regexStorage.count()).toBe(0);
 
     // 升版后新表可正常写入
     const asset = makeAsset();
     await saveAsset(asset, new Blob(['post-upgrade']));
     expect(await (await getAssetBlob(asset.id))!.text()).toBe('post-upgrade');
+    await db.regexStorage.put({ key: 'post-upgrade', value: 'ok', updatedAt: 1 });
+    expect((await db.regexStorage.get('post-upgrade'))?.value).toBe('ok');
   });
 });

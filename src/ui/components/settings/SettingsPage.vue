@@ -221,21 +221,25 @@ function openAddApi() {
   apiModels.value = [];
   showAddApi.value = true;
 }
-function openEditApi(ep: ApiEntry) {
+async function openEditApi(ep: ApiEntry) {
+  await cfg.initApiSecrets();
+  const hydrated = (s.apiPool as ApiEntry[]).find((entry) => entry.id === ep.id) ?? ep;
   editingApiId.value = ep.id;
-  apiForm.name = ep.name;
-  apiForm.baseUrl = ep.baseUrl;
-  const key = ep.apiKey || '';
+  apiForm.name = hydrated.name;
+  apiForm.baseUrl = hydrated.baseUrl;
+  const key = hydrated.apiKey || '';
   apiForm.apiKey = key;
   apiForm._realKey = key;
   apiForm._masked = key ? true : false;
-  apiForm.model = ep.model;
-  apiForm.apiType = ep.apiType || 'chat';
-  apiForm.enableThinking = ep.enableThinking ?? false;
-  apiModels.value = ep.models?.length ? [...ep.models] : [ep.model].filter(Boolean);
+  apiForm.model = hydrated.model;
+  apiForm.apiType = hydrated.apiType || 'chat';
+  apiForm.enableThinking = hydrated.enableThinking ?? false;
+  apiModels.value = hydrated.models?.length
+    ? [...hydrated.models]
+    : [hydrated.model].filter(Boolean);
   showAddApi.value = true;
 }
-function saveApi() {
+async function saveApi() {
   // trim 防脏存：这里不 trim 的话，带空白的 key 会原样进库，之后每次运行时调用都 401
   const realKey = (apiForm._realKey || apiForm.apiKey).trim();
   const e: ApiEntry = {
@@ -249,17 +253,23 @@ function saveApi() {
     apiType: apiForm.apiType,
     enableThinking: apiForm.enableThinking,
   };
-  if (editingApiId.value) {
-    const i = s.apiPool.findIndex((x: ApiEntry) => x.id === editingApiId.value);
-    if (i >= 0) s.apiPool[i] = e;
-  } else s.apiPool.push(e);
-  showAddApi.value = false;
-  editingApiId.value = null;
-  ui.toast(editingApiId.value ? 'API updated' : 'API added', 'success');
+  const wasEditing = Boolean(editingApiId.value);
+  try {
+    await cfg.saveApiEntry(e);
+    showAddApi.value = false;
+    editingApiId.value = null;
+    ui.toast(wasEditing ? 'API updated' : 'API added', 'success');
+  } catch (error) {
+    ui.toast(`API 密钥保存失败：${String(error)}`, 'error');
+  }
 }
-function deleteApi(id: string) {
-  s.apiPool = s.apiPool.filter((e: ApiEntry) => e.id !== id);
-  ui.toast('API 已删除', 'info');
+async function deleteApi(id: string) {
+  try {
+    await cfg.removeApiEntry(id);
+    ui.toast('API 已删除', 'info');
+  } catch (error) {
+    ui.toast(`API 删除失败：${String(error)}`, 'error');
+  }
 }
 
 // ============================================================
@@ -305,6 +315,7 @@ const activeWorldBook = ref<WorldBook | null>(null);
 
 // Phase 0: 保证进设置页时世界书已就绪（init() 幂等，App.vue 已踢过一次）
 onMounted(() => {
+  void cfg.initApiSecrets();
   void wb.init().catch(() => {
     /* 世界书装不起来不该拦住设置页其它分区 */
   });
@@ -1236,6 +1247,7 @@ async function importAll() {
     try {
       const { importAllData } = await import('@engine/database');
       await importAllData(JSON.parse(await f.text()));
+      await cfg.reloadApiEntries();
       ui.toast('导入成功', 'success');
       await loadStorageUsage();
     } catch {
@@ -1323,6 +1335,12 @@ async function clearAll() {
                 </div>
                 <AppButton variant="primary" size="sm" @click="openAddApi">+ 添加 API</AppButton>
               </div>
+              <AppCard v-if="cfg.apiSecretsError" padding="md" class="api-storage-error">
+                <p class="api-warn" style="margin: 0">
+                  API
+                  密钥安全存储不可用。旧密钥仍保留且本次会话不会覆盖原设置；请检查浏览器存储后重新加载。
+                </p>
+              </AppCard>
               <div class="api-pool">
                 <AppCard v-for="ep in s.apiPool" :key="ep.id" padding="md"
                   ><div class="api-card-body">

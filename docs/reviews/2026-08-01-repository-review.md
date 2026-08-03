@@ -5,6 +5,8 @@
 **Baseline:** [`097b0e8a294d7ba8bd5c50cdf128fe06305713c5`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/commit/097b0e8a294d7ba8bd5c50cdf128fe06305713c5) on `master`  
 **Review type:** Static repository, architecture, security, test, release, and maintainability review
 
+> **Historical baseline:** The executive summary, evidence, impact, attack chain, and original remediation sequence below describe the 2026-08-01 baseline. Present-day status annotations are explicitly dated; they do not rewrite the original findings.
+
 ## Executive summary
 
 This is an ambitious and unusually disciplined development repository. It combines a sizeable deterministic TypeScript game engine, a Vue 3/Pinia user interface, Dexie/IndexedDB persistence, a multi-agent AI orchestration layer, a Hono-based local BFF, extensive design documentation, and a large Vitest suite. The code frequently records design intent, failure modes, and compatibility decisions directly beside the implementation. Recent work on deterministic combat, transactional persistence, migration safety, request cancellation, caching, and repository governance is strong.
@@ -127,20 +129,20 @@ Commit [`d1852867...`](https://github.com/The-poem-of-destiny/IndependentFront-f
 
 ## Priority findings
 
-| ID        | Severity                                  | Area                    | Finding                                                                                       | Recommended release treatment                          |
-| --------- | ----------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| SEC-01    | **Critical**                              | Workshop/UI             | Raw workshop replacements become executable HTML through `v-html`                             | Block workshop release until fixed                     |
-| SEC-02    | **Critical**                              | Workshop/EJS            | `new Function` “sandbox” is intentionally escapable and unbounded                             | Disable for community content or replace runtime       |
-| SEC-03    | **High**                                  | Dev server              | `/data` route can resolve outside `dataDir` and read arbitrary files                          | Patch immediately                                      |
-| SEC-04    | **High**                                  | BFF/network             | Wildcard-CORS arbitrary-target proxy permits private/loopback access                          | Require exact origin and target policy                 |
-| SEC-05    | **High**                                  | Dev server              | File-write APIs lack authentication, origin checks, validation, and limits                    | Replace or harden before broader use                   |
-| REL-01    | **High**                                  | Release                 | Production build omits BFF and root `data/`; preview is not representative                    | Add a real production server and build smoke test      |
-| PERF-01   | **Medium–High**                           | Workshop/rendering      | Untrusted regular expressions can cause catastrophic backtracking, amplified during streaming | Add execution budgets/isolation                        |
-| SUPPLY-01 | **High while executable content remains** | Workshop supply chain   | Remote packages have no content signature or digest verification                              | Add signed manifests and immutable digests             |
-| CI-01     | **Medium**                                | CI/testing              | CI omits build, browser E2E, coverage policy, dependency/secret/security checks               | Expand required checks                                 |
-| DX-01     | **Medium**                                | Developer experience    | `npm run dev` is Windows-only; Node requirements are inconsistent                             | Make setup reproducible                                |
-| DOC-01    | **Medium**                                | Documentation/licensing | Architecture is stale; license link is broken; root MIT license file is absent                | Correct before external adoption                       |
-| PKG-01    | **Medium**                                | Packaging/repository    | Package metadata and repository size are inconsistent with an app-only project                | Mark private or define a real package/release boundary |
+| ID        | Severity                                  | Area                    | Finding                                                                                       | Recommended release treatment                                 |
+| --------- | ----------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| SEC-01    | **Critical at baseline; remediated**      | Workshop/UI             | Raw workshop replacements became executable HTML through `v-html` at the reviewed commit      | Opaque network-capable frame; accepted content-exfil exposure |
+| SEC-02    | **Critical**                              | Workshop/EJS            | `new Function` “sandbox” is intentionally escapable and unbounded                             | Disable for community content or replace runtime              |
+| SEC-03    | **High**                                  | Dev server              | `/data` route can resolve outside `dataDir` and read arbitrary files                          | Patch immediately                                             |
+| SEC-04    | **High**                                  | BFF/network             | Wildcard-CORS arbitrary-target proxy permits private/loopback access                          | Require exact origin and target policy                        |
+| SEC-05    | **High**                                  | Dev server              | File-write APIs lack authentication, origin checks, validation, and limits                    | Replace or harden before broader use                          |
+| REL-01    | **High**                                  | Release                 | Production build omits BFF and root `data/`; preview is not representative                    | Add a real production server and build smoke test             |
+| PERF-01   | **Medium–High**                           | Workshop/rendering      | Untrusted regular expressions can cause catastrophic backtracking, amplified during streaming | Add execution budgets/isolation                               |
+| SUPPLY-01 | **High while executable content remains** | Workshop supply chain   | Remote packages have no content signature or digest verification                              | Add signed manifests and immutable digests                    |
+| CI-01     | **Medium**                                | CI/testing              | CI omits build, browser E2E, coverage policy, dependency/secret/security checks               | Expand required checks                                        |
+| DX-01     | **Medium**                                | Developer experience    | `npm run dev` is Windows-only; Node requirements are inconsistent                             | Make setup reproducible                                       |
+| DOC-01    | **Medium**                                | Documentation/licensing | Architecture is stale; license link is broken; root MIT license file is absent                | Correct before external adoption                              |
+| PKG-01    | **Medium**                                | Packaging/repository    | Package metadata and repository size are inconsistent with an app-only project                | Mark private or define a real package/release boundary        |
 
 ---
 
@@ -158,9 +160,13 @@ Commit [`d1852867...`](https://github.com/The-poem-of-destiny/IndependentFront-f
 - [`src/ui/components/game/ChatFlow.vue`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/src/ui/components/game/ChatFlow.vue)
 - [`src/ui/stores/settings-store.ts`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/src/ui/stores/settings-store.ts)
 
+**Status (2026-08-02):** The reviewed parent-DOM path has been removed. `compileBeautifierSegments()` now separates unmatched text from rich regex matches. Plain-only text and the app-owned dialogue card use Vue text bindings; when a message contains arbitrary replacement HTML/CSS/scripts/event handlers, its escaped unmatched text and all replacements share one opaque `sandbox="allow-scripts"` iframe so cross-match scripts and inline layout retain upstream semantics. The frame has no same-origin permission and uses `credentialless` plus `no-referrer`. External HTTP(S) assets and native network APIs are deliberately allowed for compatibility; forms, popups, downloads, top navigation, and nested frames remain blocked. The frame cannot read the parent DOM, IndexedDB, application storage/Dexie, saves, or API keys, and application-owned `/api` routes reject `Origin: null`. Its sole persistent authority is Dexie v16 `regexStorage`: one shared untrusted namespace for every regex, trust level, and preview, exposed as a pre-hydrated synchronous `localStorage` mirror plus `window.regexStorage`; mutations persist and broadcast across frames. `sessionStorage` remains frame-ephemeral. API keys have migrated from localStorage into Dexie `apiEndpoints` with write/read-back verification before the legacy snapshot is scrubbed.
+
+The anonymous public corpus snapshot covers 303 projects and all 99 observed regexes (zero compile failures). The compatibility surface retains inline CSS/scripts, event attributes, fenced full documents, persistent regex storage, automatic height, remote assets, and native network calls. The report's eight storage hits are lexical; exact review found six active rules across five projects plus two comment-only false positives, and every active rule uses only `getItem`/`setItem`/`removeItem`, now covered by the shared mirror. The sixty external-origin rules are no longer degraded; persisted obsolete offline notes are filtered. This closes the credential/parent-DOM path without deleting the compatibility surface. It deliberately permits requests to remote or local networks and exfiltration of narrative or regex-namespace data visible to a rule. It does **not** solve hostile regex backtracking or script CPU loops. Sixteen rules still reach for parent/top/opener and fourteen still expect host APIs, so the workshop entry remains disabled pending broader visual QA and execution budgets. See `docs/reviews/2026-08-02-workshop-regex-compatibility.md`.
+
 ### Evidence
 
-The workshop regex mapper intentionally copies `replaceString` unchanged, preserves its enabled state, and does not strip HTML. The beautifier first escapes raw model text, but then applies replacement strings as trusted output. `useBeautify` returns the resulting HTML, and `ChatFlow.vue` renders both completed and streaming assistant content with `v-html`.
+At the reviewed commit, the workshop regex mapper intentionally copied `replaceString` unchanged, preserved its enabled state, and did not strip HTML. The beautifier first escaped raw model text, but then applied replacement strings as trusted output. `useBeautify` returned the resulting HTML, and `ChatFlow.vue` rendered both completed and streaming assistant content with `v-html`.
 
 Escaping the original model text does **not** make a later replacement string safe. A replacement need not use a `<script>` element. Browser-executable attributes and active URL schemes are sufficient.
 
@@ -173,11 +179,11 @@ replacement: <img src=x onerror="document.body.dataset.workshopProbe='1'">
 
 When the pattern matches, the replacement is inserted as real HTML and the event handler runs.
 
-The settings store persists `ApiEntry.apiKey` as part of the complete settings object in `localStorage` under `fated-poem-settings`. Any same-origin script can read it. The same script can also access IndexedDB saves, call the local BFF, change application state, or persist itself through installed rules.
+At the reviewed commit, the settings store persisted `ApiEntry.apiKey` as part of the complete settings object in `localStorage` under `fated-poem-settings`. Any same-origin script could read it. The same script could also access IndexedDB saves, call the local BFF, change application state, or persist itself through installed rules.
 
-### Impact
+### Historical impact at the reviewed baseline
 
-A workshop author, compromised workshop service, or modified local workshop file can obtain:
+At the reviewed commit, a workshop author, compromised workshop service, or modified local workshop file could obtain:
 
 - AI provider API keys.
 - Game saves, worldbooks, presets, and local metadata.
@@ -187,7 +193,7 @@ A workshop author, compromised workshop service, or modified local workshop file
 
 This is a normal-install attack path, not a developer-console-only path.
 
-### Recommendation
+### Original recommendation (superseded by the compatibility-first iframe implementation)
 
 1. **Sanitize the final generated HTML after all regex substitutions.** Sanitizing only input text is insufficient.
 2. Use a strict allowlist. Remove event attributes, scripts, styles, SVG/MathML, iframes, objects, embeds, forms, `javascript:` URLs, dangerous `data:` URLs, and unapproved inline styles.
@@ -197,12 +203,14 @@ This is a normal-install attack path, not a developer-console-only path.
 6. Add Trusted Types and a restrictive CSP after `new Function` is removed.
 7. Add regression tests for event handlers, malformed tags, SVG payloads, URL schemes, capture-group injection, and streaming rendering.
 
-### Acceptance criteria
+### Original acceptance criteria
 
 - No installed rule can introduce executable attributes or active content.
 - Final HTML is sanitized in one central function immediately before DOM insertion.
 - Built-in and community rules use the same security policy unless a narrowly scoped internal capability is explicitly documented.
 - A test using the harmless `data-workshop-probe` payload cannot mutate the DOM.
+
+The implemented alternative keeps active workshop markup for compatibility but moves it out of the application DOM. Its acceptance contract is: the opaque, credentialless frame cannot read the parent DOM, IndexedDB, application storage/Dexie, saves, or credentials; its only persistence is the quota-bound shared regex namespace; forms, popups, downloads, top navigation, and nested frames remain blocked; unmatched model text never becomes HTML; and scripts do not execute during streaming. Network-capable channels are deliberately available. Requests to remote or local networks and exfiltration of narrative or regex-namespace data are accepted exposure, while application-owned `/api` routes reject `Origin: null`.
 
 ---
 
@@ -624,7 +632,7 @@ The workflow runs:
 - No dependency audit/update workflow in the repository.
 - No CodeQL or equivalent SAST workflow.
 - No repository secret-scanning workflow/configuration visible in source.
-- No security regression tests for the BFF, Vite file APIs, HTML sanitization, or EJS isolation.
+- At review time there were no security regression tests for the BFF, Vite file APIs, HTML execution, or EJS isolation; iframe, QuickJS, and the BFF opaque-origin boundary now have coverage, while broader Vite file-API coverage remains open.
 - GitHub Actions are pinned to major tags rather than immutable commit SHAs.
 - Lint rules allow explicit `any`, and unused-variable/empty-block rules are warnings; CI does not use a zero-warning policy.
 
@@ -750,9 +758,9 @@ If it is also an engine package:
 
 ---
 
-# Combined attack chain
+# Combined attack chain at the reviewed baseline
 
-The following chain is currently plausible after a user installs a malicious or compromised workshop project:
+The following chain was plausible at the reviewed 2026-08-01 baseline after a user installed a malicious or compromised workshop project:
 
 ```text
 Workshop package
@@ -772,7 +780,7 @@ Workshop package
           Provider credentials and local/private services
 ```
 
-This chain explains why the BFF's previous assumption—“raw model XSS is fixed, therefore no hostile same-origin code exists”—is no longer valid. The raw-model escape fix remains useful, but workshop-authored HTML and JavaScript bypass it.
+This chain explained why the BFF's previous assumption—“raw model XSS is fixed, therefore no hostile same-origin code exists”—was not valid at that baseline. The current implementation splits the two content runtimes from application authority: EJS runs in QuickJS or fails closed, and regex markup runs in an opaque frame. Regex networking remains intentionally available, but it no longer grants same-origin access to parent DOM, IndexedDB, application Dexie/storage, or API keys; its only persistent data is the shared regex namespace, and application-owned `/api` routes reject its `Origin: null` requests.
 
 ---
 
@@ -792,7 +800,7 @@ This chain explains why the BFF's previous assumption—“raw model XSS is fixe
 
 ### Security regression tests
 
-- Final HTML removes `onerror`, `onclick`, `javascript:`, SVG/MathML active content, iframes, and unsafe styles.
+- Workshop replacement markup remains byte-compatible; its opaque, credentialless frame can load external HTTP(S) assets, use native network APIs, and use the pre-hydrated shared regex namespace within the 5 MiB / 1024-key / 4096-byte-key limits, but cannot reach parent DOM, IndexedDB, application storage/Dexie, credentials, forms, popups, downloads, top navigation, nested frames, or application-owned `/api` routes.
 - EJS cannot recover `globalThis`, constructors, timers, storage, DOM, or network.
 - EJS infinite loops are terminated.
 - Regex catastrophic backtracking cannot block the UI.
@@ -850,14 +858,18 @@ Moving keys from `localStorage` to IndexedDB alone would not protect them from s
 
 This is defense in depth; it does not replace fixing XSS and EJS isolation.
 
+**Current scope decision (2026-08-02):** The trusted main renderer may store API keys in Dexie because the accepted attacker set is customized regex/EJS content, and both runtimes are now separated from application storage. An OS credential vault remains optional defense in depth rather than a release requirement for this threat model.
+
 ---
 
-# Recommended remediation sequence
+# Original recommended remediation sequence (historical)
+
+The sequence below records the 2026-08-01 recommendation. SEC-01 items 0.2 and 2.2 are retained for history but explicitly superseded by the current compatibility policy.
 
 ## Gate 0 — Contain immediate risk
 
 1. Feature-flag community EJS off.
-2. Disable workshop HTML replacements or render them as escaped text until final-output sanitization exists.
+2. ~~Disable workshop HTML replacements or render them as escaped text until final-output sanitization exists.~~ **Superseded 2026-08-02:** use an opaque, credentialless, network-capable frame; isolate host authority and reject `Origin: null` at application APIs.
 3. Patch `/data` canonical containment.
 4. Require exact origin and a per-launch token for all local privileged routes.
 5. Remove wildcard CORS and arbitrary target selection from individual requests.
@@ -876,7 +888,7 @@ This is defense in depth; it does not replace fixing XSS and EJS isolation.
 ## Gate 2 — Redesign workshop trust
 
 1. Replace EJS with a safe DSL or isolated terminating VM.
-2. Replace arbitrary HTML replacements with typed presentation primitives or strict sanitization.
+2. ~~Replace arbitrary HTML replacements with typed presentation primitives or strict sanitization.~~ **Superseded 2026-08-02:** allow external assets, native network APIs, and the dedicated regex-only namespace inside the opaque frame while keeping parent/application-storage/API access unavailable.
 3. Add regex execution budgets/isolation.
 4. Add signed manifests and payload digests.
 5. Add permission/trust UI, signer identity, update diffs, and rollback.

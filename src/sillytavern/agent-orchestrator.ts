@@ -61,7 +61,7 @@ export interface OrchestratorOptions {
 export interface OrchestratorEvents {
   onStageStart?: (stageIndex: number, agents: string[]) => void;
   onAgentStart?: (agentId: string, config: AgentConfig) => void;
-  onAgentComplete?: (result: AgentResult) => void;
+  onAgentComplete?: (result: AgentResult) => void | Promise<void>;
   onAgentError?: (agentId: string, error: string) => void;
   onStageComplete?: (stageIndex: number) => void;
   /** StatePatch 提交后存在失败项时触发（source = 'request_dispatcher' | 'vars_update' 等） */
@@ -266,7 +266,8 @@ export class AgentOrchestrator {
       }
     }
 
-    this.status = this.completedStages.length > 0 ? 'completed' : 'failed';
+    this.status =
+      this.completedStages.length > 0 && this.requiredAgentsSucceeded() ? 'completed' : 'failed';
     return this.buildRun(startTime);
   }
 
@@ -292,9 +293,7 @@ export class AgentOrchestrator {
     if (result.error) {
       this.events.onAgentError?.(agentId, result.error);
     } else {
-      // Update context with new result (but do NOT propagate to downstream)
-      this.context.agentOutputs!.set(agentId, result.output);
-      this.events.onAgentComplete?.(result);
+      await this.publishAgentCompletion(result);
     }
 
     return result;
@@ -323,10 +322,7 @@ export class AgentOrchestrator {
         const result = settled.value;
         this.results.set(agentId, result);
         if (!result.error) {
-          hasSuccess = true;
-          // 注入上下文供下游 Agent 使用（单向流动）
-          this.context.agentOutputs!.set(agentId, result.output);
-          this.events.onAgentComplete?.(result);
+          hasSuccess = (await this.publishAgentCompletion(result)) || hasSuccess;
         } else {
           this.events.onAgentError?.(agentId, result.error);
         }
@@ -487,30 +483,41 @@ export class AgentOrchestrator {
           onChunk: (text, isComplete) => {
             callbacks.onChunk(text, isComplete);
           },
+          onToolCall: (toolCall) => {
+            callbacks.onToolCall?.(toolCall);
+          },
           onComplete: (streamResult) => {
-            resolve({
-              agentId: config.agentId,
-              output: streamResult.fullText,
-              rawResponse: streamResult.fullText,
-              reasoning: streamResult.reasoning,
-              tokensUsed: streamResult.tokensUsed,
-              cacheHit: streamResult.cacheHit,
-              cacheHitTokens: streamResult.cacheHitTokens,
-              cacheMissTokens: streamResult.cacheMissTokens,
-              completionTokens: streamResult.completionTokens,
-              duration: streamResult.duration,
-            });
+            try {
+              callbacks.onComplete(streamResult);
+            } finally {
+              resolve({
+                agentId: config.agentId,
+                output: streamResult.fullText,
+                rawResponse: streamResult.fullText,
+                reasoning: streamResult.reasoning,
+                tokensUsed: streamResult.tokensUsed,
+                cacheHit: streamResult.cacheHit,
+                cacheHitTokens: streamResult.cacheHitTokens,
+                cacheMissTokens: streamResult.cacheMissTokens,
+                completionTokens: streamResult.completionTokens,
+                duration: streamResult.duration,
+              });
+            }
           },
           onError: (error) => {
-            resolve({
-              agentId: config.agentId,
-              output: null,
-              rawResponse: '',
-              tokensUsed: 0,
-              cacheHit: false,
-              duration: Date.now() - startTime,
-              error,
-            });
+            try {
+              callbacks.onError(error);
+            } finally {
+              resolve({
+                agentId: config.agentId,
+                output: null,
+                rawResponse: '',
+                tokensUsed: 0,
+                cacheHit: false,
+                duration: Date.now() - startTime,
+                error,
+              });
+            }
           },
         },
         config.abortSignal,
@@ -716,6 +723,33 @@ export class AgentOrchestrator {
       }
     }
     return true;
+  }
+
+  /** 必需 Agent 必须存在、无错误，且产出非 null/undefined/空白字符串。 */
+  private requiredAgentsSucceeded(): boolean {
+    for (const agentId of this.pipeline.requiredAgents ?? []) {
+      const result = this.results.get(agentId);
+      if (!result || result.error || result.output == null) return false;
+      if (typeof result.output === 'string' && result.output.trim() === '') return false;
+    }
+    return true;
+  }
+
+  /** 完成处理属于阶段提交的一部分；失败时不得让下游消费未提交的结果。 */
+  private async publishAgentCompletion(result: AgentResult): Promise<boolean> {
+    this.context.agentOutputs!.set(result.agentId, result.output);
+    try {
+      await this.events.onAgentComplete?.(result);
+      return true;
+    } catch (error) {
+      const message = `Agent completion handler failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      result.error = message;
+      this.context.agentOutputs!.delete(result.agentId);
+      this.events.onAgentError?.(result.agentId, message);
+      return false;
+    }
   }
 
   // ========== Internal: Marker Processing (Phase 6e) ==========

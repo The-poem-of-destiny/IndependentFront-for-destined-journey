@@ -3,9 +3,10 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import InputBar from './InputBar.vue';
 import type { ChatMessage, SystemEvent } from '@engine/types';
 import { escapeHtml } from '@engine/beautifier';
-import { useBeautify } from '../../composables/useBeautify';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useGameStore } from '../../stores/game-store';
+import { computeConversationalDepths } from '../../lib/chat-depth';
+import BeautifiedNarrative from './BeautifiedNarrative.vue';
 import CraftSystemCard from './cards/CraftSystemCard.vue';
 import CharGenSystemCard from './cards/CharGenSystemCard.vue';
 import CombatSystemCard from './cards/CombatSystemCard.vue';
@@ -40,6 +41,8 @@ const game = useGameStore();
 
 const container = ref<HTMLDivElement>();
 const expandedIds = ref<Record<string, boolean>>({});
+const pinnedToBottom = ref(true);
+const messageDepths = computed(() => computeConversationalDepths(props.messages ?? []));
 
 watch(
   () => props.messages?.length,
@@ -56,6 +59,10 @@ function formatTime(ts?: number): string {
   if (!ts) return '';
   const d = new Date(ts);
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
+function messageDepth(id: string): number {
+  return messageDepths.value.get(id) ?? 0;
 }
 
 function toggleExpand(id: string) {
@@ -101,8 +108,20 @@ function eventIconClass(type: string): string {
   return icons[type] ?? 'fa-solid fa-circle-info';
 }
 
-// 美化逻辑抽到 composable（CombatMessageFlow 复用）
-const { beautifyText, beautifyStreamingText } = useBeautify();
+function handleChatScroll() {
+  const el = container.value;
+  if (!el) return;
+  pinnedToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
+  closeCtxMenu();
+}
+
+function handleNarrativeResize() {
+  if (!pinnedToBottom.value) return;
+  nextTick(() => {
+    const el = container.value;
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+}
 
 // ===== 右键菜单（最新一回合 回退/复制）=====
 const ctxMenu = ref<{ x: number; y: number; msgId: string } | null>(null);
@@ -173,7 +192,7 @@ onUnmounted(() => {
 
 <template>
   <div class="chat-flow">
-    <div ref="container" class="chat-messages" tabindex="0">
+    <div ref="container" class="chat-messages" tabindex="0" @scroll="handleChatScroll">
       <div v-if="!messages || messages.length === 0" class="chat-empty">
         <span class="chat-empty-glyph" aria-hidden="true">❦</span>
         <p>等待冒险开始...</p>
@@ -202,7 +221,15 @@ onUnmounted(() => {
           @contextmenu="onContextMenu($event, msg)"
         >
           <div class="bubble bubble-narrative-full">
-            <div class="narrative-body" v-html="beautifyText(msg)" />
+            <BeautifiedNarrative
+              class="narrative-body"
+              :text="msg.content"
+              :depth="messageDepth(msg.id)"
+              :forward-context-menu="
+                latestAssistantMsg?.id === msg.id && !game.isInCombat && !isGenerating
+              "
+              @resize="handleNarrativeResize"
+            />
             <span v-if="msg.timestamp" class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
           </div>
         </div>
@@ -260,9 +287,11 @@ onUnmounted(() => {
       <!-- 🆕 流式正文实时渲染 -->
       <div v-if="isGenerating && streamingText" class="bubble-row bubble-row-narrative">
         <div class="bubble bubble-narrative-full">
-          <div
+          <BeautifiedNarrative
             class="narrative-body streaming-content"
-            v-html="beautifyStreamingText(streamingText)"
+            :text="streamingText"
+            streaming
+            @resize="handleNarrativeResize"
           />
         </div>
       </div>

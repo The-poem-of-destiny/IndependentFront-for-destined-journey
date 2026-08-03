@@ -724,11 +724,13 @@ export function buildAgentMessages(
 
   // Step 1: Get the template string
   // Priority: 1) agent-config.json template field  2) getDefaultTemplate from placeholder-registry  3) empty string
-  let template = config?.template || '';
-  if (!template) {
-    // Fall back to default template from placeholder-registry
-    template = getDefaultTemplate(agentId);
-  }
+  const configuredTemplate = config?.template || '';
+  const defaultTemplate = getDefaultTemplate(agentId);
+  const usesBuiltinDefaultTemplate =
+    !configuredTemplate ||
+    configuredTemplate.replace(/\r\n/g, '\n').trim() ===
+      defaultTemplate.replace(/\r\n/g, '\n').trim();
+  let template = configuredTemplate || defaultTemplate;
   if (!template) {
     // Fallback: old-style assembly for agents with no template
     return buildFallbackMessages(
@@ -798,7 +800,7 @@ export function buildAgentMessages(
   // story + 规范预设（已预解析内部占位符）+ 未自定义 template → 简化为 {{SYS_PROMPT}}，
   // 避免默认 template 追加的 {{LORE_BOOK}} 等与预设内部占位符重复渲染同一段数据。
   // 无预设 / 预设无占位符 / 自定义 template 场景仍走完整 template 兜底。
-  if (agentId === 'story' && storyPresetHasPlaceholders && !config?.template) {
+  if (agentId === 'story' && storyPresetHasPlaceholders && usesBuiltinDefaultTemplate) {
     template = '{{SYS_PROMPT}}';
   }
 

@@ -4,8 +4,8 @@
  * Phase 10h: 连接 GamePage UI 和引擎 Agent 管线。
  * 封装: AgentConfig 组装 / AgentContext 构建 / 编排器创建 / 回调处理。
  *
- * Phase 7e: 🆕 流式渲染支持 — story agent 使用 chatStream() 逐块回调，
- * 通过 onStoryChunk 将增量文本实时推送到前端 UI。
+ * Phase 7e: story agent 使用 chatStream() 逐块接收原文，
+ * 通过 onStoryChunk 将累计的玩家可见投影实时推送到前端 UI。
  */
 import { AgentOrchestrator } from '@engine/agent-orchestrator';
 import type { OrchestratorOptions, OrchestratorEvents } from '@engine/agent-orchestrator';
@@ -24,11 +24,12 @@ import type {
   ItemGenRequestMarker,
   PlayAudioMarker,
   MemoryRecord,
+  WorkshopProject,
 } from '@engine/types';
 import { AgentClient } from '@engine/agent-client';
 import type { StreamCallbacks } from '@engine/agent-client';
 import { createStateManager } from '@engine/state-manager';
-import { stripPlayAudioMarkers } from '@engine/marker-protocol';
+import { projectStoryOutput, projectStreamingStory } from '@engine/story-output';
 import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
 import { buildStatData } from '@engine/stat-projection';
@@ -50,46 +51,38 @@ export interface GamePipelineDeps {
   saveId: string;
 }
 
-/** 流式回调 — 由 GamePage 提供实时渲染。isComplete=true 表示流式传输已结束 */
+/** 流式回调 — chunk 是累计的可见正文快照；isComplete=true 表示清理临时预览。 */
 export type StoryChunkCallback = (chunk: string, isComplete: boolean) => void;
 
-/**
- * 从 story 正文中提取 <options> 行动选项块。
- * 格式约定（story systemPrompt <option_format>）: <options> 内每行 "数字. 内容"。
- * 返回剥离选项块后的正文 + 选项列表。
- *
- * 🔴 2026-08-02 修：AI 输出格式约定正文用 `<maintext>...</maintext>` 包裹
- * （DEFAULT_FORMAT_PROMPT），此处剥离标签取正文 —— 之前只剥 <options>，
- * `<maintext>` 标签原样漏进 message，玩家眼前出现尖括号。
- */
+/** 兼容旧调用名；正文、控制区块与 `<option(s)>` 统一由 story-output 投影。 */
 export function extractStoryOptions(raw: string): { content: string; options: string[] } {
-  const match = raw.match(/<options>([\s\S]*?)<\/options>/i);
-  // 剥离 <maintext> 包裹。真机（2026-08-02）：AI 常只写开标签 `<maintext>` 而**不写闭合
-  // `</maintext>`** —— 正则若要求闭合就匹配不上，标签漏进正文。故分两段处理：
-  //   1. 有闭合标签 → 剥掉首尾标签保留正文
-  //   2. 无闭合标签 → 把开标签起的整段（到 </options> 前或末尾）剥成纯正文
-  const withoutMaintext = raw
-    .replace(/<maintext>[\s\S]*?<\/maintext>/gi, (m) =>
-      m.replace(/^<maintext>/i, '').replace(/<\/maintext>$/i, ''),
+  return projectStoryOutput(raw);
+}
+
+/** Resolve selected workshop books that explicitly declare system-core semantics. */
+export function collectSelectedSystemCoreWorkshopBookIds(
+  worldBooks: WorldBook[],
+  projects: WorkshopProject[],
+): string[] {
+  const coreProjectIds = new Set(
+    projects
+      .filter((project) => project.tags?.some((tag) => tag.trim().toLowerCase() === 'system/core'))
+      .map((project) => project.id),
+  );
+  if (coreProjectIds.size === 0) return [];
+
+  return worldBooks
+    .filter(
+      (book) =>
+        book.partition === 'creative_workshop' &&
+        book.entries.some(
+          (entry) =>
+            entry.enabled &&
+            Boolean(entry.extra?.workshop?.projectId) &&
+            coreProjectIds.has(entry.extra!.workshop!.projectId),
+        ),
     )
-    // 未闭合形态：`<maintext>\n...正文...` → 剥掉 `<maintext>` 前缀标签
-    .replace(/^\s*<maintext>\s*/i, '')
-    .trim();
-  if (!match) return { content: withoutMaintext, options: [] };
-  const options = match[1]
-    .split('\n')
-    .map((line) =>
-      line
-        .trim()
-        .match(/^\d+\s*[.、)．]\s*(.+)$/)?.[1]
-        ?.trim(),
-    )
-    .filter((s): s is string => !!s);
-  const content = withoutMaintext
-    .replace(/<options>[\s\S]*?<\/options>/gi, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  return { content, options };
+    .map((book) => book.id);
 }
 
 /** 各 Agent 的中文标签（供调试日志 / DebugPanel 显示） */
@@ -184,11 +177,23 @@ export class GamePipeline {
   async sendOpeningPrompt(onStoryChunk?: StoryChunkCallback): Promise<void> {
     const prompt = this.game.openingPrompt;
     if (!prompt) return;
+    // Claim before starting the long pipeline. A page remount can create a second
+    // GamePipeline while the first one is still running.
+    const claimed = await this.game.markOpeningPromptConsumed();
+    if (!claimed) return;
+
+    // run() 会先落库用户消息，所以重试前得知道这条已经在了 —— 否则归还认领等于放行重复。
+    const promptAlreadyRendered = this.game.messages.some(
+      (msg) => msg.role === 'user' && msg.content === prompt,
+    );
     // 开场 prompt 作为真正的用户消息渲染 + 注入历史，让下游 Agent 能读到装备/技能/背景/命定核心等
-    const ok = await this.run(prompt, onStoryChunk, /* isUserMessage */ true);
-    if (ok) {
-      await this.game.markOpeningPromptConsumed();
-    }
+    const ok = await this.run(prompt, onStoryChunk, /* isUserMessage */ !promptAlreadyRendered);
+    if (ok) return;
+
+    // 只有「一句叙事都没产出」才归还认领：API 抽风不该把开场永久烧掉。
+    // 已经有 assistant 正文时保持已消费，重跑会把那段叙事再写一遍。
+    const producedNarrative = this.game.messages.some((msg) => msg.role === 'assistant');
+    if (!producedNarrative) await this.game.releaseOpeningPromptClaim();
   }
 
   /** 核心: 将用户输入送入 Agent 管线。返回 true 表示管线成功完成。 */
@@ -208,7 +213,10 @@ export class GamePipeline {
     this.game.isGenerating = true;
 
     try {
-      // 1. 添加用户消息（非用户消息仅注入 context 不渲染）
+      // 1. 先快照既有历史；当前输入只走 userInput，避免同时出现在 NARRATIVE 与 USER_INPUT。
+      const context = this.buildContext(userInput);
+
+      // 添加用户消息（非用户消息仅注入 context 不渲染）
       if (isUserMessage) {
         this.game.addMessage(userInput, 'user');
       }
@@ -221,7 +229,6 @@ export class GamePipeline {
 
       // 2. 构建 endpoints & context
       const endpoints = this.buildEndpoints();
-      const context = this.buildContext(userInput);
       this.currentContext = context;
       this.pendingPlotTasks = [];
       this.pendingAudioMarker = null;
@@ -230,9 +237,14 @@ export class GamePipeline {
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
       const { presets, agentDefaults } = await this.loadPresets();
       const worldBooks = await this.loadActiveWorldBooks();
+      const systemCoreWorkshopBookIds = await this.loadSystemCoreWorkshopBookIds(worldBooks);
 
       // 2.6 构建 Agent 配置（用已加载的 agentDefaults 替代 projectAgentDefaults）
-      const agentConfigs = this.buildAgentConfigs(agentDefaults, onStoryChunk);
+      const agentConfigs = this.buildAgentConfigs(
+        agentDefaults,
+        onStoryChunk,
+        systemCoreWorkshopBookIds,
+      );
 
       // 真机修(2026-07-17): 侧链 (char/item/craft) 调用 buildAgentMessages 时需要
       // configs/worldBooks/presets 才能拿到完整 systemPrompt + 世界书上下文，
@@ -399,6 +411,7 @@ export class GamePipeline {
       { presetId?: string; systemPrompt?: string; template?: string; ejsVarsCommit?: boolean }
     >,
     onStoryChunk?: StoryChunkCallback,
+    systemCoreWorkshopBookIds: string[] = [],
   ): AgentConfig[] {
     const s = this.settings.settings;
 
@@ -440,15 +453,22 @@ export class GamePipeline {
       // 🆕 为 story agent 构建流式回调（如果提供了 onStoryChunk）
       let streamCallbacks: StreamCallbacks | undefined;
       if (isStory && onStoryChunk) {
+        let streamedRaw = '';
         streamCallbacks = {
           onChunk: (text: string, isComplete: boolean) => {
-            onStoryChunk(text, isComplete);
+            if (isComplete) {
+              onStoryChunk('', true);
+              return;
+            }
+            streamedRaw += text;
+            onStoryChunk(projectStreamingStory(streamedRaw), false);
           },
           onComplete: () => {
             // 流式完成 — 最终结果由 handleAgentResult 处理
           },
           onError: (error: string) => {
             console.warn('[GamePipeline] story 流式错误:', error);
+            onStoryChunk('', true);
           },
         };
       }
@@ -465,6 +485,24 @@ export class GamePipeline {
           : defaults.presetId || undefined;
       const systemPrompt: string | undefined = defaults.systemPrompt || undefined;
       const template: string | undefined = defaults.template || undefined;
+      const worldBookEnabled = (s.agentWorldbookEnabled as Record<string, boolean>)[agentId];
+      const configuredWorldBookIds = worldBookEnabled
+        ? [...((s.agentWorldbookIds as Record<string, string[]>)[agentId] ?? [])]
+        : [];
+      const selectedSystemCore =
+        this.game.activeSave?.metadata?.enabledWorldBookEntries?.some((entry: string) =>
+          entry.startsWith('system_core:'),
+        ) ?? false;
+      // Selected core lore is authoritative save data. Story and char_gen both
+      // need the source entry; the other agents keep their configured partitions.
+      const isCoreLoreAgent = agentId === 'story' || agentId === 'char_gen';
+      const coreBookIds = isCoreLoreAgent
+        ? [...(selectedSystemCore ? ['system_core'] : []), ...systemCoreWorkshopBookIds]
+        : [];
+      const worldBookIds =
+        worldBookEnabled && coreBookIds.length > 0
+          ? [...new Set([...configuredWorldBookIds, ...coreBookIds])]
+          : configuredWorldBookIds;
 
       return {
         agentId,
@@ -484,9 +522,7 @@ export class GamePipeline {
           fixedExamples: '',
         },
         presetId,
-        worldBookIds: (s.agentWorldbookEnabled as Record<string, boolean>)[agentId]
-          ? ((s.agentWorldbookIds as Record<string, string[]>)[agentId] ?? [])
-          : [],
+        worldBookIds,
         // 🔑 优先使用 agentDefaults（loadPresets 自 fetch agent-config.json），
         // localStorage 可能有用户编辑过的版本，作为 fallback。
         systemPrompt: systemPrompt || (s.agentPrompts as Record<string, string>)[agentId],
@@ -702,6 +738,21 @@ export class GamePipeline {
       const enabledEntries = this.game.activeSave?.metadata?.enabledWorldBookEntries ?? [];
       return filterBooksByEnabledEntries(all, enabledEntries);
     } catch {
+      return [];
+    }
+  }
+
+  /** Match selected workshop entries to project-level `system/core` tags. */
+  private async loadSystemCoreWorkshopBookIds(worldBooks: WorldBook[]): Promise<string[]> {
+    if (!worldBooks.some((book) => book.partition === 'creative_workshop' && book.entries.length)) {
+      return [];
+    }
+    try {
+      const { getDatabase } = await import('@engine/database');
+      const projects = await getDatabase().workshopProjects.toArray();
+      return collectSelectedSystemCoreWorkshopBookIds(worldBooks, projects);
+    } catch (err) {
+      console.warn('[GamePipeline] 工坊 system/core 标签读取失败（不阻塞本轮）:', err);
       return [];
     }
   }
@@ -1025,7 +1076,7 @@ export class GamePipeline {
           duration: 0,
         });
       },
-      onAgentComplete: (result) => {
+      onAgentComplete: async (result) => {
         this.game.clearAgentStatus(result.agentId, result.error);
         // 补全本轮已启动日志的剩余字段（保留 onAgentStart 写入的占位条目）
         const prev = this.game.agentLog.find((e) => e.agentId === result.agentId);
@@ -1047,7 +1098,7 @@ export class GamePipeline {
           completionTokens: result.completionTokens,
           duration: result.duration,
         });
-        this.handleAgentResult(result);
+        await this.handleAgentResult(result);
       },
       onAgentError: (agentId, error) => {
         console.error(`[GamePipeline] Agent 错误: ${agentId}`, error);
@@ -1099,12 +1150,10 @@ export class GamePipeline {
     switch (result.agentId) {
       case 'story': {
         // rawResponse 直接就是 AI 返回的字符串正文（流式模式下也是完整文本）
-        if (result.rawResponse) {
-          const { content, options } = extractStoryOptions(result.rawResponse);
-          this.game.setPendingOptions(options);
-          // 配乐标记没有渲染意义，漏出去就是玩家眼前的一行尖括号
-          this.game.addMessage(stripPlayAudioMarkers(content).trim(), 'assistant');
-        }
+        const { content, options } = extractStoryOptions(result.rawResponse || '');
+        if (!content) throw new Error('story produced no player-visible narrative');
+        this.game.setPendingOptions(options);
+        this.game.addMessage(content, 'assistant');
         break;
       }
       case 'memory_summary': {

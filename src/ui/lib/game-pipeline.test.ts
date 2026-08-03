@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { extractStoryOptions, GamePipeline } from './game-pipeline';
+import {
+  collectSelectedSystemCoreWorkshopBookIds,
+  extractStoryOptions,
+  GamePipeline,
+} from './game-pipeline';
 import type { AgentResult } from '@engine/types';
 
 vi.mock('@engine/plot-engine', () => ({
@@ -81,7 +85,8 @@ function makeGameStore(overrides: Record<string, any> = {}) {
     clearAgentStatus: vi.fn(),
     addAgentLogEntry: vi.fn(),
     refreshFromDb: vi.fn(async () => {}),
-    markOpeningPromptConsumed: vi.fn(async () => {}),
+    markOpeningPromptConsumed: vi.fn(async () => true),
+    releaseOpeningPromptClaim: vi.fn(async () => true),
     recordEjsVarsRejection: vi.fn(),
     ...overrides,
   } as any;
@@ -117,6 +122,159 @@ function makePipeline(gameOverrides: Record<string, any> = {}) {
 function makeResult(agentId: string, rawResponse: string): AgentResult {
   return { agentId, output: rawResponse, rawResponse, tokensUsed: 0, cacheHit: false, duration: 0 };
 }
+
+describe('sendOpeningPrompt', () => {
+  it('two pipeline instances sharing one save generate the opening only once', async () => {
+    let consumed = false;
+    const gameStore = makeGameStore({
+      openingPrompt: 'OPENING',
+      markOpeningPromptConsumed: vi.fn(async () => {
+        if (consumed) return false;
+        consumed = true;
+        return true;
+      }),
+    });
+    const options = {
+      gameStore,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    };
+    const first = new GamePipeline(options);
+    const second = new GamePipeline(options);
+    const firstRun = vi.spyOn(first, 'run').mockResolvedValue(true);
+    const secondRun = vi.spyOn(second, 'run').mockResolvedValue(true);
+
+    await Promise.all([first.sendOpeningPrompt(), second.sendOpeningPrompt()]);
+
+    expect(firstRun.mock.calls.length + secondRun.mock.calls.length).toBe(1);
+    expect(gameStore.markOpeningPromptConsumed).toHaveBeenCalledTimes(2);
+  });
+
+  it('releases the claim when the run produced no narrative at all', async () => {
+    // API 一次抽风不该把开场永久烧掉 —— 玩家会拿到一个只有自己那句话、没法重来的存档。
+    const gameStore = makeGameStore({ openingPrompt: 'OPENING' });
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    vi.spyOn(pipeline, 'run').mockImplementation(async () => {
+      gameStore.messages.push({ id: 'u1', role: 'user', content: 'OPENING' });
+      return false;
+    });
+
+    await pipeline.sendOpeningPrompt();
+
+    expect(gameStore.releaseOpeningPromptClaim).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the claim when narrative already landed, and never re-renders the same user line', async () => {
+    // 已经有叙事时重跑会把那段再写一遍；用户消息也已落库，重试不能重复插入。
+    const gameStore = makeGameStore({
+      openingPrompt: 'OPENING',
+      messages: [
+        { id: 'u1', role: 'user', content: 'OPENING' },
+        { id: 'a1', role: 'assistant', content: '晨光落在石阶上。' },
+      ],
+    });
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    const run = vi.spyOn(pipeline, 'run').mockResolvedValue(false);
+
+    await pipeline.sendOpeningPrompt();
+
+    expect(run).toHaveBeenCalledWith('OPENING', undefined, false);
+    expect(gameStore.releaseOpeningPromptClaim).not.toHaveBeenCalled();
+  });
+});
+
+describe('buildAgentConfigs — selected system core visibility', () => {
+  it.each([408, 413, 999])(
+    'adds system_core to char_gen for any selected system-core entry (uid %s)',
+    (uid) => {
+      const pipeline = makePipeline({
+        activeSave: {
+          metadata: { enabledWorldBookEntries: [`system_core:${uid}`] },
+        },
+      });
+      const settings = (pipeline as any).settings.settings;
+      settings.agentWorldbookEnabled.char_gen = true;
+      settings.agentWorldbookIds.char_gen = ['world_setting', 'race', 'character'];
+      settings.agentWorldbookEnabled.story = true;
+      settings.agentWorldbookIds.story = ['world_setting'];
+
+      const configs = (pipeline as any).buildAgentConfigs({ char_gen: {} });
+      const charGen = configs.find((config: any) => config.agentId === 'char_gen');
+      const story = configs.find((config: any) => config.agentId === 'story');
+
+      expect(charGen.worldBookIds).toContain('system_core');
+      expect(story.worldBookIds).toContain('system_core');
+    },
+  );
+
+  it('grants selected system/core workshop books to story and char_gen only', () => {
+    const pipeline = makePipeline();
+    const settings = (pipeline as any).settings.settings;
+    for (const agentId of ['story', 'char_gen', 'request_dispatcher']) {
+      settings.agentWorldbookEnabled[agentId] = true;
+      settings.agentWorldbookIds[agentId] = ['world_setting'];
+    }
+
+    const configs = (pipeline as any).buildAgentConfigs({}, undefined, ['workshop:core-project']);
+    const byId = (agentId: string) =>
+      configs.find((config: any) => config.agentId === agentId).worldBookIds;
+
+    expect(byId('story')).toContain('workshop:core-project');
+    expect(byId('char_gen')).toContain('workshop:core-project');
+    expect(byId('request_dispatcher')).not.toContain('workshop:core-project');
+  });
+});
+
+describe('collectSelectedSystemCoreWorkshopBookIds', () => {
+  it('returns only selected, enabled workshop books whose project has the system/core tag', () => {
+    const entry = (projectId: string, uid: number, enabled = true) => ({
+      uid,
+      name: projectId,
+      content: projectId,
+      enabled,
+      key: [],
+      keysecondary: [],
+      selectiveLogic: 0,
+      order: 0,
+      position: 0,
+      extra: { workshop: { projectId } },
+    });
+    const books = [
+      {
+        id: 'workshop:core-project',
+        partition: 'creative_workshop',
+        entries: [entry('core-project', 100)],
+      },
+      {
+        id: 'workshop:regular-project',
+        partition: 'creative_workshop',
+        entries: [entry('regular-project', 101)],
+      },
+      {
+        id: 'workshop:disabled-core',
+        partition: 'creative_workshop',
+        entries: [entry('disabled-core', 102, false)],
+      },
+    ] as any;
+    const projects = [
+      { id: 'core-project', tags: ['System/Core'] },
+      { id: 'regular-project', tags: ['character'] },
+      { id: 'disabled-core', tags: ['system/core'] },
+    ] as any;
+
+    expect(collectSelectedSystemCoreWorkshopBookIds(books, projects)).toEqual([
+      'workshop:core-project',
+    ]);
+  });
+});
 
 describe('extractStoryOptions', () => {
   it('提取 <options> 块并剥离正文', () => {
@@ -239,6 +397,23 @@ describe('extractStoryOptions', () => {
 });
 
 describe('buildContext — plotSettings (步5)', () => {
+  it('当前输入只进入 userInput，不混入既有历史', () => {
+    const pipeline = makePipeline({
+      messages: [
+        { id: 'u1', role: 'user', content: '上一轮输入', timestamp: 1 },
+        { id: 'a1', role: 'assistant', content: '上一轮正文', timestamp: 2 },
+      ],
+    });
+
+    const ctx = (pipeline as any).buildContext('当前输入');
+
+    expect(ctx.userInput).toBe('当前输入');
+    expect(ctx.history.map((message: { content: string }) => message.content)).toEqual([
+      '上一轮输入',
+      '上一轮正文',
+    ]);
+  });
+
   it('读取 activeSave.metadata.plotSettings', () => {
     const plotSettings = {
       mode: 'main',
@@ -269,6 +444,76 @@ describe('buildContext — plotSettings (步5)', () => {
     const pipeline = makePipeline({ activeSave: null });
     const ctx = (pipeline as any).buildContext('输入');
     expect(ctx.plotSettings.mode).toBe('off');
+  });
+});
+
+describe('buildAgentConfigs — story 流式投影', () => {
+  it('回调接收累计的玩家可见正文，不暴露结构标签', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const pipeline = makePipeline();
+    (pipeline as any).settings.settings.apiPool = [
+      {
+        id: 'ep',
+        name: 'test',
+        provider: 'openai',
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'test',
+        defaultModel: 'model',
+      },
+    ];
+    const chunks: Array<[string, boolean]> = [];
+    const configs = (pipeline as any).buildAgentConfigs({}, (text: string, complete: boolean) =>
+      chunks.push([text, complete]),
+    );
+    const stream = configs.find(
+      (config: { agentId: string }) => config.agentId === 'story',
+    ).streamCallbacks;
+
+    stream.onChunk('<main', false);
+    stream.onChunk('text>夜色渐深', false);
+    stream.onChunk('</maintext><options>\n1. 前进', false);
+    stream.onChunk('<maintext>夜色渐深</maintext><options>\n1. 前进', true);
+    stream.onError('断流');
+
+    expect(chunks).toEqual([
+      ['', false],
+      ['夜色渐深', false],
+      ['夜色渐深', false],
+      ['', true],
+      ['', true],
+    ]);
+    warn.mockRestore();
+  });
+});
+
+describe('handleAgentResult — story 正文投影', () => {
+  it('持久化正文与选项，但不持久化控制区块和音频标记', async () => {
+    const addMessage = vi.fn();
+    const setPendingOptions = vi.fn();
+    const pipeline = makePipeline({ addMessage, setPendingOptions });
+    const raw = `<thinking>隐藏分析</thinking>
+<maintext>夜色渐深。<play_audio mood="安静"/></maintext>
+<options>
+1. 前进
+2. 等待
+</options>`;
+
+    await (pipeline as any).handleAgentResult(makeResult('story', raw));
+
+    expect(setPendingOptions).toHaveBeenCalledWith(['前进', '等待']);
+    expect(addMessage).toHaveBeenCalledWith('夜色渐深。', 'assistant');
+  });
+
+  it('rejects a nonblank envelope with no player-visible narrative', async () => {
+    const addMessage = vi.fn();
+    const pipeline = makePipeline({ addMessage });
+
+    await expect(
+      (pipeline as any).handleAgentResult(
+        makeResult('story', '<maintext>   </maintext><options>1. 等待</options>'),
+      ),
+    ).rejects.toThrow('no player-visible narrative');
+    expect(addMessage).not.toHaveBeenCalled();
   });
 });
 

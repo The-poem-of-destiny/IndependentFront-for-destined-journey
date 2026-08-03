@@ -13,6 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { executeToolCall } from './agent-tools';
 import type { ToolExecutionContext, CharacterState } from './types';
 import { EventBus } from './game-event';
+import { deleteCharacter, getCharacters, saveCharacter } from './database';
 
 // ═══════════════════════════════════════════════════════════
 // 测试夹具
@@ -41,11 +42,11 @@ function makeCharacter(partial: Partial<CharacterState>): CharacterState {
   } as CharacterState;
 }
 
-function makeCtx(characters: CharacterState[] = []): ToolExecutionContext {
+function makeCtx(characters: CharacterState[] = [], saveId = 'save_test'): ToolExecutionContext {
   return {
     characters,
     variables: {},
-    saveId: 'save_test',
+    saveId,
   };
 }
 
@@ -197,11 +198,82 @@ describe('复用工具回归保护', () => {
     expect(r.reason).toBe('攻击检定');
   });
 
-  it('get_hp_percent 仍按 id 寻址（未受 combat 改动影响）', async () => {
+  it('get_character 优先按角色名寻址', async () => {
+    const byName = makeCharacter({ id: 'uuid_by_name', name: '同一个键' });
+    const byLegacyId = makeCharacter({ id: '同一个键', name: 'ID 碰撞角色' });
+    const r = await executeToolCall(
+      'get_character',
+      { characterId: '同一个键' },
+      makeCtx([byName, byLegacyId]),
+    );
+
+    expect(r.found).toBe(true);
+    expect(r.id).toBe('uuid_by_name');
+    expect(r.name).toBe('同一个键');
+  });
+
+  it('get_hp_percent 按角色名寻址', async () => {
+    const char = makeCharacter({ id: 'uuid_hp', name: '测试员', hp: 30, maxHp: 100 });
+    const ctx = makeCtx([char]);
+    const r = await executeToolCall('get_hp_percent', { characterId: '测试员' }, ctx);
+    expect(r.hpPercent).toBe(30);
+  });
+
+  it('get_hp_percent 兼容旧 UUID 寻址', async () => {
     const char = makeCharacter({ id: 'char_1', name: '测试员', hp: 30, maxHp: 100 });
     const ctx = makeCtx([char]);
     const r = await executeToolCall('get_hp_percent', { characterId: 'char_1' }, ctx);
     expect(r.hpPercent).toBe(30);
+  });
+
+  it('get_inventory 接受中文材料类型并按角色名寻址', async () => {
+    const char = makeCharacter({
+      id: 'uuid_inventory',
+      name: '采集者',
+      inventory: [
+        { name: '铁矿石', quantity: 3, type: '材料', rarity: '普通' },
+        { name: '治疗药水', quantity: 1, type: '消耗品', rarity: '普通' },
+      ],
+    });
+
+    const r = await executeToolCall(
+      'get_inventory',
+      { characterId: '采集者', type: '材料' },
+      makeCtx([char]),
+    );
+
+    expect(r.items.map((item: { name: string }) => item.name)).toEqual(['铁矿石']);
+  });
+
+  it('get_inventory 兼容英文材料别名和旧 UUID 寻址', async () => {
+    const char = makeCharacter({
+      id: 'uuid_inventory_legacy',
+      name: '旧版采集者',
+      inventory: [
+        { name: '银矿石', quantity: 2, type: '材料', rarity: '普通' },
+        { name: '任务信物', quantity: 1, type: '任务物品', rarity: '普通' },
+      ],
+    });
+
+    const r = await executeToolCall(
+      'get_inventory',
+      { characterId: 'uuid_inventory_legacy', type: 'material' },
+      makeCtx([char]),
+    );
+
+    expect(r.items.map((item: { name: string }) => item.name)).toEqual(['银矿石']);
+  });
+
+  it('get_inventory 对未知类型显式报错', async () => {
+    const char = makeCharacter({ name: '采集者' });
+
+    await expect(
+      executeToolCall(
+        'get_inventory',
+        { characterId: '采集者', type: 'not-a-real-type' },
+        makeCtx([char]),
+      ),
+    ).rejects.toThrow('未知物品类型');
   });
 
   it('未知工具仍抛错', async () => {
@@ -279,5 +351,52 @@ describe('复用工具回归保护', () => {
     );
     // coreAttr(12) + skillBonus(3, 生产检定) + d20 = 15 + d20；命中不加
     expect(r.fixedBonus).toBe(15);
+  });
+
+  it('craft_settle 将按名解析的制作者写成 StatePatch 角色名并真实扣除材料', async () => {
+    const saveId = 'save_agent_tools_craft_name';
+    const crafter = makeCharacter({
+      id: 'uuid_craft_name',
+      saveId,
+      name: '落库匠人',
+      tier: 1,
+      level: 1,
+      totalExp: 0,
+      attributes: { str: 20, dex: 10, con: 10, int: 10, spi: 10 },
+      inventory: [
+        {
+          name: '铁矿石',
+          description: '普通锻造材料',
+          quantity: 2,
+          type: '材料',
+          rarity: '普通',
+        },
+      ],
+    });
+
+    await deleteCharacter(crafter.id);
+    await saveCharacter(crafter);
+
+    try {
+      const result = await executeToolCall(
+        'craft_settle',
+        {
+          characterId: '落库匠人',
+          industry: '锻造',
+          stage: '基础加工',
+          productName: '铁锭',
+          targetQuality: '普通',
+          materials: [{ name: '铁矿石', quantity: 1, quality: '普通' }],
+        },
+        makeCtx([crafter], saveId),
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.patchesApplied).toBeGreaterThan(0);
+      const [stored] = await getCharacters(saveId);
+      expect(stored.inventory.find((item) => item.name === '铁矿石')?.quantity).toBe(1);
+    } finally {
+      await deleteCharacter(crafter.id);
+    }
   });
 });

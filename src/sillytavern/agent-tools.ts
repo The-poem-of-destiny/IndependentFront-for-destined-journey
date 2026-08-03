@@ -31,6 +31,7 @@ import type {
 import type { EventBus } from './game-event';
 import type { StatusApplyIntent, StatusRemoveIntent } from './status-api';
 import { d20, d100, roll, executeDiceRoll } from './dice';
+import { normalizeItemType } from './field-enums';
 import { collectChecks } from './effect-types';
 import type { Modifier, CheckModifier } from './effect-types';
 import {
@@ -102,11 +103,11 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: 'craft_check',
       description:
-        '执行制作检定。输入制作者ID、行业、目标品质、材料等，返回完整的检定分解（基础DC、材料DC修正、最终DC、骰值、评级）。这是真实计算，不是猜测。',
+        '执行制作检定。输入制作者名字、行业、目标品质、材料等，返回完整的检定分解（基础DC、材料DC修正、最终DC、骰值、评级）。这是真实计算，不是猜测。',
       parameters: {
         type: 'object',
         properties: {
-          characterId: { type: 'string', description: '制作者角色 ID' },
+          characterId: { type: 'string', description: '制作者角色名（兼容旧 UUID）' },
           industry: {
             type: 'string',
             enum: ['锻造', '炼金', '烹饪', '裁缝'],
@@ -187,7 +188,7 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
       parameters: {
         type: 'object',
         properties: {
-          characterId: { type: 'string', description: '制作者角色 ID' },
+          characterId: { type: 'string', description: '制作者角色名（兼容旧 UUID）' },
           industry: {
             type: 'string',
             enum: ['锻造', '炼金', '烹饪', '裁缝'],
@@ -325,7 +326,10 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
       parameters: {
         type: 'object',
         properties: {
-          characterId: { type: 'string', description: '角色 ID。不填则返回所有角色列表。' },
+          characterId: {
+            type: 'string',
+            description: '角色名（兼容旧 UUID）。不填则返回所有角色列表。',
+          },
         },
       },
     },
@@ -338,7 +342,7 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
       parameters: {
         type: 'object',
         properties: {
-          characterId: { type: 'string', description: '角色 ID' },
+          characterId: { type: 'string', description: '角色名（兼容旧 UUID）' },
         },
         required: ['characterId'],
       },
@@ -353,13 +357,14 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
       parameters: {
         type: 'object',
         properties: {
-          characterId: { type: 'string', description: '角色 ID' },
+          characterId: { type: 'string', description: '角色名（兼容旧 UUID）' },
           type: {
             type: 'string',
             enum: ['consumable', 'material', 'quest'],
             description: '按类型筛选（可选）',
           },
         },
+        required: ['characterId'],
       },
     },
   },
@@ -648,7 +653,8 @@ export async function executeToolCall(
       }));
 
       const request: CraftActionRequest = {
-        characterId: args.characterId,
+        // CraftActionRequest 沿用历史字段名，但 StatePatch 的逻辑键必须是角色名。
+        characterId: character.name,
         industry: (args.industry ?? '锻造') as CraftIndustry,
         stage: (args.stage ?? '成品') as CraftStage,
         productName: args.productName ?? '未命名制品',
@@ -709,7 +715,8 @@ export async function executeToolCall(
       }));
 
       const request: CraftActionRequest = {
-        characterId: args.characterId,
+        // CraftActionRequest 沿用历史字段名，但 StatePatch 的逻辑键必须是角色名。
+        characterId: character.name,
         industry: (args.industry ?? '锻造') as CraftIndustry,
         stage: (args.stage ?? '成品') as CraftStage,
         productName: args.productName ?? '未命名制品',
@@ -784,7 +791,7 @@ export async function executeToolCall(
     // ── Character Query ──
     case 'get_character': {
       if (args.characterId) {
-        const char = context.characters.find((c) => c.id === args.characterId);
+        const char = findCharacter(args.characterId, context);
         if (!char) return { found: false, characterId: args.characterId };
         return {
           found: true,
@@ -829,7 +836,11 @@ export async function executeToolCall(
       if (!char) throw new Error(`未找到角色: ${args.characterId}`);
       let items = char.inventory ?? [];
       if (args.type) {
-        items = items.filter((i) => i.type === args.type);
+        const normalizedType = normalizeItemType(args.type);
+        if (!normalizedType) {
+          throw new Error(`未知物品类型: ${args.type}`);
+        }
+        items = items.filter((i) => normalizeItemType(i.type ?? '') === normalizedType);
       }
       return {
         characterId: args.characterId,
@@ -1005,8 +1016,9 @@ temp.<path>    — 会话临时 (不持久化)
 // Helpers
 // ═══════════════════════════════════════════════════════════
 
-function findCharacter(id: string, ctx: ToolExecutionContext): CharacterState | undefined {
-  return ctx.characters.find((c) => c.id === id);
+/** Agent 工具统一寻址：规范名优先；UUID 仅保留给旧工具调用兼容。 */
+function findCharacter(key: string, ctx: ToolExecutionContext): CharacterState | undefined {
+  return findCharacterByName(key, ctx) ?? ctx.characters.find((c) => c.id === key);
 }
 
 /**

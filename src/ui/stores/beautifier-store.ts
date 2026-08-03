@@ -9,8 +9,8 @@
  *   data/defaults/beautifier-rules.json 现算的**派生缓存**。**纯内存 ref，不落任何存储**。
  *   每次启动重算，永远与磁盘一致，也不吃 localStorage 配额。
  *
- * `beautifierBuiltinDisabled`（几个 id 的 string[]）继续留在 settings-store，
- * 体积无关紧要，没必要动。
+ * `beautifierBuiltinDisabled`（历史字段名，现为「相对默认值翻转」的 id 列表）继续留在
+ * settings-store，体积无关紧要，没必要迁移。
  *
  * 🔴 本 store **绝不**把规则写回 settings —— settings-store 的 deep watch 会把整个
  *    设置对象序列化进 localStorage，写回去等于把刚搬出来的容量又塞回配额里。
@@ -22,6 +22,7 @@ import { loadPresetRules, mergeRules } from '@engine/beautifier';
 import type { BeautifierRule } from '@engine/types';
 import {
   migrateBeautifierRulesToDexie,
+  pruneLegacyBuiltinOverrides,
   type BeautifierMigrationOutcome,
 } from './beautifier-migration';
 import { useSettingsStore } from './settings-store';
@@ -94,6 +95,10 @@ export const useBeautifierStore = defineStore('beautifier', () => {
   ): Promise<void> {
     try {
       const preset = await loadPresetRules();
+      // 覆盖列表语义迁移：认得出出厂默认值才能做，所以挂在预设加载之后。
+      // 内部有标志位，重复调用是空转。
+      const settingsStore = useSettingsStore();
+      if (pruneLegacyBuiltinOverrides(settingsStore.settings, preset)) settingsStore.saveNow();
       const merged = mergeRules(
         preset,
         userRules.value,
@@ -108,7 +113,7 @@ export const useBeautifierStore = defineStore('beautifier', () => {
     }
   }
 
-  /** 用户手动禁用的内置规则 id —— 仍住在 settings（体积无关紧要） */
+  /** 用户手动翻转默认启用状态的内置规则 id —— 仍住在 settings（字段名保持兼容） */
   function builtinDisabled(): string[] {
     return (useSettingsStore().settings.beautifierBuiltinDisabled as string[]) ?? [];
   }

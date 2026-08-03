@@ -9,6 +9,37 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### PR #24 审查收口（模型帧脚本策略 / 匹配预算 / 覆盖列表语义 / 开场重试）｜✅ 完成（2026-08-03）
+
+- **模型输出不再顺带拿到脚本面与网络出口**：`<item_info>` / `<task_info>` 卡片的 markup 是**本轮模型输出**，不是用户装过的规则，却和工坊正则共用同一档全开 frame（`allow-scripts` + `connect-src http: https:` + 整份 `regexStorage` 快照内嵌进 srcdoc）。`BeautifierMatchSegment` 新增 `origin: 'rule' | 'model'`，renderer 据此分档：模型帧走 nonce-only `script-src` + `script-src-attr 'none'` + `connect-src 'none'`，且不注入共享命名空间。拦截由**浏览器执行 CSP** 完成，markup 一个字符都不改（不回退到正则消毒）；样式/图片/字体/媒体照旧，卡片视觉不降级。规则帧契约完全不动，工坊兼容面零影响。
+- **匹配阶段封顶**：`findEligibleMatches` 的越界重试分支（匹配从文本范围内起头、却越过范围尾撞上前一条规则的占位符）是 O(n²)：贪婪 pattern 每次退一格重来、每次扫到正文末尾。现按扫描字符数记账封顶（`MAX_OVERLAP_SCAN_CHARS_PER_RULE = 5e6`），病态规则退化成「少匹配几处」而不是卡死渲染线程。只卡这一个分支——正常命中的 `exec` 一找到就返回，拿总量卡会误伤「长正文 + 多命中」的正经规则。回归用例去掉封顶后耗时 3.9 s 且断言失败，装上后 9 ms。
+- **`beautifierBuiltinDisabled` 语义迁移**：该字段从「强制关掉」改成「相对出厂默认翻转」后，22 条预设里 21 条出厂 `defaultEnabled: false` —— 旧 UI 点它们是空操作，但 id 照样进了列表。不迁移的话老档升级会突然打开这 21 条。新增 `pruneLegacyBuiltinOverrides()`：带标志位、只保留旧语义下真的起过作用的 id（出厂开启的那些），认不出来的 id 保守留着。
+- **开场生成失败可重试**：认领发生在长管线之前且刻意不归还，一次 API 抽风就把开场永久烧掉，玩家只剩一句自己的话、没有叙事、也没法重来。新增 `releaseOpeningPromptClaim()`；仅当「一句 assistant 正文都没产出」时归还，重挂载会重跑开场。用户消息已落库时不再重复插入（`run()` 的 `isUserMessage` 按现存消息判定），所以归还不会带来重复正文。
+- **清理**：删掉零调用方的 `beautify()`（它还停留在旧的 `builtinDisabled` 语义，与 `mergeRules` 自相矛盾）；`processRules()` 补上「返回值不是可直接 `v-html` 的安全 HTML」的显式警告——隔离边界在渲染面，不在这个字符串里。移除 iframe 上的 `csp` 属性（CSP Embedded Enforcement 从未落地、Chrome 已移除，真正生效的是文档内 `<meta http-equiv>`）。合并 `App.vue` 里重复的 `worldbooks.init()`。
+- **仍未收口（已记进审查文档）**：每命中一帧的常驻开销（长对话可累积数百 frame）与 inline 命中会断段——两者都需要真机量化，见 `docs/reviews/2026-08-02-workshop-regex-compatibility.md` 第 10/11 条。
+
+### 输出美化视觉边界收口｜✅ 完成（2026-08-03）
+
+- **根因**：只要消息含一个富正则命中，renderer 就把未命中正文与全部 replacement 拼进同一个 iframe；因此规则的 `body`、`span`、`*`、继承字体或背景等 CSS 仍会影响普通正文。iframe 根的 `color-scheme: light dark` 还会让透明画布按系统暗色偏好绘成深色。
+- **边界修订**：未命中正文与内置对话卡片始终留在宿主原生 Vue renderer；每个非原生富命中各自进入 opaque `sandbox="allow-scripts"` iframe。规则自带的颜色体系、HTML/CSS/JS 与完整文档保持原样，但视觉作用域只覆盖该命中，不能触及普通正文或其它命中；跨命中 DOM 查询不再兼容。
+- **验证**：组件回归测试以 `* { background:#111; color:#eee }` 钉死边界；青花瓷宽/窄视口真机检查确认普通正文保持透明底与钴蓝文字，深色规则卡片仍在 iframe 内使用自己的深色方案。全量测试与 production build 通过后方可交付。
+
+### 生成链路 / Agent / 正文渲染审查与收口｜ ✅ 完成（2026-08-02）
+
+- **管线成功契约**：默认 `story` 为必需 Agent；缺失、报错、`null`、空白输出或完成处理失败时不再推进回合。`onAgentComplete` 支持异步并由编排器等待，记忆与剧情持久化不再与下一阶段竞速。
+- **SSE 结算**：支持 CRLF、多 `data:` 字段、`[DONE]`、尾部 usage 与 EOF；完成/错误只结算一次。`finish_reason` 后有 1 秒尾包窗口，异常常开连接会主动收口，不再无限挂起。
+- **正文唯一投影**：新增 `story-output.ts`，流式预览与最终入库共用 `<maintext>` / `<option(s)>` / 控制区块解析；开标签前的内容先缓冲，投影后无可见正文则整轮失败；当前玩家输入只进 `userInput`，不再同时重复进历史区。
+- **Agent 工具寻址**：角色名优先、旧 UUID 兼容；制作补丁统一使用角色逻辑名；物品筛选复用字段枚举别名，未知类型显式失败。
+- **美化兼容边界**：撤销 DOM 消毒方案。正文编译为转义文本与原样富匹配片段；同一条已提交消息的全部片段进入一个无 same-origin、`credentialless`、`no-referrer` 的 `allow-scripts` iframe，使跨命中脚本与 inline replacement 共享原有 message DOM。外部 HTTP(S) 资源与原生网络 API 放行；form、popup、download、top navigation、嵌套 frame、parent DOM 与应用存储仍隔离，应用 `/api` 拒绝 `Origin: null`。规则 replacement、捕获组、HTML/CSS/script、事件属性、SVG/控件及完整文档保持原样；流式阶段不执行脚本，提交后才创建 frame。向远程/本地网络请求以及外传正文/regex-namespace 数据是明确接受的兼容代价。
+- **正则专用持久存储**：Dexie v16 新增 `regexStorage`，整张表就是所有正则、信任级别与规则预览共享的唯一不可信命名空间；工坊更新/卸载不清理，并纳入 `FullBackup`（pre-v16 缺字段时保留现表）。宿主在 authored `<head>` script 执行前完成 hydration，iframe 以同步 `localStorage` 镜像及 `window.regexStorage` 别名读写，mutation 异步落库并向其它 frame 广播；`sessionStorage` 仍是 frame-ephemeral，IndexedDB、应用 storage/Dexie 与 API Key 不开放。配额为每命名空间 5 MiB、1024 keys、单 key 4096 UTF-8 bytes。
+- **工坊正则元数据**：只把包含 AI-output `placement=2` 的规则接入 assistant 正文，避免 user-only 规则误投；`minDepth`/`maxDepth` 以最新 user/assistant 消息为 0、忽略 system event、含边界执行。公共语料里 `runOnEdit` 当前不可达，非零 `substituteRegex` 均因 findRegex 无宏而惰性。
+- **API Key 迁移**：API Key 从 `fated-poem-settings` localStorage 快照迁入 Dexie `apiEndpoints`；事务写入并回读验证成功后才清理旧 key，任一阶段失败则保留唯一可恢复副本并在设置页提示。API CRUD 改为 Dexie-first。
+- **BFF 响应编码**：Node `fetch` 会自动解压上游 gzip/deflate/Brotli 响应但保留 `content-encoding`；代理现与 `content-length` 一并剥离该失效头，避免浏览器二次解压并报 `ERR_CONTENT_DECODING_FAILED`。新增本地 Brotli 上游回归测试覆盖真实转发链路。
+- **调试弹窗布局**：工具栏「调试 & 导出」弹窗与 `Alt+Shift+D` 开发抽屉曾共用 `.debug-panel`，Vue 父级 scoped 样式因此把弹窗内容误设为 fixed 并移出布局流；开发抽屉现改用独立 `.debug-drawer`，并新增双调试面的类名隔离回归测试。真机在 1280×720 与 900×700 下确认弹窗恢复正常高度，开发抽屉仍固定于右侧。
+- **全量工坊语料**：2026-08-02 完成一次性匿名公共快照审查，覆盖 303/303 项目详情、303/303 payload 响应与 99 条正则（0 编译失败，最高 `$39`）。本地 41.6 MB 语料位于 gitignored `reference/workshop-reference/`；60 条外部资源规则已按联网契约放行，16 条父页面耦合与 14 条宿主 API 耦合仍明确报告降级；历史项目里已持久化的旧「禁止联网」提示会被过滤。storage 报表的 8 条是词法命中；逐条审查确认 5 个项目共 6 条 active、另 2 条只在注释中出现，active 全部仅调用 `localStorage.getItem`/`setItem`/`removeItem`，现由共享持久镜像覆盖。
+- **创作者契约**：新增 `docs/reference/worldbook-ejs-regex-authoring-guide.md`，以中文统一规定世界书激活与排序、EJS 语法/能力/持久化/预算/回退、ST 正则字段映射、原生 replacement 语义、联网 iframe 与共享 `regexStorage`。同步校正 `poem-ejs.d.ts` 和文档导航，明确 EJS `local` 当前是每存档共享桶、QuickJS fail-closed 与 50 ms/5 s 预算、99 条语料中 94 条可落地，以及纯正则项目当前缺少存档启用信号。
+- **验证**：全量 Vitest 207 文件、5807 通过 / 3 跳过；`tsc --noEmit`、`vue-tsc --noEmit`、Vite production build 与浏览器真机 iframe 探针通过。真机覆盖 pre-head hydration、同 frame 不重载、跨 frame 广播、页面重载持久、sessionStorage 重载清空，以及 parent DOM / IndexedDB / 应用 API 继续不可达。
+
 ### 真机 debug 修复轮 · 开局链路（美化/item_gen 批量/词条落库/userId 缓存）｜ ✅ 完成（2026-08-02）
 
 基于 4 份真机 debug 导出（`484c6363` / `0b7f8f6e` / `2743e219` / `e91825e1` / `e91825e1`）逐项定位并修复开局链路的六类问题：
@@ -40,17 +71,17 @@
 - AI 思考过重：item_gen prompt「思考深度要求」段加批量优先规则（每条目 30-80 字，保证产出 `<item_result>` 优先）。
 - `applyAddSkill` 补透传 `modifiers/buffs/divinity/automata`（此前只收 8 字段，item_gen 合法产出的技能 modifiers 落库即丢 → 生产检定加值不生效，与 `applyAddItem` S1/S3 对齐）。
 
-**6. item_info 卡片放行 + 消毒（🔴）** — `beautifier.ts`
+**6. item_info / task_info 卡片结构化渲染（🔴）** — `beautifier.ts`
 
 - story 预设引导 AI 输出 `<item_info>`/`<task_info>` HTML 美化卡片，但引擎不处理 → 标签被转义成文本。
-- 修复：新增 `sanitizeCardHtml`（剥 script/on*/javascript: 等执行面、保留样式面）+ `processRules` 规则循环前提取卡片块保护。
+- 修复：规则循环前提取卡片块为富匹配片段，交由同一隔离 iframe renderer；不再使用正则或 DOM sanitizer。
 
 **7. userId 缓存跨存档复用（🟢 降本）** — `agent-client.ts`
 
 - 根因：DeepSeek `user_id` 参与 KVCache 缓存隔离，`fp|saveId|agentId` 让每个存档缓存全 miss → 开新档全价重算（~0.5 元/次）。
 - 修复：改为 `fp|agentId`（只按 agent 区分），`parseUserId` 兼容新旧格式回溯。
 
-**回归防护**：beautifier 标签规则/XSS/item_info 消毒、normalizeEffects 三形态、未闭合 maintext、SKILL_STATE 提取、item_gen 批量打包、applyAddSkill 透传、userId 新格式 —— 全部补测试钉死。**5701 tests 全绿，typecheck 0 错误。**
+**回归防护**：beautifier 标签规则/结构化片段/item_info、normalizeEffects 三形态、未闭合 maintext、SKILL_STATE 提取、item_gen 批量打包、applyAddSkill 透传、userId 新格式 —— 全部补测试钉死。**5701 tests 全绿，typecheck 0 错误。**
 
 ---
 

@@ -169,7 +169,9 @@ AI 每回合的输出必须按以下**固定顺序**排列：
 
 ## 预设中不应该出现的内容
 
-以下内容源自旧 SillyTavern 角色卡体系，**在命定之诗引擎中不应使用**：
+以下限制只针对 **Story preset 本体**。世界书条目可以使用 EJS，输出美化库可以使用正则和 HTML/CSS/JS；其契约见[世界书 EJS 与输出美化正则创作指南](./worldbook-ejs-regex-authoring-guide.md)。
+
+以下内容源自旧 SillyTavern 角色卡体系，**不应直接塞进 Story preset**：
 
 - **EJS 条件块** `<% if (...) { %>` — 本引擎不区分模型，不需要多模型适配
 - **HTML 美化** `<style>` / `<item_info>` / `<task_info>` / 技能异域字符 / emoji / 文字发光 — 不需要

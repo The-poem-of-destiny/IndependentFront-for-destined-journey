@@ -616,6 +616,32 @@ AI 生成回合完成
       └─ 消息气泡: 从下向上滑入 (新消息)
 ```
 
+#### 7.2.1 生成与正文渲染契约
+
+- `GamePipeline` 在把当前玩家消息写入对话流之前快照历史；当前输入只通过
+  `AgentContext.userInput` 发送，不能同时出现在 `history`。
+- `AgentClient.chatStream()` 以 SSE 的 `[DONE]`、`finish_reason + EOF` 或显式错误完成一次且仅一次；
+  `story-output.ts` 是流式预览与最终入库共用的正文/选项投影入口；流式内容在 `<maintext>`
+  开标签到达前保持缓冲，避免前导分析进入玩家视图。
+- 默认管线把 `story` 声明为必需 Agent；缺失、报错、投影后无可见正文或完成处理失败时本回合失败，
+  不推进回合。异步 `onAgentComplete` 持久化完成后，编排器才进入后续阶段。
+- `compileBeautifierSegments()` 只让后续规则消费尚未命中的原文，并按原生 JavaScript
+  replacement 语义展开 `$1..$99`、`$&`、`$$`、命名组等；先前 replacement 不会被后续规则重写。
+- 工坊规则只把含 AI-output `placement=2` 的一侧接入 assistant renderer；`minDepth`/`maxDepth`
+  从最新 user/assistant 消息起按 0 计数、忽略 system event，并按含边界语义筛选。
+- 未命中正文与内置对话卡片始终用 Vue 文本绑定渲染；HTML/CSS/script replacement 不清洗，
+  每次富命中各自进入一个无 same-origin 的 `sandbox="allow-scripts"` iframe。由此规则的全局 CSS/布局只影响
+  自己的命中，不能触及普通正文或其它命中；跨命中 DOM 查询不兼容。frame 使用 `credentialless` + `no-referrer`，外部 HTTP(S) 资源与
+  原生网络 API 放行；form、popup、download、top navigation 与嵌套 frame 仍由 sandbox/CSP 阻断。
+- frame 不能读 parent DOM、IndexedDB、应用 Dexie/storage 或 API Key；应用自有 `/api` 拒绝 `Origin: null`。
+  正则唯一持久能力是 Dexie v16 `regexStorage` 代表的共享不可信命名空间：所有正则、信任级别与预览共用，
+  authored `<head>` script 前完成 hydration，iframe 通过同步 `localStorage` 镜像和 `window.regexStorage` 别名读写，
+  mutation 异步落库并跨 frame 广播。`sessionStorage` 仍只活在当前 frame。
+- regex namespace 限 5 MiB / 1024 keys / 单 key 4096 UTF-8 bytes，进入 `FullBackup`，工坊更新/卸载不清理。
+  规则向远程/本地网络发请求，或外传它可见的正文与 regex-namespace 数据，是为兼容现有工坊内容而明确接受的暴露。
+- 流式正文始终按原生文本预览，提交后才创建富文本 frame，避免每个 token 重跑脚本；已完成正文、
+  战斗正文和规则预览共用同一 renderer。完整 HTML 文档与外层 Markdown HTML 围栏由 frame 装配器归一化。
+
 ### 7.3 Store 设计补充（修订版）
 
 ```typescript

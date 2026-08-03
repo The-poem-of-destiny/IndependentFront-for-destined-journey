@@ -1113,7 +1113,9 @@ function setupPlotStore() {
 }
 
 describe('generatePlotOutline 大纲生成', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    const { getDatabase } = await import('@engine/database');
+    await getDatabase().apiEndpoints.clear();
     chatMock.mockReset();
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })) as any);
   });
