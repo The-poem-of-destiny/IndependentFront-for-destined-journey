@@ -366,7 +366,7 @@ describe('MARKER_TAGS', () => {
 // ========== MARKER_TAG_SET 常量 ==========
 
 describe('MARKER_TAG_SET', () => {
-  it('应包含全部 8 种标记类型', () => {
+  it('应包含全部 9 种标记类型', () => {
     expect(MARKER_TAG_SET.has('craft_request')).toBe(true);
     expect(MARKER_TAG_SET.has('combat_trigger')).toBe(true);
     expect(MARKER_TAG_SET.has('char_detect')).toBe(true);
@@ -447,5 +447,30 @@ describe('stripPlayAudioMarkers', () => {
   it('多个标记全部剥掉；没有标记时原样返回', () => {
     expect(stripPlayAudioMarkers('<play_audio/>x<play_audio>探索</play_audio>y')).toBe('xy');
     expect(stripPlayAudioMarkers('干净正文')).toBe('干净正文');
+  });
+});
+
+// ========== 防漏扫闸门（Q-05） ==========
+
+describe('MARKER_TAGS 与 scanMarkers 不许分叉', () => {
+  it('MARKER_TAGS 里的每一种标记，scanMarkers 都必须扫得到', () => {
+    // 旧实现里 scanMarkers 手抄两份清单（分别调用 + 手动合并数组）。
+    // 加了标记却漏改合并那处，症状是「单独扫得到、主入口扫不到」——
+    // 只在真机才暴露。这条把它钉在编译不到的地方：数据驱动地逐个验。
+    for (const tag of MARKER_TAGS) {
+      const text = `前文<${tag} target="x" itemType="equipment" operation="consume">正文</${tag}>后文`;
+      const { markers, cleanText } = scanMarkers(text);
+      expect(markers.map((m) => m.type)).toContain(tag);
+      expect(cleanText).toBe('前文后文');
+    }
+  });
+
+  it('每种标记都保留 rawContent 与 position，供倒序剥离用', () => {
+    for (const tag of MARKER_TAGS) {
+      const text = `AB<${tag}>c</${tag}>`;
+      const [m] = scanMarkers(text).markers;
+      expect(m.position).toBe(2);
+      expect(text.slice(m.position, m.position + m.rawContent.length)).toBe(m.rawContent);
+    }
   });
 });

@@ -50,7 +50,7 @@
 | [步骤 1](roadmap.md) 清尸体 + 补工具链网  | Q-04、Q-15             | ✅   | 四批僵尸清完 + 补网与清仓两个 PR 都落地                                               |
 | [步骤 2](roadmap.md) 修静默出错的生产路径 | Q-01、Q-02             | ✅   | 两条全部兑现（`a0c3d5d`），骰子那条建议仍需真机打一场复核                             |
 | [步骤 3](roadmap.md) 三处去留裁定         | Q-07、Q-03、Q-30       | ✅   | 三条裁定均已拍板并落地（Q-07 含 emit 源 + 效果回收 + 战斗内 12/18 显式化）            |
-| [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | 🔄   | Q-13 / Q-17 完成；Q-05 只剩 marker-protocol 走表化；Q-14 未开始                       |
+| [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | 🔄   | Q-05 / Q-13 / Q-17 完成；只剩 Q-14 失败回执统一                                       |
 | [步骤 5](roadmap.md) 数据路径去重         | Q-08、Q-16、Q-12       | ⬜   | 抽查：三份 `*-migration.ts` 与 `variables.ts` / `vars-merger.ts` 两个僵尸宿主原样在库 |
 | [步骤 6](roadmap.md) 品质体系与设置真源   | Q-11、Q-18、Q-06       | ⬜   | 抽查：`ScenePanel.vue:134` 的 `TIER_COLOR` 仍是 6 元、仍漏「唯一」，T7 仍描成灰       |
 | [步骤 7](roadmap.md) EJS 能力面 + Legacy  | Q-09、Q-10、Q-27       | ⬜   | 抽查：`ejs-backend.ts` 仍在；退役仍卡在真机走查这一前置                               |
@@ -72,7 +72,8 @@
 | `cbf6f82` | Q-07 ✅                  | 第二半：`commitChatState` 发事件 + `SubscriptionManager.setEffectSink` 回收效果（反应轮上限 3）；`runWindow` 消掉 8 处静默丢弃；6 个无求值器窗口以 `WINDOW_NOT_WIRED` 编译期掉落                                  |
 | `316acb8` | Q-15 ✅                  | 补网（`typecheck:tools` 进 CI / lint·format 扩到 server·tests·scripts）+ 清仓；补网当场逮到三处过期，含 CharGenSystemCard 把 `string[]` 当字典渲染                                                                |
 | `c4d01c2` | Q-04 ✅                  | 第四批：删 `variableContext`/`variableInstruction` 闭包与 `buildFallbackMessages`，`DEFAULT_TEMPLATES` 补齐三个退役 Agent；顺带删净 `MatchedEntry`/`lorebookMatches`/`targetCharacterId` 与 `buildZoneSection`    |
-| _本次_    | Q-17 ✅                  | `buildRequestBody(request, stream)` + `postCompletions(body, signal)` 收口流式/非流式两份逐字相同的装配；`stream` 是真形参（`stream_options` 只能在流式出现）；超时倍率提为具名常量                               |
+| `a4365c5` | Q-17 ✅                  | `buildRequestBody(request, stream)` + `postCompletions(body, signal)` 收口流式/非流式两份逐字相同的装配；`stream` 是真形参（`stream_options` 只能在流式出现）；超时倍率提为具名常量                               |
+| _本次_    | Q-05 ✅                  | `marker-protocol` 走表化：8 份相同扫描骨架 → `MARKER_SPECS` + `scanByTag`；`MARKER_TAGS` 与 `scanMarkers` 的合并都由表推导，消掉「两份手抄清单」这条漏扫线；补 2 条数据驱动防分叉闸门                             |
 
 ## 结论摘要
 
@@ -154,7 +155,7 @@
 | [Q-02](findings-t1-wiring-gap.md#q-02)    | 高     | T1   | `applyTimeAdvance` 算出的 patches 在唯一调用点被丢弃，`onRemove` 脚本在生产中等于没写    | 步骤 2   | ✅   |
 | [Q-03](findings-t1-wiring-gap.md#q-03)    | 高     | T1   | 记忆子系统被 UI 层重新实现一遍，`memory-summarizer.ts` 生产零调用，两套 MEM 编号不兼容   | 步骤 3   | ✅   |
 | [Q-04](findings-t4-corpses.md#q-04)       | 中     | T4   | 五处僵尸模块零生产引用却仍带测试与提示词正文                                             | 步骤 1   | ✅   |
-| [Q-05](findings-t2-ai-boundary.md#q-05)   | 高     | T2   | AI 输出解析没有共享缝：15+ 份拷贝，同名 `extractTag` 语义相反，effect 正则已漂出数据丢失 | 步骤 4   | 🔄   |
+| [Q-05](findings-t2-ai-boundary.md#q-05)   | 高     | T2   | AI 输出解析没有共享缝：15+ 份拷贝，同名 `extractTag` 语义相反，effect 正则已漂出数据丢失 | 步骤 4   | ✅   |
 | [Q-06](findings-t3-single-source.md#q-06) | 中     | T3   | 设置有两个真源，只有两个字段被手写桥搬运，引擎侧读到的是永远停在默认值的影子配置         | 步骤 6   | ⬜   |
 | [Q-07](findings-t1-wiring-gap.md#q-07)    | 高     | T1   | 两层效果系统都是空的：13 个「封闭枚举」窗口惰性，emitChain 事件层从未被实例化            | 步骤 3   | ✅   |
 | [Q-08](findings-t3-single-source.md#q-08) | 中     | T3   | 「六步迁移」复制了三遍且已漂移——唯一「搞砸即用户数据不可恢复」的路径是复制粘贴           | 步骤 5   | ⬜   |
