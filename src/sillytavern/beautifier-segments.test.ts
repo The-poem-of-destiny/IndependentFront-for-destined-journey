@@ -50,6 +50,7 @@ describe('compileBeautifierSegments', () => {
         kind: 'match',
         ruleId: 'card',
         ruleName: 'Card',
+        origin: 'rule',
         occurrence: 0,
         source: '<card>A</card>',
         captures: ['A'],
@@ -60,6 +61,7 @@ describe('compileBeautifierSegments', () => {
         kind: 'match',
         ruleId: 'card',
         ruleName: 'Card',
+        origin: 'rule',
         occurrence: 1,
         source: '<card>A</card>',
         captures: ['A'],
@@ -212,6 +214,8 @@ describe('compileBeautifierSegments', () => {
       { ruleId: 'builtin:item_info', occurrence: 0 },
       { ruleId: 'builtin:task_info', occurrence: 0 },
     ]);
+    // 卡片来自模型输出，不是用户装过的规则 —— 渲染面据此关掉脚本面（见 BeautifiedNarrative）。
+    expect(rich.map(({ origin }) => origin)).toEqual(['model', 'model']);
     expect(rich[0].replacement).toContain('<style>.x{color:red}</style>');
     expect(rich[0].replacement).toContain('<script>probe()</script>');
     expect(rich[0].replacement).toContain('<svg><circle /></svg>');
@@ -219,6 +223,27 @@ describe('compileBeautifierSegments', () => {
     expect(serializeBeautifierSegments(segments)).toContain(
       '<div class="st-card st-item_info"><style>.x{color:red}</style>',
     );
+  });
+
+  it('bounds overlap retries so a greedy rule cannot pin the render thread', () => {
+    // 先让一条规则在正文**末尾**留下一个不可穿透的占位片段，再让一条贪婪规则去匹配。
+    // `a[\s\S]*` 每次都会一路吃到投影末尾（越过文本范围尾），于是退一格重来 ——
+    // 没有封顶的话就是 200k 次 exec × 每次扫 200k 字符。
+    const filler = 'a'.repeat(200000);
+    const source = `${filler}<mark>x</mark>`;
+    const rules = [
+      activeRule({ id: 'first', pattern: '<mark>x</mark>', replacement: '<b>x</b>', order: 1 }),
+      activeRule({ id: 'greedy', pattern: 'a[\\s\\S]*', replacement: 'never', order: 2 }),
+    ];
+
+    const started = Date.now();
+    const segments = compileBeautifierSegments(source, 'maintext', rules);
+    const elapsed = Date.now() - started;
+
+    // 贪婪规则一处都不该命中，正文与前一条规则的替换都要原样保留。
+    expect(matches(segments).map(({ ruleId }) => ruleId)).toEqual(['first']);
+    expect(serializeBeautifierSegments(segments)).toBe(`${filler}<b>x</b>`);
+    expect(elapsed).toBeLessThan(2000);
   });
 
   it('retains all 22 bundled replacement structures byte-for-byte', () => {

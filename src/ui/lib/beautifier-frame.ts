@@ -11,29 +11,69 @@ export type BeautifierStorageMutation =
 
 export type BeautifierStorageEntry = readonly [key: string, value: string];
 
-export const BEAUTIFIER_FRAME_CSP = [
-  'default-src http: https: data: blob:',
-  "base-uri 'none'",
-  "object-src 'none'",
-  "frame-src 'none'",
-  "child-src 'none'",
-  "form-action 'none'",
-  'connect-src http: https: ws: wss: data: blob:',
-  'worker-src blob:',
-  "script-src http: https: data: blob: 'unsafe-inline' 'unsafe-eval'",
-  "script-src-attr 'unsafe-inline'",
-  "style-src http: https: data: blob: 'unsafe-inline'",
-  'img-src http: https: data: blob:',
-  'font-src http: https: data: blob:',
-  'media-src http: https: data: blob:',
-  "manifest-src 'none'",
-].join('; ');
+/**
+ * 帧内脚本策略 —— 按 markup 的**作者**分档，不是按内容长相。
+ *
+ * - `allow` —— 用户装过的规则（内置预设 / 自建 / 工坊）。保持工坊兼容：脚本、
+ *   `eval`、内联事件、远程资源、网络 API 全开，边界是 opaque sandbox 本身。
+ * - `block` —— 本轮**模型输出**合成的卡片（`<item_info>` / `<task_info>`）。世界书、
+ *   角色卡与工坊文案都能牵着模型正文走，所以这一档不给脚本面：CSP 只放行带 nonce 的
+ *   宿主引导脚本，卡片自带的 `<script>` / `onerror=` 一律被**浏览器**拦掉（不是正则
+ *   消毒），`connect-src` 收成 `'none'`，共享正则存储也不注入。样式、图片、字体、
+ *   媒体照旧，卡片该长什么样还长什么样。
+ */
+export type BeautifierFrameScriptPolicy = 'allow' | 'block';
+
+export function buildBeautifierFrameCsp(
+  scripts: BeautifierFrameScriptPolicy,
+  scriptNonce: string,
+): string {
+  const shared = [
+    "base-uri 'none'",
+    "object-src 'none'",
+    "frame-src 'none'",
+    "child-src 'none'",
+    "form-action 'none'",
+    "manifest-src 'none'",
+    "style-src http: https: data: blob: 'unsafe-inline'",
+    'img-src http: https: data: blob:',
+    'font-src http: https: data: blob:',
+    'media-src http: https: data: blob:',
+  ];
+
+  if (scripts === 'block') {
+    return [
+      "default-src 'none'",
+      ...shared,
+      "connect-src 'none'",
+      "worker-src 'none'",
+      `script-src 'nonce-${scriptNonce}'`,
+      "script-src-attr 'none'",
+    ].join('; ');
+  }
+
+  return [
+    'default-src http: https: data: blob:',
+    ...shared,
+    'connect-src http: https: ws: wss: data: blob:',
+    'worker-src blob:',
+    "script-src http: https: data: blob: 'unsafe-inline' 'unsafe-eval'",
+    "script-src-attr 'unsafe-inline'",
+  ].join('; ');
+}
+
+/** 规则帧（`scripts: 'allow'`）的策略串。模型帧按 nonce 逐帧生成，见 `buildBeautifierFrameCsp`。 */
+export const BEAUTIFIER_FRAME_CSP = buildBeautifierFrameCsp('allow', '');
 
 export interface BeautifierFrameDocumentOptions {
   markup: string;
   bridgeId: string;
   forwardContextMenu?: boolean;
   storageEntries?: readonly BeautifierStorageEntry[];
+  /** 见 `BeautifierFrameScriptPolicy`。默认 `allow`（规则帧）。 */
+  scripts?: BeautifierFrameScriptPolicy;
+  /** 仅用于测试注入确定性 nonce；生产走 `createBeautifierBridgeId()`。 */
+  scriptNonce?: string;
 }
 
 export interface BeautifierFrameMessage {
@@ -115,25 +155,35 @@ export function recommendedFrameMinHeight(markup: string): number {
 /**
  * Build an opaque iframe document for one rich beautifier match.
  *
- * This is intentionally not an HTML sanitizer: the rule's markup, styles,
- * inline handlers, and scripts are retained. The security boundary is the
- * opaque iframe sandbox plus CSP. Remote resources and network APIs are
- * available for workshop compatibility, while parent/storage access, nested
- * frames, forms, popups, downloads, external anchor navigation, and top-level
- * navigation remain blocked.
+ * This is intentionally not an HTML sanitizer: the markup, styles, inline
+ * handlers, and scripts are retained verbatim. The security boundary is the
+ * opaque iframe sandbox plus CSP.
+ *
+ * With `scripts: 'allow'` (rule-authored markup) remote resources and network
+ * APIs stay available for workshop compatibility. With `scripts: 'block'`
+ * (model-authored cards) the embedded markup gets no script execution, no
+ * network API, and no shared regex storage — enforced by CSP, not by filtering
+ * the markup. Either way parent/storage access, nested frames, forms, popups,
+ * downloads, external anchor navigation, and top-level navigation are blocked.
  */
 export function buildBeautifierFrameDocument({
   markup,
   bridgeId,
   forwardContextMenu = false,
   storageEntries = [],
+  scripts = 'allow',
+  scriptNonce,
 }: BeautifierFrameDocumentOptions): string {
   const parts = splitRichDocument(markup);
   const bridgeLiteral = JSON.stringify(bridgeId);
   const sourceLiteral = JSON.stringify(BEAUTIFIER_FRAME_MESSAGE_SOURCE);
   const contextMenuLiteral = forwardContextMenu ? 'true' : 'false';
   const mayUseFixedLayoutLiteral = /position\s*:\s*fixed/i.test(markup) ? 'true' : 'false';
-  const storageEntriesLiteral = inlineScriptLiteral(storageEntries);
+  // 模型帧不注入共享正则命名空间：那份快照会整份内嵌进 srcdoc 源码里。
+  const storageEntriesLiteral = inlineScriptLiteral(scripts === 'block' ? [] : storageEntries);
+  const persistStorageLiteral = scripts === 'block' ? 'false' : 'true';
+  const nonce = scriptNonce ?? createBeautifierBridgeId();
+  const nonceAttribute = scripts === 'block' ? ` nonce="${nonce}"` : '';
   const htmlAttributes = /(?:^|\s)lang\s*=/i.test(parts.htmlAttributes)
     ? parts.htmlAttributes
     : `lang="zh-CN" ${parts.htmlAttributes}`.trim();
@@ -143,7 +193,7 @@ export function buildBeautifierFrameDocument({
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="${BEAUTIFIER_FRAME_CSP}">
+<meta http-equiv="Content-Security-Policy" content="${buildBeautifierFrameCsp(scripts, nonce)}">
 <style>
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; width: 100%; min-width: 0; background: transparent; }
@@ -163,7 +213,7 @@ img, svg, video, canvas { max-width: 100%; }
   }
 }
 </style>
-<script>
+<script${nonceAttribute}>
 // window.localStorage throws for an opaque origin before user code can fall
 // back. A global lexical binding shadows that accessor for ordinary legacy
 // references. Its data is a host-owned, regex-only namespace; no application
@@ -243,9 +293,10 @@ const __beautifierMakeStorage = (initialEntries = [], onMutation = null) => {
   return { storage: proxy, apply, entries: () => [...values.entries()] };
 };
 let __beautifierQueueStorageMutation = () => {};
+const __beautifierSharedStorage = ${persistStorageLiteral};
 const __beautifierPersistentStorage = __beautifierMakeStorage(
   ${storageEntriesLiteral},
-  (mutation) => __beautifierQueueStorageMutation(mutation),
+  __beautifierSharedStorage ? (mutation) => __beautifierQueueStorageMutation(mutation) : null,
 );
 const localStorage = __beautifierPersistentStorage.storage;
 const sessionStorage = __beautifierMakeStorage().storage;
@@ -268,7 +319,10 @@ const sessionStorage = __beautifierMakeStorage().storage;
   for (const name of ['localStorage', 'sessionStorage']) {
     try { Object.defineProperty(window, name, { configurable: true, value: name === 'localStorage' ? localStorage : sessionStorage }); } catch (_) {}
   }
-  try { Object.defineProperty(window, 'regexStorage', { configurable: true, value: localStorage }); } catch (_) {}
+  // regexStorage 是「共享且持久」的承诺；模型帧那份只是本帧内存，别用同一个名字骗人。
+  if (__beautifierSharedStorage) {
+    try { Object.defineProperty(window, 'regexStorage', { configurable: true, value: localStorage }); } catch (_) {}
+  }
 
   // Common SillyTavern globals are represented by local, empty compatibility
   // surfaces. They let visual rules initialize, but deliberately expose no save,

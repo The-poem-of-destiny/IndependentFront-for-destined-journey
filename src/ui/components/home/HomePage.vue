@@ -13,10 +13,12 @@ const ui = useUIStore();
  * 创意工坊入口仍按产品发布节奏临时隐藏，等待完整安装/启用/游戏页真机走查。
  * 这不是安全边界：已安装项目仍可在游戏页启用。
  *
- * 当前执行边界：正则 replacement 只在 opaque `sandbox="allow-scripts"` iframe 中运行，
- * 可加载远程资源并调用网络 API，但拿不到父页面 DOM、Dexie、应用存储或 API Key；
- * 每个富命中独占一个 frame，未命中正文留在宿主原生文本面。世界书 EJS 由 QuickJS
- * 隔离并 fail-closed。网络开启意味着正则仍可发送该命中的 replacement/capture，
+ * 当前执行边界：**用户装过的**正则 replacement 在 opaque `sandbox="allow-scripts"` iframe
+ * 中运行，可加载远程资源并调用网络 API，但拿不到父页面 DOM、Dexie、应用存储或 API Key；
+ * 每个富命中独占一个 frame，未命中正文留在宿主原生文本面。模型输出合成的
+ * `<item_info>` / `<task_info>` 卡片走收紧的一档：nonce-only `script-src` +
+ * `connect-src 'none'`，不注入共享 `regexStorage`。世界书 EJS 由 QuickJS 隔离并
+ * fail-closed。网络开启意味着规则仍可发送该命中的 replacement/capture，
  * 详见 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
  */
 const WORKSHOP_ENTRY_ENABLED = false;

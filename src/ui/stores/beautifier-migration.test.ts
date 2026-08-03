@@ -14,6 +14,9 @@ import type { BeautifierRule } from '@engine/types';
 import { getDatabase } from '@engine/database';
 import {
   migrateBeautifierRulesToDexie,
+  pruneLegacyBuiltinOverrides,
+  BUILTIN_OVERRIDES_KEY,
+  BUILTIN_OVERRIDES_MIGRATED_FLAG_KEY,
   RULES_MIGRATED_FLAG_KEY,
   LEGACY_RULES_KEY,
   LEGACY_PRESET_CACHE_KEY,
@@ -378,5 +381,60 @@ describe('beautifier-migration (Phase 0b)', () => {
     expect(readLocalStorage().beautifierBuiltinDisabled).toEqual(['builtin-kill-proliferation']);
     // 开关也没被误伤
     expect(readLocalStorage().beautifierEnabled).toBe(true);
+  });
+});
+
+// ===== 覆盖列表语义迁移（2026-08-03）=====
+
+describe('pruneLegacyBuiltinOverrides', () => {
+  /** 出厂 22 条里只有 1 条 defaultEnabled=true —— 用最小夹具复刻这个比例。 */
+  const preset: BeautifierRule[] = [
+    makeRule('builtin-dialogue-card', { enabled: true, isBuiltin: true }),
+    makeRule('builtin-kill-proliferation', { enabled: false, isBuiltin: true }),
+    makeRule('builtin-revue', { enabled: false, isBuiltin: true }),
+  ];
+
+  it('丢掉旧语义下的空操作 id，保留真的起过作用的那些', () => {
+    // 用户点过三条：一条出厂开启（旧语义下真的关掉了），两条出厂关闭（点了没反应）。
+    const settings: Record<string, unknown> = {
+      [BUILTIN_OVERRIDES_KEY]: [
+        'builtin-dialogue-card',
+        'builtin-kill-proliferation',
+        'builtin-revue',
+      ],
+    };
+
+    expect(pruneLegacyBuiltinOverrides(settings, preset)).toBe(true);
+    expect(settings[BUILTIN_OVERRIDES_KEY]).toEqual(['builtin-dialogue-card']);
+    expect(settings[BUILTIN_OVERRIDES_MIGRATED_FLAG_KEY]).toEqual(expect.any(Number));
+  });
+
+  it('认不出来的 id 保守留着，不替用户做主', () => {
+    const settings: Record<string, unknown> = {
+      [BUILTIN_OVERRIDES_KEY]: ['workshop:abc:0', 'builtin-revue'],
+    };
+
+    pruneLegacyBuiltinOverrides(settings, preset);
+    expect(settings[BUILTIN_OVERRIDES_KEY]).toEqual(['workshop:abc:0']);
+  });
+
+  it('置过标志位之后是空转 —— 用户新点的翻转不会被再剪一次', () => {
+    const settings: Record<string, unknown> = {
+      [BUILTIN_OVERRIDES_KEY]: ['builtin-dialogue-card'],
+    };
+    pruneLegacyBuiltinOverrides(settings, preset);
+
+    // 迁移之后用户主动打开一条出厂关闭的规则 —— 这次是有效操作，不能再被当空操作剪掉。
+    (settings[BUILTIN_OVERRIDES_KEY] as string[]).push('builtin-revue');
+    expect(pruneLegacyBuiltinOverrides(settings, preset)).toBe(false);
+    expect(settings[BUILTIN_OVERRIDES_KEY]).toEqual(['builtin-dialogue-card', 'builtin-revue']);
+  });
+
+  it('全新档（没有这个字段）也照样置标志位，落成空列表', () => {
+    const settings: Record<string, unknown> = {};
+
+    expect(pruneLegacyBuiltinOverrides(settings, preset)).toBe(true);
+    expect(settings[BUILTIN_OVERRIDES_KEY]).toEqual([]);
+    expect(settings[BUILTIN_OVERRIDES_MIGRATED_FLAG_KEY]).toEqual(expect.any(Number));
   });
 });

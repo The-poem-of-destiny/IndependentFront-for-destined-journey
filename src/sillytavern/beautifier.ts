@@ -283,6 +283,17 @@ export interface BeautifierMatchSegment {
   kind: 'match';
   ruleId: string;
   ruleName: string;
+  /**
+   * Who authored the markup in `replacement`.
+   *
+   * - `rule` —— 用户装过的规则（内置预设 / 用户自建 / 工坊）。信任级别 = 用户自己选的。
+   * - `model` —— 本轮模型输出里合成出来的卡片（`<item_info>` / `<task_info>`）。
+   *
+   * 两者的隔离契约**不同**：模型正文会被世界书 / 角色卡 / 工坊文案里的注入牵着走，
+   * 所以渲染面必须给 `model` 片段关掉脚本执行与共享正则存储（见
+   * `BeautifiedNarrative.vue` 与 `beautifier-frame.ts` 的 `scripts` 策略）。
+   */
+  origin: 'rule' | 'model';
   /** Zero-based occurrence within this rule, in source order. */
   occurrence: number;
   /** Raw full match and capture groups for structured renderers. */
@@ -300,6 +311,14 @@ export interface BeautifierCompileOptions {
 }
 
 const CARD_PATTERN = /<\s*(item_info|task_info)\s*>([\s\S]*?)<\s*\/\s*\1\s*>/gi;
+
+/**
+ * 单条规则在一条正文上、**仅越界重试分支**允许扫过的字符数上限。
+ *
+ * 只卡这一个分支是刻意的：正常命中的 `exec` 一找到就返回，成本与正文长度不成正比，
+ * 拿总量卡它会误伤「长正文 + 多命中」的正经规则。见 `findEligibleMatches`。
+ */
+const MAX_OVERLAP_SCAN_CHARS_PER_RULE = 5_000_000;
 
 function appendText(segments: BeautifierSegment[], text: string): void {
   if (!text) return;
@@ -427,6 +446,7 @@ function findEligibleMatches(
   const matcher = new RegExp(expression.source, flags);
   const unicode = matcher.flags.includes('u') || matcher.flags.includes('v');
   const eligible: EligibleMatch[] = [];
+  let overlapScan = 0;
 
   for (const range of ranges) {
     let searchIndex = range.start;
@@ -448,6 +468,13 @@ function findEligibleMatches(
             : matcher.lastIndex;
         continue;
       }
+
+      // 越界重试是**二次方**的：匹配从范围内起头、却越过范围尾（撞上前一条规则留下的
+      // 占位符），只能退一个字符重来，而贪婪模式每次都会一路扫到正文末尾。给这个分支
+      // 记账并封顶，让病态 pattern 退化成「少匹配几处」而不是卡死渲染线程。正常命中
+      // 不经过这里，所以「长正文 + 多命中」的正经规则不受影响。
+      overlapScan += projection.length - match.index;
+      if (overlapScan > MAX_OVERLAP_SCAN_CHARS_PER_RULE) return eligible;
       searchIndex = advanceStringIndex(projection, match.index, unicode);
     }
   }
@@ -469,6 +496,8 @@ function extractCardSegments(text: string, occurrences: Map<string, number>): Be
       kind: 'match',
       ruleId,
       ruleName: tag,
+      // 卡片正文是**本轮模型输出**，不是用户装过的规则；渲染面据此收紧隔离契约。
+      origin: 'model',
       occurrence: nextOccurrence(occurrences, ruleId),
       source: match[0],
       captures: [inner],
@@ -519,6 +548,7 @@ function applyRule(
         kind: 'match',
         ruleId: rule.id,
         ruleName: rule.name,
+        origin: 'rule',
         occurrence: nextOccurrence(occurrences, rule.id),
         source: match[0],
         captures,
@@ -586,6 +616,11 @@ export function serializeBeautifierSegments(segments: readonly BeautifierSegment
  *    - 捕获内容不清洗；富文本片段由 UI 放入隔离 iframe
  * 4. 编译失败静默跳过
  *
+ * 🔴 **返回值不是可直接 `v-html` 的安全 HTML。** 未命中正文会转义，但匹配片段的
+ * `replacement`（含未转义的捕获内容）原样拼进来 —— 隔离边界在渲染面
+ * （`BeautifiedNarrative` 的 per-match iframe），不在这个字符串里。
+ * 渲染路径请用 `compileBeautifierSegments()`；本函数只服务测试与非 DOM 消费者。
+ *
  * @param text  原始文本
  * @param scope 当前处理的作用域（maintext / options / summary / thinking）
  * @param rules 全量规则列表（含内置 + 用户）
@@ -598,33 +633,4 @@ export function processRules(
   options: BeautifierCompileOptions = {},
 ): string {
   return serializeBeautifierSegments(compileBeautifierSegments(text, scope, rules, options));
-}
-
-/**
- * 美化文本的便捷入口（兼容旧接口）。
- *
- * @param text        原始文本
- * @param scope       当前作用域
- * @param userRules   用户自定义规则
- * @param builtinDisabled 禁用的内置规则 ID 列表
- * @returns 处理后的文本
- */
-export function beautify(
-  text: string,
-  scope: string,
-  userRules: BeautifierRule[],
-  builtinDisabled?: string[],
-): string {
-  const builtin = getBuiltinRules();
-  const disabledSet = new Set(builtinDisabled ?? []);
-  const filteredBuiltin = builtin.map((r) => ({
-    ...r,
-    enabled: r.enabled && !disabledSet.has(r.id),
-  }));
-  const builtinIds = new Set(builtin.map((r) => r.id));
-  const merged: BeautifierRule[] = [
-    ...filteredBuiltin,
-    ...userRules.filter((r) => !builtinIds.has(r.id)),
-  ];
-  return processRules(text, scope, merged);
 }

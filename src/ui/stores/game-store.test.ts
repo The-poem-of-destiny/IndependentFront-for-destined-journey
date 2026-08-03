@@ -614,4 +614,25 @@ describe('markOpeningPromptConsumed', () => {
     expect(store.hasOpeningPromptConsumed).toBe(true);
     expect((await getSave(SAVE_ID))?.metadata.openingPromptConsumed).toBe(true);
   });
+
+  it('releases a claim back to disk so a failed opening can be retried', async () => {
+    const base = makeSaveSlot();
+    await saveSaveSlot(
+      makeSaveSlot({
+        metadata: { ...base.metadata, openingPrompt: 'OPENING', openingPromptConsumed: false },
+      }),
+    );
+    const store = makeStore();
+    await store.loadSave(SAVE_ID);
+    expect(await store.markOpeningPromptConsumed()).toBe(true);
+
+    expect(await store.releaseOpeningPromptClaim()).toBe(true);
+    expect(store.hasOpeningPromptConsumed).toBe(false);
+    expect((await getSave(SAVE_ID))?.metadata.openingPromptConsumed).toBe(false);
+
+    // 归还之后能重新认领，且第二次归还是空转（没认领过就没什么可还的）。
+    expect(await store.markOpeningPromptConsumed()).toBe(true);
+    expect(await store.releaseOpeningPromptClaim()).toBe(true);
+    expect(await store.releaseOpeningPromptClaim()).toBe(false);
+  });
 });

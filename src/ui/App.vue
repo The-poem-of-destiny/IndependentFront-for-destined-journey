@@ -37,17 +37,15 @@ void settings.initApiSecrets().then((outcome) => {
 // 这里只负责尽早踢一脚；三个消费端（game-pipeline / create-store / SettingsPage）
 // 各自也 `await init()` —— init() 幂等且并发共用同一个 Promise，
 // 所以「谁先到谁等着」，不依赖本处的时序。
-void worldbooks.init().catch(() => {
-  /* 迁移例程内部永不抛；这里兜 hydrate/内置合并的意外，不该拦住应用启动 */
-});
-
-// 工坊正则按「当前存档启用了哪个工坊项目」隔离；启动时先水合项目元数据，
-// 让首屏正文就能把 creative_workshop:<uid> 还原成 workshop:<projectId>。
+//
+// 工坊正则还要按「当前存档启用了哪个工坊项目」隔离，所以世界书就绪后接着水合项目
+// 元数据，让首屏正文就能把 creative_workshop:<uid> 还原成 workshop:<projectId>。
 void worldbooks
   .init()
   .then(() => workshop.init())
   .catch(() => {
-    /* 工坊元数据不可用时规则保持关闭，不影响普通正文 */
+    /* 迁移例程内部永不抛；这里兜 hydrate/内置合并/工坊元数据的意外，
+       不该拦住应用启动。工坊元数据缺失时规则保持关闭，不影响普通正文。 */
   });
 
 // ═══ 美化规则（Phase 0b）═════════════════════════════════

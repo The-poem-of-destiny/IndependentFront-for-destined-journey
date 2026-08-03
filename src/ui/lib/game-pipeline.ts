@@ -181,10 +181,19 @@ export class GamePipeline {
     // GamePipeline while the first one is still running.
     const claimed = await this.game.markOpeningPromptConsumed();
     if (!claimed) return;
+
+    // run() 会先落库用户消息，所以重试前得知道这条已经在了 —— 否则归还认领等于放行重复。
+    const promptAlreadyRendered = this.game.messages.some(
+      (msg) => msg.role === 'user' && msg.content === prompt,
+    );
     // 开场 prompt 作为真正的用户消息渲染 + 注入历史，让下游 Agent 能读到装备/技能/背景/命定核心等
-    // run() persists the user message first, so releasing this claim on failure
-    // would let an automatic retry duplicate that message.
-    await this.run(prompt, onStoryChunk, /* isUserMessage */ true);
+    const ok = await this.run(prompt, onStoryChunk, /* isUserMessage */ !promptAlreadyRendered);
+    if (ok) return;
+
+    // 只有「一句叙事都没产出」才归还认领：API 抽风不该把开场永久烧掉。
+    // 已经有 assistant 正文时保持已消费，重跑会把那段叙事再写一遍。
+    const producedNarrative = this.game.messages.some((msg) => msg.role === 'assistant');
+    if (!producedNarrative) await this.game.releaseOpeningPromptClaim();
   }
 
   /** 核心: 将用户输入送入 Agent 管线。返回 true 表示管线成功完成。 */

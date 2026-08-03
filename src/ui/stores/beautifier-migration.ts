@@ -34,6 +34,42 @@ export const LEGACY_RULES_KEY = 'beautifierRules';
 /** 预设规则派生缓存在 settings 里的旧键名（无条件删除，见下） */
 export const LEGACY_PRESET_CACHE_KEY = 'beautifierPresetRules';
 
+/** 内置规则手动覆盖列表的键名（字段名沿用历史，语义已改，见 `pruneLegacyBuiltinOverrides`） */
+export const BUILTIN_OVERRIDES_KEY = 'beautifierBuiltinDisabled';
+
+/** 覆盖列表语义迁移的标志位 */
+export const BUILTIN_OVERRIDES_MIGRATED_FLAG_KEY = 'beautifierBuiltinOverridesMigratedAt';
+
+/**
+ * `beautifierBuiltinDisabled` 的语义从「强制关掉」改成「相对出厂默认翻转」（2026-08-03）。
+ *
+ * 为什么要迁：22 条预设里 **21 条出厂 `defaultEnabled: false`**，旧 `mergeRules` 对它们
+ * 一律强制 `enabled = false` —— 也就是说在设置页点这 21 条是**空操作**。但
+ * `toggleBuiltinRule` 不管有没有效果，照样把 id 塞进了列表。语义一改成 XOR，那些
+ * 「点了没反应」留下的 id 会在升级后突然把规则全打开，老存档一进游戏页满屏卡片。
+ *
+ * 处置：只保留在**旧语义下真的起过作用**的 id（出厂就开着、被这个列表关掉的那些）。
+ * 认不出来的 id（预设里查无此条）保守留着，不替用户做主。想开哪条再点一次即可 ——
+ * 这次会真的生效。
+ *
+ * 纯函数：只读 `presetRules` 的出厂 `enabled`，就地改 settings，返回是否动过。
+ */
+export function pruneLegacyBuiltinOverrides(
+  settings: Record<string, unknown>,
+  presetRules: readonly BeautifierRule[],
+): boolean {
+  if (settings[BUILTIN_OVERRIDES_MIGRATED_FLAG_KEY]) return false;
+
+  const raw = settings[BUILTIN_OVERRIDES_KEY];
+  const list = Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string') : [];
+  const defaultEnabledById = new Map(presetRules.map((rule) => [rule.id, rule.enabled === true]));
+  const kept = list.filter((id) => defaultEnabledById.get(id) ?? true);
+
+  settings[BUILTIN_OVERRIDES_MIGRATED_FLAG_KEY] = Date.now();
+  if (kept.length !== list.length || !Array.isArray(raw)) settings[BUILTIN_OVERRIDES_KEY] = kept;
+  return true;
+}
+
 export interface BeautifierMigrationDeps {
   /** 设置对象本体（settings-store 的 `settings.value`）—— 既是迁移源，也承载标志位 */
   settings: Record<string, unknown>;

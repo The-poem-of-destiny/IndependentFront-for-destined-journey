@@ -52,6 +52,17 @@ function isNativeMatch(segment: BeautifierMatchSegment): boolean {
   return segment.ruleId === 'builtin-dialogue-card';
 }
 
+/**
+ * 模型合成的卡片（`<item_info>` / `<task_info>`）不给脚本面。
+ *
+ * 隔离框够不到宿主是一回事，**该不该给这条正文脚本执行 + 网络出口**是另一回事：
+ * 模型正文会被世界书 / 角色卡 / 工坊文案里的注入牵着走，而 story 预设的卡片本来就只有
+ * div/b/span + 内联 style，不需要脚本。规则片段（用户自己装的）保持全开不变。
+ */
+function scriptPolicy(segment: BeautifierMatchSegment): 'allow' | 'block' {
+  return segment.origin === 'model' ? 'block' : 'allow';
+}
+
 function paragraphs(text: string): string[] {
   return text.split(/\n\n+/).filter((part, index, list) => part.length > 0 || list.length === 1);
 }
@@ -70,6 +81,7 @@ function paragraphs(text: string): string[] {
         :markup="segment.replacement"
         :rule-name="segment.ruleName"
         :forward-context-menu="forwardContextMenu"
+        :scripts="scriptPolicy(segment)"
         @resize="emit('resize', $event)"
       />
       <div

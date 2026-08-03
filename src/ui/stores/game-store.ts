@@ -502,6 +502,36 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  /**
+   * 归还开场 Prompt 认领。
+   *
+   * 只在「这一轮什么正文都没产出」时用：认领发生在长管线之前，API 一次抽风就会把
+   * 开场永久烧掉 —— 玩家拿到一个只有自己那句话、没有任何叙事、也没法重来的存档。
+   * 归还之后重挂载会重跑开场；调用方负责保证不会重复插同一条用户消息。
+   */
+  async function releaseOpeningPromptClaim(): Promise<boolean> {
+    const current = activeSave.value;
+    if (!current || !current.metadata?.openingPromptConsumed) return false;
+
+    const idx = saves.value.findIndex((save: SaveSlot) => save.id === current.id);
+    if (idx < 0) return false;
+
+    const previous = saves.value[idx];
+    const clean = JSON.parse(JSON.stringify(current));
+    clean.metadata = { ...(clean.metadata ?? {}), openingPromptConsumed: false };
+    clean.updatedAt = Date.now();
+
+    saves.value[idx] = clean;
+    try {
+      await saveSaveSlot(clean);
+      return true;
+    } catch (err) {
+      if (saves.value[idx]?.updatedAt === clean.updatedAt) saves.value[idx] = previous;
+      console.error('[game-store] 归还开场 Prompt 认领失败:', err);
+      return false;
+    }
+  }
+
   // === 选项管理 ===
   /** vars_update 解析出的行动选项 */
   const pendingOptions = ref<string[]>([]);
@@ -840,6 +870,7 @@ export const useGameStore = defineStore('game', () => {
     hasOpeningPromptConsumed,
     openingPrompt,
     markOpeningPromptConsumed,
+    releaseOpeningPromptClaim,
     setEnabledWorldBookEntries,
     pendingOptions,
     setPendingOptions,

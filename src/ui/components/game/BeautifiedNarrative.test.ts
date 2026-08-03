@@ -38,8 +38,9 @@ function mountNarrative(text: string, extra: Record<string, unknown> = {}) {
       stubs: {
         BeautifierFrame: {
           name: 'BeautifierFrame',
-          props: ['markup', 'ruleName'],
-          template: '<div class="frame-stub" :data-rule="ruleName">{{ markup }}</div>',
+          props: ['markup', 'ruleName', 'scripts'],
+          template:
+            '<div class="frame-stub" :data-rule="ruleName" :data-scripts="scripts">{{ markup }}</div>',
         },
       },
     },
@@ -57,6 +58,21 @@ describe('BeautifiedNarrative', () => {
 
     expect(wrapper.find('img').exists()).toBe(false);
     expect(wrapper.text()).toContain('<img src=x onerror=alert(1)>');
+  });
+
+  it('denies scripts to model-authored cards while rule matches keep the full surface', () => {
+    state.rules = [rule()];
+    const wrapper = mountNarrative(
+      '<card>rule owned</card>\n\n<item_info><script>leak()</script></item_info>',
+    );
+    const frames = wrapper.findAllComponents({ name: 'BeautifierFrame' });
+
+    expect(frames).toHaveLength(2);
+    // 用户装过的规则 = 全开（工坊兼容面不动）；模型合成的卡片 = 关脚本面。
+    expect(frames[0].props('scripts')).toBe('allow');
+    expect(frames[1].props('scripts')).toBe('block');
+    // 卡片 markup 不做消毒，拦截交给帧内 CSP。
+    expect(frames[1].props('markup')).toContain('<script>leak()</script>');
   });
 
   it('keeps unmatched narrative native while isolating each rich match', () => {

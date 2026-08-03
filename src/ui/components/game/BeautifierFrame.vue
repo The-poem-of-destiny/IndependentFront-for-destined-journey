@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import {
-  BEAUTIFIER_FRAME_CSP,
   BEAUTIFIER_FRAME_MESSAGE_SOURCE,
   BEAUTIFIER_FRAME_SANDBOX,
   buildBeautifierFrameDocument,
@@ -9,6 +8,7 @@ import {
   createBeautifierBridgeId,
   isBeautifierFrameMessage,
   recommendedFrameMinHeight,
+  type BeautifierFrameScriptPolicy,
   type BeautifierStorageEntry,
   type BeautifierStorageMutation,
 } from '../../lib/beautifier-frame';
@@ -22,12 +22,18 @@ const props = withDefaults(
     markup: string;
     ruleName?: string;
     forwardContextMenu?: boolean;
+    /** 见 `BeautifierFrameScriptPolicy`：规则作者 = `allow`，模型输出 = `block`。 */
+    scripts?: BeautifierFrameScriptPolicy;
   }>(),
   {
     ruleName: '',
     forwardContextMenu: false,
+    scripts: 'allow',
   },
 );
+
+/** 模型帧不参与共享正则命名空间，连会话都不开（少一个监听者，也少一份快照拷贝）。 */
+const usesSharedStorage = computed(() => props.scripts === 'allow');
 
 const emit = defineEmits<{
   resize: [height: number];
@@ -47,6 +53,7 @@ const srcdoc = computed(() => {
     bridgeId: bridgeId.value,
     forwardContextMenu: props.forwardContextMenu,
     storageEntries: storageEntries.value,
+    scripts: props.scripts,
   });
 });
 
@@ -169,6 +176,11 @@ onMounted(() => {
     attributeFilter: ['class', 'style', 'data-theme'],
   });
 
+  if (!usesSharedStorage.value) {
+    storageEntries.value = [];
+    return;
+  }
+
   void openBeautifierStorageSession((mutations) => {
     if (!storageSession) return;
     sendStorageSync(mutations);
@@ -205,7 +217,6 @@ onUnmounted(() => {
     :title="title"
     :srcdoc="srcdoc"
     :sandbox="BEAUTIFIER_FRAME_SANDBOX"
-    :csp="BEAUTIFIER_FRAME_CSP"
     credentialless
     referrerpolicy="no-referrer"
     loading="lazy"

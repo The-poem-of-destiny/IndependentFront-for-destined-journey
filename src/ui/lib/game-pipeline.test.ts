@@ -86,6 +86,7 @@ function makeGameStore(overrides: Record<string, any> = {}) {
     addAgentLogEntry: vi.fn(),
     refreshFromDb: vi.fn(async () => {}),
     markOpeningPromptConsumed: vi.fn(async () => true),
+    releaseOpeningPromptClaim: vi.fn(async () => true),
     recordEjsVarsRejection: vi.fn(),
     ...overrides,
   } as any;
@@ -147,6 +148,46 @@ describe('sendOpeningPrompt', () => {
 
     expect(firstRun.mock.calls.length + secondRun.mock.calls.length).toBe(1);
     expect(gameStore.markOpeningPromptConsumed).toHaveBeenCalledTimes(2);
+  });
+
+  it('releases the claim when the run produced no narrative at all', async () => {
+    // API 一次抽风不该把开场永久烧掉 —— 玩家会拿到一个只有自己那句话、没法重来的存档。
+    const gameStore = makeGameStore({ openingPrompt: 'OPENING' });
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    vi.spyOn(pipeline, 'run').mockImplementation(async () => {
+      gameStore.messages.push({ id: 'u1', role: 'user', content: 'OPENING' });
+      return false;
+    });
+
+    await pipeline.sendOpeningPrompt();
+
+    expect(gameStore.releaseOpeningPromptClaim).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the claim when narrative already landed, and never re-renders the same user line', async () => {
+    // 已经有叙事时重跑会把那段再写一遍；用户消息也已落库，重试不能重复插入。
+    const gameStore = makeGameStore({
+      openingPrompt: 'OPENING',
+      messages: [
+        { id: 'u1', role: 'user', content: 'OPENING' },
+        { id: 'a1', role: 'assistant', content: '晨光落在石阶上。' },
+      ],
+    });
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    const run = vi.spyOn(pipeline, 'run').mockResolvedValue(false);
+
+    await pipeline.sendOpeningPrompt();
+
+    expect(run).toHaveBeenCalledWith('OPENING', undefined, false);
+    expect(gameStore.releaseOpeningPromptClaim).not.toHaveBeenCalled();
   });
 });
 

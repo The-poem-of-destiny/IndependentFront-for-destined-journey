@@ -724,6 +724,8 @@ frame 使用：
 
 frame 内的 `eval` / `new Function` 属于允许的浏览器脚本能力，但仍只能操作该 frame 自己的权限面。
 
+> 本章描述的是**规则作者**的 frame（用户装过的正则）。模型输出里合成的 `<item_info>` / `<task_info>` 卡片走另一档收紧策略：`script-src` 只放行带 nonce 的宿主引导脚本、`script-src-attr 'none'`、`connect-src 'none'`，也不注入共享 `regexStorage`。样式、图片、字体、媒体不变。写正则时不会碰到这一档。
+
 明确阻断或不保证：
 
 - form submit；

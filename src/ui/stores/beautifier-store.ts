@@ -22,6 +22,7 @@ import { loadPresetRules, mergeRules } from '@engine/beautifier';
 import type { BeautifierRule } from '@engine/types';
 import {
   migrateBeautifierRulesToDexie,
+  pruneLegacyBuiltinOverrides,
   type BeautifierMigrationOutcome,
 } from './beautifier-migration';
 import { useSettingsStore } from './settings-store';
@@ -94,6 +95,10 @@ export const useBeautifierStore = defineStore('beautifier', () => {
   ): Promise<void> {
     try {
       const preset = await loadPresetRules();
+      // 覆盖列表语义迁移：认得出出厂默认值才能做，所以挂在预设加载之后。
+      // 内部有标志位，重复调用是空转。
+      const settingsStore = useSettingsStore();
+      if (pruneLegacyBuiltinOverrides(settingsStore.settings, preset)) settingsStore.saveNow();
       const merged = mergeRules(
         preset,
         userRules.value,
