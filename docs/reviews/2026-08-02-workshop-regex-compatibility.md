@@ -1,8 +1,10 @@
 # 工坊正则兼容性语料审查（2026-08-02）
 
+> 创作者应先读[世界书 EJS 与输出美化正则创作指南](../reference/worldbook-ejs-regex-authoring-guide.md)。本文是语料与安全边界证据，不是作者 API 的唯一入口。
+
 ## 结论
 
-公共工坊现有美化规则不是「少量 HTML 模板」，而是一套完整的浏览器内容面：99 条正则中，90 条输出 HTML、82 条带 `<style>`、35 条带 `<script>`、37 条输出完整 HTML 文档。以 parent DOM 白名单消毒会直接破坏主要语料，因此现行实现保留 replacement 原文，把每条已提交消息的全部富匹配放进同一个无 same-origin、`credentialless`、`no-referrer` 的 `sandbox="allow-scripts"` iframe。外部 HTTP(S) 资源与原生网络 API 为兼容现有语料刻意放行。
+公共工坊现有美化规则不是「少量 HTML 模板」，而是一套完整的浏览器内容面：99 条正则中，90 条输出 HTML、82 条带 `<style>`、35 条带 `<script>`、37 条输出完整 HTML 文档。99 条 pattern 全部可编译；按现行元数据映射有 94 条可落地，其余 5 条因 `promptOnly` 或 placement 不含 AI 输出位置而不导入。以 parent DOM 白名单消毒会直接破坏主要语料，因此现行实现保留 replacement 原文，把每条已提交消息的全部富匹配放进同一个无 same-origin、`credentialless`、`no-referrer` 的 `sandbox="allow-scripts"` iframe。外部 HTTP(S) 资源与原生网络 API 为兼容现有语料刻意放行。
 
 该边界隔离应用 DOM、应用 storage/Dexie 存档和 API Key；form、popup、download、top navigation 与嵌套 frame 也仍被阻断，应用自有 `/api` 拒绝 `Origin: null`。正则唯一可持久化的能力是 Dexie v16 `regexStorage` 代表的共享不可信命名空间，不是任意 IndexedDB 或应用表访问。父页面 DOM 与任意宿主 API 依赖会被显式报告为降级；外部来源则不再视为降级。规则向远程/本地网络发请求，以及外传它可见的正文与 regex-namespace 数据，是当前威胁模型明确接受的暴露。
 
@@ -35,29 +37,29 @@ node scripts/analyze-workshop-reference.mjs --apply
 
 ## 正则与 replacement 事实
 
-| 能力                               | 规则数 |
-| ---------------------------------- | -----: |
-| HTML                               |     90 |
-| replacement 捕获引用               |     82 |
-| `<style>`                          |     82 |
-| 外部来源                           |     60 |
-| CSS `url(...)`                     |     54 |
-| 完整 HTML 文档                     |     37 |
-| 外层 Markdown HTML 围栏            |     36 |
-| `<script>`                         |     35 |
-| CSS `@import`                      |     32 |
-| 表单控件/details 等交互元素        |     26 |
-| 图片/音频/视频                     |     24 |
-| data URL 资源                      |     19 |
-| parent/top/opener                  |     16 |
-| inline event handler               |     14 |
-| 酒馆/宿主 API                      |     14 |
-| SVG                                |     13 |
+| 能力                               |    规则数 |
+| ---------------------------------- | --------: |
+| HTML                               |        90 |
+| replacement 捕获引用               |        82 |
+| `<style>`                          |        82 |
+| 外部来源                           |        60 |
+| CSS `url(...)`                     |        54 |
+| 完整 HTML 文档                     |        37 |
+| 外层 Markdown HTML 围栏            |        36 |
+| `<script>`                         |        35 |
+| CSS `@import`                      |        32 |
+| 表单控件/details 等交互元素        |        26 |
+| 图片/音频/视频                     |        24 |
+| data URL 资源                      |        19 |
+| parent/top/opener                  |        16 |
+| inline event handler               |        14 |
+| 酒馆/宿主 API                      |        14 |
+| SVG                                |        13 |
 | local/session storage 或 IndexedDB | 8（词法） |
-| `{{...}}` 宏                       |      5 |
-| EJS 式宏                           |      1 |
-| 显式 network API                   |      1 |
-| Web Worker                         |      1 |
+| `{{...}}` 宏                       |         5 |
+| EJS 式宏                           |         1 |
+| 显式 network API                   |         1 |
+| Web Worker                         |         1 |
 
 83 条 `findRegex` 使用 `/pattern/flags`，16 条是裸 pattern；裸 pattern 不能擅自补 `g`。82 条 replacement 使用捕获引用，最高到 `$39`，因此兼容器必须保持 JavaScript 的 `$1..$99`、`$&`、`$$`、前后缀与命名组语义。
 
@@ -89,6 +91,8 @@ replacement 总计约 407.6 万字符，中位 6,412 字符，p90 为 52,933，�
 5. **上游元数据**：AI-output `placement=2` 已接入；不含 2 的 user-only 规则不会误投到 assistant 正文。`minDepth`/`maxDepth` 以最新 user/assistant 消息为深度 0、忽略 system event、含边界执行。现有 99 条语料的非零 `substituteRegex` 都没有 findRegex 宏，因此运行上惰性；`runOnEdit` 在没有消息编辑入口时不可达。prompt/history 改写、user-side 显示与 `trimStrings` 仍未接线。
 6. **执行预算**：iframe 的权限隔离不等于 CPU 隔离。灾难性回溯与无限脚本循环仍可能阻塞渲染线程，工坊入口在完成预算方案和更广泛视觉走查前保持关闭。
 7. **交互边界**：联网不等于授予浏览器宿主能力。form、popup、download、top navigation 与嵌套 frame 仍被 sandbox/CSP 阻断；这些边界不阻止规则使用已放行的资源与网络 API。
+8. **纯正则项目不可启用**：存档启用信号要求项目至少有一个世界书条目，`entryUids=[]` 恒为未启用。语料中两个纯正则项目可以安装规则，但当前在任何存档都不可达。
+9. **modal 不保证**：sandbox 没有 `allow-modals`；`alert/confirm/prompt` 不属于作者兼容面。语料中有 6 条词法命中，需另做 Chromium 真机确认。
 
 旧版已经安装进 Dexie 的规则没有保留深度字段，且本地项目记录不含原 payload，无法从本地记录安全复原；对应项目需刷新或重装后才会获得精确深度行为。
 

@@ -44,6 +44,9 @@ docs/
 │   ├── agent_system_prompt_guide.md    # 🆕 Agent System Prompt 配置流程（架构/步骤/踩坑/检查清单）
 │   ├── debug-loop-handbook.md          # 🆕 游玩→导出→分析→修复 调试循环操作手册（每次发现 bug 必读）
 │   ├── audio_system.md                 # 🆕 音频系统 v1.0 说明书 ← 改音频必读
+│   ├── worldbook-ejs-regex-authoring-guide.md
+│   │                                   # 🆕 世界书 EJS + 输出美化正则创作者规范（作者入口）
+│   ├── story_preset_format.md           # 🆕 Story Agent 预设编写指南（输出标签顺序 + 占位符排列 + 可用宏）
 │   ├── dev-bat-notes.md                # 🆕 dev.bat 说明书 ← **改启动器前必读**
 │                                       #    ①注释必须纯 ASCII（chcp 65001 让 cmd 字节偏移解析器错位，
 │                                       #      注释片段会被**当命令执行**）
@@ -56,7 +59,7 @@ docs/
 │                                       #    （🔴 §15.10 真机验证记录只对 `e818b61` 那一版有效，
 │                                       #      现行 UI 未经真机走查）；审查轮 §15.11
 ├── planning/2026-08-01-ejs-capability-surface-design.md
-│                                       # 🆕 EJS 能力面设计 v1.0（官方标准）← 改 EJS 注入面/写工坊内容前必读
+│                                       # 🆕 EJS 能力面设计 v1.0（设计与实施记录）← 改 EJS 注入面必读
 │                                       #    12 个 namespace（stats/vars/local/char/world/quest/lore/
 │                                       #    chat/fmt/rng/ui/engine）+ 上游别名层 + 原生库 A/B/C 三档保证
 │                                       #    §0.1 裁定 + 实测：求值后端 **QuickJS(wasm, 主线程)**，不做 AST 分析器
@@ -65,7 +68,6 @@ docs/
 ├── planning/2026-07-31-creative-workshop-compat-design.md
 │                                       # 🆕 创意工坊兼容层设计 v2（D1-D17）← 改工坊/世界书存储必读
 │                                       #    Phase 0 世界书迁 Dexie · Phase 1 工坊 · Phase 2 EJS 沙盒（✅ 待真机）
-└── story_preset_format.md          # 🆕 Story Agent 预设编写指南（输出标签顺序 + 占位符排列 + 可用宏）
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
@@ -216,7 +218,7 @@ npm run dev            # 开发服务器（dev.bat：自动杀残留进程 + 固
 - **StateManager 为唯一写入入口 (ADR-21)**：所有状态变更通过 `commitChatState()`，替代分散的 `saveChat()`。
   - 📌 **受控例外 (P1-09)**：SaveProfile 的纯 UI 辅助字段（`focusQuest` 焦点任务选择、`news[].read` 已读标记）允许 UI 层直写，但必须走 `updateProfile()` / `markNewsRead()` 统一写入函数（非裸 `db.put`）并带 try/catch。AI 产生的 SaveProfile 变更仍必须走 `vars_update` 语义 op，不在此例外内。
 - **世界书实现理念 (ADR-28)**：世界书是给**纯文本 AI** 的协议——骰子池/action_info 文本面板/`{{roll}}` 文本注入都是因为没有 Code 层才用的文本手段。我们有 Code 纯函数 + 工具调用 + script 沙盒，**中间结构不必照抄**；目标：输入→流程→**结果**模仿世界书，中间实现用工程手段。script 是"让世界书自由文本效果代码化"的**妥协桥梁**，不是追求完美复现每个机制的借口。
-- **EJS 世界书求值契约 (ADR-30)**：世界书条目正文 EJS 由 Code 在提示装配期求值（承 ADR-04），契约自主设计、不承诺 MVU/酒馆助手兼容（上游函数名仅作别名层）。**两轴**：`stats` 只读面（纯代码推导数值：资源/等级/五维/命运点数/时间）+ `vars` 共写叙事变量空间（= `variables.sys` 草稿，AI 与 EJS 双写同一棵树，**冲突 AI 赢**——EJS 差量先落、vars_update 补丁后落）。提交权按 Agent 声明（`ejsVarsCommit`，默认仅 story——前瞻扩展设计）。缓存分层：含 `<%`/`{{random`/`{{getvar` 的条目沉到 LORE_BOOK 展开尾部，静态前缀保字节稳定；EJS 失败条目原文注入（零回归兜底）。设计全文：`docs/planning/2026-07-31-workshop-phase2-ejs-design.md`；词汇：根目录 `CONTEXT.md`。
+- **EJS 世界书求值契约 (ADR-30)**：世界书条目正文 EJS 由 Code 在提示装配期求值（承 ADR-04），契约自主设计、不承诺 MVU/酒馆助手兼容（上游函数名仅作别名层）。**两轴**：`stats` 只读面（纯代码推导数值：资源/等级/五维/命运点数/时间）+ `vars` 共写叙事变量空间（= `variables.sys` 草稿，AI 与 EJS 双写同一棵树，**冲突 AI 赢**——EJS 差量先落、vars_update 补丁后落）。提交权按 Agent 声明（`ejsVarsCommit`，默认仅 story——前瞻扩展设计）。缓存分层：含 `<%`/`{{random`/`{{getvar` 的条目沉到 LORE_BOOK 展开尾部，静态前缀保字节稳定；EJS 失败条目原文注入（零回归兜底）。创作者规范：`docs/reference/worldbook-ejs-regex-authoring-guide.md`；设计全文：`docs/planning/2026-07-31-workshop-phase2-ejs-design.md`；词汇：根目录 `CONTEXT.md`。
 
 ## 事件驱动架构（Phase 4.5-8 实现）
 

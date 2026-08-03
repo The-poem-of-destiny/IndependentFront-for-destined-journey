@@ -1,9 +1,9 @@
-# EJS 能力面设计 v1.0 —— 官方标准（白名单 + 创作者 API）
+# EJS 能力面设计 v1.0 —— 设计与实施记录
 
+> **作者契约已迁移**：[世界书 EJS 与输出美化正则创作指南](../reference/worldbook-ejs-regex-authoring-guide.md) 是创作者行为规范，`public/poem-ejs.d.ts` 是签名配套。本文件保留设计理由、实施切片和历史拟议值；与作者指南冲突时以作者指南为准。
+>
 > **状态**：✅ **T0-T8 全部实施完成（2026-08-01）**，真机走查未做。承 ADR-30（两轴契约）与 `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`（工坊 P2）。
-> **定位**：本文件是 **《命定之诗》独立前端 EJS 能力面的唯一真源**。我们是官方团队，这份面由我们定义，
-> 创作者按本标准编写内容；上游（SillyTavern + 酒馆助手 + MVU）的 API 只以**兼容别名层**形式承接存量内容，
-> **不是设计约束**。
+> **定位**：本文件是 EJS 能力面的设计与实施记录。上游（SillyTavern + 酒馆助手 + MVU）的 API 只以**兼容别名层**形式承接存量内容，不是设计约束。
 >
 > **前置阅读**：`docs/planning/2026-07-31-workshop-phase2-ejs-design.md`（D1-D10 契约）、
 > `docs/reviews/2026-08-01-repository-review.md`（SEC-02）、`AGENTS.md`「事件驱动架构」。
@@ -152,9 +152,11 @@ vars.计数 = (vars.计数 ?? 0) + 1;
 pass 结束深 diff → `applyVarsPatch` 落库；差量超 **256 KB 整份拒绝**（不截断）；
 提交权按 Agent 声明（`ejsVarsCommit`，默认仅 story）。
 
-### 3.3 `local` —— 条目私有持久 KV（新）
+### 3.3 `local` —— 原始按项目隔离目标（现行共享）
 
-取代上游 `localStorage` / `getLocalVar`。语义：**属于本条目所在项目的小仓库**，跨回合持久，
+> **现行偏离**：本节记录的是按项目隔离的原始目标。生产装配当前把所有内容接到 `builtin`，所以实际契约是“当前存档内所有 EJS 共享”；详见创作者指南第 6.4 节。
+
+取代上游 `localStorage` / `getLocalVar`。原始目标语义：**属于本条目所在项目的小仓库**，跨回合持久，
 不参与 AI 的变量空间（AI 看不见、写不到）。
 
 ```ts
@@ -167,7 +169,7 @@ local.keys(): string[]
 
 **边界**
 
-- 命名空间：`vars._local.<projectId>.<key>`（内置书 projectId = `builtin`）。**项目之间互不可见** ——
+- 原始命名空间目标：`vars._local.<projectId>.<key>`（内置书 projectId = `builtin`）。**项目之间互不可见** ——
   一个工坊项目读不到另一个的 KV，这是刻意的隔离，不是限制。
 - 值必须可 JSON 序列化；单键 ≤ 16 KB，单项目总量 ≤ 64 KB，超限 `set` 静默失败 + `ui.log` 警告。
 - 持久位置在 `variables.sys` 之下 → **快照回退自动覆盖**，零额外工作。
@@ -435,29 +437,28 @@ engine.name: 'poem-of-destiny'
 `ejs-vars-diff.ts` 的 `DANGEROUS_KEYS`（`__proto__` / `prototype` / `constructor`）逐路径剔除。
 guest 内的原型污染污染的是 guest，pass 结束即弃。
 
-### 6.2 预算表（初值，实测后调）
+### 6.2 现行预算表
 
-| 预算                                       | 初值               | 超限行为                                                                                                                                                         |
-| ------------------------------------------ | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 单条目执行时间                             | 50 ms              | interrupt 中断 → 该条目回退原文（D8），**继续下一条**                                                                                                            |
-| 🔴 **单 pass 执行总时间**                  | **1.5 s**          | 剩余未求值条目**全部回退原文** + `ui.log` + 一次 toast。<br>**这不是性能项，是 DoS 防线**：没有 pass 天花板时，109 个动态条目各吃满 50 ms = **5.5 秒主线程冻结** |
-| guest 内存上限                             | 64 MB              | 分配失败 → 该条目回退                                                                                                                                            |
-| guest 最大栈深                             | 引擎默认的保守值   | 爆栈 → 该条目回退                                                                                                                                                |
-| Promise job 泵次数（`executePendingJobs`） | 1000 / 条目        | 超出视为悬挂 → 该条目回退                                                                                                                                        |
-| 单条目渲染输出                             | 256 KB             | 截断 + `ui.log` 警告                                                                                                                                             |
-| `vars` 差量（每 pass）                     | 256 KB             | **整份拒绝**（不截断），toast 每存档每来源一次                                                                                                                   |
-| `local` 单键 / 单项目                      | 16 KB / 64 KB      | `set` 静默失败 + 警告                                                                                                                                            |
-| `lore.get` 每条目                          | 8 次，单次 ≤ 64 KB | 超出返回 `''`                                                                                                                                                    |
-| `ui.notify` 每 pass                        | 3 条（同文去重）   | 丢弃                                                                                                                                                             |
-| `ui.log` 每 pass                           | 512 条             | 环形覆盖                                                                                                                                                         |
+| 预算                      | 现行值             | 超限行为                                        |
+| ------------------------- | ------------------ | ----------------------------------------------- |
+| 单条目执行时间            | 50 ms              | 当前条目回退原文，继续下一条                    |
+| 单 pass 执行总时间        | 5000 ms            | 当前及剩余动态条目回退原文                      |
+| guest heap                | 64 MiB             | 当前条目或整个 pass 回退                        |
+| guest stack               | 512 KiB            | 当前条目回退                                    |
+| `vars` 差量（每 pass）    | 256 KiB UTF-8      | 整份拒绝，不截断                                |
+| `local` 单值 / 当前共享桶 | 16 / 64 KiB UTF-8  | 当前 `set` 忽略并记录诊断                       |
+| `lore.get` 每条目         | 8 次，单次 ≤ 64K 字符 | 超出返回空串或截断                              |
+| 每个 `fmt.*` 字符串       | 64K 字符           | 截断并带标记                                    |
+| `ui.notify` 每条目        | 3 条（同文去重）   | 其余丢弃                                        |
+| `ui.log` 每条目           | 512 次             | 其余丢弃                                        |
 
-🔴 **预算粒度是条目级不是 pass 级** —— 一条死循环只废它自己，不是把整 pass 几十条一起推去回退。
+预算是条目 + pass 双层：单条目失败通常只回退自己；pass 总时间耗尽后，剩余动态条目不再执行。没有整条目 256 KiB 输出上限。
 
 ### 6.3 明确不提供（及理由）
 
 | 不给                                               | 理由                                                                             |
 | -------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `globalThis` / `window` / `document`               | 同源权限起点。给了，前面全白做                                                   |
+| 宿主 `window` / `document` / host global          | guest `globalThis` 存在，但只能回到 guest realm；宿主权限不开放                  |
 | `fetch` / `XMLHttpRequest` / `WebSocket`           | 数据外传腿                                                                       |
 | 真 `localStorage` / `indexedDB` / `sessionStorage` | API Key 与存档就在那儿                                                           |
 | `setTimeout` / `setInterval`                       | 「条目跑完还在后台跑」——装配期不该有生命周期                                     |
@@ -474,10 +475,12 @@ guest 内的原型污染污染的是 guest，pass 结束即弃。
 
 **裁定**：`rng.*` 的种子由 `hash(saveId, 回合号, 条目 uid, 本条目内第 n 次调用)` 派生。
 
+> **现行修订**：实际种子为“saveId + 回合号 + 条目精确正文”，不含 uid；代码位 roll/random 宏已接入 `rng`，生产 QuickJS 不提供 `_.random` / `_.sample`。现行契约见创作者指南第 7.7 节。
+
 - 同一回合同一条目重放 → 逐值一致
 - 不同条目/不同回合 → 互不相关
-- `{{roll}}` / `{{random::}}` 宏改写后落 `rng`（**当前实现落 `Math.random`，需改**）
-- `Math.random` 仍可用但**文档标注不可复现**；`_.random` / `_.sample` 内部走 `rng`
+- EJS 代码位中的 `{{roll}}` / `{{random::}}` 宏改写后落 `rng`；文本位随机宏仍由后续非种子宏链处理
+- `Math.random` 仍可用但不可复现；生产 QuickJS 不提供 `_.random` / `_.sample`
 
 ---
 
@@ -707,13 +710,13 @@ QuickJS 单独一个 suite + 语料字节比对。
   |---|---|---|
   | **T0** | 混淆语料生成器 + 夹具（109 条目 / 38 片段 / 660 KB）+ CI 双向闸门；合成语料 A/D/E 三组 | ✅ |
   | **T1** | `EjsBackend` 接口 + `LegacyBackend`；`await` 条目编译成 `AsyncFunction`；`prerenderWorldBookEntries` 异步预渲染 + `buildAgentMessagesAsync`（`PlaceholderResolver` 签名零改动） | ✅ |
-  | **T2** | `ejs-rng.ts` 种子随机；`{{roll}}`/`{{random::}}` 改走 `rng`；种子 = `(saveId, 回合号)` → 快照重放可复现 | ✅ |
+  | **T2** | `ejs-rng.ts` 种子随机；EJS 代码位 `{{roll}}`/`{{random::}}` 改走 `rng`；种子 = `(saveId, 回合号, 条目正文)` → 快照重放可复现 | ✅ |
   | **T3** | `stats` 扩面：背包/装备/技能/状态效果/登神长阶/金钱/队伍/世界(时段·回合·天气·地点) | ✅ |
   | **T4** | `chat` / `lore` / `local` / `ui` / `engine`（`ejs-capabilities.ts`） | ✅ |
-  | **T5** | `char` / `world` / `quest`；`fmt`（`ejs-fmt.ts`，含不依赖 locale 的 `compareName`）；`_` 17 → 27 方法 | ✅ |
+  | **T5** | `char` / `world` / `quest`；`fmt`（`ejs-fmt.ts`，含不依赖 locale 的 `compareName`）；`_` 扩面（生产 QuickJS 的可移植交集现为 25 方法） | ✅ |
   | **T6** | 别名层重接到能力面（`getChatMessage`/`getwi`/`YAML`/`TavernHelper`/`toastr`/`alert`/`localStorage`/`console`/`message_id`/`lastMessageId`）；**内置全语料回退 7 → 0** | ✅ |
   | **T7** | `QuickJsBackend`（quickjs-emscripten 0.32，主线程）+ 预算配置 + 15 个安全用例 | ✅ |
-  | **T8** | 生产默认切 QuickJS（`installProductionEjsBackend`，失败退 Legacy 并留痕）；`public/poem-ejs.d.ts` 创作者类型定义；`ejs-preflight.ts` 装前预检 | ✅ |
+  | **T8** | 生产默认切 QuickJS（`installProductionEjsBackend`，初始化失败时 fail-closed、保留 EJS 原文且不退 Legacy）；`public/poem-ejs.d.ts` 创作者类型定义；`ejs-preflight.ts` 装前预检 | ✅ |
 
 **实测安全属性**（T7，quickjs-emscripten 0.32）：
 

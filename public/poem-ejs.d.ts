@@ -5,12 +5,14 @@
  * 写 `<% %>` 里的代码时就有补全与类型检查了。
  *
  * 契约版本：1.0.0 —— 与 `engine.version` 对应。
- * 完整规格：`docs/planning/2026-08-01-ejs-capability-surface-design.md`
+ * 创作者规范：`docs/reference/worldbook-ejs-regex-authoring-guide.md`
+ * 设计记录：`docs/planning/2026-08-01-ejs-capability-surface-design.md`
  *
  * ## 三件事先记住
- * 1. **只有两个地方能写**：`vars`（与 AI 共写的叙事变量）和 `local`（你自己的私有 KV）。
+ * 1. **只有两个地方能写**：`vars`（与 AI 共写）和 `local`（当前存档的共享 EJS KV）。
  *    角色、物品、任务、资源都是**只读**的 —— 要改它们得让 AI 输出语义指令，EJS 改不动。
- * 2. **所有能力都不抛异常**。查不到就给你空串 / 空数组 / null / 0，放心链式写下去。
+ * 2. 查询能力查不到时通常返回空串 / 空数组 / null / 0；你的 JavaScript 异常或预算超限
+ *    仍会让当前条目回退原文。
  * 3. **随机要用 `rng` 不要用 `Math.random`** —— 只有 `rng` 在快照回退重放时结果一致。
  */
 
@@ -85,8 +87,8 @@ interface PoemPlayer {
 }
 
 /**
- * 只读数值面。**改它不会生效**（拿到的是一份拷贝），但也不会报错 ——
- * 想读出来做局部整理再判断是完全合法的用法。
+ * 只读数值面。**必须只读**；修改不会提交游戏状态，条目间的 mutation 表现不属于契约。
+ * 需要局部整理时先复制到自己的对象。
  */
 declare const stats: {
   主角?: PoemPlayer;
@@ -115,20 +117,23 @@ declare const stats: {
 /**
  * 叙事变量空间。任意形状、任意路径、跨回合持久。
  *
- * ⚠️ AI 也在写同一棵树。**路径冲突时 AI 覆盖你** —— 想要不被碰的状态请用 `local`。
- * ⚠️ 一个回合内写入总量有 256 KB 上限，超了**整份丢弃**（不会只写一半）。
+ * ⚠️ AI 也在写同一棵树。**路径冲突时 AI 覆盖你**。
+ * ⚠️ 对象 key 不得包含点号；点号是持久化路径分隔符且没有转义语法。
+ * ⚠️ 每个提交 pass 的差量有 256 KiB 上限，超了**整份丢弃**（不会只写一半）。
  */
 declare const vars: Record<string, any>;
 
 // ═══════════════════════════════════════════════════════════
-// local —— 你自己的私有 KV
+// local —— 当前存档的共享 EJS KV
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 属于**你这个项目**的小仓库，跨回合持久，AI 看不见也写不到，别的项目也读不到。
- * 用来存展示偏好、状态机进度这类「不该让 AI 知道」的东西。
+ * 当前 1.0 实现中，所有世界书 EJS 共用当前存档的 `builtin` 桶。
+ * 它不是项目隔离或秘密存储；作者必须给 key 加唯一前缀，不得保存凭据。
+ * key 不得包含点号；可使用下划线、连字符、冒号或 UUID。
+ * 只有带 `ejsVarsCommit` 的 Agent 才会把改动持久化（默认仅 story）。
  *
- * 上限：单键 16 KB，单项目 64 KB。超了静默忽略（不报错）。
+ * 上限：单值 16 KiB，整个共享桶 64 KiB（UTF-8 JSON）。超了静默忽略并记诊断。
  */
 declare const local: {
   get(key: string, fallback?: any): any;
@@ -161,6 +166,7 @@ interface PoemCharacter {
 }
 
 declare const char: {
+  /** 可见集合由当前 Agent 上下文决定；不得假定一定包含全存档角色。 */
   player(): PoemCharacter | null;
   /** 按名字查；查不到返回 `null` */
   get(name: string): PoemCharacter | null;
@@ -233,7 +239,7 @@ declare const lore: {
 /**
  * 读最近的聊天正文。
  *
- * ⚠️ 窗口 = **当前 Agent 的历史注入层数**，不是全部聊天记录。越界返回空串。
+ * 稳定保证只覆盖当前 Agent 的历史注入窗口；不得依赖窗口外消息。
  */
 declare const chat: {
   /** `chat.last('user')` = 玩家最近说的话 */
@@ -297,7 +303,10 @@ declare const rng: {
   chance(p: number): boolean;
 };
 
-/** lodash 只读子集（27 个方法）。**没有** `set`/`assign`/`merge` —— 写请用 `vars` / `local` */
+/**
+ * 生产 QuickJS 的 25 方法兼容子集；不要依赖 Legacy 独有的
+ * `toPath` / `isFunction` / `random` / `sample`。写请用 `vars` / `local`。
+ */
 declare const _: any;
 
 // ═══════════════════════════════════════════════════════════
@@ -307,7 +316,7 @@ declare const _: any;
 /**
  * 给**玩家**看的东西。这些**不会进提示词**，AI 看不到。
  *
- * ⚠️ `notify` 每次装配最多 3 条且同文去重；提示会带「内容说：」前缀，
+ * ⚠️ `notify` 每个 EJS 条目最多 3 条且同文去重；提示会带「内容说：」前缀，
  * 这样玩家一眼能分清是世界书在说话还是引擎在说话。
  */
 declare const ui: {
@@ -382,7 +391,10 @@ declare const TavernHelper: {
   getLastMessageId(): number;
   getVariables(opts?: unknown): { stat_data: Record<string, any> };
 };
-/** @deprecated 用 `local`（这**不是**浏览器的 localStorage，是你项目的私有 KV） */
+/**
+ * @deprecated 用 `local`。这**不是**浏览器 localStorage，而是当前存档的共享 EJS KV；
+ * 与输出美化 iframe 的 `localStorage` / `regexStorage` 也不是同一个空间。
+ */
 declare const localStorage: {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -394,7 +406,6 @@ declare const console: {
   info(...args: unknown[]): void;
   warn(...args: unknown[]): void;
   error(...args: unknown[]): void;
-  debug(...args: unknown[]): void;
 };
 /** 当前角色绑定的世界书名 */
 declare const charLoreBook: string;

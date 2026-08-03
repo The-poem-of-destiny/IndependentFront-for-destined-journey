@@ -202,20 +202,21 @@ npm run typecheck    # 仅类型检查，不输出文件
 
 ## 八、项目文档索引
 
-| 文档                                                                     | 说明                         |
-| ------------------------------------------------------------------------ | ---------------------------- |
-| [CLAUDE.md](../CLAUDE.md)                                                | 项目工作指导 & 架构总览      |
-| [PRD](./fated-poem-engine-prd.md)                                        | 产品需求文档                 |
-| [ARCHITECTURE.md](./ARCHITECTURE.md)                                     | 完整软件+世界观架构          |
-| [progress.md](./planning/progress.md)                                    | 开发进度日志                 |
-| [phase7e/game_page_design.md](./phases/phase7e/game_page_design.md)      | 游戏页设计规划               |
-| [phase8_plan.md](./phases/phase8/phase8_plan.md)                         | Agent 上下文可见性模型       |
-| [effect_script_system.md](./reference/effect_script_system.md)           | 词条效果 & 脚本系统架构      |
-| [status_page_architecture.md](./reference/status_page_architecture.md)   | 状态栏页面架构               |
-| [agent_system_prompt_guide.md](./reference/agent_system_prompt_guide.md) | Agent System Prompt 配置流程 |
-| [story_preset_format.md](./story_preset_format.md)                       | Story Agent 预设编写指南     |
-| [world_book_index.md](../reference/world_book_index.md)                  | 世界书条目索引（605 条目）   |
+| 文档                                                                                         | 说明                                |
+| -------------------------------------------------------------------------------------------- | ----------------------------------- |
+| [CLAUDE.md](../CLAUDE.md)                                                                    | 项目工作指导 & 架构总览             |
+| [PRD](./fated-poem-engine-prd.md)                                                            | 产品需求文档                        |
+| [ARCHITECTURE.md](./ARCHITECTURE.md)                                                         | 完整软件+世界观架构                 |
+| [progress.md](./planning/progress.md)                                                        | 开发进度日志                        |
+| [phase7e/game_page_design.md](./phases/phase7e/game_page_design.md)                          | 游戏页设计规划                      |
+| [phase8_plan.md](./phases/phase8/phase8_plan.md)                                             | Agent 上下文可见性模型              |
+| [effect_script_system.md](./reference/effect_script_system.md)                               | 词条效果 & 脚本系统架构             |
+| [status_page_architecture.md](./reference/status_page_architecture.md)                       | 状态栏页面架构                      |
+| [agent_system_prompt_guide.md](./reference/agent_system_prompt_guide.md)                     | Agent System Prompt 配置流程        |
+| [worldbook-ejs-regex-authoring-guide.md](./reference/worldbook-ejs-regex-authoring-guide.md) | 世界书 EJS 与输出美化正则创作者规范 |
+| [story_preset_format.md](./reference/story_preset_format.md)                                 | Story Agent 预设编写指南            |
+| [world_book_index.md](../reference/world_book_index.md)                                      | 世界书条目索引（605 条目）          |
 
 ---
 
-_最后更新：2026-07-08_
+_最后更新：2026-08-02_

@@ -1,5 +1,7 @@
 # 创意工坊兼容层设计 v2
 
+> **创作者入口**：[世界书 EJS 与输出美化正则创作指南](../reference/worldbook-ejs-regex-authoring-guide.md)。本文记录工坊架构决策；D16 的早期 `v-html` 结论已由“D16 二次修订”取代。
+>
 > 状态：**已实施（Phase 0 / 0b / 1 全部落地，2026-07-31）** · 分支 `creative-workshop-integration-v1`
 > 设计本身评审通过于 2026-07-31 拷问定稿；实施纪要见 `docs/CHANGELOG.md`「工坊 P0 / P0b / P1」。
 >

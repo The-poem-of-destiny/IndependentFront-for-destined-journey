@@ -1,5 +1,7 @@
-# 工坊 Phase 2 —— EJS 沙盒 + 只读 stats 投影 设计 v1.2
+# 工坊 Phase 2 —— EJS 沙盒 + 只读 stats 投影 设计历史 v1.2
 
+> **作者契约已迁移**：[世界书 EJS 与输出美化正则创作指南](../reference/worldbook-ejs-regex-authoring-guide.md) 是现行创作者规范，`public/poem-ejs.d.ts` 是签名配套。本文保留 Phase 2 最初的两轴方案与 T1-T6 实施历史；其中收窄 stats、`new Function` 边界和不支持 `await` 等描述已被后续 QuickJS 能力面取代。
+>
 > 状态：**拷问定稿（2026-07-31，五轮）** · **已实施（T1-T6，2026-07-31）待真机**，对应决策已录 ADR-30（AGENTS.md 设计约定）· 契约词汇见根目录 `CONTEXT.md` · 实施纪要见 `docs/CHANGELOG.md`「工坊 P2」
 >
 > 修订：v1.1 —— 契约按主人指定重构为**两轴**：①只读 stats 面 ②EJS 变量沙盒。**契约自主设计，不承诺 MVU/酒馆助手兼容**；上游函数名只作薄别名层保留。v1 中「2a 纯只读 + 写回全部推给 2b」的框架废弃。
