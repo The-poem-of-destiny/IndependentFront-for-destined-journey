@@ -5,8 +5,9 @@
     "rootDir": ".",
     "declaration": false,
     "declarationMap": false,
-    "sourceMap": false
+    "sourceMap": false,
+    "types": ["node"]
   },
-  "include": ["server/**/*.ts", "tests/**/*.ts", "*.config.ts"],
-  "exclude": ["node_modules", "dist", "src"]
+  "include": ["server/**/*.ts", "tests/**/*.ts", "*.config.ts", "src/env.d.ts"],
+  "exclude": ["node_modules", "dist"]
 }

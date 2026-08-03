@@ -1,4 +1,4 @@
-import type { Context } from 'hono'
+import type { Context } from 'hono';
 
 /**
  * 透传时剥离的 hop-by-hop / 分块响应头。
@@ -12,7 +12,7 @@ const STRIP_RESP_HEADERS = new Set([
   'content-encoding',
   'connection',
   'keep-alive',
-])
+]);
 
 /**
  * 🔒 P1-03 SSRF 黑名单 —— 云厂商元数据端点，可泄露实例凭据（IMDSv1 尤其危险）。
@@ -23,18 +23,18 @@ const STRIP_RESP_HEADERS = new Set([
  * 逐 IP 校验私有/loopback/link-local 段，并在解析后二次校验防 DNS rebinding。
  */
 const SSRF_BLOCKLIST = new Set([
-  '169.254.169.254',   // AWS / GCP / Azure IMDS（IPv4）
-  'fd00:ec2::254',     // AWS IMDS（IPv6）
+  '169.254.169.254', // AWS / GCP / Azure IMDS（IPv4）
+  'fd00:ec2::254', // AWS IMDS（IPv6）
   'metadata.google.internal',
   'metadata.azure.com',
-])
+]);
 
 export function stripHopHeaders(src: Headers): Record<string, string> {
-  const out: Record<string, string> = {}
+  const out: Record<string, string> = {};
   src.forEach((v, k) => {
-    if (!STRIP_RESP_HEADERS.has(k.toLowerCase())) out[k] = v
-  })
-  return out
+    if (!STRIP_RESP_HEADERS.has(k.toLowerCase())) out[k] = v;
+  });
+  return out;
 }
 
 /**
@@ -45,46 +45,52 @@ export function stripHopHeaders(src: Headers): Record<string, string> {
  * - body 与 SSE 流管道转发，不缓冲（支持 stream:true）
  */
 export async function forward(c: Context, suffix: string): Promise<Response> {
-  const baseRaw = c.req.header('X-Target-Base-URL')
-  const base = baseRaw?.trim().replace(/\/+$/, '')
+  const baseRaw = c.req.header('X-Target-Base-URL');
+  const base = baseRaw?.trim().replace(/\/+$/, '');
   if (!base) {
-    return c.json({ error: "missing 'X-Target-Base-URL' header" }, 400)
+    return c.json({ error: "missing 'X-Target-Base-URL' header" }, 400);
   }
   if (!/^https?:\/\//i.test(base)) {
-    return c.json({ error: 'invalid X-Target-Base-URL (must start with http/https)' }, 400)
+    return c.json({ error: 'invalid X-Target-Base-URL (must start with http/https)' }, 400);
   }
 
   // 🔒 P1-03 SSRF 防护：拒绝云元数据端点（见 SSRF_BLOCKLIST 注释）
-  const host = (() => { try { return new URL(base).hostname } catch { return '' } })()
+  const host = (() => {
+    try {
+      return new URL(base).hostname;
+    } catch {
+      return '';
+    }
+  })();
   if (SSRF_BLOCKLIST.has(host)) {
-    return c.json({ error: 'blocked target by SSRF protection' }, 403)
+    return c.json({ error: 'blocked target by SSRF protection' }, 403);
   }
 
   const headers: Record<string, string> = {
     'Content-Type': c.req.header('Content-Type') || 'application/json',
     Accept: c.req.header('Accept') || 'application/json',
-  }
-  const auth = c.req.header('Authorization')
-  if (auth) headers['Authorization'] = auth
-  const apiKey = c.req.header('api-key') // Azure 风格
-  if (apiKey) headers['api-key'] = apiKey
+  };
+  const auth = c.req.header('Authorization');
+  if (auth) headers['Authorization'] = auth;
+  const apiKey = c.req.header('api-key'); // Azure 风格
+  if (apiKey) headers['api-key'] = apiKey;
 
-  let upstream: Response
+  let upstream: Response;
   try {
-    const reqBody = c.req.raw.body
-    const streaming = !!reqBody && c.req.method !== 'GET' && c.req.method !== 'HEAD'
+    const reqBody = c.req.raw.body;
+    const streaming = !!reqBody && c.req.method !== 'GET' && c.req.method !== 'HEAD';
     upstream = await fetch(`${base}${suffix}`, {
       method: c.req.method,
       headers,
       ...(streaming ? { body: reqBody, duplex: 'half' as const } : {}),
-    })
+    });
   } catch (e) {
-    return c.json({ error: `upstream unreachable: ${(e as Error).message}` }, 502)
+    return c.json({ error: `upstream unreachable: ${(e as Error).message}` }, 502);
   }
 
   // 上游 body（ReadableStream）直接管道转发，SSE 不缓冲
   return new Response(upstream.body, {
     status: upstream.status,
     headers: stripHopHeaders(upstream.headers),
-  })
+  });
 }

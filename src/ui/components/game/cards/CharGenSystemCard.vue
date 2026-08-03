@@ -366,10 +366,11 @@ const inventoryGroups = computed(() => {
             </div>
             <div class="ci-item-body">
               <p class="ci-item-desc">{{ el.description }}</p>
-              <div v-if="el.effects && Object.keys(el.effects).length" class="ci-effects">
-                <span v-for="(v, k) in el.effects" :key="k" class="ci-effect-pill">
-                  <span class="ci-effect-key" :style="{ color: raceColor }">{{ k }}</span>
-                  <span>{{ v }}</span>
+              <!-- 要素 effects 是 string[]（char-gen-agent 按行切），不是 name→desc 表；
+                   照 (v, k) 渲染会把数组下标当词条名画出来 -->
+              <div v-if="el.effects?.length" class="ci-effects">
+                <span v-for="eff in el.effects" :key="eff" class="ci-effect-pill">
+                  <span>{{ eff }}</span>
                 </span>
               </div>
             </div>
@@ -390,10 +391,10 @@ const inventoryGroups = computed(() => {
             <div class="ci-item-body">
               <p class="ci-item-desc">{{ au.description }}</p>
               <p v-if="au.costDescription" class="ci-cost">{{ au.costDescription }}</p>
-              <div v-if="au.effects && Object.keys(au.effects).length" class="ci-effects">
-                <span v-for="(v, k) in au.effects" :key="k" class="ci-effect-pill">
-                  <span class="ci-effect-key" :style="{ color: raceColor }">{{ k }}</span>
-                  <span>{{ v }}</span>
+              <!-- 同 elements：权能 effects 也是 string[] -->
+              <div v-if="au.effects?.length" class="ci-effects">
+                <span v-for="eff in au.effects" :key="eff" class="ci-effect-pill">
+                  <span>{{ eff }}</span>
                 </span>
               </div>
             </div>

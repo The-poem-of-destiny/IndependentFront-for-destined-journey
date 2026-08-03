@@ -34,10 +34,10 @@ data/worldbooks/_classification_guide.md
 # 本地 API 配置（含 key，不提交）
 tests/agent-framework/.api-config*.json
 
-# 临时脚本目录（历史 tracked 文件保留，新增文件不追踪）
+# 临时脚本目录（Q-15 清仓已把 59 个历史 tracked 文件全删；这里现在是纯 ignore）
 tmp/
 
-# 🔒 P2-07: 备份与 crash dump 不追踪（历史 tracked 的用 git rm --cached 清理）
+# 🔒 P2-07: 备份与 crash dump 不追踪（Q-15 清仓已清完历史 tracked 的那批）
 *.bak
 *.stackdump
 *.orig

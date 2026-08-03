@@ -18,6 +18,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run typecheck:vue
+      # server/ tests/ *.config.ts —— 主 tsconfig 只 include src/**，这一步是它们唯一的类型网
+      - run: npm run typecheck:tools
       - run: npm run format:check
       - run: npm run lint
       - run: npm run test:run

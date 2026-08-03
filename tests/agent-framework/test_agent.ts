@@ -11,24 +11,30 @@ import { buildAgentMessages } from '../../src/sillytavern/agent-templates.js';
 import { AgentClient, type ChatRequest } from '../../src/sillytavern/agent-client.js';
 import { getToolsForAgent, executeToolCall } from '../../src/sillytavern/agent-tools.js';
 import { getDefaultTemplate } from '../../src/sillytavern/placeholder-registry.js';
-import type { AgentContext, AgentConfig, AgentPreset, ToolExecutionContext, CharacterState } from '../../src/sillytavern/types.js';
+import type {
+  AgentContext,
+  AgentConfig,
+  AgentPreset,
+  ToolExecutionContext,
+  CharacterState,
+} from '../../src/sillytavern/types.js';
 
 // ═══════════════════════════════════════
 // CLI 参数
 // ═══════════════════════════════════════
 const { values: args } = parseArgs({
   options: {
-    agent:    { type: 'string', short: 'a' },
-    save:     { type: 'string', short: 's' },
-    'api-url':  { type: 'string' },
-    'api-key':  { type: 'string' },
-    model:    { type: 'string', short: 'm' },
+    agent: { type: 'string', short: 'a' },
+    save: { type: 'string', short: 's' },
+    'api-url': { type: 'string' },
+    'api-key': { type: 'string' },
+    model: { type: 'string', short: 'm' },
     'endpoint-id': { type: 'string' },
     'dry-run': { type: 'boolean', default: false },
-    verbose:  { type: 'boolean', short: 'v', default: false },
+    verbose: { type: 'boolean', short: 'v', default: false },
     upstream: { type: 'boolean', default: false },
-    output:   { type: 'string', short: 'o' },
-    'help':   { type: 'boolean', short: 'h' },
+    output: { type: 'string', short: 'o' },
+    help: { type: 'boolean', short: 'h' },
   },
 });
 
@@ -79,7 +85,9 @@ const OUTPUT_PATH = args.output;
 const CONFIG_PATH = '.api-config.json';
 let localApiConfig: { apiUrl?: string; apiKey?: string; model?: string } = {};
 try {
-  const configPath = fs.existsSync(CONFIG_PATH) ? CONFIG_PATH : 'tests/agent-framework/.api-config.json';
+  const configPath = fs.existsSync(CONFIG_PATH)
+    ? CONFIG_PATH
+    : 'tests/agent-framework/.api-config.json';
   if (fs.existsSync(configPath)) localApiConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 } catch {}
 const API_URL_FINAL = args['api-url'] || localApiConfig.apiUrl || 'http://localhost:1234/v1';
@@ -89,7 +97,11 @@ const MODEL_FINAL = args.model || localApiConfig.model || 'gpt-3.5-turbo';
 // ═══════════════════════════════════════
 // 校验函数（内联，纯正则/JSON）
 // ═══════════════════════════════════════
-interface ValidationResult { valid: boolean; errors: string[]; warnings: string[] }
+interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
 
 function validateOutput(agentId: string, output: string): ValidationResult {
   const errors: string[] = [];
@@ -103,19 +115,26 @@ function validateOutput(agentId: string, output: string): ValidationResult {
         if (d.replace && !Array.isArray(d.replace)) errors.push('replace 应为数组');
         if (d.delta && !Array.isArray(d.delta)) errors.push('delta 应为数组');
         if (d.insert && !Array.isArray(d.insert)) errors.push('insert 应为数组');
-        if (d.delta_time !== undefined && typeof d.delta_time !== 'number') warnings.push('delta_time 不是数字');
-      } catch { errors.push('JSON 解析失败'); }
+        if (d.delta_time !== undefined && typeof d.delta_time !== 'number')
+          warnings.push('delta_time 不是数字');
+      } catch {
+        errors.push('JSON 解析失败');
+      }
       break;
     }
     case 'char_update': {
       try {
         const d = JSON.parse(text);
         if (!d.characters || !Array.isArray(d.characters)) errors.push('缺少 characters 数组');
-        else d.characters.forEach((c: any, i: number) => {
-          if (!c.id) errors.push(`characters[${i}] 缺 id`);
-          if (!c.changes || typeof c.changes !== 'object') errors.push(`characters[${i}] 缺 changes`);
-        });
-      } catch { errors.push('JSON 解析失败'); }
+        else
+          d.characters.forEach((c: any, i: number) => {
+            if (!c.id) errors.push(`characters[${i}] 缺 id`);
+            if (!c.changes || typeof c.changes !== 'object')
+              errors.push(`characters[${i}] 缺 changes`);
+          });
+      } catch {
+        errors.push('JSON 解析失败');
+      }
       break;
     }
     case 'memory_summary': {
@@ -125,10 +144,13 @@ function validateOutput(agentId: string, output: string): ValidationResult {
         else if (d.content.length < 200) warnings.push(`content 长度 ${d.content.length} < 200 字`);
         if (!d.hiddenLine) errors.push('缺 hiddenLine');
         if (!Array.isArray(d.keywords)) errors.push('keywords 应为数组');
-        if (d.importance !== undefined && (d.importance < 1 || d.importance > 10)) warnings.push('importance 不在 1-10');
+        if (d.importance !== undefined && (d.importance < 1 || d.importance > 10))
+          warnings.push('importance 不在 1-10');
         if (!d.timeRangeStart) warnings.push('缺 timeRangeStart');
         if (!d.timeRangeEnd) warnings.push('缺 timeRangeEnd');
-      } catch { errors.push('JSON 解析失败'); }
+      } catch {
+        errors.push('JSON 解析失败');
+      }
       break;
     }
     case 'story':
@@ -138,9 +160,18 @@ function validateOutput(agentId: string, output: string): ValidationResult {
       break;
     case 'craft_gen':
       if (!/<craft_result>/.test(text)) errors.push('未找到 <craft_result>');
-      else for (const tag of ['success', 'product_name', 'quality', 'rating', 'check_summary', 'narrative', 'craft_params']) {
-        if (!new RegExp(`<${tag}>`).test(text)) errors.push(`缺 <${tag}> 标签`);
-      }
+      else
+        for (const tag of [
+          'success',
+          'product_name',
+          'quality',
+          'rating',
+          'check_summary',
+          'narrative',
+          'craft_params',
+        ]) {
+          if (!new RegExp(`<${tag}>`).test(text)) errors.push(`缺 <${tag}> 标签`);
+        }
       // 成功时应该有 <item_requests>（替代旧版 <creative_effects>）
       if (/<success>true<\/success>/.test(text) && !/<item_requests>/.test(text)) {
         errors.push('成功但缺 <item_requests> 标签（Phase 9b: 已取代 <creative_effects>）');
@@ -152,15 +183,28 @@ function validateOutput(agentId: string, output: string): ValidationResult {
       break;
     case 'char_gen':
       if (!/<char_result>/.test(text)) errors.push('未找到 <char_result>');
-      else for (const tag of ['name', 'race', 'gender', 'tier', 'attributes', 'background', 'appearance', 'clothing', 'personality', 'likes']) {
-        if (!new RegExp(`<${tag}[^>]*>`).test(text)) errors.push(`缺 <${tag}> 标签`);
-      }
+      else
+        for (const tag of [
+          'name',
+          'race',
+          'gender',
+          'tier',
+          'attributes',
+          'background',
+          'appearance',
+          'clothing',
+          'personality',
+          'likes',
+        ]) {
+          if (!new RegExp(`<${tag}[^>]*>`).test(text)) errors.push(`缺 <${tag}> 标签`);
+        }
       break;
     case 'item_gen':
       if (!/<item_result>/.test(text)) errors.push('未找到 <item_result>');
-      else for (const tag of ['skills', 'equipment', 'inventory']) {
-        if (!new RegExp(`<${tag}>`).test(text)) errors.push(`缺 <${tag}> 标签`);
-      }
+      else
+        for (const tag of ['skills', 'equipment', 'inventory']) {
+          if (!new RegExp(`<${tag}>`).test(text)) errors.push(`缺 <${tag}> 标签`);
+        }
       break;
     default:
       warnings.push(`未知 agent: ${agentId}, 跳过校验`);
@@ -196,7 +240,11 @@ function resolveProjectPath(relativePath: string): string {
  * - char_gen:  从 story 输出提取 <char_detect>
  * - item_gen:  从 char_gen/craft_gen 输出提取 CHAR_GEN_RESULT/CRAFT_RESULT/ITEM_REQUEST
  */
-function extractLocalParams(agentId: string, ctx: AgentContext, upstreamOutput?: string): Record<string, string> {
+function extractLocalParams(
+  agentId: string,
+  ctx: AgentContext,
+  upstreamOutput?: string,
+): Record<string, string> {
   const storyOut = upstreamOutput || ctx.agentOutputs?.get('story') || '';
 
   if (agentId === 'craft_gen') {
@@ -233,7 +281,9 @@ function loadAgentConfigJson(): Record<string, any> {
     const path = resolveProjectPath('data/defaults/agent-config.json');
     const ac = JSON.parse(fs.readFileSync(path, 'utf-8'));
     return (ac.agents || {}) as Record<string, any>;
-  } catch { return {}; }
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -244,15 +294,17 @@ function loadWorldBookFile(wbId: string): any {
   if (!fs.existsSync(wbPath)) return null;
   try {
     const wb = JSON.parse(fs.readFileSync(wbPath, 'utf-8'));
-    return { id: wbId, name: wbId, entries: Array.isArray(wb) ? wb : (wb.entries || []) };
-  } catch { return null; }
+    return { id: wbId, name: wbId, entries: Array.isArray(wb) ? wb : wb.entries || [] };
+  } catch {
+    return null;
+  }
 }
 
 /**
  * 构建 buildAgentMessages() 所需的 AgentConfig
  */
 function buildAgentConfig(agentId: string, agents: Record<string, any>): AgentConfig {
-  const ag = agents[agentId] || {} as any;
+  const ag = agents[agentId] || ({} as any);
   const cfg: AgentConfig = {
     agentId,
     enabled: true,
@@ -302,17 +354,28 @@ interface TemplateSourceInfo {
 }
 
 function analyzeTemplate(
-  agentId: string, cfg: AgentConfig, agents: Record<string, any>, content: string, localParams?: Record<string, string>
+  agentId: string,
+  cfg: AgentConfig,
+  agents: Record<string, any>,
+  content: string,
+  localParams?: Record<string, string>,
 ): TemplateSourceInfo {
-  const hasConfigTemplate = !!(agents[agentId]?.template);
+  const hasConfigTemplate = !!agents[agentId]?.template;
   const hasDefaultTemplate = getDefaultTemplate(agentId) !== '';
-  const templateSource = cfg.template ? 'agent-config.json'
-    : hasDefaultTemplate ? 'placeholder-registry default' : 'legacy fallback';
+  const templateSource = cfg.template
+    ? 'agent-config.json'
+    : hasDefaultTemplate
+      ? 'placeholder-registry default'
+      : 'legacy fallback';
 
-  const sysPromptSource = agentId === 'story' && agents['story']?.preset ? 'preset'
-    : cfg.systemPrompt ? 'systemPrompt' : 'fixedSystem fallback';
+  const sysPromptSource =
+    agentId === 'story' && agents['story']?.preset
+      ? 'preset'
+      : cfg.systemPrompt
+        ? 'systemPrompt'
+        : 'fixedSystem fallback';
 
-  const localParamsKeys = localParams ? Object.keys(localParams).filter(k => localParams[k]) : [];
+  const localParamsKeys = localParams ? Object.keys(localParams).filter((k) => localParams[k]) : [];
 
   const unresolved = content.match(/\{\{[A-Z][A-Z_.]*(?::[^}]*)?\}\}/g);
   const unresolvedPlaceholders = unresolved ? [...new Set(unresolved)] : [];
@@ -323,7 +386,16 @@ function analyzeTemplate(
 // ═══════════════════════════════════════
 // 上下文构建
 // ═══════════════════════════════════════
-function buildContextFromSave(backup: any, overrideUserInput?: string): AgentContext {
+/**
+ * 本 CLI 自用的上下文类型。
+ *
+ * `AgentContext` 本身**没有** `saveId` —— 生产里存档 id 由 GamePipeline 侧持有，
+ * 分别喂给 `AgentClient` 与 `ToolExecutionContext`，不经过 Agent 上下文。这个 CLI
+ * 只有一个 backup JSON 当输入源，所以把它挂在 ctx 上顺路运下去；别据此以为引擎有这个字段。
+ */
+type TestAgentContext = AgentContext & { saveId?: string };
+
+function buildContextFromSave(backup: any, overrideUserInput?: string): TestAgentContext {
   const chat = backup.chats?.[0];
   if (!chat) throw new Error('存档中没有 ChatSession');
 
@@ -331,7 +403,7 @@ function buildContextFromSave(backup: any, overrideUserInput?: string): AgentCon
   // 最后一条 user 消息作为当前输入，其余为历史
   const lastUserIdx = [...messages].reverse().findIndex((m: any) => m.role === 'user');
   const lastUserMsg = lastUserIdx >= 0 ? messages[messages.length - 1 - lastUserIdx] : null;
-  const userInput = overrideUserInput || (lastUserMsg?.content || '');
+  const userInput = overrideUserInput || lastUserMsg?.content || '';
   const history = lastUserMsg
     ? messages.slice(0, messages.indexOf(lastUserMsg))
     : messages.slice(0, -1);
@@ -378,9 +450,12 @@ async function main() {
   // 1. 加载存档
   log(VERBOSE, `Loading save: ${SAVE_PATH}`);
   const backup = JSON.parse(fs.readFileSync(SAVE_PATH, 'utf-8'));
-  let ctx = buildContextFromSave(backup);
+  const ctx = buildContextFromSave(backup);
 
-  log(VERBOSE, `Context: ${ctx.characters.length} chars, ${ctx.memories.length} memories, ${ctx.plotEvents.length} plot events, ${backup.chats?.length || 0} chats`);
+  log(
+    VERBOSE,
+    `Context: ${ctx.characters.length} chars, ${ctx.memories.length} memories, ${ctx.plotEvents.length} plot events, ${backup.chats?.length || 0} chats`,
+  );
 
   // 2. 如果 --endpoint-id，从存档取 API 配置；否则用本地配置/CLI 参数
   let apiUrl = API_URL_FINAL;
@@ -390,7 +465,9 @@ async function main() {
     const idx = parseInt(args['endpoint-id']);
     const ep = backup.apiEndpoints?.[idx];
     if (ep) {
-      apiUrl = ep.baseUrl; apiKey = ep.apiKey; model = ep.defaultModel || model;
+      apiUrl = ep.baseUrl;
+      apiKey = ep.apiKey;
+      model = ep.defaultModel || model;
       log(VERBOSE, `Using endpoint[${idx}]: ${ep.name || apiUrl}`);
     } else {
       console.error(`apiEndpoints[${idx}] 不存在, 使用 CLI 默认值`);
@@ -415,14 +492,18 @@ async function main() {
       log(VERBOSE, `localParams: ${Object.keys(localParams).join(', ')}`);
     }
     const msgs = buildAgentMessages(AGENT_ID, ctx, [agentConfig], worldBooks, presets, localParams);
-    if (!msgs) { console.error(`未知 Agent: ${AGENT_ID}`); process.exit(1); }
+    if (!msgs) {
+      console.error(`未知 Agent: ${AGENT_ID}`);
+      process.exit(1);
+    }
 
     // Phase 10: 分析模板来源
     const info = analyzeTemplate(AGENT_ID, agentConfig, allAgents, msgs[0].content, localParams);
     console.log(`\n=== RESOLVED TEMPLATE (${AGENT_ID} | ${msgs.length} message(s)) ===`);
     console.log(`Template source: ${info.templateSource}`);
     console.log(`SYS_PROMPT source: ${info.sysPromptSource}`);
-    if (info.localParamsKeys.length > 0) console.log(`localParams injected: ${info.localParamsKeys.join(', ')}`);
+    if (info.localParamsKeys.length > 0)
+      console.log(`localParams injected: ${info.localParamsKeys.join(', ')}`);
     if (info.unresolvedPlaceholders.length > 0) {
       console.log(`⚠ Unresolved placeholders: ${info.unresolvedPlaceholders.join(', ')}`);
     }
@@ -434,7 +515,10 @@ async function main() {
     }
     // 也打印工具（如果是 Agentic agent）
     const tools = getToolsForAgent(AGENT_ID);
-    if (tools.length > 0) console.log(`\n=== TOOLS (${tools.length}) ===\n${tools.map(t => t.function.name).join(', ')}`);
+    if (tools.length > 0)
+      console.log(
+        `\n=== TOOLS (${tools.length}) ===\n${tools.map((t) => t.function.name).join(', ')}`,
+      );
     return;
   }
 
@@ -449,17 +533,25 @@ async function main() {
     log(VERBOSE, `localParams: ${Object.keys(localParams).join(', ')}`);
   }
   const msgs = buildAgentMessages(AGENT_ID, ctx, [agentConfig], worldBooks, presets, localParams);
-  if (!msgs) { console.error(`未知 Agent: ${AGENT_ID}`); process.exit(1); }
+  if (!msgs) {
+    console.error(`未知 Agent: ${AGENT_ID}`);
+    process.exit(1);
+  }
   log(VERBOSE, `System prompt: ${msgs[0]?.content.length || 0} chars`);
   if (msgs.length > 1) log(VERBOSE, `User message: ${msgs[1]?.content.length || 0} chars`);
 
   // 6. 创建 client 并调用
-  const detectProvider = (url: string) => url.includes('deepseek.com') ? 'deepseek' : url.includes('openai.com') ? 'openai' : 'custom';
+  const detectProvider = (url: string) =>
+    url.includes('deepseek.com') ? 'deepseek' : url.includes('openai.com') ? 'openai' : 'custom';
 
   // Move upstream block here, after detectProvider is defined
   if (DO_UPSTREAM) {
-    const upstreamId = AGENT_ID === 'vars_update' || AGENT_ID === 'char_update' || AGENT_ID === 'memory_summary' ? 'story'
-      : AGENT_ID === 'item_gen' ? 'char_gen' : null;
+    const upstreamId =
+      AGENT_ID === 'vars_update' || AGENT_ID === 'char_update' || AGENT_ID === 'memory_summary'
+        ? 'story'
+        : AGENT_ID === 'item_gen'
+          ? 'char_gen'
+          : null;
     if (upstreamId) {
       log(VERBOSE, `[upstream] Running ${upstreamId} first...`);
       const upCfg = buildAgentConfig(upstreamId, allAgents);
@@ -476,12 +568,29 @@ async function main() {
       const upPresets = upstreamId === 'story' ? presets : undefined;
       const upMsgs = buildAgentMessages(upstreamId, ctx, [upCfg], upWbs, upPresets, upLocalParams);
       if (upMsgs) {
-        const upClient = new AgentClient({ endpoint: { baseUrl: apiUrl, apiKey, defaultModel: model, id: 'up', name: 'up', provider: detectProvider(apiUrl), models: [model], timeout: 120 }, agentId: upstreamId, saveId: ctx.saveId || 'test' });
+        const upClient = new AgentClient({
+          endpoint: {
+            baseUrl: apiUrl,
+            apiKey,
+            defaultModel: model,
+            id: 'up',
+            name: 'up',
+            provider: detectProvider(apiUrl),
+            models: [model],
+            timeout: 120,
+          },
+          agentId: upstreamId,
+          saveId: ctx.saveId || 'test',
+        });
         // 上游用 Agentic 模式（如果有工具）
         const upTools = getToolsForAgent(upstreamId);
         let upResult: any;
         if (upTools.length > 0 && upClient.chatWithTools) {
-          const upToolCtx: ToolExecutionContext = { characters: ctx.characters, variables: ctx.variables, saveId: ctx.saveId || 'test-save' };
+          const upToolCtx: ToolExecutionContext = {
+            characters: ctx.characters,
+            variables: ctx.variables,
+            saveId: ctx.saveId || 'test-save',
+          };
           upResult = await upClient.chatWithTools(
             { messages: upMsgs, tools: upTools, tool_choice: 'auto' },
             async (name: string, nargs: Record<string, any>) => {
@@ -495,19 +604,39 @@ async function main() {
         }
         if (upResult?.output) {
           ctx.agentOutputs!.set(upstreamId, upResult.output);
-          log(VERBOSE, `[upstream] ${upstreamId}: tokens=${upResult.tokensUsed} cache=${upResult.cacheHit} duration=${upResult.duration}ms`);
-          if (VERBOSE) console.log(`[upstream output, ${upResult.output.length} chars]:\n${upResult.output.substring(0, 500)}\n...`);
+          log(
+            VERBOSE,
+            `[upstream] ${upstreamId}: tokens=${upResult.tokensUsed} cache=${upResult.cacheHit} duration=${upResult.duration}ms`,
+          );
+          if (VERBOSE)
+            console.log(
+              `[upstream output, ${upResult.output.length} chars]:\n${upResult.output.substring(0, 500)}\n...`,
+            );
 
           // Phase 10: 上游完成后重新提取下游 localParams (story→craft_gen/char_gen, char_gen→item_gen)
-          const updatedLocalParams = extractLocalParams(AGENT_ID, ctx, upstreamId === 'story' ? upResult.output : undefined);
+          const updatedLocalParams = extractLocalParams(
+            AGENT_ID,
+            ctx,
+            upstreamId === 'story' ? upResult.output : undefined,
+          );
           if (Object.keys(updatedLocalParams).length > 0) {
             // Rebuild msgs with updated localParams from upstream output
             Object.assign(localParams, updatedLocalParams);
-            const rebuiltMsgs = buildAgentMessages(AGENT_ID, ctx, [agentConfig], worldBooks, presets, localParams);
+            const rebuiltMsgs = buildAgentMessages(
+              AGENT_ID,
+              ctx,
+              [agentConfig],
+              worldBooks,
+              presets,
+              localParams,
+            );
             if (rebuiltMsgs) {
               msgs.length = 0;
               msgs.push(...rebuiltMsgs);
-              log(VERBOSE, `[upstream] Rebuilt messages with localParams: ${Object.keys(updatedLocalParams).join(', ')}`);
+              log(
+                VERBOSE,
+                `[upstream] Rebuilt messages with localParams: ${Object.keys(updatedLocalParams).join(', ')}`,
+              );
             }
           }
         }
@@ -515,31 +644,63 @@ async function main() {
     }
   }
   const client = new AgentClient({
-    endpoint: { id: 'test', name: 'test', baseUrl: apiUrl, apiKey, defaultModel: model, provider: detectProvider(apiUrl), models: [model], timeout: 120 },
+    endpoint: {
+      id: 'test',
+      name: 'test',
+      baseUrl: apiUrl,
+      apiKey,
+      defaultModel: model,
+      provider: detectProvider(apiUrl),
+      models: [model],
+      timeout: 120,
+    },
     agentId: AGENT_ID,
     saveId: ctx.saveId || 'test',
   });
 
   const tools = getToolsForAgent(AGENT_ID);
   const isAgentic = tools.length > 0;
-  if (isAgentic) log(VERBOSE, `Agentic mode: ${tools.length} tools (${tools.map(t => t.function.name).join(', ')})`);
+  if (isAgentic)
+    log(
+      VERBOSE,
+      `Agentic mode: ${tools.length} tools (${tools.map((t) => t.function.name).join(', ')})`,
+    );
 
   const result = isAgentic
     ? await (async () => {
-        const toolCtx: ToolExecutionContext = { characters: ctx.characters, variables: ctx.variables, saveId: ctx.saveId || 'test-save' };
-        const req: ChatRequest = { messages: msgs, temperature: 0.7, maxTokens: 16384, tools, reasoning: true };
-        return client.chatWithTools(req, (name, nargs) => {
-          const r = executeToolCall(name, nargs, toolCtx);
-          if (VERBOSE) {
-            const a = JSON.stringify(nargs).substring(0, 120);
-            const res = JSON.stringify(r).substring(0, 200);
-            log(VERBOSE, `  [TOOL] ${name}(${a}) → ${res}`);
-          }
-          return Promise.resolve(r);
-        }, { maxRounds: 15 });
+        const toolCtx: ToolExecutionContext = {
+          characters: ctx.characters,
+          variables: ctx.variables,
+          saveId: ctx.saveId || 'test-save',
+        };
+        const req: ChatRequest = {
+          messages: msgs,
+          temperature: 0.7,
+          maxTokens: 16384,
+          tools,
+          reasoning: true,
+        };
+        return client.chatWithTools(
+          req,
+          (name, nargs) => {
+            const r = executeToolCall(name, nargs, toolCtx);
+            if (VERBOSE) {
+              const a = JSON.stringify(nargs).substring(0, 120);
+              const res = JSON.stringify(r).substring(0, 200);
+              log(VERBOSE, `  [TOOL] ${name}(${a}) → ${res}`);
+            }
+            return Promise.resolve(r);
+          },
+          { maxRounds: 15 },
+        );
       })()
     : await (async () => {
-        const req: ChatRequest = { messages: msgs, temperature: 0.7, maxTokens: 16384, reasoning: true };
+        const req: ChatRequest = {
+          messages: msgs,
+          temperature: 0.7,
+          maxTokens: 16384,
+          reasoning: true,
+        };
         return client.chat(req);
       })();
 
@@ -561,14 +722,24 @@ async function main() {
     for (const e of validation.errors) console.log(`  ❌ ${e}`);
     for (const w of validation.warnings) console.log(`  ⚠️ ${w}`);
   }
-  console.log(`${status} ${AGENT_ID}: tokens=${result.tokensUsed} cache=${result.cacheHit} duration=${(result.duration / 1000).toFixed(1)}s errors=${validation.errors.length} warnings=${validation.warnings.length}`);
+  console.log(
+    `${status} ${AGENT_ID}: tokens=${result.tokensUsed} cache=${result.cacheHit} duration=${(result.duration / 1000).toFixed(1)}s errors=${validation.errors.length} warnings=${validation.warnings.length}`,
+  );
   if (result.error) console.log(`  Error: ${result.error}`);
 
   // 8. 保存输出 (Phase 10: 增加 template metadata)
   if (OUTPUT_PATH) {
-    const info = analyzeTemplate(AGENT_ID, agentConfig, allAgents, msgs[0]?.content || '', localParams);
+    const info = analyzeTemplate(
+      AGENT_ID,
+      agentConfig,
+      allAgents,
+      msgs[0]?.content || '',
+      localParams,
+    );
     const outputData = {
-      agentId: AGENT_ID, saveFile: SAVE_PATH, model,
+      agentId: AGENT_ID,
+      saveFile: SAVE_PATH,
+      model,
       templateMetadata: {
         templateSource: info.templateSource,
         sysPromptSource: info.sysPromptSource,
@@ -576,7 +747,15 @@ async function main() {
         unresolvedPlaceholders: info.unresolvedPlaceholders,
       },
       messages: msgs,
-      response: { output: result.output, rawResponse: result.rawResponse, reasoning: result.reasoning, tokensUsed: result.tokensUsed, cacheHit: result.cacheHit, duration: result.duration, error: result.error },
+      response: {
+        output: result.output,
+        rawResponse: result.rawResponse,
+        reasoning: result.reasoning,
+        tokensUsed: result.tokensUsed,
+        cacheHit: result.cacheHit,
+        duration: result.duration,
+        error: result.error,
+      },
       validation,
       toolCalls: result.toolCalls || [],
     };
@@ -585,4 +764,7 @@ async function main() {
   }
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

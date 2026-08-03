@@ -10,14 +10,15 @@
     "build:engine": "tsc",
     "typecheck": "tsc --noEmit",
     "typecheck:vue": "vue-tsc --noEmit",
+    "typecheck:tools": "tsc -p tsconfig.tools.json --noEmit",
     "test": "vitest",
     "test:run": "vitest --run",
     "preview": "vite preview",
-    "format": "prettier --write \"src/**/*.{ts,vue,css}\" \"*.json\" \"*.md\" \"docs/**/*.md\"",
-    "format:check": "prettier --check \"src/**/*.{ts,vue,css}\" \"*.json\" \"*.md\" \"docs/**/*.md\"",
+    "format": "prettier --write \"{src,server,tests,scripts}/**/*.{ts,vue,css,mjs,cjs}\" \"*.{json,js,ts}\" \"*.md\" \"docs/**/*.md\"",
+    "format:check": "prettier --check \"{src,server,tests,scripts}/**/*.{ts,vue,css,mjs,cjs}\" \"*.{json,js,ts}\" \"*.md\" \"docs/**/*.md\"",
     "ejs:fixture": "node scripts/scramble-worldbook-ejs.mjs",
-    "lint": "eslint \"src/**/*.{ts,vue}\"",
-    "lint:fix": "eslint \"src/**/*.{ts,vue}\" --fix"
+    "lint": "eslint \"{src,server,tests,scripts}/**/*.{ts,vue,mjs,cjs}\" \"*.config.{ts,js}\"",
+    "lint:fix": "eslint \"{src,server,tests,scripts}/**/*.{ts,vue,mjs,cjs}\" \"*.config.{ts,js}\" --fix"
   },
   "keywords": [
     "sillytavern",
@@ -38,6 +39,7 @@
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "@types/node": "^26.1.2",
     "@types/openseadragon": "^5.0.2",
     "@vitejs/plugin-vue": "^5.2.4",
     "@vue/eslint-config-typescript": "^14.9.0",

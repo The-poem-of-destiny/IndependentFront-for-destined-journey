@@ -7,53 +7,53 @@
  * 用法: node scripts/compress-images.mjs
  * 一次性工具，D 批后可删；保留以便将来新图复用。
  */
-import sharp from 'sharp'
-import { readdirSync, readFileSync, statSync, renameSync, unlinkSync } from 'fs'
-import { fileURLToPath } from 'url'
-import { dirname, join } from 'path'
+import sharp from 'sharp';
+import { readdirSync, readFileSync, statSync, renameSync, unlinkSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const root = join(__dirname, '..')
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const root = join(__dirname, '..');
 
 function walkPngs(dir) {
-  const out = []
+  const out = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name)
-    if (e.isDirectory()) out.push(...walkPngs(p))
-    else if (e.name.toLowerCase().endsWith('.png')) out.push(p)
+    const p = join(dir, e.name);
+    if (e.isDirectory()) out.push(...walkPngs(p));
+    else if (e.name.toLowerCase().endsWith('.png')) out.push(p);
   }
-  return out
+  return out;
 }
 
-const themesDir = join(root, 'src/ui/assets/themes')
-const files = walkPngs(themesDir).filter((f) => statSync(f).size > 500 * 1024)
-console.log(`找到 ${files.length} 个 >500KB 的 PNG，开始压缩…\n`)
+const themesDir = join(root, 'src/ui/assets/themes');
+const files = walkPngs(themesDir).filter((f) => statSync(f).size > 500 * 1024);
+console.log(`找到 ${files.length} 个 >500KB 的 PNG，开始压缩…\n`);
 
-let totalBefore = 0
-let totalAfter = 0
+let totalBefore = 0;
+let totalAfter = 0;
 for (const f of files) {
-  const before = statSync(f).size
-  totalBefore += before
-  const tmp = f + '.tmp'
+  const before = statSync(f).size;
+  totalBefore += before;
+  const tmp = f + '.tmp';
   await sharp(readFileSync(f))
     .png({ palette: true, quality: 78, compressionLevel: 9, effort: 10 })
-    .toFile(tmp)
-  const after = statSync(tmp).size
+    .toFile(tmp);
+  const after = statSync(tmp).size;
   if (after < before) {
-    unlinkSync(f)
-    renameSync(tmp, f)
-    totalAfter += after
+    unlinkSync(f);
+    renameSync(tmp, f);
+    totalAfter += after;
     console.log(
       `  ${(before / 1024).toFixed(0)}KB → ${(after / 1024).toFixed(0)}KB  ${f.replace(root + '/', '')}`,
-    )
+    );
   } else {
-    unlinkSync(tmp)
-    totalAfter += before
-    console.log(`  ${(before / 1024).toFixed(0)}KB (无改善)  ${f.replace(root + '/', '')}`)
+    unlinkSync(tmp);
+    totalAfter += before;
+    console.log(`  ${(before / 1024).toFixed(0)}KB (无改善)  ${f.replace(root + '/', '')}`);
   }
 }
 
 console.log(
   `\n总计: ${(totalBefore / 1024 / 1024).toFixed(1)}MB → ${(totalAfter / 1024 / 1024).toFixed(1)}MB` +
     ` (-${((1 - totalAfter / totalBefore) * 100).toFixed(0)}%)`,
-)
+);

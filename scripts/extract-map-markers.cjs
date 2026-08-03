@@ -53,9 +53,9 @@ const cleaned = markers.map((m, i) => {
 
 fs.writeFileSync(OUTPUT, JSON.stringify(cleaned, null, 2), 'utf8');
 
-const max = Math.max(...cleaned.map(m => m.description.length));
+const max = Math.max(...cleaned.map((m) => m.description.length));
 const avg = Math.round(cleaned.reduce((s, m) => s + m.description.length, 0) / cleaned.length);
-const withNewline = cleaned.filter(m => m.description.includes('\n')).length;
+const withNewline = cleaned.filter((m) => m.description.includes('\n')).length;
 
 console.log(`✅ 完成: ${cleaned.length} 标记, 最长 ${max} chars, 平均 ${avg} chars`);
 console.log(`   含真正换行: ${withNewline} 个`);

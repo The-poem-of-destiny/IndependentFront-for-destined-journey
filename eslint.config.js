@@ -1,6 +1,6 @@
-import pluginVue from 'eslint-plugin-vue'
-import vueTsEslintConfig from '@vue/eslint-config-typescript'
-import prettierConfig from 'eslint-config-prettier'
+import pluginVue from 'eslint-plugin-vue';
+import vueTsEslintConfig from '@vue/eslint-config-typescript';
+import prettierConfig from 'eslint-config-prettier';
 
 // ESLint 9 flat config。风格问题交给 Prettier（prettierConfig 放最后关掉 eslint 的格式规则）。
 // 风格不在 review 里争（治理规范 §5.1）。
@@ -28,4 +28,11 @@ export default [
       'no-empty': ['warn', { allowEmptyCatch: true }],
     },
   },
-]
+  {
+    // Q-15 补网：lint 从 src/** 扩到 {src,server,tests,scripts}/**。
+    // .cjs 是**有意**的 CommonJS 一次性脚本（node 直跑，不进构建），require 是它唯一的导入方式。
+    files: ['**/*.cjs'],
+    languageOptions: { sourceType: 'commonjs' },
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
+];

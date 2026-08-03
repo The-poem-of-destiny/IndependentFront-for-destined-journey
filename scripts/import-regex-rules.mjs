@@ -3,8 +3,12 @@
  *
  * 用法: node scripts/import-regex-rules.mjs
  *
- * 读取 tmp/_regex_remote.json（从 CDN 下载的远程规则），
+ * 读取 data/regex-remote-snapshot.json（从 CDN 下载的远程规则快照），
  * 字段映射为本地 BeautifierRule 格式，合并到 data/defaults/beautifier-rules.json。
+ *
+ * Q-15 清仓：原路径是 tmp/_regex_remote.json，但 tmp/ 已整个从版本控制里清掉且被
+ * .gitignore 挡住——一个被 ignore 的目录里躺着唯一的 tracked 输入文件太容易被误删，
+ * 故挪进 data/。
  */
 
 import { readFileSync, writeFileSync } from 'fs';
@@ -14,7 +18,7 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 
-const REMOTE_PATH = resolve(ROOT, 'tmp/_regex_remote.json');
+const REMOTE_PATH = resolve(ROOT, 'data/regex-remote-snapshot.json');
 const OUTPUT_PATH = resolve(ROOT, 'data/defaults/beautifier-rules.json');
 
 // ===== 字段映射 =====
@@ -70,7 +74,7 @@ function convertRule(remote, index) {
 
 console.log('读取远程规则...');
 const remoteData = JSON.parse(readFileSync(REMOTE_PATH, 'utf-8'));
-const remoteRules = Array.isArray(remoteData) ? remoteData : (remoteData.rules || []);
+const remoteRules = Array.isArray(remoteData) ? remoteData : remoteData.rules || [];
 
 console.log(`远程规则数: ${remoteRules.length}`);
 
@@ -105,10 +109,10 @@ if (errors > 0) {
 }
 
 // 合并: 内置规则 ID 集合
-const builtinIds = new Set(existingRules.filter(r => r.isBuiltin).map(r => r.id));
+const builtinIds = new Set(existingRules.filter((r) => r.isBuiltin).map((r) => r.id));
 // 保留非远程的内置规则 + 所有新转换的远程规则
 const merged = [
-  ...existingRules.filter(r => builtinIds.has(r.id) && !converted.find(c => c.id === r.id)),
+  ...existingRules.filter((r) => builtinIds.has(r.id) && !converted.find((c) => c.id === r.id)),
   ...converted,
 ];
 
@@ -119,7 +123,9 @@ const output = {
 
 writeFileSync(OUTPUT_PATH, JSON.stringify(output, null, 2), 'utf-8');
 console.log(`\n✅ 写入 ${OUTPUT_PATH}`);
-console.log(`   总规则数: ${merged.length} (内置 ${existingRules.filter(r => r.isBuiltin).length} + 远程 ${converted.length})`);
+console.log(
+  `   总规则数: ${merged.length} (内置 ${existingRules.filter((r) => r.isBuiltin).length} + 远程 ${converted.length})`,
+);
 
 // 输出规则摘要
 console.log('\n规则摘要:');

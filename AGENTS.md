@@ -454,9 +454,9 @@ src/sillytavern/                    ← 核心引擎
   ├── api-router.ts / api-tools.ts
   │
   └── (战斗 v2 纯计算规则见 docs/reference/combat-system-architecture.md；v3 内核见 docs/reference/combat-system-architecture-v3.md)
-
-src/vanilla/sillytavern-store.ts    ← 框架无关响应式 Store
 ```
+
+> 🪦 这里曾指着一行 `src/vanilla/sillytavern-store.ts`（"框架无关响应式 Store"）——该目录早已不存在，Store 由 Pinia 接管。Q-15 清仓时删掉，别按图找那个文件。
 
 ## 前端架构 (Phase 7)
 
