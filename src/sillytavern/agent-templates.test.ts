@@ -422,6 +422,49 @@ describe('buildAgentMessages — SYS_PROMPT assembly', () => {
     expect(content.split('探索古墓').length - 1).toBe(1);
   });
 
+  it('story + 设置中保存的内置默认模板 → 不重复追加预设已有的上下文', () => {
+    const ctx = makeContext({ userInput: '唤醒妲丽安' });
+    const cfg = makeCfg('story', {
+      presetId: 'saved-default-template-preset',
+      template: getDefaultTemplate('story'),
+      worldBookIds: ['system_core'],
+    });
+    const presets: AgentPreset[] = [
+      {
+        id: 'saved-default-template-preset',
+        name: 'Saved Default Template Preset',
+        fixedSystem:
+          '核心提示词。\n<世界书>{{LORE_BOOK_STATIC}}</世界书>\n<输入>{{USER_INPUT}}</输入>',
+        fixedExamples: '',
+      } as AgentPreset,
+    ];
+    const worldBooks: WorldBook[] = [
+      {
+        id: 'system_core',
+        name: '命定核心',
+        partition: 'system_core',
+        entries: [
+          {
+            uid: 413,
+            name: '妲丽安',
+            content: '妲丽安掌管九十万六百六十六册幻书。',
+            enabled: true,
+            key: [],
+            keysecondary: [],
+            selectiveLogic: 0,
+            order: 0,
+            position: 0,
+          },
+        ],
+      },
+    ];
+
+    const content = buildAgentMessages('story', ctx, [cfg], worldBooks, presets)![0].content;
+
+    expect(content.split('九十万六百六十六册幻书').length - 1).toBe(1);
+    expect(content.split('唤醒妲丽安').length - 1).toBe(1);
+  });
+
   // 裸名分区占位符必须进 STORY_PRESET_PLACEHOLDER_RE，否则只用它们的预设不走预解析、原样裸奔给 AI
   it('story + 预设只含裸名分区占位符 → 仍判定为规范预设并预解析', () => {
     const ctx = makeContext({ userInput: '探索古墓' });

@@ -19,6 +19,7 @@ import {
   savePlotOutline,
   savePlotEvents,
   getDatabase,
+  getSave,
 } from '@engine/database';
 import { createDefaultCharacterState } from '@engine/types';
 import type { SaveSlot, SaveProfile, CharacterState, PlotOutline, PlotEvent } from '@engine/types';
@@ -577,5 +578,40 @@ describe('EJS 诊断累计', () => {
     expect(game.ejsFallbacks).toHaveLength(1);
     expect(game.ejsVarsRejections).toHaveLength(1);
     expect(game.ejsUiLog).toHaveLength(1);
+  });
+});
+
+describe('markOpeningPromptConsumed', () => {
+  beforeEach(async () => {
+    try {
+      await clearAllData();
+    } catch {
+      /* db may not exist yet */
+    }
+    await initializeDatabase();
+  });
+
+  it('claims an opening prompt once across concurrent callers and persists the claim', async () => {
+    const base = makeSaveSlot();
+    await saveSaveSlot(
+      makeSaveSlot({
+        metadata: {
+          ...base.metadata,
+          openingPrompt: 'OPENING',
+          openingPromptConsumed: false,
+        },
+      }),
+    );
+    const store = makeStore();
+    await store.loadSave(SAVE_ID);
+
+    const results = await Promise.all([
+      store.markOpeningPromptConsumed(),
+      store.markOpeningPromptConsumed(),
+    ]);
+
+    expect(results).toEqual([true, false]);
+    expect(store.hasOpeningPromptConsumed).toBe(true);
+    expect((await getSave(SAVE_ID))?.metadata.openingPromptConsumed).toBe(true);
   });
 });

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { extractStoryOptions, GamePipeline } from './game-pipeline';
+import {
+  collectSelectedSystemCoreWorkshopBookIds,
+  extractStoryOptions,
+  GamePipeline,
+} from './game-pipeline';
 import type { AgentResult } from '@engine/types';
 
 vi.mock('@engine/plot-engine', () => ({
@@ -81,7 +85,7 @@ function makeGameStore(overrides: Record<string, any> = {}) {
     clearAgentStatus: vi.fn(),
     addAgentLogEntry: vi.fn(),
     refreshFromDb: vi.fn(async () => {}),
-    markOpeningPromptConsumed: vi.fn(async () => {}),
+    markOpeningPromptConsumed: vi.fn(async () => true),
     recordEjsVarsRejection: vi.fn(),
     ...overrides,
   } as any;
@@ -117,6 +121,119 @@ function makePipeline(gameOverrides: Record<string, any> = {}) {
 function makeResult(agentId: string, rawResponse: string): AgentResult {
   return { agentId, output: rawResponse, rawResponse, tokensUsed: 0, cacheHit: false, duration: 0 };
 }
+
+describe('sendOpeningPrompt', () => {
+  it('two pipeline instances sharing one save generate the opening only once', async () => {
+    let consumed = false;
+    const gameStore = makeGameStore({
+      openingPrompt: 'OPENING',
+      markOpeningPromptConsumed: vi.fn(async () => {
+        if (consumed) return false;
+        consumed = true;
+        return true;
+      }),
+    });
+    const options = {
+      gameStore,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    };
+    const first = new GamePipeline(options);
+    const second = new GamePipeline(options);
+    const firstRun = vi.spyOn(first, 'run').mockResolvedValue(true);
+    const secondRun = vi.spyOn(second, 'run').mockResolvedValue(true);
+
+    await Promise.all([first.sendOpeningPrompt(), second.sendOpeningPrompt()]);
+
+    expect(firstRun.mock.calls.length + secondRun.mock.calls.length).toBe(1);
+    expect(gameStore.markOpeningPromptConsumed).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('buildAgentConfigs — selected system core visibility', () => {
+  it.each([408, 413, 999])(
+    'adds system_core to char_gen for any selected system-core entry (uid %s)',
+    (uid) => {
+      const pipeline = makePipeline({
+        activeSave: {
+          metadata: { enabledWorldBookEntries: [`system_core:${uid}`] },
+        },
+      });
+      const settings = (pipeline as any).settings.settings;
+      settings.agentWorldbookEnabled.char_gen = true;
+      settings.agentWorldbookIds.char_gen = ['world_setting', 'race', 'character'];
+      settings.agentWorldbookEnabled.story = true;
+      settings.agentWorldbookIds.story = ['world_setting'];
+
+      const configs = (pipeline as any).buildAgentConfigs({ char_gen: {} });
+      const charGen = configs.find((config: any) => config.agentId === 'char_gen');
+      const story = configs.find((config: any) => config.agentId === 'story');
+
+      expect(charGen.worldBookIds).toContain('system_core');
+      expect(story.worldBookIds).toContain('system_core');
+    },
+  );
+
+  it('grants selected system/core workshop books to story and char_gen only', () => {
+    const pipeline = makePipeline();
+    const settings = (pipeline as any).settings.settings;
+    for (const agentId of ['story', 'char_gen', 'request_dispatcher']) {
+      settings.agentWorldbookEnabled[agentId] = true;
+      settings.agentWorldbookIds[agentId] = ['world_setting'];
+    }
+
+    const configs = (pipeline as any).buildAgentConfigs({}, undefined, ['workshop:core-project']);
+    const byId = (agentId: string) =>
+      configs.find((config: any) => config.agentId === agentId).worldBookIds;
+
+    expect(byId('story')).toContain('workshop:core-project');
+    expect(byId('char_gen')).toContain('workshop:core-project');
+    expect(byId('request_dispatcher')).not.toContain('workshop:core-project');
+  });
+});
+
+describe('collectSelectedSystemCoreWorkshopBookIds', () => {
+  it('returns only selected, enabled workshop books whose project has the system/core tag', () => {
+    const entry = (projectId: string, uid: number, enabled = true) => ({
+      uid,
+      name: projectId,
+      content: projectId,
+      enabled,
+      key: [],
+      keysecondary: [],
+      selectiveLogic: 0,
+      order: 0,
+      position: 0,
+      extra: { workshop: { projectId } },
+    });
+    const books = [
+      {
+        id: 'workshop:core-project',
+        partition: 'creative_workshop',
+        entries: [entry('core-project', 100)],
+      },
+      {
+        id: 'workshop:regular-project',
+        partition: 'creative_workshop',
+        entries: [entry('regular-project', 101)],
+      },
+      {
+        id: 'workshop:disabled-core',
+        partition: 'creative_workshop',
+        entries: [entry('disabled-core', 102, false)],
+      },
+    ] as any;
+    const projects = [
+      { id: 'core-project', tags: ['System/Core'] },
+      { id: 'regular-project', tags: ['character'] },
+      { id: 'disabled-core', tags: ['system/core'] },
+    ] as any;
+
+    expect(collectSelectedSystemCoreWorkshopBookIds(books, projects)).toEqual([
+      'workshop:core-project',
+    ]);
+  });
+});
 
 describe('extractStoryOptions', () => {
   it('提取 <options> 块并剥离正文', () => {

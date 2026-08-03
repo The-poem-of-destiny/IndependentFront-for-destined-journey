@@ -477,15 +477,28 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
-  /** 标记开场 Prompt 已消费 */
-  async function markOpeningPromptConsumed() {
-    if (!activeSave.value) return;
-    const clean = JSON.parse(JSON.stringify(activeSave.value));
-    clean.metadata.openingPromptConsumed = true;
+  /** 在生成开始前原子认领开场 Prompt。 */
+  async function markOpeningPromptConsumed(): Promise<boolean> {
+    const current = activeSave.value;
+    if (!current || current.metadata?.openingPromptConsumed) return false;
+
+    const idx = saves.value.findIndex((save: SaveSlot) => save.id === current.id);
+    if (idx < 0) return false;
+
+    const previous = saves.value[idx];
+    const clean = JSON.parse(JSON.stringify(current));
+    clean.metadata = { ...(clean.metadata ?? {}), openingPromptConsumed: true };
+    clean.updatedAt = Date.now();
+
+    // 在第一个 await 之前同步写入内存，阻止共享 Store 的第二条管线重复启动。
+    saves.value[idx] = clean;
     try {
       await saveSaveSlot(clean);
+      return true;
     } catch (err) {
+      if (saves.value[idx]?.updatedAt === clean.updatedAt) saves.value[idx] = previous;
       console.error('[game-store] 标记开场 Prompt 失败:', err);
+      return false;
     }
   }
 

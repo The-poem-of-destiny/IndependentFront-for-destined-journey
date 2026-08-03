@@ -24,6 +24,7 @@ import type {
   ItemGenRequestMarker,
   PlayAudioMarker,
   MemoryRecord,
+  WorkshopProject,
 } from '@engine/types';
 import { AgentClient } from '@engine/agent-client';
 import type { StreamCallbacks } from '@engine/agent-client';
@@ -56,6 +57,32 @@ export type StoryChunkCallback = (chunk: string, isComplete: boolean) => void;
 /** 兼容旧调用名；正文、控制区块与 `<option(s)>` 统一由 story-output 投影。 */
 export function extractStoryOptions(raw: string): { content: string; options: string[] } {
   return projectStoryOutput(raw);
+}
+
+/** Resolve selected workshop books that explicitly declare system-core semantics. */
+export function collectSelectedSystemCoreWorkshopBookIds(
+  worldBooks: WorldBook[],
+  projects: WorkshopProject[],
+): string[] {
+  const coreProjectIds = new Set(
+    projects
+      .filter((project) => project.tags?.some((tag) => tag.trim().toLowerCase() === 'system/core'))
+      .map((project) => project.id),
+  );
+  if (coreProjectIds.size === 0) return [];
+
+  return worldBooks
+    .filter(
+      (book) =>
+        book.partition === 'creative_workshop' &&
+        book.entries.some(
+          (entry) =>
+            entry.enabled &&
+            Boolean(entry.extra?.workshop?.projectId) &&
+            coreProjectIds.has(entry.extra!.workshop!.projectId),
+        ),
+    )
+    .map((book) => book.id);
 }
 
 /** 各 Agent 的中文标签（供调试日志 / DebugPanel 显示） */
@@ -150,11 +177,14 @@ export class GamePipeline {
   async sendOpeningPrompt(onStoryChunk?: StoryChunkCallback): Promise<void> {
     const prompt = this.game.openingPrompt;
     if (!prompt) return;
+    // Claim before starting the long pipeline. A page remount can create a second
+    // GamePipeline while the first one is still running.
+    const claimed = await this.game.markOpeningPromptConsumed();
+    if (!claimed) return;
     // 开场 prompt 作为真正的用户消息渲染 + 注入历史，让下游 Agent 能读到装备/技能/背景/命定核心等
-    const ok = await this.run(prompt, onStoryChunk, /* isUserMessage */ true);
-    if (ok) {
-      await this.game.markOpeningPromptConsumed();
-    }
+    // run() persists the user message first, so releasing this claim on failure
+    // would let an automatic retry duplicate that message.
+    await this.run(prompt, onStoryChunk, /* isUserMessage */ true);
   }
 
   /** 核心: 将用户输入送入 Agent 管线。返回 true 表示管线成功完成。 */
@@ -198,9 +228,14 @@ export class GamePipeline {
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
       const { presets, agentDefaults } = await this.loadPresets();
       const worldBooks = await this.loadActiveWorldBooks();
+      const systemCoreWorkshopBookIds = await this.loadSystemCoreWorkshopBookIds(worldBooks);
 
       // 2.6 构建 Agent 配置（用已加载的 agentDefaults 替代 projectAgentDefaults）
-      const agentConfigs = this.buildAgentConfigs(agentDefaults, onStoryChunk);
+      const agentConfigs = this.buildAgentConfigs(
+        agentDefaults,
+        onStoryChunk,
+        systemCoreWorkshopBookIds,
+      );
 
       // 真机修(2026-07-17): 侧链 (char/item/craft) 调用 buildAgentMessages 时需要
       // configs/worldBooks/presets 才能拿到完整 systemPrompt + 世界书上下文，
@@ -367,6 +402,7 @@ export class GamePipeline {
       { presetId?: string; systemPrompt?: string; template?: string; ejsVarsCommit?: boolean }
     >,
     onStoryChunk?: StoryChunkCallback,
+    systemCoreWorkshopBookIds: string[] = [],
   ): AgentConfig[] {
     const s = this.settings.settings;
 
@@ -440,6 +476,24 @@ export class GamePipeline {
           : defaults.presetId || undefined;
       const systemPrompt: string | undefined = defaults.systemPrompt || undefined;
       const template: string | undefined = defaults.template || undefined;
+      const worldBookEnabled = (s.agentWorldbookEnabled as Record<string, boolean>)[agentId];
+      const configuredWorldBookIds = worldBookEnabled
+        ? [...((s.agentWorldbookIds as Record<string, string[]>)[agentId] ?? [])]
+        : [];
+      const selectedSystemCore =
+        this.game.activeSave?.metadata?.enabledWorldBookEntries?.some((entry: string) =>
+          entry.startsWith('system_core:'),
+        ) ?? false;
+      // Selected core lore is authoritative save data. Story and char_gen both
+      // need the source entry; the other agents keep their configured partitions.
+      const isCoreLoreAgent = agentId === 'story' || agentId === 'char_gen';
+      const coreBookIds = isCoreLoreAgent
+        ? [...(selectedSystemCore ? ['system_core'] : []), ...systemCoreWorkshopBookIds]
+        : [];
+      const worldBookIds =
+        worldBookEnabled && coreBookIds.length > 0
+          ? [...new Set([...configuredWorldBookIds, ...coreBookIds])]
+          : configuredWorldBookIds;
 
       return {
         agentId,
@@ -459,9 +513,7 @@ export class GamePipeline {
           fixedExamples: '',
         },
         presetId,
-        worldBookIds: (s.agentWorldbookEnabled as Record<string, boolean>)[agentId]
-          ? ((s.agentWorldbookIds as Record<string, string[]>)[agentId] ?? [])
-          : [],
+        worldBookIds,
         // 🔑 优先使用 agentDefaults（loadPresets 自 fetch agent-config.json），
         // localStorage 可能有用户编辑过的版本，作为 fallback。
         systemPrompt: systemPrompt || (s.agentPrompts as Record<string, string>)[agentId],
@@ -677,6 +729,21 @@ export class GamePipeline {
       const enabledEntries = this.game.activeSave?.metadata?.enabledWorldBookEntries ?? [];
       return filterBooksByEnabledEntries(all, enabledEntries);
     } catch {
+      return [];
+    }
+  }
+
+  /** Match selected workshop entries to project-level `system/core` tags. */
+  private async loadSystemCoreWorkshopBookIds(worldBooks: WorldBook[]): Promise<string[]> {
+    if (!worldBooks.some((book) => book.partition === 'creative_workshop' && book.entries.length)) {
+      return [];
+    }
+    try {
+      const { getDatabase } = await import('@engine/database');
+      const projects = await getDatabase().workshopProjects.toArray();
+      return collectSelectedSystemCoreWorkshopBookIds(worldBooks, projects);
+    } catch (err) {
+      console.warn('[GamePipeline] 工坊 system/core 标签读取失败（不阻塞本轮）:', err);
       return [];
     }
   }

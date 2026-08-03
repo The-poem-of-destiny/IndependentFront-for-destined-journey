@@ -174,7 +174,7 @@ const allowedUids = enabledByPartition.get(book.partition);
 ### D12 — UI 粒度是项目，不做冲突拦截
 
 - 勾一个项目 → 写入其全部条目的 `creative_workshop:<uid>`。用户不需要在维拉的 12 条里挑 11 条；那 12 条是一个作品。
-- **不做命定核心冲突检测**：工坊项目可能自带命定核心，与内置单选的那个撞。但 `tags` 是上游自由文本（"系统"/"命定核心"/"外挂"/"路边"），无可靠机器信号，猜必误伤。**UI 显著展示 tags 与简介，由用户判断。**
+- **不做命定核心冲突检测**：工坊项目可能自带命定核心，与内置单选的那个撞。普通 `tags` 仍是上游自由文本（"系统"/"命定核心"/"外挂"/"路边"），不据此猜测或拦截；**UI 显著展示 tags 与简介，由用户判断。** 2026-08-03 起仅保留精确标签 `system/core` 作为机器语义：当前存档启用该项目条目时，将对应工坊书授予 Story 与 `char_gen`，但仍不做冲突检测或自动替用户停用其它核心。
 - 捏人页现有的命定核心是**单选一个 uid**（`selectedSystemCoreEntryUid`），项目是 N 条条目，塞不进那个槽 —— 工坊走自己的多选列表。
 - **实施期 UX 调整（2026-07-31）**：工坊多选列表与命定核心单选**同屏并列**，都在捏人页「命定核心」步骤里，拆成视觉上分开的两轴（`一 · 命定核心` 单选·必选 / `二 · 工坊项目` 多选·可选）；工坊区从 `CreateStepCharacters.vue` 挪到 `CreateStepDestinyCore.vue`，原步骤名「内容启用」改回「角色启用」。**仍不做冲突拦截** —— 同屏之后反而更好落实本条决策：用户能同时看到内置命定核心与工坊项目的 tags 与简介，自行判断是否撞车。纯 UI 位置调整，`create-store` 三条轴逻辑与 `buildEnabledWorldBookEntries()` 输出逐字未变（有测试钉住）。
 - 建档后须可改（工坊项目是玩到一半装的），因此除捏人页外还需一个每存档的启用面板。
@@ -195,7 +195,7 @@ export interface WorkshopProject {
   description: string;
   version: string; // 上游自由填，本引擎只做串比对不解析
   authorName: string; // authorGlobalName 优先，回退 authorName
-  tags: string[]; // 仅展示与筛选，不参与 partition（D6）
+  tags: string[]; // 展示/筛选；保留标签 system/core 会授予 Story 与 char_gen 可见性
   coverUrl?: string;
   downloadUrl: string;
   fileSize: number;

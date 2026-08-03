@@ -130,7 +130,7 @@ export interface WorkshopProject {
   description: string;
   version: string; // 上游自由填，本引擎只做串比对不解析
   authorName: string; // authorGlobalName 优先，回退 authorName
-  tags: string[]; // 仅展示与筛选，不参与 partition（D6）
+  tags: string[]; // 展示/筛选；保留标签 system/core 会授予核心叙事 Agent 可见性
   coverUrl?: string;
   downloadUrl: string;
   fileSize: number;
