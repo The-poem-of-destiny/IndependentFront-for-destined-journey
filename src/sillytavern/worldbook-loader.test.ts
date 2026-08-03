@@ -253,6 +253,48 @@ describe('filterBooksByEnabledEntries', () => {
     expect(result[0].entries[0].content).toBe('命运之轮');
   });
 
+  it('存档选中的内置命定核心应进入 Agent 激活条目', () => {
+    const books = [
+      makeBook({
+        id: 'system_core',
+        partition: 'system_core',
+        builtIn: true,
+        entries: [
+          makeEntry({
+            uid: 413,
+            name: '命定系统-妲丽安核心',
+            content: '妲丽安世界书正文',
+            enabled: false,
+          }),
+          makeEntry({ uid: 414, name: '命定系统-小夜莺核心', enabled: false }),
+        ],
+      }),
+    ];
+    const configs = [makeConfig({ worldBookIds: ['system_core'] })];
+
+    const filtered = filterBooksByEnabledEntries(books, ['system_core:413']);
+    const active = filterActiveEntries(getEntriesForAgent('story', configs, filtered));
+
+    expect(active.map((entry) => entry.uid)).toEqual([413]);
+    expect(active[0].content).toBe('妲丽安世界书正文');
+  });
+
+  it('不覆盖工坊或用户书自身的 enabled=false', () => {
+    const books = [
+      makeBook({
+        id: 'workshop:test',
+        partition: 'creative_workshop',
+        builtIn: false,
+        entries: [makeEntry({ uid: 900, enabled: false })],
+      }),
+    ];
+
+    const filtered = filterBooksByEnabledEntries(books, ['creative_workshop:900']);
+
+    expect(filtered[0].entries).toHaveLength(1);
+    expect(filtered[0].entries[0].enabled).toBe(false);
+  });
+
   it('passes through books whose partition is not in enabledEntries', () => {
     const books = [
       makeBook({ id: 'system_core', partition: 'system_core', entries: [makeEntry({ uid: 413 })] }),

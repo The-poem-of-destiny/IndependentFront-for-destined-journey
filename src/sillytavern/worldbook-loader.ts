@@ -182,6 +182,7 @@ function matchSingleKeyword(text: string, keyword: string): boolean {
  * 规则:
  * - `enabledEntries` 格式: `"partition:uid"`（如 `"system_core:413"`）
  * - partition 在 enabledEntries 中有记录的 → 只保留 uid 命中条目，其余移除
+ * - 内置 system_core/character 的命中条目 → 存档选择覆盖出厂 enabled=false
  * - partition 不在 enabledEntries 中的 → 整本原样通过（走 keyword 激活）
  * - enabledEntries 为空 → 所有书原样通过
  * - 非原始 entry（缺少 `:` 或无有效 uid）→ 静默跳过
@@ -221,9 +222,15 @@ export function filterBooksByEnabledEntries(
   return books.map((book) => {
     const allowedUids = enabledByPartition.get(book.partition);
     if (!allowedUids) return book; // partition 未在存档中收录 → 整本原样通过
+    const isBuiltInSaveSelection =
+      book.builtIn === true && (book.partition === 'system_core' || book.partition === 'character');
     return {
       ...book,
-      entries: book.entries.filter((e) => allowedUids.has(e.uid)),
+      entries: book.entries
+        .filter((e) => allowedUids.has(e.uid))
+        // 内置命定核心/角色的 enabled=false 是“默认不全局注入”，不是否定本存档的明确选择。
+        // 选择只存在 SaveSlot，不能反写全局世界书；在这个存档级边界克隆为启用态。
+        .map((e) => (isBuiltInSaveSelection ? { ...e, enabled: true } : e)),
     };
   });
 }
