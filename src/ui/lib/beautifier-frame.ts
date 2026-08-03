@@ -113,7 +113,7 @@ export function recommendedFrameMinHeight(markup: string): number {
 }
 
 /**
- * Build an opaque iframe document for one committed narrative message.
+ * Build an opaque iframe document for one rich beautifier match.
  *
  * This is intentionally not an HTML sanitizer: the rule's markup, styles,
  * inline handlers, and scripts are retained. The security boundary is the
@@ -153,7 +153,6 @@ body {
   line-height: 1.8;
   overflow-wrap: anywhere;
 }
-[data-beautifier-source-text] { white-space: pre-wrap; }
 img, svg, video, canvas { max-width: 100%; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

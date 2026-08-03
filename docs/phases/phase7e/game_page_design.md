@@ -629,9 +629,9 @@ AI 生成回合完成
   replacement 语义展开 `$1..$99`、`$&`、`$$`、命名组等；先前 replacement 不会被后续规则重写。
 - 工坊规则只把含 AI-output `placement=2` 的一侧接入 assistant renderer；`minDepth`/`maxDepth`
   从最新 user/assistant 消息起按 0 计数、忽略 system event，并按含边界语义筛选。
-- 没有富命中的文本与内置对话卡片用 Vue 文本绑定渲染；出现任意 HTML/CSS/script replacement 时不清洗，
-  同一条已提交消息的全部命中与转义原文共同进入一个无 same-origin 的 `sandbox="allow-scripts"` iframe，
-  保留跨命中查询和 inline 流式布局。frame 使用 `credentialless` + `no-referrer`，外部 HTTP(S) 资源与
+- 未命中正文与内置对话卡片始终用 Vue 文本绑定渲染；HTML/CSS/script replacement 不清洗，
+  每次富命中各自进入一个无 same-origin 的 `sandbox="allow-scripts"` iframe。由此规则的全局 CSS/布局只影响
+  自己的命中，不能触及普通正文或其它命中；跨命中 DOM 查询不兼容。frame 使用 `credentialless` + `no-referrer`，外部 HTTP(S) 资源与
   原生网络 API 放行；form、popup、download、top navigation 与嵌套 frame 仍由 sandbox/CSP 阻断。
 - frame 不能读 parent DOM、IndexedDB、应用 Dexie/storage 或 API Key；应用自有 `/api` 拒绝 `Origin: null`。
   正则唯一持久能力是 Dexie v16 `regexStorage` 代表的共享不可信命名空间：所有正则、信任级别与预览共用，

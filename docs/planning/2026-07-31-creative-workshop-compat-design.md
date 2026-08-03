@@ -303,7 +303,7 @@ entry.extra = {
 
 上面的 `v-html`「已知后果」已被新 renderer **取代，不再描述现行行为**。303 个公共项目的完整快照得到 99 条正则：90 条 HTML、82 条 `<style>`、35 条 `<script>`、37 条完整文档，最高捕获引用 `$39`。消毒或 parent DOM 渲染无法同时满足这套语料与隔离要求，现行裁定是：
 
-- replacement 原样保留；每条已提交消息只建一个无 same-origin、`credentialless`、`no-referrer` 的 `sandbox="allow-scripts"` iframe，全部命中共享 message DOM，未命中原文先转义再组装。
+- replacement 原样保留；每次富命中各建一个无 same-origin、`credentialless`、`no-referrer` 的 `sandbox="allow-scripts"` iframe，未命中原文留在宿主原生文本面。规则 CSS/布局不能触及普通正文或其它命中；明确放弃跨命中 message DOM 查询兼容。
 - `<style>` 只影响自己的 frame；script、inline handler、完整文档与外层 HTML 围栏均可执行/渲染。
 - CSP 放行外部 HTTP(S) 资源与原生网络 API；form、popup、download、top navigation 与嵌套 frame 仍不开放。流式阶段不创建 frame。
 - `localStorage` 是 Dexie v16 `regexStorage` 的同步镜像，并提供同对象的 `window.regexStorage` 别名。整张表就是所有正则、信任级别与规则预览共享的唯一不可信命名空间；宿主必须在 authored `<head>` script 前完成 hydration，mutation 异步落库并广播到其它 frame。

@@ -15,8 +15,9 @@ const ui = useUIStore();
  *
  * 当前执行边界：正则 replacement 只在 opaque `sandbox="allow-scripts"` iframe 中运行，
  * 可加载远程资源并调用网络 API，但拿不到父页面 DOM、Dexie、应用存储或 API Key；
- * 世界书 EJS 由 QuickJS 隔离并 fail-closed。网络开启意味着正则仍可发送它在框内看见的
- * 正文内容，详见 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
+ * 每个富命中独占一个 frame，未命中正文留在宿主原生文本面。世界书 EJS 由 QuickJS
+ * 隔离并 fail-closed。网络开启意味着正则仍可发送该命中的 replacement/capture，
+ * 详见 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
  */
 const WORKSHOP_ENTRY_ENABLED = false;
 

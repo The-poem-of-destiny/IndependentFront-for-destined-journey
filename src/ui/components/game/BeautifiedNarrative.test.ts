@@ -59,29 +59,40 @@ describe('BeautifiedNarrative', () => {
     expect(wrapper.text()).toContain('<img src=x onerror=alert(1)>');
   });
 
-  it('routes all rich matches in one message to one shared frame with authored markup intact', () => {
-    state.rules = [rule()];
+  it('keeps unmatched narrative native while isolating each rich match', () => {
+    state.rules = [
+      rule({
+        replacement:
+          '<style>*{background:#111;color:#eee}</style><div class="card">$1</div><script>go()</script>',
+      }),
+    ];
     const wrapper = mountNarrative('<card>A</card> between <card>B</card>');
-    const frames = wrapper.findAll('.frame-stub');
+    const frames = wrapper.findAllComponents({ name: 'BeautifierFrame' });
 
-    expect(frames).toHaveLength(1);
-    expect(frames[0].text()).toContain('<style>.card{color:red}</style>');
-    expect(frames[0].text()).toContain('<script>go()</script>');
-    expect(frames[0].text()).toContain('<div class="card">A</div>');
-    expect(frames[0].text()).toContain('<div class="card">B</div>');
-    expect(frames[0].text()).toContain('data-beautifier-source-text');
-    expect(frames[0].text()).toContain('between');
+    expect(frames).toHaveLength(2);
+    expect(frames[0].props('markup')).toContain('<div class="card">A</div>');
+    expect(frames[1].props('markup')).toContain('<div class="card">B</div>');
+    expect(frames[0].props('markup')).toContain('<style>*{background:#111;color:#eee}</style>');
+    expect(frames[0].props('markup')).toContain('<script>go()</script>');
+    expect(frames.every((frame) => !String(frame.props('markup')).includes('between'))).toBe(true);
+    expect(
+      frames.every(
+        (frame) => !String(frame.props('markup')).includes('data-beautifier-source-text'),
+      ),
+    ).toBe(true);
+    expect(wrapper.get('p').text()).toContain('between');
   });
 
-  it('escapes unmatched model markup before composing it beside a rich replacement', () => {
+  it('renders unmatched model markup natively beside an isolated rich replacement', () => {
     state.rules = [rule()];
     const wrapper = mountNarrative(
       '<img src=x onerror="parent.postMessage(1,\'*\')"><card>safe</card>',
     );
     const markup = wrapper.findComponent({ name: 'BeautifierFrame' }).props('markup') as string;
 
-    expect(markup).toContain('&lt;img src=x onerror="parent.postMessage(1,\'*\')"&gt;');
-    expect(markup).not.toContain('<img src=x');
+    expect(wrapper.find('img').exists()).toBe(false);
+    expect(wrapper.text()).toContain('<img src=x onerror="parent.postMessage(1,\'*\')">');
+    expect(markup).not.toContain('img src=x');
     expect(markup).toContain('<div class="card">safe</div>');
   });
 

@@ -1,10 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import {
-  compileBeautifierSegments,
-  escapeHtmlBasic,
-  type BeautifierMatchSegment,
-} from '@engine/beautifier';
+import { compileBeautifierSegments, type BeautifierMatchSegment } from '@engine/beautifier';
 import type { BeautifierRule } from '@engine/types';
 import { useBeautify } from '../../composables/useBeautify';
 import BeautifierFrame from './BeautifierFrame.vue';
@@ -56,46 +52,6 @@ function isNativeMatch(segment: BeautifierMatchSegment): boolean {
   return segment.ruleId === 'builtin-dialogue-card';
 }
 
-const hasFrameContent = computed(() =>
-  segments.value.some(
-    (segment) => isMatch(segment) && Boolean(segment.replacement) && !isNativeMatch(segment),
-  ),
-);
-
-/**
- * Upstream regex scripts share one message DOM. Keep that execution unit intact:
- * unmatched source is escaped, while authored replacements remain byte-for-byte
- * markup. A sole full-document replacement is returned without a wrapper so the
- * frame document splitter can retain its head/body structure.
- */
-const frameMarkup = computed(() => {
-  const visible = segments.value.filter(
-    (segment) => segment.kind === 'match' || segment.text.trim().length > 0,
-  );
-  if (visible.length === 1 && visible[0].kind === 'match') return visible[0].replacement;
-
-  return segments.value
-    .map((segment) =>
-      segment.kind === 'match'
-        ? segment.replacement
-        : `<span data-beautifier-source-text>${escapeHtmlBasic(segment.text)}</span>`,
-    )
-    .join('');
-});
-
-const frameRuleName = computed(() =>
-  [
-    ...new Set(
-      segments.value
-        .filter(
-          (segment): segment is BeautifierMatchSegment =>
-            isMatch(segment) && Boolean(segment.replacement) && !isNativeMatch(segment),
-        )
-        .map((segment) => segment.ruleName),
-    ),
-  ].join('、'),
-);
-
 function paragraphs(text: string): string[] {
   return text.split(/\n\n+/).filter((part, index, list) => part.length > 0 || list.length === 1);
 }
@@ -103,19 +59,19 @@ function paragraphs(text: string): string[] {
 
 <template>
   <div class="beautified-narrative">
-    <BeautifierFrame
-      v-if="hasFrameContent"
-      :markup="frameMarkup"
-      :rule-name="frameRuleName"
-      :forward-context-menu="forwardContextMenu"
-      @resize="emit('resize', $event)"
-    />
-    <template v-else v-for="(segment, index) in segments" :key="index">
+    <template v-for="(segment, index) in segments" :key="index">
       <template v-if="!isMatch(segment)">
         <p v-for="(paragraph, paragraphIndex) in paragraphs(segment.text)" :key="paragraphIndex">
           {{ paragraph }}
         </p>
       </template>
+      <BeautifierFrame
+        v-else-if="segment.replacement && !isNativeMatch(segment)"
+        :markup="segment.replacement"
+        :rule-name="segment.ruleName"
+        :forward-context-menu="forwardContextMenu"
+        @resize="emit('resize', $event)"
+      />
       <div
         v-else-if="segment.replacement && isNativeMatch(segment)"
         class="beautifier-native-match"

@@ -4,7 +4,7 @@
 
 ## 结论
 
-公共工坊现有美化规则不是「少量 HTML 模板」，而是一套完整的浏览器内容面：99 条正则中，90 条输出 HTML、82 条带 `<style>`、35 条带 `<script>`、37 条输出完整 HTML 文档。99 条 pattern 全部可编译；按现行元数据映射有 94 条可落地，其余 5 条因 `promptOnly` 或 placement 不含 AI 输出位置而不导入。以 parent DOM 白名单消毒会直接破坏主要语料，因此现行实现保留 replacement 原文，把每条已提交消息的全部富匹配放进同一个无 same-origin、`credentialless`、`no-referrer` 的 `sandbox="allow-scripts"` iframe。外部 HTTP(S) 资源与原生网络 API 为兼容现有语料刻意放行。
+公共工坊现有美化规则不是「少量 HTML 模板」，而是一套完整的浏览器内容面：99 条正则中，90 条输出 HTML、82 条带 `<style>`、35 条带 `<script>`、37 条输出完整 HTML 文档。99 条 pattern 全部可编译；按现行元数据映射有 94 条可落地，其余 5 条因 `promptOnly` 或 placement 不含 AI 输出位置而不导入。以 parent DOM 白名单消毒会直接破坏主要语料，因此现行实现保留 replacement 原文，把每次富匹配放进各自无 same-origin、`credentialless`、`no-referrer` 的 `sandbox="allow-scripts"` iframe；未命中正文留在宿主原生文本面，正则视觉作用域不会覆盖普通正文或其它命中。跨命中 DOM 查询因而不再兼容。外部 HTTP(S) 资源与原生网络 API 为兼容现有语料刻意放行。
 
 该边界隔离应用 DOM、应用 storage/Dexie 存档和 API Key；form、popup、download、top navigation 与嵌套 frame 也仍被阻断，应用自有 `/api` 拒绝 `Origin: null`。正则唯一可持久化的能力是 Dexie v16 `regexStorage` 代表的共享不可信命名空间，不是任意 IndexedDB 或应用表访问。父页面 DOM 与任意宿主 API 依赖会被显式报告为降级；外部来源则不再视为降级。规则向远程/本地网络发请求，以及外传它可见的正文与 regex-namespace 数据，是当前威胁模型明确接受的暴露。
 

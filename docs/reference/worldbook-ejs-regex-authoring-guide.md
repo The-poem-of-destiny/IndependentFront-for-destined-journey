@@ -56,7 +56,7 @@
 | 输入 | 世界书条目 `content` | 已提交的 assistant 正文 |
 | 执行时机 | Agent 提示装配时 | 模型输出完成并提交后 |
 | 主要用途 | 条件注入、只读查询、叙事变量簿记 | HTML/CSS/JS 卡片、状态栏、交互展示 |
-| 浏览器 DOM | 无 | 只有当前消息自己的 iframe DOM |
+| 浏览器 DOM | 无 | 只有当前富命中自己的 iframe DOM |
 | 网络 | 无 | 允许 HTTP(S)、WS(S) 等浏览器网络能力 |
 | 持久状态 | `vars` / EJS `local`，按存档 | 共享 `regexStorage`，跨存档 |
 | 能否修改游戏实体 | 不能 | 不能 |
@@ -700,17 +700,17 @@ replacement 中以下内容全部按字面处理：
 
 - 流式输出阶段只显示普通文本，不创建脚本 frame；
 - assistant 消息提交后才编译正则并创建 iframe；
-- 同一条消息的全部富命中共享一个 iframe 和一个 DOM；
-- 不同消息、不同预览各自拥有独立 frame；
+- 每次富命中独占一个 iframe 和一个 DOM，未命中正文仍由宿主原生文本面渲染；
+- 同一消息的不同命中、不同消息与不同预览均各自独立；
 - replacement 可以是 HTML fragment，也可以是完整 HTML 文档；
 - 外层 HTML 围栏、doctype、`html/head/body` 会按传输文档解析；
 - `html` / `body` 属性、`style`、`script`、inline handler、SVG、图片、音频、视频和普通控件均可保留。
 
-mapper 存储的 replacement 字符串保持原样，但渲染器会去外层空白和传输围栏、移除 doctype、抽取第一套 `html/head/body` 并重建文档 shell。因此不要在同一消息中依赖多套完整 HTML 文档的原始字节结构。
+mapper 存储的 replacement 字符串保持原样，但渲染器会去外层空白和传输围栏、移除 doctype、抽取该 replacement 的第一套 `html/head/body` 并重建文档 shell。
 
 宿主会在作者 head 前注入透明 body、`border-box`、媒体最大宽度和部分 `--theme-*` 变量；`prefers-reduced-motion` 时会压低动画。iframe 会自测高度，外层显示上限为 6000 px。
 
-同一消息内的样式和脚本可以协作；CSS 不会泄漏到应用父页面或其它消息。frame 因正文变化或组件重建时脚本可能再次执行，需要“一次性”行为的脚本必须在当前 frame 内设置幂等 guard。
+同一次命中的样式和脚本可以协作；CSS 不会泄漏到普通正文、应用父页面、其它命中或其它消息。跨命中 DOM 查询不受支持；需要跨 frame 持久协作时只能使用共享 `regexStorage`。frame 因正文变化或组件重建时脚本可能再次执行，需要“一次性”行为的脚本必须在当前 frame 内设置幂等 guard。
 
 ### 13.2 sandbox
 
