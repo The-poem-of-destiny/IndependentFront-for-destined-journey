@@ -409,6 +409,12 @@ const sessionStorage = __beautifierMakeStorage().storage;
     const body = document.body;
     let fixedOverlayHeight = 0;
     if (mayUseFixedLayout && body) {
+      // ⚠️ Q-27 已知开销：这里对整棵子树逐元素取计算样式（getComputedStyle 会强制
+      // 样式重算），每次 ResizeObserver/MutationObserver 触发都跑一遍。
+      // 收窄成 [style*=fixed], [class] 能把它降到 O(候选)，但会漏掉「靠标签选择器
+      // 拿到 position:fixed」的元素 —— 那是只有真机才看得见的内容裁切。
+      // （注：本段在 TS 模板字面量里，注释中不能出现反引号。）
+      // 本文件是 SEC-01 隔离契约的执行体，按审查要求要配真机走查，故不盲改。
       for (const element of body.querySelectorAll('*')) {
         const style = getComputedStyle(element);
         if (style.position !== 'fixed' || style.display === 'none' || style.visibility === 'hidden') {
@@ -518,10 +524,14 @@ export function isBeautifierFrameMessage(
   const data = value as Partial<BeautifierFrameMessage>;
   if (data.source !== BEAUTIFIER_FRAME_MESSAGE_SOURCE || data.bridgeId !== bridgeId) return false;
   if (data.type === 'ready' || data.type === 'height' || data.type === 'contextmenu') return true;
+  // Q-27: 此前是 `data.sequence! < 1` —— 非空断言与上一行的 Number.isSafeInteger
+  // 守卫语义重复，但编译器看不出关联。取到局部变量后收窄是真的收窄。
+  const sequence = data.sequence;
   if (
     data.type !== 'storage-mutate' ||
-    !Number.isSafeInteger(data.sequence) ||
-    data.sequence! < 1
+    typeof sequence !== 'number' ||
+    !Number.isSafeInteger(sequence) ||
+    sequence < 1
   ) {
     return false;
   }

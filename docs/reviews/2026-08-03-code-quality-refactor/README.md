@@ -81,7 +81,8 @@
 | `1604575` | Q-06 ✅                  | 设置真源收敛：新增 `engine-settings.ts` 注入缝，删 `syncSnapshotSettings` 那座只搬两个字段的桥 + `settings` 表播种；FullBackup 分支注明只为老备份往返；AGENTS.md 那句「settings 同为死表」（此前是错的）改成事实                                                                       |
 | `c70e2e2` | Q-18 🔄                  | 新增 `agent-settings.ts`：`AGENT_SETTINGS_DEFAULTS`（六份拷贝收成一处）+ get/patch/reset/fillMissing 四个口；13 段手抄的加载器、`saveAsDefault`、`restoreAgentDefaults` 两分支全部收口。**剩**：`UiSettings` 接口（审查要求先取得同意）与 13 张 map 的物理合并                         |
 | `7f313e0` | Q-09 🔄                  | 新增 `EJS_SURFACE` 唯一真源（4 张名单全部派生）—— `engine.has('world.isDaytime')` 不再返回 false；补 `EjsWorld`/`EjsEngine` 与有签名的 `marshalWorld`；危险键集宿主侧 5 份 → 1 份。**剩**：别名层共享源码（须与 Legacy 退役同批）                                                      |
-| _本次_    | Q-10 🔄                  | 两份逐行相同的编译缓存合一并接到生产路径；QuickJS 补 `guestBodyCache`（此前零记忆化，是 348-583ms/pass 的直接来源）；清空口经 `registerEjsCacheClear` 反向注册只留一个。**剩**：同步渲染路径降格（须与 Legacy 退役同批）                                                               |
+| `671d269` | Q-10 🔄                  | 两份逐行相同的编译缓存合一并接到生产路径；QuickJS 补 `guestBodyCache`（此前零记忆化，是 348-583ms/pass 的直接来源）；清空口经 `registerEjsCacheClear` 反向注册只留一个。**剩**：同步渲染路径降格（须与 Legacy 退役同批）                                                               |
+| _本次_    | Q-27 🔄                  | 收掉 `data.sequence!` 非空断言；`measure` 的 O(全部元素) 开销与「为什么不顺手收窄」写进代码。**主体（290 行内嵌运行时切成真 .js）按审查排期约束未做** —— 那是 SEC-01 执行体，须配真机走查                                                                                              |
 
 ## 结论摘要
 
@@ -185,7 +186,7 @@
 | [Q-24](findings-t5-layering.md#q-24)      | 中     | T5   | `asset-store` 的「纯执行器」定位没守住，约 200 行文案/闸门长在 Pinia 闭包里              | 后续批次 | ⬜   |
 | [Q-25](findings-t5-layering.md#q-25)      | 高     | T5   | 视图层巨石：`SettingsPage.vue` 3823 行内联 9 个分区，`StatusOverview.vue` 夹 260 行管线  | 后续批次 | ⬜   |
 | [Q-26](findings-t3-single-source.md#q-26) | 中     | T3   | `database.ts` 里 16 个 Dexie 版本各自全量重述 schema，约 390 行是同一张表清单的拷贝      | 后续批次 | ⬜   |
-| [Q-27](findings-t5-layering.md#q-27)      | 低     | T5   | beautifier iframe 的 290 行运行时内嵌在模板字面量里，四职责混在一个函数                  | 步骤 7   | ⬜   |
+| [Q-27](findings-t5-layering.md#q-27)      | 低     | T5   | beautifier iframe 的 290 行运行时内嵌在模板字面量里，四职责混在一个函数                  | 步骤 7   | 🔄   |
 | [Q-28](findings-t5-layering.md#q-28)      | 高     | T5   | `crimson.css` 与 `indigo.css` 里 319 条全局选择器直接伸进组件的 scoped 私有类名          | 后续批次 | ⬜   |
 | [Q-29](findings-t5-layering.md#q-29)      | 高     | T5   | Agent 装配与整条 LLM 管线没有独立层，两处各写一份且已漂移，两个宿主都涨成 L 级巨石       | 后续批次 | ⬜   |
 | [Q-30](findings-t3-single-source.md#q-30) | 中     | T3   | `start-catalog.ts`：8752 行 CDN 数据硬编成 TS 模块，并第二次定义了 Rarity 与品质映射     | 步骤 3   | ✅   |
