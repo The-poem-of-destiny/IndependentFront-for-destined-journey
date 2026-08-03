@@ -129,20 +129,20 @@ Commit [`d1852867...`](https://github.com/The-poem-of-destiny/IndependentFront-f
 
 ## Priority findings
 
-| ID        | Severity                                  | Area                    | Finding                                                                                       | Recommended release treatment                          |
-| --------- | ----------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| ID        | Severity                                  | Area                    | Finding                                                                                       | Recommended release treatment                                 |
+| --------- | ----------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
 | SEC-01    | **Critical at baseline; remediated**      | Workshop/UI             | Raw workshop replacements became executable HTML through `v-html` at the reviewed commit      | Opaque network-capable frame; accepted content-exfil exposure |
-| SEC-02    | **Critical**                              | Workshop/EJS            | `new Function` “sandbox” is intentionally escapable and unbounded                             | Disable for community content or replace runtime       |
-| SEC-03    | **High**                                  | Dev server              | `/data` route can resolve outside `dataDir` and read arbitrary files                          | Patch immediately                                      |
-| SEC-04    | **High**                                  | BFF/network             | Wildcard-CORS arbitrary-target proxy permits private/loopback access                          | Require exact origin and target policy                 |
-| SEC-05    | **High**                                  | Dev server              | File-write APIs lack authentication, origin checks, validation, and limits                    | Replace or harden before broader use                   |
-| REL-01    | **High**                                  | Release                 | Production build omits BFF and root `data/`; preview is not representative                    | Add a real production server and build smoke test      |
-| PERF-01   | **Medium–High**                           | Workshop/rendering      | Untrusted regular expressions can cause catastrophic backtracking, amplified during streaming | Add execution budgets/isolation                        |
-| SUPPLY-01 | **High while executable content remains** | Workshop supply chain   | Remote packages have no content signature or digest verification                              | Add signed manifests and immutable digests             |
-| CI-01     | **Medium**                                | CI/testing              | CI omits build, browser E2E, coverage policy, dependency/secret/security checks               | Expand required checks                                 |
-| DX-01     | **Medium**                                | Developer experience    | `npm run dev` is Windows-only; Node requirements are inconsistent                             | Make setup reproducible                                |
-| DOC-01    | **Medium**                                | Documentation/licensing | Architecture is stale; license link is broken; root MIT license file is absent                | Correct before external adoption                       |
-| PKG-01    | **Medium**                                | Packaging/repository    | Package metadata and repository size are inconsistent with an app-only project                | Mark private or define a real package/release boundary |
+| SEC-02    | **Critical**                              | Workshop/EJS            | `new Function` “sandbox” is intentionally escapable and unbounded                             | Disable for community content or replace runtime              |
+| SEC-03    | **High**                                  | Dev server              | `/data` route can resolve outside `dataDir` and read arbitrary files                          | Patch immediately                                             |
+| SEC-04    | **High**                                  | BFF/network             | Wildcard-CORS arbitrary-target proxy permits private/loopback access                          | Require exact origin and target policy                        |
+| SEC-05    | **High**                                  | Dev server              | File-write APIs lack authentication, origin checks, validation, and limits                    | Replace or harden before broader use                          |
+| REL-01    | **High**                                  | Release                 | Production build omits BFF and root `data/`; preview is not representative                    | Add a real production server and build smoke test             |
+| PERF-01   | **Medium–High**                           | Workshop/rendering      | Untrusted regular expressions can cause catastrophic backtracking, amplified during streaming | Add execution budgets/isolation                               |
+| SUPPLY-01 | **High while executable content remains** | Workshop supply chain   | Remote packages have no content signature or digest verification                              | Add signed manifests and immutable digests                    |
+| CI-01     | **Medium**                                | CI/testing              | CI omits build, browser E2E, coverage policy, dependency/secret/security checks               | Expand required checks                                        |
+| DX-01     | **Medium**                                | Developer experience    | `npm run dev` is Windows-only; Node requirements are inconsistent                             | Make setup reproducible                                       |
+| DOC-01    | **Medium**                                | Documentation/licensing | Architecture is stale; license link is broken; root MIT license file is absent                | Correct before external adoption                              |
+| PKG-01    | **Medium**                                | Packaging/repository    | Package metadata and repository size are inconsistent with an app-only project                | Mark private or define a real package/release boundary        |
 
 ---
 

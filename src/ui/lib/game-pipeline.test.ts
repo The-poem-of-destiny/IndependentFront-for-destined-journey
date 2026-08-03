@@ -304,12 +304,12 @@ describe('buildAgentConfigs — story 流式投影', () => {
       },
     ];
     const chunks: Array<[string, boolean]> = [];
-    const configs = (pipeline as any).buildAgentConfigs(
-      {},
-      (text: string, complete: boolean) => chunks.push([text, complete]),
+    const configs = (pipeline as any).buildAgentConfigs({}, (text: string, complete: boolean) =>
+      chunks.push([text, complete]),
     );
-    const stream = configs.find((config: { agentId: string }) => config.agentId === 'story')
-      .streamCallbacks;
+    const stream = configs.find(
+      (config: { agentId: string }) => config.agentId === 'story',
+    ).streamCallbacks;
 
     stream.onChunk('<main', false);
     stream.onChunk('text>夜色渐深', false);
