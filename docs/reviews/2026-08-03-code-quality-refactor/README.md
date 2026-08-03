@@ -53,7 +53,7 @@
 | [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | ✅   | 四条全部落地                                                                                                      |
 | [步骤 5](roadmap.md) 数据路径去重         | Q-08、Q-16、Q-12       | ✅   | 三条全部落地（api-key 那份迁移按裁定留在外面）                                                                    |
 | [步骤 6](roadmap.md) 品质体系与设置真源   | Q-11、Q-18、Q-06       | 🔄   | Q-11 / Q-06 完成；Q-18 的读写口与默认值收敛已落地，剩 `UiSettings` 接口（审查要求先取得同意）+ 13 张 map 物理合并 |
-| [步骤 7](roadmap.md) EJS 能力面 + Legacy  | Q-09、Q-10、Q-27       | ⬜   | 抽查：`ejs-backend.ts` 仍在；退役仍卡在真机走查这一前置                                                           |
+| [步骤 7](roadmap.md) EJS 能力面 + Legacy  | Q-09、Q-10、Q-27       | 🔄   | Q-09 的 SSOT / 类型 / 危险键三步已落地；剩别名层共享源码 + Q-10 Legacy 退役（卡真机走查）+ Q-27                   |
 | [步骤 8](roadmap.md) 巨石拆分第一刀       | Q-23、Q-19             | ⬜   | 硬前置未清：步骤 1 的删尸体与步骤 3 的效果层都还没收尾                                                            |
 | [后续批次](roadmap.md#后续批次不进前八步) | 其余 9 条              | ⬜   | —                                                                                                                 |
 
@@ -79,7 +79,8 @@
 | `f227812` | Q-12 ✅、Q-16 ✅         | 删 `variables.ts`/`vars-merger.ts` 两个僵尸宿主，`applyVarsPatch` → `applyPathOps` + `VarPathOps` 进 types；新增 `db-write.ts`（detach 唯一实现）/ `store-utils.ts`（配额判据+notify）/ `asset-path.ts`（+13 测试），`game-store` 三个 metadata 写函数收成 `patchSaveMetadata`         |
 | `43c3188` | Q-11 ✅                  | 品质 4 套类型/序号 + 5 份颜色表收敛成一套（全部由 `RARITY_LEVELS`/`TIER_CONFIGS` 派生）；修好 ScenePanel「键错整套词汇」的层级描边色；`CharGenSystemCard` 47 项裸 hex 表删除改主题令牌；`inferQuality` 下沉 `quality-inference.ts`；`ItemsPanel` `any[]` → 判别联合（18 处 cast 归零） |
 | `1604575` | Q-06 ✅                  | 设置真源收敛：新增 `engine-settings.ts` 注入缝，删 `syncSnapshotSettings` 那座只搬两个字段的桥 + `settings` 表播种；FullBackup 分支注明只为老备份往返；AGENTS.md 那句「settings 同为死表」（此前是错的）改成事实                                                                       |
-| _本次_    | Q-18 🔄                  | 新增 `agent-settings.ts`：`AGENT_SETTINGS_DEFAULTS`（六份拷贝收成一处）+ get/patch/reset/fillMissing 四个口；13 段手抄的加载器、`saveAsDefault`、`restoreAgentDefaults` 两分支全部收口。**剩**：`UiSettings` 接口（审查要求先取得同意）与 13 张 map 的物理合并                         |
+| `c70e2e2` | Q-18 🔄                  | 新增 `agent-settings.ts`：`AGENT_SETTINGS_DEFAULTS`（六份拷贝收成一处）+ get/patch/reset/fillMissing 四个口；13 段手抄的加载器、`saveAsDefault`、`restoreAgentDefaults` 两分支全部收口。**剩**：`UiSettings` 接口（审查要求先取得同意）与 13 张 map 的物理合并                         |
+| _本次_    | Q-09 🔄                  | 新增 `EJS_SURFACE` 唯一真源（4 张名单全部派生）—— `engine.has('world.isDaytime')` 不再返回 false；补 `EjsWorld`/`EjsEngine` 与有签名的 `marshalWorld`；危险键集宿主侧 5 份 → 1 份。**剩**：别名层共享源码（须与 Legacy 退役同批）                                                      |
 
 ## 结论摘要
 
@@ -165,7 +166,7 @@
 | [Q-06](findings-t3-single-source.md#q-06) | 中     | T3   | 设置有两个真源，只有两个字段被手写桥搬运，引擎侧读到的是永远停在默认值的影子配置         | 步骤 6   | ✅   |
 | [Q-07](findings-t1-wiring-gap.md#q-07)    | 高     | T1   | 两层效果系统都是空的：13 个「封闭枚举」窗口惰性，emitChain 事件层从未被实例化            | 步骤 3   | ✅   |
 | [Q-08](findings-t3-single-source.md#q-08) | 中     | T3   | 「六步迁移」复制了三遍且已漂移——唯一「搞砸即用户数据不可恢复」的路径是复制粘贴           | 步骤 5   | ✅   |
-| [Q-09](findings-t3-single-source.md#q-09) | 高     | T3   | EJS 能力面契约被记在 6 处，已发生 8 次静默渲染漂移，`engine.has` 已经在说谎              | 步骤 7   | ⬜   |
+| [Q-09](findings-t3-single-source.md#q-09) | 高     | T3   | EJS 能力面契约被记在 6 处，已发生 8 次静默渲染漂移，`engine.has` 已经在说谎              | 步骤 7   | 🔄   |
 | [Q-10](findings-t4-corpses.md#q-10)       | 中     | T4   | Legacy EJS 后端的两处遗产：缓存只服务停用路径（生产零缓存）、同步渲染路径恒被闸门关死    | 步骤 7   | ⬜   |
 | [Q-11](findings-t3-single-source.md#q-11) | 中     | T3   | 7 级品质有 4 套类型与 5 份颜色表；`ScenePanel` 漏「唯一」项，T7 角色一律描成灰色         | 步骤 6   | ✅   |
 | [Q-12](findings-t3-single-source.md#q-12) | 中     | T3   | 两个同名 `applyVarsPatch` 契约互斥，其中一份的宿主已是零引用僵尸                         | 步骤 5   | ✅   |

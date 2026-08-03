@@ -16,6 +16,7 @@
 import type { CharacterState, Quest } from './types';
 import { formatGameTime, getTimeOfDay, type GameTime } from './time-system';
 import { getAffectionLabel } from './affection-system';
+import { DANGEROUS_PATH_SEGMENTS } from './var-resolver';
 
 // ═══════════════════════════════════════════════════════════
 // 注入面
@@ -93,7 +94,7 @@ function clone<T>(v: T): T {
   if (proto !== Object.prototype && proto !== null) return v;
   const out: Record<string, unknown> = {};
   for (const k of Object.keys(v as Record<string, unknown>)) {
-    if (k === '__proto__' || k === 'prototype' || k === 'constructor') continue;
+    if (DANGEROUS_PATH_SEGMENTS.has(k)) continue;
     out[k] = clone((v as Record<string, unknown>)[k]);
   }
   return out as unknown as T;
@@ -237,7 +238,52 @@ function buildChar(input: EjsCapabilityInput): EjsChar {
 // world（§3.5）
 // ═══════════════════════════════════════════════════════════
 
-function buildWorld(input: EjsCapabilityInput): Record<string, any> {
+/**
+ * 游戏时间的分解投影。**中文字段名逐字保留** —— 它是创作者契约的一部分（Q-09）。
+ */
+export interface EjsWorldTimeDetail {
+  纪元: string;
+  年: number;
+  月: number;
+  日: number;
+  星期: number;
+  时: number;
+  分: number;
+  时段: string;
+}
+
+/**
+ * `world` namespace（§3.5）。
+ *
+ * Q-09：此前是 `Record<string, any>`，于是「`isDaytime` 是函数，过 JSON 编组会整个
+ * 丢掉」这件事只能写在 QuickJS 后端的注释里 —— guest 里调它抛 TypeError、整条目回退
+ * 原文，而 Legacy 下工作正常，两个后端渲染出不同字节且都报 ok。
+ * 有了类型，那条分界就能写成 {@link marshalWorld} 这个有签名的函数。
+ */
+export interface EjsWorld {
+  时间: string;
+  时间详情: EjsWorldTimeDetail | null;
+  地点: string;
+  天气: string;
+  回合: number;
+  isDaytime(): boolean;
+}
+
+/**
+ * `world` 过 JSON 边界时的显式分界（Q-09）。
+ *
+ * `data` 是能安全序列化的部分；`isDaytime` 求值成布尔常量随之过去，
+ * guest 侧据它装一个返回常量的 shim。此前这条分界散在 `installCapabilities` 的两段注释里。
+ */
+export function marshalWorld(w: EjsWorld): {
+  data: Omit<EjsWorld, 'isDaytime'>;
+  isDaytime: boolean;
+} {
+  const { isDaytime, ...data } = w;
+  return { data, isDaytime: isDaytime.call(w) };
+}
+
+function buildWorld(input: EjsCapabilityInput): EjsWorld {
   const t = input.gameTime;
   const player = (input.characters ?? []).find((c) => c.type === 'player');
   return {
@@ -402,9 +448,7 @@ function buildLocal(vars: Record<string, any>, input: EjsCapabilityInput, ui: Ej
 
   /** 取（或建）本项目的 KV 子树。落在 `vars` 下 → 随快照回退天然覆盖 */
   const bucket = (create: boolean): Record<string, unknown> | undefined => {
-    if (projectId === '__proto__' || projectId === 'constructor' || projectId === 'prototype') {
-      return undefined;
-    }
+    if (DANGEROUS_PATH_SEGMENTS.has(projectId)) return undefined;
     let root = vars[LOCAL_ROOT];
     if (root === null || typeof root !== 'object') {
       if (!create) return undefined;
@@ -422,7 +466,7 @@ function buildLocal(vars: Record<string, any>, input: EjsCapabilityInput, ui: Ej
 
   const safeKey = (key: unknown): string | null => {
     const k = String(key ?? '');
-    if (!k || k === '__proto__' || k === 'prototype' || k === 'constructor') return null;
+    if (!k || DANGEROUS_PATH_SEGMENTS.has(k)) return null;
     return k;
   };
 
@@ -526,85 +570,134 @@ function buildUi(input: EjsCapabilityInput): EjsUi {
 /** 能力面契约版本。**新增能力时升 minor，移除/改语义升 major** */
 export const EJS_SURFACE_VERSION = '1.0.0';
 
-/** `engine.has()` 认得的路径全表 —— 加能力时同步加行，否则创作者探测不到 */
-const CAPABILITY_PATHS: ReadonlySet<string> = new Set([
-  'stats',
-  'vars',
-  'local',
-  'local.get',
-  'local.set',
-  'local.has',
-  'local.remove',
-  'local.keys',
-  'char',
-  'char.player',
-  'char.get',
-  'char.present',
-  'char.all',
-  'char.has',
-  'char.affection',
-  'char.affectionLabel',
-  'world',
-  'world.时间',
-  'world.时间详情',
-  'world.地点',
-  'world.天气',
-  'world.回合',
-  'quest',
-  'quest.all',
-  'quest.active',
-  'quest.get',
-  'quest.has',
-  'quest.focus',
-  'lore',
-  'lore.get',
-  'lore.has',
-  'lore.list',
-  'chat',
-  'chat.last',
-  'chat.at',
-  'chat.slice',
-  'chat.match',
-  'chat.text',
-  'fmt',
-  'fmt.yaml',
-  'fmt.json',
-  'fmt.table',
-  'fmt.list',
-  'fmt.num',
-  'fmt.pct',
-  'fmt.bar',
-  'fmt.pad',
-  'fmt.truncate',
-  'fmt.compareName',
-  'fmt.sortNames',
-  'rng',
-  'rng.roll',
-  'rng.rollDetail',
-  'rng.int',
-  'rng.float',
-  'rng.pick',
-  'rng.pickN',
-  'rng.shuffle',
-  'rng.chance',
-  'ui',
-  'ui.notify',
-  'ui.log',
-  'engine',
-  'engine.version',
-  'engine.has',
-  // stats 扩面（T3）—— 创作者据此决定要不要走守卫分支
-  'stats.主角.背包',
-  'stats.主角.装备',
-  'stats.主角.技能',
-  'stats.主角.状态效果',
-  'stats.主角.登神长阶',
-  'stats.主角.金钱',
-  'stats.队伍',
-  'stats.世界.回合',
+/**
+ * 🔴 **能力面唯一真源（Q-09）**。
+ *
+ * 此前「沙盒里存在哪些符号」由四处独立维护：本文件的 `CAPABILITY_PATHS`（供
+ * `engine.has()` 探测）、`ejs-preflight.ts` 的两张 Set、guest 侧的
+ * `fmtNames` / `rngNames` 字符串数组。四份靠人眼保持一致，而且**已经对不上**：
+ * `world.isDaytime` 与 `engine.name` 都是真实能力，却不在探测表里 ——
+ * 创作者写 `engine.has('world.isDaytime')` 拿到 `false`，于是他的守卫分支
+ * 反过来禁用了一个可用能力，且完全无声。
+ *
+ * 现在四处全部从这里派生。加能力只动这张表。
+ *
+ * 中文键名（`world.时间` 等）**必须逐字保留** —— 它们是两个后端与创作者共同
+ * 认定的契约，改名是静默破坏。
+ */
+export const EJS_SURFACE = {
+  /** namespace → 该 namespace 下的成员名 */
+  namespaces: {
+    local: ['get', 'set', 'has', 'remove', 'keys'],
+    char: ['player', 'get', 'present', 'all', 'has', 'affection', 'affectionLabel'],
+    // isDaytime 是函数，过 JSON 编组会丢；QuickJS 侧另有常量 shim 顶上
+    world: ['时间', '时间详情', '地点', '天气', '回合', 'isDaytime'],
+    quest: ['all', 'active', 'get', 'has', 'focus'],
+    lore: ['get', 'has', 'list'],
+    chat: ['last', 'at', 'slice', 'match', 'text'],
+    fmt: [
+      'yaml',
+      'json',
+      'table',
+      'list',
+      'num',
+      'pct',
+      'bar',
+      'pad',
+      'truncate',
+      'compareName',
+      'sortNames',
+    ],
+    rng: ['roll', 'rollDetail', 'int', 'float', 'pick', 'pickN', 'shuffle', 'chance'],
+    ui: ['notify', 'log'],
+    engine: ['name', 'version', 'has'],
+  },
+  /**
+   * 顶层符号里**没有成员**的那些。
+   *
+   * `stats` / `vars` 是数据树（不是 namespace，成员由存档决定）；
+   * `print` / `_` 是语言/库层面的符号，创作者不会去 `engine.has` 它们 ——
+   * 所以它们进预检的符号表，但**不进** `engine.has` 的路径表（见 `bareProbePaths`）。
+   */
+  bareTopLevel: ['stats', 'vars', 'print', '_'],
+  /** 上面那批里，仍然值得让 `engine.has` 认得的 */
+  bareProbePaths: ['stats', 'vars'],
+  /** 兼容别名（§5）—— 认得，但预检会提示改用新面 */
+  aliases: [
+    'getMessageVar',
+    'setMessageVar',
+    'getvar',
+    'setvar',
+    'getLocalVar',
+    'setLocalVar',
+    'matchChatMessages',
+    'getChatMessage',
+    'getChatMessages',
+    'getwi',
+    'YAML',
+    'TavernHelper',
+    'toastr',
+    'alert',
+    'message_id',
+    'lastMessageId',
+    'charLoreBook',
+    'localStorage',
+    'console',
+    'variables',
+  ],
+  /**
+   * `stats` 下的扩面路径 —— 创作者据此决定要不要走守卫分支。
+   * 它们不是 namespace 成员（`stats` 是一棵数据树），单列。
+   */
+  statsPaths: [
+    'stats.主角.背包',
+    'stats.主角.装备',
+    'stats.主角.技能',
+    'stats.主角.状态效果',
+    'stats.主角.登神长阶',
+    'stats.主角.金钱',
+    'stats.队伍',
+    'stats.世界.回合',
+  ],
+} as const;
+
+/** 能力面 §3 的顶层符号（namespace + 裸符号）—— 预检用 */
+export const EJS_TOP_LEVEL_SYMBOLS: ReadonlySet<string> = new Set([
+  ...Object.keys(EJS_SURFACE.namespaces),
+  ...EJS_SURFACE.bareTopLevel,
 ]);
 
-function buildEngine(input: EjsCapabilityInput): Record<string, any> {
+/** 兼容别名集合 —— 预检用 */
+export const EJS_ALIAS_SYMBOLS: ReadonlySet<string> = new Set(EJS_SURFACE.aliases);
+
+/** `fmt` / `rng` 的成员名 —— guest 门面按它生成，不再在字符串里手写一份 */
+export const EJS_FMT_NAMES: readonly string[] = EJS_SURFACE.namespaces.fmt;
+export const EJS_RNG_NAMES: readonly string[] = EJS_SURFACE.namespaces.rng;
+
+/** `engine.has()` 认得的路径全表。**由 EJS_SURFACE 展平，不再手抄** */
+const CAPABILITY_PATHS: ReadonlySet<string> = new Set<string>([
+  ...Object.keys(EJS_SURFACE.namespaces),
+  ...EJS_SURFACE.bareProbePaths,
+  ...Object.entries(EJS_SURFACE.namespaces).flatMap(([ns, members]) =>
+    (members as readonly string[]).map((m) => `${ns}.${m}`),
+  ),
+  ...EJS_SURFACE.statsPaths,
+]);
+
+/**
+ * `engine` namespace。
+ *
+ * Q-09：`name` 此前有实现却不在 `CAPABILITY_PATHS` 里，`engine.has('engine.name')`
+ * 返回 false。现在两者同源（{@link EJS_SURFACE}）。
+ */
+export interface EjsEngine {
+  name: string;
+  version: string;
+  /** 能力探测。创作者据此写「有就用、没有就退」 */
+  has(path: string): boolean;
+}
+
+function buildEngine(input: EjsCapabilityInput): EjsEngine {
   return {
     name: 'poem-of-destiny',
     version: input.engineVersion ?? EJS_SURFACE_VERSION,
@@ -612,7 +705,7 @@ function buildEngine(input: EjsCapabilityInput): Record<string, any> {
      * 能力探测。创作者据此写「有就用、没有就退」——
      * 真机语料里作者已经在用 try/catch 猜环境了，给个正经的口更好。
      */
-    has: (path: unknown) => CAPABILITY_PATHS.has(String(path ?? '')),
+    has: (path: string) => CAPABILITY_PATHS.has(String(path ?? '')),
   };
 }
 
@@ -623,12 +716,12 @@ function buildEngine(input: EjsCapabilityInput): Record<string, any> {
 export interface EjsCapabilities {
   chat: EjsChat;
   char: EjsChar;
-  world: Record<string, any>;
+  world: EjsWorld;
   quest: EjsQuest;
   lore: EjsLore;
   local: EjsLocal;
   ui: EjsUi;
-  engine: Record<string, any>;
+  engine: EjsEngine;
   /** 上游 `charLoreBook` 环境变量 */
   charLoreBook: string;
 }

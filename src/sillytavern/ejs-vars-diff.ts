@@ -23,6 +23,8 @@
  *   `vars` 契约是 JSON-ish 数据，出现这类值本身即越界。
  */
 
+import { DANGEROUS_PATH_SEGMENTS } from './var-resolver';
+
 // ═══════════════════════════════════════════════════════════
 // 类型与常量
 // ═══════════════════════════════════════════════════════════
@@ -45,7 +47,10 @@ export const EJS_DIFF_SIZE_LIMIT = 256 * 1024;
  * 拦截，这边是遍历时剔键）。base / draft **两侧都跳**：既不产出针对危险键的
  * set，也不产出针对它的 del。
  */
-const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+// Q-09：曾在此另建一份同内容的 Set。危险键集是安全不变式，散成多份的话
+// 任何一次收紧（将来要加 `valueOf` 或 Symbol 键）都必然漏掉几处，
+// 而漏掉的后果只会在别处以奇怪现象冒出来。唯一定义在 var-resolver。
+const DANGEROUS_KEYS = DANGEROUS_PATH_SEGMENTS;
 
 /** 深 diff 产物 —— 结构上与 var-resolver 的 applyPathOps 入参兼容 */
 export interface EjsVarsDiff {

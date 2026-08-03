@@ -17,6 +17,7 @@
  */
 
 import { compileEjsEntry } from './ejs-runtime';
+import { EJS_ALIAS_SYMBOLS, EJS_TOP_LEVEL_SYMBOLS } from './ejs-capabilities';
 
 // ═══════════════════════════════════════════════════════════
 // 结果类型
@@ -56,47 +57,14 @@ export interface PreflightReport {
 // 已知符号表
 // ═══════════════════════════════════════════════════════════
 
-/** 能力面 §3 的 12 个顶层符号 */
-const CAPABILITY_SYMBOLS = new Set([
-  'stats',
-  'vars',
-  'local',
-  'char',
-  'world',
-  'quest',
-  'lore',
-  'chat',
-  'fmt',
-  'rng',
-  'ui',
-  'engine',
-  'print',
-  '_',
-]);
+// Q-09：这两张表此前是手抄的，与 ejs-capabilities 的 CAPABILITY_PATHS、
+// guest 侧的 fmtNames/rngNames 并列四份靠人眼保持一致。现在都从 EJS_SURFACE 派生。
+
+/** 能力面 §3 的顶层符号 */
+const CAPABILITY_SYMBOLS = EJS_TOP_LEVEL_SYMBOLS;
 
 /** 兼容别名（§5）—— 认得，但会提示改用新面 */
-const ALIAS_SYMBOLS = new Set([
-  'getMessageVar',
-  'setMessageVar',
-  'getvar',
-  'setvar',
-  'getLocalVar',
-  'setLocalVar',
-  'matchChatMessages',
-  'getChatMessage',
-  'getChatMessages',
-  'getwi',
-  'YAML',
-  'TavernHelper',
-  'toastr',
-  'alert',
-  'message_id',
-  'lastMessageId',
-  'charLoreBook',
-  'localStorage',
-  'console',
-  'variables',
-]);
+const ALIAS_SYMBOLS = EJS_ALIAS_SYMBOLS;
 
 /** JS 语言与内建（永远可用） */
 const LANGUAGE_SYMBOLS = new Set([

@@ -17,6 +17,13 @@ import {
   EJS_SURFACE_VERSION,
   type EjsCapabilityInput,
 } from './ejs-capabilities';
+import {
+  EJS_ALIAS_SYMBOLS,
+  EJS_FMT_NAMES,
+  EJS_RNG_NAMES,
+  EJS_SURFACE,
+  EJS_TOP_LEVEL_SYMBOLS,
+} from './ejs-capabilities';
 import { createDefaultCharacterState, createDefaultQuest, type Quest } from './types';
 import type { GameTime } from './time-system';
 
@@ -149,8 +156,8 @@ describe('world（§3.5）', () => {
     const player = createDefaultCharacterState({ id: 'p1', type: 'player', location: '晨曦镇' });
     const { caps } = build({ gameTime: TIME, turn: 12, weather: '小雨', characters: [player] });
     expect(caps.world.时间).toContain('复兴纪元');
-    expect(caps.world.时间详情.时).toBe(15);
-    expect(caps.world.时间详情.时段).toBeTruthy();
+    expect(caps.world.时间详情!.时).toBe(15);
+    expect(caps.world.时间详情!.时段).toBeTruthy();
     expect(caps.world.回合).toBe(12);
     expect(caps.world.天气).toBe('小雨');
     expect(caps.world.地点).toBe('晨曦镇');
@@ -373,11 +380,75 @@ describe('engine（§3.12）', () => {
     expect(caps.engine.has('lore.get')).toBe(true);
     expect(caps.engine.has('stats.主角.背包')).toBe(true);
     expect(caps.engine.has('完全不存在的能力')).toBe(false);
-    expect(caps.engine.has(undefined)).toBe(false);
+    // Q-09: has 的签名收成 string 之后，这一条改成显式的"脏输入"而不是类型漏洞
+    expect(caps.engine.has(undefined as unknown as string)).toBe(false);
   });
 
   it('engineVersion 可被调用方覆盖', () => {
     const { caps } = build({ engineVersion: '9.9.9' });
     expect(caps.engine.version).toBe('9.9.9');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 能力面唯一真源（Q-09）
+// ═══════════════════════════════════════════════════════════
+
+describe('EJS_SURFACE —— engine.has 不许再说谎', () => {
+  const caps = () => build({ gameTime: TIME }).caps;
+
+  it('每个 namespace 的每个成员，engine.has 都必须认得', () => {
+    const has = caps().engine.has;
+    for (const [ns, members] of Object.entries(EJS_SURFACE.namespaces)) {
+      expect(has(ns), `engine.has('${ns}') 为假`).toBe(true);
+      for (const m of members as readonly string[]) {
+        expect(has(`${ns}.${m}`), `engine.has('${ns}.${m}') 为假`).toBe(true);
+      }
+    }
+  });
+
+  it('🔴 world.isDaytime 与 engine.name —— 两条曾经漏在表外的真实能力', () => {
+    // 创作者写 engine.has('world.isDaytime') 曾拿到 false，
+    // 于是他的守卫分支反过来禁用了一个可用能力，且完全无声。
+    const c = caps();
+    expect(c.engine.has('world.isDaytime')).toBe(true);
+    expect(typeof c.world.isDaytime).toBe('function');
+    expect(c.engine.has('engine.name')).toBe(true);
+    expect(typeof c.engine.name).toBe('string');
+  });
+
+  // `fmt` / `rng` 是纯函数库（ejs-fmt / ejs-rng），由 runtime 直接注入沙盒，
+  // 不经 buildEjsCapabilities —— 它们的同源性由下面那条「与 EJS_SURFACE 同源」覆盖。
+  const ON_CAPS = ['chat', 'char', 'world', 'quest', 'lore', 'local', 'ui', 'engine'] as const;
+
+  it('namespace 里声明的成员，实际对象上必须真的有', () => {
+    const c = caps() as unknown as Record<string, Record<string, unknown>>;
+    for (const ns of ON_CAPS) {
+      const obj = c[ns];
+      expect(obj, `能力面上没有 namespace ${ns}`).toBeTruthy();
+      for (const m of EJS_SURFACE.namespaces[ns] as readonly string[]) {
+        expect(m in obj, `${ns}.${m} 在表里但对象上没有`).toBe(true);
+      }
+    }
+  });
+
+  it('不存在的路径仍然返回 false（探测口不能一律说有）', () => {
+    const has = caps().engine.has;
+    expect(has('world.不存在')).toBe(false);
+    expect(has('随便什么')).toBe(false);
+    expect(has('')).toBe(false);
+  });
+
+  it('预检的两张符号表与 EJS_SURFACE 同源', () => {
+    for (const ns of Object.keys(EJS_SURFACE.namespaces)) {
+      expect(EJS_TOP_LEVEL_SYMBOLS.has(ns)).toBe(true);
+    }
+    for (const s of EJS_SURFACE.bareTopLevel) expect(EJS_TOP_LEVEL_SYMBOLS.has(s)).toBe(true);
+    for (const a of EJS_SURFACE.aliases) expect(EJS_ALIAS_SYMBOLS.has(a)).toBe(true);
+  });
+
+  it('guest 门面的 fmt/rng 名单与 EJS_SURFACE 同源', () => {
+    expect(EJS_FMT_NAMES).toEqual([...EJS_SURFACE.namespaces.fmt]);
+    expect(EJS_RNG_NAMES).toEqual([...EJS_SURFACE.namespaces.rng]);
   });
 });

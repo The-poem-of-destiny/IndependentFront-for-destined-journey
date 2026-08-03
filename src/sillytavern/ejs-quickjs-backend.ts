@@ -35,7 +35,14 @@
 
 import type { EjsBackend, EjsEntryOutcome, EjsPassEntry } from './ejs-backend';
 import { tokenizeTrimmed, type EjsEvalContext } from './ejs-runtime';
-import { buildEjsCapabilities, LOCAL_ROOT, type EjsCapabilities } from './ejs-capabilities';
+import {
+  buildEjsCapabilities,
+  EJS_FMT_NAMES,
+  EJS_RNG_NAMES,
+  LOCAL_ROOT,
+  marshalWorld,
+  type EjsCapabilities,
+} from './ejs-capabilities';
 import { createEjsRng, type EjsRng } from './ejs-rng';
 import { ejsFmt } from './ejs-fmt';
 import { ejsLodash } from './ejs-lodash-shim';
@@ -419,30 +426,22 @@ export class QuickJsBackend implements EjsBackend {
 
     // 前导 + 数据轴
     this.evalSetup(context, GUEST_PRELUDE, '前导');
+    // 🔴 `world.isDaytime` 是**函数**，JSON 编组会把它整个丢掉 —— guest 里调它抛
+    // `TypeError: not a function`，整条目回退原文，而 Legacy 下它工作得好好的。
+    // Q-09：这条分界现在由 `marshalWorld` 表达（有签名、编译器看得见），
+    // 不再是散在这里的两段注释 + 一段 as 断言。结果只取决于时（pass 内不变），
+    // 所以预先算好布尔值、在 guest 侧补个同值 shim。
+    const worldMarshalled = marshalWorld(caps.world);
     const data = {
       stats: ctx.stats ?? {},
       vars: ctx.vars ?? {},
-      world: {
-        时间: caps.world.时间,
-        时间详情: caps.world.时间详情,
-        地点: caps.world.地点,
-        天气: caps.world.天气,
-        回合: caps.world.回合,
-      },
+      world: worldMarshalled.data,
       charLoreBook: caps.charLoreBook,
       engine: { name: caps.engine.name, version: caps.engine.version },
     };
     const json = toGuestJson(data);
     if (json === undefined) throw new Error('EJS 数据轴不可序列化（含环或宿主对象）');
-    // 🔴 `world.isDaytime` 是**函数**，JSON 编组会把它整个丢掉 —— guest 里 `world.isDaytime()`
-    // 于是抛 `TypeError: not a function`，整条目回退原文，而 Legacy 下它工作得好好的。
-    // 结果只取决于 `world.时间详情.时`（pass 内不变），故预先算好布尔值、在 guest 侧补个同值 shim。
-    let isDaytime = true;
-    try {
-      isDaytime = !!(caps.world['isDaytime'] as (() => boolean) | undefined)?.();
-    } catch {
-      /* 能力面承诺永不抛，这里只是兜底 */
-    }
+    const isDaytime = worldMarshalled.isDaytime;
     this.evalSetup(
       context,
       `globalThis.__ejsData = ${json};
@@ -549,7 +548,7 @@ globalThis.engine = __ejsData.engine;`,
       else capsRef.current.ui.log(msg);
       return null;
     });
-    bridge('__b_engine_has', (path) => capsRef.current.engine['has'](path));
+    bridge('__b_engine_has', (path) => capsRef.current.engine.has(String(path ?? '')));
     bridge('__b_fmt', (op, ...args) => (ejsFmt as any)[String(op)]?.(...args) ?? '');
     // 读 `rngRef.current` 而不是闭包捕获某一条序列 —— runEntry 每条目换一次
     bridge('__b_rng', (op, ...args) => (rngRef.current as any)[String(op)]?.(...args) ?? null);
@@ -889,11 +888,12 @@ const GUEST_FACADE = `
   };
   globalThis.engine.has = function (p) { return !!P(__b_engine_has(p)); };
 
-  var fmtNames = ['yaml','json','table','list','num','pct','bar','pad','truncate','compareName','sortNames'];
+  // Q-09：名单由宿主注入（EJS_SURFACE 唯一真源），不再在字符串里手写第四份。
+  var fmtNames = ${JSON.stringify(EJS_FMT_NAMES)};
   globalThis.fmt = {};
   fmtNames.forEach(function (n) { globalThis.fmt[n] = function () { return P(__b_fmt.apply(null, [n].concat(Array.prototype.slice.call(arguments)))); }; });
 
-  var rngNames = ['roll','rollDetail','int','float','pick','pickN','shuffle','chance'];
+  var rngNames = ${JSON.stringify(EJS_RNG_NAMES)};
   globalThis.rng = {};
   rngNames.forEach(function (n) { globalThis.rng[n] = function () { return P(__b_rng.apply(null, [n].concat(Array.prototype.slice.call(arguments)))); }; });
 
