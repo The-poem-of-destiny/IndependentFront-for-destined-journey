@@ -720,7 +720,6 @@ function outcomeOf(session: CombatSession): CombatV3Result['outcome'] {
   }
 }
 
-
 /**
  * 把终局 DomainEvent 翻译成 StatePatch[]（M2 最小：FP 结算落库）。
  *
