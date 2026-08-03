@@ -145,7 +145,6 @@ export function buildBeautifierFrameDocument({
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${BEAUTIFIER_FRAME_CSP}">
 <style>
-:root { color-scheme: light dark; }
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; width: 100%; min-width: 0; background: transparent; }
 body {

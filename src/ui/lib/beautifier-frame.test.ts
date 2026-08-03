@@ -9,6 +9,21 @@ import {
 } from './beautifier-frame';
 
 describe('beautifier iframe document', () => {
+  it('keeps unmatched narrative transparent outside a rule-owned color scheme', () => {
+    const document = buildBeautifierFrameDocument({
+      markup:
+        '<span data-beautifier-source-text>normal narrative</span>' +
+        '<div style="color-scheme: dark; background: #36393f">rule-owned card</div>',
+      bridgeId: 'bridge-theme-boundary',
+    });
+
+    expect(document).not.toContain(':root { color-scheme: light dark; }');
+    expect(document).toContain(
+      'html, body { margin: 0; width: 100%; min-width: 0; background: transparent; }',
+    );
+    expect(document).toContain('style="color-scheme: dark; background: #36393f"');
+  });
+
   it('retains fenced full-document rule CSS, markup, and scripts', () => {
     const parts = splitRichDocument(
       '```html\n<!doctype html><html><head><style>.card{color:red}</style></head>' +
