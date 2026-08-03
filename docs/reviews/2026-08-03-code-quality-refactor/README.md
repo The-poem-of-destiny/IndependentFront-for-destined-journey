@@ -41,21 +41,21 @@
 | 🔄   | 部分完成，剩余项写在备注列               |
 | ⬜   | 未开始（下表备注里附本次核对的抽查结果） |
 
-**核对基线**：`master`（2026-08-03，随修复滚动）· `typecheck` / `typecheck:vue` / `typecheck:tools` / `lint` 全绿 · 203 个测试文件 · 5664 passed / 3 skipped
+**核对基线**：`master` @ `34db02e` · `typecheck` / `typecheck:vue` / `typecheck:tools` / `lint` 全绿 · 212 个测试文件 · 5826 passed / 4 skipped
 
 ### 按路线图步骤
 
-| 步骤                                      | 包含                   | 状态 | 备注                                                                                                              |
-| ----------------------------------------- | ---------------------- | ---- | ----------------------------------------------------------------------------------------------------------------- |
-| [步骤 1](roadmap.md) 清尸体 + 补工具链网  | Q-04、Q-15             | ✅   | 四批僵尸清完 + 补网与清仓两个 PR 都落地                                                                           |
-| [步骤 2](roadmap.md) 修静默出错的生产路径 | Q-01、Q-02             | ✅   | 两条全部兑现（`a0c3d5d`），骰子那条建议仍需真机打一场复核                                                         |
-| [步骤 3](roadmap.md) 三处去留裁定         | Q-07、Q-03、Q-30       | ✅   | 三条裁定均已拍板并落地（Q-07 含 emit 源 + 效果回收 + 战斗内 12/18 显式化）                                        |
-| [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | ✅   | 四条全部落地                                                                                                      |
-| [步骤 5](roadmap.md) 数据路径去重         | Q-08、Q-16、Q-12       | ✅   | 三条全部落地（api-key 那份迁移按裁定留在外面）                                                                    |
-| [步骤 6](roadmap.md) 品质体系与设置真源   | Q-11、Q-18、Q-06       | 🔄   | Q-11 / Q-06 完成；Q-18 的读写口与默认值收敛已落地，剩 `UiSettings` 接口（审查要求先取得同意）+ 13 张 map 物理合并 |
-| [步骤 7](roadmap.md) EJS 能力面 + Legacy  | Q-09、Q-10、Q-27       | 🔄   | Q-09 的 SSOT / 类型 / 危险键三步已落地；剩别名层共享源码 + Q-10 Legacy 退役（卡真机走查）+ Q-27                   |
-| [步骤 8](roadmap.md) 巨石拆分第一刀       | Q-23、Q-19             | ⬜   | 硬前置未清：步骤 1 的删尸体与步骤 3 的效果层都还没收尾                                                            |
-| [后续批次](roadmap.md#后续批次不进前八步) | 其余 9 条              | ⬜   | —                                                                                                                 |
+| 步骤                                      | 包含                   | 状态 | 备注                                                                                                                                              |
+| ----------------------------------------- | ---------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [步骤 1](roadmap.md) 清尸体 + 补工具链网  | Q-04、Q-15             | ✅   | 四批僵尸清完 + 补网与清仓两个 PR 都落地                                                                                                           |
+| [步骤 2](roadmap.md) 修静默出错的生产路径 | Q-01、Q-02             | ✅   | 两条全部兑现（`a0c3d5d`），骰子那条建议仍需真机打一场复核                                                                                         |
+| [步骤 3](roadmap.md) 三处去留裁定         | Q-07、Q-03、Q-30       | ✅   | 三条裁定均已拍板并落地（Q-07 含 emit 源 + 效果回收 + 战斗内 12/18 显式化）                                                                        |
+| [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | ✅   | 四条全部落地                                                                                                                                      |
+| [步骤 5](roadmap.md) 数据路径去重         | Q-08、Q-16、Q-12       | ✅   | 三条全部落地（api-key 那份迁移按裁定留在外面）                                                                                                    |
+| [步骤 6](roadmap.md) 品质体系与设置真源   | Q-11、Q-18、Q-06       | 🔄   | Q-11 / Q-06 完成；Q-18 的读写口与默认值收敛已落地，剩 `UiSettings` 接口（审查要求先取得同意）+ 13 张 map 物理合并                                 |
+| [步骤 7](roadmap.md) EJS 能力面 + Legacy  | Q-09、Q-10、Q-27       | 🔄   | 三条各自落地了不依赖真机的那半；剩下的都压在同一个前置上——**Legacy 退役需真机走查**（别名层共享源码要与它同批，否则失去 parity 这唯一的差分护栏） |
+| [步骤 8](roadmap.md) 巨石拆分第一刀       | Q-23、Q-19             | 🔄   | Q-19 两个 PR 全落；Q-23 未动——它要先拍板域边界（`EffectIntent` 的传递闭包 ~400 行，盲搬等于替主人做决定）                                         |
+| [后续批次](roadmap.md#后续批次不进前八步) | 其余 9 条              | 🔄   | 阻塞已解的三条（Q-22 / Q-31 / Q-26）已做完；其余 6 条的延后理由仍成立，见下                                                                       |
 
 ### 已落地的提交
 
@@ -82,7 +82,26 @@
 | `c70e2e2` | Q-18 🔄                  | 新增 `agent-settings.ts`：`AGENT_SETTINGS_DEFAULTS`（六份拷贝收成一处）+ get/patch/reset/fillMissing 四个口；13 段手抄的加载器、`saveAsDefault`、`restoreAgentDefaults` 两分支全部收口。**剩**：`UiSettings` 接口（审查要求先取得同意）与 13 张 map 的物理合并                         |
 | `7f313e0` | Q-09 🔄                  | 新增 `EJS_SURFACE` 唯一真源（4 张名单全部派生）—— `engine.has('world.isDaytime')` 不再返回 false；补 `EjsWorld`/`EjsEngine` 与有签名的 `marshalWorld`；危险键集宿主侧 5 份 → 1 份。**剩**：别名层共享源码（须与 Legacy 退役同批）                                                      |
 | `671d269` | Q-10 🔄                  | 两份逐行相同的编译缓存合一并接到生产路径；QuickJS 补 `guestBodyCache`（此前零记忆化，是 348-583ms/pass 的直接来源）；清空口经 `registerEjsCacheClear` 反向注册只留一个。**剩**：同步渲染路径降格（须与 Legacy 退役同批）                                                               |
-| _本次_    | Q-27 🔄                  | 收掉 `data.sequence!` 非空断言；`measure` 的 O(全部元素) 开销与「为什么不顺手收窄」写进代码。**主体（290 行内嵌运行时切成真 .js）按审查排期约束未做** —— 那是 SEC-01 执行体，须配真机走查                                                                                              |
+| `e89cc91` | Q-27 🔄                  | 收掉 `data.sequence!` 非空断言；`measure` 的 O(全部元素) 开销与「为什么不顺手收窄」写进代码。**主体（290 行内嵌运行时切成真 .js）按审查排期约束未做** —— 那是 SEC-01 执行体，须配真机走查                                                                                              |
+| `f41824f` | Q-19 🔄                  | 提交层 30 分支 switch → `PATCH_HANDLERS: Record<StatePatchOp, …>`（漏接 op 变编译错误）；资源钳制 10 处 `as any` → `satisfies` 表；13 处 `await import` 转静态                                                                                                                         |
+| `ba215ae` | Q-19 ✅                  | 抽 `vars-update-translator.ts`：纯翻译脱离 560 行巨方法，orchestrator 1520 → 1100 行；现有 5808 条未改一行全绿（行为等价）+ 13 条直接喂 parsed 的新测试                                                                                                                                |
+| `3368ae3` | Q-22 ✅、Q-31 ✅         | 删 combat-v3 从不被读的 `bundle` 参数（连带 `bundleOf` 与两处 `as never`）；`session.completed` 构造快照 → 活 getter 并收窄到 SettlementCommitted；location-db 邻接按对称收口 + 全表对称性闸门                                                                                         |
+| `34db02e` | Q-26 ✅                  | Dexie v13+ 改 `withSchema` delta 写法（-390 行重述），v1–v12 原样冻结；逐字节验证四版键序与索引串全同；更正 v12 那句被证伪的「漏写即删表」                                                                                                                                             |
+
+### 未做的 7 条，以及各自卡在哪
+
+> 都不是"漏了"。每一条要么审查自己写了排期约束，要么需要主人先拍一个板 ——
+> 那类决定不该由执行者顺手替主人做掉。
+
+| ID                                                                                                                                                                                                      | 卡在哪                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Q-18](findings-t6-safety-net.md#q-18) 余下部分                                                                                                                                                         | `settings` 收成 `UiSettings` 接口**反转的是 store 头注释里明确写下的设计意图**（"任意新字段零改动"），审查原文要求"应作为决策先取得同意，而不是当清理顺手做掉"。13 张 map 的物理合并（改持久化形状 + 一次性迁移 + 动 SettingsPage 87 处 v-model）建议在那之后一次做完 —— 读写口已收进三个函数，那一步现在只需改一个文件 |
+| [Q-09](findings-t3-single-source.md#q-09) 别名层                                                                                                                                                        | 宿主 TS 与 guest 210 行字符串各写一遍同一套别名。抽共享源码**必须与 Legacy 退役同批**，否则会先失去 `ejs-backend-parity.test.ts` 这唯一的差分护栏                                                                                                                                                                       |
+| [Q-10](findings-t4-corpses.md#q-10) 同步路径降格                                                                                                                                                        | 同上批。且要迁 3 个测试文件约 20 条在 Legacy 默认后端下断言同步渲染输出的基线；`agent-templates.buildAgentMessages`（文档化的公共导出）仍在同步调用它                                                                                                                                                                   |
+| [Q-27](findings-t5-layering.md#q-27) 主体                                                                                                                                                               | 290 行内嵌运行时是 **SEC-01 隔离契约的执行体**。审查原文：需"由熟悉 SEC-01 契约的人做，并配一次真机走查（切片顺序 / CSP 分档 / 跨帧广播三项各验一次）"                                                                                                                                                                  |
+| [Q-23](findings-t5-layering.md#q-23)                                                                                                                                                                    | 审查要求"动手前先拍板域边界"。`EffectAutomaton` 的传递闭包（`EffectIntent` 及其下游）约 400 行，搬哪些、留哪些是设计决定                                                                                                                                                                                                |
+| [Q-29](findings-t5-layering.md#q-29)                                                                                                                                                                    | 审查原文："动手前需要一个 owner 定下 seam 位置"，且含一处要主人确认的行为变更 —— 端点列表一次 `run` 内算一次意味着**回合中途改设置不再立即生效**                                                                                                                                                                        |
+| [Q-25](findings-t5-layering.md#q-25) / [Q-24](findings-t5-layering.md#q-24) / [Q-20](findings-t6-safety-net.md#q-20) / [Q-21](findings-t3-single-source.md#q-21) / [Q-28](findings-t5-layering.md#q-28) | 路线图原有的延后理由仍成立：Q-25 等 Q-18 的类型落地、Q-24 与 Q-25 同批、Q-20 等生产形状稳定、Q-21 要配 audit-code 与世界书对账（涉平衡数值）、Q-28 的 319 条主题选择器需先逐条验证是否还匹配活 DOM（独立调查）                                                                                                          |
 
 ## 结论摘要
 
@@ -178,16 +197,16 @@
 | [Q-16](findings-t3-single-source.md#q-16) | 中     | T3   | store 层没有共享工具层：detach helper 复制 8 份，两个同名 `toRow` 语义还不同             | 步骤 5   | ✅   |
 | [Q-17](findings-t2-ai-boundary.md#q-17)   | 中     | T2   | `agent-client` 的流式与非流式路径各写一份请求体装配、fetch 与错误翻译                    | 步骤 4   | ✅   |
 | [Q-18](findings-t6-safety-net.md#q-18)    | 中     | T6   | 最热的状态零编译期保护：settings 是 `Record<string, any>`，per-Agent 摊成 13 张并行 map  | 步骤 6   | 🔄   |
-| [Q-19](findings-t2-ai-boundary.md#q-19)   | 中     | T2   | AI→状态写入链是两个无缝巨型函数：560 行私有翻译方法 + 30 分支手写 switch                 | 步骤 8   | ⬜   |
+| [Q-19](findings-t2-ai-boundary.md#q-19)   | 中     | T2   | AI→状态写入链是两个无缝巨型函数：560 行私有翻译方法 + 30 分支手写 switch                 | 步骤 8   | ✅   |
 | [Q-20](findings-t6-safety-net.md#q-20)    | 中     | T6   | 测试底盘三处缺口：730 行有状态 composable 零测试、7 份逐字相同的桩、两份过期源码断言     | 后续批次 | ⬜   |
 | [Q-21](findings-t3-single-source.md#q-21) | 中     | T3   | 战斗/制作结算层四处复制，含 17 参数调用两份、15 字段装配两份且各自掷骰                   | 后续批次 | ⬜   |
-| [Q-22](findings-t4-corpses.md#q-22)       | 中     | T4   | combat-v3 公共面两个装饰性字段：`bundle` 从不被读、`completed` 是构造时快照              | 后续批次 | ⬜   |
+| [Q-22](findings-t4-corpses.md#q-22)       | 中     | T4   | combat-v3 公共面两个装饰性字段：`bundle` 从不被读、`completed` 是构造时快照              | 后续批次 | ✅   |
 | [Q-23](findings-t5-layering.md#q-23)      | 中     | T5   | `types.ts` 3716 行兼任常量/函数库；`combat-v3/types.ts` 把依赖方向反转                   | 步骤 8   | ⬜   |
 | [Q-24](findings-t5-layering.md#q-24)      | 中     | T5   | `asset-store` 的「纯执行器」定位没守住，约 200 行文案/闸门长在 Pinia 闭包里              | 后续批次 | ⬜   |
 | [Q-25](findings-t5-layering.md#q-25)      | 高     | T5   | 视图层巨石：`SettingsPage.vue` 3823 行内联 9 个分区，`StatusOverview.vue` 夹 260 行管线  | 后续批次 | ⬜   |
-| [Q-26](findings-t3-single-source.md#q-26) | 中     | T3   | `database.ts` 里 16 个 Dexie 版本各自全量重述 schema，约 390 行是同一张表清单的拷贝      | 后续批次 | ⬜   |
+| [Q-26](findings-t3-single-source.md#q-26) | 中     | T3   | `database.ts` 里 16 个 Dexie 版本各自全量重述 schema，约 390 行是同一张表清单的拷贝      | 后续批次 | ✅   |
 | [Q-27](findings-t5-layering.md#q-27)      | 低     | T5   | beautifier iframe 的 290 行运行时内嵌在模板字面量里，四职责混在一个函数                  | 步骤 7   | 🔄   |
 | [Q-28](findings-t5-layering.md#q-28)      | 高     | T5   | `crimson.css` 与 `indigo.css` 里 319 条全局选择器直接伸进组件的 scoped 私有类名          | 后续批次 | ⬜   |
 | [Q-29](findings-t5-layering.md#q-29)      | 高     | T5   | Agent 装配与整条 LLM 管线没有独立层，两处各写一份且已漂移，两个宿主都涨成 L 级巨石       | 后续批次 | ⬜   |
 | [Q-30](findings-t3-single-source.md#q-30) | 中     | T3   | `start-catalog.ts`：8752 行 CDN 数据硬编成 TS 模块，并第二次定义了 Rarity 与品质映射     | 步骤 3   | ✅   |
-| [Q-31](findings-t3-single-source.md#q-31) | 低     | T3   | `location-db` 邻接关系两套语义：`buildAdjacency` 双向对称，`areAdjacent` 只看单向        | 后续批次 | ⬜   |
+| [Q-31](findings-t3-single-source.md#q-31) | 低     | T3   | `location-db` 邻接关系两套语义：`buildAdjacency` 双向对称，`areAdjacent` 只看单向        | 后续批次 | ✅   |
