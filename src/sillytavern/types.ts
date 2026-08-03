@@ -3191,6 +3191,9 @@ export interface CharGenOutput {
     durability?: number;
     quality?: string;
     effects?: Record<string, string>;
+    /** 🆕 Q-13: 脚本 <script name="...">code</script>。此前只有 ItemGenOutput 声明了它，
+     *  assembleCharacterState 靠 `(e as any).scripts` 读，类型上看不出这条通路存在 */
+    scripts?: Record<string, string>;
     /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier） */
     modifiers?: Modifier[];
     /** 🆕 战斗 v2 (M4 5.5b): 该装备附带的 buff 定义 */
@@ -3207,6 +3210,9 @@ export interface CharGenOutput {
     quantity: number;
     type: string;
     rarity?: string;
+    /** 🆕 Q-13: 词条效果 / 脚本。同上——此前只由 `(inv as any)` 读，类型上是隐形的 */
+    effects?: Record<string, string>;
+    scripts?: Record<string, string>;
     /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier） */
     modifiers?: Modifier[];
     /** 🆕 战斗 v2 (M4 5.5b): 该物品附带的 buff 定义 */

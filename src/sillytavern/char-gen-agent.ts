@@ -42,6 +42,24 @@ import { getToolsForAgent, executeToolCall } from './agent-tools';
 import { normalizeSlot } from './field-enums';
 import { validateItemOutput } from './combat-item-validator';
 import type { ToolExecutionContext } from './types';
+// Q-05：XML / JSON 解析的唯一工具面。参数顺序一律 (source, tag)，
+// 名字自带语义（tagInner=内文 / tagBlock=含标签整块），不再有叫 extractTag 的东西。
+import {
+  tagInner,
+  tagBlock,
+  tagAttr,
+  tagAttrInt,
+  parseAttrsStr,
+  stripInnerTags,
+  parseNamedChildren,
+  stripKnownChildBlocks,
+} from './agent-xml';
+import { extractJsonPayload } from './model-json';
+
+/** 剥壳取 JSON；抠不到时退回原文（本文件历史行为——调用方自己 try/catch parse） */
+function extractJsonOrRaw(text: string): string {
+  return extractJsonPayload(text) ?? text;
+}
 
 // ========== Types ==========
 
@@ -343,15 +361,12 @@ export function assembleCharacterState(
     effects: s.effects,
     scripts: s.scripts,
     // 战斗 v2 (M4 5.5b): <modifiers>/<buffs>/<divinity> 透传（技能生产检定加值落库，S4 收 S2-2）
-    ...((s as any).modifiers && (s as any).modifiers.length > 0
-      ? { modifiers: (s as any).modifiers }
-      : {}),
-    ...((s as any).buffs && (s as any).buffs.length > 0 ? { buffs: (s as any).buffs } : {}),
-    ...((s as any).divinity !== undefined ? { divinity: (s as any).divinity } : {}),
+    // Q-13：这四个字段在 CharGenOutput / ItemGenOutput 上都已显式声明，不需要 as any
+    ...(s.modifiers && s.modifiers.length > 0 ? { modifiers: s.modifiers } : {}),
+    ...(s.buffs && s.buffs.length > 0 ? { buffs: s.buffs } : {}),
+    ...(s.divinity !== undefined ? { divinity: s.divinity } : {}),
     // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传到 Skill 落库
-    ...((s as any).automata && (s as any).automata.length > 0
-      ? { automata: (s as any).automata }
-      : {}),
+    ...(s.automata && s.automata.length > 0 ? { automata: s.automata } : {}),
   }));
 
   // 合并装备: char_gen 自产优先
@@ -370,16 +385,14 @@ export function assembleCharacterState(
     stats: e.stats,
     durability: e.durability,
     maxDurability: e.durability,
-    effects: (e as any).effects,
-    scripts: (e as any).scripts, // M3: scripts 无损传递（#45）
+    effects: e.effects,
+    scripts: e.scripts, // M3: scripts 无损传递（#45）
     // 战斗 v2 (M4 5.5b): modifiers/buffs/divinity 透传到 InventoryItem（战斗管线 collect_mods 消费）
     ...(e.modifiers ? { modifiers: e.modifiers } : {}),
     ...(e.buffs ? { buffs: e.buffs } : {}),
     ...(e.divinity !== undefined ? { divinity: e.divinity } : {}),
     // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传到 InventoryItem（v3 编译进 activeEffects）
-    ...((e as any).automata && (e as any).automata.length > 0
-      ? { automata: (e as any).automata }
-      : {}),
+    ...(e.automata && e.automata.length > 0 ? { automata: e.automata } : {}),
   }));
   // 合并背包: char_gen 自产优先
   // M3: inventory 物品 effects/scripts 无损传递，废除 id 生成（#45）
@@ -395,16 +408,14 @@ export function assembleCharacterState(
       type: inv.type,
       quantity: inv.quantity,
       rarity: (inv.rarity as QualityLevel) || undefined,
-      effects: (inv as any).effects, // M3: effects 无损传递（#45）
-      scripts: (inv as any).scripts, // M3: scripts 无损传递（#45）
+      effects: inv.effects, // M3: effects 无损传递（#45）
+      scripts: inv.scripts, // M3: scripts 无损传递（#45）
       // 战斗 v2 (M4 5.5b): modifiers/buffs/divinity 透传
       ...(inv.modifiers ? { modifiers: inv.modifiers } : {}),
       ...(inv.buffs ? { buffs: inv.buffs } : {}),
       ...(inv.divinity !== undefined ? { divinity: inv.divinity } : {}),
       // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传到 InventoryItem
-      ...((inv as any).automata && (inv as any).automata.length > 0
-        ? { automata: (inv as any).automata }
-        : {}),
+      ...(inv.automata && inv.automata.length > 0 ? { automata: inv.automata } : {}),
     })),
     // M3: 装备产物并入 inventory（equippedSlot 非空 = 已穿戴）
     ...equippedItems,
@@ -850,7 +861,7 @@ function parseAutomataXML(innerContent: string): EffectAutomaton[] {
  */
 export function parseCharGenOutput(raw: string): CharGenOutput {
   // 先尝试 XML
-  const xml = extractXML(raw, 'char_result');
+  const xml = tagBlock(raw, 'char_result');
   if (xml) {
     const parsed = parseCharGenXML(xml);
     // 真机兜底（2026-07-17）: AI 输出 JSON（非 XML），parseCharGenXML 全字段兜底为 '未命名'
@@ -864,7 +875,7 @@ export function parseCharGenOutput(raw: string): CharGenOutput {
 
   // 回退到 JSON
   try {
-    const json = extractJSON(raw);
+    const json = extractJsonOrRaw(raw);
     const data = JSON.parse(json);
     if (!data?.name) throw new Error('缺少 name');
     return charGenFromJSON(data);
@@ -880,7 +891,7 @@ export function parseCharGenOutput(raw: string): CharGenOutput {
  * appearance/personality 可以是对象（取 summary 字段）或字符串。
  */
 function parseCharGenJSONLoose(text: string): CharGenOutput | null {
-  const json = extractJSON(text);
+  const json = extractJsonOrRaw(text);
   if (!json) return null;
   let data: any;
   try {
@@ -970,7 +981,7 @@ function charGenFromJSON(data: any): CharGenOutput {
 /** 从 XML <char_result> 中解析角色数据 */
 function parseCharGenXML(xml: string): CharGenOutput {
   // ascension 子结构
-  const ascXML = extractTagBlock(xml, 'ascension');
+  const ascXML = tagInner(xml, 'ascension');
   const ascElements: CharGenOutput['ascension']['elements'] = [];
   const ascAuthorities: CharGenOutput['ascension']['authorities'] = [];
   const ascLaws: CharGenOutput['ascension']['laws'] = [];
@@ -1031,68 +1042,64 @@ function parseCharGenXML(xml: string): CharGenOutput {
   }
 
   // 技能/装备/物品 子结构 (char_gen 自行生成)
-  const skillsXML = extractTagBlock(xml, 'skills');
-  const equipmentXML = extractTagBlock(xml, 'equipment');
-  const inventoryXML = extractTagBlock(xml, 'inventory');
+  const skillsXML = tagInner(xml, 'skills');
+  const equipmentXML = tagInner(xml, 'equipment');
+  const inventoryXML = tagInner(xml, 'inventory');
 
   const skills = skillsXML ? parseSkillsXML(skillsXML) : [];
   const equipment = equipmentXML ? parseEquipmentXML(equipmentXML) : [];
   const inventory = inventoryXML ? parseInventoryXML(inventoryXML) : [];
 
   return {
-    name: extractTag(xml, 'name') ?? '未命名',
-    race: extractTag(xml, 'race') ?? '人类',
-    gender: extractTag(xml, 'gender') ?? '其他',
-    faction: extractTag(xml, 'faction') ?? undefined,
-    tier: parseInt(extractTag(xml, 'tier') ?? '1') || 1,
-    level: parseInt(extractTag(xml, 'level') ?? '1') || 1,
+    name: tagInner(xml, 'name') ?? '未命名',
+    race: tagInner(xml, 'race') ?? '人类',
+    gender: tagInner(xml, 'gender') ?? '其他',
+    faction: tagInner(xml, 'faction') ?? undefined,
+    tier: parseInt(tagInner(xml, 'tier') ?? '1') || 1,
+    level: parseInt(tagInner(xml, 'level') ?? '1') || 1,
     attributes: {
       // 真机修(2026-07-17): `|| 10` 会把 0 打回 10 — 意识体/灵体的 0 属性是合法值，改 NaN 检查
-      str: parseAttrIntKeepZero(xml, 'attributes', 'str', 10),
-      dex: parseAttrIntKeepZero(xml, 'attributes', 'dex', 10),
-      con: parseAttrIntKeepZero(xml, 'attributes', 'con', 10),
-      int: parseAttrIntKeepZero(xml, 'attributes', 'int', 10),
-      spi: parseAttrIntKeepZero(xml, 'attributes', 'spi', 10),
+      str: tagAttrInt(xml, 'attributes', 'str', 10),
+      dex: tagAttrInt(xml, 'attributes', 'dex', 10),
+      con: tagAttrInt(xml, 'attributes', 'con', 10),
+      int: tagAttrInt(xml, 'attributes', 'int', 10),
+      spi: tagAttrInt(xml, 'attributes', 'spi', 10),
     },
     identity:
-      extractTag(xml, 'identity')
+      tagInner(xml, 'identity')
         ?.split(',')
         .map((s) => s.trim())
         .filter(Boolean) ?? [],
     occupation:
-      extractTag(xml, 'occupation')
+      tagInner(xml, 'occupation')
         ?.split(',')
         .map((s) => s.trim())
         .filter(Boolean) ?? [],
     // 真机修(2026-07-17): AI 可能在叙事字段内嵌套子标签（<appearance>→<physical>/<voice>等），
     // extractTag 原样返回 → 落库带 XML 污染前端渲染。stripInnerTags 剥子标签留纯文本。
-    background: stripInnerTags(extractTag(xml, 'background') ?? ''),
-    appearance: stripInnerTags(extractTag(xml, 'appearance') ?? ''),
-    clothing: stripInnerTags(extractTag(xml, 'clothing') ?? ''),
+    background: stripInnerTags(tagInner(xml, 'background') ?? ''),
+    appearance: stripInnerTags(tagInner(xml, 'appearance') ?? ''),
+    clothing: stripInnerTags(tagInner(xml, 'clothing') ?? ''),
     personality: stripInnerTags(
-      extractTag(xml, 'personality') ?? extractAttr(xml, 'personality', 'code') ?? '',
+      tagInner(xml, 'personality') ?? tagAttr(xml, 'personality', 'code') ?? '',
     ),
-    likes: stripInnerTags(extractTag(xml, 'likes') ?? ''),
-    thoughts: stripInnerTags(extractTag(xml, 'thoughts') ?? ''),
+    likes: stripInnerTags(tagInner(xml, 'likes') ?? ''),
+    thoughts: stripInnerTags(tagInner(xml, 'thoughts') ?? ''),
     ascension: {
-      enabled: (extractAttr(xml, 'ascension', 'enabled') ?? 'false') === 'true',
-      path: extractAttr(xml, 'ascension', 'path') ?? '',
-      description: extractAttr(xml, 'ascension', 'description') ?? '',
+      enabled: (tagAttr(xml, 'ascension', 'enabled') ?? 'false') === 'true',
+      path: tagAttr(xml, 'ascension', 'path') ?? '',
+      description: tagAttr(xml, 'ascension', 'description') ?? '',
       elements: ascElements,
       authorities: ascAuthorities,
       laws: ascLaws,
-      deityPosition: ascXML ? (extractTag(ascXML, 'deity_position') ?? '') : '',
+      deityPosition: ascXML ? (tagInner(ascXML, 'deity_position') ?? '') : '',
       divineKingdom: (() => {
         if (!ascXML) return { name: '', description: '' };
-        const kdXML = extractTagBlock(ascXML, 'kingdom');
+        const kdXML = tagInner(ascXML, 'kingdom');
         return {
-          name: kdXML
-            ? (extractAttr(kdXML, 'kingdom', 'name') ?? extractTag(kdXML, 'name') ?? '')
-            : '',
+          name: kdXML ? (tagAttr(kdXML, 'kingdom', 'name') ?? tagInner(kdXML, 'name') ?? '') : '',
           description: kdXML
-            ? (extractAttr(kdXML, 'kingdom', 'description') ??
-              extractTag(kdXML, 'description') ??
-              '')
+            ? (tagAttr(kdXML, 'kingdom', 'description') ?? tagInner(kdXML, 'description') ?? '')
             : '',
         };
       })(),
@@ -1111,7 +1118,7 @@ function parseCharGenXML(xml: string): CharGenOutput {
  */
 export function parseItemGenOutput(raw: string): ItemGenOutput {
   // 先尝试 XML
-  const xml = extractXML(raw, 'item_result');
+  const xml = tagBlock(raw, 'item_result');
   if (xml) {
     const parsed = parseItemGenXML(xml);
     // 真机兜底（2026-07-17）: AI 无视 XML 子元素教学、在 <item_result> 里塞 markdown JSON
@@ -1125,7 +1132,7 @@ export function parseItemGenOutput(raw: string): ItemGenOutput {
 
   // 回退到 JSON
   try {
-    const json = extractJSON(raw);
+    const json = extractJsonOrRaw(raw);
     const data = JSON.parse(json);
 
     return {
@@ -1146,7 +1153,7 @@ export function parseItemGenOutput(raw: string): ItemGenOutput {
  * 字段映射: rarity↔quality 互备（ItemGenOutput.equipment 用 quality，inventory 用 rarity）。
  */
 function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
-  const json = extractJSON(text);
+  const json = extractJsonOrRaw(text);
   if (!json) return null;
   let data: any;
   try {
@@ -1263,10 +1270,10 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
 
 /** 从 XML <item_result> 中解析物品数据 */
 function parseItemGenXML(xml: string): ItemGenOutput {
-  const skillsXML = extractTagBlock(xml, 'skills');
-  const equipmentXML = extractTagBlock(xml, 'equipment');
-  const inventoryXML = extractTagBlock(xml, 'inventory');
-  const ascensionXML = extractTagBlock(xml, 'ascension');
+  const skillsXML = tagInner(xml, 'skills');
+  const equipmentXML = tagInner(xml, 'equipment');
+  const inventoryXML = tagInner(xml, 'inventory');
+  const ascensionXML = tagInner(xml, 'ascension');
 
   const skills = skillsXML ? parseSkillsXML(skillsXML) : [];
   const equipment = equipmentXML ? parseEquipmentXML(equipmentXML) : [];
@@ -1276,8 +1283,8 @@ function parseItemGenXML(xml: string): ItemGenOutput {
   let elements: ItemGenOutput['elements'] | undefined;
   let authorities: ItemGenOutput['authorities'] | undefined;
   if (ascensionXML) {
-    const elementsXML = extractTagBlock(ascensionXML, 'elements');
-    const authoritiesXML = extractTagBlock(ascensionXML, 'authorities');
+    const elementsXML = tagInner(ascensionXML, 'elements');
+    const authoritiesXML = tagInner(ascensionXML, 'authorities');
     if (elementsXML) elements = parseElementsXML(elementsXML);
     if (authoritiesXML) authorities = parseAuthoritiesXML(authoritiesXML);
   }
@@ -1293,18 +1300,11 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
     const innerContent = m[2]?.trim() ?? '';
 
     // 提取 <effect name="...">content</effect> 子元素
-    const effects: Record<string, string> = {};
-    const effectMatches = innerContent.matchAll(/<effect\s+name="([^"]*)">([\s\S]*?)<\/effect>/g);
-    for (const em of effectMatches) {
-      effects[em[1]] = em[2]?.trim() ?? '';
-    }
+    // Q-05：宽松正则（name 不必是第一个属性）。严格版会把 <effect type="buff" name="x"> 静默丢掉
+    const effects = parseNamedChildren(innerContent, 'effect');
 
     // 提取 <script name="...">code</script> 子元素
-    const scripts: Record<string, string> = {};
-    const scriptMatches = innerContent.matchAll(/<script\s+name="([^"]*)">([\s\S]*?)<\/script>/g);
-    for (const sm of scriptMatches) {
-      scripts[sm[1]] = sm[2]?.trim() ?? '';
-    }
+    const scripts = parseNamedChildren(innerContent, 'script');
 
     // 战斗 v2 (M4 5.5b): 提取 <modifiers> 子元素 → Modifier[]，再校验接入（违规 warn 不中断）
     const rawModifiers = parseModifiersXML(innerContent);
@@ -1321,12 +1321,7 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
     const descSubTag = innerContent.match(/<description\b[^>]*>([\s\S]*?)<\/description>/);
     // 真机 fix(2026-07-18): 预剥离 <effect>/<script> 块（含内容），防止子标签文本泄漏进 description
     // 战斗 v2: 同步剥离 <modifiers> 块
-    const descText = innerContent
-      .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '')
-      .replace(/<modifiers\b[^>]*>[\s\S]*?<\/modifiers>/gi, '')
-      .replace(/<modifiers\b[^>]*\/>/gi, '')
-      .replace(/<automaton\b[^>]*>[\s\S]*?<\/automaton>/gi, '')
-      .replace(/<automaton\b[^>]*\/>/gi, '');
+    const descText = stripKnownChildBlocks(innerContent);
     const description = descSubTag
       ? descSubTag[1].trim()
       : descText.replace(/<\/?[a-z_][\w-]*[^>]*>/gi, '').trim();
@@ -1391,12 +1386,7 @@ function parseEquipmentXML(xml: string): ItemGenOutput['equipment'] {
     // 🆕 战斗 v3 (S3 2026-08-01): 提取 <automaton> 子元素 → EffectAutomaton[]
     const rawAutomata = parseAutomataXML(innerContent);
     // 预剥离 effect/script/modifiers 块，再 stripInnerTags 取纯文本描述
-    const descText = innerContent
-      .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '')
-      .replace(/<modifiers\b[^>]*>[\s\S]*?<\/modifiers>/gi, '')
-      .replace(/<modifiers\b[^>]*\/>/gi, '')
-      .replace(/<automaton\b[^>]*>[\s\S]*?<\/automaton>/gi, '')
-      .replace(/<automaton\b[^>]*\/>/gi, '');
+    const descText = stripKnownChildBlocks(innerContent);
     const qualityRaw = attrs['quality'];
     results.push({
       slot: attrs['slot'] ?? '饰品',
@@ -1444,12 +1434,7 @@ function parseInventoryXML(xml: string): ItemGenOutput['inventory'] {
     // 🆕 战斗 v3 (S3 2026-08-01): 提取 <automaton> 子元素 → EffectAutomaton[]
     const rawAutomata = parseAutomataXML(innerContent);
     // 预剥离 effect/script/modifiers 块，再 stripInnerTags 取纯文本描述
-    const descText = innerContent
-      .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '')
-      .replace(/<modifiers\b[^>]*>[\s\S]*?<\/modifiers>/gi, '')
-      .replace(/<modifiers\b[^>]*\/>/gi, '')
-      .replace(/<automaton\b[^>]*>[\s\S]*?<\/automaton>/gi, '')
-      .replace(/<automaton\b[^>]*\/>/gi, '');
+    const descText = stripKnownChildBlocks(innerContent);
     const rarityRaw = attrs['rarity'];
     results.push({
       name: attrs['name'] ?? '未命名物品',
@@ -1481,18 +1466,11 @@ function parseElementsXML(xml: string): NonNullable<ItemGenOutput['elements']> {
     const innerContent = m[2]?.trim() ?? '';
 
     // 提取 <effect name="...">content</effect> 子元素 → effectDescriptions
-    const effectDescriptions: Record<string, string> = {};
-    const effectMatches = innerContent.matchAll(/<effect\s+name="([^"]*)">([\s\S]*?)<\/effect>/g);
-    for (const em of effectMatches) {
-      effectDescriptions[em[1]] = em[2]?.trim() ?? '';
-    }
+    // Q-05：宽松正则（name 不必是第一个属性）—— 严格版会把 <effect type="x" name="y"> 静默丢掉
+    const effectDescriptions = parseNamedChildren(innerContent, 'effect');
 
     // 提取 <script name="...">code</script> 子元素 → scripts
-    const scripts: Record<string, string> = {};
-    const scriptMatches = innerContent.matchAll(/<script\s+name="([^"]*)">([\s\S]*?)<\/script>/g);
-    for (const sm of scriptMatches) {
-      scripts[sm[1]] = sm[2]?.trim() ?? '';
-    }
+    const scripts = parseNamedChildren(innerContent, 'script');
 
     // 描述 = innerContent 中去除 effect/script 标签后的纯文本
     const description = innerContent
@@ -1522,18 +1500,11 @@ function parseAuthoritiesXML(xml: string): NonNullable<ItemGenOutput['authoritie
     const innerContent = m[2]?.trim() ?? '';
 
     // 提取 <effect name="...">content</effect> 子元素 → effectDescriptions
-    const effectDescriptions: Record<string, string> = {};
-    const effectMatches = innerContent.matchAll(/<effect\s+name="([^"]*)">([\s\S]*?)<\/effect>/g);
-    for (const em of effectMatches) {
-      effectDescriptions[em[1]] = em[2]?.trim() ?? '';
-    }
+    // Q-05：宽松正则（name 不必是第一个属性）—— 严格版会把 <effect type="x" name="y"> 静默丢掉
+    const effectDescriptions = parseNamedChildren(innerContent, 'effect');
 
     // 提取 <script name="...">code</script> 子元素 → scripts
-    const scripts: Record<string, string> = {};
-    const scriptMatches = innerContent.matchAll(/<script\s+name="([^"]*)">([\s\S]*?)<\/script>/g);
-    for (const sm of scriptMatches) {
-      scripts[sm[1]] = sm[2]?.trim() ?? '';
-    }
+    const scripts = parseNamedChildren(innerContent, 'script');
 
     // 描述 = innerContent 中去除 effect/script 标签后的纯文本
     const description = innerContent
@@ -1633,101 +1604,8 @@ export function parseStatusEffectsXML(xmlBody: string): Array<{
   return results;
 }
 
-// ── XML helpers ──
-
-/** 从文本中提取指定 XML 标签的内容块 */
-function extractXML(text: string, tagName: string): string | null {
-  const regex = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i');
-  const match = text.match(regex);
-  return match ? match[0] : null;
-}
-
-/** 提取 XML 标签的文本内容 */
-function extractTag(xml: string, tagName: string): string | null {
-  const regex = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i');
-  const match = xml.match(regex);
-  return match ? match[1].trim() : null;
-}
-
-/**
- * 剥离字段值内 AI 自作主张的嵌套 XML 标签（真机修 2026-07-17）。
- * 如 <appearance> 内嵌 <physical>/<voice>/<presence>、<personality> 内嵌 <code>/<description>。
- * 成对标签 → 保留内容（换行拼接）；孤立/残缺标签 → 删除。最多展开 3 层嵌套。
- */
-function stripInnerTags(s: string): string {
-  if (!s || !/<[a-z_]/i.test(s)) return s;
-  let out = s;
-  for (let i = 0; i < 3 && /<([a-z_][\w-]*)\b[^>]*>[\s\S]*?<\/\1>/i.test(out); i++) {
-    out = out.replace(
-      /<([a-z_][\w-]*)\b[^>]*>([\s\S]*?)<\/\1>/gi,
-      (_m, _t, inner) => `${String(inner).trim()}\n`,
-    );
-  }
-  out = out.replace(/<\/?[a-z_][\w-]*[^>]*>/gi, ''); // 残留孤立标签清除
-  return out.replace(/\n{3,}/g, '\n\n').trim();
-}
-
-/** 提取 XML 标签中的属性值 */
-function extractAttr(xml: string, tagName: string, attrName: string): string | null {
-  const regex = new RegExp(`<${tagName}[^>]*?${attrName}\\s*=\\s*"([^"]*)"`, 'i');
-  const match = xml.match(regex);
-  if (match) return match[1];
-  // Try single quotes
-  const regex2 = new RegExp(`<${tagName}[^>]*?${attrName}\\s*=\\s*'([^']*)'`, 'i');
-  const match2 = xml.match(regex2);
-  return match2 ? match2[1] : null;
-}
-
-/** 提取标签内的子块 */
-function extractTagBlock(xml: string, tagName: string): string | null {
-  const regex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, 'i');
-  const match = xml.match(regex);
-  return match ? match[1].trim() : null;
-}
-
-/** 提取属性并转 int — 缺失/非法用缺省值，但显式的 0 保留（真机修: 意识体 0 属性合法） */
-function parseAttrIntKeepZero(xml: string, tag: string, attr: string, dflt: number): number {
-  const v = parseInt(extractAttr(xml, tag, attr) ?? '');
-  return Number.isNaN(v) ? dflt : v;
-}
-
-/** 解析属性字符串 key="val" key2="val2" */
-function parseAttrsStr(attrStr: string): Record<string, string> {
-  const attrs: Record<string, string> = {};
-  const regex = /(\w+)\s*=\s*"([^"]*)"|(\w+)\s*=\s*'([^']*)'/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(attrStr)) !== null) {
-    if (match[1] !== undefined) {
-      attrs[match[1]] = match[2];
-    } else if (match[3] !== undefined) {
-      attrs[match[3]] = match[4];
-    }
-  }
-  return attrs;
-}
-
-/**
- * 从可能含 markdown 代码块的文本中提取 JSON。
- * 处理 \`\`\`json ... \`\`\` 和 \`\`\` ... \`\`\` 包裹。
- */
-function extractJSON(text: string): string {
-  // 尝试匹配 \`\`\`json ... \`\`\`
-  const jsonBlockMatch = text.match(/```json\s*([\s\S]*?)```/);
-  if (jsonBlockMatch) return jsonBlockMatch[1].trim();
-
-  // 尝试匹配 \`\`\` ... \`\`\`
-  const codeBlockMatch = text.match(/```\s*([\s\S]*?)```/);
-  if (codeBlockMatch) return codeBlockMatch[1].trim();
-
-  // 查找第一个 { 到最后一个 }
-  const firstBrace = text.indexOf('{');
-  const lastBrace = text.lastIndexOf('}');
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    return text.slice(firstBrace, lastBrace + 1);
-  }
-
-  return text;
-}
+// XML / JSON 解析工具统一在 agent-xml.ts 与 model-json.ts（Q-05）——
+// 本文件曾自带 8 个 helper，与 craft-gen-chain 的同名函数语义相反（见 agent-xml.ts 文件头）。
 
 /**
  * 从 AgentContext 中解析玩家角色的 location。

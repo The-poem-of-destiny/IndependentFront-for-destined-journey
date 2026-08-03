@@ -12,6 +12,8 @@
 import type { MemoryRecord, AgentContext } from './types';
 import { getMemories, saveMemory } from './database';
 import { computeEmbedding } from './memory-store';
+// Q-05：从模型输出抢救 JSON 的唯一入口
+import { parseModelJson } from './model-json';
 
 // ========== 常量 ==========
 
@@ -83,46 +85,27 @@ export interface MemorySummaryOutput {
   timeRangeEnd: string;
 }
 
-/** 解析 memory_summary Agent 的 JSON 输出（先过 stripJsonEnvelope 剥壳，Q-03） */
+/**
+ * 解析 memory_summary Agent 的 JSON 输出。
+ *
+ * Q-05：剥壳与兜底分家 —— `model-json` 认四种包裹形态，这里只留一条校验口径。
+ * 旧实现主/兜底两个分支的必填字段判据不一样（主分支要求 keywords 是数组、兜底分支不要求），
+ * 同一份输出走哪条路结果不同。**统一到严格的那份**：keywords 不是数组即整条不落库，
+ * 与 Q-03 裁定「hiddenLine 缺失不落库」同一口径 —— 记忆宁缺毋滥。
+ */
 export function parseMemorySummaryOutput(rawOutput: string): MemorySummaryOutput | null {
-  const raw = stripJsonEnvelope(rawOutput);
-  try {
-    // 尝试直接解析 JSON
-    const parsed = JSON.parse(raw) as MemorySummaryOutput;
-
-    if (!parsed.content || !parsed.hiddenLine || !Array.isArray(parsed.keywords)) {
-      return null;
-    }
-
+  return parseModelJson<MemorySummaryOutput>(rawOutput, (p) => {
+    const o = (p ?? {}) as Partial<MemorySummaryOutput>;
+    if (!o.content || !o.hiddenLine || !Array.isArray(o.keywords)) return null;
     return {
-      content: parsed.content,
-      hiddenLine: parsed.hiddenLine,
-      keywords: parsed.keywords.slice(0, 8),
-      importance: Math.max(1, Math.min(10, parsed.importance || 5)),
-      timeRangeStart: parsed.timeRangeStart || '未知',
-      timeRangeEnd: parsed.timeRangeEnd || '未知',
+      content: o.content,
+      hiddenLine: o.hiddenLine,
+      keywords: o.keywords.slice(0, 8),
+      importance: Math.max(1, Math.min(10, o.importance || 5)),
+      timeRangeStart: o.timeRangeStart || '未知',
+      timeRangeEnd: o.timeRangeEnd || '未知',
     };
-  } catch {
-    // 尝试从文本中提取 JSON
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-
-    try {
-      const parsed = JSON.parse(jsonMatch[0]) as MemorySummaryOutput;
-      if (!parsed.content || !parsed.hiddenLine) return null;
-
-      return {
-        content: parsed.content,
-        hiddenLine: parsed.hiddenLine,
-        keywords: Array.isArray(parsed.keywords) ? parsed.keywords.slice(0, 8) : [],
-        importance: Math.max(1, Math.min(10, parsed.importance || 5)),
-        timeRangeStart: parsed.timeRangeStart || '未知',
-        timeRangeEnd: parsed.timeRangeEnd || '未知',
-      };
-    } catch {
-      return null;
-    }
-  }
+  });
 }
 
 // ========== 总结 & 保存 ==========

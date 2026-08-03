@@ -10,6 +10,8 @@
 
 import type { PlotOutline, PlotSettings, PlotEvent, CharacterState } from './types';
 import { getLatestPlotOutline, savePlotOutline, getPlotEvents, savePlotEvents } from './database';
+// Q-05：从模型输出抢救 JSON 的唯一入口
+import { parseModelJson } from './model-json';
 
 // ========== 大纲生成 ==========
 
@@ -128,17 +130,10 @@ function normalizeOutlineJson(parsed: RawOutlineJson): ParsedOutlineOutput | nul
 
 /** 解析 plot_outline Agent 的 JSON 输出 */
 export function parseOutlineJson(rawOutput: string): ParsedOutlineOutput | null {
-  try {
-    return normalizeOutlineJson(JSON.parse(rawOutput) as RawOutlineJson);
-  } catch {
-    const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-    try {
-      return normalizeOutlineJson(JSON.parse(jsonMatch[0]) as RawOutlineJson);
-    } catch {
-      return null;
-    }
-  }
+  // Q-05：剥壳走 model-json（比旧的裸 `/\{[\s\S]*\}/` 多认围栏与 <json> 标签）
+  return parseModelJson<ParsedOutlineOutput>(rawOutput, (p) =>
+    normalizeOutlineJson(p as RawOutlineJson),
+  );
 }
 
 /** @deprecated 使用 parseOutlineJson 或 tryParseOutline */

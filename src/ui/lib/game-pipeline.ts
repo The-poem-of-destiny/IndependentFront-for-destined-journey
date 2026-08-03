@@ -8,6 +8,8 @@
  * 通过 onStoryChunk 将累计的玩家可见投影实时推送到前端 UI。
  */
 import { AgentOrchestrator } from '@engine/agent-orchestrator';
+// Q-05：从模型输出抢救 JSON 的唯一入口（裸 / 围栏 / <json> / 前后夹带解说四种形态）
+import { extractJsonPayload } from '@engine/model-json';
 import type { OrchestratorOptions, OrchestratorEvents } from '@engine/agent-orchestrator';
 import { DEFAULT_AGENT_PIPELINE } from '@engine/types';
 import type {
@@ -1184,10 +1186,14 @@ export class GamePipeline {
     }
   }
 
-  /** 步5: 从 rawResponse 提取 <json> 块内容（兼容裸 JSON） */
+  /**
+   * 步5: 从 rawResponse 抠 JSON。
+   *
+   * Q-05：改走 `extractJsonPayload` —— 除了原来认的 `<json>` 标签，还认裸 JSON、
+   * markdown 围栏、以及前后夹带解说文字的贪婪切片。抠不到时退回原文（旧行为）。
+   */
   private static extractJsonBlock(raw: string): string {
-    const match = raw.match(/<json>([\s\S]*?)<\/json>/);
-    return match ? match[1].trim() : raw;
+    return extractJsonPayload(raw) ?? raw;
   }
 
   /**
@@ -1202,8 +1208,7 @@ export class GamePipeline {
     const jsonStr = GamePipeline.extractJsonBlock(raw);
 
     try {
-      const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-      const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : jsonStr);
+      const parsed = JSON.parse(jsonStr);
       const background: string = parsed.relevantBackground || '';
       const directive: string = parsed.directive || parsed.outlineRelevance || '';
       const blocks: string[] = [];

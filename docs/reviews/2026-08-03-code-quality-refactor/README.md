@@ -50,7 +50,7 @@
 | [步骤 1](roadmap.md) 清尸体 + 补工具链网  | Q-04、Q-15             | ✅   | 四批僵尸清完 + 补网与清仓两个 PR 都落地                                               |
 | [步骤 2](roadmap.md) 修静默出错的生产路径 | Q-01、Q-02             | ✅   | 两条全部兑现（`a0c3d5d`），骰子那条建议仍需真机打一场复核                             |
 | [步骤 3](roadmap.md) 三处去留裁定         | Q-07、Q-03、Q-30       | ✅   | 三条裁定均已拍板并落地（Q-07 含 emit 源 + 效果回收 + 战斗内 12/18 显式化）            |
-| [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | ⬜   | —                                                                                     |
+| [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | 🔄   | Q-13 完成；Q-05 只剩 marker-protocol 走表化；Q-14 / Q-17 未开始                       |
 | [步骤 5](roadmap.md) 数据路径去重         | Q-08、Q-16、Q-12       | ⬜   | 抽查：三份 `*-migration.ts` 与 `variables.ts` / `vars-merger.ts` 两个僵尸宿主原样在库 |
 | [步骤 6](roadmap.md) 品质体系与设置真源   | Q-11、Q-18、Q-06       | ⬜   | 抽查：`ScenePanel.vue:134` 的 `TIER_COLOR` 仍是 6 元、仍漏「唯一」，T7 仍描成灰       |
 | [步骤 7](roadmap.md) EJS 能力面 + Legacy  | Q-09、Q-10、Q-27       | ⬜   | 抽查：`ejs-backend.ts` 仍在；退役仍卡在真机走查这一前置                               |
@@ -59,18 +59,19 @@
 
 ### 已落地的提交
 
-| 提交      | 覆盖                     | 说明                                                                                                                                                                                                           |
-| --------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `a0c3d5d` | Q-01、Q-02               | `drawDice` 改必填依赖、删 `sysDrawSixty`；`applyTimeAdvance` 的 patches 末尾自提交                                                                                                                             |
-| `cfc9cd2` | Q-04(1-3 批)、Q-15(部分) | 三批僵尸删除 + 文档同步；新增 `tsconfig.tools.json`                                                                                                                                                            |
-| `ecd68a1` | —                        | prettier 修复（CI `format:check` 红灯）                                                                                                                                                                        |
-| `9fd5a3b` | Q-30                     | 数据拆 `start-catalog-data.ts`；`Rarity` → `CatalogRarityCode`；加防分叉闸门测试                                                                                                                               |
-| `0a6e7b6` | Q-03                     | 裁定：hiddenLine 保留 + 门槛统一 100 字 + embedding 接线；MEM 编号收敛到一套发号器                                                                                                                             |
-| `eab3729` | Q-07(部分)               | 裁定：完整接线；新增 `effect-wiring.ts`，装备/卸下/存档加载三处接上注册面                                                                                                                                      |
-| `ebb2cf9` | —                        | 本进度追踪面                                                                                                                                                                                                   |
-| _本次_    | Q-07 ✅                  | 第二半：`commitChatState` 发事件 + `SubscriptionManager.setEffectSink` 回收效果（反应轮上限 3）；`runWindow` 消掉 8 处静默丢弃；6 个无求值器窗口以 `WINDOW_NOT_WIRED` 编译期掉落                               |
-| `316acb8` | Q-15 ✅                  | 补网（`typecheck:tools` 进 CI / lint·format 扩到 server·tests·scripts）+ 清仓；补网当场逮到三处过期，含 CharGenSystemCard 把 `string[]` 当字典渲染                                                             |
-| _本次_    | Q-04 ✅                  | 第四批：删 `variableContext`/`variableInstruction` 闭包与 `buildFallbackMessages`，`DEFAULT_TEMPLATES` 补齐三个退役 Agent；顺带删净 `MatchedEntry`/`lorebookMatches`/`targetCharacterId` 与 `buildZoneSection` |
+| 提交      | 覆盖                     | 说明                                                                                                                                                                                                              |
+| --------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `a0c3d5d` | Q-01、Q-02               | `drawDice` 改必填依赖、删 `sysDrawSixty`；`applyTimeAdvance` 的 patches 末尾自提交                                                                                                                                |
+| `cfc9cd2` | Q-04(1-3 批)、Q-15(部分) | 三批僵尸删除 + 文档同步；新增 `tsconfig.tools.json`                                                                                                                                                               |
+| `ecd68a1` | —                        | prettier 修复（CI `format:check` 红灯）                                                                                                                                                                           |
+| `9fd5a3b` | Q-30                     | 数据拆 `start-catalog-data.ts`；`Rarity` → `CatalogRarityCode`；加防分叉闸门测试                                                                                                                                  |
+| `0a6e7b6` | Q-03                     | 裁定：hiddenLine 保留 + 门槛统一 100 字 + embedding 接线；MEM 编号收敛到一套发号器                                                                                                                                |
+| `eab3729` | Q-07(部分)               | 裁定：完整接线；新增 `effect-wiring.ts`，装备/卸下/存档加载三处接上注册面                                                                                                                                         |
+| `ebb2cf9` | —                        | 本进度追踪面                                                                                                                                                                                                      |
+| _本次_    | Q-05 🔄、Q-13 ✅         | 新增 `agent-xml.ts` + `model-json.ts` 两个共享缝（45 条测试）；修 plot_post_check 兜底分支静默空转、item_gen 三处严格 effect 正则丢字段；14 处 `as any` 全删并补出 3 处真类型缺口。Q-05 剩 marker-protocol 走表化 |
+| _本次_    | Q-07 ✅                  | 第二半：`commitChatState` 发事件 + `SubscriptionManager.setEffectSink` 回收效果（反应轮上限 3）；`runWindow` 消掉 8 处静默丢弃；6 个无求值器窗口以 `WINDOW_NOT_WIRED` 编译期掉落                                  |
+| `316acb8` | Q-15 ✅                  | 补网（`typecheck:tools` 进 CI / lint·format 扩到 server·tests·scripts）+ 清仓；补网当场逮到三处过期，含 CharGenSystemCard 把 `string[]` 当字典渲染                                                                |
+| _本次_    | Q-04 ✅                  | 第四批：删 `variableContext`/`variableInstruction` 闭包与 `buildFallbackMessages`，`DEFAULT_TEMPLATES` 补齐三个退役 Agent；顺带删净 `MatchedEntry`/`lorebookMatches`/`targetCharacterId` 与 `buildZoneSection`    |
 
 ## 结论摘要
 
@@ -152,7 +153,7 @@
 | [Q-02](findings-t1-wiring-gap.md#q-02)    | 高     | T1   | `applyTimeAdvance` 算出的 patches 在唯一调用点被丢弃，`onRemove` 脚本在生产中等于没写    | 步骤 2   | ✅   |
 | [Q-03](findings-t1-wiring-gap.md#q-03)    | 高     | T1   | 记忆子系统被 UI 层重新实现一遍，`memory-summarizer.ts` 生产零调用，两套 MEM 编号不兼容   | 步骤 3   | ✅   |
 | [Q-04](findings-t4-corpses.md#q-04)       | 中     | T4   | 五处僵尸模块零生产引用却仍带测试与提示词正文                                             | 步骤 1   | ✅   |
-| [Q-05](findings-t2-ai-boundary.md#q-05)   | 高     | T2   | AI 输出解析没有共享缝：15+ 份拷贝，同名 `extractTag` 语义相反，effect 正则已漂出数据丢失 | 步骤 4   | ⬜   |
+| [Q-05](findings-t2-ai-boundary.md#q-05)   | 高     | T2   | AI 输出解析没有共享缝：15+ 份拷贝，同名 `extractTag` 语义相反，effect 正则已漂出数据丢失 | 步骤 4   | 🔄   |
 | [Q-06](findings-t3-single-source.md#q-06) | 中     | T3   | 设置有两个真源，只有两个字段被手写桥搬运，引擎侧读到的是永远停在默认值的影子配置         | 步骤 6   | ⬜   |
 | [Q-07](findings-t1-wiring-gap.md#q-07)    | 高     | T1   | 两层效果系统都是空的：13 个「封闭枚举」窗口惰性，emitChain 事件层从未被实例化            | 步骤 3   | ✅   |
 | [Q-08](findings-t3-single-source.md#q-08) | 中     | T3   | 「六步迁移」复制了三遍且已漂移——唯一「搞砸即用户数据不可恢复」的路径是复制粘贴           | 步骤 5   | ⬜   |
@@ -160,7 +161,7 @@
 | [Q-10](findings-t4-corpses.md#q-10)       | 中     | T4   | Legacy EJS 后端的两处遗产：缓存只服务停用路径（生产零缓存）、同步渲染路径恒被闸门关死    | 步骤 7   | ⬜   |
 | [Q-11](findings-t3-single-source.md#q-11) | 中     | T3   | 7 级品质有 4 套类型与 5 份颜色表；`ScenePanel` 漏「唯一」项，T7 角色一律描成灰色         | 步骤 6   | ⬜   |
 | [Q-12](findings-t3-single-source.md#q-12) | 中     | T3   | 两个同名 `applyVarsPatch` 契约互斥，其中一份的宿主已是零引用僵尸                         | 步骤 5   | ⬜   |
-| [Q-13](findings-t2-ai-boundary.md#q-13)   | 中     | T2   | `assembleCharacterState` 里 14 处无谓的 `as any`，同一字面量一半字段带转型               | 步骤 4   | ⬜   |
+| [Q-13](findings-t2-ai-boundary.md#q-13)   | 中     | T2   | `assembleCharacterState` 里 14 处无谓的 `as any`，同一字面量一半字段带转型               | 步骤 4   | ✅   |
 | [Q-14](findings-t2-ai-boundary.md#q-14)   | 中     | T2   | 失败回执三处口径各异，落库失败会伪装成解析失败                                           | 步骤 4   | ⬜   |
 | [Q-15](findings-t6-safety-net.md#q-15)    | 中     | T6   | 15 个源文件在 tsc/ESLint/Prettier 三张网之外，59 个 tracked 临时脚本与 ~120MB 大文件     | 步骤 1   | ✅   |
 | [Q-16](findings-t3-single-source.md#q-16) | 中     | T3   | store 层没有共享工具层：detach helper 复制 8 份，两个同名 `toRow` 语义还不同             | 步骤 5   | ⬜   |

@@ -35,6 +35,9 @@ import { buildAgentMessagesAsync } from './agent-templates';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
 import { normalizeSlot, normalizeItemType } from './field-enums';
 import type { ToolExecutionContext } from './types';
+// Q-05：XML / JSON 解析的唯一工具面（参数顺序一律 (source, tag)）
+import { tagInner, tagBlock, parseAttrsStr } from './agent-xml';
+import { extractJsonPayload } from './model-json';
 
 // ========== Types ==========
 
@@ -372,13 +375,13 @@ export async function callItemGenForCraft(
  */
 export function parseCraftResultXML(xml: string): CraftGenOutput {
   // 尝试提取 <craft_result> XML
-  const craftTag = extractTag('craft_result', xml);
+  const craftTag = tagBlock(xml, 'craft_result');
   if (craftTag) {
     return parseCraftResultTag(craftTag);
   }
 
   // 尝试 JSON 兜底
-  const json = extractJSON(xml);
+  const json = extractJsonPayload(xml);
   if (json) {
     try {
       const parsed = JSON.parse(json);
@@ -582,20 +585,20 @@ export async function runCraftGenChain(
  * 解析 <craft_result> 标签内容
  */
 function parseCraftResultTag(xml: string): CraftGenOutput {
-  const success = extractTagContent('success', xml)?.trim().toLowerCase() === 'true';
-  const productName = extractTagContent('product_name', xml)?.trim() ?? '';
-  const quality = (extractTagContent('quality', xml)?.trim() ?? '普通') as QualityLevel;
-  const rating = (extractTagContent('rating', xml)?.trim() ?? '失败') as CraftRating;
-  const checkSummary = extractTagContent('check_summary', xml)?.trim() ?? '';
-  const perfectionBonus = extractTagContent('perfection_bonus', xml)?.trim() || undefined;
-  const narrative = extractTagContent('narrative', xml)?.trim() ?? '';
+  const success = tagInner(xml, 'success')?.trim().toLowerCase() === 'true';
+  const productName = tagInner(xml, 'product_name')?.trim() ?? '';
+  const quality = (tagInner(xml, 'quality')?.trim() ?? '普通') as QualityLevel;
+  const rating = (tagInner(xml, 'rating')?.trim() ?? '失败') as CraftRating;
+  const checkSummary = tagInner(xml, 'check_summary')?.trim() ?? '';
+  const perfectionBonus = tagInner(xml, 'perfection_bonus')?.trim() || undefined;
+  const narrative = tagInner(xml, 'narrative')?.trim() ?? '';
 
   // 解析 <item_requests> 块
-  const itemRequestsXML = extractTagContent('item_requests', xml);
+  const itemRequestsXML = tagInner(xml, 'item_requests');
   const itemRequests = itemRequestsXML ? parseItemRequestsXML(itemRequestsXML) : [];
 
   // 解析 <craft_params>
-  const craftParamsXML = extractTagContent('craft_params', xml);
+  const craftParamsXML = tagInner(xml, 'craft_params');
   const craftParams = parseCraftParams(craftParamsXML ?? '');
 
   return {
@@ -651,82 +654,20 @@ function parseItemRequestsJSON(parsed: any): ItemRequest[] {
  */
 function parseCraftParams(xml: string): CraftGenOutput['craftParams'] {
   return {
-    industry: (extractTagContent('industry', xml)?.trim() ?? '锻造') as CraftIndustry,
-    targetQuality: (extractTagContent('target_quality', xml)?.trim() ?? '普通') as QualityLevel,
-    stage: extractTagContent('stage', xml)?.trim() ?? '成品',
-    quantity: parseInt(extractTagContent('quantity', xml)?.trim() ?? '1', 10) || 1,
-    materials: extractTagContent('materials', xml)?.trim() ?? '',
-    expGained: parseInt(extractTagContent('exp_gained', xml)?.trim() ?? '0', 10) || 0,
-    fpGained: parseInt(extractTagContent('fp_gained', xml)?.trim() ?? '0', 10) || 0,
+    industry: (tagInner(xml, 'industry')?.trim() ?? '锻造') as CraftIndustry,
+    targetQuality: (tagInner(xml, 'target_quality')?.trim() ?? '普通') as QualityLevel,
+    stage: tagInner(xml, 'stage')?.trim() ?? '成品',
+    quantity: parseInt(tagInner(xml, 'quantity')?.trim() ?? '1', 10) || 1,
+    materials: tagInner(xml, 'materials')?.trim() ?? '',
+    expGained: parseInt(tagInner(xml, 'exp_gained')?.trim() ?? '0', 10) || 0,
+    fpGained: parseInt(tagInner(xml, 'fp_gained')?.trim() ?? '0', 10) || 0,
   };
 }
 
-// ========== Reused XML Utilities ==========
-// (mirrors char-gen-agent.ts helpers for self-contained operation)
-
-/**
- * 提取 XML 标签内容 (不包含标签本身)
- */
-function extractTagContent(tagName: string, xml: string): string | null {
-  const regex = new RegExp(
-    `<${escapeRegex(tagName)}[^>]*?>([\\s\\S]*?)<\\/${escapeRegex(tagName)}>`,
-    'i',
-  );
-  const match = regex.exec(xml);
-  return match ? match[1] : null;
-}
-
-/**
- * 提取完整的 XML 标签块 (含标签)
- */
-function extractTag(tagName: string, text: string): string | null {
-  const regex = new RegExp(
-    `<${escapeRegex(tagName)}[^>]*?>[\\s\\S]*?<\\/${escapeRegex(tagName)}>`,
-    'i',
-  );
-  const match = regex.exec(text);
-  return match ? match[0] : null;
-}
-
-/**
- * 从文本中提取 JSON (支持 markdown code block 和裸花括号)
- */
-function extractJSON(text: string): string | null {
-  // 尝试 ```json ... ``` 包裹
-  const codeBlock = /```(?:json)?\s*\n?([\s\S]*?)\n?```/g;
-  let match = codeBlock.exec(text);
-  while (match) {
-    const content = match[1].trim();
-    if (content.startsWith('{') || content.startsWith('[')) return content;
-    match = codeBlock.exec(text);
-  }
-
-  // 尝试裸花括号 (最外层)
-  const braceStart = text.indexOf('{');
-  const braceEnd = text.lastIndexOf('}');
-  if (braceStart !== -1 && braceEnd > braceStart) {
-    return text.slice(braceStart, braceEnd + 1);
-  }
-
-  return null;
-}
-
-/**
- * 解析 XML 属性字符串 "key1="val1" key2="val2"" 为 Record
- */
-function parseAttrsStr(attrsStr: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  const regex = /(\w+)="([^"]*)"/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(attrsStr)) !== null) {
-    result[match[1]] = match[2];
-  }
-  return result;
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+// XML / JSON 解析工具统一在 agent-xml.ts 与 model-json.ts（Q-05）——
+// 本文件曾自带一套镜像 helper，其中 extractTag 与 char-gen-agent 的同名函数**语义相反**：
+// 这边 (tag, text) 返回含标签整块，那边 (xml, tag) 返回标签内文。签名同为 (string, string)，
+// 连定义带调用一起复制过去编译照过，运行时把整块 XML 当字段值写进档案。
 
 // ========== Lazy Import for parseItemGenOutput ==========
 

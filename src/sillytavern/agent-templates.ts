@@ -295,23 +295,11 @@ function reportEjsFallback(
   }
 }
 
-function formatCharacters(ctx: AgentContext): string {
-  if (!ctx.characters?.length) return '无角色数据';
-  return ctx.characters
-    .map(
-      (c) =>
-        `[${c.type}:${c.name}] Lv.${c.level} ${c.tierName} | HP:${c.hp}/${c.maxHp} MP:${c.mp}/${c.maxMp} | 位置:${c.location} | ${c.currentAction || '待机中'}`,
-    )
-    .join('\n');
-}
-
-function formatPlotEvents(ctx: AgentContext): string {
-  if (!ctx.plotEvents?.length) return '暂无活跃剧情事件';
-  return ctx.plotEvents
-    .filter((e) => e.status === 'active' || e.status === 'pending')
-    .map((e) => `[${e.id}] ${e.title} (${e.status})\n${e.description.slice(0, 200)}`)
-    .join('\n---\n');
-}
+// 🪦 Q-05：`formatCharacters` / `formatPlotEvents` 已删除。它们的最后调用点是 Q-04 删掉的
+//    提示词闭包，此后是死代码；placeholder-registry 里那两份「Mirror of agent-templates」
+//    才是现役实现（`{{CHARACTER_STATE}}` / `{{PLOT_EVENTS}}` 走它们）。
+//    注意两边的空态串本就不同（这里返回「无角色数据」哨兵，placeholder 侧返回空串让占位符
+//    渲染为空）——不是抄漏，别「统一」回来。本文件仍在用的是下面的 formatPlotEventsFull。
 
 function formatGameTime(gt?: GameTime): string {
   if (!gt) return '';

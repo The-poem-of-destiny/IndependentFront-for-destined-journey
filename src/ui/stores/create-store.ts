@@ -18,6 +18,8 @@ import type {
   AgentConfig,
 } from '@engine/types';
 import { TIER_CONFIGS, calcResources } from '@engine/tier-constants';
+// Q-05：从模型输出抢救 JSON 的唯一入口
+import { extractJsonPayload } from '@engine/model-json';
 import { getBloodlineList } from '@engine/bloodlines';
 import { AgentClient } from '@engine/agent-client';
 import {
@@ -1034,11 +1036,11 @@ export const useCreateStore = defineStore('create', () => {
         suggestions: extractTags(scope, 'suggestion'),
       };
     }
-    // 2. legacy JSON 兜底
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) return null;
+    // 2. legacy JSON 兜底（Q-05：剥壳走 model-json，多认围栏与 <json> 标签）
+    const payload = extractJsonPayload(raw);
+    if (!payload) return null;
     try {
-      const parsed = JSON.parse(m[0]);
+      const parsed = JSON.parse(payload);
       const sc = parsed?.selfCritique;
       if (!sc || typeof sc.score !== 'number') return null;
       return {

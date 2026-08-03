@@ -16,7 +16,7 @@
  * - NARRATIVE 使用 defaultHistoryLayers / defaultHistorySlice（从 agent-templates 导入）
  * - CHARACTER_STATE 使用 buildZoneContext + filterZoneContent（从 context-visibility 导入）
  * - LORE_BOOK 使用 worldbook-loader 的 getEntriesForAgent / filterActiveEntries / renderWorldBookEntries
- * - formatHistory / formatCharacters / formatMemories / formatPlotEvents 等私有函数在此模块内镜像实现
+ * - formatHistory / formatCharacters / formatMemories / formatPlotEvents 是本模块私有实现（Q-05 起不再是镜像）
  */
 
 import type {
@@ -67,7 +67,7 @@ function bookNameOfUid(uid: number): string {
   return '?';
 }
 
-/** Mirror of agent-templates.ts formatCharacters (private, not exported) */
+/** 角色状态一行摘要（Q-05 起是**唯一**实现——agent-templates 那份随死闭包一起删了） */
 function formatCharacters(ctx: AgentContext): string {
   if (!ctx.characters?.length) return '';
   return ctx.characters
@@ -78,7 +78,7 @@ function formatCharacters(ctx: AgentContext): string {
     .join('\n');
 }
 
-/** Mirror of agent-templates.ts formatMemories (private, not exported) */
+/** 记忆条目格式化（Q-05 起是唯一实现） */
 function formatMemoriesEntries(ctx: AgentContext, topK?: number): string {
   const memories = ctx.memories ?? [];
   if (memories.length === 0) return '';
@@ -91,7 +91,7 @@ function formatMemoriesEntries(ctx: AgentContext, topK?: number): string {
     .join('\n---\n');
 }
 
-/** Mirror of agent-templates.ts formatPlotEvents (private, not exported) */
+/** 活跃剧情事件格式化（Q-05 起是唯一实现） */
 function formatPlotEventsEntries(ctx: AgentContext): string {
   const events = ctx.plotEvents ?? [];
   if (events.length === 0) return '';

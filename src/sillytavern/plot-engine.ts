@@ -11,6 +11,8 @@
 
 import type { PlotEvent, PlotOutline, MemoryRecord, CharacterState } from './types';
 import { getPlotEvents, savePlotEvent, savePlotEvents } from './database';
+// Q-05：从模型输出抢救 JSON 的唯一入口
+import { parseModelJson, asArray, asString } from './model-json';
 import {
   getActiveOutline,
   updateOutlineVersion,
@@ -81,28 +83,17 @@ export interface PreCheckResult {
 
 /** 解析 plot_pre_check Agent 的 JSON 输出 */
 export function parsePreCheckOutput(rawOutput: string): PreCheckResult | null {
-  try {
-    const parsed = JSON.parse(rawOutput) as PreCheckResult;
-    if (!Array.isArray(parsed.triggeredEvents)) return null;
+  // Q-05：剥壳交给 model-json（裸/围栏/<json>/前后夹带解说四种形态一处处理），
+  // 这里只留兜底口径 —— 成功与失败两条路都过同一个 normalize，长不出「两个分支两套兜底」
+  return parseModelJson<PreCheckResult>(rawOutput, (p) => {
+    const o = (p ?? {}) as Partial<PreCheckResult>;
+    if (!Array.isArray(o.triggeredEvents)) return null;
     return {
-      triggeredEvents: parsed.triggeredEvents.filter((e) => e.title),
-      relevantBackground: parsed.relevantBackground || '',
-      outlineRelevance: parsed.outlineRelevance || '',
+      triggeredEvents: o.triggeredEvents.filter((e) => e?.title),
+      relevantBackground: asString(o.relevantBackground),
+      outlineRelevance: asString(o.outlineRelevance),
     };
-  } catch {
-    const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-    try {
-      const parsed = JSON.parse(jsonMatch[0]) as PreCheckResult;
-      return {
-        triggeredEvents: parsed.triggeredEvents?.filter((e) => e.title) || [],
-        relevantBackground: parsed.relevantBackground || '',
-        outlineRelevance: parsed.outlineRelevance || '',
-      };
-    } catch {
-      return null;
-    }
-  }
+  });
 }
 
 /** 按标题在本存档事件中唯一匹配（精确匹配优先，匹配不到返回 undefined 并 warn） */
@@ -197,26 +188,26 @@ export interface PostCheckResult {
   }>;
 }
 
-/** 解析 plot_post_check Agent 的 JSON 输出 */
+/**
+ * 解析 plot_post_check Agent 的 JSON 输出。
+ *
+ * 🔴 Q-05 修的就是这里：旧实现主分支逐字段兜底、catch 分支是裸的
+ * `JSON.parse(jsonMatch[0]) as PostCheckResult`。而 `postCheckPlot` 无守卫地
+ * 遍历 `eventUpdates` / `newChildEvents` —— 缺键输出走兜底路径直接 TypeError，
+ * 再被 `game-pipeline.persistPlotPostCheck` 的 catch 吞成 console.warn，
+ * **整条剧情后检查静默空转**。现在只有一条兜底口径。
+ */
 export function parsePostCheckOutput(rawOutput: string): PostCheckResult | null {
-  try {
-    const parsed = JSON.parse(rawOutput) as PostCheckResult;
+  return parseModelJson<PostCheckResult>(rawOutput, (p) => {
+    const o = (p ?? {}) as Partial<PostCheckResult>;
     return {
-      worldLineChanged: parsed.worldLineChanged || false,
-      changeLevel: parsed.changeLevel || 'none',
-      outlineChanges: parsed.outlineChanges || { action: 'none', changes: '' },
-      eventUpdates: Array.isArray(parsed.eventUpdates) ? parsed.eventUpdates : [],
-      newChildEvents: Array.isArray(parsed.newChildEvents) ? parsed.newChildEvents : [],
+      worldLineChanged: o.worldLineChanged || false,
+      changeLevel: o.changeLevel || 'none',
+      outlineChanges: o.outlineChanges || { action: 'none', changes: '' },
+      eventUpdates: asArray<PostCheckResult['eventUpdates'][number]>(o.eventUpdates),
+      newChildEvents: asArray<PostCheckResult['newChildEvents'][number]>(o.newChildEvents),
     };
-  } catch {
-    const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-    try {
-      return JSON.parse(jsonMatch[0]) as PostCheckResult;
-    } catch {
-      return null;
-    }
-  }
+  });
 }
 
 /**
