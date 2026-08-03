@@ -8,16 +8,10 @@
 
 该边界隔离应用 DOM、应用 storage/Dexie 存档和 API Key；form、popup、download、top navigation 与嵌套 frame 也仍被阻断，应用自有 `/api` 拒绝 `Origin: null`。正则唯一可持久化的能力是 Dexie v16 `regexStorage` 代表的共享不可信命名空间，不是任意 IndexedDB 或应用表访问。父页面 DOM 与任意宿主 API 依赖会被显式报告为降级；外部来源则不再视为降级。规则向远程/本地网络发请求，以及外传它可见的正文与 regex-namespace 数据，是当前威胁模型明确接受的暴露。
 
-## 快照与复现
+## 一次性快照
 
 抓取只使用匿名公共 API，不发送 token、cookie、API Key，也不访问草稿或账户接口。
-
-```powershell
-node scripts/fetch-workshop-reference.mjs --apply --concurrency 10
-node scripts/analyze-workshop-reference.mjs --apply
-```
-
-两支脚本默认 dry-run；只有 `--apply` 写文件。完整响应、manifest、SHA-256、逐项目正则与分析结果放在 `reference/workshop-reference/`，该目录已 gitignore，避免把 41.6 MB 动态外部语料提交进仓库。
+这是为本轮兼容性审查保留的本地一次性证据，不提供持续抓取或分析工具。完整响应、manifest、SHA-256、逐项目正则与分析结果放在 `reference/workshop-reference/`，该目录已 gitignore，避免把 41.6 MB 动态外部语料提交进仓库。
 
 快照完整性：
 
