@@ -58,6 +58,12 @@ export interface ChatWithToolsOptions {
 
 const POST_FINISH_GRACE_MS = 1000;
 
+/**
+ * 流式请求首字节等待期的超时倍率（Q-17：原为 `this.timeout * 3` 的裸字面量）。
+ * 流式含模型加载 + 大上下文处理，云端 API（ollama.com 等）首字节延迟可能 >120s。
+ */
+const STREAM_TIMEOUT_MULTIPLIER = 3;
+
 /** 流式响应回调集合 */
 export interface StreamCallbacks {
   /** 增量文本块（delta），isComplete 在最后一块为 true */
@@ -345,7 +351,7 @@ export class AgentClient {
     // 流式超时：首字节等待期用 this.timeout * 3（流式请求含模型加载 + 大上下文处理，
     // ollama.com 等云端 API 首字节延迟可能 >120s）。收到首个 chunk 后清除超时
     // （数据在流动说明请求活着，不应因总时长超限而中断长文本生成）
-    const streamTimeout = this.timeout * 3;
+    const streamTimeout = this.timeout * STREAM_TIMEOUT_MULTIPLIER;
     const timeoutId = setTimeout(() => {
       abortedByTimeout = true;
       controller.abort();
@@ -359,56 +365,8 @@ export class AgentClient {
     }
 
     try {
-      const model = request.model || this.endpoint.defaultModel;
-      const body: Record<string, any> = {
-        model,
-        messages: this.ensureUserMessage(request.messages),
-        temperature: request.temperature ?? 0.7,
-        max_tokens: request.maxTokens ?? 16384, // 真机修(2026-07-17): 侧链 request 不带 maxTokens，2048 兜底会截断 char_gen 思考链+XML → 静默解析失败
-        top_p: request.topP ?? 1.0,
-        frequency_penalty: request.frequencyPenalty ?? 0,
-        presence_penalty: request.presencePenalty ?? 0,
-        stream: true,
-        stream_options: { include_usage: true }, // 🆕 让流式末尾 chunk 返回 usage（DeepSeek 命中/未命中/输出 token），否则流式永远拿不到 usage
-        stop: request.stop,
-        user_id: this.userId,
-      };
-
-      if (request.tools && request.tools.length > 0) {
-        body.tools = request.tools;
-        body.tool_choice = request.tool_choice ?? 'auto';
-      }
-
-      // 🆕 思考模式控制（与 callOnce 对齐，详见该处注释）
-      if (this.endpoint.enableThinking) {
-        body.thinking = { type: 'enabled' };
-        body.reasoning_effort = 'high';
-      } else {
-        body.thinking = { type: 'disabled' };
-      }
-
-      const res = await fetch('/api/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Target-Base-URL': this.baseUrl,
-          Authorization: `Bearer ${this.endpoint.apiKey}`,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text().catch(() => '');
-        console.error(
-          '[AgentClient] API error — status:',
-          res.status,
-          'body:',
-          errorText.slice(0, 500),
-        );
-        console.error('[AgentClient] Request model:', body.model, 'has model:', !!body.model);
-        throw new Error(`HTTP ${res.status}: ${errorText.slice(0, 200)}`);
-      }
+      const body = this.buildRequestBody(request, true);
+      const res = await this.postCompletions(body, controller.signal);
 
       // Parse SSE stream
       const reader = res.body?.getReader();
@@ -639,6 +597,91 @@ export class AgentClient {
     }
   }
 
+  /**
+   * 组装 chat completion 请求体 —— **流式与非流式共用这一份**（Q-17）。
+   *
+   * 此前 `chatStream` 与 `callOnce` 各写一份逐字相同的装配：每调一个采样参数、
+   * 每加一个厂商兼容字段（Cline 解包、ollama thinking 这类已经踩过两次）都要记得改两处，
+   * 漏一处就是「流式能跑、非流式空回」这种最难查的症状。
+   *
+   * `stream` 是**真形参**而不是事后 merge：`stream_options` 只能在 `stream: true` 时出现，
+   * 部分网关会拒绝非流式请求携带它。
+   */
+  private buildRequestBody(request: ChatRequest, stream: boolean): Record<string, any> {
+    const body: Record<string, any> = {
+      model: request.model || this.endpoint.defaultModel,
+      messages: this.ensureUserMessage(request.messages),
+      temperature: request.temperature ?? 0.7,
+      // 真机修(2026-07-17): 侧链 request 不带 maxTokens，2048 兜底会截断 char_gen 思考链+XML → 静默解析失败
+      max_tokens: request.maxTokens ?? 16384,
+      top_p: request.topP ?? 1.0,
+      frequency_penalty: request.frequencyPenalty ?? 0,
+      presence_penalty: request.presencePenalty ?? 0,
+      stream,
+      stop: request.stop,
+      user_id: this.userId,
+    };
+
+    // 🆕 让流式末尾 chunk 返回 usage（DeepSeek 命中/未命中/输出 token），否则流式永远拿不到 usage。
+    //    非流式**不能**带 —— 部分网关会拒。
+    if (stream) body.stream_options = { include_usage: true };
+
+    // 🆕 注入 tools / tool_choice（如果提供）
+    if (request.tools && request.tools.length > 0) {
+      body.tools = request.tools;
+      body.tool_choice = request.tool_choice ?? 'auto';
+    }
+
+    // 🆕 思考模式控制：
+    // - enableThinking=true → 开启思考（DeepSeek: thinking + reasoning_effort=high；Ollama: 默认开启）
+    // - enableThinking=false → 显式关闭思考（thinking.type=disabled）
+    //   关键修复(2026-07-30): Ollama 思考模型（glm-5.2 等）默认开启 thinking，且 think:false
+    //   在 /v1/chat/completions 上被静默忽略（ollama#14820）。若不显式关闭，思考会耗尽
+    //   max_tokens 导致 content 永远为空 → 所有 agent 输出空白。
+    //   注意: 不用 reasoning_effort=none，因为非思考模型（如 deepseek-v4-flash）
+    //   不认识 'none'（只认 high/low/medium/max/xhigh），会报 HTTP 400。
+    //   改用标准 OpenAI 字段 thinking.type=disabled 关闭，兼容性更好。
+    if (this.endpoint.enableThinking) {
+      body.thinking = { type: 'enabled' };
+      body.reasoning_effort = 'high';
+    } else {
+      body.thinking = { type: 'disabled' };
+    }
+
+    return body;
+  }
+
+  /**
+   * 发请求 + `!res.ok` 抛错 —— 流式与非流式共用（Q-17）。
+   *
+   * 只负责「发出去、确认 HTTP 层没炸」；响应体怎么读（SSE vs json）留给调用方。
+   */
+  private async postCompletions(body: Record<string, any>, signal: AbortSignal): Promise<Response> {
+    const res = await fetch('/api/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Target-Base-URL': this.baseUrl,
+        Authorization: `Bearer ${this.endpoint.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => '');
+      console.error(
+        '[AgentClient] API error — status:',
+        res.status,
+        'body:',
+        errorText.slice(0, 500),
+      );
+      console.error('[AgentClient] Request model:', body.model, 'has model:', !!body.model);
+      throw new Error(`HTTP ${res.status}: ${errorText.slice(0, 200)}`);
+    }
+    return res;
+  }
+
   private async callOnce(request: ChatRequest, signal?: AbortSignal): Promise<InternalAgentResult> {
     const controller = new AbortController();
     let abortedByTimeout = false;
@@ -655,64 +698,8 @@ export class AgentClient {
     }
 
     try {
-      const model = request.model || this.endpoint.defaultModel;
-      const body: Record<string, any> = {
-        model,
-        messages: this.ensureUserMessage(request.messages),
-        temperature: request.temperature ?? 0.7,
-        max_tokens: request.maxTokens ?? 16384, // 真机修(2026-07-17): 侧链 request 不带 maxTokens，2048 兜底会截断 char_gen 思考链+XML → 静默解析失败
-        top_p: request.topP ?? 1.0,
-        frequency_penalty: request.frequencyPenalty ?? 0,
-        presence_penalty: request.presencePenalty ?? 0,
-        stream: false,
-        stop: request.stop,
-        user_id: this.userId,
-      };
-
-      // 🆕 注入 tools / tool_choice（如果提供）
-      if (request.tools && request.tools.length > 0) {
-        body.tools = request.tools;
-        body.tool_choice = request.tool_choice ?? 'auto';
-      }
-
-      // 🆕 思考模式控制：
-      // - enableThinking=true → 开启思考（DeepSeek: thinking + reasoning_effort=high；Ollama: 默认开启）
-      // - enableThinking=false → 显式关闭思考（thinking.type=disabled）
-      //   关键修复(2026-07-30): Ollama 思考模型（glm-5.2 等）默认开启 thinking，且 think:false
-      //   在 /v1/chat/completions 上被静默忽略（ollama#14820）。若不显式关闭，思考会耗尽
-      //   max_tokens 导致 content 永远为空 → 所有 agent 输出空白。
-      //   注意: 不用 reasoning_effort=none，因为非思考模型（如 deepseek-v4-flash）
-      //   不认识 'none'（只认 high/low/medium/max/xhigh），会报 HTTP 400。
-      //   改用标准 OpenAI 字段 thinking.type=disabled 关闭，兼容性更好。
-      if (this.endpoint.enableThinking) {
-        body.thinking = { type: 'enabled' };
-        body.reasoning_effort = 'high';
-      } else {
-        body.thinking = { type: 'disabled' };
-      }
-
-      const res = await fetch('/api/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Target-Base-URL': this.baseUrl,
-          Authorization: `Bearer ${this.endpoint.apiKey}`,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text().catch(() => '');
-        console.error(
-          '[AgentClient] API error — status:',
-          res.status,
-          'body:',
-          errorText.slice(0, 500),
-        );
-        console.error('[AgentClient] Request model:', body.model, 'has model:', !!body.model);
-        throw new Error(`HTTP ${res.status}: ${errorText.slice(0, 200)}`);
-      }
+      const body = this.buildRequestBody(request, false);
+      const res = await this.postCompletions(body, controller.signal);
 
       const raw = await res.json();
       // Cline 网关(api.cline.bot)把非流式响应整个包在顶层 data 里（流式 chunk 是标准形态）。
