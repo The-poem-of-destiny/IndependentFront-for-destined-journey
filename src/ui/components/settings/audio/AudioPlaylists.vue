@@ -53,13 +53,15 @@ async function createPlaylist(): Promise<void> {
       value: draft,
     });
     if (!name) return;
-    const list = await audio.createPlaylist(name);
-    if (list) {
-      selectedPlaylistId.value = list.id;
+    const res = await audio.createPlaylist(name);
+    if (res.ok) {
+      selectedPlaylistId.value = res.value.id;
       return;
     }
+    // Q-14: 文案由 store 给（它才知道失败原因）；只有撞名值得带着原文再弹一次
+    ui.toast(res.message, 'error');
+    if (res.reason !== 'name-taken') return;
     draft = name;
-    ui.toast(`已有名为「${name}」的播放列表，请换一个名字。`, 'error');
   }
 }
 
@@ -74,15 +76,13 @@ async function renameSelectedPlaylist(): Promise<void> {
       value: draft,
     });
     if (!name) return;
-    if (await audio.renamePlaylist(p.id, name)) return;
-    // store 返回 false 有两种原因：撞名、或这一条已经不存在了（在别处被删）。
-    // 一律归因撞名的话，列表被删时用户换十个名字都出不去，只能取消。
-    if (!audio.findPlaylist(p.id)) {
-      ui.toast('这个播放列表已经不存在了（可能在别处被删除）。', 'error');
-      return;
-    }
+    const res = await audio.renamePlaylist(p.id, name);
+    if (res.ok) return;
+    // Q-14: 失败原因由 store 直说，不再反查 findPlaylist 去猜。
+    // 只有撞名才值得带着原文重弹 —— 列表已被删时换十个名字也出不去，得让人走掉。
+    ui.toast(res.message, 'error');
+    if (res.reason !== 'name-taken') return;
     draft = name;
-    ui.toast(`已有名为「${name}」的播放列表，请换一个名字。`, 'error');
   }
 }
 

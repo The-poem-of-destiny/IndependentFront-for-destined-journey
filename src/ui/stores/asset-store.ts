@@ -88,6 +88,7 @@ import { createAssetUrlCache, type AssetUrlCache } from '../lib/asset-url';
 import { useAudioStore } from './audio-store';
 import type { AudioBatchResult } from './audio-store';
 import { useUIStore } from './ui-store';
+import { mutationFail, mutationOk, type MutationResult } from './store-result';
 
 // ═══════════════════════════════════════════════════════════
 // 常量
@@ -2098,16 +2099,19 @@ export const useAssetStore = defineStore('asset', () => {
    * **删掉基图不会自动提拔变体**（§7.4）: 组留成「无主图」，由 设为主图 显式修。
    * 自动提拔等于悄悄改写一个用户没碰过的文件名，还在猜他的意图。
    */
-  async function deleteAssetById(id: string): Promise<boolean> {
+  async function deleteAssetById(id: string): Promise<MutationResult> {
     try {
       await dbDeleteAsset(id);
     } catch {
-      notify('删除失败，这条素材仍在库里，可以再试一次。', 'error');
-      return false;
+      // Q-14: 回执从裸 boolean 收成判别式。文案仍由 store 弹（素材面既有的「尽力做完」
+      // 播报模式，调用点只播报成功），但失败原因现在能被调用点读到，而不用反查库。
+      const message = '删除失败，这条素材仍在库里，可以再试一次。';
+      notify(message, 'error');
+      return mutationFail('failed', message);
     }
     releaseAssetUrl(id);
     await refreshAssets();
-    return true;
+    return mutationOk();
   }
 
   /**

@@ -46,6 +46,7 @@ import {
 import { hashMediaBlob } from '../lib/media-hash';
 import { useSettingsStore } from './settings-store';
 import { useUIStore } from './ui-store';
+import { mutationFail, mutationOk, type MutationResult } from './store-result';
 
 // ===== 常量 =====
 
@@ -659,15 +660,25 @@ export const useAudioStore = defineStore('audio', () => {
 
   /**
    * 手工改名: 重名**拒绝**而不是自动编号（用户是有意在起名，替他改反而是骗人）。
-   * 改成自己现在的名字不算冲突（exceptId）。返回是否落库。
+   * 改成自己现在的名字不算冲突（exceptId）。
+   *
+   * Q-14: 曾经返回裸 `boolean`，调用方只好反查 store 才能分清「曲目没了」和「名字撞了」——
+   * 这里本来就知道，说出来即可。
    */
-  async function renameTrack(id: string, name: string): Promise<boolean> {
+  async function renameTrack(id: string, name: string): Promise<MutationResult> {
     const t = findTrack(id);
-    if (!t || t.builtin) return false;
-    if (isNameTaken(tracks.value, name, id)) return false;
-    await saveAudioTrack({ ...t, name });
+    if (!t) return mutationFail('not-found', '这首曲目已经不存在了（可能在别处被删除）。');
+    if (t.builtin) return mutationFail('builtin', '内置曲目不能改名。');
+    if (isNameTaken(tracks.value, name, id)) {
+      return mutationFail('name-taken', `已有名为「${name}」的曲目，请换一个名字。`);
+    }
+    try {
+      await saveAudioTrack({ ...t, name });
+    } catch {
+      return mutationFail('failed', '改名没能写进曲库，可以再试一次。');
+    }
     await refreshTracks();
-    return true;
+    return mutationOk();
   }
 
   async function setTrackTags(id: string, tags: string[]): Promise<void> {
@@ -684,14 +695,29 @@ export const useAudioStore = defineStore('audio', () => {
     await refreshTracks();
   }
 
-  /** 内置曲目不可删（§2: builtin 只能隐藏） */
-  async function deleteTrack(id: string): Promise<void> {
+  /**
+   * 删一首。内置曲目不可删（§2: builtin 只能隐藏）。
+   *
+   * Q-14: 曾经是 `Promise<void>` 且**无 try/catch** —— Dexie 写失败的 rejection 直接甩给
+   * 调用方，而唯一的调用点（AudioLibrary）是裸 `await`，于是删失败在界面上什么也不发生。
+   * 同一个 store 里删多首反而有「有 N 首没能删除，它们仍留在曲库里」的明确解释。
+   */
+  async function deleteTrack(id: string): Promise<MutationResult> {
     const t = findTrack(id);
-    if (t?.builtin) return;
-    await dbDeleteAudioTrack(id);
+    if (!t) return mutationFail('not-found', '这首曲目已经不存在了。');
+    if (t.builtin) return mutationFail('builtin', '内置曲目不能删除（只能隐藏）。');
+    try {
+      await dbDeleteAudioTrack(id);
+    } catch {
+      return mutationFail(
+        'failed',
+        '没能删除这首曲目，它仍留在曲库里。可以再删一次重试；磁盘上的文件不会被删除。',
+      );
+    }
     // 删除会顺带剪掉播放列表里的悬挂引用 → 两边都刷
     await refreshTracks();
     await refreshPlaylists();
+    return mutationOk();
   }
 
   /**
@@ -743,9 +769,11 @@ export const useAudioStore = defineStore('audio', () => {
     return findByName(playlists.value, name);
   }
 
-  /** 手工命名 → 重名拒绝，返回 null（不抛） */
-  async function createPlaylist(name: string): Promise<AudioPlaylist | null> {
-    if (isNameTaken(playlists.value, name)) return null;
+  /** 手工命名 → 重名拒绝（不抛） */
+  async function createPlaylist(name: string): Promise<MutationResult<AudioPlaylist>> {
+    if (isNameTaken(playlists.value, name)) {
+      return mutationFail('name-taken', `已有名为「${name}」的播放列表，请换一个名字。`);
+    }
     const now = Date.now();
     const list: AudioPlaylist = {
       id: newId('plist'),
@@ -754,19 +782,29 @@ export const useAudioStore = defineStore('audio', () => {
       createdAt: now,
       updatedAt: now,
     };
-    await saveAudioPlaylist(list);
+    try {
+      await saveAudioPlaylist(list);
+    } catch {
+      return mutationFail('failed', '没能创建播放列表，可以再试一次。');
+    }
     await refreshPlaylists();
-    return list;
+    return mutationOk(list);
   }
 
   /** 手工改名 → 重名拒绝；改成自己现在的名字不算冲突 */
-  async function renamePlaylist(id: string, name: string): Promise<boolean> {
+  async function renamePlaylist(id: string, name: string): Promise<MutationResult> {
     const p = findPlaylist(id);
-    if (!p) return false;
-    if (isNameTaken(playlists.value, name, id)) return false;
-    await saveAudioPlaylist({ ...p, name });
+    if (!p) return mutationFail('not-found', '这个播放列表已经不存在了。');
+    if (isNameTaken(playlists.value, name, id)) {
+      return mutationFail('name-taken', `已有名为「${name}」的播放列表，请换一个名字。`);
+    }
+    try {
+      await saveAudioPlaylist({ ...p, name });
+    } catch {
+      return mutationFail('failed', '改名没能写进曲库，可以再试一次。');
+    }
     await refreshPlaylists();
-    return true;
+    return mutationOk();
   }
 
   async function deletePlaylist(id: string): Promise<void> {

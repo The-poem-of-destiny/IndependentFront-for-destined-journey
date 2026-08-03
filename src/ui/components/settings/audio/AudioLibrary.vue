@@ -372,15 +372,15 @@ async function saveEdit(t: AudioTrack): Promise<void> {
     return;
   }
   // 撞名 → store 拒绝。行内编辑面板原样留着（用户填的名字/标签都还在），改个名再存。
-  if (name !== t.name && !(await audio.renameTrack(t.id, name))) {
-    // false 的两种原因要分开说，否则曲目已被删时用户换多少个名字都出不去
-    if (!audio.findTrack(t.id)) {
-      ui.toast('这首曲目已经不存在了（可能在别处被删除）。', 'error');
-      editingId.value = '';
+  if (name !== t.name) {
+    const res = await audio.renameTrack(t.id, name);
+    if (!res.ok) {
+      // Q-14: 失败原因由 store 直说，不再反查 findTrack 去猜。
+      ui.toast(res.message, 'error');
+      // 曲目已经没了的话，换多少个名字都出不去 —— 直接收面板
+      if (res.reason === 'not-found') editingId.value = '';
       return;
     }
-    ui.toast(`已有名为「${name}」的曲目，请换一个名字。`, 'error');
-    return;
   }
   const tags = editTags.value
     .split(/[,，]/)
@@ -410,7 +410,12 @@ async function removeTrack(t: AudioTrack): Promise<void> {
     danger: true,
   });
   if (!ok) return;
-  await audio.deleteTrack(t.id);
+  // Q-14: 曾经是裸 await —— 删失败时 rejection 甩上来、界面什么也不发生。
+  const res = await audio.deleteTrack(t.id);
+  if (!res.ok) {
+    ui.toast(res.message, 'error');
+    return;
+  }
   storageInfo.value = await cfg.getStorageUsage();
 }
 

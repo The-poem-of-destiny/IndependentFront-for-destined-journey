@@ -123,7 +123,18 @@ agent-client.ts: chatWithTools()
 5. `delta_time` → `stateManager.applyTimeAdvance(minutes)`
 6. 所有 patch 批量 `commitChatState(patches)`
 
-**⚠️ 调试检查点**: JSON.parse 失败时整个 vars_update 阶段静默跳过，需在此处打 log。
+**⚠️ 调试检查点**: ~~JSON.parse 失败时整个 vars_update 阶段静默跳过，需在此处打 log。~~
+✅ **已修（Q-14, 2026-08-03）**：三道失败各有各的日志，不再混成一条：
+
+| 失败 | 日志前缀 | 上浮 UI |
+| ---- | -------- | ------- |
+| `<json>` 解析失败 | `[Orchestrator] <source> <json> 解析失败` + 异常对象 | 否 |
+| JSON 合法但结构不对 | `[Orchestrator] <source> <json> 结构不符` + 异常对象 | 否 |
+| 落库抛异常 | `[Orchestrator] <source> 状态提交抛异常` + 异常对象 | ✅ `onStateCommitError` |
+| 时间推进失败 | `[Orchestrator] <source> 时间推进失败` | ✅ `onStateCommitError(<source>:delta_time)` |
+
+看见「解析失败」就去查 AI 输出，看见「状态提交抛异常」就去查 StateManager —— 旧实现两者都印成前者，
+debug loop 会去改 prompt 而实际该查落库。
 
 ---
 
@@ -274,6 +285,23 @@ agent-client.ts: chatWithTools()
 | `roll_d100` | `modifier?`, `reason?` | `{value, modifier}` |
 | `roll_dice` | `formula`, `modifier?`, `reason?` | `{formula, rolls[], total, modifier}` |
 | `get_hp_percent` | `characterId` | `{characterId, hpPercent, hp, maxHp}` |
+
+#### 🔴 工具失败长什么样（Q-14, 2026-08-03 起统一）
+
+`executeToolCall` 的**所有失败路径一律 throw**，由 `agent-client.chatWithTools` 统一包成
+`{"error": "<消息>"}` 的 tool 消息回喂模型。执行器不再自己造第二种失败形态。
+
+本次改掉的两处（模型可见的契约变更）：
+
+| 工具 | 旧回执 | 新回执 |
+| ---- | ------ | ------ |
+| `get_script_reference` 传未知分类 | 正常 tool 结果 `{query, error: "未知分类 …，可用: …"}` | `{"error": "未知分类 \"x\"，可用: …"}` |
+| `craft_get_production_bonus` 传表外品质 | 裸 `null`（模型无从判断出了什么事） | `{"error": "未知品质 \"x\"，可用: …"}` |
+
+两处的「可用清单」都原样保留在异常消息里，模型照样能读能自纠。
+
+**查询未命中不算失败**：`status_query` 对不存在的角色返回 `{found: false, message}` 是这个工具的
+正常回答，不走 throw —— 别把这条一并"统一"掉。
 
 ### 输出 XML 格式
 
@@ -935,7 +963,7 @@ interface MemoryRecord {
 
 | # | Agent | 关键检查点 | 严重度 |
 |---|-------|-----------|--------|
-| 1 | vars_update | JSON.parse 失败静默跳过 → 需 log | 🟡 |
+| 1 | vars_update | ~~JSON.parse 失败静默跳过 → 需 log~~ ✅ Q-14 已修：解析/结构/落库/时间推进四条日志分家 | ✅ |
 | 2 | vars_update | delta_time 是否正确定时推进 | 🟡 |
 | 3 | char_update | 输出未被 processStageMarkers 自动消费 | 🔴 |
 | 4 | craft_gen | story 是否输出 `<craft_request>` 标记 | 🟡 |

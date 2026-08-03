@@ -811,11 +811,10 @@ export class AgentOrchestrator {
       const markers = scanResult.markers;
 
       // Step C: 解析 <json> 块中的全局变量 → StatePatch（先执行）
-      if (jsonText) {
-        try {
-          const parsed = JSON.parse(jsonText.trim());
-          const { createStateManager } = await import('./state-manager');
-          const sm = createStateManager(this.saveId);
+      const dispatcherJson = jsonText ? this.parseStageJson(jsonText, 'request_dispatcher') : null;
+      if (dispatcherJson) {
+        const parsed = dispatcherJson;
+        const patches = this.buildPatches('request_dispatcher', () => {
           const patches: import('./types').StatePatch[] = [];
 
           for (const r of parsed.replace ?? []) {
@@ -845,16 +844,13 @@ export class AgentOrchestrator {
             });
           }
 
-          if (patches.length > 0) {
-            const r = await sm.commitChatState(patches);
-            this.reportCommitResult(r, patches.length, 'request_dispatcher');
-          }
+          return patches;
+        });
 
-          if (parsed.delta_time && typeof parsed.delta_time === 'number' && parsed.delta_time > 0) {
-            await sm.applyTimeAdvance(parsed.delta_time);
-          }
-        } catch {
-          console.warn('[Orchestrator] request_dispatcher <json> 解析失败，跳过全局变量更新');
+        await this.commitPatches(patches, 'request_dispatcher');
+
+        if (typeof parsed.delta_time === 'number' && parsed.delta_time > 0) {
+          await this.advanceTime(parsed.delta_time, 'request_dispatcher');
         }
       }
 
@@ -934,12 +930,13 @@ export class AgentOrchestrator {
       if (!varsOutput) return;
 
       // Step A: 提取 <json> 块 → 解析 char ops + item ops → StatePatch
+      // Q-14: 只 parse 一次，下面的 quests 分支复用同一个 parsed —— 旧实现把同一段
+      // 文本 parse 两遍，两次的失败还分别落进两个不同的 catch，报出两条不同的话。
       const jsonMatch = varsOutput.match(/<json>([\s\S]*?)<\/json>/);
-      if (jsonMatch) {
-        try {
-          const parsed = JSON.parse(jsonMatch[1].trim());
-          const { createStateManager } = await import('./state-manager');
-          const sm = createStateManager(this.saveId);
+      const varsJson = jsonMatch ? this.parseStageJson(jsonMatch[1], 'vars_update') : null;
+      if (varsJson) {
+        const parsed = varsJson;
+        const patches = this.buildPatches('vars_update', () => {
           const patches: import('./types').StatePatch[] = [];
 
           // --- characters.replace → set_hp/set_mp/set_sp/set_location/update_character ---
@@ -1253,76 +1250,129 @@ export class AgentOrchestrator {
             });
           }
 
-          if (patches.length > 0) {
-            const r = await sm.commitChatState(patches);
-            this.reportCommitResult(r, patches.length, 'vars_update');
-          }
-        } catch {
-          console.warn('[Orchestrator] vars_update <json> 解析失败，跳过状态更新');
-        }
+          return patches;
+        });
+
+        await this.commitPatches(patches, 'vars_update');
       }
 
       // Step B: 提取 <status_effects> 块 → 解析效果定义 → apply
       const seMatch = varsOutput.match(/<status_effects>([\s\S]*?)<\/status_effects>/);
       if (seMatch) {
-        try {
-          const { parseStatusEffectsXML } = await import('./char-gen-agent');
-          const effects = parseStatusEffectsXML(seMatch[1].trim());
-          if (effects.length > 0) {
-            const { createStateManager } = await import('./state-manager');
-            const sm = createStateManager(this.saveId);
-            const patches: import('./types').StatePatch[] = effects.map((e) => ({
-              op: 'add_status_effect' as const,
-              target: `characters.${e.owner}`,
-              value: e,
-              metadata: { source: 'vars_update' },
-            }));
-            const r = await sm.commitChatState(patches);
-            this.reportCommitResult(r, patches.length, 'vars_update:status_effects');
-          }
-        } catch (e) {
-          console.warn('[Orchestrator] vars_update <status_effects> 解析失败:', e);
-        }
+        const { parseStatusEffectsXML } = await import('./char-gen-agent');
+        const patches = this.buildPatches('vars_update:status_effects', () =>
+          parseStatusEffectsXML(seMatch[1].trim()).map((e) => ({
+            op: 'add_status_effect' as const,
+            target: `characters.${e.owner}`,
+            value: e,
+            metadata: { source: 'vars_update' },
+          })),
+        );
+        await this.commitPatches(patches, 'vars_update:status_effects');
       }
 
       // Step C: 提取 <json> 中 quests 块 → StatePatch (Phase 10g)
-      if (jsonMatch) {
-        try {
-          const parsed = JSON.parse(jsonMatch[1].trim());
-          if (parsed.quests) {
-            const { createStateManager } = await import('./state-manager');
-            const sm = createStateManager(this.saveId);
-            const patches: import('./types').StatePatch[] = [];
+      if (varsJson?.quests) {
+        const quests = varsJson.quests;
+        const patches = this.buildPatches('vars_update:quests', () => {
+          const patches: import('./types').StatePatch[] = [];
 
-            for (const q of parsed.quests.upsert ?? []) {
-              const { name, ...questFields } = q;
-              if (!name) continue;
-              patches.push({
-                op: 'update_quest',
-                target: `quests.${name}`,
-                value: { name, ...questFields },
-                metadata: { source: 'vars_update', operation: 'upsert' },
-              });
-            }
-
-            for (const q of parsed.quests.remove ?? []) {
-              patches.push({
-                op: 'remove_quest',
-                target: `quests.${q.name}`,
-                value: { name: q.name }, // #40: 形态统一为 {name} 对象
-                metadata: { source: 'vars_update', operation: 'remove' },
-              });
-            }
-
-            if (patches.length > 0) {
-              const r = await sm.commitChatState(patches);
-              this.reportCommitResult(r, patches.length, 'vars_update:quests');
-            }
+          for (const q of quests.upsert ?? []) {
+            const { name, ...questFields } = q;
+            if (!name) continue;
+            patches.push({
+              op: 'update_quest',
+              target: `quests.${name}`,
+              value: { name, ...questFields },
+              metadata: { source: 'vars_update', operation: 'upsert' },
+            });
           }
-        } catch {
-          console.warn('[Orchestrator] vars_update <json> quests 解析失败，跳过 quest 更新');
-        }
+
+          for (const q of quests.remove ?? []) {
+            patches.push({
+              op: 'remove_quest',
+              target: `quests.${q.name}`,
+              value: { name: q.name }, // #40: 形态统一为 {name} 对象
+              metadata: { source: 'vars_update', operation: 'remove' },
+            });
+          }
+
+          return patches;
+        });
+
+        await this.commitPatches(patches, 'vars_update:quests');
       }
+    }
+  }
+
+  // ========== 失败回执（Q-14） ==========
+  //
+  // 从 AI 文本走到状态落库要过三道，**每道各有各的回执，不许混成一条**：
+  //   ① JSON 解析失败       → parseStageJson   ：AI 没输出合法 JSON
+  //   ② patch 装配失败      → buildPatches     ：JSON 合法但结构不是约定的形状
+  //   ③ 落库抛异常          → commitPatches    ：Dexie 写失败 / 校验器 throw
+  //
+  // 旧实现三处 try 都从 `JSON.parse` 一路包到 `await sm.commitChatState()`，catch 还是
+  // 无参的，于是 ③ 会印成「<json> 解析失败」并把异常整个丢掉，专为把落库失败上浮给 UI
+  // 才存在的 `onStateCommitError` 也不触发。真机 debug loop 看见这条会去改 prompt，
+  // 而实际该查的是 StateManager —— 掉状态且界面无提示，是最贵的一类误导。
+
+  /** ① 解析 stage 输出里的 `<json>` 块；失败返回 null 并带上异常对象 */
+  private parseStageJson(jsonText: string, source: string): Record<string, any> | null {
+    try {
+      return JSON.parse(jsonText.trim());
+    } catch (err) {
+      console.warn(`[Orchestrator] ${source} <json> 解析失败，跳过该批状态更新:`, err);
+      return null;
+    }
+  }
+
+  /**
+   * ② 跑 patch 装配，把「JSON 合法但结构不对」圈在这里（如 `replace` 给成字符串，
+   * for..of 直接抛）。返回空数组即「这批没得可提交」，不影响同 stage 的其它批次。
+   */
+  private buildPatches(
+    source: string,
+    build: () => import('./types').StatePatch[],
+  ): import('./types').StatePatch[] {
+    try {
+      return build();
+    } catch (err) {
+      console.warn(`[Orchestrator] ${source} <json> 结构不符，跳过该批状态更新:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * ③ 提交 patch。`commitChatState` 的契约是返回带 `errors[]` 的结果而非抛错，
+   * 所以这里 catch 到的是更窄的一类（Dexie 写失败、校验器 throw）——正是旧实现吞掉的那类。
+   *
+   * 这不新增写入路径（仍是 ADR-21 的 `commitChatState` 唯一入口），只新增一条失败上报路径。
+   */
+  private async commitPatches(
+    patches: import('./types').StatePatch[],
+    source: string,
+  ): Promise<void> {
+    if (patches.length === 0) return;
+    try {
+      const { createStateManager } = await import('./state-manager');
+      const sm = createStateManager(this.saveId);
+      const r = await sm.commitChatState(patches);
+      this.reportCommitResult(r, patches.length, source);
+    } catch (err) {
+      console.error(`[Orchestrator] ${source} 状态提交抛异常:`, err);
+      this.events.onStateCommitError?.(source, [String(err)]);
+    }
+  }
+
+  /** 时间推进 —— 独立成一条回执：旧实现与解析共用 catch，推进抛错会被印成「解析失败」 */
+  private async advanceTime(deltaMinutes: number, source: string): Promise<void> {
+    try {
+      const { createStateManager } = await import('./state-manager');
+      await createStateManager(this.saveId).applyTimeAdvance(deltaMinutes);
+    } catch (err) {
+      console.error(`[Orchestrator] ${source} 时间推进失败:`, err);
+      this.events.onStateCommitError?.(`${source}:delta_time`, [String(err)]);
     }
   }
 

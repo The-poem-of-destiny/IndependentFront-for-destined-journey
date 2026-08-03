@@ -1279,6 +1279,17 @@ export interface ToolCallResult {
   error?: string; // 执行失败时的错误消息
 }
 
+/**
+ * 工具执行结果 —— `executeToolCall` 的返回类型（Q-14）。
+ *
+ * 之所以是宽松的 `Record<string, unknown>` 而不是判别联合：17 个工具的返回结构各不相同，
+ * 且**由 `ALL_TOOL_DEFINITIONS` 里的 JSON Schema 对模型承诺**，编译期无法与之建立联系。
+ * 收成这个类型的意义只在于「不是 `any`」—— 调用方拿到后不能再无声地点进不存在的字段。
+ *
+ * 失败**不**编码在返回值里，一律 throw（见 `executeToolCall` 文档）。
+ */
+export type ToolResult = Record<string, unknown>;
+
 /** 工具执行所需的运行时上下文（非纯函数工具需要） */
 export interface ToolExecutionContext {
   characters: CharacterState[];

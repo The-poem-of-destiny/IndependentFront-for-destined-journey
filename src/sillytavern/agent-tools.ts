@@ -27,6 +27,7 @@ import type {
   StatusEffect,
   ReadonlyHookSet,
   DamageType,
+  ToolResult,
 } from './types';
 import type { EventBus } from './game-event';
 import type { StatusApplyIntent, StatusRemoveIntent } from './status-api';
@@ -598,31 +599,37 @@ export function getToolDefinition(functionName: string): ToolDefinition | undefi
 /**
  * 执行单个工具调用。
  *
+ * **失败一律 throw**（Q-14）——「工具失败长什么样」只在一处定义：
+ * `agent-client.chatWithTools` 的既有 catch 把异常包成 `{"error": message}` 的 tool 消息
+ * 回喂给模型。执行器自己再造一种 `return { error }` 的话，同一个分发口里「参数不合法」
+ * 就有两种长相，prompt 侧没法统一教模型如何应对。
+ *
+ * 注意区分：**查询未命中不是失败**。`status_query` 对不存在的角色返回
+ * `{ found: false, message }` 是这个工具的正常回答，不在上面这条规则内。
+ *
  * @param functionName 工具名（如 'roll_d20', 'craft_check'）
  * @param args AI 传入的参数对象
  * @param context 运行时上下文（用于需要角色数据的工具）
  * @returns 工具执行结果（会被 JSON.stringify 后发回 AI）
+ * @throws 参数缺失/不合法、目标不存在、工具未接线
  */
 export async function executeToolCall(
   functionName: string,
   args: Record<string, any>,
   context: ToolExecutionContext,
-): Promise<any> {
+): Promise<ToolResult> {
   switch (functionName) {
     // ── Dice ──
+    // 骰子三口都写成 `{ ...result }` 而非 `result`：具名 interface 没有索引签名，
+    // 不能直接当 ToolResult（Record<string, unknown>）；展开成对象字面量即可，
+    // 且这一步本来就要发生 —— 结果马上要被 JSON.stringify 回喂模型。
     case 'roll_d20': {
       const result = d20(args.modifier ?? 0, args.advantage, args.disadvantage);
-      if (args.reason) {
-        return { ...result, reason: args.reason };
-      }
-      return result;
+      return args.reason ? { ...result, reason: args.reason } : { ...result };
     }
     case 'roll_d100': {
       const result = d100(args.modifier ?? 0);
-      if (args.reason) {
-        return { ...result, reason: args.reason };
-      }
-      return result;
+      return args.reason ? { ...result, reason: args.reason } : { ...result };
     }
     case 'roll_dice': {
       const formula = args.formula;
@@ -630,10 +637,7 @@ export async function executeToolCall(
         throw new Error('缺少必需参数: formula');
       }
       const result = roll(formula, args.modifier ?? 0);
-      if (args.reason) {
-        return { ...result, reason: args.reason };
-      }
-      return result;
+      return args.reason ? { ...result, reason: args.reason } : { ...result };
     }
 
     // ── Craft ──
@@ -698,7 +702,14 @@ export async function executeToolCall(
     case 'craft_get_production_bonus': {
       const { CRAFT_PRODUCTION_BONUSES } = await import('./types');
       const bonus = CRAFT_PRODUCTION_BONUSES[args.quality as QualityLevel];
-      return bonus ?? null;
+      // Q-14: 品质不在表里 = 参数越界（schema 里 quality 本就是 enum），照统一口径 throw。
+      // 旧实现返回裸 `null` —— 模型收到一个没有任何说明的 null，既不知道错在哪也不知道能重试。
+      if (!bonus) {
+        throw new Error(
+          `未知品质 "${args.quality}"，可用: ${Object.keys(CRAFT_PRODUCTION_BONUSES).join(', ')}`,
+        );
+      }
+      return { ...bonus };
     }
     case 'craft_settle': {
       const { $craft } = await import('./craft-resolver');
@@ -931,7 +942,10 @@ temp.<path>    — 会话临时 (不持久化)
       if (SCRIPT_REF[query as keyof typeof SCRIPT_REF]) {
         return { query, reference: SCRIPT_REF[query as keyof typeof SCRIPT_REF] };
       }
-      return { query, error: `未知分类 "${query}"，可用: ${Object.keys(SCRIPT_REF).join(', ')}` };
+      // Q-14: 参数不合法一律 throw（此处旧实现返回 { query, error } —— 同一个执行器里
+      // 「参数不合法」有两种长相，模型侧无法统一教。可用分类清单原样保留在异常消息里，
+      // chatWithTools 会把它包成 {"error": …} 的 tool 消息，模型照样能读能重试。
+      throw new Error(`未知分类 "${query}"，可用: ${Object.keys(SCRIPT_REF).join(', ')}`);
     }
 
     // ── Async dispatch: call_item_gen (Phase 9 removed — orchest now calls item_gen directly) ──

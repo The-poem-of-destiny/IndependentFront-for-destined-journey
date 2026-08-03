@@ -70,6 +70,7 @@ vi.mock('./settings-store', () => ({
 
 import { useAudioStore } from './audio-store';
 import { useUIStore } from './ui-store';
+import type { MutationResult } from './store-result';
 import { getAudioManager, resetAudioManager } from '../lib/audio-singleton';
 import { __setFolderTestHooks, __resetFolderTestHooks } from '../lib/audio-folder';
 import { hashMediaBlob } from '../lib/media-hash';
@@ -731,14 +732,52 @@ describe('audio-store · 名字唯一性（仅新写入）', () => {
     const store = useAudioStore();
     await store.init();
 
-    expect(await store.renameTrack('b', '晨曦')).toBe(false);
+    // Q-14: 回执带 reason —— 调用点不必再反查 store 才能分清「撞名」和「曲目没了」
+    expect(await store.renameTrack('b', '晨曦')).toMatchObject({
+      ok: false,
+      reason: 'name-taken',
+    });
     expect(trackRows.get('b')?.name).toBe('暮色');
     // 归一化比较：大小写/尾部扩展名/多余空白都算同一个名字
-    expect(await store.renameTrack('b', ' 晨曦.mp3 ')).toBe(false);
+    expect(await store.renameTrack('b', ' 晨曦.mp3 ')).toMatchObject({
+      ok: false,
+      reason: 'name-taken',
+    });
     // 改成自己现在的名字不算冲突
-    expect(await store.renameTrack('b', '暮色')).toBe(true);
-    expect(await store.renameTrack('b', '黄昏')).toBe(true);
+    expect((await store.renameTrack('b', '暮色')).ok).toBe(true);
+    expect((await store.renameTrack('b', '黄昏')).ok).toBe(true);
     expect(trackRows.get('b')?.name).toBe('黄昏');
+  });
+
+  it('renameTrack 对不存在的曲目返回 not-found，不与撞名混为一谈', async () => {
+    const store = useAudioStore();
+    await store.init();
+    expect(await store.renameTrack('查无此曲', '随便')).toMatchObject({
+      ok: false,
+      reason: 'not-found',
+    });
+  });
+
+  it('deleteTrack 单条失败也有明确回执（旧实现是裸 rejection，界面什么也不发生）', async () => {
+    trackRows.set('a', {
+      id: 'a',
+      name: '晨曦',
+      kind: 'music',
+      source: 'blob',
+      tags: [],
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    const store = useAudioStore();
+    await store.init();
+
+    deleteFailIds.add('a');
+    expect(await store.deleteTrack('a')).toMatchObject({ ok: false, reason: 'failed' });
+    expect(trackRows.has('a')).toBe(true);
+
+    deleteFailIds.delete('a');
+    expect((await store.deleteTrack('a')).ok).toBe(true);
+    expect(trackRows.has('a')).toBe(false);
   });
 
   it('播放列表与曲目是两个命名空间', async () => {
@@ -754,27 +793,46 @@ describe('audio-store · 名字唯一性（仅新写入）', () => {
     const store = useAudioStore();
     await store.init();
 
-    const list = await store.createPlaylist('战斗');
-    expect(list).toBeTruthy();
+    const list = unwrap(await store.createPlaylist('战斗'));
     // 同名的第二个播放列表才算冲突
-    expect(await store.createPlaylist('战斗')).toBeNull();
-    expect(await store.renamePlaylist(list!.id, '战斗')).toBe(true);
+    expect(await store.createPlaylist('战斗')).toMatchObject({
+      ok: false,
+      reason: 'name-taken',
+    });
+    expect((await store.renamePlaylist(list.id, '战斗')).ok).toBe(true);
   });
 
   it('renamePlaylist 撞名拒绝', async () => {
     const store = useAudioStore();
     await store.init();
-    const a = await store.createPlaylist('清晨');
-    const b = await store.createPlaylist('深夜');
-    expect(await store.renamePlaylist(b!.id, '清晨')).toBe(false);
-    expect(store.findPlaylist(b!.id)?.name).toBe('深夜');
-    expect(a).toBeTruthy();
+    unwrap(await store.createPlaylist('清晨'));
+    const b = unwrap(await store.createPlaylist('深夜'));
+    expect(await store.renamePlaylist(b.id, '清晨')).toMatchObject({
+      ok: false,
+      reason: 'name-taken',
+    });
+    expect(store.findPlaylist(b.id)?.name).toBe('深夜');
+  });
+
+  it('renamePlaylist 对不存在的列表返回 not-found', async () => {
+    const store = useAudioStore();
+    await store.init();
+    expect(await store.renamePlaylist('查无此列表', '随便')).toMatchObject({
+      ok: false,
+      reason: 'not-found',
+    });
   });
 });
 
 // ═══════════════════════════════════════════════════════════
 // 批量操作（曲库多选）
 // ═══════════════════════════════════════════════════════════
+
+/** 取成功回执的值；失败就让测试红在这一行（Q-14 判别式回执） */
+function unwrap<T>(res: MutationResult<T>): T {
+  if (!res.ok) throw new Error(`预期成功，实际失败: ${res.reason} — ${res.message}`);
+  return res.value;
+}
 
 const blobTrack = (id: string, name: string, over: Partial<AudioTrack> = {}): AudioTrack => ({
   id,
@@ -842,13 +900,13 @@ describe('audio-store · addTracksToPlaylist（批量加入）', () => {
     trackRows.set('b', blobTrack('b', 'B'));
     const store = useAudioStore();
     await store.init();
-    const list = await store.createPlaylist('夜行');
-    await store.addTrackToPlaylist(list!.id, 'a');
+    const list = unwrap(await store.createPlaylist('夜行'));
+    await store.addTrackToPlaylist(list.id, 'a');
     const ui = useUIStore();
 
-    const res = await store.addTracksToPlaylist(list!.id, ['a', 'b']);
+    const res = await store.addTracksToPlaylist(list.id, ['a', 'b']);
     expect(res).toEqual({ ok: 1, skipped: 1, failed: 0 });
-    expect(playlistRows.get(list!.id)?.trackIds).toEqual(['a', 'b']);
+    expect(playlistRows.get(list.id)?.trackIds).toEqual(['a', 'b']);
     expect(ui.toasts.some((t) => t.message.includes('已在列表中'))).toBe(true);
   });
 
@@ -856,24 +914,24 @@ describe('audio-store · addTracksToPlaylist（批量加入）', () => {
     trackRows.set('a', blobTrack('a', 'A'));
     const store = useAudioStore();
     await store.init();
-    const list = await store.createPlaylist('夜行');
+    const list = unwrap(await store.createPlaylist('夜行'));
 
-    const res = await store.addTracksToPlaylist(list!.id, ['a', 'a', 'a']);
+    const res = await store.addTracksToPlaylist(list.id, ['a', 'a', 'a']);
     expect(res).toEqual({ ok: 1, skipped: 2, failed: 0 });
-    expect(playlistRows.get(list!.id)?.trackIds).toEqual(['a']);
+    expect(playlistRows.get(list.id)?.trackIds).toEqual(['a']);
   });
 
   it('落库失败 → 如实报 failed，播放列表不被改动', async () => {
     trackRows.set('a', blobTrack('a', 'A'));
     const store = useAudioStore();
     await store.init();
-    const list = await store.createPlaylist('夜行');
+    const list = unwrap(await store.createPlaylist('夜行'));
     const ui = useUIStore();
 
     failFlags.playlistSave = true;
-    const res = await store.addTracksToPlaylist(list!.id, ['a']);
+    const res = await store.addTracksToPlaylist(list.id, ['a']);
     expect(res).toEqual({ ok: 0, skipped: 0, failed: 1 });
-    expect(playlistRows.get(list!.id)?.trackIds).toEqual([]);
+    expect(playlistRows.get(list.id)?.trackIds).toEqual([]);
     expect(ui.toasts.filter((t) => t.type === 'error')).toHaveLength(1);
   });
 

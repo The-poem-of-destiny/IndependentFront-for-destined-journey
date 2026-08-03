@@ -520,7 +520,7 @@ describe('删除', () => {
     const store = useAssetStore();
     await store.init();
 
-    expect(await store.deleteAsset('d-base')).toBe(true);
+    expect((await store.deleteAsset('d-base')).ok).toBe(true);
 
     const group = store.groups.find((g) => g.name === '苏婉');
     expect(group).toBeDefined();

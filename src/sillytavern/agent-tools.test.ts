@@ -50,6 +50,15 @@ function makeCtx(characters: CharacterState[] = [], saveId = 'save_test'): ToolE
   };
 }
 
+/**
+ * 取 get_inventory 结果里的物品名。
+ * Q-14 把 `executeToolCall` 从 `Promise<any>` 收成 `Promise<ToolResult>` 后，
+ * 结果字段是 `unknown` —— 断言前必须先声明期望的形状，这正是收类型的目的。
+ */
+function itemNames(result: Record<string, unknown>): string[] {
+  return (result.items as Array<{ name: string }>).map((item) => item.name);
+}
+
 // ═══════════════════════════════════════════════════════════
 // 5. status_query 接真函数
 // ═══════════════════════════════════════════════════════════
@@ -242,7 +251,7 @@ describe('复用工具回归保护', () => {
       makeCtx([char]),
     );
 
-    expect(r.items.map((item: { name: string }) => item.name)).toEqual(['铁矿石']);
+    expect(itemNames(r)).toEqual(['铁矿石']);
   });
 
   it('get_inventory 兼容英文材料别名和旧 UUID 寻址', async () => {
@@ -261,7 +270,7 @@ describe('复用工具回归保护', () => {
       makeCtx([char]),
     );
 
-    expect(r.items.map((item: { name: string }) => item.name)).toEqual(['银矿石']);
+    expect(itemNames(r)).toEqual(['银矿石']);
   });
 
   it('get_inventory 对未知类型显式报错', async () => {
@@ -398,5 +407,33 @@ describe('复用工具回归保护', () => {
     } finally {
       await deleteCharacter(crafter.id);
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 失败一律 throw（Q-14）
+// ═══════════════════════════════════════════════════════════
+
+describe('executeToolCall — 失败形态只有一种', () => {
+  it('get_script_reference 未知分类 throw，异常消息里带可用清单', async () => {
+    await expect(
+      executeToolCall('get_script_reference', { query: '不存在的分类' }, makeCtx()),
+    ).rejects.toThrow(/未知分类.*可用/s);
+  });
+
+  it('get_script_reference 合法分类仍是正常结果', async () => {
+    const r = await executeToolCall('get_script_reference', { query: 'all' }, makeCtx());
+    expect(typeof r.reference).toBe('string');
+  });
+
+  it('craft_get_production_bonus 表外品质 throw（旧实现返回裸 null，模型无从判断）', async () => {
+    await expect(
+      executeToolCall('craft_get_production_bonus', { quality: '不存在的品质' }, makeCtx()),
+    ).rejects.toThrow(/未知品质.*可用/s);
+  });
+
+  it('status_query 查无此角色**不算失败** —— 那是这个工具的正常回答', async () => {
+    const r = await executeToolCall('status_query', { target: '查无此人' }, makeCtx());
+    expect(r.found).toBe(false);
   });
 });

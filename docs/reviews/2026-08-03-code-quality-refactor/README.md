@@ -50,7 +50,7 @@
 | [步骤 1](roadmap.md) 清尸体 + 补工具链网  | Q-04、Q-15             | ✅   | 四批僵尸清完 + 补网与清仓两个 PR 都落地                                               |
 | [步骤 2](roadmap.md) 修静默出错的生产路径 | Q-01、Q-02             | ✅   | 两条全部兑现（`a0c3d5d`），骰子那条建议仍需真机打一场复核                             |
 | [步骤 3](roadmap.md) 三处去留裁定         | Q-07、Q-03、Q-30       | ✅   | 三条裁定均已拍板并落地（Q-07 含 emit 源 + 效果回收 + 战斗内 12/18 显式化）            |
-| [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | 🔄   | Q-05 / Q-13 / Q-17 完成；只剩 Q-14 失败回执统一                                       |
+| [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | ✅   | 四条全部落地                                                                          |
 | [步骤 5](roadmap.md) 数据路径去重         | Q-08、Q-16、Q-12       | ⬜   | 抽查：三份 `*-migration.ts` 与 `variables.ts` / `vars-merger.ts` 两个僵尸宿主原样在库 |
 | [步骤 6](roadmap.md) 品质体系与设置真源   | Q-11、Q-18、Q-06       | ⬜   | 抽查：`ScenePanel.vue:134` 的 `TIER_COLOR` 仍是 6 元、仍漏「唯一」，T7 仍描成灰       |
 | [步骤 7](roadmap.md) EJS 能力面 + Legacy  | Q-09、Q-10、Q-27       | ⬜   | 抽查：`ejs-backend.ts` 仍在；退役仍卡在真机走查这一前置                               |
@@ -73,7 +73,8 @@
 | `316acb8` | Q-15 ✅                  | 补网（`typecheck:tools` 进 CI / lint·format 扩到 server·tests·scripts）+ 清仓；补网当场逮到三处过期，含 CharGenSystemCard 把 `string[]` 当字典渲染                                                                |
 | `c4d01c2` | Q-04 ✅                  | 第四批：删 `variableContext`/`variableInstruction` 闭包与 `buildFallbackMessages`，`DEFAULT_TEMPLATES` 补齐三个退役 Agent；顺带删净 `MatchedEntry`/`lorebookMatches`/`targetCharacterId` 与 `buildZoneSection`    |
 | `a4365c5` | Q-17 ✅                  | `buildRequestBody(request, stream)` + `postCompletions(body, signal)` 收口流式/非流式两份逐字相同的装配；`stream` 是真形参（`stream_options` 只能在流式出现）；超时倍率提为具名常量                               |
-| _本次_    | Q-05 ✅                  | `marker-protocol` 走表化：8 份相同扫描骨架 → `MARKER_SPECS` + `scanByTag`；`MARKER_TAGS` 与 `scanMarkers` 的合并都由表推导，消掉「两份手抄清单」这条漏扫线；补 2 条数据驱动防分叉闸门                             |
+| `8135359` | Q-05 ✅                  | `marker-protocol` 走表化：8 份相同扫描骨架 → `MARKER_SPECS` + `scanByTag`；`MARKER_TAGS` 与 `scanMarkers` 的合并都由表推导，消掉「两份手抄清单」这条漏扫线；补 2 条数据驱动防分叉闸门                             |
+| _本次_    | Q-14 ✅                  | 三层失败回执各自收口：编排层解析/结构/落库/时间推进四条日志分家（落库抛异常终于会上浮 `onStateCommitError`）；新建 `store-result.ts` 判别式回执，删掉 UI 反查 store 猜原因；工具层失败一律 throw + `ToolResult`   |
 
 ## 结论摘要
 
@@ -164,7 +165,7 @@
 | [Q-11](findings-t3-single-source.md#q-11) | 中     | T3   | 7 级品质有 4 套类型与 5 份颜色表；`ScenePanel` 漏「唯一」项，T7 角色一律描成灰色         | 步骤 6   | ⬜   |
 | [Q-12](findings-t3-single-source.md#q-12) | 中     | T3   | 两个同名 `applyVarsPatch` 契约互斥，其中一份的宿主已是零引用僵尸                         | 步骤 5   | ⬜   |
 | [Q-13](findings-t2-ai-boundary.md#q-13)   | 中     | T2   | `assembleCharacterState` 里 14 处无谓的 `as any`，同一字面量一半字段带转型               | 步骤 4   | ✅   |
-| [Q-14](findings-t2-ai-boundary.md#q-14)   | 中     | T2   | 失败回执三处口径各异，落库失败会伪装成解析失败                                           | 步骤 4   | ⬜   |
+| [Q-14](findings-t2-ai-boundary.md#q-14)   | 中     | T2   | 失败回执三处口径各异，落库失败会伪装成解析失败                                           | 步骤 4   | ✅   |
 | [Q-15](findings-t6-safety-net.md#q-15)    | 中     | T6   | 15 个源文件在 tsc/ESLint/Prettier 三张网之外，59 个 tracked 临时脚本与 ~120MB 大文件     | 步骤 1   | ✅   |
 | [Q-16](findings-t3-single-source.md#q-16) | 中     | T3   | store 层没有共享工具层：detach helper 复制 8 份，两个同名 `toRow` 语义还不同             | 步骤 5   | ⬜   |
 | [Q-17](findings-t2-ai-boundary.md#q-17)   | 中     | T2   | `agent-client` 的流式与非流式路径各写一份请求体装配、fetch 与错误翻译                    | 步骤 4   | ✅   |

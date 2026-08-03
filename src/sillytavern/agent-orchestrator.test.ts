@@ -1,7 +1,7 @@
 /**
  * agent-orchestrator.ts — DAG 编排引擎测试
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AgentOrchestrator } from './agent-orchestrator';
 import type { AgentContext, AgentConfig, ApiEndpoint, Pipeline } from './types';
 
@@ -1800,5 +1800,104 @@ describe('AgentOrchestrator — onEjsVarsFlush (工坊 P2 / D5)', () => {
     );
     const run = await orch.run();
     expect(run.status).toBe('completed');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// Q-14: 三类失败各有各的回执，不许混成一条
+// ═══════════════════════════════════════════════════════════
+
+describe('AgentOrchestrator — 失败回执分家（Q-14）', () => {
+  let warns: string[];
+  let errors: string[];
+
+  beforeEach(() => {
+    commitChatStateMock.mockClear();
+    commitChatStateMock.mockImplementation(async (patches: any[]) => ({
+      success: true,
+      patchesApplied: patches.length,
+      eventsGenerated: [],
+      errors: [],
+    }));
+    warns = [];
+    errors = [];
+    vi.spyOn(console, 'warn').mockImplementation((...a: any[]) => void warns.push(a.join(' ')));
+    vi.spyOn(console, 'error').mockImplementation((...a: any[]) => void errors.push(a.join(' ')));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** 跑一个单 stage vars_update，正文由调用方给（可以是坏 JSON） */
+  async function runVarsRaw(output: string, onStateCommitError?: any): Promise<void> {
+    globalThis.fetch = mockFetch(output);
+    const orch = new AgentOrchestrator(
+      {
+        pipeline: makeSimplePipeline(['vars_update']),
+        context: makeContext(),
+        agentConfigs: [makeAgentConfig({ agentId: 'vars_update' })],
+        endpoints: [makeEndpoint()],
+        saveId: 'save_q14',
+      },
+      onStateCommitError ? { onStateCommitError } : {},
+    );
+    await orch.run();
+  }
+
+  it('JSON 解析失败 → 说「解析失败」，不上浮给 UI', async () => {
+    const seen: string[] = [];
+    await runVarsRaw('<json>{ 这不是 JSON </json>', (src: string) => seen.push(src));
+
+    expect(warns.some((w) => w.includes('vars_update <json> 解析失败'))).toBe(true);
+    expect(seen).toEqual([]);
+    expect(commitChatStateMock).not.toHaveBeenCalled();
+  });
+
+  it('JSON 合法但结构不对 → 说「结构不符」，与解析失败分开，也不上浮', async () => {
+    const seen: string[] = [];
+    // characters.replace 给成对象：JSON 本身合法，但对象不可迭代，for..of 当场抛。
+    // （给字符串不行 —— 字符串是可迭代的，会被逐字符走一遍，只落进「缺 name 跳过」）
+    await runVarsRaw('<json>{"characters":{"replace":{"理查德":88}}}</json>', (src: string) =>
+      seen.push(src),
+    );
+
+    expect(warns.some((w) => w.includes('vars_update <json> 结构不符'))).toBe(true);
+    expect(warns.some((w) => w.includes('解析失败'))).toBe(false);
+    expect(seen).toEqual([]);
+    expect(commitChatStateMock).not.toHaveBeenCalled();
+  });
+
+  it('落库抛异常 → 说「状态提交抛异常」并上浮 onStateCommitError（旧实现印成「解析失败」且不上浮）', async () => {
+    commitChatStateMock.mockImplementation(async () => {
+      throw new Error('Dexie 写失败');
+    });
+    const seen: Array<[string, string[]]> = [];
+    await runVarsRaw(
+      '<json>{"characters":{"replace":[{"name":"理查德","path":"hp","value":88}]}}</json>',
+      (src: string, errs: string[]) => seen.push([src, errs]),
+    );
+
+    expect(errors.some((e) => e.includes('vars_update 状态提交抛异常'))).toBe(true);
+    // 这条是关键：落库炸了不许被说成 AI 输出格式问题
+    expect(warns.some((w) => w.includes('解析失败'))).toBe(false);
+    expect(seen).toHaveLength(1);
+    expect(seen[0][0]).toBe('vars_update');
+    expect(seen[0][1][0]).toContain('Dexie 写失败');
+  });
+
+  it('quests 分支复用同一个 parsed —— 同一段 <json> 不再 parse 两遍', async () => {
+    await runVarsRaw(
+      '<json>{"characters":{"replace":[{"name":"理查德","path":"hp","value":88}]},' +
+        '"quests":{"upsert":[{"name":"寻剑"}]}}</json>',
+    );
+
+    const sources = commitChatStateMock.mock.calls.map((c: any) => c[0][0]?.metadata?.source);
+    expect(sources).toContain('vars_update');
+    const ops = commitChatStateMock.mock.calls.flatMap((c: any) => c[0]).map((p: any) => p.op);
+    expect(ops).toContain('set_hp');
+    expect(ops).toContain('update_quest');
+    // 两批各自提交，互不连累
+    expect(commitChatStateMock.mock.calls.length).toBe(2);
   });
 });

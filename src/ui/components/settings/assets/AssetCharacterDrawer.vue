@@ -268,7 +268,7 @@ async function removeRow(row: AssetMetaRecord): Promise<void> {
   });
   if (!ok) return;
   // 失败时 store 自己会弹一条 error（尽力做完模式），这里只播报成功
-  if (await assets.deleteAsset(row.id)) emit('announce', '已删除一条素材。');
+  if ((await assets.deleteAsset(row.id)).ok) emit('announce', '已删除一条素材。');
 }
 </script>
 
