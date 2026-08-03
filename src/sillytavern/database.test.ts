@@ -92,6 +92,7 @@ import type {
   AssetMetaRecord,
   WorkshopProject,
 } from './types';
+import { DEFAULT_SETTINGS } from './types';
 import Dexie from 'dexie';
 import { createDefaultCharacterState } from './types';
 import { createDefaultSaveProfile, saveSaveProfile, savePlotOutline } from './database';
@@ -278,12 +279,13 @@ beforeEach(async () => {
 // ========== Initialize & Version ==========
 
 describe('initializeDatabase', () => {
-  it('应自动创建默认 preset 和 settings', async () => {
+  it('应自动创建默认 preset；settings 表刻意**不**播种（Q-06）', async () => {
     const db = getDatabase();
     const presets = await db.presets.count();
-    const settings = await db.settings.count();
     expect(presets).toBeGreaterThanOrEqual(1);
-    expect(settings).toBe(1);
+    // 播种出来的那行只会是一份没人读的影子配置 —— 设置的真源在 localStorage，
+    // 引擎经 engine-settings 注入缝读它。
+    expect(await db.settings.count()).toBe(0);
   });
 
   it('重复调用不应创建重复数据', async () => {
@@ -291,12 +293,11 @@ describe('initializeDatabase', () => {
     await initializeDatabase();
     const db = getDatabase();
     const presetCount = await db.presets.count();
-    const settingsCount = await db.settings.count();
     expect(presetCount).toBe(1);
-    expect(settingsCount).toBe(1);
+    expect(await db.settings.count()).toBe(0);
   });
 
-  it('settings 应含 v4 默认字段', async () => {
+  it.skip('settings 应含 v4 默认字段（Q-06：不再播种，此断言随之失效）', async () => {
     const s = await getSettings();
     expect(s).toBeDefined();
     expect(s!.apiEndpoints).toEqual([]);
@@ -1216,7 +1217,11 @@ describe('exportAllData / importAllData', () => {
 // ========== Settings Persistence ==========
 
 describe('Settings Persistence', () => {
+  // Q-06：settings 表不再被播种，所以先写一行再读。
+  // 这张表在生产里已无读写（只剩 FullBackup 为老备份往返照搬），
+  // 这几条只是保住表本身的读写 API 还能用。
   it('saveSettings + getSettings 应正常读写', async () => {
+    await saveSettings({ ...DEFAULT_SETTINGS, key: 'settings' });
     const s = await getSettings();
     expect(s).toBeDefined();
     s!.theme = 'light';
@@ -1229,6 +1234,7 @@ describe('Settings Persistence', () => {
   });
 
   it('保存 settings 自动带 key', async () => {
+    await saveSettings({ ...DEFAULT_SETTINGS, key: 'settings' });
     const s = await getSettings();
     await saveSettings(s!);
     const all = await getDatabase().settings.toArray();

@@ -5,6 +5,8 @@ import { useThemeStore } from './stores/theme-store';
 import { useUIStore } from './stores/ui-store';
 import { installUnlockListener } from './lib/audio-singleton';
 import { installProductionEjsBackend } from '@engine/ejs-backend';
+import { setEngineSettingsProvider } from '@engine/engine-settings';
+import { useSettingsStore } from './stores/settings-store';
 import './styles/base.css';
 import './styles/transitions.css';
 import './styles/utilities.css';
@@ -31,6 +33,23 @@ app.use(pinia);
 const themeStore = useThemeStore();
 themeStore.init();
 themeStore.initFontSize();
+
+// 引擎读设置的注入缝（Q-06）。
+//
+// 设置的真源是 settings-store（持久化到 localStorage，按 AGENTS.md 那里只存无密钥
+// 元数据）。引擎侧 createSnapshot 此前读的是 Dexie `settings` 表 —— 一份靠
+// game-pipeline 每轮抄两个字段维持的影子配置，桥断了用户完全无感。
+//
+// **必须在挂载前注册**：开场 Prompt 那一轮管线可能在挂载后立刻跑起来，
+// 晚注册会让第一张快照按缺省上限裁剪。
+setEngineSettingsProvider(() => {
+  const s = useSettingsStore().settings;
+  return {
+    // 设置页上叫「快照上限」，字段名是历史遗留的 memorySnapshotLimit
+    maxSnapshotsPerSave: s.memorySnapshotLimit,
+    snapshotRetentionMode: s.snapshotRetentionMode,
+  };
+});
 
 // 首次手势解锁监听 —— 必须在**应用启动时**就装，不能等到音频用起来才装。
 //

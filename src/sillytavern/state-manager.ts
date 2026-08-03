@@ -39,11 +39,11 @@ import {
   getSnapshot,
   saveSnapshot,
   trimSnapshots,
-  getSettings,
   deleteMessagesAfterTurn,
   getDatabase,
 } from './database';
 import { getVar, setVar, delVar, insertVar, applyPathOps } from './var-resolver';
+import { getEngineSettings } from './engine-settings';
 import type { EjsVarsDiff } from './ejs-vars-diff';
 import {
   normalizeQuestStatus,
@@ -1444,11 +1444,11 @@ export class StateManager {
       await saveSaveSlot(save);
     }
 
-    // 滚动上限 + 保留模式（读 settings；缺省 30 / tiered）
-    const settings = await getSettings();
-    const maxSnapshots = settings?.maxSnapshotsPerSave ?? 30;
-    const retentionMode = settings?.snapshotRetentionMode ?? 'tiered';
-    await trimSnapshots(this.saveId, maxSnapshots, retentionMode);
+    // 滚动上限 + 保留模式。Q-06：此前读 Dexie `settings` 表 —— 那是一份由
+    // initializeDatabase 播种、之后只被 game-pipeline 搬过两个字段的影子配置，
+    // 桥一断用户就永远拿不到自己选的上限。现在走 engine-settings 注入缝。
+    const { maxSnapshotsPerSave, snapshotRetentionMode } = getEngineSettings();
+    await trimSnapshots(this.saveId, maxSnapshotsPerSave, snapshotRetentionMode);
 
     return snapshot;
   }

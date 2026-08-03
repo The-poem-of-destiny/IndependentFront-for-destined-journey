@@ -515,10 +515,11 @@ export async function initializeDatabase(): Promise<void> {
     } as ChatPreset);
   }
 
-  const settingsCount = await db.settings.count();
-  if (settingsCount === 0) {
-    await db.settings.put({ ...DEFAULT_SETTINGS, key: 'settings' });
-  }
+  // 🪦 Q-06：不再播种 `settings` 行。这张表曾是引擎侧读设置的地方，而前端设置的
+  //    真源在 localStorage —— 播种出来的那行只会是一份永远停在 DEFAULT_SETTINGS 的
+  //    影子配置，让「设置页改了、引擎行为没变」这类问题看起来像是引擎的锅。
+  //    引擎现在经 `engine-settings` 注入缝读真源。表本身按数据安全约定保留（删表要写
+  //    `表名: null`，会永久抹掉老用户的行），只是停止读写。
 }
 
 export async function clearAllData(): Promise<void> {
@@ -689,6 +690,9 @@ async function doImportAllData(
   backup: FullBackup,
 ): Promise<void> {
   // Split into multiple transactions — 单事务覆盖 13 张表在 Dexie 上有性能/锁问题
+  // `lorebooks` 与 `settings` 是死表（无生产读写，见 Q-06 与 AGENTS.md 架构图）。
+  // 这里仍然照搬**只为老备份往返不丢字节**：老包里带着这两张表的行，导入时丢掉
+  // 就等于这份备份进去再出来变小了。新包里它们是空数组，clear + bulkPut([]) 是 no-op。
   await db.transaction('rw', db.lorebooks, db.presets, db.settings, async () => {
     await db.lorebooks.clear();
     await db.presets.clear();

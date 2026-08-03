@@ -54,6 +54,7 @@ vi.mock('./save-profile', () => ({
 }));
 
 import { StateManager, createStateManager } from './state-manager';
+import { setEngineSettingsProvider } from './engine-settings';
 import { wireEffectSystem, clearAllEffectWirings, peekEffectWiring } from './effect-wiring';
 import * as db from './database';
 import * as saveProfile from './save-profile';
@@ -2794,15 +2795,21 @@ describe('StateManager', () => {
       expect(snap.saveProfile.variables.sys.gold).toBe(42);
     });
 
-    it('滚动上限读 settings.maxSnapshotsPerSave（settings 缺失时缺省 30）', async () => {
+    it('滚动上限读 engine-settings 注入缝（未注册 provider 时缺省 30）', async () => {
+      // Q-06：此前读 Dexie `settings` 表 —— 那是一份没人写全的影子配置，
+      // 用户在设置页选的上限根本到不了这里。现在读的是 settings-store 的真源。
       const sm = new StateManager({ saveId: 'save-001' });
 
-      vi.mocked(db.getSettings).mockResolvedValue({ maxSnapshotsPerSave: 5 } as any);
+      setEngineSettingsProvider(() => ({ maxSnapshotsPerSave: 5 }));
       await sm.createSnapshot('turn', 1);
       expect(vi.mocked(db.trimSnapshots)).toHaveBeenLastCalledWith('save-001', 5, 'tiered');
 
-      vi.mocked(db.getSettings).mockResolvedValue(undefined);
+      setEngineSettingsProvider(() => ({ maxSnapshotsPerSave: 8, snapshotRetentionMode: 'dense' }));
       await sm.createSnapshot('turn', 2);
+      expect(vi.mocked(db.trimSnapshots)).toHaveBeenLastCalledWith('save-001', 8, 'dense');
+
+      setEngineSettingsProvider(undefined);
+      await sm.createSnapshot('turn', 3);
       expect(vi.mocked(db.trimSnapshots)).toHaveBeenLastCalledWith('save-001', 30, 'tiered');
     });
 

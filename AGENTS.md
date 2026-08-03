@@ -363,8 +363,15 @@ src/sillytavern/                    ← 核心引擎
   ├── database.ts                   ← Dexie/IndexedDB v16
   │   ├── v1-v3: lorebooks / presets / settings / chats
   │   │           🪦 lorebooks 是 v3 遗留 `Lorebook` 类型的**死表**，生产代码零读写；
-  │   │              现役世界书表是 v14 的 worldBooks（`WorldBook` 类型）。settings 同为死表。
-  │   │              两张死表刻意保留（删表要写 `表名: null`，会永久抹掉老用户的 v1–v3 行）
+  │   │              现役世界书表是 v14 的 worldBooks（`WorldBook` 类型）。
+  │   │              settings 自 Q-06 起也是死表 —— 此前这句话是**错的**：它有三处活引用
+  │   │              （initializeDatabase 播种 / state-manager 打快照时读 / FullBackup），
+  │   │              而前端设置的真源在 localStorage，于是引擎读到的是一份永远停在
+  │   │              DEFAULT_SETTINGS 的影子配置（症状：设置页改了、引擎行为没变）。
+  │   │              现在引擎经 `engine-settings.ts` 注入缝读真源，播种与那座只搬两个
+  │   │              字段的桥（game-pipeline.syncSnapshotSettings）都已删除。
+  │   │              两张死表刻意保留（删表要写 `表名: null`，会永久抹掉老用户的 v1–v3 行）；
+  │   │              FullBackup 仍照搬它们的行，只为老备份往返不丢字节。
   │   ├── v4+: memories / plotEvents / characters / snapshots / saves / apiEndpoints
   │   ├── v11+: audioTracks / audioBlobs / audioPlaylists（全局共享，排除 FullBackup）
   │   ├── v12+: audioHandles（持久化 FileSystemDirectoryHandle）
