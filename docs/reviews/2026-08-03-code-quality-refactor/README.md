@@ -80,7 +80,8 @@
 | `43c3188` | Q-11 ✅                  | 品质 4 套类型/序号 + 5 份颜色表收敛成一套（全部由 `RARITY_LEVELS`/`TIER_CONFIGS` 派生）；修好 ScenePanel「键错整套词汇」的层级描边色；`CharGenSystemCard` 47 项裸 hex 表删除改主题令牌；`inferQuality` 下沉 `quality-inference.ts`；`ItemsPanel` `any[]` → 判别联合（18 处 cast 归零） |
 | `1604575` | Q-06 ✅                  | 设置真源收敛：新增 `engine-settings.ts` 注入缝，删 `syncSnapshotSettings` 那座只搬两个字段的桥 + `settings` 表播种；FullBackup 分支注明只为老备份往返；AGENTS.md 那句「settings 同为死表」（此前是错的）改成事实                                                                       |
 | `c70e2e2` | Q-18 🔄                  | 新增 `agent-settings.ts`：`AGENT_SETTINGS_DEFAULTS`（六份拷贝收成一处）+ get/patch/reset/fillMissing 四个口；13 段手抄的加载器、`saveAsDefault`、`restoreAgentDefaults` 两分支全部收口。**剩**：`UiSettings` 接口（审查要求先取得同意）与 13 张 map 的物理合并                         |
-| _本次_    | Q-09 🔄                  | 新增 `EJS_SURFACE` 唯一真源（4 张名单全部派生）—— `engine.has('world.isDaytime')` 不再返回 false；补 `EjsWorld`/`EjsEngine` 与有签名的 `marshalWorld`；危险键集宿主侧 5 份 → 1 份。**剩**：别名层共享源码（须与 Legacy 退役同批）                                                      |
+| `7f313e0` | Q-09 🔄                  | 新增 `EJS_SURFACE` 唯一真源（4 张名单全部派生）—— `engine.has('world.isDaytime')` 不再返回 false；补 `EjsWorld`/`EjsEngine` 与有签名的 `marshalWorld`；危险键集宿主侧 5 份 → 1 份。**剩**：别名层共享源码（须与 Legacy 退役同批）                                                      |
+| _本次_    | Q-10 🔄                  | 两份逐行相同的编译缓存合一并接到生产路径；QuickJS 补 `guestBodyCache`（此前零记忆化，是 348-583ms/pass 的直接来源）；清空口经 `registerEjsCacheClear` 反向注册只留一个。**剩**：同步渲染路径降格（须与 Legacy 退役同批）                                                               |
 
 ## 结论摘要
 
@@ -167,7 +168,7 @@
 | [Q-07](findings-t1-wiring-gap.md#q-07)    | 高     | T1   | 两层效果系统都是空的：13 个「封闭枚举」窗口惰性，emitChain 事件层从未被实例化            | 步骤 3   | ✅   |
 | [Q-08](findings-t3-single-source.md#q-08) | 中     | T3   | 「六步迁移」复制了三遍且已漂移——唯一「搞砸即用户数据不可恢复」的路径是复制粘贴           | 步骤 5   | ✅   |
 | [Q-09](findings-t3-single-source.md#q-09) | 高     | T3   | EJS 能力面契约被记在 6 处，已发生 8 次静默渲染漂移，`engine.has` 已经在说谎              | 步骤 7   | 🔄   |
-| [Q-10](findings-t4-corpses.md#q-10)       | 中     | T4   | Legacy EJS 后端的两处遗产：缓存只服务停用路径（生产零缓存）、同步渲染路径恒被闸门关死    | 步骤 7   | ⬜   |
+| [Q-10](findings-t4-corpses.md#q-10)       | 中     | T4   | Legacy EJS 后端的两处遗产：缓存只服务停用路径（生产零缓存）、同步渲染路径恒被闸门关死    | 步骤 7   | 🔄   |
 | [Q-11](findings-t3-single-source.md#q-11) | 中     | T3   | 7 级品质有 4 套类型与 5 份颜色表；`ScenePanel` 漏「唯一」项，T7 角色一律描成灰色         | 步骤 6   | ✅   |
 | [Q-12](findings-t3-single-source.md#q-12) | 中     | T3   | 两个同名 `applyVarsPatch` 契约互斥，其中一份的宿主已是零引用僵尸                         | 步骤 5   | ✅   |
 | [Q-13](findings-t2-ai-boundary.md#q-13)   | 中     | T2   | `assembleCharacterState` 里 14 处无谓的 `as any`，同一字面量一半字段带转型               | 步骤 4   | ✅   |

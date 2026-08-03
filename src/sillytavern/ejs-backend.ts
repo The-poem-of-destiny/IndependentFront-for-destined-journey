@@ -98,9 +98,23 @@ export function getCompiledEntry(content: string): CompileCacheHit {
   return result;
 }
 
-/** 清空编译缓存（测试/性能计时用；生产路径无需调用） */
+/**
+ * 后端自带的额外缓存清空钩子（Q-10）。
+ *
+ * QuickJS 后端有它自己的 guest 函数体缓存，而本模块**不能 import 它**——
+ * 那会把 wasm 模块图拉进每一条 import 链。所以反过来由后端注册。
+ */
+const extraCacheClears: Array<() => void> = [];
+
+/** 后端登记自己的缓存清空函数。重复登记同一个引用是幂等的 */
+export function registerEjsCacheClear(fn: () => void): void {
+  if (!extraCacheClears.includes(fn)) extraCacheClears.push(fn);
+}
+
+/** 清空全部 EJS 编译缓存（测试/性能计时用；生产路径无需调用） */
 export function clearEjsBackendCache(): void {
   compileCache.clear();
+  for (const fn of extraCacheClears) fn();
 }
 
 // ═══════════════════════════════════════════════════════════

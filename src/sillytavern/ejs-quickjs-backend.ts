@@ -35,6 +35,7 @@
 
 import type { EjsBackend, EjsEntryOutcome, EjsPassEntry } from './ejs-backend';
 import { tokenizeTrimmed, type EjsEvalContext } from './ejs-runtime';
+import { registerEjsCacheClear } from './ejs-backend';
 import {
   buildEjsCapabilities,
   EJS_FMT_NAMES,
@@ -1058,7 +1059,41 @@ const GUEST_FACADE = `
  * 的 `__ejs` 收集器装配。曾经这里自建一套分词器，只跳过 `<%_`/`_%>`/`-%>` 的标记字符却没吞
  * 空白——同一模板在两后端渲染出不同字节。共用分词器后 trim 语义逐字节对齐（见 DEFECT A）。
  */
+/**
+ * guest 函数体缓存（Q-10）。
+ *
+ * 生产真正在跑的是本后端，而它此前**零记忆化**：每个条目每回合都重新全量分词 +
+ * 字符串拼接，随后 `context.evalCode` 让 QuickJS 再解析一遍同样的源码。
+ * 实测 109 条目单 pass 348-583ms（同口径 Legacy 6-73ms）—— 那是 `passTimeoutMs`
+ * 从 1500 被迫上调到 5000 的背景。而条目正文在回合之间几乎从不变。
+ *
+ * 讽刺的是仓库里同时维护着**两份**编译缓存，却都只服务已停用的 Legacy 路径。
+ *
+ * 键 = 条目正文，与 `ejs-backend.getCompiledEntry` 同键；session 级不淘汰
+ * （全语料 ≈1500 块，无内存压力）。
+ */
+const guestBodyCache = new Map<string, string>();
+
+/**
+ * 清空 guest 函数体缓存（测试/性能计时用；生产路径无需调用）。
+ *
+ * 已注册进 `ejs-backend` 的统一清空口 —— `clearEjsBackendCache()` 会连它一起清，
+ * 免得「清了缓存」这件事又长出两个入口（那正是 Q-10 要消掉的形状）。
+ */
+export function clearGuestBodyCache(): void {
+  guestBodyCache.clear();
+}
+registerEjsCacheClear(clearGuestBodyCache);
+
 function compileToGuestBody(source: string): string {
+  const cached = guestBodyCache.get(source);
+  if (cached !== undefined) return cached;
+  const built = buildGuestBody(source);
+  guestBodyCache.set(source, built);
+  return built;
+}
+
+function buildGuestBody(source: string): string {
   // `print` 是**函数体局部**而非全局（对齐 Legacy 的 buildFnBody）：它得往本条目的收集器里推，
   // 挂全局会让并发/嵌套语义变模糊。漏了它 → 用 `print()` 的条目在 QuickJS 下 ReferenceError。
   const parts: string[] = ['var print = function (v) { __ejs.push(v); };'];

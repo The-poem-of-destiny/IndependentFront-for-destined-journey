@@ -15,7 +15,13 @@ import {
   type CompiledEjsEntry,
   type EjsEvalContext,
 } from './ejs-runtime';
-import { getEjsBackend, LegacyBackend, type EjsPassEntry } from './ejs-backend';
+import {
+  clearEjsBackendCache,
+  getCompiledEntry,
+  getEjsBackend,
+  LegacyBackend,
+  type EjsPassEntry,
+} from './ejs-backend';
 
 // ========== 加载 ==========
 
@@ -274,34 +280,17 @@ export interface WorldBookRenderResult {
   fallbackEntries: Array<{ uid: number; error: string }>;
 }
 
-/** 编译缓存项：失败也缓存，避免每回合重编译炸一遍（设计 D9） */
-type CompileCacheHit = { ok: true; compiled: CompiledEjsEntry } | { ok: false; error: string };
+// 🪦 Q-10：本模块曾自带一份 `ejsCompileCache` / `getCompiled` / `clearEjsCompileCache`，
+//    与 `ejs-backend` 的 `getCompiledEntry` **函数体逐行相同**，只是变量名不同。
+//    两份缓存键都是条目正文原文，缓存内容也一模一样，却各自占一份内存、各自被清空。
+//    现在统一用 ejs-backend 那份（它同时服务 LegacyBackend.runPass）。
 
-/**
- * session 级编译缓存，key = 条目正文原文。
- * 不淘汰——全语料 ≈660 块，无内存压力（设计 D9）。
- */
-const ejsCompileCache = new Map<string, CompileCacheHit>();
+/** 取（或建）编译产物；语法错误也缓存，避免每回合重炸一遍（设计 D9） */
+const getCompiled = getCompiledEntry;
 
-/** 取（或建）编译产物；语法错误缓存为失败项。 */
-function getCompiled(content: string): CompileCacheHit {
-  const cached = ejsCompileCache.get(content);
-  if (cached) return cached;
-
-  let result: CompileCacheHit;
-  try {
-    result = { ok: true, compiled: compileEjsEntry(content) };
-  } catch (err) {
-    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-    result = { ok: false, error: msg };
-  }
-  ejsCompileCache.set(content, result);
-  return result;
-}
-
-/** 清空编译缓存（测试/性能计时用；生产路径无需调用） */
+/** 清空编译缓存（测试/性能计时用；生产路径无需调用）。转发到唯一实现 */
 export function clearEjsCompileCache(): void {
-  ejsCompileCache.clear();
+  clearEjsBackendCache();
 }
 
 /**
