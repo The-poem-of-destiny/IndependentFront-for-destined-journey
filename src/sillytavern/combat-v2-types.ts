@@ -8,7 +8,7 @@
  * 本文件承载两类东西：
  *  - 类型：`CombatClient` / `CombatClientResult` / `CombatEvent`（原出自 combat-runner）、
  *    `PipelineContext`（原出自 combat-pipeline）
- *  - 值：`COMBAT_EVENTS`（19 event 常量，原出自 combat-pipeline，combat-morale-pipeline 仍引）
+ *  - 值：`COMBAT_EVENTS`（19 event 常量，原出自 combat-pipeline）
  *  - 纯函数：`characterToCombatParticipant`（原出自 combat-resolver，game-pipeline v3 分支仍引）
  *
  * 这些是 v2 战斗的「纯计算 / 契约」部分，v3 内核或保留文件仍在使用（铁律：不删 v2 纯计算函数）。
@@ -96,7 +96,8 @@ export type CombatEvent =
   | { type: 'v3_combat_ended'; reason: string; winner?: string };
 
 // ========== PipelineContext + COMBAT_EVENTS（原出自 combat-pipeline.ts） ==========
-// combat-morale-pipeline.ts（保留的 v2 纯计算）仍引这两者。
+// Q-04: combat-morale-pipeline.ts 已删，此段供 v2 遗留类型/前端复用。保留类型形状，
+// 供 M4 Agent / M5 前端（CombatMessageFlow）消费。
 
 export interface PipelineContext {
   bus: EventBus;

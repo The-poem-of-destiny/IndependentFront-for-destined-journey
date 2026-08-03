@@ -7,16 +7,13 @@
  * endCombat）已退役删除。原第九章/第十章（走 $combat 编排）随删除一并移除。
  *
  * 本文件覆盖**存活的 v2 纯计算**（仍被 v3 内核使用的数值/规则部分）:
- *   - 集群先攻/减员 → $combat.initCombat() 被 initCombat 前的流程
- *   - 意图解析 → resolveAttack → 伤害管线 → 集群减员
+ *   - 意图解析 → resolveAttack → 伤害管线
  *   - 士气检测 → 处决判定
  *
  * 涉及模块（全部保留）:
  *   combat-intention  (意图解析)
  *   combat-damage     (8步伤害管线)
  *   combat-turn       (先攻回合)
- *   combat-panel      (面板生成)
- *   cluster-system    (集群形成/减员/修正)
  *   morale-system     (士气状态机/处决条件)
  */
 import { describe, it, expect } from 'vitest';
@@ -33,21 +30,6 @@ import {
   type DamagePipelineInput,
 } from './combat-damage';
 import { rollInitiative, rollAndSortInitiative } from './combat-turn';
-import { buildOverviewPanel, buildAttackPanel } from './combat-panel';
-
-// 集群系统 (统一从 cluster-system 导入，避免与 combat-damage 重复)
-import {
-  formClusterState,
-  getClusterHpRatio,
-  getClusterAttackCountByRatio,
-  calcAoEClusterDamage,
-  updateClusterAfterDamage,
-  getClusterIntentionOverride,
-  refreshClusterAttacks,
-  isClusterEligible,
-  canFormCluster,
-  formatClusterPanel,
-} from './cluster-system';
 
 // 士气系统
 import {
@@ -167,39 +149,7 @@ const GOBLIN_TEMPLATE = {
 // 第一章: 遭遇战 — 集群形成
 // ═══════════════════════════════════════════════════════════
 
-describe('🎮 第一章: 森林遭遇战 — 集群形成', () => {
-  it('场景设定: 8只哥布林 → 判定可集群化', () => {
-    // AI 检测到 8 只 T1 哥布林 → isClusterEligible 判定
-    expect(isClusterEligible(1, 8)).toBe(true);
-    expect(canFormCluster(8)).toBe(true);
-
-    // T4 敌人不能集群
-    expect(isClusterEligible(4, 5)).toBe(false);
-
-    // 不足3只不能集群
-    expect(isClusterEligible(1, 2)).toBe(false);
-  });
-
-  it('战术分群: 前排5只 + 侧翼3只', () => {
-    const clusterA = formClusterState('goblin_scout', 5, GOBLIN_TEMPLATE.maxHp);
-    const clusterB = formClusterState('goblin_scout', 3, GOBLIN_TEMPLATE.maxHp);
-
-    expect(clusterA.cluster.initialCount).toBe(5);
-    expect(clusterA.cluster.currentCount).toBe(5);
-    expect(clusterA.cluster.clusterHp).toBe(300); // 60 × 5
-    expect(clusterA.cluster.clusterMaxHp).toBe(300);
-    expect(clusterA.cluster.attacksPerRound).toBe(3); // 100% HP → 3次
-
-    expect(clusterB.cluster.initialCount).toBe(3);
-    expect(clusterB.cluster.clusterHp).toBe(180); // 60 × 3
-
-    // 面板输出
-    expect(formatClusterPanel(clusterA.cluster, '哥布林群A')).toContain('(5/5)');
-    expect(formatClusterPanel(clusterA.cluster, '哥布林群A')).toContain('HP [300/300]');
-    expect(formatClusterPanel(clusterB.cluster, '哥布林群B')).toContain('(3/3)');
-    expect(formatClusterPanel(clusterB.cluster, '哥布林群B')).toContain('HP [180/180]');
-  });
-
+describe('🎮 第一章: 遭遇战 — 战斗类型与士气阈值', () => {
   it('战斗类型判定: 野外遭遇 → 标准战斗', () => {
     const combatType: CombatType = '标准';
     expect(getMoraleThreshold('标准')).toBe(0.3);
@@ -255,15 +205,10 @@ describe('🎮 第二章: 先攻排序 — 第1回合', () => {
 // 第三章: 玩家攻击集群 — 完整 resolveAttack 管线
 // ═══════════════════════════════════════════════════════════
 
-describe('🎮 第三章: 玩家攻击集群 — resolveAttack 完整管线', () => {
-  it('Step 1: AI 声明攻击 — "砍向哥布林群" → 常规意图', () => {
+describe('🎮 第三章: 玩家攻击哥布林 — 意图/检定/伤害管线', () => {
+  it('Step 1: AI 声明攻击 — "艾伦挥剑砍向哥布林群" → 常规意图', () => {
     const intention = parseIntentionFromInput('艾伦挥剑砍向哥布林群');
     expect(intention).toBe('常规');
-
-    // 集群意图免疫检查
-    const override = getClusterIntentionOverride();
-    expect(override.coefficient).toBe(1.0);
-    expect(override.narrativeNote).toContain('集群');
   });
 
   it('Step 2: 攻击检定 — T3 vs T1 → 优势 + 闪避无效', () => {
@@ -320,119 +265,10 @@ describe('🎮 第三章: 玩家攻击集群 — resolveAttack 完整管线', ()
     expect(breakdown.finalDamage).toBeGreaterThan(withoutCluster.finalDamage);
   });
 
-  it('Step 4: 集群减员 — 伤害后存活数更新', () => {
-    const clusterA = formClusterState('goblin_scout', 5, 60).cluster;
-
-    const input: DamagePipelineInput = {
-      relevantAttribute: 14,
-      attackerTier: 3,
-      skillPower: 60,
-      weaponAtk: 35,
-      multiHitCount: 1,
-      defenderDefense: 8,
-      penetrationRate: 0.15,
-      damageType: '物理',
-      defenderAttributes: { str: 8, dex: 12, con: 7, int: 5, spi: 4 },
-      ratingCoefficient: 1.3,
-      intentionCoefficient: 1.0,
-      drRate: 0,
-      isClusterTarget: true,
-      currentHp: 300,
-    };
-
-    const damage = runDamagePipeline(input).finalDamage;
-    const result = updateClusterAfterDamage(clusterA, damage);
-
-    if (result.cluster) {
-      expect(result.cluster.clusterHp).toBeLessThan(300);
-      expect(result.cluster.currentCount).toBeLessThanOrEqual(5);
-      // 攻击次数随 HP 变化
-      const hpRatio = getClusterHpRatio(result.cluster);
-      expect(result.cluster.attacksPerRound).toBe(getClusterAttackCountByRatio(hpRatio));
-    }
-  });
-
   it('Step 5: 状态施加 — 暴击必触发', () => {
     const result = checkStatusTrigger(1.3, 14, 8, 16, 5, false);
     expect(result.triggered).toBe(true);
     expect(result.narrative).toContain('暴击');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════
-// 第四章: 集群反击 — HP%决定攻击次数
-// ═══════════════════════════════════════════════════════════
-
-describe('🎮 第四章: 集群反击 — 攻击次数动态变化', () => {
-  it('满血 → 3次', () => {
-    const cluster = formClusterState('goblin', 5, 60).cluster;
-    expect(cluster.attacksPerRound).toBe(3);
-  });
-
-  it('HP=75% → 2次 (< 80%)', () => {
-    const damaged = { ...formClusterState('goblin', 5, 60).cluster, clusterHp: 225 };
-    expect(refreshClusterAttacks(damaged).attacksPerRound).toBe(2);
-  });
-
-  it('HP=50% → 2次', () => {
-    const damaged = { ...formClusterState('goblin', 5, 60).cluster, clusterHp: 150 };
-    expect(refreshClusterAttacks(damaged).attacksPerRound).toBe(2);
-  });
-
-  it('HP=35% → 1次', () => {
-    const damaged = { ...formClusterState('goblin', 5, 60).cluster, clusterHp: 105 };
-    expect(refreshClusterAttacks(damaged).attacksPerRound).toBe(1);
-  });
-
-  it('HP=10% → 仅1只存活, 1次攻击', () => {
-    const cluster = formClusterState('goblin', 5, 60).cluster;
-    const result = updateClusterAfterDamage(cluster, 270);
-    expect(result.cluster!.currentCount).toBe(1);
-    expect(result.cluster!.attacksPerRound).toBe(1);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════
-// 第五章: 法师范围攻击 — AoE vs 集群
-// ═══════════════════════════════════════════════════════════
-
-describe('🎮 第五章: 法师范围攻击 — 火球术 vs 集群', () => {
-  it('火球术(范围:3) vs 集群B(3只)', () => {
-    const clusterB = formClusterState('goblin_scout', 3, 60).cluster;
-
-    // 单体伤害 = 16×10×2.8 + 80 + 8 = 448+88 = 536
-    const singleInput: DamagePipelineInput = {
-      relevantAttribute: 16,
-      attackerTier: 2,
-      skillPower: 80,
-      weaponAtk: 8,
-      multiHitCount: 1,
-      defenderDefense: 8,
-      penetrationRate: 0,
-      damageType: '能量',
-      defenderAttributes: { str: 8, dex: 12, con: 7, int: 5, spi: 4 },
-      ratingCoefficient: 1.0,
-      intentionCoefficient: 1.0,
-      drRate: 0,
-      isClusterTarget: true,
-      currentHp: 180,
-    };
-
-    const singleDamage = runDamagePipeline(singleInput).finalDamage;
-
-    // AoE: × min(范围3, 集群数3) = ×3
-    const totalAoE = calcAoEClusterDamage(singleDamage, 3, 3);
-    expect(totalAoE).toBe(singleDamage * 3);
-
-    // 应用 AoE 伤害
-    const result = updateClusterAfterDamage(clusterB, totalAoE);
-    // 3只哥布林总HP=180, 单体伤害~500+, AoE总伤害>1500 → 全灭
-    expect(result.cluster).toBeNull();
-    expect(result.casualtiesThisRound).toBe(3);
-  });
-
-  it('范围5 vs 集群只剩1只 → ×min(5,1)=×1', () => {
-    expect(calcAoEClusterDamage(100, 5, 1)).toBe(100);
   });
 });
 
@@ -557,16 +393,10 @@ describe('🎮 第七章: 处决 — 战意崩溃目标的处决流程', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('🎮 第八章: 完整战斗流程 — 从遇敌到结算', () => {
-  it('完整流程: 8只哥布林 → 集群 → 3回合 → 敌方崩溃/全灭', () => {
+  it('完整流程: 遇敌 → 攻击检定 → 伤害 → 士气崩溃 → 处决', () => {
     const combatType: CombatType = '标准';
 
-    // ═══ 集群形成 ═══
-    const clusterA = formClusterState('goblin_scout', 5, 60).cluster;
-    const clusterB = formClusterState('goblin_scout', 3, 60).cluster;
-
-    expect(clusterA.clusterHp + clusterB.clusterHp).toBe(480); // 300 + 180
-
-    // ═══ 回合 1: 玩家攻击集群A ═══
+    // ═══ 回合 1: 玩家攻击哥布林 ═══
     const r1Input: DamagePipelineInput = {
       relevantAttribute: 14,
       attackerTier: 3,
@@ -580,84 +410,42 @@ describe('🎮 第八章: 完整战斗流程 — 从遇敌到结算', () => {
       ratingCoefficient: 1.3,
       intentionCoefficient: 1.0,
       drRate: 0,
-      isClusterTarget: true,
-      currentHp: 300,
+      isClusterTarget: false,
+      currentHp: 60,
     };
     const r1Damage = runDamagePipeline(r1Input).finalDamage;
-    const aAfterR1 = updateClusterAfterDamage(clusterA, r1Damage);
+    // 高额伤害直接把哥布林 HP 打到 0 以下 → 战意崩溃
+    expect(r1Damage).toBeGreaterThan(60);
 
-    expect(aAfterR1.cluster ? aAfterR1.cluster.clusterHp : 0).toBeLessThan(300);
+    // ═══ 士气检测：敌方受重创 → 崩溃/溃逃 ═══
+    const moraleAfter = checkMorale(0.05, combatType, 8); // HP≈5%, d20=8 < 12
+    expect(moraleAfter.triggered).toBe(true);
+    expect(moraleAfter.moraleState).toBe('routing');
 
-    // 刷新攻击次数
-    const aRefreshed = aAfterR1.cluster ? refreshClusterAttacks(aAfterR1.cluster) : null;
-    if (aRefreshed) {
-      expect(aRefreshed.attacksPerRound).toBeGreaterThanOrEqual(1);
-    }
+    // ═══ 处决：routing 目标可被终结 ═══
+    expect(canExecute('routing')).toBe(true);
+    const exec = getExecutionModifiers();
+    expect(exec.intentionAutoSuccess).toBe(true);
+    expect(exec.minRatingCoefficient).toBe(1.3);
 
-    // ═══ 回合 2: 法师 AoE 火球术 vs 集群A ═══
-    const r2SingleInput: DamagePipelineInput = {
-      relevantAttribute: 16,
-      attackerTier: 2,
-      skillPower: 80,
-      weaponAtk: 8,
-      multiHitCount: 1,
-      defenderDefense: 8,
-      penetrationRate: 0,
-      damageType: '能量',
-      defenderAttributes: { str: 8, dex: 12, con: 7, int: 5, spi: 4 },
-      ratingCoefficient: 1.0,
-      intentionCoefficient: 1.0,
-      drRate: 0,
-      isClusterTarget: true,
-      currentHp: aAfterR1.cluster?.clusterHp ?? 300,
-    };
-    const r2Single = runDamagePipeline(r2SingleInput).finalDamage;
-    const currentA = aAfterR1.cluster?.currentCount ?? 5;
-    const aoeDmg = calcAoEClusterDamage(r2Single, 3, currentA);
-    const aAfterR2 = aAfterR1.cluster
-      ? updateClusterAfterDamage(aAfterR1.cluster, aoeDmg)
-      : { cluster: null, casualtiesThisRound: 0, hpPercentBefore: 0, hpPercentAfter: 0 };
-
-    // ═══ 士气检测 (回合2结束) ═══
-    const moraleB = checkMorale(1.0, combatType, 18); // 集群B满血
-    expect(moraleB.triggered).toBe(false);
-
-    // ═══ 回合 3: 玩家攻击集群B ═══
-    const r3Input: DamagePipelineInput = {
-      relevantAttribute: 14,
+    // ═══ 处决意图判定：routing 目标 → 自动成功 ═══
+    const execInput: IntentionCheckInput = {
+      intentionLevel: '处决',
       attackerTier: 3,
-      skillPower: 60,
-      weaponAtk: 35,
-      multiHitCount: 1,
-      defenderDefense: 8,
-      penetrationRate: 0.15,
-      damageType: '物理',
-      defenderAttributes: { str: 8, dex: 12, con: 7, int: 5, spi: 4 },
-      ratingCoefficient: 1.3,
-      intentionCoefficient: 1.0,
-      drRate: 0,
-      isClusterTarget: true,
-      currentHp: 180,
+      defenderTier: 1,
+      defenderIncapacitated: false,
+      defenderMorale: 'routing',
+      isExecutionIntent: true,
+      nonLethal: false,
+      attackerD20: 14,
+      defenderD20: 8,
     };
-    const r3Damage = runDamagePipeline(r3Input).finalDamage;
-    const bAfterR3 = updateClusterAfterDamage(clusterB, r3Damage);
+    const execResult = resolveIntention(execInput);
+    expect(execResult.verdict).toBe('自动成功');
+    expect(execResult.coefficient).toBe(1.3);
 
-    // ═══ 回合3结束: 士气检测 — 集群B可能崩溃 ═══
-    const bHpRatio = bAfterR3.cluster
-      ? bAfterR3.cluster.clusterHp / bAfterR3.cluster.clusterMaxHp
-      : 0;
-    const finalMorale = checkMorale(bHpRatio, combatType, 8); // d20=8 < 12
-
-    if (finalMorale.triggered) {
-      expect(finalMorale.moraleState).toBe('routing');
-      expect(canExecute('routing')).toBe(true);
-    }
-
-    // ═══ 战斗结算 ═══
-    const totalInitial = clusterA.initialCount + clusterB.initialCount;
-    const aSurvivors = aAfterR2.cluster?.currentCount ?? 0;
-    const bSurvivors = bAfterR3.cluster?.currentCount ?? 0;
-    expect(aSurvivors + bSurvivors).toBeLessThan(totalInitial);
+    // ═══ 战斗结算：敌方崩溃 → 胜利 ═══
+    expect(getMoraleThreshold(combatType)).toBe(0.3);
   });
 });
 

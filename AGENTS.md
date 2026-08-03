@@ -385,11 +385,11 @@ src/sillytavern/                    ← 核心引擎
   ├── random-tables.ts              ← [Phase 8.5] NPC 生成随机表
   │
   ├── field-enums.ts                ← [M1] 中文枚举集中定义 + 归一化（铁律5）
-  ├── tier-constants.ts / bloodlines.ts / death-system.ts / validate.ts / char-query.ts
+  ├── tier-constants.ts / bloodlines.ts / validate.ts / char-query.ts
   ├── resource-calc.ts / var-resolver.ts / namespace-normalizer.ts / time-system.ts
   │
   ├── save-profile.ts               ← [Phase 4.6] 存档级 FP 元货币（M5: +variables 变量唯一真源）
-  ├── fp-system.ts / effect-parser.ts / effect-runtime.ts
+  ├── effect-parser.ts / effect-runtime.ts
   ├── ejs-backend.ts                ← [能力面 T1] EjsBackend 接口 + LegacyBackend + 生产切换入口
   ├── ejs-quickjs-backend.ts        ← [能力面 T7] ★ QuickJS(wasm,主线程) 隔离后端 —— SEC-02 的边界
   │                                    实测：构造器逃逸/死循环/ReDoS/OOM 四条全部堵住
@@ -406,7 +406,7 @@ src/sillytavern/                    ← 核心引擎
   ├── state-manager.ts              ← 唯一状态写入入口（M2按名寻址 M4名字唯一化 M5变量迁profile+快照重建）
   ├── dice.ts / memory-store.ts / memory-summarizer.ts / plot-outline.ts / plot-engine.ts / location-db.ts
   │
-  ├── combat-intention.ts / combat-damage.ts / combat-turn.ts / combat-panel.ts / combat-resolver.ts
+  ├── combat-intention.ts / combat-damage.ts / combat-turn.ts / combat-resolver.ts
   │   └── (以上为 v2 战斗纯计算函数，v3 内核仍调用；v2 编排层 combat-runner/combat-pipeline 由 M5 删除)
   │   └── combat-v3/               ← [战斗 v3] 代码内核主持流程（M0-M5 已合入）
   │       ├── kernel.ts / reducer.ts / state.ts     ← 状态机 + 原子提交 + 5 不变量
@@ -419,7 +419,7 @@ src/sillytavern/                    ← 核心引擎
   │       ├── replay.ts / contract/                 ← contract harness + 7 场 fixture
   │       └── index.ts                              ← 唯一公共出口（openCombat / runCombatV3）
   ├── craft-quality.ts / craft-dc.ts / craft-resolver.ts
-  ├── cluster-system.ts / morale-system.ts / affection-system.ts
+  ├── morale-system.ts / affection-system.ts
   ├── marker-protocol.ts            ← [Phase 6e+Audio] XML 标记检测（含 <play_audio>）
   ├── char-gen-agent.ts             ← [Phase 6e] 角色生成编排（M3 单patch落库/正式字段直写/零id）
   ├── craft-gen-chain.ts            ← [Phase 9b] 制作生成编排（M3 零id/type归一化/单patch）
@@ -446,8 +446,8 @@ src/sillytavern/                    ← 核心引擎
   ├── workshop-diff.ts              ← [工坊 P4] ★纯函数 diffInstallPlan：更新前的「这一版会改什么」
   │                                    输入是**已算好的计划**而非重拉详情 —— 预告与提交在结构上同源
   │
-  ├── lorebook-engine.ts / prompt-assembler.ts / importer.ts / variables.ts / vars-merger.ts
-  ├── stream-parser.ts / api-router.ts / api-tools.ts / editor-utils.ts
+  ├── variables.ts / vars-merger.ts
+  ├── api-router.ts / api-tools.ts
   │
   └── (战斗 v2 纯计算规则见 docs/reference/combat-system-architecture.md；v3 内核见 docs/reference/combat-system-architecture-v3.md)
 

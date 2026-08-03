@@ -461,33 +461,6 @@ export function performAttackCheck(input: AttackCheckInput): AttackCheckResult {
   };
 }
 
-// ========== 集群攻击次数 ==========
-
-/**
- * 集群攻击次数 (对齐世界书):
- *   HP ≥ 80% → 3次
- *   HP ≥ 50% → 2次
- *   HP ≥ 30% → 1次
- *   HP < 30% → 1次
- */
-export function getClusterAttackCount(currentHp: number, maxHp: number): number {
-  const hpPercent = maxHp > 0 ? currentHp / maxHp : 0;
-  if (hpPercent >= 0.8) return 3;
-  if (hpPercent >= 0.5) return 2;
-  return 1;
-}
-
-// ========== 范围/集群结算 ==========
-
-/** 范围技能对集群: 总伤害 = 修正后单体伤害 × min(范围x, 集群当前数量n) */
-export function calcAoEClusterDamage(
-  singleTargetDamage: number,
-  aoeRange: number,
-  clusterCount: number,
-): number {
-  return singleTargetDamage * Math.min(aoeRange, clusterCount);
-}
-
 // ========== 状态触发判定 ==========
 
 /**

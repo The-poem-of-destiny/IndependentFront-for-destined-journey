@@ -15,8 +15,6 @@ import {
   applyClusterMultiplier,
   runDamagePipeline,
   performAttackCheck,
-  getClusterAttackCount,
-  calcAoEClusterDamage,
   checkStatusTrigger,
   getHitRating,
 } from './combat-damage';
@@ -436,42 +434,6 @@ describe('getHitRating', () => {
     expect(getHitRating(2).level).toBe('失手');
     expect(getHitRating(2).coefficient).toBe(0);
     expect(getHitRating(-5).level).toBe('失手');
-  });
-});
-
-// ========== 集群攻击次数 ==========
-
-describe('getClusterAttackCount', () => {
-  it('HP ≥ 80% → 3 次', () => {
-    expect(getClusterAttackCount(80, 100)).toBe(3);
-    expect(getClusterAttackCount(95, 100)).toBe(3);
-  });
-
-  it('HP ≥ 50% → 2 次', () => {
-    expect(getClusterAttackCount(60, 100)).toBe(2);
-    expect(getClusterAttackCount(79, 100)).toBe(2);
-  });
-
-  it('HP ≥ 30% → 1 次', () => {
-    expect(getClusterAttackCount(40, 100)).toBe(1);
-    expect(getClusterAttackCount(49, 100)).toBe(1);
-  });
-
-  it('HP < 30% → 1 次', () => {
-    expect(getClusterAttackCount(20, 100)).toBe(1);
-    expect(getClusterAttackCount(1, 100)).toBe(1);
-  });
-});
-
-// ========== AoE 集群 ==========
-
-describe('calcAoEClusterDamage', () => {
-  it('范围 3/集群 5: 取 min(3,5)=3', () => {
-    expect(calcAoEClusterDamage(100, 3, 5)).toBe(300);
-  });
-
-  it('范围 5/集群 3: 取 min(5,3)=3', () => {
-    expect(calcAoEClusterDamage(100, 5, 3)).toBe(300);
   });
 });
 

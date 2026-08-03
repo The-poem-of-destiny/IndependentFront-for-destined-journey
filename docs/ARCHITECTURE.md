@@ -76,19 +76,15 @@ fated_poem_independent/
 │   │   ├── char-query.ts         # 角色查询
 │   │   ├── resource-calc.ts      # 资源计算
 │   │   ├── time-system.ts        # 游戏时间系统
-│   │   ├── lorebook-engine.ts    # 世界书关键词匹配
+│   │   ├── worldbook-loader.ts   # 世界书条目匹配/注入（现役实现）
 │   │   ├── variables.ts          # 变量提取+命名空间隔离
 │   │   ├── vars-merger.ts        # VarsPatch 深合并
-│   │   ├── stream-parser.ts      # XML 增量解析器
-│   │   ├── importer.ts           # ST 格式导入/导出
 │   │   ├── ...                   # 还有更多模块
 │   │   └── index.ts              # 统一导出入口
 │   ├── ui/                       # Vue 3 前端 (10主题/16组件/4页面)
 │   │   ├── main.ts / App.vue
 │   │   ├── themes/ / stores/ / components/
 │   │   └── styles/
-│   └── vanilla/
-│       └── sillytavern-store.ts  # Vanilla JS 响应式 Store
 ├── docs/
 │   ├── ARCHITECTURE.md           # 本文档
 │   ├── phases/                   # Phase 计划
@@ -182,7 +178,7 @@ createSillytavernStore()
 用户输入 + 当前聊天历史
         │
 ┌───────▼──────────────────────────────────────────┐
-│  Step 1: 世界书扫描 (lorebook-engine.ts)           │
+│  Step 1: 世界书扫描 (worldbook-loader.ts)          │
 │  ─────────────────────────────────────             │
 │  · 对 [用户输入 + 最近3条历史] 进行关键词匹配        │
 │  · 4 种选择性逻辑: and_any / not_all / not_any      │
@@ -193,7 +189,8 @@ createSillytavernStore()
 └───────┬──────────────────────────────────────────┘
         │
 ┌───────▼──────────────────────────────────────────┐
-│  Step 2: Prompt 组装 (prompt-assembler.ts)         │
+│  Step 2: Prompt 组装 (agent-templates +          │
+│           placeholder-registry + assemblePreset) │
 │  ─────────────────────────────────────             │
 │  · 按 preset.prompt_order 逐段构建系统消息           │
 │  · worldInfoBefore / worldInfoAfter 位置注入世界书   │
@@ -217,7 +214,8 @@ createSillytavernStore()
 └───────┬──────────────────────────────────────────┘
         │
 ┌───────▼──────────────────────────────────────────┐
-│  Step 4: 响应解析 (stream-parser + variables)      │
+│  Step 4: 响应解析 (agent-client 内联 SSE +        │
+│           story-output.ts)                        │
 │  ─────────────────────────────────────             │
 │  · 流式 XML 状态机解析 AI 回复                        │
 │  · 提取 <maintext> <option> <sum> <vars> <thinking>│
@@ -320,7 +318,7 @@ Agent 编排引擎: `agent-orchestrator.ts`
         │
 ┌───────▼────────┐
 │ 响应处理
-│ · stream-parser 解析 XML
+│ · agent-client 内联 SSE 解析 XML
 │ · extractVariables (兼容 <var> 标签)
 │ · mergeVariables → 新变量快照
 │ · 创建 AssistantMessage
@@ -334,7 +332,7 @@ Agent 编排引擎: `agent-orchestrator.ts`
 
 ### 5.3 SillyTavern 兼容
 
-内部格式与 SillyTavern 原始格式的差异由 `importer.ts` 处理：
+内部格式与 SillyTavern 原始格式的差异由 `importer.ts` 处理（v3 世界书栈已退役，现由 `workshop-manifest.ts` / 工坊导入链承担）：
 
 | 字段             | 内部格式                     | SillyTavern 格式 |
 | ---------------- | ---------------------------- | ---------------- |
@@ -342,7 +340,7 @@ Agent 编排引擎: `agent-orchestrator.ts`
 | `selectiveLogic` | 字符串枚举 (`'and_any'`)     | 数值 (0-3)       |
 | `entry key`      | `string` (UUID)              | `number` (uid)   |
 
-所有导入/导出通过 `importLorebook()` / `exportLorebook()` 转换。
+所有导入/导出通过工坊导入链（`workshop-manifest.ts` → `workshop-install-plan.ts`）转换。
 
 ---
 
@@ -354,7 +352,7 @@ Agent 编排引擎: `agent-orchestrator.ts`
 | 记忆召回 Agent    | ✅ 已完成 | `memory-store.ts` + `memory-summarizer.ts` — Embedding 向量召回  |
 | Schema-first 状态 | ✅ 已完成 | `types.ts` — ~45 接口/类型，所有状态结构强类型                   |
 | 前端 UI (Vue 3)   | ✅ 已完成 | `src/ui/` — 10 主题/16 组件/4 页面/单URL架构                     |
-| 流式输出          | ✅ 已完成 | `stream-parser.ts` — XML 增量解析 + SSE                          |
+| 流式输出          | ✅ 已完成 | `agent-client.ts` 内联 SSE 流式解析 + `story-output.ts`          |
 | 脚本沙盒          | ✅ 已完成 | `script-executor.ts` — $event.on/off 持久订阅 + $call 跨对象引用 |
 | 持久订阅管理      | ✅ 已完成 | `subscription-manager.ts` — init/cleanup 生命周期 + 递归保护     |
 | 测试覆盖          | ✅ 已完成 | 53 files / 2171 tests — Vitest + fake-indexeddb                  |
