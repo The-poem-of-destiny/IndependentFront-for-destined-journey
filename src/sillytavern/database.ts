@@ -46,6 +46,68 @@ export interface CreatePresetRecord {
 const DB_NAME = 'SillyTavernWebDB';
 const DB_VERSION = 16;
 
+// ═══════════════════════════════════════════════════════════
+// Schema 声明（Q-26）
+// ═══════════════════════════════════════════════════════════
+//
+// 16 个 Dexie 版本此前各自**全量重述**整份表清单，约 390 行是同一张单子的拷贝。
+// 加一张表要把上一版的 21 行原样抄一遍再加一行，抄错一个索引名不会有任何提示。
+//
+// v1–v12 **原样冻结**：它们已经出厂，任何改动都要在用户既有库上比对 schema 字符串，
+// 差一个字节就触发真正的索引重建。v13 起改走下面的 delta 写法，一版一行。
+//
+// 🔴 `withSchema` 生成的字符串必须与手写版**逐字节相同** —— 键序沿用插入序
+//    （JS 对象字符串键保序），delta 追加在尾部，正是原来手写的位置。
+//    database.test.ts 的升版回归测试是这条的闸门。
+
+/** 表名 → 索引声明。`null` = 删表（Dexie 的显式删表语义，见 v9 的 `chats: null`） */
+type SchemaSpec = Record<string, string | null>;
+
+/**
+ * 基线 + 增量 → 新版 schema。
+ *
+ * 增量里写 `null` 表示删表 —— 与 Dexie 的 `表名: null` 语义一致，原样透传。
+ * 不做任何排序/归一化：Dexie 比对的是字符串，重排键序会让既有库以为 schema 变了。
+ */
+function withSchema(base: SchemaSpec, delta: SchemaSpec): SchemaSpec {
+  return { ...base, ...delta };
+}
+
+/** v12 全量基线（v1–v12 的终态；上面那批冻结版本仍各自手写） */
+const SCHEMA_V12: SchemaSpec = {
+  lorebooks: 'id, name, updatedAt',
+  presets: 'id, name, updatedAt',
+  settings: 'key',
+  memories: 'id, saveId, createdAt, realTimestamp',
+  plotEvents: 'id, saveId, parentId, status, updatedAt',
+  characters: 'id, saveId, type',
+  snapshots: 'id, saveId, createdAt',
+  saves: 'id, slot, updatedAt',
+  apiEndpoints: 'id, name',
+  plotOutlines: 'id, saveId, updatedAt',
+  saveProfiles: 'saveId, updatedAt',
+  createPresets: 'id, name, updatedAt',
+  messages: 'id, saveId, [saveId+turn]',
+  audioTracks: 'id, name, kind, *tags, updatedAt',
+  audioBlobs: 'id',
+  audioPlaylists: 'id, name, updatedAt',
+  audioHandles: 'id',
+};
+
+const SCHEMA_V13: SchemaSpec = withSchema(SCHEMA_V12, {
+  assetMeta: 'id, name, type, [name+type], createdAt, updatedAt',
+  assetBlobs: 'id',
+});
+
+const SCHEMA_V14: SchemaSpec = withSchema(SCHEMA_V13, {
+  worldBooks: 'id, partition, updatedAt',
+  workshopProjects: 'id, installedAt, updatedAt',
+});
+
+const SCHEMA_V15: SchemaSpec = withSchema(SCHEMA_V14, {
+  beautifierRules: 'id, group, order',
+});
+
 class AppDatabase extends Dexie {
   // v1-v3 tables (chats 已于 v9 删除)
   lorebooks!: Table<Lorebook>;
@@ -334,7 +396,9 @@ class AppDatabase extends Dexie {
     });
 
     // v12: 音频本地文件夹 — 新增 audioHandles 表（纯增量，无 upgrade 回调）
-    // 注意: Dexie 要求每版重述完整 schema，漏写任一表即为删表（静默毁数据）。
+    // ⚠️ 这句曾写着「Dexie 要求每版重述完整 schema，漏写任一表即为删表」——
+    //    **对 Dexie 4 不成立**（stores() 跨版累加，漏写的表从上一版继承；删表要显式
+    //    写 `表名: null`，见 v9 的 `chats: null`）。留着它是反向指导，故更正（Q-26）。
     this.version(12).stores({
       lorebooks: 'id, name, updatedAt',
       presets: 'id, name, updatedAt',
@@ -368,27 +432,12 @@ class AppDatabase extends Dexie {
     //     没有查询在背后的索引就是死重量。
     //   · assetHandles 表 —— v1 无 File System Access 层级（D5），等 v14 再做一次纯增量升版。
     //   · category 列 —— 由 type 经 categoryForType() 派生，落库即第二个真相来源（违反铁律4）。
-    this.version(13).stores({
-      lorebooks: 'id, name, updatedAt',
-      presets: 'id, name, updatedAt',
-      settings: 'key',
-      memories: 'id, saveId, createdAt, realTimestamp',
-      plotEvents: 'id, saveId, parentId, status, updatedAt',
-      characters: 'id, saveId, type',
-      snapshots: 'id, saveId, createdAt',
-      saves: 'id, slot, updatedAt',
-      apiEndpoints: 'id, name',
-      plotOutlines: 'id, saveId, updatedAt',
-      saveProfiles: 'saveId, updatedAt',
-      createPresets: 'id, name, updatedAt',
-      messages: 'id, saveId, [saveId+turn]',
-      audioTracks: 'id, name, kind, *tags, updatedAt',
-      audioBlobs: 'id',
-      audioPlaylists: 'id, name, updatedAt',
-      audioHandles: 'id',
-      assetMeta: 'id, name, type, [name+type], createdAt, updatedAt',
-      assetBlobs: 'id',
-    });
+    this.version(13).stores(
+      withSchema(SCHEMA_V12, {
+        assetMeta: 'id, name, type, [name+type], createdAt, updatedAt',
+        assetBlobs: 'id',
+      }),
+    );
 
     // v14: 世界书迁出 localStorage + 创意工坊 — 新增 worldBooks / workshopProjects 两表
     //      （纯增量，无 upgrade 回调；迁移例程在 UI 层单独跑，见设计 D4）
@@ -402,29 +451,12 @@ class AppDatabase extends Dexie {
     // 索引取舍:
     //   · worldBooks.partition —— 工坊过滤（按分区整体识别/开关/排除）是一等访问模式，保留。
     //   · workshopProjects 不建 rootProjectId / installState 索引 —— 项目量级是几十条，全表扫即可。
-    this.version(14).stores({
-      lorebooks: 'id, name, updatedAt',
-      presets: 'id, name, updatedAt',
-      settings: 'key',
-      memories: 'id, saveId, createdAt, realTimestamp',
-      plotEvents: 'id, saveId, parentId, status, updatedAt',
-      characters: 'id, saveId, type',
-      snapshots: 'id, saveId, createdAt',
-      saves: 'id, slot, updatedAt',
-      apiEndpoints: 'id, name',
-      plotOutlines: 'id, saveId, updatedAt',
-      saveProfiles: 'saveId, updatedAt',
-      createPresets: 'id, name, updatedAt',
-      messages: 'id, saveId, [saveId+turn]',
-      audioTracks: 'id, name, kind, *tags, updatedAt',
-      audioBlobs: 'id',
-      audioPlaylists: 'id, name, updatedAt',
-      audioHandles: 'id',
-      assetMeta: 'id, name, type, [name+type], createdAt, updatedAt',
-      assetBlobs: 'id',
-      worldBooks: 'id, partition, updatedAt',
-      workshopProjects: 'id, installedAt, updatedAt',
-    });
+    this.version(14).stores(
+      withSchema(SCHEMA_V13, {
+        worldBooks: 'id, partition, updatedAt',
+        workshopProjects: 'id, installedAt, updatedAt',
+      }),
+    );
 
     // v15: 美化规则迁出 localStorage（Phase 0b）— 新增 beautifierRules 一表
     //      （纯增量，无 upgrade 回调；迁移例程在 UI 层单独跑，复用 Phase 0 的六步）
@@ -436,58 +468,11 @@ class AppDatabase extends Dexie {
     //
     // 索引取舍：`group` 供设置页按分组折叠，`order` 供 processRules 排序取用；
     // 用户规则量级是几十条，不再多建索引。
-    this.version(15).stores({
-      lorebooks: 'id, name, updatedAt',
-      presets: 'id, name, updatedAt',
-      settings: 'key',
-      memories: 'id, saveId, createdAt, realTimestamp',
-      plotEvents: 'id, saveId, parentId, status, updatedAt',
-      characters: 'id, saveId, type',
-      snapshots: 'id, saveId, createdAt',
-      saves: 'id, slot, updatedAt',
-      apiEndpoints: 'id, name',
-      plotOutlines: 'id, saveId, updatedAt',
-      saveProfiles: 'saveId, updatedAt',
-      createPresets: 'id, name, updatedAt',
-      messages: 'id, saveId, [saveId+turn]',
-      audioTracks: 'id, name, kind, *tags, updatedAt',
-      audioBlobs: 'id',
-      audioPlaylists: 'id, name, updatedAt',
-      audioHandles: 'id',
-      assetMeta: 'id, name, type, [name+type], createdAt, updatedAt',
-      assetBlobs: 'id',
-      worldBooks: 'id, partition, updatedAt',
-      workshopProjects: 'id, installedAt, updatedAt',
-      beautifierRules: 'id, group, order',
-    });
+    this.version(15).stores(withSchema(SCHEMA_V14, { beautifierRules: 'id, group, order' }));
 
     // v16: persistent storage for isolated beautifier regexes. Pure addition;
     // no upgrade callback and no existing table is removed.
-    this.version(16).stores({
-      lorebooks: 'id, name, updatedAt',
-      presets: 'id, name, updatedAt',
-      settings: 'key',
-      memories: 'id, saveId, createdAt, realTimestamp',
-      plotEvents: 'id, saveId, parentId, status, updatedAt',
-      characters: 'id, saveId, type',
-      snapshots: 'id, saveId, createdAt',
-      saves: 'id, slot, updatedAt',
-      apiEndpoints: 'id, name',
-      plotOutlines: 'id, saveId, updatedAt',
-      saveProfiles: 'saveId, updatedAt',
-      createPresets: 'id, name, updatedAt',
-      messages: 'id, saveId, [saveId+turn]',
-      audioTracks: 'id, name, kind, *tags, updatedAt',
-      audioBlobs: 'id',
-      audioPlaylists: 'id, name, updatedAt',
-      audioHandles: 'id',
-      assetMeta: 'id, name, type, [name+type], createdAt, updatedAt',
-      assetBlobs: 'id',
-      worldBooks: 'id, partition, updatedAt',
-      workshopProjects: 'id, installedAt, updatedAt',
-      beautifierRules: 'id, group, order',
-      regexStorage: 'key',
-    });
+    this.version(16).stores(withSchema(SCHEMA_V15, { regexStorage: 'key' }));
   }
 }
 
