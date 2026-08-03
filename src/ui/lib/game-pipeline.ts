@@ -47,6 +47,7 @@ import { useWorldBookStore } from '../stores/worldbook-store';
 import { useUIStore } from '../stores/ui-store';
 import type { CombatCommand } from '@engine/combat-v3';
 import { rollDice } from '@engine/dice';
+import { getAgentSettings } from '../stores/agent-settings';
 
 export interface GamePipelineDeps {
   gameStore: ReturnType<typeof useGameStore>;
@@ -484,10 +485,10 @@ export class GamePipeline {
           : defaults.presetId || undefined;
       const systemPrompt: string | undefined = defaults.systemPrompt || undefined;
       const template: string | undefined = defaults.template || undefined;
-      const worldBookEnabled = (s.agentWorldbookEnabled as Record<string, boolean>)[agentId];
-      const configuredWorldBookIds = worldBookEnabled
-        ? [...((s.agentWorldbookIds as Record<string, string[]>)[agentId] ?? [])]
-        : [];
+      // Q-18: per-Agent 设置只取一次，数值项的默认由 AGENT_SETTINGS_DEFAULTS 合上
+      const agentCfg = getAgentSettings(s, agentId);
+      const worldBookEnabled = agentCfg.worldBookEnabled;
+      const configuredWorldBookIds = worldBookEnabled ? agentCfg.worldBookIds : [];
       const selectedSystemCore =
         this.game.activeSave?.metadata?.enabledWorldBookEntries?.some((entry: string) =>
           entry.startsWith('system_core:'),
@@ -508,24 +509,27 @@ export class GamePipeline {
         enabled: true,
         apiEndpointId: endpoint?.id ?? '',
         model,
-        temperature: (s.agentTemperature as Record<string, number>)[agentId] ?? 0.7,
-        maxTokens: (s.agentMaxTokens as Record<string, number>)[agentId] ?? 16384,
-        topP: (s.agentTopP as Record<string, number>)[agentId] ?? 1.0,
-        frequencyPenalty: (s.agentFreqPen as Record<string, number>)[agentId] ?? 0,
-        presencePenalty: (s.agentPresPen as Record<string, number>)[agentId] ?? 0,
+        // Q-18: 默认值只在 AGENT_SETTINGS_DEFAULTS 出现一次。此前这五行各写一遍
+        // 字面量，与设置页的六处拷贝靠人眼保持一致 —— 漏掉这处就是「设置页显示新默认、
+        // 运行时用旧值」，那类偏差要到账单上才可见。
+        temperature: agentCfg.temperature,
+        maxTokens: agentCfg.maxTokens,
+        topP: agentCfg.topP,
+        frequencyPenalty: agentCfg.freqPen,
+        presencePenalty: agentCfg.presPen,
         retryOnFail: true,
         timeout: 120000,
         userId: `fp|${this.saveId}|${agentId}`,
         promptTemplate: {
-          fixedSystem: (s.agentPrompts as Record<string, string>)[agentId] ?? '',
+          fixedSystem: agentCfg.systemPrompt,
           fixedExamples: '',
         },
         presetId,
         worldBookIds,
         // 🔑 优先使用 agentDefaults（loadPresets 自 fetch agent-config.json），
         // localStorage 可能有用户编辑过的版本，作为 fallback。
-        systemPrompt: systemPrompt || (s.agentPrompts as Record<string, string>)[agentId],
-        template: template || (s.agentTemplates as Record<string, string>)[agentId],
+        systemPrompt: systemPrompt || agentCfg.systemPrompt,
+        template: template || agentCfg.template,
         // 工坊 P2 (ADR-30 D5): 只有持权 Agent 的装配 pass 产出 EJS vars 提交候选。
         // 代码级兜底：agent-config.json 没加载上（fetch 失败/离线）或该 agent 未声明本字段时，
         // story 默认持权 —— 与设计「默认仅 story 持权」一致。否则一次网络抖动就让整条

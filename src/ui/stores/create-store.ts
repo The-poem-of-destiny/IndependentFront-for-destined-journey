@@ -49,6 +49,7 @@ import {
 import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
 import { useWorldBookStore } from './worldbook-store';
 import { useWorkshopStore } from './workshop-store';
+import { getAgentSettings } from './agent-settings';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
 import type { WorldBook, WorldBookEntry } from '@engine/types';
 import {
@@ -1115,13 +1116,14 @@ export const useCreateStore = defineStore('create', () => {
         // AI 生成稳定 >120s。提至 300s。配合 agent-client 的 AbortError 友好化。
         timeout: 300000,
       });
+      // Q-18: 默认值不再在这里重述一遍（此前 0.7 / 16384 / 1.0 三处字面量与
+      // 设置页、game-pipeline 的拷贝靠人眼保持一致）
+      const plotAgentCfg = getAgentSettings(settings, 'plot_outline');
       const llmParams = {
         model: endpoint.defaultModel,
-        temperature:
-          ((settings.agentTemperature ?? {}) as Record<string, number>)['plot_outline'] ?? 0.7,
-        maxTokens:
-          ((settings.agentMaxTokens ?? {}) as Record<string, number>)['plot_outline'] ?? 16384,
-        topP: ((settings.agentTopP ?? {}) as Record<string, number>)['plot_outline'] ?? 1.0,
+        temperature: plotAgentCfg.temperature,
+        maxTokens: plotAgentCfg.maxTokens,
+        topP: plotAgentCfg.topP,
       };
 
       let best: { parsed: ParsedOutlineOutput; raw: string } | null = null;

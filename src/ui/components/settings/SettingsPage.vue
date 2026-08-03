@@ -3,6 +3,12 @@ import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
 import { useThemeStore } from '../../stores/theme-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useSettingsStore, type ApiEntry, type PresetItem } from '../../stores/settings-store';
+import {
+  AGENT_SETTINGS_DEFAULTS,
+  getAgentSettings,
+  patchAgentSettings,
+  resetAgentSettings,
+} from '../../stores/agent-settings';
 import { useWorldBookStore } from '../../stores/worldbook-store';
 import AppButton from '../shared/AppButton.vue';
 import AppCard from '../shared/AppCard.vue';
@@ -842,23 +848,15 @@ async function saveAsDefault() {
   if (!activeAgent.value) return;
   const agentId = activeAgent.value;
 
-  // 构建当前 Agent 的默认条目
+  // 构建当前 Agent 的默认条目。
+  // Q-18: 此前是 13 行手抄（含 5 处 `?? 0.7` 之类的字面默认），加个旋钮要记得来这补一行。
+  // systemPrompt / template 先清空，由下面按 story / 非 story 分别填。
   const entry = {
-    worldBookEnabled: s.agentWorldbookEnabled[agentId] ?? false,
-    worldBookIds: [...(s.agentWorldbookIds[agentId] || [])],
-    model: s.agentModels[agentId] || '',
+    ...getAgentSettings(s, agentId),
     systemPrompt: '',
+    template: '',
     presetId: '',
     preset: null as PresetItem | null,
-    temperature: s.agentTemperature[agentId] ?? 0.7,
-    topP: s.agentTopP[agentId] ?? 1.0,
-    freqPen: s.agentFreqPen[agentId] ?? 0,
-    presPen: s.agentPresPen[agentId] ?? 0,
-    maxTokens: s.agentMaxTokens[agentId] ?? 16384,
-    // Phase 8.6: Agent 历史注入配置 (存档不设则引擎侧按类别默认)
-    historyLayers: s.agentHistoryLayers[agentId],
-    historySlice: s.agentHistorySlice[agentId],
-    template: '',
   };
 
   if (agentId === 'story') {
@@ -963,40 +961,40 @@ async function restoreAgentDefaults() {
         delete s.agentTemplates[agentId];
       }
     }
-    s.agentTemperature[agentId] = pd.temperature ?? 0.7;
-    s.agentTopP[agentId] = pd.topP ?? 1.0;
-    s.agentFreqPen[agentId] = pd.freqPen ?? 0;
-    s.agentPresPen[agentId] = pd.presPen ?? 0;
-    s.agentMaxTokens[agentId] = pd.maxTokens ?? 16384;
+    // Q-18: 五个数值旋钮 + 两项历史注入配置一次写完，默认值只在
+    // AGENT_SETTINGS_DEFAULTS 出现一次（此前这里各写一遍 `?? 0.7 / ?? 16384`，
+    // 与下面的兜底分支、game-pipeline、create-store 共六份拷贝）。
+    //
+    // `historyLayers` / `historySlice` 传 undefined 即**删键** —— 项目默认没设时要把
+    // 「走引擎按 agent 类别的默认」那条语义还回去，不是写个 0 进去。
+    //
+    // 🔴 这里刻意**只碰数值项**：model 不动（用户自己选的 API 与模型不该被默认值覆盖，
+    // 这是本分支既有行为，与下面的出厂兜底分支不同）；worldBook / systemPrompt /
+    // template 上面已按 story 分支各自处理过，重写一遍会把刚 delete 掉的 template 键
+    // 又补成空串。
+    patchAgentSettings(s, agentId, {
+      temperature: pd.temperature ?? AGENT_SETTINGS_DEFAULTS.temperature,
+      topP: pd.topP ?? AGENT_SETTINGS_DEFAULTS.topP,
+      freqPen: pd.freqPen ?? AGENT_SETTINGS_DEFAULTS.freqPen,
+      presPen: pd.presPen ?? AGENT_SETTINGS_DEFAULTS.presPen,
+      maxTokens: pd.maxTokens ?? AGENT_SETTINGS_DEFAULTS.maxTokens,
+      historyLayers: pd.historyLayers,
+      historySlice: pd.historySlice,
+    });
     s.agentPromptEdited = false;
     s.agentDirty[agentId] = false;
-    // Phase 8.6: 恢复历史注入配置 (项目默认未设则清除走引擎默认)
-    if (pd.historyLayers !== undefined) s.agentHistoryLayers[agentId] = pd.historyLayers;
-    else delete s.agentHistoryLayers[agentId];
-    if (pd.historySlice !== undefined) s.agentHistorySlice[agentId] = pd.historySlice;
-    else delete s.agentHistorySlice[agentId];
     ui.toast('已恢复项目默认设置', 'info');
     return;
   }
 
-  // 无项目默认 → 硬编码兜底
-  s.agentModels[agentId] = '';
-  s.agentWorldbookEnabled[agentId] = false;
-  s.agentWorldbookIds[agentId] = [];
-  s.agentPrompts[agentId] = '';
+  // 无项目默认 → 恢复出厂（不传来源即全部落 AGENT_SETTINGS_DEFAULTS）。
+  // 与上面的分支此前是两段只差取值来源的手抄，各写一遍 `?? 0.7 / ?? 16384`。
+  resetAgentSettings(s, agentId);
   s.activePresetId = '';
   agentPromptDraft.value = '';
   agentTemplateDraft.value = '';
-  delete s.agentTemplates[agentId];
-  s.agentTemperature[agentId] = 0.7;
-  s.agentTopP[agentId] = 1.0;
-  s.agentFreqPen[agentId] = 0;
-  s.agentPresPen[agentId] = 0;
-  s.agentMaxTokens[agentId] = 16384;
   s.agentPromptEdited = false;
   s.agentDirty[agentId] = false;
-  delete s.agentHistoryLayers[agentId];
-  delete s.agentHistorySlice[agentId];
   ui.toast('已恢复默认设置', 'info');
 }
 

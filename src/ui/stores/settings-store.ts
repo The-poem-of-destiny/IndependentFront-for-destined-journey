@@ -12,6 +12,7 @@ import { defineStore } from 'pinia';
 import { ref, watch } from 'vue';
 import { deleteApiEndpoint, getApiEndpoints, saveApiEndpoint } from '@engine/database';
 import { detach } from './db-write';
+import { fillMissingAgentSettings } from './agent-settings';
 import {
   apiEndpointToEntry,
   apiEntryToEndpoint,
@@ -375,61 +376,11 @@ export const useSettingsStore = defineStore('settings', () => {
     const pd = projectAgentDefaults.value?.agents;
     if (!pd) return;
     for (const [agentId, entry] of Object.entries(pd)) {
-      if (!(agentId in (settings.value.agentModels as Record<string, string>))) {
-        settings.value.agentModels[agentId] = entry.model ?? '';
-      }
-      if (!(agentId in (settings.value.agentWorldbookEnabled as Record<string, boolean>))) {
-        settings.value.agentWorldbookEnabled[agentId] = entry.worldBookEnabled ?? false;
-      }
-      if (!(agentId in (settings.value.agentWorldbookIds as Record<string, string[]>))) {
-        settings.value.agentWorldbookIds[agentId] = [...(entry.worldBookIds ?? [])];
-      }
-      if (!(agentId in (settings.value.agentPrompts as Record<string, string>))) {
-        settings.value.agentPrompts[agentId] = entry.systemPrompt ?? '';
-      }
-      // Phase 10: 从项目默认加载上下文模板
-      if (
-        entry.template &&
-        !(agentId in (settings.value.agentTemplates as Record<string, string>))
-      ) {
-        settings.value.agentTemplates[agentId] = entry.template;
-      }
-      // LLM 参数（缺省使用合理默认值）
-      if (!(agentId in (settings.value.agentTemperature as Record<string, number>))) {
-        settings.value.agentTemperature[agentId] = entry.temperature ?? 0.7;
-      }
-      if (!(agentId in (settings.value.agentTopP as Record<string, number>))) {
-        settings.value.agentTopP[agentId] = entry.topP ?? 1.0;
-      }
-      if (!(agentId in (settings.value.agentFreqPen as Record<string, number>))) {
-        settings.value.agentFreqPen[agentId] = entry.freqPen ?? 0;
-      }
-      if (!(agentId in (settings.value.agentPresPen as Record<string, number>))) {
-        settings.value.agentPresPen[agentId] = entry.presPen ?? 0;
-      }
-      if (!(agentId in (settings.value.agentMaxTokens as Record<string, number>))) {
-        settings.value.agentMaxTokens[agentId] = entry.maxTokens ?? 16384;
-      }
-      // Phase 8.6: 历史注入层数/截断字数 — 不设则留空 (引擎侧 defaultHistoryLayers/Slice 兜底)
-      if (
-        entry.historyLayers !== undefined &&
-        !(agentId in (settings.value.agentHistoryLayers as Record<string, number>))
-      ) {
-        settings.value.agentHistoryLayers[agentId] = entry.historyLayers;
-      }
-      if (
-        entry.historySlice !== undefined &&
-        !(agentId in (settings.value.agentHistorySlice as Record<string, number>))
-      ) {
-        settings.value.agentHistorySlice[agentId] = entry.historySlice;
-      }
-      // Phase 10: 从项目默认加载 Agent 上下文模板
-      if (
-        entry.template &&
-        !(agentId in (settings.value.agentTemplates as Record<string, string>))
-      ) {
-        settings.value.agentTemplates[agentId] = entry.template;
-      }
+      // Q-18：此前是 13 段逐字同形的 `if (!(agentId in map))` 手抄（其中 template
+      // 那段还抄了**两遍**，一模一样）。加第 14 个旋钮要记得在这里再抄一段。
+      // 语义原样保留：只填空位不覆盖用户已改的；historyLayers/historySlice 来源没给
+      // 就不写键，把「走引擎按类别的默认」那条语义还回去。
+      fillMissingAgentSettings(settings.value, agentId, entry);
       // 预设：DB 空 → seed 出厂预设；DB 有同 id → 同步出厂 name（保留用户 prompts 编辑）
       if (entry.preset && entry.presetId) {
         try {

@@ -45,17 +45,17 @@
 
 ### 按路线图步骤
 
-| 步骤                                      | 包含                   | 状态 | 备注                                                                       |
-| ----------------------------------------- | ---------------------- | ---- | -------------------------------------------------------------------------- |
-| [步骤 1](roadmap.md) 清尸体 + 补工具链网  | Q-04、Q-15             | ✅   | 四批僵尸清完 + 补网与清仓两个 PR 都落地                                    |
-| [步骤 2](roadmap.md) 修静默出错的生产路径 | Q-01、Q-02             | ✅   | 两条全部兑现（`a0c3d5d`），骰子那条建议仍需真机打一场复核                  |
-| [步骤 3](roadmap.md) 三处去留裁定         | Q-07、Q-03、Q-30       | ✅   | 三条裁定均已拍板并落地（Q-07 含 emit 源 + 效果回收 + 战斗内 12/18 显式化） |
-| [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | ✅   | 四条全部落地                                                               |
-| [步骤 5](roadmap.md) 数据路径去重         | Q-08、Q-16、Q-12       | ✅   | 三条全部落地（api-key 那份迁移按裁定留在外面）                             |
-| [步骤 6](roadmap.md) 品质体系与设置真源   | Q-11、Q-18、Q-06       | 🔄   | Q-11 / Q-06 完成；只剩 Q-18 设置类型与 13 张并行表                         |
-| [步骤 7](roadmap.md) EJS 能力面 + Legacy  | Q-09、Q-10、Q-27       | ⬜   | 抽查：`ejs-backend.ts` 仍在；退役仍卡在真机走查这一前置                    |
-| [步骤 8](roadmap.md) 巨石拆分第一刀       | Q-23、Q-19             | ⬜   | 硬前置未清：步骤 1 的删尸体与步骤 3 的效果层都还没收尾                     |
-| [后续批次](roadmap.md#后续批次不进前八步) | 其余 9 条              | ⬜   | —                                                                          |
+| 步骤                                      | 包含                   | 状态 | 备注                                                                                                              |
+| ----------------------------------------- | ---------------------- | ---- | ----------------------------------------------------------------------------------------------------------------- |
+| [步骤 1](roadmap.md) 清尸体 + 补工具链网  | Q-04、Q-15             | ✅   | 四批僵尸清完 + 补网与清仓两个 PR 都落地                                                                           |
+| [步骤 2](roadmap.md) 修静默出错的生产路径 | Q-01、Q-02             | ✅   | 两条全部兑现（`a0c3d5d`），骰子那条建议仍需真机打一场复核                                                         |
+| [步骤 3](roadmap.md) 三处去留裁定         | Q-07、Q-03、Q-30       | ✅   | 三条裁定均已拍板并落地（Q-07 含 emit 源 + 效果回收 + 战斗内 12/18 显式化）                                        |
+| [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | ✅   | 四条全部落地                                                                                                      |
+| [步骤 5](roadmap.md) 数据路径去重         | Q-08、Q-16、Q-12       | ✅   | 三条全部落地（api-key 那份迁移按裁定留在外面）                                                                    |
+| [步骤 6](roadmap.md) 品质体系与设置真源   | Q-11、Q-18、Q-06       | 🔄   | Q-11 / Q-06 完成；Q-18 的读写口与默认值收敛已落地，剩 `UiSettings` 接口（审查要求先取得同意）+ 13 张 map 物理合并 |
+| [步骤 7](roadmap.md) EJS 能力面 + Legacy  | Q-09、Q-10、Q-27       | ⬜   | 抽查：`ejs-backend.ts` 仍在；退役仍卡在真机走查这一前置                                                           |
+| [步骤 8](roadmap.md) 巨石拆分第一刀       | Q-23、Q-19             | ⬜   | 硬前置未清：步骤 1 的删尸体与步骤 3 的效果层都还没收尾                                                            |
+| [后续批次](roadmap.md#后续批次不进前八步) | 其余 9 条              | ⬜   | —                                                                                                                 |
 
 ### 已落地的提交
 
@@ -78,7 +78,8 @@
 | `63ddb66` | Q-08 ✅                  | 六步迁移收敛成 `legacy-dexie-migration.ts` 一份（-348 行）；`preStep` 承 beautifier 的第 0 步旁路；两份 `verifyRow` 各自保留强度不降级；api-key 那份刻意留在外面。39 条现有 adapter 测试未改一行 + 15 条骨架测试                                                                       |
 | `f227812` | Q-12 ✅、Q-16 ✅         | 删 `variables.ts`/`vars-merger.ts` 两个僵尸宿主，`applyVarsPatch` → `applyPathOps` + `VarPathOps` 进 types；新增 `db-write.ts`（detach 唯一实现）/ `store-utils.ts`（配额判据+notify）/ `asset-path.ts`（+13 测试），`game-store` 三个 metadata 写函数收成 `patchSaveMetadata`         |
 | `43c3188` | Q-11 ✅                  | 品质 4 套类型/序号 + 5 份颜色表收敛成一套（全部由 `RARITY_LEVELS`/`TIER_CONFIGS` 派生）；修好 ScenePanel「键错整套词汇」的层级描边色；`CharGenSystemCard` 47 项裸 hex 表删除改主题令牌；`inferQuality` 下沉 `quality-inference.ts`；`ItemsPanel` `any[]` → 判别联合（18 处 cast 归零） |
-| _本次_    | Q-06 ✅                  | 设置真源收敛：新增 `engine-settings.ts` 注入缝，删 `syncSnapshotSettings` 那座只搬两个字段的桥 + `settings` 表播种；FullBackup 分支注明只为老备份往返；AGENTS.md 那句「settings 同为死表」（此前是错的）改成事实                                                                       |
+| `1604575` | Q-06 ✅                  | 设置真源收敛：新增 `engine-settings.ts` 注入缝，删 `syncSnapshotSettings` 那座只搬两个字段的桥 + `settings` 表播种；FullBackup 分支注明只为老备份往返；AGENTS.md 那句「settings 同为死表」（此前是错的）改成事实                                                                       |
+| _本次_    | Q-18 🔄                  | 新增 `agent-settings.ts`：`AGENT_SETTINGS_DEFAULTS`（六份拷贝收成一处）+ get/patch/reset/fillMissing 四个口；13 段手抄的加载器、`saveAsDefault`、`restoreAgentDefaults` 两分支全部收口。**剩**：`UiSettings` 接口（审查要求先取得同意）与 13 张 map 的物理合并                         |
 
 ## 结论摘要
 
@@ -173,7 +174,7 @@
 | [Q-15](findings-t6-safety-net.md#q-15)    | 中     | T6   | 15 个源文件在 tsc/ESLint/Prettier 三张网之外，59 个 tracked 临时脚本与 ~120MB 大文件     | 步骤 1   | ✅   |
 | [Q-16](findings-t3-single-source.md#q-16) | 中     | T3   | store 层没有共享工具层：detach helper 复制 8 份，两个同名 `toRow` 语义还不同             | 步骤 5   | ✅   |
 | [Q-17](findings-t2-ai-boundary.md#q-17)   | 中     | T2   | `agent-client` 的流式与非流式路径各写一份请求体装配、fetch 与错误翻译                    | 步骤 4   | ✅   |
-| [Q-18](findings-t6-safety-net.md#q-18)    | 中     | T6   | 最热的状态零编译期保护：settings 是 `Record<string, any>`，per-Agent 摊成 13 张并行 map  | 步骤 6   | ⬜   |
+| [Q-18](findings-t6-safety-net.md#q-18)    | 中     | T6   | 最热的状态零编译期保护：settings 是 `Record<string, any>`，per-Agent 摊成 13 张并行 map  | 步骤 6   | 🔄   |
 | [Q-19](findings-t2-ai-boundary.md#q-19)   | 中     | T2   | AI→状态写入链是两个无缝巨型函数：560 行私有翻译方法 + 30 分支手写 switch                 | 步骤 8   | ⬜   |
 | [Q-20](findings-t6-safety-net.md#q-20)    | 中     | T6   | 测试底盘三处缺口：730 行有状态 composable 零测试、7 份逐字相同的桩、两份过期源码断言     | 后续批次 | ⬜   |
 | [Q-21](findings-t3-single-source.md#q-21) | 中     | T3   | 战斗/制作结算层四处复制，含 17 参数调用两份、15 字段装配两份且各自掷骰                   | 后续批次 | ⬜   |
