@@ -16,7 +16,7 @@
  *   - PlayerCommand（玩家方）→ deps.submitCommand + waitForCommand（game-store）
  *   - PlayerCommand（敌方）→ 战斗 Agent（deps.clientFactory → chatWithTools）→ toolCallToCommand
  *   - EffectChoice → M2 throw UnsupportedInM2
- *   - BeginOutput → 调 deps.registerDiceSupplier 取 60 颗 → SupplyDice
+ *   - BeginOutput → 调 deps.drawDice 取 60 颗 → SupplyDice
  *   - BoundedAdjudication / CharGenRequest → M2 throw UnsupportedInM2
  *
  * 验收断言：
@@ -84,9 +84,9 @@ export interface RunCombatV3Opts {
     waitForCommand: () => Promise<CombatCommand>;
     // 放弃战斗（C4）
     abandon: () => void;
-    // BeginOutput 注骰（可选钩子）：coordinator 需要的骰源（M2 缺省用确定性 sysDrawSixty）。
-    // 提供时 coordinator 每次续杯会调它取 60 颗 d20。
-    registerDiceSupplier?: (fn: () => { outputId: string; dice: number[] }) => void;
+    // BeginOutput 注骰（必填依赖）：coordinator 每次续杯会调它取 60 颗 d20。
+    // 生产由 game-pipeline 注入真实随机源（dice.ts 的 rollDice），测试注入确定性向量。
+    drawDice: () => { outputId: string; dice: number[] };
   };
   /** 前端事件流回调（投影 A 输出，供 game-store） */
   onCombatEvent?: (evt: CombatEvent) => void;
@@ -113,7 +113,7 @@ function nextCmdId(prefix: string): string {
  *
  * 协调循环（plan §3.2）：
  *   1. openCombat 建 session
- *   2. 首个 SupplyDice 喂 60 颗骰（registerDiceSupplier 提供）
+ *   2. 首个 SupplyDice 喂 60 颗骰（deps.drawDice 提供）
  *   3. 循环 dispatch：无 requiredInput 且未终局则自动推进；有 requiredInput 则 route；到 Terminal dispatch RequestSettlement
  *   4. 终局：翻译 DomainEvent → StatePatch[] → 一次 commitChatState → 摘要回注
  */
@@ -121,8 +121,8 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
   const { deps } = opts;
   const session = openCombat({ kind: 'new', bundle: opts.bundle });
 
-  // 骰子供应（M2 coordinator 自持确定性骰源；BeginOutput 走 getDice 续杯）
-  const getDice = (): { outputId: string; dice: number[] } => sysDrawSixty(_idSeq++);
+  // 骰子供应（必填依赖 drawDice；BeginOutput 走 getDice 续杯）
+  const getDice = (): { outputId: string; dice: number[] } => deps.drawDice();
 
   const allEvents: DomainEvent[] = [];
   const summaryText = '';
@@ -720,10 +720,6 @@ function outcomeOf(session: CombatSession): CombatV3Result['outcome'] {
   }
 }
 
-/** 幂等骰子供应（无真实随机源时用确定性中位数 10；真实源自 registerDiceSupplier） */
-function sysDrawSixty(outId: number): { outputId: string; dice: number[] } {
-  return { outputId: `sys-${outId}`, dice: Array.from({ length: 60 }, () => 10) };
-}
 
 /**
  * 把终局 DomainEvent 翻译成 StatePatch[]（M2 最小：FP 结算落库）。

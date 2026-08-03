@@ -580,11 +580,14 @@ export class StateManager {
           throw new Error(`update_character 不认识的字段 "${k}" — 白名单外的键一律拒绝`);
         }
         if (isDelta) {
-          // delta 模式: 仅数值字段可加法，且传入值必须是 number
-          if (!UPDATE_CHAR_NUMERIC_FIELDS.has(k)) {
+          // delta 模式: 数值字段直接加；attributes 为嵌套对象（五维），其内部数值键各自加法
+          if (k === 'attributes') {
+            if (typeof value[k] !== 'object' || value[k] === null) {
+              throw new Error(`update_character delta=true 的 attributes 必须是对象`);
+            }
+          } else if (!UPDATE_CHAR_NUMERIC_FIELDS.has(k)) {
             throw new Error(`update_character delta=true 仅支持数值字段，"${k}" 不是数值字段`);
-          }
-          if (typeof value[k] !== 'number') {
+          } else if (typeof value[k] !== 'number') {
             throw new Error(
               `update_character delta=true 要求 "${k}" 的值为 number，实际为 ${typeof value[k]}`,
             );
@@ -596,8 +599,20 @@ export class StateManager {
       if (isDelta) {
         // #20: delta 真加法（缺省/脏数据从 0 起加），不再退化为替换
         for (const k of keys) {
-          const current = (char as any)[k];
-          (char as any)[k] = (typeof current === 'number' ? current : 0) + value[k];
+          if (k === 'attributes') {
+            // 五维属性 delta：逐键加法（读缺省 0），不动未提及的维度
+            const incoming = (value as Record<string, any>).attributes as Record<string, number>;
+            const base = (char.attributes ?? {}) as Record<string, number>;
+            const next: Record<string, number> = { ...base };
+            for (const attr of Object.keys(incoming)) {
+              const cur = typeof base[attr] === 'number' ? base[attr] : 0;
+              next[attr] = cur + (incoming[attr] ?? 0);
+            }
+            char.attributes = next as CharacterState['attributes'];
+          } else {
+            const current = (char as any)[k];
+            (char as any)[k] = (typeof current === 'number' ? current : 0) + value[k];
+          }
         }
       } else {
         // attributes 深合并: AI 只发 {attributes:{力量:12}} 不得抹掉其余维度（终审修复）
@@ -1468,7 +1483,7 @@ export class StateManager {
     // 1. 更新 SaveProfile.gameTime
     const { getProfile, updateProfile } = await import('./save-profile');
     const { advanceTime } = await import('./time-system');
-    const { getCharacters, saveCharacter } = await import('./database');
+    const { getCharacters } = await import('./database');
 
     const profile = await getProfile(this.saveId);
     profile.gameTime = advanceTime(profile.gameTime, minutes);
@@ -1510,7 +1525,7 @@ export class StateManager {
             owner: char.id,
             self: { stacks: fx.stacks, remainingTime: 0, name: fx.name },
           });
-          patches.push(...convertScriptEffects(result));
+          patches.push(...(await convertScriptEffects(this.saveId, result)));
         }
 
         char.statusEffects = char.statusEffects.filter((e) => e.name !== fx.name);
@@ -1521,24 +1536,39 @@ export class StateManager {
           value: { name: fx.name },
         });
 
-        this.createEvent('status_effect', {
-          op: 'remove_status_effect',
-          target: `characters.${char.name}`,
-          value: { name: fx.name },
-        });
+        // Q-02 修复：createEvent 只构造不落库，改 push 进 events（旧代码假 emit）
+        this.events.push(
+          this.createEvent('status_effect', {
+            op: 'remove_status_effect',
+            target: `characters.${char.name}`,
+            value: { name: fx.name },
+          }),
+        );
       }
 
+      // 时长扣减/移除的持久化走 saveCharacter（statusEffects 数组被 update_character 白名单
+      // 禁止直写，防 AI 假字段污染；此处引擎内存内已 mutate，一条直写即可）。Q-02 修复的
+      // 是 patches 里的脚本效果（remove/hp/stat）曾被调用点丢弃 —— 它们现在走末尾自提交。
       if (changed) {
         await saveCharacter(char);
       }
     }
 
-    // 3. emit time_advanced
-    this.createEvent('system', {
-      op: 'set_variable',
-      target: 'variables.gameTime',
-      value: profile.gameTime,
-    });
+    // 3. emit time_advanced（Q-02：改成真 push，旧代码 createEvent 不落库）
+    this.events.push(
+      this.createEvent('system', {
+        op: 'set_variable',
+        target: 'variables.gameTime',
+        value: profile.gameTime,
+      }),
+    );
+
+    // Q-02 修复：自提交 —— 之前返回值在唯一调用点（agent-orchestrator.ts:854）被丢弃，
+    // 到期效果的 remove/hp/stat 与 onRemove 脚本全部蒸发。这里在方法内提交，符合 ADR-21
+    // 唯一写入口约定，调用点无需自己 commit。
+    if (patches.length > 0) {
+      await this.commitChatState(patches);
+    }
 
     return patches;
   }
@@ -1568,32 +1598,55 @@ export function findByName<T extends { name: string }>(list: T[], name: string):
 
 import type { ScriptEffects } from './script-executor';
 
-function convertScriptEffects(se: ScriptEffects): StatePatch[] {
+async function convertScriptEffects(saveId: string, se: ScriptEffects): Promise<StatePatch[]> {
   const patches: StatePatch[] = [];
+  // 名字解析唯一入口（铁律1：逻辑键=名字，charId 一律先换名）。
+  // 脚本按名调用（modifyHp('Hero', -30)）是最常见路径，直接透传；id 形态才查库。
+  const resolveName = async (charId: string): Promise<string> => {
+    const chars = await getCharacters(saveId);
+    const byName = chars.find((c) => c.name === charId);
+    if (byName) return byName.name;
+    if (charId === '主角' || charId === '玩家') {
+      const player = chars.find((c) => c.type === 'player');
+      if (player) return player.name;
+    }
+    return charId;
+  };
   // M2: add_status_effect 不再要求 id → Partial<StatusEffect> 直接透传（handler 内按 name 寻址+补缺省）
   for (const a of se.adds)
-    patches.push({ op: 'add_status_effect', target: `characters.${a.charId}`, value: a.effect });
+    patches.push({
+      op: 'add_status_effect',
+      target: `characters.${await resolveName(a.charId)}`,
+      value: a.effect,
+    });
   // M2: effectId 字符串按 name 解释（remove handler 的裸字符串过渡形态）
   for (const r of se.removes)
     patches.push({
       op: 'remove_status_effect',
-      target: `characters.${r.charId}`,
+      target: `characters.${await resolveName(r.charId)}`,
       value: r.effectId,
     });
   // M2: 逻辑键=name（铁律1）— stackSets 的 effectId 按 name 解释（脚本层 $status.setStacks 过渡形态，M3 收敛）
   for (const s of se.stackSets)
     patches.push({
       op: 'set_variable',
-      target: `characters.${s.charId}.statusEffects`,
+      target: `characters.${await resolveName(s.charId)}.statusEffects`,
       value: { name: s.effectId, stacks: s.stacks },
     });
+  // Q-02 修复：hpChanges 走 delta_hp（角色资源真源），不再用 delta_variable 写错 variables 树
   for (const h of se.hpChanges)
-    patches.push({ op: 'delta_variable', target: `characters.${h.charId}.hp`, amount: h.amount });
+    patches.push({
+      op: 'delta_hp',
+      target: `characters.${await resolveName(h.charId)}`,
+      amount: h.amount,
+    } as unknown as StatePatch);
+  // Q-02 修复：statChanges 走 update_character + metadata.delta（按名寻址，五维加法）
   for (const st of se.statChanges)
     patches.push({
-      op: 'delta_variable',
-      target: `characters.${st.charId}.attributes.${st.stat}`,
-      amount: st.amount,
-    });
+      op: 'update_character',
+      target: `characters.${await resolveName(st.charId)}`,
+      value: { attributes: { [st.stat]: st.amount } },
+      metadata: { delta: true },
+    } as unknown as StatePatch);
   return patches;
 }

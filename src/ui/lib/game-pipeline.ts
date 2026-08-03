@@ -44,6 +44,7 @@ import { useAudioStore } from '../stores/audio-store';
 import { useWorldBookStore } from '../stores/worldbook-store';
 import { useUIStore } from '../stores/ui-store';
 import type { CombatCommand } from '@engine/combat-v3';
+import { rollDice } from '@engine/dice';
 
 export interface GamePipelineDeps {
   gameStore: ReturnType<typeof useGameStore>;
@@ -134,6 +135,8 @@ export class GamePipeline {
    * 不新增任何持久化字段；累计诊断在 `game.ejsVarsRejections`。
    */
   private ejsRejectToasted = new Set<string>();
+  /** Q-01: v3 战斗真实骰源（drawDice）的 outputId 计数器，区分每次续杯 */
+  private _diceDrawSeq = 0;
 
   /**
    * 取 EJS `ui.log` 调试日志快照（能力面 §3.11）。
@@ -1397,7 +1400,12 @@ export class GamePipeline {
           submitCommand: async () => {}, // 等待态由 v3_awaiting_player_input 事件驱动 store
           waitForCommand,
           abandon: () => {},
-          // M2 缺省确定性骰源；后续可注入真实骰源
+          // 真实随机源（Q-01）：唯一注入点，委托 dice.ts 的 rollDice（内核禁 Math.random）。
+          // 每次续杯调用会换一批新骰（BeginOutput 后再取，outputId 用计数器区分）。
+          drawDice: () => ({
+            outputId: `draw-${++this._diceDrawSeq}`,
+            dice: rollDice(60, 20),
+          }),
         },
         onCombatEvent: (evt) => this.game.applyCombatEvent(evt),
       });

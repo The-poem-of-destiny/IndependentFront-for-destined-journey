@@ -15,6 +15,7 @@ import type {
   Skill,
 } from './types';
 import { createDefaultCharacterState } from './types';
+import { createDefaultTime } from './time-system';
 
 // Hoisted mock — replaces ./database for all consumers
 vi.mock('./database', () => ({
@@ -171,6 +172,7 @@ describe('StateManager', () => {
           mapMarkers: [],
           variables: {},
           worldFlags: {},
+          gameTime: createDefaultTime(),
         });
       }
       return profileStore.get(saveId);
@@ -798,7 +800,7 @@ describe('StateManager', () => {
       expect(char.attributes).toEqual({ str: 20, dex: 11, con: 12, int: 13, spi: 14 });
     });
 
-    it('attributes + delta=true → errors（attributes 非数值字段，既有规则覆盖）', async () => {
+    it('attributes + delta=true → 五维逐键加法（Q-02：modifyStat 脚本按名写五维）', async () => {
       const char = buildMockCharacter({ id: 'char-001' });
       vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
@@ -807,13 +809,14 @@ describe('StateManager', () => {
         {
           op: 'update_character',
           target: 'characters.Test Hero',
-          value: { attributes: { str: 5 } },
+          value: { attributes: { str: 5, dex: -2 } },
           metadata: { delta: true },
         },
       ]);
 
-      expect(result.success).toBe(false);
-      expect(result.errors[0]).toContain('attributes');
+      expect(result.success).toBe(true);
+      // 默认五维全 10：str 10+5=15，dex 10-2=8，con/int/spi 未提及不变
+      expect(char.attributes).toEqual({ str: 15, dex: 8, con: 10, int: 10, spi: 10 });
     });
   });
 
@@ -942,6 +945,80 @@ describe('StateManager', () => {
       await sm.commitChatState([{ op: 'delta_sp', target: 'characters.Test Hero', amount: 10 }]);
 
       expect(char.sp).toBe(50); // clamped
+    });
+  });
+
+  // ===================================================================
+  // 7.5 Q-02: applyTimeAdvance 到期效果 patches 自提交 + onRemove 脚本落地
+  // ===================================================================
+  describe('Q-02 applyTimeAdvance — 到期效果 patches 落地（不再被调用点丢弃）', () => {
+    it('带 onRemove 的效果到期后，owner 的 hp 真的变了（$resource.modifyHp 落库）', async () => {
+      // 角色：中毒减益「剧毒」，到期触发 onRemove → $resource.modifyHp('hero', -30) 回掉 30 HP
+      const char = buildMockCharacter({
+        id: 'char-hero',
+        name: 'Hero',
+        type: 'player',
+        hp: 80,
+        maxHp: 100,
+        statusEffects: [
+          {
+            name: '剧毒',
+            description: '烈性毒素',
+            stacks: 1,
+            remainingTime: 1,
+            timeUnit: '小时' as const,
+            category: '减益' as const,
+            source: '毒蛇',
+            effects: {},
+            scripts: {
+              remove: `$resource.modifyHp('Hero', -30);`,
+            },
+            onRemove: 'remove',
+          },
+        ],
+      });
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      // 推进 60 分钟 → 剧毒 remainingTime 1小时 → 扣到 0 → 到期执行 onRemove
+      const patches = await sm.applyTimeAdvance(60);
+
+      // 关键断言：onRemove 脚本的 modifyHp 已落地（旧代码把 patches 丢在调用点）
+      expect(char.hp).toBe(50); // 80 - 30
+      // 效果已从角色身上移除
+      expect(char.statusEffects.find((e) => e.name === '剧毒')).toBeUndefined();
+      // 返回值带 remove_status_effect patch
+      expect(patches.some((p) => p.op === 'remove_status_effect')).toBe(true);
+    });
+
+    it('applyTimeAdvance 自提交 — 到期的 remove_status_effect 会经过 commitChatState（events 可见）', async () => {
+      const char = buildMockCharacter({
+        id: 'char-hero2',
+        name: 'Hero2',
+        type: 'player',
+        hp: 80,
+        maxHp: 100,
+        statusEffects: [
+          {
+            name: '剧毒2',
+            description: '烈性毒素',
+            stacks: 1,
+            remainingTime: 1,
+            timeUnit: '小时' as const,
+            category: '减益' as const,
+            source: '毒蛇',
+            effects: {},
+          },
+        ],
+      });
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      await sm.applyTimeAdvance(60);
+
+      // 自提交后 events 里应有 remove_status_effect（旧代码 createEvent 不 push，events 为空）
+      const events = sm.getEvents();
+      expect(events.some((e) => e.type === 'status_effect')).toBe(true);
     });
   });
 

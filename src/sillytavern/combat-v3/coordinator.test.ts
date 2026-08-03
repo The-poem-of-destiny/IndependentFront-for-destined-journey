@@ -91,6 +91,8 @@ function mkOpts(
         return c;
       },
       abandon,
+      // 确定性骰源：默认给 60 颗 10（保持既有测试语义，真随机在 game-pipeline 注入）
+      drawDice: () => ({ outputId: 'test-dice', dice: Array.from({ length: 60 }, () => 10) }),
     },
   };
   return { opts, commit, abandon, setQueue };
@@ -127,6 +129,22 @@ describe('A2-1：终局一次 commitChatState', () => {
     expect(commit).toHaveBeenCalledTimes(1);
     expect(abandon).not.toHaveBeenCalled();
     expect(result.outcome).toBe('ally_win');
+  });
+});
+
+describe('Q-01：生产骰源接线（消灭恒定 10）', () => {
+  it('coordinator 使用注入的 drawDice 而非 sysDrawSixty（旧代码从不调用它）', async () => {
+    const { opts, setQueue } = mkOpts();
+    // 已知非均匀 60 向量：前 59 颗 1，最后一颗 20（非 10 中位数，便于断言「真到了」）
+    const supplied = Array.from({ length: 60 }, (_, i) => (i === 59 ? 20 : 1));
+    let draws = 0;
+    opts.deps.drawDice = () => ({ outputId: `q01-${++draws}`, dice: supplied });
+    setQueue(atkTurn());
+
+    const result = await runCombatV3(opts);
+    expect(result.outcome).toBe('ally_win');
+    // 关键断言：drawDice 真的被调用（旧代码走 sysDrawSixty，绝不会调它）
+    expect(draws).toBeGreaterThan(0);
   });
 });
 
