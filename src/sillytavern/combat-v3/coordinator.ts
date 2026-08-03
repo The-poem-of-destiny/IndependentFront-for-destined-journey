@@ -134,9 +134,10 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
   let steps = 0;
   let aborted = false;
 
-  // 循环直到 SettlementCommitted（Terminal 也要处理 settle）。用的是 phase 而非
-  // session.completed，因为 completed 在 Terminal 就返回 true，会漏掉结算。
-  while (session.snapshot().phase !== 'SettlementCommitted' && steps < MAX_DISPATCH_STEPS) {
+  // 循环直到结算提交（Terminal 之后还要 dispatch 一次 settle）。
+  // Q-22: `session.completed` 现在就是这个谓词（活 getter + 收窄到 SettlementCommitted），
+  // 不必再自己读 phase 绕开它。
+  while (!session.completed && steps < MAX_DISPATCH_STEPS) {
     steps++;
 
     // 终局：dispatch RequestSettlement（C3 幂等）

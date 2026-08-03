@@ -57,3 +57,32 @@ describe('kernel 熔断（§3.9）', () => {
     expect(() => s.dispatch(mkAttack('x', 0, '甲', '乙'))).not.toThrow();
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// completed 是活 getter（Q-22）
+// ═══════════════════════════════════════════════════════════
+
+describe('session.completed', () => {
+  it('🔴 是活 getter，不是构造时快照', () => {
+    // 曾经写成 `const completed = state.phase === …`，在 createSession 那一刻算一次。
+    // 于是无论打多少轮都恒为 false，两个消费者只好各自绕开它去读 phase。
+    const s = createSession(mkBundle());
+    expect(s.completed).toBe(false);
+
+    // 打到结算提交
+    let t = s.dispatch(mkAttack('a', 0, '甲', '乙'));
+    for (let i = 0; i < 200 && (s.snapshot() as any).phase !== 'Terminal'; i++) {
+      const phase = (s.snapshot() as any).phase;
+      if (phase === 'SettlementCommitted') break;
+      t = s.dispatch(mkPass(`p${i}`, t.revision, '甲', 'action'));
+      if (t.rejection) break;
+    }
+    if ((s.snapshot() as any).phase === 'Terminal') {
+      // Terminal **不算** completed —— 还得 dispatch 一次 RequestSettlement
+      expect(s.completed).toBe(false);
+      s.dispatch(mkSettle('settle', s.snapshot().revision, 'settle-1'));
+      expect((s.snapshot() as any).phase).toBe('SettlementCommitted');
+      expect(s.completed).toBe(true);
+    }
+  });
+});

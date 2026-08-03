@@ -57,7 +57,6 @@ import { emptyChanges, type PhaseOutcome } from './outcome';
  * 消费的骰子都从 state.dice 各通道取；通道耗尽返回 requiredInput BeginOutput。
  */
 export function handleAttack(
-  bundle: CombatDefinitionBundle,
   state: CombatState,
   command: Extract<CombatCommand, { kind: 'DeclareAttack' }>,
 ): PhaseOutcome {
@@ -298,7 +297,7 @@ export function handleAttack(
   }
 
   // 无 RequestChoice → 沿用当前 finalDamage 走完整结算
-  finalizeAttack(out, bundle, state, attacker, defender, ability, command, {
+  finalizeAttack(out, state, attacker, defender, ability, command, {
     finalDamage,
     preReduction,
     postStep6,
@@ -352,7 +351,6 @@ function derefPreview(
  */
 function finalizeAttack(
   out: PhaseOutcome,
-  bundle: CombatDefinitionBundle,
   state: CombatState,
   attacker: CombatState['units'][string],
   defender: CombatState['units'][string],
@@ -512,7 +510,6 @@ function finalizeAttack(
  * 再走 ⑦⑧⑨⑩（不重取骰、不重跑 ①-③）。用于 reducer 的 DeclareBlock frame 恢复分支。
  */
 export function resumeBlockedAttack(
-  bundle: CombatDefinitionBundle,
   state: CombatState,
   recompute: DamageRecomputeCtx,
 ): PhaseOutcome {
@@ -558,7 +555,6 @@ export function resumeBlockedAttack(
 
   finalizeAttack(
     out,
-    bundle,
     state,
     attacker,
     defender,

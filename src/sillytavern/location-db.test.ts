@@ -343,3 +343,51 @@ describe('$location namespace', () => {
     expect(path).toBe('阿斯塔利亚大陆/索伦蒂斯王国/潮汐王座');
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// 邻接对称性闸门（Q-31）
+// ═══════════════════════════════════════════════════════════
+
+describe('邻接关系只有一套语义', () => {
+  it('🔴 areAdjacent 对全表对称 —— a↔b 问哪个方向都得同一个答案', () => {
+    // 起因：buildAdjacency 双向对称化，而 areAdjacent/getEdge/getNeighbors 只看单向。
+    // 数据里只要有一行非对称，同一个「两地相邻吗」就有两个答案。
+    for (const a of DEFAULT_LOCATIONS) {
+      for (const b of DEFAULT_LOCATIONS) {
+        expect(
+          areAdjacent(DEFAULT_LOCATIONS, a.id, b.id),
+          `areAdjacent(${a.id}, ${b.id}) 与反向不一致`,
+        ).toBe(areAdjacent(DEFAULT_LOCATIONS, b.id, a.id));
+      }
+    }
+  });
+
+  it('areAdjacent 与 buildAdjacency 的表同口径', () => {
+    const adj = buildAdjacency(DEFAULT_LOCATIONS);
+    for (const node of DEFAULT_LOCATIONS) {
+      for (const edge of adj.get(node.id) ?? []) {
+        expect(
+          areAdjacent(DEFAULT_LOCATIONS, node.id, edge.targetId),
+          `邻接表说 ${node.id}→${edge.targetId} 相邻，areAdjacent 说不`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('getEdge 反向也取得到（镜像成从 from 出发的形状）', () => {
+    const withEdge = DEFAULT_LOCATIONS.find((n) => n.neighbors.length > 0);
+    expect(withEdge).toBeDefined();
+    const target = withEdge!.neighbors[0].targetId;
+    const back = getEdge(DEFAULT_LOCATIONS, target, withEdge!.id);
+    expect(back).toBeDefined();
+    expect(back!.targetId).toBe(withEdge!.id);
+  });
+
+  it('getNeighbors 与 areAdjacent 互不矛盾', () => {
+    for (const node of DEFAULT_LOCATIONS) {
+      for (const n of getNeighbors(DEFAULT_LOCATIONS, node.id)) {
+        expect(areAdjacent(DEFAULT_LOCATIONS, node.id, n.id)).toBe(true);
+      }
+    }
+  });
+});

@@ -78,13 +78,17 @@ export function createSession(
     };
   };
 
-  const completed = state.phase === 'Terminal' || state.phase === 'SettlementCommitted';
-
   return {
     dispatch,
     snapshot,
     history,
-    completed,
+    // Q-22: 曾经是 `const completed = …` —— 在 createSession 那一刻算一次的**快照**，
+    // 此后无论打多少轮都恒为 false。两个消费者因此都绕开它自己读 phase。
+    // 现在是活 getter，且口径收窄到 SettlementCommitted（不含 Terminal）——
+    // 那正是两个消费者实际想要的语义：Terminal 之后还得 dispatch 一次 RequestSettlement。
+    get completed() {
+      return state.phase === 'SettlementCommitted';
+    },
   };
 }
 

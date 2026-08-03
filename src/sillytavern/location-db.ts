@@ -820,10 +820,23 @@ export function getNeighbors(nodes: LocationNode[], nodeId: string): LocationNod
   const node = getLocationNode(nodes, nodeId);
   if (!node) return [];
 
+  // Q-31: 与 areAdjacent / getEdge / buildAdjacency 同口径 —— 自己声明的邻居，
+  // 加上「声明了通往我」的那些。只看单向会让 areAdjacent(a,b) 与 (b,a) 不一致。
+  const seen = new Set<string>();
   const result: LocationNode[] = [];
   for (const edge of node.neighbors) {
     const neighbor = getLocationNode(nodes, edge.targetId);
-    if (neighbor) result.push(neighbor);
+    if (neighbor && !seen.has(neighbor.id)) {
+      seen.add(neighbor.id);
+      result.push(neighbor);
+    }
+  }
+  for (const other of nodes) {
+    if (other.id === nodeId || seen.has(other.id)) continue;
+    if (other.neighbors.some((e) => e.targetId === nodeId)) {
+      seen.add(other.id);
+      result.push(other);
+    }
   }
   return result;
 }
@@ -861,16 +874,35 @@ export function getLocationPath(nodes: LocationNode[], nodeId: string): string {
   return parts.join('/');
 }
 
+/**
+ * 找 from→to 的边 —— **邻接的唯一判据**（Q-31）。
+ *
+ * 起因：`buildAdjacency` 把 `neighbors` 双向对称化（A 声明了通往 B，B 也会拿到通往 A
+ * 的反向边），而同一命名空间下的 `areAdjacent` / `getEdge` / `getNeighbors` 只看
+ * 单向的 `node.neighbors`。同一个「两地相邻吗」的问题，问 `buildAdjacency` 出来的表
+ * 和问这三个函数，答案可以不一样 —— 数据里只要有一行非对称就现形。
+ *
+ * 这里按**对称**收口（与 `buildAdjacency` 同口径）：先查正向，没有再查反向并镜像。
+ * 不选「修数据 + 加断言」那条路是因为它把不变式压在数据上 —— 下一份地图数据、
+ * 下一个工坊扩展包都得记得对称，而忘了的代价是路径查询静默单向。
+ */
+function findEdge(nodes: LocationNode[], from: string, to: string): LocationEdge | undefined {
+  const nodeFrom = getLocationNode(nodes, from);
+  const forward = nodeFrom?.neighbors.find((e) => e.targetId === to);
+  if (forward) return forward;
+
+  // 反向边：镜像成「从 from 出发」的形状（targetId 换成 to，其余属性沿用）
+  const nodeTo = getLocationNode(nodes, to);
+  const backward = nodeTo?.neighbors.find((e) => e.targetId === from);
+  return backward ? { ...backward, targetId: to } : undefined;
+}
+
 export function areAdjacent(nodes: LocationNode[], a: string, b: string): boolean {
-  const nodeA = getLocationNode(nodes, a);
-  if (!nodeA) return false;
-  return nodeA.neighbors.some((e) => e.targetId === b);
+  return findEdge(nodes, a, b) !== undefined;
 }
 
 export function getEdge(nodes: LocationNode[], from: string, to: string): LocationEdge | undefined {
-  const nodeFrom = getLocationNode(nodes, from);
-  if (!nodeFrom) return undefined;
-  return nodeFrom.neighbors.find((e) => e.targetId === to);
+  return findEdge(nodes, from, to);
 }
 
 // ========== $location Namespace ==========

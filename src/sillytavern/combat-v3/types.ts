@@ -1055,7 +1055,9 @@ export interface CombatTransition {
  * - dispatch(command)：唯一入口，同步自动推进（P2 单一入口）
  * - snapshot()：当前只读投影
  * - history：已提交的 transition 序列（可追溯）
- * - completed：是否已进入终局（Terminal / SettlementCommitted）
+ * - completed：**结算已提交**（phase === 'SettlementCommitted'）。活 getter，不是构造快照。
+ *   刻意不含 Terminal —— Terminal 之后还要 dispatch 一次 RequestSettlement，
+ *   把 Terminal 也算「完成」会让驱动循环少转一圈、漏掉结算（Q-22）。
  */
 export interface CombatSession {
   dispatch(command: CombatCommand): CombatTransition;

@@ -253,7 +253,7 @@ function resumeBlock(
     });
   }
 
-  const out = resumeBlockedAttack(bundleOf(state), state, recompute);
+  const out = resumeBlockedAttack(state, recompute);
   if (out.rejection) return rejection(state, out.rejection);
 
   // 格挡消耗动作槽（DeclareBlock.cost='action'）——进 pendingChanges
@@ -284,18 +284,12 @@ function resumeBlock(
   } satisfies CombatTransition;
 }
 
-/** DeclareBlock 恢复时重建 bundle（bundle 参与 runDamagePipeline 的 skill 解析；M3 用最小闭包） */
-function bundleOf(state: CombatState): CombatDefinitionBundle {
-  // resumeBlockedAttack 只用 state.units + recompute；bundle 仅供签名，
-  // 传一个最小 bundle 保证纯函数（无副作用）可继续。
-  return {
-    combatId: state.combatId,
-    combatType: '标准',
-    participants: Object.values(state.units as never) as never,
-    resourceSnapshots: state.resourceSnapshots,
-    rulesetRevision: 'v3-m3',
-  };
-}
+// 🪦 Q-22：`bundleOf` 已删。它存在的唯一理由是 `resumeBlockedAttack` 的签名要一个
+//    `bundle` —— 而那个参数贯穿整条攻击路径却**从不被读**。为了喂它，这里要现造一个
+//    假 bundle（combatType 硬写 '标准'、rulesetRevision 硬写 'v3-m3'，两处 `as never`）。
+//    参数一删，这段连同两个 `as never` 一起消失。
+//    将来某个窗口若真需要战斗级事实，传具体字段（如 `combatType: CombatType`）——
+//    产出 `PhaseOutcome` 的函数应当只拿它读的东西。
 
 // ──────────────────────────────────────────────────────────────────────────────
 // SupplyUnit spawn frame 恢复（M3.5，A35-1/A35-2）
@@ -779,7 +773,7 @@ function runBusiness(
 ): PhaseOutcome {
   switch (command.kind) {
     case 'DeclareAttack':
-      return handleAttack(bundle, working, command);
+      return handleAttack(working, command);
     case 'DeclareAction':
       return handleAction(bundle, working, command);
     case 'Flee':
