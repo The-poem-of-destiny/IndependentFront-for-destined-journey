@@ -44,6 +44,13 @@ import {
 } from './database';
 import { getVar, setVar, delVar, insertVar, applyPathOps } from './var-resolver';
 import { getEngineSettings } from './engine-settings';
+// Q-19：这三个模块此前在 14 处 handler 里各 `await import` 一次。它们都不 import
+// 本模块（已核实无环），动态化没有换来任何解耦，只是让每个 handler 多一次 await
+// 和一行噪音，还遮蔽了 1471 行那处同名解构。script-executor 仍留动态 —— 它是
+// 唯一可能成环的那个（沙盒会回调状态层），单独验证后再说。
+import { getProfile, updateProfile, setQuest, removeQuest } from './save-profile';
+import { clampAffection } from './affection-system';
+import { advanceTime } from './time-system';
 import type { EjsVarsDiff } from './ejs-vars-diff';
 import {
   normalizeQuestStatus,
@@ -320,106 +327,13 @@ export class StateManager {
     // 验证 — 失败直接 throw → 被 commitChatState 的 try/catch 收进 errors[]（M2 语义修正）
     this.validatePatch(patch);
 
-    // 分发
-    let event: GameEvent | undefined;
-
-    switch (patch.op) {
-      case 'set_variable':
-        event = await this.applySetVariable(patch);
-        break;
-      case 'delta_variable':
-        event = await this.applyDeltaVariable(patch);
-        break;
-      case 'update_character':
-        event = await this.applyUpdateCharacter(patch);
-        break;
-      case 'set_hp':
-      case 'set_mp':
-      case 'set_sp':
-        event = await this.applySetResource(patch);
-        break;
-      case 'delta_hp':
-      case 'delta_mp':
-      case 'delta_sp':
-        event = await this.applyDeltaResource(patch);
-        break;
-      case 'add_status_effect':
-        event = await this.applyAddStatusEffect(patch);
-        break;
-      case 'remove_status_effect':
-        event = await this.applyRemoveStatusEffect(patch);
-        break;
-      case 'add_item':
-        event = await this.applyAddItem(patch);
-        break;
-      case 'remove_item':
-        event = await this.applyRemoveItem(patch);
-        break;
-      case 'update_item':
-        event = await this.applyUpdateItem(patch);
-        break;
-      case 'transfer_item':
-        event = await this.applyTransferItem(patch);
-        break;
-      case 'equip_item':
-        event = await this.applyEquipItem(patch);
-        break;
-      case 'unequip_item':
-        event = await this.applyUnequipItem(patch);
-        break;
-      case 'add_skill':
-        event = await this.applyAddSkill(patch);
-        break;
-      case 'update_skill':
-        event = await this.applyUpdateSkill(patch);
-        break;
-      case 'remove_skill':
-        event = await this.applyRemoveSkill(patch);
-        break;
-      case 'set_location':
-        event = await this.applySetLocation(patch);
-        break;
-      case 'add_character':
-        event = await this.applyAddCharacter(patch);
-        break;
-      case 'remove_character':
-        event = await this.applyRemoveCharacter(patch);
-        break;
-      case 'rename_character':
-        event = await this.applyRenameCharacter(patch);
-        break;
-      case 'add_memory':
-        event = await this.applyAddMemory(patch);
-        break;
-      case 'update_plot_event':
-        event = await this.applyUpdatePlotEvent(patch);
-        break;
-      case 'update_quest':
-        event = await this.applyUpdateQuest(patch);
-        break;
-      case 'remove_quest':
-        event = await this.applyRemoveQuest(patch);
-        break;
-      case 'set_affection':
-      case 'delta_affection':
-        event = await this.applyAffection(patch);
-        break;
-      case 'add_news':
-        event = await this.applyAddNews(patch);
-        break;
-      case 'remove_variable':
-        event = await this.applyRemoveVariable(patch);
-        break;
-      case 'move_variable':
-        event = await this.applyMoveVariable(patch);
-        break;
-      case 'insert_variable':
-        event = await this.applyInsertVariable(patch);
-        break;
-      default:
-        // 未知 op 必须 loud 失败 → commitChatState 收进 errors[]（终审修复: 旧 return 形态被上层当成功吞掉）
-        throw new Error(`未知操作: ${patch.op}`);
+    const handler = PATCH_HANDLERS[patch.op];
+    if (!handler) {
+      // 未知 op 必须 loud 失败 → commitChatState 收进 errors[]
+      // （终审修复: 旧 return 形态被上层当成功吞掉）
+      throw new Error(`未知操作: ${patch.op}`);
     }
+    const event = await handler(this, patch);
 
     return { patch, success: true, event };
   }
@@ -593,14 +507,12 @@ export class StateManager {
 
   /** 获取当前变量（真源: SaveProfile.variables） */
   private async getCurrentVariables(): Promise<Record<string, any>> {
-    const { getProfile } = await import('./save-profile');
     const profile = await getProfile(this.saveId);
     return profile.variables ?? {};
   }
 
   /** 持久化变量到 SaveProfile */
   private async persistVariables(variables: Record<string, any>): Promise<void> {
-    const { getProfile, updateProfile } = await import('./save-profile');
     const profile = await getProfile(this.saveId);
     profile.variables = variables;
     await updateProfile(profile);
@@ -680,14 +592,15 @@ export class StateManager {
 
       // ===== hp/mp/sp 钳制: 与 set_hp 语义一致 [0, 对应 max]（终审修复）=====
       // 仅在本次 patch 涉及资源或其 max 时钳制（若本次也写了 max* 则以写后值为准）
-      for (const res of ['hp', 'mp', 'sp'] as const) {
-        const maxField = `max${res.charAt(0).toUpperCase()}${res.slice(1)}` as
-          'maxHp' | 'maxMp' | 'maxSp';
+      // Q-19: 字段对由 RESOURCE_MAX_FIELD 给（`satisfies` 保证两侧都真的在
+      // CharacterState 上），不再靠字符串拼 `max${...}` + `as` 断言。
+      for (const res of RESOURCE_KEYS) {
+        const maxField = RESOURCE_MAX_FIELD[res];
         if (keys.includes(res) || keys.includes(maxField)) {
-          const cur = (char as any)[res];
-          const max = (char as any)[maxField];
+          const cur = char[res];
+          const max = char[maxField];
           if (typeof cur === 'number' && typeof max === 'number') {
-            (char as any)[res] = Math.max(0, Math.min(cur, max));
+            char[res] = Math.max(0, Math.min(cur, max));
           }
         }
       }
@@ -702,12 +615,11 @@ export class StateManager {
   private async applySetResource(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    const resource = patch.op.replace('set_', '') as 'hp' | 'mp' | 'sp';
-    const maxField = `max${resource.charAt(0).toUpperCase()}${resource.slice(1)}` as
-      'maxHp' | 'maxMp' | 'maxSp';
+    const resource = patch.op.replace('set_', '') as ResourceKey;
+    const maxField = RESOURCE_MAX_FIELD[resource];
 
-    const newValue = Math.max(0, Math.min(patch.value as number, (char as any)[maxField]));
-    (char as any)[resource] = newValue;
+    const newValue = Math.max(0, Math.min(patch.value as number, char[maxField]));
+    char[resource] = newValue;
     await saveCharacter(char);
 
     return this.createEvent('character_action', patch);
@@ -716,14 +628,13 @@ export class StateManager {
   private async applyDeltaResource(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    const resource = patch.op.replace('delta_', '') as 'hp' | 'mp' | 'sp';
-    const maxField = `max${resource.charAt(0).toUpperCase()}${resource.slice(1)}` as
-      'maxHp' | 'maxMp' | 'maxSp';
+    const resource = patch.op.replace('delta_', '') as ResourceKey;
+    const maxField = RESOURCE_MAX_FIELD[resource];
 
-    const current = (char as any)[resource] as number;
+    const current = char[resource];
     const delta = patch.amount ?? 0;
-    const newValue = Math.max(0, Math.min(current + delta, (char as any)[maxField]));
-    (char as any)[resource] = newValue;
+    const newValue = Math.max(0, Math.min(current + delta, char[maxField]));
+    char[resource] = newValue;
     await saveCharacter(char);
 
     return this.createEvent('character_action', patch);
@@ -1258,7 +1169,6 @@ export class StateManager {
     await saveCharacter(char);
 
     // 按名引用迁移 — 当前仅 affections（M5/M6 新增按名引用时必须回来扩这里）
-    const { getProfile, updateProfile } = await import('./save-profile');
     const profile = await getProfile(this.saveId);
     if (profile?.affections && Object.prototype.hasOwnProperty.call(profile.affections, oldName)) {
       profile.affections[newName] = profile.affections[oldName];
@@ -1296,7 +1206,6 @@ export class StateManager {
     const questData = patch.value as { name: string } & Record<string, any>;
     const questName = questData.name;
     if (!questName) throw new Error('缺少任务名称');
-    const { getProfile, setQuest } = await import('./save-profile');
     const profile = await getProfile(this.saveId);
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
     // M6 #52: 用 delete 剔除寻址键，替代 `{ name: _name, ...rest }` 的未用解构 + eslint-disable
@@ -1314,7 +1223,6 @@ export class StateManager {
     // #40: value 形态统一为 {name} 对象（与 update_quest 对齐）
     const questName = (patch.value as { name?: string })?.name;
     if (!questName) throw new Error('缺少任务名称');
-    const { getProfile, removeQuest } = await import('./save-profile');
     const profile = await getProfile(this.saveId);
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
     await removeQuest(profile, questName);
@@ -1338,9 +1246,6 @@ export class StateManager {
     }
     const charName = patch.target.slice(AFFECTION_PREFIX.length).trim();
     if (!charName) throw new Error(`${patch.op} target 缺少角色名: ${patch.target}`);
-
-    const { clampAffection } = await import('./affection-system');
-    const { getProfile, updateProfile } = await import('./save-profile');
     const profile = await getProfile(this.saveId);
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
 
@@ -1374,8 +1279,6 @@ export class StateManager {
     const newsData = patch.value as { title?: string; content?: string; category?: string };
     if (!newsData?.title) throw new Error('add_news 缺少 title');
     if (!newsData.content) throw new Error('add_news 缺少 content');
-
-    const { getProfile, updateProfile } = await import('./save-profile');
     const profile = await getProfile(this.saveId);
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
 
@@ -1419,7 +1322,6 @@ export class StateManager {
    * @param turn   对话回合游标（恢复时截断 messages 用）
    */
   async createSnapshot(reason: Snapshot['reason'], turn: number): Promise<Snapshot> {
-    const { getProfile } = await import('./save-profile');
     const characters = await getCharacters(this.saveId);
     const profile = await getProfile(this.saveId);
     const plotEvents = await getPlotEvents(this.saveId);
@@ -1495,7 +1397,6 @@ export class StateManager {
       // 🔒 P1-06: 单事务覆盖所有被修改的表 —— 快照恢复此前是顺序多步独立 DB 操作，
       // 后段失败会留下部分恢复状态（如角色已覆写但对话/记忆未回滚）。包进单事务后任一步
       // 抛错 Dexie 自动回滚全表，恢复要么完整成功要么完全不动。
-      const { updateProfile } = await import('./save-profile');
       const db = getDatabase();
       await db.transaction(
         'rw',
@@ -1561,8 +1462,6 @@ export class StateManager {
     if (minutes <= 0) return patches;
 
     // 1. 更新 SaveProfile.gameTime
-    const { getProfile, updateProfile } = await import('./save-profile');
-    const { advanceTime } = await import('./time-system');
     const { getCharacters } = await import('./database');
 
     const profile = await getProfile(this.saveId);
@@ -1730,3 +1629,88 @@ async function convertScriptEffects(saveId: string, se: ScriptEffects): Promise<
     } as unknown as StatePatch);
   return patches;
 }
+
+// ═══════════════════════════════════════════════════════════
+// 资源字段对（Q-19）
+// ═══════════════════════════════════════════════════════════
+
+/** 三种资源 */
+const RESOURCE_KEYS = ['hp', 'mp', 'sp'] as const;
+type ResourceKey = (typeof RESOURCE_KEYS)[number];
+
+/**
+ * 资源 → 它的上限字段。
+ *
+ * Q-19：此前是三处 `\`max\${res.charAt(0).toUpperCase()}…\`` 字符串拼接 + `as` 断言，
+ * 读写一律 `(char as any)[k]`（10 处）。`satisfies` 让「字段名写错」变成编译错误 ——
+ * 拼字符串那种写法编译器一个字都看不懂。
+ */
+const RESOURCE_MAX_FIELD = {
+  hp: 'maxHp',
+  mp: 'maxMp',
+  sp: 'maxSp',
+} as const satisfies Record<ResourceKey, keyof CharacterState>;
+
+// ═══════════════════════════════════════════════════════════
+// op → handler 分发表（Q-19）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 🔴 **`Record<StatePatchOp, …>` 是这张表的全部意义**：漏接一个 op 是**编译错误**，
+ * 而不是运行到那一条才 `throw new Error('未知操作')`。
+ *
+ * 此前是一个 30 分支的手写 switch + `default: throw`。加一个 op 时编译器完全不管，
+ * 只有真机走到那条 patch 才炸 —— 而 patch 是 AI 产出的，走不走到看运气。
+ *
+ * 放在 class 之外是必须的：类内静态字段初始化时 `StateManager.prototype` 上的
+ * 私有方法还没准备好被引用成值。这里每个条目都是 `(sm, patch) => sm.applyXxx(patch)`
+ * 的薄包装，`sm` 就是 `this`。
+ */
+const PATCH_HANDLERS: Record<
+  StatePatchOp,
+  (sm: StateManager, patch: StatePatch) => Promise<GameEvent>
+> = {
+  // 变量
+  set_variable: (sm, p) => sm['applySetVariable'](p),
+  delta_variable: (sm, p) => sm['applyDeltaVariable'](p),
+  remove_variable: (sm, p) => sm['applyRemoveVariable'](p),
+  move_variable: (sm, p) => sm['applyMoveVariable'](p),
+  insert_variable: (sm, p) => sm['applyInsertVariable'](p),
+  // 角色
+  update_character: (sm, p) => sm['applyUpdateCharacter'](p),
+  add_character: (sm, p) => sm['applyAddCharacter'](p),
+  remove_character: (sm, p) => sm['applyRemoveCharacter'](p),
+  rename_character: (sm, p) => sm['applyRenameCharacter'](p),
+  set_location: (sm, p) => sm['applySetLocation'](p),
+  // 资源（三态共用一个 handler，op 本身携带是哪一种）
+  set_hp: (sm, p) => sm['applySetResource'](p),
+  set_mp: (sm, p) => sm['applySetResource'](p),
+  set_sp: (sm, p) => sm['applySetResource'](p),
+  delta_hp: (sm, p) => sm['applyDeltaResource'](p),
+  delta_mp: (sm, p) => sm['applyDeltaResource'](p),
+  delta_sp: (sm, p) => sm['applyDeltaResource'](p),
+  // 状态效果
+  add_status_effect: (sm, p) => sm['applyAddStatusEffect'](p),
+  remove_status_effect: (sm, p) => sm['applyRemoveStatusEffect'](p),
+  // 物品
+  add_item: (sm, p) => sm['applyAddItem'](p),
+  remove_item: (sm, p) => sm['applyRemoveItem'](p),
+  update_item: (sm, p) => sm['applyUpdateItem'](p),
+  transfer_item: (sm, p) => sm['applyTransferItem'](p),
+  equip_item: (sm, p) => sm['applyEquipItem'](p),
+  unequip_item: (sm, p) => sm['applyUnequipItem'](p),
+  // 技能
+  add_skill: (sm, p) => sm['applyAddSkill'](p),
+  update_skill: (sm, p) => sm['applyUpdateSkill'](p),
+  remove_skill: (sm, p) => sm['applyRemoveSkill'](p),
+  // 记忆 / 剧情 / 任务
+  add_memory: (sm, p) => sm['applyAddMemory'](p),
+  update_plot_event: (sm, p) => sm['applyUpdatePlotEvent'](p),
+  update_quest: (sm, p) => sm['applyUpdateQuest'](p),
+  remove_quest: (sm, p) => sm['applyRemoveQuest'](p),
+  // 好感度（两个 op 共用，handler 内按 op 分绝对/增量）
+  set_affection: (sm, p) => sm['applyAffection'](p),
+  delta_affection: (sm, p) => sm['applyAffection'](p),
+  // 世界新闻
+  add_news: (sm, p) => sm['applyAddNews'](p),
+};
