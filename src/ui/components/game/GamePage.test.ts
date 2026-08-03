@@ -2,10 +2,12 @@
  * GamePage 基础渲染测试 (Phase 7e)
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { enableAutoUnmount, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import GamePage from './GamePage.vue';
+
+enableAutoUnmount(afterEach);
 
 // Mock game store
 vi.mock('../../stores/game-store', () => ({
@@ -90,6 +92,77 @@ describe('GamePage', () => {
 
     mount(GamePage);
     expect(mockLoadSave).toHaveBeenCalledWith('test-save-123');
+  });
+
+  it('keeps the toolbar debug modal separate from the keyboard debug drawer', async () => {
+    const { useGameStore } = await import('../../stores/game-store');
+    (useGameStore as any).mockReturnValue({
+      player: null,
+      npcs: [],
+      saveProfile: null,
+      fp: 0,
+      messages: [],
+      characters: [],
+      agentLog: [],
+      pendingOptions: [],
+      isGenerating: false,
+      recentMemories: [],
+      activePlotEvents: [],
+      plotOutline: null,
+      activeCombat: null,
+      activeSave: null,
+      activeSaveId: null,
+      activeModal: 'debug',
+      sidebarCollapsed: false,
+      rightPanelMode: 'status',
+      fullscreenStatus: false,
+      hasOpeningPromptConsumed: true,
+      openingPrompt: null,
+      loadSave: vi.fn(),
+      toggleSidebar: vi.fn(),
+      setRightPanel: vi.fn(),
+      toggleFullscreen: vi.fn(),
+      closeModal: vi.fn(),
+    });
+
+    const wrapper = mount(GamePage, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          TopBar: true,
+          SideToolbar: true,
+          ScenePanel: true,
+          ChatFlow: true,
+          StatusHUD: true,
+          AgentStatusPanel: true,
+          MiniPlayer: true,
+          CombatPanel: true,
+          ItemsPanel: true,
+          CharacterListPanel: true,
+          QuestsPanel: true,
+          PlotPanel: true,
+          MemoryPanel: true,
+          SnapshotPanel: true,
+          WorkshopEnablePanel: true,
+          MapPanel: true,
+          DebugPanel: { template: '<div class="debug-panel">modal debug</div>' },
+        },
+      },
+    });
+
+    try {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'D', altKey: true, shiftKey: true }),
+      );
+      await wrapper.vm.$nextTick();
+
+      expect(document.body.querySelectorAll('.debug-panel')).toHaveLength(1);
+      expect(document.body.querySelector('.debug-drawer')).not.toBeNull();
+    } finally {
+      wrapper.unmount();
+      document.body.innerHTML = '';
+      document.body.style.overflow = '';
+    }
   });
 });
 

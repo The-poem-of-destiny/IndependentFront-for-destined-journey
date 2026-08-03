@@ -297,7 +297,7 @@ function onModalOpenChange(v: boolean) {
 
     <!-- 调试面板 (Alt+Shift+D) -->
     <Teleport to="body">
-      <div v-if="showDebug" class="debug-panel">
+      <div v-if="showDebug" class="debug-drawer">
         <div class="debug-header">
           <span>Debug Panel</span>
           <button @click="showDebug = false">✕</button>
@@ -369,7 +369,7 @@ function onModalOpenChange(v: boolean) {
 }
 
 /* ===== 调试面板 ===== */
-.debug-panel {
+.debug-drawer {
   position: fixed;
   top: 0;
   right: 0;
