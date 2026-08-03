@@ -38,7 +38,7 @@
 | 状态 | 含义                                     |
 | ---- | ---------------------------------------- |
 | ✅   | 已完成，有测试或可复核的证据             |
-| 🔄   | 部分完成，剩余项见下方明细               |
+| 🔄   | 部分完成，剩余项写在备注列               |
 | ⬜   | 未开始（下表备注里附本次核对的抽查结果） |
 
 **核对基线**：`master`（2026-08-03，随修复滚动）· `typecheck` / `typecheck:vue` / `typecheck:tools` / `lint` 全绿 · 203 个测试文件 · 5664 passed / 3 skipped
@@ -49,20 +49,13 @@
 | ----------------------------------------- | ---------------------- | ---- | ------------------------------------------------------------------------------------- |
 | [步骤 1](roadmap.md) 清尸体 + 补工具链网  | Q-04、Q-15             | ✅   | 四批僵尸清完 + 补网与清仓两个 PR 都落地                                               |
 | [步骤 2](roadmap.md) 修静默出错的生产路径 | Q-01、Q-02             | ✅   | 两条全部兑现（`a0c3d5d`），骰子那条建议仍需真机打一场复核                             |
-| [步骤 3](roadmap.md) 三处去留裁定         | Q-07、Q-03、Q-30       | 🔄   | 三条裁定均已拍板；Q-03 / Q-30 已落地，Q-07 只落了注册面                               |
+| [步骤 3](roadmap.md) 三处去留裁定         | Q-07、Q-03、Q-30       | ✅   | 三条裁定均已拍板并落地（Q-07 含 emit 源 + 效果回收 + 战斗内 12/18 显式化）            |
 | [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | ⬜   | —                                                                                     |
 | [步骤 5](roadmap.md) 数据路径去重         | Q-08、Q-16、Q-12       | ⬜   | 抽查：三份 `*-migration.ts` 与 `variables.ts` / `vars-merger.ts` 两个僵尸宿主原样在库 |
 | [步骤 6](roadmap.md) 品质体系与设置真源   | Q-11、Q-18、Q-06       | ⬜   | 抽查：`ScenePanel.vue:134` 的 `TIER_COLOR` 仍是 6 元、仍漏「唯一」，T7 仍描成灰       |
 | [步骤 7](roadmap.md) EJS 能力面 + Legacy  | Q-09、Q-10、Q-27       | ⬜   | 抽查：`ejs-backend.ts` 仍在；退役仍卡在真机走查这一前置                               |
 | [步骤 8](roadmap.md) 巨石拆分第一刀       | Q-23、Q-19             | ⬜   | 硬前置未清：步骤 1 的删尸体与步骤 3 的效果层都还没收尾                                |
 | [后续批次](roadmap.md#后续批次不进前八步) | 其余 9 条              | ⬜   | —                                                                                     |
-
-### 🔄 剩余明细
-
-**Q-07（效果层）** — 裁定为「完整接线」。已做：新增 `effect-wiring.ts`，按存档实例化 EventBus，装备 / 卸下 / 存档加载三处接上 `executeInit` 与 `$event.on` 订阅注册，3 条回归测试。剩余两项：
-
-- 只建了**注册面**，战斗外的业务事件 `emit` 源尚未接（提交自述「留待后续」）——即订阅能挂上，但目前没有生产事件去触发它们。
-- 战斗内 13 个惰性窗口未处理：`initiative.before` / `initiative.after` / `turn.close` / `morale.before` / `morale.after` / `settlement.before` 在 `combat-v3/phases/` 里仍只出现在注释中，无求值器；编译白名单与 `char-gen-agent` 仍允许 AI 从 18 个里任选。
 
 ### 已落地的提交
 
@@ -75,6 +68,7 @@
 | `0a6e7b6` | Q-03                     | 裁定：hiddenLine 保留 + 门槛统一 100 字 + embedding 接线；MEM 编号收敛到一套发号器                                                                                                                             |
 | `eab3729` | Q-07(部分)               | 裁定：完整接线；新增 `effect-wiring.ts`，装备/卸下/存档加载三处接上注册面                                                                                                                                      |
 | `ebb2cf9` | —                        | 本进度追踪面                                                                                                                                                                                                   |
+| _本次_    | Q-07 ✅                  | 第二半：`commitChatState` 发事件 + `SubscriptionManager.setEffectSink` 回收效果（反应轮上限 3）；`runWindow` 消掉 8 处静默丢弃；6 个无求值器窗口以 `WINDOW_NOT_WIRED` 编译期掉落                               |
 | `316acb8` | Q-15 ✅                  | 补网（`typecheck:tools` 进 CI / lint·format 扩到 server·tests·scripts）+ 清仓；补网当场逮到三处过期，含 CharGenSystemCard 把 `string[]` 当字典渲染                                                             |
 | _本次_    | Q-04 ✅                  | 第四批：删 `variableContext`/`variableInstruction` 闭包与 `buildFallbackMessages`，`DEFAULT_TEMPLATES` 补齐三个退役 Agent；顺带删净 `MatchedEntry`/`lorebookMatches`/`targetCharacterId` 与 `buildZoneSection` |
 
@@ -88,7 +82,7 @@
 
 - **生产战斗从未拿到真骰子**——`sysDrawSixty` 恒返回 60 颗 `10`，注入缝 `registerDiceSupplier` 只存在于类型声明和三条注释里，从未被调用（[Q-01](findings-t1-wiring-gap.md#q-01)）。整个 DiceTape 通道预算、优势/劣势双骰、7 个重放 fixture 服务的随机性，在出货的游戏里一次都没被触发。〔✅ 已修 `a0c3d5d`，见[进度追踪](#进度追踪)〕
 - **状态到期的连带效果全部蒸发**——`applyTimeAdvance` 仔细构造的 patches 在唯一调用点被丢弃（[Q-02](findings-t1-wiring-gap.md#q-02)）。效果条本身会消失，但它承诺的回血/掉属性不会发生。〔✅ 已修 `a0c3d5d`〕
-- **两层效果系统都是空的**——战斗外整条 emitChain 事件层从未被实例化，战斗内 18 个「封闭枚举」窗口有 13 个惰性（[Q-07](findings-t1-wiring-gap.md#q-07)）。〔🔄 战斗外注册面已接（`eab3729`），业务事件源与战斗内 13 窗口仍在〕
+- **两层效果系统都是空的**——战斗外整条 emitChain 事件层从未被实例化，战斗内 18 个「封闭枚举」窗口有 13 个惰性（[Q-07](findings-t1-wiring-gap.md#q-07)）。〔✅ 已修：注册面 `eab3729`，emit 源 + 效果回收 + 战斗内 12/18 显式化见[进度追踪](#进度追踪)〕
 
 三条都被绿测掩盖，因为测试注入自己的替身、或只覆盖被替换掉的那一层。**这类缺陷的成本不是修复工作量，而是发现延迟**：读代码的人看不出问题，只有真机对着数值表比对才会发现。
 
@@ -160,7 +154,7 @@
 | [Q-04](findings-t4-corpses.md#q-04)       | 中     | T4   | 五处僵尸模块零生产引用却仍带测试与提示词正文                                             | 步骤 1   | ✅   |
 | [Q-05](findings-t2-ai-boundary.md#q-05)   | 高     | T2   | AI 输出解析没有共享缝：15+ 份拷贝，同名 `extractTag` 语义相反，effect 正则已漂出数据丢失 | 步骤 4   | ⬜   |
 | [Q-06](findings-t3-single-source.md#q-06) | 中     | T3   | 设置有两个真源，只有两个字段被手写桥搬运，引擎侧读到的是永远停在默认值的影子配置         | 步骤 6   | ⬜   |
-| [Q-07](findings-t1-wiring-gap.md#q-07)    | 高     | T1   | 两层效果系统都是空的：13 个「封闭枚举」窗口惰性，emitChain 事件层从未被实例化            | 步骤 3   | 🔄   |
+| [Q-07](findings-t1-wiring-gap.md#q-07)    | 高     | T1   | 两层效果系统都是空的：13 个「封闭枚举」窗口惰性，emitChain 事件层从未被实例化            | 步骤 3   | ✅   |
 | [Q-08](findings-t3-single-source.md#q-08) | 中     | T3   | 「六步迁移」复制了三遍且已漂移——唯一「搞砸即用户数据不可恢复」的路径是复制粘贴           | 步骤 5   | ⬜   |
 | [Q-09](findings-t3-single-source.md#q-09) | 高     | T3   | EJS 能力面契约被记在 6 处，已发生 8 次静默渲染漂移，`engine.has` 已经在说谎              | 步骤 7   | ⬜   |
 | [Q-10](findings-t4-corpses.md#q-10)       | 中     | T4   | Legacy EJS 后端的两处遗产：缓存只服务停用路径（生产零缓存）、同步渲染路径恒被闸门关死    | 步骤 7   | ⬜   |

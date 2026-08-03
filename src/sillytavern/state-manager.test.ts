@@ -54,6 +54,7 @@ vi.mock('./save-profile', () => ({
 }));
 
 import { StateManager, createStateManager } from './state-manager';
+import { wireEffectSystem, clearAllEffectWirings, peekEffectWiring } from './effect-wiring';
 import * as db from './database';
 import * as saveProfile from './save-profile';
 
@@ -3852,6 +3853,85 @@ describe('StateManager', () => {
       const sm = createStateManager('save-001');
       expect(sm).toBeInstanceOf(StateManager);
       expect((sm as any).saveId).toBe('save-001');
+    });
+  });
+
+  // ===================================================================
+  // 23. Q-07 —— commit 产生的事件真的会触发已装备物品的 $event.on 订阅
+  // ===================================================================
+  describe('commitChatState — 效果反应轮（Q-07）', () => {
+    beforeEach(() => {
+      clearAllEffectWirings();
+    });
+
+    it('订阅脚本的 modifyHp 会作为第二轮补丁真正落到角色身上', async () => {
+      // 主角戴一件「有人上状态就回血」的护符
+      const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 100 });
+      char.inventory = [
+        {
+          name: '共感护符',
+          quantity: 1,
+          equippedSlot: '饰品',
+          scripts: {
+            init: `$event.on('status_effect', 'onStatus');`,
+            onStatus: `$resource.modifyHp('Test Hero', 12);`,
+          },
+        },
+      ];
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
+      wireEffectSystem('save-001', [char]);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      await sm.commitChatState([
+        {
+          op: 'add_status_effect',
+          target: 'characters.Test Hero',
+          value: { name: '专注', category: '增益', stacks: 1 },
+        },
+      ]);
+
+      // 加状态本身不改 hp；50 → 62 只可能来自订阅脚本那一轮
+      expect(char.hp).toBe(62);
+    });
+
+    it('没接线的存档不受影响（也不会凭空建出 EventBus）', async () => {
+      const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 100 });
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+      const sm = new StateManager({ saveId: 'save-unwired' });
+      const result = await sm.commitChatState([
+        { op: 'set_hp', target: 'characters.Test Hero', value: 55 },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.hp).toBe(55);
+      expect(peekEffectWiring('save-unwired')).toBeUndefined();
+    });
+
+    it('互相触发的两条脚本被深度上限拦住，不会打成事件风暴', async () => {
+      // 两件装备互喂：A 收到 status_effect 就 modifyHp，modifyHp 又产生新事件……
+      const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 9999 });
+      char.inventory = [
+        {
+          name: '永动机甲',
+          quantity: 1,
+          equippedSlot: '身体',
+          scripts: {
+            // delta_hp 自己也产生 character_action 事件 → 又触发本脚本 → 无限自喂
+            init: `$event.on('character_action', 'loop');`,
+            loop: `$resource.modifyHp('Test Hero', 1);`,
+          },
+        },
+      ];
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
+      wireEffectSystem('save-001', [char]);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      await sm.commitChatState([{ op: 'delta_hp', target: 'characters.Test Hero', amount: 1 }]);
+
+      // 首轮 +1，之后最多 3 轮反应各 +1 —— 关键是它会停下来
+      expect(char.hp).toBeGreaterThan(50);
+      expect(char.hp).toBeLessThanOrEqual(55);
     });
   });
 });

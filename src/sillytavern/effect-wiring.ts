@@ -23,7 +23,7 @@ import { ScriptRegistry } from './script-registry';
 import { SubscriptionManager } from './subscription-manager';
 import { executeInit, executeCleanup, createScriptEffects } from './script-executor';
 import type { ScriptEffects } from './script-executor';
-import type { CharacterState } from './types';
+import type { CharacterState, GameEvent } from './types';
 
 /** 每存档的效果系统实例（EventBus + 两个注册 facade） */
 export interface EffectWiring {
@@ -35,6 +35,22 @@ export interface EffectWiring {
   subscriptions: SubscriptionManager;
   /** 已注册的 ownerKey 集合（幂等 + 调试） */
   owners: Set<string>;
+  /** 本轮 publish 的效果收集桶（非 publish 期间为 undefined） */
+  collector?: ScriptEffects;
+}
+
+/** 把 src 的各类效果并进 dst（Q-07：一轮 publish 内多个订阅的产出要合并） */
+function mergeScriptEffects(dst: ScriptEffects, src: ScriptEffects): void {
+  dst.adds.push(...src.adds);
+  dst.removes.push(...src.removes);
+  dst.stackSets.push(...src.stackSets);
+  dst.events.push(...src.events);
+  dst.hpChanges.push(...src.hpChanges);
+  dst.statChanges.push(...src.statChanges);
+  dst.subscriptions.push(...src.subscriptions);
+  dst.unsubscriptions.push(...src.unsubscriptions);
+  dst.statusApplies.push(...src.statusApplies);
+  dst.statusRemoves.push(...src.statusRemoves);
 }
 
 /** 存档 → EffectWiring 实例缓存（随存档生命周期） */
@@ -50,15 +66,62 @@ export function getEffectWiring(saveId: string): EffectWiring {
   let w = wirings.get(saveId);
   if (!w) {
     const bus = getEventBus(saveId);
-    w = {
+    const wiring: EffectWiring = {
       bus,
       registry: new ScriptRegistry(bus),
       subscriptions: new SubscriptionManager(bus),
       owners: new Set(),
     };
+    // Q-07：订阅脚本产出的效果汇进本轮 publish 的桶（无桶 = 非 publish 期间触发，丢弃并告警）
+    wiring.subscriptions.setEffectSink((effects) => {
+      if (wiring.collector) mergeScriptEffects(wiring.collector, effects);
+      else console.warn(`[effect-wiring] ${saveId}: publish 之外触发的订阅效果被丢弃`);
+    });
+    w = wiring;
     wirings.set(saveId, w);
   }
   return w;
+}
+
+/**
+ * 取某存档已建立的效果系统实例；**不存在则返回 undefined，不创建**。
+ *
+ * state-manager 每次 commit 都会问一次，用 getEffectWiring 会给每个存档凭空建出
+ * EventBus + 两个 facade（包括从没装过带脚本物品的存档、以及每个测试用的假 saveId）。
+ */
+export function peekEffectWiring(saveId: string): EffectWiring | undefined {
+  return wirings.get(saveId);
+}
+
+/**
+ * 把一批 GameEvent 发到存档 EventBus，并收集订阅脚本产出的效果。
+ *
+ * 这就是 Q-07 缺的那半：`wireEffectSystem` 只建了**注册面**（谁订阅了什么），
+ * 没有任何生产代码去 publish，于是订阅永远不会被触发。现在 state-manager 每次
+ * commit 后把本次产生的 GameEvent 走这里发出去。
+ *
+ * 本函数**不写任何状态**（ADR-21）：只把效果交回调用方，由 state-manager 转成
+ * StatePatch 再走 commitChatState。
+ */
+export async function publishToEffectSystem(
+  saveId: string,
+  events: GameEvent[],
+): Promise<ScriptEffects> {
+  const acc = createScriptEffects();
+  const w = wirings.get(saveId);
+  if (!w || events.length === 0) return acc;
+  // 没有任何持久订阅时直接短路 —— 绝大多数存档是这种情况
+  if (w.subscriptions.totalSubscriptions === 0) return acc;
+
+  w.collector = acc;
+  try {
+    for (const event of events) {
+      await w.bus.publish(event);
+    }
+  } finally {
+    w.collector = undefined;
+  }
+  return acc;
 }
 
 /**

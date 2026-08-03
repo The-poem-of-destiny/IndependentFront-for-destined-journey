@@ -151,6 +151,32 @@ export function evaluateWindow<K extends WindowKey>(
   return { intents, rejections };
 }
 
+/**
+ * 窗口求值的**唯一推荐调用形态**（Q-07 步骤 2）。
+ *
+ * `evaluateWindow` 返回 `{ intents, rejections }`，而历史上 12 个调用点里有 7 个直接
+ * 丢弃整个返回值 —— 于是 effect intents **和** `EffectRejected` 诊断一起静默消失：
+ * 作者写的 automaton 过了全部编译校验、进了索引、tooltip 里也显示，然后什么都不做，
+ * 没有日志、没有 rejection、没有测试。排查一次要烧掉一天。
+ *
+ * `runWindow` 把「rejections 必须落进 out.events」变成调用形态的一部分：暂时消费不了
+ * intents 的窗口写成一行 `runWindow(events, ...)` 忽略返回值 —— 那是**可见的** TODO，
+ * 而不是藏起来的丢弃。
+ *
+ * @param out 该阶段的 DomainEvent 收集数组（rejections 直接 push 进去）
+ * @returns 本窗口产出的 intent 批次（调用方可消费，也可显式忽略）
+ */
+export function runWindow<K extends WindowKey>(
+  out: DomainEvent[],
+  index: ActiveEffectIndex,
+  key: WindowKey,
+  rt: RuntimeWindowCtx<K>,
+): readonly RawIntent[] {
+  const evaluation = evaluateWindow(index, key, rt);
+  out.push(...evaluation.rejections);
+  return evaluation.intents;
+}
+
 /** 构造一条 EffectRejected 事件 */
 function makeReject(a: QueuedAutomaton, code: EffectRejectCode, detail: string): DomainEvent {
   return {
@@ -184,6 +210,16 @@ export function makeWindowRuntimeCtx(
     window: WindowKey;
     /** M4：本窗口的伤害覆盖（damage.after / unit.beforeDown 等伤害窗口传真实 preReduction/postStep6/final） */
     damage?: Partial<DamageCtxLike>;
+    /**
+     * 反应嵌套深度（Q-07）。此前写死 0，任何读 `ctx.depth` 的触发表达式恒见 0 ——
+     * 「只在第一层反应里触发」这类条件写了等于没写。反伤链等嵌套求值应逐层 +1。
+     */
+    depth?: number;
+    /**
+     * 本 automaton 的剩余 charges（Q-07）。此前写死 0，读 `ctx.charges.remaining`
+     * 的表达式恒见 0（即「还剩几次」永远是「零次」）。
+     */
+    chargesRemaining?: number;
   },
 ): RuntimeWindowCtx<WindowKey> {
   const selfU = opts.selfId ? state.units[opts.selfId] : undefined;
@@ -209,8 +245,8 @@ export function makeWindowRuntimeCtx(
     self,
     target,
     round,
-    depth: 0,
-    charges: { remaining: 0 },
+    depth: opts.depth ?? 0,
+    charges: { remaining: opts.chargesRemaining ?? 0 },
     damage: {
       attackerId: opts.selfId ?? '',
       targetId: opts.targetId ?? '',

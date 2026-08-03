@@ -10,6 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { compileEffectProgram } from './compile';
+import { V3_WINDOW_KEYS_LIVE, V3_WINDOW_KEYS_RESERVED } from '../../combat-item-validator';
 import type { EffectAutomaton } from '../types';
 
 const base = {
@@ -64,6 +65,35 @@ describe('compile — 9 条校验逐条反例', () => {
     });
     expect(automata).toHaveLength(0);
     expect(errors.map((e) => e.code)).toContain('WINDOW_NOT_FOUND');
+  });
+
+  // Q-07：窗口在 18 枚举里、但 phases 里没有求值器。以前这类 automaton 过全部校验、
+  // 进索引、tooltip 里显示，然后什么都不做 —— 作者查「反伤为什么不触发」要烧一天。
+  it('#1b subscribe 是未接线窗口 → 剔除 + WINDOW_NOT_WIRED', () => {
+    for (const w of V3_WINDOW_KEYS_RESERVED) {
+      const { automata, errors } = compileEffectProgram({
+        ...base,
+        automata: [invalid({ subscribe: w })],
+      });
+      expect(automata, w).toHaveLength(0);
+      expect(
+        errors.map((e) => e.code),
+        w,
+      ).toContain('WINDOW_NOT_WIRED');
+    }
+  });
+
+  it('#1c 已接线窗口不被 WINDOW_NOT_WIRED 误伤', () => {
+    for (const w of V3_WINDOW_KEYS_LIVE) {
+      const { errors } = compileEffectProgram({
+        ...base,
+        automata: [invalid({ subscribe: w })],
+      });
+      expect(
+        errors.map((e) => e.code),
+        w,
+      ).not.toContain('WINDOW_NOT_WIRED');
+    }
   });
 
   it('#2 trigger 表达式文法不合规 → 剔除 + TRIGGER_SYNTAX 带列号', () => {

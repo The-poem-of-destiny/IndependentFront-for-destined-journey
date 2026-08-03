@@ -30,6 +30,7 @@ import type { IntentionResult } from '../../types';
 import { getCombatCoefficient } from '../../tier-constants';
 import {
   evaluateWindow,
+  runWindow,
   hasSubscribers,
   makeWindowRuntimeCtx,
   resolveNumberExpr,
@@ -87,7 +88,8 @@ export function handleAttack(
     };
 
   // ── ① check.intent：取 intentCheck 通道 2 颗骰 → resolveIntention（C5） ──
-  evaluateWindow(
+  runWindow(
+    out.events,
     state.activeEffects,
     'check.intent',
     makeWindowRuntimeCtx(state, {
@@ -121,7 +123,8 @@ export function handleAttack(
   }
 
   // ── ② collect_attacker_mods 窗口（M1 空转；M3 接 modifier push-handler） ──
-  evaluateWindow(
+  runWindow(
+    out.events,
     state.activeEffects,
     'collect_attacker_mods',
     makeWindowRuntimeCtx(state, {
@@ -133,7 +136,8 @@ export function handleAttack(
   );
 
   // ── ③ check.hit：取 attackHit 通道 1~2 颗骰 → performAttackCheck（M-5） ──
-  evaluateWindow(
+  runWindow(
+    out.events,
     state.activeEffects,
     'check.hit',
     makeWindowRuntimeCtx(state, {
@@ -183,7 +187,8 @@ export function handleAttack(
   });
 
   // ④ collect_defender_mods 窗口（M1 空转）
-  evaluateWindow(
+  runWindow(
+    out.events,
     state.activeEffects,
     'collect_defender_mods',
     makeWindowRuntimeCtx(state, {
@@ -195,7 +200,8 @@ export function handleAttack(
   );
 
   // ── ⑤ damage.compute：8 步管线 + clamp ≥ 0（C7） ──
-  evaluateWindow(
+  runWindow(
+    out.events,
     state.activeEffects,
     'damage.compute',
     makeWindowRuntimeCtx(state, {
@@ -407,7 +413,8 @@ function finalizeAttack(
   // 把反伤 ScheduleIntent 排进**同一原子提交**（不变量④）：反射 automaton 挂守方身上，
   // 在 damage.after 产出 ScheduleIntent(DealDamage isReaction)，写 out.changes.hpChanges
   // （doesNotConsumeSlot 不碰槽位）。R8 反伤命中骰从 attackHit 通道消费。
-  const afterEval = evaluateWindow(
+  const afterIntents = runWindow(
+    out.events,
     state.activeEffects,
     'damage.after',
     makeWindowRuntimeCtx(state, {
@@ -418,9 +425,8 @@ function finalizeAttack(
       damage: { preReduction, postStep6, final: finalDamage },
     }),
   );
-  out.events.push(...afterEval.rejections);
-  if (afterEval.intents.length > 0) {
-    applyAfterWindow(out, state, attacker, defender, afterEval.intents, {
+  if (afterIntents.length > 0) {
+    applyAfterWindow(out, state, attacker, defender, afterIntents, {
       preReduction,
       final: finalDamage,
     });
@@ -450,7 +456,10 @@ function finalizeAttack(
   // 与_ConsumeCharge_语义：由 automaton 的 charges 在窗口层消耗，此处只保证「一次原子提交
   // 内恢复 HP」（架构 §八 8.2 显式修订 v2 死亡红线）。
   if (targetHpAfter <= 0 && defender.hp > 0) {
-    const beforeDownEval = evaluateWindow(
+    // Q-07：此前这里连 rejections 都没接 —— PreventDeath automaton 校验失败会在
+    // 「本该阻止死亡」的那一刻静默消失，连一条诊断都不留。
+    const beforeDownIntents = runWindow(
+      out.events,
       state.activeEffects,
       'unit.beforeDown',
       makeWindowRuntimeCtx(state, {
@@ -460,7 +469,7 @@ function finalizeAttack(
         window: 'unit.beforeDown',
       }),
     );
-    const pd = findPreventDeath(beforeDownEval.intents, defender.id);
+    const pd = findPreventDeath(beforeDownIntents, defender.id);
     // PreventDeath 声明 slot='death.threshold' 即自认法则级（≥5）——SLOT 即门槛显式声明，
     // 无需重复读取 RULE_KEYS。找不到（目标不在场/非本目标）则按常规击倒。
     if (pd) {
@@ -724,11 +733,12 @@ function reflectChain(
     round: state.round,
     window: 'damage.after',
     damage: { preReduction: rootBase, final: rootBase },
+    // Q-07：反伤链逐层 +1 —— 此前写死 0，「只在第一层反应触发」这类条件写了等于没写
+    depth,
   });
-  const evalResult = evaluateWindow(state.activeEffects, 'damage.after', winCtx);
-  out.events.push(...evalResult.rejections);
+  const reflectIntents = runWindow(out.events, state.activeEffects, 'damage.after', winCtx);
 
-  for (const raw of evalResult.intents) {
+  for (const raw of reflectIntents) {
     // 只认受击方自身的反伤被动（owner 门控，R5）
     if (raw.owner !== victim.id) continue;
     for (const intent of raw.intents) {

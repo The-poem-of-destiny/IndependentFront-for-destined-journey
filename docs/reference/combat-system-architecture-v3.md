@@ -362,27 +362,32 @@ interface CombatProvenance {
 
 ## 五、ReactionWindow 清单
 
-### 5.1 完整清单（18 个 typed window）
+### 5.1 完整清单（18 个 typed window，其中 **12 个已接求值器**）
 
 ReactionWindow 是内核在结算流程中预留的 **typed seam**。automaton 在窗口内读同一份 immutable snapshot、返回 intent batch，**不能**推进流程或直接写状态（这是与 v2 `emitChain` 依次修改共享参数对象的根本差别）。
 
-| Window | 时机 | 典型用途 |
-|--------|------|----------|
-| `round.open` | 回合开始 | 正面 buff tick、光环刷新 |
-| `round.close` | 回合结束 | 负面 buff tick、DoT、持续时间递减、召唤时限到期 |
-| `initiative.before` / `initiative.after` | 先攻掷骰前/后 | 先攻修正、强制先手 |
-| `turn.open` / `turn.close` | 单位回合开/闭 | 行动预算调整、回合开始触发型效果 |
-| `action.declared` | 战术动作声明 | 道具 / 格挡 / 移动 / 专注的介入 |
-| `check.intent` | 意图对抗 | 意图检定修正、divinity 压制注入 |
-| `check.hit` | 命中检定 | 命中/闪避修正、必中必闪 |
-| `collect_attacker_mods` | 攻方 modifier 收集 | 装备/技能声明攻方 modifier（ADR-29 push handler） |
-| `collect_defender_mods` | 守方 modifier 收集 | 装备/技能声明守方 modifier |
-| **`damage.preview`** 🆕 | **伤害已算出、未提交** | **格挡 / 招架 / 闪避反应（可返回 RequestChoice）** |
-| `damage.compute` | 伤害管线 Step1–8 内部 | 真伤注入、bypass 短路、反伤基准读取 |
-| `damage.after` | 伤害结算后 | 反伤 Schedule、命中后状态施加 |
-| `unit.beforeDown` | HP 即将 ≤ 0 | PreventDeath、复活、濒死保护 |
-| `morale.before` / `morale.after` | 战意判定前/后 | 阈值修正、`morale.forceState` override |
-| `settlement.before` | 终局结算前 | EXP/FP 修正（幂等范围内） |
+> 🔴 **枚举 ≠ 已接线（Q-07, 2026-08-03 修订）**：下表 18 行是**声明面**，但只有标 ✅ 的 12 个在 `combat-v3/phases/` 里有求值器。标 ⛔ 的 6 个从未被求值——以前订阅它们的 automaton 能过全部编译校验、进 `ActiveEffectIndex`、在 tooltip 里显示出来，然后什么都不做，没有日志也没有 `EffectRejected`。现在编译期就以 `WINDOW_NOT_WIRED` 掉落（真源：`combat-item-validator.ts` 的 `V3_WINDOW_KEYS_LIVE` / `V3_WINDOW_KEYS_RESERVED`）。**这改变了老存档的加载行为**：已存档里订阅这 6 个窗口的 automaton 会开始被拒——它们本来也从未生效，区别只是从「静默不跑」变成「明确报错」。接上求值器时把 key 从 RESERVED 挪进 LIVE。
+
+| Window | 接线 | 时机 | 典型用途 |
+|--------|------|------|----------|
+| `round.open` | ✅ | 回合开始 | 正面 buff tick、光环刷新 |
+| `round.close` | ✅ | 回合结束 | 负面 buff tick、DoT、持续时间递减、召唤时限到期 |
+| `initiative.before` / `initiative.after` | ⛔ | 先攻掷骰前/后 | 先攻修正、强制先手 |
+| `turn.open` | ✅ | 单位回合开 | 行动预算调整、回合开始触发型效果 |
+| `turn.close` | ⛔ | 单位回合闭 | 回合结束触发型效果 |
+| `action.declared` | ✅ | 战术动作声明 | 道具 / 格挡 / 移动 / 专注的介入 |
+| `check.intent` | ✅ | 意图对抗 | 意图检定修正、divinity 压制注入 |
+| `check.hit` | ✅ | 命中检定 | 命中/闪避修正、必中必闪 |
+| `collect_attacker_mods` | ✅ | 攻方 modifier 收集 | 装备/技能声明攻方 modifier（ADR-29 push handler） |
+| `collect_defender_mods` | ✅ | 守方 modifier 收集 | 装备/技能声明守方 modifier |
+| **`damage.preview`** 🆕 | ✅ | **伤害已算出、未提交** | **格挡 / 招架 / 闪避反应（可返回 RequestChoice）** |
+| `damage.compute` | ✅ | 伤害管线 Step1–8 内部 | 真伤注入、bypass 短路、反伤基准读取 |
+| `damage.after` | ✅ | 伤害结算后 | 反伤 Schedule、命中后状态施加 |
+| `unit.beforeDown` | ✅ | HP 即将 ≤ 0 | PreventDeath、复活、濒死保护 |
+| `morale.before` / `morale.after` | ⛔ | 战意判定前/后 | 阈值修正、`morale.forceState` override |
+| `settlement.before` | ⛔ | 终局结算前 | EXP/FP 修正（幂等范围内） |
+
+> 📌 **调用形态**：窗口求值统一走 `runWindow(out.events, index, key, rt)`（`windows.ts`），它保证 `EffectRejected` 诊断必进事件流并返回 intents。暂时消费不了 intents 的窗口写成一行忽略返回值——那是**可见的** TODO；直接调 `evaluateWindow` 并丢弃返回值会同时吞掉 intents 与诊断（Q-07 之前 12 个调用点里有 8 个是这样）。
 
 ### 5.2 `damage.preview` 语义（解缺口 A）
 

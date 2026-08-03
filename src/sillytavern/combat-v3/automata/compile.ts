@@ -44,6 +44,7 @@ import type {
 import {
   validateModifier,
   V3_WINDOW_KEYS,
+  V3_WINDOW_KEYS_RESERVED,
   V3_INTENT_KINDS,
   V3_RULE_KEYS,
 } from '../../combat-item-validator';
@@ -57,6 +58,9 @@ import type { ParsedEffect } from '../../types';
 
 /** 18 个合法窗口（架构 §五 5.1）——委托 combat-item-validator 共享常量 */
 const VALID_WINDOWS: ReadonlySet<string> = V3_WINDOW_KEYS;
+
+/** 其中 6 个还没有求值器（Q-07）——过了 #1 也要在 #1b 掉落 */
+const RESERVED_WINDOWS: ReadonlySet<string> = V3_WINDOW_KEYS_RESERVED;
 
 /** closed RuleKey 白名单（架构 §八 8.2 / plan §5.5 #4） */
 const VALID_RULE_KEYS: ReadonlySet<string> = V3_RULE_KEYS;
@@ -351,6 +355,16 @@ function compileDslAutomaton(
       automatonId: a.id,
       code: 'WINDOW_NOT_FOUND',
       message: `subscribe「${a.subscribe}」不在 18 窗口清单内`,
+    });
+    return { automaton: null, messages };
+  }
+  // 校验 #1b（Q-07）：窗口在枚举里但**没有求值器** —— 大声掉落，别静默入索引。
+  // 以前这类 automaton 能过全部校验、进索引、tooltip 里显示，然后什么都不做。
+  if (RESERVED_WINDOWS.has(a.subscribe)) {
+    messages.push({
+      automatonId: a.id,
+      code: 'WINDOW_NOT_WIRED',
+      message: `窗口「${a.subscribe}」尚未接求值器，订阅它的效果永远不会触发；请改订阅已接线的窗口`,
     });
     return { automaton: null, messages };
   }

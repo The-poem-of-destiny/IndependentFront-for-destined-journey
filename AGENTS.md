@@ -252,14 +252,15 @@ Layer 1  原语级 状态读写        StateManager.commitChatState() / $validat
 
 战斗 v2 (M1-M5) 已验证一套**统一 subscribeChain 链式管道**机制，制作系统直接复用，不发明第二套。完整设计见 `docs/planning/unified-effect-system-framework.md`。
 
-> 📌 **v3 演进**：战斗内已由 v3 内核接管（`combat-v3/`），效果走 **EffectAutomaton DSL**（18 窗口 + 8 大类 intent + 封闭表达式文法），不再走 emitChain/script-executor。**本框架仍是制作系统与战斗外的效果基座**（ADR-29 继续适用）。
+> 📌 **v3 演进**：战斗内已由 v3 内核接管（`combat-v3/`），效果走 **EffectAutomaton DSL**（18 窗口声明 / **12 个已接求值器** + 8 大类 intent + 封闭表达式文法），不再走 emitChain/script-executor。**本框架仍是制作系统与战斗外的效果基座**（ADR-29 继续适用）。
 
 - **统一机制**：`EventBus.emitChain(type, params, ctx)` 链式参数管道——`(priority, order, 注册序)` 稳定排序、`ctx.combatants`+`subscription.owner` 在场过滤、错误隔离、递归保护
 - **两个注册 facade**（互不干扰）：`ScriptRegistry`（声明式，物品装备/卸下）+ `SubscriptionManager`（动态，AI script 运行时 `$event.on`）
 - **modifier 不是第二套系统**：物品 `modifiers[]` 在装备时由 ScriptRegistry 注册成"push handler"，走同一条 emitChain
 - **核心模式：纯函数兜底 + AI subscribeChain 覆盖**：Code 算基础 → emitChain 传 AI → AI handler 改 outcome → AI 不响应走兜底
 - **✅ P1-11 已接线（Q-07, 2026-08-03）**：战斗外效果系统已由 `effect-wiring.ts` 接进生产——`wireEffectSystem(saveId, characters)` 在存档加载时对已装备物品/技能执行 `executeInit` + `$event.on` 订阅注册，装备/卸下经 `state-manager` 的 equip/unequip handler 调 `wireObject`/`unwireObject`。`getEventBus(saveId)` 按存档实例化，`ScriptRegistry` + `SubscriptionManager` 双 facade 随存档生命周期。
-  **边界**：本接线只建立「注册面」（脚本能进系统、订阅能触发），**战斗外的事件 emit 源**（谁触发 `npc_talk` 等业务事件）是后续业务层的事；脚本里的 hpChanges/statChanges 效果收集仍须经 `state-manager.commitChatState` 提交（ADR-21 唯一写入口，本接线不开第二条写路径）。
+- **✅ emit 源与效果回收也已接线（Q-07 第二半, 2026-08-03）**：`commitChatState` 每次提交后，把本次 patch 产生的 `GameEvent` 经 `publishToEffectSystem(saveId, events)` 发到存档 EventBus；`SubscriptionManager` 新增 `setEffectSink`，触发脚本产出的 `hpChanges`/`statChanges`/status 意图不再被丢弃（此前 `handleEvent` 执行完脚本直接扔掉，注释写着「由 state-manager 统一 apply」却没有那个调用方——与 Q-02 同形状的缺陷）。收上来的效果经 `convertScriptEffects` 转成 StatePatch，再走一轮 `commitChatState`（ADR-21 唯一写入口，**没有开第二条写路径**）。反应轮有深度上限 `MAX_EVENT_REACTION_DEPTH = 3`，防止「A 触发 B、B 触发 A」打成事件风暴。没接过线的存档零开销（`peekEffectWiring` 不凭空建 EventBus）。
+- **⚠️ 战斗内 18 窗口里只有 12 个真的接了求值器**：`initiative.before` / `initiative.after` / `turn.close` / `morale.before` / `morale.after` / `settlement.before` 在 `combat-v3/phases/` 里没有任何求值器。它们现在编译期就以 `WINDOW_NOT_WIRED` 掉落（`V3_WINDOW_KEYS_RESERVED`），不再静默入索引；接上求值器时把 key 挪进 `V3_WINDOW_KEYS_LIVE` 即可。窗口求值统一走 `runWindow(out.events, ...)`——它保证 `EffectRejected` 诊断必进事件流，忽略返回值是可见的 TODO 而非隐藏的丢弃。
 
 ## v4 三层子系统分流 (ADR-24/25/26)
 

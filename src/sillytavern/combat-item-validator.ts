@@ -366,14 +366,16 @@ export function validateItemOutput(output: {
 // 保留 v2 运行时入口（validateModifier / validateBuff / validateItemOutput）不删。
 // 这里是战斗 v3 的 EffectAutomaton DSL 编译期共享校验（架构 §七 7.4 / plan §5.5）。
 
-/** 18 个 ReactionWindow 清单（架构 §五 5.1） */
-export const V3_WINDOW_KEYS: ReadonlySet<string> = new Set([
+/**
+ * **有求值器**的 12 个窗口（Q-07）—— 订阅这些的 automaton 会真正被跑到。
+ *
+ * 判据是「`combat-v3/phases/` 或 `reducer.ts` 里有 `runWindow(...)` 调用点」，
+ * 不是「架构文档列了它」。
+ */
+export const V3_WINDOW_KEYS_LIVE: ReadonlySet<string> = new Set([
   'round.open',
   'round.close',
-  'initiative.before',
-  'initiative.after',
   'turn.open',
-  'turn.close',
   'action.declared',
   'check.intent',
   'check.hit',
@@ -383,9 +385,33 @@ export const V3_WINDOW_KEYS: ReadonlySet<string> = new Set([
   'damage.compute',
   'damage.after',
   'unit.beforeDown',
+]);
+
+/**
+ * **声明了但还没有求值器**的 6 个窗口（Q-07）。
+ *
+ * 架构 §五 5.1 把 18 窗口写成「封闭枚举」，但这 6 个在 phases 里一次都没被求值
+ * （源码注释标着「M1 空转 / M3 接索引」）。以前它们和 live 的一样能过编译校验、
+ * 进 ActiveEffectIndex、在 tooltip 里显示，然后什么都不做 —— 没有日志、没有
+ * EffectRejected、没有测试。作者排查「我的反伤为什么不触发」要烧掉一天。
+ *
+ * 现在编译期就以 `WINDOW_NOT_WIRED` 大声掉落。**这会改变老存档的加载行为**：
+ * 已存档里订阅这 6 个窗口的 automaton 会开始被拒（它们本来也从未生效，
+ * 区别只是从「静默不跑」变成「明确报错」）。接上求值器时把 key 挪进 LIVE 即可。
+ */
+export const V3_WINDOW_KEYS_RESERVED: ReadonlySet<string> = new Set([
+  'initiative.before',
+  'initiative.after',
+  'turn.close',
   'morale.before',
   'morale.after',
   'settlement.before',
+]);
+
+/** 18 个 ReactionWindow 清单（架构 §五 5.1）= LIVE ∪ RESERVED */
+export const V3_WINDOW_KEYS: ReadonlySet<string> = new Set([
+  ...V3_WINDOW_KEYS_LIVE,
+  ...V3_WINDOW_KEYS_RESERVED,
 ]);
 
 /** 8 大类 EffectIntent kind + Outcome 子类（架构 §六 6.1） */
@@ -417,6 +443,10 @@ export const V3_RULE_KEYS: ReadonlySet<string> = new Set([
 export function validateV3Window(subscribe: unknown): string | null {
   if (typeof subscribe !== 'string' || !V3_WINDOW_KEYS.has(subscribe)) {
     return `subscribe 必须是 18 窗口之一，当前=${JSON.stringify(subscribe)}（架构 §五 5.1）`;
+  }
+  // Q-07：窗口在枚举里、但没有求值器 —— 与其静默入索引再什么都不做，不如当场说清楚
+  if (V3_WINDOW_KEYS_RESERVED.has(subscribe)) {
+    return `窗口 ${subscribe} 尚未接求值器（WINDOW_NOT_WIRED），订阅它的效果永远不会触发；请改订阅 ${[...V3_WINDOW_KEYS_LIVE].join(' / ')} 之一`;
   }
   return null;
 }

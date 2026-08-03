@@ -19,7 +19,7 @@
 import { draw } from '../dice-tape';
 import { checkMorale, getMoraleThreshold } from '../../morale-system';
 import { toParticipant } from './initiative';
-import { evaluateWindow, makeWindowRuntimeCtx } from '../windows';
+import { runWindow, makeWindowRuntimeCtx } from '../windows';
 import { applyIntents } from '../intents';
 import type { CombatCommand, CombatDefinitionBundle, CombatState, DomainEvent } from '../types';
 import { emptyChanges, type PhaseOutcome } from './outcome';
@@ -96,11 +96,10 @@ function applyTurnOpenIntents(out: PhaseOutcome, state: CombatState, unitId: str
     round: state.round,
     window: 'turn.open',
   });
-  const evalResult = evaluateWindow(state.activeEffects, 'turn.open', winCtx);
-  out.events.push(...evalResult.rejections);
+  const openIntents = runWindow(out.events, state.activeEffects, 'turn.open', winCtx);
 
   // 逐批：非 OverrideIntent 的统一忽略（本轮 open 只消费 freezeSlot override）
-  for (const raw of evalResult.intents) {
+  for (const raw of openIntents) {
     const freezeOverrides = raw.intents.filter(
       (i) => i.kind === 'OverrideIntent' && i.ruleKey === 'action.freezeSlot',
     );

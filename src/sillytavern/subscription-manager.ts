@@ -47,11 +47,28 @@ export class SubscriptionManager {
   /** 最大递归深度 */
   private maxRecursionDepth: number;
 
+  /** 触发脚本产出的效果的出口（Q-07）。不设 = 效果被丢弃（旧行为）。 */
+  private effectSink?: SubscriptionCallback;
+
   constructor(
     private eventBus: EventBus,
     maxRecursionDepth = 10,
   ) {
     this.maxRecursionDepth = maxRecursionDepth;
+  }
+
+  /**
+   * 设置效果出口（Q-07 接线）。
+   *
+   * 在此之前 `handleEvent` 执行完脚本就把 `effects` 扔了 —— 注释写着「由调用方
+   * （state-manager）统一 apply」，但从来没有那个调用方，于是订阅脚本里的
+   * modifyHp/modifyStat/status 全部蒸发（和 Q-02 同一个形状的缺陷）。
+   *
+   * 本类**不自己写状态**（ADR-21）：只把效果交出去，由 effect-wiring 汇总、
+   * state-manager 转成 StatePatch 走 commitChatState。
+   */
+  setEffectSink(cb: SubscriptionCallback | undefined): void {
+    this.effectSink = cb;
   }
 
   /** 运行时调整最大递归深度。
@@ -248,15 +265,12 @@ export class SubscriptionManager {
         this.unregisterByHandle(`${baseCtx.owner}:subscription:nested`, unsub);
       }
 
-      // 处理瞬时事件（$event.emit）
-      for (const evt of effects.events) {
-        // 瞬时事件不持久存储，只在此次触发的上下文中处理
-        // 如果脚本内 emit 了事件，其他订阅者会通过 EventBus 自动收到
-      }
+      // 瞬时事件（$event.emit）暂不 re-publish —— 见 setMaxDepth 注释的 M3 说明。
+      // 它们随 effects 一起交给 sink，由上层决定要不要再发一轮。
 
-      // 注意: hpChanges/statChanges/status adds 等即时效果
-      // 由调用方（state-manager）在脚本执行后统一 apply
-      // 持久订阅的脚本执行结果需要在外部处理
+      // Q-07：hpChanges/statChanges/status 等即时效果交给 sink（不设 sink 才丢弃）。
+      // 本类不写状态，写入仍归 state-manager.commitChatState（ADR-21）。
+      this.effectSink?.(effects, event);
     } catch (err) {
       console.error(
         '[SubscriptionManager] 订阅脚本执行失败:',

@@ -10,6 +10,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   getEffectWiring,
+  peekEffectWiring,
+  publishToEffectSystem,
   wireObject,
   unwireObject,
   wireEffectSystem,
@@ -17,7 +19,18 @@ import {
   clearAllEffectWirings,
   ownerKeyOf,
 } from './effect-wiring';
-import type { CharacterState } from './types';
+import type { CharacterState, GameEvent } from './types';
+
+function mockEvent(type: string, data: Record<string, unknown> = {}): GameEvent {
+  return {
+    id: `evt-${type}`,
+    type: type as GameEvent['type'],
+    source: 'system',
+    timestamp: 0,
+    data,
+    processed: false,
+  };
+}
 
 function mockCharacter(overrides: Partial<CharacterState> = {}): CharacterState {
   return {
@@ -135,5 +148,61 @@ describe('effect-wiring（Q-07 战斗外接线）', () => {
     // 拆除后重新 getEffectWiring 得到全新空实例（旧订阅已销毁）
     const fresh = getEffectWiring('s1');
     expect(fresh.subscriptions.totalSubscriptions).toBe(0);
+  });
+
+  // ── Q-07 第二半：emit 源 + 效果回收 ──
+
+  it('publishToEffectSystem 收得回订阅脚本产出的效果（此前被 SubscriptionManager 丢弃）', async () => {
+    const char = mockCharacter();
+    wireObject('s1', char, 'item', '吸血匕首', {
+      init: `$event.on('status_effect', 'onStatus');`,
+      onStatus: `$resource.modifyHp('英雄', 7); $resource.modifyStat('英雄', 'str', 1);`,
+    });
+
+    const effects = await publishToEffectSystem('s1', [
+      mockEvent('status_effect', { target: '英雄' }),
+    ]);
+
+    expect(effects.hpChanges).toEqual([{ charId: '英雄', amount: 7 }]);
+    expect(effects.statChanges).toEqual([{ charId: '英雄', stat: 'str', amount: 1 }]);
+  });
+
+  it('一轮 publish 内多个订阅的效果被合并，而不是互相覆盖', async () => {
+    const a = mockCharacter({ id: 'char-a', name: '甲' });
+    const b = mockCharacter({ id: 'char-b', name: '乙' });
+    wireObject('s1', a, 'item', '甲的护符', {
+      init: `$event.on('status_effect', 'react');`,
+      react: `$resource.modifyHp('甲', 1);`,
+    });
+    wireObject('s1', b, 'item', '乙的护符', {
+      init: `$event.on('status_effect', 'react');`,
+      react: `$resource.modifyHp('乙', 2);`,
+    });
+
+    const effects = await publishToEffectSystem('s1', [mockEvent('status_effect')]);
+    expect(effects.hpChanges).toEqual([
+      { charId: '甲', amount: 1 },
+      { charId: '乙', amount: 2 },
+    ]);
+  });
+
+  it('没接过线的存档：peek 返回 undefined，publish 是零开销空操作', async () => {
+    expect(peekEffectWiring('never-wired')).toBeUndefined();
+    const effects = await publishToEffectSystem('never-wired', [mockEvent('status_effect')]);
+    expect(effects.hpChanges).toEqual([]);
+    // 关键：不因为问了一句就凭空建出 EventBus
+    expect(peekEffectWiring('never-wired')).toBeUndefined();
+  });
+
+  it('拆掉订阅后 publish 不再产出效果', async () => {
+    const char = mockCharacter();
+    const unsub = wireObject('s1', char, 'item', '吸血匕首', {
+      init: `$event.on('status_effect', 'onStatus');`,
+      onStatus: `$resource.modifyHp('英雄', 7);`,
+    });
+    unsub?.();
+
+    const effects = await publishToEffectSystem('s1', [mockEvent('status_effect')]);
+    expect(effects.hpChanges).toEqual([]);
   });
 });

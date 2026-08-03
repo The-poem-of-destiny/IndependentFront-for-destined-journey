@@ -162,11 +162,19 @@ const UPDATE_CHAR_NUMERIC_FIELDS = new Set<string>([
 
 // ========== StateManager ==========
 
+/**
+ * Q-07：一次 commit 里「事件 → 订阅脚本 → 补丁 → 又是事件」这条链的最大轮数。
+ * 3 轮足够表达「装备回血 → 触发满血 buff → 触发第三件装备」这类连锁，再多就是脚本互相触发。
+ */
+const MAX_EVENT_REACTION_DEPTH = 3;
+
 export class StateManager {
   private saveId: string;
   private events: GameEvent[] = [];
   /** Q-07：已装备物品的脚本注销函数缓存（key=ownerKey，卸下时调用） */
   private _itemUnsubs: Map<string, () => void> = new Map();
+  /** Q-07：事件反应轮的当前深度（见 reactToEvents） */
+  private reactionDepth = 0;
 
   constructor(config: StateManagerConfig) {
     this.saveId = config.saveId;
@@ -218,12 +226,14 @@ export class StateManager {
       }
     }
 
+    const newEvents: GameEvent[] = [];
     for (const patch of patches) {
       try {
         const result = await this.applyPatch(patch);
         results.push(result);
         if (result.event) {
           this.events.push(result.event);
+          newEvents.push(result.event);
         }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
@@ -231,6 +241,11 @@ export class StateManager {
         results.push({ patch, success: false, error: errorMsg });
       }
     }
+
+    // Q-07：把本次产生的 GameEvent 发到存档 EventBus，触发已装备物品/技能的 $event.on 订阅，
+    // 并把订阅脚本产出的效果转成补丁再提交一轮。此前这些事件只进 this.events（一个只被读取
+    // 用于展示的数组），从未 publish —— 于是整条 emitChain 层永远空转。
+    await this.reactToEvents(newEvents);
 
     // 更新 SaveSlot 触碰时间（saveSaveSlot 内部刷新 updatedAt）
     // M5 #27: totalTurns 不再随每次 commit 虚高，回合推进统一走 advanceTurn()
@@ -249,6 +264,44 @@ export class StateManager {
       eventsGenerated: [...this.events],
       errors,
     };
+  }
+
+  /**
+   * Q-07：事件 → 效果订阅 → 补丁 的反应轮。
+   *
+   * 反应产生的补丁自己也会产生事件，所以有深度上限：超过就停下并告警，
+   * 而不是让「A 触发 B、B 触发 A」把一次 commit 拖成事件风暴。
+   */
+  private async reactToEvents(events: GameEvent[]): Promise<void> {
+    if (events.length === 0) return;
+
+    const { peekEffectWiring, publishToEffectSystem } = await import('./effect-wiring');
+    // 本存档没接线（没有带 scripts 的装备/技能）→ 零开销返回，不凭空建 EventBus
+    if (!peekEffectWiring(this.saveId)) return;
+
+    if (this.reactionDepth >= MAX_EVENT_REACTION_DEPTH) {
+      console.warn(
+        `[StateManager] 效果反应递归超限 (${MAX_EVENT_REACTION_DEPTH})，本轮 ${events.length} 个事件不再触发订阅`,
+      );
+      return;
+    }
+
+    this.reactionDepth++;
+    try {
+      const effects = await publishToEffectSystem(this.saveId, events);
+      const patches = await convertScriptEffects(this.saveId, effects);
+      if (patches.length > 0) {
+        await this.commitChatState(patches);
+      }
+    } catch (err) {
+      // 效果反应失败不能回滚已提交的正文状态 —— 记录即可
+      console.error(
+        '[StateManager] 效果反应失败:',
+        err instanceof Error ? err.message : String(err),
+      );
+    } finally {
+      this.reactionDepth--;
+    }
   }
 
   /** 获取已生成的事件列表 */

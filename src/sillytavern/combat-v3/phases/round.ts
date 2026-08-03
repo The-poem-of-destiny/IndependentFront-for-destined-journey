@@ -28,7 +28,7 @@ import type {
   PendingChangeSet,
   StatusPatch,
 } from '../types';
-import { evaluateWindow, makeWindowRuntimeCtx } from '../windows';
+import { runWindow, makeWindowRuntimeCtx } from '../windows';
 import { updateIndex } from '../automata/index-active';
 import type { PhaseOutcome } from './outcome';
 import { emptyChanges } from './outcome';
@@ -57,8 +57,9 @@ export function handleRoundOpen(
 
   events.push({ kind: 'RoundOpened', round: state.round });
 
-  // round.open 窗口（M3 接索引，M1 空转）
-  evaluateWindow(
+  // round.open 窗口：intents 尚未接消费（M3 待办），但 rejections 必须进 events —— 见 runWindow
+  runWindow(
+    events,
     state.activeEffects,
     'round.open',
     makeWindowRuntimeCtx(state, { selfId: undefined, round: state.round, window: 'round.open' }),
@@ -85,8 +86,9 @@ export function handleRoundClose(bundle: CombatDefinitionBundle, state: CombatSt
   };
   const events: DomainEvent[] = [];
 
-  // round.close 窗口（M3 接索引，M1 空转）
-  evaluateWindow(
+  // round.close 窗口：同 round.open —— intents 待接，rejections 不再丢
+  runWindow(
+    events,
     state.activeEffects,
     'round.close',
     makeWindowRuntimeCtx(state, { selfId: undefined, round: state.round, window: 'round.close' }),

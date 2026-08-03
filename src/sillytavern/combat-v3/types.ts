@@ -1762,6 +1762,8 @@ export interface CompileError {
 /** 编译期剔除子码（plan §5.5 校验 #1..#8 的剔除项） */
 export type RejectSubCode =
   | 'WINDOW_NOT_FOUND'
+  /** Q-07：窗口在 18 枚举里、但 phases 里没有求值器 —— 订阅它等于什么都不做 */
+  | 'WINDOW_NOT_WIRED'
   | 'TRIGGER_SYNTAX'
   | 'INTENT_KIND_ILLEGAL'
   | 'RULEKEY_ILLEGAL'

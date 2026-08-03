@@ -20,7 +20,7 @@
  */
 
 import { draw } from '../dice-tape';
-import { evaluateWindow, makeWindowRuntimeCtx } from '../windows';
+import { runWindow, makeWindowRuntimeCtx } from '../windows';
 import { validateBatch, applyIntents } from '../intents';
 import type {
   CombatCommand,
@@ -57,7 +57,9 @@ export function handleAction(
     nextPhase: 'SlotConsume',
   };
 
-  const evalResult = evaluateWindow(
+  // 错误隔离：单 automaton 抛错不打断动作（rejections 由 runWindow 记进 out.events）
+  const declaredIntents = runWindow(
+    out.events,
     state.activeEffects,
     'action.declared',
     makeWindowRuntimeCtx(state, {
@@ -67,11 +69,8 @@ export function handleAction(
     }),
   );
 
-  // 错误隔离：单 automaton 抛错不打断动作（rejections 记录）
-  out.events.push(...evalResult.rejections);
-
   // 收集 spawn 意图 + 已验证的非 spawn 费用意图（A3-7 / A35-1）
-  const { spawns, nonSpawn } = collectSpawnAndFees(evalResult.intents);
+  const { spawns, nonSpawn } = collectSpawnAndFees(declaredIntents);
 
   if (spawns.length > 0) {
     return handleSpawnIntents(out, state, bundle, command, spawns, nonSpawn);
