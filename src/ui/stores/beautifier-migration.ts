@@ -1,13 +1,12 @@
 /**
  * 美化规则 localStorage → Dexie 一次性迁移（Phase 0b）
  *
- * 与世界书迁移（worldbook-migration.ts）**同一套六步机制**，那套已通过独立审查：
- *   1. 显式标志位 `settings.beautifierRulesMigratedAt` 判定，不看「表里有没有行」
- *   2. 单个 `db.transaction` 内 `bulkPut`，写入全有或全无
- *   3. 销毁前回读校验：规则数量 + 逐条 id/pattern 一致
- *   4. 校验通过**才**删 localStorage 副本、置标志位（顺序不可颠倒）
- *   5. 任何一步失败：localStorage 原封不动、标志位不置，下次启动重试
- *   6. id 碰撞先唯一化再写，避免 bulkPut 静默合并成一条
+ * **六步流程本身在 `legacy-dexie-migration.ts`**（Q-08：本文件与 worldbook-migration
+ * 曾各存一份逐字相同的实现）。本文件只留美化规则特有的东西：
+ *   - 第 0 步 `dropPresetCache`：无条件丢弃派生缓存（骨架的 `preStep`）
+ *   - `toRow`：深拷贝 + 丢掉运行时字段 `locked`
+ *   - `verifyRow`：逐条比 `pattern`/`replacement`
+ *   - `pruneLegacyBuiltinOverrides`：与迁移无关的一次性语义修正，见下
  *
  * 三个字段分别处置（刻意不一刀切）：
  *
@@ -21,6 +20,7 @@
  */
 import { getDatabase } from '@engine/database';
 import type { BeautifierRule } from '@engine/types';
+import { runLegacyMigration, type IdRename } from './legacy-dexie-migration';
 
 /** `AppDatabase` 类本身未导出，用返回类型取到它 */
 type AppDatabase = ReturnType<typeof getDatabase>;
@@ -79,13 +79,8 @@ export interface BeautifierMigrationDeps {
   db?: AppDatabase;
 }
 
-/** id 碰撞化解记录（语义同 worldbook 侧的 `WorldBookIdRename`） */
-export interface BeautifierRuleIdRename {
-  from: string;
-  to: string;
-  name: string;
-  sourceIndex: number;
-}
+/** id 碰撞化解记录 —— 语义与结构见 `legacy-dexie-migration` 的 `IdRename` */
+export type BeautifierRuleIdRename = IdRename;
 
 export type BeautifierMigrationOutcome =
   /** 标志位已置位，规则表没动（预设缓存仍会被顺手清掉，见 presetCacheDropped） */
@@ -105,73 +100,15 @@ export type BeautifierMigrationOutcome =
       presetCacheDropped: boolean;
     };
 
-function readSource(settings: Record<string, unknown>): BeautifierRule[] {
-  const raw = settings[LEGACY_RULES_KEY];
-  return Array.isArray(raw) ? (raw as BeautifierRule[]) : [];
-}
-
-/**
- * 深拷贝 —— 源数组来自 Vue 响应式 ref，直接塞给 Dexie 会连 Proxy 一起走 structured clone
- * （抛 DataCloneError）。同时切断与源的引用，保证第 3 步比的是真回读出来的字节。
- *
- * 顺带丢掉 `locked`：它在 `BeautifierRule` 上就注明是「运行时计算，不持久化」，
- * 由 mergeRules/resolveAutoEnable 每次现算。存进库就成了会过期的第二真相来源。
- */
-function toRows(source: BeautifierRule[]): BeautifierRule[] {
-  return source.map((rule) => {
-    const copy = JSON.parse(JSON.stringify(rule)) as BeautifierRule;
-    delete copy.locked;
-    return copy;
-  });
-}
-
-/**
- * id 唯一化 —— 保内容优先，与世界书迁移同一处置。
- *
- * 美化规则的 id 同样可以撞：设置页导入规则文件走的是「同 id 覆盖、否则追加」，
- * 而 `saveRule` 新建时的 id 由调用方给。两条同 id 进 `bulkPut` 只会落一行，
- * 若回读校验按下标比对又会被「同一行返回两次」骗过 → 静默丢规则。
- *
- * 首条保留原 id（可能已被 `beautifierBuiltinDisabled` 按 id 引用），
- * 后续赋确定性新 id `${id}__dup2` / `__dup3` …，递增到不与任何已占用 id 冲突。
- */
-function dedupeIds(rows: BeautifierRule[]): {
-  rows: BeautifierRule[];
-  renames: BeautifierRuleIdRename[];
-} {
-  const taken = new Set<string>(rows.map((r) => r.id));
-  const seen = new Set<string>();
-  const renames: BeautifierRuleIdRename[] = [];
-
-  const out = rows.map((rule, sourceIndex) => {
-    if (!seen.has(rule.id)) {
-      seen.add(rule.id);
-      return rule;
-    }
-    let n = 2;
-    let candidate = `${rule.id}__dup${n}`;
-    while (taken.has(candidate) || seen.has(candidate)) {
-      n += 1;
-      candidate = `${rule.id}__dup${n}`;
-    }
-    taken.add(candidate);
-    seen.add(candidate);
-    renames.push({ from: rule.id, to: candidate, name: rule.name, sourceIndex });
-    return { ...rule, id: candidate };
-  });
-
-  return { rows: out, renames };
-}
-
 /**
  * 丢弃预设规则派生缓存。
  *
- * 🔴 刻意**不受迁移标志位与成败的约束**，无条件执行：它是 `loadPresetRules()` 从
- *    data/defaults/beautifier-rules.json 现算的派生数据，删掉零数据损失、下次启动重算。
- *    把这 ~378 KB 的净收益绑给「用户规则迁移是否成功」没有道理 ——
- *    真源数据（用户规则）该谨慎，派生缓存不该。
+ * 🔴 刻意**不受迁移标志位与成败的约束**，无条件执行（走骨架的第 0 步 `preStep`）：
+ *    它是 `loadPresetRules()` 从 data/defaults/beautifier-rules.json 现算的派生数据，
+ *    删掉零数据损失、下次启动重算。把这 ~378 KB 的净收益绑给「用户规则迁移是否成功」
+ *    没有道理 —— 真源数据（用户规则）该谨慎，派生缓存不该。
  *
- * @returns 是否真的删掉了东西（用于决定要不要落盘）
+ * @returns 是否真的删掉了东西（骨架据此决定要不要在失败分支上补落盘）
  */
 function dropPresetCache(settings: Record<string, unknown>): boolean {
   if (!(LEGACY_PRESET_CACHE_KEY in settings)) return false;
@@ -185,107 +122,49 @@ function dropPresetCache(settings: Record<string, unknown>): boolean {
 export async function migrateBeautifierRulesToDexie(
   deps: BeautifierMigrationDeps,
 ): Promise<BeautifierMigrationOutcome> {
-  const { settings, persistSettings } = deps;
-
-  // ── 第 0 步：无条件丢弃派生缓存（与下面的迁移互不影响）──
-  const presetCacheDropped = dropPresetCache(settings);
-
-  // ── 第 1 步：显式标志位判定 ──────────────────────────────
-  if (settings[RULES_MIGRATED_FLAG_KEY]) {
-    if (presetCacheDropped) persistSettings();
-    return { status: 'already-migrated', presetCacheDropped };
-  }
-
   let db: AppDatabase;
-  let rows: BeautifierRule[];
-  let renames: BeautifierRuleIdRename[];
   try {
     db = deps.db ?? getDatabase();
-    // 唯一化必须在写库**之前**：同 id 进 bulkPut 就已经只剩一行，事后救不回来。
-    const deduped = dedupeIds(toRows(readSource(settings)));
-    rows = deduped.rows;
-    renames = deduped.renames;
   } catch (err) {
-    if (presetCacheDropped) persistSettings();
-    return { status: 'failed', stage: 'read', message: String(err), presetCacheDropped };
+    // getDatabase() 自己炸了：第 0 步还没跑，预设缓存自然没动
+    return { status: 'failed', stage: 'read', message: String(err), presetCacheDropped: false };
   }
 
-  // ── 第 2 步：单事务 bulkPut，全有或全无 ──────────────────
-  // 空数组（全新用户 / 从没自定义过规则）走同一条路径。
-  // 刻意**不 clear 表**：只搬源里有的行，绝不销毁 Dexie 里已有的内容
-  // （上一轮失败后重试、或 resetAll 清掉标志位后的重跑）。
-  try {
-    await db.transaction('rw', db.beautifierRules, async () => {
-      if (rows.length > 0) await db.beautifierRules.bulkPut(rows);
-    });
-  } catch (err) {
-    if (presetCacheDropped) persistSettings();
-    return { status: 'failed', stage: 'write', message: String(err), presetCacheDropped };
+  const out = await runLegacyMigration<BeautifierRule>({
+    flagKey: RULES_MIGRATED_FLAG_KEY,
+    legacyKey: LEGACY_RULES_KEY,
+    table: db.beautifierRules,
+    db,
+    settings: deps.settings,
+    persistSettings: deps.persistSettings,
+    unit: '条规则',
+    nameOf: (rule) => rule.name,
+    preStep: () => dropPresetCache(deps.settings),
+    // 深拷贝（理由见骨架的 `toRow` 文档）+ 丢掉 `locked`：它在 `BeautifierRule` 上
+    // 就注明是「运行时计算，不持久化」，由 mergeRules/resolveAutoEnable 每次现算。
+    // 存进库就成了会过期的第二真相来源。
+    toRow: (rule) => {
+      const copy = JSON.parse(JSON.stringify(rule)) as BeautifierRule;
+      delete copy.locked;
+      return copy;
+    },
+    // 美化规则的校验强度：pattern/replacement 是规则的全部价值所在，逐条比对而不是只数个数
+    // （**别降级**，不留 localStorage 回滚副本就靠它兜着）
+    verifyRow: (expected, actual) =>
+      actual.pattern === expected.pattern && actual.replacement === expected.replacement
+        ? null
+        : `规则「${expected.name}」正文不符`,
+  });
+
+  const presetCacheDropped = out.preStepChanged;
+  if (out.status === 'already-migrated') return { status: 'already-migrated', presetCacheDropped };
+  if (out.status === 'failed') {
+    return { status: 'failed', stage: out.stage, message: out.message, presetCacheDropped };
   }
-
-  // ── 第 3 步：销毁前回读校验 ──────────────────────────────
-  try {
-    const ids = rows.map((r) => r.id);
-    // 不变式守卫：dedupeIds 之后 id 必然唯一。若这里还能撞，说明唯一化坏了 ——
-    // 此时按下标比对会被「同一行返回两次」骗过去，宁可判失败也不能往下走。
-    const uniqueIds = new Set(ids);
-    if (uniqueIds.size !== ids.length) {
-      return {
-        status: 'failed',
-        stage: 'verify',
-        message: `id 唯一化失效: ${ids.length} 条规则只有 ${uniqueIds.size} 个不同 id`,
-        presetCacheDropped,
-      };
-    }
-    const readBack = await db.beautifierRules.bulkGet(ids);
-    if (readBack.length !== rows.length) {
-      return {
-        status: 'failed',
-        stage: 'verify',
-        message: `回读规则数量不符: 期望 ${rows.length}，实际 ${readBack.length}`,
-        presetCacheDropped,
-      };
-    }
-    for (let i = 0; i < rows.length; i++) {
-      const expected = rows[i];
-      const actual = readBack[i];
-      if (!actual) {
-        return {
-          status: 'failed',
-          stage: 'verify',
-          message: `回读缺规则: ${expected.id}`,
-          presetCacheDropped,
-        };
-      }
-      if (actual.id !== expected.id) {
-        return {
-          status: 'failed',
-          stage: 'verify',
-          message: `回读规则 id 不符: 期望 ${expected.id}，实际 ${actual.id}`,
-          presetCacheDropped,
-        };
-      }
-      // pattern/replacement 是规则的全部价值所在，逐条比对而不是只数个数
-      if (actual.pattern !== expected.pattern || actual.replacement !== expected.replacement) {
-        return {
-          status: 'failed',
-          stage: 'verify',
-          message: `规则「${expected.name}」正文不符`,
-          presetCacheDropped,
-        };
-      }
-    }
-  } catch (err) {
-    if (presetCacheDropped) persistSettings();
-    return { status: 'failed', stage: 'verify', message: String(err), presetCacheDropped };
-  }
-
-  // ── 第 4 步：校验通过才销毁源 + 置标志位（顺序不可颠倒）──
-  // 从 settings 对象上删键，而不是只改 localStorage 字符串 —— settings-store 的
-  // deep watch 会把整个对象重新序列化写回去，只改字符串下一拍就被覆盖。
-  delete settings[LEGACY_RULES_KEY];
-  settings[RULES_MIGRATED_FLAG_KEY] = Date.now();
-  persistSettings();
-
-  return { status: 'migrated', ruleCount: rows.length, renames, presetCacheDropped };
+  return {
+    status: 'migrated',
+    ruleCount: out.rows.length,
+    renames: out.renames,
+    presetCacheDropped,
+  };
 }

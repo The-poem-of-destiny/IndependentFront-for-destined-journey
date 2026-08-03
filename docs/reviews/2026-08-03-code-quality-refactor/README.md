@@ -45,17 +45,17 @@
 
 ### 按路线图步骤
 
-| 步骤                                      | 包含                   | 状态 | 备注                                                                                  |
-| ----------------------------------------- | ---------------------- | ---- | ------------------------------------------------------------------------------------- |
-| [步骤 1](roadmap.md) 清尸体 + 补工具链网  | Q-04、Q-15             | ✅   | 四批僵尸清完 + 补网与清仓两个 PR 都落地                                               |
-| [步骤 2](roadmap.md) 修静默出错的生产路径 | Q-01、Q-02             | ✅   | 两条全部兑现（`a0c3d5d`），骰子那条建议仍需真机打一场复核                             |
-| [步骤 3](roadmap.md) 三处去留裁定         | Q-07、Q-03、Q-30       | ✅   | 三条裁定均已拍板并落地（Q-07 含 emit 源 + 效果回收 + 战斗内 12/18 显式化）            |
-| [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | ✅   | 四条全部落地                                                                          |
-| [步骤 5](roadmap.md) 数据路径去重         | Q-08、Q-16、Q-12       | ⬜   | 抽查：三份 `*-migration.ts` 与 `variables.ts` / `vars-merger.ts` 两个僵尸宿主原样在库 |
-| [步骤 6](roadmap.md) 品质体系与设置真源   | Q-11、Q-18、Q-06       | ⬜   | 抽查：`ScenePanel.vue:134` 的 `TIER_COLOR` 仍是 6 元、仍漏「唯一」，T7 仍描成灰       |
-| [步骤 7](roadmap.md) EJS 能力面 + Legacy  | Q-09、Q-10、Q-27       | ⬜   | 抽查：`ejs-backend.ts` 仍在；退役仍卡在真机走查这一前置                               |
-| [步骤 8](roadmap.md) 巨石拆分第一刀       | Q-23、Q-19             | ⬜   | 硬前置未清：步骤 1 的删尸体与步骤 3 的效果层都还没收尾                                |
-| [后续批次](roadmap.md#后续批次不进前八步) | 其余 9 条              | ⬜   | —                                                                                     |
+| 步骤                                      | 包含                   | 状态 | 备注                                                                            |
+| ----------------------------------------- | ---------------------- | ---- | ------------------------------------------------------------------------------- |
+| [步骤 1](roadmap.md) 清尸体 + 补工具链网  | Q-04、Q-15             | ✅   | 四批僵尸清完 + 补网与清仓两个 PR 都落地                                         |
+| [步骤 2](roadmap.md) 修静默出错的生产路径 | Q-01、Q-02             | ✅   | 两条全部兑现（`a0c3d5d`），骰子那条建议仍需真机打一场复核                       |
+| [步骤 3](roadmap.md) 三处去留裁定         | Q-07、Q-03、Q-30       | ✅   | 三条裁定均已拍板并落地（Q-07 含 emit 源 + 效果回收 + 战斗内 12/18 显式化）      |
+| [步骤 4](roadmap.md) AI 输出编解码收口    | Q-05、Q-13、Q-14、Q-17 | ✅   | 四条全部落地                                                                    |
+| [步骤 5](roadmap.md) 数据路径去重         | Q-08、Q-16、Q-12       | 🔄   | Q-08 完成（api-key 那份按裁定留在外面）；Q-16 / Q-12 未开始                     |
+| [步骤 6](roadmap.md) 品质体系与设置真源   | Q-11、Q-18、Q-06       | ⬜   | 抽查：`ScenePanel.vue:134` 的 `TIER_COLOR` 仍是 6 元、仍漏「唯一」，T7 仍描成灰 |
+| [步骤 7](roadmap.md) EJS 能力面 + Legacy  | Q-09、Q-10、Q-27       | ⬜   | 抽查：`ejs-backend.ts` 仍在；退役仍卡在真机走查这一前置                         |
+| [步骤 8](roadmap.md) 巨石拆分第一刀       | Q-23、Q-19             | ⬜   | 硬前置未清：步骤 1 的删尸体与步骤 3 的效果层都还没收尾                          |
+| [后续批次](roadmap.md#后续批次不进前八步) | 其余 9 条              | ⬜   | —                                                                               |
 
 ### 已落地的提交
 
@@ -74,7 +74,8 @@
 | `c4d01c2` | Q-04 ✅                  | 第四批：删 `variableContext`/`variableInstruction` 闭包与 `buildFallbackMessages`，`DEFAULT_TEMPLATES` 补齐三个退役 Agent；顺带删净 `MatchedEntry`/`lorebookMatches`/`targetCharacterId` 与 `buildZoneSection`    |
 | `a4365c5` | Q-17 ✅                  | `buildRequestBody(request, stream)` + `postCompletions(body, signal)` 收口流式/非流式两份逐字相同的装配；`stream` 是真形参（`stream_options` 只能在流式出现）；超时倍率提为具名常量                               |
 | `8135359` | Q-05 ✅                  | `marker-protocol` 走表化：8 份相同扫描骨架 → `MARKER_SPECS` + `scanByTag`；`MARKER_TAGS` 与 `scanMarkers` 的合并都由表推导，消掉「两份手抄清单」这条漏扫线；补 2 条数据驱动防分叉闸门                             |
-| _本次_    | Q-14 ✅                  | 三层失败回执各自收口：编排层解析/结构/落库/时间推进四条日志分家（落库抛异常终于会上浮 `onStateCommitError`）；新建 `store-result.ts` 判别式回执，删掉 UI 反查 store 猜原因；工具层失败一律 throw + `ToolResult`   |
+| `ba1dba0` | Q-14 ✅                  | 三层失败回执各自收口：编排层解析/结构/落库/时间推进四条日志分家（落库抛异常终于会上浮 `onStateCommitError`）；新建 `store-result.ts` 判别式回执，删掉 UI 反查 store 猜原因；工具层失败一律 throw + `ToolResult`   |
+| _本次_    | Q-08 ✅                  | 六步迁移收敛成 `legacy-dexie-migration.ts` 一份（-348 行）；`preStep` 承 beautifier 的第 0 步旁路；两份 `verifyRow` 各自保留强度不降级；api-key 那份刻意留在外面。39 条现有 adapter 测试未改一行 + 15 条骨架测试  |
 
 ## 结论摘要
 
@@ -159,7 +160,7 @@
 | [Q-05](findings-t2-ai-boundary.md#q-05)   | 高     | T2   | AI 输出解析没有共享缝：15+ 份拷贝，同名 `extractTag` 语义相反，effect 正则已漂出数据丢失 | 步骤 4   | ✅   |
 | [Q-06](findings-t3-single-source.md#q-06) | 中     | T3   | 设置有两个真源，只有两个字段被手写桥搬运，引擎侧读到的是永远停在默认值的影子配置         | 步骤 6   | ⬜   |
 | [Q-07](findings-t1-wiring-gap.md#q-07)    | 高     | T1   | 两层效果系统都是空的：13 个「封闭枚举」窗口惰性，emitChain 事件层从未被实例化            | 步骤 3   | ✅   |
-| [Q-08](findings-t3-single-source.md#q-08) | 中     | T3   | 「六步迁移」复制了三遍且已漂移——唯一「搞砸即用户数据不可恢复」的路径是复制粘贴           | 步骤 5   | ⬜   |
+| [Q-08](findings-t3-single-source.md#q-08) | 中     | T3   | 「六步迁移」复制了三遍且已漂移——唯一「搞砸即用户数据不可恢复」的路径是复制粘贴           | 步骤 5   | ✅   |
 | [Q-09](findings-t3-single-source.md#q-09) | 高     | T3   | EJS 能力面契约被记在 6 处，已发生 8 次静默渲染漂移，`engine.has` 已经在说谎              | 步骤 7   | ⬜   |
 | [Q-10](findings-t4-corpses.md#q-10)       | 中     | T4   | Legacy EJS 后端的两处遗产：缓存只服务停用路径（生产零缓存）、同步渲染路径恒被闸门关死    | 步骤 7   | ⬜   |
 | [Q-11](findings-t3-single-source.md#q-11) | 中     | T3   | 7 级品质有 4 套类型与 5 份颜色表；`ScenePanel` 漏「唯一」项，T7 角色一律描成灰色         | 步骤 6   | ⬜   |
