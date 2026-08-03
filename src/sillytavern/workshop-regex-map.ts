@@ -150,11 +150,11 @@ function noteKnownConsequences(name: string, replacement: string, notes: Worksho
     );
   }
 
-  if (/\b(?:localStorage|sessionStorage|indexedDB)\b/.test(replacement)) {
+  if (/\b(?:sessionStorage|indexedDB)\b/.test(replacement)) {
     notes.push(
       workshopNote(
         'degraded',
-        `「${name}」使用浏览器存储：localStorage/sessionStorage 仅在当前隔离框内临时有效，IndexedDB 不可用`,
+        `「${name}」使用受限浏览器存储：sessionStorage 仅在当前隔离框内临时有效，IndexedDB 不可用`,
       ),
     );
   }

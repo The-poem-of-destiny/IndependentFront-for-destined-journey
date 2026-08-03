@@ -114,7 +114,9 @@ function handleSave() {
           style="font-family: monospace; font-size: 0.8rem"
         />
         <p class="form-hint">
-          支持 $1, $2... 捕获组；HTML、CSS、脚本与远程资源在仅临时存储的隔离框中运行。联网内容可发送框内正文，但无法访问应用数据。
+          支持 $1, $2...
+          捕获组；HTML、CSS、脚本与远程资源在隔离框中运行。所有正则共享专用持久存储并可联网，可发送框内正文与该命名空间数据，但无法访问应用数据或
+          API Key。
         </p>
       </label>
 

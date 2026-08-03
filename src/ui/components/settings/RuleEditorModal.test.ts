@@ -2,11 +2,19 @@
  * Rule preview iframe-boundary regression tests.
  * @vitest-environment jsdom
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import type { BeautifierRule } from '@engine/types';
 import RuleEditorModal from './RuleEditorModal.vue';
+
+vi.mock('../../lib/beautifier-storage', () => ({
+  openBeautifierStorageSession: async () => ({
+    snapshot: () => [],
+    commit: async () => undefined,
+    close: () => undefined,
+  }),
+}));
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -31,6 +39,7 @@ describe('RuleEditorModal', () => {
         '<span style="position:fixed">$1</span><script>globalThis.__scriptProbe = 1</script>',
     );
     await inputs[2].setValue('preview text');
+    await flushPromises();
 
     const preview = document.body.querySelector('.preview-box');
     const frame = preview?.querySelector('iframe');

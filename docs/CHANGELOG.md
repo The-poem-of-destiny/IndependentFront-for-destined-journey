@@ -15,11 +15,12 @@
 - **SSE 结算**：支持 CRLF、多 `data:` 字段、`[DONE]`、尾部 usage 与 EOF；完成/错误只结算一次。`finish_reason` 后有 1 秒尾包窗口，异常常开连接会主动收口，不再无限挂起。
 - **正文唯一投影**：新增 `story-output.ts`，流式预览与最终入库共用 `<maintext>` / `<option(s)>` / 控制区块解析；开标签前的内容先缓冲，投影后无可见正文则整轮失败；当前玩家输入只进 `userInput`，不再同时重复进历史区。
 - **Agent 工具寻址**：角色名优先、旧 UUID 兼容；制作补丁统一使用角色逻辑名；物品筛选复用字段枚举别名，未知类型显式失败。
-- **美化兼容边界**：撤销 DOM 消毒方案。正文编译为转义文本与原样富匹配片段；同一条已提交消息的全部片段进入一个无 same-origin、`credentialless`、`no-referrer` 的 `allow-scripts` iframe，使跨命中脚本与 inline replacement 共享原有 message DOM。外部 HTTP(S) 资源与原生网络 API 放行；form、popup、download、top navigation、嵌套 frame、parent DOM 与应用存储仍隔离，应用 `/api` 拒绝 `Origin: null`。规则 replacement、捕获组、HTML/CSS/script、事件属性、SVG/控件及完整文档保持原样；流式阶段不执行脚本，提交后才创建 frame。向远程/本地网络请求以及外传正文/frame-local 数据是明确接受的兼容代价。
+- **美化兼容边界**：撤销 DOM 消毒方案。正文编译为转义文本与原样富匹配片段；同一条已提交消息的全部片段进入一个无 same-origin、`credentialless`、`no-referrer` 的 `allow-scripts` iframe，使跨命中脚本与 inline replacement 共享原有 message DOM。外部 HTTP(S) 资源与原生网络 API 放行；form、popup、download、top navigation、嵌套 frame、parent DOM 与应用存储仍隔离，应用 `/api` 拒绝 `Origin: null`。规则 replacement、捕获组、HTML/CSS/script、事件属性、SVG/控件及完整文档保持原样；流式阶段不执行脚本，提交后才创建 frame。向远程/本地网络请求以及外传正文/regex-namespace 数据是明确接受的兼容代价。
+- **正则专用持久存储**：Dexie v16 新增 `regexStorage`，整张表就是所有正则、信任级别与规则预览共享的唯一不可信命名空间；工坊更新/卸载不清理，并纳入 `FullBackup`（pre-v16 缺字段时保留现表）。宿主在 authored `<head>` script 执行前完成 hydration，iframe 以同步 `localStorage` 镜像及 `window.regexStorage` 别名读写，mutation 异步落库并向其它 frame 广播；`sessionStorage` 仍是 frame-ephemeral，IndexedDB、应用 storage/Dexie 与 API Key 不开放。配额为每命名空间 5 MiB、1024 keys、单 key 4096 UTF-8 bytes。
 - **工坊正则元数据**：只把包含 AI-output `placement=2` 的规则接入 assistant 正文，避免 user-only 规则误投；`minDepth`/`maxDepth` 以最新 user/assistant 消息为 0、忽略 system event、含边界执行。公共语料里 `runOnEdit` 当前不可达，非零 `substituteRegex` 均因 findRegex 无宏而惰性。
 - **API Key 迁移**：API Key 从 `fated-poem-settings` localStorage 快照迁入 Dexie `apiEndpoints`；事务写入并回读验证成功后才清理旧 key，任一阶段失败则保留唯一可恢复副本并在设置页提示。API CRUD 改为 Dexie-first。
-- **全量工坊语料**：新增可复现抓取/分析脚本；2026-08-02 匿名公共快照覆盖 303/303 项目详情、303/303 payload 响应与 99 条正则（0 编译失败，最高 `$39`）。本地 41.6 MB 语料位于 gitignored `reference/workshop-reference/`；60 条外部资源规则已按联网契约放行，16 条父页面耦合与 14 条宿主 API 耦合仍明确报告降级；历史项目里已持久化的旧「禁止联网」提示会被过滤。
-- **验证**：全量 Vitest 205 文件、5789 通过 / 3 跳过；`tsc --noEmit`、`vue-tsc --noEmit`、Vite production build 与浏览器真机 iframe 探针通过。
+- **全量工坊语料**：新增可复现抓取/分析脚本；2026-08-02 匿名公共快照覆盖 303/303 项目详情、303/303 payload 响应与 99 条正则（0 编译失败，最高 `$39`）。本地 41.6 MB 语料位于 gitignored `reference/workshop-reference/`；60 条外部资源规则已按联网契约放行，16 条父页面耦合与 14 条宿主 API 耦合仍明确报告降级；历史项目里已持久化的旧「禁止联网」提示会被过滤。storage 报表的 8 条是词法命中；逐条审查确认 5 个项目共 6 条 active、另 2 条只在注释中出现，active 全部仅调用 `localStorage.getItem`/`setItem`/`removeItem`，现由共享持久镜像覆盖。
+- **验证**：全量 Vitest 207 文件、5805 通过 / 3 跳过；`tsc --noEmit`、`vue-tsc --noEmit`、Vite production build 与浏览器真机 iframe 探针通过。真机覆盖 pre-head hydration、同 frame 不重载、跨 frame 广播、页面重载持久、sessionStorage 重载清空，以及 parent DOM / IndexedDB / 应用 API 继续不可达。
 
 ### 真机 debug 修复轮 · 开局链路（美化/item_gen 批量/词条落库/userId 缓存）｜ ✅ 完成（2026-08-02）
 

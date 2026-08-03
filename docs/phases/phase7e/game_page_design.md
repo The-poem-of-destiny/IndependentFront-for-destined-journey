@@ -633,9 +633,12 @@ AI 生成回合完成
   同一条已提交消息的全部命中与转义原文共同进入一个无 same-origin 的 `sandbox="allow-scripts"` iframe，
   保留跨命中查询和 inline 流式布局。frame 使用 `credentialless` + `no-referrer`，外部 HTTP(S) 资源与
   原生网络 API 放行；form、popup、download、top navigation 与嵌套 frame 仍由 sandbox/CSP 阻断。
-- frame 不能读 parent DOM、Dexie、应用 storage 或 API Key；localStorage/sessionStorage 是该 frame 的临时内存实现，
-  应用自有 `/api` 拒绝 `Origin: null`。规则向远程/本地网络发请求，或外传它可见的正文与 frame-local 数据，
-  是为兼容现有工坊内容而明确接受的暴露。
+- frame 不能读 parent DOM、IndexedDB、应用 Dexie/storage 或 API Key；应用自有 `/api` 拒绝 `Origin: null`。
+  正则唯一持久能力是 Dexie v16 `regexStorage` 代表的共享不可信命名空间：所有正则、信任级别与预览共用，
+  authored `<head>` script 前完成 hydration，iframe 通过同步 `localStorage` 镜像和 `window.regexStorage` 别名读写，
+  mutation 异步落库并跨 frame 广播。`sessionStorage` 仍只活在当前 frame。
+- regex namespace 限 5 MiB / 1024 keys / 单 key 4096 UTF-8 bytes，进入 `FullBackup`，工坊更新/卸载不清理。
+  规则向远程/本地网络发请求，或外传它可见的正文与 regex-namespace 数据，是为兼容现有工坊内容而明确接受的暴露。
 - 流式正文始终按原生文本预览，提交后才创建富文本 frame，避免每个 token 重跑脚本；已完成正文、
   战斗正文和规则预览共用同一 renderer。完整 HTML 文档与外层 Markdown HTML 围栏由 frame 装配器归一化。
 

@@ -324,13 +324,14 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 战斗 v3   | 代码内核主持流程（Kernel+DiceTape+EffectIntent+DSL）     | ✅ M5完成 全量合入  |
 | 工坊 P0   | 世界书迁出 localStorage → Dexie v14（+ 进 FullBackup）   | ✅                  |
 | 工坊 P0b  | 美化规则迁出 localStorage → Dexie v15                    | ✅                  |
+| 工坊存储  | 正则共享隔离 KV → Dexie v16 `regexStorage`（+ FullBackup） | ✅                  |
 | 工坊 P1   | 创意工坊（浏览/安装/更新/卸载/启用，= 7f）               | 🔒 入口临时下线     |
 | 工坊 P2   | EJS 沙盒 + 只读 stats 投影（ADR-30）                     | ✅ 待真机           |
 | 工坊 P3   | 社交面（Discord 登录/点赞/订阅，D18-D25）                | ✅ 真机已过         |
 | 工坊 P4   | 上游对齐（封面链/类型徽章/我的项目/更新 diff/投稿/审核） | ✅ B4 真机已过      |
 | 真机迭代  | debug loop 持续修复                                      | 🔄                  |
 
-> 🔒 **工坊入口仍临时下线（2026-08-01 安全审计）**：首页「创意工坊」按钮由 `HomePage.vue` 的 `WORKSHOP_ENTRY_ENABLED = false` 隐藏。SEC-02 已由 QuickJS 隔离后端收口；SEC-01 不再用 DOM 白名单牺牲兼容，而是把每条已提交 assistant 正文的全部富正则命中放进同一个无 same-origin 的 `sandbox="allow-scripts"` iframe，并使用 `credentialless` + `no-referrer`。外部 HTTP(S) 资源与原生网络 API 为兼容性刻意放行；form、popup、download、top navigation、嵌套 frame、parent DOM、Dexie、应用 storage 与 API Key 仍不可达，应用自有 `/api` 也拒绝 `Origin: null`。规则可向远程或本地网络发请求，也可外传它能看到的正文与 frame-local 数据，这是当前威胁模型明确接受的暴露。2026-08-02 公共工坊快照为 303 项目 / 99 条正则（0 编译失败）：60 条外部资源规则不再降级，16 条 parent 耦合与 14 条宿主 API 耦合仍受限；已持久化的旧「禁止联网」提示会被过滤。脚本仍无 CPU 预算，因此入口继续关闭；已装规则仍按存档启用状态运行。详见 `docs/reviews/2026-08-01-repository-review.md` 与 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
+> 🔒 **工坊入口仍临时下线（2026-08-01 安全审计）**：首页「创意工坊」按钮由 `HomePage.vue` 的 `WORKSHOP_ENTRY_ENABLED = false` 隐藏。SEC-02 已由 QuickJS 隔离后端收口；SEC-01 不再用 DOM 白名单牺牲兼容，而是把每条已提交 assistant 正文的全部富正则命中放进同一个无 same-origin 的 `sandbox="allow-scripts"` iframe，并使用 `credentialless` + `no-referrer`。外部 HTTP(S) 资源与原生网络 API 为兼容性刻意放行；form、popup、download、top navigation、嵌套 frame、parent DOM、应用 Dexie/storage 与 API Key 仍不可达，应用自有 `/api` 也拒绝 `Origin: null`。正则唯一持久权限是 Dexie v16 `regexStorage`：所有正则、信任级别与预览共享同一个不可信命名空间，iframe 内以同步 `localStorage` 镜像和 `window.regexStorage` 别名使用，跨 frame 持久化/广播；`sessionStorage` 仍只活在当前 frame，IndexedDB 不开放。规则可向远程或本地网络发请求，也可外传它能看到的正文与 regex-namespace 数据，这是当前威胁模型明确接受的暴露。2026-08-02 公共工坊快照为 303 项目 / 99 条正则（0 编译失败）：60 条外部资源规则不再降级，16 条 parent 耦合与 14 条宿主 API 耦合仍受限；storage 词法命中 8 条，精查为 5 项目 6 条 active + 2 条仅注释，active 均只用 `getItem`/`setItem`/`removeItem` 且现已兼容。脚本仍无 CPU 预算，因此入口继续关闭；已装规则仍按存档启用状态运行。详见 `docs/reviews/2026-08-01-repository-review.md` 与 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
 
 > 🟡 **工坊 P4 已实施（B1-B5），真机走查未做**：以上游工坊页（`github.com/AkabaneSaki/myrepo`，本地克隆 `E:\Projects\myrepo`）为参照做的功能对齐。B1 封面代理链 + 类型徽章 + Cloudflare 错误码 + 加载更多；B2 我的项目 / 订阅与已装 / 审核徽章；B3 更新前改动预告；B4 投稿·编辑·上传·可见性·删除；B5 审核队列 + 管理员 + 日志。**三条与上游刻意不同**已写进各自文件头注释：不给没有基础标签的项目盖章成「系统」、diff 由已算好的安装计划派生（不重新归一化一遍）、权限判定只用于画不画入口（门禁在上游 403）。**真机走查（2026-08-02）**：B4 写侧（投稿上传 / 编辑 / 删除）与 P3 社交（点赞 / 订阅）已人工走过。B1-B3（封面链 / 我的项目 / 更新 diff）尚未专门走查。🔴 **B5 审核面无法自测（已搁置）** —— 当前账号 `isAdmin: false`，延后到拿到管理员账号再做。
 
@@ -355,7 +356,7 @@ src/sillytavern/                    ← 核心引擎
   │   ├── Audio: AudioSourceKind ('blob'|'builtin'|'file') / AudioTrack / AudioBlobRecord 等
   │   └── 辅助: createDefaultCharacterState() / resolvePlotTree()
   │
-  ├── database.ts                   ← Dexie/IndexedDB v15
+  ├── database.ts                   ← Dexie/IndexedDB v16
   │   ├── v1-v3: lorebooks / presets / settings / chats
   │   │           🪦 lorebooks 是 v3 遗留 `Lorebook` 类型的**死表**，生产代码零读写；
   │   │              现役世界书表是 v14 的 worldBooks（`WorldBook` 类型）。settings 同为死表。
@@ -365,9 +366,11 @@ src/sillytavern/                    ← 核心引擎
   │   ├── v12+: audioHandles（持久化 FileSystemDirectoryHandle）
   │   ├── v13+: assetMeta / assetBlobs（素材库，全局共享，排除 FullBackup，走 zip 导出）
   │   ├── v14+: worldBooks / workshopProjects（工坊 P0；两者都进 FullBackup）
-  │   └── v15+: beautifierRules（工坊 P0b；只存**用户规则**，内置预设是派生缓存不落库）
-  │       🔴 **世界书、美化规则与 API Key 现居 Dexie，不再在 localStorage**。localStorage
-  │          只存无密钥设置元数据（Agent 配置/主题/`beautifierBuiltinDisabled` 等）
+  │   ├── v15+: beautifierRules（工坊 P0b；只存**用户规则**，内置预设是派生缓存不落库）
+  │   └── v16+: regexStorage（所有正则/信任级别/预览共享的隔离 KV；进 FullBackup；更新/卸载保留）
+  │       🔴 **世界书、美化规则与 API Key 现居应用 Dexie，不再在 localStorage**。正则 iframe
+  │          只能经同步镜像访问 `regexStorage`，不能访问任何应用表；应用 localStorage 只存无密钥
+  │          设置元数据（Agent 配置/主题/`beautifierBuiltinDisabled` 等）
   │
   ├── agent-client.ts               ← [Phase 3] API 客户端（每 Agent 独立 userId / 重试退避 / 缓存检测）
   ├── agent-templates.ts            ← [Phase 3+9] Prompt 模板（systemPrompt 已迁 agent-config.json，留 stub + 动态上下文）
@@ -472,6 +475,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── asset-url.ts                 ← [素材] object URL LRU + 引用计数
 │   ├── image-crop.ts                ← [素材] 从源图切真字节（解码与画布两处注入缝）
 │   ├── crop-rects.ts                ← [素材] 裁剪框几何（纯函数，源图像素坐标系）
+│   ├── beautifier-frame.ts          ← [工坊正则] opaque iframe 文档/CSP/同步 storage 镜像与消息协议
+│   ├── beautifier-storage.ts        ← [Dexie v16] regexStorage hydrate / 有序 mutation / 跨 frame 广播 / 配额
 │   ├── workshop-client.ts           ← [工坊] 唯一网络接触点（判别联合永不抛穿 + 超时 + 取消）
 │   │                                   P4: +listMyProjects / 投稿写侧（create/update/visibility/delete/上传三口）
 │   │                                   / 审核面（pending/review/admins/logs/set-admin）

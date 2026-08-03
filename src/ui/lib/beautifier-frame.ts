@@ -2,6 +2,15 @@ export const BEAUTIFIER_FRAME_SANDBOX = 'allow-scripts';
 
 export const BEAUTIFIER_FRAME_MESSAGE_SOURCE = 'fated-poem-beautifier';
 
+export const BEAUTIFIER_STORAGE_QUOTA_BYTES = 5 * 1024 * 1024;
+export const BEAUTIFIER_STORAGE_MAX_KEYS = 1024;
+export const BEAUTIFIER_STORAGE_MAX_KEY_BYTES = 4096;
+
+export type BeautifierStorageMutation =
+  { kind: 'set'; key: string; value: string } | { kind: 'remove'; key: string } | { kind: 'clear' };
+
+export type BeautifierStorageEntry = readonly [key: string, value: string];
+
 export const BEAUTIFIER_FRAME_CSP = [
   'default-src http: https: data: blob:',
   "base-uri 'none'",
@@ -24,15 +33,18 @@ export interface BeautifierFrameDocumentOptions {
   markup: string;
   bridgeId: string;
   forwardContextMenu?: boolean;
+  storageEntries?: readonly BeautifierStorageEntry[];
 }
 
 export interface BeautifierFrameMessage {
   source: typeof BEAUTIFIER_FRAME_MESSAGE_SOURCE;
   bridgeId: string;
-  type: 'ready' | 'height' | 'contextmenu';
+  type: 'ready' | 'height' | 'contextmenu' | 'storage-mutate';
   height?: number;
   x?: number;
   y?: number;
+  sequence?: number;
+  mutations?: BeautifierStorageMutation[];
 }
 
 interface RichDocumentParts {
@@ -40,6 +52,13 @@ interface RichDocumentParts {
   body: string;
   htmlAttributes: string;
   bodyAttributes: string;
+}
+
+function inlineScriptLiteral(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
 }
 
 /**
@@ -107,12 +126,14 @@ export function buildBeautifierFrameDocument({
   markup,
   bridgeId,
   forwardContextMenu = false,
+  storageEntries = [],
 }: BeautifierFrameDocumentOptions): string {
   const parts = splitRichDocument(markup);
   const bridgeLiteral = JSON.stringify(bridgeId);
   const sourceLiteral = JSON.stringify(BEAUTIFIER_FRAME_MESSAGE_SOURCE);
   const contextMenuLiteral = forwardContextMenu ? 'true' : 'false';
   const mayUseFixedLayoutLiteral = /position\s*:\s*fixed/i.test(markup) ? 'true' : 'false';
+  const storageEntriesLiteral = inlineScriptLiteral(storageEntries);
   const htmlAttributes = /(?:^|\s)lang\s*=/i.test(parts.htmlAttributes)
     ? parts.htmlAttributes
     : `lang="zh-CN" ${parts.htmlAttributes}`.trim();
@@ -147,18 +168,70 @@ img, svg, video, canvas { max-width: 100%; }
 <script>
 // window.localStorage throws for an opaque origin before user code can fall
 // back. A global lexical binding shadows that accessor for ordinary legacy
-// references while remaining private to this one frame/document.
-const __beautifierMakeStorage = () => {
+// references. Its data is a host-owned, regex-only namespace; no application
+// storage object or namespace selector crosses the iframe seam.
+const __beautifierUtf8Bytes = (value) => new TextEncoder().encode(String(value)).byteLength;
+const __beautifierStorageBatchSize = ${BEAUTIFIER_STORAGE_MAX_KEYS};
+const __beautifierMakeStorage = (initialEntries = [], onMutation = null) => {
   const values = new Map();
+  for (const entry of initialEntries) {
+    if (!Array.isArray(entry) || entry.length !== 2) continue;
+    if (typeof entry[0] !== 'string' || typeof entry[1] !== 'string') continue;
+    values.set(entry[0], entry[1]);
+  }
+  const quotaBytes = ${BEAUTIFIER_STORAGE_QUOTA_BYTES};
+  const maxKeys = ${BEAUTIFIER_STORAGE_MAX_KEYS};
+  const maxKeyBytes = ${BEAUTIFIER_STORAGE_MAX_KEY_BYTES};
+  const byteSize = () => {
+    let total = 0;
+    for (const [key, value] of values) total += __beautifierUtf8Bytes(key) + __beautifierUtf8Bytes(value);
+    return total;
+  };
+  const quotaError = () => new DOMException('Regex storage quota exceeded', 'QuotaExceededError');
+  const assertSetAllowed = (key, value) => {
+    if (__beautifierUtf8Bytes(key) > maxKeyBytes) throw quotaError();
+    const isNew = !values.has(key);
+    if (isNew && values.size >= maxKeys) throw quotaError();
+    const previous = values.get(key);
+    values.set(key, value);
+    const overQuota = byteSize() > quotaBytes;
+    if (previous === undefined) values.delete(key);
+    else values.set(key, previous);
+    if (overQuota) throw quotaError();
+  };
+  const apply = (mutation, emit = false) => {
+    if (!mutation || typeof mutation !== 'object') return;
+    if (mutation.kind === 'set' && typeof mutation.key === 'string' && typeof mutation.value === 'string') {
+      assertSetAllowed(mutation.key, mutation.value);
+      const previous = values.get(mutation.key) ?? null;
+      if (previous === mutation.value) return;
+      values.set(mutation.key, mutation.value);
+      if (emit && onMutation) onMutation(mutation);
+      return { key: mutation.key, oldValue: previous, newValue: mutation.value };
+    }
+    if (mutation.kind === 'remove' && typeof mutation.key === 'string') {
+      const previous = values.get(mutation.key);
+      if (previous === undefined) return;
+      values.delete(mutation.key);
+      if (emit && onMutation) onMutation(mutation);
+      return { key: mutation.key, oldValue: previous, newValue: null };
+    }
+    if (mutation.kind === 'clear') {
+      if (values.size === 0) return;
+      values.clear();
+      if (emit && onMutation) onMutation(mutation);
+      return { key: null, oldValue: null, newValue: null };
+    }
+  };
   const storage = {
     get length() { return values.size; },
-    clear() { values.clear(); },
+    clear() { apply({ kind: 'clear' }, true); },
     getItem(key) { key = String(key); return values.has(key) ? values.get(key) : null; },
     key(index) { return [...values.keys()][Number(index)] ?? null; },
-    removeItem(key) { values.delete(String(key)); },
-    setItem(key, value) { values.set(String(key), String(value)); },
+    removeItem(key) { apply({ kind: 'remove', key: String(key) }, true); },
+    setItem(key, value) { apply({ kind: 'set', key: String(key), value: String(value) }, true); },
   };
-  return new Proxy(storage, {
+  const proxy = new Proxy(storage, {
     get(target, key, receiver) {
       if (typeof key !== 'string' || key in target) return Reflect.get(target, key, receiver);
       return target.getItem(key);
@@ -169,9 +242,15 @@ const __beautifierMakeStorage = () => {
       return true;
     },
   });
+  return { storage: proxy, apply, entries: () => [...values.entries()] };
 };
-const localStorage = __beautifierMakeStorage();
-const sessionStorage = __beautifierMakeStorage();
+let __beautifierQueueStorageMutation = () => {};
+const __beautifierPersistentStorage = __beautifierMakeStorage(
+  ${storageEntriesLiteral},
+  (mutation) => __beautifierQueueStorageMutation(mutation),
+);
+const localStorage = __beautifierPersistentStorage.storage;
+const sessionStorage = __beautifierMakeStorage().storage;
 
 (() => {
   'use strict';
@@ -181,13 +260,17 @@ const sessionStorage = __beautifierMakeStorage();
   const mayUseFixedLayout = ${mayUseFixedLayoutLiteral};
   let lastHeight = -1;
   let scheduled = false;
+  let storageSequence = 0;
+  let pendingStorageMutations = [];
+  let storageFlushScheduled = false;
 
-  // Opaque sandbox origins do not expose browser storage. A per-frame memory
-  // implementation keeps existing UI preferences functional without exposing
-  // the app's real localStorage/IndexedDB or persisting arbitrary rule data.
+  // Opaque sandbox origins do not expose browser storage. localStorage is a
+  // synchronous mirror of the dedicated persistent regex namespace;
+  // sessionStorage remains private to this frame lifetime.
   for (const name of ['localStorage', 'sessionStorage']) {
     try { Object.defineProperty(window, name, { configurable: true, value: name === 'localStorage' ? localStorage : sessionStorage }); } catch (_) {}
   }
+  try { Object.defineProperty(window, 'regexStorage', { configurable: true, value: localStorage }); } catch (_) {}
 
   // Common SillyTavern globals are represented by local, empty compatibility
   // surfaces. They let visual rules initialize, but deliberately expose no save,
@@ -252,6 +335,22 @@ const sessionStorage = __beautifierMakeStorage();
   const post = (type, detail = {}) => {
     parent.postMessage({ source, bridgeId, type, ...detail }, '*');
   };
+  __beautifierQueueStorageMutation = (mutation) => {
+    pendingStorageMutations.push(mutation);
+    if (storageFlushScheduled) return;
+    storageFlushScheduled = true;
+    queueMicrotask(() => {
+      storageFlushScheduled = false;
+      const mutations = pendingStorageMutations;
+      pendingStorageMutations = [];
+      for (let offset = 0; offset < mutations.length; offset += __beautifierStorageBatchSize) {
+        post('storage-mutate', {
+          sequence: ++storageSequence,
+          mutations: mutations.slice(offset, offset + __beautifierStorageBatchSize),
+        });
+      }
+    });
+  };
   const measure = () => {
     scheduled = false;
     const root = document.documentElement;
@@ -301,6 +400,24 @@ const sessionStorage = __beautifierMakeStorage();
       }
       scheduleMeasure();
     }
+    if (data.type === 'storage-sync' && Array.isArray(data.mutations)) {
+      for (const mutation of data.mutations) {
+        try {
+          const detail = __beautifierPersistentStorage.apply(mutation, false);
+          if (detail) dispatchEvent(new StorageEvent('storage', { ...detail, storageArea: null, url: location.href }));
+        } catch (_) {}
+      }
+    }
+    if (data.type === 'storage-reset' && Array.isArray(data.entries)) {
+      try {
+        __beautifierPersistentStorage.apply({ kind: 'clear' }, false);
+        for (const entry of data.entries) {
+          if (Array.isArray(entry) && entry.length === 2) {
+            __beautifierPersistentStorage.apply({ kind: 'set', key: String(entry[0]), value: String(entry[1]) }, false);
+          }
+        }
+      } catch (_) {}
+    }
   });
 
   if (forwardContextMenu) {
@@ -347,11 +464,32 @@ export function isBeautifierFrameMessage(
 ): value is BeautifierFrameMessage {
   if (!value || typeof value !== 'object') return false;
   const data = value as Partial<BeautifierFrameMessage>;
-  return (
-    data.source === BEAUTIFIER_FRAME_MESSAGE_SOURCE &&
-    data.bridgeId === bridgeId &&
-    (data.type === 'ready' || data.type === 'height' || data.type === 'contextmenu')
-  );
+  if (data.source !== BEAUTIFIER_FRAME_MESSAGE_SOURCE || data.bridgeId !== bridgeId) return false;
+  if (data.type === 'ready' || data.type === 'height' || data.type === 'contextmenu') return true;
+  if (
+    data.type !== 'storage-mutate' ||
+    !Number.isSafeInteger(data.sequence) ||
+    data.sequence! < 1
+  ) {
+    return false;
+  }
+  if (
+    !Array.isArray(data.mutations) ||
+    data.mutations.length === 0 ||
+    data.mutations.length > BEAUTIFIER_STORAGE_MAX_KEYS
+  ) {
+    return false;
+  }
+  return data.mutations.every((mutation) => {
+    if (!mutation || typeof mutation !== 'object') return false;
+    if (mutation.kind === 'clear') return true;
+    if (mutation.kind === 'remove') return typeof mutation.key === 'string';
+    return (
+      mutation.kind === 'set' &&
+      typeof mutation.key === 'string' &&
+      typeof mutation.value === 'string'
+    );
+  });
 }
 
 export function collectThemeValues(style: CSSStyleDeclaration): Record<string, string> {

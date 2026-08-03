@@ -346,12 +346,26 @@ describe('mapWorkshopRegexes —— droppedNotes 必须 loud', () => {
     const count = (kind: WorkshopNoteKind): number =>
       droppedNotes.filter((n) => n.kind === kind).length;
     expect(count('dropped')).toBe(0);
-    expect(count('degraded')).toBe(2);
+    expect(count('degraded')).toBe(1);
     expect(count('sideEffect')).toBe(0);
     expect(textOfKind(droppedNotes, 'degraded')).not.toContain('外部来源');
     expect(textOfKind(droppedNotes, 'degraded')).toContain('父页面或酒馆 API');
-    expect(textOfKind(droppedNotes, 'degraded')).toContain('临时有效');
+    expect(textOfKind(droppedNotes, 'degraded')).not.toContain('浏览器存储');
     expect(textOfKind(droppedNotes, 'dropped')).not.toContain('外部来源');
+  });
+
+  it('localStorage 走共享持久命名空间，仍只对 sessionStorage / IndexedDB 报降级', () => {
+    const local = mapWorkshopRegexes(
+      [regex({ replaceString: '<script>localStorage.setItem("theme", "dark")</script>' })],
+      CTX,
+    );
+    expect(textOfKind(local.droppedNotes, 'degraded')).not.toContain('浏览器存储');
+
+    const unavailable = mapWorkshopRegexes(
+      [regex({ replaceString: '<script>sessionStorage.x = 1; indexedDB.open("x")</script>' })],
+      CTX,
+    );
+    expect(textOfKind(unavailable.droppedNotes, 'degraded')).toContain('受限浏览器存储');
   });
 
   it('note 里带条目名，用户能对上是哪条', () => {

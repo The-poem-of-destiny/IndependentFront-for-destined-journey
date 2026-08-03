@@ -93,8 +93,9 @@ export interface WorldBook {
  * - `dropped` —— 上游语义在当前显示路径**确实丢了**（`promptOnly`、不含 AI 输出
  *   位置 2 的规则、`trimStrings`、可达的 findRegex 宏替换；`markdownOnly=false`
  *   的提示词侧改写也只保留显示侧）
- * - `degraded` —— **装了**，但受隔离契约限制（parent/宿主 API 不开放、storage 仅临时
- *   有效、`{{...}}` 宏原样输出；远程资源与网络 API 已开放）
+ * - `degraded` —— **装了**，但受隔离契约限制（parent/宿主 API 不开放、sessionStorage
+ *   仅当前 frame 有效、IndexedDB 不开放、`{{...}}` 宏原样输出；共享 localStorage/
+ *   regexStorage、远程资源与网络 API 已开放）
  * - `sideEffect` —— **装了**，且有**规则自身之外**的副作用。富 replacement 进入独立
  *   iframe 后，现行 mapper 不再为 `<style>` 产生这类记录；类型保留以兼容历史行。
  */
@@ -748,6 +749,21 @@ export interface BeautifierRule {
   group?: string;
   /** 🔒 系统自动管理标记（运行时计算，不持久化） */
   locked?: boolean;
+}
+
+/**
+ * Untrusted regex persistent storage.
+ *
+ * The dedicated Dexie table is the single shared untrusted namespace for every
+ * regex, trust level, and preview. Iframes receive only a synchronous mirror
+ * (`localStorage` / `window.regexStorage`), never an application table or a
+ * caller-selected namespace. Host code enforces 5 MiB, 1024 keys, and a
+ * 4096-byte UTF-8 key limit before persisting or broadcasting mutations.
+ */
+export interface RegexStorageRecord {
+  key: string;
+  value: string;
+  updatedAt: number;
 }
 
 /** 变量更新补丁 — 支持 mvu_update 协议的 replace/delta/insert */

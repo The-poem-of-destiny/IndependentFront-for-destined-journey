@@ -29,6 +29,7 @@ import type {
   WorldBook,
   WorkshopProject,
   BeautifierRule,
+  RegexStorageRecord,
 } from './types';
 import type { CreatePreset } from '../ui/stores/create-store';
 import { DEFAULT_SETTINGS } from './types';
@@ -43,7 +44,7 @@ export interface CreatePresetRecord {
 }
 
 const DB_NAME = 'SillyTavernWebDB';
-const DB_VERSION = 15;
+const DB_VERSION = 16;
 
 class AppDatabase extends Dexie {
   // v1-v3 tables (chats 已于 v9 删除)
@@ -93,6 +94,10 @@ class AppDatabase extends Dexie {
   //   仅**用户规则**。内置 22 条预设规则（~378 KB）是 loadPresetRules() 从
   //   data/defaults/beautifier-rules.json 现算出来的派生缓存，纯内存持有，不进任何表。
   beautifierRules!: Table<BeautifierRule>;
+
+  // v16 new table — untrusted regex persistent KV. The table itself is the
+  // single shared namespace; iframe callers never select an application table.
+  regexStorage!: Table<RegexStorageRecord>;
 
   constructor() {
     super(DB_NAME);
@@ -455,6 +460,34 @@ class AppDatabase extends Dexie {
       workshopProjects: 'id, installedAt, updatedAt',
       beautifierRules: 'id, group, order',
     });
+
+    // v16: persistent storage for isolated beautifier regexes. Pure addition;
+    // no upgrade callback and no existing table is removed.
+    this.version(16).stores({
+      lorebooks: 'id, name, updatedAt',
+      presets: 'id, name, updatedAt',
+      settings: 'key',
+      memories: 'id, saveId, createdAt, realTimestamp',
+      plotEvents: 'id, saveId, parentId, status, updatedAt',
+      characters: 'id, saveId, type',
+      snapshots: 'id, saveId, createdAt',
+      saves: 'id, slot, updatedAt',
+      apiEndpoints: 'id, name',
+      plotOutlines: 'id, saveId, updatedAt',
+      saveProfiles: 'saveId, updatedAt',
+      createPresets: 'id, name, updatedAt',
+      messages: 'id, saveId, [saveId+turn]',
+      audioTracks: 'id, name, kind, *tags, updatedAt',
+      audioBlobs: 'id',
+      audioPlaylists: 'id, name, updatedAt',
+      audioHandles: 'id',
+      assetMeta: 'id, name, type, [name+type], createdAt, updatedAt',
+      assetBlobs: 'id',
+      worldBooks: 'id, partition, updatedAt',
+      workshopProjects: 'id, installedAt, updatedAt',
+      beautifierRules: 'id, group, order',
+      regexStorage: 'key',
+    });
   }
 }
 
@@ -523,6 +556,8 @@ export interface FullBackup {
   // v15 美化规则迁出 localStorage（Phase 0b）—— 同样是「旧备份缺字段」的三态语义。
   // 只含**用户规则**；内置预设规则是派生缓存，不进备份（导入方启动时自己从磁盘算）。
   beautifierRules: BeautifierRule[];
+  // v16 隔离正则持久 KV。旧备份缺字段时，导入侧保留现有表。
+  regexStorage: RegexStorageRecord[];
 }
 
 export async function exportAllData(): Promise<FullBackup> {
@@ -544,6 +579,7 @@ export async function exportAllData(): Promise<FullBackup> {
     worldBooks,
     workshopProjects,
     beautifierRules,
+    regexStorage,
   ] = await Promise.all([
     db.lorebooks.toArray(),
     db.presets.toArray(),
@@ -561,6 +597,7 @@ export async function exportAllData(): Promise<FullBackup> {
     db.worldBooks.toArray(),
     db.workshopProjects.toArray(),
     db.beautifierRules.toArray(),
+    db.regexStorage.toArray(),
   ]);
   return {
     version: DB_VERSION,
@@ -581,6 +618,7 @@ export async function exportAllData(): Promise<FullBackup> {
     worldBooks,
     workshopProjects,
     beautifierRules,
+    regexStorage,
   };
 }
 
@@ -613,6 +651,7 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
     'worldBooks',
     'workshopProjects',
     'beautifierRules',
+    'regexStorage',
   ];
   for (const f of arrayFields) {
     const v = backup[f];
@@ -741,6 +780,19 @@ async function doImportAllData(
       await db.beautifierRules.clear();
       if (Array.isArray(backup.beautifierRules))
         await db.beautifierRules.bulkPut(backup.beautifierRules);
+    }
+  });
+
+  // v16 transaction — same three-state semantics as v14/v15:
+  //   · undefined (pre-v16 backup) -> preserve the current table
+  //   · []                         -> clear the table
+  //   · rows                       -> replace the table
+  await db.transaction('rw', db.regexStorage, async () => {
+    if (backup.regexStorage !== undefined) {
+      await db.regexStorage.clear();
+      if (Array.isArray(backup.regexStorage)) {
+        await db.regexStorage.bulkPut(backup.regexStorage);
+      }
     }
   });
 }
