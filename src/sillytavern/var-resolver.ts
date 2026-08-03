@@ -9,6 +9,10 @@
  * 5. 变量导入/导出
  */
 
+// 唯一的 import，且是 `import type` —— 编译后完全消失，
+// 不破坏下方「本模块无任何运行时 import，可安全被叶子模块引用」那条性质。
+import type { VarPathOps } from './types';
+
 // ========== 命名空间 ==========
 
 /** 变量命名空间 */
@@ -34,11 +38,12 @@ export type VarNamespace = (typeof VAR_NAMESPACES)[keyof typeof VAR_NAMESPACES];
  *
  * 被提示注入的模型或恶意 VarsPatch 可能写入 `sys.__proto__.polluted` 之类的路径，
  * 从而篡改 Object.prototype 并影响此后所有对象创建。parseVarPath 在此统一拦截，
- * 使 getVar/setVar/delVar/applyVarsPatch 等所有读写入口都共享这道守卫。
+ * 使 getVar/setVar/delVar/applyPathOps 等所有读写入口都共享这道守卫。
  *
  * 🔴 **全仓唯一定义**。EJS 侧（`ejs-runtime` / `ejs-capabilities` / `ejs-lodash-shim` /
  * `agent-templates`）一律从这里 import —— 曾经每处各抄一份 `new Set([...])`，
- * 五份靠人眼保持一致，加第四个危险键时必漏。本模块无任何 import，可安全被叶子模块引用。
+ * 五份靠人眼保持一致，加第四个危险键时必漏。本模块无任何**运行时** import，
+ * 可安全被叶子模块引用。
  */
 export const DANGEROUS_PATH_SEGMENTS: ReadonlySet<string> = new Set([
   '__proto__',
@@ -191,16 +196,17 @@ export function insertVar(
 
 // ========== 批量操作 ==========
 
-/** 应用 VarsPatch（合并 replace/delta/insert/remove/move） */
-export function applyVarsPatch(
+/**
+ * 应用一组路径级变量操作（replace/delta/insert/remove/move）。
+ *
+ * Q-12 改名：曾叫 `applyVarsPatch`，与 `vars-merger` 的同名导出契约互斥
+ * （那份只认 `VarsPatch.merge`，本函数只认路径 ops，两者交集为空），
+ * 靠 import 路径区分，是 auto-import 最容易点错的一类。那个宿主已随 Q-12 删除，
+ * 这里改名并把入参形状提进 `types.ts`（{@link VarPathOps}），免得再长出第三份。
+ */
+export function applyPathOps(
   variables: Record<string, any>,
-  patch: {
-    replace?: Array<{ path: string; value: any }>;
-    delta?: Array<{ path: string; amount: number }>;
-    insert?: Array<{ path: string; value: any; index?: number }>;
-    remove?: Array<{ path: string }>;
-    move?: Array<{ from: string; to: string }>;
-  },
+  patch: VarPathOps,
 ): Record<string, any> {
   let result = variables;
 
@@ -335,7 +341,7 @@ export const $var = {
   delta: deltaVar,
   insert: insertVar,
   move: moveVar,
-  applyVarsPatch,
+  applyPathOps,
   parseVarPath,
   getUserVars,
   getSysVars,

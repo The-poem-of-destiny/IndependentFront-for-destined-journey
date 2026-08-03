@@ -9,7 +9,7 @@
  * （要归因得上 Proxy 全程拦截，不值得）。因此提交权是 pass 粒度不是书粒度。
  *
  * 输出形状: `{ replace, remove }` —— 与 `var-resolver.ts` 的
- * `applyVarsPatch(variables, patch)` 参数结构兼容，可直接消费；路径一律带
+ * `applyPathOps(variables, patch)` 参数结构兼容，可直接消费；路径一律带
  * `sys.` 命名空间前缀（`EJS_VARS_PATH_PREFIX`）。
  *
  * 纯度约束: 无 I/O、无 Dexie、无 Vue。只依赖 JSON / TextEncoder。
@@ -47,7 +47,7 @@ export const EJS_DIFF_SIZE_LIMIT = 256 * 1024;
  */
 const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
-/** 深 diff 产物 —— 结构上与 var-resolver 的 applyVarsPatch 入参兼容 */
+/** 深 diff 产物 —— 结构上与 var-resolver 的 applyPathOps 入参兼容 */
 export interface EjsVarsDiff {
   /** 新增/修改 → 按路径整体覆盖（值为 draft 侧深拷贝） */
   replace: Array<{ path: string; value: unknown }>;
@@ -163,7 +163,7 @@ function walk(
  *
  * @param base  回合开始时的 sys 克隆
  * @param draft pass 结束时的最终草稿
- * @returns 路径带 `sys.` 前缀的 set/del 补丁（可直接喂 var-resolver 的 applyVarsPatch）
+ * @returns 路径带 `sys.` 前缀的 set/del 补丁（可直接喂 var-resolver 的 applyPathOps）
  */
 export function diffVars(
   base: Record<string, unknown>,

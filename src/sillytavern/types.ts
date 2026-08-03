@@ -762,7 +762,14 @@ export interface RegexStorageRecord {
   updatedAt: number;
 }
 
-/** 变量更新补丁 — 支持 mvu_update 协议的 replace/delta/insert */
+/**
+ * 变量更新补丁 —— **声明式效果（`EffectDefinition.payload`）的载荷格式**。
+ *
+ * 唯一实现是 `effect-runtime.executeVarsPatch`，它把四个字段各自翻成 `StatePatch`
+ * 交给 StateManager（ADR-21）。别把它跟下面的 {@link VarPathOps} 弄混 ——
+ * 两者形状相近但用途不同，Q-12 之前正是因为两个同名 `applyVarsPatch` 各认一半字段，
+ * 才让「按类型签名构造的补丁被无声吞掉一半」成为可能。
+ */
 export interface VarsPatch {
   /** 深合并到 chat.variables */
   merge: Record<string, any>;
@@ -772,6 +779,30 @@ export interface VarsPatch {
   delta?: Array<{ path: string; amount: number }>;
   /** v4 新增: insert 操作 — 在数组指定位置插入 */
   insert?: Array<{ path: string; value: any; index?: number }>;
+}
+
+/**
+ * 路径级变量操作集 —— `var-resolver.applyPathOps` 的入参（Q-12）。
+ *
+ * 与 {@link VarsPatch} 的分工：
+ * - `VarsPatch` 是**效果系统的声明式载荷**，`merge` 必填，由 effect-runtime 翻成 StatePatch。
+ * - `VarPathOps` 是**直接作用在变量树上的路径操作**，没有 `merge`，多 `remove`/`move`，
+ *   由 `applyPathOps` 就地算出新树。EJS 差量（`ejs-vars-diff`）产出的就是这个形状。
+ *
+ * 之前这份形状是就地写死在 `applyVarsPatch` 形参上的匿名结构（既不叫这个名字、
+ * 也没进 types.ts），于是 `types.ts` 上那份类型声明的承诺比任何实现都大。
+ */
+export interface VarPathOps {
+  /** 直接替换指定路径的值 */
+  replace?: Array<{ path: string; value: any }>;
+  /** 对数值型变量做增量 */
+  delta?: Array<{ path: string; amount: number }>;
+  /** 在数组指定位置插入（缺 index 则追加） */
+  insert?: Array<{ path: string; value: any; index?: number }>;
+  /** 删除指定路径 */
+  remove?: Array<{ path: string }>;
+  /** 把一个路径的值搬到另一个路径 */
+  move?: Array<{ from: string; to: string }>;
 }
 
 export type Task = 'story' | 'summary' | 'vars';

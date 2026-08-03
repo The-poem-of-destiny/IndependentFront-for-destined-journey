@@ -22,6 +22,7 @@ import {
   type AssetFraming,
   type AssetType,
 } from './types';
+import { normalizeExtension } from './asset-path';
 
 // ═══════════════════════════════════════════════════════════
 // 类型 → 大类
@@ -105,11 +106,8 @@ export const ASSET_VIDEO_EXTENSIONS: readonly string[] = Object.keys(VIDEO_MIME_
 const IMAGE_SET = new Set(ASSET_IMAGE_EXTENSIONS);
 const VIDEO_SET = new Set(ASSET_VIDEO_EXTENSIONS);
 
-/** 归一化扩展名: 去掉前导点、trim、转小写。表查询前一律先过这里 */
-function normalizeExtension(ext: string): string {
-  const trimmed = (ext ?? '').trim().toLowerCase();
-  return trimmed.startsWith('.') ? trimmed.slice(1) : trimmed;
-}
+// 归一化扩展名（去前导点 + trim + 小写）—— Q-16 起唯一实现在 `asset-path.ts`，
+// 本模块与 asset-zip 曾各存一份。表查询前一律先过它。
 
 /** 该扩展名是否是认可的素材扩展名（图片或视频） */
 export function isAssetExtension(ext: string): boolean {

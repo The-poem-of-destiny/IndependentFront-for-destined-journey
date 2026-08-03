@@ -45,7 +45,7 @@ import {
 } from '../lib/audio-folder';
 import { hashMediaBlob } from '../lib/media-hash';
 import { useSettingsStore } from './settings-store';
-import { useUIStore } from './ui-store';
+import { isQuotaError, notify } from './store-utils';
 import { mutationFail, mutationOk, type MutationResult } from './store-result';
 
 // ===== 常量 =====
@@ -129,24 +129,6 @@ function stripExt(filename: string): string {
 function notifyAutoRenamed(count: number): void {
   if (count <= 0) return;
   notify(`${count} 个文件重名，已自动编号`, 'info');
-}
-
-/**
- * 是否是「浏览器存储配额耗尽」。标准浏览器抛 DOMException('QuotaExceededError')，
- * 老 Firefox 用 NS_ERROR_DOM_QUOTA_REACHED；Dexie 会原样透传底层错误。
- */
-function isQuotaError(e: unknown): boolean {
-  const name = (e as { name?: unknown } | null)?.name;
-  return name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED';
-}
-
-/** 提示的唯一出口；无 Pinia 上下文（测试 / 早期启动）时不该因为一条提示炸掉调用方 */
-function notify(message: string, type: 'info' | 'error'): void {
-  try {
-    useUIStore().toast(message, type);
-  } catch {
-    // 静默：提示失败不能影响主流程的结果
-  }
 }
 
 // ===== Store =====

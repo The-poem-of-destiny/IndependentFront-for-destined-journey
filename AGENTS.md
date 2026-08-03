@@ -451,7 +451,12 @@ src/sillytavern/                    ← 核心引擎
   ├── workshop-diff.ts              ← [工坊 P4] ★纯函数 diffInstallPlan：更新前的「这一版会改什么」
   │                                    输入是**已算好的计划**而非重拉详情 —— 预告与提交在结构上同源
   │
-  ├── variables.ts / vars-merger.ts
+  │  🪦 Q-12：`variables.ts` / `vars-merger.ts` 已删。两者整条链零生产引用
+  │     （`variables.ts` 最后一个活着的导出 `formatVariablesForPrompt` 的唯一消费方
+  │      是 Q-04 删掉的 prompt-assembler）。顺带拆掉「两个同名 `applyVarsPatch`
+  │      契约互斥」那个 auto-import 陷阱：留下的那份改名 `var-resolver.applyPathOps`，
+  │      入参形状提进 `types.ts` 的 `VarPathOps`；`VarsPatch` 保留，它是效果系统
+  │      （`effect-runtime.executeVarsPatch`）的声明式载荷，两者用途不同别再混。
   ├── api-router.ts / api-tools.ts
   │
   └── (战斗 v2 纯计算规则见 docs/reference/combat-system-architecture.md；v3 内核见 docs/reference/combat-system-architecture-v3.md)

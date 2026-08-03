@@ -2,7 +2,7 @@
  * var-resolver 单元测试 — $var 变量解析 & 命名空间隔离 (Layer 2)
  *
  * 覆盖: parseVarPath / getVar / setVar / delVar / deltaVar / insertVar /
- *       applyVarsPatch / getUserVars...getTempVars / isUserPath / isSysPath /
+ *       applyPathOps / getUserVars...getTempVars / isUserPath / isSysPath /
  *       diffVariables / $var namespace / VAR_NAMESPACES / 不可变性
  */
 
@@ -14,7 +14,7 @@ import {
   delVar,
   deltaVar,
   insertVar,
-  applyVarsPatch,
+  applyPathOps,
   getUserVars,
   getSysVars,
   getWorldVars,
@@ -323,11 +323,11 @@ describe('insertVar', () => {
   });
 });
 
-// ========== applyVarsPatch ==========
+// ========== applyPathOps ==========
 
-describe('applyVarsPatch', () => {
+describe('applyPathOps', () => {
   it('applies replace operations', () => {
-    const result = applyVarsPatch(makeVars(), {
+    const result = applyPathOps(makeVars(), {
       replace: [
         { path: 'user.hp', value: 200 },
         { path: 'sys.world.weather', value: 'sunny' },
@@ -338,7 +338,7 @@ describe('applyVarsPatch', () => {
   });
 
   it('applies delta operations', () => {
-    const result = applyVarsPatch(makeVars(), {
+    const result = applyPathOps(makeVars(), {
       delta: [
         { path: 'user.hp', amount: 30 },
         { path: 'user.mp', amount: -10 },
@@ -349,7 +349,7 @@ describe('applyVarsPatch', () => {
   });
 
   it('applies insert operations', () => {
-    const result = applyVarsPatch(makeVars(), {
+    const result = applyPathOps(makeVars(), {
       insert: [
         { path: 'user.inventory', value: 'bow' },
         { path: 'user.inventory', value: 'arrow', index: 0 },
@@ -360,7 +360,7 @@ describe('applyVarsPatch', () => {
   });
 
   it('applies all three operation types together (replace + delta + insert)', () => {
-    const result = applyVarsPatch(makeVars(), {
+    const result = applyPathOps(makeVars(), {
       replace: [{ path: 'user.name', value: 'Bob' }],
       delta: [{ path: 'user.hp', amount: 50 }],
       insert: [{ path: 'user.inventory', value: 'potion' }],
@@ -371,13 +371,13 @@ describe('applyVarsPatch', () => {
   });
 
   it('handles empty patch gracefully', () => {
-    const result = applyVarsPatch(makeVars(), {});
+    const result = applyPathOps(makeVars(), {});
     expect(result).toEqual(makeVars());
   });
 
   it('preserves immutability', () => {
     const vars = makeVars();
-    applyVarsPatch(vars, { replace: [{ path: 'user.hp', value: 999 }] });
+    applyPathOps(vars, { replace: [{ path: 'user.hp', value: 999 }] });
     expect(vars.user.hp).toBe(100);
   });
 });
@@ -530,7 +530,7 @@ describe('$var namespace', () => {
     expect($var.del).toBe(delVar);
     expect($var.delta).toBe(deltaVar);
     expect($var.insert).toBe(insertVar);
-    expect($var.applyVarsPatch).toBe(applyVarsPatch);
+    expect($var.applyPathOps).toBe(applyPathOps);
     expect($var.parseVarPath).toBe(parseVarPath);
     expect($var.getUserVars).toBe(getUserVars);
     expect($var.getSysVars).toBe(getSysVars);

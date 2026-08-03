@@ -70,6 +70,7 @@ import type { WorkshopBundle, WorkshopFailure } from '../lib/workshop-client';
 import { useBeautifierStore } from './beautifier-store';
 import { useSettingsStore } from './settings-store';
 import { useWorldBookStore } from './worldbook-store';
+import { detach } from './db-write';
 
 // ═══════════════════════════════════════════════════════════
 // 常量与对外形状
@@ -130,11 +131,6 @@ function describeError(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
   if (typeof err === 'string' && err) return err;
   return '未知错误';
-}
-
-/** 切断 Vue Proxy —— 否则 structured clone 抛 DataCloneError */
-function detach<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 // ═══════════════════════════════════════════════════════════

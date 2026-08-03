@@ -7,7 +7,7 @@ import {
   EJS_VARS_PATH_PREFIX,
   type EjsVarsDiff,
 } from './ejs-vars-diff';
-import { applyVarsPatch } from './var-resolver';
+import { applyPathOps } from './var-resolver';
 
 /** 取某条 replace 的值（找不到返回 undefined） */
 function replaceValue(diff: EjsVarsDiff, path: string): unknown {
@@ -255,8 +255,8 @@ describe('measureDiffSize 与体积护栏', () => {
   });
 });
 
-describe('与现有写入入口的兼容性（var-resolver.applyVarsPatch）', () => {
-  it('把差量喂给 applyVarsPatch 能把 base 还原成 draft', () => {
+describe('与现有写入入口的兼容性（var-resolver.applyPathOps）', () => {
+  it('把差量喂给 applyPathOps 能把 base 还原成 draft', () => {
     const base = {
       计数: 1,
       事件: { 冰之歌: { 触发时间: 3, 次数: 1 }, 废弃: true },
@@ -272,7 +272,7 @@ describe('与现有写入入口的兼容性（var-resolver.applyVarsPatch）', (
     };
 
     const diff = diffVars(base, draft);
-    const applied = applyVarsPatch({ sys: JSON.parse(JSON.stringify(base)) }, diff);
+    const applied = applyPathOps({ sys: JSON.parse(JSON.stringify(base)) }, diff);
     expect(applied.sys).toEqual(draft);
   });
 
@@ -280,7 +280,7 @@ describe('与现有写入入口的兼容性（var-resolver.applyVarsPatch）', (
     const base = { a: 1, b: { c: 2, d: 3 } };
     const draft = { b: { c: 2 } };
     const diff = diffVars(base, draft);
-    const applied = applyVarsPatch({ sys: JSON.parse(JSON.stringify(base)) }, diff);
+    const applied = applyPathOps({ sys: JSON.parse(JSON.stringify(base)) }, diff);
     expect(applied.sys).toEqual(draft);
   });
 });

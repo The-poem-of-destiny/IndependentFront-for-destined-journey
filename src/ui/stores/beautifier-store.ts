@@ -26,12 +26,17 @@ import {
   type BeautifierMigrationOutcome,
 } from './beautifier-migration';
 import { useSettingsStore } from './settings-store';
+import { detach, omit } from './db-write';
 
-/** 落库前深拷贝（切断 Vue Proxy）+ 丢掉 locked（运行时计算，不持久化） */
+/**
+ * 落库前深拷贝（切断 Vue Proxy —— 理由见 db-write，Q-16）+ 丢掉 locked
+ * （运行时计算，不持久化；存进库就成了会过期的第二真相来源）。
+ *
+ * 与 worldbook-store 的同名 `toRow` **刻意不同**（那边是盖时间戳），所以两者只共用
+ * `detach`，不共用名字 —— 收敛成一个名字才是搬错版本的温床。
+ */
 function toRow(rule: BeautifierRule): BeautifierRule {
-  const copy = JSON.parse(JSON.stringify(rule)) as BeautifierRule;
-  delete copy.locked;
-  return copy;
+  return omit(detach(rule), 'locked');
 }
 
 export const useBeautifierStore = defineStore('beautifier', () => {

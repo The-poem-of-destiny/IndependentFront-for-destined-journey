@@ -18,10 +18,11 @@ import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks';
 import type { WorldBook, WorldBookEntry } from '@engine/types';
 import { migrateWorldBooksToDexie, type WorldBookMigrationOutcome } from './worldbook-migration';
 import { useSettingsStore } from './settings-store';
+import { detach, stamped } from './db-write';
 
-/** 落库前统一盖 updatedAt 戳 + 深拷贝（切断 Vue Proxy，否则 structured clone 抛错） */
+/** 落库前统一盖 updatedAt 戳 + 深拷贝（切断 Vue Proxy —— 理由见 db-write，Q-16） */
 function toRow(book: WorldBook): WorldBook {
-  return { ...(JSON.parse(JSON.stringify(book)) as WorldBook), updatedAt: Date.now() };
+  return stamped(detach(book));
 }
 
 export const useWorldBookStore = defineStore('worldbook', () => {

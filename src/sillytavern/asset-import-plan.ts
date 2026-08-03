@@ -33,6 +33,7 @@
  */
 
 import { explainAssetFilename } from './asset-filename';
+import { basenameOf, normalizeSlashes, normalizedExtensionOf } from './asset-path';
 import { clampAssetFraming, mimeForAssetExtension } from './asset-types';
 import { AUDIO_MIME_BY_EXTENSION, normalizeAudioName, uniqueAudioName } from './audio-names';
 import type { AssetFraming, AssetMetaRecord, AssetType, AudioTrack } from './types';
@@ -203,24 +204,10 @@ export interface ImportPlan {
 // ═══════════════════════════════════════════════════════════
 // 路径与噪音
 // ═══════════════════════════════════════════════════════════
-
-/** 斜杠归一化: 部分 Windows 工具会写反斜杠分隔符 */
-function normalizeSlashes(path: string): string {
-  return (path ?? '').replace(/\\/g, '/');
-}
-
-/** 取 basename（拍平嵌套目录）；纯路径返回空串 */
-function basenameOf(path: string): string {
-  const norm = normalizeSlashes(path);
-  const idx = norm.lastIndexOf('/');
-  return idx === -1 ? norm : norm.slice(idx + 1);
-}
-
-/** 小写扩展名（不含点）；无真尾缀返回空串（`dot > 0` 排除 `.png` 这种整串扩展名） */
-function extensionOf(basename: string): string {
-  const dot = basename.lastIndexOf('.');
-  return dot > 0 ? basename.slice(dot + 1).toLowerCase() : '';
-}
+//
+// Q-16: normalizeSlashes / basenameOf / 扩展名归一化统一在 `asset-path.ts`。
+// 这里原有的私有 `extensionOf` 是「取尾缀并当场小写」，现在拆成显式两步 ——
+// 归一化由调用点用 `normalizedExtensionOf` 表达，抽取本身不改变行为。
 
 /**
  * 可静默忽略的噪音（§5.1，与 asset-zip.ts:225 的 `isNoiseEntry` 同口径）:
@@ -521,7 +508,7 @@ export function planImport(
     // ── 路由: 按扩展名，判在拍平后的 basename 上（§5.1）──
     // 音频表先查（D8: `webm` 已被 `audio/webm` 占用，改判是回退）。两张表
     // 都从引擎层唯一来源 import，本模块不复制任何一份路由表。
-    const ext = extensionOf(basename);
+    const ext = normalizedExtensionOf(basename);
     const audioMime = AUDIO_MIME_BY_EXTENSION[ext];
 
     if (audioMime !== undefined) {

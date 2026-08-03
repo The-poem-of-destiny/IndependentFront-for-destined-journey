@@ -11,6 +11,7 @@
 import { defineStore } from 'pinia';
 import { ref, watch } from 'vue';
 import { deleteApiEndpoint, getApiEndpoints, saveApiEndpoint } from '@engine/database';
+import { detach } from './db-write';
 import {
   apiEndpointToEntry,
   apiEntryToEndpoint,
@@ -88,7 +89,7 @@ function containsApiPoolKey(settings: Record<string, unknown>): boolean {
 
 /** localStorage is configuration metadata only; API secrets live in Dexie `apiEndpoints`. */
 export function serializeSettingsForLocalStorage(settings: Record<string, unknown>): string {
-  const copy = JSON.parse(JSON.stringify(settings)) as Record<string, unknown>;
+  const copy = detach(settings);
   if (Array.isArray(copy.apiPool)) {
     for (const entry of copy.apiPool) {
       if (entry && typeof entry === 'object' && 'apiKey' in entry) {

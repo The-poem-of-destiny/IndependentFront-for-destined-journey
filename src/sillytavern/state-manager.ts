@@ -43,7 +43,7 @@ import {
   deleteMessagesAfterTurn,
   getDatabase,
 } from './database';
-import { getVar, setVar, delVar, insertVar, applyVarsPatch } from './var-resolver';
+import { getVar, setVar, delVar, insertVar, applyPathOps } from './var-resolver';
 import type { EjsVarsDiff } from './ejs-vars-diff';
 import {
   normalizeQuestStatus,
@@ -215,7 +215,7 @@ export class StateManager {
       try {
         let vars = await this.getCurrentVariables();
         for (const diff of ejsDiffs) {
-          vars = applyVarsPatch(vars, diff);
+          vars = applyPathOps(vars, diff);
         }
         await this.persistVariables(vars);
       } catch (err) {

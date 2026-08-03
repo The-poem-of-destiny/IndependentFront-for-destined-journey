@@ -87,7 +87,7 @@ import {
 import { createAssetUrlCache, type AssetUrlCache } from '../lib/asset-url';
 import { useAudioStore } from './audio-store';
 import type { AudioBatchResult } from './audio-store';
-import { useUIStore } from './ui-store';
+import { isQuotaError, notify } from './store-utils';
 import { mutationFail, mutationOk, type MutationResult } from './store-result';
 
 // ═══════════════════════════════════════════════════════════
@@ -330,27 +330,6 @@ function makeBlob(bytes: Uint8Array, mime: string): Blob | null {
   const Ctor = (globalThis as { Blob?: BlobCtorLike }).Blob;
   if (!Ctor) return null;
   return new Ctor([bytes.slice().buffer as ArrayBuffer], { type: mime });
-}
-
-/**
- * 是否是「浏览器存储配额耗尽」。与 audio-store 同判据（标准浏览器抛
- * `QuotaExceededError`，老 Firefox 用 `NS_ERROR_DOM_QUOTA_REACHED`）。
- *
- * 这四行刻意在本地重写而不是从 audio-store 导出: 那边没导出它，而本任务的范围
- * 栅栏禁止改 audio-store。两处判据必须一致，改一处记得改另一处。
- */
-function isQuotaError(e: unknown): boolean {
-  const name = (e as { name?: unknown } | null)?.name;
-  return name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED';
-}
-
-/** 提示的唯一出口；无 Pinia 上下文（测试 / 早期启动）时不该因为一条提示炸掉调用方 */
-function notify(message: string, type: 'info' | 'error'): void {
-  try {
-    useUIStore().toast(message, type);
-  } catch {
-    // 静默：提示失败不能影响主流程的结果
-  }
 }
 
 /**

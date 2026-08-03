@@ -23,6 +23,7 @@ import {
 } from '@engine/database';
 import { saveMessage, getMessages, saveSaveSlot } from '@engine/database';
 import { createStateManager } from '@engine/state-manager';
+import { detach } from './db-write';
 import type { CombatEvent } from '@engine/combat-v2-types';
 
 /** 单条 Agent 调试日志（含完整请求/响应上下文） */
@@ -452,54 +453,69 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
-   * 改写本存档的世界书条目启用轴（`metadata.enabledWorldBookEntries`）。
+   * 改写当前存档的 `metadata` 若干键并落库 —— **三个 UI 辅助字段写入口共用这一份**（Q-16）。
    *
-   * ADR-21 的受控例外（P1-09）：这是**纯 UI 辅助字段**，与 `markOpeningPromptConsumed`
-   * 同一条路径 —— 经本统一写入函数 + try/catch，不裸 `db.put`。AI 产生的存档变更
-   * 仍必须走 `vars_update` 语义 op，不在此例外内。
+   * ADR-21 的受控例外（P1-09）：`metadata` 里这几个是**纯 UI 辅助字段**，允许 UI 层
+   * 直写，但必须走统一写入函数 + try/catch，不裸 `db.put`。AI 产生的存档变更仍必须走
+   * `vars_update` 语义 op，不在此例外内。此前三个公开函数各写一份同形骨架，
+   * 其中两个有并发保护、一个没有 —— 下一个 UI 辅助字段抄到哪份全看运气。
    *
    * 写完同步回内存 `saves`，否则 `activeSave` 仍是旧值，面板会显示成没改动。
+   *
+   * 🔴 `optimistic` **每个调用点显式给值，刻意没有默认值**：给一条本来没有重入风险的
+   * 路径加上乐观写是行为变更而非等价重构（面板会短暂显示一个尚未落库的值）。
+   * - `true`：在第一个 await **之前**写内存，用于要挡住「共享 Store 的第二条管线」
+   *   重复启动的原子认领；失败时按 `updatedAt` 守卫回滚（期间被别人改过就不回滚，
+   *   免得把新值也一起抹掉）。
+   * - `false`：落库成功后才写内存，失败什么也不动。
    */
-  async function setEnabledWorldBookEntries(entries: string[]): Promise<boolean> {
+  async function patchSaveMetadata(
+    patch: Record<string, unknown>,
+    opts: { optimistic: boolean; failMessage: string },
+  ): Promise<boolean> {
     const current = activeSave.value;
     if (!current) return false;
-    const clean = JSON.parse(JSON.stringify(current));
-    clean.metadata = { ...(clean.metadata ?? {}), enabledWorldBookEntries: [...entries] };
+
+    const idx = saves.value.findIndex((save: SaveSlot) => save.id === current.id);
+    if (opts.optimistic && idx < 0) return false;
+
+    const previous = idx >= 0 ? saves.value[idx] : undefined;
+    const clean = detach(current);
+    clean.metadata = { ...(clean.metadata ?? {}), ...patch };
     clean.updatedAt = Date.now();
+
+    if (opts.optimistic) saves.value[idx] = clean;
     try {
       await saveSaveSlot(clean);
-      const idx = saves.value.findIndex((s: SaveSlot) => s.id === clean.id);
-      if (idx >= 0) saves.value[idx] = clean;
+      if (!opts.optimistic && idx >= 0) saves.value[idx] = clean;
       return true;
     } catch (err) {
-      console.error('[game-store] 写入世界书启用轴失败:', err);
+      if (opts.optimistic && previous && saves.value[idx]?.updatedAt === clean.updatedAt) {
+        saves.value[idx] = previous;
+      }
+      console.error(`[game-store] ${opts.failMessage}:`, err);
       return false;
     }
+  }
+
+  /** 改写本存档的世界书条目启用轴（`metadata.enabledWorldBookEntries`） */
+  async function setEnabledWorldBookEntries(entries: string[]): Promise<boolean> {
+    // 非乐观：这条路径没有重入风险，乐观写只会让面板短暂显示一个尚未落库的启用轴
+    return patchSaveMetadata(
+      { enabledWorldBookEntries: [...entries] },
+      { optimistic: false, failMessage: '写入世界书启用轴失败' },
+    );
   }
 
   /** 在生成开始前原子认领开场 Prompt。 */
   async function markOpeningPromptConsumed(): Promise<boolean> {
     const current = activeSave.value;
     if (!current || current.metadata?.openingPromptConsumed) return false;
-
-    const idx = saves.value.findIndex((save: SaveSlot) => save.id === current.id);
-    if (idx < 0) return false;
-
-    const previous = saves.value[idx];
-    const clean = JSON.parse(JSON.stringify(current));
-    clean.metadata = { ...(clean.metadata ?? {}), openingPromptConsumed: true };
-    clean.updatedAt = Date.now();
-
-    // 在第一个 await 之前同步写入内存，阻止共享 Store 的第二条管线重复启动。
-    saves.value[idx] = clean;
-    try {
-      await saveSaveSlot(clean);
-      return true;
-    } catch (err) {
-      if (saves.value[idx]?.updatedAt === clean.updatedAt) saves.value[idx] = previous;
-      console.error('[game-store] 标记开场 Prompt 失败:', err);
-      return false;
-    }
+    // 乐观：内存要在第一个 await 之前就位，否则共享 Store 的第二条管线会重复启动
+    return patchSaveMetadata(
+      { openingPromptConsumed: true },
+      { optimistic: true, failMessage: '标记开场 Prompt 失败' },
+    );
   }
 
   /**
@@ -510,26 +526,11 @@ export const useGameStore = defineStore('game', () => {
    * 归还之后重挂载会重跑开场；调用方负责保证不会重复插同一条用户消息。
    */
   async function releaseOpeningPromptClaim(): Promise<boolean> {
-    const current = activeSave.value;
-    if (!current || !current.metadata?.openingPromptConsumed) return false;
-
-    const idx = saves.value.findIndex((save: SaveSlot) => save.id === current.id);
-    if (idx < 0) return false;
-
-    const previous = saves.value[idx];
-    const clean = JSON.parse(JSON.stringify(current));
-    clean.metadata = { ...(clean.metadata ?? {}), openingPromptConsumed: false };
-    clean.updatedAt = Date.now();
-
-    saves.value[idx] = clean;
-    try {
-      await saveSaveSlot(clean);
-      return true;
-    } catch (err) {
-      if (saves.value[idx]?.updatedAt === clean.updatedAt) saves.value[idx] = previous;
-      console.error('[game-store] 归还开场 Prompt 认领失败:', err);
-      return false;
-    }
+    if (!activeSave.value?.metadata?.openingPromptConsumed) return false;
+    return patchSaveMetadata(
+      { openingPromptConsumed: false },
+      { optimistic: true, failMessage: '归还开场 Prompt 认领失败' },
+    );
   }
 
   // === 选项管理 ===

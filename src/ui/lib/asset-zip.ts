@@ -58,6 +58,7 @@
 
 import { AsyncUnzipInflate, Unzip, zip, type UnzipFile } from 'fflate';
 import { clampAssetFraming, isAssetExtension } from '@engine/asset-types';
+import { basenameOf, normalizeSlashes, normalizedExtensionOf } from '@engine/asset-path';
 import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names';
 import type {
   DecodedEntry,
@@ -255,23 +256,8 @@ export class AssetZipError extends Error {
 // 路径工具
 // ═══════════════════════════════════════════════════════════
 
-/** 斜杠归一化: 部分 Windows 工具会写反斜杠分隔符 */
-function normalizeSlashes(path: string): string {
-  return path.replace(/\\/g, '/');
-}
-
-/** 取 basename（拍平嵌套目录）；纯路径返回空串 */
-function basenameOf(path: string): string {
-  const norm = normalizeSlashes(path);
-  const idx = norm.lastIndexOf('/');
-  return idx === -1 ? norm : norm.slice(idx + 1);
-}
-
-/** 扩展名原文（不含点）；无扩展名返回空串。归一化交给 {@link isImportableName} */
-function extensionOf(basename: string): string {
-  const dot = basename.lastIndexOf('.');
-  return dot > 0 ? basename.slice(dot + 1) : '';
-}
+// Q-16: normalizeSlashes / basenameOf / extensionOf / normalizedExtensionOf
+// 统一在 `@engine/asset-path`（本模块与 asset-import-plan 曾各存一份逐字相同的实现）。
 
 /**
  * 这个 basename 有没有可能成为一行数据 —— 路由闸门的判据。
@@ -279,20 +265,14 @@ function extensionOf(basename: string): string {
  * 🔴 **扩展名要归一化（trim + 小写），名字本身绝不动。** `"苏婉_头像.png "` 的
  * 字面扩展名是 `"png "`，直接查表查不着，于是整条被当噪音丢掉 —— 而它明明是张
  * 合法的 png，且按 D2 名字里的空白必须原样保留。引擎的 `isAssetExtension`
- * 内部本来就 trim（asset-types.ts 的私有 normalizeExtension），本模块曾经比它更严，
- * 那是漂移。这里素材半边**直接调引擎的判据**（口径不可能再分叉），音频半边照同一
- * 套归一化查共享表。
+ * 内部本来就 trim，本模块曾经比它更严，那是漂移 —— Q-16 起两边共用
+ * `asset-path.normalizedExtensionOf`，口径不可能再分叉。这里素材半边**直接调引擎的
+ * 判据**，音频半边照同一套归一化查共享表。
  */
 function isImportableName(basename: string): boolean {
   const ext = normalizedExtensionOf(basename);
   if (!ext) return false;
   return isAssetExtension(ext) || AUDIO_EXTENSIONS.has(ext);
-}
-
-/** 归一化后的扩展名（trim + 去点 + 小写）；无扩展名返回空串。名字本身绝不动 */
-function normalizedExtensionOf(basename: string): string {
-  const raw = extensionOf(basename).trim().toLowerCase();
-  return raw.startsWith('.') ? raw.slice(1) : raw;
 }
 
 /**
