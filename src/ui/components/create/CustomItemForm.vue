@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import type { CatalogItem, Rarity } from '@engine/start-catalog';
+import type { CatalogItem, CatalogRarityCode } from '@engine/start-catalog';
 import { RARITY_LABELS, RARITY_TO_QUALITY } from '@engine/start-catalog';
 import AppModal from '../shared/AppModal.vue';
 import AppButton from '../shared/AppButton.vue';
@@ -39,7 +39,7 @@ const subtypeOptions = computed(() => {
 // 表单
 const itemName = ref('');
 const itemType = ref('武器');
-const itemRarity = ref<Rarity>('common');
+const itemRarity = ref<CatalogRarityCode>('common');
 const itemTag = ref('');
 const itemTagList = ref<string[]>([]);
 const effectKey = ref('');

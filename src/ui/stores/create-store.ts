@@ -33,7 +33,7 @@ import {
   type BackgroundTemplate,
   type DestinyCore,
   type DifficultyPreset,
-  type Rarity,
+  type CatalogRarityCode,
   DIFFICULTY_PRESETS,
   DEFAULT_DESTINY_CORES,
   DEFAULT_BACKGROUNDS,
@@ -512,7 +512,7 @@ export const useCreateStore = defineStore('create', () => {
   const selectedSkills = ref<CatalogItem[]>([]);
 
   const activeCategory = ref<'equipment' | 'item' | 'skill'>('equipment');
-  const rarityFilter = ref<Rarity | 'all'>('all');
+  const rarityFilter = ref<CatalogRarityCode | 'all'>('all');
   const typeFilter = ref<string>('all');
 
   // ═══ 装备/道具/技能 — 运行时从仓库 fetch，保留分组结构 ═══

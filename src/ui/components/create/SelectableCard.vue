@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CatalogItem, Rarity } from '@engine/start-catalog';
+import type { CatalogItem, CatalogRarityCode } from '@engine/start-catalog';
 import { RARITY_TO_QUALITY } from '@engine/start-catalog';
 import type { QualityLevel } from '@engine/types';
 import QualityBadge from '../shared/QualityBadge.vue';

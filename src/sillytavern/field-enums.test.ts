@@ -94,6 +94,17 @@ describe('normalizeRarity', () => {
   it('无法识别返回 undefined', () => {
     expect(normalizeRarity('五彩斑斓')).toBeUndefined();
   });
+  // Q-30 防分叉闸门: start-catalog 池里出现过的每个 rarity 码都必须能被 normalizeRarity 认出。
+  // 若 CDN 数据再出新的稀有度编码而 RARITY_ALIASES 没跟上，此测试红灯即分叉。
+  it('Q-30 闸门: start-catalog 池的每个稀有度编码都能被 normalizeRarity 认出', () => {
+    const catalogCodes = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic', 'only'];
+    for (const code of catalogCodes) {
+      expect(
+        normalizeRarity(code),
+        `start-catalog 编码 ${code} 未被 RARITY_ALIASES 认出`,
+      ).toBeDefined();
+    }
+  });
 });
 
 describe('normalizeQuestStatus', () => {

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import type { Rarity } from '@engine/start-catalog';
+import type { CatalogRarityCode } from '@engine/start-catalog';
 
-defineProps<{ modelValue: Rarity | 'all' }>();
-defineEmits<{ 'update:modelValue': [val: Rarity | 'all'] }>();
+defineProps<{ modelValue: CatalogRarityCode | 'all' }>();
+defineEmits<{ 'update:modelValue': [val: CatalogRarityCode | 'all'] }>();
 
-const FILTER_OPTIONS: { key: Rarity | 'all'; label: string; color: string }[] = [
+const FILTER_OPTIONS: { key: CatalogRarityCode | 'all'; label: string; color: string }[] = [
   { key: 'all', label: '全部', color: 'var(--theme-text-secondary)' },
   { key: 'common', label: '普通', color: 'var(--theme-quality-common)' },
   { key: 'uncommon', label: '优良', color: 'var(--theme-quality-uncommon)' },
