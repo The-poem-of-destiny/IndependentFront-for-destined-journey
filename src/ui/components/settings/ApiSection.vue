@@ -1,0 +1,528 @@
+<script setup lang="ts">
+/**
+ * API 池分区 —— 端点 CRUD / 连接测试 / 模型列表 / 高级设置（Q-25 从 SettingsPage.vue 抽出）
+ *
+ * 📌 添加/编辑弹窗跟着一起搬进来了: 它是本分区**唯一**的写入口，留在壳层就等于
+ *    apiForm 这团状态横跨两个文件。
+ *
+ * 🔴 `initApiSecrets()` 改成本分区挂载时调（原先在整页 onMounted）。它是幂等的，
+ *    且 `api` 是默认分区，所以进设置页仍然会立刻跑一次；切走再回来会多调一次，
+ *    那次直接命中已解密的缓存。
+ */
+import { ref, reactive, onMounted } from 'vue';
+import AppCard from '../shared/AppCard.vue';
+import AppButton from '../shared/AppButton.vue';
+import AppModal from '../shared/AppModal.vue';
+import { useSettingsStore, type ApiEntry } from '../../stores/settings-store';
+import { useUIStore } from '../../stores/ui-store';
+import { fetchModels } from '@engine/api-tools';
+
+const cfg = useSettingsStore();
+const s = cfg.settings;
+const ui = useUIStore();
+
+onMounted(() => {
+  void cfg.initApiSecrets();
+});
+
+const showAddApi = ref(false);
+const apiForm = reactive({
+  name: '',
+  baseUrl: '',
+  apiKey: '',
+  model: '',
+  apiType: 'chat' as 'chat' | 'embedding',
+  enableThinking: false,
+  _realKey: '' as string,
+  _masked: false,
+});
+const apiModels = ref<string[]>([]);
+const showModelList = ref(false);
+// 浮层始终显示全部已获取模型——不按 input 当前值过滤（否则聚焦时旧值会滤掉其他模型，重蹈 datalist 覆辙）。
+// 当前已选模型高亮，用户可从全部列表点选，或继续手动输入。
+function selectModel(m: string) {
+  apiForm.model = m;
+  showModelList.value = false;
+}
+function onModelBlur() {
+  setTimeout(() => {
+    showModelList.value = false;
+  }, 150);
+}
+const showAdvancedApi = ref(false);
+const apiFormTesting = ref(false);
+const apiFormFetchingModels = ref(false);
+const editingApiId = ref<string | null>(null);
+
+function maskKey(key: string): string {
+  if (!key || key.length < 8) return key ? key.slice(0, 3) + '***' : '';
+  return key.slice(0, 3) + '***' + key.slice(-4);
+}
+function onApiKeyInput() {
+  // 用户手动改了 key 输入框：新输入即权威。必须丢弃 _realKey，
+  // 否则测试/获取模型/保存全走 `_realKey || apiKey` 的旧 key，新 key 永远不生效。
+  apiForm._realKey = '';
+  apiForm._masked = false;
+}
+async function testApiAndFetch() {
+  if (!apiForm.baseUrl || !apiForm.apiKey) return;
+  apiFormTesting.value = true;
+  // trim 与 fetchModels 对齐：粘贴带尾随空白/换行的 key 时，避免"获取模型能通、测试反而 401"
+  const realKey = (apiForm._realKey || apiForm.apiKey).trim();
+  try {
+    await fetchModelList({ fromConnectionTest: true });
+    let testModel = apiForm.model;
+    if (!testModel && apiModels.value.length > 0) {
+      if (apiForm.apiType === 'embedding') {
+        const emb = apiModels.value.find((m) => m.toLowerCase().includes('embedding'));
+        testModel = emb || apiModels.value[0];
+      } else {
+        testModel = apiModels.value[0];
+      }
+    }
+    if (!testModel) {
+      ui.toast('未获取到模型，请先点「获取模型」并选择一个模型再测试', 'warning');
+      apiFormTesting.value = false;
+      return;
+    }
+    const testUrl = apiForm.apiType === 'embedding' ? '/api/embeddings' : '/api/chat/test';
+    const testBody =
+      apiForm.apiType === 'embedding'
+        ? JSON.stringify({ model: testModel, input: 'test' })
+        : JSON.stringify({
+            model: testModel,
+            messages: [{ role: 'user', content: 'hi' }],
+            max_tokens: 1,
+          });
+    const r = await fetch(testUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Target-Base-URL': apiForm.baseUrl.replace(/\/+$/, ''),
+        Authorization: 'Bearer ' + realKey,
+      },
+      body: testBody,
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      throw new Error(r.status + ' ' + t.slice(0, 100));
+    }
+    apiForm._realKey = realKey;
+    apiForm.apiKey = maskKey(realKey);
+    apiForm._masked = true;
+    ui.toast('ok', 'success');
+    // 测试通过后兜底重拉一次列表；首次已弹过提示，这次失败保持安静
+    if (apiModels.value.length === 0) await fetchModelList({ silentFail: true });
+  } catch (e: any) {
+    const msg = (e?.message || '').slice(0, 80);
+    const hint =
+      msg.indexOf('401') >= 0
+        ? '（API Key 无效或与该服务不匹配，请按服务商文档核对 key 的来源与格式）'
+        : msg.indexOf('404') >= 0
+          ? '（模型名或接口路径不对，检查 baseUrl/模型）'
+          : '';
+    ui.toast('fail: ' + msg + hint, 'error');
+  }
+  apiFormTesting.value = false;
+}
+async function fetchModelList(opts: { fromConnectionTest?: boolean; silentFail?: boolean } = {}) {
+  if (!apiForm.baseUrl) {
+    return;
+  }
+  apiFormFetchingModels.value = true;
+  const rk = (apiForm._realKey || apiForm.apiKey).trim();
+  try {
+    // 去重：复用 api-tools.fetchModels（同源 /api/models + Bearer/api-key 双鉴权 + 三形态解析）
+    const { models, source, error } = await fetchModels({ baseUrl: apiForm.baseUrl, apiKey: rk });
+    if (source === 'remote' && models.length > 0) {
+      apiModels.value = [...new Set(models)];
+      console.log('[fetchModelList] remote → unique models:', JSON.stringify(apiModels.value));
+      ui.toast(
+        '已获取 ' + apiModels.value.length + ' 个模型，点击输入框下拉选择或手动填写',
+        'success',
+      );
+    } else if (!opts.silentFail) {
+      const msg = (error || 'unknown').slice(0, 100);
+      if (msg.indexOf('404') >= 0) {
+        // 404 独立分支：不是 key 问题——要么端点根本没实现 /models（Cline 等属常态），
+        // 要么主链接填错。从「测试连接」进来时降级为 info（列表只是顺手拉，
+        // 连接测试的权威结果是后面那条 chat 请求），单独点「获取模型」时用 warning。
+        ui.toast(
+          opts.fromConnectionTest
+            ? '该端点没有 /models 模型列表接口（或主链接不正确），已用手填模型继续测试连接'
+            : '该端点没有 /models 模型列表接口（或主链接不正确），请手动填写模型 id',
+          opts.fromConnectionTest ? 'info' : 'warning',
+        );
+      } else {
+        const hint =
+          msg.indexOf('401') >= 0
+            ? '（Key 无效或与端点不匹配，请按服务商文档核对 key 与主链接是否配套）'
+            : msg.indexOf('network') >= 0
+              ? '（代理或网络问题）'
+              : '';
+        ui.toast('获取失败: ' + msg + hint, 'error');
+      }
+    }
+  } catch (e: any) {
+    if (!opts.silentFail) ui.toast('获取失败: ' + (e.message || '').slice(0, 100), 'error');
+  }
+  apiFormFetchingModels.value = false;
+}
+function openAddApi() {
+  editingApiId.value = null;
+  apiForm.name = '';
+  apiForm.baseUrl = '';
+  apiForm.apiKey = '';
+  apiForm.model = '';
+  apiForm.apiType = 'chat';
+  apiForm.enableThinking = false;
+  apiForm._realKey = '';
+  apiForm._masked = false;
+  apiModels.value = [];
+  showAddApi.value = true;
+}
+async function openEditApi(ep: ApiEntry) {
+  await cfg.initApiSecrets();
+  const hydrated = (s.apiPool as ApiEntry[]).find((entry) => entry.id === ep.id) ?? ep;
+  editingApiId.value = ep.id;
+  apiForm.name = hydrated.name;
+  apiForm.baseUrl = hydrated.baseUrl;
+  const key = hydrated.apiKey || '';
+  apiForm.apiKey = key;
+  apiForm._realKey = key;
+  apiForm._masked = key ? true : false;
+  apiForm.model = hydrated.model;
+  apiForm.apiType = hydrated.apiType || 'chat';
+  apiForm.enableThinking = hydrated.enableThinking ?? false;
+  apiModels.value = hydrated.models?.length
+    ? [...hydrated.models]
+    : [hydrated.model].filter(Boolean);
+  showAddApi.value = true;
+}
+async function saveApi() {
+  // trim 防脏存：这里不 trim 的话，带空白的 key 会原样进库，之后每次运行时调用都 401
+  const realKey = (apiForm._realKey || apiForm.apiKey).trim();
+  const e: ApiEntry = {
+    id: editingApiId.value || crypto.randomUUID(),
+    name: apiForm.name,
+    baseUrl: apiForm.baseUrl,
+    apiKey: realKey,
+    maskedKey: maskKey(realKey),
+    model: apiForm.model,
+    models: apiModels.value.length > 0 ? apiModels.value : [apiForm.model].filter(Boolean),
+    apiType: apiForm.apiType,
+    enableThinking: apiForm.enableThinking,
+  };
+  const wasEditing = Boolean(editingApiId.value);
+  try {
+    await cfg.saveApiEntry(e);
+    showAddApi.value = false;
+    editingApiId.value = null;
+    ui.toast(wasEditing ? 'API updated' : 'API added', 'success');
+  } catch (error) {
+    ui.toast(`API 密钥保存失败：${String(error)}`, 'error');
+  }
+}
+async function deleteApi(id: string) {
+  try {
+    await cfg.removeApiEntry(id);
+    ui.toast('API 已删除', 'info');
+  } catch (error) {
+    ui.toast(`API 删除失败：${String(error)}`, 'error');
+  }
+}
+</script>
+
+<template>
+  <section class="section centered">
+    <div class="section-head">
+      <div>
+        <h3>API 池管理</h3>
+        <p class="section-desc">管理 AI 模型连接端点。支持所有 OpenAI 兼容 API。</p>
+      </div>
+      <AppButton variant="primary" size="sm" @click="openAddApi">+ 添加 API</AppButton>
+    </div>
+    <AppCard v-if="cfg.apiSecretsError" padding="md" class="api-storage-error">
+      <p class="api-warn" style="margin: 0">
+        API 密钥安全存储不可用。旧密钥仍保留且本次会话不会覆盖原设置；请检查浏览器存储后重新加载。
+      </p>
+    </AppCard>
+    <div class="api-pool">
+      <AppCard v-for="ep in s.apiPool" :key="ep.id" padding="md"
+        ><div class="api-card-body">
+          <div class="api-card-info">
+            <span class="api-card-name">{{ ep.name }}</span
+            ><span class="api-card-model text-secondary text-sm">{{
+              ep.model || '未选择模型'
+            }}</span
+            ><span class="api-card-url text-muted text-xs">{{ ep.baseUrl }}</span>
+          </div>
+          <div class="api-card-actions">
+            <AppButton variant="ghost" size="sm" @click="openEditApi(ep)">编辑</AppButton
+            ><AppButton variant="ghost" size="sm" @click="deleteApi(ep.id)">删除</AppButton>
+          </div>
+        </div></AppCard
+      >
+      <p
+        v-if="s.apiPool.length === 0"
+        class="text-muted text-sm"
+        style="text-align: center; padding: 24px"
+      >
+        还没有配置 API，点击右上角"添加 API"开始
+      </p>
+    </div>
+    <!-- 模型推荐 -->
+    <AppCard padding="md" class="embedding-hint" style="margin-top: 16px">
+      <p class="text-sm text-muted" style="margin: 0 0 6px"><strong>模型推荐</strong></p>
+      <p class="text-sm text-muted" style="margin: 0 0 4px">
+        对话模型：推荐 <strong>DeepSeek V4 Flash</strong>（快速便宜）或
+        <strong>DeepSeek V4 Pro</strong>（质量优先）。
+      </p>
+      <p class="text-sm text-muted" style="margin: 0">
+        Embedding 模型：推荐 <strong>硅基流动 (SiliconFlow)</strong> 的
+        <strong>Qwen3-VL-Embedding-8B</strong>，充个五块钱能玩到天荒地老。
+      </p>
+    </AppCard>
+
+    <!-- 添加/编辑弹窗留在 <section> 内层：本组件必须是**单根**，否则 Vue 不会把
+         父组件的 scope id 盖到根节点上，SettingsPage 的 `.centered`（780px 居中）
+         就会失效，本分区在宽屏下摊满整行。AppModal 自己 Teleport 到 body，
+         所以挪进来不改变它实际渲染的位置。 -->
+    <AppModal
+      :open="showAddApi"
+      :title="editingApiId ? '编辑 API' : '添加 API'"
+      size="md"
+      @update:open="showAddApi = $event"
+    >
+      <div class="api-form">
+        <label class="form-label"
+          >名称<input
+            v-model="apiForm.name"
+            class="form-input"
+            placeholder="如: DeepSeek 生产" /></label
+        ><label class="form-label"
+          >类型<select v-model="apiForm.apiType" class="form-input">
+            <option value="chat">文本补全 (Chat)</option>
+            <option value="embedding">向量嵌入 (Embedding)</option>
+          </select>
+          <p class="form-hint">
+            Chat 模型用 /chat/completions 测试；Embedding 模型用 /embeddings 测试
+          </p></label
+        ><label class="form-label"
+          >主链接<input
+            v-model="apiForm.baseUrl"
+            class="form-input"
+            placeholder="https://api.deepseek.com/v1" /></label
+        ><label class="form-label"
+          >API Key
+          <div class="key-row">
+            <input
+              v-model="apiForm.apiKey"
+              class="form-input"
+              @input="onApiKeyInput"
+              :type="
+                editingApiId &&
+                apiForm._masked &&
+                (!apiForm._realKey ||
+                  (apiForm.apiKey.length > 10 && apiForm.apiKey.includes('***')))
+                  ? 'password'
+                  : apiForm.apiKey.length > 10 && !apiForm.apiKey.includes('***')
+                    ? 'text'
+                    : 'password'
+              "
+              placeholder="API Key（按服务商提供，不一定是 sk- 开头）"
+            /><AppButton
+              variant="secondary"
+              size="sm"
+              :disabled="apiFormTesting"
+              @click="testApiAndFetch"
+              >{{ apiFormTesting ? '测试中...' : '测试连接' }}</AppButton
+            >
+          </div>
+          <p class="form-hint">
+            编辑已有 API 时密钥默认隐藏。点击测试连接验证密钥并获取模型列表。
+          </p></label
+        ><label class="form-label"
+          >模型
+          <div class="key-row">
+            <div class="model-combo">
+              <input
+                v-model="apiForm.model"
+                class="form-input"
+                placeholder="如 glm-4.6 / deepseek-chat"
+                autocomplete="off"
+                @focus="showModelList = true"
+                @blur="onModelBlur"
+              />
+              <div v-if="showModelList && apiModels.length" class="model-dropdown">
+                <div
+                  v-for="m in apiModels"
+                  :key="m"
+                  class="model-option"
+                  :class="{ 'model-option-current': m === apiForm.model }"
+                  @mousedown.prevent="selectModel(m)"
+                >
+                  {{ m }}
+                </div>
+              </div>
+            </div>
+            <AppButton
+              variant="secondary"
+              size="sm"
+              :disabled="apiFormFetchingModels"
+              @click="fetchModelList"
+              >{{ apiFormFetchingModels ? '获取中...' : '获取模型' }}</AppButton
+            >
+          </div>
+          <p class="form-hint">
+            可手动填写模型 id，或点「获取模型」拉取列表后选择。获取失败时按服务商文档手动填（如 z.ai
+            填 glm-4.6）。
+          </p></label
+        >
+        <!-- 高级设置（可折叠） -->
+        <div class="advanced-section">
+          <button class="advanced-toggle" type="button" @click="showAdvancedApi = !showAdvancedApi">
+            <i class="fa-solid" :class="showAdvancedApi ? 'fa-chevron-up' : 'fa-chevron-down'" />
+            高级设置
+          </button>
+          <div v-if="showAdvancedApi" class="advanced-body">
+            <label class="form-label" style="margin-top: 8px">
+              <span class="form-check-row">
+                <input v-model="apiForm.enableThinking" type="checkbox" />
+                开启思维链 (DeepSeek thinking)
+              </span>
+            </label>
+            <p class="form-hint">
+              启用后每次调用该 API 池的请求都会携带
+              <code>thinking: {"{"} type: 'enabled' {"}"}</code> +
+              <code>reasoning_effort: 'high'</code>，让模型在输出前先进行深度思考。
+            </p>
+          </div>
+        </div>
+      </div>
+      <template #footer
+        ><AppButton variant="ghost" size="sm" @click="showAddApi = false">取消</AppButton
+        ><AppButton variant="primary" size="sm" @click="saveApi">{{
+          editingApiId ? '保存修改' : '添加'
+        }}</AppButton></template
+      >
+    </AppModal>
+  </section>
+</template>
+
+<!-- 共用外壳（.section>h3 / .section-desc / .form-* / .toggle-*）：唯一一份在 settings-chrome.css -->
+<style scoped src="./settings-chrome.css"></style>
+
+<style scoped>
+.model-combo {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.model-combo .form-input {
+  width: 100%;
+}
+.model-dropdown {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: var(--theme-content-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+.model-option {
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--theme-text-primary);
+  transition: background var(--theme-transition-fast);
+}
+.model-option:hover {
+  background: var(--theme-tab-hover-bg);
+}
+.model-option-current {
+  background: color-mix(in srgb, var(--theme-primary) 12%, var(--theme-content-bg));
+  color: var(--theme-primary);
+  font-weight: 600;
+}
+/* API */
+.api-pool {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.api-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+.api-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.api-card-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--theme-text-primary);
+}
+.api-card-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.embedding-hint {
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+}
+/* 高级设置折叠 */
+.advanced-section {
+  margin-top: 2px;
+}
+.advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border: none;
+  background: transparent;
+  color: var(--theme-text-secondary);
+  font-family: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: color var(--theme-transition-fast);
+}
+.advanced-toggle:hover {
+  color: var(--theme-text-primary);
+}
+.advanced-toggle i {
+  font-size: 0.7rem;
+  width: 14px;
+  text-align: center;
+}
+.advanced-body {
+  padding-left: 4px;
+}
+.advanced-body .form-hint code {
+  background: var(--theme-surface-muted);
+  color: var(--theme-primary);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.68rem;
+}
+.form-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--theme-text-secondary);
+  font-size: 0.85rem;
+}
+.form-check-row input[type='checkbox'] {
+  accent-color: var(--theme-primary);
+}
+</style>

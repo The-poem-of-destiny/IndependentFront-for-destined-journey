@@ -483,7 +483,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── useMapViewer.ts              ← OpenSeadragon 生命周期
 │   ├── useMapMarkers.ts             ← 地图标记 CRUD + Overlay 同步
 │   ├── useHoverPopup.ts             ← 悬停浮层唯一实现（读 settings.hoverDelayMs）
-│   └── useAssetImage.ts             ← [素材] 渲染缝：(name,type?) → {url,isVideo,row}，世代号守卫 + 引用计数索引
+│   ├── useAssetImage.ts             ← [素材] 渲染缝：(name,type?) → {url,isVideo,row}，世代号守卫 + 引用计数索引
+│   └── usePlayerPortrait.ts         ← [Q-25] 玩家画像位：立牌链渲染 + 定点导入 + 裁剪台开关
+│                                       （文案一律出自 game/portrait-messages.ts，本层只决定"做什么"）
 │
 ├── lib/                             ← 前端↔引擎桥接层
 │   ├── game-pipeline.ts             ← GamePipeline（AgentConfig 组装/上下文/编排器/回调）
@@ -529,8 +531,21 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── ToastContainer.vue
 │   │   └── form/ (Input/Select/Stepper/Cascader/KeyValue)
 │   ├── home/HomePage.vue            ← 游戏标题画面
-│   ├── settings/
-│   │   ├── SettingsPage.vue         ← 设置页（左侧导航 + 12 分区 + 预设系统）
+│   ├── settings/                    ← [Q-25] 12 分区里 11 个已是一行子组件
+│   │   ├── SettingsPage.vue         ← 壳层：导航 + **Agent 分区**（仅剩这一个内联）
+│   │   │                               🔴 Agent 分区不拆是因为它读写 14 张 per-Agent 并行 map，
+│   │   │                                  那些 map 的形状正是 Q-18 要改的 —— 先拆再改等于拆两遍
+│   │   ├── settings-chrome.css      ← [Q-25] ★共用外壳样式**唯一一份**（.section>h3/.section-desc/
+│   │   │                               .form-*/.toggle-*/.detail-card）。各分区（含壳层）用
+│   │   │                               `<style scoped src>` 引入 —— 一份源码，各自作用域。
+│   │   │                               父组件的 scoped 样式只能命中子组件**根节点**，够不到里面
+│   │   ├── ApiSection.vue           ← API 池 CRUD + 连接测试 + 模型列表（含添加/编辑弹窗）
+│   │   │                               🔴 必须**单根**：弹窗放 <section> 内层，否则父级 `.centered`
+│   │   │                                  命不中根节点，本分区在宽屏下摊满整行（真机走查逮到）
+│   │   ├── WorldBookSection.vue     ← 世界书列表/导入/新建/删除/恢复 + 条目编辑器
+│   │   ├── PlotSection.vue / MemorySection.vue / ThemeSection.vue / MessagesSection.vue
+│   │   ├── DataSection.vue          ← 导出/导入/存储用量/清除全部（用量改为**本分区**挂载时读）
+│   │   ├── AboutSection.vue
 │   │   ├── AudioSection.vue         ← [Audio] 音频分区（壳层 + 5 子组件）
 │   │   └── AssetSection.vue         ← [素材] 素材分区壳层 + 4 子组件
 │   ├── create/CreatePage.vue        ← [占位] 捏人页
@@ -538,6 +553,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── GamePage.vue             ← 游戏页主布局（三栏 + 6 弹窗；持有 --rail-w）
 │   │   ├── MapPanel.vue / TopBar.vue / SideToolbar.vue / ScenePanel.vue / ChatFlow.vue / InputBar.vue
 │   │   ├── StatusHUD.vue / StatusOverview.vue / ItemsPanel.vue / CharacterListPanel.vue
+│   │   ├── portrait-messages.ts     ← [Q-25] 画像导入路径的文案层（纯函数，零副作用，不 mount 可测）
 │   │   ├── QuestsPanel.vue / PlotPanel.vue / MemoryPanel.vue / SnapshotPanel.vue / MiniPlayer.vue
 │   │   ├── WorkshopEnablePanel.vue  ← [工坊] 每存档「内容启用」面板（建档后仍可改）
 │   │   └── (战斗面板见 combat/ 子组件，docs/reference/combat-system-architecture.md)

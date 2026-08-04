@@ -1,8 +1,19 @@
 <script setup lang="ts">
+/**
+ * 设置页壳层 —— 导航 + Agent 分区（Q-25）
+ *
+ * 12 个分区里 11 个已经是一行子组件；只剩 **Agent 配置**还内联在这里，因为它
+ * 要读写 14 张 per-Agent 并行 map（`agentModels` / `agentPrompts` / …），
+ * 而那些 map 的形状正是 Q-18 要改的东西 —— 先拆再改等于拆两遍。
+ * Q-18 落地后照 `settings/audio/` 的样子拆成 `settings/agent/` 目录。
+ *
+ * 分区共用的外壳样式在 `settings-chrome.css`：本页的 `<style scoped>` 只能命中
+ * 自己的模板与子组件的**根节点**，够不到根节点里面，所以那份共用规则由各分区
+ * （含本页）各自 `<style scoped src>` 引入 —— 一份源码，各自作用域。
+ */
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
-import { useThemeStore } from '../../stores/theme-store';
 import { useUIStore } from '../../stores/ui-store';
-import { useSettingsStore, type ApiEntry, type PresetItem } from '../../stores/settings-store';
+import { useSettingsStore, type PresetItem } from '../../stores/settings-store';
 import {
   AGENT_SETTINGS_DEFAULTS,
   getAgentSettings,
@@ -13,25 +24,34 @@ import { useWorldBookStore } from '../../stores/worldbook-store';
 import AppButton from '../shared/AppButton.vue';
 import AppCard from '../shared/AppCard.vue';
 import AppModal from '../shared/AppModal.vue';
-import WorldBookEditor from './WorldBookEditor.vue';
 import TemplatePreview from './TemplatePreview.vue';
-import type { WorldBook } from '@engine/types';
-import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks';
-import { VERSION } from '@engine/index';
 import { getAgentTemplate } from '@engine/agent-templates';
 import { getDefaultTemplate } from '@engine/placeholder-registry';
 import { preprocessPresetForPreview } from '@engine/preset-loader';
-import { fetchModels } from '@engine/api-tools';
+import ApiSection from './ApiSection.vue';
+import WorldBookSection from './WorldBookSection.vue';
+import PlotSection from './PlotSection.vue';
+import MemorySection from './MemorySection.vue';
+import ThemeSection from './ThemeSection.vue';
+import MessagesSection from './MessagesSection.vue';
 import BeautifierSection from './BeautifierSection.vue';
 import AudioSection from './AudioSection.vue';
 import AssetSection from './AssetSection.vue';
+import DataSection from './DataSection.vue';
+import AboutSection from './AboutSection.vue';
 
-const theme = useThemeStore();
 const ui = useUIStore();
 const cfg = useSettingsStore();
 const s = cfg.settings; // 短别名，模板里用 s.xxx
 // Phase 0：书本体在 Dexie，唯一入口是 worldbook-store（`s.worldBooks` 已不存在）
 const wb = useWorldBookStore();
+
+/**
+ * 有没有配好 API —— **两个消费者都在壳层**，所以它没跟着 ApiSection 走：
+ * 左侧 Agent 子导航的红色 `!` 角标，以及 Agent 分区里"没选模型且没配 API"那句提示。
+ * 读的是 store，与 ApiSection 天然同源，不需要跨组件传。
+ */
+const hasApi = computed(() => s.apiPool.length > 0);
 
 // ============================================================
 // 主导航
@@ -66,217 +86,6 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'data', label: '存档数据', icon: 'fa-solid fa-database' },
   { key: 'about', label: '关于', icon: 'fa-solid fa-circle-info' },
 ];
-
-// ============================================================
-// API 池（存于 settings-store，自动持久化）
-// ============================================================
-const hasApi = computed(() => s.apiPool.length > 0);
-const showAddApi = ref(false);
-const apiForm = reactive({
-  name: '',
-  baseUrl: '',
-  apiKey: '',
-  model: '',
-  apiType: 'chat' as 'chat' | 'embedding',
-  enableThinking: false,
-  _realKey: '' as string,
-  _masked: false,
-});
-const apiModels = ref<string[]>([]);
-const showModelList = ref(false);
-// 浮层始终显示全部已获取模型——不按 input 当前值过滤（否则聚焦时旧值会滤掉其他模型，重蹈 datalist 覆辙）。
-// 当前已选模型高亮，用户可从全部列表点选，或继续手动输入。
-function selectModel(m: string) {
-  apiForm.model = m;
-  showModelList.value = false;
-}
-function onModelBlur() {
-  setTimeout(() => {
-    showModelList.value = false;
-  }, 150);
-}
-const showAdvancedApi = ref(false);
-const apiFormTesting = ref(false);
-const apiFormFetchingModels = ref(false);
-const editingApiId = ref<string | null>(null);
-
-function maskKey(key: string): string {
-  if (!key || key.length < 8) return key ? key.slice(0, 3) + '***' : '';
-  return key.slice(0, 3) + '***' + key.slice(-4);
-}
-function onApiKeyInput() {
-  // 用户手动改了 key 输入框：新输入即权威。必须丢弃 _realKey，
-  // 否则测试/获取模型/保存全走 `_realKey || apiKey` 的旧 key，新 key 永远不生效。
-  apiForm._realKey = '';
-  apiForm._masked = false;
-}
-async function testApiAndFetch() {
-  if (!apiForm.baseUrl || !apiForm.apiKey) return;
-  apiFormTesting.value = true;
-  // trim 与 fetchModels 对齐：粘贴带尾随空白/换行的 key 时，避免"获取模型能通、测试反而 401"
-  const realKey = (apiForm._realKey || apiForm.apiKey).trim();
-  try {
-    await fetchModelList({ fromConnectionTest: true });
-    let testModel = apiForm.model;
-    if (!testModel && apiModels.value.length > 0) {
-      if (apiForm.apiType === 'embedding') {
-        const emb = apiModels.value.find((m) => m.toLowerCase().includes('embedding'));
-        testModel = emb || apiModels.value[0];
-      } else {
-        testModel = apiModels.value[0];
-      }
-    }
-    if (!testModel) {
-      ui.toast('未获取到模型，请先点「获取模型」并选择一个模型再测试', 'warning');
-      apiFormTesting.value = false;
-      return;
-    }
-    const testUrl = apiForm.apiType === 'embedding' ? '/api/embeddings' : '/api/chat/test';
-    const testBody =
-      apiForm.apiType === 'embedding'
-        ? JSON.stringify({ model: testModel, input: 'test' })
-        : JSON.stringify({
-            model: testModel,
-            messages: [{ role: 'user', content: 'hi' }],
-            max_tokens: 1,
-          });
-    const r = await fetch(testUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Target-Base-URL': apiForm.baseUrl.replace(/\/+$/, ''),
-        Authorization: 'Bearer ' + realKey,
-      },
-      body: testBody,
-    });
-    if (!r.ok) {
-      const t = await r.text().catch(() => '');
-      throw new Error(r.status + ' ' + t.slice(0, 100));
-    }
-    apiForm._realKey = realKey;
-    apiForm.apiKey = maskKey(realKey);
-    apiForm._masked = true;
-    ui.toast('ok', 'success');
-    // 测试通过后兜底重拉一次列表；首次已弹过提示，这次失败保持安静
-    if (apiModels.value.length === 0) await fetchModelList({ silentFail: true });
-  } catch (e: any) {
-    const msg = (e?.message || '').slice(0, 80);
-    const hint =
-      msg.indexOf('401') >= 0
-        ? '（API Key 无效或与该服务不匹配，请按服务商文档核对 key 的来源与格式）'
-        : msg.indexOf('404') >= 0
-          ? '（模型名或接口路径不对，检查 baseUrl/模型）'
-          : '';
-    ui.toast('fail: ' + msg + hint, 'error');
-  }
-  apiFormTesting.value = false;
-}
-async function fetchModelList(opts: { fromConnectionTest?: boolean; silentFail?: boolean } = {}) {
-  if (!apiForm.baseUrl) {
-    return;
-  }
-  apiFormFetchingModels.value = true;
-  const rk = (apiForm._realKey || apiForm.apiKey).trim();
-  try {
-    // 去重：复用 api-tools.fetchModels（同源 /api/models + Bearer/api-key 双鉴权 + 三形态解析）
-    const { models, source, error } = await fetchModels({ baseUrl: apiForm.baseUrl, apiKey: rk });
-    if (source === 'remote' && models.length > 0) {
-      apiModels.value = [...new Set(models)];
-      console.log('[fetchModelList] remote → unique models:', JSON.stringify(apiModels.value));
-      ui.toast(
-        '已获取 ' + apiModels.value.length + ' 个模型，点击输入框下拉选择或手动填写',
-        'success',
-      );
-    } else if (!opts.silentFail) {
-      const msg = (error || 'unknown').slice(0, 100);
-      if (msg.indexOf('404') >= 0) {
-        // 404 独立分支：不是 key 问题——要么端点根本没实现 /models（Cline 等属常态），
-        // 要么主链接填错。从「测试连接」进来时降级为 info（列表只是顺手拉，
-        // 连接测试的权威结果是后面那条 chat 请求），单独点「获取模型」时用 warning。
-        ui.toast(
-          opts.fromConnectionTest
-            ? '该端点没有 /models 模型列表接口（或主链接不正确），已用手填模型继续测试连接'
-            : '该端点没有 /models 模型列表接口（或主链接不正确），请手动填写模型 id',
-          opts.fromConnectionTest ? 'info' : 'warning',
-        );
-      } else {
-        const hint =
-          msg.indexOf('401') >= 0
-            ? '（Key 无效或与端点不匹配，请按服务商文档核对 key 与主链接是否配套）'
-            : msg.indexOf('network') >= 0
-              ? '（代理或网络问题）'
-              : '';
-        ui.toast('获取失败: ' + msg + hint, 'error');
-      }
-    }
-  } catch (e: any) {
-    if (!opts.silentFail) ui.toast('获取失败: ' + (e.message || '').slice(0, 100), 'error');
-  }
-  apiFormFetchingModels.value = false;
-}
-function openAddApi() {
-  editingApiId.value = null;
-  apiForm.name = '';
-  apiForm.baseUrl = '';
-  apiForm.apiKey = '';
-  apiForm.model = '';
-  apiForm.apiType = 'chat';
-  apiForm.enableThinking = false;
-  apiForm._realKey = '';
-  apiForm._masked = false;
-  apiModels.value = [];
-  showAddApi.value = true;
-}
-async function openEditApi(ep: ApiEntry) {
-  await cfg.initApiSecrets();
-  const hydrated = (s.apiPool as ApiEntry[]).find((entry) => entry.id === ep.id) ?? ep;
-  editingApiId.value = ep.id;
-  apiForm.name = hydrated.name;
-  apiForm.baseUrl = hydrated.baseUrl;
-  const key = hydrated.apiKey || '';
-  apiForm.apiKey = key;
-  apiForm._realKey = key;
-  apiForm._masked = key ? true : false;
-  apiForm.model = hydrated.model;
-  apiForm.apiType = hydrated.apiType || 'chat';
-  apiForm.enableThinking = hydrated.enableThinking ?? false;
-  apiModels.value = hydrated.models?.length
-    ? [...hydrated.models]
-    : [hydrated.model].filter(Boolean);
-  showAddApi.value = true;
-}
-async function saveApi() {
-  // trim 防脏存：这里不 trim 的话，带空白的 key 会原样进库，之后每次运行时调用都 401
-  const realKey = (apiForm._realKey || apiForm.apiKey).trim();
-  const e: ApiEntry = {
-    id: editingApiId.value || crypto.randomUUID(),
-    name: apiForm.name,
-    baseUrl: apiForm.baseUrl,
-    apiKey: realKey,
-    maskedKey: maskKey(realKey),
-    model: apiForm.model,
-    models: apiModels.value.length > 0 ? apiModels.value : [apiForm.model].filter(Boolean),
-    apiType: apiForm.apiType,
-    enableThinking: apiForm.enableThinking,
-  };
-  const wasEditing = Boolean(editingApiId.value);
-  try {
-    await cfg.saveApiEntry(e);
-    showAddApi.value = false;
-    editingApiId.value = null;
-    ui.toast(wasEditing ? 'API updated' : 'API added', 'success');
-  } catch (error) {
-    ui.toast(`API 密钥保存失败：${String(error)}`, 'error');
-  }
-}
-async function deleteApi(id: string) {
-  try {
-    await cfg.removeApiEntry(id);
-    ui.toast('API 已删除', 'info');
-  } catch (error) {
-    ui.toast(`API 删除失败：${String(error)}`, 'error');
-  }
-}
 
 // ============================================================
 // Agent 配置
@@ -316,12 +125,10 @@ const agentList = [
 ];
 const activeAgent = ref<string | null>(s.activeAgent);
 
-// Phase 8: 世界书编辑
-const activeWorldBook = ref<WorldBook | null>(null);
-
 // Phase 0: 保证进设置页时世界书已就绪（init() 幂等，App.vue 已踢过一次）
+// Agent 分区的"这个 Agent 能看哪几本"勾选列表要用它；API 密钥的解密改由
+// ApiSection 自己在挂载时踢（Q-25）。
 onMounted(() => {
-  void cfg.initApiSecrets();
   void wb.init().catch(() => {
     /* 世界书装不起来不该拦住设置页其它分区 */
   });
@@ -998,158 +805,6 @@ async function restoreAgentDefaults() {
   ui.toast('已恢复默认设置', 'info');
 }
 
-// Phase 8: 世界书管理
-/** 保存内置世界书 → 写回 data/worldbooks/{id}.json（需要开发服务器运行） */
-async function saveWorldBookAsDefault(book: WorldBook) {
-  if (!book.builtIn) {
-    ui.toast('只有内置世界书可以保存为默认', 'warning');
-    return;
-  }
-  try {
-    const payload = { ...book, builtIn: true };
-    const res = await fetch(`/api/worldbooks/${book.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload, null, 2),
-    });
-    if (res.ok) {
-      ui.toast(`已将"${book.name}"保存为项目默认`, 'success');
-    } else {
-      ui.toast(`保存失败 (${res.status})`, 'error');
-    }
-  } catch {
-    ui.toast('保存失败，请确认开发服务器正在运行', 'error');
-  }
-}
-
-/** 重置单本内置世界书 → 删除用户副本，重新从本地 JSON 加载 */
-async function resetSingleWorldBook(id: string) {
-  const book = wb.getBook(id);
-  if (!book?.builtIn) return;
-  if (!confirm(`确定将"${book.name}"恢复为默认吗？\n\n您对该书的所有修改将被清除。`)) return;
-  try {
-    // 先取到干净版本再落库：加载不到就什么都不动，绝不先删了再发现拿不回来
-    const builtIn = await loadBuiltInWorldBooks();
-    const fresh = builtIn.find((b) => b.id === id);
-    if (!fresh) {
-      ui.toast('恢复失败：未找到内置版本', 'error');
-      return;
-    }
-    await wb.upsertBook(fresh);
-    if (activeWorldBook.value?.id === id) activeWorldBook.value = wb.getBook(id) ?? null;
-    ui.toast(`"${book.name}"已恢复为默认`, 'success');
-  } catch {
-    ui.toast('恢复失败', 'error');
-  }
-}
-
-async function importWorldBook() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.json';
-  input.onchange = async (e) => {
-    const f = (e.target as HTMLInputElement).files?.[0];
-    if (!f) return;
-    try {
-      const raw = JSON.parse(await f.text());
-      const book: WorldBook = {
-        id: f.name.replace(/\.json$/i, ''),
-        name: raw.name || f.name.replace(/\.json$/i, ''),
-        partition: 'world_setting',
-        description: raw.description || '',
-        entries: Array.isArray(raw.entries)
-          ? raw.entries.map((e: any) => ({
-              uid: e.uid || Date.now(),
-              name: e.name || e.comment || '',
-              content: e.content || '',
-              enabled: e.enabled !== false,
-              constant: e.constant || false,
-              key: e.key || [],
-              keysecondary: e.keysecondary || [],
-              selectiveLogic: e.selectiveLogic ?? 0,
-              order: e.order ?? 100,
-              position: e.position ?? 0,
-            }))
-          : [],
-      };
-      await wb.upsertBook(book);
-      ui.toast(`已导入 "${book.name}" (${book.entries.length} 条目)`, 'success');
-    } catch {
-      ui.toast('导入失败：文件格式错误', 'error');
-    }
-  };
-  input.click();
-}
-
-async function newWorldBook() {
-  const name = prompt('世界书名称：');
-  if (!name) return;
-  const id = name.toLowerCase().replace(/\s+/g, '_');
-  const book: WorldBook = {
-    id,
-    name,
-    partition: 'world_setting',
-    entries: [],
-  };
-  try {
-    await wb.upsertBook(book);
-  } catch {
-    ui.toast('创建失败', 'error');
-    return;
-  }
-  activeWorldBook.value = wb.getBook(id) ?? book;
-  ui.toast(`已创建 "${name}"`, 'success');
-}
-
-async function deleteWorldBook(id: string) {
-  const book = wb.getBook(id);
-  if (!book) return;
-  if (
-    !confirm(
-      `确定删除世界书"${book.name}"吗？将删除全部 ${book.entries?.length || 0} 条条目，此操作不可撤销。`,
-    )
-  )
-    return;
-  try {
-    await wb.deleteBook(id);
-  } catch {
-    ui.toast('删除失败', 'error');
-    return;
-  }
-  if (activeWorldBook.value?.id === id) activeWorldBook.value = null;
-  ui.toast(`已删除"${book.name}"`, 'warning');
-}
-
-function closeWorldBookEditor() {
-  activeWorldBook.value = null;
-}
-
-async function resetWorldBooks() {
-  if (
-    !confirm(
-      '确定恢复所有世界书为默认吗？\n\n这将清除所有修改和导入的世界书，重新加载内置版本。此操作不可撤销。',
-    )
-  )
-    return;
-  try {
-    await cfg.resetWorldBooksToDefaults();
-    activeWorldBook.value = null;
-    ui.toast('世界书已恢复为默认', 'success');
-  } catch {
-    ui.toast('恢复失败，请检查 data/worldbooks/ 目录', 'error');
-  }
-}
-
-async function handleWorldBookUpdate(updated: WorldBook) {
-  try {
-    await wb.upsertBook(updated);
-  } catch {
-    ui.toast('保存失败', 'error');
-    return;
-  }
-  ui.toast('世界书已保存', 'success');
-}
-
 function toggleAgentWorldBook(agentId: string | null, bookId: string) {
   if (!agentId) return;
   const ids = s.agentWorldbookIds[agentId] || [];
@@ -1161,116 +816,6 @@ function toggleAgentWorldBook(agentId: string | null, bookId: string) {
   }
   s.agentWorldbookIds[agentId] = [...ids];
   s.agentDirty[agentId] = true;
-}
-
-// ============================================================
-// 剧情系统（存于 settings-store，自动持久化）
-// ============================================================
-const showPlotPreview = ref(false);
-const genreOptions = [
-  { value: 'combat', label: '战斗', desc: '侧重战斗冲突与力量成长' },
-  { value: 'mystery', label: '解谜', desc: '侧重悬疑推理与真相揭露' },
-  { value: 'social', label: '社交', desc: '侧重势力博弈与人际关系' },
-  { value: 'romance', label: '恋爱', desc: '侧重情感发展与羁绊建立' },
-  { value: 'exploration', label: '探索', desc: '侧重地图探索与未知发现' },
-  { value: 'politics', label: '权谋', desc: '侧重政治斗争与权力更迭' },
-  { value: 'survival', label: '生存', desc: '侧重资源管理与逆境求生' },
-  { value: 'tragedy', label: '悲剧', desc: '侧重命运无常与英雄陨落' },
-];
-function toggleGenre(g: string) {
-  const i = s.plotGenrePreference.indexOf(g);
-  if (i >= 0) s.plotGenrePreference.splice(i, 1);
-  else s.plotGenrePreference.push(g);
-}
-const plotDifficultyOptions = [
-  { value: 'adaptive', label: '动态（根据玩家层级）' },
-  { value: '1', label: 'T1 普通' },
-  { value: '2', label: 'T2 中坚' },
-  { value: '3', label: 'T3 精英' },
-  { value: '4', label: 'T4 史诗' },
-  { value: '5', label: 'T5 传说' },
-  { value: '6', label: 'T6 神话' },
-  { value: '7', label: 'T7 神祇' },
-];
-
-// ============================================================
-// 主题 & 数据 & 关于
-// ============================================================
-function selectTheme(id: string) {
-  theme.apply(id);
-  ui.toast(`主题：${theme.currentTheme?.nameZh}`, 'success');
-}
-function eventFilterLabel(key: string | number): string {
-  const labels: Record<string, string> = {
-    craft: '制作完成',
-    char_gen: '新角色加入',
-    item_gen: '新物品获得',
-    combat: '战斗结果',
-    character_update: '角色微调',
-    item_update: '物品变动',
-    quest_update: '任务进度',
-  };
-  return labels[String(key)] ?? String(key);
-}
-const showClearConfirm = ref(false);
-const storageInfo = ref<{ used: number; quota: number; pct: number } | null>(null);
-async function loadStorageUsage() {
-  storageInfo.value = await cfg.getStorageUsage();
-}
-onMounted(loadStorageUsage);
-function fmtBytes(b: number) {
-  if (b < 1024) return `${b} B`;
-  if (b < 1048576) return `${(b / 1024).toFixed(1)} KB`;
-  return `${(b / 1048576).toFixed(1)} MB`;
-}
-async function exportAll() {
-  const { exportAllData } = await import('@engine/database');
-  const d = await exportAllData();
-  const b = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
-  const u = URL.createObjectURL(b);
-  const a = document.createElement('a');
-  a.href = u;
-  a.download = `fated-poem-${Date.now()}.json`;
-  a.click();
-  URL.revokeObjectURL(u);
-  ui.toast('导出成功', 'success');
-}
-async function importAll() {
-  const i = document.createElement('input');
-  i.type = 'file';
-  i.accept = '.json';
-  i.onchange = async (e) => {
-    const f = (e.target as HTMLInputElement).files?.[0];
-    if (!f) return;
-    try {
-      const { importAllData } = await import('@engine/database');
-      await importAllData(JSON.parse(await f.text()));
-      await cfg.reloadApiEntries();
-      ui.toast('导入成功', 'success');
-      await loadStorageUsage();
-    } catch {
-      ui.toast('导入失败', 'error');
-    }
-  };
-  i.click();
-}
-/**
- * 清除全部数据。
- *
- * 🔴 这里以前解构的是 `deleteDatabase` —— database.ts 从来没导出过这个名字，
- * 于是 `await deleteDatabase()` 必然 TypeError，抛在弹窗关闭与 toast **之前**：
- * 弹窗不关、没有提示、一个字节也没删，用户只看见"点了没反应"。`tsc` 拦不住它，
- * 因为项目的 typecheck 是裸 tsc，不解析 .vue 模板与 script setup 之外的类型流。
- * 真名是 `clearAllData()`（`db.delete()` 整库删除 + dbInstance 置空，含 assetMeta /
- * assetBlobs / audio* 全部表）。守护测试见 SettingsPage.engine-imports.test.ts。
- */
-async function clearAll() {
-  const { clearAllData } = await import('@engine/database');
-  await clearAllData();
-  cfg.resetAll();
-  showClearConfirm.value = false;
-  ui.toast('数据已清除，页面即将刷新', 'warning');
-  setTimeout(() => location.reload(), 1500);
 }
 </script>
 
@@ -1325,59 +870,7 @@ async function clearAll() {
         <Transition name="section-fade" mode="out-in">
           <div :key="activeSection" class="section-wrapper">
             <!-- ========== API 池 ========== -->
-            <section v-if="activeSection === 'api'" class="section centered">
-              <div class="section-head">
-                <div>
-                  <h3>API 池管理</h3>
-                  <p class="section-desc">管理 AI 模型连接端点。支持所有 OpenAI 兼容 API。</p>
-                </div>
-                <AppButton variant="primary" size="sm" @click="openAddApi">+ 添加 API</AppButton>
-              </div>
-              <AppCard v-if="cfg.apiSecretsError" padding="md" class="api-storage-error">
-                <p class="api-warn" style="margin: 0">
-                  API
-                  密钥安全存储不可用。旧密钥仍保留且本次会话不会覆盖原设置；请检查浏览器存储后重新加载。
-                </p>
-              </AppCard>
-              <div class="api-pool">
-                <AppCard v-for="ep in s.apiPool" :key="ep.id" padding="md"
-                  ><div class="api-card-body">
-                    <div class="api-card-info">
-                      <span class="api-card-name">{{ ep.name }}</span
-                      ><span class="api-card-model text-secondary text-sm">{{
-                        ep.model || '未选择模型'
-                      }}</span
-                      ><span class="api-card-url text-muted text-xs">{{ ep.baseUrl }}</span>
-                    </div>
-                    <div class="api-card-actions">
-                      <AppButton variant="ghost" size="sm" @click="openEditApi(ep)">编辑</AppButton
-                      ><AppButton variant="ghost" size="sm" @click="deleteApi(ep.id)"
-                        >删除</AppButton
-                      >
-                    </div>
-                  </div></AppCard
-                >
-                <p
-                  v-if="s.apiPool.length === 0"
-                  class="text-muted text-sm"
-                  style="text-align: center; padding: 24px"
-                >
-                  还没有配置 API，点击右上角"添加 API"开始
-                </p>
-              </div>
-              <!-- 模型推荐 -->
-              <AppCard padding="md" class="embedding-hint" style="margin-top: 16px">
-                <p class="text-sm text-muted" style="margin: 0 0 6px"><strong>模型推荐</strong></p>
-                <p class="text-sm text-muted" style="margin: 0 0 4px">
-                  对话模型：推荐 <strong>DeepSeek V4 Flash</strong>（快速便宜）或
-                  <strong>DeepSeek V4 Pro</strong>（质量优先）。
-                </p>
-                <p class="text-sm text-muted" style="margin: 0">
-                  Embedding 模型：推荐 <strong>硅基流动 (SiliconFlow)</strong> 的
-                  <strong>Qwen3-VL-Embedding-8B</strong>，充个五块钱能玩到天荒地老。
-                </p>
-              </AppCard>
-            </section>
+            <ApiSection v-if="activeSection === 'api'" />
 
             <!-- ========== Agent 详情 ========== -->
             <section v-if="activeSection === 'agent' && activeAgent" class="section centered">
@@ -1878,497 +1371,19 @@ async function clearAll() {
             </section>
 
             <!-- ========== 世界书 (Phase 8) ========== -->
-            <section v-if="activeSection === 'worldbook'" class="section centered">
-              <!-- 编辑模式：显示条目编辑器 -->
-              <WorldBookEditor
-                v-if="activeWorldBook"
-                :book="activeWorldBook"
-                :readonly="(activeWorldBook.builtIn && !s.allowEditBuiltInBooks) || false"
-                @back="closeWorldBookEditor"
-                @update="handleWorldBookUpdate"
-              />
-
-              <!-- 列表模式 -->
-              <template v-else>
-                <div class="section-head">
-                  <div>
-                    <h3>世界书管理</h3>
-                    <p class="section-desc">管理世界书条目，为 Agent 提供世界观上下文。</p>
-                  </div>
-                  <div class="worldbook-toolbar">
-                    <label
-                      class="toggle-label protection-toggle"
-                      :title="
-                        s.allowEditBuiltInBooks
-                          ? '内置书当前可编辑，点击恢复只读保护'
-                          : '内置书当前受只读保护，点击允许编辑'
-                      "
-                    >
-                      <span class="toggle-label-text">{{
-                        s.allowEditBuiltInBooks ? '可编辑' : '只读保护'
-                      }}</span>
-                      <input
-                        v-model="s.allowEditBuiltInBooks"
-                        type="checkbox"
-                        class="toggle-input"
-                      />
-                      <span class="toggle-slider"></span>
-                    </label>
-                    <div class="worldbook-actions">
-                      <AppButton variant="secondary" size="sm" @click="importWorldBook"
-                        >导入ST世界书</AppButton
-                      >
-                      <AppButton variant="primary" size="sm" @click="newWorldBook"
-                        >+ 新建世界书</AppButton
-                      >
-                      <AppButton
-                        variant="ghost"
-                        size="sm"
-                        style="color: var(--color-warning)"
-                        @click="resetWorldBooks"
-                        >⟳ 恢复默认</AppButton
-                      >
-                    </div>
-                  </div>
-                </div>
-
-                <AppCard v-if="wb.books.length === 0" padding="md">
-                  <p class="text-muted text-sm" style="text-align: center; padding: 40px 0">
-                    暂无世界书<br />
-                    <span style="font-size: 0.75rem"
-                      >点击右上角"导入ST世界书"或"新建世界书"开始</span
-                    >
-                  </p>
-                </AppCard>
-
-                <div v-else class="worldbook-list">
-                  <AppCard
-                    v-for="book in wb.books"
-                    :key="book.id"
-                    padding="md"
-                    class="worldbook-card"
-                  >
-                    <div class="wb-info">
-                      <h4>
-                        <i
-                          class="fa-solid fa-book"
-                          aria-hidden="true"
-                          style="margin-right: 6px; opacity: 0.6"
-                        ></i
-                        >{{ book.name }}
-                        <span v-if="book.builtIn" class="builtin-badge">内置</span>
-                      </h4>
-                      <p class="text-sm text-muted">{{ book.description || book.partition }}</p>
-                      <span class="text-sm text-muted">{{ book.entries?.length || 0 }} 条目</span>
-                    </div>
-                    <div style="display: flex; gap: 8px">
-                      <AppButton
-                        v-if="!book.builtIn"
-                        variant="danger"
-                        size="sm"
-                        @click="deleteWorldBook(book.id)"
-                      >
-                        <i class="fa-solid fa-trash" aria-hidden="true"></i>
-                      </AppButton>
-                      <AppButton
-                        v-if="book.builtIn && s.allowEditBuiltInBooks"
-                        variant="ghost"
-                        size="sm"
-                        @click="saveWorldBookAsDefault(book)"
-                      >
-                        保存为默认
-                      </AppButton>
-                      <AppButton
-                        v-if="book.builtIn"
-                        variant="ghost"
-                        size="sm"
-                        style="color: var(--color-warning)"
-                        @click="resetSingleWorldBook(book.id)"
-                      >
-                        重置
-                      </AppButton>
-                      <AppButton variant="secondary" size="sm" @click="activeWorldBook = book">
-                        <i
-                          v-if="book.builtIn"
-                          class="fa-solid fa-eye"
-                          aria-hidden="true"
-                          style="margin-right: 4px"
-                        ></i>
-                        浏览
-                        <i
-                          class="fa-solid fa-arrow-right"
-                          aria-hidden="true"
-                          style="margin-left: 4px"
-                        ></i>
-                      </AppButton>
-                    </div>
-                  </AppCard>
-                </div>
-              </template>
-            </section>
+            <WorldBookSection v-if="activeSection === 'worldbook'" />
 
             <!-- ========== 剧情系统 ========== -->
-            <section v-if="activeSection === 'plot'" class="section centered">
-              <h3>剧情系统</h3>
-              <p class="section-desc">
-                控制剧情生成模式、大纲和事件参数。对应 Agent：剧情预检 / 剧情修正 / 大纲生成
-              </p>
-              <p class="plot-defaults-note">
-                此处为「新档默认值」——每个存档可在捏人页「剧情规划」步骤单独调整，互不影响。
-              </p>
-              <!-- 剧情偏向 — 最上面 -->
-              <AppCard padding="md" class="detail-card"
-                ><h4>剧情偏向</h4>
-                <p class="form-hint">选择一个或多个你喜欢的剧情方向，AI 会优先往这些方向发展。</p>
-                <div class="genre-grid">
-                  <label
-                    v-for="g in genreOptions"
-                    :key="g.value"
-                    class="genre-chip"
-                    :class="{ 'genre-active': s.plotGenrePreference.includes(g.value) }"
-                    @click="toggleGenre(g.value)"
-                    ><span class="genre-chip-label">{{ g.label }}</span
-                    ><span class="genre-chip-desc">{{ g.desc }}</span></label
-                  >
-                </div></AppCard
-              >
-              <!-- 模式 & 参数 -->
-              <AppCard padding="md" class="detail-card" style="margin-top: 16px"
-                ><h4>剧情模式 & 参数</h4>
-                <div class="form-grid">
-                  <label class="form-label"
-                    >剧情模式
-                    <p class="form-hint">选择剧情系统的运行模式</p>
-                    <select v-model="s.plotMode" class="form-input">
-                      <option value="off">完全关闭 — 不生成任何剧情事件</option>
-                      <option value="side">仅支线 — 每年自动生成地区冲突事件</option>
-                      <option value="main">主线模式 — 按大纲推进完整主线剧情</option>
-                    </select></label
-                  >
-                  <template v-if="s.plotMode === 'main'">
-                    <label class="form-label"
-                      >主线持续年份
-                      <p class="form-hint">主线剧情覆盖的游戏年份数</p>
-                      <input
-                        v-model.number="s.plotDurationYears"
-                        type="number"
-                        min="1"
-                        max="50"
-                        class="form-input"
-                    /></label>
-                    <label class="form-label"
-                      >事件难度层级
-                      <p class="form-hint">动态 = 根据玩家当前层级自动调整</p>
-                      <select v-model="s.plotDifficultyTier" class="form-input">
-                        <option v-for="o in plotDifficultyOptions" :key="o.value" :value="o.value">
-                          {{ o.label }}
-                        </option>
-                      </select></label
-                    >
-                    <label class="form-label"
-                      >引入外部 NPC
-                      <p class="form-hint">允许 AI 在世界书之外创造新角色</p>
-                      <select v-model="s.plotAllowNonWorldbookNpc" class="form-input">
-                        <option :value="true">允许 — 剧情更丰富但可能偏离设定</option>
-                        <option :value="false">禁止 — 仅使用世界书内角色</option>
-                      </select></label
-                    >
-                    <label class="form-label" style="grid-column: 1/-1"
-                      >自定义偏好
-                      <p class="form-hint">用自然语言描述你想要的剧情风格</p>
-                      <textarea
-                        v-model="s.plotCustomPreference"
-                        class="form-input form-textarea"
-                        rows="2"
-                        placeholder="例如：希望主角经历一场背叛后重新振作..."
-                      />
-                    </label>
-                    <label class="form-label"
-                      >章节数量
-                      <p class="form-hint">主线推荐 3~5 章，0 = AI 自行判断</p>
-                      <input
-                        v-model.number="s.plotChapterCount"
-                        type="number"
-                        min="0"
-                        max="20"
-                        class="form-input"
-                    /></label>
-                    <label class="form-label"
-                      >每章事件数
-                      <p class="form-hint">主线推荐 3~5 个，0 = AI 自行判断</p>
-                      <input
-                        v-model.number="s.plotEventsPerChapter"
-                        type="number"
-                        min="0"
-                        max="20"
-                        class="form-input"
-                    /></label>
-                  </template>
-                  <template v-if="s.plotMode === 'side'">
-                    <label class="form-label"
-                      >专注区域
-                      <p class="form-hint">支线剧情优先围绕此区域生成，留空 = 当前区域</p>
-                      <input
-                        v-model="s.plotFocusRegion"
-                        class="form-input"
-                        placeholder="留空=当前区域"
-                    /></label>
-                    <label class="form-label"
-                      >章节数量
-                      <p class="form-hint">支线推荐 1~3 章，0 = AI 自行判断</p>
-                      <input
-                        v-model.number="s.plotChapterCount"
-                        type="number"
-                        min="0"
-                        max="20"
-                        class="form-input"
-                    /></label>
-                    <label class="form-label"
-                      >每章事件数
-                      <p class="form-hint">支线推荐 2~4 个，0 = AI 自行判断</p>
-                      <input
-                        v-model.number="s.plotEventsPerChapter"
-                        type="number"
-                        min="0"
-                        max="20"
-                        class="form-input"
-                    /></label>
-                  </template>
-                  <label v-if="s.plotMode !== 'off'" class="form-label" style="grid-column: 1/-1"
-                    >雷点（绝对禁止生成的内容）
-                    <p class="form-hint">仅在生成剧情大纲时生效，优先级高于一切剧情偏好</p>
-                    <textarea
-                      v-model="s.plotTabooContent"
-                      class="form-input form-textarea"
-                      rows="2"
-                      placeholder="例如：不要出现重要角色永久死亡、不要虐待动物的情节..."
-                    />
-                  </label>
-                </div>
-              </AppCard>
-              <!-- 大纲预览 -->
-              <AppCard
-                padding="md"
-                class="detail-card plot-preview-card"
-                :class="{ 'plot-revealed': showPlotPreview }"
-                style="margin-top: 16px"
-              >
-                <div class="plot-preview-header">
-                  <h4>剧情大纲预览</h4>
-                  <AppButton
-                    variant="ghost"
-                    size="sm"
-                    @click="showPlotPreview = !showPlotPreview"
-                    >{{ showPlotPreview ? '隐藏' : '点击查看（防剧透）' }}</AppButton
-                  >
-                </div>
-                <div class="plot-preview-body" :class="{ 'plot-blur': !showPlotPreview }">
-                  <p class="text-muted text-sm"><strong>第一年 — 序章：命定之始</strong></p>
-                  <p class="text-muted text-sm">
-                    主角在起始地点觉醒命运之力，遭遇第一次重大抉择...
-                  </p>
-                  <p class="text-muted text-sm"><strong>第二年 — 崛起：风云际会</strong></p>
-                  <p class="text-muted text-sm">与各大势力接触，逐步揭开世界背后的真相...</p>
-                  <p class="text-muted text-sm"><strong>第三年 — 转折：命运分叉</strong></p>
-                  <p class="text-muted text-sm">关键盟友背叛/牺牲，主线走向出现重大分支...</p>
-                  <p class="text-muted text-sm"><strong>第四年 — 高潮：诸神黄昏</strong></p>
-                  <p class="text-muted text-sm">最终决战前夕，所有伏笔回收，各方势力集结...</p>
-                  <p class="text-muted text-sm"><strong>第五年 — 终章：命定之诗</strong></p>
-                  <p class="text-muted text-sm">完成主线任务，世界线尘埃落定，角色结局生成...</p>
-                </div>
-                <p class="text-xs text-muted" style="margin-top: 8px">
-                  以上为示例大纲。实际内容由 AI 在游戏开始时生成。点击可切换模糊/清晰。
-                </p>
-              </AppCard>
-            </section>
+            <PlotSection v-if="activeSection === 'plot'" />
 
             <!-- ========== 记忆 & 缓存 ========== -->
-            <section v-if="activeSection === 'memory'" class="section centered">
-              <h3>记忆 & 缓存设置</h3>
-              <p class="section-desc">
-                控制 Embedding 召回、记忆压缩和缓存策略。Embedding 端点请在「API
-                配置」中添加（推荐硅基流动）。
-              </p>
-              <AppCard padding="md"
-                ><div class="form-grid">
-                  <label class="form-label"
-                    >每轮最大召回记忆数
-                    <p class="form-hint">每次对话时从记忆库中召回的最多条目数</p>
-                    <input
-                      v-model.number="s.memoryRecallCount"
-                      type="number"
-                      min="5"
-                      max="50"
-                      class="form-input"
-                  /></label>
-                  <label class="form-label"
-                    >压缩阈值（轮）
-                    <p class="form-hint">超过此轮数后，早期记忆会被压缩为摘要</p>
-                    <input
-                      v-model.number="s.memoryCompressionThreshold"
-                      type="number"
-                      min="50"
-                      max="500"
-                      class="form-input"
-                  /></label>
-                  <label class="form-label"
-                    >每存档最大快照数
-                    <p class="form-hint">超过上限后最旧的快照会被自动删除</p>
-                    <input
-                      v-model.number="s.memorySnapshotLimit"
-                      type="number"
-                      min="10"
-                      max="50"
-                      class="form-input"
-                  /></label>
-                  <label class="form-label"
-                    >快照保留模式
-                    <p class="form-hint">
-                      阶梯式=最近5回合每轮留档 + 更早的按 4/8/10
-                      回合稀疏保留（推荐）；密集=每轮都留，更早的优先淘汰
-                    </p>
-                    <select v-model="s.snapshotRetentionMode" class="form-input">
-                      <option value="tiered">阶梯式（推荐）</option>
-                      <option value="dense">密集（每轮都留）</option>
-                    </select></label
-                  >
-                  <label class="form-label"
-                    >缓存策略
-                    <p class="form-hint">影响 API 调用的 Prompt 缓存利用率</p>
-                    <select v-model="s.memoryCacheStrategy" class="form-input">
-                      <option value="aggressive">激进 — 尽可能缓存，高命中率</option>
-                      <option value="balanced">平衡 — 兼顾缓存命中与资源消耗</option>
-                      <option value="conservative">保守 — 最小缓存，适合低内存设备</option>
-                    </select></label
-                  >
-                </div></AppCard
-              >
-            </section>
+            <MemorySection v-if="activeSection === 'memory'" />
 
             <!-- ========== 外观主题 ========== -->
-            <section v-if="activeSection === 'theme'" class="section centered">
-              <h3>外观主题</h3>
-              <p class="section-desc">
-                当前：<strong>{{ theme.currentTheme?.nameZh }}</strong
-                >（{{
-                  theme.currentTheme?.type === 'dark'
-                    ? '深色'
-                    : theme.currentTheme?.type === 'warm'
-                      ? '暖色'
-                      : '浅色'
-                }}系）
-              </p>
-              <div class="theme-grid">
-                <button
-                  v-for="t in theme.THEME_LIST"
-                  :key="t.id"
-                  class="theme-option"
-                  :class="{ 'theme-selected': t.id === theme.current }"
-                  :style="{ background: t.preview }"
-                  @click="selectTheme(t.id)"
-                >
-                  <span
-                    class="theme-name"
-                    :style="{ color: t.type === 'dark' ? '#fff' : '#1a1a1a' }"
-                    >{{ t.nameZh }}</span
-                  ><span v-if="t.id === theme.current" class="theme-check">✓</span>
-                </button>
-              </div>
-              <AppCard padding="md" style="margin-top: 16px"
-                ><div class="form-grid">
-                  <label class="form-label"
-                    >字体风格
-                    <p class="form-hint">衬线体更有古典文学感，无衬线体更适合长时间阅读</p>
-                    <select
-                      class="form-input"
-                      :value="theme.fonts"
-                      @change="theme.setFonts(($event.target as HTMLSelectElement).value as any)"
-                    >
-                      <option value="sans">无衬线 (Noto Sans SC)</option>
-                      <option value="serif">衬线 (Noto Serif SC)</option>
-                      <option value="mixed">混合</option>
-                    </select></label
-                  ><label class="form-label"
-                    >字体大小
-                    <p class="form-hint">调整所有界面文字大小</p>
-                    <select
-                      class="form-input"
-                      :value="theme.fontSize"
-                      @change="theme.setFontSize(($event.target as HTMLSelectElement).value)"
-                    >
-                      <option value="14">小 (14px)</option>
-                      <option value="16" selected>默认 (16px)</option>
-                      <option value="18">大 (18px)</option>
-                      <option value="20">特大 (20px)</option>
-                    </select></label
-                  ><label class="form-label"
-                    >悬停提示延迟
-                    <p class="form-hint">
-                      鼠标停留多久才弹出详情气泡（状态效果、在场角色心声等全站悬停浮层）。键盘聚焦不受此延迟影响，始终即时显示。
-                    </p>
-                    <select v-model.number="s.hoverDelayMs" class="form-input">
-                      <option :value="0">立即</option>
-                      <option :value="120">快 (120ms)</option>
-                      <option :value="200">默认 (200ms)</option>
-                      <option :value="350">慢 (350ms)</option>
-                      <option :value="500">很慢 (500ms)</option>
-                    </select></label
-                  >
-                  <div class="form-label">
-                    减少动态效果
-                    <p class="form-hint">
-                      关掉卡片入场、骨架屏脉动、折叠展开等过渡动画。若系统已开启「减少动态效果」，
-                      无需在此重复设置 —— 系统偏好始终独立生效，本开关只是额外强制开启。
-                    </p>
-                    <div class="toggle-row">
-                      <span>{{ s.reducedMotion ? '已开启' : '跟随系统' }}</span>
-                      <label class="toggle-label">
-                        <input v-model="s.reducedMotion" type="checkbox" class="toggle-input" />
-                        <span class="toggle-slider"></span>
-                      </label>
-                    </div>
-                  </div></div
-              ></AppCard>
-            </section>
+            <ThemeSection v-if="activeSection === 'theme'" />
 
             <!-- ========== 消息显示 ========== -->
-            <section v-if="activeSection === 'messages'" class="section centered">
-              <h3>消息显示</h3>
-              <p class="section-desc">
-                控制对话流中系统通知的可见性。关闭后对应类型的消息将不在正文中渲染。
-              </p>
-
-              <AppCard padding="md" style="margin-top: 16px">
-                <h4>全局开关</h4>
-                <div class="toggle-row">
-                  <span>显示系统通知</span>
-                  <label class="toggle-label">
-                    <input v-model="s.systemEventsVisible" type="checkbox" class="toggle-input" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-              </AppCard>
-
-              <AppCard padding="md" style="margin-top: 12px">
-                <h4>分类控制</h4>
-                <p class="text-muted text-sm" style="margin-bottom: 12px">
-                  选择哪些类型的系统事件在对话流中展示
-                </p>
-                <div class="event-filter-grid">
-                  <div v-for="(enabled, key) in s.systemEventFilters" :key="key" class="toggle-row">
-                    <span>{{ eventFilterLabel(key) }}</span>
-                    <label class="toggle-label">
-                      <input
-                        v-model="s.systemEventFilters[key]"
-                        type="checkbox"
-                        class="toggle-input"
-                      />
-                      <span class="toggle-slider"></span>
-                    </label>
-                  </div>
-                </div>
-              </AppCard>
-            </section>
+            <MessagesSection v-if="activeSection === 'messages'" />
 
             <!-- ========== 输出美化 ========== -->
             <BeautifierSection v-if="activeSection === 'beautifier'" />
@@ -2380,136 +1395,10 @@ async function clearAll() {
             <AssetSection v-if="activeSection === 'asset'" />
 
             <!-- ========== 存档数据 ========== -->
-            <section v-if="activeSection === 'data'" class="section centered">
-              <h3>存档数据管理</h3>
-              <p class="section-desc">导出、导入或清除所有数据。建议定期导出备份。</p>
-              <!--
-            两处遗漏必须明说（素材设计 §4.5）: 存档导出是一份 JSON，字节类的库进不去，
-            所以音频与素材都不在里面 —— 各自另有出口。写在分区正文里而不是 tooltip 里，
-            是因为换设备时才发现"东西没跟过来"已经太晚了。
-          -->
-              <p class="data-note">
-                存档导出/导入<strong>不包含音频库与素材库</strong> —— 两者是全局资源，不随存档走。
-                它们各有出口：素材与上传的音频可在「素材」分区打包成 zip
-                导出；「音频」分区的音乐文件夹本就把文件留在磁盘上。
-                <span class="data-note-em">「清除所有数据」会一并删除这两个库。</span>
-              </p>
-              <div class="data-actions">
-                <AppCard padding="md"
-                  ><h4>导出数据</h4>
-                  <p class="text-muted text-sm">
-                    将所有存档、角色、记忆、剧情导出为 JSON 文件（不含音频库与素材库）
-                  </p>
-                  <AppButton
-                    variant="secondary"
-                    size="sm"
-                    style="margin-top: 8px"
-                    @click="exportAll"
-                    >导出全部数据</AppButton
-                  ></AppCard
-                ><AppCard padding="md"
-                  ><h4>导入数据</h4>
-                  <p class="text-muted text-sm">
-                    从 JSON 文件恢复数据，将合并到现有数据库（同样不含音频与素材）
-                  </p>
-                  <AppButton
-                    variant="secondary"
-                    size="sm"
-                    style="margin-top: 8px"
-                    @click="importAll"
-                    >导入数据</AppButton
-                  ></AppCard
-                ><AppCard padding="md"
-                  ><h4>浏览器存储用量</h4>
-                  <div v-if="storageInfo">
-                    <div class="storage-bar-track">
-                      <div
-                        class="storage-bar-fill"
-                        :style="{ transform: 'scaleX(' + storageInfo.pct / 100 + ')' }"
-                      ></div>
-                    </div>
-                    <p class="text-sm" style="margin: 6px 0 0">
-                      {{ fmtBytes(storageInfo.used) }} / {{ fmtBytes(storageInfo.quota) }}（{{
-                        storageInfo.pct.toFixed(1)
-                      }}%）
-                    </p>
-                    <p class="text-xs text-muted">IndexedDB + localStorage</p>
-                  </div>
-                  <p v-else class="text-muted text-sm">获取中…</p></AppCard
-                ><AppCard padding="md" class="data-danger"
-                  ><h4>清除所有数据</h4>
-                  <p class="text-muted text-sm">
-                    永久删除所有存档、角色、记忆、设置，以及上传的音频曲库与播放列表、素材库。不可撤销。
-                  </p>
-                  <AppButton
-                    variant="danger"
-                    size="sm"
-                    style="margin-top: 8px"
-                    @click="showClearConfirm = true"
-                    >清除所有数据</AppButton
-                  ></AppCard
-                >
-              </div>
-              <AppModal
-                :open="showClearConfirm"
-                title="确认清除"
-                size="sm"
-                @update:open="showClearConfirm = $event"
-                ><p>
-                  确定要删除所有数据吗？此操作<strong style="color: var(--theme-error)"
-                    >不可撤销</strong
-                  >。
-                </p>
-                <p class="text-muted text-sm">
-                  包括存档、角色、记忆、剧情，以及<strong>上传的音频曲库与播放列表、素材库</strong>（音频与素材都不包含在存档导出中，删除后无法通过导入存档恢复）。
-                </p>
-                <template #footer
-                  ><AppButton variant="ghost" size="sm" @click="showClearConfirm = false"
-                    >取消</AppButton
-                  ><AppButton variant="danger" size="sm" @click="clearAll"
-                    >确认清除</AppButton
-                  ></template
-                ></AppModal
-              >
-            </section>
+            <DataSection v-if="activeSection === 'data'" />
 
             <!-- ========== 关于 ========== -->
-            <section v-if="activeSection === 'about'" class="section centered">
-              <h3>关于命定之诗</h3>
-              <div class="about-grid">
-                <AppCard padding="md"
-                  ><h4>引擎信息</h4>
-                  <div class="about-table">
-                    <div class="about-row">
-                      <span>引擎版本</span><span>{{ VERSION }}</span>
-                    </div>
-                    <div class="about-row"><span>UI 版本</span><span>1.0.0</span></div>
-                    <div class="about-row"><span>构建时间</span><span>2026-06-15</span></div>
-                  </div></AppCard
-                ><AppCard padding="md"
-                  ><h4>技术栈</h4>
-                  <div class="about-table">
-                    <div class="about-row"><span>框架</span><span>Vue 3.5 + Pinia 2</span></div>
-                    <div class="about-row"><span>构建</span><span>Vite 6</span></div>
-                    <div class="about-row">
-                      <span>数据库</span><span>Dexie.js (IndexedDB)</span>
-                    </div>
-                    <div class="about-row"><span>语言</span><span>TypeScript 5.4</span></div>
-                  </div></AppCard
-                ><AppCard padding="md"
-                  ><h4>引擎统计</h4>
-                  <div class="about-table">
-                    <div class="about-row"><span>引擎模块</span><span>41 模块</span></div>
-                    <div class="about-row"><span>单元测试</span><span>1978 tests</span></div>
-                    <div class="about-row"><span>主题</span><span>10 套</span></div>
-                    <div class="about-row"><span>纪元</span><span>复兴纪元</span></div>
-                  </div></AppCard
-                >
-              </div>
-              <p class="text-muted text-sm text-center" style="margin-top: 16px">
-                《命定之诗》Fated Poem — 多 Agent 协作文字 RPG 引擎<br />© 2026 命定之诗创作组
-              </p>
-            </section>
+            <AboutSection v-if="activeSection === 'about'" />
           </div>
           <!-- /section-wrapper -->
         </Transition>
@@ -2654,127 +1543,11 @@ async function clearAll() {
     </AppModal>
 
     <!-- 添加/编辑 API 弹窗 -->
-    <AppModal
-      :open="showAddApi"
-      :title="editingApiId ? '编辑 API' : '添加 API'"
-      size="md"
-      @update:open="showAddApi = $event"
-    >
-      <div class="api-form">
-        <label class="form-label"
-          >名称<input
-            v-model="apiForm.name"
-            class="form-input"
-            placeholder="如: DeepSeek 生产" /></label
-        ><label class="form-label"
-          >类型<select v-model="apiForm.apiType" class="form-input">
-            <option value="chat">文本补全 (Chat)</option>
-            <option value="embedding">向量嵌入 (Embedding)</option>
-          </select>
-          <p class="form-hint">
-            Chat 模型用 /chat/completions 测试；Embedding 模型用 /embeddings 测试
-          </p></label
-        ><label class="form-label"
-          >主链接<input
-            v-model="apiForm.baseUrl"
-            class="form-input"
-            placeholder="https://api.deepseek.com/v1" /></label
-        ><label class="form-label"
-          >API Key
-          <div class="key-row">
-            <input
-              v-model="apiForm.apiKey"
-              class="form-input"
-              @input="onApiKeyInput"
-              :type="
-                editingApiId &&
-                apiForm._masked &&
-                (!apiForm._realKey ||
-                  (apiForm.apiKey.length > 10 && apiForm.apiKey.includes('***')))
-                  ? 'password'
-                  : apiForm.apiKey.length > 10 && !apiForm.apiKey.includes('***')
-                    ? 'text'
-                    : 'password'
-              "
-              placeholder="API Key（按服务商提供，不一定是 sk- 开头）"
-            /><AppButton
-              variant="secondary"
-              size="sm"
-              :disabled="apiFormTesting"
-              @click="testApiAndFetch"
-              >{{ apiFormTesting ? '测试中...' : '测试连接' }}</AppButton
-            >
-          </div>
-          <p class="form-hint">
-            编辑已有 API 时密钥默认隐藏。点击测试连接验证密钥并获取模型列表。
-          </p></label
-        ><label class="form-label"
-          >模型
-          <div class="key-row">
-            <div class="model-combo">
-              <input
-                v-model="apiForm.model"
-                class="form-input"
-                placeholder="如 glm-4.6 / deepseek-chat"
-                autocomplete="off"
-                @focus="showModelList = true"
-                @blur="onModelBlur"
-              />
-              <div v-if="showModelList && apiModels.length" class="model-dropdown">
-                <div
-                  v-for="m in apiModels"
-                  :key="m"
-                  class="model-option"
-                  :class="{ 'model-option-current': m === apiForm.model }"
-                  @mousedown.prevent="selectModel(m)"
-                >
-                  {{ m }}
-                </div>
-              </div>
-            </div>
-            <AppButton
-              variant="secondary"
-              size="sm"
-              :disabled="apiFormFetchingModels"
-              @click="fetchModelList"
-              >{{ apiFormFetchingModels ? '获取中...' : '获取模型' }}</AppButton
-            >
-          </div>
-          <p class="form-hint">
-            可手动填写模型 id，或点「获取模型」拉取列表后选择。获取失败时按服务商文档手动填（如 z.ai
-            填 glm-4.6）。
-          </p></label
-        >
-        <!-- 高级设置（可折叠） -->
-        <div class="advanced-section">
-          <button class="advanced-toggle" type="button" @click="showAdvancedApi = !showAdvancedApi">
-            <i class="fa-solid" :class="showAdvancedApi ? 'fa-chevron-up' : 'fa-chevron-down'" />
-            高级设置
-          </button>
-          <div v-if="showAdvancedApi" class="advanced-body">
-            <label class="form-label" style="margin-top: 8px">
-              <span class="form-check-row">
-                <input v-model="apiForm.enableThinking" type="checkbox" />
-                开启思维链 (DeepSeek thinking)
-              </span>
-            </label>
-            <p class="form-hint">
-              启用后每次调用该 API 池的请求都会携带
-              <code>thinking: {"{"} type: 'enabled' {"}"}</code> +
-              <code>reasoning_effort: 'high'</code>，让模型在输出前先进行深度思考。
-            </p>
-          </div>
-        </div>
-      </div>
-      <template #footer
-        ><AppButton variant="ghost" size="sm" @click="showAddApi = false">取消</AppButton
-        ><AppButton variant="primary" size="sm" @click="saveApi">{{
-          editingApiId ? '保存修改' : '添加'
-        }}</AppButton></template
-      >
-    </AppModal>
   </div>
 </template>
+
+<!-- 共用外壳（.section>h3 / .section-desc / .form-* / .toggle-*）：唯一一份在 settings-chrome.css -->
+<style scoped src="./settings-chrome.css"></style>
 
 <style scoped>
 .settings-page {
@@ -2801,13 +1574,11 @@ async function clearAll() {
 .header-spacer {
   flex: 1;
 }
-
 .settings-body {
   display: flex;
   flex: 1;
   overflow: hidden;
 }
-
 /* 主导航 */
 .main-nav {
   width: 180px;
@@ -2869,7 +1640,6 @@ async function clearAll() {
 .nav-label {
   flex: 1;
 }
-
 /* Agent 子导航 */
 .sub-nav {
   width: 170px;
@@ -2929,7 +1699,6 @@ async function clearAll() {
   color: var(--theme-success);
   border: 1px solid color-mix(in srgb, var(--theme-success) 40%, var(--theme-card-border));
 }
-
 /* 内容区 */
 .settings-content {
   flex: 1;
@@ -2942,7 +1711,6 @@ async function clearAll() {
 .section-wrapper {
   width: 100%;
 }
-
 /* 分区切换动画 */
 .section-fade-enter-active,
 .section-fade-leave-active {
@@ -2958,253 +1726,11 @@ async function clearAll() {
   opacity: 0;
   transform: translateY(-4px);
 }
-
 /* 居中 */
 .centered {
   max-width: 780px;
   margin: 0 auto;
 }
-
-/* 通用 */
-.section > h3 {
-  font-family: var(--theme-font-title);
-  font-size: 1.4rem;
-  color: var(--theme-text-primary);
-  margin: 0 0 4px;
-}
-.section-desc {
-  margin: 0 0 20px;
-  padding-bottom: 12px;
-  font-size: 0.85rem;
-  color: var(--theme-text-muted);
-  border-bottom: 1px solid var(--theme-card-border);
-}
-.plot-defaults-note {
-  margin: -8px 0 16px;
-  font-size: 0.75rem;
-  font-style: italic;
-  color: var(--theme-text-muted);
-}
-.section-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 16px;
-  gap: 16px;
-}
-.section-head h3 {
-  font-family: var(--theme-font-title);
-  font-size: 1.3rem;
-  color: var(--theme-text-primary);
-  margin: 0 0 4px;
-}
-/* 世界书工具栏: 编辑保护 + 操作按钮分行 */
-.worldbook-toolbar {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
-  flex-shrink: 0;
-}
-.protection-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 12px;
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-md);
-  background: var(--theme-card-bg);
-}
-.toggle-label-text {
-  font-size: 0.8rem;
-  font-weight: 500;
-  color: var(--theme-text-secondary);
-  white-space: nowrap;
-}
-.worldbook-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 16px;
-}
-.form-label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--theme-text-secondary);
-}
-.form-input {
-  padding: 8px 12px;
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-md);
-  background: var(--theme-content-bg);
-  color: var(--theme-text-primary);
-  font-family: inherit;
-  font-size: 0.9rem;
-  transition:
-    border-color var(--theme-transition-fast),
-    box-shadow 0.15s;
-  width: 100%;
-}
-.form-input:focus {
-  outline: none;
-  border-color: var(--theme-primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 15%, transparent);
-}
-.form-textarea {
-  resize: vertical;
-  min-height: 50px;
-}
-.form-hint {
-  font-size: 0.72rem;
-  color: var(--theme-text-muted);
-  margin: 0 0 4px;
-  line-height: 1.4;
-}
-.key-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.key-row .form-input {
-  flex: 1;
-}
-.model-combo {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-}
-.model-combo .form-input {
-  width: 100%;
-}
-.model-dropdown {
-  position: absolute;
-  top: calc(100% + 2px);
-  left: 0;
-  right: 0;
-  z-index: 50;
-  background: var(--theme-content-bg);
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-md);
-  max-height: 220px;
-  overflow-y: auto;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-}
-.model-option {
-  padding: 7px 12px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  color: var(--theme-text-primary);
-  transition: background var(--theme-transition-fast);
-}
-.model-option:hover {
-  background: var(--theme-tab-hover-bg);
-}
-.model-option-current {
-  background: color-mix(in srgb, var(--theme-primary) 12%, var(--theme-content-bg));
-  color: var(--theme-primary);
-  font-weight: 600;
-}
-
-/* API */
-.api-pool {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.api-card-body {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-}
-.api-card-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.api-card-name {
-  font-weight: 600;
-  font-size: 0.95rem;
-  color: var(--theme-text-primary);
-}
-.api-card-actions {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
-.api-form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.embedding-hint {
-  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
-}
-.api-warn {
-  color: var(--theme-error);
-  font-size: 0.8rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.api-ok {
-  color: var(--theme-success);
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-/* 高级设置折叠 */
-.advanced-section {
-  margin-top: 2px;
-}
-.advanced-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 0;
-  border: none;
-  background: transparent;
-  color: var(--theme-text-secondary);
-  font-family: inherit;
-  font-size: 0.82rem;
-  cursor: pointer;
-  transition: color var(--theme-transition-fast);
-}
-.advanced-toggle:hover {
-  color: var(--theme-text-primary);
-}
-.advanced-toggle i {
-  font-size: 0.7rem;
-  width: 14px;
-  text-align: center;
-}
-.advanced-body {
-  padding-left: 4px;
-}
-.advanced-body .form-hint code {
-  background: var(--theme-surface-muted);
-  color: var(--theme-primary);
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-size: 0.68rem;
-}
-.form-check-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--theme-text-secondary);
-  font-size: 0.85rem;
-}
-.form-check-row input[type='checkbox'] {
-  accent-color: var(--theme-primary);
-}
-
 /* Agent */
 .agent-detail-head {
   margin-bottom: 20px;
@@ -3215,20 +1741,6 @@ async function clearAll() {
   font-family: var(--theme-font-title);
   font-size: 1.3rem;
   margin: 0 0 6px;
-}
-.detail-card {
-  margin-bottom: 20px;
-  border: 1px solid var(--theme-card-border);
-  transition: border-color 0.15s;
-  border-radius: var(--theme-radius-lg, 12px);
-}
-.detail-card:hover {
-  border-color: color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
-}
-.detail-card h4 {
-  margin: 0 0 8px;
-  font-size: 1rem;
-  color: var(--theme-text-primary);
 }
 .detail-actions {
   display: flex;
@@ -3257,7 +1769,6 @@ async function clearAll() {
   border-color: var(--theme-primary);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 12%, transparent);
 }
-
 /* Preset 预设系统 — 仿 ST 面板 */
 .preset-selector-bar {
   display: flex;
@@ -3268,7 +1779,6 @@ async function clearAll() {
 .preset-select {
   flex: 1;
 }
-
 .preset-viewer {
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-lg);
@@ -3291,61 +1801,6 @@ async function clearAll() {
   gap: 4px;
   flex-shrink: 0;
 }
-
-/* 采样器参数网格 — 仿 ST 滑块面板 */
-.preset-sampler-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 8px;
-  padding: 12px 16px;
-}
-.sampler-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.sampler-label {
-  font-size: 0.72rem;
-  font-weight: 500;
-  color: var(--theme-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-.sampler-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.sampler-slider {
-  flex: 1;
-  height: 4px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: var(--theme-card-border);
-  border-radius: 2px;
-  outline: none;
-  cursor: default;
-}
-.sampler-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--theme-primary);
-}
-.sampler-value {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--theme-text-primary);
-  min-width: 30px;
-  text-align: right;
-}
-.sampler-value-text {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--theme-text-primary);
-}
-
 /* 子 Prompt 列表 */
 .preset-prompts-list {
   display: flex;
@@ -3452,7 +1907,6 @@ async function clearAll() {
   width: 12px;
   height: 12px;
 }
-
 .preset-empty {
   padding: 24px;
   text-align: center;
@@ -3491,250 +1945,9 @@ async function clearAll() {
   font-size: 14px;
   font-weight: 500;
 }
-.worldbook-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.worldbook-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  transition: all 0.15s;
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-lg, 12px);
-}
-.worldbook-card:hover {
-  border-color: color-mix(in srgb, var(--theme-primary) 25%, var(--theme-card-border));
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-}
-.wb-info {
-  flex: 1;
-  min-width: 0;
-}
-.wb-info h4 {
-  font-size: 15px;
-  margin: 0 0 4px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.builtin-badge {
-  font-size: 11px;
-  font-weight: 500;
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--theme-success) 12%, transparent);
-  color: var(--theme-success);
-  border: 1px solid color-mix(in srgb, var(--theme-success) 30%, transparent);
-}
-
-/* Toggle */
-.toggle-label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-}
-.toggle-input {
-  display: none;
-}
-.toggle-slider {
-  width: 40px;
-  height: 22px;
-  border-radius: 11px;
-  background: var(--theme-card-border);
-  transition: background var(--theme-transition-fast);
-  position: relative;
-}
-.toggle-slider::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--theme-text-primary);
-  transition: transform var(--theme-transition-fast);
-}
-.toggle-input:checked + .toggle-slider {
-  background: var(--theme-success);
-}
-.toggle-input:checked + .toggle-slider::after {
-  transform: translateX(18px);
-}
-
-/* Plot */
-.genre-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px;
-}
-.genre-chip {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 12px 14px;
-  border: 1.5px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-md);
-  cursor: pointer;
-  transition: all var(--theme-transition-fast);
-  user-select: none;
-  background: var(--theme-card-bg);
-}
-.genre-chip:hover {
-  border-color: var(--theme-primary);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-.genre-chip:hover {
-  border-color: var(--theme-primary);
-}
-.genre-active {
-  border-color: var(--theme-primary);
-  background: color-mix(in srgb, var(--theme-primary) 10%, var(--theme-card-bg));
-}
-.genre-chip-label {
-  font-weight: 600;
-  font-size: 0.9rem;
-  color: var(--theme-text-primary);
-}
-.genre-active .genre-chip-label {
-  color: var(--theme-primary);
-}
-.genre-chip-desc {
-  font-size: 0.72rem;
-  color: var(--theme-text-muted);
-}
-.plot-preview-card {
-  transition: all 0.3s ease;
-}
-.plot-preview-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-.plot-preview-header h4 {
-  margin: 0;
-  font-size: 0.95rem;
-}
-.plot-blur {
-  filter: blur(6px);
-  user-select: none;
-  opacity: 0.5;
-  transition: all 0.3s ease;
-  cursor: pointer;
-}
-.plot-preview-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-/* Theme */
-.theme-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: 14px;
-}
-.theme-option {
-  position: relative;
-  aspect-ratio: 16/10;
-  border: 2px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-lg);
-  cursor: pointer;
-  transition: all var(--theme-transition-fast);
-  overflow: hidden;
-  display: flex;
-  align-items: flex-end;
-  padding: 10px;
-}
-.theme-option:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 6px 20px color-mix(in srgb, #000 25%, transparent);
-  border-color: color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
-}
-.theme-selected {
-  border-color: var(--theme-primary) !important;
-  box-shadow: 0 0 16px color-mix(in srgb, var(--theme-primary) 25%, transparent);
-}
-.theme-name {
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
-  letter-spacing: 0.5px;
-}
-.theme-check {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--theme-primary);
-  color: var(--theme-primary-text);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.7rem;
-  font-weight: 700;
-  box-shadow: 0 0 8px color-mix(in srgb, var(--theme-primary) 40%, transparent);
-}
-
-/* Data */
-/* 备份遗漏说明：正文档字号(0.8125rem)，语气与四张卡一致 —— 是告知，不是警告，
-   所以不用 warning 色、不加边框，只把最后那句"会一并删除"提到正文色上 */
-.data-note {
-  margin: 0 0 var(--theme-spacing-lg);
-  font-size: 0.8125rem;
-  line-height: 1.7;
-  color: var(--theme-text-muted);
-}
-.data-note strong {
-  color: var(--theme-text-secondary);
-  font-weight: 600;
-}
-.data-note-em {
-  color: var(--theme-text-primary);
-}
-.data-actions {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 14px;
-}
-.data-actions h4 {
-  margin: 0 0 4px;
-  font-size: 0.95rem;
-}
-.data-danger {
-  border-color: color-mix(in srgb, var(--theme-error) 25%, transparent) !important;
-  background: color-mix(in srgb, var(--theme-error) 3%, transparent);
-}
-.data-danger:hover {
-  border-color: color-mix(in srgb, var(--theme-error) 45%, transparent) !important;
-}
-.storage-bar-track {
-  height: 8px;
-  border-radius: 4px;
-  background: var(--theme-card-border);
-  overflow: hidden;
-}
-.storage-bar-fill {
-  height: 100%;
-  border-radius: 4px;
-  background: var(--theme-quality-rare);
-  width: 100%;
-  transform-origin: left;
-  transition: transform 0.5s ease;
-}
+/* 减少动态效果（design.md 检查清单）。
+   `.storage-bar-fill` 那条随 DataSection 走了 —— 分区抽走了，规则不跟着走就是死规则。 */
 @media (prefers-reduced-motion: reduce) {
-  .storage-bar-fill {
-    transition: none;
-  }
   .section-fade-enter-active,
   .section-fade-leave-active {
     transition: none;
@@ -3743,35 +1956,6 @@ async function clearAll() {
     animation: none;
   }
 }
-
-/* About */
-.about-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 14px;
-}
-.about-grid h4 {
-  margin: 0 0 10px;
-  font-size: 0.95rem;
-  color: var(--theme-text-primary);
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--theme-card-border);
-}
-.about-table {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.about-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.85rem;
-  color: var(--theme-text-primary);
-}
-.about-row span:first-child {
-  color: var(--theme-text-muted);
-}
-
 /* Phase 10e: Placeholder badges */
 .placeholder-badge {
   display: inline-flex;
@@ -3790,7 +1974,6 @@ async function clearAll() {
   transform: translateY(-1px);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
-
 /* Phase 10e: Template preview panel */
 .template-preview-panel {
   animation: template-preview-in 0.2s ease;
@@ -3804,18 +1987,5 @@ async function clearAll() {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-.event-filter-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.toggle-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--theme-card-border);
 }
 </style>

@@ -1,0 +1,180 @@
+/*
+ * settings-chrome.css — 设置分区的共用外壳样式（Q-25）
+ *
+ * 为什么存在：`SettingsPage.vue` 的 `<style scoped>` 只能命中**它自己的模板**，
+ * 以及子组件的**根节点**。分区抽成子组件之后，`.section > h3` / `.form-input` /
+ * `.toggle-slider` 这些长在根节点**里面**的规则就够不着了 —— 分区会当场退回
+ * 浏览器默认样式。`AssetSection.vue` 当年是把两条规则抄进自己的 style 块解决的；
+ * 抄两条还行，抄 20 条 × 8 个分区就是又一处真源分裂。
+ *
+ * 于是共用外壳只写这一份，每个分区用 `<style scoped src="./settings-chrome.css">`
+ * 引进去 —— Vue 会给它盖上**该组件自己的**作用域 id，所以仍然是 scoped，
+ * 不会泄漏成全局样式。
+ *
+ * 🔴 只放**跨分区真的共用**的东西。分区私有的类名写在各自的 `<style scoped>` 里。
+ *    判据是 Q-25 步骤零那份归属表：命中 2 个以上分区才有资格进这个文件。
+ *
+ * 🔴 `.section` / `.centered` **不在这里** —— 它们作用在分区的根节点上，
+ *    而根节点会同时带上 SettingsPage 的作用域 id，父级那两条规则照旧命中。
+ *    重复一份只会让人以为改这里就够了。
+ */
+
+/* ═══ 分区标题与描述 ═══ */
+.section > h3 {
+  font-family: var(--theme-font-title);
+  font-size: 1.4rem;
+  color: var(--theme-text-primary);
+  margin: 0 0 4px;
+}
+.section-desc {
+  margin: 0 0 20px;
+  padding-bottom: 12px;
+  font-size: 0.85rem;
+  color: var(--theme-text-muted);
+  border-bottom: 1px solid var(--theme-card-border);
+}
+/* 标题与右侧工具栏分列（API 池 / 世界书两处） */
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 16px;
+}
+.section-head h3 {
+  font-family: var(--theme-font-title);
+  font-size: 1.3rem;
+  color: var(--theme-text-primary);
+  margin: 0 0 4px;
+}
+
+/* ═══ 表单 ═══ */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+.form-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--theme-text-secondary);
+}
+.form-input {
+  padding: 8px 12px;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: var(--theme-content-bg);
+  color: var(--theme-text-primary);
+  font-family: inherit;
+  font-size: 0.9rem;
+  transition:
+    border-color var(--theme-transition-fast),
+    box-shadow 0.15s;
+  width: 100%;
+}
+.form-input:focus {
+  outline: none;
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 15%, transparent);
+}
+.form-textarea {
+  resize: vertical;
+  min-height: 50px;
+}
+.form-hint {
+  font-size: 0.72rem;
+  color: var(--theme-text-muted);
+  margin: 0 0 4px;
+  line-height: 1.4;
+}
+.key-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.key-row .form-input {
+  flex: 1;
+}
+
+/* ═══ 开关 ═══ */
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+.toggle-input {
+  display: none;
+}
+.toggle-slider {
+  width: 40px;
+  height: 22px;
+  border-radius: 11px;
+  background: var(--theme-card-border);
+  transition: background var(--theme-transition-fast);
+  position: relative;
+}
+.toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--theme-text-primary);
+  transition: transform var(--theme-transition-fast);
+}
+.toggle-input:checked + .toggle-slider {
+  background: var(--theme-success);
+}
+.toggle-input:checked + .toggle-slider::after {
+  transform: translateX(18px);
+}
+.toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--theme-card-border);
+}
+
+/* ═══ 卡片 / 弹窗表单 ═══
+ * 名字带 `api-` 前缀是历史包袱: 这三条同时被 Agent 分区（1411/1414/1415、
+ * 2526、2574）与 API 分区（1337、2663）用着，所以是共用外壳而不是 API 私有。
+ * 改名要同时动两处模板，不在本次搬迁的范围内。 */
+.api-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.api-warn {
+  color: var(--theme-error);
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.api-ok {
+  color: var(--theme-success);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+/* Agent 分区与剧情分区共用的内容卡 */
+.detail-card {
+  margin-bottom: 20px;
+  border: 1px solid var(--theme-card-border);
+  transition: border-color 0.15s;
+  border-radius: var(--theme-radius-lg, 12px);
+}
+.detail-card:hover {
+  border-color: color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
+}
+.detail-card h4 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: var(--theme-text-primary);
+}
