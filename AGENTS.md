@@ -428,6 +428,21 @@ src/sillytavern/                    ← 核心引擎
   │       ├── replay.ts / contract/                 ← contract harness + 7 场 fixture
   │       └── index.ts                              ← 唯一公共出口（openCombat / runCombatV3）
   ├── craft-quality.ts / craft-dc.ts / craft-resolver.ts
+  │   ├── craft-request.ts        ← [Q-21] 装配唯一口 buildCraftRequest(角色, 工具参数, 骰带)
+  │   │                              🔴 **纯函数、无随机** —— 骰子由工具边界掷好传进来
+  │   │                              （agent-tools.takeCraftTape）。此前两个工具各装配一遍
+  │   │                              且都写 `d20Rolls: []`，`rollCraftDice` 兜底成
+  │   │                              `d20Rolls[0] ?? 10` → **生产每一次制作检定都是 d20=10**，
+  │   │                              连带大失败不可达（判据要 length===1，而 length 是 0）、
+  │   │                              优/劣势整条死规则（要 length>=2）。与 Q-01 同形状，
+  │   │                              但 Q-01 只覆盖了 combat-v3 的 coordinator。
+  │   │                              check 的骰带按**请求指纹**存 ToolExecutionContext.craftDice，
+  │   │                              同参数的 settle 取走 —— AI 只见结果不碰骰值，且刷检定无效。
+  │   │                              🔴 骰数由优/劣势决定（齐平 1 颗 / 优劣势 2 颗），
+  │   │                                 **不能**一律掷 2 颗，那会把大失败判据换个姿势再打掉一次
+  │   └── craft-projection.ts     ← [Q-21] 结算结果 → `<action_info>` 竖线表 + 一句话摘要
+  │                                  照 combat-v3 projection-agent/projection-ui 的先例；
+  │                                  这一层不允许出现计算（ADR-28：面板是给纯文本 AI 的遗留手段）
   ├── morale-system.ts / affection-system.ts
   ├── start-catalog.ts              ← [Q-30] 捏人页目录入口（类型/常量/品质映射）+ start-catalog-data.ts（纯数据，CDN 生成）
   ├── marker-protocol.ts            ← [Phase 6e+Audio] XML 标记检测（含 <play_audio>）

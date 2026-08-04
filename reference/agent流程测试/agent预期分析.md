@@ -260,7 +260,7 @@ debug loop 会去改 prompt 而实际该查落库。
 工作流程:
 1. 调用 get_character 获取制作者数据
 2. 调用 get_inventory 获取材料清单
-3. 调用 craft_check 获取真实检定结果（禁止自己编造 DC 值/d20 值）
+3. 调用 craft_check 获取真实检定结果（禁止自己编造 DC 值/d20 值；此处掷的骰会留给第 7 步的 craft_settle）
 4. 解读检定结果（大失败/失败/成功/精益求精）
 5. 成功时根据 expects 需求 brainstorm 创意效果词条
 6. 生成制作叙事片段
@@ -279,6 +279,27 @@ debug loop 会去改 prompt 而实际该查落库。
 | `get_inventory` | `characterId`, `type?` | 物品列表（name, quantity, type, quality） |
 | `craft_check` | `characterId`, `industry`, `targetQuality`, `materials[]`, `stage?`, `quantity?` | `{baseDC, finalDC, fixedBonus, diceValue, diceRolls[], totalValue, rating}` |
 | `craft_settle` | 同上 + `productName` | `{success, outputQuality, productQuantity, xpGained, fpGained, patchesApplied}` — 实际消耗资源 |
+
+#### 🔴 制作骰带：check 与 settle 同源（Q-21, 2026-08-04 起）
+
+**修复前**：两个工具都以 `d20Rolls: []` 装配请求，`craft-dc.rollCraftDice` 兜底成
+`d20Rolls[0] ?? 10` —— 于是**生产环境每一次制作检定都是 d20 = 10**，连带
+**大失败不可达**（判据要 `d20Rolls.length === 1`，而 length 是 0）、
+**优势/劣势整条规则是死的**（`rollCraftDice` 要 `length >= 2` 才取高/取低）。
+`craft_check` 展示给 AI 的 DC/评级与 `craft_settle` 真正落库的结果也各掷各的。
+
+**现在**：骰子在工具边界（`agent-tools.takeCraftTape`）真掷，装配收在
+`craft-request.buildCraftRequest` 一处。掷出的骰带按**请求指纹**
+（角色名 + 行业 + 阶段 + 产物 + 品质 + 数量 + 材料清单）存在 `ToolExecutionContext.craftDice`，
+随后同参数的 `craft_settle` 取走同一条。三条推论，写进了 craft_gen 的 systemPrompt：
+
+- `craft_check` 给出的评级**就是**最终结果，不是预测；
+- 同一次制作重复 `craft_check` 返回同一个值 —— 刷检定无效；
+- `craft_settle` 的参数与 `craft_check` 有任何一项不同 → 判成另一次制作、重新掷骰。
+
+骰带**不出引擎**：AI 既不携带 id 也不携带骰值，指纹从工具参数本身算出。
+检定骰数由优/劣势决定（齐平 1 颗、优/劣势 2 颗），**不能**图省事一律掷 2 颗 ——
+那会让常规检定的 `length === 2`，把大失败判据换个姿势再打掉一次。
 | `craft_get_base_dc` | `quality` | `{quality, baseDC}` |
 | `craft_get_production_bonus` | `quality` | 完整产能加成对象（dcReduction, resourceReduction, timeReduction 等） |
 | `roll_d20` | `modifier?`, `advantage?`, `disadvantage?`, `reason?` | `{diceValue, diceRolls[], advantage, disadvantage}` |

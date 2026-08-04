@@ -25,9 +25,9 @@
 
 import { draw } from '../dice-tape';
 import { performAttackCheck, runDamagePipeline } from '../../combat-damage';
+import type { DamagePipelineInput } from '../../combat-damage';
 import { resolveIntention, checkNonLethal, getIntentionConfig } from '../../combat-intention';
-import type { IntentionResult } from '../../types';
-import { getCombatCoefficient } from '../../tier-constants';
+import type { DamageType, IntentionResult } from '../../types';
 import {
   evaluateWindow,
   runWindow,
@@ -51,6 +51,55 @@ import type {
   WindowCtx,
 } from '../types';
 import { emptyChanges, type PhaseOutcome } from './outcome';
+
+/** 一次攻击**声明**了什么 —— 与攻守双方的场上状态无关的那部分伤害入参。 */
+interface DamageSpec {
+  relevantAttribute: number;
+  skillPower: number;
+  multiHitCount: number;
+  damageType: DamageType;
+  ratingCoefficient: number;
+  intentionCoefficient: number;
+  /** Step 6a 额外固伤。常规路径 0；格挡重算路径取冻结的 `fixedDamageAdjust` */
+  fixedDamageBonus: number;
+}
+
+/**
+ * 组装 `runDamagePipeline` 的 16 个字段 —— 全仓**唯一**的装配处（Q-21）。
+ *
+ * 常规攻击（`handleAttack` ⑤）与格挡重算（`resumeBlockedAttack`）此前各自逐字展开
+ * 同一份对象字面量，同样的键、同样的顺序。两份已在两个字段上无声分叉，其中
+ * `damageType` 那处改变了守方的类型减免（见 `DamageRecomputeCtx.damageType`）。
+ * 现在两处的差异全部收进 `spec`，看得见。
+ *
+ * 放在本文件而非 `combat-damage.ts`：后者是 v2 的纯计算模块，把 `CombatState`
+ * （v3 的形状）塞进它的签名会让 v2 反过来依赖 v3。`runDamagePipeline` 的调用点
+ * 也全在本文件 —— 装配是 v3 的事，公式才是 combat-damage 的事。
+ */
+function buildDamageInput(
+  attacker: CombatState['units'][string],
+  defender: CombatState['units'][string],
+  spec: DamageSpec,
+): DamagePipelineInput {
+  return {
+    relevantAttribute: spec.relevantAttribute,
+    attackerTier: attacker.tier,
+    skillPower: spec.skillPower,
+    weaponAtk: attacker.weaponAtk,
+    multiHitCount: spec.multiHitCount || 1,
+    defenderDefense: defender.defense,
+    penetrationRate: attacker.penetration,
+    damageType: spec.damageType,
+    defenderAttributes: defender.attributes,
+    ratingCoefficient: spec.ratingCoefficient,
+    intentionCoefficient: spec.intentionCoefficient,
+    drRate: defender.dr,
+    isClusterTarget: false,
+    currentHp: defender.hp,
+    fixedDamageBonus: spec.fixedDamageBonus,
+    modifiers: { hitBonus: 0, dodgeBonus: 0 },
+  };
+}
 
 /**
  * 执行一次攻击结算（DeclareAttack → 微步骤链 → PhaseOutcome）。
@@ -211,38 +260,28 @@ export function handleAttack(
     }),
   );
 
-  const coeff = getCombatCoefficient(attacker.tier);
-  const initialDamage =
-    ability.relevantAttribute * 10 * coeff + ability.skillPower + attacker.weaponAtk;
   const intentionCoefficient = intention.coefficient;
 
-  const damage = runDamagePipeline({
-    relevantAttribute: ability.relevantAttribute,
-    attackerTier: attacker.tier,
-    skillPower: ability.skillPower,
-    weaponAtk: attacker.weaponAtk,
-    multiHitCount: ability.multiHitCount || 1,
-    defenderDefense: defender.defense,
-    penetrationRate: attacker.penetration,
-    damageType: ability.damageType,
-    defenderAttributes: defender.attributes,
-    ratingCoefficient: attackCheck.rating.coefficient,
-    intentionCoefficient,
-    drRate: defender.dr,
-    isClusterTarget: false,
-    currentHp: defender.hp,
-    fixedDamageBonus: 0,
-    modifiers: {
-      hitBonus: 0,
-      dodgeBonus: 0,
-    },
-  });
+  const damage = runDamagePipeline(
+    buildDamageInput(attacker, defender, {
+      relevantAttribute: ability.relevantAttribute,
+      skillPower: ability.skillPower,
+      multiHitCount: ability.multiHitCount || 1,
+      damageType: ability.damageType,
+      ratingCoefficient: attackCheck.rating.coefficient,
+      intentionCoefficient,
+      fixedDamageBonus: 0,
+    }),
+  );
 
   // C7: 最终伤害 clamp ≥ 0（负 modifier 不产生治疗）
   const finalDamage = Math.max(0, Math.floor(damage.finalDamage));
 
   // ── ⑥ damage.preview 窗口（M3 接 RequestChoice 补暂停 / 格挡重算） ──
-  const preReduction = initialDamage;
+  // Q-21：`preReduction` 直接取管线 Step 1 的产物。此处曾手抄一遍
+  // 「属性×10×层级系数 + 技能威力 + 武器攻击力」——那正是 `calcInitialDamage`
+  // 的公式，而 `runDamagePipeline` 内部已经算过并原样返回。第三份拷贝没有存在理由。
+  const preReduction = damage.initialDamage;
   const postStep6 = damage.afterRating;
 
   // A3-6：无订阅者 → 直接跳过窗口，不暂停（架构 §五 5.2 约束 3）
@@ -274,6 +313,9 @@ export function handleAttack(
         skillPower: ability.skillPower,
         weaponAtk: attacker.weaponAtk,
         multiHitCount: ability.multiHitCount || 1,
+        // ★ 冻结当次声明的伤害类型（Q-21）。恢复路径不得回头去读 attacker.ability ——
+        //   那是攻击者的基础档，不是这一次挥出去的那一击。
+        damageType: ability.damageType,
         intentionCoefficient,
         ratingCoefficient: attackCheck.rating.coefficient,
         damageTakenFactor: choice.blockDamageFactor ?? 1,
@@ -297,7 +339,7 @@ export function handleAttack(
   }
 
   // 无 RequestChoice → 沿用当前 finalDamage 走完整结算
-  finalizeAttack(out, state, attacker, defender, ability, command, {
+  finalizeAttack(out, state, attacker, defender, ability.damageType, command, {
     finalDamage,
     preReduction,
     postStep6,
@@ -354,15 +396,14 @@ function finalizeAttack(
   state: CombatState,
   attacker: CombatState['units'][string],
   defender: CombatState['units'][string],
-  ability: Record<string, unknown> & {
-    relevantAttribute: number;
-    skillPower: number;
-    weaponAtk?: number;
-    multiHitCount?: number;
-    damageType: string;
-    intentionLevel: string;
-    divinity: number;
-  },
+  /**
+   * 本次攻击声明的伤害类型（只进 `DamageApplied` 事件）。
+   *
+   * Q-21：这个参数曾是一个 8 字段的 ability 结构体，而函数体只读了 `damageType` 一项。
+   * 代价是格挡路径得**现编一个 ability** 来满足形参 —— 那个字面量里
+   * `damageType: '物理'` 的兜底，正是伤害类型分叉的第二处落点。
+   */
+  damageType: DamageType,
   /** finalizeAttack 所需的最小 Command 视图（costs / nonLethal） */
   command: { payload: { costs?: { mp?: number; sp?: number }; nonLethal?: boolean } },
   params: {
@@ -493,7 +534,7 @@ function finalizeAttack(
     preReduction,
     postStep6,
     final: finalDamage,
-    damageType: ability.damageType as never,
+    damageType: damageType as never,
     targetHpBefore,
     targetHpAfter,
   });
@@ -526,27 +567,18 @@ export function resumeBlockedAttack(
   }
 
   // ★ 回到 damage.compute 重算（架构 §五 5.2 约束 4）：blockDamageFactor 折后 clamp ≥ 0
-  const coeff = getCombatCoefficient(attacker.tier);
-  const initialDamage =
-    recompute.relevantAttribute * 10 * coeff + recompute.skillPower + attacker.weaponAtk;
-  const damage = runDamagePipeline({
-    relevantAttribute: recompute.relevantAttribute,
-    attackerTier: attacker.tier,
-    skillPower: recompute.skillPower,
-    weaponAtk: attacker.weaponAtk,
-    multiHitCount: recompute.multiHitCount || 1,
-    defenderDefense: defender.defense,
-    penetrationRate: attacker.penetration,
-    damageType: attacker.ability?.damageType ?? '物理',
-    defenderAttributes: defender.attributes,
-    ratingCoefficient: recompute.ratingCoefficient,
-    intentionCoefficient: recompute.intentionCoefficient,
-    drRate: defender.dr,
-    isClusterTarget: false,
-    currentHp: defender.hp,
-    fixedDamageBonus: recompute.fixedDamageAdjust,
-    modifiers: { hitBonus: 0, dodgeBonus: 0 },
-  });
+  //   入参全部来自冻结的 frame（含 damageType），一个字段都不回头去读 attacker 的当前档。
+  const damage = runDamagePipeline(
+    buildDamageInput(attacker, defender, {
+      relevantAttribute: recompute.relevantAttribute,
+      skillPower: recompute.skillPower,
+      multiHitCount: recompute.multiHitCount || 1,
+      damageType: recompute.damageType,
+      ratingCoefficient: recompute.ratingCoefficient,
+      intentionCoefficient: recompute.intentionCoefficient,
+      fixedDamageBonus: recompute.fixedDamageAdjust,
+    }),
+  );
   // 折减因子（格挡 damageTaken -0.8 → ×0.2）∈ 管线重算，非 final 打折
   const recomputed = Math.max(
     0,
@@ -558,21 +590,14 @@ export function resumeBlockedAttack(
     state,
     attacker,
     defender,
-    attacker.ability ?? {
-      relevantAttribute: recompute.relevantAttribute,
-      skillPower: recompute.skillPower,
-      damageType: '物理',
-      intentionLevel: '常规',
-      multiHitCount: recompute.multiHitCount || 1,
-      divinity: 0,
-    },
+    recompute.damageType,
     {
       // 无 costs —— 格挡的 SP/动作槽由 reducer 单独并入（DeclareBlock cost:action）
       payload: {},
     },
     {
       finalDamage: recomputed,
-      preReduction: initialDamage,
+      preReduction: damage.initialDamage,
       postStep6: damage.afterRating,
       attackCheckRatingCoef: recompute.ratingCoefficient,
     },

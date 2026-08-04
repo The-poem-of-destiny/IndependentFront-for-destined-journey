@@ -15,11 +15,9 @@
 import type {
   ToolDefinition,
   ToolExecutionContext,
-  CraftActionRequest,
-  CraftMaterial,
+  CraftDiceTape,
+  CraftToolArgs,
   QualityLevel,
-  CraftIndustry,
-  CraftStage,
   CharacterState,
   CombatState,
   CombatParticipant,
@@ -31,10 +29,11 @@ import type {
 } from './types';
 import type { EventBus } from './game-event';
 import type { StatusApplyIntent, StatusRemoveIntent } from './status-api';
-import { d20, d100, roll, executeDiceRoll } from './dice';
+import { d20, d100, roll, executeDiceRoll, rollDice, rollDie } from './dice';
 import { normalizeItemType } from './field-enums';
 import { collectChecks } from './effect-types';
 import type { Modifier, CheckModifier } from './effect-types';
+import { buildCraftRequest, craftCheckDiceCount, craftRequestFingerprint } from './craft-request';
 import {
   randomName,
   randomHairColor,
@@ -104,7 +103,7 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: 'craft_check',
       description:
-        '执行制作检定。输入制作者名字、行业、目标品质、材料等，返回完整的检定分解（基础DC、材料DC修正、最终DC、骰值、评级）。这是真实计算，不是猜测。',
+        '执行制作检定。输入制作者名字、行业、目标品质、材料等，返回完整的检定分解（基础DC、材料DC修正、最终DC、骰值、评级）。这是真实计算，不是猜测。掷出的骰子会留给随后**同参数**的 craft_settle 复用 —— 因此这里给出的评级就是最终结果，重复调用返回同一个值，不会重掷。',
       parameters: {
         type: 'object',
         properties: {
@@ -185,7 +184,7 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: 'craft_settle',
       description:
-        '执行完整制作管线（准备+检定+结算）。返回成功/失败、产出品质、经验奖励、FP奖励、材料损耗、精益求精增益。与 craft_check 不同，此工具会实际消耗资源并产出成品。仅在最终确认制作时调用。',
+        '执行完整制作管线（准备+检定+结算）。返回成功/失败、产出品质、经验奖励、FP奖励、材料损耗、精益求精增益。与 craft_check 不同，此工具会实际消耗资源并产出成品。仅在最终确认制作时调用。参数必须与之前那次 craft_check **完全一致**：一致则沿用同一组骰子（检定结论即结算结论），改动任何一项都会被判成另一次制作并重新掷骰。',
       parameters: {
         type: 'object',
         properties: {
@@ -648,32 +647,8 @@ export async function executeToolCall(
         throw new Error(`未找到角色: ${args.characterId}`);
       }
 
-      const materials: CraftMaterial[] = (args.materials ?? []).map((m: any, i: number) => ({
-        itemId: `mat_${i}`,
-        itemName: m.name ?? '未知材料',
-        quantity: m.quantity ?? 1,
-        quality: (m.quality ?? '普通') as QualityLevel,
-        dcModifier: 0, // Will be calculated by craft-quality
-      }));
-
-      const request: CraftActionRequest = {
-        // CraftActionRequest 沿用历史字段名，但 StatePatch 的逻辑键必须是角色名。
-        characterId: character.name,
-        industry: (args.industry ?? '锻造') as CraftIndustry,
-        stage: (args.stage ?? '成品') as CraftStage,
-        productName: args.productName ?? '未命名制品',
-        targetQuality: (args.targetQuality ?? '普通') as QualityLevel,
-        quantity: args.quantity ?? 1,
-        materials,
-        crafterTier: character.tier,
-        crafterLevel: character.level,
-        coreAttributeValue: getCoreAttribute(character, args.industry),
-        resourceCosts: { hp: 0, mp: 0, sp: 0 },
-        currentResources: { hp: character.hp, mp: character.mp, sp: character.sp },
-        d20Rolls: [], // Will be rolled inside craftResolver
-        // 🆕 制造反向链路 S2+S4（2026-08-01）：装备「生产检定」modifier → 道具加值（C 位）+ 技能「生产检定」→ 技能加值（B 位）
-        ...collectCraftBonuses(character),
-      };
+      // Q-21：装配收在 buildCraftRequest 一处；骰带在这里（工具边界）掷、留给 craft_settle。
+      const request = buildCraftRequest(character, args, takeCraftTape(context, character, args));
 
       // 先跑 validate 获取准备阶段的问题（品质继承/层级封顶/管制物等）
       const validation = $craft.validate(request);
@@ -717,32 +692,14 @@ export async function executeToolCall(
       const character = findCharacter(args.characterId, context);
       if (!character) throw new Error(`未找到角色: ${args.characterId}`);
 
-      const materials: CraftMaterial[] = (args.materials ?? []).map((m: any, i: number) => ({
-        itemId: `mat_${i}`,
-        itemName: m.name ?? '未知材料',
-        quantity: m.quantity ?? 1,
-        quality: (m.quality ?? '普通') as QualityLevel,
-        dcModifier: 0,
-      }));
-
-      const request: CraftActionRequest = {
-        // CraftActionRequest 沿用历史字段名，但 StatePatch 的逻辑键必须是角色名。
-        characterId: character.name,
-        industry: (args.industry ?? '锻造') as CraftIndustry,
-        stage: (args.stage ?? '成品') as CraftStage,
-        productName: args.productName ?? '未命名制品',
-        targetQuality: (args.targetQuality ?? '普通') as QualityLevel,
-        quantity: args.quantity ?? 1,
-        materials,
-        crafterTier: character.tier,
-        crafterLevel: character.level,
-        coreAttributeValue: getCoreAttribute(character, args.industry),
-        resourceCosts: { hp: 0, mp: 0, sp: 0 },
-        currentResources: { hp: character.hp, mp: character.mp, sp: character.sp },
-        d20Rolls: [],
-        // 🆕 制造反向链路 S2+S4（2026-08-01）：装备「生产检定」modifier → 道具加值（C 位）+ 技能「生产检定」→ 技能加值（B 位）
-        ...collectCraftBonuses(character),
-      };
+      // ★ 取走 craft_check 掷过的那一条骰带（没 check 过就现掷）——
+      //   AI 看到的 DC/评级与真正落库的结果从此同源。取走即消费：
+      //   同一件东西连做两次，第二次会重新掷。
+      const request = buildCraftRequest(
+        character,
+        args,
+        takeCraftTape(context, character, args, { consume: true }),
+      );
 
       const result = $craft.startProject(request);
 
@@ -1053,52 +1010,42 @@ function buffIdMatches(effect: { name: string; sourceKey?: string }, query: stri
   return fullId === query || effect.name === query;
 }
 
-/** 从角色五维中提取制作行业对应的核心属性值 */
-function getCoreAttribute(char: CharacterState, industry?: string): number {
-  switch (industry) {
-    case '锻造':
-      return char.attributes.str;
-    case '炼金':
-      return char.attributes.int;
-    case '烹饪':
-      return char.attributes.spi;
-    case '裁缝':
-      return char.attributes.dex;
-    default:
-      return Math.max(
-        char.attributes.str,
-        char.attributes.dex,
-        char.attributes.con,
-        char.attributes.int,
-        char.attributes.spi,
-      );
-  }
-}
-
 /**
- * 🆕 制造反向链路 S2+S4（2026-08-01，见 2026-08-01-item-gen-combat-link-plan.md §3 S2b）：
- * 从角色收集「生产检定」modifier → 检定加值。
+ * 取这次制作要用的骰带（Q-21）。
  *
- * 世界书依据：
- *  - 《品质效果限定》检定类含「生产检定修正」（稀+[2-4]/史+[5-7]/传+[8-10]/神+[11-15]）
- *  - 《生产制作协议》检定加值 = 属性[A] + 技能[B] + 道具[C] + 身份[D] → 进 fixedBonus
+ * `craft_check` 掷一次并存进**本次 run 的工具上下文**；随后的 `craft_settle`
+ * 按同一个指纹取走同一条带 —— AI 看到的 DC/评级与真正落库的结果从此同源。
  *
- * - toolBonus（道具 C 位）：只统计 equippedSlot 非空的物品（躺背包不算正在使用）
- * - skillBonus（技能 B 位）：技能「生产检定」modifier（S4 补 Skill 落库 modifiers 字段后收 S2-2）
- *   ——此前 Skill 接口无 modifiers 字段，技能生产加值留 0；S4a 已补字段落库，此处闭环。
- * checkType='生产' 不编译进战斗（compile.ts 已剔除），这里只服务制造链路。
+ * 骰带不出引擎：AI 既不携带 id 也不携带骰值（理由见 `craftRequestFingerprint`）。
+ * 缓存挂在 ToolExecutionContext 上 —— 那是 per-run 对象，跟着这一轮 Agentic 循环生灭。
+ *
+ * 掷骰在这里而不在 resolver 里：与 combat-v3「内核禁 Math.random，随机源在内核外」
+ * 同一条口径（Q-01 的修法）。resolver 与 craft-request 都保持纯函数。
+ *
+ * @param opts.consume settle 传 true —— 取走即删，同一件东西再做一次会重新掷。
  */
-function collectCraftBonuses(char: CharacterState): { toolBonus: number; skillBonus: number } {
-  const isCraftCheck = (m: Modifier): m is CheckModifier =>
-    m.category === '检定' && m.checkType === '生产';
-  const toolBonus = char.inventory
-    .filter((i) => i.equippedSlot)
-    .flatMap((i) => i.modifiers ?? [])
-    .filter(isCraftCheck)
-    .reduce((sum, m) => sum + m.bonus, 0);
-  const skillBonus = (char.skills ?? [])
-    .flatMap((s) => s.modifiers ?? [])
-    .filter(isCraftCheck)
-    .reduce((sum, m) => sum + m.bonus, 0);
-  return { toolBonus, skillBonus };
+function takeCraftTape(
+  context: ToolExecutionContext,
+  character: CharacterState,
+  args: CraftToolArgs,
+  opts: { consume?: boolean } = {},
+): CraftDiceTape {
+  const cache = (context.craftDice ??= {});
+  const key = craftRequestFingerprint(character.name, args);
+
+  const cached = cache[key];
+  if (cached) {
+    if (opts.consume) delete cache[key];
+    return cached;
+  }
+
+  const count = craftCheckDiceCount(character.tier, (args.targetQuality ?? '普通') as QualityLevel);
+  const tape: CraftDiceTape = {
+    d20Rolls: rollDice(count, 20),
+    d20MaterialSave: rollDie(20),
+    d20QualityUpgrade: rollDie(20),
+  };
+  // check 存起来给 settle 用；settle 自己现掷的没有下一个消费者，不必留
+  if (!opts.consume) cache[key] = tape;
+  return tape;
 }

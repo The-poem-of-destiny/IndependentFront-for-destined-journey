@@ -10,6 +10,7 @@ import type {
   ActiveEffectIndex,
   CombatPhase,
   CommandRejection,
+  DamageRecomputeCtx,
   DiceTapeState,
   DomainEvent,
   FrozenSlot,
@@ -66,25 +67,16 @@ export interface PhaseOutcome {
    */
   suspended?:
     | {
-        recompute: ImportedRecomputeCtx;
+        recompute: DamageRecomputeCtx;
         finalDamage: number;
       }
     | { spawn: boolean };
 }
 
-/** phase 层的重算上下文（避免 types.ts 循环依赖，复用字段名） */
-export interface ImportedRecomputeCtx {
-  attackerId: string;
-  targetId: string;
-  relevantAttribute: number;
-  skillPower: number;
-  weaponAtk: number;
-  multiHitCount: number;
-  intentionCoefficient: number;
-  ratingCoefficient: number;
-  damageTakenFactor: number;
-  fixedDamageAdjust: number;
-}
+// 🪦 Q-21：这里曾有一份 `ImportedRecomputeCtx` —— 逐字段抄自 `DamageRecomputeCtx`，
+//    注释写着「避免 types.ts 循环依赖」。那个理由不成立：本文件上方**已经**在从
+//    `'../types'` 取 10 个类型，多取一个不新增任何边。代价却是真的：给 frame 加一个
+//    字段要改两处，漏一处就是「reducer 收得到、phase 读不到」这类只在真机上冒头的偏差。
 
 /** 轻量 settlement 结果（避免循环依赖 types.ts） */
 export interface ImportedSettlement {

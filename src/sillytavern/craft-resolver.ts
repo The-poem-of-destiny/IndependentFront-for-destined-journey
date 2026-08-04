@@ -21,28 +21,17 @@ import type {
   QualityLevel,
   CraftIndustry,
   CraftStage,
-  CraftRating,
   CraftMaterial,
   CraftActionRequest,
   CraftActionResult,
   CraftPrepResult,
   CraftCheckResult,
   CraftSettleResult,
-  CraftCheckBreakdown,
   CraftSettlementBreakdown,
-  CraftProduct,
   StatePatch,
-  EffectDefinition,
   CraftProductionBonus,
 } from './types';
-import {
-  CRAFT_DC_BASE,
-  CRAFT_PRODUCTION_BONUSES,
-  CRAFT_QUALITY_EXP,
-  QUALITY_RANK,
-  CRAFT_RATING_VALUE_RANGE,
-  CRAFT_INDUSTRY_ATTRIBUTE,
-} from './types';
+import { CRAFT_DC_BASE, CRAFT_QUALITY_EXP, QUALITY_RANK, CRAFT_RATING_VALUE_RANGE } from './types';
 
 import {
   inheritQuality,
@@ -50,26 +39,27 @@ import {
   validateCrafterTierForQuality,
   validateCraftStage,
   generateDCModifier,
-  assignMaterialDCModifiers,
   checkRegulatedLicenses,
   checkResourceSufficiency,
   determineBatchMode,
 } from './craft-quality';
 
+// 🪦 Q-21：这份 import 里曾有 6 个从未在本文件出现过第二次的名字
+//    （determineAdvantage / rollCraftDice / calcFinalDC / buildSettlementBreakdown /
+//     checkMaterialSave / calcTimeReduction）。它们都还在 craft-dc.ts 里导出着，
+//    只是本文件不用 —— 尤其 buildSettlementBreakdown 是 resolveSettlement 的
+//    另一份实现（且它会算材料节省，而 resolveSettlement 不算）。留在这里会让人
+//    以为结算读过材料节省。删的是 import，不是那些函数。
 import {
-  determineAdvantage,
-  rollCraftDice,
-  calcFinalDC,
   calcCraftCheck,
   getProductionBonus,
   calcExpReward,
   calcFPReward,
   calcResourceCost,
-  buildSettlementBreakdown,
-  checkMaterialSave,
   checkQualityUpgrade,
-  calcTimeReduction,
 } from './craft-dc';
+
+import { buildCraftPanelLines, buildCraftDescription } from './craft-projection';
 
 // ========== Phase 1: 生产准备 ==========
 
@@ -371,18 +361,9 @@ export function resolveCraft(request: CraftActionRequest): CraftActionResult {
     });
   }
 
-  // Build panel lines
+  // 投影（craft-projection.ts）—— 两者都是这四个结果对象的纯函数，不参与任何计算
   const panelLines = buildCraftPanelLines(request, prepResult, checkResult, settleResult);
-
-  // Build description
-  const description = buildCraftDescription(
-    request.productName,
-    outputQuality,
-    rating,
-    success,
-    prepResult,
-    settleResult,
-  );
+  const description = buildCraftDescription(request, prepResult, checkResult, settleResult);
 
   return {
     request,
@@ -479,150 +460,6 @@ export const $craft: CraftAPI = {
   getProductionBonus,
 };
 
-// ========== Panel Line Generation ==========
-
-/**
- * 生成三级面板行 (对齐世界书 <action_info> 模板)
- */
-function buildCraftPanelLines(
-  request: CraftActionRequest,
-  prep: CraftPrepResult,
-  check: CraftCheckResult,
-  settle: CraftSettleResult,
-): string[] {
-  const lines: string[] = [];
-
-  // Phase 1: 生产准备
-  lines.push('{生产准备}');
-  lines.push(
-    `| 目标: ${request.productName} | 数量: ${prep.batchCount} | 类型: ${request.stage} | 品质: ${request.targetQuality} |`,
-  );
-  lines.push(
-    `| 行业: ${request.industry} | 核心属性: ${CRAFT_INDUSTRY_ATTRIBUTE[request.industry]} |`,
-  );
-  lines.push(
-    `| 管制投入物检查: ${prep.regulatedCheck.passed ? '不涉及/有许可' : `涉及-无许可(${prep.regulatedCheck.missingLicenses.join(',')})`} |`,
-  );
-  lines.push(
-    `| 品质要求检查: ${prep.qualityReqCheck.passed ? '满足' : `不满足(${prep.qualityReqCheck.downgradeReason})`} |`,
-  );
-  lines.push(
-    `| 资源预检: HP[${request.currentResources.hp}/${request.resourceCosts.hp * prep.batchCount}] MP[${request.currentResources.mp}/${request.resourceCosts.mp * prep.batchCount}] SP[${request.currentResources.sp}/${request.resourceCosts.sp * prep.batchCount}] | 状态: ${prep.resourceCheck.sufficient ? '充足' : '不足(终止)'} |`,
-  );
-  lines.push(
-    `| 批量检查: ${request.stage === '成品' && !request.hasRecipe ? '成品-图纸(未持有)->强制单件' : '允许批量'} |`,
-  );
-  const matStr = request.materials.map((m) => `${m.itemName} x${m.quantity}`).join(', ');
-  lines.push(`| 投入物: ${matStr} |`);
-
-  // Phase 2: 制作检定
-  if (prep.canProceed) {
-    const bd = check.breakdown;
-    lines.push('{制作检定}');
-    lines.push(`| 类型: ${request.stage} | 数量: ${prep.batchCount} |`);
-    const dcDetail = `${bd.baseDC} + [材料 DC ${bd.materialDCModifier}] - [减免 ${bd.bonusDCReduction}] = ${bd.finalDC}`;
-    lines.push(`| 基础DC: ${dcDetail} |`);
-    lines.push(
-      `| 检定加值: 属性[${bd.fixedBonusBreakdown.attribute}] + 技能[${bd.fixedBonusBreakdown.skill}] + 道具[${bd.fixedBonusBreakdown.tool}] + 身份[${bd.fixedBonusBreakdown.identity}] = 固定加值 [${bd.fixedBonus}] |`,
-    );
-    const advStr = bd.advantage
-      ? `优势:d20(${bd.diceRolls.join(',')})→取值${bd.diceValue}`
-      : bd.disadvantage
-        ? `劣势:d20(${bd.diceRolls.join(',')})→取值${bd.diceValue}`
-        : `正常:d20(${bd.diceValue})`;
-    lines.push(`| 掷骰: ${advStr} |`);
-    lines.push(
-      `| 判定公式: ${bd.fixedBonus} + ${bd.diceValue} = ${bd.totalValue} vs DC ${bd.finalDC} |`,
-    );
-    lines.push(`| 检定结果: ${bd.rating} |`);
-    lines.push(
-      `| 资源消耗: HP[${settle.breakdown.resourceCost.hp}] MP[${settle.breakdown.resourceCost.mp}] SP[${settle.breakdown.resourceCost.sp}] |`,
-    );
-  } else {
-    lines.push('{制作检定}');
-    lines.push(`| 状态: [终止] ${prep.stopReason} |`);
-  }
-
-  // Phase 3: 结算
-  const sb = settle.breakdown;
-  lines.push('{生产结算}');
-  lines.push(`| 类型: ${request.stage} |`);
-
-  if (request.stage === '基础加工' && check.breakdown.rating !== '大失败') {
-    lines.push('| 状态: 基础加工完成，无损耗 |');
-  } else if (sb.materialLoss.lossRate > 0) {
-    lines.push(
-      `| 状态: [制作${check.breakdown.rating}] | 投入物损耗 ${Math.round(sb.materialLoss.lossRate * 100)}% |`,
-    );
-    const lossStr = sb.materialLoss.lostMaterials
-      .map((m) => `${m.itemName} x${m.quantity}`)
-      .join(', ');
-    lines.push(`| 损失: ${lossStr} 损毁 |`);
-  } else {
-    lines.push(
-      `| 状态: [制作成功] | 品质: ${sb.outputQuality}${sb.qualityDowngraded ? ` (降级前: ${request.targetQuality})` : ''} |`,
-    );
-    if (sb.certification) {
-      lines.push(`| 认证: ${sb.certification} |`);
-    }
-    if (sb.perfectionBonus) {
-      if (sb.perfectionBonus.batchExtraYield) {
-        lines.push(`| 精益求精: 批量-产量+${sb.perfectionBonus.batchExtraYield} |`);
-      } else if (sb.perfectionBonus.singleExtraAffix) {
-        lines.push(`| 精益求精: 单件-获得额外词条: ${sb.perfectionBonus.singleExtraAffix} |`);
-      } else if (sb.perfectionBonus.dcModifierDowngrade) {
-        lines.push(`| 精益求精: 单件-DC修正降级${sb.perfectionBonus.dcModifierDowngrade} |`);
-      }
-    }
-    lines.push(
-      `| 产出列表: ${request.productName}(${sb.outputQuality}, DC修正+${sb.productDCModifier}) x${prep.batchCount} |`,
-    );
-    if (sb.expReward.actualExp > 0) {
-      lines.push(
-        `| 经验依据: ${request.stage} ${sb.outputQuality} -> 基础EXP ${sb.expReward.baseExp} |`,
-      );
-      lines.push(
-        `| 结算状态: ${sb.expReward.tierSuppressed ? '层级压制归零' : '正常结算'} | 实得EXP: ${sb.expReward.actualExp} |`,
-      );
-      lines.push(`| 奖励: EXP +${sb.expReward.actualExp} | FP +${sb.fpReward} |`);
-    }
-  }
-
-  return lines;
-}
-
-// ========== Description Builder ==========
-
-function buildCraftDescription(
-  productName: string,
-  quality: QualityLevel,
-  rating: CraftRating,
-  success: boolean,
-  prep: CraftPrepResult,
-  settle: CraftSettleResult,
-): string {
-  // 准备阶段失败优先于检定失败
-  if (!success && !prep.canProceed) {
-    return `制作「${productName}」终止: ${prep.stopReason ?? '准备阶段不通过'}。`;
-  }
-  if (rating === '大失败') {
-    return `制作「${productName}」大失败！投入物全部损毁。`;
-  }
-  if (rating === '失败') {
-    return `制作「${productName}」失败，${Math.round(settle.breakdown.materialLoss.lossRate * 100)}% 投入物损耗。`;
-  }
-
-  let desc = `成功制作「${productName}」(${quality}品质)`;
-  if (settle.breakdown.qualityDowngraded) {
-    desc += `，因品质继承降级`;
-  }
-  if (rating === '精益求精') {
-    desc += `，精益求精！`;
-  }
-  desc += `，获得 ${settle.breakdown.expReward.actualExp} EXP，${settle.breakdown.fpReward} FP。`;
-  return desc;
-}
-
 // ========== Utilities ==========
 
 let productIdCounter = 0;
@@ -646,51 +483,10 @@ function getExtraAffixLabel(quality: QualityLevel): string {
   return affixes[quality] ?? '额外词条';
 }
 
-/**
- * 按请求构建默认的 CraftActionRequest
- */
-export function createCraftRequest(params: {
-  characterId: string;
-  industry: CraftIndustry;
-  stage: CraftStage;
-  productName: string;
-  targetQuality: QualityLevel;
-  quantity: number;
-  materials: CraftMaterial[];
-  crafterTier: number;
-  crafterLevel: number;
-  coreAttributeValue: number;
-  resourceCosts: { hp: number; mp: number; sp: number };
-  currentResources: { hp: number; mp: number; sp: number };
-  recipeId?: string;
-  hasRecipe?: boolean;
-  toolBonus?: number;
-  skillBonus?: number;
-  identityBonus?: number;
-  locationBonus?: number;
-  d20Rolls?: number[];
-}): CraftActionRequest {
-  return {
-    characterId: params.characterId,
-    industry: params.industry,
-    stage: params.stage,
-    productName: params.productName,
-    targetQuality: params.targetQuality,
-    quantity: params.quantity,
-    materials: params.materials,
-    crafterTier: params.crafterTier,
-    crafterLevel: params.crafterLevel,
-    coreAttributeValue: params.coreAttributeValue,
-    resourceCosts: params.resourceCosts,
-    currentResources: params.currentResources,
-    recipeId: params.recipeId,
-    hasRecipe: params.hasRecipe ?? params.stage !== '成品',
-    toolBonus: params.toolBonus,
-    skillBonus: params.skillBonus,
-    identityBonus: params.identityBonus,
-    locationBonus: params.locationBonus,
-    d20Rolls: params.d20Rolls ?? [Math.floor(Math.random() * 20) + 1],
-    d20MaterialSave: Math.floor(Math.random() * 20) + 1,
-    d20QualityUpgrade: Math.floor(Math.random() * 20) + 1,
-  };
-}
+// 🪦 Q-21：这里曾有 export function createCraftRequest(params) —— 生产零调用
+//    （只有 craft-resolver.test.ts 用它当 fixture 工厂），内部却拿 Math.random
+//    掷三颗骰。两个后果：一是与 combat-v3「随机源在内核外」的确定性约定相悖；
+//    二是任何拿它造「传说」请求的测试都在 15% 的概率上会被静默升成神话
+//    （d20QualityUpgrade ≥ 18），一个还没绊倒人的定时器。
+//    生产装配现在收在 craft-request.ts 的 buildCraftRequest（骰带显式传入）；
+//    测试用的 fixture 工厂搬进了 craft-resolver.test.ts 自己家里。

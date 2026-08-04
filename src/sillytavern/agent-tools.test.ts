@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { executeToolCall } from './agent-tools';
+import { craftRequestFingerprint } from './craft-request';
 import type { ToolExecutionContext, CharacterState } from './types';
 import { EventBus } from './game-event';
 import { deleteCharacter, getCharacters, saveCharacter } from './database';
@@ -404,6 +405,137 @@ describe('复用工具回归保护', () => {
       expect(result.patchesApplied).toBeGreaterThan(0);
       const [stored] = await getCharacters(saveId);
       expect(stored.inventory.find((item) => item.name === '铁矿石')?.quantity).toBe(1);
+    } finally {
+      await deleteCharacter(crafter.id);
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// Q-21：制作检定的骰子（此前生产恒 d20 = 10）
+// ═══════════════════════════════════════════════════════════
+
+describe('craft 骰带 — 真骰子 + check/settle 同源', () => {
+  /** 与工具参数一一对应的检定参数（层级齐平 → 常规 1 颗骰） */
+  const CHECK_ARGS = {
+    // 按名寻址（铁律 ①）——工具参数名沿用历史的 characterId，值是角色名
+    characterId: '铁砧',
+    industry: '锻造',
+    stage: '成品',
+    productName: '铁剑',
+    targetQuality: '优良',
+    quantity: 1,
+    // 优良需要**两种**同品质投入物（inheritQuality），少一种会整条降级并让检定空转
+    materials: [
+      { name: '铁锭', quantity: 1, quality: '优良' },
+      { name: '钢材', quantity: 1, quality: '优良' },
+    ],
+  };
+
+  /** 优良 对应 T1；制作者也 T1 → 齐平，恰好 1 颗骰（大失败判据成立的前提） */
+  const smith = () =>
+    makeCharacter({
+      name: '铁砧',
+      tier: 1,
+      attributes: { str: 12, dex: 8, con: 8, int: 8, spi: 8 },
+    });
+
+  it('骰子是真的 —— 多次独立调用不再全是 10', async () => {
+    const seen = new Set<unknown>();
+    for (let i = 0; i < 20; i++) {
+      // 每次全新 ctx（无缓存）→ 每次现掷
+      const r = await executeToolCall('craft_check', CHECK_ARGS, makeCtx([smith()]));
+      seen.add(r.diceValue);
+    }
+    // 修复前这里恒为 {10}
+    expect(seen.size).toBeGreaterThan(1);
+    expect(seen.has(10) && seen.size === 1).toBe(false);
+  });
+
+  it('常规检定恰好 1 颗骰 —— 多掷一颗会让大失败永久不可达', async () => {
+    const r = await executeToolCall('craft_check', CHECK_ARGS, makeCtx([smith()]));
+    expect((r.diceRolls as number[]).length).toBe(1);
+  });
+
+  it('大失败可达（d20=1 且只掷了 1 颗）', async () => {
+    const ctx = makeCtx([smith()]);
+    // 预置骰带：指纹即键，AI 参与不了
+    ctx.craftDice = {
+      [craftRequestFingerprint('铁砧', CHECK_ARGS)]: {
+        d20Rolls: [1],
+        d20MaterialSave: 10,
+        d20QualityUpgrade: 10,
+      },
+    };
+    const r = await executeToolCall('craft_check', CHECK_ARGS, ctx);
+    expect(r.diceValue).toBe(1);
+    expect(r.rating).toBe('大失败');
+  });
+
+  it('优/劣势掷 2 颗并取高 —— 整条规则此前是死的', async () => {
+    // T3 制作普通品质（对应 T1）→ 优势
+    const r = await executeToolCall(
+      'craft_check',
+      { ...CHECK_ARGS, targetQuality: '普通' },
+      makeCtx([makeCharacter({ name: '铁砧', tier: 3 })]),
+    );
+    const rolls = r.diceRolls as number[];
+    expect(rolls.length).toBe(2);
+    expect(r.diceValue).toBe(Math.max(rolls[0], rolls[1]));
+  });
+
+  it('同一次制作重复 check 是幂等的 —— 「再算一次」不等于偷偷重掷', async () => {
+    const ctx = makeCtx([smith()]);
+    const a = await executeToolCall('craft_check', CHECK_ARGS, ctx);
+    const b = await executeToolCall('craft_check', CHECK_ARGS, ctx);
+    expect(b.diceValue).toBe(a.diceValue);
+    expect(b.rating).toBe(a.rating);
+  });
+
+  it('换了任一项就是另一次制作 → 另一条骰带', async () => {
+    const ctx = makeCtx([smith()]);
+    await executeToolCall('craft_check', CHECK_ARGS, ctx);
+    await executeToolCall('craft_check', { ...CHECK_ARGS, quantity: 2 }, ctx);
+    expect(Object.keys(ctx.craftDice ?? {})).toHaveLength(2);
+  });
+
+  it('craft_settle 取走 craft_check 的骰带 —— AI 看到的评级就是落库的结果', async () => {
+    const saveId = 'save_craft_tape_share';
+    const crafter = makeCharacter({
+      id: 'uuid_craft_tape',
+      saveId,
+      name: '铁砧',
+      tier: 1,
+      level: 1,
+      totalExp: 0,
+      attributes: { str: 12, dex: 8, con: 8, int: 8, spi: 8 },
+      inventory: [
+        { name: '铁锭', description: '', quantity: 5, type: '材料', rarity: '优良' },
+        { name: '钢材', description: '', quantity: 5, type: '材料', rarity: '优良' },
+      ],
+    });
+    await deleteCharacter(crafter.id);
+    await saveCharacter(crafter);
+
+    try {
+      const ctx = makeCtx([crafter], saveId);
+      // 钉死一条注定失败的骰带（d20=1），check 与 settle 必须看到同一条
+      ctx.craftDice = {
+        [craftRequestFingerprint('铁砧', CHECK_ARGS)]: {
+          d20Rolls: [1],
+          d20MaterialSave: 10,
+          d20QualityUpgrade: 10,
+        },
+      };
+
+      const check = await executeToolCall('craft_check', CHECK_ARGS, ctx);
+      expect(check.rating).toBe('大失败');
+
+      const settle = await executeToolCall('craft_settle', CHECK_ARGS, ctx);
+      // 修复前 settle 会另掷（其实是恒 10 → 成功），与 check 展示给 AI 的结论相反
+      expect(settle.success).toBe(false);
+      // 取走即消费：同一件东西再做一次会重新掷
+      expect(Object.keys(ctx.craftDice ?? {})).toHaveLength(0);
     } finally {
       await deleteCharacter(crafter.id);
     }

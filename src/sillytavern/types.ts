@@ -1331,6 +1331,16 @@ export interface ToolExecutionContext {
   characters: CharacterState[];
   variables: Record<string, any>;
   saveId: string;
+  /**
+   * Q-21：`craft_check` 掷过的骰带，按请求指纹存放，供随后的 `craft_settle` 取走。
+   *
+   * 挂在这里是因为这是**唯一**跨工具调用、又不跨 run 的东西 —— 一轮 Agentic 循环
+   * 一个上下文对象，循环结束就随之消失，不需要（也不应该）落盘。
+   *
+   * 键与值的语义见 `craft-request.ts`；构造方**不必**初始化它，
+   * `takeCraftTape` 用到时才建。
+   */
+  craftDice?: Record<string, CraftDiceTape>;
 }
 
 /** Agent 定义 */
@@ -2451,6 +2461,44 @@ export interface CraftActionRequest {
   d20MaterialSave?: number;
   /** d20 骰值 (用于品质提升判定, 神话) */
   d20QualityUpgrade?: number;
+}
+
+/**
+ * 一次制作用到的全部骰子（Q-21）。
+ *
+ * 三条互不相干：检定骰进 `calcCraftCheck`、材料节省与品质提升各自在结算里查阈值。
+ * 打包成一个对象，是为了让「craft_check 掷的那一把，craft_settle 原样接着用」
+ * 这件事只需要搬一个值。装配与消费见 `craft-request.ts`。
+ */
+export interface CraftDiceTape {
+  /** 检定骰。正常 1 颗；优/劣势 2 颗（颗数由 `craftCheckDiceCount` 决定） */
+  d20Rolls: number[];
+  /** 材料节省判定（品质产能加成的 d20 阈值） */
+  d20MaterialSave: number;
+  /** 品质提升判定（神话产能：传说 → 神话，d20 ≥ 18） */
+  d20QualityUpgrade: number;
+}
+
+/**
+ * `craft_check` / `craft_settle` 的 AI 参数形状（两个工具 schema 一致）。
+ *
+ * 全部可缺省 —— 兜底默认值集中在 `buildCraftRequest`，不在各调用点。
+ */
+export interface CraftToolArgs {
+  industry?: string;
+  stage?: string;
+  productName?: string;
+  targetQuality?: string;
+  quantity?: number;
+  materials?: Array<{ name?: string; quantity?: number; quality?: string }>;
+  /**
+   * 是否持有图纸。
+   *
+   * 🔴 现行工具 schema **没有**这个参数，所以它总是缺省 → 成品阶段一律
+   *    「未持图纸、强制单件」。缺省值必须按 false 处理而不是 `stage !== '成品'`，
+   *    否则半成品/基础加工会凭空多出批量能力。
+   */
+  hasRecipe?: boolean;
 }
 
 // ========== Craft Check Breakdown ==========

@@ -9,6 +9,57 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### Q-21 结算层去重 —— 伤害管线两处调用合一 + 制作骰子接线 + 投影拆分 ｜ ✅ 完成（2026-08-04）
+
+审查 `docs/reviews/2026-08-03-code-quality-refactor` 的 Q-21。原文列四刀，**第一刀（集群阈值梯两份）
+已由 Q-04/Q-15 的删尸体覆盖** —— `cluster-system.ts` 与 `combat-damage.getClusterAttackCount`
+都已不在仓库里，那两份「注释自陈分叉」的死实现连同它们的测试一起没了。剩下三刀本轮全做。
+
+**伤害管线（含 live bug）**：`attack.ts` 里两处 17 字段的 `runDamagePipeline({...})` 收进
+`buildDamageInput(attacker, defender, spec)`，两条路径的差异全部落到 `spec` 上、看得见。
+两处已分叉的字段里，`damageType` 是当下就在错的：常规路径用
+`command.payload.ability ?? attacker.ability ?? {…}`，格挡重算路径却回头读
+`attacker.ability?.damageType ?? '物理'`。格挡一记伤害类型异于攻击者基础档的技能（火系法术、
+真实伤害），管线 Step 5 会按另一条抗性算，`DamageApplied.damageType` 也报错。现在 `damageType`
+冻进 `DamageRecomputeCtx`，恢复路径一个字段都不回头读 `attacker`。顺带：两处手抄的
+`initialDamage`（第三份「属性×10×层级系数 + 技能威力 + 武器攻击力」）删掉改读 `damage.initialDamage`；
+`finalizeAttack` 那个只被读了 `damageType` 一项的 8 字段 ability 形参收成一个 `DamageType`
+（格挡路径因此不必再现编一个 ability —— 那个字面量里的 `'物理'` 正是分叉的第二处落点）；
+`outcome.ts` 里逐字段抄自 `DamageRecomputeCtx` 的 `ImportedRecomputeCtx` 删掉，它注释里那句
+「避免 types.ts 循环依赖」不成立（本文件已在从 `../types` 取 10 个类型）。
+
+**制作骰子（含 live bug）**：`craft_check` 与 `craft_settle` 各装配一遍 15 字段的
+`CraftActionRequest`，且都写 `d20Rolls: []`，注释「Will be rolled inside craftResolver」是错的 ——
+`resolveCheck` 原样透传，`craft-dc.rollCraftDice` 落到 `d20Rolls[0] ?? 10`。于是**生产环境
+每一次制作检定都是 d20 = 10**，连带**大失败不可达**（判据要 `d20Rolls.length === 1`，而 length 是 0）
+与**优势/劣势整条死规则**（`rollCraftDice` 要 `length >= 2`）。与 Q-01 同形状，但 Q-01 的修复
+只覆盖了 combat-v3 的 coordinator。现在装配收进 `craft-request.buildCraftRequest`（纯函数、无随机），
+骰子在工具边界真掷（`agent-tools.takeCraftTape`，与「内核禁 Math.random、随机源在内核外」同口径）。
+`craft_check` 掷的骰带按**请求指纹**存进 per-run 的 `ToolExecutionContext.craftDice`，
+同参数的 `craft_settle` 取走 —— 用指纹而不是让 AI 回传 id：骰带不出引擎，AI 编造不了，
+同一次制作重复 check 幂等（刷检定无效），换任一项就是另一次制作。
+🔴 骰数由优/劣势决定（齐平 1 颗 / 优劣势 2 颗），**不能**图省事一律掷 2 颗 —— 那会让常规检定的
+`length === 2`，把大失败判据换个姿势再打掉一次。
+
+**制作投影**：`buildCraftPanelLines` / `buildCraftDescription`（约 140 行 `<action_info>` 竖线表）
+搬进 `craft-projection.ts`，照 combat-v3 `projection-agent`/`projection-ui` 的先例。
+`buildCraftDescription` 那四个由调用方各算一遍的形参（含自己重算的 `success`）就地推导。
+顺手删掉 `craft-resolver` 里 6 个从未用到的 import（其中 `buildSettlementBreakdown` 是
+`resolveSettlement` 的另一份实现，留着会让人以为结算读过材料节省）与生产零调用、
+内部拿 `Math.random` 掷三颗骰的 `createCraftRequest`（它让任何造「传说」的测试有 15% 概率
+被静默升成神话）。
+
+涉及文件: 新增 `craft-request.ts` / `craft-projection.ts`（+ 两份测试）·
+`combat-v3/phases/attack.ts` · `combat-v3/phases/outcome.ts` · `combat-v3/types.ts` ·
+`agent-tools.ts` · `craft-resolver.ts` · `types.ts`（`CraftDiceTape` / `CraftToolArgs` /
+`ToolExecutionContext.craftDice`）· `data/defaults/agent-config.json`（craft_gen 提示词）·
+`reference/agent流程测试/agent预期分析.md`
+
+验证: 218 文件 / 5928 passed / 4 skipped（基线 216 / 5883）· tsc & vue-tsc & typecheck:tools
+0 错误 · lint 0 error · `vite build` 通过。**两处 live bug 各配了会红的回归测试** ——
+把修复逐个还原后，伤害类型那条报 `expected '物理' to be '真实'`，制作骰子那 6 条全红。
+🔴 未做真机走查。
+
 ### PR #24 审查收口（模型帧脚本策略 / 匹配预算 / 覆盖列表语义 / 开场重试）｜✅ 完成（2026-08-03）
 
 - **模型输出不再顺带拿到脚本面与网络出口**：`<item_info>` / `<task_info>` 卡片的 markup 是**本轮模型输出**，不是用户装过的规则，却和工坊正则共用同一档全开 frame（`allow-scripts` + `connect-src http: https:` + 整份 `regexStorage` 快照内嵌进 srcdoc）。`BeautifierMatchSegment` 新增 `origin: 'rule' | 'model'`，renderer 据此分档：模型帧走 nonce-only `script-src` + `script-src-attr 'none'` + `connect-src 'none'`，且不注入共享命名空间。拦截由**浏览器执行 CSP** 完成，markup 一个字符都不改（不回退到正则消毒）；样式/图片/字体/媒体照旧，卡片视觉不降级。规则帧契约完全不动，工坊兼容面零影响。

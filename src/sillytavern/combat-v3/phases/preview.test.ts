@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { reduce } from '../reducer';
 import { createCombatState } from '../state';
 import { buildIndex } from '../automata/index-active';
-import type { CombatState, CompiledAutomaton, DomainEvent } from '../types';
+import type { CombatCommand, CombatState, CompiledAutomaton, DomainEvent } from '../types';
 import { mkBundle, mkAttack } from '../test-utils';
 
 /** 造一条 格挡 反应 automaton（damage.preview → RequestChoice + blockDamageFactor） */
@@ -136,5 +136,113 @@ describe('A3-5：DeclareBlock → 回到 damage.compute 重算（487→97 路径
     const dmg = blockTrans.events.find((e) => e.kind === 'DamageApplied') as
       (DomainEvent & { final: number }) | undefined;
     expect(dmg!.final).toBe(Math.floor(previewDamage * 0.2));
+  });
+});
+
+// ── Q-21：格挡重算必须沿用**当次声明**的伤害类型 ──
+describe('Q-21：格挡重算沿用冻结的 damageType', () => {
+  /**
+   * 这一场刻意让「本次技能声明的类型」与「攻击者基础档的类型」不同 ——
+   * 真实伤害无视类型减免（reductionRate 0），物理走 (con+str+dex)×0.25%。
+   *
+   * 修复前 `resumeBlockedAttack` 读的是 `attacker.ability?.damageType ?? '物理'`，
+   * 于是 preview 按真实算、重算按物理算，格挡后的伤害凭空多挨一道 12.5% 的减免，
+   * 且 `DamageApplied.damageType` 也报成物理。修复后两条路径同源于冻结的 frame。
+   */
+  function mkTypedAttack(revision: number): CombatCommand {
+    return {
+      commandId: 'a-typed',
+      expectedRevision: revision,
+      kind: 'DeclareAttack',
+      actorId: '甲',
+      cost: 'attack',
+      payload: {
+        targetId: '乙',
+        intentionLevel: '常规',
+        // 本次挥出去的是一记真实伤害技能
+        ability: {
+          relevantAttribute: 20,
+          skillPower: 100,
+          damageType: '真实',
+          intentionLevel: '常规',
+          multiHitCount: 1,
+          divinity: 0,
+        },
+      },
+    } as CombatCommand;
+  }
+
+  /** 攻击者基础档是物理 —— 修复前重算会回头读到它 */
+  function withPhysicalBaseAbility(state: CombatState): CombatState {
+    return {
+      ...state,
+      units: {
+        ...state.units,
+        甲: {
+          ...state.units['甲'],
+          ability: {
+            relevantAttribute: 20,
+            skillPower: 100,
+            damageType: '物理',
+            intentionLevel: '常规',
+            multiHitCount: 1,
+            divinity: 0,
+          },
+        },
+      },
+    };
+  }
+
+  it('技能类型异于攻击者基础档时，重算不回落到基础档', () => {
+    const bundle = mkBundle();
+    let s: CombatState = createCombatState(bundle);
+    s = { ...s, units: { ...s.units, 乙: { ...s.units['乙'], hp: 500000, maxHp: 500000 } } };
+    s = withPhysicalBaseAbility(s);
+    s = withAutomaton(s, blockAutomaton('乙', 0.2));
+
+    const attackTrans = reduce(bundle, s, mkTypedAttack(0));
+    const preview = attackTrans.requiredInput;
+    expect(preview?.kind).toBe('EffectChoice');
+    const previewDamage = preview && preview.kind === 'EffectChoice' ? preview.damagePreview : 0;
+    expect(previewDamage).toBeGreaterThan(0);
+
+    const blockTrans = reduce(bundle, attackTrans.next!, {
+      commandId: 'b-typed',
+      expectedRevision: attackTrans.next!.revision,
+      kind: 'DeclareBlock',
+      actorId: '乙',
+      cost: 'action',
+      payload: { choiceId: 'block-乙' },
+    });
+
+    const dmg = blockTrans.events.find((e) => e.kind === 'DamageApplied') as
+      (DomainEvent & { final: number; damageType: string }) | undefined;
+    expect(dmg).toBeTruthy();
+    // ① 事件如实报出当次声明的类型（修复前是 '物理'）
+    expect(dmg!.damageType).toBe('真实');
+    // ② 折减是**纯乘**：重算与 preview 同源，只差一个 blockDamageFactor。
+    //    修复前物理的 12.5% 类型减免会让这一条不成立。
+    expect(dmg!.final).toBe(Math.floor(previewDamage * 0.2));
+  });
+
+  it('未声明 ability 时仍走攻击者基础档（回退语义不变）', () => {
+    const bundle = mkBundle();
+    let s: CombatState = createCombatState(bundle);
+    s = { ...s, units: { ...s.units, 乙: { ...s.units['乙'], hp: 500000, maxHp: 500000 } } };
+    s = withPhysicalBaseAbility(s);
+    s = withAutomaton(s, blockAutomaton('乙', 0.2));
+
+    const attackTrans = reduce(bundle, s, mkAttack('a-base', 0, '甲', '乙'));
+    const blockTrans = reduce(bundle, attackTrans.next!, {
+      commandId: 'b-base',
+      expectedRevision: attackTrans.next!.revision,
+      kind: 'DeclareBlock',
+      actorId: '乙',
+      cost: 'action',
+      payload: { choiceId: 'block-乙' },
+    });
+    const dmg = blockTrans.events.find((e) => e.kind === 'DamageApplied') as
+      (DomainEvent & { damageType: string }) | undefined;
+    expect(dmg!.damageType).toBe('物理');
   });
 });

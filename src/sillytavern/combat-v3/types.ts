@@ -1408,6 +1408,18 @@ export interface DamageRecomputeCtx {
   skillPower: number;
   weaponAtk: number;
   multiHitCount: number;
+  /**
+   * 本次攻击**声明**的伤害类型（Q-21）。
+   *
+   * 🔴 必填，且必须在 damage.preview 冻结时从当次 `ability.damageType` 取。
+   *    此前 frame 不带这个字段，`resumeBlockedAttack` 只好回头读
+   *    `attacker.ability?.damageType ?? '物理'` —— 而常规路径用的是
+   *    `command.payload.ability ?? attacker.ability ?? {…}`。于是格挡一个
+   *    伤害类型异于攻击者基础档的技能（火系法术、真实伤害），重算走的是
+   *    另一条类型减免（管线 Step 5 按 `damageType` 查守方抗性），
+   *    格挡后的伤害与不格挡时**不同源**。这是 live bug 不是坏味。
+   */
+  damageType: DamageType;
   intentionCoefficient: number;
   ratingCoefficient: number;
   /** 恢复时注入的减伤因子（如格挡 0.2，即伤害 × 0.2 重算到 damage.compute） */

@@ -4,13 +4,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { CraftMaterial, QualityLevel } from './types';
+import type { CraftActionRequest, CraftMaterial, QualityLevel } from './types';
 import {
   resolvePreparation,
   resolveCheck,
   resolveSettlement,
   resolveCraft,
-  createCraftRequest,
   $craft,
 } from './craft-resolver';
 
@@ -28,8 +27,15 @@ function mat(name: string, quality: QualityLevel, qty = 1, licensed = false): Cr
   };
 }
 
-function makeRequest(overrides: Partial<ReturnType<typeof createCraftRequest>> = {}) {
-  return createCraftRequest({
+/**
+ * fixture 工厂。
+ *
+ * Q-21：此前借用生产代码的 `createCraftRequest`，而那个函数拿 `Math.random`
+ * 补三颗骰 —— 于是任何造「传说」请求的用例都有 15% 概率被静默升成神话
+ * （`d20QualityUpgrade ≥ 18`）。这里三颗全部钉死，用例要什么骰自己 override。
+ */
+function makeRequest(overrides: Partial<CraftActionRequest> = {}): CraftActionRequest {
+  return {
     characterId: 'char_1',
     industry: '锻造',
     stage: '成品',
@@ -44,8 +50,10 @@ function makeRequest(overrides: Partial<ReturnType<typeof createCraftRequest>> =
     currentResources: { hp: 100, mp: 50, sp: 30 },
     hasRecipe: true,
     d20Rolls: [15],
+    d20MaterialSave: 10,
+    d20QualityUpgrade: 10,
     ...overrides,
-  });
+  };
 }
 
 // ========== Phase 1: Preparation ==========
@@ -355,47 +363,5 @@ describe('$craft API', () => {
     const bonus = $craft.getProductionBonus('稀有');
     expect(bonus.dcReduction).toBeDefined();
     expect(bonus.resourceReduction).toBeDefined();
-  });
-});
-
-// ========== createCraftRequest ==========
-
-describe('createCraftRequest', () => {
-  it('应正确填充默认值', () => {
-    const req = createCraftRequest({
-      characterId: 'char_1',
-      industry: '锻造',
-      stage: '成品',
-      productName: '铁剑',
-      targetQuality: '优良',
-      quantity: 3,
-      materials: [mat('铁锭', '优良')],
-      crafterTier: 2,
-      crafterLevel: 6,
-      coreAttributeValue: 12,
-      resourceCosts: { hp: 0, mp: 5, sp: 10 },
-      currentResources: { hp: 100, mp: 50, sp: 30 },
-    });
-    expect(req.hasRecipe).toBe(false); // 成品默认不持有图纸(需显式传入)
-    expect(req.d20Rolls).toHaveLength(1);
-  });
-
-  it('成品无图纸', () => {
-    const req = createCraftRequest({
-      characterId: 'char_1',
-      industry: '锻造',
-      stage: '成品',
-      productName: '铁剑',
-      targetQuality: '优良',
-      quantity: 1,
-      materials: [],
-      crafterTier: 2,
-      crafterLevel: 6,
-      coreAttributeValue: 12,
-      resourceCosts: { hp: 0, mp: 5, sp: 10 },
-      currentResources: { hp: 100, mp: 50, sp: 30 },
-      hasRecipe: false,
-    });
-    expect(req.hasRecipe).toBe(false);
   });
 });
