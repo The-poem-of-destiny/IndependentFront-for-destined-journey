@@ -69,6 +69,7 @@ import { fetchInstallInput, fetchProject } from '../lib/workshop-client';
 import type { WorkshopBundle, WorkshopFailure } from '../lib/workshop-client';
 import { useBeautifierStore } from './beautifier-store';
 import { useSettingsStore } from './settings-store';
+import { updateAgentWorldBookIds } from './agent-settings';
 import { useWorldBookStore } from './worldbook-store';
 import { detach } from './db-write';
 
@@ -380,10 +381,11 @@ export const useWorkshopStore = defineStore('workshop', () => {
    */
   function grantBookToAllAgents(projectId: string): void {
     const settingsStore = useSettingsStore();
-    const current = settingsStore.settings.agentWorldbookIds as Record<string, string[]>;
-    settingsStore.settings.agentWorldbookIds = grantWorkshopBookToAgents(
-      current,
-      workshopBookId(projectId),
+    // Q-18：per-Agent 设置合并成 `agents` 之后，这里投影出一张
+    // `Record<agentId, string[]>` 交给纯函数，再写回条目 —— 工坊那两个纯函数
+    // 与它们的测试一个字都不用改。
+    updateAgentWorldBookIds(settingsStore.settings, (current) =>
+      grantWorkshopBookToAgents(current, workshopBookId(projectId)),
     );
     settingsStore.saveNow();
   }
@@ -480,9 +482,8 @@ export const useWorkshopStore = defineStore('workshop', () => {
     projects.value = projects.value.filter((p) => p.id !== projectId);
     // 与 grantBookToAllAgents 成对：不收回的话 Agent 清单里会积一串指向已删书的死 id
     const settingsStore = useSettingsStore();
-    settingsStore.settings.agentWorldbookIds = revokeWorkshopBookFromAgents(
-      settingsStore.settings.agentWorldbookIds as Record<string, string[]>,
-      workshopBookId(projectId),
+    updateAgentWorldBookIds(settingsStore.settings, (current) =>
+      revokeWorkshopBookFromAgents(current, workshopBookId(projectId)),
     );
     settingsStore.saveNow();
     return true;

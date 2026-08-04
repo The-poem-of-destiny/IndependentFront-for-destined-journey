@@ -483,7 +483,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── useMapViewer.ts              ← OpenSeadragon 生命周期
 │   ├── useMapMarkers.ts             ← 地图标记 CRUD + Overlay 同步
 │   ├── useHoverPopup.ts             ← 悬停浮层唯一实现（读 settings.hoverDelayMs）
-│   └── useAssetImage.ts             ← [素材] 渲染缝：(name,type?) → {url,isVideo,row}，世代号守卫 + 引用计数索引
+│   ├── useAssetImage.ts             ← [素材] 渲染缝：(name,type?) → {url,isVideo,row}，世代号守卫 + 引用计数索引
+│   └── usePlayerPortrait.ts         ← [Q-25] 玩家画像位：立牌链渲染 + 定点导入 + 裁剪台开关
+│                                       （文案一律出自 game/portrait-messages.ts，本层只决定"做什么"）
 │
 ├── lib/                             ← 前端↔引擎桥接层
 │   ├── game-pipeline.ts             ← GamePipeline（AgentConfig 组装/上下文/编排器/回调）
@@ -506,7 +508,23 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   └── variables.css + 10 主题 CSS（parchment/obsidian/crimson/indigo/bronze/sakura/ivory/misty-lilac/forest/ocean）
 │
 ├── stores/
-│   ├── theme-store.ts / ui-store.ts / settings-store.ts / create-store.ts / game-store.ts
+│   ├── theme-store.ts / ui-store.ts / create-store.ts / game-store.ts
+│   ├── settings-store.ts            ← 全应用最热的状态；deep watch 自动落 localStorage
+│   │                                   🔴 **加新设置要改两处**（Q-18）：先在 settings-types.ts
+│   │                                      的 `UiSettings` 上声明，再在 getDefaults() 给默认值。
+│   │                                      「任意新字段零改动」那条设计意图已于 2026-08-04 反转
+│   ├── settings-types.ts            ← [Q-18] ★`UiSettings`（**type 不是 interface** —— 整份袋子
+│   │                                   要传进 5 处 `Record<string, unknown>` 参数，interface 没有
+│   │                                   隐式索引签名会当场编译不过；也**不能**加显式索引签名，
+│   │                                   那会让 `s.agentTopp` 重新变成合法的 unknown）
+│   │                                   已迁出的历史键与迁移标志位刻意**不声明** —— 应用代码碰它
+│   │                                   就是编译错误，迁移模块经宽参数照常工作
+│   ├── agent-settings.ts            ← [Q-18] per-Agent 设置唯一读写口（get/patch/reset/fillMissing
+│   │                                   /listConfigured/updateAgentWorldBookIds）+ AGENT_SETTINGS_DEFAULTS
+│   │                                   （0.7/1.0/0/0/16384 全应用唯一出处，此前四文件六处拷贝）
+│   ├── agent-settings-migration.ts  ← [Q-18] 12 张并行 map → `agents` 的一次性形状迁移。
+│   │                                   **不是**六步迁移那一类：同一个对象内重排、零跨存储、
+│   │                                   无标志位（旧键在不在就是信号）、在 `ref()` **之前**同步跑
 │   ├── audio-store.ts               ← [Audio] Pinia 薄壳（桥接单例 + CRUD + 三后端分流）
 │   ├── asset-store.ts               ← [素材] 执行器（planImport 出计划，本店只落库）+ importForCharacter/importPortraitPair
 │   ├── worldbook-store.ts           ← [工坊 P0] 🆕 世界书 Dexie 唯一入口（`settings.worldBooks` 已不存在）
@@ -529,8 +547,38 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── ToastContainer.vue
 │   │   └── form/ (Input/Select/Stepper/Cascader/KeyValue)
 │   ├── home/HomePage.vue            ← 游戏标题画面
-│   ├── settings/
-│   │   ├── SettingsPage.vue         ← 设置页（左侧导航 + 12 分区 + 预设系统）
+│   ├── settings/                    ← [Q-25] 12 个分区**全部**是一行子组件
+│   │   ├── SettingsPage.vue         ← 纯壳层（1995 → 约 415 行）：页头 + 主导航 + Agent 子导航
+│   │   │                               只留 activeSection / activeAgent / selectAgent /
+│   │   │                               agentModelOf 与 wb.init()（世界书分区也靠它）
+│   │   ├── agent/                    ← [Q-25] Agent 分区（照 settings/audio/ 的样子）
+│   │   │   ├── AgentSection.vue      ← 分区壳：**单根** section.section.centered；
+│   │   │   │                            两个草稿 + 三个动作（保存/恢复默认/存为项目默认）
+│   │   │   │                            🔴 草稿载入必须 watch(..., { immediate: true })：
+│   │   │   │                               主导航每次点击都把 activeAgent 置 null，本组件
+│   │   │   │                               永远是新挂载，普通 watch 不触发 → 文本框空着渲染
+│   │   │   │                               → 「保存设置」把空串写进用户提示词
+│   │   │   ├── AgentParamsCard.vue   ← API 池 + 7 个 LLM 旋钮 + 世界书卡（共用 agentCfg/setAgentField）
+│   │   │   ├── AgentPromptCard.vue   ← systemPrompt + 上下文模板 + 占位符徽章 + 预览（非 story）
+│   │   │   │                            占位符插入改用**模板 ref**，不再全局 querySelectorAll
+│   │   │   ├── PresetManager.vue     ← 预设子系统 + 两个弹窗（story）；单根，弹窗在根卡内层
+│   │   │   ├── agent-list.ts         ← 11 个 Agent 的展示元数据 + getDefaultTemplateForAgent
+│   │   │   ├── placeholder-catalog.ts← 23 项占位符 + 按 Agent 过滤（DAG 偏序 + 侧链归属）
+│   │   │   ├── agent-defaults.ts     ← buildAgentDefaultEntry（纯装配；patch 副作用留调用方）
+│   │   │   └── agent-chrome.css      ← ★跨组件共用：.prompt-editor / .template-preview-panel
+│   │   │                                🔴 @keyframes 必须与用它的规则同组件 —— Vue 的 scoped
+│   │   │                                   编译器按组件 hash 重命名关键帧，分家动画就停了
+│   │   ├── settings-chrome.css      ← [Q-25] ★共用外壳样式**唯一一份**（.section>h3/.section-desc/
+│   │   │                               .form-*/.toggle-*/.detail-card）。各分区（含壳层）用
+│   │   │                               `<style scoped src>` 引入 —— 一份源码，各自作用域。
+│   │   │                               父组件的 scoped 样式只能命中子组件**根节点**，够不到里面
+│   │   ├── ApiSection.vue           ← API 池 CRUD + 连接测试 + 模型列表（含添加/编辑弹窗）
+│   │   │                               🔴 必须**单根**：弹窗放 <section> 内层，否则父级 `.centered`
+│   │   │                                  命不中根节点，本分区在宽屏下摊满整行（真机走查逮到）
+│   │   ├── WorldBookSection.vue     ← 世界书列表/导入/新建/删除/恢复 + 条目编辑器
+│   │   ├── PlotSection.vue / MemorySection.vue / ThemeSection.vue / MessagesSection.vue
+│   │   ├── DataSection.vue          ← 导出/导入/存储用量/清除全部（用量改为**本分区**挂载时读）
+│   │   ├── AboutSection.vue
 │   │   ├── AudioSection.vue         ← [Audio] 音频分区（壳层 + 5 子组件）
 │   │   └── AssetSection.vue         ← [素材] 素材分区壳层 + 4 子组件
 │   ├── create/CreatePage.vue        ← [占位] 捏人页
@@ -538,6 +586,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── GamePage.vue             ← 游戏页主布局（三栏 + 6 弹窗；持有 --rail-w）
 │   │   ├── MapPanel.vue / TopBar.vue / SideToolbar.vue / ScenePanel.vue / ChatFlow.vue / InputBar.vue
 │   │   ├── StatusHUD.vue / StatusOverview.vue / ItemsPanel.vue / CharacterListPanel.vue
+│   │   ├── portrait-messages.ts     ← [Q-25] 画像导入路径的文案层（纯函数，零副作用，不 mount 可测）
 │   │   ├── QuestsPanel.vue / PlotPanel.vue / MemoryPanel.vue / SnapshotPanel.vue / MiniPlayer.vue
 │   │   ├── WorkshopEnablePanel.vue  ← [工坊] 每存档「内容启用」面板（建档后仍可改）
 │   │   └── (战斗面板见 combat/ 子组件，docs/reference/combat-system-architecture.md)

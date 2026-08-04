@@ -432,9 +432,9 @@ export class GamePipeline {
     // 复用 buildEndpoints() 的映射结果（ApiEntry.model → ApiEndpoint.defaultModel）
     const apiPool = this.buildEndpoints();
 
-    // agentModels 存 API 池 id → 匹配对应端点
+    // 每个 Agent 的 `model` 存的是 **API 池 id** → 匹配对应端点
     const getEndpoint = (agentId: string): ApiEndpoint | undefined => {
-      const poolId = (s.agentModels as Record<string, string>)[agentId] || '';
+      const poolId = getAgentSettings(s, agentId).model;
       return apiPool.find((ep) => ep.id === poolId) || apiPool[0];
     };
 
@@ -480,9 +480,7 @@ export class GamePipeline {
       // 此前硬绑 agent-config.json 出厂 presetId，用户导入/另存的预设（新 id）在设置页编辑得再对，
       // 运行时也永远用旧的那份（"我保存了第二人称但 agent 没拿到"根因）。
       const presetId: string | undefined =
-        agentId === 'story' && (s.activePresetId as string)
-          ? (s.activePresetId as string)
-          : defaults.presetId || undefined;
+        agentId === 'story' && s.activePresetId ? s.activePresetId : defaults.presetId || undefined;
       const systemPrompt: string | undefined = defaults.systemPrompt || undefined;
       const template: string | undefined = defaults.template || undefined;
       // Q-18: per-Agent 设置只取一次，数值项的默认由 AGENT_SETTINGS_DEFAULTS 合上
@@ -764,7 +762,7 @@ export class GamePipeline {
     return this.buildEndpoints()[0];
   }
 
-  /** 按 agentId 解析 endpoint —— 尊重设置页 s.agentModels 映射；
+  /** 按 agentId 解析 endpoint —— 尊重设置页为各 Agent 选的 API 池；
    *  未配置或映射失效时回退到默认 endpoint（与 createAgentClients 一致）。
    *  修复(2026-07-30): 此前 char_gen/item_gen/craft_gen/combat 等侧链一律走
    *  getDefaultEndpoint()（API 池第一项），无视用户在设置页为各 Agent 选的 API 池，
@@ -772,7 +770,7 @@ export class GamePipeline {
   private getEndpointForAgent(agentId: string): ApiEndpoint {
     const s = this.settings.settings;
     const apiPool = this.buildEndpoints();
-    const poolId = (s.agentModels as Record<string, string>)[agentId] || '';
+    const poolId = getAgentSettings(s, agentId).model;
     return apiPool.find((ep) => ep.id === poolId) || apiPool[0];
   }
 
@@ -1316,7 +1314,7 @@ export class GamePipeline {
     return {
       baseUrl: ep.baseUrl,
       apiKey: ep.apiKey,
-      defaultModel: (s.embeddingModel as string) || ep.defaultModel,
+      defaultModel: s.embeddingModel || ep.defaultModel,
     };
   }
 

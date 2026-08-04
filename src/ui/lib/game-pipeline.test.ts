@@ -4,6 +4,7 @@ import {
   extractStoryOptions,
   GamePipeline,
 } from './game-pipeline';
+import { patchAgentSettings } from '../stores/agent-settings';
 import type { AgentResult } from '@engine/types';
 
 vi.mock('@engine/plot-engine', () => ({
@@ -96,17 +97,10 @@ function makeSettingsStore() {
   return {
     settings: {
       apiPool: [],
-      agentModels: {},
-      agentTemperature: {},
-      agentMaxTokens: {},
-      agentTopP: {},
-      agentFreqPen: {},
-      agentPresPen: {},
-      agentPrompts: {},
-      agentTemplates: {},
-      agentWorldbookEnabled: {},
-      agentWorldbookIds: {},
-      worldBooks: [],
+      // Q-18: per-Agent 设置合并成一张 `agents` 表（此前是 10 张并行 map，
+      // 而且这份桩少列了 agentDirty / agentHistoryLayers / agentHistorySlice ——
+      // 那正是「加一张 map 要改七处」的代价）
+      agents: {},
     },
   } as any;
 }
@@ -201,10 +195,14 @@ describe('buildAgentConfigs — selected system core visibility', () => {
         },
       });
       const settings = (pipeline as any).settings.settings;
-      settings.agentWorldbookEnabled.char_gen = true;
-      settings.agentWorldbookIds.char_gen = ['world_setting', 'race', 'character'];
-      settings.agentWorldbookEnabled.story = true;
-      settings.agentWorldbookIds.story = ['world_setting'];
+      patchAgentSettings(settings, 'char_gen', {
+        worldBookEnabled: true,
+        worldBookIds: ['world_setting', 'race', 'character'],
+      });
+      patchAgentSettings(settings, 'story', {
+        worldBookEnabled: true,
+        worldBookIds: ['world_setting'],
+      });
 
       const configs = (pipeline as any).buildAgentConfigs({ char_gen: {} });
       const charGen = configs.find((config: any) => config.agentId === 'char_gen');
@@ -219,8 +217,10 @@ describe('buildAgentConfigs — selected system core visibility', () => {
     const pipeline = makePipeline();
     const settings = (pipeline as any).settings.settings;
     for (const agentId of ['story', 'char_gen', 'request_dispatcher']) {
-      settings.agentWorldbookEnabled[agentId] = true;
-      settings.agentWorldbookIds[agentId] = ['world_setting'];
+      patchAgentSettings(settings, agentId, {
+        worldBookEnabled: true,
+        worldBookIds: ['world_setting'],
+      });
     }
 
     const configs = (pipeline as any).buildAgentConfigs({}, undefined, ['workshop:core-project']);

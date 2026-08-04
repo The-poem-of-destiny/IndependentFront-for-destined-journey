@@ -62,6 +62,7 @@ describe('settings-store', () => {
         maskedKey: '***',
         model: 'm',
         models: ['m'],
+        apiType: 'chat',
       },
     ];
     await nextTick();
@@ -158,7 +159,9 @@ describe('settings-store', () => {
   it('settings 中所有默认字段应存在', () => {
     const keys = Object.keys(store.settings);
     expect(keys).toContain('apiPool');
-    expect(keys).toContain('agentModels');
+    // Q-18: 12 张 per-Agent map 已合并成一张 `agents` 表
+    expect(keys).toContain('agents');
+    expect(keys).not.toContain('agentModels');
     expect(keys).toContain('presets');
     expect(keys).toContain('plotMode');
     expect(keys).toContain('plotDurationYears');

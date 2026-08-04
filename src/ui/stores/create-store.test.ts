@@ -9,6 +9,7 @@ import { nextTick } from 'vue';
 import { setActivePinia, createPinia } from 'pinia';
 import { useCreateStore } from './create-store';
 import { useSettingsStore } from './settings-store';
+import { patchAgentSettings } from './agent-settings';
 import {
   DIFFICULTY_PRESETS,
   DEFAULT_EQUIPMENT_POOL,
@@ -1104,8 +1105,10 @@ function setupPlotStore() {
       apiType: 'chat',
     },
   ];
-  settings.settings.agentModels = { plot_outline: 'ep1' };
-  settings.settings.agentPrompts = { plot_outline: '你是剧情大纲生成 Agent' };
+  patchAgentSettings(settings.settings, 'plot_outline', {
+    model: 'ep1',
+    systemPrompt: '你是剧情大纲生成 Agent',
+  });
   const store = useCreateStore();
   store.plotMode = 'main';
   store.name = '艾琳';
@@ -1409,8 +1412,10 @@ describe('localStorage 草稿 save/restore/clear', () => {
         apiType: 'chat',
       },
     ];
-    settings.settings.agentModels = { plot_outline: 'ep1' };
-    settings.settings.agentPrompts = { plot_outline: '你是剧情大纲生成 Agent' };
+    patchAgentSettings(settings.settings, 'plot_outline', {
+      model: 'ep1',
+      systemPrompt: '你是剧情大纲生成 Agent',
+    });
     return useCreateStore();
   }
 
