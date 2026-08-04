@@ -603,6 +603,111 @@ describe('取消', () => {
   });
 });
 
+// ═══ 上一次会话的遗留对账（D5 / D25 / §10.2）═══
+
+describe('遗留在飞记录的对账', () => {
+  it('上次会话留下的 generating / queued 在 load() 后都落 failed，原因说得清发生了什么', async () => {
+    // 页面关掉时队列与 AbortController 都没了，库里这两行却还写着在飞 ——
+    // 不对账的话 §10.2 会画一个永远转下去的圈 + 一个从上辈子开始算的「已用 N 秒」
+    await saveSceneImage(makeRecord({ id: 'g', status: 'generating', startedAt: 1 }));
+    await saveSceneImage(makeRecord({ id: 'q', status: 'queued', occurrence: 1 }));
+
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+
+    for (const id of ['g', 'q']) {
+      const row = await getSceneImage(id);
+      expect(row?.status).toBe('failed');
+      expect(row?.errorKind).toBe('aborted');
+      // 措辞指向真正发生的事，不是「网络错误」那种会让人以为是 NAI 出问题的说法
+      expect(row?.error).toContain('上次');
+      expect(row?.error).not.toContain('网络');
+    }
+    // 投影同步更新，UI 立刻从转圈变成可重试的失败
+    expect(store.find('g')?.status).toBe('failed');
+    expect(store.find('q')?.status).toBe('failed');
+  });
+
+  it('🔴 对账不产生任何网络调用（D25：永不自动重试）', async () => {
+    // 关页面之前那一次请求可能已经扣过费了，替玩家重发一次是拿他的钱做决定
+    await saveSceneImage(makeRecord({ id: 'g', status: 'generating' }));
+    await saveSceneImage(makeRecord({ id: 'q', status: 'queued', occurrence: 1 }));
+
+    const store = useSceneImageStore();
+    const runPromptAgent = vi.fn();
+    const send = vi.fn();
+    store.setSeams({ runPromptAgent, send });
+
+    await store.load(SAVE);
+    await store.whenIdle();
+
+    expect(runPromptAgent).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    // 也没有偷偷把它们塞回队列
+    expect(store.queue).toHaveLength(0);
+    expect(store.generatingId).toBeNull();
+  });
+
+  it('done / failed 的记录一个字节都不动', async () => {
+    await saveSceneImage(makeRecord({ id: 'done_one' }));
+    await saveSceneImage(
+      makeRecord({
+        id: 'failed_one',
+        occurrence: 1,
+        status: 'failed',
+        errorKind: 'rate-limit',
+        error: '已达速率上限',
+      }),
+    );
+
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+
+    const done = await getSceneImage('done_one');
+    expect(done?.status).toBe('done');
+    expect(done?.error).toBeUndefined();
+    expect(done?.errorKind).toBeUndefined();
+
+    const failed = await getSceneImage('failed_one');
+    expect(failed?.errorKind).toBe('rate-limit');
+    // 原来的失败原因不该被对账的措辞盖掉
+    expect(failed?.error).toBe('已达速率上限');
+  });
+
+  it('🔴 本次会话正在飞 / 正在排队的记录不被误伤', async () => {
+    // cleanup() 之类的路径会在会话中途重新 load()，那时队列里的东西是有人认领的
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+
+    const called = deferred<void>();
+    const release = deferred<SceneImageSendResult>();
+    store.setSeams({
+      runPromptAgent: stubPromptAgent(),
+      send: async () => {
+        called.resolve();
+        return release.promise;
+      },
+    });
+
+    const a = await store.generate(baseInput({ occurrence: 0 }));
+    const b = await store.generate(baseInput({ occurrence: 1 }));
+    expect(a.ok && b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+    await called.promise;
+
+    await store.load(SAVE);
+
+    expect((await getSceneImage(a.id))?.status).toBe('generating');
+    expect((await getSceneImage(b.id))?.status).toBe('queued');
+
+    // 而且泵没被打断，第二条照样轮得到
+    release.resolve(okSend());
+    await store.whenIdle();
+    expect((await getSceneImage(a.id))?.status).toBe('done');
+    expect((await getSceneImage(b.id))?.status).toBe('done');
+  });
+});
+
 // ═══ 钉住（D45）═══
 
 describe('钉住', () => {

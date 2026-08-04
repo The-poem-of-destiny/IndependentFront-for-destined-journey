@@ -246,6 +246,16 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
    */
   const context = new Map<string, { narrative: string; location?: string }>();
 
+  /**
+   * 本次会话「有人认领」的记录 id —— 经 {@link enqueue} 排进队列、还没跑完的那些。
+   *
+   * 唯一用途是给 {@link reconcileStale} 一条明确判据：不在这个集合里的 `queued` /
+   * `generating` 记录，就是**上一次会话**留下的（没有任何本进程的队列位置或
+   * AbortController 认领它）。刻意不落库 —— 它描述的是「这个 JS 进程正在做什么」，
+   * 页面一关就该整个消失，那正是对账要利用的事实。
+   */
+  const sessionLive = new Set<string>();
+
   let seams: SceneImageSeams = {};
   let currentAbort: AbortController | null = null;
   let running = false;
@@ -270,11 +280,48 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
     loading.value = true;
     try {
       records.value = await getSceneImages(saveId);
+      await reconcileStale();
     } catch {
       // IndexedDB 不可用 → 空库，正文照样渲染（对齐 asset-store 的降级）
       records.value = [];
     } finally {
       loading.value = false;
+    }
+  }
+
+  /**
+   * 把**上一次会话**遗留的 `queued` / `generating` 记录对账成 `failed`。
+   *
+   * 页面一关，串行队列和 AbortController 都随进程没了，库里那一行却还写着在飞。
+   * 不对账的话，§10.2 真值表会照 `generating` 那一格画一个**永远转下去的圈**，
+   * 还配一个从上辈子开始算的「已用 N 秒」；`queued` 那一格更糟 —— 队列已经不存在，
+   * 它永远排不到第 0 位。
+   *
+   * 🔴 **落 `failed`，绝不自动重发**（D25）。页面关掉之前那一次请求可能已经扣过费了，
+   *    替玩家重发一次是拿他的钱做决定。落成 failed 之后 UI 出「重试」按钮，他自己按。
+   *    这也是本函数**一个网络调用都不产生**的理由 —— 它只改状态，不碰任何缝。
+   *
+   * 🔴 **只动上一次会话的记录**。判据是 {@link sessionLive}：本次会话排过队、还没跑完的
+   *    id 都在里面，对账一律跳过。两条让这条判据成立的细节：
+   *    - 对账**只在 `load()` 那一刻做一次**，没有任何周期性扫描，所以不存在「扫到一半
+   *      有人入队」这种要加锁的窗口。
+   *    - `generate()` 里 `await put(...)` 与 `enqueue(...)` 之间没有 await 出让点，于是
+   *      「已落库 `queued` 但还没进 `sessionLive`」这个瞬间对别的任务不可见。
+   */
+  async function reconcileStale(): Promise<void> {
+    const stale = records.value.filter(
+      (r) => (r.status === 'queued' || r.status === 'generating') && !sessionLive.has(r.id),
+    );
+    for (const r of stale) {
+      await patch(r.id, {
+        status: 'failed',
+        errorKind: 'aborted',
+        // 措辞要指向真正发生的事 —— 说成「网络错误」会让人以为是 NAI 那边出了问题
+        error:
+          r.status === 'generating'
+            ? '上次生成被页面关闭打断，未自动重试（这一张可能已经计费）。'
+            : '上次排队时页面被关闭，这一张没有发出去。',
+      });
     }
   }
 
@@ -465,6 +512,7 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
   // ═══ 队列 ═════════════════════════════════════════════
 
   function dequeue(id: string): boolean {
+    sessionLive.delete(id);
     const i = queue.value.indexOf(id);
     if (i < 0) return false;
     queue.value.splice(i, 1);
@@ -472,6 +520,7 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
   }
 
   function enqueue(id: string): void {
+    sessionLive.add(id);
     queue.value.push(id);
     kick();
   }
@@ -539,6 +588,7 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
     const pending = [...queue.value];
     queue.value = [];
     for (const id of pending) {
+      sessionLive.delete(id);
       void deleteSceneImage(id).catch(() => {});
       forgetLocal(id);
     }
@@ -635,6 +685,7 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
     // 记录可能已经被 cancel/remove 掉了 —— 那就什么都不做（尤其**不发请求**）
     if (!start || start.status !== 'queued') {
       context.delete(id);
+      sessionLive.delete(id);
       return;
     }
 
@@ -699,6 +750,8 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
       await fail(id, { ...failureOf('network', '生成时出错，请稍后重试。', true), detail });
     } finally {
       context.delete(id);
+      // 跑完（成功/失败/抛异常都算）就不再是「本次会话认领中」的记录
+      sessionLive.delete(id);
       if (generatingId.value === id) generatingId.value = null;
       if (currentAbort === abort) currentAbort = null;
     }

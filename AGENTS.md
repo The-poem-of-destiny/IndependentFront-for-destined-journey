@@ -87,11 +87,17 @@ docs/
 │                                       # 🆕 创意工坊兼容层设计 v2（D1-D17）← 改工坊/世界书存储必读
 │                                       #    Phase 0 世界书迁 Dexie · Phase 1 工坊 · Phase 2 EJS 沙盒（✅ 待真机）
 ├── planning/2026-08-04-image-generation-design.md
-│                                       # 🆕 图像生成 v1（D1-D27）← 做文生图必读。**设计定稿，未实施**
+│                                       # 🆕 图像生成 v1（v1.1 / D1-D55）← 做文生图必读。**✅ 已实施，待真机**
 │                                       #    v1 范围：NovelAI 单家 + 情景插画（标记当锚点，图就地插进正文）
 │                                       #    🔴 三条钱相关的铁则：自动档不追溯开火 / 同回合不重复自动生成 /
 │                                       #      超限降级成手动按钮而非丢弃标记
 │                                       #    NAI V4 请求体三重冗余（input + v4_prompt + characterPrompts）已核准
+│                                       #    🔴 §8.5 记着一条实施期才发现的坑：那句给 story 的指令
+│                                       #      **不写进 agents.story.systemPrompt**（story 有预设短路）
+├── planning/2026-08-04-image-generation-implementation-plan.md
+│                                       # 🆕 图像生成 v1 的 lean-delegation 编排（波次 / 逐任务 brief）
+│                                       #    开头「实际执行情况」一节记的是**实际怎么跑的**（7 波 22 任务）
+│                                       #    与原计划（6 波 19 任务）的每一处偏差及其理由 —— 下次编排照它调
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
@@ -261,16 +267,16 @@ Layer 1  原语级 状态读写        StateManager.commitChatState() / $validat
 
 ### 关键架构决策
 
-| 决策                         | 选择                                | 理由                                                                                                 |
-| ---------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| EventBus 实例化              | 按 SaveSlot                         | 效果实例随存档隔离                                                                                   |
-| Script 执行                  | 沙盒模式 (script-executor.ts)       | $event.on/off 持久订阅 + $call 跨对象调用 + init/cleanup 生命周期                                    |
-| 持久订阅管理                 | subscription-manager.ts             | 递归保护(≤10) + 僵尸兜底(unregisterAll)                                                              |
-| EffectRuntime 时序           | 管线完成后批量执行                  | 保持 DAG 原子性                                                                                      |
-| EventBus 引入时机            | Phase 7e+8（已完成）                | 与 Script 系统同步上线                                                                               |
-| Agentic 模式                 | OpenAI function calling (Phase 8.5) | craft_gen/char_gen/item_gen 通过 tools 调用真实 Code 函数，禁止 AI 编造数值                          |
-| craft_request 时序           | 延迟型 (对齐 combat_trigger)        | Stage 1 暂存 → Stage 2 统一执行，避免阻塞叙事                                                        |
-| System Prompt 管理 (Phase 9) | agent-config.json 唯一来源          | 所有 Agent 的完整 systemPrompt 存在 agent-config.json；agent-templates.ts 只留 stub + 动态上下文函数 |
+| 决策                         | 选择                                | 理由                                                                                                                                                                                         |
+| ---------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| EventBus 实例化              | 按 SaveSlot                         | 效果实例随存档隔离                                                                                                                                                                           |
+| Script 执行                  | 沙盒模式 (script-executor.ts)       | $event.on/off 持久订阅 + $call 跨对象调用 + init/cleanup 生命周期                                                                                                                            |
+| 持久订阅管理                 | subscription-manager.ts             | 递归保护(≤10) + 僵尸兜底(unregisterAll)                                                                                                                                                      |
+| EffectRuntime 时序           | 管线完成后批量执行                  | 保持 DAG 原子性                                                                                                                                                                              |
+| EventBus 引入时机            | Phase 7e+8（已完成）                | 与 Script 系统同步上线                                                                                                                                                                       |
+| Agentic 模式                 | OpenAI function calling (Phase 8.5) | craft_gen/char_gen/item_gen 通过 tools 调用真实 Code 函数，禁止 AI 编造数值                                                                                                                  |
+| craft_request 时序           | 延迟型 (对齐 combat_trigger)        | Stage 1 暂存 → Stage 2 统一执行，避免阻塞叙事                                                                                                                                                |
+| System Prompt 管理 (Phase 9) | agent-config.json 唯一来源          | 所有 Agent 的完整 systemPrompt 存在 agent-config.json；agent-templates.ts 只留 stub + 动态上下文函数。🔴 **story 例外**：预设短路，行为真源是预设条目——细节见架构图里 agent-config.json 那条 |
 
 ### 效果系统统一框架（战斗+制作共用，ADR-29）
 
@@ -357,6 +363,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 工坊 P2   | EJS 沙盒 + 只读 stats 投影（ADR-30）                       | ✅ 待真机           |
 | 工坊 P3   | 社交面（Discord 登录/点赞/订阅，D18-D25）                  | ✅ 真机已过         |
 | 工坊 P4   | 上游对齐（封面链/类型徽章/我的项目/更新 diff/投稿/审核）   | ✅ B4 真机已过      |
+| 图像 v1   | 情景插画（NovelAI 单家 + 标记锚点 + 三档开关 + CG 图鉴）   | ✅ 待真机           |
 | 真机迭代  | debug loop 持续修复                                        | 🔄                  |
 
 > 🔒 **工坊入口仍临时下线（2026-08-01 安全审计，2026-08-03 视觉边界修订）**：首页「创意工坊」按钮由 `HomePage.vue` 的 `WORKSHOP_ENTRY_ENABLED = false` 隐藏。SEC-02 已由 QuickJS 隔离后端收口；SEC-01 不再用 DOM 白名单牺牲 replacement 兼容，而是把每次富正则命中放进各自无 same-origin 的 `sandbox="allow-scripts"` iframe，并使用 `credentialless` + `no-referrer`；未命中正文始终由宿主原生文本面渲染，正则 CSS/布局无法触及普通正文或其它命中。代价是跨命中 DOM 查询不再兼容。外部 HTTP(S) 资源与原生网络 API 为兼容性刻意放行；form、popup、download、top navigation、嵌套 frame、parent DOM、应用 Dexie/storage 与 API Key 仍不可达，应用自有 `/api` 也拒绝 `Origin: null`。正则唯一持久权限是 Dexie v16 `regexStorage`：所有正则、信任级别与预览共享同一个不可信命名空间，iframe 内以同步 `localStorage` 镜像和 `window.regexStorage` 别名使用，跨 frame 持久化/广播；`sessionStorage` 仍只活在当前 frame，IndexedDB 不开放。规则可向远程或本地网络发请求，也可外传该命中的 replacement/capture 与 regex-namespace 数据，这是当前威胁模型明确接受的暴露。**但这套全开契约只给「用户自己装过的规则」**：模型输出里合成的 `<item_info>` / `<task_info>` 卡片是另一档（`BeautifierMatchSegment.origin === 'model'`）—— CSP 只放行带 nonce 的宿主引导脚本，卡片自带 `<script>` / inline handler 由浏览器拦掉，`connect-src 'none'`，也不注入 `regexStorage` 快照；样式/图片照旧，视觉不降级。理由是模型正文会被世界书/角色卡/工坊文案里的注入牵着走，不该顺带拿到脚本面与网络出口。2026-08-02 公共工坊快照为 303 项目 / 99 条正则（0 编译失败）：60 条外部资源规则不再降级，16 条 parent 耦合与 14 条宿主 API 耦合仍受限；storage 词法命中 8 条，精查为 5 项目 6 条 active + 2 条仅注释，active 均只用 `getItem`/`setItem`/`removeItem` 且现已兼容。脚本仍无 CPU 预算，因此入口继续关闭；已装规则仍按存档启用状态运行。详见 `docs/reviews/2026-08-01-repository-review.md` 与 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
@@ -368,6 +375,10 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 > 1. **并发 toggle 互相抹掉** —— 节流键按（项目 × 动作）分开，点赞与订阅可同时在飞；而校正/回滚都拿**起飞时**抓的快照整份盖回去，后落地的会把先落地的成果重置回起飞前，失败回滚还会连累并发动作、并留下一个服务端从没记过的「幻影赞」。现在校正基线取**落地那一刻**的覆盖层，回滚只放回自己那一对字段（`workshop-social-store.ts` 的 `rollback`）。
 > 2. **编辑表单从本地已装库取初值** —— 「我的项目」列的是作者名下全部项目、未必装过，查空就开出空表单，而「提交修改」是整份 PUT，一次没留神就把上游的简介清成空串、标签清光。现在 `WorkshopBrowseModal` 的 `edit` 事件转达**上游整行**，本地那份只做兜底。
 > 3. **登录弹窗不验地址** —— `window.open` 吃的是上游响应里的一个字段：`javascript:` 会在与本源关联的上下文里执行（当时 API Key 仍在 localStorage），而弹窗刻意保留 opener（登录靠 postMessage），放行陌生域等于把 `opener.location` 交出去。现在开窗前过 `isAllowedLoginUrl()`：只放 https + 主机钉死 `discord.com` 与工坊 worker（含子域）。
+>
+> 🟡 **图像生成 v1 已实施（7 波 22 任务），真机走查未做**：`<scene_image>` 成为引擎认识的标记，story 在正文里就地插标记当锚点，Code 走「限额 → `image_prompt` 侧链把中文转 danbooru → NovelAI V4.5 出图 → 落库 → 就地渲染」。三档开关（off / manual / auto）默认 **manual**。设计 D1–D55 全文在 `docs/planning/2026-08-04-image-generation-design.md`，实施编排与实际偏差在同目录的 `-implementation-plan.md`。**代码层全绿（typecheck + 全量测试），真机一次没跑过** —— NAI 真实响应 zip、0 角色数组、`ucPreset` 按模型编号这三点仍只有自压 fixture 做保证。四条钱相关的铁则分别钉在四个文件里：自动档不追溯开火（`lib/game-pipeline.ts`）、限额在侧链之前（`image-quota.ts`）、「无记录 + auto」出按钮而不是去生成（`scene-image-view.ts`）、手动永不被判成不可用（`useManualSceneImage.ts`）。
+>
+> 🩹 **实施中逮到的两处**：① `blurByDefault`（D46 打码）**声明了但没人传**，整条功能是死的 —— 根因是只有单组件测试，那种测试能证明逻辑对、**证明不了有人供值**，现已补从 ChatFlow 真渲染到底的链路测试。② `data/defaults/agent-config.json` 里有 **47 个 U+FFFD 坏字符**（16 段 / 6 个 agent），其中一处落在闭合 XML 标签的标签名里 —— **既有问题，本轮未修**，已另开任务。
 >
 > 🟡 **工坊 P2 已实施（T1-T6），真机走查未做**：世界书条目正文的 EJS 现在**会在提示装配期求值**（ADR-30 两轴契约：只读 `stats` + 共写 `vars`，冲突 AI 赢；动态条目沉底、静态前缀字节稳定）。全语料冒烟 509 条目 / 61 动态 / **0 回退**（能力面别名层落地后 7 → 0，白名单已清空；语料门现按 **Legacy 与 QuickJS 双后端**各自跑双向白名单，基线一致），回退条目原文注入不阻断。代码位内嵌的 ST 值宏（`{{roll}}`/`{{random::}}`）已在编译期降成沙盒调用（`rewriteCodeMacros`），uid 358 出列。回退率 / 缓存命中字节 / 跨回合链尚未真机验证，设计全文见 `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`。
 
@@ -384,7 +395,7 @@ src/sillytavern/                    ← 核心引擎
   │   ├── Audio: AudioSourceKind ('blob'|'builtin'|'file') / AudioTrack / AudioBlobRecord 等
   │   └── 辅助: createDefaultCharacterState() / resolvePlotTree()
   │
-  ├── database.ts                   ← Dexie/IndexedDB v16
+  ├── database.ts                   ← Dexie/IndexedDB v17
   │   ├── v1-v3: lorebooks / presets / settings / chats
   │   │           🪦 lorebooks 是 v3 遗留 `Lorebook` 类型的**死表**，生产代码零读写；
   │   │              现役世界书表是 v14 的 worldBooks（`WorldBook` 类型）。
@@ -402,7 +413,14 @@ src/sillytavern/                    ← 核心引擎
   │   ├── v13+: assetMeta / assetBlobs（素材库，全局共享，排除 FullBackup，走 zip 导出）
   │   ├── v14+: worldBooks / workshopProjects（工坊 P0；两者都进 FullBackup）
   │   ├── v15+: beautifierRules（工坊 P0b；只存**用户规则**，内置预设是派生缓存不落库）
-  │   └── v16+: regexStorage（所有正则/信任级别/预览共享的隔离 KV；进 FullBackup；更新/卸载保留）
+  │   ├── v16+: regexStorage（所有正则/信任级别/预览共享的隔离 KV；进 FullBackup；更新/卸载保留）
+  │   └── v17+: sceneImages / sceneImageBlobs / imagePresets（图像 v1）
+  │              删存档连带删前两张；**imagePresets 刻意不删** —— 视觉预设是全局的，
+  │              与素材库同口径（删一个存档不该让别的存档的角色换脸）
+  │              FullBackup 收 sceneImages ✅ + imagePresets ✅、**sceneImageBlobs ❌** ——
+  │              图片字节进 JSON 会爆炸；字节的回收走「清理」不走备份
+  │              🔴 「清理」= 删 blob 行 + 给记录打 blobDropped，**sceneImages 行数不变**（D47）：
+  │                 图鉴那一格变成「字节已清理 + 重画」，标题/说明/提示词一条不少
   │       🔴 **世界书、美化规则与 API Key 现居应用 Dexie，不再在 localStorage**。正则 iframe
   │          只能经同步镜像访问 `regexStorage`，不能访问任何应用表；应用 localStorage 只存无密钥
   │          设置元数据（Agent 配置/主题/`beautifierBuiltinDisabled` 等）
@@ -410,6 +428,20 @@ src/sillytavern/                    ← 核心引擎
   ├── agent-client.ts               ← [Phase 3] API 客户端（每 Agent 独立 userId / 重试退避 / 缓存检测）
   ├── agent-templates.ts            ← [Phase 3+9] Prompt 模板（systemPrompt 已迁 agent-config.json，留 stub + 动态上下文）
   ├── agent-config.json             ← [Phase 9] 10+ Agent 完整 systemPrompt 唯一来源
+  │      （🔴 实际文件在 `data/defaults/agent-config.json`，不在本目录）
+  │      🔴 **story 是这条「唯一来源」的例外**：`buildAgentMessages(story)` 先跑
+  │         `assemblePresetContent`，拿到内容就直接用、**根本不看 systemPrompt**，
+  │         只有「用户一个预设都没有」时才回退 `STORY_TEMPLATE.fixedSystem + fixedExamples`。
+  │         于是往 `agents.story.systemPrompt` 里写字有两种结果、没有一种是想要的：
+  │         有预设时（常态）永远不生效；没预设时**顶掉整份** fixedSystem+fixedExamples ——
+  │         一句话换掉全游戏最要紧的提示词。**story 的行为真源是预设条目**
+  │         （图像 v1 那句 `<scene_image>` 指令就落在预设条目里，不在 systemPrompt）。
+  │         挑条目还有第二个坑：`assemblePresetContent` 按**条目自身的 `enabled`** 过滤、
+  │         **不读 `prompt_order`** —— 现行预设 101 条里只有 32 条真的进提示词，
+  │         写进一条没启用的条目 = 写进空气
+  │      🔴 本文件现存 47 个 U+FFFD 替换字符（16 段 / 6 个 agent），其中一处落在闭合 XML
+  │         标签的标签名里（形如 `</□有物品>`，模型看到的是坏标签）。**既有问题，
+  │         图像 v1 未修**，已另开任务；改这个文件时别顺手把它们当成自己弄坏的
   ├── agent-tools.ts                ← [Phase 8.5] Agentic 工具注册表（17 tools）+ AGENT_TOOL_MAP
   ├── agent-orchestrator.ts         ← [Phase 3+8.5] DAG 编排引擎（阶段串行+同阶段并行/M3 翻译层按名寻址零id单patch）
   │   ├── callAgenticAgent(): toolsEnabled=true → chatWithTools() 多轮循环
@@ -469,7 +501,14 @@ src/sillytavern/                    ← 核心引擎
   │                                  这一层不允许出现计算（ADR-28：面板是给纯文本 AI 的遗留手段）
   ├── morale-system.ts / affection-system.ts
   ├── start-catalog.ts              ← [Q-30] 捏人页目录入口（类型/常量/品质映射）+ start-catalog-data.ts（纯数据，CDN 生成）
-  ├── marker-protocol.ts            ← [Phase 6e+Audio] XML 标记检测（含 <play_audio>）
+  ├── marker-protocol.ts            ← [Phase 6e+Audio+图像 v1] XML 标记检测（含 <play_audio> / <scene_image>）
+  │                                    + sanitizeCaption（标题/说明的收敛器）
+  │                                    🔴 加标记**只动 MARKER_SPECS**（Q-05）：扫描器、MARKER_TAGS、
+  │                                       scanMarkers 全由那张表推导，别去手改它们
+  │                                    🔴 标记正文那句中文**不过 normalizeTagString** —— 全角标点在中文
+  │                                       句子里是对的，归一化会把它改坏
+  │                                    🔴 title 畸形（含引号/超长/缺省）**只收敛不拒绝**：为一次装饰性
+  │                                       失误否掉整个标记，等于把它升级成一张画不出来的图
   ├── char-gen-agent.ts             ← [Phase 6e] 角色生成编排（M3 单patch落库/正式字段直写/零id）
   ├── craft-gen-chain.ts            ← [Phase 9b] 制作生成编排（M3 零id/type归一化/单patch）
   │
@@ -497,6 +536,62 @@ src/sillytavern/                    ← 核心引擎
   ├── workshop-diff.ts              ← [工坊 P4] ★纯函数 diffInstallPlan：更新前的「这一版会改什么」
   │                                    输入是**已算好的计划**而非重拉详情 —— 预告与提交在结构上同源
   │
+  ├── types-image.ts                ← [图像 v1] 子系统类型分册（先例 types-audio.ts）。与音频分册不同的是
+  │                                    **数据模型类型也全在这里** —— 图像生成与 types.ts 既有实体零交织，
+  │                                    集中放才只有一个真相来源。唯一反向边是 `SceneImageMarker`：它要进
+  │                                    types.ts 的 `DetectedMarker` 联合，那边 type-only import 回来，
+  │                                    本册**不 import types.ts**，边不成环
+  ├── image-defaults.ts             ← [图像 v1] 画质后缀 / 固定构图词 / 基础负向 / 限额初值的唯一出处
+  │                                    （被 image-prompt、image-quota 与设置页 getDefaults() 共用）
+  │                                    🔴 默认模型刻意**不是 Curated**：它既是过滤子集，官方规范画质后缀
+  │                                       还强制带 `rating:general` —— 本项目要支持露骨内容，带上等于
+  │                                       每张图都在跟自己的提示词打架。已有断言钉死这条
+  ├── image-prompt.ts               ← [图像 v1] ★承重纯函数：场景串 + 角色/地点预设 + 世界标签 → ComposedPrompt
+  │                                    🔴 角色预设**绝不拼进 base**，各进 characters[]；角色负向进**该角色的
+  │                                       槽**，不并入 baseNegative —— 官方文档确认多角色并进去会串味
+  │                                    🔴 `normalizeTagString` 由本模块 export，是**全仓唯一一份**
+  │                                       （image-prompt-agent 从这里 import，绝不另抄一份）
+  │                                    🔴 无随机、不读时钟、不做 I/O —— 中文→标签是一次 LLM 调用，
+  │                                       发生在侧链里；那一步挪进来，本层就再也测不动了
+  ├── image-quota.ts                ← [图像 v1] 三层限额（每消息 / 滚动一小时 / 同回合去重）**唯一**判定处
+  │                                    🔴 自动档与手动档共用它，差别只在拿到 ok:false 之后做什么。
+  │                                       两处各写一份就是漂移的来路 —— 一边改阈值另一边没改，症状是
+  │                                       「有时候拦有时候不拦」，而错的那一边在花钱
+  │                                    🔴 传进来的记录必须含 queued/generating/failed：只算 done 的话，
+  │                                       连点 10 次会在第一张落地之前全部放行，限额形同虚设
+  │                                    🔴 必须跑在 image_prompt 侧链**之前**（D32）：两处都花钱
+  │                                       （LLM token + Anlas），闸门要在最前面
+  │                                    🔴 `source==='manual'` 的 ok:false 语义是**「要确认」不是「不许」**
+  │                                       —— 机器该被拦死，人该只被减速
+  ├── image-segments.ts             ← [图像 v1] 一条正文 → 文本段/图片段序列（分段在**美化之前**且不看
+  │                                    美化开关：否则美化关掉或流式途中，标记会漏成尖括号给玩家看见）
+  │                                    🔴 **不许写第二个解析器** —— 调 marker-protocol 的 scanSceneImages
+  │                                       拿 position 切。一个标签两个解析器就是漂移的来路
+  ├── image-world-tags.ts           ← [图像 v1] 时段 / 天气中文 → danbooru 标签（D39）：夜里的戏不该被
+  │                                    画成白天，而引擎本来就知道现在几点 —— 不必问 AI
+  │                                    🔴 **映射不中的值一律不贡献标签，绝不猜**。天气是 AI 自由书写的
+  │                                       短词（「小雨转晴」「血月低垂」），留空只是少一个标签，
+  │                                       猜错是**在画面上画出没发生的事**。故只做精确匹配
+  ├── image-anlas.ts                ← [图像 v1] 估算这一张会不会烧 Anlas（D43）：宽高与步数在设置里**可调**，
+  │                                    调大了会**静默**开始扣费，用户只看到图变清楚了
+  │                                    🔴 给的是提示不是保证 —— 判定值叫 within-free-allowance 而不是
+  │                                       isFree，UI 措辞必须是「按当前订阅规则**估算**」。
+  │                                       规则会变，所以数字只许出现在 NAI_ANLAS_RULES 一处，
+  │                                       测试就是这条规则的文档
+  ├── image-prompt-agent.ts         ← [图像 v1] image_prompt 侧链：装配 → callAgent → 抽取，
+  │                                    **两端是纯函数，中间那次调用是唯一 I/O**（客户端从 deps 交进来，
+  │                                    形状照 char-gen-agent 的 CharGenClient）
+  │                                    🔴 抽不到 <image_prompt> 就是**明确失败**，不猜、不用启发式兜一个
+  │                                       —— 兜出来的是一张没人要的图，且失败被掩盖
+  │                                    模型爱在答案前写一段废话，抽取要能越过它（先例 story-rescue.ts）
+  ├── image-providers/novelai.ts    ← [图像 v1] ComposedPrompt → NAI V4.5 请求体 / 响应 zip → PNG 字节
+  │                                    🔴 **三重冗余是这一层的全部要害**：同一份内容要展开到 `input` /
+  │                                       `v4_prompt` / `characterPrompts` 三处，字段名还各不相同，而
+  │                                       **只填一处不会报错，只会静默产出不对的图**。所以三处一律由
+  │                                       同一个中间结构一次性展开，中间不许插 filter/sort（下标会错位）
+  │                                    🔴 本层不产随机：seed 缺省由调用方给，塞 Math.random() 会让快照
+  │                                       复现失效（测试钉住了这条）
+  │
   │  🪦 Q-12：`variables.ts` / `vars-merger.ts` 已删。两者整条链零生产引用
   │     （`variables.ts` 最后一个活着的导出 `formatVariablesForPrompt` 的唯一消费方
   │      是 Q-04 删掉的 prompt-assembler）。顺带拆掉「两个同名 `applyVarsPatch`
@@ -523,11 +618,29 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── useMapMarkers.ts             ← 地图标记 CRUD + Overlay 同步
 │   ├── useHoverPopup.ts             ← 悬停浮层唯一实现（读 settings.hoverDelayMs）
 │   ├── useAssetImage.ts             ← [素材] 渲染缝：(name,type?) → {url,isVideo,row}，世代号守卫 + 引用计数索引
-│   └── usePlayerPortrait.ts         ← [Q-25] 玩家画像位：立牌链渲染 + 定点导入 + 裁剪台开关
-│                                       （文案一律出自 game/portrait-messages.ts，本层只决定"做什么"）
+│   ├── usePlayerPortrait.ts         ← [Q-25] 玩家画像位：立牌链渲染 + 定点导入 + 裁剪台开关
+│   │                                   （文案一律出自 game/portrait-messages.ts，本层只决定"做什么"）
+│   ├── useSceneImageUrls.ts         ← [图像 v1] 插画字节 → object URL（正文与 CG 图鉴共用一份缓存）
+│   │                                   🔴 一律走 lib/asset-url.ts 的引用计数 LRU，**不写第二个**。
+│   │                                      每个使用面自己记账：少还是泄漏，多还花的是**别人**那一份
+│   │                                      （那份 LRU 只按 id 计数，不记是谁欠的）
+│   └── useManualSceneImage.ts       ← [图像 v1] 玩家主动要图那条路（发起 → 被限额拦下 → 弹一次确认 →
+│                                       带确认重发）。手动有**两个入口**（正文按钮 + 消息右键），
+│                                       D24「手动永不被判成不可用」两处都得守 —— 各写一遍的下场是
+│                                       一处补了确认、另一处仍把人拦死在 toast 上
+│                                       🔴 请求形状里**没有** source / quotaConfirmed 字段，所以
+│                                          「顺手给自动档开个绕过口」在这一层是类型错误，不是代码审查
 │
 ├── lib/                             ← 前端↔引擎桥接层
 │   ├── game-pipeline.ts             ← GamePipeline（AgentConfig 组装/上下文/编排器/回调）
+│   │                                   [图像 v1] +onSceneImage（照 onPlayAudio 的形状）
+│   │                                   🔴 **自动档绝不追溯开火**（D15）：这个回调只在编排器**刚产出**
+│   │                                      这条消息时触发一次，历史消息重渲染走 store 查询、根本不经过
+│   │                                      这里 —— D15 是这么**白拿**的。日后千万别为了「补全历史插画」
+│   │                                      加一条扫描全部消息的路径，那会把这条安全性一次性拆掉
+│   │                                   🔴 checkQuota 在 image_prompt 侧链**之前**（D32）；限额拒绝时
+│   │                                      **绝不丢弃标记** —— 什么都不做，让它落到「无记录」格渲染成
+│   │                                      手动按钮（D21）。off 档标记照扫（否则会漏成文本）但不建记录
 │   ├── audio-singleton.ts           ← AudioManager 应用级单例（setBlobResolver 注入缝）
 │   ├── audio-folder.ts              ← [Audio] 本地音乐文件夹（File System Access 唯一接触点，仅 Chromium）
 │   ├── asset-zip.ts                 ← [素材] 一键 zip 读写（流式 + SHA-256 + 体积上限）
@@ -543,6 +656,22 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── workshop-cover.ts            ← [工坊 P4] 封面候选链（wsrv.nl 代理 → 原图；组件按序试）
 │   ├── workshop-upstream-error.ts   ← [工坊 P4] Cloudflare 平台错误（1027 额度/1102 资源/429）优先于业务错误
 │   ├── workshop-enable.ts           ← [工坊] 启用展开纯函数（项目 → `creative_workshop:<uid>` 集合）
+│   ├── image-client.ts              ← [图像 v1] 文生图上游的**唯一网络接触点**（照 workshop-client.ts：
+│   │                                   判别联合永不抛穿 + 超时 + 取消）
+│   │                                   🔴 成功路径**只准 arrayBuffer()，永远不许 json()/text()**：
+│   │                                      NAI 成功响应是 zip 二进制，按文本读会在非法 UTF-8 处产生
+│   │                                      U+FFFD 把 zip 悄悄读坏 —— 不报错、只是解不开，症状还伪装成
+│   │                                      「上游返回了坏 zip」。text() 只在**非 2xx** 的错误体上用
+│   │                                   🔴 必须走 BFF（`server/routes/image.ts` 复用 forward() 管道直通）
+│   │                                      —— NAI 没有 CORS，浏览器直连必被拦；key 仍前端持有、
+│   │                                      经 Authorization 透传，BFF 零状态
+│   │                                   解 zip 归引擎的 image-providers/novelai.ts，本层不解析
+│   ├── scene-image-seams.ts         ← [图像 v1] 把 scene-image-store 的三条缝（checkQuota /
+│   │                                   runPromptAgent / send）接到真实实现上，**唯一**生产实现
+│   │                                   🔴 缝必须在**存档加载时**挂上，否则每次 generate() 都以
+│   │                                      prompt-agent 失败告终，症状是「按了没反应、记录直接变红」
+│   │                                   刻意做成**不碰 Pinia 的工厂**（入参全是取值函数）——「缝挂上没有」
+│   │                                   「限额拒绝时侧链一次都没被调用」这类断言不必挂载任何组件
 │   ├── quality-colors.ts / test-fixtures.ts / toSystemEvent.ts
 │   └── variables.css + 10 主题 CSS（parchment/obsidian/crimson/indigo/bronze/sakura/ivory/misty-lilac/forest/ocean）
 │
@@ -570,6 +699,22 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── worldbook-migration.ts       ← [工坊 P0] localStorage→Dexie 六步迁移（标志位判定→单事务 bulkPut→逐本回读校验→过了才删源→失败一律不动可重试；dedupeIds 防同 id 静默合并）
 │   ├── beautifier-store.ts          ← [工坊 P0b] 美化规则 Dexie 唯一入口（内置预设走纯内存 ref，不持久化）
 │   ├── beautifier-migration.ts      ← [工坊 P0b] 复用 P0 六步迁移
+│   ├── scene-image-store.ts         ← [图像 v1] sceneImages/sceneImageBlobs 的 Dexie 唯一读写口 +
+│   │                                   `generate()` **串行**队列（NAI 有速率限制且并发同时扣费；
+│   │                                   手动点击进同一个队列，不另开一条）
+│   │                                   🔴 记录**先落库再发请求**（D5），状态 queued；轮到它才写 startedAt
+│   │                                      —— **不是 createdAt**，否则排第三位的图一上来就显示「已用 180 秒」
+│   │                                   🔴 取消 queued 项**不产生任何网络调用**（有断言）；中止在飞的
+│   │                                      上游照样计费，两种取消的措辞必须不同（D36）
+│   │                                   🔴 重画是**追加 take 不覆盖**；同一锚点下 pinned 至多一条；
+│   │                                      'marker' 与 'message-end' 两种锚点的 occurrence 各自独立计数
+│   │                                   限额/侧链/发请求三件事都不在本店（三条注入缝，见 lib/scene-image-seams.ts）
+│   ├── image-preset-store.ts        ← [图像 v1] 视觉预设（角色 + 地点）CRUD。两者形状完全一样，
+│   │                                   所以是同一张表加一个 kind、不是两张表（D40）
+│   │                                   🔴 主键 = `${kind}:${name}` —— 幻想设定里人名与地名撞车是会发生的
+│   │                                   🔴 name 保**原始字符串**、`===` 匹配：不 trim / 不折大小写 / 不 NFKC
+│   │                                      （铁律 1）。角色名真源在别处，这边偷偷改名只会让预设查不中；
+│   │                                      改名走 rename()（删旧建新），原地 upsert 会留下孤儿记录
 │   ├── workshop-store.ts            ← [工坊 P1] 执行器：拿 planInstall 的计划落 DB，不含转换逻辑
 │   └── workshop-social-store.ts     ← [工坊 P3] 社交状态（Bearer JWT 弹窗+轮询登录 / JWT 本地解码 /
 │                                       toggle 乐观→校正→回滚 + 800ms 节流；纯内存展示层，零 Dexie，D22/D23）
@@ -586,7 +731,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── ToastContainer.vue
 │   │   └── form/ (Input/Select/Stepper/Cascader/KeyValue)
 │   ├── home/HomePage.vue            ← 游戏标题画面
-│   ├── settings/                    ← [Q-25] 12 个分区**全部**是一行子组件
+│   ├── settings/                    ← [Q-25] 13 个分区**全部**是一行子组件
 │   │   ├── SettingsPage.vue         ← 纯壳层（1995 → 约 415 行）：页头 + 主导航 + Agent 子导航
 │   │   │                               只留 activeSection / activeAgent / selectAgent /
 │   │   │                               agentModelOf 与 wb.init()（世界书分区也靠它）
@@ -621,16 +766,80 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── WorldBookSection.vue     ← 世界书列表/导入/新建/删除/恢复 + 条目编辑器
 │   │   ├── PlotSection.vue / MemorySection.vue / ThemeSection.vue / MessagesSection.vue
 │   │   ├── DataSection.vue          ← 导出/导入/存储用量/清除全部（用量改为**本分区**挂载时读）
+│   │   │                               [图像 v1] +本存档插画用量与清理。🔴 这一行**刻意不在图像分区**：
+│   │   │                               用量是**每存档**的数字，而图像分区是全局设置；且「清理」与
+│   │   │                               旁边那些清除动作是同一类事，放一起才找得到
 │   │   ├── AboutSection.vue
 │   │   ├── AudioSection.vue         ← [Audio] 音频分区（壳层 + 5 子组件）
-│   │   └── AssetSection.vue         ← [素材] 素材分区壳层 + 4 子组件
+│   │   ├── AssetSection.vue         ← [素材] 素材分区壳层 + 4 子组件
+│   │   └── image/                   ← [图像 v1] 第 13 分区（壳层 + 3 张卡）
+│   │       ├── ImageSection.vue     ← 分区壳。**单根** section.centered（.centered 是 SettingsPage 的
+│   │       │                           scoped 规则，只够得到子组件根节点；多根会在宽屏摊满整行，
+│   │       │                           ApiSection 真机走查栽过一次）
+│   │       │                           🔴 为什么是自己的分区而不是 Agent 分区里的一个类目（D50，
+│   │       │                              这条推翻过一次）：Agent 子导航的角标读每 Agent 的 LLM 设置袋，
+│   │       │                              「出图」在里面永远没有 model → 永久挂红叉。它本来就不是一个
+│   │       │                              agent，是含**两次不同调用**的子系统（LLM 出标签 / NAI 出图）
+│   │       ├── ImagePromptCard.vue  ← 第一卡「提示词生成」= 薄壳，内部是 AgentConfigPanel 传
+│   │       │                           agentId="image_prompt"
+│   │       │                           🔴 **渲染位置 ≠ 存储位置**（D52）：渲染的是 `agents` 袋子里的
+│   │       │                              **同一份存储**，不复制到 UiSettings
+│   │       │                           🔴 它**不进 agent-list.ts 的 AGENT_LIST**（D53）——同一份配置
+│   │       │                              开两个入口，用户就要猜哪个是权威的（先例：combat_v3）
+│   │       ├── ImageRenderCard.vue  ← 第二卡「出图」：三档开关 + NAI 参数 + 限额，全存 UiSettings
+│   │       │                           🔴 三档不是三个光秃秃的单选（D44）：auto 项底下带后果行，
+│   │       │                              首次切到 auto 弹一次确认（imageAutoConfirmed 记住）。
+│   │       │                              后果行的数字取**当前设置值**，照文案写死会变成一句假话
+│   │       │                           🔴 免费额度指示只在 consumes-anlas 时报数：anlasPerSample 在免费档内
+│   │       │                              也是正数（那是牌价不是这次要付的），照报会显示「免费，约 17 点」；
+│   │       │                              输入框清空 → NaN 那一支单独渲染成「算不出来」——把**不知道**
+│   │       │                              显示成**免费**是这个指示器最不该犯的错
+│   │       │                           🔴 本分区里有**两处**都叫「提示词」：这张卡的画质后缀/全局负向是
+│   │       │                              **图本身的提示词**，上一张卡的 systemPrompt 是**教模型怎么转标签**。
+│   │       │                              写错框两边都不报错，只是画出来不对
+│   │       └── ImagePresetList.vue  ← 第三卡「视觉预设」：角色/地点 CRUD（同表两 kind，两个筛选页签）
+│   │                                   🔴 名字被占用时如实报 store 的 name-taken，**别自动编号**：
+│   │                                      预设是**按名字**被出图链路查中的，编过号的名字永远查不中
+│   │                                   🔴 pinnedSeed 的说明必须照实说「同一 seed 只让构图更接近，
+│   │                                      **不保证同一张脸**」—— 写成「锁定长相」是守不住的承诺
 │   ├── create/CreatePage.vue        ← [占位] 捏人页
 │   ├── game/
 │   │   ├── GamePage.vue             ← 游戏页主布局（三栏 + 6 弹窗；持有 --rail-w）
 │   │   ├── MapPanel.vue / TopBar.vue / SideToolbar.vue / ScenePanel.vue / ChatFlow.vue / InputBar.vue
+│   │   │                               [图像 v1] ChatFlow 右键菜单加「为这一段配图」：回退仍只在最新
+│   │   │                               一条 assistant 消息，配图**哪条都行**（story 被教了克制使用）
+│   │   │                               🔴 `off` 档下这一项**不出现** —— 功能整个关掉了、右键里却还留着
+│   │   │                                  一个能开始花钱的入口，是「关掉了但没完全关掉」那类最招人烦的 bug
+│   │   │                               锚点是 anchorKind:'message-end'，不做选中文本锚定（原文一改就丢）
 │   │   ├── StatusHUD.vue / StatusOverview.vue / ItemsPanel.vue / CharacterListPanel.vue
 │   │   ├── portrait-messages.ts     ← [Q-25] 画像导入路径的文案层（纯函数，零副作用，不 mount 可测）
 │   │   ├── QuestsPanel.vue / PlotPanel.vue / MemoryPanel.vue / SnapshotPanel.vue / MiniPlayer.vue
+│   │   ├── SceneImageSegment.vue    ← [图像 v1] 正文里一格插画的六种样子。**不判定**该显示什么
+│   │   │                               （那是 scene-image-view.ts），只把判定画出来
+│   │   │                               🔴 按钮态/排队态/生成中态**占同样高度**，否则每张图落地时对话流
+│   │   │                                  会往下跳一截，正在读的那一行被推走
+│   │   │                               🔴 占位框里始终写 title 与 intent（D37）：5–60 秒的灰框是纯死时间，
+│   │   │                                  而「这张画的是什么」本来就在记录里，写上去成本为零
+│   │   ├── scene-image-view.ts      ← [图像 v1] ★七态真值表的**唯一**判定（纯函数，组件里没有第二处）
+│   │   │                               🔴 **「无记录 + auto」出的是按钮，不是去生成**（D15/D21）。
+│   │   │                                  自动档只对编排器刚产出的那条消息开火一次；渲染层若解释成
+│   │   │                                  「没记录就补一张」，每次把开关拨到自动、每次滚回历史消息
+│   │   │                                  都会**追溯烧钱**。设计点名这是最可能被人「顺手补全」掉的一环
+│   │   │                               🔴 blurByDefault 曾经**声明了但没人传**，D46 打码整个是死的。
+│   │   │                                  根因是只有单组件测试 —— 那种测试能证明逻辑对，
+│   │   │                                  **证明不了有人供值**。现有从 ChatFlow 真渲染到底的链路测试
+│   │   ├── scene-image-actions.ts   ← [图像 v1] done 态里两件纯判定：复制的必须是**这张实际发出去的**
+│   │   │                               那份提示词（记录里躺着三个候选，取错不报错）；角标 2/3 的点击是
+│   │   │                               **浏览**不是钉住（后者会落库、正文从此定死）
+│   │   ├── CgGalleryPanel.vue / CgGalleryDetail.vue / cg-gallery.ts
+│   │   │                             ← [图像 v1] CG 图鉴 = 同一批 SceneImageRecord 的**第二个视图**，
+│   │   │                               零新数据模型（折叠/排序/收录判据在纯函数 cg-gallery.ts）
+│   │   │                               🔴 只列**已经画出来的**：未生成的标记与失败的记录都不进 ——
+│   │   │                                  塞灰格子会让它从战利品陈列变成待办清单。已清理的**要列**，
+│   │   │                                  显示成「字节已清理 + 重画」而不是破图
+│   │   │                               🔴 懒加载**双保险**：IntersectionObserver **加上** 500ms 定时兜底
+│   │   │                                  （对视口 ±1500px 复查）。单靠观察器在低带宽/弱设备上会不触发，
+│   │   │                                  表现为一屏空白框 —— 那种「我这边好好的」的 bug
 │   │   ├── WorkshopEnablePanel.vue  ← [工坊] 每存档「内容启用」面板（建档后仍可改）
 │   │   └── (战斗面板见 combat/ 子组件，docs/reference/combat-system-architecture.md)
 │   └── workshop/                    ← [工坊 P1] 创意工坊页

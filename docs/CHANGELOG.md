@@ -9,6 +9,67 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 图像生成 v1 —— NovelAI 情景插画（标记锚点 / 三档开关 / CG 图鉴 / 第 13 分区）｜ ✅ 已实施，待真机（2026-08-04）
+
+设计 `docs/planning/2026-08-04-image-generation-design.md`（v1.1 / D1–D55）落地，编排照
+`docs/planning/2026-08-04-image-generation-implementation-plan.md` 走 lean-delegation：**实际 7 波 22 个任务**
+（原计划 6 波 19 个，偏差与理由已写进该文件开头的「实际执行情况」一节）。
+
+**链路**：story 在正文里就地写 `<scene_image title characters rating>一句中文</scene_image>` 当锚点 →
+`GamePipeline.onSceneImage` 三档分流 → `checkQuota` → `image_prompt` 侧链把中文转 danbooru →
+`composePrompt` 装配 → `buildNaiRequest` → BFF 透传 → `parseNaiZip` → 落库 → 正文就地渲染 + 进 CG 图鉴。
+
+**引擎纯函数层（9 个新模块，全部无 I/O / 无随机 / 无时钟）**：`types-image.ts`（子系统类型分册，
+数据模型也在里面——与 types.ts 既有实体零交织）· `image-defaults.ts`（默认值唯一出处；默认模型刻意
+**不是 Curated**，它的官方画质后缀强制带 `rating:general`，本项目要支持露骨内容，带上等于每张图都在跟
+自己的提示词打架）· `image-prompt.ts`（承重：角色预设绝不拼进 base、角色负向进**该角色的槽**，官方文档
+确认并进 baseNegative 会串味；`normalizeTagString` 全仓唯一一份）· `image-quota.ts`（三层限额唯一判定，
+自动/手动共用；记录必须含 queued/generating/failed，否则连点能在第一张落地前全部放行）·
+`image-segments.ts`（分段在美化**之前**且不看美化开关，否则流式途中标记会漏成尖括号）·
+`image-world-tags.ts`（时段/天气 → 标签，**映射不中一律返空串绝不猜**——天气是 AI 自由文本，
+猜错是在画面上画出没发生的事）· `image-anlas.ts`（免费额度**估算**，规则数字只许出现在一处）·
+`image-prompt-agent.ts`（侧链两端纯函数、中间一次 I/O；抽不到 `<image_prompt>` 就是明确失败，不启发式兜底）·
+`image-providers/novelai.ts`（**三重冗余**：同一份内容展开到 `input` / `v4_prompt` / `characterPrompts`
+三处且字段名各不相同，只填一处不报错、只静默产出不对的图，故由同一中间结构一次性展开）。
+`marker-protocol.ts` 加 `scene_image`（只动 MARKER_SPECS，Q-05）+ `sanitizeCaption`。
+
+**存储（Dexie v17）**：`sceneImages` / `sceneImageBlobs` / `imagePresets`。删存档连带删前两张，
+`imagePresets` 全局不删（与素材库同口径）；FullBackup 收 `sceneImages` + `imagePresets`，
+**blob 不进**（字节进 JSON 会爆炸）。记录**先落库再发请求**（D5），`startedAt` 与 `createdAt` 分开
+——否则排第三位的图一上来就显示「已用 180 秒」。队列**串行**（NAI 有速率限制且并发同时扣费），
+取消 queued 项零网络调用（有断言）。重画**追加 take 不覆盖**。
+
+**前端**：`scene-image-store`（Dexie 唯一口 + 队列 + 状态机，限额/侧链/发请求做成三条注入缝，
+生产实现集中在 `lib/scene-image-seams.ts`）· `image-preset-store`（主键 `${kind}:${name}`，name 不归一化）·
+`lib/image-client.ts`（唯一网络接触点；成功路径**只准 `arrayBuffer()`**，按文本读会在非法 UTF-8 处产生
+U+FFFD 把 zip 悄悄读坏）· `server/routes/image.ts`（复用 `forward()` 管道直通，NAI 没有 CORS 必须走 BFF）·
+`SceneImageSegment.vue` + `scene-image-view.ts`（七态真值表抽成纯函数）· CG 图鉴三件套（零新数据模型，
+懒加载双保险）· 设置页**第 13 分区** `settings/image/`（三张卡 = 三处不同存储：`agents` 袋子 / `UiSettings` /
+Dexie）· ChatFlow 右键「为这一段配图」· DataSection 加本存档插画用量与清理。
+前置重构：`AgentConfigPanel.vue` 从 `AgentSection.vue` 抽壳，图像分区第一张卡传不同 `agentId` 复用。
+
+**四条钱相关的铁则，各自钉在一个文件里**：自动档**绝不追溯开火**（`game-pipeline.ts`；回调只在编排器
+刚产出这条消息时触发一次，历史消息重渲染根本不经过它——注释已写明日后别为「补全历史插画」加扫描全量的路径）·
+限额在 `image_prompt` **之前**（D32，两处都花钱）·「无记录 + auto」出的是**按钮不是去生成**
+（`scene-image-view.ts`）· 手动**永不被判成不可用**，最多是要确认（`useManualSceneImage.ts`）。
+
+🔴 **实施中逮到的三件事，都是坑不是功能**：
+
+1. **给 story 的那句指令不写进 `agents.story.systemPrompt`** —— story 有一条别的 agent 没有的短路：
+   `buildAgentMessages(story)` 先跑 `assemblePresetContent`，拿到内容就直接用、根本不看 systemPrompt，
+   只有「一个预设都没有」时才回退 `fixedSystem + fixedExamples`。往那个字段写字有两种结果、没有一种是
+   想要的：有预设时（常态）永远不生效；没预设时**顶掉整份** fixedSystem+fixedExamples。真源是**预设条目**，
+   且 `assemblePresetContent` 按条目自身 `enabled` 过滤、**不读 `prompt_order`**（现行 101 条只有 32 条
+   真的进提示词）。设计 §8.5 与 AGENTS.md 已同步。
+2. **`blurByDefault` 声明了但没人传**，D46 打码整个是死的。根因是只有单组件测试——那种测试能证明逻辑对，
+   **证明不了有人供值**。已补从 `ChatFlow` 真渲染到底的链路测试。
+3. **`data/defaults/agent-config.json` 有 47 个 U+FFFD 坏字符**（16 段 / 6 个 agent），其中一处落在
+   闭合 XML 标签的标签名里（模型看到的是坏标签）。**既有问题，本轮未修**，已另开任务。
+
+**真机走查未做**：NAI 真实响应 zip、0 角色时两个数组、`ucPreset` 按模型各自编号这三点目前只有自压 fixture
+做保证；若真机发现不对，改动只落在 `image-providers/novelai.ts` 一个文件里。`image_prompt` 的正式
+systemPrompt 也**仍是临时最小版**（带 TODO）——提示词好不好要看真机出的图才谈得上调，是延后的独立任务。
+
 ### Q-21 结算层去重 —— 伤害管线两处调用合一 + 制作骰子接线 + 投影拆分 ｜ ✅ 完成（2026-08-04）
 
 审查 `docs/reviews/2026-08-03-code-quality-refactor` 的 Q-21。原文列四刀，**第一刀（集群阈值梯两份）

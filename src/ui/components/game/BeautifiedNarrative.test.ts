@@ -36,10 +36,18 @@ function mountNarrative(text: string, extra: Record<string, unknown> = {}) {
   return mount(BeautifiedNarrative, {
     props: { text, ...extra },
     global: {
+      /**
+       * 🔴 **stub 的 props 必须与真实组件逐一对齐**（漏一个不会报错）。
+       *
+       * 漏掉的那个 prop 会静默落进 stub 根节点的 attrs，于是「父组件根本没传」与
+       * 「传了但 stub 不接」在测试里长得一模一样 —— D46 打码的 `blurByDefault`
+       * 就是这么一路绿着躺了一整轮：组件声明了、设置页能调、全仓没人传。
+       * 加 prop 时这里也要跟着加（整条链另有 scene-image-chain.test.ts 兜底）。
+       */
       stubs: {
         BeautifierFrame: {
           name: 'BeautifierFrame',
-          props: ['markup', 'ruleName', 'scripts'],
+          props: ['markup', 'ruleName', 'forwardContextMenu', 'scripts'],
           template:
             '<div class="frame-stub" :data-rule="ruleName" :data-scripts="scripts">{{ markup }}</div>',
         },
@@ -47,7 +55,17 @@ function mountNarrative(text: string, extra: Record<string, unknown> = {}) {
         // 状态真值表由 scene-image-view.test.ts 逐格钉住。
         SceneImageSegment: {
           name: 'SceneImageSegment',
-          props: ['messageId', 'occurrence', 'anchorKind', 'mode', 'marker', 'narrative'],
+          props: [
+            'messageId',
+            'occurrence',
+            'anchorKind',
+            'mode',
+            'turn',
+            'marker',
+            'narrative',
+            'maxRating',
+            'blurByDefault',
+          ],
           template: '<div class="scene-image-stub" :data-occurrence="occurrence"></div>',
         },
       },
