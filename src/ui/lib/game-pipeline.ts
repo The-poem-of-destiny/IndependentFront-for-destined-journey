@@ -480,9 +480,7 @@ export class GamePipeline {
       // 此前硬绑 agent-config.json 出厂 presetId，用户导入/另存的预设（新 id）在设置页编辑得再对，
       // 运行时也永远用旧的那份（"我保存了第二人称但 agent 没拿到"根因）。
       const presetId: string | undefined =
-        agentId === 'story' && s.activePresetId
-          ? s.activePresetId
-          : defaults.presetId || undefined;
+        agentId === 'story' && s.activePresetId ? s.activePresetId : defaults.presetId || undefined;
       const systemPrompt: string | undefined = defaults.systemPrompt || undefined;
       const template: string | undefined = defaults.template || undefined;
       // Q-18: per-Agent 设置只取一次，数值项的默认由 AGENT_SETTINGS_DEFAULTS 合上
