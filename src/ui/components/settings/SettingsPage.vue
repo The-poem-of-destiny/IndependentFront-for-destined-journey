@@ -3,7 +3,7 @@
  * 设置页壳层 —— 导航 + Agent 分区（Q-25）
  *
  * 12 个分区里 11 个已经是一行子组件；只剩 **Agent 配置**还内联在这里，因为它
- * 要读写 14 张 per-Agent 并行 map（`agentModels` / `agentPrompts` / …），
+ * 要读写 13 张 per-Agent 并行 map（`agentModels` / `agentPrompts` / …），
  * 而那些 map 的形状正是 Q-18 要改的东西 —— 先拆再改等于拆两遍。
  * Q-18 落地后照 `settings/audio/` 的样子拆成 `settings/agent/` 目录。
  *

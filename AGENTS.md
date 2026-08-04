@@ -533,7 +533,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── home/HomePage.vue            ← 游戏标题画面
 │   ├── settings/                    ← [Q-25] 12 分区里 11 个已是一行子组件
 │   │   ├── SettingsPage.vue         ← 壳层：导航 + **Agent 分区**（仅剩这一个内联）
-│   │   │                               🔴 Agent 分区不拆是因为它读写 14 张 per-Agent 并行 map，
+│   │   │                               🔴 Agent 分区不拆是因为它读写 13 张 per-Agent 并行 map，
 │   │   │                                  那些 map 的形状正是 Q-18 要改的 —— 先拆再改等于拆两遍
 │   │   ├── settings-chrome.css      ← [Q-25] ★共用外壳样式**唯一一份**（.section>h3/.section-desc/
 │   │   │                               .form-*/.toggle-*/.detail-card）。各分区（含壳层）用
