@@ -547,10 +547,27 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── ToastContainer.vue
 │   │   └── form/ (Input/Select/Stepper/Cascader/KeyValue)
 │   ├── home/HomePage.vue            ← 游戏标题画面
-│   ├── settings/                    ← [Q-25] 12 分区里 11 个已是一行子组件
-│   │   ├── SettingsPage.vue         ← 壳层：导航 + **Agent 分区**（仅剩这一个内联）
-│   │   │                               Q-18 已落地，13 张 map 的阻塞解除；拆成 settings/agent/
-│   │   │                               目录是下一步（照 settings/audio/ 的样子）
+│   ├── settings/                    ← [Q-25] 12 个分区**全部**是一行子组件
+│   │   ├── SettingsPage.vue         ← 纯壳层（1995 → 约 415 行）：页头 + 主导航 + Agent 子导航
+│   │   │                               只留 activeSection / activeAgent / selectAgent /
+│   │   │                               agentModelOf 与 wb.init()（世界书分区也靠它）
+│   │   ├── agent/                    ← [Q-25] Agent 分区（照 settings/audio/ 的样子）
+│   │   │   ├── AgentSection.vue      ← 分区壳：**单根** section.section.centered；
+│   │   │   │                            两个草稿 + 三个动作（保存/恢复默认/存为项目默认）
+│   │   │   │                            🔴 草稿载入必须 watch(..., { immediate: true })：
+│   │   │   │                               主导航每次点击都把 activeAgent 置 null，本组件
+│   │   │   │                               永远是新挂载，普通 watch 不触发 → 文本框空着渲染
+│   │   │   │                               → 「保存设置」把空串写进用户提示词
+│   │   │   ├── AgentParamsCard.vue   ← API 池 + 7 个 LLM 旋钮 + 世界书卡（共用 agentCfg/setAgentField）
+│   │   │   ├── AgentPromptCard.vue   ← systemPrompt + 上下文模板 + 占位符徽章 + 预览（非 story）
+│   │   │   │                            占位符插入改用**模板 ref**，不再全局 querySelectorAll
+│   │   │   ├── PresetManager.vue     ← 预设子系统 + 两个弹窗（story）；单根，弹窗在根卡内层
+│   │   │   ├── agent-list.ts         ← 11 个 Agent 的展示元数据 + getDefaultTemplateForAgent
+│   │   │   ├── placeholder-catalog.ts← 23 项占位符 + 按 Agent 过滤（DAG 偏序 + 侧链归属）
+│   │   │   ├── agent-defaults.ts     ← buildAgentDefaultEntry（纯装配；patch 副作用留调用方）
+│   │   │   └── agent-chrome.css      ← ★跨组件共用：.prompt-editor / .template-preview-panel
+│   │   │                                🔴 @keyframes 必须与用它的规则同组件 —— Vue 的 scoped
+│   │   │                                   编译器按组件 hash 重命名关键帧，分家动画就停了
 │   │   ├── settings-chrome.css      ← [Q-25] ★共用外壳样式**唯一一份**（.section>h3/.section-desc/
 │   │   │                               .form-*/.toggle-*/.detail-card）。各分区（含壳层）用
 │   │   │                               `<style scoped src>` 引入 —— 一份源码，各自作用域。

@@ -12,6 +12,8 @@
  *    引擎那边决定它跑不跑，这里决定它在设置页里看不看得见。
  */
 
+import { getDefaultTemplate } from '@engine/placeholder-registry';
+
 export interface AgentListEntry {
   /** 与 agent-config.json / agent-templates.ts 一致的 id */
   id: string;
@@ -65,4 +67,22 @@ export const AGENT_LIST: readonly AgentListEntry[] = [
 export function agentDisplayName(agentId: string | null): string {
   if (!agentId) return '';
   return AGENT_LIST.find((a) => a.id === agentId)?.name ?? agentId;
+}
+
+/**
+ * 非 story Agent 的**出厂上下文模板**（引擎的 placeholder-registry 提供）。
+ *
+ * 两个消费者，分居两个组件：`AgentSection` 载入草稿时的最后一级兜底，
+ * 以及 `AgentPromptCard` 在草稿为空时给模板预览用的输入。所以放这儿共享。
+ *
+ * 取不到就返回空串 —— 引擎没给这个 Agent 登记模板不是错误，
+ * 意味着它走的是纯 systemPrompt 路径。
+ */
+export function getDefaultTemplateForAgent(agentId: string | null): string {
+  if (!agentId) return '';
+  try {
+    return getDefaultTemplate(agentId);
+  } catch {
+    return '';
+  }
 }

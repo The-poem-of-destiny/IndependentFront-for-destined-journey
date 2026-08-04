@@ -31,6 +31,20 @@ watch(
   },
 );
 
+/**
+ * 🔴 卸载时必须把滚动锁还回去。
+ *
+ * 上面那个 watch 只在 `open` **变化**时跑；组件带着 `open === true` 被销毁时它不会
+ * 触发，`body` 就永远停在 `overflow: hidden` —— 整页从此滚不动，直到刷新。
+ *
+ * 此前碰不到：所有弹窗都挂在页面根上，不会被分区切换销毁。Q-25 把预设的两个弹窗
+ * 搬进了 `agent/PresetManager.vue`（只在 story 分区存在），这条路径就通了。
+ * 一行守卫，顺带给另外十来个调用点都上了保险。
+ */
+onUnmounted(() => {
+  if (props.open) document.body.style.overflow = '';
+});
+
 // Escape key — document level, always works
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && props.open) doClose();

@@ -19,8 +19,9 @@
  * `clearAllData` —— 于是「清除所有数据」抛在关弹窗与 toast 之前，表现为"点了没反应"，
  * 而且大概从来没成功过。
  *
- * 🔴 Q-25 之后这些调用点**散在多个 SFC 里**（预设那几处仍在 SettingsPage，
- *    导出/导入/清除随 DataSection 走了）。所以本测试扫的是一张**文件表**，
+ * 🔴 Q-25 之后这些调用点**散在多个 SFC 里**（导出/导入/清除随 DataSection 走了，
+ *    预设那 6 处随 agent/PresetManager 走了，restoreAgentDefaults 随 agent/AgentSection
+ *    走了 —— SettingsPage 自己已经一处都不剩）。所以本测试扫的是一张**文件表**，
  *    新分区若也用动态导入，往 `SOURCES` 里加一行 —— 忘了加不会红，
  *    这是本测试已知的边界（源码级扫描无法发现"没被扫到的文件"）。
  */
@@ -32,14 +33,18 @@ import * as engineDatabase from '@engine/database';
 //   · `?raw` 的环境声明由 `src/env.d.ts` 引的 `vite/client` 提供，类型就是 string；
 //   · 走 `@ui` / `@engine` 别名而不是相对路径算术 —— 本文件挪窝也不用改，
 //     真解析不到时是**导入期硬报错**，不会退化成静默通过。
-import settingsPageSource from '@ui/components/settings/SettingsPage.vue?raw';
 import dataSectionSource from '@ui/components/settings/DataSection.vue?raw';
+import presetManagerSource from '@ui/components/settings/agent/PresetManager.vue?raw';
+import agentSectionSource from '@ui/components/settings/agent/AgentSection.vue?raw';
 import databaseSource from '@engine/database.ts?raw';
 
 /** 会用到 `await import('@engine/…')` 的设置页 SFC */
 const SOURCES: { file: string; source: string }[] = [
-  { file: 'SettingsPage.vue', source: settingsPageSource },
   { file: 'DataSection.vue', source: dataSectionSource },
+  // Q-25 第 9 步：预设子系统那 6 处与 restoreAgentDefaults 那 1 处随 Agent 分区搬走了，
+  // SettingsPage 自己已经一处动态引擎导入都不剩 —— 所以它退出这张表。
+  { file: 'agent/PresetManager.vue', source: presetManagerSource },
+  { file: 'agent/AgentSection.vue', source: agentSectionSource },
 ];
 
 /** 本测试能对照的引擎模块（静态 import 拿到真实导出面） */
@@ -83,9 +88,10 @@ describe('设置页各分区的动态引擎导入', () => {
   });
 
   it('🔴 两个文件都各自抓到了（拆分后别只剩一个文件在被扫）', () => {
-    // Q-25 把 exportAll / importAll / clearAll 挪进了 DataSection。若哪天有人
-    // 把 SOURCES 里的某一行删了、或分区又搬了家，这条会立刻红 —— 否则测试会
-    // "扫了一个空文件然后全绿"，正是本测试最怕的失败形态。
+    // Q-25 把 exportAll / importAll / clearAll 挪进了 DataSection，把预设子系统
+    // 挪进了 agent/PresetManager。若哪天有人把 SOURCES 里的某一行删了、或分区又
+    // 搬了家，这条会立刻红 —— 否则测试会"扫了一个空文件然后全绿"，
+    // 正是本测试最怕的失败形态。
     for (const { file } of SOURCES) {
       expect(
         sites.some((s) => s.file === file),
