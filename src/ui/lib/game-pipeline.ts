@@ -28,7 +28,14 @@ import type {
   MemoryRecord,
   WorkshopProject,
 } from '@engine/types';
-import type { ImageGenFailure, ImagePromptOutput, ImagePromptRequest } from '@engine/types-image';
+import type {
+  ImageGenFailure,
+  ImagePromptOutput,
+  ImagePromptRequest,
+  SceneImageMarker,
+} from '@engine/types-image';
+import { splitSceneImageSegments } from '@engine/image-segments';
+import { stripMarkers } from '@engine/marker-protocol';
 import { AgentClient } from '@engine/agent-client';
 import type { StreamCallbacks } from '@engine/agent-client';
 import { createStateManager } from '@engine/state-manager';
@@ -132,6 +139,14 @@ export class GamePipeline {
    */
   private lastAudioLocation = '';
   /**
+   * 🖼 本轮 story 刚产出的那条消息（id / turn / 正文）。
+   *
+   * 情景插画按 `(saveId, messageId, occurrence)` 反查挂回正文（D2），所以自动档开火
+   * 时必须知道图挂在哪条消息上。**每轮 run() 开头清空** —— 上一轮的消息不该被这一轮
+   * 的标记挂上去。
+   */
+  private lastStoryMessage: { id: string; turn: number; content: string } | null = null;
+  /**
    * 工坊 P2 (D5) 体积护栏: 已经因超限被拒过的来源 Agent。
    *
    * **每存档每来源只 toast 一次** —— 一个失控的世界书状态机会轮轮超限，
@@ -224,6 +239,7 @@ export class GamePipeline {
       this.currentContext = context;
       this.pendingPlotTasks = [];
       this.pendingAudioMarker = null;
+      this.lastStoryMessage = null;
       await this.loadPlotData(context);
 
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
@@ -1051,11 +1067,99 @@ export class GamePipeline {
     });
   }
 
+  /**
+   * 🖼 `<scene_image>` → 三档分流（设计 §8）。
+   *
+   * ```
+   * 【auto】   逐个标记过 checkQuota → ok 就 generate；拒了什么都不做
+   * 【manual】 什么都不做。渲染层在「无记录」那一格画按钮，点了才花钱（D14）
+   * 【off】    什么都不做。标记照扫（否则会漏成一行尖括号），但不建记录、不发请求
+   * ```
+   *
+   * 🔴 **D15：自动档绝不追溯开火。** 本方法只被 `onSceneImage` 唤起，而那个回调只在
+   * 编排器**刚产出这条消息**时触发一次；历史消息重新渲染走的是 `scene-image-store`
+   * 的查询，根本不经过这里。**日后千万别为了「补全历史插画」加一条扫描全部消息的
+   * 路径** —— 那会把这条安全性一次性拆掉，表现为「把开关从手动拨到自动，追溯烧掉
+   * 几十张图的钱」。补画的入口在正文里，一张一张点。
+   *
+   * 🔴 **D21：限额拒绝绝不丢弃标记。** 拿到 `ok:false` 就什么都不做 —— 那一格落到
+   * 「无记录」，按 §10.2 的真值表渲染成手动按钮。玩家看到的是一个按钮和一句「已达
+   * 本小时上限」，而不是一张凭空消失的图。
+   *
+   * 🔴 **D32：限额在侧链之前。** 排序由 `scene-image-store.generate()` 保证（缝的调用
+   * 顺序写在那儿），本方法只负责把每个标记喂给它。
+   *
+   * 🔴 **D25：永不自动重试。** 失败的记录留在那儿等玩家点重试，这里不看结果。
+   */
+  private async handleSceneImages(markers: SceneImageMarker[]): Promise<void> {
+    // 【manual】/【off】都是「什么都不做」，差别只在渲染层画不画那个按钮
+    if (this.settings.settings.imageGenMode !== 'auto') return;
+
+    const message = this.lastStoryMessage;
+    if (!message || markers.length === 0) return;
+
+    const { useSceneImageStore } = await import('../stores/scene-image-store');
+    const store = useSceneImageStore();
+    // 缝没接上 / 这个存档的记录还没载入 → 不开火。宁可少画一张，也不在一个不在
+    // 屏幕上的存档上花钱（切存档途中尤其容易撞上）。
+    if (store.activeSaveId !== this.saveId) {
+      console.warn('[GamePipeline] 情景插画：插画库尚未载入本存档，本轮不自动生成');
+      return;
+    }
+
+    // 🔴 分段编号必须与渲染层同源: `splitSceneImageSegments` 只给**正文有内容**的标记
+    // 发号（空 body 的标记照剥但不占号）。自己数一遍 markers 会在有空标记时错位，
+    // 图就挂到隔壁那一格去了。
+    const segments = splitSceneImageSegments(message.content);
+    // 侧链要的是**剥掉全部标记**的正文（判断氛围/光线/时间）
+    const narrative = stripMarkers(message.content).trim();
+    const location = this.game.player?.location || undefined;
+    const maxRating = this.settings.settings.imageMaxRating;
+
+    for (const segment of segments) {
+      if (segment.kind !== 'image') continue;
+      const marker = segment.marker;
+      try {
+        const result = await store.generate({
+          saveId: this.saveId,
+          messageId: message.id,
+          turn: message.turn,
+          anchorKind: 'marker',
+          occurrence: segment.occurrence,
+          source: 'auto',
+          intent: marker.bodyText,
+          title: marker.title,
+          characters: marker.characters,
+          // 标记没写 rating 时取设置里那一档；写了也会在 composePrompt 里被钳到上限（D38）
+          rating: marker.rating ?? maxRating,
+          narrative,
+          ...(location ? { location } : {}),
+        });
+        if (!result.ok) {
+          // D21: 什么都不做 —— 这一格会渲染成手动按钮，玩家想要就自己点
+          console.log(
+            `[GamePipeline] 情景插画被限额拦下（${result.reason}），降级成手动按钮: ${result.message}`,
+          );
+        }
+      } catch (err) {
+        // 一个标记出问题不该让同一条消息里剩下的标记跟着没了
+        console.warn('[GamePipeline] 情景插画入队失败（跳过这一个）:', err);
+      }
+    }
+  }
+
   private buildEventHandlers(): OrchestratorEvents {
     return {
       // 🎵 配乐：只暂存，**不在 Stage 1 就播** —— 见 run() 末尾的说明
       onPlayAudio: (marker) => {
         this.pendingAudioMarker = marker;
+      },
+
+      // 🖼 情景插画：三档分流。不 await —— 出图 5–60 秒，不该进管线时序
+      onSceneImage: (markers) => {
+        void this.handleSceneImages(markers).catch((err) => {
+          console.warn('[GamePipeline] 情景插画分流失败（不阻塞本轮）:', err);
+        });
       },
 
       // 工坊 P2 (D5): stage 跑完 → EJS 差量落库 → 才轮到本 stage 的 AI 补丁
@@ -1157,7 +1261,14 @@ export class GamePipeline {
         const { content, options } = extractStoryOptions(result.rawResponse || '');
         if (!content) throw new Error('story produced no player-visible narrative');
         this.game.setPendingOptions(options);
-        this.game.addMessage(content, 'assistant');
+        // 🖼 记下这条消息 —— 情景插画按 (saveId, messageId, occurrence) 反查挂回正文（D2）。
+        // 从 messages 末尾去捞是个会被别的写入者破坏的假设，所以让 addMessage 交回来。
+        const message = this.game.addMessage(content, 'assistant');
+        this.lastStoryMessage = {
+          id: message.id,
+          turn: message.turn ?? 0,
+          content: message.content,
+        };
         break;
       }
       case 'memory_summary': {

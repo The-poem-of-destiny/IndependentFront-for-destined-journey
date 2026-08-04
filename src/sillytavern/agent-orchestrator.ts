@@ -28,6 +28,7 @@ import type {
   CraftGenRequestMarker,
   ToolExecutionContext,
 } from './types';
+import type { SceneImageMarker } from './types-image';
 import { AgentClient } from './agent-client';
 import type { ChatRequest, StreamCallbacks } from './agent-client';
 import { buildAgentMessagesAsync, getAgentTemplate } from './agent-templates';
@@ -115,6 +116,24 @@ export interface OrchestratorEvents {
    * 以它最后的判断为准；连着切两首歌只会听见后一首的开头）。
    */
   onPlayAudio?: (marker: PlayAudioMarker, storyOutput: string) => void | Promise<void>;
+
+  /**
+   * 🖼 Scene Image: Stage 1 正文中检测到 `<scene_image>` 后触发（图像生成 §8）。
+   *
+   * 🔴 **这是 D15 的物理落点**：本回调**只在编排器刚产出这条消息时触发一次**。
+   * 历史消息重新渲染走的是 `scene-image-store` 的查询，根本不经过这里 —— 于是
+   * 「自动档绝不追溯开火」是**默认成立**的，不靠任何额外判断。
+   * **日后千万别为了「补全历史插画」加一条扫描全部消息的路径**：把开关从手动拨到
+   * 自动的那一刻，几百回合的存档会一起开火，代价是真金白银。
+   *
+   * 🔴 D48: 本回调跑在 story agent **完成之后**（`processStageMarkers` 在 stage 结束时
+   * 才调），所以看到的永远是完整正文 —— 流式途中那份半截文本没有 messageId、也不
+   * 经过这里，自动档不可能在没写完的标记上开火。
+   *
+   * 三档分流（auto / manual / off）在调用方，不在这里：编排器只负责「扫到了」。
+   * **不 await、不阻塞管线**，抛错也吞掉 —— 出图是旁路，画不出来不该影响这一轮叙事。
+   */
+  onSceneImage?: (markers: SceneImageMarker[], storyOutput: string) => void | Promise<void>;
 
   // ===== Phase 10: request_dispatcher 调度器回调 =====
 
@@ -800,6 +819,19 @@ export class AgentOrchestrator {
           void Promise.resolve(this.events.onPlayAudio(lastAudio, storyOutput)).catch(() => {});
         } catch {
           // 换歌失败不该让这一轮叙事失败
+        }
+      }
+
+      // 🖼 scene_image: 就地触发，不 await —— 出图是旁路，5–60 秒的等待不进管线时序。
+      // 🔴 **只在这里触发一次**，历史消息永不重扫（D15，见 onSceneImage 的文档）。
+      const sceneMarkers = scanResult.markers.filter(
+        (m): m is SceneImageMarker => m.type === 'scene_image',
+      );
+      if (sceneMarkers.length > 0 && this.events.onSceneImage) {
+        try {
+          void Promise.resolve(this.events.onSceneImage(sceneMarkers, storyOutput)).catch(() => {});
+        } catch {
+          // 画不出插画不该让这一轮叙事失败
         }
       }
     }

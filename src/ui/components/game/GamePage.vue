@@ -4,7 +4,10 @@ import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAudioStore } from '../../stores/audio-store';
+import { useSceneImageStore } from '../../stores/scene-image-store';
+import { useImagePresetStore } from '../../stores/image-preset-store';
 import { GamePipeline } from '../../lib/game-pipeline';
+import { buildSceneImageSeams, resolveSceneWeather } from '../../lib/scene-image-seams';
 import TopBar from './TopBar.vue';
 import SideToolbar from './SideToolbar.vue';
 import ChatFlow from './ChatFlow.vue';
@@ -29,6 +32,8 @@ const game = useGameStore();
 const ui = useUIStore();
 const settings = useSettingsStore();
 const audio = useAudioStore();
+const sceneImages = useSceneImageStore();
+const imagePresets = useImagePresetStore();
 const s = settings.settings;
 
 let pipeline: GamePipeline | null = null;
@@ -54,6 +59,33 @@ onMounted(async () => {
       settingsStore: settings,
       saveId: ui.activeSaveId,
     });
+    // 🖼 情景插画：载入本存档的记录 + **挂上三条注入缝**。
+    //
+    // 🔴 缝不挂的话，每一次 generate() 都会以 prompt-agent 失败告终 —— 症状是
+    //    「按了没反应、记录直接变红」，看起来像 store 坏了。装配逻辑全在
+    //    `lib/scene-image-seams.ts`（不碰 Pinia，可单测），这里只负责接线。
+    await sceneImages.load(ui.activeSaveId);
+    void imagePresets.init();
+    sceneImages.setSeams(
+      buildSceneImageSeams({
+        settings: () => settings.settings,
+        presets: () => imagePresets.presets,
+        world: () => ({
+          gameTime: game.saveProfile?.gameTime,
+          weather: resolveSceneWeather(game.saveProfile),
+          location: game.player?.location || undefined,
+        }),
+        runPromptAgent: (request, signal) =>
+          pipeline
+            ? pipeline.runImagePromptAgent(request, signal)
+            : Promise.resolve({
+                ok: false as const,
+                kind: 'prompt-agent' as const,
+                message: '游戏管线还没就绪，稍后再试',
+                retryable: true,
+              }),
+      }),
+    );
     // 🎵 曲库必须在这里装 —— 此前只有设置页音频分区和迷你播放器会 init()，
     // 没打开过它们的会话曲库是空的，选曲永远命中不了任何东西。
     // 装完按当前地点起一次场景配乐（读档回来的第一眼也该有音乐）。
@@ -136,6 +168,9 @@ const showDebug = ref(false);
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown);
   game.isGenerating = false;
+  // 🖼 离开游戏页：中止在飞的出图、清掉排队的（§8.2）。排队中的一个字节都没花，
+  //    删掉即可；在飞的那条会落 failed/aborted，因为上游照样计费。
+  sceneImages.abortAll();
 });
 
 async function handleSend(content: string) {

@@ -64,6 +64,18 @@ vi.mock('../stores/ui-store', () => ({
   useUIStore: () => ({ toast: toastSpy }),
 }));
 
+// 🖼 情景插画：三档分流只关心「有没有把标记喂给 store.generate」，store 本身另有测试
+const { sceneImageStore } = vi.hoisted(() => ({
+  sceneImageStore: {
+    activeSaveId: 'save-test' as string | null,
+    generate: vi.fn(async (_input: unknown) => ({ ok: true, id: 'simg_1' }) as any),
+  },
+}));
+
+vi.mock('../stores/scene-image-store', () => ({
+  useSceneImageStore: () => sceneImageStore,
+}));
+
 import { preCheckPlot, postCheckPlot } from '@engine/plot-engine';
 
 function makeGameStore(overrides: Record<string, any> = {}) {
@@ -77,7 +89,14 @@ function makeGameStore(overrides: Record<string, any> = {}) {
     activeSave: null,
     isGenerating: false,
     agentLog: [],
-    addMessage: vi.fn(),
+    // 真 store 的 addMessage 会把落库的那条消息交回来（情景插画要它的 id/turn，D2）
+    addMessage: vi.fn((content: string, role: string) => ({
+      id: 'msg_stub',
+      role,
+      content,
+      timestamp: 0,
+      turn: 1,
+    })),
     addSystemMessage: vi.fn(),
     setPendingOptions: vi.fn(),
     clearAgentLog: vi.fn(),
@@ -93,22 +112,30 @@ function makeGameStore(overrides: Record<string, any> = {}) {
   } as any;
 }
 
-function makeSettingsStore() {
+function makeSettingsStore(settingsOverrides: Record<string, any> = {}) {
   return {
     settings: {
       apiPool: [],
+      // 图像生成三档开关。默认 `'manual'` 与 `getDefaults()` 一致 —— 桩里写 `'auto'`
+      // 会让每条测试用例都悄悄走上花钱那条路
+      imageGenMode: 'manual',
+      imageMaxRating: 'general',
       // Q-18: per-Agent 设置合并成一张 `agents` 表（此前是 10 张并行 map，
       // 而且这份桩少列了 agentDirty / agentHistoryLayers / agentHistorySlice ——
       // 那正是「加一张 map 要改七处」的代价）
       agents: {},
+      ...settingsOverrides,
     },
   } as any;
 }
 
-function makePipeline(gameOverrides: Record<string, any> = {}) {
+function makePipeline(
+  gameOverrides: Record<string, any> = {},
+  settingsOverrides: Record<string, any> = {},
+) {
   return new GamePipeline({
     gameStore: makeGameStore(gameOverrides),
-    settingsStore: makeSettingsStore(),
+    settingsStore: makeSettingsStore(settingsOverrides),
     saveId: 'save-test',
   });
 }
@@ -488,7 +515,7 @@ describe('buildAgentConfigs — story 流式投影', () => {
 
 describe('handleAgentResult — story 正文投影', () => {
   it('持久化正文与选项，但不持久化控制区块和音频标记', async () => {
-    const addMessage = vi.fn();
+    const addMessage = vi.fn((content: string) => ({ id: 'm1', turn: 1, content }));
     const setPendingOptions = vi.fn();
     const pipeline = makePipeline({ addMessage, setPendingOptions });
     const raw = `<thinking>隐藏分析</thinking>
@@ -505,7 +532,7 @@ describe('handleAgentResult — story 正文投影', () => {
   });
 
   it('rejects a nonblank envelope with no player-visible narrative', async () => {
-    const addMessage = vi.fn();
+    const addMessage = vi.fn((content: string) => ({ id: 'm1', turn: 1, content }));
     const pipeline = makePipeline({ addMessage });
 
     await expect(
@@ -974,5 +1001,144 @@ describe('flushEjsVarsDiffs — EJS vars 差量提交 (工坊 P2 / D5)', () => {
     const diffs = lastDiffs();
     expect(diffs).toHaveLength(1);
     expect(diffs[0].replace).toEqual([{ path: 'sys.小键', value: 1 }]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 🖼 情景插画：三档分流（图像生成 §8 / D15 / D21 / D32 / D48）
+// ═══════════════════════════════════════════════════════════
+
+describe('handleSceneImages — 三档分流', () => {
+  /** 让管线以为「story 刚产出了这条消息」，即 D15 那个唯一的开火时机 */
+  async function primeStory(pipeline: any, narrative: string, mode = 'auto'): Promise<void> {
+    pipeline.settings.settings.imageGenMode = mode;
+    await pipeline.handleAgentResult(makeResult('story', `<maintext>${narrative}</maintext>`));
+  }
+
+  const oneMarker =
+    '夜色渐深。<scene_image title="炉火" characters="苏婉">她望着壁炉</scene_image>';
+
+  beforeEach(() => {
+    sceneImageStore.activeSaveId = 'save-test';
+    sceneImageStore.generate.mockClear();
+    sceneImageStore.generate.mockImplementation(async () => ({ ok: true, id: 'simg_1' }));
+  });
+
+  it('auto：逐个标记进 store.generate，带上 messageId/turn/occurrence 与剥净的正文', async () => {
+    const pipeline: any = makePipeline();
+    await primeStory(pipeline, oneMarker);
+
+    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
+
+    expect(sceneImageStore.generate).toHaveBeenCalledTimes(1);
+    const input = sceneImageStore.generate.mock.calls[0][0] as any;
+    expect(input).toMatchObject({
+      saveId: 'save-test',
+      messageId: 'msg_stub',
+      turn: 1,
+      anchorKind: 'marker',
+      occurrence: 0,
+      source: 'auto',
+      title: '炉火',
+      characters: ['苏婉'],
+      intent: '她望着壁炉',
+    });
+    // 侧链拿到的是**剥掉全部标记**的正文
+    expect(input.narrative).toBe('夜色渐深。');
+  });
+
+  it('auto：occurrence 与渲染分段同源 —— 空正文的标记照剥但不占号', async () => {
+    const pipeline: any = makePipeline();
+    await primeStory(
+      pipeline,
+      `A<scene_image title="空"></scene_image>B<scene_image title="甲">画面甲</scene_image>` +
+        `C<scene_image title="乙">画面乙</scene_image>`,
+    );
+
+    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
+
+    const calls = sceneImageStore.generate.mock.calls.map((c: any[]) => c[0]);
+    expect(calls.map((c) => c.occurrence)).toEqual([0, 1]);
+    expect(calls.map((c) => c.title)).toEqual(['甲', '乙']);
+  });
+
+  it('manual / off：一次都不建记录（点了才花钱 / 这个子系统不存在）', async () => {
+    for (const mode of ['manual', 'off']) {
+      sceneImageStore.generate.mockClear();
+      const pipeline: any = makePipeline();
+      await primeStory(pipeline, oneMarker, mode);
+      await pipeline.handleSceneImages([{ type: 'scene_image' }]);
+      expect(sceneImageStore.generate).not.toHaveBeenCalled();
+    }
+  });
+
+  it('🔴 D15：没有「刚产出的那条消息」就绝不开火（历史消息不会走到这里）', async () => {
+    const pipeline: any = makePipeline();
+    pipeline.settings.settings.imageGenMode = 'auto';
+
+    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
+
+    expect(sceneImageStore.generate).not.toHaveBeenCalled();
+  });
+
+  it('🔴 D15：每轮 run() 开头清空上一轮的消息，标记不会挂到隔壁回合去', async () => {
+    const pipeline: any = makePipeline();
+    await primeStory(pipeline, oneMarker);
+    expect(pipeline.lastStoryMessage).not.toBeNull();
+
+    // run() 的重置在 try 内很靠前；这里直接验字段本身的语义
+    pipeline.lastStoryMessage = null;
+    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
+    expect(sceneImageStore.generate).not.toHaveBeenCalled();
+  });
+
+  it('🔴 D21：限额拒绝时什么都不做，同一条消息里剩下的标记照样各自判定', async () => {
+    sceneImageStore.generate.mockImplementation(async () => ({
+      ok: false,
+      reason: 'rolling-window',
+      message: '已达本小时上限',
+    }));
+    const pipeline: any = makePipeline();
+    await primeStory(
+      pipeline,
+      `<scene_image title="甲">画面甲</scene_image><scene_image title="乙">画面乙</scene_image>`,
+    );
+
+    await expect(pipeline.handleSceneImages([{ type: 'scene_image' }])).resolves.toBeUndefined();
+    // 被拒不等于放弃后面那个：每个标记各自过闸门（拒了只是落到「无记录」那一格）
+    expect(sceneImageStore.generate).toHaveBeenCalledTimes(2);
+  });
+
+  it('一个标记入队抛错不牵连同一条消息里的其它标记', async () => {
+    sceneImageStore.generate
+      .mockImplementationOnce(async () => {
+        throw new Error('boom');
+      })
+      .mockImplementationOnce(async () => ({ ok: true, id: 'simg_2' }));
+    const pipeline: any = makePipeline();
+    await primeStory(
+      pipeline,
+      `<scene_image title="甲">画面甲</scene_image><scene_image title="乙">画面乙</scene_image>`,
+    );
+
+    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
+    expect(sceneImageStore.generate).toHaveBeenCalledTimes(2);
+  });
+
+  it('插画库还没载入本存档时不开火（切存档途中不该在别处花钱）', async () => {
+    sceneImageStore.activeSaveId = 'another-save';
+    const pipeline: any = makePipeline();
+    await primeStory(pipeline, oneMarker);
+
+    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
+    expect(sceneImageStore.generate).not.toHaveBeenCalled();
+  });
+
+  it('标记没写 rating 时取设置里的上限档（D38 的另一半）', async () => {
+    const pipeline: any = makePipeline({}, { imageMaxRating: 'sensitive' });
+    await primeStory(pipeline, oneMarker);
+
+    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
+    expect((sceneImageStore.generate.mock.calls[0][0] as any).rating).toBe('sensitive');
   });
 });
