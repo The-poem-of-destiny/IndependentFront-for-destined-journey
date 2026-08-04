@@ -19,9 +19,6 @@
 
 import type {
   QualityLevel,
-  CraftIndustry,
-  CraftStage,
-  CraftMaterial,
   CraftActionRequest,
   CraftActionResult,
   CraftPrepResult,
