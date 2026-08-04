@@ -12,13 +12,13 @@
 
 ## 方案
 
-| 项 | 做法 |
-| --- | --- |
-| 元素 | `<input type="text">` → `<textarea rows="1">`，`v-model="input"` 数据流不变 |
-| 按键 | `@keydown` 手动判断：`e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey` → `preventDefault()` + 发送；Shift+Enter 不拦截，交给 textarea 原生换行 |
-| 自动增高 | `@input` 时按 `scrollHeight` 重设高度；发送清空 / 外部填充（pendingInput）经 `watch` 兜底复位。CSS `min-height`/`max-height` 钳制行数 |
-| 拖拽 | `resize: vertical`（只允许上下拉，防左右破坏布局） |
-| 样式 | 复用现有 `.input-field` 类名与主题 token（`--theme-card-bg`/`--theme-card-border`/`--theme-primary` 聚焦），补齐 `line-height`、`prefers-reduced-motion` |
+| 项       | 做法                                                                                                                                                        |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 元素     | `<input type="text">` → `<textarea rows="1">`，`v-model="input"` 数据流不变                                                                                 |
+| 按键     | `@keydown` 手动判断：`e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey` → `preventDefault()` + 发送；Shift+Enter 不拦截，交给 textarea 原生换行 |
+| 自动增高 | `@input` 时按 `scrollHeight` 重设高度；发送清空 / 外部填充（pendingInput）经 `watch` 兜底复位。CSS `min-height`/`max-height` 钳制行数                       |
+| 拖拽     | `resize: vertical`（只允许上下拉，防左右破坏布局）                                                                                                          |
+| 样式     | 复用现有 `.input-field` 类名与主题 token（`--theme-card-bg`/`--theme-card-border`/`--theme-primary` 聚焦），补齐 `line-height`、`prefers-reduced-motion`    |
 
 ## 范围
 

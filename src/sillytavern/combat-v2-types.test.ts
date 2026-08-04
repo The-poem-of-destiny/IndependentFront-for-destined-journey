@@ -132,5 +132,52 @@ describe('characterToCombatParticipant', () => {
     const p = characterToCombatParticipant(char, 'ally');
     expect(p.modifiers).toBeUndefined();
     expect(p.automata).toBeUndefined();
+    expect(p.activeSkills).toBeUndefined(); // 🆕 skillPower 链路修复
+  });
+
+  it('🆕 skillPower 链路修复 (2026-08-04): 主动技能摘进 activeSkills（skillPower/relevantAttribute/damageType）', () => {
+    const char = makeChar({
+      inventory: [],
+      skills: [
+        {
+          name: '火球术',
+          description: '',
+          type: 'active',
+          skillPower: 450,
+          relevantAttribute: 'int',
+          damageType: '能量',
+        },
+        { name: '高等材料学', description: '', type: 'passive' },
+      ],
+    });
+    const p = characterToCombatParticipant(char, 'ally');
+    expect(p.activeSkills).toHaveLength(1);
+    expect(p.activeSkills![0]).toMatchObject({
+      name: '火球术',
+      skillPower: 450,
+      relevantAttribute: 'int',
+      damageType: '能量',
+    });
+  });
+
+  it('🆕 skillPower 链路修复: 被动技能不进 activeSkills；主动无 skillPower 被过滤（旧存档兼容，兜底 0 不退化）', () => {
+    const char = makeChar({
+      inventory: [],
+      skills: [
+        { name: '猎杀本能', description: '', type: 'passive' },
+        { name: '旧主动技能', description: '', type: 'active' },
+        {
+          name: '火球术',
+          description: '',
+          type: 'active',
+          skillPower: 450,
+          relevantAttribute: 'int',
+          damageType: '能量',
+        },
+      ],
+    });
+    const p = characterToCombatParticipant(char, 'ally');
+    expect(p.activeSkills).toHaveLength(1);
+    expect(p.activeSkills![0].name).toBe('火球术');
   });
 });
