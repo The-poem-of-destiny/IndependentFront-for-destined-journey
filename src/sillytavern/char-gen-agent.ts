@@ -90,19 +90,25 @@ export interface CharGenAgentDeps {
 /**
  * CharGen 客户端接口 — 抽象的 API 调用层。
  * 生产环境使用 AgentClient，测试使用 mock。
+ *
+ * 🔴 2026-08-04: `chatWithTools` 是**必填**，且本接口不再声明 `chat`。
+ *   此前 `chatWithTools` 可选 + 一条 `client.chat(messages)` 回退路径，而回退路径
+ *   声明的是 `chat(messages: Array<…>)`、真正的 `AgentClient.chat` 收的是
+ *   `chat(request: ChatRequest)`（messages 在 request 里）—— 形状不符，走上去
+ *   `request.messages` 是 undefined，`ensureUserMessage` 读 `.length` 抛 TypeError，
+ *   被 chat 的重试循环吞成 `{ error }`，最终报成一句和真因无关的「char_gen Agent 调用失败」。
+ *
+ *   那条路在生产里**不可达**：唯一的 clientFactory 是 `GamePipeline.getClientFactory()`，
+ *   它返回的包装对象恒定带 `chatWithTools`（内部委托 `AgentClient.chatWithTools`，
+ *   是类方法、不是可选属性），也没有任何开关能摘掉它 —— `AgentConfig.toolsEnabled`
+ *   是 orchestrator 的概念，本链自带 clientFactory、根本不读它。
+ *
+ *   所以不修签名而是**删接口**：把 `chatWithTools` 提成必填，未来任何新 client
+ *   少实现它当场编译不过，不必再靠一条永不执行的回退路径兜底。
  */
 export interface CharGenClient {
-  chat(messages: Array<{ role: string; content: string }>): Promise<{
-    output: string | null;
-    rawResponse: string;
-    tokensUsed: number;
-    cacheHit: boolean;
-    duration: number;
-    error?: string;
-  }>;
-
-  /** 🆕 Phase 8.5 Agentic: 多轮 function calling 路径 */
-  chatWithTools?: (
+  /** Phase 8.5 Agentic: 多轮 function calling —— 本链唯一的调用路径 */
+  chatWithTools: (
     request: {
       messages: Array<{ role: string; content: string }>;
       tools: ToolDefinition[];
@@ -205,42 +211,28 @@ export async function callCharGenAgent(
 
   const client = deps.clientFactory('char_gen', request.endpoint, request.saveId);
 
-  // 🆕 Phase 8.5: 优先走 Agentic 路径（function calling 多轮循环）
-  if (client.chatWithTools) {
-    const tools = getToolsForAgent('char_gen');
-    const toolContext: ToolExecutionContext = {
-      characters: request.context.characters ?? [],
-      variables: request.context.variables ?? {},
-      saveId: request.saveId,
-    };
+  // Phase 8.5 Agentic 路径（function calling 多轮循环）—— 唯一路径，见 CharGenClient 注释
+  const tools = getToolsForAgent('char_gen');
+  const toolContext: ToolExecutionContext = {
+    characters: request.context.characters ?? [],
+    variables: request.context.variables ?? {},
+    saveId: request.saveId,
+  };
 
-    const result = await client.chatWithTools(
-      { messages, tools, tool_choice: 'auto' },
-      async (name, args) => executeToolCall(name, args, toolContext),
-      { maxRounds: 10 },
-    );
-
-    if (result.error) {
-      throw new Error(`char_gen Agent 调用失败: ${result.error}`);
-    }
-
-    const rawOutput = result.output ?? result.rawResponse;
-    const parsed = parseCharGenOutput(rawOutput);
-    parsed.rawXml = rawOutput;
-    return parsed;
-  }
-
-  // 回退: 旧路径（无工具，直接 chat）
-  const result = await client.chat(messages);
+  const result = await client.chatWithTools(
+    { messages, tools, tool_choice: 'auto' },
+    async (name, args) => executeToolCall(name, args, toolContext),
+    { maxRounds: 10 },
+  );
 
   if (result.error) {
     throw new Error(`char_gen Agent 调用失败: ${result.error}`);
   }
 
   const rawOutput = result.output ?? result.rawResponse;
-  const fallbackParsed = parseCharGenOutput(rawOutput);
-  fallbackParsed.rawXml = rawOutput;
-  return fallbackParsed;
+  const parsed = parseCharGenOutput(rawOutput);
+  parsed.rawXml = rawOutput;
+  return parsed;
 }
 
 /**
@@ -293,32 +285,19 @@ export async function callItemGenAgent(
 
   const client = deps.clientFactory('item_gen', request.endpoint, request.saveId);
 
-  // 🆕 Phase 8.5: 优先走 Agentic 路径（function calling 多轮循环）
-  if (client.chatWithTools) {
-    const tools = getToolsForAgent('item_gen');
-    const toolContext: ToolExecutionContext = {
-      characters: request.context.characters ?? [],
-      variables: request.context.variables ?? {},
-      saveId: request.saveId,
-    };
+  // Phase 8.5 Agentic 路径（function calling 多轮循环）—— 唯一路径，见 CharGenClient 注释
+  const tools = getToolsForAgent('item_gen');
+  const toolContext: ToolExecutionContext = {
+    characters: request.context.characters ?? [],
+    variables: request.context.variables ?? {},
+    saveId: request.saveId,
+  };
 
-    const result = await client.chatWithTools(
-      { messages, tools, tool_choice: 'auto' },
-      async (name, args) => executeToolCall(name, args, toolContext),
-      { maxRounds: 10 },
-    );
-
-    if (result.error) {
-      // item_gen 失败不阻断流程 — 返回空物品数据
-      return { skills: [], equipment: [], inventory: [] };
-    }
-
-    const rawOutput = result.output ?? result.rawResponse;
-    return parseItemGenOutput(rawOutput);
-  }
-
-  // 回退: 旧路径（无工具，直接 chat）
-  const result = await client.chat(messages);
+  const result = await client.chatWithTools(
+    { messages, tools, tool_choice: 'auto' },
+    async (name, args) => executeToolCall(name, args, toolContext),
+    { maxRounds: 10 },
+  );
 
   if (result.error) {
     // item_gen 失败不阻断流程 — 返回空物品数据
