@@ -388,18 +388,26 @@ describe('复用工具回归保护', () => {
     await saveCharacter(crafter);
 
     try {
-      const result = await executeToolCall(
-        'craft_settle',
-        {
-          characterId: '落库匠人',
-          industry: '锻造',
-          stage: '基础加工',
-          productName: '铁锭',
-          targetQuality: '普通',
-          materials: [{ name: '铁矿石', quantity: 1, quality: '普通' }],
+      const args = {
+        characterId: '落库匠人',
+        industry: '锻造',
+        stage: '基础加工',
+        productName: '铁锭',
+        targetQuality: '普通',
+        materials: [{ name: '铁矿石', quantity: 1, quality: '普通' }],
+      };
+      const ctx = makeCtx([crafter], saveId);
+      // 🔴 Q-21 起制作检定用的是**真骰子**。本用例断言的是「落库路径」而不是骰运，
+      //    所以必须把骰带钉死 —— 不钉的话 T1 齐平品质是 1 颗骰，d20=1 即大失败，
+      //    这条用例会以 5% 的概率随机红。任何断言 success/评级的用例都得这么做。
+      ctx.craftDice = {
+        [craftRequestFingerprint('落库匠人', args)]: {
+          d20Rolls: [15],
+          d20MaterialSave: 10,
+          d20QualityUpgrade: 10,
         },
-        makeCtx([crafter], saveId),
-      );
+      };
+      const result = await executeToolCall('craft_settle', args, ctx);
 
       expect(result.success).toBe(true);
       expect(result.patchesApplied).toBeGreaterThan(0);
