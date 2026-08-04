@@ -3,7 +3,8 @@
 > 状态：**设计定稿**，未实施。
 > 日期：2026-08-04
 > 范围：**NovelAI 单家 provider + 情景插画单一用途**。四家 provider 对比、分级路由、角色画像路径见 **附录 A**（已核准，v2 直接取用）。
-> ADR 关联：ADR-21（StateManager 唯一写入口）· ADR-28（模仿结果、不照抄中间结构）· Q-05（加标记只动 `MARKER_SPECS`）· Q-18（设置项要改两处）
+> 提示词分工：story 只写**一句中文**声明"这里该有张图"，danbooru 方言由专职侧链 agent `image_prompt` 负责（**D28**）—— 与 `char_gen` / `item_gen` / `craft_gen` 同一形状。
+> ADR 关联：ADR-21（StateManager 唯一写入口）· **ADR-24/25/26（侧链 agent 模式）** · ADR-28（模仿结果、不照抄中间结构）· Q-05（加标记只动 `MARKER_SPECS`）· Q-18（设置项要改两处）
 
 ---
 
@@ -13,18 +14,23 @@
 
 ```
 三档开关（关 / 手动 / 自动）
-  → story agent 在正文里输出 <scene_image>（标题 + 一句话说明 + 角色名 + danbooru 场景串）
-  → 【自动】过限额后就地发请求   【手动】标记处出现按钮，玩家点了才发
-  → 装配提示词（角色预设逐个进各自槽位）→ 经 BFF 调 NAI → 解 zip
+  → story agent 在正文里输出 <scene_image>（标题 + 角色名 + **一句中文描述**）
+  → 【自动】过限额后开火   【手动】标记处出现按钮，玩家点了才开火
+  → image_prompt agent：一句中文 + 上下文 → **danbooru 标签串**      ← 侧链，专职
+  → 装配（角色预设逐个进各自槽位）→ 经 BFF 调 NAI → 解 zip
   → 图**就地插在标记所在的位置**
   → 落进该存档专属的存储（用户花了钱，必须留住）
   → 全部插画在 **CG 图鉴**里按剧情顺序回看
 ```
 
-一句话：**标记是锚点，图长在锚点上；图鉴是同一批记录的第二个视图。**
+两句话：
+
+- **标记是锚点，图长在锚点上**；图鉴是同一批记录的第二个视图。
+- **story 只声明"这里该有张图、画的是这件事"，不写 danbooru** —— 方言转换归专职侧链 agent（D28）。这与 `char_gen` / `item_gen` / `craft_gen` 是同一个形状（ADR-24/25/26）。
 
 ### 0.2 验收标准（v1 做完 = 这九条全成立）
 
+0. **story 的 systemPrompt 里没有一个 danbooru 词** —— 方言知识全在 `image_prompt` 那边（D28）
 1. story agent 输出的 `<scene_image>` **在任何开关档位下都不会以尖括号形式漏给玩家**（含美化关闭、流式输出中）
 2. 自动档：新回合的标记就地生成，图出现在标记原来的位置
 3. 手动档：标记处是按钮，点击后生成，位置同上
@@ -57,53 +63,64 @@ img2img / 局部重绘 / 放大 · 候选多选 · 角色画像入槽位（`writ
 
 ## 2. 决策表
 
-| #       | 决策                                 | 裁定                                                                         | 理由                                                                                                                                                             |
-| ------- | ------------------------------------ | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **D1**  | 提示词写在标记属性还是正文           | **正文（`bodyText`）**                                                       | danbooru 串必有逗号、括号、`{{}}`，可能有引号。塞进属性值，一个 `"` 就截断标签解析 → 生成失败                                                                    |
-| **D2**  | 图怎么定位到正文位置                 | **标记留在 `msg.content` 不动，图按 `(saveId, messageId, occurrence)` 反查** | 永不改写 AI 写过的字节。且快照回滚带回同样的 messageId 与正文 → 图**自动重新挂上**，零回收代码                                                                   |
-| **D3**  | 分段在美化之前还是之后               | **之前，且不受美化开关约束**                                                 | 插画是应用自有渲染，不是"美化"。美化关掉 / 流式输出中，`BeautifiedNarrative` 退回单个裸文本段 —— 那时标记会漏成尖括号                                            |
-| **D4**  | 角色外观谁写                         | **标记只报角色名，Code 拼预设**                                              | story agent 不知道苏婉的 booru 标签，让它每回合自己编 = 每张图里的人都不一样                                                                                     |
-| **D5**  | 生成中/失败的记录                    | **pending 记录先落库，再发请求**                                             | 否则刷新之后"这里本来有张图"凭空消失                                                                                                                             |
-| **D6**  | 保留策略                             | **v1 不做任何自动淘汰**                                                      | 用户为每一张付过钱。只给手动清理 + 用量读数                                                                                                                      |
-| **D7**  | 孤儿（消息没回来的图）               | **保留，不删**                                                               | 同 D6。只有删除存档才连带删                                                                                                                                      |
-| **D8**  | FullBackup                           | **元数据进，字节不进**                                                       | 字节进 JSON 备份会爆炸；元数据含 prompt + seed + model，**NAI 同参数可复现** —— 备份存的是配方。加上标题说明，恢复出来的图鉴是**一份读得通的目录**               |
-| **D9**  | 候选张数                             | **恒 `n_samples: 1`**                                                        | 用户按张付费；且**恰好卡在 Opus 免费档内**（常规尺寸 + 单张）                                                                                                    |
-| **D10** | 分级路由                             | **v1 不建**（NAI 是 explicit-ok，无需选路）                                  | 但分层保留，见 D11                                                                                                                                               |
-| **D11** | 只有一家 provider 还分不分层         | **分**：方言/装配层与适配器层照留                                            | 省掉能少写约 60 行；但 v2 接 OpenAI/Gemini 时，"提示词装配"与"HTTP 形状"糊在一起就要整个重写。且**分层正是 NAI 三重冗余能被一处保证的原因**（§6.1）              |
-| **D12** | 素材库 `插画` 类型                   | **v1 不加**                                                                  | 加类型 token 要付 D16 命名不变式的迁移代价，而 v1 插画进存档专属表、不进素材库。**这条推翻了本文档 2026-08-04 早先的裁定**——当时的前提（插画要入素材库）已不成立 |
-| **D13** | 角色画像（`writeIntoSlot`）          | **v1 不做**                                                                  | 主人裁定先做情景。`writeIntoSlot` 现成，v2 接它是纯增补                                                                                                          |
-| **D14** | 开关形状                             | **三档单选** `'off' \| 'manual' \| 'auto'`                                   | 两个 boolean 能表达"关掉但自动"这种无意义组合，且每个消费点要重推优先级。先例：`audioSceneAutoPlay`                                                              |
-| **D15** | 🔴 自动档**绝不追溯触发**            | 只对**本回合新到的消息**自动发请求                                           | 否则把开关拨到自动的那一刻，整本聊天记录里所有未生成的标记一起开火 —— 几百回合的存档能瞬间烧掉几十美元                                                           |
-| **D16** | 手动档要不要先建记录                 | **不建，点击才建**                                                           | 否则每个从没被点过的标记都在表里留一行 `idle`。标记本身已带渲染按钮所需的全部信息                                                                                |
-| **D17** | 重画的处置                           | **追加一条新记录**（同 `(messageId, occurrence)`，`take` 递增），不覆盖      | 用户对两张都付过钱。正文显示最新 + `2/3` 切换，图鉴显示全部                                                                                                      |
-| **D18** | 标题与说明谁写                       | **story agent 在标记属性里写**                                               | 它正在写这段剧情，知道图画的是什么，且写的是中文叙事口吻。Code 无从从 danbooru 标签反推出「篝火旁的低语」                                                        |
-| **D19** | 标题放属性、提示词放正文             | **刻意不一致**                                                               | 提示词被引号搞坏 = 生成失败（结构性）；标题被搞坏 = 图鉴里一行难看（装饰性）。容错等级不同，处置就该不同                                                         |
-| **D20** | 频率控制放 prompt 还是 Code          | **两处都要，Code 是失效保护**                                                | prompt 里的克制指令是"一般情况下的期望"，模型漂移/越狱/上下文污染都能让它失效，而失效代价是真金白银。凡是"错了会花钱"的约束，都不能只由被约束者自己遵守          |
-| **D21** | 🔴 限流时标记怎么处置                | **绝不丢弃。超预算 = 降级成手动按钮**                                        | 这是让 Code 限流变安全的那一条。丢标记 = 玩家眼里"有时候有图有时候没有"；降级 = 玩家看到按钮、知道有这张图、想要就自己点                                         |
-| **D22** | 分层限额                             | 每条消息上限 · 滚动时间窗 · 同回合去重                                       | 三条各挡一种失效模式，不是同一条的三个刻度                                                                                                                       |
-| **D23** | 🔴 同回合已自动生成过 → 不再自动生成 | 按 `(saveId, turn, source:'auto')` 去重                                      | **回退重发是既有功能且玩家用得很勤**。不设这条，对同一段剧情重掷 5 次就产生 5 张图，4 张挂在被丢弃的消息上                                                       |
-| **D24** | 超限时自动与手动的差别               | **自动硬停（降级成按钮），手动只弹一次确认**                                 | 机器该被拦死，人该只被减速。玩家点按钮是在场的、刻意的支出                                                                                                       |
-| **D25** | 失败重试                             | **永不自动重试**，只有手动重试按钮                                           | 自动重试 + 上游 5xx = 最经典的账单事故。且失败原因多半是提示词或额度，重试一百次也不会变对                                                                       |
-| **D26** | 用户改过的提示词 vs 重画             | **编辑版优先**（`editedScenePrompt`），原文不覆盖                            | 改完提示词点重画、结果却按 AI 原话生成，是这类界面最挫败的一种失败。原文留着，"改回去"才永远可行                                                                 |
-| **D27** | 标记正文进装配前**必须过标点归一化** | `normalizeTagString`（§3.2b）                                                | story agent 写中文叙事却要吐 danbooru 串，全角 `，` 与 `《》` 必然渗进来 —— 前者让整串变成一个巨型标签，后者毁掉 `<lora:>` 语法，**两者都不报错，只是静默画错**  |
+| #       | 决策                                              | 裁定                                                                         | 理由                                                                                                                                                                                                                                                                                                                                                       |
+| ------- | ------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **D1**  | 提示词写在标记属性还是正文                        | **正文（`bodyText`）**                                                       | danbooru 串必有逗号、括号、`{{}}`，可能有引号。塞进属性值，一个 `"` 就截断标签解析 → 生成失败                                                                                                                                                                                                                                                              |
+| **D2**  | 图怎么定位到正文位置                              | **标记留在 `msg.content` 不动，图按 `(saveId, messageId, occurrence)` 反查** | 永不改写 AI 写过的字节。且快照回滚带回同样的 messageId 与正文 → 图**自动重新挂上**，零回收代码                                                                                                                                                                                                                                                             |
+| **D3**  | 分段在美化之前还是之后                            | **之前，且不受美化开关约束**                                                 | 插画是应用自有渲染，不是"美化"。美化关掉 / 流式输出中，`BeautifiedNarrative` 退回单个裸文本段 —— 那时标记会漏成尖括号                                                                                                                                                                                                                                      |
+| **D4**  | 角色外观谁写                                      | **标记只报角色名，Code 拼预设**                                              | story agent 不知道苏婉的 booru 标签，让它每回合自己编 = 每张图里的人都不一样                                                                                                                                                                                                                                                                               |
+| **D5**  | 生成中/失败的记录                                 | **pending 记录先落库，再发请求**                                             | 否则刷新之后"这里本来有张图"凭空消失                                                                                                                                                                                                                                                                                                                       |
+| **D6**  | 保留策略                                          | **v1 不做任何自动淘汰**                                                      | 用户为每一张付过钱。只给手动清理 + 用量读数                                                                                                                                                                                                                                                                                                                |
+| **D7**  | 孤儿（消息没回来的图）                            | **保留，不删**                                                               | 同 D6。只有删除存档才连带删                                                                                                                                                                                                                                                                                                                                |
+| **D8**  | FullBackup                                        | **元数据进，字节不进**                                                       | 字节进 JSON 备份会爆炸；元数据含 prompt + seed + model，**NAI 同参数可复现** —— 备份存的是配方。加上标题说明，恢复出来的图鉴是**一份读得通的目录**                                                                                                                                                                                                         |
+| **D9**  | 候选张数                                          | **恒 `n_samples: 1`**                                                        | 用户按张付费；且**恰好卡在 Opus 免费档内**（常规尺寸 + 单张）                                                                                                                                                                                                                                                                                              |
+| **D10** | 分级路由                                          | **v1 不建**（NAI 是 explicit-ok，无需选路）                                  | 但分层保留，见 D11                                                                                                                                                                                                                                                                                                                                         |
+| **D11** | 只有一家 provider 还分不分层                      | **分**：方言/装配层与适配器层照留                                            | 省掉能少写约 60 行；但 v2 接 OpenAI/Gemini 时，"提示词装配"与"HTTP 形状"糊在一起就要整个重写。且**分层正是 NAI 三重冗余能被一处保证的原因**（§6.1）                                                                                                                                                                                                        |
+| **D12** | 素材库 `插画` 类型                                | **v1 不加**                                                                  | 加类型 token 要付 D16 命名不变式的迁移代价，而 v1 插画进存档专属表、不进素材库。**这条推翻了本文档 2026-08-04 早先的裁定**——当时的前提（插画要入素材库）已不成立                                                                                                                                                                                           |
+| **D13** | 角色画像（`writeIntoSlot`）                       | **v1 不做**                                                                  | 主人裁定先做情景。`writeIntoSlot` 现成，v2 接它是纯增补                                                                                                                                                                                                                                                                                                    |
+| **D14** | 开关形状                                          | **三档单选** `'off' \| 'manual' \| 'auto'`                                   | 两个 boolean 能表达"关掉但自动"这种无意义组合，且每个消费点要重推优先级。先例：`audioSceneAutoPlay`                                                                                                                                                                                                                                                        |
+| **D15** | 🔴 自动档**绝不追溯触发**                         | 只对**本回合新到的消息**自动发请求                                           | 否则把开关拨到自动的那一刻，整本聊天记录里所有未生成的标记一起开火 —— 几百回合的存档能瞬间烧掉几十美元                                                                                                                                                                                                                                                     |
+| **D16** | 手动档要不要先建记录                              | **不建，点击才建**                                                           | 否则每个从没被点过的标记都在表里留一行 `idle`。标记本身已带渲染按钮所需的全部信息                                                                                                                                                                                                                                                                          |
+| **D17** | 重画的处置                                        | **追加一条新记录**（同 `(messageId, occurrence)`，`take` 递增），不覆盖      | 用户对两张都付过钱。正文显示最新 + `2/3` 切换，图鉴显示全部                                                                                                                                                                                                                                                                                                |
+| **D18** | 标题与说明谁写                                    | **story agent 在标记属性里写**                                               | 它正在写这段剧情，知道图画的是什么，且写的是中文叙事口吻。Code 无从从 danbooru 标签反推出「篝火旁的低语」                                                                                                                                                                                                                                                  |
+| **D19** | 标题放属性、提示词放正文                          | **刻意不一致**                                                               | 提示词被引号搞坏 = 生成失败（结构性）；标题被搞坏 = 图鉴里一行难看（装饰性）。容错等级不同，处置就该不同                                                                                                                                                                                                                                                   |
+| **D20** | 频率控制放 prompt 还是 Code                       | **两处都要，Code 是失效保护**                                                | prompt 里的克制指令是"一般情况下的期望"，模型漂移/越狱/上下文污染都能让它失效，而失效代价是真金白银。凡是"错了会花钱"的约束，都不能只由被约束者自己遵守                                                                                                                                                                                                    |
+| **D21** | 🔴 限流时标记怎么处置                             | **绝不丢弃。超预算 = 降级成手动按钮**                                        | 这是让 Code 限流变安全的那一条。丢标记 = 玩家眼里"有时候有图有时候没有"；降级 = 玩家看到按钮、知道有这张图、想要就自己点                                                                                                                                                                                                                                   |
+| **D22** | 分层限额                                          | 每条消息上限 · 滚动时间窗 · 同回合去重                                       | 三条各挡一种失效模式，不是同一条的三个刻度                                                                                                                                                                                                                                                                                                                 |
+| **D23** | 🔴 同回合已自动生成过 → 不再自动生成              | 按 `(saveId, turn, source:'auto')` 去重                                      | **回退重发是既有功能且玩家用得很勤**。不设这条，对同一段剧情重掷 5 次就产生 5 张图，4 张挂在被丢弃的消息上                                                                                                                                                                                                                                                 |
+| **D24** | 超限时自动与手动的差别                            | **自动硬停（降级成按钮），手动只弹一次确认**                                 | 机器该被拦死，人该只被减速。玩家点按钮是在场的、刻意的支出                                                                                                                                                                                                                                                                                                 |
+| **D25** | 失败重试                                          | **永不自动重试**，只有手动重试按钮                                           | 自动重试 + 上游 5xx = 最经典的账单事故。且失败原因多半是提示词或额度，重试一百次也不会变对                                                                                                                                                                                                                                                                 |
+| **D26** | 用户改过的提示词 vs 重画                          | **编辑版优先**（`editedScenePrompt`），原文不覆盖                            | 改完提示词点重画、结果却按 AI 原话生成，是这类界面最挫败的一种失败。原文留着，"改回去"才永远可行                                                                                                                                                                                                                                                           |
+| **D27** | 提示词串进装配前**必须过标点归一化**              | `normalizeTagString`（§3.2b）                                                | 中文语境的模型极易把全角 `，` 与 `《》` 带进标签串 —— 前者让整串变成一个巨型标签，后者毁掉 `<lora:>` 语法，**两者都不报错，只是静默画错**。D28 之后主要防的是 `image_prompt` 的输出，story 侧写中文句子反而不再有这个问题                                                                                                                                  |
+| **D28** | 🔴 danbooru 串谁写                                | **专职侧链 agent `image_prompt`**，story 只写一句中文描述                    | ①**这才是引擎本来的形状** —— `char_gen`/`item_gen`/`craft_gen` 全是"story 发 request 标记 → Stage 2 专职 agent"（ADR-24/25/26），原方案让 `scene_image` 成了异类 ②不必在**全游戏最要紧的 agent** 的系统提示词里塞方言教学，也不冒标签思维渗进叙事的险 ③它是第 13 个 agent，**白拿整套设置界面**（模型/温度/世界书/systemPrompt/预设）④机械转换可挂便宜模型 |
+| **D29** | 🔴 agent 产出**不回写 `msg.content`**             | 存进 `SceneImageRecord`，标记仍是锚点（承 D2）                               | `msg.content` **会被当历史喂回后续提示词**（`historyLayers`/`historySlice`）。把两百 token 的标签串塞进正文 = **之后每回合的历史窗口里都是标签沙拉而不是叙事**，正好砸在想保护的东西上。且回写会毁掉 D2 白送的回滚重挂。渲染时本来就把标记换成了图，**视觉上"贴回原处"已经成立**，不需要动字节                                                             |
+| **D30** | `characters` 与 `title` 留在标记上，不由 agent 产 | 两条各有硬理由                                                               | **`characters`**：预设查找是严格 `===`，agent 从散文抽名字会漂（「苏婉」vs「苏婉小姐」），而 story 正在写这些名字、知道规范写法 · **`title`**：**手动档的按钮必须在 agent 跑之前就有标签**，否则那是个无名按钮                                                                                                                                             |
+| **D31** | `image_prompt` 何时跑                             | **自动档在 Stage 2；手动档点击时懒执行**                                     | 手动档预跑会破坏「不点就不花钱」这条性质（D14/D21 的立足点）。在 5–60 秒的出图等待上加 2 秒是噪音。产出**缓存进记录**，重试/重画不再跑（除非用户改过）                                                                                                                                                                                                     |
+| **D32** | 🔴 限额检查**在 `image_prompt` 之前**             | 排序约束，不是实现细节                                                       | 否则自动档会为**被限流器拦下的**插画白烧 LLM token。两处花钱，闸门要在最前面                                                                                                                                                                                                                                                                               |
 
 ---
 
 ## 3. 标记协议
 
 ```xml
-<scene_image title="篝火旁的低语" desc="苏婉第一次说起她的家乡" characters="苏婉" rating="general">
-tavern interior, warm candlelight, wooden table, sitting, holding a mug, looking at viewer
+<scene_image title="篝火旁的低语" characters="苏婉" rating="general">
+苏婉在旅店后院第一次说起她的家乡，篝火映着她的脸
 </scene_image>
 ```
 
-| 部分         | 必填   | 说明                                                                                          |
-| ------------ | ------ | --------------------------------------------------------------------------------------------- |
-| `title`      | 否     | 中文短标题，图鉴条目名。缺省 → Code 填「第 N 回合的插画」                                     |
-| `desc`       | 否     | 一句话说明，图鉴副标题。缺省 → 空串                                                           |
-| `characters` | 否     | 逗号分隔角色名。**原样 `===` 匹配，不归一化**（铁律 1 / 素材系统 D2）。缺省 = 纯风景          |
-| `rating`     | 否     | `general` / `sensitive` / `questionable` / `explicit`。缺省 → 设置里的默认档                  |
-| 正文         | **是** | **场景/动作/光线/构图**的 danbooru 标签，含数量标签（`2girls, 1boy`）。**不写角色外观**（D4） |
+🔴 **正文是一句中文，不是 danbooru 串**（D28）。story agent 全程只写中文 —— 它不需要知道 danbooru 长什么样。
+
+| 部分                                                 | 必填   | 谁写           | 说明                                                                                    |
+| ---------------------------------------------------- | ------ | -------------- | --------------------------------------------------------------------------------------- |
+| `title`                                              | 否     | story          | 中文短标题，图鉴条目名 + **手动档按钮的标签**。缺省 → Code 填「第 N 回合的插画」（D30） |
+| `characters`                                         | 否     | story          | 逗号分隔角色名。**原样 `===` 匹配，不归一化**（铁律 1 / 素材系统 D2）。缺省 = 纯风景    |
+| `rating`                                             | 否     | story          | `general` / `sensitive` / `questionable` / `explicit`。缺省 → 设置里的默认档            |
+| 正文                                                 | **是** | story          | **一句中文**，说明这张图画的是什么。写场景/动作/氛围，**不写角色外观**（D4）            |
+| —— 以下由 `image_prompt` 侧链产出，不出现在标记里 —— |
+| danbooru 串                                          | —      | `image_prompt` | 由上面那句中文 + 上下文转换而来（§8.5）                                                 |
+| `desc`                                               | —      | `image_prompt` | 图鉴副标题。**可以让它写**，因为它跑完之前图鉴里本来就没有这一条                        |
+
+> 💡 `desc` 从 story 挪到了 agent（与 `title` 的处置**刻意不同**）：按钮标签在 agent 跑之前就要有，所以 `title` 必须来自 story；而 `desc` 只在图鉴里出现，而图鉴只列**已经画出来的**（§10.3），那时 agent 早就跑完了。能省 story 的字就省。
 
 ### 3.1 `MARKER_SPECS` 增量
 
@@ -111,13 +128,14 @@ tavern interior, warm candlelight, wooden table, sitting, holding a mug, looking
 scene_image: {
   fields: (attrs) => ({
     title: sanitizeCaption(attrs['title'], CAPTION_TITLE_MAX),
-    desc: sanitizeCaption(attrs['desc'], CAPTION_DESC_MAX),
     characters: splitCharacterList(attrs['characters']),
     rating: normalizeRating(attrs['rating']),
   }),
   emptyBody: '',   // Phase 10 那批的口径：必填 string，缺省空串
 },
 ```
+
+⚠️ 标记正文（那句中文）**不过 `normalizeTagString`** —— 全角标点在中文句子里是**正确的**，归一化会把它改坏。D27 的归一化对象是 `image_prompt` 的**输出**与用户手打的**角色预设**，不是这里。
 
 ### 3.2 `sanitizeCaption` 规格（纯函数）
 
@@ -136,9 +154,9 @@ scene_image: {
 
 ### 3.2b `normalizeTagString` 规格（纯函数）—— 🔴 别漏
 
-标记正文要在进装配前过一遍**标点归一化**。这不是洁癖，是本子系统最隐蔽的一类失败：
+**任何 danbooru 串**（`image_prompt` 的输出、用户手打的角色预设）进装配前都要过一遍**标点归一化**。这不是洁癖，是本子系统最隐蔽的一类失败：
 
-> story agent 写的是**中文叙事**，却被要求在同一段输出里吐 danbooru 标签串。中文输入状态下，模型极易把 **全角逗号 `，`** 和 **全角书名号 `《》`** 带进标签串。而：
+> 产出标签串的模型工作在**中文语境**里（系统提示词、上下文、角色名全是中文），极易把 **全角逗号 `，`** 和 **全角书名号 `《》`** 带进标签串。而：
 >
 > - `，` 不是合法分隔符 → 整串被当成**一个巨型标签**，画出来的东西面目全非
 > - `《》` 会毁掉 `<lora:name:0.8>` / `<wlr:…>` 这类尖括号语法
@@ -156,14 +174,16 @@ scene_image: {
 
 🔴 **归一化只动标点，不动内容** —— 权重语法（`{{}}` / `[[]]` / `-0.8::feet::` / `<lora:…>`）在第 ② 步之后**原样透传**，一个字符都不许改。
 
-同一个函数也用于**角色预设的正/负向**（用户手打时同样会带全角标点）。
+🔴 **绝不用在标记正文上** —— 那是一句中文，全角标点在那里是正确的（§3.1 的警告）。
 
 **测试要盖到的**：`1girl，silver hair` → `1girl, silver hair` · `《lora:x:0.8》` → `<lora:x:0.8>` · `a,,b` → `a, b` · `{{masterpiece}}` 不变 · `-0.8::feet::` 不变。
 
-### 3.3 为什么标题在属性、提示词在正文（D19）
+### 3.3 为什么描述在正文、标题在属性（D19）
 
-- **提示词进正文**：danbooru 串里必有逗号、括号、`{{}}`，可能有引号 → 塞进属性值一个 `"` 就截断解析 → **生成失败**（结构性）
-- **标题/说明进属性**：中文叙事短句，出现英文直引号概率低；`parseTagAttributes` 双单引号都认。真搞坏也只是**图鉴里一行难看**（装饰性）
+- **描述进正文**：中文句子里逗号、引号、括号都可能出现。塞进属性值一个 `"` 就截断解析 → **这张图画不出来**（结构性）
+- **标题进属性**：短，且真搞坏也只是**按钮/图鉴上一行难看**（装饰性）
+
+容错等级不同，处置就该不同。D28 之后正文从 danbooru 串换成中文句子，这条理由**依然成立**（甚至更强 —— 中文句子出现引号的概率比标签串更高）。
 
 ### 3.4 漏写闭合标签的兜底
 
@@ -171,7 +191,7 @@ AI 漏写闭合标签是常事。`scanPlayAudioMarkers` 已有先例（认自闭
 
 - ✅ 成对写法：通用骨架
 - ✅ 只有开标签、没写闭合：**吃到下一个块级标记或正文末尾**，当作正文
-- ❌ 自闭合 `<scene_image ... />`：没有正文 = 没有提示词 → **当作无效标记剥掉**（渲染成空），不建记录
+- ❌ 自闭合 `<scene_image ... />`：没有正文 = 没说要画什么 → **当作无效标记剥掉**（渲染成空），不建记录
 
 ---
 
@@ -179,7 +199,7 @@ AI 漏写闭合标签是常事。`scanPlayAudioMarkers` 已有先例（认自闭
 
 先例：`types-audio.ts`（大型联合拆分文件；数据模型类型仍可留 `types.ts`，本子系统全部集中在此）。
 
-```ts
+````ts
 // ═══ 开关与分级 ═══
 
 /** 三档开关（D14） */
@@ -195,15 +215,56 @@ export interface SceneImageMarker {
   type: 'scene_image';
   rawContent: string;
   position: number;
-  /** danbooru 场景串（必填，空串 = 无效标记） */
+  /**
+   * 🔴 **一句中文描述**，不是 danbooru 串（D28）。空串 = 无效标记。
+   * **不过 `normalizeTagString`** —— 全角标点在中文句子里是对的。
+   */
   bodyText: string;
-  /** 已过 sanitizeCaption；可能是空串 */
+  /**
+   * 已过 sanitizeCaption；可能是空串。
+   * **必须来自 story**（D30）—— 手动档的按钮要在 `image_prompt` 跑之前就有标签。
+   */
   title: string;
-  desc: string;
-  /** 原样，未归一化（D2 / 铁律 1） */
+  /** 原样，未归一化（D2 / 铁律 1）。**必须来自 story**（D30）—— agent 抽名字会漂 */
   characters: string[];
   /** 缺省时为 undefined，由设置里的默认档兜底 */
   rating?: ImageRating;
+}
+
+// ═══ image_prompt 侧链（D28）═══
+
+/** 喂给 `image_prompt` 的上下文。全部来自 Code，agent 不必自己查 */
+export interface ImagePromptRequest {
+  /** 标记正文：那句中文描述 */
+  intent: string;
+  /** 出场角色名（agent **只用来理解场景**，外观仍由预设决定，D4） */
+  characters: string[];
+  /** 所属消息正文（已剥掉全部标记），给 agent 判断氛围/光线/时间 */
+  narrative: string;
+  /** 当前地点名 —— 引擎知道，不必让 agent 猜 */
+  location?: string;
+  rating: ImageRating;
+}
+
+/**
+ * `image_prompt` 的产出。
+ *
+ * 用 XML 标签而非裸文本：模型爱在答案前面写一段废话，而本仓已有
+ * `story-rescue.ts` 处理同一类缺陷 —— 标签让抽取变成确定的事。
+ *
+ * ```xml
+ * <image_prompt>tavern interior, warm candlelight, sitting, campfire, …</image_prompt>
+ * <image_negative>modern clothing</image_negative>
+ * <image_desc>苏婉第一次说起她的家乡</image_desc>
+ * ```
+ */
+export interface ImagePromptOutput {
+  /** 场景 danbooru 串。**已过 `normalizeTagString`**（D27） */
+  scenePrompt: string;
+  /** 该场景专属的追加负向；通常空串 */
+  sceneNegative: string;
+  /** 图鉴副标题（D30 的注解：这一条可以让 agent 写） */
+  desc: string;
 }
 
 // ═══ 渲染分段 ═══
@@ -296,13 +357,23 @@ export interface SceneImageRecord {
   favorite?: boolean;
 
   // ── 复现所需（D8：备份存的是配方）──
-  /** 标记正文原文（**未归一化**，保留 AI 写的原始字节，供排查） */
+  /** 标记正文原文 —— story 写的**那句中文**（D28），保留原始字节供排查 */
+  intent: string;
+  /**
+   * `image_prompt` 产出的 danbooru 场景串（已过 `normalizeTagString`）。
+   *
+   * **缓存在这里**，于是重试 / 重画不再重跑侧链 agent（D31）——
+   * 除非用户改过（见下）。
+   */
   scenePrompt: string;
+  /** `image_prompt` 产出的场景专属追加负向；通常空串 */
+  sceneNegative: string;
   /**
    * 用户在图鉴里改过的场景提示词。
    *
-   * **存在时，「重画」优先用它**（D26）—— 用户改完提示词点重画，结果却按 AI 的原话生成，
-   * 是这类界面最挫败的一种失败。`scenePrompt` 保持原样不被覆盖，于是"改回去"永远可行。
+   * **存在时，「重画」优先用它、且跳过 `image_prompt`**（D26 + D31）—— 用户改完
+   * 提示词点重画，结果却按 agent 的原话生成，是这类界面最挫败的一种失败。
+   * `scenePrompt` 保持原样不被覆盖，于是"改回去"永远可行。
    */
   editedScenePrompt?: string;
   characters: string[];
@@ -337,6 +408,7 @@ export interface SceneImageBlobRecord {
 // ═══ 失败分类 ═══
 
 export type ImageGenFailureKind =
+  | 'prompt-agent' // image_prompt 侧链失败：调用出错、或输出里抽不到 <image_prompt>
   | 'auth' // 401：令牌无效/过期
   | 'payment' // 402：Anlas 不足
   | 'rate-limit' // 429
@@ -356,7 +428,7 @@ export interface ImageGenFailure {
   /** 这一类要不要显示"重试"按钮 */
   retryable: boolean;
 }
-```
+````
 
 ---
 
@@ -398,7 +470,13 @@ export interface ComposeOptions {
 }
 
 export function composePrompt(
-  marker: SceneImageMarker,
+  /** 🔴 **danbooru 场景串**，来自 `image_prompt` 侧链（或用户编辑版）——
+   *  **不是** `marker.bodyText`（那是中文，D28） */
+  scenePrompt: string,
+  /** 场景专属追加负向；侧链产出，通常空串 */
+  sceneNegative: string,
+  /** 角色名与 rating 仍取自标记（D30） */
+  marker: Pick<SceneImageMarker, 'characters' | 'rating'>,
   presets: ReadonlyMap<string, CharacterImagePreset>,
   opts: ComposeOptions,
 ): ComposedPrompt;
@@ -407,11 +485,15 @@ export function composePrompt(
 **拼接顺序（`base`）：**
 
 ```
-[1] 场景     ← marker.bodyText（含数量标签 2girls/1boy）
+[1] 场景     ← scenePrompt（image_prompt 产出，含数量标签 2girls/1boy）
 [2] 构图     ← opts.compositionTags
 [3] rating   ← `rating:${marker.rating ?? opts.defaultRating}`
 [4] 画质后缀 ← opts.qualitySuffix   🔴 末尾，不是开头
+
+baseNegative = opts.baseNegative ∪ opts.extraNegative ∪ sceneNegative
 ```
+
+🔴 **本函数收的是标签串，不是那句中文。** 中文→标签的转换发生在 §8.5，是一次 LLM 调用，**不属于纯函数层** —— 这条边界必须清楚，否则 `image-prompt.ts` 会被人塞进一个网络调用而失去可测性。
 
 **不变式：**
 
@@ -718,14 +800,23 @@ story agent 输出正文（含 <scene_image>）
 
 generate(saveId, messageId, occurrence, marker, source)    ← 唯一入口，两档共用
   ↓ take = 该 (messageId, occurrence) 已有记录数
-  ↓ 建 SceneImageRecord{status:'pending', source, take} → **立即落库**（D5）
-  ↓ composePrompt(marker, presets, opts)
+  ↓ 建 SceneImageRecord{status:'pending', source, take, intent} → **立即落库**（D5）
+  │
+  ↓ 【中文 → danbooru】(§8.5)
+  │    有 editedScenePrompt？ → 直接用它，**跳过侧链**（D26 + D31）
+  │    有上一 take 的 scenePrompt 且用户没改？ → 复用，**跳过侧链**（省钱，D31）
+  │    否则 → 调 image_prompt agent → normalizeTagString → 存进记录
+  │           失败 → status:'failed', errorKind:'prompt-agent'，**到此为止，不发 NAI**
+  │
+  ↓ composePrompt(scenePrompt, sceneNegative, marker, presets, opts)
   ↓ buildNaiRequest(composed, naiOpts)
   ↓ image-client 经 BFF 发请求（带 AbortController）
   ↓ 成功：parseNaiZip → 存 blob → status:'done' + mime/bytes/hash
      失败：status:'failed' + error/errorKind（§12）
   ↓ store 变更 → 正文与图鉴两处同时更新（同一批记录的两个视图）
 ```
+
+🔴 **`checkQuota` 在 `image_prompt` 之前**（D32）。两处花钱（LLM token + Anlas），闸门要在最前面 —— 否则自动档会为被限流器拦下的插画白烧一次侧链调用。
 
 ### 8.1 D15 的实现面
 
@@ -736,6 +827,34 @@ generate(saveId, messageId, occurrence, marker, source)    ← 唯一入口，�
 ### 8.2 并发
 
 一条消息可能有 2-3 个标记 → **串行发**（NAI 有速率限制，且并发同时扣费）。手动点击进同一个队列，不另开一条。切存档/离开页面 → `AbortController` 取消未完成的，对应记录标 `aborted`。
+
+### 8.5 `image_prompt` 侧链（D28）
+
+**第 13 个 agent**，进 `data/defaults/agent-config.json` 的 `agents`。于是它**白拿整套设置界面** —— 模型选择、温度/topP/惩罚项、maxTokens、世界书开关与选书、systemPrompt 编辑、预设，全部由既有的 `agent-settings.ts` + 设置页 Agent 分区提供，**一个新控件都不用画**。
+
+| 项       | 值                                                                                               |
+| -------- | ------------------------------------------------------------------------------------------------ |
+| agent id | `image_prompt`                                                                                   |
+| 类型     | 普通补全（**非 Agentic**，不需要工具调用）                                                       |
+| 默认模型 | 建议挂**便宜快模型** —— 散文→标签是机械转换，不需要 story 那一档                                 |
+| 世界书   | 默认关。开了能让地点/服饰的设定进来提升保真度，代价是 token（用既有的 per-agent 开关，零新代码） |
+| 输入     | `ImagePromptRequest`（§4）：那句中文 + 角色名 + 所属消息正文 + 当前地点 + rating                 |
+| 输出     | `<image_prompt>` / `<image_negative>` / `<image_desc>` 三个 XML 标签                             |
+
+**为什么输出用 XML 标签而不是裸文本**：模型爱在答案前面写一段废话（"好的，我来把这个场景转换成标签："）。本仓已有 `story-rescue.ts` 专门处理同一类缺陷 —— 用标签让抽取变成确定的事，而不是靠一堆"从最后一个冒号后面截"的启发式。抽不到 `<image_prompt>` 就是 `errorKind: 'prompt-agent'`，**明确失败，不猜**。
+
+**systemPrompt 要教的四件事**（都不涉及叙事，所以可以写得很直白）：
+
+1. 输出 danbooru 标签，逗号分隔，**全部 ASCII 标点**
+2. **不写角色外观** —— 那由角色预设负责（D4）。它只写场景、动作、光线、构图、数量标签（`2girls, 1boy`）
+3. 不写画质词与 rating —— Code 会追加（§5.2 的 `[3]`/`[4]`）
+4. 输出三个标签，不要别的
+
+**story 那边的改动缩到一句话**（原计划的 J 阶段大幅缩水）：
+
+> 当某个时刻值得配一张插画时，输出 `<scene_image title="短标题" characters="出场角色名">一句话说明画的是什么</scene_image>`。克制使用。
+
+**不要在 story 的 systemPrompt 里教 danbooru** —— 那是把方言知识塞进全游戏最要紧的 agent，既占预算，又有让标签思维渗进叙事的风险。
 
 ---
 
@@ -836,6 +955,8 @@ imageMaxPerHour: number; // 20
 
 **默认档位是 `'manual'`**：手动档下 AI 多写几个标记只是多几个按钮、不花钱，所以"story agent 该多久画一次"这个提示词工程问题可以先不解决 —— 让玩家看着标记频率合不合适，再决定要不要拨到自动。
 
+🔴 **上面这些是 NAI 与限额的参数。`image_prompt` 的配置一个都不在这里** —— 它是第 13 个 agent，模型/温度/世界书/systemPrompt 全部走既有的 `agent-settings.ts` 与设置页 Agent 分区（D28）。**不要**为它另开设置项，那会造出第二个真相来源。
+
 ⚠️ **`apiType` 的坑**：`api-key-migration.ts:16` 把类型钉成 `'chat' | 'embedding'`，`:65` 有一行 `entry.apiType === 'embedding' ? 'embedding' : 'chat'` —— 加 `'image'` 时**两处一起改**，否则症状是「图像 API 存了、重开变成 chat」。
 
 ---
@@ -851,16 +972,17 @@ imageMaxPerHour: number; // 20
 
 ### 12.2 错误分类与文案
 
-| HTTP / 情形     | `kind`         | UI 文案                                     | 可重试 |
-| --------------- | -------------- | ------------------------------------------- | ------ |
-| 401             | `auth`         | NovelAI 令牌无效或已过期，去设置里重填      | ❌     |
-| 402             | `payment`      | Anlas 不足，或这次的尺寸/步数超出了免费额度 | ❌     |
-| 429             | `rate-limit`   | NovelAI 限流了，过一会儿再试                | ✅     |
-| 400             | `bad-request`  | 请求被拒绝：{上游 detail 摘要}              | ❌     |
-| 5xx             | `upstream`     | NovelAI 服务端出错了                        | ✅     |
-| 网络/超时       | `network`      | 连不上 NovelAI，检查网络或代理              | ✅     |
-| 用户取消        | `aborted`      | 已取消                                      | ✅     |
-| 非 zip / 空 zip | `bad-response` | NovelAI 返回了看不懂的内容                  | ✅     |
+| HTTP / 情形         | `kind`         | UI 文案                                          | 可重试 |
+| ------------------- | -------------- | ------------------------------------------------ | ------ |
+| 侧链失败/抽不到标签 | `prompt-agent` | 提示词生成失败了，点重试；或在图鉴里自己填提示词 | ✅     |
+| 401                 | `auth`         | NovelAI 令牌无效或已过期，去设置里重填           | ❌     |
+| 402                 | `payment`      | Anlas 不足，或这次的尺寸/步数超出了免费额度      | ❌     |
+| 429                 | `rate-limit`   | NovelAI 限流了，过一会儿再试                     | ✅     |
+| 400                 | `bad-request`  | 请求被拒绝：{上游 detail 摘要}                   | ❌     |
+| 5xx                 | `upstream`     | NovelAI 服务端出错了                             | ✅     |
+| 网络/超时           | `network`      | 连不上 NovelAI，检查网络或代理                   | ✅     |
+| 用户取消            | `aborted`      | 已取消                                           | ✅     |
+| 非 zip / 空 zip     | `bad-response` | NovelAI 返回了看不懂的内容                       | ✅     |
 
 `detail` 只进 console 与记录，**不进 UI**（上游报文可能很长且是英文）。
 
@@ -875,9 +997,15 @@ src/sillytavern/
 ├── image-prompt.ts             ← ★承重：composePrompt（§5.2）
 ├── image-quota.ts              ← ★checkQuota（§5.3，三层限额**唯一**判定处）
 ├── image-defaults.ts           ← 画质后缀表 / 构图词 / 基础负向 等常量
+├── image-prompt-agent.ts       ← 侧链（§8.5）：装 ImagePromptRequest → 调 agent → 抽三个 XML 标签
+│                                  **纯函数部分单独导出**（buildImagePromptInput / parseImagePromptOutput），
+│                                  只有中间那次 callAgent 有 I/O —— 于是抽取逻辑照样可测
 ├── marker-protocol.ts          ← 改：MARKER_SPECS 加一行 + sanitizeCaption
 └── image-providers/
     └── novelai.ts              ← buildNaiRequest / parseNaiZip（§5.4）
+
+data/defaults/agent-config.json ← 改：agents 加第 13 个 `image_prompt`（含 systemPrompt）
+                                   story 的 systemPrompt 只加一句话（§8.5）
 
 src/ui/
 ├── lib/image-client.ts         ← 唯一网络接触点（先例：workshop-client.ts，判别联合永不抛穿 + 超时 + 取消）
@@ -912,7 +1040,8 @@ server/routes/image.ts          ← 复用 forward()
 | `novelai.test.ts`                                   | `buildNaiRequest` 逐字节确定 · ★**三重冗余一致**（`input`≡`base_caption`、`negative_prompt`≡负向 `base_caption`、`characterPrompts[i]`≡`char_captions[i]` 且**顺序一致**） · 0 角色时两数组皆 `[]` · `parseNaiZip` 喂**真 NAI zip fixture** → 字节 · 非 zip content-type → `bad-response` |
 | `marker-protocol.test.ts`                           | 既有 + `scene_image` 属性解析与正文提取 · **标题含引号/超长/缺省时只收敛不拒绝**                                                                                                                                                                                                          |
 | `normalizeTagString`（并入 `image-prompt.test.ts`） | ★全角逗号/顿号/全角分号 → ASCII · `《》`→`<>`（`<lora:x:0.8>` 得以复原） · 换行与 `<br>` → `, ` · 连续逗号折叠 · **权重语法 `{{}}` / `[[]]` / `-0.8::feet::` 一个字符不改** · 首尾逗号被去掉                                                                                              |
-| `scene-image-store.test.ts`                         | fake-indexeddb：pending 先落库 · 按 `[saveId+messageId]` 查 · 删存档连带删（且 `imagePresets` **不**删） · **重画追加 take 不覆盖**                                                                                                                                                       |
+| `image-prompt-agent.test.ts`                        | ★`parseImagePromptOutput`：三个标签正常抽出 · **模型在前面写了废话仍能抽到** · 缺 `<image_prompt>` → `prompt-agent` 失败而**不是**猜一个 · 输出已过 `normalizeTagString` · `buildImagePromptInput` 带上地点与正文且**剥掉了全部标记**                                                     |
+| `scene-image-store.test.ts`                         | fake-indexeddb：pending 先落库 · 按 `[saveId+messageId]` 查 · 删存档连带删（且 `imagePresets` **不**删） · **重画追加 take 不覆盖** · ★**有 `editedScenePrompt` 时跳过侧链** · ★**限额拒绝时侧链一次都没被调用**（D32）                                                                   |
 | 渲染态判定（纯函数抽出来测）                        | §10.2 真值表逐格 —— 尤其**「无记录 + auto」出按钮而不是自动开火**                                                                                                                                                                                                                         |
 
 > D15 值得单独一条断言：它是本设计唯一"错了会直接花钱"的规则，而其正确性来自"回调只在新消息时触发"这个**外部事实**。所以要测的不是回调本身，而是**渲染态判定不会把 auto 解释成"没记录就去生成"** —— 那是将来最可能被人"顺手补全"掉的一环。
@@ -921,24 +1050,28 @@ server/routes/image.ts          ← 复用 forward()
 
 ## 15. 实施顺序
 
-| 阶段   | 内容                                                                   | 依赖    | 可并行              |
-| ------ | ---------------------------------------------------------------------- | ------- | ------------------- |
-| **A**  | `types-image.ts` + `image-defaults.ts`                                 | 无      | —                   |
-| **B1** | `image-segments.ts` + 测试                                             | A       | ✅ 与 B2/B3/B4 并行 |
-| **B2** | `image-prompt.ts` + 测试                                               | A       | ✅                  |
-| **B3** | `image-quota.ts` + 测试                                                | A       | ✅                  |
-| **B4** | `image-providers/novelai.ts` + 测试                                    | A       | ✅                  |
-| **C**  | `marker-protocol.ts`：`MARKER_SPECS` 加一行 + `sanitizeCaption` + 测试 | A       | —                   |
-| **D**  | Dexie v17 + `scene-image-store` + `image-preset-store` + 测试          | A       | —                   |
-| **E**  | `server/routes/image.ts` + `vite.config.ts` + `image-client.ts`        | A       | 与 D 并行           |
-| **F**  | `BeautifiedNarrative.vue` 改造 + `SceneImageSegment.vue`               | B1, D   | —                   |
-| **G**  | `GamePipeline.onSceneImage` 接线（三档分流 + 限额）                    | C, D, E | —                   |
-| **H**  | 设置分区 `settings/image/`                                             | D       | 与 F/G 并行         |
-| **I**  | CG 图鉴 `CgGalleryPanel/Detail` + `SideToolbar` 入口                   | D       | 与 G/H 并行         |
-| **J**  | `agent-config.json` story systemPrompt（教方言 + 标题写法 + 克制指令） | G       | —                   |
-| **K**  | 真机走查 + §6.3 的三点 curl 确认                                       | 全部    | —                   |
+| 阶段   | 内容                                                                       | 依赖       | 可并行              |
+| ------ | -------------------------------------------------------------------------- | ---------- | ------------------- |
+| **A**  | `types-image.ts` + `image-defaults.ts`                                     | 无         | —                   |
+| **B1** | `image-segments.ts` + 测试                                                 | A          | ✅ 与 B2/B3/B4 并行 |
+| **B2** | `image-prompt.ts` + 测试                                                   | A          | ✅                  |
+| **B3** | `image-quota.ts` + 测试                                                    | A          | ✅                  |
+| **B4** | `image-providers/novelai.ts` + 测试                                        | A          | ✅                  |
+| **B5** | `image-prompt-agent.ts` 的**纯函数半边**（装输入 / 抽三个 XML 标签）+ 测试 | A          | ✅                  |
+| **C**  | `marker-protocol.ts`：`MARKER_SPECS` 加一行 + `sanitizeCaption` + 测试     | A          | —                   |
+| **D**  | Dexie v17 + `scene-image-store` + `image-preset-store` + 测试              | A          | —                   |
+| **E**  | `server/routes/image.ts` + `vite.config.ts` + `image-client.ts`            | A          | 与 D 并行           |
+| **F**  | `BeautifiedNarrative.vue` 改造 + `SceneImageSegment.vue`                   | B1, D      | —                   |
+| **G**  | `image_prompt` 进 `agent-config.json` + 侧链调用接线                       | B5, D      | 与 E/F 并行         |
+| **H**  | `GamePipeline.onSceneImage` 接线（三档分流 + **限额在侧链之前**，D32）     | C, D, E, G | —                   |
+| **I**  | 设置分区 `settings/image/`（**不含** agent 配置，那是白拿的）              | D          | 与 F/H 并行         |
+| **J**  | CG 图鉴 `CgGalleryPanel/Detail` + `SideToolbar` 入口                       | D          | 与 H/I 并行         |
+| **K**  | story systemPrompt 加**那一句话**（§8.5）                                  | H          | —                   |
+| **L**  | 真机走查 + §6.3 的三点 curl 确认                                           | 全部       | —                   |
 
-**B 组四个纯函数模块完全不依赖任何未决事项，可以立刻开工。**
+**B 组五个纯函数模块完全不依赖任何未决事项，可以立刻并行开工。**
+
+> D28 让 K 阶段从「教 story 学 danbooru 方言 + 标题写法 + 克制指令」缩成「加一句话」，代价是多了 B5 + G 两格 —— 而这两格都是**新增文件**，不动全游戏最要紧的那个系统提示词。这笔交换划算。
 
 ---
 
