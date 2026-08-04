@@ -31,7 +31,12 @@ import type {
   BeautifierRule,
   RegexStorageRecord,
 } from './types';
-import type { SceneImageRecord, SceneImageBlobRecord, ImagePreset } from './types-image';
+import type {
+  SceneImageRecord,
+  SceneImageBlobRecord,
+  SceneImageUsage,
+  ImagePreset,
+} from './types-image';
 import type { CreatePreset } from '../ui/stores/create-store';
 import { DEFAULT_SETTINGS } from './types';
 
@@ -1566,6 +1571,76 @@ export async function dropSceneImageBlobs(ids: readonly string[]): Promise<numbe
     if (next.length > 0) await db.sceneImages.bulkPut(next);
   });
   return dropped;
+}
+
+/**
+ * 一条记录此刻是否**占着字节**。
+ *
+ * `getSceneImageUsage` 与 `listCleanableSceneImageIds` 共用这一个判据，两者才不会
+ * 各算各的 —— 「显示 12 张可清理、点下去只清了 8 张」是这类界面最容易长出来的裂缝。
+ *
+ * `status === 'done'` 是必要条件：只有走完 `saveSceneImage(record, blob)` 那条路的
+ * 记录才有字节。给 `failed`/`queued` 打 `blobDropped` 会让图鉴对着一条从没画出来的
+ * 记录说「字节已清理」。
+ */
+function hasStoredSceneImageBytes(row: SceneImageRecord): boolean {
+  return row.status === 'done' && row.blobDropped !== true;
+}
+
+/**
+ * 本存档的插画用量（只读，§7.5）。
+ *
+ * 一张图都没有时返回全 0 —— 调用方照常渲染「0 张 / 0 B」，**不要**把这一行藏起来：
+ * 这行字同时在回答「我这存档到底有没有在攒图」。
+ */
+export async function getSceneImageUsage(saveId: string): Promise<SceneImageUsage> {
+  const usage: SceneImageUsage = {
+    records: 0,
+    storedCount: 0,
+    storedBytes: 0,
+    favoriteCount: 0,
+    favoriteBytes: 0,
+  };
+  // 走 saveId 索引逐行累加，不 toArray —— 统计不需要把整份记录数组留在内存里
+  await getDatabase()
+    .sceneImages.where('saveId')
+    .equals(saveId)
+    .each((row) => {
+      usage.records += 1;
+      if (!hasStoredSceneImageBytes(row)) return;
+      const bytes = typeof row.bytes === 'number' && Number.isFinite(row.bytes) ? row.bytes : 0;
+      usage.storedCount += 1;
+      usage.storedBytes += bytes;
+      if (row.favorite === true) {
+        usage.favoriteCount += 1;
+        usage.favoriteBytes += bytes;
+      }
+    });
+  return usage;
+}
+
+/**
+ * 本存档中「清理」会动到的那些记录 id —— 喂给 `dropSceneImageBlobs`。
+ *
+ * 默认排除 `favorite`（D6 的豁免位 / §7.5）；`includeFavorite` 留给将来那个措辞更重的
+ * 入口，v1 的设置页不传它。
+ *
+ * 只读；真正删字节的是 `dropSceneImageBlobs`，本函数一个字节都不动。
+ */
+export async function listCleanableSceneImageIds(
+  saveId: string,
+  opts: { includeFavorite?: boolean } = {},
+): Promise<string[]> {
+  const ids: string[] = [];
+  await getDatabase()
+    .sceneImages.where('saveId')
+    .equals(saveId)
+    .each((row) => {
+      if (!hasStoredSceneImageBytes(row)) return;
+      if (row.favorite === true && opts.includeFavorite !== true) return;
+      ids.push(row.id);
+    });
+  return ids;
 }
 
 // ========== Image Presets (v17) ==========

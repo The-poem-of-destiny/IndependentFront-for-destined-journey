@@ -221,6 +221,49 @@ describe('限额（D32：闸门在最前面）', () => {
     const seen = checkQuota.mock.calls[0][0];
     expect(seen.records.map((r) => r.id).sort()).toEqual(['f', 'q']);
   });
+
+  it('手动 + quotaConfirmed 跳过判定照发（D24：确认之后不再拦）', async () => {
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    const checkQuota = vi.fn((): QuotaVerdict => ({
+      ok: false,
+      reason: 'per-message',
+      message: '这条消息已经有 2/2 张',
+    }));
+    const send = vi.fn(async () => okSend());
+    store.setSeams({ checkQuota, runPromptAgent: stubPromptAgent(), send });
+
+    const res = await store.generate(
+      baseInput({ source: 'manual', quotaConfirmed: true, occurrence: 5 }),
+    );
+    await store.whenIdle();
+
+    expect(res.ok).toBe(true);
+    // 判定被整个跳过 —— 不是「问了但忽略答案」
+    expect(checkQuota).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 auto 拿不到这个绕过口 —— 自动档带 quotaConfirmed 照样被拦', async () => {
+    // 无人值守的花钱没有确认者。这条测试存在的理由: 别让将来有人「顺手给自动档也开一个」。
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    const runPromptAgent = vi.fn();
+    const send = vi.fn();
+    store.setSeams({
+      checkQuota: () => ({ ok: false, reason: 'same-turn', message: '这一回合已经自动生成过了' }),
+      runPromptAgent,
+      send,
+    });
+
+    const res = await store.generate(baseInput({ source: 'auto', quotaConfirmed: true }));
+    await store.whenIdle();
+
+    expect(res.ok).toBe(false);
+    expect(runPromptAgent).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(await getSceneImagesByMessage(SAVE, 'msg_1')).toHaveLength(0);
+  });
 });
 
 // ═══ 队列与状态机 ═══

@@ -7,7 +7,7 @@ import {
 } from '@engine/beautifier';
 import { splitSceneImageSegments } from '@engine/image-segments';
 import type { BeautifierRule } from '@engine/types';
-import type { ImageGenMode, SceneImageMarker } from '@engine/types-image';
+import type { ImageGenMode, ImageRating, SceneImageMarker } from '@engine/types-image';
 import { useBeautify } from '../../composables/useBeautify';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import BeautifierFrame from './BeautifierFrame.vue';
@@ -30,6 +30,11 @@ const props = withDefaults(
     turn?: number;
     /** 三档开关；缺省 `off` = 这个子系统在 UI 上完全不存在（真值表第一行） */
     imageMode?: ImageGenMode;
+    /**
+     * rating **上限**（D38），来自 `settings.imageMaxRating` —— 钳住标记写的 rating。
+     * 缺省 `general`（最保守的一档）与设置默认值同步。
+     */
+    imageMaxRating?: ImageRating;
   }>(),
   {
     rules: undefined,
@@ -40,6 +45,7 @@ const props = withDefaults(
     messageId: undefined,
     turn: 0,
     imageMode: 'off',
+    imageMaxRating: 'general',
   },
 );
 
@@ -172,6 +178,7 @@ function paragraphs(text: string): string[] {
         :turn="turn"
         :marker="part.marker"
         :narrative="strippedNarrative"
+        :max-rating="imageMaxRating"
       />
 
       <template v-for="(segment, index) in part.kind === 'prose' ? part.segments : []" :key="index">
@@ -213,6 +220,7 @@ function paragraphs(text: string): string[] {
       :mode="imageMode"
       :turn="turn"
       :narrative="strippedNarrative"
+      :max-rating="imageMaxRating"
     />
   </div>
 </template>

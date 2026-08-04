@@ -19,7 +19,14 @@
  * 引用计数 LRU）—— **本组件不写第二套铸造/撤销**，也与 CG 图鉴共用同一份缓存。
  */
 import { computed, onUnmounted, ref, watch } from 'vue';
-import type { ImageGenMode, SceneImageAnchorKind, SceneImageMarker } from '@engine/types-image';
+import type {
+  ImageGenMode,
+  ImageRating,
+  SceneImageAnchorKind,
+  SceneImageMarker,
+} from '@engine/types-image';
+import { clampRating } from '@engine/image-prompt';
+import { useManualSceneImage } from '../../composables/useManualSceneImage';
 import { useSceneImageUrls } from '../../composables/useSceneImageUrls';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
@@ -42,6 +49,14 @@ const props = withDefaults(
     marker?: SceneImageMarker | undefined;
     /** 所属消息正文（已剥标记），喂侧链判断氛围/光线/时间 */
     narrative?: string;
+    /**
+     * rating **上限**（D38），来自 `settings.imageMaxRating`。
+     *
+     * 🔴 它钳住的是**标记写的** rating —— 玩家把上限设成 `general` 通常有现实原因
+     * （在外面玩），而 story agent 写一句 `rating="explicit"` 不该穿透它。
+     * 缺省 `general` 与设置默认值同档: 猜错了只是画得保守，反过来是把人推进麻烦里。
+     */
+    maxRating?: ImageRating;
   }>(),
   {
     anchorKind: 'marker',
@@ -51,6 +66,7 @@ const props = withDefaults(
     turn: 0,
     marker: undefined,
     narrative: '',
+    maxRating: 'general',
   },
 );
 
@@ -153,9 +169,25 @@ onUnmounted(() => {
 
 // ═══ 动作 ═══
 
-const busy = ref(false);
 const promptDraft = ref('');
 const promptOpen = ref(false);
+
+/**
+ * 手动开火那一条路（D24）—— 被限额拦下时**立起确认框而不是弹个 toast 就结束**。
+ *
+ * 本组件里每一次生成都是手动的（自动档由编排器回调开火，不经过渲染层），所以
+ * 三个动作（首次生成 / 重画 / 用自己写的提示词重画）共用同一个 composable。
+ */
+const {
+  busy,
+  pending: quotaPending,
+  request: requestImage,
+  confirm: confirmQuota,
+  dismiss: dismissQuota,
+} = useManualSceneImage({
+  generate: (input) => store.generate(input),
+  notify: (message) => ui.toast(message, 'warning'),
+});
 
 /** 手动开火 —— 无记录那一格的按钮。**只有这里会新建记录**（自动档由编排器回调开火） */
 async function fire(): Promise<void> {
@@ -164,26 +196,20 @@ async function fire(): Promise<void> {
     ui.toast('还没有载入存档，暂时画不了', 'warning');
     return;
   }
-  busy.value = true;
-  try {
-    const result = await store.generate({
-      saveId,
-      messageId: props.messageId,
-      turn: props.turn,
-      anchorKind: props.anchorKind,
-      occurrence: props.occurrence,
-      source: 'manual',
-      intent: props.marker?.bodyText ?? '',
-      title: props.marker?.title ?? '',
-      characters: props.marker?.characters ?? [],
-      // 设置项（§11 的 rating 上限）还没落地 —— 先按最保守的一档发
-      rating: props.marker?.rating ?? 'general',
-      narrative: props.narrative,
-    });
-    if (!result.ok) ui.toast(result.message, 'warning');
-  } finally {
-    busy.value = false;
-  }
+  await requestImage({
+    saveId,
+    messageId: props.messageId,
+    turn: props.turn,
+    anchorKind: props.anchorKind,
+    occurrence: props.occurrence,
+    intent: props.marker?.bodyText ?? '',
+    title: props.marker?.title ?? '',
+    characters: props.marker?.characters ?? [],
+    // 🔴 标记写的 rating 在这里就被上限钳住（D38）—— 记录里那个值还会喂给侧链，
+    //    只在 composePrompt 里钳的话，上限管得住图、管不住送去侧链的那句话
+    rating: clampRating(props.marker?.rating, props.maxRating),
+    narrative: props.narrative,
+  });
 }
 
 /**
@@ -195,27 +221,21 @@ async function fire(): Promise<void> {
 async function redraw(): Promise<void> {
   const r = record.value;
   if (!r) return;
-  busy.value = true;
-  try {
-    const result = await store.generate({
-      saveId: r.saveId,
-      messageId: r.messageId,
-      turn: r.turn,
-      anchorKind: r.anchorKind,
-      occurrence: r.occurrence,
-      source: 'manual',
-      intent: r.intent,
-      title: r.title,
-      description: r.description,
-      characters: r.characters,
-      rating: r.rating,
-      narrative: props.narrative,
-      redrawFrom: r.id,
-    });
-    if (!result.ok) ui.toast(result.message, 'warning');
-  } finally {
-    busy.value = false;
-  }
+  await requestImage({
+    saveId: r.saveId,
+    messageId: r.messageId,
+    turn: r.turn,
+    anchorKind: r.anchorKind,
+    occurrence: r.occurrence,
+    intent: r.intent,
+    title: r.title,
+    description: r.description,
+    characters: r.characters,
+    // 重画沿用这一条记录的 rating，但上限可能在这期间被调低了 —— 照样钳一次
+    rating: clampRating(r.rating, props.maxRating),
+    narrative: props.narrative,
+    redrawFrom: r.id,
+  });
 }
 
 /** 自己写提示词（D42）—— 就地写，不是"去图鉴里填"（失败的记录根本不进图鉴） */
@@ -343,6 +363,21 @@ function goPresets(): void {
           </AppButton>
           <AppButton variant="ghost" size="sm" @click="promptOpen = false">取消</AppButton>
         </div>
+      </div>
+    </div>
+
+    <!--
+      限额确认（D24）—— 手动**永不被拦死**，最多是要确认一下。
+      🔴 显示的是 checkQuota 原样给的那句中文: 它已经按「还能继续、只是要确认」的
+         口吻写好了，在这里改写会让一个照样点得动的按钮看起来像坏了。
+    -->
+    <div v-if="quotaPending" class="si-quota" role="alertdialog">
+      <span class="si-quota-msg">{{ quotaPending.message }}</span>
+      <div class="si-actions">
+        <AppButton variant="primary" size="sm" :loading="busy" @click="confirmQuota">
+          仍然生成
+        </AppButton>
+        <AppButton variant="ghost" size="sm" @click="dismissQuota">算了</AppButton>
       </div>
     </div>
   </div>
@@ -535,6 +570,27 @@ function goPresets(): void {
   width: 100%;
   flex-direction: column;
   gap: var(--theme-spacing-sm);
+}
+
+/* 限额确认（D24）—— 一条提醒，不是一堵墙。用 warning 色而非 error */
+.si-quota {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: var(--theme-spacing-sm);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  border: 1px solid color-mix(in srgb, var(--theme-warning) 40%, var(--theme-card-border));
+  border-radius: var(--theme-radius-md, 6px);
+  background: color-mix(in srgb, var(--theme-warning) 8%, var(--theme-surface-muted));
+  gap: var(--theme-spacing-sm);
+  text-align: center;
+}
+
+.si-quota-msg {
+  color: var(--theme-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  text-indent: 0;
 }
 
 .si-textarea {

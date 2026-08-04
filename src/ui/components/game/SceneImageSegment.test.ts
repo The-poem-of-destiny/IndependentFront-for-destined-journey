@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { reactive } from 'vue';
 import type { SceneImageMarker, SceneImageRecord } from '@engine/types-image';
+import type { SceneImageGenerateResult } from '../../stores/scene-image-store';
 import SceneImageSegment from './SceneImageSegment.vue';
 
 const NOW = 1_700_000_000_000;
@@ -20,8 +21,8 @@ const scene = reactive({
   records: [] as SceneImageRecord[],
   // 入参写成具名形参不是装饰: 没有它，`mock.calls[0]` 是空元组，
   // 「点一下按钮到底发了什么」根本断言不了
-  generate: vi.fn(async (_input: Record<string, unknown>) => ({
-    ok: true as const,
+  generate: vi.fn(async (_input: Record<string, unknown>): Promise<SceneImageGenerateResult> => ({
+    ok: true,
     id: 'simg_new',
   })),
   cancel: vi.fn(async (_id: string) => 'cancelled' as const),
@@ -229,6 +230,44 @@ describe('SceneImageSegment', () => {
 
     expect(wrapper.findAll('button').some((b) => b.text().includes('重试'))).toBe(false);
     expect(wrapper.text()).toContain('Anlas 不足');
+  });
+
+  it('🔴 被限额拦下不是终点：弹一次确认，点了就带 quotaConfirmed 重发（D24）', async () => {
+    scene.generate.mockResolvedValueOnce({
+      ok: false,
+      reason: 'per-message',
+      message: '这条消息已经有 2/2 张插画，继续生成会额外消耗额度 —— 确认后仍可生成',
+    });
+    const wrapper = mountSegment({ marker: MARKER, mode: 'manual', turn: 7 });
+
+    await wrapper.get('.si-offer').trigger('click');
+    await wrapper.vm.$nextTick();
+
+    // checkQuota 那句中文**原样**出现（不是一条转瞬即逝的 toast）
+    expect(wrapper.text()).toContain('确认后仍可生成');
+    expect(ui.toast).not.toHaveBeenCalled();
+
+    const confirm = wrapper.findAll('button').find((b) => b.text().includes('仍然生成'));
+    await confirm?.trigger('click');
+    await wrapper.vm.$nextTick();
+
+    expect(scene.generate).toHaveBeenCalledTimes(2);
+    expect(scene.generate.mock.calls[1]?.[0]).toMatchObject({
+      source: 'manual',
+      quotaConfirmed: true,
+      turn: 7,
+    });
+  });
+
+  it('rating 被 maxRating 上限钳住（D38）—— 标记写什么都穿不过去', async () => {
+    const wrapper = mountSegment({
+      marker: { ...MARKER, rating: 'explicit' },
+      mode: 'manual',
+      maxRating: 'sensitive',
+    });
+    await wrapper.get('.si-offer').trigger('click');
+
+    expect(scene.generate.mock.calls[0]?.[0]).toMatchObject({ rating: 'sensitive' });
   });
 
   it('keeps the button / queued / generating frames at one height', () => {

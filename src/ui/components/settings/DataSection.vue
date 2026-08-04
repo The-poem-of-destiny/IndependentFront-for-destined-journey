@@ -6,7 +6,8 @@
  *    所以效果反而更准（每次点进来都是新数），代价是切走再切回会多问一次
  *    `navigator.storage.estimate()` —— 那是个便宜的浏览器查询。
  */
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
+import type { SceneImageUsage } from '@engine/types-image';
 import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
@@ -26,6 +27,62 @@ function fmtBytes(b: number) {
   if (b < 1024) return `${b} B`;
   if (b < 1048576) return `${(b / 1024).toFixed(1)} KB`;
   return `${(b / 1048576).toFixed(1)} MB`;
+}
+
+/**
+ * 本存档插画用量与清理（图像生成设计 §7.5 / D47）。
+ *
+ * 🔴 为什么这一行在**存档数据**分区而不是图像分区：用量是**每存档**的数字，而图像
+ * 分区整个存的是全局 `UiSettings`。把「本存档 20 MB」摆在一屏全局设置里会被读成
+ * 「总共 20 MB」。这里本来就有 saveId 上下文（`ui.activeSaveId`）。
+ *
+ * 🔴 「清理」= 删字节、**留记录**：插画条目、标题说明与提示词一条不动，图鉴里那一格
+ * 变成「字节已清理 + 重画」而不是消失。确认文案必须把这件事说清楚 —— 用户以为自己
+ * 在删回忆，和用户以为自己只是腾空间，是两种完全不同的心情。
+ */
+const sceneUsage = ref<SceneImageUsage | null>(null);
+const showImageCleanConfirm = ref(false);
+const cleaningImages = ref(false);
+/** 收藏的那些不在清理范围内（D6 的豁免位），所以「可清理」要把它们减掉 */
+const cleanableCount = computed(() =>
+  sceneUsage.value ? sceneUsage.value.storedCount - sceneUsage.value.favoriteCount : 0,
+);
+const cleanableBytes = computed(() =>
+  sceneUsage.value ? sceneUsage.value.storedBytes - sceneUsage.value.favoriteBytes : 0,
+);
+/** 记录还在、字节已经没了的那些 —— 图鉴里显示成「可重画」的格子 */
+const droppedCount = computed(() =>
+  sceneUsage.value ? sceneUsage.value.records - sceneUsage.value.storedCount : 0,
+);
+async function loadSceneUsage() {
+  const saveId = ui.activeSaveId;
+  // 没有活跃存档时不去查（查了也只会得到别人存档的 0），照实显示"未载入存档"
+  if (!saveId) {
+    sceneUsage.value = null;
+    return;
+  }
+  const { getSceneImageUsage } = await import('@engine/database');
+  sceneUsage.value = await getSceneImageUsage(saveId);
+}
+onMounted(loadSceneUsage);
+async function cleanSceneImages() {
+  const saveId = ui.activeSaveId;
+  if (!saveId) return;
+  cleaningImages.value = true;
+  try {
+    const { listCleanableSceneImageIds, dropSceneImageBlobs } = await import('@engine/database');
+    // 名单在**点下确认这一刻**重新取：面板可能已经开着好一会儿了
+    const ids = await listCleanableSceneImageIds(saveId);
+    const dropped = await dropSceneImageBlobs(ids);
+    ui.toast(`已清理 ${dropped} 张插画的图片文件，条目与提示词都还在`, 'success');
+  } catch {
+    ui.toast('清理失败', 'error');
+  } finally {
+    cleaningImages.value = false;
+    showImageCleanConfirm.value = false;
+    await loadSceneUsage();
+    await loadStorageUsage();
+  }
 }
 async function exportAll() {
   const { exportAllData } = await import('@engine/database');
@@ -127,6 +184,33 @@ async function clearAll() {
           <p class="text-xs text-muted">IndexedDB + localStorage</p>
         </div>
         <p v-else class="text-muted text-sm">获取中…</p></AppCard
+      ><AppCard padding="md"
+        ><h4>本存档插画</h4>
+        <!-- 一张都没有时照常显示「0 张 / 0 B」，不把这一行藏起来 ——
+             它同时在回答"我这存档到底有没有在攒图" -->
+        <div v-if="sceneUsage">
+          <p class="text-sm" style="margin: 0">
+            {{ sceneUsage.storedCount }} 张 / {{ fmtBytes(sceneUsage.storedBytes) }}
+          </p>
+          <p class="text-xs text-muted" style="margin: 4px 0 0">
+            共 {{ sceneUsage.records }} 条插画记录<template v-if="droppedCount > 0"
+              >，其中 {{ droppedCount }} 条的图片文件已清理（配方还在，可重画）</template
+            ><template v-if="sceneUsage.favoriteCount > 0"
+              >；收藏的 {{ sceneUsage.favoriteCount }} 张不会被清理</template
+            >
+          </p>
+          <AppButton
+            variant="secondary"
+            size="sm"
+            style="margin-top: 8px"
+            :disabled="cleanableCount === 0"
+            @click="showImageCleanConfirm = true"
+            >清理图片文件</AppButton
+          >
+        </div>
+        <p v-else class="text-muted text-sm">
+          未载入存档 —— 插画用量按存档统计，进入游戏后可在此查看与清理。
+        </p></AppCard
       ><AppCard padding="md" class="data-danger"
         ><h4>清除所有数据</h4>
         <p class="text-muted text-sm">
@@ -155,6 +239,41 @@ async function clearAll() {
       <template #footer
         ><AppButton variant="ghost" size="sm" @click="showClearConfirm = false">取消</AppButton
         ><AppButton variant="danger" size="sm" @click="clearAll">确认清除</AppButton></template
+      ></AppModal
+    >
+    <!--
+      清理插画字节的确认（D47）。三句话缺一不可：
+        ① 清掉的**只是图片文件** —— 条目/标题说明/提示词都留着，图鉴里那一格变成
+           「字节已清理 + 重画」，不是消失；
+        ② **不可撤销** —— 字节没了就得重新生成，而生成是花钱的；
+        ③ 收藏的不动。
+      少了 ① 用户会以为在删回忆而不敢点，少了 ② 用户会以为随手可恢复而乱点。
+    -->
+    <AppModal
+      :open="showImageCleanConfirm"
+      title="确认清理插画图片"
+      size="sm"
+      @update:open="showImageCleanConfirm = $event"
+      ><p>
+        将清理本存档 <strong>{{ cleanableCount }}</strong> 张插画的图片文件，释放约
+        <strong>{{ fmtBytes(cleanableBytes) }}</strong
+        >。
+      </p>
+      <p class="text-muted text-sm">
+        清掉的只是<strong>图片文件本身</strong>：插画条目、标题说明与提示词全部保留，图鉴里仍会列出它们，随时可以按原配方<strong>重画</strong>。<template
+          v-if="sceneUsage && sceneUsage.favoriteCount > 0"
+          >收藏的 {{ sceneUsage.favoriteCount }} 张不在清理范围内。</template
+        >
+      </p>
+      <p class="text-muted text-sm">
+        但此操作<strong style="color: var(--theme-error)">不可撤销</strong> ——
+        已清理的图片只能重新生成，会再次消耗生成额度。
+      </p>
+      <template #footer
+        ><AppButton variant="ghost" size="sm" @click="showImageCleanConfirm = false">取消</AppButton
+        ><AppButton variant="danger" size="sm" :loading="cleaningImages" @click="cleanSceneImages"
+          >确认清理</AppButton
+        ></template
       ></AppModal
     >
   </section>

@@ -326,6 +326,36 @@ export interface SceneImageBlobRecord {
   blob: Blob;
 }
 
+/**
+ * 一个存档的插画用量（只读统计，§7.5）—— 设置页「存档数据」分区那一行的数据源。
+ *
+ * 🔴 用量是**每存档**的数字，所以它归存档数据分区（那里本来就有 saveId 上下文），
+ * 不在图像分区 —— 图像分区整个存的是全局 `UiSettings`，把「本存档 20 MB」摆在
+ * 一屏全局设置里会被读成「总共 20 MB」。
+ *
+ * 「张数」有两个都不多余的口径：`storedCount` 是**占着字节**的，`records` 是图鉴
+ * 目录的长度（含清理过的）。清理之后前者归零而后者一条不少 —— 这正是 D47 想让
+ * 用户看见的事。
+ */
+export interface SceneImageUsage {
+  /** 记录总数，含 `blobDropped` 的（= 图鉴目录长度） */
+  records: number;
+  /** 仍占着字节的记录数 */
+  storedCount: number;
+  /**
+   * 上述记录的字节合计。
+   *
+   * 取的是记录里的 `bytes` 元数据而**不是**去把 Blob 一个个读出来量 —— 后者要把
+   * 整个存档的图都materialize 一遍，只为在设置页显示一行字。`bytes` 缺失的记录按
+   * 0 计（那是写入侧的漏，不该在这里补猜）。
+   */
+  storedBytes: number;
+  /** 其中被收藏的 —— 清理默认豁免（D6 留的位 / §7.5） */
+  favoriteCount: number;
+  /** 收藏那部分的字节合计 */
+  favoriteBytes: number;
+}
+
 // ═══ 失败分类 ═══
 
 export type ImageGenFailureKind =

@@ -157,6 +157,17 @@ export interface SceneImageGenerateInput {
    * 新记录是**追加的一个 take**，源记录一个字节都不动（D17）。
    */
   redrawFrom?: string;
+  /**
+   * 玩家已经在确认框里点过「仍然生成」—— 本次**跳过限额判定**（D24 / §9.3）。
+   *
+   * 🔴 **只对 `source: 'manual'` 生效**。自动档是无人值守花钱，没有任何界面能替玩家
+   * 按下那一下确认，所以 `source: 'auto'` 带上它也不算数 —— 判据写在 {@link generate}
+   * 里而不是靠调用方自觉，否则将来「顺手给自动档也开一个」就是一行改动的事。
+   *
+   * 限额本身仍是同一个 `checkQuota`（§5.3 不变式：自动与手动共用一个判定），
+   * 差别只在拿到 `ok:false` 之后做什么: 自动降级成按钮（D21），手动弹一次确认（D24）。
+   */
+  quotaConfirmed?: boolean;
 }
 
 export type SceneImageGenerateResult =
@@ -556,7 +567,11 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
     const existing = await getSceneImages(input.saveId);
 
     // ── 1. 限额（在侧链之前，D32）──
-    if (seams.checkQuota) {
+    // 🔴 手动档被拦下时是「弹一次确认后照发」而不是拦死（D24）—— 玩家点确认之后
+    //    重发会带上 `quotaConfirmed`，这一次就绕过判定。**绕过口只对 manual 开**：
+    //    自动档没有确认者，传了也当没传。
+    const bypassQuota = input.quotaConfirmed === true && input.source === 'manual';
+    if (seams.checkQuota && !bypassQuota) {
       const verdict = seams.checkQuota({
         records: existing,
         target: { messageId: input.messageId, turn: input.turn, source: input.source },

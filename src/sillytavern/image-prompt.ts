@@ -120,8 +120,12 @@ const RATING_ORDER: readonly ImageRating[] = ['general', 'sensitive', 'questiona
  *
  * 🔴 **静默钳位、不产 warning**：上限是用户自己设的、正按预期工作；
  *    每张图提醒一句「本来可以更露骨」是纯噪音。
+ *
+ * 导出是给**手动开火那一侧**用的（正文按钮 / 右键「为这一段配图」）：那里在
+ * `composePrompt` 之前就要把 rating 写进记录，而记录里那个值还会喂给 `image_prompt`
+ * 侧链。钳位只在拼接时做的话，上限就管得住图、管不住送去侧链的那句话。
  */
-function clampRating(requested: ImageRating | undefined, max: ImageRating): ImageRating {
+export function clampRating(requested: ImageRating | undefined, max: ImageRating): ImageRating {
   const maxIndex = RATING_ORDER.indexOf(max);
   const wantIndex = requested === undefined ? maxIndex : RATING_ORDER.indexOf(requested);
   // 未知取值（类型外的脏数据）一律退回上限，绝不越过它

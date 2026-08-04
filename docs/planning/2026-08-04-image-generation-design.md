@@ -1008,6 +1008,21 @@ generate(saveId, messageId, occurrence, marker, source)    ← 唯一入口，�
 
 **不要在 story 的 systemPrompt 里教 danbooru** —— 那是把方言知识塞进全游戏最要紧的 agent，既占预算，又有让标签思维渗进叙事的风险。
 
+#### 🔴 但这句话**不写进 `agents.story.systemPrompt`**（实施阶段 K 发现）
+
+本文以下各处凡写着「story 的 systemPrompt」，实际落点都是**预设条目**，不是那个字段。原因是 story 有一条别的 agent 没有的短路：
+
+```
+buildAgentMessages(story) → 先跑 assemblePresetContent
+                          → 拿到内容就直接用，systemPrompt 根本不看
+                          → 只有「用户一个预设都没有」时才回退到
+                            STORY_TEMPLATE.fixedSystem + fixedExamples
+```
+
+于是往 `agents.story.systemPrompt` 里写字有**两种结果，没有一种是想要的**：有预设时（常态）这句话**永远不生效**；没预设时它会**顶掉整份** `fixedSystem + fixedExamples` —— 一句话换掉全游戏最要紧的提示词。
+
+真源是预设条目。选条目还有一个坑：`assemblePresetContent` 按**条目自身的 `enabled`** 过滤，**不读 `prompt_order`** —— 现行预设 101 条里只有 32 条真的进提示词。挑一个确实在生效、且本来就管「正文内标记何时输出」的条目写。
+
 ---
 
 ## 9. 限流失效保护（D20–D25）
