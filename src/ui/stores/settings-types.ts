@@ -37,6 +37,7 @@
  */
 import type { ApiEntry, PresetItem } from './settings-store';
 import type { AgentSettingsEntry } from './agent-settings';
+import type { ImageGenMode, ImageRating } from '@engine/types-image';
 
 /** 剧情难度层级。`'adaptive'` = 按玩家层级动态；数字 = 钉死 T1-T7 */
 export type PlotDifficultyTier = 'adaptive' | number | string;
@@ -137,6 +138,59 @@ export type UiSettings = {
   // ═══ 输出美化（规则本体在 Dexie）═══
   beautifierEnabled: boolean;
   beautifierBuiltinDisabled: string[];
+
+  // ═══ 图像生成（设计 §11）═══
+  //
+  // 🔴 这里**只有 NAI 参数与限额**。`image_prompt` 的模型/温度/世界书/systemPrompt
+  //    一个都不在这里 —— 那些走 `agent-settings.ts` 的 `agents` 袋子（D28/D52）。
+  //    两者在同一个分区里挨着渲染，但存储各归各位；合并会造出第二个真相来源。
+
+  /** 三档开关。默认 `'manual'`：手动档下多几个标记只是多几个按钮，不花钱 */
+  imageGenMode: ImageGenMode;
+  /** 指向 API 池里 `apiType: 'image'` 的那条；null = 还没选 */
+  imageEndpointId: string | null;
+  /** NAI 模型 id（**不是** LLM 模型）。默认见 `image-defaults.DEFAULT_IMAGE_MODEL` */
+  imageModel: string;
+  /**
+   * 画质后缀 —— 直接拼进**每一张图**的正向提示词末尾（§5.2 的 `[6]`）。
+   *
+   * 🔴 值**不带前导逗号**：`composePrompt` 用 `', '` 连接各段，带了会产出 `', ,'`。
+   * 🔴 与「提示词生成」卡里的 `systemPrompt` 完全不同层：那个教模型怎么转标签，
+   *    这个是图本身的提示词。两处都叫「提示词」，写错框两边都不报错（§11.3）。
+   */
+  imageQualitySuffix: string;
+  /** 我们维护的基础负向（`image-defaults.DEFAULT_IMAGE_BASE_NEGATIVE`） */
+  imageBaseNegative: string;
+  /** 用户追加的负向，拼在基础负向之后。默认空串 */
+  imageExtraNegative: string;
+  /** 🔴 **上限而非默认**（D38）：标记里写的 rating 会被钳到这里 */
+  imageMaxRating: ImageRating;
+  /** 正文里的插画默认打码显示，点一下才揭示（D46） */
+  imageBlurByDefault: boolean;
+  /** 自动档那一次性确认弹过没有（D44）。弹过就不再弹 */
+  imageAutoConfirmed: boolean;
+  /** 出图宽（px）。默认 1216 —— 与 832 配成 NAI 官方横构图预设，面积卡在免费档内 */
+  imageWidth: number;
+  /** 出图高（px）。默认 832 */
+  imageHeight: number;
+  /** 采样步数。默认 23（免费档上限是 28） */
+  imageSteps: number;
+  /** CFG scale。默认 4.5（录制样本值） */
+  imageScale: number;
+  /** 采样器。默认 `'k_euler_ancestral'`（录制样本值） */
+  imageSampler: string;
+  /** 噪声调度。默认 `'karras'`（录制样本值） */
+  imageNoiseSchedule: string;
+  /**
+   * NAI 的 UC 预设编号，按录制值原样发。
+   * 🔴 它是**每模型一套**的具名清单序号，换模型语义就变 —— 所以负向文本由
+   *    `imageBaseNegative` 自己拿着，不靠这个字段表达（`image-defaults.ts` 有全文）。
+   */
+  imageUcPreset: number;
+  /** L1 每条消息上限（auto/manual 都计入） */
+  imageMaxPerMessage: number;
+  /** L2 每小时上限 —— 真正的失效保护，调大之前先读设计 §9 */
+  imageMaxPerHour: number;
 
   // ═══ 下面几项**不在 `getDefaults()` 里**，但生产代码确实读它们 ═══
 

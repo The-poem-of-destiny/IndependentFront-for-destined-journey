@@ -3,18 +3,22 @@
  *
  * 侧链一共三步：
  *   ① `buildImagePromptInput`  —— 标记 + 所属消息 → `ImagePromptRequest`（纯函数，本文件）
- *   ② callAgent                —— 唯一有 I/O 的一步（见下方 `ImagePromptAgentCall`，尚未接线）
+ *   ② `callImagePromptAgent`   —— 唯一有 I/O 的一步（G 阶段接线，本文件）
  *   ③ `parseImagePromptOutput` —— 模型原文 → `ImagePromptOutput` 或明确失败（纯函数，本文件）
  *
  * 🔴 **两端都是纯函数**，中间那次调用是唯一的 I/O —— 于是抽取逻辑照样可测（设计 §13）。
- *    本文件**不 import** `agent-client` / Dexie / DOM 里的任何东西，别顺手加。
+ *    本文件**不 import** `agent-client` / Dexie / DOM 里的任何东西，别顺手加：
+ *    ② 只经 `agent-templates` 装配消息，真正的 HTTP 客户端由 `deps.clientFactory`
+ *    从外面交进来（`char-gen-agent` 的 `CharGenClient` 同一形状）。
  *
  * 🔴 `normalizeTagString` 从 `image-prompt.ts` import —— 那是全仓唯一一份（D27）。
  *    这里**绝不另抄一份**。
  */
 
+import { buildAgentMessagesAsync } from './agent-templates';
 import { normalizeTagString } from './image-prompt';
 import { CAPTION_DESC_MAX, sanitizeCaption, stripMarkers } from './marker-protocol';
+import type { AgentConfig, AgentContext, AgentPreset, ApiEndpoint, WorldBook } from './types';
 import type {
   ImageGenFailure,
   ImagePromptOutput,
@@ -66,7 +70,7 @@ export function buildImagePromptInput(
 }
 
 // ═══════════════════════════════════════════════════════════
-// ② 中间那次调用（尚未接线）
+// ② 中间那次调用
 // ═══════════════════════════════════════════════════════════
 
 /**
@@ -75,16 +79,149 @@ export function buildImagePromptInput(
  * 形状刻意只有「请求进、模型原文出」：装配与抽取都在本文件的纯函数里，
  * 于是实现方只需要负责 I/O（选 API 池 / 拼上下文模板 / 重试 / 取消）。
  *
- * TODO(G 阶段): 实现方住在调用侧（`scene-image-store`），照既有侧链的样子
- * 走 `agent-orchestrator` 的普通补全（**非 Agentic**，不需要工具调用，§8.5）。
- * 串起来的顺序是：`checkQuota`（🔴 在侧链**之前**，D32）→ `buildImagePromptInput`
- * → 本调用 → `parseImagePromptOutput`；调用抛错与抽取失败**都**降级成
- * `errorKind: 'prompt-agent'`，到此为止，不发 NAI。
+ * 生产实现是下面的 {@link callImagePromptAgent}；测试里换成一个返回定值的函数即可。
  */
 export type ImagePromptAgentCall = (
   request: ImagePromptRequest,
   signal?: AbortSignal,
 ) => Promise<string>;
+
+/**
+ * 侧链客户端 —— `AgentClient` 的**最小子集**。
+ *
+ * 🔴 只有 `chat`：`image_prompt` 是**普通补全，非 Agentic**（§8.5）。它不查库、
+ * 不掷骰、不写状态，没有一件事需要工具调用 —— 给它挂 tools 只会多烧 token
+ * 并给模型一条编数值的路。
+ */
+export interface ImagePromptClient {
+  chat(
+    request: {
+      model?: string;
+      messages: Array<{ role: string; content: string }>;
+      temperature?: number;
+      maxTokens?: number;
+      topP?: number;
+      frequencyPenalty?: number;
+      presencePenalty?: number;
+    },
+    signal?: AbortSignal,
+  ): Promise<{ output: string | null; rawResponse: string; error?: string }>;
+}
+
+/** 侧链一次调用的全部输入。`configs`/`worldBooks`/`presets` 缺席 = systemPrompt 退化成 stub */
+export interface ImagePromptChainRequest {
+  saveId: string;
+  /** `buildImagePromptInput` 的产出（或 store 从记录里重建的等价物） */
+  request: ImagePromptRequest;
+  /** 装配上下文。世界书/占位符都从这里取 */
+  context: AgentContext;
+  endpoint: ApiEndpoint;
+  /** 🔴 真机教训（char-gen 2026-07-17）：这三个不透传，systemPrompt 会退化成一行 stub */
+  configs?: AgentConfig[];
+  worldBooks?: WorldBook[];
+  presets?: AgentPreset[];
+  /** 切存档 / 离开页面时取消（§8.2） */
+  signal?: AbortSignal;
+}
+
+export interface ImagePromptAgentDeps {
+  /** 每次调用建新实例（缓存隔离），与 `char-gen-agent` 同口径 */
+  clientFactory: (agentId: string, endpoint: ApiEndpoint, saveId: string) => ImagePromptClient;
+}
+
+/** rating 在提示词里的中文说明 —— **只作上下文**，标签由 Code 追加（§5.2） */
+const RATING_LABEL: Record<ImageRating, string> = {
+  general: '全年龄',
+  sensitive: '轻微敏感',
+  questionable: '较敏感',
+  explicit: '成人向',
+};
+
+/**
+ * `ImagePromptRequest` → 注进 `{{IMAGE_REQUEST}}` 的那段文本（**纯函数**）。
+ *
+ * 🔴 正文放在最后。前面几行是短字段，正文可能上千字 —— 短的在前读起来才不费劲，
+ * 也让「这段是正文」这件事不必靠标点去猜。
+ */
+export function formatImagePromptRequest(req: ImagePromptRequest): string {
+  const lines: string[] = [`画面意图: ${req.intent.trim()}`];
+  if (req.characters.length > 0) lines.push(`出场角色: ${req.characters.join('、')}`);
+  if (req.location !== undefined && req.location.trim() !== '') {
+    lines.push(`当前地点: ${req.location.trim()}`);
+  }
+  lines.push(`分级: ${RATING_LABEL[req.rating]}`);
+  const narrative = req.narrative.trim();
+  if (narrative !== '') lines.push(`所属正文:\n${narrative}`);
+  return lines.join('\n');
+}
+
+/**
+ * 侧链的那一次调用：装消息 → `chat` → 抽三个标签。
+ *
+ * 调用顺序（🔴 `checkQuota` 在**本函数之前**，D32 —— 两处花钱，闸门要在最前面）：
+ * `checkQuota` → `buildImagePromptInput` → **本函数** → `parseImagePromptOutput`。
+ *
+ * 🔴 **本函数不抛错**。网络挂了、模板没注册、模型只写了废话 —— 一律降级成
+ * `errorKind: 'prompt-agent'` 的失败值，到此为止**不发 NAI**（§8.5）。理由是
+ * 上游 `scene-image-store` 的泵不该因为一张图的侧链而停摆，而失败态本身给了
+ * 「重试 / 自己写一份」两条看得见的出路（D42）。
+ */
+export async function callImagePromptAgent(
+  req: ImagePromptChainRequest,
+  deps: ImagePromptAgentDeps,
+): Promise<ImagePromptParseResult> {
+  let raw: string;
+  try {
+    const messages = await buildAgentMessagesAsync(
+      'image_prompt',
+      req.context,
+      req.configs,
+      req.worldBooks,
+      req.presets,
+      { IMAGE_REQUEST: formatImagePromptRequest(req.request) },
+    );
+    if (!messages) {
+      return agentFailure('image_prompt 模板未注册（AGENT_TEMPLATES / DEFAULT_TEMPLATES）');
+    }
+
+    const config = req.configs?.find((c) => c.agentId === 'image_prompt');
+    const client = deps.clientFactory('image_prompt', req.endpoint, req.saveId);
+    const result = await client.chat(
+      {
+        // 空串会让下游把它当成"显式指定了空模型"，一律退回 endpoint 的默认模型
+        ...(config?.model ? { model: config.model } : {}),
+        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        ...(config === undefined
+          ? {}
+          : {
+              temperature: config.temperature,
+              maxTokens: config.maxTokens,
+              topP: config.topP,
+              frequencyPenalty: config.frequencyPenalty,
+              presencePenalty: config.presencePenalty,
+            }),
+      },
+      req.signal,
+    );
+    if (result.error) return agentFailure(result.error);
+    raw = result.output ?? result.rawResponse;
+  } catch (e) {
+    return agentFailure(e instanceof Error ? e.message : String(e));
+  }
+
+  return parseImagePromptOutput(raw);
+}
+
+/** 调用侧的失败（网络/模板/异常）—— 与抽取失败同一个 `kind`，UI 只有一种文案 */
+function agentFailure(detail: string): ImageGenFailure {
+  return {
+    ok: false,
+    kind: 'prompt-agent',
+    message: PROMPT_AGENT_MESSAGE,
+    detail: detail.slice(0, DETAIL_MAX),
+    retryable: true,
+  };
+}
 
 // ═══════════════════════════════════════════════════════════
 // ③ 输出抽取

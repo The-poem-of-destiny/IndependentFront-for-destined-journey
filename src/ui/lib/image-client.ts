@@ -29,6 +29,7 @@
  */
 
 import { parseNaiZip, type NaiRequestBody } from '@engine/image-providers/novelai';
+import { IMAGE_BAD_RESPONSE_MESSAGE, IMAGE_FAILURE_RETRYABLE } from '@engine/image-defaults';
 import type { ImageGenFailure, ImageGenFailureKind } from '@engine/types-image';
 
 // ═══════════════════════════════════════════════════════════
@@ -70,10 +71,9 @@ export const IMAGE_REQUEST_TIMEOUT_MS = 120_000;
 /**
  * §12.2 那张表的 UI 文案 —— **中文原文，一字不改**。
  *
- * ⚠️ `bad-response` 那句与 `image-providers/novelai.ts` 里的
- * `BAD_RESPONSE_MESSAGE` 是同一句话（该常量未导出）。本模块只在
- * **字节根本读不出来**时用它，zip 内容的判定一律交给 `parseNaiZip` ——
- * 两处产出同一句文案，但判据不重叠。
+ * ⚠️ `bad-response` 那句与 `image-providers/novelai.ts` 用的是**同一个常量**
+ * （`image-defaults.IMAGE_BAD_RESPONSE_MESSAGE`）。本模块只在**字节根本读不出来**
+ * 时用它，zip 内容的判定一律交给 `parseNaiZip` —— 两处产出同一句文案，但判据不重叠。
  */
 const FAILURE_MESSAGES = {
   auth: 'NovelAI 令牌无效或已过期，去设置里重填',
@@ -83,25 +83,16 @@ const FAILURE_MESSAGES = {
   upstream: 'NovelAI 服务端出错了',
   network: '连不上 NovelAI，检查网络或代理',
   aborted: '已取消',
-  'bad-response': 'NovelAI 返回了看不懂的内容',
+  'bad-response': IMAGE_BAD_RESPONSE_MESSAGE,
 } as const satisfies Partial<Record<ImageGenFailureKind, string>>;
 
 /**
- * 哪几类值得再试（§12.2 最后一列）。
+ * 哪几类值得再试（§12.2 最后一列）—— 表在 `image-defaults` 里。
  *
- * `aborted` 也是 ✅ —— 用户自己取消的，当然还能再点一次；它不是错误，
- * UI 收到这一类**不该弹红字**，静默即可（对齐工坊的 `cancelled`）。
+ * 为什么不留在本模块: 渲染层要用同一张表决定失败段上画不画「重试」按钮
+ * （设计 §10.2 那一行）。两份表会漂成「客户端说可以重试、界面上却没有按钮」。
  */
-const RETRYABLE: Partial<Record<ImageGenFailureKind, boolean>> = {
-  auth: false,
-  payment: false,
-  'rate-limit': true,
-  'bad-request': false,
-  upstream: true,
-  network: true,
-  aborted: true,
-  'bad-response': true,
-};
+const RETRYABLE: Partial<Record<ImageGenFailureKind, boolean>> = IMAGE_FAILURE_RETRYABLE;
 
 /** 上游错误正文进 UI 时的长度闸（只有 400 那一格会用摘要，§12.2） */
 const DETAIL_SUMMARY_MAX = 160;

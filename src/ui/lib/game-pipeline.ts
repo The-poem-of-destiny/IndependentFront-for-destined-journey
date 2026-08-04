@@ -28,6 +28,7 @@ import type {
   MemoryRecord,
   WorkshopProject,
 } from '@engine/types';
+import type { ImageGenFailure, ImagePromptOutput, ImagePromptRequest } from '@engine/types-image';
 import { AgentClient } from '@engine/agent-client';
 import type { StreamCallbacks } from '@engine/agent-client';
 import { createStateManager } from '@engine/state-manager';
@@ -427,6 +428,9 @@ export class GamePipeline {
       'craft_gen', // 侧链: 制作生成，需完整 systemPrompt (真机 fix 2026-07-18)
       'char_gen', // 侧链: 角色生成，需完整 systemPrompt
       'item_gen', // 侧链: 物品生成，需完整 systemPrompt + {{ITEM_REQUEST}} 占位符
+      // 侧链: 情景插画的中文 → danbooru 转换（图像生成 D28）。不进主 DAG、也不进设置页
+      // Agent 子导航（D53）—— 但它的 systemPrompt/世界书/采样参数照旧从这里装配。
+      'image_prompt',
     ];
 
     // 复用 buildEndpoints() 的映射结果（ApiEntry.model → ApiEndpoint.defaultModel）
@@ -1616,5 +1620,81 @@ export class GamePipeline {
         console.error('[GamePipeline] item_gen 批量链失败（本批不落库，下回合重试）:', err);
       }
     }
+  }
+
+  /**
+   * `image_prompt` 侧链（图像生成 G 阶段 / D28）—— 中文那句话 → danbooru 串。
+   *
+   * 这就是 `scene-image-store` 的 `runPromptAgent` 缝要的那个实现，形状与它逐字对齐
+   * （`ImagePromptOutput | ImageGenFailure`），于是接线只剩一行 `runPromptAgent: (r, s) =>
+   * pipeline.runImagePromptAgent(r, s)`。
+   *
+   * 🔴 **限额 `checkQuota` 必须在本方法之前**（D32）。两处花钱（LLM token + Anlas），
+   * 闸门要在最前面 —— 否则自动档会为被限流器拦下的插画白烧一次侧链调用。这条排序
+   * 由 store 的 `generate()` 保证，本方法只管调用本身。
+   *
+   * 🔴 **不抛错**：一切失败降级成 `errorKind: 'prompt-agent'`，NAI 一次都不会发。
+   */
+  async runImagePromptAgent(
+    request: ImagePromptRequest,
+    signal?: AbortSignal,
+  ): Promise<ImagePromptOutput | ImageGenFailure> {
+    const fail = (detail: string): ImageGenFailure => ({
+      ok: false,
+      kind: 'prompt-agent',
+      message: '提示词生成失败了，点重试；或自己写一份',
+      detail,
+      retryable: true,
+    });
+
+    const endpoint = this.getEndpointForAgent('image_prompt');
+    if (!endpoint) return fail('未配置 API endpoint');
+
+    try {
+      // 手动档可能在任何时候点（甚至本会话还没跑过一轮），chainData 不能假定已就绪
+      const chain = await this.ensureChainData();
+      const { callImagePromptAgent } = await import('@engine/image-prompt-agent');
+      const result = await callImagePromptAgent(
+        {
+          saveId: this.saveId,
+          request,
+          context: this.currentContext ?? this.buildContext(''),
+          endpoint,
+          configs: chain.agentConfigs,
+          worldBooks: chain.worldBooks,
+          presets: chain.presets,
+          ...(signal ? { signal } : {}),
+        },
+        { clientFactory: this.getClientFactory() },
+      );
+      return result.ok ? result.value : result;
+    } catch (err) {
+      console.error('[GamePipeline] image_prompt 侧链失败:', err);
+      return fail(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  /**
+   * 侧链要用的 configs/worldBooks/presets —— run() 里那三行的**惰性版本**。
+   *
+   * 存在的理由只有一个：手动点「生成插画」不经过 run()，而 `chainData` 是 run()
+   * 才填的。缺它时 systemPrompt 会退化成一行 stub（char_gen 2026-07-17 的真机教训）。
+   */
+  private async ensureChainData(): Promise<{
+    agentConfigs: AgentConfig[];
+    worldBooks: WorldBook[];
+    presets: AgentPreset[];
+  }> {
+    if (this.chainData) return this.chainData;
+    const { presets, agentDefaults } = await this.loadPresets();
+    const worldBooks = await this.loadActiveWorldBooks();
+    const systemCoreWorkshopBookIds = await this.loadSystemCoreWorkshopBookIds(worldBooks);
+    const agentConfigs = this.buildAgentConfigs(
+      agentDefaults,
+      undefined,
+      systemCoreWorkshopBookIds,
+    );
+    this.chainData = { agentConfigs, worldBooks, presets };
+    return this.chainData;
   }
 }

@@ -9,8 +9,15 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { buildImagePromptInput, parseImagePromptOutput } from './image-prompt-agent';
-import type { SceneImageMarker } from './types-image';
+import {
+  buildImagePromptInput,
+  callImagePromptAgent,
+  formatImagePromptRequest,
+  parseImagePromptOutput,
+} from './image-prompt-agent';
+import type { ImagePromptAgentDeps, ImagePromptClient } from './image-prompt-agent';
+import type { AgentConfig, AgentContext, ApiEndpoint } from './types';
+import type { ImagePromptRequest, SceneImageMarker } from './types-image';
 
 const marker = (over: Partial<SceneImageMarker> = {}): SceneImageMarker => ({
   type: 'scene_image',
@@ -243,5 +250,185 @@ describe('parseImagePromptOutput', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.kind).toBe('prompt-agent');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// formatImagePromptRequest（② 的入参装配，纯函数）
+// ═══════════════════════════════════════════════════════════
+
+describe('formatImagePromptRequest', () => {
+  const req = (over: Partial<ImagePromptRequest> = {}): ImagePromptRequest => ({
+    intent: '苏婉在篝火边说起家乡',
+    characters: ['苏婉', '林越'],
+    narrative: '篝火噼啪作响。',
+    rating: 'general',
+    ...over,
+  });
+
+  it('短字段在前、正文在最后', () => {
+    const text = formatImagePromptRequest(req({ location: '风语村' }));
+    expect(text.indexOf('画面意图')).toBeLessThan(text.indexOf('所属正文'));
+    expect(text).toContain('出场角色: 苏婉、林越');
+    expect(text).toContain('当前地点: 风语村');
+    expect(text).toContain('篝火噼啪作响。');
+  });
+
+  it('没有地点 / 没有角色 / 没有正文时不留空行占位', () => {
+    const text = formatImagePromptRequest(req({ characters: [], narrative: '  ' }));
+    expect(text).not.toContain('当前地点');
+    expect(text).not.toContain('出场角色');
+    expect(text).not.toContain('所属正文');
+  });
+
+  it('分级出现的是中文说明，不是 rating:* 标签（标签由 Code 追加）', () => {
+    expect(formatImagePromptRequest(req({ rating: 'explicit' }))).toContain('分级: 成人向');
+    expect(formatImagePromptRequest(req({ rating: 'explicit' }))).not.toContain('rating:');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// callImagePromptAgent（② 中间那次调用）
+// ═══════════════════════════════════════════════════════════
+
+describe('callImagePromptAgent', () => {
+  const context = (): AgentContext => ({
+    userInput: '',
+    history: [],
+    worldBooks: [],
+    characters: [],
+    variables: {},
+    plotEvents: [],
+    memories: [],
+    agentOutputs: new Map(),
+  });
+
+  const endpoint = (): ApiEndpoint =>
+    ({ id: 'ep', name: 'ep', baseUrl: '', apiKey: '', defaultModel: 'cheap-model' }) as ApiEndpoint;
+
+  const config = (over: Partial<AgentConfig> = {}): AgentConfig =>
+    ({
+      agentId: 'image_prompt',
+      enabled: true,
+      apiEndpointId: 'ep',
+      model: '',
+      temperature: 0.3,
+      maxTokens: 1024,
+      topP: 1,
+      frequencyPenalty: 0,
+      presencePenalty: 0,
+      retryOnFail: false,
+      timeout: 0,
+      userId: '',
+      promptTemplate: { fixedSystem: '', fixedExamples: '' },
+      worldBookIds: [],
+      systemPrompt: '把中文场景转成 danbooru 标签。',
+      ...over,
+    }) as AgentConfig;
+
+  function client(impl: ImagePromptClient['chat']): {
+    deps: ImagePromptAgentDeps;
+    seen: Array<{ agentId: string; request: Parameters<ImagePromptClient['chat']>[0] }>;
+  } {
+    const seen: Array<{ agentId: string; request: Parameters<ImagePromptClient['chat']>[0] }> = [];
+    return {
+      seen,
+      deps: {
+        clientFactory: (agentId) => ({
+          chat: (request, signal) => {
+            seen.push({ agentId, request });
+            return impl(request, signal);
+          },
+        }),
+      },
+    };
+  }
+
+  const baseReq = () => ({
+    saveId: 'save-1',
+    request: {
+      intent: '苏婉在篝火边说起家乡',
+      characters: ['苏婉'],
+      narrative: '篝火噼啪作响。',
+      rating: 'general' as const,
+    },
+    context: context(),
+    endpoint: endpoint(),
+    configs: [config()],
+  });
+
+  it('装配 → 调用 → 抽取，三步走通', async () => {
+    const { deps, seen } = client(async () => ({
+      output:
+        '<image_prompt>campfire, night, 1girl</image_prompt><image_desc>篝火夜话</image_desc>',
+      rawResponse: '',
+    }));
+
+    const result = await callImagePromptAgent(baseReq(), deps);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.scenePrompt).toBe('campfire, night, 1girl');
+    expect(result.value.desc).toBe('篝火夜话');
+
+    // 用的是 image_prompt 这个 agentId（→ 设置页那份配置、那个 API 池）
+    expect(seen[0].agentId).toBe('image_prompt');
+    // systemPrompt 与本次需求都进了消息体
+    const sent = JSON.stringify(seen[0].request.messages);
+    expect(sent).toContain('把中文场景转成 danbooru 标签。');
+    expect(sent).toContain('苏婉在篝火边说起家乡');
+    // 采样参数取自该 agent 的配置，不是写死的
+    expect(seen[0].request.temperature).toBe(0.3);
+    expect(seen[0].request.maxTokens).toBe(1024);
+  });
+
+  it('🔴 普通补全，不带 tools（非 Agentic，§8.5）', async () => {
+    const { deps, seen } = client(async () => ({
+      output: '<image_prompt>campfire</image_prompt>',
+      rawResponse: '',
+    }));
+    await callImagePromptAgent(baseReq(), deps);
+    expect(seen[0].request).not.toHaveProperty('tools');
+  });
+
+  it('客户端抛错 → prompt-agent 失败值，不抛穿', async () => {
+    const { deps } = client(async () => {
+      throw new Error('网络断了');
+    });
+    const result = await callImagePromptAgent(baseReq(), deps);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('prompt-agent');
+    expect(result.detail).toContain('网络断了');
+  });
+
+  it('客户端返回 error 字段 → 同一条失败路径', async () => {
+    const { deps } = client(async () => ({ output: null, rawResponse: '', error: '429 限流' }));
+    const result = await callImagePromptAgent(baseReq(), deps);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('prompt-agent');
+  });
+
+  it('模型只写废话（抽不到标签）→ 明确失败，绝不猜一个出来', async () => {
+    const { deps } = client(async () => ({
+      output: '好的，我这就把这个场景转换成标签。',
+      rawResponse: '',
+    }));
+    const result = await callImagePromptAgent(baseReq(), deps);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('prompt-agent');
+  });
+
+  it('signal 原样透传给客户端（切存档要能取消）', async () => {
+    let seenSignal: AbortSignal | undefined;
+    const { deps } = client(async (_req, signal) => {
+      seenSignal = signal;
+      return { output: '<image_prompt>campfire</image_prompt>', rawResponse: '' };
+    });
+    const ac = new AbortController();
+    await callImagePromptAgent({ ...baseReq(), signal: ac.signal }, deps);
+    expect(seenSignal).toBe(ac.signal);
   });
 });

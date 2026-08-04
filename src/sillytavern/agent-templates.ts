@@ -503,6 +503,17 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
     fixedExamples: '',
   },
 
+  // ---- image_prompt: 情景插画的中文 → danbooru 侧链 (图像生成 G 阶段, D28) ----
+  // 完整提示词在 agent-config.json 的 systemPrompt 字段（G 阶段先落临时最小版，D55）
+  // 输出格式: <image_prompt> / <image_negative> / <image_desc> 三个 XML 标签
+  // 🔴 它**不进** src/ui/components/settings/agent/agent-list.ts 的 AGENT_LIST（D53）——
+  //    渲染在设置页第 13 分区「🖼 图像生成」，同一份配置不开两个入口。combat_v3 同例。
+  image_prompt: {
+    fixedSystem:
+      '情景插画提示词系统。把 story 写的那句中文场景描述转成 danbooru 标签串，输出 <image_prompt>/<image_negative>/<image_desc>。完整提示词见 agent-config.json 和模板系统。',
+    fixedExamples: '',
+  },
+
   // ---- v3 兼容别名: plot_check / plot_correct ----
   plot_check: {
     fixedSystem: '剧情规划系统。完整提示词见 agent-config.json 和模板系统。',

@@ -1,13 +1,16 @@
 /**
  * image-defaults.ts — 图像生成子系统的常量默认值（设计 §6.2 / §5.2 / §5.3）
  *
- * 装什么: 画质后缀表 / 固定构图词 / 基础负向 / 限额默认值。
+ * 装什么: 画质后缀表 / 固定构图词 / 基础负向 / 限额默认值 / §12.2 那张表里被
+ *         **多方共用**的两格（`bad-response` 文案与「要不要显示重试」）。
  * 不装什么: 任何逻辑。本文件是纯常量，被 `image-prompt.ts`、`image-quota.ts` 与
  *           设置页的 `getDefaults()` 共用 —— 它存在的意义就是让这些值只有一处。
  *
  * 🔴 这些默认值大多是**可配置项的初值**（`ComposeOptions` / `UiSettings`），
  *    不是硬编码常量。改这里等于改所有新存档的起点。
  */
+
+import type { ImageGenFailureKind } from './types-image';
 
 // ═══ 模型 ═══
 
@@ -103,3 +106,37 @@ export const DEFAULT_IMAGE_MAX_PER_HOUR = 20;
 
 /** L2 的窗口长度，毫秒。判据是 `now - createdAt < IMAGE_QUOTA_WINDOW_MS`。 */
 export const IMAGE_QUOTA_WINDOW_MS = 3_600_000;
+
+// ═══ 失败面（§12.2）═══
+
+/**
+ * `bad-response` 那一行的 UI 文案。
+ *
+ * 🔴 **两处产出它，判据不重叠**: `image-providers/novelai.ts` 判的是「zip 解不开 /
+ * 里面没有图」，`ui/lib/image-client.ts` 判的是「字节根本读不出来」。判据分开是对的，
+ * 但玩家看到的是同一句话 —— 各存一份字符串就会在某次改文案时只改了一半，于是同一种
+ * 失败在两条路径上说两种话。所以字符串在这里，判据留在各自那边。
+ */
+export const IMAGE_BAD_RESPONSE_MESSAGE = 'NovelAI 返回了看不懂的内容';
+
+/**
+ * §12.2 最后一列：哪几类值得再试。**唯一一份**（客户端构造失败时用它，渲染层决定
+ * 失败段上要不要画「重试」按钮时也用它）。
+ *
+ * - `aborted` 是 ✅ —— 用户自己取消的，当然还能再点一次；它不是错误，UI 收到这一类
+ *   **不该弹红字**（对齐工坊的 `cancelled`）
+ * - `prompt-agent` 是 ✅ —— 侧链是一次 LLM 调用，重跑常常就好了（§12.2 第一行）
+ * - `auth` / `payment` / `bad-request` 是 ❌ —— 同样的请求再发一百次也是同样的结果，
+ *   给一个注定失败的按钮只会让人多花一次时间
+ */
+export const IMAGE_FAILURE_RETRYABLE = {
+  'prompt-agent': true,
+  auth: false,
+  payment: false,
+  'rate-limit': true,
+  'bad-request': false,
+  upstream: true,
+  network: true,
+  aborted: true,
+  'bad-response': true,
+} as const satisfies Record<ImageGenFailureKind, boolean>;

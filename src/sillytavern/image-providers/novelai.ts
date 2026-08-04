@@ -30,6 +30,7 @@
  */
 
 import type { ComposedPrompt, ImageGenFailure } from '../types-image';
+import { IMAGE_BAD_RESPONSE_MESSAGE } from '../image-defaults';
 
 import { unzipSync } from 'fflate';
 
@@ -259,14 +260,17 @@ export function buildNaiRequest(prompt: ComposedPrompt, opts: NaiOptions): NaiRe
 
 // ═══ 响应解包 ═══
 
-/** §12.2 那张表里 `bad-response` 那一行的文案。上游细节只进 detail，不进 UI */
-const BAD_RESPONSE_MESSAGE = 'NovelAI 返回了看不懂的内容';
-
+/**
+ * §12.2 那张表里 `bad-response` 那一行。上游细节只进 `detail`，不进 UI。
+ *
+ * 文案取自 `image-defaults.IMAGE_BAD_RESPONSE_MESSAGE` —— `ui/lib/image-client.ts`
+ * 用**另一套判据**（字节根本读不出来）产出同一句话，各存一份就会改一半漂一半。
+ */
 function badResponse(detail: string): ImageGenFailure {
   return {
     ok: false,
     kind: 'bad-response',
-    message: BAD_RESPONSE_MESSAGE,
+    message: IMAGE_BAD_RESPONSE_MESSAGE,
     detail,
     retryable: true,
   };

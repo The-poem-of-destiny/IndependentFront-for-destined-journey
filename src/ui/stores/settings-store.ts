@@ -21,6 +21,13 @@
 import { defineStore } from 'pinia';
 import { ref, watch } from 'vue';
 import { deleteApiEndpoint, getApiEndpoints, saveApiEndpoint } from '@engine/database';
+import {
+  DEFAULT_IMAGE_BASE_NEGATIVE,
+  DEFAULT_IMAGE_MAX_PER_HOUR,
+  DEFAULT_IMAGE_MAX_PER_MESSAGE,
+  DEFAULT_IMAGE_MODEL,
+  DEFAULT_IMAGE_QUALITY_SUFFIX,
+} from '@engine/image-defaults';
 import { detach } from './db-write';
 import { fillMissingAgentSettings } from './agent-settings';
 import { migrateLegacyAgentMaps } from './agent-settings-migration';
@@ -42,7 +49,8 @@ export interface ApiEntry {
   maskedKey: string;
   model: string;
   models: string[];
-  apiType: 'chat' | 'embedding';
+  /** `'image'` = 出图端点（NovelAI），由图像生成分区的端点选择器筛选 */
+  apiType: 'chat' | 'embedding' | 'image';
   enableThinking?: boolean;
 }
 
@@ -223,6 +231,30 @@ function getDefaults(): UiSettings {
     //   留个空数组会让消费端以为这里仍是真相来源，而 deep watch 又会把它写回 localStorage。
     //   下面这项是几个 id 的开关列表，体积无关紧要，继续留在设置里。
     beautifierBuiltinDisabled: [],
+
+    // 图像生成（设计 §11）——
+    // 🔴 常量一律从 `image-defaults.ts` 取，**不照抄设计文档里的字面值**：
+    //    画质后缀与基础负向都是长串，抄一份进来就是第二个真相来源，而两处漂移
+    //    的症状只是「画出来的东西不太对」，不会有任何报错。
+    //    尺寸/步数/采样器那几个是录制样本值（§6.1），它们没有常量，如实写在这里。
+    imageGenMode: 'manual',
+    imageEndpointId: null,
+    imageModel: DEFAULT_IMAGE_MODEL,
+    imageQualitySuffix: DEFAULT_IMAGE_QUALITY_SUFFIX,
+    imageBaseNegative: DEFAULT_IMAGE_BASE_NEGATIVE,
+    imageExtraNegative: '',
+    imageMaxRating: 'general',
+    imageBlurByDefault: false,
+    imageAutoConfirmed: false,
+    imageWidth: 1216,
+    imageHeight: 832,
+    imageSteps: 23,
+    imageScale: 4.5,
+    imageSampler: 'k_euler_ancestral',
+    imageNoiseSchedule: 'karras',
+    imageUcPreset: 0,
+    imageMaxPerMessage: DEFAULT_IMAGE_MAX_PER_MESSAGE,
+    imageMaxPerHour: DEFAULT_IMAGE_MAX_PER_HOUR,
   };
 }
 

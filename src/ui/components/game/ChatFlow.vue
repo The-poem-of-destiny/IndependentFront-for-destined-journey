@@ -210,8 +210,10 @@ onUnmounted(() => {
         </div>
 
         <!-- AI 叙事消息 — 只渲染美化正文 -->
+        <!-- data-message-id 是 CG 图鉴「跳回那条消息」的锚点（§10.3），别删 -->
         <div
           v-else-if="msg.role === 'assistant'"
+          :data-message-id="msg.id"
           class="bubble-row bubble-row-narrative"
           :title="
             latestAssistantMsg?.id === msg.id && !game.isInCombat && !isGenerating
