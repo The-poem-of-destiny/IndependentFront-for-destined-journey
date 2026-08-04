@@ -336,6 +336,7 @@ onUnmounted(() => {
               :turn="msg.turn ?? 0"
               :image-mode="s.imageGenMode"
               :image-max-rating="s.imageMaxRating"
+              :image-blur-by-default="s.imageBlurByDefault"
               @resize="handleNarrativeResize"
             />
             <span v-if="msg.timestamp" class="bubble-time">{{ formatTime(msg.timestamp) }}</span>

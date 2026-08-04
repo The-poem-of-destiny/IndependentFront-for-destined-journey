@@ -17,6 +17,18 @@
  *
  * object URL 走 `composables/useSceneImageUrls.ts`（它自己走 `lib/asset-url.ts` 的
  * 引用计数 LRU）—— **本组件不写第二套铸造/撤销**，也与 CG 图鉴共用同一份缓存。
+ *
+ * ---
+ *
+ * **`done` 那一格之内的四件交互**（§10.2 那一行的后半截），三条纪律:
+ *
+ * 1. 🔴 **打码是「揭开就不再糊回去」**（D46）。`imageBlurByDefault` 只决定**初值**;
+ *    揭开之后这一张在本次渲染周期内一直是清晰的，哪怕记录因为改标题/收藏被刷新。
+ *    揭开状态**不落库**（每张各自决定，也不跨消息记忆）。
+ * 2. 🔴 **角标点击是浏览，不是钉住**。`pinned`（落库、以后每次都显示这张，D45）与
+ *    「当前正在看第几张」是两件事，后者只活在本组件的一个 ref 里。
+ * 3. 🔴 **悬停菜单必须有非悬停的触发方式** —— 常驻一个 `⋯` 按钮，触摸设备靠它。
+ *    只绑 `:hover` 的话这四个动作在手机上根本不存在。
  */
 import { computed, onUnmounted, ref, watch } from 'vue';
 import type {
@@ -32,6 +44,8 @@ import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
 import { useUIStore } from '../../stores/ui-store';
 import AppButton from '../shared/AppButton.vue';
+import AppModal from '../shared/AppModal.vue';
+import { copyablePromptOf, nextTakeId } from './scene-image-actions';
 import { missingPresetHint, resolveSceneImageView } from './scene-image-view';
 
 const props = withDefaults(
@@ -57,6 +71,13 @@ const props = withDefaults(
      * 缺省 `general` 与设置默认值同档: 猜错了只是画得保守，反过来是把人推进麻烦里。
      */
     maxRating?: ImageRating;
+    /**
+     * 打码显示（D46），来自 `settings.imageBlurByDefault`。
+     *
+     * 🔴 它只是**初值** —— 玩家在某一张上点开之后，那一张在本次渲染周期内不再糊回去
+     * （见文件头第 1 条）。缺省 `false` 与设置默认值同档。
+     */
+    blurByDefault?: boolean;
   }>(),
   {
     anchorKind: 'marker',
@@ -67,6 +88,7 @@ const props = withDefaults(
     marker: undefined,
     narrative: '',
     maxRating: 'general',
+    blurByDefault: false,
   },
 );
 
@@ -81,9 +103,24 @@ void presets.init();
 // ═══ 记录与派生 ═══
 
 const takes = computed(() => store.takesAt(props.messageId, props.anchorKind, props.occurrence));
-const record = computed(() =>
-  store.displayedAt(props.messageId, props.anchorKind, props.occurrence),
-);
+
+/**
+ * 玩家点角标切到的那一张。**纯浏览态**: 只活在这个 ref 里，一个字节都不落库。
+ *
+ * 🔴 与 `pinned` 是两件事 —— 后者是 `store.pin()` 写库的结果，决定**以后每次**读到
+ * 这条消息看到哪张（D45）。把浏览写成落库，"看一眼上一张"就成了不可见的破坏性操作。
+ */
+const viewingTakeId = ref<string | null>(null);
+
+const record = computed(() => {
+  // 切过之后那张要是没了（被删 / 换了消息），静默退回 displayedAt —— 不留空白格
+  const id = viewingTakeId.value;
+  if (id !== null) {
+    const hit = takes.value.find((r) => r.id === id);
+    if (hit) return hit;
+  }
+  return store.displayedAt(props.messageId, props.anchorKind, props.occurrence);
+});
 
 /** 角标 `2/3` 只数**真的画出来了**的那些 —— 失败/排队中的 take 不是一张图 */
 const shownTakes = computed(() =>
@@ -167,6 +204,116 @@ onUnmounted(() => {
   // URL 的归还由 useSceneImageUrls 的 onScopeDispose 负责，这里只收自己的定时器
 });
 
+// ═══ done 态之内的交互（打码 / 切 take / 放大 / 悬停菜单）═══
+
+/**
+ * 已经被揭开的那些（D46）。**按记录 id 记，不落库**:
+ *
+ * - 不落库 —— 打码是「现在这个场合别显示」，不是记录的一个属性。存进去等于把
+ *   一次性的遮挡变成一条要维护的状态，而且换台设备就不对了。
+ * - 🔴 揭开之后**不再糊回去**（哪怕记录因为改标题/收藏被刷新重画）。反复糊回去
+ *   的遮挡不叫隐私保护，叫故障。
+ */
+const revealed = ref(new Set<string>());
+
+const blurred = computed(() => {
+  if (!props.blurByDefault) return false;
+  const v = view.value;
+  return v.kind === 'done' && !revealed.value.has(v.recordId);
+});
+
+const lightboxOpen = ref(false);
+/** 悬停菜单的**非悬停**触发（触摸设备靠它；桌面照样能点） */
+const menuOpen = ref(false);
+
+/** 图上点一下：还糊着就先揭开，已经看得见才放大 —— 打码不会被一次点击直接跳过 */
+function onShotClick(): void {
+  const v = view.value;
+  if (v.kind !== 'done') return;
+  if (blurred.value) {
+    // Set 是响应式的（ref 深包装），add 会触发依赖
+    revealed.value.add(v.recordId);
+    return;
+  }
+  lightboxOpen.value = true;
+}
+
+/** 角标点击 —— 环形前进一张。**浏览，不落库**（见 viewingTakeId） */
+function cycleTake(): void {
+  const next = nextTakeId(
+    shownTakes.value.map((r) => r.id),
+    record.value?.id ?? null,
+  );
+  if (next !== null) viewingTakeId.value = next;
+}
+
+/** 悬停菜单里的动作在飞时按钮转圈；与生成用的 `busy` 分开，免得两边互相锁死 */
+const actionBusy = ref(false);
+
+async function withBusy(fn: () => Promise<unknown>): Promise<void> {
+  if (actionBusy.value) return;
+  actionBusy.value = true;
+  try {
+    await fn();
+  } finally {
+    actionBusy.value = false;
+  }
+}
+
+/** 钉住这张（D45）—— 这一条**是**落库动作，与角标浏览相反 */
+async function pinThis(): Promise<void> {
+  const r = record.value;
+  if (!r || r.pinned === true) return;
+  await withBusy(async () => {
+    await store.pin(r.id);
+    ui.toast('正文以后就显示这一张', 'success');
+  });
+}
+
+async function toggleFavorite(): Promise<void> {
+  const r = record.value;
+  if (!r) return;
+  const next = r.favorite !== true;
+  await withBusy(async () => {
+    await store.update(r.id, { favorite: next });
+    // 收藏顺带是「清理时豁免」的开关（D6），说出来才有人敢用清理
+    ui.toast(next ? '已收藏 · 清理时会保留' : '已取消收藏', 'success');
+  });
+}
+
+/** 复制**这一张实际发出去**的那份提示词（取值判定在 scene-image-actions.ts） */
+async function copyPrompt(): Promise<void> {
+  const r = record.value;
+  if (!r) return;
+  const text = copyablePromptOf(r);
+  if (text === '') {
+    ui.toast('这一张还没有提示词可复制', 'warning');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    ui.toast('提示词已复制', 'success');
+  } catch {
+    // 剪贴板要权限/要安全上下文，拿不到时说实话，别假装成功
+    ui.toast('复制失败，浏览器没有给剪贴板权限', 'error');
+  }
+}
+
+/** 删除 —— 不可逆，所以先确认（对齐 CgGalleryPanel 的措辞：说清楚会消失什么） */
+async function removeThis(): Promise<void> {
+  const r = record.value;
+  if (!r) return;
+  const ok = window.confirm(`删除这一张？\n「${r.title || '未命名插画'}」的图与记录都会消失。`);
+  if (!ok) return;
+  await withBusy(async () => {
+    await store.remove(r.id);
+    // 被删的可能正是浏览态钉着的那张，放手让它退回 displayedAt
+    if (viewingTakeId.value === r.id) viewingTakeId.value = null;
+    lightboxOpen.value = false;
+    menuOpen.value = false;
+  });
+}
+
 // ═══ 动作 ═══
 
 const promptDraft = ref('');
@@ -221,6 +368,9 @@ async function fire(): Promise<void> {
 async function redraw(): Promise<void> {
   const r = record.value;
   if (!r) return;
+  // 🔴 松开浏览态: 不然新 take 排队/生成的那 5–60 秒里，这一格还钉在旧图上，
+  //    点了「重画」却什么都没发生 —— 那是最容易让人连点第二次（再花一次钱）的画面
+  viewingTakeId.value = null;
   await requestImage({
     saveId: r.saveId,
     messageId: r.messageId,
@@ -302,14 +452,76 @@ function goPresets(): void {
     <!-- 画好了 -->
     <figure v-else-if="view.kind === 'done'" class="si-figure">
       <div class="si-canvas">
-        <img v-if="url" :src="url" :alt="view.title" :title="view.description" class="si-img" />
+        <!-- 点击：还糊着 → 揭开；已看得见 → 放大（D46 + §10.2「点击放大」） -->
+        <button
+          v-if="url"
+          type="button"
+          class="si-shot"
+          :class="{ 'is-blurred': blurred }"
+          :aria-label="blurred ? `显示「${view.title}」` : `放大查看「${view.title}」`"
+          @click="onShotClick"
+        >
+          <img :src="url" :alt="view.title" :title="view.description" class="si-img" />
+          <span v-if="blurred" class="si-veil">
+            <span class="si-veil-glyph" aria-hidden="true">◍</span>
+            <span class="si-veil-text">已打码 · 点击显示</span>
+          </span>
+        </button>
         <div v-else class="si-frame si-loading-bytes">
           <span class="si-title">{{ view.title }}</span>
           <span class="si-status">正在载入图片…</span>
         </div>
-        <span v-if="view.takeCount > 1" class="si-take"
-          >{{ view.takeIndex }}/{{ view.takeCount }}</span
+
+        <!-- 多 take 的角标可点 —— 🔴 浏览，不是钉住（D17 / D45） -->
+        <button
+          v-if="view.takeCount > 1"
+          type="button"
+          class="si-take"
+          :aria-label="`第 ${view.takeIndex} 张，共 ${view.takeCount} 张；点击看下一张`"
+          @click="cycleTake"
         >
+          {{ view.takeIndex }}/{{ view.takeCount }}
+        </button>
+
+        <!-- 悬停菜单。🔴 常驻的 `⋯` 是触摸设备唯一的入口，别删 -->
+        <template v-if="url">
+          <button
+            type="button"
+            class="si-more"
+            :aria-expanded="menuOpen"
+            aria-label="这一张的操作"
+            @click="menuOpen = !menuOpen"
+          >
+            ⋯
+          </button>
+          <div class="si-menu" :class="{ 'is-open': menuOpen }">
+            <button
+              type="button"
+              class="si-menu-item"
+              :disabled="actionBusy || record?.pinned === true"
+              @click="pinThis"
+            >
+              {{ record?.pinned === true ? '正文显示中' : '钉住这张' }}
+            </button>
+            <button
+              type="button"
+              class="si-menu-item"
+              :disabled="actionBusy"
+              @click="toggleFavorite"
+            >
+              {{ record?.favorite === true ? '取消收藏' : '收藏' }}
+            </button>
+            <button type="button" class="si-menu-item" @click="copyPrompt">复制提示词</button>
+            <button
+              type="button"
+              class="si-menu-item si-menu-danger"
+              :disabled="actionBusy"
+              @click="removeThis"
+            >
+              删除
+            </button>
+          </div>
+        </template>
       </div>
       <figcaption class="si-caption">
         <span class="si-cap-title">{{ view.title }}</span>
@@ -365,6 +577,17 @@ function goPresets(): void {
         </div>
       </div>
     </div>
+
+    <!--
+      放大查看。🔴 用仓库既有的 `AppModal`（Esc 关闭 / 滚动锁 / 遮罩点击都在里面），
+      不另写一个 lightbox —— 那种自研遮罩最后总会漏掉其中一样。
+    -->
+    <AppModal v-model:open="lightboxOpen" size="xxl" :title="record?.title || '插画'">
+      <div class="si-lightbox">
+        <img v-if="url" :src="url" :alt="record?.title || '插画'" class="si-lightbox-img" />
+        <p v-if="record?.description" class="si-lightbox-desc">{{ record.description }}</p>
+      </div>
+    </AppModal>
 
     <!--
       限额确认（D24）—— 手动**永不被拦死**，最多是要确认一下。
@@ -488,7 +711,12 @@ function goPresets(): void {
   .si-spinner {
     animation: none;
   }
-  .si-offer {
+  .si-offer,
+  .si-img,
+  .si-take,
+  .si-more,
+  .si-menu,
+  .si-menu-item {
     transition: none;
   }
 }
@@ -501,6 +729,18 @@ function goPresets(): void {
   position: relative;
 }
 
+/* 图本身是个按钮（点击 = 揭开 / 放大），所以要把按钮的默认外观全部抹平 */
+.si-shot {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: zoom-in;
+  font: inherit;
+}
+
 .si-img {
   display: block;
   width: 100%;
@@ -509,6 +749,42 @@ function goPresets(): void {
   border-radius: var(--theme-radius-md, 6px);
   box-shadow: var(--paper-stack, 0 2px 8px rgba(0, 0, 0, 0.15));
   object-fit: contain;
+  transition: filter var(--theme-transition-fast, 0.15s ease);
+}
+
+/* 打码（D46）—— 缩放一点点是为了不让模糊在边缘露出原图（filter 不是布局属性） */
+.si-shot.is-blurred {
+  cursor: pointer;
+}
+
+.si-shot.is-blurred .si-img {
+  filter: blur(22px) saturate(0.7);
+  transform: scale(1.03);
+}
+
+.si-veil {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--theme-radius-md, 6px);
+  background: color-mix(in srgb, var(--theme-window-bg) 45%, transparent);
+  gap: var(--theme-spacing-xs);
+  pointer-events: none;
+}
+
+.si-veil-glyph {
+  color: var(--theme-text-secondary);
+  font-size: 1.5rem;
+  opacity: 0.6;
+}
+
+.si-veil-text {
+  color: var(--theme-text-secondary);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
 }
 
 .si-loading-bytes {
@@ -519,12 +795,137 @@ function goPresets(): void {
   position: absolute;
   right: var(--theme-spacing-sm);
   bottom: var(--theme-spacing-sm);
-  padding: 2px 6px;
+  min-height: 36px;
+  padding: 2px 10px;
   border: 1px solid color-mix(in srgb, var(--theme-card-border) 60%, transparent);
   border-radius: var(--theme-radius-sm, 4px);
   background: color-mix(in srgb, var(--theme-window-bg) 70%, transparent);
   color: var(--theme-text-secondary);
+  cursor: pointer;
+  font: inherit;
   font-size: 0.6875rem;
+  transition:
+    background var(--theme-transition-fast, 0.15s ease),
+    color var(--theme-transition-fast, 0.15s ease);
+}
+
+.si-take:hover {
+  background: color-mix(in srgb, var(--theme-window-bg) 92%, transparent);
+  color: var(--theme-text-primary);
+}
+
+/*
+ * 🔴 `⋯` 常驻（半透明），这是触摸设备上打开菜单的**唯一**方式 ——
+ *    菜单本身既跟 :hover / :focus-within 走，也跟这个按钮的 is-open 走。
+ */
+.si-more {
+  position: absolute;
+  top: var(--theme-spacing-sm);
+  right: var(--theme-spacing-sm);
+  width: 36px;
+  height: 36px;
+  border: 1px solid color-mix(in srgb, var(--theme-card-border) 60%, transparent);
+  border-radius: var(--theme-radius-sm, 4px);
+  background: color-mix(in srgb, var(--theme-window-bg) 70%, transparent);
+  color: var(--theme-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  opacity: 0.65;
+  transition:
+    opacity var(--theme-transition-fast, 0.15s ease),
+    color var(--theme-transition-fast, 0.15s ease);
+}
+
+.si-more:hover,
+.si-more:focus-visible {
+  color: var(--theme-text-primary);
+  opacity: 1;
+}
+
+.si-menu {
+  position: absolute;
+  top: calc(var(--theme-spacing-sm) + 40px);
+  right: var(--theme-spacing-sm);
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm, 4px);
+  background: var(--theme-card-bg);
+  box-shadow: var(--theme-shadow-lg, 0 6px 20px rgba(0, 0, 0, 0.22));
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--theme-transition-fast, 0.15s ease);
+}
+
+.si-canvas:hover .si-menu,
+.si-canvas:focus-within .si-menu,
+.si-menu.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.si-menu-item {
+  min-height: 36px;
+  padding: 0 var(--theme-spacing-md);
+  border: 0;
+  border-radius: var(--theme-radius-sm, 4px);
+  background: none;
+  color: var(--theme-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  text-align: left;
+  white-space: nowrap;
+  transition:
+    background var(--theme-transition-fast, 0.15s ease),
+    color var(--theme-transition-fast, 0.15s ease);
+}
+
+.si-menu-item:hover:not(:disabled) {
+  background: var(--theme-tab-hover-bg);
+  color: var(--theme-text-primary);
+}
+
+.si-menu-item:disabled {
+  color: var(--theme-text-muted);
+  cursor: default;
+}
+
+.si-menu-danger {
+  color: var(--theme-error);
+}
+
+.si-menu-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--theme-error) 12%, transparent);
+  color: var(--theme-error);
+}
+
+.si-lightbox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+}
+
+.si-lightbox-img {
+  display: block;
+  max-width: 100%;
+  max-height: 72vh;
+  border-radius: var(--theme-radius-md, 6px);
+  object-fit: contain;
+}
+
+.si-lightbox-desc {
+  margin: 0;
+  color: var(--theme-text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  text-align: center;
+  text-indent: 0;
 }
 
 .si-caption {

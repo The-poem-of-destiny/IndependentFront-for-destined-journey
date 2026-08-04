@@ -35,6 +35,14 @@ const props = withDefaults(
      * 缺省 `general`（最保守的一档）与设置默认值同步。
      */
     imageMaxRating?: ImageRating;
+    /**
+     * 打码显示（D46），来自 `settings.imageBlurByDefault`。
+     *
+     * 🔴 **本组件渲染两处 `SceneImageSegment`**（marker 段 + message-end 图带），
+     * 这个 prop 必须两处都透传 —— 只改一处的表现是「有的图糊、有的不糊」，
+     * 而不糊的那一张正是打码本来要挡住的那种场合。
+     */
+    imageBlurByDefault?: boolean;
   }>(),
   {
     rules: undefined,
@@ -46,6 +54,7 @@ const props = withDefaults(
     turn: 0,
     imageMode: 'off',
     imageMaxRating: 'general',
+    imageBlurByDefault: false,
   },
 );
 
@@ -179,6 +188,7 @@ function paragraphs(text: string): string[] {
         :marker="part.marker"
         :narrative="strippedNarrative"
         :max-rating="imageMaxRating"
+        :blur-by-default="imageBlurByDefault"
       />
 
       <template v-for="(segment, index) in part.kind === 'prose' ? part.segments : []" :key="index">
@@ -221,6 +231,7 @@ function paragraphs(text: string): string[] {
       :turn="turn"
       :narrative="strippedNarrative"
       :max-rating="imageMaxRating"
+      :blur-by-default="imageBlurByDefault"
     />
   </div>
 </template>

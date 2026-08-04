@@ -1,10 +1,18 @@
 /** @vitest-environment jsdom */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { enableAutoUnmount, mount } from '@vue/test-utils';
 import { reactive } from 'vue';
 import type { SceneImageMarker, SceneImageRecord } from '@engine/types-image';
 import type { SceneImageGenerateResult } from '../../stores/scene-image-store';
 import SceneImageSegment from './SceneImageSegment.vue';
+
+/**
+ * 🔴 用例之间必须卸干净。这个文件的假 store 是**模块级 `reactive`**，下一个用例的
+ * `beforeEach` 一改 `scene.records`，上一个用例遗留的 wrapper 会跟着重渲染 ——
+ * 一旦有谁清过 `document.body`（Teleport 的弹窗测试很想这么做），那些 wrapper 就会以
+ * `insertBefore(null)` 炸成 Unhandled Rejection，而且**测试全绿**、报错还指向别的用例名。
+ */
+enableAutoUnmount(afterEach);
 
 const NOW = 1_700_000_000_000;
 
@@ -27,6 +35,8 @@ const scene = reactive({
   })),
   cancel: vi.fn(async (_id: string) => 'cancelled' as const),
   update: vi.fn(async (_id: string, _changes: Record<string, unknown>) => undefined),
+  pin: vi.fn(async (_id: string) => undefined),
+  remove: vi.fn(async (_id: string) => undefined),
   blobOf: vi.fn(async (): Promise<Blob | undefined> => undefined),
   takesAt(messageId: string, anchorKind: string, occurrence: number): SceneImageRecord[] {
     return scene.records.filter(
@@ -268,6 +278,161 @@ describe('SceneImageSegment', () => {
     await wrapper.get('.si-offer').trigger('click');
 
     expect(scene.generate.mock.calls[0]?.[0]).toMatchObject({ rating: 'sensitive' });
+  });
+
+  it('renders the take badge as a browse control, never as a pin (D17/D45)', async () => {
+    scene.records = [record({ id: 'simg_1', take: 0 }), record({ id: 'simg_2', take: 1 })];
+    scene.blobOf.mockResolvedValue(new Blob(['x'], { type: 'image/png' }));
+    const wrapper = mountSegment({ marker: MARKER, mode: 'off' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // displayedAt 给最后一张 → 2/2
+    expect(wrapper.get('.si-take').text()).toBe('2/2');
+
+    await wrapper.get('.si-take').trigger('click');
+    // 环形前进回到第一张
+    expect(wrapper.get('.si-take').text()).toBe('1/2');
+    // 🔴 浏览一次都不该写库
+    expect(scene.pin).not.toHaveBeenCalled();
+    expect(scene.update).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the displayed take when the browsed one disappears', async () => {
+    scene.records = [record({ id: 'simg_1', take: 0 }), record({ id: 'simg_2', take: 1 })];
+    scene.blobOf.mockResolvedValue(new Blob(['x'], { type: 'image/png' }));
+    const wrapper = mountSegment({ marker: MARKER, mode: 'off' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await wrapper.get('.si-take').trigger('click'); // 看第 1 张
+    scene.records = [record({ id: 'simg_2', take: 1 })]; // 第 1 张被删掉
+    await wrapper.vm.$nextTick();
+
+    // 不留空白格，静默退回 displayedAt（此时只剩一张，角标也没了）
+    expect(wrapper.find('.si-take').exists()).toBe(false);
+    expect(wrapper.find('img').exists()).toBe(true);
+  });
+
+  describe('打码显示（D46）', () => {
+    async function mountBlurred() {
+      scene.records = [record()];
+      scene.blobOf.mockResolvedValue(new Blob(['x'], { type: 'image/png' }));
+      const wrapper = mountSegment({ marker: MARKER, mode: 'off', blurByDefault: true });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return wrapper;
+    }
+
+    it('blurs a done image when the setting is on, and reveals it on click', async () => {
+      const wrapper = await mountBlurred();
+
+      expect(wrapper.get('.si-shot').classes()).toContain('is-blurred');
+      expect(wrapper.text()).toContain('点击显示');
+
+      await wrapper.get('.si-shot').trigger('click');
+      expect(wrapper.get('.si-shot').classes()).not.toContain('is-blurred');
+      // 🔴 第一次点击只揭开，不放大 —— 否则打码等于被一次点击直接跳过
+      expect(document.body.querySelector('.si-lightbox')).toBeNull();
+    });
+
+    it('🔴 never re-blurs an image the player already revealed', async () => {
+      const wrapper = await mountBlurred();
+      await wrapper.get('.si-shot').trigger('click');
+
+      // 记录被刷新（改标题 / 收藏都会走到这里）
+      scene.records = [record({ title: '雨夜的酒馆（改）' })];
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.get('.si-shot').classes()).not.toContain('is-blurred');
+    });
+
+    it('leaves the image alone when the setting is off', async () => {
+      scene.records = [record()];
+      scene.blobOf.mockResolvedValue(new Blob(['x'], { type: 'image/png' }));
+      const wrapper = mountSegment({ marker: MARKER, mode: 'off' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(wrapper.get('.si-shot').classes()).not.toContain('is-blurred');
+    });
+  });
+
+  describe('done 态的放大与悬停菜单', () => {
+    async function mountDone(over: Partial<SceneImageRecord> = {}) {
+      scene.records = [record(over)];
+      scene.blobOf.mockResolvedValue(new Blob(['x'], { type: 'image/png' }));
+      const wrapper = mountSegment({ marker: MARKER, mode: 'off' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return wrapper;
+    }
+
+    function menuItem(wrapper: ReturnType<typeof mountSegment>, label: string) {
+      return wrapper.findAll('.si-menu-item').find((b) => b.text().includes(label));
+    }
+
+    it('opens the shared AppModal on click instead of a hand-rolled lightbox', async () => {
+      const wrapper = await mountDone();
+      await wrapper.get('.si-shot').trigger('click');
+      await wrapper.vm.$nextTick();
+
+      // 🔴 别 `document.body.innerHTML = ''` 收尾 —— autoUnmount 会把 Teleport 的内容
+      //    一起带走，而清空 body 会抽掉别的 wrapper 的宿主节点（见文件头）
+      expect(document.body.querySelector('.modal-overlay')).not.toBeNull();
+      expect(document.body.querySelector('.si-lightbox-img')).not.toBeNull();
+    });
+
+    it('🔴 keeps a non-hover way into the menu for touch devices', async () => {
+      const wrapper = await mountDone();
+
+      // 常驻的 `⋯`：只绑 :hover 的话这四个动作在手机上根本不存在
+      expect(wrapper.find('.si-more').exists()).toBe(true);
+      expect(wrapper.get('.si-menu').classes()).not.toContain('is-open');
+
+      await wrapper.get('.si-more').trigger('click');
+      expect(wrapper.get('.si-menu').classes()).toContain('is-open');
+    });
+
+    it('pins this take through the store (a write, unlike the badge)', async () => {
+      const wrapper = await mountDone();
+      await menuItem(wrapper, '钉住这张')?.trigger('click');
+
+      expect(scene.pin).toHaveBeenCalledWith('simg_1');
+    });
+
+    it('toggles favorite through the store', async () => {
+      const wrapper = await mountDone();
+      await menuItem(wrapper, '收藏')?.trigger('click');
+
+      expect(scene.update).toHaveBeenCalledWith('simg_1', { favorite: true });
+    });
+
+    it('copies the prompt this image actually used', async () => {
+      const writeText = vi.fn(async () => undefined);
+      Object.assign(navigator, { clipboard: { writeText } });
+      const wrapper = await mountDone({
+        positive: '1girl, tavern interior, best quality',
+        scenePrompt: 'tavern interior',
+      });
+
+      await menuItem(wrapper, '复制提示词')?.trigger('click');
+      await Promise.resolve();
+
+      // 🔴 复制的是真正发出去的 `positive`，不是场景那一段
+      expect(writeText).toHaveBeenCalledWith('1girl, tavern interior, best quality');
+    });
+
+    it('🔴 asks before deleting, and does nothing when the player says no', async () => {
+      const wrapper = await mountDone();
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+      try {
+        await menuItem(wrapper, '删除')?.trigger('click');
+        expect(confirmSpy).toHaveBeenCalled();
+        expect(scene.remove).not.toHaveBeenCalled();
+
+        confirmSpy.mockReturnValue(true);
+        await menuItem(wrapper, '删除')?.trigger('click');
+        expect(scene.remove).toHaveBeenCalledWith('simg_1');
+      } finally {
+        confirmSpy.mockRestore();
+      }
+    });
   });
 
   it('keeps the button / queued / generating frames at one height', () => {
