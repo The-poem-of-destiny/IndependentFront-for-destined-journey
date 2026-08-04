@@ -1,0 +1,69 @@
+/*
+ * agent-chrome.css — Agent 分区里**跨组件**共用的那几条（Q-25 第 9 步）
+ *
+ * 与 `settings-chrome.css` 同一个道理：父组件的 scoped 样式只能命中子组件的**根节点**，
+ * 够不到里面。但这几条的共用面比那份窄（只有 Agent 目录下的两个组件用），
+ * 所以单独一份，不去污染全分区共用的那张表。
+ *
+ * 🔴 **`@keyframes` 必须与用它的规则待在同一个组件里。**
+ *    Vue 的 scoped 编译器会把 `@keyframes name` 重命名成 `name-<hash>` 并同步改写
+ *    `animation` 简写 —— 而 hash 是**按组件**算的。把关键帧留在 SettingsPage 而规则
+ *    搬进子组件，动画会一声不响地停掉（不报错、不警告）。所以
+ *    `.template-preview-panel` + `@keyframes` + `prefers-reduced-motion` 的
+ *    `animation: none` 三件必须同进同出，都放这里。
+ *
+ * 消费者（各自 `<style scoped src>` 引入，各自拿到一份带自己 hash 的副本）：
+ *   · AgentPromptCard.vue —— 两个 .prompt-editor textarea + 模板预览面板
+ *   · PresetManager.vue   —— 两个弹窗里的 .prompt-editor textarea + 两处预览面板
+ *
+ * 🔴 以下规则从 SettingsPage 的 <style scoped> **原样搬来**，一个字节都没改 ——
+ *    改了就是趁搬家偷偷换设计。
+ */
+
+/* ═══ 提示词 / 模板编辑框 ═══
+ * 四个 textarea 用它：AgentPromptCard 的 System Prompt 与 Context Template，
+ * 以及 PresetManager 两个弹窗里的正文框。没有它就退回 settings-chrome 的
+ * .form-textarea：等宽字体、200px 最小高度、内凹底色、焦点环全部消失。 */
+.prompt-editor {
+  font-family: 'Monaco', 'Menlo', 'Cascadia Code', monospace;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  min-height: 200px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: color-mix(in srgb, #000 6%, var(--theme-content-bg));
+  color: var(--theme-text-primary);
+  resize: vertical;
+  tab-size: 2;
+}
+.prompt-editor:focus {
+  outline: none;
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 12%, transparent);
+}
+
+/* ═══ 模板预览面板 ═══ */
+/* Phase 10e: Template preview panel */
+.template-preview-panel {
+  animation: template-preview-in 0.2s ease;
+}
+@keyframes template-preview-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* design.md 的减少动态效果检查清单 —— 必须与上面两条同组件，理由见文件头。
+   原 @media 块里另一半（.section-fade-*）属于壳层，留在 SettingsPage。 */
+@media (prefers-reduced-motion: reduce) {
+  .template-preview-panel {
+    animation: none;
+  }
+}
