@@ -359,14 +359,14 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 工坊 P0   | 世界书迁出 localStorage → Dexie v14（+ 进 FullBackup）     | ✅                  |
 | 工坊 P0b  | 美化规则迁出 localStorage → Dexie v15                      | ✅                  |
 | 工坊存储  | 正则共享隔离 KV → Dexie v16 `regexStorage`（+ FullBackup） | ✅                  |
-| 工坊 P1   | 创意工坊（浏览/安装/更新/卸载/启用，= 7f）                 | 🔒 入口临时下线     |
+| 工坊 P1   | 创意工坊（浏览/安装/更新/卸载/启用，= 7f）                 | ✅ 入口已开放       |
 | 工坊 P2   | EJS 沙盒 + 只读 stats 投影（ADR-30）                       | ✅ 待真机           |
 | 工坊 P3   | 社交面（Discord 登录/点赞/订阅，D18-D25）                  | ✅ 真机已过         |
 | 工坊 P4   | 上游对齐（封面链/类型徽章/我的项目/更新 diff/投稿/审核）   | ✅ B4 真机已过      |
 | 图像 v1   | 情景插画（NovelAI 单家 + 标记锚点 + 三档开关 + CG 图鉴）   | ✅ 待真机           |
 | 真机迭代  | debug loop 持续修复                                        | 🔄                  |
 
-> 🔒 **工坊入口仍临时下线（2026-08-01 安全审计，2026-08-03 视觉边界修订）**：首页「创意工坊」按钮由 `HomePage.vue` 的 `WORKSHOP_ENTRY_ENABLED = false` 隐藏。SEC-02 已由 QuickJS 隔离后端收口；SEC-01 不再用 DOM 白名单牺牲 replacement 兼容，而是把每次富正则命中放进各自无 same-origin 的 `sandbox="allow-scripts"` iframe，并使用 `credentialless` + `no-referrer`；未命中正文始终由宿主原生文本面渲染，正则 CSS/布局无法触及普通正文或其它命中。代价是跨命中 DOM 查询不再兼容。外部 HTTP(S) 资源与原生网络 API 为兼容性刻意放行；form、popup、download、top navigation、嵌套 frame、parent DOM、应用 Dexie/storage 与 API Key 仍不可达，应用自有 `/api` 也拒绝 `Origin: null`。正则唯一持久权限是 Dexie v16 `regexStorage`：所有正则、信任级别与预览共享同一个不可信命名空间，iframe 内以同步 `localStorage` 镜像和 `window.regexStorage` 别名使用，跨 frame 持久化/广播；`sessionStorage` 仍只活在当前 frame，IndexedDB 不开放。规则可向远程或本地网络发请求，也可外传该命中的 replacement/capture 与 regex-namespace 数据，这是当前威胁模型明确接受的暴露。**但这套全开契约只给「用户自己装过的规则」**：模型输出里合成的 `<item_info>` / `<task_info>` 卡片是另一档（`BeautifierMatchSegment.origin === 'model'`）—— CSP 只放行带 nonce 的宿主引导脚本，卡片自带 `<script>` / inline handler 由浏览器拦掉，`connect-src 'none'`，也不注入 `regexStorage` 快照；样式/图片照旧，视觉不降级。理由是模型正文会被世界书/角色卡/工坊文案里的注入牵着走，不该顺带拿到脚本面与网络出口。2026-08-02 公共工坊快照为 303 项目 / 99 条正则（0 编译失败）：60 条外部资源规则不再降级，16 条 parent 耦合与 14 条宿主 API 耦合仍受限；storage 词法命中 8 条，精查为 5 项目 6 条 active + 2 条仅注释，active 均只用 `getItem`/`setItem`/`removeItem` 且现已兼容。脚本仍无 CPU 预算，因此入口继续关闭；已装规则仍按存档启用状态运行。详见 `docs/reviews/2026-08-01-repository-review.md` 与 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
+> 🔓 **工坊入口已开放（2026-08-04）**：首页「创意工坊」按钮的 `HomePage.vue` `WORKSHOP_ENTRY_ENABLED` 已置 `true`。以下执行边界（2026-08-01 安全审计，2026-08-03 视觉边界修订）**一条没变**，仍是读工坊/正则代码时的必读；唯一遗留缺口是**脚本没有 CPU 预算**（恶意规则可让那一个 iframe 空转，宿主页面不受影响）。SEC-02 已由 QuickJS 隔离后端收口；SEC-01 不再用 DOM 白名单牺牲 replacement 兼容，而是把每次富正则命中放进各自无 same-origin 的 `sandbox="allow-scripts"` iframe，并使用 `credentialless` + `no-referrer`；未命中正文始终由宿主原生文本面渲染，正则 CSS/布局无法触及普通正文或其它命中。代价是跨命中 DOM 查询不再兼容。外部 HTTP(S) 资源与原生网络 API 为兼容性刻意放行；form、popup、download、top navigation、嵌套 frame、parent DOM、应用 Dexie/storage 与 API Key 仍不可达，应用自有 `/api` 也拒绝 `Origin: null`。正则唯一持久权限是 Dexie v16 `regexStorage`：所有正则、信任级别与预览共享同一个不可信命名空间，iframe 内以同步 `localStorage` 镜像和 `window.regexStorage` 别名使用，跨 frame 持久化/广播；`sessionStorage` 仍只活在当前 frame，IndexedDB 不开放。规则可向远程或本地网络发请求，也可外传该命中的 replacement/capture 与 regex-namespace 数据，这是当前威胁模型明确接受的暴露。**但这套全开契约只给「用户自己装过的规则」**：模型输出里合成的 `<item_info>` / `<task_info>` 卡片是另一档（`BeautifierMatchSegment.origin === 'model'`）—— CSP 只放行带 nonce 的宿主引导脚本，卡片自带 `<script>` / inline handler 由浏览器拦掉，`connect-src 'none'`，也不注入 `regexStorage` 快照；样式/图片照旧，视觉不降级。理由是模型正文会被世界书/角色卡/工坊文案里的注入牵着走，不该顺带拿到脚本面与网络出口。2026-08-02 公共工坊快照为 303 项目 / 99 条正则（0 编译失败）：60 条外部资源规则不再降级，16 条 parent 耦合与 14 条宿主 API 耦合仍受限；storage 词法命中 8 条，精查为 5 项目 6 条 active + 2 条仅注释，active 均只用 `getItem`/`setItem`/`removeItem` 且现已兼容。脚本仍无 CPU 预算（入口开放后这条仍未补）；已装规则按存档启用状态运行。详见 `docs/reviews/2026-08-01-repository-review.md` 与 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
 
 > 🟡 **工坊 P4 已实施（B1-B5），真机走查未做**：以上游工坊页（`github.com/AkabaneSaki/myrepo`，本地克隆 `E:\Projects\myrepo`）为参照做的功能对齐。B1 封面代理链 + 类型徽章 + Cloudflare 错误码 + 加载更多；B2 我的项目 / 订阅与已装 / 审核徽章；B3 更新前改动预告；B4 投稿·编辑·上传·可见性·删除；B5 审核队列 + 管理员 + 日志。**三条与上游刻意不同**已写进各自文件头注释：不给没有基础标签的项目盖章成「系统」、diff 由已算好的安装计划派生（不重新归一化一遍）、权限判定只用于画不画入口（门禁在上游 403）。**真机走查（2026-08-02）**：B4 写侧（投稿上传 / 编辑 / 删除）与 P3 社交（点赞 / 订阅）已人工走过。B1-B3（封面链 / 我的项目 / 更新 diff）尚未专门走查。🔴 **B5 审核面无法自测（已搁置）** —— 当前账号 `isAdmin: false`，延后到拿到管理员账号再做。
 
@@ -677,6 +677,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │
 ├── stores/
 │   ├── theme-store.ts / ui-store.ts / create-store.ts / game-store.ts
+│   │      ui-store 的 `previousView` 只记**一层**来路，服务「进去了要能原路回来」
+│   │      （工坊有三个入口：首页 / 游戏页侧栏 / 设置页导航）。同视图重复 navigate
+│   │      刻意不覆盖它 —— 否则返回目标会变成自己，返回键就地失效。不是历史栈
 │   ├── settings-store.ts            ← 全应用最热的状态；deep watch 自动落 localStorage
 │   │                                   🔴 **加新设置要改两处**（Q-18）：先在 settings-types.ts
 │   │                                      的 `UiSettings` 上声明，再在 getDefaults() 给默认值。
@@ -735,6 +738,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── SettingsPage.vue         ← 纯壳层（1995 → 约 415 行）：页头 + 主导航 + Agent 子导航
 │   │   │                               只留 activeSection / activeAgent / selectAgent /
 │   │   │                               agentModelOf 与 wb.init()（世界书分区也靠它）
+│   │   │                               🔴 主导航末尾那条「创意工坊」**不是分区**：它 navigate 去
+│   │   │                                  工坊页，故不进 `navItems`、也没有对应的 `activeSection`
+│   │   │                                  值。塞进那张表 = 多一个点了只出现空白右栏的选项
 │   │   ├── agent/                    ← [Q-25] Agent 分区（照 settings/audio/ 的样子）
 │   │   │   ├── AgentSection.vue      ← 分区壳：**单根** section.section.centered + 页头，
 │   │   │   │                            其余全交给 AgentConfigPanel

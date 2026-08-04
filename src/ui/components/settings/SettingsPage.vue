@@ -145,6 +145,23 @@ onMounted(() => {
           <span class="nav-icon"><i :class="item.icon" aria-hidden="true"></i></span>
           <span class="nav-label">{{ item.label }}</span>
         </button>
+
+        <!--
+          🔴 这一条**不是分区**：它离开设置页去创意工坊，所以既不进 `navItems`、
+          也永远不会拿到 `.nav-active`（`activeSection` 里没有它的 key）。
+          分隔线 + 右侧外链箭头就是在说这件事 —— 长得和上面一模一样的话，
+          用户会以为点了会在右侧开一块面板，结果整页换掉。
+          回来的路由工坊页的返回键负责（走 `ui.previousView`）。
+        -->
+        <div class="nav-divider" aria-hidden="true"></div>
+        <button class="nav-item nav-external" @click="ui.navigate('workshop')">
+          <span class="nav-icon"><i class="fa-solid fa-puzzle-piece" aria-hidden="true"></i></span>
+          <span class="nav-label">创意工坊</span>
+          <i
+            class="fa-solid fa-arrow-up-right-from-square nav-external-mark"
+            aria-hidden="true"
+          ></i>
+        </button>
       </nav>
 
       <!-- ====== Agent 子导航（仅当选中 Agent 配置时显示）====== -->
@@ -319,6 +336,20 @@ onMounted(() => {
 }
 .nav-label {
   flex: 1;
+}
+/* 离开设置页的入口：与分区之间留一道分隔线 + 一个外链角标 */
+.nav-divider {
+  height: 1px;
+  margin: 8px 12px;
+  background: var(--theme-card-border);
+}
+.nav-external-mark {
+  font-size: 0.7rem;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+.nav-external:hover .nav-external-mark {
+  opacity: 0.9;
 }
 /* Agent 子导航 */
 .sub-nav {
