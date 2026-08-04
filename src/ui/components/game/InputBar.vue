@@ -12,6 +12,7 @@ const props = defineProps<{ disabled?: boolean }>();
 const game = useGameStore();
 const input = ref('');
 const showOptions = ref(false);
+const textareaRef = ref<HTMLTextAreaElement | null>(null);
 
 /** vars_update 解析出的动态行动选项 */
 const dynamicOptions = computed(() => game.pendingOptions);
@@ -23,9 +24,29 @@ watch(
     if (v) {
       input.value = v;
       game.clearPendingInput();
+      autoResize();
     }
   },
 );
+
+/**
+ * 随内容自动增高：textarea 高度贴合内容，上限约 6 行。
+ * 内容少时回到单行，超出上限内部滚动（max-height 由 CSS 钳制）。
+ */
+function autoResize() {
+  const el = textareaRef.value;
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
+}
+
+function handleKeydown(e: KeyboardEvent) {
+  // 纯 Enter（不带 Shift / Ctrl / Meta）= 发送；Shift+Enter 留给 textarea 原生换行
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    handleSend();
+  }
+}
 
 function selectOption(option: string) {
   input.value = option;
@@ -37,6 +58,7 @@ function handleSend() {
   if (!text) return;
   emit('send', text);
   input.value = '';
+  autoResize();
 }
 
 function handleStop() {
@@ -72,13 +94,15 @@ function handleStop() {
       <i class="fa-solid fa-list-ul" />
     </button>
 
-    <input
+    <textarea
+      ref="textareaRef"
       v-model="input"
       class="input-field"
-      type="text"
-      placeholder="输入你的行动..."
+      rows="1"
+      placeholder="输入你的行动…（Enter 发送 · Shift+Enter 换行）"
       :disabled="props.disabled"
-      @keydown.enter="handleSend"
+      @input="autoResize"
+      @keydown="handleKeydown"
     />
 
     <!-- 非生成态：发送按钮 -->
@@ -137,6 +161,8 @@ function handleStop() {
 }
 .input-field {
   flex: 1;
+  min-height: 36px;
+  max-height: 9.75rem; /* 约 6 行（36px + 5×行高），超出内部滚动 */
   padding: 8px 12px;
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-sm, 6px);
@@ -144,6 +170,8 @@ function handleStop() {
   color: var(--theme-text-primary);
   font-size: 0.875rem;
   font-family: inherit;
+  line-height: 1.5;
+  resize: vertical; /* 右下角拖拽手柄：只允许上下拉 */
   outline: none;
   transition: border-color 150ms;
 }
@@ -152,6 +180,11 @@ function handleStop() {
 }
 .input-field::placeholder {
   color: var(--theme-text-muted);
+}
+@media (prefers-reduced-motion: reduce) {
+  .input-field {
+    transition: none;
+  }
 }
 .options-popup {
   position: absolute;
