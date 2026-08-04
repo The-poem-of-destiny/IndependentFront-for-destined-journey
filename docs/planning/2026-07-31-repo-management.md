@@ -76,6 +76,11 @@ AGENTS.md 目标 **≤ 500 行**。超过就把细节下沉到 `docs/reference/`
 **模型：trunk-based + 短命分支 + PR 必经 + squash merge。**
 
 - `master` 开启分支保护：禁止直推，必须走 PR，必须过 CI 必需检查（§4）。**允许管理员绕过**（solo 热修场景刚需；多 agent 并行靠 worktree 隔离不靠禁推）。→ 主人在 GitHub Settings 手动配置。
+- **🟢 例外：纯文档改动（只动 `.md`）可以直推 master，免 PR**（2026-08-04 追加）。
+  - 理由：设计文档、说明书、规范这类改动没有可执行面，PR 的价值主要是 CI 与 review，而 CI 对 `.md` 只有一项 `format:check`——本地跑一遍 Prettier 就等价了。为一句错别字开 PR 是纯摩擦。
+  - **🔴 前置条件：推之前必须 `npx prettier --write` 过每一个改动的 `.md`**，否则 CI 会在 master 上挂红。操作细则（只格式化改过的文件 / 写完再格式化 / 用 `git diff --numstat` 剔掉纯行尾抖动）见 `AGENTS.md` 的「提交前文档检查」一节。
+  - 边界：一旦同一个提交里**碰了任何非 `.md` 文件**，就退回 PR 流程。混合提交没有"文档部分"这回事。
+  - 推完仍要检查 CI —— 直推不等于免检。
 - 分支命名：`feat/<topic>` `fix/<topic>` `docs/<topic>` `refactor/<topic>`；agent 自动创建的分支保留其前缀（如 `claude/<topic>`）。
 - 分支生命周期 **≤ 3 天**。大功能拆成可独立合并的小 PR（M1-M6 批次模式是范本）。
 - **合并后立刻删分支**（GitHub 开 auto-delete head branches）。

@@ -18,6 +18,24 @@
 
 **每次向远程仓库 push 后，必须主动检查对应的 GitHub Actions CI 状态；CI 失败时读取失败日志、定位根因并修复，不得只报告 push 成功。**
 
+### 🟢 纯文档改动可以直推 master（免 PR）
+
+**只改 `.md` 的提交允许直接推 master，不必开 PR。** 代码（`src/` `server/` `tests/` `scripts/` 配置文件）仍按 `docs/planning/2026-07-31-repo-management.md` §2 走分支 + PR。
+
+**🔴 但直推之前必须先跑 Prettier**，否则 CI 的 `format:check` 会在 master 上挂红：
+
+```bash
+npx prettier --write <你改过的每一个 .md>
+```
+
+三条细则，缺一条就会踩坑：
+
+1. **只 `--write` 你真正改过的文件**，绝不跑仓库级 `npm run format` —— Windows 上 `core.autocrlf` 会让它把约 520 个文件重写成 LF，全部显示为已修改但 `git diff` 无内容变化。
+2. **写完之后再格式化**。先格式化再编辑等于没格式化 —— CI 跑在 Linux/LF 检出上，它是权威闸门。
+3. **`git diff --numstat` 分辨真假改动**：没有 numstat 行的文件只是行尾变化，用 `git checkout -- <file>` 还原掉，别把它带进提交。
+
+推完照样要检查 CI（上一条规则对直推同样生效）。
+
 ## 文档导航
 
 详细设计文档统一在 `docs/` 目录下：
