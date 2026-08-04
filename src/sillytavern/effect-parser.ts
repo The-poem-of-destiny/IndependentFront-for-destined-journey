@@ -66,7 +66,10 @@ const CHINESE_TO_KEY: Record<string, string> = {
   金钱加成: 'moneyBonus',
   掉落率: 'dropRate',
   冷却缩减: 'cooldownReduction',
-  技能威力: 'skillPower',
+  // 🔴 skillPower 链路修复 (2026-08-04): "技能威力"词条映射已废弃。主体威力应写 `<skill power="...">` 属性
+  // （由 parseSkillsXML 读进 Skill.skillPower，战斗 v3 ability.skillPower 消费）。保留此映射会让 AI
+  // 双通道重复计算（既写 power 属性又写 effect 词条）。删除后 AI 若仍写"技能威力: +N"，effect-parser 归
+  // unknown → builtins 无 adapter → UNSUPPORTED_CAPABILITY，提示 AI 改用 power 属性。
   治疗效果: 'healPower',
 };
 

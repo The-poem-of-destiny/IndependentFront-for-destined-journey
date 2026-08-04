@@ -1541,6 +1541,53 @@ describe('parseItemGenOutput — <automaton> 子元素解析（战斗 v3 S3）',
   });
 });
 
+describe('parseItemGenOutput — skillPower 链路修复 (2026-08-04: <skill power/attr/dtype>)', () => {
+  it('应解析 <skill power="..." attr="..." dtype="..."> → skillPower/relevantAttribute/damageType', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><skills>',
+      '<skill name="火球术" type="active" cost_type="MP" cost_amount="200" cooldown="3" power="450" attr="int" dtype="能量">',
+      '  凝聚烈焰成球掷出。',
+      '  <effect name="烈焰爆裂">范围伤害</effect>',
+      '</skill>',
+      '</skills></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.skills).toHaveLength(1);
+    expect(out.skills[0].skillPower).toBe(450);
+    expect(out.skills[0].relevantAttribute).toBe('int');
+    expect(out.skills[0].damageType).toBe('能量');
+  });
+
+  it('非法 attr/dtype 值被白名单丢弃（power 仍解析，不污染 Skill）', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><skills>',
+      '<skill name="X" type="active" power="100" attr="foo" dtype="量子">',
+      '  desc',
+      '</skill>',
+      '</skills></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.skills[0].skillPower).toBe(100);
+    expect(out.skills[0].relevantAttribute).toBeUndefined();
+    expect(out.skills[0].damageType).toBeUndefined();
+  });
+
+  it('无 power 属性 → skillPower undefined（旧存档兼容）', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><skills>',
+      '<skill name="旧技能" type="active" cost_type="MP" cost_amount="10">',
+      '  desc',
+      '</skill>',
+      '</skills></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.skills[0].skillPower).toBeUndefined();
+  });
+});
+
 describe('parseItemGenOutput — 校验接入（违规 warn 不中断）', () => {
   it('非检定类直接改五维（铁律 #265160）→ 违规 modifier 被丢弃，合规的留下，链路不中断', async () => {
     const { parseItemGenOutput } = await import('./char-gen-agent');

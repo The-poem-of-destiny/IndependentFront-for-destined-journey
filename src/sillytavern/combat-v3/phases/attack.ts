@@ -125,12 +125,35 @@ export function handleAttack(
     return out;
   }
 
-  const ability = command.payload.ability ??
-    attacker.ability ?? {
+  // 🆕 skillPower 链路修复 (2026-08-04): 若声明了 skillName，从攻击者 activeSkills 查主体威力。
+  //    fallback 四层：payload.ability（已填不重写）→ activeSkills[skillName]（主体威力走结算管线）
+  //    → attacker.ability（单位默认）→ 字面量兜底（普攻/旧存档无 skillPower，=0）。
+  //    ADR-28：AI 只声明 skillName（战术意图），skillPower/relevantAttribute/damageType 由 Code 查
+  //    ——与 declare_attack schema 的"骰值与伤害由内核真实计算"一致。这一处收口让敌方 AI / 玩家 /
+  //    replay 三条路径自动受益，所有上游断点即使不修也能靠 activeSkills 兜住。
+  const declared = command.payload;
+  const fromSkill =
+    declared.skill && attacker.activeSkills
+      ? attacker.activeSkills.find((s) => s.name === declared.skill)
+      : undefined;
+
+  const ability = declared.ability ??
+    (fromSkill
+      ? {
+          relevantAttribute: fromSkill.relevantAttribute
+            ? attacker.attributes[fromSkill.relevantAttribute]
+            : attacker.attributes.int,
+          skillPower: fromSkill.skillPower,
+          damageType: (fromSkill.damageType ?? '物理') as DamageType,
+          intentionLevel: declared.intentionLevel,
+          multiHitCount: 1,
+          divinity: fromSkill.divinity ?? attacker.ability?.divinity ?? 0,
+        }
+      : attacker.ability) ?? {
       relevantAttribute: attacker.attributes.str,
       skillPower: 0,
-      damageType: (command.payload.damageType ?? '物理') as never,
-      intentionLevel: command.payload.intentionLevel,
+      damageType: (declared.damageType ?? '物理') as never,
+      intentionLevel: declared.intentionLevel,
       multiHitCount: 1,
       divinity: 0,
     };

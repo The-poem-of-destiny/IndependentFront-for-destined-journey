@@ -528,6 +528,17 @@ export interface CombatUnitState {
     /** 登神强度 0-8（v2 §四 4.2） */
     divinity: number;
   };
+  /** 🆕 skillPower 链路修复 (2026-08-04): 主动技能战斗快照（来自 CombatParticipant.activeSkills，
+   *  characterToCombatParticipant 从 char.skills 摘取，handleAttack 按 command.payload.skill 名查
+   *  skillPower/relevantAttribute/damageType 填进当次 ability）。被动技能不在这里——它们的
+   *  modifiers/automata 走现有 activeEffects 通道。 */
+  activeSkills?: ReadonlyArray<{
+    name: string;
+    skillPower: number;
+    relevantAttribute?: 'str' | 'dex' | 'con' | 'int' | 'spi';
+    damageType?: DamageType;
+    divinity?: number;
+  }>;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -122,6 +122,8 @@
 ```
 > ⚠️ `d20Attack` 必须先调 `roll_d20` 取真实骰值，**禁止 AI 编造骰值**（对齐现有工具纪律）。
 
+> 🔴 **v3 已迁移（2026-08-04）**：`combat_attack` 是 v2 工具（走 19 event 攻击链，AI 自己填 `skillPower` / `damageType` / `multiHitCount` 等数值）。v3 的 `declare_attack` 工具按 ADR-28 删掉了这些 AI 填值参数（"骰值与伤害由内核真实计算，你只负责战术决策"），技能威力改由 Code 按 `skillName` 从技能库查（见 `src/sillytavern/combat-v3/phases/attack.ts` handleAttack 的 activeSkills 查询层）。本节保留仅作 v2 历史接口参考；v3 威力入口与修复方案见 `docs/planning/2026-08-04-skillpower-link-fix-design.md`。
+
 #### `combat_use_skill` — 使用技能（非攻击型）
 ```
 参数: characterId(string,必), skillName(string,必)

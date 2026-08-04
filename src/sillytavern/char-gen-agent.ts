@@ -29,6 +29,7 @@ import type {
   QualityLevel,
   InventoryItem,
   ToolDefinition,
+  DamageType,
 } from './types';
 import { createDefaultCharacterState } from './types';
 import type { Modifier } from './effect-types';
@@ -367,6 +368,10 @@ export function assembleCharacterState(
     ...(s.divinity !== undefined ? { divinity: s.divinity } : {}),
     // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传到 Skill 落库
     ...(s.automata && s.automata.length > 0 ? { automata: s.automata } : {}),
+    // 🆕 skillPower 链路修复 (2026-08-04): 主体威力三字段透传到 Skill 落库
+    ...(s.skillPower !== undefined ? { skillPower: s.skillPower } : {}),
+    ...(s.relevantAttribute ? { relevantAttribute: s.relevantAttribute } : {}),
+    ...(s.damageType ? { damageType: s.damageType } : {}),
   }));
 
   // 合并装备: char_gen 自产优先
@@ -1228,6 +1233,10 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
         ...(elemDivinity !== undefined ? { divinity: elemDivinity } : {}),
         // 🆕 战斗 v3 (S3 2026-08-01): automata 透传（JSON 兜底路径）
         ...(itAutomata.length > 0 ? { automata: itAutomata } : {}),
+        // 🆕 skillPower 链路修复 (2026-08-04): JSON 直出路径同样透传
+        ...(typeof it.skillPower === 'number' ? { skillPower: it.skillPower } : {}),
+        ...(it.relevantAttribute ? { relevantAttribute: it.relevantAttribute } : {}),
+        ...(it.damageType ? { damageType: it.damageType } : {}),
       });
     } else if (isEquip) {
       out.equipment.push({
@@ -1293,6 +1302,9 @@ function parseItemGenXML(xml: string): ItemGenOutput {
 }
 
 function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
+  // 🆕 skillPower 链路修复 (2026-08-04): <skill power/attr/dtype> 属性白名单（非法值丢弃，不污染 Skill）
+  const ATTR_KEYS = new Set(['str', 'dex', 'con', 'int', 'spi']);
+  const DMG_TYPES = new Set(['物理', '能量', '精神', '真实']);
   const matches = xml.matchAll(/<skill\s+([^>]*?)>([\s\S]*?)<\/skill>/g);
   const results: ItemGenOutput['skills'] = [];
   for (const m of matches) {
@@ -1330,6 +1342,16 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
     const normalizedType: 'active' | 'passive' =
       skillType === '被动' || skillType === 'passive' ? 'passive' : 'active';
 
+    // 🆕 skillPower 链路修复 (2026-08-04): <skill power="..." attr="..." dtype="..."> 属性 → skillPower/relevantAttribute/damageType
+    const skillPowerAttr = attrs['power'] ? parseInt(attrs['power']) || 0 : undefined;
+    const relevantAttrRaw = attrs['attr'];
+    const relevantAttribute =
+      relevantAttrRaw && ATTR_KEYS.has(relevantAttrRaw)
+        ? (relevantAttrRaw as 'str' | 'dex' | 'con' | 'int' | 'spi')
+        : undefined;
+    const dtypeRaw = attrs['dtype'];
+    const damageType = dtypeRaw && DMG_TYPES.has(dtypeRaw) ? (dtypeRaw as DamageType) : undefined;
+
     results.push({
       name: attrs['name'] ?? '未命名技能',
       description: description || (descSubTag ? '' : descText.replace(/<[^>]+>/g, '').trim()),
@@ -1348,6 +1370,10 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
       ...(combat.divinity !== undefined ? { divinity: combat.divinity } : {}),
       // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传（编译期校验由 compileEffectProgram 做）
       ...(rawAutomata.length > 0 ? { automata: rawAutomata } : {}),
+      // 🆕 skillPower 链路修复 (2026-08-04): 主体威力三字段透传
+      ...(skillPowerAttr !== undefined ? { skillPower: skillPowerAttr } : {}),
+      ...(relevantAttribute ? { relevantAttribute } : {}),
+      ...(damageType ? { damageType } : {}),
     });
   }
   return results;

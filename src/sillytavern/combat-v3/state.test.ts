@@ -121,6 +121,26 @@ describe('createCombatState / toView', () => {
     expect(ownerSet.has('甲')).toBe(true);
   });
 
+  it('🆕 skillPower 链路修复 (2026-08-04): 透传 participant.activeSkills → unit.activeSkills', () => {
+    const bundle = mkBundle({
+      participants: [
+        mkParticipant('甲', {
+          activeSkills: [
+            { name: '火球术', skillPower: 450, relevantAttribute: 'int', damageType: '能量' },
+          ],
+        }),
+      ],
+    });
+    const state = createCombatState(bundle);
+    expect(state.units['甲'].activeSkills).toHaveLength(1);
+    expect(state.units['甲'].activeSkills![0]).toMatchObject({
+      name: '火球术',
+      skillPower: 450,
+      relevantAttribute: 'int',
+      damageType: '能量',
+    });
+  });
+
   it('🆕 automata 不合规（subscribe 越界）→ 编译期剔除，不误入 activeEffects（A3-3）', () => {
     const bundle = mkBundle({
       participants: [

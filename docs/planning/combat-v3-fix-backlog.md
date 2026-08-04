@@ -10,6 +10,13 @@
 
 ## 修复项
 
+### ✅ skillPower 链路断裂 —— 主动攻击技能威力没进 v3 结算（已修 2026-08-04）
+
+- **问题**：item_gen 生成的主动攻击技能（如火球术，威力 450）没有进 v3 伤害结算管线——`Skill` 类型无 `skillPower` 字段、`<skill>` XML schema 无威力属性、`characterToCombatParticipant` 不摘主动技能、`createCombatState` 不透传、`parseSkillsXML` 不解析威力、`handleAttack` 三 fallback 全 `skillPower:0`。结果主体伤害公式里"+技能威力"项恒为 0，AI 被逼把威力塞进 cast 脚本 `$resource.modifyHp`（战斗外固定伤害，且 v3 战斗内根本不执行 cast 脚本）。
+- **根因**：v2→v3 迁移遗漏——v2 的 `combat_attack` schema 有 `skillPower` 参数（AI 填），v3 按 ADR-28 删了 AI 入口但**忘了建 Code 入口**（按 skillName 查）。8 个断点 + 2 条旁路（cast 脚本无执行点 / effect-parser skillPower 映射悬空）。
+- **修复**：单点收口 `attack.ts:128` 加 `activeSkills[skillName]` 查询层（敌方 AI / 玩家 / replay 三路径受益）；上游加 `Skill.skillPower/relevantAttribute/damageType` 字段 + `parseSkillsXML` 解析 `<skill power/attr/dtype>` + `characterToCombatParticipant` 摘主动技能 + `createCombatState` 透传；item_gen prompt 加 `power` 属性 + 主体威力铁律（禁 cast modifyHp，buff 必须写 `<buffs>` 子元素）；effect-parser 废弃"技能威力"词条映射（防双通道重复计算）。
+- **状态**：✅ 已完成（2026-08-04，5934 tests 全绿）。落点 `types.ts` / `combat-v2-types.ts` / `combat-v3/types.ts` / `combat-v3/state.ts` / `combat-v3/phases/attack.ts` / `char-gen-agent.ts` / `effect-parser.ts` / `agent-config.json`。设计全文 `docs/planning/2026-08-04-skillpower-link-fix-design.md`。
+
 ### ✅ 战斗 v3 物品 modifiers 链路断裂（已修 2026-08-01）
 
 - **问题**：M5 退役 v2 后，item_gen 生成的装备 modifiers（命中+5、附加流血）在 v3 战斗里完全不生效。
