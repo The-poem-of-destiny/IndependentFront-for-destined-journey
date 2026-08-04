@@ -4,6 +4,7 @@ import { chatRoutes } from './routes/chat';
 import { statusRoutes } from './routes/status';
 import { embeddingsRoutes } from './routes/embeddings';
 import { modelsRoutes } from './routes/models';
+import { imageRoutes } from './routes/image';
 
 export const OPAQUE_ORIGIN_ERROR = 'opaque sandbox origins cannot access application APIs';
 
@@ -45,6 +46,7 @@ export function buildHonoApp(): Hono {
   app.route('/api/status', statusRoutes);
   app.route('/api/embeddings', embeddingsRoutes);
   app.route('/api/models', modelsRoutes);
+  app.route('/api/image', imageRoutes);
 
   return app;
 }

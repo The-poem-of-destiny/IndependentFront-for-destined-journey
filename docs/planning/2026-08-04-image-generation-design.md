@@ -857,6 +857,8 @@ prompt.characters[i]   → body.parameters.characterPrompts[i]
 2. 我们拼的 body 能否端到端换回 zip
 3. 换到 `nai-diffusion-4-5-full` 后 `ucPreset: 0` 是否仍合理
    → **同样已降级**：这个值在各 V3/V4 分支的实践取值互不相同却都能正常出图，说明它**不是承重参数**。先原样发，出问题再调
+4. 🆕 `qualityToggle: true` 与我们拼进 base 的画质后缀是**同一条指令的两份**（实施阶段 B4 发现）。录制样本里两者同时存在，所以先照原样发；curl 时顺手对比一次「关掉 toggle」与「留着」的出图差异，确认是冗余而非叠加
+5. 🆕 zip 里的条目命名（实施阶段 B4 发现）。`parseNaiZip` 的顺序取自解包对象的键序，而 JS 会把**纯数字键**提到最前 —— NAI 出的是 `image_0.png` 所以不受影响，但这一条只有真样本能确认。拿到真响应后**追加**一个 fixture，不要替换掉自造的那个（两者证明的是不同的事）
 
 ```bash
 curl -X POST https://image.novelai.net/ai/generate-image -H "Authorization: Bearer $NAI_TOKEN" -H "Content-Type: application/json" -H "Accept: application/x-zip-compressed" --data @nai-probe.json -o nai-probe.zip -w "status=%{http_code} type=%{content_type}\n"
@@ -1112,7 +1114,10 @@ story 被教了「克制使用」，所以必然存在「AI 没配图但我想�
 imageGenMode: ImageGenMode; // 'manual'  ← 默认手动，见下
 imageEndpointId: string | null; // null      指向 API 池（apiType:'image'）
 imageModel: string; // 'nai-diffusion-4-5-full'
-imageQualitySuffix: string; // ', location, very aesthetic, masterpiece, no text'
+imageQualitySuffix: string; // 取 image-defaults.ts 的 DEFAULT_QUALITY_SUFFIX，**不要另抄一份字面值**
+//                           🔴 值本身**不带前导逗号** —— composePrompt 用 ', ' 连接各段，
+//                              带了会产出 ', ,'。§6.2 表里的 ', location, …' 是在描绘「追加」
+//                              这个动作，不是这个字段该存的内容
 imageBaseNegative: string; // 我们维护的基础负向
 imageExtraNegative: string; // ''        用户追加
 imageMaxRating: ImageRating; // 'general'  🔴 上限而非默认（D38）：标记写的 rating 会被钳到这里

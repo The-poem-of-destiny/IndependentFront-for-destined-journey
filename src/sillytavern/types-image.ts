@@ -163,6 +163,52 @@ export type QuotaReason = 'per-message' | 'rolling-window' | 'same-turn';
 
 export type QuotaVerdict = { ok: true } | { ok: false; reason: QuotaReason; message: string };
 
+// ═══ Anlas 估算（D43）═══
+
+/**
+ * 🔴 **两个取值都带「估算」语义，没有一个是保证**（D43 / §11.2）。
+ *
+ * 刻意不叫 `isFree` / `free` 之类：NAI 的免费档规则随时会变，我们手里只有一份
+ * 记录在 `NAI_ANLAS_RULES` 里的快照。说「在免费额度内」是一句提示，说「免费」
+ * 是一句我们守不住的承诺 —— 名字本身就该拦住后者。
+ *
+ * - `within-free-allowance` —— 按当前记录的订阅规则估算，这次请求落在免费额度内
+ * - `consumes-anlas` —— 按同一份规则估算，这次请求会扣点数
+ */
+export type AnlasVerdict = 'within-free-allowance' | 'consumes-anlas';
+
+/**
+ * 把这次请求推出免费额度的**具体**参数，供 UI 指出「是宽高还是步数超了」。
+ *
+ * `invalid-input` 是第四种：任一参数不是正的有限数（设置页输入框清空 → `NaN`）。
+ * 读不懂的参数**一律报成会花钱**，绝不乐观 —— 这个指示器唯一的职责就是挡账单惊吓，
+ * 把「不知道」显示成「免费」正好是它最不该犯的错。
+ */
+export type AnlasFreeAllowanceBreach = 'pixels' | 'steps' | 'samples' | 'invalid-input';
+
+/** `estimateAnlasCost()` 的产出。全部字段都是**估算值**，见 `AnlasVerdict`。 */
+export interface AnlasEstimate {
+  verdict: AnlasVerdict;
+  /**
+   * **不计免费额度**时的单张定价估算 —— 即 §11.2 里「约 N 点/张」的 N。
+   *
+   * 🔴 免费额度内它也是个正数（那是这张图的牌价），别拿它判断免不免费，
+   * 判断只看 `verdict`。
+   */
+  anlasPerSample: number;
+  /** 计入免费额度后，这一次请求的总点数估算。`within-free-allowance` 时恒为 0 */
+  estimatedAnlas: number;
+  /** 越界项；`within-free-allowance` 时为空数组 */
+  breaches: AnlasFreeAllowanceBreach[];
+  /**
+   * 估算依据的规则集标签，直接进 UI 那句「按当前订阅规则估算」。
+   *
+   * 带上它是为了让「这是哪一版规则」在界面上**看得见** —— 规则变了而我们没跟上时，
+   * 用户至少知道自己在看一份什么时候的快照。
+   */
+  rulesetLabel: string;
+}
+
 // ═══ 落库记录 ═══
 
 /**

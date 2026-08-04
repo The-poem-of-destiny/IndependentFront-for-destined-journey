@@ -811,8 +811,8 @@ describe('exportAllData / importAllData', () => {
     await saveApiEndpoint(makeApiEndpoint({ id: 'exp_api' }));
 
     const backup = await exportAllData();
-    // 跟随 DB_VERSION（v16: 隔离正则持久 KV）—— 每次升版这里同步
-    expect(backup.version).toBe(16);
+    // 跟随 DB_VERSION（v17: 图像生成三表）—— 每次升版这里同步
+    expect(backup.version).toBe(17);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -827,6 +827,10 @@ describe('exportAllData / importAllData', () => {
     expect(Array.isArray(backup.worldBooks)).toBe(true);
     expect(Array.isArray(backup.workshopProjects)).toBe(true);
     expect(Array.isArray(backup.regexStorage)).toBe(true);
+    // v17 —— 元数据进备份，字节（sceneImageBlobs）刻意不进（设计 §7.3）
+    expect(Array.isArray(backup.sceneImages)).toBe(true);
+    expect(Array.isArray(backup.imagePresets)).toBe(true);
+    expect('sceneImageBlobs' in backup).toBe(false);
   });
 
   it('importAllData 应还原数据', async () => {
@@ -1908,9 +1912,10 @@ describe('Asset CRUD (v13)', () => {
     // ---- 以当前版 (AppDatabase) 打开：触发升版 ----
     await initializeDatabase();
     const db = getDatabase();
-    expect(db.verno).toBe(16);
+    expect(db.verno).toBe(17);
 
-    // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张，一个不少
+    // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
+    //           + 图像生成三张，一个不少
     //（误写 `表名: null` 或漏声明会在这里炸 —— 尤其 lorebooks/settings 两张死表按 D3 必须保留）
     const EXPECTED_TABLES = [
       ...Object.keys(V12_STORES),
@@ -1920,6 +1925,9 @@ describe('Asset CRUD (v13)', () => {
       'workshopProjects',
       'beautifierRules',
       'regexStorage',
+      'sceneImages',
+      'sceneImageBlobs',
+      'imagePresets',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 
@@ -1939,6 +1947,9 @@ describe('Asset CRUD (v13)', () => {
     expect(await db.workshopProjects.count()).toBe(0);
     expect(await db.beautifierRules.count()).toBe(0);
     expect(await db.regexStorage.count()).toBe(0);
+    expect(await db.sceneImages.count()).toBe(0);
+    expect(await db.sceneImageBlobs.count()).toBe(0);
+    expect(await db.imagePresets.count()).toBe(0);
 
     // 升版后新表可正常写入
     const asset = makeAsset();

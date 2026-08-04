@@ -15,6 +15,9 @@ import type { Modifier } from './effect-types';
 // type-only 循环安全：combat-v3/types.ts 反向 import 本文件的 CombatParticipant/StatusEffect 也是 type-only
 // EffectAutomaton 定义在 combat-v3/types.ts（v3 内核 DSL），这里只做类型引用不引入运行时
 import type { EffectAutomaton } from './combat-v3/types';
+// type-only 单向边：types-image.ts **不 import 本文件**（图像子系统的类型全部自持），
+// 所以这条边不成环。只为把 SceneImageMarker 接进 DetectedMarker 联合。
+import type { SceneImageMarker } from './types-image';
 
 // 音频子系统的接口/seam 类型拆分在 types-audio.ts（本文件已逾 800 行）。
 // 从这里统一再导出，「types.ts 是唯一类型来源」这条 import 路径依然成立。
@@ -2932,7 +2935,8 @@ export type MarkerType =
   | 'item_gen_request'
   | 'item_update_request' // 物品调度
   | 'craft_gen_request' // 制作调度（统一 _request 后缀）
-  | 'play_audio'; // 场景配乐（Story 直接输出，非阻塞）
+  | 'play_audio' // 场景配乐（Story 直接输出，非阻塞）
+  | 'scene_image'; // 情景插画（图像生成 v1；标记即锚点，图就地插进正文）
 
 /** 所有标记的公共字段 */
 export interface DetectedMarkerBase {
@@ -3028,7 +3032,14 @@ export type DetectedMarker =
   | ItemGenRequestMarker
   | ItemUpdateRequestMarker
   | CraftGenRequestMarker
-  | PlayAudioMarker;
+  | PlayAudioMarker
+  // 图像生成 v1：`<scene_image>`。定义住在 types-image.ts（子系统类型集中在那里），
+  // 这里只把它接进联合，`marker-protocol.ts` 的 `MarkerOf`/`MarkerFields` 因此对它成立。
+  //
+  // 🔴 加/删 `MarkerType` 成员与改 `MARKER_SPECS` **必须同一次改动**：那张表是
+  //    `{ [K in Exclude<MarkerType,'play_audio'>]: … }` 的映射类型，只改一边当场缺键、
+  //    编译不过（设计 §3.1）。
+  | SceneImageMarker;
 
 /**
  * <char_gen_request> 标记 — request_dispatcher 检测到新角色时输出。
