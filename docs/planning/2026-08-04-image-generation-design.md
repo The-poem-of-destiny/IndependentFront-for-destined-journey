@@ -45,11 +45,11 @@ img2img / 局部重绘 / 放大 · 候选多选 · 角色画像入槽位（`writ
 
 均已查证，是本设计成立的前提。
 
-| # | 事实 | 出处 | 省掉了什么 |
-| --- | --- | --- | --- |
-| 1 | **正文渲染路径刻意保留标记**，只有 `<play_audio>` 被单独剥 | `marker-protocol.ts:349` 注释原文 | 标记可以直接当锚点，**不需要改写 AI 写过的正文** |
-| 2 | **正文已经是分段渲染的**（`compileBeautifierSegments` → 文本段/命中段），`CARD_PATTERN` 已在做"认内置标签 → 变成一个段" | `beautifier.ts:276-313` · `BeautifiedNarrative.vue` | 「把图插在标记处」不是新机制，是加第三种段 |
-| 3 | **加标记只动 `MARKER_SPECS`** —— 扫描器、`MARKER_TAGS`、`scanMarkers` 全由那张表推导 | `marker-protocol.ts:20`（Q-05） | agent 侧接线 = 一张表加一行 |
+| #   | 事实                                                                                                                    | 出处                                                | 省掉了什么                                       |
+| --- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------ |
+| 1   | **正文渲染路径刻意保留标记**，只有 `<play_audio>` 被单独剥                                                              | `marker-protocol.ts:349` 注释原文                   | 标记可以直接当锚点，**不需要改写 AI 写过的正文** |
+| 2   | **正文已经是分段渲染的**（`compileBeautifierSegments` → 文本段/命中段），`CARD_PATTERN` 已在做"认内置标签 → 变成一个段" | `beautifier.ts:276-313` · `BeautifiedNarrative.vue` | 「把图插在标记处」不是新机制，是加第三种段       |
+| 3   | **加标记只动 `MARKER_SPECS`** —— 扫描器、`MARKER_TAGS`、`scanMarkers` 全由那张表推导                                    | `marker-protocol.ts:20`（Q-05）                     | agent 侧接线 = 一张表加一行                      |
 
 另外三处现成件：`fflate`（解 NAI 的 zip）· `forward()` 二进制管道直通（BFF）· `asset-url.ts` 的 object URL LRU + 引用计数。
 
@@ -57,35 +57,35 @@ img2img / 局部重绘 / 放大 · 候选多选 · 角色画像入槽位（`writ
 
 ## 2. 决策表
 
-| # | 决策 | 裁定 | 理由 |
-| --- | --- | --- | --- |
-| **D1** | 提示词写在标记属性还是正文 | **正文（`bodyText`）** | danbooru 串必有逗号、括号、`{{}}`，可能有引号。塞进属性值，一个 `"` 就截断标签解析 → 生成失败 |
-| **D2** | 图怎么定位到正文位置 | **标记留在 `msg.content` 不动，图按 `(saveId, messageId, occurrence)` 反查** | 永不改写 AI 写过的字节。且快照回滚带回同样的 messageId 与正文 → 图**自动重新挂上**，零回收代码 |
-| **D3** | 分段在美化之前还是之后 | **之前，且不受美化开关约束** | 插画是应用自有渲染，不是"美化"。美化关掉 / 流式输出中，`BeautifiedNarrative` 退回单个裸文本段 —— 那时标记会漏成尖括号 |
-| **D4** | 角色外观谁写 | **标记只报角色名，Code 拼预设** | story agent 不知道苏婉的 booru 标签，让它每回合自己编 = 每张图里的人都不一样 |
-| **D5** | 生成中/失败的记录 | **pending 记录先落库，再发请求** | 否则刷新之后"这里本来有张图"凭空消失 |
-| **D6** | 保留策略 | **v1 不做任何自动淘汰** | 用户为每一张付过钱。只给手动清理 + 用量读数 |
-| **D7** | 孤儿（消息没回来的图） | **保留，不删** | 同 D6。只有删除存档才连带删 |
-| **D8** | FullBackup | **元数据进，字节不进** | 字节进 JSON 备份会爆炸；元数据含 prompt + seed + model，**NAI 同参数可复现** —— 备份存的是配方。加上标题说明，恢复出来的图鉴是**一份读得通的目录** |
-| **D9** | 候选张数 | **恒 `n_samples: 1`** | 用户按张付费；且**恰好卡在 Opus 免费档内**（常规尺寸 + 单张） |
-| **D10** | 分级路由 | **v1 不建**（NAI 是 explicit-ok，无需选路） | 但分层保留，见 D11 |
-| **D11** | 只有一家 provider 还分不分层 | **分**：方言/装配层与适配器层照留 | 省掉能少写约 60 行；但 v2 接 OpenAI/Gemini 时，"提示词装配"与"HTTP 形状"糊在一起就要整个重写。且**分层正是 NAI 三重冗余能被一处保证的原因**（§6.1） |
-| **D12** | 素材库 `插画` 类型 | **v1 不加** | 加类型 token 要付 D16 命名不变式的迁移代价，而 v1 插画进存档专属表、不进素材库。**这条推翻了本文档 2026-08-04 早先的裁定**——当时的前提（插画要入素材库）已不成立 |
-| **D13** | 角色画像（`writeIntoSlot`） | **v1 不做** | 主人裁定先做情景。`writeIntoSlot` 现成，v2 接它是纯增补 |
-| **D14** | 开关形状 | **三档单选** `'off' \| 'manual' \| 'auto'` | 两个 boolean 能表达"关掉但自动"这种无意义组合，且每个消费点要重推优先级。先例：`audioSceneAutoPlay` |
-| **D15** | 🔴 自动档**绝不追溯触发** | 只对**本回合新到的消息**自动发请求 | 否则把开关拨到自动的那一刻，整本聊天记录里所有未生成的标记一起开火 —— 几百回合的存档能瞬间烧掉几十美元 |
-| **D16** | 手动档要不要先建记录 | **不建，点击才建** | 否则每个从没被点过的标记都在表里留一行 `idle`。标记本身已带渲染按钮所需的全部信息 |
-| **D17** | 重画的处置 | **追加一条新记录**（同 `(messageId, occurrence)`，`take` 递增），不覆盖 | 用户对两张都付过钱。正文显示最新 + `2/3` 切换，图鉴显示全部 |
-| **D18** | 标题与说明谁写 | **story agent 在标记属性里写** | 它正在写这段剧情，知道图画的是什么，且写的是中文叙事口吻。Code 无从从 danbooru 标签反推出「篝火旁的低语」 |
-| **D19** | 标题放属性、提示词放正文 | **刻意不一致** | 提示词被引号搞坏 = 生成失败（结构性）；标题被搞坏 = 图鉴里一行难看（装饰性）。容错等级不同，处置就该不同 |
-| **D20** | 频率控制放 prompt 还是 Code | **两处都要，Code 是失效保护** | prompt 里的克制指令是"一般情况下的期望"，模型漂移/越狱/上下文污染都能让它失效，而失效代价是真金白银。凡是"错了会花钱"的约束，都不能只由被约束者自己遵守 |
-| **D21** | 🔴 限流时标记怎么处置 | **绝不丢弃。超预算 = 降级成手动按钮** | 这是让 Code 限流变安全的那一条。丢标记 = 玩家眼里"有时候有图有时候没有"；降级 = 玩家看到按钮、知道有这张图、想要就自己点 |
-| **D22** | 分层限额 | 每条消息上限 · 滚动时间窗 · 同回合去重 | 三条各挡一种失效模式，不是同一条的三个刻度 |
-| **D23** | 🔴 同回合已自动生成过 → 不再自动生成 | 按 `(saveId, turn, source:'auto')` 去重 | **回退重发是既有功能且玩家用得很勤**。不设这条，对同一段剧情重掷 5 次就产生 5 张图，4 张挂在被丢弃的消息上 |
-| **D24** | 超限时自动与手动的差别 | **自动硬停（降级成按钮），手动只弹一次确认** | 机器该被拦死，人该只被减速。玩家点按钮是在场的、刻意的支出 |
-| **D25** | 失败重试 | **永不自动重试**，只有手动重试按钮 | 自动重试 + 上游 5xx = 最经典的账单事故。且失败原因多半是提示词或额度，重试一百次也不会变对 |
-| **D26** | 用户改过的提示词 vs 重画 | **编辑版优先**（`editedScenePrompt`），原文不覆盖 | 改完提示词点重画、结果却按 AI 原话生成，是这类界面最挫败的一种失败。原文留着，"改回去"才永远可行 |
-| **D27** | 标记正文进装配前**必须过标点归一化** | `normalizeTagString`（§3.2b） | story agent 写中文叙事却要吐 danbooru 串，全角 `，` 与 `《》` 必然渗进来 —— 前者让整串变成一个巨型标签，后者毁掉 `<lora:>` 语法，**两者都不报错，只是静默画错** |
+| #       | 决策                                 | 裁定                                                                         | 理由                                                                                                                                                             |
+| ------- | ------------------------------------ | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **D1**  | 提示词写在标记属性还是正文           | **正文（`bodyText`）**                                                       | danbooru 串必有逗号、括号、`{{}}`，可能有引号。塞进属性值，一个 `"` 就截断标签解析 → 生成失败                                                                    |
+| **D2**  | 图怎么定位到正文位置                 | **标记留在 `msg.content` 不动，图按 `(saveId, messageId, occurrence)` 反查** | 永不改写 AI 写过的字节。且快照回滚带回同样的 messageId 与正文 → 图**自动重新挂上**，零回收代码                                                                   |
+| **D3**  | 分段在美化之前还是之后               | **之前，且不受美化开关约束**                                                 | 插画是应用自有渲染，不是"美化"。美化关掉 / 流式输出中，`BeautifiedNarrative` 退回单个裸文本段 —— 那时标记会漏成尖括号                                            |
+| **D4**  | 角色外观谁写                         | **标记只报角色名，Code 拼预设**                                              | story agent 不知道苏婉的 booru 标签，让它每回合自己编 = 每张图里的人都不一样                                                                                     |
+| **D5**  | 生成中/失败的记录                    | **pending 记录先落库，再发请求**                                             | 否则刷新之后"这里本来有张图"凭空消失                                                                                                                             |
+| **D6**  | 保留策略                             | **v1 不做任何自动淘汰**                                                      | 用户为每一张付过钱。只给手动清理 + 用量读数                                                                                                                      |
+| **D7**  | 孤儿（消息没回来的图）               | **保留，不删**                                                               | 同 D6。只有删除存档才连带删                                                                                                                                      |
+| **D8**  | FullBackup                           | **元数据进，字节不进**                                                       | 字节进 JSON 备份会爆炸；元数据含 prompt + seed + model，**NAI 同参数可复现** —— 备份存的是配方。加上标题说明，恢复出来的图鉴是**一份读得通的目录**               |
+| **D9**  | 候选张数                             | **恒 `n_samples: 1`**                                                        | 用户按张付费；且**恰好卡在 Opus 免费档内**（常规尺寸 + 单张）                                                                                                    |
+| **D10** | 分级路由                             | **v1 不建**（NAI 是 explicit-ok，无需选路）                                  | 但分层保留，见 D11                                                                                                                                               |
+| **D11** | 只有一家 provider 还分不分层         | **分**：方言/装配层与适配器层照留                                            | 省掉能少写约 60 行；但 v2 接 OpenAI/Gemini 时，"提示词装配"与"HTTP 形状"糊在一起就要整个重写。且**分层正是 NAI 三重冗余能被一处保证的原因**（§6.1）              |
+| **D12** | 素材库 `插画` 类型                   | **v1 不加**                                                                  | 加类型 token 要付 D16 命名不变式的迁移代价，而 v1 插画进存档专属表、不进素材库。**这条推翻了本文档 2026-08-04 早先的裁定**——当时的前提（插画要入素材库）已不成立 |
+| **D13** | 角色画像（`writeIntoSlot`）          | **v1 不做**                                                                  | 主人裁定先做情景。`writeIntoSlot` 现成，v2 接它是纯增补                                                                                                          |
+| **D14** | 开关形状                             | **三档单选** `'off' \| 'manual' \| 'auto'`                                   | 两个 boolean 能表达"关掉但自动"这种无意义组合，且每个消费点要重推优先级。先例：`audioSceneAutoPlay`                                                              |
+| **D15** | 🔴 自动档**绝不追溯触发**            | 只对**本回合新到的消息**自动发请求                                           | 否则把开关拨到自动的那一刻，整本聊天记录里所有未生成的标记一起开火 —— 几百回合的存档能瞬间烧掉几十美元                                                           |
+| **D16** | 手动档要不要先建记录                 | **不建，点击才建**                                                           | 否则每个从没被点过的标记都在表里留一行 `idle`。标记本身已带渲染按钮所需的全部信息                                                                                |
+| **D17** | 重画的处置                           | **追加一条新记录**（同 `(messageId, occurrence)`，`take` 递增），不覆盖      | 用户对两张都付过钱。正文显示最新 + `2/3` 切换，图鉴显示全部                                                                                                      |
+| **D18** | 标题与说明谁写                       | **story agent 在标记属性里写**                                               | 它正在写这段剧情，知道图画的是什么，且写的是中文叙事口吻。Code 无从从 danbooru 标签反推出「篝火旁的低语」                                                        |
+| **D19** | 标题放属性、提示词放正文             | **刻意不一致**                                                               | 提示词被引号搞坏 = 生成失败（结构性）；标题被搞坏 = 图鉴里一行难看（装饰性）。容错等级不同，处置就该不同                                                         |
+| **D20** | 频率控制放 prompt 还是 Code          | **两处都要，Code 是失效保护**                                                | prompt 里的克制指令是"一般情况下的期望"，模型漂移/越狱/上下文污染都能让它失效，而失效代价是真金白银。凡是"错了会花钱"的约束，都不能只由被约束者自己遵守          |
+| **D21** | 🔴 限流时标记怎么处置                | **绝不丢弃。超预算 = 降级成手动按钮**                                        | 这是让 Code 限流变安全的那一条。丢标记 = 玩家眼里"有时候有图有时候没有"；降级 = 玩家看到按钮、知道有这张图、想要就自己点                                         |
+| **D22** | 分层限额                             | 每条消息上限 · 滚动时间窗 · 同回合去重                                       | 三条各挡一种失效模式，不是同一条的三个刻度                                                                                                                       |
+| **D23** | 🔴 同回合已自动生成过 → 不再自动生成 | 按 `(saveId, turn, source:'auto')` 去重                                      | **回退重发是既有功能且玩家用得很勤**。不设这条，对同一段剧情重掷 5 次就产生 5 张图，4 张挂在被丢弃的消息上                                                       |
+| **D24** | 超限时自动与手动的差别               | **自动硬停（降级成按钮），手动只弹一次确认**                                 | 机器该被拦死，人该只被减速。玩家点按钮是在场的、刻意的支出                                                                                                       |
+| **D25** | 失败重试                             | **永不自动重试**，只有手动重试按钮                                           | 自动重试 + 上游 5xx = 最经典的账单事故。且失败原因多半是提示词或额度，重试一百次也不会变对                                                                       |
+| **D26** | 用户改过的提示词 vs 重画             | **编辑版优先**（`editedScenePrompt`），原文不覆盖                            | 改完提示词点重画、结果却按 AI 原话生成，是这类界面最挫败的一种失败。原文留着，"改回去"才永远可行                                                                 |
+| **D27** | 标记正文进装配前**必须过标点归一化** | `normalizeTagString`（§3.2b）                                                | story agent 写中文叙事却要吐 danbooru 串，全角 `，` 与 `《》` 必然渗进来 —— 前者让整串变成一个巨型标签，后者毁掉 `<lora:>` 语法，**两者都不报错，只是静默画错**  |
 
 ---
 
@@ -97,13 +97,13 @@ tavern interior, warm candlelight, wooden table, sitting, holding a mug, looking
 </scene_image>
 ```
 
-| 部分 | 必填 | 说明 |
-| --- | --- | --- |
-| `title` | 否 | 中文短标题，图鉴条目名。缺省 → Code 填「第 N 回合的插画」 |
-| `desc` | 否 | 一句话说明，图鉴副标题。缺省 → 空串 |
-| `characters` | 否 | 逗号分隔角色名。**原样 `===` 匹配，不归一化**（铁律 1 / 素材系统 D2）。缺省 = 纯风景 |
-| `rating` | 否 | `general` / `sensitive` / `questionable` / `explicit`。缺省 → 设置里的默认档 |
-| 正文 | **是** | **场景/动作/光线/构图**的 danbooru 标签，含数量标签（`2girls, 1boy`）。**不写角色外观**（D4） |
+| 部分         | 必填   | 说明                                                                                          |
+| ------------ | ------ | --------------------------------------------------------------------------------------------- |
+| `title`      | 否     | 中文短标题，图鉴条目名。缺省 → Code 填「第 N 回合的插画」                                     |
+| `desc`       | 否     | 一句话说明，图鉴副标题。缺省 → 空串                                                           |
+| `characters` | 否     | 逗号分隔角色名。**原样 `===` 匹配，不归一化**（铁律 1 / 素材系统 D2）。缺省 = 纯风景          |
+| `rating`     | 否     | `general` / `sensitive` / `questionable` / `explicit`。缺省 → 设置里的默认档                  |
+| 正文         | **是** | **场景/动作/光线/构图**的 danbooru 标签，含数量标签（`2girls, 1boy`）。**不写角色外观**（D4） |
 
 ### 3.1 `MARKER_SPECS` 增量
 
@@ -209,8 +209,7 @@ export interface SceneImageMarker {
 // ═══ 渲染分段 ═══
 
 export type NarrativeSegment =
-  | { kind: 'text'; text: string }
-  | { kind: 'image'; occurrence: number; marker: SceneImageMarker };
+  { kind: 'text'; text: string } | { kind: 'image'; occurrence: number; marker: SceneImageMarker };
 
 // ═══ 角色预设 ═══
 
@@ -260,16 +259,13 @@ export interface ComposedCharacter {
 }
 
 export type ComposeWarning =
-  | { kind: 'missing-preset'; name: string }
-  | { kind: 'characters-truncated'; dropped: string[] };
+  { kind: 'missing-preset'; name: string } | { kind: 'characters-truncated'; dropped: string[] };
 
 // ═══ 限额 ═══
 
 export type QuotaReason = 'per-message' | 'rolling-window' | 'same-turn';
 
-export type QuotaVerdict =
-  | { ok: true }
-  | { ok: false; reason: QuotaReason; message: string };
+export type QuotaVerdict = { ok: true } | { ok: false; reason: QuotaReason; message: string };
 
 // ═══ 落库记录 ═══
 
@@ -341,14 +337,14 @@ export interface SceneImageBlobRecord {
 // ═══ 失败分类 ═══
 
 export type ImageGenFailureKind =
-  | 'auth'         // 401：令牌无效/过期
-  | 'payment'      // 402：Anlas 不足
-  | 'rate-limit'   // 429
-  | 'bad-request'  // 400：请求体不合法（带上游 detail）
-  | 'upstream'     // 5xx
-  | 'network'      // 连不上 / 超时
-  | 'aborted'      // 用户取消 / 切存档
-  | 'bad-response';// content-type 不是 zip，或 zip 里没有图
+  | 'auth' // 401：令牌无效/过期
+  | 'payment' // 402：Anlas 不足
+  | 'rate-limit' // 429
+  | 'bad-request' // 400：请求体不合法（带上游 detail）
+  | 'upstream' // 5xx
+  | 'network' // 连不上 / 超时
+  | 'aborted' // 用户取消 / 切存档
+  | 'bad-response'; // content-type 不是 zip，或 zip 里没有图
 
 export interface ImageGenFailure {
   ok: false;
@@ -449,11 +445,11 @@ export function checkQuota(input: QuotaInput): QuotaVerdict;
 
 **三层，互相独立，任一不满足即拒：**
 
-| 层 | 判据 | 默认 | 挡的是 |
-| --- | --- | --- | --- |
-| **L1 每条消息** | 同 `messageId` 的记录数 ≥ `maxPerMessage` | 2 | 单条正文蹦出 15 个标记 |
-| **L2 滚动时间窗** | `now - createdAt < 3600_000` 的记录数 ≥ `maxPerHour` | 20 | **真正的失效保护**：回退重发风暴、UI 双触发、任何没预料到的循环 |
-| **L3 同回合去重** | `target.source === 'auto'` 且已存在同 `turn` 且 `source==='auto'` 的记录 | 恒开 | 回退重发（D23） |
+| 层                | 判据                                                                     | 默认 | 挡的是                                                          |
+| ----------------- | ------------------------------------------------------------------------ | ---- | --------------------------------------------------------------- |
+| **L1 每条消息**   | 同 `messageId` 的记录数 ≥ `maxPerMessage`                                | 2    | 单条正文蹦出 15 个标记                                          |
+| **L2 滚动时间窗** | `now - createdAt < 3600_000` 的记录数 ≥ `maxPerHour`                     | 20   | **真正的失效保护**：回退重发风暴、UI 双触发、任何没预料到的循环 |
+| **L3 同回合去重** | `target.source === 'auto'` 且已存在同 `turn` 且 `source==='auto'` 的记录 | 恒开 | 回退重发（D23）                                                 |
 
 **不变式：**
 
@@ -466,15 +462,15 @@ export function checkQuota(input: QuotaInput): QuotaVerdict;
 
 ```ts
 export interface NaiOptions {
-  model: string;            // 'nai-diffusion-4-5-full'
-  width: number;            // 1216
-  height: number;           // 832
-  steps: number;            // 23
-  scale: number;            // 4.5
-  sampler: string;          // 'k_euler_ancestral'
-  noiseSchedule: string;    // 'karras'
-  ucPreset: number;         // 0
-  seed?: number;            // 缺省 → 调用方生成（本函数不产随机）
+  model: string; // 'nai-diffusion-4-5-full'
+  width: number; // 1216
+  height: number; // 832
+  steps: number; // 23
+  scale: number; // 4.5
+  sampler: string; // 'k_euler_ancestral'
+  noiseSchedule: string; // 'karras'
+  ucPreset: number; // 0
+  seed?: number; // 缺省 → 调用方生成（本函数不产随机）
 }
 
 export function buildNaiRequest(prompt: ComposedPrompt, opts: NaiOptions): NaiRequestBody;
@@ -508,15 +504,15 @@ prompt.characters[i]   → body.parameters.characterPrompts[i]
 
 ## 6. NovelAI 接口规格（2026-08-04 核准）
 
-| 项 | 值 |
-| --- | --- |
-| 端点 | `POST https://image.novelai.net/ai/generate-image` |
-| 鉴权 | `Authorization: Bearer <persistent token>` |
-| CORS | ❌ 无 → **必须走 BFF** |
-| 响应 | `Content-Type: application/x-zip-compressed` → ZIP 装 PNG |
-| v1 模型 | **`nai-diffusion-4-5-full`**（理由见 §6.2） |
-| 尺寸 | **1216 × 832**（NAI 官方横构图预设，≈3:2）—— 卡在 Opus 免费档内 |
-| 分级 | explicit-ok |
+| 项      | 值                                                              |
+| ------- | --------------------------------------------------------------- |
+| 端点    | `POST https://image.novelai.net/ai/generate-image`              |
+| 鉴权    | `Authorization: Bearer <persistent token>`                      |
+| CORS    | ❌ 无 → **必须走 BFF**                                          |
+| 响应    | `Content-Type: application/x-zip-compressed` → ZIP 装 PNG       |
+| v1 模型 | **`nai-diffusion-4-5-full`**（理由见 §6.2）                     |
+| 尺寸    | **1216 × 832**（NAI 官方横构图预设，≈3:2）—— 卡在 Opus 免费档内 |
+| 分级    | explicit-ok                                                     |
 
 ### 6.1 V4.5 请求体 —— 由**真实录制的请求**确认
 
@@ -529,42 +525,63 @@ prompt.characters[i]   → body.parameters.characterPrompts[i]
   // 🔴 正向提示词在**顶层 input**，`parameters.prompt` 这个字段不存在
   "input": "1girl, tavern interior, …, rating:general, location, very aesthetic, masterpiece, no text",
   "parameters": {
-    "negative_prompt": "blurry, lowres, …",          // 与下面 base_caption 一字不差
+    "negative_prompt": "blurry, lowres, …", // 与下面 base_caption 一字不差
 
     "v4_prompt": {
       "caption": {
         "base_caption": "…同 input…",
         "char_captions": [
-          { "char_caption": "girl, silver hair, golden eyes, …", "centers": [{ "x": 0, "y": 0 }] }
-        ]
+          { "char_caption": "girl, silver hair, golden eyes, …", "centers": [{ "x": 0, "y": 0 }] },
+        ],
       },
       "use_coords": false,
-      "use_order": true
+      "use_order": true,
     },
     "v4_negative_prompt": {
       "caption": {
         "base_caption": "…同 negative_prompt…",
-        "char_captions": [{ "char_caption": "lowres, aliasing, ", "centers": [{ "x": 0, "y": 0 }] }]
+        "char_captions": [
+          { "char_caption": "lowres, aliasing, ", "centers": [{ "x": 0, "y": 0 }] },
+        ],
       },
-      "legacy_uc": false
+      "legacy_uc": false,
     },
 
     // 🔴 第三处重复，字段名换了一套（camelCase + prompt/uc/center/enabled）
     "characterPrompts": [
-      { "prompt": "girl, silver hair, …", "uc": "lowres, aliasing, ",
-        "center": { "x": 0, "y": 0 }, "enabled": true }
+      {
+        "prompt": "girl, silver hair, …",
+        "uc": "lowres, aliasing, ",
+        "center": { "x": 0, "y": 0 },
+        "enabled": true,
+      },
     ],
 
-    "params_version": 3, "ucPreset": 0, "qualityToggle": true,
-    "width": 1216, "height": 832, "n_samples": 1, "seed": 168874300,
-    "sampler": "k_euler_ancestral", "noise_schedule": "karras", "scale": 4.5, "steps": 23,
-    "cfg_rescale": 0, "dynamic_thresholding": false, "skip_cfg_above_sigma": null,
-    "use_coords": false, "autoSmea": false, "prefer_brownian": true,
-    "legacy": false, "legacy_uc": false, "legacy_v3_extend": false,
+    "params_version": 3,
+    "ucPreset": 0,
+    "qualityToggle": true,
+    "width": 1216,
+    "height": 832,
+    "n_samples": 1,
+    "seed": 168874300,
+    "sampler": "k_euler_ancestral",
+    "noise_schedule": "karras",
+    "scale": 4.5,
+    "steps": 23,
+    "cfg_rescale": 0,
+    "dynamic_thresholding": false,
+    "skip_cfg_above_sigma": null,
+    "use_coords": false,
+    "autoSmea": false,
+    "prefer_brownian": true,
+    "legacy": false,
+    "legacy_uc": false,
+    "legacy_v3_extend": false,
     "deliberate_euler_ancestral_bug": false,
-    "add_original_image": true, "controlnet_strength": 1,
-    "normalize_reference_strength_multiple": true
-  }
+    "add_original_image": true,
+    "controlnet_strength": 1,
+    "normalize_reference_strength_multiple": true,
+  },
 }
 ```
 
@@ -576,13 +593,13 @@ prompt.characters[i]   → body.parameters.characterPrompts[i]
 
 官方 [Add Quality Tags](https://docs.novelai.net/en/image/qualitytags/) 各模型后缀（V3 之后一律在**末尾**）：
 
-| 模型 | 后缀 |
-| --- | --- |
-| **V4.5 Full** | `, location, very aesthetic, masterpiece, no text` |
+| 模型             | 后缀                                                                   |
+| ---------------- | ---------------------------------------------------------------------- |
+| **V4.5 Full**    | `, location, very aesthetic, masterpiece, no text`                     |
 | **V4.5 Curated** | `, location, masterpiece, no text, -0.8::feet::, `**`rating:general`** |
-| V4 Full | `, no text, best quality, very aesthetic, absurdres` |
-| V4 Curated | `, `**`rating:general`**`, amazing quality, very aesthetic, absurdres` |
-| Anime V3 | `, best quality, amazing quality, very aesthetic, absurdres` |
+| V4 Full          | `, no text, best quality, very aesthetic, absurdres`                   |
+| V4 Curated       | `, `**`rating:general`**`, amazing quality, very aesthetic, absurdres` |
+| Anime V3         | `, best quality, amazing quality, very aesthetic, absurdres`           |
 
 录制样本用的是 V4.5 Curated，其 `base_caption` 末尾逐字就是那一串。
 
@@ -599,13 +616,13 @@ prompt.characters[i]   → body.parameters.characterPrompts[i]
 
 #### 多角色官方规则（[Multi-Character Prompting](https://docs.novelai.net/en/image/multiplecharacters/)）
 
-| 规则 | 对 `image-prompt.ts` 的约束 |
-| --- | --- |
-| **最多 6 个角色** | 超出**截断并告警** |
-| 数量标签属于 base | 角色槽写 `girl, purple hair…`，**不写 `1girl`** |
-| 顺序 ≈ 阅读顺序 | 数组顺序 = 标记 `characters` 的顺序，别排序别去重 |
-| 位置是 5×5 网格，**只是轻微暗示** | v1 不用坐标：恒 `{x:0,y:0}` + `use_coords:false` + `use_order:true` |
-| **特征会串味，官方解法是逐角色 UC** | 角色预设 negative 进 `characterPrompts[].uc` |
+| 规则                                | 对 `image-prompt.ts` 的约束                                         |
+| ----------------------------------- | ------------------------------------------------------------------- |
+| **最多 6 个角色**                   | 超出**截断并告警**                                                  |
+| 数量标签属于 base                   | 角色槽写 `girl, purple hair…`，**不写 `1girl`**                     |
+| 顺序 ≈ 阅读顺序                     | 数组顺序 = 标记 `characters` 的顺序，别排序别去重                   |
+| 位置是 5×5 网格，**只是轻微暗示**   | v1 不用坐标：恒 `{x:0,y:0}` + `use_coords:false` + `use_order:true` |
+| **特征会串味，官方解法是逐角色 UC** | 角色预设 negative 进 `characterPrompts[].uc`                        |
 
 #### ⚠️ `ucPreset` 按模型各自编号
 
@@ -638,7 +655,7 @@ this.version(17).stores(
   withSchema(SCHEMA_V16, {
     sceneImages: 'id, saveId, messageId, [saveId+messageId], turn',
     sceneImageBlobs: 'id',
-    imagePresets: 'name',          // 主键即角色名（D2：严格 ===）
+    imagePresets: 'name', // 主键即角色名（D2：严格 ===）
   }),
 );
 ```
@@ -661,11 +678,11 @@ await db.sceneImages.where('saveId').equals(id).delete();
 
 ### 7.3 FullBackup（D8）
 
-| 表 | 进备份 | 理由 |
-| --- | --- | --- |
-| `sceneImages` | ✅ | 元数据是**配方**：prompt + seed + model + 标题说明。恢复出来是一份读得通的图鉴目录，可一键重画 |
-| `imagePresets` | ✅ | 纯文本、很小，与世界书/工坊项目同性质 |
-| `sceneImageBlobs` | ❌ | 字节进 JSON 备份会爆炸。与 `audioBlobs` / `assetBlobs` 一致 |
+| 表                | 进备份 | 理由                                                                                           |
+| ----------------- | ------ | ---------------------------------------------------------------------------------------------- |
+| `sceneImages`     | ✅     | 元数据是**配方**：prompt + seed + model + 标题说明。恢复出来是一份读得通的图鉴目录，可一键重画 |
+| `imagePresets`    | ✅     | 纯文本、很小，与世界书/工坊项目同性质                                                          |
+| `sceneImageBlobs` | ❌     | 字节进 JSON 备份会爆炸。与 `audioBlobs` / `assetBlobs` 一致                                    |
 
 **独立 zip 导出**：「导出本存档插画」，复用 `asset-zip.ts` 的流式机制。文件名 `<turn>_<title>.png`，附 `manifest.json` 带标题/说明/提示词/seed。
 
@@ -766,13 +783,13 @@ msg.content
 
 渲染只看两件事：这个 `(messageId, occurrence)` **有没有记录** × **当前哪一档开关**。
 
-| 有记录？ | 开关 | 渲染 |
-| --- | --- | --- |
-| 无 | `off` | **什么都不渲染**，标记隐形 |
-| 无 | `manual` / `auto` | **「生成插画」按钮** + 标题 + 说明。点击 → 建记录并发请求 |
-| `pending` | 任意 | 占位框（1216:832 骨架屏）+ 转圈。**刷新后仍在**（D5） |
-| `done` | 任意 | 图片，点击放大；悬停出「重画 / 复制提示词 / 收藏 / 删除」；多 take 时角落 `2/3` 可切（D17） |
-| `failed` | 任意 | 一行可读原因 + 「重试」（`retryable` 为 false 时不显示）。**绝不静默留白** |
+| 有记录？  | 开关              | 渲染                                                                                        |
+| --------- | ----------------- | ------------------------------------------------------------------------------------------- |
+| 无        | `off`             | **什么都不渲染**，标记隐形                                                                  |
+| 无        | `manual` / `auto` | **「生成插画」按钮** + 标题 + 说明。点击 → 建记录并发请求                                   |
+| `pending` | 任意              | 占位框（1216:832 骨架屏）+ 转圈。**刷新后仍在**（D5）                                       |
+| `done`    | 任意              | 图片，点击放大；悬停出「重画 / 复制提示词 / 收藏 / 删除」；多 take 时角落 `2/3` 可切（D17） |
+| `failed`  | 任意              | 一行可读原因 + 「重试」（`retryable` 为 false 时不显示）。**绝不静默留白**                  |
 
 > 💡「无记录 + `auto`」这一格是 D15 与 D21 的共同产物：自动只对新消息开火、超限降级到这里。所以把开关从手动拨到自动**不会追溯烧钱**，玩家仍能一张张补画。
 
@@ -799,22 +816,22 @@ msg.content
 
 ```ts
 // UiSettings 增量
-imageGenMode: ImageGenMode;          // 'manual'  ← 默认手动，见下
-imageEndpointId: string | null;      // null      指向 API 池（apiType:'image'）
-imageModel: string;                  // 'nai-diffusion-4-5-full'
-imageQualitySuffix: string;          // ', location, very aesthetic, masterpiece, no text'
-imageBaseNegative: string;           // 我们维护的基础负向
-imageExtraNegative: string;          // ''        用户追加
-imageDefaultRating: ImageRating;     // 'general'
-imageWidth: number;                  // 1216
-imageHeight: number;                 // 832
-imageSteps: number;                  // 23
-imageScale: number;                  // 4.5
-imageSampler: string;                // 'k_euler_ancestral'
-imageNoiseSchedule: string;          // 'karras'
-imageUcPreset: number;               // 0
-imageMaxPerMessage: number;          // 2
-imageMaxPerHour: number;             // 20
+imageGenMode: ImageGenMode; // 'manual'  ← 默认手动，见下
+imageEndpointId: string | null; // null      指向 API 池（apiType:'image'）
+imageModel: string; // 'nai-diffusion-4-5-full'
+imageQualitySuffix: string; // ', location, very aesthetic, masterpiece, no text'
+imageBaseNegative: string; // 我们维护的基础负向
+imageExtraNegative: string; // ''        用户追加
+imageDefaultRating: ImageRating; // 'general'
+imageWidth: number; // 1216
+imageHeight: number; // 832
+imageSteps: number; // 23
+imageScale: number; // 4.5
+imageSampler: string; // 'k_euler_ancestral'
+imageNoiseSchedule: string; // 'karras'
+imageUcPreset: number; // 0
+imageMaxPerMessage: number; // 2
+imageMaxPerHour: number; // 20
 ```
 
 **默认档位是 `'manual'`**：手动档下 AI 多写几个标记只是多几个按钮、不花钱，所以"story agent 该多久画一次"这个提示词工程问题可以先不解决 —— 让玩家看着标记频率合不合适，再决定要不要拨到自动。
@@ -834,16 +851,16 @@ imageMaxPerHour: number;             // 20
 
 ### 12.2 错误分类与文案
 
-| HTTP / 情形 | `kind` | UI 文案 | 可重试 |
-| --- | --- | --- | --- |
-| 401 | `auth` | NovelAI 令牌无效或已过期，去设置里重填 | ❌ |
-| 402 | `payment` | Anlas 不足，或这次的尺寸/步数超出了免费额度 | ❌ |
-| 429 | `rate-limit` | NovelAI 限流了，过一会儿再试 | ✅ |
-| 400 | `bad-request` | 请求被拒绝：{上游 detail 摘要} | ❌ |
-| 5xx | `upstream` | NovelAI 服务端出错了 | ✅ |
-| 网络/超时 | `network` | 连不上 NovelAI，检查网络或代理 | ✅ |
-| 用户取消 | `aborted` | 已取消 | ✅ |
-| 非 zip / 空 zip | `bad-response` | NovelAI 返回了看不懂的内容 | ✅ |
+| HTTP / 情形     | `kind`         | UI 文案                                     | 可重试 |
+| --------------- | -------------- | ------------------------------------------- | ------ |
+| 401             | `auth`         | NovelAI 令牌无效或已过期，去设置里重填      | ❌     |
+| 402             | `payment`      | Anlas 不足，或这次的尺寸/步数超出了免费额度 | ❌     |
+| 429             | `rate-limit`   | NovelAI 限流了，过一会儿再试                | ✅     |
+| 400             | `bad-request`  | 请求被拒绝：{上游 detail 摘要}              | ❌     |
+| 5xx             | `upstream`     | NovelAI 服务端出错了                        | ✅     |
+| 网络/超时       | `network`      | 连不上 NovelAI，检查网络或代理              | ✅     |
+| 用户取消        | `aborted`      | 已取消                                      | ✅     |
+| 非 zip / 空 zip | `bad-response` | NovelAI 返回了看不懂的内容                  | ✅     |
 
 `detail` 只进 console 与记录，**不进 UI**（上游报文可能很长且是英文）。
 
@@ -887,16 +904,16 @@ server/routes/image.ts          ← 复用 forward()
 
 ## 14. 测试清单
 
-| 模块 | 断言 |
-| --- | --- |
-| `image-segments.test.ts` | 分割位置 · occurrence 编号 · 0/1/多标记 · 标记在正文首尾 · 漏写闭合的兜底 · 自闭合被剥掉 · 无标记返回单个 text 段（非空数组） · **不引入第二个解析器**（走 `scanByTag`） |
-| `image-prompt.test.ts` | 四段顺序（**画质后缀在末尾**） · 查不到预设的角色被跳过并告警而非报错 · 角色 negative 进各自槽**而非**全局 · **第 7 个角色被截断且告警** · rating tag 正确 · **默认后缀不含 `rating:general`** · 权重语法原样透传 · 不产生 `, ,` |
-| `image-quota.test.ts` | 三层各自边界（L1 第 2/3 个 · L2 窗口内外 · L3 同回合已有 auto） · **三条互相独立**（任一不满足即拒） · **L3 只对 auto 生效** · 手动**永不被判成不可用**，只可能"要确认" · 拒绝理由是可读中文 |
-| `novelai.test.ts` | `buildNaiRequest` 逐字节确定 · ★**三重冗余一致**（`input`≡`base_caption`、`negative_prompt`≡负向 `base_caption`、`characterPrompts[i]`≡`char_captions[i]` 且**顺序一致**） · 0 角色时两数组皆 `[]` · `parseNaiZip` 喂**真 NAI zip fixture** → 字节 · 非 zip content-type → `bad-response` |
-| `marker-protocol.test.ts` | 既有 + `scene_image` 属性解析与正文提取 · **标题含引号/超长/缺省时只收敛不拒绝** |
-| `normalizeTagString`（并入 `image-prompt.test.ts`） | ★全角逗号/顿号/全角分号 → ASCII · `《》`→`<>`（`<lora:x:0.8>` 得以复原） · 换行与 `<br>` → `, ` · 连续逗号折叠 · **权重语法 `{{}}` / `[[]]` / `-0.8::feet::` 一个字符不改** · 首尾逗号被去掉 |
-| `scene-image-store.test.ts` | fake-indexeddb：pending 先落库 · 按 `[saveId+messageId]` 查 · 删存档连带删（且 `imagePresets` **不**删） · **重画追加 take 不覆盖** |
-| 渲染态判定（纯函数抽出来测） | §10.2 真值表逐格 —— 尤其**「无记录 + auto」出按钮而不是自动开火** |
+| 模块                                                | 断言                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `image-segments.test.ts`                            | 分割位置 · occurrence 编号 · 0/1/多标记 · 标记在正文首尾 · 漏写闭合的兜底 · 自闭合被剥掉 · 无标记返回单个 text 段（非空数组） · **不引入第二个解析器**（走 `scanByTag`）                                                                                                                  |
+| `image-prompt.test.ts`                              | 四段顺序（**画质后缀在末尾**） · 查不到预设的角色被跳过并告警而非报错 · 角色 negative 进各自槽**而非**全局 · **第 7 个角色被截断且告警** · rating tag 正确 · **默认后缀不含 `rating:general`** · 权重语法原样透传 · 不产生 `, ,`                                                          |
+| `image-quota.test.ts`                               | 三层各自边界（L1 第 2/3 个 · L2 窗口内外 · L3 同回合已有 auto） · **三条互相独立**（任一不满足即拒） · **L3 只对 auto 生效** · 手动**永不被判成不可用**，只可能"要确认" · 拒绝理由是可读中文                                                                                              |
+| `novelai.test.ts`                                   | `buildNaiRequest` 逐字节确定 · ★**三重冗余一致**（`input`≡`base_caption`、`negative_prompt`≡负向 `base_caption`、`characterPrompts[i]`≡`char_captions[i]` 且**顺序一致**） · 0 角色时两数组皆 `[]` · `parseNaiZip` 喂**真 NAI zip fixture** → 字节 · 非 zip content-type → `bad-response` |
+| `marker-protocol.test.ts`                           | 既有 + `scene_image` 属性解析与正文提取 · **标题含引号/超长/缺省时只收敛不拒绝**                                                                                                                                                                                                          |
+| `normalizeTagString`（并入 `image-prompt.test.ts`） | ★全角逗号/顿号/全角分号 → ASCII · `《》`→`<>`（`<lora:x:0.8>` 得以复原） · 换行与 `<br>` → `, ` · 连续逗号折叠 · **权重语法 `{{}}` / `[[]]` / `-0.8::feet::` 一个字符不改** · 首尾逗号被去掉                                                                                              |
+| `scene-image-store.test.ts`                         | fake-indexeddb：pending 先落库 · 按 `[saveId+messageId]` 查 · 删存档连带删（且 `imagePresets` **不**删） · **重画追加 take 不覆盖**                                                                                                                                                       |
+| 渲染态判定（纯函数抽出来测）                        | §10.2 真值表逐格 —— 尤其**「无记录 + auto」出按钮而不是自动开火**                                                                                                                                                                                                                         |
 
 > D15 值得单独一条断言：它是本设计唯一"错了会直接花钱"的规则，而其正确性来自"回调只在新消息时触发"这个**外部事实**。所以要测的不是回调本身，而是**渲染态判定不会把 auto 解释成"没记录就去生成"** —— 那是将来最可能被人"顺手补全"掉的一环。
 
@@ -904,22 +921,22 @@ server/routes/image.ts          ← 复用 forward()
 
 ## 15. 实施顺序
 
-| 阶段 | 内容 | 依赖 | 可并行 |
-| --- | --- | --- | --- |
-| **A** | `types-image.ts` + `image-defaults.ts` | 无 | — |
-| **B1** | `image-segments.ts` + 测试 | A | ✅ 与 B2/B3/B4 并行 |
-| **B2** | `image-prompt.ts` + 测试 | A | ✅ |
-| **B3** | `image-quota.ts` + 测试 | A | ✅ |
-| **B4** | `image-providers/novelai.ts` + 测试 | A | ✅ |
-| **C** | `marker-protocol.ts`：`MARKER_SPECS` 加一行 + `sanitizeCaption` + 测试 | A | — |
-| **D** | Dexie v17 + `scene-image-store` + `image-preset-store` + 测试 | A | — |
-| **E** | `server/routes/image.ts` + `vite.config.ts` + `image-client.ts` | A | 与 D 并行 |
-| **F** | `BeautifiedNarrative.vue` 改造 + `SceneImageSegment.vue` | B1, D | — |
-| **G** | `GamePipeline.onSceneImage` 接线（三档分流 + 限额） | C, D, E | — |
-| **H** | 设置分区 `settings/image/` | D | 与 F/G 并行 |
-| **I** | CG 图鉴 `CgGalleryPanel/Detail` + `SideToolbar` 入口 | D | 与 G/H 并行 |
-| **J** | `agent-config.json` story systemPrompt（教方言 + 标题写法 + 克制指令） | G | — |
-| **K** | 真机走查 + §6.3 的三点 curl 确认 | 全部 | — |
+| 阶段   | 内容                                                                   | 依赖    | 可并行              |
+| ------ | ---------------------------------------------------------------------- | ------- | ------------------- |
+| **A**  | `types-image.ts` + `image-defaults.ts`                                 | 无      | —                   |
+| **B1** | `image-segments.ts` + 测试                                             | A       | ✅ 与 B2/B3/B4 并行 |
+| **B2** | `image-prompt.ts` + 测试                                               | A       | ✅                  |
+| **B3** | `image-quota.ts` + 测试                                                | A       | ✅                  |
+| **B4** | `image-providers/novelai.ts` + 测试                                    | A       | ✅                  |
+| **C**  | `marker-protocol.ts`：`MARKER_SPECS` 加一行 + `sanitizeCaption` + 测试 | A       | —                   |
+| **D**  | Dexie v17 + `scene-image-store` + `image-preset-store` + 测试          | A       | —                   |
+| **E**  | `server/routes/image.ts` + `vite.config.ts` + `image-client.ts`        | A       | 与 D 并行           |
+| **F**  | `BeautifiedNarrative.vue` 改造 + `SceneImageSegment.vue`               | B1, D   | —                   |
+| **G**  | `GamePipeline.onSceneImage` 接线（三档分流 + 限额）                    | C, D, E | —                   |
+| **H**  | 设置分区 `settings/image/`                                             | D       | 与 F/G 并行         |
+| **I**  | CG 图鉴 `CgGalleryPanel/Detail` + `SideToolbar` 入口                   | D       | 与 G/H 并行         |
+| **J**  | `agent-config.json` story systemPrompt（教方言 + 标题写法 + 克制指令） | G       | —                   |
+| **K**  | 真机走查 + §6.3 的三点 curl 确认                                       | 全部    | —                   |
 
 **B 组四个纯函数模块完全不依赖任何未决事项，可以立刻开工。**
 
@@ -929,11 +946,11 @@ server/routes/image.ts          ← 复用 forward()
 
 ### A.1 另外三家 provider
 
-| Provider | 端点 / 鉴权 | 方言 | 分级 | 关键点 |
-| --- | --- | --- | --- | --- |
-| **A1111 / Forge** | `POST {base}/sdapi/v1/txt2img`；本地无鉴权 | danbooru | explicit-ok | 启动加 `--api`；CORS 用 `--cors-allow-origins=http://127.0.0.1:5173`（**正是 dev.bat 钉死的端口**）。响应 `{images:[b64], parameters, info}`。进度 `GET /sdapi/v1/progress`（不需 `id_task`）。中断 `/sdapi/v1/interrupt` |
-| **OpenAI** | `POST /v1/images/generations`；Bearer | prose | sfw-moderated | 模型 `gpt-image-2` / `gpt-image-1.5` / `gpt-image-1` / `gpt-image-1-mini`。🔴 **`gpt-image-2` 不支持透明背景**，要透明得挑 1.5 或更早 + `output_format` png/webp。GPT 系**恒回 `data[].b64_json`**，`response_format` 只对 DALL·E 有效。拒绝时 `error.code='moderation_blocked'` 带 `moderation_stage`(input/output) + `categories` |
-| **Google Gemini** | `POST https://generativelanguage.googleapis.com/v1beta/interactions`；`x-goog-api-key` | prose | sfw-moderated | 🔴 **不是 `:generateContent`**，是 Interactions API：`{model, input:[{type:'text'…},{type:'image'…}], response_format:{type:'image', aspect_ratio, image_size}}`，图在 `interaction.output_image.data`。模型 `gemini-3-pro-image`(NB Pro) / `gemini-3.1-flash-image`(NB 2)。宽高比含 `16:9`/`4:5`；分辨率 1K/2K/4K。**参考图做角色一致性**：NB Pro 支持 6 物件 + 5 角色 |
+| Provider          | 端点 / 鉴权                                                                            | 方言     | 分级          | 关键点                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------- | -------------------------------------------------------------------------------------- | -------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A1111 / Forge** | `POST {base}/sdapi/v1/txt2img`；本地无鉴权                                             | danbooru | explicit-ok   | 启动加 `--api`；CORS 用 `--cors-allow-origins=http://127.0.0.1:5173`（**正是 dev.bat 钉死的端口**）。响应 `{images:[b64], parameters, info}`。进度 `GET /sdapi/v1/progress`（不需 `id_task`）。中断 `/sdapi/v1/interrupt`                                                                                                                                               |
+| **OpenAI**        | `POST /v1/images/generations`；Bearer                                                  | prose    | sfw-moderated | 模型 `gpt-image-2` / `gpt-image-1.5` / `gpt-image-1` / `gpt-image-1-mini`。🔴 **`gpt-image-2` 不支持透明背景**，要透明得挑 1.5 或更早 + `output_format` png/webp。GPT 系**恒回 `data[].b64_json`**，`response_format` 只对 DALL·E 有效。拒绝时 `error.code='moderation_blocked'` 带 `moderation_stage`(input/output) + `categories`                                     |
+| **Google Gemini** | `POST https://generativelanguage.googleapis.com/v1beta/interactions`；`x-goog-api-key` | prose    | sfw-moderated | 🔴 **不是 `:generateContent`**，是 Interactions API：`{model, input:[{type:'text'…},{type:'image'…}], response_format:{type:'image', aspect_ratio, image_size}}`，图在 `interaction.output_image.data`。模型 `gemini-3-pro-image`(NB Pro) / `gemini-3.1-flash-image`(NB 2)。宽高比含 `16:9`/`4:5`；分辨率 1K/2K/4K。**参考图做角色一致性**：NB Pro 支持 6 物件 + 5 角色 |
 
 接 Gemini 时 BFF 要加 **`x-goog-api-key`** 到 `forward()` 白名单**和** `app.ts` 的 `cors({allowHeaders})` —— **两处都要**，漏一处是跨端口访问时才炸的那类 bug。
 
@@ -982,6 +999,7 @@ export type AssetCategory = 'character' | 'scene';
 ## 附录 B：核准来源（2026-08-04）
 
 **NovelAI**
+
 - 真实录制的 V4.5 请求体：`LlmKira/novelai-python` → `record/ai/generate_image/text2image_v4/schema.json`
 - 端点与 zip 响应的一线 TS 实现：<https://github.com/koishijs/novelai-bot/blob/main/src/index.ts>
 - [Multi-Character Prompting](https://docs.novelai.net/en/image/multiplecharacters/) —— 6 角色上限 / base 与角色槽分工 / 顺序 / 位置只是暗示 / 串味与逐角色 UC
@@ -991,6 +1009,7 @@ export type AssetCategory = 'character' | 'scene';
 - `image.novelai.net/openapi.json` 只含 Observability API，**不含生图端点** —— 公开面无 schema 可查，故取证走录制请求
 
 **v2 路线图**
+
 - [Gemini 图像生成](https://ai.google.dev/gemini-api/docs/image-generation)
 - [OpenAI 图像生成指南](https://developers.openai.com/api/docs/guides/image-generation) · [参数参考](https://developers.openai.com/api/reference/python/resources/images/methods/generate)
 - [AUTOMATIC1111 API Wiki](https://github.com/AUTOMATIC1111/stable-diffusion-webui/wiki/API) · [`--cors-allow-origins` PR](https://github.com/AUTOMATIC1111/stable-diffusion-webui/pull/4294) · [progress 端点讨论](https://github.com/AUTOMATIC1111/stable-diffusion-webui/discussions/7888)
