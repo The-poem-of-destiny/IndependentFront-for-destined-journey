@@ -68,6 +68,12 @@ docs/
 ├── planning/2026-07-31-creative-workshop-compat-design.md
 │                                       # 🆕 创意工坊兼容层设计 v2（D1-D17）← 改工坊/世界书存储必读
 │                                       #    Phase 0 世界书迁 Dexie · Phase 1 工坊 · Phase 2 EJS 沙盒（✅ 待真机）
+├── planning/2026-08-04-image-generation-design.md
+│                                       # 🆕 图像生成 v1（D1-D27）← 做文生图必读。**设计定稿，未实施**
+│                                       #    v1 范围：NovelAI 单家 + 情景插画（标记当锚点，图就地插进正文）
+│                                       #    🔴 三条钱相关的铁则：自动档不追溯开火 / 同回合不重复自动生成 /
+│                                       #      超限降级成手动按钮而非丢弃标记
+│                                       #    NAI V4 请求体三重冗余（input + v4_prompt + characterPrompts）已核准
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
