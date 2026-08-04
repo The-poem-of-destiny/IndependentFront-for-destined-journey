@@ -42,6 +42,12 @@ import { useSettingsStore } from './settings-store';
 import { useCreateStore } from './create-store';
 import { MIGRATED_FLAG_KEY, LEGACY_BOOKS_KEY } from './worldbook-migration';
 
+// Q-18: 已迁出的历史键（worldBooks / *MigratedAt）**刻意不在 `UiSettings` 上** ——
+//        声明它们等于把「设置袋子还是真相来源」这条错觉还回去（理由见 settings-types.ts
+//        文件头）。迁移测试要按运行时字符串键读它们，所以在这里显式放宽一次，
+//        而不是给类型开一个所有笔误都能钻的口子。
+const loose = (s: unknown): Record<string, unknown> => s as Record<string, unknown>;
+
 // ===== 夹具 =====
 
 const STORAGE_KEY = 'fated-poem-settings';
@@ -123,7 +129,7 @@ describe('P0-4 世界书消费端切换 —— 启动流程', () => {
     expect(await getDatabase().worldBooks.count()).toBe(3);
 
     // 消费端读的是 `wb.books.length`，不再是被移除的 `s.worldBooks.length`
-    expect(useSettingsStore().settings[LEGACY_BOOKS_KEY]).toBeUndefined();
+    expect(loose(useSettingsStore().settings)[LEGACY_BOOKS_KEY]).toBeUndefined();
   });
 
   it('全新用户: 捏人页 loadWorldBookEntries() 拿得到 system_core / character 条目', async () => {
@@ -158,8 +164,8 @@ describe('P0-4 世界书消费端切换 —— 启动流程', () => {
 
     // ② localStorage 键消失 + 标志位置位，且序列化里搜不到书内容
     const settings = useSettingsStore().settings;
-    expect(settings[LEGACY_BOOKS_KEY]).toBeUndefined();
-    expect(typeof settings[MIGRATED_FLAG_KEY]).toBe('number');
+    expect(loose(settings)[LEGACY_BOOKS_KEY]).toBeUndefined();
+    expect(typeof loose(settings)[MIGRATED_FLAG_KEY]).toBe('number');
     useSettingsStore().saveNow();
     const serialized = JSON.stringify(settings) + (lsBacking.get(STORAGE_KEY) ?? '');
     expect(serialized).not.toContain('用户改过的正文');

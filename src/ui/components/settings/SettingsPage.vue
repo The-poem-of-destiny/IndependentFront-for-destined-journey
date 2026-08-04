@@ -19,6 +19,7 @@ import {
   getAgentSettings,
   patchAgentSettings,
   resetAgentSettings,
+  type AgentSettingsEntry,
 } from '../../stores/agent-settings';
 import { useWorldBookStore } from '../../stores/worldbook-store';
 import AppButton from '../shared/AppButton.vue';
@@ -138,8 +139,8 @@ onMounted(() => {
 const agentPromptDraft = ref('');
 const agentTemplateDraft = ref('');
 // 初始化时从 store 恢复 agent 提示词
-if (activeAgent.value && s.agentPrompts[activeAgent.value]) {
-  agentPromptDraft.value = s.agentPrompts[activeAgent.value];
+if (activeAgent.value) {
+  agentPromptDraft.value = getAgentSettings(s, activeAgent.value).systemPrompt;
 }
 
 // ============================================================
@@ -441,9 +442,9 @@ async function loadPresets() {
       if (p.length > 0) s.presets = p as PresetItem[];
     }
     // 确保自动选中：如果还没选中且有可用预设，优先项目默认
-    if (!s.activePresetId && (s.presets as PresetItem[]).length > 0) {
+    if (!s.activePresetId && s.presets.length > 0) {
       const pd = cfg.projectAgentDefaults?.agents?.story;
-      if (pd?.presetId && (s.presets as PresetItem[]).find((p) => p.id === pd.presetId)) {
+      if (pd?.presetId && s.presets.find((p) => p.id === pd.presetId)) {
         s.activePresetId = pd.presetId;
       }
     }
@@ -601,11 +602,32 @@ const availableApiModels = computed(() => {
   return m;
 });
 
+/**
+ * 当前 Agent 的完整设置（数值项已合默认）。
+ *
+ * 模板里的 7 个旋钮从此读它，不再各写一遍 `s.agentTemperature[activeAgent] ?? 0.7`
+ * —— 那 5 个字面量是 AGENT_SETTINGS_DEFAULTS 之外仅存的拷贝（Q-18 核查发现）。
+ * 没选中 Agent 时给一份全默认的条目，模板不必再到处判空。
+ */
+const agentCfg = computed(() => getAgentSettings(s, activeAgent.value ?? ''));
+
+/** 改当前 Agent 的若干项并置脏位 —— 模板里每个旋钮共用这一条路径 */
+function setAgentField(patch: Partial<AgentSettingsEntry>) {
+  if (!activeAgent.value) return;
+  patchAgentSettings(s, activeAgent.value, patch);
+  s.agentDirty[activeAgent.value] = true;
+}
+
+/** 子导航角标要问「这个 agent 选过 API 池没有」，问的不是当前选中的那个 */
+function agentModelOf(agentId: string): string {
+  return getAgentSettings(s, agentId).model;
+}
+
 function selectAgent(agentId: string) {
   activeAgent.value = agentId;
   s.activeAgent = agentId;
   // 优先加载用户自定义的 system prompt，否则加载引擎内置模板
-  const custom = s.agentPrompts[agentId];
+  const custom = getAgentSettings(s, agentId).systemPrompt;
   if (custom) {
     agentPromptDraft.value = custom;
   } else {
@@ -623,7 +645,7 @@ function selectAgent(agentId: string) {
   s.agentPromptEdited = false;
 
   // Load template from user custom, agent-config, or default
-  const customTemplate = s.agentTemplates[agentId];
+  const customTemplate = getAgentSettings(s, agentId).template;
   if (customTemplate) {
     agentTemplateDraft.value = customTemplate;
   } else {
@@ -638,7 +660,7 @@ function selectAgent(agentId: string) {
 
 function confirmPrompt() {
   if (!activeAgent.value) return;
-  s.agentPrompts[activeAgent.value] = agentPromptDraft.value;
+  patchAgentSettings(s, activeAgent.value, { systemPrompt: agentPromptDraft.value });
   s.agentPromptEdited = false;
   s.agentDirty[activeAgent.value] = true;
   ui.toast('提示词已保存', 'success');
@@ -646,7 +668,7 @@ function confirmPrompt() {
 function resetPrompt() {
   if (!activeAgent.value) return;
   agentPromptDraft.value = '';
-  s.agentPrompts[activeAgent.value] = '';
+  patchAgentSettings(s, activeAgent.value, { systemPrompt: '' });
   s.agentPromptEdited = false;
   s.agentDirty[activeAgent.value] = false;
   ui.toast('已清除自定义提示词，将使用引擎内置模板', 'info');
@@ -674,10 +696,11 @@ async function saveAsDefault() {
     }
   } else {
     // 其他 Agent：提交 System Prompt + Template
-    s.agentPrompts[agentId] = agentPromptDraft.value;
+    patchAgentSettings(s, agentId, {
+      systemPrompt: agentPromptDraft.value,
+      template: agentTemplateDraft.value,
+    });
     entry.systemPrompt = agentPromptDraft.value || '';
-    // Save template
-    s.agentTemplates[agentId] = agentTemplateDraft.value;
     entry.template = agentTemplateDraft.value || '';
   }
 
@@ -707,8 +730,10 @@ function saveAgentSettings() {
   if (!activeAgent.value) return;
   // 非 story Agent：提交 System Prompt + Template 到持久化
   if (activeAgent.value !== 'story') {
-    s.agentPrompts[activeAgent.value] = agentPromptDraft.value;
-    s.agentTemplates[activeAgent.value] = agentTemplateDraft.value;
+    patchAgentSettings(s, activeAgent.value, {
+      systemPrompt: agentPromptDraft.value,
+      template: agentTemplateDraft.value,
+    });
   }
   s.agentDirty[activeAgent.value] = true;
   ui.toast('Agent 设置已保存', 'success');
@@ -718,17 +743,15 @@ function saveAgentSettings() {
 function onHistoryLayersInput(ev: Event) {
   if (!activeAgent.value) return;
   const v = (ev.target as HTMLInputElement).value;
-  if (v === '') delete s.agentHistoryLayers[activeAgent.value];
-  else s.agentHistoryLayers[activeAgent.value] = Number(v);
-  s.agentDirty[activeAgent.value] = true;
+  // 空串传 undefined —— patchAgentSettings 会**删键**而不是写 undefined，
+  // 「键不存在」正是「按 Agent 类别走引擎默认」那条语义
+  setAgentField({ historyLayers: v === '' ? undefined : Number(v) });
 }
 /** Phase 8.6: 历史截断字数输入 — 空值清除 (走引擎类别默认)，非空写入 */
 function onHistorySliceInput(ev: Event) {
   if (!activeAgent.value) return;
   const v = (ev.target as HTMLInputElement).value;
-  if (v === '') delete s.agentHistorySlice[activeAgent.value];
-  else s.agentHistorySlice[activeAgent.value] = Number(v);
-  s.agentDirty[activeAgent.value] = true;
+  setAgentField({ historySlice: v === '' ? undefined : Number(v) });
 }
 async function restoreAgentDefaults() {
   if (!activeAgent.value) return;
@@ -738,12 +761,14 @@ async function restoreAgentDefaults() {
   const pd = cfg.projectAgentDefaults?.agents?.[agentId];
   if (pd) {
     // 不恢复模型选择 — 用户自己选的 API 和模型不应该被默认值覆盖
-    s.agentWorldbookEnabled[agentId] = pd.worldBookEnabled ?? false;
-    s.agentWorldbookIds[agentId] = [...(pd.worldBookIds || [])];
+    patchAgentSettings(s, agentId, {
+      worldBookEnabled: pd.worldBookEnabled ?? false,
+      worldBookIds: [...(pd.worldBookIds || [])],
+    });
     if (agentId === 'story') {
       s.activePresetId = pd.presetId || '';
       if (pd.preset) {
-        const existing = (s.presets as PresetItem[]).find((p) => p.id === pd.preset!.id);
+        const existing = s.presets.find((p) => p.id === pd.preset!.id);
         if (!existing) {
           s.presets.push(pd.preset);
           // 🔒 P2-04: await 写 IndexedDB —— 此前 fire-and-forget + 空 catch，
@@ -757,16 +782,11 @@ async function restoreAgentDefaults() {
         }
       }
     } else {
-      s.agentPrompts[agentId] = pd.systemPrompt || '';
+      patchAgentSettings(s, agentId, { systemPrompt: pd.systemPrompt || '' });
       agentPromptDraft.value = pd.systemPrompt || '';
-      // Restore template from project default
-      if (pd.template) {
-        s.agentTemplates[agentId] = pd.template;
-        agentTemplateDraft.value = pd.template;
-      } else {
-        agentTemplateDraft.value = '';
-        delete s.agentTemplates[agentId];
-      }
+      // Restore template from project default（没给就删键，不是写空串）
+      patchAgentSettings(s, agentId, { template: pd.template || undefined });
+      agentTemplateDraft.value = pd.template || '';
     }
     // Q-18: 五个数值旋钮 + 两项历史注入配置一次写完，默认值只在
     // AGENT_SETTINGS_DEFAULTS 出现一次（此前这里各写一遍 `?? 0.7 / ?? 16384`，
@@ -807,14 +827,11 @@ async function restoreAgentDefaults() {
 
 function toggleAgentWorldBook(agentId: string | null, bookId: string) {
   if (!agentId) return;
-  const ids = s.agentWorldbookIds[agentId] || [];
+  const ids = getAgentSettings(s, agentId).worldBookIds; // 已是副本
   const idx = ids.indexOf(bookId);
-  if (idx >= 0) {
-    ids.splice(idx, 1);
-  } else {
-    ids.push(bookId);
-  }
-  s.agentWorldbookIds[agentId] = [...ids];
+  if (idx >= 0) ids.splice(idx, 1);
+  else ids.push(bookId);
+  patchAgentSettings(s, agentId, { worldBookIds: ids });
   s.agentDirty[agentId] = true;
 }
 </script>
@@ -860,7 +877,7 @@ function toggleAgentWorldBook(agentId: string | null, bookId: string) {
           <span class="sub-nav-name">{{ ag.name }}</span>
           <!-- 未配置 API 标红 -->
           <span v-if="!hasApi" class="sub-nav-badge sub-nav-bad">!</span>
-          <span v-else-if="!s.agentModels[ag.id]" class="sub-nav-badge sub-nav-bad">&#10005;</span>
+          <span v-else-if="!agentModelOf(ag.id)" class="sub-nav-badge sub-nav-bad">&#10005;</span>
           <span v-else class="sub-nav-badge sub-nav-ok">&#10003;</span>
         </button>
       </nav>
@@ -890,21 +907,16 @@ function toggleAgentWorldBook(agentId: string | null, bookId: string) {
                 <div class="key-row">
                   <select
                     class="form-input"
-                    :value="s.agentModels[activeAgent] || ''"
-                    @change="
-                      s.agentModels[activeAgent] = ($event.target as HTMLSelectElement).value;
-                      s.agentDirty[activeAgent] = true;
-                    "
+                    :value="agentCfg.model"
+                    @change="setAgentField({ model: ($event.target as HTMLSelectElement).value })"
                   >
                     <option value="">— 请选择 API 池 —</option>
                     <option v-for="ep in s.apiPool" :key="ep.id" :value="ep.id">
                       {{ ep.name }} — {{ ep.model || '未选择模型' }}
                     </option>
                   </select>
-                  <span v-if="!s.agentModels[activeAgent] && !hasApi" class="api-warn"
-                    >请先配置 API</span
-                  >
-                  <span v-else-if="!s.agentModels[activeAgent]" class="api-warn">未选择</span>
+                  <span v-if="!agentCfg.model && !hasApi" class="api-warn">请先配置 API</span>
+                  <span v-else-if="!agentCfg.model" class="api-warn">未选择</span>
                   <span v-else class="api-ok">✓</span>
                 </div>
               </AppCard>
@@ -925,13 +937,12 @@ function toggleAgentWorldBook(agentId: string | null, bookId: string) {
                       step="0.1"
                       min="0"
                       max="2"
-                      :value="s.agentTemperature[activeAgent] ?? 0.7"
+                      :value="agentCfg.temperature"
                       class="form-input"
                       @input="
-                        s.agentTemperature[activeAgent] = Number(
-                          ($event.target as HTMLInputElement).value,
-                        );
-                        s.agentDirty[activeAgent] = true;
+                        setAgentField({
+                          temperature: Number(($event.target as HTMLInputElement).value),
+                        })
                       "
                     />
                   </label>
@@ -943,13 +954,10 @@ function toggleAgentWorldBook(agentId: string | null, bookId: string) {
                       step="0.05"
                       min="0"
                       max="1"
-                      :value="s.agentTopP[activeAgent] ?? 1.0"
+                      :value="agentCfg.topP"
                       class="form-input"
                       @input="
-                        s.agentTopP[activeAgent] = Number(
-                          ($event.target as HTMLInputElement).value,
-                        );
-                        s.agentDirty[activeAgent] = true;
+                        setAgentField({ topP: Number(($event.target as HTMLInputElement).value) })
                       "
                     />
                   </label>
@@ -961,13 +969,12 @@ function toggleAgentWorldBook(agentId: string | null, bookId: string) {
                       step="0.1"
                       min="-2"
                       max="2"
-                      :value="s.agentFreqPen[activeAgent] ?? 0"
+                      :value="agentCfg.freqPen"
                       class="form-input"
                       @input="
-                        s.agentFreqPen[activeAgent] = Number(
-                          ($event.target as HTMLInputElement).value,
-                        );
-                        s.agentDirty[activeAgent] = true;
+                        setAgentField({
+                          freqPen: Number(($event.target as HTMLInputElement).value),
+                        })
                       "
                     />
                   </label>
@@ -979,13 +986,12 @@ function toggleAgentWorldBook(agentId: string | null, bookId: string) {
                       step="0.1"
                       min="-2"
                       max="2"
-                      :value="s.agentPresPen[activeAgent] ?? 0"
+                      :value="agentCfg.presPen"
                       class="form-input"
                       @input="
-                        s.agentPresPen[activeAgent] = Number(
-                          ($event.target as HTMLInputElement).value,
-                        );
-                        s.agentDirty[activeAgent] = true;
+                        setAgentField({
+                          presPen: Number(($event.target as HTMLInputElement).value),
+                        })
                       "
                     />
                   </label>
@@ -997,13 +1003,12 @@ function toggleAgentWorldBook(agentId: string | null, bookId: string) {
                       min="100"
                       max="32768"
                       step="100"
-                      :value="s.agentMaxTokens[activeAgent] ?? 16384"
+                      :value="agentCfg.maxTokens"
                       class="form-input"
                       @input="
-                        s.agentMaxTokens[activeAgent] = Number(
-                          ($event.target as HTMLInputElement).value,
-                        );
-                        s.agentDirty[activeAgent] = true;
+                        setAgentField({
+                          maxTokens: Number(($event.target as HTMLInputElement).value),
+                        })
                       "
                     />
                   </label>
@@ -1018,7 +1023,7 @@ function toggleAgentWorldBook(agentId: string | null, bookId: string) {
                       min="0"
                       max="20"
                       step="1"
-                      :value="s.agentHistoryLayers[activeAgent] ?? ''"
+                      :value="agentCfg.historyLayers ?? ''"
                       placeholder="(默认)"
                       class="form-input"
                       @input="onHistoryLayersInput($event)"
@@ -1035,7 +1040,7 @@ function toggleAgentWorldBook(agentId: string | null, bookId: string) {
                       min="100"
                       max="8000"
                       step="100"
-                      :value="s.agentHistorySlice[activeAgent] ?? ''"
+                      :value="agentCfg.historySlice ?? ''"
                       placeholder="(默认)"
                       class="form-input"
                       @input="onHistorySliceInput($event)"
@@ -1054,12 +1059,11 @@ function toggleAgentWorldBook(agentId: string | null, bookId: string) {
                     <input
                       type="checkbox"
                       class="toggle-input"
-                      :checked="s.agentWorldbookEnabled[activeAgent] || false"
+                      :checked="agentCfg.worldBookEnabled"
                       @change="
-                        s.agentWorldbookEnabled[activeAgent] = (
-                          $event.target as HTMLInputElement
-                        ).checked;
-                        s.agentDirty[activeAgent] = true;
+                        setAgentField({
+                          worldBookEnabled: ($event.target as HTMLInputElement).checked,
+                        })
                       "
                     />
                     <span class="toggle-slider"></span>
@@ -1074,7 +1078,7 @@ function toggleAgentWorldBook(agentId: string | null, bookId: string) {
                   <label v-for="book in wb.books" :key="book.id" class="worldbook-checkbox">
                     <input
                       type="checkbox"
-                      :checked="(s.agentWorldbookIds[activeAgent] || []).includes(book.id)"
+                      :checked="agentCfg.worldBookIds.includes(book.id)"
                       :aria-label="`关联世界书: ${book.name}`"
                       @change="toggleAgentWorldBook(activeAgent, book.id)"
                     />

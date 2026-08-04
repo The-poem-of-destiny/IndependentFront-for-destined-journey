@@ -120,7 +120,7 @@ export const useBeautifierStore = defineStore('beautifier', () => {
 
   /** 用户手动翻转默认启用状态的内置规则 id —— 仍住在 settings（字段名保持兼容） */
   function builtinDisabled(): string[] {
-    return (useSettingsStore().settings.beautifierBuiltinDisabled as string[]) ?? [];
+    return useSettingsStore().settings.beautifierBuiltinDisabled ?? [];
   }
 
   // ===== 用户规则 CRUD =====

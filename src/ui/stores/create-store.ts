@@ -902,7 +902,7 @@ export const useCreateStore = defineStore('create', () => {
   // 剧情大纲生成 — 捏人页走模板系统 (buildAgentMessagesAsync)
   // ═══════════════════════════════════════════════════════
 
-  /** 端点解析（对齐 game-pipeline.buildEndpoints: agentModels 存 API 池 id，ApiEntry.model → defaultModel） */
+  /** 端点解析（对齐 game-pipeline.buildEndpoints: 每个 Agent 的 `model` 存 API 池 id，ApiEntry.model → defaultModel） */
   function resolvePlotOutlineEndpoint(): ApiEndpoint | null {
     try {
       const s = useSettingsStore().settings;
@@ -917,7 +917,7 @@ export const useCreateStore = defineStore('create', () => {
         timeout: entry.timeout ?? 60000,
         enableThinking: entry.enableThinking ?? false,
       })) as ApiEndpoint[];
-      const poolId = ((s.agentModels ?? {}) as Record<string, string>)['plot_outline'] || '';
+      const poolId = getAgentSettings(s, 'plot_outline').model;
       return pool.find((ep) => ep.id === poolId) || pool[0] || null;
     } catch {
       return null;

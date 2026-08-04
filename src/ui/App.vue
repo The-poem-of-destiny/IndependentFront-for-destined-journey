@@ -67,7 +67,7 @@ void beautifier.init().catch(() => {
 // 系统的 `prefers-reduced-motion` 由 CSS 那条媒体查询独立负责，与本开关是或的关系
 // —— 所以这里只写 true/false，不去读系统偏好。
 watch(
-  () => settings.settings.reducedMotion as boolean,
+  () => settings.settings.reducedMotion,
   (enabled) => applyReducedMotion(Boolean(enabled)),
   { immediate: true },
 );

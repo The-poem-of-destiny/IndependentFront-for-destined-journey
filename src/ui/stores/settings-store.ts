@@ -1,18 +1,30 @@
 /**
- * 设置持久化 Store — 通用 key-value 自动存 localStorage
+ * 设置持久化 Store — 一个 ref 装所有设置，deep watch 自动写 localStorage。
  *
  * 用法：
  *   const s = useSettingsStore()
  *   s.settings.apiPool = [...]        // 写入 → 自动存
- *   s.settings.任意新字段 = 值         // 加新设置零改动
  *
- * 设计：一个 ref 装所有设置，deep watch 自动写 localStorage。
+ * 🔴 **加新设置要改两处**（Q-18，2026-08-04 主人拍板）：
+ *    先在 `settings-types.ts` 的 `UiSettings` 上声明，再在 `getDefaults()` 里给默认值。
+ *
+ *    这条注释原先写的是「`s.settings.任意新字段 = 值` —— 加新设置零改动」，
+ *    而那正是被反转掉的设计意图。反转的理由：这袋子是全应用最热的状态
+ *    （模型选择 / 温度 / systemPrompt / 世界书勾选 / 主题 / 音量），九个组件把
+ *    `v-model` 直接绑在 `s.<任意键>` 上 —— 「零改动」意味着模板里一个笔误
+ *    （`agentTopp`、`hoverDelayMS`）不是错误，而是一个被 deep watch **永久**写进
+ *    localStorage 的幽灵键，症状只会在真机上表现成「设置页改了、引擎行为没变」。
+ *    多写一行声明换整条链路的编译期保护，这笔账划得来。
+ *
+ *    已迁出的历史键与迁移标志位刻意**不**在 `UiSettings` 上（见该文件头）。
  */
 import { defineStore } from 'pinia';
 import { ref, watch } from 'vue';
 import { deleteApiEndpoint, getApiEndpoints, saveApiEndpoint } from '@engine/database';
 import { detach } from './db-write';
 import { fillMissingAgentSettings } from './agent-settings';
+import { migrateLegacyAgentMaps } from './agent-settings-migration';
+import type { UiSettings } from './settings-types';
 import {
   apiEndpointToEntry,
   apiEntryToEndpoint,
@@ -101,34 +113,39 @@ export function serializeSettingsForLocalStorage(settings: Record<string, unknow
   return JSON.stringify(copy);
 }
 
-function getDefaults(): Record<string, any> {
+function getDefaults(): UiSettings {
   return {
     // API 池
-    apiPool: [] as ApiEntry[],
+    apiPool: [],
 
     // Agent 配置
-    activeAgent: null as string | null,
-    agentModels: {} as Record<string, string>,
-    agentWorldbookEnabled: {} as Record<string, boolean>,
-    agentWorldbookIds: {} as Record<string, string[]>,
-    agentPrompts: {} as Record<string, string>,
-    /** Phase 10: 用户自定义的 Agent 上下文模板 ({{PLACEHOLDER}} 字符串) */
-    agentTemplates: {} as Record<string, string>,
+    activeAgent: null,
+    /**
+     * per-Agent 设置 —— 一个 agent 一条（Q-18）。
+     *
+     * 此前是 12 张用同一个 agentId 作键的兄弟 map（agentModels / agentPrompts /
+     * agentTemperature / …）。加一个旋钮要改七处，漏改一张会产出「UI 上看着正常」
+     * 的半恢复 Agent。老用户那 12 张由 `migrateLegacyAgentMaps` 在 store 构造期
+     * （`ref()` 之前）折进来，所以活状态里只会有这一种形状。
+     *
+     * 唯一读写口是 `agent-settings.ts`；数值默认在 `AGENT_SETTINGS_DEFAULTS`。
+     */
+    agents: {},
+    /**
+     * 「这个 Agent 有未保存的改动」。
+     *
+     * 🔴 **不并进 `agents`**：它是 UI 状态不是设置，而 `AgentSettingsEntry` 与磁盘上的
+     *    `AgentDefaultEntry` 刻意同形 —— 混进去会让它跟着 `saveAsDefault` 一路写进
+     *    `data/defaults/agent-config.json`。
+     * 🔴 **今天全仓零读取**（15 处写、0 处读，Q-18 核查）：本该驱动子导航上的
+     *    「●未保存」角标，那个角标没有被实现。留着是因为删掉 15 个写入点会把这次
+     *    类型化的 diff 冲淡，且真要补那个角标时管线是现成的。`agentPromptEdited` 同此。
+     */
+    agentDirty: {},
     agentPromptEdited: false,
-    agentDirty: {} as Record<string, boolean>,
-
-    // Agent LLM 参数 (每 Agent 独立)
-    agentTemperature: {} as Record<string, number>,
-    agentTopP: {} as Record<string, number>,
-    agentFreqPen: {} as Record<string, number>,
-    agentPresPen: {} as Record<string, number>,
-    agentMaxTokens: {} as Record<string, number>,
-    // Phase 8.6: Agent 上下文注入 (每 Agent 独立)
-    agentHistoryLayers: {} as Record<string, number>,
-    agentHistorySlice: {} as Record<string, number>,
 
     // 预设系统 (ChatPreset)
-    presets: [] as PresetItem[],
+    presets: [],
     activePresetId: '',
 
     // Phase 8: 世界书管理
@@ -136,28 +153,28 @@ function getDefaults(): Record<string, any> {
     //    唯一入口是 worldbook-store。此处刻意**不留默认值** —— 留个空数组会让消费端
     //    以为这里仍是真相来源，而 deep watch 又会把它写回 localStorage。
     //    下面几项是 UI 选择/开关，不是书内容，继续留在设置里。
-    activeWorldBookId: null as string | null,
+    activeWorldBookId: null,
     worldBookDirty: false,
     allowEditBuiltInBooks: false, // 允许编辑内置世界书（默认只读保护）
 
     // 剧情系统（新档默认值 — 捏人页初始化时读入，字段形状对齐 create-store / types.ts PlotSettings）
-    plotMode: 'off' as string,
+    plotMode: 'off',
     plotDurationYears: 5,
-    plotDifficultyTier: 'adaptive' as string | number,
+    plotDifficultyTier: 'adaptive',
     plotAllowNonWorldbookNpc: true,
-    plotGenrePreference: ['combat', 'social'] as string[],
+    plotGenrePreference: ['combat', 'social'],
     plotCustomPreference: '',
     plotFocusRegion: '',
     plotTabooContent: '',
-    plotChapterCount: 0 as number,
-    plotEventsPerChapter: 0 as number,
+    plotChapterCount: 0,
+    plotEventsPerChapter: 0,
 
     // 记忆 & 缓存
     memoryRecallCount: 20,
     memoryCompressionThreshold: 100,
     memorySnapshotLimit: 30,
-    snapshotRetentionMode: 'tiered' as 'tiered' | 'dense',
-    memoryCacheStrategy: 'balanced' as string,
+    snapshotRetentionMode: 'tiered',
+    memoryCacheStrategy: 'balanced',
 
     // 交互 —— 悬停浮层延迟（ms）。全站 hover-to-display 统一读它：
     // 状态效果气泡、在场角色心声气泡等。0 = 立即弹出。
@@ -178,7 +195,7 @@ function getDefaults(): Record<string, any> {
       character_update: false,
       item_update: false,
       quest_update: false,
-    } as Record<string, boolean>,
+    },
 
     // 音频系统（全局环境属性，不属于存档状态 — 设计 §4.1）
     audioMasterVolume: 0.7,
@@ -187,11 +204,11 @@ function getDefaults(): Record<string, any> {
     audioMusicMuted: false,
     audioSfxVolume: 0.7,
     audioSfxMuted: false,
-    audioRepeat: 'all' as 'off' | 'all' | 'one',
+    audioRepeat: 'all',
     audioShuffle: false,
     audioLastPlaylistId: '',
     /** 内置曲目不可删，只能隐藏（设计 §2）— 对齐 beautifierBuiltinDisabled 先例 */
-    audioHiddenBuiltinIds: [] as string[],
+    audioHiddenBuiltinIds: [],
     /**
      * 进入新地点时自动换 BGM。默认开 —— 这是场景配乐的主路径。
      * 关掉之后地点变化不再触发，音乐完全由用户手动控制（AI 的 <play_audio> 标记同样不生效）。
@@ -205,7 +222,7 @@ function getDefaults(): Record<string, any> {
     //   · beautifierPresetRules → 派生缓存，改为 beautifier-store 的纯内存 ref，不再持久化
     //   留个空数组会让消费端以为这里仍是真相来源，而 deep watch 又会把它写回 localStorage。
     //   下面这项是几个 id 的开关列表，体积无关紧要，继续留在设置里。
-    beautifierBuiltinDisabled: [] as string[],
+    beautifierBuiltinDisabled: [],
   };
 }
 
@@ -225,6 +242,15 @@ export const useSettingsStore = defineStore('settings', () => {
   const defaults = getDefaults();
   const merged = { ...defaults, ...saved };
 
+  // Q-18：老用户那 12 张 per-Agent map → `agents`。
+  //
+  // 🔴 位置不可挪动：必须在 `ref()` **之前**、同步执行。放到 ref 之后就有一段
+  //    「响应式状态里是旧形状」的窗口，而 deep watch 会把那一拍原样写回 localStorage；
+  //    放到 setTimeout 里更糟 —— 首屏渲染会先读到一个空的 `agents`，
+  //    每个 Agent 的模型/提示词会当场显示成默认值。
+  //    它是纯内存重排、无 I/O、幂等，所以这里同步跑没有代价。
+  migrateLegacyAgentMaps(merged);
+
   // Phase 0: 内置世界书合并已搬去 worldbook-store 的 init()（设计 D4 第 6 步）——
   // 必须在 localStorage→Dexie 迁移**之后**、针对 Dexie 执行，否则会把内置书写回
   // localStorage，源数组在迁移脚下漂移。
@@ -238,7 +264,7 @@ export const useSettingsStore = defineStore('settings', () => {
     // 现在它只进 beautifier-store 的纯内存 ref，不再持久化。
   }, 0);
 
-  const settings = ref<Record<string, any>>(merged);
+  const settings = ref<UiSettings>(merged);
   const apiSecretsReady = ref(false);
   const apiSecretsError = ref<string | null>(null);
   const lastApiKeyMigration = ref<ApiKeyMigrationOutcome | null>(null);

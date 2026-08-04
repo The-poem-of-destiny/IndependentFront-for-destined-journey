@@ -94,7 +94,8 @@ async function buildExportData() {
       provider: ep.provider,
       enableThinking: ep.enableThinking,
     })),
-    agentModels: sysSettings.agentModels,
+    // Q-18: per-Agent 设置已合并成一张 `agents` 表；导出整张，调试面要的是全貌
+    agents: sysSettings.agents,
     // 工坊 P2 / 能力面：EJS 三类诊断（空 = 本局没发生过）
     ejs: {
       backend: ejsBackend.value,

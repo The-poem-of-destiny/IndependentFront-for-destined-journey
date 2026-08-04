@@ -1,26 +1,30 @@
 /**
  * per-Agent 设置的读写口（Q-18）。
  *
- * per-Agent 配置在 settings 里摊成 **13 张用同一个 agentId 作键的兄弟 map**
+ * per-Agent 配置**曾经**在 settings 里摊成 12 张用同一个 agentId 作键的兄弟 map
  * （agentModels / agentWorldbookEnabled / … / agentHistorySlice）。形状正确的记录类型
  * `AgentDefaultEntry` 就在 settings-store 同一文件里，却只用于磁盘上的项目默认值文件，
  * 从不用于活状态。
  *
- * 后果是每个操作都变成一段 13 行的手抄：`saveAsDefault` 把 13 个值读进一个对象字面量、
+ * 后果是每个操作都变成一段 12 行的手抄：`saveAsDefault` 把 12 个值读进一个对象字面量、
  * `restoreAgentDefaults` 写回**两遍**（一遍来自项目默认、一遍来自硬编码兜底，两个分支
- * 只差取值来源）、settings-store 的项目默认加载器再抄一遍。加第 14 个旋钮要改七处，
+ * 只差取值来源）、settings-store 的项目默认加载器再抄一遍。加第 13 个旋钮要改七处，
  * 漏改一张 map 会产出一个「UI 上看着正常」的半恢复 Agent。
  *
- * 同一批字面默认值（0.7 / 1.0 / 0 / 0 / 16384）在四个文件六处重述 —— 今天取值仍然
+ * 同一批字面默认值（0.7 / 1.0 / 0 / 0 / 16384）曾在四个文件六处重述 —— 那时取值仍然
  * 一致纯属运气，漏掉 game-pipeline 那处就是「设置页显示新默认、运行时用旧值」，
  * 这类偏差要到账单上才可见。
  *
  * ---
  *
- * 本模块只做**读写口**，不改持久化形状：13 张 map 仍是磁盘格式。
- * 物理合并成 `agents: Record<string, AgentSettingsEntry>` 要配一次性迁移 +
- * 动 SettingsPage 87 处 v-model，那是独立一步；先把所有调用点收进这三个函数，
- * 那一步就退化成只改本文件。
+ * **现在的形状**：`settings.agents: Record<agentId, AgentSettingsEntry>`，一个 agent 一条。
+ * 老用户的 12 张 map 由 `agent-settings-migration.ts` 在 store 构造期（`ref()` 之前）
+ * 折进来，所以响应式状态里**只会有新形状** —— 本模块不带兼容分支，也就没有
+ * 「有时是 map、有时是 agents」这种可以漂移的两套并存形态。
+ *
+ * 🔴 `agentDirty`（有未保存改动）**刻意不在这里**：它是 UI 状态不是设置。混进条目会
+ *    跟着 `saveAsDefault` 一路写进 `data/defaults/agent-config.json`，而那份文件的
+ *    形状是 `AgentDefaultEntry` —— 两者刻意同形，别把 UI 状态塞进去。
  */
 
 /** 一个 Agent 的全部可调项 —— 与 `AgentDefaultEntry` 同形（后者是磁盘上的项目默认值） */
@@ -60,35 +64,36 @@ export const AGENT_SETTINGS_DEFAULTS = {
   maxTokens: 16384,
 } as const;
 
-/** 13 张 map 的键名 → 条目字段名。合并那一步只需删掉这张表 */
-const MAP_KEY: Record<string, string> = {
-  model: 'agentModels',
-  worldBookEnabled: 'agentWorldbookEnabled',
-  worldBookIds: 'agentWorldbookIds',
-  systemPrompt: 'agentPrompts',
-  template: 'agentTemplates',
-  temperature: 'agentTemperature',
-  topP: 'agentTopP',
-  freqPen: 'agentFreqPen',
-  presPen: 'agentPresPen',
-  maxTokens: 'agentMaxTokens',
-  historyLayers: 'agentHistoryLayers',
-  historySlice: 'agentHistorySlice',
-};
-
-/** settings 袋子（settings-store 的 `settings.value`）—— 目前还是 `Record<string, any>` */
+/** settings 袋子（settings-store 的 `settings.value`） */
 type SettingsBag = Record<string, any>;
 
-function bucket(bag: SettingsBag, field: string): Record<string, unknown> {
-  const key = MAP_KEY[field];
-  if (!bag[key] || typeof bag[key] !== 'object') bag[key] = {};
-  return bag[key] as Record<string, unknown>;
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 }
 
-function read<T>(bag: SettingsBag, field: string, agentId: string): T | undefined {
-  const map = bag[MAP_KEY[field]];
-  if (!map || typeof map !== 'object') return undefined;
-  return (map as Record<string, T>)[agentId];
+/** 只读取，绝不建结构 —— 读一个从没配过的 agent 不该在袋子里留下空壳 */
+function peek(bag: SettingsBag, agentId: string): Record<string, unknown> | null {
+  const agents = bag.agents;
+  if (!isPlainObject(agents)) return null;
+  const entry = agents[agentId];
+  return isPlainObject(entry) ? entry : null;
+}
+
+/** 写入用：缺哪层补哪层 */
+function ensure(bag: SettingsBag, agentId: string): Record<string, unknown> {
+  if (!isPlainObject(bag.agents)) bag.agents = {};
+  const agents = bag.agents as Record<string, unknown>;
+  if (!isPlainObject(agents[agentId])) agents[agentId] = {};
+  return agents[agentId] as Record<string, unknown>;
+}
+
+function read<T>(
+  bag: SettingsBag,
+  agentId: string,
+  field: keyof AgentSettingsEntry,
+): T | undefined {
+  const entry = peek(bag, agentId);
+  return entry ? (entry[field] as T | undefined) : undefined;
 }
 
 /**
@@ -98,19 +103,19 @@ function read<T>(bag: SettingsBag, field: string, agentId: string): T | undefine
  */
 export function getAgentSettings(bag: SettingsBag, agentId: string): AgentSettingsEntry {
   return {
-    model: read<string>(bag, 'model', agentId) ?? '',
-    worldBookEnabled: read<boolean>(bag, 'worldBookEnabled', agentId) ?? false,
-    worldBookIds: [...(read<string[]>(bag, 'worldBookIds', agentId) ?? [])],
-    systemPrompt: read<string>(bag, 'systemPrompt', agentId) ?? '',
-    template: read<string>(bag, 'template', agentId) ?? '',
-    temperature: read<number>(bag, 'temperature', agentId) ?? AGENT_SETTINGS_DEFAULTS.temperature,
-    topP: read<number>(bag, 'topP', agentId) ?? AGENT_SETTINGS_DEFAULTS.topP,
-    freqPen: read<number>(bag, 'freqPen', agentId) ?? AGENT_SETTINGS_DEFAULTS.freqPen,
-    presPen: read<number>(bag, 'presPen', agentId) ?? AGENT_SETTINGS_DEFAULTS.presPen,
-    maxTokens: read<number>(bag, 'maxTokens', agentId) ?? AGENT_SETTINGS_DEFAULTS.maxTokens,
+    model: read<string>(bag, agentId, 'model') ?? '',
+    worldBookEnabled: read<boolean>(bag, agentId, 'worldBookEnabled') ?? false,
+    worldBookIds: [...(read<string[]>(bag, agentId, 'worldBookIds') ?? [])],
+    systemPrompt: read<string>(bag, agentId, 'systemPrompt') ?? '',
+    template: read<string>(bag, agentId, 'template') ?? '',
+    temperature: read<number>(bag, agentId, 'temperature') ?? AGENT_SETTINGS_DEFAULTS.temperature,
+    topP: read<number>(bag, agentId, 'topP') ?? AGENT_SETTINGS_DEFAULTS.topP,
+    freqPen: read<number>(bag, agentId, 'freqPen') ?? AGENT_SETTINGS_DEFAULTS.freqPen,
+    presPen: read<number>(bag, agentId, 'presPen') ?? AGENT_SETTINGS_DEFAULTS.presPen,
+    maxTokens: read<number>(bag, agentId, 'maxTokens') ?? AGENT_SETTINGS_DEFAULTS.maxTokens,
     // 不合默认：缺省 = 走引擎按类别给的默认
-    historyLayers: read<number>(bag, 'historyLayers', agentId),
-    historySlice: read<number>(bag, 'historySlice', agentId),
+    historyLayers: read<number>(bag, agentId, 'historyLayers'),
+    historySlice: read<number>(bag, agentId, 'historySlice'),
   };
 }
 
@@ -126,11 +131,10 @@ export function patchAgentSettings(
   agentId: string,
   patch: Partial<AgentSettingsEntry>,
 ): void {
+  const entry = ensure(bag, agentId);
   for (const [field, value] of Object.entries(patch)) {
-    if (!(field in MAP_KEY)) continue;
-    const map = bucket(bag, field);
-    if (value === undefined) delete map[agentId];
-    else map[agentId] = value;
+    if (value === undefined) delete entry[field];
+    else entry[field] = value;
   }
 }
 
@@ -170,7 +174,7 @@ export function resetAgentSettings(
  * 对**尚未被用户配置过**的项补上来源里的值（项目默认值加载器用）。
  *
  * 与 `resetAgentSettings` 的区别：这个只填空位，不覆盖用户已改过的项。
- * 此前是一段 13 个 `if (!(agentId in map))` 的手抄。
+ * 此前是一段 12 个 `if (!(agentId in map))` 的手抄。
  */
 export function fillMissingAgentSettings(
   bag: SettingsBag,
@@ -197,10 +201,48 @@ export function fillMissingAgentSettings(
   if (from.historyLayers !== undefined) full.historyLayers = from.historyLayers;
   if (from.historySlice !== undefined) full.historySlice = from.historySlice;
 
+  const existing = peek(bag, agentId);
   const patch: Partial<AgentSettingsEntry> = {};
   for (const [field, value] of Object.entries(full)) {
-    if (agentId in bucket(bag, field)) continue;
+    if (existing && field in existing) continue;
     (patch as Record<string, unknown>)[field] = value;
   }
   patchAgentSettings(bag, agentId, patch);
+}
+
+/**
+ * 列出袋子里已有条目的 agentId。
+ *
+ * 12 张 map 时代要问这个问题得把 12 张表的键取并集 —— 于是没人问，
+ * 每处都改成「拿一张写死的 agentList 去遍历」。合并之后它是一行。
+ */
+export function listConfiguredAgents(bag: SettingsBag): string[] {
+  return isPlainObject(bag.agents) ? Object.keys(bag.agents) : [];
+}
+
+/**
+ * 把「所有 Agent 的世界书清单」当成一张 `Record<agentId, string[]>` 来整体改写。
+ *
+ * 工坊装/卸要给**每个** Agent 的清单加/删同一个 bookId，那两个纯函数
+ * （`grantWorkshopBookToAgents` / `revokeWorkshopBookFromAgents`）本来就是按
+ * 「一张 map 进、一张 map 出」写的，并且带着自己的测试。合并之后 map 不再存在，
+ * 但**没必要**把它们改成认 `agents` —— 那会把工坊的纯函数绑死在设置的存储形状上。
+ * 于是投影这一步收在这里：读出来一张 map、交给调用方变换、再写回条目。
+ *
+ * 只动 `worldBookIds`，其余字段一个不碰（`worldBookEnabled` 尤其不能顺手开 ——
+ * 见 `grantWorkshopBookToAgents` 的注释）。
+ */
+export function updateAgentWorldBookIds(
+  bag: SettingsBag,
+  transform: (current: Record<string, string[]>) => Record<string, string[]>,
+): void {
+  const current: Record<string, string[]> = {};
+  for (const agentId of listConfiguredAgents(bag)) {
+    const ids = read<string[]>(bag, agentId, 'worldBookIds');
+    current[agentId] = Array.isArray(ids) ? [...ids] : [];
+  }
+  const next = transform(current);
+  for (const [agentId, ids] of Object.entries(next)) {
+    patchAgentSettings(bag, agentId, { worldBookIds: [...ids] });
+  }
 }

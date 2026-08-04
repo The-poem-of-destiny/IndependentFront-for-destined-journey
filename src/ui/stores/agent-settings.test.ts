@@ -6,14 +6,19 @@
  *   2. `historyLayers` / `historySlice` **不合默认**，且「没给」= 删键
  *      —— 那条语义只写在注释里，一旦被「顺手补全」，引擎按 agent 类别给的默认会被静默盖掉
  *   3. `fillMissingAgentSettings` 只填空位、不覆盖用户已改的
+ *
+ * 形状：`bag.agents[agentId]` 一条（Q-18 合并后）。老用户那 12 张 map 怎么折进来
+ * 是 `agent-settings-migration.test.ts` 的事，本文件只测合并**之后**的读写口。
  */
 import { describe, it, expect } from 'vitest';
 import {
   AGENT_SETTINGS_DEFAULTS,
   fillMissingAgentSettings,
   getAgentSettings,
+  listConfiguredAgents,
   patchAgentSettings,
   resetAgentSettings,
+  updateAgentWorldBookIds,
 } from './agent-settings';
 
 const bag = (): Record<string, any> => ({});
@@ -39,11 +44,9 @@ describe('getAgentSettings', () => {
     expect(got.historySlice).toBeUndefined();
   });
 
-  it('读到的是袋子里那 13 张 map 的值', () => {
+  it('读到的是袋子里那条 agents 记录的值', () => {
     const b: Record<string, any> = {
-      agentModels: { story: 'ep_1' },
-      agentTemperature: { story: 1.2 },
-      agentHistoryLayers: { story: 3 },
+      agents: { story: { model: 'ep_1', temperature: 1.2, historyLayers: 3 } },
     };
     const got = getAgentSettings(b, 'story');
     expect(got.model).toBe('ep_1');
@@ -54,13 +57,13 @@ describe('getAgentSettings', () => {
   });
 
   it('worldBookIds 返回副本，改它不影响袋子', () => {
-    const b: Record<string, any> = { agentWorldbookIds: { story: ['a'] } };
+    const b: Record<string, any> = { agents: { story: { worldBookIds: ['a'] } } };
     getAgentSettings(b, 'story').worldBookIds.push('b');
-    expect(b.agentWorldbookIds.story).toEqual(['a']);
+    expect(b.agents.story.worldBookIds).toEqual(['a']);
   });
 
   it('每个 agentId 各自独立', () => {
-    const b: Record<string, any> = { agentTemperature: { story: 1.5 } };
+    const b: Record<string, any> = { agents: { story: { temperature: 1.5 } } };
     expect(getAgentSettings(b, 'story').temperature).toBe(1.5);
     expect(getAgentSettings(b, 'vars_update').temperature).toBe(
       AGENT_SETTINGS_DEFAULTS.temperature,
@@ -70,32 +73,35 @@ describe('getAgentSettings', () => {
 
 describe('patchAgentSettings', () => {
   it('只改给到的字段，其余不动', () => {
-    const b: Record<string, any> = { agentTemperature: { story: 1.5 } };
+    const b: Record<string, any> = { agents: { story: { temperature: 1.5 } } };
     patchAgentSettings(b, 'story', { maxTokens: 999 });
-    expect(b.agentTemperature.story).toBe(1.5);
-    expect(b.agentMaxTokens.story).toBe(999);
+    expect(b.agents.story.temperature).toBe(1.5);
+    expect(b.agents.story.maxTokens).toBe(999);
   });
 
   it('🔴 传 undefined = 删键，不是写入 undefined', () => {
-    const b: Record<string, any> = { agentHistoryLayers: { story: 3 } };
+    const b: Record<string, any> = { agents: { story: { historyLayers: 3 } } };
     patchAgentSettings(b, 'story', { historyLayers: undefined });
-    expect('story' in b.agentHistoryLayers).toBe(false);
-    // 「键存在但值是 undefined」会让 `agentId in map` 成立，从而挡掉引擎默认 —— 那是 bug
+    expect('historyLayers' in b.agents.story).toBe(false);
+    // 「键存在但值是 undefined」会让 `field in entry` 成立，从而挡掉引擎默认 —— 那是 bug
   });
 
-  it('目标 map 不存在时就地建出来', () => {
+  it('agents / 条目都不存在时就地建出来', () => {
     const b = bag();
     patchAgentSettings(b, 'story', { model: 'ep_1' });
-    expect(b.agentModels).toEqual({ story: 'ep_1' });
+    expect(b.agents).toEqual({ story: { model: 'ep_1' } });
+  });
+
+  it('🔴 只读不建结构 —— 读一个从没配过的 agent 不该在袋子里留下空壳', () => {
+    const b = bag();
+    getAgentSettings(b, 'story');
+    expect(b.agents).toBeUndefined();
   });
 });
 
 describe('resetAgentSettings', () => {
   it('不传来源 = 恢复出厂，数值落默认、字符串清空', () => {
-    const b: Record<string, any> = {
-      agentModels: { story: 'ep_1' },
-      agentTemperature: { story: 1.9 },
-    };
+    const b: Record<string, any> = { agents: { story: { model: 'ep_1', temperature: 1.9 } } };
     resetAgentSettings(b, 'story');
     const got = getAgentSettings(b, 'story');
     expect(got.model).toBe('');
@@ -112,13 +118,10 @@ describe('resetAgentSettings', () => {
   });
 
   it('🔴 来源没给 historyLayers/historySlice → 删键（把「走引擎默认」还回去）', () => {
-    const b: Record<string, any> = {
-      agentHistoryLayers: { story: 3 },
-      agentHistorySlice: { story: 200 },
-    };
+    const b: Record<string, any> = { agents: { story: { historyLayers: 3, historySlice: 200 } } };
     resetAgentSettings(b, 'story', { temperature: 0.5 });
-    expect('story' in b.agentHistoryLayers).toBe(false);
-    expect('story' in b.agentHistorySlice).toBe(false);
+    expect('historyLayers' in b.agents.story).toBe(false);
+    expect('historySlice' in b.agents.story).toBe(false);
   });
 
   it('来源给了 historyLayers 就写进去', () => {
@@ -128,39 +131,82 @@ describe('resetAgentSettings', () => {
   });
 });
 
+describe('updateAgentWorldBookIds', () => {
+  it('投影出所有 agent 的清单交给变换，再写回条目', () => {
+    const b: Record<string, any> = {
+      agents: {
+        story: { worldBookIds: ['a'], temperature: 1.5 },
+        char_gen: { worldBookIds: [] },
+      },
+    };
+    updateAgentWorldBookIds(b, (current) => {
+      expect(current).toEqual({ story: ['a'], char_gen: [] });
+      return Object.fromEntries(Object.entries(current).map(([k, v]) => [k, [...v, 'ws_1']]));
+    });
+    expect(b.agents.story.worldBookIds).toEqual(['a', 'ws_1']);
+    expect(b.agents.char_gen.worldBookIds).toEqual(['ws_1']);
+    // 🔴 只动 worldBookIds，其余字段一个不碰
+    expect(b.agents.story.temperature).toBe(1.5);
+  });
+
+  it('没有 worldBookIds 的条目投影成空数组（工坊纯函数不必判空）', () => {
+    const b: Record<string, any> = { agents: { story: { model: 'ep' } } };
+    updateAgentWorldBookIds(b, (current) => {
+      expect(current).toEqual({ story: [] });
+      return current;
+    });
+  });
+
+  it('一个 agent 都没配过 → 变换收到空对象，不建结构', () => {
+    const b: Record<string, any> = {};
+    updateAgentWorldBookIds(b, (current) => {
+      expect(current).toEqual({});
+      return current;
+    });
+    expect(b.agents).toBeUndefined();
+  });
+});
+
+describe('listConfiguredAgents', () => {
+  it('列出已有条目的 agentId；袋子为空时是空数组', () => {
+    expect(listConfiguredAgents({})).toEqual([]);
+    expect(listConfiguredAgents({ agents: { a: {}, b: {} } })).toEqual(['a', 'b']);
+  });
+});
+
 describe('fillMissingAgentSettings', () => {
   it('只填空位，不覆盖用户已改过的项', () => {
-    const b: Record<string, any> = { agentTemperature: { story: 1.9 } };
+    const b: Record<string, any> = { agents: { story: { temperature: 1.9 } } };
     fillMissingAgentSettings(b, 'story', { temperature: 0.3, maxTokens: 4096 });
-    expect(b.agentTemperature.story).toBe(1.9); // 用户的值保住
-    expect(b.agentMaxTokens.story).toBe(4096); // 空位被填
+    expect(b.agents.story.temperature).toBe(1.9); // 用户的值保住
+    expect(b.agents.story.maxTokens).toBe(4096); // 空位被填
   });
 
   it('来源缺项时空位仍落默认（与旧逐行实现一致）', () => {
     const b = bag();
     fillMissingAgentSettings(b, 'story', { model: 'ep_1' });
     expect(getAgentSettings(b, 'story').temperature).toBe(AGENT_SETTINGS_DEFAULTS.temperature);
-    expect(b.agentPrompts.story).toBe('');
+    expect(b.agents.story.systemPrompt).toBe('');
   });
 
   it('template 只在来源真的给了才写（空串不写）', () => {
     const b = bag();
     fillMissingAgentSettings(b, 'story', { template: '' });
-    expect(b.agentTemplates?.story).toBeUndefined();
+    expect('template' in b.agents.story).toBe(false);
     fillMissingAgentSettings(b, 'vars_update', { template: '{{X}}' });
-    expect(b.agentTemplates.vars_update).toBe('{{X}}');
+    expect(b.agents.vars_update.template).toBe('{{X}}');
   });
 
   it('historyLayers/historySlice 来源没给就不写键', () => {
     const b = bag();
     fillMissingAgentSettings(b, 'story', { temperature: 0.5 });
-    expect(b.agentHistoryLayers?.story).toBeUndefined();
+    expect('historyLayers' in b.agents.story).toBe(false);
     expect(getAgentSettings(b, 'story').historyLayers).toBeUndefined();
   });
 
   it('值为 0 的旋钮也算「已配置」，不会被来源顶掉', () => {
-    const b: Record<string, any> = { agentHistoryLayers: { story: 0 } };
+    const b: Record<string, any> = { agents: { story: { historyLayers: 0 } } };
     fillMissingAgentSettings(b, 'story', { historyLayers: 4 });
-    expect(b.agentHistoryLayers.story).toBe(0);
+    expect(b.agents.story.historyLayers).toBe(0);
   });
 });

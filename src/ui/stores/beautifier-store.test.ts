@@ -55,11 +55,17 @@ function makeRule(id: string, overrides: Partial<BeautifierRule> = {}): Beautifi
   };
 }
 
+// Q-18: 已迁出的历史键（worldBooks / beautifierRules / *MigratedAt）**刻意不在
+//        `UiSettings` 上** —— 声明它们等于把「设置袋子还是真相来源」这条错觉还回去
+//        （理由见 settings-types.ts 文件头）。迁移测试要按运行时字符串键读它们，
+//        所以在这里显式放宽一次，而不是给类型开一个所有笔误都能钻的口子。
+const loose = (s: unknown): Record<string, unknown> => s as Record<string, unknown>;
+
 /** 迁移的目的：规则正文一个字节都不许再落在 settings / localStorage 里 */
 function expectSettingsFreeOfRules(needles: string[] = []) {
   const s = useSettingsStore().settings;
-  expect(s[LEGACY_RULES_KEY]).toBeUndefined();
-  expect(s[LEGACY_PRESET_CACHE_KEY]).toBeUndefined();
+  expect(loose(s)[LEGACY_RULES_KEY]).toBeUndefined();
+  expect(loose(s)[LEGACY_PRESET_CACHE_KEY]).toBeUndefined();
   const serialized = JSON.stringify(s) + (lsBacking.get(STORAGE_KEY) ?? '');
   for (const needle of needles) {
     expect(serialized).not.toContain(needle);

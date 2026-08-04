@@ -64,10 +64,16 @@ function makeBook(id: string, entryCount: number, builtIn = false): WorldBook {
   };
 }
 
+// Q-18: 已迁出的历史键（worldBooks / *MigratedAt）**刻意不在 `UiSettings` 上** ——
+//        声明它们等于把「设置袋子还是真相来源」这条错觉还回去（理由见 settings-types.ts
+//        文件头）。迁移测试要按运行时字符串键读它们，所以在这里显式放宽一次，
+//        而不是给类型开一个所有笔误都能钻的口子。
+const loose = (s: unknown): Record<string, unknown> => s as Record<string, unknown>;
+
 /** 迁移的目的：书内容一个字节都不许再落在 settings / localStorage 里 */
 function expectSettingsFreeOfBooks(bookNames: string[] = []) {
   const s = useSettingsStore().settings;
-  expect(s[LEGACY_BOOKS_KEY]).toBeUndefined();
+  expect(loose(s)[LEGACY_BOOKS_KEY]).toBeUndefined();
   const serialized = JSON.stringify(s) + (lsBacking.get(STORAGE_KEY) ?? '');
   for (const name of bookNames) {
     expect(serialized).not.toContain(name);
@@ -178,7 +184,7 @@ describe('worldbook-store', () => {
     // ★ 关键：合并结果没有一个字节回到 localStorage
     useSettingsStore().saveNow();
     expectSettingsFreeOfBooks(['《race》', '用户改过的正文']);
-    expect(typeof useSettingsStore().settings[MIGRATED_FLAG_KEY]).toBe('number');
+    expect(typeof loose(useSettingsStore().settings)[MIGRATED_FLAG_KEY]).toBe('number');
   });
 
   it('init 幂等: 并发/重复调用只跑一次', async () => {

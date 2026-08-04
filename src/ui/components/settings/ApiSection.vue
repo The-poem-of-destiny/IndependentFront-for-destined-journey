@@ -183,7 +183,7 @@ function openAddApi() {
 }
 async function openEditApi(ep: ApiEntry) {
   await cfg.initApiSecrets();
-  const hydrated = (s.apiPool as ApiEntry[]).find((entry) => entry.id === ep.id) ?? ep;
+  const hydrated = s.apiPool.find((entry) => entry.id === ep.id) ?? ep;
   editingApiId.value = ep.id;
   apiForm.name = hydrated.name;
   apiForm.baseUrl = hydrated.baseUrl;
