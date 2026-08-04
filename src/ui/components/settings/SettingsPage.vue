@@ -91,7 +91,7 @@ const activeAgent = ref<string | null>(s.activeAgent);
  * 选一个 Agent。
  *
  * 只做**页面骨架**该做的两件事：记住选了谁、把它持久化。草稿载入随
- * `AgentSection` 的 `watch(agentId, …, { immediate: true })` 走 ——
+ * `AgentConfigPanel` 的 `watch(agentId, …, { immediate: true })` 走 ——
  * 本组件每次进 Agent 分区都会把 `activeAgent` 置 null（下方主导航），
  * 所以那边永远是新挂载，immediate 会在同一时刻触发。
  */

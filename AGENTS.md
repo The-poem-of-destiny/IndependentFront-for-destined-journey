@@ -591,12 +591,16 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               只留 activeSection / activeAgent / selectAgent /
 │   │   │                               agentModelOf 与 wb.init()（世界书分区也靠它）
 │   │   ├── agent/                    ← [Q-25] Agent 分区（照 settings/audio/ 的样子）
-│   │   │   ├── AgentSection.vue      ← 分区壳：**单根** section.section.centered；
-│   │   │   │                            两个草稿 + 三个动作（保存/恢复默认/存为项目默认）
+│   │   │   ├── AgentSection.vue      ← 分区壳：**单根** section.section.centered + 页头，
+│   │   │   │                            其余全交给 AgentConfigPanel
+│   │   │   ├── AgentConfigPanel.vue  ← ★可复用配置面（收 agentId）：两个草稿 + 三个动作
+│   │   │   │                            （保存/恢复默认/存为项目默认）+ 三张卡。别的分区
+│   │   │   │                            传不同 agentId 即可复用；**多根**，外框靠宿主 section
 │   │   │   │                            🔴 草稿载入必须 watch(..., { immediate: true })：
 │   │   │   │                               主导航每次点击都把 activeAgent 置 null，本组件
 │   │   │   │                               永远是新挂载，普通 watch 不触发 → 文本框空着渲染
 │   │   │   │                               → 「保存设置」把空串写进用户提示词
+│   │   │   │                               （回归测试 AgentConfigPanel.test.ts 第一条）
 │   │   │   ├── AgentParamsCard.vue   ← API 池 + 7 个 LLM 旋钮 + 世界书卡（共用 agentCfg/setAgentField）
 │   │   │   ├── AgentPromptCard.vue   ← systemPrompt + 上下文模板 + 占位符徽章 + 预览（非 story）
 │   │   │   │                            占位符插入改用**模板 ref**，不再全局 querySelectorAll
