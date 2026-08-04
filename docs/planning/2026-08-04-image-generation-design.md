@@ -1,7 +1,11 @@
-# 图像生成系统设计 v1.0 —— NovelAI 情景插画
+# 图像生成系统设计 v1.1 —— NovelAI 情景插画
 
 > 状态：**设计定稿**，未实施。
-> 日期：2026-08-04
+> 日期：2026-08-04（v1.1 同日：补第二轮 UX 决策 D33–D49，见 §2.1）
+>
+> **v1.1 改了什么**：第一轮定的是机制（谁写什么、钱怎么管、图存哪），第二轮补的是**人怎么用它** —— 等待期的反馈、失败态的出路、第一次玩的引导、以及「AI 没配图但玩家想要这一刻」。其中 **D42 是在修 v1.0 的一处内部矛盾**（失败文案指向了一个到不了的地方），**D38 是在堵一个让模型盖过用户偏好的口子**，**D40 把地点预设从 v2 提前到 v1**（合表之后它几乎免费）。
+>
+> **D50–D54 是设置页归位**：图像生成拿**自己的第 13 分区** `🖼 图像生成`，**整个功能都在里面**（提示词生成 / 出图 / 视觉预设三张卡），含 `image_prompt` 的 Agent 配置与它的 systemPrompt。中途试过「作为一个类目住进 Agent 分区」并**推翻了** —— 理由留在 §11.3，因为它解释了为什么这个子系统不该被当成一个 agent。
 > 范围：**NovelAI 单家 provider + 情景插画单一用途**。四家 provider 对比、分级路由、角色画像路径见 **附录 A**（已核准，v2 直接取用）。
 > 提示词分工：story 只写**一句中文**声明"这里该有张图"，danbooru 方言由专职侧链 agent `image_prompt` 负责（**D28**）—— 与 `char_gen` / `item_gen` / `craft_gen` 同一形状。
 > ADR 关联：ADR-21（StateManager 唯一写入口）· **ADR-24/25/26（侧链 agent 模式）** · ADR-28（模仿结果、不照抄中间结构）· Q-05（加标记只动 `MARKER_SPECS`）· Q-18（设置项要改两处）
@@ -28,7 +32,7 @@
 - **标记是锚点，图长在锚点上**；图鉴是同一批记录的第二个视图。
 - **story 只声明"这里该有张图、画的是这件事"，不写 danbooru** —— 方言转换归专职侧链 agent（D28）。这与 `char_gen` / `item_gen` / `craft_gen` 是同一个形状（ADR-24/25/26）。
 
-### 0.2 验收标准（v1 做完 = 这九条全成立）
+### 0.2 验收标准（v1 做完 = 这十五条全成立）
 
 0. **story 的 systemPrompt 里没有一个 danbooru 词** —— 方言知识全在 `image_prompt` 那边（D28）
 1. story agent 输出的 `<scene_image>` **在任何开关档位下都不会以尖括号形式漏给玩家**（含美化关闭、流式输出中）
@@ -39,7 +43,16 @@
 6. 回退一回合再重发：旧图不丢（图鉴里仍在），且**同一回合不会自动生成第二张**
 7. 三层限额任一触发时，标记**降级成手动按钮**而不是消失；手动点击永远可用
 8. CG 图鉴按剧情顺序列出全部插画，带 AI 写的标题与说明，可跳回原消息
-9. `npm run typecheck` 与 `npm test` 全绿，新模块各自带 `*.test.ts`
+
+以下六条来自第二轮 UX 补丁（§2.1）：
+
+9. **排队中**与**生成中**看起来不一样；排队项可取消且**不产生任何费用**，生成中项中止时**照实说明本次仍会计费**（D35/D36）
+10. 玩家能对**任意** assistant 消息主动要一张图（右键菜单），不依赖 story 有没有写标记（D33）
+11. 标记里写的 `rating` **不能超过**设置里的上限档（D38）
+12. 角色没有预设时**图照样出**，且图下有一句话说明为什么 + 一键跳到预设编辑器（D41）
+13. 失败的图**就地**能重试、也能自己写提示词 —— 不需要（也不可能）去图鉴里找它（D42）
+14. 夜里的戏不会被画成白天：时段与天气由引擎注入，**不问 AI**（D39）
+15. `npm run typecheck` 与 `npm test` 全绿，新模块各自带 `*.test.ts`
 
 ### 0.3 非目标（v1 明确不做）
 
@@ -69,7 +82,7 @@ img2img / 局部重绘 / 放大 · 候选多选 · 角色画像入槽位（`writ
 | **D2**  | 图怎么定位到正文位置                              | **标记留在 `msg.content` 不动，图按 `(saveId, messageId, occurrence)` 反查** | 永不改写 AI 写过的字节。且快照回滚带回同样的 messageId 与正文 → 图**自动重新挂上**，零回收代码                                                                                                                                                                                                                                                             |
 | **D3**  | 分段在美化之前还是之后                            | **之前，且不受美化开关约束**                                                 | 插画是应用自有渲染，不是"美化"。美化关掉 / 流式输出中，`BeautifiedNarrative` 退回单个裸文本段 —— 那时标记会漏成尖括号                                                                                                                                                                                                                                      |
 | **D4**  | 角色外观谁写                                      | **标记只报角色名，Code 拼预设**                                              | story agent 不知道苏婉的 booru 标签，让它每回合自己编 = 每张图里的人都不一样                                                                                                                                                                                                                                                                               |
-| **D5**  | 生成中/失败的记录                                 | **pending 记录先落库，再发请求**                                             | 否则刷新之后"这里本来有张图"凭空消失                                                                                                                                                                                                                                                                                                                       |
+| **D5**  | 生成中/失败的记录                                 | **记录先落库，再发请求**（`queued` 态，见 D35）                              | 否则刷新之后"这里本来有张图"凭空消失                                                                                                                                                                                                                                                                                                                       |
 | **D6**  | 保留策略                                          | **v1 不做任何自动淘汰**                                                      | 用户为每一张付过钱。只给手动清理 + 用量读数                                                                                                                                                                                                                                                                                                                |
 | **D7**  | 孤儿（消息没回来的图）                            | **保留，不删**                                                               | 同 D6。只有删除存档才连带删                                                                                                                                                                                                                                                                                                                                |
 | **D8**  | FullBackup                                        | **元数据进，字节不进**                                                       | 字节进 JSON 备份会爆炸；元数据含 prompt + seed + model，**NAI 同参数可复现** —— 备份存的是配方。加上标题说明，恢复出来的图鉴是**一份读得通的目录**                                                                                                                                                                                                         |
@@ -97,6 +110,38 @@ img2img / 局部重绘 / 放大 · 候选多选 · 角色画像入槽位（`writ
 | **D30** | `characters` 与 `title` 留在标记上，不由 agent 产 | 两条各有硬理由                                                               | **`characters`**：预设查找是严格 `===`，agent 从散文抽名字会漂（「苏婉」vs「苏婉小姐」），而 story 正在写这些名字、知道规范写法 · **`title`**：**手动档的按钮必须在 agent 跑之前就有标签**，否则那是个无名按钮                                                                                                                                             |
 | **D31** | `image_prompt` 何时跑                             | **自动档在 Stage 2；手动档点击时懒执行**                                     | 手动档预跑会破坏「不点就不花钱」这条性质（D14/D21 的立足点）。在 5–60 秒的出图等待上加 2 秒是噪音。产出**缓存进记录**，重试/重画不再跑（除非用户改过）                                                                                                                                                                                                     |
 | **D32** | 🔴 限额检查**在 `image_prompt` 之前**             | 排序约束，不是实现细节                                                       | 否则自动档会为**被限流器拦下的**插画白烧 LLM token。两处花钱，闸门要在最前面                                                                                                                                                                                                                                                                               |
+
+### 2.1 第二轮：UX 补丁（D33–D53）
+
+第一轮定的是**机制**（谁写什么、钱怎么管、图存哪）。这一轮补的是**人怎么用它**：等待期、失败态、第一次玩、以及「AI 没画但玩家想要」。多数是零成本的文案与不变式，两条是真功能，**一条（D42）是在修既有矛盾**。
+
+**D50–D54 是设置页归位**：图像生成拿自己的第 13 分区，整个功能都在里面（§11.3）。
+
+| #       | 决策                                      | 裁定                                                                                                       | 理由                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **D33** | 🔴 玩家主动要图的入口                     | 消息右键菜单加「为这一段配图」                                                                             | v1 每张图都要 story 先写标记，而提示词又教它「克制使用」—— 玩家想要**某一刻**的图时没有任何路径，而付钱的是玩家。`ChatFlow.vue` 已有右键菜单基础设施（现仅绑最新一条，需放宽到任意 assistant 消息）。**不做选中文本锚定**，那是脆弱的那一半                                                                                                                                                     |
+| **D34** | 手动图的锚点形状                          | 加 `anchorKind: 'marker' \| 'message-end'`，`occurrence` 语义不变                                          | 保住 D2 白送的回滚重挂（仍按 `messageId` 反查）。**不用魔法数字**（`occurrence = 1000+k` 那种写法必然腐烂），也不改成判别联合去动所有查询                                                                                                                                                                                                                                                       |
+| **D35** | 🔴 `pending` 拆成 `queued` / `generating` | 两个状态，两种渲染                                                                                         | 一条消息 2–3 个标记**串行**发（§8.2），第 3 张要等到 3 分钟后才开始。三个一模一样的转圈 = 玩家判定卡死。且**取消排队不花钱、中止在飞照样计费** —— 这个差别必须让用户看得见                                                                                                                                                                                                                      |
+| **D36** | 取消的语义                                | 排队项「取消（不消耗）」· 在飞项「中止（本次仍会计费）」                                                   | `AbortController` 设计里已有，缺的是**用户能碰到的入口**与**诚实的文案**。骗用户说中止能省钱，比不给取消更糟                                                                                                                                                                                                                                                                                    |
+| **D37** | 等待期显示什么                            | 占位框里写 `title` + `intent` 那句中文；生成中附**已用秒数**                                               | 5–60 秒的灰框是纯死时间。写上「这张图画的是什么」，等待就变成期待，而**数据本来就在记录里**，零成本。秒数则是：没有它的转圈在 40 秒时读作「卡了」，有它读作「慢」                                                                                                                                                                                                                               |
+| **D38** | 🔴 rating 是**上限**不是默认              | 设置里改成 `imageMaxRating`，钳住标记写的 rating                                                           | 现设计让**模型**决定内容尺度、并且能覆盖用户偏好。玩家把默认设成 `general` 通常有现实原因（在外面玩），而 story agent 写一句 `rating="explicit"` 就穿透了它                                                                                                                                                                                                                                     |
+| **D39** | 世界状态进提示词                          | 时段 + 天气由 **Code 查引擎**注入，不问 AI                                                                 | `getTimeOfDay()` 已存在，天气在 `stat-projection` 的 `world['天气']`。夜里的戏画成白天是最扎眼的不一致，而我们**根本不需要让模型记住** —— 引擎知道。🔴 查不到的值**不贡献任何标签**，绝不猜                                                                                                                                                                                                     |
+| **D40** | 地点预设提前到 v1                         | 并进 `imagePresets` 同一张表，加 `kind: 'character' \| 'location'`                                         | 场景一致性原定 v2（附录 A.4）。但它与角色预设**同形状** —— 合表后是零新表、一个字段、一次查找、编辑器加个筛选。**父级回退链仍留 v2**：精确命中不中就不贡献，退化干净                                                                                                                                                                                                                            |
+| **D41** | 缺预设时玩家看到什么                      | 图上一行提示 +「去设置」深链（预填角色名）                                                                 | `composePrompt` 的 `missing-preset` 告警现在**没有落点**（§5.2 只说「可播报」，没说播到哪）。首次游玩必然命中：图里的人跟角色毫无关系，而玩家不知道为什么。把困惑变成引导                                                                                                                                                                                                                       |
+| **D42** | 🔴 失败了能自己写提示词                   | **失败段就地**给「重试 / 自己写提示词」                                                                    | **修既有矛盾**：§12.2 的文案让用户「在图鉴里自己填提示词」，而 §10.3 规定图鉴只列**已经画出来的** —— 现在的文案指向了一个到不了的地方                                                                                                                                                                                                                                                           |
+| **D43** | 免费额度指示                              | 设置页按当前参数算「在免费额度内 ✅ / 会消耗 Anlas ⚠️」                                                    | 宽高/步数在设置里可调，调大了会**静默**开始烧点数。一个纯函数，挡的是账单惊吓。标注「按当前订阅规则估算」—— 规则会变，这是提示不是保证                                                                                                                                                                                                                                                          |
+| **D44** | 开自动档之前确认一次                      | 选项旁一行后果；首次切到 `auto` 弹一次确认                                                                 | 自动档是**无人值守花钱**。在决策点写清「每回合最多 1 张 / 每小时 20 张 / 超出降级成按钮」，比事后给一个计数器早一步                                                                                                                                                                                                                                                                             |
+| **D45** | 正文里显示哪一个 take                     | 用户可**钉**某一 take；未钉则显示最新                                                                      | D17 说正文显示最新。但重画出来更差时，「最新」让之后每次阅读都看到更差的那张 —— 重画在效果上成了破坏性操作，而用户以为它是增量的                                                                                                                                                                                                                                                                |
+| **D46** | 打码显示                                  | `imageBlurByDefault`，默认**关**                                                                           | 与 D38 正交：D38 管**生成什么**，这条管**默认显示成什么**。在外面玩 / 直播 / 截图是真实场景，而成本是十几行 CSS                                                                                                                                                                                                                                                                                 |
+| **D47** | 「清理」是什么意思                        | **删字节、留记录**                                                                                         | 元数据是配方（D8）。删掉字节释放空间、图鉴条目还在、随时可重画 —— 这正是用户说「清理」时想要的那件事，而不是把回忆删掉                                                                                                                                                                                                                                                                          |
+| **D48** | 🔴 auto **绝不在流式未完成的消息上开火**  | 显式不变式                                                                                                 | 与 D15 同族但**是另一回事**：D15 管「不追溯历史」，这条管「不抢跑当前」—— 流式途中标记可能还没写完就被读到。而渲染期不漏尖括号是 D3，第三件事                                                                                                                                                                                                                                                   |
+| **D49** | 每图的尺寸/构图交不交给 AI                | **v1 不交**                                                                                                | 想过让标记带 `orientation`（竖构图拍特写）。但尺寸直接决定**是否还在免费额度内**（D43）—— 让模型的一个属性把用户踢出免费档，正是 D20 说的那类「错了会花钱，就不能只由被约束者自己遵守」的约束                                                                                                                                                                                                   |
+| **D50** | 🔴 图像生成放设置页哪儿                   | **自己的顶层分区** `🖼 图像生成`（第 13 分区），**整个功能都在里面** —— 含 `image_prompt` 的 Agent 配置     | 试过「作为一个类目住进 Agent 分区」，**推翻了**：那条路要往 Agent 子导航里塞两个不是 LLM Agent 的条目，代价是角标判据要按条目类型分流（否则永久红叉）、`AgentSection` 要按类目分流渲染 —— 为了「看起来像 agent」去改一个本来只服务 LLM Agent 的导航。而**它本来就不是一个 agent**：它是一个含**两次不同调用**（LLM 出标签、NAI 出图）的子系统，其中只有一次是 agent。分区归分区，agent 归 agent |
+| **D51** | 分区里怎么分块                            | **三张卡**：提示词生成（Agent 配置）· 出图（NAI + 限额 + 用量）· 视觉预设                                  | 光 NAI 参数就十几个，一张卡装不下还读不动。前两张正好对应两个花钱的地方（LLM token / Anlas），与 D32「两处花钱、闸门在最前面」同一套心智模型；第三张是内容不是配置，本就该分开                                                                                                                                                                                                                  |
+| **D52** | 🔴 渲染位置 ≠ 存储位置                    | `image_prompt` 的配置**仍住 `agents` 袋子**（`agent-settings.ts` 唯一读写口）；NAI 参数住 `UiSettings`     | 这条从「类目」方案里**原样保留**，因为它跟导航长什么样无关。归属看的是「这份配置在描述什么」：`image_prompt` 是个 LLM Agent，它的模型/温度/世界书就该跟别的 agent 存一处。在图像分区里渲染它，**渲染的是同一份存储**，不是复制一份（D28 的第二真相来源）                                                                                                                                        |
+| **D53** | `image_prompt` 还进不进 Agent 子导航      | **不进** `AGENT_LIST`                                                                                      | 同一份配置开两个入口，用户要猜哪个是权威的（其实都一样，但没人信）。先例现成：`combat_v3` 在 `agent-config.json` 里跑，也从来没进过子导航 —— `agent-list.ts:9` 说得很清楚，那张表是**设置页的展示元数据**，不是「有哪些 agent」的真源                                                                                                                                                           |
+| **D54** | 🔴 复用 Agent 配置界面的代价              | 把 `AgentSection` 的**草稿 + 动作壳**抽成 `AgentConfigPanel.vue`，两处共用                                 | 两张卡本身是 `agentId` 单 prop 驱动、直接可复用；但 `AgentPromptCard` 的两个草稿是 `defineModel`，**由父组件持有** —— 连同「保存 / 恢复默认 / 存为项目默认」三个动作，以及 AGENTS.md 记着的那个坑（草稿载入必须 `watch(..., { immediate: true })`，否则文本框空着渲染、一保存就把空串写进用户提示词）。不抽壳就要把这套东西连同那个坑**再实现一遍**                                             |
+| **D55** | 🔴 `image_prompt` 的 systemPrompt 何时写  | **推迟**。G 阶段先落一份**临时最小版**（覆盖 §8.5 的四点 + `TODO` 标注），正式撰写作为**最后一个独立任务** | 侧链的**管道**（XML 抽取、调用、缓存、限额排序）与**提示词内容**是两件可以分开验证的事：管道对不对，用一份糊弄的提示词就能测出来（抽不抽得到三个标签、失败会不会正确降级）；而提示词好不好，要等到能真机看图才谈得上调。先把管道钉死，提示词留到有反馈回路的时候写 —— 否则就是在没有观测手段的情况下调一个纯经验的东西。**临时版必须带 `TODO`**，否则它会以"反正能跑"的姿态活到上线             |
 
 ---
 
@@ -272,11 +317,25 @@ export interface ImagePromptOutput {
 export type NarrativeSegment =
   { kind: 'text'; text: string } | { kind: 'image'; occurrence: number; marker: SceneImageMarker };
 
-// ═══ 角色预设 ═══
+// ═══ 视觉预设（角色 + 地点，同一张表，D40）═══
 
-/** Dexie v17 `imagePresets`，全局按角色名键控，进 FullBackup（纯文本、很小） */
-export interface CharacterImagePreset {
-  /** 🔴 主键。原始字符串，`===` 匹配，不 trim / 不折叠大小写 / 不 NFKC */
+/**
+ * 角色预设管**人**的一致性，地点预设管**场景**的一致性 —— 两者形状完全一样，
+ * 所以是同一张表加一个 `kind`，不是两张表（D40）。
+ */
+export type ImagePresetKind = 'character' | 'location';
+
+/** Dexie v17 `imagePresets`，全局键控，进 FullBackup（纯文本、很小） */
+export interface ImagePreset {
+  /**
+   * 🔴 主键 = `` `${kind}:${name}` ``。
+   *
+   * 合表之后不能再拿 `name` 当主键 —— 幻想设定里人名与地名撞车是会发生的
+   * （某人以某地为名）。`name` 保留**原始字符串**供 `===` 匹配，主键只是它的派生。
+   */
+  key: string;
+  kind: ImagePresetKind;
+  /** 🔴 原始字符串，`===` 匹配，不 trim / 不折叠大小写 / 不 NFKC（铁律 1 / 素材系统 D2） */
   name: string;
   dialects: {
     /** v1 唯一在用 */
@@ -284,7 +343,13 @@ export interface CharacterImagePreset {
     /** v2 的 OpenAI/Gemini 用。形状先留好（D11） */
     prose?: { positive: string; negative: string };
   };
-  /** 角色一致性的穷人版；缺省 = 每次随机 */
+  /**
+   * 角色一致性的穷人版；缺省 = 每次随机。仅 `kind==='character'` 有意义。
+   *
+   * ⚠️ 同一 seed 只让构图更接近，**不保证同一张脸** —— 编辑器里要照实说。
+   * 唯一实际可用的设置路径是图鉴详情的「把这次的 seed 钉给他」（§10.3），
+   * 没人会手打一个十位随机整数。
+   */
   pinnedSeed?: number;
   createdAt: number;
   updatedAt: number;
@@ -330,13 +395,32 @@ export type QuotaVerdict = { ok: true } | { ok: false; reason: QuotaReason; mess
 
 // ═══ 落库记录 ═══
 
-export type SceneImageStatus = 'pending' | 'done' | 'failed';
+/**
+ * 🔴 `queued` 与 `generating` 是**两个**状态（D35），不是一个 `pending`。
+ *
+ * 一条消息的多个标记串行发，第 3 张可能要等 3 分钟才开始 —— 三个一模一样的转圈
+ * 会被读成「卡死了」。而且两者的**取消语义不同**：排队取消不花钱，在飞中止照样计费（D36）。
+ */
+export type SceneImageStatus = 'queued' | 'generating' | 'done' | 'failed';
+
+/**
+ * 图挂在哪儿（D34）。
+ *
+ * `marker` —— story 写的 `<scene_image>`，`occurrence` 是它在该消息里的序号（D2）。
+ * `message-end` —— 玩家从右键菜单主动要的（D33），排在消息正文之后，`occurrence` 是
+ *                  同类里的序号。
+ *
+ * 两者都只按 `messageId` 反查，所以 D2 白送的「快照回滚 → 图自动重挂」对二者同样成立。
+ */
+export type SceneImageAnchorKind = 'marker' | 'message-end';
 
 export interface SceneImageRecord {
   id: string;
   saveId: string;
   messageId: string;
-  /** 该消息里第几个 <scene_image>，与渲染段编号对齐（D2） */
+  /** 见 SceneImageAnchorKind（D34） */
+  anchorKind: SceneImageAnchorKind;
+  /** 该消息里第几个（同 anchorKind 内计数），与渲染段编号对齐（D2） */
   occurrence: number;
   /** 同一处的第几次重画，从 0 起（D17）。正文显示最大者，图鉴显示全部 */
   take: number;
@@ -355,6 +439,14 @@ export interface SceneImageRecord {
   description: string;
   /** 用户收藏，将来做清理时的豁免位 */
   favorite?: boolean;
+  /**
+   * 用户把这一 take 钉成正文里显示的那张（D45）。
+   *
+   * 同一 `(messageId, anchorKind, occurrence)` 下**至多一条**为 true；没有任何一条为 true
+   * 时正文显示 `take` 最大者。没有这个字段，重画就是事实上的破坏性操作 —— 新的更差时，
+   * 之后每次读到这条消息都看到更差的那张。
+   */
+  pinned?: boolean;
 
   // ── 复现所需（D8：备份存的是配方）──
   /** 标记正文原文 —— story 写的**那句中文**（D28），保留原始字节供排查 */
@@ -390,6 +482,13 @@ export interface SceneImageRecord {
   mime?: string;
   bytes?: number;
   hash?: string;
+  /**
+   * 字节被「清理」删掉了，但记录留着（D47）。
+   *
+   * `status` 仍是 `'done'` —— 这张图**画出来过**，那是历史事实，不因为腾空间而改写。
+   * 图鉴照常列出（缩略位显示「已清理」+ 重画按钮），配方（prompt/seed/model）都还在。
+   */
+  blobDropped?: boolean;
 
   /** status='failed' 时的可读原因（已本地化，§12） */
   error?: string;
@@ -397,6 +496,12 @@ export interface SceneImageRecord {
   errorKind?: ImageGenFailureKind;
 
   createdAt: number;
+  /**
+   * 真正开始发请求的时刻（进入 `generating` 时写）。
+   * 用途只有一个：算「已用 N 秒」（D37）。**不要**拿 `createdAt` 算 —— 那是入队时刻，
+   * 排在第三位的图会一上来就显示「已用 180 秒」。
+   */
+  startedAt?: number;
 }
 
 /** 字节表，与 assetBlobs 同形状 */
@@ -463,8 +568,23 @@ export interface ComposeOptions {
   baseNegative: string;
   /** 设置里的全局追加负向 */
   extraNegative: string;
-  /** 标记没写 rating 时的默认档 */
-  defaultRating: ImageRating;
+  /**
+   * 🔴 **上限，不是默认值**（D38）。标记写的 rating 会被钳到这里。
+   *
+   * 旧名 `defaultRating` 是个陷阱：那让**模型**决定内容尺度，还能盖过用户偏好。
+   * 玩家把它设成 `general` 通常有现实原因（在外面玩），而 story agent 写一句
+   * `rating="explicit"` 就穿透了。标记没写时同样取这个值，所以"默认"的行为没变，
+   * 变的是它现在还封顶。
+   */
+  maxRating: ImageRating;
+  /**
+   * 世界状态标签（D39）：时段 + 天气，由 **Code 查引擎**得出，不问 AI。
+   *
+   * 调用方从 `getTimeOfDay()` 与 `stat-projection` 的 `world['天气']` 映射而来。
+   * 🔴 **映射不中的值一律不贡献标签** —— 天气是自由文本，猜错比留空糟得多。
+   * 空串合法（引擎没有这些信息时）。
+   */
+  worldTags: string;
   /** 缺省 6（NAI 官方上限） */
   maxCharacters?: number;
 }
@@ -477,7 +597,14 @@ export function composePrompt(
   sceneNegative: string,
   /** 角色名与 rating 仍取自标记（D30） */
   marker: Pick<SceneImageMarker, 'characters' | 'rating'>,
-  presets: ReadonlyMap<string, CharacterImagePreset>,
+  /**
+   * 当前地点名（D40）。引擎自己知道，**不由 AI 在标记里报**。
+   * 查不到同名预设时**静默跳过** —— 绝大多数地点本来就没人写过预设，
+   * 这是常态不是异常，不产 warning。
+   */
+  locationName: string | undefined,
+  /** 键是 `` `${kind}:${name}` ``（§4 `ImagePreset.key`） */
+  presets: ReadonlyMap<string, ImagePreset>,
   opts: ComposeOptions,
 ): ComposedPrompt;
 ```
@@ -486,12 +613,19 @@ export function composePrompt(
 
 ```
 [1] 场景     ← scenePrompt（image_prompt 产出，含数量标签 2girls/1boy）
-[2] 构图     ← opts.compositionTags
-[3] rating   ← `rating:${marker.rating ?? opts.defaultRating}`
-[4] 画质后缀 ← opts.qualitySuffix   🔴 末尾，不是开头
+[2] 地点     ← presets.get(`location:${locationName}`)?.danbooru.positive   （D40，查不到=跳过）
+[3] 世界状态 ← opts.worldTags                                                （D39，空串=跳过）
+[4] 构图     ← opts.compositionTags
+[5] rating   ← `rating:${min(marker.rating ?? opts.maxRating, opts.maxRating)}`   （D38 钳位）
+[6] 画质后缀 ← opts.qualitySuffix   🔴 末尾，不是开头
 
 baseNegative = opts.baseNegative ∪ opts.extraNegative ∪ sceneNegative
+              ∪ 地点预设的 negative（若命中）
 ```
+
+🔴 **顺序即权重**：danbooru 系模型里靠前的标签更重。所以是「这一刻的场景」压过「这个地方长什么样」压过「天光如何」—— 地点预设是背景板，不该盖掉正在发生的事。
+
+🔴 **rating 钳位是静默的，不产 warning**。上限是用户自己设的、正按预期工作；每张图都提醒一句"本来可以更露骨"是纯噪音。分级顺序 `general < sensitive < questionable < explicit`。
 
 🔴 **本函数收的是标签串，不是那句中文。** 中文→标签的转换发生在 §8.5，是一次 LLM 调用，**不属于纯函数层** —— 这条边界必须清楚，否则 `image-prompt.ts` 会被人塞进一个网络调用而失去可测性。
 
@@ -504,6 +638,10 @@ baseNegative = opts.baseNegative ∪ opts.extraNegative ∪ sceneNegative
 - `seed` 取**第一个带 `pinnedSeed` 的角色**的值；都没有则 undefined
 - 各段用 `, ` 连接，空段跳过，不产生 `, ,`
 - danbooru 权重语法（`{{}}` / `[[]]` / `-0.8::x::`）**原样透传**，一个字符都不改
+- 🔴 **rating 钳到 `opts.maxRating`**（D38），且**静默钳**、不产 warning —— 上限是用户自己设的、正按预期工作，每张图提醒一句是纯噪音
+- 🔴 **地点预设进 `base`，不进角色槽**（D40）—— 它描述的是场景不是人。查不到同名预设**静默跳过、不产 warning**：绝大多数地点本来就没写过预设，那是常态
+- 🔴 **`opts.worldTags` 原样拼进 `base`**（D39）。本函数**不做**任何时段/天气的推导 —— 中文自由文本到标签的映射在调用方，本层保持纯粹拼接，否则那张映射表会跟着一起进纯函数测试的负担里
+- 本函数**仍然不产随机、不读时钟**（承 §5 的纯度约束）—— `startedAt` 之类是 store 的事
 
 **角色预设的编写规范**（要显示在预设编辑器里）：
 
@@ -513,7 +651,7 @@ baseNegative = opts.baseNegative ∪ opts.extraNegative ∪ sceneNegative
 
 ```ts
 export interface QuotaInput {
-  /** 本存档已有的全部记录（含 pending/failed） */
+  /** 本存档已有的全部记录（**含 queued/generating/failed** —— 在飞的和失败的都要计入，否则限额可以被连点绕过） */
   records: readonly Pick<SceneImageRecord, 'messageId' | 'turn' | 'source' | 'createdAt'>[];
   /** 本次要生成的目标 */
   target: { messageId: string; turn: number; source: 'auto' | 'manual' };
@@ -737,7 +875,7 @@ this.version(17).stores(
   withSchema(SCHEMA_V16, {
     sceneImages: 'id, saveId, messageId, [saveId+messageId], turn',
     sceneImageBlobs: 'id',
-    imagePresets: 'name', // 主键即角色名（D2：严格 ===）
+    imagePresets: 'key, kind, name', // 主键 = `${kind}:${name}`（D40）；name 保原样供 === 匹配
   }),
 );
 ```
@@ -776,9 +914,13 @@ await db.sceneImages.where('saveId').equals(id).delete();
 
 **这条是 D2 白送的，不需要写一行回收逻辑。**
 
-### 7.5 用量
+### 7.5 用量与清理
 
 设置页存档数据分区加一行：「本存档插画：N 张 / X MB（自动 A / 手动 M）」+ 手动清理按钮。
+
+🔴 **「清理」= 删字节、留记录**（D47）。删掉 `sceneImageBlobs` 的行、给 `sceneImages` 打上 `blobDropped`，**记录本身一条都不动**。理由是 D8 那条：元数据是**配方**（prompt + seed + model 齐全，NAI 同参数可复现）。于是清理之后图鉴目录还是完整的、随时能重画 —— 这正是用户说「清理」时想要的那件事。把回忆一起删掉的那种"清理"要单独一个按钮、单独一次确认，且措辞必须是「删除」而不是「清理」。
+
+清理的默认范围排除 `favorite` 的那些（D6 早就留了这个豁免位）。
 
 ---
 
@@ -799,8 +941,9 @@ story agent 输出正文（含 <scene_image>）
   └─【off】→ 什么都不做（标记照扫，否则漏成文本；但不建记录、不发请求）
 
 generate(saveId, messageId, occurrence, marker, source)    ← 唯一入口，两档共用
-  ↓ take = 该 (messageId, occurrence) 已有记录数
-  ↓ 建 SceneImageRecord{status:'pending', source, take, intent} → **立即落库**（D5）
+  ↓ take = 该 (messageId, anchorKind, occurrence) 已有记录数
+  ↓ 建 SceneImageRecord{status:'queued', source, take, intent, anchorKind} → **立即落库**（D5）
+  ↓ 轮到它时 → status:'generating' + startedAt = now（D35/D37）
   │
   ↓ 【中文 → danbooru】(§8.5)
   │    有 editedScenePrompt？ → 直接用它，**跳过侧链**（D26 + D31）
@@ -808,7 +951,8 @@ generate(saveId, messageId, occurrence, marker, source)    ← 唯一入口，�
   │    否则 → 调 image_prompt agent → normalizeTagString → 存进记录
   │           失败 → status:'failed', errorKind:'prompt-agent'，**到此为止，不发 NAI**
   │
-  ↓ composePrompt(scenePrompt, sceneNegative, marker, presets, opts)
+  ↓ worldTags = buildWorldTags(engineTime, engineWeather)   ← D39，Code 查引擎，映射不中返空串
+  ↓ composePrompt(scenePrompt, sceneNegative, marker, locationName, presets, {...opts, worldTags, maxRating})
   ↓ buildNaiRequest(composed, naiOpts)
   ↓ image-client 经 BFF 发请求（带 AbortController）
   ↓ 成功：parseNaiZip → 存 blob → status:'done' + mime/bytes/hash
@@ -830,7 +974,11 @@ generate(saveId, messageId, occurrence, marker, source)    ← 唯一入口，�
 
 ### 8.5 `image_prompt` 侧链（D28）
 
-**第 13 个 agent**，进 `data/defaults/agent-config.json` 的 `agents`。于是它**白拿整套设置界面** —— 模型选择、温度/topP/惩罚项、maxTokens、世界书开关与选书、systemPrompt 编辑、预设，全部由既有的 `agent-settings.ts` + 设置页 Agent 分区提供，**一个新控件都不用画**。
+**第 13 个 agent**，进 `data/defaults/agent-config.json` 的 `agents`。于是它**白拿整套设置界面** —— 模型选择、温度/topP/惩罚项、maxTokens、世界书开关与选书、**systemPrompt 编辑**、预设，全部由既有的 `agent-settings.ts` + 设置页 Agent 分区提供，**一个新控件都不用画**。
+
+⚠️ 但它在设置页里**不出现在 Agent 分区** —— 它渲染在第 13 分区「🖼 图像生成」的第一张卡上，与「出图」「视觉预设」挨着，因为用户眼里它们是同一个功能（D50/D53，§11.3）。**配置照旧存 `agents` 袋子**，只是换个地方渲染（D52）；`AGENT_LIST` 不收它，免得同一份配置有两个入口。
+
+**自定义提示词就是这里的 systemPrompt**；它与出图卡那个「画质后缀 / 全局负向」是两个不同层的"提示词"，两张卡挨着放正是为了把这件事讲清楚（§11.3）。
 
 | 项       | 值                                                                                               |
 | -------- | ------------------------------------------------------------------------------------------------ |
@@ -842,6 +990,8 @@ generate(saveId, messageId, occurrence, marker, source)    ← 唯一入口，�
 | 输出     | `<image_prompt>` / `<image_negative>` / `<image_desc>` 三个 XML 标签                             |
 
 **为什么输出用 XML 标签而不是裸文本**：模型爱在答案前面写一段废话（"好的，我来把这个场景转换成标签："）。本仓已有 `story-rescue.ts` 专门处理同一类缺陷 —— 用标签让抽取变成确定的事，而不是靠一堆"从最后一个冒号后面截"的启发式。抽不到 `<image_prompt>` 就是 `errorKind: 'prompt-agent'`，**明确失败，不猜**。
+
+🔴 **systemPrompt 的正式撰写推迟（D55）**：G 阶段只落一份带 `TODO` 的临时最小版，够跑通管道即可。理由是这两件事的验证手段完全不同 —— 管道用糊弄的提示词就能测（抽不抽得到三个标签、失败会不会降级成 `prompt-agent`），而提示词质量要看真机出的图。**下面这四点是正式版的提纲，不是临时版的验收标准。**
 
 **systemPrompt 要教的四件事**（都不涉及叙事，所以可以写得很直白）：
 
@@ -887,7 +1037,7 @@ prompt 里的克制指令表达的是"一般情况下希望它怎么做"。模�
 
 ```
 msg.content
-  ↓ splitSceneImageSegments(text)              ← always-on，不看美化开关
+  ↓ splitSceneImageSegments(text)              ← always-on，不看美化开关（只切 anchorKind:'marker'）
   [ {text}, {image, occurrence, marker}, {text}, … ]
   ↓ 每个 text 段各自过 compileBeautifierSegments(...)   ← 既有逻辑，仍受开关/流式约束
   ↓ BeautifiedNarrative 渲染
@@ -900,28 +1050,50 @@ msg.content
 
 ### 10.2 图片段的状态真值表
 
-渲染只看两件事：这个 `(messageId, occurrence)` **有没有记录** × **当前哪一档开关**。
+渲染只看两件事：这个 `(messageId, anchorKind, occurrence)` **有没有记录** × **当前哪一档开关**。
 
-| 有记录？  | 开关              | 渲染                                                                                        |
-| --------- | ----------------- | ------------------------------------------------------------------------------------------- |
-| 无        | `off`             | **什么都不渲染**，标记隐形                                                                  |
-| 无        | `manual` / `auto` | **「生成插画」按钮** + 标题 + 说明。点击 → 建记录并发请求                                   |
-| `pending` | 任意              | 占位框（1216:832 骨架屏）+ 转圈。**刷新后仍在**（D5）                                       |
-| `done`    | 任意              | 图片，点击放大；悬停出「重画 / 复制提示词 / 收藏 / 删除」；多 take 时角落 `2/3` 可切（D17） |
-| `failed`  | 任意              | 一行可读原因 + 「重试」（`retryable` 为 false 时不显示）。**绝不静默留白**                  |
+| 有记录？     | 开关              | 渲染                                                                                                         |
+| ------------ | ----------------- | ------------------------------------------------------------------------------------------------------------ |
+| 无           | `off`             | **什么都不渲染**，标记隐形                                                                                   |
+| 无           | `manual` / `auto` | **「生成插画」按钮** + 标题 + 说明。点击 → 建记录并发请求                                                    |
+| `queued`     | 任意              | 占位框 +「队列中 · 第 2 位」+ **「取消（不消耗）」**（D35/D36）                                              |
+| `generating` | 任意              | 占位框 + 转圈 + **已用 N 秒**（D37）+「中止（本次仍会计费）」（D36）。**刷新后仍在**（D5）                   |
+| `done`       | 任意              | 图片，点击放大；悬停出「重画 / 钉住这张 / 复制提示词 / 收藏 / 删除」；多 take 时角落 `2/3` 可切（D17 / D45） |
+| `failed`     | 任意              | 一行可读原因 +「重试」（`retryable` 为 false 时不显示）+ **「自己写提示词」**（D42）。**绝不静默留白**       |
+
+三格的公共内容：**占位框里始终写着 `title` 与 `intent` 那句中文**（D37）。5–60 秒的空白灰框是纯死时间，而「这张图画的是什么」本来就在记录里 —— 写上去，等待变成期待，成本为零。
 
 > 💡「无记录 + `auto`」这一格是 D15 与 D21 的共同产物：自动只对新消息开火、超限降级到这里。所以把开关从手动拨到自动**不会追溯烧钱**，玩家仍能一张张补画。
 
-**布局约束**：图片宽度跟随正文列宽，`max-height` 夹住。**按钮态与占位态必须占同样高度**，否则每张图生成完成时整个对话流会跳一下。
+**缺预设提示（D41）**：`done` 且装配时产出过 `{kind:'missing-preset'}` 时，图下方一行小字 ——「**苏婉** 还没有外观预设，这张图里的她是随机的 · [去设置]」，深链带角色名预填。首次游玩必然命中这一格；没有它，玩家只会看到一个跟角色毫无关系的人，并且不知道为什么。
+
+**打码（D46）**：`imageBlurByDefault` 开启时，`done` 的图默认蒙一层模糊 + 「点击查看」，点开即恢复（不记忆，每张各自决定）。
+
+**布局约束**：图片宽度跟随正文列宽，`max-height` 夹住。**按钮态、排队态、生成中态必须占同样高度**，否则每张图落地时整个对话流会跳一下。`alt` 取 `title`，`title` 属性取 `description` —— 元数据已经写好了，不用白不用。
+
+### 10.2b 玩家主动要图（D33）
+
+story 被教了「克制使用」，所以必然存在「AI 没配图但我想要这一刻」的情况。而付钱的是玩家。
+
+- **入口**：消息右键菜单加一项「为这一段配图」。`ChatFlow.vue:126` 已有右键菜单，现在只绑最新一条 assistant 消息（回退/复制）—— 需**放宽到任意 assistant 消息**，并按消息做菜单项过滤（回退仍只在最新一条上出现，配图哪条都行）。
+- **锚点**：`anchorKind: 'message-end'`（D34），渲染在该消息正文之后、与正文同宽。
+- **`intent` 从哪来**：整条消息正文（已剥标记）直接喂给 `image_prompt` 侧链当 `intent`。**不做选中文本锚定** —— 那是这套东西里最脆弱的一半（原文一改锚点就丢），收益却只是位置更精确一点。
+- **限额**：走同一个 `checkQuota({source:'manual'})`（§5.3 的不变式：自动与手动共用一个判定）。
+- **`title`**：这里没有 story 写的标题，所以由 `image_prompt` 的 `desc` 兼任；侧链跑完之前按钮标签是「第 N 回合的插画」。
+- 🔴 **`off` 档下这一项不出现**。整个功能关掉时右键菜单里还留着一个能开始花钱的入口，是「关掉了但没完全关掉」那类最招人烦的 bug。判据与 §10.2 真值表第一行同源：`off` = 这个子系统在 UI 上完全不存在。
+- 🔴 **它不走 `splitSceneImageSegments`**。那个函数只切 `anchorKind:'marker'`（它的输入是正文文本，而 message-end 的图在正文里没有对应字节）。渲染路径是：正文分段照常 → 段落渲染完之后，追加一条按 `(messageId, anchorKind:'message-end')` 查出来的图带。**两条路径不要合并** —— 一个由文本驱动、一个由记录驱动，合并只会让分段器去关心它看不到的东西。
 
 ### 10.3 CG 图鉴
 
 同一批 `SceneImageRecord` 的第二个视图 —— **零新数据模型**。
 
 - **入口**：游戏页侧栏（`SideToolbar.vue`），与 `SnapshotPanel` / `MemoryPanel` 同级
-- **列表**：按 `turn` 升序（剧情顺序）。每格缩略图 + `title` + `desc`。同 `(messageId, occurrence)` 的多 take 折成一格，角标显示张数
-- **详情**：大图 + 标题/说明（**双击就地改** —— AI 写的是初值不是定论）+ 元数据（回合/模型/seed/出场角色）+ **可编辑的场景提示词**（改完点重画 → 走 `editedScenePrompt`，D26）+ 动作（跳回那条消息 / 重画 / 导出这一张 / 收藏 / 删除）
+- **列表**：按 `turn` 升序（剧情顺序）。每格缩略图 + `title` + `desc`。同 `(messageId, anchorKind, occurrence)` 的多 take 折成一格，角标显示张数
+- **详情**：大图 + 标题/说明（**双击就地改** —— AI 写的是初值不是定论）+ 元数据（回合/模型/seed/出场角色）+ **可编辑的场景提示词**（改完点重画 → 走 `editedScenePrompt`，D26）+ 动作（跳回那条消息 / 重画 / **钉成正文显示的那张**（D45）/ 导出这一张 / 收藏 / 删除）
+- **「把这次的 seed 钉给他」**：图里**恰好一个**角色时，详情多一个动作，把本次 seed 写进该角色预设的 `pinnedSeed`。这是 `pinnedSeed` **唯一现实可用的设置路径** —— 没人会在预设编辑器里手打一个十位随机整数，而一个谁也设不了的字段等于不存在。按钮旁照实写「同一 seed 只让构图更接近，不保证同一张脸」
+- **已清理的格子**（`blobDropped`，D47）：缩略位显示「字节已清理」+ 重画按钮。配方（prompt/seed/model）都还在，标题说明照常显示 —— 这一格记的是"这张图存在过"，不是一个空洞
 - **未生成的标记不进图鉴** —— 图鉴是"已经画出来的东西"，塞一堆灰格子会让它从战利品陈列变成待办清单。补画入口在正文里
+- **失败的记录也不进图鉴** —— 同上。失败的自助入口在正文那一段里（D42），不在这儿
 - **性能**：几十张时 object URL + CSS 尺寸即可。上百张后再考虑烘缩略图（`image-crop.ts` 的 canvas 缝现成），属于"卡了再做"
 - 🔴 **懒加载要双保险**：`IntersectionObserver` **加上**一个定时兜底（约 500ms 后按 `getBoundingClientRect()` 对视口 ±1500px 复查一遍）。单靠观察器在低带宽/弱设备上会不触发，图鉴一屏几十张时表现为**一片空白框**，而且是那种"我这边好好的"的 bug
 
@@ -931,7 +1103,9 @@ msg.content
 
 ## 11. 设置项
 
-新增第 13 分区 `🖼 图像生成`。⚠️ **要改两处**（Q-18 硬规矩）：`settings-types.ts` 的 `UiSettings` 声明 **+** `getDefaults()` 给默认值。
+新增第 13 分区 `🖼 图像生成`，**整个功能都在里面** —— 包括 `image_prompt` 的 Agent 配置（D50–D54，§11.3）。
+
+⚠️ **`UiSettings` 要改两处**（Q-18 硬规矩）：`settings-types.ts` 的声明 **+** `getDefaults()` 给默认值。⚠️ **`AGENTS.md` 的「设置页 12 分区」表要改成 13**（实施时改，现在不改 —— 那张表描述的是现状）。
 
 ```ts
 // UiSettings 增量
@@ -941,7 +1115,9 @@ imageModel: string; // 'nai-diffusion-4-5-full'
 imageQualitySuffix: string; // ', location, very aesthetic, masterpiece, no text'
 imageBaseNegative: string; // 我们维护的基础负向
 imageExtraNegative: string; // ''        用户追加
-imageDefaultRating: ImageRating; // 'general'
+imageMaxRating: ImageRating; // 'general'  🔴 上限而非默认（D38）：标记写的 rating 会被钳到这里
+imageBlurByDefault: boolean; // false     打码显示（D46）
+imageAutoConfirmed: boolean; // false     自动档的一次性确认是否已经弹过（D44）
 imageWidth: number; // 1216
 imageHeight: number; // 832
 imageSteps: number; // 23
@@ -955,9 +1131,82 @@ imageMaxPerHour: number; // 20
 
 **默认档位是 `'manual'`**：手动档下 AI 多写几个标记只是多几个按钮、不花钱，所以"story agent 该多久画一次"这个提示词工程问题可以先不解决 —— 让玩家看着标记频率合不合适，再决定要不要拨到自动。
 
-🔴 **上面这些是 NAI 与限额的参数。`image_prompt` 的配置一个都不在这里** —— 它是第 13 个 agent，模型/温度/世界书/systemPrompt 全部走既有的 `agent-settings.ts` 与设置页 Agent 分区（D28）。**不要**为它另开设置项，那会造出第二个真相来源。
+🔴 **上面这些是 NAI 与限额的参数，存在 `UiSettings`。`image_prompt` 的模型/温度/世界书/systemPrompt 一个都不在这里** —— 那些走 `agent-settings.ts` 的 `agents` 袋子（D28）。两者现在**在同一个分区里挨着渲染**（§11.3 的头两张卡），但**存储各归各位**（D52）。合并存储会造出第二个真相来源，那正是 D28 当初要避免的事。
 
 ⚠️ **`apiType` 的坑**：`api-key-migration.ts:16` 把类型钉成 `'chat' | 'embedding'`，`:65` 有一行 `entry.apiType === 'embedding' ? 'embedding' : 'chat'` —— 加 `'image'` 时**两处一起改**，否则症状是「图像 API 存了、重开变成 chat」。
+
+### 11.1 三档开关旁边写什么（D44）
+
+档位选择器**不是**三个光秃秃的单选。`auto` 那一项底下带一行后果：
+
+> 剧情里出现值得配图的时刻就自动生成。每回合最多 1 张、每小时最多 20 张，超出的会降级成按钮等你点。
+
+并且**首次**从别的档切到 `auto` 时弹一次确认（`imageAutoConfirmed` 记住，只弹这一次）。自动档是**无人值守花钱**，在决策点讲清楚比事后给一个计数器（§9.4）早一步 —— 两者都要，因为它们挡的是不同时刻的意外。
+
+### 11.2 免费额度指示（D43）
+
+参数卡底部一行，按当前 `imageWidth × imageHeight / imageSteps / n_samples` 实时算：
+
+- ✅ 「当前参数在 Opus 免费额度内，不消耗 Anlas」
+- ⚠️ 「当前参数会消耗 Anlas（约 N 点/张）」
+
+宽高与步数在设置里**是可调的**，调大了会**静默**开始烧点数 —— 用户改完只会看到图变清楚了，账单要过一阵才发现。这是一个纯函数（`estimateAnlasCost(w, h, steps, samples)`），值得为它单独一条测试。
+
+🔴 措辞必须是**估算**：「按当前订阅规则估算」。NAI 的免费档规则会变，我们给的是提示不是保证，写成保证就成了一个我们守不住的承诺。
+
+### 11.3 分区内三张卡（D50–D54）
+
+**为什么是自己的分区，不是 Agent 分区里的一个类目**：这条**推翻过一次**，理由值得留着 ——
+
+> 「类目」方案要往 Agent 子导航里塞两个**不是 LLM Agent** 的条目（出图、视觉预设）。代价立刻显形：`SettingsPage.vue:104` 的 `agentModelOf()` 读的是每 Agent 的 LLM 设置袋，那两条在里面永远没有 `model`，于是子导航给它们**永久挂红叉**；要修就得让角标判据按条目类型分流，还要让 `AgentSection` 按类目分流渲染。
+>
+> 也就是说：为了让它「看起来像 agent」，去改一个本来只服务 LLM Agent 的导航。而**它本来就不是一个 agent** —— 它是一个含**两次不同调用**的子系统（LLM 出标签、NAI 出图），其中只有一次是 agent。分区归分区，agent 归 agent。
+
+而玩家眼里只有一个功能叫「图像生成」，所以**整个功能进同一个分区**，包括 `image_prompt` 的 Agent 配置。
+
+#### 三张卡（D51）
+
+| 卡             | 内容                                                                                                                                                      | 存储                                 |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| **提示词生成** | `image_prompt` 的完整 Agent 配置：API 池 / 模型 / 7 个旋钮 / 世界书 / **systemPrompt** / 上下文模板                                                       | `agents` 袋子（`agent-settings.ts`） |
+| **出图**       | 三档开关（含后果行 + 首次确认，D44）+ 端点 + NAI 模型 + 尺寸/步数/采样器 + 画质后缀 + 全局负向 + rating 上限 + 限额 + **免费额度指示**（D43）+ 用量与清理 | `UiSettings`                         |
+| **视觉预设**   | 角色 / 地点视觉预设 CRUD（D40 合表后两个筛选页签）                                                                                                        | Dexie `imagePresets`                 |
+
+分三张而不是一张：光 NAI 参数就十几个，一张卡装不下还读不动。前两张正好对应**两个花钱的地方**（LLM token / Anlas），与 D32「两处花钱、闸门在最前面」是同一套心智模型。
+
+#### 🔴 自定义提示词有两处，别让用户写错框
+
+- **提示词生成**卡里的 `systemPrompt` —— 教模型怎么把中文场景转成 danbooru 标签（§8.5 的四件事）。这是「**Agent 的**提示词」。
+- **出图**卡里的画质后缀 / 全局负向 —— 直接拼进每一张图（§5.2 的 `[6]` 与 `baseNegative`）。这是「**图的**提示词」。
+
+两者都叫"提示词"却完全不同层。放进同一个分区**正是把这件事讲清楚的机会**（两张卡挨着，各自写明作用范围）；写错框两边都不报错，只是画出来不对 —— 与 D27 同一类的静默失败。
+
+#### `image_prompt` 不进 Agent 子导航（D53）
+
+同一份配置开两个入口，用户就要猜哪个是权威的（其实是同一份存储，但没人信）。所以它**不进 `AGENT_LIST`**。
+
+先例现成：`agent-config.json` 里有 **12** 个 agent，`AGENT_LIST` 只有 **11** 条 —— `combat_v3` 在引擎里跑，从来没进过子导航。`agent-list.ts:9` 的注释把这件事写得很清楚：那张表是**设置页的展示元数据**，不是「有哪些 agent」的真源。
+
+> 💡 于是这次**一个字都不用动 `agent-list.ts` 与 `SettingsPage.vue` 的子导航** —— 类目方案要改的那两处（分组渲染、角标分流）现在都不需要了。这是推翻它之后省下的东西。
+
+#### 🔴 复用 Agent 配置界面：先抽壳（D54）
+
+`AgentParamsCard` / `AgentPromptCard` 都是 `agentId` 单 prop 驱动的，看起来直接复用就行 —— **但草稿不在它们身上**：
+
+```
+AgentPromptCard   promptDraft / templateDraft 是 defineModel  → 父组件持有
+AgentSection      持有那两个草稿 + 三个动作（保存 / 恢复默认 / 存为项目默认）
+```
+
+所以要复用的其实是 **`AgentSection` 那层壳**，不是两张卡。做法是把壳抽成 `AgentConfigPanel.vue`（草稿 + 动作 + 两张卡），`AgentSection` 与图像分区各渲染一次，传不同的 `agentId`。
+
+🔴 **不抽壳的代价是把 AGENTS.md 记着的那个坑再踩一遍**：草稿载入必须 `watch(..., { immediate: true })`。因为主导航每次点击都把 `activeAgent` 置 null，宿主组件永远是新挂载，普通 `watch` 不触发 → 文本框空着渲染 → 用户一点「保存设置」就把**空串写进了自己的用户提示词**。这个坑在图像分区里会以完全一样的形状复现。
+
+#### 渲染位置 ≠ 存储位置（D52）
+
+🔴 `image_prompt` 的配置**仍然住在 `agents` 袋子里**，走 `agent-settings.ts` 这个唯一读写口 —— 在图像分区里渲染它，**渲染的是同一份存储**，不是复制一份。NAI 参数则住 `UiSettings`（§11 顶部那张表）。
+
+这条与导航长什么样无关，所以从「类目」方案里原样活了下来。归属看的是**「这份配置在描述什么」**：`image_prompt` 是个 LLM Agent，它的模型/温度/世界书就该跟别的 agent 存一处；`width`/`steps`/`ucPreset` 不是 LLM 参数，`AGENT_SETTINGS_DEFAULTS` 那五个默认值对它们一个都不适用。合并存储会造出 D28 要避免的第二真相来源。
 
 ---
 
@@ -972,19 +1221,21 @@ imageMaxPerHour: number; // 20
 
 ### 12.2 错误分类与文案
 
-| HTTP / 情形         | `kind`         | UI 文案                                          | 可重试 |
-| ------------------- | -------------- | ------------------------------------------------ | ------ |
-| 侧链失败/抽不到标签 | `prompt-agent` | 提示词生成失败了，点重试；或在图鉴里自己填提示词 | ✅     |
-| 401                 | `auth`         | NovelAI 令牌无效或已过期，去设置里重填           | ❌     |
-| 402                 | `payment`      | Anlas 不足，或这次的尺寸/步数超出了免费额度      | ❌     |
-| 429                 | `rate-limit`   | NovelAI 限流了，过一会儿再试                     | ✅     |
-| 400                 | `bad-request`  | 请求被拒绝：{上游 detail 摘要}                   | ❌     |
-| 5xx                 | `upstream`     | NovelAI 服务端出错了                             | ✅     |
-| 网络/超时           | `network`      | 连不上 NovelAI，检查网络或代理                   | ✅     |
-| 用户取消            | `aborted`      | 已取消                                           | ✅     |
-| 非 zip / 空 zip     | `bad-response` | NovelAI 返回了看不懂的内容                       | ✅     |
+| HTTP / 情形         | `kind`         | UI 文案                                     | 可重试 |
+| ------------------- | -------------- | ------------------------------------------- | ------ |
+| 侧链失败/抽不到标签 | `prompt-agent` | 提示词生成失败了，点重试；或自己写一份      | ✅     |
+| 401                 | `auth`         | NovelAI 令牌无效或已过期，去设置里重填      | ❌     |
+| 402                 | `payment`      | Anlas 不足，或这次的尺寸/步数超出了免费额度 | ❌     |
+| 429                 | `rate-limit`   | NovelAI 限流了，过一会儿再试                | ✅     |
+| 400                 | `bad-request`  | 请求被拒绝：{上游 detail 摘要}              | ❌     |
+| 5xx                 | `upstream`     | NovelAI 服务端出错了                        | ✅     |
+| 网络/超时           | `network`      | 连不上 NovelAI，检查网络或代理              | ✅     |
+| 用户取消            | `aborted`      | 已取消                                      | ✅     |
+| 非 zip / 空 zip     | `bad-response` | NovelAI 返回了看不懂的内容                  | ✅     |
 
 `detail` 只进 console 与记录，**不进 UI**（上游报文可能很长且是英文）。
+
+🔴 **「自己写提示词」是就地的，不在图鉴里**（D42）。失败段旁边直接给一个提示词输入框，写完存进 `editedScenePrompt` 并重发 —— 于是它也自动跳过侧链（D26 + D31）。**这一条是在修矛盾**：本表早先的文案让用户「在图鉴里自己填」，而 §10.3 规定图鉴只列已经画出来的，失败的根本不在那儿。凡是失败态给的出路，都必须指向用户此刻**看得见**的地方。
 
 ---
 
@@ -996,6 +1247,8 @@ src/sillytavern/
 ├── image-segments.ts           ← ★splitSceneImageSegments（§5.1）
 ├── image-prompt.ts             ← ★承重：composePrompt（§5.2）
 ├── image-quota.ts              ← ★checkQuota（§5.3，三层限额**唯一**判定处）
+├── image-world-tags.ts         ← ★D39：时段/天气 中文 → danbooru 标签（纯函数，映射不中返空串）
+├── image-anlas.ts              ← ★D43：estimateAnlasCost（纯函数；规则会变，测试即文档）
 ├── image-defaults.ts           ← 画质后缀表 / 构图词 / 基础负向 等常量
 ├── image-prompt-agent.ts       ← 侧链（§8.5）：装 ImagePromptRequest → 调 agent → 抽三个 XML 标签
 │                                  **纯函数部分单独导出**（buildImagePromptInput / parseImagePromptOutput），
@@ -1010,18 +1263,33 @@ data/defaults/agent-config.json ← 改：agents 加第 13 个 `image_prompt`（
 src/ui/
 ├── lib/image-client.ts         ← 唯一网络接触点（先例：workshop-client.ts，判别联合永不抛穿 + 超时 + 取消）
 ├── stores/scene-image-store.ts ← Dexie v17 唯一读写口 + generate() 队列
-├── stores/image-preset-store.ts← 角色预设 CRUD
+├── stores/image-preset-store.ts← 视觉预设 CRUD（角色 + 地点同表，D40）
 └── components/game/
     ├── BeautifiedNarrative.vue ← 改：外层先过 splitSceneImageSegments
-    ├── SceneImageSegment.vue   ← 新：§10.2 状态真值表
+    ├── SceneImageSegment.vue   ← 新：§10.2 状态真值表（含 queued/generating 两态、缺预设提示、打码）
     ├── CgGalleryPanel.vue      ← 新：图鉴列表
-    ├── CgGalleryDetail.vue     ← 新：图鉴详情
+    ├── CgGalleryDetail.vue     ← 新：图鉴详情（含「钉住这张」与「把 seed 钉给他」）
+    ├── ChatFlow.vue            ← 改：右键菜单放宽到任意 assistant 消息 + 加「为这一段配图」（D33）
     └── SideToolbar.vue         ← 改：加图鉴入口
 
-src/ui/components/settings/image/
+src/ui/components/settings/agent/
+└── AgentConfigPanel.vue        ← 🆕 **抽壳**（D54）：从 `AgentSection.vue` 抽出
+                                   「两个草稿 + 三个动作 + 两张卡」，传 `agentId` 复用
+                                   🔴 草稿载入必须 `watch(..., { immediate: true })`
+                                      —— 这个坑在新宿主里会原样复现（AGENTS.md 已记）
+   （`AgentSection.vue` 改为渲染 `AgentConfigPanel`；`agent-list.ts` 与
+     `SettingsPage.vue` 的子导航**一个字都不用动** —— `image_prompt` 不进
+     `AGENT_LIST`，D53）
+
+src/ui/components/settings/image/       ← 🆕 第 13 分区（D50）
 ├── ImageSection.vue            ← 分区壳（**单根** section.centered），照 Q-25 拆法
-├── ImageProviderCard.vue       ← 三档开关 + 端点 + 模型 + 参数 + 后缀/负向 + 限额 + 用量
-└── ImagePresetList.vue         ← 角色预设 CRUD（含 §5.2 那条编写规范提示）
+├── ImagePromptCard.vue         ← 「提示词生成」卡：薄壳，内部就是 `AgentConfigPanel`
+│                                  传 `agentId="image_prompt"`（D52：渲染这里、存 `agents`）
+├── ImageRenderCard.vue         ← 「出图」卡：三档开关（含后果行 + 首次确认，D44）+ 端点
+│                                  + 模型 + 参数 + **免费额度指示**（D43）+ 画质后缀/全局负向
+│                                  + rating 上限 + 限额 + 用量与清理
+└── ImagePresetList.vue         ← 「视觉预设」卡：CRUD，角色/地点两个筛选页签（D40）
+                                   含 §5.2 那条编写规范提示 + pinnedSeed 的照实说明
 
 server/routes/image.ts          ← 复用 forward()
 ```
@@ -1041,37 +1309,54 @@ server/routes/image.ts          ← 复用 forward()
 | `marker-protocol.test.ts`                           | 既有 + `scene_image` 属性解析与正文提取 · **标题含引号/超长/缺省时只收敛不拒绝**                                                                                                                                                                                                          |
 | `normalizeTagString`（并入 `image-prompt.test.ts`） | ★全角逗号/顿号/全角分号 → ASCII · `《》`→`<>`（`<lora:x:0.8>` 得以复原） · 换行与 `<br>` → `, ` · 连续逗号折叠 · **权重语法 `{{}}` / `[[]]` / `-0.8::feet::` 一个字符不改** · 首尾逗号被去掉                                                                                              |
 | `image-prompt-agent.test.ts`                        | ★`parseImagePromptOutput`：三个标签正常抽出 · **模型在前面写了废话仍能抽到** · 缺 `<image_prompt>` → `prompt-agent` 失败而**不是**猜一个 · 输出已过 `normalizeTagString` · `buildImagePromptInput` 带上地点与正文且**剥掉了全部标记**                                                     |
-| `scene-image-store.test.ts`                         | fake-indexeddb：pending 先落库 · 按 `[saveId+messageId]` 查 · 删存档连带删（且 `imagePresets` **不**删） · **重画追加 take 不覆盖** · ★**有 `editedScenePrompt` 时跳过侧链** · ★**限额拒绝时侧链一次都没被调用**（D32）                                                                   |
+| `scene-image-store.test.ts`                         | fake-indexeddb：`queued` 记录先落库再发请求 · 按 `[saveId+messageId]` 查 · 删存档连带删（且 `imagePresets` **不**删） · **重画追加 take 不覆盖** · ★**有 `editedScenePrompt` 时跳过侧链** · ★**限额拒绝时侧链一次都没被调用**（D32）                                                      |
 | 渲染态判定（纯函数抽出来测）                        | §10.2 真值表逐格 —— 尤其**「无记录 + auto」出按钮而不是自动开火**                                                                                                                                                                                                                         |
 
 > D15 值得单独一条断言：它是本设计唯一"错了会直接花钱"的规则，而其正确性来自"回调只在新消息时触发"这个**外部事实**。所以要测的不是回调本身，而是**渲染态判定不会把 auto 解释成"没记录就去生成"** —— 那是将来最可能被人"顺手补全"掉的一环。
+
+### 14.1 第二轮补丁的测试增量
+
+| 模块                                | 断言                                                                                                                                                                                                                                                                                           |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `image-prompt.test.ts`（追加）      | ★**rating 钳位**：标记 `explicit` + 上限 `general` → 出 `rating:general`，且 `warnings` 为空（静默）· 标记未写 rating → 取上限值 · **地点预设命中进 `base` 而非角色槽** · 地点预设查不到 → 静默跳过且不产 warning · `worldTags` 原样拼入且位置在构图之前 · `worldTags` 为空串时不产生 `, ,`    |
+| `image-world-tags.test.ts`（新）    | ★中文自由文本 → 标签的映射：`getTimeOfDay()` 各档位有对应标签 · 🔴 **天气映射不中时返回空串**（绝不猜） · 引擎没有时间/天气信息时返回空串 · **本函数是纯函数**，时间从参数进                                                                                                                   |
+| `image-anlas.test.ts`（新）         | ★`estimateAnlasCost`：1216×832 / 23 步 / 1 张 → 免费档 · 放大尺寸越界 → 非免费 · 步数越界 → 非免费 · 边界值逐个钉死（这条规则会变，测试就是它的文档）                                                                                                                                          |
+| `scene-image-store.test.ts`（追加） | ★`queued → generating` 时写 `startedAt`（**不是** `createdAt`） · 取消 `queued` 项**不产生任何网络调用** · `anchorKind:'message-end'` 与 `'marker'` 的 `occurrence` **各自独立计数**，互不干扰 · 同一锚点下 `pinned` **至多一条** · 清理只删 blob 行并打 `blobDropped`，`sceneImages` 行数不变 |
+| 渲染态判定（追加）                  | `queued` 与 `generating` 判成**不同**渲染态 · `blobDropped` 的 `done` 记录不渲染成破图 · `missing-preset` 告警存在时出提示行                                                                                                                                                                   |
 
 ---
 
 ## 15. 实施顺序
 
-| 阶段   | 内容                                                                       | 依赖       | 可并行              |
-| ------ | -------------------------------------------------------------------------- | ---------- | ------------------- |
-| **A**  | `types-image.ts` + `image-defaults.ts`                                     | 无         | —                   |
-| **B1** | `image-segments.ts` + 测试                                                 | A          | ✅ 与 B2/B3/B4 并行 |
-| **B2** | `image-prompt.ts` + 测试                                                   | A          | ✅                  |
-| **B3** | `image-quota.ts` + 测试                                                    | A          | ✅                  |
-| **B4** | `image-providers/novelai.ts` + 测试                                        | A          | ✅                  |
-| **B5** | `image-prompt-agent.ts` 的**纯函数半边**（装输入 / 抽三个 XML 标签）+ 测试 | A          | ✅                  |
-| **C**  | `marker-protocol.ts`：`MARKER_SPECS` 加一行 + `sanitizeCaption` + 测试     | A          | —                   |
-| **D**  | Dexie v17 + `scene-image-store` + `image-preset-store` + 测试              | A          | —                   |
-| **E**  | `server/routes/image.ts` + `vite.config.ts` + `image-client.ts`            | A          | 与 D 并行           |
-| **F**  | `BeautifiedNarrative.vue` 改造 + `SceneImageSegment.vue`                   | B1, D      | —                   |
-| **G**  | `image_prompt` 进 `agent-config.json` + 侧链调用接线                       | B5, D      | 与 E/F 并行         |
-| **H**  | `GamePipeline.onSceneImage` 接线（三档分流 + **限额在侧链之前**，D32）     | C, D, E, G | —                   |
-| **I**  | 设置分区 `settings/image/`（**不含** agent 配置，那是白拿的）              | D          | 与 F/H 并行         |
-| **J**  | CG 图鉴 `CgGalleryPanel/Detail` + `SideToolbar` 入口                       | D          | 与 H/I 并行         |
-| **K**  | story systemPrompt 加**那一句话**（§8.5）                                  | H          | —                   |
-| **L**  | 真机走查 + §6.3 的三点 curl 确认                                           | 全部       | —                   |
+| 阶段   | 内容                                                                                         | 依赖       | 可并行              |
+| ------ | -------------------------------------------------------------------------------------------- | ---------- | ------------------- |
+| **A**  | `types-image.ts` + `image-defaults.ts`                                                       | 无         | —                   |
+| **B1** | `image-segments.ts` + 测试                                                                   | A          | ✅ 与 B2/B3/B4 并行 |
+| **B2** | `image-prompt.ts` + 测试                                                                     | A          | ✅                  |
+| **B3** | `image-quota.ts` + 测试                                                                      | A          | ✅                  |
+| **B4** | `image-providers/novelai.ts` + 测试                                                          | A          | ✅                  |
+| **B5** | `image-prompt-agent.ts` 的**纯函数半边**（装输入 / 抽三个 XML 标签）+ 测试                   | A          | ✅                  |
+| **B6** | `image-world-tags.ts` + 测试（D39）                                                          | A          | ✅                  |
+| **B7** | `image-anlas.ts` + 测试（D43）                                                               | A          | ✅                  |
+| **C**  | `marker-protocol.ts`：`MARKER_SPECS` 加一行 + `sanitizeCaption` + 测试                       | A          | —                   |
+| **D**  | Dexie v17 + `scene-image-store` + `image-preset-store` + 测试                                | A          | —                   |
+| **E**  | `server/routes/image.ts` + `vite.config.ts` + `image-client.ts`                              | A          | 与 D 并行           |
+| **F**  | `BeautifiedNarrative.vue` 改造 + `SceneImageSegment.vue`                                     | B1, D      | —                   |
+| **G**  | `image_prompt` 进 `agent-config.json`（**临时最小 systemPrompt + TODO**，D55）+ 侧链调用接线 | B5, D      | 与 E/F 并行         |
+| **H**  | `GamePipeline.onSceneImage` 接线（三档分流 + **限额在侧链之前**，D32）                       | C, D, E, G | —                   |
+| **I0** | **抽壳**：`AgentConfigPanel.vue` 从 `AgentSection` 抽出（D54）+ 验证既有 11 个 Agent 页没坏  | 无         | ✅ 随时可做         |
+| **I**  | 第 13 分区 `settings/image/`：`ImageSection` + 三张卡（D50/D51）                             | D, B7, I0  | 与 F/H 并行         |
+| **J**  | CG 图鉴 `CgGalleryPanel/Detail` + `SideToolbar` 入口                                         | D          | 与 H/I 并行         |
+| **K**  | story systemPrompt 加**那一句话**（§8.5）                                                    | H          | —                   |
+| **M**  | `ChatFlow.vue` 右键菜单放宽 +「为这一段配图」（D33/D34）                                     | D, G       | 与 I/J 并行         |
+| **L**  | 真机走查 + §6.3 的三点 curl 确认                                                             | 全部       | —                   |
+| **N**  | ✍️ **正式撰写 `image_prompt` 的 systemPrompt**（§8.5 四点提纲）+ 摘掉 G 留的 `TODO`（D55）   | L          | —                   |
 
-**B 组五个纯函数模块完全不依赖任何未决事项，可以立刻并行开工。**
+**B 组七个纯函数模块完全不依赖任何未决事项，可以立刻并行开工。**
 
 > D28 让 K 阶段从「教 story 学 danbooru 方言 + 标题写法 + 克制指令」缩成「加一句话」，代价是多了 B5 + G 两格 —— 而这两格都是**新增文件**，不动全游戏最要紧的那个系统提示词。这笔交换划算。
+
+**第二轮补丁（§2.1）落在哪：** 绝大多数是既有阶段内的增量，不新增格子 —— D35/D36/D37（队列态与取消）在 D + F；D38/D39/D40（钳位、世界状态、地点预设）在 B2 + B6；D41/D42/D45/D46（缺预设提示、失败自助、钉 take、打码）在 F；D43/D44（额度指示、开启确认）在 B7 + I；D47（清理语义）在 D + I。**只有 D33 需要一个新阶段 M**，因为它动的是 `ChatFlow.vue` 这个既有组件。
 
 ---
 
@@ -1103,16 +1388,20 @@ server/routes/image.ts          ← 复用 forward()
 
 裁剪台（`AssetCropEditor.vue` + `importPortraitPair`）已通：生成一张全身图 → 裁剪台 → 同时烘出立绘 + 头像两份真字节。
 
-### A.4 地点视觉预设 —— 场景一致性
+### A.4 地点视觉预设的**回退链** —— 场景一致性的后半截
 
-v1 用角色预设解决了**角色**一致性，但**场景**一致性完全没管：同一家旅店在第 3 回合和第 40 回合会画成两个地方。
+> 📌 **这一节的前半截已经提前到 v1 了**（D40）：地点预设与角色预设合并进同一张 `imagePresets` 表（`kind: 'location'`），`composePrompt` 按**当前地点名精确匹配**注入进 `base`。留在 v2 的只有下面这条回退链。
 
-解法是**同一个机制换个实体**：按**地点名**键控的视觉预设，与 `CharacterImagePreset` 形状一致。而本项目有两样通用工具做不到的东西：
+v1 用角色预设解决了**角色**一致性，用地点预设解决了**命名地点**的一致性。剩下的缺口是：地点名没有精确命中预设时，什么都不贡献。
 
-- `location-db.ts` 已有 32 个地点节点的层级结构
+补法是本项目独有的两样东西：
+
+- `location-db.ts` 已有 32 个地点节点的**层级结构**
 - 引擎**随时知道主角当前在哪** —— 不需要 AI 在标记里报地点，Code 自己就能查
 
-于是 `composePrompt` 多一个来源：`base` 里注入当前地点的视觉预设（材质/光线/建筑风格/色调）。地点未命中时按 `audio-scene.ts` 那条**逐级回退链**找父级地点（"某间旅店" → "旅店" → "城镇内部"），与场景配乐的选曲逻辑同源。
+于是未命中时按 `audio-scene.ts` 那条**逐级回退链**找父级地点（「某间旅店」→「旅店」→「城镇内部」），与场景配乐的选曲逻辑同源。这样写一条「旅店」预设就覆盖了世界上所有旅店，而不必给每一家单独写。
+
+**为什么回退链留 v2 而不是跟着精确匹配一起做**：精确匹配是一次 `Map.get`，回退链要接 `location-db` 的层级遍历 + 一套与 `audio-scene` 对齐的优先级规则 —— 后者的复杂度是前者的十倍，而**没有它系统也能正常工作**（未命中就不贡献，退化干净）。先让用户用起来，等他们抱怨"每家旅店都要写一遍"再做，那时也才知道该在哪一层回退。
 
 ⚠️ 别用 AI 每回合重写场景描述来做一致性 —— 那是"把上一张的标签贴进提示词里祈祷"，回合一多必然漂移。预设是**钉死的**，这正是它比"让模型自己记住"强的地方。
 
