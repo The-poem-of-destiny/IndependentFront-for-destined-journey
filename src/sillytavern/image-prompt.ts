@@ -18,6 +18,7 @@
  */
 
 import { renderAppearanceDanbooru } from './character-appearance';
+import { baselineOf, characterPresetKey } from './character-appearance-resolve';
 import type {
   ComposedCharacter,
   ComposedPrompt,
@@ -130,7 +131,9 @@ function deriveCountTags(
 ): string {
   const counts = new Map<string, number>();
   for (const name of names) {
-    const token = (presets.get(`character:${name}`)?.appearance?.count ?? '').trim().toLowerCase();
+    const token = (presets.get(characterPresetKey(name))?.appearance?.count ?? '')
+      .trim()
+      .toLowerCase();
     if (token === '') continue;
     // `1girl` / `1boy` → 归一到 girl/boy 再计数；写了别的（如 `1other`）原样计
     const m = /^(\d+)\s*(girls?|boys?|others?)$/.exec(token);
@@ -202,14 +205,21 @@ function joinSegments(segments: readonly string[]): string {
  *
  * 负向仍从 `dialects.danbooru.negative` 取：槽描述的是「她长什么样」，
  * 而角色负向是「别把她画成什么样」，两者不同源。
+ *
+ * 🔴 判据是 `baselineOf`（= 槽里**有内容**）而**不是** `preset.appearance !== undefined`。
+ *    设置页的编辑器总是整份写回九个槽（D58：留空即空值），所以「只填了正向标签框、
+ *    九个槽全留空」的预设带着一个**存在但全空**的 `appearance` —— 按存在性判会让它
+ *    产出空串，于是这条用户明明填过的预设被当成「没有预设」丢掉，画出来是个随机人。
+ *    不报错、不告警，只是那个角色永远不像。
  */
 function danbooruOf(
   preset: ImagePreset | undefined,
 ): { positive: string; negative: string } | undefined {
   if (!preset) return undefined;
   const negative = preset.dialects?.danbooru?.negative ?? '';
-  if (preset.appearance) {
-    return { positive: renderAppearanceDanbooru(preset.appearance), negative };
+  const appearance = baselineOf(preset);
+  if (appearance) {
+    return { positive: renderAppearanceDanbooru(appearance), negative };
   }
   return preset.dialects?.danbooru;
 }
@@ -279,7 +289,7 @@ export function composePrompt(
   let seed: number | undefined;
 
   for (const name of kept) {
-    const preset = presets.get(`character:${name}`);
+    const preset = presets.get(characterPresetKey(name));
     const dialect = danbooruOf(preset);
     const positive = dialect === undefined ? '' : normalizeTagString(dialect.positive);
     if (positive === '') {

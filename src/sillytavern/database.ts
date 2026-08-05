@@ -51,7 +51,16 @@ export interface CreatePresetRecord {
 }
 
 const DB_NAME = 'SillyTavernWebDB';
-const DB_VERSION = 17;
+/**
+ * 🔴 **必须等于下面最后一个 `this.version(n)`**。它只出现在 `FullBackup.version` 上
+ * （导入侧不拿它做判断），所以对不上时**不会有任何报错** —— 只是每份导出的备份都盖了
+ * 一个过期的戳，日后靠它排查「这份备份是哪一版导的」时会被误导。
+ *
+ * 曾经落后过两版：v17 那次记得改，v18（删地点预设行）与 v19（角色外貌会话副本表）都忘了，
+ * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
+ * 升版时这两处一起改。
+ */
+const DB_VERSION = 19;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -609,6 +618,11 @@ export interface FullBackup {
   //    目录，随时可一键重画。图片字节走「导出本存档插画」那条独立 zip 路径。
   sceneImages: SceneImageRecord[];
   imagePresets: ImagePreset[];
+  // v19 角色外貌会话副本（D56）。**与 sceneImages 同为「每存档」数据，必须同进同出** ——
+  // 少了它，导出再导入之后每个角色的本档变化（换了衣服 / 留了疤）会静默退回基线，
+  // 而存档的其余部分完好，于是症状看起来像「AI 忘了她换过装」而不是「备份没收这张表」。
+  // 纯文本 patch，体积与 imagePresets 同量级。
+  characterAppearances: CharacterSessionAppearance[];
 }
 
 export async function exportAllData(): Promise<FullBackup> {
@@ -633,6 +647,7 @@ export async function exportAllData(): Promise<FullBackup> {
     regexStorage,
     sceneImages,
     imagePresets,
+    characterAppearances,
   ] = await Promise.all([
     db.lorebooks.toArray(),
     db.presets.toArray(),
@@ -653,6 +668,7 @@ export async function exportAllData(): Promise<FullBackup> {
     db.regexStorage.toArray(),
     db.sceneImages.toArray(),
     db.imagePresets.toArray(),
+    db.characterAppearances.toArray(),
   ]);
   return {
     version: DB_VERSION,
@@ -676,6 +692,7 @@ export async function exportAllData(): Promise<FullBackup> {
     regexStorage,
     sceneImages,
     imagePresets,
+    characterAppearances,
   };
 }
 
@@ -711,6 +728,7 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
     'regexStorage',
     'sceneImages',
     'imagePresets',
+    'characterAppearances',
   ];
   for (const f of arrayFields) {
     const v = backup[f];
@@ -874,6 +892,19 @@ async function doImportAllData(
     if (backup.imagePresets !== undefined) {
       await db.imagePresets.clear();
       if (Array.isArray(backup.imagePresets)) await db.imagePresets.bulkPut(backup.imagePresets);
+    }
+  });
+
+  // v19 角色外貌会话副本（D56）—— 同一套三态语义。
+  //
+  // 🔴 它与 `sceneImages` 一样是**每存档**数据，所以必须与存档一起往返：漏掉它的症状
+  //    不是报错，而是导入后每个角色的本档变化静默退回基线（看起来像 AI 失忆）。
+  await db.transaction('rw', db.characterAppearances, async () => {
+    if (backup.characterAppearances !== undefined) {
+      await db.characterAppearances.clear();
+      if (Array.isArray(backup.characterAppearances)) {
+        await db.characterAppearances.bulkPut(backup.characterAppearances);
+      }
     }
   });
 }

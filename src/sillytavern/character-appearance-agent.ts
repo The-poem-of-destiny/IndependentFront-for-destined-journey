@@ -119,14 +119,15 @@ export function parseCharacterAppearances(raw: string): ParsedCharacterAppearanc
 }
 
 /**
- * 首次出图时给这个角色**建基线**（D57）。
+ * 一份 patch 落在全空之上 → 一份完整的 `CharacterAppearance`。
  *
- * 与上报共用同一条线格式与同一个抽取器 —— 建基线只是「patch 落在一份空白上」，
- * 不值得为它再发明一套语法。
+ * 🔴 **它不再被用来建基线**（v1.3 裁定，2026-08-05）。D57 原本让 AI 为没有基线的角色
+ *    现建一份**基线**；现在那份即兴外貌只落**会话层**（`characterAppearances`），基线
+ *    始终只有用户能写 —— 理由见 `character-appearance-resolve.ts` 头部那张表。
  *
- * 🔴 **建的是基线不是会话副本**：第一次见到这个角色时她的样子，定义上就是她的
- *    初始样子。写进会话副本会让基线永远空着，D56 那份「干净的、可回退的真源」
- *    也就不存在了。
+ * 现存的唯一用途是设置页那个「**存为初始设定**」：用户看过 AI 即兴出来的样子、觉得
+ * 对，于是**由人**把它提升成跨存档的基线。同一条线格式、同一个抽取器、同一个函数，
+ * 只是按下按钮的换成了人。
  */
 export function bootstrapAppearance(patch: CharacterAppearancePatch): CharacterAppearance {
   const out: CharacterAppearance = { ...EMPTY_APPEARANCE };
@@ -167,5 +168,5 @@ condition: soaked, muddy
 3. 🔴 **只写这一刻**真的**变了或值得记下的槽**，没变的一个都别写 ——
    没写的槽会保留原值，重复写一遍反而可能把措辞改坏。
 4. 输入里若给了**尚无外观设定的角色**名单，**为那几个角色把九个槽尽量写全**（写不出的留空
-   即可不写），那会成为他们的初始设定。名单之外的角色仍按第 3 条只写变化。
+   即可不写），那会成为他们在本档里的外观设定。名单之外的角色仍按第 3 条只写变化。
 `.trim();

@@ -102,6 +102,29 @@ describe('getSceneImageUsage', () => {
     expect(usage.storedBytes).toBe(1000);
   });
 
+  /**
+   * 🔴 D47 的另一半：清理**只动字节**，记录本身一个字段都不改。
+   *
+   * `status` 尤其不能动 —— 这张图**画出来过**，那是历史事实，不因为腾空间而改写；
+   * 而 `scenePrompt` 等配方字段还在，正是「清理之后图鉴目录仍然完整、随时可重画」
+   * 这个承诺的全部依据。（这条断言原先住在 scene-image-store 那份重复实现的测试里，
+   * 那份实现已删，断言搬到唯一真源这边。）
+   */
+  it('清理只删字节：status 与配方字段一个都不动', async () => {
+    const row = makeImage({ bytes: 4000 });
+    await saveSceneImage(row, new Blob(['b']));
+
+    await dropSceneImageBlobs([row.id]);
+
+    const after = await getDatabase().sceneImages.get(row.id);
+    expect(after?.blobDropped).toBe(true);
+    expect(after?.status).toBe('done');
+    expect(after?.scenePrompt).toBe('tavern interior, warm candlelight');
+    expect(after?.positive).toBe(row.positive);
+    expect(after?.model).toBe(row.model);
+    expect(await getDatabase().sceneImageBlobs.get(row.id)).toBeUndefined();
+  });
+
   it('failed / queued 的记录不算占字节（它们从来没有过字节）', async () => {
     await saveSceneImage(makeImage({ status: 'failed', bytes: undefined, error: '超时' }));
     await saveSceneImage(makeImage({ status: 'queued', bytes: undefined }));

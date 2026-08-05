@@ -46,7 +46,6 @@ import type {
 } from '@engine/types-image';
 import {
   deleteSceneImage,
-  dropSceneImageBlobs,
   getSceneImage,
   getSceneImageBlob,
   getSceneImages,
@@ -181,27 +180,21 @@ export type SceneImageGenerateResult =
   /** 被限额拦下 —— 调用方据此降级成手动按钮（自动，D21）或弹一次确认（手动，D24） */
   | { ok: false; reason: QuotaReason; message: string };
 
-export interface SceneImageUsage {
-  total: number;
-  auto: number;
-  manual: number;
-  /** `done` 且字节还在的条数 */
-  withBytes: number;
-  /** 已清理（`blobDropped`）的条数 */
-  dropped: number;
-  /** 字节合计（按记录里的 `bytes` 求和，只算字节还在的） */
-  bytes: number;
-}
-
-/** 一次「清理」的回执 */
-export interface SceneImageCleanupResult {
-  /** 被删掉字节的条数 */
-  dropped: number;
-  /** 因为收藏而豁免的条数（D6 的豁免位） */
-  keptFavorite: number;
-  /** 释放的字节数（估算 —— 按记录里的 `bytes` 求和） */
-  bytes: number;
-}
+// 🪦 **用量统计与「清理」不在本 store**（2026-08-05 收口）。
+//
+// 这里曾经有一份 `SceneImageUsage` + `usage` computed + `cleanup()`，与
+// `@engine/database` 的 `getSceneImageUsage` / `listCleanableSceneImageIds` /
+// `dropSceneImageBlobs` 是**同一件事的第二份实现**，而且类型同名、字段不同 ——
+// 一个 import 写错就拿到另一套语义。三条理由删掉本店那份而不是留着：
+//
+// 1. 生产里**没有任何调用方**：设置页「存档数据」分区直接调引擎那三个函数
+//    （`DataSection.vue`），本店那份只被自己的测试用着。
+// 2. `database.ts` 的 `hasStoredSceneImageBytes` 注释已明说「用量」与「可清理名单」
+//    必须共用同一条判据，否则会长出「显示 12 张可清理、点下去只清了 8 张」那种裂缝 ——
+//    本店那份正好是这条判据的第三个副本。
+// 3. 清理是**每存档一次性**的维护动作，不是渲染热路径，没有理由再过一层内存投影。
+//
+// 需要清理后刷新本店投影时，调用方 `load(saveId)` 即可（切回游戏页本来就会调）。
 
 // ═══════════════════════════════════════════════════════════
 // 无状态小工具
@@ -212,6 +205,14 @@ function newId(): string {
   if (c && typeof c.randomUUID === 'function') return `simg_${c.randomUUID()}`;
   return `simg_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 }
+
+/**
+ * `whenIdle()` 最多等几轮。
+ *
+ * 一轮 = 等当前这一趟泵跑完；泵在两次 await 之间可能又被 kick，所以要循环。
+ * 100 是「正常情况下永远到不了」的数量级 —— 到了就是有东西没收尾，该抛不该装作跑空了。
+ */
+const WHEN_IDLE_MAX_ROUNDS = 100;
 
 /** 同一处的第几次重画 / 同类锚点的第几个 —— 都是「已有最大值 + 1」 */
 function nextIndex(values: readonly number[]): number {
@@ -267,6 +268,34 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
   let running = false;
   /** 当前这一轮泵的完成 promise —— `whenIdle()` 等的就是它 */
   let pump: Promise<void> = Promise.resolve();
+
+  /**
+   * `generate()` 的**准入临界区**闸门（读记录 → 判限额 → 落库，一次只许一个进）。
+   *
+   * 🔴 为什么必须串行：那三步中间有两次 `await`，而限额是拿**落库前**读到的记录集算的。
+   *    两次 `generate()` 交错时，两边都会读到「还没有对方那条」的旧快照、都判通过、
+   *    然后各落一条 —— 限额被整整绕过一次，而绕过的代价是真金白银。
+   *
+   *    自动档那条路本身是顺序 await 的（`handleSceneImages` 逐个标记跑），所以撞不上；
+   *    但手动开火有**两个入口**（正文按钮 / 消息右键），各自的 `busy` 只锁自己那个组件
+   *    实例，两个入口同时点、或同一个按钮连点两下，就是这个窗口。
+   *
+   * 🔴 闸门只包**准入**，不包生成本身 —— 生成早就是串行的（一条队列），把它一起锁进来
+   *    会让第二次点击一直等到第一张图画完（几十秒）才收到「已排队」的回执。
+   */
+  let admission: Promise<unknown> = Promise.resolve();
+
+  function serializeAdmission<T>(task: () => Promise<T>): Promise<T> {
+    // 前一位失败也要放行下一位（`then` 的两个分支都跑 task）
+    const run = admission.then(task, task);
+    // 闸门本身永远是「已解决」的，否则一次失败会把后面所有人卡死，
+    // 且会留下一个没人接的 rejection
+    admission = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
 
   /**
    * 接线口。生产在应用启动/存档加载时调一次；测试逐条替身。
@@ -383,28 +412,6 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
     return getSceneImageBlob(id);
   }
 
-  const usage = computed<SceneImageUsage>(() => {
-    const out: SceneImageUsage = {
-      total: 0,
-      auto: 0,
-      manual: 0,
-      withBytes: 0,
-      dropped: 0,
-      bytes: 0,
-    };
-    for (const r of records.value) {
-      out.total += 1;
-      if (r.source === 'auto') out.auto += 1;
-      else out.manual += 1;
-      if (r.blobDropped === true) out.dropped += 1;
-      else if (r.status === 'done') {
-        out.withBytes += 1;
-        out.bytes += r.bytes ?? 0;
-      }
-    }
-    return out;
-  });
-
   // ═══ 写（唯一落库口）═══════════════════════════════════
 
   /**
@@ -486,39 +493,20 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
     forgetLocal(id);
   }
 
-  /**
-   * 「清理」：删字节、**留记录**（D47 / §7.5）。
-   *
-   * 🔴 `sceneImages` 的行数一条都不变，`status` 也不动 —— 这张图**画出来过**，
-   * 那是历史事实。默认范围排除 `favorite`（D6 早就留了这个豁免位）。
-   *
-   * 把回忆一起删掉的那种"清理"要走 {@link remove}，单独确认，且措辞必须是「删除」。
-   */
-  async function cleanup(
-    saveId: string,
-    opts: { includeFavorites?: boolean } = {},
-  ): Promise<SceneImageCleanupResult> {
-    const all = await getSceneImages(saveId);
-    const out: SceneImageCleanupResult = { dropped: 0, keptFavorite: 0, bytes: 0 };
-    const ids: string[] = [];
-    for (const r of all) {
-      if (r.status !== 'done' || r.blobDropped === true) continue;
-      if (r.favorite === true && opts.includeFavorites !== true) {
-        out.keptFavorite += 1;
-        continue;
-      }
-      ids.push(r.id);
-      out.bytes += r.bytes ?? 0;
-    }
-    out.dropped = await dropSceneImageBlobs(ids);
-    if (activeSaveId.value === saveId) await load(saveId);
-    return out;
-  }
+  // 🪦 「清理」（删字节留记录，D47 / §7.5）走 `@engine/database` 的
+  //    `listCleanableSceneImageIds` + `dropSceneImageBlobs`，不在本店重写一遍判据
+  //    （见文件上方那块墓志铭）。清理完想刷新本店投影就调 `load(saveId)`。
+  //
+  //    把回忆一起删掉的那种「清理」是另一回事，走 {@link remove}，措辞必须是「删除」。
 
   // ═══ 队列 ═════════════════════════════════════════════
 
   function dequeue(id: string): boolean {
     sessionLive.delete(id);
+    // 🔴 侧链上下文跟着一起丢掉。它只有 `runOne` 的 `finally` 会清，而**排队中被取消
+    //    或删掉的记录永远轮不到 `runOne`** —— 那一条的正文（可能上千字）就会在这个
+    //    Map 里挂到页面关闭。纯内存泄漏，没有任何症状，所以只能靠这里记得删。
+    context.delete(id);
     const i = queue.value.indexOf(id);
     if (i < 0) return false;
     queue.value.splice(i, 1);
@@ -547,13 +535,29 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
     }
   }
 
-  /** 等队列跑空 —— 测试用；UI 只看记录状态，不等这个 */
-  async function whenIdle(): Promise<void> {
-    // 泵可能在 await 之间又被 kick 过一次，所以循环等到真的没人跑
-    for (let i = 0; i < 100; i += 1) {
+  /**
+   * 等队列跑空 —— 测试用；UI 只看记录状态，不等这个。
+   *
+   * 🔴 轮数用完就**抛**，不静默返回。它此前跑满 100 轮后直接 `return`，于是调用方
+   *    （全是测试）拿到一个「已经空了」的假承诺，接下来的断言在一个还在跑的队列上执行 ——
+   *    表现是随机失败的用例，且报错指向断言而不是这里。等不到就说等不到。
+   *
+   * ⚠️ 「轮」不是时间：一轮 = 等当前这趟泵跑完。所以它挡的是**泵反复被 kick、
+   *    永远追不上**那种情况，**挡不住**一个永不兑现的 `send`（那时第一轮的 `await pump`
+   *    自己就不会返回，交给测试框架的超时去报更合适 —— 它至少会指出卡在哪一行）。
+   *
+   * @param maxRounds 轮数预算，仅测试用（压低它才够得着上面那条超时分支）
+   */
+  async function whenIdle(maxRounds: number = WHEN_IDLE_MAX_ROUNDS): Promise<void> {
+    for (let i = 0; i < maxRounds; i += 1) {
+      // 泵可能在 await 之间又被 kick 过一次，所以循环等到真的没人跑
       await pump;
       if (!running && queue.value.length === 0) return;
     }
+    throw new Error(
+      `whenIdle: 队列在 ${maxRounds} 轮之后仍未跑空` +
+        `（还剩 ${queue.value.length} 条，running=${running}）`,
+    );
   }
 
   /**
@@ -595,6 +599,8 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
     queue.value = [];
     for (const id of pending) {
       sessionLive.delete(id);
+      // 与 dequeue 同一条理由：这些记录永远轮不到 runOne 的 finally 去清上下文
+      context.delete(id);
       void deleteSceneImage(id).catch(() => {});
       forgetLocal(id);
     }
@@ -618,7 +624,15 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
    * 表现为「把开关从手动拨到自动，追溯烧掉几十张图的钱」。补画的入口在正文里，
    * 一张一张点。
    */
-  async function generate(input: SceneImageGenerateInput): Promise<SceneImageGenerateResult> {
+  function generate(input: SceneImageGenerateInput): Promise<SceneImageGenerateResult> {
+    // 🔴 读-判-写整段进闸（见 `serializeAdmission`）：限额是拿落库前读到的记录集算的，
+    //    两次调用交错就会各自读到旧快照、双双放行。这是唯一一条会**多花钱**的竞态。
+    return serializeAdmission(() => admitAndEnqueue(input));
+  }
+
+  async function admitAndEnqueue(
+    input: SceneImageGenerateInput,
+  ): Promise<SceneImageGenerateResult> {
     const now = Date.now();
     const existing = await getSceneImages(input.saveId);
 
@@ -824,7 +838,20 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
     return { ok: true, record: next, scenePrompt: produced.scenePrompt };
   }
 
+  /**
+   * 记成失败。
+   *
+   * 🔴 **已经落成 `aborted` 的失败不再被覆盖**（D36）。玩家点「中止」时 {@link cancel}
+   *    已经写下「已中止（本次仍可能计费）」；紧接着在飞的那次请求会以客户端的
+   *    `aborted`（文案「已取消」）回来，原样写下去就会把**可能已经计费**这件最要紧的事
+   *    抹掉 —— 而中止恰恰只在请求已经发出去之后才可能发生，也就是**每次**都会被抹掉。
+   *
+   *    两种取消的措辞必须不同，这是 D36 的全部要点：排队中取消一个字节都没花，
+   *    在飞中止上游照样收钱。
+   */
   async function fail(id: string, failure: ImageGenFailure): Promise<void> {
+    const current = (await getSceneImage(id)) ?? find(id);
+    if (current?.status === 'failed' && current.errorKind === 'aborted') return;
     await patch(id, {
       status: 'failed',
       error: failure.message,
@@ -840,7 +867,6 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
     queue: computed(() => [...queue.value]),
     generatingId: computed(() => generatingId.value),
     gallery,
-    usage,
     // 读
     load,
     byMessage,
@@ -852,7 +878,6 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
     update,
     pin,
     remove,
-    cleanup,
     // 生成
     setSeams,
     generate,

@@ -594,12 +594,41 @@ describe('composePrompt —— 角色外貌属性槽（D58）', () => {
     expect(out.characters[0].positive).toBe('a, b');
   });
 
-  it('🔴 槽全空 = 与「没有预设」同义：跳过该角色并告警，不产出一个空槽位', () => {
-    // 这条是写测试时被实现纠正的：一个全空的基线给不出任何一致性信息，
-    // 与查不到预设是同一回事。产出空槽位反而更糟 —— NAI 会拿到一个
+  it('🔴 槽全空 = 与「没有槽」同义：不产出一个空槽位', () => {
+    // 一个全空的基线给不出任何一致性信息。产出空槽位比跳过更糟 —— NAI 会拿到一个
     // 什么都没说的角色条件，等于让它自由发挥，而调用方还以为钉住了。
-    // （D57 的 bootstrap 正是为了让这种角色不再全空。）
+    //
+    // 🔴 「没有槽」之后走的是**退回手写串**那条路（D58 的原话就是「有属性槽就以槽为准，
+    //    **没有才**退回 dialects.danbooru」）—— 见下面两条。
     const out = composePrompt('scene', '', marker(['艾莉丝']), presetMap(withSlots({})), BARE);
+    expect(out.characters[0].positive).toBe('OLD_HANDWRITTEN');
+  });
+
+  /**
+   * 🔴 这一条挡的是一个**静默**的真 bug：设置页编辑器**总是**整份写回九个槽
+   * （D58 留空即空值），所以「只填了外观标签框、九个槽没动」的预设带着一个
+   * **存在但全空**的 `appearance`。按 `preset.appearance !== undefined` 判，
+   * 这条用户明明填过的预设会产出空串并被当成「没有预设」丢掉 —— 不报错、不告警，
+   * 只是那个角色在每一张图里都不像。
+   */
+  it('🔴 槽全空但有手写串 → 用手写串，绝不当成「没有预设」丢掉', () => {
+    const out = composePrompt('scene', '', marker(['艾莉丝']), presetMap(withSlots({})), BARE);
+    expect(out.warnings).toEqual([]);
+    expect(out.characters).toHaveLength(1);
+    expect(out.characters[0].positive).toBe('OLD_HANDWRITTEN');
+  });
+
+  it('槽全空且没有手写串 → 这才是真的「没有预设」：跳过并告警', () => {
+    const bare: ImagePreset = {
+      key: 'character:艾莉丝',
+      kind: 'character',
+      name: '艾莉丝',
+      appearance: { ...EMPTY_APPEARANCE },
+      dialects: {},
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    const out = composePrompt('scene', '', marker(['艾莉丝']), presetMap(bare), BARE);
     expect(out.characters).toHaveLength(0);
     expect(out.warnings).toEqual([{ kind: 'missing-preset', name: '艾莉丝' }]);
   });

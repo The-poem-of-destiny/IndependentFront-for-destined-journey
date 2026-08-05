@@ -2,7 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
 import { reactive } from 'vue';
-import type { SceneImageMarker, SceneImageRecord } from '@engine/types-image';
+import type { ImagePreset, SceneImageMarker, SceneImageRecord } from '@engine/types-image';
+import type { CharacterAppearancePatch } from '@engine/character-appearance';
+import { EMPTY_APPEARANCE } from '@engine/character-appearance';
 import type { SceneImageGenerateResult } from '../../stores/scene-image-store';
 import SceneImageSegment from './SceneImageSegment.vue';
 
@@ -57,13 +59,25 @@ const scene = reactive({
 const presets = reactive({
   loading: false,
   init: vi.fn(async () => undefined),
-  find: vi.fn((): undefined => undefined),
+  find: vi.fn((): ImagePreset | undefined => undefined),
+});
+
+/**
+ * 会话外貌副本（D56 / v1.3）。组件只读它一处 —— 判断某个出场角色是不是**真的**
+ * 没有一致外貌: AI 即兴出来的外貌住在会话层、一行预设都没有，按预设行判会对着
+ * 这种角色说「形象是随机的」，而那是假的。
+ */
+const sessionAppearance = reactive({
+  patchOf: vi.fn((): CharacterAppearancePatch | undefined => undefined),
 });
 
 const ui = { toast: vi.fn(), navigate: vi.fn() };
 
 vi.mock('../../stores/scene-image-store', () => ({ useSceneImageStore: () => scene }));
 vi.mock('../../stores/image-preset-store', () => ({ useImagePresetStore: () => presets }));
+vi.mock('../../stores/character-appearance-store', () => ({
+  useCharacterAppearanceStore: () => sessionAppearance,
+}));
 vi.mock('../../stores/ui-store', () => ({ useUIStore: () => ui }));
 
 function record(over: Partial<SceneImageRecord> = {}): SceneImageRecord {
@@ -115,6 +129,10 @@ describe('SceneImageSegment', () => {
     scene.queue = [];
     scene.activeSaveId = 'save_1';
     presets.loading = false;
+    // 🔴 `clearAllMocks` 只清调用记录，**不清 `mockReturnValue`** —— 不显式设回默认值的话，
+    //    某个用例里「这个角色有预设 / 有本档外貌」会泄漏给它后面的所有用例。
+    presets.find.mockReturnValue(undefined);
+    sessionAppearance.patchOf.mockReturnValue(undefined);
     Object.assign(globalThis.URL, {
       createObjectURL: vi.fn(() => 'blob:scene-image'),
       revokeObjectURL: vi.fn(),
@@ -196,6 +214,42 @@ describe('SceneImageSegment', () => {
     expect(wrapper.text()).toContain('还没有外观预设');
     await wrapper.get('.si-link').trigger('click');
     expect(ui.navigate).toHaveBeenCalledWith('settings');
+  });
+
+  /**
+   * 🔴 v1.3：AI 即兴出来的外貌住在**会话副本**里，那种角色一行预设都没有 ——
+   * 但他**是**有一致外貌的。按「有没有预设行」判会对着他说「形象是随机的」，
+   * 而那句话是假的，还会把用户推去写一份他其实不需要的预设。
+   */
+  it('🔴 只有本档外貌（没有预设行）的角色不算「形象随机」', async () => {
+    scene.records = [record()];
+    scene.blobOf.mockResolvedValue(new Blob(['x'], { type: 'image/png' }));
+    sessionAppearance.patchOf.mockReturnValue({ hairColor: 'silver hair' });
+
+    const wrapper = mountSegment({ marker: MARKER, mode: 'off' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(wrapper.text()).not.toContain('还没有外观预设');
+  });
+
+  /** 反过来：槽全空的预设**等于没有**外貌，那一行照旧要出（否则用户永远不知道为什么不像） */
+  it('槽全空的预设仍算「形象随机」', async () => {
+    scene.records = [record()];
+    scene.blobOf.mockResolvedValue(new Blob(['x'], { type: 'image/png' }));
+    presets.find.mockReturnValue({
+      key: 'character:苏婉',
+      kind: 'character',
+      name: '苏婉',
+      appearance: { ...EMPTY_APPEARANCE },
+      dialects: {},
+      createdAt: 0,
+      updatedAt: 0,
+    });
+
+    const wrapper = mountSegment({ marker: MARKER, mode: 'off' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(wrapper.text()).toContain('还没有外观预设');
   });
 
   it('never renders a cleared record as a broken image (D47)', () => {

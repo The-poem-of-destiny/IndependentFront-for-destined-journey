@@ -38,10 +38,12 @@ import type {
   SceneImageMarker,
 } from '@engine/types-image';
 import { clampRating } from '@engine/image-prompt';
+import { hasEffectiveAppearance } from '@engine/character-appearance-resolve';
 import { useManualSceneImage } from '../../composables/useManualSceneImage';
 import { useSceneImageUrls } from '../../composables/useSceneImageUrls';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
+import { useCharacterAppearanceStore } from '../../stores/character-appearance-store';
 import { useUIStore } from '../../stores/ui-store';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
@@ -94,6 +96,8 @@ const props = withDefaults(
 
 const store = useSceneImageStore();
 const presets = useImagePresetStore();
+/** 会话副本（D56）—— 只读，用来判断「这个角色到底有没有一致的外貌」。载入归 GamePage */
+const sessionAppearance = useCharacterAppearanceStore();
 const ui = useUIStore();
 
 // 幂等；放在 setup 而不是 onMounted —— init() 同步就把 loading 置 true，于是
@@ -134,11 +138,21 @@ const queuePosition = computed(() => {
   return i < 0 ? undefined : i + 1;
 });
 
-/** 出场角色里查不到预设的那些（D41）。预设库还在读时报空，不冤枉任何人 */
+/**
+ * 出场角色里**没有任何可用外貌**的那些（D41）。预设库还在读时报空，不冤枉任何人。
+ *
+ * 🔴 判据不是「有没有预设行」，而是 `hasEffectiveAppearance`（v1.3）——
+ *    AI 即兴出来的外貌住在**会话副本**里，那种角色一行预设都没有却**是**有一致外貌的。
+ *    按预设行判会对着他说「这张图里的形象是随机的」，而那句话是假的。判据与装配层
+ *    （`composePrompt` 产 `missing-preset` 告警）同源，两处必须给同一个答案。
+ */
 const missing = computed<string[]>(() => {
   const r = record.value;
   if (!r || presets.loading) return [];
-  return r.characters.filter((name) => presets.find('character', name) === undefined);
+  return r.characters.filter(
+    (name) =>
+      !hasEffectiveAppearance(presets.find('character', name), sessionAppearance.patchOf(name)),
+  );
 });
 
 /** 「已用 N 秒」的时钟；只在真的有一张在飞时才走 */

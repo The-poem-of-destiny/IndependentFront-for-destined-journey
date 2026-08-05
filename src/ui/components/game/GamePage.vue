@@ -9,7 +9,11 @@ import { useImagePresetStore } from '../../stores/image-preset-store';
 import { GamePipeline } from '../../lib/game-pipeline';
 import { buildSceneImageSeams, resolveSceneWeather } from '../../lib/scene-image-seams';
 import { useCharacterAppearanceStore } from '../../stores/character-appearance-store';
-import { bootstrapAppearance, isUsableBaseline } from '@engine/character-appearance-agent';
+import {
+  appearanceWriteTarget,
+  buildEffectivePresets,
+  needsBaselineReport,
+} from '@engine/character-appearance-resolve';
 import TopBar from './TopBar.vue';
 import SideToolbar from './SideToolbar.vue';
 import ChatFlow from './ChatFlow.vue';
@@ -78,44 +82,44 @@ onMounted(async () => {
         settings: () => settings.settings,
         // 🔴 交出去的是**基线 + 本档覆盖**合并后的预设（D56）：装配层只认一份外貌，
         //    会话覆盖在这里就地叠好，`composePrompt` 不必知道有两份定义这回事。
-        presets: () =>
-          imagePresets.presets.map((p) =>
-            p.appearance ? { ...p, appearance: charAppearance.resolve(p.name, p.appearance) } : p,
-          ),
+        //
+        // 🔴 合并归 `buildEffectivePresets`（纯函数、有测试），**不在这个 .vue 里手写** ——
+        //    它还要负责 v1.3 那一半：**只有会话副本、没有预设行**的角色（AI 即兴出来的
+        //    那些）也必须出现在结果里。漏掉他们，那份即兴外貌永远到不了提示词，表现是
+        //    「AI 明明报了外貌，画出来还是每张一个样」。这类漏供值的缺陷 .vue 里的单组件
+        //    测试证明不了（blurByDefault 当年就是这么死的），所以逻辑不留在这儿。
+        presets: () => buildEffectivePresets(imagePresets.presets, charAppearance.rows),
         world: () => ({
           gameTime: game.saveProfile?.gameTime,
           weather: resolveSceneWeather(game.saveProfile),
           location: game.player?.location || undefined,
         }),
-        /**
-         * AI 报了外貌变化（D56/D57）。两条分支：
-         * - **没有基线** → 这是这个角色第一次出图，把上报当作**初始设定**建基线
-         *   （D57：第一次见到她的样子，定义上就是她的初始样子；写进会话副本会让
-         *   基线永远空着，那份「干净的、可回退的真源」就不存在了）
-         * - **有基线** → 写会话副本（自动写入 + 可重置，主人 2026-08-04 裁定）
-         */
-        // D57：引擎知道谁还没有基线，直接告诉侧链 —— 模型看不到库，
-        // 「第一次出场」这件事它自己永远判断不出来
+        // D57：引擎知道谁还没有任何可用外貌，直接告诉侧链 —— 模型看不到库，
+        // 「第一次出场」这件事它自己永远判断不出来。
+        // 🔴 判据含**会话副本**：报过一次之后就该收声，否则每张图都会让模型把九个槽
+        //    重新即兴一遍，点名本身反而成了漂移的来源（见 needsBaselineReport）。
         charactersNeedingBaseline: (names) =>
-          names.filter((n) => {
-            const a = imagePresets.find('character', n)?.appearance;
-            return !a || !isUsableBaseline(a);
-          }),
+          names.filter((n) =>
+            needsBaselineReport(imagePresets.find('character', n), charAppearance.patchOf(n)),
+          ),
+        /**
+         * AI 报了外貌变化（D56/D57，v1.3 修订）。
+         *
+         * 🔴 **一律写会话副本，AI 永远碰不到基线**。差量基准由 `appearanceWriteTarget`
+         *    给：有基线就是基线，没有就是全空（那份即兴外貌）。此前这里的分支会为
+         *    「没有基线」的角色调 `imagePresets.upsert` **建一份全局基线** —— 而全局
+         *    意味着 A 周目的即兴成了 B 周目的定义，且两个重置口都够不着它，设置页却
+         *    正写着「初始设定不受影响」。
+         *
+         * 🔴 `skip` 那一支是用户**手写的老形态预设**（有 danbooru 串、没有槽）：会话层
+         *    只能表达槽，落下去会让合并后的槽盖过那串手写标签，等于 AI 悄悄改写了用户
+         *    写的东西。宁可这一档记不住「她换了衣服」。
+         */
         applyAppearances: async (list) => {
           for (const item of list) {
-            const preset = imagePresets.find('character', item.name);
-            const base = preset?.appearance;
-            if (!base || !isUsableBaseline(base)) {
-              const bootstrapped = bootstrapAppearance(item.patch);
-              if (!isUsableBaseline(bootstrapped)) continue; // 全空的基线 = 没有基线
-              await imagePresets.upsert({
-                kind: 'character',
-                name: item.name,
-                appearance: bootstrapped,
-              });
-              continue;
-            }
-            await charAppearance.applyPatch(item.name, base, item.patch);
+            const target = appearanceWriteTarget(imagePresets.find('character', item.name));
+            if (target.kind === 'skip') continue;
+            await charAppearance.applyPatch(item.name, target.base, item.patch);
           }
         },
         runPromptAgent: (request, signal) =>

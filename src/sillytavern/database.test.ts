@@ -75,7 +75,12 @@ import {
   deleteAsset,
   deleteAssets,
   getAssetBlob,
+  // 角色外貌会话副本 (v19 / D56)
+  characterAppearanceKey,
+  getCharacterAppearances,
+  saveCharacterAppearance,
 } from './database';
+import type { FullBackup } from './database';
 import type {
   ChatMessage,
   MemoryRecord,
@@ -811,8 +816,10 @@ describe('exportAllData / importAllData', () => {
     await saveApiEndpoint(makeApiEndpoint({ id: 'exp_api' }));
 
     const backup = await exportAllData();
-    // 跟随 DB_VERSION（v17: 图像生成三表）—— 每次升版这里同步
-    expect(backup.version).toBe(17);
+    // 🔴 跟随 DB_VERSION，而 DB_VERSION 必须等于最后一个 `this.version(n)` ——
+    // 这条断言曾经写着 17 而 schema 已经到 19（v18 删地点预设行 / v19 角色外貌会话副本），
+    // 于是它把漂移**固定**下来而不是拦下来。升版时 database.ts 与这里一起改。
+    expect(backup.version).toBe(19);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -831,6 +838,57 @@ describe('exportAllData / importAllData', () => {
     expect(Array.isArray(backup.sceneImages)).toBe(true);
     expect(Array.isArray(backup.imagePresets)).toBe(true);
     expect('sceneImageBlobs' in backup).toBe(false);
+    // v19 —— 角色外貌会话副本与 sceneImages 同为「每存档」数据，必须同进同出
+    expect(Array.isArray(backup.characterAppearances)).toBe(true);
+  });
+
+  /**
+   * 🔴 会话外貌漏出备份时**不会有任何报错** —— 存档的其余部分完好，只是每个角色的
+   * 本档变化静默退回基线，症状看起来像「AI 忘了她换过装」。所以这条走完整往返。
+   */
+  it('exportAllData/importAllData 应往返角色外貌会话副本（v19/D56）', async () => {
+    const db = getDatabase();
+    await saveCharacterAppearance({
+      key: characterAppearanceKey('save_test', '艾莉丝'),
+      saveId: 'save_test',
+      name: '艾莉丝',
+      patch: { outfit: 'dark travel cloak', condition: 'soaked' },
+      updatedAt: 1_700_000_000_000,
+    });
+
+    const backup = await exportAllData();
+    expect(backup.characterAppearances).toHaveLength(1);
+
+    // 清空这张表，模拟「换一台设备后导入」
+    await db.characterAppearances.clear();
+    expect(await getCharacterAppearances('save_test')).toHaveLength(0);
+
+    await importAllData(backup);
+
+    const restored = await getCharacterAppearances('save_test');
+    expect(restored).toHaveLength(1);
+    expect(restored[0].name).toBe('艾莉丝');
+    expect(restored[0].patch).toEqual({ outfit: 'dark travel cloak', condition: 'soaked' });
+  });
+
+  /** 三态语义：pre-v19 的旧备份对这张表**无话可说**，就不该有权删它 */
+  it('导入缺 characterAppearances 字段的旧备份应保留现有会话外貌', async () => {
+    await saveCharacterAppearance({
+      key: characterAppearanceKey('save_test', '苏婉'),
+      saveId: 'save_test',
+      name: '苏婉',
+      patch: { hairStyle: 'short hair' },
+      updatedAt: 1_700_000_000_000,
+    });
+
+    const backup = await exportAllData();
+    delete (backup as Partial<FullBackup>).characterAppearances;
+
+    await importAllData(backup as FullBackup);
+
+    const kept = await getCharacterAppearances('save_test');
+    expect(kept).toHaveLength(1);
+    expect(kept[0].patch).toEqual({ hairStyle: 'short hair' });
   });
 
   it('importAllData 应还原数据', async () => {

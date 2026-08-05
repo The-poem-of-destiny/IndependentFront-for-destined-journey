@@ -32,6 +32,7 @@ import {
   EMPTY_APPEARANCE,
   type CharacterAppearance,
 } from '@engine/character-appearance';
+import { bootstrapAppearance } from '@engine/character-appearance-agent';
 
 const store = useImagePresetStore();
 const session = useCharacterAppearanceStore();
@@ -80,6 +81,66 @@ async function resetOne(name: string) {
 async function resetAll() {
   const r = await session.resetAll();
   ui.toast(r.ok ? '本存档的外貌变化已全部重置' : r.message, r.ok ? 'success' : 'error');
+}
+
+// ═══ 只有本档外貌、还没有初始设定的角色（v1.3）═══
+//
+// 🔴 这一节存在的理由: 没有初始设定的角色，出图 AI 即兴出来的样子只落**会话副本**
+//    （v1.3 裁定 —— AI 一个字节都碰不到全局基线）。那份外貌**没有对应的预设行**，
+//    上面那张表按预设行渲染，于是它会整个隐形: 用户看不见 AI 给他定成了什么样，
+//    也没有单角色重置可按（只剩「全部重置」这把大锤）。
+//
+//    「存为初始设定」是这一节的另一半 —— 从「AI 即兴」到「用户拥有、跨存档钉死」的
+//    唯一路径，且**由人按下**。这正是 v1.3 把自动建基线砍掉之后该有的替代品。
+
+interface SessionOnlyRow {
+  name: string;
+  appearance: CharacterAppearance;
+  slots: { slot: keyof CharacterAppearance; value: string }[];
+}
+
+const sessionOnlyRows = computed<SessionOnlyRow[]>(() => {
+  const named = new Set(store.characters.map((p) => p.name));
+  const out: SessionOnlyRow[] = [];
+  for (const row of session.rows) {
+    // 🔴 名字原样比较（铁律 1）
+    if (named.has(row.name)) continue;
+    const appearance = bootstrapAppearance(row.patch);
+    const slots = slotOrder
+      .filter((slot) => appearance[slot].trim() !== '')
+      .map((slot) => ({ slot, value: appearance[slot] }));
+    if (slots.length === 0) continue;
+    out.push({ name: row.name, appearance, slots });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
+});
+
+const promoting = ref<string | null>(null);
+
+/**
+ * 把 AI 即兴出来的那份**提升成初始设定**（跨存档、只有用户能改的那一份）。
+ *
+ * 提升之后把会话行删掉: 它的内容已经**逐字**成为基线，留着只会让这个角色顶着一个
+ * 「本档已变」的角标，而它与基线其实分毫不差。
+ */
+async function promoteToBaseline(row: SessionOnlyRow) {
+  if (promoting.value !== null) return;
+  promoting.value = row.name;
+  try {
+    const saved = await store.upsert({
+      kind: 'character',
+      name: row.name,
+      appearance: row.appearance,
+    });
+    if (!saved.ok) {
+      ui.toast(saved.message, 'error');
+      return;
+    }
+    await session.resetOne(row.name);
+    ui.toast(`「${row.name}」已存为初始设定，之后每个存档都用它`, 'success');
+  } finally {
+    promoting.value = null;
+  }
 }
 
 const activeKind = ref<ImagePresetKind>('character');
@@ -230,11 +291,11 @@ function summarize(row: ImagePreset): string {
       <AppButton variant="ghost" size="sm" @click="openCreate">+ 新建</AppButton>
     </div>
 
-    <div v-if="rows.length === 0" class="empty-tab">
-      {{ activeKind === 'character' ? '还没有角色预设，画中人全凭 AI 即兴' : '还没有地点预设' }}
+    <div v-if="rows.length === 0 && sessionOnlyRows.length === 0" class="empty-tab">
+      还没有角色预设，画中人全凭 AI 即兴
     </div>
 
-    <ul v-else class="preset-list">
+    <ul v-else-if="rows.length > 0" class="preset-list">
       <li v-for="row in rows" :key="row.key" class="preset-row">
         <div class="preset-main">
           <span class="preset-name">{{ row.name }}</span>
@@ -267,6 +328,44 @@ function summarize(row: ImagePreset): string {
         </div>
       </li>
     </ul>
+
+    <!--
+      只有本档外貌、还没有初始设定的角色（v1.3）。
+      不列出来的话，AI 给他定成了什么样是**看不见**的，也没有单角色重置可按。
+    -->
+    <div v-if="sessionOnlyRows.length > 0" class="session-only">
+      <h5 class="session-only-head">本档临时外貌（还没有初始设定）</h5>
+      <p class="form-hint session-only-note">
+        这些角色你还没写过初始设定，出图 AI 即兴给了他们一份，<strong>只在本存档有效</strong>。
+        觉得对就「存为初始设定」——从此跨存档钉死，而且只有你能改。
+      </p>
+      <ul class="preset-list">
+        <li v-for="row in sessionOnlyRows" :key="row.name" class="preset-row">
+          <div class="preset-main">
+            <span class="preset-name">{{ row.name }}</span>
+            <ul class="session-diff">
+              <li v-for="d in row.slots" :key="d.slot">
+                <span class="diff-slot">{{ SLOT_LABELS[d.slot] }}</span>
+                <span class="diff-value">{{ d.value }}</span>
+              </li>
+            </ul>
+          </div>
+          <div class="preset-actions">
+            <span class="session-badge" title="只在本存档有效">仅本档</span>
+            <AppButton
+              variant="ghost"
+              size="sm"
+              :disabled="promoting !== null"
+              @click="promoteToBaseline(row)"
+              >存为初始设定</AppButton
+            >
+            <AppButton variant="ghost" size="sm" class="reset-one-btn" @click="resetOne(row.name)"
+              >重置</AppButton
+            >
+          </div>
+        </li>
+      </ul>
+    </div>
 
     <!-- 编辑器（AppModal 自己 Teleport，留在卡内层不改变渲染位置） -->
     <AppModal
@@ -416,6 +515,20 @@ function summarize(row: ImagePreset): string {
 .diff-slot {
   color: var(--theme-primary);
   margin-right: 4px;
+}
+/* 只有本档外貌的角色（v1.3）—— 与上面那张表刻意分开，两者的归属不同 */
+.session-only {
+  margin-top: var(--theme-spacing-md);
+  padding-top: var(--theme-spacing-md);
+  border-top: 1px solid var(--theme-border);
+}
+.session-only-head {
+  margin: 0 0 4px;
+  font-size: 0.85rem;
+  color: var(--theme-text-secondary);
+}
+.session-only-note {
+  margin: 0 0 var(--theme-spacing-sm);
 }
 .slot-grid {
   display: grid;

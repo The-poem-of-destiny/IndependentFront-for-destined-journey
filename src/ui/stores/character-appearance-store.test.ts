@@ -54,6 +54,37 @@ describe('自动写入', () => {
     expect(rows[0].name).toBe('艾莉丝');
   });
 
+  /**
+   * 🔴 v1.3 的核心：**没有基线的角色，AI 即兴出来的那份也落这里**，差量基准是全空。
+   *
+   * 此前这种角色走的是「AI 现建一份**全局基线**」（D57 原版），而全局意味着 A 周目的
+   * 即兴成了 B 周目的定义，且两个重置口都够不着它 —— 设置页却正写着「初始设定不受影响」。
+   * 现在基线只有用户能写，这条断言就是那个保证的落点。
+   */
+  it('🔴 没有基线的角色：即兴外貌整份落会话层（差量基准是全空）', async () => {
+    const store = await freshStore();
+    await store.applyPatch('无名剑客', EMPTY_APPEARANCE, {
+      count: '1boy',
+      hairColor: 'black hair',
+      outfit: 'worn leather armor',
+    });
+
+    // 全空基线下，「差异」就是它报的全部内容 —— 一个槽都不该丢
+    expect(store.patchOf('无名剑客')).toEqual({
+      count: '1boy',
+      hairColor: 'black hair',
+      outfit: 'worn leather armor',
+    });
+    // 落的是**本存档**的行；基线表（imagePresets）本轮一个字节都没写
+    const rows = await getCharacterAppearances(SAVE);
+    expect(rows.map((r) => r.name)).toEqual(['无名剑客']);
+    expect(rows[0].saveId).toBe(SAVE);
+
+    // 而且它照样能被单角色重置口清掉 —— 这正是「自动写入可接受」的前提
+    await store.resetOne('无名剑客');
+    expect(store.patchOf('无名剑客')).toBeUndefined();
+  });
+
   it('🔴 与基线等价的 patch 不落库（每张图写一行噪音会毁掉重置）', async () => {
     const store = await freshStore();
     const res = await store.applyPatch('艾莉丝', ALICE, {

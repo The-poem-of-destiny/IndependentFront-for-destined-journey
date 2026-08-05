@@ -207,6 +207,43 @@ describe('限额（D32：闸门在最前面）', () => {
     expect(await getSceneImagesByMessage(SAVE, 'msg_1')).toHaveLength(0);
   });
 
+  /**
+   * 🔴 **并发连点绕不过限额**（准入临界区串行化）。
+   *
+   * `generate()` 的读-判-写中间有两次 await，而限额是拿**落库前**读到的记录集算的。
+   * 不串行的话两次调用会各自读到「还没有对方那条」的旧快照、双双放行 —— 限额被整整
+   * 绕过一次，而绕过的代价是真金白银。
+   *
+   * 这个窗口在生产里是够得着的：手动开火有**两个入口**（正文按钮 / 消息右键），各自的
+   * `busy` 只锁自己那个组件实例。
+   */
+  it('🔴 两次并发 generate 只放行一条 —— 限额不被连点绕过', async () => {
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    const send = vi.fn(async () => okSend());
+    store.setSeams({
+      // 「这条消息上已经有记录了就不许再来」—— 判据只看传进来的那一份快照，
+      // 与真实的 checkQuota 一样，所以旧快照会让它误判
+      checkQuota: ({ records }): QuotaVerdict =>
+        records.some((r) => r.messageId === 'msg_1')
+          ? { ok: false, reason: 'per-message', message: '这条消息已经有插画了' }
+          : { ok: true },
+      runPromptAgent: stubPromptAgent(),
+      send,
+    });
+
+    const [first, second] = await Promise.all([
+      store.generate(baseInput({ occurrence: 0 })),
+      store.generate(baseInput({ occurrence: 1 })),
+    ]);
+    await store.whenIdle();
+
+    // 恰好一条通过、一条被拦 —— 而不是两条都过
+    expect([first.ok, second.ok].filter(Boolean)).toHaveLength(1);
+    expect(await getSceneImagesByMessage(SAVE, 'msg_1')).toHaveLength(1);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   it('限额判定拿到的是本存档全部记录（含 queued/failed），否则连点能绕过', async () => {
     await saveSceneImage(makeRecord({ id: 'q', status: 'queued' }));
     await saveSceneImage(makeRecord({ id: 'f', status: 'failed', occurrence: 1 }));
@@ -594,6 +631,42 @@ describe('取消', () => {
     expect(row?.errorKind).toBe('aborted');
   });
 
+  /**
+   * 🔴 D36 的两种取消**措辞必须不同**，而这一条差点在实现里丢掉：
+   *
+   * `cancel()` 写下「已中止（本次仍可能计费）」之后，在飞的那次请求会以客户端的
+   * `aborted`（文案「已取消」）回来，`fail()` 原样写下去就把**可能已经计费**这件最要紧的
+   * 事抹掉了 —— 而中止只可能发生在请求已经发出去之后，也就是**每一次**都会被抹掉。
+   */
+  it('🔴 中止的措辞不被客户端的「已取消」盖掉（计费提示是这条记录上最要紧的字）', async () => {
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    const called = deferred<void>();
+    const release = deferred<void>();
+    store.setSeams({
+      runPromptAgent: stubPromptAgent(),
+      send: async () => {
+        called.resolve();
+        await release.promise;
+        // 真实的 image-client 在被 abort 时回的就是这一句
+        return { ok: false as const, kind: 'aborted' as const, message: '已取消', retryable: true };
+      },
+    });
+
+    const a = await store.generate(baseInput());
+    if (!a.ok) throw new Error('generate 应当成功');
+    await called.promise;
+
+    await store.cancel(a.id);
+    release.resolve();
+    await store.whenIdle();
+
+    const row = await getSceneImage(a.id);
+    expect(row?.errorKind).toBe('aborted');
+    expect(row?.error).toContain('可能计费');
+    expect(row?.error).not.toBe('已取消');
+  });
+
   it('取消 done/failed 是 noop', async () => {
     await saveSceneImage(makeRecord({ id: 'done_one' }));
     const store = useSceneImageStore();
@@ -745,52 +818,9 @@ describe('钉住', () => {
   });
 });
 
-// ═══ 清理（D47）═══
-
-describe('清理', () => {
-  it('只删字节并打 blobDropped —— sceneImages 行数一条都不变，status 也不动', async () => {
-    const db = getDatabase();
-    const png = () => new Blob([new Uint8Array([7, 7])], { type: 'image/png' });
-    await saveSceneImage(makeRecord({ id: 'r1', bytes: 2 }), png());
-    await saveSceneImage(makeRecord({ id: 'r2', occurrence: 1, bytes: 2 }), png());
-    await saveSceneImage(makeRecord({ id: 'fav', occurrence: 2, bytes: 2, favorite: true }), png());
-
-    const store = useSceneImageStore();
-    await store.load(SAVE);
-    const before = await db.sceneImages.count();
-
-    const result = await store.cleanup(SAVE);
-
-    expect(result.dropped).toBe(2);
-    expect(result.keptFavorite).toBe(1);
-    expect(result.bytes).toBe(4);
-    // 🔴 行数不变
-    expect(await db.sceneImages.count()).toBe(before);
-
-    const r1 = await getSceneImage('r1');
-    expect(r1?.blobDropped).toBe(true);
-    // 这张图**画出来过**，那是历史事实，不因为腾空间而改写
-    expect(r1?.status).toBe('done');
-    expect(r1?.scenePrompt).toBe('tavern interior');
-    expect(await db.sceneImageBlobs.get('r1')).toBeUndefined();
-
-    // 收藏的豁免（D6）
-    expect((await getSceneImage('fav'))?.blobDropped).toBeUndefined();
-    expect(await db.sceneImageBlobs.get('fav')).toBeDefined();
-  });
-
-  it('includeFavorites 时连收藏一起清', async () => {
-    const png = new Blob([new Uint8Array([7])], { type: 'image/png' });
-    await saveSceneImage(makeRecord({ id: 'fav', favorite: true, bytes: 1 }), png);
-    const store = useSceneImageStore();
-    await store.load(SAVE);
-
-    const result = await store.cleanup(SAVE, { includeFavorites: true });
-    expect(result.dropped).toBe(1);
-    expect(result.keptFavorite).toBe(0);
-    expect((await getSceneImage('fav'))?.blobDropped).toBe(true);
-  });
-});
+// 🪦 「清理（D47）」与「用量统计」的用例已搬去 `database.scene-image-usage.test.ts` ——
+//    本 store 那两份重复实现（`cleanup()` / `usage`）已删（生产零调用方，且是
+//    `hasStoredSceneImageBytes` 那条判据的第三个副本）。唯一真源在 `@engine/database`。
 
 // ═══ 视图 ═══
 
@@ -801,25 +831,6 @@ describe('视图', () => {
     const store = useSceneImageStore();
     await store.load(SAVE);
     expect(store.gallery.map((r) => r.id)).toEqual(['early', 'late']);
-  });
-
-  it('用量统计区分自动/手动，并把已清理的算进去', async () => {
-    await saveSceneImage(makeRecord({ id: 'a', source: 'auto', bytes: 10 }));
-    await saveSceneImage(makeRecord({ id: 'm', source: 'manual', occurrence: 1, bytes: 20 }));
-    await saveSceneImage(
-      makeRecord({ id: 'd', source: 'auto', occurrence: 2, bytes: 30, blobDropped: true }),
-    );
-    const store = useSceneImageStore();
-    await store.load(SAVE);
-
-    expect(store.usage).toEqual({
-      total: 3,
-      auto: 2,
-      manual: 1,
-      withBytes: 2,
-      dropped: 1,
-      bytes: 30,
-    });
   });
 });
 
@@ -847,5 +858,43 @@ describe('注入缝', () => {
     expect(b.ok).toBe(true);
     if (!b.ok) return;
     expect((await getSceneImage(b.id))?.status).toBe('failed');
+  });
+});
+
+// ═══ whenIdle 的失败面 ═══
+
+describe('whenIdle', () => {
+  /**
+   * 🔴 等不到就**抛**，不静默返回。
+   *
+   * 它此前跑满 100 轮后直接 `return`，于是调用方（全是测试）拿到一个「已经空了」的
+   * 假承诺，接下来的断言在一个还在跑的队列上执行 —— 表现是随机失败的用例，
+   * 而报错指向断言、不指向这里。一个等不到的等待应该说自己等不到。
+   */
+  it('🔴 轮数用完时抛错并报出还剩几条，而不是假装跑空了', async () => {
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    // 永不兑现的 send：第一条卡在 generating，第二条排在队列里
+    store.setSeams({
+      runPromptAgent: stubPromptAgent(),
+      send: () => new Promise<never>(() => {}),
+    });
+
+    await store.generate(baseInput({ occurrence: 0 }));
+    await store.generate(baseInput({ occurrence: 1 }));
+
+    // 轮数预算给 0：直接走到超时分支（不 await 那个永不兑现的泵，所以用例不会挂住）
+    await expect(store.whenIdle(0)).rejects.toThrow(/仍未跑空/);
+    // 🔴 消息里必须带上「还剩几条」—— 一句没有数字的超时对排查毫无帮助
+    await expect(store.whenIdle(0)).rejects.toThrow(/还剩 1 条/);
+  });
+
+  it('正常跑空时照常返回（超时分支不是常态）', async () => {
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams({ runPromptAgent: stubPromptAgent(), send: async () => okSend() });
+
+    await store.generate(baseInput());
+    await expect(store.whenIdle()).resolves.toBeUndefined();
   });
 });
