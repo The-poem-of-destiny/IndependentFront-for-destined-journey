@@ -136,20 +136,43 @@ function makeItemGenOutput(overrides: Partial<ItemGenOutput> = {}): ItemGenOutpu
   };
 }
 
+/**
+ * 不调工具、一轮返回最终输出的 CharGenClient。
+ *
+ * 🔴 只 mock `chatWithTools` —— `CharGenClient` 已不再有 `chat`（2026-08-04）：
+ *   本链在生产里恒定走 Agentic 路径，那条曾经的 `client.chat(messages)` 回退路
+ *   签名与 `AgentClient.chat(request: ChatRequest)` 不符（数组当 request 传，
+ *   `request.messages` 恒 undefined），且永不执行。mock 若还留 `chat`，等于在测试里
+ *   养一条生产没有的路径。
+ */
 function makeMockClient(
   response: string | object,
   overrides: Partial<CharGenClient> = {},
 ): CharGenClient {
   const rawResponse = typeof response === 'string' ? response : JSON.stringify(response);
   return {
-    chat: vi.fn().mockResolvedValue({
-      output: typeof response === 'string' ? response : JSON.stringify(response),
+    chatWithTools: vi.fn().mockResolvedValue({
+      output: rawResponse,
       rawResponse,
       tokensUsed: 500,
       cacheHit: false,
       duration: 1000,
     }),
     ...overrides,
+  };
+}
+
+/** 只产错误结果的 client（错误分支专用） */
+function makeErrorClient(error: string): CharGenClient {
+  return {
+    chatWithTools: vi.fn().mockResolvedValue({
+      output: null,
+      rawResponse: '',
+      tokensUsed: 0,
+      cacheHit: false,
+      duration: 100,
+      error,
+    }),
   };
 }
 
@@ -540,21 +563,30 @@ describe('callCharGenAgent', () => {
     expect(result.name).toBe('艾琳');
     expect(result.race).toBe('精灵');
     expect(result.attributes.str).toBe(4);
-    expect(mockClient.chat).toHaveBeenCalledTimes(1);
+    expect(mockClient.chatWithTools).toHaveBeenCalledTimes(1);
+  });
+
+  // 🔴 回归钉子（2026-08-04）：送进 client 的必须是 `{ messages, tools, tool_choice }`
+  //   形状的 **request 对象**、且 messages 非空。此前本链另有一条 `client.chat(messages)`
+  //   回退路径把**数组本身**当 request 传，`AgentClient` 那边 `request.messages` 读出 undefined。
+  //   回退路径已删，这条断言钉住剩下的唯一路径别再退化成"发一次没有任何消息的请求"。
+  it('送出的 request 必须带非空 messages（而非把数组当 request 传）', async () => {
+    const mockClient = makeMockClient(makeCharGenOutput());
+    await callCharGenAgent(makeRequest(), makeDeps(mockClient));
+
+    const [sentRequest] = (mockClient.chatWithTools as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(Array.isArray(sentRequest)).toBe(false);
+    expect(Array.isArray(sentRequest.messages)).toBe(true);
+    expect(sentRequest.messages.length).toBeGreaterThan(0);
+    for (const m of sentRequest.messages) {
+      expect(typeof m.role).toBe('string');
+      expect(typeof m.content).toBe('string');
+    }
+    expect(sentRequest.tool_choice).toBe('auto');
   });
 
   it('API 返回错误时应抛出异常', async () => {
-    const mockClient: CharGenClient = {
-      chat: vi.fn().mockResolvedValue({
-        output: null,
-        rawResponse: '',
-        tokensUsed: 0,
-        cacheHit: false,
-        duration: 100,
-        error: 'Network error',
-      }),
-    };
-    const deps = makeDeps(mockClient);
+    const deps = makeDeps(makeErrorClient('Network error'));
 
     await expect(callCharGenAgent(makeRequest(), deps)).rejects.toThrow('char_gen Agent 调用失败');
   });
@@ -591,21 +623,22 @@ describe('callItemGenAgent', () => {
     expect(result.skills).toHaveLength(1);
     expect(result.equipment).toHaveLength(1);
     expect(result.inventory).toHaveLength(1);
-    expect(mockClient.chat).toHaveBeenCalledTimes(1);
+    expect(mockClient.chatWithTools).toHaveBeenCalledTimes(1);
+  });
+
+  // 同 callCharGenAgent 的回归钉子 —— item_gen 侧也删过一条形状不符的 chat 回退路径
+  it('送出的 request 必须带非空 messages（而非把数组当 request 传）', async () => {
+    const mockClient = makeMockClient(makeItemGenOutput());
+    await callItemGenAgent(makeCharGenOutput(), makeRequest(), makeDeps(mockClient));
+
+    const [sentRequest] = (mockClient.chatWithTools as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(Array.isArray(sentRequest)).toBe(false);
+    expect(Array.isArray(sentRequest.messages)).toBe(true);
+    expect(sentRequest.messages.length).toBeGreaterThan(0);
   });
 
   it('API 错误时应返回空物品数据 (不阻断流程)', async () => {
-    const mockClient: CharGenClient = {
-      chat: vi.fn().mockResolvedValue({
-        output: null,
-        rawResponse: '',
-        tokensUsed: 0,
-        cacheHit: false,
-        duration: 100,
-        error: 'Timeout',
-      }),
-    };
-    const deps = makeDeps(mockClient);
+    const deps = makeDeps(makeErrorClient('Timeout'));
 
     const result = await callItemGenAgent(makeCharGenOutput(), makeRequest(), deps);
     expect(result.skills).toHaveLength(0);
@@ -638,8 +671,8 @@ describe('runCharGenChain', () => {
     expect(result.patches).toBeDefined();
     expect(result.patches.length).toBeGreaterThan(0);
     expect(result.narrativeSummary).toContain('艾琳');
-    expect(charClient.chat).toHaveBeenCalledTimes(1);
-    expect(itemClient.chat).toHaveBeenCalledTimes(1);
+    expect(charClient.chatWithTools).toHaveBeenCalledTimes(1);
+    expect(itemClient.chatWithTools).toHaveBeenCalledTimes(1);
   });
 
   it('应可选地调用 stateManager.commitChatState', async () => {
@@ -704,8 +737,8 @@ describe('runCharGenForCombat', () => {
     // 产出 SummonedUnitDefinition
     expect(def).toBeDefined();
     expect(def.name).toBe('艾琳');
-    expect(charClient.chat).toHaveBeenCalledTimes(1);
-    expect(itemClient.chat).toHaveBeenCalledTimes(1);
+    expect(charClient.chatWithTools).toHaveBeenCalledTimes(1);
+    expect(itemClient.chatWithTools).toHaveBeenCalledTimes(1);
   });
 
   it('返回的 definition 字段齐全（参战时机/持续/预算）', async () => {
@@ -800,13 +833,6 @@ function makeAgenticMockClient(
   finalOutput: string,
 ): CharGenClient {
   return {
-    chat: vi.fn().mockResolvedValue({
-      output: 'mock chat response',
-      rawResponse: 'mock chat response',
-      tokensUsed: 0,
-      cacheHit: false,
-      duration: 0,
-    }),
     chatWithTools: vi.fn().mockImplementation(async (request, toolExecutor, _options) => {
       const conversation = [...request.messages];
 
@@ -941,37 +967,14 @@ describe('callCharGenAgent (Agentic 路径)', () => {
   });
 
   it('Agentic 路径失败应抛出异常', async () => {
-    const mockClient: CharGenClient = {
-      chat: vi.fn().mockResolvedValue({
-        output: 'mock chat response',
-        rawResponse: 'mock chat response',
-        tokensUsed: 0,
-        cacheHit: false,
-        duration: 0,
-      }),
-      chatWithTools: vi.fn().mockResolvedValue({
-        output: null,
-        rawResponse: '',
-        tokensUsed: 0,
-        cacheHit: false,
-        duration: 100,
-        error: 'API timeout',
-      }),
-    };
-    const deps = makeDeps(mockClient);
+    const deps = makeDeps(makeErrorClient('API timeout'));
 
     await expect(callCharGenAgent(makeRequest(), deps)).rejects.toThrow('char_gen Agent 调用失败');
   });
 
-  it('应回退到旧路径 (无 chatWithTools 时)', async () => {
-    // makeMockClient 只提供 chat，不提供 chatWithTools → 应走旧路径
-    const mockClient = makeMockClient(makeCharGenOutput());
-    const deps = makeDeps(mockClient);
-
-    const result = await callCharGenAgent(makeRequest(), deps);
-    expect(result.name).toBe('艾琳');
-    expect(mockClient.chat).toHaveBeenCalledTimes(1);
-  });
+  // 🪦 '应回退到旧路径 (无 chatWithTools 时)' 已删（2026-08-04）：那条回退路在生产不可达
+  //    （唯一的 clientFactory 恒定带 chatWithTools），且签名与 AgentClient.chat 不符。
+  //    `chatWithTools` 现为 CharGenClient 必填项 —— 缺失是编译错误，不再需要运行时用例。
 });
 
 // ── Agentic callItemGenAgent 测试 ──
@@ -1019,24 +1022,7 @@ describe('callItemGenAgent (Agentic 路径)', () => {
   });
 
   it('Agentic 路径失败应返回空物品（不阻断流程）', async () => {
-    const mockClient: CharGenClient = {
-      chat: vi.fn().mockResolvedValue({
-        output: 'mock chat response',
-        rawResponse: 'mock chat response',
-        tokensUsed: 0,
-        cacheHit: false,
-        duration: 0,
-      }),
-      chatWithTools: vi.fn().mockResolvedValue({
-        output: null,
-        rawResponse: '',
-        tokensUsed: 0,
-        cacheHit: false,
-        duration: 100,
-        error: 'Timeout',
-      }),
-    };
-    const deps = makeDeps(mockClient);
+    const deps = makeDeps(makeErrorClient('Timeout'));
 
     const result = await callItemGenAgent(makeCharGenOutput(), makeRequest(), deps);
     expect(result.skills).toHaveLength(0);
@@ -1538,6 +1524,53 @@ describe('parseItemGenOutput — <automaton> 子元素解析（战斗 v3 S3）',
     const out = parseItemGenOutput(raw);
     expect(out.equipment[0].automata).toHaveLength(1);
     expect(out.equipment[0].automata![0].subscribe).toBe('round.open');
+  });
+});
+
+describe('parseItemGenOutput — skillPower 链路修复 (2026-08-04: <skill power/attr/dtype>)', () => {
+  it('应解析 <skill power="..." attr="..." dtype="..."> → skillPower/relevantAttribute/damageType', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><skills>',
+      '<skill name="火球术" type="active" cost_type="MP" cost_amount="200" cooldown="3" power="450" attr="int" dtype="能量">',
+      '  凝聚烈焰成球掷出。',
+      '  <effect name="烈焰爆裂">范围伤害</effect>',
+      '</skill>',
+      '</skills></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.skills).toHaveLength(1);
+    expect(out.skills[0].skillPower).toBe(450);
+    expect(out.skills[0].relevantAttribute).toBe('int');
+    expect(out.skills[0].damageType).toBe('能量');
+  });
+
+  it('非法 attr/dtype 值被白名单丢弃（power 仍解析，不污染 Skill）', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><skills>',
+      '<skill name="X" type="active" power="100" attr="foo" dtype="量子">',
+      '  desc',
+      '</skill>',
+      '</skills></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.skills[0].skillPower).toBe(100);
+    expect(out.skills[0].relevantAttribute).toBeUndefined();
+    expect(out.skills[0].damageType).toBeUndefined();
+  });
+
+  it('无 power 属性 → skillPower undefined（旧存档兼容）', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result><skills>',
+      '<skill name="旧技能" type="active" cost_type="MP" cost_amount="10">',
+      '  desc',
+      '</skill>',
+      '</skills></item_result>',
+    ].join('\n');
+    const out = parseItemGenOutput(raw);
+    expect(out.skills[0].skillPower).toBeUndefined();
   });
 });
 

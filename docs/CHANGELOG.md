@@ -9,6 +9,25 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### skillPower 链路修复 —— 主动攻击技能威力接入 v3 结算管线 ｜ ✅ 完成（2026-08-04）
+
+排查 debug 真机样本发现：item_gen 生成的主动攻击技能（火球术威力 450）**没有进 v3 伤害结算**——
+`attack.ts:128` 三 fallback 全 `skillPower:0`，公式「属性×10×层级系数 + **技能威力** + 武器攻击力」
+里技能威力项恒为 0；AI 被逼把威力塞进 cast 脚本 `$resource.modifyHp(target,-450)`（战斗外固定伤害，
+且 v3 战斗内根本不执行 cast 脚本）。根因是 v2→v3 迁移遗漏：v2 `combat_attack` schema 有 skillPower（AI 填），
+v3 按 ADR-28 删了 AI 入口但**没建 Code 入口**（按 skillName 查）。
+
+**单点收口**（`attack.ts:128`）：fallback 链从三层变四层——`payload.ability → activeSkills[skillName] →
+attacker.ability → 字面量兜底 0`，敌方 AI / 玩家 / replay 三路径自动受益。**上游通路**：`Skill` 加
+`skillPower/relevantAttribute/damageType` + `ItemGenOutput.skills`/`CharGenOutput.skills` 同步加字段；
+`parseSkillsXML` 解析 `<skill power="..." attr="..." dtype="...">`（白名单过滤非法值）+ JSON 兜底路径 +
+`assembleCharacterState` 三处透传；`characterToCombatParticipant` 摘主动技能 → `CombatParticipant.activeSkills` →
+`createCombatState` 透传 → `CombatUnitState.activeSkills`。**item_gen prompt**：`<skill>` 加 `power/attr/dtype`
+属性 + 主体威力铁律（禁 cast modifyHp，buff 必须写 `<buffs>` 子元素）。**旁路 D**：effect-parser 废弃
+"技能威力"词条映射（防 power 属性与 effect 词条双通道重复计算）。**配套**：`combat-agent-api.md` 的 v2
+`combat_attack` 规格加 v3 迁移标注。6 新测试用例（characterToCombatParticipant 摘主动技能 / parseSkillsXML
+解析 power / createCombatState 透传 / 旧存档兼容）。**5934 tests 全绿**，零回归。
+
 ### 图像生成 v1 —— NovelAI 情景插画（标记锚点 / 三档开关 / CG 图鉴 / 第 13 分区）｜ ✅ 已实施，待真机（2026-08-04）
 
 设计 `docs/planning/2026-08-04-image-generation-design.md`（v1.1 / D1–D55）落地，编排照

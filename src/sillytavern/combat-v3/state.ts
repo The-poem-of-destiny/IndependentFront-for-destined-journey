@@ -150,6 +150,8 @@ export function createCombatState(bundle: CombatDefinitionBundle): CombatState {
       statusEffects: p.statusEffects ? p.statusEffects.map((s) => ({ ...s })) : [],
       // M1 最小 ability：可由 bundle.skills 或参与者的 weaponAtk 兜底
       ability: undefined,
+      // 🆕 skillPower 链路修复 (2026-08-04): 透传主动技能快照，供 handleAttack 按 skillName 查
+      activeSkills: p.activeSkills,
     };
     initiativeOrder.push(id);
   }

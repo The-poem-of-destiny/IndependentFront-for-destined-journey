@@ -849,6 +849,17 @@ export interface Skill {
   divinity?: DivinityLevel;
   /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（EffectAutomaton[]，来自 item_gen `<automaton>` JSON） */
   automata?: EffectAutomaton[];
+  /** 🆕 skillPower 链路修复 (2026-08-04): 主体技能威力。item_gen 按 Tier→威力区间表填，战斗 v3 的
+   *  ability.skillPower 消费（进 calcInitialDamage 公式「属性×10×层级系数 + 技能威力 + 武器攻击力」）。
+   *  被动/纯辅助技能可 undefined；战斗结算缺省=0。
+   *  与 modifiers(附加效果)/automata(自由效果) 的边界：skillPower = 走结算管线的主体伤害基数
+   *  （参与命中/防御/抗性/暴击）；modifiers/automata 里加 fixedDamage = 结算后追加固伤（不参与防御）。 */
+  skillPower?: number;
+  /** 🆕 skillPower 链路修复: 关联属性（公式"属性×10×系数"取哪一维）。主动攻击技能由 item_gen 定型：
+   *  法术/能量类=int、物理类=str、敏捷类=dex。 */
+  relevantAttribute?: 'str' | 'dex' | 'con' | 'int' | 'spi';
+  /** 🆕 skillPower 链路修复: 主体威力的伤害类型（结算通道）。法术=能量、物理=物理、精神攻击=精神。 */
+  damageType?: DamageType;
 }
 
 /** 背包物品 */
@@ -2084,6 +2095,17 @@ export interface CombatParticipant {
   canAct: boolean;
   /** 战意状态 (Phase 6c) */
   morale?: MoraleState;
+  /** 🆕 skillPower 链路修复 (2026-08-04): 主动技能战斗快照。characterToCombatParticipant 从
+   *  char.skills 摘取主动技能的最小战斗集，createCombatState 透传进 CombatUnitState.activeSkills，
+   *  供 handleAttack 在声明 declare_attack(skillName) 时按名查 skillPower/relevantAttribute/damageType。
+   *  被动技能的 modifiers/automata 仍走现有 modifiers/automata 通道，不在这里。 */
+  activeSkills?: ReadonlyArray<{
+    name: string;
+    skillPower: number;
+    relevantAttribute?: 'str' | 'dex' | 'con' | 'int' | 'spi';
+    damageType?: DamageType;
+    divinity?: number;
+  }>;
 }
 
 // ========== Combat State ==========
@@ -3284,6 +3306,10 @@ export interface CharGenOutput {
     divinity?: DivinityLevel;
     /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton */
     automata?: EffectAutomaton[];
+    /** 🆕 skillPower 链路修复 (2026-08-04): 主体技能威力（同 ItemGenOutput.skills.skillPower） */
+    skillPower?: number;
+    relevantAttribute?: 'str' | 'dex' | 'con' | 'int' | 'spi';
+    damageType?: DamageType;
   }>;
   /** 🆕 char_gen 自身生成的装备 */
   equipment: Array<{
@@ -3355,6 +3381,13 @@ export interface ItemGenOutput {
     divinity?: DivinityLevel;
     /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（来自 item_gen `<automaton>` JSON） */
     automata?: EffectAutomaton[];
+    /** 🆕 skillPower 链路修复 (2026-08-04): 主体技能威力（item_gen `<skill power="...">`）。
+     *  战斗 v3 的 ability.skillPower 消费，进 calcInitialDamage 公式。被动/辅助可 undefined。 */
+    skillPower?: number;
+    /** 🆕 skillPower 链路修复: 关联属性（法术=int、物理=str、敏捷=dex） */
+    relevantAttribute?: 'str' | 'dex' | 'con' | 'int' | 'spi';
+    /** 🆕 skillPower 链路修复: 主体威力伤害类型 */
+    damageType?: DamageType;
   }>;
   /** 装备列表 */
   equipment: Array<{

@@ -166,6 +166,20 @@ export function characterToCombatParticipant(
     ...(char.skills ?? []).filter((s) => s.type === 'passive').flatMap((s) => s.automata ?? []),
   ];
 
+  // 🆕 skillPower 链路修复 (2026-08-04): 摘主动技能的最小战斗集（skillPower/relevantAttribute/
+  //    damageType/divinity），供 v3 内核 declare_attack 时按 skillName 查主体威力填进 ability。
+  //    被动技能不在这里（它们的 modifiers/automata 走 equippedAutomata/equippedModifiers 通道）。
+  //    旧存档 Skill 无 skillPower 字段 → typeof 过滤掉，行为与现状一致（兜底 0，不退化）。
+  const activeSkills = (char.skills ?? [])
+    .filter((s) => s.type === 'active' && typeof s.skillPower === 'number')
+    .map((s) => ({
+      name: s.name,
+      skillPower: s.skillPower as number,
+      relevantAttribute: s.relevantAttribute,
+      damageType: s.damageType,
+      divinity: s.divinity,
+    }));
+
   return {
     characterId: char.id,
     name: char.name,
@@ -191,6 +205,7 @@ export function characterToCombatParticipant(
     weaponAtk: weapon?.stats?.atk ?? 0,
     modifiers: equippedModifiers.length > 0 ? equippedModifiers : undefined,
     automata: equippedAutomata.length > 0 ? equippedAutomata : undefined,
+    activeSkills: activeSkills.length > 0 ? activeSkills : undefined,
     side,
     canAct: char.hp > 0,
     ...overrides,

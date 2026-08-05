@@ -191,11 +191,10 @@ describe('parseEffectDeclaration', () => {
     expect(result[0].isPercentage).toBe(true);
   });
 
-  it('技能威力 应映射为 skillPower', () => {
+  it('🔴 技能威力 词条已废弃（skillPower 链路修复 2026-08-04）—— 不再映射 skillPower，AI 应写 <skill power="..."> 属性', () => {
     const result = parseEffectDeclaration('技能威力: +15');
-    expect(result).toHaveLength(1);
-    expect(result[0].key).toBe('skillPower');
-    expect(result[0].value).toBe(15);
+    // 不再映射成 skillPower；主体威力走 <skill power="..."> 属性由 parseSkillsXML 读
+    expect(result.every((r) => r.key !== 'skillPower')).toBe(true);
   });
 
   it('HP恢复 应映射为 hpRegen', () => {

@@ -29,6 +29,7 @@ import type {
   QualityLevel,
   InventoryItem,
   ToolDefinition,
+  DamageType,
 } from './types';
 import { createDefaultCharacterState } from './types';
 import type { Modifier } from './effect-types';
@@ -89,19 +90,25 @@ export interface CharGenAgentDeps {
 /**
  * CharGen 客户端接口 — 抽象的 API 调用层。
  * 生产环境使用 AgentClient，测试使用 mock。
+ *
+ * 🔴 2026-08-04: `chatWithTools` 是**必填**，且本接口不再声明 `chat`。
+ *   此前 `chatWithTools` 可选 + 一条 `client.chat(messages)` 回退路径，而回退路径
+ *   声明的是 `chat(messages: Array<…>)`、真正的 `AgentClient.chat` 收的是
+ *   `chat(request: ChatRequest)`（messages 在 request 里）—— 形状不符，走上去
+ *   `request.messages` 是 undefined，`ensureUserMessage` 读 `.length` 抛 TypeError，
+ *   被 chat 的重试循环吞成 `{ error }`，最终报成一句和真因无关的「char_gen Agent 调用失败」。
+ *
+ *   那条路在生产里**不可达**：唯一的 clientFactory 是 `GamePipeline.getClientFactory()`，
+ *   它返回的包装对象恒定带 `chatWithTools`（内部委托 `AgentClient.chatWithTools`，
+ *   是类方法、不是可选属性），也没有任何开关能摘掉它 —— `AgentConfig.toolsEnabled`
+ *   是 orchestrator 的概念，本链自带 clientFactory、根本不读它。
+ *
+ *   所以不修签名而是**删接口**：把 `chatWithTools` 提成必填，未来任何新 client
+ *   少实现它当场编译不过，不必再靠一条永不执行的回退路径兜底。
  */
 export interface CharGenClient {
-  chat(messages: Array<{ role: string; content: string }>): Promise<{
-    output: string | null;
-    rawResponse: string;
-    tokensUsed: number;
-    cacheHit: boolean;
-    duration: number;
-    error?: string;
-  }>;
-
-  /** 🆕 Phase 8.5 Agentic: 多轮 function calling 路径 */
-  chatWithTools?: (
+  /** Phase 8.5 Agentic: 多轮 function calling —— 本链唯一的调用路径 */
+  chatWithTools: (
     request: {
       messages: Array<{ role: string; content: string }>;
       tools: ToolDefinition[];
@@ -204,42 +211,28 @@ export async function callCharGenAgent(
 
   const client = deps.clientFactory('char_gen', request.endpoint, request.saveId);
 
-  // 🆕 Phase 8.5: 优先走 Agentic 路径（function calling 多轮循环）
-  if (client.chatWithTools) {
-    const tools = getToolsForAgent('char_gen');
-    const toolContext: ToolExecutionContext = {
-      characters: request.context.characters ?? [],
-      variables: request.context.variables ?? {},
-      saveId: request.saveId,
-    };
+  // Phase 8.5 Agentic 路径（function calling 多轮循环）—— 唯一路径，见 CharGenClient 注释
+  const tools = getToolsForAgent('char_gen');
+  const toolContext: ToolExecutionContext = {
+    characters: request.context.characters ?? [],
+    variables: request.context.variables ?? {},
+    saveId: request.saveId,
+  };
 
-    const result = await client.chatWithTools(
-      { messages, tools, tool_choice: 'auto' },
-      async (name, args) => executeToolCall(name, args, toolContext),
-      { maxRounds: 10 },
-    );
-
-    if (result.error) {
-      throw new Error(`char_gen Agent 调用失败: ${result.error}`);
-    }
-
-    const rawOutput = result.output ?? result.rawResponse;
-    const parsed = parseCharGenOutput(rawOutput);
-    parsed.rawXml = rawOutput;
-    return parsed;
-  }
-
-  // 回退: 旧路径（无工具，直接 chat）
-  const result = await client.chat(messages);
+  const result = await client.chatWithTools(
+    { messages, tools, tool_choice: 'auto' },
+    async (name, args) => executeToolCall(name, args, toolContext),
+    { maxRounds: 10 },
+  );
 
   if (result.error) {
     throw new Error(`char_gen Agent 调用失败: ${result.error}`);
   }
 
   const rawOutput = result.output ?? result.rawResponse;
-  const fallbackParsed = parseCharGenOutput(rawOutput);
-  fallbackParsed.rawXml = rawOutput;
-  return fallbackParsed;
+  const parsed = parseCharGenOutput(rawOutput);
+  parsed.rawXml = rawOutput;
+  return parsed;
 }
 
 /**
@@ -292,32 +285,19 @@ export async function callItemGenAgent(
 
   const client = deps.clientFactory('item_gen', request.endpoint, request.saveId);
 
-  // 🆕 Phase 8.5: 优先走 Agentic 路径（function calling 多轮循环）
-  if (client.chatWithTools) {
-    const tools = getToolsForAgent('item_gen');
-    const toolContext: ToolExecutionContext = {
-      characters: request.context.characters ?? [],
-      variables: request.context.variables ?? {},
-      saveId: request.saveId,
-    };
+  // Phase 8.5 Agentic 路径（function calling 多轮循环）—— 唯一路径，见 CharGenClient 注释
+  const tools = getToolsForAgent('item_gen');
+  const toolContext: ToolExecutionContext = {
+    characters: request.context.characters ?? [],
+    variables: request.context.variables ?? {},
+    saveId: request.saveId,
+  };
 
-    const result = await client.chatWithTools(
-      { messages, tools, tool_choice: 'auto' },
-      async (name, args) => executeToolCall(name, args, toolContext),
-      { maxRounds: 10 },
-    );
-
-    if (result.error) {
-      // item_gen 失败不阻断流程 — 返回空物品数据
-      return { skills: [], equipment: [], inventory: [] };
-    }
-
-    const rawOutput = result.output ?? result.rawResponse;
-    return parseItemGenOutput(rawOutput);
-  }
-
-  // 回退: 旧路径（无工具，直接 chat）
-  const result = await client.chat(messages);
+  const result = await client.chatWithTools(
+    { messages, tools, tool_choice: 'auto' },
+    async (name, args) => executeToolCall(name, args, toolContext),
+    { maxRounds: 10 },
+  );
 
   if (result.error) {
     // item_gen 失败不阻断流程 — 返回空物品数据
@@ -367,6 +347,10 @@ export function assembleCharacterState(
     ...(s.divinity !== undefined ? { divinity: s.divinity } : {}),
     // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传到 Skill 落库
     ...(s.automata && s.automata.length > 0 ? { automata: s.automata } : {}),
+    // 🆕 skillPower 链路修复 (2026-08-04): 主体威力三字段透传到 Skill 落库
+    ...(s.skillPower !== undefined ? { skillPower: s.skillPower } : {}),
+    ...(s.relevantAttribute ? { relevantAttribute: s.relevantAttribute } : {}),
+    ...(s.damageType ? { damageType: s.damageType } : {}),
   }));
 
   // 合并装备: char_gen 自产优先
@@ -1228,6 +1212,10 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
         ...(elemDivinity !== undefined ? { divinity: elemDivinity } : {}),
         // 🆕 战斗 v3 (S3 2026-08-01): automata 透传（JSON 兜底路径）
         ...(itAutomata.length > 0 ? { automata: itAutomata } : {}),
+        // 🆕 skillPower 链路修复 (2026-08-04): JSON 直出路径同样透传
+        ...(typeof it.skillPower === 'number' ? { skillPower: it.skillPower } : {}),
+        ...(it.relevantAttribute ? { relevantAttribute: it.relevantAttribute } : {}),
+        ...(it.damageType ? { damageType: it.damageType } : {}),
       });
     } else if (isEquip) {
       out.equipment.push({
@@ -1293,6 +1281,9 @@ function parseItemGenXML(xml: string): ItemGenOutput {
 }
 
 function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
+  // 🆕 skillPower 链路修复 (2026-08-04): <skill power/attr/dtype> 属性白名单（非法值丢弃，不污染 Skill）
+  const ATTR_KEYS = new Set(['str', 'dex', 'con', 'int', 'spi']);
+  const DMG_TYPES = new Set(['物理', '能量', '精神', '真实']);
   const matches = xml.matchAll(/<skill\s+([^>]*?)>([\s\S]*?)<\/skill>/g);
   const results: ItemGenOutput['skills'] = [];
   for (const m of matches) {
@@ -1330,6 +1321,16 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
     const normalizedType: 'active' | 'passive' =
       skillType === '被动' || skillType === 'passive' ? 'passive' : 'active';
 
+    // 🆕 skillPower 链路修复 (2026-08-04): <skill power="..." attr="..." dtype="..."> 属性 → skillPower/relevantAttribute/damageType
+    const skillPowerAttr = attrs['power'] ? parseInt(attrs['power']) || 0 : undefined;
+    const relevantAttrRaw = attrs['attr'];
+    const relevantAttribute =
+      relevantAttrRaw && ATTR_KEYS.has(relevantAttrRaw)
+        ? (relevantAttrRaw as 'str' | 'dex' | 'con' | 'int' | 'spi')
+        : undefined;
+    const dtypeRaw = attrs['dtype'];
+    const damageType = dtypeRaw && DMG_TYPES.has(dtypeRaw) ? (dtypeRaw as DamageType) : undefined;
+
     results.push({
       name: attrs['name'] ?? '未命名技能',
       description: description || (descSubTag ? '' : descText.replace(/<[^>]+>/g, '').trim()),
@@ -1348,6 +1349,10 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
       ...(combat.divinity !== undefined ? { divinity: combat.divinity } : {}),
       // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传（编译期校验由 compileEffectProgram 做）
       ...(rawAutomata.length > 0 ? { automata: rawAutomata } : {}),
+      // 🆕 skillPower 链路修复 (2026-08-04): 主体威力三字段透传
+      ...(skillPowerAttr !== undefined ? { skillPower: skillPowerAttr } : {}),
+      ...(relevantAttribute ? { relevantAttribute } : {}),
+      ...(damageType ? { damageType } : {}),
     });
   }
   return results;
