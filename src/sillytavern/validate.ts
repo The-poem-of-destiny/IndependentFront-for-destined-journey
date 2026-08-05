@@ -10,14 +10,7 @@
  * 所有写入 StateManager 的数据必须先通过 validate。
  */
 
-import type {
-  CharacterState,
-  StatusEffect,
-  Skill,
-  InventoryItem,
-  VarsPatch,
-  StatePatch,
-} from './types';
+import type { CharacterState, Skill, InventoryItem, VarsPatch, StatePatch } from './types';
 
 // ========== 数值约束 ==========
 

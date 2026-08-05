@@ -97,7 +97,6 @@ export function checkMorale(
   d20Roll?: number,
 ): MoraleCheckResult {
   const threshold = getMoraleThreshold(combatType);
-  const baseState = getBaseMoraleState(hpRatio, threshold);
 
   // HP 高于阈值 → 未触发
   if (hpRatio > threshold) {

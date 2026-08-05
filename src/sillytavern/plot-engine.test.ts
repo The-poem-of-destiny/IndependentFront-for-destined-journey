@@ -6,7 +6,7 @@
  *       postCheckPlot / getPendingEventsForTrigger / autoGenerateMemoriesFromEvents
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { PlotEvent, MemoryRecord, PlotOutline } from './types';
+import type { PlotEvent, PlotOutline } from './types';
 import {
   evaluateCondition,
   parsePreCheckOutput,

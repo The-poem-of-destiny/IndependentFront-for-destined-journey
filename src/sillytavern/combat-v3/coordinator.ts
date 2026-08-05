@@ -653,7 +653,7 @@ function lastCommandFromResult(
 // 辅助
 // ──────────────────────────────────────────────────────────────────────────────
 
-function nearestCommand(revision: number, actorId: string, actorName: string): CombatCommand {
+function nearestCommand(revision: number, actorId: string, _actorName: string): CombatCommand {
   return {
     commandId: nextCmdId('prompt'),
     expectedRevision: revision,

@@ -278,12 +278,6 @@ export const useGameStore = defineStore('game', () => {
     return char?.thoughts ?? '';
   }
 
-  // === Agent 管线状态（供 AgentStatusPanel 读取） ===
-  interface AgentStatusEntry {
-    agentId: string;
-    label: string;
-    startedAt: number;
-  }
   const agentStatus = ref<{ agentId: string; label: string; startedAt: number } | null>(null);
   const agentDurations = ref<{ agentId: string; label: string; elapsed: number }[]>([]);
 
@@ -648,8 +642,9 @@ export const useGameStore = defineStore('game', () => {
       turn: role === 'user' ? ++turnCounter : turnCounter,
     };
     messages.value.push(msg);
-    // 异步持久化（不阻塞 UI）
-    persistMessage(msg);
+    // 异步持久化（不阻塞 UI）。`void` 是显式的「发射后不管」——
+    // persistMessage 自己 try/catch 到底，不会拒绝。
+    void persistMessage(msg);
     return msg;
   }
 
@@ -664,7 +659,7 @@ export const useGameStore = defineStore('game', () => {
       systemEvent,
     };
     messages.value.push(msg);
-    persistMessage(msg);
+    void persistMessage(msg);
   }
 
   // === 动作 ===

@@ -17,7 +17,7 @@
  *   morale-system     (士气状态机/处决条件)
  */
 import { describe, it, expect } from 'vitest';
-import type { CombatType, CombatState, CombatParticipant, DamageType } from './types';
+import type { CombatType, CombatParticipant } from './types';
 
 // 战斗模块
 import { parseIntentionFromInput, resolveIntention } from './combat-intention';
@@ -26,7 +26,6 @@ import {
   runDamagePipeline,
   performAttackCheck,
   checkStatusTrigger,
-  getHitRating,
   type DamagePipelineInput,
 } from './combat-damage';
 import { rollInitiative, rollAndSortInitiative } from './combat-turn';
@@ -130,28 +129,12 @@ const ALLY = makeParticipant({
   fixedInitiativeBonus: 1,
 });
 
-const GOBLIN_TEMPLATE = {
-  tier: 1,
-  level: 3,
-  attributes: { str: 8, dex: 12, con: 7, int: 5, spi: 4 },
-  maxHp: 60,
-  maxMp: 10,
-  maxSp: 20,
-  defense: 8,
-  weaponAtk: 5,
-  hitBonus: 1,
-  dodgeBonus: 2,
-  speedModifiers: [0.05],
-  fixedInitiativeBonus: 0,
-};
-
 // ═══════════════════════════════════════════════════════════
 // 第一章: 遭遇战 — 集群形成
 // ═══════════════════════════════════════════════════════════
 
 describe('🎮 第一章: 遭遇战 — 战斗类型与士气阈值', () => {
   it('战斗类型判定: 野外遭遇 → 标准战斗', () => {
-    const combatType: CombatType = '标准';
     expect(getMoraleThreshold('标准')).toBe(0.3);
     expect(isAutoTriggerType('标准')).toBe(false);
     expect(isCheckTriggerType('标准')).toBe(true);

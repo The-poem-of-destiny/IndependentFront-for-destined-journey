@@ -19,20 +19,10 @@ import type {
   CraftToolArgs,
   QualityLevel,
   CharacterState,
-  CombatState,
-  CombatParticipant,
-  StatePatch,
-  StatusEffect,
-  ReadonlyHookSet,
-  DamageType,
   ToolResult,
 } from './types';
-import type { EventBus } from './game-event';
-import type { StatusApplyIntent, StatusRemoveIntent } from './status-api';
-import { d20, d100, roll, executeDiceRoll, rollDice, rollDie } from './dice';
+import { d20, d100, roll, rollDice, rollDie } from './dice';
 import { normalizeItemType } from './field-enums';
-import { collectChecks } from './effect-types';
-import type { Modifier, CheckModifier } from './effect-types';
 import { buildCraftRequest, craftCheckDiceCount, craftRequestFingerprint } from './craft-request';
 import {
   randomName,
@@ -892,7 +882,7 @@ temp.<path>    — 会话临时 (不持久化)
 
       if (query === 'all') {
         const allParts = Object.entries(SCRIPT_REF)
-          .map(([key, text]) => text)
+          .map(([_key, text]) => text)
           .join('\n\n');
         return { query: 'all', reference: allParts };
       }

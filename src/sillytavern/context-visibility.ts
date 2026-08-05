@@ -18,7 +18,6 @@ import type {
   ZoneId,
   ZoneVisibilityMatrix,
   VariableZone,
-  ZoneConfig,
   AgentContext,
   CharacterState,
 } from './types';
@@ -365,7 +364,7 @@ function formatZoneFull(zoneId: ZoneId, content: Record<string, any>): string {
 function formatZoneNarrative(
   zoneId: ZoneId,
   content: Record<string, any>,
-  ctx?: AgentContext,
+  _ctx?: AgentContext,
 ): string {
   if (zoneId !== 'npc') {
     // 非 npc zone 走 FULL 路径

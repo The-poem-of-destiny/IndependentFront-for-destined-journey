@@ -10,6 +10,10 @@ const props = withDefaults(
   }>(),
   {
     closable: true,
+    // 显式写 undefined：这两项**本来就没有默认值**（无标题 / 由 CSS 决定尺寸），
+    // 但 vue/require-default-prop 要求每个可选 prop 都有交代，写出来比关规则好
+    title: undefined,
+    size: undefined,
   },
 );
 

@@ -15,7 +15,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { reactive } from 'vue';
 import CreateStepDestinyCore from './CreateStepDestinyCore.vue';
-import CreateStepCharacters from './CreateStepCharacters.vue';
 import type { WorkshopEnableOption } from '../../lib/workshop-enable';
 
 let mockCreate: any;

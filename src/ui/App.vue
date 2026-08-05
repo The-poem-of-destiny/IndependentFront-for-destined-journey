@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, watch } from 'vue';
 import { useUIStore } from './stores/ui-store';
-import { useThemeStore } from './stores/theme-store';
 import { useAudioStore } from './stores/audio-store';
 import { useAssetStore } from './stores/asset-store';
 import { useSettingsStore } from './stores/settings-store';
@@ -12,7 +11,6 @@ import { queryForView } from './lib/view-audio';
 import { applyReducedMotion } from './lib/reduced-motion';
 import ToastContainer from './components/shared/ToastContainer.vue';
 
-const theme = useThemeStore();
 const ui = useUIStore();
 const audio = useAudioStore();
 const assets = useAssetStore();

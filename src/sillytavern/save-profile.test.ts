@@ -6,15 +6,7 @@
  * addAchievement / addNews / markNewsRead
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type {
-  SaveProfile,
-  FPTransaction,
-  FateContract,
-  Achievement,
-  NewsItem,
-  Quest,
-  MapMarker,
-} from './types';
+import type { SaveProfile, FateContract, Achievement, NewsItem, MapMarker } from './types';
 
 // ---- Mocks ----
 const mockGetSaveProfile = vi.fn();
@@ -804,14 +796,7 @@ describe('chained operations', () => {
 // Quest 测试 (Phase 7e)
 // ═══════════════════════════════════════════════════════════
 
-import {
-  getQuests,
-  getQuest,
-  setQuest,
-  removeQuest,
-  getActiveQuests,
-  getSortedQuests,
-} from './save-profile';
+import { getQuests, setQuest, removeQuest, getActiveQuests, getSortedQuests } from './save-profile';
 
 describe('Quest', () => {
   beforeEach(() => {

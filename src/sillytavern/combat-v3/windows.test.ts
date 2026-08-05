@@ -13,7 +13,6 @@ import { describe, it, expect } from 'vitest';
 import { evaluateWindow, makeWindowRuntimeCtx } from './windows';
 import { buildIndex } from './automata/index-active';
 import type { CombatState, CompiledAutomaton, WindowKey } from './types';
-import { EMPTY_CHANGES } from './types';
 
 function mkAuto(id: string, partial: Partial<CompiledAutomaton> = {}): CompiledAutomaton {
   return {

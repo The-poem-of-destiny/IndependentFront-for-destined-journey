@@ -17,7 +17,6 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type {
   EffectDefinition,
   EffectResult,
-  StatePatch,
   VarsPatch,
   StatusEffectPayload,
   CharacterUpdatePayload,
@@ -104,10 +103,6 @@ describe('EffectRuntime', () => {
     });
 
     it('should initialise variables from config', () => {
-      const rt = new EffectRuntime({
-        saveId: 'save-1',
-        variables: { gold: 100, hp: 42 },
-      });
       // We'll verify indirectly via condition evaluation
       const eff = makeEffect({
         type: 'vars_patch',
@@ -548,9 +543,6 @@ describe('EffectRuntime', () => {
     it('should execute effects in ascending priority order (lower priority first)', async () => {
       const rt = makeRuntime({ variables: { counter: 0 } });
 
-      // Create effects at different priorities that modify a variable.
-      // We can observe the execution order by checking which patch comes first.
-      const executionOrder: number[] = [];
       // We'll use conditions to track order, or manually inspect results.
       // Better: create effects with merge payload and observe the order of patches.
 

@@ -24,13 +24,11 @@ import type {
   CraftProductionBonus,
   CraftCheckBreakdown,
   CraftSettlementBreakdown,
-  TierConfig,
 } from './types';
 import {
   CRAFT_DC_BASE,
   CRAFT_PRODUCTION_BONUSES,
   CRAFT_QUALITY_EXP,
-  QUALITY_RANK,
   CRAFT_RATING_VALUE_RANGE,
 } from './types';
 import { getTierConfig } from './tier-constants';
@@ -472,7 +470,12 @@ export function buildSettlementBreakdown(params: {
   const fpReward = calcFPReward(stage, outputQuality, rating);
 
   // 材料节省
-  const materialSave = checkMaterialSave(outputQuality, d20MaterialSave);
+  // 🔴 **算出来了却没进返回值** —— 下面的返回对象里根本没有 materialSave 这一项，
+  //    于是「材料节省」这个机制整条是死的：骰值 `d20MaterialSave` 照收，结果照丢。
+  //    2026-08-05 收紧 lint 时由 `no-unused-vars` 逮到（此前它是 warning，CI 放行）。
+  //    没有就地补进返回值，是因为那要同时改 `CraftDCResult` 类型与所有下游消费方，
+  //    属于功能改动而不是 lint 清理 —— 留给单独一次提交，别顺手塞进来。
+  const _materialSave = checkMaterialSave(outputQuality, d20MaterialSave);
 
   // 品质升级
   const qualityUpgrade = checkQualityUpgrade(targetQuality, d20QualityUpgrade);

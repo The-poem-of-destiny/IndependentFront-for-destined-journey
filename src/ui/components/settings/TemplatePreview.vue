@@ -25,6 +25,8 @@ const props = withDefaults(
   }>(),
   {
     showLabels: true,
+    // 无 agentId 时按「不限 Agent」渲染占位符；显式写出来满足 vue/require-default-prop
+    agentId: undefined,
   },
 );
 

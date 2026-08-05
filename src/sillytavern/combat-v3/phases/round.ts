@@ -31,7 +31,6 @@ import type {
 import { runWindow, makeWindowRuntimeCtx } from '../windows';
 import { updateIndex } from '../automata/index-active';
 import type { PhaseOutcome } from './outcome';
-import { emptyChanges } from './outcome';
 
 /**
  * RoundOpen：结算增益 tick（M-1）。

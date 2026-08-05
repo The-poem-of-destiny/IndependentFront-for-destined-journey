@@ -19,9 +19,6 @@ import type { CombatState } from '../types';
 import { mkBundle, mkAttack, mkPass } from '../test-utils';
 
 /** 便捷 helper：从 bundle 建初始 state */
-function s0(bundle = mkBundle()): CombatState {
-  return createCombatState(bundle);
-}
 
 describe('A1-1：行动槽强制（M-3）', () => {
   it('单位必须消费两槽（攻击+动作）才离开自己的回合；Pass 也消费槽位', () => {

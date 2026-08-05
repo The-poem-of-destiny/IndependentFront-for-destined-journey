@@ -19,9 +19,7 @@ import {
   checkAllMorale,
   AUTO_TRIGGER_TYPES,
   CHECK_TRIGGER_TYPES,
-  type BatchMoraleResult,
 } from './morale-system';
-import type { CombatType, MoraleState } from './types';
 
 // ========== 阈值查询 ==========
 

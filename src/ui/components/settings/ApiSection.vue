@@ -328,7 +328,6 @@ async function deleteApi(id: string) {
             <input
               v-model="apiForm.apiKey"
               class="form-input"
-              @input="onApiKeyInput"
               :type="
                 editingApiId &&
                 apiForm._masked &&
@@ -340,6 +339,7 @@ async function deleteApi(id: string) {
                     : 'password'
               "
               placeholder="API Key（按服务商提供，不一定是 sk- 开头）"
+              @input="onApiKeyInput"
             /><AppButton
               variant="secondary"
               size="sm"

@@ -530,19 +530,19 @@ const activeTemplates = Object.entries(AGENT_TEMPLATES).filter(([id]) => !EXTERN
 
 describe('模板质量 (Phase 10)', () => {
   it('所有完整模板 fixedSystem 应非空', () => {
-    for (const [id, tpl] of activeTemplates) {
+    for (const [_id, tpl] of activeTemplates) {
       expect(tpl.fixedSystem.length).toBeGreaterThan(0);
     }
   });
 
   it('所有完整模板 fixedExamples 应非空', () => {
-    for (const [id, tpl] of activeTemplates) {
+    for (const [_id, tpl] of activeTemplates) {
       expect(tpl.fixedExamples.length).toBeGreaterThan(0);
     }
   });
 
   it('不应有完全空的 fixedSystem', () => {
-    for (const [id, tpl] of activeTemplates) {
+    for (const [_id, tpl] of activeTemplates) {
       expect(tpl.fixedSystem.trim().length).toBeGreaterThan(0);
     }
   });

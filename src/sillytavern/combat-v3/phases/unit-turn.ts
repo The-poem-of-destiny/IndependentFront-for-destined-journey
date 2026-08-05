@@ -18,10 +18,9 @@
 
 import { draw } from '../dice-tape';
 import { checkMorale, getMoraleThreshold } from '../../morale-system';
-import { toParticipant } from './initiative';
 import { runWindow, makeWindowRuntimeCtx } from '../windows';
 import { applyIntents } from '../intents';
-import type { CombatCommand, CombatDefinitionBundle, CombatState, DomainEvent } from '../types';
+import type { CombatCommand, CombatDefinitionBundle, CombatState } from '../types';
 import { emptyChanges, type PhaseOutcome } from './outcome';
 
 /** 当前正在行动的单位 id（initiativeOrder[currentTurnIndex]），不存在返回 null */

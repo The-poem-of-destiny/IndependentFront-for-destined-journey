@@ -312,7 +312,7 @@ export const DEFAULT_STORY_CONTEXT_BLOCK = [
  */
 export function preprocessPresetForPreview(
   preset: AgentPreset,
-  opts?: { characterName?: string; userName?: string },
+  _opts?: { characterName?: string; userName?: string },
 ): string {
   const prompts = (preset as any).settings?.prompts;
   if (!prompts || !Array.isArray(prompts)) return '';

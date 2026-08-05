@@ -3,7 +3,7 @@
  *
  * Layer 2 纯函数: 掷骰计算、判定、格式化。覆盖所有导出函数。
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   rollDie,
   rollDice,

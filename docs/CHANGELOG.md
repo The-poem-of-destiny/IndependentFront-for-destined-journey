@@ -9,6 +9,45 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 测试体系加固 —— 编码闸门 / knip 棘轮 / 属性测试 / lint 收紧 ｜ ✅ 完成（2026-08-05）
+
+起因是一次盘点：**6564 个用例没拦住 PR #22 评审的任何一条缺陷**——问题不是量不够，是**种类不全**
+（当时零覆盖率 / 零 E2E / 零属性测试 / 零死代码检测）。本轮补四种**新种类**的闸门，全部进 CI。
+
+**① 编码不变式闸门**（`tests/encoding-invariants.test.ts`，43 用例）——把 AGENTS.md 那条「改中文文本
+之后必须验编码」的**手工命令**变成断言。三条判据：U+FFFD=0 / 控制字符=0 / JSON 可解析，且**raw 与
+parsed 两遍都扫**（合法转义的退格源码干净、`JSON.parse` 也不报错，但落进字符串值里仍是真退格）。
+扫 `data/` + `src|server|tests|scripts` 源码；**不扫** `reference/`（上游语料自带坏字，实测 workshop
+正则快照 8 个 U+FFFD、某第三方角色卡 21 个 0x1C）。带「确实扫到了文件」哨兵，防路径写错导致的假绿。
+**上线当天就逮到一条真的**：`ejs-backend-parity.test.ts` 里两个**真 0x08 退格**——作者想写正则单词边界，
+落地成了退格字节，于是 `Intl` 那条豁免分支**永远匹配不到任何东西**，而测试一直是绿的。
+
+**② knip 死代码棘轮**（`knip.json` + `scripts/knip-ratchet.mjs` + `knip-baseline.json`）——首轮 133 条，
+其中绝大多数**不是垃圾**（捏人页 4 个 Vue 组件是 Phase 7d 在途件；图像生成 v1 才落地两天，
+`NaiParameters` 这类是刚设计的接口面；抽样验证「未引用导出」多数在本文件内有用，真正修法是去掉
+`export` 而非删代码）。故不做一次性大扫除，改**按身份棘轮**：只许变少不许变多，出现基线外的条目就
+退出码 1。用身份而非计数，是为了让「修好一条又新增一条」的净零变化也能被抓住。顺手删掉真死的
+`vue-router` 依赖（全仓零 import，删后 typecheck/vue-tsc/build 三关照过）。
+
+**③ 属性测试**（fast-check，4 个 `*.property.test.ts`，33 用例）——覆盖 `crop-rects`（此前**零测试**）
+/ `image-quota` / `image-anlas` / `image-prompt`。**做过变异验证**：6 个人工注入的缺陷全部被杀，
+其中一个正是 2026-08-04 真机那天的 bug（anlas 默认档位从 `unset` 变回 `opus` → 对按点数付费的账户说不要钱）。
+
+**④ ESLint 从提示板改成闸门**——此前 `npm run lint` 有 **193 条 warning 却 exit 0**，且
+`no-empty: { allowEmptyCatch: true }` **明文允许**「异常被 catch 咽掉」这一 PR #22 的缺陷类，
+更没开类型感知规则（`no-floating-promises` 这类不带类型信息根本无法工作）。现在：`--max-warnings 0`
+
+- 类型感知三规则 + 禁空 catch + `unused-imports` 自动删未引用导入。**逮到 4 处真的 floating promise**，
+  其中 `agent-orchestrator.callAgentStreaming` 那处：`chatStream` 拒绝时既没人 resolve 外层 promise
+  （整条管线永久挂起）又多一个未处理拒绝，已补 `.catch`。清掉 186 条 unused-vars 基线（约 122 条是
+  未引用导入自动删；其余逐条判定：形参/解构/循环变量改 `_` 前缀，确证死掉的声明直接删）。
+
+**顺带发现的两个真问题**（未就地修，属功能改动不是 lint 清理）：`craft-dc.ts` 的 `materialSave`
+算出来了**却没进返回值**——「材料节省」整条机制是死的，骰值照收结果照丢，已在原地留注释；
+`placeholder-registry.formatCharacters` 是**从未接进注册表**的死函数（已删）。
+
+**验证**：256 文件 / 6648 passed + 4 skipped 全绿；typecheck ×3、lint（0 warning）、knip 棘轮、build 全过。
+
 ### skillPower 链路修复 —— 主动攻击技能威力接入 v3 结算管线 ｜ ✅ 完成（2026-08-04）
 
 排查 debug 真机样本发现：item_gen 生成的主动攻击技能（火球术威力 450）**没有进 v3 伤害结算**——

@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { CraftMaterial, QualityLevel, CraftIndustry } from './types';
+import type { CraftMaterial, QualityLevel } from './types';
 import {
   inheritQuality,
   checkQualityRequirement,

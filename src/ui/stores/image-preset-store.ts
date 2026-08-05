@@ -34,7 +34,8 @@ import { mutationFail, mutationOk, type MutationResult } from './store-result';
  * 分隔符是 `:`；名字里含 `:` 不会造成歧义，因为 `kind` 只有两个字面值且都不含 `:`，
  * 从左边第一个 `:` 切开即可还原（真的需要还原时；平时两段都是分别传进来的）。
  */
-export function imagePresetKey(kind: ImagePresetKind, name: string): string {
+// 本文件内部使用，不导出：外部若要拼主键，应改为调用带校验的 store 方法（避免绕过唯一拼法）
+function imagePresetKey(kind: ImagePresetKind, name: string): string {
   return `${kind}:${name}`;
 }
 

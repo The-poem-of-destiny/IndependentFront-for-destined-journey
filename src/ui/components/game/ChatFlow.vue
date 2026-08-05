@@ -312,6 +312,8 @@ onUnmounted(() => {
         <div v-if="msg.role === 'user'" class="bubble-row bubble-row-player">
           <div class="bubble bubble-player">
             <span class="bubble-prefix">你:</span>
+            <!-- 内容先过 escapeHtml()，再只把换行还原成 <br>。别把 escapeHtml 摘掉 -->
+            <!-- eslint-disable-next-line vue/no-v-html -->
             <span class="bubble-text" v-html="escapeHtml(msg.content).replace(/\n/g, '<br>')" />
             <span v-if="msg.timestamp" class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
           </div>

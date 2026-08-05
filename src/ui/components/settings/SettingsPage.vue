@@ -11,18 +11,12 @@
  * 自己的模板与子组件的**根节点**，够不到根节点里面，所以那份共用规则由各分区
  * （含本页）各自 `<style scoped src>` 引入 —— 一份源码，各自作用域。
  */
-import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useUIStore } from '../../stores/ui-store';
-import { useSettingsStore, type PresetItem } from '../../stores/settings-store';
+import { useSettingsStore } from '../../stores/settings-store';
 import { getAgentSettings } from '../../stores/agent-settings';
 import { useWorldBookStore } from '../../stores/worldbook-store';
 import AppButton from '../shared/AppButton.vue';
-import AppCard from '../shared/AppCard.vue';
-import AppModal from '../shared/AppModal.vue';
-import TemplatePreview from './TemplatePreview.vue';
-import { getAgentTemplate } from '@engine/agent-templates';
-import { getDefaultTemplate } from '@engine/placeholder-registry';
-import { preprocessPresetForPreview } from '@engine/preset-loader';
 import AgentSection from './agent/AgentSection.vue';
 import { AGENT_LIST } from './agent/agent-list';
 import ApiSection from './ApiSection.vue';

@@ -16,16 +16,12 @@
  * - NARRATIVE 使用 defaultHistoryLayers / defaultHistorySlice（从 agent-templates 导入）
  * - CHARACTER_STATE 使用 buildZoneContext + filterZoneContent（从 context-visibility 导入）
  * - LORE_BOOK 使用 worldbook-loader 的 getEntriesForAgent / filterActiveEntries / renderWorldBookEntries
- * - formatHistory / formatCharacters / formatMemories / formatPlotEvents 是本模块私有实现（Q-05 起不再是镜像）
+ * - formatHistory / formatMemories / formatPlotEvents 是本模块私有实现（Q-05 起不再是镜像）
+ *   （曾经并列的 formatCharacters 是**从未接进注册表**的死函数，2026-08-05 收紧 lint 时删除；
+ *   角色状态实际由 CHARACTER_STATE / INVENTORY / SKILL_STATE 各自的内联实现产出）
  */
 
-import type {
-  AgentContext,
-  AgentConfig,
-  WorldBook,
-  CharacterState,
-  PlaceholderResolver,
-} from './types';
+import type { AgentContext, AgentConfig, WorldBook, PlaceholderResolver } from './types';
 import {
   getEntriesForAgent,
   filterActiveEntries,
@@ -33,7 +29,7 @@ import {
 } from './worldbook-loader';
 import { parseSetvars, resolveGetvars, resolveRandoms } from './preset-loader';
 import { buildZoneContext, filterZoneContent, getAgentZoneVisibility } from './context-visibility';
-import { defaultHistoryLayers, defaultHistorySlice } from './agent-templates';
+import { defaultHistoryLayers } from './agent-templates';
 
 // ═══════════════════════════════════════════════════════════
 // Module-Level Globals
@@ -65,17 +61,6 @@ function bookNameOfUid(uid: number): string {
     if (book.entries?.some((e) => e.uid === uid)) return book.name || book.id;
   }
   return '?';
-}
-
-/** 角色状态一行摘要（Q-05 起是**唯一**实现——agent-templates 那份随死闭包一起删了） */
-function formatCharacters(ctx: AgentContext): string {
-  if (!ctx.characters?.length) return '';
-  return ctx.characters
-    .map(
-      (c) =>
-        `[${c.type}:${c.name}] Lv.${c.level} ${c.tierName} | HP:${c.hp}/${c.maxHp} MP:${c.mp}/${c.maxMp} | 位置:${c.location} | ${c.currentAction || '待机中'}`,
-    )
-    .join('\n');
 }
 
 /** 记忆条目格式化（Q-05 起是唯一实现） */

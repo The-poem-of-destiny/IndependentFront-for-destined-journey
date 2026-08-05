@@ -39,17 +39,14 @@ import type {
   CombatCommand,
   CombatDefinitionBundle,
   CombatParticipant,
-  DiceEpoch,
   DiceTapeState,
   DomainEvent,
   EffectAutomaton,
   FixtureCommand,
-  HarnessInputs,
   Milestone,
   MilestoneKind,
   ProposedAdjudication,
   RequiredInput,
-  SummonedUnitDefinition,
   CombatFixture,
   CombatTransition,
 } from './types';
@@ -102,7 +99,6 @@ export function fixtureBundle(fixture: CombatFixture): CombatDefinitionBundle {
 /** FixtureUnit → CombatParticipant 适配（英文 attrs 键 → 五维结构；side 缺省 enemy） */
 function toParticipant(u: CombatFixture['bundle']['units'][number]): CombatParticipant {
   const a = (u.attributes ?? {}) as Record<string, number>;
-  const side = u.side ?? 'enemy';
   return {
     characterId: u.name,
     name: u.name,
@@ -247,8 +243,6 @@ function replayWithEffects(
 
 /** 每次 dispatch 的微步骤 / 总步骤熔断上限 */
 const MAX_TOTAL_STEPS = 500;
-/** BeginOutput 续杯上限（超过认为死循环） */
-const MAX_EPOCHS = 200;
 
 /**
  * replay 主驱动：喂首个 epoch → dispatch 循环 → RequiredInput 自动应答 → 终局结算。
@@ -334,7 +328,6 @@ function replayLoop(
     void fixture;
   }
 
-  const final = session.snapshot();
   const requestedEpochs = harness.epochIdx;
   return {
     events,

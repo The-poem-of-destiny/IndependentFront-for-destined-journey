@@ -50,7 +50,6 @@ import {
 } from '../../combat-item-validator';
 import type { Modifier } from '../../effect-types';
 import { parseEffectDeclaration } from '../../effect-parser';
-import type { ParsedEffect } from '../../types';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 常量
@@ -67,9 +66,6 @@ const VALID_RULE_KEYS: ReadonlySet<string> = V3_RULE_KEYS;
 
 /** 八大类合法 intent kind（架构 §六 6.1 / plan §5.5 #3） */
 const VALID_INTENT_KINDS: ReadonlySet<string> = V3_INTENT_KINDS;
-
-/** 五维英文别名（校验 #8：非检定类不得直接改五维） */
-const FIVE_DIM: ReadonlySet<string> = new Set(['str', 'dex', 'con', 'int', 'spi']);
 
 /** 编译产物 */
 export interface CompiledProgram {
@@ -330,12 +326,6 @@ function compileModifierPushHandler(
 // ──────────────────────────────────────────────────────────────────────────────
 // ③ DSL automaton 编译期校验（9 条，plan §5.5）
 // ──────────────────────────────────────────────────────────────────────────────
-
-/** DSL automaton 编译结果（含累积错误） */
-interface DslResult {
-  automaton: CompiledAutomaton;
-  errors: CompileError[];
-}
 
 /**
  * 编译并校验一个 AI automaton JSON。

@@ -2,7 +2,8 @@
 import type { ItemGenSystemEvent } from '@engine/types';
 import { qualityVar } from '../../../lib/quality-colors';
 
-const props = defineProps<{ event: ItemGenSystemEvent }>();
+// 模板里直接用 `event`，无需在 script 里持有引用 —— defineProps 只是声明
+defineProps<{ event: ItemGenSystemEvent }>();
 const emit = defineEmits<{ collapse: [] }>();
 
 function typeIcon(itemType: string): string {

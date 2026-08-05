@@ -7,8 +7,8 @@
  * 3. 定期触发记忆压缩（旧记忆 → 单条摘要）
  */
 
-import type { MemoryRecord, ApiEndpoint } from './types';
-import { getMemories, getRecentMemories, saveMemory, deleteMemory } from './database';
+import type { MemoryRecord } from './types';
+import { getMemories, saveMemory, deleteMemory } from './database';
 
 // ========== Embedding ==========
 

@@ -66,18 +66,6 @@ const selEquipment = computed(() =>
   ((selected.value as any)?.inventory || []).filter((i: any) => i.equippedSlot),
 );
 const selSkills = computed(() => (selected.value as any)?.skills || []);
-const selEffects = computed(() => {
-  const tab = detailTab.value;
-  if (tab === 'equipment') {
-    const item = selEquipment.value[0]; // show first item's effects
-    return item?.effects as Record<string, string> | undefined;
-  }
-  if (tab === 'skills') {
-    const skill = selSkills.value[0];
-    return skill?.effects as Record<string, string> | undefined;
-  }
-  return undefined;
-});
 const selScripts = computed(() => {
   const tab = detailTab.value;
   if (tab === 'equipment')

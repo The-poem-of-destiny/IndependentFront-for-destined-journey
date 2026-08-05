@@ -3,7 +3,7 @@
  *
  * Uses fake-indexeddb (injected via src/test-setup.ts).
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   getDatabase,
   initializeDatabase,
@@ -33,7 +33,6 @@ import {
   getSnapshot,
   getLatestSnapshot,
   saveSnapshot,
-  deleteSnapshot,
   trimSnapshots,
   // Saves
   getSaves,
@@ -90,7 +89,6 @@ import type {
   Snapshot,
   SaveSlot,
   ApiEndpoint,
-  AppSettings,
   AudioTrack,
   AudioPlaylist,
   AudioHandleRecord,

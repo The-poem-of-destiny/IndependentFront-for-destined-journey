@@ -17,7 +17,6 @@ import {
   DEFAULT_BACKGROUNDS,
   DEFAULT_DESTINY_CORES,
 } from '@engine/start-catalog';
-import { TIER_CONFIGS } from '@engine/tier-constants';
 
 // AgentClient mock — 大纲生成链测试用（可控响应队列）
 const { chatMock } = vi.hoisted(() => ({ chatMock: vi.fn() }));
@@ -61,12 +60,6 @@ function makeStore() {
 }
 
 /** 快速设置一个基础角色 */
-function setupBasicChar(store: ReturnType<typeof useCreateStore>) {
-  store.name = '测试角色';
-  store.race = '人类';
-  store.identity = '非贵族平民';
-  store.level = 1;
-}
 
 // ===== 难度系统 =====
 
@@ -407,8 +400,6 @@ describe('装备选择', () => {
   });
 
   const sword = DEFAULT_EQUIPMENT_POOL.find((e) => e.type === '武器')!;
-  const armor = DEFAULT_EQUIPMENT_POOL.find((e) => e.type === '防具')!;
-  const accessory = DEFAULT_EQUIPMENT_POOL.find((e) => e.type === '饰品')!;
 
   it('添加武器应成功', () => {
     if (sword) {
@@ -1423,13 +1414,17 @@ describe('localStorage 草稿 save/restore/clear', () => {
     // Ensure localStorage is clean
     try {
       localStorage.removeItem(DRAFT_KEY);
-    } catch {}
+    } catch {
+      // 测试环境未必有 localStorage；清不掉就算了，下面的用例自己会覆写
+    }
   });
 
   afterEach(() => {
     try {
       localStorage.removeItem(DRAFT_KEY);
-    } catch {}
+    } catch {
+      // 同上：收尾清理是尽力而为
+    }
   });
 
   it('autoSaveDraft 写入 localStorage 并可被 tryRestoreDraft 恢复', () => {

@@ -18,7 +18,7 @@
  * contract test 逐条断言 ok 为 true（value 在 tolerance 内）。
  */
 
-import type { DomainEvent, Milestone, CombatState, CombatView } from '../types';
+import type { DomainEvent, Milestone, CombatView } from '../types';
 
 /** 断言结果 */
 export interface MilestoneCheck {

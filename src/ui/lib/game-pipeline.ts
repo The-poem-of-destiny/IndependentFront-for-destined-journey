@@ -23,7 +23,6 @@ import type {
   WorldBook,
   CraftGenRequestMarker,
   CharGenRequestMarker,
-  ItemGenRequestMarker,
   PlayAudioMarker,
   MemoryRecord,
   WorkshopProject,

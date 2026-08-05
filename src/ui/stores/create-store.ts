@@ -575,15 +575,21 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   // 三类并行加载（Node 测试环境 fetch 失败则保持空 {}，筛选相关测试见空跳过）
-  Promise.all([
+  // `void` + `.catch` 是刻意的：这是发射后不管的预热，失败就保持空目录（上面
+  // loadGroupedCatalog 已经自己吞过一层），但**不能**让拒绝漏成未处理拒绝。
+  void Promise.all([
     loadGroupedCatalog('equipments', 'equipment'),
     loadGroupedCatalog('items', 'item'),
     loadGroupedCatalog('skills', 'skill'),
-  ]).then(([eq, it, sk]) => {
-    equipmentGroups.value = eq;
-    itemGroups.value = it;
-    skillGroups.value = sk;
-  });
+  ])
+    .then(([eq, it, sk]) => {
+      equipmentGroups.value = eq;
+      itemGroups.value = it;
+      skillGroups.value = sk;
+    })
+    .catch((err: unknown) => {
+      console.error('[create-store] 目录预热失败，保持空目录:', err);
+    });
 
   /** 当前大分类对应的分组数据 */
   const activeGroups = computed<Record<string, CatalogItem[]>>(() => {

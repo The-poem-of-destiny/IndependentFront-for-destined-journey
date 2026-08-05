@@ -13,7 +13,6 @@ import { describe, it, expect } from 'vitest';
 import { executeToolCall } from './agent-tools';
 import { craftRequestFingerprint } from './craft-request';
 import type { ToolExecutionContext, CharacterState } from './types';
-import { EventBus } from './game-event';
 import { deleteCharacter, getCharacters, saveCharacter } from './database';
 
 // ═══════════════════════════════════════════════════════════

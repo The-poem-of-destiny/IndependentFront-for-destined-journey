@@ -42,13 +42,10 @@ import { divinitySuppression } from '../rule-keys';
 import { MAX_REFLECTION_DEPTH } from '../types';
 import type {
   CombatCommand,
-  CombatDefinitionBundle,
   CombatState,
-  DomainEvent,
   DamageRecomputeCtx,
   EffectIntent,
   IntentionLevel,
-  WindowCtx,
 } from '../types';
 import { emptyChanges, type PhaseOutcome } from './outcome';
 

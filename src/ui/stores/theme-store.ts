@@ -92,14 +92,18 @@ export const useThemeStore = defineStore('theme', () => {
     document.documentElement.style.fontSize = size + 'px';
     try {
       localStorage.setItem('fated-poem-font-size', size);
-    } catch {}
+    } catch {
+      // 隐私模式 / 配额满：字号记不住而已，本次设置已经生效，不值得打断用户
+    }
   }
 
   function initFontSize() {
     try {
       const saved = localStorage.getItem('fated-poem-font-size');
       if (saved) setFontSize(saved);
-    } catch {}
+    } catch {
+      // 读不到就用默认字号，没有可降级的余地也没有可报的错
+    }
   }
 
   const currentTheme = computed(() => THEME_LIST.find((t) => t.id === current.value));

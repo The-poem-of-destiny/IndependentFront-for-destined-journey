@@ -24,7 +24,9 @@ function loadWorldBooks(ids: string[]): any[] {
         } else if (data && typeof data === 'object') {
           books.push(data.id ? data : { id, name: id, entries: data.entries || [] });
         }
-      } catch {}
+      } catch {
+        // 单本世界书读坏 / 格式不认：跳过它，别让整个测试存档构建失败
+      }
     }
   }
   return books;
@@ -578,7 +580,9 @@ function loadStoryPresets(): any[] {
         return [p];
       }
     }
-  } catch {}
+  } catch {
+    // 读不到 agent-config / 里面没有 story 预设：返回空表，调用方按「无预设」处理
+  }
   return [];
 }
 

@@ -17,7 +17,6 @@ import type {
   OrchestratorRun,
   AgentConfig,
   ApiEndpoint,
-  AgentDefinition,
   CraftRequestMarker,
   CombatTriggerMarker,
   CombatSummaryResult,
@@ -30,13 +29,12 @@ import type {
 } from './types';
 import type { SceneImageMarker } from './types-image';
 import { AgentClient } from './agent-client';
-import type { ChatRequest, StreamCallbacks } from './agent-client';
-import { buildAgentMessagesAsync, getAgentTemplate } from './agent-templates';
+import type { ChatRequest } from './agent-client';
+import { buildAgentMessagesAsync } from './agent-templates';
 import { scanMarkers } from './marker-protocol';
 import { recallMemories } from './memory-store';
 import { buildZoneContext } from './context-visibility';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
-import { normalizeSlot } from './field-enums';
 import { rescueStoryOutput } from './story-rescue';
 // Q-19：AI JSON → StatePatch 的纯映射（本文件此前把它和 stage 归类、抠块、落库、
 // marker 回调编排一起塞在一个 560 行私有方法里）
@@ -503,51 +501,68 @@ export class AgentOrchestrator {
     const callbacks = config.streamCallbacks!;
 
     return new Promise((resolve) => {
-      client.chatStream(
-        request,
-        {
-          onChunk: (text, isComplete) => {
-            callbacks.onChunk(text, isComplete);
+      // 🔴 这个 promise 只由下面的 onComplete / onError 兑现。`chatStream` 自己把每一条
+      // 抛出都收进 `settleError` → `callbacks.onError`，所以正常路径上它不会拒绝 ——
+      // 但 `onError` 回调**自己**抛出时（或 finally 里出事），拒绝就会漏出来：
+      // 那时既没人 resolve 外层 promise（整条管线永久挂起），又多一个未处理拒绝。
+      // 这条 catch 是那种情况下唯一的出口。
+      void client
+        .chatStream(
+          request,
+          {
+            onChunk: (text, isComplete) => {
+              callbacks.onChunk(text, isComplete);
+            },
+            onToolCall: (toolCall) => {
+              callbacks.onToolCall?.(toolCall);
+            },
+            onComplete: (streamResult) => {
+              try {
+                callbacks.onComplete(streamResult);
+              } finally {
+                resolve({
+                  agentId: config.agentId,
+                  output: streamResult.fullText,
+                  rawResponse: streamResult.fullText,
+                  reasoning: streamResult.reasoning,
+                  tokensUsed: streamResult.tokensUsed,
+                  cacheHit: streamResult.cacheHit,
+                  cacheHitTokens: streamResult.cacheHitTokens,
+                  cacheMissTokens: streamResult.cacheMissTokens,
+                  completionTokens: streamResult.completionTokens,
+                  duration: streamResult.duration,
+                });
+              }
+            },
+            onError: (error) => {
+              try {
+                callbacks.onError(error);
+              } finally {
+                resolve({
+                  agentId: config.agentId,
+                  output: null,
+                  rawResponse: '',
+                  tokensUsed: 0,
+                  cacheHit: false,
+                  duration: Date.now() - startTime,
+                  error,
+                });
+              }
+            },
           },
-          onToolCall: (toolCall) => {
-            callbacks.onToolCall?.(toolCall);
-          },
-          onComplete: (streamResult) => {
-            try {
-              callbacks.onComplete(streamResult);
-            } finally {
-              resolve({
-                agentId: config.agentId,
-                output: streamResult.fullText,
-                rawResponse: streamResult.fullText,
-                reasoning: streamResult.reasoning,
-                tokensUsed: streamResult.tokensUsed,
-                cacheHit: streamResult.cacheHit,
-                cacheHitTokens: streamResult.cacheHitTokens,
-                cacheMissTokens: streamResult.cacheMissTokens,
-                completionTokens: streamResult.completionTokens,
-                duration: streamResult.duration,
-              });
-            }
-          },
-          onError: (error) => {
-            try {
-              callbacks.onError(error);
-            } finally {
-              resolve({
-                agentId: config.agentId,
-                output: null,
-                rawResponse: '',
-                tokensUsed: 0,
-                cacheHit: false,
-                duration: Date.now() - startTime,
-                error,
-              });
-            }
-          },
-        },
-        config.abortSignal,
-      );
+          config.abortSignal,
+        )
+        .catch((error: unknown) => {
+          resolve({
+            agentId: config.agentId,
+            output: null,
+            rawResponse: '',
+            tokensUsed: 0,
+            cacheHit: false,
+            duration: Date.now() - startTime,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
     });
   }
 
@@ -1098,7 +1113,14 @@ export class AgentOrchestrator {
 
   // ========== Internal: Build Run ==========
 
-  private buildRun(startTime: number, errors: string[] = []): OrchestratorRun {
+  // 🔴 **收进来了却没进返回值** —— `_errors` 是 `run()` 那边 `validatePipeline()` 的真实结果
+  //    （见上方 `return this.buildRun(startTime, errors)`），但 `OrchestratorRun` 类型里
+  //    根本没有 `errors` 这一项，于是管线校验失败只剩一个 `status: 'failed'`，**失败原因整条丢掉**。
+  //    与 `craft-dc.ts` 的 `_materialSave` 是同一种形状：值算出来了、调用方也传进来了，落地时蒸发。
+  //    2026-08-05 收紧 lint 时由 `no-unused-vars` 逮到（此前它是 warning，CI 放行）。
+  //    没有就地补进返回值，是因为那要改 `OrchestratorRun` 类型与所有下游消费方，
+  //    属于功能改动而不是 lint 清理 —— 留给单独一次提交，别顺手塞进来。
+  private buildRun(startTime: number, _errors: string[] = []): OrchestratorRun {
     return {
       id: this.runId,
       pipeline: this.pipeline,

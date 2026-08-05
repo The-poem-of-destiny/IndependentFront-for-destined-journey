@@ -469,7 +469,7 @@ describe('真实语料片段两后端一致', () => {
         // §3.14 C 档：**已登记且刻意不修**的跨后端差异。QuickJS 无完整 ICU，
         // `localeCompare('zh-CN')` 的排序口径与 V8 不同 → 排序类条目输出必然不同。
         // 修不了（除非自带 CJK 排序表），故不假装一致——列出来，并由预检提醒创作者改用 fmt.compareName。
-        if (/localeCompare|toLocaleString|Intl|\(\?</.test(f.code)) {
+        if (/localeCompare|toLocaleString|\bIntl\b|\(\?</.test(f.code)) {
           tolerated.push(`${f.from}(${f.feature})`);
           continue;
         }

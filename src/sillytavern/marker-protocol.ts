@@ -354,16 +354,6 @@ function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** 提取标签体内容 (去掉开闭标签) */
-function extractBody(fullMatch: string, tagName: string): string {
-  const openTag = `<${tagName}`;
-  const closeTag = `</${tagName}>`;
-  const openEnd = fullMatch.indexOf('>');
-  if (openEnd === -1) return '';
-  const body = fullMatch.slice(openEnd + 1, fullMatch.length - closeTag.length);
-  return body;
-}
-
 // ========== Public API ==========
 
 /**

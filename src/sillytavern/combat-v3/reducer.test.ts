@@ -9,7 +9,7 @@
  *   §3.9  微步骤熔断抛 KernelStuckError
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { reduce } from './reducer';
 import { createCombatState, applyOutcome } from './state';
 import { currentUnitId } from './phases/unit-turn';
@@ -121,8 +121,6 @@ describe('原子性（A1-4）', () => {
 
 describe('熔断（§3.9）', () => {
   it('reducer 内部 step 超限抛 KernelStuckError（构造非终止 phase 交互）', () => {
-    // 单单位且不能终结时会无限自动推进 → 熔断。构造一个「无敌人」战斗
-    const bundle = mkBundle();
     // 用只有 player 方的 bundle（无 enemy）→ hp_zero 永远不触发 → 每轮循环
     const oneSide = mkBundle({ participants: [mkBundle().participants[0]] });
     const s = createCombatState(oneSide);

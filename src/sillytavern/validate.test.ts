@@ -26,14 +26,7 @@ import {
   $validate,
 } from './validate';
 import { createDefaultCharacterState } from './types';
-import type {
-  CharacterState,
-  Skill,
-  InventoryItem,
-  StatusEffect,
-  StatePatch,
-  VarsPatch,
-} from './types';
+import type { Skill, InventoryItem, StatusEffect, StatePatch, VarsPatch } from './types';
 
 // ========== 常量 ==========
 

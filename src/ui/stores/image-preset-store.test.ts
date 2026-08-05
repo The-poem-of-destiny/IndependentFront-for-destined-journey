@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { clearAllData, getDatabase, getImagePreset } from '@engine/database';
 import { EMPTY_APPEARANCE } from '@engine/character-appearance';
-import { imagePresetKey, useImagePresetStore } from './image-preset-store';
+import { useImagePresetStore } from './image-preset-store';
 
 beforeEach(() => {
   setActivePinia(createPinia());
