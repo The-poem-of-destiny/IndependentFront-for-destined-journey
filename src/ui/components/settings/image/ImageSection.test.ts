@@ -203,17 +203,17 @@ describe('ImagePresetList —— 视觉预设 CRUD', () => {
     expect(table.size).toBe(0);
   });
 
-  it('地点页签与角色页签各看各的（同一张表，两个筛选）', async () => {
+  it('🪦 D59：地点页签已删，只剩「角色」一个页签', async () => {
     const store = useImagePresetStore();
     await store.upsert({ kind: 'character', name: '苏婉' });
-    await store.upsert({ kind: 'location', name: '黄昏酒馆' });
+    await store.upsert({ kind: 'character', name: '黄昏酒馆' });
 
     const w = mount(ImagePresetList);
     await flushPromises();
-    expect(w.findAll('.preset-name').map((n) => n.text())).toEqual(['苏婉']);
-
-    await w.findAll('.tab-item')[1].trigger('click');
-    expect(w.findAll('.preset-name').map((n) => n.text())).toEqual(['黄昏酒馆']);
+    // 一个页签，且列的是全部角色 —— 地点预设废除后没有第二个筛选面
+    expect(w.findAll('.tab-item')).toHaveLength(1);
+    // 排序按 zh-Hans-CN 拼音：黄(h) 在 苏(s) 前
+    expect(w.findAll('.preset-name').map((n) => n.text())).toEqual(['黄昏酒馆', '苏婉']);
   });
 
   it('删除要过一次确认，确认后才真的删', async () => {

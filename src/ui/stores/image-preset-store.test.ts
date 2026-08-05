@@ -20,29 +20,8 @@ afterEach(async () => {
 });
 
 describe('主键（D40）', () => {
-  it('人名与地名撞车时是两条独立记录，互不覆盖', async () => {
-    const store = useImagePresetStore();
-    await store.init();
-
-    await store.upsert({
-      kind: 'character',
-      name: '瓦伦蒂亚',
-      danbooru: { positive: '1girl, blonde', negative: '' },
-    });
-    await store.upsert({
-      kind: 'location',
-      name: '瓦伦蒂亚',
-      danbooru: { positive: 'coastal city, harbor', negative: '' },
-    });
-
-    expect(store.presets).toHaveLength(2);
-    expect(store.find('character', '瓦伦蒂亚')?.dialects.danbooru?.positive).toBe('1girl, blonde');
-    expect(store.find('location', '瓦伦蒂亚')?.dialects.danbooru?.positive).toBe(
-      'coastal city, harbor',
-    );
-    expect(imagePresetKey('character', '瓦伦蒂亚')).toBe('character:瓦伦蒂亚');
-    expect(await getImagePreset('location:瓦伦蒂亚')).toBeDefined();
-  });
+  // 🪦 D59：「人名与地名撞车」那条已删 —— 地点预设废除，主键里只剩 character 一种
+  //    kind，撞车这个问题本身不存在了。主键仍是 `${kind}:${name}`（D56 还要用）。
 
   it('同 kind 同 name 是覆盖，且 createdAt 保留、updatedAt 前进', async () => {
     const store = useImagePresetStore();
@@ -98,15 +77,14 @@ describe('名字原样（铁律 1）', () => {
 });
 
 describe('查询', () => {
-  it('按 kind 分列并按名字排序', async () => {
+  it('按名字排序（D59 后只剩角色一档）', async () => {
     const store = useImagePresetStore();
     await store.init();
-    await store.upsert({ kind: 'location', name: '风铃旅店' });
     await store.upsert({ kind: 'character', name: '苏婉' });
     await store.upsert({ kind: 'character', name: '莱恩' });
 
+    // D59 之后只剩角色一档；排序仍按名字（zh-Hans-CN）
     expect(store.characters.map((p) => p.name)).toEqual(['莱恩', '苏婉']);
-    expect(store.locations.map((p) => p.name)).toEqual(['风铃旅店']);
   });
 
   it('findMany 只回命中的，缺席的既不报错也不占位（D41 的告警归装配层）', async () => {
@@ -220,9 +198,9 @@ describe('删除', () => {
   it('按主键删，投影与库同步', async () => {
     const store = useImagePresetStore();
     await store.init();
-    await store.upsert({ kind: 'location', name: '风铃旅店' });
+    await store.upsert({ kind: 'character', name: '风铃旅店' });
 
-    const res = await store.remove('location:风铃旅店');
+    const res = await store.remove('character:风铃旅店');
     expect(res.ok).toBe(true);
     expect(store.presets).toHaveLength(0);
     expect(await getDatabase().imagePresets.count()).toBe(0);

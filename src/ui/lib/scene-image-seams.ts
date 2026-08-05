@@ -194,7 +194,8 @@ async function sendOne(
     input.scenePrompt,
     input.sceneNegative,
     { characters: record.characters, rating: record.rating },
-    world.location,
+    // 🔴 地点不再进这里（D59）—— 它由侧链写进 `scenePrompt`。`world.location` 仍然有用：
+    //    它是**喂给侧链**的上下文（`ImagePromptRequest.location`），不是查表的键
     presets,
     {
       qualitySuffix: s.imageQualitySuffix,

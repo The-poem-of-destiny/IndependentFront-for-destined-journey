@@ -145,13 +145,12 @@ describe('normalizeTagString —— 标点归一化', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('composePrompt —— 拼接顺序', () => {
-  it('场景 → 地点 → 世界状态 → 构图 → rating → 画质后缀', () => {
+  it('场景 → 世界状态 → 构图 → rating → 画质后缀（地点随 D59 出列）', () => {
     const out = composePrompt(
       'tavern interior, sitting',
       '',
       marker([], 'general'),
-      '破晓旅店',
-      presetMap(preset('location', '破晓旅店', 'wooden walls, candlelight')),
+      presetMap(),
       opts({
         worldTags: 'night, rain',
         compositionTags: 'wide shot',
@@ -160,12 +159,12 @@ describe('composePrompt —— 拼接顺序', () => {
     );
 
     expect(out.base).toBe(
-      'tavern interior, sitting, wooden walls, candlelight, night, rain, wide shot, rating:general, masterpiece',
+      'tavern interior, sitting, night, rain, wide shot, rating:general, masterpiece',
     );
   });
 
   it('🔴 画质后缀在末尾（V3 之后一律追加在末尾，顺序即权重）', () => {
-    const out = composePrompt('scene', '', marker(), undefined, presetMap(), opts());
+    const out = composePrompt('scene', '', marker(), presetMap(), opts());
     expect(out.base.endsWith(DEFAULT_IMAGE_QUALITY_SUFFIX)).toBe(true);
     expect(out.base.startsWith('scene')).toBe(true);
   });
@@ -175,7 +174,6 @@ describe('composePrompt —— 拼接顺序', () => {
       'scene',
       '',
       marker([], 'sensitive'),
-      undefined,
       presetMap(),
       opts({ compositionTags: 'wide shot', qualitySuffix: 'masterpiece' }),
     );
@@ -184,7 +182,7 @@ describe('composePrompt —— 拼接顺序', () => {
   });
 
   it('🔴 worldTags 原样拼接 —— 本层不做任何时段/天气推导', () => {
-    const out = composePrompt('scene', '', marker(), undefined, presetMap(), {
+    const out = composePrompt('scene', '', marker(), presetMap(), {
       ...BARE,
       worldTags: 'night, heavy rain',
     });
@@ -198,13 +196,13 @@ describe('composePrompt —— 拼接顺序', () => {
 
 describe('composePrompt —— 空段直接跳过，绝不产出 ", ," 或首尾逗号', () => {
   it('全部可选段为空时只剩场景与 rating', () => {
-    const out = composePrompt('scene', '', marker(), undefined, presetMap(), BARE);
+    const out = composePrompt('scene', '', marker(), presetMap(), BARE);
     expect(out.base).toBe('scene, rating:explicit');
     expectCleanJoin(out.base);
   });
 
   it('连场景都为空时 base 只有 rating tag，且不以逗号开头', () => {
-    const out = composePrompt('', '', marker(), undefined, presetMap(), BARE);
+    const out = composePrompt('', '', marker(), presetMap(), BARE);
     expect(out.base).toBe('rating:explicit');
     expectCleanJoin(out.base);
   });
@@ -214,16 +212,15 @@ describe('composePrompt —— 空段直接跳过，绝不产出 ", ," 或首尾
       ', tavern，,',
       '',
       marker(),
-      '破晓旅店',
-      presetMap(preset('location', '破晓旅店', '，wooden walls，')),
+      presetMap(),
       opts({ worldTags: ' , ', compositionTags: 'wide shot', qualitySuffix: 'masterpiece' }),
     );
-    expect(out.base).toBe('tavern, wooden walls, wide shot, rating:explicit, masterpiece');
+    expect(out.base).toBe('tavern, wide shot, rating:explicit, masterpiece');
     expectCleanJoin(out.base);
   });
 
   it('baseNegative 的四段里有空段时同样干净', () => {
-    const out = composePrompt('scene', '', marker(), undefined, presetMap(), {
+    const out = composePrompt('scene', '', marker(), presetMap(), {
       ...BARE,
       baseNegative: 'lowres',
       extraNegative: '',
@@ -233,7 +230,7 @@ describe('composePrompt —— 空段直接跳过，绝不产出 ", ," 或首尾
   });
 
   it('四段负向全空时 baseNegative 是空串，不是 ", "', () => {
-    const out = composePrompt('scene', '', marker(), undefined, presetMap(), BARE);
+    const out = composePrompt('scene', '', marker(), presetMap(), BARE);
     expect(out.baseNegative).toBe('');
   });
 });
@@ -251,7 +248,6 @@ describe('composePrompt —— 角色', () => {
       '2girls, tavern',
       '',
       marker(['苏婉', '雷恩']),
-      undefined,
       presetMap(苏婉, 雷恩),
       opts(),
     );
@@ -264,7 +260,7 @@ describe('composePrompt —— 角色', () => {
   });
 
   it('🔴 角色的 negative 进该角色的槽，不并入 baseNegative（官方抗串味手段）', () => {
-    const out = composePrompt('scene', '', marker(['苏婉']), undefined, presetMap(苏婉), BARE);
+    const out = composePrompt('scene', '', marker(['苏婉']), presetMap(苏婉), BARE);
     expect(out.characters[0].negative).toBe('red hair');
     expect(out.baseNegative).not.toContain('red hair');
   });
@@ -274,7 +270,6 @@ describe('composePrompt —— 角色', () => {
       'scene',
       '',
       marker(['雷恩', '苏婉', '雷恩']),
-      undefined,
       presetMap(苏婉, 雷恩),
       opts(),
     );
@@ -283,7 +278,7 @@ describe('composePrompt —— 角色', () => {
 
   it('角色预设里的全角标点同样被归一化', () => {
     const 脏 = preset('character', '苏婉', 'girl，silver hair', 'red hair，freckles');
-    const out = composePrompt('scene', '', marker(['苏婉']), undefined, presetMap(脏), opts());
+    const out = composePrompt('scene', '', marker(['苏婉']), presetMap(脏), opts());
     expect(out.characters[0]).toEqual({
       name: '苏婉',
       positive: 'girl, silver hair',
@@ -292,14 +287,7 @@ describe('composePrompt —— 角色', () => {
   });
 
   it('🔴 查不到预设 → 跳过该角色 + missing-preset 告警，不报错', () => {
-    const out = composePrompt(
-      'scene',
-      '',
-      marker(['苏婉', '路人甲']),
-      undefined,
-      presetMap(苏婉),
-      opts(),
-    );
+    const out = composePrompt('scene', '', marker(['苏婉', '路人甲']), presetMap(苏婉), opts());
     expect(out.characters.map((c) => c.name)).toEqual(['苏婉']);
     expect(out.warnings).toEqual([{ kind: 'missing-preset', name: '路人甲' }]);
     expect(out.base).toContain('scene'); // 只画场景，仍然产出可用提示词
@@ -314,14 +302,7 @@ describe('composePrompt —— 角色', () => {
       createdAt: 0,
       updatedAt: 0,
     };
-    const out = composePrompt(
-      'scene',
-      '',
-      marker(['艾拉']),
-      undefined,
-      presetMap(只有prose),
-      opts(),
-    );
+    const out = composePrompt('scene', '', marker(['艾拉']), presetMap(只有prose), opts());
     expect(out.characters).toEqual([]);
     expect(out.warnings).toEqual([{ kind: 'missing-preset', name: '艾拉' }]);
   });
@@ -329,7 +310,7 @@ describe('composePrompt —— 角色', () => {
   it('🔴 超过 6 个角色 → 截断 + characters-truncated 告警，不静默丢', () => {
     const names = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
     const rows = names.map((n) => preset('character', n, `${n} hair`));
-    const out = composePrompt('scene', '', marker(names), undefined, presetMap(...rows), opts());
+    const out = composePrompt('scene', '', marker(names), presetMap(...rows), opts());
 
     expect(out.characters.map((c) => c.name)).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
     expect(out.warnings).toEqual([{ kind: 'characters-truncated', dropped: ['g', 'h'] }]);
@@ -338,7 +319,7 @@ describe('composePrompt —— 角色', () => {
   it('被截掉的名字不再查预设，因此不会同时产 missing-preset', () => {
     const names = ['a', 'b', 'c', 'd', 'e', 'f', '没人写过的家伙'];
     const rows = names.slice(0, 6).map((n) => preset('character', n, `${n} hair`));
-    const out = composePrompt('scene', '', marker(names), undefined, presetMap(...rows), opts());
+    const out = composePrompt('scene', '', marker(names), presetMap(...rows), opts());
     expect(out.warnings).toEqual([{ kind: 'characters-truncated', dropped: ['没人写过的家伙'] }]);
   });
 
@@ -349,7 +330,6 @@ describe('composePrompt —— 角色', () => {
       'scene',
       '',
       marker(names),
-      undefined,
       presetMap(...rows),
       opts({ maxCharacters: 2 }),
     );
@@ -360,12 +340,12 @@ describe('composePrompt —— 角色', () => {
   it('恰好 6 个不告警', () => {
     const names = ['a', 'b', 'c', 'd', 'e', 'f'];
     const rows = names.map((n) => preset('character', n, `${n} hair`));
-    const out = composePrompt('scene', '', marker(names), undefined, presetMap(...rows), opts());
+    const out = composePrompt('scene', '', marker(names), presetMap(...rows), opts());
     expect(out.warnings).toEqual([]);
   });
 
   it('0 角色是合法的（纯风景）', () => {
-    const out = composePrompt('landscape', '', marker([]), undefined, presetMap(), opts());
+    const out = composePrompt('landscape', '', marker([]), presetMap(), opts());
     expect(out.characters).toEqual([]);
     expect(out.warnings).toEqual([]);
   });
@@ -381,7 +361,6 @@ describe('composePrompt —— seed', () => {
       'scene',
       '',
       marker(['甲', '乙', '丙']),
-      undefined,
       presetMap(
         preset('character', '甲', 'a'),
         preset('character', '乙', 'b', '', 12345),
@@ -397,7 +376,6 @@ describe('composePrompt —— seed', () => {
       'scene',
       '',
       marker(['甲']),
-      undefined,
       presetMap(preset('character', '甲', 'a')),
       opts(),
     );
@@ -409,7 +387,6 @@ describe('composePrompt —— seed', () => {
       'scene',
       '',
       marker(['甲', '乙']),
-      undefined,
       presetMap(preset('character', '甲', 'a'), preset('character', '乙', 'b', '', 777)),
       opts({ maxCharacters: 1 }),
     );
@@ -418,64 +395,39 @@ describe('composePrompt —— seed', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 地点（D40）
+// 地点：D59 已废除
 // ═══════════════════════════════════════════════════════════
 
-describe('composePrompt —— 地点预设', () => {
-  it('🔴 地点预设进 base，不进角色槽', () => {
+describe('composePrompt —— 地点（D59 已废除）', () => {
+  /**
+   * 🪦 原本这里有五条地点预设用例（进 base / negative 并入 / 查不到静默 /
+   *    空地点名 / 人名地名撞车）。D59 把地点预设整个废除 —— 地点无法穷举
+   *    （宫殿 → 宴会厅 → 盥洗室），穷举表永远写不完。地点现在由侧链写进
+   *    `scenePrompt`，本函数连地点参数都不再收。
+   *
+   * 留一条守住这件事：地点长什么样必须来自**场景串**，且再没有第二个来源。
+   */
+  it('地点描述来自场景串本身，函数不再查任何地点预设', () => {
     const out = composePrompt(
-      'scene',
+      'tavern interior, wooden walls, candlelight',
       '',
       marker([]),
-      '破晓旅店',
-      presetMap(preset('location', '破晓旅店', 'wooden walls', 'modern furniture')),
+      // 就算库里塞一条 key 长得像地点的预设，也不该有人去查它
+      presetMap({
+        key: 'location:破晓旅店',
+        kind: 'character',
+        name: '破晓旅店',
+        dialects: { danbooru: { positive: 'SHOULD_NOT_APPEAR', negative: 'ALSO_NOT' } },
+        createdAt: 0,
+        updatedAt: 0,
+      }),
       BARE,
     );
     expect(out.base).toContain('wooden walls');
+    expect(out.base).not.toContain('SHOULD_NOT_APPEAR');
+    expect(out.baseNegative).not.toContain('ALSO_NOT');
     expect(out.characters).toEqual([]);
-  });
-
-  it('地点预设的 negative 并进 baseNegative（它描述的是场景不是人）', () => {
-    const out = composePrompt(
-      'scene',
-      '',
-      marker([]),
-      '破晓旅店',
-      presetMap(preset('location', '破晓旅店', 'wooden walls', 'modern furniture')),
-      { ...BARE, baseNegative: 'lowres' },
-    );
-    expect(out.baseNegative).toBe('lowres, modern furniture');
-  });
-
-  it('🔴 查不到同名地点预设 → 静默跳过，不产 warning（那是常态不是异常）', () => {
-    const out = composePrompt('scene', '', marker([]), '没人写过的地方', presetMap(), BARE);
     expect(out.warnings).toEqual([]);
-    expect(out.base).toBe('scene, rating:explicit');
-  });
-
-  it('locationName 为 undefined / 空串时同样安静', () => {
-    for (const name of [undefined, '']) {
-      const out = composePrompt('scene', '', marker([]), name, presetMap(), BARE);
-      expect(out.warnings).toEqual([]);
-      expect(out.base).toBe('scene, rating:explicit');
-    }
-  });
-
-  it('地名与人名撞车时按 kind 前缀取，不会拿错（主键 = `${kind}:${name}`）', () => {
-    const out = composePrompt(
-      'scene',
-      '',
-      marker(['亚瑟']),
-      '亚瑟',
-      presetMap(
-        preset('location', '亚瑟', 'ruined castle'),
-        preset('character', '亚瑟', 'man, golden armor'),
-      ),
-      BARE,
-    );
-    expect(out.base).toContain('ruined castle');
-    expect(out.base).not.toContain('golden armor');
-    expect(out.characters).toEqual([{ name: '亚瑟', positive: 'man, golden armor', negative: '' }]);
   });
 });
 
@@ -489,7 +441,6 @@ describe('composePrompt —— rating 钳位', () => {
       'scene',
       '',
       marker([], 'explicit'),
-      undefined,
       presetMap(),
       opts({ maxRating: 'general' }),
     );
@@ -503,7 +454,6 @@ describe('composePrompt —— rating 钳位', () => {
       'scene',
       '',
       marker([], 'sensitive'),
-      undefined,
       presetMap(),
       opts({ maxRating: 'explicit' }),
     );
@@ -515,7 +465,6 @@ describe('composePrompt —— rating 钳位', () => {
       'scene',
       '',
       marker([]),
-      undefined,
       presetMap(),
       opts({ maxRating: 'questionable' }),
     );
@@ -530,7 +479,6 @@ describe('composePrompt —— rating 钳位', () => {
           'scene',
           '',
           marker([], order[want]),
-          undefined,
           presetMap(),
           opts({ maxRating: order[max] }),
         );
@@ -540,7 +488,7 @@ describe('composePrompt —— rating 钳位', () => {
   });
 
   it('base 里恒有且只有一个 rating tag', () => {
-    const out = composePrompt('scene', '', marker([], 'explicit'), undefined, presetMap(), opts());
+    const out = composePrompt('scene', '', marker([], 'explicit'), presetMap(), opts());
     expect(out.base.match(/rating:/g)).toHaveLength(1);
   });
 });
@@ -552,7 +500,7 @@ describe('composePrompt —— rating 钳位', () => {
 describe('composePrompt —— 透传与纯度', () => {
   it('🔴 场景串里的权重语法一个字符都不改', () => {
     const scene = '{{masterpiece}}, [[bad]], -0.8::feet::, <lora:my_style:0.8>';
-    const out = composePrompt('' + scene, '', marker(), undefined, presetMap(), BARE);
+    const out = composePrompt('' + scene, '', marker(), presetMap(), BARE);
     expect(out.base).toBe(`${scene}, rating:explicit`);
   });
 
@@ -561,7 +509,6 @@ describe('composePrompt —— 透传与纯度', () => {
       'scene',
       '',
       marker(['甲']),
-      undefined,
       presetMap(preset('character', '甲', '{{silver hair}}, -0.8::feet::')),
       BARE,
     );
@@ -569,7 +516,7 @@ describe('composePrompt —— 透传与纯度', () => {
   });
 
   it('sceneNegative 进 baseNegative（在全局与追加之后）', () => {
-    const out = composePrompt('scene', 'modern clothing', marker(), undefined, presetMap(), {
+    const out = composePrompt('scene', 'modern clothing', marker(), presetMap(), {
       ...BARE,
       baseNegative: 'lowres',
       extraNegative: 'blurry',
@@ -583,8 +530,7 @@ describe('composePrompt —— 透传与纯度', () => {
         'scene',
         'neg',
         marker(['甲'], 'sensitive'),
-        '破晓旅店',
-        presetMap(preset('character', '甲', 'a', 'b', 42), preset('location', '破晓旅店', 'walls')),
+        presetMap(preset('character', '甲', 'a', 'b', 42)),
         opts({ worldTags: 'night' }),
       );
     expect(args()).toEqual(args());
@@ -593,7 +539,7 @@ describe('composePrompt —— 透传与纯度', () => {
   it('不改动传入的 marker.characters 数组', () => {
     const names = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
     const copy = [...names];
-    composePrompt('scene', '', marker(names), undefined, presetMap(), opts());
+    composePrompt('scene', '', marker(names), presetMap(), opts());
     expect(names).toEqual(copy);
   });
 });

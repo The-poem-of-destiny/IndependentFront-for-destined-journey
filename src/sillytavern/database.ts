@@ -506,6 +506,21 @@ class AppDatabase extends Dexie {
         imagePresets: 'key, kind, name',
       }),
     );
+
+    /**
+     * v18 —— 地点视觉预设废除（D59）。
+     *
+     * 表结构一个字没变，只删数据：`kind === 'location'` 的行从此没有任何读者
+     * （`composePrompt` 不再查表、设置页也没有那个页签了）。留着就是**看不见的
+     * 垃圾**——用户删不掉、UI 不显示、下一个读这张表的人还得先搞懂它们是什么。
+     *
+     * 🔴 只删 location，character 一行不动：那是 D56 里「初始定义」的真源。
+     */
+    // 🔴 **不带 `.stores()`**：表结构没变，这一版只搬数据。带上就得把 v17 的全套表名
+    //    再抄一遍（`withSchema(SCHEMA_V16, …)` 里没有 sceneImages），抄漏一张就是删表。
+    this.version(18).upgrade(async (tx) => {
+      await tx.table('imagePresets').where('kind').equals('location').delete();
+    });
   }
 }
 

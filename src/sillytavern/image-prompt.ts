@@ -168,48 +168,39 @@ function danbooruOf(
  *                      **不是** `marker.bodyText`（那是一句中文，D28）
  * @param sceneNegative 场景专属追加负向；侧链产出，通常空串
  * @param marker        角色名与 rating 仍取自标记（D30）
- * @param locationName  当前地点名（D40）。引擎自己知道，**不由 AI 在标记里报**。
- *                      查不到同名预设时**静默跳过、不产 warning** —— 绝大多数地点
- *                      本来就没人写过预设，那是常态不是异常
- * @param presets       键是 `` `${kind}:${name}` ``（`ImagePreset.key`）
+ * @param presets       键是 `` `${kind}:${name}` ``（`ImagePreset.key`）。**只剩角色**（D59）
+ *
+ * 🔴 **不再有地点参数（D59，2026-08-04）**：地点无法穷举（宫殿 → 宴会厅 → 盥洗室），
+ *    穷举表永远写不完，写了也总会在下一级子地点上失效。地点现在由 `image_prompt`
+ *    侧链在 `scenePrompt` 里现写 —— 侧链本来就收 `location` 字段，这里只是不再查表。
+ *    代价：同一地点在两张图里不保证长得一样。要一致性的正解是把侧链**这次写出来的**
+ *    地点串按名字缓存进会话，不是回头去写那张表。
  */
 export function composePrompt(
   scenePrompt: string,
   sceneNegative: string,
   marker: Pick<SceneImageMarker, 'characters' | 'rating'>,
-  locationName: string | undefined,
   presets: ReadonlyMap<string, ImagePreset>,
   opts: ComposeOptions,
 ): ComposedPrompt {
   const warnings: ComposeWarning[] = [];
 
-  // ── 地点预设（D40）：进 base，不进角色槽 —— 它描述的是场景不是人 ──
-  const locationDialect =
-    locationName === undefined || locationName === ''
-      ? undefined
-      : danbooruOf(presets.get(`location:${locationName}`));
-
   // ── rating 钳位（D38），静默 ──
   const rating = clampRating(marker.rating, opts.maxRating);
 
-  // ── base：顺序即权重，画质后缀压在最后（§5.2 [1]-[6]）──
+  // ── base：顺序即权重，画质后缀压在最后（§5.2）──
+  //    地点那一段没了，场景串自己带（D59）
   const base = joinSegments([
-    scenePrompt, // [1] 场景 —— 这一刻正在发生什么
-    locationDialect?.positive ?? '', // [2] 地点 —— 这个地方长什么样（背景板）
-    opts.worldTags, // [3] 世界状态 —— 天光如何
-    opts.compositionTags, // [4] 构图
-    `rating:${rating}`, // [5] 分级
-    opts.qualitySuffix, // [6] 🔴 画质后缀在末尾，不是开头
+    scenePrompt, // [1] 场景 —— 这一刻正在发生什么（含地点长什么样）
+    opts.worldTags, // [2] 世界状态 —— 天光如何
+    opts.compositionTags, // [3] 构图
+    `rating:${rating}`, // [4] 分级
+    opts.qualitySuffix, // [5] 🔴 画质后缀在末尾，不是开头
   ]);
 
-  // ── baseNegative：全局 ∪ 追加 ∪ 场景 ∪ 地点 ──
+  // ── baseNegative：全局 ∪ 追加 ∪ 场景（地点那一段随 D59 一起没了）──
   // 🔴 角色的 negative **不在这里** —— 它进各自的槽（官方的抗串味手段，§6.2）
-  const baseNegative = joinSegments([
-    opts.baseNegative,
-    opts.extraNegative,
-    sceneNegative,
-    locationDialect?.negative ?? '',
-  ]);
+  const baseNegative = joinSegments([opts.baseNegative, opts.extraNegative, sceneNegative]);
 
   // ── 角色：顺序 = 标记里 characters 的顺序（V4 的 use_order 依赖它），别排序别去重 ──
   const maxCharacters = opts.maxCharacters ?? 6;

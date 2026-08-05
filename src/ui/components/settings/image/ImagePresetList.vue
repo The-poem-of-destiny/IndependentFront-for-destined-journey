@@ -36,14 +36,16 @@ onMounted(() => {
 
 const activeKind = ref<ImagePresetKind>('character');
 
+/**
+ * 🪦 D59：「地点」页签已删 —— 地点无法穷举（宫殿 → 宴会厅 → 盥洗室），
+ *    改由 `image_prompt` 侧链在出图时现写。只剩一个页签仍保留这套外壳，
+ *    是因为 D56 之后这里要长出「初始定义 / 会话定义」两个视图。
+ */
 const tabs = computed(() => [
   { key: 'character' as ImagePresetKind, label: '角色', badge: store.characters.length },
-  { key: 'location' as ImagePresetKind, label: '地点', badge: store.locations.length },
 ]);
 
-const rows = computed<ImagePreset[]>(() =>
-  activeKind.value === 'character' ? store.characters : store.locations,
-);
+const rows = computed<ImagePreset[]>(() => store.characters);
 
 // ═══ 编辑器 ═══
 

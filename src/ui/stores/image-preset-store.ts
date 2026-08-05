@@ -85,11 +85,8 @@ export const useImagePresetStore = defineStore('imagePreset', () => {
       .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN')),
   );
 
-  const locations = computed<ImagePreset[]>(() =>
-    presets.value
-      .filter((p) => p.kind === 'location')
-      .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN')),
-  );
+  // 🪦 D59：`locations` 已删。地点预设整个废除（地点无法穷举，见 types-image
+  //    的 `ImagePresetKind` 注释），Dexie v18 已把 kind==='location' 的行删掉。
 
   /** 严格 `===` 匹配，**不做任何归一化**（铁律 1） */
   function find(kind: ImagePresetKind, name: string): ImagePreset | undefined {
@@ -222,7 +219,7 @@ export const useImagePresetStore = defineStore('imagePreset', () => {
     presets: computed(() => presets.value),
     loading: computed(() => loading.value),
     characters,
-    locations,
+
     init,
     refresh,
     find,

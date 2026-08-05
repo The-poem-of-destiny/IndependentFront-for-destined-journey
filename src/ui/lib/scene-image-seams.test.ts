@@ -170,21 +170,13 @@ describe('注入缝装配（阻塞项：不挂缝 = 每一次生成都以 prompt
     expect(row.params).toMatchObject({ width: 1216, height: 832, steps: 23 });
   });
 
-  it('地点预设与世界状态标签（D39/D40）都由 Code 注入，不问 AI', async () => {
+  it('世界状态标签（D39）由 Code 注入，不问 AI；地点已随 D59 出列', async () => {
     const store = useSceneImageStore();
     await store.load(SAVE);
     store.setSeams(
       buildSceneImageSeams(
         makeDeps({
-          presets: () => [
-            makePreset(),
-            makePreset({
-              key: 'location:风铃旅店',
-              kind: 'location',
-              name: '风铃旅店',
-              dialects: { danbooru: { positive: 'wooden tavern, fireplace', negative: '' } },
-            }),
-          ],
+          presets: () => [makePreset()],
           world: () => ({
             location: '风铃旅店',
             gameTime: {
@@ -206,7 +198,7 @@ describe('注入缝装配（阻塞项：不挂缝 = 每一次生成都以 prompt
     await store.whenIdle();
 
     const row = (await getSceneImagesByMessage(SAVE, 'msg_1'))[0];
-    expect(row.positive).toContain('wooden tavern, fireplace');
+    // 🔴 地点预设废除（D59）：地点长什么样由侧链写进场景串，这里只验世界状态标签
     expect(row.positive).toContain('night');
     expect(row.positive).toContain('rain');
   });

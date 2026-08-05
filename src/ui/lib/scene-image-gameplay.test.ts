@@ -61,14 +61,6 @@ const PRESETS: ImagePreset[] = [
     createdAt: 0,
     updatedAt: 0,
   },
-  {
-    key: 'location:黄昏回廊',
-    kind: 'location',
-    name: '黄昏回廊',
-    dialects: { danbooru: { positive: 'stone corridor, stained glass', negative: 'modern' } },
-    createdAt: 0,
-    updatedAt: 0,
-  },
 ];
 
 function settingsSnapshot(over: Partial<ImageRuntimeSettings> = {}): ImageRuntimeSettings {
@@ -124,7 +116,8 @@ function wire(over: Partial<ImageRuntimeSettings> = {}) {
       promptCalls.push(req);
       // 侧链真实产物的形状：中文 intent → danbooru 串
       return {
-        scenePrompt: '1girl, standing, looking away, window, candlelight',
+        // 🔴 D59 之后地点长什么样由**侧链写进场景串**，不再有 location 预设可查
+        scenePrompt: '1girl, standing, looking away, stone corridor, stained glass, candlelight',
         sceneNegative: '',
         // 🔴 侧链**不收 title**（标题必须来自 story，D30）—— 它只拿 intent/characters/
         //    narrative/location/rating。这里跟着契约走，别顺手编一个 req.title

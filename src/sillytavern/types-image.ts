@@ -87,13 +87,20 @@ export interface ImagePromptOutput {
 export type NarrativeSegment =
   { kind: 'text'; text: string } | { kind: 'image'; occurrence: number; marker: SceneImageMarker };
 
-// ═══ 视觉预设（角色 + 地点，同一张表，D40）═══
+// ═══ 视觉预设（只剩角色，D59）═══
 
 /**
- * 角色预设管**人**的一致性，地点预设管**场景**的一致性 —— 两者形状完全一样，
- * 所以是同一张表加一个 `kind`，不是两张表（D40）。
+ * 🔴 **地点预设已废除（D59，2026-08-04）**，这个联合从此只有一个成员。
+ *
+ * 理由是**地点无法穷举**：总能再往下找到一个子地点（宫殿 → 宴会厅 → 宴会厅的盥洗室）。
+ * 给「宫殿」写一份定义，画盥洗室时它就是错的；给每个子地点都写，那是永远写不完的表。
+ * 角色与地点在这件事上根本不同 —— 角色是**有限的实体清单**，地点是无限的层级空间。
+ * 地点现在由 `image_prompt` 侧链在场景串里现写（它本来就收 `location` 字段）。
+ *
+ * 留成联合类型而不是直接删掉，是因为 D56 之后这里还要长出别的**角色侧**分支
+ * （初始定义 / 会话定义）；到那时它仍是「这条预设是什么」的那个字段。
  */
-export type ImagePresetKind = 'character' | 'location';
+export type ImagePresetKind = 'character';
 
 /** Dexie v17 `imagePresets`，全局键控，进 FullBackup（纯文本、很小） */
 export interface ImagePreset {
