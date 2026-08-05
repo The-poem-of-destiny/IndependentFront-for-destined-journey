@@ -36,6 +36,31 @@ npx prettier --write <你改过的每一个 .md>
 
 推完照样要检查 CI（上一条规则对直推同样生效）。
 
+### 🔴 改中文文本之后必须验编码（每次，别凭肉眼）
+
+本仓大量文件是中文：提示词（`data/defaults/agent-config.json`）、世界书、设计文档。
+**用脚本批量改这些文件极易悄悄毁掉编码**，而症状全都不在改动处：
+
+- **U+FFFD 替换字符**（那个菱形问号）—— 一次错误的编码往返就会产生。`agent-config.json` 一度带着
+  **47 个**，其中一个落在**闭合 XML 标签的标签名里**，模型看到的是坏标签，而 diff 看着完全正常。
+- **真控制字符混进 JSON 字符串** —— 脚本里想写 `\n`（两个字符）却落成一个真换行，
+  JSON 当场不可解析；想写 `\b` 却落成 `0x08`（退格），正则从此匹配不到任何东西，**且不报错**。
+- **Windows 控制台是 GBK** —— 脚本里 `print()` 中文会抛 `UnicodeEncodeError`，或打出一屏乱码。
+  **别拿控制台回显当验证依据**，它自己就会骗人。
+
+改完（尤其是用 python / sed / PowerShell 批量改过）**必须**跑一遍：
+
+```bash
+node -e "const fs=require('fs');const f=process.argv[1];const s=fs.readFileSync(f,'utf8');const bad=(s.match(/\uFFFD/g)||[]).length;const ctrl=(s.match(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g)||[]).length;if(f.endsWith('.json'))JSON.parse(s);console.log(f,'U+FFFD:',bad,'ctrl:',ctrl)" <改过的文件>
+```
+
+三条判据缺一不可：**U+FFFD 为 0**、**控制字符为 0**、**JSON 能解析**。
+不为 0 就别提交 —— 编码坏字**不会让测试变红**，只会让模型看到坏输入。
+
+> 配套的一条纪律：在脚本里拼这些转义时，用**原始字符串**或 `chr(92)` 拼，
+> 别在多层引号里堆反斜杠。2026-08-05 那轮就是这样先写坏了 JSON、又写坏了正则；
+> 连本节初稿都栽在同一处 —— 描述这个坑的那两个例子自己被转义吃掉了。
+
 ## 文档导航
 
 详细设计文档统一在 `docs/` 目录下：
