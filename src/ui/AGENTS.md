@@ -71,10 +71,22 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      —— NAI 没有 CORS，浏览器直连必被拦；key 仍前端持有、
 │   │                                      经 Authorization 透传，BFF 零状态
 │   │                                   解 zip 归引擎的 image-providers/novelai.ts，本层不解析
+│   │                                   🔴 **上游地址是常量，生产不传 `baseUrl`**（2026-08-05 真机连坑两轮）：
+│   │                                      出图只有一个地址，而这一格错了之后上游报的错**全都指着无辜的
+│   │                                      地方** —— 填成 `api.novelai.net`（NAI 的文本/账户域）时那台机器的
+│   │                                      模型枚举停在 V3，于是对合法的 `nai-diffusion-4-5-full` 回
+│   │                                      「model must be a valid enum value」；漏掉 `https://` 时 BFF 回
+│   │                                      「invalid X-Target-Base-URL」。`baseUrl` 参数保留（自建镜像/测试
+│   │                                      替身用），归一化与早退在 `resolveImageBaseUrl`：补协议、剃掉
+│   │                                      BFF 会自己拼的 `/ai/generate-image`、文本域**只报错不改写**
+│   │                                      （改写等于替用户决定令牌送去哪台机器）
 │   ├── scene-image-seams.ts         ← [图像 v1] 把 scene-image-store 的三条缝（checkQuota /
 │   │                                   runPromptAgent / send）接到真实实现上，**唯一**生产实现
 │   │                                   🔴 缝必须在**存档加载时**挂上，否则每次 generate() 都以
 │   │                                      prompt-agent 失败告终，症状是「按了没反应、记录直接变红」
+│   │                                   🔴 **不读 `endpoint.baseUrl`**（2026-08-05）：端点记录里只取
+│   │                                      `apiKey`，地址走 image-client 的常量。加回来会同时红两处测试
+│   │                                      （seams 的「地址一概不传」+ ApiSection.image-endpoint 的源码断言）
 │   │                                   刻意做成**不碰 Pinia 的工厂**（入参全是取值函数）——「缝挂上没有」
 │   │                                   「限额拒绝时侧链一次都没被调用」这类断言不必挂载任何组件
 │   ├── quality-colors.ts / test-fixtures.ts / toSystemEvent.ts
@@ -189,6 +201,14 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── ApiSection.vue           ← API 池 CRUD + 连接测试 + 模型列表（含添加/编辑弹窗）
 │   │   │                               🔴 必须**单根**：弹窗放 <section> 内层，否则父级 `.centered`
 │   │   │                                  命不中根节点，本分区在宽屏下摊满整行（真机走查逮到）
+│   │   │                               🔴 **出图端点只填名称 + API Key**（2026-08-05）：`isImageEntry`
+│   │   │                                  把「主链接」与「模型」两格藏掉 —— 地址是常量（见
+│   │   │                                  lib/image-client.ts 那条），出图模型在「图像生成 → 出图」卡上。
+│   │   │                                  留着它们只会让人以为生效，而填错的后果全是**上游报一句指向
+│   │   │                                  别处的错**。保存时 baseUrl 写成常量而非留空（卡片上那行地址
+│   │   │                                  要说实话）；「测试连接」的图像分支必须排在 baseUrl 闸**之前**，
+│   │   │                                  否则没有地址的出图端点点了会静悄悄什么都不发生
+│   │   │                                  结构断言在 ApiSection.image-endpoint.test.ts（不 mount）
 │   │   ├── WorldBookSection.vue     ← 世界书列表/导入/新建/删除/恢复 + 条目编辑器
 │   │   ├── PlotSection.vue / MemorySection.vue / ThemeSection.vue / MessagesSection.vue
 │   │   ├── DataSection.vue          ← 导出/导入/存储用量/清除全部（用量改为**本分区**挂载时读）

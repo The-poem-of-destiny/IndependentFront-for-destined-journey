@@ -255,10 +255,19 @@ async function sendOne(
     ucPreset: s.imageUcPreset,
   });
 
+  // 🔴 **上游地址不从端点记录里取**（2026-08-05 真机连坑两轮后定的）。出图只有一个
+  //    地址，用户在这一格唯一该提供的是**令牌**。而这格地址错了之后，上游报的错
+  //    全都指着无辜的地方：填成 `api.novelai.net` 时被报成「模型枚举非法」，
+  //    漏掉 `https://` 时被报成「header 非法」—— 两次都要人从一句无关的话倒推回
+  //    一个根本没被提及的输入框。所以地址是常量，就用常量（`generateNaiImage`
+  //    的 `baseUrl` 缺省即 `NAI_IMAGE_API_BASE`）。
+  //
+  //    `generateNaiImage` 仍收 `baseUrl`（自建镜像 / 测试替身要用），但**生产不传**；
+  //    要开放自定义地址得先想清楚错误信息怎么指回那一格，见 image-client 的
+  //    `resolveImageBaseUrl`。
   const result: NaiGenerateResult = await send({
     token: endpoint.apiKey ?? '',
     body,
-    ...(endpoint.baseUrl ? { baseUrl: endpoint.baseUrl } : {}),
     signal,
   });
   if (!result.ok) return result;

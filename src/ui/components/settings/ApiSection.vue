@@ -9,13 +9,14 @@
  *    且 `api` 是默认分区，所以进设置页仍然会立刻跑一次；切走再回来会多调一次，
  *    那次直接命中已解密的缓存。
  */
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import { useSettingsStore, type ApiEntry } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
 import { fetchModels } from '@engine/api-tools';
+import { NAI_IMAGE_API_BASE } from '../../lib/image-client';
 
 const cfg = useSettingsStore();
 const s = cfg.settings;
@@ -36,6 +37,16 @@ const apiForm = reactive({
   _realKey: '' as string,
   _masked: false,
 });
+/**
+ * 出图端点：**地址与模型都不由这张表管**（2026-08-05）。
+ *
+ * 上游地址只有一个，代码里就是常量（`scene-image-seams` 不再读 `endpoint.baseUrl`）；
+ * NAI 的出图模型 id 在「图像生成 → 出图」那张卡上。留着这两格只会让人以为它们生效 ——
+ * 而它们填错的后果全都是**上游报一句指向别处的错**（真机连坑两轮：一次被报成
+ * 「模型枚举非法」，一次被报成「header 非法」）。所以这里只剩名称 + API Key。
+ */
+const isImageEntry = computed(() => apiForm.apiType === 'image');
+
 const apiModels = ref<string[]>([]);
 const showModelList = ref(false);
 // 浮层始终显示全部已获取模型——不按 input 当前值过滤（否则聚焦时旧值会滤掉其他模型，重蹈 datalist 覆辙）。
@@ -65,14 +76,18 @@ function onApiKeyInput() {
   apiForm._masked = false;
 }
 async function testApiAndFetch() {
-  if (!apiForm.baseUrl || !apiForm.apiKey) return;
   // 🔴 图像端点没有 /chat/completions 也没有 /embeddings，更没有 /models（NovelAI
   //    的出图接口是单一 POST）。拿现有两条通道去测它只会得到一个误导性的 401/404，
   //    所以这里如实说「测不了」而不是假装测过。真正的验证在第一次出图时发生。
+  //
+  //    🔴 这一支必须排在下面那道 `baseUrl` 闸**之前**：出图端点已经没有地址那一格了
+  //    （地址是常量），排在闸后面的话点「测试连接」会静悄悄什么都不发生 ——
+  //    比一句「测不了」更让人以为是按钮坏了。
   if (apiForm.apiType === 'image') {
     ui.toast('图像端点没有可用的测试通道，请直接保存，出图时会验证密钥', 'info');
     return;
   }
+  if (!apiForm.baseUrl || !apiForm.apiKey) return;
   apiFormTesting.value = true;
   // trim 与 fetchModels 对齐：粘贴带尾随空白/换行的 key 时，避免"获取模型能通、测试反而 401"
   const realKey = (apiForm._realKey || apiForm.apiKey).trim();
@@ -212,7 +227,9 @@ async function saveApi() {
   const e: ApiEntry = {
     id: editingApiId.value || crypto.randomUUID(),
     name: apiForm.name,
-    baseUrl: apiForm.baseUrl,
+    // 出图端点的地址由代码决定（见 isImageEntry）。这里照写常量而不是留空，是为了
+    // 卡片上那行地址说的是**实话** —— 留空会让它看起来像"没配好"
+    baseUrl: isImageEntry.value ? NAI_IMAGE_API_BASE : apiForm.baseUrl,
     apiKey: realKey,
     maskedKey: maskKey(realKey),
     model: apiForm.model,
@@ -317,12 +334,17 @@ async function deleteApi(id: string) {
             Chat 模型用 /chat/completions 测试；Embedding 模型用 /embeddings
             测试；图像端点没有测试通道，保存后在「图像生成」分区里选用
           </p></label
-        ><label class="form-label"
+        ><label v-if="!isImageEntry" class="form-label"
           >主链接<input
             v-model="apiForm.baseUrl"
             class="form-input"
-            placeholder="https://api.deepseek.com/v1" /></label
-        ><label class="form-label"
+            placeholder="https://api.deepseek.com/v1"
+        /></label>
+        <p v-else class="form-hint fixed-endpoint-hint">
+          出图地址固定为 <code>{{ NAI_IMAGE_API_BASE }}</code
+          >，不需要填。出图模型在「图像生成 → 出图」那张卡上设置。
+        </p>
+        <label class="form-label"
           >API Key
           <div class="key-row">
             <input
@@ -351,7 +373,7 @@ async function deleteApi(id: string) {
           <p class="form-hint">
             编辑已有 API 时密钥默认隐藏。点击测试连接验证密钥并获取模型列表。
           </p></label
-        ><label class="form-label"
+        ><label v-if="!isImageEntry" class="form-label"
           >模型
           <div class="key-row">
             <div class="model-combo">
@@ -423,6 +445,11 @@ async function deleteApi(id: string) {
 <style scoped src="./settings-chrome.css"></style>
 
 <style scoped>
+/* 出图端点没有「主链接」输入框，这一行提示顶替它的位置。`.form-hint` 的 margin 是
+   `0 0 4px`（设计成贴在输入框下面的），单独成段时上方需要一点呼吸 */
+.fixed-endpoint-hint {
+  margin-top: 6px;
+}
 .model-combo {
   position: relative;
   flex: 1;

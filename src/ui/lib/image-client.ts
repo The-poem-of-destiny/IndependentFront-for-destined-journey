@@ -39,8 +39,12 @@ import type { ImageGenFailure, ImageGenFailureKind } from '@engine/types-image';
 /**
  * NovelAI 生图 API 的 base URL（**不带尾斜杠**，路径由 BFF 补 `/ai/generate-image`）。
  *
- * 提成常量是为了将来换后端（自建代理 / 镜像 / 本地 mock）只改一行；设置页的
- * 「端点」输入框会把用户值经 `baseUrl` 传进来，缺省即此值。
+ * 提成常量是为了将来换后端（自建代理 / 镜像 / 本地 mock）只改一行。
+ *
+ * 🔴 **生产就是用它，不再由设置页供值**（2026-08-05）：出图端点那格地址填错两次、
+ * 两次都被上游报成指向别处的错（见 {@link resolveImageBaseUrl}），于是裁定地址由代码
+ * 持有、用户只填令牌。`generateNaiImage` 仍收 `baseUrl`（镜像 / 测试替身要用），
+ * 但 `scene-image-seams` **不传**。
  */
 export const NAI_IMAGE_API_BASE = 'https://image.novelai.net';
 
@@ -96,6 +100,16 @@ const RETRYABLE: Partial<Record<ImageGenFailureKind, boolean>> = IMAGE_FAILURE_R
 
 /** 上游错误正文进 UI 时的长度闸（只有 400 那一格会用摘要，§12.2） */
 const DETAIL_SUMMARY_MAX = 160;
+
+/**
+ * NovelAI 的**文本 / 账户**域。出图不在这台机器上（出图在 {@link NAI_IMAGE_API_BASE}）。
+ *
+ * 之所以要专门认它一下，见 {@link resolveImageBaseUrl} 的说明。
+ */
+const NAI_TEXT_API_HOST = 'api.novelai.net';
+
+/** BFF 自己会补的上游路径（`server/routes/image.ts`）。用户连它一起填进 base 时要剃掉 */
+const NAI_IMAGE_PATH = '/ai/generate-image';
 
 // ═══════════════════════════════════════════════════════════
 // 注入缝
@@ -230,6 +244,75 @@ export function classifyImageHttpStatus(status: number, detail?: string): ImageG
 }
 
 // ═══════════════════════════════════════════════════════════
+// 端点地址归一化
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 设置页那格「图像端点 Base URL」→ 真正发出去的上游地址。
+ *
+ * **为什么这件事必须在本地做**（2026-08-05 真机连坑两次的教训）：这一格填错时，
+ * 上游回的错**全都指着无辜的地方**，人得从错误信息倒推到一个根本没被提及的输入框 ——
+ *
+ * - 填成 `https://api.novelai.net`（NAI 的**文本/账户**域）→ 那台机器上 `/ai/generate-image`
+ *   还活着（所以是 400 不是 404），但它的模型枚举停在 V3 时代，于是它对一个完全合法的
+ *   `nai-diffusion-4-5-full` 回 **「model must be a valid enum value」** —— 看起来像模型名写错了
+ * - 漏掉 `https://` → BFF 的 `forward()` 回 **「invalid X-Target-Base-URL」** —— 看起来像 header 坏了
+ *
+ * 所以：能归一化的就地归一化，归一化不了的**在本地**说清楚是哪一格填错了，一次上游请求都不发。
+ *
+ * 🔴 `api.novelai.net` **只报错、不改写**。改写等于替用户决定把他的令牌送去哪台机器；
+ *    而这一格存在的理由本来就是自建代理/镜像，静默改写会长出「我明明填了 A、日志里却是 B」
+ *    这种更难查的问题。补 `https://` 是另一回事 —— 那不改变打给谁。
+ *
+ * 纯函数，导出只为让测试逐格钉死。
+ */
+export function resolveImageBaseUrl(
+  raw: string | undefined,
+): { ok: true; base: string } | { ok: false; message: string; detail: string } {
+  const trimmed = (raw ?? '').trim();
+  if (!trimmed) return { ok: true, base: NAI_IMAGE_API_BASE };
+
+  // 漏协议 → 补 https。这一步**不改变打给谁**，只补上唯一合理的那个值
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+  let url: URL;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    return {
+      ok: false,
+      message: `出图端点地址填错了，去「API 配置」里改成 ${NAI_IMAGE_API_BASE}`,
+      detail: `无法解析的端点地址: ${trimmed}`,
+    };
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return {
+      ok: false,
+      message: `出图端点地址只能是 http/https，去「API 配置」里改成 ${NAI_IMAGE_API_BASE}`,
+      detail: `端点地址的协议是 ${url.protocol}`,
+    };
+  }
+
+  if (url.hostname.toLowerCase() === NAI_TEXT_API_HOST) {
+    return {
+      ok: false,
+      message: `出图要用 ${NAI_IMAGE_API_BASE}；${NAI_TEXT_API_HOST} 是 NovelAI 的文本/账户域，不出图`,
+      detail: `端点地址是 ${url.origin}，那台机器不认 V4/V4.5 的模型名`,
+    };
+  }
+
+  // 用户把完整 URL 整条粘进来时剃掉尾部路径 —— 否则 BFF 会再拼一次，
+  // 打到 `.../ai/generate-image/ai/generate-image`
+  const noSlash = withScheme.replace(/\/+$/, '');
+  const stripped = noSlash.toLowerCase().endsWith(NAI_IMAGE_PATH)
+    ? noSlash.slice(0, -NAI_IMAGE_PATH.length)
+    : noSlash;
+
+  return { ok: true, base: stripped.replace(/\/+$/, '') };
+}
+
+// ═══════════════════════════════════════════════════════════
 // 超时闸
 // ═══════════════════════════════════════════════════════════
 
@@ -334,7 +417,11 @@ export async function generateNaiImage(opts: NaiGenerateOptions): Promise<NaiGen
   // 调用方已经取消了才轮到我们
   if (opts.signal?.aborted) return fail('aborted');
 
-  const base = (opts.baseUrl?.trim() || NAI_IMAGE_API_BASE).replace(/\/+$/, '');
+  // 端点地址填错就在这里收口，一次上游请求都不发 —— 上游对这一格的报错全都指着无辜的地方
+  const resolved = resolveImageBaseUrl(opts.baseUrl);
+  if (!resolved.ok) return fail('bad-request', resolved.detail, resolved.message);
+  const base = resolved.base;
+
   const timeoutMs = opts.timeoutMs ?? IMAGE_REQUEST_TIMEOUT_MS;
   const guard = armTimeout(timeoutMs, opts.signal);
 

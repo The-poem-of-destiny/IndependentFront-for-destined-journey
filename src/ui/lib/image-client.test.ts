@@ -21,6 +21,7 @@ import {
   classifyImageHttpStatus,
   generateNaiImage,
   resetImageClient,
+  resolveImageBaseUrl,
   setImageFetch,
   summarizeUpstreamDetail,
   type ImageFetchInit,
@@ -256,6 +257,97 @@ describe('请求形状', () => {
     vi.stubGlobal('fetch', undefined);
     const result = await generateNaiImage({ token: 'tk', body: requestBody() });
     expect(result).toMatchObject({ ok: false, kind: 'network' });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 端点地址归一化（2026-08-05 真机连坑两次）
+//
+// 这一组守的是同一件事: 这一格填错时，**报错必须指着这一格**。
+// 两次真机失败分别被上游报成「模型枚举非法」与「header 非法」，
+// 都要人从一句无关的话倒推回一个没被提及的输入框。
+// ═══════════════════════════════════════════════════════════
+
+describe('resolveImageBaseUrl', () => {
+  it('空 / 全空白 → 官方出图端点', () => {
+    expect(resolveImageBaseUrl(undefined)).toEqual({ ok: true, base: NAI_IMAGE_API_BASE });
+    expect(resolveImageBaseUrl('   ')).toEqual({ ok: true, base: NAI_IMAGE_API_BASE });
+  });
+
+  it('漏掉协议 → 补 https（不改变打给谁）', () => {
+    expect(resolveImageBaseUrl('image.novelai.net')).toEqual({
+      ok: true,
+      base: 'https://image.novelai.net',
+    });
+    expect(resolveImageBaseUrl('  mirror.example.com/nai/  ')).toEqual({
+      ok: true,
+      base: 'https://mirror.example.com/nai',
+    });
+  });
+
+  it('已有协议就不动它（http 也放行 —— 本地代理要用）', () => {
+    expect(resolveImageBaseUrl('http://127.0.0.1:8080')).toEqual({
+      ok: true,
+      base: 'http://127.0.0.1:8080',
+    });
+  });
+
+  it('整条完整 URL 粘进来 → 剃掉 BFF 会自己补的那段路径', () => {
+    expect(resolveImageBaseUrl('https://image.novelai.net/ai/generate-image')).toEqual({
+      ok: true,
+      base: 'https://image.novelai.net',
+    });
+  });
+
+  it('填成文本/账户域 → 本地早退，且**不静默改写**', () => {
+    const out = resolveImageBaseUrl('https://api.novelai.net');
+    expect(out.ok).toBe(false);
+    // 报错必须点名两个域，否则用户还是不知道该往哪改
+    if (!out.ok) {
+      expect(out.message).toContain('image.novelai.net');
+      expect(out.message).toContain('api.novelai.net');
+    }
+  });
+
+  it('协议不是 http/https → 早退', () => {
+    expect(resolveImageBaseUrl('ftp://example.com').ok).toBe(false);
+    // `javascript:` 之类连 `//` 都没有，会先被补成 https —— 那是可接受的归一化结果
+    expect(resolveImageBaseUrl('ws://example.com').ok).toBe(false);
+  });
+
+  it('解析不出来的串 → 早退而不是抛', () => {
+    expect(resolveImageBaseUrl('https://').ok).toBe(false);
+  });
+});
+
+describe('端点地址填错 → 一次上游请求都不发', () => {
+  it('文本/账户域 → bad-request、不可重试、零请求', async () => {
+    const { res } = fakeResponse();
+    const calls = stubFetch(res);
+
+    const result = await generateNaiImage({
+      token: 'tk',
+      body: requestBody(),
+      baseUrl: 'https://api.novelai.net',
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'bad-request', retryable: false });
+    // 同一份配置再发一百次也是同样的结果 —— 不该白烧一次往返
+    expect(calls).toHaveLength(0);
+  });
+
+  it('漏协议的地址被补好后照常发出去', async () => {
+    const { res } = fakeResponse();
+    const calls = stubFetch(res);
+
+    await generateNaiImage({
+      token: 'tk',
+      body: requestBody(),
+      baseUrl: 'image.novelai.net',
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].init?.headers?.['X-Target-Base-URL']).toBe(NAI_IMAGE_API_BASE);
   });
 });
 

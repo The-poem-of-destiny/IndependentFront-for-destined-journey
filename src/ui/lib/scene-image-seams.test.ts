@@ -327,11 +327,15 @@ describe('端点缺失与上游失败', () => {
     expect(row?.errorKind).toBe('payment');
   });
 
-  it('令牌与端点 base 都取自选中的那条 API 池记录', async () => {
+  it('令牌取自选中的那条 API 池记录，**地址一概不传**', async () => {
     const sendImage = vi.fn(async (_opts: NaiGenerateOptions) => okSend());
     const store = useSceneImageStore();
     await store.load(SAVE);
-    store.setSeams(buildSceneImageSeams(makeDeps({ sendImage })));
+    // 记录里带一个**填错的**地址：出图端点填 `api.novelai.net` 是真机踩过的坑，
+    // 上游会把它报成「模型枚举非法」。这一条钉住它连传都不会被传下去。
+    const settings = makeSettings();
+    settings.apiPool[0]!.baseUrl = 'https://api.novelai.net';
+    store.setSeams(buildSceneImageSeams(makeDeps({ sendImage, settings: () => settings })));
 
     await store.generate(baseInput());
     await store.whenIdle();
@@ -339,7 +343,9 @@ describe('端点缺失与上游失败', () => {
     expect(sendImage).toHaveBeenCalledTimes(1);
     const opts = sendImage.mock.calls[0][0];
     expect(opts.token).toBe('pst-token');
-    expect(opts.baseUrl).toBe('https://image.novelai.net');
+    // 🔴 不是「等于官方地址」而是**根本没有这个字段** —— 地址是 image-client 的常量，
+    //    生产不给调用方留改它的口子（2026-08-05）
+    expect(opts.baseUrl).toBeUndefined();
     // 三重冗余在 buildNaiRequest 里保证；这里只钉「发出去的正是装配好的那份」
     expect(opts.body.input).toBe(opts.body.parameters.v4_prompt.caption.base_caption);
   });
