@@ -1344,6 +1344,10 @@ describe('getDefaultTemplate', () => {
     expect(tmpl).toContain('{{CHARACTER_STATE}}');
     expect(tmpl).toContain('{{LORE_BOOK_STATIC}}');
     expect(tmpl).toContain('{{LORE_BOOK_DYNAMIC}}');
+    // 🔴 回归: dispatcher 必须看到 {{USER_INPUT}} —— 开局轮 USER_INPUT 是开场提示词，
+    //    含「--- 初始装备 --- / --- 初始技能 ---」原始清单。没有它，dispatcher 只能从
+    //    story 改写后的叙事里反推物品，名字/数值会被 item_gen 重掷（详见 2026-08-05 debug）。
+    expect(tmpl).toContain('{{USER_INPUT}}');
   });
 
   it('returns non-empty template for vars_update', () => {

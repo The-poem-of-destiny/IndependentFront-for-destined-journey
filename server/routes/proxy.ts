@@ -85,7 +85,22 @@ export async function forward(c: Context, suffix: string): Promise<Response> {
       ...(streaming ? { body: reqBody, duplex: 'half' as const } : {}),
     });
   } catch (e) {
-    return c.json({ error: `upstream unreachable: ${(e as Error).message}` }, 502);
+    // undici 的 fetch 失败时抛 TypeError("fetch failed")，真因（ECONNRESET /
+    // ENOTFOUND / ETIMEDOUT / 证书错 等）在 e.cause 里。只读 .message 会丢掉
+    // 这层关键信息，把 cause.code / cause.message 拼进去回给前端 + 打 server 日志。
+    const err = e as { message?: string; cause?: { code?: string; message?: string } };
+    const cause = err?.cause;
+    const detail = cause ? (cause.code ?? cause.message ?? String(cause)) : '';
+    const reason = detail
+      ? `${err?.message ?? 'fetch error'}: ${detail}`
+      : (err?.message ?? String(e));
+    console.error('[proxy] upstream fetch failed:', {
+      target: `${base}${suffix}`,
+      method: c.req.method,
+      message: err?.message,
+      cause: cause ? { code: cause.code, message: cause.message } : undefined,
+    });
+    return c.json({ error: `upstream unreachable: ${reason}` }, 502);
   }
 
   // 上游 body（ReadableStream）直接管道转发，SSE 不缓冲
