@@ -1319,9 +1319,13 @@ export const useCreateStore = defineStore('create', () => {
     // ═══ 真机修（2026-07-23）: 开局装备/道具/技能不再直接结构化落库 ═══
     // 此前直接落库的 inventory 只有 effects(描述字符串) 没有 stats(战斗数值)，且会让
     // request_dispatcher 误判为「已有物品」→ 永不触发 item_gen → 战斗数值全 0。
-    // 现在改为：选中项全部写进 buildOpeningPrompt 开场正文 → request_dispatcher 从
-    // history(开场白) 识别为新物品 → <item_gen_request> → item_gen 正式生成 stats+effects
-    // 落库（ADR: AI 填叙事字段，Code 补账务字段）。HP/MP/SP/五维等基础属性仍在此 Code 计算。
+    // 现在改为：选中项全部写进 buildOpeningPrompt 开场正文 → 开局轮 {{USER_INPUT}} 把
+    // 这份开场提示词原样喂给 request_dispatcher（含「--- 初始装备 --- / --- 初始技能 ---」
+    // 原始清单）→ dispatcher 按原名/原描述发 <item_gen_request> → item_gen 正式生成
+    // stats+effects 落库（ADR: AI 填叙事字段，Code 补账务字段）。
+    // ⚠️ 不能依赖 story 正文复述物品名 —— story 会改写名字（法师长袍→深蓝色天鹅绒长袍），
+    //    dispatcher 必须从 {{USER_INPUT}} 的原始清单认物品，否则名字漂移、数值被 item_gen 重掷。
+    // HP/MP/SP/五维等基础属性仍在此 Code 计算。
 
     return {
       id: charId,
