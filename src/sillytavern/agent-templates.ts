@@ -27,11 +27,9 @@ import { MONTH_NAMES } from './time-system';
 import {
   getEntriesForAgent,
   filterActiveEntries,
-  renderWorldBookEntries,
   prerenderWorldBookEntries,
 } from './worldbook-loader';
 import { getPreset, assemblePresetContent } from './preset-loader';
-import { buildZoneContext } from './context-visibility';
 import { resolveTemplateWithGlobals } from './template-resolver';
 import type { EjsCapabilityInput } from './ejs-capabilities';
 import { DANGEROUS_PATH_SEGMENTS } from './var-resolver';
@@ -91,36 +89,6 @@ export function defaultHistorySlice(agentId: string): number {
     default:
       return 800;
   }
-}
-
-/**
- * 格式化最近对话历史。层数 N → 注入最近 N*2 条 user/ai 消息；每条按 historySlice 截断。
- * 优先读 ctx.agentConfig.historyLayers/historySlice（per-agent 可配），回退到默认值。
- * ctx.agentConfig 可能为空（非 buildAgentMessages 路径, 如测试）, 此时代理 agentId 由 _proxyAgentId 提供。
- */
-function formatHistory(ctx: AgentContext): string {
-  const agentId = ctx.agentConfig?.agentId ?? (ctx as any)._proxyAgentId ?? '';
-  const layers = ctx.agentConfig?.historyLayers ?? defaultHistoryLayers(agentId);
-  const slice = ctx.agentConfig?.historySlice ?? defaultHistorySlice(agentId);
-  if (layers <= 0) return ''; // 0 层 = 不注入
-  const maxMessages = layers * 2; // user/ai 一对算一层
-  return ctx.history
-    .slice(-maxMessages)
-    .map((m) => {
-      const displayRole = m.role === 'system' ? 'assistant' : m.role;
-      return `[${displayRole}]: ${m.content.slice(0, slice)}`;
-    })
-    .join('\n');
-}
-
-/**
- * Phase 8.6: 注入最近对话历史作为"辅助上文"块 (含标题)。layers<=0 时返回空串。
- * 供后置抽取型 agent (vars_update/char_update/char_gen/craft_gen/item_gen) 在 story 输出前调用,
- * 让它们除本轮 story 外还能看到上一轮上下文 (如 vars_update 能据此判断前一轮位置)。
- */
-function recentHistoryBlock(ctx: AgentContext): string {
-  const h = formatHistory(ctx);
-  return h ? `**最近对话:**\n${h}\n\n` : '';
 }
 
 // ========== 工坊 Phase 2 / ADR-30: EJS 求值 pass 上下文 ==========

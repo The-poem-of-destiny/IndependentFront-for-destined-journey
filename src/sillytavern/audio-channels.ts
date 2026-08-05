@@ -22,7 +22,6 @@ import type {
   AudioContextLike,
   AudioElementLike,
   AudioGainLike,
-  AudioNodeLike,
   LoadBlobFn,
   MusicChannelOptions,
   MusicChannelState,

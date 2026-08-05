@@ -96,24 +96,6 @@ function makeRequest(marker: ItemGenRequestMarker) {
 }
 
 /** 最小 AgentConfig —— 让 buildAgentMessagesAsync 走生产路径（模板渲染 ITEM_REQUEST） */
-function makeItemGenConfig() {
-  return {
-    agentId: 'item_gen',
-    apiEndpointId: 'ep-test',
-    model: 'test-model',
-    enabled: true,
-    worldBookIds: [],
-    temperature: 0.7,
-    maxTokens: 4096,
-    topP: 1,
-    frequencyPenalty: 0,
-    presencePenalty: 0,
-    retryOnFail: true,
-    timeout: 30000,
-    userId: 'test-user',
-    promptTemplate: { fixedSystem: '', fixedExamples: '' },
-  } as any;
-}
 
 // ========== buildItemGenPatches (纯函数) ==========
 

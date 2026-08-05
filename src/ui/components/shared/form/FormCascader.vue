@@ -15,8 +15,6 @@ const emit = defineEmits<{
 const open = ref(false);
 const search = ref('');
 
-const filtered = ref(props.items);
-
 function select(item: { key: string; value: T }) {
   emit('update:modelValue', item.value);
   open.value = false;

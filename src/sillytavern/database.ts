@@ -39,7 +39,6 @@ import type {
   ImagePreset,
 } from './types-image';
 import type { CreatePreset } from '../ui/stores/create-store';
-import { DEFAULT_SETTINGS } from './types';
 
 /** 捏人预设记录 (DB 存储格式) */
 export interface CreatePresetRecord {

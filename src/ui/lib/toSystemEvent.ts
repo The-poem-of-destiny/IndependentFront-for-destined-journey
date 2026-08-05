@@ -25,7 +25,6 @@ import type {
   ItemGenOutput,
   CombatSummaryResult,
   QualityLevel,
-  CraftRating,
 } from '@engine/types';
 
 export function craftToEvent(output: CraftGenOutput): SystemEvent {

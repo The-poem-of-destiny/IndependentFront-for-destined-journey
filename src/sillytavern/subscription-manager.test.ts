@@ -26,7 +26,6 @@ describe('SubscriptionManager', () => {
   // S1: register → EventBus 触发 → 脚本执行
   // ═══════════════════════════════════════════════════════════
   it('S1: register → EventBus publish triggers script execution', async () => {
-    const executed: string[] = [];
     const codeResolver: CodeResolver = (key) => {
       if (key === 'reflect') return '$resource.modifyHp(target, -15);';
       return undefined;

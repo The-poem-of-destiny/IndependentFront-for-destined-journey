@@ -18,14 +18,7 @@ import {
   destroyEventBus,
   destroyAllEventBuses,
 } from './game-event';
-import type { ChainContext, ChainSubscription, ChainHandler } from './game-event';
-import type {
-  GameEvent,
-  GameEventType,
-  CombatActionRequest,
-  CraftActionRequest,
-  DiceRollPayload,
-} from './types';
+import type { CombatActionRequest, CraftActionRequest, DiceRollPayload } from './types';
 
 // ========== Helpers ==========
 

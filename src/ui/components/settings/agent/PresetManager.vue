@@ -181,13 +181,14 @@ async function loadPresets() {
         s.activePresetId = pd.presetId;
       }
     }
-  } catch {}
+  } catch {
+    // 预设加载失败（存储损坏 / 格式不认）：保持当前选择，面板照常可用
+  }
 }
 function selectPreset(id: string) {
   s.activePresetId = id;
   const p = s.presets.find((x: PresetItem) => x.id === id);
   if (p) {
-    const ps = p.settings;
     // 🔴 这里原本还有两行：`agentPromptDraft.value = ...` 与 `s.agentPromptEdited = true`。
     //    经查是**惰性**的：草稿绑的两个 textarea 只在非 story 分支渲染，而本组件只在
     //    story 分支存在；`saveAgentSettings` 与 `saveAsDefault` 对 story 都跳过草稿。
@@ -204,19 +205,6 @@ function openNewPreset() {
   presetForm.topP = '1';
   presetForm.freqPen = '0';
   presetForm.presPen = '0';
-  showPresetEditor.value = true;
-}
-function openEditPreset(p: PresetItem) {
-  editingPresetId.value = p.id;
-  const s = p.settings;
-  presetForm.name = p.name;
-  presetForm.description = p.description || '';
-  presetForm.mainPrompt = s.prompts?.[0]?.content || s.mainPrompt || s.system_prompt || '';
-  presetForm.temperature = s.temp_openai ?? s.temperature ?? '0.8';
-  presetForm.maxTokens = s.openai_max_tokens ?? s.max_tokens ?? '4096';
-  presetForm.topP = s.top_p_openai ?? s.top_p ?? '1';
-  presetForm.freqPen = s.freq_pen_openai ?? s.frequency_penalty ?? '0';
-  presetForm.presPen = s.pres_pen_openai ?? s.presence_penalty ?? '0';
   showPresetEditor.value = true;
 }
 async function savePreset() {
@@ -282,7 +270,9 @@ async function deletePreset(id: string) {
     await loadPresets();
     if (s.activePresetId === id) s.activePresetId = '';
     ui.toast('预设已删除', 'info');
-  } catch {}
+  } catch {
+    // 删除失败（DB 写不进去）：列表下次加载还会看到这条，用户可以重试
+  }
 }
 async function importStPreset() {
   const { savePreset: sp } = await import('@engine/database');

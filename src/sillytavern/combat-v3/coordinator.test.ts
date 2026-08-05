@@ -150,7 +150,7 @@ describe('Q-01：生产骰源接线（消灭恒定 10）', () => {
 
 describe('A2-4：abandon（C4）', () => {
   it('玩家命令队列耗尽 → coordinator 熔断 → abandon、commit 不调用、FP 不落库', async () => {
-    const { opts, commit, abandon, setQueue } = mkOpts();
+    const { opts, commit, setQueue } = mkOpts();
     setQueue([]); // 玩家不动作 → waitForCommand 抛错 → coordinator 熔断
     await expect(runCombatV3(opts)).rejects.toThrow();
     expect(commit).not.toHaveBeenCalled();

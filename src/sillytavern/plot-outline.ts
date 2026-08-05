@@ -183,16 +183,6 @@ function extractSelfClosingAttrs(
   return { attrs: result, rest: content.replace(regex, '') };
 }
 
-/** 提取非贪婪匹配的正则 — 提取指定模式后的剩余文本 */
-function extractPattern(
-  content: string,
-  regex: RegExp,
-): { match: RegExpExecArray | null; rest: string } {
-  const m = regex.exec(content);
-  if (!m) return { match: null, rest: content };
-  return { match: m, rest: content.replace(regex, '') };
-}
-
 /**
  * 解析 plot_outline Agent 的 XML 输出
  *

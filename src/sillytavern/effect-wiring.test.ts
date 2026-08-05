@@ -7,13 +7,12 @@
  *   3. unwireObject 拆除后订阅不再触发
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   getEffectWiring,
   peekEffectWiring,
   publishToEffectSystem,
   wireObject,
-  unwireObject,
   wireEffectSystem,
   unwireEffectSystem,
   clearAllEffectWirings,

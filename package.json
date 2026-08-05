@@ -17,8 +17,11 @@
     "format": "prettier --write \"{src,server,tests,scripts}/**/*.{ts,vue,css,mjs,cjs}\" \"*.{json,js,ts}\" \"*.md\" \"docs/**/*.md\"",
     "format:check": "prettier --check \"{src,server,tests,scripts}/**/*.{ts,vue,css,mjs,cjs}\" \"*.{json,js,ts}\" \"*.md\" \"docs/**/*.md\"",
     "ejs:fixture": "node scripts/scramble-worldbook-ejs.mjs",
-    "lint": "eslint \"{src,server,tests,scripts}/**/*.{ts,vue,mjs,cjs}\" \"*.config.{ts,js}\"",
-    "lint:fix": "eslint \"{src,server,tests,scripts}/**/*.{ts,vue,mjs,cjs}\" \"*.config.{ts,js}\" --fix"
+    "knip": "knip",
+    "knip:ratchet": "node scripts/knip-ratchet.mjs",
+    "knip:update": "node scripts/knip-ratchet.mjs --update",
+    "lint": "eslint \"{src,server,tests,scripts}/**/*.{ts,vue,mjs,cjs}\" \"*.config.{ts,js}\" --max-warnings 0",
+    "lint:fix": "eslint \"{src,server,tests,scripts}/**/*.{ts,vue,mjs,cjs}\" \"*.config.{ts,js}\" --fix --max-warnings 0"
   },
   "keywords": [
     "sillytavern",
@@ -35,8 +38,7 @@
     "openseadragon": "^6.0.2",
     "pinia": "^2.3.1",
     "quickjs-emscripten": "^0.32.0",
-    "vue": "^3.5.38",
-    "vue-router": "^4.6.4"
+    "vue": "^3.5.38"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
@@ -46,8 +48,11 @@
     "@vue/test-utils": "^2.4.11",
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-unused-imports": "^4.4.1",
     "fake-indexeddb": "^6.2.5",
+    "fast-check": "^4.9.0",
     "jsdom": "^29.1.1",
+    "knip": "^6.31.0",
     "prettier": "^3.9.6",
     "sharp": "^0.35.3",
     "typescript": "^5.4.0",

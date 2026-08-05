@@ -1006,7 +1006,6 @@ function parseCharGenXML(xml: string): CharGenOutput {
     const lawMatches = ascXML.matchAll(/<law\b([^>]*?)>([\s\S]*?)<\/law>/g);
     for (const m of lawMatches) {
       const attrs = parseAttrsStr(m[1]);
-      const innerText = m[2]?.trim() ?? '';
       ascLaws.push({
         name: attrs['name'] ?? '',
         description: attrs['description'] ?? '',

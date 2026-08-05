@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { FixtureValidationError, replayCombat, validateFixture } from './replay';
+import { replayCombat, validateFixture } from './replay';
 import type { CombatFixture, DiceChannel } from './types';
 
 const DEFAULT_SPLIT: Record<DiceChannel, number> = {

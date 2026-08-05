@@ -15,7 +15,7 @@
 import type { EventBus } from './game-event';
 import type { GameEvent, GameEventType } from './types';
 import type { ScriptContext } from './script-executor';
-import { executeScript, createScriptEffects } from './script-executor';
+import { executeScript } from './script-executor';
 import type { ScriptEffects } from './script-executor';
 
 // ═══════════════════════════════════════════════════════════

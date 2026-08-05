@@ -49,7 +49,6 @@ import {
   getSceneImage,
   getSceneImageBlob,
   getSceneImages,
-  getSceneImagesByMessage,
   saveSceneImage,
 } from '@engine/database';
 import { detach } from './db-write';

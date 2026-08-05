@@ -22,4 +22,6 @@ jobs:
       - run: npm run typecheck:tools
       - run: npm run format:check
       - run: npm run lint
+      # 死代码棘轮：只许变少，不许变多（基线 knip-baseline.json，说明见 scripts/knip-ratchet.mjs）
+      - run: npm run knip:ratchet
       - run: npm run test:run

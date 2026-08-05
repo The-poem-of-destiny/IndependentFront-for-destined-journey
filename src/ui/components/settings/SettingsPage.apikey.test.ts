@@ -29,17 +29,41 @@ import apiSectionSource from '@ui/components/settings/ApiSection.vue?raw';
 /**
  * 抠出绑定了 v-model="apiForm.apiKey" 的那个 <input ...> 标签全文（含多行属性）。
  *
- * 🔴 `[^>]*` 在这个标签上是**有条件成立**的：`:type` 的表达式里含
- *    `apiForm.apiKey.length > 10`，那个 `>` 会被当成标签结束。今天能匹配到
- *    `@input`，靠的是 `@input` 排在 `:type` **之前**（属性顺序！）。
- *    `eslint --fix` 的 `vue/attributes-order` 会把 `:type` 提到前面 —— 一旦提了，
- *    这个正则就再也看不见 `@input`，测试红而代码没错。Q-25 期间踩过一次。
- *    真要根治得换成 HTML 解析或直接 mount（Q-20 的建议），不是在这里加转义。
+ * 🔴 **这里曾经是个 `[^>]*` 正则，而它是有条件成立的**：`:type` 的表达式里含
+ *    `apiForm.apiKey.length > 10`，那个 `>` 会被当成标签结束；能匹配到 `@input`
+ *    全靠 `@input` 恰好排在 `:type` 之前。上一版注释已经预言了它会怎么死 ——
+ *    「`eslint --fix` 的 `vue/attributes-order` 会把 `:type` 提到前面，
+ *    一旦提了这个正则就再也看不见 `@input`，测试红而代码没错」。
+ *    2026-08-05 收紧 lint 时果然应验（`--fix` 把 `@input` 挪到了 `placeholder` 之后）。
+ *
+ *    现在改成**带引号感知的扫描**：从 `<input` 起逐字符走，属性值内的 `>` 不算结束。
+ *    属性怎么排都不影响，这条断言从此只关心「绑没绑 @input」这件事本身。
  */
 function extractApiKeyInputTag(source: string): string {
-  const re = /<input\b[^>]*v-model="apiForm\.apiKey"[^>]*>/s;
-  const m = source.match(re);
-  return m ? m[0] : '';
+  for (
+    let start = source.indexOf('<input');
+    start !== -1;
+    start = source.indexOf('<input', start + 1)
+  ) {
+    let quote: string | null = null;
+    for (let i = start; i < source.length; i++) {
+      const ch = source[i];
+      if (quote) {
+        if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        continue;
+      }
+      if (ch === '>') {
+        const tag = source.slice(start, i + 1);
+        if (tag.includes('v-model="apiForm.apiKey"')) return tag;
+        break;
+      }
+    }
+  }
+  return '';
 }
 
 describe('ApiSection.vue API Key 编辑态', () => {

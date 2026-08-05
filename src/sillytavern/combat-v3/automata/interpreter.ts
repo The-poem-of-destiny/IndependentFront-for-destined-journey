@@ -35,19 +35,6 @@ export class ExprEvalError extends Error {
   }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// 内部类型（window ctx 求值面）
-// ──────────────────────────────────────────────────────────────────────────────
-
-// 递归解析出 window ctx 的某个根段（self / target / damage / round / depth / charges）
-type CtxRoot =
-  | { type: 'self'; v: unknown }
-  | { type: 'target'; v: unknown }
-  | { type: 'damage'; v: unknown }
-  | { type: 'round'; v: unknown }
-  | { type: 'depth' }
-  | { type: 'charges'; v: unknown };
-
 // 每窗口暴露的根段白名单（用于编译校验 #7 与运行时检查）
 const WINDOW_ROOTS: Readonly<Record<WindowKey, readonly string[]>> = {
   'round.open': ['self', 'round', 'charges'],

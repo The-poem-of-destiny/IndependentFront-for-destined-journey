@@ -5,7 +5,7 @@
  * 事件生成/版本更新/设置判断/事件同步等全部导出函数。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { PlotOutline, PlotSettings, PlotEvent, CharacterState } from './types';
+import type { PlotOutline, PlotSettings, PlotEvent } from './types';
 
 // ========== Mock database ==========
 

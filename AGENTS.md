@@ -57,6 +57,12 @@ node -e "const fs=require('fs');const f=process.argv[1];const s=fs.readFileSync(
 三条判据缺一不可：**U+FFFD 为 0**、**控制字符为 0**、**JSON 能解析**。
 不为 0 就别提交 —— 编码坏字**不会让测试变红**，只会让模型看到坏输入。
 
+> ✅ **2026-08-05 起这条已自动化**：`tests/encoding-invariants.test.ts` 把上面三条判据变成了 CI 断言，
+> 扫 `data/` 与 `src|server|tests|scripts` 源码（`reference/` 不扫——上游语料自带坏字）。
+> 它还多扫一遍**解析后的 JSON 值**：合法转义写出来的退格源码干净、`JSON.parse` 也不报错，
+> 但落进字符串值里仍是真退格。上线当天就在 `ejs-backend-parity.test.ts` 逮到两个真 0x08。
+> **手工命令仍建议在改完当场跑一次**（比等 CI 快），但漏跑不再等于漏网。
+
 > 配套的一条纪律：在脚本里拼这些转义时，用**原始字符串**或 `chr(92)` 拼，
 > 别在多层引号里堆反斜杠。2026-08-05 那轮就是这样先写坏了 JSON、又写坏了正则；
 > 连本节初稿都栽在同一处 —— 描述这个坑的那两个例子自己被转义吃掉了。
@@ -242,6 +248,11 @@ npm run build          # 编译 TypeScript (tsc) → dist/
 npm run typecheck      # 仅类型检查，不输出文件 (tsc --noEmit)
 npm run test           # 运行 Vitest 测试套件（watch 模式）
 npm run test -- --run  # 单次运行（非 watch 模式）
+npm run lint           # ESLint 闸门（--max-warnings 0：一条 warning 都会挂红）
+npm run lint:fix       # 同上 + 自动修（会自动删未引用导入）
+npm run knip           # 死代码原始报告（人看的）
+npm run knip:ratchet   # 死代码棘轮闸门（CI 跑这个：只许变少不许变多）
+npm run knip:update    # 清理完死代码后收紧 knip-baseline.json
 npm run dev            # 开发服务器（dev.bat：自动杀残留进程 + 固定 5173 端口）
                        # 🔴 改 dev.bat 前必读 docs/reference/dev-bat-notes.md ——
                        #    注释一律纯 ASCII（中文注释会让 cmd 把注释片段当命令执行），
@@ -389,6 +400,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 工坊 P3   | 社交面（Discord 登录/点赞/订阅，D18-D25）                  | ✅ 真机已过         |
 | 工坊 P4   | 上游对齐（封面链/类型徽章/我的项目/更新 diff/投稿/审核）   | ✅ B4 真机已过      |
 | 图像 v1   | 情景插画（NovelAI 单家 + 标记锚点 + 三档开关 + CG 图鉴）   | ✅ 待真机           |
+| 测试加固  | 编码闸门 / knip 棘轮 / 属性测试 / lint 收紧（四种新闸门）  | ✅                  |
 | 真机迭代  | debug loop 持续修复                                        | 🔄                  |
 
 > 🔓 **工坊入口已开放（2026-08-04）**：首页「创意工坊」按钮的 `HomePage.vue` `WORKSHOP_ENTRY_ENABLED` 已置 `true`。以下执行边界（2026-08-01 安全审计，2026-08-03 视觉边界修订）**一条没变**，仍是读工坊/正则代码时的必读；唯一遗留缺口是**脚本没有 CPU 预算**（恶意规则可让那一个 iframe 空转，宿主页面不受影响）。SEC-02 已由 QuickJS 隔离后端收口；SEC-01 不再用 DOM 白名单牺牲 replacement 兼容，而是把每次富正则命中放进各自无 same-origin 的 `sandbox="allow-scripts"` iframe，并使用 `credentialless` + `no-referrer`；未命中正文始终由宿主原生文本面渲染，正则 CSS/布局无法触及普通正文或其它命中。代价是跨命中 DOM 查询不再兼容。外部 HTTP(S) 资源与原生网络 API 为兼容性刻意放行；form、popup、download、top navigation、嵌套 frame、parent DOM、应用 Dexie/storage 与 API Key 仍不可达，应用自有 `/api` 也拒绝 `Origin: null`。正则唯一持久权限是 Dexie v16 `regexStorage`：所有正则、信任级别与预览共享同一个不可信命名空间，iframe 内以同步 `localStorage` 镜像和 `window.regexStorage` 别名使用，跨 frame 持久化/广播；`sessionStorage` 仍只活在当前 frame，IndexedDB 不开放。规则可向远程或本地网络发请求，也可外传该命中的 replacement/capture 与 regex-namespace 数据，这是当前威胁模型明确接受的暴露。**但这套全开契约只给「用户自己装过的规则」**：模型输出里合成的 `<item_info>` / `<task_info>` 卡片是另一档（`BeautifierMatchSegment.origin === 'model'`）—— CSP 只放行带 nonce 的宿主引导脚本，卡片自带 `<script>` / inline handler 由浏览器拦掉，`connect-src 'none'`，也不注入 `regexStorage` 快照；样式/图片照旧，视觉不降级。理由是模型正文会被世界书/角色卡/工坊文案里的注入牵着走，不该顺带拿到脚本面与网络出口。2026-08-02 公共工坊快照为 303 项目 / 99 条正则（0 编译失败）：60 条外部资源规则不再降级，16 条 parent 耦合与 14 条宿主 API 耦合仍受限；storage 词法命中 8 条，精查为 5 项目 6 条 active + 2 条仅注释，active 均只用 `getItem`/`setItem`/`removeItem` 且现已兼容。脚本仍无 CPU 预算（入口开放后这条仍未补）；已装规则按存档启用状态运行。详见 `docs/reviews/2026-08-01-repository-review.md` 与 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。

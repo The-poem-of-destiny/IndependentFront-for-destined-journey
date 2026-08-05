@@ -9,7 +9,7 @@
  * 5. 持久化到 IndexedDB
  */
 
-import type { MemoryRecord, AgentContext } from './types';
+import type { MemoryRecord } from './types';
 import { getMemories, saveMemory } from './database';
 import { computeEmbedding } from './memory-store';
 // Q-05：从模型输出抢救 JSON 的唯一入口

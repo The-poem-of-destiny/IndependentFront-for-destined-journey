@@ -81,11 +81,6 @@ const selectedCharacter = computed<CharacterState | undefined>(() =>
 );
 
 /** 当前选中单位的 CombatParticipant（取名字用） */
-const selectedParticipant = computed<CombatParticipant | undefined>(() => {
-  const combat = game.activeCombat;
-  if (!combat || !selectedUnitId.value) return undefined;
-  return combat.participants.find((p) => p.characterId === selectedUnitId.value);
-});
 
 // ── 技能列表（仅 active 类型可主动施放）──
 const availableSkills = computed<Skill[]>(() => {

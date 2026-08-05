@@ -26,7 +26,6 @@ import {
   $var,
   VAR_NAMESPACES,
 } from './var-resolver';
-import type { VarChange } from './var-resolver';
 
 // ========== 测试辅助 ==========
 

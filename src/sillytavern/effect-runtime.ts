@@ -15,7 +15,6 @@ import type {
   EffectDefinition,
   EffectResult,
   StatePatch,
-  GameEvent,
   VarsPatch,
   StatusEffectPayload,
   CharacterUpdatePayload,
@@ -25,7 +24,7 @@ import type {
   CharacterState,
 } from './types';
 import { executeDiceRoll } from './dice';
-import { getCharacter, getMemories } from './database';
+import { getCharacter } from './database';
 
 // ========== EffectRuntime ==========
 

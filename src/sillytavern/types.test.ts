@@ -7,7 +7,6 @@ import {
   resolvePlotTree,
   DEFAULT_AGENT_PIPELINE,
   DEFAULT_SETTINGS,
-  DEFAULT_AGENT_PIPELINE as pipeline,
 } from './types';
 import type { PlotEvent, PlotEventNode, SaveSlot, Snapshot } from './types';
 

@@ -41,16 +41,6 @@ function mockFetch(content: string, tokens = 50, cacheHit = false) {
   });
 }
 
-function mockFetchError(status = 500) {
-  return vi.fn().mockResolvedValue({
-    ok: false,
-    status,
-    headers: new Headers(),
-    json: async () => ({}),
-    text: async () => 'Error body',
-  });
-}
-
 function makeEndpoint(overrides: Partial<ApiEndpoint> = {}): ApiEndpoint {
   return {
     id: 'ep_1',
@@ -408,9 +398,7 @@ describe('AgentOrchestrator — 基本执行', () => {
   });
 
   it('同阶段 Agent 应并行执行', async () => {
-    const startTimes: Record<string, number> = {};
     globalThis.fetch = vi.fn().mockImplementation(() => {
-      const agentId = 'unknown'; // can't easily get this from fetch mock alone
       return Promise.resolve({
         ok: true,
         status: 200,

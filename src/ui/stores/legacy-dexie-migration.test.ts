@@ -46,7 +46,6 @@ function makeDb(opts: { throwOnTransaction?: boolean } = {}) {
   };
 }
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 function run(over: Record<string, any>) {
   const settings: Record<string, unknown> = over.settings ?? {};
   const persistSettings = over.persistSettings ?? vi.fn();
@@ -65,7 +64,6 @@ function run(over: Record<string, any>) {
     ...over.opts,
   });
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 describe('dedupeById', () => {
   it('无碰撞时原样返回，不产生任何重命名', () => {

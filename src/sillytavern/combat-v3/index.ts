@@ -17,7 +17,6 @@
 import { createSession } from './kernel';
 import type { CombatDefinitionBundle, CombatSession, CombatState } from './types';
 import { runCombatV3 } from './coordinator';
-import type { CombatV3Result, RunCombatV3Opts } from './coordinator';
 
 /** 开战入参：新建一场战斗（NewCombat） */
 export interface NewCombat {

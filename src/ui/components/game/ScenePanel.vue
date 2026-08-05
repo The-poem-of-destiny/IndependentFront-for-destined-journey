@@ -5,17 +5,13 @@ import { tierVarByName } from '../../lib/quality-colors';
 import { useHoverPopup } from '../../composables/useHoverPopup';
 import AssetMedia from '../shared/AssetMedia.vue';
 import { ASSET_TYPE_FALLBACK_CHAIN } from '@engine/asset-resolve';
-import { useSettingsStore } from '../../stores/settings-store';
 import { markNewsRead } from '@engine/save-profile';
 import { getAffectionLabel } from '@engine/affection-system';
 import { MONTH_NAMES, WEEKDAY_NAMES, getTimeOfDay } from '@engine/time-system';
 import { nameColorVar, initialsOf } from '../../utils/name-color';
-import { formatRel } from '../../utils/time-format';
 import AppTabs from '../shared/AppTabs.vue';
 
 const game = useGameStore();
-const settings = useSettingsStore();
-const s = settings.settings;
 
 // ═══ 时间 ═══
 const timeInfo = computed(() => {

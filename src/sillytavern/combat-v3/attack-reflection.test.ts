@@ -13,10 +13,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { openCombat } from './index';
-import { createCombatState, hashBundle } from './state';
+import { createCombatState } from './state';
 import { buildIndex } from './automata/index-active';
 import { compileParsedEffect } from './automata/builtins';
-import { EMPTY_CHANGES, type CombatState, type DomainEvent } from './types';
+import { type CombatState, type DomainEvent } from './types';
 import type {
   CombatDefinitionBundle,
   CombatParticipant,

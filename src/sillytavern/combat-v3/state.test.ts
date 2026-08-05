@@ -10,7 +10,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyPending, createCombatState, toView, applyOutcome } from './state';
 import { emptyChanges } from './phases/outcome';
-import type { CombatState } from './types';
 import { mkBundle, mkParticipant } from './test-utils';
 
 describe('createCombatState / toView', () => {

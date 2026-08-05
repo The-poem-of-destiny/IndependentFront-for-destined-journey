@@ -15,9 +15,7 @@ import type {
   CharacterState,
   MemoryRecord,
   PlotEvent,
-  ZoneId,
   VisibilityLevel,
-  VariableZone,
 } from './types';
 
 // ========== Helpers ==========
@@ -205,7 +203,7 @@ describe('Visibility Matrix', () => {
   });
 
   it('each agent has exactly 8 zone keys', () => {
-    for (const [agentId, matrix] of Object.entries(VISIBILITY_MATRIX)) {
+    for (const [_agentId, matrix] of Object.entries(VISIBILITY_MATRIX)) {
       const keys = Object.keys(matrix);
       expect(keys).toHaveLength(8);
       for (const zid of ZONE_IDS) {

@@ -9,12 +9,7 @@
  */
 
 import type { WorldBook, WorldBookEntry, AgentConfig } from './types';
-import {
-  compileEjsEntry,
-  executeEjsEntry,
-  type CompiledEjsEntry,
-  type EjsEvalContext,
-} from './ejs-runtime';
+import { executeEjsEntry, type EjsEvalContext } from './ejs-runtime';
 import {
   clearEjsBackendCache,
   getCompiledEntry,

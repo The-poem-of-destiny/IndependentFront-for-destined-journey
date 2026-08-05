@@ -26,10 +26,6 @@ function withDivinity(bundle: CombatDefinitionBundle, divs: Record<string, numbe
   return state;
 }
 
-function diceStateConsumedAfter(state: CombatState, from: CombatState): number {
-  return state.dice.current.cursors.intentCheck - from.dice.current.cursors.intentCheck;
-}
-
 describe('A4-4 意图对抗 divinity 压制（check.intent）', () => {
   it('差 ≥5 攻高必成：不消费 intentCheck 骰（cursor 不前进）', () => {
     const bundle = mkBundle({

@@ -708,7 +708,7 @@ export function createDefaultPreset(): Omit<ChatPreset, 'id' | 'createdAt' | 'up
       scenario_format: '',
       personality_format: '',
       prompts: [],
-      prompt_order: DEFAULT_PROMPT_ORDER.map((p, i) => ({ ...p, enabled: true })),
+      prompt_order: DEFAULT_PROMPT_ORDER.map((p, _i) => ({ ...p, enabled: true })),
     },
   };
 }
@@ -1230,7 +1230,9 @@ export function resolvePlotTree(flatEvents: PlotEvent[]): PlotEventNode[] {
   const roots: PlotEventNode[] = [];
 
   for (const e of flatEvents) {
-    const { childrenIds, ...rest } = e;
+    // childrenIds 是扁平存储用的，树节点改用 children —— 解构剥掉它（重命名成 `_` 前缀
+    // 才能同时满足「必须占位」与 no-unused-vars）
+    const { childrenIds: _childrenIds, ...rest } = e;
     map.set(e.id, { ...rest, children: [] });
   }
   for (const node of map.values()) {

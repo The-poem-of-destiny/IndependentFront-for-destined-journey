@@ -187,7 +187,6 @@ async function handleImport() {
 }
 
 async function batchImport(imports: CreatePreset[], overwrite: boolean) {
-  let count = 0;
   for (const p of imports) {
     if (!p.name) continue;
     const existing = presets.value.find((ep) => ep.name === p.name);
@@ -200,7 +199,6 @@ async function batchImport(imports: CreatePreset[], overwrite: boolean) {
       updatedAt: now,
       data: p,
     });
-    count++;
   }
   importConflict.value = null;
   await loadPresets();

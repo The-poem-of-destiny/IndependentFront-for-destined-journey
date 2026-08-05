@@ -41,9 +41,6 @@ const game = useGameStore();
 function matchLocationToMarker(location: string, markers: MapMarker[]): MapMarker | null {
   if (!location) return null;
 
-  // 去括号/空格
-  const q = location.trim().toLowerCase();
-
   // 尝试 location-db 解析 → 中文名
   const tryNames = [location];
   const node = getLocationNode(DEFAULT_LOCATIONS, location);

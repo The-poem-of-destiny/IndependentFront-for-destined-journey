@@ -5,7 +5,6 @@ import { describe, it, expect } from 'vitest';
 import {
   executeScript,
   executeHook,
-  createScriptEffects,
   resolveScriptRef,
   executeInit,
   executeCleanup,
@@ -205,8 +204,6 @@ describe('resolveScriptRef', () => {
 
   // 🆕 递归深度保护
   it('returns undefined after exceeding recursion depth 5', () => {
-    // 构造循环引用: a → @parent.b → @parent.c → @parent.d → @parent.e → @parent.f → ...
-    const scripts = { a: '@parent.b' };
     // 传入深度为5时应该返回 undefined
     expect(resolveScriptRef('@parent.nonexistent', {}, {}, 6)).toBeUndefined();
   });

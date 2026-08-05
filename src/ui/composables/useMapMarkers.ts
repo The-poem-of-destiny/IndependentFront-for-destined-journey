@@ -5,7 +5,7 @@
  * 负责标记的 CRUD、Overlay 同步、搜索过滤。
  */
 
-import { ref, computed, shallowRef, type Ref } from 'vue';
+import { ref, computed, type Ref } from 'vue';
 import OpenSeadragon from 'openseadragon';
 import type { MapMarker, MapMarkerIcon } from '@engine/types';
 

@@ -13,8 +13,6 @@
 import type {
   GameEvent,
   GameEventType,
-  StatePatch,
-  EffectDefinition,
   CombatActionRequest,
   CraftActionRequest,
   DiceRollPayload,

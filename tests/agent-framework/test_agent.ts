@@ -70,9 +70,6 @@ API 配置 (按优先级 CLI > 本地文件 > 默认值):
   process.exit(0);
 }
 
-const API_URL = args['api-url'] || 'http://localhost:1234/v1';
-const API_KEY = args['api-key'] || 'not-needed';
-const MODEL = args.model || 'gpt-3.5-turbo';
 const SAVE_PATH = args.save;
 const AGENT_ID = args.agent;
 const DRY_RUN = args['dry-run'];
@@ -89,7 +86,9 @@ try {
     ? CONFIG_PATH
     : 'tests/agent-framework/.api-config.json';
   if (fs.existsSync(configPath)) localApiConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-} catch {}
+} catch {
+  // 本地 API 配置是可选的（且不进 git）：读不到就走下面的 CLI 参数与默认值
+}
 const API_URL_FINAL = args['api-url'] || localApiConfig.apiUrl || 'http://localhost:1234/v1';
 const API_KEY_FINAL = args['api-key'] || localApiConfig.apiKey || 'not-needed';
 const MODEL_FINAL = args.model || localApiConfig.model || 'gpt-3.5-turbo';
@@ -219,8 +218,6 @@ function resolveProjectPath(relativePath: string): string {
   // 先试当前 cwd 的相对路径
   if (fs.existsSync(relativePath)) return relativePath;
 
-  // 如果 cwd 是 tests/agent-framework/，往上两级找
-  const parts = relativePath.split('/');
   const fromRoot = '../../' + relativePath;
   if (fs.existsSync(fromRoot)) return fromRoot;
 
@@ -360,7 +357,6 @@ function analyzeTemplate(
   content: string,
   localParams?: Record<string, string>,
 ): TemplateSourceInfo {
-  const hasConfigTemplate = !!agents[agentId]?.template;
   const hasDefaultTemplate = getDefaultTemplate(agentId) !== '';
   const templateSource = cfg.template
     ? 'agent-config.json'

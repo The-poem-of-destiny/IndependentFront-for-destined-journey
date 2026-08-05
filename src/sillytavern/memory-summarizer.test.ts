@@ -37,7 +37,6 @@ import {
   createCompressionSummaryMemory,
   MEMORY_MIN_CHARS,
 } from './memory-summarizer';
-import type { MemorySummaryOutput } from './memory-summarizer';
 
 // ═══════════════════════════════════════════════════════════
 // Helpers

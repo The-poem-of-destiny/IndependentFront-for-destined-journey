@@ -12,11 +12,7 @@ import { reduce } from '../reducer';
 import { createCombatState, applyOutcome } from '../state';
 import { checkTerminal, settle } from './terminal';
 import type { CombatState } from '../types';
-import { mkBundle, mkAttack, mkPass, mkAction, mkSettle } from '../test-utils';
-
-function s0(bundle = mkBundle()): CombatState {
-  return createCombatState(bundle);
-}
+import { mkBundle, mkPass, mkSettle } from '../test-utils';
 
 describe('A1-6：终局四出口', () => {
   it('HP 全灭（enemy 全灭）→ checkTerminal 返回 hp_zero', () => {

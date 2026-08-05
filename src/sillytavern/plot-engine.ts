@@ -9,16 +9,11 @@
  * 5. 事件完成/失败 → 自动生成关联记忆
  */
 
-import type { PlotEvent, PlotOutline, MemoryRecord, CharacterState } from './types';
+import type { PlotEvent, MemoryRecord } from './types';
 import { getPlotEvents, savePlotEvent, savePlotEvents } from './database';
 // Q-05：从模型输出抢救 JSON 的唯一入口
 import { parseModelJson, asArray, asString } from './model-json';
-import {
-  getActiveOutline,
-  updateOutlineVersion,
-  outlineToEvents,
-  syncOutlineEvents,
-} from './plot-outline';
+import { getActiveOutline, updateOutlineVersion } from './plot-outline';
 
 // ========== 条件评估 ==========
 

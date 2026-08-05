@@ -24,7 +24,6 @@ import type {
   CharacterState,
   ApiEndpoint,
   AgentContext,
-  ToolDefinition,
 } from './types';
 import { executeToolCall } from './agent-tools';
 

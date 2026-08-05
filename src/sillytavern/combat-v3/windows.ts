@@ -30,7 +30,7 @@ import type {
   WindowKey,
 } from './types';
 import { MAX_AUTOMATON_PER_WINDOW, MAX_REFLECTION_DEPTH } from './types';
-import { evaluate, ExprEvalError } from './automata/interpreter';
+import { evaluate } from './automata/interpreter';
 import { parseExpression } from './automata/parser';
 import { validateBatch } from './intents';
 
