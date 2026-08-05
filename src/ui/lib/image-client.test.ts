@@ -357,8 +357,27 @@ describe('§12.2 错误分类', () => {
     });
   });
 
-  it('content-type 不是 zip → bad-response（判定来自 parseNaiZip，本模块不长第二套）', async () => {
+  it('🔴 content-type 说是 JSON 但字节是 zip → 成功（判定来自 parseNaiZip：字节是权威）', async () => {
+    // 2026-08-04 真机：NAI 成功响应报的是 `binary/octet-stream`。此前这里判死 content-type，
+    // 于是一张已扣点数的图被自己扔掉。header 会变、zip 本地文件头不会 —— 信后者。
     const { res } = fakeResponse({ contentType: 'application/json' });
+    stubFetch(res);
+    const result = await generateNaiImage({ token: 'tk', body: requestBody() });
+    expect(result.ok).toBe(true);
+  });
+
+  it('真机实测的 binary/octet-stream 也照样解出图', async () => {
+    const { res } = fakeResponse({ contentType: 'binary/octet-stream' });
+    stubFetch(res);
+    const result = await generateNaiImage({ token: 'tk', body: requestBody() });
+    expect(result.ok).toBe(true);
+  });
+
+  it('字节根本不是 zip → bad-response（这条防线没被削弱）', async () => {
+    const { res } = fakeResponse({
+      contentType: 'application/json',
+      bytes: strToU8('{"statusCode":400,"message":"nope"}'),
+    });
     stubFetch(res);
     const result = await generateNaiImage({ token: 'tk', body: requestBody() });
     expect(result).toMatchObject({

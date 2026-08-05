@@ -276,6 +276,19 @@ function badResponse(detail: string): ImageGenFailure {
   };
 }
 
+/**
+ * 失败诊断用：开头 4 个字节的十六进制。
+ *
+ * 排查「上游到底返了什么」时这是最省事的一眼 —— `50 4b 03 04` 是 zip、`7b` 开头多半是
+ * JSON、`3c 21 44 4f` 是 HTML 拦截页（EJS 那边真踩过这个）。
+ */
+function magicOf(bytes: Uint8Array): string {
+  if (bytes.length === 0) return '(空)';
+  return Array.from(bytes.slice(0, 4))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join(' ');
+}
+
 /** 已知图片扩展名（小写，含点） */
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'];
 
@@ -317,11 +330,19 @@ function looksLikeImage(name: string, bytes: Uint8Array): boolean {
 /**
  * NAI 响应 zip → PNG 字节。
  *
- * - `contentType` 不含 `zip` → `bad-response`（多半是上游把错误体当 JSON 返回了，
- *   而调用方**不该**在这里 `await res.json()` —— §12.1 第 2 条）
- * - zip 解不开 → `bad-response`
+ * - zip 解不开 → `bad-response`（detail 里带上 content-type 与开头几个字节）
  * - zip 解出 0 张图 → `bad-response`
  * - 否则按 zip 内条目顺序返回全部图片字节
+ *
+ * 🔴 **字节是权威，content-type 只是线索**（2026-08-04 真机纠正）。
+ *    这里原本先看 `contentType.includes('zip')`，不含就直接 `bad-response`。真机第一次
+ *    拿到图时上游报的是 **`binary/octet-stream`** —— 于是一张**已经生成、已经扣了点数**
+ *    的图被我们自己扔掉，还报成「NovelAI 返回了看不懂的内容」。header 是人家随时会换的
+ *    自由字段，zip 的本地文件头不是；用可变的东西去否决不可变的东西，方向反了。
+ *    现在一律先试解包，成功就是成功；content-type 只进失败时的 `detail` 帮人排查。
+ *
+ * 🔴 这条**不削弱**「上游把错误体当 JSON 返回」的防线：JSON 正文不是合法 zip，
+ *    `unzipSync` 照样抛，只是错误信息里现在同时有 content-type 和魔数。
  *
  * 🔴 条目顺序取自 `unzipSync` 返回对象的键序（= zip 里的条目顺序）。**纯数字文件名**会被
  *    JS 对象的整数键规则提到最前面；NAI 出的是 `image_0.png`，不受影响，但换 provider 时要记得。
@@ -330,15 +351,14 @@ export function parseNaiZip(
   bytes: Uint8Array,
   contentType: string,
 ): { ok: true; images: Uint8Array[] } | ImageGenFailure {
-  if (!contentType.toLowerCase().includes('zip')) {
-    return badResponse(`content-type: ${contentType || '(空)'}`);
-  }
-
   let entries: Record<string, Uint8Array>;
   try {
     entries = unzipSync(bytes);
   } catch (err) {
-    return badResponse(`zip 解包失败: ${err instanceof Error ? err.message : String(err)}`);
+    const reason = err instanceof Error ? err.message : String(err);
+    return badResponse(
+      `zip 解包失败: ${reason}（content-type: ${contentType || '(空)'}, 开头字节: ${magicOf(bytes)}）`,
+    );
   }
 
   const images: Uint8Array[] = [];

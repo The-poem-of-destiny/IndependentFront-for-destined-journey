@@ -324,26 +324,31 @@ describe('parseNaiZip', () => {
     expect(Array.from(result.images[0])).toEqual(Array.from(png));
   });
 
-  it('content-type 不含 zip → bad-response（多半是上游把错误体当 JSON 返了）', () => {
-    const result = parseNaiZip(zipSync({ 'image_0.png': fakePng(5) }), 'application/json');
+  /**
+   * 🔴 2026-08-04 真机纠正：**字节是权威，content-type 只是线索**。
+   *
+   * 原实现先看 `contentType.includes('zip')`，不含就直接判失败。真机第一次成功出图时
+   * NAI 报的是 `binary/octet-stream` —— 一张**已生成、已扣点数**的图被我们自己扔掉，
+   * 还报成「返回了看不懂的内容」。下面这一组就是那次教训的回归。
+   */
+  it('🔴 content-type 是 binary/octet-stream（真机实测值）→ 照样解出图', () => {
+    const result = parseNaiZip(zipSync({ 'image_0.png': fakePng(5) }), 'binary/octet-stream');
 
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.kind).toBe('bad-response');
-    expect(result.message).toBe('NovelAI 返回了看不懂的内容');
-    expect(result.retryable).toBe(true);
-    expect(result.detail).toContain('application/json');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.images).toHaveLength(1);
   });
 
-  it('content-type 为空串 → bad-response', () => {
-    const result = parseNaiZip(zipSync({ 'image_0.png': fakePng(6) }), '');
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.kind).toBe('bad-response');
+  it('🔴 content-type 说是 JSON 但字节确实是 zip → 信字节', () => {
+    expect(parseNaiZip(zipSync({ 'image_0.png': fakePng(6) }), 'application/json').ok).toBe(true);
+  });
+
+  it('🔴 content-type 为空串也不影响 —— 缺个 header 不该毁掉一张付过钱的图', () => {
+    expect(parseNaiZip(zipSync({ 'image_0.png': fakePng(7) }), '').ok).toBe(true);
   });
 
   it('content-type 大小写/带 charset 参数不影响判定', () => {
-    const zipped = zipSync({ 'image_0.png': fakePng(7) });
+    const zipped = zipSync({ 'image_0.png': fakePng(8) });
 
     expect(parseNaiZip(zipped, 'Application/X-ZIP-Compressed').ok).toBe(true);
     expect(parseNaiZip(zipped, 'application/zip; charset=binary').ok).toBe(true);
@@ -357,6 +362,19 @@ describe('parseNaiZip', () => {
     if (result.ok) return;
     expect(result.kind).toBe('bad-response');
     expect(result.detail).toContain('zip');
+  });
+
+  it('上游把错误体当 JSON 返回 → 仍是 bad-response，且 detail 带 content-type 与魔数', () => {
+    const jsonBody = strToU8('{"statusCode":400,"message":"nope"}');
+    const result = parseNaiZip(jsonBody, 'application/json');
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe('bad-response');
+    expect(result.message).toBe('NovelAI 返回了看不懂的内容');
+    expect(result.retryable).toBe(true);
+    expect(result.detail).toContain('application/json');
+    expect(result.detail).toContain('7b'); // '{' 的十六进制 —— 一眼看出上游返的是 JSON
   });
 
   it('zip 解出 0 张图 → bad-response', () => {

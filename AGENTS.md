@@ -376,7 +376,9 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 > 2. **编辑表单从本地已装库取初值** —— 「我的项目」列的是作者名下全部项目、未必装过，查空就开出空表单，而「提交修改」是整份 PUT，一次没留神就把上游的简介清成空串、标签清光。现在 `WorkshopBrowseModal` 的 `edit` 事件转达**上游整行**，本地那份只做兜底。
 > 3. **登录弹窗不验地址** —— `window.open` 吃的是上游响应里的一个字段：`javascript:` 会在与本源关联的上下文里执行（当时 API Key 仍在 localStorage），而弹窗刻意保留 opener（登录靠 postMessage），放行陌生域等于把 `opener.location` 交出去。现在开窗前过 `isAllowedLoginUrl()`：只放 https + 主机钉死 `discord.com` 与工坊 worker（含子域）。
 >
-> 🟡 **图像生成 v1 已实施（7 波 22 任务），真机走查未做**：`<scene_image>` 成为引擎认识的标记，story 在正文里就地插标记当锚点，Code 走「限额 → `image_prompt` 侧链把中文转 danbooru → NovelAI V4.5 出图 → 落库 → 就地渲染」。三档开关（off / manual / auto）默认 **manual**。设计 D1–D55 全文在 `docs/planning/2026-08-04-image-generation-design.md`，实施编排与实际偏差在同目录的 `-implementation-plan.md`。**代码层全绿（typecheck + 全量测试），真机一次没跑过** —— NAI 真实响应 zip、0 角色数组、`ucPreset` 按模型编号这三点仍只有自压 fixture 做保证。四条钱相关的铁则分别钉在四个文件里：自动档不追溯开火（`lib/game-pipeline.ts`）、限额在侧链之前（`image-quota.ts`）、「无记录 + auto」出按钮而不是去生成（`scene-image-view.ts`）、手动永不被判成不可用（`useManualSceneImage.ts`）。
+> 🟡 **图像生成 v1 已实施（7 波 22 任务），真机走查未做**：`<scene_image>` 成为引擎认识的标记，story 在正文里就地插标记当锚点，Code 走「限额 → `image_prompt` 侧链把中文转 danbooru → NovelAI V4.5 出图 → 落库 → 就地渲染」。三档开关（off / manual / auto）默认 **manual**。设计 D1–D55 全文在 `docs/planning/2026-08-04-image-generation-design.md`，实施编排与实际偏差在同目录的 `-implementation-plan.md`。**上游链路已真机跑通（2026-08-04）**：合成冒烟（不走真实游玩，手工造 danbooru 场景串）打通「装配 → 三重冗余 → 同源 BFF `forward()` → NAI → 真实 zip → PNG」，1 角色与 0 角色各出图一张，1216×832，约 1.8 秒。三条此前只有自压 fixture 的假设现已实测：真实响应 zip（魔数 `50 4b 03 04`，单条目 `image_0.png`）、0 角色空数组上游接受、`ucPreset: 0` 出图正常。**仍未真机的是游玩链路**：story 产标记 → `image_prompt` 侧链 → 限额 → 落库 → 正文渲染 / CG 图鉴，全部只有单测。四条钱相关的铁则分别钉在四个文件里：自动档不追溯开火（`lib/game-pipeline.ts`）、限额在侧链之前（`image-quota.ts`）、「无记录 + auto」出按钮而不是去生成（`scene-image-view.ts`）、手动永不被判成不可用（`useManualSceneImage.ts`）。
+>
+> 🩹 **真机第一次成功出图时逮到的（2026-08-04）**：`parseNaiZip` 先判 `content-type` 含不含 `zip`，不含就 `bad-response`。NAI 实际报的是 **`binary/octet-stream`** —— 于是第一张**已生成、已扣 Anlas** 的图被我们自己扔掉，还报成「NovelAI 返回了看不懂的内容」。根因是**拿可变的 header 去否决不可变的字节**：现在一律先试解包，content-type 只进失败 detail。同一轮还发现 `NAI_ANLAS_RULES` 的免费额度是 **Opus 专属**却对所有账户生效（见上一条 commit）。
 >
 > 🩹 **实施中逮到的两处**：① `blurByDefault`（D46 打码）**声明了但没人传**，整条功能是死的 —— 根因是只有单组件测试，那种测试能证明逻辑对、**证明不了有人供值**，现已补从 ChatFlow 真渲染到底的链路测试。② `data/defaults/agent-config.json` 里有 **47 个 U+FFFD 坏字符**（16 段 / 6 个 agent），其中一处落在闭合 XML 标签的标签名里 —— **既有问题，本轮未修**，已另开任务。
 >
@@ -595,6 +597,11 @@ src/sillytavern/                    ← 核心引擎
   │                                       同一个中间结构一次性展开，中间不许插 filter/sort（下标会错位）
   │                                    🔴 本层不产随机：seed 缺省由调用方给，塞 Math.random() 会让快照
   │                                       复现失效（测试钉住了这条）
+  │                                    🔴 **字节是权威，content-type 只是线索**（2026-08-04 真机纠正）：
+  │                                       `parseNaiZip` 原先先判 content-type 含不含 `zip`，而 NAI 真机
+  │                                       报的是 **`binary/octet-stream`** —— 一张已生成、已扣点数的图
+  │                                       被我们自己扔掉。现在一律先试解包，content-type 只进失败 detail。
+  │                                       真机实测：zip 魔数 `50 4b 03 04`，单条目 `image_0.png`
   │
   │  🪦 Q-12：`variables.ts` / `vars-merger.ts` 已删。两者整条链零生产引用
   │     （`variables.ts` 最后一个活着的导出 `formatVariablesForPrompt` 的唯一消费方
