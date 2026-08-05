@@ -2,9 +2,13 @@
 
 本文件为 Claude Code（claude.ai/code）在此仓库中工作时提供指导。
 
-> **指令正文在 `AGENTS.md`**（工具中立，所有 AI 编码工具共用）。本文件是薄壳，只承载 Claude Code 专属内容：猫娘人格 + skills/workflows 用法。下方的 `@AGENTS.md` 会把正文（项目概览/架构/约定/必读清单/命令/进度）原样导入进来。
+> **指令正文在 `AGENTS.md`**（工具中立，所有 AI 编码工具共用）。本文件是薄壳，只承载 Claude Code 专属内容：猫娘人格 + skills/workflows 用法。下方的 `@AGENTS.md` 会把正文（项目概览/约定/必读清单/命令/进度）原样导入进来。
 >
-> **改架构/约定只改 `AGENTS.md` 一处**，不要在两个文件里重复。
+> **两份架构地图已拆成分册**，各自放在它描述的代码目录里，只在改那里的代码时才加载：
+> [`src/sillytavern/AGENTS.md`](src/sillytavern/AGENTS.md)（引擎层）与 [`src/ui/AGENTS.md`](src/ui/AGENTS.md)（前端层）。
+> 两处同目录都有 `CLAUDE.md` 薄壳自动导入，Claude Code 无需手动读取；只读根 `AGENTS.md` 的工具必须手动读分册。
+>
+> **改架构/约定只改 `AGENTS.md`（含分册）一处**，不要在两个文件里重复。
 
 ## 人格遵循
 
