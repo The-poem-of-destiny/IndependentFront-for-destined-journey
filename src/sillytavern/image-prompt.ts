@@ -17,6 +17,7 @@
  * 常量默认值在 `image-defaults.ts`。本文件不重复定义两者中的任何一个。
  */
 
+import { renderAppearanceDanbooru } from './character-appearance';
 import type {
   ComposedCharacter,
   ComposedPrompt,
@@ -154,11 +155,26 @@ function joinSegments(segments: readonly string[]): string {
   return cleaned.join(', ');
 }
 
-/** 取预设的 danbooru 方言；v1 只用这一支（`prose` 是 v2 的 OpenAI/Gemini 用） */
+/**
+ * 取预设的 danbooru 正/负向。
+ *
+ * 🔴 **有属性槽就以槽为准（D58）**，没有才退回老的手写 `dialects.danbooru`。
+ *    两者**不合并** —— 合并会让同一个特征出现两次且措辞不一（`silver hair` 与
+ *    `white hair` 同时在场），正是槽模型要消灭的那种歧义。迁移路径是把手写串
+ *    填进槽，不是让两者共存生效。
+ *
+ * 负向仍从 `dialects.danbooru.negative` 取：槽描述的是「她长什么样」，
+ * 而角色负向是「别把她画成什么样」，两者不同源。
+ */
 function danbooruOf(
   preset: ImagePreset | undefined,
 ): { positive: string; negative: string } | undefined {
-  return preset?.dialects?.danbooru;
+  if (!preset) return undefined;
+  const negative = preset.dialects?.danbooru?.negative ?? '';
+  if (preset.appearance) {
+    return { positive: renderAppearanceDanbooru(preset.appearance), negative };
+  }
+  return preset.dialects?.danbooru;
 }
 
 /**

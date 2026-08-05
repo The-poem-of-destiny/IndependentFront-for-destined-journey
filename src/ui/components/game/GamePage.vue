@@ -8,6 +8,7 @@ import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
 import { GamePipeline } from '../../lib/game-pipeline';
 import { buildSceneImageSeams, resolveSceneWeather } from '../../lib/scene-image-seams';
+import { useCharacterAppearanceStore } from '../../stores/character-appearance-store';
 import TopBar from './TopBar.vue';
 import SideToolbar from './SideToolbar.vue';
 import ChatFlow from './ChatFlow.vue';
@@ -34,6 +35,8 @@ const settings = useSettingsStore();
 const audio = useAudioStore();
 const sceneImages = useSceneImageStore();
 const imagePresets = useImagePresetStore();
+/** 角色外貌的会话副本（D56）—— 基线在 imagePresets，这一份随存档走 */
+const charAppearance = useCharacterAppearanceStore();
 const s = settings.settings;
 
 let pipeline: GamePipeline | null = null;
@@ -66,10 +69,18 @@ onMounted(async () => {
     //    `lib/scene-image-seams.ts`（不碰 Pinia，可单测），这里只负责接线。
     await sceneImages.load(ui.activeSaveId);
     void imagePresets.init();
+    // 🔴 会话外貌副本**必须按存档载入**（D56）：不载入就会拿上一个存档的外貌去出图，
+    //    而同一个角色名在两周目里长得不一样是正常的 —— 那正是会话副本存在的理由。
+    await charAppearance.load(ui.activeSaveId);
     sceneImages.setSeams(
       buildSceneImageSeams({
         settings: () => settings.settings,
-        presets: () => imagePresets.presets,
+        // 🔴 交出去的是**基线 + 本档覆盖**合并后的预设（D56）：装配层只认一份外貌，
+        //    会话覆盖在这里就地叠好，`composePrompt` 不必知道有两份定义这回事。
+        presets: () =>
+          imagePresets.presets.map((p) =>
+            p.appearance ? { ...p, appearance: charAppearance.resolve(p.name, p.appearance) } : p,
+          ),
         world: () => ({
           gameTime: game.saveProfile?.gameTime,
           weather: resolveSceneWeather(game.saveProfile),

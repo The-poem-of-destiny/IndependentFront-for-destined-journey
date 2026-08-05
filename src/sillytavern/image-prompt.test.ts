@@ -14,6 +14,7 @@ import {
 } from './image-defaults';
 import { composePrompt, normalizeTagString, type ComposeOptions } from './image-prompt';
 import type { ImagePreset, ImageRating, SceneImageMarker } from './types-image';
+import { EMPTY_APPEARANCE, type CharacterAppearance } from './character-appearance';
 
 // ═══════════════════════════════════════════════════════════
 // 夹具
@@ -541,5 +542,65 @@ describe('composePrompt —— 透传与纯度', () => {
     const copy = [...names];
     composePrompt('scene', '', marker(names), presetMap(), opts());
     expect(names).toEqual(copy);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 外貌属性槽（D58）：槽在则以槽为准
+// ═══════════════════════════════════════════════════════════
+
+describe('composePrompt —— 角色外貌属性槽（D58）', () => {
+  const withSlots = (appearance: Partial<CharacterAppearance>): ImagePreset => ({
+    key: 'character:艾莉丝',
+    kind: 'character',
+    name: '艾莉丝',
+    appearance: { ...EMPTY_APPEARANCE, ...appearance },
+    dialects: { danbooru: { positive: 'OLD_HANDWRITTEN', negative: 'blonde hair' } },
+    createdAt: 0,
+    updatedAt: 0,
+  });
+
+  it('🔴 有槽就用槽，**不与**老的手写串合并（合并会让同一特征出现两次且措辞不一）', () => {
+    const out = composePrompt(
+      'scene',
+      '',
+      marker(['艾莉丝']),
+      presetMap(withSlots({ count: '1girl', hairColor: 'silver hair', outfit: 'white robe' })),
+      BARE,
+    );
+    expect(out.characters[0].positive).toBe('1girl, silver hair, white robe');
+    expect(out.characters[0].positive).not.toContain('OLD_HANDWRITTEN');
+  });
+
+  it('负向仍从 dialects 取 —— 槽说的是「她长什么样」，负向说的是「别画成什么样」', () => {
+    const out = composePrompt(
+      'scene',
+      '',
+      marker(['艾莉丝']),
+      presetMap(withSlots({ count: '1girl' })),
+      BARE,
+    );
+    expect(out.characters[0].negative).toBe('blonde hair');
+  });
+
+  it('没有槽的老预设照常走 dialects（迁移期两种预设并存）', () => {
+    const out = composePrompt(
+      'scene',
+      '',
+      marker(['甲']),
+      presetMap(preset('character', '甲', 'a, b', 'c')),
+      BARE,
+    );
+    expect(out.characters[0].positive).toBe('a, b');
+  });
+
+  it('🔴 槽全空 = 与「没有预设」同义：跳过该角色并告警，不产出一个空槽位', () => {
+    // 这条是写测试时被实现纠正的：一个全空的基线给不出任何一致性信息，
+    // 与查不到预设是同一回事。产出空槽位反而更糟 —— NAI 会拿到一个
+    // 什么都没说的角色条件，等于让它自由发挥，而调用方还以为钉住了。
+    // （D57 的 bootstrap 正是为了让这种角色不再全空。）
+    const out = composePrompt('scene', '', marker(['艾莉丝']), presetMap(withSlots({})), BARE);
+    expect(out.characters).toHaveLength(0);
+    expect(out.warnings).toEqual([{ kind: 'missing-preset', name: '艾莉丝' }]);
   });
 });
