@@ -153,6 +153,12 @@ export function formatImagePromptRequest(req: ImagePromptRequest): string {
   lines.push(`分级: ${RATING_LABEL[req.rating]}`);
   const narrative = req.narrative.trim();
   if (narrative !== '') lines.push(`所属正文:\n${narrative}`);
+  if (req.charactersNeedingBaseline?.length) {
+    // D57：模型看不到库，「谁是第一次出场」只能由引擎告诉它
+    lines.push(
+      `尚无外观设定的角色（请为他们写全九个槽）: ${req.charactersNeedingBaseline.join(', ')}`,
+    );
+  }
   return lines.join('\n');
 }
 

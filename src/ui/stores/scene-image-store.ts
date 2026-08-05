@@ -116,6 +116,12 @@ export interface SceneImageSeams {
     req: ImagePromptRequest,
     signal: AbortSignal,
   ) => Promise<ImagePromptOutput | ImageGenFailure>;
+  /**
+   * 这些出场角色里，谁还没有外貌基线（D57）。缺省 = 都当作有（不提示）。
+   *
+   * 🔴 纯查询、同步：它在**每次**侧链调用前跑，不该引入一次 await。
+   */
+  charactersNeedingBaseline?: (names: readonly string[]) => string[];
   /** 发请求。缺省时记录直接落 `failed`，绝不悬在 `generating` 上 */
   send?: (
     input: SceneImageSendInput,
@@ -796,6 +802,10 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
       rating: record.rating,
     };
     if (ctx?.location !== undefined) req.location = ctx.location;
+    // D57：模型看不到库，「谁是第一次出场」只能由引擎告诉它。
+    // 判定归缝（store 不认识预设库），这里只负责把它挂进请求。
+    const needBaseline = seams.charactersNeedingBaseline?.(record.characters) ?? [];
+    if (needBaseline.length > 0) req.charactersNeedingBaseline = needBaseline;
 
     // `ImagePromptOutput` 没有 `ok` 字段，`ImageGenFailure` 一定有 —— 用它判别
     const out = await seams.runPromptAgent(req, signal);

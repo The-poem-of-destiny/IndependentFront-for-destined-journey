@@ -110,6 +110,8 @@ export interface SceneImageSeamDeps {
    *    而抛出去会让整张图变成 `prompt-agent` 失败。
    */
   applyAppearances?: (list: readonly ParsedCharacterAppearance[]) => Promise<void>;
+  /** 这些出场角色里谁还没有基线（D57）。缺省 = 都当作有 */
+  charactersNeedingBaseline?: (names: readonly string[]) => string[];
 }
 
 /** NAI 回的是 PNG（§6）。造 blob 时声明它，落库的 `mime` 仍从 blob 上回读 */
@@ -190,6 +192,10 @@ export function buildSceneImageSeams(deps: SceneImageSeamDeps): SceneImageSeams 
       }
       return out;
     },
+
+    ...(deps.charactersNeedingBaseline
+      ? { charactersNeedingBaseline: deps.charactersNeedingBaseline }
+      : {}),
 
     send: (input, signal) => sendOne(input, signal, deps, send, hash),
   };

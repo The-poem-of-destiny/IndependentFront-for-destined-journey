@@ -144,8 +144,11 @@ describe('提示词规则与解析器同源', () => {
     }
   });
 
-  it('规则明说「只写变了的槽」与「首次出场写全」——两条缺一条都会让副本长歪', () => {
+  it('规则明说「只写变了的槽」与「名单里的角色写全」——两条缺一条都会让副本长歪', () => {
     expect(APPEARANCE_PROMPT_RULES).toContain('只写这一刻');
-    expect(APPEARANCE_PROMPT_RULES).toContain('第一次出场');
+    // 🔴 「第一次出场」改成了「输入里给的名单」（2026-08-05）：模型看不到库，
+    //    自己判断不出谁是第一次出场，那条规则于是永远不触发、D57 不可达。
+    //    现在由引擎在 `charactersNeedingBaseline` 里点名。
+    expect(APPEARANCE_PROMPT_RULES).toContain('尚无外观设定的角色');
   });
 });

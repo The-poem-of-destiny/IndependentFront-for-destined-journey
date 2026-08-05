@@ -65,6 +65,15 @@ export interface ImagePromptRequest {
   /** 当前地点名 —— 引擎知道，不必让 agent 猜 */
   location?: string;
   rating: ImageRating;
+  /**
+   * 还没有外貌基线的角色名（D57）。
+   *
+   * 🔴 **模型自己判断不出「这是不是第一次出场」** —— 它看不到库。规则里那句
+   *    「第一次出场就把九个槽写全」于是永远不会触发，D57 在实践中不可达。
+   *    引擎知道谁没有基线，就该直接告诉它。这与 D39（时段天气由 Code 给）
+   *    是同一条：Code 知道的事实不要问 AI。
+   */
+  charactersNeedingBaseline?: string[];
 }
 
 /**

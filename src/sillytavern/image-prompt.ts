@@ -109,6 +109,43 @@ export interface ComposeOptions {
   maxCharacters?: number;
 }
 
+/** 人数标签（`1girl` / `2girls` / `no humans`）—— 侧链禁写，由本函数从阵容推 */
+const COUNT_TAG_RE =
+  /\b(?:\d+\s*(?:girls?|boys?|others?)|no\s+humans?|multiple\s+(?:girls|boys))\b/gi;
+
+/**
+ * 从**已解析的角色槽**推出场面的人数标签（2026-08-05 真机催生）。
+ *
+ * 🔴 起因：人数是侧链**唯一**怎么调提示词都压不下去的错误 —— 三轮采样稳定在 22–28%
+ *    写错（双人场景写成 `2girls, 1boy`、单人场景干脆不写）。而**引擎自己知道**这一格
+ *    有谁：`marker.characters` 是名单，每个角色的 `count` 槽写着他是 `1girl` 还是
+ *    `1boy`。既然是 Code 知道的事实，就不该问 AI —— 与 D39（时段天气）同一条。
+ *
+ * 只数**有槽的角色**：老的手写预设没有 `count` 槽，数不出来的宁可不写，
+ * 也不猜一个可能凭空造人的标签。
+ */
+function deriveCountTags(
+  names: readonly string[],
+  presets: ReadonlyMap<string, ImagePreset>,
+): string {
+  const counts = new Map<string, number>();
+  for (const name of names) {
+    const token = (presets.get(`character:${name}`)?.appearance?.count ?? '').trim().toLowerCase();
+    if (token === '') continue;
+    // `1girl` / `1boy` → 归一到 girl/boy 再计数；写了别的（如 `1other`）原样计
+    const m = /^(\d+)\s*(girls?|boys?|others?)$/.exec(token);
+    if (!m) continue;
+    const kind = m[2].replace(/s$/, '');
+    counts.set(kind, (counts.get(kind) ?? 0) + Number(m[1]));
+  }
+  if (counts.size === 0) return '';
+  const order = ['girl', 'boy', 'other'];
+  return [...counts.entries()]
+    .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
+    .map(([kind, n]) => (n === 1 ? `1${kind}` : `${n}${kind}s`))
+    .join(', ');
+}
+
 // ═══════════════════════════════════════════════════════════
 // rating 钳位（D38）
 // ═══════════════════════════════════════════════════════════
@@ -204,10 +241,21 @@ export function composePrompt(
   // ── rating 钳位（D38），静默 ──
   const rating = clampRating(marker.rating, opts.maxRating);
 
+  // ── 人数：Code 推，且**把模型写的那个剥掉**（2026-08-05）──
+  // 🔴 提示词已明令不许写人数，但规则是概率性的（三轮采样 22–28% 写错）。
+  //    这里的剥离是确定性的：两个人数标签同时出现会让 NAI 画出多余的人。
+  const maxCharactersForCount = opts.maxCharacters ?? 6;
+  const countTags = deriveCountTags(
+    marker.characters.slice(0, Math.max(0, maxCharactersForCount)),
+    presets,
+  );
+  const sceneWithoutCounts = countTags === '' ? scenePrompt : scenePrompt.replace(COUNT_TAG_RE, '');
+
   // ── base：顺序即权重，画质后缀压在最后（§5.2）──
-  //    地点那一段没了，场景串自己带（D59）
+  //    地点那一段没了，场景串自己带（D59）；人数由 Code 推（见 deriveCountTags）
   const base = joinSegments([
-    scenePrompt, // [1] 场景 —— 这一刻正在发生什么（含地点长什么样）
+    countTags, // [0] 人数 —— **Code 推的**，压在最前（NAI 靠它决定画几个人）
+    sceneWithoutCounts, // [1] 场景 —— 这一刻正在发生什么（含地点长什么样）
     opts.worldTags, // [2] 世界状态 —— 天光如何
     opts.compositionTags, // [3] 构图
     `rating:${rating}`, // [4] 分级

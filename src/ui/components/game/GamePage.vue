@@ -94,6 +94,13 @@ onMounted(async () => {
          *   基线永远空着，那份「干净的、可回退的真源」就不存在了）
          * - **有基线** → 写会话副本（自动写入 + 可重置，主人 2026-08-04 裁定）
          */
+        // D57：引擎知道谁还没有基线，直接告诉侧链 —— 模型看不到库，
+        // 「第一次出场」这件事它自己永远判断不出来
+        charactersNeedingBaseline: (names) =>
+          names.filter((n) => {
+            const a = imagePresets.find('character', n)?.appearance;
+            return !a || !isUsableBaseline(a);
+          }),
         applyAppearances: async (list) => {
           for (const item of list) {
             const preset = imagePresets.find('character', item.name);

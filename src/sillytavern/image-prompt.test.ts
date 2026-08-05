@@ -604,3 +604,60 @@ describe('composePrompt —— 角色外貌属性槽（D58）', () => {
     expect(out.warnings).toEqual([{ kind: 'missing-preset', name: '艾莉丝' }]);
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// 人数标签由 Code 推（2026-08-05 真机催生）
+// ═══════════════════════════════════════════════════════════
+
+describe('composePrompt —— 人数标签', () => {
+  const withCount = (name: string, count: string): ImagePreset => ({
+    key: `character:${name}`,
+    kind: 'character',
+    name,
+    appearance: { ...EMPTY_APPEARANCE, count },
+    dialects: {},
+    createdAt: 0,
+    updatedAt: 0,
+  });
+
+  it('🔴 从阵容推出人数，压在 base 最前', () => {
+    const out = composePrompt(
+      'standing, looking at each other',
+      '',
+      marker(['甲', '乙']),
+      presetMap(withCount('甲', '1girl'), withCount('乙', '1boy')),
+      BARE,
+    );
+    expect(out.base.startsWith('1girl, 1boy')).toBe(true);
+  });
+
+  it('同性别累加成复数（2girls，不是 1girl, 1girl）', () => {
+    const out = composePrompt(
+      'scene',
+      '',
+      marker(['甲', '乙']),
+      presetMap(withCount('甲', '1girl'), withCount('乙', '1girl')),
+      BARE,
+    );
+    expect(out.base.startsWith('2girls')).toBe(true);
+  });
+
+  it('🔴 模型自己写的人数标签被剥掉 —— 两个人数标签同时在场会画出多余的人', () => {
+    const out = composePrompt(
+      '2girls, 1boy, sitting across a table',
+      '',
+      marker(['甲']),
+      presetMap(withCount('甲', '1girl')),
+      BARE,
+    );
+    expect(out.base.startsWith('1girl')).toBe(true);
+    expect(out.base).not.toContain('2girls');
+    expect(out.base).toContain('sitting across a table');
+  });
+
+  it('🔴 数不出来时什么都不加（老的手写预设没有 count 槽）', () => {
+    const out = composePrompt('no humans, scenery', '', marker([]), presetMap(), BARE);
+    // 推不出人数 → 场景串原样保留，绝不凭空造一个人数标签
+    expect(out.base).toContain('no humans');
+  });
+});
