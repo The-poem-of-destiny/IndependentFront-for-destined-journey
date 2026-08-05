@@ -871,22 +871,33 @@ describe('whenIdle', () => {
    * 假承诺，接下来的断言在一个还在跑的队列上执行 —— 表现是随机失败的用例，
    * 而报错指向断言、不指向这里。一个等不到的等待应该说自己等不到。
    */
+  /**
+   * 🔴 收尾纪律：**别把一条还在飞的记录留给 afterEach**。
+   *
+   * 这个用例第一版就是这么写的（`send: () => new Promise(() => {})`，永不兑现），
+   * 每个断言都绿、`Test Files 250 passed` 也照印，但 `afterEach` 的 `clearAllData()`
+   * 关掉 Dexie 之后，还停在泵里的那条会撞上 `DatabaseClosedError`，冒成一条
+   * **没人接的 rejection**，整轮 vitest 以非零码退出。本地只看 “Tests passed” 那两行
+   * 是看不见它的 —— CI 才把它照出来。所以这里用可控的 deferred，跑完放掉。
+   */
   it('🔴 轮数用完时抛错并报出还剩几条，而不是假装跑空了', async () => {
     const store = useSceneImageStore();
     await store.load(SAVE);
-    // 永不兑现的 send：第一条卡在 generating，第二条排在队列里
-    store.setSeams({
-      runPromptAgent: stubPromptAgent(),
-      send: () => new Promise<never>(() => {}),
-    });
+    // 可控地把第一条卡在 generating，第二条排在队列里
+    const hang = deferred<SceneImageSendResult>();
+    store.setSeams({ runPromptAgent: stubPromptAgent(), send: () => hang.promise });
 
     await store.generate(baseInput({ occurrence: 0 }));
     await store.generate(baseInput({ occurrence: 1 }));
 
-    // 轮数预算给 0：直接走到超时分支（不 await 那个永不兑现的泵，所以用例不会挂住）
+    // 轮数预算给 0：直接走到超时分支（不 await 那个还没兑现的泵，所以用例不会挂住）
     await expect(store.whenIdle(0)).rejects.toThrow(/仍未跑空/);
     // 🔴 消息里必须带上「还剩几条」—— 一句没有数字的超时对排查毫无帮助
     await expect(store.whenIdle(0)).rejects.toThrow(/还剩 1 条/);
+
+    // 收尾：放掉在飞的那条，等队列真的跑空再交还给 afterEach
+    hang.resolve(okSend());
+    await store.whenIdle();
   });
 
   it('正常跑空时照常返回（超时分支不是常态）', async () => {

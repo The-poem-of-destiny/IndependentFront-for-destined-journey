@@ -522,9 +522,19 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
   function kick(): void {
     if (running) return;
     running = true;
-    pump = drain().finally(() => {
-      running = false;
-    });
+    pump = drain()
+      // 🔴 泵**永不以 rejection 收场**。`runOne` 已经把缝里抛的东西兜住了，但兜底本身
+      //    （落 failed 那一次写库）也可能失败 —— 典型是切存档/关页面时 Dexie 已经关掉，
+      //    那次写会抛 `DatabaseClosedError`，从 catch 里逃出来一路冒到这里。没有这个
+      //    catch，它就是一条**没人接的 Promise rejection**：在生产里是控制台里一句
+      //    追不到源头的报错，在 vitest 里会让**整轮测试以非零码退出**（哪怕每个用例都绿）。
+      //    CI 2026-08-05 正是这么红的。
+      .catch((err: unknown) => {
+        console.warn('[sceneImage] 出图队列异常收场（已吞掉，不影响后续入队）:', err);
+      })
+      .finally(() => {
+        running = false;
+      });
   }
 
   async function drain(): Promise<void> {
@@ -850,13 +860,21 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
    *    在飞中止上游照样收钱。
    */
   async function fail(id: string, failure: ImageGenFailure): Promise<void> {
-    const current = (await getSceneImage(id)) ?? find(id);
-    if (current?.status === 'failed' && current.errorKind === 'aborted') return;
-    await patch(id, {
-      status: 'failed',
-      error: failure.message,
-      errorKind: failure.kind,
-    });
+    // 🔴 **本函数自己绝不抛**。它是 `runOne` 的 catch 里那一步兜底：兜底再抛出去，
+    //    异常就从 catch 里逃出来一路冒成没人接的 rejection（见 `kick` 的 catch）。
+    //    典型场景是切存档/关页面时 Dexie 已经关掉，这两次读写都会抛 `DatabaseClosedError`
+    //    —— 而那时「把状态记成 failed」本来也已经没有意义了。
+    try {
+      const current = (await getSceneImage(id)) ?? find(id);
+      if (current?.status === 'failed' && current.errorKind === 'aborted') return;
+      await patch(id, {
+        status: 'failed',
+        error: failure.message,
+        errorKind: failure.kind,
+      });
+    } catch (err) {
+      console.warn('[sceneImage] 记录失败状态时出错（已忽略）:', err);
+    }
   }
 
   return {
