@@ -64,7 +64,11 @@ function scriptPolicy(segment: BeautifierMatchSegment): 'allow' | 'block' {
 }
 
 function paragraphs(text: string): string[] {
-  return text.split(/\n\n+/).filter((part, index, list) => part.length > 0 || list.length === 1);
+  // HTML 注释（<!-- ... -->）是元数据：AI 的 itemThink/taskThink 思考块、作者注释等，
+  // 不应当正文显示。Vue 的 {{ }} 会把它当字面文本转义后原样显示，很诡异——这里先剥离。
+  // 用 [\s\S]*? 懒惰匹配，跨多行 + 多条注释（/g）都能一次清掉。
+  const stripped = text.replace(/<!--[\s\S]*?-->/g, '');
+  return stripped.split(/\n\n+/).filter((part, index, list) => part.length > 0 || list.length === 1);
 }
 </script>
 
