@@ -243,7 +243,6 @@ function replayWithEffects(
 
 /** 每次 dispatch 的微步骤 / 总步骤熔断上限 */
 const MAX_TOTAL_STEPS = 500;
-/** BeginOutput 续杯上限（超过认为死循环） */
 
 /**
  * replay 主驱动：喂首个 epoch → dispatch 循环 → RequiredInput 自动应答 → 终局结算。

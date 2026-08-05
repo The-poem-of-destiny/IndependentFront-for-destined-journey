@@ -8,3 +8,19 @@
 # 只声明 .bat，刻意不给其他类型加规则: 现有文件的行尾就地保持原样，
 # 加一条全局规则会触发一次全仓库重规范化，那是另一个风险，不在这里顺手做。
 *.bat text eol=crlf
+
+# 反过来，**带 shebang 的脚本必须以 LF 检出** —— 同样不是风格偏好。
+#
+# shebang 行结尾多一个 CR，解释器读到的就是 `/usr/bin/env node\r` 这样一个不存在的路径。
+# 症状同样跟行尾看着毫无关系：
+# - `scripts/knip-ratchet.mjs` —— 2026-08-05 实测：CRLF 检出后 vitest 转译该模块直接抛
+#   `SyntaxError: Invalid or unexpected token`，于是 `tests/knip-ratchet.test.ts` 在 Windows 上
+#   **必红**，而 Linux CI 全绿（CI 检出就是 LF）。更阴的是 `node --check` 也说没问题 ——
+#   Node 自己容忍 shebang 后的 CR，只有打包器不容忍。第一次装完之所以没发现，是因为
+#   那份工作副本是脚本直接写出来的 LF，直到一次 `git checkout` 才被 autocrlf 换成 CRLF。
+# - `scripts/notify.sh` —— 同一类：CRLF 的 shell 脚本会以 `bad interpreter: ...^M` 失败。
+#
+# 依旧只点名具体文件、不写 `*.mjs`/`*.sh` 通配 —— 理由与上面那条相同，
+# 新增带 shebang 的脚本时**记得往这里补一行**。
+scripts/knip-ratchet.mjs text eol=lf
+scripts/notify.sh text eol=lf

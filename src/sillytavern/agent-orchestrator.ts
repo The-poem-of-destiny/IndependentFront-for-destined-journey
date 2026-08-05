@@ -1113,6 +1113,13 @@ export class AgentOrchestrator {
 
   // ========== Internal: Build Run ==========
 
+  // 🔴 **收进来了却没进返回值** —— `_errors` 是 `run()` 那边 `validatePipeline()` 的真实结果
+  //    （见上方 `return this.buildRun(startTime, errors)`），但 `OrchestratorRun` 类型里
+  //    根本没有 `errors` 这一项，于是管线校验失败只剩一个 `status: 'failed'`，**失败原因整条丢掉**。
+  //    与 `craft-dc.ts` 的 `_materialSave` 是同一种形状：值算出来了、调用方也传进来了，落地时蒸发。
+  //    2026-08-05 收紧 lint 时由 `no-unused-vars` 逮到（此前它是 warning，CI 放行）。
+  //    没有就地补进返回值，是因为那要改 `OrchestratorRun` 类型与所有下游消费方，
+  //    属于功能改动而不是 lint 清理 —— 留给单独一次提交，别顺手塞进来。
   private buildRun(startTime: number, _errors: string[] = []): OrchestratorRun {
     return {
       id: this.runId,

@@ -13,6 +13,12 @@ const emit = defineEmits<{
 }>();
 
 const open = ref(false);
+// 🔴 **写了没人读** —— `search` 下面被清空两次（select / toggle），但模板里没有任何输入框绑定它，
+//    下拉列表直接 `v-for="item in items"`：**搜索框从来就没做出来**，这是它仅存的痕迹。
+//    2026-08-05 收紧 lint 删掉 `const filtered = ref(props.items)` 时才暴露 —— 那个 computed 是
+//    最后一个读者，而它自己也是死的（模板没用）。ESLint 逮不到（`search` 确实被"引用"了，
+//    只是全是写），typecheck 也逮不到。留着注释而不是一并删掉，是为了不让这个缺口再次隐形：
+//    要么把搜索框补上，要么连 `search` 一起清掉 —— 两者都是功能改动，不塞进 lint 清理。
 const search = ref('');
 
 function select(item: { key: string; value: T }) {

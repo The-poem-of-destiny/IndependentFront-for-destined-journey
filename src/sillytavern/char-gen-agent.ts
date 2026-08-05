@@ -1003,6 +1003,12 @@ function parseCharGenXML(xml: string): CharGenOutput {
       });
     }
     // 解析 <law> 子标签
+    // 🔴 **正文体被丢掉** —— 正则第二个捕获组 `m[2]` 抓的是 `<law>…</law>` 之间的正文，
+    //    但下面只读 `m[1]` 的属性；模型若把法则说明写在标签体里（而不是 description 属性里），
+    //    那段文字直接蒸发。2026-08-05 收紧 lint 时由 `no-unused-vars` 逮到
+    //    （原来是 `const innerText = m[2]?.trim()`，赋了值没人读，此前只是 warning）。
+    //    没有就地接上，是因为要先定 `<law>` 的写法约定（属性优先还是标签体优先、两者都有时谁赢），
+    //    那是模板/协议层的改动而不是 lint 清理 —— 留给单独一次提交。
     const lawMatches = ascXML.matchAll(/<law\b([^>]*?)>([\s\S]*?)<\/law>/g);
     for (const m of lawMatches) {
       const attrs = parseAttrsStr(m[1]);

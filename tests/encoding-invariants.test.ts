@@ -23,6 +23,12 @@ import { describe, expect, it } from 'vitest';
  * **合法转义**写出来（反斜杠 + u0008）：那样源码干干净净、`JSON.parse` 也不报错，
  * 落进字符串值里却仍是一个真退格 —— 症状一模一样。所以 raw 与 parsed 两遍都要扫。
  *
+ * 🟡 **已知缺口**：parsed 那一遍只对 `data/` 下的 `.json` 跑（那里有现成的 `JSON.parse`）。
+ * 源码文件目前只扫 raw —— 也就是说，`.ts` 字符串字面量里用**合法转义**写出来的退格
+ * 仍然看不见，而那恰好就是上一段描述的失败形态。真要补，得在源码里按词法找出字符串
+ * 字面量、再判断其中的转义解出来是不是 C0（正则字面量里的单词边界是合法用法，不能一刀切），
+ * 那是独立一次设计而不是本轮清理。本轮逮到的 `ejs-backend-parity.test.ts` 是真字节，raw 够用。
+ *
  * ## 扫描范围
  * - `data/`：我们自己写的、**喂给模型**的那批文件（提示词 / 世界书 / 预设 / 美化规则）。
  * - `src/` `server/` `tests/` `scripts/` 的源码：坏字在这里同样静默 —— 见上面那个退格。
@@ -117,6 +123,18 @@ describe('编码不变式', () => {
     expect(dataFiles.length).toBeGreaterThan(10);
     expect(dataFiles.map(dataRel)).toContain('defaults/agent-config.json');
     expect(sourceFiles.length).toBeGreaterThan(400);
+  });
+
+  // 🔴 反向哨兵：上面那条只保证「扫到了东西」，保证不了「没多扫」。
+  // `reference/` 与 `docs/` 是**故意**排除的（上游语料自带坏字、文档要拿坏字当例子），
+  // 而这个排除现在只靠 DATA_ROOT / SOURCE_ROOTS 恰好没列到它们 —— 谁把根目录改宽一点，
+  // 闸门就会在一批我们修不了的文件上炸红，然后被当成误报关掉。钉死它。
+  it('没有多扫 reference/ 与 docs/（这两处是刻意排除的）', () => {
+    const scanned = [...dataFiles, ...sourceFiles].map(repoRel);
+    const leaked = scanned.filter(
+      (path) => path.startsWith('reference/') || path.startsWith('docs/'),
+    );
+    expect(leaked, `这些路径不该进闸门：\n${leaked.join('\n')}`).toEqual([]);
   });
 
   describe('data/', () => {
