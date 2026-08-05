@@ -37,7 +37,7 @@
  */
 import type { ApiEntry, PresetItem } from './settings-store';
 import type { AgentSettingsEntry } from './agent-settings';
-import type { ImageGenMode, ImageRating } from '@engine/types-image';
+import type { ImageGenMode, ImageRating, NaiBillingTier } from '@engine/types-image';
 
 /** 剧情难度层级。`'adaptive'` = 按玩家层级动态；数字 = 钉死 T1-T7 */
 export type PlotDifficultyTier = 'adaptive' | number | string;
@@ -187,6 +187,14 @@ export type UiSettings = {
    *    `imageBaseNegative` 自己拿着，不靠这个字段表达（`image-defaults.ts` 有全文）。
    */
   imageUcPreset: number;
+  /**
+   * NovelAI 账户档位 —— 只喂给免费额度指示器，**不影响任何请求**。
+   *
+   * 存在的理由：免费额度是 Opus 专属的，而默认参数满足 Opus 的全部三条，于是
+   * 指示器曾对所有人都说「在免费额度内」。对按点数付费的账户那是**错的**：
+   * 每张扣约 17 点，界面却说不要钱。默认 `'unset'` = 不猜（D43 补丁，2026-08-04）。
+   */
+  imageNaiTier: NaiBillingTier;
   /** L1 每条消息上限（auto/manual 都计入） */
   imageMaxPerMessage: number;
   /** L2 每小时上限 —— 真正的失效保护，调大之前先读设计 §9 */

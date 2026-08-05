@@ -50,9 +50,22 @@ function resetSettings() {
     imageSampler: 'k_euler_ancestral',
     imageNoiseSchedule: 'karras',
     imageUcPreset: 0,
+    // 🔴 与 getDefaults() 一致：'unset'，不是 'opus'。这里若图省事写 'opus'，
+    //    「默认不谎报免费」那条用例就会在一个**测试自己造出来的**前提下变绿
+    imageNaiTier: 'unset',
     imageMaxPerMessage: 2,
     imageMaxPerHour: 20,
   });
+}
+
+/** 三档出图开关（第一组 mode-list）。档位选择器复用同一套外壳类，故按 aria-label 定位 */
+function modeItems(w: ReturnType<typeof mount>) {
+  return w.get('[aria-label="出图档位"]').findAll('.mode-item');
+}
+
+/** 账户档位（第二组）：unset / opus / metered */
+function tierItems(w: ReturnType<typeof mount>) {
+  return w.get('[aria-label="NovelAI 账户档位"]').findAll('.mode-item');
 }
 
 beforeEach(() => {
@@ -62,7 +75,9 @@ beforeEach(() => {
 });
 
 describe('ImageRenderCard —— 免费额度指示（D43）', () => {
-  it('默认参数（1216×832 / 23 步）报免费，且**一个点数都不出现**', () => {
+  it('Opus + 默认参数（1216×832 / 23 步）报免费，且**一个点数都不出现**', () => {
+    mockSettings.imageNaiTier = 'opus';
+
     const line = mount(ImageRenderCard).find('.anlas-line');
     expect(line.classes()).toContain('anlas-free');
     expect(line.text()).toContain('估算');
@@ -70,7 +85,8 @@ describe('ImageRenderCard —— 免费额度指示（D43）', () => {
     expect(line.text()).not.toContain('点/张');
   });
 
-  it('尺寸调大到免费额度之外 → 报收费，并给出每张点数', () => {
+  it('Opus + 尺寸调大到免费额度之外 → 报收费，并给出每张点数', () => {
+    mockSettings.imageNaiTier = 'opus';
     mockSettings.imageWidth = 2048;
     mockSettings.imageHeight = 2048;
 
@@ -79,7 +95,8 @@ describe('ImageRenderCard —— 免费额度指示（D43）', () => {
     expect(line.text()).toMatch(/约 \d+ 点\/张/);
   });
 
-  it('步数越界（>28）同样报收费 —— 免费判据不只看尺寸', () => {
+  it('Opus + 步数越界（>28）同样报收费 —— 免费判据不只看尺寸', () => {
+    mockSettings.imageNaiTier = 'opus';
     mockSettings.imageSteps = 40;
     expect(mount(ImageRenderCard).find('.anlas-line').classes()).toContain('anlas-billed');
   });
@@ -96,16 +113,69 @@ describe('ImageRenderCard —— 免费额度指示（D43）', () => {
     expect(line.text()).not.toContain('不消耗');
   });
 
-  it('规则快照标签渲染出来了 —— 「这是哪一版规则」要看得见', () => {
+  it('Opus 下规则快照标签渲染出来了 —— 「这是哪一版规则」要看得见', () => {
+    mockSettings.imageNaiTier = 'opus';
     expect(mount(ImageRenderCard).find('.anlas-ruleset').text()).toContain('规则快照');
   });
 });
 
+describe('🔴 ImageRenderCard —— 账户档位（D43 补丁，2026-08-04 真机催生）', () => {
+  it('默认档位（没设置）+ 默认参数 → **绝不**说免费，改说取决于档位', () => {
+    const line = mount(ImageRenderCard).find('.anlas-line');
+
+    expect(line.classes()).not.toContain('anlas-free');
+    expect(line.text()).not.toContain('不消耗');
+    expect(line.text()).toContain('取决于你的账户档位');
+    // 牌价照报 —— 用户至少知道量级
+    expect(line.text()).toMatch(/约 \d+ 点\/张/);
+  });
+
+  it('按点数付费 + 默认参数 → 报收费，并说明调参数也免不掉', () => {
+    mockSettings.imageNaiTier = 'metered';
+
+    const line = mount(ImageRenderCard).find('.anlas-line');
+    expect(line.classes()).toContain('anlas-billed');
+    expect(line.text()).toContain('没有免费额度');
+    expect(line.text()).toContain('免不掉');
+    expect(line.text()).toMatch(/约 \d+ 点\/张/);
+  });
+
+  it('同一组参数：Opus 说免费、按点数付费说收费 —— 这就是那个 bug 的回归', () => {
+    mockSettings.imageNaiTier = 'opus';
+    expect(mount(ImageRenderCard).find('.anlas-line').classes()).toContain('anlas-free');
+
+    mockSettings.imageNaiTier = 'metered';
+    expect(mount(ImageRenderCard).find('.anlas-line').classes()).toContain('anlas-billed');
+  });
+
+  it('三个档位按钮点得动，且选中态跟着走', async () => {
+    const w = mount(ImageRenderCard);
+    const items = tierItems(w);
+    expect(items).toHaveLength(3);
+
+    await items[1].trigger('click');
+    expect(mockSettings.imageNaiTier).toBe('opus');
+    expect(tierItems(w)[1].classes()).toContain('mode-active');
+
+    await tierItems(w)[2].trigger('click');
+    expect(mockSettings.imageNaiTier).toBe('metered');
+  });
+
+  it('档位选择器写明它**不改变请求** —— 免得被当成会影响出图质量的开关', () => {
+    expect(mount(ImageRenderCard).find('.tier-desc').text()).toContain('不改变任何请求');
+  });
+
+  it('非 Opus 档位的规则标签不许再自称 Opus', () => {
+    mockSettings.imageNaiTier = 'metered';
+    const label = mount(ImageRenderCard).find('.anlas-ruleset').text();
+    expect(label).not.toContain('Opus 订阅 ·');
+    expect(label).toContain('无免费额度');
+  });
+});
+
 describe('ImageRenderCard —— 三档开关与自动档确认（D44）', () => {
-  /** 三档按钮的渲染顺序：off / manual / auto */
-  function modeButtons(w: ReturnType<typeof mount>) {
-    return w.findAll('.mode-item');
-  }
+  /** 三档按钮的渲染顺序：off / manual / auto（`modeItems` 已按 aria-label 隔开档位选择器） */
+  const modeButtons = modeItems;
 
   it('off / manual 立即生效，不打断', async () => {
     const w = mount(ImageRenderCard);
@@ -148,7 +218,7 @@ describe('ImageRenderCard —— 三档开关与自动档确认（D44）', () =>
     mockSettings.imageMaxPerMessage = 5;
     mockSettings.imageMaxPerHour = 7;
 
-    const hint = mount(ImageRenderCard).findAll('.mode-hint')[2].text();
+    const hint = modeItems(mount(ImageRenderCard))[2].find('.mode-hint').text();
     expect(hint).toContain('5 张');
     expect(hint).toContain('7 张');
   });

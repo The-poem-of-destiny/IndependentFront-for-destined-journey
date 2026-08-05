@@ -10,6 +10,11 @@
  *    后果行里的两个数字取**当前设置值**而不是文案里写死的数 —— 用户调过限额之后
  *    还照着旧数字吓唬他，就成了一句假话。
  *
+ * 2b. 🔴 **免费额度是 Opus 专属的**（D43 补丁，2026-08-04 真机催生）。默认参数满足
+ *    Opus 的全部三条，于是这行指示器曾对**每一个**账户都说「在免费额度内」——
+ *    对 Tablet / Scroll / 免订阅买点数的账户，那是每张扣约 17 点却被告知不花钱。
+ *    档位由 `imageNaiTier` 明说，默认 `'unset'`（不猜），四支措辞互斥。
+ *
  * 2. 🔴 **免费额度指示只在 `consumes-anlas` 时报数**（D43 / §11.2）。
  *    `estimateAnlasCost` 的 `anlasPerSample` 在免费档内**也是正数** —— 那是这张图
  *    的牌价，不是这次要付多少。在免费分支渲染它会显示「免费，约 17 点」这种自相矛盾。
@@ -30,7 +35,7 @@ import AppButton from '../../shared/AppButton.vue';
 import AppModal from '../../shared/AppModal.vue';
 import { useSettingsStore, type ApiEntry } from '../../../stores/settings-store';
 import { estimateAnlasCost } from '@engine/image-anlas';
-import type { ImageGenMode, ImageRating } from '@engine/types-image';
+import type { ImageGenMode, ImageRating, NaiBillingTier } from '@engine/types-image';
 
 const cfg = useSettingsStore();
 const s = cfg.settings;
@@ -84,14 +89,52 @@ const imageEndpoints = computed<ApiEntry[]>(() =>
 const N_SAMPLES = 1;
 
 const anlas = computed(() =>
-  estimateAnlasCost(s.imageWidth, s.imageHeight, s.imageSteps, N_SAMPLES),
+  estimateAnlasCost(s.imageWidth, s.imageHeight, s.imageSteps, {
+    samples: N_SAMPLES,
+    // 🔴 必须传。不传 = 引擎按 'unset' 处理（那是刻意的兜底），但真源在这个设置里
+    tier: s.imageNaiTier,
+  }),
 );
 
-/** 三支互斥：算不出来 / 免费 / 收费。**不知道**永远不渲染成**免费** */
-const anlasState = computed<'unknown' | 'free' | 'billed'>(() => {
+/**
+ * 四支互斥，优先级从上到下：
+ *   unknown   参数读不懂（NaN）—— 连牌价都算不出，先说这个
+ *   depends   档位没设 —— 算得出牌价，但不知道要不要付
+ *   free      Opus 且参数在额度内
+ *   billed    确定要花钱
+ *
+ * 🔴 `unknown` 与 `depends` 都**不许**渲染成 `free`。两者的区别只在措辞：
+ *    前者是「你把输入框清空了」，后者是「我不知道你买的是哪一档」。
+ */
+const anlasState = computed<'unknown' | 'depends' | 'free' | 'billed'>(() => {
   if (anlas.value.breaches.includes('invalid-input')) return 'unknown';
+  if (anlas.value.breaches.includes('tier-unknown')) return 'depends';
   return anlas.value.verdict === 'within-free-allowance' ? 'free' : 'billed';
 });
+
+/**
+ * 收费那一支的原因：是参数越界，还是这一档本来就没有免费额度。
+ *
+ * 分开说是有用的 —— 「调小尺寸就能免费」与「你这一档调什么都要钱」是两种完全不同的
+ * 行动建议，混成一句话会让 Tablet 用户徒劳地去调步数。
+ */
+const billedBecauseTier = computed(() => anlas.value.breaches.includes('no-free-allowance'));
+
+// ═══ 账户档位（D43 补丁）═══
+
+const TIERS: { key: NaiBillingTier; label: string; hint: string }[] = [
+  { key: 'unset', label: '没设置', hint: '不猜，一律按可能要花钱提示。' },
+  {
+    key: 'opus',
+    label: 'Opus 订阅',
+    hint: '单张、面积 ≤ 1024×1024、步数 ≤ 28 时不扣 Anlas。',
+  },
+  {
+    key: 'metered',
+    label: '按点数付费',
+    hint: 'Tablet / Scroll / 免订阅买点数 —— 没有免费额度，每张都扣。',
+  },
+];
 
 // ═══ rating 上限（D38：**上限**而非默认）═══
 
@@ -179,17 +222,47 @@ const RATINGS: { key: ImageRating; label: string }[] = [
       /></label>
     </div>
 
-    <!-- ════ 免费额度指示（§11.2）════ -->
+    <!-- ════ 账户档位（D43 补丁）════ -->
+    <p class="tier-title">NovelAI 账户档位</p>
+    <p class="form-hint tier-desc">
+      只影响下面那行估算，<strong>不改变任何请求</strong>。免费额度是 Opus 专属的 ——
+      不问清楚的话，那行字会对按点数付费的账户谎报「免费」。
+    </p>
+    <!-- 沿用三档开关的那套外壳类（mode-*）：同一张卡里两组单选长得不一样才是怪事 -->
+    <div class="mode-list" role="radiogroup" aria-label="NovelAI 账户档位">
+      <button
+        v-for="t in TIERS"
+        :key="t.key"
+        class="mode-item"
+        :class="{ 'mode-active': s.imageNaiTier === t.key }"
+        role="radio"
+        :aria-checked="s.imageNaiTier === t.key"
+        @click="s.imageNaiTier = t.key"
+      >
+        <span class="mode-label">{{ t.label }}</span>
+        <span class="mode-hint">{{ t.hint }}</span>
+      </button>
+    </div>
+
+    <!-- ════ 免费额度指示（§11.2 + D43 补丁）════ -->
     <p
       class="anlas-line"
       :class="{
         'anlas-free': anlasState === 'free',
         'anlas-billed': anlasState === 'billed',
-        'anlas-unknown': anlasState === 'unknown',
+        'anlas-unknown': anlasState === 'unknown' || anlasState === 'depends',
       }"
     >
       <template v-if="anlasState === 'free'">
-        按当前订阅规则估算，这组参数在免费额度内，不消耗 Anlas。
+        按当前订阅规则估算，这组参数在 Opus 免费额度内，不消耗 Anlas。
+      </template>
+      <template v-else-if="anlasState === 'depends'">
+        这组参数约 {{ anlas.anlasPerSample }} 点/张 —— 要不要付取决于你的账户档位，
+        上面选一个才能算准。
+      </template>
+      <template v-else-if="anlasState === 'billed' && billedBecauseTier">
+        按当前订阅规则估算，你这一档没有免费额度，每张都会消耗 Anlas（约
+        {{ anlas.anlasPerSample }} 点/张）—— 调小尺寸或步数也免不掉。
       </template>
       <template v-else-if="anlasState === 'billed'">
         按当前订阅规则估算，这组参数会消耗 Anlas（约 {{ anlas.anlasPerSample }} 点/张）。
@@ -371,6 +444,17 @@ const RATINGS: { key: ImageRating; label: string }[] = [
 
 .image-grid {
   margin-bottom: var(--theme-spacing-md);
+}
+
+/* 账户档位（D43 补丁） */
+.tier-title {
+  margin: var(--theme-spacing-md) 0 var(--theme-spacing-xs);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+}
+.tier-desc {
+  margin-top: 0;
 }
 
 /* 免费额度指示 */

@@ -184,7 +184,37 @@ export type AnlasVerdict = 'within-free-allowance' | 'consumes-anlas';
  * 读不懂的参数**一律报成会花钱**，绝不乐观 —— 这个指示器唯一的职责就是挡账单惊吓，
  * 把「不知道」显示成「免费」正好是它最不该犯的错。
  */
-export type AnlasFreeAllowanceBreach = 'pixels' | 'steps' | 'samples' | 'invalid-input';
+export type AnlasFreeAllowanceBreach =
+  | 'pixels'
+  | 'steps'
+  | 'samples'
+  | 'invalid-input'
+  /**
+   * 账户档位不是 Opus（Tablet / Scroll / 免订阅买点数）—— **免费额度整个不存在**，
+   * 每张都按牌价扣 Anlas。参数本身可能完全在 Opus 免费档内，所以这一项与
+   * `pixels`/`steps` 互不蕴含：它说的是「谁在付钱」，不是「参数超没超」。
+   */
+  | 'no-free-allowance'
+  /**
+   * 用户还没说自己是哪一档（默认值）。**一律按会花钱报**，与 `invalid-input` 同一条
+   * doctrine：把「不知道」显示成「免费」是这个指示器最不该犯的错。UI 靠这一项把
+   * 「确定要花钱」与「取决于你的订阅」分开措辞。
+   */
+  | 'tier-unknown';
+
+/**
+ * NovelAI 账户档位 —— 决定**免费额度存不存在**（2026-08-04 真机实测催生）。
+ *
+ * 起因：`NAI_ANLAS_RULES` 编码的是 **Opus 专属**的免费生成规则（单张 / 面积 ≤ 1024² /
+ * 步数 ≤ 28）。默认的 `1216×832 / 23 步` 满足全部三条，于是指示器对**任何**账户都显示
+ * 「在免费额度内」。对 Tablet / Scroll、以及免订阅直接买 Anlas 的账户，这句话是**错的**：
+ * 那些账户每张都扣约 17 点，而界面正告诉他不要钱。
+ *
+ * - `opus`    —— Opus 订阅：满足三条即不扣点
+ * - `metered` —— Tablet / Scroll / 免订阅买点数：**没有免费额度**，每张按牌价扣
+ * - `unset`   —— 默认。没说 = 不猜，一律按会花钱报并说明取决于档位
+ */
+export type NaiBillingTier = 'opus' | 'metered' | 'unset';
 
 /** `estimateAnlasCost()` 的产出。全部字段都是**估算值**，见 `AnlasVerdict`。 */
 export interface AnlasEstimate {

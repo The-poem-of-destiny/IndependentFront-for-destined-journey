@@ -19,7 +19,7 @@
  * 纯函数、零依赖、无 I/O。
  */
 
-import type { AnlasEstimate, AnlasFreeAllowanceBreach } from './types-image';
+import type { AnlasEstimate, AnlasFreeAllowanceBreach, NaiBillingTier } from './types-image';
 
 /**
  * 估算所依据的**全部**规则与系数 —— 这是本模块唯一允许出现数字的地方。
@@ -35,7 +35,13 @@ import type { AnlasEstimate, AnlasFreeAllowanceBreach } from './types-image';
  *    另有系数，v1 不发那些请求，所以这里刻意不写 —— 别照着猜一个填进来。
  */
 export const NAI_ANLAS_RULES = {
-  /** 进 `AnlasEstimate.rulesetLabel`，让「这是哪一版规则」在界面上看得见 */
+  /**
+   * 进 `AnlasEstimate.rulesetLabel`，让「这是哪一版规则」在界面上看得见。
+   *
+   * 🔴 **免费额度那几条是 Opus 专属的**，标签里那三个字不是装饰。非 Opus 档位
+   *    走 {@link TIER_RULESET_LABELS} 的另一句 —— 拿这句去描述一个按点数付费的
+   *    账户，就是 2026-08-04 真机那天暴露的那个 bug 本身。
+   */
   rulesetLabel: 'NovelAI Opus 订阅 · V4 系列文生图（规则快照 2026-08-04）',
 
   /**
@@ -68,9 +74,35 @@ export const NAI_ANLAS_RULES = {
   minAnlasPerSample: 2,
 } as const;
 
+/**
+ * 各档位的规则集标签。免费额度**只有 Opus 有**，所以另外两句都不提「免费档」。
+ *
+ * 与 `NAI_ANLAS_RULES.rulesetLabel` 同为「让用户看见依据的是哪一版规则」，
+ * 分开写是因为它们描述的是**不同的账单规则**，不是同一句话的三种说法。
+ */
+export const TIER_RULESET_LABELS: Readonly<Record<NaiBillingTier, string>> = {
+  opus: NAI_ANLAS_RULES.rulesetLabel,
+  metered: 'NovelAI 按点数计费（Tablet / Scroll / 免订阅购点）· 无免费额度',
+  unset: 'NovelAI 账户档位未设置 · 无法判断有没有免费额度',
+};
+
 /** 正的有限数才算能拿来估算的参数（设置页输入框清空会给出 `NaN`） */
 function isUsable(value: number): boolean {
   return Number.isFinite(value) && value > 0;
+}
+
+/** {@link estimateAnlasCost} 的可选轴。留成对象是因为这一族参数还会长（v2 的 img2img） */
+export interface AnlasEstimateOptions {
+  /** `n_samples`，v1 恒 1（D9）；留参数是为了让规则本身可被表达 */
+  samples?: number;
+  /**
+   * 账户档位。**缺省是 `'unset'`，不是 `'opus'`** —— 这条默认值就是修复本身。
+   *
+   * 缺省若给 `'opus'`，任何忘了传的调用方都会重新得到「这组参数免费」的乐观答案，
+   * 而那正是 2026-08-04 那天的 bug：指示器对按点数付费的账户说不要钱。默认值
+   * 必须是**不猜**，让忘了传的地方显示「取决于你的订阅」而不是「免费」。
+   */
+  tier?: NaiBillingTier;
 }
 
 /**
@@ -79,19 +111,25 @@ function isUsable(value: number): boolean {
  * @param width  `UiSettings.imageWidth`
  * @param height `UiSettings.imageHeight`
  * @param steps  `UiSettings.imageSteps`
- * @param samples `n_samples`，v1 恒 1（D9）；留参数是为了让规则本身可被表达
+ * @param opts   见 {@link AnlasEstimateOptions}；`tier` 缺省 `'unset'`（不猜）
  * @returns 一份**估算**，不是账单承诺 —— 判定值的命名与 `rulesetLabel` 都在说这件事
  *
- * 🔴 任一参数不是正的有限数时，返回 `consumes-anlas` + `invalid-input`，
- *    并按最低收费给一个数。把「读不懂」显示成「免费」，正是这个指示器最不该犯的错。
+ * 三条「绝不乐观」的早退/降级，共用同一条 doctrine ——
+ * **把「不知道」显示成「免费」是这个指示器最不该犯的错**：
+ * - 任一参数不是正的有限数 → `consumes-anlas` + `invalid-input`
+ * - 档位是 `metered` → `consumes-anlas` + `no-free-allowance`（免费额度整个不存在）
+ * - 档位是 `unset`   → `consumes-anlas` + `tier-unknown`
  */
 export function estimateAnlasCost(
   width: number,
   height: number,
   steps: number,
-  samples: number = 1,
+  opts: AnlasEstimateOptions = {},
 ): AnlasEstimate {
   const rules = NAI_ANLAS_RULES;
+  const samples = opts.samples ?? 1;
+  const tier: NaiBillingTier = opts.tier ?? 'unset';
+  const rulesetLabel = TIER_RULESET_LABELS[tier] ?? TIER_RULESET_LABELS.unset;
 
   if (!isUsable(width) || !isUsable(height) || !isUsable(steps) || !isUsable(samples)) {
     return {
@@ -99,7 +137,7 @@ export function estimateAnlasCost(
       anlasPerSample: rules.minAnlasPerSample,
       estimatedAnlas: rules.minAnlasPerSample,
       breaches: ['invalid-input'],
-      rulesetLabel: rules.rulesetLabel,
+      rulesetLabel,
     };
   }
 
@@ -117,9 +155,16 @@ export function estimateAnlasCost(
     Math.ceil(rules.anlasPerPixel * pixels + rules.anlasPerPixelStep * pixels * steps),
   );
 
+  // 🔴 档位先于参数：免费额度是 **Opus 专属**的，别的档位参数再省也一样扣点。
+  //    这两项与 pixels/steps 并列进 breaches（而不是替换它们）—— 用户既该知道
+  //    「这一档没有免费额度」，也该在调大尺寸时照样看见是哪个参数越了界。
+  if (tier === 'metered') breaches.push('no-free-allowance');
+  if (tier === 'unset') breaches.push('tier-unknown');
+
   // 尺寸或步数越界 ⇒ 整单失去免费额度；只是张数多要了几张 ⇒ 仍免掉前 N 张。
   const outOfSpec = breaches.includes('pixels') || breaches.includes('steps');
-  const freeSamples = outOfSpec ? 0 : rules.freeSamplesPerRequest;
+  // 只有 Opus 才有那 N 张免费额度可言
+  const freeSamples = outOfSpec || tier !== 'opus' ? 0 : rules.freeSamplesPerRequest;
   const billedSamples = Math.max(0, samples - freeSamples);
 
   return {
@@ -127,6 +172,6 @@ export function estimateAnlasCost(
     anlasPerSample,
     estimatedAnlas: billedSamples * anlasPerSample,
     breaches,
-    rulesetLabel: rules.rulesetLabel,
+    rulesetLabel,
   };
 }

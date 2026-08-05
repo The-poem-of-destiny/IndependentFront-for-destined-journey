@@ -253,6 +253,8 @@ function getDefaults(): UiSettings {
     imageSampler: 'k_euler_ancestral',
     imageNoiseSchedule: 'karras',
     imageUcPreset: 0,
+    // 🔴 'unset' 而不是 'opus'：没问过用户就假设他有 Opus，等于替他宣布「这些图不要钱」
+    imageNaiTier: 'unset',
     imageMaxPerMessage: DEFAULT_IMAGE_MAX_PER_MESSAGE,
     imageMaxPerHour: DEFAULT_IMAGE_MAX_PER_HOUR,
   };
