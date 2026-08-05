@@ -32,16 +32,17 @@
  * 本文件是**纯函数层**：没有网络、没有 Dexie、不产随机。
  */
 
-import type { CharacterAppearance, CharacterAppearancePatch } from './character-appearance';
+import type {
+  CharacterAppearance,
+  CharacterAppearancePatch,
+  ParsedCharacterAppearance,
+} from './character-appearance';
 import { APPEARANCE_SLOT_ORDER, EMPTY_APPEARANCE } from './character-appearance';
 import { normalizeTagString } from './image-prompt';
 
-/** 一个角色的一次外貌上报 */
-export interface ParsedCharacterAppearance {
-  /** 🔴 原样，不归一化（铁律 1）—— 名字要与标记里的 `characters` `===` 对上 */
-  name: string;
-  patch: CharacterAppearancePatch;
-}
+// 解析产物的类型在 `character-appearance.ts`（零依赖，types-image 要引用它，
+// 放这边会成环）。本模块原样再导出，调用方 import 哪边都对。
+export type { ParsedCharacterAppearance } from './character-appearance';
 
 /** 槽名的容错映射：模型会写驼峰、下划线、也会写中文 */
 const SLOT_ALIASES: Readonly<Record<string, keyof CharacterAppearance>> = {

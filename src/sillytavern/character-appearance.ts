@@ -221,3 +221,16 @@ export function renderAppearanceProse(appearance: CharacterAppearance): string {
   const parts = order.map((slot) => appearance[slot].trim()).filter((v) => v !== '');
   return parts.join('; ');
 }
+
+/**
+ * 一个角色的一次外貌上报（`character-appearance-agent` 的抽取产物）。
+ *
+ * 🔴 类型住在本文件而不是 agent 那边，是为了**不成环**：`types-image` 要引用它，
+ *    而 agent 模块 import 了 `image-prompt`，`image-prompt` 又 import `types-image`。
+ *    本文件零依赖，谁都可以引。
+ */
+export interface ParsedCharacterAppearance {
+  /** 🔴 原样，不归一化（铁律 1）—— 要与标记里的 `characters` `===` 对上 */
+  name: string;
+  patch: CharacterAppearancePatch;
+}

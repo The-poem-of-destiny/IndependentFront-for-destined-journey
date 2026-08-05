@@ -9,6 +9,7 @@ import { useImagePresetStore } from '../../stores/image-preset-store';
 import { GamePipeline } from '../../lib/game-pipeline';
 import { buildSceneImageSeams, resolveSceneWeather } from '../../lib/scene-image-seams';
 import { useCharacterAppearanceStore } from '../../stores/character-appearance-store';
+import { bootstrapAppearance, isUsableBaseline } from '@engine/character-appearance-agent';
 import TopBar from './TopBar.vue';
 import SideToolbar from './SideToolbar.vue';
 import ChatFlow from './ChatFlow.vue';
@@ -86,6 +87,30 @@ onMounted(async () => {
           weather: resolveSceneWeather(game.saveProfile),
           location: game.player?.location || undefined,
         }),
+        /**
+         * AI 报了外貌变化（D56/D57）。两条分支：
+         * - **没有基线** → 这是这个角色第一次出图，把上报当作**初始设定**建基线
+         *   （D57：第一次见到她的样子，定义上就是她的初始样子；写进会话副本会让
+         *   基线永远空着，那份「干净的、可回退的真源」就不存在了）
+         * - **有基线** → 写会话副本（自动写入 + 可重置，主人 2026-08-04 裁定）
+         */
+        applyAppearances: async (list) => {
+          for (const item of list) {
+            const preset = imagePresets.find('character', item.name);
+            const base = preset?.appearance;
+            if (!base || !isUsableBaseline(base)) {
+              const bootstrapped = bootstrapAppearance(item.patch);
+              if (!isUsableBaseline(bootstrapped)) continue; // 全空的基线 = 没有基线
+              await imagePresets.upsert({
+                kind: 'character',
+                name: item.name,
+                appearance: bootstrapped,
+              });
+              continue;
+            }
+            await charAppearance.applyPatch(item.name, base, item.patch);
+          }
+        },
         runPromptAgent: (request, signal) =>
           pipeline
             ? pipeline.runImagePromptAgent(request, signal)

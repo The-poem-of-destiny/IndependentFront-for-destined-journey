@@ -18,6 +18,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import type { ImagePreset, ImagePresetKind } from '@engine/types-image';
+import type { CharacterAppearance } from '@engine/character-appearance';
 import {
   deleteImagePreset,
   getImagePreset,
@@ -41,6 +42,14 @@ export function imagePresetKey(kind: ImagePresetKind, name: string): string {
 export interface ImagePresetInput {
   kind: ImagePresetKind;
   name: string;
+  /**
+   * 外貌**基线**的属性槽（D56/D58）。
+   *
+   * 🔴 这个字段曾经差点被漏掉：`upsert` 不接它的话，D57 的 bootstrap 会**静默失败**
+   *    —— 调用方传了、类型不报错（`.vue` 不走 tsc）、库里就是没有。与 `blurByDefault`
+   *    当年那个「声明了但没人传」是同一种缺陷。
+   */
+  appearance?: CharacterAppearance;
   danbooru?: { positive: string; negative: string };
   /** v2 的 OpenAI/Gemini 用；形状先留好（D11） */
   prose?: { positive: string; negative: string };
@@ -139,6 +148,9 @@ export const useImagePresetStore = defineStore('imagePreset', () => {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
+    if (input.appearance !== undefined) row.appearance = { ...input.appearance };
+    // 没传 appearance 但库里已经有 → 保留（改名/钉 seed 这类局部更新不该抹掉基线）
+    else if (existing?.appearance !== undefined) row.appearance = { ...existing.appearance };
     if (input.danbooru !== undefined) row.dialects.danbooru = { ...input.danbooru };
     if (input.prose !== undefined) row.dialects.prose = { ...input.prose };
     if (input.pinnedSeed !== undefined) row.pinnedSeed = input.pinnedSeed;
@@ -172,6 +184,7 @@ export const useImagePresetStore = defineStore('imagePreset', () => {
       return mutationFail('name-taken', `已经有一条叫「${to}」的预设了。`);
     }
     const next: ImagePresetInput = { kind, name: to };
+    if (source.appearance !== undefined) next.appearance = { ...source.appearance };
     if (source.dialects.danbooru !== undefined) next.danbooru = { ...source.dialects.danbooru };
     if (source.dialects.prose !== undefined) next.prose = { ...source.dialects.prose };
     if (source.pinnedSeed !== undefined) next.pinnedSeed = source.pinnedSeed;

@@ -15,7 +15,11 @@
  * 🔴 本文件里带 🔴 的注释记录的是设计阶段已经踩到或推演出的坑，不是装饰。改之前先读设计文档。
  */
 
-import type { CharacterAppearance, CharacterAppearancePatch } from './character-appearance';
+import type {
+  CharacterAppearance,
+  CharacterAppearancePatch,
+  ParsedCharacterAppearance,
+} from './character-appearance';
 
 // ═══ 开关与分级 ═══
 
@@ -82,6 +86,13 @@ export interface ImagePromptOutput {
   sceneNegative: string;
   /** 图鉴副标题（D30 的注解：这一条可以让 agent 写） */
   desc: string;
+  /**
+   * 这一段正文里 AI 观察到的**角色外貌变化**（D56/D57）。缺席或空数组 = 没有变化。
+   *
+   * 🔴 与场景串走**同一次调用**：那一段正文侧链本来就在看，「她换了身衣服」正是从
+   *    同一份材料里读出来的。另开一次 LLM 是双倍的钱与延迟换一个更差的答案。
+   */
+  appearances?: ParsedCharacterAppearance[];
 }
 
 // ═══ 渲染分段 ═══

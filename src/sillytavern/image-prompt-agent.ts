@@ -17,6 +17,7 @@
 
 import { buildAgentMessagesAsync } from './agent-templates';
 import { normalizeTagString } from './image-prompt';
+import { APPEARANCE_PROMPT_RULES, parseCharacterAppearances } from './character-appearance-agent';
 import { CAPTION_DESC_MAX, sanitizeCaption, stripMarkers } from './marker-protocol';
 import type { AgentConfig, AgentContext, AgentPreset, ApiEndpoint, WorldBook } from './types';
 import type {
@@ -184,6 +185,22 @@ export async function callImagePromptAgent(
       return agentFailure('image_prompt 模板未注册（AGENT_TEMPLATES / DEFAULT_TEMPLATES）');
     }
 
+    // 🔴 外貌上报规则在**装配期**追加，不写进 `agent-config.json`（D56）：
+    //    格式的定义与解析器必须同源，否则会出现「提示词教它写 A、解析器只认 B」
+    //    那种静默失效 —— 用户看到的只是外貌永远不更新，没有任何报错。
+    //    追加在 system 消息末尾；没有 system 消息时补一条（模板理论上一定有）。
+    const systemIndex = messages.findIndex((m) => m.role === 'system');
+    if (systemIndex >= 0) {
+      messages[systemIndex] = {
+        ...messages[systemIndex],
+        content: `${messages[systemIndex].content}
+
+${APPEARANCE_PROMPT_RULES}`,
+      };
+    } else {
+      messages.unshift({ role: 'system', content: APPEARANCE_PROMPT_RULES });
+    }
+
     const config = req.configs?.find((c) => c.agentId === 'image_prompt');
     const client = deps.clientFactory('image_prompt', req.endpoint, req.saveId);
     const result = await client.chat(
@@ -319,5 +336,12 @@ export function parseImagePromptOutput(raw: string): ImagePromptParseResult {
   // 绝不过 normalizeTagString（那会把中文标点改坏）
   const desc = sanitizeCaption(extractTag(text, 'image_desc'), CAPTION_DESC_MAX);
 
-  return { ok: true, value: { scenePrompt, sceneNegative, desc } };
+  // 外貌上报（D56/D57）：抽不到就是空数组，**不影响本次成功与否** ——
+  // 它是锦上添花，为一个畸形的附加块让整张图失败是把「少件衣服」升级成「没有图」。
+  const appearances = parseCharacterAppearances(text);
+
+  return {
+    ok: true,
+    value: { scenePrompt, sceneNegative, desc, ...(appearances.length ? { appearances } : {}) },
+  };
 }

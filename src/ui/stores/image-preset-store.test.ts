@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { clearAllData, getDatabase, getImagePreset } from '@engine/database';
+import { EMPTY_APPEARANCE } from '@engine/character-appearance';
 import { imagePresetKey, useImagePresetStore } from './image-preset-store';
 
 beforeEach(() => {
@@ -204,5 +205,55 @@ describe('删除', () => {
     expect(res.ok).toBe(true);
     expect(store.presets).toHaveLength(0);
     expect(await getDatabase().imagePresets.count()).toBe(0);
+  });
+});
+
+describe('外貌基线槽（D56/D58）', () => {
+  /**
+   * 🔴 这一组守的是一个**差点发生**的静默失败：`upsert` 不接 `appearance` 的话，
+   * D57 的 bootstrap 会照常「成功」，库里却什么都没有 —— `.vue` 不走 tsc，
+   * 类型层拦不住。与 `blurByDefault` 当年那个「声明了但没人传」同形状。
+   */
+  it('upsert 存得下外貌槽，且回读得到', async () => {
+    const store = useImagePresetStore();
+    await store.init();
+    await store.upsert({
+      kind: 'character',
+      name: '艾莉丝',
+      appearance: { ...EMPTY_APPEARANCE, count: '1girl', hairColor: 'silver hair' },
+    });
+
+    expect(store.find('character', '艾莉丝')?.appearance?.hairColor).toBe('silver hair');
+    expect((await getImagePreset('character:艾莉丝'))?.appearance?.count).toBe('1girl');
+  });
+
+  it('🔴 局部更新（钉 seed）不抹掉已有基线', async () => {
+    const store = useImagePresetStore();
+    await store.init();
+    await store.upsert({
+      kind: 'character',
+      name: '艾莉丝',
+      appearance: { ...EMPTY_APPEARANCE, hairColor: 'silver hair' },
+    });
+
+    await store.setPinnedSeed('艾莉丝', 42);
+
+    expect(store.find('character', '艾莉丝')?.appearance?.hairColor).toBe('silver hair');
+    expect(store.find('character', '艾莉丝')?.pinnedSeed).toBe(42);
+  });
+
+  it('改名带着基线一起走', async () => {
+    const store = useImagePresetStore();
+    await store.init();
+    await store.upsert({
+      kind: 'character',
+      name: '旧名',
+      appearance: { ...EMPTY_APPEARANCE, eyes: 'golden eyes' },
+    });
+
+    await store.rename('character', '旧名', '新名');
+
+    expect(store.find('character', '新名')?.appearance?.eyes).toBe('golden eyes');
+    expect(store.find('character', '旧名')).toBeUndefined();
   });
 });

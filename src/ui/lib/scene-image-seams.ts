@@ -34,6 +34,7 @@ import { buildWorldTags } from '@engine/image-world-tags';
 import { buildNaiRequest } from '@engine/image-providers/novelai';
 import { DEFAULT_IMAGE_COMPOSITION_TAGS } from '@engine/image-defaults';
 import type { GameTime } from '@engine/time-system';
+import type { ParsedCharacterAppearance } from '@engine/character-appearance';
 import type {
   ImageGenFailure,
   ImagePreset,
@@ -99,6 +100,16 @@ export interface SceneImageSeamDeps {
   sendImage?: typeof generateNaiImage;
   /** 字节指纹；缺省用 `media-hash`（算不出来返回 undefined，不换算法） */
   hashBytes?: (bytes: Uint8Array) => Promise<string | undefined>;
+  /**
+   * AI 报了角色外貌变化时落库（D56/D57）。缺省 = 不落（外貌功能整个静默关闭）。
+   *
+   * 🔴 **在 `send` 之前调**，所以这一次出图就已经穿上新衣服 —— 由下面 `runPromptAgent`
+   *    的包装保证：`send` 每次现取 `deps.presets()`，落库先发生，取值后发生。
+   *    放到 `send` 之后的话，改变永远晚一张图生效，看起来像「AI 反应慢半拍」。
+   * 🔴 **失败不阻断出图**：外貌落不了库最多是这张图的衣服旧了，
+   *    而抛出去会让整张图变成 `prompt-agent` 失败。
+   */
+  applyAppearances?: (list: readonly ParsedCharacterAppearance[]) => Promise<void>;
 }
 
 /** NAI 回的是 PNG（§6）。造 blob 时声明它，落库的 `mime` 仍从 blob 上回读 */
@@ -162,7 +173,23 @@ export function buildSceneImageSeams(deps: SceneImageSeamDeps): SceneImageSeams 
       });
     },
 
-    runPromptAgent: (req, signal) => deps.runPromptAgent(req, signal),
+    // 侧链 + 外貌落库。包装在这里而不是改 store 的契约：store 只关心场景串，
+    // 它不该知道「顺便还会更新角色外貌」这回事。
+    runPromptAgent: async (req, signal) => {
+      const out = await deps.runPromptAgent(req, signal);
+      // 判别联合：失败分支有 `ok: false`，成功分支（ImagePromptOutput）没有 `ok` 字段
+      const failed = (out as ImageGenFailure).ok === false;
+      const appearances = failed ? undefined : (out as ImagePromptOutput).appearances;
+      if (appearances?.length && deps.applyAppearances) {
+        try {
+          await deps.applyAppearances(appearances);
+        } catch (err) {
+          // 落不了库 = 这张图的衣服是旧的；抛出去 = 根本没有这张图
+          console.warn('[sceneImage] 角色外貌落库失败（不影响出图）:', err);
+        }
+      }
+      return out;
+    },
 
     send: (input, signal) => sendOne(input, signal, deps, send, hash),
   };
