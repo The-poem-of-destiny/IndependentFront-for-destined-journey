@@ -76,7 +76,7 @@ npm run dev
 
 - Endpoint：`https://api.siliconflow.cn/v1`
 - API Key：在[硅基流动](https://cloud.siliconflow.cn/)注册后获取
-- 默认模型：`Qwen/Qwen3-VL-Embedding-8B`
+- 默认模型：`Qwen/Qwen3-Embedding-8B`
 
 每个创建后点「**连接测试**」确认通过。配完 API 列表应有 **3 个**。
 
