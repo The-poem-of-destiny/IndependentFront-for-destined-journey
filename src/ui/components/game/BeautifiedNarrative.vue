@@ -174,7 +174,9 @@ function paragraphs(text: string): string[] {
   // 不应当正文显示。Vue 的 {{ }} 会把它当字面文本转义后原样显示，很诡异——这里先剥离。
   // 用 [\s\S]*? 懒惰匹配，跨多行 + 多条注释（/g）都能一次清掉。
   const stripped = text.replace(/<!--[\s\S]*?-->/g, '');
-  return stripped.split(/\n\n+/).filter((part, index, list) => part.length > 0 || list.length === 1);
+  return stripped
+    .split(/\n\n+/)
+    .filter((part, index, list) => part.length > 0 || list.length === 1);
 }
 </script>
 
@@ -316,5 +318,4 @@ function paragraphs(text: string): string[] {
   line-height: 1.85;
   text-indent: 0;
 }
-
 </style>

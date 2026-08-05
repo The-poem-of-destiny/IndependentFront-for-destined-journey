@@ -91,7 +91,9 @@ export async function forward(c: Context, suffix: string): Promise<Response> {
     const err = e as { message?: string; cause?: { code?: string; message?: string } };
     const cause = err?.cause;
     const detail = cause ? (cause.code ?? cause.message ?? String(cause)) : '';
-    const reason = detail ? `${err?.message ?? 'fetch error'}: ${detail}` : (err?.message ?? String(e));
+    const reason = detail
+      ? `${err?.message ?? 'fetch error'}: ${detail}`
+      : (err?.message ?? String(e));
     console.error('[proxy] upstream fetch failed:', {
       target: `${base}${suffix}`,
       method: c.req.method,
