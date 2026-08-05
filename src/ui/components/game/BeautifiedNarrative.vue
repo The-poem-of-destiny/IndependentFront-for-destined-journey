@@ -89,11 +89,8 @@ function paragraphs(text: string): string[] {
         class="beautifier-native-match"
       >
         <div class="dialogue-card">
-          <div class="dialogue-header">
-            <span class="dialogue-avatar">{{ segment.captures[0] }}</span>
-            <span class="dialogue-name">{{ segment.captures[0] }}</span>
-          </div>
-          <div class="dialogue-body">"{{ segment.captures[2] }}"</div>
+          <span class="dialogue-name">{{ segment.captures[0] }}</span>
+          <div class="dialogue-body">{{ segment.captures[2] }}</div>
         </div>
       </div>
     </template>
@@ -115,41 +112,70 @@ function paragraphs(text: string): string[] {
   margin-bottom: 0;
 }
 
+/* === 对话卡片 · 血色玫瑰窗 / 圣物匣风（仿 crimson reliquary） ===
+   走 native 渲染（宿主 DOM），直接用 --theme-* 变量。
+   拱形顶 + 双层描边（外卡边 + ::before 内嵌古金线）+ 顶部金色辉光 +
+   ::after 渐变血色短线 + 名字旁血红宝石点（::before on name）+ inset 层次 */
 .beautifier-native-match :deep(.dialogue-card) {
-  margin: 10px 0;
-  padding: 10px 14px;
-  border: 1px solid color-mix(in srgb, var(--theme-primary) 22%, var(--theme-card-border));
-  border-radius: var(--theme-radius-md, 8px);
-  background: color-mix(in srgb, var(--theme-surface-muted) 80%, transparent);
+  position: relative;
+  margin: var(--theme-spacing-md, 8px) 0;
+  padding: 10px 16px 8px;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(194, 163, 111, 0.08), transparent 70%),
+    var(--theme-card-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: 12px 12px 3px 3px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+    var(--theme-shadow-sm);
 }
 
-.beautifier-native-match :deep(.dialogue-header) {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+.beautifier-native-match :deep(.dialogue-card)::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border: 1px solid rgba(194, 163, 111, 0.28);
+  border-radius: 9px 9px 2px 2px;
+  pointer-events: none;
 }
 
-.beautifier-native-match :deep(.dialogue-avatar) {
-  display: inline-flex;
-  width: 24px;
-  height: 24px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--theme-primary) 16%, transparent);
-  color: var(--theme-primary);
-  font-size: 0.75rem;
-  font-weight: 700;
+.beautifier-native-match :deep(.dialogue-card)::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 28px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--theme-primary), transparent);
+  opacity: 0.6;
 }
 
 .beautifier-native-match :deep(.dialogue-name) {
+  display: block;
+  font-family: var(--theme-font-title, serif);
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.1em;
   color: var(--theme-primary);
-  font-weight: 700;
+  text-shadow: 0 0 10px rgba(194, 163, 111, 0.25);
+  margin-bottom: 4px;
+}
+
+.beautifier-native-match :deep(.dialogue-name)::before {
+  content: '◆';
+  color: var(--theme-primary);
+  margin-right: 7px;
+  font-size: 0.75em;
+  opacity: 0.85;
 }
 
 .beautifier-native-match :deep(.dialogue-body) {
   color: var(--theme-text-primary);
+  font-family: var(--theme-font-body, var(--theme-font-title, serif));
+  line-height: 1.85;
   text-indent: 0;
 }
+
 </style>
