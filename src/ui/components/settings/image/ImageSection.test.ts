@@ -24,6 +24,8 @@ import type { ImagePreset } from '@engine/types-image';
 
 // ---- Dexie 层：jsdom 下不可用，整层替成内存表 ----
 const table = new Map<string, ImagePreset>();
+const sessionTable = new Map<string, any>();
+
 vi.mock('@engine/database', () => ({
   getImagePresets: vi.fn(async () => [...table.values()]),
   getImagePreset: vi.fn(async (key: string) => table.get(key)),
@@ -32,6 +34,22 @@ vi.mock('@engine/database', () => ({
   }),
   deleteImagePreset: vi.fn(async (key: string) => {
     table.delete(key);
+  }),
+  // 会话副本（D56）：ImagePresetList 现在也读它
+  characterAppearanceKey: (saveId: string, name: string) => `${saveId}:${name}`,
+  getCharacterAppearances: vi.fn(async (saveId: string) =>
+    [...sessionTable.values()].filter((r) => r.saveId === saveId),
+  ),
+  saveCharacterAppearance: vi.fn(async (row: { key: string }) => {
+    sessionTable.set(row.key, row);
+  }),
+  deleteCharacterAppearance: vi.fn(async (key: string) => {
+    sessionTable.delete(key);
+  }),
+  clearCharacterAppearances: vi.fn(async (saveId: string) => {
+    for (const [k, v] of [...sessionTable.entries()]) {
+      if ((v as { saveId: string }).saveId === saveId) sessionTable.delete(k);
+    }
   }),
 }));
 
@@ -56,6 +74,9 @@ import ImagePresetList from './ImagePresetList.vue';
 import AgentConfigPanel from '../agent/AgentConfigPanel.vue';
 import AppButton from '../../shared/AppButton.vue';
 import AppModal from '../../shared/AppModal.vue';
+import { APPEARANCE_SLOT_ORDER, EMPTY_APPEARANCE } from '@engine/character-appearance';
+import { useCharacterAppearanceStore } from '../../../stores/character-appearance-store';
+import { useUIStore } from '../../../stores/ui-store';
 import { useImagePresetStore } from '../../../stores/image-preset-store';
 
 /**
@@ -233,5 +254,81 @@ describe('ImagePresetList —— 视觉预设 CRUD', () => {
     await flushPromises();
 
     expect(table.has('character:苏婉')).toBe(false);
+  });
+});
+
+describe('ImagePresetList —— 初始设定 vs 本档变化（D56）', () => {
+  /**
+   * 🔴 这一组守的是**自动写入的安全阀**：AI 会自动改会话副本，所以界面上必须
+   * ①看得见改了什么 ②两种粒度都能重置回去。看不见 + 撤不掉的自动写入，
+   * 就是当初拒绝「一份可变定义」的那个理由本身。
+   */
+  it('有活动存档时显示会话条与「全部重置」', async () => {
+    const ui = useUIStore();
+    ui.navigate('game', 'save_x');
+
+    const w = mount(ImagePresetList);
+    await flushPromises();
+
+    expect(w.find('.session-bar').exists()).toBe(true);
+  });
+
+  it('没有活动存档时不画一个点了没反应的重置按钮，改说明白', async () => {
+    const w = mount(ImagePresetList);
+    await flushPromises();
+
+    expect(w.find('.session-bar').exists()).toBe(false);
+    expect(w.text()).toContain('当前没有进行中的存档');
+  });
+
+  it('🔴 改过的角色列出改了哪些槽，并给出单个重置', async () => {
+    const ui = useUIStore();
+    ui.navigate('game', 'save_x');
+    const presets = useImagePresetStore();
+    await presets.upsert({
+      kind: 'character',
+      name: '艾莉丝',
+      appearance: { ...EMPTY_APPEARANCE, count: '1girl', outfit: 'white robe' },
+    });
+    const session = useCharacterAppearanceStore();
+    await session.load('save_x');
+    await session.applyPatch(
+      '艾莉丝',
+      { ...EMPTY_APPEARANCE, count: '1girl', outfit: 'white robe' },
+      {
+        outfit: 'travel cloak',
+      },
+    );
+
+    const w = mount(ImagePresetList);
+    await flushPromises();
+
+    const diff = w.find('.session-diff');
+    expect(diff.exists()).toBe(true);
+    expect(diff.text()).toContain('穿戴');
+    expect(diff.text()).toContain('travel cloak');
+    expect(w.find('.reset-one-btn').exists()).toBe(true);
+
+    // 重置之后差异行消失
+    await w.find('.reset-one-btn').trigger('click');
+    await flushPromises();
+    expect(w.find('.session-diff').exists()).toBe(false);
+  });
+
+  it('编辑器里九个槽都有输入框（留空 = 明确清空，D58）', async () => {
+    const presets = useImagePresetStore();
+    await presets.upsert({ kind: 'character', name: '苏婉' });
+
+    const w = mount(ImagePresetList);
+    await flushPromises();
+    const editBtn = w.findAll('.preset-actions button').find((b) => b.text().includes('编辑'));
+    await editBtn!.trigger('click');
+    await flushPromises();
+
+    // AppModal 自己 Teleport 到 body —— 弹窗内容不在 wrapper 里，只能查文档
+    // （本文件既有用例的 `typeInto('.modal-body …')` 同一口径）
+    expect(document.querySelectorAll('.modal-body .slot-label')).toHaveLength(
+      APPEARANCE_SLOT_ORDER.length,
+    );
   });
 });

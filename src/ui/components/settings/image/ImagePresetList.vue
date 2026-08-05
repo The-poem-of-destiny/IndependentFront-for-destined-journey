@@ -24,15 +24,63 @@ import AppButton from '../../shared/AppButton.vue';
 import AppModal from '../../shared/AppModal.vue';
 import AppTabs from '../../shared/AppTabs.vue';
 import { useImagePresetStore } from '../../../stores/image-preset-store';
+import { useCharacterAppearanceStore } from '../../../stores/character-appearance-store';
 import { useUIStore } from '../../../stores/ui-store';
 import type { ImagePreset, ImagePresetKind } from '@engine/types-image';
+import {
+  APPEARANCE_SLOT_ORDER,
+  EMPTY_APPEARANCE,
+  type CharacterAppearance,
+} from '@engine/character-appearance';
 
 const store = useImagePresetStore();
+const session = useCharacterAppearanceStore();
 const ui = useUIStore();
 
 onMounted(() => {
   void store.init();
+  // 会话副本按存档存（D56）。没有活动存档时它是空的，界面据此说明白，
+  // 而不是画一个点了没反应的重置按钮。
+  if (ui.activeSaveId) void session.load(ui.activeSaveId);
 });
+
+// ═══ 会话副本（D56）═══
+
+/** 槽的中文名 —— 编辑器与差异行共用，两处各写一份必然漂 */
+const SLOT_LABELS: Record<keyof CharacterAppearance, string> = {
+  count: '人数性别',
+  hairColor: '发色',
+  hairStyle: '发型',
+  eyes: '瞳色',
+  build: '体型',
+  features: '固有特征',
+  outfit: '穿戴',
+  condition: '状态',
+  expression: '表情',
+};
+
+const slotOrder = APPEARANCE_SLOT_ORDER;
+const hasSave = computed(() => ui.activeSaveId !== null);
+const changedCount = computed(() => session.rows.length);
+
+/** 这个角色在本档里被 AI 改过哪些槽（空 = 没改过） */
+function sessionSlots(name: string): { slot: keyof CharacterAppearance; value: string }[] {
+  const patch = session.patchOf(name);
+  if (!patch) return [];
+  return slotOrder
+    .filter((slot) => patch[slot] !== undefined)
+    .map((slot) => ({ slot, value: patch[slot] as string }));
+}
+
+async function resetOne(name: string) {
+  const r = await session.resetOne(name);
+  ui.toast(r.ok ? `「${name}」已回到初始设定` : r.message, r.ok ? 'success' : 'error');
+}
+
+async function resetAll() {
+  const r = await session.resetAll();
+  ui.toast(r.ok ? '本存档的外貌变化已全部重置' : r.message, r.ok ? 'success' : 'error');
+}
 
 const activeKind = ref<ImagePresetKind>('character');
 
@@ -54,11 +102,23 @@ const editorOpen = ref(false);
 const editingName = ref<string | null>(null);
 const saving = ref(false);
 
-const form = ref({ name: '', positive: '', negative: '', pinnedSeed: null as number | null });
+const form = ref({
+  name: '',
+  positive: '',
+  negative: '',
+  pinnedSeed: null as number | null,
+  appearance: { ...EMPTY_APPEARANCE } as CharacterAppearance,
+});
 
 function openCreate() {
   editingName.value = null;
-  form.value = { name: '', positive: '', negative: '', pinnedSeed: null };
+  form.value = {
+    name: '',
+    positive: '',
+    negative: '',
+    pinnedSeed: null,
+    appearance: { ...EMPTY_APPEARANCE },
+  };
   editorOpen.value = true;
 }
 
@@ -69,6 +129,7 @@ function openEdit(row: ImagePreset) {
     positive: row.dialects.danbooru?.positive ?? '',
     negative: row.dialects.danbooru?.negative ?? '',
     pinnedSeed: row.pinnedSeed ?? null,
+    appearance: { ...EMPTY_APPEARANCE, ...(row.appearance ?? {}) },
   };
   editorOpen.value = true;
 }
@@ -96,6 +157,9 @@ async function save() {
       kind,
       name: form.value.name,
       danbooru: { positive: form.value.positive, negative: form.value.negative },
+      // 🔴 槽整份写回：编辑器里每个槽都有输入框，「留空」就是明确的空值。
+      //    只挑非空的写会让「清空某个槽」永远做不到（D58 的空串语义）。
+      appearance: { ...form.value.appearance },
       ...(form.value.pinnedSeed !== null && Number.isFinite(form.value.pinnedSeed)
         ? { pinnedSeed: form.value.pinnedSeed }
         : {}),
@@ -135,10 +199,31 @@ function summarize(row: ImagePreset): string {
     <div class="image-card-head">
       <h4>视觉预设</h4>
       <p class="image-card-scope">
-        同一个角色/地点每次出图都带上同一串外观标签 —— 这是画面一致性的来源。
-        名字按<strong>原样</strong>匹配正文里的角色名与地点名，不做大小写或空格的容错。
+        角色的<strong>初始设定</strong>：每次出图都带上同一份外观，这是画面一致性的来源。
+        名字按<strong>原样</strong>匹配正文里的角色名，不做大小写或空格的容错。
+      </p>
+      <p class="image-card-scope">
+        剧情里换了衣服、留了疤，出图 AI 会把变化<strong>自动</strong>记进
+        <strong>本存档的副本</strong>；初始设定不受影响，随时可以重置回去。
       </p>
     </div>
+
+    <div v-if="hasSave" class="session-bar">
+      <span class="session-note">
+        本存档有 <strong>{{ changedCount }}</strong> 个角色的外貌被剧情改过
+      </span>
+      <AppButton
+        variant="ghost"
+        size="sm"
+        :disabled="changedCount === 0"
+        class="reset-all-btn"
+        @click="resetAll"
+        >全部重置</AppButton
+      >
+    </div>
+    <p v-else class="form-hint session-note">
+      当前没有进行中的存档，所以看不到「本存档的外貌变化」——下面编辑的是初始设定。
+    </p>
 
     <div class="preset-toolbar">
       <AppTabs :tabs="tabs" :active="activeKind" @select="activeKind = $event" />
@@ -154,8 +239,26 @@ function summarize(row: ImagePreset): string {
         <div class="preset-main">
           <span class="preset-name">{{ row.name }}</span>
           <span class="preset-summary">{{ summarize(row) }}</span>
+          <!-- 会话副本：只列**改过的槽**，让「现在与初始差在哪」一眼看得见 -->
+          <ul v-if="sessionSlots(row.name).length > 0" class="session-diff">
+            <li v-for="d in sessionSlots(row.name)" :key="d.slot">
+              <span class="diff-slot">{{ SLOT_LABELS[d.slot] }}</span>
+              <span class="diff-value">{{ d.value || '（已清空）' }}</span>
+            </li>
+          </ul>
         </div>
         <div class="preset-actions">
+          <span v-if="sessionSlots(row.name).length > 0" class="session-badge" title="本存档里变过"
+            >本档已变</span
+          >
+          <AppButton
+            v-if="sessionSlots(row.name).length > 0"
+            variant="ghost"
+            size="sm"
+            class="reset-one-btn"
+            @click="resetOne(row.name)"
+            >重置</AppButton
+          >
           <span v-if="row.pinnedSeed !== undefined" class="seed-badge" title="已钉住 seed"
             >seed</span
           >
@@ -201,6 +304,16 @@ function summarize(row: ImagePreset): string {
           </p>
           <input v-model.number="form.pinnedSeed" type="number" class="form-input"
         /></label>
+        <p class="form-hint">
+          下面是这个角色的<strong>初始设定</strong>。剧情里的变化由 AI 记在本存档的副本里，
+          不会改动这里 —— 所以这几栏可以放心当作「她本来的样子」。
+        </p>
+        <div class="slot-grid">
+          <label v-for="slot in slotOrder" :key="slot" class="form-label slot-label"
+            >{{ SLOT_LABELS[slot] }}
+            <input v-model="form.appearance[slot]" class="form-input" spellcheck="false" />
+          </label>
+        </div>
       </div>
       <template #footer>
         <AppButton variant="ghost" size="sm" @click="editorOpen = false">取消</AppButton>
@@ -263,6 +376,52 @@ function summarize(row: ImagePreset): string {
 .preset-toolbar > :first-child {
   flex: 1;
   min-width: 0;
+}
+
+/* 会话副本（D56）：初始设定 vs 本档变化 */
+.session-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--theme-spacing-sm);
+  margin-bottom: var(--theme-spacing-sm);
+  padding: 8px 12px;
+  background: var(--theme-surface-muted);
+  border-radius: var(--theme-radius-md);
+}
+.session-note {
+  font-size: 0.8rem;
+  color: var(--theme-text-secondary);
+}
+.session-badge {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--theme-primary) 14%, var(--theme-card-bg));
+  color: var(--theme-primary);
+  white-space: nowrap;
+}
+.session-diff {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.session-diff li {
+  font-size: 0.75rem;
+  color: var(--theme-text-muted);
+}
+.diff-slot {
+  color: var(--theme-primary);
+  margin-right: 4px;
+}
+.slot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--theme-spacing-sm);
+  margin-bottom: var(--theme-spacing-sm);
 }
 
 .preset-list {
