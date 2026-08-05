@@ -4,7 +4,16 @@ import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAudioStore } from '../../stores/audio-store';
+import { useSceneImageStore } from '../../stores/scene-image-store';
+import { useImagePresetStore } from '../../stores/image-preset-store';
 import { GamePipeline } from '../../lib/game-pipeline';
+import { buildSceneImageSeams, resolveSceneWeather } from '../../lib/scene-image-seams';
+import { useCharacterAppearanceStore } from '../../stores/character-appearance-store';
+import {
+  appearanceWriteTarget,
+  buildEffectivePresets,
+  needsBaselineReport,
+} from '@engine/character-appearance-resolve';
 import TopBar from './TopBar.vue';
 import SideToolbar from './SideToolbar.vue';
 import ChatFlow from './ChatFlow.vue';
@@ -17,6 +26,7 @@ import QuestsPanel from './QuestsPanel.vue';
 import PlotPanel from './PlotPanel.vue';
 import MemoryPanel from './MemoryPanel.vue';
 import SnapshotPanel from './SnapshotPanel.vue';
+import CgGalleryPanel from './CgGalleryPanel.vue';
 import WorkshopEnablePanel from './WorkshopEnablePanel.vue';
 import MapPanel from './MapPanel.vue';
 import AgentStatusPanel from './AgentStatusPanel.vue';
@@ -28,6 +38,10 @@ const game = useGameStore();
 const ui = useUIStore();
 const settings = useSettingsStore();
 const audio = useAudioStore();
+const sceneImages = useSceneImageStore();
+const imagePresets = useImagePresetStore();
+/** 角色外貌的会话副本（D56）—— 基线在 imagePresets，这一份随存档走 */
+const charAppearance = useCharacterAppearanceStore();
 const s = settings.settings;
 
 let pipeline: GamePipeline | null = null;
@@ -53,6 +67,72 @@ onMounted(async () => {
       settingsStore: settings,
       saveId: ui.activeSaveId,
     });
+    // 🖼 情景插画：载入本存档的记录 + **挂上三条注入缝**。
+    //
+    // 🔴 缝不挂的话，每一次 generate() 都会以 prompt-agent 失败告终 —— 症状是
+    //    「按了没反应、记录直接变红」，看起来像 store 坏了。装配逻辑全在
+    //    `lib/scene-image-seams.ts`（不碰 Pinia，可单测），这里只负责接线。
+    await sceneImages.load(ui.activeSaveId);
+    void imagePresets.init();
+    // 🔴 会话外貌副本**必须按存档载入**（D56）：不载入就会拿上一个存档的外貌去出图，
+    //    而同一个角色名在两周目里长得不一样是正常的 —— 那正是会话副本存在的理由。
+    await charAppearance.load(ui.activeSaveId);
+    sceneImages.setSeams(
+      buildSceneImageSeams({
+        settings: () => settings.settings,
+        // 🔴 交出去的是**基线 + 本档覆盖**合并后的预设（D56）：装配层只认一份外貌，
+        //    会话覆盖在这里就地叠好，`composePrompt` 不必知道有两份定义这回事。
+        //
+        // 🔴 合并归 `buildEffectivePresets`（纯函数、有测试），**不在这个 .vue 里手写** ——
+        //    它还要负责 v1.3 那一半：**只有会话副本、没有预设行**的角色（AI 即兴出来的
+        //    那些）也必须出现在结果里。漏掉他们，那份即兴外貌永远到不了提示词，表现是
+        //    「AI 明明报了外貌，画出来还是每张一个样」。这类漏供值的缺陷 .vue 里的单组件
+        //    测试证明不了（blurByDefault 当年就是这么死的），所以逻辑不留在这儿。
+        presets: () => buildEffectivePresets(imagePresets.presets, charAppearance.rows),
+        world: () => ({
+          gameTime: game.saveProfile?.gameTime,
+          weather: resolveSceneWeather(game.saveProfile),
+          location: game.player?.location || undefined,
+        }),
+        // D57：引擎知道谁还没有任何可用外貌，直接告诉侧链 —— 模型看不到库，
+        // 「第一次出场」这件事它自己永远判断不出来。
+        // 🔴 判据含**会话副本**：报过一次之后就该收声，否则每张图都会让模型把九个槽
+        //    重新即兴一遍，点名本身反而成了漂移的来源（见 needsBaselineReport）。
+        charactersNeedingBaseline: (names) =>
+          names.filter((n) =>
+            needsBaselineReport(imagePresets.find('character', n), charAppearance.patchOf(n)),
+          ),
+        /**
+         * AI 报了外貌变化（D56/D57，v1.3 修订）。
+         *
+         * 🔴 **一律写会话副本，AI 永远碰不到基线**。差量基准由 `appearanceWriteTarget`
+         *    给：有基线就是基线，没有就是全空（那份即兴外貌）。此前这里的分支会为
+         *    「没有基线」的角色调 `imagePresets.upsert` **建一份全局基线** —— 而全局
+         *    意味着 A 周目的即兴成了 B 周目的定义，且两个重置口都够不着它，设置页却
+         *    正写着「初始设定不受影响」。
+         *
+         * 🔴 `skip` 那一支是用户**手写的老形态预设**（有 danbooru 串、没有槽）：会话层
+         *    只能表达槽，落下去会让合并后的槽盖过那串手写标签，等于 AI 悄悄改写了用户
+         *    写的东西。宁可这一档记不住「她换了衣服」。
+         */
+        applyAppearances: async (list) => {
+          for (const item of list) {
+            const target = appearanceWriteTarget(imagePresets.find('character', item.name));
+            if (target.kind === 'skip') continue;
+            await charAppearance.applyPatch(item.name, target.base, item.patch);
+          }
+        },
+        runPromptAgent: (request, signal) =>
+          pipeline
+            ? pipeline.runImagePromptAgent(request, signal)
+            : Promise.resolve({
+                ok: false as const,
+                kind: 'prompt-agent' as const,
+                message: '游戏管线还没就绪，稍后再试',
+                retryable: true,
+              }),
+      }),
+    );
     // 🎵 曲库必须在这里装 —— 此前只有设置页音频分区和迷你播放器会 init()，
     // 没打开过它们的会话曲库是空的，选曲永远命中不了任何东西。
     // 装完按当前地点起一次场景配乐（读档回来的第一眼也该有音乐）。
@@ -135,6 +215,9 @@ const showDebug = ref(false);
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown);
   game.isGenerating = false;
+  // 🖼 离开游戏页：中止在飞的出图、清掉排队的（§8.2）。排队中的一个字节都没花，
+  //    删掉即可；在飞的那条会落 failed/aborted，因为上游照样计费。
+  sceneImages.abortAll();
 });
 
 async function handleSend(content: string) {
@@ -263,6 +346,16 @@ function onModalOpenChange(v: boolean) {
       @update:open="onModalOpenChange"
     >
       <SnapshotPanel />
+    </AppModal>
+    <AppModal
+      title="CG 图鉴"
+      :open="game.activeModal === 'gallery'"
+      size="xxl"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
+      <CgGalleryPanel />
     </AppModal>
     <AppModal
       title="工坊内容启用"

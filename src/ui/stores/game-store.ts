@@ -631,7 +631,14 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
-  function addMessage(content: string, role: 'user' | 'assistant'): void {
+  /**
+   * 追加一条消息，**并把它交回调用方**。
+   *
+   * 返回值不是装饰：情景插画按 `(saveId, messageId, occurrence)` 反查挂回正文（图像
+   * 生成 D2），所以刚产出这条 assistant 消息的那一方必须拿得到它的 `id` 与 `turn`。
+   * 从 `messages` 末尾去捞是个会随时被别的写入者破坏的假设。
+   */
+  function addMessage(content: string, role: 'user' | 'assistant'): ChatMessage {
     const msg: ChatMessage = {
       id: crypto.randomUUID(),
       role,
@@ -643,6 +650,7 @@ export const useGameStore = defineStore('game', () => {
     messages.value.push(msg);
     // 异步持久化（不阻塞 UI）
     persistMessage(msg);
+    return msg;
   }
 
   function addSystemMessage(systemEvent: import('@engine/types').SystemEvent): void {

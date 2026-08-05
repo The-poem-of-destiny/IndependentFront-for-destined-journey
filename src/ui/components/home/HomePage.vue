@@ -10,8 +10,8 @@ const game = useGameStore();
 const ui = useUIStore();
 
 /**
- * 创意工坊入口仍按产品发布节奏临时隐藏，等待完整安装/启用/游戏页真机走查。
- * 这不是安全边界：已安装项目仍可在游戏页启用。
+ * 创意工坊入口已开放（2026-08-04）。这个开关从来不是安全边界：入口关着的时候，
+ * 已安装项目照样能在游戏页启用 —— 它只挡首页那一个按钮。
  *
  * 当前执行边界：**用户装过的**正则 replacement 在 opaque `sandbox="allow-scripts"` iframe
  * 中运行，可加载远程资源并调用网络 API，但拿不到父页面 DOM、Dexie、应用存储或 API Key；
@@ -21,7 +21,7 @@ const ui = useUIStore();
  * fail-closed。网络开启意味着规则仍可发送该命中的 replacement/capture，
  * 详见 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
  */
-const WORKSHOP_ENTRY_ENABLED = false;
+const WORKSHOP_ENTRY_ENABLED = true;
 
 // === 读取存档 ===
 const showSaveModal = ref(false);
@@ -256,7 +256,7 @@ function formatTime(ts: number) {
         >
           <i class="btn-icon fa-solid fa-folder-open" aria-hidden="true"></i>读 取 存 档
         </AppButton>
-        <!-- 🔒 临时下线：见 script 里的 WORKSHOP_ENTRY_ENABLED -->
+        <!-- 入口开关：见 script 里的 WORKSHOP_ENTRY_ENABLED -->
         <AppButton
           v-if="WORKSHOP_ENTRY_ENABLED"
           variant="secondary"

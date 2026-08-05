@@ -32,7 +32,8 @@ export default defineConfig({
             u.startsWith('/api/chat') ||
             u.startsWith('/api/status') ||
             u.startsWith('/api/models') ||
-            u.startsWith('/api/embeddings')
+            u.startsWith('/api/embeddings') ||
+            u.startsWith('/api/image')
           ) {
             return honoListener(req, res);
           }

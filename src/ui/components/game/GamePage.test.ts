@@ -168,6 +168,14 @@ describe('GamePage', () => {
 
 /* ===== ChatFlow 三源消息渲染测试 ===== */
 describe('ChatFlow — 三源消息渲染', () => {
+  // 🔴 自己建一个 pinia，别靠上一个 describe 漏出来的那个全局实例。
+  //    今天 ChatFlow 恰好一个 store 都不用，所以不写也能跑 —— 但只要往
+  //    ChatFlow/GamePage 里加一个 store，这一组就会以「没有 active pinia」整片红，
+  //    而且看起来像是新 store 的错。
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
   it('应渲染用户消息（右对齐）', async () => {
     const ChatFlow = (await import('./ChatFlow.vue')).default;
     const msgs: import('@engine/types').ChatMessage[] = [

@@ -72,7 +72,7 @@ export function agentDisplayName(agentId: string | null): string {
 /**
  * 非 story Agent 的**出厂上下文模板**（引擎的 placeholder-registry 提供）。
  *
- * 两个消费者，分居两个组件：`AgentSection` 载入草稿时的最后一级兜底，
+ * 两个消费者，分居两个组件：`AgentConfigPanel` 载入草稿时的最后一级兜底，
  * 以及 `AgentPromptCard` 在草稿为空时给模板预览用的输入。所以放这儿共享。
  *
  * 取不到就返回空串 —— 引擎没给这个 Agent 登记模板不是错误，

@@ -13,7 +13,12 @@ export interface StoredApiEntry {
   maskedKey: string;
   model: string;
   models: string[];
-  apiType: 'chat' | 'embedding';
+  /**
+   * 🔴 加新类型时**这里与 `readEntries` 的收窄三元一起改**（设计 §11）。
+   *    只改一处的症状是「图像 API 存了、重开变成 chat」—— 收窄那一行会把不认识的
+   *    值一律翻成 `'chat'`，而它跑在每次启动的读取路径上。
+   */
+  apiType: 'chat' | 'embedding' | 'image';
   enableThinking?: boolean;
 }
 
@@ -40,6 +45,17 @@ export function maskApiKey(key: string): string {
   return `${key.slice(0, 3)}***${key.slice(-4)}`;
 }
 
+/**
+ * 未知/缺失的 `apiType` 一律落 `'chat'` —— 老档里根本没有这个字段。
+ *
+ * 单独一个函数是因为它有**两个**收窄点（localStorage 读入与 Dexie 行回填），
+ * 而此前那两处是各写一遍的三元表达式：加 `'image'` 时漏改一处，症状就是
+ * 「图像 API 存了、重开变成 chat」（设计 §11 的原话）。
+ */
+function normalizeApiType(raw: unknown): StoredApiEntry['apiType'] {
+  return raw === 'embedding' || raw === 'image' ? raw : 'chat';
+}
+
 function readEntries(settings: Record<string, unknown>): StoredApiEntry[] {
   const raw = settings.apiPool;
   if (!Array.isArray(raw)) return [];
@@ -62,7 +78,7 @@ function readEntries(settings: Record<string, unknown>): StoredApiEntry[] {
         models: Array.isArray(entry.models)
           ? entry.models.filter((model): model is string => typeof model === 'string')
           : [],
-        apiType: entry.apiType === 'embedding' ? 'embedding' : 'chat',
+        apiType: normalizeApiType(entry.apiType),
         enableThinking: entry.enableThinking === true,
       };
     });
@@ -92,8 +108,7 @@ export function apiEndpointToEntry(endpoint: ApiEndpoint, local?: StoredApiEntry
     maskedKey: maskApiKey(apiKey),
     model: local?.model ?? endpoint.defaultModel,
     models: local?.models?.length ? [...local.models] : [...(endpoint.models ?? [])],
-    apiType:
-      local?.apiType ?? (endpoint.provider === 'embedding' ? 'embedding' : ('chat' as const)),
+    apiType: local?.apiType ?? normalizeApiType(endpoint.provider),
     enableThinking: local?.enableThinking ?? endpoint.enableThinking ?? false,
   };
 }

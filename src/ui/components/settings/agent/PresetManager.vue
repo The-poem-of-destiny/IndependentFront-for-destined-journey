@@ -73,7 +73,7 @@ function getStoryContextTemplate(): string {
 /**
  * 当前选中的预设。
  *
- * 🔴 AgentSection 的 `saveAsDefault` 也要它，那边**各算一次**而不是穿成 prop ——
+ * 🔴 AgentConfigPanel 的 `saveAsDefault` 也要它，那边**各算一次**而不是穿成 prop ——
  *    它是对 store 的一行派生（与 `hasApi` 同类），穿 prop 只是为了少一次 store 读取，
  *    却换来一条真正的组件间契约。
  */
@@ -191,7 +191,7 @@ function selectPreset(id: string) {
     // 🔴 这里原本还有两行：`agentPromptDraft.value = ...` 与 `s.agentPromptEdited = true`。
     //    经查是**惰性**的：草稿绑的两个 textarea 只在非 story 分支渲染，而本组件只在
     //    story 分支存在；`saveAgentSettings` 与 `saveAsDefault` 对 story 都跳过草稿。
-    //    它同时是本区域唯一一处跨组件写（草稿归 AgentSection），删掉之后这条边界干净。
+    //    它同时是本区域唯一一处跨组件写（草稿归 AgentConfigPanel），删掉之后这条边界干净。
   }
 }
 function openNewPreset() {
