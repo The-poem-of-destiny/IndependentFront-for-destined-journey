@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import type { BeautifierRule } from '@engine/types';
 import BeautifiedNarrative from './BeautifiedNarrative.vue';
 
@@ -35,12 +36,37 @@ function mountNarrative(text: string, extra: Record<string, unknown> = {}) {
   return mount(BeautifiedNarrative, {
     props: { text, ...extra },
     global: {
+      /**
+       * 🔴 **stub 的 props 必须与真实组件逐一对齐**（漏一个不会报错）。
+       *
+       * 漏掉的那个 prop 会静默落进 stub 根节点的 attrs，于是「父组件根本没传」与
+       * 「传了但 stub 不接」在测试里长得一模一样 —— D46 打码的 `blurByDefault`
+       * 就是这么一路绿着躺了一整轮：组件声明了、设置页能调、全仓没人传。
+       * 加 prop 时这里也要跟着加（整条链另有 scene-image-chain.test.ts 兜底）。
+       */
       stubs: {
         BeautifierFrame: {
           name: 'BeautifierFrame',
-          props: ['markup', 'ruleName', 'scripts'],
+          props: ['markup', 'ruleName', 'forwardContextMenu', 'scripts'],
           template:
             '<div class="frame-stub" :data-rule="ruleName" :data-scripts="scripts">{{ markup }}</div>',
+        },
+        // 插画格自己连 store（Pinia）；这里只关心「标记有没有被切走」，
+        // 状态真值表由 scene-image-view.test.ts 逐格钉住。
+        SceneImageSegment: {
+          name: 'SceneImageSegment',
+          props: [
+            'messageId',
+            'occurrence',
+            'anchorKind',
+            'mode',
+            'turn',
+            'marker',
+            'narrative',
+            'maxRating',
+            'blurByDefault',
+          ],
+          template: '<div class="scene-image-stub" :data-occurrence="occurrence"></div>',
         },
       },
     },
@@ -51,6 +77,9 @@ describe('BeautifiedNarrative', () => {
   beforeEach(() => {
     state.enabled = true;
     state.rules = [];
+    // 带 messageId 的用法会去问 scene-image-store「这条消息有没有 message-end 的图」；
+    // 空库即可（`byMessage` 只过滤内存投影，不碰 Dexie）。
+    setActivePinia(createPinia());
   });
 
   it('renders unmatched model HTML as text without a parent-DOM sanitizer', () => {
@@ -146,6 +175,63 @@ describe('BeautifiedNarrative', () => {
     expect(mountNarrative('<card>old</card>', { depth: 3 }).find('.frame-stub').exists()).toBe(
       false,
     );
+  });
+
+  // ── D3 / §10.1：分段在美化之前，且 always-on ──
+
+  it('strips scene_image markers even with beautification off', () => {
+    state.enabled = false;
+    const wrapper = mountNarrative(
+      '雨停了。\n<scene_image title="雨后的街">石板路上还积着水</scene_image>\n她推开门。',
+    );
+
+    // 🔴 美化关掉 ≠ 标记漏成一行尖括号给玩家看见
+    expect(wrapper.text()).not.toContain('<scene_image');
+    expect(wrapper.text()).not.toContain('</scene_image>');
+    expect(wrapper.text()).toContain('雨停了。');
+    expect(wrapper.text()).toContain('她推开门。');
+  });
+
+  it('strips scene_image markers mid-stream as well', () => {
+    const wrapper = mountNarrative('风起了。<scene_image title="风">旗帜猎猎</scene_image>', {
+      streaming: true,
+    });
+
+    expect(wrapper.text()).not.toContain('<scene_image');
+    expect(wrapper.text()).toContain('风起了。');
+  });
+
+  it('renders no image slot without a messageId anchor', () => {
+    // 规则预览 / 流式草稿没有锚点：标记照剥，但一格都不挂（也就不碰 Pinia）
+    const wrapper = mountNarrative('<scene_image title="街市">人来人往</scene_image>正文');
+
+    expect(wrapper.find('.scene-image-stub').exists()).toBe(false);
+    expect(wrapper.text()).toContain('正文');
+  });
+
+  it('anchors each marker to its own occurrence number', () => {
+    const wrapper = mountNarrative(
+      '<scene_image title="一">甲</scene_image>中间<scene_image title="二">乙</scene_image>',
+      { messageId: 'msg_1', imageMode: 'manual' },
+    );
+    const slots = wrapper.findAll('.scene-image-stub');
+
+    expect(slots).toHaveLength(2);
+    expect(slots[0]?.attributes('data-occurrence')).toBe('0');
+    expect(slots[1]?.attributes('data-occurrence')).toBe('1');
+    expect(wrapper.text()).toContain('中间');
+  });
+
+  it('does not let a beautifier rule swallow an illustration', () => {
+    state.rules = [rule()];
+    const wrapper = mountNarrative('<card>A<scene_image title="插图">画面</scene_image>B</card>', {
+      messageId: 'msg_1',
+      imageMode: 'manual',
+    });
+
+    // 规则不该跨过一张插画去匹配：标记两侧成了两段正文，`<card>` 于是配不上对
+    expect(wrapper.find('.frame-stub').exists()).toBe(false);
+    expect(wrapper.find('.scene-image-stub').exists()).toBe(true);
   });
 
   it('keeps the app-owned dialogue card native for host theme styling', () => {

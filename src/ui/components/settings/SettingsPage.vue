@@ -34,6 +34,7 @@ import MessagesSection from './MessagesSection.vue';
 import BeautifierSection from './BeautifierSection.vue';
 import AudioSection from './AudioSection.vue';
 import AssetSection from './AssetSection.vue';
+import ImageSection from './image/ImageSection.vue';
 import DataSection from './DataSection.vue';
 import AboutSection from './AboutSection.vue';
 
@@ -64,6 +65,7 @@ type Section =
   | 'beautifier'
   | 'audio'
   | 'asset'
+  | 'image'
   | 'data'
   | 'about';
 const activeSection = ref<Section>('api');
@@ -78,8 +80,9 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'messages', label: '消息显示', icon: 'fa-solid fa-message' },
   { key: 'beautifier', label: '输出美化', icon: 'fa-solid fa-wand-magic-sparkles' },
   { key: 'audio', label: '音频', icon: 'fa-solid fa-music' },
-  // 媒体两分区相邻，数据操作排在它们之后（设计 §7.1）
+  // 媒体三分区相邻（音频 / 素材 / 图像生成），数据操作排在它们之后（设计 §7.1）
   { key: 'asset', label: '素材', icon: 'fa-solid fa-image' },
+  { key: 'image', label: '图像生成', icon: 'fa-solid fa-wand-sparkles' },
   { key: 'data', label: '存档数据', icon: 'fa-solid fa-database' },
   { key: 'about', label: '关于', icon: 'fa-solid fa-circle-info' },
 ];
@@ -91,7 +94,7 @@ const activeAgent = ref<string | null>(s.activeAgent);
  * 选一个 Agent。
  *
  * 只做**页面骨架**该做的两件事：记住选了谁、把它持久化。草稿载入随
- * `AgentSection` 的 `watch(agentId, …, { immediate: true })` 走 ——
+ * `AgentConfigPanel` 的 `watch(agentId, …, { immediate: true })` 走 ——
  * 本组件每次进 Agent 分区都会把 `activeAgent` 置 null（下方主导航），
  * 所以那边永远是新挂载，immediate 会在同一时刻触发。
  */
@@ -141,6 +144,23 @@ onMounted(() => {
         >
           <span class="nav-icon"><i :class="item.icon" aria-hidden="true"></i></span>
           <span class="nav-label">{{ item.label }}</span>
+        </button>
+
+        <!--
+          🔴 这一条**不是分区**：它离开设置页去创意工坊，所以既不进 `navItems`、
+          也永远不会拿到 `.nav-active`（`activeSection` 里没有它的 key）。
+          分隔线 + 右侧外链箭头就是在说这件事 —— 长得和上面一模一样的话，
+          用户会以为点了会在右侧开一块面板，结果整页换掉。
+          回来的路由工坊页的返回键负责（走 `ui.previousView`）。
+        -->
+        <div class="nav-divider" aria-hidden="true"></div>
+        <button class="nav-item nav-external" @click="ui.navigate('workshop')">
+          <span class="nav-icon"><i class="fa-solid fa-puzzle-piece" aria-hidden="true"></i></span>
+          <span class="nav-label">创意工坊</span>
+          <i
+            class="fa-solid fa-arrow-up-right-from-square nav-external-mark"
+            aria-hidden="true"
+          ></i>
         </button>
       </nav>
 
@@ -204,6 +224,9 @@ onMounted(() => {
 
             <!-- ========== 素材 ========== -->
             <AssetSection v-if="activeSection === 'asset'" />
+
+            <!-- ========== 图像生成 ========== -->
+            <ImageSection v-if="activeSection === 'image'" />
 
             <!-- ========== 存档数据 ========== -->
             <DataSection v-if="activeSection === 'data'" />
@@ -313,6 +336,20 @@ onMounted(() => {
 }
 .nav-label {
   flex: 1;
+}
+/* 离开设置页的入口：与分区之间留一道分隔线 + 一个外链角标 */
+.nav-divider {
+  height: 1px;
+  margin: 8px 12px;
+  background: var(--theme-card-border);
+}
+.nav-external-mark {
+  font-size: 0.7rem;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+.nav-external:hover .nav-external-mark {
+  opacity: 0.9;
 }
 /* Agent 子导航 */
 .sub-nav {

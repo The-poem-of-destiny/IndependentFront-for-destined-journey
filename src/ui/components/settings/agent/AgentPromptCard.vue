@@ -3,7 +3,7 @@
  * 非 story Agent 的提示词卡：System Prompt / 上下文模板 / 占位符面板 / 模板预览
  * （Q-25 第 9 步）。
  *
- * 两个草稿由 `AgentSection` 持有（动作栏的三个按钮都要读写它们），这里用
+ * 两个草稿由 `AgentConfigPanel` 持有（动作栏的三个按钮都要读写它们），这里用
  * `defineModel` 双向绑回去 —— 组件只管编辑，不管保存。
  *
  * 🔴 插入占位符改用**模板 ref**，不再 `document.querySelectorAll('.prompt-editor')`
@@ -54,7 +54,7 @@ async function insertPlaceholder(key: string) {
 </script>
 
 <template>
-  <!-- 原本是与预设卡成对的 v-else 分支；分叉现在由 AgentSection 用
+  <!-- 原本是与预设卡成对的 v-else 分支；分叉现在由 AgentConfigPanel 用
        v-if="agentId === 'story'" / v-else 在**组件层**做，所以这里是无条件根节点 -->
   <AppCard padding="md" class="detail-card">
     <!-- Section 1: System Prompt -->

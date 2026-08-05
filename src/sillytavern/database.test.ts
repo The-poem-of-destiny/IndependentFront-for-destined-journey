@@ -75,7 +75,12 @@ import {
   deleteAsset,
   deleteAssets,
   getAssetBlob,
+  // 角色外貌会话副本 (v19 / D56)
+  characterAppearanceKey,
+  getCharacterAppearances,
+  saveCharacterAppearance,
 } from './database';
+import type { FullBackup } from './database';
 import type {
   ChatMessage,
   MemoryRecord,
@@ -811,8 +816,10 @@ describe('exportAllData / importAllData', () => {
     await saveApiEndpoint(makeApiEndpoint({ id: 'exp_api' }));
 
     const backup = await exportAllData();
-    // 跟随 DB_VERSION（v16: 隔离正则持久 KV）—— 每次升版这里同步
-    expect(backup.version).toBe(16);
+    // 🔴 跟随 DB_VERSION，而 DB_VERSION 必须等于最后一个 `this.version(n)` ——
+    // 这条断言曾经写着 17 而 schema 已经到 19（v18 删地点预设行 / v19 角色外貌会话副本），
+    // 于是它把漂移**固定**下来而不是拦下来。升版时 database.ts 与这里一起改。
+    expect(backup.version).toBe(19);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -827,6 +834,61 @@ describe('exportAllData / importAllData', () => {
     expect(Array.isArray(backup.worldBooks)).toBe(true);
     expect(Array.isArray(backup.workshopProjects)).toBe(true);
     expect(Array.isArray(backup.regexStorage)).toBe(true);
+    // v17 —— 元数据进备份，字节（sceneImageBlobs）刻意不进（设计 §7.3）
+    expect(Array.isArray(backup.sceneImages)).toBe(true);
+    expect(Array.isArray(backup.imagePresets)).toBe(true);
+    expect('sceneImageBlobs' in backup).toBe(false);
+    // v19 —— 角色外貌会话副本与 sceneImages 同为「每存档」数据，必须同进同出
+    expect(Array.isArray(backup.characterAppearances)).toBe(true);
+  });
+
+  /**
+   * 🔴 会话外貌漏出备份时**不会有任何报错** —— 存档的其余部分完好，只是每个角色的
+   * 本档变化静默退回基线，症状看起来像「AI 忘了她换过装」。所以这条走完整往返。
+   */
+  it('exportAllData/importAllData 应往返角色外貌会话副本（v19/D56）', async () => {
+    const db = getDatabase();
+    await saveCharacterAppearance({
+      key: characterAppearanceKey('save_test', '艾莉丝'),
+      saveId: 'save_test',
+      name: '艾莉丝',
+      patch: { outfit: 'dark travel cloak', condition: 'soaked' },
+      updatedAt: 1_700_000_000_000,
+    });
+
+    const backup = await exportAllData();
+    expect(backup.characterAppearances).toHaveLength(1);
+
+    // 清空这张表，模拟「换一台设备后导入」
+    await db.characterAppearances.clear();
+    expect(await getCharacterAppearances('save_test')).toHaveLength(0);
+
+    await importAllData(backup);
+
+    const restored = await getCharacterAppearances('save_test');
+    expect(restored).toHaveLength(1);
+    expect(restored[0].name).toBe('艾莉丝');
+    expect(restored[0].patch).toEqual({ outfit: 'dark travel cloak', condition: 'soaked' });
+  });
+
+  /** 三态语义：pre-v19 的旧备份对这张表**无话可说**，就不该有权删它 */
+  it('导入缺 characterAppearances 字段的旧备份应保留现有会话外貌', async () => {
+    await saveCharacterAppearance({
+      key: characterAppearanceKey('save_test', '苏婉'),
+      saveId: 'save_test',
+      name: '苏婉',
+      patch: { hairStyle: 'short hair' },
+      updatedAt: 1_700_000_000_000,
+    });
+
+    const backup = await exportAllData();
+    delete (backup as Partial<FullBackup>).characterAppearances;
+
+    await importAllData(backup as FullBackup);
+
+    const kept = await getCharacterAppearances('save_test');
+    expect(kept).toHaveLength(1);
+    expect(kept[0].patch).toEqual({ hairStyle: 'short hair' });
   });
 
   it('importAllData 应还原数据', async () => {
@@ -1908,9 +1970,10 @@ describe('Asset CRUD (v13)', () => {
     // ---- 以当前版 (AppDatabase) 打开：触发升版 ----
     await initializeDatabase();
     const db = getDatabase();
-    expect(db.verno).toBe(16);
+    expect(db.verno).toBe(19); // v18 = D59 删地点预设；v19 = D56 角色外貌会话副本
 
-    // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张，一个不少
+    // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
+    //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56），一个不少
     //（误写 `表名: null` 或漏声明会在这里炸 —— 尤其 lorebooks/settings 两张死表按 D3 必须保留）
     const EXPECTED_TABLES = [
       ...Object.keys(V12_STORES),
@@ -1920,6 +1983,10 @@ describe('Asset CRUD (v13)', () => {
       'workshopProjects',
       'beautifierRules',
       'regexStorage',
+      'sceneImages',
+      'sceneImageBlobs',
+      'imagePresets',
+      'characterAppearances',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 
@@ -1939,6 +2006,9 @@ describe('Asset CRUD (v13)', () => {
     expect(await db.workshopProjects.count()).toBe(0);
     expect(await db.beautifierRules.count()).toBe(0);
     expect(await db.regexStorage.count()).toBe(0);
+    expect(await db.sceneImages.count()).toBe(0);
+    expect(await db.sceneImageBlobs.count()).toBe(0);
+    expect(await db.imagePresets.count()).toBe(0);
 
     // 升版后新表可正常写入
     const asset = makeAsset();

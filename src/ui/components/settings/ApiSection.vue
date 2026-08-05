@@ -31,7 +31,7 @@ const apiForm = reactive({
   baseUrl: '',
   apiKey: '',
   model: '',
-  apiType: 'chat' as 'chat' | 'embedding',
+  apiType: 'chat' as ApiEntry['apiType'],
   enableThinking: false,
   _realKey: '' as string,
   _masked: false,
@@ -66,6 +66,13 @@ function onApiKeyInput() {
 }
 async function testApiAndFetch() {
   if (!apiForm.baseUrl || !apiForm.apiKey) return;
+  // 🔴 图像端点没有 /chat/completions 也没有 /embeddings，更没有 /models（NovelAI
+  //    的出图接口是单一 POST）。拿现有两条通道去测它只会得到一个误导性的 401/404，
+  //    所以这里如实说「测不了」而不是假装测过。真正的验证在第一次出图时发生。
+  if (apiForm.apiType === 'image') {
+    ui.toast('图像端点没有可用的测试通道，请直接保存，出图时会验证密钥', 'info');
+    return;
+  }
   apiFormTesting.value = true;
   // trim 与 fetchModels 对齐：粘贴带尾随空白/换行的 key 时，避免"获取模型能通、测试反而 401"
   const realKey = (apiForm._realKey || apiForm.apiKey).trim();
@@ -304,9 +311,11 @@ async function deleteApi(id: string) {
           >类型<select v-model="apiForm.apiType" class="form-input">
             <option value="chat">文本补全 (Chat)</option>
             <option value="embedding">向量嵌入 (Embedding)</option>
+            <option value="image">图像生成 (NovelAI)</option>
           </select>
           <p class="form-hint">
-            Chat 模型用 /chat/completions 测试；Embedding 模型用 /embeddings 测试
+            Chat 模型用 /chat/completions 测试；Embedding 模型用 /embeddings
+            测试；图像端点没有测试通道，保存后在「图像生成」分区里选用
           </p></label
         ><label class="form-label"
           >主链接<input

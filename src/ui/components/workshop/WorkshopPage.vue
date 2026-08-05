@@ -359,7 +359,17 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
       2026-08-01 全部下沉进页面本体。
     -->
     <header class="wk-topbar">
-      <AppButton variant="ghost" size="sm" @click="ui.navigate('home')">← 返回</AppButton>
+      <!--
+        原路返回：工坊现在有三个入口（首页 / 游戏页侧栏 / 设置页导航），
+        一律回首页会把从设置里进来的人扔到标题画面。`previousView` 只记一层，
+        够这一个用途；工坊自己不该出现在返回目标里（防返回键就地失效）。
+      -->
+      <AppButton
+        variant="ghost"
+        size="sm"
+        @click="ui.navigate(ui.previousView === 'workshop' ? 'home' : ui.previousView)"
+        >← 返回</AppButton
+      >
       <h2 class="wk-title">创意工坊</h2>
     </header>
 

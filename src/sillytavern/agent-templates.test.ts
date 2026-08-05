@@ -54,8 +54,8 @@ function makeCfg(agentId: string, overrides: Partial<AgentConfig> = {}): AgentCo
 // ========== Template Existence ==========
 
 describe('AGENT_TEMPLATES', () => {
-  it('应注册全部 14 个 Agent (含 Phase 10 重命名 + M4 combat)', () => {
-    expect(REGISTERED_AGENT_IDS).toHaveLength(14);
+  it('应注册全部 15 个 Agent (含 Phase 10 重命名 + M4 combat + 图像 image_prompt)', () => {
+    expect(REGISTERED_AGENT_IDS).toHaveLength(15);
   });
 
   // Phase 3-6e 完整模板 Agent
@@ -523,6 +523,8 @@ const EXTERNALIZED_IDS = new Set([
   'craft_gen',
   'char_gen',
   'combat',
+  // 图像生成 G 阶段: 提示词在 agent-config.json（临时最小版 + TODO，D55）
+  'image_prompt',
 ]);
 const activeTemplates = Object.entries(AGENT_TEMPLATES).filter(([id]) => !EXTERNALIZED_IDS.has(id));
 

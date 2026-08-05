@@ -1,9 +1,17 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { compileBeautifierSegments, type BeautifierMatchSegment } from '@engine/beautifier';
+import {
+  compileBeautifierSegments,
+  type BeautifierMatchSegment,
+  type BeautifierSegment,
+} from '@engine/beautifier';
+import { splitSceneImageSegments } from '@engine/image-segments';
 import type { BeautifierRule } from '@engine/types';
+import type { ImageGenMode, ImageRating, SceneImageMarker } from '@engine/types-image';
 import { useBeautify } from '../../composables/useBeautify';
+import { useSceneImageStore } from '../../stores/scene-image-store';
 import BeautifierFrame from './BeautifierFrame.vue';
+import SceneImageSegment from './SceneImageSegment.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -13,6 +21,28 @@ const props = withDefaults(
     streaming?: boolean;
     forwardContextMenu?: boolean;
     depth?: number;
+    /**
+     * 这段正文属于哪条消息。**省略 = 没有锚点**（流式草稿、规则预览），此时插画
+     * 标记照样被剥掉，但一格都不渲染 —— 没有 messageId 就没有记录可挂。
+     */
+    messageId?: string;
+    /** 所属消息的 turn（限额 L3 的同回合去重键） */
+    turn?: number;
+    /** 三档开关；缺省 `off` = 这个子系统在 UI 上完全不存在（真值表第一行） */
+    imageMode?: ImageGenMode;
+    /**
+     * rating **上限**（D38），来自 `settings.imageMaxRating` —— 钳住标记写的 rating。
+     * 缺省 `general`（最保守的一档）与设置默认值同步。
+     */
+    imageMaxRating?: ImageRating;
+    /**
+     * 打码显示（D46），来自 `settings.imageBlurByDefault`。
+     *
+     * 🔴 **本组件渲染两处 `SceneImageSegment`**（marker 段 + message-end 图带），
+     * 这个 prop 必须两处都透传 —— 只改一处的表现是「有的图糊、有的不糊」，
+     * 而不糊的那一张正是打码本来要挡住的那种场合。
+     */
+    imageBlurByDefault?: boolean;
   }>(),
   {
     rules: undefined,
@@ -20,6 +50,11 @@ const props = withDefaults(
     streaming: false,
     forwardContextMenu: false,
     depth: 0,
+    messageId: undefined,
+    turn: 0,
+    imageMode: 'off',
+    imageMaxRating: 'general',
+    imageBlurByDefault: false,
   },
 );
 
@@ -29,20 +64,91 @@ const emit = defineEmits<{
 
 const { getBeautifierRules, isBeautifierEnabled } = useBeautify();
 
-const segments = computed(() => {
-  if (!props.text) return [];
+/**
+ * 🔴 **分段在美化之前，且 always-on、不看美化开关**（D3 / §10.1）。
+ *
+ * 两个后果都是想要的:
+ * - 美化关掉、或流式输出途中，`<scene_image>` 也**绝不会漏成一行尖括号**给玩家看见
+ * - 美化规则不会跨过一张插画去匹配（一条规则不该把插图吞进替换里）
+ */
+const narrativeSegments = computed(() => splitSceneImageSegments(props.text));
+
+const hasImageSegments = computed(() =>
+  narrativeSegments.value.some((segment) => segment.kind === 'image'),
+);
+
+/**
+ * 标记左右那些换行是**正文的字节**，分段器刻意原样留着（它不替渲染层做排版决定）。
+ * 这里做那个决定: 标记独占一行时，剥掉之后剩下的首尾换行会各排出一个空段落，把
+ * 插画上下各顶开一大块。**只在真的切出了图片段时才收边**，没有标记的正文一个
+ * 字节都不动（那是绝大多数消息，行为与改造前逐字节一致）。
+ */
+function trimAroundImages(text: string): string {
+  return hasImageSegments.value ? text.replace(/^[\r\n]+|[\r\n]+$/g, '') : text;
+}
+
+/** 美化仍受开关 / 流式约束 —— 这一层没变，变的只是它现在**逐个文本段**跑 */
+function beautify(text: string): BeautifierSegment[] {
   // Incomplete matches change on nearly every token. Keep streaming output
   // readable and promote it to rich frames once the committed message arrives;
   // this also prevents legacy scripts from executing repeatedly mid-generation.
   if (props.streaming || (!props.force && !isBeautifierEnabled())) {
-    return [{ kind: 'text' as const, text: props.text }];
+    return [{ kind: 'text' as const, text }];
   }
-  return compileBeautifierSegments(props.text, 'maintext', props.rules ?? getBeautifierRules(), {
+  return compileBeautifierSegments(text, 'maintext', props.rules ?? getBeautifierRules(), {
     depth: props.depth,
   });
+}
+
+type RenderPart =
+  | { kind: 'prose'; segments: BeautifierSegment[] }
+  | { kind: 'image'; occurrence: number; marker: SceneImageMarker };
+
+const parts = computed<RenderPart[]>(() => {
+  if (!props.text) return [];
+  const out: RenderPart[] = [];
+  for (const segment of narrativeSegments.value) {
+    if (segment.kind === 'image') {
+      out.push({ kind: 'image', occurrence: segment.occurrence, marker: segment.marker });
+      continue;
+    }
+    const text = trimAroundImages(segment.text);
+    if (text === '') continue;
+    out.push({ kind: 'prose', segments: beautify(text) });
+  }
+  return out;
 });
 
-function isMatch(segment: (typeof segments.value)[number]): segment is BeautifierMatchSegment {
+/** 喂给侧链的「所属消息正文」—— 已剥掉全部标记（§8.5 要的就是这个） */
+const strippedNarrative = computed(() =>
+  narrativeSegments.value
+    .filter(
+      (segment): segment is Extract<typeof segment, { kind: 'text' }> => segment.kind === 'text',
+    )
+    .map((segment) => segment.text)
+    .join('')
+    .trim(),
+);
+
+/**
+ * 消息末尾那条图带（D33 / §10.2b）。
+ *
+ * 🔴 **它不走 `splitSceneImageSegments`** —— 玩家从右键菜单主动要的图在正文里没有
+ * 对应字节，是**由记录驱动**、在段落渲染完之后追加的。两条路径刻意不合并，否则
+ * 分段器要去关心它看不到的东西。
+ */
+const messageEndOccurrences = computed<number[]>(() => {
+  const id = props.messageId;
+  if (id === undefined) return [];
+  // 懒取 store: 没有 messageId 的用法（规则预览 / 流式草稿）根本不碰 Pinia
+  const seen = new Set<number>();
+  for (const record of useSceneImageStore().byMessage(id)) {
+    if (record.anchorKind === 'message-end') seen.add(record.occurrence);
+  }
+  return [...seen].sort((a, b) => a - b);
+});
+
+function isMatch(segment: BeautifierSegment): segment is BeautifierMatchSegment {
   return segment.kind === 'match';
 }
 
@@ -70,33 +176,63 @@ function paragraphs(text: string): string[] {
 
 <template>
   <div class="beautified-narrative">
-    <template v-for="(segment, index) in segments" :key="index">
-      <template v-if="!isMatch(segment)">
-        <p v-for="(paragraph, paragraphIndex) in paragraphs(segment.text)" :key="paragraphIndex">
-          {{ paragraph }}
-        </p>
-      </template>
-      <BeautifierFrame
-        v-else-if="segment.replacement && !isNativeMatch(segment)"
-        :markup="segment.replacement"
-        :rule-name="segment.ruleName"
-        :forward-context-menu="forwardContextMenu"
-        :scripts="scriptPolicy(segment)"
-        @resize="emit('resize', $event)"
+    <template v-for="(part, partIndex) in parts" :key="partIndex">
+      <!-- 正文标记切出来的图片段（anchorKind: 'marker'） -->
+      <SceneImageSegment
+        v-if="part.kind === 'image' && messageId !== undefined"
+        :message-id="messageId"
+        :occurrence="part.occurrence"
+        anchor-kind="marker"
+        :mode="imageMode"
+        :turn="turn"
+        :marker="part.marker"
+        :narrative="strippedNarrative"
+        :max-rating="imageMaxRating"
+        :blur-by-default="imageBlurByDefault"
       />
-      <div
-        v-else-if="segment.replacement && isNativeMatch(segment)"
-        class="beautifier-native-match"
-      >
-        <div class="dialogue-card">
-          <div class="dialogue-header">
-            <span class="dialogue-avatar">{{ segment.captures[0] }}</span>
-            <span class="dialogue-name">{{ segment.captures[0] }}</span>
+
+      <template v-for="(segment, index) in part.kind === 'prose' ? part.segments : []" :key="index">
+        <template v-if="!isMatch(segment)">
+          <p v-for="(paragraph, paragraphIndex) in paragraphs(segment.text)" :key="paragraphIndex">
+            {{ paragraph }}
+          </p>
+        </template>
+        <BeautifierFrame
+          v-else-if="segment.replacement && !isNativeMatch(segment)"
+          :markup="segment.replacement"
+          :rule-name="segment.ruleName"
+          :forward-context-menu="forwardContextMenu"
+          :scripts="scriptPolicy(segment)"
+          @resize="emit('resize', $event)"
+        />
+        <div
+          v-else-if="segment.replacement && isNativeMatch(segment)"
+          class="beautifier-native-match"
+        >
+          <div class="dialogue-card">
+            <div class="dialogue-header">
+              <span class="dialogue-avatar">{{ segment.captures[0] }}</span>
+              <span class="dialogue-name">{{ segment.captures[0] }}</span>
+            </div>
+            <div class="dialogue-body">"{{ segment.captures[2] }}"</div>
           </div>
-          <div class="dialogue-body">"{{ segment.captures[2] }}"</div>
         </div>
-      </div>
+      </template>
     </template>
+
+    <!-- 🔴 记录驱动的图带，追加在段落之后（§10.2b）—— 不经过分段器 -->
+    <SceneImageSegment
+      v-for="occurrence in messageEndOccurrences"
+      :key="`message-end-${occurrence}`"
+      :message-id="messageId ?? ''"
+      :occurrence="occurrence"
+      anchor-kind="message-end"
+      :mode="imageMode"
+      :turn="turn"
+      :narrative="strippedNarrative"
+      :max-rating="imageMaxRating"
+      :blur-by-default="imageBlurByDefault"
+    />
   </div>
 </template>
 

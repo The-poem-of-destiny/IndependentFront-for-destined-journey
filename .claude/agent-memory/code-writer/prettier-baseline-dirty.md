@@ -21,8 +21,17 @@ CI 会真的红——因为 CI 那边基线是绿的。
 ⚠️ 对比法有个必踩的坑：prettier **按文件路径**向上找配置，临时目录在仓库外 → 它用默认配置
 （printWidth 80 等）把**所有**文件都判红，看起来跟没做一样。必须显式 `--config .prettierrc`。
 加了之后 2026-08-01 实测：10 个 LF 副本里只有 4 个真红，正好是本次实际写了内容的那 4 个。
-`data/**` 不在 format:check 的 glob 内（globs = `src/**/*.{ts,vue,css}` / 根 `*.json` / `docs/**/*.md`），
-`data/defaults/agent-config.json` 本身就不合 prettier 风格，**别去格式化它**。
+
+**更省事的同一件事**（2026-08-04 实测，不用临时目录也就不会踩配置坑）：
+`npx prettier <file> > /tmp/p.ts; tr -d '\r' < <file> > /tmp/o.ts; diff /tmp/p.ts /tmp/o.ts`
+—— 无差异就是「内容合格、只是工作副本 CRLF」，CI 那边（Linux/LF 检出）必绿。
+`core.autocrlf=true` 且 `.gitattributes` 只声明了 `*.bat`，所以仓库里存的一直是 LF。
+判断依据还有一条：`git diff --numstat` 只报你真正改的那几行 = 整份文件没被行尾污染。
+
+format:check 的 glob 是 `{src,server,tests,scripts}/**/*.{ts,vue,css,mjs,cjs}` + 根 `*.{json,js,ts}`
++ 根 `*.md` + `docs/**/*.md` —— **`server/` `tests/` `vite.config.ts` 都在管辖内**（早先这条记成
+只有 `src/**`，是错的）。`data/**` 确实不在，`data/defaults/agent-config.json` 本身就不合
+prettier 风格，**别去格式化它**。
 lint 是 0 errors / 165 warnings 的基线，别为清 warning 顺手改无关文件。
 
 相关：[[known-flaky-tests]]（测试侧的同类基线）
