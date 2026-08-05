@@ -1912,10 +1912,10 @@ describe('Asset CRUD (v13)', () => {
     // ---- 以当前版 (AppDatabase) 打开：触发升版 ----
     await initializeDatabase();
     const db = getDatabase();
-    expect(db.verno).toBe(18); // v18 = D59 删地点预设（只搬数据，不动表结构）
+    expect(db.verno).toBe(19); // v18 = D59 删地点预设；v19 = D56 角色外貌会话副本
 
     // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
-    //           + 图像生成三张，一个不少
+    //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56），一个不少
     //（误写 `表名: null` 或漏声明会在这里炸 —— 尤其 lorebooks/settings 两张死表按 D3 必须保留）
     const EXPECTED_TABLES = [
       ...Object.keys(V12_STORES),
@@ -1928,6 +1928,7 @@ describe('Asset CRUD (v13)', () => {
       'sceneImages',
       'sceneImageBlobs',
       'imagePresets',
+      'characterAppearances',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 

@@ -15,6 +15,8 @@
  * 🔴 本文件里带 🔴 的注释记录的是设计阶段已经踩到或推演出的坑，不是装饰。改之前先读设计文档。
  */
 
+import type { CharacterAppearance, CharacterAppearancePatch } from './character-appearance';
+
 // ═══ 开关与分级 ═══
 
 /** 三档开关（D14） */
@@ -102,6 +104,27 @@ export type NarrativeSegment =
  */
 export type ImagePresetKind = 'character';
 
+/**
+ * Dexie v19 `characterAppearances` —— 角色外貌的**会话副本**（D56）。
+ *
+ * 🔴 **按存档隔离，删存档连带删**：它记的是「这一周目里她现在长什么样」。
+ *    基线（`ImagePreset.appearance`）是全局的、干净的、用户可编辑的；这一份由出图 AI
+ *    自动写入，脏了随时可以重置回基线（每角色一个重置 / 整档一个重置）。
+ *
+ * 存的是 **patch 而不是全量快照**（`diffFromBase` 的产物）：只记与基线不同的槽。
+ * 存全量的话，「重置」会退化成「重置回一堆基线的复制品」，而且基线日后被用户改了
+ * 也传导不到已有存档。
+ */
+export interface CharacterSessionAppearance {
+  /** 主键 = `` `${saveId}:${name}` ``。名字是**原始字符串**（铁律 1，不归一化） */
+  key: string;
+  saveId: string;
+  name: string;
+  /** 只含与基线不同的槽；空对象 = 与基线一致（正常不落库，见 `isMeaningfulPatch`） */
+  patch: CharacterAppearancePatch;
+  updatedAt: number;
+}
+
 /** Dexie v17 `imagePresets`，全局键控，进 FullBackup（纯文本、很小） */
 export interface ImagePreset {
   /**
@@ -114,6 +137,14 @@ export interface ImagePreset {
   kind: ImagePresetKind;
   /** 🔴 原始字符串，`===` 匹配，不 trim / 不折叠大小写 / 不 NFKC（铁律 1 / 素材系统 D2） */
   name: string;
+  /**
+   * 外貌**基线**的属性槽（D56/D58）。缺席 = 这条还是老的手写预设，装配时退回
+   * `dialects.danbooru`。
+   *
+   * 🔴 槽在则以槽为准：两者都有时**不合并**——那会让同一个特征出现两次且措辞不一，
+   *    正是 D58 要消灭的歧义。迁移路径是把手写串填进槽，不是让两者共存生效。
+   */
+  appearance?: CharacterAppearance;
   dialects: {
     /** v1 唯一在用 */
     danbooru?: { positive: string; negative: string };

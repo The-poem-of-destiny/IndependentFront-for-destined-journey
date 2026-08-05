@@ -34,6 +34,7 @@ import type {
 import type {
   SceneImageRecord,
   SceneImageBlobRecord,
+  CharacterSessionAppearance,
   SceneImageUsage,
   ImagePreset,
 } from './types-image';
@@ -176,6 +177,10 @@ class AppDatabase extends Dexie {
   sceneImages!: Table<SceneImageRecord>;
   sceneImageBlobs!: Table<SceneImageBlobRecord>;
   imagePresets!: Table<ImagePreset>;
+
+  // v19 (D56): 角色外貌的**会话副本** —— 随存档隔离，删存档连带删。
+  // 基线在 imagePresets.appearance（全局、干净、用户可编辑），这一份由出图 AI 自动写。
+  characterAppearances!: Table<CharacterSessionAppearance>;
 
   constructor() {
     super(DB_NAME);
@@ -521,6 +526,10 @@ class AppDatabase extends Dexie {
     this.version(18).upgrade(async (tx) => {
       await tx.table('imagePresets').where('kind').equals('location').delete();
     });
+
+    // v19 (D56): 角色外貌会话副本。`saveId` 单独建索引 —— 「整档重置」与
+    // `deleteSaveSlot` 都是按存档整批删，没有它就得全表扫。
+    this.version(19).stores({ characterAppearances: 'key, saveId, name' });
   }
 }
 
@@ -1159,6 +1168,7 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       db.saves,
       db.sceneImages,
       db.sceneImageBlobs,
+      db.characterAppearances,
     ],
     async () => {
       await db.snapshots.where('saveId').equals(id).delete();
@@ -1176,9 +1186,38 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       const imageIds = await db.sceneImages.where('saveId').equals(id).primaryKeys();
       if (imageIds.length > 0) await db.sceneImageBlobs.bulkDelete(imageIds);
       await db.sceneImages.where('saveId').equals(id).delete();
+      // v19 (D56): 会话外貌随存档走 —— 与 imagePresets（全局基线）刻意相反
+      await db.characterAppearances.where('saveId').equals(id).delete();
       await db.saves.delete(id);
     },
   );
+}
+
+// --- 角色外貌会话副本 (v19, D56) ---
+
+/** 主键 —— **唯一**一处拼法。名字原样，不归一化（铁律 1） */
+export function characterAppearanceKey(saveId: string, name: string): string {
+  return `${saveId}:${name}`;
+}
+
+export async function getCharacterAppearances(
+  saveId: string,
+): Promise<CharacterSessionAppearance[]> {
+  return getDatabase().characterAppearances.where('saveId').equals(saveId).toArray();
+}
+
+export async function saveCharacterAppearance(row: CharacterSessionAppearance): Promise<void> {
+  await getDatabase().characterAppearances.put(row);
+}
+
+/** 单个角色重置 —— 删掉会话覆盖，出图即刻回到基线 */
+export async function deleteCharacterAppearance(key: string): Promise<void> {
+  await getDatabase().characterAppearances.delete(key);
+}
+
+/** 整档重置（D56 的第二个重置口）—— 这一周目所有角色回到基线 */
+export async function clearCharacterAppearances(saveId: string): Promise<void> {
+  await getDatabase().characterAppearances.where('saveId').equals(saveId).delete();
 }
 
 // --- API Endpoints ---
