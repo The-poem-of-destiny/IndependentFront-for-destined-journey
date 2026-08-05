@@ -12,7 +12,7 @@
 
 - ❌ 废弃：code 层关键词粗筛 → Agent 精选
 - ✅ 新方案：Embedding 向量相似度检索
-  - 候选模型：Qwen/Qwen3-VL-Embedding-8B（或其他 OpenAI 兼容 embedding 端点）
+  - 候选模型：Qwen/Qwen3-Embedding-8B（或其他 OpenAI 兼容 embedding 端点）
   - 存入记忆时计算 embedding，召回时用余弦相似度排序
   - 配置每轮最大返回条数（如 20 条），即使有 2000 条记忆上下文也不爆炸
 

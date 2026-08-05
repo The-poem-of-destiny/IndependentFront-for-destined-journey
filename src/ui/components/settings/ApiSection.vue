@@ -287,7 +287,7 @@ async function deleteApi(id: string) {
       </p>
       <p class="text-sm text-muted" style="margin: 0">
         Embedding 模型：推荐 <strong>硅基流动 (SiliconFlow)</strong> 的
-        <strong>Qwen3-VL-Embedding-8B</strong>，充个五块钱能玩到天荒地老。
+        <strong>Qwen3-Embedding-8B</strong>，充个五块钱能玩到天荒地老。
       </p>
     </AppCard>
 

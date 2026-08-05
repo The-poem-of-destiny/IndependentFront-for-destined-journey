@@ -285,7 +285,7 @@ class AppDatabase extends Dexie {
             s.plotSettings = DEFAULT_PLOT_SETTINGS;
           }
           if (s.embeddingEndpointId === undefined) s.embeddingEndpointId = null;
-          if (s.embeddingModel === undefined) s.embeddingModel = 'Qwen/Qwen3-VL-Embedding-8B';
+          if (s.embeddingModel === undefined) s.embeddingModel = 'Qwen/Qwen3-Embedding-8B';
           if (s.embeddingDimension === undefined) s.embeddingDimension = 4096;
           if (s.memoryCompressionThreshold === undefined) s.memoryCompressionThreshold = 100;
           // Fix: maxMemoriesRecall 默认改为 20

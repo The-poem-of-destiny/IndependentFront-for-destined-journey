@@ -634,7 +634,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Phase 4 新增
   plotSettings: DEFAULT_PLOT_SETTINGS,
   embeddingEndpointId: null,
-  embeddingModel: 'Qwen/Qwen3-VL-Embedding-8B',
+  embeddingModel: 'Qwen/Qwen3-Embedding-8B',
   embeddingDimension: 4096,
   memoryCompressionThreshold: 100,
   /** Phase 7e: 输出美化 */
