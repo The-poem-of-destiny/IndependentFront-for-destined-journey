@@ -419,7 +419,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 >
 > 🩹 **游玩链路真机第一轮逮到的（2026-08-05）**：出图端点那格 Base URL 是**自由文本**，一格连坑两轮，而**两次报错都指着无辜的地方** —— 填成 `https://api.novelai.net`（NAI 的**文本/账户**域）时，那台机器上 `/ai/generate-image` 还活着（所以是 400 不是 404）但模型枚举停在 V3，于是它对一个完全合法的 `nai-diffusion-4-5-full` 回 **「model must be a valid enum value」**，看起来像模型名写错；改对域名却漏掉 `https://` 时，BFF 的 `forward()` 回 **「invalid X-Target-Base-URL」**，看起来像 header 坏了。裁定：**出图地址由代码持有，用户只填令牌** —— `scene-image-seams` 不再读 `endpoint.baseUrl`，API 配置里出图端点的「主链接」与「模型」两格直接隐藏（`isImageEntry`）。`image-client` 仍收 `baseUrl`（自建镜像/测试替身）并新增 `resolveImageBaseUrl`：补协议、剃掉 BFF 自己会拼的 `/ai/generate-image`、文本域**只报错不改写**。同一轮还确认「弹回首页」不可能是组件异常 —— 全仓没有任何程序化跳首页的路径，`currentView` 初值就是 `home` 且只活在内存里，所以那是**整页重载**（待再现时取证）。
 >
-> 🩹 **实施中逮到的两处**：① `blurByDefault`（D46 打码）**声明了但没人传**，整条功能是死的 —— 根因是只有单组件测试，那种测试能证明逻辑对、**证明不了有人供值**，现已补从 ChatFlow 真渲染到底的链路测试。② `data/defaults/agent-config.json` 里有 **47 个 U+FFFD 坏字符**（16 段 / 6 个 agent），其中一处落在闭合 XML 标签的标签名里 —— **既有问题，本轮未修**，已另开任务。
+> 🩹 **实施中逮到的两处**：① `blurByDefault`（D46 打码）**声明了但没人传**，整条功能是死的 —— 根因是只有单组件测试，那种测试能证明逻辑对、**证明不了有人供值**，现已补从 ChatFlow 真渲染到底的链路测试。② `data/defaults/agent-config.json` 里曾有 **47 个 U+FFFD 坏字符**（16 段 / 6 个 agent，其中一处落在闭合 XML 标签的标签名里）—— **已于 2026-08-05 修复**（实测 U+FFFD:0 / ctrl:0 / JSON 可解析），`tests/encoding-invariants.test.ts` 把三条判据变成了常驻 CI 断言。
 >
 > 🟡 **工坊 P2 已实施（T1-T6），真机走查未做**：世界书条目正文的 EJS 现在**会在提示装配期求值**（ADR-30 两轴契约：只读 `stats` + 共写 `vars`，冲突 AI 赢；动态条目沉底、静态前缀字节稳定）。全语料冒烟 509 条目 / 61 动态 / **0 回退**（能力面别名层落地后 7 → 0，白名单已清空；语料门现按 **Legacy 与 QuickJS 双后端**各自跑双向白名单，基线一致），回退条目原文注入不阻断。代码位内嵌的 ST 值宏（`{{roll}}`/`{{random::}}`）已在编译期降成沙盒调用（`rewriteCodeMacros`），uid 358 出列。回退率 / 缓存命中字节 / 跨回合链尚未真机验证，设计全文见 `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`。
 

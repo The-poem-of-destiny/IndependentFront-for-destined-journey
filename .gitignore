@@ -11,6 +11,10 @@ dist-ui/
 .claude/scheduled_tasks.json
 .claude/plans/
 
+# 🔒 内容分离波 0 (D1/D45)：worktrees 挂完整工作副本（含全部世界书），整目录拷贝会泄内容。
+# 预防性 ignore —— 本机此刻没有该目录，但快照切仓前任何机器出现都立刻入 ignore。
+.claude/worktrees/
+
 # 系统文件
 .DS_Store
 Thumbs.db
