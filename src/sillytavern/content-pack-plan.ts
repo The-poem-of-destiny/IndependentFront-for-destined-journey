@@ -527,6 +527,41 @@ function handleUnmatchedPartition(
 }
 
 // ═══════════════════════════════════════════════════════════
+// 逐项基线（D18 hash 分工：冲突判定/对账的逐书基线一律从 payload 现算）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 从一份已装的 `ContentPack.payload` 现算 `PackBaseline`（D18）。
+ *
+ * 🔴 **hash 分工**：升级 diff 展示用 `payload.sectionHashes`（构建器盖章）；冲突判定 /
+ *   卸载确认 / 对账用的**逐项基线**从这里现算（同一份 payload 现算，不信任 sectionHashes）。
+ *   安装时执行器把上一次装包的 baseline 喂给 `planPackInstall`；卸载时喂给
+ *   `planPackUninstall` 判「N 本已被你编辑过」。
+ *
+ * 输出覆盖三键（`byBook` / `byPreset` / `byBeautifierRule`），与 planner 四态规则的
+ * 消费键一一对应。hash 算法与四态判定侧共用（worldBooks → `hashWorldBook` 同步确定性；
+ * rows 用 `hashContentDeterministic` 接 `stableSerialize`）。
+ *
+ * @param payload 已装内容包的 payload
+ */
+export function buildPackBaseline(payload: ContentPack): PackBaseline {
+  const byBook: Record<string, string> = {};
+  for (const b of payload.worldBooks ?? []) byBook[b.id] = hashWorldBook(b);
+
+  const byPreset: Record<string, string> = {};
+  for (const p of payload.presets ?? [])
+    byPreset[p.id] = hashContentDeterministic(
+      JSON.stringify(stableSerialize({ id: p.id, name: p.name, settings: p.settings })),
+    );
+
+  const byBeautifierRule: Record<string, string> = {};
+  for (const r of payload.beautifierRules?.rules ?? [])
+    byBeautifierRule[r.id] = hashContentDeterministic(JSON.stringify(stableSerialize(r)));
+
+  return { byBook, byPreset, byBeautifierRule };
+}
+
+// ═══════════════════════════════════════════════════════════
 // 卸载计划（§5.2）
 // ═══════════════════════════════════════════════════════════
 

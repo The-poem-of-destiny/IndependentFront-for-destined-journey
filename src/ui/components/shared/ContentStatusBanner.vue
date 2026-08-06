@@ -16,8 +16,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useContentStore } from '../../stores/content-store';
+import { useUIStore } from '../../stores/ui-store';
+import AppButton from './AppButton.vue';
 
 const content = useContentStore();
+const ui = useUIStore();
 
 /** 占位世界书条目规模阈值（§5.8）：超过则判定为「本地有真实内容」 */
 const PLACEHOLDER_ENTRY_THRESHOLD = 150;
@@ -50,7 +53,6 @@ const detectedLegacyContent = computed(() => localEntryScale.value > PLACEHOLDER
 const visible = computed(() => {
   const st = content.contentStatus;
   if (st === 'pack' || st === 'needs_attention') {
-    // T7 装包落地前 activePackId 恒为 null → 不渲染（避免空横幅）
     return content.activePackId !== null;
   }
   return true; // placeholder / error 始终显示
@@ -78,6 +80,80 @@ const level = computed<'info' | 'warn' | 'error'>(() => {
   if (detectedLegacyContent.value) return 'warn';
   return 'info';
 });
+
+// ── 波 1 T7：横幅动作（placeholder → 导入；pack → 卸载） ──
+const busy = ref(false);
+
+/** placeholder 态：导入内容包（文件 picker → installPack；冲突弹系统确认窗口） */
+function importPack() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = async (e) => {
+    const f = (e.target as HTMLInputElement).files?.[0];
+    if (!f) return;
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await f.text());
+    } catch {
+      ui.toast('内容包格式无效', 'error');
+      return;
+    }
+    busy.value = true;
+    try {
+      const outcome = await content.installPack(raw);
+      if (!outcome.ok) {
+        if (outcome.status === 'needs_confirmation') {
+          // 横幅不内嵌复杂 Modal，引导去设置页数据分区完成两阶段确认
+          if (
+            window.confirm(
+              '检测到与本地既有内容冲突的项，覆盖将丢弃这些修改。前往「设置 → 存档数据 → 导入内容包」完成确认。',
+            )
+          ) {
+            ui.navigate('settings');
+          }
+        } else if (outcome.status === 'invalid') {
+          ui.toast('内容包校验未通过', 'error');
+        }
+        return;
+      }
+      ui.toast('内容包已安装', 'success');
+    } catch {
+      ui.toast('内容包安装失败', 'error');
+    } finally {
+      busy.value = false;
+    }
+  };
+  input.click();
+}
+
+/** pack 态：卸载内容包（确认后执行） */
+async function uninstallPack() {
+  if (!window.confirm('确定卸载内容包吗？将恢复到演示级占位内容。')) return;
+  busy.value = true;
+  try {
+    const outcome = await content.uninstallPack();
+    if (!outcome.ok && outcome.status === 'needs_confirmation') {
+      if (
+        !window.confirm(
+          `有 ${(outcome.plan?.confirmations?.length ?? 0) as number} 本内容包世界书被编辑过，卸载会丢弃这些修改。确定卸载吗？`,
+        )
+      ) {
+        return;
+      }
+      const done = await content.uninstallPack({ confirmEdits: true });
+      if (done.ok) ui.toast('内容包已卸载', 'success');
+      else ui.toast('卸载失败', 'error');
+      return;
+    }
+    if (outcome.ok) ui.toast('内容包已卸载', 'success');
+    else ui.toast('卸载失败', 'error');
+  } catch {
+    ui.toast('卸载失败', 'error');
+  } finally {
+    busy.value = false;
+  }
+}
 </script>
 
 <template>
@@ -94,6 +170,24 @@ const level = computed<'info' | 'warn' | 'error'>(() => {
       aria-hidden="true"
     />
     <span class="content-banner-text">{{ message }}</span>
+    <span class="content-banner-actions">
+      <AppButton
+        v-if="content.contentStatus === 'placeholder'"
+        variant="secondary"
+        size="sm"
+        :loading="busy"
+        @click="importPack"
+        >导入内容包</AppButton
+      >
+      <AppButton
+        v-else-if="content.contentStatus === 'pack'"
+        variant="ghost"
+        size="sm"
+        :disabled="busy"
+        @click="uninstallPack"
+        >卸载内容包</AppButton
+      >
+    </span>
   </div>
 </template>
 
@@ -113,6 +207,14 @@ const level = computed<'info' | 'warn' | 'error'>(() => {
 }
 .content-banner-text {
   flex: 1;
+}
+.content-banner-actions {
+  flex-shrink: 0;
+}
+@media (max-width: 520px) {
+  .content-banner-actions {
+    margin-top: 6px;
+  }
 }
 .content-banner-info {
   background: var(--theme-bg-elevated, rgba(100, 149, 237, 0.08));

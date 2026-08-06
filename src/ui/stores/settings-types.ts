@@ -72,6 +72,11 @@ export type UiSettings = {
   //    响应式视图经 `usePresets` composable。这里只剩「当前选中哪条」的 UI 状态。
   activePresetId: string;
 
+  // ═══ 内容-引擎分离波 1 / D42：占位内容版本戳 ═══
+  // 占位集随引擎打包；戳前进时 content-store 对「hash 仍等于占位基线」的书重播种（D42）。
+  // 缺省 = 未比对过（首启），D42 重播种当作需要写入当前占位版本。不常驻、非必填。
+  placeholderVersion?: string;
+
   // ═══ 世界书（书本体在 Dexie，这里只有 UI 选择/开关）═══
   activeWorldBookId: string | null;
   worldBookDirty: boolean;

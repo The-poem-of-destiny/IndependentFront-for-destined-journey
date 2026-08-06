@@ -19,6 +19,7 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { getDatabase } from '@engine/database';
 import { loadPresetRules, mergeRules } from '@engine/beautifier';
+import { getPackRules } from '@engine/content-source';
 import type { BeautifierRule } from '@engine/types';
 import {
   migrateBeautifierRulesToDexie,
@@ -88,6 +89,14 @@ export const useBeautifierStore = defineStore('beautifier', () => {
   /**
    * 重算预设规则（含 autoEnable 解析）。
    *
+   * 内容-引擎分离波 1 / D20 + §5.6：预设规则真源 = **已装 pack 的美化规则 > 占位文件**
+   * （provider 内存层）。装包 / 卸载 / 恢复默认时经 content-source 的
+   * `setPackRulesProvider` 把当前生效的 pack 规则注册进去，由 `getPackRules()` 读取；
+   * 无 pack（占位态）时回落 `loadPresetRules()`（占位文件）。
+   *
+   * 🔴 pack 规则只进内存 `presetRules` ref（`isBuiltin`），**永不写用户表**
+   * （beautifierRules）—— 卸载天然免费（D20）。
+   *
    * 启动时无存档上下文 → 传空信号；locked 由游戏页/设置页按存档
    * `enabledWorldBookEntries` 各自重算（`useBeautify` / `BeautifierSection`）。
    *
@@ -97,9 +106,18 @@ export const useBeautifierStore = defineStore('beautifier', () => {
     activeWorldBookIds: Set<string> = new Set(),
     activeEntryUids: Set<number> = new Set(),
     activeCharacterNames: Set<string> = new Set(),
+    // 🔴 供测试/装包流程显式注入 pack 规则；生产路径不传，由 provider 惰性读（§5.6 恢复默认）
+    packRulesOverride?: readonly BeautifierRule[],
   ): Promise<void> {
     try {
-      const preset = await loadPresetRules();
+      // provider 内存层优先（D20）：pack 规则 > 占位文件。packRulesOverride 显式传入时
+      // 优先用它（装包瞬间 provider 注册与重算谁先谁都互斥，显式传最稳）。
+      const packRules = packRulesOverride ?? getPackRules();
+      // 兼容下游 mergeRules / pruneLegacyBuiltinOverrides 的 mutable 参数，展开为可变数组
+      const preset: BeautifierRule[] =
+        packRules !== undefined && packRules.length >= 0
+          ? [...packRules]
+          : ((await loadPresetRules()) as BeautifierRule[]);
       // 覆盖列表语义迁移：认得出出厂默认值才能做，所以挂在预设加载之后。
       // 内部有标志位，重复调用是空转。
       const settingsStore = useSettingsStore();
