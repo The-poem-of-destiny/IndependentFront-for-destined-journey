@@ -37,6 +37,7 @@ import type {
   CharacterSessionAppearance,
   SceneImageUsage,
   ImagePreset,
+  TagBank,
 } from './types-image';
 import type { CreatePreset } from '../ui/stores/create-store';
 
@@ -59,7 +60,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
  * 升版时这两处一起改。
  */
-const DB_VERSION = 19;
+const DB_VERSION = 20;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -189,6 +190,12 @@ class AppDatabase extends Dexie {
   // v19 (D56): 角色外貌的**会话副本** —— 随存档隔离，删存档连带删。
   // 基线在 imagePresets.appearance（全局、干净、用户可编辑），这一份由出图 AI 自动写。
   characterAppearances!: Table<CharacterSessionAppearance>;
+
+  // v20 (图像 v1.4): 标签词库 —— 用户导入的中文→danbooru 映射，供 image_prompt 侧链查。
+  //   **全局**，与 imagePresets 同口径：词库是参考资料，不该随某个存档一起删。
+  //   整本一行（`entries[]` 内联），与 worldBooks 同口径 —— 几千条也就几百 KB，
+  //   而检索本来就要整本进内存建索引，拆成一条一行只是多付一次组装。
+  imageTagBanks!: Table<TagBank>;
 
   constructor() {
     super(DB_NAME);
@@ -538,6 +545,12 @@ class AppDatabase extends Dexie {
     // v19 (D56): 角色外貌会话副本。`saveId` 单独建索引 —— 「整档重置」与
     // `deleteSaveSlot` 都是按存档整批删，没有它就得全表扫。
     this.version(19).stores({ characterAppearances: 'key, saveId, name' });
+
+    // v20 (图像 v1.4): 标签词库。纯增量，无 upgrade 回调。
+    // 只索引主键与 `enabled` —— 读侧只有两种查询：整取全部、取启用的那几本。
+    // 条目级检索在内存里做（`image-tag-bank.ts` 的纯函数），不进 IndexedDB 索引：
+    // 几千条别名的子串匹配是毫秒级的事，为它建索引只会让导入变慢、写放大。
+    this.version(20).stores({ imageTagBanks: 'id, enabled' });
   }
 }
 
@@ -622,6 +635,10 @@ export interface FullBackup {
   // 而存档的其余部分完好，于是症状看起来像「AI 忘了她换过装」而不是「备份没收这张表」。
   // 纯文本 patch，体积与 imagePresets 同量级。
   characterAppearances: CharacterSessionAppearance[];
+  // v20 标签词库（图像 v1.4）。**全局**数据，与 imagePresets 同口径进备份。
+  // 纯文本，几千条约几百 KB —— 与图片字节不同，它进 JSON 不会爆炸，而用户手工
+  // 整理过的词库丢了是补不回来的。旧备份缺这个字段时保留现有表（三态语义）。
+  imageTagBanks: TagBank[];
 }
 
 export async function exportAllData(): Promise<FullBackup> {
@@ -647,6 +664,7 @@ export async function exportAllData(): Promise<FullBackup> {
     sceneImages,
     imagePresets,
     characterAppearances,
+    imageTagBanks,
   ] = await Promise.all([
     db.lorebooks.toArray(),
     db.presets.toArray(),
@@ -668,6 +686,7 @@ export async function exportAllData(): Promise<FullBackup> {
     db.sceneImages.toArray(),
     db.imagePresets.toArray(),
     db.characterAppearances.toArray(),
+    db.imageTagBanks.toArray(),
   ]);
   return {
     version: DB_VERSION,
@@ -692,6 +711,7 @@ export async function exportAllData(): Promise<FullBackup> {
     sceneImages,
     imagePresets,
     characterAppearances,
+    imageTagBanks,
   };
 }
 
@@ -728,6 +748,7 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
     'sceneImages',
     'imagePresets',
     'characterAppearances',
+    'imageTagBanks',
   ];
   for (const f of arrayFields) {
     const v = backup[f];
@@ -903,6 +924,17 @@ async function doImportAllData(
       await db.characterAppearances.clear();
       if (Array.isArray(backup.characterAppearances)) {
         await db.characterAppearances.bulkPut(backup.characterAppearances);
+      }
+    }
+  });
+
+  // v20 标签词库（图像 v1.4）—— 同一套三态语义：缺字段保留现有表，
+  // 有字段则整表替换。全局数据，不随存档走。
+  await db.transaction('rw', db.imageTagBanks, async () => {
+    if (backup.imageTagBanks !== undefined) {
+      await db.imageTagBanks.clear();
+      if (Array.isArray(backup.imageTagBanks)) {
+        await db.imageTagBanks.bulkPut(backup.imageTagBanks);
       }
     }
   });
@@ -1746,4 +1778,19 @@ export async function saveImagePreset(preset: ImagePreset): Promise<string> {
 
 export async function deleteImagePreset(key: string): Promise<void> {
   await getDatabase().imagePresets.delete(key);
+}
+
+// ========== v20 标签词库（图像 v1.4）==========
+
+export async function getTagBanks(): Promise<TagBank[]> {
+  return getDatabase().imageTagBanks.toArray();
+}
+
+export async function saveTagBank(bank: TagBank): Promise<string> {
+  await getDatabase().imageTagBanks.put(bank);
+  return bank.id;
+}
+
+export async function deleteTagBank(id: string): Promise<void> {
+  await getDatabase().imageTagBanks.delete(id);
 }

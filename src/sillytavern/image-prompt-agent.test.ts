@@ -17,7 +17,7 @@ import {
 } from './image-prompt-agent';
 import type { ImagePromptAgentDeps, ImagePromptClient } from './image-prompt-agent';
 import type { AgentConfig, AgentContext, ApiEndpoint } from './types';
-import type { ImagePromptRequest, SceneImageMarker } from './types-image';
+import type { ImagePromptRequest, SceneImageMarker, TagBankEntry } from './types-image';
 
 const marker = (over: Partial<SceneImageMarker> = {}): SceneImageMarker => ({
   type: 'scene_image',
@@ -430,5 +430,144 @@ describe('callImagePromptAgent', () => {
     const ac = new AbortController();
     await callImagePromptAgent({ ...baseReq(), signal: ac.signal }, deps);
     expect(seenSignal).toBe(ac.signal);
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // 标签词库（图像 v1.4）—— AI 看目录 → 调工具 → 拿标签
+  // ═══════════════════════════════════════════════════════════
+
+  describe('标签词库', () => {
+    const bankEntry = (over: Partial<TagBankEntry> = {}): TagBankEntry => ({
+      key: 'b:1',
+      uid: 1,
+      category: '场景',
+      name: '温泉',
+      aliases: ['温泉', '汤屋'],
+      tags: [['onsen'], ['hot spring']],
+      alwaysOn: false,
+      raw: '',
+      order: 2905,
+      enabled: true,
+      ...over,
+    });
+
+    /** 同时带 chat 与 chatWithTools 的替身，两口各自记账 */
+    function toolClient(output: string) {
+      const calls = {
+        chat: 0,
+        withTools: 0,
+        tools: [] as string[],
+        systemText: '',
+        maxRounds: 0,
+      };
+      let executor: ((n: string, a: Record<string, unknown>) => Promise<unknown>) | undefined;
+      const deps: ImagePromptAgentDeps = {
+        clientFactory: () => ({
+          chat: async () => {
+            calls.chat++;
+            return { output, rawResponse: '' };
+          },
+          chatWithTools: async (request, toolExecutor, options) => {
+            calls.withTools++;
+            calls.tools = request.tools.map((t) => t.function.name);
+            calls.systemText = request.messages.find((m) => m.role === 'system')?.content ?? '';
+            calls.maxRounds = options.maxRounds;
+            executor = toolExecutor;
+            return { output, rawResponse: '' };
+          },
+        }),
+      };
+      return { deps, calls, runTool: (n: string, a: Record<string, unknown>) => executor!(n, a) };
+    }
+
+    const OK = '<image_prompt>onsen, hot spring</image_prompt>';
+
+    it('没有词库 → 走原来的单次补全，一份工具 schema 都不发', async () => {
+      const { deps, calls } = toolClient(OK);
+      const result = await callImagePromptAgent(baseReq(), deps);
+      expect(result.ok).toBe(true);
+      expect(calls.chat).toBe(1);
+      expect(calls.withTools).toBe(0);
+    });
+
+    it('有词库 → 走多轮，白名单里只有查词库那两口', async () => {
+      const { deps, calls } = toolClient(OK);
+      await callImagePromptAgent({ ...baseReq(), tagBank: [bankEntry()] }, deps);
+      expect(calls.withTools).toBe(1);
+      expect(calls.chat).toBe(0);
+      expect(calls.tools.sort()).toEqual(['get_image_tags', 'search_image_tags']);
+    });
+
+    it('目录进了 system 消息，且只有名字没有标签', async () => {
+      const { deps, calls } = toolClient(OK);
+      await callImagePromptAgent({ ...baseReq(), tagBank: [bankEntry()] }, deps);
+      expect(calls.systemText).toContain('温泉');
+      expect(calls.systemText).not.toContain('onsen');
+    });
+
+    it('🔴 目录排在本次插画需求之前 —— 它是每张图都一样的缓存前缀', async () => {
+      const { deps, calls } = toolClient(OK);
+      await callImagePromptAgent({ ...baseReq(), tagBank: [bankEntry()] }, deps);
+      expect(calls.systemText.indexOf('词库目录')).toBeGreaterThanOrEqual(0);
+      expect(calls.systemText.indexOf('词库目录')).toBeLessThan(
+        calls.systemText.indexOf('本次插画需求'),
+      );
+    });
+
+    it('工具执行器真的从词库里取到标签', async () => {
+      const { deps, runTool } = toolClient(OK);
+      await callImagePromptAgent({ ...baseReq(), tagBank: [bankEntry()] }, deps);
+
+      const got = (await runTool('get_image_tags', { names: ['温泉'] })) as {
+        found: Array<{ tags: string }>;
+      };
+      expect(got.found[0].tags).toBe('onsen, hot spring');
+
+      const searched = (await runTool('search_image_tags', { query: '汤屋' })) as {
+        hits: Array<{ name: string }>;
+      };
+      expect(searched.hits[0].name).toBe('温泉');
+    });
+
+    it('查不到的名字照实回报，不静默少给', async () => {
+      const { deps, runTool } = toolClient(OK);
+      await callImagePromptAgent({ ...baseReq(), tagBank: [bankEntry()] }, deps);
+      const got = (await runTool('get_image_tags', { names: ['没有这条'] })) as {
+        found: unknown[];
+        notFound: string[];
+      };
+      expect(got.found).toEqual([]);
+      expect(got.notFound).toEqual(['没有这条']);
+    });
+
+    it('🔴 客户端不支持工具时退回单次补全，而不是让整张图失败', async () => {
+      // 只实现 chat 的老客户端（历史测试替身正是这个形状）
+      let chatCalls = 0;
+      const deps: ImagePromptAgentDeps = {
+        clientFactory: () => ({
+          chat: async () => {
+            chatCalls++;
+            return { output: OK, rawResponse: '' };
+          },
+        }),
+      };
+      const result = await callImagePromptAgent({ ...baseReq(), tagBank: [bankEntry()] }, deps);
+      expect(result.ok).toBe(true);
+      expect(chatCalls).toBe(1);
+    });
+
+    it('停用的条目由调用方过滤 —— 本层拿到什么就用什么（空数组 = 没词库）', async () => {
+      const { deps, calls } = toolClient(OK);
+      await callImagePromptAgent({ ...baseReq(), tagBank: [] }, deps);
+      expect(calls.chat).toBe(1);
+      expect(calls.withTools).toBe(0);
+    });
+
+    it('多轮上限挡住「搜不到就一直搜」', async () => {
+      const { deps, calls } = toolClient(OK);
+      await callImagePromptAgent({ ...baseReq(), tagBank: [bankEntry()] }, deps);
+      expect(calls.maxRounds).toBeGreaterThan(0);
+      expect(calls.maxRounds).toBeLessThanOrEqual(5);
+    });
   });
 });

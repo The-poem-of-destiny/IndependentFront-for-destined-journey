@@ -460,9 +460,20 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     return typeof v === 'string' ? v : JSON.stringify(v);
   },
 
-  // ---- Chain Communication Placeholders (5) (localParams injected) ----
+  // ---- Chain Communication Placeholders (6) (localParams injected) ----
   // 图像生成 G 阶段: `image_prompt` 侧链的输入块，由 callImagePromptAgent 经 localParams 注入
   IMAGE_REQUEST: (_ctx, _config, _params) => '',
+  /**
+   * {{IMAGE_TAG_BANK}} — 标签词库目录（图像 v1.4）。同样由 callImagePromptAgent 注入。
+   *
+   * 🔴 **位置要靠前、内容要逐字节稳定**：它是几万字符、每张图都发一遍的东西，
+   *    唯一能让它不烧钱的办法是落进 prompt cache 的稳定前缀。渲染方
+   *    （`image-tag-bank.formatTagBankCatalogue`）已保证同一本词库字节不漂，
+   *    模板里也别把它排到 `{{IMAGE_REQUEST}}`（每张图都不同）后面去。
+   *
+   * 用户没导入词库时是空串 —— 那时侧链走的是无工具的老路径，这一格本来就该空着。
+   */
+  IMAGE_TAG_BANK: (_ctx, _config, _params) => '',
   CRAFT_REQUEST: (_ctx, _config, _params) => '',
   CHAR_DETECT: (_ctx, _config, _params) => '',
   ITEM_REQUEST: (_ctx, _config, _params) => '',
@@ -515,7 +526,7 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   // 图像生成 G 阶段（D28）: image_prompt 侧链。由 scene-image-store 的 runPromptAgent 缝唤起，
   // 不走主 DAG。刻意短 —— 挂便宜快模型，机械转换不需要整套世界观（世界书默认关，§8.5）。
   image_prompt:
-    '{{SYS_PROMPT}}\n\n<!-- image_prompt 侧链由情景插画队列唤起，不走主 DAG（设计 §8.5 / D28）。 -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 世界书对本 Agent 默认关闭。开了才有内容——地点/服饰的设定能提升画面保真度，代价是 token。-->\n\n<本次插画需求>\n{{IMAGE_REQUEST}}\n</本次插画需求>\n<!-- 引擎装配：story 写的那句中文 + 出场角色名 + 当前地点 + 分级 + 所属消息正文。\n     这是你转换的唯一输入——不要从别处推断画面内容，也不要复述这段文字。-->',
+    '{{SYS_PROMPT}}\n\n<!-- image_prompt 侧链由情景插画队列唤起，不走主 DAG（设计 §8.5 / D28）。 -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 世界书对本 Agent 默认关闭。开了才有内容——地点/服饰的设定能提升画面保真度，代价是 token。-->\n\n<标签词库目录>\n{{IMAGE_TAG_BANK}}\n</标签词库目录>\n<!-- 用户导入的中文→danbooru 标签词库，此处**只列名字**。要某一条的实际标签就调\n     get_image_tags；目录里一眼没找到就用 search_image_tags 按中文关键词搜。\n     这一段每张图都一模一样（缓存前缀），所以排在只属于本次的插画需求之前。\n     用户没导入词库时这里是空的——那就照常自己写标签，不必提这件事。-->\n\n<本次插画需求>\n{{IMAGE_REQUEST}}\n</本次插画需求>\n<!-- 引擎装配：story 写的那句中文 + 出场角色名 + 当前地点 + 分级 + 所属消息正文。\n     这是你转换的唯一输入——不要从别处推断画面内容，也不要复述这段文字。-->',
   // Q-04: 以下三个是**退役/别名** agentId，生产链路不会调它们（战斗主持已换 combat_v3，
   // 走 coordinator 自己的装配；plot_check / plot_correct 是 v3 兼容别名）。它们仍留在
   // AGENT_TEMPLATES 与 context-visibility 的可见性表里，所以这里给一条最小模板 ——

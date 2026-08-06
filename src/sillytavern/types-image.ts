@@ -444,6 +444,113 @@ export interface SceneImageUsage {
   favoriteBytes: number;
 }
 
+// ═══ 标签词库（tag bank）═══
+
+/**
+ * 一格标签的候选集 —— 上游用 `/` 分隔的那一串（`cat ears/fox ears/dog ears`）。
+ *
+ * 🔴 **不在导入期压成一个字符串**：`,` 与 `/` 在上游语料里语义不同 ——
+ * 逗号那一串是「同时成立」（`onsen, hot spring, steam`），斜杠那一串是「同类候选」
+ * （猫娘选 cat ears、狐娘选 fox ears）。压平之后两者长得一模一样，AI 会把六种耳朵
+ * 一起写进提示词，模型就给画六对耳朵。
+ *
+ * 语料本身并不严谨（`animal ears/cat ears/animal ear fluff` 里最后一项其实是可叠加的
+ * 补充项而非候选），所以工具说明里的措辞是「通常择一，也可叠加」，不做更强的承诺。
+ */
+export type TagAlternatives = string[];
+
+/** 词库里的一条：一个中文名字 → 若干格 danbooru 标签 */
+export interface TagBankEntry {
+  /** 主键 = `` `${bankId}:${uid}` ``。uid 只在单本内唯一，跨本撞号是常态 */
+  key: string;
+  /** 上游 uid，仅溯源（导入侧不拿它做跨本寻址） */
+  uid: number | string;
+  /** 来自 `comment` 的 `[方括号]` 部分；没有括号时是 `UNCATEGORIZED_LABEL` */
+  category: string;
+  /**
+   * 条目名。**AI 在目录里看到的就是这个字符串**，也是 `get_image_tags` 的键。
+   *
+   * 🔴 原始字符串，不 trim 之外的任何归一化（铁律 1）——
+   * 目录里印的是它，工具查的也是它，两者必须逐字节同源。
+   */
+  name: string;
+  /** 检索别名（上游 `key[]`）。**含 `name` 自身**，于是搜索只需看这一个字段 */
+  aliases: string[];
+  /** 标签，按格存放；见 {@link TagAlternatives} */
+  tags: TagAlternatives[];
+  /**
+   * 上游 `constant` —— 作者标记的「总是相关」条目（画风/构图惯例这类）。
+   *
+   * 目录里这一档**连标签一起印**，不必等 AI 去查：它们对每张图都成立，
+   * 为它们各花一次工具往返是纯粹的浪费。
+   */
+  alwaysOn: boolean;
+  /** 上游 `content` 原文（已去 BOM/零宽，未做别的改动）。排查用 */
+  raw: string;
+  /** 上游 `order`，稳定排序用 —— 语料里它本来就按分类聚簇 */
+  order: number;
+  /** 上游 `disable` 的反面。false 的条目不进目录、也查不到 */
+  enabled: boolean;
+}
+
+/** 一本词库。整本一行落库（`entries[]` 内联），与 WorldBook 同口径 */
+export interface TagBank {
+  id: string;
+  name: string;
+  /** 导入时的文件名，供用户认出这本是哪个文件来的 */
+  sourceFile?: string;
+  entries: TagBankEntry[];
+  /** 关掉的整本既不进目录也查不到（不必删就能试） */
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * 导入期的一条处置记录。
+ *
+ * 分 kind 而不是一个 `string[]`，理由与 `WorkshopNoteKind` 完全相同：
+ * 「这条丢了」和「这条装了但有点脏」不是一回事，合流会让 UI 把后者也报成失败。
+ *
+ * - `skipped`  —— 这条**没进库**（名字与标签都抽不出来）
+ * - `repaired` —— 进库了，但导入期改过字节（去了 BOM / 去了 U+FFFD 坏字符）
+ * - `warning`  —— 进库了，字节没动，但有值得看一眼的地方（标签里混着中文）
+ * - `duplicate`—— 进库了，但同名条目不止一条（查询会同时返回，不是错误）
+ */
+export type TagBankImportNoteKind = 'skipped' | 'repaired' | 'warning' | 'duplicate';
+
+export interface TagBankImportNote {
+  kind: TagBankImportNoteKind;
+  /** 上游 uid，供用户回原文件定位 */
+  uid: number | string;
+  /** 可辨识名 —— 有 comment 用 comment，否则退回 `uid #N` */
+  label: string;
+  /** 人读的一句话原因 */
+  text: string;
+}
+
+/**
+ * `parseTagBankLorebook` 的产出 —— **计划，不是落库结果**。
+ *
+ * 照 `planInstall` / `planImport` 的先例：纯同步、不抛错、把所有处置收集起来交给 UI，
+ * 由用户看过报告再决定落不落。上游语料有几千条，其中一定有我们没见过的写法 ——
+ * 一条读不懂就抛错，等于让一个畸形条目否掉整本词库。
+ */
+export interface TagBankImportPlan {
+  entries: TagBankEntry[];
+  notes: TagBankImportNote[];
+  stats: {
+    /** 文件里一共有几条 */
+    total: number;
+    /** 进库几条 */
+    imported: number;
+    /** 没进库几条 */
+    skipped: number;
+    /** 分类分布，按条数降序 —— 导入报告直接印它 */
+    categories: Array<{ category: string; count: number }>;
+  };
+}
+
 // ═══ 失败分类 ═══
 
 export type ImageGenFailureKind =

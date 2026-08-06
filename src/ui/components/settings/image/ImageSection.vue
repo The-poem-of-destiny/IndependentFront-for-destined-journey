@@ -9,11 +9,15 @@
  * 一个 agent —— 它是含**两次不同调用**的子系统（LLM 出标签、NAI 出图）。
  * 于是：分区归分区，agent 归 agent，`agent-list.ts` 一个字都不用动。
  *
- * 三张卡对应**三处不同的存储**（D51/D52）：
+ * 四张卡对应**四处不同的存储**（D51/D52）：
  *   · 提示词生成 → `agents` 袋子（`agent-settings.ts`）
  *   · 出图       → `UiSettings`
+ *   · 标签词库   → Dexie `imageTagBanks`（图像 v1.4）
  *   · 视觉预设   → Dexie `imagePresets`
  * 前两张正好是**两个花钱的地方**（LLM token / Anlas）。
+ *
+ * 词库卡排在「提示词生成」之后、「视觉预设」之前，因为它属于**第一步**（中文 → 标签）：
+ * 词库喂的是那个 LLM，与 NAI 参数无关。排到最后会让人以为它和外观预设是一类东西。
  *
  * 🔴 **单根** `<section class="section centered">`：`.centered`（780px 居中）是
  *    SettingsPage 的 scoped 规则，只够得到子组件的**根节点**。多根 fragment 会让它
@@ -21,6 +25,7 @@
  */
 import ImagePromptCard from './ImagePromptCard.vue';
 import ImageRenderCard from './ImageRenderCard.vue';
+import ImageTagBankCard from './ImageTagBankCard.vue';
 import ImagePresetList from './ImagePresetList.vue';
 </script>
 
@@ -29,12 +34,14 @@ import ImagePresetList from './ImagePresetList.vue';
     <h3>图像生成</h3>
     <p class="section-desc">
       给正文里值得记住的时刻配一张插画。两步：先让一个 LLM 把中文场景转成 danbooru
-      标签，再把标签发给 NovelAI 出图 —— 下面三张卡正好对应这两步和它们共用的外观设定。
+      标签，再把标签发给 NovelAI 出图 —— 下面四张卡对应这两步、给第一步用的标签词库，
+      以及它们共用的外观设定。
     </p>
 
     <div class="image-cards">
       <ImagePromptCard />
       <ImageRenderCard />
+      <ImageTagBankCard />
       <ImagePresetList />
     </div>
   </section>

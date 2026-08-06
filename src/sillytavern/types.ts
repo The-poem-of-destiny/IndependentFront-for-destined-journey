@@ -17,7 +17,7 @@ import type { Modifier } from './effect-types';
 import type { EffectAutomaton } from './combat-v3/types';
 // type-only 单向边：types-image.ts **不 import 本文件**（图像子系统的类型全部自持），
 // 所以这条边不成环。只为把 SceneImageMarker 接进 DetectedMarker 联合。
-import type { SceneImageMarker } from './types-image';
+import type { SceneImageMarker, TagBankEntry } from './types-image';
 
 // 音频子系统的接口/seam 类型拆分在 types-audio.ts（本文件已逾 800 行）。
 // 从这里统一再导出，「types.ts 是唯一类型来源」这条 import 路径依然成立。
@@ -1357,6 +1357,15 @@ export interface ToolExecutionContext {
    * `takeCraftTape` 用到时才建。
    */
   craftDice?: Record<string, CraftDiceTape>;
+  /**
+   * 图像 v1.4：`image_prompt` 侧链的标签词库（`get_image_tags`/`search_image_tags` 的数据源）。
+   *
+   * 🔴 由调用方**从 Dexie 读好交进来**，工具自己不碰库 —— 这条链的两端都是纯函数
+   * （`image-prompt-agent.ts` 的文件头写着这件事），执行器里冒出一次 `db.` 就把它破了。
+   *
+   * 缺席 = 用户没导入词库。工具照实回报「一条都没查到」，模型据此自己写标签。
+   */
+  tagBank?: TagBankEntry[];
 }
 
 /** Agent 定义 */

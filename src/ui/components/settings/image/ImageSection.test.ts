@@ -70,6 +70,7 @@ vi.mock('../../../stores/settings-store', () => ({
 import ImageSection from './ImageSection.vue';
 import ImagePromptCard from './ImagePromptCard.vue';
 import ImageRenderCard from './ImageRenderCard.vue';
+import ImageTagBankCard from './ImageTagBankCard.vue';
 import ImagePresetList from './ImagePresetList.vue';
 import AgentConfigPanel from '../agent/AgentConfigPanel.vue';
 import AppButton from '../../shared/AppButton.vue';
@@ -133,14 +134,18 @@ describe('ImageSection —— 分区壳', () => {
     expect(w.classes()).toContain('centered');
   });
 
-  it('三张卡都在，且顺序是 提示词生成 → 出图 → 视觉预设（两处花钱的地方在前）', () => {
+  it('四张卡都在，顺序是 提示词生成 → 出图 → 标签词库 → 视觉预设', () => {
+    // 两处花钱的地方（LLM token / Anlas）在前；词库紧随其后，因为它喂的是**第一步**
+    // 那个 LLM —— 排到最后会让人以为它和外观预设是一类东西。
     const w = mount(ImageSection, { shallow: true });
     expect(w.findComponent(ImagePromptCard).exists()).toBe(true);
     expect(w.findComponent(ImageRenderCard).exists()).toBe(true);
+    expect(w.findComponent(ImageTagBankCard).exists()).toBe(true);
     expect(w.findComponent(ImagePresetList).exists()).toBe(true);
 
     const order = w.findAll('.image-cards > *').map((el) => el.element.tagName.toLowerCase());
-    expect(order).toHaveLength(3);
+    expect(order).toHaveLength(4);
+    expect(order[2]).toContain('image-tag-bank-card');
   });
 });
 

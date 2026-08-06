@@ -513,6 +513,51 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
       },
     },
   },
+
+  // ── 标签词库（图像 v1.4）──
+  //   image_prompt 侧链专用：目录里只有中文名字，标签本体靠这两个工具取。
+  //   🔴 两者都是**纯查询**：不掷骰、不写状态、不花钱。词库由调用方经
+  //      `ToolExecutionContext.tagBank` 交进来，工具本身不碰 Dexie。
+  {
+    type: 'function',
+    function: {
+      name: 'get_image_tags',
+      description:
+        '按词库目录里的中文名字取它对应的 danbooru 标签。一次可传多个名字。' +
+        '返回的 tags 里：逗号分隔的是可同时使用；竖线 | 分隔的是同类候选（通常择一，按画面挑最贴切的那个）。' +
+        '名字必须与目录里的写法一致；同名条目可写成「分类:名字」消歧。查不到的名字会原样列在 notFound 里——' +
+        '那说明目录里没这一条，改用 search_image_tags 换个说法找，或者自己写标签。',
+      parameters: {
+        type: 'object',
+        properties: {
+          names: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '目录里的条目名，如 ["温泉", "兽耳"]',
+          },
+        },
+        required: ['names'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_image_tags',
+      description:
+        '按中文关键词在标签词库里模糊查找（匹配条目名与它的全部别名）。' +
+        '用在目录里一眼没找到、但觉得词库里应该有的时候——例如查「猫耳」能找到名为「兽耳」的那条。' +
+        '返回结果直接带标签，不必再调 get_image_tags。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '中文关键词，如「猫耳」「雨天」' },
+          limit: { type: 'integer', description: '最多返回几条，缺省 12' },
+        },
+        required: ['query'],
+      },
+    },
+  },
 ];
 
 // ═══════════════════════════════════════════════════════════
@@ -562,6 +607,15 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
     'get_inventory',
     'get_combat_state',
   ],
+  /**
+   * image_prompt（图像 v1.4）——**只有查词库这两口**。
+   *
+   * 🔴 别往这里加别的工具。这条侧链每张图都要跑，它的职责只有「中文场景 → 标签串」；
+   *    给它 get_character / roll_d20 之类既不会让标签更准，又给了模型一条编数值的路。
+   *    没导入词库时 `getToolsForAgent` 照样返回这两个定义，但调用方会走无工具的老路径
+   *    （见 `image-prompt-agent.callImagePromptAgent`）——空词库不该白发两份 schema。
+   */
+  image_prompt: ['get_image_tags', 'search_image_tags'],
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -966,6 +1020,30 @@ temp.<path>    — 会话临时 (不持久化)
         stacks: totalStacks,
         matched,
       };
+    }
+
+    // ── 标签词库（图像 v1.4）──
+    case 'get_image_tags': {
+      const names = Array.isArray(args.names) ? args.names : [];
+      if (names.length === 0) {
+        throw new Error('缺少必需参数: names（目录里的条目名数组）');
+      }
+      const { lookupTagEntries } = await import('./image-tag-bank');
+      // 🔴 词库缺席 = 一条都查不到，**不是**空结果：报成「全部 notFound」，
+      //    模型据此知道该自己写标签，而不是以为这些条目本来就没有标签。
+      return { ...lookupTagEntries(context.tagBank ?? [], names) };
+    }
+    case 'search_image_tags': {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (query.trim() === '') {
+        throw new Error('缺少必需参数: query（中文关键词）');
+      }
+      const { searchTagEntries, SEARCH_DEFAULT_LIMIT } = await import('./image-tag-bank');
+      const limit =
+        typeof args.limit === 'number' && Number.isFinite(args.limit)
+          ? Math.floor(args.limit)
+          : SEARCH_DEFAULT_LIMIT;
+      return { ...searchTagEntries(context.tagBank ?? [], query, limit) };
     }
 
     default:

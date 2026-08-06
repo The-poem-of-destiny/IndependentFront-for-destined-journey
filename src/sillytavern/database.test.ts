@@ -817,7 +817,7 @@ describe('exportAllData / importAllData', () => {
     // 🔴 跟随 DB_VERSION，而 DB_VERSION 必须等于最后一个 `this.version(n)` ——
     // 这条断言曾经写着 17 而 schema 已经到 19（v18 删地点预设行 / v19 角色外貌会话副本），
     // 于是它把漂移**固定**下来而不是拦下来。升版时 database.ts 与这里一起改。
-    expect(backup.version).toBe(19);
+    expect(backup.version).toBe(20);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -1968,10 +1968,10 @@ describe('Asset CRUD (v13)', () => {
     // ---- 以当前版 (AppDatabase) 打开：触发升版 ----
     await initializeDatabase();
     const db = getDatabase();
-    expect(db.verno).toBe(19); // v18 = D59 删地点预设；v19 = D56 角色外貌会话副本
+    expect(db.verno).toBe(20); // v18 = D59 删地点预设；v19 = D56 角色外貌会话副本；v20 = 图像 v1.4 标签词库
 
     // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
-    //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56），一个不少
+    //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56）+ 标签词库一张（v20），一个不少
     //（误写 `表名: null` 或漏声明会在这里炸 —— 尤其 lorebooks/settings 两张死表按 D3 必须保留）
     const EXPECTED_TABLES = [
       ...Object.keys(V12_STORES),
@@ -1985,6 +1985,7 @@ describe('Asset CRUD (v13)', () => {
       'sceneImageBlobs',
       'imagePresets',
       'characterAppearances',
+      'imageTagBanks',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 

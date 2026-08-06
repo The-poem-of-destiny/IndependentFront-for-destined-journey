@@ -1763,6 +1763,16 @@ export class GamePipeline {
     try {
       // 手动档可能在任何时候点（甚至本会话还没跑过一轮），chainData 不能假定已就绪
       const chain = await this.ensureChainData();
+
+      // 标签词库（图像 v1.4）—— 用户没导入就是空数组，侧链据此走无工具的老路径。
+      // 🔴 取值经 store 的 `enabledEntries`（两层启用开关只在那一处过）：
+      //    在这里自己 filter 一遍，就会出现「目录里印着的名字，工具查不到」，
+      //    而那不会有任何报错，只会让模型拿到一句 notFound。
+      const { useImageTagBankStore } = await import('../stores/image-tag-bank-store');
+      const tagBankStore = useImageTagBankStore();
+      await tagBankStore.init();
+      const tagBank = tagBankStore.enabledEntries;
+
       const { callImagePromptAgent } = await import('@engine/image-prompt-agent');
       const result = await callImagePromptAgent(
         {
@@ -1773,6 +1783,7 @@ export class GamePipeline {
           configs: chain.agentConfigs,
           worldBooks: chain.worldBooks,
           presets: chain.presets,
+          ...(tagBank.length > 0 ? { tagBank } : {}),
           ...(signal ? { signal } : {}),
         },
         { clientFactory: this.getClientFactory() },

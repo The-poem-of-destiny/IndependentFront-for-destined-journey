@@ -10,22 +10,35 @@
  *    本文件**不 import** `agent-client` / Dexie / DOM 里的任何东西，别顺手加：
  *    ② 只经 `agent-templates` 装配消息，真正的 HTTP 客户端由 `deps.clientFactory`
  *    从外面交进来（`char-gen-agent` 的 `CharGenClient` 同一形状）。
+ *    图像 v1.4 起多 import 了 `agent-tools`（工具 schema + 纯查询分发器）与
+ *    `image-tag-bank`（纯函数），两者都不做 I/O —— **词库本身由调用方从 Dexie 读好
+ *    经 `tagBank` 交进来**，这条边界一寸没退。
  *
  * 🔴 `normalizeTagString` 从 `image-prompt.ts` import —— 那是全仓唯一一份（D27）。
  *    这里**绝不另抄一份**。
  */
 
 import { buildAgentMessagesAsync } from './agent-templates';
+import { executeToolCall, getToolsForAgent } from './agent-tools';
+import { formatTagBankCatalogue } from './image-tag-bank';
 import { normalizeTagString } from './image-prompt';
 import { APPEARANCE_PROMPT_RULES, parseCharacterAppearances } from './character-appearance-agent';
 import { CAPTION_DESC_MAX, sanitizeCaption, stripMarkers } from './marker-protocol';
-import type { AgentConfig, AgentContext, AgentPreset, ApiEndpoint, WorldBook } from './types';
+import type {
+  AgentConfig,
+  AgentContext,
+  AgentPreset,
+  ApiEndpoint,
+  ToolDefinition,
+  WorldBook,
+} from './types';
 import type {
   ImageGenFailure,
   ImagePromptOutput,
   ImagePromptRequest,
   ImageRating,
   SceneImageMarker,
+  TagBankEntry,
 } from './types-image';
 
 // ═══════════════════════════════════════════════════════════
@@ -90,9 +103,17 @@ export type ImagePromptAgentCall = (
 /**
  * 侧链客户端 —— `AgentClient` 的**最小子集**。
  *
- * 🔴 只有 `chat`：`image_prompt` 是**普通补全，非 Agentic**（§8.5）。它不查库、
- * 不掷骰、不写状态，没有一件事需要工具调用 —— 给它挂 tools 只会多烧 token
- * 并给模型一条编数值的路。
+ * 🔴 **`chat` 必备，`chatWithTools` 按需**（图像 v1.4 修订）。
+ *
+ * 此处原本写着「image_prompt 是普通补全，非 Agentic —— 它不查库、不掷骰、不写状态，
+ * 没有一件事需要工具调用」。**标签词库让第一句不再成立**：用户导入的几千条中文→标签
+ * 映射装不进一次提示词，检索模型是「AI 看目录 → 调工具取标签 → 自己组装」（用户裁定，
+ * 2026-08-05）。那句话的其余部分仍然有效 —— 词库工具是**纯查询**，不掷骰、不写状态、
+ * 不花钱，白名单里也只有这两口（见 `AGENT_TOOL_MAP.image_prompt` 的注释）。
+ *
+ * 没导入词库时**一个字都不变**：`callImagePromptAgent` 走原来的单次 `chat`，
+ * 既不发工具 schema 也不多跑一轮。所以 `chatWithTools` 是可选的 ——
+ * 老的测试替身与任何只实现 `chat` 的客户端继续能用。
  */
 export interface ImagePromptClient {
   chat(
@@ -106,6 +127,22 @@ export interface ImagePromptClient {
       presencePenalty?: number;
     },
     signal?: AbortSignal,
+  ): Promise<{ output: string | null; rawResponse: string; error?: string }>;
+  /** 有词库时走这一口（多轮 function calling）。缺席 → 自动退回 `chat` */
+  chatWithTools?(
+    request: {
+      model?: string;
+      messages: Array<{ role: string; content: string }>;
+      tools: ToolDefinition[];
+      tool_choice: string;
+      temperature?: number;
+      maxTokens?: number;
+      topP?: number;
+      frequencyPenalty?: number;
+      presencePenalty?: number;
+    },
+    toolExecutor: (name: string, args: Record<string, unknown>) => Promise<unknown>,
+    options: { maxRounds: number; signal?: AbortSignal },
   ): Promise<{ output: string | null; rawResponse: string; error?: string }>;
 }
 
@@ -121,6 +158,13 @@ export interface ImagePromptChainRequest {
   configs?: AgentConfig[];
   worldBooks?: WorldBook[];
   presets?: AgentPreset[];
+  /**
+   * 标签词库（图像 v1.4）—— **已由调用方从 Dexie 读好、且已过两层启用开关**
+   * （`image-tag-bank.collectEnabledEntries`）。
+   *
+   * 缺席或空数组 = 用户没导入词库 → 侧链走原来的单次补全，行为与 v1.3 逐字相同。
+   */
+  tagBank?: TagBankEntry[];
   /** 切存档 / 离开页面时取消（§8.2） */
   signal?: AbortSignal;
 }
@@ -179,13 +223,18 @@ export async function callImagePromptAgent(
 ): Promise<ImagePromptParseResult> {
   let raw: string;
   try {
+    // 词库目录（图像 v1.4）。空词库 → 空串 → 模板里那一段整个不出现，
+    // 且下面不会挂工具 —— 没导入词库的用户付的 token 与 v1.3 一模一样。
+    const tagBank = req.tagBank ?? [];
+    const catalogue = tagBank.length > 0 ? formatTagBankCatalogue(tagBank) : '';
+
     const messages = await buildAgentMessagesAsync(
       'image_prompt',
       req.context,
       req.configs,
       req.worldBooks,
       req.presets,
-      { IMAGE_REQUEST: formatImagePromptRequest(req.request) },
+      { IMAGE_REQUEST: formatImagePromptRequest(req.request), IMAGE_TAG_BANK: catalogue },
     );
     if (!messages) {
       return agentFailure('image_prompt 模板未注册（AGENT_TEMPLATES / DEFAULT_TEMPLATES）');
@@ -209,23 +258,45 @@ ${APPEARANCE_PROMPT_RULES}`,
 
     const config = req.configs?.find((c) => c.agentId === 'image_prompt');
     const client = deps.clientFactory('image_prompt', req.endpoint, req.saveId);
-    const result = await client.chat(
-      {
-        // 空串会让下游把它当成"显式指定了空模型"，一律退回 endpoint 的默认模型
-        ...(config?.model ? { model: config.model } : {}),
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
-        ...(config === undefined
-          ? {}
-          : {
-              temperature: config.temperature,
-              maxTokens: config.maxTokens,
-              topP: config.topP,
-              frequencyPenalty: config.frequencyPenalty,
-              presencePenalty: config.presencePenalty,
+
+    const baseRequest = {
+      // 空串会让下游把它当成"显式指定了空模型"，一律退回 endpoint 的默认模型
+      ...(config?.model ? { model: config.model } : {}),
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      ...(config === undefined
+        ? {}
+        : {
+            temperature: config.temperature,
+            maxTokens: config.maxTokens,
+            topP: config.topP,
+            frequencyPenalty: config.frequencyPenalty,
+            presencePenalty: config.presencePenalty,
+          }),
+    };
+
+    // 🔴 只有**同时**满足「有词库」与「客户端支持工具」时才走多轮：
+    //    少了任一条都退回单次补全，而不是报错。这条链每张图都要跑，
+    //    为一个可选的增强让整张图失败是把「没有词库」升级成「没有图」。
+    const useTools = tagBank.length > 0 && typeof client.chatWithTools === 'function';
+
+    const result = useTools
+      ? await client.chatWithTools!(
+          { ...baseRequest, tools: getToolsForAgent('image_prompt'), tool_choice: 'auto' },
+          async (name, args) =>
+            executeToolCall(name, args as Record<string, unknown>, {
+              // 词库以外的上下文这条链一概用不上（白名单里只有两口查询工具），
+              // 给空值即可 —— 塞真角色数据反而给了模型一条编数值的路
+              characters: [],
+              variables: {},
+              saveId: req.saveId,
+              tagBank,
             }),
-      },
-      req.signal,
-    );
+          // 取标签通常一轮就够（一次 get_image_tags 传多个名字）；给到 4 轮是留给
+          // 「先 search 没找到、换个词再 search」这类来回，同时挡住无限循环
+          { maxRounds: 4, ...(req.signal ? { signal: req.signal } : {}) },
+        )
+      : await client.chat(baseRequest, req.signal);
+
     if (result.error) return agentFailure(result.error);
     raw = result.output ?? result.rawResponse;
   } catch (e) {
