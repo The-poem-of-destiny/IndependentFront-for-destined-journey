@@ -158,6 +158,77 @@
   color: var(--theme-quality-unique);
 }
 
+/* ===== 空态（design.md §5.2）— 全站唯一一份 =====
+ *
+ * 放在全局工具层而不是 settings-chrome.css: 空态不是「设置页外壳」，游戏页面板、
+ * 工坊列表同样要用，而 `<style scoped src>` 那条路会给每个引用它的组件复制一份。
+ *
+ * 收编前设置页有**三种方言**:
+ *   · `.empty-tab` —— audio/ 与 assets/ 各抄了一份，且已经开始漂移
+ *     （padding `xl` vs `2xl`、其中一份多一条 line-height）
+ *   · 内联 `style="text-align: center; padding: 24px"` + 纯文字 —— API / 世界书 /
+ *     输出美化 / Agent 四处，padding 各写各的（16 / 24 / 40 / 60px），
+ *     既没有装饰符也没有斜体
+ *   · WorldBookEditor 的 `.empty-state`（图标 + 标题 + 描述 + CTA 按钮）
+ *
+ * 🔴 空态要**教会用户这个界面**，不是通报「这里没东西」。所以但凡说得出下一步的，
+ *    都要带 `.empty-tab-hint`；能一键开始的再加 `.empty-tab-action`。
+ *    光一句「暂无数据」是这套里唯一不许出现的写法。
+ */
+.empty-tab {
+  padding: var(--theme-spacing-2xl) 0;
+  text-align: center;
+  color: var(--theme-text-muted);
+  font-size: 0.8125rem;
+  font-style: italic;
+  line-height: 1.7;
+}
+.empty-tab::before {
+  content: '—';
+  display: block;
+  margin-bottom: var(--theme-spacing-sm);
+  font-size: 1.25rem;
+  opacity: 0.3;
+}
+/* 图标变体：有图标时它替代那道 `—`，不要两个装饰符叠着 */
+.empty-tab-icon {
+  display: block;
+  margin-bottom: var(--theme-spacing-sm);
+  font-size: 1.75rem;
+  opacity: 0.25;
+}
+.empty-tab:has(.empty-tab-icon)::before {
+  content: none;
+}
+/* 「怎么开始」那一行 —— 不斜体: 它是操作指引，不是氛围文字 */
+.empty-tab-hint {
+  display: block;
+  margin-top: var(--theme-spacing-xs);
+  font-size: 0.75rem;
+  font-style: normal;
+  opacity: 0.9;
+}
+.empty-tab-action {
+  margin-top: var(--theme-spacing-md);
+  padding: 8px 18px;
+  min-height: 36px; /* design.md §4.1 触摸目标下限 */
+  border: 1px solid var(--theme-primary);
+  border-radius: var(--theme-radius-sm);
+  background: var(--theme-primary);
+  color: var(--theme-primary-text);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-style: normal;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    filter var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
+}
+.empty-tab-action:hover {
+  filter: brightness(1.1);
+}
+
 /* 品质色点 — 与 .quality-* 文字色类组合使用: <span class="quality-dot quality-rare"> */
 .quality-dot {
   display: inline-block;

@@ -17,11 +17,15 @@
  *    仍由 `AgentSection` 的**单根** `<section>` 负责，见那边的文件头。
  *
  * 🔴 草稿载入必须是 `watch(..., { immediate: true })`，**immediate 不是可选项**：
- *    主导航每次点击都把 `activeAgent` 置 null（SettingsPage 的 nav 里），
- *    所以本组件永远是**新挂载**的。普通 watch 在挂载时不触发，两个 textarea 会
- *    空着渲染，接着「保存设置」把空串写进用户的提示词。抽壳之后这条 watch 必须
- *    留在**本组件**（草稿在这里，宿主看不见它们）——
+ *    整个 Agent 分区在 SettingsPage 里是 `v-if`，随 `activeSection` 挂载/卸载，
+ *    所以每次进分区本组件都是**新挂载**的。普通 watch 在挂载时不触发，两个
+ *    textarea 会空着渲染，接着「保存设置」把空串写进用户的提示词。抽壳之后这条
+ *    watch 必须留在**本组件**（草稿在这里，宿主看不见它们）——
  *    回归测试见 `AgentConfigPanel.test.ts` 第一条。
+ *
+ *    （历史：这里原先写的理由是「主导航每次点击都把 activeAgent 置 null」。那个
+ *    置 null 已经删掉了 —— 它让持久化的 Agent 选择永远读不回来。结论没变，
+ *    是 `v-if` 在保证新挂载，不是那次置 null。）
  */
 import { computed, ref, watch } from 'vue';
 import AppButton from '../../shared/AppButton.vue';

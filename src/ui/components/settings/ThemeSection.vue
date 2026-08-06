@@ -2,9 +2,15 @@
 /**
  * 外观主题分区 —— 10 套主题 + 字体 / 字号 / 悬停延迟 / 减少动态效果
  * （Q-25 从 SettingsPage.vue 抽出）
+ *
+ * 🔴 字体是**两格独立设置**（正文 / 标题），不是一个三档单选。旧的「字体风格」
+ *    只写 `--theme-font-body`，`mixed` 那档渲染出来与 `sans` 完全一样（它只是
+ *    一条字体栈，有中文字形的字符全部命中第一个）—— 三个选项实际只有两种结果。
+ *    拆成两格之后，「标题字体」才第一次能碰到 `--theme-font-title`
+ *    （叙事正文、角色名、物品名、全部分区标题，共 111 处引用）。
  */
 import AppCard from '../shared/AppCard.vue';
-import { useThemeStore } from '../../stores/theme-store';
+import { useThemeStore, type FontFamilyChoice } from '../../stores/theme-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useSettingsStore } from '../../stores/settings-store';
 
@@ -15,6 +21,11 @@ const s = useSettingsStore().settings;
 function selectTheme(id: string) {
   theme.apply(id);
   ui.toast(`主题：${theme.currentTheme?.nameZh}`, 'success');
+}
+
+/** `<select>` 的值收窄成字体选项 —— 两个下拉框共用，省掉模板里的 `as any` */
+function asFontChoice(e: Event): FontFamilyChoice {
+  return (e.target as HTMLSelectElement).value === 'serif' ? 'serif' : 'sans';
 }
 </script>
 
@@ -46,19 +57,33 @@ function selectTheme(id: string) {
         ><span v-if="t.id === theme.current" class="theme-check">✓</span>
       </button>
     </div>
-    <AppCard padding="md" style="margin-top: 16px"
+    <AppCard padding="md"
       ><div class="form-grid">
         <label class="form-label"
-          >字体风格
-          <p class="form-hint">衬线体更有古典文学感，无衬线体更适合长时间阅读</p>
+          >正文字体
+          <p class="form-hint">
+            界面标签、表单、列表与说明文字。无衬线更适合长时间阅读，也是默认值。
+          </p>
           <select
             class="form-input"
-            :value="theme.fonts"
-            @change="theme.setFonts(($event.target as HTMLSelectElement).value as any)"
+            :value="theme.fontBody"
+            @change="theme.setFontBody(asFontChoice($event))"
           >
             <option value="sans">无衬线 (Noto Sans SC)</option>
             <option value="serif">衬线 (Noto Serif SC)</option>
-            <option value="mixed">混合</option>
+          </select></label
+        ><label class="form-label"
+          >标题字体
+          <p class="form-hint">
+            分区标题、叙事正文、角色名与物品名。衬线体是古籍手稿观感的来源，改成无衬线会让全站失去这层对比。
+          </p>
+          <select
+            class="form-input"
+            :value="theme.fontTitle"
+            @change="theme.setFontTitle(asFontChoice($event))"
+          >
+            <option value="serif">衬线 (Noto Serif SC)</option>
+            <option value="sans">无衬线 (Noto Sans SC)</option>
           </select></label
         ><label class="form-label"
           >字体大小

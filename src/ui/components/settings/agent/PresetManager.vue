@@ -430,7 +430,7 @@ void reactive;
     </div>
 
     <!-- Phase 10e: Story Agent template preview -->
-    <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap">
+    <div class="preset-actions">
       <AppButton variant="ghost" size="sm" @click="showStoryPreview = !showStoryPreview">
         {{ showStoryPreview ? '收起模板预览' : '模板预览' }}
       </AppButton>
@@ -764,5 +764,12 @@ void reactive;
 .preset-empty {
   padding: 24px;
   text-align: center;
+}
+/* 预设卡底部的一排动作按钮 */
+.preset-actions {
+  margin-top: var(--theme-spacing-md);
+  display: flex;
+  gap: var(--theme-spacing-sm);
+  flex-wrap: wrap;
 }
 </style>

@@ -7,6 +7,28 @@ import { installUnlockListener } from './lib/audio-singleton';
 import { installProductionEjsBackend } from '@engine/ejs-backend';
 import { setEngineSettingsProvider } from '@engine/engine-settings';
 import { useSettingsStore } from './stores/settings-store';
+// 字体与图标 —— **自托管**，零外部请求（2026-08-05，替掉 index.html 里的两个 CDN）。
+//
+// 🔴 必须排在所有样式表**之前**：`@font-face` 得先登记，否则首屏那一瞬按兜底字体排版，
+//    字体到位后再回流一次（CJK 字面宽度差很大，那一跳很显眼）。
+//
+// 用的是 **variable** 包（`@fontsource-variable/*`）而不是逐字重的静态包：
+// 静态包 4 个字重 × 2 个中文族约 34MB，变量包一共 10.6MB 就覆盖 100–900 全区间。
+// 两个包都保留了 Google 的 unicode-range 切片（每族 101 个子集），所以浏览器仍然
+// 只下载正文真正用到的那几片，不是一次拉整族。
+//
+// 🔴 字体族名是 `'Noto Sans SC Variable'`（带 Variable 后缀），与静态包不同 ——
+//    `themes/variables.css` 与 `stores/theme-store.ts` 的字体栈必须写这个名字，
+//    写成 `'Noto Sans SC'` 不会报错，只会安静地退回系统字体。
+import '@fontsource-variable/noto-sans-sc';
+import '@fontsource-variable/noto-serif-sc';
+import '@fontsource-variable/cinzel';
+// Font Awesome 只引用到的两套：fa-solid（221 处）+ fa-regular（2 处）。
+// **刻意不引 brands.css** —— 全仓零处使用，省掉 fa-brands-400.woff2。
+import '@fortawesome/fontawesome-free/css/fontawesome.css';
+import '@fortawesome/fontawesome-free/css/solid.css';
+import '@fortawesome/fontawesome-free/css/regular.css';
+
 import './styles/base.css';
 import './styles/transitions.css';
 import './styles/utilities.css';
@@ -33,6 +55,9 @@ app.use(pinia);
 const themeStore = useThemeStore();
 themeStore.init();
 themeStore.initFontSize();
+// 🔴 必须跟着 init() 一起跑：这两格是「设置严格压过主题」的执行点，少了它，
+//    字体退回 [data-theme] 说了算，而设置页的下拉框仍显示用户选的值（design.md §7.4）
+themeStore.initFonts();
 
 // 引擎读设置的注入缝（Q-06）。
 //

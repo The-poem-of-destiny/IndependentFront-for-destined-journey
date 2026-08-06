@@ -109,7 +109,7 @@ async function insertPlaceholder(key: string) {
     </div>
 
     <!-- Section 3: Template Preview -->
-    <div style="margin-top: 12px">
+    <div class="prompt-block">
       <AppButton variant="ghost" size="sm" @click="showTemplatePreview = !showTemplatePreview">
         {{ showTemplatePreview ? '收起预览' : '模板预览' }}
       </AppButton>
@@ -157,5 +157,9 @@ async function insertPlaceholder(key: string) {
 .placeholder-badge:hover {
   transform: translateY(-1px);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+/* 提示词卡内的下一块（占位符徽章 / 预览面板之类） */
+.prompt-block {
+  margin-top: var(--theme-spacing-md);
 }
 </style>

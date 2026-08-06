@@ -40,7 +40,47 @@ import { VERSION } from '@engine/index';
         </div></AppCard
       >
     </div>
-    <p class="text-muted text-sm text-center" style="margin-top: 16px">
+    <!--
+      🔴 字体与图标署名 —— **不是可选装饰，是许可义务**（2026-08-05 自托管起）。
+      Font Awesome 的图标按 **CC BY 4.0** 授权，该协议要求署名，而且是唯一一条
+      要求**界面上可见**的：把许可证文件放进 dist 不足以满足它。
+      三款字体是 SIL OFL 1.1，要求随分发附上许可证全文 —— 那部分靠 /licenses/ 下的
+      静态文件满足，这里的链接是让人找得到它们。
+      删这一段之前先读 THIRD-PARTY-NOTICES.md。
+    -->
+    <AppCard padding="md" class="about-licenses">
+      <h4>字体与图标</h4>
+      <p class="card-desc">
+        本应用自带并分发下列字体，不从任何 CDN 加载。许可证全文随应用一起分发。
+      </p>
+      <div class="about-table">
+        <div class="about-row">
+          <span>Noto Sans SC / Noto Serif SC</span>
+          <span>
+            © Google Inc. ·
+            <a href="/licenses/OFL-Noto-Sans-SC.txt" target="_blank" rel="noopener">OFL 1.1</a>
+          </span>
+        </div>
+        <div class="about-row">
+          <span>Cinzel</span>
+          <span>
+            © The Cinzel Project Authors ·
+            <a href="/licenses/OFL-Cinzel.txt" target="_blank" rel="noopener">OFL 1.1</a>
+          </span>
+        </div>
+        <div class="about-row">
+          <span>Font Awesome Free 6.7.2</span>
+          <span>
+            © Fonticons, Inc. ·
+            <a href="/licenses/Font-Awesome-Free.txt" target="_blank" rel="noopener"
+              >图标 CC BY 4.0</a
+            >
+          </span>
+        </div>
+      </div>
+    </AppCard>
+
+    <p class="about-footer text-muted text-sm text-center">
       《命定之诗》Fated Poem — 多 Agent 协作文字 RPG 引擎<br />© 2026 命定之诗创作组
     </p>
   </section>
@@ -76,5 +116,20 @@ import { VERSION } from '@engine/index';
 }
 .about-row span:first-child {
   color: var(--theme-text-muted);
+}
+.about-footer {
+  margin-top: var(--theme-spacing-lg);
+}
+/* 署名卡：整行宽（不进上面那个 auto-fill 网格），字号比引擎信息小一号 */
+.about-licenses .about-row {
+  font-size: 0.8rem;
+  gap: var(--theme-spacing-md);
+}
+.about-licenses a {
+  color: var(--theme-primary);
+  text-decoration: none;
+}
+.about-licenses a:hover {
+  text-decoration: underline;
 }
 </style>

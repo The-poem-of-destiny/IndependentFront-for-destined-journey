@@ -59,6 +59,10 @@ border: 1px solid color-mix(in srgb, var(--theme-success) 30%, transparent);
 
 **层级约定**：分区大标题（设置页 section h3 等）用 `var(--theme-font-title)` + `1.3-1.4rem`，正文与列表保持无衬线，形成"手稿标题 + 工整正文"的古籍对比。
 
+> 🔴 这两个变量的取值**由用户在设置页决定**（正文字体 / 标题字体两格），主题不参与。
+> 写组件时照旧按语义选变量 —— 叙事与标题用 `--theme-font-title`，UI 标签用
+> `--theme-font-body` —— 不要硬写字体名，也不要假设 title 一定是衬线。详见 §7.4。
+
 ### 2.2 字号层级
 
 | 层级          | 字号                    | 用途                     |
@@ -328,26 +332,83 @@ Modal 打开：`<Transition name="modal">` — fade + scale(0.97→1)
 
 ---
 
-## 7.4 已知问题
+## 7.4 字体：设置严格压过主题（2026-08-05 定案）
 
-### 🐛 切换主题会改变字体，即便字体设置没动（未修复）
+> 本节此前是「已知问题 · 未修复」，记着两个待拍板的方案。**主人已拍板：走方案 A
+> 的严格版，并把三档单选拆成正文 / 标题两格独立设置。**
 
-**现象**：设置页「字体风格」保持不变，但切到某些主题后界面字体从无衬线变成衬线。
+### 规则
 
-**根因链**（`theme-store.ts` + `themes/*.css`）：
+**字体由设置页「外观主题」分区的两格决定，主题一律不参与。**
 
-1. `setFonts()` 只写 `--theme-font-body` 这一个内联变量，**且只在用户主动改下拉框时才执行**；
-2. `fated-poem-fonts` 只被 `setItem` 写入，**全项目没有任何读取点** —— 刷新后不恢复，`fonts` ref 永远重置为 `'sans'`，DOM 上也就没有内联覆盖；
-3. 没有内联覆盖时，`--theme-font-body` 由 `[data-theme="…"]` 块决定，而 `parchment` / `ivory` 把它定义成了 `'Noto Serif SC', serif`（`variables.css` 的 `:root` 是 `'Noto Sans SC', sans-serif`）。
+| 设置项       | 写的变量             | 出厂默认              | 影响面                                           |
+| ------------ | -------------------- | --------------------- | ------------------------------------------------ |
+| **正文字体** | `--theme-font-body`  | 无衬线 (Noto Sans SC) | UI 标签、表单、列表、说明文字                    |
+| **标题字体** | `--theme-font-title` | 衬线 (Noto Serif SC)  | 分区标题、叙事正文、角色名、物品名（111 处引用） |
 
-于是：**换主题 → 正文字体跟着变，而设置页仍显示原来的值**。
+`--theme-font-display`（Cinzel）**不可配置** —— 它是纯装饰拉丁字体，没有中文字形，
+只服务英文副标/章节数字。
 
-**为什么没顺手修**：涉及一个设计决策，需要主人拍板 ——
+### 三条硬约束
 
-- **方案 A**：主题只管颜色，字体变量从 `parchment` / `ivory` / `misty-lilac` 中删除，字体完全由设置控制（符合 §1「主题无关」原则，但三个主题会失去各自的字体性格）；
-- **方案 B**：保留主题字体作为「默认值」，但补上 `initFonts()` 读回 localStorage，并让 `setFonts()` 同时写 `--theme-font-title`，用户一旦设置过就恒定压过主题。
+1. **主题 CSS 里不许出现 `--theme-font-*` 声明。** 唯一允许的地方是
+   `themes/variables.css` 的 `:root`（没有 JS 时的兜底）。闸门：`themes/theme-fonts.test.ts`
+   逐文件扫描，注释里提这个名字可以，写成声明就红。
+2. **`initFonts()` 必须在挂载前跑**（`main.ts`，紧跟 `init()` / `initFontSize()`）。
+   它把两格写成 `<html>` 的**内联变量** —— 内联压得过任何 `[data-theme]` 规则，
+   「设置说了算」就是靠这个强制的。
+3. **默认值也要写内联变量**，不能因为「等于默认」就跳过。跳过等于在默认档上把
+   决定权又交还给主题。
 
-无论选哪个，**`fated-poem-fonts` 写了不读**这一条都是要修的。
+### 修掉的三处（症状全都不在改动处）
+
+1. `setFonts()` 往 `fated-poem-fonts` **写了却没有任何读取点** —— 刷新后 ref 重置、
+   DOM 无内联覆盖，字体退回主题说了算，而下拉框仍显示用户选的值。补 `initFonts()`。
+2. `parchment` / `ivory` 把 `--theme-font-body` 定义成衬线 —— 换主题悄悄改掉正文字体。
+   已从主题 CSS 移除（`misty-lilac` 那两行只是原样重复 `:root`，一并删掉，
+   留着会诱使人以为「主题可以定字体」）。
+3. `mixed` 档写的是 `'Noto Sans SC', 'Noto Serif SC', sans-serif` —— 一条字体栈，
+   有中文字形的字符全部命中第一个，**渲染出来和 `sans` 一模一样**。三个选项实际只有
+   两种结果。拆成两格后这一档自然消失。
+
+### 字体从哪来 —— 自托管，零外部请求（2026-08-05）
+
+2026-08-05 之前，字体与图标从两个 CDN **运行时加载**（`fonts.googleapis.com` 与
+`cdnjs.cloudflare.com`）。现已全部自托管，`index.html` 里**一条外链都不剩**。
+
+| 资源                                       | 包                              | 许可                                 |
+| ------------------------------------------ | ------------------------------- | ------------------------------------ |
+| Noto Sans SC / Noto Serif SC / Cinzel      | `@fontsource-variable/*`        | SIL OFL 1.1                          |
+| Font Awesome Free 6.7.2（solid + regular） | `@fortawesome/fontawesome-free` | 图标 CC BY 4.0 · 字体 OFL · 代码 MIT |
+
+**为什么必须改**：CDN 失败时**没有任何报错** —— `font-display: swap` 安静地落到系统字体，
+图标退化成方框，而设置页仍显示「衬线」。`fonts.googleapis.com` 在中国大陆长期不可达，
+对一款中文游戏来说，这意味着相当一部分玩家从来没见过设计里那套字体。§1「玄墨基调」
+写着「暖色由强调色**与字体**承载」，而那一半此前是挂在一条会静默失效的外链上的。
+
+**用变量字体而不是逐字重静态包**：静态包 4 字重 × 2 中文族约 34MB，变量包一共 10.6MB
+覆盖 100–900 全区间。两者都保留 Google 的 unicode-range 切片（每族 101 个子集），
+浏览器只下载正文用到的那几片。
+
+🔴 **族名带 `Variable` 后缀**（`'Noto Sans SC Variable'`）。写成不带后缀的名字不会报错，
+只会安静地退回系统字体 —— 与它替掉的那个 bug 一模一样的失败形态。闸门：
+`tests/theme-fonts-invariant.test.ts` 逐条断言第一顺位必须带后缀。
+
+🔴 **署名是许可义务，不是装饰**：Font Awesome 图标按 CC BY 4.0 授权，要求署名可见 ——
+写在设置页「关于」分区，删之前先读 `THIRD-PARTY-NOTICES.md`。许可证全文随 `dist` 分发在
+`/licenses/`（`public/licenses/` 被 Vite 逐字复制）。
+
+🔴 **CSS 里那批专有系统字体不能打包**（Monaco / Menlo / Consolas / Courier New /
+Palatino Linotype / KaiTi / STKaiti）。它们只是兜底：本应用从不下载，用户机器上有就用。
+**按名字引用不是分发**，把 `.ttf` 放进仓库才是侵权。这条边界别越过去。
+
+闸门：`tests/no-external-assets.test.ts`（无外链 / 只引用到的 FA 分册 / 许可证与署名齐全）。
+
+### 旧设置怎么迁
+
+旧的三档只影响正文，从没碰过 `--theme-font-title`。所以**照用户实际看到的样子迁**：
+`'serif'` → 正文衬线；`'sans'` / `'mixed'` → 正文无衬线；标题一律取默认衬线。
+迁移只在两个新键都没设过时发生（`theme-store.fonts.test.ts` 钉住）。
 
 ---
 

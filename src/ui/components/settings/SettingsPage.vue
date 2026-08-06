@@ -19,7 +19,7 @@ import { useWorldBookStore } from '../../stores/worldbook-store';
 import AppButton from '../shared/AppButton.vue';
 import AgentSection from './agent/AgentSection.vue';
 import AgentUpdateCenter from './agent/AgentUpdateCenter.vue';
-import { AGENT_LIST } from './agent/agent-list';
+import { AGENT_LIST, resolveAgentSelection } from './agent/agent-list';
 import ApiSection from './ApiSection.vue';
 import WorldBookSection from './WorldBookSection.vue';
 import PlotSection from './PlotSection.vue';
@@ -82,16 +82,40 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'about', label: '关于', icon: 'fa-solid fa-circle-info' },
 ];
 
-/** 子导航当前选中的 Agent（null = 显示「未选择」空态） */
-const activeAgent = ref<string | null>(s.activeAgent);
+/**
+ * 子导航当前选中的 Agent（null = 显示「未选择」空态）。
+ *
+ * 读回来的持久化值先过 `resolveAgentSelection` —— 陈旧 id 的判定是纯函数，
+ * 连同「为什么不能原样用」的理由一起放在 `agent-list.ts`。
+ */
+const activeAgent = ref<string | null>(resolveAgentSelection(s.activeAgent));
+
+/**
+ * 切主分区。
+ *
+ * 🔴 进 Agent 分区时**恢复上次选中的那个**，不要置 null。此前这里对每一个导航项
+ *    都无条件 `activeAgent = null`（含「Agent 配置」自己），于是 `s.activeAgent`
+ *    成了一个**存了却永远读不到**的值：`activeSection` 初值是 'api'，想进 Agent
+ *    分区必须点一下那个按钮，而那一下正好把选择清掉 —— 每次都落在
+ *    「← 请从左侧选择一个 Agent」空态，持久化白做。
+ *
+ *    置 null 当初是为了「强制重挂载，好让草稿的 immediate watch 触发」。那件事
+ *    本来就由 `v-if` 保证：整个 Agent 分区随 `activeSection` 挂载/卸载，进来时
+ *    永远是新挂载，`AgentConfigPanel` 的 `watch(..., { immediate: true })` 照常
+ *    在挂载那一刻用正确的 agentId 触发。所以这里不需要拿一次用户点击去换它。
+ */
+function selectSection(key: Section) {
+  activeSection.value = key;
+  if (key === 'agent') activeAgent.value = resolveAgentSelection(s.activeAgent);
+}
 
 /**
  * 选一个 Agent。
  *
  * 只做**页面骨架**该做的两件事：记住选了谁、把它持久化。草稿载入随
  * `AgentConfigPanel` 的 `watch(agentId, …, { immediate: true })` 走 ——
- * 本组件每次进 Agent 分区都会把 `activeAgent` 置 null（下方主导航），
- * 所以那边永远是新挂载，immediate 会在同一时刻触发。
+ * 分区整块是 `v-if`，进来时永远是新挂载，immediate 会在同一时刻触发；
+ * 在分区内换 Agent 则走 prop 变化，同一条 watch 照常触发。
  */
 function selectAgent(agentId: string) {
   activeAgent.value = agentId;
@@ -132,10 +156,7 @@ onMounted(() => {
           :key="item.key"
           class="nav-item"
           :class="{ 'nav-active': activeSection === item.key }"
-          @click="
-            activeSection = item.key;
-            activeAgent = null;
-          "
+          @click="selectSection(item.key)"
         >
           <span class="nav-icon"><i :class="item.icon" aria-hidden="true"></i></span>
           <span class="nav-label">{{ item.label }}</span>
@@ -188,11 +209,12 @@ onMounted(() => {
 
             <!-- Agent 未选择时的提示 -->
             <section v-if="activeSection === 'agent' && !activeAgent" class="section centered">
-              <div style="text-align: center; padding: 60px 0 24px">
-                <p class="text-muted" style="font-size: 1.1rem">← 请从左侧选择一个 Agent</p>
-                <p class="text-sm text-muted" style="margin-top: 8px">
-                  每个 Agent 需要单独配置模型和世界书上下文
-                </p>
+              <div class="empty-tab">
+                <i class="fa-solid fa-robot empty-tab-icon" aria-hidden="true"></i>
+                请从左侧选择一个 Agent
+                <span class="empty-tab-hint">
+                  每个 Agent 单独配置 API 池、采样参数与可见的世界书；名字旁的角标是它配好了没有
+                </span>
               </div>
               <!-- 提示词更新中心：项目默认更新后，用户存量配置不会自动跟新（fillMissing
                    只填空位），这里给一个一键同步的入口。没有更新时组件自己不渲染。 -->

@@ -40,12 +40,12 @@
       >
     </div>
 
-    <!-- 空状态 -->
-    <div v-if="sortedEntries.length === 0" class="empty-state">
-      <i class="fa-solid fa-book-open empty-icon" aria-hidden="true"></i>
-      <p class="empty-title">暂无条目</p>
-      <p class="empty-desc">点击「新建条目」开始添加世界书内容</p>
-      <button class="add-btn" @click="addEntry">新建条目</button>
+    <!-- 空状态（全站唯一一套 `.empty-tab`，见 styles/utilities.css） -->
+    <div v-if="sortedEntries.length === 0" class="empty-tab">
+      <i class="fa-solid fa-book-open empty-tab-icon" aria-hidden="true"></i>
+      这本世界书还没有条目
+      <span class="empty-tab-hint">条目是注入给 AI 的知识块，按关键词或常驻方式生效</span>
+      <button class="empty-tab-action" @click="addEntry">新建条目</button>
     </div>
 
     <!-- 条目表格 -->
@@ -458,33 +458,9 @@ watch(
   gap: 6px;
 }
 
-/* ===== 空状态 ===== */
-.empty-state {
-  text-align: center;
-  padding: 48px 16px;
-  border: 2px dashed var(--theme-card-border);
-  border-radius: var(--theme-radius-md, 8px);
-}
-
-.empty-icon {
-  font-size: 2.5rem;
-  color: var(--theme-text-muted);
-  margin-bottom: 12px;
-  opacity: 0.5;
-}
-
-.empty-title {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--theme-text-primary);
-  margin: 0 0 4px;
-}
-
-.empty-desc {
-  font-size: 0.85rem;
-  color: var(--theme-text-muted);
-  margin: 0 0 16px;
-}
+/* 空状态的样式**不在这里** —— 全站唯一一份 `.empty-tab` 在 styles/utilities.css
+ * （design.md §5.2）。本组件原先自带一套 `.empty-state` / `.empty-icon` /
+ * `.empty-title` / `.empty-desc`，是设置页三种空态方言里的第三种。 */
 
 /* ===== 条目表格 ===== */
 .entry-table {

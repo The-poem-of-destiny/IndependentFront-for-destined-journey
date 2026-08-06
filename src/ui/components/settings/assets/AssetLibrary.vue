@@ -543,21 +543,8 @@ function onGroupKey(g: AssetGroup, e: KeyboardEvent): void {
 }
 
 /* ═══ 空态 ═══ */
-.empty-tab {
-  padding: var(--theme-spacing-2xl) 0;
-  text-align: center;
-  color: var(--theme-text-muted);
-  font-size: 0.8125rem;
-  font-style: italic;
-  line-height: 1.7;
-}
-.empty-tab::before {
-  content: '—';
-  display: block;
-  margin-bottom: var(--theme-spacing-sm);
-  font-size: 1.25rem;
-  opacity: 0.3;
-}
+/* 空态样式在 styles/utilities.css（全站唯一一份 `.empty-tab`，design.md §5.2）——
+ * 本组件原先自带一份拷贝，三份之间已经开始漂移（padding xl vs 2xl / 多一条 line-height）。 */
 .conv-code {
   font-family: 'Cascadia Code', monospace;
   font-size: 0.75rem;

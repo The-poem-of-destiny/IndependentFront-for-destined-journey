@@ -219,7 +219,7 @@ void ref;
   <AppCard padding="md" class="detail-card">
     <h4>世界书配置</h4>
     <p class="form-hint">启用该 Agent 的世界书上下文注入。选择要关联的世界书。</p>
-    <div class="key-row" style="margin-bottom: 8px">
+    <div class="key-row key-row-stacked">
       <label class="toggle-label">
         <span class="text-sm text-secondary">启用世界书</span>
         <input
@@ -295,5 +295,9 @@ void ref;
   flex: 1;
   font-size: 14px;
   font-weight: 500;
+}
+/* 竖直堆叠的 key-row（上面还有一行同类控件时留一跳） */
+.key-row-stacked {
+  margin-bottom: var(--theme-spacing-sm);
 }
 </style>

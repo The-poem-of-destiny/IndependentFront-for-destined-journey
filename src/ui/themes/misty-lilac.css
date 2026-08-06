@@ -50,8 +50,8 @@
   --theme-currency-silver: #b0a8b8;
   --theme-currency-copper: #c88050;
 
-  --theme-font-title: 'Noto Serif SC', serif;
-  --theme-font-body: 'Noto Sans SC', sans-serif;
+  /* 🔴 字体**不在主题里定义** —— 理由同 parchment.css。本主题这两行原本只是把
+     `:root` 的值原样重复了一遍（无实际效果），但留着会诱使人以为「主题可以定字体」 */
 
   --theme-shadow-sm: 0 1px 3px rgba(100, 60, 130, 0.08);
   --theme-shadow-md: 0 2px 8px rgba(100, 60, 130, 0.12);

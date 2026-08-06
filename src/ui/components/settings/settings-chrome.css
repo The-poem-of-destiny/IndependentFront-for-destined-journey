@@ -19,6 +19,36 @@
  *    重复一份只会让人以为改这里就够了。
  */
 
+/* ═══ 分区纵向节奏 ═══
+ *
+ * 分区里**块与块之间的间距由这一条规则给**，模板里不要再写
+ * `style="margin-top: 16px"`。收编前设置页有 45 处内联间距，而「首卡 16、次卡 12」
+ * 是一条从没写下来的约定 —— 于是有的分区守、有的不守，实际出现过 8 / 12 / 16 / 20 /
+ * 24 / 40 / 60 七种值。design.md §3.1 早就规定间距一律取 `--theme-spacing-*`。
+ *
+ * 🔴 那些内联的 `margin-top: 16px` 里，**第一张卡上的那个从来没生效过**:
+ *    `.section-desc` 的 `margin-bottom: 20px` 与它是相邻兄弟，外边距合并取
+ *    max(20, 16) = 20px。抄了七八遍的一个值，其中一半是死的 —— 这正是内联间距
+ *    最典型的下场：没人能一眼看出哪个数字真的在起作用。
+ */
+.section > .app-card {
+  margin-top: var(--theme-spacing-lg);
+}
+
+/* 卡片里紧跟 `h4` 的那行说明 —— 与 `.section-desc` 是同一件事，只是低一级。
+   此前写成 `class="text-muted text-sm" style="margin-bottom: 12px"`，三处各抄一遍。 */
+.card-desc {
+  margin: 0 0 var(--theme-spacing-md);
+  font-size: 0.85rem;
+  color: var(--theme-text-muted);
+  line-height: 1.55;
+}
+
+/* 卡片内「说明 → 动作按钮」之间那一跳（存档数据分区有四处一模一样的 8px） */
+.card-action {
+  margin-top: var(--theme-spacing-sm);
+}
+
 /* ═══ 分区标题与描述 ═══ */
 .section > h3 {
   font-family: var(--theme-font-title);
