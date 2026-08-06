@@ -56,6 +56,31 @@ const POSITION_POLL_MS = 250;
 /** 内置曲库清单路径 (§5)；不存在时静默跳过 */
 const MANIFEST_URL = '/audio/manifest.json';
 
+/**
+ * 上报内置 manifest fetch 结果给 ContentProvider（波 1 T2 / §5.5 census）。
+ *
+ * 🔴 **行为兜底不变**：失败只进 contentStatus，不阻塞、不抛。Pinia 尚未挂载时
+ * （单测里）静默跳过——content-store 是 store，需要 activePinia 才能读。
+ * 用动态 import 避开 audio-store → content-store 的循环依赖。
+ */
+async function reportManifestFetch(
+  source: string,
+  status: number | undefined,
+  error?: string,
+): Promise<void> {
+  try {
+    const { useContentStore } = await import('./content-store');
+    useContentStore().reportContentFetch({
+      source,
+      status,
+      ok: error === undefined && typeof status === 'number' && status >= 200 && status < 300,
+      error,
+    });
+  } catch {
+    /* Pinia 未挂载（单测环境）→ 静默；manifest 兜底行为不变 */
+  }
+}
+
 /** manifest 条目格式: { id, name, kind, file, tags, credit, license } */
 interface AudioManifestEntry {
   id: string;
@@ -167,9 +192,16 @@ export const useAudioStore = defineStore('audio', () => {
   async function loadManifest(): Promise<void> {
     try {
       const res = await fetch(MANIFEST_URL);
-      if (!res.ok) return;
+      if (!res.ok) {
+        // 内容-引擎分离（波 1 T2 / §5.5 census）：上报内容态，不阻塞启动。
+        void reportManifestFetch('audio-store', res.status);
+        return;
+      }
       const raw = (await res.json()) as AudioManifestEntry[];
-      if (!Array.isArray(raw)) return;
+      if (!Array.isArray(raw)) {
+        void reportManifestFetch('audio-store', undefined, 'manifest 非数组');
+        return;
+      }
       const now = Date.now();
       builtinTracks.value = raw
         .filter((e) => e && typeof e.id === 'string' && typeof e.file === 'string')
@@ -184,8 +216,14 @@ export const useAudioStore = defineStore('audio', () => {
           createdAt: now,
           updatedAt: now,
         }));
-    } catch {
+      void reportManifestFetch('audio-store', res.status);
+    } catch (err) {
       // manifest 尚未存在（波次 5c 交付）或 fetch 不可用 → 静默
+      void reportManifestFetch(
+        'audio-store',
+        undefined,
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 

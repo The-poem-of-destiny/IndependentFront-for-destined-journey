@@ -15,8 +15,7 @@
 
 import type { AgentPreset } from './types';
 
-/** 预设文件路径前缀 */
-const PRESET_BASE = '/data/presets/';
+// 🪦 D28（波 1 T2）: `PRESET_BASE = '/data/presets/'` 常量已删（死路径，见文件尾注释）。
 
 // ═══════════════════════════════════════════════════════════
 // Phase 10: ST 占位符预处理
@@ -163,42 +162,13 @@ export function hasSTMacros(content: string): boolean {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 原有加载逻辑
+// 同步版加载（Vite import.meta.glob 预加载对象）
 // ═══════════════════════════════════════════════════════════
 
-/**
- * 从 data/presets/ 加载所有预设
- */
-export async function loadPresets(): Promise<AgentPreset[]> {
-  // 预设索引从服务器端点获取，或硬编码预设文件名列表
-  // 当前通过 fetch 逐个加载
-  const presetIds = await fetchPresetIds();
-  const presets: AgentPreset[] = [];
-  for (const id of presetIds) {
-    try {
-      const response = await fetch(`${PRESET_BASE}${id}.json`);
-      if (!response.ok) continue;
-      const preset = (await response.json()) as AgentPreset;
-      presets.push(preset);
-    } catch {
-      // 加载失败，跳过
-    }
-  }
-  return presets;
-}
-
-/** 获取预设 ID 列表 */
-async function fetchPresetIds(): Promise<string[]> {
-  try {
-    const response = await fetch(`${PRESET_BASE}_index.json`);
-    if (response.ok) {
-      return (await response.json()) as string[];
-    }
-  } catch {
-    // 无索引文件
-  }
-  return [];
-}
+// 🪦 D28（波 1 T2）: `PRESET_BASE` 常量 + 异步 `loadPresets()` + `fetchPresetIds()` 已删。
+// 此前它们从 `/data/presets/` fetch——该目录在生产构建里不存在（§1.1），整条路径是死的，
+// 零生产引用。预设真源是 `data/defaults/agent-config.json` 内嵌的 preset + Dexie `presets` 表。
+// `loadPresetsSync`（从预加载对象取）保留——它是纯函数，被 preset-loader.test.ts 覆盖。
 
 /** 同步版：从预加载数据获取预设 */
 export function loadPresetsSync(preloaded: Record<string, AgentPreset>): AgentPreset[] {

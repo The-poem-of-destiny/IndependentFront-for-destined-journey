@@ -424,13 +424,21 @@ export const useSettingsStore = defineStore('settings', () => {
 
   /** 从 data/defaults/agent-config.json 加载项目默认配置 */
   async function loadAgentProjectDefaults() {
+    // 内容-引擎分离（波 1 T2 / D16）：经 ContentProvider 收口。
+    // 🔴 `loadProjectDefaults()` 内部 `await contentReadyPromise`——保证 T7 的 pack 叠加层
+    //    有机会在 fetch 落地前灌注。本波（T2）ready 立即 resolve，等价于直接 fetch。
+    //    装载失败上报 contentStatus（不阻塞启动），这里照旧走空骨架兜底。
+    const { useContentStore } = await import('./content-store');
+    const config = (await useContentStore().loadProjectDefaults()) as {
+      version?: number;
+      agents?: Record<string, AgentDefaultEntry>;
+    };
     try {
-      const res = await fetch('/data/defaults/agent-config.json');
-      if (res.ok) {
-        projectAgentDefaults.value = await res.json();
+      if (config && config.agents) {
+        projectAgentDefaults.value = config as AgentProjectDefaults;
       }
     } catch {
-      // 文件不存在或 fetch 失败，使用空骨架
+      // 形状不符，使用空骨架
     }
     // 对未被用户配置过的 agent 补上项目默认值
     const pd = projectAgentDefaults.value?.agents;
