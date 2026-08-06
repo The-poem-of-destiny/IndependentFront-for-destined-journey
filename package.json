@@ -4,6 +4,16 @@
   "description": "IndependentFront for Destined Journey — 命定之诗独立前端，多 Agent 文字 RPG 引擎",
   "main": "dist/sillytavern/index.js",
   "type": "module",
+  "private": true,
+  "files": [
+    "dist",
+    "dist-ui",
+    "public",
+    "src",
+    "server",
+    "scripts",
+    "docs"
+  ],
   "scripts": {
     "dev": "dev.bat",
     "build": "vite build",
