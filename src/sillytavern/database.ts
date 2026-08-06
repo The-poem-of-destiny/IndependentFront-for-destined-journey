@@ -39,6 +39,8 @@ import type {
   ImagePreset,
 } from './types-image';
 import type { CreatePreset } from '../ui/stores/create-store';
+import type { ContentPack } from './types-content';
+import { hashWorldBook } from './content-source';
 
 /** 捏人预设记录 (DB 存储格式) */
 export interface CreatePresetRecord {
@@ -47,6 +49,31 @@ export interface CreatePresetRecord {
   createdAt: number;
   updatedAt: number;
   data: CreatePreset;
+}
+
+/**
+ * contentPacks 表行形状（D18）。
+ *
+ * 🔴 **payload 是整包 ContentPack**：恢复默认 / 卸载 / 升级 diff 都不需要重新拿文件 ——
+ *    所有「装包时发生过什么」都从这一份还原。`sectionHashes` 与 `notes` 直接复用
+ *    ContentPack 的同名字段（构建器盖章 / 安装处置记录），为查询便利提升到一等字段。
+ *
+ * 🔴 **contentPacks 不进 FullBackup**（D18）：payload 进备份 = 每份日常备份都是可自由转发的
+ *    完整内容包 + 体积翻倍。备份/恢复一致性由 `reconcilePackState()` 解决。
+ */
+export interface ContentPackRecord {
+  /** 主键 = `payload.packId`（与 payload 同源，提升为索引便于直接查询） */
+  packId: string;
+  /** = `payload.packVersion`（semver，驱动升级判定 D40） */
+  packVersion: string;
+  /** 安装时间戳（epoch ms）；本次 put 的时间，非 payload.exportedAt */
+  installedAt: number;
+  /** 整包内容（ContentPack 原样入库） */
+  payload: ContentPack;
+  /** = `payload.sectionHashes`（D40 升级 diff 展示与快速比对用；逐书基线从 payload 现算） */
+  sectionHashes?: Readonly<Record<string, string>>;
+  /** 安装处置记录（WorkshopNote[]，由执行器在安装时产出） */
+  notes?: unknown[];
 }
 
 const DB_NAME = 'SillyTavernWebDB';
@@ -59,7 +86,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
  * 升版时这两处一起改。
  */
-const DB_VERSION = 19;
+const DB_VERSION = 20;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -189,6 +216,11 @@ class AppDatabase extends Dexie {
   // v19 (D56): 角色外貌的**会话副本** —— 随存档隔离，删存档连带删。
   // 基线在 imagePresets.appearance（全局、干净、用户可编辑），这一份由出图 AI 自动写。
   characterAppearances!: Table<CharacterSessionAppearance>;
+
+  // v20 (内容-引擎分离波 1 / D18): 内容包安装持久化。
+  //   payload = 整包 ContentPack；恢复默认/卸载/升级 diff 都从这里还原，无需重拿文件。
+  //   🔴 **不进 FullBackup**（payload 进备份 = 每份备份都是可转发的完整内容包）。
+  contentPacks!: Table<ContentPackRecord>;
 
   constructor() {
     super(DB_NAME);
@@ -538,6 +570,16 @@ class AppDatabase extends Dexie {
     // v19 (D56): 角色外貌会话副本。`saveId` 单独建索引 —— 「整档重置」与
     // `deleteSaveSlot` 都是按存档整批删，没有它就得全表扫。
     this.version(19).stores({ characterAppearances: 'key, saveId, name' });
+
+    // v20 (内容-引擎分离波 1 / D18): contentPacks 表 —— 安装持久化的唯一真源。
+    //
+    // 🔴 payload 是整包 ContentPack：恢复默认 / 卸载 / 升级 diff 不需要重新拿文件。
+    //    🔴 **不进 FullBackup**（D18）：payload 进备份 = 每份日常备份都是可自由转发的
+    //       完整内容包 + 体积翻倍；备份/恢复一致性由 `reconcilePackState()` 解决。
+    //
+    // 索引取舍：只建 `packId` 主键。安装/卸载/升级/对账全部按 packId 直查，无第二索引需求。
+    // 与 v19 同款用对象字面量（仅声明本版新增表，旧表跨版继承，Dexie 4 累加语义）。
+    this.version(20).stores({ contentPacks: 'packId' });
   }
 }
 
@@ -622,6 +664,12 @@ export interface FullBackup {
   // 而存档的其余部分完好，于是症状看起来像「AI 忘了她换过装」而不是「备份没收这张表」。
   // 纯文本 patch，体积与 imagePresets 同量级。
   characterAppearances: CharacterSessionAppearance[];
+
+  // 🔴 **contentPacks 不在这个列表里，也不会被加进来**（D18 / §5.7）：
+  //    payload 进备份 = 每份日常备份都是可自由转发的完整内容包 + 体积翻倍。
+  //    备份/恢复一致性由 `reconcilePackState()` 解决 —— 它挂在 `importAllData` 收尾，
+  //    逐 pack 拥有项比对（payload 现算 hash vs 恢复行 hash），失配只报 needs_attention、
+  //    不自动改任何一边。
 }
 
 export async function exportAllData(): Promise<FullBackup> {
@@ -737,7 +785,7 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
   }
 }
 
-export async function importAllData(backup: FullBackup): Promise<void> {
+export async function importAllData(backup: FullBackup): Promise<ReconcileResult> {
   // 🔒 P0-04: 先验证 —— 不合法的备份（空对象/残缺结构）直接拒绝，不进入 clear 流程
   validateBackupOrThrow(backup);
 
@@ -757,6 +805,13 @@ export async function importAllData(backup: FullBackup): Promise<void> {
     }
     throw err;
   }
+
+  // 内容-引擎分离波 1 / D18 / §5.7：恢复完成后跑对账。
+  // contentPacks 不进备份，所以恢复可能让 pack 拥有的 worldBooks/presets 行与 payload
+  // 失配（旧备份清了表 / 手编备份删了字段）。对账只读 + 报告，不自动改任何一边；
+  // 唯一的写动作是 `activePresetId` 悬空时从 payload 重导 story 预设（D18 明确分支）。
+  // 🔴 reconcile 自身绝不再调 importAllData（会递归），也不读 backup（只看现状 vs payload）。
+  return reconcilePackState();
 }
 
 /** 纯导入内核（无验证、无预备份）— importAllData 与失败回滚共用 */
@@ -918,6 +973,157 @@ async function doImportAllData(
       }
     }
   });
+}
+
+// ═══════════════════════════════════════════════════════════
+// 内容包恢复对账（D18 / §5.7）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 一条 pack 拥有项的失配记录（reconcilePackState 产出）。
+ *
+ * `kind` 区分两类失配，UI 据此给不同的措辞与二选动作（D18）：
+ * - `'missing'`：恢复后该拥有项不见了（旧备份清了表 / 手编备份删了字段）。
+ *   用户二选：从本地 payload 重放 / 卸载回占位。
+ * - `'replaced'`：拥有项还在但内容与 payload 不符（用户编辑过 / 被别处覆盖）。
+ *   同样二选，但措辞要承认「这是你改过的，覆盖会丢你的编辑」。
+ */
+export interface ReconcileMismatch {
+  packId: string;
+  /** 'worldBooks' | 'presets' —— 对账范围（D18 限定这两节） */
+  section: 'worldBooks' | 'presets';
+  /** 该项的逻辑键（世界书 id / 预设 id） */
+  key: string;
+  /** 该项的人类可读名（UI 展示用） */
+  name: string;
+  kind: 'missing' | 'replaced';
+}
+
+/**
+ * 恢复后对账结果（reconcilePackState 产出）。
+ *
+ * 🔴 `needsAttention` 为空且 `reimportedPresetId === null` → 一切正常，调用方无需提示。
+ *    有任意一项 → 调用方（content-store / DataSection）应把 `contentStatus` 置为
+ *    `'needs_attention'` 并展示项列表 + 二选动作（D18：**不自动做任何一边**）。
+ */
+export interface ReconcileResult {
+  /** 全部 pack 合计的失配项（跨 pack 跨 section）；空数组 = 无失配 */
+  mismatches: ReconcileMismatch[];
+  /**
+   * activePresetId 悬空时从 payload 重导的 story 预设 id（D18 明确分支）；
+   * `null` = 未触发重导（activePresetId 仍指向存在的预设，或没有任何 pack / pack 无 presets）。
+   *
+   * 🔴 这是 reconcile 唯一的写动作：旧备份清了 presets 表会让 activePresetId 指向不存在的
+   *    预设；从 contentPacks.payload 把 story 预设重新 put 进 presets 表。
+   *    重导后 activePresetId 的真源（settings-store localStorage）由调用方另行同步，
+   *    本函数只负责 DB 层 presets 行存在。
+   */
+  reimportedPresetId: string | null;
+}
+
+/**
+ * 恢复后内容包状态对账（D18 / §5.7）。
+ *
+ * 🔴 **对账范围限定 `{worldBooks, presets}`**（D18）：其余分节的真源就是 contentPacks.payload
+ *    本身，恢复动不到它们（FullBackup 不收 contentPacks），无从失配。
+ *
+ * 🔴 **逐 pack 拥有项比对**（D18 hash 分工）：对每本 pack 拥有的世界书，从 payload 现算
+ *    `hashWorldBook` 作为基线，与恢复行 hash 比对；预设走 id 存在性（预设无逐条 hash 基线，
+ *    D18 只要求「id 在不在」）。用户自建书 / 工坊书不在任何 pack 的拥有域内，不参与比对。
+ *
+ * 🔴 **只读 + 报告，不自动改任何一边**（D18「不自动做任何一边」）：失配只产出
+ *    `ReconcileMismatch`，调用方决定本地 payload 重放还是卸载回占位。
+ *
+ * 🔴 唯一的写动作：`activePresetId` 悬空 → 从 payload 重导 story 预设（D18 明确分支）。
+ *
+ * @returns 对账结果；`mismatches` 为空且 `reimportedPresetId === null` 即一切正常
+ */
+export async function reconcilePackState(): Promise<ReconcileResult> {
+  const db = getDatabase();
+  const packs = await db.contentPacks.toArray();
+
+  // 无 pack 安装 → 无从对账（也无需重导预设）
+  if (packs.length === 0) {
+    return { mismatches: [], reimportedPresetId: null };
+  }
+
+  const mismatches: ReconcileMismatch[] = [];
+
+  // ── 1. worldBooks 逐 pack 逐书比对（hash 从 payload 现算） ──
+  const allBooks = await db.worldBooks.toArray();
+  const booksById = new Map<string, WorldBook>();
+  for (const b of allBooks) booksById.set(b.id, b);
+
+  for (const pack of packs) {
+    const packBooks = pack.payload.worldBooks;
+    if (!packBooks || packBooks.length === 0) continue;
+    for (const packBook of packBooks) {
+      const current = booksById.get(packBook.id);
+      const packHash = hashWorldBook(packBook);
+      if (!current) {
+        mismatches.push({
+          packId: pack.packId,
+          section: 'worldBooks',
+          key: packBook.id,
+          name: packBook.name,
+          kind: 'missing',
+        });
+      } else if (hashWorldBook(current) !== packHash) {
+        mismatches.push({
+          packId: pack.packId,
+          section: 'worldBooks',
+          key: packBook.id,
+          name: packBook.name,
+          kind: 'replaced',
+        });
+      }
+    }
+  }
+
+  // ── 2. presets 逐 pack 逐条 id 存在性比对（D18：预设只判 id 在不在） ──
+  const allPresets = await db.presets.toArray();
+  const presetIds = new Set(allPresets.map((p) => p.id));
+
+  for (const pack of packs) {
+    const packPresets = pack.payload.presets;
+    if (!packPresets || packPresets.length === 0) continue;
+    for (const packPreset of packPresets) {
+      if (!presetIds.has(packPreset.id)) {
+        mismatches.push({
+          packId: pack.packId,
+          section: 'presets',
+          key: packPreset.id,
+          name: packPreset.name,
+          kind: 'missing',
+        });
+      }
+      // 预设无逐条 hash 基线（D18），'replaced' 不适用 —— 用户编辑预设是合法的，
+      // 不会被对账标记（pack 升级时的 diff 由 D40 sectionHashes 另走路径）。
+    }
+  }
+
+  // ── 3. activePresetId 悬空 → 从 payload 重导 story 预设（D18 明确分支） ──
+  // activePresetId 的真源在 settings-store (localStorage)，本函数读不到它；
+  // 这里只保证「DB 层 presets 表里有至少一条 pack 预设可供指向」。调用方据
+  // reimportedPresetId 自行同步 activePresetId（若它原本悬空）。
+  let reimportedPresetId: string | null = null;
+  if (allPresets.length === 0) {
+    // presets 表被旧备份清空 → 从第一个含 presets 的 pack 重导第一条预设。
+    // 🔴 只重导一条（story 预设通常一条；多 pack 各自预设的完整重放走 needs_attention
+    //    二选路径，不在这里自动全量重放——那等于「恢复时静默把所有 pack 预设塞回去」，
+    //    违反 D18「不自动做任何一边」）。
+    for (const pack of packs) {
+      const packPresets = pack.payload.presets;
+      if (packPresets && packPresets.length > 0) {
+        const seed = packPresets[0];
+        await db.presets.put({ ...seed });
+        reimportedPresetId = seed.id;
+        break;
+      }
+    }
+  }
+
+  return { mismatches, reimportedPresetId };
 }
 
 // ========== v1-v3 CRUD (unchanged) ==========

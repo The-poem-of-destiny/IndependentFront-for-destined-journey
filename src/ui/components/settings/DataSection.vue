@@ -150,6 +150,16 @@ async function clearAll() {
       导出；「音频」分区的音乐文件夹本就把文件留在磁盘上。
       <span class="data-note-em">「清除所有数据」会一并删除这两个库。</span>
     </p>
+    <!--
+    内容-引擎分离波 1 / D18：存档备份同样不含**内容包本体**（contentPacks.payload）——
+    payload 进备份 = 每份日常备份都是可自由转发的完整内容包 + 体积翻倍。恢复后引擎会自动
+    对账（reconcilePackState）：内容包拥有的世界书 / 预设若在恢复中缺失或被替换，会在内容
+    状态横幅提示需要处理，给你「本地重放 / 卸载回占位」二选，不会自动改你的东西。
+  -->
+    <p class="data-note">
+      存档导出<strong>不含内容包本体</strong> ——
+      恢复后若发现内容包拥有的世界书或预设与本地不一致，会在内容状态处提示，可一键从本地内容包重放。
+    </p>
     <div class="data-actions">
       <AppCard padding="md"
         ><h4>导出数据</h4>

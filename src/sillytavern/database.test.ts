@@ -94,11 +94,18 @@ import type {
   AudioHandleRecord,
   AssetMetaRecord,
   WorkshopProject,
+  WorldBook,
 } from './types';
 import { DEFAULT_SETTINGS } from './types';
 import Dexie from 'dexie';
 import { createDefaultCharacterState } from './types';
-import { createDefaultSaveProfile, saveSaveProfile, savePlotOutline } from './database';
+import {
+  createDefaultSaveProfile,
+  saveSaveProfile,
+  savePlotOutline,
+  reconcilePackState,
+} from './database';
+import type { ContentPackRecord } from './database';
 import { createStateManager } from './state-manager';
 
 // ========== Helpers ==========
@@ -817,7 +824,8 @@ describe('exportAllData / importAllData', () => {
     // 🔴 跟随 DB_VERSION，而 DB_VERSION 必须等于最后一个 `this.version(n)` ——
     // 这条断言曾经写着 17 而 schema 已经到 19（v18 删地点预设行 / v19 角色外貌会话副本），
     // 于是它把漂移**固定**下来而不是拦下来。升版时 database.ts 与这里一起改。
-    expect(backup.version).toBe(19);
+    // v20：内容-引擎分离波 1 / D18 —— contentPacks 表（安装持久化，不进 FullBackup）。
+    expect(backup.version).toBe(20);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -838,6 +846,9 @@ describe('exportAllData / importAllData', () => {
     expect('sceneImageBlobs' in backup).toBe(false);
     // v19 —— 角色外貌会话副本与 sceneImages 同为「每存档」数据，必须同进同出
     expect(Array.isArray(backup.characterAppearances)).toBe(true);
+    // v20 —— contentPacks 刻意不进 FullBackup（D18 / §5.7）：payload 进备份 = 每份日常备份
+    // 都成了可自由转发的完整内容包 + 体积翻倍。备份/恢复一致性由 reconcilePackState() 解决。
+    expect('contentPacks' in backup).toBe(false);
   });
 
   /**
@@ -985,7 +996,7 @@ describe('exportAllData / importAllData', () => {
       legacyBackup.version = 13;
       expect('worldBooks' in legacyBackup).toBe(false);
 
-      await expect(importAllData(legacyBackup)).resolves.toBeUndefined();
+      await expect(importAllData(legacyBackup)).resolves.toBeDefined();
 
       const db = getDatabase();
       expect(await db.worldBooks.count()).toBe(2);
@@ -1025,7 +1036,7 @@ describe('exportAllData / importAllData', () => {
       legacyBackup.version = 13;
       expect('workshopProjects' in legacyBackup).toBe(false);
 
-      await expect(importAllData(legacyBackup)).resolves.toBeUndefined();
+      await expect(importAllData(legacyBackup)).resolves.toBeDefined();
 
       const db = getDatabase();
       expect(await db.workshopProjects.count()).toBe(2);
@@ -1064,7 +1075,7 @@ describe('exportAllData / importAllData', () => {
       delete legacyBackup.workshopProjects;
       legacyBackup.version = 13;
 
-      await expect(importAllData(legacyBackup)).resolves.toBeUndefined();
+      await expect(importAllData(legacyBackup)).resolves.toBeDefined();
 
       const db = getDatabase();
       expect(await db.worldBooks.count()).toBe(2);
@@ -1111,7 +1122,7 @@ describe('exportAllData / importAllData', () => {
       legacyBackup.version = 14;
       expect('beautifierRules' in legacyBackup).toBe(false);
 
-      await expect(importAllData(legacyBackup)).resolves.toBeUndefined();
+      await expect(importAllData(legacyBackup)).resolves.toBeDefined();
 
       const db = getDatabase();
       expect(await db.beautifierRules.count()).toBe(2);
@@ -1198,7 +1209,7 @@ describe('exportAllData / importAllData', () => {
       legacyBackup.version = 14;
       expect('presets' in legacyBackup).toBe(false);
 
-      await expect(importAllData(legacyBackup)).resolves.toBeUndefined();
+      await expect(importAllData(legacyBackup)).resolves.toBeDefined();
 
       const db = getDatabase();
       expect(await db.presets.count()).toBe(2);
@@ -1264,7 +1275,7 @@ describe('exportAllData / importAllData', () => {
       delete legacyBackup.regexStorage;
       legacyBackup.version = 15;
 
-      await expect(importAllData(legacyBackup)).resolves.toBeUndefined();
+      await expect(importAllData(legacyBackup)).resolves.toBeDefined();
 
       const rows = await getDatabase().regexStorage.toArray();
       expect(rows).toHaveLength(2);
@@ -1354,6 +1365,188 @@ describe('exportAllData / importAllData', () => {
     const proj = await db2.workshopProjects.get('proj_1');
     expect(proj).toBeDefined();
     expect(proj!.uidRange).toEqual({ start: 900000, end: 900999 });
+  });
+});
+
+// ========== v20 contentPacks 表 + 恢复对账（D18 / §5.7） ==========
+
+describe('contentPacks 表 (v20 / D18)', () => {
+  it('contentPacks 表存在且主键为 packId', async () => {
+    const db = getDatabase();
+    // 表存在（Dexie 暴露 .contentPacks Table）
+    expect(db.contentPacks).toBeDefined();
+    // 主键索引 = packId（schema 写的是 'packId'）
+    const schema = db.contentPacks.schema;
+    expect(schema?.primKey.keyPath).toBe('packId');
+  });
+
+  it('FullBackup 往返不碰 contentPacks（payload 不进备份）', async () => {
+    const db = getDatabase();
+    const rec: ContentPackRecord = {
+      packId: 'pack_test_rt',
+      packVersion: '1.0.0',
+      installedAt: 1_700_000_000_000,
+      payload: {
+        formatVersion: 1,
+        packId: 'pack_test_rt',
+        packVersion: '1.0.0',
+      } as any,
+    };
+    await db.contentPacks.put(rec);
+
+    const backup = await exportAllData();
+    // 备份里没有 contentPacks 字段（D18）
+    expect('contentPacks' in backup).toBe(false);
+
+    // 清表后恢复，contentPacks **不应被恢复**（备份从未收它）
+    await db.contentPacks.clear();
+    expect(await db.contentPacks.count()).toBe(0);
+    await importAllData(backup);
+    expect(await db.contentPacks.count()).toBe(0);
+  });
+});
+
+describe('reconcilePackState (D18 / §5.7)', () => {
+  /** 造一本最小世界书（满足 hashWorldBook 所需字段） */
+  function makeBook(id: string, content: string): WorldBook {
+    return {
+      id,
+      name: id,
+      partition: 'lorebook' as any,
+      entries: [
+        {
+          uid: 1,
+          name: '条目',
+          content,
+          enabled: true,
+          key: [],
+          keysecondary: [],
+          selectiveLogic: 0,
+          order: 100,
+          position: 0,
+        },
+      ],
+    };
+  }
+
+  /** 造一个最小 pack 行（payload 含一本世界书） */
+  function makePackRecord(packBookId: string, content: string): ContentPackRecord {
+    return {
+      packId: 'pack_recon',
+      packVersion: '1.0.0',
+      installedAt: 1_700_000_000_000,
+      payload: {
+        formatVersion: 1,
+        packId: 'pack_recon',
+        packVersion: '1.0.0',
+        worldBooks: [makeBook(packBookId, content)],
+      } as any,
+    };
+  }
+
+  it('无 pack 安装时返回空结果', async () => {
+    const result = await reconcilePackState();
+    expect(result.mismatches).toEqual([]);
+    expect(result.reimportedPresetId).toBeNull();
+  });
+
+  it('pack 拥有项齐全且 hash 一致 → 无失配', async () => {
+    const db = getDatabase();
+    const book = makeBook('wb_pack_ok', '原始正文');
+    await db.contentPacks.put(makePackRecord('wb_pack_ok', '原始正文'));
+    await db.worldBooks.put(book);
+
+    const result = await reconcilePackState();
+    expect(result.mismatches).toEqual([]);
+    expect(result.reimportedPresetId).toBeNull();
+  });
+
+  it('pack 拥有项缺失 → needs_attention (missing)', async () => {
+    const db = getDatabase();
+    // pack 声明拥有 wb_pack_miss，但 worldBooks 表里没有它
+    await db.contentPacks.put(makePackRecord('wb_pack_miss', '原始正文'));
+    // 不 put 对应的世界书行
+
+    const result = await reconcilePackState();
+    expect(result.mismatches).toHaveLength(1);
+    expect(result.mismatches[0]).toMatchObject({
+      packId: 'pack_recon',
+      section: 'worldBooks',
+      key: 'wb_pack_miss',
+      kind: 'missing',
+    });
+  });
+
+  it('pack 拥有项被替换（用户编辑过）→ needs_attention (replaced)', async () => {
+    const db = getDatabase();
+    await db.contentPacks.put(makePackRecord('wb_pack_edit', '原始正文'));
+    // 同 id 但正文不同 → hash 不符
+    await db.worldBooks.put(makeBook('wb_pack_edit', '用户改过的正文'));
+
+    const result = await reconcilePackState();
+    expect(result.mismatches).toHaveLength(1);
+    expect(result.mismatches[0]).toMatchObject({
+      packId: 'pack_recon',
+      section: 'worldBooks',
+      key: 'wb_pack_edit',
+      kind: 'replaced',
+    });
+  });
+
+  it('用户自建书 / 工坊书不在比对域内（不报失配）', async () => {
+    const db = getDatabase();
+    await db.contentPacks.put(makePackRecord('wb_pack_user', '原始正文'));
+    await db.worldBooks.put(makeBook('wb_pack_user', '原始正文'));
+    // 用户自建书 —— pack 不声明拥有它，reconcile 不该碰它
+    await db.worldBooks.put(makeBook('wb_user_only', '用户自己的书'));
+
+    const result = await reconcilePackState();
+    expect(result.mismatches).toEqual([]);
+  });
+
+  it('presets 表为空 + pack 含 presets → 重导第一条预设', async () => {
+    const db = getDatabase();
+    // pack 声明拥有一条预设，但 presets 表是空的（旧备份清了表）
+    await db.contentPacks.clear();
+    await db.presets.clear();
+    const packWithPreset: ContentPackRecord = {
+      packId: 'pack_preset',
+      packVersion: '1.0.0',
+      installedAt: 1_700_000_000_000,
+      payload: {
+        formatVersion: 1,
+        packId: 'pack_preset',
+        packVersion: '1.0.0',
+        presets: [
+          {
+            id: 'preset_pack_story',
+            name: '故事预设',
+            settings: {},
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      } as any,
+    };
+    await db.contentPacks.put(packWithPreset);
+
+    const result = await reconcilePackState();
+    expect(result.reimportedPresetId).toBe('preset_pack_story');
+    // 重导后 presets 表里有了那条
+    expect(await db.presets.get('preset_pack_story')).toBeDefined();
+  });
+
+  it('importAllData 收尾挂 reconcile（返回对账结果）', async () => {
+    const db = getDatabase();
+    // 准备：装一个 pack，其拥有项在恢复后会缺失
+    await db.contentPacks.put(makePackRecord('wb_pack_import', '原始正文'));
+    // 不放对应世界书行 → 恢复后应报 missing
+
+    const backup = await exportAllData();
+    // importAllData 现在返回 ReconcileResult
+    const result = await importAllData(backup);
+    expect(result.mismatches.length).toBeGreaterThanOrEqual(1);
+    expect(result.mismatches.some((m) => m.key === 'wb_pack_import')).toBe(true);
   });
 });
 
@@ -2051,10 +2244,11 @@ describe('Asset CRUD (v13)', () => {
     // ---- 以当前版 (AppDatabase) 打开：触发升版 ----
     await initializeDatabase();
     const db = getDatabase();
-    expect(db.verno).toBe(19); // v18 = D59 删地点预设；v19 = D56 角色外貌会话副本
+    expect(db.verno).toBe(20); // v18=D59 删地点预设; v19=D56 角色外貌会话副本; v20=D18 contentPacks 表
 
     // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
-    //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56），一个不少
+    //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56）
+    //           + contentPacks 一张（v20/D18），一个不少
     //（误写 `表名: null` 或漏声明会在这里炸 —— 尤其 lorebooks/settings 两张死表按 D3 必须保留）
     const EXPECTED_TABLES = [
       ...Object.keys(V12_STORES),
@@ -2068,6 +2262,7 @@ describe('Asset CRUD (v13)', () => {
       'sceneImageBlobs',
       'imagePresets',
       'characterAppearances',
+      'contentPacks',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 
