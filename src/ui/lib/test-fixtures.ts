@@ -2,6 +2,10 @@
  * ChatFlow 测试夹具 — 覆盖全部 7 种系统事件卡片 + user/assistant 消息流
  *
  * 使用方式: 在浏览器控制台调用 window.__injectChatFlowFixtures__()
+ *
+ * 🔴 **这里的叙事一律是通用奇幻占位内容**（内容-引擎分离 D27）：人名/地名/势力全部是本文件
+ * 自造的中性词，不引用任何具体世界观。夹具演示的是**卡片形状与消息流**，不是某个世界——
+ * 往里塞真实世界观的专名，等于把内容偷渡回引擎仓。
  */
 
 import type { ChatMessage } from '@engine/types';
@@ -82,14 +86,14 @@ function makeCharGenOutputSimple(): CharGenOutput {
     name: '铁锤·灰炉',
     race: '矮人',
     gender: '男',
-    faction: '索伦蒂斯王国',
+    faction: '铁山王国',
     tier: 2,
     level: 8,
     attributes: { str: 8, dex: 3, con: 7, int: 5, spi: 3 },
     identity: ['铁匠学徒', '矿山守卫'],
     occupation: ['铁匠', '战士'],
     background:
-      '灰炉氏族世世代代在索伦蒂斯的矿山中开采矿石、锻造武器。铁锤是族中最年轻的铁匠，但他对矿石的感知力却远超前辈。他坚信每一块矿石都有自己的灵魂，都值得被淬炼成最好的兵器。',
+      '灰炉氏族世世代代在铁山王国的矿脉中开采矿石、锻造武器。铁锤是族中最年轻的铁匠，但他对矿石的感知力却远超前辈。他坚信每一块矿石都有自己的灵魂，都值得被淬炼成最好的兵器。',
     appearance:
       '身材矮壮，肌肉结实，一头火红色的乱发总是沾着煤灰。浓密的胡须编成了三股辫子，末端系着铁环。脸上有几道被火花溅伤留下的疤痕，笑起来时眼睛眯成一条缝。',
     clothing:
@@ -251,7 +255,7 @@ function makeItemGenOutputHybrid(): ItemGenOutput {
     inventory: [
       {
         name: '深铁矿石',
-        description: '从索伦蒂斯矿山深处开采的高品质铁矿石。',
+        description: '从铁山矿脉深处开采的高品质铁矿石。',
         quantity: 8,
         type: '材料',
         rarity: '优良',
@@ -552,54 +556,54 @@ export function buildScenePreviewMock(): { characters: any[]; saveProfile: any }
       {
         id: 'preview-npc-1',
         type: 'npc',
-        name: '艾莉丝',
+        name: '莉薇娅',
         race: '精灵',
         tier: 1,
         tierName: '普通',
-        location: '大陆中东部-奥古斯提姆-艾瑟嘉德',
-        customFields: { thoughts: '最近商队失踪的事让人不安...卡尔的盗贼团越来越嚣张了。' },
+        location: '中部大陆-边境行省-石桥镇',
+        customFields: { thoughts: '最近商队失踪的事让人不安...科尔那伙人越来越嚣张了。' },
       },
       {
         id: 'preview-npc-2',
         type: 'npc',
-        name: '暗影盗贼·卡尔',
+        name: '灰刃·科尔',
         race: '暗精灵',
         tier: 3,
         tierName: '稀有',
-        location: '大陆中东部-奥古斯提姆-艾瑟嘉德',
-        customFields: { thoughts: '亚瑟...那个帝国走狗。他以为自己在伸张正义。' },
+        location: '中部大陆-边境行省-石桥镇',
+        customFields: { thoughts: '莱恩...那个替领主跑腿的。他以为自己在伸张正义。' },
       },
       {
         id: 'preview-npc-3',
         type: 'npc',
-        name: '大法师·梅林',
+        name: '贤者·奥尔文',
         race: '人类',
         tier: 5,
         tierName: '神话',
-        location: '大陆中东部-奥古斯提姆-艾瑟嘉德',
+        location: '中部大陆-边境行省-石桥镇',
         customFields: {
-          thoughts: '草药的事不急，但那孩子的剑术还得再练练...帝国边境在集结兵力，不是好兆头。',
+          thoughts: '草药的事不急，但那孩子的剑术还得再练练...邻邦在边境集结兵力，不是好兆头。',
         },
       },
       // 这里也强制设一个 player，确保 presentChars 能基于 player.location 过滤
       {
         id: 'preview-player',
         type: 'player',
-        name: '亚瑟',
+        name: '莱恩',
         race: '人类',
         tier: 2,
         tierName: '优良',
-        location: '大陆中东部-奥古斯提姆-艾瑟嘉德',
+        location: '中部大陆-边境行省-石桥镇',
       },
     ],
     saveProfile: {
-      gameTime: { era: '复兴纪元', year: 3, month: 3, day: 14, weekday: 3, hour: 9, minute: 30 },
+      gameTime: { era: '元年', year: 3, month: 3, day: 14, weekday: 3, hour: 9, minute: 30 },
       news: [
         {
           id: 'preview-news-1',
           title: '商队失踪事件',
-          content: '近日艾瑟嘉德近郊频繁发生商队失踪事件，帝国已派遣调查队前往。',
-          category: '阿斯塔利亚快讯',
+          content: '近日石桥镇近郊频繁发生商队失踪事件，领主府已派遣调查队前往。',
+          category: '大陆快讯',
           publishedAt: Date.now() - 5 * 60_000,
           read: false,
         },

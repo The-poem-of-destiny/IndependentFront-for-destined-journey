@@ -37,9 +37,10 @@ import {
 // ========== createDefaultTime ==========
 
 describe('createDefaultTime', () => {
-  it('returns correct defaults with default era (epoch year 488)', () => {
+  it('returns correct defaults with a NEUTRAL era (epoch year 488)', () => {
     const t = createDefaultTime();
-    expect(t.era).toBe('复兴纪元');
+    // D9: 引擎不持有任何具体纪元名 —— 缺省是中性空串，真值由内容侧在建档时盖章。
+    expect(t.era).toBe('');
     expect(t.year).toBe(GAME_EPOCH_YEAR);
     expect(t.year).toBe(488);
     expect(t.month).toBe(1);
@@ -60,6 +61,13 @@ describe('createDefaultTime', () => {
     const b = createDefaultTime();
     a.year = 99;
     expect(b.year).toBe(488);
+  });
+
+  // D9 回归：引擎源码里不许再出现任何硬编码的纪元名 —— 这条断言是「era 中性化」的守门人。
+  it('never invents an era name of its own (D9)', () => {
+    expect(createDefaultTime().era).toBe('');
+    expect(fromEpochMinutes(0).era).toBe('');
+    expect(fromEpochMinutes(12345).era).toBe('');
   });
 });
 
@@ -136,10 +144,30 @@ describe('formatGameTime', () => {
   });
 
   it('pads year to 4 digits', () => {
-    const t = createDefaultTime();
+    const t = createDefaultTime('某某纪元');
     t.year = 1;
     const formatted = formatGameTime(t);
-    expect(formatted).toContain('复兴纪元0001年');
+    expect(formatted).toContain('某某纪元0001年');
+  });
+
+  // D9: era 中性缺省后，format→parse 这条既有往返不变式在**空 era** 下也必须成立
+  //（parseGameTime 的纪元名段因此是 `(.*?)` 而不是 `(.+?)`）。
+  it('roundtrips through parseGameTime with an EMPTY era (D9)', () => {
+    const original = createDefaultTime();
+    original.year = 42;
+    original.month = 7;
+    original.day = 15;
+    original.weekday = 5;
+    original.hour = 14;
+    original.minute = 30;
+
+    const formatted = formatGameTime(original);
+    expect(formatted).toBe('0042年-07月-15日-周四-14:30');
+
+    const parsed = parseGameTime(formatted);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.era).toBe('');
+    expect(parsed).toEqual(original);
   });
 
   it('includes weekday name in output', () => {
@@ -349,9 +377,9 @@ describe('fromEpochMinutes', () => {
     expect(t.weekday).toBe(1); // 周日
   });
 
-  it('roundtrips: fromEpochMinutes(toEpochMinutes(t)) 深等于 t（复兴纪元）', () => {
+  it('roundtrips: fromEpochMinutes(toEpochMinutes(t), t.era) 深等于 t（任意纪元名）', () => {
     const t: GameTime = {
-      era: '复兴纪元',
+      era: '某某纪元',
       year: 495,
       month: 6,
       day: 15,
@@ -360,13 +388,29 @@ describe('fromEpochMinutes', () => {
       minute: 30,
     };
     // weekday 会被 epoch 重算（9 非法→重算为合法值），其余字段往返保真
-    const rt = fromEpochMinutes(toEpochMinutes(t));
+    const rt = fromEpochMinutes(toEpochMinutes(t), t.era);
     expect(rt.year).toBe(495);
     expect(rt.month).toBe(6);
     expect(rt.day).toBe(15);
     expect(rt.hour).toBe(14);
     expect(rt.minute).toBe(30);
-    expect(rt.era).toBe('复兴纪元');
+    // D9: era 是**调用方传进来的**那一个，不是引擎凭空补的
+    expect(rt.era).toBe('某某纪元');
+  });
+
+  // D9 回归：时间戳里没有纪元名这一维 —— 不传就是空，绝不猜。
+  // 这条钉死「往返会把存档盖章的 era 冲成硬编码值」那个坑不会复发。
+  it('不传 era 时不凭空补一个纪元名（D9）', () => {
+    const t: GameTime = {
+      era: '某某纪元',
+      year: 495,
+      month: 6,
+      day: 15,
+      weekday: 1,
+      hour: 14,
+      minute: 30,
+    };
+    expect(fromEpochMinutes(toEpochMinutes(t)).era).toBe('');
   });
 
   it('handles negative epoch (pre-488)', () => {

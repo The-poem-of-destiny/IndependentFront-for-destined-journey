@@ -34,7 +34,7 @@ import type { WorkshopSocialMeta } from '@engine/workshop-types';
 import {
   clearWorkshopCache,
   decodeJwtPayload,
-  WORKSHOP_API_BASE,
+  getWorkshopApiBase,
   parseAuthUser,
   pollLogin,
   setWorkshopAuthTokenProvider,
@@ -154,13 +154,28 @@ export function isAllowedLoginUrl(raw: string): boolean {
   if (parsed.protocol !== 'https:') return false;
 
   const host = parsed.hostname.toLowerCase();
-  return WORKSHOP_LOGIN_URL_HOSTS.some(
-    (allowed) => host === allowed || host.endsWith(`.${allowed}`),
-  );
+  return loginUrlHosts().some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
 }
 
-/** 允许开弹窗的主机（含子域）。Discord 授权页 + 工坊 worker 自己 */
-const WORKSHOP_LOGIN_URL_HOSTS = ['discord.com', new URL(WORKSHOP_API_BASE).hostname.toLowerCase()];
+/**
+ * 允许开弹窗的主机（含子域）。Discord 授权页 + 当前配置的工坊 worker 自己。
+ *
+ * 🔴 **每次调用现算**，不是模块级常量（D41）：社区源改成运行时配置之后，模块加载那一刻
+ * 它还是空串——把名单在 import 期冻住，等于永远只放行 discord.com，而工坊自己的回跳域
+ * 会被自己的白名单拒掉。未配置时 `new URL('')` 会抛，所以那一支返回空补位而不是让它炸。
+ */
+function loginUrlHosts(): string[] {
+  const hosts = ['discord.com'];
+  const base = getWorkshopApiBase();
+  if (base !== '') {
+    try {
+      hosts.push(new URL(base).hostname.toLowerCase());
+    } catch {
+      /* 配置值畸形 → 只剩 discord.com（宁可拒登录，不放行未知域） */
+    }
+  }
+  return hosts;
+}
 
 function browserWindow(): (Window & typeof globalThis) | undefined {
   const scope = globalThis as { window?: Window & typeof globalThis };

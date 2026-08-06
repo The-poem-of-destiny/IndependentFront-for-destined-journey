@@ -9,7 +9,6 @@
     "tests/agent-framework/test_agent.ts"
   ],
   "project": ["src/**/*.{ts,vue}", "server/**/*.ts", "tests/**/*.ts", "scripts/**/*.{mjs,cjs}"],
-  "ignore": ["src/sillytavern/start-catalog-data.ts"],
   "ignoreBinaries": ["dev.bat"],
   "vue": true
 }

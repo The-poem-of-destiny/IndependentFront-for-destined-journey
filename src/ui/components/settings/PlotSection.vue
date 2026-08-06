@@ -7,8 +7,12 @@ import { ref } from 'vue';
 import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
 import { useSettingsStore } from '../../stores/settings-store';
+import { useBranding } from '../../branding-defaults';
 
 const s = useSettingsStore().settings;
+
+// 大纲示例是**内容**不是引擎（D26）：随内容包走，未装包时为空 → 整张预览卡不渲染
+const { branding } = useBranding();
 
 const showPlotPreview = ref(false);
 const genreOptions = [
@@ -174,8 +178,9 @@ const plotDifficultyOptions = [
         </label>
       </div>
     </AppCard>
-    <!-- 大纲预览 -->
+    <!-- 大纲预览（示例来自内容包；没有示例就不出这张卡） -->
     <AppCard
+      v-if="branding.plotTemplate.length > 0"
       padding="md"
       class="detail-card plot-preview-card"
       :class="{ 'plot-revealed': showPlotPreview }"
@@ -186,17 +191,18 @@ const plotDifficultyOptions = [
           showPlotPreview ? '隐藏' : '点击查看（防剧透）'
         }}</AppButton>
       </div>
+      <!--
+        示例大纲由 branding.plotTemplate 供给（D26）—— 它讲的是**某个具体世界**的
+        五年主线，属于内容不属于引擎。未装内容包时这一段是空的，整张预览卡不渲染
+        （给一份编出来的通用大纲当示例，只会让人以为那就是将要生成的东西）。
+      -->
       <div class="plot-preview-body" :class="{ 'plot-blur': !showPlotPreview }">
-        <p class="text-muted text-sm"><strong>第一年 — 序章：命定之始</strong></p>
-        <p class="text-muted text-sm">主角在起始地点觉醒命运之力，遭遇第一次重大抉择...</p>
-        <p class="text-muted text-sm"><strong>第二年 — 崛起：风云际会</strong></p>
-        <p class="text-muted text-sm">与各大势力接触，逐步揭开世界背后的真相...</p>
-        <p class="text-muted text-sm"><strong>第三年 — 转折：命运分叉</strong></p>
-        <p class="text-muted text-sm">关键盟友背叛/牺牲，主线走向出现重大分支...</p>
-        <p class="text-muted text-sm"><strong>第四年 — 高潮：诸神黄昏</strong></p>
-        <p class="text-muted text-sm">最终决战前夕，所有伏笔回收，各方势力集结...</p>
-        <p class="text-muted text-sm"><strong>第五年 — 终章：命定之诗</strong></p>
-        <p class="text-muted text-sm">完成主线任务，世界线尘埃落定，角色结局生成...</p>
+        <template v-for="(beat, i) in branding.plotTemplate" :key="i">
+          <p v-if="beat.title" class="text-muted text-sm">
+            <strong>{{ beat.title }}</strong>
+          </p>
+          <p v-if="beat.body" class="text-muted text-sm">{{ beat.body }}</p>
+        </template>
       </div>
       <p class="text-xs text-muted plot-note">
         以上为示例大纲。实际内容由 AI 在游戏开始时生成。点击可切换模糊/清晰。

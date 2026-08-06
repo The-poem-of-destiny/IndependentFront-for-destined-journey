@@ -390,7 +390,7 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
   // ---- story: 正文 AI (核心) ----
   story: {
     fixedSystem:
-      '命定之诗叙事引擎。你生成下一段剧情正文，输出 <maintext>/<option>/<sum>/<vars> XML。使用第二人称"你"叙事，保持世界观一致性。完整提示词见 agent-config.json 和预设系统。',
+      '叙事引擎。你生成下一段剧情正文，输出 <maintext>/<option>/<sum>/<vars> XML。使用第二人称"你"叙事，保持世界观一致性。完整提示词见 agent-config.json 和预设系统。',
     fixedExamples:
       '<maintext>示例正文</maintext>\n<option>选项A\n选项B</option>\n<sum>示例总结</sum>',
   },
@@ -400,7 +400,7 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
     fixedSystem:
       '请求调度系统。分析正文后判断新-vs-已有角色/物品/制作，输出 <json> 全局变量 + XML request 标签分派给下游 Agent。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples:
-      '{"replace": [{"path": "位置", "value": "白曜城"}], "delta": [{"path": "金钱", "amount": -50}]}',
+      '{"replace": [{"path": "位置", "value": "石桥镇"}], "delta": [{"path": "金钱", "amount": -50}]}',
   },
 
   // ---- vars_update: 变量更新（合并原 char_update + item_update，可选 Agentic）----
@@ -408,7 +408,7 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
     fixedSystem:
       '角色/物品状态更新系统。根据请求调度器的标签更新角色状态和物品状态，必要时调用工具编写状态效果脚本。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples:
-      '{"characters": {"replace": [{"name": "理查德", "path": "hp", "value": 88}]}, "items": {"consume": [{"owner": "理查德", "target": "治疗药水", "quantity": 1}]}}',
+      '{"characters": {"replace": [{"name": "莱恩", "path": "hp", "value": 88}]}, "items": {"consume": [{"owner": "莱恩", "target": "治疗药水", "quantity": 1}]}}',
   },
 
   // ---- memory_summary: 记忆总结 ----

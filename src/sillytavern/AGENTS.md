@@ -141,7 +141,15 @@ src/sillytavern/                    ← 核心引擎
   │                                  照 combat-v3 projection-agent/projection-ui 的先例；
   │                                  这一层不允许出现计算（ADR-28：面板是给纯文本 AI 的遗留手段）
   ├── morale-system.ts / affection-system.ts
-  ├── start-catalog.ts              ← [Q-30] 捏人页目录入口（类型/常量/品质映射）+ start-catalog-data.ts（纯数据，CDN 生成）
+  ├── start-catalog.ts              ← [Q-30] 捏人目录入口（re-export 机制 + 属性名/品质码表/品质色/品质基础 DC）
+  │   └── start-catalog-mechanics.ts ← [D24] 机制半边：schema/类型 + 难度档位/性别枚举/限定覆盖表
+  │                                     + 纯函数（parseCatalogData 容错解析 / lookupCost 查表 /
+  │                                     flattenLocationTree / classifyBackground）
+  │       🪦 `start-catalog-data.ts`（8704 行）已删。七个池（装备/物品/技能、背景、命定核心、
+  │          种族/身份点数表、起始地树）住在 `data/content/catalog.json`，经内容注册表
+  │          （content-store 的 `catalog` 面）供给、pack 可整份替换。
+  │          🔴 **不许往机制文件里加任何一条具体条目** —— `start-catalog-mechanics.test.ts`
+  │             有一条结构闸门专门盯这件事（导出名黑名单）。
   ├── marker-protocol.ts            ← [Phase 6e+Audio+图像 v1] XML 标记检测（含 <play_audio> / <scene_image>）
   │                                    + sanitizeCaption（标题/说明的收敛器）
   │                                    🔴 加标记**只动 MARKER_SPECS**（Q-05）：扫描器、MARKER_TAGS、

@@ -5,7 +5,7 @@
  * - malformed 包全谱: 空对象 / 错 formatVersion / 坏分节形状 / 含 creative_workshop 分区书 → 不 throw，出 notes
  * - 三态语义表（absent / [] / rows 的分节解析）
  * - hash 工具: 同输入产同 hash；不同输入产不同 hash
- * - __ENGINE_VERSION__ 缺省时跳过 version 门（本波契约）
+ * - __ENGINE_VERSION__ 版本门（T13 通电后）：define 真的注入了 / 过新的包被拒绝
  *
  * 设计: docs/planning/2026-08-05-content-engine-separation-design.md §4 / §5.1 / §5.2 / D8 / D20
  */
@@ -272,23 +272,79 @@ describe('validatePackOrThrow', () => {
 // checkEngineVersion + semverGte
 // ═══════════════════════════════════════════════════════════
 
+/**
+ * 版本门测试（T13 通电后）。
+ *
+ * 🔴 `__ENGINE_VERSION__` 现在由 `vitest.config.ts` 的 `define` 注入（值 = package.json
+ * 的 version），所以**测试里门是通电的**。要模拟别的引擎版本就改 `globalThis` 覆写通道
+ * （`readEngineVersion` 的覆写优先级高于 define），改完必须还原 —— 它是模块级全局。
+ */
+type EngineVersionScope = { __ENGINE_VERSION__?: unknown };
+
+function withEngineVersion(version: string | undefined, fn: () => void): void {
+  const scope = globalThis as EngineVersionScope;
+  const had = '__ENGINE_VERSION__' in scope;
+  const prev = scope.__ENGINE_VERSION__;
+  if (version === undefined) delete scope.__ENGINE_VERSION__;
+  else scope.__ENGINE_VERSION__ = version;
+  try {
+    fn();
+  } finally {
+    if (had) scope.__ENGINE_VERSION__ = prev;
+    else delete scope.__ENGINE_VERSION__;
+  }
+}
+
 describe('checkEngineVersion', () => {
-  it('🔴 __ENGINE_VERSION__ 未注入时跳过版本门（本波契约）', () => {
-    // vitest node 环境下 __ENGINE_VERSION__ 未注入
-    const gate = checkEngineVersion('99.0.0');
-    expect(gate.result).toBe('skipped');
-    expect(gate.engineVersion).toBeUndefined();
+  it('🔴 版本门已通电：vitest 里 __ENGINE_VERSION__ 有值（define 生效的回归钉）', () => {
+    // 这条不测业务，测的是「define 真的落进了测试运行时」。
+    // 它红 = vitest.config.ts 的 define 掉了 / readEngineVersion 又写回了成员访问，
+    // 而那两种情况下门会安静地恒放行（下面那条 too-new 也会跟着红，但根因在这里）。
+    const gate = checkEngineVersion(undefined);
+    expect(typeof gate.engineVersion).toBe('string');
+    expect(gate.engineVersion).toMatch(/^\d+\.\d+\.\d+/);
   });
+
+  it('🔴 过新的包被拒绝：minEngineVersion > 引擎版本 → too-new', () => {
+    withEngineVersion('1.0.0', () => {
+      const gate = checkEngineVersion('99.0.0');
+      expect(gate.result).toBe('too-new');
+      expect(gate.engineVersion).toBe('1.0.0');
+      expect(gate.packMin).toBe('99.0.0');
+    });
+  });
+
+  it('🔴 过新的包在 validatePackOrThrow 出 error（不是只在门函数里）', () => {
+    withEngineVersion('1.0.0', () => {
+      const notes = validatePackOrThrow({ ...minimalPack(), minEngineVersion: '2.0.0' });
+      const err = notes.find((n) => n.code === 'engine-too-old');
+      expect(err?.level).toBe('error');
+      // 消息要能让人自己判断该升哪一边 —— 两个版本号都得出现
+      expect(err?.text).toContain('2.0.0');
+      expect(err?.text).toContain('1.0.0');
+    });
+  });
+
+  it('引擎版本满足要求 → ok', () => {
+    withEngineVersion('2.5.0', () => {
+      expect(checkEngineVersion('2.4.9').result).toBe('ok');
+      expect(checkEngineVersion('2.5.0').result).toBe('ok');
+    });
+  });
+
+  // 📌 `'skipped'`（读不到引擎版本）在测试环境里**不可达** —— define 把标识符换成了
+  //    字符串字面量，`typeof` 恒为 'string'。它只会在裸 node / 未打包宿主里出现，
+  //    那种环境没法在 vitest 里制造，所以这里刻意不写一条演出来的断言。
 
   it('pack 未声明 minEngineVersion → ok（无版本要求，直接放行）', () => {
     const gate = checkEngineVersion(undefined);
     expect(gate.result).toBe('ok');
   });
 
-  it('pack 未声明 minEngineVersion 时 engineVersion 仍如实回读（未注入则 undefined）', () => {
-    const gate = checkEngineVersion(undefined);
-    // vitest node 环境下未注入 → undefined
-    expect(gate.engineVersion).toBeUndefined();
+  it('minEngineVersion 无法解析 → too-new（保守拒绝，不放行看不懂的要求）', () => {
+    withEngineVersion('1.0.0', () => {
+      expect(checkEngineVersion('not-a-version').result).toBe('too-new');
+    });
   });
 });
 

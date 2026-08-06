@@ -1,9 +1,23 @@
 /**
- * 捏人页数据目录 — 从 CDN 自动生成（纯数据，见 start-catalog.ts 的类型/常量入口）
+ * 捏人目录 — 引擎入口（类型 / 机制常量 / 纯函数）。
+ *
+ * 🔴 **这里没有内容了**（内容-引擎分离 D24）。七个池（装备/物品/技能、背景、命定核心、
+ * 种族/身份点数表、起始地树）已从 `start-catalog-data.ts`（8704 行，已删）抽成
+ * `data/content/catalog.json`，经内容注册表供给：
+ *
+ * ```ts
+ * import { getContentRegistry, ensureContentRegistryLoaded } from '../ui/stores/content-store';
+ * import { parseCatalogData } from '@engine/start-catalog-mechanics';
+ * await ensureContentRegistryLoaded();
+ * const catalog = parseCatalogData(getContentRegistry().catalog);
+ * ```
+ *
+ * 机制半边在 `start-catalog-mechanics.ts`（下方整份 re-export）；本文件另留四组
+ * 与目录同用的引擎常量（属性名 / 品质码表 / 品质色 / 品质基础 DC）。
  */
 
-export * from './start-catalog-data';
-import type { CatalogRarityCode } from './start-catalog-data';
+export * from './start-catalog-mechanics';
+import type { CatalogRarityCode } from './start-catalog-mechanics';
 
 export const ATTRIBUTE_NAMES = ['力量', '敏捷', '体质', '智力', '精神'] as const;
 export const ATTR_CN_TO_EN: Record<string, string> = {

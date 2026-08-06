@@ -178,14 +178,25 @@ export interface PackNamePoolsSection {
  */
 export interface PackBrandingSection {
   appTitle?: string;
+  /** 产品短名 → 设置页「关于 X」 */
+  shortName?: string;
+  /** 首页大标题分行 */
+  titleLines?: string[];
+  /** 首页标题下那行小字 */
+  tagline?: string;
   subtitles?: string[];
   credits?: string;
+  /** 首页制作人员弹窗的世界速览块 */
+  worldSummary?: { title?: string; lines?: string[] };
   about?: string;
+  /** 关于分区页脚的版权行 */
+  copyright?: string;
   /** save 创建时盖章用；无 epochYear（D9） */
   era?: string;
-  plotTemplate?: string;
-  /** 地图图源 URL（D23） */
-  mapSources?: string[];
+  /** 设置页剧情分区的大纲示例（防剧透预览）；空数组 = 不渲染预览卡 */
+  plotTemplate?: Array<{ title?: string; body?: string }>;
+  /** 地图图源（D23）。🔴 是 `{key,name,url}` 对象数组，不是裸 URL 串数组 */
+  mapSources?: Array<{ key?: string; name?: string; url?: string }>;
   /** 工坊 API 基址（D41） */
   workshopApiBase?: string;
   workshopLoginHint?: string;

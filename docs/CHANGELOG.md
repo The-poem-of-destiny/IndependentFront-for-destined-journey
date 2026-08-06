@@ -9,6 +9,86 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 内容-引擎分离 波 2 + 波 3 —— 代码内 IP 数据驱动化 + 占位内容集 ｜ ✅ 完成（2026-08-06）
+
+设计真源 `docs/planning/2026-08-05-content-engine-separation-design.md`（v1.2 / D1-D45），
+编排 `-implementation-plan.md`（8 波 26 任务）。波 0（安全前置）与波 1（provider / pack 机制 /
+agents 分层）已于 PR #36-#43 合入，本轮交付 **波 2（T8a + T8-T14）与波 3（T15-T16）**。
+
+**波 2 —— 真实数据出代码，引擎只留 schema + 纯函数 + 注册表读取。**
+本波结束时 app 行为与波前完全一致 —— 数据只是换了载体，这是「改造与搬家分离」的关键：
+行为回归能在真实内容还在库里的时候就被发现，而不是等波 4 搬完家。
+
+- **T8a（计划外补的前置）** —— 波 1 留下的注册表是**空骨架**，六面全 `undefined`，
+  而波 2 七个任务都要往同一处灌注：这是计划没点名的唯一真实撞面。补
+  `ensureContentRegistryLoaded()`（六面各自 fetch / 一面失败不拖累其余 / 永不抛 / memoize /
+  已装 pack 经 `resolveSection` 继续赢），七个任务的文件面才真正互不重叠。
+  卸载包后重拉占位 —— 否则卸个包捏人页与地图页直接空。
+- **T8 捏人目录（D24）** —— `start-catalog-data.ts`（8704 行）删除，劈成
+  `start-catalog-mechanics.ts`（机制）+ `data/content/catalog.json`（七池）。
+  机制文件配了一条**导出名黑名单**结构闸门，防具体条目日后再漏回引擎。
+  D9 起源印记区块改可选通用区块（没选就整块不出现，收尾指令不再留悬空的「展现其苏醒」）。
+  🔴 Overlord / Fate / HP 三段背景**原样抽进 JSON** —— D10 黑名单在 pack 构建器执行，
+  不在抽取时悄悄删，留审计痕迹。
+- **T9 / T10（D25）** —— `location-db.ts` 921→292 行、`bloodlines.ts`、`random-tables.ts`
+  数据清零走注册表，逐项结构校验、坏行丢弃而不是整表塌。顺带修了一个既有 bug：
+  姓氏池为空的种族原本产出 `名·undefined`。
+- **T11 地图 + 外链三清（D23）** —— MapPanel 的 `data/` 静态 import 断开（全仓 `src/` 下
+  已无一条）；两条 `i.ibb.co` 热链移出代码，图源改由 `branding.mapSources` 供给；
+  OSD 雪碧图自托管进 `public/osd/`（从已装 npm 包复制，不下载外部文件）。
+  `no-external-assets.test.ts` 扩成扫 `src/**` 的 `https?://` 主机名白名单。
+- **T12 era（D9）** —— 线程化而非删字段：`createDefaultTime(era?)` /
+  `fromEpochMinutes(em, era?)` / `createDefaultSaveProfile(saveId, era?)` /
+  `getProfile(saveId, era?)`，缺省空串（引擎不自造纪元名），存档创建时盖章、此后只读存档。
+  选①不选②的理由：去字段要动持久化形状 + 约 60 处 fixture + Dexie 迁移，还会留下
+  「老档带 era、新档没有」的半状态。
+- **T13 branding / 版本门 / 工坊配置化（D26/D40/D41）** —— `branding-defaults.ts` 中性默认值
+  - 注册表 branding 面；favicon / 标题 / dev.bat 等逐项去 IP。
+    🔴 `__ENGINE_VERSION__` 要注入**两份 config**：本仓有独立 `vitest.config.ts`，vite 那份
+    在测试里根本不生效；且 `define` 只替换**裸标识符**，T1 预留的 `globalThis.__ENGINE_VERSION__`
+    注了也永远读不到。两条都踩过，各配一条回归钉 —— 钉红 = 版本门静默恒放行。
+- **T14 演示面（D27）** —— test-save / test-fixtures / agent-templates stub /
+  placeholder-registry 中性重写；通用奇幻 story 占位预设 11 条目 + 回退 systemPrompt。
+
+**波 3 —— 占位内容集（三级标准：UI 不空破 / 演示环路可走 / 不承诺游戏性）。**
+
+- **T15** —— 15 本占位世界书（同 id / 同分区 / `builtIn:true`，38 条目，
+  uid 全在 900001-901402 保留段内，1 条 EJS 动态 + 37 条静态）+
+  `scripts/build-placeholder-hashes.mjs`（输入目录参数化，波 4 换 `public/data` 重跑）→
+  `src/sillytavern/placeholder-hashes.json`。hash 一致性不靠自觉：测试同时 import 构建脚本与
+  `content-source.ts` / `content-pack-plan.ts`，两侧产出必须同串 —— 任一侧改了另一侧没改
+  就当场变红（若失守，D20 会把每本没动过的占位书判成「已改」）。
+- **T16** —— 占位 agent-config（13 个 id 与真实侧逐字相同，输出契约与工具约定保真，
+  只换叙事风格）+ 占位六面（`data/placeholder/content/`，文件名与真实侧逐字相同 —— URL
+  同形铁律）+ 占位标记 / 美化规则 / audio manifest。血脉 **id 与 statModifiers 与真实侧一致**，
+  只换描述（数值机制变了捏人页数值门会塌）。
+
+**收波时补的五处跨任务缺口**（各 agent 互相报到、没人认领的）：
+
+1. `getProfile(saveId, era.value)` —— SaveProfile 是惰性创建的，这是生产上唯一的创建点，
+   不透传等于新档纪元名落成空串，而存档一旦盖章就永不重读内容包。
+2. 演示存档 `createDefaultTime(getBranding().era)`。
+3. `PackBrandingSection` 与 `BrandingConfig` 对齐 —— `plotTemplate` 是段落数组不是字符串、
+   `mapSources` 是 `{key,name,url}` 不是裸 URL 串。schema 与实际解析器对不上，症状是
+   pack 供的 branding 静默走形。
+4. 真实图源移进 `data/content/branding.json` 的 `mapSources` —— 波 2 铁律是「行为不变」，
+   而 T11 删热链时没有把它们放回内容侧，地图会空。
+5. 🔴 **占位基线清单读不到**：波 1 的 T7 写的是 `fetch('/data/placeholder-hashes.json')`，
+   而清单由 T15 产在 `src/sillytavern/` 下随引擎打包 —— 那次 fetch **永远 404**，
+   而空清单是**合法态**（四态回落 updated/conflicted），所以它不报错、不变红，
+   只是让 D20 基线、D42 重播种、卸载 re-seed 三处一起静默失效。改成静态 import
+   （`resolveJsonModule`），并补测试覆写口 `setPlaceholderHashesForTests`。
+   就算把文件放到 `/data/` 也仍是错的：overlay 生效时那里是**真实内容**，
+   拿真实内容当占位基线比对，等于把每一本都判成「用户没改过」。
+
+**闸门**：typecheck ×3 干净 / lint 0 warning / knip 棘轮 145 无新增 / prettier 全过 /
+**7078 tests passed**（波前 6875，+203）/ 编码门 U+FFFD=0、控制字符=0、JSON 可解析。
+
+**编排上值得记的一条**：波 2 七个任务在同一工作树里并行跑，靠的是「文件面互不重叠 +
+撞面显式移交」（`create-store.ts` 由 T8 独占并代执行 T10/T12 的改点，`MapPanel.vue` 由 T11
+独占，`agent-tools.ts` 由 T10 独占）。代价是每个 agent 都会看到别人半成品造成的 typecheck 红，
+brief 里必须写明「不属于你文件面的错忽略并记悬置」，否则会互相去修对方的文件。
+
 ### 测试体系加固 —— 编码闸门 / knip 棘轮 / 属性测试 / lint 收紧 ｜ ✅ 完成（2026-08-05）
 
 起因是一次盘点：**6564 个用例没拦住 PR #22 评审的任何一条缺陷**——问题不是量不够，是**种类不全**

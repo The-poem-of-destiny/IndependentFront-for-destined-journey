@@ -36,9 +36,12 @@ import {
   buildProjectUrl,
   clearWorkshopCache,
   resetWorkshopClient,
+  setWorkshopConfig,
   setWorkshopFetch,
-  WORKSHOP_API_BASE,
 } from '../lib/workshop-client';
+
+/** 测试用社区源（D41：真实地址已改运行时配置，默认 unset） */
+const WORKSHOP_API_BASE = 'https://workshop.test';
 import { useWorkshopStore, WORKSHOP_UID_CURSOR_KEY } from './workshop-store';
 import { useWorldBookStore } from './worldbook-store';
 import { useBeautifierStore } from './beautifier-store';
@@ -241,6 +244,7 @@ describe('workshop-store', () => {
     upstream.clear();
     offline.clear();
     resetWorkshopClient();
+    setWorkshopConfig({ apiBase: WORKSHOP_API_BASE, loginHint: '' });
     installFetchMock();
     const db = getDatabase();
     await db.worldBooks.clear();

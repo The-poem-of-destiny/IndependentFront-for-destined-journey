@@ -9,7 +9,7 @@
  *
  * 纯度约束: 无 Vue、无 store、无 I/O。
  */
-import type { WorkshopFailure } from '../../lib/workshop-client';
+import { getWorkshopLoginHint, type WorkshopFailure } from '../../lib/workshop-client';
 
 /**
  * 未登录 / 401 的统一引导语（D25）。
@@ -31,10 +31,15 @@ export const WORKSHOP_LOGIN_GUIDE = '点赞与订阅需要先用 Discord 登录�
  * 为什么不区分「这条是不是门槛失败」再决定加不加: store 那边超时/弹窗被拦/上游 5xx
  * 都收在同一个 `message` 里，靠串匹配去猜是哪一种，猜错的那天就成了误导。而这句
  * 补充说的是**登录的前提条件**，对任何一种登录失败都成立。
+ *
+ * 🔴 前提句**随社区源配置走**（D41）：它此前写死了某个具体的 Discord 服务器名，
+ * 而社区源已经是配置项——换了一个源，这句话就成了一句假话，而假话恰好出现在
+ * 用户最需要知道「我到底还差什么」的时刻。没配 hint 就**不说**，比乱说强。
  */
 export function describeLoginFailure(message: string): string {
   const raw = (message ?? '').trim();
-  const hint = '（登录需要你已加入「命定之诗」Discord 服务器）';
+  const configured = getWorkshopLoginHint().trim();
+  const hint = configured ? `（${configured}）` : '';
   return raw ? `${raw}${hint}` : `登录失败${hint}`;
 }
 

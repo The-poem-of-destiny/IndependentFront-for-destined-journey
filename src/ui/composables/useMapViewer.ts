@@ -12,35 +12,72 @@ import OpenSeadragon from 'openseadragon';
 export type MapViewerStatus = 'loading' | 'ready' | 'error';
 
 export interface MapSourceConfig {
-  key: 'small' | 'large';
+  /** 源标识（历史上是 'small' / 'large'，现由内容供给，任意字符串） */
+  key: string;
   name: string;
   url: string;
 }
 
-export const MAP_SOURCES: MapSourceConfig[] = [
-  {
-    key: 'small',
-    name: '高清地图',
-    url: 'https://i.ibb.co/G3rrhgVS/Maplite-1.webp',
-  },
-  {
-    key: 'large',
-    name: '超清地图',
-    url: 'https://i.ibb.co/2zYccsJ/Map.webp',
-  },
-];
+/**
+ * OSD 控件雪碧图前缀（D23 外链三清之三）。
+ *
+ * 🔴 原值指向 openseadragon.github.io 上的官方贴图目录 —— 一条**没人会发现
+ * 失败**的外链：图挂了只是按钮变空白方块，控件仍然可点。离线 / CDN 故障 / 大陆网络下
+ * 每个玩家都在裸奔。现在整套图随 `public/osd/` 自托管（从已装的 `openseadragon` 包里
+ * 原样复制，不下载外部文件），行为与今日一致。
+ *
+ * 用字面量而不是 `import.meta.env.BASE_URL`：仓库未配置 vite `base`，且这条常量要能在
+ * 纯 `tsc` 与 node 侧测试里读，不引入 vite/client 类型依赖。
+ */
+const OSD_PREFIX_URL = '/osd/';
+
+/**
+ * 从注册表 `branding` 面解析地图图源（D23）。
+ *
+ * 🔴 **公开仓默认空**：原来这里硬编码着两条 `i.ibb.co` 热链（第三方图床，既是外部资源
+ * 也是世界内容），已删。图源改由内容包的 `branding.mapSources` 供给；没有内容包时返回
+ * 空数组，MapPanel 渲染空态而不是去连一个不存在的地址。
+ *
+ * 形状容错：`branding` 是注册表的 `unknown` 面，可能是 undefined / 任意 JSON。
+ * 逐项校验三个字符串字段，坏项跳过而不是整份丢弃。
+ */
+export function resolveMapSources(branding: unknown): MapSourceConfig[] {
+  if (!branding || typeof branding !== 'object') return [];
+  const raw = (branding as { mapSources?: unknown }).mapSources;
+  if (!Array.isArray(raw)) return [];
+  const out: MapSourceConfig[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const { key, name, url } = item as Record<string, unknown>;
+    if (typeof key !== 'string' || !key) continue;
+    if (typeof url !== 'string' || !url) continue;
+    out.push({ key, name: typeof name === 'string' && name ? name : key, url });
+  }
+  return out;
+}
 
 const MAP_OPEN_TIMEOUT_MS = 30000;
 
-export function useMapViewer(containerRef: Ref<HTMLDivElement | null>) {
+/**
+ * @param containerRef OSD 挂载容器
+ * @param sourcesRef   可用图源列表（D23：由 MapPanel 从注册表 branding 面解析后传入）
+ */
+export function useMapViewer(
+  containerRef: Ref<HTMLDivElement | null>,
+  sourcesRef?: Ref<MapSourceConfig[]>,
+) {
   const status = ref<MapViewerStatus>('loading');
   const errorMessage = ref('');
   const viewerRef = shallowRef<OpenSeadragon.Viewer | null>(null);
-  const currentSourceKey = ref<'small' | 'large'>('small');
+  const currentSourceKey = ref<string>('');
 
-  const objectUrlCache = new Map<'small' | 'large', string>();
+  const objectUrlCache = new Map<string, string>();
   let abortController: AbortController | null = null;
   let openSequence = 0;
+
+  function availableSources(): MapSourceConfig[] {
+    return sourcesRef?.value ?? [];
+  }
 
   // ========== 创建 Viewer ==========
   function createViewer() {
@@ -48,7 +85,7 @@ export function useMapViewer(containerRef: Ref<HTMLDivElement | null>) {
 
     const viewer = OpenSeadragon({
       element: containerRef.value,
-      prefixUrl: 'https://openseadragon.github.io/openseadragon/images/',
+      prefixUrl: OSD_PREFIX_URL,
       showNavigator: true,
       showNavigationControl: true,
       showFullPageControl: false,
@@ -96,12 +133,19 @@ export function useMapViewer(containerRef: Ref<HTMLDivElement | null>) {
   }
 
   // ========== 加载地图源 ==========
-  async function loadSource(key: 'small' | 'large') {
+  async function loadSource(key: string) {
     const viewer = viewerRef.value;
     if (!viewer) return;
 
-    const config = MAP_SOURCES.find((s) => s.key === key);
-    if (!config) return;
+    const config = availableSources().find((s) => s.key === key);
+    // 🔴 没有这个源 = 没有图可加载。**必须落进 error 态**，不能悄悄 return ——
+    //    否则内容包缺 branding.mapSources 时地图永远停在「地图加载中…」的转圈上，
+    //    看着像卡死而不是「这里没有内容」。
+    if (!config) {
+      errorMessage.value = '没有可用的地图图源（需要内容包提供）';
+      status.value = 'error';
+      return;
+    }
 
     currentSourceKey.value = key;
     status.value = 'loading';

@@ -7,11 +7,15 @@
  */
 import AppCard from '../shared/AppCard.vue';
 import { VERSION } from '@engine/index';
+import { useBranding } from '../../branding-defaults';
+
+// 品牌面（D26）：分区标题与页脚署名随内容包走，未装包时是中性默认值
+const { branding } = useBranding();
 </script>
 
 <template>
   <section class="section centered">
-    <h3>关于命定之诗</h3>
+    <h3>关于{{ branding.shortName }}</h3>
     <div class="about-grid">
       <AppCard padding="md"
         ><h4>引擎信息</h4>
@@ -36,7 +40,10 @@ import { VERSION } from '@engine/index';
           <div class="about-row"><span>引擎模块</span><span>41 模块</span></div>
           <div class="about-row"><span>单元测试</span><span>1978 tests</span></div>
           <div class="about-row"><span>主题</span><span>10 套</span></div>
-          <div class="about-row"><span>纪元</span><span>复兴纪元</span></div>
+          <!-- 纪元名是**内容**（D9/D26）：随内容包走，未装包时是中性缺省 -->
+          <div class="about-row">
+            <span>纪元</span><span>{{ branding.era }}</span>
+          </div>
         </div></AppCard
       >
     </div>
@@ -81,7 +88,8 @@ import { VERSION } from '@engine/index';
     </AppCard>
 
     <p class="about-footer text-muted text-sm text-center">
-      《命定之诗》Fated Poem — 多 Agent 协作文字 RPG 引擎<br />© 2026 命定之诗创作组
+      {{ branding.about
+      }}<template v-if="branding.copyright"><br />{{ branding.copyright }}</template>
     </p>
   </section>
 </template>

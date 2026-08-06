@@ -1,7 +1,7 @@
 {
-  "name": "IndependentFront-for-destined-journey",
+  "name": "narrative-engine",
   "version": "1.0.0",
-  "description": "IndependentFront for Destined Journey — 命定之诗独立前端，多 Agent 文字 RPG 引擎",
+  "description": "多 Agent 协作的文字 RPG 引擎（世界内容以内容包形式外挂）",
   "main": "dist/sillytavern/index.js",
   "type": "module",
   "private": true,

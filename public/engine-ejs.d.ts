@@ -1,7 +1,7 @@
 /**
- * poem-ejs.d.ts —— 《命定之诗》世界书 EJS 能力面 类型定义（创作者用）
+ * engine-ejs.d.ts —— 世界书 EJS 能力面 类型定义（创作者用）
  *
- * 把本文件放进你写世界书的项目里（或在 VSCode 里 `/// <reference path="poem-ejs.d.ts" />`），
+ * 把本文件放进你写世界书的项目里（或在 VSCode 里 `/// <reference path="engine-ejs.d.ts" />`），
  * 写 `<% %>` 里的代码时就有补全与类型检查了。
  *
  * 契约版本：1.0.0 —— 与 `engine.version` 对应。
@@ -181,7 +181,7 @@ declare const char: {
 };
 
 declare const world: {
-  /** 规范串，如 `复兴纪元0001年-05月-24日-周日-15:30` */
+  /** 规范串，如 `<纪元名>0001年-05月-24日-周日-15:30`（纪元名由内容包供给） */
   时间: string;
   时间详情: {
     纪元: string;

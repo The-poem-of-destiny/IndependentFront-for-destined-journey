@@ -7,10 +7,12 @@
  * 覆盖范围:
  *  1. status_query 接真函数（按名寻址 / 缺省返回全部 / 指定 buff 聚合层数）——executeToolCall 内仍保留
  *  2. 复用工具 (roll_d20 / get_hp_percent 等) 仍可正常工作（回归保护）
+ *  3. random_name 工具描述的品牌面（D26）——注册表未就绪时必须是**不含作品名**的中性文案
  */
 
-import { describe, it, expect } from 'vitest';
-import { executeToolCall } from './agent-tools';
+import { describe, it, expect, afterEach } from 'vitest';
+import { executeToolCall, getToolDefinition, getToolsForAgent } from './agent-tools';
+import { getContentRegistry, setContentRegistry } from '@ui/stores/content-store';
 import { craftRequestFingerprint } from './craft-request';
 import type { ToolExecutionContext, CharacterState } from './types';
 import { deleteCharacter, getCharacters, saveCharacter } from './database';
@@ -574,5 +576,54 @@ describe('executeToolCall — 失败形态只有一种', () => {
   it('status_query 查无此角色**不算失败** —— 那是这个工具的正常回答', async () => {
     const r = await executeToolCall('status_query', { target: '查无此人' }, makeCtx());
     expect(r.found).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 品牌面注入（D26 / 波 2 T10）
+// ═══════════════════════════════════════════════════════════
+
+describe('random_name 工具描述的品牌面（D26）', () => {
+  afterEach(() => {
+    setContentRegistry({ ...getContentRegistry(), branding: undefined });
+  });
+
+  it('注册表未就绪 → 中性文案，不含任何作品名', () => {
+    setContentRegistry({ ...getContentRegistry(), branding: undefined });
+    const def = getToolDefinition('random_name');
+    expect(def).toBeDefined();
+    expect(def!.function.description).toBe(
+      '随机生成一个符合当前世界观的角色名称。根据种族和性别从名称池中随机选取。',
+    );
+    expect(def!.function.description).not.toContain('《');
+  });
+
+  it('注册表有 branding.appTitle → 描述换成带作品名的版本', () => {
+    setContentRegistry({ ...getContentRegistry(), branding: { appTitle: '某某作品' } });
+    expect(getToolDefinition('random_name')!.function.description).toBe(
+      '随机生成一个符合《某某作品》世界观的角色名称。根据种族和性别从名称池中随机选取。',
+    );
+  });
+
+  it('getToolsForAgent 出口同样套上品牌面（两个读取口不许漂移）', () => {
+    setContentRegistry({ ...getContentRegistry(), branding: { appTitle: '某某作品' } });
+    const tools = getToolsForAgent('char_gen');
+    const def = tools.find((t) => t.function.name === 'random_name');
+    expect(def).toBeDefined();
+    expect(def!.function.description).toContain('《某某作品》');
+  });
+
+  it('branding 形状不对（数组 / appTitle 非字符串 / 空串）一律回落中性文案', () => {
+    for (const bad of [['x'], { appTitle: 42 }, { appTitle: '' }, 'nope']) {
+      setContentRegistry({ ...getContentRegistry(), branding: bad });
+      expect(getToolDefinition('random_name')!.function.description).toContain('符合当前世界观');
+    }
+  });
+
+  it('非品牌工具的描述不被改写', () => {
+    setContentRegistry({ ...getContentRegistry(), branding: { appTitle: '某某作品' } });
+    const before = getToolDefinition('roll_d20')!.function.description;
+    setContentRegistry({ ...getContentRegistry(), branding: undefined });
+    expect(getToolDefinition('roll_d20')!.function.description).toBe(before);
   });
 });

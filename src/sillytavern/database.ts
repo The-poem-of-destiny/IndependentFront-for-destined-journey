@@ -1547,7 +1547,15 @@ export async function deleteSaveProfile(saveId: string): Promise<void> {
 
 import { createDefaultTime } from './time-system';
 
-export function createDefaultSaveProfile(saveId: string): SaveProfile {
+/**
+ * 造一份空白存档档案。
+ *
+ * 🔴 `era` 是**盖章参数**（D9）：新存档创建时由调用方从内容侧（branding 面）取一次，
+ * 写进 `gameTime.era` 后就只属于这个存档 —— 此后一律读存档、**永不活读内容包**，
+ * 否则卸载/更换内容包会追溯改名每一个既有存档的历法。
+ * 缺省不传 = 引擎中性空串（见 `createDefaultTime`），不是任何具体纪元名。
+ */
+export function createDefaultSaveProfile(saveId: string, era?: string): SaveProfile {
   return {
     saveId,
     fp: 0,
@@ -1558,7 +1566,7 @@ export function createDefaultSaveProfile(saveId: string): SaveProfile {
     quests: {},
     focusQuest: '',
     affections: {},
-    gameTime: createDefaultTime(),
+    gameTime: createDefaultTime(era),
     variables: {},
     worldFlags: {},
     updatedAt: Date.now(),

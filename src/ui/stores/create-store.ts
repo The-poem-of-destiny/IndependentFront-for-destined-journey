@@ -2,10 +2,16 @@
  * 捏人页 Store — 角色创建状态管理
  *
  * 数据来源:
- * - start-catalog.ts — 难度/核心/装备池/技能池/道具池/背景/种族费用/身份费用/地点
- * - bloodlines.ts — 23 血脉列表
+ * - start-catalog-mechanics.ts — 难度档位/性别枚举 + 目录 schema 与纯函数（**引擎**，D24）
+ * - 内容注册表 `catalog` 面 — 命定核心/背景/种族费用/身份费用/起始地树（**内容**，D24）
+ * - 内容注册表 `bloodlines` 面 — 血脉集（D25②，经 `getBloodlineSet()` 读）
+ * - 内容注册表 `branding` 面 — 纪元名（D9，存档创建时盖章）
  * - tier-constants.ts — 7 层级 HP/MP/SP 乘数
  * - custom_start_index.html — BP/AP/消耗计算 原版逻辑
+ *
+ * 🔴 **内容三面是异步加载的**（D16/D24）：`initContent()` 是本 store 的加载门，
+ * 捏人页在挂载时 await 它。加载完成前所有目录派生的 computed 都是空列表 ——
+ * 组件必须看 `contentStatus` 决定画加载态/空态，而不是把空列表当成「没有内容」。
  */
 
 import { defineStore } from 'pinia';
@@ -20,7 +26,7 @@ import type {
 import { TIER_CONFIGS, calcResources } from '@engine/tier-constants';
 // Q-05：从模型输出抢救 JSON 的唯一入口
 import { extractJsonPayload } from '@engine/model-json';
-import { getBloodlineList } from '@engine/bloodlines';
+import { getBloodlineList, getBloodlineSet, type BloodlineSet } from '@engine/bloodlines';
 import { AgentClient } from '@engine/agent-client';
 import {
   tryParseOutline,
@@ -32,20 +38,26 @@ import { createDefaultTime, formatGameTime, GAME_EPOCH_YEAR } from '@engine/time
 import { useSettingsStore } from './settings-store';
 import {
   type CatalogItem,
+  type CatalogData,
   type BackgroundTemplate,
   type DestinyCore,
   type DifficultyPreset,
   type CatalogRarityCode,
-  DIFFICULTY_PRESETS,
-  DEFAULT_DESTINY_CORES,
-  DEFAULT_BACKGROUNDS,
-  DEFAULT_RACE_COSTS,
-  DEFAULT_IDENTITY_COSTS,
+  type BackgroundCategory,
   GENDER_OPTIONS,
-  START_LOCATIONS,
   ATTRIBUTE_NAMES,
   ATTR_CN_TO_EN,
+  parseCatalogData,
+  isCatalogPopulated,
+  findDifficultyPreset,
+  lookupCost,
+  costTableOptions,
+  flattenLocationTree,
+  filterBackgroundsByCategory,
+  countBackgroundsByCategory,
 } from '@engine/start-catalog';
+import { ensureContentRegistryLoaded, getContentRegistry } from './content-store';
+import { getBranding } from '../branding-defaults';
 import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
 import { useWorldBookStore } from './worldbook-store';
 import { useWorkshopStore } from './workshop-store';
@@ -150,13 +162,93 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   // ═══════════════════════════════════════════════════════
+  // 内容加载门（D16/D24）—— 捏人页整页的前置
+  // ═══════════════════════════════════════════════════════
+
+  /**
+   * 目录内容态。组件按它画加载态/空态。
+   *
+   * - `idle` 还没有人 await 过 `initContent()`
+   * - `loading` 首轮加载在飞
+   * - `ready` 注册表给出了非空目录
+   * - `empty` 注册表就绪但目录是空的（内容缺席 / JSON 坏了 / fetch 失败）
+   *
+   * 🔴 `empty` **不是异常**，是「这台机器上没有内容」。捏人页要画空态而不是崩 ——
+   * 注册表的逐面加载器本身永不抛（失败面保持原值），所以「加载失败」在这里
+   * 与「内容确实为空」不可区分，也不必区分。
+   */
+  /**
+   * 当前目录内容（注册表 `catalog` 面的收窄结果）。
+   *
+   * 🔴 **必须是 ref 而不是直接读 `getContentRegistry()`**：注册表是模块级普通变量、
+   * 不带响应式，computed 里直接读它会在首次求值后永久缓存住空目录 —— 表现是
+   * 内容加载完了但捏人页还是空的。装包重灌注册表时同理，靠 `initContent(true)` 重取。
+   *
+   * 🔴 构造时**同步**取一次：boot 链（`loadProjectDefaults`）已经灌过注册表，
+   * 于是常态下 store 一建好就有内容，加载门只在冷路径（直接进捏人页 URL / 装包后）
+   * 才真的等。少了这一步，每次进页面都会先闪一帧空列表。
+   */
+  const catalog = ref<CatalogData>(parseCatalogData(getContentRegistry().catalog));
+
+  /** 当前血脉集（注册表 `bloodlines` 面，D25②）——同样为了响应式才落 ref */
+  const bloodlineSet = ref<BloodlineSet>(getBloodlineSet());
+
+  /**
+   * 纪元名（注册表 `branding` 面，D9）。
+   *
+   * 🔴 引擎里**没有**具体纪元名（`time-system` 的缺省是中性空串）。真值由内容侧供给，
+   * 内容缺席时落 `NEUTRAL_BRANDING.era`（中性名，不是 IP 纪元名）。
+   * 存档创建时它被盖章进 `SaveProfile.gameTime.era`，此后只读存档（D9）。
+   *
+   * 🔴 解析走 `branding-defaults` 的 `getBranding()`（品牌面**唯一**解析处，D26），
+   * 不在这里另写一个「读 raw.era」—— 两个解析器就是漂移的来路。
+   */
+  const era = ref(getBranding().era);
+
+  const contentStatus = ref<'idle' | 'loading' | 'ready' | 'empty'>(
+    isCatalogPopulated(catalog.value) ? 'ready' : 'idle',
+  );
+
+  /** 首轮加载的 memo（幂等闸）；`initContent(true)` 清掉它重取 */
+  let contentPromise: Promise<void> | null = null;
+
+  /**
+   * 捏人页的内容加载门（幂等、**永不抛**）。
+   *
+   * 组件在 `onMounted` 里 `await store.initContent()`；重复调用零 I/O。
+   * 注册表自身的 fetch 已经逐面兜底并上报 `contentStatus`（content-store），
+   * 这里只负责把它的结果搬进响应式 ref 并给出四态。
+   *
+   * @param force 装包/卸载后重取（跳过 memo）
+   */
+  function initContent(force = false): Promise<void> {
+    if (force) contentPromise = null;
+    if (contentPromise) return contentPromise;
+    // 已经同步拿到内容就不画加载态（否则每次进页面都闪一下「正在加载」）
+    if (contentStatus.value !== 'ready') contentStatus.value = 'loading';
+    contentPromise = (async () => {
+      try {
+        await ensureContentRegistryLoaded();
+      } catch {
+        /* ensureContentRegistryLoaded 自己就永不抛；这里只兜最外层意外 */
+      }
+      const reg = getContentRegistry();
+      catalog.value = parseCatalogData(reg.catalog);
+      bloodlineSet.value = getBloodlineSet();
+      era.value = getBranding().era;
+      contentStatus.value = isCatalogPopulated(catalog.value) ? 'ready' : 'empty';
+    })();
+    return contentPromise;
+  }
+
+  // ═══════════════════════════════════════════════════════
   // 难度
   // ═══════════════════════════════════════════════════════
   const difficulty = ref<DifficultyPreset | null>(null);
   const reincarnationPoints = ref(1000);
 
   function selectDifficulty(id: string) {
-    const preset = DIFFICULTY_PRESETS.find((d) => d.id === id);
+    const preset = findDifficultyPreset(id);
     if (preset) {
       difficulty.value = preset;
       reincarnationPoints.value = preset.points;
@@ -185,35 +277,23 @@ export const useCreateStore = defineStore('create', () => {
   /** 补充说明 */
   const extra = ref('');
 
-  // 扁平化地点列表（从级联树提取）
-  function flattenLocations(
-    nodes: typeof START_LOCATIONS,
-    prefix = '',
-  ): { label: string; value: string }[] {
-    const result: { label: string; value: string }[] = [];
-    for (const n of nodes) {
-      const label = prefix ? `${prefix} > ${n.label}` : n.label;
-      if (!n.children || n.children.length === 0) {
-        result.push({ label, value: n.value });
-      } else {
-        result.push(...flattenLocations(n.children, label));
-      }
-    }
-    return result;
-  }
-  const flatLocationOptions = computed(() => flattenLocations(START_LOCATIONS));
+  /** 起始地级联树（内容侧） */
+  const startLocationTree = computed(() => catalog.value.startLocations);
+  /** 扁平化地点列表（叶子；树 → `{ label: '洲 > 国 > 城', value }`） */
+  const flatLocationOptions = computed(() => flattenLocationTree(catalog.value.startLocations));
 
+  // 🔴 血脉走 `bloodlineSet` 这个 ref 而不是无参 `getBloodlineList()`（D25②/T10）：
+  //    后者同步读模块级注册表，而注册表不是响应式的 —— computed 会把首次求值时
+  //    那份空集永久缓存住，内容加载完了种族下拉仍然只有「自定义」一项。
   const raceOptions = computed(() => {
-    const bloodlines = getBloodlineList();
+    const bloodlines = getBloodlineList(bloodlineSet.value);
     return [
       ...bloodlines.map((b) => ({ label: b.name, value: b.name })),
       { label: '自定义', value: '自定义' },
     ];
   });
 
-  const identityOptions = computed(() => {
-    return [...Object.keys(DEFAULT_IDENTITY_COSTS).filter((k) => k !== '自定义'), '自定义'];
-  });
+  const identityOptions = computed(() => costTableOptions(catalog.value.identityCosts));
 
   // ═══════════════════════════════════════════════════════
   // 等级 & 属性 (→ 变量路径) — 对齐原版 custom_start_index.html
@@ -307,14 +387,8 @@ export const useCreateStore = defineStore('create', () => {
   const destinyPoints = ref(0);
   const money = ref(0);
 
-  const raceCost = computed(() => {
-    const key = race.value === '自定义' ? '自定义' : race.value;
-    return DEFAULT_RACE_COSTS[key] ?? 80;
-  });
-  const identityCost = computed(() => {
-    const key = identity.value === '自定义' ? '自定义' : identity.value;
-    return DEFAULT_IDENTITY_COSTS[key] ?? 80;
-  });
+  const raceCost = computed(() => lookupCost(catalog.value.raceCosts, race.value));
+  const identityCost = computed(() => lookupCost(catalog.value.identityCosts, identity.value));
   const equipmentCost = computed(() =>
     selectedEquipments.value.reduce((s, e) => s + (e.cost || 0), 0),
   );
@@ -344,10 +418,10 @@ export const useCreateStore = defineStore('create', () => {
   // 命定核心
   // ═══════════════════════════════════════════════════════
   const destinyCore = ref<DestinyCore | null>(null);
-  const destinyCorePool = DEFAULT_DESTINY_CORES;
+  const destinyCorePool = computed(() => catalog.value.destinyCores);
 
   function selectDestinyCore(coreId: string) {
-    const core = DEFAULT_DESTINY_CORES.find((c) => c.id === coreId);
+    const core = catalog.value.destinyCores.find((c) => c.id === coreId);
     destinyCore.value = core ?? null;
   }
 
@@ -724,48 +798,23 @@ export const useCreateStore = defineStore('create', () => {
   // 背景分类 (4 侧栏: 通用/身份/种族/地区)
   // ═══════════════════════════════════════════════════════
 
-  const activeBackgroundCategory = ref<'universal' | 'identity' | 'race' | 'location'>('universal');
+  const activeBackgroundCategory = ref<BackgroundCategory>('universal');
 
+  // 计数与筛选共用 `classifyBackground`（start-catalog-mechanics）：
+  // 各写一套判定就会出现「侧栏写 7 条、点进去只有 5 条」那种对不上。
   const backgroundCategories = computed(() => {
-    const cats = [
-      { key: 'universal' as const, label: '通用开局', count: 0 },
-      { key: 'identity' as const, label: '身份限定', count: 0 },
-      { key: 'race' as const, label: '种族限定', count: 0 },
-      { key: 'location' as const, label: '地区限定', count: 0 },
+    const counts = countBackgroundsByCategory(catalog.value.backgrounds);
+    return [
+      { key: 'universal' as const, label: '通用开局', count: counts.universal },
+      { key: 'identity' as const, label: '身份限定', count: counts.identity },
+      { key: 'race' as const, label: '种族限定', count: counts.race },
+      { key: 'location' as const, label: '地区限定', count: counts.location },
     ];
-    for (const bg of DEFAULT_BACKGROUNDS) {
-      if (bg.requiredIdentity) cats[1].count++;
-      else if (bg.requiredRace) cats[2].count++;
-      else if (bg.requiredLocation || bg.requiredDestinyCore) cats[3].count++;
-      else cats[0].count++;
-    }
-    return cats;
   });
 
-  const filteredBackgrounds = computed(() => {
-    let pool = DEFAULT_BACKGROUNDS;
-    switch (activeBackgroundCategory.value) {
-      case 'universal':
-        pool = pool.filter(
-          (bg) =>
-            !bg.requiredRace &&
-            !bg.requiredIdentity &&
-            !bg.requiredLocation &&
-            !bg.requiredDestinyCore,
-        );
-        break;
-      case 'identity':
-        pool = pool.filter((bg) => !!bg.requiredIdentity);
-        break;
-      case 'race':
-        pool = pool.filter((bg) => !!bg.requiredRace);
-        break;
-      case 'location':
-        pool = pool.filter((bg) => !!bg.requiredLocation || !!bg.requiredDestinyCore);
-        break;
-    }
-    return pool;
-  });
+  const filteredBackgrounds = computed(() =>
+    filterBackgroundsByCategory(catalog.value.backgrounds, activeBackgroundCategory.value),
+  );
 
   /** 检查单个背景是否满足所有限定条件 */
   function checkBackgroundConditions(bg: BackgroundTemplate): {
@@ -1010,12 +1059,19 @@ export const useCreateStore = defineStore('create', () => {
     }
   }
 
-  /** AI 未输出 timerange 时的兜底区间（基准 = 纪元年 488；正常路径由 createOutlineFromAgent 用 AI 的 parsed.timeRange） */
+  /**
+   * AI 未输出 timerange 时的兜底区间（基准 = 纪元年 488；正常路径由 createOutlineFromAgent
+   * 用 AI 的 parsed.timeRange）。
+   *
+   * 🔴 纪元名取自内容侧（D9），**不许写死**。内容缺席时 `era` 是空串，
+   * 于是这里退化成「0488年01月01日」—— 一眼看得出「纪元名没接上」，
+   * 而一个看着合理的硬编码缺省会把接线漏洞伪装成正常。
+   */
   function buildOutlineTimeRange(): { start: string; end: string } {
     const years = plotMode.value === 'main' ? plotDurationYears.value : 1;
     const startYear = String(GAME_EPOCH_YEAR).padStart(4, '0');
     const endYear = String(GAME_EPOCH_YEAR + Math.max(1, years)).padStart(4, '0');
-    return { start: `复兴纪元${startYear}年01月01日`, end: `复兴纪元${endYear}年12月30日` };
+    return { start: `${era.value}${startYear}年01月01日`, end: `${era.value}${endYear}年12月30日` };
   }
 
   /** 历史入栈（最多 5 版，超出丢最旧） */
@@ -1497,23 +1553,21 @@ export const useCreateStore = defineStore('create', () => {
       lines.push(substituteUser(customBackgroundText.value.trim()));
     }
 
-    // 开局时间（时间戳基准 = 复兴纪元488年01月01日，开局时刻 08:00；供 memory_summary 等 Agent 作为时间锚点）
+    // 开局时间（时间戳基准 = 纪元年 488年01月01日，开局时刻 08:00；供 memory_summary 等
+    // Agent 作为时间锚点）。纪元名由内容侧供给（D9），此处不写死。
     lines.push('');
     lines.push('--- 开局时间 ---');
-    lines.push(formatGameTime(createDefaultTime()));
+    lines.push(formatGameTime(createDefaultTime(era.value)));
 
-    // 命定核心
+    // 起源印记（D9）——**可选的通用区块**：内容侧没给命定核心/起源设定时整块不出现。
     // 优先用 UI 捏人选中的 system_core 世界书条目（selectedSystemCoreEntry）；
-    // 兼容旧的 destinyCore 对象（DestinyCore Pool，保留兜底）。
-    if (selectedSystemCoreEntry.value) {
-      const core = selectedSystemCoreEntry.value;
+    // 兼容旧的 DestinyCore 池对象（保留兜底）。
+    // 🔴 措辞刻意保持通用奇幻、不含任何专有名词：具体叫什么由内容侧的条目名决定。
+    const originMarkName = selectedSystemCoreEntry.value?.name ?? destinyCore.value?.name ?? '';
+    if (originMarkName) {
       lines.push('');
-      lines.push(`--- 命定之灵：「${core.name}」---`);
-      lines.push(`命定核心「${core.name}」已激活，详细内容参见世界书。`);
-    } else if (destinyCore.value) {
-      lines.push('');
-      lines.push(`--- 命定之灵：「${destinyCore.value.name}」---`);
-      lines.push(`命定核心「${destinyCore.value.name}」已激活，详细内容参见世界书。`);
+      lines.push(`--- 起源印记：「${originMarkName}」---`);
+      lines.push(`起源印记「${originMarkName}」已在此刻苏醒，其具体表现参见世界书对应条目。`);
     }
 
     // 角色补充信息
@@ -1534,11 +1588,16 @@ export const useCreateStore = defineStore('create', () => {
 
     // 收尾
     // 真机迭代2: 首轮叙事 = 开局剧情的"复述+续写"（以开局场景为舞台重新演绎再推进），
-    // 且命定核心的激活必须在开场叙事中体现（世界书条目有具体表现），不再指示"跳过不复述"。
+    // 不再指示"跳过不复述"。
+    // 🔴 起源印记那一句**跟着区块一起可选**（D9）：没有印记时还留着"必须展现其苏醒"
+    //    的指令，等于让模型去演一件根本不存在的事。
     lines.push('');
     lines.push('---');
+    const originMarkClause = originMarkName
+      ? '起源印记的苏醒是这段开场的一部分，必须在叙事中具体展现其显现的过程与表征（表现细节参见世界书对应条目）。'
+      : '';
     lines.push(
-      `以上是${charName}的角色设定与开局剧情。首轮叙事请以「开局剧情」描写的时间地点为舞台：先将这段开场以你的笔触重新演绎（可扩写细节与氛围，不可改变既定事实），再自然续写后续发展。命定核心的激活是这段开场的一部分，必须在叙事中具体展现其苏醒的过程与表征（表现细节参见世界书对应条目）。`,
+      `以上是${charName}的角色设定与开局剧情。首轮叙事请以「开局剧情」描写的时间地点为舞台：先将这段开场以你的笔触重新演绎（可扩写细节与氛围，不可改变既定事实），再自然续写后续发展。${originMarkClause}`,
     );
 
     return lines.join('\n');
@@ -1588,7 +1647,9 @@ export const useCreateStore = defineStore('create', () => {
     // customFields.destinyPoints，游戏内 FP(SaveProfile.fp) 从未拿到这笔，开局兑换的 FP 丢失。
     if (destinyPoints.value > 0) {
       const { getProfile, addFP } = await import('@engine/save-profile');
-      const profile = await getProfile(saveId);
+      // 🔴 era 必须透传（T12 的 D9 线程化）：SaveProfile 是惰性创建的，这里是生产上
+      // 唯一的创建点。不传就等于让新档的纪元名落成空串，而存档一旦盖章就永不重读内容包。
+      const profile = await getProfile(saveId, era.value);
       await addFP(profile, destinyPoints.value, '开局兑换的命运点', 'other');
     }
 
@@ -1836,6 +1897,11 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   return {
+    // 内容加载门（D16/D24）
+    contentStatus,
+    initContent,
+    catalog,
+    era,
     // 步骤
     currentStep,
     stepValid,
@@ -1857,7 +1923,8 @@ export const useCreateStore = defineStore('create', () => {
     identityOptions,
     startLocation,
     customStartLocation,
-    START_LOCATIONS,
+    // 起始地树：内容侧供给，名字保持 START_LOCATIONS 以免动 8 个模板消费点
+    START_LOCATIONS: startLocationTree,
     flatLocationOptions,
     GENDER_OPTIONS,
     // 角色补充信息

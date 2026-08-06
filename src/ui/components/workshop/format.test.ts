@@ -6,8 +6,12 @@
  * 自己遇到了几个不同的问题 —— 而「N 项未导入」这三个字只属于 `dropped`。
  */
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { groupWorkshopNotes, workshopNote } from '@engine/workshop-types';
+import { setWorkshopConfig } from '../../lib/workshop-client';
+
+// 工坊配置是模块级状态（D41）：用例改过就得还原，否则串到隔壁文件
+afterEach(() => setWorkshopConfig({ apiBase: '', loginHint: '' }));
 import {
   baseTagClass,
   baseTagOf,
@@ -150,13 +154,22 @@ describe('登录相关文案（D25）', () => {
     expect(text).not.toContain('出了问题');
   });
 
-  it('登录失败：上游原话照登，后面补上服务器门槛这个前提', () => {
+  it('登录失败：上游原话照登，后面补上配置里给的前提句（D41）', () => {
+    setWorkshopConfig({ loginHint: '登录需要你已加入某个 Discord 服务器' });
     const text = describeLoginFailure('你不在允许的服务器中');
     expect(text).toContain('你不在允许的服务器中');
-    expect(text).toContain('命定之诗');
+    expect(text).toContain('登录需要你已加入某个 Discord 服务器');
+  });
+
+  it('🔴 没配前提句就一个字都不补 —— 宁可不说，也别说一句假话（D41）', () => {
+    // 这句此前写死了某个具体的服务器名。社区源已是配置项，换一个源它就成了假话，
+    // 而假话恰好出现在用户最需要知道「我到底还差什么」的时刻。
+    setWorkshopConfig({ loginHint: '' });
+    expect(describeLoginFailure('你不在允许的服务器中')).toBe('你不在允许的服务器中');
   });
 
   it('上游一句话都没给时也不能只弹一个空串', () => {
+    setWorkshopConfig({ loginHint: '' });
     expect(describeLoginFailure('')).toContain('登录失败');
   });
 

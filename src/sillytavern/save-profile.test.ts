@@ -104,8 +104,33 @@ describe('getProfile', () => {
 
     expect(result).toBe(created);
     expect(mockGetSaveProfile).toHaveBeenCalledWith('save_2');
-    expect(mockCreateDefaultSaveProfile).toHaveBeenCalledWith('save_2');
+    expect(mockCreateDefaultSaveProfile).toHaveBeenCalledWith('save_2', undefined);
     expect(mockSaveSaveProfile).toHaveBeenCalledWith(created);
+  });
+
+  // D9: era 是建档时的盖章参数 —— 只在「不存在 → 新建」那一支往下传。
+  it('新建时把调用方给的 era 透传给 createDefaultSaveProfile（D9）', async () => {
+    mockGetSaveProfile.mockResolvedValue(undefined);
+    const created = makeDefaultProfile('save_era');
+    mockCreateDefaultSaveProfile.mockReturnValue(created);
+    mockSaveSaveProfile.mockResolvedValue(undefined);
+
+    await getProfile('save_era', '某某纪元');
+
+    expect(mockCreateDefaultSaveProfile).toHaveBeenCalledWith('save_era', '某某纪元');
+  });
+
+  // D9: 存量存档一律读自己那份 —— 读路径上传 era 也绝不改写既有档案。
+  it('存量存档不受传入 era 影响（D9）', async () => {
+    const existing = makeDefaultProfile('save_old');
+    existing.gameTime.era = '旧纪元';
+    mockGetSaveProfile.mockResolvedValue(existing);
+
+    const result = await getProfile('save_old', '新纪元');
+
+    expect(result.gameTime.era).toBe('旧纪元');
+    expect(mockCreateDefaultSaveProfile).not.toHaveBeenCalled();
+    expect(mockSaveSaveProfile).not.toHaveBeenCalled();
   });
 
   it('saves the newly created default profile before returning', async () => {

@@ -20,7 +20,7 @@ import type { WorkshopProject } from '@engine/types';
 import type { InstallConflict, InstallPlan } from '@engine/workshop-types';
 import type { WorkshopUpdateDiff } from '@engine/workshop-diff';
 import WorkshopPage from './WorkshopPage.vue';
-import { fetchProject, listProjects } from '../../lib/workshop-client';
+import { fetchProject, listProjects, setWorkshopConfig } from '../../lib/workshop-client';
 
 // ── 网络层：整层替掉，一发请求都不许出去 ──
 vi.mock('../../lib/workshop-client', async () => {
@@ -189,6 +189,12 @@ const CONFLICT: InstallConflict = {
 beforeEach(() => {
   vi.clearAllMocks();
   setActivePinia(createPinia());
+  // D41：社区源是运行时配置且默认 unset —— 不配上，本页渲染的是「未配置社区源」空态，
+  // 登录位/浏览/投稿四个入口一个都不出现（那条空态本身另有用例覆盖）
+  setWorkshopConfig({
+    apiBase: 'https://workshop.test',
+    loginHint: '登录需要你已加入某个 Discord 服务器',
+  });
   state.projects = [];
   state.ready = true;
   h.fns.init.mockResolvedValue(undefined);
@@ -210,6 +216,37 @@ function findBodyButton(text: string): HTMLButtonElement | undefined {
     b.textContent?.includes(text),
   ) as HTMLButtonElement | undefined;
 }
+
+describe('WorkshopPage — 未配置社区源（D41）', () => {
+  beforeEach(() => setWorkshopConfig({ apiBase: '', loginHint: '' }));
+
+  it('🔴 渲染空态而不是报错，四个网络入口一个都不出现', async () => {
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+
+    expect(wrapper.find('.wk-unconfigured').exists()).toBe(true);
+    // 浏览 / 投稿 / 审核 / Discord 登录 —— 全都是会发请求的入口
+    expect(findButton(wrapper, '浏览工坊')).toBeUndefined();
+    expect(findButton(wrapper, 'Discord 登录')).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('🔴 不碰社交层 —— social.init 会去注册 token provider 并恢复登录态', async () => {
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    expect(socialFns.init).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('已装列表照常渲染 —— 之前装过的项目还得能看能卸', async () => {
+    state.projects = [makeProject()];
+    const wrapper = mount(WorkshopPage);
+    await flushPromises();
+    expect(h.fns.init).toHaveBeenCalled();
+    expect(wrapper.text()).toContain('已安装');
+    wrapper.unmount();
+  });
+});
 
 describe('WorkshopPage', () => {
   it('挂载时踢一脚 store.init，并渲染「浏览工坊」入口', async () => {
@@ -391,8 +428,8 @@ describe('WorkshopPage', () => {
 
     const live = wrapper.find('[aria-live="polite"]').text();
     expect(live).toContain('你不在允许的服务器中');
-    // 光有上游原话说不清「我该怎么办」
-    expect(live).toContain('命定之诗');
+    // 光有上游原话说不清「我该怎么办」—— 前提句来自社区源配置（D41）
+    expect(live).toContain('登录需要你已加入某个 Discord 服务器');
     wrapper.unmount();
   });
 

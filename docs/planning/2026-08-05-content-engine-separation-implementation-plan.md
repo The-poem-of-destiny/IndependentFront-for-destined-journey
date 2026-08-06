@@ -327,8 +327,9 @@ PackBaseline / ContentStatus` 类型。
    🔴 **`reference/` 全树离场（审计 #1）**：瘦身件（卡片 JSON / world_book_index /
    audit_report / agent 流程测试 / 战斗样本 / HTML 参考页 / 各 .txt）→
    `_private-staging/reference/`；三类 ✋ 件（两份 .jsonl 对局导出、游戏实例*、角色生成.txt）
-   按 T0.3 裁定，默认 **`git rm`（历史留档即归档）**。`.gitignore`/`.prettierignore`/
-   `eslint.config.js` 里的 reference 条目相应清理。
+   ✅ **主人已裁定（2026-08-06）：同样迁进 `_private-staging/reference/`**，不 `git rm` ——
+   `reference/` 是**整树离场、无例外**（原「默认 git rm」作废，见设计 §3.1 的裁定框）。
+   `.gitignore`/`.prettierignore`/`eslint.config.js` 里的 reference 条目相应清理。
 2. `vite.config.ts`：无条件读中间件删除；`POEM_CONTENT_DIR` 条件 overlay（读 + PUT 门控 +
    define 标志）+ `configurePreviewServer` 挂 BFF（D14+D15）；watch ignored 调整；
    「保存为默认」按钮按 define 标志隐藏。
@@ -389,8 +390,12 @@ PackBaseline / ContentStatus` 类型。
 
 - **设计**：§3.1（`data/` 形状铁律）、D3。建仓（✋ T0.3 裁定）；`_private-staging/` 全量迁入
   （data/ 树 + content/ + tests/ + tools/ + docs/ + reference/ 瘦身件）；README（创作工作流：
-  `POEM_CONTENT_DIR` 指法 + PUT 写回说明）。🔴 §3.1 三类不迁件（.jsonl 对局 / 游戏实例 /
-  角色生成.txt）按 T0.3 裁定处置，默认留本仓归档。
+  `POEM_CONTENT_DIR` 指法 + PUT 写回说明）。✅ §3.1 那三类件（.jsonl 对局 / 游戏实例 /
+  角色生成.txt）主人已裁定**一并迁入**（2026-08-06），`reference/` 无例外。
+  🔴 随之两条**必须一起做**：① 那 105 MB **从未做过 PII / 密钥审查** —— 私有仓 CI 的
+  密钥扫描面要覆盖到它，否则它只是换个仓库继续没人看；② 私有仓 CI 每次拉 117 MB，
+  慢到难以忍受就上 Git LFS 或挪进不参与 CI 的目录，**但不许拿「太大」当理由退回删除**
+  （那是替主人重做一次已经做过的决定）。
 
 #### T22 pack 构建器 + 私有 CI【L】
 

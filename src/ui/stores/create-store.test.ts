@@ -12,11 +12,119 @@ import { useSettingsStore } from './settings-store';
 import { patchAgentSettings } from './agent-settings';
 import {
   DIFFICULTY_PRESETS,
-  DEFAULT_EQUIPMENT_POOL,
-  DEFAULT_ITEM_POOL,
-  DEFAULT_BACKGROUNDS,
-  DEFAULT_DESTINY_CORES,
+  type CatalogItem,
+  type BackgroundTemplate,
+  type DestinyCore,
+  type CascaderOption,
 } from '@engine/start-catalog';
+import { setContentRegistry } from './content-store';
+import { NEUTRAL_BRANDING } from '../branding-defaults';
+
+// ═══════════════════════════════════════════════════════════
+// 目录 fixture（D24）
+//
+// 🔴 捏人目录已抽出 TS，住在 `data/content/catalog.json`（内容侧，可被内容包整份替换）。
+//    本文件因此**一条真实内容都不引用** —— 断言「某把真实武器叫什么」等于把内容
+//    焊进测试，换个内容包就红一片，而那时红的不是 bug。
+//    下面这份占位目录是通用奇幻，只为把机制跑通：
+//    武器/防具各两件（覆盖「同类多选」）、一件贵到地狱档买不起的、四类背景各一条。
+// ═══════════════════════════════════════════════════════════
+
+const FIXTURE_ERA = '占位纪元';
+
+function mkEquip(id: string, type: string, cost: number): CatalogItem {
+  return {
+    id,
+    name: `占位${id}`,
+    category: 'equipment',
+    type,
+    rarity: 'common',
+    tag: [],
+    effect: {},
+    description: '',
+    cost,
+  };
+}
+
+const FIXTURE_EQUIPMENT_POOL: CatalogItem[] = [
+  mkEquip('剑', '武器', 30),
+  mkEquip('斧', '武器', 40),
+  mkEquip('甲', '防具', 20),
+  mkEquip('盔', '防具', 25),
+  mkEquip('神兵', '武器', 5000), // 地狱档（100 点）买不起 —— canSelect 闸门用
+];
+
+const FIXTURE_ITEM_POOL: CatalogItem[] = [
+  {
+    id: 'it_药水',
+    name: '占位药水',
+    category: 'item',
+    type: '消耗品',
+    rarity: 'common',
+    tag: [],
+    effect: {},
+    description: '',
+    cost: 10,
+    quantity: 1,
+  },
+];
+
+const FIXTURE_START_LOCATION = '占位大陆-占位王国-占位城';
+
+const FIXTURE_DESTINY_CORES: DestinyCore[] = [
+  { id: 'dc_placeholder', name: '占位核心', author: 'fixture', theme: 'fixture' },
+];
+
+const FIXTURE_BACKGROUNDS: BackgroundTemplate[] = [
+  { id: 'bg_通用', name: '占位通用', description: '', fullText: '占位通用开局正文' },
+  { id: 'bg_身份', name: '占位身份', description: '', fullText: '', requiredIdentity: '占位学徒' },
+  { id: 'bg_种族', name: '占位种族', description: '', fullText: '', requiredRace: '占位羽族' },
+  {
+    id: 'bg_地区',
+    name: '占位地区',
+    description: '',
+    fullText: '',
+    requiredLocation: FIXTURE_START_LOCATION,
+  },
+];
+
+const FIXTURE_START_LOCATIONS: CascaderOption[] = [
+  {
+    label: '占位大陆',
+    value: 'placeholder-continent',
+    children: [
+      {
+        label: '占位王国',
+        value: 'placeholder-kingdom',
+        children: [{ label: '占位城', value: FIXTURE_START_LOCATION }],
+      },
+    ],
+  },
+];
+
+const FIXTURE_CATALOG = {
+  version: 1,
+  destinyCores: FIXTURE_DESTINY_CORES,
+  equipmentPool: FIXTURE_EQUIPMENT_POOL,
+  itemPool: FIXTURE_ITEM_POOL,
+  skillPool: [],
+  backgrounds: FIXTURE_BACKGROUNDS,
+  raceCosts: { 人类: 0, 占位羽族: 30, 自定义: 80 },
+  identityCosts: { 非贵族平民: 0, 占位学徒: 10, 自定义: 80 },
+  startLocations: FIXTURE_START_LOCATIONS,
+};
+
+/** 把 fixture 灌进内容注册表（store 构造时同步读它） */
+function seedFixtureRegistry() {
+  setContentRegistry({
+    catalog: FIXTURE_CATALOG,
+    locations: undefined,
+    bloodlines: undefined,
+    namePools: undefined,
+    markers: undefined,
+    branding: { era: FIXTURE_ERA },
+  });
+}
 
 // AgentClient mock — 大纲生成链测试用（可控响应队列）
 const { chatMock } = vi.hoisted(() => ({ chatMock: vi.fn() }));
@@ -56,6 +164,9 @@ beforeEach(() => {
 
 function makeStore() {
   setActivePinia(createPinia());
+  // 🔴 必须在 `useCreateStore()` **之前**灌：store 构造时同步读一次注册表
+  //    （常态下 boot 已灌好，这里模拟的就是那个状态）。
+  seedFixtureRegistry();
   return useCreateStore();
 }
 
@@ -95,6 +206,78 @@ describe('难度系统', () => {
     store.selectDifficulty('nonexistent');
     expect(store.difficulty).toBeNull();
     expect(store.reincarnationPoints).toBe(1000); // 默认值不变
+  });
+});
+
+// ===== 内容加载门（D16/D24）=====
+
+describe('内容加载门 —— 目录来自注册表而不是编译期常量', () => {
+  /** 灌一份指定的注册表并新建 store（绕开 makeStore 的固定 fixture） */
+  function storeWith(catalog: unknown, branding: unknown = { era: FIXTURE_ERA }) {
+    setActivePinia(createPinia());
+    setContentRegistry({
+      catalog,
+      locations: undefined,
+      bloodlines: undefined,
+      namePools: undefined,
+      markers: undefined,
+      branding,
+    });
+    return useCreateStore();
+  }
+
+  it('注册表有内容 → 构造即 ready，六个消费点全都读到它', () => {
+    const store = storeWith(FIXTURE_CATALOG);
+    expect(store.contentStatus).toBe('ready');
+    expect(store.destinyCorePool).toEqual(FIXTURE_DESTINY_CORES);
+    expect(store.filteredBackgrounds.length).toBeGreaterThan(0);
+    expect(store.identityOptions).toContain('占位学徒');
+    expect(store.flatLocationOptions.map((o) => o.value)).toContain(FIXTURE_START_LOCATION);
+    expect(store.START_LOCATIONS).toEqual(FIXTURE_START_LOCATIONS);
+    store.race = '占位羽族';
+    expect(store.raceCost).toBe(30);
+  });
+
+  it('🔴 换一份目录 → 消费点跟着变（证明它读的是注册表，不是某个常量）', () => {
+    const store = storeWith({
+      ...FIXTURE_CATALOG,
+      destinyCores: [{ id: 'dc_other', name: '另一枚', author: 'x', theme: 'y' }],
+      raceCosts: { 占位羽族: 999 },
+    });
+    expect(store.destinyCorePool.map((c) => c.id)).toEqual(['dc_other']);
+    store.race = '占位羽族';
+    expect(store.raceCost).toBe(999);
+  });
+
+  it('注册表那一面缺席 / 坏掉 → 加载后 contentStatus=empty，各列表为空且不抛', async () => {
+    for (const bad of [undefined, null, 'broken', 42]) {
+      const store = storeWith(bad);
+      // 构造时是 idle（还没人尝试加载），走完加载门才敢下「没有内容」的结论 ——
+      // 一进页面就画空态会把「还在加载」误报成「这台机器上没内容」。
+      expect(store.contentStatus).toBe('idle');
+      await store.initContent();
+      expect(store.contentStatus).toBe('empty');
+      expect(store.destinyCorePool).toEqual([]);
+      expect(store.filteredBackgrounds).toEqual([]);
+      expect(store.flatLocationOptions).toEqual([]);
+      // 查不到的种族/身份落兜底 80，而不是 NaN/undefined
+      expect(store.raceCost).toBe(80);
+      expect(() => store.buildOpeningPrompt()).not.toThrow();
+    }
+  });
+
+  it('initContent 幂等且永不抛（fetch 在 Node 环境必失败，失败面保持原值）', async () => {
+    const store = storeWith(FIXTURE_CATALOG);
+    await expect(store.initContent()).resolves.toBeUndefined();
+    await expect(store.initContent()).resolves.toBeUndefined();
+    expect(store.contentStatus).toBe('ready');
+    expect(store.destinyCorePool).toEqual(FIXTURE_DESTINY_CORES);
+  });
+
+  it('难度档位不随内容走（机制留引擎，目录为空也照样能选）', () => {
+    const store = storeWith(undefined);
+    store.selectDifficulty('hell');
+    expect(store.reincarnationPoints).toBe(100);
   });
 });
 
@@ -353,7 +536,7 @@ describe('totalCost 消耗公式', () => {
 
   it('默认状态下 totalCost = 种族费 + 身份费', () => {
     // 人类=0, 非贵族平民=?
-    // identityCost 从 DEFAULT_IDENTITY_COSTS 查
+    // identityCost 从 目录的 identityCosts 查
     expect(store.totalCost).toBe(store.raceCost + store.identityCost);
   });
 
@@ -399,7 +582,7 @@ describe('装备选择', () => {
     store.selectDifficulty('creative'); // 1000000 点, 够用
   });
 
-  const sword = DEFAULT_EQUIPMENT_POOL.find((e) => e.type === '武器')!;
+  const sword = FIXTURE_EQUIPMENT_POOL.find((e) => e.type === '武器')!;
 
   it('添加武器应成功', () => {
     if (sword) {
@@ -410,7 +593,7 @@ describe('装备选择', () => {
   });
 
   it('同类型防具应允许多选', () => {
-    const armors = DEFAULT_EQUIPMENT_POOL.filter((e) => e.type === '防具');
+    const armors = FIXTURE_EQUIPMENT_POOL.filter((e) => e.type === '防具');
     if (armors.length >= 2) {
       store.addEquipment(armors[0]);
       store.addEquipment(armors[1]);
@@ -422,7 +605,7 @@ describe('装备选择', () => {
     // 武器的 addEquipment 逻辑允许多个
     // 检查现有代码: addEquipment 只对非武器做替换
     // 所以多把武器是允许的
-    const weapons = DEFAULT_EQUIPMENT_POOL.filter((e) => e.type === '武器');
+    const weapons = FIXTURE_EQUIPMENT_POOL.filter((e) => e.type === '武器');
     if (weapons.length >= 2) {
       store.addEquipment(weapons[0]);
       store.addEquipment(weapons[1]);
@@ -449,7 +632,7 @@ describe('道具选择', () => {
   });
 
   it('同 id 道具应叠加 quantity', () => {
-    const item = DEFAULT_ITEM_POOL[0];
+    const item = FIXTURE_ITEM_POOL[0];
     if (item) {
       store.addItem(item);
       store.addItem(item);
@@ -461,7 +644,7 @@ describe('道具选择', () => {
   });
 
   it('removeItem 应移除指定道具', () => {
-    const item = DEFAULT_ITEM_POOL[0];
+    const item = FIXTURE_ITEM_POOL[0];
     if (item) {
       store.addItem(item);
       store.removeItem(item.id);
@@ -492,7 +675,7 @@ describe('技能选择', () => {
 
   it('canSelect 点数不足时返回 false', () => {
     store.selectDifficulty('hell'); // 100 点
-    const item = DEFAULT_EQUIPMENT_POOL.find((e) => e.cost > 100);
+    const item = FIXTURE_EQUIPMENT_POOL.find((e) => e.cost > 100);
     if (item) {
       expect(store.canSelect(item)).toBe(false);
     }
@@ -508,50 +691,44 @@ describe('背景条件检查', () => {
     store.name = '测试';
     store.race = '人类';
     store.identity = '非贵族平民';
-    store.startLocation = '大陆中东部区域-奥古斯提姆帝国-艾瑟嘉德';
+    store.startLocation = FIXTURE_START_LOCATION;
   });
 
+  // 🔴 这四条以前写成 `const bg = pool.find(...); if (bg) { … }` —— 池换成占位目录后
+  //    那个 `if` 会让「fixture 里没有这类背景」静默变成绿灯。fixture 是确定的，
+  //    所以一律 `!` 断言：找不到就当场红。
   it('无限制背景应始终通过', () => {
-    const bg = DEFAULT_BACKGROUNDS.find(
+    const bg = FIXTURE_BACKGROUNDS.find(
       (b) =>
         !b.requiredRace && !b.requiredIdentity && !b.requiredLocation && !b.requiredDestinyCore,
-    );
-    if (bg) {
-      const result = store.checkBackgroundConditions(bg);
-      expect(result.valid).toBe(true);
-      expect(result.missing).toHaveLength(0);
-    }
+    )!;
+    const result = store.checkBackgroundConditions(bg);
+    expect(result.valid).toBe(true);
+    expect(result.missing).toHaveLength(0);
   });
 
   it('种族不匹配应返回 missing', () => {
-    const bg = DEFAULT_BACKGROUNDS.find((b) => b.requiredRace && b.requiredRace !== '人类');
-    if (bg) {
-      const result = store.checkBackgroundConditions(bg);
-      expect(result.valid).toBe(false);
-      expect(result.missing.some((m) => m.includes('种族'))).toBe(true);
-    }
+    const bg = FIXTURE_BACKGROUNDS.find((b) => b.requiredRace && b.requiredRace !== '人类')!;
+    const result = store.checkBackgroundConditions(bg);
+    expect(result.valid).toBe(false);
+    expect(result.missing.some((m) => m.includes('种族'))).toBe(true);
   });
 
   it('身份不匹配应返回 missing', () => {
-    const bg = DEFAULT_BACKGROUNDS.find(
+    const bg = FIXTURE_BACKGROUNDS.find(
       (b) => b.requiredIdentity && b.requiredIdentity !== '非贵族平民',
-    );
-    if (bg) {
-      const result = store.checkBackgroundConditions(bg);
-      expect(result.valid).toBe(false);
-    }
+    )!;
+    const result = store.checkBackgroundConditions(bg);
+    expect(result.valid).toBe(false);
   });
 
   it('地点前缀匹配应通过', () => {
-    const bg = DEFAULT_BACKGROUNDS.find((b) => b.requiredLocation);
-    if (bg) {
-      // 设置地点包含 requiredLocation
-      store.startLocation = (bg.requiredLocation || '') + '-某处';
-      const result = store.checkBackgroundConditions(bg);
-      if (bg.requiredRace && store.race !== bg.requiredRace) return; // 受种族限制跳过
-      if (bg.requiredIdentity && store.identity !== bg.requiredIdentity) return;
-      expect(result.valid).toBe(true);
-    }
+    const bg = FIXTURE_BACKGROUNDS.find(
+      (b) => b.requiredLocation && !b.requiredRace && !b.requiredIdentity,
+    )!;
+    // 设置地点包含 requiredLocation
+    store.startLocation = (bg.requiredLocation || '') + '-某处';
+    expect(store.checkBackgroundConditions(bg).valid).toBe(true);
   });
 });
 
@@ -692,8 +869,8 @@ describe('buildCharacterState', () => {
   it('开局 inventory/skills 始终为空（装备/道具/技能交 item_gen 链经开场正文生成，不直接落库）', () => {
     store.selectDifficulty('creative');
     // 即使选了装备/道具，buildCharacterState 也不再直接落库
-    store.addEquipment(DEFAULT_EQUIPMENT_POOL.find((e) => e.type === '武器')!);
-    store.addItem(DEFAULT_ITEM_POOL[0]);
+    store.addEquipment(FIXTURE_EQUIPMENT_POOL.find((e) => e.type === '武器')!);
+    store.addItem(FIXTURE_ITEM_POOL[0]);
     const state = store.buildCharacterState('test-save-id');
     expect(state.inventory).toEqual([]);
     expect(state.skills).toEqual([]);
@@ -701,10 +878,10 @@ describe('buildCharacterState', () => {
 
   it('真机修(2026-07-23): 选中项写进开场正文而非直接落库（交 item_gen 生成 stats）', () => {
     store.selectDifficulty('creative');
-    const sword = DEFAULT_EQUIPMENT_POOL.find((e) => e.type === '武器')!;
-    const armor = DEFAULT_EQUIPMENT_POOL.find((e) => e.type === '防具')!;
-    const potion = DEFAULT_ITEM_POOL[0];
-    // DEFAULT_SKILL_POOL 为空数组（运行时从 baseInfo 加载），测试用手工条目
+    const sword = FIXTURE_EQUIPMENT_POOL.find((e) => e.type === '武器')!;
+    const armor = FIXTURE_EQUIPMENT_POOL.find((e) => e.type === '防具')!;
+    const potion = FIXTURE_ITEM_POOL[0];
+    // 目录的 skillPool 为空数组（运行时从 baseInfo 加载），测试用手工条目
     const skill = {
       id: 'sk_test',
       name: '灼热射线',
@@ -760,38 +937,56 @@ describe('buildOpeningPrompt', () => {
     expect(prompt).not.toContain('--- 初始装备 ---');
     expect(prompt).not.toContain('--- 初始技能 ---');
     expect(prompt).not.toContain('--- 背包物品 ---');
-    // 开局时间总是存在（纪元基准 488 年）
+    // 开局时间总是存在（纪元基准 488 年）；纪元名由内容侧 branding 面供给（D9）
     expect(prompt).toContain('--- 开局时间 ---');
-    expect(prompt).toContain('复兴纪元0488年');
+    expect(prompt).toContain(`${FIXTURE_ERA}0488年`);
+    // 🔴 D9：没有起源印记时整块不出现，收尾指令里也不许留「展现其苏醒」的悬空指令
+    expect(prompt).not.toContain('--- 起源印记');
+    expect(prompt).not.toContain('起源印记的苏醒');
+  });
+
+  it('纪元名整条取自内容侧：内容缺席时落中性默认名，绝不出现 IP 纪元名', () => {
+    setContentRegistry({
+      catalog: FIXTURE_CATALOG,
+      locations: undefined,
+      bloodlines: undefined,
+      namePools: undefined,
+      markers: undefined,
+      branding: undefined,
+    });
+    setActivePinia(createPinia());
+    const bare = useCreateStore();
+    bare.name = '测试';
+    const prompt = bare.buildOpeningPrompt();
+    // 解析与兜底都归 branding-defaults（品牌面唯一解析处），这里只断言「跟着它走」
+    expect(prompt).toContain(`${NEUTRAL_BRANDING.era}0488年`);
+    expect(prompt).not.toContain(FIXTURE_ERA);
   });
 
   it('有装备应输出装备信息', () => {
-    const eq = DEFAULT_EQUIPMENT_POOL[0];
-    if (eq) {
-      store.addEquipment(eq);
-      const prompt = store.buildOpeningPrompt();
-      expect(prompt).toContain('--- 初始装备 ---');
-      expect(prompt).toContain(eq.name);
-    }
+    const item = FIXTURE_EQUIPMENT_POOL[0];
+    store.addEquipment(item);
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).toContain('--- 初始装备 ---');
+    expect(prompt).toContain(item.name);
   });
 
-  it('有命定核心应输出命定之灵', () => {
-    const core = DEFAULT_DESTINY_CORES[0];
-    if (core) {
-      store.selectDestinyCore(core.id);
-      const prompt = store.buildOpeningPrompt();
-      expect(prompt).toContain('--- 命定之灵');
-      expect(prompt).toContain(core.name);
-    }
+  it('有起源印记应输出通用区块 + 收尾指令（D9）', () => {
+    const core = FIXTURE_DESTINY_CORES[0];
+    store.selectDestinyCore(core.id);
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).toContain('--- 起源印记');
+    expect(prompt).toContain(core.name);
+    expect(prompt).toContain('起源印记的苏醒');
   });
 
-  it('选中 system_core 世界书条目时应输出激活指针而非条目全文（命定之灵）', () => {
-    // 新的 UI 命定核心选择走 selectedSystemCoreEntry（system_core 世界书条目）
+  it('选中 system_core 世界书条目时应输出激活指针而非条目全文（起源印记）', () => {
+    // 新的 UI 起源印记选择走 selectedSystemCoreEntry（system_core 世界书条目）
     store.systemCoreEntries = [
       {
         uid: 413,
-        name: '裂命之灵',
-        content: '寄宿于灵魂深处的命运之灵，影响叙事风格。',
+        name: '占位印记',
+        content: '寄宿于灵魂深处的占位设定，影响叙事风格。',
         enabled: true,
         constant: false,
         key: [],
@@ -803,13 +998,13 @@ describe('buildOpeningPrompt', () => {
     ];
     store.selectSystemCoreEntry(413);
     const prompt = store.buildOpeningPrompt();
-    expect(prompt).toContain('--- 命定之灵：');
-    expect(prompt).toContain('裂命之灵');
+    expect(prompt).toContain('--- 起源印记：');
+    expect(prompt).toContain('占位印记');
     // e42f971 起开场白仅输出激活指针；条目全文由世界书通道注入
     // （buildEnabledWorldBookEntries → SaveSlot.metadata.enabledWorldBookEntries → worldbook-loader），
     // 避免同一内容在开场 user 消息中重复占用 token。
-    expect(prompt).toContain('命定核心「裂命之灵」已激活，详细内容参见世界书。');
-    expect(prompt).not.toContain('寄宿于灵魂深处的命运之灵');
+    expect(prompt).toContain('起源印记「占位印记」已在此刻苏醒，其具体表现参见世界书对应条目。');
+    expect(prompt).not.toContain('寄宿于灵魂深处的占位设定');
   });
 });
 

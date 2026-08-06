@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 :: ===================================================
-:: Dev launcher (Fated Poem independent frontend).
+:: Dev launcher (narrative engine frontend).
 :: Usage: npm run dev   (or double-click dev.bat)
 :: - kills stale Vite listeners on ports 5173-5179
 :: - starts Vite on the fixed port 5173
@@ -16,7 +16,7 @@ chcp 65001 >nul
 
 echo.
 echo ==============================
-echo   命定之诗 开发启动器
+echo   叙事引擎 开发启动器
 echo ==============================
 echo.
 

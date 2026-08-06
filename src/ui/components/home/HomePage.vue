@@ -6,6 +6,7 @@ import { VERSION } from '@engine/index';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import ContentStatusBanner from '../shared/ContentStatusBanner.vue';
+import { useBranding } from '../../branding-defaults';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -94,14 +95,14 @@ watch(selectedSaveId, async (id) => {
   }
 });
 
+// === 品牌面（D26）===
+// 标题 / 副标题 / 风味文字 / 制作人员署名与世界速览全部由内容包供给，
+// 未装包时是 branding-defaults 的中性值。这里**不留任何硬编码文案兜底** ——
+// 留一份就是第二套默认值，两处漂移之后没人说得清屏幕上那句是从哪来的。
+const { branding } = useBranding();
+
 // === 风味文字循环 ===
-const quotes = [
-  '命运的交响，于此奏鸣',
-  '在黄昏的余晖中，踏上命定之途',
-  '每一次抉择，都是诗篇的一行',
-  '星辰为引，长夜作伴',
-  '于灰烬中点亮前行的灯',
-];
+const quotes = computed(() => branding.value.subtitles);
 const currentQuote = ref(0);
 let quoteTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -118,9 +119,12 @@ onMounted(async () => {
   } catch {
     /* IndexedDB 可能未初始化 */
   }
-  // 风味文字循环
+  // 风味文字循环。
+  // 🔴 取模前先挡住空数组：内容包可以显式给 `subtitles: []`（刻意关掉轮播），
+  //    `x % 0` 是 NaN，索引成 NaN 之后这一行永远渲染空白且再也回不来。
   quoteTimer = setInterval(() => {
-    currentQuote.value = (currentQuote.value + 1) % quotes.length;
+    const n = quotes.value.length;
+    currentQuote.value = n > 0 ? (currentQuote.value + 1) % n : 0;
   }, 5000);
 });
 
@@ -224,9 +228,17 @@ function formatTime(ts: number) {
         <div class="title-corner title-corner-bl" aria-hidden="true" />
         <div class="title-corner title-corner-br" aria-hidden="true" />
 
+        <!--
+          标题分行由 branding 供给（1-2 行都合法）。第一行套主色、其余行套次色，
+          与原来「主 + 副」两行的视觉一致；只有一行时自然退化成单行主色。
+        -->
         <h1 class="main-title">
-          <span class="title-line-t main-line">命定之诗</span>
-          <span class="title-line-b alt-line">与黄昏之歌</span>
+          <span
+            v-for="(line, i) in branding.titleLines"
+            :key="i"
+            :class="i === 0 ? 'title-line-t main-line' : 'title-line-b alt-line'"
+            >{{ line }}</span
+          >
         </h1>
       </div>
 
@@ -234,10 +246,10 @@ function formatTime(ts: number) {
         <span class="divider-diamond" aria-hidden="true" />
       </div>
 
-      <p class="sub-title">Destined Poetry &amp; Twilight Song</p>
+      <p v-if="branding.tagline" class="sub-title">{{ branding.tagline }}</p>
 
-      <!-- 风味文字 -->
-      <div class="quote-container">
+      <!-- 风味文字（branding.subtitles 为空 = 内容包刻意关掉轮播，整块不渲染） -->
+      <div v-if="quotes.length > 0" class="quote-container">
         <transition name="quote-fade" mode="out-in">
           <p :key="currentQuote" class="flavor-quote">「{{ quotes[currentQuote] }}」</p>
         </transition>
@@ -442,17 +454,22 @@ function formatTime(ts: number) {
     <AppModal v-model:open="showCreditsModal" title="制作人员" size="sm">
       <div class="credits-content">
         <div class="credit-item"><strong>引擎开发</strong><span>Claude Code + Richard</span></div>
-        <div class="credit-item"><strong>世界观设定</strong><span>命定之诗创作组</span></div>
+        <div class="credit-item">
+          <strong>世界观设定</strong><span>{{ branding.credits }}</span>
+        </div>
         <div class="credit-item"><strong>前端 UI</strong><span>Vue 3 + Pinia + Vite</span></div>
         <div class="credit-item"><strong>数据引擎</strong><span>Dexie.js (IndexedDB)</span></div>
-        <hr class="credit-divider" />
-        <div class="world-lore">
-          <h4>阿斯塔利亚世界</h4>
-          <p class="text-muted text-sm">
-            复兴纪元 · 10大势力 · 23血脉 · 32节点地图<br />
-            普通 / 优良 / 稀有 / 史诗 / 传说 / 神话 / 唯一
-          </p>
-        </div>
+        <template v-if="branding.worldSummary.title || branding.worldSummary.lines.length">
+          <hr class="credit-divider" />
+          <div class="world-lore">
+            <h4>{{ branding.worldSummary.title }}</h4>
+            <p class="text-muted text-sm">
+              <template v-for="(line, i) in branding.worldSummary.lines" :key="i">
+                <br v-if="i > 0" />{{ line }}
+              </template>
+            </p>
+          </div>
+        </template>
       </div>
     </AppModal>
   </div>
@@ -460,7 +477,7 @@ function formatTime(ts: number) {
 
 <style scoped>
 /* ═══════════════════════════════════════
-   首页 — 命定之诗标题画面
+   首页 — 标题画面
    优雅的暗色奇幻风格
    ═══════════════════════════════════════ */
 .home-page {

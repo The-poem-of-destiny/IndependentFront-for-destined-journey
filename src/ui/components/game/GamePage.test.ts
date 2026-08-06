@@ -2,12 +2,42 @@
  * GamePage 基础渲染测试 (Phase 7e)
  * @vitest-environment jsdom
  */
+import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import GamePage from './GamePage.vue';
+import {
+  seedPlaceholderRegistry,
+  ensureContentRegistryLoaded,
+  resetContentRegistryLoadedForTests,
+} from '../../stores/content-store';
 
 enableAutoUnmount(afterEach);
+
+// GamePage 静态 import 了 MapPanel。地图弹窗一开就要真的把 OSD 建起来 ——
+// jsdom 里没有画布也没有 ResizeObserver，这里只关心「零内容能不能开」。
+vi.mock('openseadragon', () => {
+  const OpenSeadragon: any = vi.fn(() => ({
+    addHandler: vi.fn(),
+    removeHandler: vi.fn(),
+    destroy: vi.fn(),
+    isDestroyed: () => false,
+    forceResize: vi.fn(),
+    open: vi.fn(),
+    world: { getItemAt: () => null },
+    viewport: { applyConstraints: vi.fn(), panTo: vi.fn() },
+    element: document.createElement('div'),
+  }));
+  OpenSeadragon.Point = class {
+    constructor(
+      public x: number,
+      public y: number,
+    ) {}
+  };
+  OpenSeadragon.ImageTileSource = class {};
+  return { default: OpenSeadragon };
+});
 
 // Mock game store
 vi.mock('../../stores/game-store', () => ({
@@ -163,6 +193,81 @@ describe('GamePage', () => {
       document.body.innerHTML = '';
       document.body.style.overflow = '';
     }
+  });
+
+  /**
+   * D23 解耦验证：**零内容也能开地图**。
+   *
+   * 改造前 `MapPanel.vue` 静态 import 了 `data/defaults/map-marker-presets.json`，
+   * 于是 GamePage 的整条模块图都拴着那份内容文件——删文件 break build，而不是「地图是空的」。
+   * 现在标记与地点都从内容注册表来：一面都没灌注时地图弹窗照样开得起来，显示 0 标记。
+   */
+  it('内容注册表全空时地图弹窗照样开得起来（不再静态依赖 data/ 里的文件）', async () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('offline in tests');
+      }),
+    );
+    seedPlaceholderRegistry();
+    resetContentRegistryLoadedForTests();
+
+    const { useGameStore } = await import('../../stores/game-store');
+    (useGameStore as any).mockReturnValue({
+      player: null,
+      npcs: [],
+      saveProfile: null,
+      fp: 0,
+      messages: [],
+      characters: [],
+      agentLog: [],
+      pendingOptions: [],
+      isGenerating: false,
+      recentMemories: [],
+      activePlotEvents: [],
+      plotOutline: null,
+      activeCombat: null,
+      activeSave: null,
+      activeSaveId: null,
+      activeModal: 'map',
+      sidebarCollapsed: false,
+      rightPanelMode: 'status',
+      fullscreenStatus: false,
+      hasOpeningPromptConsumed: true,
+      openingPrompt: null,
+      loadSave: vi.fn(),
+      toggleSidebar: vi.fn(),
+      setRightPanel: vi.fn(),
+      toggleFullscreen: vi.fn(),
+      closeModal: vi.fn(),
+    });
+
+    const wrapper = mount(GamePage);
+    await ensureContentRegistryLoaded();
+    await flushPromises();
+
+    // AppModal 用 Teleport 挂到 body，wrapper.find 够不着
+    const badge = document.body.querySelector('.toolbar-badge');
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toBe('0 标记');
+
+    // 🔴 就地卸载 + 把 MapPanel 那几个 300/500ms 的补同步定时器等掉。
+    //    留着它们会在**测试跑完之后**触发 jsdom 的告警输出，vitest 报成
+    //    `Closing rpc while "onUserConsoleLog" was pending` —— 断言全绿但整份 exit 1。
+    wrapper.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    vi.unstubAllGlobals();
+    seedPlaceholderRegistry();
+    resetContentRegistryLoadedForTests();
   });
 });
 

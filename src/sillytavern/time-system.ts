@@ -12,7 +12,15 @@
 
 /** 游戏内时间 */
 export interface GameTime {
-  era: string; // 纪元名，如 "光辉纪元"
+  /**
+   * 纪元名 —— **纯标签**，由内容侧供给（branding 面），引擎不解释其含义（D9）。
+   *
+   * 🔴 引擎不认识任何具体纪元名：所有时间算术只用 `year/month/day/hour/minute`
+   * （见 `GAME_EPOCH_YEAR`）。era 只参与显示与解析，且**只跟着调用方给的值走** ——
+   * 任何在引擎里写死一个纪元名的地方，都会在往返（`toEpochMinutes` → `fromEpochMinutes`）
+   * 时把存档盖章的那个值冲掉。
+   */
+  era: string;
   year: number; // 1-based
   month: number; // 1-12
   day: number; // 1-30 (统一每月30天)
@@ -63,8 +71,11 @@ const MONTHS_PER_YEAR = 12;
 
 // ========== 时间戳纪元（Unix time_t 模型，最小粒度 1 分钟）==========
 /**
- * 纪元基准年：复兴纪元488年01月01日 00:00 = 第 0 分钟（时间戳 0）。
+ * 纪元基准年：第 488 年 01月01日 00:00 = 第 0 分钟（时间戳 0）。
  * 仿 Unix epoch（1970-01-01），最小粒度 1 分钟。所有比较/推进经 toEpochMinutes 归一为整数。
+ *
+ * 🔴 这是**时间算术原点**（引擎常量，D9），不是内容：它与叫什么纪元名无关，
+ * 换一份内容包也不会变 —— 变了等于所有存档的既有时间戳集体漂移。
  */
 export const GAME_EPOCH_YEAR = 488;
 /** 纪元日（488-01-01）是周几：1=周日 … 7=周六。幻想日历无外部基准，声明值。 */
@@ -76,10 +87,23 @@ const MINUTES_PER_YEAR = MONTHS_PER_YEAR * MINUTES_PER_MONTH; // 518400
 // ========== 默认时间 ==========
 
 /**
- * 创建默认起始时间（游戏开局时刻）= 复兴纪元488年01月01日 08:00（epoch 第 480 分钟）。
- * 纪元 0 点定义在 488-01-01 00:00；开局时刻 08:00 与纪元定义分离（同 Unix epoch=00:00 不代表程序 00:00 启动）。
+ * 引擎侧的中性纪元名（D9）= **空串**。
+ *
+ * 🔴 刻意不给一个「像样的」缺省名：引擎里任何具体纪元名都是内容。
+ * 真值由内容侧（branding 面）在**存档创建时盖章**进 `SaveProfile.gameTime.era`，
+ * 此后只读存档、永不活读内容包 —— 否则卸包会追溯改名每一个存档的历法。
+ * 空串还有一个好处：漏接线时显示成「0488年-…」一眼看得出来，
+ * 而一个看着合理的缺省名会把「盖章没接上」伪装成正常。
  */
-export function createDefaultTime(era: string = '复兴纪元'): GameTime {
+const NEUTRAL_ERA = '';
+
+/**
+ * 创建默认起始时间（游戏开局时刻）= 第 488 年 01月01日 08:00（epoch 第 480 分钟）。
+ * 纪元 0 点定义在 488-01-01 00:00；开局时刻 08:00 与纪元定义分离（同 Unix epoch=00:00 不代表程序 00:00 启动）。
+ *
+ * @param era 纪元名，由调用方（存档创建路径）从内容侧取；缺省为中性空串（D9）
+ */
+export function createDefaultTime(era: string = NEUTRAL_ERA): GameTime {
   return {
     era,
     year: GAME_EPOCH_YEAR,
@@ -95,10 +119,14 @@ export function createDefaultTime(era: string = '复兴纪元'): GameTime {
 
 /**
  * 解析游戏时间字符串
- * 格式: "复兴纪元001年-05月-24日-周日-15:30"
+ * 格式: "<纪元名>0001年-05月-24日-周日-15:30"
+ *
+ * 🔴 纪元名段是 `(.*?)` 而非 `(.+?)`（D9）：era 可以为空（中性缺省），
+ * 而 `formatGameTime` 对空 era 会产出 "0488年-…"。用 `.+?` 会让
+ * `parseGameTime(formatGameTime(t))` 这条既有往返不变式在空 era 下静默返回 null。
  */
 export function parseGameTime(timeStr: string): GameTime | null {
-  const regex = /^(.+?)(\d{1,4})年-(\d{2})月-(\d{2})日-(周[一二三四五六日])-(\d{2}):(\d{2})$/;
+  const regex = /^(.*?)(\d{1,4})年-(\d{2})月-(\d{2})日-(周[一二三四五六日])-(\d{2}):(\d{2})$/;
   const match = timeStr.match(regex);
   if (!match) return null;
 
@@ -139,10 +167,11 @@ export function formatGameTimeShort(time: GameTime): string {
 /**
  * 推进指定分钟 — 仿 Unix：时间戳相加再拆回。
  * toEpochMinutes(time) + minutes → fromEpochMinutes，保留原 era 标签。负数合法（可回拨/纪元前）。
+ *
+ * era 直接**传进** fromEpochMinutes（D9），不再「先被冲成硬编码值、再靠展开覆盖回来」。
  */
 export function advanceTime(time: GameTime, minutes: number): GameTime {
-  const advanced = fromEpochMinutes(toEpochMinutes(time) + minutes);
-  return { ...advanced, era: time.era };
+  return fromEpochMinutes(toEpochMinutes(time) + minutes, time.era);
 }
 
 /** 推进小时 */
@@ -159,7 +188,8 @@ export function advanceDays(time: GameTime, days: number): GameTime {
 
 /**
  * GameTime → 时间戳（分钟数）。仿 Unix mktime。
- * 纪元：复兴纪元488年01月01日 00:00 = 0。weekday 不参与（派生量，非独立时间维度）。
+ * 纪元：第 488 年 01月01日 00:00 = 0。**era 不参与**（纯标签，D9），
+ * weekday 也不参与（派生量，非独立时间维度）。
  * 负值合法（纪元前/回拨），同 Unix time_t 允许负数。
  */
 export function toEpochMinutes(time: GameTime): number {
@@ -175,8 +205,14 @@ export function toEpochMinutes(time: GameTime): number {
 /**
  * 时间戳（分钟数）→ GameTime。仿 Unix gmtime。
  * weekday 由纪元日起算（每 1440 分钟进一日，7 日一循环），非存储独立量。
+ *
+ * 🔴 era 由**调用方供给**（D9）。时间戳里没有纪元名这一维，所以这里凭空补一个具体名字
+ * 就等于「每次 epoch→GameTime 往返都把存档盖章的那个值冲掉」—— 这正是 D9 点名要拆的坑。
+ * 缺省是中性空串，不是任何具体纪元。
+ *
+ * @param era 纪元标签，原样写进返回值；缺省中性空串
  */
-export function fromEpochMinutes(em: number): GameTime {
+export function fromEpochMinutes(em: number, era: string = NEUTRAL_ERA): GameTime {
   let rem = em;
   const yearOffset = Math.floor(rem / MINUTES_PER_YEAR);
   rem -= yearOffset * MINUTES_PER_YEAR;
@@ -190,7 +226,7 @@ export function fromEpochMinutes(em: number): GameTime {
   const daysSinceEpoch = Math.floor(em / MINUTES_PER_DAY);
   const weekday = ((((daysSinceEpoch + EPOCH_WEEKDAY - 1) % 7) + 7) % 7) + 1;
   return {
-    era: '复兴纪元',
+    era,
     year: yearOffset + GAME_EPOCH_YEAR,
     month,
     day,
