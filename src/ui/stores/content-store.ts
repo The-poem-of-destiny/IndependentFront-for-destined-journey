@@ -691,13 +691,12 @@ export const useContentStore = defineStore('content', () => {
 
   /** 装包/卸载末尾统一重灌缓存与内容态 */
   async function finalizePackState(pack: ContentPack): Promise<void> {
-    const rec: ContentPackRecord = {
-      packId: pack.packId,
-      packVersion: pack.packVersion,
-      installedAt: Date.now(),
-      payload: pack,
-    };
-    setActivePackRecord(rec);
+    // 🔴 从 Dexie 读回**完整行**（含 sectionHashes/notes）再进缓存——否则模块级
+    // activePackRecord 只有 4 个字段，与落库行不一致。眼下消费方只读 payload，
+    // 但保持一致是防御性的：未来任何读 record.notes/sectionHashes 的路径不会拿到
+    // 一个「看着装了、其实少了字段」的缓存。
+    const row = await getDatabase().contentPacks.get(pack.packId);
+    setActivePackRecord(row ?? null);
     activePackId.value = pack.packId;
     activePackVersion.value = pack.packVersion;
     contentStatus.value = 'pack';
@@ -867,12 +866,10 @@ export const useContentStore = defineStore('content', () => {
       };
 
     const pack = rawPack as ContentPack;
-    // 已装同 id 且版本不同 → 交由 upgradePack（同 id 同版本则视为重装/无操作）
+    // 已装同 id → 用旧包 payload 现算基线（D18 hash 分工：冲突判定从 payload 现算）。
+    // 升级的 diff 展示由 upgradePack 单独提供（UI 层按 packId 分流）；installPack 本身
+    // 只负责「装这一版」—— 旧基线用于四态规则判「现 hash = 基线 → updated 静默覆盖」。
     const existing = await getDatabase().contentPacks.get(pack.packId);
-    if (existing && existing.packVersion !== pack.packVersion) {
-      // 版本变化走升级（diff 展示后用户确认），这里委托 upgrade 逻辑返回 diff 由 UI 决定，
-      // 但简化为：直接走同一条安装路径（升级的 diff 展示由 upgradePack 单独提供）。
-    }
 
     try {
       const packBaseline = existing ? buildPackBaseline(existing.payload) : {};

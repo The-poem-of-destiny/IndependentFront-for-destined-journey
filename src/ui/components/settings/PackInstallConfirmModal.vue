@@ -193,9 +193,7 @@ function noteTitle(kind: 'dropped' | 'degraded' | 'sideEffect'): string {
 
     <p v-if="hasConflicts" class="pk-warn">
       检测到
-      {{
-        plan?.sections ? countConflicted(plan) : 0
-      }}
+      {{ plan?.sections ? countConflicted(plan) : 0 }}
       项内容与本地现有数据不一致。覆盖这些项会<b>丢弃本地对这些内容的修改</b>。
     </p>
 
