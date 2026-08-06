@@ -168,8 +168,15 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── home/HomePage.vue            ← 游戏标题画面
 │   ├── settings/                    ← [Q-25] 13 个分区**全部**是一行子组件
 │   │   ├── SettingsPage.vue         ← 纯壳层（1995 → 约 415 行）：页头 + 主导航 + Agent 子导航
-│   │   │                               只留 activeSection / activeAgent / selectAgent /
-│   │   │                               agentModelOf 与 wb.init()（世界书分区也靠它）
+│   │   │                               只留 activeSection / activeAgent / selectSection /
+│   │   │                               selectAgent / restoreAgent / agentModelOf 与
+│   │   │                               wb.init()（世界书分区也靠它）
+│   │   │                               🔴 进 Agent 分区**恢复** `s.activeAgent`，别置 null：
+│   │   │                                  此前主导航每个按钮都无条件清掉它（含「Agent 配置」
+│   │   │                                  自己），而进分区必须点那一下 —— 于是持久化的选择
+│   │   │                                  永远读不回来，每次都落在空态。重挂载由 `v-if` 保证，
+│   │   │                                  不需要拿一次用户点击去换。恢复前先对 AGENT_LIST 验，
+│   │   │                                  查不到就退空态（陈旧 id 会让页头渲染成空白）
 │   │   │                               🔴 主导航末尾那条「创意工坊」**不是分区**：它 navigate 去
 │   │   │                                  工坊页，故不进 `navItems`、也没有对应的 `activeSection`
 │   │   │                                  值。塞进那张表 = 多一个点了只出现空白右栏的选项
@@ -180,8 +187,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │   │                            （保存/恢复默认/存为项目默认）+ 三张卡。别的分区
 │   │   │   │                            传不同 agentId 即可复用；**多根**，外框靠宿主 section
 │   │   │   │                            🔴 草稿载入必须 watch(..., { immediate: true })：
-│   │   │   │                               主导航每次点击都把 activeAgent 置 null，本组件
-│   │   │   │                               永远是新挂载，普通 watch 不触发 → 文本框空着渲染
+│   │   │   │                               分区整块是 `v-if`，每次进分区本组件都是
+│   │   │   │                               新挂载，普通 watch 不触发 → 文本框空着渲染
 │   │   │   │                               → 「保存设置」把空串写进用户提示词
 │   │   │   │                               （回归测试 AgentConfigPanel.test.ts 第一条）
 │   │   │   ├── AgentParamsCard.vue   ← API 池 + 7 个 LLM 旋钮 + 世界书卡（共用 agentCfg/setAgentField）

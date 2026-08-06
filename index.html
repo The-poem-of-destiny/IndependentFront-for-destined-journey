@@ -1,18 +1,20 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN" data-theme="obsidian">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>命定之诗与黄昏之歌</title>
-  <link rel="icon" type="image/png" sizes="256x256" href="/favicon.png" />
-  <link rel="apple-touch-icon" href="/favicon.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-</head>
-<body>
-  <div id="app"></div>
-  <script type="module" src="/src/ui/main.ts"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>命定之诗与黄昏之歌</title>
+    <link rel="icon" type="image/png" sizes="256x256" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/favicon.png" />
+    <!--
+    字体与图标一律**自托管**，这里不留任何外部 <link>（2026-08-05）。
+    以前这里挂着 fonts.googleapis.com 与 cdnjs 两个 CDN —— 那两条外链在被墙或离线时
+    不会报错，只会静默落到系统字体：设置页显示「衬线」而屏幕上是黑体，图标全变成方框。
+    现在 @font-face 由 src/ui/main.ts 引入的 @fontsource-variable/* 提供。
+    许可与署名见根目录 THIRD-PARTY-NOTICES.md，全文随 dist 分发在 /licenses/。
+  --></head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/ui/main.ts"></script>
+  </body>
 </html>

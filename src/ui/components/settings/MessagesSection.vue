@@ -27,7 +27,7 @@ function eventFilterLabel(key: string | number): string {
     <h3>消息显示</h3>
     <p class="section-desc">控制对话流中系统通知的可见性。关闭后对应类型的消息将不在正文中渲染。</p>
 
-    <AppCard padding="md" style="margin-top: 16px">
+    <AppCard padding="md">
       <h4>全局开关</h4>
       <div class="toggle-row">
         <span>显示系统通知</span>
@@ -38,11 +38,9 @@ function eventFilterLabel(key: string | number): string {
       </div>
     </AppCard>
 
-    <AppCard padding="md" style="margin-top: 12px">
+    <AppCard padding="md">
       <h4>分类控制</h4>
-      <p class="text-muted text-sm" style="margin-bottom: 12px">
-        选择哪些类型的系统事件在对话流中展示
-      </p>
+      <p class="card-desc">选择哪些类型的系统事件在对话流中展示</p>
       <div class="event-filter-grid">
         <div v-for="(enabled, key) in s.systemEventFilters" :key="key" class="toggle-row">
           <span>{{ eventFilterLabel(key) }}</span>

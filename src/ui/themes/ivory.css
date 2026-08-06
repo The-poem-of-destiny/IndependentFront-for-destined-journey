@@ -55,8 +55,7 @@
   --theme-tag-contract-bg: rgba(208, 72, 104, 0.1);
   --theme-tag-contract-text: #a03050;
 
-  --theme-font-title: 'Noto Serif SC', serif;
-  --theme-font-body: 'Noto Serif SC', serif;
+  /* 🔴 字体**不在主题里定义** —— 理由同 parchment.css，见那里的注释与 design.md §7.4 */
 
   --theme-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
   --theme-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);

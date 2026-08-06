@@ -5,7 +5,7 @@
  *
  *   `watch(() => props.agentId, loadDrafts, { immediate: true })`
  *
- * 主导航每次点击都会把 `activeAgent` 置 null，所以本组件永远是新挂载的 ——
+ * Agent 分区在 SettingsPage 里是 `v-if`，每次进分区本组件都是新挂载的 ——
  * 少了 `immediate`，两个 textarea 会空着渲染，用户随手点一下「保存设置」就把
  * **空串**写进了自己的 systemPrompt。这条 bug 不会让类型检查变红、也不会让页面
  * 报错，只会静默吃掉用户的提示词。所以下面第一组用例是真正的看门人。

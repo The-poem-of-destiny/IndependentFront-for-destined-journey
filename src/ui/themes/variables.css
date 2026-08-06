@@ -79,10 +79,19 @@
   /* 排版
      font-title:   标题/叙事衬线 — 中文古籍感的真正来源（思源宋体）
      font-display: 纯装饰衬线 — 仅用于英文副标/章节数字（Cinzel 无中文字形）
-     font-body:    UI 标签/正文无衬线 */
-  --theme-font-title: 'Noto Serif SC', serif;
-  --theme-font-display: 'Cinzel', 'Noto Serif SC', serif;
-  --theme-font-body: 'Noto Sans SC', sans-serif;
+     font-body:    UI 标签/正文无衬线
+
+     🔴 第一顺位必须是带 `Variable` 后缀的族名 —— 自托管用的是 @fontsource-variable/*，
+        它注册的 `@font-face` 就叫 `'Noto Sans SC Variable'`。写成 `'Noto Sans SC'`
+        不会报任何错，只会安静地退回系统字体（正是 2026-08-05 之前 CDN 挂掉时的症状）。
+        第二顺位保留不带后缀的名字：万一自托管文件没到位，系统里装了同名字体还能顶上。
+
+     🟡 这三行是**没有 JS 时的兜底**。真正生效的是 theme-store.initFonts() 写在
+        `<html>` 上的内联变量（design.md §7.4：字体严格由设置决定，主题不参与）。
+        改这里的值，记得同步 stores/theme-store.ts 的 FONT_STACKS。 */
+  --theme-font-title: 'Noto Serif SC Variable', 'Noto Serif SC', serif;
+  --theme-font-display: 'Cinzel Variable', 'Cinzel', 'Noto Serif SC Variable', serif;
+  --theme-font-body: 'Noto Sans SC Variable', 'Noto Sans SC', sans-serif;
 
   /* 间距 */
   --theme-spacing-xs: 4px;

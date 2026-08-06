@@ -13,8 +13,8 @@
  *    `AgentConfigPanel` 是多根的，它必须待在这层 `<section>` 里面才有外框。
  *
  * 🔴 草稿的 `watch(..., { immediate: true })` 在 `AgentConfigPanel` 里，别搬回来：
- *    主导航每次点击都把 `activeAgent` 置 null（SettingsPage 的 nav 里），
- *    所以这条链上的组件永远是**新挂载**的，普通 watch 在挂载时不触发，
+ *    本分区在 SettingsPage 里是 `v-if`，随 `activeSection` 挂载/卸载，所以这条链上
+ *    的组件每次进分区都是**新挂载**的，普通 watch 在挂载时不触发，
  *    两个 textarea 会空着渲染，接着「保存设置」把空串写进用户的提示词。
  */
 import { computed } from 'vue';

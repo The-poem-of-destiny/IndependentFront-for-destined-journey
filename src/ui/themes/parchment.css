@@ -59,8 +59,10 @@
   --theme-ascension-power: rgba(255, 152, 0, 0.1);
   --theme-ascension-law: rgba(156, 39, 176, 0.1);
 
-  --theme-font-title: 'Noto Serif SC', serif;
-  --theme-font-body: 'Noto Serif SC', serif;
+  /* 🔴 字体**不在主题里定义**（design.md §1「主题无关」/ §7.4）：字体由设置页的
+     「正文字体 / 标题字体」两格严格决定，theme-store 的 initFonts() 把它们写成
+     `<html>` 的内联变量。本主题此前把 `--theme-font-body` 改成衬线，于是换主题会
+     悄悄改掉正文字体，而设置页的下拉框还显示着原来的值 —— 主题只管颜色。 */
 
   --theme-shadow-sm: 0 1px 3px rgba(139, 115, 85, 0.12);
   --theme-shadow-md: 0 2px 8px rgba(139, 115, 85, 0.18);

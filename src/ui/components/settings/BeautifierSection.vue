@@ -219,7 +219,7 @@ function importRules() {
 
     <template v-else>
       <!-- 全局开关 -->
-      <AppCard padding="md" style="margin-top: 16px">
+      <AppCard padding="md">
         <h4>全局开关</h4>
         <div class="toggle-row">
           <span>启用输出美化</span>
@@ -231,11 +231,9 @@ function importRules() {
       </AppCard>
 
       <!-- 自动管理 -->
-      <AppCard v-if="autoManagedRules.length > 0" padding="md" style="margin-top: 12px">
+      <AppCard v-if="autoManagedRules.length > 0" padding="md">
         <h4>自动管理</h4>
-        <p class="text-muted text-sm" style="margin-bottom: 12px">
-          由世界书或角色自动激活，不可手动操作。
-        </p>
+        <p class="card-desc">由世界书或角色自动激活，不可手动操作。</p>
         <div v-for="rule in autoManagedRules" :key="rule.id" class="rule-item rule-locked">
           <div class="rule-header">
             <span class="rule-lock-icon">—</span>
@@ -247,11 +245,9 @@ function importRules() {
       </AppCard>
 
       <!-- 已启用 -->
-      <AppCard v-if="manualEnabledRules.length > 0" padding="md" style="margin-top: 12px">
+      <AppCard v-if="manualEnabledRules.length > 0" padding="md">
         <h4>已启用</h4>
-        <p class="text-muted text-sm" style="margin-bottom: 12px">
-          当前生效的规则，可手动启用/禁用。
-        </p>
+        <p class="card-desc">当前生效的规则，可手动启用/禁用。</p>
         <div v-for="rule in manualEnabledRules" :key="rule.id" class="rule-item">
           <div class="rule-header">
             <label class="toggle-label">
@@ -285,7 +281,7 @@ function importRules() {
       </AppCard>
 
       <!-- 可用规则库 -->
-      <AppCard padding="md" style="margin-top: 12px">
+      <AppCard padding="md">
         <div class="library-header" @click="toggleLibrary">
           <h4 style="margin: 0; cursor: pointer">
             可用规则库 · {{ disabledRules.length }} 条未启用
@@ -332,17 +328,14 @@ function importRules() {
             </div>
           </div>
         </template>
-        <div
-          v-if="libraryExpanded && disabledGrouped.length === 0"
-          class="text-muted text-sm"
-          style="text-align: center; padding: 16px"
-        >
-          暂无可用规则
+        <div v-if="libraryExpanded && disabledGrouped.length === 0" class="empty-tab">
+          预设规则库里的规则都已启用
+          <span class="empty-tab-hint">这里只列还没启用的，暂时空着说明没有可加的了</span>
         </div>
       </AppCard>
 
       <!-- 自定义规则 -->
-      <AppCard padding="md" style="margin-top: 12px">
+      <AppCard padding="md">
         <div
           style="
             display: flex;
@@ -354,14 +347,12 @@ function importRules() {
           <h4 style="margin: 0">自定义规则</h4>
           <AppButton variant="primary" size="sm" @click="openAdd">＋ 添加规则</AppButton>
         </div>
-        <p
-          v-if="userRules.length === 0"
-          class="text-muted text-sm"
-          style="text-align: center; padding: 24px"
-        >
-          暂无自定义规则<br />
-          <span style="font-size: 0.75rem">点击右上角添加，用正则表达式自定义输出美化</span>
-        </p>
+        <div v-if="userRules.length === 0" class="empty-tab">
+          还没有自定义规则
+          <span class="empty-tab-hint">
+            点击右上角「＋ 添加规则」，用正则表达式把模型输出里的片段改写成卡片或样式
+          </span>
+        </div>
         <div v-for="rule in userRules" :key="rule.id" class="rule-item">
           <div class="rule-header">
             <label class="toggle-label">
@@ -398,7 +389,7 @@ function importRules() {
       </AppCard>
 
       <!-- 导入/导出 -->
-      <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end">
+      <div class="rule-form-actions">
         <AppButton variant="secondary" size="sm" @click="exportRules">导出规则</AppButton>
         <AppButton variant="secondary" size="sm" @click="importRules">导入规则</AppButton>
       </div>
@@ -607,5 +598,33 @@ function importRules() {
 .toggle-input:checked + .toggle-slider::before {
   transform: translateX(18px);
   background: var(--theme-primary-text);
+}
+/* ═══ 本该来自 settings-chrome.css 的两条 ═══
+ *
+ * 🔴 本分区是 13 个里**唯一没有** `<style scoped src="./settings-chrome.css">` 的，
+ *    所以共用外壳的规则一条都够不着（父组件的 scoped 样式只能命中子组件根节点）。
+ *    直接补 import 会把共用的 `.toggle-slider` 也带进来，而本分区自带一套**不同实现**
+ *    （`::before` 做旋钮、开启时是金色；共用那套是 `::after`、开启时是绿色），
+ *    两套叠在一起会出现两个旋钮。统一成一套是独立一件事，需要真机走查，不在本轮。
+ *
+ *    所以这里只把本轮用到的两条照抄过来。**这是权宜之计，不是范例** ——
+ *    改 settings-chrome.css 里的对应规则时，记得这里还有一份。
+ */
+.section > .app-card {
+  margin-top: var(--theme-spacing-lg);
+}
+.card-desc {
+  margin: 0 0 var(--theme-spacing-md);
+  font-size: 0.85rem;
+  color: var(--theme-text-muted);
+  line-height: 1.55;
+}
+
+/* 规则表单底部的确认/取消 */
+.rule-form-actions {
+  display: flex;
+  gap: var(--theme-spacing-sm);
+  margin-top: var(--theme-spacing-md);
+  justify-content: flex-end;
 }
 </style>

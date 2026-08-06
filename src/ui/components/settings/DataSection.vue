@@ -156,7 +156,7 @@ async function clearAll() {
         <p class="text-muted text-sm">
           将所有存档、角色、记忆、剧情导出为 JSON 文件（不含音频库与素材库）
         </p>
-        <AppButton variant="secondary" size="sm" style="margin-top: 8px" @click="exportAll"
+        <AppButton variant="secondary" size="sm" class="card-action" @click="exportAll"
           >导出全部数据</AppButton
         ></AppCard
       ><AppCard padding="md"
@@ -164,7 +164,7 @@ async function clearAll() {
         <p class="text-muted text-sm">
           从 JSON 文件恢复数据，将合并到现有数据库（同样不含音频与素材）
         </p>
-        <AppButton variant="secondary" size="sm" style="margin-top: 8px" @click="importAll"
+        <AppButton variant="secondary" size="sm" class="card-action" @click="importAll"
           >导入数据</AppButton
         ></AppCard
       ><AppCard padding="md"
@@ -202,7 +202,7 @@ async function clearAll() {
           <AppButton
             variant="secondary"
             size="sm"
-            style="margin-top: 8px"
+            class="card-action"
             :disabled="cleanableCount === 0"
             @click="showImageCleanConfirm = true"
             >清理图片文件</AppButton
@@ -216,11 +216,7 @@ async function clearAll() {
         <p class="text-muted text-sm">
           永久删除所有存档、角色、记忆、设置，以及上传的音频曲库与播放列表、素材库。不可撤销。
         </p>
-        <AppButton
-          variant="danger"
-          size="sm"
-          style="margin-top: 8px"
-          @click="showClearConfirm = true"
+        <AppButton variant="danger" size="sm" class="card-action" @click="showClearConfirm = true"
           >清除所有数据</AppButton
         ></AppCard
       >

@@ -63,6 +63,24 @@ export const AGENT_LIST: readonly AgentListEntry[] = [
   { id: 'plot_outline', name: '大纲生成', desc: '主线/支线模式下生成剧情大纲和事件树', stage: 5 },
 ];
 
+/**
+ * 把**持久化的** Agent 选择解析成一个当前仍然有效的 id（查不到 → null）。
+ *
+ * `settings.activeAgent` 存在 localStorage 里，而本清单是会改的（新增 / 改名 /
+ * 下线一个 Agent）。直接拿旧值去渲染，`AgentSection` 的页头会是**空白** ——
+ * 它取的是 `AGENT_LIST.find(...)?.name` —— 子导航里也没有任何一项高亮，
+ * 于是用户面对的是一个说不出自己是谁的配置面。查不到就退回「未选择」空态。
+ *
+ * 🔴 与 `agentDisplayName` 的「查不到就原样显示 id」**刻意相反**：那个是在已经
+ *    决定要显示某个 Agent 之后尽量说点什么，这个是在决定**要不要显示**。
+ *    一个不在清单里的 id 没有子导航项可高亮，让它进去只会得到半个界面。
+ *    顺带接住 `image_prompt` —— 它按 D53 刻意不在 AGENT_LIST 里。
+ */
+export function resolveAgentSelection(persisted: string | null | undefined): string | null {
+  if (!persisted) return null;
+  return AGENT_LIST.some((a) => a.id === persisted) ? persisted : null;
+}
+
 /** 找一个 Agent 的展示名；查不到就把 id 原样显示出来，不吞掉未知 Agent */
 export function agentDisplayName(agentId: string | null): string {
   if (!agentId) return '';

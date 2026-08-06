@@ -516,11 +516,18 @@ function summarize(row: ImagePreset): string {
   color: var(--theme-primary);
   margin-right: 4px;
 }
-/* 只有本档外貌的角色（v1.3）—— 与上面那张表刻意分开，两者的归属不同 */
+/* 只有本档外貌的角色（v1.3）—— 与上面那张表刻意分开，两者的归属不同
+ *
+ * 🔴 边框一律 `--theme-card-border`（design.md 禁令表）：这里原本写的是
+ *    `--theme-border`，那个 token 全仓没有定义，且没写 fallback ——
+ *    整条声明 invalid at computed-value time，`border-top-style` 退回初始值
+ *    `none`，于是**这条线根本没画出来**。而它承担的正是 D60/D61 的语义：
+ *    把「有基线预设的角色」与「只有本档临时外貌的角色」分开。唯一说明
+ *    两张表归属不同的视觉线索，此前是隐形的。 */
 .session-only {
   margin-top: var(--theme-spacing-md);
   padding-top: var(--theme-spacing-md);
-  border-top: 1px solid var(--theme-border);
+  border-top: 1px solid var(--theme-card-border);
 }
 .session-only-head {
   margin: 0 0 4px;
@@ -592,21 +599,7 @@ function summarize(row: ImagePreset): string {
   border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, transparent);
 }
 
-/* 空态：装饰符 + 斜体（design.md §5.2） */
-.empty-tab {
-  padding: 32px 0;
-  text-align: center;
-  color: var(--theme-text-muted);
-  font-size: 0.8125rem;
-  font-style: italic;
-}
-.empty-tab::before {
-  content: '—';
-  display: block;
-  margin-bottom: var(--theme-spacing-sm);
-  font-size: 1.25rem;
-  opacity: 0.3;
-}
+/* 空态样式在 styles/utilities.css（全站唯一一份 `.empty-tab`，design.md §5.2） */
 
 .confirm-text {
   margin: 0;

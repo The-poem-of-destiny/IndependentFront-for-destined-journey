@@ -227,10 +227,13 @@ async function handleWorldBookUpdate(updated: WorldBook) {
       </div>
 
       <AppCard v-if="wb.books.length === 0" padding="md">
-        <p class="text-muted text-sm" style="text-align: center; padding: 40px 0">
-          暂无世界书<br />
-          <span style="font-size: 0.75rem">点击右上角"导入ST世界书"或"新建世界书"开始</span>
-        </p>
+        <div class="empty-tab">
+          <i class="fa-solid fa-book-open empty-tab-icon" aria-hidden="true"></i>
+          还没有任何世界书
+          <span class="empty-tab-hint">
+            用右上角「导入 ST 世界书」读入一份 SillyTavern 的 JSON，或「新建世界书」从空白开始
+          </span>
+        </div>
       </AppCard>
 
       <div v-else class="worldbook-list">

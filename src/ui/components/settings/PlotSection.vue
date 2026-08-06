@@ -64,7 +64,7 @@ const plotDifficultyOptions = [
       </div></AppCard
     >
     <!-- 模式 & 参数 -->
-    <AppCard padding="md" class="detail-card" style="margin-top: 16px"
+    <AppCard padding="md" class="detail-card"
       ><h4>剧情模式 & 参数</h4>
       <div class="form-grid">
         <label class="form-label"
@@ -179,7 +179,6 @@ const plotDifficultyOptions = [
       padding="md"
       class="detail-card plot-preview-card"
       :class="{ 'plot-revealed': showPlotPreview }"
-      style="margin-top: 16px"
     >
       <div class="plot-preview-header">
         <h4>剧情大纲预览</h4>
@@ -199,7 +198,7 @@ const plotDifficultyOptions = [
         <p class="text-muted text-sm"><strong>第五年 — 终章：命定之诗</strong></p>
         <p class="text-muted text-sm">完成主线任务，世界线尘埃落定，角色结局生成...</p>
       </div>
-      <p class="text-xs text-muted" style="margin-top: 8px">
+      <p class="text-xs text-muted plot-note">
         以上为示例大纲。实际内容由 AI 在游戏开始时生成。点击可切换模糊/清晰。
       </p>
     </AppCard>
@@ -282,5 +281,9 @@ const plotDifficultyOptions = [
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+/* 大纲预览下方的补充说明 */
+.plot-note {
+  margin-top: var(--theme-spacing-sm);
 }
 </style>

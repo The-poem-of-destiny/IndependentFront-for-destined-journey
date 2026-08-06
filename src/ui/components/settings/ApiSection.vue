@@ -287,16 +287,15 @@ async function deleteApi(id: string) {
           </div>
         </div></AppCard
       >
-      <p
-        v-if="s.apiPool.length === 0"
-        class="text-muted text-sm"
-        style="text-align: center; padding: 24px"
-      >
-        还没有配置 API，点击右上角"添加 API"开始
-      </p>
+      <div v-if="s.apiPool.length === 0" class="empty-tab">
+        还没有配置任何 API 端点
+        <span class="empty-tab-hint">
+          点击右上角「＋ 添加 API」填入端点地址与密钥，Agent 才能选到模型
+        </span>
+      </div>
     </div>
     <!-- 模型推荐 -->
-    <AppCard padding="md" class="embedding-hint" style="margin-top: 16px">
+    <AppCard padding="md" class="embedding-hint">
       <p class="text-sm text-muted" style="margin: 0 0 6px"><strong>模型推荐</strong></p>
       <p class="text-sm text-muted" style="margin: 0 0 4px">
         对话模型：推荐 <strong>DeepSeek V4 Flash</strong>（快速便宜）或
@@ -417,7 +416,7 @@ async function deleteApi(id: string) {
             高级设置
           </button>
           <div v-if="showAdvancedApi" class="advanced-body">
-            <label class="form-label" style="margin-top: 8px">
+            <label class="form-label form-label-stacked">
               <span class="form-check-row">
                 <input v-model="apiForm.enableThinking" type="checkbox" />
                 开启思维链 (DeepSeek thinking)
@@ -560,5 +559,9 @@ async function deleteApi(id: string) {
 }
 .form-check-row input[type='checkbox'] {
   accent-color: var(--theme-primary);
+}
+/* 同一张表单里紧接着上一格的 form-label */
+.form-label-stacked {
+  margin-top: var(--theme-spacing-sm);
 }
 </style>
