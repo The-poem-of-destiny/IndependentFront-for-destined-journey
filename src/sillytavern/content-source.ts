@@ -33,8 +33,9 @@ import type {
   PackInstallPlan,
   PackValidationNote,
 } from './types-content';
-import { emptySectionPlan } from './types-content';
-import type { WorldBook, WorkshopNote } from './types';
+import { planPackInstall as planPackInstallImpl } from './content-pack-plan';
+import type { CurrentLibrary } from './content-pack-plan';
+import type { WorldBook } from './types';
 
 // ═══════════════════════════════════════════════════════════
 // 常量
@@ -499,103 +500,30 @@ export function resolveSection<T>(
 }
 
 // ═══════════════════════════════════════════════════════════
-// planner 骨架（D19 / D20）—— 完整实现是 T6 的任务
+// planner 入口（D19 / D20）—— 实现住在 content-pack-plan.ts
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 产出一个内容包的安装计划（§5.1 / D19 / D20）。
+ * 产出一个内容包的安装计划（§5.1 / D19 / D20 / D43）。
  *
- * 🔴 **本波（T1）只立骨架 + 类型签名**。完整四态判定逻辑（D20 四态规则：
- * 有上次装包基线→现hash=基线则覆盖 / ≠则冲突确认；无基线→现hash=占位基线则静默覆盖 /
- * ≠则冲突确认）是 **T6** 的任务。
+ * 🔴 **实现住在 `content-pack-plan.ts`**（四态判定 + 存档 uid 迁移 + 卸载 + diff 都在那）。
+ * 本文件只做**委托转发**——保持 content-source.ts 作为「内容包纯函数层」的对外入口
+ * （校验 + hash + planner 同一处暴露），调用方无需感知 planner 拆成了独立模块。
  *
- * 本函数当前行为:
- * 1. 调 `validatePackOrThrow` 校验 pack；error 级 note 进 `validationErrors`
- * 2. 若校验通过（无 error），返回一个**全空计划**（每个 absent 分节不出现、出现的
- *    分节给 `emptySectionPlan()`）—— 这是 T6 填充四态逻辑的骨架
- * 3. 存档 uid 迁移步骤 / agentDefaults 名册 / branding 声明键 都只立结构占位
+ * 详细的四态规则、双基线 hash、按名配对迁移语义见 `content-pack-plan.ts` 的 JSDoc。
  *
  * @param pack 待安装的内容包
- * @param _current 当前库里各分节的状态（T6 用于 added/updated/conflicted 判定；本波未用）
- * @param _packBaseline 上次装包的逐项基线 hash（D20 四态规则操作数之一；本波未用）
- * @param _placeholderBaseline 占位内容的逐项基线 hash（D20 四态规则操作数之二；本波未用）
+ * @param current 当前库里各分节的状态 + 存档级 uid 允许清单（D43）
+ * @param packBaseline 上次装包的逐项基线 hash（D20 四态规则操作数之一）
+ * @param placeholderBaseline 占位内容的逐项基线 hash（D20 四态规则操作数之二）
  */
 export function planPackInstall(
   pack: ContentPack,
-  // T6 会用到这三个参数；本波签名先立，避免 T6 改 planner 签名引发调用方连锁改动。
-  _current?: {
-    worldBooks?: readonly WorldBook[];
-    presets?: readonly unknown[];
-    beautifierRules?: readonly unknown[];
-    mapMarkers?: readonly unknown[];
-    locations?: readonly unknown[];
-    bloodlines?: readonly unknown[];
-  },
-  _packBaseline?: PackBaseline,
-  _placeholderBaseline?: PackBaseline,
+  current: CurrentLibrary = {},
+  packBaseline: PackBaseline = {},
+  placeholderBaseline: PackBaseline = {},
 ): PackInstallPlan {
-  const validationErrors = validatePackOrThrow(pack);
-  const notes: WorkshopNote[] = [];
-
-  const sections: PackInstallPlan['sections'] = {};
-
-  // T6 在此填四态逻辑。本波给每个 present 分节一个空计划骨架。
-  // TODO(T6): 实现 D20 四态规则:
-  //   - 有上次装包基线 (_packBaseline): 现hash = 基线 → updated; ≠ → conflicted
-  //   - 无装包基线（首次安装）: 现hash = 占位基线 (_placeholderBaseline) → updated(静默); ≠ → conflicted
-  //   - pack 声明 [] → removed
-  //   - 当前不存在 → added
-  //   每项 hash 用 hashWorldBook / hashContentDeterministic 现算（D18: 从 payload 现算，不用 sectionHashes）
-  if (pack.worldBooks !== undefined) {
-    sections.worldBooks = emptySectionPlan();
-  }
-  if (pack.presets !== undefined) {
-    sections.presets = emptySectionPlan();
-  }
-  if (pack.beautifierRules !== undefined) {
-    sections.beautifierRules = emptySectionPlan();
-  }
-  if (pack.mapMarkers !== undefined) {
-    sections.mapMarkers = emptySectionPlan();
-  }
-  if (pack.catalog !== undefined) {
-    sections.catalog = emptySectionPlan();
-  }
-  if (pack.locations !== undefined) {
-    sections.locations = emptySectionPlan();
-  }
-  if (pack.bloodlines !== undefined) {
-    sections.bloodlines = emptySectionPlan();
-  }
-  if (pack.namePools !== undefined) {
-    sections.namePools = emptySectionPlan();
-  }
-
-  const agentDefaults: PackInstallPlan['agentDefaults'] | undefined = pack.agentDefaults
-    ? { agentIds: Object.keys(pack.agentDefaults.agents ?? {}) }
-    : undefined;
-
-  const branding: PackInstallPlan['branding'] | undefined = pack.branding
-    ? { declaredKeys: Object.keys(pack.branding) }
-    : undefined;
-
-  // 存档 uid 迁移占位（T6/T43 实现）
-  let saveUidMigration: PackInstallPlan['saveUidMigration'];
-  if (pack.worldBooks !== undefined) {
-    // TODO(T6/T43): 按 D43 三段式填迁移映射（按名配对 + needs_selection 标记）
-    saveUidMigration = { rewrite: {}, needsSelectionPartitions: [] };
-  }
-
-  return {
-    packId: typeof pack.packId === 'string' ? pack.packId : '',
-    packVersion: typeof pack.packVersion === 'string' ? pack.packVersion : '',
-    sections,
-    agentDefaults,
-    branding,
-    saveUidMigration,
-    notes,
-    validationErrors,
-  };
+  return planPackInstallImpl(pack, current, packBaseline, placeholderBaseline);
 }
 
 // ═══════════════════════════════════════════════════════════
