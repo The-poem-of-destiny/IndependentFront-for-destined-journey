@@ -162,7 +162,10 @@ describe('settings-store', () => {
     // Q-18: 12 张 per-Agent map 已合并成一张 `agents` 表
     expect(keys).toContain('agents');
     expect(keys).not.toContain('agentModels');
-    expect(keys).toContain('presets');
+    // D22（内容-引擎分离波 1）：presets 镜像已删，真源在 Dexie（usePresets composable）；
+    // settings 只留 activePresetId。与 worldBooks 同口径 —— 不留默认值避免消费端误以为是真相。
+    expect(keys).not.toContain('presets');
+    expect(keys).toContain('activePresetId');
     expect(keys).toContain('plotMode');
     expect(keys).toContain('plotDurationYears');
     expect(keys).toContain('plotDifficultyTier');

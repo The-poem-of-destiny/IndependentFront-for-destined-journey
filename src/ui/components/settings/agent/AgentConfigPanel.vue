@@ -36,6 +36,7 @@ import { agentDisplayName, getDefaultTemplateForAgent } from './agent-list';
 import { buildAgentDefaultEntry } from './agent-defaults';
 import { useSettingsStore, type PresetItem } from '../../../stores/settings-store';
 import { useUIStore } from '../../../stores/ui-store';
+import { usePresets } from '../../../composables/usePresets';
 import {
   AGENT_SETTINGS_DEFAULTS,
   applyProjectDefaultToAgent,
@@ -50,13 +51,19 @@ const props = defineProps<{ agentId: string }>();
 const cfg = useSettingsStore();
 const s = cfg.settings;
 const ui = useUIStore();
+const { presets: presetList, upsertPreset } = usePresets();
 
 const agentPromptDraft = ref('');
 const agentTemplateDraft = ref('');
 
-/** 当前选中的预设 —— 与 PresetManager 各算一次（对 store 的一行派生，不穿 prop） */
+/**
+ * 当前选中的预设 —— 与 PresetManager 各算一次（对 store 的一行派生，不穿 prop）。
+ *
+ * 内容-引擎分离波 1 / D22：预设真源是 Dexie（经 usePresets composable 的共享 ref），
+ * 不再读 `s.presets` localStorage 镜像。
+ */
 const activePreset = computed(
-  () => (s.presets as PresetItem[]).find((p) => p.id === s.activePresetId) ?? null,
+  () => presetList.value.find((p) => p.id === s.activePresetId) ?? null,
 );
 
 /** 载入两个草稿：用户自定义 → 项目默认（agent-config.json）→ 引擎内置模板 */
@@ -127,7 +134,9 @@ async function saveAsDefault() {
     promptDraft: agentPromptDraft.value,
     templateDraft: agentTemplateDraft.value,
     activePresetId: s.activePresetId || '',
-    activePreset: activePreset.value,
+    // ChatPreset 与 PresetItem 结构同形（id/name/description?/settings/createdAt/updatedAt）；
+    // buildAgentDefaultEntry 内部用 JSON 深拷贝，此处对齐前端历史类型签名。
+    activePreset: activePreset.value as unknown as PresetItem | null,
   });
 
   // 读取现有文件，更新当前 Agent，写回
@@ -159,14 +168,12 @@ async function restoreAgentDefaults() {
       // story 走预设子系统：systemPrompt/template 由预设提供，这里只拉预设 + 世界书 + 旋钮
       s.activePresetId = pd.presetId || '';
       if (pd.preset) {
-        const existing = s.presets.find((p) => p.id === pd.preset!.id);
+        const existing = presetList.value.find((p) => p.id === pd.preset!.id);
         if (!existing) {
-          s.presets.push(pd.preset);
           // 🔒 P2-04: await 写 IndexedDB —— 此前 fire-and-forget + 空 catch，
           // 刷新或页面销毁时 Promise 可能未完成，预设丢失且错误被吞。
           try {
-            const { savePreset } = await import('@engine/database');
-            await savePreset(pd.preset as any);
+            await upsertPreset(pd.preset as any);
           } catch (err) {
             console.error('[AgentConfigPanel] 恢复默认预设写 IndexedDB 失败:', err);
           }
