@@ -35,7 +35,7 @@ import type {
 } from './types-content';
 import { planPackInstall as planPackInstallImpl } from './content-pack-plan';
 import type { CurrentLibrary } from './content-pack-plan';
-import type { WorldBook } from './types';
+import type { WorldBook, BeautifierRule } from './types';
 
 // ═══════════════════════════════════════════════════════════
 // 常量
@@ -101,6 +101,45 @@ export function reportContentFetch(report: ContentFetchReport): void {
     contentFetchReporter?.(report);
   } catch {
     /* 上报自身永不抛 */
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// pack 美化规则注入缝（D20：pack 规则走 provider 内存层，不写用户表）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 读取已解析出的 pack 美化规则集（美化规则 provider 内存层的读取入口）。
+ *
+ * 🔴 D20：pack 规则走 **provider 内存层**（`presetRules` 语义，`isBuiltin: true`，
+ * 参与 `builtinDisabled` 门控），**不写用户表** —— 卸载天然免费。消费方
+ * （beautifier-store 的 `refreshPresetRules`，§5.6 恢复默认矩阵）经此取当前生效的
+ * pack 规则；装包时由 content-store 的 `setPackRulesProvider` 注册，卸载时注册回
+ * 无 pack 版本（返回 undefined → 消费方回落占位文件）。
+ *
+ * 与 `setContentFetchReporter` 同一个注入缝先例。
+ */
+export type PackRulesProvider = () => readonly BeautifierRule[] | undefined;
+
+/** 当前生效的 pack 美化规则读取器（content-store 装包/卸载时注册） */
+let packRulesProvider: PackRulesProvider | null = null;
+
+/**
+ * 注册 pack 美化规则读取器（唯一生产注册点 = content-store 的装包/卸载执行器）。
+ * 传 `null` = 无 pack（占位态），消费方回落占位文件。
+ */
+export function setPackRulesProvider(fn: PackRulesProvider | null): void {
+  packRulesProvider = fn;
+}
+
+/**
+ * 取当前生效的 pack 美化规则；无 pack / 未注册返回 `undefined`（消费方回落占位文件）。
+ */
+export function getPackRules(): readonly BeautifierRule[] | undefined {
+  try {
+    return packRulesProvider?.();
+  } catch {
+    return undefined;
   }
 }
 

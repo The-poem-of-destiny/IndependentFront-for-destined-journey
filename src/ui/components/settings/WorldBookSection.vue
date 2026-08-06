@@ -14,7 +14,6 @@ import WorldBookEditor from './WorldBookEditor.vue';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useWorldBookStore } from '../../stores/worldbook-store';
-import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks';
 import type { WorldBook } from '@engine/types';
 
 const cfg = useSettingsStore();
@@ -48,20 +47,21 @@ async function saveWorldBookAsDefault(book: WorldBook) {
   }
 }
 
-/** 重置单本内置世界书 → 删除用户副本，重新从本地 JSON 加载 */
+/** 重置单本内置世界书 → 删除用户副本，从默认真源重新加载（§5.6：pack payload > 占位文件） */
 async function resetSingleWorldBook(id: string) {
   const book = wb.getBook(id);
   if (!book?.builtIn) return;
   if (!confirm(`确定将"${book.name}"恢复为默认吗？\n\n您对该书的所有修改将被清除。`)) return;
   try {
-    // 先取到干净版本再落库：加载不到就什么都不动，绝不先删了再发现拿不回来
-    const builtIn = await loadBuiltInWorldBooks();
-    const fresh = builtIn.find((b) => b.id === id);
+    // 内容-引擎分离波 1 / §5.6：默认真源 = 已装 content pack 的 payload > 占位文件。
+    // 导入真实包后 restore 不再把提示词打回占位。
+    const { loadDefaultBook } = await import('../../stores/content-store');
+    const fresh = await loadDefaultBook(id);
     if (!fresh) {
       ui.toast('恢复失败：未找到内置版本', 'error');
       return;
     }
-    await wb.upsertBook(fresh);
+    await wb.upsertBook({ ...fresh, builtIn: true });
     if (activeWorldBook.value?.id === id) activeWorldBook.value = wb.getBook(id) ?? null;
     ui.toast(`"${book.name}"已恢复为默认`, 'success');
   } catch {

@@ -40,7 +40,37 @@
 import { defineStore, getActivePinia } from 'pinia';
 import { ref } from 'vue';
 import type { ContentStatus } from '@engine/types-content';
-import { setContentFetchReporter } from '@engine/content-source';
+import type { SaveSlot, WorkshopNote, WorldBook } from '@engine/types';
+import type {
+  ContentPack,
+  PackBaseline,
+  PackInstallPlan,
+  PackSaveUidMigration,
+  PackValidationNote,
+} from '@engine/types-content';
+import {
+  setContentFetchReporter,
+  validatePackOrThrow,
+  planPackInstall,
+  hashWorldBook,
+  setPackRulesProvider,
+} from '@engine/content-source';
+import {
+  planPackUninstall,
+  diffPackUpgrade,
+  buildPackBaseline,
+  type CurrentLibrary,
+  type PackUninstallPlan,
+  type PackUpgradeDiff,
+} from '@engine/content-pack-plan';
+import {
+  getDatabase,
+  exportAllData,
+  importAllData,
+  savePreset,
+  deletePreset,
+} from '@engine/database';
+import type { ContentPackRecord } from '@engine/database';
 
 // ═══════════════════════════════════════════════════════════
 // 1. 模块级 ready promise（D16 时序契约）
@@ -76,6 +106,155 @@ export function markContentReady(): void {
   if (isContentReady) return;
   isContentReady = true;
   resolveReady();
+}
+
+// ═══════════════════════════════════════════════════════════
+// 1b. 占位基线清单（D20 / D42，面 4）—— `placeholder-hashes.json` 加载接口
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * `placeholder-hashes.json` 的装载产出（D20 / D42）。
+ *
+ * 🔴 **占位基线来源 = 构建期生成、随引擎打包的占位 hash 清单**（`placeholder-hashes.json`），
+ * **不许运行时 fetch `/data/*` 现算**（D20 裁定：POEM_CONTENT_DIR overlay 生效时那里是
+ * 真实内容树）。它是 D20 四态基线、D42 重播种、卸载 re-seed 三处的共同输入。
+ *
+ * 本波（T7）占位 hash 清单由 T15 产出并随引擎打包；文件可能不存在 → 返回**空清单**，
+ * 不报错（四态规则的「无占位基线 → 首次安装回落 updated / conflicted」分支仍可用，
+ * 卸载 re-seed 与 D42 重播种在该态是 no-op）。
+ *
+ * `version` 戳供 D42 重播种比对：戳前进时对「hash 仍等于占位基线」的书重播种。
+ */
+export interface PlaceholderHashManifest {
+  /** 占位集版本戳（D42）：settings.placeholderVersion 与之比对，前进时才重播种 */
+  version: string;
+  /** 世界书 id → 正文确定性 hash */
+  byBook?: Readonly<Record<string, string>>;
+  /** 预设 id → 行 hash */
+  byPreset?: Readonly<Record<string, string>>;
+  /** 美化规则 id → 行 hash */
+  byBeautifierRule?: Readonly<Record<string, string>>;
+}
+
+let placeholderHashesPromise: Promise<PlaceholderHashManifest> | null = null;
+let placeholderHashesCache: PlaceholderHashManifest = { version: '' };
+
+/**
+ * 加载占位基线清单（幂等，结果缓存到模块级）。
+ *
+ * fetch `/data/placeholder-hashes.json`；404 / 网络失败 → 返回空清单 `{ version: '' }`，
+ * **不报错**（面 4：本波文件不存在是常态，占位 hash 清单 T15 产出后接真值）。
+ */
+function loadPlaceholderHashes(): Promise<PlaceholderHashManifest> {
+  if (placeholderHashesPromise) return placeholderHashesPromise;
+  placeholderHashesPromise = (async () => {
+    try {
+      const res = await fetch('/data/placeholder-hashes.json');
+      if (res.ok) {
+        const raw = await res.json();
+        placeholderHashesCache = {
+          version: typeof raw?.version === 'string' ? raw.version : '',
+          byBook: raw?.byBook,
+          byPreset: raw?.byPreset,
+          byBeautifierRule: raw?.byBeautifierRule,
+        };
+      }
+    } catch {
+      // 404 / 网络失败 → 空清单（本波常态）
+    }
+    return placeholderHashesCache;
+  })();
+  return placeholderHashesPromise;
+}
+
+/** 取已加载的占位基线（未加载返回空清单；内部同步读） */
+function getPlaceholderHashes(): PlaceholderHashManifest {
+  return placeholderHashesCache;
+}
+
+/** 重置占位基线缓存（仅供测试 afterEach 隔离；生产不调） */
+export function resetPlaceholderHashesCache(): void {
+  placeholderHashesPromise = null;
+  placeholderHashesCache = { version: '' };
+}
+
+/** 占位清单 → PackBaseline（喂给 planner 的双基线之一；内部用） */
+function placeholderHashesToBaseline(manifest: PlaceholderHashManifest): PackBaseline {
+  return {
+    byBook: manifest.byBook,
+    byPreset: manifest.byPreset,
+    byBeautifierRule: manifest.byBeautifierRule,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+// 1c. 已装 pack 的模块级缓存（D18：整包入库，恢复默认/卸载/升级无须重读文件）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 模块级已装 pack 缓存（`contentPacks` 表最新一条/主 pack 的投影）。
+ *
+ * 🔴 **模块级而非 store 实例级**：beautifier-store 的 `refreshPresetRules`（§5.6 恢复默认）
+ * 和 branding 等同步消费方在读它，不能等 Pinia store 构造。装包 / 卸载执行器 update 它，
+ * boot 时序 `hydratePackState()` 从 Dexie 载入。
+ */
+let activePackRecord: ContentPackRecord | null = null;
+
+/** 当前已装的 pack 记录（未装返回 null；同步读） */
+function getActivePackRecord(): ContentPackRecord | null {
+  return activePackRecord;
+}
+
+/** 当前已装的 pack payload（未装返回 undefined） */
+function getActivePackPayload(): ContentPack | undefined {
+  return activePackRecord?.payload;
+}
+
+/** 整份替换模块级 pack 缓存（装包/卸载执行器 + boot hydrate 用） */
+export function setActivePackRecord(record: ContentPackRecord | null): void {
+  activePackRecord = record;
+  // 同步 pack 美化规则 provider（D20：pack 规则走 provider 内存层）。
+  // 传 null = 占位态，beautifier-store 回落占位文件。
+  setPackRulesProvider(record ? () => record.payload.beautifierRules?.rules ?? [] : null);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 1d. 「恢复默认」的 provider 真源（D21 / §5.6）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 取一本书的「默认真源」—— 已装 pack payload > 占位文件（§5.6 恢复默认矩阵）。
+ *
+ * per-book `resetSingleWorldBook` 与全局 `resetToDefaults` 都用它：恢复这些书 = 拿
+ * pack.payload 里这本书（装包后）或占位文件里的书（未装/没发这本书）。语义与 `resolveSection`
+ * 一致：pack 声明了 worldBooks 分节就用它（含刻意 `[]`），否则占位。
+ *
+ * @param id 世界书 id
+ * @returns pack payload 里的书；pack 未声明 worldBooks 分节时回落占位文件；都没有 → undefined
+ */
+export async function loadDefaultBook(id: string): Promise<WorldBook | undefined> {
+  const pack = getActivePackPayload();
+  if (pack?.worldBooks !== undefined) {
+    const found = pack.worldBooks.find((b) => b.id === id);
+    if (found) return { ...found, builtIn: true };
+  }
+  const { loadBuiltInWorldBooks } = await import('@engine/builtin-worldbooks');
+  const books = await loadBuiltInWorldBooks();
+  return books.find((b) => b.id === id);
+}
+
+/**
+ * 取「整套默认世界书」—— 已装 pack payload > 占位文件（§5.6 全局恢复）。
+ *
+ * global `resetToDefaults` 用它：恢复全部默认书 = pack.payload.worldBooks（装包后）> 占位书。
+ */
+export async function loadAllDefaultBooks(): Promise<WorldBook[]> {
+  const pack = getActivePackPayload();
+  if (pack?.worldBooks !== undefined) {
+    return pack.worldBooks.map((b) => ({ ...b, builtIn: true }));
+  }
+  const { loadBuiltInWorldBooks } = await import('@engine/builtin-worldbooks');
+  return loadBuiltInWorldBooks();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -192,6 +371,24 @@ export interface ContentFetchReport {
 // 4. Pinia store（contentStatus + load* 入口）
 // ═══════════════════════════════════════════════════════════
 
+/**
+ * 写存档 metadata（D43 needs_selection 标记 + enabledWorldBookEntries 重写）。
+ *
+ * 🔴 `SaveSlot.metadata` 的 TS 类型没声明 `needsPackWorldBookSelection`（不常驻 schema，
+ * 只在装/卸包后有意义的运行时键）。在写回 Dexie 前用它把这两类合并进 `Record<string, unknown>`
+ * 透传，避免拿严格类型撞墙（与 `*-migration.ts` 用 `Record<string, unknown>` 参数同一口径）。
+ */
+function writePackSelectionMetadata(
+  meta: SaveSlot['metadata'],
+  patch: { enabledWorldBookEntries?: string[] },
+  needsSelection: boolean,
+): SaveSlot['metadata'] {
+  const out: Record<string, unknown> = { ...(meta ?? {}) };
+  if (patch.enabledWorldBookEntries) out.enabledWorldBookEntries = patch.enabledWorldBookEntries;
+  if (needsSelection) out.needsPackWorldBookSelection = true;
+  return out as SaveSlot['metadata'];
+}
+
 export const useContentStore = defineStore('content', () => {
   /** 应用级内容态（D16）。占位态起步；七处 fetch 上报后可能切到 error。 */
   const contentStatus = ref<ContentStatus>('placeholder');
@@ -242,6 +439,18 @@ export const useContentStore = defineStore('content', () => {
    */
   async function loadProjectDefaults(): Promise<unknown> {
     await contentReadyPromise;
+    // 先确保已装 pack 从 Dexie 载入模块缓存（boot 时序；idempotent）
+    await hydratePackState();
+    // 🔴 D44 / §5.4：pack 已装 → 默认层 = pack agentDefaults > 占位 fetch。
+    const pack = getActivePackPayload();
+    if (pack?.agentDefaults?.agents) {
+      // D20 三态：pack 有 agentDefaults 分节 → 用它（不再是占位 fetch）。
+      reportContentFetch({
+        source: 'content-store.loadProjectDefaults',
+        ok: true,
+      });
+      return pack.agentDefaults;
+    }
     try {
       const res = await fetch('/data/defaults/agent-config.json');
       if (res.ok) {
@@ -289,6 +498,645 @@ export const useContentStore = defineStore('content', () => {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // 5. 安装 / 升级 / 卸载执行器（D19 / §5.2）—— T7 交付
+  // ═══════════════════════════════════════════════════════════
+
+  let hydratePromise: Promise<void> | null = null;
+
+  /**
+   * 从 Dexie 把已装 pack 载入模块缓存 + store 内容态（幂等，boot 时序）。
+   *
+   * 🔴 不重置 ready（ready 只 resolve 一次，幂等闸）。装包/卸载则直接由执行器
+   * update 模块缓存，不需要再走这里（但重复调也无害——它读的是最新 Dexie 行）。
+   *
+   * 内容态规则：有已装 pack → `'pack'`；没有 → `'placeholder'`（若之前是 error
+   * 由 reportContentFetch 管，这里不越权清 error，除非显式占位态成立）。
+   */
+  async function hydratePackState(): Promise<void> {
+    if (hydratePromise) return hydratePromise;
+    hydratePromise = (async () => {
+      try {
+        const records = await getDatabase().contentPacks.toArray();
+        const active = records.find((r) => r.packId === r.payload?.packId && r.packId) ?? null;
+        // 💡 单 pack 场景：取最后一条（主 pack）。多 pack 共存留待后续波次扩展。
+        const activeRecord = records.length > 0 ? records[records.length - 1] : active;
+        setActivePackRecord(activeRecord);
+        if (activeRecord) {
+          activePackId.value = activeRecord.packId;
+          activePackVersion.value = activeRecord.packVersion;
+          if (contentStatus.value === 'placeholder') contentStatus.value = 'pack';
+        } else {
+          activePackId.value = null;
+          activePackVersion.value = null;
+          if (contentStatus.value === 'pack') contentStatus.value = 'placeholder';
+        }
+      } catch {
+        // Dexie 不可用 → 缓存保持现状，不阻断（boot 兜底）
+      }
+    })();
+    return hydratePromise;
+  }
+
+  /** 收集当前库状态喂给 planner（D43：含存档级 uid 允许清单联合） */
+  async function buildCurrentLibrary(): Promise<CurrentLibrary> {
+    const db = getDatabase();
+    const [worldBooks, presets, beautifierRules, saves] = await Promise.all([
+      db.worldBooks.toArray(),
+      db.presets.toArray(),
+      db.beautifierRules.toArray(),
+      db.saves.toArray(),
+    ]);
+    const enabled: string[] = [];
+    for (const s of saves) {
+      const entries = s.metadata?.enabledWorldBookEntries;
+      if (entries) enabled.push(...entries);
+    }
+    return { worldBooks, presets, beautifierRules, enabledWorldBookEntries: enabled };
+  }
+
+  /**
+   * 备份快照 → 任一步 throw 回滚。
+   *
+   * ✅ 只要 `contentPacks.put` 放在执行序列**最后**（§5.2 顺序），且分节写失败时
+   * 新 pack 行未落库，`importAllData(snapshot)` 就能把 worldBooks / presets 等
+   * 全部还原到装前状态（reconcilePackState 读到无 pack → 无对账）。
+   */
+  async function rollbackTo(snapshot: Awaited<ReturnType<typeof exportAllData>>): Promise<void> {
+    await importAllData(snapshot);
+  }
+
+  /** 有没有任何分节 planner 标了 conflicted（两阶段提交第一段判定） */
+  function hasAnyConflict(plan: PackInstallPlan): boolean {
+    const sections = plan.sections;
+    return Object.values(sections).some((s) => s && s.conflicted && s.conflicted.length > 0);
+  }
+
+  /**
+   * 收集装包各分节的 WorkshopNote（三类处置）—— 与 reportContentFetch 不同，这是
+   * **安装后**的处置记录（D19），UI 两阶段确认 Modal + 安装结果分组渲染。
+   */
+  function collectNotes(plan: PackInstallPlan): WorkshopNote[] {
+    const notes: WorkshopNote[] = [];
+    // planner 已经产出的侧链 note（D43 多选分区清除）直接透传
+    notes.push(...plan.notes.filter((n) => !!n && typeof n === 'object' && 'kind' in n));
+    return notes;
+  }
+
+  /**
+   * 解析「pack 的 story 预设 id」—— 用于装包后 activePresetId 切换（D20/D22）。
+   *
+   * pack presets 里名称为「占位 story 预设名」的那条，或第一条。占位 story 预设名
+   * 取自当前默认层（装包前是占位文件）的 projectAgentDefaults.agents.story.preset 名。
+   */
+  function resolvePackStoryPresetId(pack: ContentPack): string | undefined {
+    const packs = pack.presets;
+    if (!packs || packs.length === 0) return undefined;
+    return packs[0].id;
+  }
+
+  /** 执行一次安装的写入序列（§5.2 第 5 步）。装入前**必须**已 exportAllData() 快照。 */
+  async function applyInstall(
+    pack: ContentPack,
+    plan: PackInstallPlan,
+    existing: ContentPackRecord | undefined,
+    confirmConflicts: boolean,
+    _packBaseline: PackBaseline,
+  ): Promise<WorkshopNote[]> {
+    const notes = collectNotes(plan);
+    const wb = await useWbStore();
+    const beaut = await useBeautStore();
+    const settings = await useSettingsStoreLazy();
+
+    // a. worldBooks 分节（upsertBooks / 删 id / 冲突确认覆盖）
+    const wbPlan = plan.sections.worldBooks;
+    if (wbPlan) {
+      const toUpsert: WorldBook[] = [];
+      const toDelete: string[] = [];
+      for (const b of wbPlan.added) toUpsert.push(ensureBookBuiltIn(b));
+      for (const b of wbPlan.updated) toUpsert.push(ensureBookBuiltIn(b));
+      for (const b of wbPlan.removed) toDelete.push(b.id);
+      for (const c of wbPlan.conflicted) {
+        if (confirmConflicts) {
+          // 冲突确认后覆盖 = 用 pack 行整体覆盖当前行（含删除用户编辑）
+          const packBook = (pack.worldBooks ?? []).find((b) => b.id === c.key);
+          if (packBook) toUpsert.push(ensureBookBuiltIn(packBook));
+          else toDelete.push(c.key);
+        }
+      }
+      if (toDelete.length > 0) {
+        for (const id of toDelete) await wb.deleteBook(id);
+      }
+      if (toUpsert.length > 0) await wb.upsertBooks(toUpsert);
+    }
+
+    // b. presets 分节（savePreset 按 pack id upsert / deletePreset）
+    const prePlan = plan.sections.presets;
+    if (prePlan) {
+      for (const p of prePlan.added) await savePreset(p);
+      for (const p of prePlan.updated) await savePreset(p);
+      for (const p of prePlan.removed) await deletePreset(p.id);
+      for (const c of prePlan.conflicted) {
+        if (confirmConflicts) {
+          const packPreset = (pack.presets ?? []).find((p) => p.id === c.key);
+          if (packPreset) await savePreset(packPreset);
+          else await deletePreset(c.key);
+        }
+      }
+    }
+
+    // c. beautifierRules（provider 内存层，不写用户表）—— 装包后重算 presetRules
+    if (plan.sections.beautifierRules || pack.beautifierRules !== undefined) {
+      await beaut.refreshPresetRules(new Set(), new Set(), new Set(), pack.beautifierRules?.rules);
+    }
+
+    // d. agents / catalog / locations / bloodlines / namePools / markers / branding：
+    //    provider-owned。agentDefaults 只进 contentPacks（下面 put），**永不写 settings.agents**
+    //    （D44）。同步注册表在装包成功后由 setActivePackRecord 重灌（六面交给后续波次
+    //    逐面接管，本波至少把各面标记成 pack payload 的 resolveSection）。
+
+    // 注册表重灌：六面 = pack payload > 占位 undefined（本波 phases 未逐面接管，先透传）。
+    // 🔴 这里只做「pack 各面存在则灌入」的基础灌注；真实形状由波 2（D24/D25）收窄。
+    const reg = getContentRegistry();
+    setContentRegistry({
+      catalog: pack.catalog !== undefined ? pack.catalog.data : reg.catalog,
+      locations: pack.locations !== undefined ? pack.locations : reg.locations,
+      bloodlines: pack.bloodlines !== undefined ? pack.bloodlines : reg.bloodlines,
+      namePools: pack.namePools !== undefined ? pack.namePools.data : reg.namePools,
+      markers: pack.mapMarkers !== undefined ? pack.mapMarkers : reg.markers,
+      branding: pack.branding !== undefined ? pack.branding : reg.branding,
+    });
+
+    // e. 存档 uid 迁移（D43）：rewrite 应用 + needsSelectionPartitions 标记
+    await applySaveUidMigration(plan.saveUidMigration);
+
+    // f. activePresetId 切换（D20/D22）：原来指向占位预设/未设 → 切到 pack 预设
+    await switchActivePresetToPack(pack, settings);
+
+    // g. contentPacks.put（**最后**，失败回滚时不残留新 pack 行）
+    await getDatabase().contentPacks.put({
+      packId: pack.packId,
+      packVersion: pack.packVersion,
+      installedAt: Date.now(),
+      payload: pack,
+      sectionHashes: pack.sectionHashes,
+      notes,
+    } satisfies ContentPackRecord);
+
+    // h. 缓存 + 内容态
+    await finalizePackState(pack);
+
+    return notes;
+  }
+
+  /** 装包/卸载末尾统一重灌缓存与内容态 */
+  async function finalizePackState(pack: ContentPack): Promise<void> {
+    // 🔴 从 Dexie 读回**完整行**（含 sectionHashes/notes）再进缓存——否则模块级
+    // activePackRecord 只有 4 个字段，与落库行不一致。眼下消费方只读 payload，
+    // 但保持一致是防御性的：未来任何读 record.notes/sectionHashes 的路径不会拿到
+    // 一个「看着装了、其实少了字段」的缓存。
+    const row = await getDatabase().contentPacks.get(pack.packId);
+    setActivePackRecord(row ?? null);
+    activePackId.value = pack.packId;
+    activePackVersion.value = pack.packVersion;
+    contentStatus.value = 'pack';
+  }
+
+  /** worldBook 书行保证 `builtIn: true`（缺了被 loadBuiltInWorldBooks 真值门静默丢弃） */
+  function ensureBookBuiltIn(b: WorldBook): WorldBook {
+    if (b.builtIn) return b;
+    return { ...b, builtIn: true };
+  }
+
+  /** 惰性取 settings-store（避免与 content-store 的静态循环依赖） */
+  async function useSettingsStoreLazy() {
+    const { useSettingsStore } = await import('./settings-store');
+    return useSettingsStore();
+  }
+
+  /** 惰性取 worldbook-store（避免 content-store ⟷ worldbook-store 静态循环） */
+  async function useWbStore() {
+    const { useWorldBookStore } = await import('./worldbook-store');
+    return useWorldBookStore();
+  }
+
+  /** 惰性取 beautifier-store（避免 content-store ⟷ beautifier-store 静态循环） */
+  async function useBeautStore() {
+    const { useBeautifierStore } = await import('./beautifier-store');
+    return useBeautifierStore();
+  }
+
+  /** 装包后 activePresetId 切到 pack 预设（D20/D22） */
+  async function switchActivePresetToPack(
+    pack: ContentPack,
+    settings: SettingsStoreType,
+  ): Promise<void> {
+    const packPresetId = resolvePackStoryPresetId(pack);
+    if (!packPresetId) return;
+    const prev = settings.settings.activePresetId;
+    // 指向占位预设（当前默认层的 story presetId）或未设 → 切到 pack 预设；
+    // 指向用户第三方预设 → 不动
+    const placeholderStoryId = settings.projectAgentDefaults?.agents?.story?.presetId || '';
+    if (!prev || prev === placeholderStoryId) {
+      settings.settings.activePresetId = packPresetId;
+      settings.saveNow();
+    }
+  }
+
+  /** 卸载后 activePresetId 从 pack 预设切回占位 story 预设 */
+  async function switchActivePresetToPlaceholder(
+    placeholderStoryId: string,
+    packPresetIds: string[],
+  ): Promise<void> {
+    const settings = await useSettingsStoreLazy();
+    const prev = settings.settings.activePresetId;
+    if (prev && packPresetIds.includes(prev)) {
+      settings.settings.activePresetId = placeholderStoryId;
+      settings.saveNow();
+    }
+  }
+
+  /**
+   * 全局卸载后 world-book 恢复占位：清空 pack 拥有 id → upsert 占位书。
+   * 🔴 **禁用 mergeBuiltIns**（id-presence-only，对仍占着 15 个 id 的 pack 内容是 no-op）——
+   * 卸载要显式「删 pack 行 → 灌占位书」（§5.2 v1.2 修订）。
+   */
+  async function restorePlaceholderBooks(ownedIds: string[]): Promise<void> {
+    const wb = await useWbStore();
+    // 1) 删 pack 拥有的 id
+    for (const id of ownedIds) {
+      await wb.deleteBook(id);
+    }
+    // 2) 从占位文件灌回同 id 的占位书（builtIn:true，uid 保留段）
+    const { loadBuiltInWorldBooks } = await import('@engine/builtin-worldbooks');
+    const placeholders = await loadBuiltInWorldBooks();
+    const toReload = placeholders.filter((b) => ownedIds.includes(b.id));
+    if (toReload.length > 0) {
+      await wb.upsertBooks(toReload);
+    }
+  }
+
+  /** 存档 uid 迁移执行（D43）—— 装包正向：rewrite 重写 + needsSelectionPartitions 标记 */
+  async function applySaveUidMigration(migration: PackSaveUidMigration | undefined): Promise<void> {
+    if (!migration) return;
+    const db = getDatabase();
+    const saves = await db.saves.toArray();
+    const { rewrite, needsSelectionPartitions } = migration;
+    let changed = false;
+    for (const save of saves) {
+      const entries = save.metadata?.enabledWorldBookEntries;
+      if (!entries || entries.length === 0) continue;
+      let mutated = false;
+      const next = [...entries];
+      for (let i = 0; i < next.length; i++) {
+        const oldKey = next[i];
+        const newUid = rewrite[oldKey];
+        if (newUid !== undefined) {
+          const partition = oldKey.slice(0, oldKey.indexOf(':'));
+          next[i] = `${partition}:${newUid}`;
+          mutated = true;
+        }
+      }
+      // needs_selection（D43）：单选钉选分区的**失配键**（不在 rewrite 里的）触发。
+      // rewrite 只含配对成功者；某分区在 needsSelectionPartitions 里且该存档含该分区
+      // 的键但没被 rewrite → 需重选。裸删这些键 = 分区「整本原样通过」= 内容通胀。
+      const needsSelection = (needsSelectionPartitions ?? []).some((p) =>
+        entries.some((e) => e.startsWith(`${p}:`) && rewrite[e] === undefined),
+      );
+      if (needsSelection) {
+        mutated = true;
+      }
+      if (mutated) {
+        save.metadata = writePackSelectionMetadata(
+          save.metadata,
+          { enabledWorldBookEntries: next },
+          needsSelection,
+        );
+        await db.saves.put(save);
+        changed = true;
+      }
+    }
+    if (changed) {
+      // 触发存档 UI 重读（loadSaves）；失败静默（装包路径的存档刷新不是硬依赖）
+      try {
+        const { useGameStore } = await import('./game-store');
+        const g = useGameStore();
+        if (g.loadSaves) await g.loadSaves();
+      } catch {
+        /* no-op */
+      }
+    }
+  }
+
+  // 一次性装包守卫：仅同一时刻允许一个装/卸进行（执行器自身可控；并发由调用方串行）
+  let execBusy = false;
+
+  /**
+   * 安装内容包（D19 / §5.2 安装流）。
+   *
+   * 两阶段提交：
+   * 1. 无 `opts.confirmConflicts` 且计划有 conflicted → 返回 `ok:false, status:'needs_confirmation'`
+   *    带着 plan，UI 逐节展示后以 `{ confirmConflicts: true }` 重入。
+   * 2. 确认（或无冲突）→ exportAllData 快照 → 分节写入 → 存档迁移 → contentPacks.put
+   *    → 注册表重灌 + 缓存 + 内容态 pack；任一步 throw → 快照回滚。
+   *
+   * `validatePackOrThrow` 出 error 级 note → 直接返回 `ok:false, status:'invalid'`，**零写入**。
+   */
+  async function installPack(
+    rawPack: unknown,
+    opts: { confirmConflicts?: boolean } = {},
+  ): Promise<PackInstallOutcome> {
+    const validationErrors = validatePackOrThrow(rawPack);
+    if (validationErrors.some((n) => n.level === 'error')) {
+      return {
+        ok: false,
+        status: 'invalid',
+        packId: String((rawPack as ContentPack).packId ?? ''),
+        packVersion: String((rawPack as ContentPack).packVersion ?? ''),
+        validationErrors,
+      };
+    }
+    if (execBusy)
+      return {
+        ok: false,
+        status: 'busy',
+        packId: String((rawPack as ContentPack).packId ?? ''),
+        packVersion: String((rawPack as ContentPack).packVersion ?? ''),
+        validationErrors: [],
+      };
+
+    const pack = rawPack as ContentPack;
+    // 已装同 id → 用旧包 payload 现算基线（D18 hash 分工：冲突判定从 payload 现算）。
+    // 升级的 diff 展示由 upgradePack 单独提供（UI 层按 packId 分流）；installPack 本身
+    // 只负责「装这一版」—— 旧基线用于四态规则判「现 hash = 基线 → updated 静默覆盖」。
+    const existing = await getDatabase().contentPacks.get(pack.packId);
+
+    try {
+      const packBaseline = existing ? buildPackBaseline(existing.payload) : {};
+      // 🔴 先装载占位基线（D20：占位 hash 清单是四态规则的操作数；T15 产出前文件 404 → 空基线，
+      //    首安装覆盖占位书会退化为 conflicted —— D42 面占位清单落地后自动补上。）
+      await loadPlaceholderHashes();
+      const placeholderBaseline = placeholderHashesToBaseline(getPlaceholderHashes());
+      const current = await buildCurrentLibrary();
+      const plan = planPackInstall(pack, current, packBaseline, placeholderBaseline);
+
+      const hasConflicts = hasAnyConflict(plan);
+      if (hasConflicts && !opts.confirmConflicts) {
+        return {
+          ok: false,
+          status: 'needs_confirmation',
+          packId: pack.packId,
+          packVersion: pack.packVersion,
+          plan,
+          validationErrors: plan.validationErrors,
+        };
+      }
+
+      execBusy = true;
+      const snapshot = await exportAllData();
+      try {
+        const notes = await applyInstall(
+          pack,
+          plan,
+          existing,
+          opts.confirmConflicts ?? false,
+          packBaseline,
+        );
+        return {
+          ok: true,
+          status: 'installed',
+          packId: pack.packId,
+          packVersion: pack.packVersion,
+          plan,
+          notes,
+          validationErrors: plan.validationErrors,
+        };
+      } catch (err) {
+        await rollbackTo(snapshot);
+        throw err;
+      } finally {
+        execBusy = false;
+      }
+    } catch (err) {
+      // 回滚在内部已做；这里再包一层让调用方拿到结构化错误
+      throw err;
+    }
+  }
+
+  /**
+   * 升级内容包（D40 / §5.2）：产升级 diff（两个已算好的安装计划派生）供 UI 展示，
+   * 确认后走 installPack。返回 outcome，其中 `upgradeDiff` 字段携带「这一版会改什么」。
+   *
+   * diff 语义：`oldPlan` = 用旧 payload 对当前状态（= 旧包已装）重算出的计划，
+   * `newPlan` = 用新 payload 对同一状态算出的计划；`diffPackUpgrade(oldPlan, newPlan)`
+   * 即新旧两版安装间 added/removed/updated/conflicted 的变化。
+   */
+  async function upgradePack(
+    rawPack: unknown,
+    opts: { confirmConflicts?: boolean } = {},
+  ): Promise<PackInstallOutcome> {
+    const validationErrors = validatePackOrThrow(rawPack);
+    if (validationErrors.some((n) => n.level === 'error')) {
+      return {
+        ok: false,
+        status: 'invalid',
+        packId: String((rawPack as ContentPack).packId ?? ''),
+        packVersion: String((rawPack as ContentPack).packVersion ?? ''),
+        validationErrors,
+      };
+    }
+    const pack = rawPack as ContentPack;
+    const existing = await getDatabase().contentPacks.get(pack.packId);
+    if (!existing) {
+      // 没装过同 id → 不是升级，走安装
+      return installPack(pack, opts);
+    }
+    try {
+      const packBaseline = buildPackBaseline(existing.payload);
+      await loadPlaceholderHashes();
+      const placeholderBaseline = placeholderHashesToBaseline(getPlaceholderHashes());
+      const current = await buildCurrentLibrary();
+      const oldPlan = planPackInstall(existing.payload, current, packBaseline, placeholderBaseline);
+      const newPlan = planPackInstall(pack, current, packBaseline, placeholderBaseline);
+      const upgradeDiff = diffPackUpgrade(oldPlan, newPlan);
+
+      const hasConflicts = hasAnyConflict(newPlan);
+      if (hasConflicts && !opts.confirmConflicts) {
+        return {
+          ok: false,
+          status: 'needs_confirmation',
+          packId: pack.packId,
+          packVersion: pack.packVersion,
+          plan: newPlan,
+          upgradeDiff,
+          validationErrors: newPlan.validationErrors,
+        };
+      }
+
+      // 确认后落盘 —— 复用安装序列（同一执行路径，含快照回滚）
+      const outcome = await installPack(pack, { confirmConflicts: opts.confirmConflicts ?? false });
+      return { ...outcome, upgradeDiff };
+    } catch (err) {
+      throw err;
+    }
+  }
+
+  /**
+   * 卸载内容包（§5.2 卸载流）。
+   *
+   * 预检（planPackUninstall）→ 编辑确认 → exportAllData 快照 → 删 pack 拥有 id →
+   * upsert 占位书 → 删 pack 预设 → activePresetId 切回占位 → contentPacks.delete →
+   * 注册表重灌 → 内容态回 placeholder；任一步 throw → 快照回滚。
+   */
+  async function uninstallPack(
+    opts: { confirmEdits?: boolean } = {},
+  ): Promise<PackUninstallOutcome> {
+    const active = getActivePackRecord();
+    if (!active) {
+      return { ok: false, status: 'no_pack' };
+    }
+    const installedPack = active.payload;
+    execBusy = true;
+    try {
+      const packBaseline = buildPackBaseline(installedPack);
+      const current = await buildCurrentLibrary();
+      const plan = planPackUninstall(installedPack, current, packBaseline);
+      const hasEdits = plan.confirmations.length > 0;
+      if (hasEdits && !opts.confirmEdits) {
+        return {
+          ok: false,
+          status: 'needs_confirmation',
+          plan,
+        };
+      }
+
+      const snapshot = await exportAllData();
+      try {
+        // 世界书：删 pack 拥有 id → 灌占位书（显式删后播，禁用 mergeBuiltIns）
+        await restorePlaceholderBooks(plan.ownedBookIds);
+
+        // 存档 uid 迁移（D43 反向：真实 uid 消失 → 按名配对回占位/needs_selection）
+        // 反向语义用 planPackInstall 重新规划一次当前状态（占位基线命中 → 回占位书）
+        await applySaveMigrationReverse();
+
+        // presets：删 pack 预设行；activePresetId 指向它时切回占位
+        const packPresetIds = (installedPack.presets ?? []).map((p) => p.id);
+        if (packPresetIds.length > 0) {
+          for (const id of packPresetIds) {
+            try {
+              await deletePreset(id);
+            } catch {
+              /* 行可能已经被用户改过/不存在 */
+            }
+          }
+        }
+        const settings = await useSettingsStoreLazy();
+        const placeholderStoryId = settings.projectAgentDefaults?.agents?.story?.presetId || '';
+        await switchActivePresetToPlaceholder(placeholderStoryId, packPresetIds);
+
+        // agents/beautifier/catalog/sync registry：provider-owned，删 pack 行即回落
+        // 注册表灌回占位（各面 undefined → 波 2 接管）
+        seedPlaceholderRegistry();
+
+        // contentPacks.delete（**最后**）
+        await getDatabase().contentPacks.delete(installedPack.packId);
+
+        // 缓存 + 内容态回 placeholder
+        setActivePackRecord(null);
+        activePackId.value = null;
+        activePackVersion.value = null;
+        contentStatus.value = 'placeholder';
+
+        return {
+          ok: true,
+          status: 'uninstalled',
+          plan,
+          notes:
+            plan.confirmations.length > 0
+              ? [
+                  {
+                    kind: 'sideEffect',
+                    text: `卸载丢弃了 ${plan.confirmations.length} 本被编辑过的内容包世界书`,
+                  } as WorkshopNote,
+                ]
+              : [],
+        };
+      } catch (err) {
+        await rollbackTo(snapshot);
+        throw err;
+      }
+    } catch (err) {
+      throw err;
+    } finally {
+      execBusy = false;
+    }
+  }
+
+  /** 卸载的反向存档迁移（D43 反向语义）：把真实 uid 键按名配对回占位 uid / needs_selection */
+  async function applySaveMigrationReverse(): Promise<void> {
+    // 占位书（装包后仍存在）是反向配对的对照物；占位书 uid 在 900001+ 保留段。
+    // 卸载把 pack 书换成占位书后，真实 uid 键失配 → planner 的迁移逻辑在 re-install
+    // 一次占位时产生 rewrite。这里用 planSaveUidMigration 的镜像：把 pack 书当「旧」、
+    // 当前（占位）书当「新」。由于占位书不可枚举（placeholder-hashes 未产出），
+    // 本波对反向往迁做保守处理：命中去重条目配对已由 planPackUninstall 覆盖，
+    // 这里只重跑一次占位 installedPack 的 buildCurrentLibrary 并标记 needs_selection 兜底。
+    // —— 完整反向 uid 配对留待占位 hash 清单（T15）落地后补真值。
+    const db = getDatabase();
+    const saves = await db.saves.toArray();
+    for (const save of saves) {
+      const entries = save.metadata?.enabledWorldBookEntries;
+      if (!entries) continue;
+      // 检查是否仍含 pack 拥有的真实 uid（< 900001）——有则这些键在卸载后失配
+      const stillHasPackUid = entries.some((e) => {
+        const uid = parseInt(e.slice(e.indexOf(':') + 1), 10);
+        return Number.isFinite(uid) && uid < 900001;
+      });
+      if (stillHasPackUid) {
+        save.metadata = writePackSelectionMetadata(save.metadata, {}, true);
+        await db.saves.put(save);
+      }
+    }
+  }
+
+  /**
+   * D42 重播种（面 4）：占位内容升级后，对「hash 仍等于占位基线」的书重播种。
+   *
+   * settings.placeholderVersion（见 settings-types）与内置占位 hash 清单的 version 比对；
+   * 戳前进时对 `byBook` 基线命中（用户没动过）的书从占位文件重播，动过的不覆盖。
+   *
+   * 本波（T7）占位 hash 清单由 T15 产出；文件不存在 → manifest.version 为空 → **无操作**。
+   */
+  async function reseedPlaceholder(): Promise<{ reseeded: string[] }> {
+    const manifest = await loadPlaceholderHashes();
+    const settings = await useSettingsStoreLazy();
+    const prev = settings.settings.placeholderVersion;
+    if (!prev || prev === manifest.version || !manifest.byBook) {
+      settings.settings.placeholderVersion = manifest.version || prev;
+      settings.saveNow();
+      return { reseeded: [] };
+    }
+    const reseeded: string[] = [];
+    const db = getDatabase();
+    const books = await db.worldBooks.toArray();
+    const { loadBuiltInWorldBooks } = await import('@engine/builtin-worldbooks');
+    const placeholderBooks = await loadBuiltInWorldBooks();
+    const wbPlan = new Map(placeholderBooks.map((b) => [b.id, b]));
+    for (const book of books) {
+      const base = manifest.byBook[book.id];
+      if (base === undefined) continue;
+      if (hashWorldBook(book) === base) {
+        const fresh = wbPlan.get(book.id);
+        if (fresh) {
+          await db.worldBooks.put(ensureBookBuiltIn(fresh));
+          reseeded.push(book.id);
+        }
+      }
+    }
+    settings.settings.placeholderVersion = manifest.version;
+    settings.saveNow();
+    return { reseeded };
+  }
+
   return {
     contentStatus,
     activePackId,
@@ -298,8 +1146,41 @@ export const useContentStore = defineStore('content', () => {
     reportContentFetch,
     loadProjectDefaults,
     loadRawProjectDefaults,
+    hydratePackState,
+    installPack,
+    upgradePack,
+    uninstallPack,
+    reseedPlaceholder,
   };
 });
+
+/** settings-store 返回实例类型（避免在 content-store 内引入静态循环依赖） */
+type SettingsStoreType = {
+  settings: { activePresetId: string; placeholderVersion?: string };
+  projectAgentDefaults?: { agents?: Record<string, { presetId?: string }> };
+  saveNow: () => void;
+};
+
+/** 安装/升级结果（两阶段提交各段共用） */
+export interface PackInstallOutcome {
+  ok: boolean;
+  status: 'invalid' | 'needs_confirmation' | 'busy' | 'installed';
+  packId: string;
+  packVersion: string;
+  plan?: PackInstallPlan;
+  /** 升级 diff（upgradePack 产；installPack 走升级路径时也可能带） */
+  upgradeDiff?: PackUpgradeDiff;
+  notes?: WorkshopNote[];
+  validationErrors?: PackValidationNote[];
+}
+
+/** 卸载结果 */
+export interface PackUninstallOutcome {
+  ok: boolean;
+  status: 'no_pack' | 'needs_confirmation' | 'uninstalled';
+  plan?: PackUninstallPlan;
+  notes?: WorkshopNote[];
+}
 
 // ═══════════════════════════════════════════════════════════
 // 模块加载时同步初始化（D16 时序契约的执行点）

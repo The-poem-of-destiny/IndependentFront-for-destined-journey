@@ -136,25 +136,28 @@ export const useWorldBookStore = defineStore('worldbook', () => {
   }
 
   /**
-   * 恢复默认：清空整表，重新从 `data/worldbooks/` 加载。
-   * 语义与迁移前的 `settings.resetWorldBooksToDefaults()` 一致（含清 activeWorldBookId）。
-   * fetch 失败 → 什么都不动（绝不先清表再发现加载不到）。
+   * 恢复默认：清空整表，从**默认真源**重新加载（§5.6 / D21）。
+   *
+   * 🔴 内容-引擎分离波 1：默认真源 = 已装 content pack 的 payload > 占位文件
+   * （provider `loadAllDefaultBooks`）。导入真实包后 restore 不再把真实书打回占位。
+   * 语义与迁移前一致（含清 activeWorldBookId）；fetch 失败 → 什么都不动（绝不先清表再发现拿不回来）。
    */
   async function resetToDefaults(): Promise<void> {
-    let builtIn: WorldBook[];
     try {
-      builtIn = await loadBuiltInWorldBooks();
+      // 先 await 确保 pack 已装载到模块缓存（boot 顺序：loadProjectDefaults → 这里）
+      const { loadAllDefaultBooks } = await import('./content-store');
+      const builtIn = await loadAllDefaultBooks();
+      const rows = builtIn.map(toRow);
+      const db = getDatabase();
+      await db.transaction('rw', db.worldBooks, async () => {
+        await db.worldBooks.clear();
+        if (rows.length > 0) await db.worldBooks.bulkPut(rows);
+      });
+      books.value = rows;
+      useSettingsStore().settings.activeWorldBookId = null;
     } catch {
-      return;
+      return; // fetch / IndexedDB 不可用时静默跳过
     }
-    const rows = builtIn.map(toRow);
-    const db = getDatabase();
-    await db.transaction('rw', db.worldBooks, async () => {
-      await db.worldBooks.clear();
-      if (rows.length > 0) await db.worldBooks.bulkPut(rows);
-    });
-    books.value = rows;
-    useSettingsStore().settings.activeWorldBookId = null;
   }
 
   return {
