@@ -171,6 +171,39 @@ export function resetAgentSettings(
 }
 
 /**
+ * 把一个**非 story** Agent 的设置从项目默认值「拉到最新」—— 只动提示词/模板/
+ * 世界书/旋钮，**保留 `model`**（用户自己选的 API 和模型不该被默认值覆盖）。
+ *
+ * 与 `resetAgentSettings` 的区别：后者连 `model` 一起重置（连 API 选择都抹掉），
+ * 本函数刻意不动 model。这是「恢复默认」/「恢复成最新」按钮的既有语义，也是
+ * 空态区「提示词更新中心」批量更新用的同一套逻辑 —— 两处复用本函数，避免漂移。
+ *
+ * 🔴 不处理 story：story 的提示词是预设（`prompts[]`），走 PresetManager 那条
+ *    分叉，本函数不碰它。story 的「恢复默认」在 AgentConfigPanel 里单独处理。
+ */
+export function applyProjectDefaultToAgent(
+  bag: SettingsBag,
+  agentId: string,
+  pd: Partial<AgentSettingsEntry>,
+): void {
+  patchAgentSettings(bag, agentId, {
+    worldBookEnabled: pd.worldBookEnabled ?? false,
+    worldBookIds: [...(pd.worldBookIds ?? [])],
+    systemPrompt: pd.systemPrompt ?? '',
+    // 空串 → 删键（把「走引擎默认」的语义还回去），不是写空串
+    template: pd.template || undefined,
+    temperature: pd.temperature ?? AGENT_SETTINGS_DEFAULTS.temperature,
+    topP: pd.topP ?? AGENT_SETTINGS_DEFAULTS.topP,
+    freqPen: pd.freqPen ?? AGENT_SETTINGS_DEFAULTS.freqPen,
+    presPen: pd.presPen ?? AGENT_SETTINGS_DEFAULTS.presPen,
+    maxTokens: pd.maxTokens ?? AGENT_SETTINGS_DEFAULTS.maxTokens,
+    // 来源没给就删键 —— historyLayers/historySlice 的「键存在」会挡掉引擎按类别给的默认
+    historyLayers: pd.historyLayers,
+    historySlice: pd.historySlice,
+  });
+}
+
+/**
  * 对**尚未被用户配置过**的项补上来源里的值（项目默认值加载器用）。
  *
  * 与 `resetAgentSettings` 的区别：这个只填空位，不覆盖用户已改过的项。

@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   AGENT_SETTINGS_DEFAULTS,
+  applyProjectDefaultToAgent,
   fillMissingAgentSettings,
   getAgentSettings,
   listConfiguredAgents,
@@ -208,5 +209,57 @@ describe('fillMissingAgentSettings', () => {
     const b: Record<string, any> = { agents: { story: { historyLayers: 0 } } };
     fillMissingAgentSettings(b, 'story', { historyLayers: 4 });
     expect(b.agents.story.historyLayers).toBe(0);
+  });
+});
+
+describe('applyProjectDefaultToAgent', () => {
+  it('🔴 model 保留不动（用户自己选的 API 与模型不该被默认值覆盖）', () => {
+    const b: Record<string, any> = { agents: { char_gen: { model: 'deepseek-chat' } } };
+    applyProjectDefaultToAgent(b, 'char_gen', { systemPrompt: '新版', model: 'ignored-model' });
+    expect(getAgentSettings(b, 'char_gen').model).toBe('deepseek-chat');
+  });
+
+  it('拉提示词/模板/世界书/旋钮到来源的值', () => {
+    const b: Record<string, any> = { agents: { char_gen: { model: 'm', systemPrompt: '旧' } } };
+    applyProjectDefaultToAgent(b, 'char_gen', {
+      systemPrompt: '新版',
+      template: '{{X}}',
+      worldBookEnabled: true,
+      worldBookIds: ['wb1'],
+      temperature: 0.3,
+      maxTokens: 8192,
+    });
+    const got = getAgentSettings(b, 'char_gen');
+    expect(got.systemPrompt).toBe('新版');
+    expect(got.template).toBe('{{X}}');
+    expect(got.worldBookEnabled).toBe(true);
+    expect(got.worldBookIds).toEqual(['wb1']);
+    expect(got.temperature).toBe(0.3);
+    expect(got.maxTokens).toBe(8192);
+  });
+
+  it('🔴 template 空串 → 删键（不是写空串），把「走引擎默认」语义还回去', () => {
+    const b: Record<string, any> = {
+      agents: { char_gen: { model: 'm', template: '{{旧}}' } },
+    };
+    applyProjectDefaultToAgent(b, 'char_gen', { template: '' });
+    expect('template' in b.agents.char_gen).toBe(false);
+  });
+
+  it('historyLayers/historySlice 来源没给就删键', () => {
+    const b: Record<string, any> = {
+      agents: { char_gen: { model: 'm', historyLayers: 3, historySlice: 500 } },
+    };
+    applyProjectDefaultToAgent(b, 'char_gen', { systemPrompt: 'x' });
+    expect('historyLayers' in b.agents.char_gen).toBe(false);
+    expect('historySlice' in b.agents.char_gen).toBe(false);
+  });
+
+  it('来源缺项时旋钮落 AGENT_SETTINGS_DEFAULTS（与其它路径同源）', () => {
+    const b: Record<string, any> = { agents: { char_gen: { model: 'm' } } };
+    applyProjectDefaultToAgent(b, 'char_gen', {});
+    const got = getAgentSettings(b, 'char_gen');
+    expect(got.temperature).toBe(AGENT_SETTINGS_DEFAULTS.temperature);
+    expect(got.maxTokens).toBe(AGENT_SETTINGS_DEFAULTS.maxTokens);
   });
 });

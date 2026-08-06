@@ -34,6 +34,7 @@ import { useSettingsStore, type PresetItem } from '../../../stores/settings-stor
 import { useUIStore } from '../../../stores/ui-store';
 import {
   AGENT_SETTINGS_DEFAULTS,
+  applyProjectDefaultToAgent,
   getAgentSettings,
   patchAgentSettings,
   resetAgentSettings,
@@ -150,12 +151,8 @@ async function restoreAgentDefaults() {
   // 优先查项目默认
   const pd = cfg.projectAgentDefaults?.agents?.[id];
   if (pd) {
-    // 不恢复模型选择 — 用户自己选的 API 和模型不应该被默认值覆盖
-    patchAgentSettings(s, id, {
-      worldBookEnabled: pd.worldBookEnabled ?? false,
-      worldBookIds: [...(pd.worldBookIds || [])],
-    });
     if (id === 'story') {
+      // story 走预设子系统：systemPrompt/template 由预设提供，这里只拉预设 + 世界书 + 旋钮
       s.activePresetId = pd.presetId || '';
       if (pd.preset) {
         const existing = s.presets.find((p) => p.id === pd.preset!.id);
@@ -171,48 +168,40 @@ async function restoreAgentDefaults() {
           }
         }
       }
+      // 不动 model / systemPrompt / template —— story 的提示词是预设，不是裸串。
+      // `applyProjectDefaultToAgent` 会写 systemPrompt，story 不用它。
+      patchAgentSettings(s, id, {
+        worldBookEnabled: pd.worldBookEnabled ?? false,
+        worldBookIds: [...(pd.worldBookIds || [])],
+        temperature: pd.temperature ?? AGENT_SETTINGS_DEFAULTS.temperature,
+        topP: pd.topP ?? AGENT_SETTINGS_DEFAULTS.topP,
+        freqPen: pd.freqPen ?? AGENT_SETTINGS_DEFAULTS.freqPen,
+        presPen: pd.presPen ?? AGENT_SETTINGS_DEFAULTS.presPen,
+        maxTokens: pd.maxTokens ?? AGENT_SETTINGS_DEFAULTS.maxTokens,
+        historyLayers: pd.historyLayers,
+        historySlice: pd.historySlice,
+      });
     } else {
-      patchAgentSettings(s, id, { systemPrompt: pd.systemPrompt || '' });
+      // 非 story：一键拉提示词/模板/世界书/旋钮（保留 model）。
+      // 与空态区「提示词更新中心」用同一个 helper —— 两处行为天然一致，改一个就够。
+      applyProjectDefaultToAgent(s, id, pd);
       agentPromptDraft.value = pd.systemPrompt || '';
-      // Restore template from project default（没给就删键，不是写空串）
-      patchAgentSettings(s, id, { template: pd.template || undefined });
       agentTemplateDraft.value = pd.template || '';
     }
-    // Q-18: 五个数值旋钮 + 两项历史注入配置一次写完，默认值只在
-    // AGENT_SETTINGS_DEFAULTS 出现一次（此前这里各写一遍 `?? 0.7 / ?? 16384`，
-    // 与下面的兜底分支、game-pipeline、create-store 共六份拷贝）。
-    //
-    // `historyLayers` / `historySlice` 传 undefined 即**删键** —— 项目默认没设时要把
-    // 「走引擎按 agent 类别的默认」那条语义还回去，不是写个 0 进去。
-    //
-    // 🔴 这里刻意**只碰数值项**：model 不动（用户自己选的 API 与模型不该被默认值覆盖，
-    // 这是本分支既有行为，与下面的出厂兜底分支不同）；worldBook / systemPrompt /
-    // template 上面已按 story 分支各自处理过，重写一遍会把刚 delete 掉的 template 键
-    // 又补成空串。
-    patchAgentSettings(s, id, {
-      temperature: pd.temperature ?? AGENT_SETTINGS_DEFAULTS.temperature,
-      topP: pd.topP ?? AGENT_SETTINGS_DEFAULTS.topP,
-      freqPen: pd.freqPen ?? AGENT_SETTINGS_DEFAULTS.freqPen,
-      presPen: pd.presPen ?? AGENT_SETTINGS_DEFAULTS.presPen,
-      maxTokens: pd.maxTokens ?? AGENT_SETTINGS_DEFAULTS.maxTokens,
-      historyLayers: pd.historyLayers,
-      historySlice: pd.historySlice,
-    });
     s.agentPromptEdited = false;
     s.agentDirty[id] = false;
-    ui.toast('已恢复项目默认设置', 'info');
+    ui.toast('已恢复成最新', 'info');
     return;
   }
 
   // 无项目默认 → 恢复出厂（不传来源即全部落 AGENT_SETTINGS_DEFAULTS）。
-  // 与上面的分支此前是两段只差取值来源的手抄，各写一遍 `?? 0.7 / ?? 16384`。
   resetAgentSettings(s, id);
   s.activePresetId = '';
   agentPromptDraft.value = '';
   agentTemplateDraft.value = '';
   s.agentPromptEdited = false;
   s.agentDirty[id] = false;
-  ui.toast('已恢复默认设置', 'info');
+  ui.toast('已恢复出厂默认', 'info');
 }
 </script>
 
@@ -231,7 +220,7 @@ async function restoreAgentDefaults() {
   <!-- 操作按钮 -->
   <div class="detail-actions">
     <AppButton variant="ghost" size="sm" @click="saveAsDefault">保存为默认</AppButton>
-    <AppButton variant="ghost" size="sm" @click="restoreAgentDefaults">恢复默认</AppButton>
+    <AppButton variant="ghost" size="sm" @click="restoreAgentDefaults">恢复成最新</AppButton>
     <AppButton variant="primary" size="sm" @click="saveAgentSettings">保存设置</AppButton>
   </div>
 </template>

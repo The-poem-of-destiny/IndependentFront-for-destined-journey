@@ -136,7 +136,7 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     };
 
     const w = mountPanel('char_gen');
-    // 动作栏顺序：保存为默认 / 恢复默认 / 保存设置
+    // 动作栏顺序：保存为默认 / 恢复成最新 / 保存设置
     await w.findAllComponents(AppButton)[2].vm.$emit('click');
 
     const saved = getAgentSettings(mockSettings, 'char_gen');
