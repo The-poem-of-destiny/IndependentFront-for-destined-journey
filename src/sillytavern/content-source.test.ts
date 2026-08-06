@@ -486,7 +486,7 @@ describe('planPackInstall (T1 skeleton)', () => {
     expect(plan.validationErrors.filter((n) => n.level === 'error').length).toBeGreaterThan(0);
   });
 
-  it('每个 present 分节在 sections 里有对应键（空计划骨架）', () => {
+  it('每个 present 分节在 sections 里有对应键（T6 四态实现后 worldBooks 有 added）', () => {
     const pack: ContentPack = {
       ...minimalPack(),
       worldBooks: [makeBook()],
@@ -498,9 +498,9 @@ describe('planPackInstall (T1 skeleton)', () => {
     };
     const plan = planPackInstall(pack);
     expect(plan.sections.worldBooks).toBeDefined();
-    expect(plan.sections.worldBooks?.added).toEqual([]);
+    // makeBook 当前库里不存在 → 落 added（T6 四态实现）
+    expect(plan.sections.worldBooks?.added).toHaveLength(1);
     expect(plan.sections.worldBooks?.updated).toEqual([]);
-    expect(plan.sections.worldBooks?.removed).toEqual([]);
     expect(plan.sections.worldBooks?.conflicted).toEqual([]);
     expect(plan.sections.presets).toBeDefined();
     expect(plan.sections.beautifierRules).toBeDefined();
@@ -561,9 +561,10 @@ describe('planPackInstall (T1 skeleton)', () => {
     expect(plan.branding?.declaredKeys).toEqual(expect.arrayContaining(['appTitle', 'era']));
   });
 
-  it('worldBooks present → saveUidMigration 占位存在（T6/T43 填）', () => {
+  it('worldBooks present + 无存档 enabledEntries → saveUidMigration 空映射（T6 实现）', () => {
     const plan = planPackInstall({ ...minimalPack(), worldBooks: [makeBook()] });
     expect(plan.saveUidMigration).toBeDefined();
+    // 没传存档 enabledWorldBookEntries → 无需迁移，rewrite 空、needs_selection 空
     expect(plan.saveUidMigration?.rewrite).toEqual({});
     expect(plan.saveUidMigration?.needsSelectionPartitions).toEqual([]);
   });
@@ -571,13 +572,5 @@ describe('planPackInstall (T1 skeleton)', () => {
   it('无 worldBooks → 不出 saveUidMigration', () => {
     const plan = planPackInstall(minimalPack());
     expect(plan.saveUidMigration).toBeUndefined();
-  });
-
-  it('🔴 四态逻辑尚未实现: present 分节的 added/updated 均为空（T6 填）', () => {
-    // 这是 T1 的骨架契约 —— T6 落地后此断言会变红，提示移除
-    const plan = planPackInstall({ ...minimalPack(), worldBooks: [makeBook()] });
-    expect(plan.sections.worldBooks?.added).toEqual([]);
-    expect(plan.sections.worldBooks?.updated).toEqual([]);
-    expect(plan.sections.worldBooks?.conflicted).toEqual([]);
   });
 });
