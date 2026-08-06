@@ -20,50 +20,15 @@ import {
 
 // ========== 加载 ==========
 
-/** 所有可用的世界书文件路径 */
-const WORLD_BOOK_FILES: Record<string, string> = {
-  world_setting: 'world_setting.json',
-  race: 'race.json',
-  faction: 'faction.json',
-  character: 'character.json',
-  event: 'event.json',
-  adventure_area: 'adventure_area.json',
-  monster_ecology: 'monster_ecology.json',
-  industry: 'industry.json',
-  organization: 'organization.json',
-  system_core: 'system_core.json',
-  variable: 'variable.json',
-  quick_feature: 'quick_feature.json',
-  extra_setting: 'extra_setting.json',
-  cot: 'cot.json',
-  dlc: 'dlc.json',
-};
+// 🪦 D28（波 1 T2）: `WORLD_BOOK_FILES` + `loadWorldBooks(ids)` 已删。
+// 15 本内置世界书清单的唯一真源是 `builtin-worldbooks.ts` 的 `BUILTIN_IDS`，
+// 加载入口是同文件的 `loadBuiltInWorldBooks()`。此前这里重复一份清单 + 一个无人调
+// 的 `loadWorldBooks(ids)` fetch 包装——两份清单漂移过（见设计 D28）。
+// `loadWorldBooksSync` 与 `getEntriesForAgent` 等纯函数保留。
 
 /**
- * 从 data/worldbooks/ 加载指定 ID 的世界书
- * 使用动态 import 兼容 Vite 打包
+ * 同步版：从预加载的对象加载（Vite import.meta.glob）
  */
-export async function loadWorldBooks(ids: string[]): Promise<WorldBook[]> {
-  const books: WorldBook[] = [];
-  for (const id of ids) {
-    const filename = WORLD_BOOK_FILES[id];
-    if (!filename) continue;
-    try {
-      // Vite 环境下用 fetch 从 public 或 data 目录加载
-      // 注：data/worldbooks/ 在构建时需要配置为静态资源
-      const url = `/data/worldbooks/${filename}`;
-      const response = await fetch(url);
-      if (!response.ok) continue;
-      const book = (await response.json()) as WorldBook;
-      books.push(book);
-    } catch {
-      // 文件不存在或加载失败，跳过
-    }
-  }
-  return books;
-}
-
-/** 同步版：从预加载的对象加载（Vite import.meta.glob） */
 export function loadWorldBooksSync(
   ids: string[],
   preloaded: Record<string, WorldBook>,

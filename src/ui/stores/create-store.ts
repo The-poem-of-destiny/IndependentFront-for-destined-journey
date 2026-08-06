@@ -966,10 +966,13 @@ export const useCreateStore = defineStore('create', () => {
 
   /** 加载 agent-config.json 中的 Agent 配置 */
   async function loadOutlineAgentConfigs(): Promise<AgentConfig[]> {
+    // 内容-引擎分离（波 1 T2 / D16）：经 ContentProvider 收口。
+    // provider 内部 await contentReadyPromise + 上报 contentStatus；失败返回空骨架不抛。
     try {
-      const resp = await fetch('/data/defaults/agent-config.json');
-      if (!resp.ok) return [];
-      const json = await resp.json();
+      const { useContentStore } = await import('./content-store');
+      const json = (await useContentStore().loadProjectDefaults()) as {
+        agents?: Record<string, any>;
+      };
       if (!json.agents) return [];
       const result: AgentConfig[] = [];
       for (const [id, cfg] of Object.entries(json.agents) as [string, any][]) {

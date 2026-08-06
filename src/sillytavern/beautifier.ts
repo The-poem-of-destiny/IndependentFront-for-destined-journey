@@ -11,6 +11,7 @@
  */
 
 import type { BeautifierRule } from './types';
+import { reportContentFetch } from './content-source';
 
 // ========== Helpers ==========
 
@@ -94,12 +95,14 @@ export async function loadPresetRules(): Promise<BeautifierRule[]> {
   try {
     const resp = await fetch('/data/defaults/beautifier-rules.json');
     if (!resp.ok) {
+      // 内容-引擎分离（波 1 T2 / §5.5 census）：上报内容态，不阻塞启动。
+      reportContentFetch({ source: 'beautifier.loadPresetRules', status: resp.status, ok: false });
       console.warn('[Beautifier] 预设规则加载失败，回退到 getBuiltinRules():', resp.status);
       return getBuiltinRules();
     }
     const data = await resp.json();
     const raw: any[] = data?.rules ?? [];
-    return raw.map(
+    const rules = raw.map(
       (r: any) =>
         ({
           id: r.id,
@@ -118,7 +121,14 @@ export async function loadPresetRules(): Promise<BeautifierRule[]> {
           locked: false,
         }) satisfies BeautifierRule,
     );
+    reportContentFetch({ source: 'beautifier.loadPresetRules', status: resp.status, ok: true });
+    return rules;
   } catch (err) {
+    reportContentFetch({
+      source: 'beautifier.loadPresetRules',
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
     console.warn('[Beautifier] 预设规则加载异常，回退到 getBuiltinRules():', err);
     return getBuiltinRules();
   }

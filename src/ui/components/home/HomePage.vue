@@ -5,6 +5,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { VERSION } from '@engine/index';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
+import ContentStatusBanner from '../shared/ContentStatusBanner.vue';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -193,6 +194,8 @@ function formatTime(ts: number) {
 
 <template>
   <div class="home-page" @mouseenter="showDevButton = true" @mouseleave="showDevButton = false">
+    <!-- 内容态横幅（波 1 T2 / §5.8）：占位 / 检测到本地真实内容 / error -->
+    <ContentStatusBanner class="home-content-banner" />
     <!-- 装饰性背景光晕 -->
     <div class="bg-glow bg-glow-1" aria-hidden="true" />
     <div class="bg-glow bg-glow-2" aria-hidden="true" />
@@ -467,6 +470,15 @@ function formatTime(ts: number) {
   justify-content: flex-start;
   min-height: 100vh;
   position: relative;
+}
+.home-content-banner {
+  position: absolute;
+  top: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(90vw, 640px);
+  z-index: 5;
+}
   overflow-x: hidden;
   overflow-y: auto;
   background:

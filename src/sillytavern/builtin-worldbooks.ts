@@ -6,6 +6,7 @@
  */
 
 import type { WorldBook } from './types';
+import { reportContentFetch } from './content-source';
 
 /** 内置世界书文件名列表 */
 const BUILTIN_IDS = [
@@ -32,14 +33,31 @@ export async function loadBuiltInWorldBooks(): Promise<WorldBook[]> {
   for (const id of BUILTIN_IDS) {
     try {
       const res = await fetch(`/data/worldbooks/${id}.json`);
-      if (!res.ok) continue;
+      if (!res.ok) {
+        // 内容-引擎分离（波 1 T2 / §5.5 census）：上报内容态，不阻塞启动。
+        reportContentFetch({
+          source: 'builtin-worldbooks.loadBuiltInWorldBooks',
+          status: res.status,
+          ok: false,
+          error: `book ${id}: HTTP ${res.status}`,
+        });
+        continue;
+      }
       const book = (await res.json()) as WorldBook;
       if (book.builtIn) {
         books.push({ ...book, entries: book.entries || [] });
       }
-    } catch {
+    } catch (err) {
       // 文件不存在或加载失败，跳过
+      reportContentFetch({
+        source: 'builtin-worldbooks.loadBuiltInWorldBooks',
+        ok: false,
+        error: `book ${id}: ${err instanceof Error ? err.message : String(err)}`,
+      });
     }
+  }
+  if (books.length > 0) {
+    reportContentFetch({ source: 'builtin-worldbooks.loadBuiltInWorldBooks', ok: true });
   }
   return books;
 }

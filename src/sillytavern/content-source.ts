@@ -56,6 +56,54 @@ const CREATIVE_WORKSHOP_PARTITION = 'creative_workshop';
 export const PLACEHOLDER_UID_RESERVED_BASE = 900001;
 
 // ═══════════════════════════════════════════════════════════
+// 内容态上报钩子（D16 / §5.5 census —— 引擎层 fetch 的 provider 出口）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 一次内容 fetch 的上报载荷（§5.5）。
+ *
+ * 引擎层（`beautifier.ts` / `builtin-worldbooks.ts`）不能直接 import UI store
+ * （依赖边方向：UI → 引擎，不可反转）。所以 provider 暴露一个**注入式上报钩子**，
+ * 由 UI 层的 content-store 在 boot 时 `setContentFetchReporter` 注册。
+ *
+ * 与 `engine-settings.ts` 的 `setEngineSettingsProvider` 同一注入缝先例。
+ * 引擎层在 fetch 完成后调 `reportContentFetch(...)`；钩子未注册时静默 no-op
+ * （单测环境不强制挂 Pinia）。
+ */
+export interface ContentFetchReport {
+  source: string;
+  status?: number;
+  ok: boolean;
+  error?: string;
+}
+
+/** 注入式上报回调（由 content-store boot 时注册；未注册时 no-op） */
+let contentFetchReporter: ((report: ContentFetchReport) => void) | null = null;
+
+/**
+ * 注册内容态上报回调（UI 层 boot 时调用）。
+ *
+ * 🔴 引擎层不 import UI store；这条钩子是引擎层 fetch 上报 contentStatus 的唯一出口。
+ * 注册幂等：后注册覆盖前一个。
+ */
+export function setContentFetchReporter(fn: ((report: ContentFetchReport) => void) | null): void {
+  contentFetchReporter = fn;
+}
+
+/**
+ * 上报一次内容 fetch 的结果（引擎层调用）。
+ *
+ * 🔴 行为兜底不变：钩子未注册时 no-op，不抛、不阻塞。
+ */
+export function reportContentFetch(report: ContentFetchReport): void {
+  try {
+    contentFetchReporter?.(report);
+  } catch {
+    /* 上报自身永不抛 */
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // 确定性 hash 工具（同步，planner 内部用）
 // ═══════════════════════════════════════════════════════════
 

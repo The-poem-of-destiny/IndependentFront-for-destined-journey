@@ -699,38 +699,42 @@ export class GamePipeline {
       // IndexedDB 不可用时静默跳过
     }
 
-    // 2. 直接 fetch agent-config.json（不依赖 store.projectAgentDefaults 异步初始化时序）
+    // 2. 经 ContentProvider 收口加载 agent-config.json（波 1 T2 / D16）。
+    //    provider 内部 await contentReadyPromise（T7 pack 叠加层的灌注点）+ 上报 contentStatus。
+    //    provider 失败时返回空骨架（agents={}）并 console.warn（保留原「必须留痕」语义）。
     try {
-      const res = await fetch('/data/defaults/agent-config.json');
-      if (res.ok) {
-        const config = await res.json();
-        const agents = config.agents || {};
-        for (const [agentId, entry] of Object.entries(agents)) {
-          const e = entry as any;
-          // 提取内嵌预设（story 等依赖 ST 预设的 Agent）
-          if (e.preset && !presets.some((p) => p.id === (e.preset as any).id)) {
-            presets.push(e.preset as unknown as AgentPreset);
-          } else if (e.preset) {
-            // 真机诊断(2026-07-17): DB 版预设（设置页编辑过的）优先于 agent-config.json 内嵌版 — 设计行为。
-            // 直接改 agent-config.json 不会生效于已存在的 DB 记录；要么在设置页编辑，要么删除 DB 预设回落出厂版。
-            console.warn(
-              `[GamePipeline] 预设 "${(e.preset as any).name ?? (e.preset as any).id}" 使用 DB 版本（设置页编辑优先），agent-config.json 内嵌版被忽略`,
-            );
-          }
-          // 提取各 agent 默认配置（供 buildAgentConfigs 使用）
-          agentDefaults[agentId] = {
-            presetId: e.presetId || undefined,
-            systemPrompt: e.systemPrompt || undefined,
-            template: e.template || undefined,
-            // 工坊 P2 (ADR-30 D5): EJS vars 提交权（出厂仅 story 置 true）。
-            // 字段缺席时保留 undefined（不塌成 false）——由 buildAgentConfigs 走代码级兜底。
-            ejsVarsCommit: typeof e.ejsVarsCommit === 'boolean' ? e.ejsVarsCommit : undefined,
-          };
-        }
-      } else {
+      const { useContentStore } = await import('../stores/content-store');
+      const config = (await useContentStore().loadProjectDefaults()) as {
+        agents?: Record<string, any>;
+      };
+      const agents = config.agents || {};
+      if (Object.keys(agents).length === 0) {
+        // provider 返回空骨架 = 占位 fetch 失败或文件缺失。原行为是 console.warn。
         console.warn(
-          `[GamePipeline] agent-config.json 请求失败 (HTTP ${res.status})，Agent 默认配置回落（EJS vars 提交权走代码兜底）`,
+          '[GamePipeline] agent-config.json 加载为空，Agent 默认配置回落（EJS vars 提交权走代码兜底）',
         );
+      }
+      for (const [agentId, entry] of Object.entries(agents)) {
+        const e = entry as any;
+        // 提取内嵌预设（story 等依赖 ST 预设的 Agent）
+        if (e.preset && !presets.some((p) => p.id === (e.preset as any).id)) {
+          presets.push(e.preset as unknown as AgentPreset);
+        } else if (e.preset) {
+          // 真机诊断(2026-07-17): DB 版预设（设置页编辑过的）优先于 agent-config.json 内嵌版 — 设计行为。
+          // 直接改 agent-config.json 不会生效于已存在的 DB 记录；要么在设置页编辑，要么删除 DB 预设回落出厂版。
+          console.warn(
+            `[GamePipeline] 预设 "${(e.preset as any).name ?? (e.preset as any).id}" 使用 DB 版本（设置页编辑优先），agent-config.json 内嵌版被忽略`,
+          );
+        }
+        // 提取各 agent 默认配置（供 buildAgentConfigs 使用）
+        agentDefaults[agentId] = {
+          presetId: e.presetId || undefined,
+          systemPrompt: e.systemPrompt || undefined,
+          template: e.template || undefined,
+          // 工坊 P2 (ADR-30 D5): EJS vars 提交权（出厂仅 story 置 true）。
+          // 字段缺席时保留 undefined（不塌成 false）——由 buildAgentConfigs 走代码级兜底。
+          ejsVarsCommit: typeof e.ejsVarsCommit === 'boolean' ? e.ejsVarsCommit : undefined,
+        };
       }
     } catch (err) {
       // 不再静默：这份配置是 systemPrompt / template / ejsVarsCommit 的唯一来源，

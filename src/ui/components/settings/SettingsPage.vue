@@ -17,6 +17,7 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { getAgentSettings } from '../../stores/agent-settings';
 import { useWorldBookStore } from '../../stores/worldbook-store';
 import AppButton from '../shared/AppButton.vue';
+import ContentStatusBanner from '../shared/ContentStatusBanner.vue';
 import AgentSection from './agent/AgentSection.vue';
 import AgentUpdateCenter from './agent/AgentUpdateCenter.vue';
 import { AGENT_LIST, resolveAgentSelection } from './agent/agent-list';
@@ -139,6 +140,8 @@ onMounted(() => {
 
 <template>
   <div class="settings-page">
+    <!-- 内容态徽标（波 1 T2 / §5.5）：占位 / error / 检测到本地真实内容 -->
+    <ContentStatusBanner class="settings-content-banner" />
     <!-- 顶部栏 -->
     <div class="settings-header">
       <AppButton variant="ghost" size="sm" @click="ui.navigate(ui.activeSaveId ? 'game' : 'home')"
@@ -272,6 +275,9 @@ onMounted(() => {
   flex-direction: column;
   height: 100vh;
   background: var(--theme-window-bg);
+}
+.settings-content-banner {
+  margin: 8px 16px 0;
 }
 .settings-header {
   display: flex;
