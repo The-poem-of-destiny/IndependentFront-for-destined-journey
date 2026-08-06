@@ -18,6 +18,7 @@ import { getAgentSettings } from '../../stores/agent-settings';
 import { useWorldBookStore } from '../../stores/worldbook-store';
 import AppButton from '../shared/AppButton.vue';
 import AgentSection from './agent/AgentSection.vue';
+import AgentUpdateCenter from './agent/AgentUpdateCenter.vue';
 import { AGENT_LIST } from './agent/agent-list';
 import ApiSection from './ApiSection.vue';
 import WorldBookSection from './WorldBookSection.vue';
@@ -187,12 +188,15 @@ onMounted(() => {
 
             <!-- Agent 未选择时的提示 -->
             <section v-if="activeSection === 'agent' && !activeAgent" class="section centered">
-              <div style="text-align: center; padding: 60px 0">
+              <div style="text-align: center; padding: 60px 0 24px">
                 <p class="text-muted" style="font-size: 1.1rem">← 请从左侧选择一个 Agent</p>
                 <p class="text-sm text-muted" style="margin-top: 8px">
                   每个 Agent 需要单独配置模型和世界书上下文
                 </p>
               </div>
+              <!-- 提示词更新中心：项目默认更新后，用户存量配置不会自动跟新（fillMissing
+                   只填空位），这里给一个一键同步的入口。没有更新时组件自己不渲染。 -->
+              <AgentUpdateCenter />
             </section>
 
             <!-- ========== 世界书 (Phase 8) ========== -->
