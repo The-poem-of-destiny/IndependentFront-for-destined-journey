@@ -48,7 +48,6 @@ import AgentPromptCard from './AgentPromptCard.vue';
 import PresetManager from './PresetManager.vue';
 import AgentSection from './AgentSection.vue';
 import AppButton from '../../shared/AppButton.vue';
-import { getAgentSettings } from '../../../stores/agent-settings';
 
 function resetSettings() {
   for (const k of Object.keys(mockSettings)) delete mockSettings[k];
@@ -130,18 +129,38 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     expect(mountPanel('char_gen').findAllComponents(AppButton)).toHaveLength(3);
   });
 
-  it('🔴「保存设置」提交的是载好的草稿，不是空串', async () => {
+  it('🔴「保存设置」提交的是载好的草稿，不是空串（草稿 ≠ 默认 → 写覆写）', async () => {
+    // 草稿 ≠ 默认时，diff-write 会把草稿写进覆写层
     mockStore.projectAgentDefaults = {
       agents: { char_gen: { systemPrompt: '项目默认提示词', template: '项目默认模板' } },
     };
-
     const w = mountPanel('char_gen');
+    // 载好的草稿来自默认层（= '项目默认提示词'）。改成用户编辑版，让 diff-write 真的写
+    const card = w.findComponent(AgentPromptCard);
+    await card.vm.$emit('update:prompt', '用户改过的提示词');
+    await card.vm.$emit('update:template', '用户改过的模板');
     // 动作栏顺序：保存为默认 / 恢复成最新 / 保存设置
     await w.findAllComponents(AppButton)[2].vm.$emit('click');
 
-    const saved = getAgentSettings(mockSettings, 'char_gen');
-    expect(saved.systemPrompt).toBe('项目默认提示词');
-    expect(saved.template).toBe('项目默认模板');
+    // 覆写层现在有用户版
+    expect(mockSettings.agents.char_gen.systemPrompt).toBe('用户改过的提示词');
+    expect(mockSettings.agents.char_gen.template).toBe('用户改过的模板');
+    expect(mockSettings.agentDirty.char_gen).toBe(true);
+  });
+
+  it('🔴 D44 修正 4：草稿 === 解析默认 → 不写覆写（diff-write 删键，默认层接管）', async () => {
+    mockStore.projectAgentDefaults = {
+      agents: { char_gen: { systemPrompt: '项目默认提示词', template: '项目默认模板' } },
+    };
+    const w = mountPanel('char_gen');
+    // 草稿载好 = 默认层的值（没改过）。点「保存设置」→ diff 相等 → 不写覆写键
+    await w.findAllComponents(AppButton)[2].vm.$emit('click');
+
+    // 🔴 覆写层**整条都不存在** —— 不只是键不存在，连空壳条目也不能留。
+    //    （此前 patchAgentSettings 的 ensure 会在覆写层建 `{ char_gen: {} }` 空壳，
+    //    那是「用户没改任何东西却冒出脏数据」。）
+    expect('char_gen' in mockSettings.agents).toBe(false);
+    expect(mockSettings.agents.char_gen).toBeUndefined();
     expect(mockSettings.agentDirty.char_gen).toBe(true);
   });
 

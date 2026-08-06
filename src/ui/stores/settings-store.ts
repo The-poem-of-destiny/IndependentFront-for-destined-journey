@@ -29,7 +29,7 @@ import {
   DEFAULT_IMAGE_QUALITY_SUFFIX,
 } from '@engine/image-defaults';
 import { detach } from './db-write';
-import { fillMissingAgentSettings } from './agent-settings';
+import { migrateLegacyAgentOverrides } from './agent-settings';
 import { migrateLegacyAgentMaps } from './agent-settings-migration';
 import type { UiSettings } from './settings-types';
 import {
@@ -500,20 +500,26 @@ export const useSettingsStore = defineStore('settings', () => {
     } catch {
       // 形状不符，使用空骨架
     }
-    // 对未被用户配置过的 agent 补上项目默认值
+
+    // 🔴 内容-引擎分离波 1 / D44 修正 3：一次性指纹迁移。
+    // 删 boot 播种后，旧安装的 settings.agents 里还存着 boot 抄进去的旧默认值
+    // （看起来像用户改过）。命中历史默认指纹（scripts/build-agent-fingerprints.mjs
+    // 从 data/defaults/agent-config.json 生成）的覆写键删除 → 默认层接管。
+    // 用户真正改过的值指纹不匹配、原样保留。迁移幂等：第二次启动已无命中键。
+    migrateLegacyAgentOverrides(settings.value);
+
+    // 预设播种（与 agent 覆写层无关，仍走这一支）：DB 空 → seed 出厂预设；
+    // DB 有同 id → 同步出厂 name（保留用户 prompts 编辑）
+    //
+    // 🔴 内容-引擎分离波 1 / D22：预设只写 Dexie，不再碰 `settings.presets` 镜像。
+    //    （此前这里还同步写镜像 —— 镜像删除后那段是死代码。）响应式视图由
+    //    usePresets composable 提供，本处 seed 之后下次 loadPresets 自然读到。
+    // 🔴 D44：agent 数值/提示词/世界书不再 boot 播种进覆写层 —— 读侧
+    //    （getAgentSettings）经 projectAgentDefaults 合默认层。本循环现在**只**负责
+    //    story 的预设落 Dexie（其余 agent 没有嵌入式预设，entry.preset 为 null）。
     const pd = projectAgentDefaults.value?.agents;
     if (!pd) return;
-    for (const [agentId, entry] of Object.entries(pd)) {
-      // Q-18：此前是 13 段逐字同形的 `if (!(agentId in map))` 手抄（其中 template
-      // 那段还抄了**两遍**，一模一样）。加第 14 个旋钮要记得在这里再抄一段。
-      // 语义原样保留：只填空位不覆盖用户已改的；historyLayers/historySlice 来源没给
-      // 就不写键，把「走引擎按类别的默认」那条语义还回去。
-      fillMissingAgentSettings(settings.value, agentId, entry);
-      // 预设：DB 空 → seed 出厂预设；DB 有同 id → 同步出厂 name（保留用户 prompts 编辑）
-      //
-      // 🔴 内容-引擎分离波 1 / D22：预设只写 Dexie，不再碰 `settings.presets` 镜像。
-      //    （此前这里还同步写镜像 —— 镜像删除后那段是死代码。）响应式视图由
-      //    usePresets composable 提供，本处 seed 之后下次 loadPresets 自然读到。
+    for (const [, entry] of Object.entries(pd)) {
       if (entry.preset && entry.presetId) {
         try {
           const { getPresets, savePreset } = await import('@engine/database');

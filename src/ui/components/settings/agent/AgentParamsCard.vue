@@ -3,12 +3,16 @@
  * Agent 的三张设置卡：API 池选择 / LLM 参数 / 世界书配置（Q-25 第 9 步）。
  *
  * 三张卡合成一个组件而不是三个，是因为它们**共用同一对读写口** ——
- * `agentCfg`（合上默认值的当前设置）与 `setAgentField`（改一项并置脏位）。
+ * `agentCfg`（合上默认层的当前设置）与 `setAgentField`（改一项并置脏位）。
  * 拆成三个各自重建这对助手的组件，只会得到三个没有实现的壳。
  *
  * 🔴 `wb.init()` **不在这里** —— 它留在 SettingsPage 的 onMounted。世界书分区
  *    （WorldBookSection）自己不调 init，同样靠壳层那一次；搬进来会让那个分区
  *    在没进过 Agent 分区时列表为空。
+ *
+ * 🔴 D44 修正 1/4：`getAgentSettings` 现在合**默认层**（pack > 占位），数值/世界书/
+ *    model 的有效值走「覆写 ?? 默认」。每张卡上的「默认 / 已覆写」徽标告诉用户这个
+ *    值是默认层给的还是用户改过——「已覆写」意味着覆写层有条目、清掉即回默认。
  */
 import { computed, ref } from 'vue';
 import AppCard from '../../shared/AppCard.vue';
@@ -17,19 +21,43 @@ import { useWorldBookStore } from '../../../stores/worldbook-store';
 import {
   getAgentSettings,
   patchAgentSettings,
+  type AgentDefaultsLayer,
   type AgentSettingsEntry,
 } from '../../../stores/agent-settings';
 
 const props = defineProps<{ agentId: string }>();
 
-const s = useSettingsStore().settings;
+const cfg = useSettingsStore();
+const s = cfg.settings;
 const wb = useWorldBookStore();
 
 /** 配过 API 池没有 —— 一行派生，与子导航那处各算各的（不穿成 prop） */
 const hasApi = computed(() => s.apiPool.length > 0);
 
-/** 当前 Agent 的完整设置（数值项已合默认）。模板里不再写 `?? 0.7` 这类字面量 */
-const agentCfg = computed(() => getAgentSettings(s, props.agentId));
+/** 当前 Agent 的默认层（pack > 占位）—— 传给 getAgentSettings 合覆写 ?? 默认 */
+const defaultsLayer = computed<AgentDefaultsLayer>(() => {
+  const agents = cfg.projectAgentDefaults?.agents;
+  if (!agents) return {};
+  const layer: AgentDefaultsLayer = {};
+  for (const [id, entry] of Object.entries(agents)) {
+    layer[id] = entry as Partial<AgentSettingsEntry>;
+  }
+  return layer;
+});
+
+/** 当前 Agent 的完整设置（已合覆写 ?? 默认层） */
+const agentCfg = computed(() => getAgentSettings(s, props.agentId, defaultsLayer.value));
+
+/**
+ * 某字段是不是「已被用户覆写」—— 用于「默认 / 已覆写」徽标。
+ * 覆写层（s.agents[agentId]）里有该键 = 已覆写；否则走默认层。
+ */
+function isOverridden(field: keyof AgentSettingsEntry): boolean {
+  const agents = (s as unknown as { agents?: Record<string, Record<string, unknown>> }).agents;
+  if (!agents) return false;
+  const entry = agents[props.agentId];
+  return Boolean(entry && typeof entry === 'object' && field in entry);
+}
 
 /** 改若干项并置脏位 —— 每个旋钮共用这一条写入路径 */
 function setAgentField(patch: Partial<AgentSettingsEntry>) {
@@ -56,7 +84,7 @@ function onHistorySliceInput(ev: Event) {
  *    Vue 认为still干净的缓存值。搬迁时原样保留，别"顺手简化"。
  */
 function toggleAgentWorldBook(bookId: string) {
-  const ids = getAgentSettings(s, props.agentId).worldBookIds; // 已是副本
+  const ids = getAgentSettings(s, props.agentId, defaultsLayer.value).worldBookIds; // 已是副本
   const idx = ids.indexOf(bookId);
   if (idx >= 0) ids.splice(idx, 1);
   else ids.push(bookId);
@@ -71,7 +99,12 @@ void ref;
 <template>
   <!-- 模型选择 — 从 API 池中选择 -->
   <AppCard padding="md" class="detail-card">
-    <h4>API 池选择</h4>
+    <h4>
+      API 池选择
+      <span class="source-badge" :class="{ overridden: isOverridden('model') }">{{
+        isOverridden('model') ? '已覆写' : '默认'
+      }}</span>
+    </h4>
     <p class="form-hint">为此 Agent 指定一个已配置好的 API 池（含端点地址、密钥和默认模型）。</p>
     <div class="key-row">
       <select
@@ -93,13 +126,18 @@ void ref;
   <!-- LLM 参数 (所有 Agent 通用) -->
   <AppCard padding="md" class="detail-card">
     <h4>LLM 参数</h4>
-    <p class="form-hint">控制此 Agent 的采样行为和生成长度。所有参数均有合理默认值。</p>
+    <p class="form-hint">
+      控制此 Agent 的采样行为和生成长度。带「已覆写」徽标的参数是你改过的；清掉覆写即回默认。
+    </p>
     <div
       class="form-grid"
       style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px"
     >
       <label class="form-label"
         >Temperature
+        <span class="source-badge" :class="{ overridden: isOverridden('temperature') }">{{
+          isOverridden('temperature') ? '已覆写' : '默认'
+        }}</span>
         <p class="form-hint">越高越随机 (0-2)</p>
         <input
           type="number"
@@ -117,6 +155,9 @@ void ref;
       </label>
       <label class="form-label"
         >Top P
+        <span class="source-badge" :class="{ overridden: isOverridden('topP') }">{{
+          isOverridden('topP') ? '已覆写' : '默认'
+        }}</span>
         <p class="form-hint">核采样阈值 (0-1)</p>
         <input
           type="number"
@@ -130,6 +171,9 @@ void ref;
       </label>
       <label class="form-label"
         >Frequency Penalty
+        <span class="source-badge" :class="{ overridden: isOverridden('freqPen') }">{{
+          isOverridden('freqPen') ? '已覆写' : '默认'
+        }}</span>
         <p class="form-hint">抑制重复 (-2 ~ 2)</p>
         <input
           type="number"
@@ -147,6 +191,9 @@ void ref;
       </label>
       <label class="form-label"
         >Presence Penalty
+        <span class="source-badge" :class="{ overridden: isOverridden('presPen') }">{{
+          isOverridden('presPen') ? '已覆写' : '默认'
+        }}</span>
         <p class="form-hint">鼓励新话题 (-2 ~ 2)</p>
         <input
           type="number"
@@ -164,6 +211,9 @@ void ref;
       </label>
       <label class="form-label"
         >Max Tokens
+        <span class="source-badge" :class="{ overridden: isOverridden('maxTokens') }">{{
+          isOverridden('maxTokens') ? '已覆写' : '默认'
+        }}</span>
         <p class="form-hint">单次回复最大长度</p>
         <input
           type="number"
@@ -181,6 +231,9 @@ void ref;
       </label>
       <label class="form-label"
         >历史注入层数
+        <span class="source-badge" :class="{ overridden: isOverridden('historyLayers') }">{{
+          isOverridden('historyLayers') ? '已覆写' : '默认'
+        }}</span>
         <p class="form-hint">
           注入最近 N 轮「玩家+AI」对话历史（0=不注入；留空=按 Agent 类别默认）。后置型 Agent 默认 1
           轮辅助上文，长正文型默认 6 轮
@@ -198,6 +251,9 @@ void ref;
       </label>
       <label class="form-label"
         >历史截断字数
+        <span class="source-badge" :class="{ overridden: isOverridden('historySlice') }">{{
+          isOverridden('historySlice') ? '已覆写' : '默认'
+        }}</span>
         <p class="form-hint">
           每条历史正文保留前多少字（留空=按 Agent 类别默认，长正文型默认 1500，后置型默认 800）
         </p>
@@ -217,7 +273,12 @@ void ref;
 
   <!-- 世界书配置 (Phase 8) -->
   <AppCard padding="md" class="detail-card">
-    <h4>世界书配置</h4>
+    <h4>
+      世界书配置
+      <span class="source-badge" :class="{ overridden: isOverridden('worldBookEnabled') }">{{
+        isOverridden('worldBookEnabled') ? '已覆写' : '默认'
+      }}</span>
+    </h4>
     <p class="form-hint">启用该 Agent 的世界书上下文注入。选择要关联的世界书。</p>
     <div class="key-row key-row-stacked">
       <label class="toggle-label">
@@ -299,5 +360,29 @@ void ref;
 /* 竖直堆叠的 key-row（上面还有一行同类控件时留一跳） */
 .key-row-stacked {
   margin-bottom: var(--theme-spacing-sm);
+}
+/* 「默认 / 已覆写」徽标 —— D44 修正 4 来源标识 */
+.source-badge {
+  display: inline-block;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: var(--theme-radius-sm);
+  margin-left: 6px;
+  vertical-align: middle;
+  background: color-mix(in srgb, var(--theme-text-muted) 14%, transparent);
+  color: var(--theme-text-muted);
+  border: 1px solid transparent;
+  letter-spacing: 0.02em;
+}
+.source-badge.overridden {
+  background: color-mix(in srgb, var(--theme-primary) 16%, transparent);
+  color: var(--theme-primary);
+  border-color: color-mix(in srgb, var(--theme-primary) 30%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .source-badge {
+    transition: none;
+  }
 }
 </style>

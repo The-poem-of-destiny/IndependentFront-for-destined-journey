@@ -384,8 +384,16 @@ export const useWorkshopStore = defineStore('workshop', () => {
     // Q-18：per-Agent 设置合并成 `agents` 之后，这里投影出一张
     // `Record<agentId, string[]>` 交给纯函数，再写回条目 —— 工坊那两个纯函数
     // 与它们的测试一个字都不用改。
-    updateAgentWorldBookIds(settingsStore.settings, (current) =>
-      grantWorkshopBookToAgents(current, workshopBookId(projectId)),
+    // 🔴 D44 修正 2：必须传默认层（projectAgentDefaults.agents），否则覆写层为空时
+    //    解析名册是空的、工坊装书授权给零个 agent（用户看到「装了等于没装」）。
+    const defaultsLayer = (settingsStore.projectAgentDefaults?.agents ?? {}) as Record<
+      string,
+      Partial<import('./agent-settings').AgentSettingsEntry>
+    >;
+    updateAgentWorldBookIds(
+      settingsStore.settings,
+      (current) => grantWorkshopBookToAgents(current, workshopBookId(projectId)),
+      defaultsLayer,
     );
     settingsStore.saveNow();
   }
@@ -481,9 +489,16 @@ export const useWorkshopStore = defineStore('workshop', () => {
     await getDatabase().workshopProjects.delete(projectId);
     projects.value = projects.value.filter((p) => p.id !== projectId);
     // 与 grantBookToAllAgents 成对：不收回的话 Agent 清单里会积一串指向已删书的死 id
+    // 🔴 D44 修正 2：传默认层，让 revoke 也覆盖到没覆写条目的 agent（与 grant 对称）。
     const settingsStore = useSettingsStore();
-    updateAgentWorldBookIds(settingsStore.settings, (current) =>
-      revokeWorkshopBookFromAgents(current, workshopBookId(projectId)),
+    const defaultsLayer = (settingsStore.projectAgentDefaults?.agents ?? {}) as Record<
+      string,
+      Partial<import('./agent-settings').AgentSettingsEntry>
+    >;
+    updateAgentWorldBookIds(
+      settingsStore.settings,
+      (current) => revokeWorkshopBookFromAgents(current, workshopBookId(projectId)),
+      defaultsLayer,
     );
     settingsStore.saveNow();
     return true;

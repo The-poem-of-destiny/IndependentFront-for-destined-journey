@@ -38,11 +38,11 @@ import { useSettingsStore, type PresetItem } from '../../../stores/settings-stor
 import { useUIStore } from '../../../stores/ui-store';
 import { usePresets } from '../../../composables/usePresets';
 import {
-  AGENT_SETTINGS_DEFAULTS,
   applyProjectDefaultToAgent,
   getAgentSettings,
   patchAgentSettings,
   resetAgentSettings,
+  type AgentDefaultsLayer,
 } from '../../../stores/agent-settings';
 import { getAgentTemplate } from '@engine/agent-templates';
 
@@ -57,6 +57,25 @@ const agentPromptDraft = ref('');
 const agentTemplateDraft = ref('');
 
 /**
+ * 当前 Agent 的**默认层**（pack > 占位）—— D44 修正 1：getAgentSettings 合默认层、
+ * saveAgentSettings 与之 diff 写覆写。
+ *
+ * 形如 `{ [agentId]: Partial<AgentSettingsEntry> }`。projectAgentDefaults 异步加载，
+ * 加载完 reactive 触发本 computed 重算（saveAgentSettings 读最新值）。
+ */
+const defaultsLayer = computed<AgentDefaultsLayer>(() => {
+  const agents = cfg.projectAgentDefaults?.agents;
+  if (!agents) return {};
+  // 形状对齐 AgentSettingsEntry 的 12 键子集（磁盘 AgentDefaultEntry 多了 presetId/preset，
+  // 对 resolve 无害——getAgentSettings 只读它认得的键）
+  const layer: AgentDefaultsLayer = {};
+  for (const [id, entry] of Object.entries(agents)) {
+    layer[id] = entry as Partial<import('../../../stores/agent-settings').AgentSettingsEntry>;
+  }
+  return layer;
+});
+
+/**
  * 当前选中的预设 —— 与 PresetManager 各算一次（对 store 的一行派生，不穿 prop）。
  *
  * 内容-引擎分离波 1 / D22：预设真源是 Dexie（经 usePresets composable 的共享 ref），
@@ -66,12 +85,13 @@ const activePreset = computed(
   () => presetList.value.find((p) => p.id === s.activePresetId) ?? null,
 );
 
-/** 载入两个草稿：用户自定义 → 项目默认（agent-config.json）→ 引擎内置模板 */
+/** 载入两个草稿：用户覆写 → 项目默认（agent-config.json）→ 引擎内置模板 */
 function loadDrafts(id: string) {
-  // 优先加载用户自定义的 system prompt，否则加载引擎内置模板
-  const custom = getAgentSettings(s, id).systemPrompt;
-  if (custom) {
-    agentPromptDraft.value = custom;
+  const layer = defaultsLayer.value;
+  // D44 修正 1：经 getAgentSettings 合默认层 —— 「用户没覆写」时读到默认层 systemPrompt
+  const resolved = getAgentSettings(s, id, layer);
+  if (resolved.systemPrompt) {
+    agentPromptDraft.value = resolved.systemPrompt;
   } else {
     // Phase 9: 优先从 agent-config.json 读 systemPrompt，否则回退到 agent-templates.ts 的 fixedSystem+fixedExamples
     const pd = cfg.projectAgentDefaults?.agents?.[id];
@@ -86,10 +106,9 @@ function loadDrafts(id: string) {
   }
   s.agentPromptEdited = false;
 
-  // Load template from user custom, agent-config, or default
-  const customTemplate = getAgentSettings(s, id).template;
-  if (customTemplate) {
-    agentTemplateDraft.value = customTemplate;
+  // Load template from resolved (user override ?? default), else engine default
+  if (resolved.template) {
+    agentTemplateDraft.value = resolved.template;
   } else {
     const pd2 = cfg.projectAgentDefaults?.agents?.[id];
     if (pd2?.template) {
@@ -104,12 +123,29 @@ function loadDrafts(id: string) {
 watch(() => props.agentId, loadDrafts, { immediate: true });
 
 function saveAgentSettings() {
-  // 非 story Agent：提交 System Prompt + Template 到持久化
+  // 非 story Agent：提交 System Prompt + Template 到覆写层
+  // 🔴 D44 修正 4：diff 写入 —— 草稿与解析默认相等时**删键**（不是写进覆写层），
+  //    让默认层接管。这样「保存设置」不会把展示中的默认值固化成覆写，pack 后续
+  //    版本仍能透过覆写层够到这个 agent。
   if (props.agentId !== 'story') {
-    patchAgentSettings(s, props.agentId, {
-      systemPrompt: agentPromptDraft.value,
-      template: agentTemplateDraft.value,
-    });
+    const resolved = getAgentSettings(s, props.agentId, defaultsLayer.value);
+    const promptPatch: { systemPrompt: string | undefined } = {
+      systemPrompt:
+        agentPromptDraft.value === resolved.systemPrompt ? undefined : agentPromptDraft.value,
+    };
+    const templatePatch: { template: string | undefined } = {
+      template:
+        agentTemplateDraft.value === resolved.template ? undefined : agentTemplateDraft.value,
+    };
+    // 🔴 两个字段都与默认相等时不调用 patch —— 否则 `patchAgentSettings` 的 ensure 会
+    //    在覆写层留下一个空壳条目 `{ char_gen: {} }`（用户没改任何东西却冒出脏数据）。
+    //    空壳无害（getAgentSettings 的 peek 返回 {} → 全走默认层；AgentUpdateCenter 的
+    //    空对象键被过滤不列出），但违背 D44 修正 4「保存只写 diff」的意图。
+    const hasChange =
+      promptPatch.systemPrompt !== undefined || templatePatch.template !== undefined;
+    if (hasChange) {
+      patchAgentSettings(s, props.agentId, { ...promptPatch, ...templatePatch });
+    }
   }
   s.agentDirty[props.agentId] = true;
   ui.toast('Agent 设置已保存', 'success');
@@ -130,7 +166,7 @@ async function saveAsDefault() {
 
   const entry = buildAgentDefaultEntry({
     agentId,
-    settings: getAgentSettings(s, agentId),
+    settings: getAgentSettings(s, agentId, defaultsLayer.value),
     promptDraft: agentPromptDraft.value,
     templateDraft: agentTemplateDraft.value,
     activePresetId: s.activePresetId || '',
@@ -179,23 +215,14 @@ async function restoreAgentDefaults() {
           }
         }
       }
-      // 不动 model / systemPrompt / template —— story 的提示词是预设，不是裸串。
-      // `applyProjectDefaultToAgent` 会写 systemPrompt，story 不用它。
-      patchAgentSettings(s, id, {
-        worldBookEnabled: pd.worldBookEnabled ?? false,
-        worldBookIds: [...(pd.worldBookIds || [])],
-        temperature: pd.temperature ?? AGENT_SETTINGS_DEFAULTS.temperature,
-        topP: pd.topP ?? AGENT_SETTINGS_DEFAULTS.topP,
-        freqPen: pd.freqPen ?? AGENT_SETTINGS_DEFAULTS.freqPen,
-        presPen: pd.presPen ?? AGENT_SETTINGS_DEFAULTS.presPen,
-        maxTokens: pd.maxTokens ?? AGENT_SETTINGS_DEFAULTS.maxTokens,
-        historyLayers: pd.historyLayers,
-        historySlice: pd.historySlice,
-      });
+      // 🔴 D44 修正 4：story「恢复默认」= 清覆写层（解析值自动回默认层 pack > 占位）。
+      //    不动 model（用户选的 API 池）。applyProjectDefaultToAgent 保留 model、清其余。
+      //    不写 systemPrompt/template —— story 的提示词是预设不是裸串。
+      applyProjectDefaultToAgent(s, id);
     } else {
-      // 非 story：一键拉提示词/模板/世界书/旋钮（保留 model）。
-      // 与空态区「提示词更新中心」用同一个 helper —— 两处行为天然一致，改一个就够。
-      applyProjectDefaultToAgent(s, id, pd);
+      // 非 story：一键清覆写层（解析值回默认层，保留 model）。
+      // 与「覆写差异面板」（AgentUpdateCenter）用同一个 helper —— 两处行为天然一致。
+      applyProjectDefaultToAgent(s, id);
       agentPromptDraft.value = pd.systemPrompt || '';
       agentTemplateDraft.value = pd.template || '';
     }
@@ -205,7 +232,7 @@ async function restoreAgentDefaults() {
     return;
   }
 
-  // 无项目默认 → 恢复出厂（不传来源即全部落 AGENT_SETTINGS_DEFAULTS）。
+  // 无项目默认 → 清覆写层（解析值落占位/兜底）。resetAgentSettings 连 model 一起清。
   resetAgentSettings(s, id);
   s.activePresetId = '';
   agentPromptDraft.value = '';
