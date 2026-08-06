@@ -449,8 +449,10 @@ export class GamePipeline {
     const apiPool = this.buildEndpoints();
 
     // 每个 Agent 的 `model` 存的是 **API 池 id** → 匹配对应端点
+    // 🔴 D44 修正 1：传默认层（agentDefaults）——model 也是 12 键之一，删 boot 播种后
+    //    用户没覆写时唯一来源就是默认层。agentDefaults 在本方法参数里、闭包可直接用。
     const getEndpoint = (agentId: string): ApiEndpoint | undefined => {
-      const poolId = getAgentSettings(s, agentId).model;
+      const poolId = getAgentSettings(s, agentId, agentDefaults).model;
       return apiPool.find((ep) => ep.id === poolId) || apiPool[0];
     };
 

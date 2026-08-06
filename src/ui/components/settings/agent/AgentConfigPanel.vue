@@ -137,7 +137,15 @@ function saveAgentSettings() {
       template:
         agentTemplateDraft.value === resolved.template ? undefined : agentTemplateDraft.value,
     };
-    patchAgentSettings(s, props.agentId, { ...promptPatch, ...templatePatch });
+    // 🔴 两个字段都与默认相等时不调用 patch —— 否则 `patchAgentSettings` 的 ensure 会
+    //    在覆写层留下一个空壳条目 `{ char_gen: {} }`（用户没改任何东西却冒出脏数据）。
+    //    空壳无害（getAgentSettings 的 peek 返回 {} → 全走默认层；AgentUpdateCenter 的
+    //    空对象键被过滤不列出），但违背 D44 修正 4「保存只写 diff」的意图。
+    const hasChange =
+      promptPatch.systemPrompt !== undefined || templatePatch.template !== undefined;
+    if (hasChange) {
+      patchAgentSettings(s, props.agentId, { ...promptPatch, ...templatePatch });
+    }
   }
   s.agentDirty[props.agentId] = true;
   ui.toast('Agent 设置已保存', 'success');

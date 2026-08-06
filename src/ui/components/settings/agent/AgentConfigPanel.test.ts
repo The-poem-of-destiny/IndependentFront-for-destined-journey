@@ -156,9 +156,11 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     // 草稿载好 = 默认层的值（没改过）。点「保存设置」→ diff 相等 → 不写覆写键
     await w.findAllComponents(AppButton)[2].vm.$emit('click');
 
-    // 覆写层没有 systemPrompt/template（diff-write 删了，不是写空串）
-    expect(mockSettings.agents.char_gen?.systemPrompt).toBeUndefined();
-    expect(mockSettings.agents.char_gen?.template).toBeUndefined();
+    // 🔴 覆写层**整条都不存在** —— 不只是键不存在，连空壳条目也不能留。
+    //    （此前 patchAgentSettings 的 ensure 会在覆写层建 `{ char_gen: {} }` 空壳，
+    //    那是「用户没改任何东西却冒出脏数据」。）
+    expect('char_gen' in mockSettings.agents).toBe(false);
+    expect(mockSettings.agents.char_gen).toBeUndefined();
     expect(mockSettings.agentDirty.char_gen).toBe(true);
   });
 
