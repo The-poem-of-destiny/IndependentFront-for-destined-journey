@@ -15,7 +15,12 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
-import { useContentStore, setActivePackRecord, resetPlaceholderHashesCache } from './content-store';
+import {
+  useContentStore,
+  setActivePackRecord,
+  resetPlaceholderHashesCache,
+  setPlaceholderHashesForTests,
+} from './content-store';
 import { getDatabase } from '@engine/database';
 import { hashWorldBook } from '@engine/content-source';
 import type { WorldBook, WorldBookEntry } from '@engine/types';
@@ -138,11 +143,11 @@ function installContentFetchMock(opts: { version?: string; extraBooks?: WorldBoo
   const byBook: Record<string, string> = {};
   for (const b of placeholderBooks) byBook[b.id] = hashWorldBook(b);
   const manifest = { version: opts.version ?? '1', byBook };
+  // 🔴 清单是**静态 import 的打包资源**（设计 §6），不再走 fetch —— 合成基线只能经
+  // 测试覆写口注入。此前这里 mock 的那条 `/data/placeholder-hashes.json` 分支已经死了。
+  setPlaceholderHashesForTests(manifest);
   const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const url = String(input);
-    if (url.includes('placeholder-hashes.json')) {
-      return new Response(JSON.stringify(manifest), { status: 200 });
-    }
     // 占位世界书 /data/worldbooks/<id>.json
     const m = /\/data\/worldbooks\/(.+)\.json$/.exec(url);
     if (m) {

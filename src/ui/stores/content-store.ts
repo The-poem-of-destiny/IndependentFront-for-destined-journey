@@ -41,6 +41,8 @@
 import { defineStore, getActivePinia } from 'pinia';
 import { ref } from 'vue';
 import type { ContentStatus } from '@engine/types-content';
+// 占位基线清单：随引擎打包的静态资源（设计 §6），**不是**内容树的一部分。
+import placeholderHashesRaw from '@engine/placeholder-hashes.json';
 import type { SaveSlot, WorkshopNote, WorldBook } from '@engine/types';
 import type {
   ContentPack,
@@ -125,9 +127,11 @@ export function markContentReady(): void {
  * **不许运行时 fetch `/data/*` 现算**（D20 裁定：POEM_CONTENT_DIR overlay 生效时那里是
  * 真实内容树）。它是 D20 四态基线、D42 重播种、卸载 re-seed 三处的共同输入。
  *
- * 本波（T7）占位 hash 清单由 T15 产出并随引擎打包；文件可能不存在 → 返回**空清单**，
- * 不报错（四态规则的「无占位基线 → 首次安装回落 updated / conflicted」分支仍可用，
- * 卸载 re-seed 与 D42 重播种在该态是 no-op）。
+ * 清单由 T15 的 `scripts/build-placeholder-hashes.mjs` 生成到
+ * `src/sillytavern/placeholder-hashes.json`，本模块**静态 import**（见 `loadPlaceholderHashes`）。
+ * 「空清单」仍是合法态（四态规则的「无占位基线 → 首次安装回落 updated / conflicted」分支
+ * 仍可用，卸载 re-seed 与 D42 重播种在该态是 no-op）—— 但**空清单不该再由取不到文件造成**，
+ * 那正是它此前静默失效的方式。
  *
  * `version` 戳供 D42 重播种比对：戳前进时对「hash 仍等于占位基线」的书重播种。
  */
@@ -148,26 +152,27 @@ let placeholderHashesCache: PlaceholderHashManifest = { version: '' };
 /**
  * 加载占位基线清单（幂等，结果缓存到模块级）。
  *
- * fetch `/data/placeholder-hashes.json`；404 / 网络失败 → 返回空清单 `{ version: '' }`，
- * **不报错**（面 4：本波文件不存在是常态，占位 hash 清单 T15 产出后接真值）。
+ * 🔴 **静态 import，不 fetch**（设计 §6）。T7 初版写的是
+ * `fetch('/data/placeholder-hashes.json')`，那条路两头都不对：
+ * ① 清单由 T15 产在 `src/sillytavern/placeholder-hashes.json`（随引擎打包），
+ *    `/data/` 下**根本没有这个文件** —— 那次 fetch 永远 404、永远回落空清单，
+ *    而空清单是**合法态**（四态回落 updated/conflicted），所以它不报错、不变红，
+ *    只是让 D20 基线、D42 重播种、卸载 re-seed 三处一起静默失效。
+ * ② 就算把文件放过去也是错的：`POEM_CONTENT_DIR` overlay 生效时 `/data/*` 是**真实内容**，
+ *    拿真实内容当「占位基线」比对，等于把每一本都判成「用户没改过」。
+ *
+ * 保留 async 签名（三处调用方都 await），只是现在没有 I/O 了。
  */
 function loadPlaceholderHashes(): Promise<PlaceholderHashManifest> {
   if (placeholderHashesPromise) return placeholderHashesPromise;
   placeholderHashesPromise = (async () => {
-    try {
-      const res = await fetch('/data/placeholder-hashes.json');
-      if (res.ok) {
-        const raw = await res.json();
-        placeholderHashesCache = {
-          version: typeof raw?.version === 'string' ? raw.version : '',
-          byBook: raw?.byBook,
-          byPreset: raw?.byPreset,
-          byBeautifierRule: raw?.byBeautifierRule,
-        };
-      }
-    } catch {
-      // 404 / 网络失败 → 空清单（本波常态）
-    }
+    const raw = placeholderHashesRaw as Record<string, unknown>;
+    placeholderHashesCache = {
+      version: typeof raw?.version === 'string' ? raw.version : '',
+      byBook: raw?.byBook as PlaceholderHashManifest['byBook'],
+      byPreset: raw?.byPreset as PlaceholderHashManifest['byPreset'],
+      byBeautifierRule: raw?.byBeautifierRule as PlaceholderHashManifest['byBeautifierRule'],
+    };
     return placeholderHashesCache;
   })();
   return placeholderHashesPromise;
@@ -178,10 +183,22 @@ function getPlaceholderHashes(): PlaceholderHashManifest {
   return placeholderHashesCache;
 }
 
-/** 重置占位基线缓存（仅供测试 afterEach 隔离；生产不调） */
+/** 重置占位基线缓存（仅供测试 afterEach 隔离；生产不调）。下次读取回落到打包清单。 */
 export function resetPlaceholderHashesCache(): void {
   placeholderHashesPromise = null;
   placeholderHashesCache = { version: '' };
+}
+
+/**
+ * 覆写占位基线清单（**仅供测试**；生产不调）。
+ *
+ * 清单改成静态 import 之后，测试再也不能靠 mock fetch 供给合成基线了 —— 而四态判定
+ * （updated / conflicted / needs_selection / 重播种）全靠它，没有覆写口就只能拿打包的
+ * 真占位集当夹具，那等于把测试钉死在占位内容的具体字节上。
+ */
+export function setPlaceholderHashesForTests(manifest: PlaceholderHashManifest): void {
+  placeholderHashesCache = manifest;
+  placeholderHashesPromise = Promise.resolve(manifest);
 }
 
 /** 占位清单 → PackBaseline（喂给 planner 的双基线之一；内部用） */

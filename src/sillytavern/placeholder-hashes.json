@@ -1,0 +1,42 @@
+{
+  "version": "1.0.0",
+  "byBook": {
+    "adventure_area": "0e2af3cda9a5b4e6",
+    "character": "59ae613f96065225",
+    "cot": "44dc9a687580b79c",
+    "dlc": "9e8e7d4532c3bc60",
+    "event": "bae87ad7a6497e49",
+    "extra_setting": "6483ef50649de06d",
+    "faction": "a4dcdb396786523a",
+    "industry": "f85766078d05d5d8",
+    "monster_ecology": "0e8fee112ec5cd83",
+    "organization": "79390fa24f061459",
+    "quick_feature": "3de7c4fc33475e71",
+    "race": "bf5f3c6ca071080a",
+    "system_core": "5cc2220e9efd6368",
+    "variable": "d6b62bdc5671797d",
+    "world_setting": "af78d2c6bb272d5d"
+  },
+  "byPreset": {
+    "placeholder-story-v1": "0bbc89e4c15bcb6d"
+  },
+  "byBeautifierRule": {
+    "placeholder-aside": "ff03fa46267cb2b3",
+    "placeholder-dialogue-card": "fb53a20f930ba0cc",
+    "placeholder-emphasis": "83104f0e2b7bfb2d",
+    "placeholder-figure": "f6a616a4260a19b9",
+    "placeholder-strip-ooc": "ffc6dd986e8d6d6d"
+  },
+  "bySection": {
+    "content/bloodlines": "67c8aac6000fc8de",
+    "content/branding": "0151ddec23899b30",
+    "content/catalog": "4446cad8324e9b60",
+    "content/locations": "319a3dc5cef8e61f",
+    "content/name-pools": "45977085fb1d52eb",
+    "defaults/agent-config": "b6fe22a41b59794f",
+    "defaults/audio-manifest": "741638a580c5630d",
+    "defaults/beautifier-rules": "109fb75675ff60ed",
+    "defaults/map-marker-presets": "741638a580c5630d",
+    "defaults/story-preset": "31f451a862e5ef30"
+  }
+}

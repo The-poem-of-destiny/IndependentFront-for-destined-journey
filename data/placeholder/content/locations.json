@@ -1,0 +1,96 @@
+[
+  {
+    "id": "continent_midland",
+    "name": "中部大陆",
+    "type": "continent",
+    "parentId": null,
+    "tier": 1,
+    "description": "占位演示用的温带内陆大陆。中部是连绵的农耕平原，北缘被大片未开垦的林地封住，人烟随着离开主道而迅速稀薄",
+    "neighbors": []
+  },
+  {
+    "id": "region_frontier",
+    "name": "边境行省",
+    "type": "region",
+    "parentId": "continent_midland",
+    "tier": 2,
+    "description": "大陆东缘的行省，秩序松散，靠几条商道与内陆相连。行省官员常年缺额，实际的规矩由各镇自己商量着定",
+    "neighbors": [
+      {
+        "targetId": "region_woodland",
+        "terrain": "森林",
+        "distance": 6,
+        "fromDirection": "西",
+        "toDirection": "东"
+      }
+    ]
+  },
+  {
+    "id": "region_woodland",
+    "name": "林间自治领",
+    "type": "region",
+    "parentId": "continent_midland",
+    "tier": 2,
+    "description": "由若干林中聚落共同推举议会治理的自治区域。对外来者礼貌而警惕，进入林地需要向议会报备路线",
+    "neighbors": []
+  },
+  {
+    "id": "city_stonebridge",
+    "name": "石桥镇",
+    "type": "city",
+    "parentId": "region_frontier",
+    "tier": 3,
+    "description": "行省东缘最后一处补给点，因跨河的旧石桥得名。一条主街，两家旅店，一间从早烧到晚的铁匠铺",
+    "neighbors": [
+      {
+        "targetId": "city_greenshade",
+        "terrain": "平原",
+        "distance": 5,
+        "fromDirection": "西",
+        "toDirection": "东"
+      },
+      {
+        "targetId": "area_nearwood",
+        "terrain": "森林",
+        "distance": 1,
+        "fromDirection": "北",
+        "toDirection": "南"
+      }
+    ]
+  },
+  {
+    "id": "area_nearwood",
+    "name": "近郊森林",
+    "type": "area",
+    "parentId": "city_stonebridge",
+    "tier": 4,
+    "description": "石桥镇北面的一片阔叶林，镇民日常在此拾柴打猎。再往深处的路没有人愿意带路",
+    "neighbors": []
+  },
+  {
+    "id": "city_greenshade",
+    "name": "绿荫城",
+    "type": "city",
+    "parentId": "region_woodland",
+    "tier": 3,
+    "description": "自治领对外的门户，房屋顺着林间空地散布。议事厅是全城唯一的石构建筑，也是外来者办手续的地方",
+    "neighbors": [
+      {
+        "targetId": "area_stillwater",
+        "terrain": "湿地",
+        "distance": 2,
+        "fromDirection": "南",
+        "toDirection": "北"
+      }
+    ]
+  },
+  {
+    "id": "area_stillwater",
+    "name": "静水湖畔",
+    "type": "area",
+    "parentId": "city_greenshade",
+    "tier": 4,
+    "description": "绿荫城南面的一片浅湖与湿地，水面终年无风。当地人天黑之后不靠近岸边，理由各说各的",
+    "neighbors": []
+  }
+]
