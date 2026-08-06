@@ -121,6 +121,50 @@ export function serializeSettingsForLocalStorage(settings: Record<string, unknow
   return JSON.stringify(copy);
 }
 
+/**
+ * 内容-引擎分离波 1 / D22：把残留的 `settings.presets` localStorage 镜像一次性迁进 Dexie。
+ *
+ * 迁移规则（幂等、跑一次）：
+ *   · 镜像无 presets（新用户 / 已迁完）→ 不动（仍清掉残留空数组键）
+ *   · 镜像有 presets 且 Dexie presets 表为空 → 镜像整份迁入 Dexie，然后从 settings 删除字段
+ *   · 镜像有 presets 但 Dexie 已有数据 → 以 Dexie 为准，直接弃镜像（删字段）
+ *
+ * 🔴 无论命中哪条有数据的分支，**都要从 settings 删除 presets 字段并 persist**：
+ *    `UiSettings` 已不声明该字段，留着会被 deep watch 永久写回 localStorage 成幽灵键。
+ *    迁移成功后下次启动镜像无 presets，本函数空转。
+ */
+async function migratePresetsMirrorToDexie(
+  settingsValue: Record<string, unknown>,
+  persist: () => boolean,
+): Promise<void> {
+  const mirror = settingsValue.presets;
+  if (!Array.isArray(mirror) || mirror.length === 0) {
+    // 即便残留一个空数组也清掉键，避免 deep watch 写回。
+    if ('presets' in settingsValue) {
+      delete settingsValue.presets;
+      persist();
+    }
+    return;
+  }
+  try {
+    const { getPresets, savePreset } = await import('@engine/database');
+    const existing = await getPresets();
+    if (!existing || existing.length === 0) {
+      // Dexie 空 → 迁入镜像里的每一条
+      for (const p of mirror) {
+        if (p && typeof p === 'object' && typeof (p as { id?: unknown }).id === 'string') {
+          await savePreset(p as any);
+        }
+      }
+    }
+    // 无论是否迁入（Dexie 已有则弃镜像），都删字段。
+    delete settingsValue.presets;
+    persist();
+  } catch {
+    // IndexedDB 不可用：保留镜像字段不动，下次启动再试。
+  }
+}
+
 function getDefaults(): UiSettings {
   return {
     // API 池
@@ -153,7 +197,10 @@ function getDefaults(): UiSettings {
     agentPromptEdited: false,
 
     // 预设系统 (ChatPreset)
-    presets: [],
+    // 🔴 `presets` 镜像已删除（内容-引擎分离波 1 / D22）：预设真源是 Dexie `presets` 表，
+    //    唯一响应式视图是 usePresets composable。留个空数组会让消费端以为这里仍是真相来源，
+    //    而 deep watch 又会把它写回 localStorage —— 与 worldBooks/beautifierRules 同口径。
+    //    下面这项是「当前选中哪条预设」的 UI 状态，继续留在设置里。
     activePresetId: '',
 
     // Phase 8: 世界书管理
@@ -289,6 +336,19 @@ export const useSettingsStore = defineStore('settings', () => {
   // 必须在 localStorage→Dexie 迁移**之后**、针对 Dexie 执行，否则会把内置书写回
   // localStorage，源数组在迁移脚下漂移。
   setTimeout(async () => {
+    // 🔴 内容-引擎分离波 1 / D22：一次性迁移 presets 镜像 → Dexie。
+    //    必须在 loadAgentProjectDefaults 之前跑：seed 那步只在 Dexie 空时播种出厂预设，
+    //    迁移先把用户的第三方预设从镜像搬进 Dexie，seed 就不会覆盖它们。
+    //    迁移幂等：完成后从 settings 删除 presets 字段并 persist，下次启动不再触发。
+    await migratePresetsMirrorToDexie(settings.value as Record<string, unknown>, () => {
+      try {
+        localStorage.setItem(STORAGE_KEY, serializeSettingsForLocalStorage(settings.value));
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
     // 加载项目默认 Agent 配置
     await loadAgentProjectDefaults();
 
@@ -450,34 +510,27 @@ export const useSettingsStore = defineStore('settings', () => {
       // 就不写键，把「走引擎按类别的默认」那条语义还回去。
       fillMissingAgentSettings(settings.value, agentId, entry);
       // 预设：DB 空 → seed 出厂预设；DB 有同 id → 同步出厂 name（保留用户 prompts 编辑）
+      //
+      // 🔴 内容-引擎分离波 1 / D22：预设只写 Dexie，不再碰 `settings.presets` 镜像。
+      //    （此前这里还同步写镜像 —— 镜像删除后那段是死代码。）响应式视图由
+      //    usePresets composable 提供，本处 seed 之后下次 loadPresets 自然读到。
       if (entry.preset && entry.presetId) {
         try {
           const { getPresets, savePreset } = await import('@engine/database');
           const existing = await getPresets();
-          const embedded: any = JSON.parse(JSON.stringify(entry.preset));
+          const embedded = JSON.parse(JSON.stringify(entry.preset)) as PresetItem;
           if (!existing || existing.length === 0) {
             await savePreset(embedded);
           } else {
             // M5.1: 出厂预设改名同步 —— id 匹配时把 DB 预设 name 更新为出厂版
             // （prompts/settings 保留用户编辑；仅 name 跟随 agent-config.json）
-            const dbMatch = existing.find((p: any) => p.id === embedded.id);
+            const dbMatch = existing.find((p) => p.id === embedded.id);
             if (dbMatch && dbMatch.name !== embedded.name) {
-              const updated = { ...dbMatch, name: embedded.name };
-              await savePreset(updated);
-              const idx = (settings.value.presets as PresetItem[]).findIndex(
-                (p) => p.id === embedded.id,
-              );
-              if (idx >= 0) (settings.value.presets as PresetItem[])[idx] = updated as PresetItem;
+              await savePreset({ ...dbMatch, name: embedded.name });
             }
           }
         } catch {
           /* IndexedDB 不可用时静默跳过 */
-        }
-        const existingPreset = (settings.value.presets as PresetItem[]).find(
-          (p) => p.id === entry.presetId,
-        );
-        if (!existingPreset && entry.preset) {
-          (settings.value.presets as PresetItem[]).push(entry.preset);
         }
         if (!settings.value.activePresetId) {
           settings.value.activePresetId = entry.presetId;

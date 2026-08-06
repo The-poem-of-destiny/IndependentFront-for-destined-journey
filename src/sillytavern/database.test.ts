@@ -1167,6 +1167,89 @@ describe('exportAllData / importAllData', () => {
     });
   });
 
+  // 内容-引擎分离波 1 / D22：presets 三态护栏 —— 此前 presets 与 lorebooks/settings
+  // 死表同段无条件 clear，手编/裁剪备份（删 presets 字段）导入会静默清空 Dexie 预设表。
+  describe('importAllData × D22 presets 三态语义', () => {
+    /** 预置：两条用户预设（先清掉 initializeDatabase 默认播种的那条） */
+    async function seedPresets() {
+      await getDatabase().presets.clear();
+      await getDatabase().presets.bulkPut([
+        {
+          id: 'preset_user_a',
+          name: '用户预设A',
+          settings: { prompts: [{ name: 'A', content: 'aaa', role: 'system' }] },
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+        {
+          id: 'preset_user_b',
+          name: '用户预设B',
+          settings: { prompts: [{ name: 'B', content: 'bbb', role: 'system' }] },
+          createdAt: 2000,
+          updatedAt: 2000,
+        },
+      ]);
+    }
+
+    it('缺 presets 字段（手编/裁剪备份）：整张表逐行原样保留', async () => {
+      await seedPresets();
+      const legacyBackup: any = await exportAllData();
+      delete legacyBackup.presets;
+      legacyBackup.version = 14;
+      expect('presets' in legacyBackup).toBe(false);
+
+      await expect(importAllData(legacyBackup)).resolves.toBeUndefined();
+
+      const db = getDatabase();
+      expect(await db.presets.count()).toBe(2);
+      expect((await db.presets.get('preset_user_a'))!.name).toBe('用户预设A');
+      expect((await db.presets.get('preset_user_b'))!.name).toBe('用户预设B');
+    });
+
+    it('presets: [] （字段存在但为空）：表被清空', async () => {
+      await seedPresets();
+      const backup = await exportAllData();
+      backup.presets = [];
+
+      await importAllData(backup);
+
+      expect(await getDatabase().presets.count()).toBe(0);
+    });
+
+    it('presets 含数据：正常覆盖（旧的 seed 行被替换）', async () => {
+      await seedPresets();
+      const backup = await exportAllData();
+      backup.presets = [
+        {
+          id: 'preset_from_backup',
+          name: '备份里的预设',
+          settings: { prompts: [{ name: 'X', content: 'xxx', role: 'system' }] },
+          createdAt: 5000,
+          updatedAt: 5000,
+        },
+      ];
+
+      await importAllData(backup);
+
+      const db = getDatabase();
+      expect(await db.presets.count()).toBe(1);
+      expect((await db.presets.get('preset_from_backup'))!.name).toBe('备份里的预设');
+      expect(await db.presets.get('preset_user_a')).toBeUndefined();
+    });
+
+    it('exportAllData / importAllData 往返保留 presets', async () => {
+      await seedPresets();
+      const backup = await exportAllData();
+      expect(backup.presets).toHaveLength(2);
+
+      await getDatabase().presets.clear();
+      await importAllData(backup);
+
+      const rows = await getDatabase().presets.toArray();
+      expect(rows.map((r) => r.id).sort()).toEqual(['preset_user_a', 'preset_user_b']);
+    });
+  });
+
   describe('importAllData × v16 regexStorage 三态语义', () => {
     async function seedV16Table() {
       await getDatabase().regexStorage.bulkPut([

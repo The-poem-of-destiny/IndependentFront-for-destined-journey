@@ -34,20 +34,17 @@ import * as engineDatabase from '@engine/database';
 //   · 走 `@ui` / `@engine` 别名而不是相对路径算术 —— 本文件挪窝也不用改，
 //     真解析不到时是**导入期硬报错**，不会退化成静默通过。
 import dataSectionSource from '@ui/components/settings/DataSection.vue?raw';
-import presetManagerSource from '@ui/components/settings/agent/PresetManager.vue?raw';
-// 🔴 `restoreAgentDefaults` 那处随配置面从 AgentSection 抽进了 AgentConfigPanel
-//    （AgentSection 现在只剩外框 + 页头，一处动态导入都不剩）——
-//    扫错文件会退化成"扫了个空文件然后全绿"，正是本测试最怕的失败形态。
-import agentConfigPanelSource from '@ui/components/settings/agent/AgentConfigPanel.vue?raw';
 import databaseSource from '@engine/database.ts?raw';
 
-/** 会用到 `await import('@engine/…')` 的设置页 SFC */
+/**
+ * 会用到 `await import('@engine/…')` 的设置页 SFC。
+ *
+ * 🔴 内容-引擎分离波 1 / D22：PresetManager.vue 与 AgentConfigPanel.vue 的预设
+ *    读写已收口到 `usePresets` composable（静态 import），不再有动态引擎导入 ——
+ *    两者从这张表退出。设置页里仍走动态导入的只剩 DataSection（导出/导入/清除）。
+ */
 const SOURCES: { file: string; source: string }[] = [
   { file: 'DataSection.vue', source: dataSectionSource },
-  // Q-25 第 9 步：预设子系统那 6 处与 restoreAgentDefaults 那 1 处随 Agent 分区搬走了，
-  // SettingsPage 自己已经一处动态引擎导入都不剩 —— 所以它退出这张表。
-  { file: 'agent/PresetManager.vue', source: presetManagerSource },
-  { file: 'agent/AgentConfigPanel.vue', source: agentConfigPanelSource },
 ];
 
 /** 本测试能对照的引擎模块（静态 import 拿到真实导出面） */
@@ -90,11 +87,10 @@ describe('设置页各分区的动态引擎导入', () => {
     expect(sites.every((s) => s.names.length > 0)).toBe(true);
   });
 
-  it('🔴 两个文件都各自抓到了（拆分后别只剩一个文件在被扫）', () => {
-    // Q-25 把 exportAll / importAll / clearAll 挪进了 DataSection，把预设子系统
-    // 挪进了 agent/PresetManager。若哪天有人把 SOURCES 里的某一行删了、或分区又
-    // 搬了家，这条会立刻红 —— 否则测试会"扫了一个空文件然后全绿"，
-    // 正是本测试最怕的失败形态。
+  it('🔴 SOURCES 里的每个文件都各自抓到了动态导入（搬走/空扫别让它静默全绿）', () => {
+    // 设置页的重活（导出/导入/清除）仍在 DataSection 里走动态引擎导入。
+    // 若哪天有人把 SOURCES 里的某一行删了、或分区又搬了家，这条会立刻红 ——
+    // 否则测试会"扫了一个空文件然后全绿"，正是本测试最怕的失败形态。
     for (const { file } of SOURCES) {
       expect(
         sites.some((s) => s.file === file),

@@ -26,15 +26,18 @@ import AppCard from '../../shared/AppCard.vue';
 import AppButton from '../../shared/AppButton.vue';
 import AppModal from '../../shared/AppModal.vue';
 import TemplatePreview from '../TemplatePreview.vue';
-import { useSettingsStore, type PresetItem } from '../../../stores/settings-store';
+import { useSettingsStore } from '../../../stores/settings-store';
 import { useUIStore } from '../../../stores/ui-store';
+import { usePresets } from '../../../composables/usePresets';
 import { preprocessPresetForPreview } from '@engine/preset-loader';
+import type { ChatPreset } from '@engine/types';
 
 const props = defineProps<{ agentId: string }>();
 
 const cfg = useSettingsStore();
 const s = cfg.settings;
 const ui = useUIStore();
+const { presets, loadPresets: loadPresetsFromDexie, upsertPreset, removePreset } = usePresets();
 
 const showStoryPreview = ref(false);
 const showStoryResolvedPreview = ref(false);
@@ -77,9 +80,7 @@ function getStoryContextTemplate(): string {
  *    它是对 store 的一行派生（与 `hasApi` 同类），穿 prop 只是为了少一次 store 读取，
  *    却换来一条真正的组件间契约。
  */
-const activePreset = computed(
-  () => s.presets.find((p: PresetItem) => p.id === s.activePresetId) || null,
-);
+const activePreset = computed(() => presets.value.find((p) => p.id === s.activePresetId) || null);
 
 // 条目展开/折叠
 const expandedEntries = ref(new Set<string>());
@@ -91,22 +92,19 @@ function toggleEntry(presetId: string, idx: number) {
 
 // 条目启用/禁用开关 — 自动保存
 async function togglePresetEntryEnabled(presetId: string, idx: number) {
-  const p = s.presets.find((x: PresetItem) => x.id === presetId);
+  const p = presets.value.find((x) => x.id === presetId);
   if (!p?.settings?.prompts) return;
   const prompts = [...p.settings.prompts];
   if (!prompts[idx]) return;
   prompts[idx] = { ...prompts[idx], enabled: !(prompts[idx].enabled !== false) };
-  const raw = JSON.parse(
+  const raw: ChatPreset = JSON.parse(
     JSON.stringify({ ...p, settings: { ...p.settings, prompts }, updatedAt: Date.now() }),
   );
-  // 直接替换 s.presets 中对应的预设（避免闪动后再等 DB 回读）
-  const pi = s.presets.findIndex((x: PresetItem) => x.id === presetId);
-  if (pi >= 0) s.presets[pi] = raw;
   try {
-    const { savePreset } = await import('@engine/database');
-    await savePreset(raw);
+    await upsertPreset(raw);
   } catch {
-    /* DB 写入失败时 UI 已经乐观更新 */
+    /* DB 写入失败时内存 ref 已乐观更新（upsertPreset 内部先写 Dexie 再改 ref，
+       Dexie 失败则 ref 也不变；此处保留 catch 以兼容 IndexedDB 不可用环境） */
   }
 }
 
@@ -117,7 +115,7 @@ const editingEntryPresetId = ref('');
 const entryEditForm = reactive({ name: '', content: '', enabled: true, role: 'system' });
 
 function openEntryEditor(presetId: string, idx: number) {
-  const p = s.presets.find((x: PresetItem) => x.id === presetId);
+  const p = presets.value.find((x) => x.id === presetId);
   if (!p?.settings?.prompts?.[idx]) return;
   const sp = p.settings.prompts[idx];
   editingEntryPresetId.value = presetId;
@@ -130,7 +128,7 @@ function openEntryEditor(presetId: string, idx: number) {
 }
 
 async function saveEntry() {
-  const p = s.presets.find((x: PresetItem) => x.id === editingEntryPresetId.value);
+  const p = presets.value.find((x) => x.id === editingEntryPresetId.value);
   if (!p) return;
   const idx = editingEntryIdx.value;
   const prompts = [...(p.settings.prompts || [])];
@@ -142,12 +140,10 @@ async function saveEntry() {
       enabled: entryEditForm.enabled,
       role: entryEditForm.role,
     };
-    const raw = JSON.parse(
+    const raw: ChatPreset = JSON.parse(
       JSON.stringify({ ...p, settings: { ...p.settings, prompts }, updatedAt: Date.now() }),
     );
-    const { savePreset } = await import('@engine/database');
-    await savePreset(raw);
-    await loadPresets();
+    await upsertPreset(raw);
     s.activePresetId = raw.id;
     showEntryEditor.value = false;
     ui.toast('条目已保存', 'success');
@@ -168,16 +164,11 @@ const editingPresetId = ref<string | null>(null);
 
 async function loadPresets() {
   try {
-    const { getPresets } = await import('@engine/database');
-    const p = await getPresets();
-    if (p) {
-      // IndexedDB 有数据 → 直接用；为空 → 保留内存已有的（来自 agent-config.json seed）
-      if (p.length > 0) s.presets = p as PresetItem[];
-    }
+    await loadPresetsFromDexie();
     // 确保自动选中：如果还没选中且有可用预设，优先项目默认
-    if (!s.activePresetId && s.presets.length > 0) {
+    if (!s.activePresetId && presets.value.length > 0) {
       const pd = cfg.projectAgentDefaults?.agents?.story;
-      if (pd?.presetId && s.presets.find((p) => p.id === pd.presetId)) {
+      if (pd?.presetId && presets.value.find((p) => p.id === pd.presetId)) {
         s.activePresetId = pd.presetId;
       }
     }
@@ -187,7 +178,7 @@ async function loadPresets() {
 }
 function selectPreset(id: string) {
   s.activePresetId = id;
-  const p = s.presets.find((x: PresetItem) => x.id === id);
+  const p = presets.value.find((x) => x.id === id);
   if (p) {
     // 🔴 这里原本还有两行：`agentPromptDraft.value = ...` 与 `s.agentPromptEdited = true`。
     //    经查是**惰性**的：草稿绑的两个 textarea 只在非 story 分支渲染，而本组件只在
@@ -208,13 +199,12 @@ function openNewPreset() {
   showPresetEditor.value = true;
 }
 async function savePreset() {
-  const { savePreset: sp } = await import('@engine/database');
   const now = Date.now();
 
   let settings: Record<string, any>;
   if (editingPresetId.value) {
     // 编辑已有预设：基于原 settings 更新，不丢失原有数据
-    const original = s.presets.find((p: PresetItem) => p.id === editingPresetId.value);
+    const original = presets.value.find((p) => p.id === editingPresetId.value);
     settings = {
       ...(original?.settings || {}), // 保留所有原有 ST 配置
       temp_openai: presetForm.temperature,
@@ -248,26 +238,23 @@ async function savePreset() {
     };
   }
 
-  const item: PresetItem = {
+  const item: ChatPreset = {
     id: editingPresetId.value || crypto.randomUUID(),
     name: presetForm.name,
     description: presetForm.description,
     settings,
     createdAt: editingPresetId.value
-      ? s.presets.find((p: PresetItem) => p.id === editingPresetId.value)?.createdAt || now
+      ? presets.value.find((p) => p.id === editingPresetId.value)?.createdAt || now
       : now,
     updatedAt: now,
   };
-  await sp(item as any);
-  await loadPresets();
+  await upsertPreset(item);
   showPresetEditor.value = false;
   ui.toast(editingPresetId.value ? '预设已更新' : '预设已创建', 'success');
 }
 async function deletePreset(id: string) {
-  const { deletePreset: dp } = await import('@engine/database');
   try {
-    await dp(id);
-    await loadPresets();
+    await removePreset(id);
     if (s.activePresetId === id) s.activePresetId = '';
     ui.toast('预设已删除', 'info');
   } catch {
@@ -275,7 +262,6 @@ async function deletePreset(id: string) {
   }
 }
 async function importStPreset() {
-  const { savePreset: sp } = await import('@engine/database');
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.json';
@@ -287,7 +273,7 @@ async function importStPreset() {
       // 用导入的文件名作为预设名
       const presetName = f.name.replace(/\.json$/i, '');
       const now = Date.now();
-      const preset: PresetItem = {
+      const preset: ChatPreset = {
         id: crypto.randomUUID(),
         name: presetName,
         description: raw.description || '',
@@ -295,8 +281,7 @@ async function importStPreset() {
         createdAt: now,
         updatedAt: now,
       };
-      await sp(preset as any);
-      await loadPresets();
+      await upsertPreset(preset);
       ui.toast(`已导入预设「${presetName}」(${raw.prompts?.length || 0} 个子提示词)`, 'success');
     } catch {
       ui.toast('导入失败，请检查文件格式', 'error');
@@ -304,7 +289,7 @@ async function importStPreset() {
   };
   input.click();
 }
-async function exportPresetDynamic(p: PresetItem) {
+async function exportPresetDynamic(p: ChatPreset) {
   const data = { ...p.settings, name: p.name, description: p.description };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -341,7 +326,7 @@ void reactive;
         @change="selectPreset(($event.target as HTMLSelectElement).value)"
       >
         <option value="">— 选择预设 —</option>
-        <option v-for="p in s.presets" :key="p.id" :value="p.id">{{ p.name }}</option>
+        <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.name }}</option>
       </select>
       <AppButton variant="ghost" size="sm" @click="importStPreset">导入</AppButton>
       <AppButton variant="primary" size="sm" @click="openNewPreset">+ 新建</AppButton>

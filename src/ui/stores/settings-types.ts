@@ -35,7 +35,7 @@
  *
  * 不声明 = 应用代码碰它就是编译错误，迁移模块照常工作。这是想要的效果。
  */
-import type { ApiEntry, PresetItem } from './settings-store';
+import type { ApiEntry } from './settings-store';
 import type { AgentSettingsEntry } from './agent-settings';
 import type { ImageGenMode, ImageRating, NaiBillingTier } from '@engine/types-image';
 
@@ -68,7 +68,8 @@ export type UiSettings = {
   agentPromptEdited: boolean;
 
   // ═══ 预设系统（正文 Agent 专用）═══
-  presets: PresetItem[];
+  // 🔴 内容-引擎分离波 1 / D22：`presets` 镜像已删除。预设真源是 Dexie `presets` 表，
+  //    响应式视图经 `usePresets` composable。这里只剩「当前选中哪条」的 UI 状态。
   activePresetId: string;
 
   // ═══ 世界书（书本体在 Dexie，这里只有 UI 选择/开关）═══

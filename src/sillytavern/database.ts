@@ -768,13 +768,25 @@ async function doImportAllData(
   // `lorebooks` 与 `settings` 是死表（无生产读写，见 Q-06 与 AGENTS.md 架构图）。
   // 这里仍然照搬**只为老备份往返不丢字节**：老包里带着这两张表的行，导入时丢掉
   // 就等于这份备份进去再出来变小了。新包里它们是空数组，clear + bulkPut([]) 是 no-op。
-  await db.transaction('rw', db.lorebooks, db.presets, db.settings, async () => {
+  await db.transaction('rw', db.lorebooks, db.settings, async () => {
     await db.lorebooks.clear();
-    await db.presets.clear();
     await db.settings.clear();
     if (Array.isArray(backup.lorebooks)) await db.lorebooks.bulkPut(backup.lorebooks);
-    if (Array.isArray(backup.presets)) await db.presets.bulkPut(backup.presets);
     if (Array.isArray(backup.settings)) await db.settings.bulkPut(backup.settings);
+  });
+
+  // 🔴 内容-引擎分离波 1 / D22：presets 拆出 lorebooks/settings 事务，改三态护栏。
+  //   此前与死表同段无条件 clear —— 手编/裁剪过的备份（删了 presets 字段）导入会
+  //   静默清空 Dexie 预设表。改三态语义（与 v14/v15 同款）：
+  //   · undefined（字段缺席，手编备份）→ 整张表原样不动，连 clear 都不执行
+  //   · []（字段存在但为空）          → 合法的「确实没有预设」，照常 clear
+  //   · 有数据                         → 清空后整表覆盖
+  //   注：「旧备份抹掉 pack 预设」的真正救济是 D18 reconcilePackState（T5），不是这条护栏。
+  await db.transaction('rw', db.presets, async () => {
+    if (backup.presets !== undefined) {
+      await db.presets.clear();
+      if (Array.isArray(backup.presets)) await db.presets.bulkPut(backup.presets);
+    }
   });
 
   await db.transaction('rw', db.memories, db.plotEvents, db.characters, async () => {
