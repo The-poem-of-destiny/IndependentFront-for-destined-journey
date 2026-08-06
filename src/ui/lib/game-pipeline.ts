@@ -422,10 +422,7 @@ export class GamePipeline {
   // ===== 私有方法 =====
 
   private buildAgentConfigs(
-    agentDefaults: Record<
-      string,
-      { presetId?: string; systemPrompt?: string; template?: string; ejsVarsCommit?: boolean }
-    >,
+    agentDefaults: Record<string, Record<string, unknown>>,
     onStoryChunk?: StoryChunkCallback,
     systemCoreWorkshopBookIds: string[] = [],
   ): AgentConfig[] {
@@ -492,18 +489,20 @@ export class GamePipeline {
         };
       }
 
-      // 从已加载的 agentDefaults 取 presetId/systemPrompt/template
-      // （loadPresets 已自 fetch agent-config.json，不依赖 store.projectAgentDefaults 异步初始化）
+      // defaults 层 = loadPresets 自 fetch agent-config.json 解析出的完整默认层
+      // （D44 修正 1：覆盖 AgentSettingsEntry 12 键 + presetId/ejsVarsCommit）。
       const defaults = agentDefaults[agentId] ?? {};
+      // 🔴 D44 修正 1/3：经 getAgentSettings 统一 resolve（覆写 ?? 默认），不再分别
+      //    `defaults.X || agentCfg.X`（那是默认优先、覆写被无视）与 `agentCfg.X`（裸取覆写）。
+      //    agentCfg 现在已合默认层，下面 systemPrompt/template/worldBookIds/数值全部读它。
+      const agentCfg = getAgentSettings(s, agentId, agentDefaults);
       // 真机修(2026-07-17): story 预设尊重设置页选中项（s.activePresetId）——
       // 此前硬绑 agent-config.json 出厂 presetId，用户导入/另存的预设（新 id）在设置页编辑得再对，
       // 运行时也永远用旧的那份（"我保存了第二人称但 agent 没拿到"根因）。
       const presetId: string | undefined =
-        agentId === 'story' && s.activePresetId ? s.activePresetId : defaults.presetId || undefined;
-      const systemPrompt: string | undefined = defaults.systemPrompt || undefined;
-      const template: string | undefined = defaults.template || undefined;
-      // Q-18: per-Agent 设置只取一次，数值项的默认由 AGENT_SETTINGS_DEFAULTS 合上
-      const agentCfg = getAgentSettings(s, agentId);
+        agentId === 'story' && s.activePresetId
+          ? s.activePresetId
+          : (defaults.presetId as string | undefined) || undefined;
       const worldBookEnabled = agentCfg.worldBookEnabled;
       const configuredWorldBookIds = worldBookEnabled ? agentCfg.worldBookIds : [];
       const selectedSystemCore =
@@ -521,14 +520,17 @@ export class GamePipeline {
           ? [...new Set([...configuredWorldBookIds, ...coreBookIds])]
           : configuredWorldBookIds;
 
+      // systemPrompt/template 统一读 agentCfg（已合覆写 ?? 默认）。空串 → undefined
+      // （AgentConfig 里 undefined = 不发该字段，与原 `defaults.X || undefined` 行为一致）。
+      const resolvedSystemPrompt: string | undefined = agentCfg.systemPrompt || undefined;
+      const resolvedTemplate: string | undefined = agentCfg.template || undefined;
+
       return {
         agentId,
         enabled: true,
         apiEndpointId: endpoint?.id ?? '',
         model,
-        // Q-18: 默认值只在 AGENT_SETTINGS_DEFAULTS 出现一次。此前这五行各写一遍
-        // 字面量，与设置页的六处拷贝靠人眼保持一致 —— 漏掉这处就是「设置页显示新默认、
-        // 运行时用旧值」，那类偏差要到账单上才可见。
+        // D44 修正 3：数值从 agentCfg 读（已合覆写 ?? 默认 ?? AGENT_SETTINGS_DEFAULTS）。
         temperature: agentCfg.temperature,
         maxTokens: agentCfg.maxTokens,
         topP: agentCfg.topP,
@@ -543,15 +545,17 @@ export class GamePipeline {
         },
         presetId,
         worldBookIds,
-        // 🔑 优先使用 agentDefaults（loadPresets 自 fetch agent-config.json），
-        // localStorage 可能有用户编辑过的版本，作为 fallback。
-        systemPrompt: systemPrompt || agentCfg.systemPrompt,
-        template: template || agentCfg.template,
+        // 🔴 D44 修正 3：precedence 统一为 覆写 ?? 默认（经 getAgentSettings）。
+        //    此前这里是 `defaults.systemPrompt || agentCfg.systemPrompt`（默认优先、
+        //    覆写被无视）—— 用户在设置页改的提示词进不了运行时。现在 agentCfg 已合
+        //    两层，直接读它即可。
+        systemPrompt: resolvedSystemPrompt,
+        template: resolvedTemplate,
         // 工坊 P2 (ADR-30 D5): 只有持权 Agent 的装配 pass 产出 EJS vars 提交候选。
         // 代码级兜底：agent-config.json 没加载上（fetch 失败/离线）或该 agent 未声明本字段时，
         // story 默认持权 —— 与设计「默认仅 story 持权」一致。否则一次网络抖动就让整条
         // EJS→vars 提交链静默哑火（EJS 照跑、写照丢，无任何征兆）。显式 false 仍然生效。
-        ejsVarsCommit: defaults.ejsVarsCommit ?? isStory,
+        ejsVarsCommit: (defaults.ejsVarsCommit as boolean | undefined) ?? isStory,
         toolsEnabled: ['craft_gen', 'char_gen', 'item_gen'].includes(agentId),
         maxToolCallRounds: 10,
         // 🆕 流式 + abort 信号
@@ -673,20 +677,17 @@ export class GamePipeline {
   }
 
   /** 加载 story 预设：DB 优先（用户可修改）→ agent-config.json 内嵌 preset fallback 补齐缺失。
-   *  同时返回各 agent 的默认配置（presetId/systemPrompt/template），
-   *  自给自足 fetch agent-config.json，不依赖 store 的 projectAgentDefaults 异步加载时序。 */
+   *  同时返回各 agent 的**完整默认层**（D44 修正 1：12 键 + presetId/ejsVarsCommit/preset），
+   *  自给自足 fetch agent-config.json，不依赖 store 的 projectAgentDefaults 异步加载时序。
+   *
+   *  🔴 D44 修正 1：返回的 agentDefaults 同时充当 `getAgentSettings` 的 defaultsLayer 参数
+   *     ——删 boot 播种后，世界书/model/数值的唯一默认来源就是这里。*/
   private async loadPresets(): Promise<{
     presets: AgentPreset[];
-    agentDefaults: Record<
-      string,
-      { presetId?: string; systemPrompt?: string; template?: string; ejsVarsCommit?: boolean }
-    >;
+    agentDefaults: Record<string, Record<string, unknown>>;
   }> {
     let presets: AgentPreset[] = [];
-    const agentDefaults: Record<
-      string,
-      { presetId?: string; systemPrompt?: string; template?: string; ejsVarsCommit?: boolean }
-    > = {};
+    const agentDefaults: Record<string, Record<string, unknown>> = {};
 
     // 1. DB 优先：用户可能通过设置页修改过预设
     try {
@@ -726,11 +727,28 @@ export class GamePipeline {
             `[GamePipeline] 预设 "${(e.preset as any).name ?? (e.preset as any).id}" 使用 DB 版本（设置页编辑优先），agent-config.json 内嵌版被忽略`,
           );
         }
-        // 提取各 agent 默认配置（供 buildAgentConfigs 使用）
+        // 提取各 agent 完整默认层（D44 修正 1）—— 收齐 AgentSettingsEntry 12 键 +
+        // presetId/ejsVarsCommit（preset 已在上面单独提进 presets[]）。
+        // getAgentSettings 经此合「覆写 ?? 默认」，删 boot 播种后世界书/model/数值
+        // 的唯一默认来源就是这里。原样保留 agent-config.json 给的字段（包括 undefined
+        // 语义相关的 historyLayers/historySlice —— 不塌成默认）。
         agentDefaults[agentId] = {
+          model: e.model,
+          worldBookEnabled:
+            typeof e.worldBookEnabled === 'boolean' ? e.worldBookEnabled : undefined,
+          worldBookIds: Array.isArray(e.worldBookIds)
+            ? [...(e.worldBookIds as string[])]
+            : undefined,
+          systemPrompt: typeof e.systemPrompt === 'string' ? e.systemPrompt : undefined,
+          template: typeof e.template === 'string' ? e.template : undefined,
+          temperature: typeof e.temperature === 'number' ? e.temperature : undefined,
+          topP: typeof e.topP === 'number' ? e.topP : undefined,
+          freqPen: typeof e.freqPen === 'number' ? e.freqPen : undefined,
+          presPen: typeof e.presPen === 'number' ? e.presPen : undefined,
+          maxTokens: typeof e.maxTokens === 'number' ? e.maxTokens : undefined,
+          historyLayers: typeof e.historyLayers === 'number' ? e.historyLayers : undefined,
+          historySlice: typeof e.historySlice === 'number' ? e.historySlice : undefined,
           presetId: e.presetId || undefined,
-          systemPrompt: e.systemPrompt || undefined,
-          template: e.template || undefined,
           // 工坊 P2 (ADR-30 D5): EJS vars 提交权（出厂仅 story 置 true）。
           // 字段缺席时保留 undefined（不塌成 false）——由 buildAgentConfigs 走代码级兜底。
           ejsVarsCommit: typeof e.ejsVarsCommit === 'boolean' ? e.ejsVarsCommit : undefined,

@@ -429,6 +429,11 @@ export type BeautifierRuleDraft = Omit<BeautifierRule, 'locked'>;
  * 条目自身的 `enabled` 与存档级 `enabledWorldBookEntries` 仍照常过滤 —— 授予可见性
  * 不等于强行注入。
  *
+ * 🔴 D44 修正 2（名册迭代改源）：本纯函数迭代**入参字典**的键。入参字典由调用方
+ *    `updateAgentWorldBookIds`（agent-settings.ts）投影成**解析名册**（默认层键 ∪
+ *    覆写层键）—— 这样覆写层为空时，工坊装书仍能授权给全部 agent。本函数自身与
+ *    入参字典同源，无需改动。
+ *
  * 纯函数: 返回新映射，不改入参。
  */
 export function grantWorkshopBookToAgents(

@@ -125,7 +125,8 @@ function selectAgent(agentId: string) {
 
 /** 子导航角标要问「这个 Agent 选过 API 池没有」，问的不是当前选中的那个 */
 function agentModelOf(agentId: string): string {
-  return getAgentSettings(s, agentId).model;
+  // D44 修正 1：合默认层 —— 用户没覆写 model 时，角标也能正确反映「默认层给了一个池」。
+  return getAgentSettings(s, agentId, cfg.projectAgentDefaults?.agents ?? {}).model;
 }
 
 // Phase 0: 保证进设置页时世界书已就绪（init() 幂等，App.vue 已踢过一次）

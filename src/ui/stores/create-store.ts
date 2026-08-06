@@ -911,7 +911,8 @@ export const useCreateStore = defineStore('create', () => {
   /** 端点解析（对齐 game-pipeline.buildEndpoints: 每个 Agent 的 `model` 存 API 池 id，ApiEntry.model → defaultModel） */
   function resolvePlotOutlineEndpoint(): ApiEndpoint | null {
     try {
-      const s = useSettingsStore().settings;
+      const store = useSettingsStore();
+      const s = store.settings;
       const pool = ((s.apiPool ?? []) as any[]).map((entry: any) => ({
         id: entry.id || '',
         name: entry.name || '',
@@ -923,7 +924,11 @@ export const useCreateStore = defineStore('create', () => {
         timeout: entry.timeout ?? 60000,
         enableThinking: entry.enableThinking ?? false,
       })) as ApiEndpoint[];
-      const poolId = getAgentSettings(s, 'plot_outline').model;
+      const poolId = getAgentSettings(
+        s,
+        'plot_outline',
+        store.projectAgentDefaults?.agents ?? {},
+      ).model;
       return pool.find((ep) => ep.id === poolId) || pool[0] || null;
     } catch {
       return null;
@@ -1075,7 +1080,8 @@ export const useCreateStore = defineStore('create', () => {
 
     isPlotGenerating.value = true;
     try {
-      const settings = useSettingsStore().settings;
+      const settingsStore = useSettingsStore();
+      const settings = settingsStore.settings;
 
       // 加载模板系统依赖: Agent 配置 + 世界书
       // 🔴 必须用 **Async** 版（2026-08-01 修 F3）：plot_outline 可见的世界书里有 22 条含 EJS 的条目，
@@ -1127,7 +1133,12 @@ export const useCreateStore = defineStore('create', () => {
       });
       // Q-18: 默认值不再在这里重述一遍（此前 0.7 / 16384 / 1.0 三处字面量与
       // 设置页、game-pipeline 的拷贝靠人眼保持一致）
-      const plotAgentCfg = getAgentSettings(settings, 'plot_outline');
+      // D44 修正 1：合默认层 —— 用户没覆写数值时取默认层（pack > 占位）给的值。
+      const plotAgentCfg = getAgentSettings(
+        settings,
+        'plot_outline',
+        settingsStore.projectAgentDefaults?.agents ?? {},
+      );
       const llmParams = {
         model: endpoint.defaultModel,
         temperature: plotAgentCfg.temperature,
