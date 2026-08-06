@@ -14,7 +14,39 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import type { AudioPlaylist, AudioTrack } from '@engine/types';
+import type { AudioPlaylist, AudioTrack, LocationNode } from '@engine/types';
+import { getContentRegistry, setContentRegistry } from './content-store';
+
+/** 场景选曲用的微型地图（大陆 → 势力 → 城市）；只提供层级，不参与断言 */
+const SCENE_LOCATION_FIXTURE: LocationNode[] = [
+  {
+    id: 'c',
+    name: '阿斯塔利亚大陆',
+    type: 'continent',
+    parentId: null,
+    tier: 1,
+    description: '',
+    neighbors: [],
+  },
+  {
+    id: 'r1',
+    name: '奥古斯提姆帝国',
+    type: 'region',
+    parentId: 'c',
+    tier: 2,
+    description: '',
+    neighbors: [],
+  },
+  {
+    id: 'city1',
+    name: '铁炉堡',
+    type: 'city',
+    parentId: 'r1',
+    tier: 3,
+    description: '',
+    neighbors: [],
+  },
+];
 
 // ── @engine/database: Dexie 在 import 期就构造，整层替掉 ──
 const trackRows = new Map<string, AudioTrack>();
@@ -194,11 +226,16 @@ beforeEach(() => {
     ok: false,
     json: async () => [],
   }));
+  // 🔴 场景选曲的「地点层级」来自**内容注册表**（D25①），不再是引擎里烤死的常量。
+  //    本文件有两条用例走单段地名（'铁炉堡'）→ 靠地图才上溯得到势力级，注册表空着
+  //    就永远回退不上去。这里灌一份微型地图，只提供层级、不参与任何断言的内容。
+  setContentRegistry({ ...getContentRegistry(), locations: SCENE_LOCATION_FIXTURE });
 });
 
 afterEach(() => {
   __resetFolderTestHooks();
   vi.unstubAllGlobals(); // 上传补 hash 那组会替掉 crypto，别漏给下一个用例
+  setContentRegistry({ ...getContentRegistry(), locations: undefined });
 });
 
 // ═══════════════════════════════════════════════════════════

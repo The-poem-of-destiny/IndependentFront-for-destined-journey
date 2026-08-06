@@ -1,14 +1,29 @@
 /**
- * NPC 生成随机表 — 对齐世界书 #865613 (角色生成) + #443 (命名指导) + #445 (辅助指导)
+ * NPC 生成随机表 — schema + 抽样纯函数（Phase 8.5；内容-引擎分离 波 2 / D25③）
  *
  * 提供 code 层随机化工具，供 Agentic Agent (char_gen) 通过工具调用获取真实随机值。
- * 所有数据从世界书 extra_setting.json uid 443-445 提取。
+ *
+ * 🔴 **本模块不再持有名字池 / 发色池 / 瞳色池 / 性格池的数据**（D25③）。它们住在内容
+ * 注册表的 `namePools` 面（占位来源 `/data/content/name-pools.json`，装包后由 pack 的
+ * `namePools` 分节替换）。这里只留：形状（{@link NamePoolsContent}）、注册表读取缝、
+ * 抽样纯函数，以及**属性投点算法**（`rollAttributes` / `getTierAttributeCap` 是数值机制，
+ * 不是内容，留在引擎）。
+ *
+ * 🔴 **空池一律确定性兜底、绝不抛**：名字/发色/瞳色返回空串，性格返回
+ * `{ code: '', description: '' }`。注册表在 boot 链上灌注（content-store 的
+ * `ensureContentRegistryLoaded()`，D16 时序契约），而工具执行必在其后。
+ *
+ * 抽样函数都收一个可选的内容参数（默认 = 注册表当前值），与 `location-db.ts` 的
+ * `(nodes, …)` 参数式同一口径：调用方不必知道注册表，测试可直接喂 fixture。
  */
+
+import { getContentRegistry } from '../ui/stores/content-store';
 
 // ========== 通用随机工具 ==========
 
-/** 从数组中随机取一个元素 */
-function pick<T>(arr: readonly T[]): T {
+/** 从数组中随机取一个元素；空数组 / 缺失返回 undefined（不抛） */
+function pick<T>(arr: readonly T[] | undefined): T | undefined {
+  if (!arr || arr.length === 0) return undefined;
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
@@ -18,826 +33,254 @@ function randInt(min: number, max: number): number {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 名称池 (按种族 + 性别)
-// 对齐世界书 #443 角色命名指导
+// 形状（注册表 `namePools` 面 / pack `namePools` 分节）
 // ═══════════════════════════════════════════════════════════
 
-interface NamePool {
+/** 一个种族的名称池 */
+export interface NamePool {
   male: string[];
   female: string[];
   surnames: string[];
 }
 
-const NAME_POOLS: Record<string, NamePool> = {
-  人类: {
-    male: [
-      '艾德',
-      '卡尔',
-      '雷诺',
-      '维克多',
-      '塞巴斯蒂安',
-      '路德维希',
-      '马库斯',
-      '奥利弗',
-      '亨里克',
-      '弗雷德',
-      '阿瑟',
-      '贝尔纳',
-      '康拉德',
-      '迪特里希',
-      '埃德蒙',
-      '弗里茨',
-      '戈特弗里德',
-      '海因里希',
-      '伊格纳兹',
-      '约阿希姆',
-      '卡斯帕',
-      '利奥波德',
-      '曼弗雷德',
-      '诺伯特',
-      '奥斯瓦尔德',
-      '菲利克斯',
-      '雷金纳德',
-      '西格弗里德',
-      '提奥',
-      '乌尔里希',
-      '瓦尔特',
-      '泽维尔',
-    ],
-    female: [
-      '艾琳',
-      '莉亚',
-      '索菲亚',
-      '伊莎贝拉',
-      '奥莉维亚',
-      '艾玛',
-      '米娅',
-      '夏洛特',
-      '艾米莉亚',
-      '维多利亚',
-      '阿德莱德',
-      '比阿特丽斯',
-      '克拉拉',
-      '多萝西娅',
-      '伊迪丝',
-      '芙蕾雅',
-      '格蕾塔',
-      '海伦娜',
-      '伊丽莎白',
-      '约瑟芬',
-      '卡塔琳娜',
-      '露易丝',
-      '玛蒂尔达',
-      '诺拉',
-      '奥蒂莉',
-      '佩特拉',
-      '罗莎琳',
-      '西尔维亚',
-      '特蕾莎',
-      '乌苏拉',
-      '薇拉',
-    ],
-    surnames: [
-      '铁锤',
-      '风行者',
-      '影步',
-      '星辰',
-      '黎明',
-      '霜语',
-      '火心',
-      '暗影',
-      '光翼',
-      '石英',
-      '钢盾',
-      '银叶',
-      '河风',
-      '岩脊',
-      '烽火',
-      '霜刃',
-      '橡木',
-      '鹰眼',
-      '狼牙',
-      '炎铸',
-      '海歌',
-      '云梯',
-      '金穗',
-      '雪松',
-    ],
-  },
-  精灵: {
-    male: [
-      '艾隆',
-      '瑟兰迪尔',
-      '芬罗德',
-      '莱戈拉斯',
-      '凯勒布林博',
-      '欧洛斐尔',
-      '加尔多',
-      '贝烈格',
-      '埃克塞里安',
-      '林迪尔',
-      '希尔凡',
-      '费诺',
-      '阿姆拉斯',
-      '达格尼尔',
-      '洛林',
-      '奈尔多',
-      '凡雅罗',
-      '辛格尔',
-    ],
-    female: [
-      '阿尔玟',
-      '伽拉德瑞尔',
-      '露西恩',
-      '伊缀尔',
-      '宁洛丝',
-      '埃尔温',
-      '费瑞尔',
-      '阿纳瑞恩',
-      '凯勒布莉安',
-      '弥瑞尔',
-      '艾尔薇',
-      '莉安娜',
-      '西尔维亚',
-      '艾莉西亚',
-      '月华',
-      '晨露',
-      '银铃',
-      '星眸',
-    ],
-    surnames: [
-      '银叶',
-      '星落',
-      '月影',
-      '晨光',
-      '林语',
-      '风吟',
-      '水镜',
-      '花冠',
-      '金枝',
-      '绿荫',
-      '光翼',
-      '云裳',
-      '霜华',
-      '春藤',
-      '夜莺',
-      '碧波',
-      '日冕',
-      '霞光',
-      '空谷',
-      '幻音',
-    ],
-  },
-  矮人: {
-    male: [
-      '索林',
-      '巴林',
-      '德瓦林',
-      '格罗因',
-      '欧因',
-      '多瑞',
-      '诺瑞',
-      '比弗',
-      '波弗',
-      '邦伯',
-      '基利',
-      '菲力',
-      '吉姆利',
-      '弗拉尔',
-      '索尔',
-      '布洛克',
-      '卡兹',
-      '德鲁根',
-      '莫拉丁',
-      '钢拳',
-    ],
-    female: [
-      '迪丝',
-      '布伦希尔德',
-      '格瑞塔',
-      '赫尔加',
-      '英格丽德',
-      '斯瓦娜',
-      '托芙',
-      '弗蕾迪丝',
-      '雅恩',
-      '凯特琳',
-      '莫拉',
-      '娜拉',
-      '茹娜',
-    ],
-    surnames: [
-      '铁炉',
-      '石拳',
-      '钢胡',
-      '铜盾',
-      '金砧',
-      '火锤',
-      '岩足',
-      '铁砧',
-      '重锤',
-      '深矿',
-      '硬石',
-      '熔炉',
-      '锻钢',
-      '银脉',
-      '雷锤',
-      '坚岩',
-    ],
-  },
-  翼民: {
-    male: [
-      '赛瑞斯',
-      '加百列',
-      '米迦勒',
-      '拉斐尔',
-      '乌列',
-      '阿兹瑞尔',
-      '泽菲',
-      '艾里克',
-      '阿奎拉',
-      '法尔科',
-      '奥雷利',
-      '塞拉芬',
-    ],
-    female: [
-      '安吉拉',
-      '瑟拉芬娜',
-      '艾莉尔',
-      '加布莉',
-      '奥罗拉',
-      '塞莉丝',
-      '菲尼克斯',
-      '伊卡莉',
-      '卢娜',
-      '艾瑟琳',
-      '天羽',
-      '云雀',
-    ],
-    surnames: [
-      '光翼',
-      '天翔',
-      '圣歌',
-      '苍穹',
-      '辉羽',
-      '晨星',
-      '耀日',
-      '霜羽',
-      '银翎',
-      '烈风',
-      '云翼',
-      '穹顶',
-      '神谕',
-      '飞羽',
-      '高天',
-      '碧空',
-    ],
-  },
-  兽族: {
-    male: [
-      '洛戈什',
-      '乌尔法',
-      '卡尔格',
-      '沃里克',
-      '雷加',
-      '芬里尔',
-      '加尔姆',
-      '斯卡',
-      '塔洛',
-      '格兰',
-      '霍克',
-      '巴鲁',
-    ],
-    female: [
-      '费拉',
-      '莎卡',
-      '阿尔瓦',
-      '莱卡',
-      '基拉',
-      '洛娜',
-      '塞尔达',
-      '弗雷娅',
-      '希拉',
-      '塔拉',
-      '薇克丝',
-      '桑德拉',
-    ],
-    surnames: [
-      '霜狼',
-      '碎牙',
-      '血爪',
-      '铁鬃',
-      '怒角',
-      '风蹄',
-      '火鬃',
-      '裂岩',
-      '雷牙',
-      '冰脊',
-      '暗月',
-      '赤鬃',
-      '影爪',
-      '破风',
-    ],
-  },
-  血族: {
-    male: [
-      '弗拉德',
-      '拉兹洛',
-      '阿利斯泰尔',
-      '塞巴斯蒂安',
-      '达米安',
-      '路西安',
-      '马库斯',
-      '维克托',
-      '康斯坦丁',
-      '阿兹拉尔',
-    ],
-    female: [
-      '卡蜜拉',
-      '莉莉丝',
-      '伊莎贝拉',
-      '艾莉诺',
-      '维多利亚',
-      '瑟琳娜',
-      '莫甘娜',
-      '德古丽娜',
-      '瓦伦蒂娜',
-      '诺斯菲拉',
-    ],
-    surnames: [
-      '诺斯费拉图',
-      '血月',
-      '暗夜',
-      '赤红',
-      '永夜',
-      '血誓',
-      '影裔',
-      '猩红',
-      '暮光',
-      '血源',
-      '黑玫瑰',
-      '血蔷薇',
-    ],
-  },
-  巨龙: {
-    male: [
-      '阿卡托什',
-      '奥杜因',
-      '帕图纳克斯',
-      '奈萨里奥',
-      '玛里苟斯',
-      '伊瑟兰',
-      '诺兹多姆',
-      '萨菲隆',
-      '奥尼克希亚斯',
-      '辛达苟萨',
-    ],
-    female: [
-      '阿莱克丝塔萨',
-      '希尔瓦娜',
-      '奥妮克希亚',
-      '辛萨莉亚',
-      '伊瑟拉',
-      '菲莉希亚',
-      '墨菲斯托菲莉亚',
-      '维拉诺斯',
-    ],
-    surnames: [
-      '烬灭',
-      '炎渊',
-      '雷暴',
-      '虚空',
-      '熔岩',
-      '飓风',
-      '冰狱',
-      '裂空',
-      '永恒',
-      '始源',
-      '终焉',
-      '天灾',
-    ],
-    // TODO Phase 9: 巨龙应有凡世名(化用名) + 真名(龙之名讳+史诗称号) 双名体系
-    // 世界书 #443: "凡世名: {化用名}; 真名: {龙之名讳}(极为复杂)，{史诗称号}"
-  },
-  // ── 世界书 #443 补充种族 ──
-  半身人: {
-    male: [
-      '托博',
-      '费尔顿',
-      '潘伯',
-      '科顿',
-      '米罗',
-      '洛宾',
-      '巴里',
-      '霍比',
-      '罗恩',
-      '迪克',
-      '芬恩',
-      '曼尼',
-      '皮普',
-      '利奥',
-    ],
-    female: [
-      '多拉',
-      '梅莉',
-      '潘妮',
-      '艾维',
-      '罗丝',
-      '贝拉',
-      '芬妮',
-      '霍莉',
-      '波比',
-      '蒂莉',
-      '洛蒂',
-      '米娅',
-      '珀尔',
-      '玛吉',
-    ],
-    surnames: [
-      '麦穗',
-      '蜜酒',
-      '织布',
-      '陶匠',
-      '守林人',
-      '面包师',
-      '酒窖',
-      '烟斗',
-      '耕田',
-      '花圃',
-      '木匠',
-      '磨坊',
-      '铁匠',
-      '裁缝',
-      '果园',
-      '奶酪',
-      '蜂蜜',
-      '渔钩',
-      '草药',
-      '鞋匠',
-    ],
-  },
-  巨人: {
-    male: [
-      '斯克里米尔',
-      '尤弥尔',
-      '赫朗格尼尔',
-      '索列姆',
-      '贝格尔米尔',
-      '格尔罗德',
-      '伦格尼尔',
-      '沃苏德',
-      '斯塔卡德',
-      '艾吉尔',
-      '洛基',
-      '布利',
-      '乌特加德',
-      '洛德',
-      '哈迪',
-    ],
-    female: [
-      '格瑞德',
-      '芬雅',
-      '斯卡蒂',
-      '安格尔波达',
-      '贝斯特拉',
-      '海蒂',
-      '尼奥德',
-      '吉尔德',
-      '赫尔',
-      '琳达',
-      '索拉',
-      '诺恩',
-      '索格',
-      '约德',
-      '贝尔格',
-    ],
-    // 巨人仅有名字不设姓氏（世界书 #443: "强者有称号但非姓氏"）
-    surnames: [],
-  },
-  妖精: {
-    // 世界书 #443: "无传统姓名，名字为{诗意短语} (不超过8字)"
-    male: [
-      '露珠之舞',
-      '晨光微语',
-      '花间风吟',
-      '星屑流光',
-      '蝶影轻掠',
-      '雨后虹桥',
-      '林隙碎金',
-      '夜莺低语',
-      '溪涧浅唱',
-      '萤火之约',
-      '霜叶轻旋',
-      '云隙微光',
-      '春泥初醒',
-      '月影徘徊',
-      '蝉鸣夏梦',
-    ],
-    female: [
-      '花瓣坠落',
-      '薄雾柔光',
-      '蔷薇私语',
-      '雪融之息',
-      '月华如水',
-      '清泉映月',
-      '蒲公英飞',
-      '月光摇篮',
-      '浅梦幽兰',
-      '风铃轻响',
-      '樱吹雪',
-      '星之泪',
-      '朝露待晞',
-      '烟霞微漪',
-      '幻蝶迷踪',
-    ],
-    surnames: [
-      // 妖精无姓氏，名字本身就是完整标识
-    ],
-  },
-  亡灵: {
-    // 世界书 #443: "保留生前姓名，高阶亡灵可能以{称号意译}替代姓氏"
-    // 从各族混合抽取名字（模拟"生前"种族多样性）
-    male: [
-      '莫德雷德',
-      '骸骨',
-      '苍白',
-      '寂灭',
-      '无光',
-      '影蚀',
-      '死棘',
-      '幽魂',
-      '虚空行者',
-      '终末',
-      '悲鸣',
-      '腐蚀',
-      '寂静',
-      '凋零',
-      '灰烬',
-    ],
-    female: [
-      '莫尔甘娜',
-      '苍白夫人',
-      '寂静女爵',
-      '哀霜',
-      '幽冥',
-      '亡语',
-      '暗月',
-      '残烛',
-      '冥河',
-      '安息',
-      '蚀骨',
-      '暗纱',
-      '孤影',
-      '灵薄',
-      '冷霜',
-    ],
-    surnames: [
-      '寂灭者',
-      '永夜',
-      '破晓之影',
-      '哀悼',
-      '冥河渡者',
-      '不眠者',
-      '残响',
-      '血色挽歌',
-      '黑曜',
-      '终焉之誓',
-      '暗翼',
-      '低语者',
-      '遗忘',
-      '寒霜之握',
-      '深渊之眼',
-    ],
-  },
+/** 性格维度的一项（编码 + 人类可读描述） */
+export interface PersonalityTrait {
+  code: string;
+  desc: string;
+}
+
+/** 性格池：五维 + 稳定性，各是一组可选项 */
+export interface PersonalityPool {
+  warmth: PersonalityTrait[];
+  openness: PersonalityTrait[];
+  urgency: PersonalityTrait[];
+  firmness: PersonalityTrait[];
+  persistence: PersonalityTrait[];
+  stability: PersonalityTrait[];
+}
+
+/** 性格维度的键（用于遍历/校验；顺序即编码拼接顺序） */
+const PERSONALITY_AXES = [
+  'warmth',
+  'openness',
+  'urgency',
+  'firmness',
+  'persistence',
+  'stability',
+] as const;
+
+/** 注册表 `namePools` 面的整体形状 */
+export interface NamePoolsContent {
+  /** 名字池查不到该种族时回退到的种族键；缺省 = 不回退 */
+  defaultRace?: string;
+  /** 发色/瞳色池查不到该种族时回退到的键；缺省 = 不回退 */
+  defaultColorKey?: string;
+  namePools: Record<string, NamePool>;
+  hairColors: Record<string, string[]>;
+  eyeColors: Record<string, string[]>;
+  personality: Partial<PersonalityPool>;
+}
+
+/** 空内容（注册表未就绪 / 形状不对时的确定性兜底） */
+const EMPTY_NAME_POOLS_CONTENT: NamePoolsContent = {
+  namePools: {},
+  hairColors: {},
+  eyeColors: {},
+  personality: {},
 };
 
-/** 默认名称池（未定义的种族回退到人类） */
-const DEFAULT_NAME_POOL: NamePool = NAME_POOLS['人类'];
+// ═══════════════════════════════════════════════════════════
+// 注册表读取缝
+// ═══════════════════════════════════════════════════════════
 
-// ========== 发色池 ==========
+/**
+ * 取当前生效的名字池内容（同步读注册表）。
+ *
+ * 该面未就绪 / 形状不对 → 返回空内容（各池为空对象）。逐段做最小形状校验，
+ * 坏的一段只让那一段变空，不牵连其余段。
+ */
+export function getNamePoolsContent(): NamePoolsContent {
+  const raw: unknown = getContentRegistry().namePools;
+  if (!isPlainObject(raw)) return EMPTY_NAME_POOLS_CONTENT;
+  return {
+    defaultRace: typeof raw.defaultRace === 'string' ? raw.defaultRace : undefined,
+    defaultColorKey: typeof raw.defaultColorKey === 'string' ? raw.defaultColorKey : undefined,
+    namePools: parseNamePools(raw.namePools),
+    hairColors: parseStringListMap(raw.hairColors),
+    eyeColors: parseStringListMap(raw.eyeColors),
+    personality: parsePersonality(raw.personality),
+  };
+}
 
-const HAIR_COLORS: Record<string, string[]> = {
-  人类: [
-    '黑色',
-    '棕色',
-    '金色',
-    '红色',
-    '灰色',
-    '白色',
-    '栗色',
-    '深棕色',
-    '亚麻色',
-    '褐色',
-    '银灰色',
-    '蜂蜜色',
-    '深褐色',
-    '赤褐色',
-  ],
-  精灵: [
-    '银色',
-    '金色',
-    '白色',
-    '淡金色',
-    '浅绿色',
-    '浅蓝色',
-    '月光银',
-    '铂金色',
-    '淡紫色',
-    '冰蓝色',
-    '翡翠绿',
-    '星空银',
-  ],
-  矮人: ['棕色', '红色', '黑色', '灰色', '姜黄色', '深棕', '赤褐色', '铜色', '暗金色', '灰白'],
-  翼民: ['白色', '金色', '银色', '淡蓝', '淡粉', '铂金', '珍珠白', '浅紫', '天蓝', '玫瑰金'],
-  兽族: ['灰色', '棕色', '白色', '黑色', '斑纹棕', '赤色', '暗灰', '银灰', '深棕', '虎斑色'],
-  血族: ['银白', '黑色', '深紫', '暗红', '灰白', '墨黑', '血色红', '冷灰', '深蓝黑'],
-  巨龙: ['熔金', '赤红', '墨黑', '银白', '深蓝', '青铜', '紫晶', '翡翠绿', '暗金'],
-  // ── 世界书 #443 新增种族 ──
-  半身人: ['棕色', '金色', '红色', '姜黄色', '黑色', '栗色', '亚麻色'],
-  巨人: ['棕色', '灰色', '黑色', '姜黄色', '灰白', '白色', '深棕'],
-  妖精: ['银色', '金色', '淡金', '浅绿', '浅蓝', '月光银', '铂金'],
-  亡灵: ['灰白', '银白', '惨白', '灰黑', '枯黄', '透明光泽'],
-  默认: [
-    '樱粉',
-    '紫红',
-    '桃红',
-    '酒红',
-    '泰尔紫',
-    '姜黄色',
-    '玫瑰红',
-    '墨绿',
-    '熔金',
-    '碧绿',
-    '浅金',
-    '月白',
-    '品红',
-    '象牙白',
-    '矢车菊蓝',
-    '椰棕色',
-    '银红',
-    '朱砂红',
-    '橘黄',
-    '橙红',
-    '米黄',
-    '小麦色',
-    '紫丁香',
-    '茶色',
-    '珍珠白',
-    '石青',
-    '金赭',
-    '宝石绿',
-    '翡翠绿',
-    '灰绿',
-    '黑色',
-    '棕色',
-    '金色',
-  ],
-};
+/** 窄化：值是不是普通对象（非 null / 非数组） */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+}
 
-// ========== 瞳色池 ==========
+/** 只保留字符串元素的数组（非数组 → 空数组） */
+function parseStringList(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((x): x is string => typeof x === 'string');
+}
 
-const EYE_COLORS: Record<string, string[]> = {
-  人类: ['棕色', '蓝色', '绿色', '灰色', '淡褐色', '深棕', '蓝灰', '琥珀色', '翠绿', '天蓝'],
-  精灵: ['翠绿', '银灰', '天蓝', '紫罗兰', '金色', '深绿', '浅蓝', '月光银', '星空紫', '碧绿'],
-  矮人: ['棕色', '深棕', '灰色', '琥珀', '暗绿', '铜色'],
-  翼民: ['金色', '天蓝', '银白', '淡紫', '琥珀', '碧空蓝'],
-  兽族: ['金色', '琥珀', '暗绿', '橙黄', '冰蓝', '血红'],
-  血族: ['深红', '暗金', '紫罗兰', '冰蓝', '漆黑', '猩红'],
-  // ── 世界书 #443 新增种族 ──
-  半身人: ['棕色', '蓝色', '绿色', '灰色', '淡褐色', '琥珀色'],
-  巨人: ['灰色', '深棕', '蓝灰', '琥珀', '冰蓝'],
-  妖精: ['翠绿', '银灰', '天蓝', '紫罗兰', '金色', '浅蓝'],
-  亡灵: ['幽绿', '暗红', '冰蓝', '灰白', '漆黑', '磷光白'],
-  巨龙: ['竖瞳金', '竖瞳赤', '竖瞳蓝', '竖瞳绿', '竖瞳紫', '熔金'],
-  默认: [
-    '棕色',
-    '蓝色',
-    '绿色',
-    '灰色',
-    '淡褐色',
-    '琥珀色',
-    '金色',
-    '紫色',
-    '红色',
-    '银色',
-    '异色瞳(左蓝右绿)',
-    '翠绿',
-    '天蓝',
-  ],
-};
+/** `Record<string, string[]>` 形状（发色池 / 瞳色池） */
+function parseStringListMap(v: unknown): Record<string, string[]> {
+  if (!isPlainObject(v)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [key, value] of Object.entries(v)) out[key] = parseStringList(value);
+  return out;
+}
 
-// ========== 性格池 ==========
+/** `Record<string, NamePool>` 形状（名字池） */
+function parseNamePools(v: unknown): Record<string, NamePool> {
+  if (!isPlainObject(v)) return {};
+  const out: Record<string, NamePool> = {};
+  for (const [race, value] of Object.entries(v)) {
+    if (!isPlainObject(value)) continue;
+    out[race] = {
+      male: parseStringList(value.male),
+      female: parseStringList(value.female),
+      surnames: parseStringList(value.surnames),
+    };
+  }
+  return out;
+}
 
-const PERSONALITY_POOL = {
-  // w/W vs d/D: 亲 vs 疏
-  warmth: [
-    { code: 'w', desc: '轻度亲近 — 主动关心，容易交心，喜欢热闹' },
-    { code: 'W', desc: '重度亲近 — 热情洋溢，社交核心，极其健谈' },
-    { code: 'd', desc: '轻度疏离 — 保持距离，不轻易交心，享受独处' },
-    { code: 'D', desc: '重度疏离 — 孤僻避世，极度内向，抗拒社交' },
-  ],
-  // o/O vs h/H: 显 vs 隐
-  openness: [
-    { code: 'o', desc: '轻度坦露 — 心思直白，情绪外露，有话直说' },
-    { code: 'O', desc: '重度坦露 — 毫无城府，情绪完全写在脸上' },
-    { code: 'h', desc: '轻度内敛 — 深藏不露，喜怒不形于色，话留三分' },
-    { code: 'H', desc: '重度内敛 — 密不透风，永远无法被读懂' },
-  ],
-  // a/A vs l/L: 急 vs 缓
-  urgency: [
-    { code: 'a', desc: '轻度急切 — 性急冲动，想到就做，闲不住' },
-    { code: 'A', desc: '重度急切 — 暴风骤雨，无法等待一秒' },
-    { code: 'l', desc: '轻度从容 — 不紧不慢，从容不迫，耐得住' },
-    { code: 'L', desc: '重度从容 — 泰山崩于前而色不变' },
-  ],
-  // g/G vs r/R: 刚 vs 柔
-  firmness: [
-    { code: 'g', desc: '轻度刚硬 — 寸步不让，宁折不弯，硬碰硬' },
-    { code: 'G', desc: '重度刚硬 — 绝对不妥协，宁死不屈' },
-    { code: 'r', desc: '轻度柔韧 — 以柔克刚，善于妥协，顺势而为' },
-    { code: 'R', desc: '重度柔韧 — 随波逐流，极度灵活' },
-  ],
-  // z/Z vs y/Y: 执 vs 逸
-  persistence: [
-    { code: 'z', desc: '轻度执着 — 认准不放，死磕到底，放不下' },
-    { code: 'Z', desc: '重度执着 — 偏执到疯狂，不达目的誓不罢休' },
-    { code: 'y', desc: '轻度超逸 — 随遇而安，拿得起放得下，不强求' },
-    { code: 'Y', desc: '重度超逸 — 一切皆空，万物不挂心' },
-  ],
-  // 稳定性 S/A/F
-  stability: [
-    { code: 'S', desc: '稳固 — 行为可预测，性格不易随环境改变' },
-    { code: 'A', desc: '可塑 — 随环境调整行为模式' },
-    { code: 'F', desc: '流动 — 性格不稳定，难以捉摸' },
-  ],
-};
+/** 性格池形状（逐维度校验，缺失维度直接不出现） */
+function parsePersonality(v: unknown): Partial<PersonalityPool> {
+  if (!isPlainObject(v)) return {};
+  const out: Partial<PersonalityPool> = {};
+  for (const axis of PERSONALITY_AXES) {
+    const list = v[axis];
+    if (!Array.isArray(list)) continue;
+    const traits: PersonalityTrait[] = [];
+    for (const item of list) {
+      if (!isPlainObject(item)) continue;
+      if (typeof item.code !== 'string' || typeof item.desc !== 'string') continue;
+      traits.push({ code: item.code, desc: item.desc });
+    }
+    out[axis] = traits;
+  }
+  return out;
+}
+
+/** 按种族取名字池；查不到回退 `defaultRace`，仍查不到返回 undefined */
+function resolveNamePool(race: string, content: NamePoolsContent): NamePool | undefined {
+  const direct = content.namePools[race];
+  if (direct) return direct;
+  const fallbackKey = content.defaultRace;
+  return fallbackKey === undefined ? undefined : content.namePools[fallbackKey];
+}
+
+/** 按种族取颜色池；查不到回退 `defaultColorKey`，仍查不到返回空数组 */
+function resolveColorPool(
+  race: string,
+  map: Record<string, string[]>,
+  content: NamePoolsContent,
+): string[] {
+  const direct = map[race];
+  if (direct) return direct;
+  const fallbackKey = content.defaultColorKey;
+  return (fallbackKey === undefined ? undefined : map[fallbackKey]) ?? [];
+}
 
 // ═══════════════════════════════════════════════════════════
 // Public API
 // ═══════════════════════════════════════════════════════════
 
-/** 随机生成角色名称（名+姓，中间阶层格式） */
-export function randomName(race: string, gender: '男' | '女' = '男'): string {
-  const pool = NAME_POOLS[race] ?? DEFAULT_NAME_POOL;
-  const givenNames = gender === '男' ? pool.male : pool.female;
+/**
+ * 随机生成角色名称（名+姓，中间阶层格式）。
+ *
+ * 50% 概率带姓氏；🔴 该种族**没有姓氏池**（如世界书里明确「无姓氏」的种族）时
+ * 只返回名，不再拼一个空姓——原实现在这里会产出 `名·undefined`。
+ * 名字池为空 → 返回空串（确定性兜底）。
+ */
+export function randomName(
+  race: string,
+  gender: '男' | '女' = '男',
+  content: NamePoolsContent = getNamePoolsContent(),
+): string {
+  const pool = resolveNamePool(race, content);
+  const givenNames = gender === '男' ? pool?.male : pool?.female;
   const given = pick(givenNames);
+  if (given === undefined) return '';
 
   // 50% 概率有姓氏（中层阶级）
   if (Math.random() < 0.5) {
-    const surname = pick(pool.surnames);
-    return `${given}·${surname}`;
+    const surname = pick(pool?.surnames);
+    if (surname !== undefined) return `${given}·${surname}`;
   }
   return given;
 }
 
-/** 随机生成发色 */
-export function randomHairColor(race: string): string {
-  const pool = HAIR_COLORS[race] ?? HAIR_COLORS['默认'];
-  return pick(pool);
+/** 随机生成发色（池为空 → 空串） */
+export function randomHairColor(
+  race: string,
+  content: NamePoolsContent = getNamePoolsContent(),
+): string {
+  return pick(resolveColorPool(race, content.hairColors, content)) ?? '';
 }
 
-/** 随机生成瞳色 */
-export function randomEyeColor(race: string): string {
-  const pool = EYE_COLORS[race] ?? EYE_COLORS['默认'];
-  return pick(pool);
+/** 随机生成瞳色（池为空 → 空串） */
+export function randomEyeColor(
+  race: string,
+  content: NamePoolsContent = getNamePoolsContent(),
+): string {
+  return pick(resolveColorPool(race, content.eyeColors, content)) ?? '';
 }
 
-/** 随机生成性格编码和描述（wOaGz 五维模型 + 稳定性） */
-export function randomPersonality(): {
+/** 性格维度键 → 描述行前缀（描述文案的组装顺序与 PERSONALITY_AXES 一致） */
+const PERSONALITY_AXIS_LABELS: Record<(typeof PERSONALITY_AXES)[number], string> = {
+  warmth: '亲近度',
+  openness: '坦露度',
+  urgency: '急切度',
+  firmness: '刚柔度',
+  persistence: '执着度',
+  stability: '稳定性',
+};
+
+/**
+ * 随机生成性格编码和描述（五维模型 + 稳定性）。
+ *
+ * 编码形如 `wOaGz(A)`：前五维直接拼接，稳定性用括号包住。
+ * 某一维池为空 → 该维不进编码也不进描述；全空 → `{ code: '', description: '' }`。
+ */
+export function randomPersonality(content: NamePoolsContent = getNamePoolsContent()): {
   code: string; // 如 'wOaGz(A)'
   description: string; // 人类可读描述
 } {
-  const w = pick(PERSONALITY_POOL.warmth);
-  const o = pick(PERSONALITY_POOL.openness);
-  const a = pick(PERSONALITY_POOL.urgency);
-  const g = pick(PERSONALITY_POOL.firmness);
-  const z = pick(PERSONALITY_POOL.persistence);
-  const s = pick(PERSONALITY_POOL.stability);
+  const picked = new Map<(typeof PERSONALITY_AXES)[number], PersonalityTrait>();
+  for (const axis of PERSONALITY_AXES) {
+    const trait = pick(content.personality[axis]);
+    if (trait) picked.set(axis, trait);
+  }
 
-  const code = `${w.code}${o.code}${a.code}${g.code}${z.code}(${s.code})`;
-  const description = [
-    `亲近度: ${w.desc}`,
-    `坦露度: ${o.desc}`,
-    `急切度: ${a.desc}`,
-    `刚柔度: ${g.desc}`,
-    `执着度: ${z.desc}`,
-    `稳定性: ${s.desc}`,
-  ].join('; ');
+  let code = '';
+  for (const axis of PERSONALITY_AXES) {
+    const trait = picked.get(axis);
+    if (!trait) continue;
+    // 稳定性是最后一维，用括号包住；其余直接拼
+    code += axis === 'stability' ? `(${trait.code})` : trait.code;
+  }
+
+  const description = PERSONALITY_AXES.filter((axis) => picked.has(axis))
+    .map((axis) => `${PERSONALITY_AXIS_LABELS[axis]}: ${picked.get(axis)!.desc}`)
+    .join('; ');
 
   return { code, description };
 }
 
-/** 按 Tier 获取属性随机范围（对齐世界书 #445） */
+/** 按 Tier 获取属性随机范围（数值机制，非内容） */
 export function getTierAttributeCap(tier: number): number {
   const CAPS: Record<number, number> = { 1: 8, 2: 10, 3: 12, 4: 14, 5: 16, 6: 18, 7: 20 };
   return CAPS[tier] ?? 8;
 }
 
 /**
- * 按 Tier 随机生成五维属性（三池分配模型，对齐世界书 #444 Step2 + #445）
+ * 按 Tier 随机生成五维属性（三池分配模型）
  *
  * 公式: 每项 = [基础池分配] + [层级固定 tier-1] + {等级额外分配}
- * - 基础池: 0~25 点自由分配，每项上限 6（世界书 #445: "每项上限6点，与层级实力无关，仅代表天赋与种族优劣"）
+ * - 基础池: 0~25 点自由分配，每项上限 6（每项上限与层级实力无关，仅代表天赋与种族优劣）
  * - 层级固定: 每属性固定获得 tier-1 点
  * - 等级额外: 每等级 1 点自由分配（共 level-1 点），不超 tierCap
  * - 每项总上限由 tier 决定（见 getTierAttributeCap）
@@ -863,7 +306,7 @@ export function rollAttributes(
   };
 } {
   const cap = getTierAttributeCap(tier);
-  const baseCap = 6; // 世界书 #445: 天赋基础每项上限 6
+  const baseCap = 6; // 天赋基础每项上限 6
   const tierFixed = Math.max(0, tier - 1); // 每属性固定 +tier-1
   const basePool = randInt(0, 25); // 基础浮动池（天赋/种族优劣）
   const levelExtra = Math.max(0, level - 1); // 等级额外池
@@ -931,9 +374,13 @@ export function randomAppearanceSummary(
   const buildFemale = ['纤细', '匀称', '丰满', '娇小', '高挑'];
   const buildGeneric = ['中等', '匀称', '偏瘦', '偏壮'];
 
-  const ageAppearance = pick(agePool);
+  const ageAppearance = pick(agePool) ?? '';
   const build =
-    gender === '男' ? pick(buildMale) : gender === '女' ? pick(buildFemale) : pick(buildGeneric);
+    (gender === '男'
+      ? pick(buildMale)
+      : gender === '女'
+        ? pick(buildFemale)
+        : pick(buildGeneric)) ?? '';
 
   return { ageAppearance, build };
 }

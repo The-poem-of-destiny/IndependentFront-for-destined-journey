@@ -23,10 +23,16 @@ import type { WorkshopSocialMeta } from '@engine/workshop-types';
 import {
   resetWorkshopClient,
   setWorkshopClock,
+  setWorkshopConfig,
   setWorkshopFetch,
-  WORKSHOP_API_BASE,
   type WorkshopResponseLike,
 } from '../lib/workshop-client';
+
+/**
+ * 测试用社区源（D41）。真实地址已改为运行时配置、默认 unset，
+ * 所以这里显式配一个假域 —— 顺带让「登录白名单跟着配置走」这件事真的被覆盖到。
+ */
+const WORKSHOP_API_BASE = 'https://workshop.test';
 import {
   decodeJwtPayload,
   isAllowedLoginUrl,
@@ -154,6 +160,7 @@ beforeEach(() => {
   clockMs = 1_800_000_000_000;
 
   resetWorkshopClient();
+  setWorkshopConfig({ apiBase: WORKSHOP_API_BASE, loginHint: '' });
   setWorkshopClock(() => clockMs);
   installFetch();
   setWorkshopSocialEnv({
@@ -539,6 +546,20 @@ describe('登录地址白名单（开弹窗前的那一刀）', () => {
     expect(isAllowedLoginUrl('')).toBe(false);
     expect(isAllowedLoginUrl('/api/auth/login')).toBe(false);
     expect(isAllowedLoginUrl('discord.com/oauth2')).toBe(false);
+  });
+
+  it('🔴 白名单跟着配置现算（D41）—— 换社区源，旧域立刻不再被放行', () => {
+    // 这一条钉的是「名单不许在 import 期冻住」：社区源默认 unset，模块加载那一刻
+    // 它还是空串，冻住的名单会永远只剩 discord.com —— 工坊自己的回跳域被自己拒掉。
+    setWorkshopConfig({ apiBase: 'https://mirror.example' });
+    expect(isAllowedLoginUrl('https://mirror.example/api/auth/redirect')).toBe(true);
+    expect(isAllowedLoginUrl(`${WORKSHOP_API_BASE}/api/auth/redirect`)).toBe(false);
+  });
+
+  it('未配置社区源时只剩 Discord —— 不因为读不到基址就放行任何域', () => {
+    setWorkshopConfig({ apiBase: '' });
+    expect(isAllowedLoginUrl('https://discord.com/oauth2/authorize')).toBe(true);
+    expect(isAllowedLoginUrl(`${WORKSHOP_API_BASE}/api/auth/redirect`)).toBe(false);
   });
 
   it('★ 起飞端点给了个坏地址 → 一个弹窗都不许开', async () => {

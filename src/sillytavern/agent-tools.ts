@@ -32,6 +32,57 @@ import {
   rollAttributes,
   randomAppearanceSummary,
 } from './random-tables';
+import { getContentRegistry } from '../ui/stores/content-store';
+
+// ═══════════════════════════════════════════════════════════
+// Group A0: 品牌面注入（D26）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 注册表未就绪（或 pack 没声明 `branding.appTitle`）时用的**中性**世界称谓。
+ *
+ * 🔴 兜底文案里不许出现任何 IP 专名（D26）：这条描述会原样发给模型，
+ * 写死作品名等于把内容焊进引擎。真实作品名由内容包的 `branding.appTitle` 供给。
+ */
+const NEUTRAL_WORLD_LABEL = '当前';
+
+/**
+ * 当前生效的世界称谓（同步读注册表 `branding` 面）。
+ *
+ * 有 `appTitle` → `《作品名》`；没有 / 面未就绪 / 形状不对 → {@link NEUTRAL_WORLD_LABEL}。
+ */
+function brandingWorldLabel(): string {
+  const branding: unknown = getContentRegistry().branding;
+  if (branding && typeof branding === 'object' && !Array.isArray(branding)) {
+    const title = (branding as { appTitle?: unknown }).appTitle;
+    if (typeof title === 'string' && title.length > 0) return `《${title}》`;
+  }
+  return NEUTRAL_WORLD_LABEL;
+}
+
+/**
+ * `random_name` 的工具描述（**唯一**一处作者面文案；中性基线与品牌版共用它）。
+ */
+function randomNameToolDescription(worldLabel: string): string {
+  return `随机生成一个符合${worldLabel}世界观的角色名称。根据种族和性别从名称池中随机选取。`;
+}
+
+/**
+ * 给一条工具定义套上品牌面（D26）。
+ *
+ * 🔴 `ALL_TOOL_DEFINITIONS` 是模块加载时求值的常量，而注册表在 boot 链上才灌注——
+ * 所以品牌相关的描述只能在**读取时**解析。常量里存的是中性基线（直接读它也安全），
+ * 本函数在 `getToolsForAgent` / `getToolDefinition` 出口处覆盖。
+ */
+function withBranding(def: ToolDefinition): ToolDefinition {
+  if (def.function.name !== 'random_name') return def;
+  const label = brandingWorldLabel();
+  if (label === NEUTRAL_WORLD_LABEL) return def;
+  return {
+    ...def,
+    function: { ...def.function, description: randomNameToolDescription(label) },
+  };
+}
 
 // ═══════════════════════════════════════════════════════════
 // Group A: 工具定义（OpenAI function schemas）
@@ -215,8 +266,8 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'random_name',
-      description:
-        '随机生成一个符合《命定之诗》世界观的角色名称。根据种族和性别从名称池中随机选取。',
+      // 中性基线；有内容包时由 withBranding() 在读取出口换成带作品名的版本（D26）
+      description: randomNameToolDescription(NEUTRAL_WORLD_LABEL),
       parameters: {
         type: 'object',
         properties: {
@@ -573,12 +624,13 @@ export function getToolsForAgent(agentId: string): ToolDefinition[] {
   const allowed = AGENT_TOOL_MAP[agentId];
   if (!allowed) return [];
   const allowedSet = new Set(allowed);
-  return ALL_TOOL_DEFINITIONS.filter((t) => allowedSet.has(t.function.name));
+  return ALL_TOOL_DEFINITIONS.filter((t) => allowedSet.has(t.function.name)).map(withBranding);
 }
 
 /** 根据工具名获取单个工具定义 */
 export function getToolDefinition(functionName: string): ToolDefinition | undefined {
-  return ALL_TOOL_DEFINITIONS.find((t) => t.function.name === functionName);
+  const def = ALL_TOOL_DEFINITIONS.find((t) => t.function.name === functionName);
+  return def === undefined ? undefined : withBranding(def);
 }
 
 // ═══════════════════════════════════════════════════════════

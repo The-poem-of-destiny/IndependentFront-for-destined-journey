@@ -251,7 +251,8 @@ describe('buildAgentMessages', () => {
     const messages = buildAgentMessages('story', ctx);
     // Phase 10: template resolves all placeholders into single system message
     // system 消息应包含 fixedSystem (via SYS_PROMPT fallback)
-    expect(messages![0].content).toContain('命定之诗叙事引擎');
+    // D27: 存根文案已中性化（去 IP），断言跟着改 —— 被测行为不变
+    expect(messages![0].content).toContain('叙事引擎');
     // user input resolved via {{USER_INPUT}}
     expect(messages![0].content).toContain('查看状态');
   });

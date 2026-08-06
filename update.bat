@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 :: ===================================================
-:: Auto-update (Fated Poem independent frontend).
+:: Auto-update (narrative engine frontend).
 :: Usage: double-click update.bat
 :: - pulls latest code from remote (fast-forward only)
 :: - runs npm install if package files changed
@@ -15,7 +15,7 @@ chcp 65001 >nul
 
 echo.
 echo ==============================
-echo   命定之诗 自动更新
+echo   叙事引擎 自动更新
 echo ==============================
 echo.
 

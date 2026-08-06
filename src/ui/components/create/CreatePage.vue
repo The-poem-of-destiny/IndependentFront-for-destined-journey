@@ -41,6 +41,10 @@ async function handleNext() {
 }
 
 onMounted(() => {
+  // 🔴 整页内容加载门（D16/D24）：七个池住在内容注册表里，不再编译进 bundle。
+  //    先 await 它再让步骤组件渲染，否则第一帧的下拉/列表全是空的，
+  //    用户会以为「这台机器上没有内容」。`initContent` 幂等且永不抛。
+  void store.initContent();
   store.loadWorldBookEntries();
 });
 </script>
@@ -58,7 +62,21 @@ onMounted(() => {
     />
 
     <main class="create-content">
-      <Transition name="step-fade" mode="out-in">
+      <!-- 内容加载门（D24）：三态。加载失败与「内容确实为空」在这里不可区分，
+           也不必区分 —— 两者都是「没有可选内容」，画同一个空态。**不崩**。 -->
+      <div
+        v-if="store.contentStatus === 'loading' || store.contentStatus === 'idle'"
+        class="content-gate"
+      >
+        正在加载内容目录…
+      </div>
+      <div v-else-if="store.contentStatus === 'empty'" class="content-gate content-gate-empty">
+        <p class="gate-title">没有可用的内容目录</p>
+        <p class="gate-desc">
+          未能读取到起始装备、背景与出生地等内容。可在「创意工坊」安装内容包后重试。
+        </p>
+      </div>
+      <Transition v-else name="step-fade" mode="out-in">
         <component :is="currentComponent" :key="store.currentStep" />
       </Transition>
     </main>
@@ -120,6 +138,31 @@ onMounted(() => {
   height: 100%;
   color: var(--theme-text-muted);
   font-size: 1rem;
+}
+
+/* 内容加载门（D24）—— 空态照 design.md §5.2：居中、克制、给下一步动作 */
+.content-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--theme-spacing-xs);
+  height: 100%;
+  min-height: 12rem;
+  color: var(--theme-text-muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+.content-gate .gate-title {
+  margin: 0;
+  font-family: var(--theme-font-title, serif);
+  font-size: 1rem;
+  color: var(--theme-text-secondary);
+}
+.content-gate .gate-desc {
+  margin: 0;
+  max-width: 30rem;
+  line-height: 1.6;
 }
 
 /* 步骤切换动画 */

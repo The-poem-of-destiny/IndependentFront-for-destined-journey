@@ -1,0 +1,60 @@
+{
+  "appTitle": "命定之诗与黄昏之歌",
+  "shortName": "命定之诗",
+  "titleLines": ["命定之诗", "与黄昏之歌"],
+  "tagline": "Destined Poetry & Twilight Song",
+  "subtitles": [
+    "命运的交响，于此奏鸣",
+    "在黄昏的余晖中，踏上命定之途",
+    "每一次抉择，都是诗篇的一行",
+    "星辰为引，长夜作伴",
+    "于灰烬中点亮前行的灯"
+  ],
+  "credits": "命定之诗创作组",
+  "worldSummary": {
+    "title": "阿斯塔利亚世界",
+    "lines": [
+      "复兴纪元 · 10大势力 · 23血脉 · 32节点地图",
+      "普通 / 优良 / 稀有 / 史诗 / 传说 / 神话 / 唯一"
+    ]
+  },
+  "about": "《命定之诗》Fated Poem — 多 Agent 协作文字 RPG 引擎",
+  "copyright": "© 2026 命定之诗创作组",
+  "era": "复兴纪元",
+  "plotTemplate": [
+    {
+      "title": "第一年 — 序章：命定之始",
+      "body": "主角在起始地点觉醒命运之力，遭遇第一次重大抉择..."
+    },
+    {
+      "title": "第二年 — 崛起：风云际会",
+      "body": "与各大势力接触，逐步揭开世界背后的真相..."
+    },
+    {
+      "title": "第三年 — 转折：命运分叉",
+      "body": "关键盟友背叛/牺牲，主线走向出现重大分支..."
+    },
+    {
+      "title": "第四年 — 高潮：诸神黄昏",
+      "body": "最终决战前夕，所有伏笔回收，各方势力集结..."
+    },
+    {
+      "title": "第五年 — 终章：命定之诗",
+      "body": "完成主线任务，世界线尘埃落定，角色结局生成..."
+    }
+  ],
+  "workshopApiBase": "https://poemofdestinycreativeworkshop.1528779666.workers.dev",
+  "workshopLoginHint": "登录需要你已加入「命定之诗」Discord 服务器",
+  "mapSources": [
+    {
+      "key": "small",
+      "name": "高清地图",
+      "url": "https://i.ibb.co/G3rrhgVS/Maplite-1.webp"
+    },
+    {
+      "key": "large",
+      "name": "超清地图",
+      "url": "https://i.ibb.co/2zYccsJ/Map.webp"
+    }
+  ]
+}

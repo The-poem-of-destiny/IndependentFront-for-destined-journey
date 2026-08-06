@@ -10,7 +10,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import OpenSeadragon from 'openseadragon';
 import { useGameStore } from '../../stores/game-store';
-import { useMapViewer, MAP_SOURCES } from '../../composables/useMapViewer';
+import { useMapViewer, resolveMapSources } from '../../composables/useMapViewer';
 import {
   useMapMarkers,
   DEFAULT_MARKER_COLOR,
@@ -19,13 +19,51 @@ import {
   MARKER_ICON_OPTIONS,
   MARKER_COLOR_OPTIONS,
 } from '../../composables/useMapMarkers';
-import { DEFAULT_LOCATIONS, getLocationNode } from '@engine/location-db';
+import { getLocationNode, getLocationNodes } from '@engine/location-db';
 import { getMapMarkers } from '@engine/save-profile';
-import type { MapMarker } from '@engine/types';
-import presetMarkersJson from '../../../../data/defaults/map-marker-presets.json';
+import type { LocationNode, MapMarker } from '@engine/types';
+import { getContentRegistry, ensureContentRegistryLoaded } from '../../stores/content-store';
 
 // ═══ Stores ═══
 const game = useGameStore();
+
+// ═══ 内容注册表（D23 / D25①） ═══
+/**
+ * 🔴 本组件**不许**再出现任何指向 `data/` 的静态 import。
+ *
+ * 原来这里有两条硬耦合：`map-marker-presets.json` 的静态 ESM import（删文件直接 break
+ * build）与 `@engine/location-db` 的 `DEFAULT_LOCATIONS` 模块常量。两者都是世界内容，
+ * 现在统一从内容注册表（`content-store` 的六面之一）同步读——占位 JSON 或已装内容包供给。
+ *
+ * 注册表未加载时该面是 `undefined`：进面板前 `await ensureContentRegistryLoaded()`
+ * （幂等、永不抛），期间渲染加载态；仍然拿不到就是空数组，面板显示空态而不是崩。
+ */
+const contentReady = ref(false);
+
+/** 预设标记（注册表 markers 面；非数组 → 空） */
+const presetMarkers = computed<MapMarker[]>(() => {
+  void contentReady.value; // 注册表是模块级非响应式的，靠这个门重算
+  const raw = getContentRegistry().markers;
+  return Array.isArray(raw) ? (raw as MapMarker[]) : [];
+});
+
+/**
+ * 地点节点。
+ *
+ * 🔴 走 `getLocationNodes()` 而不是自己读注册表的 `locations` 面 —— 那是 location-db
+ * 声明的**唯一**入口（含逐项形状校验）。在这里另读一次，「装包后该看到新地图」
+ * 这件事就只在一半的地方成立。
+ */
+const locationNodes = computed<LocationNode[]>(() => {
+  void contentReady.value; // 注册表是模块级非响应式的，靠这个门重算
+  return getLocationNodes();
+});
+
+/** 地图图源（注册表 branding 面的 `mapSources`；公开仓默认空 → 空态） */
+const mapSources = computed(() => {
+  void contentReady.value;
+  return resolveMapSources(getContentRegistry().branding);
+});
 
 // ═══ 位置→标记模糊匹配 ═══
 /**
@@ -43,7 +81,7 @@ function matchLocationToMarker(location: string, markers: MapMarker[]): MapMarke
 
   // 尝试 location-db 解析 → 中文名
   const tryNames = [location];
-  const node = getLocationNode(DEFAULT_LOCATIONS, location);
+  const node = getLocationNode(locationNodes.value, location);
   if (node && node.name) {
     tryNames.push(node.name);
   }
@@ -124,7 +162,7 @@ const {
   loadSource,
   clientPointToNormalized,
   destroy,
-} = useMapViewer(containerRef);
+} = useMapViewer(containerRef, mapSources);
 
 const {
   markers,
@@ -153,7 +191,7 @@ const playerLocationId = computed(() => game.player?.location ?? null);
 const playerLocationNode = computed(() => {
   const locId = playerLocationId.value;
   if (!locId) return null;
-  return getLocationNode(DEFAULT_LOCATIONS, locId) ?? null;
+  return getLocationNode(locationNodes.value, locId) ?? null;
 });
 
 // ═══ 持久化 ═══
@@ -171,7 +209,7 @@ function schedulePersist() {
 watch(markers, () => schedulePersist(), { deep: true });
 
 // ═══ 地图源切换 ═══
-function switchSource(key: 'small' | 'large') {
+function switchSource(key: string) {
   loadSource(key);
   nextTick(() => {
     setTimeout(() => syncOverlays(), 500);
@@ -325,10 +363,13 @@ watch(markerAddMode, (v) => {
 
 // ═══ 生命周期 ═══
 onMounted(async () => {
-  // 预设标记：worldFlags 优先，否则用静态导入的原版标记
-  const raw: MapMarker[] = Array.isArray(presetMarkersJson)
-    ? presetMarkersJson
-    : ((presetMarkersJson as any).default ?? []);
+  // 🔴 加载门：注册表六面的首轮加载（幂等、永不抛）。没等它就读 markers/locations
+  //    会拿到 undefined，面板一进来就是空的——那不是「没有内容」，是「还没到」。
+  await ensureContentRegistryLoaded();
+  contentReady.value = true;
+
+  // 预设标记：存档里的 worldFlags 优先，否则用注册表供给的预设标记
+  const raw = presetMarkers.value;
   if (game.saveProfile) {
     const existing = getMapMarkers(game.saveProfile);
     setMarkers(existing.length > 0 ? existing : raw);
@@ -338,7 +379,8 @@ onMounted(async () => {
 
   await nextTick();
   createViewer();
-  loadSource('small');
+  // 首个可用图源；一个都没有时 loadSource 落 error 态并说明「需要内容包」
+  loadSource(mapSources.value[0]?.key ?? '');
 });
 
 onBeforeUnmount(() => {
@@ -357,10 +399,10 @@ onBeforeUnmount(() => {
         <span class="toolbar-badge">{{ markers.length }} 标记</span>
       </div>
       <div class="toolbar-actions">
-        <!-- 地图源切换 -->
-        <div class="source-group">
+        <!-- 地图源切换（图源由内容供给；一个都没有时整组不出现） -->
+        <div v-if="mapSources.length > 0" class="source-group">
           <button
-            v-for="src in MAP_SOURCES"
+            v-for="src in mapSources"
             :key="src.key"
             class="btn btn-sm"
             :class="{ 'btn-active': currentSourceKey === src.key }"
@@ -393,11 +435,17 @@ onBeforeUnmount(() => {
       <div class="map-stage">
         <!-- 状态提示 -->
         <div v-if="status === 'loading'" class="map-overlay">
-          <span>地图加载中…</span>
+          <span>{{ contentReady ? '地图加载中…' : '内容加载中…' }}</span>
         </div>
         <div v-else-if="status === 'error'" class="map-overlay map-overlay-error">
           <span>{{ errorMessage || '地图加载失败' }}</span>
-          <button class="btn btn-sm" @click="loadSource(currentSourceKey)">重试</button>
+          <button
+            v-if="mapSources.length > 0"
+            class="btn btn-sm"
+            @click="loadSource(currentSourceKey || mapSources[0].key)"
+          >
+            重试
+          </button>
         </div>
 
         <!-- 模式提示 -->

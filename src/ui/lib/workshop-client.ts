@@ -68,12 +68,67 @@ import { describePlatformFailure, describeRawBody } from './workshop-upstream-er
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 上游 worker 的 base URL。
+ * 工坊社区源的配置（D41）。
  *
- * 提成常量而非散在各处，是为了将来换后端（自建代理 / 镜像 / 本地 mock 服务）
- * 只改一行。**不带尾斜杠** —— 拼接一律 `${BASE}/api/...`。
+ * 🔴 **不再是硬编码常量**。此前这里钉着一个具体的 worker URL —— 开源引擎带着它，
+ * 等于给任意用户一个一键安装第三方二创内容的入口（授权协议 §2 明确排除的那一类），
+ * 而 `failure-text.ts` 那句「登录需要你已加入某某 Discord 服务器」在品牌中性化之后
+ * 会直接变成一句假话。两件事都由配置化解决：
+ *
+ * - **默认 unset**（`apiBase === ''`）→ 工坊页渲染「未配置社区源」空态，一个请求都不发。
+ * - 真实值由内容包的 `branding.workshopApiBase` / `branding.workshopLoginHint` 供给，
+ *   经 `branding-defaults.ts` 的 `applyBranding()` 推进来。
+ *
+ * 为什么是**推**而不是本模块自己去读注册表：本模块是纯网络层，import 注册表会把
+ * Pinia + Dexie 拖进它自己的测试树。推的方向反过来就没有这个代价。
+ *
+ * `apiBase` **不带尾斜杠** —— 拼接一律 `${base}/api/...`（setter 会替你剃掉）。
  */
-export const WORKSHOP_API_BASE = 'https://poemofdestinycreativeworkshop.1528779666.workers.dev';
+interface WorkshopConfig {
+  apiBase: string;
+  loginHint: string;
+}
+
+const workshopConfig: WorkshopConfig = { apiBase: '', loginHint: '' };
+
+/** 配置社区源（`branding-defaults.applyBranding` 唯一调用方；测试可直接调） */
+export function setWorkshopConfig(next: Partial<WorkshopConfig>): void {
+  if (next.apiBase !== undefined) {
+    workshopConfig.apiBase = next.apiBase.trim().replace(/\/+$/, '');
+  }
+  if (next.loginHint !== undefined) {
+    workshopConfig.loginHint = next.loginHint;
+  }
+}
+
+/** 当前社区源基址；**空串 = 未配置** */
+export function getWorkshopApiBase(): string {
+  return workshopConfig.apiBase;
+}
+
+/** 登录前提说明（D41）；空串 = 不追加前提句 */
+export function getWorkshopLoginHint(): string {
+  return workshopConfig.loginHint;
+}
+
+/** 工坊是否可用（UI 的空态闸：为 false 时不该走到任何一个网络入口） */
+export function isWorkshopConfigured(): boolean {
+  return workshopConfig.apiBase !== '';
+}
+
+/**
+ * 取基址，未配置就抛。
+ *
+ * 是**编程错误**的护栏而不是用户可见路径：UI 层在未配置时渲染空态、根本不给按钮，
+ * 所以这里抛出去只可能是有人新加了一条绕过空态的调用。抛在 URL 装配这一步，
+ * 比让请求带着 `undefined/api/...` 飞出去要好定位得多。
+ */
+function requireApiBase(): string {
+  if (workshopConfig.apiBase === '') {
+    throw new Error('创意工坊未配置社区源（branding.workshopApiBase 未设置）');
+  }
+  return workshopConfig.apiBase;
+}
 
 /** 项目详情 TTL —— 5 分钟（沿用上游卡内缓存量级，D17） */
 export const WORKSHOP_DETAIL_TTL_MS = 5 * 60 * 1000;
@@ -299,7 +354,7 @@ export type WorkshopLoginPoll =
   /**
    * 上游明确说失败了。`message` 多半是**服务器成员门槛**没过
    * （不在 `ALLOWED_GUILD_IDS` 内，§1.1）—— UI 要把它当人话展示并补一句
-   * 「需要先加入命定之诗 Discord 服务器」，而不是丢一个错误码（D25）。
+   * 配置里那句登录前提（`branding.workshopLoginHint`，D41），而不是丢一个错误码（D25）。
    */
   | { phase: 'failure'; message: string };
 
@@ -930,12 +985,12 @@ export function buildListUrl(query: WorkshopListQuery = {}): string {
   const search = (query.search ?? '').trim();
   if (search) params.set('search', search);
 
-  return `${WORKSHOP_API_BASE}/api/projects?${params.toString()}`;
+  return `${requireApiBase()}/api/projects?${params.toString()}`;
 }
 
 /** 拼详情 URL。id 一律 encode —— 上游 id 是 uuid，但别赌它永远是 */
 export function buildProjectUrl(projectId: string): string {
-  return `${WORKSHOP_API_BASE}/api/projects/${encodeURIComponent(projectId)}`;
+  return `${requireApiBase()}/api/projects/${encodeURIComponent(projectId)}`;
 }
 
 /**
@@ -947,16 +1002,16 @@ export function buildProjectUrl(projectId: string): string {
  */
 export function buildToggleUrl(projectId: string, kind: WorkshopToggleKind): string {
   const action = kind === 'like' ? 'like' : 'subscribe';
-  return `${WORKSHOP_API_BASE}/api/projects/${encodeURIComponent(projectId)}/${action}`;
+  return `${requireApiBase()}/api/projects/${encodeURIComponent(projectId)}/${action}`;
 }
 
 /** 登录三段式的前两段（§1.1）；第三段「回调」落在 worker 自己身上，与我们无关 */
 export function buildLoginUrl(): string {
-  return `${WORKSHOP_API_BASE}/api/auth/login`;
+  return `${requireApiBase()}/api/auth/login`;
 }
 
 export function buildLoginPollUrl(state: string): string {
-  return `${WORKSHOP_API_BASE}/api/auth/poll?key=${encodeURIComponent(state)}`;
+  return `${requireApiBase()}/api/auth/poll?key=${encodeURIComponent(state)}`;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1054,7 +1109,7 @@ export async function listProjects(
 export async function listMyProjects(
   opts: WorkshopAbortable = {},
 ): Promise<WorkshopResult<WorkshopListPage>> {
-  const url = `${WORKSHOP_API_BASE}/api/my/projects`;
+  const url = `${requireApiBase()}/api/my/projects`;
   const res = await fetchJson(url, { signal: opts.signal, withAuth: true });
   if (!res.ok) return res;
 
@@ -1353,7 +1408,7 @@ export async function createProject(
   draft: WorkshopProjectDraft,
   opts: WorkshopAbortable = {},
 ): Promise<WorkshopResult<WorkshopWriteAck>> {
-  const url = `${WORKSHOP_API_BASE}/api/projects`;
+  const url = `${requireApiBase()}/api/projects`;
   const name = draft.name.trim();
   if (!name) {
     return { ok: false, error: { kind: 'malformed', message: '项目名不能为空', url } };
@@ -1561,7 +1616,7 @@ function readStr(source: unknown, key: string): string {
 export async function listPendingProjects(
   opts: WorkshopAbortable = {},
 ): Promise<WorkshopResult<WorkshopListPage>> {
-  const url = `${WORKSHOP_API_BASE}/api/admin/pending?page=0&pageSize=50`;
+  const url = `${requireApiBase()}/api/admin/pending?page=0&pageSize=50`;
   const res = await fetchJson(url, { signal: opts.signal, withAuth: true });
   if (!res.ok) return res;
 
@@ -1606,7 +1661,7 @@ export async function reviewProject(
   opts: WorkshopAbortable = {},
 ): Promise<WorkshopResult<null>> {
   const id = (projectId ?? '').trim();
-  const url = `${WORKSHOP_API_BASE}/api/admin/review/${encodeURIComponent(id)}`;
+  const url = `${requireApiBase()}/api/admin/review/${encodeURIComponent(id)}`;
   if (!id) {
     return { ok: false, error: { kind: 'malformed', message: '缺少项目 id', url } };
   }
@@ -1623,7 +1678,7 @@ export async function reviewProject(
 export async function listAdmins(
   opts: WorkshopAbortable = {},
 ): Promise<WorkshopResult<WorkshopAdminUser[]>> {
-  const url = `${WORKSHOP_API_BASE}/api/admin/list`;
+  const url = `${requireApiBase()}/api/admin/list`;
   const res = await fetchJson(url, { signal: opts.signal, withAuth: true });
   if (!res.ok) return res;
 
@@ -1646,7 +1701,7 @@ export async function listAdmins(
 export async function listAdminLogs(
   opts: WorkshopAbortable = {},
 ): Promise<WorkshopResult<WorkshopAdminLog[]>> {
-  const url = `${WORKSHOP_API_BASE}/api/admin/logs`;
+  const url = `${requireApiBase()}/api/admin/logs`;
   const res = await fetchJson(url, { signal: opts.signal, withAuth: true });
   if (!res.ok) return res;
 
@@ -1674,7 +1729,7 @@ export async function setAdmin(
   isAdmin: boolean,
   opts: WorkshopAbortable = {},
 ): Promise<WorkshopResult<null>> {
-  const url = `${WORKSHOP_API_BASE}/api/admin/set-admin`;
+  const url = `${requireApiBase()}/api/admin/set-admin`;
   const id = (userId ?? '').trim();
   if (!id) {
     return { ok: false, error: { kind: 'malformed', message: '缺少用户 id', url } };

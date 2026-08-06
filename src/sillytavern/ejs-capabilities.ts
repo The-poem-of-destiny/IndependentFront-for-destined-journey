@@ -319,7 +319,7 @@ function buildWorld(input: EjsCapabilityInput): EjsWorld {
  * `progress` / `reward` / `priority`。早先这里读的是 `description` / `objectives` /
  * `rewards` —— 引擎里根本没有这三个字段，真实任务表投出来永远是 描述 '' / 目标 [] / 奖励 []。
  *
- * `objective` / `reward` 在引擎里是**单数串**，但契约（`public/poem-ejs.d.ts`）承诺数组，
+ * `objective` / `reward` 在引擎里是**单数串**，但契约（`public/engine-ejs.d.ts`）承诺数组，
  * 故在这里包一层（空串 → 空表，创作者的 `for` 循环天然跳过）。
  */
 function projectQuest(name: string, q: Quest): Record<string, any> {

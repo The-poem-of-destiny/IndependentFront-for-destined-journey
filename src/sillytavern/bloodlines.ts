@@ -1,163 +1,93 @@
 /**
- * 血脉系统 — 最小实现 (Phase 5)
+ * 血脉系统 — schema + 查询纯函数（Phase 5；内容-引擎分离 波 2 / D25②）
  *
  * 设计决策: 血脉主要是 AI 扮演层的内容（性格/行为/社会地位），
  * Code 层只存标识 + 基础属性修正。完整觉醒/继承/复合机制由 AI 叙事。
- * 种族列表对齐世界书条目 #906373 [种族概览]。
+ *
+ * 🔴 **本模块不再持有任何血脉数据**（D25②）。具体血脉集住在内容注册表的 `bloodlines`
+ * 面（占位来源 `/data/content/bloodlines.json`，装包后由 pack 的 `bloodlines` 分节替换）。
+ * 这里只留：形状（{@link BloodlineInfo} / {@link BloodlineSet}）、注册表读取缝、
+ * 三个查询/累加纯函数。
+ *
+ * 🔴 **注册表未就绪时确定性兜底为空集**——`getBloodline` 返回 `undefined`、
+ * `getBloodlineList` 返回 `[]`、`calcBloodlineModifiers` 返回 `{}`。不抛、不崩。
+ * 灌注时序由 content-store 的 ready promise + `ensureContentRegistryLoaded()` 保证
+ * （boot 链必经，见 `src/ui/stores/content-store.ts` 文件头 D16 时序契约）。
+ *
+ * 三个函数都收一个可选的 `set` 参数（默认 = 注册表当前值），与 `location-db.ts` 的
+ * `(nodes, …)` 参数式同一口径：调用方不必知道注册表，测试可直接喂 fixture。
  */
 
-// ========== 已知血脉列表 ==========
+import { getContentRegistry } from '../ui/stores/content-store';
 
-/** 静态血脉数据（用于角色创建的参考），对齐世界书种族体系 */
-export const KNOWN_BLOODLINES: Record<
-  string,
-  { name: string; description: string; statModifiers?: Partial<Record<string, number>> }
-> = {
-  // ===== 智人种 =====
-  human: {
-    name: '人类',
-    description: '适应力最强的短寿种族（60-70 岁），欲望驱动，分布最广',
-    statModifiers: {},
-  },
-  elf: {
-    name: '精灵',
-    description: '与翠梦乡之树共生的古老种族，天生感知本源之歌，元颂魔法',
-    statModifiers: { dex: 2, int: 1 },
-  },
-  dwarf: {
-    name: '矮人',
-    description: '山脉之子（~120cm, 300-350 岁），地下城邦，锻造与胡须文化',
-    statModifiers: { con: 2, str: 1 },
-  },
-  winged: {
-    name: '翼民',
-    description: '拥有 3-5m 功能性羽翼的神迹山脉种族，小头翼感知情绪与魔法，以诚实守诺为荣',
-    statModifiers: { dex: 2, spi: 1 },
-  },
-  merfolk: {
-    name: '人鱼',
-    description: '半人半鱼的海洋种族（150-300 岁），高魔法亲和，分浅海种与深海种',
-    statModifiers: { int: 2, spi: 1 },
-  },
-  halfling: {
-    name: '半身人',
-    description: '~110cm 的小型种族（55-65 岁），城镇中无处不在的工匠与商人',
-    statModifiers: { dex: 2, int: 1 },
-  },
+// ========== 形状 ==========
 
-  // ===== 亚人种 =====
-  beast: {
-    name: '兽族',
-    description: '耳型种/幻身种（半人马/人鱼），120 岁，部落社会结构',
-    statModifiers: { str: 1, dex: 2 },
-  },
-  centaur: {
-    name: '半人马',
-    description: '幻身种兽族，女性上身+马身，平原游牧生活',
-    statModifiers: { str: 2, dex: 1 },
-  },
-  vampire: {
-    name: '血族',
-    description: '13 氏族血脉的不死长生种，炼金术诅咒起源，血魔法与恩惠体系社会',
-    statModifiers: { dex: 2, con: -1, spi: 2 },
-  },
-  undead: {
-    name: '不死生物',
-    description: '负能量驱动的超越生死者：僵尸/骷髅/幽灵/巫妖，各具不同意识层级',
-    statModifiers: { con: -1, spi: 2 },
-  },
-  dragonkin_north: {
-    name: '北境龙裔',
-    description: '人形龙血传承者（1.8-2.2m），竖瞳，龙吼之力',
-    statModifiers: { str: 2, con: 2 },
-  },
+/**
+ * 一条血脉的内容形状（注册表 / pack `bloodlines` 分节的行）。
+ *
+ * 刻意**不 export**：对外的入口是 {@link BloodlineSet}，它已把这个形状带出去；
+ * 单独导出一个没人 import 的名字会进 knip 死代码账。
+ */
+interface BloodlineInfo {
+  name: string;
+  description: string;
+  statModifiers?: Partial<Record<string, number>>;
+}
 
-  // ===== 幻身种 =====
-  fairy_lightwing: {
-    name: '光翅妖精',
-    description: '~30cm 的纯粹自然精魂，蝉/蝶翼，迷恋歌声与故事',
-    statModifiers: { int: 2, spi: 2 },
-  },
-  slime: {
-    name: '不定形生物',
-    description: '源初魔力凝胶构成的最基础生物，分布极广，可拟态进化',
-    statModifiers: { con: 2 },
-  },
-  wish_spirit: {
-    name: '愿灵',
-    description: '集体意识/祈愿/记忆中诞生的精魂，存在强度取决于被记忆的程度',
-    statModifiers: { spi: 3 },
-  },
-  construct: {
-    name: '构装体',
-    description: '魔力驱动的非生命体：魔像/活化物体/自律机器，遵守创造者的指令',
-    statModifiers: { str: 2, con: 2 },
-  },
-  plant_creature: {
-    name: '植物生物',
-    description: '自然觉醒或德鲁伊唤醒的植物生命：树精/曼德拉草/真菌',
-    statModifiers: { con: 2, spi: 1 },
-  },
+/** 血脉集：id → 血脉信息（注册表 `bloodlines` 面的整体形状） */
+export type BloodlineSet = Record<string, BloodlineInfo>;
 
-  // ===== 异界种 =====
-  celestial: {
-    name: '天族',
-    description: '辉煌神国的天使——神圣秩序之力的具现',
-    statModifiers: { spi: 2, int: 1 },
-  },
-  demon: {
-    name: '魔族',
-    description: '魔界/九层地狱的深渊血脉，混沌之力流淌于身',
-    statModifiers: { str: 2, spi: 1 },
-  },
-  elemental: {
-    name: '元素生物',
-    description: '四元素位面的造物：火/水/风/土精魂，位面裂隙或高阶召唤而来',
-    statModifiers: { int: 2, spi: 1 },
-  },
+// ========== 注册表读取缝 ==========
 
-  // ===== 巨人种 =====
-  frost_giant: {
-    name: '霜巨人',
-    description: '20-40m 的极寒巨人，冰晶发，鲸/猛犸皮衣，诺斯加德冰原的原住民',
-    statModifiers: { str: 3, con: 3 },
-  },
-
-  // ===== 龙种 =====
-  true_dragon: {
-    name: '巨龙',
-    description: '四足双翼的元素吐息之主，千岁寿命，第 6 层级世界调节者',
-    statModifiers: { str: 3, con: 3, int: 2, spi: 2 },
-  },
-  ancient_dragon: {
-    name: '古龙',
-    description: '神造的世界调节者（第 6 层级），可化人形（龙姬/龙人），无固定肉身',
-    statModifiers: { str: 3, int: 3, spi: 3 },
-  },
-  drake: {
-    name: '亚龙',
-    description: '龙血稀释种：地龙/双足飞龙/多头蛇，中层级冒险者的对手',
-    statModifiers: { str: 2, con: 2 },
-  },
-};
+/**
+ * 取当前生效的血脉集（同步读注册表）。
+ *
+ * 注册表该面未就绪 / 形状不对 → 返回**空集**（确定性兜底，不抛）。
+ * 逐行做最小形状校验：`name` 与 `description` 必须是字符串，否则丢弃该行——
+ * 一行坏数据不该让整个血脉列表消失。
+ */
+export function getBloodlineSet(): BloodlineSet {
+  const raw: unknown = getContentRegistry().bloodlines;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: BloodlineSet = {};
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const row = value as Record<string, unknown>;
+    if (typeof row.name !== 'string' || typeof row.description !== 'string') continue;
+    const info: BloodlineInfo = { name: row.name, description: row.description };
+    const mods = row.statModifiers;
+    if (mods && typeof mods === 'object' && !Array.isArray(mods)) {
+      const parsed: Record<string, number> = {};
+      for (const [stat, val] of Object.entries(mods as Record<string, unknown>)) {
+        if (typeof val === 'number' && Number.isFinite(val)) parsed[stat] = val;
+      }
+      info.statModifiers = parsed;
+    }
+    out[id] = info;
+  }
+  return out;
+}
 
 // ========== 辅助函数 ==========
 
-/** 获取血脉信息 */
-export function getBloodline(id: string) {
-  return KNOWN_BLOODLINES[id];
+/** 获取血脉信息（未知 id / 注册表未就绪 → undefined） */
+export function getBloodline(id: string, set: BloodlineSet = getBloodlineSet()) {
+  return set[id];
 }
 
-/** 获取血脉列表（用于 UI） */
-export function getBloodlineList() {
-  return Object.entries(KNOWN_BLOODLINES).map(([id, info]) => ({ id, ...info }));
+/** 获取血脉列表（用于 UI；注册表未就绪 → 空数组） */
+export function getBloodlineList(set: BloodlineSet = getBloodlineSet()) {
+  return Object.entries(set).map(([id, info]) => ({ id, ...info }));
 }
 
-/** 计算血脉属性修正总和 */
-export function calcBloodlineModifiers(bloodlineIds: string[]): Partial<Record<string, number>> {
+/** 计算血脉属性修正总和（未知 id 静默忽略） */
+export function calcBloodlineModifiers(
+  bloodlineIds: string[],
+  set: BloodlineSet = getBloodlineSet(),
+): Partial<Record<string, number>> {
   const totals: Record<string, number> = {};
   for (const id of bloodlineIds) {
-    const bl = KNOWN_BLOODLINES[id];
+    const bl = set[id];
     if (bl?.statModifiers) {
       for (const [stat, val] of Object.entries(bl.statModifiers)) {
         totals[stat] = (totals[stat] ?? 0) + (val ?? 0);

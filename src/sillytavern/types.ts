@@ -1,5 +1,5 @@
 /**
- * SillyTavern Web / 命定之诗 Fated Poem — Core Types
+ * SillyTavern 兼容叙事引擎 — Core Types
  *
  * v4: 多 Agent 引擎架构 — 新增角色/记忆/剧情/存档/Agent 管线类型
  */

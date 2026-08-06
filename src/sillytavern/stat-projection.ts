@@ -185,7 +185,7 @@ export function buildStatData(input: StatProjectionInput): Record<string, any> {
   // 世界面：任一子项存在即建键（时间/回合/天气各自独立缺省）
   const world: Record<string, any> = {};
   if (input.gameTime) {
-    // 引擎既有规范串：复兴纪元0001年-05月-24日-周日-15:30
+    // 引擎既有规范串：<纪元名>0001年-05月-24日-周日-15:30（纪元名来自存档，引擎不产生）
     world['时间'] = formatGameTime(input.gameTime);
     world['时段'] = getTimeOfDay(input.gameTime);
   }

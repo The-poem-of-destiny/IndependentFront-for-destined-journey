@@ -19,11 +19,12 @@
  *    行为兜底不变（失败不阻塞启动）；现在失败进 `contentStatus='error'` 而不是静默。
  *
  * 3. **内容注册表**（D16）。六面（catalog/locations/bloodlines/namePools/markers/branding）
- *    的同步读取入口，约定 URL `/data/content/<name>.json`。本波（T2）先灌占位 = 现有
- *    代码常量（random-tables / bloodlines / DEFAULT_LOCATIONS 等）；波 2 逐面接管，
- *    pack 安装（T7）重灌。消费方（agent-tools 同步路径 / random-tables / bloodlines /
- *    $location）同步读它，所以注册表必须在任何 agent 执行前灌注完成——这条由
- *    `main.ts` 引入本模块时模块顶层同步触发 `seedPlaceholderRegistry()` 保证。
+ *    的同步读取入口，约定 URL `/data/content/<name>.json`（markers 例外，见
+ *    `CONTENT_REGISTRY_SOURCES`）。消费方（agent-tools 同步路径 / random-tables /
+ *    bloodlines / $location）**同步**读它，所以注册表必须在任何 agent 执行前灌注完成——
+ *    两段保证：模块顶层同步 `seedPlaceholderRegistry()`（保证非 null 骨架），
+ *    boot 链上 `loadProjectDefaults()` 里的 `ensureContentRegistryLoaded()`（灌真值，
+ *    波 2 逐面接管的落点；pack 安装（T7）重灌走 `setContentRegistry`）。
  *
  * 本波（T2）交付范围:
  * - 模块级 ready promise（带时序断言测试）
@@ -54,6 +55,11 @@ import {
   planPackInstall,
   hashWorldBook,
   setPackRulesProvider,
+  resolveSection,
+  // 🔴 别名导入：store 内部另有一个同名 action（`reportContentFetch`），
+  //    在 setup 作用域里会遮蔽这个模块级导入。模块级路径（注册表加载器）用别名，
+  //    读代码时一眼能分清「引擎注入缝」与「store action」。
+  reportContentFetch as reportEngineContentFetch,
 } from '@engine/content-source';
 import {
   planPackUninstall,
@@ -326,22 +332,188 @@ function createEmptyRegistry(): ContentRegistry {
 }
 
 /**
- * 用现有代码常量灌注占位注册表（D16 / §6）。
+ * 同步重置注册表为空骨架（D16 / §6）。
  *
- * 🔴 在**模块加载时同步跑**（见文件尾）。这保证 agent-tools 同步工具执行路径在任何
- * agent 真正跑起来之前，registry 已是非空占位常量。波 2 逐面接管时改成读占位
- * `/data/content/*.json`；本波先灌内存常量，零 I/O。
+ * 🔴 在**模块加载时同步跑**（见文件尾）。它是「模块加载后 `getContentRegistry()`
+ * 永远返回非 null 骨架」的那一环——agent-tools 同步工具执行路径在任何 agent 真正跑起来
+ * 之前读它，不能拿到 `undefined` 的对象。
  *
- * 注：本波刻意**不**在模块加载时 `import` random-tables / bloodlines / location-db
- * 的真实常量——那会把 334 KB 的 start-catalog-data 等内容编译进 bundle（§1.2 硬耦合 #2/#3）。
- * 占位值用 `undefined`，让「本波未灌」成为可观测的占位态；波 2 改为读 `/data/content/`。
- * 真正的内容灌注由 `setContentRegistry` 在 boot 显式调（T7 装包执行器或占位 fetch 完成后）。
+ * 🔴 这里**不**同步 `import` random-tables / bloodlines / location-db 的真实常量——
+ * 那会把 334 KB 的 start-catalog-data 等内容编译进 bundle（§1.2 硬耦合 #2/#3）。
+ * **异步占位加载见 `ensureContentRegistryLoaded()`**（六面各自 fetch
+ * `/data/content/<name>.json`）；pack 分节由装包执行器经 `setContentRegistry` 重灌。
  */
 export function seedPlaceholderRegistry(): void {
-  // 本波：占位注册表保持空骨架（各面 undefined）。
-  // 波 2 逐面接管时此处改为读占位 `/data/content/<name>.json` 并灌注。
-  // 现在先不灌——避免在 T2 阶段就把真实内容常量拉进 bundle（D24/D25 的活）。
   registry = createEmptyRegistry();
+}
+
+// ═══════════════════════════════════════════════════════════
+// 2b. 六面占位内容的异步加载（D16 / §5.1，波 2 七个抽取任务的共同落点）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 六面占位内容的来源 URL（与私有内容仓 `data/` 树同形——设计 §3.1）。
+ *
+ * 🔴 `markers` 不在 `content/` 下：地图标记预设今天就住在 `data/defaults/`
+ * （`map-marker-presets.json`，MapPanel 的既有文件），抽取时不搬家。
+ */
+export const CONTENT_REGISTRY_SOURCES: ReadonlyArray<{
+  readonly face: keyof ContentRegistry;
+  readonly url: string;
+}> = [
+  { face: 'catalog', url: '/data/content/catalog.json' },
+  { face: 'locations', url: '/data/content/locations.json' },
+  { face: 'bloodlines', url: '/data/content/bloodlines.json' },
+  { face: 'namePools', url: '/data/content/name-pools.json' },
+  { face: 'branding', url: '/data/content/branding.json' },
+  { face: 'markers', url: '/data/defaults/map-marker-presets.json' },
+];
+
+/** 首轮占位加载的 memo（幂等闸；`ensureContentRegistryLoaded` 的全部状态） */
+let registryLoadPromise: Promise<void> | null = null;
+
+/** 一面 fetch 的结果：`ok=false` 时调用方保留该面**原值**（不覆写成 undefined） */
+interface RegistryFaceFetch {
+  ok: boolean;
+  value?: unknown;
+}
+
+/**
+ * 取一面占位内容。**永不抛**：404 / 网络错 / JSON 解析错都记 `ok:false` 并上报。
+ *
+ * 上报走引擎注入缝（`content-source.reportContentFetch`），caller 标识
+ * `content-registry:<face>` —— 模块级路径拿不到 store 实例，注入缝内部自己找 Pinia，
+ * 找不到就静默 no-op（§5.5 兜底语义）。
+ */
+async function fetchRegistryFace(
+  face: keyof ContentRegistry,
+  url: string,
+): Promise<RegistryFaceFetch> {
+  const source = `content-registry:${face}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      reportEngineContentFetch({
+        source,
+        status: res.status,
+        ok: false,
+        error: `HTTP ${res.status}`,
+      });
+      return { ok: false };
+    }
+    // 🔴 解析失败与 404 同档：JSON 坏了 = 这一面没有内容，不是「有个坏值」。
+    const value: unknown = await res.json();
+    reportEngineContentFetch({ source, status: res.status, ok: true });
+    return { ok: true, value };
+  } catch (err) {
+    reportEngineContentFetch({
+      source,
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { ok: false };
+  }
+}
+
+/**
+ * 已装 pack 各面的取值（D20 三态的 pack 半边）。
+ *
+ * 取法与装包执行器一致：`catalog` / `namePools` 取 `.data` 子字段，
+ * `locations` / `mapMarkers` / `branding` / `bloodlines` 是整节。
+ * 键**只在该面有值时才出现**——于是下游一律 `resolveSection(packFace, placeholder)`，
+ * 不必在两处各写一遍三元。
+ *
+ * 📌 边界：pack 声明了分节但其 `data` 为 `undefined`（类型上不允许，只可能是构建器 bug）
+ * 时，该面回落占位而非被抹成 undefined —— 「装了个空壳把内容清掉」不是任何人想要的。
+ */
+function packRegistryFaces(
+  pack: ContentPack | undefined,
+): Partial<Record<keyof ContentRegistry, unknown>> {
+  if (!pack) return {};
+  const out: Partial<Record<keyof ContentRegistry, unknown>> = {};
+  if (pack.catalog?.data !== undefined) out.catalog = pack.catalog.data;
+  if (pack.locations !== undefined) out.locations = pack.locations;
+  if (pack.bloodlines !== undefined) out.bloodlines = pack.bloodlines;
+  if (pack.namePools?.data !== undefined) out.namePools = pack.namePools.data;
+  if (pack.mapMarkers !== undefined) out.markers = pack.mapMarkers;
+  if (pack.branding !== undefined) out.branding = pack.branding;
+  return out;
+}
+
+/**
+ * 若 Pinia 已挂载，先把已装 pack 从 Dexie 载进模块缓存（幂等）。
+ *
+ * 🔴 为什么在这里：注册表的 pack 优先级（D20）读的是模块级 `activePackRecord`。
+ * boot 链上 `loadProjectDefaults()` 已先 `hydratePackState()`，但 UI 页面（捏人页/地图页
+ * 的加载门）可能**直接** await 本加载器——那时若没 hydrate 过，pack 会被占位盖掉。
+ * 无 Pinia（模块级早期调用 / 单测）时静默跳过：那种环境下也没有 Dexie 可读。
+ */
+async function hydratePackStateIfPossible(): Promise<void> {
+  try {
+    const pinia = getActivePinia?.();
+    if (!pinia) return;
+    await useContentStore().hydratePackState();
+  } catch {
+    /* hydrate 失败 → 按未装 pack 处理（与 hydratePackState 自身兜底同口径） */
+  }
+}
+
+/** 首轮加载的实现体。**永不抛**（外层 memo 拿到的 promise 一定 resolve）。 */
+async function loadContentRegistryOnce(): Promise<void> {
+  try {
+    await hydratePackStateIfPossible();
+    const results = await Promise.all(
+      CONTENT_REGISTRY_SOURCES.map((s) => fetchRegistryFace(s.face, s.url)),
+    );
+    // 🔴 pack 在 fetch 落地**之后**读：装包与首轮加载交错时，pack 必须仍然赢
+    //    （规则 2 / D20 三态）。
+    const packFaces = packRegistryFaces(getActivePackPayload());
+    const current = getContentRegistry();
+    const next: ContentRegistry = { ...current };
+    for (let i = 0; i < CONTENT_REGISTRY_SOURCES.length; i++) {
+      const face = CONTENT_REGISTRY_SOURCES[i].face;
+      // 失败面保持原值（通常是 undefined 的占位骨架；已装 pack 时是 pack 值）
+      const placeholder = results[i].ok ? results[i].value : current[face];
+      next[face] = resolveSection(packFaces[face], placeholder);
+    }
+    // 整份替换（不深合并）——与 setContentRegistry 的既有纪律一致
+    setContentRegistry(next);
+  } catch {
+    /* 注册表加载永不阻塞启动：失败面已各自上报，这里只兜最外层意外 */
+  }
+}
+
+/**
+ * 确保注册表六面已完成首轮占位加载（D16）。
+ *
+ * - **幂等**：memoize 同一个 promise，六面只 fetch 一轮；重复 await 零 I/O。
+ * - **永不抛、永不阻塞启动**：逐面独立，一面失败不影响其余五面；失败面保持原值。
+ * - **pack 优先**（D20 三态）：已装 pack 提供的分节赢过占位 fetch 结果。
+ *
+ * 两个调用位置：boot 链（`loadProjectDefaults()` 内部，见那里的注释）与需要「加载门」
+ * 的 UI 页面（捏人页 / 地图页可直接 `await` 它）。
+ */
+export function ensureContentRegistryLoaded(): Promise<void> {
+  if (!registryLoadPromise) {
+    registryLoadPromise = loadContentRegistryOnce();
+  }
+  return registryLoadPromise;
+}
+
+/** 清掉 memo，让下次 `ensureContentRegistryLoaded()` 重新 fetch（测试隔离用；生产只有卸载路径调） */
+export function resetContentRegistryLoadedForTests(): void {
+  registryLoadPromise = null;
+}
+
+/**
+ * 卸载 pack 后重新拉一轮占位内容（§5.2 卸载流的注册表重灌）。
+ *
+ * 🔴 光调 `seedPlaceholderRegistry()` 只把注册表清成空骨架——那会让卸载后的捏人页/地图页
+ * 拿到六个 `undefined`。这里重置 memo 再跑一轮，把占位 JSON 灌回去。
+ */
+async function reloadContentRegistryPlaceholders(): Promise<void> {
+  resetContentRegistryLoadedForTests();
+  await ensureContentRegistryLoaded();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -441,6 +613,26 @@ export const useContentStore = defineStore('content', () => {
     await contentReadyPromise;
     // 先确保已装 pack 从 Dexie 载入模块缓存（boot 时序；idempotent）
     await hydratePackState();
+    const defaults = await resolveProjectDefaults();
+    // 🔴 六面注册表接进 boot 链（D16 时序契约）：本函数是三处装载面的收口入口，
+    //    boot 必经，所以注册表的首轮占位加载挂在这里（幂等，只跑一轮）。
+    //    **放在默认层解析之后**且**不影响返回值**——它永不抛，失败只进 contentStatus。
+    //    UI 页面（捏人页/地图页的加载门）可以单独 `await ensureContentRegistryLoaded()`。
+    //
+    // 🔴 先记下「默认层这一趟失败了吗」：reportContentFetch 的既有语义是**后一次成功清 error**
+    //    （见上面那个函数），于是六面占位加载成功会把 agent-config 的失败悄悄擦掉——
+    //    本函数「失败 → contentStatus=error」的既有行为不许因为多挂了一条加载链而变。
+    const defaultsError = contentStatus.value === 'error' ? lastFetchError.value : null;
+    await ensureContentRegistryLoaded();
+    if (defaultsError !== null && contentStatus.value === 'placeholder') {
+      contentStatus.value = 'error';
+      lastFetchError.value = defaultsError;
+    }
+    return defaults;
+  }
+
+  /** 默认层解析（pack agentDefaults > 占位 fetch > 空骨架）。loadProjectDefaults 的原体。 */
+  async function resolveProjectDefaults(): Promise<unknown> {
     // 🔴 D44 / §5.4：pack 已装 → 默认层 = pack agentDefaults > 占位 fetch。
     const pack = getActivePackPayload();
     if (pack?.agentDefaults?.agents) {
@@ -655,16 +847,18 @@ export const useContentStore = defineStore('content', () => {
     //    （D44）。同步注册表在装包成功后由 setActivePackRecord 重灌（六面交给后续波次
     //    逐面接管，本波至少把各面标记成 pack payload 的 resolveSection）。
 
-    // 注册表重灌：六面 = pack payload > 占位 undefined（本波 phases 未逐面接管，先透传）。
-    // 🔴 这里只做「pack 各面存在则灌入」的基础灌注；真实形状由波 2（D24/D25）收窄。
+    // 注册表重灌：六面 = pack payload > 当前值（占位 fetch 的结果，或未加载时的 undefined）。
+    // 🔴 pack 取值与 `packRegistryFaces` 同一处定义（catalog/namePools 取 .data，其余整节），
+    //    三态判定统一走 `resolveSection` —— 装包路径与占位加载路径不许各写一套。
     const reg = getContentRegistry();
+    const packFaces = packRegistryFaces(pack);
     setContentRegistry({
-      catalog: pack.catalog !== undefined ? pack.catalog.data : reg.catalog,
-      locations: pack.locations !== undefined ? pack.locations : reg.locations,
-      bloodlines: pack.bloodlines !== undefined ? pack.bloodlines : reg.bloodlines,
-      namePools: pack.namePools !== undefined ? pack.namePools.data : reg.namePools,
-      markers: pack.mapMarkers !== undefined ? pack.mapMarkers : reg.markers,
-      branding: pack.branding !== undefined ? pack.branding : reg.branding,
+      catalog: resolveSection(packFaces.catalog, reg.catalog),
+      locations: resolveSection(packFaces.locations, reg.locations),
+      bloodlines: resolveSection(packFaces.bloodlines, reg.bloodlines),
+      namePools: resolveSection(packFaces.namePools, reg.namePools),
+      markers: resolveSection(packFaces.markers, reg.markers),
+      branding: resolveSection(packFaces.branding, reg.branding),
     });
 
     // e. 存档 uid 迁移（D43）：rewrite 应用 + needsSelectionPartitions 标记
@@ -1035,7 +1229,7 @@ export const useContentStore = defineStore('content', () => {
         await switchActivePresetToPlaceholder(placeholderStoryId, packPresetIds);
 
         // agents/beautifier/catalog/sync registry：provider-owned，删 pack 行即回落
-        // 注册表灌回占位（各面 undefined → 波 2 接管）
+        // 注册表先清成空骨架（pack 各面立刻失效），占位 JSON 在下面 pack 缓存清掉之后重拉
         seedPlaceholderRegistry();
 
         // contentPacks.delete（**最后**）
@@ -1045,6 +1239,12 @@ export const useContentStore = defineStore('content', () => {
         setActivePackRecord(null);
         activePackId.value = null;
         activePackVersion.value = null;
+
+        // 🔴 pack 缓存清掉**之后**再重拉占位六面（否则 pack 优先级会把刚卸的包灌回来）；
+        //    又必须在下面那句 `contentStatus = 'placeholder'` **之前** —— 卸载的终态是确定的
+        //    （包没了 = 占位态），不该被这一轮占位 fetch 的成败改写。失败仍进 fetchReports。
+        await reloadContentRegistryPlaceholders();
+
         contentStatus.value = 'placeholder';
 
         return {

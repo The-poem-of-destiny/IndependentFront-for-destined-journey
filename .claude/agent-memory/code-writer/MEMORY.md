@@ -22,4 +22,7 @@
 - [M4 第二部分已落地](combat-v3-m4-part2-harness-wiring.md) — 窗口接线层(反射/PreventDeath排原子提交)+replayCombat升级真内核harness；4 缺口(互反熔断/forceTerminal/召唤/freezeSlot触发源)已全闭合，5245 tests 全绿
 - [story 提示词在预设里不在 systemPrompt](story-prompt-lives-in-preset.md) — agents.story.systemPrompt 是死字段（预设短路），写进去还会顶掉无预设兜底；启用位看条目 enabled 不是 prompt_order
 - [M5-PR2 v2 运行时已退役](combat-v3-m5-pr2-v2-retired.md) — 真正退役 v2 战斗：删 6 文件+测试、类型迁 combat-v2-types.ts、v2 分支优雅提示；tools 5245→5101 全绿；agent-config 在 data/defaults 非 src/sillytavern
+- [setvar 的值不能含 }](preset-setvar-value-no-braces.md) — 预设里 `{{setvar::x::值}}` 值嵌 `{{user}}` 会被腰斩且静默；官方创作指南给的正是这个坏例子
 - [清 body 会炸掉遗留 wrapper](vtu-body-clear-kills-stale-wrappers.md) — 没开 enableAutoUnmount 的组件测试里别写 document.body.innerHTML=''；测试全绿但结尾多出 Unhandled Rejection，且指错用例名
+- [内容注册表不是响应式的](content-registry-not-reactive.md) — computed 里直接读 getContentRegistry() 会永久缓存空目录；必须落 ref + 四态加载门，测试先 setContentRegistry 再建 store
+- [vite define 两个静默陷阱](vite-define-two-traps.md) — vitest 不共用 vite.config.ts；define 只替换裸标识符，成员访问读不到注入值

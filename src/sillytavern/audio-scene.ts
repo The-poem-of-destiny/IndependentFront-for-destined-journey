@@ -23,7 +23,7 @@
 
 import { normalizeAudioName } from './audio-names';
 import { groupTrackTags, tagValuesFor, type AudioTagType, type GroupedTags } from './audio-tags';
-import { DEFAULT_LOCATIONS } from './location-db';
+import { getLocationNodes } from './location-db';
 import type { AudioTrack, AudioTrackKind, LocationNode } from './types';
 
 // ═══════════════════════════════════════════════════════════
@@ -148,7 +148,9 @@ export function splitLocationPath(location: string): string[] {
  */
 export function buildLocationChain(
   location: string,
-  nodes: readonly LocationNode[] = DEFAULT_LOCATIONS,
+  // 🔴 默认参每次调用**现读注册表**（D25①）：写成模块级常量就等于把地点数据在
+  //    首次 import 时冻起来，装包/卸载后的选曲还会沿着旧地图回退。
+  nodes: readonly LocationNode[] = getLocationNodes(),
 ): SceneChainLink[] {
   const links: SceneChainLink[] = [];
   const seen = new Set<string>();
@@ -340,7 +342,7 @@ export function resolveSceneByTags(
   } = {},
 ): SceneTagResult | null {
   const kind: AudioTrackKind = query.kind ?? 'music';
-  const nodes = opts.nodes ?? DEFAULT_LOCATIONS;
+  const nodes = opts.nodes ?? getLocationNodes();
   const w = { ...SCENE_TAG_WEIGHTS, ...opts.weights };
 
   const chain = query.location ? buildLocationChain(query.location, nodes) : [];

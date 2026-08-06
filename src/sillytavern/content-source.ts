@@ -321,15 +321,15 @@ export function validatePackOrThrow(pack: unknown): PackValidationNote[] {
 }
 
 /**
- * `__ENGINE_VERSION__` 版本门（D40）。
+ * `__ENGINE_VERSION__` 版本门（D40）。**T13 起已通电**。
  *
- * 🔴 **本波先接受缺省=跳过**: `__ENGINE_VERSION__` 的 vite define 注入是 D26 的活，
- * 落在 T13。当前 `typeof __ENGINE_VERSION__ === 'undefined'` 时（裸 tsc / vitest node
- * 环境都成立），本函数返回 `'skipped'`，不阻止安装。
+ * `__ENGINE_VERSION__` 由 `vite.config.ts` 与 `vitest.config.ts` 的 `define` 注入
+ * （值 = `package.json` 的 `version`），所以生产构建与测试里它都有值，`'too-new'`
+ * 是真的会拒绝安装的。
  *
- * TODO(T13): D26 落地 `vite.config.ts` 的 `define: { __ENGINE_VERSION__: JSON.stringify(pkg.version) }`
- * 后，删掉 `typeof` 缺省分支，让 `'skipped'` 不可达；并补「过新包被拒绝」的测试
- * （minEngineVersion > __ENGINE_VERSION__ 时 result === 'too-new'）。
+ * 🔴 `'skipped'` **仍然保留且仍然可达**：裸 `tsc`、`node dist/`、或任何不经打包器的
+ * 宿主里它都不存在。那种环境下「因为读不到自己的版本号所以拒绝一切声明了版本要求的包」
+ * 是最糟的一种保守——引擎自己没能力回答这个问题，不该由用户来承担答案。
  *
  * semver 比对用朴素的三段数值比较（pack 的 minEngineVersion 约定为 `MAJOR.MINOR.PATCH`）；
  * 解析失败 → 视为「pack 声明了无法解析的版本要求」，记 `'too-new'`（保守拒绝）。
@@ -341,8 +341,7 @@ export function checkEngineVersion(packMin: string | undefined): EngineVersionGa
   if (packMin === undefined) {
     return { packMin: undefined, engineVersion: readEngineVersion(), result: 'ok' };
   }
-  // 🔴 T13 之前 __ENGINE_VERSION__ 未注入 → 跳过版本门
-  // （裸 tsc 与 vitest node 环境下此分支恒成立）
+  // 读不到自己的版本号（未经打包的宿主）→ 跳过版本门，不阻止安装
   const engineVersion = readEngineVersion();
   if (engineVersion === undefined) {
     return { packMin, engineVersion: undefined, result: 'skipped' };
@@ -354,16 +353,21 @@ export function checkEngineVersion(packMin: string | undefined): EngineVersionGa
 }
 
 /**
- * 读 `__ENGINE_VERSION__` 注入值；未注入返回 undefined。
+ * 读 `__ENGINE_VERSION__`；读不到返回 undefined。
  *
- * 独立成函数是为了 vitest 能在不污染全局的情况下跑：测试直接调 `checkEngineVersion`
- * 传字符串参数即可，不依赖 define 注入。
+ * 🔴 **必须读裸标识符**。`define` 是编译期的**标识符**文本替换：写成
+ * `(globalThis as {…}).__ENGINE_VERSION__` 这种成员访问，esbuild 一个字都不会动，
+ * 于是注入了也永远读到 `undefined` —— 版本门看着接好了，实际恒 `'skipped'`，
+ * 而且没有任何东西会报错。T13 通电前这里就是那个写法。
+ *
+ * `globalThis` 那一支保留为**覆写**通道：测试要模拟「引擎版本是 0.9.0」时改它，
+ * 不必去重新编译一个 define。覆写优先，两者都没有才是 undefined。
  */
 function readEngineVersion(): string | undefined {
-  // 引擎版本经 vite define 注入；裸 tsc / vitest node 环境下未定义。
   const scope = globalThis as { __ENGINE_VERSION__?: unknown };
-  const v = scope.__ENGINE_VERSION__;
-  return typeof v === 'string' ? v : undefined;
+  const override = scope.__ENGINE_VERSION__;
+  if (typeof override === 'string') return override;
+  return typeof __ENGINE_VERSION__ === 'string' ? __ENGINE_VERSION__ : undefined;
 }
 
 /**

@@ -37,6 +37,7 @@ import WorkshopAdminModal from './WorkshopAdminModal.vue';
 import WorkshopDetailModal from './WorkshopDetailModal.vue';
 import WorkshopInstalledList from './WorkshopInstalledList.vue';
 import WorkshopConflictModal from './WorkshopConflictModal.vue';
+import { isWorkshopConfigured } from '../../lib/workshop-client';
 import { describeFailure, describeLoginFailure } from './failure-text';
 import {
   DISCORD_FALLBACK_AVATAR,
@@ -49,7 +50,26 @@ const ui = useUIStore();
 const workshop = useWorkshopStore();
 const social = useWorkshopSocialStore();
 
+/**
+ * 社区源是否已配置（D41）。
+ *
+ * 未配置时本页收成**空态**：登录 / 投稿 / 审核 / 浏览四个入口全不渲染，一个请求都不发。
+ * 已安装列表仍照常渲染 —— 用户之前装过的项目还得能看、能停用、能卸载；
+ * 把整页换成一句「未配置」会把那些内容变成不可管理的黑箱。
+ *
+ * 🔴 `ref` 而不是 `computed`：配置源是模块级变量（不是 reactive），依赖收集拿不到它。
+ * 本页的 `v-if` 只在挂载时决定一次，够用 —— 配置只在装/卸内容包时变，那两条路径
+ * 都会离开本页。
+ */
+const workshopConfigured = ref(isWorkshopConfigured());
+
 onMounted(() => {
+  workshopConfigured.value = isWorkshopConfigured();
+  if (!workshopConfigured.value) {
+    // 未配置社区源 → 只水合本地已装列表，社交侧一个字节都不碰
+    void workshop.init();
+    return;
+  }
   // 幂等：init 内部共用同一个 Promise，App.vue 已经踢过的 store 在这里空转
   void workshop.init();
   // 同样幂等。做两件事：给 client 注册 token provider、从 localStorage 恢复登录态
@@ -374,7 +394,17 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
     </header>
 
     <main class="wk-main">
-      <p class="wk-intro">
+      <!--
+        ═══ 未配置社区源（D41） ═══
+        公开引擎默认不带社区源地址。这里是**空态**不是错误：没配置不是坏了，
+        只是这个引擎实例还没有被指向任何一个社区。下方已装列表照常渲染。
+      -->
+      <p v-if="!workshopConfigured" class="wk-unconfigured">
+        当前没有配置社区源，无法浏览或安装工坊项目。<br />
+        社区源地址随内容包提供 —— 导入内容包后这一页会自动接上。
+      </p>
+
+      <p v-else class="wk-intro">
         创意工坊的项目由社区投稿，未经本引擎审核。装上之后，它的世界书条目会进入
         <strong>创意工坊</strong> 分区（与内置内容彼此隔离），正则会进入「输出美化」规则库。
         装了还不等于生效 —— 还要在存档里勾选启用。
@@ -385,7 +415,7 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
         左：身份（登录 / 头像 + 登出）。右：动作，「浏览工坊」作为主动作排在最后
         （视线终点，也是最常按的那个）。
       -->
-      <section class="wk-actionbar">
+      <section v-if="workshopConfigured" class="wk-actionbar">
         <div class="wk-actionbar-identity">
           <!-- ═══ 登录位（P3c） ═══ -->
           <div v-if="social.isLoggedIn" class="wk-account">
@@ -615,6 +645,18 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
   line-height: 1.7;
   color: var(--theme-text-muted);
   border-bottom: 1px solid var(--theme-card-border);
+}
+
+/* ── 未配置社区源的空态（D41 / design.md §5.2） ── */
+.wk-unconfigured {
+  margin: 0;
+  padding: var(--theme-spacing-lg) var(--theme-spacing-md);
+  font-size: 0.8125rem;
+  line-height: 1.8;
+  text-align: center;
+  color: var(--theme-text-muted);
+  border: 1px dashed var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
 }
 
 .wk-section {

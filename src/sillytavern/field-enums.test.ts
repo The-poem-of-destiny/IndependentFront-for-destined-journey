@@ -15,6 +15,16 @@ import {
   normalizeStatusCategory,
 } from './field-enums';
 
+/**
+ * 盘上的捏人目录（D24：内容已抽出 TS，住在 `data/content/catalog.json`）。
+ * 供下方 Q-11 品质编码防分叉闸门扫描 —— 换了内容包也照样扫得到。
+ */
+const RAW_CATALOG = import.meta.glob('../../data/content/catalog.json', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
 describe('枚举常量', () => {
   it('slot 枚举为规范定义的 8 个中文槽位', () => {
     expect(EQUIP_SLOTS).toEqual(['武器', '副手', '头部', '身体', '手部', '脚部', '腰带', '饰品']);
@@ -163,15 +173,21 @@ describe('原型键安全（M2 硬前置: AI 提名值可能是任意字符串�
 // ═══════════════════════════════════════════════════════════
 
 describe('品质编码只有一套 —— 防再次分叉的闸门', () => {
-  it('start-catalog 池里出现过的每一个 rarity 码，normalizeRarity 都必须认得', async () => {
-    // 目录是 CDN 生成的（start-catalog-data.ts），下次重生成可能带进新编码。
-    // 这条测试直接扫真实数据，而不是手抄一份码表 —— 手抄的那份就是第二真源。
-    const { DEFAULT_EQUIPMENT_POOL, DEFAULT_ITEM_POOL, DEFAULT_SKILL_POOL } =
-      await import('./start-catalog-data');
+  it('捏人目录池里出现过的每一个 rarity 码，normalizeRarity 都必须认得', async () => {
+    // 目录内容已抽成 `data/content/catalog.json`（D24），不再是编译进 bundle 的 TS 常量。
+    // 这条测试直接扫**盘上那份目录**，而不是手抄一份码表 —— 手抄的那份就是第二真源。
+    // 换了内容包（或占位目录被替换）也照样扫得到，这正是这道闸门要防的分叉。
+    // 🔴 用 Vite 的 `import.meta.glob(..., { query: '?raw' })` 取盘上文件，**不用 node 的 fs/path**
+    //    —— 仓库没装 `@types/node`，`src/**` 下 `import 'node:fs'` 会让裸 tsc 报 TS2307
+    //    （口径同 `ejs-scrambled-corpus.test.ts`）。
+    const { parseCatalogData } = await import('./start-catalog-mechanics');
+    const catalog = parseCatalogData(JSON.parse(Object.values(RAW_CATALOG)[0]));
     const codes = new Set<string>();
-    for (const row of [...DEFAULT_EQUIPMENT_POOL, ...DEFAULT_ITEM_POOL, ...DEFAULT_SKILL_POOL]) {
+    for (const row of [...catalog.equipmentPool, ...catalog.itemPool, ...catalog.skillPool]) {
       if (row.rarity) codes.add(row.rarity);
     }
+    // 🔴 空转闸：目录一旦被抽空 / 解析失败，`codes` 会是空集，下面的 for 循环
+    //    一条都不跑 —— 这条测试就会在什么都没验的情况下常绿。
     expect(codes.size).toBeGreaterThan(0);
     for (const code of codes) {
       expect(normalizeRarity(code), `未知 rarity 码: ${code}`).toBeDefined();

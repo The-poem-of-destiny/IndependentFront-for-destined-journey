@@ -663,7 +663,7 @@ function buildSandboxArgs(ctx: EjsEvalContext, sourceKey: string): any[] {
   return [
     // 🔴 **每条目一份深拷贝**：`stats` 是 pass 级共享对象，直传引用时条目 A 的
     //    `stats.主角.背包.push(...)` 会被同 pass 的条目 B 看见 —— 既背离
-    //    `poem-ejs.d.ts` 的「拿到的是一份拷贝」承诺，也与 QuickJS 后端（每条目 JSON 编组）分叉。
+    //    `engine-ejs.d.ts` 的「拿到的是一份拷贝」承诺，也与 QuickJS 后端（每条目 JSON 编组）分叉。
     //    stats 是小投影，克隆成本可忽略；口径与 `mergeVarsWithClonedStats` 一致。
     deepClone(ctx.stats ?? {}),
     ctx.vars,

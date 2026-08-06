@@ -7,7 +7,8 @@
  * 3. resolveSceneByTags 的多维度累计打分、深度衰减、跨维度权衡、稳定性
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { getContentRegistry, setContentRegistry } from '@ui/stores/content-store';
 import {
   nameSimilarity,
   splitLocationPath,
@@ -458,10 +459,41 @@ describe('resolveSceneByTags · 边界', () => {
     expect(resolveSceneByTags(LIB, { location: '' }, { nodes: NODES })).toBeNull();
   });
 
-  it('默认使用真实 location-db（不传 nodes 也能沿帝国城市回退）', () => {
-    const r = resolveSceneByTags(LIB, { location: '金谷城' });
-    expect(r?.resolvedLocation).toBe('奥古斯提姆帝国');
-    expect(r?.fallbackDepth).toBe(1);
+  // 🔴 不传 nodes 时的默认来源已从「烤死在引擎里的 location-db 常量」改成**内容注册表**
+  //    （D25①）。所以这里断言的是「有没有现读注册表」，不是任何一份具体地图的内容——
+  //    后者装个内容包就换了，而换掉不该让引擎测试变红。
+  describe('不传 nodes 时的默认地点来源 = 内容注册表', () => {
+    let saved: unknown;
+
+    beforeEach(() => {
+      saved = getContentRegistry().locations;
+    });
+
+    afterEach(() => {
+      setContentRegistry({ ...getContentRegistry(), locations: saved });
+    });
+
+    it('注册表已灌注 → 与显式传 nodes 同结果（装包即时生效，不缓存）', () => {
+      setContentRegistry({ ...getContentRegistry(), locations: NODES });
+      const r = resolveSceneByTags(LIB, { location: '铁炉堡的锻炉区' });
+      expect(r?.resolvedLocation).toBe('奥古斯提姆帝国');
+      expect(r?.fallbackDepth).toBe(1);
+      expect(buildLocationChain('铁炉堡')).toEqual([
+        { name: '铁炉堡', depth: 0 },
+        { name: '奥古斯提姆帝国', depth: 1 },
+        { name: '阿斯塔利亚大陆', depth: 2 },
+      ]);
+    });
+
+    it('🔴 注册表未就绪 → 只剩路径段，照常选曲、不崩', () => {
+      setContentRegistry({ ...getContentRegistry(), locations: undefined });
+      // 路径里写明了层级，所以没有地图也仍然分得出深度
+      const r = resolveSceneByTags(LIB, { location: '奥古斯提姆帝国-锻炉区' });
+      expect(r?.resolvedLocation).toBe('奥古斯提姆帝国');
+      expect(r?.fallbackDepth).toBe(1);
+      // 单段输入没有地图可补，就只有自己一环（不抛）
+      expect(buildLocationChain('铁炉堡')).toEqual([{ name: '铁炉堡', depth: 0 }]);
+    });
   });
 });
 

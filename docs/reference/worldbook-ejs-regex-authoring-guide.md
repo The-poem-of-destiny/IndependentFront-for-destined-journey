@@ -8,7 +8,7 @@
 
 配套资料：
 
-- [`poem-ejs.d.ts`](../../public/poem-ejs.d.ts)：EJS API 的 TypeScript 声明，可复制到创作项目中获得补全。
+- [`engine-ejs.d.ts`](../../public/engine-ejs.d.ts)：EJS API 的 TypeScript 声明，可复制到创作项目中获得补全。
 - [EJS 能力面设计](../planning/2026-08-01-ejs-capability-surface-design.md)：设计与实施记录；用于理解决策背景，不覆盖本文的创作者契约。
 - [工坊正则兼容性语料审查](../reviews/2026-08-02-workshop-regex-compatibility.md)：公共工坊语料、兼容率与安全边界证据。
 - [内容二创与素材使用授权协议](../《命定之诗》内容二创与素材使用授权协议.md)：发布世界观与叙事内容前必须遵守。
@@ -25,7 +25,7 @@
 若资料发生冲突，创作者应按以下顺序判断：
 
 1. 本文的行为契约；
-2. `public/poem-ejs.d.ts` 的签名；
+2. `public/engine-ejs.d.ts` 的签名；
 3. 当前实现与回归测试；
 4. planning/reviews 文档中的历史设计和语料记录。
 
@@ -306,7 +306,7 @@ if (!local.has(KEY)) local.set(KEY, mode);
 
 ## 7. EJS 能力面速查
 
-完整类型以 [`poem-ejs.d.ts`](../../public/poem-ejs.d.ts) 为准。本节说明稳定语义和易错点。
+完整类型以 [`engine-ejs.d.ts`](../../public/engine-ejs.d.ts) 为准。本节说明稳定语义和易错点。
 
 ### 7.1 `char`
 
@@ -446,7 +446,7 @@ engine.version // '1.0.0'
 engine.has(path)
 ```
 
-`engine.has` 查询硬编码的能力路径，不是任意对象反射。应只用它探测本文和 `poem-ejs.d.ts` 中明确列出的路径。当前 `engine.has('world.isDaytime')` 与 `engine.has('engine.name')` 会返回 `false`，即使成员本身存在；作者不得用这两个结果反推成员不存在。
+`engine.has` 查询硬编码的能力路径，不是任意对象反射。应只用它探测本文和 `engine-ejs.d.ts` 中明确列出的路径。当前 `engine.has('world.isDaytime')` 与 `engine.has('engine.name')` 会返回 `false`，即使成员本身存在；作者不得用这两个结果反推成员不存在。
 
 ### 7.10 `_` 的可移植子集
 

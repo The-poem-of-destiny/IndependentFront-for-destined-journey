@@ -1,7 +1,20 @@
 import { defineConfig } from 'vitest/config';
+import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { cpus } from 'os';
 import vue from '@vitejs/plugin-vue';
+
+/**
+ * 引擎版本注入（D26/D40）—— **必须和 `vite.config.ts` 里那份一模一样**。
+ *
+ * 🔴 vitest 在本仓**不共用** `vite.config.ts`：根目录同时存在 `vitest.config.ts`，
+ * 它优先，`vite.config.ts` 的 `define` 在测试里**一个字节都不生效**。
+ * 少了这一行，`checkEngineVersion` 在测试里恒走 `'skipped'` 分支 ——
+ * 「过新的包会被拒绝」这条断言就永远测的是一个从未通电的门。
+ */
+const enginePkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8')) as {
+  version: string;
+};
 
 /**
  * 并发上限 —— 修 `create-store` 大纲生成用例的负载 flake（2026-08-01）。
@@ -38,6 +51,9 @@ const maxWorkers = cpuCount > 8 ? Math.floor(cpuCount / 2) : undefined;
 
 export default defineConfig({
   plugins: [vue()],
+  define: {
+    __ENGINE_VERSION__: JSON.stringify(enginePkg.version),
+  },
   resolve: {
     alias: {
       '@engine': resolve(__dirname, 'src/sillytavern'),

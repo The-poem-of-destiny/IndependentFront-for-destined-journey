@@ -3,9 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>命定之诗与黄昏之歌</title>
-    <link rel="icon" type="image/png" sizes="256x256" href="/favicon.png" />
-    <link rel="apple-touch-icon" href="/favicon.png" />
+    <!--
+      静态标题是**中性**的（D26）：这一行在首字节就要有值，那时内容包还没读进来。
+      真实应用名由 branding 面在运行时改写 `document.title`
+      （`src/ui/branding-defaults.ts` 的 applyBranding）。
+    -->
+    <title>叙事引擎</title>
+    <!-- 中性图标（原本这里是一张世界 IP 插画，随内容一并撤出引擎仓） -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
     <!--
     字体与图标一律**自托管**，这里不留任何外部 <link>（2026-08-05）。
     以前这里挂着 fonts.googleapis.com 与 cdnjs 两个 CDN —— 那两条外链在被墙或离线时

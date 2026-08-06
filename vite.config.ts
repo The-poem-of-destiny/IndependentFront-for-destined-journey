@@ -5,7 +5,18 @@ import fs from 'fs';
 import { buildHonoApp, isOpaqueSandboxOrigin, OPAQUE_ORIGIN_ERROR } from './server/app';
 import { getRequestListener } from '@hono/node-server';
 
+// 引擎版本 —— `package.json` 是唯一真源（D26/D40）。
+// 内容包的 `minEngineVersion` 拿它做门（`content-source.ts` 的 checkEngineVersion）。
+// 🔴 vitest 与本 config 共用一份配置，所以 `define` 在测试里**同样生效**：
+//    「版本门在 vitest 下恒 skipped」的旧契约到此为止，测试用例要显式改写全局值。
+const pkg = JSON.parse(fs.readFileSync(resolve(__dirname, 'package.json'), 'utf-8')) as {
+  version: string;
+};
+
 export default defineConfig({
+  define: {
+    __ENGINE_VERSION__: JSON.stringify(pkg.version),
+  },
   plugins: [
     vue(),
     {

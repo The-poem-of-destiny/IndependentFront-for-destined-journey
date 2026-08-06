@@ -294,7 +294,7 @@ export function preflightEntry(content: string): PreflightReport {
           code: 'deprecated-alias',
           message: `用了兼容别名 \`${name}\``,
           symbol: name,
-          hint: '存量内容可以继续用；新内容建议改用能力面（见 poem-ejs.d.ts）',
+          hint: '存量内容可以继续用；新内容建议改用能力面（见 engine-ejs.d.ts）',
         });
         continue;
       }

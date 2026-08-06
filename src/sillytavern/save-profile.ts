@@ -10,14 +10,21 @@ import { getSaveProfile, saveSaveProfile, createDefaultSaveProfile } from './dat
 
 // ========== Profile CRUD ==========
 
-export async function getProfile(saveId: string): Promise<SaveProfile> {
+/**
+ * 读存档档案；不存在则**当场创建**。
+ *
+ * 🔴 `era` 只在「不存在 → 新建」那一支用得上（D9 盖章）：存量档案一律读自己那份，
+ * 传什么都不会改写它。所以在读路径上忘了传 era 不会污染既有存档 ——
+ * 只有存档创建那一次的调用方（捏人页）需要把内容侧的 era 交进来。
+ */
+export async function getProfile(saveId: string, era?: string): Promise<SaveProfile> {
   const existing = await getSaveProfile(saveId);
   if (existing) {
     // M5: 存量记录归一化 — M1 加的 variables 字段在旧 profile 上可能缺失（M1 终审备忘履约）
     if (existing.variables === undefined) existing.variables = {};
     return existing;
   }
-  const created = createDefaultSaveProfile(saveId);
+  const created = createDefaultSaveProfile(saveId, era);
   await saveSaveProfile(created);
   return created;
 }

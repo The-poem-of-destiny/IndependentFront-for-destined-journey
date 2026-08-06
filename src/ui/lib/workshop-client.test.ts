@@ -9,7 +9,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { planInstall } from '@engine/workshop-install-plan';
 import {
-  WORKSHOP_API_BASE,
   WORKSHOP_DEFAULT_PAGE_SIZE,
   WORKSHOP_DETAIL_TTL_MS,
   WORKSHOP_LIST_TTL_MS,
@@ -28,7 +27,10 @@ import {
   resetWorkshopClient,
   setWorkshopAuthTokenProvider,
   setWorkshopClock,
+  setWorkshopConfig,
   setWorkshopFetch,
+  getWorkshopApiBase,
+  isWorkshopConfigured,
   startLogin,
   toggleLike,
   toggleSubscribe,
@@ -40,6 +42,14 @@ import {
 // ═══════════════════════════════════════════════════════════
 // 夹具
 // ═══════════════════════════════════════════════════════════
+
+/**
+ * 测试用的社区源基址（D41）。
+ *
+ * 🔴 社区源已是**运行时配置**，默认 unset —— 所以每个用例都得先把它配上，
+ * 否则 URL 装配会抛「未配置社区源」。用一个显然假的域，跑出真流量也连不到任何东西。
+ */
+const WORKSHOP_API_BASE = 'https://workshop.test';
 
 const PROJECT_ID = '11111111-2222-3333-4444-555555555555';
 const DOWNLOAD_URL = `${WORKSHOP_API_BASE}/api/files/projects/${PROJECT_ID}/payload.json`;
@@ -147,6 +157,8 @@ let now = 1_000_000;
 beforeEach(() => {
   now = 1_000_000;
   resetWorkshopClient();
+  // D41：社区源是运行时配置且默认 unset，每个用例都得先配上
+  setWorkshopConfig({ apiBase: WORKSHOP_API_BASE, loginHint: '' });
   setWorkshopClock(() => now);
   // 哨兵：任何漏注入的路径都会炸，而不是去连真上游
   vi.stubGlobal(
@@ -165,6 +177,32 @@ afterEach(() => {
 // ═══════════════════════════════════════════════════════════
 // URL 拼装
 // ═══════════════════════════════════════════════════════════
+
+describe('社区源配置（D41）', () => {
+  it('默认 unset —— 引擎自己不带任何社区源地址', () => {
+    // 🔴 这条是**开源边界**的钉子，不是功能测试：公开引擎带一个硬编码的社区源，
+    //    等于给任意用户一键安装第三方二创内容的入口。它红了说明有人把地址写回代码里了。
+    setWorkshopConfig({ apiBase: '', loginHint: '' });
+    expect(getWorkshopApiBase()).toBe('');
+    expect(isWorkshopConfigured()).toBe(false);
+  });
+
+  it('未配置时 URL 装配抛（护栏，不是让请求带着空基址飞出去）', () => {
+    setWorkshopConfig({ apiBase: '' });
+    expect(() => buildProjectUrl(PROJECT_ID)).toThrow(/未配置社区源/);
+  });
+
+  it('尾斜杠被剃掉 —— 拼接一律 `${base}/api/...`，不产生双斜杠', () => {
+    setWorkshopConfig({ apiBase: 'https://workshop.test/// '.trim() });
+    expect(getWorkshopApiBase()).toBe('https://workshop.test');
+    expect(buildProjectUrl('x')).toBe('https://workshop.test/api/projects/x');
+  });
+
+  it('配置值决定 URL —— 换一个社区源，请求就去那一个', () => {
+    setWorkshopConfig({ apiBase: 'https://mirror.example' });
+    expect(buildProjectUrl('x')).toBe('https://mirror.example/api/projects/x');
+  });
+});
 
 describe('buildListUrl', () => {
   it('缺省带上 page/pageSize/sort，不带 tag/search', () => {
