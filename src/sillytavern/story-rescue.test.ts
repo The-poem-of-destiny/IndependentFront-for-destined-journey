@@ -146,8 +146,7 @@ describe('rescueStoryOutput', () => {
     });
 
     it('顶部第一个块就是正文（不含思维链元语言）→ 不动', () => {
-      const raw =
-        '<maintext>\n叙事第一段。\n\n---\n\n叙事第二段（场景切换）。\n</maintext>';
+      const raw = '<maintext>\n叙事第一段。\n\n---\n\n叙事第二段（场景切换）。\n</maintext>';
       const r = makeResult({ rawResponse: raw });
       expect(rescueStoryOutput(r)).toBe(false);
       expect(r.rawResponse).toBe(raw);
@@ -177,7 +176,8 @@ describe('rescueStoryOutput', () => {
     });
 
     it('不误剥非 Think 的 HTML 注释 (如 <!-- craft_request expects="..." -->)', () => {
-      const raw = '<maintext>正文。\n<!-- craft_request expects="修补封印" -->\n结尾。\n</maintext>';
+      const raw =
+        '<maintext>正文。\n<!-- craft_request expects="修补封印" -->\n结尾。\n</maintext>';
       const r = makeResult({ rawResponse: raw });
       expect(rescueStoryOutput(r)).toBe(false);
       expect(r.rawResponse).toContain('craft_request');
