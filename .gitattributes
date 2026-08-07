@@ -23,4 +23,5 @@
 # 依旧只点名具体文件、不写 `*.mjs`/`*.sh` 通配 —— 理由与上面那条相同，
 # 新增带 shebang 的脚本时**记得往这里补一行**。
 scripts/knip-ratchet.mjs text eol=lf
+scripts/build-placeholder-hashes.mjs text eol=lf
 scripts/notify.sh text eol=lf

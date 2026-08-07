@@ -16,10 +16,11 @@ import {
 } from './field-enums';
 
 /**
- * 盘上的捏人目录（D24：内容已抽出 TS，住在 `data/content/catalog.json`）。
+ * 盘上的捏人目录（D24：内容已抽出 TS，占位集住在 `public/data/content/catalog.json`；
+ * 真实内容迁私有仓，波 4 / D14）。
  * 供下方 Q-11 品质编码防分叉闸门扫描 —— 换了内容包也照样扫得到。
  */
-const RAW_CATALOG = import.meta.glob('../../data/content/catalog.json', {
+const RAW_CATALOG = import.meta.glob('../../public/data/content/catalog.json', {
   query: '?raw',
   import: 'default',
   eager: true,
@@ -174,7 +175,7 @@ describe('原型键安全（M2 硬前置: AI 提名值可能是任意字符串�
 
 describe('品质编码只有一套 —— 防再次分叉的闸门', () => {
   it('捏人目录池里出现过的每一个 rarity 码，normalizeRarity 都必须认得', async () => {
-    // 目录内容已抽成 `data/content/catalog.json`（D24），不再是编译进 bundle 的 TS 常量。
+    // 目录内容已抽成 `public/data/content/catalog.json`（D24），不再是编译进 bundle 的 TS 常量。
     // 这条测试直接扫**盘上那份目录**，而不是手抄一份码表 —— 手抄的那份就是第二真源。
     // 换了内容包（或占位目录被替换）也照样扫得到，这正是这道闸门要防的分叉。
     // 🔴 用 Vite 的 `import.meta.glob(..., { query: '?raw' })` 取盘上文件，**不用 node 的 fs/path**

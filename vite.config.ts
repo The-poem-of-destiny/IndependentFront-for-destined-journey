@@ -13,15 +13,28 @@ const pkg = JSON.parse(fs.readFileSync(resolve(__dirname, 'package.json'), 'utf-
   version: string;
 };
 
+// 内容-引擎分离波 4 / D14+D15：真实内容 overlay 目录。
+// 设置 POEM_CONTENT_DIR 时，dev server 从该目录服务 /data/*（读 + PUT 写回），
+// 否则 /data/* 由 public/data 静态服务（占位内容）。UI 侧「保存为默认」按钮
+// 按 __POEM_CONTENT_DIR__（编译期布尔）隐藏 —— 🔴 不许用 HTTP 探测（SPA fallback
+// 会让探测失败开，见 D14）。
+const poemContentDir = process.env.POEM_CONTENT_DIR ? resolve(process.env.POEM_CONTENT_DIR) : null;
+
 export default defineConfig({
   define: {
     __ENGINE_VERSION__: JSON.stringify(pkg.version),
+    __POEM_CONTENT_DIR__: JSON.stringify(poemContentDir !== null),
   },
   plugins: [
     vue(),
     {
       name: 'file-write-api',
       configureServer(server) {
+        // 🔴 中间件注册次序是承重的（D14）：configureServer 注册的中间件先于 Vite 的
+        // publicDir 静态处理执行 —— overlay 必然赢。POEM_CONTENT_DIR 未设置时
+        // 不注册任何 /data 中间件，占位内容由 public/data 原生静态服务。
+        const dataDir = poemContentDir ?? resolve(__dirname, 'data');
+
         server.middlewares.use((req, res, next) => {
           const u = req.url || '';
           if (u.startsWith('/api/') && isOpaqueSandboxOrigin(req.headers.origin)) {
@@ -51,97 +64,126 @@ export default defineConfig({
           next();
         });
 
-        const dataDir = resolve(__dirname, 'data');
-
-        server.middlewares.use('/data', (req, res, next) => {
-          if (req.method !== 'GET' && req.method !== 'HEAD') return next();
-          const url = new URL(req.url || '', 'http://localhost');
-          const relPath = url.pathname.replace(/^\/data\//, '');
-          const filePath = resolve(dataDir, relPath);
-          if (
-            fs.existsSync(filePath) &&
-            fs.statSync(filePath).isFile() &&
-            !relPath.includes('..')
-          ) {
-            res.statusCode = 200;
-            res.setHeader('Content-Type', 'application/json');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.end(fs.readFileSync(filePath, 'utf-8'));
-            return;
-          }
-          next();
-        });
-
-        server.middlewares.use('/api/worldbooks', (req, res, next) => {
-          if (req.method !== 'PUT' && req.method !== 'POST') return next();
-          const id = (req.url || '').replace(/^\//, '').replace(/\.json$/, '');
-          if (!id || id.includes('..')) return next();
-          let body = '';
-          req.on('data', (chunk: Buffer) => {
-            body += chunk.toString();
-          });
-          req.on('end', () => {
-            try {
-              const worldbooksDir = resolve(dataDir, 'worldbooks');
-              const filePath = resolve(worldbooksDir, `${id}.json`);
-              // 🔒 P1-03 越界写防御：canonical containment —— 仅拒 '..' 不够，
-              // Windows 绝对路径（如 C:\evil）经 resolve 会吞掉 worldbooksDir 逃逸到任意位置。
-              const rel = relative(worldbooksDir, filePath);
-              if (rel.startsWith('..') || isAbsolute(rel)) {
-                res.statusCode = 400;
-                res.end(JSON.stringify({ error: 'invalid path' }));
-                return;
-              }
-              // 对齐 /api/defaults 行为：允许新建文件
-              if (!fs.existsSync(worldbooksDir)) {
-                fs.mkdirSync(worldbooksDir, { recursive: true });
-              }
-              fs.writeFileSync(filePath, body, 'utf-8');
+        // 🔴 条件 overlay（D14）：只有设置 POEM_CONTENT_DIR 才注册 /data 读中间件
+        // 与 PUT/POST 写入口（写回 overlay 目录）。未设置时：
+        //   - /data/* 由 public/data 静态服务（占位）
+        //   - 写入口不注册（占位内容不可被「保存为默认」污染）
+        if (poemContentDir !== null) {
+          server.middlewares.use('/data', (req, res, next) => {
+            if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+            const url = new URL(req.url || '', 'http://localhost');
+            // 🔴 Vite 中间件挂在 '/data' 前缀时，req.url 已经剥掉前缀
+            // （实测：/data/worldbooks/x.json → req.url = /worldbooks/x.json）。
+            // 不能再用 replace(/^\/data\//) —— 剥不存在的前缀会留下开头的 /，
+            // resolve(dataDir, '/worldbooks/x') 因绝对路径直接丢掉 dataDir。
+            const relPath = url.pathname.replace(/^\//, '');
+            const filePath = resolve(dataDir, relPath);
+            if (
+              fs.existsSync(filePath) &&
+              fs.statSync(filePath).isFile() &&
+              !relPath.includes('..')
+            ) {
               res.statusCode = 200;
               res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ ok: true }));
-            } catch (e: any) {
-              res.statusCode = 500;
-              res.end(JSON.stringify({ error: e.message }));
+              res.setHeader('Cache-Control', 'no-cache');
+              res.end(fs.readFileSync(filePath, 'utf-8'));
+              return;
             }
+            next();
           });
-        });
+        }
 
-        server.middlewares.use('/api/defaults', (req, res, next) => {
-          if (req.method !== 'PUT' && req.method !== 'POST') return next();
-          const rawUrl = (req.url || '').replace(/^\//, '').replace(/\.json$/, '');
-          const fileName = rawUrl || 'agent-config';
-          if (fileName.includes('..')) return next();
-          let body = '';
-          req.on('data', (chunk: Buffer) => {
-            body += chunk.toString();
-          });
-          req.on('end', () => {
-            try {
-              const defaultsDir = resolve(dataDir, 'defaults');
-              if (!fs.existsSync(defaultsDir)) fs.mkdirSync(defaultsDir, { recursive: true });
-              const filePath = resolve(defaultsDir, `${fileName}.json`);
-              // 🔒 P1-03 越界写防御（同 /api/worldbooks）：Windows 绝对路径会吞掉 defaultsDir。
-              const rel = relative(defaultsDir, filePath);
-              if (rel.startsWith('..') || isAbsolute(rel)) {
-                res.statusCode = 400;
-                res.end(JSON.stringify({ error: 'invalid path' }));
-                return;
+        // 写入口只在 overlay 启用时注册（D14）：写回 overlay 目录，不碰占位内容。
+        if (poemContentDir !== null)
+          server.middlewares.use('/api/worldbooks', (req, res, next) => {
+            if (req.method !== 'PUT' && req.method !== 'POST') return next();
+            const id = (req.url || '').replace(/^\//, '').replace(/\.json$/, '');
+            if (!id || id.includes('..')) return next();
+            let body = '';
+            req.on('data', (chunk: Buffer) => {
+              body += chunk.toString();
+            });
+            req.on('end', () => {
+              try {
+                const worldbooksDir = resolve(dataDir, 'worldbooks');
+                const filePath = resolve(worldbooksDir, `${id}.json`);
+                // 🔒 P1-03 越界写防御：canonical containment —— 仅拒 '..' 不够，
+                // Windows 绝对路径（如 C:\evil）经 resolve 会吞掉 worldbooksDir 逃逸到任意位置。
+                const rel = relative(worldbooksDir, filePath);
+                if (rel.startsWith('..') || isAbsolute(rel)) {
+                  res.statusCode = 400;
+                  res.end(JSON.stringify({ error: 'invalid path' }));
+                  return;
+                }
+                // 对齐 /api/defaults 行为：允许新建文件
+                if (!fs.existsSync(worldbooksDir)) {
+                  fs.mkdirSync(worldbooksDir, { recursive: true });
+                }
+                fs.writeFileSync(filePath, body, 'utf-8');
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ ok: true }));
+              } catch (e: any) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ error: e.message }));
               }
-              fs.writeFileSync(filePath, body, 'utf-8');
-              res.statusCode = 200;
-              res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ ok: true }));
-            } catch (e: any) {
-              res.statusCode = 500;
-              res.end(JSON.stringify({ error: e.message }));
-            }
+            });
           });
-        });
+
+        if (poemContentDir !== null)
+          server.middlewares.use('/api/defaults', (req, res, next) => {
+            if (req.method !== 'PUT' && req.method !== 'POST') return next();
+            const rawUrl = (req.url || '').replace(/^\//, '').replace(/\.json$/, '');
+            const fileName = rawUrl || 'agent-config';
+            if (fileName.includes('..')) return next();
+            let body = '';
+            req.on('data', (chunk: Buffer) => {
+              body += chunk.toString();
+            });
+            req.on('end', () => {
+              try {
+                const defaultsDir = resolve(dataDir, 'defaults');
+                if (!fs.existsSync(defaultsDir)) fs.mkdirSync(defaultsDir, { recursive: true });
+                const filePath = resolve(defaultsDir, `${fileName}.json`);
+                // 🔒 P1-03 越界写防御（同 /api/worldbooks）：Windows 绝对路径会吞掉 defaultsDir。
+                const rel = relative(defaultsDir, filePath);
+                if (rel.startsWith('..') || isAbsolute(rel)) {
+                  res.statusCode = 400;
+                  res.end(JSON.stringify({ error: 'invalid path' }));
+                  return;
+                }
+                fs.writeFileSync(filePath, body, 'utf-8');
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ ok: true }));
+              } catch (e: any) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ error: e.message }));
+              }
+            });
+          });
 
         // 🔒 P1-03: 旧的 /api/proxy 任意 URL 透传中间件已移除（BFF 重构后死代码 + SSRF 攻击面）。
         // agent-client / memory-store / api-tools 现走同源 /api/chat|embeddings|models（server/routes/proxy.ts），
         // 那里是受控的 X-Target-Base-URL 透传，不再有接受任意 URL 的开放代理。
+      },
+      configurePreviewServer(server) {
+        // 🔴 D14 v1.2 补：vite preview 下 /api/* 必须通（验收 #2）。buildHonoApp 的
+        // BFF 路由挂在 hono listener 上，preview 走同一个 getRequestListener。
+        const honoListener = getRequestListener(buildHonoApp().fetch);
+        server.middlewares.use((req, res, next) => {
+          const u = req.url || '';
+          if (
+            u.startsWith('/api/chat') ||
+            u.startsWith('/api/status') ||
+            u.startsWith('/api/models') ||
+            u.startsWith('/api/embeddings') ||
+            u.startsWith('/api/image')
+          ) {
+            return honoListener(req, res);
+          }
+          next();
+        });
       },
     },
   ],
@@ -163,7 +205,9 @@ export default defineConfig({
     port: 5173,
     open: true,
     watch: {
-      ignored: ['**/data/worldbooks/**'],
+      // 内容-引擎分离波 4 / D14：真实内容在 overlay 目录（POEM_CONTENT_DIR），
+      // 由服务端中间件按需读盘，不参与 Vite 热更新监视（改真实内容不触发前端重载）。
+      ignored: poemContentDir !== null ? [`${poemContentDir}/**`] : [],
     },
   },
   build: {

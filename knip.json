@@ -1,13 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": [
-    "index.html",
-    "server/app.ts",
-    "scripts/*.{mjs,cjs}",
-    "**/*.test.ts",
-    "tests/agent-framework/build_test_save.ts",
-    "tests/agent-framework/test_agent.ts"
-  ],
+  "entry": ["index.html", "server/app.ts", "scripts/*.{mjs,cjs}", "**/*.test.ts"],
   "project": ["src/**/*.{ts,vue}", "server/**/*.ts", "tests/**/*.ts", "scripts/**/*.{mjs,cjs}"],
   "ignoreBinaries": ["dev.bat"],
   "vue": true

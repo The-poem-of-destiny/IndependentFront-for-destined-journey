@@ -53,6 +53,9 @@ export default defineConfig({
   plugins: [vue()],
   define: {
     __ENGINE_VERSION__: JSON.stringify(enginePkg.version),
+    // 内容-引擎分离波 4 / D14：测试环境默认占位态（无 overlay）。
+    // 需要测「保存为默认」按钮可见性的用例显式改写全局值。
+    __POEM_CONTENT_DIR__: JSON.stringify(false),
   },
   resolve: {
     alias: {

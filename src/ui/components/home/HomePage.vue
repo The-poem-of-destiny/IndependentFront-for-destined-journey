@@ -496,6 +496,7 @@ function formatTime(ts: number) {
   max-width: min(90vw, 640px);
   z-index: 5;
 }
+.home-page {
   overflow-x: hidden;
   overflow-y: auto;
   background:

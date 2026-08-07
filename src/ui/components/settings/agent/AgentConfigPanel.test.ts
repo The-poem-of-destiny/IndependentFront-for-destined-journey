@@ -125,8 +125,8 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     expect(w.findComponent(PresetManager).exists()).toBe(false);
   });
 
-  it('动作栏三个按钮都在（保存为默认 / 恢复默认 / 保存设置）', () => {
-    expect(mountPanel('char_gen').findAllComponents(AppButton)).toHaveLength(3);
+  it('动作栏两个按钮（恢复默认 / 保存设置）—— 占位态无「保存为默认」（D14）', () => {
+    expect(mountPanel('char_gen').findAllComponents(AppButton)).toHaveLength(2);
   });
 
   it('🔴「保存设置」提交的是载好的草稿，不是空串（草稿 ≠ 默认 → 写覆写）', async () => {
@@ -139,8 +139,8 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     const card = w.findComponent(AgentPromptCard);
     await card.vm.$emit('update:prompt', '用户改过的提示词');
     await card.vm.$emit('update:template', '用户改过的模板');
-    // 动作栏顺序：保存为默认 / 恢复成最新 / 保存设置
-    await w.findAllComponents(AppButton)[2].vm.$emit('click');
+    // 动作栏顺序：恢复成最新 / 保存设置
+    await w.findAllComponents(AppButton)[1].vm.$emit('click');
 
     // 覆写层现在有用户版
     expect(mockSettings.agents.char_gen.systemPrompt).toBe('用户改过的提示词');
@@ -154,7 +154,7 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     };
     const w = mountPanel('char_gen');
     // 草稿载好 = 默认层的值（没改过）。点「保存设置」→ diff 相等 → 不写覆写键
-    await w.findAllComponents(AppButton)[2].vm.$emit('click');
+    await w.findAllComponents(AppButton)[1].vm.$emit('click');
 
     // 🔴 覆写层**整条都不存在** —— 不只是键不存在，连空壳条目也不能留。
     //    （此前 patchAgentSettings 的 ensure 会在覆写层建 `{ char_gen: {} }` 空壳，
@@ -166,7 +166,7 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
 
   it('story 的「保存设置」不写 systemPrompt（正文走预设子系统）', async () => {
     const w = mountPanel('story');
-    await w.findAllComponents(AppButton)[2].vm.$emit('click');
+    await w.findAllComponents(AppButton)[1].vm.$emit('click');
 
     expect(mockSettings.agents.story?.systemPrompt).toBeUndefined();
     expect(mockSettings.agentDirty.story).toBe(true);

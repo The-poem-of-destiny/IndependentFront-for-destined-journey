@@ -32,10 +32,11 @@ describe('queryForView', () => {
   });
 });
 
-// ═══ 与真实内置曲库对账 ═══════════════════════════════════
+// ═══ 与合成曲库对账 ═══════════════════════════════════
 //
-// 映射写得再漂亮，选不出曲子也是白搭。这里直接拿 public/audio/manifest.json
-// 跑一遍打分，确保这两个界面在**当前随应用分发的曲库**上真的有曲可选。
+// 内容-引擎分离波 4 / D12：内置曲库已退役（public/audio/manifest.json = []，真实曲库
+// 随真实内容迁私有仓）。映射语义仍需验证 —— 改用合成曲库跑打分，确保首页/捏人页的
+// 查询能命中「菜单/仪式」类情境曲，且地点维不参与。
 
 interface ManifestEntry {
   id: string;
@@ -45,15 +46,13 @@ interface ManifestEntry {
   tags?: string[];
 }
 
-/**
- * 读随应用分发的真实 manifest。走 Vite 的 `?raw` 而不是 `node:fs` ——
- * 这个文件在 UI 的 tsconfig 覆盖范围内，那里没有 node 类型。
- */
-const MANIFEST_RAW = (await import('../../../public/audio/manifest.json?raw')).default as string;
-
 function builtinTracks(): AudioTrack[] {
-  const raw = JSON.parse(MANIFEST_RAW) as ManifestEntry[];
-  return raw.map((e) => ({
+  const synthetic: ManifestEntry[] = [
+    { id: 'menu_main', name: '系统·菜单', kind: 'music', file: 'menu.mp3', tags: ['菜单', '系统'] },
+    { id: 'ritual_main', name: '仪式曲', kind: 'music', file: 'ritual.mp3', tags: ['仪式'] },
+    { id: 'field_forest', name: '森林', kind: 'music', file: 'forest.mp3', tags: ['森林', '地点'] },
+  ];
+  return synthetic.map((e) => ({
     id: e.id,
     name: e.name,
     kind: e.kind === 'sfx' ? 'sfx' : 'music',
@@ -66,7 +65,7 @@ function builtinTracks(): AudioTrack[] {
   }));
 }
 
-describe('界面查询在真实内置曲库上的命中', () => {
+describe('界面查询在合成曲库上的命中', () => {
   const LIB = builtinTracks();
 
   it('首页命中「系统·菜单」', () => {

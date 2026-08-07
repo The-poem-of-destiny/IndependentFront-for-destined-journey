@@ -14,6 +14,7 @@ import { describe, it, expect } from 'vitest';
 import {
   AGENT_SETTINGS_DEFAULTS,
   applyProjectDefaultToAgent,
+  fingerprintValue,
   getAgentSettings,
   listConfiguredAgents,
   migrateLegacyAgentOverrides,
@@ -22,10 +23,48 @@ import {
   updateAgentWorldBookIds,
   type AgentDefaultsLayer,
 } from './agent-settings';
-// 真实 agent-config.json —— 指纹迁移测试要拿它的字段值造「命中指纹」的覆写
-import realAgentConfig from '../../../data/defaults/agent-config.json';
 
 const bag = (): Record<string, any> => ({});
+
+// ═══ 指纹迁移测试的自造指纹表 ═══
+// 内容-引擎分离波 4 / D14：真实 agent-config 已迁私有仓，公开侧不再有真实默认值。
+// 指纹迁移的**逻辑**（命中删除 / 未命中保留 / 幂等）不依赖特定内容——测试用自造
+// 指纹表 + 同源字段值验证，口径与生产一致（sha256(JSON.stringify(value))）。
+function fpOf(value: unknown): string {
+  // 与生产 migrateLegacyAgentOverrides 同口径（sha256(JSON.stringify(value))）
+  return fingerprintValue(value);
+}
+
+const TEST_DEFAULTS = {
+  story: {
+    model: 'ep-default-story',
+    worldBookEnabled: true,
+    worldBookIds: ['world_setting'],
+    systemPrompt: '默认提示词 story',
+    template: '默认模板',
+    temperature: 0.7,
+    topP: 1.0,
+    freqPen: 0,
+    presPen: 0,
+    maxTokens: 16384,
+    historyLayers: 3,
+    historySlice: 800,
+  },
+  char_gen: {
+    temperature: 1.0,
+    maxTokens: 4096,
+  },
+  item_gen: {
+    temperature: 0.5,
+  },
+};
+
+const TEST_FINGERPRINTS: Record<string, Record<string, string>> = Object.fromEntries(
+  Object.entries(TEST_DEFAULTS).map(([agentId, fields]) => [
+    agentId,
+    Object.fromEntries(Object.entries(fields).map(([field, value]) => [field, fpOf(value)])),
+  ]),
+);
 
 // ═══════════════════════════════════════════════════════════════
 // 修正 1：resolve 覆盖全部 12 键（getAgentSettings 合默认层）
@@ -369,7 +408,7 @@ describe('migrateLegacyAgentOverrides —— 修正 3（指纹迁移）', () => 
 
   it('🔴 命中历史默认指纹的覆写键删除（旧 boot 播种值被清）', () => {
     // 用真实 agent-config.json 里 story 的完整一条作为覆写 —— 每个字段都命中指纹
-    const realStory = (realAgentConfig as any).agents.story;
+    const realStory = TEST_DEFAULTS.story;
     // 只取 12 键（剥掉 presetId/preset）
     const twelveKeys = [
       'model',
@@ -389,14 +428,14 @@ describe('migrateLegacyAgentOverrides —— 修正 3（指纹迁移）', () => 
     for (const k of twelveKeys) overrideEntry[k] = realStory[k];
     const b: Record<string, any> = { agents: { story: { ...overrideEntry } } };
 
-    const cleared = migrateLegacyAgentOverrides(b);
+    const cleared = migrateLegacyAgentOverrides(b, TEST_FINGERPRINTS);
     // 全部 12 键命中指纹 → 全清 → 整条删
     expect(cleared.story.sort()).toEqual([...twelveKeys].sort());
     expect('story' in b.agents).toBe(false); // 整条空了就删
   });
 
   it('🔴 用户真正改过的值指纹不匹配 → 保留', () => {
-    const realStory = (realAgentConfig as any).agents.story;
+    const realStory = TEST_DEFAULTS.story;
     const b: Record<string, any> = {
       agents: {
         story: {
@@ -407,7 +446,7 @@ describe('migrateLegacyAgentOverrides —— 修正 3（指纹迁移）', () => 
         },
       },
     };
-    const cleared = migrateLegacyAgentOverrides(b);
+    const cleared = migrateLegacyAgentOverrides(b, TEST_FINGERPRINTS);
     expect(cleared.story).toEqual(['temperature']); // 只清了 temperature
     expect(b.agents.story.systemPrompt).toBe('用户自定义的提示词，与默认不同'); // 保留
     expect('temperature' in b.agents.story).toBe(false); // 清了
@@ -437,20 +476,20 @@ describe('migrateLegacyAgentOverrides —— 修正 3（指纹迁移）', () => 
   });
 
   it('迁移幂等：跑两次第二次无命中（已清光）', () => {
-    const realCharGen = (realAgentConfig as any).agents.char_gen;
+    const realCharGen = TEST_DEFAULTS.char_gen;
     const b: Record<string, any> = {
       agents: {
         char_gen: { temperature: realCharGen.temperature, maxTokens: realCharGen.maxTokens },
       },
     };
-    const first = migrateLegacyAgentOverrides(b);
+    const first = migrateLegacyAgentOverrides(b, TEST_FINGERPRINTS);
     expect(first.char_gen.sort()).toEqual(['maxTokens', 'temperature']);
-    const second = migrateLegacyAgentOverrides(b);
+    const second = migrateLegacyAgentOverrides(b, TEST_FINGERPRINTS);
     expect(second).toEqual({}); // 第二次无命中
   });
 
   it('迁移后只剩 model 的条目保留 model（不删整条）', () => {
-    const realItemGen = (realAgentConfig as any).agents.item_gen;
+    const realItemGen = TEST_DEFAULTS.item_gen;
     const b: Record<string, any> = {
       agents: {
         item_gen: {
@@ -459,7 +498,7 @@ describe('migrateLegacyAgentOverrides —— 修正 3（指纹迁移）', () => 
         },
       },
     };
-    migrateLegacyAgentOverrides(b);
+    migrateLegacyAgentOverrides(b, TEST_FINGERPRINTS);
     expect(b.agents.item_gen).toEqual({ model: 'user-picked-pool' }); // 只剩 model
   });
 });

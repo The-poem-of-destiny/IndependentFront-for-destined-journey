@@ -30,7 +30,8 @@ import { describe, expect, it } from 'vitest';
  * 那是独立一次设计而不是本轮清理。本轮逮到的 `ejs-backend-parity.test.ts` 是真字节，raw 够用。
  *
  * ## 扫描范围
- * - `data/`：我们自己写的、**喂给模型**的那批文件（提示词 / 世界书 / 预设 / 美化规则）。
+ * - `public/data/`：占位内容集（内容-引擎分离波 4 / D14：占位从 data/placeholder 迁入
+ *   public/data，URL 不变 `/data/*`；真实内容已移出公开树）。
  * - `src/` `server/` `tests/` `scripts/` 的源码：坏字在这里同样静默 —— 见上面那个退格。
  * - **不扫** `reference/`：那是从上游下载的语料快照，本身就带着上游的坏字（实测 workshop
  *   正则快照 8 个 U+FFFD、某第三方角色卡 21 个 0x1C）。不是我们能修的，纳进来只会让闸门
@@ -41,7 +42,7 @@ import { describe, expect, it } from 'vitest';
  */
 
 const REPO_ROOT = join(__dirname, '..');
-const DATA_ROOT = join(REPO_ROOT, 'data');
+const DATA_ROOT = join(REPO_ROOT, 'public', 'data');
 const SOURCE_ROOTS = ['src', 'server', 'tests', 'scripts'];
 
 const DATA_FILE = /\.(json|txt|md)$/i;

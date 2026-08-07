@@ -16,7 +16,6 @@ export default [
       'node_modules/**',
       'coverage/**',
       'public/**',
-      'reference/**',
       'docs/reference/**',
       'docs/planning/**',
     ],

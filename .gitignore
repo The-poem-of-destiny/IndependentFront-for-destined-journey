@@ -14,6 +14,9 @@ dist-ui/
 # 🔒 内容分离波 0 (D1/D45)：worktrees 挂完整工作副本（含全部世界书），整目录拷贝会泄内容。
 # 预防性 ignore —— 本机此刻没有该目录，但快照切仓前任何机器出现都立刻入 ignore。
 .claude/worktrees/
+# 内容分离波 4 (T17)：真实内容临时驻留区（data/ 真实 JSON + reference/ 全树 + 私有测试/工具）。
+# 波 6 (T21) 从这里迁入私有仓；本目录绝不允许进公开仓。
+_private-staging/
 
 # 系统文件
 .DS_Store
@@ -62,7 +65,5 @@ public/audio/**/*.m4a
 public/audio/**/*.flac
 
 # Local mirror of public workshop entries used for compatibility research.
-reference/workshop-reference/
 
 # 本地调研笔记（第三方实现的行为审计等）。只供本机参考，不进仓库、不被代码或文档引用。
-reference/_local-notes/
