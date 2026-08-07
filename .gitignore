@@ -11,6 +11,14 @@ dist-ui/
 .claude/scheduled_tasks.json
 .claude/plans/
 
+# 本地 AI 工具配置（2026-08-07 review：#1-#5 根因处置，防误提交）
+# 注意：.claude/agent-memory/ 与 .codex/skills/ 已有 tracked 文件，ignore 只拦新增
+.agents/
+.codex/
+.opencode/
+opencode.json
+.claude/agent-memory/
+
 # 🔒 内容分离波 0 (D1/D45)：worktrees 挂完整工作副本（含全部世界书），整目录拷贝会泄内容。
 # 预防性 ignore —— 本机此刻没有该目录，但快照切仓前任何机器出现都立刻入 ignore。
 .claude/worktrees/
@@ -49,9 +57,8 @@ tmp/
 *.stackdump
 *.orig
 
-# 真机调试实时导出（preset.json 已 tracked 继续保留；debug 导出/日志不追踪）
-tests/realtime_export/*.json
-tests/realtime_export/log.txt
+# 真机调试实时导出（preset.json 已 tracked 继续保留；debug 导出/日志/浏览器残留不追踪）
+tests/realtime_export/
 
 # 设计评审过程产物（截图/对比图，会话产物非交付物；历史已 tracked 的文件暂保留，新增不追踪）
 artifacts/
