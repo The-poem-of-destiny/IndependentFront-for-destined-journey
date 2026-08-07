@@ -684,6 +684,62 @@ function scrambleLiteralBody(body, maps, opts) {
 }
 
 /**
+ * 正则字面量正文混淆：与 scrambleLiteralBody 同口径（CJK 逐字 + 拉丁词一致置换），
+ * 但**字符类内部整段透传** —— `[a-z]` / `[^>]` / `[\r\n\t]` 是正则语义不是标识符，
+ * 混淆它们会把匹配面改掉（编译能过、语义已变，最阴的一类）。
+ *
+ * 🔴 为什么不能直接传 `{ latin: false }`（旧行为）：正则里的**裸词**（如
+ * `<carmilla_teleport_used>` 这类世界书自己的 XML 契约标签）也是内容的一部分，
+ * 不混淆它们 = 真实机制名原样进公开 fixture，D29 泄露审计第一轮就抓到了这个洞。
+ * 转义序列（`\b` / `\d` / `\1`）由外层 `\\` 整体透传逻辑保护，与 scrambleLiteralBody 相同。
+ */
+function scrambleRegexBody(body, maps) {
+  let out = '';
+  let i = 0;
+  let inClass = false;
+  while (i < body.length) {
+    const ch = body[i];
+    // 转义序列整体透传：`\b` / `\d` / `\x41` —— 第二字符是正则语义不是词首
+    if (ch === '\\' && i + 1 < body.length) {
+      out += body.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    // 字符类边界
+    if (ch === '[') {
+      inClass = true;
+      out += ch;
+      i++;
+      continue;
+    }
+    if (ch === ']' && inClass) {
+      inClass = false;
+      out += ch;
+      i++;
+      continue;
+    }
+    // 字符类内部整段透传（`a-z` / `^>` / `\r` 全是匹配语义）
+    if (inClass) {
+      out += ch;
+      i++;
+      continue;
+    }
+    // 字符类外的裸拉丁词 → 一致置换（XML 标签名 / 属性名在这里）
+    if (/[A-Za-z]/.test(ch)) {
+      let j = i;
+      let word = '';
+      while (j < body.length && /[A-Za-z0-9_]/.test(body[j])) word += body[j++];
+      out += maps.mapLatin(word);
+      i = j;
+      continue;
+    }
+    out += isCjk(ch) ? maps.mapCjk(ch) : ch;
+    i++;
+  }
+  return out;
+}
+
+/**
  * 代码区混淆。手写扫描器而非正则整段替换——正则会把字符串里的东西也当标识符改掉。
  *
  * 正则字面量识别用「前一个有意义字符」启发式（`(`/`,`/`=`/`:`/`[`/`!`/`&`/`|`/`?`/`{`/`;`/`return`
@@ -794,7 +850,7 @@ function scrambleCode(code, maps) {
         let flags = '';
         let k = j + 1;
         while (k < code.length && /[a-z]/.test(code[k])) flags += code[k++];
-        out += '/' + scrambleLiteralBody(body, maps, { latin: false }) + '/' + flags;
+        out += '/' + scrambleRegexBody(body, maps) + '/' + flags;
         i = k;
         prevMeaningful = '/';
         continue;
