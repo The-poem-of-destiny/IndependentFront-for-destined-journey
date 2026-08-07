@@ -18,6 +18,22 @@ dist-ui/
 # 波 6 (T21) 从这里迁入私有仓；本目录绝不允许进公开仓。
 _private-staging/
 
+# 🔒 内容分离 v1.3：真实内容已离开公开树，但**在本机随时会回来** —— 设计 v1.3 节写明
+# 任何机器都可从历史 2afc23c 提取，私有内容仓 fated_poem_independent_assets 也发整树。
+# 以下路径一旦恢复到本机就是未跟踪且未忽略，`git add -A` 一次即把正文级语料推回公开仓。
+# 🔴 守门测试 tests/no-world-content.test.ts 按 D32 只扫 public/data/**，扫不到这一面。
+/data/
+# reference/ 下还有两类纯本机件：workshop-reference/（公共工坊条目镜像，兼容性调研用）
+# 与 _local-notes/（第三方实现行为审计笔记）。都只供本机参考，不进仓库、不被代码或文档引用。
+/reference/
+# 含 key 的 .api-config*.json 也在这个目录里，一并罩住。
+tests/agent-framework/
+src/sillytavern/worldbook-ejs-corpus.test.ts
+scripts/scramble-worldbook-ejs.mjs
+scripts/build-agent-fingerprints.mjs
+scripts/extract-map-markers.cjs
+scripts/import-regex-rules.mjs
+
 # 系统文件
 .DS_Store
 Thumbs.db
@@ -31,15 +47,6 @@ Thumbs.db
 # 环境变量 / 本地配置
 .env
 .env.local
-
-# 世界书临时/中间文件
-data/worldbooks/_batch_*.json
-data/worldbooks/_batch_*.txt
-data/worldbooks/_mapping_*
-data/worldbooks/_classification_guide.md
-
-# 本地 API 配置（含 key，不提交）
-tests/agent-framework/.api-config*.json
 
 # 临时脚本目录（Q-15 清仓已把 59 个历史 tracked 文件全删；这里现在是纯 ignore）
 tmp/
@@ -63,7 +70,3 @@ public/audio/**/*.ogg
 public/audio/**/*.wav
 public/audio/**/*.m4a
 public/audio/**/*.flac
-
-# Local mirror of public workshop entries used for compatibility research.
-
-# 本地调研笔记（第三方实现的行为审计等）。只供本机参考，不进仓库、不被代码或文档引用。

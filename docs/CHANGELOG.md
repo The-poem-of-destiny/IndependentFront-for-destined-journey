@@ -39,6 +39,16 @@ combat-v3-stress-test / narrative_context_example）移私有仓——工作树�
 | #51 | 装包后美化规则仍是占位 5 条                          | ① boot 竞态：beautifier.init 先于 pack provider 注册，之后没人刷新 ② pack 规则缺字段归一化（`defaultEnabled` 未转 `enabled` → 全判不激活）                           |
 | #52 | 地图加载失败（12.48MB 图源 30 秒超时中断）           | `MAP_OPEN_TIMEOUT_MS=30000` 砍掉慢网下载 + 只有内存缓存每次刷新重下 → v21 `mapBlobs` 字节本地化 + 下载不设超时 + 进度显示                                            |
 
+**R1-R4 之后补的一处仓库面缺口（2026-08-07）**：波 4 交换时顺手删掉了
+`reference/workshop-reference/` 与 `reference/_local-notes/` 两条 ignore（留下两条无 pattern
+的孤儿注释）。当时理由成立——`reference/` 整树已离场；但 R1 之后**真实内容会回到本机**
+（设计 v1.3 写明可从 `2afc23c` 提取，私有内容仓也发整树），于是这些路径变成
+「未跟踪且未忽略」，`git add -A` 一次就能把正文级语料推回公开仓。守门测试按 D32 只扫
+`public/data/**`，扫不到这一面。现补一张恢复面防误提交网：`/data/`、`/reference/`、
+`tests/agent-framework/`、`worldbook-ejs-corpus.test.ts`、四个内容工具脚本；同时删掉被它
+覆盖的三条旧规则（`data/worldbooks/_batch_*`、`.api-config*.json`、两条孤儿注释）。
+`git ls-files -i -c` 为空——没有任何已跟踪文件因此被忽略。
+
 ---
 
 ### 内容-引擎分离 波 4 + v1.3 缩减裁定 ｜ ✅ 波 4 完成（2026-08-07）
