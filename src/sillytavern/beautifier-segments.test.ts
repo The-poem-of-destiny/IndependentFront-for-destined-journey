@@ -2,7 +2,6 @@
  * Beautifier segment compiler interface tests.
  */
 import { describe, expect, it } from 'vitest';
-import bundledRulesJson from '../../data/defaults/beautifier-rules.json?raw';
 import {
   compileBeautifierSegments,
   serializeBeautifierSegments,
@@ -246,13 +245,18 @@ describe('compileBeautifierSegments', () => {
     expect(elapsed).toBeLessThan(2000);
   });
 
-  it('retains all 22 bundled replacement structures byte-for-byte', () => {
-    const payload = JSON.parse(bundledRulesJson) as {
-      rules: Array<{ id: string; name: string; replacement: string }>;
-    };
-    expect(payload.rules).toHaveLength(22);
+  // 内容-引擎分离波 4 / D31：真实 22 条规则已随真实内容迁私有仓（_private-staging/data/defaults/），
+  // 公开侧只有占位演示规则。此处改用合成规则集验证同一结构契约（replacement 形态齐全：
+  // 含 <style> / <script> / <svg> / <audio|img> 四类），不再依赖真实内容文件。
+  it('retains all synthetic replacement structures byte-for-byte', () => {
+    const syntheticRules = [
+      { id: 'demo_style', name: 'Demo Style', replacement: '<style>.demo{color:red}</style>' },
+      { id: 'demo_script', name: 'Demo Script', replacement: '<script>console.log("x")</script>' },
+      { id: 'demo_svg', name: 'Demo SVG', replacement: '<svg width="10"><circle/></svg>' },
+      { id: 'demo_media', name: 'Demo Media', replacement: '<img src="x" alt="y"/>' },
+    ];
 
-    const rules = payload.rules.map((bundled, index) =>
+    const rules = syntheticRules.map((bundled, index) =>
       activeRule({
         id: bundled.id,
         name: bundled.name,
@@ -264,10 +268,10 @@ describe('compileBeautifierSegments', () => {
     const input = rules.map((_, index) => `__BUNDLED_${index}__`).join('|');
     const compiled = matches(compileBeautifierSegments(input, 'maintext', rules));
 
-    expect(compiled).toHaveLength(22);
+    expect(compiled).toHaveLength(4);
     compiled.forEach((segment, index) => {
-      expect(segment.ruleId).toBe(payload.rules[index].id);
-      expect(segment.replacement).toBe(payload.rules[index].replacement);
+      expect(segment.ruleId).toBe(syntheticRules[index].id);
+      expect(segment.replacement).toBe(syntheticRules[index].replacement);
     });
     expect(compiled.some(({ replacement }) => replacement.includes('<style>'))).toBe(true);
     expect(compiled.some(({ replacement }) => replacement.includes('<script>'))).toBe(true);

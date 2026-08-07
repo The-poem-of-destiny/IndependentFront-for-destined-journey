@@ -56,6 +56,11 @@ const { presets: presetList, upsertPreset } = usePresets();
 const agentPromptDraft = ref('');
 const agentTemplateDraft = ref('');
 
+// 内容-引擎分离波 4 / D14：真实内容 overlay 是否启用（vite define 注入）。
+// 未启用（公开占位态）时隐藏「保存为默认」—— 否则一次点击就把提示词写进公开仓占位文件。
+declare const __POEM_CONTENT_DIR__: boolean;
+const canSaveAsDefault = __POEM_CONTENT_DIR__;
+
 /**
  * 当前 Agent 的**默认层**（pack > 占位）—— D44 修正 1：getAgentSettings 合默认层、
  * saveAgentSettings 与之 diff 写覆写。
@@ -257,7 +262,9 @@ async function restoreAgentDefaults() {
 
   <!-- 操作按钮 -->
   <div class="detail-actions">
-    <AppButton variant="ghost" size="sm" @click="saveAsDefault">保存为默认</AppButton>
+    <AppButton v-if="canSaveAsDefault" variant="ghost" size="sm" @click="saveAsDefault">
+      保存为默认
+    </AppButton>
     <AppButton variant="ghost" size="sm" @click="restoreAgentDefaults">恢复成最新</AppButton>
     <AppButton variant="primary" size="sm" @click="saveAgentSettings">保存设置</AppButton>
   </div>

@@ -345,7 +345,7 @@ type FingerprintTable = Record<string, Record<string, string>>;
 const FINGERPRINTS: FingerprintTable = fingerprintsJson as FingerprintTable;
 
 /** 与生成脚本同口径：sha256(JSON.stringify(value)) */
-function fingerprintValue(value: unknown): string {
+export function fingerprintValue(value: unknown): string {
   // 浏览器侧没有 node:crypto —— 用 Web Crypto 的同步回退（仅用于迁移期一次性比对）。
   // 测试环境（node）走 node:crypto；二者口径必须一致（都吃 JSON.stringify 后的 utf8）。
   // 这里用一个纯 JS SHA-256 实现，避免异步 + 环境差异。
@@ -360,13 +360,16 @@ function fingerprintValue(value: unknown): string {
  *
  * @returns 被清除的 `{ agentId: field[] }` 列表，供调用方上报与测试断言
  */
-export function migrateLegacyAgentOverrides(bag: SettingsBag): Record<string, string[]> {
+export function migrateLegacyAgentOverrides(
+  bag: SettingsBag,
+  fingerprints?: Record<string, Record<string, string>>,
+): Record<string, string[]> {
   const cleared: Record<string, string[]> = {};
   if (!isPlainObject(bag.agents)) return cleared;
   const agents = bag.agents as Record<string, unknown>;
   for (const [agentId, entry] of Object.entries(agents)) {
     if (!isPlainObject(entry)) continue;
-    const fpRow = FINGERPRINTS[agentId];
+    const fpRow = (fingerprints ?? FINGERPRINTS)[agentId];
     if (!fpRow) continue; // agent-config.json 没这个 agent —— 没指纹可比
     const clearedFields: string[] = [];
     for (const field of Object.keys(entry)) {

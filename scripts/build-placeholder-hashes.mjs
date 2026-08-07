@@ -36,7 +36,7 @@
  * ## 用法
  *
  * ```bash
- * node scripts/build-placeholder-hashes.mjs                       # 默认输入 data/placeholder
+ * node scripts/build-placeholder-hashes.mjs                       # 默认输入 public/data
  * node scripts/build-placeholder-hashes.mjs --input public/data   # 波 4 换输入根重跑
  * node scripts/build-placeholder-hashes.mjs --version 1.1.0       # 占位集升版（D42 触发重播种）
  * node scripts/build-placeholder-hashes.mjs --out /tmp/x.json --quiet
@@ -44,6 +44,7 @@
  *
  * 🔴 **输入目录参数化是硬要求**：波 4 会把占位树搬到 `public/data`，届时只换 `--input`
  * 重跑，不改脚本。故本脚本内**不许**出现写死的 `data/placeholder`（除了默认值那一处常量）。
+ * （波 4 / D14 后默认值已改为 `public/data` —— 占位内容公开侧的驻地。）
  *
  * 🔴 **缺文件跳过、不崩**：T15 与 T16 并行产出，跑脚本时 T16 那批占位件可能尚未落地。
  * 缺失项计入 `skipped` 并打印，退出码仍为 0。
@@ -57,7 +58,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, '..');
 
 /** 默认输入根（波 4 换成 `public/data`，走 `--input` 而不是改这里） */
-export const DEFAULT_INPUT_DIR = 'data/placeholder';
+export const DEFAULT_INPUT_DIR = 'public/data';
 
 /** 默认输出文件（随引擎打包，D20：不进内容树，overlay 覆盖不到） */
 export const DEFAULT_OUTPUT_FILE = 'src/sillytavern/placeholder-hashes.json';
@@ -267,7 +268,10 @@ export function extractRuleRows(json) {
 /** 真实磁盘实现（生产默认） */
 export const nodeFileReader = {
   exists: (p) => existsSync(p),
-  readText: (p) => readFileSync(p, 'utf8'),
+  // 🔴 行尾规范化：Windows 检出是 CRLF、CI Linux 是 LF，JSON 字符串值里的 \r\n 会
+  // 让 hash 跨平台不一致（搬移到 public/data 后 T17 实测：同一文件 hash 变了）。
+  // JSON.parse 前把 CRLF 归一成 LF —— 与 git blob（LF）逐字节同源。
+  readText: (p) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n'),
   listDir: (p) => readdirSync(p),
 };
 

@@ -350,7 +350,7 @@ describe('parseArgs', () => {
 });
 
 describe('已提交的 placeholder-hashes.json', () => {
-  it('byBook 与当前 data/placeholder/worldbooks 同步（改了书要重跑脚本）', () => {
+  it('byBook 与当前 public/data/worldbooks 同步（改了书要重跑脚本）', () => {
     expect(existsSync(MANIFEST_FILE)).toBe(true);
     const committed = JSON.parse(readFileSync(MANIFEST_FILE, 'utf8')) as {
       version: string;

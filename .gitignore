@@ -65,7 +65,5 @@ public/audio/**/*.m4a
 public/audio/**/*.flac
 
 # Local mirror of public workshop entries used for compatibility research.
-reference/workshop-reference/
 
 # 本地调研笔记（第三方实现的行为审计等）。只供本机参考，不进仓库、不被代码或文档引用。
-reference/_local-notes/
