@@ -136,7 +136,9 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
     expect(r.locations).toBeUndefined(); // 失败面保持原值（空骨架）
     expect(r.catalog).toEqual({ pools: ['catalog-placeholder'] });
     expect(r.markers).toEqual([{ id: 'marker-placeholder' }]);
-    const failed = c.fetchReports.filter((rep) => !rep.ok);
+    const failed = c.fetchReports.filter(
+      (rep) => !rep.ok && rep.source === 'content-registry:locations',
+    );
     expect(failed.map((rep) => rep.source)).toEqual(['content-registry:locations']);
     expect(failed[0].status).toBe(404);
   });
@@ -184,12 +186,14 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
     expect(Object.values(r).every((v) => v === undefined)).toBe(true);
   });
 
-  it('memoize：重复调只 fetch 一轮（六次）', async () => {
+  it('memoize：重复调只 fetch 一轮（六面各一次）', async () => {
     const { urls } = installFetchMock();
     await ensureContentRegistryLoaded();
     await ensureContentRegistryLoaded();
     await Promise.all([ensureContentRegistryLoaded(), ensureContentRegistryLoaded()]);
-    expect(urls).toHaveLength(CONTENT_REGISTRY_SOURCES.length);
+    // 🔴 只数六面自身的 fetch（loadProjectDefaults 链上 beautifier 预设有独立 fetch，
+    //    不参与注册表「一轮」的语义）
+    expect(urls.filter((u) => isRegistryUrl(u))).toHaveLength(CONTENT_REGISTRY_SOURCES.length);
   });
 
   it('并发首调共享同一 promise（不会 fetch 两轮）', async () => {
@@ -198,7 +202,7 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
     const b = ensureContentRegistryLoaded();
     expect(a).toBe(b);
     await Promise.all([a, b]);
-    expect(urls).toHaveLength(CONTENT_REGISTRY_SOURCES.length);
+    expect(urls.filter((u) => isRegistryUrl(u))).toHaveLength(CONTENT_REGISTRY_SOURCES.length);
   });
 
   it('resetContentRegistryLoadedForTests 之后会重新 fetch', async () => {
@@ -206,9 +210,14 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
     await ensureContentRegistryLoaded();
     resetContentRegistryLoadedForTests();
     await ensureContentRegistryLoaded();
-    expect(urls).toHaveLength(CONTENT_REGISTRY_SOURCES.length * 2);
+    expect(urls.filter((u) => isRegistryUrl(u))).toHaveLength(CONTENT_REGISTRY_SOURCES.length * 2);
   });
 });
+
+/** 六面注册表 URL（beautifier 预设等非注册表 fetch 不计入「一轮」） */
+function isRegistryUrl(u: string): boolean {
+  return u.startsWith('/data/content/') || u === '/data/defaults/map-marker-presets.json';
+}
 
 describe('ensureContentRegistryLoaded —— pack 优先（D20 三态）', () => {
   /** 把 pack 写进 Dexie：加载器内部 hydrate 会把它捞进模块缓存（与 boot 真实路径同形） */
@@ -249,14 +258,14 @@ describe('ensureContentRegistryLoaded —— pack 优先（D20 三态）', () =>
     expect(getContentRegistry().locations).toBeUndefined();
   });
 
-  it('装包后再跑一轮加载不会把 pack 面冲掉（memo 已生效 → 零 fetch）', async () => {
+  it('装包后再跑一轮加载不会把 pack 面冲掉（memo 已生效 → 六面零 fetch）', async () => {
     await installPackRecord(makeRegistryPack());
     const { urls } = installFetchMock();
     await ensureContentRegistryLoaded();
     const before = getContentRegistry().catalog;
     await ensureContentRegistryLoaded();
     expect(getContentRegistry().catalog).toBe(before);
-    expect(urls).toHaveLength(CONTENT_REGISTRY_SOURCES.length);
+    expect(urls.filter((u) => isRegistryUrl(u))).toHaveLength(CONTENT_REGISTRY_SOURCES.length);
   });
 
   it('即使重置 memo 重跑，pack 面仍然赢（规则 2 与 memo 无关）', async () => {

@@ -91,7 +91,43 @@ export function getBuiltinRules(): BeautifierRule[] {
  *
  * @returns 预设规则列表（含内置 + 远程导入的规则）
  */
+/**
+ * 规则字段归一化（占位文件与 pack 规则共用）。
+ *
+ * 🔴 pack 规则（content-store 装包后走 provider 内存层）直接来自构建器 JSON，
+ *    与占位文件同形状：`defaultEnabled` 而非 `enabled`、`flags` 可缺省。若不经
+ *    本函数直接进 `presetRules`，`enabled` 为 undefined → 渲染侧全判不激活，
+ *    `builtin-dialogue-card` 这类「出厂默认开」的规则装包后也失效（2026-08-07 真机）。
+ */
+export function normalizeRuleRuntime(r: any): BeautifierRule {
+  return {
+    id: r.id,
+    name: r.name,
+    scope: r.scope ?? 'maintext',
+    pattern: r.pattern,
+    flags: r.flags ?? 'g',
+    replacement: r.replacement,
+    enabled: r.defaultEnabled ?? false,
+    order: r.order ?? 99,
+    isBuiltin: r.isBuiltin ?? true,
+    minDepth: Number.isFinite(r.minDepth) ? r.minDepth : undefined,
+    maxDepth: Number.isFinite(r.maxDepth) ? r.maxDepth : undefined,
+    autoEnable: r.autoEnable,
+    group: r.group,
+    locked: false,
+  } satisfies BeautifierRule;
+}
+
+/**
+ * 预设规则加载（占位文件）。
+ *
+ * 🔴 模块级 memo（2026-08-07）：boot / 装包 / 卸载 / 设置页兜底都会调它，派生缓存
+ *    每次重算时 fetch 一次就够——重复 fetch 会污染「六面只 fetch 一轮」的装载计数
+ *    语义（content-store registry 测试），也让每次装包多一次无谓网络往返。
+ */
+let presetRulesCache: BeautifierRule[] | null = null;
 export async function loadPresetRules(): Promise<BeautifierRule[]> {
+  if (presetRulesCache) return presetRulesCache;
   try {
     const resp = await fetch('/data/defaults/beautifier-rules.json');
     if (!resp.ok) {
@@ -102,26 +138,9 @@ export async function loadPresetRules(): Promise<BeautifierRule[]> {
     }
     const data = await resp.json();
     const raw: any[] = data?.rules ?? [];
-    const rules = raw.map(
-      (r: any) =>
-        ({
-          id: r.id,
-          name: r.name,
-          scope: r.scope ?? 'maintext',
-          pattern: r.pattern,
-          flags: r.flags ?? 'g',
-          replacement: r.replacement,
-          enabled: r.defaultEnabled ?? false,
-          order: r.order ?? 99,
-          isBuiltin: r.isBuiltin ?? true,
-          minDepth: Number.isFinite(r.minDepth) ? r.minDepth : undefined,
-          maxDepth: Number.isFinite(r.maxDepth) ? r.maxDepth : undefined,
-          autoEnable: r.autoEnable,
-          group: r.group,
-          locked: false,
-        }) satisfies BeautifierRule,
-    );
+    const rules = raw.map((r: any) => normalizeRuleRuntime(r));
     reportContentFetch({ source: 'beautifier.loadPresetRules', status: resp.status, ok: true });
+    presetRulesCache = rules;
     return rules;
   } catch (err) {
     reportContentFetch({
@@ -132,6 +151,11 @@ export async function loadPresetRules(): Promise<BeautifierRule[]> {
     console.warn('[Beautifier] 预设规则加载异常，回退到 getBuiltinRules():', err);
     return getBuiltinRules();
   }
+}
+
+/** 重置预设规则缓存（测试隔离用；生产不调） */
+export function resetPresetRulesCache(): void {
+  presetRulesCache = null;
 }
 
 // ========== Auto-Enable Resolution ==========

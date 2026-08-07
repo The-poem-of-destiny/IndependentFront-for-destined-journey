@@ -18,7 +18,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { getDatabase } from '@engine/database';
-import { loadPresetRules, mergeRules } from '@engine/beautifier';
+import { loadPresetRules, mergeRules, normalizeRuleRuntime } from '@engine/beautifier';
 import { getPackRules } from '@engine/content-source';
 import type { BeautifierRule } from '@engine/types';
 import {
@@ -113,10 +113,13 @@ export const useBeautifierStore = defineStore('beautifier', () => {
       // provider 内存层优先（D20）：pack 规则 > 占位文件。packRulesOverride 显式传入时
       // 优先用它（装包瞬间 provider 注册与重算谁先谁都互斥，显式传最稳）。
       const packRules = packRulesOverride ?? getPackRules();
-      // 兼容下游 mergeRules / pruneLegacyBuiltinOverrides 的 mutable 参数，展开为可变数组
+      // 🔴 pack 规则必须过 normalizeRuleRuntime（2026-08-07 真机）：构建器 JSON 是
+      //    `defaultEnabled` 形状，不经归一化则 enabled=undefined → 渲染侧全判不激活，
+      //    builtin-dialogue-card 这类出厂默认开的规则装包后也失效。
+      //    兼容下游 mergeRules / pruneLegacyBuiltinOverrides 的 mutable 参数，展开为可变数组
       const preset: BeautifierRule[] =
         packRules !== undefined && packRules.length >= 0
-          ? [...packRules]
+          ? (packRules as BeautifierRule[]).map((r) => normalizeRuleRuntime(r as any))
           : ((await loadPresetRules()) as BeautifierRule[]);
       // 覆盖列表语义迁移：认得出出厂默认值才能做，所以挂在预设加载之后。
       // 内部有标志位，重复调用是空转。
