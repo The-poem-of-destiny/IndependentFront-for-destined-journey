@@ -32,14 +32,14 @@ combat-v3-stress-test / narrative_context_example）移私有仓——工作树�
 
 **真机修出的四个引擎缺陷**（全部合入 master + 回归测试）：
 
-| PR  | 缺陷                                                 | 根因                                                                                                                                                                 |
-| --- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| #49 | 装包失败零日志                                       | DataSection 空 catch 吞错，只弹 toast                                                                                                                                |
-| #50 | 装包 DataCloneError「#<Object> could not be cloned」 | `packPending = ref(raw)` 被 Vue 深代理成 Proxy → savePreset(Proxy) / contentPacks.put(Proxy) 落库失败（Q-16 detach 纪律的漏网点——世界书有 detach，presets/整包没有） |
-| #51 | 装包后美化规则仍是占位 5 条                          | ① boot 竞态：beautifier.init 先于 pack provider 注册，之后没人刷新 ② pack 规则缺字段归一化（`defaultEnabled` 未转 `enabled` → 全判不激活）                           |
-| #52 | 地图加载失败（12.48MB 图源 30 秒超时中断）           | `MAP_OPEN_TIMEOUT_MS=30000` 砍掉慢网下载 + 只有内存缓存每次刷新重下 → v21 `mapBlobs` 字节本地化 + 下载不设超时 + 进度显示                                            |
-| #54 | 记忆每轮不落库（7 轮只有 1 条）                       | memory_summary 默认 prompt 教模型「剧情事件/时间为空时 hiddenLine 留空」，而解析器按 Q-03 裁定弃掉空 hiddenLine 的整条记忆 —— prompt 改为必写非空兜底句 + 契约回归测试（私有内容仓同修） |
-| #55 | 进存档对话不自动滚到底                                 | ChatFlow 只 watch messages.length：进存档是整数组替换（长度不变不触发）、挂载时消息已就位也不触发 —— 补 onMounted 滚动 + 数组引用 watch |
+| PR  | 缺陷                                                 | 根因                                                                                                                                                                                     |
+| --- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #49 | 装包失败零日志                                       | DataSection 空 catch 吞错，只弹 toast                                                                                                                                                    |
+| #50 | 装包 DataCloneError「#<Object> could not be cloned」 | `packPending = ref(raw)` 被 Vue 深代理成 Proxy → savePreset(Proxy) / contentPacks.put(Proxy) 落库失败（Q-16 detach 纪律的漏网点——世界书有 detach，presets/整包没有）                     |
+| #51 | 装包后美化规则仍是占位 5 条                          | ① boot 竞态：beautifier.init 先于 pack provider 注册，之后没人刷新 ② pack 规则缺字段归一化（`defaultEnabled` 未转 `enabled` → 全判不激活）                                               |
+| #52 | 地图加载失败（12.48MB 图源 30 秒超时中断）           | `MAP_OPEN_TIMEOUT_MS=30000` 砍掉慢网下载 + 只有内存缓存每次刷新重下 → v21 `mapBlobs` 字节本地化 + 下载不设超时 + 进度显示                                                                |
+| #54 | 记忆每轮不落库（7 轮只有 1 条）                      | memory_summary 默认 prompt 教模型「剧情事件/时间为空时 hiddenLine 留空」，而解析器按 Q-03 裁定弃掉空 hiddenLine 的整条记忆 —— prompt 改为必写非空兜底句 + 契约回归测试（私有内容仓同修） |
+| #55 | 进存档对话不自动滚到底                               | ChatFlow 只 watch messages.length：进存档是整数组替换（长度不变不触发）、挂载时消息已就位也不触发 —— 补 onMounted 滚动 + 数组引用 watch                                                  |
 
 ---
 
