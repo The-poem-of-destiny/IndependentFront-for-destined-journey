@@ -550,7 +550,7 @@ describe('planPackInstall (T1 skeleton)', () => {
       beautifierRules: { version: 1, rules: [] },
       mapMarkers: [],
       locations: [],
-      bloodlines: { bloodlines: [] },
+      bloodlines: { bloodlines: {} },
     };
     const plan = planPackInstall(pack);
     expect(plan.sections.worldBooks).toBeDefined();
