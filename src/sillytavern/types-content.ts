@@ -395,7 +395,7 @@ export interface PackInstallPlan {
     mapMarkers?: PackSectionPlan<MapMarker>;
     catalog?: PackSectionPlan<unknown>;
     locations?: PackSectionPlan<LocationNode>;
-      bloodlines?: PackSectionPlan<PackBloodlinesSection>;
+    bloodlines?: PackSectionPlan<PackBloodlinesSection>;
     namePools?: PackSectionPlan<unknown>;
   };
   agentDefaults?: {
