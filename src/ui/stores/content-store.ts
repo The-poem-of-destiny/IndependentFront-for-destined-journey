@@ -239,7 +239,14 @@ export function setActivePackRecord(record: ContentPackRecord | null): void {
   activePackRecord = record;
   // 同步 pack 美化规则 provider（D20：pack 规则走 provider 内存层）。
   // 传 null = 占位态，beautifier-store 回落占位文件。
-  setPackRulesProvider(record ? () => record.payload.beautifierRules?.rules ?? [] : null);
+  // 🔴 不写 `?? []`：pack 未声明 beautifierRules 分节（absent）应回落占位文件
+  //    （D20 三态：absent = 无话可说），只有显式 [] 才是刻意清空。
+  setPackRulesProvider(record ? () => record.payload.beautifierRules?.rules : null);
+  // 🔴 provider 挂载/替换后必须让 beautifier-store 重算 presetRules（2026-08-07 真机
+  //    竞态：App.vue 的 beautifier.init() 先于 boot 的 hydratePackState，init 时 provider
+  //    未挂 → 回落占位 5 条，之后没人再刷新 → 装包后美化一直是占位规则）。
+  //    本函数刻意保持同步、不在这里刷新 —— 刷新动作放在调用方的 async 链
+  //    （hydratePackState / uninstallPack），避免 fire-and-forget 污染测试时序。
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -740,6 +747,15 @@ export const useContentStore = defineStore('content', () => {
           activePackId.value = null;
           activePackVersion.value = null;
           if (contentStatus.value === 'pack') contentStatus.value = 'placeholder';
+        }
+        // 🔴 竞态修复（2026-08-07 真机）：provider 此刻才挂载，而 App.vue 的
+        //    beautifier.init() 已先跑过（回落占位 5 条）——这里重算 presetRules，
+        //    pack 规则才能生效。无 pack 时（provider=null）重算是无害空转。
+        try {
+          const { useBeautifierStore } = await import('./beautifier-store');
+          await useBeautifierStore().refreshPresetRules();
+        } catch {
+          /* Pinia 未就绪时静默；消费端各自兜底 */
         }
       } catch {
         // Dexie 不可用 → 缓存保持现状，不阻断（boot 兜底）
@@ -1265,6 +1281,14 @@ export const useContentStore = defineStore('content', () => {
         setActivePackRecord(null);
         activePackId.value = null;
         activePackVersion.value = null;
+        // 🔴 provider 已切回 null → 重算 presetRules 回落占位文件（D20：卸载天然免费；
+        //    不刷新则美化停在 pack 的 22 条，与卸载后世界书回落占位不一致）
+        try {
+          const { useBeautifierStore } = await import('./beautifier-store');
+          await useBeautifierStore().refreshPresetRules();
+        } catch {
+          /* 同上：静默兜底 */
+        }
 
         // 🔴 pack 缓存清掉**之后**再重拉占位六面（否则 pack 优先级会把刚卸的包灌回来）；
         //    又必须在下面那句 `contentStatus = 'placeholder'` **之前** —— 卸载的终态是确定的

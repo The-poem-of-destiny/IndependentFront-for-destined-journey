@@ -455,11 +455,15 @@ describe('content-store 执行器 —— 5. 装包后 boot 时序（D44 默认�
     // 即便占位 fetch 会返回别的，pack 层已接管
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({ version: 1, agents: { story: { systemPrompt: 'PLACEHOLDER' } } }),
-          { status: 200 },
-        ),
+      // 🔴 mockImplementation 而非 mockResolvedValue：Response 实例只能读一次 body，
+      //    loadProjectDefaults 链上有多处 fetch（beautifier 重算 / 六面注册表 / agent-config），
+      //    共享同一 Response 会让第二次 res.json() 抛「body already used」。
+      .mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({ version: 1, agents: { story: { systemPrompt: 'PLACEHOLDER' } } }),
+            { status: 200 },
+          ),
       );
     const defaults = (await c.loadProjectDefaults()) as {
       agents: Record<string, { systemPrompt: string }>;
@@ -472,11 +476,12 @@ describe('content-store 执行器 —— 5. 装包后 boot 时序（D44 默认�
     const c = useContentStore();
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({ version: 1, agents: { story: { systemPrompt: 'PLACEHOLDER' } } }),
-          { status: 200 },
-        ),
+      .mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({ version: 1, agents: { story: { systemPrompt: 'PLACEHOLDER' } } }),
+            { status: 200 },
+          ),
       );
     const defaults = (await c.loadProjectDefaults()) as {
       agents: Record<string, { systemPrompt: string }>;
