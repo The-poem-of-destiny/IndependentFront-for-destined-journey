@@ -1146,7 +1146,11 @@ export async function getPresets(): Promise<ChatPreset[]> {
 }
 
 export async function savePreset(preset: ChatPreset): Promise<string> {
-  await getDatabase().presets.put(preset);
+  // 🔴 落库前切断 Vue Proxy（Q-16 / db-write.ts 同款纪律）：装包链路上 preset 可能
+  //    经过 Vue 响应式（ref 深代理），IDB 结构化克隆拒绝 Proxy → DataCloneError。
+  //    （2026-08-07 真机：导入内容包报「#<Object> could not be cloned」——
+  //     packPending.value = raw 被 ref 自动 reactive 化，确认重入后 savePreset(Proxy) 炸）
+  await getDatabase().presets.put(JSON.parse(JSON.stringify(preset)) as ChatPreset);
   return preset.id;
 }
 

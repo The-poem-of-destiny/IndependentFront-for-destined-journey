@@ -6,7 +6,7 @@
  *    所以效果反而更准（每次点进来都是新数），代价是切走再切回会多问一次
  *    `navigator.storage.estimate()` —— 那是个便宜的浏览器查询。
  */
-import { ref, computed, onMounted } from 'vue';
+import { ref, shallowRef, computed, onMounted } from 'vue';
 import type { SceneImageUsage } from '@engine/types-image';
 import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
@@ -48,7 +48,10 @@ onMounted(async () => {
  * `PackInstallConfirmModal`，用户确认后以 `{ confirmConflicts: true }` 重入。
  */
 const packPlan = ref<PackInstallPlan | null>(null);
-const packPending = ref<unknown | null>(null); // 待确认的原始 pack JSON
+// 🔴 shallowRef：pack 是纯数据，绝不能进响应式系统——ref 深代理会让确认重入时
+//    取回 Proxy，savePreset 落库 IDB 结构化克隆拒绝 Proxy → DataCloneError
+//    （2026-08-07 真机根因；savePreset 侧已加 detach 双保险）。
+const packPending = shallowRef<unknown | null>(null); // 待确认的原始 pack JSON
 const packDiff = ref<PackUpgradeDiff | null>(null);
 const packError = ref<string | null>(null);
 const packInstalling = ref(false);
