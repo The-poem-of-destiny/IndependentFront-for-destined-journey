@@ -12,6 +12,9 @@
 - Random rune evidence: `tmp/magic-circle-qa/random-runes-wide-a.png` and `tmp/magic-circle-qa/random-runes-wide-b.png` (`1280 x 720`, two states 4.2 seconds apart)
 - Premium rune evidence: `tmp/magic-circle-qa/premium-runes-wide-a.png` and `tmp/magic-circle-qa/premium-runes-wide-b.png` (`1280 x 720`, two traveling-highlight states 1.15 seconds apart)
 - Runtime: `src/ui/components/home/MagicCircle.standalone.html`
+- Open the file directly in a browser. Serving it through the project's Vite dev server fails
+  with a 500: Vite rewrites the inline module and ignores the page's own importmap, so the
+  `three` bare specifier does not resolve. The file is a standalone study, not a Vite entry.
 - Captured state: autonomous animation after approximately 3 seconds with the glow controls at the then-current 100% neutral baseline and tested extremes
 
 ## Simplification outcome
@@ -19,7 +22,7 @@
 - Composition: the full astrolabe occupies the same shallow oblique ellipse, uses a long-lens perspective, and keeps the aperture aligned with the supplied reference.
 - Hierarchy: four broad engraved registers, a separate guardian filigree layer, cardinal sigils, black aperture, and sparse void atmosphere.
 - Rim budget: five visible metallic rims total: one outer crown, three register rails, and one aperture rim.
-- Finish: the annular slab and crystalline sidewall remain absent. Smoke-bronze and moon-silver rims now combine physical metal, bright emissive cores, localized traveling energy veins, close additive halos, and restrained bloom. Rune spill, cardinal sigils, central filigree, aperture ticks, and rim halos compensate from the camera's projected pixels-per-world so their apparent radius stays stable as the composition refits.
+- Finish: the annular slab and crystalline sidewall remain absent. Smoke-bronze and moon-silver rims now combine physical metal, emissive cores held below their former ceiling, a light that travels the full circumference and carries most of the rim's brightness, close additive halos, and restrained bloom. Rune spill, cardinal sigils, central filigree, aperture ticks, and rim halos compensate from the camera's projected pixels-per-world so their apparent radius stays stable as the composition refits.
 - Motion: all four registers retain independent direction, speed, phase, height, and restrained vertical drift. Filigree, sigils, patina, aperture ticks, stars, and glints keep separate motion tracks. A single authored radial surge periodically travels through the particle field, tangent-aligned orbital streaks, rim veins, aperture light, and bloom. Each register charges one randomly selected rune at a time; the complete engraving eases into a bronze or silver radiance with a pale-metal edge, then fades without segment flashing.
 - Constraint: no raster, SVG, model, video, or other visual asset is loaded at runtime. Geometry, CanvasTextures, particles, and shaders are generated in the standalone file.
 
@@ -41,12 +44,96 @@
 14. The premium-material correction removed the rejected flat-white, many-at-once pulse. Each mask now encodes an exact glyph ID so selection cannot fall between filtered symbols; every ring chooses one primary rune, occasionally favoring a larger major glyph. A radial highlight traverses the engraving in either direction, revealing a tempered bronze/silver charge behind it while edge sampling keeps the cut profile sharp. The Runes dial still scales the complete effect and 0% disables it.
 15. The rune-flicker correction enabled mipmapped anisotropic sampling for the rotating glyph mask and removed the narrow radial hot front that made disconnected strokes pop as it crossed them. The selected rune now charges as one eased engraved-metal surface. A 70-frame on/off browser probe reduced the illuminated-layer frame-jump ratio from 1.78x to 1.39x against a 1.45x limit.
 
+16. The rune-flicker root-cause pass replaced the sampled glyph index with an analytic one. The
+    mask encoded the index in its red channel and the shader decoded it through linear,
+    mipmapped, anisotropic filtering before a hard threshold: neighbouring indices blended into
+    each other, minification averaged whole runs of them into noise, and the unpremultiply
+    divide lost the index outright on antialiased edges. The index is now derived from the pixel
+    angle, which is exact because every glyph is laid at `(glyphIndex / glyphCount) * TAU`, and
+    the mask carries shape only. Two offscreen WebGL2 probes drove the shipping fragment shader
+    for 70 frames while the register turned 0.2 px: selection toggling fell from 89.6% of lit
+    pixels per frame to 2.3%, and mean frame-to-frame brightness change fell from 90.2% to 5.0%
+    (worst frame 92.3% to 8.8%). Lit area rose from 62 to 79 arbitrary units, because the old
+    decode was also dropping edge pixels of the very glyph it was charging. A centroid check
+    confirmed the analytic index lands on the intended glyph: 33.02, 40.01 and 6.90 for targets
+    33, 40 and 7.
+
+17. The rune-uniformity pass replaced the engraving's edge measure. `interior` was an erosion of
+    the mask by four taps at a fixed base-level texel offset, subtracted from a `glyphAlpha`
+    that arrives through the mipmap and anisotropic chain; the two measured the mask at
+    different scales, so their difference was largely filter noise. That noise drove the
+    colour, the hot vein and the alpha together, so a charging rune read as a mottled, speckled
+    outline rather than an evenly lit engraving. Core and rim are now both pure functions of
+    the sampled coverage. Measured against the shipping shader in the real scene, on the outer
+    register with the ignition layer isolated: local roughness inside the glyph body fell from
+    3.50% to 1.94% at 1280x720 and from 3.25% to 2.03% at 1920x1080; solid interior pixels rose
+    from 145 to 163 and from 477 to 525, the strokes having stopped reading as hollow outlines;
+    and the red-to-blue ratio rose from 1.20 to 1.75, the charge holding bronze instead of
+    washing toward white. A screen-space-derivative variant was built and rejected: `fwidth`
+    quantises to the 2x2 shading quad and scattered visible dots through the glyph interior.
+
+18. The far plane now follows the framing solve. `resize()` backs the camera off to fit the
+    disc's width, so the distance grows without bound as the viewport narrows, but `camera.far`
+    was fixed at 100 — chosen to clear the default landscape distance of 34.2 with the 48-unit
+    nebula dome behind it, and never revisited. Three thresholds were measured against the live
+    scene. Below about 1.13:1 the dome's back fell outside the frustum and the violet backdrop
+    was replaced by black, which covers every portrait render in the evidence above, including
+    the 900x1200 and 720x980 shots this document cites as passing. Below 0.60 the disc's own far
+    edge was clipped. Below 0.585 the camera itself sat beyond the far plane and the frame was
+    bare starfield. `camera.far` is now `distance + BACKDROP_RADIUS * 1.08`, and the dome is
+    built from that same `BACKDROP_RADIUS`, so the two cannot drift apart again. Verified across
+    aspects from 1.78 down to 0.55: nothing clipped at any of them, and 900x1200, 600x1000,
+    560x1000 and 360x900 render the complete astrolabe over the full backdrop. The near plane
+    was deliberately left at 0.08 — depth precision here is set by near, not far, so widening
+    far costs nothing, and moving near would redistribute precision across layers that are
+    currently stable.
+
+19. The rim flow pass. The energy vein already described itself as travelling, but its pattern
+    advanced one revolution per 159 seconds, roughly 1.5 degrees per second, which is below the
+    threshold at which motion reads at all — the layer rendered as three stationary hot spots.
+    It is now an asymmetric pulse: a hard front with an exponential wake, because a symmetric
+    lobe reads as a bump swelling in place rather than as light moving through a tube. Every rim
+    runs at the same linear speed, 3.99 world units per second, so the period grows with the
+    radius — 8.00 s on the outer crown down to 1.50 s on the aperture rim — and the five rims
+    read as one substance moving through the structure instead of five independent turntables.
+    Each rim's direction is inherited from the register it rides, so the flow reinforces the
+    alternation the composition already had rather than competing with it; the crown and the
+    aperture rim, which ride nothing, open and close that alternation.
+
+    The change that made it visible at all is the rebalance, not the shader. A chase at 4x gain
+    over the untouched rim was indistinguishable from no chase: a highlight cannot be added to
+    something already at its ceiling. The constant layers therefore step back — core to 0.62,
+    halo to 0.68 — and the traveling light carries the difference at 3x. This also recovered
+    something that was already broken and unnoticed: the scene's own authored surge, a roughly
+    40-second event, was lifting the frame mean by 5.0%, which is imperceptible. Against the
+    rebalanced base the same surge lifts it by 43.4%. The piece had been running with no
+    headroom left for its own rhythm.
+
+    Three candidates were rendered before choosing. The rejected strong variant (core 0.30,
+    halo 0.45, 6 s) reads well but redefines the rims as dark tubes with light inside them,
+    which is a different object from the one this document describes. The shipped values were
+    verified from the file itself: linear speed identical across all five rims, directions
+    alternating, no GL errors, and rest and surge means within 1% of the approved prototype.
+
 ## Findings
 
 - P0: none.
-- P1: none.
-- P2: none.
+- P1: one escaped defect, reported by the owner after pass 15 and fixed in pass 16 — the runes
+  flickered while charging. Pass 15 measured the symptom and answered it by tightening the
+  filtering, which lowered the measured frame-jump ratio while making the underlying decode
+  worse. 1.39x against a 1.45x limit was a symptom squeezed under a threshold, not a cause
+  removed. A discrete index must never be read through a filter built for continuous data.
+- P1: a second escaped defect from the same family, reported by the owner and fixed in pass 17 —
+  the charge was mottled and dotted. Both P1s are one mistake made twice: reading the mask at a
+  scale the sampler is not using. Pass 14 did it with the glyph index, the original engraving
+  shading did it with the edge taps.
+- P2: the fixed far plane truncated the framing solve at every aspect narrower than about
+  1.13:1, including every portrait render in the evidence above. Fixed in pass 18.
 - Browser console after final desktop and portrait reloads: no errors or warnings.
 - Reduced motion freezes the scene at a deterministic authored frame.
 
-final result: passed
+final result: passed. Passes 16 and 17 were verified from real rendered frames of this scene —
+the file loaded, its own shaders compiled, and frames stepped one at a time with the ignition
+layer isolated so its pixels could be read directly. What has not happened is watching it
+animate: the harness drives frames by hand because `requestAnimationFrame` does not fire in it,
+so motion over time is inferred from stepped frames rather than observed.
