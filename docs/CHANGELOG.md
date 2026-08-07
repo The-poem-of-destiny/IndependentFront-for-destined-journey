@@ -9,6 +9,38 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 内容-引擎分离 R1-R4 全部完成 ｜ ✅ v1.3 闭环（2026-08-07）
+
+**R1 内容归家**：新私有内容仓 `fated_poem_independent_assets`（GitHub private，
+`_private-staging/` 完整等价树迁入，100 文件 136MB）；🔴 全树密钥/PII 扫描首跑抓到
+2 个真实 API key（deepseek + siliconflow——后者正是 T0.1 说的公开历史 key）——已 gitignore
+排除；84MB 对局导出按主人裁定删除（价值已提炼进战斗样本/agent 分析，README 留记录）；
+`tools/scan-secrets.mjs` 常态化。
+
+**R2 pack 构建器**：`tools/build-pack.mjs`——schema 组装 + 编码门 + **D10 黑名单硬拦**
+（Overlord / Fate=圣杯战争 / HP=踏星仪式三条 franchise 背景——HP 是化名「雾晶学院/魔法帽」，
+靠 git 历史溯源定位）+ provenance 标记（kitsch/D35③ 授权未决）+ 逐节 SHA-256 + 自检。
+产物 3.31MB（预估 3.2MB 吻合），15 本世界书 509 条（与设计 max uid≈509 吻合）。
+
+**R3 真实 pack v1.0.0 + 分发**：契约测试（`POEM_PACK_FILE`）全绿——validate 0 error /
+新鲜播种 0 冲突 / 编辑冲突路径活着。Release `pack-1.0.0` 已发内容仓；
+`MIGRATION.md` 测试者迁移公告（四降级面：美化 22 条/地图标记/捏人目录/曲库 zip 通道）。
+
+**R4 真机三走查**：占位演示环路 / 装包全链路 / 存档迁移全过（主人 2026-08-07 真机）；
+key 轮换确认（验收 #7 勾掉）；可选扫尾三处语料文档（ARCHITECTURE 世界观半部 /
+combat-v3-stress-test / narrative_context_example）移私有仓——工作树不再有正文级世界观语料。
+
+**真机修出的四个引擎缺陷**（全部合入 master + 回归测试）：
+
+| PR  | 缺陷                                                 | 根因                                                                                                                                                                 |
+| --- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #49 | 装包失败零日志                                       | DataSection 空 catch 吞错，只弹 toast                                                                                                                                |
+| #50 | 装包 DataCloneError「#<Object> could not be cloned」 | `packPending = ref(raw)` 被 Vue 深代理成 Proxy → savePreset(Proxy) / contentPacks.put(Proxy) 落库失败（Q-16 detach 纪律的漏网点——世界书有 detach，presets/整包没有） |
+| #51 | 装包后美化规则仍是占位 5 条                          | ① boot 竞态：beautifier.init 先于 pack provider 注册，之后没人刷新 ② pack 规则缺字段归一化（`defaultEnabled` 未转 `enabled` → 全判不激活）                           |
+| #52 | 地图加载失败（12.48MB 图源 30 秒超时中断）           | `MAP_OPEN_TIMEOUT_MS=30000` 砍掉慢网下载 + 只有内存缓存每次刷新重下 → v21 `mapBlobs` 字节本地化 + 下载不设超时 + 进度显示                                            |
+
+---
+
 ### 内容-引擎分离 波 4 + v1.3 缩减裁定 ｜ ✅ 波 4 完成（2026-08-07）
 
 **波 4（PR #45，T17 原子交换 + T18 守门）**：真实内容全部离树（15 本世界书 / agent-config /
