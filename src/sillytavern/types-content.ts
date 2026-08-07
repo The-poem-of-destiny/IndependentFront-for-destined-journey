@@ -19,7 +19,6 @@
 
 import type {
   BeautifierRule,
-  Bloodline,
   ChatPreset,
   LocationNode,
   MapMarker,
@@ -156,9 +155,17 @@ export interface PackCatalogSection {
 /** 地点节点分节（§4：LocationNode[]，34 节点） */
 export type PackLocationsSection = readonly LocationNode[];
 
-/** 血脉分节（§4：KNOWN_BLOODLINES 形状） */
+/**
+ * 血脉分节（§4：KNOWN_BLOODLINES 形状）。
+ *
+ * 🔴 真实形状是 `Record<raceKey, BloodlineInfo>`（`data/content/bloodlines.json` 同形，
+ * 运行态 `getBloodlineSet()` 直接消费整块；pack 整块替换，无逐项冲突语义——planner
+ * 走 planOpaqueSection）。曾写 `{bloodlines: readonly Bloodline[]}` 是数组假设，
+ * 已随 planner 修正作废。
+ */
 export interface PackBloodlinesSection {
-  bloodlines: readonly Bloodline[];
+  /** raceKey → 血脉信息（含 description 等叙事字段） */
+  bloodlines: Record<string, unknown>;
 }
 
 /**
@@ -388,7 +395,7 @@ export interface PackInstallPlan {
     mapMarkers?: PackSectionPlan<MapMarker>;
     catalog?: PackSectionPlan<unknown>;
     locations?: PackSectionPlan<LocationNode>;
-    bloodlines?: PackSectionPlan<Bloodline>;
+    bloodlines?: PackSectionPlan<PackBloodlinesSection>;
     namePools?: PackSectionPlan<unknown>;
   };
   agentDefaults?: {

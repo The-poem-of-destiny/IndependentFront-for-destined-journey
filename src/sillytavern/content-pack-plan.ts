@@ -172,14 +172,11 @@ export function planPackInstall(
     );
   }
   if (pack.bloodlines !== undefined) {
-    sections.bloodlines = planIdKeySection(
-      pack.bloodlines.bloodlines,
-      (current.bloodlines ?? []).map((b) => b),
-      undefined,
-      undefined,
-      (b: Bloodline) => b.id,
-      (b: Bloodline) => hashContentDeterministic(JSON.stringify(stableSerialize(b))),
-    );
+    // bloodlines 是 Record 形状整块替换分节（运行态 getBloodlineSet 消费，与占位
+    // bloodlines.json 同形）——无逐项冲突语义，与 catalog/namePools 同走 opaque。
+    // 🪦 曾按 id-keyed 四态读 `pack.bloodlines.bloodlines`（数组假设）：T10 落地
+    //    Record 形状后 planner 未同步，装真实 pack 时 `undefined.length` 崩溃。
+    sections.bloodlines = planOpaqueSection(pack.bloodlines);
   }
   if (pack.namePools !== undefined) {
     // namePools 是 `{ data: unknown }` 透传分节，本波按整块判定（无逐项键）
