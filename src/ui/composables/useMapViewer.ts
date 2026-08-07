@@ -59,6 +59,39 @@ export function resolveMapSources(branding: unknown): MapSourceConfig[] {
 const MAP_OPEN_TIMEOUT_MS = 30000;
 
 /**
+ * 下载地图字节（v21 地图字节本地化）。
+ *
+ * 🔴 **刻意不设超时**：12MB 图源在慢网络下 30 秒下不完是真实场景（2026-08-07 真机），
+ * 中断只由调用方 signal 控制（用户切换图源 / 组件卸载）。进度经 ReadableStream
+ * 逐块上报，UI 显示「下载中 xx%」而不是死等。
+ */
+async function downloadMapBlob(
+  config: MapSourceConfig,
+  signal: AbortSignal,
+  onProgress?: (p: number) => void,
+): Promise<Blob> {
+  const response = await fetch(config.url, { mode: 'cors', signal });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+  const total = Number(response.headers.get('content-length')) || 0;
+  if (response.body && total > 0) {
+    const reader = response.body.getReader();
+    const chunks: BlobPart[] = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      onProgress?.(Math.round((received / total) * 100));
+    }
+    return new Blob(chunks, { type: response.headers.get('content-type') ?? undefined });
+  }
+  return response.blob();
+}
+
+/**
  * @param containerRef OSD 挂载容器
  * @param sourcesRef   可用图源列表（D23：由 MapPanel 从注册表 branding 面解析后传入）
  */
@@ -133,7 +166,10 @@ export function useMapViewer(
   }
 
   // ========== 加载地图源 ==========
-  async function loadSource(key: string) {
+  /**
+   * @param onProgress 下载进度回调（0-100，仅在首次下载地图字节时触发；本地缓存命中不触发）
+   */
+  async function loadSource(key: string, onProgress?: (p: number) => void) {
     const viewer = viewerRef.value;
     if (!viewer) return;
 
@@ -150,6 +186,7 @@ export function useMapViewer(
     currentSourceKey.value = key;
     status.value = 'loading';
     errorMessage.value = '';
+    onProgress?.(0);
 
     // 取消上一次加载
     abortController?.abort();
@@ -160,37 +197,36 @@ export function useMapViewer(
     const isLatest = () => openSequence === currentSequence;
 
     try {
-      // 超时控制
+      // ① 地图字节本地化（v21 / mapBlobs）：先查 IndexedDB 缓存，命中则不再走网络。
+      //    12MB 图源（i.ibb.co）每次打开都重新下载 + 30 秒硬超时中断，是慢网络下
+      //    地图「加载失败」的根因（2026-08-07 真机：206 分块下载被 abort）。
+      const { getDatabase } = await import('@engine/database');
+      let blob = (await getDatabase().mapBlobs.get(config.url))?.blob;
+      if (!blob) {
+        blob = await downloadMapBlob(config, controller.signal, onProgress);
+        if (controller.signal.aborted || !isLatest()) return;
+        await getDatabase().mapBlobs.put({ url: config.url, blob, updatedAt: Date.now() });
+      }
+      if (controller.signal.aborted || !isLatest()) return;
+      onProgress?.(100);
+
+      const objectUrl = URL.createObjectURL(blob);
+      objectUrlCache.set(key, objectUrl);
+
+      // ② 打开阶段超时（本地 blob 读取很快；下载阶段刻意不设超时 —— 慢网慢慢下，
+      //    进度已上报，用户看到「下载中 xx%」而不是死等 30 秒被砍）
       const timeoutId = setTimeout(() => {
         controller.abort();
         if (isLatest()) {
-          errorMessage.value = '地图加载超时，请稍后重试';
+          errorMessage.value = '地图打开超时，请稍后重试';
           status.value = 'error';
         }
       }, MAP_OPEN_TIMEOUT_MS);
 
-      // 检查缓存
-      let objectUrl = objectUrlCache.get(key);
-
-      if (!objectUrl) {
-        const response = await fetch(config.url, {
-          mode: 'cors',
-          signal: controller.signal,
-        });
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        const blob = await response.blob();
-        objectUrl = URL.createObjectURL(blob);
-        objectUrlCache.set(key, objectUrl);
-      }
-
-      clearTimeout(timeoutId);
-      if (!isLatest()) return;
-
       // 等待 open 事件
       const onOpen = () => {
         viewer.removeHandler('open', onOpen);
+        clearTimeout(timeoutId);
         if (!isLatest()) return;
         status.value = 'ready';
         viewer.forceResize();

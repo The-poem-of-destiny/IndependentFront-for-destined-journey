@@ -76,6 +76,13 @@ export interface ContentPackRecord {
   notes?: unknown[];
 }
 
+/** 地图字节缓存行（v21）：`url` 主键，同一图源天然去重 */
+export interface MapBlobRecord {
+  url: string;
+  blob: Blob;
+  updatedAt: number;
+}
+
 const DB_NAME = 'SillyTavernWebDB';
 /**
  * 🔴 **必须等于下面最后一个 `this.version(n)`**。它只出现在 `FullBackup.version` 上
@@ -86,7 +93,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
  * 升版时这两处一起改。
  */
-const DB_VERSION = 20;
+const DB_VERSION = 21;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -221,6 +228,14 @@ class AppDatabase extends Dexie {
   //   payload = 整包 ContentPack；恢复默认/卸载/升级 diff 都从这里还原，无需重拿文件。
   //   🔴 **不进 FullBackup**（payload 进备份 = 每份备份都是可转发的完整内容包）。
   contentPacks!: Table<ContentPackRecord>;
+
+  // v21 (2026-08-07): 地图字节本地缓存（D23 补强）。
+  //   地图图源（pack branding.mapSources 指向的 webp，~12MB）首次打开时下载进
+  //   IndexedDB，之后永远读本地 —— 慢网络下 30 秒硬超时中断 + 每次刷新重下 12MB
+  //   （真机：i.ibb.co 206 分块下载被 MAP_OPEN_TIMEOUT_MS 中途 abort）。
+  //   🔴 **不进 FullBackup**（字节进备份 = 每份备份 +12MB，照 assetBlobs 先例）。
+  //   卸载 pack 刻意**保留**（重装秒开；行数少体积可控，无「零残留」负担）。
+  mapBlobs!: Table<MapBlobRecord>;
 
   constructor() {
     super(DB_NAME);
@@ -580,6 +595,9 @@ class AppDatabase extends Dexie {
     // 索引取舍：只建 `packId` 主键。安装/卸载/升级/对账全部按 packId 直查，无第二索引需求。
     // 与 v19 同款用对象字面量（仅声明本版新增表，旧表跨版继承，Dexie 4 累加语义）。
     this.version(20).stores({ contentPacks: 'packId' });
+
+    // v21 (2026-08-07): 地图字节本地缓存 —— url 主键，同一图源天然去重。
+    this.version(21).stores({ mapBlobs: 'url' });
   }
 }
 
