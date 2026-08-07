@@ -1,0 +1,1739 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Obsidian Astrolabe - Three.js Study</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        background: #010107;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body,
+      main {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      body {
+        background: #010107;
+      }
+
+      .magic-circle-stage {
+        position: relative;
+        isolation: isolate;
+        background: #010107;
+      }
+
+      #magic-circle-canvas {
+        position: absolute;
+        inset: 0;
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <!--
+      THESIS: A single ancient astrolabe fills the viewport; it refuses the chunky game-dial look.
+      OWN-WORLD: Smoke bronze and moon-silver engravings float above restrained violet space, lit from within.
+      STORY: Four broad fate registers turn independently around an unreadable central aperture with no solid annular substrate.
+      FIRST VIEWPORT: One shallow oblique disc occupies roughly ninety percent of a landscape frame with no UI chrome.
+      FORM: Faithful reproduction of the supplied approved reference; seed key reference-b1121ab9.
+      FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+    -->
+    <main
+      class="magic-circle-stage"
+      aria-label="An ancient engraved obsidian astrolabe turning in a dark violet void"
+    >
+      <canvas id="magic-circle-canvas" aria-hidden="true"></canvas>
+    </main>
+
+    <script type="module">
+      import * as THREE from 'three';
+      import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+      import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+      import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+      import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+      import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+      import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+      import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+      const TAU = Math.PI * 2;
+      const canvas = document.querySelector('#magic-circle-canvas');
+      const stage = document.querySelector('.magic-circle-stage');
+      const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const random = mulberry32(0xb1121ab9);
+
+      RectAreaLightUniformsLib.init();
+
+      const renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: true,
+        alpha: false,
+        powerPreference: 'high-performance',
+        stencil: false,
+      });
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 0.72;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.setClearColor(0x010107, 1);
+
+      const scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0x010107, 0.012);
+
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      const environmentScene = new RoomEnvironment();
+      const environment = pmrem.fromScene(environmentScene, 0.025);
+      scene.environment = environment.texture;
+      environmentScene.dispose();
+      pmrem.dispose();
+
+      const camera = new THREE.PerspectiveCamera(10.5, 1, 0.08, 100);
+      const cameraTarget = new THREE.Vector3(0, 0.03, 0);
+      const cameraDirection = new THREE.Vector3(
+        0,
+        Math.sin(THREE.MathUtils.degToRad(36.5)),
+        Math.cos(THREE.MathUtils.degToRad(36.5)),
+      );
+
+      const composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+
+      const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.38, 0.48, 0.56);
+      composer.addPass(bloom);
+
+      const gradePass = new ShaderPass({
+        uniforms: {
+          tDiffuse: { value: null },
+          uTime: { value: 0 },
+          uResolution: { value: new THREE.Vector2(1, 1) },
+        },
+        vertexShader: /* glsl */ `
+          varying vec2 vUv;
+
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: /* glsl */ `
+          uniform sampler2D tDiffuse;
+          uniform float uTime;
+          uniform vec2 uResolution;
+          varying vec2 vUv;
+
+          float hash21(vec2 point) {
+            point = fract(point * vec2(123.34, 345.45));
+            point += dot(point, point + 34.345);
+            return fract(point.x * point.y);
+          }
+
+          void main() {
+            vec2 centered = vUv - 0.5;
+            float radial = dot(centered, centered);
+            vec2 aberration = centered * 0.00018;
+
+            vec3 color;
+            color.r = texture2D(tDiffuse, vUv + aberration).r;
+            color.g = texture2D(tDiffuse, vUv).g;
+            color.b = texture2D(tDiffuse, vUv - aberration).b;
+
+            float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+            color = mix(vec3(luminance), color, 0.91);
+            color = (color - 0.5) * 1.07 + 0.5;
+            color *= vec3(1.015, 0.985, 1.025);
+
+            float grain = hash21(vUv * uResolution + fract(uTime * 0.061) * 79.0) - 0.5;
+            color += grain * 0.007;
+            color *= 1.0 - smoothstep(0.12, 0.72, radial) * 0.48;
+
+            gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);
+          }
+        `,
+      });
+      composer.addPass(gradePass);
+      composer.addPass(new OutputPass());
+
+      const palette = {
+        bronze: new THREE.Color(0x76503e),
+        bronzeLight: new THREE.Color(0xb58165),
+        bronzeEnergy: new THREE.Color(0xff9a55),
+        silver: new THREE.Color(0x667086),
+        silverLight: new THREE.Color(0xaab5ca),
+        silverEnergy: new THREE.Color(0xa9bbff),
+        coldWhite: new THREE.Color(0xd7e4ff),
+        violet: new THREE.Color(0x4c2f83),
+      };
+
+      const microTexture = createMicroTexture();
+      const materials = createMaterials();
+      const motionTracks = [];
+      const energyTracks = [];
+      const energyUniformTracks = [];
+
+      const nebula = createNebulaDome();
+      scene.add(nebula.mesh);
+
+      const stars = createStarfield(640);
+      scene.add(stars);
+
+      const astrolabe = new THREE.Group();
+      astrolabe.position.y = -0.15;
+      astrolabe.position.z = -0.75;
+      scene.add(astrolabe);
+
+      const energyAura = createEnergyAura();
+      astrolabe.add(energyAura.mesh);
+
+      createFoundation(astrolabe);
+
+      const registerConfigs = [
+        {
+          inner: 4.32,
+          outer: 4.96,
+          y: 0.13,
+          color: 'bronze',
+          count: 72,
+          period: 238,
+          direction: 1,
+          phase: 0.11,
+        },
+        {
+          inner: 3.28,
+          outer: 4.02,
+          y: 0.18,
+          color: 'silver',
+          count: 60,
+          period: 167,
+          direction: -1,
+          phase: -0.32,
+        },
+        {
+          inner: 2.32,
+          outer: 3.02,
+          y: 0.235,
+          color: 'bronze',
+          count: 48,
+          period: 112,
+          direction: 1,
+          phase: 0.48,
+        },
+        {
+          inner: 1.28,
+          outer: 2.08,
+          y: 0.29,
+          color: 'silver',
+          count: 34,
+          period: 74,
+          direction: -1,
+          phase: -0.26,
+          ticks: true,
+        },
+      ];
+
+      registerConfigs.forEach((config, index) => {
+        const register = createRegister(config, index);
+        astrolabe.add(register);
+        motionTracks.push({
+          group: register,
+          period: config.period,
+          direction: config.direction,
+          phase: config.phase,
+          baseY: config.y,
+          floatAmplitude: 0.003 + index * 0.00045,
+        });
+      });
+
+      const patina = createPatinaField();
+      astrolabe.add(patina);
+      motionTracks.push({
+        group: patina,
+        period: 412,
+        direction: 1,
+        phase: -0.05,
+        baseY: 0.324,
+        floatAmplitude: 0.0015,
+      });
+
+      const sigilField = createSigilField();
+      astrolabe.add(sigilField);
+      motionTracks.push({
+        group: sigilField,
+        period: 226,
+        direction: -1,
+        phase: 0.08,
+        baseY: 0.325,
+        floatAmplitude: 0.004,
+      });
+
+      const filigree = createCentralFiligree();
+      astrolabe.add(filigree);
+      motionTracks.push({
+        group: filigree,
+        period: 119,
+        direction: 1,
+        phase: -0.12,
+        baseY: 0.355,
+        floatAmplitude: 0.008,
+      });
+
+      const aperture = createAperture();
+      astrolabe.add(aperture.group);
+
+      const glints = createGlints();
+      astrolabe.add(glints.group);
+
+      const energyLights = addLighting();
+
+      const clock = new THREE.Clock();
+      const reducedMotionTime = 23.75;
+
+      function createMaterials() {
+        const obsidian = new THREE.MeshPhysicalMaterial({
+          color: 0x05050b,
+          metalness: 0.32,
+          roughness: 0.44,
+          roughnessMap: microTexture,
+          bumpMap: microTexture,
+          bumpScale: 0.005,
+          clearcoat: 0.32,
+          clearcoatRoughness: 0.28,
+          envMapIntensity: 0.14,
+        });
+
+        const bronze = new THREE.MeshPhysicalMaterial({
+          color: palette.bronze,
+          metalness: 0.93,
+          roughness: 0.24,
+          roughnessMap: microTexture,
+          bumpMap: microTexture,
+          bumpScale: 0.002,
+          clearcoat: 0.48,
+          clearcoatRoughness: 0.15,
+          envMapIntensity: 0.52,
+        });
+
+        const silver = new THREE.MeshPhysicalMaterial({
+          color: palette.silver,
+          metalness: 0.91,
+          roughness: 0.22,
+          roughnessMap: microTexture,
+          clearcoat: 0.58,
+          clearcoatRoughness: 0.12,
+          envMapIntensity: 0.58,
+        });
+
+        const voidMaterial = new THREE.ShaderMaterial({
+          toneMapped: false,
+          depthWrite: true,
+          vertexShader: /* glsl */ `
+            varying vec2 vUv;
+            void main() {
+              vUv = uv;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            varying vec2 vUv;
+            void main() {
+              float radius = length(vUv - 0.5) * 2.0;
+              float edge = smoothstep(0.18, 1.0, radius);
+              float core = 1.0 - smoothstep(0.0, 0.72, radius);
+              vec3 color = mix(vec3(0.0002, 0.0001, 0.001), vec3(0.009, 0.004, 0.021), edge);
+              color += vec3(0.004, 0.001, 0.012) * core;
+              gl_FragColor = vec4(color, 1.0);
+            }
+          `,
+        });
+
+        return { obsidian, bronze, silver, voidMaterial };
+      }
+
+      function createFoundation(parent) {
+        const outerCrown = createLuminousTorus(5.08, 0.03, materials.bronze, 'bronze', 256, 9);
+        outerCrown.position.y = 0.075;
+        parent.add(outerCrown);
+      }
+
+      function createRegister(config, index) {
+        const group = new THREE.Group();
+        group.position.y = config.y;
+
+        const railMaterial = config.color === 'bronze' ? materials.bronze : materials.silver;
+        if (index > 0) {
+          const tube = index === 1 ? 0.014 : 0.012;
+          const outerRail = createLuminousTorus(
+            config.outer - 0.012,
+            tube,
+            railMaterial,
+            config.color,
+            224,
+            7,
+          );
+          outerRail.position.y = 0.012;
+          group.add(outerRail);
+        }
+
+        const texture = createRegisterTexture(config, index);
+        const registerEnergyScale = 0.78 + index * 0.08;
+        const engravingMaterial = new THREE.MeshBasicMaterial({
+          map: texture,
+          transparent: true,
+          opacity: Math.min(0.91, 0.8 + index * 0.03 + (config.color === 'silver' ? 0.01 : 0)),
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          blending: THREE.NormalBlending,
+          toneMapped: false,
+        });
+        const engraving = new THREE.Mesh(
+          new THREE.RingGeometry(config.inner + 0.018, config.outer - 0.018, 256, 1),
+          engravingMaterial,
+        );
+        engraving.rotation.x = -Math.PI / 2;
+        engraving.position.y = 0.018;
+        engraving.renderOrder = 2;
+        group.add(engraving);
+
+        const runeGlowMaterial = new THREE.MeshBasicMaterial({
+          map: texture.userData.glowTexture,
+          color: config.color === 'bronze' ? palette.bronzeEnergy : palette.silverEnergy,
+          transparent: true,
+          opacity: (config.color === 'bronze' ? 0.46 : 0.41) * registerEnergyScale,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          toneMapped: false,
+        });
+        const runeGlow = new THREE.Mesh(
+          new THREE.RingGeometry(config.inner + 0.018, config.outer - 0.018, 256, 1),
+          runeGlowMaterial,
+        );
+        runeGlow.rotation.x = -Math.PI / 2;
+        runeGlow.position.y = 0.014;
+        runeGlow.scale.setScalar(1.0015);
+        runeGlow.renderOrder = 1;
+        group.add(runeGlow);
+        energyTracks.push({
+          material: runeGlowMaterial,
+          property: 'opacity',
+          base: runeGlowMaterial.opacity,
+          amplitude: 0.018,
+          phase: index * 1.71 + 0.4,
+          speed: 0.24 + index * 0.017,
+        });
+
+        return group;
+      }
+
+      function createRegisterTexture(config, layerIndex) {
+        const size = 1024;
+        const center = size / 2;
+        const textureCanvas = document.createElement('canvas');
+        textureCanvas.width = size;
+        textureCanvas.height = size;
+        const context = textureCanvas.getContext('2d');
+        const layerRandom = mulberry32(0x9173a1 + layerIndex * 701);
+        const color = config.color === 'bronze' ? '#ad7657' : '#9eacc8';
+        const highlight = config.color === 'bronze' ? '#d2a080' : '#d3dced';
+        const outerPixel = center - 5;
+        const innerPixel = (config.inner / config.outer) * outerPixel;
+        const midPixel = (innerPixel + outerPixel) * 0.5;
+        const bandPixels = outerPixel - innerPixel;
+        const glyphScale = Math.max(10, Math.min(22, bandPixels * 0.42));
+
+        context.clearRect(0, 0, size, size);
+        context.translate(center, center);
+        context.lineCap = 'round';
+        context.lineJoin = 'round';
+        context.strokeStyle = color;
+        context.shadowColor = color;
+        context.shadowBlur = config.color === 'silver' ? 1.4 : 0.8;
+
+        context.globalAlpha = 0.78;
+        const runeAlphabet = Array.from('ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛋᛏᛒᛖᛗᛚᛜᛞᛟ');
+        const glyphCount = Math.round(config.count * 1.65);
+        for (let glyphIndex = 0; glyphIndex < glyphCount; glyphIndex += 1) {
+          const angle = (glyphIndex / glyphCount) * TAU;
+          const major = glyphIndex % 11 === 0;
+          const wobble = (layerRandom() - 0.5) * bandPixels * 0.08;
+          context.save();
+          context.rotate(angle);
+          context.translate(0, -midPixel - wobble);
+          context.globalAlpha = (major ? 0.9 : 0.5) + layerRandom() * (major ? 0.1 : 0.42);
+          context.fillStyle = major ? highlight : color;
+          context.font = `${major ? 600 : 500} ${glyphScale * (major ? 1.82 : 1.58)}px "Segoe UI Historic", "Segoe UI Symbol", serif`;
+          context.textAlign = 'center';
+          context.textBaseline = 'middle';
+          context.shadowBlur = major ? 2.2 : 0.8;
+          context.fillText(runeAlphabet[(glyphIndex + layerIndex * 5) % runeAlphabet.length], 0, 0);
+          context.restore();
+        }
+
+        const tickCount = config.ticks ? glyphCount * 2 : glyphCount;
+        context.globalAlpha = config.ticks ? 0.58 : 0.2;
+        context.strokeStyle = color;
+        context.shadowBlur = 0;
+        context.lineWidth = config.ticks ? 1.6 : 0.85;
+        for (let tickIndex = 0; tickIndex < tickCount; tickIndex += 1) {
+          const angle = (tickIndex / tickCount) * TAU;
+          const length = tickIndex % 6 === 0 ? bandPixels * 0.32 : bandPixels * 0.17;
+          const start = innerPixel + bandPixels * 0.06;
+          context.beginPath();
+          context.moveTo(Math.cos(angle) * start, Math.sin(angle) * start);
+          context.lineTo(Math.cos(angle) * (start + length), Math.sin(angle) * (start + length));
+          context.stroke();
+        }
+
+        context.globalAlpha = 0.13;
+        context.strokeStyle = highlight;
+        context.lineWidth = 0.65;
+        for (let scratchIndex = 0; scratchIndex < 20; scratchIndex += 1) {
+          const angle = layerRandom() * TAU;
+          const length = 0.015 + layerRandom() * 0.05;
+          context.beginPath();
+          context.arc(
+            0,
+            0,
+            midPixel + (layerRandom() - 0.5) * bandPixels * 0.7,
+            angle,
+            angle + length,
+          );
+          context.stroke();
+        }
+
+        const texture = new THREE.CanvasTexture(textureCanvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
+        texture.needsUpdate = true;
+
+        const glowCanvas = document.createElement('canvas');
+        glowCanvas.width = size;
+        glowCanvas.height = size;
+        const glowContext = glowCanvas.getContext('2d');
+        glowContext.filter = config.color === 'bronze' ? 'blur(7px)' : 'blur(6px)';
+        glowContext.globalAlpha = config.color === 'bronze' ? 0.98 : 0.94;
+        glowContext.drawImage(textureCanvas, 0, 0);
+        const glowTexture = new THREE.CanvasTexture(glowCanvas);
+        glowTexture.colorSpace = THREE.SRGBColorSpace;
+        glowTexture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+        glowTexture.generateMipmaps = false;
+        glowTexture.minFilter = THREE.LinearFilter;
+        texture.userData.glowTexture = glowTexture;
+        return texture;
+      }
+
+      function drawRune(context, index, scale) {
+        const variant = index % 12;
+        const width = scale;
+        const height = scale * 0.76;
+        context.beginPath();
+
+        if (variant === 0) {
+          context.moveTo(-width, height * 0.62);
+          context.lineTo(-width * 0.2, -height);
+          context.lineTo(width * 0.15, height);
+          context.lineTo(width, -height * 0.58);
+        } else if (variant === 1) {
+          context.moveTo(-width, -height * 0.4);
+          context.lineTo(0, -height);
+          context.lineTo(width, -height * 0.4);
+          context.lineTo(width * 0.2, height);
+          context.lineTo(-width * 0.2, height);
+          context.closePath();
+        } else if (variant === 2) {
+          context.moveTo(-width, 0);
+          context.quadraticCurveTo(-width * 0.1, -height, width, -height * 0.15);
+          context.quadraticCurveTo(width * 0.1, height, -width, 0);
+          context.moveTo(0, -height * 0.8);
+          context.lineTo(0, height * 0.8);
+        } else if (variant === 3) {
+          context.moveTo(-width, -height);
+          context.lineTo(width, 0);
+          context.lineTo(-width, height);
+          context.moveTo(-width * 0.22, -height * 0.72);
+          context.lineTo(-width * 0.22, height * 0.72);
+        } else if (variant === 4) {
+          context.moveTo(-width, height * 0.65);
+          context.lineTo(0, -height);
+          context.lineTo(width, height * 0.65);
+          context.moveTo(-width * 0.55, 0);
+          context.lineTo(width * 0.55, 0);
+        } else if (variant === 5) {
+          context.moveTo(-width, -height * 0.5);
+          context.lineTo(width, -height * 0.5);
+          context.lineTo(0, height);
+          context.closePath();
+          context.moveTo(0, -height * 0.5);
+          context.lineTo(0, height * 0.34);
+        } else if (variant === 6) {
+          context.moveTo(-width, 0);
+          context.lineTo(-width * 0.25, -height);
+          context.lineTo(width * 0.2, height);
+          context.lineTo(width, 0);
+          context.moveTo(-width * 0.58, -height * 0.35);
+          context.lineTo(width * 0.56, height * 0.34);
+        } else if (variant === 7) {
+          context.arc(0, 0, height * 0.72, 0, TAU);
+          context.moveTo(-width, 0);
+          context.lineTo(width, 0);
+          context.moveTo(0, -height);
+          context.lineTo(0, height);
+        } else if (variant === 8) {
+          context.moveTo(-width, -height * 0.75);
+          context.lineTo(width * 0.48, 0);
+          context.lineTo(-width, height * 0.75);
+          context.moveTo(width * 0.48, 0);
+          context.lineTo(width, -height * 0.55);
+        } else if (variant === 9) {
+          context.moveTo(-width, height);
+          context.lineTo(-width * 0.5, -height * 0.55);
+          context.lineTo(0, height * 0.12);
+          context.lineTo(width * 0.5, -height * 0.55);
+          context.lineTo(width, height);
+        } else if (variant === 10) {
+          context.moveTo(-width, 0);
+          context.lineTo(0, -height);
+          context.lineTo(width, 0);
+          context.lineTo(0, height);
+          context.closePath();
+          context.moveTo(-width * 0.5, 0);
+          context.lineTo(width * 0.5, 0);
+        } else {
+          context.moveTo(-width, -height * 0.35);
+          context.quadraticCurveTo(0, -height, width, -height * 0.35);
+          context.moveTo(-width, height * 0.35);
+          context.quadraticCurveTo(0, height, width, height * 0.35);
+          context.moveTo(0, -height * 0.76);
+          context.lineTo(0, height * 0.76);
+        }
+
+        context.stroke();
+      }
+
+      function createSigilField() {
+        const group = new THREE.Group();
+        group.position.y = 0.325;
+        const texture = createSigilFieldTexture();
+        const material = new THREE.MeshBasicMaterial({
+          map: texture,
+          transparent: true,
+          opacity: 0.44,
+          blending: THREE.NormalBlending,
+          depthWrite: false,
+          toneMapped: false,
+          side: THREE.DoubleSide,
+        });
+        const mesh = new THREE.Mesh(new THREE.CircleGeometry(4.98, 256), material);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.renderOrder = 4;
+        group.add(mesh);
+        return group;
+      }
+
+      function createPatinaField() {
+        const group = new THREE.Group();
+        group.position.y = 0.324;
+        const size = 2048;
+        const center = size / 2;
+        const textureCanvas = document.createElement('canvas');
+        textureCanvas.width = size;
+        textureCanvas.height = size;
+        const context = textureCanvas.getContext('2d');
+        const patinaRandom = mulberry32(0x45a7f9);
+
+        context.translate(center, center);
+        context.lineCap = 'round';
+
+        for (let hazeIndex = 0; hazeIndex < 28; hazeIndex += 1) {
+          const angle = patinaRandom() * TAU;
+          const radius = 260 + patinaRandom() * 690;
+          const x = Math.cos(angle) * radius;
+          const y = Math.sin(angle) * radius;
+          const hazeRadius = 55 + patinaRandom() * 180;
+          const gradient = context.createRadialGradient(x, y, 0, x, y, hazeRadius);
+          const warm = patinaRandom() > 0.7;
+          gradient.addColorStop(0, warm ? 'rgba(125,76,57,0.055)' : 'rgba(91,72,132,0.06)');
+          gradient.addColorStop(0.46, warm ? 'rgba(84,49,40,0.022)' : 'rgba(49,36,79,0.028)');
+          gradient.addColorStop(1, 'rgba(0,0,0,0)');
+          context.fillStyle = gradient;
+          context.beginPath();
+          context.ellipse(
+            x,
+            y,
+            hazeRadius,
+            hazeRadius * (0.22 + patinaRandom() * 0.34),
+            angle,
+            0,
+            TAU,
+          );
+          context.fill();
+        }
+
+        for (let arcIndex = 0; arcIndex < 160; arcIndex += 1) {
+          const radius = 250 + patinaRandom() * 745;
+          const angle = patinaRandom() * TAU;
+          const length = 0.006 + patinaRandom() * 0.055;
+          context.globalAlpha = 0.035 + patinaRandom() * 0.1;
+          context.strokeStyle = patinaRandom() > 0.78 ? '#bd896e' : '#9aa6c2';
+          context.lineWidth = 0.5 + patinaRandom() * 1.25;
+          context.beginPath();
+          context.arc(0, 0, radius, angle, angle + length);
+          context.stroke();
+        }
+
+        for (let crackIndex = 0; crackIndex < 34; crackIndex += 1) {
+          const angle = patinaRandom() * TAU;
+          const radius = 360 + patinaRandom() * 600;
+          const startX = Math.cos(angle) * radius;
+          const startY = Math.sin(angle) * radius;
+          context.globalAlpha = 0.05 + patinaRandom() * 0.08;
+          context.strokeStyle = patinaRandom() > 0.68 ? '#c69275' : '#b7c4dc';
+          context.lineWidth = 0.55;
+          context.beginPath();
+          context.moveTo(startX, startY);
+          let x = startX;
+          let y = startY;
+          for (let segmentIndex = 0; segmentIndex < 4; segmentIndex += 1) {
+            x += (patinaRandom() - 0.5) * 46;
+            y += (patinaRandom() - 0.5) * 46;
+            context.lineTo(x, y);
+          }
+          context.stroke();
+        }
+
+        const texture = new THREE.CanvasTexture(textureCanvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        const material = new THREE.MeshBasicMaterial({
+          map: texture,
+          transparent: true,
+          opacity: 0.72,
+          depthWrite: false,
+          toneMapped: false,
+          side: THREE.DoubleSide,
+        });
+        const mesh = new THREE.Mesh(new THREE.CircleGeometry(4.98, 256), material);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.renderOrder = 3;
+        group.add(mesh);
+        return group;
+      }
+
+      function createSigilFieldTexture() {
+        const size = 2048;
+        const center = size / 2;
+        const textureCanvas = document.createElement('canvas');
+        textureCanvas.width = size;
+        textureCanvas.height = size;
+        const context = textureCanvas.getContext('2d');
+
+        context.clearRect(0, 0, size, size);
+        context.translate(center, center);
+        context.lineCap = 'round';
+        context.lineJoin = 'round';
+
+        for (let index = 0; index < 8; index += 1) {
+          const angle = (index / 8) * TAU;
+          context.save();
+          context.rotate(angle);
+          context.translate(0, -820);
+          drawSigil(context, 76, index % 2 === 0 ? '#b98968' : '#967159', 0.78);
+          context.restore();
+        }
+
+        for (let index = 0; index < 4; index += 1) {
+          const angle = (index / 4) * TAU;
+          context.save();
+          context.rotate(angle);
+          context.translate(0, -610);
+          drawSigil(context, 92, '#b9c7e3', 0.82);
+          context.restore();
+        }
+
+        const texture = new THREE.CanvasTexture(textureCanvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        return texture;
+      }
+
+      function drawSigil(context, scale, color, alpha) {
+        context.globalAlpha = alpha;
+        context.strokeStyle = color;
+        context.shadowColor = color;
+        context.shadowBlur = 4;
+        context.lineWidth = 3.2;
+
+        context.beginPath();
+        context.moveTo(0, -scale);
+        context.bezierCurveTo(
+          scale * 0.32,
+          -scale * 0.54,
+          scale * 0.52,
+          -scale * 0.3,
+          scale * 0.78,
+          0,
+        );
+        context.bezierCurveTo(scale * 0.52, scale * 0.3, scale * 0.32, scale * 0.54, 0, scale);
+        context.bezierCurveTo(
+          -scale * 0.32,
+          scale * 0.54,
+          -scale * 0.52,
+          scale * 0.3,
+          -scale * 0.78,
+          0,
+        );
+        context.bezierCurveTo(-scale * 0.52, -scale * 0.3, -scale * 0.32, -scale * 0.54, 0, -scale);
+        context.stroke();
+
+        context.lineWidth = 2.2;
+        context.beginPath();
+        context.ellipse(0, 0, scale * 0.58, scale * 0.3, 0, 0, TAU);
+        context.moveTo(0, -scale * 1.18);
+        context.lineTo(0, scale * 1.18);
+        context.moveTo(-scale * 0.93, 0);
+        context.lineTo(scale * 0.93, 0);
+        context.stroke();
+
+        context.beginPath();
+        context.moveTo(0, -scale * 0.82);
+        context.lineTo(scale * 0.36, 0);
+        context.lineTo(0, scale * 0.82);
+        context.lineTo(-scale * 0.36, 0);
+        context.closePath();
+        context.stroke();
+
+        context.globalAlpha = alpha * 0.66;
+        context.lineWidth = 1.6;
+        for (let index = 0; index < 4; index += 1) {
+          context.save();
+          context.rotate((index / 4) * TAU);
+          context.beginPath();
+          context.moveTo(0, -scale * 0.42);
+          context.quadraticCurveTo(scale * 0.28, -scale * 0.64, scale * 0.5, -scale * 0.38);
+          context.stroke();
+          context.restore();
+        }
+      }
+
+      function createCentralFiligree() {
+        const group = new THREE.Group();
+        group.position.y = 0.355;
+        const texture = createFiligreeTexture();
+        const material = new THREE.MeshBasicMaterial({
+          map: texture,
+          transparent: true,
+          opacity: 0.92,
+          blending: THREE.NormalBlending,
+          depthWrite: false,
+          toneMapped: false,
+          side: THREE.DoubleSide,
+        });
+        const mesh = new THREE.Mesh(new THREE.CircleGeometry(2.92, 256), material);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.renderOrder = 5;
+        group.add(mesh);
+        return group;
+      }
+
+      function createFiligreeTexture() {
+        const size = 2048;
+        const center = size / 2;
+        const textureCanvas = document.createElement('canvas');
+        textureCanvas.width = size;
+        textureCanvas.height = size;
+        const context = textureCanvas.getContext('2d');
+
+        context.clearRect(0, 0, size, size);
+        context.translate(center, center);
+        context.lineCap = 'round';
+        context.lineJoin = 'round';
+        context.strokeStyle = '#dce7fa';
+        context.shadowColor = '#8f9fcd';
+        context.shadowBlur = 6;
+
+        for (let index = 0; index < 12; index += 1) {
+          context.save();
+          context.rotate((index / 12) * TAU);
+          context.scale(index % 2 === 0 ? 1 : -1, 1);
+
+          context.globalAlpha = 0.38;
+          context.lineWidth = 3.1;
+          context.beginPath();
+          context.moveTo(0, -808);
+          context.bezierCurveTo(-76, -802, -196, -756, -222, -672);
+          context.bezierCurveTo(-252, -578, -196, -494, -84, -430);
+          context.bezierCurveTo(-54, -414, -38, -392, -34, -366);
+          context.stroke();
+
+          context.globalAlpha = 0.34;
+          context.lineWidth = 2.25;
+          context.beginPath();
+          context.moveTo(-38, -786);
+          context.bezierCurveTo(-96, -732, -120, -650, -78, -598);
+          context.bezierCurveTo(-42, -552, -64, -490, -130, -448);
+          context.stroke();
+
+          context.beginPath();
+          context.moveTo(-218, -674);
+          context.bezierCurveTo(-308, -688, -348, -614, -306, -554);
+          context.bezierCurveTo(-270, -504, -224, -520, -194, -568);
+          context.stroke();
+
+          context.beginPath();
+          context.moveTo(-188, -500);
+          context.bezierCurveTo(-264, -480, -286, -422, -236, -390);
+          context.bezierCurveTo(-190, -410, -174, -446, -188, -500);
+          context.stroke();
+
+          context.globalAlpha = 0.42;
+          context.lineWidth = 1.9;
+          for (let leafIndex = 0; leafIndex < 3; leafIndex += 1) {
+            const leafY = -710 + leafIndex * 108;
+            const leafX = -166 + leafIndex * 24;
+            context.beginPath();
+            context.moveTo(leafX, leafY);
+            context.quadraticCurveTo(leafX - 76, leafY - 42, leafX - 92, leafY + 18);
+            context.quadraticCurveTo(leafX - 46, leafY + 42, leafX, leafY);
+            context.stroke();
+          }
+
+          context.globalAlpha = 0.5;
+          context.lineWidth = 1.8;
+          for (let thornIndex = 0; thornIndex < 4; thornIndex += 1) {
+            const thornY = -744 + thornIndex * 84;
+            const thornX = -86 - thornIndex * 28;
+            context.beginPath();
+            context.moveTo(thornX, thornY);
+            context.lineTo(thornX - 48, thornY + 24);
+            context.lineTo(thornX - 6, thornY + 46);
+            context.stroke();
+          }
+
+          context.globalAlpha = 0.34;
+          context.lineWidth = 1.6;
+          context.beginPath();
+          context.moveTo(-66, -760);
+          context.bezierCurveTo(6, -696, -8, -616, -78, -574);
+          context.bezierCurveTo(-126, -544, -118, -466, -54, -414);
+          context.stroke();
+
+          context.restore();
+        }
+
+        for (let guardianIndex = 0; guardianIndex < 4; guardianIndex += 1) {
+          context.save();
+          context.rotate((guardianIndex / 4) * TAU);
+          for (const side of [-1, 1]) {
+            context.save();
+            context.scale(side, 1);
+            context.globalAlpha = 0.91;
+            context.lineWidth = 4.4;
+            context.beginPath();
+            context.moveTo(-12, -794);
+            context.bezierCurveTo(-128, -794, -292, -724, -308, -612);
+            context.bezierCurveTo(-322, -514, -232, -438, -116, -404);
+            context.bezierCurveTo(-72, -392, -42, -368, -30, -338);
+            context.stroke();
+
+            context.globalAlpha = 0.72;
+            context.lineWidth = 2.45;
+            context.beginPath();
+            context.moveTo(-300, -616);
+            context.bezierCurveTo(-382, -594, -392, -516, -326, -480);
+            context.bezierCurveTo(-270, -450, -242, -472, -224, -522);
+            context.stroke();
+
+            context.beginPath();
+            context.moveTo(-208, -730);
+            context.quadraticCurveTo(-286, -804, -354, -736);
+            context.quadraticCurveTo(-294, -692, -224, -708);
+            context.stroke();
+
+            context.globalAlpha = 0.82;
+            context.lineWidth = 2.1;
+            context.beginPath();
+            context.moveTo(-126, -758);
+            context.lineTo(-174, -814);
+            context.lineTo(-196, -744);
+            context.moveTo(-274, -650);
+            context.lineTo(-346, -666);
+            context.lineTo(-298, -610);
+            context.stroke();
+            context.restore();
+          }
+          context.restore();
+        }
+
+        for (let braidIndex = 0; braidIndex < 3; braidIndex += 1) {
+          context.globalAlpha = 0.54 - braidIndex * 0.09;
+          context.lineWidth = 3.2 - braidIndex * 0.55;
+          context.beginPath();
+          const points = 240;
+          for (let pointIndex = 0; pointIndex <= points; pointIndex += 1) {
+            const angle = (pointIndex / points) * TAU;
+            const radius =
+              566 +
+              braidIndex * 74 +
+              Math.sin(angle * (6 + braidIndex * 2) + braidIndex * 1.7) * 28 +
+              Math.sin(angle * 17 - braidIndex * 0.9) * 13;
+            const x = Math.cos(angle) * radius;
+            const y = Math.sin(angle) * radius;
+            if (pointIndex === 0) context.moveTo(x, y);
+            else context.lineTo(x, y);
+          }
+          context.closePath();
+          context.stroke();
+        }
+
+        context.globalAlpha = 0.42;
+        context.lineWidth = 1.9;
+        for (let stitchIndex = 0; stitchIndex < 48; stitchIndex += 1) {
+          const angle = (stitchIndex / 48) * TAU;
+          const wave = Math.sin(angle * 7) * 18;
+          const inner = 548 + wave;
+          const outer = 724 - wave * 0.45;
+          const tangent = stitchIndex % 2 === 0 ? 0.06 : -0.06;
+          context.beginPath();
+          context.moveTo(Math.cos(angle - tangent) * inner, Math.sin(angle - tangent) * inner);
+          context.quadraticCurveTo(
+            Math.cos(angle + tangent * 0.25) * ((inner + outer) * 0.5),
+            Math.sin(angle + tangent * 0.25) * ((inner + outer) * 0.5),
+            Math.cos(angle + tangent) * outer,
+            Math.sin(angle + tangent) * outer,
+          );
+          context.stroke();
+        }
+
+        context.globalAlpha = 0.48;
+        context.lineWidth = 1.7;
+        for (let barbIndex = 0; barbIndex < 36; barbIndex += 1) {
+          const angle = (barbIndex / 36) * TAU;
+          const radius = 626 + Math.sin(angle * 5) * 32;
+          const baseX = Math.cos(angle) * radius;
+          const baseY = Math.sin(angle) * radius;
+          const tipAngle = angle + (barbIndex % 2 === 0 ? 0.13 : -0.13);
+          const tipRadius = radius + 68;
+          context.beginPath();
+          context.moveTo(baseX, baseY);
+          context.lineTo(Math.cos(tipAngle) * tipRadius, Math.sin(tipAngle) * tipRadius);
+          context.lineTo(Math.cos(angle) * (radius + 26), Math.sin(angle) * (radius + 26));
+          context.stroke();
+        }
+
+        for (let index = 0; index < 4; index += 1) {
+          const angle = (index / 4) * TAU;
+          context.save();
+          context.rotate(angle);
+          context.translate(0, -786);
+          drawSigil(context, 78, '#dce8ff', 0.94);
+          context.restore();
+        }
+
+        const texture = new THREE.CanvasTexture(textureCanvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        return texture;
+      }
+
+      function createAperture() {
+        const group = new THREE.Group();
+        group.position.y = 0.395;
+
+        const wall = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.94, 0.99, 0.12, 160, 1, false),
+          materials.obsidian,
+        );
+        wall.castShadow = true;
+        group.add(wall);
+
+        const voidDisc = new THREE.Mesh(
+          new THREE.CircleGeometry(0.91, 192),
+          materials.voidMaterial,
+        );
+        voidDisc.rotation.x = -Math.PI / 2;
+        voidDisc.position.y = 0.064;
+        group.add(voidDisc);
+
+        const innerRim = createLuminousTorus(0.95, 0.018, materials.silver, 'silver', 224, 8);
+        innerRim.position.y = 0.07;
+        group.add(innerRim);
+
+        const tickTexture = createApertureTickTexture();
+        const tickMaterial = new THREE.MeshBasicMaterial({
+          map: tickTexture,
+          transparent: true,
+          opacity: 0.94,
+          depthWrite: false,
+          toneMapped: false,
+          side: THREE.DoubleSide,
+        });
+        const tickGroup = new THREE.Group();
+        tickGroup.position.y = 0.015;
+        const ticks = new THREE.Mesh(new THREE.RingGeometry(1.03, 1.27, 192, 1), tickMaterial);
+        ticks.rotation.x = -Math.PI / 2;
+        tickGroup.add(ticks);
+
+        const tickPositions = [];
+        for (let tickIndex = 0; tickIndex < 96; tickIndex += 1) {
+          const angle = (tickIndex / 96) * TAU;
+          const start = tickIndex % 8 === 0 ? 1.04 : 1.09;
+          const end = tickIndex % 8 === 0 ? 1.26 : 1.22;
+          tickPositions.push(
+            Math.cos(angle) * start,
+            0.006,
+            Math.sin(angle) * start,
+            Math.cos(angle) * end,
+            0.006,
+            Math.sin(angle) * end,
+          );
+        }
+        const tickGeometry = new THREE.BufferGeometry();
+        tickGeometry.setAttribute('position', new THREE.Float32BufferAttribute(tickPositions, 3));
+        const tickLines = new THREE.LineSegments(
+          tickGeometry,
+          new THREE.LineBasicMaterial({
+            color: 0xb9c7df,
+            transparent: true,
+            opacity: 0.7,
+            depthWrite: false,
+          }),
+        );
+        tickGroup.add(tickLines);
+        group.add(tickGroup);
+        motionTracks.push({
+          group: tickGroup,
+          period: 57,
+          direction: -1,
+          phase: 0.15,
+          baseY: 0.015,
+          floatAmplitude: 0,
+        });
+
+        const light = new THREE.PointLight(0x4a376c, 0.28, 2.8, 2);
+        light.position.y = 0.8;
+        group.add(light);
+
+        return { group, light };
+      }
+
+      function createApertureTickTexture() {
+        const size = 1024;
+        const center = size / 2;
+        const textureCanvas = document.createElement('canvas');
+        textureCanvas.width = size;
+        textureCanvas.height = size;
+        const context = textureCanvas.getContext('2d');
+        context.translate(center, center);
+        context.strokeStyle = '#bac8e2';
+        context.lineCap = 'round';
+
+        for (let index = 0; index < 96; index += 1) {
+          const angle = (index / 96) * TAU;
+          const start = index % 8 === 0 ? 386 : 401;
+          const end = 454;
+          context.globalAlpha = index % 8 === 0 ? 0.85 : 0.48;
+          context.lineWidth = index % 8 === 0 ? 2.6 : 1.4;
+          context.beginPath();
+          context.moveTo(Math.cos(angle) * start, Math.sin(angle) * start);
+          context.lineTo(Math.cos(angle) * end, Math.sin(angle) * end);
+          context.stroke();
+        }
+
+        const texture = new THREE.CanvasTexture(textureCanvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        return texture;
+      }
+
+      function createGlints() {
+        const group = new THREE.Group();
+        const items = [];
+        const size = 128;
+        const textureCanvas = document.createElement('canvas');
+        textureCanvas.width = size;
+        textureCanvas.height = size;
+        const context = textureCanvas.getContext('2d');
+        const gradient = context.createRadialGradient(64, 64, 0, 64, 64, 60);
+        gradient.addColorStop(0, 'rgba(255,255,255,1)');
+        gradient.addColorStop(0.045, 'rgba(255,255,255,0.92)');
+        gradient.addColorStop(0.16, 'rgba(190,176,244,0.3)');
+        gradient.addColorStop(0.48, 'rgba(115,73,181,0.06)');
+        gradient.addColorStop(1, 'rgba(0,0,0,0)');
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, size, size);
+        context.strokeStyle = 'rgba(245,238,255,0.7)';
+        context.lineCap = 'round';
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(64, 21);
+        context.lineTo(64, 107);
+        context.moveTo(28, 64);
+        context.lineTo(100, 64);
+        context.stroke();
+
+        const texture = new THREE.CanvasTexture(textureCanvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        const glintData = [
+          [5.05, 0.12, 'bronze', 0.38],
+          [5.04, 1.02, 'silver', 0.22],
+          [4.78, 2.38, 'bronze', 0.3],
+          [5.08, 3.02, 'silver', 0.34],
+          [4.92, 4.14, 'bronze', 0.24],
+          [5.06, 5.45, 'silver', 0.3],
+          [3.62, 0.73, 'silver', 0.18],
+          [3.08, 2.92, 'bronze', 0.2],
+          [2.18, 4.88, 'silver', 0.22],
+        ];
+
+        glintData.forEach(([radius, angle, tone, opacity], index) => {
+          const material = new THREE.SpriteMaterial({
+            map: texture,
+            color: tone === 'bronze' ? 0xe0a885 : 0xb9c8f1,
+            transparent: true,
+            opacity,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            toneMapped: false,
+          });
+          const sprite = new THREE.Sprite(material);
+          sprite.position.set(Math.cos(angle) * radius, 0.4, Math.sin(angle) * radius);
+          const scale = index < 6 ? 0.19 : 0.13;
+          sprite.scale.set(scale, scale, 1);
+          sprite.renderOrder = 8;
+          group.add(sprite);
+          items.push({ material, baseOpacity: opacity, phase: index * 0.83 });
+        });
+
+        return { group, items };
+      }
+
+      function createNebulaDome() {
+        const uniforms = {
+          uTime: { value: 0 },
+        };
+        const material = new THREE.ShaderMaterial({
+          uniforms,
+          side: THREE.BackSide,
+          depthWrite: false,
+          fog: false,
+          vertexShader: /* glsl */ `
+            varying vec3 vDirection;
+
+            void main() {
+              vDirection = normalize(position);
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uTime;
+            varying vec3 vDirection;
+
+            float hash31(vec3 point) {
+              point = fract(point * 0.1031);
+              point += dot(point, point.yzx + 33.33);
+              return fract((point.x + point.y) * point.z);
+            }
+
+            float noise3(vec3 point) {
+              vec3 cell = floor(point);
+              vec3 local = fract(point);
+              local = local * local * (3.0 - 2.0 * local);
+              return mix(
+                mix(
+                  mix(hash31(cell), hash31(cell + vec3(1.0, 0.0, 0.0)), local.x),
+                  mix(hash31(cell + vec3(0.0, 1.0, 0.0)), hash31(cell + vec3(1.0, 1.0, 0.0)), local.x),
+                  local.y
+                ),
+                mix(
+                  mix(hash31(cell + vec3(0.0, 0.0, 1.0)), hash31(cell + vec3(1.0, 0.0, 1.0)), local.x),
+                  mix(hash31(cell + vec3(0.0, 1.0, 1.0)), hash31(cell + vec3(1.0, 1.0, 1.0)), local.x),
+                  local.y
+                ),
+                local.z
+              );
+            }
+
+            float fbm(vec3 point) {
+              float value = 0.0;
+              float amplitude = 0.54;
+              for (int octave = 0; octave < 5; octave++) {
+                value += noise3(point) * amplitude;
+                point = point * 2.03 + vec3(7.1, 3.7, 11.3);
+                amplitude *= 0.48;
+              }
+              return value;
+            }
+
+            void main() {
+              vec3 direction = normalize(vDirection);
+              float time = uTime * 0.003;
+              float broad = fbm(direction * 2.4 + vec3(time, -time * 0.4, time * 0.7));
+              float detail = fbm(direction * 6.8 - vec3(time * 0.2, time, -time * 0.3));
+              float band = exp(-abs(direction.y * 1.5 + sin(direction.x * 4.0) * 0.15) * 3.4);
+              float cloud = smoothstep(0.48, 0.79, broad * 0.72 + detail * 0.34 + band * 0.16);
+              float veins = pow(1.0 - abs(detail * 2.0 - 1.0), 6.0) * cloud;
+              vec3 color = vec3(0.0018, 0.0015, 0.006);
+              color += vec3(0.095, 0.019, 0.15) * cloud * 0.46;
+              color += vec3(0.024, 0.022, 0.074) * pow(cloud, 1.8) * 0.31;
+              color += vec3(0.12, 0.035, 0.19) * veins * 0.18;
+              gl_FragColor = vec4(color, 1.0);
+            }
+          `,
+        });
+        const mesh = new THREE.Mesh(new THREE.SphereGeometry(48, 64, 40), material);
+        return { mesh, uniforms };
+      }
+
+      function createStarfield(count) {
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(count * 3);
+        const colors = new Float32Array(count * 3);
+        const sizes = new Float32Array(count);
+
+        for (let index = 0; index < count; index += 1) {
+          const radius = THREE.MathUtils.lerp(17, 42, Math.pow(random(), 0.55));
+          const azimuth = random() * TAU;
+          const elevation = Math.acos(THREE.MathUtils.lerp(-1, 1, random()));
+          const point = new THREE.Vector3().setFromSphericalCoords(radius, elevation, azimuth);
+          positions.set([point.x, point.y, point.z], index * 3);
+
+          const choice = random();
+          const color =
+            choice > 0.9
+              ? new THREE.Color(0xb4a2d8)
+              : choice > 0.74
+                ? new THREE.Color(0x91a6cc)
+                : new THREE.Color(0xd8cfca);
+          const intensity = THREE.MathUtils.lerp(0.24, 0.72, Math.pow(random(), 2.5));
+          colors.set([color.r * intensity, color.g * intensity, color.b * intensity], index * 3);
+          sizes[index] = THREE.MathUtils.lerp(0.2, 0.9, Math.pow(random(), 2.8));
+        }
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
+
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uPixelRatio: { value: 1 },
+          },
+          transparent: true,
+          depthWrite: false,
+          vertexColors: true,
+          blending: THREE.AdditiveBlending,
+          vertexShader: /* glsl */ `
+            attribute float aSize;
+            varying vec3 vColor;
+            uniform float uPixelRatio;
+
+            void main() {
+              vColor = color;
+              vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+              gl_Position = projectionMatrix * viewPosition;
+              gl_PointSize = clamp(aSize * uPixelRatio * (105.0 / max(-viewPosition.z, 1.0)), 0.5, 4.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            varying vec3 vColor;
+
+            void main() {
+              vec2 point = gl_PointCoord - 0.5;
+              float radius = length(point);
+              float alpha = smoothstep(0.5, 0.04, radius);
+              if (alpha < 0.01) discard;
+              gl_FragColor = vec4(vColor, alpha * 0.72);
+            }
+          `,
+        });
+
+        const points = new THREE.Points(geometry, material);
+        points.userData.material = material;
+        return points;
+      }
+
+      function createMicroTexture() {
+        const size = 256;
+        const surfaceCanvas = document.createElement('canvas');
+        surfaceCanvas.width = size;
+        surfaceCanvas.height = size;
+        const context = surfaceCanvas.getContext('2d');
+        const image = context.createImageData(size, size);
+        const surfaceRandom = mulberry32(0x70f1c2);
+
+        for (let index = 0; index < image.data.length; index += 4) {
+          const grain = 82 + Math.floor(surfaceRandom() * 72);
+          image.data[index] = grain;
+          image.data[index + 1] = grain;
+          image.data[index + 2] = grain;
+          image.data[index + 3] = 255;
+        }
+        context.putImageData(image, 0, 0);
+
+        context.globalAlpha = 0.18;
+        context.strokeStyle = '#e8dfef';
+        context.lineWidth = 0.55;
+        for (let index = 0; index < 46; index += 1) {
+          const x = surfaceRandom() * size;
+          const y = surfaceRandom() * size;
+          const length = 10 + surfaceRandom() * 48;
+          context.beginPath();
+          context.moveTo(x, y);
+          context.lineTo(x + length, y + surfaceRandom() * 2 - 1);
+          context.stroke();
+        }
+
+        const texture = new THREE.CanvasTexture(surfaceCanvas);
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(4, 4);
+        texture.colorSpace = THREE.NoColorSpace;
+        texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        return texture;
+      }
+
+      function createEnergyAura() {
+        const uniforms = {
+          uTime: { value: 0 },
+        };
+        const material = new THREE.ShaderMaterial({
+          uniforms,
+          transparent: true,
+          depthWrite: false,
+          depthTest: true,
+          blending: THREE.AdditiveBlending,
+          toneMapped: false,
+          side: THREE.DoubleSide,
+          vertexShader: /* glsl */ `
+            varying vec2 vUv;
+
+            void main() {
+              vUv = uv;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uTime;
+            varying vec2 vUv;
+
+            void main() {
+              vec2 point = vUv - 0.5;
+              float radius = length(point) * 2.0;
+              float angle = atan(point.y, point.x);
+              float outerField = exp(-pow((radius - 0.84) * 4.9, 2.0));
+              float innerField = (1.0 - smoothstep(0.12, 0.98, radius)) * 0.15;
+              float drift = sin(angle * 5.0 - uTime * 0.055 + sin(angle * 3.0) * 0.7);
+              float breath = 0.88 + sin(uTime * 0.16) * 0.08;
+              float alpha = (outerField * 0.118 + innerField * 0.024) *
+                (0.9 + drift * 0.1) * breath;
+              vec3 color = mix(
+                vec3(0.055, 0.026, 0.17),
+                vec3(0.19, 0.055, 0.42),
+                outerField
+              );
+              if (alpha < 0.002) discard;
+              gl_FragColor = vec4(color, alpha);
+            }
+          `,
+        });
+        const mesh = new THREE.Mesh(new THREE.CircleGeometry(6.25, 192), material);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.y = -0.16;
+        mesh.renderOrder = 0;
+        return { mesh, uniforms };
+      }
+
+      function createEnergyVeinMaterial(tone, phase, intensity) {
+        const coreColor = tone === 'bronze' ? new THREE.Color(0xffa25f) : new THREE.Color(0x9eb5ff);
+        const hotColor = tone === 'bronze' ? new THREE.Color(0xffead3) : new THREE.Color(0xf0f4ff);
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime: { value: 0 },
+            uPhase: { value: phase },
+            uIntensity: { value: intensity },
+            uCoreColor: { value: coreColor },
+            uHotColor: { value: hotColor },
+          },
+          transparent: true,
+          depthWrite: false,
+          depthTest: true,
+          blending: THREE.AdditiveBlending,
+          toneMapped: false,
+          vertexShader: /* glsl */ `
+            varying vec2 vUv;
+
+            void main() {
+              vUv = uv;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uTime;
+            uniform float uPhase;
+            uniform float uIntensity;
+            uniform vec3 uCoreColor;
+            uniform vec3 uHotColor;
+            varying vec2 vUv;
+
+            void main() {
+              float angle = vUv.x * 6.28318530718;
+              float broad = sin(angle * 3.0 - uTime * 0.18 + uPhase) * 0.5 + 0.5;
+              float fine = sin(angle * 11.0 + uTime * 0.11 - uPhase * 1.7) * 0.5 + 0.5;
+              float energy = pow(clamp(broad * 0.74 + fine * 0.26, 0.0, 1.0), 7.0);
+              float crossSection = pow(sin(vUv.y * 3.14159265359), 0.72);
+              float alpha = (0.05 + energy * 0.86) * crossSection * uIntensity;
+              vec3 color = mix(uCoreColor, uHotColor, energy * 0.86);
+              gl_FragColor = vec4(color, alpha);
+            }
+          `,
+        });
+        energyUniformTracks.push(material.uniforms.uTime);
+        return material;
+      }
+
+      function createHorizontalTorus(
+        radius,
+        tube,
+        material,
+        tubularSegments = 192,
+        radialSegments = 8,
+      ) {
+        const mesh = new THREE.Mesh(
+          new THREE.TorusGeometry(radius, tube, radialSegments, tubularSegments),
+          material,
+        );
+        mesh.rotation.x = -Math.PI / 2;
+        return mesh;
+      }
+
+      function createLuminousTorus(
+        radius,
+        tube,
+        material,
+        tone,
+        tubularSegments = 192,
+        radialSegments = 8,
+      ) {
+        const group = new THREE.Group();
+        const energyScale =
+          radius >= 4.5
+            ? 0.82
+            : radius >= 3.5
+              ? 0.9
+              : radius >= 2.3
+                ? 0.98
+                : radius >= 1.2
+                  ? 1.07
+                  : 1.18;
+        const energyColor = tone === 'bronze' ? palette.bronzeEnergy : palette.silverEnergy;
+        const coreMaterial = material.clone();
+        coreMaterial.emissive.copy(energyColor);
+        coreMaterial.emissiveIntensity = (tone === 'bronze' ? 0.8 : 0.72) * energyScale;
+
+        const core = createHorizontalTorus(
+          radius,
+          tube,
+          coreMaterial,
+          tubularSegments,
+          radialSegments,
+        );
+        group.add(core);
+
+        const haloMaterial = new THREE.MeshBasicMaterial({
+          color: energyColor,
+          transparent: true,
+          opacity: (tone === 'bronze' ? 0.16 : 0.14) * energyScale,
+          depthWrite: false,
+          depthTest: true,
+          blending: THREE.AdditiveBlending,
+          toneMapped: false,
+        });
+        const halo = createHorizontalTorus(
+          radius,
+          tube * 3,
+          haloMaterial,
+          tubularSegments,
+          Math.max(8, radialSegments),
+        );
+        halo.renderOrder = 1;
+        group.add(halo);
+
+        const veinMaterial = createEnergyVeinMaterial(tone, radius * 1.73, energyScale);
+        const vein = createHorizontalTorus(
+          radius,
+          tube * 1.045,
+          veinMaterial,
+          tubularSegments,
+          Math.max(10, radialSegments),
+        );
+        vein.renderOrder = 2;
+        group.add(vein);
+
+        energyTracks.push(
+          {
+            material: coreMaterial,
+            property: 'emissiveIntensity',
+            base: coreMaterial.emissiveIntensity,
+            amplitude: 0.05 * energyScale,
+            phase: radius * 1.13,
+            speed: 0.2,
+          },
+          {
+            material: haloMaterial,
+            property: 'opacity',
+            base: haloMaterial.opacity,
+            amplitude: 0.012 * energyScale,
+            phase: radius * 1.13 + 0.8,
+            speed: 0.2,
+          },
+        );
+
+        return group;
+      }
+
+      function addLighting() {
+        scene.add(new THREE.HemisphereLight(0x68799d, 0x0b0710, 0.055));
+
+        const coldKey = new THREE.DirectionalLight(0xa8b7d5, 0.17);
+        coldKey.position.set(-4.8, 9.5, 4.6);
+        coldKey.castShadow = true;
+        coldKey.shadow.mapSize.set(2048, 2048);
+        coldKey.shadow.camera.left = -6;
+        coldKey.shadow.camera.right = 6;
+        coldKey.shadow.camera.top = 6;
+        coldKey.shadow.camera.bottom = -6;
+        coldKey.shadow.camera.near = 1;
+        coldKey.shadow.camera.far = 22;
+        coldKey.shadow.bias = -0.0002;
+        scene.add(coldKey);
+
+        const bronzeRim = new THREE.RectAreaLight(0xc48b67, 0.34, 7, 3.5);
+        bronzeRim.position.set(5.6, 3.8, -3.3);
+        bronzeRim.lookAt(0, 0, 0);
+        scene.add(bronzeRim);
+
+        const violetFill = new THREE.RectAreaLight(0x554177, 0.17, 5, 4);
+        violetFill.position.set(-5, 2.8, -4.5);
+        violetFill.lookAt(0, 0, 0);
+        scene.add(violetFill);
+
+        const warmDrift = new THREE.PointLight(0xff8b52, 0.98, 6.8, 2.1);
+        warmDrift.position.set(4.2, 0.85, 1.4);
+        astrolabe.add(warmDrift);
+
+        const coolDrift = new THREE.PointLight(0x9db5ff, 0.84, 6.4, 2.1);
+        coolDrift.position.set(-3.7, 0.72, -1.8);
+        astrolabe.add(coolDrift);
+
+        return { warmDrift, coolDrift };
+      }
+
+      function resize() {
+        const bounds = stage.getBoundingClientRect();
+        const width = Math.max(1, Math.round(bounds.width));
+        const height = Math.max(1, Math.round(bounds.height));
+        const aspect = width / height;
+        const pixelRatio = Math.min(devicePixelRatio, 1.5);
+        const verticalFov = THREE.MathUtils.degToRad(10.5);
+        const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * aspect);
+        const widthDistance = (5.25 / Math.tan(horizontalFov / 2)) * 1.025;
+        const distance = Math.max(34.2, widthDistance);
+
+        renderer.setPixelRatio(pixelRatio);
+        renderer.setSize(width, height, false);
+        composer.setPixelRatio(pixelRatio);
+        composer.setSize(width, height);
+        bloom.setSize(width, height);
+
+        camera.aspect = aspect;
+        camera.fov = 10.5;
+        camera.position.copy(cameraTarget).addScaledVector(cameraDirection, distance);
+        camera.lookAt(cameraTarget);
+        camera.updateProjectionMatrix();
+
+        gradePass.uniforms.uResolution.value.set(width * pixelRatio, height * pixelRatio);
+        stars.userData.material.uniforms.uPixelRatio.value = pixelRatio;
+      }
+
+      function animate() {
+        requestAnimationFrame(animate);
+        const elapsed = reducedMotion ? reducedMotionTime : clock.getElapsedTime();
+        const time = elapsed * 0.66;
+
+        nebula.uniforms.uTime.value = time;
+        energyAura.uniforms.uTime.value = time;
+        gradePass.uniforms.uTime.value = time;
+
+        for (const track of motionTracks) {
+          track.group.rotation.y = track.phase + (time * TAU * track.direction) / track.period;
+          if ('position' in track.group) {
+            track.group.position.y =
+              track.baseY + Math.sin(time * 0.28 + track.phase * 5.0) * track.floatAmplitude;
+          }
+        }
+
+        aperture.light.intensity = 0.25 + Math.sin(time * 0.42) * 0.025;
+        for (const glint of glints.items) {
+          glint.material.opacity =
+            glint.baseOpacity * (0.58 + (Math.sin(time * 0.73 + glint.phase) * 0.5 + 0.5) * 0.22);
+        }
+        for (const track of energyTracks) {
+          track.material[track.property] =
+            track.base + Math.sin(time * track.speed + track.phase) * track.amplitude;
+        }
+        for (const uniform of energyUniformTracks) {
+          uniform.value = time;
+        }
+        const warmAngle = time * 0.055 + 0.42;
+        energyLights.warmDrift.position.set(
+          Math.cos(warmAngle) * 4.4,
+          0.78 + Math.sin(time * 0.13) * 0.08,
+          Math.sin(warmAngle) * 4.4,
+        );
+        const coolAngle = -time * 0.043 + 2.18;
+        energyLights.coolDrift.position.set(
+          Math.cos(coolAngle) * 3.8,
+          0.72 + Math.sin(time * 0.11 + 1.3) * 0.07,
+          Math.sin(coolAngle) * 3.8,
+        );
+        stars.rotation.y = time * 0.0012;
+        composer.render();
+      }
+
+      function mulberry32(seed) {
+        return function seededRandom() {
+          let value = (seed += 0x6d2b79f5);
+          value = Math.imul(value ^ (value >>> 15), value | 1);
+          value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+          return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+        };
+      }
+
+      const resizeObserver = new ResizeObserver(resize);
+      resizeObserver.observe(stage);
+      resize();
+      animate();
+    </script>
+  </body>
+</html>
