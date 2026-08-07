@@ -369,40 +369,40 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 
 > 详细记录见 `docs/CHANGELOG.md`。架构变更同步更新下方架构图。
 
-| Phase     | 内容                                                       | 状态                 |
-| --------- | ---------------------------------------------------------- | -------------------- |
-| 1-4.6     | 架构/数据结构/Agent编排/记忆/事件/FP 基础                  | ✅                   |
-| 5         | 角色 & 变量系统 (tier/bloodlines/validate/char/time)       | ✅                   |
-| Geography | 位置系统 (location-db, 10势力 32节点)                      | ✅                   |
-| Audit Fix | 世界书对齐 (数值/地理/品质/血脉)                           | ✅                   |
-| 6a-6e     | 战斗/制作/集群士气/好感/Marker+SubAgent                    | ✅                   |
-| 7a-7c     | 工程 (Vite+Vue3+Pinia) / 主题组件 / 首页+设置页            | ✅                   |
-| 7d        | 捏人页 `/create`                                           | 🔄 世界书驱动改造中  |
-| 7e        | 游戏页+HUD+脚本引擎+ChatFlow+输出美化+ScenePanel           | 🔄 待集成验证        |
-| 7f / 7g   | 创意工坊（= 工坊 P1）/ 衔接测试                            | ✅ / ⬜              |
-| 8 / 8.5   | Agent 可见性 / Agentic Agent (function calling)            | ✅                   |
-| 9 / 9b    | System Prompt 迁移 / craft_gen 细化                        | ✅                   |
-| 9c        | 集成测试 & 交付                                            | ⬜                   |
-| 10a-10h   | 模板系统/预设占位符/vars_update/Quest/memory_summary       | ✅                   |
-| 10i       | 输出美化规则库                                             | ✅                   |
-| 10j       | 剧情系统接线                                               | ✅ 待真机            |
-| 10k       | 快照面板+右键回退重发                                      | ✅ 待真机            |
-| M1-M6     | 数据字段规范迁移（2787 tests 全绿）                        | ✅                   |
-| Audio     | 音频系统 v1.0（双通道+三后端+按名寻址+场景配乐）           | ✅                   |
-| 素材      | 素材管理系统 v1.0（渲染面+大画像+裁剪台+画像弹窗）         | ✅                   |
-| 战斗 v2   | 战斗系统架构 v2（管道+中间件+6大类+19event+独立面板）      | ✅ 已退役（M5 删）   |
-| 战斗 v3   | 代码内核主持流程（Kernel+DiceTape+EffectIntent+DSL）       | ✅ M5完成 全量合入   |
-| 工坊 P0   | 世界书迁出 localStorage → Dexie v14（+ 进 FullBackup）     | ✅                   |
-| 工坊 P0b  | 美化规则迁出 localStorage → Dexie v15                      | ✅                   |
-| 工坊存储  | 正则共享隔离 KV → Dexie v16 `regexStorage`（+ FullBackup） | ✅                   |
-| 工坊 P1   | 创意工坊（浏览/安装/更新/卸载/启用，= 7f）                 | ✅ 入口已开放        |
-| 工坊 P2   | EJS 沙盒 + 只读 stats 投影（ADR-30）                       | ✅ 待真机            |
-| 工坊 P3   | 社交面（Discord 登录/点赞/订阅，D18-D25）                  | ✅ 真机已过          |
-| 工坊 P4   | 上游对齐（封面链/类型徽章/我的项目/更新 diff/投稿/审核）   | ✅ B4 真机已过       |
-| 图像 v1   | 情景插画（NovelAI 单家 + 标记锚点 + 三档开关 + CG 图鉴）   | ✅ 待真机            |
-| 测试加固  | 编码闸门 / knip 棘轮 / 属性测试 / lint 收紧（四种新闸门）  | ✅                   |
-| 内容分离  | 波 0-3：provider/pack 机制 · 代码内 IP 数据化 · 占位集     | ✅ 波 4 原子交换待做 |
-| 真机迭代  | debug loop 持续修复                                        | 🔄                   |
+| Phase     | 内容                                                       | 状态                                                     |
+| --------- | ---------------------------------------------------------- | -------------------------------------------------------- |
+| 1-4.6     | 架构/数据结构/Agent编排/记忆/事件/FP 基础                  | ✅                                                       |
+| 5         | 角色 & 变量系统 (tier/bloodlines/validate/char/time)       | ✅                                                       |
+| Geography | 位置系统 (location-db, 10势力 32节点)                      | ✅                                                       |
+| Audit Fix | 世界书对齐 (数值/地理/品质/血脉)                           | ✅                                                       |
+| 6a-6e     | 战斗/制作/集群士气/好感/Marker+SubAgent                    | ✅                                                       |
+| 7a-7c     | 工程 (Vite+Vue3+Pinia) / 主题组件 / 首页+设置页            | ✅                                                       |
+| 7d        | 捏人页 `/create`                                           | 🔄 世界书驱动改造中                                      |
+| 7e        | 游戏页+HUD+脚本引擎+ChatFlow+输出美化+ScenePanel           | 🔄 待集成验证                                            |
+| 7f / 7g   | 创意工坊（= 工坊 P1）/ 衔接测试                            | ✅ / ⬜                                                  |
+| 8 / 8.5   | Agent 可见性 / Agentic Agent (function calling)            | ✅                                                       |
+| 9 / 9b    | System Prompt 迁移 / craft_gen 细化                        | ✅                                                       |
+| 9c        | 集成测试 & 交付                                            | ⬜                                                       |
+| 10a-10h   | 模板系统/预设占位符/vars_update/Quest/memory_summary       | ✅                                                       |
+| 10i       | 输出美化规则库                                             | ✅                                                       |
+| 10j       | 剧情系统接线                                               | ✅ 待真机                                                |
+| 10k       | 快照面板+右键回退重发                                      | ✅ 待真机                                                |
+| M1-M6     | 数据字段规范迁移（2787 tests 全绿）                        | ✅                                                       |
+| Audio     | 音频系统 v1.0（双通道+三后端+按名寻址+场景配乐）           | ✅                                                       |
+| 素材      | 素材管理系统 v1.0（渲染面+大画像+裁剪台+画像弹窗）         | ✅                                                       |
+| 战斗 v2   | 战斗系统架构 v2（管道+中间件+6大类+19event+独立面板）      | ✅ 已退役（M5 删）                                       |
+| 战斗 v3   | 代码内核主持流程（Kernel+DiceTape+EffectIntent+DSL）       | ✅ M5完成 全量合入                                       |
+| 工坊 P0   | 世界书迁出 localStorage → Dexie v14（+ 进 FullBackup）     | ✅                                                       |
+| 工坊 P0b  | 美化规则迁出 localStorage → Dexie v15                      | ✅                                                       |
+| 工坊存储  | 正则共享隔离 KV → Dexie v16 `regexStorage`（+ FullBackup） | ✅                                                       |
+| 工坊 P1   | 创意工坊（浏览/安装/更新/卸载/启用，= 7f）                 | ✅ 入口已开放                                            |
+| 工坊 P2   | EJS 沙盒 + 只读 stats 投影（ADR-30）                       | ✅ 待真机                                                |
+| 工坊 P3   | 社交面（Discord 登录/点赞/订阅，D18-D25）                  | ✅ 真机已过                                              |
+| 工坊 P4   | 上游对齐（封面链/类型徽章/我的项目/更新 diff/投稿/审核）   | ✅ B4 真机已过                                           |
+| 图像 v1   | 情景插画（NovelAI 单家 + 标记锚点 + 三档开关 + CG 图鉴）   | ✅ 待真机                                                |
+| 测试加固  | 编码闸门 / knip 棘轮 / 属性测试 / lint 收紧（四种新闸门）  | ✅                                                       |
+| 内容分离  | 波 0-4：provider/pack · IP 数据化 · 占位集 · 原子交换+守门 | ✅ v1.3 缩减：剩 R1-R4（pack 构建+导入走查），不开源发布 |
+| 真机迭代  | debug loop 持续修复                                        | 🔄                                                       |
 
 > 🔓 **工坊入口已开放（2026-08-04）**：首页「创意工坊」按钮的 `HomePage.vue` `WORKSHOP_ENTRY_ENABLED` 已置 `true`。以下执行边界（2026-08-01 安全审计，2026-08-03 视觉边界修订）**一条没变**，仍是读工坊/正则代码时的必读；唯一遗留缺口是**脚本没有 CPU 预算**（恶意规则可让那一个 iframe 空转，宿主页面不受影响）。SEC-02 已由 QuickJS 隔离后端收口；SEC-01 不再用 DOM 白名单牺牲 replacement 兼容，而是把每次富正则命中放进各自无 same-origin 的 `sandbox="allow-scripts"` iframe，并使用 `credentialless` + `no-referrer`；未命中正文始终由宿主原生文本面渲染，正则 CSS/布局无法触及普通正文或其它命中。代价是跨命中 DOM 查询不再兼容。外部 HTTP(S) 资源与原生网络 API 为兼容性刻意放行；form、popup、download、top navigation、嵌套 frame、parent DOM、应用 Dexie/storage 与 API Key 仍不可达，应用自有 `/api` 也拒绝 `Origin: null`。正则唯一持久权限是 Dexie v16 `regexStorage`：所有正则、信任级别与预览共享同一个不可信命名空间，iframe 内以同步 `localStorage` 镜像和 `window.regexStorage` 别名使用，跨 frame 持久化/广播；`sessionStorage` 仍只活在当前 frame，IndexedDB 不开放。规则可向远程或本地网络发请求，也可外传该命中的 replacement/capture 与 regex-namespace 数据，这是当前威胁模型明确接受的暴露。**但这套全开契约只给「用户自己装过的规则」**：模型输出里合成的 `<item_info>` / `<task_info>` 卡片是另一档（`BeautifierMatchSegment.origin === 'model'`）—— CSP 只放行带 nonce 的宿主引导脚本，卡片自带 `<script>` / inline handler 由浏览器拦掉，`connect-src 'none'`，也不注入 `regexStorage` 快照；样式/图片照旧，视觉不降级。理由是模型正文会被世界书/角色卡/工坊文案里的注入牵着走，不该顺带拿到脚本面与网络出口。2026-08-02 公共工坊快照为 303 项目 / 99 条正则（0 编译失败）：60 条外部资源规则不再降级，16 条 parent 耦合与 14 条宿主 API 耦合仍受限；storage 词法命中 8 条，精查为 5 项目 6 条 active + 2 条仅注释，active 均只用 `getItem`/`setItem`/`removeItem` 且现已兼容。脚本仍无 CPU 预算（入口开放后这条仍未补）；已装规则按存档启用状态运行。详见 `docs/reviews/2026-08-01-repository-review.md` 与 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
 

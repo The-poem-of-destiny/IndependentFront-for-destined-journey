@@ -6,6 +6,10 @@
 >
 > 执行模型：主会话 grounding / 派发 / 波间审查；实现全部走子 agent（**opus / medium effort**，
 > 主人的全局约定）。设计文档是**契约**——brief 与设计冲突时以设计为准并回报，不得自行发挥。
+>
+> 🔴 **v1.3（2026-08-07）**：波 0-4 已全部合入（PR #36-#45，CI 绿）；主人裁定**不做开源
+> 发布**（设计文档文首 v1.3 节），波 5-7 原编排作废/缩水——**现行剩余工作见 §6
+> 「v1.3 剩余任务（R1-R4）」**。下文波 5-7 章节保留作历史记录，不再执行。
 
 ---
 
@@ -69,6 +73,10 @@ npm run test -- --run
 | 5   | T19-T20   | 2 个并行                                                                    | fixture/docs/仓面清洗                              | 词表扫描仅白名单命中                               |
 | 6   | T21-T23   | 串行                                                                        | 私有内容仓 + pack 构建                             | 私有 CI 四门绿；真实 pack v1.0.0 产出              |
 | 7   | T24-T25   | 串行                                                                        | 真机三走查 + 快照切仓                              | 设计 §0.2 十五条验收全过                           |
+
+> 🔴 **v1.3 进度勘定（2026-08-07）**：波 0-4 ✅ 已合入（波 0/1 = PR #36-#43；波 2+3 =
+> PR #44；波 4 = PR #45）。波 5（T19/T20）与波 7 T25 **取消**；波 6（T21-T23）与波 7 T24
+> **缩水/重排为 §6 的 R1-R4**。本表以下的波 5-7 brief 仅存档。
 
 ### 1.1 为什么这么分波
 
@@ -477,3 +485,59 @@ D30→T17(4)；D31→T17(5)；D32→T18；D33→T19；D34→各波末；D35→T0
 D38→T18/T22；D39→T0.2；D40→T13(版本注入+门通电)/T22(构建)；D41→T13；D42→T7(重播种通道)+
 T15(hash 清单)；D43→T6/T7/T15；D44→T4；§3.1 reference 分流→T17(1)；§5.8→T2(检测横幅)+
 T20(迁移公告)。
+
+---
+
+## 6. v1.3 剩余任务（现行 —— 2026-08-07 缩减裁定后）
+
+> 设计 v1.3 裁定：不开源发布、不切仓。引擎侧导入机制已全部就位（波 1 provider / planner /
+> 执行器 / 导入 UI + 波 4 守门 / 契约测试）；剩余全部是**内容侧**工作，目标一句话：
+> **让用户把真实内容导入回来**。与原编排的对应关系：T19/T20/T25 取消；T21→R1（缩水）；
+> T22→R2（缩水）；T23→R3；T24→R4（全量保留）。R1→R2→R3 串行，R4 收尾。
+
+### R1 内容归家【S；✋ 依赖 D3 简化裁定：默认扩建既有私有 Worldbook 仓】
+
+- 恢复 `_private-staging/` 等价树：优先从执行 T17 的机器取回；任何机器也可从本仓历史
+  `2afc23c`（交换前最后 commit）完整提取——`data/`（15 书 + defaults + content 七件 +
+  `regex-remote-snapshot.json`）、`public/audio/manifest.json`（真实版）、`reference/` 整树、
+  `tests/agent-framework/`、`tests/realtime_export/*.preset.json`、
+  `src/sillytavern/worldbook-ejs-corpus.test.ts`、四个内容工具脚本
+  （`scramble-worldbook-ejs.mjs` / `build-agent-fingerprints.mjs` /
+  `extract-map-markers.cjs` / `import-regex-rules.mjs`）。
+- 落进私有仓，目录形状守设计 §3.1 铁律（顶层 `data/` = `POEM_CONTENT_DIR` 指向，
+  创作工作流即 overlay + PUT 写回）。
+- 🔴 §3.1 两条跟进不变：105 MB 对局导出补密钥/PII 扫描；体积痛就 LFS 或非 CI 目录，
+  **不许退回删除**。
+
+### R2 pack 构建器【M；在私有仓，本地跑，CI 化推迟】
+
+- `tools/build-pack.mjs`：读 `data/` 树 → 设计 §4 schema 组装 → `formatVersion: 1`、
+  `minEngineVersion` 定值 → 校验（16 分区、拒 `creative_workshop`）→ 编码门三判据
+  （U+FFFD=0 / ctrl=0 / JSON 可解析）→ **D10 黑名单硬拦**（Overlord/Fate/HP 三段背景
+  不进包）→ D13 provenance 标记（kitsch 预设授权未决）→ 逐节 hash 盖章 → 尺寸报告
+  （预估 ~3.2 MB）。
+- 自检最低门：构建产物过引擎 `validatePackOrThrow`（直接以 R3 的契约测试代替亦可）。
+
+### R3 真实 pack v1.0.0 + 分发【S；依赖 R1+R2】
+
+- 构建 → 本地契约测试：`POEM_PACK_FILE=<pack> npx vitest --run tests/contract`
+  （公开仓自带，D38——断言新鲜引擎 0 冲突 + 分节计数 + 模拟编辑后 N 冲突）。
+- 私有仓 Release + 命定社区渠道分发（D40）。
+- 🔴 §5.8 时序**现已生效**：HEAD 已是占位态，测试者拉更新即降级——pack 必须先于（或随同）
+  他们更新可用。随分发附**测试者迁移公告**（四个降级面：美化 22 条 / 地图标记 / 捏人目录 /
+  内置曲库——装包即回前三者，曲库走音频 zip 通道）；这是原 T20 里唯一保留的交付件。
+
+### R4 真机三走查【主会话 + 主人；= 原 T24 全量，一字不减】
+
+- (a) 占位态零安装演示环路：`npm run build && npx vite preview`（含 `/api` 通、story 以
+  通用叙事引导产出正文）。
+- (b) 导入 v1.0.0 pack 全链路：世界书 / 预设短路 / 捏人目录 / 地图 / 血脉全量核对 +
+  恢复默认不回占位 + 升级 diff + 卸载回落占位。
+- (c) 占位期建档 → 装包 → 旧存档存活（`system_core` 恰好单条、`needs_selection` 流程）。
+- 发现问题按 debug-loop 修复后**重走该项**。
+
+### ✋ 悬置（主人裁定，均不阻塞 R1-R4 开工）
+
+- D3 简化确认：扩建既有 Worldbook 仓 vs 新建极简私有仓（默认前者）。
+- 可选扫尾：三处语料级文档（设计 v1.3「可选扫尾」节）。
+- T0.1 key 轮换确认（v1.3 验收 #7）。

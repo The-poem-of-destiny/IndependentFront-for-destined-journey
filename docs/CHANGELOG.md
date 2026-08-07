@@ -9,6 +9,25 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 内容-引擎分离 波 4 + v1.3 缩减裁定 ｜ ✅ 波 4 完成（2026-08-07）
+
+**波 4（PR #45，T17 原子交换 + T18 守门）**：真实内容全部离树（15 本世界书 / agent-config /
+美化规则 / 目录七件 / `regex-remote-snapshot` / `reference/` 整树 / agent-framework 语料 /
+`worldbook-ejs-corpus.test.ts` / 四个内容工具脚本，共 -172,726 行），占位内容落
+`public/data/`（URL 不变）；`vite.config.ts` 换 `POEM_CONTENT_DIR` 条件 overlay +
+`configurePreviewServer` 挂 BFF；新增守门 `tests/no-world-content.test.ts`（词表轴钉
+`public/data/**` + 体量轴）与契约 `tests/contract/pack-install.contract.test.ts`
+（`POEM_PACK_FILE` 门控）。CI 绿。真实内容暂存 `_private-staging/`（gitignored，仅在
+执行 T17 的机器上；任何机器可从 `2afc23c` 恢复）。
+
+**v1.3 缩减裁定（2026-08-07 主人）**：**不做开源发布**——本仓保持公开仅为让用户核验代码
+无害；分离范围收窄至敏感内容本体（世界书正文/预设/提示词）。三仓拓扑（D1/D2/D4/D45）、
+快照切仓（T25）、IP 专名清洗（T19/T20 大部）作废；私有仓与构建器缩水为「内容归家 +
+本地构建脚本」。剩余工作重排为 **R1-R4**（内容归家 → pack 构建器 → 真实 pack v1.0.0 +
+分发 → 真机三走查），聚焦用户导入路径；git 历史敏感内容永久公开被显式接受。
+🔴 §5.8 时序现已生效：HEAD 是占位态，测试者拉更新即降级——真实 pack 必须先于他们更新可用。
+详见设计文档文首 v1.3 节与实施计划 §6。
+
 ### 内容-引擎分离 波 2 + 波 3 —— 代码内 IP 数据驱动化 + 占位内容集 ｜ ✅ 完成（2026-08-06）
 
 设计真源 `docs/planning/2026-08-05-content-engine-separation-design.md`（v1.2 / D1-D45），
