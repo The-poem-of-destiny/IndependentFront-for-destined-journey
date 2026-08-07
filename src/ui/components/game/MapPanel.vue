@@ -164,6 +164,17 @@ const {
   destroy,
 } = useMapViewer(containerRef, mapSources);
 
+/** 地图字节下载进度（0-100；本地缓存命中不出现 —— 保持 0，loading 态显示「加载中」） */
+const mapDownloadProgress = ref(0);
+
+/** 首次加载 / 切换 / 重试统一入口：带进度回调 */
+function requestLoadSource(key: string) {
+  mapDownloadProgress.value = 0;
+  loadSource(key, (p) => {
+    mapDownloadProgress.value = p;
+  });
+}
+
 const {
   markers,
   activeMarkerId,
@@ -210,7 +221,7 @@ watch(markers, () => schedulePersist(), { deep: true });
 
 // ═══ 地图源切换 ═══
 function switchSource(key: string) {
-  loadSource(key);
+  requestLoadSource(key);
   nextTick(() => {
     setTimeout(() => syncOverlays(), 500);
   });
@@ -380,7 +391,7 @@ onMounted(async () => {
   await nextTick();
   createViewer();
   // 首个可用图源；一个都没有时 loadSource 落 error 态并说明「需要内容包」
-  loadSource(mapSources.value[0]?.key ?? '');
+  requestLoadSource(mapSources.value[0]?.key ?? '');
 });
 
 onBeforeUnmount(() => {
@@ -435,14 +446,20 @@ onBeforeUnmount(() => {
       <div class="map-stage">
         <!-- 状态提示 -->
         <div v-if="status === 'loading'" class="map-overlay">
-          <span>{{ contentReady ? '地图加载中…' : '内容加载中…' }}</span>
+          <span>{{
+            contentReady
+              ? mapDownloadProgress > 0
+                ? `地图下载中 ${mapDownloadProgress}%…`
+                : '地图加载中…'
+              : '内容加载中…'
+          }}</span>
         </div>
         <div v-else-if="status === 'error'" class="map-overlay map-overlay-error">
           <span>{{ errorMessage || '地图加载失败' }}</span>
           <button
             v-if="mapSources.length > 0"
             class="btn btn-sm"
-            @click="loadSource(currentSourceKey || mapSources[0].key)"
+            @click="requestLoadSource(currentSourceKey || mapSources[0].key)"
           >
             重试
           </button>

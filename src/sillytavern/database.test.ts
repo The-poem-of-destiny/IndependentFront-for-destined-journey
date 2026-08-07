@@ -825,7 +825,8 @@ describe('exportAllData / importAllData', () => {
     // 这条断言曾经写着 17 而 schema 已经到 19（v18 删地点预设行 / v19 角色外貌会话副本），
     // 于是它把漂移**固定**下来而不是拦下来。升版时 database.ts 与这里一起改。
     // v20：内容-引擎分离波 1 / D18 —— contentPacks 表（安装持久化，不进 FullBackup）。
-    expect(backup.version).toBe(20);
+    // v21：地图字节本地缓存 mapBlobs（2026-08-07，D23 补强；字节同不进备份）。
+    expect(backup.version).toBe(21);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -1403,6 +1404,34 @@ describe('contentPacks 表 (v20 / D18)', () => {
     expect(await db.contentPacks.count()).toBe(0);
     await importAllData(backup);
     expect(await db.contentPacks.count()).toBe(0);
+  });
+});
+
+// ========== v21 mapBlobs 地图字节缓存（2026-08-07，D23 补强） ==========
+
+describe('mapBlobs 表 (v21)', () => {
+  it('表存在且主键为 url（同一图源天然去重）', () => {
+    const db = getDatabase();
+    expect(db.mapBlobs).toBeDefined();
+    expect(db.mapBlobs.schema?.primKey.keyPath).toBe('url');
+  });
+
+  it('FullBackup 往返不碰 mapBlobs（字节进备份 = 每份备份 +12MB，照 assetBlobs 先例）', async () => {
+    const db = getDatabase();
+    await db.mapBlobs.put({
+      url: 'https://example.com/map.webp',
+      blob: new Blob(['x']),
+      updatedAt: 1,
+    });
+
+    const backup = await exportAllData();
+    expect('mapBlobs' in backup).toBe(false);
+
+    await db.mapBlobs.clear();
+    expect(await db.mapBlobs.count()).toBe(0);
+    await importAllData(backup);
+    // 备份从未收它 → 恢复后仍为空（地图缓存不走备份迁移）
+    expect(await db.mapBlobs.count()).toBe(0);
   });
 });
 
@@ -2244,7 +2273,7 @@ describe('Asset CRUD (v13)', () => {
     // ---- 以当前版 (AppDatabase) 打开：触发升版 ----
     await initializeDatabase();
     const db = getDatabase();
-    expect(db.verno).toBe(20); // v18=D59 删地点预设; v19=D56 角色外貌会话副本; v20=D18 contentPacks 表
+    expect(db.verno).toBe(21); // v20=D18 contentPacks 表; v21=地图字节缓存 mapBlobs
 
     // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
     //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56）
@@ -2263,6 +2292,7 @@ describe('Asset CRUD (v13)', () => {
       'imagePresets',
       'characterAppearances',
       'contentPacks',
+      'mapBlobs',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 
