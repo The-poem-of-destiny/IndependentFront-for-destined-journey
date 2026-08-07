@@ -1123,6 +1123,14 @@ export const useContentStore = defineStore('content', () => {
           validationErrors: plan.validationErrors,
         };
       } catch (err) {
+        // 🔴 回滚前先留痕：快照回滚可能掩盖原始异常（2026-08-07 真机教训——此前
+        //    catch 无任何日志，装包失败只弹 toast）。
+        console.error(
+          '[content-pack] 安装写入失败，回滚中（packId=%s, version=%s）:',
+          pack.packId,
+          pack.packVersion,
+          err,
+        );
         await rollbackTo(snapshot);
         throw err;
       } finally {
@@ -1279,6 +1287,11 @@ export const useContentStore = defineStore('content', () => {
               : [],
         };
       } catch (err) {
+        console.error(
+          '[content-pack] 卸载写入失败，回滚中（packId=%s）:',
+          installedPack.packId,
+          err,
+        );
         await rollbackTo(snapshot);
         throw err;
       }
