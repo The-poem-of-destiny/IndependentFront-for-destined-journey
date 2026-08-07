@@ -170,16 +170,16 @@ reference/audit_report.md        # 代码 vs 世界书冲突审计报告
 
 ## 世界观叙事内容生成规范（必读）
 
-**在生成任何与《命定之诗》世界观相关的叙事内容时，必须先查阅 `reference/narrative_context_example.md`。**
+**在生成任何与《命定之诗》世界观相关的叙事内容时，必须先查阅叙事规范。** 完整范例句
+`docs/reference/narrative_context_example.md` 已随内容分离移入**私有内容仓**
+（`fated_poem_independent_assets/docs/reference/narrative_context_example.md`，
+2026-08-07 可选扫尾）——公开仓侧不可见；本地仓库路径
+`E:\code\fated_poem_independent_assets\docs\reference\narrative_context_example.md`。
 
-该文件定义了两件事：
+规范的核心（在公开仓长期有效）：
 
 1. **应该考虑什么** — 生成叙事场景时，需要从哪些维度提取世界信息（外貌/种族/背景/性格/五维/装备/技能/背包/关系/好感度/状态效果/时间/地点/天气等）并自然地编织进叙事
 2. **不应该出现什么** — 什么内容会破坏世界观沉浸感（装备数值 `攻击力+15`、技能消耗 `SP消耗:15`、物品数值效果 `恢复20HP`、游戏机制术语 `好感度+5` 等）
-
-```bash
-reference/narrative_context_example.md  # 完整叙事示例 + 维度清单 + 反例对照
-```
 
 **适用范围**: 编写 Agent prompt 模板（尤其是 story 的 fixedExamples）、生成设计文档中的场景示例、编写测试用例的 mock 数据、生成世界书条目内容、编写剧情大纲。
 
