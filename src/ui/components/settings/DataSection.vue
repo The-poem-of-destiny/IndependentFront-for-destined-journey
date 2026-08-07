@@ -102,7 +102,12 @@ async function runInstall(raw: unknown) {
     }
     await afterPackApplied(outcome.notes ?? []);
     ui.toast('内容包已安装', 'success');
-  } catch {
+  } catch (err) {
+    // 🔴 安装异常必须留痕：此前空 catch 吞掉全部错误，只弹 toast、控制台零输出，
+    //    失败原因无从排查（2026-08-07 真机：导入 pack 报「安装失败」但无任何日志）。
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[content-pack] 内容包安装失败:', err);
+    packError.value = msg || '内容包安装失败（无错误信息）';
     ui.toast('内容包安装失败', 'error');
   } finally {
     packInstalling.value = false;
@@ -136,6 +141,10 @@ async function runUpgradeRaw(
     await afterPackApplied(outcome.notes ?? []);
     ui.toast('内容包已升级', 'success');
   } else if (outcome.status === 'invalid') {
+    packError.value =
+      ((outcome as { validationErrors?: unknown[] }).validationErrors ?? [])
+        .map((e: any) => e.text ?? String(e))
+        .join('\n') || '内容包校验未通过';
     ui.toast('内容包校验未通过', 'error');
   }
 }
@@ -161,7 +170,10 @@ async function confirmPackInstall() {
     }
     await afterPackApplied(outcome.notes ?? []);
     ui.toast(wasUpgrade ? '内容包已升级' : '内容包已安装', 'success');
-  } catch {
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[content-pack] 内容包安装失败（确认重入）:', err);
+    packError.value = msg || '内容包安装失败（无错误信息）';
     ui.toast('内容包安装失败', 'error');
   } finally {
     packInstalling.value = false;
