@@ -52,15 +52,25 @@ const expandedIds = ref<Record<string, boolean>>({});
 const pinnedToBottom = ref(true);
 const messageDepths = computed(() => computeConversationalDepths(props.messages ?? []));
 
+/** 滚到底部（进存档 / 新消息 / 快照回退时调用）。nextTick 等本轮 DOM 落定。 */
+function scrollToBottom() {
+  nextTick(() => {
+    const el = container.value;
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+}
+
+// 新消息是 `messages.value.push` —— 数组原地变更，只有 length 会变，靠它触发。
 watch(
   () => props.messages?.length,
-  () => {
-    nextTick(() => {
-      if (container.value) {
-        container.value.scrollTop = container.value.scrollHeight;
-      }
-    });
-  },
+  () => scrollToBottom(),
+);
+
+// 载入存档 / 快照回退是 `messages.value = await getMessages(...)` —— 整体换数组，
+// **长度可能完全不变**（回到同一轮），length watcher 不会触发，必须盯数组引用。
+watch(
+  () => props.messages,
+  () => scrollToBottom(),
 );
 
 function formatTime(ts?: number): string {
@@ -290,6 +300,9 @@ onMounted(() => {
   window.addEventListener('click', handleGlobalClick);
   window.addEventListener('keydown', handleEsc);
   window.addEventListener('scroll', handleScrollClose, true); // capture：捕获容器内滚动
+  // 进存档时消息早已就位，两个 watcher 都不会触发 —— 必须显式滚一次。
+  // 后续插画字节异步装载会触发 resize（pinnedToBottom 初值 true），自动保持钉底。
+  scrollToBottom();
 });
 onUnmounted(() => {
   window.removeEventListener('click', handleGlobalClick);
