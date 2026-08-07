@@ -15,6 +15,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
+import { reactive } from 'vue';
 import {
   useContentStore,
   setActivePackRecord,
@@ -247,6 +248,30 @@ describe('content-store 执行器 —— 1. 安装（含冲突确认路径）', 
     expect(second.ok).toBe(true);
     const sc = await db.worldBooks.get('system_core');
     expect(sc?.entries.map((e) => e.uid)).toEqual([1, 2]);
+  });
+
+  it('pack 经 Vue reactive 代理（packPending 场景）→ 确认重入装包成功，不 DataCloneError（2026-08-07 真机回归）', async () => {
+    await seedPlaceholderLibrary();
+    // 编辑占位书 → 制造 conflicted（与真机一致：确认框 → 确认重入）
+    const db = getDatabase();
+    await db.worldBooks.put({
+      ...PLACEHOLDER_SYSTEM_CORE,
+      entries: [entry(900001, '核心A', '改了')],
+    });
+
+    const c = useContentStore();
+    // 🔴 DataSection.vue 的 packPending 是 ref——存对象会 reactive() 深代理，
+    //    确认重入时取回的是 Proxy。reactive(makePack()) 模拟同一形态。
+    const pack = reactive(makePack());
+    const first = await c.installPack(pack);
+    expect(first.status).toBe('needs_confirmation');
+    // 确认重入（同一 Proxy pack）
+    const second = await c.installPack(pack, { confirmConflicts: true });
+    expect(second.ok).toBe(true);
+    expect(second.status).toBe('installed');
+    // 预设成功落库（修复前：savePreset(Proxy) → IDB DataCloneError）
+    const presets = await getDatabase().presets.toArray();
+    expect(presets.map((p) => p.id)).toContain('pack-story-preset');
   });
 });
 

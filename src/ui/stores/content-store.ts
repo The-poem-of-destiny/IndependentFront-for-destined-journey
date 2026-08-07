@@ -40,6 +40,7 @@
 
 import { defineStore, getActivePinia } from 'pinia';
 import { ref } from 'vue';
+import { detach } from './db-write';
 import type { ContentStatus } from '@engine/types-content';
 // 占位基线清单：随引擎打包的静态资源（设计 §6），**不是**内容树的一部分。
 import placeholderHashesRaw from '@engine/placeholder-hashes.json';
@@ -1076,7 +1077,7 @@ export const useContentStore = defineStore('content', () => {
         validationErrors: [],
       };
 
-    const pack = rawPack as ContentPack;
+    const pack = detach(rawPack) as ContentPack;
     // 已装同 id → 用旧包 payload 现算基线（D18 hash 分工：冲突判定从 payload 现算）。
     // 升级的 diff 展示由 upgradePack 单独提供（UI 层按 packId 分流）；installPack 本身
     // 只负责「装这一版」—— 旧基线用于四态规则判「现 hash = 基线 → updated 静默覆盖」。
@@ -1164,7 +1165,7 @@ export const useContentStore = defineStore('content', () => {
         validationErrors,
       };
     }
-    const pack = rawPack as ContentPack;
+    const pack = detach(rawPack) as ContentPack;
     const existing = await getDatabase().contentPacks.get(pack.packId);
     if (!existing) {
       // 没装过同 id → 不是升级，走安装
