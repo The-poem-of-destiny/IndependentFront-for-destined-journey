@@ -242,7 +242,7 @@ describe('beautifier-store', () => {
       expect(store.presetRules.map((r) => r.id)).toEqual(['builtin-pack-a', 'builtin-pack-b']);
     });
     // 不污染用户表 / 不写回 settings
-    expect((await getDatabase().beautifierRules.toArray())).toHaveLength(0);
+    expect(await getDatabase().beautifierRules.toArray()).toHaveLength(0);
     setPackRulesProvider(null);
   });
 });
