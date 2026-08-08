@@ -146,6 +146,21 @@
     4.2+0.66i seconds per event. The no-threshold bloom of pass 20 also gives every lit rune
     the soft halo the old thresholded pass denied it.
 
+23. The interaction pass, all three owner-requested. (a) A 30fps render cap: the piece is a
+    slow ambient animation and the uncapped loop ran laptop GPUs hot for no visible gain;
+    scene time still reads the wall clock so the cap changes smoothness only, never tempo.
+    Verified with a draw-call probe in the live page: exactly 60 rendered frames per 240
+    display ticks on a 120Hz screen. (b) Three new dials on the existing 0-200% pipeline —
+    Bloom (scatter strength), Particles (motes, streaks, glints), Sky (nebula, aurora,
+    stars; the base floor stays so 0% reads as clear night, not a hole). Verified live: Sky
+    0% extinguishes the backdrop, Bloom 200% visibly widens halation, Reset returns all five
+    dials to their declared defaults. (c) An experimental drag orbit: elevation only, azimuth
+    and distance fixed, so dragging never zooms. The ceiling is viewport-dependent — the
+    framing solve fits the disc's width, and the projected height grows with sin(elevation),
+    so a wide aspect caps the climb lower; the walk-down predicate mirrors the solve and the
+    shipped default always stays reachable. The screen-space glow compensation reruns on
+    every pose change, or halo radii would drift with elevation.
+
 ## Findings
 
 - P0: none.
