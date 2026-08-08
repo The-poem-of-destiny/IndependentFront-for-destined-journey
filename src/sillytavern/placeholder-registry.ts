@@ -85,7 +85,8 @@ function formatPlotEventsEntries(ctx: AgentContext): string {
     .map((e) => {
       const tw = e.timeWindow?.start
         ? `\n时间窗口: ${e.timeWindow.start}${e.timeWindow.end && e.timeWindow.end !== e.timeWindow.start ? ` ~ ${e.timeWindow.end}` : ''}`
-        : '';      return `[${e.id}] ${e.title} (${e.status})\n${e.description.slice(0, 200)}${tw}`;
+        : '';
+      return `[${e.id}] ${e.title} (${e.status})\n${e.description.slice(0, 200)}${tw}`;
     })
     .join('\n---\n');
 }
