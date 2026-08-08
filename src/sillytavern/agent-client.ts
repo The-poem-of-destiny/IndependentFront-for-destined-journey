@@ -613,7 +613,8 @@ export class AgentClient {
       messages: this.ensureUserMessage(request.messages),
       temperature: request.temperature ?? 0.7,
       // 真机修(2026-07-17): 侧链 request 不带 maxTokens，2048 兜底会截断 char_gen 思考链+XML → 静默解析失败
-      max_tokens: request.maxTokens ?? 16384,
+      // 2026-08-08: 兜底 16384 → 65536（全 Agent 输出上限整体拉高，与 AGENT_SETTINGS_DEFAULTS 对齐）
+      max_tokens: request.maxTokens ?? 65536,
       top_p: request.topP ?? 1.0,
       frequency_penalty: request.frequencyPenalty ?? 0,
       presence_penalty: request.presencePenalty ?? 0,
@@ -709,6 +710,9 @@ export class AgentClient {
       const message = choice?.message;
       const rawResponse: string = message?.content ?? '';
       const reasoningContent: string = message?.reasoning_content ?? '';
+      // 🆕 2026-08-08: 捕获停止原因（length=输出截断）。此前不读 finish_reason，
+      // 截断和格式损坏混成同一个「解析失败」，5×5 大纲生成失败原因不可查。
+      const finishReason: string | undefined = choice?.finish_reason;
       const tokensUsed: number = data.usage?.total_tokens ?? 0;
       // 🆕 缓存命中/未命中/输出 token 明细（缺失当 0）
       const cacheHitTokens: number = data.usage?.prompt_cache_hit_tokens ?? 0;
@@ -734,6 +738,7 @@ export class AgentClient {
         cacheHitTokens,
         cacheMissTokens,
         completionTokens,
+        finishReason,
         duration: 0,
         _toolCalls: toolCalls,
       };

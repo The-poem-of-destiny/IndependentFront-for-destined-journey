@@ -63,7 +63,8 @@ export const AGENT_SETTINGS_DEFAULTS = {
   topP: 1.0,
   freqPen: 0,
   presPen: 0,
-  maxTokens: 16384,
+  // 2026-08-08: 16384 → 65536（主人裁定：输出上限整体拉高，大纲 5×5 等重输出不再贴边）
+  maxTokens: 65536,
 } as const;
 
 /** settings 袋子（settings-store 的 `settings.value`） */
