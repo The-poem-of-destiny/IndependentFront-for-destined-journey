@@ -302,7 +302,7 @@ export function substituteWorkflow(
 // POST /prompt 的响应
 // ═══════════════════════════════════════════════════════════
 
-export interface ComfyQueueSuccess {
+interface ComfyQueueSuccess {
   ok: true;
   promptId: string;
 }

@@ -547,7 +547,7 @@ export const COMFY_DEFAULT_BASE_URL = 'http://127.0.0.1:8188';
 export const COMFY_REQUEST_TIMEOUT_MS = 600_000;
 
 /** 轮询间隔（C13）。ComfyUI 是本机服务，1.5 秒既不吵也不迟钝 */
-export const COMFY_POLL_INTERVAL_MS = 1_500;
+const COMFY_POLL_INTERVAL_MS = 1_500;
 
 /**
  * ComfyUI 地址归一化。

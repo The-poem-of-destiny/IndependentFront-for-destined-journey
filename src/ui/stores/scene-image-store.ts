@@ -119,7 +119,7 @@ export interface SceneImageSendResult {
  *
  * 🔴 判定不在这里：store 不认识 provider 也不认识方言，它只是把缝给的答案抄进记录。
  */
-export interface SceneImageRuntimeInfo {
+interface SceneImageRuntimeInfo {
   provider: ImageProviderId;
   dialectId: string;
 }

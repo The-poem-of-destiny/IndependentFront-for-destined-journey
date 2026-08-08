@@ -12,6 +12,13 @@
  *    问过之后（`imageAutoConfirmed`）不再打断 —— 每次都弹等于训练用户闭眼点过。
  *    另外「点了 auto 但没确认」时档位**不能**已经变了，否则确认框成了摆设。
  *
+ * 3. **后端切换**（图像 v2 / C9·C16）。ComfyUI 下那七样 NAI 专属的东西（端点/模型/
+ *    采样器/UC 预设/账户档位/Anlas 估算/每消息与每小时上限）必须**整块消失** ——
+ *    留着就是一句「看着权威、其实不生效」的话，与 D43 谎报免费同一类错误。
+ *
+ * 4. **方言**（C6）。四个字符串旋钮按方言 id 键控；`supportsNegative:false` 时负向框
+ *    **可见地禁用**，不是收下再静默丢掉。
+ *
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -25,6 +32,40 @@ const mockSettings = reactive<Record<string, any>>({});
 vi.mock('../../../stores/settings-store', () => ({
   useSettingsStore: () => ({ settings: mockSettings }),
 }));
+
+/**
+ * 内容注册表的第 7 面（方言）。整层替掉是为了不把 Dexie / fetch 拖进 jsdom ——
+ * 本文件关心的是「下拉里列了什么」「supportsNegative 怎么影响那一格」，
+ * 不是注册表自己的加载时序。
+ */
+let dialectFace: unknown;
+vi.mock('../../../stores/content-store', () => ({
+  getContentRegistry: () => ({ imageDialects: dialectFace }),
+  ensureContentRegistryLoaded: async () => {},
+}));
+
+/** 两条方言：一条吃负向（danbooru），一条不吃（散文 / CFG 1.0 那类模型） */
+const DIALECT_FIXTURE = {
+  dialects: [
+    {
+      id: 'danbooru-anime',
+      label: '动漫标签',
+      supportsNegative: true,
+      qualitySuffix: 'masterpiece',
+      baseNegative: 'lowres',
+      systemPrompt: '把场景转成标签',
+    },
+    {
+      id: 'natural-prose',
+      label: '自然语言',
+      supportsNegative: false,
+      qualitySuffix: '',
+      baseNegative: '',
+      composition: '',
+      systemPrompt: '写一句英文描述',
+    },
+  ],
+};
 
 import ImageRenderCard from './ImageRenderCard.vue';
 import AppModal from '../../shared/AppModal.vue';
@@ -47,6 +88,14 @@ function resetSettings() {
     // 覆盖表留空 = 回落方言默认（= 下面断言里的两个常量）
     imageDialectId: 'danbooru-anime',
     imageDialectOverrides: {},
+    // 图像 v2 / C8：后端与两个 provider 袋子。默认 novelai = 重构前唯一存在的那条路
+    imageProvider: 'novelai',
+    imageComfy: {
+      baseUrl: 'http://127.0.0.1:8188',
+      workflowJson: '',
+      timeoutMs: 600_000,
+      pollIntervalMs: 1_500,
+    },
     imageNovelai: {
       endpointId: null,
       model: 'nai-diffusion-4-5-full',
@@ -72,10 +121,16 @@ function tierItems(w: ReturnType<typeof mount>) {
   return w.get('[aria-label="NovelAI 账户档位"]').findAll('.mode-item');
 }
 
+/** 后端选择器（第三组 mode-list） */
+function providerItems(w: ReturnType<typeof mount>) {
+  return w.get('[aria-label="出图后端"]').findAll('.mode-item');
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   setActivePinia(createPinia());
   resetSettings();
+  dialectFace = DIALECT_FIXTURE;
 });
 
 describe('ImageRenderCard —— 免费额度指示（D43）', () => {
@@ -272,5 +327,189 @@ describe('ImageRenderCard —— 端点筛选与两处提示词的边界', () =>
 
   it('这张卡写明自己管的是「图」的提示词（与 Agent 的提示词区分开）', () => {
     expect(mount(ImageRenderCard).find('.image-card-scope').text()).toContain('NovelAI');
+  });
+});
+
+describe('🔴 ImageRenderCard —— 后端切换（C9/C16）', () => {
+  it('三个后端专属块的默认相：NovelAI 那套全在，ComfyUI 那套一个不出', () => {
+    const w = mount(ImageRenderCard);
+
+    expect(w.find('[aria-label="NovelAI 账户档位"]').exists()).toBe(true);
+    expect(w.find('.anlas-line').exists()).toBe(true);
+    expect(w.find('.quota-per-message').exists()).toBe(true);
+    expect(w.find('.comfy-base-url').exists()).toBe(false);
+    expect(w.find('.workflow-input').exists()).toBe(false);
+  });
+
+  it('设置里压根没有 imageProvider（迁移之前的老档）也走 NovelAI 那条路', () => {
+    delete mockSettings.imageProvider;
+    expect(mount(ImageRenderCard).find('.anlas-line').exists()).toBe(true);
+  });
+
+  it('🔴 切到 ComfyUI：端点/模型/档位/Anlas/限额**整块消失**（画出来就是假话）', async () => {
+    const w = mount(ImageRenderCard);
+    await providerItems(w)[1].trigger('click');
+    expect(mockSettings.imageProvider).toBe('comfyui');
+
+    expect(w.find('[aria-label="NovelAI 账户档位"]').exists()).toBe(false);
+    expect(w.find('.anlas-line').exists()).toBe(false);
+    expect(w.find('.anlas-ruleset').exists()).toBe(false);
+    expect(w.find('.quota-per-message').exists()).toBe(false);
+    expect(w.find('.quota-per-hour').exists()).toBe(false);
+    // 端点下拉（NAI 那格）也跟着走 —— 只剩分级上限与方言两个 select
+    expect(w.findAll('select')).toHaveLength(2);
+  });
+
+  it('共享的宽/高/步数/CFG 在两个后端下都在（comfy 侧是 %token% 的替换值）', async () => {
+    const w = mount(ImageRenderCard);
+    const numbersBefore = w.findAll('input[type="number"]').length;
+    expect(numbersBefore).toBeGreaterThan(0);
+
+    await providerItems(w)[1].trigger('click');
+    const labels = w.findAll('.form-label').map((l) => l.text());
+    expect(labels.some((t) => t.startsWith('宽（px）'))).toBe(true);
+    expect(labels.some((t) => t.startsWith('高（px）'))).toBe(true);
+    expect(labels.some((t) => t.startsWith('步数'))).toBe(true);
+    expect(labels.some((t) => t.startsWith('CFG scale'))).toBe(true);
+  });
+
+  it('🔴 auto 的后果行在 ComfyUI 下换说法 —— 不许承诺一个根本不存在的上限', async () => {
+    mockSettings.imageProvider = 'comfyui';
+    const hint = modeItems(mount(ImageRenderCard))[2].find('.mode-hint').text();
+
+    expect(hint).not.toContain('每条消息最多 2 张');
+    expect(hint).toContain('不设每消息');
+  });
+
+  it('ComfyUI 档下说明白「为什么这里没有上限」，而不是默默少几个框', async () => {
+    mockSettings.imageProvider = 'comfyui';
+    expect(mount(ImageRenderCard).find('.local-quota-note').text()).toContain('不设每消息');
+  });
+});
+
+describe('🔴 ImageRenderCard —— ComfyUI 三格（C11/C13/C16）', () => {
+  function mountComfy() {
+    mockSettings.imageProvider = 'comfyui';
+    return mount(ImageRenderCard);
+  }
+
+  it('地址 / 轮询间隔直接绑 imageComfy 袋，不进 API 池', async () => {
+    const w = mountComfy();
+
+    await w.find('.comfy-base-url').setValue('http://192.168.1.9:8188');
+    expect(mockSettings.imageComfy.baseUrl).toBe('http://192.168.1.9:8188');
+
+    await w.find('.comfy-poll').setValue('2000');
+    expect(mockSettings.imageComfy.pollIntervalMs).toBe(2000);
+
+    // 池子那边一个字都不该多出来
+    expect(mockSettings.apiPool).toHaveLength(0);
+  });
+
+  it('超时按**秒**显示、按**毫秒**存（600000 那串零没人数得清）', async () => {
+    const w = mountComfy();
+    expect((w.find('.comfy-timeout').element as HTMLInputElement).value).toBe('600');
+
+    await w.find('.comfy-timeout').setValue('300');
+    expect(mockSettings.imageComfy.timeoutMs).toBe(300_000);
+  });
+
+  it('🔴 超时清空（读不懂的输入）不写 —— 存成 0 等于每张图一发出去就超时', async () => {
+    const w = mountComfy();
+    await w.find('.comfy-timeout').setValue('');
+    expect(mockSettings.imageComfy.timeoutMs).toBe(600_000);
+  });
+
+  it('工作流坏 JSON：失焦时就地报错，说明是哪儿不对', async () => {
+    const w = mountComfy();
+    const ta = w.find('.workflow-input');
+
+    await ta.setValue('{ 这不是 JSON');
+    await ta.trigger('blur');
+
+    const err = w.find('.workflow-error');
+    expect(err.exists()).toBe(true);
+    expect(err.text()).toContain('JSON');
+  });
+
+  it('🔴 留空 = 用内置最小 SDXL 图，**不是错误**（对着默认状态报红最气人）', async () => {
+    const w = mountComfy();
+    const ta = w.find('.workflow-input');
+
+    await ta.setValue('{ 坏的');
+    await ta.trigger('blur');
+    expect(w.find('.workflow-error').exists()).toBe(true);
+
+    await ta.setValue('');
+    await ta.trigger('blur');
+    expect(w.find('.workflow-error').exists()).toBe(false);
+  });
+
+  it('合法的 API 格式工作流不报错，并原样存进袋子', async () => {
+    const w = mountComfy();
+    const graph = '{"3":{"class_type":"KSampler","inputs":{"seed":"%seed%"}}}';
+    const ta = w.find('.workflow-input');
+
+    await ta.setValue(graph);
+    await ta.trigger('blur');
+
+    expect(w.find('.workflow-error').exists()).toBe(false);
+    expect(mockSettings.imageComfy.workflowJson).toBe(graph);
+  });
+});
+
+describe('🔴 ImageRenderCard —— 方言选择与覆盖（C2/C6）', () => {
+  it('下拉列的是注册表里的方言（label + id 都看得见）', () => {
+    const options = mount(ImageRenderCard).find('.dialect-select').findAll('option');
+
+    expect(options).toHaveLength(2);
+    expect(options[0].text()).toContain('动漫标签');
+    expect(options[0].text()).toContain('danbooru-anime');
+    expect(options[1].text()).toContain('自然语言');
+  });
+
+  it('注册表这一面缺席（404 / pack 清空）时退化成内置兜底，而不是一个空下拉', () => {
+    dialectFace = undefined;
+    const options = mount(ImageRenderCard).find('.dialect-select').findAll('option');
+
+    expect(options).toHaveLength(1);
+    expect(options[0].text()).toContain('danbooru-anime');
+  });
+
+  it('选中方言写进 imageDialectId', async () => {
+    const w = mount(ImageRenderCard);
+    await w.find('.dialect-select').setValue('natural-prose');
+    expect(mockSettings.imageDialectId).toBe('natural-prose');
+  });
+
+  it('两个覆盖框的占位符 = 当前方言自己的默认值（改没改过一眼看得出）', async () => {
+    const w = mount(ImageRenderCard);
+    const textareas = w.findAll('textarea');
+
+    expect(textareas[0].attributes('placeholder')).toBe('masterpiece');
+    expect(textareas[1].attributes('placeholder')).toBe('lowres');
+  });
+
+  it('🔴 切了方言之后写的覆盖落在**新**方言那一格，不串门', async () => {
+    const w = mount(ImageRenderCard);
+    await w.find('.dialect-select').setValue('natural-prose');
+    await w.findAll('textarea')[0].setValue('prose suffix');
+
+    expect(mockSettings.imageDialectOverrides['natural-prose'].qualitySuffix).toBe('prose suffix');
+    expect(mockSettings.imageDialectOverrides['danbooru-anime']).toBeUndefined();
+  });
+
+  it('🔴 supportsNegative:false → 「我的追加」**可见地禁用**，并说明为什么', async () => {
+    mockSettings.imageDialectId = 'natural-prose';
+    const w = mount(ImageRenderCard);
+
+    expect(w.find('.extra-negative').attributes('disabled')).toBeDefined();
+    expect(w.find('.negative-off').text()).toContain('不支持负向');
+  });
+
+  it('吃负向的方言下那一格照常可用（禁用是方言属性，不是永久状态）', () => {
+    const w = mount(ImageRenderCard);
+    expect(w.find('.extra-negative').attributes('disabled')).toBeUndefined();
+    expect(w.find('.negative-off').exists()).toBe(false);
   });
 });

@@ -12,10 +12,15 @@
  * 2. **场景提示词改完存进 `editedScenePrompt`**（D26）—— 落到那个字段的效果是
  *    「重画时优先用它、且跳过侧链 agent」。原 `scenePrompt` 一个字节都不动，
  *    所以「改回去」永远可行（清空输入框即可）。
+ *
+ * 3. **装配告警在这里被消费**（图像 v2 / C15）。`ComposedPrompt.warnings` 在 v1 里产出
+ *    之后全仓无人读 —— 于是「某个角色在那条方言下没有可用形象，已跳过」这件事对玩家
+ *    完全不可见，他只看到画面里少了个人。这一行是它唯一的出口（刻意**不做 toast**：
+ *    每张图都会响）。文案与「缺席原因」的判定都在 `cg-gallery.ts`，本组件只渲染。
  */
 import { computed, ref, watch } from 'vue';
 import AppButton from '../shared/AppButton.vue';
-import { soleCharacterOf } from './cg-gallery';
+import { composeWarningLines, dialectIdOf, providerLabelOf, soleCharacterOf } from './cg-gallery';
 import type { SceneImageRecord } from '@engine/types-image';
 
 const props = defineProps<{
@@ -110,6 +115,16 @@ const dropped = computed(() => props.record.blobDropped === true);
 const charactersText = computed(() =>
   props.record.characters.length > 0 ? props.record.characters.join('、') : '—',
 );
+
+/**
+ * 后端 / 方言（C14）。两者都有「缺席即默认」的读法，判定在 `cg-gallery.ts` ——
+ * 老记录没有这两个字段，而它们**全部**是 NAI + danbooru 画的，不是「不知道」。
+ */
+const providerText = computed(() => providerLabelOf(props.record));
+const dialectText = computed(() => dialectIdOf(props.record));
+
+/** 装配告警的中文行（C15）；空数组 = 这一张一切正常，整节不渲染 */
+const warningLines = computed(() => composeWarningLines(props.record.composeWarnings));
 
 function sizeText(bytes: number | undefined): string {
   if (typeof bytes !== 'number' || bytes <= 0) return '—';
@@ -211,6 +226,13 @@ function timeText(ts: number): string {
       <div class="cg-kv">
         <span>模型</span><b>{{ record.model || '—' }}</b>
       </div>
+      <!-- 出图后端 / 方言（C14）：缺席读作 novelai + danbooru，不渲染成「未知」 -->
+      <div class="cg-kv">
+        <span>后端</span><b>{{ providerText }}</b>
+      </div>
+      <div class="cg-kv">
+        <span>方言</span><b :title="dialectText">{{ dialectText }}</b>
+      </div>
       <div class="cg-kv">
         <span>seed</span><b>{{ record.seed ?? '随机' }}</b>
       </div>
@@ -221,6 +243,12 @@ function timeText(ts: number): string {
         <span>生成于</span><b>{{ timeText(record.createdAt) }}</b>
       </div>
     </div>
+
+    <!--
+      装配告警（C15）—— 画面里为什么少了个人，这里是唯一说得出口的地方。
+      不阻断、不惊悚：它陈述一件已经发生的事，措辞按「出图时的方言」写。
+    -->
+    <p v-for="line in warningLines" :key="line" class="cg-warn">{{ line }}</p>
 
     <section class="cg-section">
       <h5 class="cg-label">场景提示词</h5>
@@ -465,6 +493,17 @@ function timeText(ts: number): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 装配告警（C15）—— warning 语义的一句话，不是错误框（图已经画出来了） */
+.cg-warn {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--theme-warning) 30%, transparent);
+  border-radius: var(--theme-radius-sm);
+  background: color-mix(in srgb, var(--theme-warning) 8%, transparent);
+  color: var(--theme-text-secondary);
+  font-size: 0.6875rem;
+  line-height: 1.6;
 }
 .cg-section {
   display: flex;

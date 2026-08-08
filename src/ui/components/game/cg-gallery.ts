@@ -11,7 +11,13 @@
  * 的那一类逻辑（漏掉一段筛选，界面上只是多几个格子），而挂载一个网格去断言它们
  * 既慢又绕。分出来之后这三条能被直接钉住。
  */
-import type { SceneImageAnchorKind, SceneImageRecord } from '@engine/types-image';
+import { FALLBACK_IMAGE_DIALECT } from '@engine/image-dialect';
+import type {
+  ComposeWarning,
+  ImageProviderId,
+  SceneImageAnchorKind,
+  SceneImageRecord,
+} from '@engine/types-image';
 
 /**
  * 一格 —— 同一个锚点 `(messageId, anchorKind, occurrence)` 的全部 take 折在一起（§10.3）。
@@ -110,6 +116,65 @@ export function soleCharacterOf(record: SceneImageRecord): string | null {
 /** 这一张能不能钉 seed —— 恰好一个角色 **且** 这次真有 seed（随机那次没有可钉的东西） */
 export function canPinSeed(record: SceneImageRecord): boolean {
   return soleCharacterOf(record) !== null && typeof record.seed === 'number';
+}
+
+// ═══ 出图元数据（图像 v2 / C14）═══
+
+/**
+ * 这张图是哪个后端画的。
+ *
+ * 🔴 **缺席读作 `'novelai'`**（C14）：v1 的记录里根本没有这个字段，而它们**全部**是
+ * NAI 画的。把 `undefined` 渲染成「未知」等于给历史记录凭空造一个残缺态 ——
+ * 图鉴里每一张老图都会顶着一个看起来像出了故障的标签。
+ */
+export function providerOf(record: Pick<SceneImageRecord, 'provider'>): ImageProviderId {
+  return record.provider ?? 'novelai';
+}
+
+/** 同上，方言缺席读作内置 danbooru 方言（v1 老记录）。id 取自兜底方言，不另写字面量 */
+export function dialectIdOf(record: Pick<SceneImageRecord, 'dialectId'>): string {
+  const id = record.dialectId;
+  return typeof id === 'string' && id !== '' ? id : FALLBACK_IMAGE_DIALECT.id;
+}
+
+/** 后端的显示名。认不出的 id 原样显示 —— 编不出名字时说实话比猜一个好 */
+export function providerLabelOf(record: Pick<SceneImageRecord, 'provider'>): string {
+  const id = providerOf(record);
+  return id === 'comfyui' ? 'ComfyUI' : id === 'novelai' ? 'NovelAI' : id;
+}
+
+/**
+ * 装配告警 → 详情页那一两行中文（C15）。
+ *
+ * 🔴 这是 `ComposedPrompt.warnings` **唯一**的消费面。v1 里它产出后全仓无人读，于是
+ * 「这个角色在当前方言下没有可用形象，已跳过」对玩家完全不可见 —— 他只看到画面里
+ * 少了个人，还以为是模型没画好。
+ *
+ * 两类各聚成一行（不是每个名字一行）：一张多人图可能同时缺三四个人，逐条列出来会
+ * 把详情栏冲垮，而这几行本来只是一句解释。
+ *
+ * 措辞刻意说「出图时的方言」而不是「当前方言」：告警是**那一次装配**留下的，用户此刻
+ * 的方言可能早就换过了 —— 把历史事实说成现状，下一步的排查就会走错方向。
+ */
+export function composeWarningLines(warnings: readonly ComposeWarning[] | undefined): string[] {
+  if (!warnings || warnings.length === 0) return [];
+  const missing: string[] = [];
+  const dropped: string[] = [];
+  for (const warning of warnings) {
+    if (warning.kind === 'missing-preset') {
+      if (warning.name !== '') missing.push(warning.name);
+    } else {
+      for (const name of warning.dropped) if (name !== '') dropped.push(name);
+    }
+  }
+  const lines: string[] = [];
+  if (missing.length > 0) {
+    lines.push(`未入画角色: ${missing.join('、')}（出图时的方言下没有可用形象）`);
+  }
+  if (dropped.length > 0) {
+    lines.push(`角色超出单张上限，未入画: ${dropped.join('、')}`);
+  }
+  return lines;
 }
 
 /** 懒加载兜底扫描的默认余量（上下各 1500px，§10.3） */

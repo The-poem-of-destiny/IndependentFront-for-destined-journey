@@ -166,6 +166,46 @@ describe('CgGalleryPanel', () => {
     w.unmount();
   });
 
+  it('🔴 详情页写出「为什么少了个人」—— 装配告警的唯一出口（C15）', async () => {
+    // v1 里 ComposedPrompt.warnings 产出后全仓无人读：玩家只看到画面里少了个人。
+    // 这条断言就是那件事被看见的证明
+    records.value = [
+      rec({
+        id: 'a',
+        characters: ['苏婉', '林越'],
+        composeWarnings: [{ kind: 'missing-preset', name: '林越' }],
+      }),
+    ];
+    const w = await mountPanel();
+    await w.find('.cg-cell').trigger('click');
+    await flushPromises();
+
+    const warn = w.find('.cg-warn');
+    expect(warn.exists()).toBe(true);
+    expect(warn.text()).toContain('林越');
+    expect(warn.text()).toContain('没有可用形象');
+    w.unmount();
+  });
+
+  it('没有告警的图不出那一行（正常的图不该带一条解释）', async () => {
+    records.value = [rec({ id: 'a' })];
+    const w = await mountPanel();
+    await w.find('.cg-cell').trigger('click');
+    await flushPromises();
+    expect(w.find('.cg-warn').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('详情页写出后端与方言；老记录读作 NovelAI + danbooru（C14）', async () => {
+    records.value = [rec({ id: 'a' })];
+    const w = await mountPanel();
+    await w.find('.cg-cell').trigger('click');
+    await flushPromises();
+    expect(w.find('.cg-detail').text()).toContain('NovelAI');
+    expect(w.find('.cg-detail').text()).toContain('danbooru-anime');
+    w.unmount();
+  });
+
   it('新记录落库后自动补装 —— 不必重开面板', async () => {
     records.value = [rec({ id: 'a' })];
     const w = await mountPanel();

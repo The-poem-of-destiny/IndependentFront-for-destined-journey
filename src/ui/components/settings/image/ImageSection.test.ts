@@ -16,11 +16,23 @@
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { reactive } from 'vue';
-import { mount, flushPromises } from '@vue/test-utils';
+import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import type { ImagePreset } from '@engine/types-image';
+
+/**
+ * 🔴 **每个用例结束必须卸载**（2026-08-08 补）。本文件的 `beforeEach` 会
+ * `document.body.innerHTML = ''` 并**就地改写共享的 `mockSettings` 响应式对象** ——
+ * 而没卸载的旧 wrapper 仍订阅着它。于是清空-重填那一步会把上一个用例遗留的组件
+ * 全部叫醒，让它们对着已经被抹掉的 DOM 重渲染，副作用落进下一个用例的断言里
+ * （症状：本用例明明只写了两条预设，列表里冒出上一个用例的第三条）。
+ *
+ * 这条脆弱性一直潜伏着：只要没有任何子组件订阅共享设置，就没人会被叫醒。
+ * ImagePresetList 为了 C15 的方言提示开始读设置之后，它才变成三条红。
+ */
+enableAutoUnmount(afterEach);
 
 // ---- Dexie 层：jsdom 下不可用，整层替成内存表 ----
 const table = new Map<string, ImagePreset>();
@@ -162,7 +174,9 @@ describe('ImagePromptCard —— 渲染位置 ≠ 存储位置（D52）', () => 
 
   it('卡上写明这里的提示词管什么（两处「提示词」不许混）', () => {
     const text = mount(ImagePromptCard, { shallow: true }).find('.image-card-scope').text();
-    expect(text).toContain('danbooru');
+    // 图像 v2 / C6：这段提示词按**方言**分档，所以文案不再点名 danbooru
+    // —— 散文方言下那句话本身就是错的
+    expect(text).toContain('方言');
     expect(text).toContain('出图');
   });
 });

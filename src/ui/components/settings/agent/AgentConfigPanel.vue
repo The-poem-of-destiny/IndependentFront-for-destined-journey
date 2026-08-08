@@ -46,7 +46,22 @@ import {
 } from '../../../stores/agent-settings';
 import { getAgentTemplate } from '@engine/agent-templates';
 
-const props = defineProps<{ agentId: string }>();
+const props = defineProps<{
+  agentId: string;
+  /**
+   * 不渲染提示词卡（systemPrompt + 上下文模板）。
+   *
+   * 🔴 **只给图像分区的「提示词生成」卡用**（图像 v2 / C6）：那个 agent 的 systemPrompt
+   *    已经是**方言属性** —— 真源在 `imageDialects` 那一面，用户覆盖按方言 id 键控存
+   *    `imageDialectOverrides[dialectId].systemPrompt`。再开一个写 `agents.image_prompt
+   *    .systemPrompt` 的框，就是 C6 点名的那种「切方言不跟着换」的静默漂移：改完看着
+   *    生效了，换条方言又变回去，而两个框长得一模一样。
+   *
+   * 默认 `false` —— Agent 分区一个字都不用改。旗子只藏**渲染**，草稿与
+   * 「保存设置」的 diff 写入照旧（草稿等于解析默认 → 不写覆写层，见 saveAgentSettings）。
+   */
+  hidePrompt?: boolean;
+}>();
 
 const cfg = useSettingsStore();
 const s = cfg.settings;
@@ -251,10 +266,11 @@ async function restoreAgentDefaults() {
 <template>
   <AgentParamsCard :agent-id="agentId" />
 
-  <!-- story 走预设面板，其余 Agent 走 systemPrompt + 上下文模板（原 v-if/v-else 一对） -->
+  <!-- story 走预设面板，其余 Agent 走 systemPrompt + 上下文模板（原 v-if/v-else 一对）；
+       hidePrompt 时两者都不出（提示词的真源在别处，见 props 上的注释） -->
   <PresetManager v-if="agentId === 'story'" :agent-id="agentId" />
   <AgentPromptCard
-    v-else
+    v-else-if="!hidePrompt"
     v-model:prompt="agentPromptDraft"
     v-model:template="agentTemplateDraft"
     :agent-id="agentId"

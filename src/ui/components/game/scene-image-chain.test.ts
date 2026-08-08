@@ -13,6 +13,14 @@
  *       → BeautifiedNarrative  :blur-by-default（**两处** SceneImageSegment）
  *       → SceneImageSegment    .si-shot.is-blurred
  *
+ * 图像 v2（C14）起同一条链上多了一根 `imageDialectId`，理由完全相同 ——
+ * 判定（`isRedrawDialectMismatch`）有自己的单测，但**没人传值**照样全绿：
+ *
+ *     settings.imageDialectId
+ *       → ChatFlow      :image-dialect-id
+ *       → BeautifiedNarrative  :dialect-id（**两处**）
+ *       → SceneImageSegment    .si-dialect-hint
+ *
  * 被替身的只有**数据源**（Dexie 那两个 store），不是链路本身。
  */
 /** @vitest-environment jsdom */
@@ -152,5 +160,57 @@ describe('打码设置 → 正文插画的整条 prop 链（D46）', () => {
     const shots = wrapper.findAll('.si-shot');
     expect(shots[0]?.classes()).not.toContain('is-blurred');
     expect(shots[1]?.classes()).toContain('is-blurred');
+  });
+});
+
+describe('方言设置 → 重画提示的整条 prop 链（C14）', () => {
+  /** 手改过提示词的失败记录 —— 重画/重试会逐字沿用那份手改（D26 跳过侧链） */
+  function edited(over: Partial<SceneImageRecord> = {}): SceneImageRecord {
+    return record({
+      status: 'failed',
+      error: '上游超时',
+      editedScenePrompt: 'tavern interior, warm candlelight',
+      dialectId: 'danbooru-anime',
+      ...over,
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setActivePinia(createPinia());
+    scene.records = [edited(), edited({ id: 'simg_2', anchorKind: 'message-end', occurrence: 0 })];
+    Object.assign(globalThis.URL, {
+      createObjectURL: vi.fn(() => 'blob:scene-image'),
+      revokeObjectURL: vi.fn(),
+    });
+  });
+
+  it('🔴 换成另一条方言后，两处锚点的重画入口都挂上提示', async () => {
+    useSettingsStore().settings.imageDialectId = 'natural-prose';
+
+    const wrapper = await mountFlow();
+    const hints = wrapper.findAll('.si-dialect-hint');
+
+    // 改一处漏一处的话这里是 1 —— 漏掉的那格照样会拿着 danbooru 标签去重画
+    expect(hints).toHaveLength(2);
+    expect(hints[0]?.text()).toContain('另一方言');
+  });
+
+  it('方言与记录一致时一句都不提示 —— 证明它真的跟着那个值走', async () => {
+    useSettingsStore().settings.imageDialectId = 'danbooru-anime';
+
+    const wrapper = await mountFlow();
+    expect(wrapper.findAll('.si-dialect-hint')).toHaveLength(0);
+  });
+
+  it('没有手改提示词时不提示（那条路引擎自己会重跑侧链）', async () => {
+    useSettingsStore().settings.imageDialectId = 'natural-prose';
+    scene.records = [
+      edited({ editedScenePrompt: undefined }),
+      edited({ id: 'simg_2', anchorKind: 'message-end', editedScenePrompt: undefined }),
+    ];
+
+    const wrapper = await mountFlow();
+    expect(wrapper.findAll('.si-dialect-hint')).toHaveLength(0);
   });
 });

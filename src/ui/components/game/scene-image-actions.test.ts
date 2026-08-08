@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { copyablePromptOf, nextTakeId, type PromptBearingRecord } from './scene-image-actions';
+import {
+  REDRAW_DIALECT_MISMATCH_HINT,
+  copyablePromptOf,
+  isRedrawDialectMismatch,
+  nextTakeId,
+  type DialectBearingRecord,
+  type PromptBearingRecord,
+} from './scene-image-actions';
 
 function bearer(over: Partial<PromptBearingRecord> = {}): PromptBearingRecord {
   return { positive: '', scenePrompt: '', ...over };
@@ -55,5 +62,71 @@ describe('nextTakeId — 角标点击是浏览，环形前进', () => {
 
   it('一张都没有时给 null', () => {
     expect(nextTakeId([], 'a')).toBeNull();
+  });
+});
+
+describe('isRedrawDialectMismatch — 重画前那句方言提示（C14）', () => {
+  function dialectRec(over: Partial<DialectBearingRecord> = {}): DialectBearingRecord {
+    return { ...over };
+  }
+
+  it('🔴 没有手改提示词时**永不提示** —— 那条路引擎自己会重跑侧链，提示只会被学会忽略', () => {
+    expect(
+      isRedrawDialectMismatch(dialectRec({ dialectId: 'danbooru-anime' }), 'natural-prose'),
+    ).toBe(false);
+    expect(
+      isRedrawDialectMismatch(
+        dialectRec({ editedScenePrompt: '   ', dialectId: 'danbooru-anime' }),
+        'natural-prose',
+      ),
+    ).toBe(false);
+  });
+
+  it('有手改 + 方言不同 → 提示', () => {
+    expect(
+      isRedrawDialectMismatch(
+        dialectRec({ editedScenePrompt: 'tavern interior', dialectId: 'danbooru-anime' }),
+        'natural-prose',
+      ),
+    ).toBe(true);
+  });
+
+  it('有手改 + 方言相同 → 不提示', () => {
+    expect(
+      isRedrawDialectMismatch(
+        dialectRec({ editedScenePrompt: 'tavern interior', dialectId: 'natural-prose' }),
+        'natural-prose',
+      ),
+    ).toBe(false);
+  });
+
+  it('🔴 记录缺 dialectId（v1 老记录）读作内置 danbooru —— 不是「不匹配」', () => {
+    // 把 undefined 当成不匹配的话，每一张 v1 老图都会挂上这句提示，
+    // 而一句对所有人都出现的提示等于没有提示
+    expect(isRedrawDialectMismatch(dialectRec({ editedScenePrompt: 'x' }), 'danbooru-anime')).toBe(
+      false,
+    );
+    expect(isRedrawDialectMismatch(dialectRec({ editedScenePrompt: 'x' }), 'natural-prose')).toBe(
+      true,
+    );
+  });
+
+  it('当前方言缺席 / 空串同样读作内置 danbooru', () => {
+    expect(
+      isRedrawDialectMismatch(
+        dialectRec({ editedScenePrompt: 'x', dialectId: 'danbooru-anime' }),
+        undefined,
+      ),
+    ).toBe(false);
+    expect(
+      isRedrawDialectMismatch(
+        dialectRec({ editedScenePrompt: 'x', dialectId: 'natural-prose' }),
+        '',
+      ),
+    ).toBe(true);
+  });
+
+  it('提示文案是常量，界面与测试读同一份', () => {
+    expect(REDRAW_DIALECT_MISMATCH_HINT).toContain('另一方言');
   });
 });

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
- * 第二张卡：**出图** —— NAI 参数与限额（D51），全部存 `UiSettings`。
+ * 第二张卡：**出图** —— 后端选择 + per-provider 参数与限额（D51 / 图像 v2 C8），
+ * 全部存 `UiSettings`。
  *
- * 三件在这张卡里必须做对的事：
+ * 五件在这张卡里必须做对的事：
  *
  * 1. 🔴 **三档开关不是三个光秃秃的单选**（D44）。`auto` 那一项底下带一行后果，
  *    并且**首次**从别的档切到 `auto` 时弹一次确认（`imageAutoConfirmed` 记住）。
@@ -29,17 +30,90 @@
  * 画质后缀与全局负向自图像 v2（C6）起是**方言属性**：这两个文本框写的是**当前方言的
  * 覆盖**，留空即回落方言 JSON 的默认值（`image-defaults` 的两个常量是内置 danbooru
  * 方言的默认）。值仍然**不带前导逗号** —— `composePrompt` 自己用 `', '` 连接各段。
+ *
+ * 4. 🔴 **后端切换要把 NAI 专属的东西整块藏掉**（图像 v2 / C9·C16）。端点 / 模型 /
+ *    采样器 / UC 预设 / 账户档位 / Anlas 估算 / 每消息与每小时上限 —— 这七样在
+ *    ComfyUI 下**一个都不成立**（本地渲染不花钱，限额按 C9 只保护 paid 后端）。
+ *    留着它们的代价与 D43 那次一模一样：界面上一句**看着权威、其实是假的**话。
+ *    宽 / 高 / 步数 / CFG 是两家共享的（comfy 侧作为 `%width%` 这类占位符的替换值），
+ *    所以它们**始终**可见。
+ *
+ * 5. 🔴 **ComfyUI 地址不进 API 池**（C16）：池建模的是带 key 的远端服务，这里是无 key
+ *    的本地地址，且填错的败法是诚实的 connection-refused。所以地址与工作流两格住在
+ *    这张卡上，`ApiSection` 一个字不用改。
  */
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import AppCard from '../../shared/AppCard.vue';
 import AppButton from '../../shared/AppButton.vue';
 import AppModal from '../../shared/AppModal.vue';
 import { useSettingsStore, type ApiEntry } from '../../../stores/settings-store';
+import { ensureContentRegistryLoaded, getContentRegistry } from '../../../stores/content-store';
 import { estimateAnlasCost } from '@engine/image-anlas';
-import type { ImageGenMode, ImageRating, NaiBillingTier } from '@engine/types-image';
+import {
+  FALLBACK_IMAGE_DIALECT,
+  parseImageDialects,
+  resolveImageDialect,
+} from '@engine/image-dialect';
+import { parseComfyWorkflow } from '@engine/image-providers/comfyui';
+import { COMFY_DEFAULT_BASE_URL } from '../../../lib/image-client';
+import type {
+  ImageGenMode,
+  ImageProviderId,
+  ImageRating,
+  NaiBillingTier,
+} from '@engine/types-image';
 
 const cfg = useSettingsStore();
 const s = cfg.settings;
+
+// ═══ 后端（C1/C16）═══
+
+const PROVIDERS: { key: ImageProviderId; label: string; hint: string }[] = [
+  {
+    key: 'novelai',
+    label: 'NovelAI',
+    hint: '远端付费出图。API Key 在「API 配置」里加一条「图像生成」端点，地址由代码持有。',
+  },
+  {
+    key: 'comfyui',
+    label: 'ComfyUI（本地）',
+    hint: '连本机跑着的 ComfyUI，出图不花钱。需要填地址，并粘贴一份 API 格式的工作流。',
+  },
+];
+
+/**
+ * 🔴 判据写成「等于 comfyui」而不是「不等于 novelai」，NAI 侧一律用 `!isComfy`：
+ *    老档里这个键可能压根不存在（迁移之前的设置），那时候该走的是 v1 那条路。
+ */
+const isComfy = computed(() => s.imageProvider === 'comfyui');
+
+// ═══ 方言（C2/C4/C6）═══
+
+/**
+ * 🔴 注册表**不是响应式的**（content-store 的模块级 `let`）：computed 里直接读
+ *    `getContentRegistry()` 会把首次求值时那份**还没灌进来的空目录**永久缓存下来，
+ *    症状是「内容加载完了，下拉里还是只有内置那一条」，且不报任何错。
+ *    所以先同步读一次（boot 链常态下已灌好，少一帧空列表），挂载后再由加载门重取。
+ */
+const dialectFace = ref<unknown>(getContentRegistry().imageDialects);
+
+onMounted(() => {
+  void ensureContentRegistryLoaded().then(() => {
+    dialectFace.value = getContentRegistry().imageDialects;
+  });
+});
+
+/** 这一面缺席（404 / pack 清空）时退化成内置兜底方言 —— 下拉永远不是空的 */
+const dialects = computed(() => {
+  const parsed = parseImageDialects(dialectFace.value);
+  return parsed.length > 0 ? parsed : [FALLBACK_IMAGE_DIALECT];
+});
+
+/**
+ * 当前方言的**默认形态**：`resolveImageDialect` 不传 overrides，拿到的是方言 JSON 自己
+ * 写的值。占位符要显示的正是它 —— 显示叠加后的值会让「我到底改没改过」看不出来。
+ */
+const activeDialect = computed(() => resolveImageDialect(dialects.value, s.imageDialectId));
 
 /**
  * 画质后缀 / 全局负向（基础）的读写口 —— **过渡形态**（图像 v2 / T5）。
@@ -77,11 +151,19 @@ const MODES: { key: ImageGenMode; label: string; hint: string }[] = [
   { key: 'auto', label: '自动', hint: '' },
 ];
 
-/** auto 那一行的后果说明 —— 数字取当前设置，不写死 */
-const autoConsequence = computed(
-  () =>
-    `剧情里出现值得配图的时刻就自动生成。每条消息最多 ${s.imageNovelai.maxPerMessage} 张、` +
-    `每小时最多 ${s.imageNovelai.maxPerHour} 张，超出的会降级成按钮等你点。`,
+/**
+ * auto 那一行的后果说明 —— 数字取当前设置，不写死。
+ *
+ * 🔴 ComfyUI 下**换一套说法**：L1/L2 按 C9 只保护付费后端，本地档根本没有那两个上限。
+ *    照搬 NAI 那句话会说出「每条消息最多 2 张」这种**当场就不成立**的承诺 ——
+ *    与 D43 那行「免费额度」谎报是同一类错误：一句看着权威、实际不生效的话。
+ */
+const autoConsequence = computed(() =>
+  isComfy.value
+    ? '剧情里出现值得配图的时刻就自动生成。本地后端不设每消息 / 每小时上限，' +
+      '只保留「同一回合不重复出图」这条去重规则 —— 不花钱，但会一直占着你的显卡。'
+    : `剧情里出现值得配图的时刻就自动生成。每条消息最多 ${s.imageNovelai.maxPerMessage} 张、` +
+      `每小时最多 ${s.imageNovelai.maxPerHour} 张，超出的会降级成按钮等你点。`,
 );
 
 /** 首次切到 auto 的一次性确认（D44）。已确认过的档位切换不再打断 */
@@ -160,6 +242,44 @@ const TIERS: { key: NaiBillingTier; label: string; hint: string }[] = [
   },
 ];
 
+// ═══ ComfyUI（C11/C13/C16）═══
+
+/**
+ * 工作流的即时校验（失焦时跑一次）。
+ *
+ * 🔴 **空 = 合法**（用内置最小 SDXL 图，C11），所以空串先短路 ——
+ *    `parseComfyWorkflow('')` 自己会返回一条「还没有粘贴」的失败，把它当错误画出来，
+ *    等于对着一个**完全正常的默认状态**报红。
+ * 🔴 校验只是**提前告知**，不拦保存：这一格里躺着的是用户从 ComfyUI 导出的整张图，
+ *    我们没资格因为解析不过就把它丢掉。
+ */
+const workflowError = ref('');
+
+function validateWorkflow() {
+  const text = s.imageComfy?.workflowJson ?? '';
+  if (!text.trim()) {
+    workflowError.value = '';
+    return;
+  }
+  const parsed = parseComfyWorkflow(text);
+  workflowError.value = parsed.ok ? '' : parsed.message;
+}
+
+/**
+ * 超时按**秒**显示、按**毫秒**存 —— 600000 那串零谁也数不清。
+ *
+ * 🔴 读不懂的输入（清空 / 负数）**不写**：把它当 0 存进去等于每张图一发出去就超时，
+ *    而症状（「刚点就失败」）看起来完全不像是这一格干的。
+ */
+const comfyTimeoutSec = computed<number>({
+  get: () => Math.round((s.imageComfy?.timeoutMs ?? 0) / 1000),
+  set: (value: number) => {
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds) || seconds <= 0) return;
+    s.imageComfy.timeoutMs = Math.round(seconds) * 1000;
+  },
+});
+
 // ═══ rating 上限（D38：**上限**而非默认）═══
 
 const RATINGS: { key: ImageRating; label: string }[] = [
@@ -175,8 +295,8 @@ const RATINGS: { key: ImageRating; label: string }[] = [
     <div class="image-card-head">
       <h4>出图</h4>
       <p class="image-card-scope">
-        这里配的是<strong>发给 NovelAI 的那次请求</strong>：什么时候出图、用哪个端点、
-        画多大、以及每张图都带上的画质词与负向词。
+        这里配的是<strong>真正去画那一张图的那次请求</strong>：什么时候出图、交给哪个后端 （NovelAI
+        或本地 ComfyUI）、画多大、以及每张图都带上的画质词与负向词。
       </p>
     </div>
 
@@ -196,21 +316,165 @@ const RATINGS: { key: ImageRating; label: string }[] = [
       </button>
     </div>
 
-    <!-- ════ 端点与模型 ════ -->
-    <div class="form-grid image-grid">
-      <label class="form-label"
-        >图像端点
-        <p class="form-hint">在「API 配置」里把类型设为「图像生成」的那些端点会出现在这里</p>
-        <select v-model="s.imageNovelai.endpointId" class="form-input">
-          <option :value="null">（未选择）</option>
-          <option v-for="ep in imageEndpoints" :key="ep.id" :value="ep.id">{{ ep.name }}</option>
-        </select></label
+    <!-- ════ 后端（C1/C16）════ -->
+    <p class="block-title">出图后端</p>
+    <!-- 沿用三档开关那套外壳类（mode-*）：同一张卡里几组单选长得不一样才是怪事 -->
+    <div class="mode-list" role="radiogroup" aria-label="出图后端">
+      <button
+        v-for="p in PROVIDERS"
+        :key="p.key"
+        class="mode-item"
+        :class="{ 'mode-active': (p.key === 'comfyui') === isComfy }"
+        role="radio"
+        :aria-checked="(p.key === 'comfyui') === isComfy"
+        @click="s.imageProvider = p.key"
       >
-      <label class="form-label"
-        >NAI 模型
-        <p class="form-hint">出图模型 id，不是 LLM 模型</p>
-        <input v-model="s.imageNovelai.model" class="form-input" spellcheck="false"
-      /></label>
+        <span class="mode-label">{{ p.label }}</span>
+        <span class="mode-hint">{{ p.hint }}</span>
+      </button>
+    </div>
+
+    <!-- ════ ComfyUI 专属（C11/C13/C16）════ -->
+    <div v-if="isComfy" class="provider-block">
+      <div class="form-grid image-grid">
+        <label class="form-label"
+          >ComfyUI 地址
+          <p class="form-hint">默认假定与本应用同机；不进「API 配置」的端点池（本地地址无 key）</p>
+          <input
+            v-model="s.imageComfy.baseUrl"
+            class="form-input comfy-base-url"
+            spellcheck="false"
+            :placeholder="COMFY_DEFAULT_BASE_URL"
+        /></label>
+        <label class="form-label"
+          >整体超时（秒）
+          <p class="form-hint">本地渲染慢：闸太紧会把还在跑的图记成失败</p>
+          <input
+            v-model.number="comfyTimeoutSec"
+            type="number"
+            min="10"
+            step="10"
+            class="form-input comfy-timeout"
+        /></label>
+        <label class="form-label"
+          >轮询间隔（毫秒）
+          <p class="form-hint">每隔这么久问一次 /history 有没有出图</p>
+          <input
+            v-model.number="s.imageComfy.pollIntervalMs"
+            type="number"
+            min="250"
+            step="250"
+            class="form-input comfy-poll"
+        /></label>
+      </div>
+
+      <label class="form-label workflow-field"
+        >工作流（API 格式）
+        <p class="form-hint">
+          在 ComfyUI 里用「Save (API Format)」导出，把 JSON 整份粘进来。值位写
+          <code>%positive%</code> <code>%negative%</code> <code>%seed%</code> <code>%width%</code>
+          <code>%height%</code> <code>%steps%</code> <code>%scale%</code>（兼容
+          <code>%prompt%</code> / <code>%negative_prompt%</code>）。留空 = 用内置最小 SDXL 图。
+        </p>
+        <textarea
+          v-model="s.imageComfy.workflowJson"
+          class="form-input form-textarea workflow-input"
+          rows="6"
+          spellcheck="false"
+          @blur="validateWorkflow"
+        ></textarea>
+      </label>
+      <p v-if="workflowError" class="workflow-error">{{ workflowError }}</p>
+    </div>
+
+    <!-- ════ NovelAI 专属（端点 / 模型 / 档位 / Anlas，C9·C16）════ -->
+    <div v-else class="provider-block">
+      <div class="form-grid image-grid">
+        <label class="form-label"
+          >图像端点
+          <p class="form-hint">在「API 配置」里把类型设为「图像生成」的那些端点会出现在这里</p>
+          <select v-model="s.imageNovelai.endpointId" class="form-input">
+            <option :value="null">（未选择）</option>
+            <option v-for="ep in imageEndpoints" :key="ep.id" :value="ep.id">{{ ep.name }}</option>
+          </select></label
+        >
+        <label class="form-label"
+          >NAI 模型
+          <p class="form-hint">出图模型 id，不是 LLM 模型</p>
+          <input v-model="s.imageNovelai.model" class="form-input" spellcheck="false"
+        /></label>
+        <label class="form-label"
+          >采样器 <input v-model="s.imageNovelai.sampler" class="form-input" spellcheck="false"
+        /></label>
+        <label class="form-label"
+          >噪声调度
+          <input v-model="s.imageNovelai.noiseSchedule" class="form-input" spellcheck="false"
+        /></label>
+        <label class="form-label"
+          >UC 预设编号
+          <p class="form-hint">按录制值原样发；负向文本由下面的全局负向拿着</p>
+          <input v-model.number="s.imageNovelai.ucPreset" type="number" min="0" class="form-input"
+        /></label>
+      </div>
+
+      <!-- ════ 账户档位（D43 补丁）════ -->
+      <p class="tier-title">NovelAI 账户档位</p>
+      <p class="form-hint tier-desc">
+        只影响下面那行估算，<strong>不改变任何请求</strong>。免费额度是 Opus 专属的 ——
+        不问清楚的话，那行字会对按点数付费的账户谎报「免费」。
+      </p>
+      <div class="mode-list" role="radiogroup" aria-label="NovelAI 账户档位">
+        <button
+          v-for="t in TIERS"
+          :key="t.key"
+          class="mode-item"
+          :class="{ 'mode-active': s.imageNovelai.tier === t.key }"
+          role="radio"
+          :aria-checked="s.imageNovelai.tier === t.key"
+          @click="s.imageNovelai.tier = t.key"
+        >
+          <span class="mode-label">{{ t.label }}</span>
+          <span class="mode-hint">{{ t.hint }}</span>
+        </button>
+      </div>
+
+      <!-- ════ 免费额度指示（§11.2 + D43 补丁）════ -->
+      <p
+        class="anlas-line"
+        :class="{
+          'anlas-free': anlasState === 'free',
+          'anlas-billed': anlasState === 'billed',
+          'anlas-unknown': anlasState === 'unknown' || anlasState === 'depends',
+        }"
+      >
+        <template v-if="anlasState === 'free'">
+          按当前订阅规则估算，这组参数在 Opus 免费额度内，不消耗 Anlas。
+        </template>
+        <template v-else-if="anlasState === 'depends'">
+          这组参数约 {{ anlas.anlasPerSample }} 点/张 —— 要不要付取决于你的账户档位，
+          上面选一个才能算准。
+        </template>
+        <template v-else-if="anlasState === 'billed' && billedBecauseTier">
+          按当前订阅规则估算，你这一档没有免费额度，每张都会消耗 Anlas（约
+          {{ anlas.anlasPerSample }} 点/张）—— 调小尺寸或步数也免不掉。
+        </template>
+        <template v-else-if="anlasState === 'billed'">
+          按当前订阅规则估算，这组参数会消耗 Anlas（约 {{ anlas.anlasPerSample }} 点/张）。
+        </template>
+        <template v-else>
+          宽 / 高 / 步数需要是正整数，现在算不出这组参数会不会消耗 Anlas。
+        </template>
+      </p>
+      <p class="form-hint anlas-ruleset">{{ anlas.rulesetLabel }} · 估算值，不是账单承诺</p>
+    </div>
+
+    <!-- ════ 共享出图参数（两家都读；comfy 侧当 %token% 的替换值）════ -->
+    <p class="block-title">画多大</p>
+    <p class="form-hint block-desc">
+      两个后端共用。ComfyUI 侧这四个值填进工作流里的
+      <code>%width%</code> <code>%height%</code> <code>%steps%</code> <code>%scale%</code>。
+    </p>
+    <div class="form-grid image-grid">
       <label class="form-label"
         >宽（px）
         <input v-model.number="s.imageWidth" type="number" min="64" step="64" class="form-input"
@@ -233,96 +497,71 @@ const RATINGS: { key: ImageRating; label: string }[] = [
           step="0.1"
           class="form-input"
       /></label>
-      <label class="form-label"
-        >采样器 <input v-model="s.imageNovelai.sampler" class="form-input" spellcheck="false"
-      /></label>
-      <label class="form-label"
-        >噪声调度
-        <input v-model="s.imageNovelai.noiseSchedule" class="form-input" spellcheck="false"
-      /></label>
-      <label class="form-label"
-        >UC 预设编号
-        <p class="form-hint">按录制值原样发；负向文本由下面的全局负向拿着</p>
-        <input v-model.number="s.imageNovelai.ucPreset" type="number" min="0" class="form-input"
-      /></label>
     </div>
 
-    <!-- ════ 账户档位（D43 补丁）════ -->
-    <p class="tier-title">NovelAI 账户档位</p>
-    <p class="form-hint tier-desc">
-      只影响下面那行估算，<strong>不改变任何请求</strong>。免费额度是 Opus 专属的 ——
-      不问清楚的话，那行字会对按点数付费的账户谎报「免费」。
-    </p>
-    <!-- 沿用三档开关的那套外壳类（mode-*）：同一张卡里两组单选长得不一样才是怪事 -->
-    <div class="mode-list" role="radiogroup" aria-label="NovelAI 账户档位">
-      <button
-        v-for="t in TIERS"
-        :key="t.key"
-        class="mode-item"
-        :class="{ 'mode-active': s.imageNovelai.tier === t.key }"
-        role="radio"
-        :aria-checked="s.imageNovelai.tier === t.key"
-        @click="s.imageNovelai.tier = t.key"
+    <!-- ════ 方言（C2/C4/C6）════ -->
+    <div class="form-grid image-grid">
+      <label class="form-label"
+        >提示词方言
+        <p class="form-hint">
+          决定<strong>侧链提示词与装配方式</strong>：画质后缀 / 基础负向 / 构图词随方言整套
+          切换，覆盖也按方言分开存。
+        </p>
+        <select v-model="s.imageDialectId" class="form-input dialect-select">
+          <option v-for="d in dialects" :key="d.id" :value="d.id">
+            {{ d.label }}（{{ d.id }}）
+          </option>
+        </select></label
       >
-        <span class="mode-label">{{ t.label }}</span>
-        <span class="mode-hint">{{ t.hint }}</span>
-      </button>
     </div>
-
-    <!-- ════ 免费额度指示（§11.2 + D43 补丁）════ -->
-    <p
-      class="anlas-line"
-      :class="{
-        'anlas-free': anlasState === 'free',
-        'anlas-billed': anlasState === 'billed',
-        'anlas-unknown': anlasState === 'unknown' || anlasState === 'depends',
-      }"
-    >
-      <template v-if="anlasState === 'free'">
-        按当前订阅规则估算，这组参数在 Opus 免费额度内，不消耗 Anlas。
-      </template>
-      <template v-else-if="anlasState === 'depends'">
-        这组参数约 {{ anlas.anlasPerSample }} 点/张 —— 要不要付取决于你的账户档位，
-        上面选一个才能算准。
-      </template>
-      <template v-else-if="anlasState === 'billed' && billedBecauseTier">
-        按当前订阅规则估算，你这一档没有免费额度，每张都会消耗 Anlas（约
-        {{ anlas.anlasPerSample }} 点/张）—— 调小尺寸或步数也免不掉。
-      </template>
-      <template v-else-if="anlasState === 'billed'">
-        按当前订阅规则估算，这组参数会消耗 Anlas（约 {{ anlas.anlasPerSample }} 点/张）。
-      </template>
-      <template v-else> 宽 / 高 / 步数需要是正整数，现在算不出这组参数会不会消耗 Anlas。 </template>
-    </p>
-    <p class="form-hint anlas-ruleset">{{ anlas.rulesetLabel }} · 估算值，不是账单承诺</p>
 
     <!-- ════ 图的提示词（≠ Agent 的提示词）════ -->
     <div class="prompt-block">
       <label class="form-label"
-        >画质后缀
+        >当前方言（{{ activeDialect.label }}）的画质后缀
         <p class="form-hint">
           追加在每一张图的正向提示词<strong>末尾</strong>（顺序即权重）。不要写前导逗号 ——
-          各段由引擎用「, 」连接。
+          各段由引擎连接。<strong>留空 = 回落方言默认</strong>（占位符里就是那份默认值）。
         </p>
-        <textarea v-model="qualitySuffix" class="form-input form-textarea" rows="2"></textarea>
+        <textarea
+          v-model="qualitySuffix"
+          class="form-input form-textarea"
+          rows="2"
+          :placeholder="activeDialect.qualitySuffix"
+        ></textarea>
       </label>
       <label class="form-label"
-        >全局负向（基础）
-        <p class="form-hint">每一张图都带上。只写画质与解剖类缺陷，分级由下面的上限管</p>
-        <textarea v-model="baseNegative" class="form-input form-textarea" rows="3"></textarea>
+        >当前方言（{{ activeDialect.label }}）的基础负向
+        <p class="form-hint">
+          每一张图都带上。只写画质与解剖类缺陷，分级由下面的上限管。留空 = 回落方言默认。
+        </p>
+        <textarea
+          v-model="baseNegative"
+          class="form-input form-textarea"
+          rows="3"
+          :placeholder="activeDialect.baseNegative"
+        ></textarea>
       </label>
       <label class="form-label"
         >全局负向（我的追加）
-        <p class="form-hint">拼在基础负向之后，留空即不追加</p>
+        <p class="form-hint">
+          拼在基础负向之后，留空即不追加。<strong>这一格是全局的</strong> ——
+          它是你的口味，不随方言切换。
+        </p>
         <textarea
           v-model="s.imageExtraNegative"
-          class="form-input form-textarea"
+          class="form-input form-textarea extra-negative"
           rows="2"
+          :disabled="!activeDialect.supportsNegative"
         ></textarea>
+        <span v-if="!activeDialect.supportsNegative" class="negative-off">
+          当前方言不支持负向提示词，这一格已停用 —— 这类模型（CFG 1.0）根本不读负向，
+          收下再悄悄丢掉只会让人以为它生效了。
+        </span>
       </label>
     </div>
 
-    <!-- ════ 分级上限与显示 ════ -->
+    <!-- ════ 分级上限与限额 ════ -->
     <div class="form-grid image-grid">
       <label class="form-label"
         >内容分级上限
@@ -331,27 +570,35 @@ const RATINGS: { key: ImageRating; label: string }[] = [
           <option v-for="r in RATINGS" :key="r.key" :value="r.key">{{ r.label }}</option>
         </select></label
       >
-      <label class="form-label"
-        >每条消息最多几张
-        <p class="form-hint">自动与手动都计入</p>
-        <input
-          v-model.number="s.imageNovelai.maxPerMessage"
-          type="number"
-          min="1"
-          max="10"
-          class="form-input"
-      /></label>
-      <label class="form-label"
-        >每小时最多几张
-        <p class="form-hint">失效保护：挡的是回退重发风暴与意外循环</p>
-        <input
-          v-model.number="s.imageNovelai.maxPerHour"
-          type="number"
-          min="1"
-          max="200"
-          class="form-input"
-      /></label>
+      <!-- 🔴 L1/L2 是**花钱防线**（C9），本地后端整块不出现 —— 画一个不生效的上限，
+           就是又一句「看着权威、其实是假的」话 -->
+      <template v-if="!isComfy">
+        <label class="form-label"
+          >每条消息最多几张
+          <p class="form-hint">自动与手动都计入</p>
+          <input
+            v-model.number="s.imageNovelai.maxPerMessage"
+            type="number"
+            min="1"
+            max="10"
+            class="form-input quota-per-message"
+        /></label>
+        <label class="form-label"
+          >每小时最多几张
+          <p class="form-hint">失效保护：挡的是回退重发风暴与意外循环</p>
+          <input
+            v-model.number="s.imageNovelai.maxPerHour"
+            type="number"
+            min="1"
+            max="200"
+            class="form-input quota-per-hour"
+        /></label>
+      </template>
     </div>
+    <p v-if="isComfy" class="form-hint local-quota-note">
+      本地后端不设每消息 / 每小时上限（本地免费就该无上限）；「同一回合不重复出图」这条
+      去重规则对两个后端恒开。
+    </p>
 
     <label class="toggle-row">
       <span class="toggle-text">
@@ -461,6 +708,69 @@ const RATINGS: { key: ImageRating; label: string }[] = [
 
 .image-grid {
   margin-bottom: var(--theme-spacing-md);
+}
+
+/* 块小标题（后端 / 画多大）—— 与档位那条 .tier-title 同一级 */
+.block-title {
+  margin: var(--theme-spacing-md) 0 var(--theme-spacing-xs);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+}
+.block-desc {
+  margin-top: 0;
+}
+
+/* per-provider 那一整块：切后端时整块换掉，块内不再有第二层缩进 */
+.provider-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.workflow-field {
+  margin-bottom: var(--theme-spacing-sm);
+}
+.workflow-input {
+  font-family: 'Cascadia Code', monospace;
+  font-size: 0.78rem;
+  min-height: 120px;
+}
+/* 校验只是提前告知，不拦保存 —— 语义徽章配方（design.md §1） */
+.workflow-error {
+  margin: 0 0 var(--theme-spacing-md);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  background: color-mix(in srgb, var(--theme-error) 12%, transparent);
+  color: var(--theme-error);
+  border: 1px solid color-mix(in srgb, var(--theme-error) 30%, transparent);
+  border-radius: var(--theme-radius-md);
+}
+
+/* 方言不吃负向时那一格的可见说明（C6：可见地禁用，不静默丢弃） */
+.extra-negative:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.negative-off {
+  margin-top: var(--theme-spacing-xs);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--theme-warning);
+}
+
+.local-quota-note {
+  margin-bottom: var(--theme-spacing-lg);
+}
+
+.image-card-scope code,
+.form-hint code {
+  padding: 0 3px;
+  font-family: 'Cascadia Code', monospace;
+  font-size: 0.95em;
+  color: var(--theme-text-secondary);
+  background: var(--theme-surface-muted);
+  border-radius: var(--theme-radius-sm);
 }
 
 /* 账户档位（D43 补丁） */
