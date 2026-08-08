@@ -218,7 +218,7 @@ void ref;
         <input
           type="number"
           min="100"
-          max="32768"
+          max="384000"
           step="100"
           :value="agentCfg.maxTokens"
           class="form-input"

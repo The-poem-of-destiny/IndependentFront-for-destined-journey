@@ -1185,7 +1185,10 @@ export const useCreateStore = defineStore('create', () => {
         // 真机修(2026-07-21): plot_outline 一次性重操作 — 大 systemPrompt(世界书注入 ~40 万字符)
         // + 复杂产出(先 if_absent 再切 event + 多事件 desc/trigger/complete/fail) + 自检重试，
         // AI 生成稳定 >120s。提至 300s。配合 agent-client 的 AbortError 友好化。
-        timeout: 300000,
+        // 🔴 2026-08-08 再次拉满: 章节×事件规模 5×5 时输出 ~10k+ 字、慢模型 4-8 分钟，
+        //    300s 会掐在生成中途。maxTokens 已拉满(384000)，这里把墙钟也放开到 30 分钟 —
+        //    让「能生成完」而不是「在超时边缘赌命」。
+        timeout: 1800000,
       });
       // Q-18: 默认值不再在这里重述一遍（此前 0.7 / 16384 / 1.0 三处字面量与
       // 设置页、game-pipeline 的拷贝靠人眼保持一致）
