@@ -7,8 +7,19 @@ const props = defineProps<{
   chapters: any[];
   isGenerating: boolean;
   revealed: boolean;
+  /** 流式生成实时统计（null = 非生成中） */
+  streamStats?: {
+    phase: 'connecting' | 'streaming';
+    round: number;
+    chars: number;
+    reasoningChars: number;
+    charsPerSec: number;
+    estimatedTotal: number;
+    estimatedRemainingSec: number | null;
+    elapsedSec: number;
+  } | null;
 }>();
-defineEmits<{ reveal: []; regenerate: [] }>();
+defineEmits<{ reveal: []; regenerate: []; abort: [] }>();
 
 const expandedChapters = ref<Set<number>>(new Set());
 
@@ -35,6 +46,17 @@ function formatTimeRange(tr: { start?: string; end?: string } | undefined): stri
   if (!tr.end || tr.end === tr.start) return formatOutlineTime(tr.start);
   return `${formatOutlineTime(tr.start)} ~ ${formatOutlineTime(tr.end)}`;
 }
+
+/** 秒 → 可读剩余时长（不足 1 分钟显秒，否则「X分Y秒」，≥60 分钟显「约 X 小时」） */
+function formatRemaining(sec: number): string {
+  if (sec < 60) return `${sec} 秒`;
+  if (sec < 3600) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return s > 0 ? `${m} 分 ${s} 秒` : `${m} 分钟`;
+  }
+  return `约 ${Math.round(sec / 3600)} 小时`;
+}
 </script>
 
 <template>
@@ -45,7 +67,34 @@ function formatTimeRange(tr: { start?: string; end?: string } | undefined): stri
     <!-- 生成中 -->
     <div v-if="isGenerating" class="outline-loading">
       <div class="shimmer" />
-      <p>AI 正在生成剧情大纲，请耐心等待…</p>
+      <div v-if="streamStats" class="stream-stats">
+        <template v-if="streamStats.phase === 'connecting'">
+          <p class="stream-line">正在连接模型，请稍候…（首次响应可能需数十秒）</p>
+        </template>
+        <template v-else>
+          <p class="stream-line">
+            第 {{ streamStats.round }} 轮 · 正文 {{ streamStats.chars.toLocaleString() }} 字 ·
+            思维链 {{ streamStats.reasoningChars.toLocaleString() }} 字 ·
+            {{ streamStats.charsPerSec }} 字/秒
+            <span v-if="streamStats.estimatedRemainingSec !== null">
+              · 预计剩余 {{ formatRemaining(streamStats.estimatedRemainingSec) }}
+            </span>
+          </p>
+          <div
+            class="stream-progress"
+            :style="{
+              width:
+                streamStats.estimatedTotal > 0
+                  ? Math.min(100, (streamStats.chars / streamStats.estimatedTotal) * 100) + '%'
+                  : '0%',
+            }"
+          />
+        </template>
+        <AppButton size="sm" variant="danger" class="stream-abort" @click="$emit('abort')">
+          取消生成
+        </AppButton>
+      </div>
+      <p v-else>AI 正在生成剧情大纲，请耐心等待…</p>
     </div>
 
     <!-- 已生成：模糊遮罩 -->
@@ -150,6 +199,27 @@ function formatTimeRange(tr: { start?: string; end?: string } | undefined): stri
   text-align: center;
   color: var(--theme-text-muted);
   font-size: 0.8rem;
+}
+.stream-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 2px;
+}
+.stream-line {
+  margin: 0;
+  font-size: 0.72rem;
+}
+.stream-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--theme-accent);
+  transition: width 0.3s ease;
+  max-width: 100%;
+}
+.stream-abort {
+  margin-top: 2px;
 }
 .shimmer {
   width: 100%;

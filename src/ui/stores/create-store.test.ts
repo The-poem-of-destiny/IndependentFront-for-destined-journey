@@ -133,6 +133,27 @@ vi.mock('@engine/agent-client', () => ({
     chat(...args: any[]) {
       return chatMock(...args);
     }
+    async chatStream(_req: any, callbacks: any, _signal?: any) {
+      // 流式路径同样走 chatMock 队列；同步补一次 onChunk 模拟最小流式，再收尾
+      const result = await chatMock(_req);
+      if (result.error) {
+        callbacks.onError(result.error);
+      } else {
+        const raw = result.rawResponse || '';
+        if (raw) callbacks.onChunk?.(raw, false);
+        callbacks.onComplete({
+          fullText: raw,
+          toolCalls: [],
+          reasoning: result.reasoning || '',
+          tokensUsed: result.tokensUsed || 0,
+          cacheHit: false,
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          completionTokens: 0,
+          duration: result.duration || 0,
+        });
+      }
+    }
   },
 }));
 
@@ -1366,6 +1387,25 @@ describe('generatePlotOutline 大纲生成', () => {
     expect(store.plotOutline).toBeNull();
     expect(store.plotGenerationError).toContain('HTTP 500');
     expect(store.isPlotGenerating).toBe(false);
+  });
+
+  it('用户取消（Request aborted）→ 提示已取消而非报错', async () => {
+    chatMock.mockResolvedValueOnce({ error: 'Request aborted', rawResponse: '' });
+    const store = setupPlotStore();
+    const ok = await store.generatePlotOutline();
+    expect(ok).toBe(false);
+    expect(store.plotGenerationError).toContain('已取消');
+    expect(store.plotGenerationError).not.toContain('Request aborted');
+    expect(store.isPlotGenerating).toBe(false);
+    expect(store.plotStreamStats).toBeNull();
+  });
+
+  it('成功后流式统计清空（plotStreamStats 回 null）', async () => {
+    chatMock.mockResolvedValueOnce(okResult(outlineJson(8)));
+    const store = setupPlotStore();
+    const ok = await store.generatePlotOutline();
+    expect(ok).toBe(true);
+    expect(store.plotStreamStats).toBeNull();
   });
 
   it('输出解析失败时应设置错误状态', async () => {

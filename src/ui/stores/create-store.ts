@@ -875,6 +875,42 @@ export const useCreateStore = defineStore('create', () => {
   /** 大纲预览是否已揭示（防剧透遮罩，捏人页本地状态） */
   const plotOutlineRevealed = ref(false);
   const plotGenerationError = ref<string | null>(null);
+
+  /** 流式生成实时统计（捏人页统计条用；null = 非生成中） */
+  const plotStreamStats = ref<{
+    phase: 'connecting' | 'streaming';
+    round: number;
+    chars: number;
+    reasoningChars: number;
+    charsPerSec: number;
+    estimatedTotal: number;
+    estimatedRemainingSec: number | null;
+    elapsedSec: number;
+  } | null>(null);
+  /** 当前生成轮的 AbortController（取消按钮用） */
+  let plotAbortController: AbortController | null = null;
+
+  /**
+   * 预计大纲总字数 —— 三档：上轮 raw 实际长度最准 → 历史版 content 膨胀 → 公式兜底。
+   * 公式：章节数 × 每章事件数 × 每事件 220 字 × XML 膨胀 1.8 + 固定开销 1800；
+   * 思维链 ≈ 正文 × 0.5（deepseek 类推理模型经验值）。
+   */
+  function estimateOutlineChars(): number {
+    const lastRaw = lastPlotGenerationMeta.value?.rawResponse?.length;
+    if (lastRaw && lastRaw > 0) return lastRaw;
+    const hist = outlineHistory.value[outlineHistory.value.length - 1];
+    if (hist?.content?.length) return Math.round(hist.content.length * 1.6);
+    const ps = plotSettings.value;
+    const chapters = ps.main?.chapterCount || 3;
+    const eventsPerCh = ps.main?.eventsPerChapter || 3;
+    const body = chapters * eventsPerCh * 220 * 1.8 + 1800;
+    return Math.round(body + body * 0.5);
+  }
+
+  /** 取消当前大纲生成（用户主动中止） */
+  function abortPlotGeneration(): void {
+    plotAbortController?.abort();
+  }
   /** 最近一次大纲生成的完整 AI 数据（供导出） */
   const lastPlotGenerationMeta = ref<{
     messages: Array<{ role: string; content: string }>;
@@ -1125,6 +1161,113 @@ export const useCreateStore = defineStore('create', () => {
     }
   }
 
+  /**
+   * 流式调用 chatStream，一边实时更新 plotStreamStats（字数/速率/剩余估算），
+   * 一边把流聚合回 Promise 结果。用户取消（abort）与真实错误用 `cancelled` 区分。
+   */
+  function streamOutlineChat(
+    client: AgentClient,
+    request: {
+      model: string;
+      temperature: number;
+      maxTokens: number;
+      topP: number;
+      messages: Array<{ role: string; content: string }>;
+    },
+    round: number,
+  ): Promise<{
+    rawResponse: string;
+    reasoning?: string;
+    finishReason?: string;
+    completionTokens?: number;
+    error?: string;
+    cancelled?: boolean;
+  }> {
+    return new Promise((resolve) => {
+      const controller = new AbortController();
+      plotAbortController = controller;
+      const startedAt = Date.now();
+      let fullText = '';
+      let fullReasoning = '';
+      plotStreamStats.value = {
+        phase: 'connecting',
+        round,
+        chars: 0,
+        reasoningChars: 0,
+        charsPerSec: 0,
+        estimatedTotal: estimateOutlineChars(),
+        estimatedRemainingSec: null,
+        elapsedSec: 0,
+      };
+      // 速率滑动窗口（近 10s 平均；开头数据少不估算）
+      const window_: Array<{ ts: number; chars: number }> = [];
+
+      const finishStats = () => {
+        if (!plotStreamStats.value) return;
+        plotStreamStats.value.chars = fullText.length;
+        plotStreamStats.value.reasoningChars = fullReasoning.length;
+        plotStreamStats.value.elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+      };
+
+      void client.chatStream(
+        request,
+        {
+          onChunk(text, _isComplete) {
+            fullText += text;
+            const now = Date.now();
+            window_.push({ ts: now, chars: fullText.length });
+            const cutoff = now - 10000;
+            while (window_.length > 0 && window_[0].ts < cutoff) window_.shift();
+            const first = window_[0];
+            const last = window_[window_.length - 1];
+            const span = last.ts - first.ts;
+            const delta = last.chars - first.chars;
+            const cps = span > 0 ? (delta * 1000) / span : 0;
+            const st = plotStreamStats.value;
+            if (!st) return;
+            st.phase = 'streaming';
+            st.chars = fullText.length;
+            st.charsPerSec = Math.round(cps);
+            st.elapsedSec = Math.round((now - startedAt) / 1000);
+            // 数据足够（≥500 字）才给剩余估算；宁偏大不偏小（×1.15 缓冲）
+            if (fullText.length >= 500 && cps > 0) {
+              const remaining = Math.max(0, st.estimatedTotal - fullText.length);
+              st.estimatedRemainingSec = Math.round((remaining / cps) * 1.15);
+            } else {
+              st.estimatedRemainingSec = null;
+            }
+          },
+          onReasoning(text) {
+            fullReasoning += text;
+            const st = plotStreamStats.value;
+            if (st) st.reasoningChars = fullReasoning.length;
+          },
+          onComplete(result) {
+            fullText = result.fullText;
+            fullReasoning = result.reasoning || '';
+            finishStats();
+            resolve({
+              rawResponse: result.fullText,
+              reasoning: result.reasoning || undefined,
+              completionTokens: result.completionTokens,
+            });
+          },
+          onError(err) {
+            finishStats();
+            const cancelled = err === 'Request aborted';
+            resolve({
+              rawResponse: fullText,
+              reasoning: fullReasoning || undefined,
+              error: cancelled ? undefined : err,
+              cancelled,
+            });
+          },
+        },
+        controller.signal,
+      );
+    });
+  }
+
   /** 核心生成循环: 通过模板系统 buildAgentMessagesAsync 构建上下文，selfCritique.score < 6 时重试（最多 2 次调用） */
   async function runOutlineGeneration(initialUserMessage: string): Promise<boolean> {
     plotGenerationError.value = null;
@@ -1218,10 +1361,17 @@ export const useCreateStore = defineStore('create', () => {
         } else {
           messages.push({ role: 'user', content: userMessage });
         }
-        const result = await client.chat({ ...llmParams, messages });
+
+        const result = await streamOutlineChat(client, { ...llmParams, messages }, attempt + 1);
+        if (result.cancelled) {
+          plotGenerationError.value = '大纲生成已取消';
+          plotStreamStats.value = null;
+          return false;
+        }
         if (result.error || !result.rawResponse) {
           if (best) break;
           plotGenerationError.value = `大纲生成失败: ${result.error ?? 'AI 返回为空'}`;
+          plotStreamStats.value = null;
           return false;
         }
         const parsed = tryParseOutline(result.rawResponse);
@@ -1247,14 +1397,15 @@ export const useCreateStore = defineStore('create', () => {
           lastPlotGenerationMeta.value = {
             messages: messages.map((m) => ({ ...m })),
             rawResponse: raw,
-            reasoning: (result as any).reasoning ?? undefined,
+            reasoning: result.reasoning ?? undefined,
             model: llmParams.model,
             finishReason: result.finishReason,
             timestamp: Date.now(),
           };
           plotGenerationError.value = truncated
-            ? '大纲输出被截断（finish_reason=length，输出未完整闭合），请减少章节/事件数量后重试，或检查 API 输出上限'
+            ? '大纲输出被截断（输出未完整闭合），请减少章节/事件数量后重试，或检查 API 输出上限'
             : '大纲输出解析失败，请重试（失败详情已写入控制台，可导出 AI 调试数据）';
+          plotStreamStats.value = null;
           return false;
         }
         best = { parsed, raw: result.rawResponse };
@@ -1262,7 +1413,7 @@ export const useCreateStore = defineStore('create', () => {
         lastPlotGenerationMeta.value = {
           messages: messages.map((m) => ({ ...m })),
           rawResponse: best.raw,
-          reasoning: (result as any).reasoning ?? undefined,
+          reasoning: result.reasoning ?? undefined,
           finishReason: result.finishReason,
           model: llmParams.model,
           timestamp: Date.now(),
@@ -1287,6 +1438,7 @@ export const useCreateStore = defineStore('create', () => {
         plotGenerationError.value = '大纲生成失败';
         return false;
       }
+      plotStreamStats.value = null;
 
       const outline = createOutlineFromAgent(
         '',
@@ -2068,6 +2220,8 @@ export const useCreateStore = defineStore('create', () => {
     plotOutline,
     plotOutlineChapters,
     isPlotGenerating,
+    plotStreamStats,
+    abortPlotGeneration,
     plotOutlineRevealed,
     plotGenerationError,
     outlineHistory,
