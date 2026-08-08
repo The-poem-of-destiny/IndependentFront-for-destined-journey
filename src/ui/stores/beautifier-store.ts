@@ -16,7 +16,7 @@
  *    设置对象序列化进 localStorage，写回去等于把刚搬出来的容量又塞回配额里。
  */
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import { getDatabase } from '@engine/database';
 import { loadPresetRules, mergeRules, normalizeRuleRuntime } from '@engine/beautifier';
 import { getPackRules } from '@engine/content-source';
@@ -26,6 +26,7 @@ import {
   pruneLegacyBuiltinOverrides,
   type BeautifierMigrationOutcome,
 } from './beautifier-migration';
+import { useContentStore } from './content-store';
 import { useSettingsStore } from './settings-store';
 import { detach, omit } from './db-write';
 
@@ -76,6 +77,30 @@ export const useBeautifierStore = defineStore('beautifier', () => {
     await refreshPresetRules();
     ready.value = true;
   }
+
+  // 🔴 收敛保险（2026-08-08 真机复现）：App.vue 的 `beautifier.init()` 先于 boot 的
+  //    `hydratePackState()` 时，doInit 的 `refreshPresetRules()` 会在 pack provider 挂载前
+  //    跑完（回落占位文件）；若 hydratePackState 里那次重算又因时序未生效，presetRules
+  //    会一直是占位规则（症状：Dexie 装着 pack 且 getPackRules()=22，但 presetRules=5）。
+  //    监听 activePackVersion：boot hydrate / 装包把它从 null 变成版本号时重算，
+  //    让所有时序最终收敛到 pack 规则。
+  // 🔴 守卫：仅当 pack 规则确实可读（provider 已注册）才重算 —— 否则走 loadPresetRules()
+  //    会 fetch 占位文件并把 contentStatus 上报成 error（测试与卸载路径的污染源）。
+  watch(
+    () => {
+      try {
+        return useContentStore().activePackVersion;
+      } catch {
+        // Pinia 未激活（极少见的早调用）→ 保持 null，不抛
+        return null;
+      }
+    },
+    (v) => {
+      if (v === null || v === undefined) return;
+      if (getPackRules() === undefined) return;
+      void refreshPresetRules();
+    },
+  );
 
   /** 从 Dexie 读全表填 ref */
   async function hydrate(): Promise<void> {
@@ -134,8 +159,10 @@ export const useBeautifierStore = defineStore('beautifier', () => {
         activeCharacterNames,
       );
       presetRules.value = merged.filter((r) => r.isBuiltin);
-    } catch {
-      // 加载失败静默（设置页打开时会兜底重算）
+    } catch (err) {
+      // 加载失败不阻断渲染（设置页打开时会兜底重算），但留痕便于诊断：
+      // 2026-08-08 美化规则「只剩占位」真机复现后，这条曾全程静默。
+      console.warn('[beautifier-store] refreshPresetRules 失败，presetRules 可能不完整:', err);
     }
   }
 
