@@ -187,9 +187,12 @@ async function removeSelected() {
           :aria-label="`查看记忆 ${mem.id}`"
           @click="openDetail(mem.id)"
         >
-          <span class="card-star" :class="starClass(mem.importance)">{{
-            '★'.repeat(mem.importance)
-          }}</span>
+          <span class="card-topline">
+            <span class="card-star" :class="starClass(mem.importance)">{{
+              '★'.repeat(mem.importance)
+            }}</span>
+            <span class="card-id">{{ mem.id }}</span>
+          </span>
           <span class="card-content">{{ mem.content }}</span>
           <span class="card-meta">
             <span v-if="mem.keywords?.length" class="card-keywords">
@@ -246,6 +249,7 @@ async function removeSelected() {
   gap: 8px;
   align-items: center;
   flex-shrink: 0;
+  margin-bottom: 4px;
 }
 .search-input {
   flex: 1;
@@ -276,8 +280,9 @@ async function removeSelected() {
   overflow-y: auto;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 8px;
+  gap: 10px;
   align-content: start;
+  padding-top: 2px;
 }
 .memory-card {
   display: flex;
@@ -302,8 +307,20 @@ async function removeSelected() {
   outline: 2px solid var(--theme-primary);
   outline-offset: 1px;
 }
+.card-topline {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+}
 .card-star {
   font-size: 0.6875rem;
+}
+.card-id {
+  font-size: 0.625rem;
+  color: var(--theme-text-muted);
+  font-family: monospace;
+  white-space: nowrap;
 }
 .star-high {
   color: #f59e0b;
