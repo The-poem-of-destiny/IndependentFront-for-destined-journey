@@ -31,6 +31,7 @@ import {
   deleteCharacter,
   saveMemory,
   deleteMemoriesAfter,
+  deleteSnapshotsAfter,
   getPlotEvents,
   savePlotEvents,
   deletePlotEvent,
@@ -1407,7 +1408,15 @@ export class StateManager {
       const db = getDatabase();
       await db.transaction(
         'rw',
-        [db.characters, db.saveProfiles, db.plotEvents, db.messages, db.memories, db.saves],
+        [
+          db.characters,
+          db.saveProfiles,
+          db.plotEvents,
+          db.messages,
+          db.memories,
+          db.saves,
+          db.snapshots,
+        ],
         async () => {
           // ② characters 整体覆写: 全删 → 写入快照副本
           //    structuredClone 防库内对象与快照对象引用共享（快照需保持不可变，可重复恢复）
@@ -1438,6 +1447,12 @@ export class StateManager {
 
           // ④.b 清理"未来"记忆（realTimestamp > 快照创建时间；记忆 append-only 安全）
           await deleteMemoriesAfter(this.saveId, snapshot.createdAt);
+
+          // ④.c 🆕 清理"未来"快照（createdAt > 恢复点）：被抛弃的分支（如同轮重发
+          //     产生的第二张快照）此前从不清理，恢复后 append 新快照会让同一 turn
+          //     出现多条、后续回退 filter(turn<=target) 取错。恢复点之后创建的快照
+          //     全是该时间线之后的产物，删除安全。
+          await deleteSnapshotsAfter(this.saveId, snapshot.createdAt);
 
           // ⑤ activeSnapshotId 指向 + totalTurns 对齐快照 turn（防重发后 turn 编号错位）
           const save = await getSave(this.saveId);

@@ -1332,6 +1332,22 @@ export async function deleteSnapshot(id: string): Promise<void> {
   await getDatabase().snapshots.delete(id);
 }
 
+/**
+ * 删除某存档中 `createdAt > cutoff` 的全部快照。
+ *
+ * 🆕 2026-08-08 快照回退 bug 根治：`restoreSnapshot` 恢复点之后的旧快照
+ * （"被抛弃的未来分支"，如同轮重发产生的第二张）此前从不清理，恢复后继续
+ * append 新快照会导致同一 turn 出现多条、回退时 `filter(turn<=target)` 取错。
+ * 用 createdAt 判定：恢复点之后创建的快照，全是该时间线之后的产物。
+ */
+export async function deleteSnapshotsAfter(saveId: string, cutoff: number): Promise<void> {
+  await getDatabase()
+    .snapshots.where('saveId')
+    .equals(saveId)
+    .filter((s) => s.createdAt > cutoff)
+    .delete();
+}
+
 /** 删除超出上限的旧快照
  *  - mode='dense'(默认): 按 createdAt 保留最新 maxCount 个（FIFO，向后兼容）
  *  - mode='tiered': 阶梯淘汰——最近5轮全留，再往前每4轮留1，更早每8/10轮留1；

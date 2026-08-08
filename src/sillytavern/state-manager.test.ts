@@ -26,6 +26,7 @@ vi.mock('./database', () => ({
   deleteCharacter: vi.fn(),
   saveMemory: vi.fn(),
   deleteMemoriesAfter: vi.fn(),
+  deleteSnapshotsAfter: vi.fn(),
   getMemories: vi.fn(),
   getPlotEvents: vi.fn(),
   savePlotEvents: vi.fn(),
@@ -3032,6 +3033,8 @@ describe('StateManager', () => {
       ]);
       // 清理 realTimestamp > 快照 createdAt 的未来记忆
       expect(vi.mocked(db.deleteMemoriesAfter)).toHaveBeenCalledWith('save-001', 5000);
+      // 🆕 清理 createdAt > 恢复点的未来快照（被抛弃的分支）
+      expect(vi.mocked(db.deleteSnapshotsAfter)).toHaveBeenCalledWith('save-001', 5000);
       // totalTurns 对齐快照 turn 游标
       expect(save.metadata.totalTurns).toBe(3);
     });

@@ -962,6 +962,32 @@ function charGenFromJSON(data: any): CharGenOutput {
   };
 }
 
+/**
+ * 从 <personality> 提取落库文本，兼容两种输出形态（2026-08-08）。
+ *
+ * 提示词与工具返回的性格编码（如 `wOaGz(A)`）是角色的**既定属性**，落库必须保留；
+ * 旧实现 `tagInner ?? tagAttr` 只取内文，AI 把 code 写进属性（旧格式）时 code 被剥掉，
+ * 落库只剩描述文本（真机 2026-08-08：`code="wHAGY(A)"` 的属性被丢弃）。
+ *
+ * 两种形态：
+ *   · 新格式（推荐）`<personality>wOaGz(A)+冷静果断的性格描述</personality>`
+ *       → code 与描述都在内文，`tagInner` 直接拿全，原样返回。
+ *   · 旧格式 `<personality code="wOaGz(A)">冷静果断的性格描述</personality>`
+ *       → code 在属性里，拼接成 `code+描述`，保证编码不丢。
+ *   · 纯描述（无 code）→ 原样返回。
+ *
+ * 内文可能嵌套 AI 自作的子标签（如 <description>），经 stripInnerTags 剥成纯文本。
+ */
+export function extractPersonalityText(xml: string): string {
+  const inner = stripInnerTags(tagInner(xml, 'personality') ?? '');
+  const code = tagAttr(xml, 'personality', 'code');
+  if (!code) return inner;
+  if (!inner) return code;
+  // 旧格式：属性 code + 内文描述 → 拼 `code+描述`；内文已含 code 前缀则不重复拼
+  const codePrefix = `${code}+`;
+  return inner.startsWith(codePrefix) ? inner : `${codePrefix}${inner}`;
+}
+
 /** 从 XML <char_result> 中解析角色数据 */
 function parseCharGenXML(xml: string): CharGenOutput {
   // ascension 子结构
@@ -1069,9 +1095,7 @@ function parseCharGenXML(xml: string): CharGenOutput {
     background: stripInnerTags(tagInner(xml, 'background') ?? ''),
     appearance: stripInnerTags(tagInner(xml, 'appearance') ?? ''),
     clothing: stripInnerTags(tagInner(xml, 'clothing') ?? ''),
-    personality: stripInnerTags(
-      tagInner(xml, 'personality') ?? tagAttr(xml, 'personality', 'code') ?? '',
-    ),
+    personality: extractPersonalityText(xml),
     likes: stripInnerTags(tagInner(xml, 'likes') ?? ''),
     thoughts: stripInnerTags(tagInner(xml, 'thoughts') ?? ''),
     ascension: {

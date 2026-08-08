@@ -14,6 +14,7 @@ import {
   callItemGenAgent,
   runCharGenChain,
   runCharGenForCombat,
+  extractPersonalityText,
   $chargen,
 } from './char-gen-agent';
 import type { CharGenRequest, CharGenAgentDeps, CharGenClient } from './char-gen-agent';
@@ -1738,5 +1739,46 @@ describe('assembleCharacterState — modifiers/buffs/divinity 透传到 Inventor
     expect(weapon!.modifiers).toHaveLength(1);
     expect(weapon!.modifiers![0].category).toBe('固伤');
     expect(weapon!.divinity).toBe(5);
+  });
+});
+
+// ========== extractPersonalityText ==========
+
+describe('extractPersonalityText', () => {
+  it('新格式: code 与描述都在内文 → 原样保留', () => {
+    const xml = '<char_result><personality>wOaGz(A)+冷静果断的性格描述</personality></char_result>';
+    expect(extractPersonalityText(xml)).toBe('wOaGz(A)+冷静果断的性格描述');
+  });
+
+  it('旧格式: code 在属性 → 拼接成 code+描述，编码不丢', () => {
+    const xml =
+      '<char_result><personality code="wOaGz(A)">冷静果断的性格描述</personality></char_result>';
+    expect(extractPersonalityText(xml)).toBe('wOaGz(A)+冷静果断的性格描述');
+  });
+
+  it('旧格式变体: code 属性用单引号 → 同样拼接', () => {
+    const xml = "<char_result><personality code='w-aG-z+(S)'>沉默寡言</personality></char_result>";
+    expect(extractPersonalityText(xml)).toBe('w-aG-z+(S)+沉默寡言');
+  });
+
+  it('内文已含 code 前缀时不重复拼接', () => {
+    const xml =
+      '<char_result><personality code="wOaGz(A)">wOaGz(A)+描述已带编码</personality></char_result>';
+    expect(extractPersonalityText(xml)).toBe('wOaGz(A)+描述已带编码');
+  });
+
+  it('纯描述（无 code 属性）→ 原样返回', () => {
+    const xml = '<char_result><personality>冷静果断，行事如风</personality></char_result>';
+    expect(extractPersonalityText(xml)).toBe('冷静果断，行事如风');
+  });
+
+  it('无 personality 标签 → 空串', () => {
+    expect(extractPersonalityText('<char_result><name>艾琳</name></char_result>')).toBe('');
+  });
+
+  it('内文嵌套子标签 → 剥掉留纯文本，code 仍保留', () => {
+    const xml =
+      '<char_result><personality code="wOaGz(A)"><description>冷静果断</description><note>细节</note></personality></char_result>';
+    expect(extractPersonalityText(xml)).toBe('wOaGz(A)+冷静果断\n细节');
   });
 });
