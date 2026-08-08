@@ -799,6 +799,11 @@ export const useGameStore = defineStore('game', () => {
     const result = await sm.restoreSnapshot(prevSnapshot.id);
     if (!result.success) return { ok: false, error: result.errors.join('; ') || '恢复快照失败' };
 
+    // 🔴 恢复后**整表替换**角色内存态：refreshFromDb 的角色同步是合并语义
+    //（内存独有角色保留）——快照回退删掉的角色（如回退点之后才生成的 NPC）
+    // 会永远留在内存/UI/导出里。先替换再 refreshFromDb（此时合并是幂等）。
+    characters.value = (await getCharacters(activeSaveId.value)) as CharacterState[];
+
     // 回填这轮玩家输入 + 同步内存 + turnCounter 对齐（防重发后 turn 编号错位）
     fillInput(capturedInput);
     await refreshFromDb();
@@ -815,6 +820,8 @@ export const useGameStore = defineStore('game', () => {
     const sm = createStateManager(activeSaveId.value);
     const result = await sm.restoreSnapshot(snapshotId);
     if (!result.success) return { ok: false, error: result.errors.join('; ') || '恢复快照失败' };
+    // 🔴 同 rollbackOneTurn：整表替换角色内存态，别让回退删掉的角色留在 UI 里
+    characters.value = (await getCharacters(activeSaveId.value)) as CharacterState[];
     await refreshFromDb();
     await restoreMessages();
     const lastMsg = messages.value.filter((m) => m.role === 'user' || m.role === 'assistant').pop();
