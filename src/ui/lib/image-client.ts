@@ -177,7 +177,10 @@ function resolveFetch(): ImageFetchLike | undefined {
 // ═══════════════════════════════════════════════════════════
 
 function fail(
-  kind: Exclude<ImageGenFailureKind, 'prompt-agent'>,
+  // 🔴 排除的三类都**不由本模块产出**：`prompt-agent` 是侧链的，
+  //    `workflow` / `execution` 是 ComfyUI 独有的（C12，由那条链自己分类与措辞）。
+  //    在类型上排掉，`FAILURE_MESSAGES` 就不必为它们编一句 NovelAI 语气的文案。
+  kind: Exclude<ImageGenFailureKind, 'prompt-agent' | 'workflow' | 'execution'>,
   detail?: string,
   messageOverride?: string,
 ): ImageGenFailure {

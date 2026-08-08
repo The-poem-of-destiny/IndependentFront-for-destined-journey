@@ -74,6 +74,7 @@ function emptyRegistry() {
     namePools: undefined,
     markers: undefined,
     branding: undefined,
+    imageDialects: undefined,
   };
 }
 

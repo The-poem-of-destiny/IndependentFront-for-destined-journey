@@ -210,6 +210,20 @@ export interface PackBrandingSection {
 }
 
 /**
+ * 提示词方言分节（图像 v2 / C4）—— 内容注册表第 7 面。
+ *
+ * 🔴 **整节替换，走 `locations`/`bloodlines` 那一档而不是 `catalog` 的 `.data` 档**：
+ * 落盘形状本来就是 `{ dialects: [...] }`，再包一层 `data` 只是多一层没人需要的壳。
+ *
+ * 形状与 `ImageDialect[]` 同构，但这里保持 `unknown[]` 透传（与 catalog/namePools 同口径）:
+ * 方言来自第三方内容包，收窄留给引擎侧的容错解析器 `parseImageDialects`——
+ * 那里认不出的旋钮回落默认值、认不出的条目跳过，**planner 不解释结构**。
+ */
+export interface PackImageDialectsSection {
+  dialects: readonly unknown[];
+}
+
+/**
  * 内容包顶层结构（§4）。
  *
  * 分节**全部可选**，三态语义：
@@ -247,6 +261,7 @@ export interface ContentPack {
   bloodlines?: PackBloodlinesSection;
   namePools?: PackNamePoolsSection;
   branding?: PackBrandingSection;
+  imageDialects?: PackImageDialectsSection;
 
   /**
    * 构建器逐节盖章的 hash 清单。

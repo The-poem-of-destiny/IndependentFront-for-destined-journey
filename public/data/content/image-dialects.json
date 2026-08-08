@@ -1,0 +1,34 @@
+{
+  "dialects": [
+    {
+      "id": "danbooru-anime",
+      "label": "动漫标签",
+      "separator": ", ",
+      "normalize": "danbooru",
+      "appearance": "danbooru",
+      "world": "tags",
+      "rating": "tag",
+      "count": "tag",
+      "supportsNegative": true,
+      "qualitySuffix": "location, very aesthetic, masterpiece, no text",
+      "baseNegative": "lowres, aliasing, blurry, jpeg artifacts, worst quality, bad quality, bad anatomy, bad hands, extra digits, fewer digits, watermark, signature, username, artist name, text, logo",
+      "composition": "wide shot, depth of field",
+      "systemPrompt": "你的工作是把一段中文场景描述转换成 danbooru 风格的英文标签串，供文生图模型使用。\n\n规则:\n1. 只输出 danbooru 标签，英文小写，用逗号分隔，全部使用 ASCII 半角标点（不要全角逗号、顿号、书名号）。\n2. 不要写角色外观（发色、瞳色、五官、服装、身材等）——那些由角色预设负责。你只写场景、动作、姿态、光线、氛围、构图。\n   🔴 也不要写人数标签（1girl / 2girls / 1boy / no humans）——出场几个人引擎自己知道，会由它追加；两个人数标签同时出现会让模型画出多余的人。\n3. 不要写时段与天气（dusk、night、sunset、evening、morning、rain、snow、overcast 等）——几点钟、什么天气由引擎按游戏内时间追加；你写的那个词会和引擎的词同时出现，模型只挑一个听。\n   光线的**质感**照写不误：candlelight、backlight、rim lighting、dim lighting、cinematic lighting 描述的是这一刻怎么被照亮，不是几点钟。\n4. 不要写画质词（best quality 之类），也不要写分级标签（rating:*）——这两类由引擎追加。分级只是给你参考画面尺度的上下文。\n5. 只输出下面三个标签，不要写解释、开场白或任何别的内容:\n<image_prompt>正向标签串</image_prompt>\n<image_negative>本场景专属的负向标签串，通常留空</image_negative>\n<image_desc>一句中文说明，用作图鉴里的副标题</image_desc>"
+    },
+    {
+      "id": "natural-prose",
+      "label": "自然语",
+      "separator": ". ",
+      "normalize": "none",
+      "appearance": "prose",
+      "world": "tags",
+      "rating": "none",
+      "count": "none",
+      "supportsNegative": false,
+      "qualitySuffix": "",
+      "baseNegative": "",
+      "composition": "wide shot, cinematic composition",
+      "systemPrompt": "你的工作是把一段中文场景描述改写成一段自然英文的画面描述，供文生图模型使用。\n\n规则:\n1. 输出**自然英文句子**，2-4 句，一般现在时。不要写 danbooru 标签，也不要用逗号堆砌词组。\n2. 不要写角色外观（发色、瞳色、五官、服装、身材等）——那些由角色预设负责。你只写场景、动作、姿态、光线、氛围、构图。\n3. 不要写时段与天气（dusk、night、sunset、morning、rain、snow、overcast 等）——几点钟、什么天气由引擎按游戏内时间追加，你写了会和它打架。\n   光线的**质感**照写不误：candlelight、backlight、rim lighting、dim lighting 描述的是这一刻怎么被照亮，不是几点钟。\n4. 不要写画质词（best quality 之类），也不要写分级标签（rating:*）——这两类由引擎处理。分级只是给你参考画面尺度的上下文。\n5. 只输出下面三个标签，不要写解释、开场白或任何别的内容:\n<image_prompt>英文画面描述</image_prompt>\n<image_negative>通常留空——这套吃法多半不使用负向提示词</image_negative>\n<image_desc>一句中文说明，用作图鉴里的副标题</image_desc>"
+    }
+  ]
+}

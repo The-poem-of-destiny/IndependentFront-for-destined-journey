@@ -128,6 +128,11 @@ export const IMAGE_BAD_RESPONSE_MESSAGE = 'NovelAI 返回了看不懂的内容';
  * - `prompt-agent` 是 ✅ —— 侧链是一次 LLM 调用，重跑常常就好了（§12.2 第一行）
  * - `auth` / `payment` / `bad-request` 是 ❌ —— 同样的请求再发一百次也是同样的结果，
  *   给一个注定失败的按钮只会让人多花一次时间
+ *
+ * 🔴 `workflow` 与 `execution` 在这张表里取**相反**的值 —— 这正是 C12 把它们立成两类
+ *   而不是合并成一个「comfy 失败」的全部理由。工作流被拒（缺 checkpoint / 未知节点 /
+ *   占位符没替换上）是图本身的问题，重试一百次仍是同一个拒绝；跑到一半挂（OOM /
+ *   节点崩溃）换个时机常常就过了。合并成一类的话，总有一半的用户拿到错的按钮。
  */
 export const IMAGE_FAILURE_RETRYABLE = {
   'prompt-agent': true,
@@ -139,4 +144,6 @@ export const IMAGE_FAILURE_RETRYABLE = {
   network: true,
   aborted: true,
   'bad-response': true,
+  workflow: false,
+  execution: true,
 } as const satisfies Record<ImageGenFailureKind, boolean>;

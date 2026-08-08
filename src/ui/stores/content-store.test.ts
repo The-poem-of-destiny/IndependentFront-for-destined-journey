@@ -47,15 +47,16 @@ describe('content-store — 模块级 ready promise（D16 时序契约）', () =
   });
 });
 
-describe('content-store — 注册表（D16 六面同步读取）', () => {
-  it('getContentRegistry 在模块加载后就返回非空骨架（六面键齐）', () => {
+describe('content-store — 注册表（D16 七面同步读取）', () => {
+  it('getContentRegistry 在模块加载后就返回非空骨架（七面键齐）', () => {
     const r = getContentRegistry();
     expect(r).toBeDefined();
-    // 六面键必须在骨架里（值可 undefined，键不能缺）
+    // 七面键必须在骨架里（值可 undefined，键不能缺）
     expect(Object.keys(r).sort()).toEqual([
       'bloodlines',
       'branding',
       'catalog',
+      'imageDialects',
       'locations',
       'markers',
       'namePools',
@@ -70,6 +71,7 @@ describe('content-store — 注册表（D16 六面同步读取）', () => {
       namePools: { data: { given: [] } },
       markers: [],
       branding: { appTitle: 'Test' },
+      imageDialects: { dialects: [] },
     };
     setContentRegistry(next);
     const r = getContentRegistry();
@@ -85,6 +87,7 @@ describe('content-store — 注册表（D16 六面同步读取）', () => {
       namePools: 'filled',
       markers: 'filled',
       branding: 'filled',
+      imageDialects: 'filled',
     });
     seedPlaceholderRegistry();
     const r = getContentRegistry();

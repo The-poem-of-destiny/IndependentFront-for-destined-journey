@@ -33,6 +33,7 @@ const PLACEHOLDER_BODIES: Record<string, unknown> = {
   '/data/content/bloodlines.json': { bloodlines: [{ id: 'bl-placeholder' }] },
   '/data/content/name-pools.json': { given: ['name-placeholder'] },
   '/data/content/branding.json': { appTitle: 'Placeholder Engine' },
+  '/data/content/image-dialects.json': { dialects: [{ id: 'dialect-placeholder' }] },
   '/data/defaults/map-marker-presets.json': [{ id: 'marker-placeholder' }],
 };
 
@@ -71,6 +72,7 @@ function makeRegistryPack(): ContentPack {
     catalog: { data: { pools: ['catalog-from-pack'] } },
     namePools: { data: { given: ['name-from-pack'] } },
     branding: { appTitle: 'Pack Engine' },
+    imageDialects: { dialects: [{ id: 'dialect-from-pack' }] },
   } as ContentPack;
 }
 
@@ -95,11 +97,12 @@ afterEach(async () => {
 });
 
 describe('ensureContentRegistryLoaded —— URL 约定', () => {
-  it('六面齐全，且 markers 走 /data/defaults/（不在 content/ 下）', () => {
+  it('七面齐全，且 markers 走 /data/defaults/（不在 content/ 下）', () => {
     expect(CONTENT_REGISTRY_SOURCES.map((s) => s.face).sort()).toEqual([
       'bloodlines',
       'branding',
       'catalog',
+      'imageDialects',
       'locations',
       'markers',
       'namePools',
@@ -110,13 +113,15 @@ describe('ensureContentRegistryLoaded —— URL 约定', () => {
     expect(byFace.bloodlines).toBe('/data/content/bloodlines.json');
     expect(byFace.namePools).toBe('/data/content/name-pools.json');
     expect(byFace.branding).toBe('/data/content/branding.json');
+    // 🔴 第 7 面（图像 v2 / C4）：缺席不是错误，出图会退到内置兜底方言
+    expect(byFace.imageDialects).toBe('/data/content/image-dialects.json');
     // 🔴 地图标记预设今天就住在 data/defaults/，抽取时不搬家
     expect(byFace.markers).toBe('/data/defaults/map-marker-presets.json');
   });
 });
 
 describe('ensureContentRegistryLoaded —— 逐面加载', () => {
-  it('六面全成功 → 六面都灌上占位值', async () => {
+  it('七面全成功 → 七面都灌上占位值', async () => {
     installFetchMock();
     await ensureContentRegistryLoaded();
     const r = getContentRegistry();
@@ -126,9 +131,10 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
     expect(r.namePools).toEqual({ given: ['name-placeholder'] });
     expect(r.branding).toEqual({ appTitle: 'Placeholder Engine' });
     expect(r.markers).toEqual([{ id: 'marker-placeholder' }]);
+    expect(r.imageDialects).toEqual({ dialects: [{ id: 'dialect-placeholder' }] });
   });
 
-  it('单面 404 → 只有该面保持原值，其余五面照常灌上 + 上报失败', async () => {
+  it('单面 404 → 只有该面保持原值，其余六面照常灌上 + 上报失败', async () => {
     installFetchMock({ '/data/content/locations.json': '404' });
     const c = useContentStore();
     await ensureContentRegistryLoaded();
@@ -154,7 +160,7 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
     );
   });
 
-  it('单面网络异常 → 不影响其余五面（fetch 自身 reject）', async () => {
+  it('单面网络异常 → 不影响其余六面（fetch 自身 reject）', async () => {
     installFetchMock({ '/data/content/branding.json': 'network' });
     const c = useContentStore();
     await ensureContentRegistryLoaded();
@@ -165,7 +171,7 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
     expect(rep?.error).toContain('network down');
   });
 
-  it('六面全 404 → 不抛、骨架仍非 null 且六键齐（应用不崩）', async () => {
+  it('七面全 404 → 不抛、骨架仍非 null 且七键齐（应用不崩）', async () => {
     installFetchMock(
       Object.fromEntries(CONTENT_REGISTRY_SOURCES.map((s) => [s.url, '404'])) as Record<
         string,
@@ -179,6 +185,7 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
       'bloodlines',
       'branding',
       'catalog',
+      'imageDialects',
       'locations',
       'markers',
       'namePools',
@@ -186,12 +193,12 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
     expect(Object.values(r).every((v) => v === undefined)).toBe(true);
   });
 
-  it('memoize：重复调只 fetch 一轮（六面各一次）', async () => {
+  it('memoize：重复调只 fetch 一轮（七面各一次）', async () => {
     const { urls } = installFetchMock();
     await ensureContentRegistryLoaded();
     await ensureContentRegistryLoaded();
     await Promise.all([ensureContentRegistryLoaded(), ensureContentRegistryLoaded()]);
-    // 🔴 只数六面自身的 fetch（loadProjectDefaults 链上 beautifier 预设有独立 fetch，
+    // 🔴 只数七面自身的 fetch（loadProjectDefaults 链上 beautifier 预设有独立 fetch，
     //    不参与注册表「一轮」的语义）
     expect(urls.filter((u) => isRegistryUrl(u))).toHaveLength(CONTENT_REGISTRY_SOURCES.length);
   });
@@ -214,7 +221,7 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
   });
 });
 
-/** 六面注册表 URL（beautifier 预设等非注册表 fetch 不计入「一轮」） */
+/** 七面注册表 URL（beautifier 预设等非注册表 fetch 不计入「一轮」） */
 function isRegistryUrl(u: string): boolean {
   return u.startsWith('/data/content/') || u === '/data/defaults/map-marker-presets.json';
 }
@@ -235,10 +242,11 @@ describe('ensureContentRegistryLoaded —— pack 优先（D20 三态）', () =>
     installFetchMock();
     await ensureContentRegistryLoaded();
     const r = getContentRegistry();
-    // pack 声明的三面（catalog/namePools 取 .data，branding 整节）
+    // pack 声明的四面（catalog/namePools 取 .data，branding/imageDialects 整节）
     expect(r.catalog).toEqual({ pools: ['catalog-from-pack'] });
     expect(r.namePools).toEqual({ given: ['name-from-pack'] });
     expect(r.branding).toEqual({ appTitle: 'Pack Engine' });
+    expect(r.imageDialects).toEqual({ dialects: [{ id: 'dialect-from-pack' }] });
     // pack 没声明的三面 → 占位 fetch 结果
     expect(r.locations).toEqual([{ id: 'loc-placeholder' }]);
     expect(r.bloodlines).toEqual({ bloodlines: [{ id: 'bl-placeholder' }] });

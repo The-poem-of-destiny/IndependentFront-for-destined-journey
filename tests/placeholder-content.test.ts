@@ -7,6 +7,12 @@ import { coerceLocationNodes, getChildren, getNeighbors } from '../src/sillytave
 import { getBloodlineSet, calcBloodlineModifiers } from '../src/sillytavern/bloodlines';
 import { getNamePoolsContent, randomName, randomHairColor } from '../src/sillytavern/random-tables';
 import { resolveBranding, NEUTRAL_BRANDING } from '../src/ui/branding-defaults';
+import { parseImageDialects, FALLBACK_IMAGE_DIALECT } from '../src/sillytavern/image-dialect';
+import {
+  DEFAULT_IMAGE_BASE_NEGATIVE,
+  DEFAULT_IMAGE_COMPOSITION_TAGS,
+  DEFAULT_IMAGE_QUALITY_SUFFIX,
+} from '../src/sillytavern/image-defaults';
 import { setContentRegistry, getContentRegistry } from '../src/ui/stores/content-store';
 
 /**
@@ -37,6 +43,7 @@ const locationsRaw = readJson(join(PLACEHOLDER_CONTENT, 'locations.json'));
 const bloodlinesRaw = readJson(join(PLACEHOLDER_CONTENT, 'bloodlines.json'));
 const namePoolsRaw = readJson(join(PLACEHOLDER_CONTENT, 'name-pools.json'));
 const brandingRaw = readJson(join(PLACEHOLDER_CONTENT, 'branding.json'));
+const imageDialectsRaw = readJson(join(PLACEHOLDER_CONTENT, 'image-dialects.json'));
 const markersRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'map-marker-presets.json'));
 const audioManifestRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'audio-manifest.json'));
 const beautifierRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'beautifier-rules.json')) as {
@@ -48,7 +55,7 @@ const agentConfigRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'agent-config.json'))
   agents: Record<string, Record<string, unknown>>;
 };
 
-describe('占位内容 · 注册表六面能被生产解析器吃下', () => {
+describe('占位内容 · 注册表七面能被生产解析器吃下', () => {
   beforeEach(() => {
     setContentRegistry({
       catalog: catalogRaw,
@@ -57,6 +64,7 @@ describe('占位内容 · 注册表六面能被生产解析器吃下', () => {
       namePools: namePoolsRaw,
       markers: markersRaw,
       branding: brandingRaw,
+      imageDialects: imageDialectsRaw,
     });
   });
 
@@ -151,6 +159,38 @@ describe('占位内容 · 注册表六面能被生产解析器吃下', () => {
     // 🔴 公开仓没有任何图源，工坊也未配置：两者都必须是「未配置」而不是某个地址
     expect((brandingRaw as { mapSources: unknown[] }).mapSources).toEqual([]);
     expect(branding.workshopApiBase).toBe('');
+  });
+
+  it('imageDialects：两条内置方言解析得出，且 danbooru 档 = 图像 v1 的行为（C5）', () => {
+    const dialects = parseImageDialects(getContentRegistry().imageDialects);
+    expect(dialects.map((d) => d.id)).toEqual(['danbooru-anime', 'natural-prose']);
+
+    // 🔴 danbooru 档的三个串必须**逐字节**等于引擎常量：这一面是「零行为变化的纯重构」，
+    //    漂了不会报错，只会让每张图悄悄换一套画质词
+    const [danbooru, prose] = dialects;
+    expect(danbooru.qualitySuffix).toBe(DEFAULT_IMAGE_QUALITY_SUFFIX);
+    expect(danbooru.baseNegative).toBe(DEFAULT_IMAGE_BASE_NEGATIVE);
+    expect(danbooru.composition).toBe(DEFAULT_IMAGE_COMPOSITION_TAGS);
+    // 兜底方言与它同形（唯一的差别是兜底不自带 systemPrompt）
+    expect({ ...danbooru, systemPrompt: '' }).toEqual(FALLBACK_IMAGE_DIALECT);
+
+    // 🔴 systemPrompt 从 agent-config.json 的 image_prompt 逐字节搬（C5）
+    expect(danbooru.systemPrompt).toBe(agentConfigRaw.agents.image_prompt.systemPrompt);
+
+    // prose 档是刻意单薄的占位（真货在私有仓），但**旋钮必须真的不同** ——
+    // 只换 systemPrompt 的方言仍会给 krea2 拼上 danbooru 尾巴（C3 的全部理由）
+    expect(prose.separator).toBe('. ');
+    expect(prose.normalize).toBe('none');
+    expect(prose.appearance).toBe('prose');
+    expect(prose.rating).toBe('none');
+    expect(prose.count).toBe('none');
+    expect(prose.supportsNegative).toBe(false);
+    expect(prose.qualitySuffix).toBe('');
+    expect(prose.baseNegative).toBe('');
+    // 三个输出标签是引擎协议，换方言不换协议（抽取器只认这三个）
+    for (const tag of ['<image_prompt>', '<image_negative>', '<image_desc>']) {
+      expect(prose.systemPrompt).toContain(tag);
+    }
   });
 
   it('markers / audio manifest：空数组（面板空态，D12 / D23）', () => {
