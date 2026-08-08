@@ -29,6 +29,16 @@
  */
 
 import { parseNaiZip, type NaiRequestBody } from '@engine/image-providers/novelai';
+import {
+  BUILTIN_COMFY_WORKFLOW,
+  comfyFail,
+  parseComfyHistory,
+  parseComfyQueueResponse,
+  parseComfyWorkflow,
+  substituteWorkflow,
+  type ComfyImageRef,
+  type ComfySubstitutionValues,
+} from '@engine/image-providers/comfyui';
 import { IMAGE_BAD_RESPONSE_MESSAGE, IMAGE_FAILURE_RETRYABLE } from '@engine/image-defaults';
 import type { ImageGenFailure, ImageGenFailureKind } from '@engine/types-image';
 
@@ -122,7 +132,8 @@ const NAI_IMAGE_PATH = '/ai/generate-image';
  * 的调用方开关。尤其禁止 `credentials` —— 打的是同源 BFF，Cookie 一律不参与。
  */
 export interface ImageFetchInit {
-  method?: 'POST';
+  /** ComfyUI 的 `/history` 与 `/view` 是 GET（C10），NAI 与 `/prompt` 是 POST */
+  method?: 'POST' | 'GET';
   headers?: Record<string, string>;
   body?: string;
   signal?: AbortSignal;
@@ -500,4 +511,322 @@ export async function generateNaiImage(opts: NaiGenerateOptions): Promise<NaiGen
 function describeError(err: unknown): string {
   if (err instanceof Error) return err.message || err.name;
   return String(err);
+}
+
+// ═══════════════════════════════════════════════════════════
+// ComfyUI（图像 v2 / C10-C13）
+// ═══════════════════════════════════════════════════════════
+//
+// 与 NAI 那半边的三处**结构性**不同，别按 NAI 的直觉改这一段:
+//
+// 1. **三次请求不是一次**: 排队（POST /prompt）→ 轮询（GET /history/{id}）→ 取字节
+//    （GET /view）。对外仍是**单个 Promise**（C13）——「排到第几了」这种进度
+//    在 UI 上已经由 queued/generating + 「已用 N 秒」表达了，多一层回调只会多一处状态。
+// 2. **`/prompt` 与 `/history` 回的是 JSON，只有 `/view` 回字节**。所以那两条上
+//    `text()` 是**正当**的读法（本模块自己 `JSON.parse`），而 `/view` 上**只准
+//    `arrayBuffer()`** —— 与 NAI 那条同一条纪律，理由也一样（按文本读会在非法 UTF-8
+//    字节处塞进 U+FFFD，把 PNG 悄悄读坏、不报错）。
+// 3. **超时是 600 秒不是 120 秒**（C13）: 本地出图慢得多，2 分钟硬闸会把一张仍在渲染的图
+//    记成失败，然后它又悄悄落在用户的输出目录里 —— 最难解释的那种「失败」。
+
+/** 同源 BFF 路由（`server/routes/image.ts` 的三条 `forward()`） */
+export const COMFY_BFF_PROMPT = '/api/image/comfy/prompt';
+export const COMFY_BFF_HISTORY = '/api/image/comfy/history';
+export const COMFY_BFF_VIEW = '/api/image/comfy/view';
+
+/** ComfyUI 默认地址（本机默认端口）。地址住 provider 袋，不进 API 池（C16） */
+export const COMFY_DEFAULT_BASE_URL = 'http://127.0.0.1:8188';
+
+/**
+ * 整条链（排队 + 轮询 + 取字节）的总时限 —— 10 分钟（C13）。
+ *
+ * 🔴 **不是** NAI 那个 120 秒。本地卡、大图、上采样链随便就跑过 2 分钟；用 NAI 的闸门
+ * 会把一张仍在渲染的图记成失败，而它随后照样落进输出目录 —— 用户看到的是「失败了，
+ * 但文件夹里有」。宽到「比最坏的一次本地生成还长」，窄到「不会永远转下去」。
+ */
+export const COMFY_REQUEST_TIMEOUT_MS = 600_000;
+
+/** 轮询间隔（C13）。ComfyUI 是本机服务，1.5 秒既不吵也不迟钝 */
+export const COMFY_POLL_INTERVAL_MS = 1_500;
+
+/**
+ * ComfyUI 地址归一化。
+ *
+ * 刻意**比 {@link resolveImageBaseUrl} 简单**: NAI 那格有「填成文本域会收到一句指向
+ * 模型名的错」这种陷阱，所以那边要认域名、要剃路径。ComfyUI 没有这类陷阱 ——
+ * 地址填错的败法是**诚实的** connection-refused（C16）。这里只做三件不改变「打给谁」
+ * 的事: 去空白、补 scheme、剃尾斜杠。
+ *
+ * 🔴 补的是 **http** 不是 https: 默认目标是 `127.0.0.1:8188`，ComfyUI 默认不开 TLS。
+ *    补 https 会让「填了 localhost:8188」变成一次必然失败的握手。
+ */
+export function resolveComfyBaseUrl(
+  raw: string | undefined,
+): { ok: true; base: string } | { ok: false; message: string; detail: string } {
+  const trimmed = (raw ?? '').trim();
+  if (!trimmed) return { ok: true, base: COMFY_DEFAULT_BASE_URL };
+
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+
+  let url: URL;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    return {
+      ok: false,
+      message: `ComfyUI 地址填错了，去「图像生成 → 出图」里改成 ${COMFY_DEFAULT_BASE_URL} 这样的形式`,
+      detail: `无法解析的 ComfyUI 地址: ${trimmed}`,
+    };
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return {
+      ok: false,
+      message: 'ComfyUI 地址只能是 http/https',
+      detail: `ComfyUI 地址的协议是 ${url.protocol}`,
+    };
+  }
+
+  return { ok: true, base: withScheme.replace(/\/+$/, '') };
+}
+
+export interface ComfyGenerateOptions {
+  /** ComfyUI 地址（`imageComfy.baseUrl`，C16）。缺省 {@link COMFY_DEFAULT_BASE_URL} */
+  baseUrl?: string;
+  /** 用户粘贴的 API-format 工作流；缺省用 `BUILTIN_COMFY_WORKFLOW`（C11） */
+  workflowJson?: string;
+  /** 替换进图里的值（`%positive%` `%seed%` …） */
+  values: ComfySubstitutionValues;
+  /**
+   * `values.seed` 缺省时用它。
+   *
+   * 🔴 引擎那层（`comfyui.ts`）**不许**产随机（快照复现），所以这个数只能从外面进来。
+   * 本层缺省用时钟——网络层本来就读时钟（超时闸）、也本来就不可复现，是唯一合适的兜底位。
+   * 正经调用方（T6 的 seams）应当**显式**给一个与记录一起落库的 seed。
+   */
+  seedFallback?: number;
+  /** ComfyUI 用它把执行进度关联到某个客户端；不给就不发 */
+  clientId?: string;
+  /** 调用方主动取消（切存档 / 离开页面 / 用户点了取消） */
+  signal?: AbortSignal;
+  /** 覆盖 {@link COMFY_REQUEST_TIMEOUT_MS} */
+  timeoutMs?: number;
+  /** 覆盖 {@link COMFY_POLL_INTERVAL_MS}。测试传 0 让轮询不真的等 */
+  pollIntervalMs?: number;
+}
+
+/** 与 NAI 同形状的成功产物 —— 上层（seams / store）对两家 provider 一视同仁 */
+export type ImageGenerateResult = NaiGenerateResult;
+
+/**
+ * 可被 signal 提前唤醒的 sleep（取消时不必干等满一个轮询间隔）。
+ *
+ * 🔴 `ms <= 0` 时**照样走 setTimeout**，不许图省事 `return Promise.resolve()`:
+ * 那样轮询循环就只在**微任务**里打转，而 `setTimeout` 是宏任务 —— 超时闸的定时器
+ * 永远排不上队，于是「轮询间隔设成 0」等于把总超时一起关掉，循环无限跑下去。
+ */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, Math.max(0, ms));
+    function done(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    }
+    if (signal) {
+      if (signal.aborted) done();
+      else signal.addEventListener('abort', done);
+    }
+  });
+}
+
+/** 读一条 JSON 响应（`/prompt` 与 `/history` 专用；**绝不用在 `/view` 上**） */
+async function readJsonBody(res: ImageResponseLike): Promise<unknown> {
+  if (typeof res.text !== 'function') return undefined;
+  let raw: string;
+  try {
+    raw = await res.text();
+  } catch {
+    return undefined;
+  }
+  if (!raw.trim()) return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // 不是 JSON（HTML 拦截页 / 纯文本）—— 交给上层按状态码分类，这里不编内容
+    return undefined;
+  }
+}
+
+/**
+ * 经同源 BFF 让本地 ComfyUI 出一张图。**判别联合，永不抛穿**（同 {@link generateNaiImage}）。
+ *
+ * 流程（C13）: 归一化地址 → 解析/取内置工作流 → 值级替换 → `POST /prompt` →
+ * {@link parseComfyQueueResponse} → 每 ~1.5s 轮询 `/history/{id}` → `GET /view` 逐张取字节。
+ *
+ * 🔴 整条链共用**一个**总时限与**一个** signal: 三段各自计时的话，一张卡在 `/history` 上的图
+ *    会永远续命下去（每一段都没超时，合起来无限长）。
+ * 🔴 `/view` 只读 `arrayBuffer()`；content-type 只是线索、进不了判据
+ *    （v1 那次「content-type 撒谎、把已付费的图扔掉」的教训，见 `parseNaiZip` 的注释）。
+ */
+export async function generateComfyImage(opts: ComfyGenerateOptions): Promise<ImageGenerateResult> {
+  const impl = resolveFetch();
+  if (!impl) return comfyFail('network', '当前环境没有可用的 fetch');
+  if (opts.signal?.aborted) return comfyFail('aborted');
+
+  const resolved = resolveComfyBaseUrl(opts.baseUrl);
+  if (!resolved.ok) return comfyFail('bad-request', resolved.detail, resolved.message);
+  const base = resolved.base;
+
+  // 工作流: 用户粘贴的优先，没有就用内置最小图（C11）
+  let graph = BUILTIN_COMFY_WORKFLOW;
+  if (opts.workflowJson && opts.workflowJson.trim()) {
+    const parsed = parseComfyWorkflow(opts.workflowJson);
+    if (!parsed.ok) return parsed;
+    graph = parsed.graph;
+  }
+
+  // 🔴 `substituteWorkflow` 不产随机（那层要可复现），兜底的那个数在这里给
+  const seedFallback = opts.seedFallback ?? Date.now() % 0x7fffffff;
+  const prompt = substituteWorkflow(graph, opts.values, seedFallback);
+
+  const timeoutMs = opts.timeoutMs ?? COMFY_REQUEST_TIMEOUT_MS;
+  const pollIntervalMs = opts.pollIntervalMs ?? COMFY_POLL_INTERVAL_MS;
+  const guard = armTimeout(timeoutMs, opts.signal);
+
+  const abortFailure = (): ImageGenFailure | undefined => {
+    if (guard.timedOut())
+      return comfyFail('network', `等待 ComfyUI 超过 ${Math.round(timeoutMs / 1000)} 秒`);
+    if (opts.signal?.aborted) return comfyFail('aborted');
+    return undefined;
+  };
+
+  const jsonHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    // `forward()` 从这个 header 取上游 base（SSRF 名单在那边，本层不重复判）
+    'X-Target-Base-URL': base,
+  };
+
+  try {
+    // ── 1. 排队 ──
+    let queueRes: ImageResponseLike;
+    try {
+      queueRes = await impl(COMFY_BFF_PROMPT, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          prompt,
+          ...(opts.clientId ? { client_id: opts.clientId } : {}),
+        }),
+        ...(guard.signal ? { signal: guard.signal } : {}),
+      });
+    } catch (err) {
+      return abortFailure() ?? comfyFail('network', describeError(err));
+    }
+
+    // 🔴 200 也要读体: `node_errors` 就藏在那里（C12）
+    const queued = parseComfyQueueResponse(
+      typeof queueRes?.status === 'number' ? queueRes.status : 0,
+      await readJsonBody(queueRes),
+    );
+    if (!queued.ok) return queued;
+
+    // ── 2. 轮询 ──
+    const historyUrl = `${COMFY_BFF_HISTORY}/${encodeURIComponent(queued.promptId)}`;
+    let images: ComfyImageRef[] | undefined;
+
+    for (;;) {
+      const interrupted = abortFailure();
+      if (interrupted) return interrupted;
+
+      let res: ImageResponseLike;
+      try {
+        res = await impl(historyUrl, {
+          method: 'GET',
+          headers: jsonHeaders,
+          ...(guard.signal ? { signal: guard.signal } : {}),
+        });
+      } catch (err) {
+        return abortFailure() ?? comfyFail('network', describeError(err));
+      }
+
+      if (!res?.ok) {
+        const status = typeof res?.status === 'number' ? res.status : 0;
+        const detail = `轮询 /history 得到 HTTP ${status}`;
+        if (status >= 500) return comfyFail('upstream', detail);
+        return comfyFail('bad-request', detail);
+      }
+
+      const state = parseComfyHistory(await readJsonBody(res), queued.promptId);
+      if (state.state === 'failed') return state.failure;
+      if (state.state === 'done') {
+        images = state.images;
+        break;
+      }
+
+      await sleep(pollIntervalMs, guard.signal);
+    }
+
+    // ── 3. 取字节 ──
+    const bytes: Uint8Array[] = [];
+    let contentType = '';
+
+    for (const ref of images) {
+      const interrupted = abortFailure();
+      if (interrupted) return interrupted;
+
+      const query = new URLSearchParams({
+        filename: ref.filename,
+        subfolder: ref.subfolder,
+        type: ref.type,
+      });
+
+      let res: ImageResponseLike;
+      try {
+        res = await impl(`${COMFY_BFF_VIEW}?${query.toString()}`, {
+          method: 'GET',
+          headers: { Accept: 'image/*', 'X-Target-Base-URL': base },
+          ...(guard.signal ? { signal: guard.signal } : {}),
+        });
+      } catch (err) {
+        return abortFailure() ?? comfyFail('network', describeError(err));
+      }
+
+      if (!res || typeof res.arrayBuffer !== 'function') {
+        return comfyFail('bad-response', `/view 的响应对象不可读（${ref.filename}）`);
+      }
+      if (!res.ok) {
+        const status = typeof res.status === 'number' ? res.status : 0;
+        return comfyFail('bad-response', `/view 得到 HTTP ${status}（${ref.filename}）`);
+      }
+
+      let buf: ArrayBuffer;
+      try {
+        // 🔴 全流程唯一读**字节**的地方，且必须是 arrayBuffer（见本节头注释第 2 条）
+        buf = await res.arrayBuffer();
+      } catch (err) {
+        return (
+          abortFailure() ??
+          comfyFail('bad-response', `/view 字节读取失败（${ref.filename}）: ${describeError(err)}`)
+        );
+      }
+
+      const data = new Uint8Array(buf);
+      if (data.length === 0) {
+        return comfyFail('bad-response', `/view 返回了 0 字节（${ref.filename}）`);
+      }
+
+      if (!contentType) contentType = res.headers?.get('content-type') ?? '';
+      bytes.push(data);
+    }
+
+    if (bytes.length === 0) {
+      return comfyFail('bad-response', '执行完成但一张图都没取到');
+    }
+
+    return { ok: true, images: bytes, contentType };
+  } finally {
+    guard.dispose();
+  }
 }

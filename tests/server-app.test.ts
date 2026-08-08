@@ -121,3 +121,102 @@ describe('BFF image passthrough', () => {
     }
   });
 });
+
+describe('BFF ComfyUI passthrough', () => {
+  // 🔴 图像 v2 C10 的三条透传。这里最要紧的一条是 **query 不许丢**：
+  // `forward(c, suffix)` 拼的上游 URL 就是 `X-Target-Base-URL + suffix`，
+  // 它**根本不看请求自己的查询串** —— 路由不自己把 query 拼进 suffix 的话，
+  // `/view` 会打成一个没有 filename 的裸路径，ComfyUI 回 400，而报错里一个字
+  // 都不会提到「参数丢了」。
+  //
+  // 第二条是 `/view` 的字节原样过（PNG 里全是非法 UTF-8 字节，读坏了立刻现形）。
+
+  /** 起一台把「我看到的 URL」回显在头里的假上游 */
+  async function startEcho(body: Buffer, contentType: string) {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on('end', () => {
+        response.writeHead(200, {
+          'Content-Type': contentType,
+          'X-Seen-Url': String(request.url ?? ''),
+          'X-Seen-Method': String(request.method ?? ''),
+        });
+        response.end(body);
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      upstream.once('error', reject);
+      upstream.listen(0, '127.0.0.1', resolve);
+    });
+    const address = upstream.address() as AddressInfo;
+    return {
+      base: `http://127.0.0.1:${address.port}`,
+      close: () =>
+        new Promise<void>((resolve, reject) => {
+          upstream.close((error) => (error ? reject(error) : resolve()));
+        }),
+    };
+  }
+
+  it('POST /comfy/prompt 打到上游 /prompt，请求体原样过', async () => {
+    const echo = await startEcho(Buffer.from('{"prompt_id":"p1"}'), 'application/json');
+    try {
+      const response = await buildHonoApp().request('/api/image/comfy/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Target-Base-URL': echo.base },
+        body: JSON.stringify({ prompt: { '3': { class_type: 'KSampler' } } }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('x-seen-url')).toBe('/prompt');
+      expect(response.headers.get('x-seen-method')).toBe('POST');
+    } finally {
+      await echo.close();
+    }
+  });
+
+  it('GET /comfy/history/:id 把 id 插进路径并转义', async () => {
+    const echo = await startEcho(Buffer.from('{}'), 'application/json');
+    try {
+      const app = buildHonoApp();
+
+      const plain = await app.request(`/api/image/comfy/history/abc-123`, {
+        headers: { 'X-Target-Base-URL': echo.base },
+      });
+      expect(plain.headers.get('x-seen-url')).toBe('/history/abc-123');
+      expect(plain.headers.get('x-seen-method')).toBe('GET');
+
+      // 上游的 prompt_id 是 uuid，但转义是白拿的一道保险
+      const weird = await app.request(`/api/image/comfy/history/${encodeURIComponent('a b/c')}`, {
+        headers: { 'X-Target-Base-URL': echo.base },
+      });
+      expect(weird.headers.get('x-seen-url')).toBe('/history/a%20b%2Fc');
+    } finally {
+      await echo.close();
+    }
+  });
+
+  it('🔴 GET /comfy/view 把查询串一起带上，PNG 字节逐字节原样过', async () => {
+    // 魔数真、其余是刻意挑的非法 UTF-8 字节：被按文本读过一次就会现形
+    const png = Buffer.from('89504e470d0a1a0a80fffec0c1eda0000102efbf', 'hex');
+    const echo = await startEcho(png, 'image/png');
+    try {
+      const response = await buildHonoApp().request(
+        '/api/image/comfy/view?filename=a%20b%26c.png&subfolder=sub&type=output',
+        { headers: { 'X-Target-Base-URL': echo.base } },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('image/png');
+      // query 丢了的话这里会是光秃秃的 `/view`
+      expect(response.headers.get('x-seen-url')).toBe(
+        '/view?filename=a%20b%26c.png&subfolder=sub&type=output',
+      );
+
+      const received = Buffer.from(await response.arrayBuffer());
+      expect(received.equals(png)).toBe(true);
+    } finally {
+      await echo.close();
+    }
+  });
+});

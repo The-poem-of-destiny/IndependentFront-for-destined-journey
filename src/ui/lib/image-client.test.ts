@@ -14,7 +14,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { zipSync, strToU8 } from 'fflate';
 import type { NaiRequestBody } from '@engine/image-providers/novelai';
+import type { ComfySubstitutionValues } from '@engine/image-providers/comfyui';
 import {
+  COMFY_BFF_HISTORY,
+  COMFY_BFF_PROMPT,
+  COMFY_BFF_VIEW,
+  COMFY_DEFAULT_BASE_URL,
+  generateComfyImage,
+  resolveComfyBaseUrl,
   IMAGE_BFF_ENDPOINT,
   NAI_IMAGE_API_BASE,
   NAI_ZIP_ACCEPT,
@@ -620,5 +627,420 @@ describe('classifyImageHttpStatus', () => {
     for (const status of [400, 401, 402, 429, 500]) {
       expect(classifyImageHttpStatus(status).ok).toBe(false);
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// ComfyUI（图像 v2 / T3）
+// ═══════════════════════════════════════════════════════════
+//
+// 🔴 这一组里最要紧的两条:
+// 1. **200 + node_errors 一次轮询都不许发生**（C12）—— 那条响应里 `prompt_id` 是有的，
+//    把它当成功会去轮询一个永远不出现的 id，600 秒后报成超时，真因一个字都不会出现。
+// 2. **`/view` 只读 `arrayBuffer()`** —— PNG 按文本读会被 U+FFFD 悄悄改坏（同 §12.1 第 2 条）。
+
+describe('generateComfyImage', () => {
+  interface ComfyCall {
+    url: string;
+    init?: ImageFetchInit;
+  }
+
+  interface JsonStub {
+    status?: number;
+    body?: unknown;
+    /** 让这一发 fetch 直接抛（模拟 connection refused） */
+    throws?: boolean;
+  }
+
+  interface ViewStub {
+    status?: number;
+    bytes?: Uint8Array;
+    contentType?: string;
+  }
+
+  interface ComfyStubOpts {
+    queue?: JsonStub;
+    /** 按顺序取；用完之后重复最后一条（于是「一直 pending」只要写一条） */
+    history?: JsonStub[];
+    view?: ViewStub;
+    /** 每次 history 请求时调一下（测试用它在轮询中途取消） */
+    onHistory?: (index: number) => void;
+  }
+
+  /** 一张「PNG」—— 魔数真，其余是非法 UTF-8 字节（被按文本读过就会现形） */
+  function comfyPng(): Uint8Array {
+    return hexBytes('89504e470d0a1a0a 80fffec0c1eda0 000102efbf');
+  }
+
+  function jsonResponse(stub: JsonStub): ImageResponseLike {
+    const status = stub.status ?? 200;
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: () => 'application/json' },
+      arrayBuffer: async () => {
+        throw new Error('JSON 路径不该读字节');
+      },
+      text: async () => JSON.stringify(stub.body ?? {}),
+    };
+  }
+
+  function viewResponse(stub: ViewStub) {
+    const status = stub.status ?? 200;
+    const bytes = stub.bytes ?? comfyPng();
+    const arrayBuffer = vi.fn(async () => bytes.slice().buffer as ArrayBuffer);
+    const text = vi.fn(async () => 'should never be read on /view');
+    const res: ImageResponseLike = {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: {
+        get: (n) => (n.toLowerCase() === 'content-type' ? (stub.contentType ?? 'image/png') : null),
+      },
+      arrayBuffer,
+      text,
+    };
+    return { res, arrayBuffer, text };
+  }
+
+  function doneHistory(
+    images: Array<{ filename: string; subfolder?: string; type?: string }> = [
+      { filename: 'fated_poem_00001_.png' },
+    ],
+  ) {
+    return {
+      p1: {
+        status: { status_str: 'success', completed: true, messages: [] },
+        outputs: {
+          '9': {
+            images: images.map((i) => ({
+              filename: i.filename,
+              subfolder: i.subfolder ?? '',
+              type: i.type ?? 'output',
+            })),
+          },
+        },
+      },
+    };
+  }
+
+  /** 按 URL 分流的 fetch mock。返回记录下来的调用 + `/view` 的两个 spy */
+  function stubComfy(opts: ComfyStubOpts = {}) {
+    const calls: ComfyCall[] = [];
+    const view = viewResponse(opts.view ?? {});
+    let historyIndex = 0;
+
+    const impl: ImageFetchLike = async (url, init) => {
+      calls.push({ url, init });
+
+      if (url.startsWith(COMFY_BFF_PROMPT)) {
+        const stub = opts.queue ?? { body: { prompt_id: 'p1', number: 1 } };
+        if (stub.throws) throw new Error('fetch failed: ECONNREFUSED');
+        return jsonResponse(stub);
+      }
+
+      if (url.startsWith(COMFY_BFF_HISTORY)) {
+        const seq = opts.history ?? [{ body: doneHistory() }];
+        const stub = seq[Math.min(historyIndex, seq.length - 1)];
+        opts.onHistory?.(historyIndex);
+        historyIndex += 1;
+        if (stub.throws) throw new Error('fetch failed');
+        return jsonResponse(stub);
+      }
+
+      return view.res;
+    };
+
+    setImageFetch(impl);
+    return { calls, view };
+  }
+
+  function comfyValues(overrides: Partial<ComfySubstitutionValues> = {}): ComfySubstitutionValues {
+    return {
+      positive: 'tavern interior, 1girl',
+      negative: 'lowres',
+      width: 1216,
+      height: 832,
+      steps: 23,
+      scale: 4.5,
+      seed: 777,
+      ...overrides,
+    };
+  }
+
+  /** 轮询间隔 0（仍走 setTimeout，见 `sleep` 的注释），总时限够宽 */
+  const fast = { pollIntervalMs: 0, timeoutMs: 5_000 } as const;
+
+  const urlsOf = (calls: ComfyCall[]): string[] => calls.map((c) => c.url);
+
+  it('happy path：排队 → 两次 pending 轮询 → done → 取字节', async () => {
+    const { calls, view } = stubComfy({
+      history: [{ body: {} }, { body: {} }, { body: doneHistory() }],
+    });
+
+    const result = await generateComfyImage({ values: comfyValues(), ...fast });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.images).toHaveLength(1);
+    expect(Array.from(result.images[0])).toEqual(Array.from(comfyPng()));
+    expect(result.contentType).toBe('image/png');
+
+    expect(urlsOf(calls).filter((u) => u.startsWith(COMFY_BFF_PROMPT))).toHaveLength(1);
+    expect(urlsOf(calls).filter((u) => u.startsWith(COMFY_BFF_HISTORY))).toHaveLength(3);
+    expect(urlsOf(calls).filter((u) => u.startsWith(COMFY_BFF_VIEW))).toHaveLength(1);
+
+    // 🔴 /view 只读字节，一次都不读文本
+    expect(view.arrayBuffer).toHaveBeenCalledTimes(1);
+    expect(view.text).not.toHaveBeenCalled();
+  });
+
+  it('🔴 200 + node_errors → workflow 失败，且一次轮询都不发生', async () => {
+    const { calls } = stubComfy({
+      queue: {
+        status: 200,
+        body: {
+          prompt_id: 'p1',
+          node_errors: {
+            '4': { errors: [{ message: 'Value not in list', details: 'ckpt_name' }] },
+          },
+        },
+      },
+    });
+
+    const result = await generateComfyImage({ values: comfyValues(), ...fast });
+
+    expect(result).toMatchObject({ ok: false, kind: 'workflow', retryable: false });
+    if (result.ok) return;
+    expect(result.message).toContain('节点 4');
+    expect(urlsOf(calls).some((u) => u.startsWith(COMFY_BFF_HISTORY))).toBe(false);
+    expect(urlsOf(calls).some((u) => u.startsWith(COMFY_BFF_VIEW))).toBe(false);
+  });
+
+  it('history 报 execution 错 → execution 失败（可重试），不去取字节', async () => {
+    const { calls } = stubComfy({
+      history: [
+        {
+          body: {
+            p1: {
+              status: {
+                status_str: 'error',
+                completed: false,
+                messages: [
+                  [
+                    'execution_error',
+                    {
+                      node_id: '3',
+                      node_type: 'KSampler',
+                      exception_message: 'CUDA out of memory',
+                    },
+                  ],
+                ],
+              },
+              outputs: {},
+            },
+          },
+        },
+      ],
+    });
+
+    const result = await generateComfyImage({ values: comfyValues(), ...fast });
+
+    expect(result).toMatchObject({ ok: false, kind: 'execution', retryable: true });
+    expect(urlsOf(calls).some((u) => u.startsWith(COMFY_BFF_VIEW))).toBe(false);
+  });
+
+  it('总时限到了 → network 失败，detail 里报等了多少秒', async () => {
+    stubComfy({ history: [{ body: {} }] }); // 永远 pending
+
+    const result = await generateComfyImage({
+      values: comfyValues(),
+      pollIntervalMs: 0,
+      timeoutMs: 30,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'network' });
+    if (result.ok) return;
+    expect(result.message).toContain('ComfyUI');
+    expect(result.detail).toContain('秒');
+  });
+
+  it('轮询途中用户取消 → aborted，且立刻停手', async () => {
+    const controller = new AbortController();
+    const { calls } = stubComfy({
+      history: [{ body: {} }],
+      onHistory: (i) => {
+        if (i === 0) controller.abort();
+      },
+    });
+
+    const result = await generateComfyImage({
+      values: comfyValues(),
+      signal: controller.signal,
+      ...fast,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'aborted' });
+    expect(urlsOf(calls).filter((u) => u.startsWith(COMFY_BFF_HISTORY))).toHaveLength(1);
+  });
+
+  it('调用前就已经取消 → aborted，一次请求都不发', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const { calls } = stubComfy();
+
+    const result = await generateComfyImage({
+      values: comfyValues(),
+      signal: controller.signal,
+      ...fast,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'aborted' });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('/view 返回 0 字节 → bad-response（不是「成功但空图」）', async () => {
+    stubComfy({ view: { bytes: new Uint8Array(0) } });
+    const result = await generateComfyImage({ values: comfyValues(), ...fast });
+    expect(result).toMatchObject({ ok: false, kind: 'bad-response' });
+  });
+
+  it('/view 非 2xx → bad-response，detail 点名是哪个文件', async () => {
+    stubComfy({ view: { status: 404 } });
+    const result = await generateComfyImage({ values: comfyValues(), ...fast });
+    expect(result).toMatchObject({ ok: false, kind: 'bad-response' });
+    if (result.ok) return;
+    expect(result.detail).toContain('fated_poem_00001_.png');
+  });
+
+  it('工作流 JSON 解不开 → workflow 失败，一次请求都不发', async () => {
+    const { calls } = stubComfy();
+    const result = await generateComfyImage({
+      values: comfyValues(),
+      workflowJson: '{"3": ',
+      ...fast,
+    });
+    expect(result).toMatchObject({ ok: false, kind: 'workflow', retryable: false });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('没给工作流就用内置 SDXL 图，占位符已经替换成真值', async () => {
+    const { calls } = stubComfy();
+
+    await generateComfyImage({ values: comfyValues({ seed: 777 }), ...fast });
+
+    const queued = calls.find((c) => c.url.startsWith(COMFY_BFF_PROMPT));
+    expect(queued).toBeDefined();
+    const body = JSON.parse(queued?.init?.body ?? '{}') as {
+      prompt: Record<string, { class_type: string; inputs: Record<string, unknown> }>;
+    };
+    expect(body.prompt['4'].inputs.ckpt_name).toBe('sd_xl_base_1.0.safetensors');
+    expect(body.prompt['3'].inputs.seed).toBe(777);
+    expect(body.prompt['3'].inputs.steps).toBe(23);
+    expect(body.prompt['6'].inputs.text).toBe('tavern interior, 1girl');
+    // 一个占位符都不许漏进真实请求
+    expect(JSON.stringify(body.prompt)).not.toMatch(/%[A-Za-z_][A-Za-z0-9_]*%/);
+  });
+
+  it('提示词里的引号与反斜杠原样进请求体（值级替换，C11）', async () => {
+    const nasty = 'a "quoted" girl, back\\slash';
+    const { calls } = stubComfy();
+
+    await generateComfyImage({ values: comfyValues({ positive: nasty }), ...fast });
+
+    const queued = calls.find((c) => c.url.startsWith(COMFY_BFF_PROMPT));
+    const body = JSON.parse(queued?.init?.body ?? '{}') as {
+      prompt: Record<string, { inputs: Record<string, unknown> }>;
+    };
+    expect(body.prompt['6'].inputs.text).toBe(nasty);
+  });
+
+  it('三条路由都带 X-Target-Base-URL，地址补了 http:// 剃了尾斜杠，方法各自正确', async () => {
+    const { calls } = stubComfy();
+
+    await generateComfyImage({ values: comfyValues(), baseUrl: '192.168.1.9:8188///', ...fast });
+
+    for (const call of calls) {
+      expect(call.init?.headers?.['X-Target-Base-URL']).toBe('http://192.168.1.9:8188');
+    }
+    expect(calls.find((c) => c.url.startsWith(COMFY_BFF_PROMPT))?.init?.method).toBe('POST');
+    expect(calls.find((c) => c.url.startsWith(COMFY_BFF_HISTORY))?.init?.method).toBe('GET');
+    expect(calls.find((c) => c.url.startsWith(COMFY_BFF_VIEW))?.init?.method).toBe('GET');
+  });
+
+  it('/view 的查询串带齐 filename / subfolder / type 并转义', async () => {
+    const { calls } = stubComfy({
+      history: [
+        { body: doneHistory([{ filename: 'a b&c.png', subfolder: 'sub dir', type: 'temp' }]) },
+      ],
+    });
+
+    await generateComfyImage({ values: comfyValues(), ...fast });
+
+    const viewUrl = calls.find((c) => c.url.startsWith(COMFY_BFF_VIEW))?.url ?? '';
+    const query = new URLSearchParams(viewUrl.slice(viewUrl.indexOf('?') + 1));
+    expect(query.get('filename')).toBe('a b&c.png');
+    expect(query.get('subfolder')).toBe('sub dir');
+    expect(query.get('type')).toBe('temp');
+  });
+
+  it('多张图按 outputs 顺序全取回来', async () => {
+    stubComfy({
+      history: [{ body: doneHistory([{ filename: 'a.png' }, { filename: 'b.png' }]) }],
+    });
+
+    const result = await generateComfyImage({ values: comfyValues(), ...fast });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.images).toHaveLength(2);
+  });
+
+  it('排队请求连不上 → network 失败，说的是 ComfyUI 不是 NovelAI', async () => {
+    stubComfy({ queue: { throws: true } });
+
+    const result = await generateComfyImage({ values: comfyValues(), ...fast });
+
+    expect(result).toMatchObject({ ok: false, kind: 'network' });
+    if (result.ok) return;
+    expect(result.message).toContain('ComfyUI');
+    expect(result.message).not.toContain('NovelAI');
+  });
+
+  it('轮询拿到 5xx → upstream；拿到 4xx → bad-request', async () => {
+    stubComfy({ history: [{ status: 503 }] });
+    expect(await generateComfyImage({ values: comfyValues(), ...fast })).toMatchObject({
+      ok: false,
+      kind: 'upstream',
+    });
+
+    stubComfy({ history: [{ status: 404 }] });
+    expect(await generateComfyImage({ values: comfyValues(), ...fast })).toMatchObject({
+      ok: false,
+      kind: 'bad-request',
+    });
+  });
+});
+
+describe('resolveComfyBaseUrl', () => {
+  it('空值 → 本机默认地址', () => {
+    expect(resolveComfyBaseUrl(undefined)).toEqual({ ok: true, base: COMFY_DEFAULT_BASE_URL });
+    expect(resolveComfyBaseUrl('  ')).toEqual({ ok: true, base: COMFY_DEFAULT_BASE_URL });
+  });
+
+  it('🔴 漏协议补的是 http 不是 https —— ComfyUI 默认不开 TLS', () => {
+    expect(resolveComfyBaseUrl('127.0.0.1:8188')).toEqual({
+      ok: true,
+      base: 'http://127.0.0.1:8188',
+    });
+  });
+
+  it('显式 https 原样保留（自建反代场景）', () => {
+    expect(resolveComfyBaseUrl('https://comfy.example.com/')).toEqual({
+      ok: true,
+      base: 'https://comfy.example.com',
+    });
+  });
+
+  it('协议不是 http/https → 就地报错，一次请求都不发', () => {
+    expect(resolveComfyBaseUrl('ftp://box')).toMatchObject({ ok: false });
   });
 });

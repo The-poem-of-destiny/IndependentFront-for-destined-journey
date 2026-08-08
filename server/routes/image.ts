@@ -22,4 +22,28 @@ const app = new Hono();
  */
 app.post('/generate', (c) => forward(c, '/ai/generate-image'));
 
+/**
+ * ── ComfyUI 三条透传（图像 v2 / C10）──────────────────────────────
+ *
+ * 上游：`${X-Target-Base-URL}/prompt` `/history/{id}` `/view?…`
+ * （前端传 `http://127.0.0.1:8188`；`forward()` 的 SSRF 名单本来就放行 localhost，
+ *  见 `proxy.ts` 里那段注释 —— 本地 LLM 需要它，本地 ComfyUI 同理。）
+ *
+ * 🔴 **同样是 `forward()` 一行，不自己写**（与上面那条同一条纪律）。`/view` 回的是
+ * PNG 字节，任何一次 `res.json()` / `res.text()` 都会把它按文本读坏；`forward()` 是
+ * `new Response(upstream.body, …)` 的管道直通，字节原样过。
+ *
+ * 🔴 **`forward(c, suffix)` 不读请求的查询串** —— 它拼的上游 URL 就是
+ * `X-Target-Base-URL + suffix` 那么直白。所以 GET 路由必须**自己**把 query 拼进 suffix，
+ * 否则 `/view` 会打成没有 `filename` 的裸路径，ComfyUI 回 400、而报错里一个字都不会提到
+ * 「参数丢了」。`:id` 同理，得自己插值（并转义）。
+ */
+app.post('/comfy/prompt', (c) => forward(c, '/prompt'));
+
+app.get('/comfy/history/:id', (c) =>
+  forward(c, `/history/${encodeURIComponent(c.req.param('id'))}`),
+);
+
+app.get('/comfy/view', (c) => forward(c, `/view${new URL(c.req.url).search}`));
+
 export { app as imageRoutes };
