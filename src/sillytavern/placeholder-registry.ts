@@ -82,7 +82,11 @@ function formatPlotEventsEntries(ctx: AgentContext): string {
   if (events.length === 0) return '';
   return events
     .filter((e) => e.status === 'active' || e.status === 'pending')
-    .map((e) => `[${e.id}] ${e.title} (${e.status})\n${e.description.slice(0, 200)}`)
+    .map((e) => {
+      const tw = e.timeWindow?.start
+        ? `\n时间窗口: ${e.timeWindow.start}${e.timeWindow.end && e.timeWindow.end !== e.timeWindow.start ? ` ~ ${e.timeWindow.end}` : ''}`
+        : '';      return `[${e.id}] ${e.title} (${e.status})\n${e.description.slice(0, 200)}${tw}`;
+    })
     .join('\n---\n');
 }
 

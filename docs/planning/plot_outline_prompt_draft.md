@@ -147,7 +147,7 @@
 <outline>
 <title>大纲标题</title>
 <summary>一句话摘要，不超过80字</summary>
-<timerange start="488-春" end="493-冬" />
+<timerange start="488-03" end="493-12" />
 <direction_anchors>核心张力 / 主角主题 / 关键长期关系人（作为后续演化的不偏离锚）</direction_anchors>
 
 <content>
@@ -180,14 +180,14 @@
 ## 字段说明
 
 - `<title>`、`<summary>`: 必填。summary 不超过 80 字
-- `<timerange start="" end="">`: 必填。大纲覆盖的时间范围。格式: 年-季节。示例: start="488-春" end="493-冬"
+- `<timerange start="" end="">`: 必填。大纲覆盖的时间范围。格式: 年-月（绝对纪年，剧情始于 488 年；如 488-03 表示 488 年 3 月）。示例: start="488-03" end="493-12"
 - `<direction_anchors>`: 必填。核心张力 / 主角主题 / 关键长期关系人，作为后续演化的不偏离锚
 - `<content>`: 必填。宏观世界态势叙事，markdown 格式。≥200 字，不按章节组织
 - `<chapter>`: 至少 1 个大事件。属性 title/summary 必填，start/end 必填
 - `<npc_agendas>`: 必填。此大事件涉及的各 NPC/势力独立议程
 - `<if_absent>`: 必填。主角完全不介入时的世界默认演化路径
 - `<event>`: 每个大事件至少 1 个子态势。属性 title 必填
-- `<time>`: 子态势的预计发生时间窗口。start 必填，end 可选
+- `<time>`: 子态势的预计发生时间窗口（年-月格式，通常跨 1~3 个月）。start 必填，end 可选
 - `<desc>`: 子态势描述，必填。AI 应该用叙事化语言描述世界此刻正在发生什么
 - `<trigger>`/`<complete>`: 必填
 - `<fail>`: 可选，存在明确风险时填写

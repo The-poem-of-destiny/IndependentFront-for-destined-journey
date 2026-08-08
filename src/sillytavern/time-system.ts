@@ -29,11 +29,14 @@ export interface GameTime {
   minute: number; // 0-59
 }
 
-/** 季节性时间 — 用于剧情大纲等粗粒度时间排序（AI 只能预测到年+季节精度） */
-export interface SeasonalTime {
+/**
+ * 大纲时间 — 年-月粒度，用于剧情大纲时间窗口（AI 可预测到月精度）。
+ * 字符串格式 "512-03"（年-月，month 补零）；旧「年-季节」格式（"512-春"）已弃用，
+ * 旧存档里遗留的字符串只作展示原样直存，不经本类型解析。
+ */
+export interface MonthTime {
   year: number; // 绝对年份，如 512
-  season: number; // 1=春 2=夏 3=秋 4=冬
-  month?: number; // 可选，1-12
+  month: number; // 1-12
 }
 
 /** 季节名常量（1-based 索引：下标 0=春） */
@@ -285,57 +288,41 @@ export function getSeason(month: number): string {
   return '冬季';
 }
 
-// ========== 季节性时间（剧情大纲排序用） ==========
+// ========== 大纲时间（剧情大纲时间窗口用，年-月粒度） ==========
 
 /**
- * 解析季节性时间字符串
- * 接受格式: "512-春" / "512-夏-06" / "512-冬"
- * @returns SeasonalTime 对象，无效格式返回 null
+ * 解析大纲时间字符串
+ * 接受格式: "512-03"（年-月，month 1-12，可 1 位或补零 2 位）
+ * @returns MonthTime 对象，无效格式返回 null
  */
-export function parseSeasonalTime(str: string): SeasonalTime | null {
-  const regex = /^(\d+)-(春|夏|秋|冬)(?:-(\d{1,2}))?$/;
+export function parseMonthTime(str: string): MonthTime | null {
+  const regex = /^(\d+)-(\d{1,2})$/;
   const match = str.match(regex);
   if (!match) return null;
 
   const year = parseInt(match[1], 10);
-  const seasonName = match[2];
-  const seasonMap: Record<string, number> = { 春: 1, 夏: 2, 秋: 3, 冬: 4 };
-  const season = seasonMap[seasonName];
+  const month = parseInt(match[2], 10);
+  if (month < 1 || month > 12) return null;
 
-  if (match[3] !== undefined) {
-    const month = parseInt(match[3], 10);
-    if (month < 1 || month > 12) return null;
-    return { year, season, month };
-  }
-
-  return { year, season };
+  return { year, month };
 }
 
 /**
- * 格式化季节性时间为字符串
- * "512-春" 或 "512-夏-06"（如有 month）
+ * 格式化大纲时间为字符串
+ * "512-03"（month 补零 2 位）
  */
-export function formatSeasonalTime(t: SeasonalTime): string {
-  const name = SEASON_NAMES[t.season - 1] ?? '春';
-  if (t.month !== undefined) {
-    const pad = String(t.month).padStart(2, '0');
-    return `${t.year}-${name}-${pad}`;
-  }
-  return `${t.year}-${name}`;
+export function formatMonthTime(t: MonthTime): string {
+  const pad = String(t.month).padStart(2, '0');
+  return `${t.year}-${pad}`;
 }
 
 /**
- * 比较两个季节性时间
- * 排序: year → season → month（缺 month 视为季节开头 < 任何有 month 的值）
+ * 比较两个大纲时间
+ * 排序: year → month
  * @returns 负数 a<b，正数 a>b，0 相等
  */
-export function compareSeasonalTime(a: SeasonalTime, b: SeasonalTime): number {
+export function compareMonthTime(a: MonthTime, b: MonthTime): number {
   if (a.year !== b.year) return a.year - b.year;
-  if (a.season !== b.season) return a.season - b.season;
-  // both undefined → equal; one undefined → that one is "less" (start of season)
-  if (a.month === undefined && b.month === undefined) return 0;
-  if (a.month === undefined) return -1;
-  if (b.month === undefined) return 1;
   return a.month - b.month;
 }
 
@@ -360,9 +347,9 @@ export const $time = {
   isDaytime,
   getTimeOfDay,
   getSeason,
-  parseSeasonalTime,
-  formatSeasonalTime,
-  compareSeasonalTime,
+  parseMonthTime,
+  formatMonthTime,
+  compareMonthTime,
   SEASON_NAMES,
   MONTH_NAMES,
   WEEKDAY_NAMES,

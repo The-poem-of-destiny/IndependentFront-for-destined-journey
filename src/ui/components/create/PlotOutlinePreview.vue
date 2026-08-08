@@ -22,10 +22,18 @@ function toggleChapter(idx: number) {
   expandedChapters.value = ns;
 }
 
+/** 大纲时间显示：年-月格式（如 512-03）美化为「512年3月」；旧季节格式/兜底全格式原样显示 */
+const MONTH_TIME_RE = /^(\d+)-(\d{1,2})$/;
+function formatOutlineTime(raw: string): string {
+  const m = raw.trim().match(MONTH_TIME_RE);
+  if (!m) return raw;
+  return `${parseInt(m[1], 10)}年${parseInt(m[2], 10)}月`;
+}
+
 function formatTimeRange(tr: { start?: string; end?: string } | undefined): string {
   if (!tr?.start) return '';
-  if (!tr.end || tr.end === tr.start) return tr.start;
-  return `${tr.start} ~ ${tr.end}`;
+  if (!tr.end || tr.end === tr.start) return formatOutlineTime(tr.start);
+  return `${formatOutlineTime(tr.start)} ~ ${formatOutlineTime(tr.end)}`;
 }
 </script>
 
@@ -93,8 +101,10 @@ function formatTimeRange(tr: { start?: string; end?: string } | undefined): stri
                     <span v-if="ev.timeWindow?.start" class="event-time">
                       {{
                         ev.timeWindow.end && ev.timeWindow.end !== ev.timeWindow.start
-                          ? ev.timeWindow.start + ' ~ ' + ev.timeWindow.end
-                          : ev.timeWindow.start
+                          ? formatOutlineTime(ev.timeWindow.start) +
+                            ' ~ ' +
+                            formatOutlineTime(ev.timeWindow.end)
+                          : formatOutlineTime(ev.timeWindow.start)
                       }}
                     </span>
                   </div>
