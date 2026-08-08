@@ -193,6 +193,18 @@ describe('SceneImageSegment', () => {
     expect(wrapper.text()).toMatch(/已用 \d+ 秒/);
   });
 
+  // 🔴 本地后端不花钱 —— 对它说「仍会计费」是吓唬人（2026-08-08 真机走查逮到）。
+  //    按记录上的 provider 判（在飞那张按它自己的后端计费），不按当前设置。
+  it('drops the billing warning from the abort button for local (comfyui) records', () => {
+    scene.records = [
+      record({ status: 'generating', startedAt: Date.now() - 5_000, provider: 'comfyui' }),
+    ];
+    const wrapper = mountSegment({ marker: MARKER, mode: 'manual' });
+
+    expect(wrapper.text()).toContain('中止');
+    expect(wrapper.text()).not.toContain('计费');
+  });
+
   it('renders the image with alt=title and title=description', async () => {
     scene.records = [record()];
     scene.blobOf.mockResolvedValue(new Blob(['x'], { type: 'image/png' }));

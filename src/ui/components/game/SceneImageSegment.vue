@@ -484,7 +484,9 @@ function goPresets(): void {
       <span class="si-title">{{ view.title }}</span>
       <span class="si-intent">{{ view.intent }}</span>
       <span class="si-status">正在生成 · 已用 {{ view.elapsedSec }} 秒</span>
-      <AppButton variant="ghost" size="sm" @click="cancel">中止（本次仍会计费）</AppButton>
+      <AppButton variant="ghost" size="sm" @click="cancel">{{
+        view.billsOnAbort ? '中止（本次仍会计费）' : '中止'
+      }}</AppButton>
     </div>
 
     <!-- 画好了 -->

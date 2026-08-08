@@ -49,7 +49,12 @@ export const NAI_QUALITY_SUFFIXES = {
 } as const satisfies Record<string, string>;
 
 /**
- * `ComposeOptions.qualitySuffix` / `UiSettings.imageQualitySuffix` 的默认值。
+ * `ComposeOptions.qualitySuffix` 的默认值，也是**内置 `danbooru-anime` 方言**
+ * （`FALLBACK_IMAGE_DIALECT.qualitySuffix`）的默认值。
+ *
+ * 🔴 自图像 v2（C6）起这一项是**方言属性**：用户改动存
+ * `UiSettings.imageDialectOverrides[dialectId].qualitySuffix`，不再有平铺的
+ * `imageQualitySuffix` 字段。空覆盖 = 回落到这里。
  *
  * 🔴 **绝不能含 `rating:general`**（§6.2）。分级是我们自己显式控制的一个 tag
  * （由 `ImageRating` 钳位后拼进 base），后缀里再塞一个 = 两条互相打架的指令，
@@ -74,8 +79,12 @@ export const DEFAULT_IMAGE_COMPOSITION_TAGS = 'wide shot, depth of field';
 // ═══ 负向（§5.2 baseNegative）═══
 
 /**
- * `ComposeOptions.baseNegative` / `UiSettings.imageBaseNegative` 的默认值 ——
- * 我们自己维护的基础负向。
+ * `ComposeOptions.baseNegative` 的默认值 —— 我们自己维护的基础负向，
+ * 同时是**内置 `danbooru-anime` 方言**（`FALLBACK_IMAGE_DIALECT.baseNegative`）的默认值。
+ *
+ * 🔴 同 {@link DEFAULT_IMAGE_QUALITY_SUFFIX}：自图像 v2（C6）起按方言 id 键控存进
+ * `UiSettings.imageDialectOverrides[dialectId].baseNegative`，平铺的 `imageBaseNegative`
+ * 已不存在。用户口味「永远别画 X」是另一格（`imageExtraNegative`，刻意保持全局）。
  *
  * 🔴 **不用 `ucPreset` 的具名清单代替**（§6.2）：UC 预设是**每模型一套**的具名清单，
  * `ucPreset: 0` 是那个模型清单里的第 0 项，换模型语义就变。所以负向文本由我们自己拿着，

@@ -39,7 +39,20 @@ export type SceneImageView =
   | { kind: 'hidden' }
   | { kind: 'offer'; title: string; intent: string }
   | { kind: 'queued'; recordId: string; position: number; title: string; intent: string }
-  | { kind: 'generating'; recordId: string; elapsedSec: number; title: string; intent: string }
+  | {
+      kind: 'generating';
+      recordId: string;
+      elapsedSec: number;
+      title: string;
+      intent: string;
+      /**
+       * 中止按钮要不要说「本次仍会计费」（D36）。
+       * 🔴 按**记录上的** provider 判（缺席 = novelai，C14），不按当前设置 ——
+       *    切了后端之后，在飞的那张仍是按它自己的后端计费的。本地后端不花钱，
+       *    对它说「仍会计费」是在吓唬人（真机走查 2026-08-08 逮到）。
+       */
+      billsOnAbort: boolean;
+    }
   | {
       kind: 'done';
       recordId: string;
@@ -142,6 +155,8 @@ export function resolveSceneImageView(input: SceneImageViewInput): SceneImageVie
         elapsedSec: elapsedSeconds(record, input.now),
         title,
         intent,
+        // 缺席 = novelai（C14 老记录口径）→ 付费后端，照实警告
+        billsOnAbort: (record.provider ?? 'novelai') !== 'comfyui',
       };
 
     case 'done': {

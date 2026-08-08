@@ -9,6 +9,65 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 图像 v2 — ComfyUI 本地后端 + 提示词方言系统 ｜ ✅ ComfyUI 真机已过；NAI 回归待真机（2026-08-08）
+
+设计: `docs/planning/2026-08-08-comfyui-image-provider-design.md`（C1–C16）。
+分支 `txt-2-img-comfyui`，5 波交付，**7252 tests 全绿**。
+
+**两件事，仅此两件**: ① ComfyUI 作为第二个出图后端（本地跑模型、零费用）与 NovelAI 并存可切换；
+② **提示词方言**系统——本地模型分 danbooru 标签系与自然语系两大吃法，侧链提示词与装配方式
+必须能整套切换。真正的提示词内容住私有内容仓，本仓只带最小可用的占位方言。
+
+**头条决策**
+
+| 决策    | 裁定                                                                                                                                                                                                                                                               |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| C1      | 分叉线 = `ImageProvider` 接口 + **能力位**（`supportsCharacterSlots` / `costModel` / `defaultTimeoutMs`）。store / 队列 / 七态真值表 / CG 图鉴 / 记录 schema 全部共用，一份不复制                                                                                  |
+| C2/C3   | 方言与 provider **正交**，用户独立选；方言拥有**整个装配契约**（分隔符/归一化器/外貌渲染器/世界·分级·人数三段/负向支持/画质后缀/基础负向/构图词/systemPrompt）—— 只换 systemPrompt 仍会给 krea2 螺栓上六段 danbooru                                                |
+| C4      | 方言是**纯数据 + 封闭旋钮集** = 内容注册表**第 7 面** `imageDialects`（`data/content/image-dialects.json`，pack 可整份替换）。私有仓不能跨边界发代码                                                                                                               |
+| C5      | 内置两条（`danbooru-anime` 从 agent-config **逐字节搬运** / `natural-prose` 刻意单薄的占位）；`agents.image_prompt.systemPrompt` **退役删除**                                                                                                                      |
+| C6      | 覆盖按**方言 id 键控** `imageDialectOverrides[dialectId]`，空 = 回落方言 JSON。🔴 全局单份覆盖会把 danbooru 调优带进 prose 档，静默废掉整个特性                                                                                                                    |
+| C7      | 角色槽是 **provider 能力不是方言属性**；无槽后端由装配层压平（方言作者声明一个后端没有的能力，败法是静默丢角色）                                                                                                                                                   |
+| C10–C13 | BFF 三条透传路由（prompt / history / view，全复用 `forward()`）；工作流 = 用户粘贴的 API-format JSON + **解析后按值替换**；失败新增 `workflow`（不可重试）与 `execution`（可重试）两类；轮询 `/history` 不做 WebSocket，超时 per-provider（NAI 120s / Comfy 600s） |
+| C14     | 记录盖 `provider` + `dialectId` 戳（缺席读作 novelai + danbooru，老记录免迁移）；重画 = 用当下配置，方言不匹配则**不继承缓存场景串**、重跑侧链                                                                                                                     |
+| C15     | prose 方言下只有标签形式的老预设**跳过**（不做跨方言降级），配套堵洞：`ComposedPrompt.warnings` 此前产出后全仓无人读 —— 现落库 `composeWarnings` 并在设置页角标 + CG 详情页说明                                                                                    |
+| C16     | ComfyUI 地址住 provider 袋、**不进 API 池**（池建模的是带 key 的远端服务；且这格填错的败法是诚实的 connection-refused，不是 2026-08-05 那格误导过两轮排查的上游错）                                                                                                |
+
+**两处 🔴 提前钉死的坑**：`POST /prompt` 会带着 `node_errors` 返回 **HTTP 200**——只看状态码
+的分类器会去轮询一个永不出现的 prompt_id、最终报成超时（与 v1「content-type 撒谎扔掉付费图」
+同形状）；占位符**在解析后的对象上按值替换**，原文字符串替换会被提示词里第一个引号打断 JSON。
+
+**波次结构**
+
+| 波  | 内容                                                                                                     | 决策                 |
+| --- | -------------------------------------------------------------------------------------------------------- | -------------------- |
+| 1   | `types-image` 方言/能力位/失败两类/记录戳 + `image-dialect.ts` 容错解析 + 内容注册表第 7 面              | C1/C4/C12/C14/C15    |
+| 2   | `composePrompt` 方言参数化（含逐字节金测试）+ ComfyUI 传输全链（纯函数层 + 客户端 + BFF 三路由）         | C3/C7/C15 + C10–C13  |
+| 3   | 设置全面重构为 per-provider 袋 + `image-settings-migration.ts` 一次性迁移                                | C8                   |
+| 4   | seams 的 provider 分叉 + `PROVIDER_CAPABILITIES` 唯一能力表 + 限额按 costModel 拆分 + 方言感知重画       | C1/C5/C6/C9/C14/C15  |
+| 5   | 设置页（后端/方言选择器 + per-dialect 覆盖编辑器 + `hide-prompt`）与游戏页（CG 详情告警 / 重画方言提示） | C2/C6/C9/C14/C15/C16 |
+
+**两处用户明确推翻我的推荐（如实记录）**
+
+1. **C8 设置全面重构**而非平铺字段旁挂 —— 接受一次真实迁移的风险，换对称的形状。
+2. **C9 本地后端完全不设 L1/L2 限额**而非降档保留 —— 接受失控循环压满本地 GPU 的可能，
+   换「本地免费就该无上限」的直觉一致性。L3（同回合去重）恒开是对偶后补上的正确性底线。
+
+**真机走查（2026-08-08，实机 ComfyUI 0.27 + anima-aesthetic-v1.1）**：
+✅ ComfyUI 全链路 —— 标记渲染成手动按钮（D37 title+intent）→ 限额放行（local）→ 侧链无
+LLM 端点如实失败（D42 两出路）→「自己写提示词」→ 重画经 seams comfy 分叉 → BFF
+`POST /prompt` → 5 次 `/history` 轮询 → `/view` 取字节 → 1216×832 落正文（%width%/%height%
+从共享设置流进工作流）→ CG 图鉴含 后端/方言/seed 元数据 + composeWarnings 行（C15）。
+✅ danbooru ↔ prose 切换 —— 提示词卡标签、三个覆盖框、extra-negative 可见禁用整套跟着换（C6）。
+✅ 设置迁移在真实档上出新形状；用户工作流（UNETLoader + qwen CLIP/VAE 子图重建）值级替换实测。
+🩹 走查逮到一处：生成中的「中止（本次仍会计费）」对本地后端撒谎 —— 现按**记录上的**
+provider 判（在飞那张按它自己的后端计费，不按当前设置），comfy 记录只说「中止」。
+**DoD 剩余**: NovelAI 回归出一张图（需 NAI 令牌，设置迁移 + systemPrompt 退役都碰了它那条路）。
+另记一条真机线索：视图曾**非重载**弹回首页（Pinia 存活而 currentView/activeSaveId 被清）——
+「弹回首页」有程序化路径，与此前「只可能是整页重载」的结论矛盾，待取证。
+
+---
+
 ### 内容-引擎分离 R1-R4 全部完成 ｜ ✅ v1.3 闭环（2026-08-07）
 
 **R1 内容归家**：新私有内容仓 `fated_poem_independent_assets`（GitHub private，

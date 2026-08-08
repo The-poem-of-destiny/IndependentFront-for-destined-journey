@@ -1,15 +1,23 @@
 /**
- * image-client.ts — 文生图上游的**唯一网络接触点**（图像生成 v1 / 阶段 E）
+ * image-client.ts — 文生图上游的**唯一网络接触点**（图像 v1 阶段 E / v2 起两家后端）
  *
  * 设计: `docs/planning/2026-08-04-image-generation-design.md` §12（BFF 与错误分类）
- *       + §6（NovelAI 接口规格）。先例: `workshop-client.ts`（判别联合永不抛穿 +
- *       超时 + 取消 + 注入缝），本文件照它写。
+ *       + §6（NovelAI 接口规格）；`docs/planning/2026-08-08-comfyui-image-provider-design.md`
+ *       C10–C13（ComfyUI 的三条 BFF 路由 / 轮询 / 失败两类）。
+ *       先例: `workshop-client.ts`（判别联合永不抛穿 + 超时 + 取消 + 注入缝），本文件照它写。
+ *
+ * **两家后端各一个入口**（图像 v2 / C1），共用下面的超时/取消/失败翻译机制:
+ * - {@link generateNaiImage} —— 一发一收，响应是 zip 二进制
+ * - {@link generateComfyImage} —— 排队 `/prompt` → 轮询 `/history/{id}` → 取图 `/view`，
+ *   对外仍是**单个 Promise**（C13：轮询在本层内部，不做 WebSocket）
  *
  * 三条职责，仅此而已:
  * 1. 拼 header、发请求、**按二进制读字节**
- * 2. 把原始字节交给 `image-providers/novelai.ts` 的 `parseNaiZip` 解析 ——
- *    **本模块自己不解 zip、不判图**（那是纯函数层的事，一处解析规则）
- * 3. 把失败翻译成 `ImageGenFailure`（§12.2 那张表逐条），带超时与取消
+ * 2. 把原始字节 / 线格式响应交给纯函数层解析 —— NAI 走 `image-providers/novelai.ts` 的
+ *    `parseNaiZip`，ComfyUI 走 `image-providers/comfyui.ts`（占位符替换 / `node_errors`
+ *    分类 / history 三态）。**本模块自己不解 zip、不判图、不改工作流**（一处解析规则）
+ * 3. 把失败翻译成 `ImageGenFailure`（§12.2 那张表逐条 + C12 的 `workflow`/`execution`），
+ *    带超时与取消
  *
  * 🔴 **成功路径只准 `arrayBuffer()`，永远不许 `json()` / `text()`**（§12.1 第 2 条）。
  * NAI 的成功响应是 `application/x-zip-compressed` 的 zip 二进制：任何一次「按文本读」
@@ -17,9 +25,11 @@
  * 解不开**，而且症状会伪装成「上游返回了坏 zip」，查起来极贵。`text()` 只在
  * **非 2xx** 的错误体上调用，那时上游给的确实是 JSON/纯文本。测试钉住了这一条。
  *
- * 🔴 **必须走 BFF**: NAI 没有 CORS（§6 那张表），浏览器直连必被拦。请求打到同源的
- * `/api/image/generate`，由 `server/routes/image.ts` 复用 `forward()` 管道直通；
- * key 仍前端持有（SillyTavern 模式），经 `Authorization` 透传，BFF 零状态。
+ * 🔴 **两家都必须走 BFF**: NAI 没有 CORS（§6 那张表），ComfyUI 默认也不发 CORS 头 ——
+ * 浏览器直连必被拦。请求打到同源的 `/api/image/generate` 与 `/api/image/comfy/*`，
+ * 由 `server/routes/image.ts` 复用同一个 `forward()` 管道直通（SSRF 名单早已放行
+ * localhost，ollama 先例）；key 仍前端持有（SillyTavern 模式），经 `Authorization`
+ * 透传，BFF 零状态。
  *
  * ⚠️ **永不抛穿**。网络失败、HTTP 非 2xx、响应读不动、用户取消 —— 全部变成
  * `ImageGenFailure`（`ok: false`）返回。一次上游抽风不该冒泡成未捕获的
