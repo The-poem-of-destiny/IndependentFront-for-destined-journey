@@ -100,7 +100,7 @@ describeIf('pack-install 契约（POEM_PACK_FILE 已设）', () => {
   //   ② 各 agent「可用工具」广告的工具名必须 ∈ 工具白名单（幻影工具会废掉整条工具链）
   it('agentDefaults 提示词契约：hiddenLine 非空 + 广告工具 ⊆ 白名单', () => {
     const pack = loadPack();
-    const agents = pack.agentDefaults.agents as Record<
+    const agents = (pack.agentDefaults?.agents ?? {}) as Record<
       string,
       { systemPrompt?: string }
     >;
