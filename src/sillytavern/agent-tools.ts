@@ -1021,7 +1021,14 @@ temp.<path>    — 会话临时 (不持久化)
     }
 
     default:
-      throw new Error(`未知工具: ${functionName}`);
+      // 🔴 2026-08-08 真机：旧版 char_gen 提示词把 `call_item_gen` 列为可用工具，
+      // 但白名单（AGENT_TOOL_MAP）没有它 —— 模型一调就报「未知工具」，随即放弃
+      // **全部**工具、手编随机值（性格编码 WoAgy(F) 等）。报错必须可行动：
+      // 告诉模型别调它、以及正确的替代做法，而不是一句冷冰冰的「未知工具」。
+      throw new Error(
+        `工具 ${functionName} 未注册或不在本 Agent 白名单，不可调用。请只使用提示词「可用工具」列出的工具；` +
+          `如需生成技能/装备/物品，把需求写进 <skill_requests>/<equipment_requests>/<item_requests> XML 区块，由引擎自动派发。`,
+      );
   }
 }
 

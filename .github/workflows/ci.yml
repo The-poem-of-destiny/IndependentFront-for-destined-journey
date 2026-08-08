@@ -1,5 +1,28 @@
 name: CI
 
+# 八道闸门拆成三个并行 job（2026-08-08）。
+#
+# ## 为什么拆
+# 拆之前是单 job 串行，实测 ~178s：环境准备 14s + typecheck 11s + typecheck:vue 18s
+# + typecheck:tools 5s + format:check 24s + lint 32s + knip:ratchet 3s + test:run 68s。
+# 没有哪一步特别慢 —— 依赖安装靠 npm 缓存只要 4s，没水分可挤；
+# 浪费的是 test:run 跑那 68 秒时另外 7 道 CPU 密集的闸门全在排队干等。
+#
+# ## 为什么是三个，不是八个
+# 每个 job 都要自付约 14s 环境准备，而 test:run 是长杆：
+#   test(14+68=82s) / quality(14+59=73s) / types(14+34=48s) → 墙钟 ≈ 85s，约 2.1 倍。
+# 再往下拆关键路径仍是那 82 秒，只多付环境准备。要再快得给 test:run 上 --shard 分片。
+#
+# ## 两个前提（改之前核过）
+# 1. 本仓是 public → Actions 分钟数免费，并行不多花钱。
+# 2. master 没有 branch protection → 没有按名字钉死的 required check，
+#    job 改名拆分不会弄坏合并闸门。**哪天加了分支保护，记得把这三个 job 名都加进必需检查**，
+#    否则只钉住其中一个等于另外两个可以红着合进来。
+#
+# ## 副作用（是好事）
+# 并行后一次 run 能同时暴露格式/lint/类型/测试的全部问题，
+# 不再是「修完 format 再推一次才发现 lint 也红」的连环重推。
+
 on:
   push:
     branches: [master]
@@ -7,7 +30,8 @@ on:
     branches: [master]
 
 jobs:
-  test:
+  types:
+    name: types
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,8 +44,30 @@ jobs:
       - run: npm run typecheck:vue
       # server/ tests/ *.config.ts —— 主 tsconfig 只 include src/**，这一步是它们唯一的类型网
       - run: npm run typecheck:tools
+
+  quality:
+    name: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
       - run: npm run format:check
       - run: npm run lint
       # 死代码棘轮：只许变少，不许变多（基线 knip-baseline.json，说明见 scripts/knip-ratchet.mjs）
       - run: npm run knip:ratchet
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
       - run: npm run test:run

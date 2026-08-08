@@ -40,6 +40,9 @@ import {
   saveSnapshot,
   trimSnapshots,
   deleteMessagesAfterTurn,
+  getMessages,
+  saveMessages,
+  deleteMessagesBySaveId,
   getDatabase,
 } from './database';
 import { getVar, setVar, delVar, insertVar, applyPathOps } from './var-resolver';
@@ -1325,6 +1328,9 @@ export class StateManager {
     const characters = await getCharacters(this.saveId);
     const profile = await getProfile(this.saveId);
     const plotEvents = await getPlotEvents(this.saveId);
+    // 🆕 消息随快照走：恢复时整体覆写 messages，快照才能**向前**恢复
+    // （旧实现只截断：恢复到第 N 回合后，N 之后的对话永远找不回来）。
+    const messages = await getMessages(this.saveId);
 
     const snapshot: Snapshot = {
       id: crypto.randomUUID(),
@@ -1335,6 +1341,7 @@ export class StateManager {
       characters: structuredClone(characters),
       saveProfile: structuredClone(profile),
       plotEvents: structuredClone(plotEvents),
+      messages: structuredClone(messages),
     };
 
     await saveSnapshot(snapshot);
@@ -1420,8 +1427,14 @@ export class StateManager {
           }
           await savePlotEvents(structuredClone(snapshot.plotEvents ?? []));
 
-          // ④ 对话回滚: 删除快照 turn 之后的消息
-          await deleteMessagesAfterTurn(this.saveId, snapshot.turn);
+          // ④ 对话恢复：快照带 messages（新快照）→ 整档覆写（截断 + 找回两向都成立）；
+          //    旧快照无 messages → 退化为按 turn 截断（旧行为，只能回退不能找回）。
+          if (snapshot.messages) {
+            await deleteMessagesBySaveId(this.saveId);
+            await saveMessages(structuredClone(snapshot.messages));
+          } else {
+            await deleteMessagesAfterTurn(this.saveId, snapshot.turn);
+          }
 
           // ④.b 清理"未来"记忆（realTimestamp > 快照创建时间；记忆 append-only 安全）
           await deleteMemoriesAfter(this.saveId, snapshot.createdAt);

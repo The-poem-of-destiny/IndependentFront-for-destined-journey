@@ -39,6 +39,9 @@ vi.mock('./database', () => ({
   trimSnapshots: vi.fn(),
   getSettings: vi.fn(),
   deleteMessagesAfterTurn: vi.fn(),
+  getMessages: vi.fn(),
+  saveMessages: vi.fn(),
+  deleteMessagesBySaveId: vi.fn(),
   // 🔒 P1-06: restoreSnapshot 用 db.transaction 包原子事务；测试不验原子性，回调直接执行
   getDatabase: () => ({
     transaction: async (_mode: string, _tables: any, cb: () => any) => cb(),
@@ -2921,6 +2924,78 @@ describe('StateManager', () => {
       // 恢复写入与快照引用隔离: 改库内对象不影响快照（可重复恢复）
       chars[0].hp = 1;
       expect(snapshot.characters[0].hp).toBe(80);
+    });
+
+    // 🆕 2026-08-08 真机：快照此前不存 messages，恢复只能「截断到快照回合」——
+    // 从第 5 回合恢复到第 7 回合时对话流永远只剩第 5 回合（第 6/7 回合消息
+    // 已在更早的回退中被删，快照里没有可找回的副本）。新快照随拍消息，
+    // 恢复时整体覆写；旧快照（无 messages）保持按 turn 截断的旧行为。
+    it('🆕 快照带 messages → 恢复整体覆写对话（向前恢复的基石）', async () => {
+      const msgTurn5 = { id: 'm5', role: 'assistant', content: '第5回合' };
+      const msgTurn7 = { id: 'm7', role: 'assistant', content: '第7回合' };
+      const snapshot = {
+        id: 'snap-fwd',
+        saveId: 'save-001',
+        createdAt: Date.now(),
+        reason: 'turn' as const,
+        turn: 7,
+        characters: [],
+        saveProfile: {},
+        messages: [msgTurn5, msgTurn7],
+      };
+      vi.mocked(db.getSnapshot).mockResolvedValue(snapshot as any);
+      const save = buildMockSaveSlot({ id: 'save-001' });
+      vi.mocked(db.getSave).mockResolvedValue(save);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.restoreSnapshot('snap-fwd');
+
+      expect(result.success).toBe(true);
+      // 整体覆写：先清后写，不再按 turn 截断
+      expect(vi.mocked(db.deleteMessagesBySaveId)).toHaveBeenCalledWith('save-001');
+      expect(vi.mocked(db.saveMessages)).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'm5' }),
+        expect.objectContaining({ id: 'm7' }),
+      ]);
+      expect(vi.mocked(db.deleteMessagesAfterTurn)).not.toHaveBeenCalled();
+      expect(save.metadata.totalTurns).toBe(7);
+    });
+
+    it('🆕 旧快照无 messages → 退化为按 turn 截断（兼容不破坏）', async () => {
+      const snapshot = {
+        id: 'snap-legacy',
+        saveId: 'save-001',
+        createdAt: Date.now(),
+        reason: 'turn' as const,
+        turn: 3,
+        characters: [],
+        saveProfile: {},
+        // 没有 messages 字段 —— 旧快照形状
+      };
+      vi.mocked(db.getSnapshot).mockResolvedValue(snapshot as any);
+      const save = buildMockSaveSlot({ id: 'save-001' });
+      vi.mocked(db.getSave).mockResolvedValue(save);
+      vi.mocked(db.deleteMessagesAfterTurn).mockClear();
+      vi.mocked(db.deleteMessagesBySaveId).mockClear();
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.restoreSnapshot('snap-legacy');
+
+      expect(result.success).toBe(true);
+      expect(vi.mocked(db.deleteMessagesAfterTurn)).toHaveBeenCalledWith('save-001', 3);
+      expect(vi.mocked(db.deleteMessagesBySaveId)).not.toHaveBeenCalled();
+      expect(vi.mocked(db.saveMessages)).not.toHaveBeenCalled();
+    });
+
+    it('🆕 createSnapshot 随拍 messages（新快照可向前恢复的前提）', async () => {
+      const msgs = [
+        { id: 'm1', role: 'assistant' as const, content: '你好' },
+        { id: 'm2', role: 'user' as const, content: '继续' },
+      ];
+      vi.mocked(db.getMessages).mockResolvedValue(msgs as any);
+      const sm = new StateManager({ saveId: 'save-001' });
+      const snap = await sm.createSnapshot('turn', 3);
+      expect(snap.messages).toEqual(msgs);
     });
 
     it('🆕 plotEvents 随快照覆写恢复（全删当前→写快照副本）+ 清理未来记忆 + totalTurns 对齐', async () => {

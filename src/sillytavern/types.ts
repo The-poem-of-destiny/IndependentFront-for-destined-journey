@@ -1263,7 +1263,7 @@ export interface Snapshot {
   createdAt: number;
   /** 触发原因: turn=每轮一拍 / manual=手动 / pre-combat=战斗前 */
   reason: 'turn' | 'manual' | 'pre-combat';
-  /** 对话回合游标（恢复时截断 messages 用） */
+  /** 对话回合游标（恢复时截断 messages 用；旧快照无 messages 时的兜底） */
   turn: number;
   /** 角色状态深拷贝 */
   characters: CharacterState[];
@@ -1271,6 +1271,11 @@ export interface Snapshot {
   saveProfile: SaveProfile;
   /** 剧情事件深拷贝（🆕 回退时覆写恢复；可选=兼容旧快照，恢复时空数组兜底） */
   plotEvents?: PlotEvent[];
+  /**
+   * 🆕 对话消息深拷贝（恢复时整体覆写 messages —— 快照能**向前**恢复的基石）。
+   * 旧快照无此字段 → 恢复退化为按 turn 截断（旧行为，无法找回已删消息）。
+   */
+  messages?: ChatMessage[];
 }
 
 /** 存档槽 — 10 槽，快照上限见 AppSettings.maxSnapshotsPerSave */

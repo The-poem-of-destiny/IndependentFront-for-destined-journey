@@ -369,6 +369,32 @@
       environmentScene.dispose();
       pmrem.dispose();
 
+      // Outermost thing in the scene: the nebula dome. resize() sizes the far plane from this,
+      // so the dome and the far plane cannot drift apart. Starfield sits inside it, at 17..42.
+      const BACKDROP_RADIUS = 48;
+
+      // animate() runs scene time at this fraction of the wall clock. The rim flow speeds below
+      // are authored in real seconds and converted through it, so the two cannot drift apart.
+      const SCENE_TIME_SCALE = 0.66;
+
+      // Rim flow. One head travels the outer crown in RIM_FLOW_OUTER_SECONDS; every other rim
+      // gets the same LINEAR speed, so the period scales with radius and the five rims read as
+      // one substance moving through the whole structure rather than five separate turntables.
+      const RIM_FLOW_OUTER_SECONDS = 8;
+      const RIM_FLOW_REFERENCE_RADIUS = 5.08;
+      const RIM_FLOW_HEADS = 3;
+
+      // The traveling light now carries most of the rim's brightness, so the constant layers
+      // step back to make room for it. This is load-bearing, not taste: a highlight cannot be
+      // added to something already at full brightness. Measured on the composite, the chase at
+      // 4x gain over an untouched base was indistinguishable from no chase at all. The same
+      // headroom also gives the authored surge its range back — it used to lift the frame by
+      // 5%, which is imperceptible, and lifts it by 44% against this base.
+      const RIM_CORE_REBALANCE = 0.62;
+      const RIM_HALO_REBALANCE = 0.68;
+      const RIM_VEIN_GAIN = 3;
+
+      // far is a placeholder; resize() derives the real one from the framing distance.
       const camera = new THREE.PerspectiveCamera(10.5, 1, 0.08, 100);
       const cameraTarget = new THREE.Vector3(0, 0.03, 0);
       const outerGlowProjectionSample = new THREE.Vector3(0, -0.075, 4.33);
@@ -648,7 +674,9 @@
       }
 
       function createFoundation(parent) {
-        const outerCrown = createLuminousTorus(5.08, 0.03, materials.bronze, 'bronze', 256, 9);
+        // The crown rides no register, so it opens the alternation the registers continue:
+        // crown +1, then -1, +1, -1 inward, and the aperture rim closes it on +1.
+        const outerCrown = createLuminousTorus(5.08, 0.03, materials.bronze, 'bronze', 256, 9, 1);
         outerCrown.position.y = 0.075;
         parent.add(outerCrown);
       }
@@ -660,6 +688,8 @@
         const railMaterial = config.color === 'bronze' ? materials.bronze : materials.silver;
         if (index > 0) {
           const tube = index === 1 ? 0.014 : 0.012;
+          // The flow inherits the register's own direction, so the light reads as carried by
+          // the ring it belongs to rather than as a separate effect laid over it.
           const outerRail = createLuminousTorus(
             config.outer - 0.012,
             tube,
@@ -667,6 +697,7 @@
             config.color,
             224,
             7,
+            config.direction,
           );
           outerRail.position.y = 0.012;
           group.add(outerRail);
@@ -793,11 +824,16 @@
           context.fillText(glyph, 0, 0);
           context.restore();
 
+          // The ignition mask carries SHAPE ONLY; the shader reads its alpha and nothing else.
+          // This used to encode the glyph index into the red channel, but a discrete index
+          // cannot survive the linear/mipmap/anisotropic filtering this mask needs -- see the
+          // note in createRuneIgnitionMaterial. The index is now derived from the angle, which
+          // is exact because every glyph sits at exactly (glyphIndex / glyphCount) * TAU.
           glyphContext.save();
           glyphContext.rotate(angle);
           glyphContext.translate(0, -midPixel - wobble);
           glyphContext.globalAlpha = 1;
-          glyphContext.fillStyle = `rgb(${glyphIndex + 1}, 0, 0)`;
+          glyphContext.fillStyle = '#ffffff';
           glyphContext.font = font;
           glyphContext.textAlign = 'center';
           glyphContext.textBaseline = 'middle';
@@ -880,7 +916,6 @@
             uCycleSeconds: { value: 5.1 + layerIndex * 0.83 },
             uBandInner: { value: (config.inner / config.outer) * bandOuter },
             uBandOuter: { value: bandOuter },
-            uTexel: { value: new THREE.Vector2(1 / textureSize, 1 / textureSize) },
             uColor: { value: energyColor },
             uHotColor: { value: hotColor },
           },
@@ -901,35 +936,34 @@
             uniform float uCycleSeconds;
             uniform float uBandInner;
             uniform float uBandOuter;
-            uniform vec2 uTexel;
             uniform vec3 uColor;
             uniform vec3 uHotColor;
             varying vec2 vUv;
+
+            const float TAU = 6.283185307179586;
 
             float hash11(float value) {
               return fract(sin(value * 127.1 + 311.7) * 43758.5453123);
             }
 
             void main() {
-              vec4 glyphSample = texture2D(uGlyphMap, vUv);
-              float glyphAlpha = glyphSample.a;
+              float glyphAlpha = texture2D(uGlyphMap, vUv).a;
               if (glyphAlpha < 0.02 || uStrength < 0.002) discard;
-              float encodedGlyph = glyphSample.r / max(glyphAlpha, 0.001);
-              float glyphIndex = clamp(
-                floor(encodedGlyph * 255.0 + 0.5) - 1.0,
-                0.0,
-                uGlyphCount - 1.0
-              );
 
-              float neighborLeft = texture2D(uGlyphMap, vUv - vec2(uTexel.x, 0.0)).a;
-              float neighborRight = texture2D(uGlyphMap, vUv + vec2(uTexel.x, 0.0)).a;
-              float neighborDown = texture2D(uGlyphMap, vUv - vec2(0.0, uTexel.y)).a;
-              float neighborUp = texture2D(uGlyphMap, vUv + vec2(0.0, uTexel.y)).a;
-              float interior = min(
-                glyphAlpha,
-                min(min(neighborLeft, neighborRight), min(neighborDown, neighborUp))
-              );
-              float engravedEdge = clamp(glyphAlpha - interior * 0.88, 0.0, 1.0);
+              // Split the sampled coverage into a solid core and the cut profile at its rim.
+              // Both are pure functions of the coverage the sampler actually returned, so they
+              // hold at every mip level and every degree of foreshortening.
+              //
+              // WARNING: this used to erode the mask with four taps at a fixed base-level texel
+              // offset (uTexel) and subtract that from glyphAlpha. But glyphAlpha comes back
+              // through the mipmap and anisotropic chain, so the taps and the sample were
+              // measuring the mask at two different scales and their difference was mostly
+              // filter noise. That noise drove the colour, the hot vein and the alpha at once,
+              // which is why a charging rune read as mottled and speckled instead of evenly
+              // lit. Measuring the mask at a scale the sampler is not using is the same mistake
+              // the glyph index made above; do not reintroduce fixed-texel taps here.
+              float interior = smoothstep(0.30, 0.95, glyphAlpha);
+              float engravedEdge = (1.0 - interior) * glyphAlpha;
 
               vec2 centered = vUv - 0.5;
               float localClock = uTime / uCycleSeconds + fract(uSeed * 0.113) * 7.0;
@@ -944,7 +978,28 @@
               );
               float favorMajor = step(0.58, hash11(epoch * 43.19 + uSeed * 7.23));
               float targetGlyph = mix(arbitraryGlyph, majorGlyph, favorMajor);
-              float selected = 1.0 - step(0.5, abs(glyphIndex - targetGlyph));
+
+              // Which engraving does this pixel belong to? Derived from the angle, NEVER
+              // sampled. createRegisterTexture lays every glyph at exactly
+              // (glyphIndex / glyphCount) * TAU, so the index is analytic: continuous across
+              // the surface, constant as the register turns, and immune to texture filtering.
+              //
+              // WARNING: do not reintroduce a sampled index. The mask used to carry it in red,
+              // which is discrete data read through a linear + mipmap + anisotropic
+              // filter and then hard-thresholded: neighbouring glyph indices blended into each
+              // other, minification averaged whole runs of them into noise, and the
+              // unpremultiply divide (red / alpha) lost the index outright on antialiased
+              // edges. An offscreen 70-frame probe measured ~90% of the lit glyph's pixels
+              // toggling every frame while the ring had turned 0.2 px. That was the flicker.
+              // Turning mipmapping ON (2026-08-07) treated the symptom and made the decode
+              // worse; this removes the decode instead.
+              float slice = mod(atan(centered.x, centered.y) / TAU * uGlyphCount, uGlyphCount);
+              float sliceDistance = abs(
+                mod(slice - targetGlyph + uGlyphCount * 0.5, uGlyphCount) - uGlyphCount * 0.5
+              );
+              // Feather the cell boundary by ~1 texel so the cut is not aliased, while staying
+              // inside the half cell so a neighbouring glyph's ink can never be lit.
+              float selected = 1.0 - smoothstep(0.46, 0.5, sliceDistance);
 
               float attack = smoothstep(0.04, 0.2, life);
               float release = 1.0 - smoothstep(0.62, 0.96, life);
@@ -1617,7 +1672,7 @@
         voidDisc.position.y = 0.064;
         group.add(voidDisc);
 
-        const innerRim = createLuminousTorus(0.95, 0.018, materials.silver, 'silver', 224, 8);
+        const innerRim = createLuminousTorus(0.95, 0.018, materials.silver, 'silver', 224, 8, 1);
         innerRim.position.y = 0.07;
         group.add(innerRim);
 
@@ -2161,7 +2216,7 @@
             }
           `,
         });
-        const mesh = new THREE.Mesh(new THREE.SphereGeometry(48, 64, 40), material);
+        const mesh = new THREE.Mesh(new THREE.SphereGeometry(BACKDROP_RADIUS, 64, 40), material);
         return { mesh, uniforms };
       }
 
@@ -2323,15 +2378,21 @@
         return { mesh, uniforms };
       }
 
-      function createEnergyVeinMaterial(tone, phase, intensity) {
+      function createEnergyVeinMaterial(tone, phase, intensity, radius, flowDirection) {
         const coreColor = tone === 'bronze' ? new THREE.Color(0xffa25f) : new THREE.Color(0x9eb5ff);
         const hotColor = tone === 'bronze' ? new THREE.Color(0xffead3) : new THREE.Color(0xf0f4ff);
+        // Same linear speed on every rim, so the period grows with the radius.
+        const flowSeconds = (RIM_FLOW_OUTER_SECONDS * radius) / RIM_FLOW_REFERENCE_RADIUS;
         const material = new THREE.ShaderMaterial({
           uniforms: {
             uTime: { value: 0 },
             uPhase: { value: phase },
             uIntensity: { value: intensity },
             uSurge: { value: 0 },
+            uSpeed: {
+              value: (flowDirection * RIM_FLOW_HEADS) / (flowSeconds * SCENE_TIME_SCALE),
+            },
+            uHeads: { value: RIM_FLOW_HEADS },
             uCoreColor: { value: coreColor },
             uHotColor: { value: hotColor },
           },
@@ -2353,15 +2414,30 @@
             uniform float uPhase;
             uniform float uIntensity;
             uniform float uSurge;
+            uniform float uSpeed;
+            uniform float uHeads;
             uniform vec3 uCoreColor;
             uniform vec3 uHotColor;
             varying vec2 vUv;
 
+            // How far behind the head this fragment sits, and how fast the head's wake decays.
+            // The decay is asymmetric on purpose: a symmetric lobe reads as a bump swelling in
+            // place, a hard front with a long wake reads as light travelling through a tube.
+            const float WAKE_DECAY = 8.0;
+
+            // At rest the flow runs at this fraction of full; the surge opens it to 1.0. The
+            // scene's surge is the authored event, so the flow answers it instead of setting up
+            // a second, competing rhythm of its own.
+            const float REST_AMPLITUDE = 0.45;
+
             void main() {
-              float angle = vUv.x * 6.28318530718;
-              float broad = sin(angle * 3.0 - uTime * 0.18 + uPhase) * 0.5 + 0.5;
-              float fine = sin(angle * 11.0 + uTime * 0.11 - uPhase * 1.7) * 0.5 + 0.5;
-              float energy = pow(clamp(broad * 0.74 + fine * 0.26, 0.0, 1.0), 7.0);
+              float behind = fract(uTime * uSpeed - vUv.x * uHeads + uPhase);
+              float wake = exp(-behind * WAKE_DECAY);
+              // A dim breath just ahead of the front, so the leading edge is crisp without
+              // being a single-pixel step that shimmers as it travels.
+              float approach = exp(-(1.0 - behind) * WAKE_DECAY * 5.0) * 0.3;
+              float flow = clamp(wake + approach, 0.0, 1.0);
+              float energy = flow * mix(REST_AMPLITUDE, 1.0, clamp(uSurge, 0.0, 1.0));
               float crossSection = pow(sin(vUv.y * 3.14159265359), 0.72);
               float alpha = (0.05 + energy * 0.86) * crossSection * uIntensity *
                 (1.0 + uSurge * 0.72);
@@ -2402,6 +2478,7 @@
         tone,
         tubularSegments = 192,
         radialSegments = 8,
+        flowDirection = 1,
       ) {
         const group = new THREE.Group();
         const energyScale =
@@ -2417,7 +2494,8 @@
         const energyColor = tone === 'bronze' ? palette.bronzeEnergy : palette.silverEnergy;
         const coreMaterial = material.clone();
         coreMaterial.emissive.copy(energyColor);
-        coreMaterial.emissiveIntensity = (tone === 'bronze' ? 0.8 : 0.72) * energyScale;
+        coreMaterial.emissiveIntensity =
+          (tone === 'bronze' ? 0.8 : 0.72) * energyScale * RIM_CORE_REBALANCE;
 
         const core = createHorizontalTorus(
           radius,
@@ -2431,7 +2509,7 @@
         const haloMaterial = new THREE.MeshBasicMaterial({
           color: energyColor,
           transparent: true,
-          opacity: (tone === 'bronze' ? 0.16 : 0.14) * energyScale,
+          opacity: (tone === 'bronze' ? 0.16 : 0.14) * energyScale * RIM_HALO_REBALANCE,
           depthWrite: false,
           depthTest: true,
           blending: THREE.AdditiveBlending,
@@ -2454,7 +2532,13 @@
           radialSegments: Math.max(8, radialSegments),
         });
 
-        const veinMaterial = createEnergyVeinMaterial(tone, radius * 1.73, energyScale);
+        const veinMaterial = createEnergyVeinMaterial(
+          tone,
+          radius * 1.73,
+          energyScale * RIM_VEIN_GAIN,
+          radius,
+          flowDirection,
+        );
         const vein = createHorizontalTorus(
           radius,
           tube * 1.045,
@@ -2471,7 +2555,7 @@
             property: 'emissiveIntensity',
             channel: 'rims',
             base: coreMaterial.emissiveIntensity,
-            amplitude: 0.05 * energyScale,
+            amplitude: 0.05 * energyScale * RIM_CORE_REBALANCE,
             phase: radius * 1.13,
             speed: 0.2,
           },
@@ -2480,7 +2564,7 @@
             property: 'opacity',
             channel: 'rims',
             base: haloMaterial.opacity,
-            amplitude: 0.012 * energyScale,
+            amplitude: 0.012 * energyScale * RIM_HALO_REBALANCE,
             phase: radius * 1.13 + 0.8,
             speed: 0.2,
           },
@@ -2545,6 +2629,13 @@
 
         camera.aspect = aspect;
         camera.fov = 10.5;
+        // The framing solve above backs the camera off to fit the disc's width, so on a narrow
+        // viewport the distance grows without bound. The far plane has to follow it. A fixed
+        // far silently truncated the solve: below roughly 0.62 aspect the disc's far edge fell
+        // outside it, and below 0.585 the camera itself sat beyond it and the frame rendered as
+        // bare starfield. The portrait evidence in design-qa.md was captured at 0.75 and 0.735,
+        // just clear of that cliff, which is why no earlier pass saw it.
+        camera.far = distance + BACKDROP_RADIUS * 1.08;
         camera.position.copy(cameraTarget).addScaledVector(cameraDirection, distance);
         camera.lookAt(cameraTarget);
         camera.updateProjectionMatrix();
@@ -2660,7 +2751,7 @@
       function animate() {
         requestAnimationFrame(animate);
         const elapsed = reducedMotion ? reducedMotionTime : clock.getElapsedTime();
-        const time = elapsed * 0.66;
+        const time = elapsed * SCENE_TIME_SCALE;
         const surge = Math.pow(Math.max(0, Math.sin(time * 0.24 - 0.9)), 10);
 
         nebula.uniforms.uTime.value = time;

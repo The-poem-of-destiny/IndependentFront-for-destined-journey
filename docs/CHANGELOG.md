@@ -32,12 +32,27 @@ combat-v3-stress-test / narrative_context_example）移私有仓——工作树�
 
 **真机修出的四个引擎缺陷**（全部合入 master + 回归测试）：
 
-| PR  | 缺陷                                                 | 根因                                                                                                                                                                 |
-| --- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| #49 | 装包失败零日志                                       | DataSection 空 catch 吞错，只弹 toast                                                                                                                                |
-| #50 | 装包 DataCloneError「#<Object> could not be cloned」 | `packPending = ref(raw)` 被 Vue 深代理成 Proxy → savePreset(Proxy) / contentPacks.put(Proxy) 落库失败（Q-16 detach 纪律的漏网点——世界书有 detach，presets/整包没有） |
-| #51 | 装包后美化规则仍是占位 5 条                          | ① boot 竞态：beautifier.init 先于 pack provider 注册，之后没人刷新 ② pack 规则缺字段归一化（`defaultEnabled` 未转 `enabled` → 全判不激活）                           |
-| #52 | 地图加载失败（12.48MB 图源 30 秒超时中断）           | `MAP_OPEN_TIMEOUT_MS=30000` 砍掉慢网下载 + 只有内存缓存每次刷新重下 → v21 `mapBlobs` 字节本地化 + 下载不设超时 + 进度显示                                            |
+| PR  | 缺陷                                                 | 根因                                                                                                                                                                                        |
+| --- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #49 | 装包失败零日志                                       | DataSection 空 catch 吞错，只弹 toast                                                                                                                                                       |
+| #50 | 装包 DataCloneError「#<Object> could not be cloned」 | `packPending = ref(raw)` 被 Vue 深代理成 Proxy → savePreset(Proxy) / contentPacks.put(Proxy) 落库失败（Q-16 detach 纪律的漏网点——世界书有 detach，presets/整包没有）                        |
+| #51 | 装包后美化规则仍是占位 5 条                          | ① boot 竞态：beautifier.init 先于 pack provider 注册，之后没人刷新 ② pack 规则缺字段归一化（`defaultEnabled` 未转 `enabled` → 全判不激活）                                                  |
+| #52 | 地图加载失败（12.48MB 图源 30 秒超时中断）           | `MAP_OPEN_TIMEOUT_MS=30000` 砍掉慢网下载 + 只有内存缓存每次刷新重下 → v21 `mapBlobs` 字节本地化 + 下载不设超时 + 进度显示                                                                   |
+| #54 | 记忆每轮不落库（7 轮只有 1 条）                      | memory_summary 默认 prompt 教模型「剧情事件/时间为空时 hiddenLine 留空」，而解析器按 Q-03 裁定弃掉空 hiddenLine 的整条记忆 —— prompt 改为必写非空兜底句 + 契约回归测试（私有内容仓同修）    |
+| #55 | 进存档对话不自动滚到底                               | ChatFlow 只 watch messages.length：进存档是整数组替换（长度不变不触发）、挂载时消息已就位也不触发 —— 补 onMounted 滚动 + 数组引用 watch                                                     |
+| #57 | 快照回退角色不回退 / 对话流只回退不恢复              | ① refreshFromDb 角色同步是合并语义（内存独有角色保留）→ 恢复后角色整表替换 ② 快照不存 messages，恢复只能按 turn 截断 → 新快照随拍消息、恢复整体覆写（向前恢复成立，旧快照兜底截断）         |
+| #58 | char_gen 性格编码格式错误（WoAgy(F)）                | 旧版 prompt 广告白名单外幻影工具 call_item_gen → 模型一调报错即放弃全部工具、手编随机值 → 未知工具报错改可行动文案（引导写 XML 请求区块）+ 默认 prompt 工具白名单契约闸门（私有内容仓同修） |
+
+| PR | 缺陷 | 根因 |
+**R1-R4 之后补的一处仓库面缺口（2026-08-07）**：波 4 交换时顺手删掉了
+`reference/workshop-reference/` 与 `reference/_local-notes/` 两条 ignore（留下两条无 pattern
+的孤儿注释）。当时理由成立——`reference/` 整树已离场；但 R1 之后**真实内容会回到本机**
+（设计 v1.3 写明可从 `2afc23c` 提取，私有内容仓也发整树），于是这些路径变成
+「未跟踪且未忽略」，`git add -A` 一次就能把正文级语料推回公开仓。守门测试按 D32 只扫
+`public/data/**`，扫不到这一面。现补一张恢复面防误提交网：`/data/`、`/reference/`、
+`tests/agent-framework/`、`worldbook-ejs-corpus.test.ts`、四个内容工具脚本；同时删掉被它
+覆盖的三条旧规则（`data/worldbooks/_batch_*`、`.api-config*.json`、两条孤儿注释）。
+`git ls-files -i -c` 为空——没有任何已跟踪文件因此被忽略。
 
 ---
 
