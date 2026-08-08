@@ -9,7 +9,7 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
-### 图像 v2 — ComfyUI 本地后端 + 提示词方言系统 ｜ ✅ ComfyUI 真机已过；NAI 回归待真机（2026-08-08）
+### 图像 v2 — ComfyUI 本地后端 + 提示词方言系统 ｜ ✅ 真机全过（2026-08-08）
 
 设计: `docs/planning/2026-08-08-comfyui-image-provider-design.md`（C1–C16）。
 分支 `txt-2-img-comfyui`，5 波交付，**7252 tests 全绿**。
@@ -62,7 +62,11 @@ LLM 端点如实失败（D42 两出路）→「自己写提示词」→ 重画�
 ✅ 设置迁移在真实档上出新形状；用户工作流（UNETLoader + qwen CLIP/VAE 子图重建）值级替换实测。
 🩹 走查逮到一处：生成中的「中止（本次仍会计费）」对本地后端撒谎 —— 现按**记录上的**
 provider 判（在飞那张按它自己的后端计费，不按当前设置），comfy 记录只说「中止」。
-**DoD 剩余**: NovelAI 回归出一张图（需 NAI 令牌，设置迁移 + systemPrompt 退役都碰了它那条路）。
+✅ NovelAI 回归（2026-08-08 补）—— `scripts/nai-regression-smoke.ts` 走生产路径
+（方言解析 → composePrompt → buildNaiRequest 三重冗余 → generateNaiImage 真实客户端 →
+BFF → NAI）一次生成过：4.2s / 1.86MB PNG / content-type 仍是那个说谎的
+`binary/octet-stream`，字节权威原则再次兜住。🔴 token 是免费额度（约 30 次），
+这个脚本**不进循环、不进 CI**，手工按需跑。
 另记一条真机线索：视图曾**非重载**弹回首页（Pinia 存活而 currentView/activeSaveId 被清）——
 「弹回首页」有程序化路径，与此前「只可能是整页重载」的结论矛盾，待取证。
 
