@@ -32,6 +32,12 @@
         position: relative;
         isolation: isolate;
         background: #010107;
+        cursor: grab;
+        touch-action: none;
+      }
+
+      .magic-circle-stage.is-dragging {
+        cursor: grabbing;
       }
 
       #magic-circle-canvas {
@@ -115,8 +121,8 @@
 
       .glow-console__dials {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 18px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px 18px;
       }
 
       .glow-dial {
@@ -168,6 +174,10 @@
 
       .glow-dial[data-tone='silver'] .glow-dial__face {
         --dial-color: #a9bbff;
+      }
+
+      .glow-dial[data-tone='violet'] .glow-dial__face {
+        --dial-color: #9f73ff;
       }
 
       .glow-dial__face::before {
@@ -294,13 +304,13 @@
                 min="0"
                 max="200"
                 step="1"
-                value="180"
+                value="130"
               />
               <span class="glow-dial__face" aria-hidden="true">
                 <span class="glow-dial__needle"></span>
               </span>
             </span>
-            <output class="glow-dial__value" for="letter-glow">180%</output>
+            <output class="glow-dial__value" for="letter-glow">130%</output>
           </label>
           <label class="glow-dial" data-tone="silver">
             <span class="glow-dial__label">Rims</span>
@@ -314,13 +324,73 @@
                 min="0"
                 max="200"
                 step="1"
-                value="160"
+                value="40"
               />
               <span class="glow-dial__face" aria-hidden="true">
                 <span class="glow-dial__needle"></span>
               </span>
             </span>
-            <output class="glow-dial__value" for="rim-glow">160%</output>
+            <output class="glow-dial__value" for="rim-glow">40%</output>
+          </label>
+          <label class="glow-dial" data-tone="violet">
+            <span class="glow-dial__label">Bloom</span>
+            <span class="glow-dial__control" data-dial-control>
+              <input
+                class="glow-dial__input"
+                id="bloom-glow"
+                data-glow-channel="bloom"
+                aria-label="Bloom scatter strength"
+                type="range"
+                min="0"
+                max="200"
+                step="1"
+                value="100"
+              />
+              <span class="glow-dial__face" aria-hidden="true">
+                <span class="glow-dial__needle"></span>
+              </span>
+            </span>
+            <output class="glow-dial__value" for="bloom-glow">100%</output>
+          </label>
+          <label class="glow-dial" data-tone="violet">
+            <span class="glow-dial__label">Particles</span>
+            <span class="glow-dial__control" data-dial-control>
+              <input
+                class="glow-dial__input"
+                id="particle-glow"
+                data-glow-channel="particles"
+                aria-label="Particle and streak brightness"
+                type="range"
+                min="0"
+                max="200"
+                step="1"
+                value="55"
+              />
+              <span class="glow-dial__face" aria-hidden="true">
+                <span class="glow-dial__needle"></span>
+              </span>
+            </span>
+            <output class="glow-dial__value" for="particle-glow">55%</output>
+          </label>
+          <label class="glow-dial" data-tone="violet">
+            <span class="glow-dial__label">Sky</span>
+            <span class="glow-dial__control" data-dial-control>
+              <input
+                class="glow-dial__input"
+                id="sky-glow"
+                data-glow-channel="sky"
+                aria-label="Nebula, aurora and starfield brightness"
+                type="range"
+                min="0"
+                max="200"
+                step="1"
+                value="75"
+              />
+              <span class="glow-dial__face" aria-hidden="true">
+                <span class="glow-dial__needle"></span>
+              </span>
+            </span>
+            <output class="glow-dial__value" for="sky-glow">75%</output>
           </label>
         </div>
       </aside>
@@ -334,12 +404,14 @@
       import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
       import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
       import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-      import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+      import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
       const TAU = Math.PI * 2;
       const canvas = document.querySelector('#magic-circle-canvas');
       const stage = document.querySelector('.magic-circle-stage');
-      const glowSettings = { letters: 1.8, rims: 1.6 };
+      // Owner-set presentation defaults (2026-08-08); the dial markup carries the same
+      // values, and setupGlowControls() re-syncs this object from the inputs at startup.
+      const glowSettings = { letters: 1.3, rims: 0.4, bloom: 1, particles: 0.55, sky: 0.75 };
       const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
       const random = mulberry32(0xb1121ab9);
 
@@ -400,16 +472,251 @@
       const outerGlowProjectionSample = new THREE.Vector3(0, -0.075, 4.33);
       const outerGlowProjectionSampleInward = new THREE.Vector3(0, -0.075, 4.32);
       const referenceOuterGlowPixelsPerWorld = 108.1;
+
+      // Experimental orbit: dragging the stage moves the camera along a vertical arc at a
+      // FIXED distance from the target — elevation only, azimuth stays authored. The distance
+      // continues to come from resize()'s framing solve, so dragging never zooms.
+      const CAMERA_ELEVATION_DEFAULT = 36.5;
+      const CAMERA_ELEVATION_MIN = 14;
+      const CAMERA_ELEVATION_MAX = 74;
+      let cameraElevationDeg = CAMERA_ELEVATION_DEFAULT;
+      let cameraFramingDistance = 34.2;
+      let viewportHeightPx = 1;
       const cameraDirection = new THREE.Vector3(
         0,
-        Math.sin(THREE.MathUtils.degToRad(36.5)),
-        Math.cos(THREE.MathUtils.degToRad(36.5)),
+        Math.sin(THREE.MathUtils.degToRad(cameraElevationDeg)),
+        Math.cos(THREE.MathUtils.degToRad(cameraElevationDeg)),
       );
+
+      // Physically-based mip-chain bloom, replacing UnrealBloomPass. The old pass is why the
+      // glow read as period CGI: a hard luminance threshold (0.52) made highlights pop in and
+      // out of the halo with an abrupt inner edge, its five fixed gaussian levels left visible
+      // banding rings, and the additive composite pushed every bright core toward flat white.
+      // This pass has NO threshold — everything scatters a little, as in a real lens — using
+      // the 13-tap downsample / 3x3 tent upsample pyramid that has been the production
+      // standard since COD:AW (Jimenez 2014). The first downsample applies a Karis average so
+      // single-pixel sparks (this scene is full of them) blur into soft motes instead of
+      // strobing fireflies. The composite is energy-conserving: mix(scene, bloom, strength),
+      // never scene + bloom, so raising the strength trades sharpness for halation instead of
+      // blowing the frame out. `strength`/`radius` keep their names because animate() drives
+      // them every frame, but their scales are new — strength is now the scatter fraction
+      // (~0.1..0.3 useful) and radius the per-level pyramid feedback (~0.5..0.95 useful).
+      class MipBloomPass extends Pass {
+        constructor() {
+          super();
+          this.strength = 0.18;
+          this.radius = 0.85;
+          this.mips = [];
+          this.quad = new FullScreenQuad(null);
+
+          const vertexShader = /* glsl */ `
+            varying vec2 vUv;
+
+            void main() {
+              vUv = uv;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `;
+
+          this.downMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+              tInput: { value: null },
+              uTexel: { value: new THREE.Vector2(1, 1) },
+              uKaris: { value: 0 },
+            },
+            vertexShader,
+            fragmentShader: /* glsl */ `
+              uniform sampler2D tInput;
+              uniform vec2 uTexel;
+              uniform float uKaris;
+              varying vec2 vUv;
+
+              float karisWeight(vec3 colorSample) {
+                return 1.0 / (1.0 + max(colorSample.r, max(colorSample.g, colorSample.b)));
+              }
+
+              void main() {
+                vec2 texel = uTexel;
+                vec3 a = texture2D(tInput, vUv + texel * vec2(-2.0, 2.0)).rgb;
+                vec3 b = texture2D(tInput, vUv + texel * vec2(0.0, 2.0)).rgb;
+                vec3 c = texture2D(tInput, vUv + texel * vec2(2.0, 2.0)).rgb;
+                vec3 d = texture2D(tInput, vUv + texel * vec2(-2.0, 0.0)).rgb;
+                vec3 e = texture2D(tInput, vUv).rgb;
+                vec3 f = texture2D(tInput, vUv + texel * vec2(2.0, 0.0)).rgb;
+                vec3 g = texture2D(tInput, vUv + texel * vec2(-2.0, -2.0)).rgb;
+                vec3 h = texture2D(tInput, vUv + texel * vec2(0.0, -2.0)).rgb;
+                vec3 i = texture2D(tInput, vUv + texel * vec2(2.0, -2.0)).rgb;
+                vec3 j = texture2D(tInput, vUv + texel * vec2(-1.0, 1.0)).rgb;
+                vec3 k = texture2D(tInput, vUv + texel * vec2(1.0, 1.0)).rgb;
+                vec3 l = texture2D(tInput, vUv + texel * vec2(-1.0, -1.0)).rgb;
+                vec3 m = texture2D(tInput, vUv + texel * vec2(1.0, -1.0)).rgb;
+
+                if (uKaris > 0.5) {
+                  // First downsample only: weight the five overlapping boxes by 1/(1+maxRGB)
+                  // so an isolated HDR spark cannot dominate its neighbourhood. Without this
+                  // the particle field shimmers as sparks cross pixel centres frame to frame.
+                  vec3 box0 = (a + b + d + e) * 0.25;
+                  vec3 box1 = (b + c + e + f) * 0.25;
+                  vec3 box2 = (d + e + g + h) * 0.25;
+                  vec3 box3 = (e + f + h + i) * 0.25;
+                  vec3 box4 = (j + k + l + m) * 0.25;
+                  float w0 = karisWeight(box0);
+                  float w1 = karisWeight(box1);
+                  float w2 = karisWeight(box2);
+                  float w3 = karisWeight(box3);
+                  float w4 = karisWeight(box4);
+                  vec3 result = box4 * (0.5 * w4) + (box0 * w0 + box1 * w1 + box2 * w2 + box3 * w3) * 0.125;
+                  float norm = 0.5 * w4 + (w0 + w1 + w2 + w3) * 0.125;
+                  gl_FragColor = vec4(result / max(norm, 1e-4), 1.0);
+                } else {
+                  vec3 result = e * 0.125;
+                  result += (a + c + g + i) * 0.03125;
+                  result += (b + d + f + h) * 0.0625;
+                  result += (j + k + l + m) * 0.125;
+                  gl_FragColor = vec4(result, 1.0);
+                }
+              }
+            `,
+            depthTest: false,
+            depthWrite: false,
+          });
+
+          // Rendered additively INTO the larger mip, which still holds its own downsample:
+          // mip[i] += tent(mip[i+1]) * radius. The pyramid therefore accumulates
+          // sum(radius^level * blur_level), and compositeMaterial divides by the matching
+          // scalar so changing the radius reshapes the halo without changing its energy.
+          this.upMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+              tInput: { value: null },
+              uTexel: { value: new THREE.Vector2(1, 1) },
+              uScale: { value: 1 },
+            },
+            vertexShader,
+            fragmentShader: /* glsl */ `
+              uniform sampler2D tInput;
+              uniform vec2 uTexel;
+              uniform float uScale;
+              varying vec2 vUv;
+
+              void main() {
+                vec2 texel = uTexel;
+                vec3 result = texture2D(tInput, vUv + texel * vec2(-1.0, 1.0)).rgb;
+                result += texture2D(tInput, vUv + texel * vec2(0.0, 1.0)).rgb * 2.0;
+                result += texture2D(tInput, vUv + texel * vec2(1.0, 1.0)).rgb;
+                result += texture2D(tInput, vUv + texel * vec2(-1.0, 0.0)).rgb * 2.0;
+                result += texture2D(tInput, vUv).rgb * 4.0;
+                result += texture2D(tInput, vUv + texel * vec2(1.0, 0.0)).rgb * 2.0;
+                result += texture2D(tInput, vUv + texel * vec2(-1.0, -1.0)).rgb;
+                result += texture2D(tInput, vUv + texel * vec2(0.0, -1.0)).rgb * 2.0;
+                result += texture2D(tInput, vUv + texel * vec2(1.0, -1.0)).rgb;
+                gl_FragColor = vec4(result * (uScale / 16.0), 1.0);
+              }
+            `,
+            depthTest: false,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            transparent: true,
+          });
+
+          this.compositeMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+              tDiffuse: { value: null },
+              tBloom: { value: null },
+              uStrength: { value: this.strength },
+              uNorm: { value: 1 },
+            },
+            vertexShader,
+            fragmentShader: /* glsl */ `
+              uniform sampler2D tDiffuse;
+              uniform sampler2D tBloom;
+              uniform float uStrength;
+              uniform float uNorm;
+              varying vec2 vUv;
+
+              void main() {
+                vec3 sceneColor = texture2D(tDiffuse, vUv).rgb;
+                vec3 bloomColor = texture2D(tBloom, vUv).rgb / uNorm;
+                gl_FragColor = vec4(mix(sceneColor, bloomColor, uStrength), 1.0);
+              }
+            `,
+            depthTest: false,
+            depthWrite: false,
+          });
+        }
+
+        setSize(width, height) {
+          for (const mip of this.mips) mip.target.dispose();
+          this.mips = [];
+          let mipWidth = Math.max(1, Math.floor(width / 2));
+          let mipHeight = Math.max(1, Math.floor(height / 2));
+          // Deep mips are what carry the wide halation; stop only once the buffer is too
+          // small to blur meaningfully. At 1600x1000 this yields six levels (800 → 25).
+          while (Math.min(mipWidth, mipHeight) >= 16 && this.mips.length < 8) {
+            this.mips.push({
+              target: new THREE.WebGLRenderTarget(mipWidth, mipHeight, {
+                type: THREE.HalfFloatType,
+                minFilter: THREE.LinearFilter,
+                magFilter: THREE.LinearFilter,
+                depthBuffer: false,
+              }),
+              texelSize: new THREE.Vector2(1 / mipWidth, 1 / mipHeight),
+            });
+            mipWidth = Math.max(1, Math.floor(mipWidth / 2));
+            mipHeight = Math.max(1, Math.floor(mipHeight / 2));
+          }
+        }
+
+        render(renderer, writeBuffer, readBuffer) {
+          if (this.mips.length === 0) return;
+          const previousAutoClear = renderer.autoClear;
+          renderer.autoClear = false;
+
+          let sourceTexture = readBuffer.texture;
+          let sourceTexel = new THREE.Vector2(1 / readBuffer.width, 1 / readBuffer.height);
+          this.quad.material = this.downMaterial;
+          for (let level = 0; level < this.mips.length; level += 1) {
+            const mip = this.mips[level];
+            this.downMaterial.uniforms.tInput.value = sourceTexture;
+            this.downMaterial.uniforms.uTexel.value.copy(sourceTexel);
+            this.downMaterial.uniforms.uKaris.value = level === 0 ? 1 : 0;
+            renderer.setRenderTarget(mip.target);
+            renderer.clear();
+            this.quad.render(renderer);
+            sourceTexture = mip.target.texture;
+            sourceTexel = mip.texelSize;
+          }
+
+          this.quad.material = this.upMaterial;
+          this.upMaterial.uniforms.uScale.value = this.radius;
+          for (let level = this.mips.length - 2; level >= 0; level -= 1) {
+            const smaller = this.mips[level + 1];
+            this.upMaterial.uniforms.tInput.value = smaller.target.texture;
+            this.upMaterial.uniforms.uTexel.value.copy(smaller.texelSize);
+            renderer.setRenderTarget(this.mips[level].target);
+            this.quad.render(renderer);
+          }
+
+          let norm = 0;
+          for (let level = 0; level < this.mips.length; level += 1) {
+            norm += Math.pow(this.radius, level);
+          }
+          this.quad.material = this.compositeMaterial;
+          this.compositeMaterial.uniforms.tDiffuse.value = readBuffer.texture;
+          this.compositeMaterial.uniforms.tBloom.value = this.mips[0].target.texture;
+          this.compositeMaterial.uniforms.uStrength.value = this.strength;
+          this.compositeMaterial.uniforms.uNorm.value = norm;
+          renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+          if (!this.renderToScreen) renderer.clear();
+          this.quad.render(renderer);
+
+          renderer.autoClear = previousAutoClear;
+        }
+      }
 
       const composer = new EffectComposer(renderer);
       composer.addPass(new RenderPass(scene, camera));
 
-      const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.42, 0.52, 0.52);
+      const bloom = new MipBloomPass();
       composer.addPass(bloom);
 
       const gradePass = new ShaderPass({
@@ -455,7 +762,10 @@
 
             float grain = hash21(vUv * uResolution + fract(uTime * 0.061) * 79.0) - 0.5;
             color += grain * 0.007;
-            color *= 1.0 - smoothstep(0.12, 0.72, radial) * 0.48;
+            // Eased from 0.48 at 0.12: with the single-hue dome the corners fell to pure
+            // black and the frame read as a disc floating in nothing. The richer dome plus
+            // this lighter vignette keeps the corners alive without losing the focal pull.
+            color *= 1.0 - smoothstep(0.16, 0.78, radial) * 0.4;
 
             gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);
           }
@@ -767,6 +1077,7 @@
         runeIgnitionTracks.push({
           time: runeIgnitionMaterial.uniforms.uTime,
           strength: runeIgnitionMaterial.uniforms.uStrength,
+          surge: runeIgnitionMaterial.uniforms.uSurge,
           base: registerEnergyScale,
         });
 
@@ -912,8 +1223,9 @@
             uTime: { value: 0 },
             uStrength: { value: 0 },
             uSeed: { value: 17.31 + layerIndex * 29.17 },
+            uSurge: { value: 0 },
             uGlyphCount: { value: glyphCount },
-            uCycleSeconds: { value: 5.1 + layerIndex * 0.83 },
+            uCycleSeconds: { value: 4.2 + layerIndex * 0.66 },
             uBandInner: { value: (config.inner / config.outer) * bandOuter },
             uBandOuter: { value: bandOuter },
             uColor: { value: energyColor },
@@ -932,6 +1244,7 @@
             uniform float uTime;
             uniform float uStrength;
             uniform float uSeed;
+            uniform float uSurge;
             uniform float uGlyphCount;
             uniform float uCycleSeconds;
             uniform float uBandInner;
@@ -1004,6 +1317,24 @@
               float attack = smoothstep(0.04, 0.2, life);
               float release = 1.0 - smoothstep(0.62, 0.96, life);
               float envelope = selected * attack * release;
+
+              // A short white-hot pop right as the charge lands. The eased envelope alone
+              // read as a slow fade-in that the eye never caught starting; the pop marks the
+              // moment, then the tempered-metal charge carries the tail.
+              float flash =
+                selected * smoothstep(0.04, 0.14, life) * (1.0 - smoothstep(0.14, 0.4, life));
+
+              // Surge chain: while the scene's authored surge passes, an arc of charge sweeps
+              // the register, igniting a couple of glyph cells at a time. Direction and phase
+              // come from the layer seed so the four registers hand the wave to each other
+              // instead of firing in lockstep. Outside the surge this term is exactly zero.
+              float waveDirection = mix(1.0, -1.0, step(0.5, fract(uSeed * 0.531)));
+              float wavefront = fract(uTime * waveDirection / 9.0 + uSeed * 0.37) * uGlyphCount;
+              float waveDistance = abs(
+                mod(slice - wavefront + uGlyphCount * 0.5, uGlyphCount) - uGlyphCount * 0.5
+              );
+              float wave = (1.0 - smoothstep(0.8, 2.4, waveDistance)) * uSurge;
+              envelope = max(envelope, wave * 0.85);
               if (envelope < 0.002) discard;
 
               float radial = clamp(
@@ -1018,13 +1349,14 @@
                 (0.52 + interior * 0.16 + engravedEdge * 0.34) *
                 radialPatina * chargeVariation;
               float hotVein = interior * 0.1 + engravedEdge * 0.38;
-              vec3 radiance = uColor * metalVein * 2.1 + uHotColor * hotVein * 1.9;
+              vec3 radiance = uColor * metalVein * 2.3 + uHotColor * hotVein * 2.05;
+              radiance += uHotColor * flash * (interior * 0.5 + engravedEdge * 0.5) * 1.7;
               float dial = min(uStrength, 2.0);
               float alpha = clamp(
                 envelope * dial * glyphAlpha *
-                  (0.5 + interior * 0.12 + engravedEdge * 0.18),
+                  (0.5 + interior * 0.12 + engravedEdge * 0.18 + flash * 0.2),
                 0.0,
-                0.86
+                0.92
               );
               gl_FragColor = vec4(radiance * (1.08 + dial * 0.44), alpha);
             }
@@ -1934,6 +2266,7 @@
           uTime: { value: 0 },
           uPixelRatio: { value: 1 },
           uSurge: { value: 0 },
+          uDial: { value: 1 },
         };
         const material = new THREE.ShaderMaterial({
           uniforms,
@@ -1991,6 +2324,7 @@
             }
           `,
           fragmentShader: /* glsl */ `
+            uniform float uDial;
             varying vec3 vColor;
             varying float vAlpha;
             varying float vHeat;
@@ -2002,7 +2336,7 @@
               float halo = pow(max(1.0 - radius, 0.0), 2.35);
               float core = smoothstep(0.34, 0.0, radius);
               vec3 color = mix(vColor, vec3(1.0), core * (0.56 + vHeat * 0.18));
-              float alpha = halo * vAlpha;
+              float alpha = halo * vAlpha * uDial;
               if (alpha < 0.004) discard;
               gl_FragColor = vec4(color, alpha);
             }
@@ -2073,6 +2407,7 @@
         const uniforms = {
           uTime: { value: 0 },
           uSurge: { value: 0 },
+          uDial: { value: 1 },
         };
         const material = new THREE.ShaderMaterial({
           uniforms,
@@ -2119,6 +2454,7 @@
             }
           `,
           fragmentShader: /* glsl */ `
+            uniform float uDial;
             varying vec2 vUv;
             varying vec3 vColor;
             varying float vAlpha;
@@ -2129,7 +2465,7 @@
               float tail = smoothstep(0.0, 0.16, vUv.x) * (1.0 - smoothstep(0.86, 1.0, vUv.x));
               float head = exp(-pow((vUv.x - 0.78) * 7.2, 2.0));
               float energy = edge * tail * (0.34 + vUv.x * 0.66) + edge * head * 0.72;
-              float alpha = energy * vAlpha;
+              float alpha = energy * vAlpha * uDial;
               if (alpha < 0.006) discard;
               vec3 color = mix(vColor, vec3(1.0), head * (0.5 + vHeat * 0.18));
               gl_FragColor = vec4(color, alpha);
@@ -2146,6 +2482,7 @@
       function createNebulaDome() {
         const uniforms = {
           uTime: { value: 0 },
+          uDial: { value: 1 },
         };
         const material = new THREE.ShaderMaterial({
           uniforms,
@@ -2162,6 +2499,7 @@
           `,
           fragmentShader: /* glsl */ `
             uniform float uTime;
+            uniform float uDial;
             varying vec3 vDirection;
 
             float hash31(vec3 point) {
@@ -2206,12 +2544,44 @@
               float broad = fbm(direction * 2.4 + vec3(time, -time * 0.4, time * 0.7));
               float detail = fbm(direction * 6.8 - vec3(time * 0.2, time, -time * 0.3));
               float band = exp(-abs(direction.y * 1.5 + sin(direction.x * 4.0) * 0.15) * 3.4);
-              float cloud = smoothstep(0.48, 0.79, broad * 0.72 + detail * 0.34 + band * 0.16);
+              float cloud = smoothstep(0.43, 0.78, broad * 0.72 + detail * 0.34 + band * 0.16);
               float veins = pow(1.0 - abs(detail * 2.0 - 1.0), 6.0) * cloud;
-              vec3 color = vec3(0.0018, 0.0015, 0.006);
-              color += vec3(0.095, 0.019, 0.15) * cloud * 0.46;
-              color += vec3(0.024, 0.022, 0.074) * pow(cloud, 1.8) * 0.31;
-              color += vec3(0.12, 0.035, 0.19) * veins * 0.18;
+
+              // The dome used to be a single violet: every cloud, vein and corner the same
+              // hue, which read as a flat backdrop card. A slow large-scale field now drifts
+              // parts of the cloud toward teal and a few pockets toward ember, so the sky
+              // reads as layered nebula. Both accents stay well below the violet so the
+              // astrolabe keeps the colour lead.
+              float hueDrift = fbm(direction * 1.35 + vec3(-time * 0.6, time * 0.25, 4.7));
+              vec3 violetHue = vec3(0.095, 0.019, 0.15);
+              vec3 tealHue = vec3(0.016, 0.075, 0.115);
+              vec3 emberHue = vec3(0.115, 0.045, 0.028);
+              vec3 cloudHue = mix(violetHue, tealHue, smoothstep(0.34, 0.72, hueDrift) * 0.55);
+              float emberField = fbm(direction * 2.2 + vec3(11.7, 5.1, -3.9));
+              cloudHue = mix(cloudHue, emberHue, smoothstep(0.6, 0.88, emberField) * 0.3);
+
+              // Everything above the base floor scales with the Sky dial; the floor itself
+              // stays, so 0% reads as a clear night rather than a rendering hole.
+              vec3 color = vec3(0.0042, 0.0036, 0.0125);
+              vec3 skyLayers = cloudHue * cloud * 0.56;
+              skyLayers += vec3(0.024, 0.022, 0.074) * pow(cloud, 1.8) * 0.31;
+              skyLayers += vec3(0.12, 0.035, 0.19) * veins * 0.18;
+
+              // Aurora curtains just above the horizon. The cloud drift above is glacial on
+              // purpose; the curtains take their own faster clock or they would read as a
+              // stationary green stripe. Kept dim: they are set dressing behind the disc.
+              float auroraTime = uTime * 0.045;
+              float azimuth = atan(direction.x, direction.z);
+              float curtainWave =
+                fbm(vec3(azimuth * 1.6, direction.y * 3.0 - auroraTime * 0.9, 2.5)) - 0.5;
+              float curtainBand = exp(-pow((direction.y - 0.16 - curtainWave * 0.14) * 5.2, 2.0));
+              float curtainRipple =
+                0.55 + 0.45 * sin(azimuth * 7.0 + auroraTime * 2.2 + curtainWave * 5.0);
+              float aurora = curtainBand * curtainRipple;
+              skyLayers += vec3(0.035, 0.11, 0.085) * aurora * 0.34;
+              skyLayers += vec3(0.05, 0.03, 0.12) * curtainBand * 0.12;
+              color += skyLayers * uDial;
+
               gl_FragColor = vec4(color, 1.0);
             }
           `,
@@ -2252,6 +2622,8 @@
         const material = new THREE.ShaderMaterial({
           uniforms: {
             uPixelRatio: { value: 1 },
+            uTime: { value: 0 },
+            uDial: { value: 1 },
           },
           transparent: true,
           depthWrite: false,
@@ -2260,10 +2632,14 @@
           vertexShader: /* glsl */ `
             attribute float aSize;
             varying vec3 vColor;
+            varying float vPhase;
             uniform float uPixelRatio;
 
             void main() {
               vColor = color;
+              // Deterministic per-star phase from the position, so the twinkle pattern is
+              // stable across reloads without another attribute upload.
+              vPhase = fract(sin(dot(position, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
               vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
               gl_Position = projectionMatrix * viewPosition;
               gl_PointSize = clamp(aSize * uPixelRatio * (105.0 / max(-viewPosition.z, 1.0)), 0.5, 4.0);
@@ -2271,13 +2647,19 @@
           `,
           fragmentShader: /* glsl */ `
             varying vec3 vColor;
+            varying float vPhase;
+            uniform float uTime;
+            uniform float uDial;
 
             void main() {
               vec2 point = gl_PointCoord - 0.5;
               float radius = length(point);
               float alpha = smoothstep(0.5, 0.04, radius);
               if (alpha < 0.01) discard;
-              gl_FragColor = vec4(vColor, alpha * 0.72);
+              // Gentle scintillation: +/-22% at 0.6..2.3 rad/s of scene time, per-star phase.
+              // Any deeper and the field strobes; any faster and it reads as electrical noise.
+              float twinkle = 0.78 + 0.22 * sin(uTime * (0.6 + vPhase * 1.7) + vPhase * 6.2832);
+              gl_FragColor = vec4(vColor, alpha * 0.72 * twinkle * uDial);
             }
           `,
         });
@@ -2624,37 +3006,114 @@
         renderer.setPixelRatio(pixelRatio);
         renderer.setSize(width, height, false);
         composer.setPixelRatio(pixelRatio);
+        // composer.setSize forwards device-pixel dimensions to every pass, including the
+        // bloom pyramid; a second explicit bloom.setSize(width, height) here would rebuild
+        // it at CSS-pixel size and quietly halve the halo resolution on hiDPI screens.
         composer.setSize(width, height);
-        bloom.setSize(width, height);
 
         camera.aspect = aspect;
         camera.fov = 10.5;
-        // The framing solve above backs the camera off to fit the disc's width, so on a narrow
+        cameraFramingDistance = distance;
+        viewportHeightPx = height;
+        // A drag may have raised the camera on a wide viewport where a narrower one cannot
+        // vertically contain that elevation; re-clamp before placing.
+        cameraElevationDeg = clampCameraElevation(cameraElevationDeg);
+        placeCamera();
+
+        gradePass.uniforms.uResolution.value.set(width * pixelRatio, height * pixelRatio);
+        stars.userData.material.uniforms.uPixelRatio.value = pixelRatio;
+        particleField.uniforms.uPixelRatio.value = pixelRatio;
+      }
+
+      // The vertical ceiling of the drag depends on the viewport: the framing solve fits the
+      // disc's WIDTH, and the projected height of the tilted disc grows with sin(elevation),
+      // so on wide aspects a high camera pushes the far rim off the top of the frame. The
+      // predicate mirrors the framing solve (5.25 half-width plus glow margin, perspective
+      // shrink of the far rim) and is walked in whole degrees — an analytic inverse is not
+      // worth the fragility here.
+      function clampCameraElevation(degrees) {
+        const halfVisibleHeight =
+          cameraFramingDistance * Math.tan(THREE.MathUtils.degToRad(10.5) / 2);
+        let ceiling = CAMERA_ELEVATION_MIN;
+        for (
+          let candidate = CAMERA_ELEVATION_MAX;
+          candidate >= CAMERA_ELEVATION_MIN;
+          candidate -= 1
+        ) {
+          const radians = THREE.MathUtils.degToRad(candidate);
+          const projectedHalfHeight =
+            (5.45 * Math.sin(radians) * cameraFramingDistance) /
+            (cameraFramingDistance + 5.25 * Math.cos(radians) * 0.8);
+          if (projectedHalfHeight <= halfVisibleHeight * 0.97) {
+            ceiling = candidate;
+            break;
+          }
+        }
+        // The shipped default always remains reachable: it is the calibrated composition and
+        // the approximation above must never clamp us out of it.
+        ceiling = Math.max(ceiling, CAMERA_ELEVATION_DEFAULT);
+        return THREE.MathUtils.clamp(degrees, CAMERA_ELEVATION_MIN, ceiling);
+      }
+
+      function placeCamera() {
+        const radians = THREE.MathUtils.degToRad(cameraElevationDeg);
+        cameraDirection.set(0, Math.sin(radians), Math.cos(radians));
+        // The framing solve backs the camera off to fit the disc's width, so on a narrow
         // viewport the distance grows without bound. The far plane has to follow it. A fixed
         // far silently truncated the solve: below roughly 0.62 aspect the disc's far edge fell
         // outside it, and below 0.585 the camera itself sat beyond it and the frame rendered as
         // bare starfield. The portrait evidence in design-qa.md was captured at 0.75 and 0.735,
         // just clear of that cliff, which is why no earlier pass saw it.
-        camera.far = distance + BACKDROP_RADIUS * 1.08;
-        camera.position.copy(cameraTarget).addScaledVector(cameraDirection, distance);
+        camera.far = cameraFramingDistance + BACKDROP_RADIUS * 1.08;
+        camera.position.copy(cameraTarget).addScaledVector(cameraDirection, cameraFramingDistance);
         camera.lookAt(cameraTarget);
         camera.updateProjectionMatrix();
         camera.updateMatrixWorld();
 
+        // The screen-space glow compensation reads the camera projection, so it must rerun
+        // after every pose change — drags included — or the halo radii drift with elevation.
         const projectedOuter = outerGlowProjectionSample.clone().project(camera);
         const projectedInner = outerGlowProjectionSampleInward.clone().project(camera);
         const projectedPixelsPerWorld =
-          (Math.abs(projectedOuter.y - projectedInner.y) * height * 0.5) / 0.01;
+          (Math.abs(projectedOuter.y - projectedInner.y) * viewportHeightPx * 0.5) / 0.01;
         const nextScreenGlowScale = THREE.MathUtils.clamp(
           referenceOuterGlowPixelsPerWorld / projectedPixelsPerWorld,
           0.35,
           4,
         );
         updateScreenSpaceGlowScale(nextScreenGlowScale);
+      }
 
-        gradePass.uniforms.uResolution.value.set(width * pixelRatio, height * pixelRatio);
-        stars.userData.material.uniforms.uPixelRatio.value = pixelRatio;
-        particleField.uniforms.uPixelRatio.value = pixelRatio;
+      function setupCameraDrag() {
+        let activePointerId = null;
+        let lastPointerY = 0;
+
+        stage.addEventListener('pointerdown', (event) => {
+          if (event.button !== 0) return;
+          // The glow console owns its own pointer interactions; a drag that starts there
+          // must not also steer the camera.
+          if (event.target.closest('.glow-console')) return;
+          activePointerId = event.pointerId;
+          lastPointerY = event.clientY;
+          stage.setPointerCapture(event.pointerId);
+          stage.classList.add('is-dragging');
+        });
+        stage.addEventListener('pointermove', (event) => {
+          if (event.pointerId !== activePointerId) return;
+          const deltaY = event.clientY - lastPointerY;
+          lastPointerY = event.clientY;
+          // Dragging up raises the camera toward top-down; 0.22 deg/px spans the full
+          // authored range in roughly a quarter of a typical viewport height.
+          cameraElevationDeg = clampCameraElevation(cameraElevationDeg - deltaY * 0.22);
+          placeCamera();
+        });
+        const endDrag = (event) => {
+          if (event.pointerId !== activePointerId) return;
+          activePointerId = null;
+          stage.classList.remove('is-dragging');
+        };
+        stage.addEventListener('pointerup', endDrag);
+        stage.addEventListener('pointercancel', endDrag);
       }
 
       function setupGlowControls() {
@@ -2748,8 +3207,18 @@
         });
       }
 
-      function animate() {
+      // 30fps cap. The piece is a slow ambient animation — nothing in it needs 60/120fps,
+      // and on laptops the uncapped loop ran the GPU hot for no visible gain. Scene time
+      // still comes from the wall clock, so the cap changes smoothness only, never tempo.
+      const FRAME_INTERVAL_MS = 1000 / 30;
+      let lastFrameStamp = -Infinity;
+
+      function animate(frameStamp = 0) {
         requestAnimationFrame(animate);
+        // The -1 tolerance keeps a 60Hz display on exact halves (every 2nd frame = 30fps)
+        // instead of drifting to every 3rd when rAF lands a fraction of a ms early.
+        if (frameStamp - lastFrameStamp < FRAME_INTERVAL_MS - 1) return;
+        lastFrameStamp = frameStamp;
         const elapsed = reducedMotion ? reducedMotionTime : clock.getElapsedTime();
         const time = elapsed * SCENE_TIME_SCALE;
         const surge = Math.pow(Math.max(0, Math.sin(time * 0.24 - 0.9)), 10);
@@ -2762,8 +3231,16 @@
         orbitStreaks.uniforms.uTime.value = time;
         orbitStreaks.uniforms.uSurge.value = surge;
         const averageGlow = (glowSettings.letters + glowSettings.rims) * 0.5;
-        bloom.strength = 0.18 + averageGlow * 0.24 + surge * (0.12 + averageGlow * 0.07);
-        bloom.radius = 0.42 + Math.min(averageGlow, 2) * 0.1 + surge * 0.08;
+        // Scatter fraction and pyramid feedback for MipBloomPass — new scales, see the pass.
+        // Rest state at the shipped dials (averageGlow 1.7) sits at ~0.15 scatter; the surge
+        // widens and brightens the halation instead of adding a second additive layer.
+        bloom.strength =
+          (0.08 + averageGlow * 0.042 + surge * (0.05 + averageGlow * 0.02)) * glowSettings.bloom;
+        bloom.radius = 0.72 + Math.min(averageGlow, 2) * 0.06 + surge * 0.08;
+        particleField.uniforms.uDial.value = glowSettings.particles;
+        orbitStreaks.uniforms.uDial.value = glowSettings.particles;
+        nebula.uniforms.uDial.value = glowSettings.sky;
+        stars.userData.material.uniforms.uDial.value = glowSettings.sky;
 
         for (const track of motionTracks) {
           track.group.rotation.y = track.phase + (time * TAU * track.direction) / track.period;
@@ -2777,7 +3254,9 @@
           (0.3 + Math.sin(time * 0.42) * 0.035 + surge * 0.34) * Math.max(0.05, glowSettings.rims);
         for (const glint of glints.items) {
           glint.material.opacity =
-            glint.baseOpacity * (0.58 + (Math.sin(time * 0.73 + glint.phase) * 0.5 + 0.5) * 0.22);
+            glint.baseOpacity *
+            (0.58 + (Math.sin(time * 0.73 + glint.phase) * 0.5 + 0.5) * 0.22) *
+            glowSettings.particles;
         }
         for (const track of energyTracks) {
           const channelStrength = glowSettings[track.channel];
@@ -2790,6 +3269,7 @@
         for (const ignition of runeIgnitionTracks) {
           ignition.time.value = time;
           ignition.strength.value = ignition.base * glowSettings.letters;
+          ignition.surge.value = surge;
         }
         for (const uniform of energyUniformTracks) {
           uniform.value = time;
@@ -2815,6 +3295,7 @@
         energyLights.warmDrift.intensity = 0.98 + surge * 0.34;
         energyLights.coolDrift.intensity = 0.84 + surge * 0.28;
         stars.rotation.y = time * 0.0012;
+        stars.userData.material.uniforms.uTime.value = time;
         composer.render();
       }
 
@@ -2830,6 +3311,7 @@
       const resizeObserver = new ResizeObserver(resize);
       resizeObserver.observe(stage);
       resize();
+      setupCameraDrag();
       animate();
     </script>
   </body>
