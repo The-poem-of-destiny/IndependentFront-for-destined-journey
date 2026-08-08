@@ -880,6 +880,7 @@ export const useCreateStore = defineStore('create', () => {
     messages: Array<{ role: string; content: string }>;
     rawResponse: string;
     reasoning?: string;
+    finishReason?: string;
     model: string;
     timestamp: number;
   } | null>(null);
@@ -1185,7 +1186,10 @@ export const useCreateStore = defineStore('create', () => {
         // 真机修(2026-07-21): plot_outline 一次性重操作 — 大 systemPrompt(世界书注入 ~40 万字符)
         // + 复杂产出(先 if_absent 再切 event + 多事件 desc/trigger/complete/fail) + 自检重试，
         // AI 生成稳定 >120s。提至 300s。配合 agent-client 的 AbortError 友好化。
-        timeout: 300000,
+        // 🔴 2026-08-08 再次拉满: 章节×事件规模 5×5 时输出 ~10k+ 字、慢模型 4-8 分钟，
+        //    300s 会掐在生成中途。maxTokens 已拉满(384000)，这里把墙钟也放开到 30 分钟 —
+        //    让「能生成完」而不是「在超时边缘赌命」。
+        timeout: 1800000,
       });
       // Q-18: 默认值不再在这里重述一遍（此前 0.7 / 16384 / 1.0 三处字面量与
       // 设置页、game-pipeline 的拷贝靠人眼保持一致）
@@ -1223,7 +1227,34 @@ export const useCreateStore = defineStore('create', () => {
         const parsed = tryParseOutline(result.rawResponse);
         if (!parsed) {
           if (best) break;
-          plotGenerationError.value = '大纲输出解析失败，请重试';
+          // 🔴 2026-08-08 诊断: 解析失败必须留痕 —— 此前只有一句「解析失败」、
+          // 零日志、raw 不留档，5×5 失败原因完全不可查。
+          const raw = result.rawResponse ?? '';
+          const hasClosing = /<\/\s*outline\s*>/i.test(raw);
+          // 截断判据：API 明说截断，或「有 <outline 开头但没闭合」——后者是截断的
+          // 特征形；纯垃圾输出（连 <outline 都没有）不算截断，是格式损坏。
+          const hasOutlineOpen = /<\s*outline\b/i.test(raw);
+          const truncated = result.finishReason === 'length' || (hasOutlineOpen && !hasClosing);
+          console.error('[PlotOutline] 大纲输出解析失败', {
+            finishReason: result.finishReason ?? '未知',
+            rawLength: raw.length,
+            hasClosingOutlineTag: hasClosing,
+            completionTokens: result.completionTokens ?? 0,
+            head: raw.slice(0, 200),
+            tail: raw.slice(-400),
+          });
+          // 失败轮也留档 —— 「导出 AI 调试数据」按钮可导出原始输出
+          lastPlotGenerationMeta.value = {
+            messages: messages.map((m) => ({ ...m })),
+            rawResponse: raw,
+            reasoning: (result as any).reasoning ?? undefined,
+            model: llmParams.model,
+            finishReason: result.finishReason,
+            timestamp: Date.now(),
+          };
+          plotGenerationError.value = truncated
+            ? '大纲输出被截断（finish_reason=length，输出未完整闭合），请减少章节/事件数量后重试，或检查 API 输出上限'
+            : '大纲输出解析失败，请重试（失败详情已写入控制台，可导出 AI 调试数据）';
           return false;
         }
         best = { parsed, raw: result.rawResponse };
@@ -1232,6 +1263,7 @@ export const useCreateStore = defineStore('create', () => {
           messages: messages.map((m) => ({ ...m })),
           rawResponse: best.raw,
           reasoning: (result as any).reasoning ?? undefined,
+          finishReason: result.finishReason,
           model: llmParams.model,
           timestamp: Date.now(),
         };
@@ -1292,6 +1324,7 @@ export const useCreateStore = defineStore('create', () => {
       userMessage: m.messages.find((msg) => msg.role === 'user')?.content ?? '',
       allMessages: m.messages,
       reasoning: m.reasoning,
+      finishReason: m.finishReason,
       rawResponse: m.rawResponse,
       parsedOutline: plotOutline.value
         ? {

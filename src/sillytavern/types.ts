@@ -1555,6 +1555,8 @@ export interface AgentResult {
   cacheMissTokens?: number;
   /** 🆕 输出 token 数（usage.completion_tokens） */
   completionTokens?: number;
+  /** 🆕 模型停止原因（stop=正常结束 / length=输出截断 / tool_calls=工具调用）—— 大纲诊断等用它区分「截断」与「格式坏」 */
+  finishReason?: string;
   duration: number; // ms
   error?: string;
   /** 🆕 Agentic: 本 Agent 产生的所有工具调用记录 */
