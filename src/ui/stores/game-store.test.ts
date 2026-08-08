@@ -448,6 +448,23 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
     expect(store.characters.find((c) => c.id === 'hero')?.hp).toBe(80);
     expect(store.activeSave?.metadata?.totalTurns).toBe(1);
   });
+
+  // 🔴 2026-08-08 真机：恢复后内存角色必须**整表替换**。refreshFromDb 的角色同步是
+  // 合并语义（内存独有角色保留）——回退点之后才生成、快照里没有的 NPC 会永远留在
+  // 内存/UI/导出里（症状：回退后角色列表仍显示后来的角色）。见 rollbackOneTurn 与
+  // restoreToSnapshot 里的 characters.value 整表替换。
+  it('restoreToSnapshot: 回退点之后生成的 NPC 不留在内存角色里', async () => {
+    await seedTwoTurns();
+    // 模拟 turn2 期间生成、不在 turn1 快照里的 NPC：DB 直写 + 内存已有（管线合并进来）
+    await saveCharacter(makeChar({ id: 'npc-late', name: '后来者', type: 'npc' }));
+    store.characters.push(makeChar({ id: 'npc-late', name: '后来者', type: 'npc' }));
+
+    const result = await store.restoreToSnapshot('snap-turn1');
+    expect(result.ok).toBe(true);
+    // 恢复后 DB 只剩快照角色 → 内存必须同步为整表替换，后来者消失
+    expect(store.characters.find((c) => c.id === 'npc-late')).toBeUndefined();
+    expect(store.characters.find((c) => c.id === 'hero')).toBeDefined();
+  });
 });
 
 // ===== M2：v3 战斗接线（submitCombatCommand / abandonCombat） =====
