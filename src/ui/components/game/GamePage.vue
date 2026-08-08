@@ -330,7 +330,7 @@ function onModalOpenChange(v: boolean) {
     <AppModal
       title="记忆"
       :open="game.activeModal === 'memory'"
-      size="lg"
+      size="xxl"
       closable
       @close="game.closeModal()"
       @update:open="onModalOpenChange"
