@@ -17,6 +17,7 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import 'fake-indexeddb/auto';
 import { planPackInstall, type CurrentLibrary } from '../../src/sillytavern/content-pack-plan';
+import { AGENT_TOOL_MAP } from '../../src/sillytavern/agent-tools';
 import { hashWorldBook, validatePackOrThrow } from '../../src/sillytavern/content-source';
 import type { ContentPack, PackBaseline } from '../../src/sillytavern/types-content';
 import type { WorldBook } from '../../src/sillytavern/types';
@@ -91,6 +92,43 @@ describeIf('pack-install 契约（POEM_PACK_FILE 已设）', () => {
     const plan = planPackInstall(pack, editedLibrary, {}, buildPlaceholderBaseline());
     const conflicts = (plan.sections.worldBooks?.conflicted ?? []) as Array<{ key: string }>;
     expect(conflicts.length).toBeGreaterThan(0);
+  });
+
+  // 🔴 2026-08-08 真机回归：pack 的 agentDefaults 是运行时默认层（pack > 占位），
+  // 装过 pack 的安装里旧 prompt 就来自这里——必须随 pack 一起守门：
+  //   ① memory_summary 不得教模型留空 hiddenLine（空串会被解析器弃掉整条记忆）
+  //   ② 各 agent「可用工具」广告的工具名必须 ∈ 工具白名单（幻影工具会废掉整条工具链）
+  it('agentDefaults 提示词契约：hiddenLine 非空 + 广告工具 ⊆ 白名单', () => {
+    const pack = loadPack();
+    const agents = pack.agentDefaults.agents as Record<
+      string,
+      { systemPrompt?: string }
+    >;
+
+    const ms = agents.memory_summary?.systemPrompt ?? '';
+    expect(ms).toContain('hiddenLine 必须是非空字符串');
+    expect(ms).not.toMatch(/hiddenLine[^\n]{0,12}留空/);
+    expect(ms).not.toContain('必须留空');
+
+    // 工具广告契约（与 tests/agent-tools-prompt-contract.test.ts 同口径）
+    for (const [agentId, entry] of Object.entries(agents)) {
+      const prompt = entry?.systemPrompt ?? '';
+      const start = prompt.indexOf('可用工具');
+      if (start < 0) continue;
+      const rest = prompt.slice(start);
+      const endMatch = rest.match(/\n\s*\n|\n#/);
+      const section = endMatch ? rest.slice(0, endMatch.index) : rest;
+      const whitelist = AGENT_TOOL_MAP[agentId] ?? [];
+      const advertised = new Set<string>();
+      for (const m of section.matchAll(/(?<!<)\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g)) {
+        advertised.add(m[0]);
+      }
+      for (const name of advertised) {
+        expect(whitelist, `pack agentDefaults.${agentId} 广告了白名单外工具 ${name}`).toContain(
+          name,
+        );
+      }
+    }
   });
 });
 
