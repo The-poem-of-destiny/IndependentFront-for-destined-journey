@@ -115,6 +115,37 @@
     verified from the file itself: linear speed identical across all five rims, directions
     alternating, no GL errors, and rest and surge means within 1% of the approved prototype.
 
+20. The bloom modernization, from owner feedback that the glow read as period CGI.
+    UnrealBloomPass was replaced with a custom mip-chain pass in the file: 13-tap downsample
+    with a Karis average on the first level, 3x3 tent upsample accumulating through the
+    pyramid, half-float targets, six levels at 1600x1000. The three properties of the old
+    pass that produced the dated look are each addressed at the cause: the hard luminance
+    threshold (highlights popping in and out of the halo) is gone entirely — everything
+    scatters as in a real lens; the five fixed gaussian levels (visible banding rings) became
+    a progressive pyramid; the additive composite (bright cores washing to flat white) became
+    the energy-conserving mix(scene, bloom, strength), normalized by the pyramid's scalar sum
+    so radius changes reshape the halo without changing its energy. animate() keeps driving
+    `strength`/`radius`, but on new scales: rest scatter ~0.15 at the shipped dials. The
+    duplicate CSS-pixel bloom.setSize in resize() was removed with the pass that needed it.
+
+21. The atmosphere pass. The dome was a single violet FBM and the grade vignette took 48% off
+    the corners, so the frame read as a disc floating in vacuum. A slow large-scale hue field
+    now drifts parts of the cloud toward teal and pockets toward ember; dim aurora curtains
+    with their own faster clock sit just above the horizon; the stars scintillate ±22% on
+    deterministic per-star phases derived from position; the vignette eased to 40% starting
+    further out. All accents were kept below the violet's level so the astrolabe keeps the
+    colour lead.
+
+22. The ignition-presence pass, from owner feedback that the charging runes went unseen. Three
+    additions, none touching the analytic-index or coverage-function invariants of passes 16
+    and 17: a short white-hot pop at the moment the charge lands (the eased envelope alone
+    started too gently for the eye to catch); a surge-coupled chain — while the authored surge
+    passes, an arc of about two glyph cells sweeps each register, direction and phase seeded
+    per layer so the four registers hand the wave around rather than firing in lockstep, and
+    the term is exactly zero outside the surge; and a cadence tightened from 5.1+0.83i to
+    4.2+0.66i seconds per event. The no-threshold bloom of pass 20 also gives every lit rune
+    the soft halo the old thresholded pass denied it.
+
 ## Findings
 
 - P0: none.
@@ -137,3 +168,9 @@ the file loaded, its own shaders compiled, and frames stepped one at a time with
 layer isolated so its pixels could be read directly. What has not happened is watching it
 animate: the harness drives frames by hand because `requestAnimationFrame` does not fire in it,
 so motion over time is inferred from stepped frames rather than observed.
+
+Passes 20-22 were verified differently: the file ran live in a real browser with
+`requestAnimationFrame` firing, sampled by screenshot at rest, mid-surge (chain wave observed
+travelling the outer register) and after the surge (single-rune cadence restored), at 800x681
+and 420x800. Console clean at both aspects; the portrait far-plane fix of pass 18 held. No
+per-pixel numeric probes were run this round — the judgements are visual, from live frames.

@@ -334,7 +334,7 @@
       import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
       import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
       import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-      import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+      import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
       const TAU = Math.PI * 2;
       const canvas = document.querySelector('#magic-circle-canvas');
@@ -406,10 +406,235 @@
         Math.cos(THREE.MathUtils.degToRad(36.5)),
       );
 
+      // Physically-based mip-chain bloom, replacing UnrealBloomPass. The old pass is why the
+      // glow read as period CGI: a hard luminance threshold (0.52) made highlights pop in and
+      // out of the halo with an abrupt inner edge, its five fixed gaussian levels left visible
+      // banding rings, and the additive composite pushed every bright core toward flat white.
+      // This pass has NO threshold — everything scatters a little, as in a real lens — using
+      // the 13-tap downsample / 3x3 tent upsample pyramid that has been the production
+      // standard since COD:AW (Jimenez 2014). The first downsample applies a Karis average so
+      // single-pixel sparks (this scene is full of them) blur into soft motes instead of
+      // strobing fireflies. The composite is energy-conserving: mix(scene, bloom, strength),
+      // never scene + bloom, so raising the strength trades sharpness for halation instead of
+      // blowing the frame out. `strength`/`radius` keep their names because animate() drives
+      // them every frame, but their scales are new — strength is now the scatter fraction
+      // (~0.1..0.3 useful) and radius the per-level pyramid feedback (~0.5..0.95 useful).
+      class MipBloomPass extends Pass {
+        constructor() {
+          super();
+          this.strength = 0.18;
+          this.radius = 0.85;
+          this.mips = [];
+          this.quad = new FullScreenQuad(null);
+
+          const vertexShader = /* glsl */ `
+            varying vec2 vUv;
+
+            void main() {
+              vUv = uv;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `;
+
+          this.downMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+              tInput: { value: null },
+              uTexel: { value: new THREE.Vector2(1, 1) },
+              uKaris: { value: 0 },
+            },
+            vertexShader,
+            fragmentShader: /* glsl */ `
+              uniform sampler2D tInput;
+              uniform vec2 uTexel;
+              uniform float uKaris;
+              varying vec2 vUv;
+
+              float karisWeight(vec3 colorSample) {
+                return 1.0 / (1.0 + max(colorSample.r, max(colorSample.g, colorSample.b)));
+              }
+
+              void main() {
+                vec2 texel = uTexel;
+                vec3 a = texture2D(tInput, vUv + texel * vec2(-2.0, 2.0)).rgb;
+                vec3 b = texture2D(tInput, vUv + texel * vec2(0.0, 2.0)).rgb;
+                vec3 c = texture2D(tInput, vUv + texel * vec2(2.0, 2.0)).rgb;
+                vec3 d = texture2D(tInput, vUv + texel * vec2(-2.0, 0.0)).rgb;
+                vec3 e = texture2D(tInput, vUv).rgb;
+                vec3 f = texture2D(tInput, vUv + texel * vec2(2.0, 0.0)).rgb;
+                vec3 g = texture2D(tInput, vUv + texel * vec2(-2.0, -2.0)).rgb;
+                vec3 h = texture2D(tInput, vUv + texel * vec2(0.0, -2.0)).rgb;
+                vec3 i = texture2D(tInput, vUv + texel * vec2(2.0, -2.0)).rgb;
+                vec3 j = texture2D(tInput, vUv + texel * vec2(-1.0, 1.0)).rgb;
+                vec3 k = texture2D(tInput, vUv + texel * vec2(1.0, 1.0)).rgb;
+                vec3 l = texture2D(tInput, vUv + texel * vec2(-1.0, -1.0)).rgb;
+                vec3 m = texture2D(tInput, vUv + texel * vec2(1.0, -1.0)).rgb;
+
+                if (uKaris > 0.5) {
+                  // First downsample only: weight the five overlapping boxes by 1/(1+maxRGB)
+                  // so an isolated HDR spark cannot dominate its neighbourhood. Without this
+                  // the particle field shimmers as sparks cross pixel centres frame to frame.
+                  vec3 box0 = (a + b + d + e) * 0.25;
+                  vec3 box1 = (b + c + e + f) * 0.25;
+                  vec3 box2 = (d + e + g + h) * 0.25;
+                  vec3 box3 = (e + f + h + i) * 0.25;
+                  vec3 box4 = (j + k + l + m) * 0.25;
+                  float w0 = karisWeight(box0);
+                  float w1 = karisWeight(box1);
+                  float w2 = karisWeight(box2);
+                  float w3 = karisWeight(box3);
+                  float w4 = karisWeight(box4);
+                  vec3 result = box4 * (0.5 * w4) + (box0 * w0 + box1 * w1 + box2 * w2 + box3 * w3) * 0.125;
+                  float norm = 0.5 * w4 + (w0 + w1 + w2 + w3) * 0.125;
+                  gl_FragColor = vec4(result / max(norm, 1e-4), 1.0);
+                } else {
+                  vec3 result = e * 0.125;
+                  result += (a + c + g + i) * 0.03125;
+                  result += (b + d + f + h) * 0.0625;
+                  result += (j + k + l + m) * 0.125;
+                  gl_FragColor = vec4(result, 1.0);
+                }
+              }
+            `,
+            depthTest: false,
+            depthWrite: false,
+          });
+
+          // Rendered additively INTO the larger mip, which still holds its own downsample:
+          // mip[i] += tent(mip[i+1]) * radius. The pyramid therefore accumulates
+          // sum(radius^level * blur_level), and compositeMaterial divides by the matching
+          // scalar so changing the radius reshapes the halo without changing its energy.
+          this.upMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+              tInput: { value: null },
+              uTexel: { value: new THREE.Vector2(1, 1) },
+              uScale: { value: 1 },
+            },
+            vertexShader,
+            fragmentShader: /* glsl */ `
+              uniform sampler2D tInput;
+              uniform vec2 uTexel;
+              uniform float uScale;
+              varying vec2 vUv;
+
+              void main() {
+                vec2 texel = uTexel;
+                vec3 result = texture2D(tInput, vUv + texel * vec2(-1.0, 1.0)).rgb;
+                result += texture2D(tInput, vUv + texel * vec2(0.0, 1.0)).rgb * 2.0;
+                result += texture2D(tInput, vUv + texel * vec2(1.0, 1.0)).rgb;
+                result += texture2D(tInput, vUv + texel * vec2(-1.0, 0.0)).rgb * 2.0;
+                result += texture2D(tInput, vUv).rgb * 4.0;
+                result += texture2D(tInput, vUv + texel * vec2(1.0, 0.0)).rgb * 2.0;
+                result += texture2D(tInput, vUv + texel * vec2(-1.0, -1.0)).rgb;
+                result += texture2D(tInput, vUv + texel * vec2(0.0, -1.0)).rgb * 2.0;
+                result += texture2D(tInput, vUv + texel * vec2(1.0, -1.0)).rgb;
+                gl_FragColor = vec4(result * (uScale / 16.0), 1.0);
+              }
+            `,
+            depthTest: false,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            transparent: true,
+          });
+
+          this.compositeMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+              tDiffuse: { value: null },
+              tBloom: { value: null },
+              uStrength: { value: this.strength },
+              uNorm: { value: 1 },
+            },
+            vertexShader,
+            fragmentShader: /* glsl */ `
+              uniform sampler2D tDiffuse;
+              uniform sampler2D tBloom;
+              uniform float uStrength;
+              uniform float uNorm;
+              varying vec2 vUv;
+
+              void main() {
+                vec3 sceneColor = texture2D(tDiffuse, vUv).rgb;
+                vec3 bloomColor = texture2D(tBloom, vUv).rgb / uNorm;
+                gl_FragColor = vec4(mix(sceneColor, bloomColor, uStrength), 1.0);
+              }
+            `,
+            depthTest: false,
+            depthWrite: false,
+          });
+        }
+
+        setSize(width, height) {
+          for (const mip of this.mips) mip.target.dispose();
+          this.mips = [];
+          let mipWidth = Math.max(1, Math.floor(width / 2));
+          let mipHeight = Math.max(1, Math.floor(height / 2));
+          // Deep mips are what carry the wide halation; stop only once the buffer is too
+          // small to blur meaningfully. At 1600x1000 this yields six levels (800 → 25).
+          while (Math.min(mipWidth, mipHeight) >= 16 && this.mips.length < 8) {
+            this.mips.push({
+              target: new THREE.WebGLRenderTarget(mipWidth, mipHeight, {
+                type: THREE.HalfFloatType,
+                minFilter: THREE.LinearFilter,
+                magFilter: THREE.LinearFilter,
+                depthBuffer: false,
+              }),
+              texelSize: new THREE.Vector2(1 / mipWidth, 1 / mipHeight),
+            });
+            mipWidth = Math.max(1, Math.floor(mipWidth / 2));
+            mipHeight = Math.max(1, Math.floor(mipHeight / 2));
+          }
+        }
+
+        render(renderer, writeBuffer, readBuffer) {
+          if (this.mips.length === 0) return;
+          const previousAutoClear = renderer.autoClear;
+          renderer.autoClear = false;
+
+          let sourceTexture = readBuffer.texture;
+          let sourceTexel = new THREE.Vector2(1 / readBuffer.width, 1 / readBuffer.height);
+          this.quad.material = this.downMaterial;
+          for (let level = 0; level < this.mips.length; level += 1) {
+            const mip = this.mips[level];
+            this.downMaterial.uniforms.tInput.value = sourceTexture;
+            this.downMaterial.uniforms.uTexel.value.copy(sourceTexel);
+            this.downMaterial.uniforms.uKaris.value = level === 0 ? 1 : 0;
+            renderer.setRenderTarget(mip.target);
+            renderer.clear();
+            this.quad.render(renderer);
+            sourceTexture = mip.target.texture;
+            sourceTexel = mip.texelSize;
+          }
+
+          this.quad.material = this.upMaterial;
+          this.upMaterial.uniforms.uScale.value = this.radius;
+          for (let level = this.mips.length - 2; level >= 0; level -= 1) {
+            const smaller = this.mips[level + 1];
+            this.upMaterial.uniforms.tInput.value = smaller.target.texture;
+            this.upMaterial.uniforms.uTexel.value.copy(smaller.texelSize);
+            renderer.setRenderTarget(this.mips[level].target);
+            this.quad.render(renderer);
+          }
+
+          let norm = 0;
+          for (let level = 0; level < this.mips.length; level += 1) {
+            norm += Math.pow(this.radius, level);
+          }
+          this.quad.material = this.compositeMaterial;
+          this.compositeMaterial.uniforms.tDiffuse.value = readBuffer.texture;
+          this.compositeMaterial.uniforms.tBloom.value = this.mips[0].target.texture;
+          this.compositeMaterial.uniforms.uStrength.value = this.strength;
+          this.compositeMaterial.uniforms.uNorm.value = norm;
+          renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+          if (!this.renderToScreen) renderer.clear();
+          this.quad.render(renderer);
+
+          renderer.autoClear = previousAutoClear;
+        }
+      }
+
       const composer = new EffectComposer(renderer);
       composer.addPass(new RenderPass(scene, camera));
 
-      const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.42, 0.52, 0.52);
+      const bloom = new MipBloomPass();
       composer.addPass(bloom);
 
       const gradePass = new ShaderPass({
@@ -455,7 +680,10 @@
 
             float grain = hash21(vUv * uResolution + fract(uTime * 0.061) * 79.0) - 0.5;
             color += grain * 0.007;
-            color *= 1.0 - smoothstep(0.12, 0.72, radial) * 0.48;
+            // Eased from 0.48 at 0.12: with the single-hue dome the corners fell to pure
+            // black and the frame read as a disc floating in nothing. The richer dome plus
+            // this lighter vignette keeps the corners alive without losing the focal pull.
+            color *= 1.0 - smoothstep(0.16, 0.78, radial) * 0.4;
 
             gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);
           }
@@ -767,6 +995,7 @@
         runeIgnitionTracks.push({
           time: runeIgnitionMaterial.uniforms.uTime,
           strength: runeIgnitionMaterial.uniforms.uStrength,
+          surge: runeIgnitionMaterial.uniforms.uSurge,
           base: registerEnergyScale,
         });
 
@@ -912,8 +1141,9 @@
             uTime: { value: 0 },
             uStrength: { value: 0 },
             uSeed: { value: 17.31 + layerIndex * 29.17 },
+            uSurge: { value: 0 },
             uGlyphCount: { value: glyphCount },
-            uCycleSeconds: { value: 5.1 + layerIndex * 0.83 },
+            uCycleSeconds: { value: 4.2 + layerIndex * 0.66 },
             uBandInner: { value: (config.inner / config.outer) * bandOuter },
             uBandOuter: { value: bandOuter },
             uColor: { value: energyColor },
@@ -932,6 +1162,7 @@
             uniform float uTime;
             uniform float uStrength;
             uniform float uSeed;
+            uniform float uSurge;
             uniform float uGlyphCount;
             uniform float uCycleSeconds;
             uniform float uBandInner;
@@ -1004,6 +1235,24 @@
               float attack = smoothstep(0.04, 0.2, life);
               float release = 1.0 - smoothstep(0.62, 0.96, life);
               float envelope = selected * attack * release;
+
+              // A short white-hot pop right as the charge lands. The eased envelope alone
+              // read as a slow fade-in that the eye never caught starting; the pop marks the
+              // moment, then the tempered-metal charge carries the tail.
+              float flash =
+                selected * smoothstep(0.04, 0.14, life) * (1.0 - smoothstep(0.14, 0.4, life));
+
+              // Surge chain: while the scene's authored surge passes, an arc of charge sweeps
+              // the register, igniting a couple of glyph cells at a time. Direction and phase
+              // come from the layer seed so the four registers hand the wave to each other
+              // instead of firing in lockstep. Outside the surge this term is exactly zero.
+              float waveDirection = mix(1.0, -1.0, step(0.5, fract(uSeed * 0.531)));
+              float wavefront = fract(uTime * waveDirection / 9.0 + uSeed * 0.37) * uGlyphCount;
+              float waveDistance = abs(
+                mod(slice - wavefront + uGlyphCount * 0.5, uGlyphCount) - uGlyphCount * 0.5
+              );
+              float wave = (1.0 - smoothstep(0.8, 2.4, waveDistance)) * uSurge;
+              envelope = max(envelope, wave * 0.85);
               if (envelope < 0.002) discard;
 
               float radial = clamp(
@@ -1018,13 +1267,14 @@
                 (0.52 + interior * 0.16 + engravedEdge * 0.34) *
                 radialPatina * chargeVariation;
               float hotVein = interior * 0.1 + engravedEdge * 0.38;
-              vec3 radiance = uColor * metalVein * 2.1 + uHotColor * hotVein * 1.9;
+              vec3 radiance = uColor * metalVein * 2.3 + uHotColor * hotVein * 2.05;
+              radiance += uHotColor * flash * (interior * 0.5 + engravedEdge * 0.5) * 1.7;
               float dial = min(uStrength, 2.0);
               float alpha = clamp(
                 envelope * dial * glyphAlpha *
-                  (0.5 + interior * 0.12 + engravedEdge * 0.18),
+                  (0.5 + interior * 0.12 + engravedEdge * 0.18 + flash * 0.2),
                 0.0,
-                0.86
+                0.92
               );
               gl_FragColor = vec4(radiance * (1.08 + dial * 0.44), alpha);
             }
@@ -2206,12 +2456,41 @@
               float broad = fbm(direction * 2.4 + vec3(time, -time * 0.4, time * 0.7));
               float detail = fbm(direction * 6.8 - vec3(time * 0.2, time, -time * 0.3));
               float band = exp(-abs(direction.y * 1.5 + sin(direction.x * 4.0) * 0.15) * 3.4);
-              float cloud = smoothstep(0.48, 0.79, broad * 0.72 + detail * 0.34 + band * 0.16);
+              float cloud = smoothstep(0.43, 0.78, broad * 0.72 + detail * 0.34 + band * 0.16);
               float veins = pow(1.0 - abs(detail * 2.0 - 1.0), 6.0) * cloud;
-              vec3 color = vec3(0.0018, 0.0015, 0.006);
-              color += vec3(0.095, 0.019, 0.15) * cloud * 0.46;
+
+              // The dome used to be a single violet: every cloud, vein and corner the same
+              // hue, which read as a flat backdrop card. A slow large-scale field now drifts
+              // parts of the cloud toward teal and a few pockets toward ember, so the sky
+              // reads as layered nebula. Both accents stay well below the violet so the
+              // astrolabe keeps the colour lead.
+              float hueDrift = fbm(direction * 1.35 + vec3(-time * 0.6, time * 0.25, 4.7));
+              vec3 violetHue = vec3(0.095, 0.019, 0.15);
+              vec3 tealHue = vec3(0.016, 0.075, 0.115);
+              vec3 emberHue = vec3(0.115, 0.045, 0.028);
+              vec3 cloudHue = mix(violetHue, tealHue, smoothstep(0.34, 0.72, hueDrift) * 0.55);
+              float emberField = fbm(direction * 2.2 + vec3(11.7, 5.1, -3.9));
+              cloudHue = mix(cloudHue, emberHue, smoothstep(0.6, 0.88, emberField) * 0.3);
+
+              vec3 color = vec3(0.0042, 0.0036, 0.0125);
+              color += cloudHue * cloud * 0.56;
               color += vec3(0.024, 0.022, 0.074) * pow(cloud, 1.8) * 0.31;
               color += vec3(0.12, 0.035, 0.19) * veins * 0.18;
+
+              // Aurora curtains just above the horizon. The cloud drift above is glacial on
+              // purpose; the curtains take their own faster clock or they would read as a
+              // stationary green stripe. Kept dim: they are set dressing behind the disc.
+              float auroraTime = uTime * 0.045;
+              float azimuth = atan(direction.x, direction.z);
+              float curtainWave =
+                fbm(vec3(azimuth * 1.6, direction.y * 3.0 - auroraTime * 0.9, 2.5)) - 0.5;
+              float curtainBand = exp(-pow((direction.y - 0.16 - curtainWave * 0.14) * 5.2, 2.0));
+              float curtainRipple =
+                0.55 + 0.45 * sin(azimuth * 7.0 + auroraTime * 2.2 + curtainWave * 5.0);
+              float aurora = curtainBand * curtainRipple;
+              color += vec3(0.035, 0.11, 0.085) * aurora * 0.34;
+              color += vec3(0.05, 0.03, 0.12) * curtainBand * 0.12;
+
               gl_FragColor = vec4(color, 1.0);
             }
           `,
@@ -2252,6 +2531,7 @@
         const material = new THREE.ShaderMaterial({
           uniforms: {
             uPixelRatio: { value: 1 },
+            uTime: { value: 0 },
           },
           transparent: true,
           depthWrite: false,
@@ -2260,10 +2540,14 @@
           vertexShader: /* glsl */ `
             attribute float aSize;
             varying vec3 vColor;
+            varying float vPhase;
             uniform float uPixelRatio;
 
             void main() {
               vColor = color;
+              // Deterministic per-star phase from the position, so the twinkle pattern is
+              // stable across reloads without another attribute upload.
+              vPhase = fract(sin(dot(position, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
               vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
               gl_Position = projectionMatrix * viewPosition;
               gl_PointSize = clamp(aSize * uPixelRatio * (105.0 / max(-viewPosition.z, 1.0)), 0.5, 4.0);
@@ -2271,13 +2555,18 @@
           `,
           fragmentShader: /* glsl */ `
             varying vec3 vColor;
+            varying float vPhase;
+            uniform float uTime;
 
             void main() {
               vec2 point = gl_PointCoord - 0.5;
               float radius = length(point);
               float alpha = smoothstep(0.5, 0.04, radius);
               if (alpha < 0.01) discard;
-              gl_FragColor = vec4(vColor, alpha * 0.72);
+              // Gentle scintillation: +/-22% at 0.6..2.3 rad/s of scene time, per-star phase.
+              // Any deeper and the field strobes; any faster and it reads as electrical noise.
+              float twinkle = 0.78 + 0.22 * sin(uTime * (0.6 + vPhase * 1.7) + vPhase * 6.2832);
+              gl_FragColor = vec4(vColor, alpha * 0.72 * twinkle);
             }
           `,
         });
@@ -2624,8 +2913,10 @@
         renderer.setPixelRatio(pixelRatio);
         renderer.setSize(width, height, false);
         composer.setPixelRatio(pixelRatio);
+        // composer.setSize forwards device-pixel dimensions to every pass, including the
+        // bloom pyramid; a second explicit bloom.setSize(width, height) here would rebuild
+        // it at CSS-pixel size and quietly halve the halo resolution on hiDPI screens.
         composer.setSize(width, height);
-        bloom.setSize(width, height);
 
         camera.aspect = aspect;
         camera.fov = 10.5;
@@ -2762,8 +3053,11 @@
         orbitStreaks.uniforms.uTime.value = time;
         orbitStreaks.uniforms.uSurge.value = surge;
         const averageGlow = (glowSettings.letters + glowSettings.rims) * 0.5;
-        bloom.strength = 0.18 + averageGlow * 0.24 + surge * (0.12 + averageGlow * 0.07);
-        bloom.radius = 0.42 + Math.min(averageGlow, 2) * 0.1 + surge * 0.08;
+        // Scatter fraction and pyramid feedback for MipBloomPass — new scales, see the pass.
+        // Rest state at the shipped dials (averageGlow 1.7) sits at ~0.15 scatter; the surge
+        // widens and brightens the halation instead of adding a second additive layer.
+        bloom.strength = 0.08 + averageGlow * 0.042 + surge * (0.05 + averageGlow * 0.02);
+        bloom.radius = 0.72 + Math.min(averageGlow, 2) * 0.06 + surge * 0.08;
 
         for (const track of motionTracks) {
           track.group.rotation.y = track.phase + (time * TAU * track.direction) / track.period;
@@ -2790,6 +3084,7 @@
         for (const ignition of runeIgnitionTracks) {
           ignition.time.value = time;
           ignition.strength.value = ignition.base * glowSettings.letters;
+          ignition.surge.value = surge;
         }
         for (const uniform of energyUniformTracks) {
           uniform.value = time;
@@ -2815,6 +3110,7 @@
         energyLights.warmDrift.intensity = 0.98 + surge * 0.34;
         energyLights.coolDrift.intensity = 0.84 + surge * 0.28;
         stars.rotation.y = time * 0.0012;
+        stars.userData.material.uniforms.uTime.value = time;
         composer.render();
       }
 
