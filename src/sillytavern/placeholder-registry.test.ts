@@ -285,7 +285,7 @@ describe('MEMORY_ENTRIES', () => {
         saveId: 's1',
         createdAt: 2,
         realTimestamp: 2000,
-        timeRange: { start: '001-01-02', end: '001-01-03' },
+        timeRange: { start: '001-01-02', end: '00488-0488-03' },
         content: '第二条记忆。',
         hiddenLine: 'h2',
         keywords: ['k2'],
@@ -297,7 +297,7 @@ describe('MEMORY_ENTRIES', () => {
         saveId: 's1',
         createdAt: 3,
         realTimestamp: 3000,
-        timeRange: { start: '001-01-03', end: '001-01-04' },
+        timeRange: { start: '00488-0488-03', end: '001-0488-04' },
         content: '第三条记忆。',
         hiddenLine: 'h3',
         keywords: ['k3'],
@@ -377,6 +377,47 @@ describe('PLOT_EVENTS', () => {
     expect(result).toContain('铁匠的委托');
     expect(result).toContain('active');
     expect(result).toContain('pending');
+  });
+
+  it('带 timeWindow 的事件应展示时间窗口（供 pre_check 判断时间条件）', () => {
+    const events: PlotEvent[] = [
+      {
+        id: 'evt_03',
+        saveId: 's1',
+        title: '春祭的密约',
+        description: 'x',
+        status: 'pending',
+        timeWindow: { start: '488-03', end: '488-04' },
+        childrenIds: [],
+        relatedCharacterIds: [],
+        worldLineChanged: false,
+        visibility: 'revealed',
+        depth: 0,
+        order: 1,
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      {
+        id: 'evt_04',
+        saveId: 's1',
+        title: '旧格式事件',
+        description: 'x',
+        status: 'pending',
+        timeWindow: { start: '512-春', end: '' },
+        childrenIds: [],
+        relatedCharacterIds: [],
+        worldLineChanged: false,
+        visibility: 'revealed',
+        depth: 0,
+        order: 2,
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    ];
+    const ctx = mockCtx({ plotEvents: events });
+    const result = PLACEHOLDER_REGISTRY['PLOT_EVENTS'](ctx, mockConfig());
+    expect(result).toContain('时间窗口: 488-03 ~ 488-04');
+    expect(result).toContain('时间窗口: 512-春');
   });
 
   it('filters out completed events', () => {
@@ -1480,7 +1521,7 @@ describe('resolveTemplate for chain placeholders', () => {
         saveId: 's1',
         createdAt: 2,
         realTimestamp: 2000,
-        timeRange: { start: '001-01-02', end: '001-01-03' },
+        timeRange: { start: '001-01-02', end: '00488-0488-03' },
         content: 'memory 2',
         hiddenLine: 'h2',
         keywords: ['k2'],

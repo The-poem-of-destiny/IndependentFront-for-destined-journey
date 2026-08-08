@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   GameTime,
-  SeasonalTime,
+  MonthTime,
   createDefaultTime,
   parseGameTime,
   formatGameTime,
@@ -25,9 +25,9 @@ import {
   isDaytime,
   getTimeOfDay,
   getSeason,
-  parseSeasonalTime,
-  formatSeasonalTime,
-  compareSeasonalTime,
+  parseMonthTime,
+  formatMonthTime,
+  compareMonthTime,
   SEASON_NAMES,
   $time,
   MONTH_NAMES,
@@ -716,227 +716,166 @@ describe('SEASON_NAMES', () => {
   });
 });
 
-// ========== parseSeasonalTime ==========
+// ========== parseMonthTime ==========
 
-describe('parseSeasonalTime', () => {
-  it('"512-春" → {year:512, season:1}', () => {
-    const result = parseSeasonalTime('512-春');
+describe('parseMonthTime', () => {
+  it('"512-03" → {year:512, month:3}', () => {
+    const result = parseMonthTime('512-03');
     expect(result).not.toBeNull();
     expect(result!.year).toBe(512);
-    expect(result!.season).toBe(1);
-    expect(result!.month).toBeUndefined();
+    expect(result!.month).toBe(3);
   });
 
-  it('"512-夏" → {year:512, season:2}', () => {
-    const result = parseSeasonalTime('512-夏');
+  it('"512-12" → {year:512, month:12}', () => {
+    const result = parseMonthTime('512-12');
     expect(result).not.toBeNull();
     expect(result!.year).toBe(512);
-    expect(result!.season).toBe(2);
-  });
-
-  it('"512-秋" → {year:512, season:3}', () => {
-    const result = parseSeasonalTime('512-秋');
-    expect(result).not.toBeNull();
-    expect(result!.season).toBe(3);
-  });
-
-  it('"512-冬" → {year:512, season:4}', () => {
-    const result = parseSeasonalTime('512-冬');
-    expect(result).not.toBeNull();
-    expect(result!.season).toBe(4);
-  });
-
-  it('"512-夏-06" → {year:512, season:2, month:6}', () => {
-    const result = parseSeasonalTime('512-夏-06');
-    expect(result).not.toBeNull();
-    expect(result!.year).toBe(512);
-    expect(result!.season).toBe(2);
-    expect(result!.month).toBe(6);
-  });
-
-  it('"512-冬-12" → {year:512, season:4, month:12}', () => {
-    const result = parseSeasonalTime('512-冬-12');
-    expect(result).not.toBeNull();
-    expect(result!.year).toBe(512);
-    expect(result!.season).toBe(4);
     expect(result!.month).toBe(12);
   });
 
-  it('"1-春" → {year:1, season:1}', () => {
-    const result = parseSeasonalTime('1-春');
+  it('"1-01" → {year:1, month:1}', () => {
+    const result = parseMonthTime('1-01');
     expect(result).not.toBeNull();
     expect(result!.year).toBe(1);
+    expect(result!.month).toBe(1);
   });
 
-  it('"512-晚春" 应返回 null (无效季节名)', () => {
-    const result = parseSeasonalTime('512-晚春');
+  it('单数字月份 "512-5" 应正确解析', () => {
+    const result = parseMonthTime('512-5');
+    expect(result).not.toBeNull();
+    expect(result!.month).toBe(5);
+  });
+
+  it('"512-00" 应返回 null (month 0)', () => {
+    const result = parseMonthTime('512-00');
+    expect(result).toBeNull();
+  });
+
+  it('"512-13" 应返回 null (month >12)', () => {
+    const result = parseMonthTime('512-13');
+    expect(result).toBeNull();
+  });
+
+  it('旧季节格式 "512-春" 应返回 null（已弃用）', () => {
+    const result = parseMonthTime('512-春');
+    expect(result).toBeNull();
+  });
+
+  it('"512-春-06" 应返回 null（旧格式已弃用）', () => {
+    const result = parseMonthTime('512-春-06');
     expect(result).toBeNull();
   });
 
   it('"abc" 应返回 null', () => {
-    const result = parseSeasonalTime('abc');
-    expect(result).toBeNull();
-  });
-
-  it('"512-13-05" 应返回 null (month 0 或 >12)', () => {
-    const result = parseSeasonalTime('512-13-05');
-    expect(result).toBeNull();
-  });
-
-  it('"512-春-00" 应返回 null (month 0)', () => {
-    const result = parseSeasonalTime('512-春-00');
-    expect(result).toBeNull();
-  });
-
-  it('"512-春-13" 应返回 null (month >12)', () => {
-    const result = parseSeasonalTime('512-春-13');
+    const result = parseMonthTime('abc');
     expect(result).toBeNull();
   });
 
   it('空字符串应返回 null', () => {
-    expect(parseSeasonalTime('')).toBeNull();
+    expect(parseMonthTime('')).toBeNull();
   });
 
   it('缺少连字符 → null', () => {
-    expect(parseSeasonalTime('512春')).toBeNull();
+    expect(parseMonthTime('51203')).toBeNull();
   });
 
-  it('单数字月份 (如 "512-春-5") 应正确解析', () => {
-    const result = parseSeasonalTime('512-春-5');
-    expect(result).not.toBeNull();
-    expect(result!.month).toBe(5);
+  it('多段 "512-03-05" → null', () => {
+    expect(parseMonthTime('512-03-05')).toBeNull();
   });
 });
 
-// ========== formatSeasonalTime ==========
+// ========== formatMonthTime ==========
 
-describe('formatSeasonalTime', () => {
-  it('无 month → "512-春"', () => {
-    const t: SeasonalTime = { year: 512, season: 1 };
-    expect(formatSeasonalTime(t)).toBe('512-春');
+describe('formatMonthTime', () => {
+  it('单数字 month 应补零 → "512-03"', () => {
+    const t: MonthTime = { year: 512, month: 3 };
+    expect(formatMonthTime(t)).toBe('512-03');
   });
 
-  it('有 month → "512-夏-06"', () => {
-    const t: SeasonalTime = { year: 512, season: 2, month: 6 };
-    expect(formatSeasonalTime(t)).toBe('512-夏-06');
+  it('month 12 → "512-12"', () => {
+    const t: MonthTime = { year: 512, month: 12 };
+    expect(formatMonthTime(t)).toBe('512-12');
   });
 
-  it('单数字 month 应补零', () => {
-    const t: SeasonalTime = { year: 512, season: 3, month: 3 };
-    expect(formatSeasonalTime(t)).toBe('512-秋-03');
+  it('year 1 → "1-01"', () => {
+    const t: MonthTime = { year: 1, month: 1 };
+    expect(formatMonthTime(t)).toBe('1-01');
   });
 
-  it('四个季节均正确格式化', () => {
-    const seasons: Array<{ season: number; name: string }> = [
-      { season: 1, name: '春' },
-      { season: 2, name: '夏' },
-      { season: 3, name: '秋' },
-      { season: 4, name: '冬' },
-    ];
-    for (const s of seasons) {
-      const t: SeasonalTime = { year: 512, season: s.season };
-      expect(formatSeasonalTime(t)).toBe(`512-${s.name}`);
-    }
-  });
-
-  it('parseSeasonalTime + formatSeasonalTime 往返', () => {
-    const inputs = ['512-春', '512-夏-06', '1-冬', '999-秋-12'];
+  it('parseMonthTime + formatMonthTime 往返', () => {
+    const inputs = ['512-03', '512-12', '1-01', '999-09'];
     for (const input of inputs) {
-      const parsed = parseSeasonalTime(input);
+      const parsed = parseMonthTime(input);
       expect(parsed).not.toBeNull();
-      expect(formatSeasonalTime(parsed!)).toBe(input);
+      expect(formatMonthTime(parsed!)).toBe(input);
     }
   });
 });
 
-// ========== compareSeasonalTime ==========
+// ========== compareMonthTime ==========
 
-describe('compareSeasonalTime', () => {
-  it('"512-春" < "512-夏" → 负数', () => {
-    const a: SeasonalTime = { year: 512, season: 1 };
-    const b: SeasonalTime = { year: 512, season: 2 };
-    expect(compareSeasonalTime(a, b)).toBeLessThan(0);
+describe('compareMonthTime', () => {
+  it('"512-03" < "512-06" → 负数', () => {
+    const a: MonthTime = { year: 512, month: 3 };
+    const b: MonthTime = { year: 512, month: 6 };
+    expect(compareMonthTime(a, b)).toBeLessThan(0);
   });
 
-  it('"512-夏" > "512-春" → 正数', () => {
-    const a: SeasonalTime = { year: 512, season: 2 };
-    const b: SeasonalTime = { year: 512, season: 1 };
-    expect(compareSeasonalTime(a, b)).toBeGreaterThan(0);
+  it('"512-06" > "512-03" → 正数', () => {
+    const a: MonthTime = { year: 512, month: 6 };
+    const b: MonthTime = { year: 512, month: 3 };
+    expect(compareMonthTime(a, b)).toBeGreaterThan(0);
   });
 
-  it('"512-春" < "513-春" (不同年份)', () => {
-    const a: SeasonalTime = { year: 512, season: 1 };
-    const b: SeasonalTime = { year: 513, season: 1 };
-    expect(compareSeasonalTime(a, b)).toBeLessThan(0);
-  });
-
-  it('"512-春" < "512-春-06" (缺 month < 有 month)', () => {
-    const a: SeasonalTime = { year: 512, season: 1 };
-    const b: SeasonalTime = { year: 512, season: 1, month: 6 };
-    expect(compareSeasonalTime(a, b)).toBeLessThan(0);
-  });
-
-  it('"512-春-03" < "512-春-06" (同季节不同月)', () => {
-    const a: SeasonalTime = { year: 512, season: 1, month: 3 };
-    const b: SeasonalTime = { year: 512, season: 1, month: 6 };
-    expect(compareSeasonalTime(a, b)).toBeLessThan(0);
+  it('"512-03" < "513-03" (不同年份)', () => {
+    const a: MonthTime = { year: 512, month: 3 };
+    const b: MonthTime = { year: 513, month: 3 };
+    expect(compareMonthTime(a, b)).toBeLessThan(0);
   });
 
   it('相等 → 0', () => {
-    const a: SeasonalTime = { year: 512, season: 1 };
-    const b: SeasonalTime = { year: 512, season: 1 };
-    expect(compareSeasonalTime(a, b)).toBe(0);
+    const a: MonthTime = { year: 512, month: 3 };
+    const b: MonthTime = { year: 512, month: 3 };
+    expect(compareMonthTime(a, b)).toBe(0);
   });
 
-  it('相等（带 month）→ 0', () => {
-    const a: SeasonalTime = { year: 512, season: 2, month: 6 };
-    const b: SeasonalTime = { year: 512, season: 2, month: 6 };
-    expect(compareSeasonalTime(a, b)).toBe(0);
-  });
-
-  it('year 优先级高于 season（"511-冬" < "512-春"）', () => {
-    const a: SeasonalTime = { year: 511, season: 4 };
-    const b: SeasonalTime = { year: 512, season: 1 };
-    expect(compareSeasonalTime(a, b)).toBeLessThan(0);
-  });
-
-  it('season 优先级高于 month（"512-秋-12" > "512-夏-01"）', () => {
-    const a: SeasonalTime = { year: 512, season: 3, month: 12 };
-    const b: SeasonalTime = { year: 512, season: 2, month: 1 };
-    expect(compareSeasonalTime(a, b)).toBeGreaterThan(0);
+  it('year 优先级高于 month（"512-12" < "513-01"）', () => {
+    const a: MonthTime = { year: 512, month: 12 };
+    const b: MonthTime = { year: 513, month: 1 };
+    expect(compareMonthTime(a, b)).toBeLessThan(0);
   });
 
   it('批量排序应保持正确顺序', () => {
-    const times: SeasonalTime[] = [
-      { year: 513, season: 1 },
-      { year: 512, season: 4 },
-      { year: 512, season: 1, month: 6 },
-      { year: 512, season: 1 },
-      { year: 512, season: 2 },
+    const times: MonthTime[] = [
+      { year: 513, month: 1 },
+      { year: 512, month: 12 },
+      { year: 512, month: 6 },
+      { year: 512, month: 3 },
+      { year: 512, month: 11 },
     ];
-    const sorted = [...times].sort(compareSeasonalTime);
-    expect(sorted[0]).toEqual({ year: 512, season: 1 });
-    expect(sorted[1]).toEqual({ year: 512, season: 1, month: 6 });
-    expect(sorted[2]).toEqual({ year: 512, season: 2 });
-    expect(sorted[3]).toEqual({ year: 512, season: 4 });
-    expect(sorted[4]).toEqual({ year: 513, season: 1 });
+    const sorted = [...times].sort(compareMonthTime);
+    expect(sorted[0]).toEqual({ year: 512, month: 3 });
+    expect(sorted[1]).toEqual({ year: 512, month: 6 });
+    expect(sorted[2]).toEqual({ year: 512, month: 11 });
+    expect(sorted[3]).toEqual({ year: 512, month: 12 });
+    expect(sorted[4]).toEqual({ year: 513, month: 1 });
   });
 });
 
-// ========== SeasonalTime in $time namespace ==========
+// ========== MonthTime in $time namespace ==========
 
-describe('$time seasonal functions', () => {
-  it('$time.parseSeasonalTime 与直接调用一致', () => {
-    expect($time.parseSeasonalTime).toBe(parseSeasonalTime);
-    expect($time.parseSeasonalTime('512-春')).toEqual(parseSeasonalTime('512-春'));
+describe('$time 大纲时间函数', () => {
+  it('$time.parseMonthTime 与直接调用一致', () => {
+    expect($time.parseMonthTime).toBe(parseMonthTime);
+    expect($time.parseMonthTime('512-03')).toEqual(parseMonthTime('512-03'));
   });
 
-  it('$time.formatSeasonalTime 与直接调用一致', () => {
-    expect($time.formatSeasonalTime).toBe(formatSeasonalTime);
+  it('$time.formatMonthTime 与直接调用一致', () => {
+    expect($time.formatMonthTime).toBe(formatMonthTime);
   });
 
-  it('$time.compareSeasonalTime 与直接调用一致', () => {
-    expect($time.compareSeasonalTime).toBe(compareSeasonalTime);
+  it('$time.compareMonthTime 与直接调用一致', () => {
+    expect($time.compareMonthTime).toBe(compareMonthTime);
   });
 
   it('$time.SEASON_NAMES 与直接引用一致', () => {

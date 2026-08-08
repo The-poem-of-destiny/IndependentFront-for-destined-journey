@@ -29,7 +29,7 @@ export interface GenerateOutlineInput {
 export interface ParsedOutlineOutput {
   title: string;
   summary: string;
-  /** 大纲覆盖的时间范围（AI 的 SeasonalTime 格式，如 "488-春"；createOutlineFromAgent 优先用它，入参作兜底） */
+  /** 大纲覆盖的时间范围（AI 的 MonthTime 格式，如 "488-03"；createOutlineFromAgent 优先用它，入参作兜底） */
   timeRange?: { start: string; end: string };
   content: string;
   /** 大方向锚（核心张力 / 主角主题 / 关键关系人）— post_check 演化时的「不偏离」判据 */
@@ -45,7 +45,7 @@ export interface ParsedOutlineOutput {
       title: string;
       description: string;
       triggerHint?: string;
-      /** 事件时间窗口（季节性，如 "512-春" 到 "512-夏"） */
+      /** 事件时间窗口（年-月粒度，如 "512-03" 到 "512-05"） */
       timeWindow?: { start: string; end: string };
       /** 完成条件提示 */
       completeHint?: string;
@@ -190,11 +190,11 @@ function extractSelfClosingAttrs(
  * <outline>
  *   <title>大纲标题</title>
  *   <summary>一句话摘要</summary>
- *   <timerange start="512-春" end="513-秋" />
+ *   <timerange start="512-03" end="513-09" />
  *   <content>大纲正文 (Markdown, 保留原样)</content>
- *   <chapter title="第一章" summary="..." start="..." end="...">
+ *   <chapter title="第一章 血色纹章" summary="主角卷入阴谋" start="512-03" end="512-06">
  *     <event title="事件标题">
- *       <time start="512-春" end="512-夏" />
+ *       <time start="512-03" end="512-04" />
  *       <desc>事件描述</desc>
  *       <trigger>触发条件提示</trigger>
  *       <complete>完成条件提示</complete>

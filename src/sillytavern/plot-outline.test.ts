@@ -1,4 +1,4 @@
-/**
+﻿/**
  * plot-outline.ts — 剧情大纲管理测试
  *
  * Phase 4 核心模块测试。覆盖大纲解析/创建/自检/确认/章节解析/
@@ -663,19 +663,19 @@ describe('parseOutlineXml', () => {
     const xml = `<outline>
 <title>血色纹章</title>
 <summary>一场围绕帝国纹章的阴谋</summary>
-<timerange start="512-春" end="513-秋" />
+<timerange start="512-03" end="513-09" />
 <content># 第一章 血色纹章
 主线剧情大纲...</content>
-<chapter title="第一章 血色纹章" summary="主角卷入阴谋" start="512-春" end="512-夏">
+<chapter title="第一章 血色纹章" summary="主角卷入阴谋" start="512-03" end="512-06">
   <event title="纹章失窃">
-    <time start="512-春" end="512-春-04" />
+    <time start="512-03" end="512-04" />
     <desc>皇家纹章被盗，主角被诬陷</desc>
     <trigger>主角到达帝都</trigger>
     <complete>找到真凶并洗清嫌疑</complete>
     <fail>主角被关进大牢</fail>
   </event>
   <event title="初遇同伴">
-    <time start="512-春-05" end="512-夏" />
+    <time start="512-05" end="512-06" />
     <desc>在追查途中遇到同伴</desc>
   </event>
 </chapter>
@@ -710,13 +710,13 @@ describe('parseOutlineXml', () => {
     expect(ev1.triggerHint).toBe('主角到达帝都');
     expect(ev1.completeHint).toBe('找到真凶并洗清嫌疑');
     expect(ev1.failHint).toBe('主角被关进大牢');
-    expect(ev1.timeWindow).toEqual({ start: '512-春', end: '512-春-04' });
+    expect(ev1.timeWindow).toEqual({ start: '512-03', end: '512-04' });
 
     // Event 2 with only some fields
     const ev2 = result!.chapters[0].keyEvents[1];
     expect(ev2.title).toBe('初遇同伴');
     expect(ev2.description).toBe('在追查途中遇到同伴');
-    expect(ev2.timeWindow).toEqual({ start: '512-春-05', end: '512-夏' });
+    expect(ev2.timeWindow).toEqual({ start: '512-05', end: '512-06' });
     expect(ev2.triggerHint).toBeUndefined();
     expect(ev2.completeHint).toBeUndefined();
     expect(ev2.failHint).toBeUndefined();
@@ -810,7 +810,7 @@ describe('parseOutlineXml', () => {
     const xml = `<outline>
 <title>T</title>
 <summary>S</summary>
-<timerange start="512-春" end="513-冬" />
+<timerange start="512-03" end="513-12" />
 <content>C</content>
 </outline>`;
 
@@ -823,7 +823,7 @@ describe('parseOutlineXml', () => {
     const xml = `<outline>
 <title>开放世界测试</title>
 <summary>摘要</summary>
-<timerange start="512-春" end="513-冬" />
+<timerange start="512-03" end="513-12" />
 <direction_anchors>核心张力：帝国与教会的权力斗争；主角主题：寻求真相；关键关系人：失踪的公主</direction_anchors>
 <content>正文</content>
 <chapter title="第一章" summary="章节摘要">
@@ -940,7 +940,7 @@ describe('parseOutlineJson', () => {
             {
               title: '事件A',
               description: '描述',
-              timeWindow: { start: '512-春', end: '512-夏' },
+              timeWindow: { start: '512-03', end: '512-05' },
               completeHint: '完成任务',
               failHint: '任务失败',
             },
@@ -951,7 +951,7 @@ describe('parseOutlineJson', () => {
 
     const result = parseOutlineJson(json);
     expect(result).not.toBeNull();
-    expect(result!.chapters[0].keyEvents[0].timeWindow).toEqual({ start: '512-春', end: '512-夏' });
+    expect(result!.chapters[0].keyEvents[0].timeWindow).toEqual({ start: '512-03', end: '512-05' });
     expect(result!.chapters[0].keyEvents[0].completeHint).toBe('完成任务');
     expect(result!.chapters[0].keyEvents[0].failHint).toBe('任务失败');
   });
@@ -1001,7 +1001,7 @@ describe('outlineToEvents with new fields', () => {
             title: '关键事件',
             description: '描述',
             triggerHint: '{{location}} == "帝都"',
-            timeWindow: { start: '512-春', end: '512-夏' },
+            timeWindow: { start: '512-03', end: '512-05' },
             completeHint: '找到线索',
             failHint: '线索丢失',
           },
@@ -1014,7 +1014,7 @@ describe('outlineToEvents with new fields', () => {
     expect(ke.triggerCondition).toBe('{{location}} == "帝都"');
     expect(ke.completeCondition).toBe('找到线索');
     expect(ke.failCondition).toBe('线索丢失');
-    expect(ke.timeWindow).toEqual({ start: '512-春', end: '512-夏' });
+    expect(ke.timeWindow).toEqual({ start: '512-03', end: '512-05' });
   });
 
   it('新字段缺省时（undefined）不应报错', () => {

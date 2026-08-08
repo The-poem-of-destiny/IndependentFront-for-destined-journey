@@ -319,10 +319,15 @@ function formatPlotEventsFull(ctx: AgentContext): string {
   return events
     .map((e) => {
       const cond = e.triggerCondition ? `\n触发条件: ${e.triggerCondition}` : '';
+      // 时间窗口（年-月格式，如 488-05 ~ 488-06）——pre_check 判断「时间到了」的唯一依据，
+      // 旧存档可能是弃用的季节格式（如 512-春），原样展示
+      const tw = e.timeWindow?.start
+        ? `\n时间窗口: ${e.timeWindow.start}${e.timeWindow.end && e.timeWindow.end !== e.timeWindow.start ? ` ~ ${e.timeWindow.end}` : ''}`
+        : '';
       // 大事件（depth 0）附带 NPC 议程 + 反事实基线，供 post_check 做议程级演化判断
       const agendas = e.depth === 0 && e.npcAgendas ? `\nNPC议程: ${e.npcAgendas}` : '';
       const absent = e.depth === 0 && e.ifAbsent ? `\n不介入演化: ${e.ifAbsent}` : '';
-      return `《${e.title}》(${e.status})\n${e.description.slice(0, 300)}${cond}${agendas}${absent}`;
+      return `《${e.title}》(${e.status})\n${e.description.slice(0, 300)}${cond}${tw}${agendas}${absent}`;
     })
     .join('\n---\n');
 }
