@@ -117,22 +117,16 @@ negative 并进 baseNegative，用方言分隔符。`%character1%…%characterN%
 
 现状 17 个平铺 `image*` 字段全是 NAI 形。重构为:
 
-```ts
-imageProvider: 'novelai' | 'comfyui';
-imageDialectId: string;
-imageDialectOverrides: Record<
-  string,
-  { systemPrompt?; qualitySuffix?; baseNegative?; composition? }
->;
-// 共享（两家都读；comfy 侧作为 %token% 替换值）:
-imageGenMode / imageWidth / imageHeight / imageSteps / imageScale;
-imageMaxRating / imageBlurByDefault / imageAutoConfirmed / imageExtraNegative;
-imageNovelai: {
-  (endpointId, model, sampler, noiseSchedule, ucPreset, tier, maxPerMessage, maxPerHour);
-} // 限额随 C9 归 paid 后端
-imageComfy: {
-  (baseUrl, workflowJson, timeoutMs, pollIntervalMs);
-}
+```txt
+imageProvider: 'novelai' | 'comfyui'
+imageDialectId: string
+imageDialectOverrides: Record<dialectId, { systemPrompt? qualitySuffix? baseNegative? composition? }>
+共享（两家都读；comfy 侧作为 %token% 替换值）:
+  imageGenMode imageWidth imageHeight imageSteps imageScale
+  imageMaxRating imageBlurByDefault imageAutoConfirmed imageExtraNegative
+imageNovelai: { endpointId model sampler noiseSchedule ucPreset tier
+                maxPerMessage maxPerHour }   ← 限额随 C9 归 paid 后端
+imageComfy:   { baseUrl workflowJson timeoutMs pollIntervalMs }
 ```
 
 迁移照 `agent-settings-migration` 先例: 同对象内重排、零跨存储、无标志位
