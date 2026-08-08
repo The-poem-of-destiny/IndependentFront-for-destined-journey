@@ -33,6 +33,7 @@ import {
   getSnapshot,
   getLatestSnapshot,
   saveSnapshot,
+  deleteSnapshotsAfter,
   trimSnapshots,
   // Saves
   getSaves,
@@ -557,6 +558,33 @@ describe('Snapshots CRUD', () => {
     const remaining = (await getSnapshots('save_test')).map((s) => s.turn).sort((a, b) => a - b);
     // tier0(36-40 全留) + tier1 每4(32,28,24,20,16) + tier2 每8(8)
     expect(remaining).toEqual([8, 16, 20, 24, 28, 32, 36, 37, 38, 39, 40]);
+  });
+
+  it('deleteSnapshotsAfter 删除 createdAt > cutoff 的快照（恢复点之后的分支清理）', async () => {
+    // 恢复点 = 快照 s1（createdAt=2000），之后有 s2/s3
+    await saveSnapshot(makeSnapshot({ id: 's0', createdAt: 1000 }));
+    await saveSnapshot(makeSnapshot({ id: 's1', createdAt: 2000 }));
+    await saveSnapshot(makeSnapshot({ id: 's2', createdAt: 3000 }));
+    await saveSnapshot(makeSnapshot({ id: 's3', createdAt: 4000 }));
+
+    // 恢复到 s1 → 清理 createdAt > 2000 的快照
+    await deleteSnapshotsAfter('save_test', 2000);
+
+    const remaining = (await getSnapshots('save_test')).map((s) => s.id).sort();
+    expect(remaining).toEqual(['s0', 's1']);
+  });
+
+  it('deleteSnapshotsAfter 不影响其他存档', async () => {
+    await saveSnapshot(makeSnapshot({ id: 'mine-old', saveId: 'save_test', createdAt: 1000 }));
+    await saveSnapshot(makeSnapshot({ id: 'mine-new', saveId: 'save_test', createdAt: 3000 }));
+    await saveSnapshot(makeSnapshot({ id: 'other-new', saveId: 'save_other', createdAt: 3000 }));
+
+    await deleteSnapshotsAfter('save_test', 1500);
+
+    const mine = (await getSnapshots('save_test')).map((s) => s.id).sort();
+    expect(mine).toEqual(['mine-old']);
+    const other = (await getSnapshots('save_other')).map((s) => s.id).sort();
+    expect(other).toEqual(['other-new']);
   });
 
   it('🆕 trimSnapshots(tiered) 铁律：最近5个 turn 档永不淘汰（即使上限<5）', async () => {

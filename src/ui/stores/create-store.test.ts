@@ -958,6 +958,9 @@ describe('buildOpeningPrompt', () => {
     expect(prompt).not.toContain('--- 初始装备 ---');
     expect(prompt).not.toContain('--- 初始技能 ---');
     expect(prompt).not.toContain('--- 背包物品 ---');
+    // 初始金钱段总是存在（0 G 时写「身无分文」，>0 时写具体数）——开局经济是既成事实
+    expect(prompt).toContain('--- 初始金钱 ---');
+    expect(prompt).toContain('身无分文');
     // 开局时间总是存在（纪元基准 488 年）；纪元名由内容侧 branding 面供给（D9）
     expect(prompt).toContain('--- 开局时间 ---');
     expect(prompt).toContain(`${FIXTURE_ERA}0488年`);
@@ -999,6 +1002,14 @@ describe('buildOpeningPrompt', () => {
     expect(prompt).toContain('--- 起源印记');
     expect(prompt).toContain(core.name);
     expect(prompt).toContain('起源印记的苏醒');
+  });
+
+  it('🆕 初始金钱段：money>0 时写明具体数额（开局经济既成事实）', () => {
+    store.money = 10012;
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).toContain('--- 初始金钱 ---');
+    expect(prompt).toContain('10012 G');
+    expect(prompt).not.toContain('身无分文');
   });
 
   it('选中 system_core 世界书条目时应输出激活指针而非条目全文（起源印记）', () => {

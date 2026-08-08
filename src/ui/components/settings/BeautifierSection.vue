@@ -9,7 +9,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useGameStore } from '../../stores/game-store';
 import { useBeautifierStore } from '../../stores/beautifier-store';
-import { loadPresetRules, mergeRules, collectActiveSignalsFromEntries } from '@engine/beautifier';
+import { collectActiveSignalsFromEntries } from '@engine/beautifier';
 import type { BeautifierRule } from '@engine/types';
 import AppButton from '../shared/AppButton.vue';
 import AppCard from '../shared/AppCard.vue';
@@ -28,9 +28,12 @@ const expanded = ref<Record<string, boolean>>({});
 const showEditor = ref(false);
 const editingRule = ref<BeautifierRule | null>(null);
 const libraryExpanded = ref(false);
-const presetRules = ref<BeautifierRule[]>([]);
-const sourcePresetRules = ref<BeautifierRule[]>([]);
 const loading = ref(true);
+// 🔴 预设规则**唯一持有者**是 beautifier-store（pack 规则 > 占位文件，见其
+//    refreshPresetRules）。本分区只读 store 的响应式投影，**绝不自己 loadPresetRules
+//    + 整份覆盖 beautifier.presetRules** —— 2026-08-08 真机：设置页 onMounted 曾直接
+//    `loadPresetRules()`（占位 5 条）盖掉 pack 的 22 条，进一次设置页所有美化就没了。
+const presetRules = computed<BeautifierRule[]>(() => beautifier.presetRules);
 
 // 历史字段名；实际语义是相对内置 defaultEnabled 的手动翻转列表。
 const builtinDisabled = computed<string[]>(() => s.beautifierBuiltinDisabled ?? []);
@@ -53,21 +56,13 @@ onMounted(async () => {
   try {
     // 先确保 store 已 hydrate（迁移 + 读 Dexie），否则 userRules 还是空的
     await beautifier.init();
+    // 用当前存档信号重算 presetRules（locked/autoEnable 按存档解析）。
+    // 规则源的选择（pack vs 占位）由 store 内部决定，本分区不参与。
     const { activeWorldBookIds, activeEntryUids } = getActiveWorldBookState();
-    sourcePresetRules.value = await loadPresetRules();
-    const merged = mergeRules(
-      sourcePresetRules.value,
-      userRules.value,
-      builtinDisabled.value,
-      activeWorldBookIds,
-      activeEntryUids,
-      new Set(), // characterNames — 美化绑定世界书，不按角色名
-    );
-    presetRules.value = merged.filter((r) => r.isBuiltin);
-    // 派生缓存只进 store 的内存 ref，**不再写 settings**（那是 ~378 KB 的白存）
-    beautifier.presetRules = merged.filter((r) => r.isBuiltin);
-  } catch {
-    // 加载失败静默，UI 空态
+    await beautifier.refreshPresetRules(activeWorldBookIds, activeEntryUids, new Set());
+  } catch (err) {
+    // 加载失败静默，UI 空态（store 内部已有 console.warn 留痕）
+    console.warn('[BeautifierSection] 加载预设规则失败:', err);
   }
   loading.value = false;
 });
@@ -154,16 +149,7 @@ function deleteRule(rule: BeautifierRule) {
 
 function refreshPresetRules() {
   const { activeWorldBookIds, activeEntryUids } = getActiveWorldBookState();
-  const merged = mergeRules(
-    sourcePresetRules.value,
-    userRules.value,
-    builtinDisabled.value,
-    activeWorldBookIds,
-    activeEntryUids,
-    new Set(),
-  );
-  presetRules.value = merged.filter((r) => r.isBuiltin);
-  beautifier.presetRules = merged.filter((r) => r.isBuiltin);
+  void beautifier.refreshPresetRules(activeWorldBookIds, activeEntryUids, new Set());
 }
 
 function exportRules() {

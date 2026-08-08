@@ -1659,6 +1659,18 @@ export const useCreateStore = defineStore('create', () => {
 
     lines.push(`【创角完成，${charName} 的初始数据】`);
 
+    // 初始金钱（🆕 2026-08-08）：把开局经济作为**既成事实**写进开场白，与初始装备同地位。
+    // 🔴 防的是「系统权威数值被 AI 叙事覆盖」：story prompt 的 CHARACTER_STATE 里明明有
+    //    金钱: N G，AI 却会因为它和「前文推导的金额」对不上，主动判面板为错误、改用叙事值。
+    //    开局就钉死「这 N G 是开局既成事实」，AI 无从质疑它该不该存在。
+    lines.push('');
+    lines.push('--- 初始金钱 ---');
+    if (money.value > 0) {
+      lines.push(`你随身带着 ${money.value} G 帝冕币，这是你开局的全部财产。`);
+    } else {
+      lines.push('你身无分文——口袋空空，这是你开局的全部财产。');
+    }
+
     // 装备
     if (selectedEquipments.value.length > 0) {
       lines.push('');
