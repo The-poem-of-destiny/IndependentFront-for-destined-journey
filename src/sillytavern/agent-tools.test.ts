@@ -291,9 +291,7 @@ describe('复用工具回归保护', () => {
     await expect(executeToolCall('call_item_gen', {}, makeCtx())).rejects.toThrow(
       '未注册或不在本 Agent 白名单',
     );
-    await expect(executeToolCall('call_item_gen', {}, makeCtx())).rejects.toThrow(
-      'skill_requests',
-    );
+    await expect(executeToolCall('call_item_gen', {}, makeCtx())).rejects.toThrow('skill_requests');
   });
 
   // 🆕 S2b（2026-08-01 制造反向链路）：craft_check 收集装备「生产检定」modifier → toolBonus

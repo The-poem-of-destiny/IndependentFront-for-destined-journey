@@ -15,9 +15,9 @@ import { AGENT_TOOL_MAP } from '../src/sillytavern/agent-tools';
  * `tsc --noEmit`（与 memory-summary-prompt-contract.test.ts 同款仓库级闸门）。
  */
 describe('Agent 默认提示词广告的工具 ⊆ 工具白名单', () => {
-  const cfg = JSON.parse(
-    readFileSync('public/data/defaults/agent-config.json', 'utf8'),
-  ) as { agents: Record<string, { systemPrompt?: string }> };
+  const cfg = JSON.parse(readFileSync('public/data/defaults/agent-config.json', 'utf8')) as {
+    agents: Record<string, { systemPrompt?: string }>;
+  };
 
   /** 从提示词「可用工具」小节抠工具名列表。
    *  只抠**小节本身**（到下个空行/标题为止）：工具名是下划线 snake_case
