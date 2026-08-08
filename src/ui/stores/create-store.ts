@@ -880,6 +880,7 @@ export const useCreateStore = defineStore('create', () => {
     messages: Array<{ role: string; content: string }>;
     rawResponse: string;
     reasoning?: string;
+    finishReason?: string;
     model: string;
     timestamp: number;
   } | null>(null);
@@ -1226,7 +1227,34 @@ export const useCreateStore = defineStore('create', () => {
         const parsed = tryParseOutline(result.rawResponse);
         if (!parsed) {
           if (best) break;
-          plotGenerationError.value = '大纲输出解析失败，请重试';
+          // 🔴 2026-08-08 诊断: 解析失败必须留痕 —— 此前只有一句「解析失败」、
+          // 零日志、raw 不留档，5×5 失败原因完全不可查。
+          const raw = result.rawResponse ?? '';
+          const hasClosing = /<\/\s*outline\s*>/i.test(raw);
+          // 截断判据：API 明说截断，或「有 <outline 开头但没闭合」——后者是截断的
+          // 特征形；纯垃圾输出（连 <outline 都没有）不算截断，是格式损坏。
+          const hasOutlineOpen = /<\s*outline\b/i.test(raw);
+          const truncated = result.finishReason === 'length' || (hasOutlineOpen && !hasClosing);
+          console.error('[PlotOutline] 大纲输出解析失败', {
+            finishReason: result.finishReason ?? '未知',
+            rawLength: raw.length,
+            hasClosingOutlineTag: hasClosing,
+            completionTokens: result.completionTokens ?? 0,
+            head: raw.slice(0, 200),
+            tail: raw.slice(-400),
+          });
+          // 失败轮也留档 —— 「导出 AI 调试数据」按钮可导出原始输出
+          lastPlotGenerationMeta.value = {
+            messages: messages.map((m) => ({ ...m })),
+            rawResponse: raw,
+            reasoning: (result as any).reasoning ?? undefined,
+            model: llmParams.model,
+            finishReason: result.finishReason,
+            timestamp: Date.now(),
+          };
+          plotGenerationError.value = truncated
+            ? '大纲输出被截断（finish_reason=length，输出未完整闭合），请减少章节/事件数量后重试，或检查 API 输出上限'
+            : '大纲输出解析失败，请重试（失败详情已写入控制台，可导出 AI 调试数据）';
           return false;
         }
         best = { parsed, raw: result.rawResponse };
@@ -1235,6 +1263,7 @@ export const useCreateStore = defineStore('create', () => {
           messages: messages.map((m) => ({ ...m })),
           rawResponse: best.raw,
           reasoning: (result as any).reasoning ?? undefined,
+          finishReason: result.finishReason,
           model: llmParams.model,
           timestamp: Date.now(),
         };
@@ -1295,6 +1324,7 @@ export const useCreateStore = defineStore('create', () => {
       userMessage: m.messages.find((msg) => msg.role === 'user')?.content ?? '',
       allMessages: m.messages,
       reasoning: m.reasoning,
+      finishReason: m.finishReason,
       rawResponse: m.rawResponse,
       parsedOutline: plotOutline.value
         ? {

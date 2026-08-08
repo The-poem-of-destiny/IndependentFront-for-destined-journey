@@ -1376,6 +1376,42 @@ describe('generatePlotOutline 大纲生成', () => {
     expect(store.plotGenerationError).toContain('解析失败');
   });
 
+  it('🆕 finish_reason=length 截断 → 报截断错误而非笼统解析失败', async () => {
+    // 半截 XML（无 </outline> 闭合）+ 模型报截断
+    chatMock.mockResolvedValueOnce({
+      agentId: 'plot_outline',
+      output: null,
+      rawResponse: '<outline><title>半截大纲<title>...',
+      tokensUsed: 300,
+      completionTokens: 16384,
+      cacheHit: false,
+      duration: 0,
+      finishReason: 'length',
+    });
+    const store = setupPlotStore();
+    const ok = await store.generatePlotOutline();
+    expect(ok).toBe(false);
+    expect(store.plotGenerationError).toContain('截断');
+    // 失败轮也要留档（导出 AI 调试数据按钮可用）
+    expect(store.lastPlotGenerationMeta?.rawResponse).toContain('半截大纲');
+  });
+
+  it('🆕 无闭合标签但 finish_reason 非 length → 也判截断（输出未完整）', async () => {
+    chatMock.mockResolvedValueOnce({
+      agentId: 'plot_outline',
+      output: null,
+      rawResponse: '<outline><title>只有开头',
+      tokensUsed: 100,
+      cacheHit: false,
+      duration: 0,
+      finishReason: 'stop',
+    });
+    const store = setupPlotStore();
+    const ok = await store.generatePlotOutline();
+    expect(ok).toBe(false);
+    expect(store.plotGenerationError).toContain('截断');
+  });
+
   it('未配置 API 端点时应报错不调用', async () => {
     setActivePinia(createPinia());
     const store = useCreateStore();

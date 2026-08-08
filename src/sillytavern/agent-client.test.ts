@@ -128,6 +128,24 @@ describe('AgentClient', () => {
       expect(result.duration).toBeGreaterThanOrEqual(0);
     });
 
+    it('🆕 应捕获 finish_reason（length=输出截断，大纲解析失败分诊用）', async () => {
+      // 截断场景: 模型输出被 max_tokens 上限切断（finish_reason 在 choice 层，不在 message 内）
+      globalThis.fetch = mockFetch({
+        choices: [{ message: { content: '...<outline><title>半截' }, finish_reason: 'length' }],
+        usage: { total_tokens: 300, completion_tokens: 16384 },
+      });
+      const truncated = await client.chat({ messages: [{ role: 'user', content: 'x' }] });
+      expect(truncated.finishReason).toBe('length');
+
+      // 正常结束场景: finish_reason=stop
+      globalThis.fetch = mockFetch({
+        choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+        usage: { total_tokens: 10 },
+      });
+      const stopped = await client.chat({ messages: [{ role: 'user', content: 'x' }] });
+      expect(stopped.finishReason).toBe('stop');
+    });
+
     it('应检测缓存命中 (cache_hit 字段)', async () => {
       const mockRes = {
         choices: [{ message: { content: 'cached response' } }],
