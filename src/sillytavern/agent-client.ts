@@ -68,6 +68,8 @@ const STREAM_TIMEOUT_MULTIPLIER = 3;
 export interface StreamCallbacks {
   /** 增量文本块（delta），isComplete 在最后一块为 true */
   onChunk: (text: string, isComplete: boolean) => void;
+  /** 思维链增量（delta.reasoning_content）——实时字数统计用；可选，不传则只在 onComplete 拿最终值 */
+  onReasoning?: (text: string) => void;
   /** 工具调用增量（name + 当前已累积的 arguments JSON 字符串） */
   onToolCall?: (toolCall: { id: string; name: string; arguments: string }) => void;
   /** 流式完成，携带最终累积状态 */
@@ -481,6 +483,7 @@ export class AgentClient {
 
           if (delta.reasoning_content) {
             fullReasoning += delta.reasoning_content;
+            callbacks.onReasoning?.(delta.reasoning_content);
           }
 
           if (delta.tool_calls) {

@@ -250,8 +250,10 @@ const DIFFICULTY_OPTIONS = [
         :outline="store.plotOutline"
         :chapters="store.plotOutlineChapters"
         :is-generating="store.isPlotGenerating"
+        :stream-stats="store.plotStreamStats"
         :revealed="store.plotOutlineRevealed"
         @reveal="store.plotOutlineRevealed = true"
+        @abort="store.abortPlotGeneration()"
       />
     </section>
 
