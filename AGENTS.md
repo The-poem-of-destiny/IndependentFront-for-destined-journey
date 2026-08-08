@@ -6,12 +6,14 @@
 
 ## 提交前文档检查（必读）
 
+**🔴 主人/用户说「提交」= 默认授权直接合并到 GitHub（squash merge，免 review），不要再问「要不要 review」。需要 review 时主人会明说。**
+
 **每次 push 之前必须先检查是否有文档需要更新，包括但不限于:**
 
 - `AGENTS.md` — 新增模块、架构变更、Phase 进展更新时需同步（进度表只留速览，详细记录进 `docs/CHANGELOG.md`）
 - `docs/` — 设计文档目录，架构变更时需更新对应阶段文档
 - `docs/CHANGELOG.md` — 近期交付的 Phase 详细记录，完成里程碑时追加
-- `reference/agent流程测试/` — Agent 模板/测试工具变更时需同步 `agent预期分析.md`
+- `reference/agent流程测试/` — Agent 模板/测试工具变更时需同步（`agent预期分析.md` 已于 2026-08-08 删除，移入私有内容仓后按需参考；`对话样本.md` / `要求.md` 仍在私有内容仓）
 - `tests/agent-framework/README.md` — 测试工具用法变更时需同步
 
 **如果忘了更新，push 之前主人会提醒。但是 agent 应该主动检查。**
@@ -187,21 +189,14 @@ reference/audit_report.md        # 代码 vs 世界书冲突审计报告
 
 ## Agent 流程测试 & Debug 参考
 
-**调试 Agent 输出格式或修改 Agent 模板/解析链路时，必须先查阅 `reference/agent流程测试/agent预期分析.md`。**
+**调试 Agent 输出格式或修改 Agent 模板/解析链路时，可参考私有内容仓的 `reference/agent流程测试/`：**
 
 ```bash
-reference/agent流程测试/agent预期分析.md  # 6 个 Agent 完整输出追踪（思维链→工具调用→XML/JSON）+ 17 条 debug 检查点
-reference/agent流程测试/对话样本.md        # 从游戏实例提取的 4 组测试用对话正文
-reference/agent流程测试/要求.md            # 测试需求说明
+E:\code\fated_poem_independent_assets\reference\agent流程测试\对话样本.md  # 从游戏实例提取的 4 组测试用对话正文
+E:\code\fated_poem_independent_assets\reference\agent流程测试\要求.md      # 测试需求说明
 ```
 
-该分析文件记录了每个 Agent 的：
-
-- 模板格式规范（agent-templates.ts 原文约束）
-- 可用工具 Schema（Agentic 类型）及参数/返回值
-- 完整输出追踪（思维链 → 工具调用序列 → 最终输出）
-- 下游解析链路（代码路径和函数调用链）
-- 🔴 已知缺口（ItemGenOutput 缺 effects/scripts、parseSkillsXML 不解析子元素、assembleCharacterState 不传递、vars_update 状态写入已布线等）
+> `agent预期分析.md`（6 个 Agent 完整输出追踪 + 17 条 debug 检查点）已于 2026-08-08 删除。
 
 ## 前端 UI 参考（Phase 7 必读）
 
