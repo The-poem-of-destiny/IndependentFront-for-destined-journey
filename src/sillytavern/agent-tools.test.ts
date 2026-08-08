@@ -287,8 +287,13 @@ describe('复用工具回归保护', () => {
     ).rejects.toThrow('未知物品类型');
   });
 
-  it('未知工具仍抛错', async () => {
-    await expect(executeToolCall('不存在的工具', {}, makeCtx())).rejects.toThrow('未知工具');
+  it('未知工具仍抛错（且报错可行动：提示白名单外 + 正确的替代做法）', async () => {
+    await expect(executeToolCall('call_item_gen', {}, makeCtx())).rejects.toThrow(
+      '未注册或不在本 Agent 白名单',
+    );
+    await expect(executeToolCall('call_item_gen', {}, makeCtx())).rejects.toThrow(
+      'skill_requests',
+    );
   });
 
   // 🆕 S2b（2026-08-01 制造反向链路）：craft_check 收集装备「生产检定」modifier → toolBonus
