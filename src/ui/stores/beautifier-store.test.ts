@@ -12,8 +12,10 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
+import { nextTick } from 'vue';
 import type { BeautifierRule } from '@engine/types';
 import { getDatabase } from '@engine/database';
+import { setPackRulesProvider } from '@engine/content-source';
 
 const presetPayload = vi.hoisted(() => ({ value: [] as unknown[] }));
 vi.mock('@engine/beautifier', async (importOriginal) => {
@@ -22,6 +24,7 @@ vi.mock('@engine/beautifier', async (importOriginal) => {
 });
 
 import { useBeautifierStore } from './beautifier-store';
+import { useContentStore } from './content-store';
 import { useSettingsStore } from './settings-store';
 import { LEGACY_RULES_KEY, LEGACY_PRESET_CACHE_KEY } from './beautifier-migration';
 
@@ -215,5 +218,31 @@ describe('beautifier-store', () => {
     expect(store.presetRules[0].locked).toBe(true);
     // locked 是算出来的，仍然不许落进任何存储
     expectSettingsFreeOfRules();
+  });
+
+  it('boot 竞态收敛: pack provider 注册 + activePackVersion 变化后 presetRules 自动重算', async () => {
+    // 模拟 App.vue beautifier.init 先跑（provider 未注册 → 占位态）
+    setPackRulesProvider(null);
+    presetPayload.value = [];
+    const store = useBeautifierStore();
+    await store.init();
+    expect(store.presetRules).toHaveLength(0);
+
+    // 模拟 hydratePackState：注册 pack provider + 设置 activePackVersion
+    const packRules = [
+      makeRule('builtin-pack-a', { isBuiltin: true }),
+      makeRule('builtin-pack-b', { isBuiltin: true }),
+    ];
+    setPackRulesProvider(() => packRules as unknown as readonly BeautifierRule[]);
+    useContentStore().activePackVersion = '9.9.9';
+
+    // watch 异步触发 refreshPresetRules → 收敛到 pack 规则
+    await nextTick();
+    await vi.waitFor(() => {
+      expect(store.presetRules.map((r) => r.id)).toEqual(['builtin-pack-a', 'builtin-pack-b']);
+    });
+    // 不污染用户表 / 不写回 settings
+    expect((await getDatabase().beautifierRules.toArray())).toHaveLength(0);
+    setPackRulesProvider(null);
   });
 });

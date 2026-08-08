@@ -754,8 +754,10 @@ export const useContentStore = defineStore('content', () => {
         try {
           const { useBeautifierStore } = await import('./beautifier-store');
           await useBeautifierStore().refreshPresetRules();
-        } catch {
-          /* Pinia 未就绪时静默；消费端各自兜底 */
+        } catch (err) {
+          // Pinia 未就绪时静默；消费端各自兜底。但留痕便于诊断 ——
+          // beautifier-store 侧另有 watch contentStatus 收敛保险（2026-08-08）。
+          console.warn('[content-store] hydratePackState 重算 presetRules 失败:', err);
         }
       } catch {
         // Dexie 不可用 → 缓存保持现状，不阻断（boot 兜底）
