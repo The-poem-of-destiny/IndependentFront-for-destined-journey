@@ -80,9 +80,16 @@ function settingsSnapshot(over: Partial<ImageRuntimeSettings> = {}): ImageRuntim
     imageSteps: 23,
     imageScale: 4.5,
     // 画质后缀与基础负向自图像 v2 / C6 起是方言属性：覆盖表留空 = 回落这两个常量
+    imageProvider: 'novelai',
     imageDialectId: 'danbooru-anime',
     imageDialectOverrides: {},
     imageNovelai: makeNovelai(),
+    imageComfy: {
+      baseUrl: 'http://127.0.0.1:8188',
+      workflowJson: '',
+      timeoutMs: 600_000,
+      pollIntervalMs: 1_500,
+    },
     ...over,
   };
 }

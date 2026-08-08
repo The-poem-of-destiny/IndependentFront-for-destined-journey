@@ -174,8 +174,11 @@ describe('占位内容 · 注册表七面能被生产解析器吃下', () => {
     // 兜底方言与它同形（唯一的差别是兜底不自带 systemPrompt）
     expect({ ...danbooru, systemPrompt: '' }).toEqual(FALLBACK_IMAGE_DIALECT);
 
-    // 🔴 systemPrompt 从 agent-config.json 的 image_prompt 逐字节搬（C5）
-    expect(danbooru.systemPrompt).toBe(agentConfigRaw.agents.image_prompt.systemPrompt);
+    // 🔴 C5 已收口：`image_prompt` 的 systemPrompt **从 agent-config 退役**，方言 JSON 是
+    //    唯一真源。两处都留着的话就是 D53 警告的第三份拷贝 —— 改一处不改另一处不报错，
+    //    只是侧链按哪一份说话取决于装配顺序
+    expect(agentConfigRaw.agents.image_prompt.systemPrompt).toBeUndefined();
+    expect(danbooru.systemPrompt.trim().length).toBeGreaterThan(0);
 
     // prose 档是刻意单薄的占位（真货在私有仓），但**旋钮必须真的不同** ——
     // 只换 systemPrompt 的方言仍会给 krea2 拼上 danbooru 尾巴（C3 的全部理由）
@@ -187,9 +190,11 @@ describe('占位内容 · 注册表七面能被生产解析器吃下', () => {
     expect(prose.supportsNegative).toBe(false);
     expect(prose.qualitySuffix).toBe('');
     expect(prose.baseNegative).toBe('');
-    // 三个输出标签是引擎协议，换方言不换协议（抽取器只认这三个）
+    // 三个输出标签是引擎协议，换方言不换协议（抽取器只认这三个）。
+    // 🔴 **两条方言都要钉**：C5 之后这里是那份契约的唯一守门人（agent-config 那份已退役）
     for (const tag of ['<image_prompt>', '<image_negative>', '<image_desc>']) {
-      expect(prose.systemPrompt).toContain(tag);
+      expect(prose.systemPrompt, `natural-prose 缺少 ${tag}`).toContain(tag);
+      expect(danbooru.systemPrompt, `danbooru-anime 缺少 ${tag}`).toContain(tag);
     }
   });
 
@@ -223,9 +228,18 @@ describe('占位内容 · agent-config', () => {
     expect(Object.keys(agentConfigRaw.agents)).toHaveLength(13);
   });
 
-  it('每个 agent 的 systemPrompt 与 template 都非空', () => {
+  it('每个 agent 的 systemPrompt 与 template 都非空（image_prompt 除外 —— 它的那份归方言）', () => {
     for (const [id, agent] of Object.entries(agentConfigRaw.agents)) {
-      expect((agent.systemPrompt as string).trim().length, `${id}.systemPrompt`).toBeGreaterThan(0);
+      // 🔴 image_prompt 的 systemPrompt 已随 C5 退役到 `image-dialects.json`：
+      //    方言拥有整个装配契约，「教模型怎么说话」是其中一格。这里断言它**不在**，
+      //    上面那条 imageDialects 用例断言它在方言里
+      if (id === 'image_prompt') {
+        expect(agent.systemPrompt, 'image_prompt.systemPrompt 应已退役').toBeUndefined();
+      } else {
+        expect((agent.systemPrompt as string).trim().length, `${id}.systemPrompt`).toBeGreaterThan(
+          0,
+        );
+      }
       // story 的可调面是预设，template 天然为空串（agent-defaults.ts 的约定）
       if (id !== 'story') {
         expect((agent.template as string).trim().length, `${id}.template`).toBeGreaterThan(0);
@@ -284,7 +298,8 @@ describe('占位内容 · agent-config', () => {
       plot_post_check: ['<json>', '"worldLineChanged"', '"eventUpdates"', '"newChildEvents"'],
       memory_summary: ['<json>', '"hiddenLine"', '"relatedCharacterIds"', '"importance"'],
       memory_recall: ['"memories"', '"relevance"'],
-      image_prompt: ['<image_prompt>', '<image_negative>', '<image_desc>'],
+      // 🔴 image_prompt 不在这张表里：它的提示词住在方言 JSON（C5），三个输出标签由
+      //    上面 imageDialects 那条用例逐条钉（两条方言各钉一遍 —— 换方言不换协议）
       combat_v3: ['declare_attack', 'declare_action', 'pass_slot', 'write_summary'],
     };
     for (const [id, tokens] of Object.entries(CONTRACT)) {

@@ -56,12 +56,17 @@ function makeRecord(over: Partial<SceneImageRecord> = {}): SceneImageRecord {
   };
 }
 
+/**
+ * 缺省 `costModel: 'paid'` —— 既有全部用例写的都是付费后端那条路（图像 v1 的唯一后端），
+ * 于是它们一个字节都不用改。本地后端那半在文件末尾单开一节。
+ */
 function input(over: Partial<QuotaInput> = {}): QuotaInput {
   return {
     records: [],
     target: { messageId: 'msg-1', turn: 1, source: 'auto' },
     now: NOW,
     limits: DEFAULT_LIMITS,
+    costModel: 'paid',
     ...over,
   };
 }
@@ -417,5 +422,64 @@ describe('纯度与文案', () => {
     expect(hourly.ok === false && hourly.message).toContain(
       `${DEFAULT_IMAGE_MAX_PER_HOUR}/${DEFAULT_IMAGE_MAX_PER_HOUR}`,
     );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// costModel 分层（图像 v2 / C9）
+// ═══════════════════════════════════════════════════════════
+
+describe('costModel: local —— L1/L2 是花钱防线，本地后端不设上限', () => {
+  it('L1 每消息：paid 拦、local 放行（同一份记录、同一份阈值）', () => {
+    const records = Array.from({ length: DEFAULT_IMAGE_MAX_PER_MESSAGE }, (_, i) =>
+      makeRecord({ turn: 50 + i }),
+    );
+    // 目标是 manual，避开 L3（L3 只拦 auto）—— 这里要单独看 L1
+    const target = { messageId: 'msg-1', turn: 999, source: 'manual' as const };
+
+    const paid = checkQuota(input({ records, target, costModel: 'paid' }));
+    expect(paid.ok === false && paid.reason).toBe('per-message');
+
+    const local = checkQuota(input({ records, target, costModel: 'local' }));
+    expect(local.ok).toBe(true);
+  });
+
+  it('L2 滚动一小时：paid 拦、local 放行', () => {
+    const records = spreadRecords(DEFAULT_IMAGE_MAX_PER_HOUR);
+    const target = { messageId: 'fresh', turn: 999, source: 'manual' as const };
+
+    const paid = checkQuota(input({ records, target, costModel: 'paid' }));
+    expect(paid.ok === false && paid.reason).toBe('rolling-window');
+
+    expect(checkQuota(input({ records, target, costModel: 'local' })).ok).toBe(true);
+  });
+
+  it('🔴 L3 同回合去重对 local **照样开火** —— 它是正确性规则，不是花钱规则', () => {
+    // 一回合自动开火两次产出两张近乎相同的图 + 图鉴里两条重复条目，
+    // 这件事与谁付钱无关。本地后端照样难看，所以这一条与 costModel 无关。
+    const records = [makeRecord({ messageId: 'other', turn: 7, source: 'auto' })];
+    const target = { messageId: 'msg-1', turn: 7, source: 'auto' as const };
+
+    for (const costModel of ['paid', 'local'] as const) {
+      const verdict = checkQuota(input({ records, target, costModel }));
+      expect(verdict.ok, `costModel=${costModel} 应被 L3 拦下`).toBe(false);
+      if (!verdict.ok) expect(verdict.reason).toBe('same-turn');
+    }
+  });
+
+  it('local 下手动开火不受任何张数限制（用户裁定：本地免费就该无上限）', () => {
+    // 远超两条阈值的记录堆在同一条消息、同一小时里
+    const records = [
+      ...Array.from({ length: 50 }, () => makeRecord({ messageId: 'msg-1' })),
+      ...spreadRecords(50),
+    ];
+    const verdict = checkQuota(
+      input({
+        records,
+        target: { messageId: 'msg-1', turn: 4242, source: 'manual' },
+        costModel: 'local',
+      }),
+    );
+    expect(verdict.ok).toBe(true);
   });
 });

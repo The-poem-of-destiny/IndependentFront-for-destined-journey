@@ -185,8 +185,15 @@ describe('② 体量轴：占位 agent-config 规格（§6 / D32）', () => {
     expect(Object.keys(agentConfig.agents)).toHaveLength(13);
   });
 
-  it('各 agent systemPrompt 非空', () => {
+  it('各 agent systemPrompt 非空（image_prompt 除外 —— 它那份归方言，C5）', () => {
     for (const [id, agent] of Object.entries(agentConfig.agents)) {
+      // 🔴 `image_prompt.systemPrompt` 已随图像 v2 / C5 退役到 `data/content/image-dialects.json`：
+      //    方言拥有整个装配契约，两处都留着就是 D53 警告的第三份拷贝。
+      //    那份提示词的体量由 placeholder-content 那条用例盯着，这里只确认它不在这儿
+      if (id === 'image_prompt') {
+        expect(agent.systemPrompt, 'image_prompt.systemPrompt 应已退役').toBeUndefined();
+        continue;
+      }
       expect(agent.systemPrompt?.trim().length, `${id}.systemPrompt`).toBeGreaterThan(0);
     }
   });

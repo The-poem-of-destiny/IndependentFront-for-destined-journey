@@ -496,6 +496,164 @@ describe('侧链复用', () => {
   });
 });
 
+// ═══ 后端 / 方言盖章（图像 v2 / C14）═══
+
+describe('provider 与 dialectId 盖章', () => {
+  /** 一套可现改的 runtimeInfo —— 「换了方言再重画」正是 C14 要覆盖的那一步 */
+  function runtimeSeam(box: { provider: 'novelai' | 'comfyui'; dialectId: string }) {
+    return () => ({ provider: box.provider, dialectId: box.dialectId });
+  }
+
+  it('新记录盖当下的章', async () => {
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams({
+      runPromptAgent: stubPromptAgent(),
+      send: async () => okSend(),
+      runtimeInfo: runtimeSeam({ provider: 'comfyui', dialectId: 'natural-prose' }),
+    });
+
+    const res = await store.generate(baseInput());
+    await store.whenIdle();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    const row = await getSceneImage(res.id);
+    expect(row?.provider).toBe('comfyui');
+    expect(row?.dialectId).toBe('natural-prose');
+  });
+
+  it('缝没接 runtimeInfo 时**不盖章** —— 缺席读作 novelai/danbooru（老记录的样子）', async () => {
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams({ runPromptAgent: stubPromptAgent(), send: async () => okSend() });
+
+    const res = await store.generate(baseInput());
+    await store.whenIdle();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    const row = await getSceneImage(res.id);
+    expect(row?.provider).toBeUndefined();
+    expect(row?.dialectId).toBeUndefined();
+  });
+
+  it('🔴 重画时方言**没换** → 照旧复用缓存的场景串（D31 省钱那条路还在）', async () => {
+    const box = { provider: 'novelai' as const, dialectId: 'danbooru-anime' };
+    const runPromptAgent = vi.fn(async () => ({
+      scenePrompt: 'tavern interior',
+      sceneNegative: '',
+      desc: '',
+    }));
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams({ runPromptAgent, send: async () => okSend(), runtimeInfo: runtimeSeam(box) });
+
+    const first = await store.generate(baseInput());
+    await store.whenIdle();
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    const redraw = await store.generate(baseInput({ redrawFrom: first.id }));
+    await store.whenIdle();
+    expect(redraw.ok).toBe(true);
+    if (!redraw.ok) return;
+
+    expect(runPromptAgent).toHaveBeenCalledTimes(1);
+    expect((await getSceneImage(redraw.id))?.scenePrompt).toBe('tavern interior');
+  });
+
+  it('🔴 重画时方言**换了** → 弃缓存重跑侧链（那串标签在新方言里是喂错模型的）', async () => {
+    const box = { provider: 'novelai' as const, dialectId: 'danbooru-anime' };
+    let produced = 'tavern interior, warm candlelight';
+    const runPromptAgent = vi.fn(async () => ({
+      scenePrompt: produced,
+      sceneNegative: '',
+      desc: '',
+    }));
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams({ runPromptAgent, send: async () => okSend(), runtimeInfo: runtimeSeam(box) });
+
+    const first = await store.generate(baseInput());
+    await store.whenIdle();
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    // 用户在设置页把方言换成散文档，然后按了重画
+    box.dialectId = 'natural-prose';
+    produced = 'A woman sits by the fire.';
+    const redraw = await store.generate(baseInput({ redrawFrom: first.id }));
+    await store.whenIdle();
+    expect(redraw.ok).toBe(true);
+    if (!redraw.ok) return;
+
+    expect(runPromptAgent).toHaveBeenCalledTimes(2);
+    const row = await getSceneImage(redraw.id);
+    expect(row?.scenePrompt).toBe('A woman sits by the fire.');
+    expect(row?.dialectId).toBe('natural-prose');
+    // 源记录一个字节不动（D17：重画是追加 take）
+    expect((await getSceneImage(first.id))?.scenePrompt).toBe('tavern interior, warm candlelight');
+  });
+
+  it('🔴 方言换了也**不丢**用户改过的那份（D26 逐字优先，界面去提示，不由我们替他丢）', async () => {
+    const box = { provider: 'novelai' as const, dialectId: 'danbooru-anime' };
+    const runPromptAgent = vi.fn(async () => ({
+      scenePrompt: 'agent 写的',
+      sceneNegative: '',
+      desc: '',
+    }));
+    let seenPrompt = '';
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams({
+      runPromptAgent,
+      send: async (input) => {
+        seenPrompt = input.scenePrompt;
+        return okSend();
+      },
+      runtimeInfo: runtimeSeam(box),
+    });
+
+    const first = await store.generate(baseInput());
+    await store.whenIdle();
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    await store.update(first.id, { editedScenePrompt: '用户亲手写的' });
+
+    box.dialectId = 'natural-prose';
+    await store.generate(baseInput({ redrawFrom: first.id }));
+    await store.whenIdle();
+
+    expect(runPromptAgent).toHaveBeenCalledTimes(1);
+    expect(seenPrompt).toBe('用户亲手写的');
+  });
+
+  it('装配告警（C15）原样落进记录；没有告警时这一格缺席', async () => {
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams({
+      runPromptAgent: stubPromptAgent(),
+      send: async () => okSend({ composeWarnings: [{ kind: 'missing-preset', name: '无名旅人' }] }),
+    });
+
+    const withWarn = await store.generate(baseInput());
+    await store.whenIdle();
+    expect(withWarn.ok).toBe(true);
+    if (!withWarn.ok) return;
+    expect((await getSceneImage(withWarn.id))?.composeWarnings).toEqual([
+      { kind: 'missing-preset', name: '无名旅人' },
+    ]);
+
+    store.setSeams({ runPromptAgent: stubPromptAgent(), send: async () => okSend() });
+    const clean = await store.generate(baseInput({ messageId: 'msg_2' }));
+    await store.whenIdle();
+    expect(clean.ok).toBe(true);
+    if (!clean.ok) return;
+    expect((await getSceneImage(clean.id))?.composeWarnings).toBeUndefined();
+  });
+});
+
 // ═══ 锚点编号（D17 / D34）═══
 
 describe('锚点编号', () => {

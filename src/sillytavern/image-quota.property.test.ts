@@ -41,15 +41,20 @@ const inputArb = fc.record({
     maxPerMessage: fc.integer({ min: 1, max: 5 }),
     maxPerHour: fc.integer({ min: 1, max: 30 }),
   }),
+  // 图像 v2 / C9：两种后端都要被这些不变式覆盖，所以它进采样空间而不是写死 'paid'
+  costModel: fc.constantFrom<'paid' | 'local'>('paid', 'local'),
 });
 
 /** 独立重算三层判据 —— 与实现同源会让测试变成同义反复，所以照设计表重写一遍 */
 function expectedReason(input: QuotaInput): string | null {
-  const { records, target, now, limits } = input;
-  const perMessage = records.filter((r) => r.messageId === target.messageId).length;
-  if (perMessage >= limits.maxPerMessage) return 'per-message';
-  const inWindow = records.filter((r) => now - r.createdAt < IMAGE_QUOTA_WINDOW_MS).length;
-  if (inWindow >= limits.maxPerHour) return 'rolling-window';
+  const { records, target, now, limits, costModel } = input;
+  // 🔴 L1/L2 只在付费后端启用（C9）；L3 与 costModel 无关，它是正确性规则
+  if (costModel === 'paid') {
+    const perMessage = records.filter((r) => r.messageId === target.messageId).length;
+    if (perMessage >= limits.maxPerMessage) return 'per-message';
+    const inWindow = records.filter((r) => now - r.createdAt < IMAGE_QUOTA_WINDOW_MS).length;
+    if (inWindow >= limits.maxPerHour) return 'rolling-window';
+  }
   if (
     target.source === 'auto' &&
     records.some((r) => r.turn === target.turn && r.source === 'auto')
@@ -129,11 +134,39 @@ describe('checkQuota 不变式', () => {
         fc.integer({ min: 1, max: 5 }),
         fc.integer({ min: 1, max: 30 }),
         (target, maxPerMessage, maxPerHour) => {
-          expect(
-            checkQuota({ records: [], target, now: NOW, limits: { maxPerMessage, maxPerHour } }).ok,
-          ).toBe(true);
+          for (const costModel of ['paid', 'local'] as const) {
+            expect(
+              checkQuota({
+                records: [],
+                target,
+                now: NOW,
+                limits: { maxPerMessage, maxPerHour },
+                costModel,
+              }).ok,
+            ).toBe(true);
+          }
         },
       ),
+    );
+  });
+
+  it('🔴 local 只可能因 same-turn 被拒 —— L1/L2 那两条花钱防线在本地整条不启用（C9）', () => {
+    fc.assert(
+      fc.property(inputArb, (input) => {
+        const verdict = checkQuota({ ...input, costModel: 'local' });
+        if (!verdict.ok) expect(verdict.reason).toBe('same-turn');
+      }),
+    );
+  });
+
+  it('🔴 换成 local 只会更宽松，绝不会把 paid 放行的那一张拦下', () => {
+    // 反过来说也成立：唯一同时命中两种后端的层是 L3，而它与 costModel 无关。
+    fc.assert(
+      fc.property(inputArb, (input) => {
+        const paid = checkQuota({ ...input, costModel: 'paid' });
+        const local = checkQuota({ ...input, costModel: 'local' });
+        if (paid.ok) expect(local.ok).toBe(true);
+      }),
     );
   });
 });

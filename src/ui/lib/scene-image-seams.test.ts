@@ -15,14 +15,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { clearAllData, getSceneImage, getSceneImagesByMessage } from '@engine/database';
-import type { ImagePreset } from '@engine/types-image';
+import type { ImagePreset, ImagePromptRequest } from '@engine/types-image';
 import {
   DEFAULT_IMAGE_BASE_NEGATIVE,
   DEFAULT_IMAGE_COMPOSITION_TAGS,
   DEFAULT_IMAGE_MODEL,
   DEFAULT_IMAGE_QUALITY_SUFFIX,
 } from '@engine/image-defaults';
-import type { NaiGenerateOptions, NaiGenerateResult } from './image-client';
+import type { ComfyGenerateOptions, NaiGenerateOptions, NaiGenerateResult } from './image-client';
 import {
   buildSceneImageSeams,
   resolveSceneWeather,
@@ -72,9 +72,22 @@ function makeSettings(over: Partial<ImageRuntimeSettings> = {}): ImageRuntimeSet
     imageHeight: 832,
     imageSteps: 23,
     imageScale: 4.5,
+    imageProvider: 'novelai',
     imageDialectId: 'danbooru-anime',
     imageDialectOverrides: {},
     imageNovelai: makeNovelai(),
+    imageComfy: makeComfy(),
+    ...over,
+  };
+}
+
+/** ComfyUI 那一袋（C8）。默认值与 `getDefaults()` 同口径 */
+function makeComfy(over: Partial<ImageRuntimeSettings['imageComfy']> = {}) {
+  return {
+    baseUrl: 'http://127.0.0.1:8188',
+    workflowJson: '',
+    timeoutMs: 600_000,
+    pollIntervalMs: 1_500,
     ...over,
   };
 }
@@ -99,6 +112,46 @@ function fakeImage(): Uint8Array {
 function okSend(): NaiGenerateResult {
   return { ok: true, images: [fakeImage()], contentType: 'application/x-zip-compressed' };
 }
+
+/**
+ * 两条方言的最小注册表面（图像 v2）。形状与 `data/content/image-dialects.json` 一致，
+ * 但**刻意不 import 那份文件** —— 这些用例要验的是「解析 + 覆盖 + 分叉」，
+ * 不是内容包里今天写了什么（那由 `tests/placeholder-content.test.ts` 钉）。
+ */
+const RAW_DIALECTS = {
+  dialects: [
+    {
+      id: 'danbooru-anime',
+      label: '动漫标签',
+      separator: ', ',
+      normalize: 'danbooru',
+      appearance: 'danbooru',
+      world: 'tags',
+      rating: 'tag',
+      count: 'tag',
+      supportsNegative: true,
+      qualitySuffix: DEFAULT_IMAGE_QUALITY_SUFFIX,
+      baseNegative: DEFAULT_IMAGE_BASE_NEGATIVE,
+      composition: DEFAULT_IMAGE_COMPOSITION_TAGS,
+      systemPrompt: '把中文转成 danbooru 标签。<image_prompt></image_prompt>',
+    },
+    {
+      id: 'natural-prose',
+      label: '自然语',
+      separator: '. ',
+      normalize: 'none',
+      appearance: 'prose',
+      world: 'tags',
+      rating: 'none',
+      count: 'none',
+      supportsNegative: false,
+      qualitySuffix: '',
+      baseNegative: '',
+      composition: 'wide shot, cinematic composition',
+      systemPrompt: '写成英文句子。<image_prompt></image_prompt>',
+    },
+  ],
+};
 
 function makeDeps(over: Partial<SceneImageSeamDeps> = {}): SceneImageSeamDeps {
   return {
@@ -393,6 +446,276 @@ describe('端点缺失与上游失败', () => {
     expect(opts.baseUrl).toBeUndefined();
     // 三重冗余在 buildNaiRequest 里保证；这里只钉「发出去的正是装配好的那份」
     expect(opts.body.input).toBe(opts.body.parameters.v4_prompt.caption.base_caption);
+  });
+});
+
+// ═══ provider 分叉（图像 v2 / C1·C9·C16）═══
+
+describe('provider 分叉', () => {
+  it('comfyui 档走 ComfyUI 客户端，**一次端点池都不查**（C16），值来自 imageComfy 那一袋', async () => {
+    const sendImage = vi.fn(async () => okSend());
+    const sendComfy = vi.fn(async (_opts: ComfyGenerateOptions) => okSend());
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams(
+      buildSceneImageSeams(
+        makeDeps({
+          sendImage,
+          sendComfy,
+          // 🔴 池里一条都没有、端点也没选：NAI 那条路会在这里落 auth 失败，
+          //    而 ComfyUI 的地址根本不住在池里（C16）—— 它必须照发不误
+          settings: () =>
+            makeSettings({
+              imageProvider: 'comfyui',
+              apiPool: [],
+              imageNovelai: makeNovelai({ endpointId: null }),
+              imageComfy: makeComfy({
+                baseUrl: 'http://127.0.0.1:9999',
+                workflowJson: '{"1":{}}',
+                timeoutMs: 42_000,
+                pollIntervalMs: 7,
+              }),
+            }),
+        }),
+      ),
+    );
+
+    const res = await store.generate(baseInput());
+    expect(res.ok).toBe(true);
+    await store.whenIdle();
+
+    expect(sendImage).not.toHaveBeenCalled();
+    expect(sendComfy).toHaveBeenCalledTimes(1);
+    const opts = sendComfy.mock.calls[0][0];
+    expect(opts.baseUrl).toBe('http://127.0.0.1:9999');
+    expect(opts.workflowJson).toBe('{"1":{}}');
+    expect(opts.timeoutMs).toBe(42_000);
+    expect(opts.pollIntervalMs).toBe(7);
+    expect(opts.values.width).toBe(1216);
+    expect(opts.values.height).toBe(832);
+    expect(opts.values.steps).toBe(23);
+    expect(opts.values.scale).toBe(4.5);
+    // 🔴 seed 由本层定死并**如实落库**：客户端那个时钟兜底回不到账本里，
+    //    而「照原样再画一张」正是重画的全部意义
+    expect(typeof opts.values.seed).toBe('number');
+    expect(opts.seedFallback).toBe(opts.values.seed);
+
+    const row = (await getSceneImagesByMessage(SAVE, 'msg_1'))[0];
+    expect(row.status).toBe('done');
+    expect(row.model).toBe('comfyui');
+    expect(row.seed).toBe(opts.values.seed);
+    expect(row.positive).toBe(opts.values.positive);
+    expect(row.negative).toBe(opts.values.negative);
+    expect(row.params).toMatchObject({ width: 1216, steps: 23, workflow: 'custom' });
+  });
+
+  it('工作流粘贴框为空 = 用内置图（C11）：**不传** workflowJson，而不是传一个空串', async () => {
+    const sendComfy = vi.fn(async (_opts: ComfyGenerateOptions) => okSend());
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams(
+      buildSceneImageSeams(
+        makeDeps({ sendComfy, settings: () => makeSettings({ imageProvider: 'comfyui' }) }),
+      ),
+    );
+
+    await store.generate(baseInput());
+    await store.whenIdle();
+
+    expect(sendComfy.mock.calls[0][0].workflowJson).toBeUndefined();
+    const row = (await getSceneImagesByMessage(SAVE, 'msg_1'))[0];
+    expect(row.params).toMatchObject({ workflow: 'builtin' });
+  });
+
+  it('🔴 comfyui（local）不受 L1/L2 限额约束，但 L3 同回合去重照样开火（C9）', async () => {
+    const sendComfy = vi.fn(async (_opts: ComfyGenerateOptions) => okSend());
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams(
+      buildSceneImageSeams(
+        makeDeps({
+          sendComfy,
+          settings: () =>
+            makeSettings({
+              imageProvider: 'comfyui',
+              // 这两个数放在 NAI 袋里，且恒拒 —— local 下它们一格都不该被读
+              imageNovelai: makeNovelai({ maxPerMessage: 0, maxPerHour: 0 }),
+            }),
+        }),
+      ),
+    );
+
+    // 手动档：L1/L2 不启用 → 连开三张都放行
+    for (const occurrence of [0, 1, 2]) {
+      const res = await store.generate(baseInput({ occurrence, source: 'manual' }));
+      expect(res.ok, `第 ${occurrence + 1} 张`).toBe(true);
+    }
+    await store.whenIdle();
+    expect(sendComfy).toHaveBeenCalledTimes(3);
+
+    // 自动档：同一回合已经有 auto 记录时被 L3 拦下（正确性规则，与谁付钱无关）
+    await store.generate(baseInput({ occurrence: 3, source: 'auto' }));
+    await store.whenIdle();
+    const again = await store.generate(baseInput({ occurrence: 4, source: 'auto' }));
+    expect(again.ok).toBe(false);
+    if (!again.ok) expect(again.reason).toBe('same-turn');
+  });
+
+  it('novelai 档（默认）分毫未变：仍查端点池、仍走 NAI 客户端', async () => {
+    const sendComfy = vi.fn(async (_opts: ComfyGenerateOptions) => okSend());
+    const sendImage = vi.fn(async (_opts: NaiGenerateOptions) => okSend());
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams(buildSceneImageSeams(makeDeps({ sendImage, sendComfy })));
+
+    await store.generate(baseInput());
+    await store.whenIdle();
+
+    expect(sendComfy).not.toHaveBeenCalled();
+    expect(sendImage).toHaveBeenCalledTimes(1);
+    expect(sendImage.mock.calls[0][0].token).toBe('pst-token');
+  });
+});
+
+// ═══ 方言（图像 v2 / C3·C6·C14）═══
+
+describe('方言解析与取用', () => {
+  it('注册表这一面缺席时退化成图像 v1 的行为（不崩、不空）', async () => {
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    // makeDeps 刻意不给 rawDialects —— 这正是「没接注册表」那条路
+    store.setSeams(buildSceneImageSeams(makeDeps()));
+
+    await store.generate(baseInput());
+    await store.whenIdle();
+
+    const row = (await getSceneImagesByMessage(SAVE, 'msg_1'))[0];
+    expect(row.positive.endsWith(DEFAULT_IMAGE_QUALITY_SUFFIX)).toBe(true);
+    expect(row.negative).toContain(DEFAULT_IMAGE_BASE_NEGATIVE);
+  });
+
+  it('换方言 = 换整套装配契约（不只是换一句 systemPrompt，C3）', async () => {
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams(
+      buildSceneImageSeams(
+        makeDeps({
+          rawDialects: () => RAW_DIALECTS,
+          settings: () => makeSettings({ imageDialectId: 'natural-prose' }),
+        }),
+      ),
+    );
+
+    await store.generate(baseInput());
+    await store.whenIdle();
+
+    const row = (await getSceneImagesByMessage(SAVE, 'msg_1'))[0];
+    // 画质后缀是空串、分级段不出、构图词换成散文档那份
+    expect(row.positive).not.toContain(DEFAULT_IMAGE_QUALITY_SUFFIX);
+    expect(row.positive).not.toContain('rating:');
+    expect(row.positive).toContain('cinematic composition');
+    // supportsNegative:false → 负向发空串，不是发一段没人读的文字
+    expect(row.negative).toBe('');
+  });
+
+  it('用户覆盖按方言 id 键控：改了 danbooru 那条，散文档一个字都不受影响（C6）', async () => {
+    const overrides = { 'danbooru-anime': { qualitySuffix: '我的尾巴' } };
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams(
+      buildSceneImageSeams(
+        makeDeps({
+          rawDialects: () => RAW_DIALECTS,
+          settings: () =>
+            makeSettings({ imageDialectId: 'natural-prose', imageDialectOverrides: overrides }),
+        }),
+      ),
+    );
+
+    await store.generate(baseInput());
+    await store.whenIdle();
+    expect((await getSceneImagesByMessage(SAVE, 'msg_1'))[0].positive).not.toContain('我的尾巴');
+  });
+
+  it('runtimeInfo 报的是当下的后端与方言（store 拿它给记录盖章，C14）', () => {
+    const seams = buildSceneImageSeams(
+      makeDeps({
+        rawDialects: () => RAW_DIALECTS,
+        settings: () => makeSettings({ imageProvider: 'comfyui', imageDialectId: 'natural-prose' }),
+      }),
+    );
+    expect(seams.runtimeInfo?.()).toEqual({ provider: 'comfyui', dialectId: 'natural-prose' });
+
+    // 设置里存着一个内容包里已经不存在的 id → 落到清单里的 danbooru（不是崩、不是空）
+    const stale = buildSceneImageSeams(
+      makeDeps({
+        rawDialects: () => RAW_DIALECTS,
+        settings: () => makeSettings({ imageDialectId: '早就没有这条了' }),
+      }),
+    );
+    expect(stale.runtimeInfo?.()).toEqual({ provider: 'novelai', dialectId: 'danbooru-anime' });
+  });
+
+  it('侧链收到的是**当前方言**的 systemPrompt；方言没话说时这一格根本不传', async () => {
+    const calls: (string | undefined)[] = [];
+    const runPromptAgent = async (
+      _req: ImagePromptRequest,
+      _signal: AbortSignal,
+      systemPrompt?: string,
+    ) => {
+      calls.push(systemPrompt);
+      return { scenePrompt: 'x', sceneNegative: '', desc: '' };
+    };
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+
+    store.setSeams(
+      buildSceneImageSeams(
+        makeDeps({
+          runPromptAgent,
+          rawDialects: () => RAW_DIALECTS,
+          settings: () => makeSettings({ imageDialectId: 'natural-prose' }),
+        }),
+      ),
+    );
+    await store.generate(baseInput());
+    await store.whenIdle();
+
+    // 注册表缺席 → 兜底方言的 systemPrompt 是空串 = 「本方言没话说」，不传（回落 agent 侧兜底）
+    // turn 换一个：同一回合已经有 auto 记录时会被 L3 拦下（那一层与方言无关）
+    store.setSeams(buildSceneImageSeams(makeDeps({ runPromptAgent })));
+    await store.generate(baseInput({ messageId: 'msg_2', turn: 4 }));
+    await store.whenIdle();
+
+    expect(calls).toEqual(['写成英文句子。<image_prompt></image_prompt>', undefined]);
+  });
+});
+
+// ═══ 装配告警（C15）═══
+
+describe('composeWarnings 落库（告警得有人消费）', () => {
+  it('没有预设的角色被跳过时，告警一路落进记录', async () => {
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams(buildSceneImageSeams(makeDeps({ presets: () => [] })));
+
+    await store.generate(baseInput());
+    await store.whenIdle();
+
+    const row = (await getSceneImagesByMessage(SAVE, 'msg_1'))[0];
+    expect(row.status).toBe('done');
+    expect(row.composeWarnings).toEqual([{ kind: 'missing-preset', name: '苏婉' }]);
+  });
+
+  it('一切正常时这一格**缺席**，不是一个空数组', async () => {
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams(buildSceneImageSeams(makeDeps()));
+
+    await store.generate(baseInput());
+    await store.whenIdle();
+
+    expect((await getSceneImagesByMessage(SAVE, 'msg_1'))[0].composeWarnings).toBeUndefined();
   });
 });
 

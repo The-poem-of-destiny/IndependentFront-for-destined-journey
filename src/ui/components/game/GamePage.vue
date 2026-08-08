@@ -8,6 +8,7 @@ import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
 import { GamePipeline } from '../../lib/game-pipeline';
 import { buildSceneImageSeams, resolveSceneWeather } from '../../lib/scene-image-seams';
+import { getContentRegistry } from '../../stores/content-store';
 import { useCharacterAppearanceStore } from '../../stores/character-appearance-store';
 import {
   appearanceWriteTarget,
@@ -80,6 +81,10 @@ onMounted(async () => {
     sceneImages.setSeams(
       buildSceneImageSeams({
         settings: () => settings.settings,
+        // 🔴 交出去的是注册表那一面的**原始值**（图像 v2 / C4）：解析与用户覆盖的叠加
+        //    留在 seams 里（纯函数、有测试）。这里现取现给 —— 内容包换了方言表之后
+        //    不必重挂缝，与 `settings` 同一条纪律
+        rawDialects: () => getContentRegistry().imageDialects,
         // 🔴 交出去的是**基线 + 本档覆盖**合并后的预设（D56）：装配层只认一份外貌，
         //    会话覆盖在这里就地叠好，`composePrompt` 不必知道有两份定义这回事。
         //
@@ -122,9 +127,12 @@ onMounted(async () => {
             await charAppearance.applyPatch(item.name, target.base, item.patch);
           }
         },
-        runPromptAgent: (request, signal) =>
+        // 🔴 第三参是**方言的 systemPrompt**（C3/C5）：解析在 seams 里发生（全仓一处），
+        //    这里只负责原样转达。忘了转达不会报错 —— 只是换了方言之后侧链仍按老吃法
+        //    说话，产出一串给错模型的标签
+        runPromptAgent: (request, signal, systemPrompt) =>
           pipeline
-            ? pipeline.runImagePromptAgent(request, signal)
+            ? pipeline.runImagePromptAgent(request, signal, systemPrompt)
             : Promise.resolve({
                 ok: false as const,
                 kind: 'prompt-agent' as const,
