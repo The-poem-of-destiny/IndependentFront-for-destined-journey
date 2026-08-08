@@ -20,6 +20,25 @@ echo   叙事引擎 开发启动器
 echo ==============================
 echo.
 
+:: ------------------------------------------------------------------
+:: Optional content-repo mode (content-engine split wave 4, D14).
+::   dev.bat --content   (or: npm run dev -- --content)
+:: Points /data/* reads AND the "save as default" UI write at the real
+:: content repo (sibling dir ..\fated_poem_independent_assets\data)
+:: instead of the public/data placeholder. This also makes the
+:: "save as default" button appear (it is hidden unless the
+:: __POEM_CONTENT_DIR__ define is true). Without --content the
+:: placeholder stays read-only and the button stays hidden -- by design,
+:: so placeholder content can never be written by the UI.
+:: A pre-set POEM_CONTENT_DIR env var always wins (no override).
+if not defined POEM_CONTENT_DIR (
+    for %%A in (%*) do if /i "%%~A"=="--content" (
+        set "POEM_CONTENT_DIR=%~dp0..\fated_poem_independent_assets\data"
+    )
+)
+if defined POEM_CONTENT_DIR echo [dev] content repo: %POEM_CONTENT_DIR%
+
+
 :: Kill leftover listeners on the dev port range.
 :: Three details are load-bearing -- read docs/reference/dev-bat-notes.md
 :: before touching the netstat/findstr pipeline:
