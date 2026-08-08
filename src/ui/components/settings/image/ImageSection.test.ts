@@ -105,10 +105,6 @@ beforeEach(() => {
     presets: [],
     activePresetId: '',
     imageGenMode: 'manual',
-    imageEndpointId: null,
-    imageModel: 'nai-diffusion-4-5-full',
-    imageQualitySuffix: 'location, very aesthetic',
-    imageBaseNegative: 'lowres',
     imageExtraNegative: '',
     imageMaxRating: 'general',
     imageBlurByDefault: false,
@@ -117,11 +113,19 @@ beforeEach(() => {
     imageHeight: 832,
     imageSteps: 23,
     imageScale: 4.5,
-    imageSampler: 'k_euler_ancestral',
-    imageNoiseSchedule: 'karras',
-    imageUcPreset: 0,
-    imageMaxPerMessage: 2,
-    imageMaxPerHour: 20,
+    // 图像 v2 / C8：画质后缀与基础负向进方言覆盖，NAI 参数与限额进 provider 袋
+    imageDialectId: 'danbooru-anime',
+    imageDialectOverrides: { 'danbooru-anime': { qualitySuffix: 'location, very aesthetic' } },
+    imageNovelai: {
+      endpointId: null,
+      model: 'nai-diffusion-4-5-full',
+      sampler: 'k_euler_ancestral',
+      noiseSchedule: 'karras',
+      ucPreset: 0,
+      tier: 'unset',
+      maxPerMessage: 2,
+      maxPerHour: 20,
+    },
   });
 });
 

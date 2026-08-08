@@ -32,7 +32,11 @@ import { checkQuota } from '@engine/image-quota';
 import { composePrompt } from '@engine/image-prompt';
 import { buildWorldTags } from '@engine/image-world-tags';
 import { buildNaiRequest } from '@engine/image-providers/novelai';
-import { DEFAULT_IMAGE_COMPOSITION_TAGS } from '@engine/image-defaults';
+import {
+  DEFAULT_IMAGE_BASE_NEGATIVE,
+  DEFAULT_IMAGE_COMPOSITION_TAGS,
+  DEFAULT_IMAGE_QUALITY_SUFFIX,
+} from '@engine/image-defaults';
 import type { GameTime } from '@engine/time-system';
 import type { ParsedCharacterAppearance } from '@engine/character-appearance';
 import type {
@@ -59,22 +63,36 @@ import { hashMediaBytes } from './media-hash';
 export type ImageRuntimeSettings = Pick<
   UiSettings,
   | 'apiPool'
-  | 'imageEndpointId'
-  | 'imageModel'
-  | 'imageQualitySuffix'
-  | 'imageBaseNegative'
   | 'imageExtraNegative'
   | 'imageMaxRating'
   | 'imageWidth'
   | 'imageHeight'
   | 'imageSteps'
   | 'imageScale'
-  | 'imageSampler'
-  | 'imageNoiseSchedule'
-  | 'imageUcPreset'
-  | 'imageMaxPerMessage'
-  | 'imageMaxPerHour'
+  | 'imageDialectId'
+  | 'imageDialectOverrides'
+  | 'imageNovelai'
 >;
+
+/**
+ * 画质后缀 / 基础负向的取值 —— **过渡形态**（图像 v2 / T5）。
+ *
+ * C6 把这两个字符串从平铺设置搬进了「方言覆盖」，但**本层还没有方言**：`composePrompt`
+ * 仍是 danbooru 形状的单一路径，方言真正接进来是 T6 的事（届时这两行由
+ * `resolveImageDialect(注册表, s.imageDialectId, 覆盖)` 整体取代）。
+ *
+ * 所以这里做的**只是把值从新住处读出来**，行为与重构前逐字节一致：
+ * 用户改过 → 迁移把它落成了当前方言的覆盖，照读；没改过 → 覆盖缺席，落回 v1 常量。
+ */
+function resolveDialectString(
+  s: ImageRuntimeSettings,
+  field: 'qualitySuffix' | 'baseNegative',
+  fallback: string,
+): string {
+  const override = s.imageDialectOverrides?.[s.imageDialectId]?.[field];
+  // 空串不算覆盖（`ImageDialectOverride` 的注释）：清空输入框表达的是「用默认」
+  return typeof override === 'string' && override !== '' ? override : fallback;
+}
 
 /** 世界状态（D39）—— 由 Code 查引擎得出，**不问 AI** */
 export interface SceneImageWorld {
@@ -171,7 +189,10 @@ export function buildSceneImageSeams(deps: SceneImageSeamDeps): SceneImageSeams 
         records: input.records,
         target: input.target,
         now: input.now,
-        limits: { maxPerMessage: s.imageMaxPerMessage, maxPerHour: s.imageMaxPerHour },
+        limits: {
+          maxPerMessage: s.imageNovelai.maxPerMessage,
+          maxPerHour: s.imageNovelai.maxPerHour,
+        },
       });
     },
 
@@ -214,7 +235,7 @@ async function sendOne(
 
   // 端点没选 → 一句能自救的话，且**不发请求**。
   // 没选端点与令牌过期是两回事，混成同一句会让人去重填一个根本没选过的令牌。
-  const endpoint = (s.apiPool ?? []).find((entry) => entry.id === s.imageEndpointId);
+  const endpoint = (s.apiPool ?? []).find((entry) => entry.id === s.imageNovelai.endpointId);
   if (!endpoint) {
     return localFailure('auth', '还没有选择出图端点，去设置的「图像生成」里选一条', false);
   }
@@ -231,9 +252,9 @@ async function sendOne(
     //    它是**喂给侧链**的上下文（`ImagePromptRequest.location`），不是查表的键
     presets,
     {
-      qualitySuffix: s.imageQualitySuffix,
+      qualitySuffix: resolveDialectString(s, 'qualitySuffix', DEFAULT_IMAGE_QUALITY_SUFFIX),
       compositionTags: DEFAULT_IMAGE_COMPOSITION_TAGS,
-      baseNegative: s.imageBaseNegative,
+      baseNegative: resolveDialectString(s, 'baseNegative', DEFAULT_IMAGE_BASE_NEGATIVE),
       extraNegative: s.imageExtraNegative,
       // 🔴 上限而非默认（D38）—— 标记写的 rating 在这里被钳住
       maxRating: s.imageMaxRating,
@@ -245,14 +266,14 @@ async function sendOne(
   // seed 刻意不传: 留给 `composed.seed`（角色预设的 pinnedSeed）；两处都没有就不发这个
   // 字段，由 NAI 自己随机。本层**不**兜一个 Math.random()（那会让"随机"变成我们的账）。
   const body = buildNaiRequest(composed, {
-    model: s.imageModel,
+    model: s.imageNovelai.model,
     width: s.imageWidth,
     height: s.imageHeight,
     steps: s.imageSteps,
     scale: s.imageScale,
-    sampler: s.imageSampler,
-    noiseSchedule: s.imageNoiseSchedule,
-    ucPreset: s.imageUcPreset,
+    sampler: s.imageNovelai.sampler,
+    noiseSchedule: s.imageNovelai.noiseSchedule,
+    ucPreset: s.imageNovelai.ucPreset,
   });
 
   // 🔴 **上游地址不从端点记录里取**（2026-08-05 真机连坑两轮后定的）。出图只有一个

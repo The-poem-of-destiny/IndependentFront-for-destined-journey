@@ -22,15 +22,15 @@ import { defineStore } from 'pinia';
 import { ref, watch } from 'vue';
 import { deleteApiEndpoint, getApiEndpoints, saveApiEndpoint } from '@engine/database';
 import {
-  DEFAULT_IMAGE_BASE_NEGATIVE,
   DEFAULT_IMAGE_MAX_PER_HOUR,
   DEFAULT_IMAGE_MAX_PER_MESSAGE,
   DEFAULT_IMAGE_MODEL,
-  DEFAULT_IMAGE_QUALITY_SUFFIX,
 } from '@engine/image-defaults';
+import { FALLBACK_IMAGE_DIALECT } from '@engine/image-dialect';
 import { detach } from './db-write';
 import { migrateLegacyAgentOverrides } from './agent-settings';
 import { migrateLegacyAgentMaps } from './agent-settings-migration';
+import { migrateImageSettings } from './image-settings-migration';
 import type { UiSettings } from './settings-types';
 import {
   apiEndpointToEntry,
@@ -279,31 +279,45 @@ function getDefaults(): UiSettings {
     //   下面这项是几个 id 的开关列表，体积无关紧要，继续留在设置里。
     beautifierBuiltinDisabled: [],
 
-    // 图像生成（设计 §11）——
-    // 🔴 常量一律从 `image-defaults.ts` 取，**不照抄设计文档里的字面值**：
-    //    画质后缀与基础负向都是长串，抄一份进来就是第二个真相来源，而两处漂移
-    //    的症状只是「画出来的东西不太对」，不会有任何报错。
+    // 图像生成（设计 §11；图像 v2 / C8 起是 per-provider 袋子）——
+    // 🔴 常量一律从 `image-defaults.ts` / `image-dialect.ts` 取，**不照抄设计文档里的
+    //    字面值**：抄一份进来就是第二个真相来源，而两处漂移的症状只是「画出来的
+    //    东西不太对」，不会有任何报错。
     //    尺寸/步数/采样器那几个是录制样本值（§6.1），它们没有常量，如实写在这里。
+    // 🔴 画质后缀与基础负向**不在这里**（C6）：它们是方言属性，默认值住在方言 JSON，
+    //    这里只留一张空的覆盖表 —— 空 = 回落方言默认。
+    imageProvider: 'novelai',
+    imageDialectId: FALLBACK_IMAGE_DIALECT.id,
+    imageDialectOverrides: {},
     imageGenMode: 'manual',
-    imageEndpointId: null,
-    imageModel: DEFAULT_IMAGE_MODEL,
-    imageQualitySuffix: DEFAULT_IMAGE_QUALITY_SUFFIX,
-    imageBaseNegative: DEFAULT_IMAGE_BASE_NEGATIVE,
-    imageExtraNegative: '',
-    imageMaxRating: 'general',
-    imageBlurByDefault: false,
-    imageAutoConfirmed: false,
     imageWidth: 1216,
     imageHeight: 832,
     imageSteps: 23,
     imageScale: 4.5,
-    imageSampler: 'k_euler_ancestral',
-    imageNoiseSchedule: 'karras',
-    imageUcPreset: 0,
-    // 🔴 'unset' 而不是 'opus'：没问过用户就假设他有 Opus，等于替他宣布「这些图不要钱」
-    imageNaiTier: 'unset',
-    imageMaxPerMessage: DEFAULT_IMAGE_MAX_PER_MESSAGE,
-    imageMaxPerHour: DEFAULT_IMAGE_MAX_PER_HOUR,
+    imageMaxRating: 'general',
+    imageBlurByDefault: false,
+    imageAutoConfirmed: false,
+    imageExtraNegative: '',
+    imageNovelai: {
+      endpointId: null,
+      model: DEFAULT_IMAGE_MODEL,
+      sampler: 'k_euler_ancestral',
+      noiseSchedule: 'karras',
+      ucPreset: 0,
+      // 🔴 'unset' 而不是 'opus'：没问过用户就假设他有 Opus，等于替他宣布「这些图不要钱」
+      tier: 'unset',
+      maxPerMessage: DEFAULT_IMAGE_MAX_PER_MESSAGE,
+      maxPerHour: DEFAULT_IMAGE_MAX_PER_HOUR,
+    },
+    imageComfy: {
+      // 与应用同机的 ComfyUI 默认端口（dev.bat 场景）
+      baseUrl: 'http://127.0.0.1:8188',
+      // 空串 = 用内置最小 SDXL 图（C11），不是「没配置就不能跑」
+      workflowJson: '',
+      // 本地渲染慢：2 分钟硬闸会把仍在渲染的图记成失败，随后图又悄悄落在输出目录里
+      timeoutMs: 600_000,
+      pollIntervalMs: 1_500,
+    },
   };
 }
 
@@ -331,6 +345,14 @@ export const useSettingsStore = defineStore('settings', () => {
   //    每个 Agent 的模型/提示词会当场显示成默认值。
   //    它是纯内存重排、无 I/O、幂等，所以这里同步跑没有代价。
   migrateLegacyAgentMaps(merged);
+
+  // 图像 v2 / C8：17 个平铺 `image*` → per-provider 袋子 + 方言覆盖。
+  //
+  // 🔴 位置同上，理由也同上：必须在 `ref()` **之前**同步跑。它同样是纯内存重排、
+  //    无 I/O、幂等（旧平铺键在不在就是信号），所以在这里跑没有代价。
+  //    放到 ref 之后会有一段「响应式状态里还是平铺形状」的窗口 —— 而设置页此刻
+  //    读的是 `s.imageNovelai.model`，那一拍会当场炸在 undefined 上。
+  migrateImageSettings(merged);
 
   // Phase 0: 内置世界书合并已搬去 worldbook-store 的 init()（设计 D4 第 6 步）——
   // 必须在 localStorage→Dexie 迁移**之后**、针对 Dexie 执行，否则会把内置书写回

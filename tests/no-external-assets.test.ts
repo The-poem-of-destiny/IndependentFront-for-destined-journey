@@ -119,6 +119,12 @@ const ALLOWED_EXTERNAL_HOSTS: ReadonlyArray<{ host: string; why: string }> = [
   { host: 'image.novelai.net', why: 'NovelAI 出图上游（image-client 的常量地址）' },
   { host: 'api.novelai.net', why: 'NovelAI 文本/账户域（image-client 的「填错了」识别分支）' },
   { host: 'docs.novelai.net', why: 'NAI 官方文档链接（注释里的出处指针）' },
+  {
+    host: '127.0.0.1:8188',
+    // 与其余条目不同：它根本不是外部主机，是**本机** ComfyUI 的默认端口（图像 v2 / C16）。
+    // 地址住在 `imageComfy.baseUrl` 里、由用户自己改；这里出现的只是那一格的默认值。
+    why: 'ComfyUI 本地默认地址（imageComfy.baseUrl 的默认值，用户可改）',
+  },
   // —— 创意工坊（P1/P3/P4）——
   { host: 'poemofdestinycreativeworkshop.1528779666.workers.dev', why: '工坊 API 上游（Worker）' },
   { host: 'cdn.discordapp.com', why: '工坊 Discord 登录后的头像（P3 社交面）' },

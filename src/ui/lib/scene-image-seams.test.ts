@@ -34,6 +34,24 @@ import { useSceneImageStore, type SceneImageGenerateInput } from '../stores/scen
 
 const SAVE = 'save_seams';
 
+/**
+ * NAI 那一袋（图像 v2 / C8）。整袋替换很啰嗦，所以给个只改一两项的口子 ——
+ * 画质后缀与基础负向**不在这里**：它们自 C6 起是方言覆盖，缺席即回落常量。
+ */
+function makeNovelai(over: Partial<ImageRuntimeSettings['imageNovelai']> = {}) {
+  return {
+    endpointId: 'nai' as string | null,
+    model: DEFAULT_IMAGE_MODEL,
+    sampler: 'k_euler_ancestral',
+    noiseSchedule: 'karras',
+    ucPreset: 0,
+    tier: 'unset' as const,
+    maxPerMessage: 2,
+    maxPerHour: 20,
+    ...over,
+  };
+}
+
 function makeSettings(over: Partial<ImageRuntimeSettings> = {}): ImageRuntimeSettings {
   return {
     apiPool: [
@@ -48,21 +66,15 @@ function makeSettings(over: Partial<ImageRuntimeSettings> = {}): ImageRuntimeSet
         apiType: 'image',
       },
     ],
-    imageEndpointId: 'nai',
-    imageModel: DEFAULT_IMAGE_MODEL,
-    imageQualitySuffix: DEFAULT_IMAGE_QUALITY_SUFFIX,
-    imageBaseNegative: DEFAULT_IMAGE_BASE_NEGATIVE,
     imageExtraNegative: '',
     imageMaxRating: 'general',
     imageWidth: 1216,
     imageHeight: 832,
     imageSteps: 23,
     imageScale: 4.5,
-    imageSampler: 'k_euler_ancestral',
-    imageNoiseSchedule: 'karras',
-    imageUcPreset: 0,
-    imageMaxPerMessage: 2,
-    imageMaxPerHour: 20,
+    imageDialectId: 'danbooru-anime',
+    imageDialectOverrides: {},
+    imageNovelai: makeNovelai(),
     ...over,
   };
 }
@@ -219,6 +231,32 @@ describe('注入缝装配（阻塞项：不挂缝 = 每一次生成都以 prompt
     expect(row.positive).toContain('rating:sensitive');
     expect(row.positive).not.toContain('rating:explicit');
   });
+
+  it('🔴 用户改过的画质后缀/基础负向经**方言覆盖**照旧到得了请求体（C6 改址不丢值）', async () => {
+    const store = useSceneImageStore();
+    await store.load(SAVE);
+    store.setSeams(
+      buildSceneImageSeams(
+        makeDeps({
+          settings: () =>
+            makeSettings({
+              imageDialectOverrides: {
+                'danbooru-anime': { qualitySuffix: 'my tail', baseNegative: 'no hands' },
+              },
+            }),
+        }),
+      ),
+    );
+
+    await store.generate(baseInput());
+    await store.whenIdle();
+
+    const row = (await getSceneImagesByMessage(SAVE, 'msg_1'))[0];
+    expect(row.positive.endsWith('my tail')).toBe(true);
+    expect(row.positive).not.toContain(DEFAULT_IMAGE_QUALITY_SUFFIX);
+    expect(row.negative).toContain('no hands');
+    expect(row.negative).not.toContain(DEFAULT_IMAGE_BASE_NEGATIVE);
+  });
 });
 
 // ═══ 限额（D32：闸门在最前面）═══
@@ -237,7 +275,7 @@ describe('限额闸门（错了会白烧 LLM token）', () => {
     store.setSeams(
       buildSceneImageSeams(
         makeDeps({
-          settings: () => makeSettings({ imageMaxPerHour: 0 }),
+          settings: () => makeSettings({ imageNovelai: makeNovelai({ maxPerHour: 0 }) }),
           runPromptAgent,
           sendImage,
         }),
@@ -259,7 +297,11 @@ describe('限额闸门（错了会白烧 LLM token）', () => {
     const store = useSceneImageStore();
     await store.load(SAVE);
     store.setSeams(
-      buildSceneImageSeams(makeDeps({ settings: () => makeSettings({ imageMaxPerMessage: 1 }) })),
+      buildSceneImageSeams(
+        makeDeps({
+          settings: () => makeSettings({ imageNovelai: makeNovelai({ maxPerMessage: 1 }) }),
+        }),
+      ),
     );
 
     expect((await store.generate(baseInput())).ok).toBe(true);
@@ -286,7 +328,10 @@ describe('端点缺失与上游失败', () => {
     await store.load(SAVE);
     store.setSeams(
       buildSceneImageSeams(
-        makeDeps({ settings: () => makeSettings({ imageEndpointId: null }), sendImage }),
+        makeDeps({
+          settings: () => makeSettings({ imageNovelai: makeNovelai({ endpointId: null }) }),
+          sendImage,
+        }),
       ),
     );
 

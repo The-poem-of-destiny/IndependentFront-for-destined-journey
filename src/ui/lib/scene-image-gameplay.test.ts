@@ -23,7 +23,6 @@ import { createPinia, setActivePinia } from 'pinia';
 
 import { scanSceneImages, stripMarkers } from '@engine/marker-protocol';
 import { splitSceneImageSegments } from '@engine/image-segments';
-import { DEFAULT_IMAGE_BASE_NEGATIVE, DEFAULT_IMAGE_QUALITY_SUFFIX } from '@engine/image-defaults';
 import type { ImagePreset, ImagePromptRequest } from '@engine/types-image';
 import { buildSceneImageSeams, type ImageRuntimeSettings } from './scene-image-seams';
 import { useSceneImageStore } from '../stores/scene-image-store';
@@ -74,21 +73,31 @@ function settingsSnapshot(over: Partial<ImageRuntimeSettings> = {}): ImageRuntim
         apiKey: 'tk',
       },
     ] as ImageRuntimeSettings['apiPool'],
-    imageEndpointId: 'ep_nai',
-    imageModel: 'nai-diffusion-4-5-full',
-    imageQualitySuffix: DEFAULT_IMAGE_QUALITY_SUFFIX,
-    imageBaseNegative: DEFAULT_IMAGE_BASE_NEGATIVE,
     imageExtraNegative: '',
     imageMaxRating: 'sensitive',
     imageWidth: 1216,
     imageHeight: 832,
     imageSteps: 23,
     imageScale: 4.5,
-    imageSampler: 'k_euler_ancestral',
-    imageNoiseSchedule: 'karras',
-    imageUcPreset: 0,
-    imageMaxPerMessage: 2,
-    imageMaxPerHour: 20,
+    // 画质后缀与基础负向自图像 v2 / C6 起是方言属性：覆盖表留空 = 回落这两个常量
+    imageDialectId: 'danbooru-anime',
+    imageDialectOverrides: {},
+    imageNovelai: makeNovelai(),
+    ...over,
+  };
+}
+
+/** NAI 那一袋（C8）。只改一两项时用它，免得每处都整袋抄一遍 */
+function makeNovelai(over: Partial<ImageRuntimeSettings['imageNovelai']> = {}) {
+  return {
+    endpointId: 'ep_nai' as string | null,
+    model: 'nai-diffusion-4-5-full',
+    sampler: 'k_euler_ancestral',
+    noiseSchedule: 'karras',
+    ucPreset: 0,
+    tier: 'unset' as const,
+    maxPerMessage: 2,
+    maxPerHour: 20,
     ...over,
   };
 }
@@ -207,7 +216,7 @@ describe('自动档一轮：**只**自动画第一张，其余留成按钮（D23
    * 🔴 这条是本文件最该有的一个断言，也是最容易被想当然写反的一个。
    *
    * story 一回合可以插好几个标记，而**自动档一回合只自动出一张**（`image-quota` 的 L3，
-   * 只对 `auto` 生效）。默认 `imageMaxPerMessage: 2` 描述的是**每条消息**的总额，
+   * 只对 `auto` 生效）。默认 `imageNovelai.maxPerMessage: 2` 描述的是**每条消息**的总额，
    * 管的主要是手动追加；它不会让自动档在同一回合连开两枪。
    *
    * 于是「两个标记 → 两张图」是**错的期待**：正确结果是一张图 + 一个按钮。
@@ -304,7 +313,9 @@ describe('自动档一轮：**只**自动画第一张，其余留成按钮（D23
 
 describe('🔴 D32：限额在 image_prompt 侧链之前 —— 被拦下的图不许烧掉一次 LLM 调用', () => {
   it('每条消息上限为 1 时，第二个标记既不发请求**也不调侧链**', async () => {
-    const { store, promptCalls, sendCalls } = wire({ imageMaxPerMessage: 1 });
+    const { store, promptCalls, sendCalls } = wire({
+      imageNovelai: makeNovelai({ maxPerMessage: 1 }),
+    });
     await playOneTurn(store);
 
     expect(promptCalls).toHaveLength(1);
@@ -312,7 +323,7 @@ describe('🔴 D32：限额在 image_prompt 侧链之前 —— 被拦下的图�
   });
 
   it('D21：被限额拦下不产生记录 → 那一格落到「无记录」，渲染成手动按钮而不是消失', async () => {
-    const { store } = wire({ imageMaxPerMessage: 1 });
+    const { store } = wire({ imageNovelai: makeNovelai({ maxPerMessage: 1 }) });
     await playOneTurn(store);
 
     const second = store.displayedAt(MESSAGE_ID, 'marker', 1);

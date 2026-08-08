@@ -13,7 +13,7 @@
  * 2b. 🔴 **免费额度是 Opus 专属的**（D43 补丁，2026-08-04 真机催生）。默认参数满足
  *    Opus 的全部三条，于是这行指示器曾对**每一个**账户都说「在免费额度内」——
  *    对 Tablet / Scroll / 免订阅买点数的账户，那是每张扣约 17 点却被告知不花钱。
- *    档位由 `imageNaiTier` 明说，默认 `'unset'`（不猜），四支措辞互斥。
+ *    档位由 `imageNovelai.tier` 明说，默认 `'unset'`（不猜），四支措辞互斥。
  *
  * 2. 🔴 **免费额度指示只在 `consumes-anlas` 时报数**（D43 / §11.2）。
  *    `estimateAnlasCost` 的 `anlasPerSample` 在免费档内**也是正数** —— 那是这张图
@@ -26,8 +26,9 @@
  *    systemPrompt 是**Agent 的提示词**。两者都叫「提示词」却完全不同层，写错框
  *    两边都不报错（§11.3）。所以两处各写明作用范围，别删。
  *
- * 画质后缀的默认值来自 `image-defaults.DEFAULT_IMAGE_QUALITY_SUFFIX`（`getDefaults()`
- * 里取的），**不带前导逗号** —— `composePrompt` 自己用 `', '` 连接各段。
+ * 画质后缀与全局负向自图像 v2（C6）起是**方言属性**：这两个文本框写的是**当前方言的
+ * 覆盖**，留空即回落方言 JSON 的默认值（`image-defaults` 的两个常量是内置 danbooru
+ * 方言的默认）。值仍然**不带前导逗号** —— `composePrompt` 自己用 `', '` 连接各段。
  */
 import { computed, ref } from 'vue';
 import AppCard from '../../shared/AppCard.vue';
@@ -39,6 +40,29 @@ import type { ImageGenMode, ImageRating, NaiBillingTier } from '@engine/types-im
 
 const cfg = useSettingsStore();
 const s = cfg.settings;
+
+/**
+ * 画质后缀 / 全局负向（基础）的读写口 —— **过渡形态**（图像 v2 / T5）。
+ *
+ * C6 把这两个字符串从平铺设置搬进了「按方言 id 键控的覆盖」，于是这张卡上的两个
+ * 文本框绑的不再是一个字段，而是**当前方言的覆盖项**：
+ *   · 空 = 回落方言 JSON 的默认值（不是「一个空的画质后缀」）
+ *   · 写了东西 = 只对当前这条方言生效
+ * 方言选择器与「这一格的默认值长什么样」的占位提示是 T7a 的事，本次只改址不改样。
+ */
+function dialectOverride(field: 'qualitySuffix' | 'baseNegative') {
+  return computed<string>({
+    get: () => s.imageDialectOverrides?.[s.imageDialectId]?.[field] ?? '',
+    set: (value: string) => {
+      if (!s.imageDialectOverrides) s.imageDialectOverrides = {};
+      const entry = (s.imageDialectOverrides[s.imageDialectId] ??= {});
+      entry[field] = value;
+    },
+  });
+}
+
+const qualitySuffix = dialectOverride('qualitySuffix');
+const baseNegative = dialectOverride('baseNegative');
 
 // ═══ 三档开关（D14 / D44）═══
 
@@ -56,8 +80,8 @@ const MODES: { key: ImageGenMode; label: string; hint: string }[] = [
 /** auto 那一行的后果说明 —— 数字取当前设置，不写死 */
 const autoConsequence = computed(
   () =>
-    `剧情里出现值得配图的时刻就自动生成。每条消息最多 ${s.imageMaxPerMessage} 张、` +
-    `每小时最多 ${s.imageMaxPerHour} 张，超出的会降级成按钮等你点。`,
+    `剧情里出现值得配图的时刻就自动生成。每条消息最多 ${s.imageNovelai.maxPerMessage} 张、` +
+    `每小时最多 ${s.imageNovelai.maxPerHour} 张，超出的会降级成按钮等你点。`,
 );
 
 /** 首次切到 auto 的一次性确认（D44）。已确认过的档位切换不再打断 */
@@ -92,7 +116,7 @@ const anlas = computed(() =>
   estimateAnlasCost(s.imageWidth, s.imageHeight, s.imageSteps, {
     samples: N_SAMPLES,
     // 🔴 必须传。不传 = 引擎按 'unset' 处理（那是刻意的兜底），但真源在这个设置里
-    tier: s.imageNaiTier,
+    tier: s.imageNovelai.tier,
   }),
 );
 
@@ -177,7 +201,7 @@ const RATINGS: { key: ImageRating; label: string }[] = [
       <label class="form-label"
         >图像端点
         <p class="form-hint">在「API 配置」里把类型设为「图像生成」的那些端点会出现在这里</p>
-        <select v-model="s.imageEndpointId" class="form-input">
+        <select v-model="s.imageNovelai.endpointId" class="form-input">
           <option :value="null">（未选择）</option>
           <option v-for="ep in imageEndpoints" :key="ep.id" :value="ep.id">{{ ep.name }}</option>
         </select></label
@@ -185,7 +209,7 @@ const RATINGS: { key: ImageRating; label: string }[] = [
       <label class="form-label"
         >NAI 模型
         <p class="form-hint">出图模型 id，不是 LLM 模型</p>
-        <input v-model="s.imageModel" class="form-input" spellcheck="false"
+        <input v-model="s.imageNovelai.model" class="form-input" spellcheck="false"
       /></label>
       <label class="form-label"
         >宽（px）
@@ -210,15 +234,16 @@ const RATINGS: { key: ImageRating; label: string }[] = [
           class="form-input"
       /></label>
       <label class="form-label"
-        >采样器 <input v-model="s.imageSampler" class="form-input" spellcheck="false"
+        >采样器 <input v-model="s.imageNovelai.sampler" class="form-input" spellcheck="false"
       /></label>
       <label class="form-label"
-        >噪声调度 <input v-model="s.imageNoiseSchedule" class="form-input" spellcheck="false"
+        >噪声调度
+        <input v-model="s.imageNovelai.noiseSchedule" class="form-input" spellcheck="false"
       /></label>
       <label class="form-label"
         >UC 预设编号
         <p class="form-hint">按录制值原样发；负向文本由下面的全局负向拿着</p>
-        <input v-model.number="s.imageUcPreset" type="number" min="0" class="form-input"
+        <input v-model.number="s.imageNovelai.ucPreset" type="number" min="0" class="form-input"
       /></label>
     </div>
 
@@ -234,10 +259,10 @@ const RATINGS: { key: ImageRating; label: string }[] = [
         v-for="t in TIERS"
         :key="t.key"
         class="mode-item"
-        :class="{ 'mode-active': s.imageNaiTier === t.key }"
+        :class="{ 'mode-active': s.imageNovelai.tier === t.key }"
         role="radio"
-        :aria-checked="s.imageNaiTier === t.key"
-        @click="s.imageNaiTier = t.key"
+        :aria-checked="s.imageNovelai.tier === t.key"
+        @click="s.imageNovelai.tier = t.key"
       >
         <span class="mode-label">{{ t.label }}</span>
         <span class="mode-hint">{{ t.hint }}</span>
@@ -279,20 +304,12 @@ const RATINGS: { key: ImageRating; label: string }[] = [
           追加在每一张图的正向提示词<strong>末尾</strong>（顺序即权重）。不要写前导逗号 ——
           各段由引擎用「, 」连接。
         </p>
-        <textarea
-          v-model="s.imageQualitySuffix"
-          class="form-input form-textarea"
-          rows="2"
-        ></textarea>
+        <textarea v-model="qualitySuffix" class="form-input form-textarea" rows="2"></textarea>
       </label>
       <label class="form-label"
         >全局负向（基础）
         <p class="form-hint">每一张图都带上。只写画质与解剖类缺陷，分级由下面的上限管</p>
-        <textarea
-          v-model="s.imageBaseNegative"
-          class="form-input form-textarea"
-          rows="3"
-        ></textarea>
+        <textarea v-model="baseNegative" class="form-input form-textarea" rows="3"></textarea>
       </label>
       <label class="form-label"
         >全局负向（我的追加）
@@ -318,7 +335,7 @@ const RATINGS: { key: ImageRating; label: string }[] = [
         >每条消息最多几张
         <p class="form-hint">自动与手动都计入</p>
         <input
-          v-model.number="s.imageMaxPerMessage"
+          v-model.number="s.imageNovelai.maxPerMessage"
           type="number"
           min="1"
           max="10"
@@ -328,7 +345,7 @@ const RATINGS: { key: ImageRating; label: string }[] = [
         >每小时最多几张
         <p class="form-hint">失效保护：挡的是回退重发风暴与意外循环</p>
         <input
-          v-model.number="s.imageMaxPerHour"
+          v-model.number="s.imageNovelai.maxPerHour"
           type="number"
           min="1"
           max="200"

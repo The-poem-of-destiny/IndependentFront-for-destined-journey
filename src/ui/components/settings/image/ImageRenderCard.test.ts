@@ -35,10 +35,6 @@ function resetSettings() {
   Object.assign(mockSettings, {
     apiPool: [],
     imageGenMode: 'manual',
-    imageEndpointId: null,
-    imageModel: 'nai-diffusion-4-5-full',
-    imageQualitySuffix: DEFAULT_IMAGE_QUALITY_SUFFIX,
-    imageBaseNegative: DEFAULT_IMAGE_BASE_NEGATIVE,
     imageExtraNegative: '',
     imageMaxRating: 'general',
     imageBlurByDefault: false,
@@ -47,14 +43,22 @@ function resetSettings() {
     imageHeight: 832,
     imageSteps: 23,
     imageScale: 4.5,
-    imageSampler: 'k_euler_ancestral',
-    imageNoiseSchedule: 'karras',
-    imageUcPreset: 0,
-    // 🔴 与 getDefaults() 一致：'unset'，不是 'opus'。这里若图省事写 'opus'，
-    //    「默认不谎报免费」那条用例就会在一个**测试自己造出来的**前提下变绿
-    imageNaiTier: 'unset',
-    imageMaxPerMessage: 2,
-    imageMaxPerHour: 20,
+    // 图像 v2 / C6：画质后缀与全局负向不再是平铺字段，而是**当前方言的覆盖**。
+    // 覆盖表留空 = 回落方言默认（= 下面断言里的两个常量）
+    imageDialectId: 'danbooru-anime',
+    imageDialectOverrides: {},
+    imageNovelai: {
+      endpointId: null,
+      model: 'nai-diffusion-4-5-full',
+      sampler: 'k_euler_ancestral',
+      noiseSchedule: 'karras',
+      ucPreset: 0,
+      // 🔴 与 getDefaults() 一致：'unset'，不是 'opus'。这里若图省事写 'opus'，
+      //    「默认不谎报免费」那条用例就会在一个**测试自己造出来的**前提下变绿
+      tier: 'unset',
+      maxPerMessage: 2,
+      maxPerHour: 20,
+    },
   });
 }
 
@@ -76,7 +80,7 @@ beforeEach(() => {
 
 describe('ImageRenderCard —— 免费额度指示（D43）', () => {
   it('Opus + 默认参数（1216×832 / 23 步）报免费，且**一个点数都不出现**', () => {
-    mockSettings.imageNaiTier = 'opus';
+    mockSettings.imageNovelai.tier = 'opus';
 
     const line = mount(ImageRenderCard).find('.anlas-line');
     expect(line.classes()).toContain('anlas-free');
@@ -86,7 +90,7 @@ describe('ImageRenderCard —— 免费额度指示（D43）', () => {
   });
 
   it('Opus + 尺寸调大到免费额度之外 → 报收费，并给出每张点数', () => {
-    mockSettings.imageNaiTier = 'opus';
+    mockSettings.imageNovelai.tier = 'opus';
     mockSettings.imageWidth = 2048;
     mockSettings.imageHeight = 2048;
 
@@ -96,7 +100,7 @@ describe('ImageRenderCard —— 免费额度指示（D43）', () => {
   });
 
   it('Opus + 步数越界（>28）同样报收费 —— 免费判据不只看尺寸', () => {
-    mockSettings.imageNaiTier = 'opus';
+    mockSettings.imageNovelai.tier = 'opus';
     mockSettings.imageSteps = 40;
     expect(mount(ImageRenderCard).find('.anlas-line').classes()).toContain('anlas-billed');
   });
@@ -114,7 +118,7 @@ describe('ImageRenderCard —— 免费额度指示（D43）', () => {
   });
 
   it('Opus 下规则快照标签渲染出来了 —— 「这是哪一版规则」要看得见', () => {
-    mockSettings.imageNaiTier = 'opus';
+    mockSettings.imageNovelai.tier = 'opus';
     expect(mount(ImageRenderCard).find('.anlas-ruleset').text()).toContain('规则快照');
   });
 });
@@ -131,7 +135,7 @@ describe('🔴 ImageRenderCard —— 账户档位（D43 补丁，2026-08-04 真
   });
 
   it('按点数付费 + 默认参数 → 报收费，并说明调参数也免不掉', () => {
-    mockSettings.imageNaiTier = 'metered';
+    mockSettings.imageNovelai.tier = 'metered';
 
     const line = mount(ImageRenderCard).find('.anlas-line');
     expect(line.classes()).toContain('anlas-billed');
@@ -141,10 +145,10 @@ describe('🔴 ImageRenderCard —— 账户档位（D43 补丁，2026-08-04 真
   });
 
   it('同一组参数：Opus 说免费、按点数付费说收费 —— 这就是那个 bug 的回归', () => {
-    mockSettings.imageNaiTier = 'opus';
+    mockSettings.imageNovelai.tier = 'opus';
     expect(mount(ImageRenderCard).find('.anlas-line').classes()).toContain('anlas-free');
 
-    mockSettings.imageNaiTier = 'metered';
+    mockSettings.imageNovelai.tier = 'metered';
     expect(mount(ImageRenderCard).find('.anlas-line').classes()).toContain('anlas-billed');
   });
 
@@ -154,11 +158,11 @@ describe('🔴 ImageRenderCard —— 账户档位（D43 补丁，2026-08-04 真
     expect(items).toHaveLength(3);
 
     await items[1].trigger('click');
-    expect(mockSettings.imageNaiTier).toBe('opus');
+    expect(mockSettings.imageNovelai.tier).toBe('opus');
     expect(tierItems(w)[1].classes()).toContain('mode-active');
 
     await tierItems(w)[2].trigger('click');
-    expect(mockSettings.imageNaiTier).toBe('metered');
+    expect(mockSettings.imageNovelai.tier).toBe('metered');
   });
 
   it('档位选择器写明它**不改变请求** —— 免得被当成会影响出图质量的开关', () => {
@@ -166,7 +170,7 @@ describe('🔴 ImageRenderCard —— 账户档位（D43 补丁，2026-08-04 真
   });
 
   it('非 Opus 档位的规则标签不许再自称 Opus', () => {
-    mockSettings.imageNaiTier = 'metered';
+    mockSettings.imageNovelai.tier = 'metered';
     const label = mount(ImageRenderCard).find('.anlas-ruleset').text();
     expect(label).not.toContain('Opus 订阅 ·');
     expect(label).toContain('无免费额度');
@@ -215,8 +219,8 @@ describe('ImageRenderCard —— 三档开关与自动档确认（D44）', () =>
   });
 
   it('auto 的后果行用**当前**限额值，不是文案里写死的数', async () => {
-    mockSettings.imageMaxPerMessage = 5;
-    mockSettings.imageMaxPerHour = 7;
+    mockSettings.imageNovelai.maxPerMessage = 5;
+    mockSettings.imageNovelai.maxPerHour = 7;
 
     const hint = modeItems(mount(ImageRenderCard))[2].find('.mode-hint').text();
     expect(hint).toContain('5 张');
@@ -238,11 +242,32 @@ describe('ImageRenderCard —— 端点筛选与两处提示词的边界', () =>
     expect(options[1].text()).toBe('NAI');
   });
 
-  it('🔴 画质后缀绑的是 UiSettings.imageQualitySuffix，且默认值不带前导逗号', () => {
+  it('🔴 画质后缀绑的是**当前方言的覆盖**（C6），不是一个全局字段', async () => {
     const w = mount(ImageRenderCard);
     const textareas = w.findAll('textarea');
-    expect((textareas[0].element as HTMLTextAreaElement).value).toBe(DEFAULT_IMAGE_QUALITY_SUFFIX);
+
+    // 没覆盖过 → 框里是空的（空 = 回落方言默认，不是「一个空的画质后缀」）
+    expect((textareas[0].element as HTMLTextAreaElement).value).toBe('');
+    expect(mockSettings.imageDialectOverrides['danbooru-anime']).toBeUndefined();
+
+    await textareas[0].setValue('my suffix');
+    // 🔴 落进的是当前方言那一格 —— 全局单份会把 danbooru 的调优带进散文档
+    expect(mockSettings.imageDialectOverrides['danbooru-anime'].qualitySuffix).toBe('my suffix');
+    expect(mockSettings.imageQualitySuffix).toBeUndefined();
+
+    // 默认值仍然不带前导逗号（`composePrompt` 自己用 '、' 连接各段）
     expect(DEFAULT_IMAGE_QUALITY_SUFFIX.startsWith(',')).toBe(false);
+    expect(DEFAULT_IMAGE_BASE_NEGATIVE.startsWith(',')).toBe(false);
+  });
+
+  it('全局负向（基础）同样落在当前方言那一格，两个框互不串门', async () => {
+    const w = mount(ImageRenderCard);
+    const textareas = w.findAll('textarea');
+
+    await textareas[1].setValue('my negative');
+    const entry = mockSettings.imageDialectOverrides['danbooru-anime'];
+    expect(entry.baseNegative).toBe('my negative');
+    expect(entry.qualitySuffix).toBeUndefined();
   });
 
   it('这张卡写明自己管的是「图」的提示词（与 Agent 的提示词区分开）', () => {
