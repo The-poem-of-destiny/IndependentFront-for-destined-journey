@@ -12,10 +12,25 @@
  * 2. **场景提示词改完存进 `editedScenePrompt`**（D26）—— 落到那个字段的效果是
  *    「重画时优先用它、且跳过侧链 agent」。原 `scenePrompt` 一个字节都不动，
  *    所以「改回去」永远可行（清空输入框即可）。
+ *
+ * 3. **装配告警在这里被消费**（图像 v2 / C15）。`ComposedPrompt.warnings` 在 v1 里产出
+ *    之后全仓无人读 —— 于是「某个角色在那条方言下没有可用形象，已跳过」这件事对玩家
+ *    完全不可见，他只看到画面里少了个人。这一行是它唯一的出口（刻意**不做 toast**：
+ *    每张图都会响）。文案与「缺席原因」的判定都在 `cg-gallery.ts`，本组件只渲染。
+ *
+ * 4. **重画前的方言提醒**（图像 v2 / C14）。判定与文案都在
+ *    `scene-image-actions.ts`（`isRedrawDialectMismatch` / `REDRAW_DIALECT_MISMATCH_HINT`），
+ *    与正文里那一格插画**读同一份**——本组件只渲染。
+ *    🔴 图鉴这边的入口比正文更多也更险：这里有两个「重画」，还有一个**就地改提示词的
+ *    编辑器**（「保存并重画」）。落进 `editedScenePrompt` 的那份按 D26 被**逐字**使用、
+ *    跳过侧链 —— 于是「当初在 danbooru 下手改过、今天换了散文方言再重画」得到的是一张
+ *    标签汤，而正文里的同一张图会提醒、图鉴里不会。同一个危险两副面孔，比两处都不提醒
+ *    更糟。
  */
 import { computed, ref, watch } from 'vue';
 import AppButton from '../shared/AppButton.vue';
-import { soleCharacterOf } from './cg-gallery';
+import { composeWarningLines, dialectIdOf, providerLabelOf, soleCharacterOf } from './cg-gallery';
+import { REDRAW_DIALECT_MISMATCH_HINT, isRedrawDialectMismatch } from './scene-image-actions';
 import type { SceneImageRecord } from '@engine/types-image';
 
 const props = defineProps<{
@@ -27,6 +42,14 @@ const props = defineProps<{
   url: string | null;
   /** 有动作在飞（落库 / 入队），按钮转圈 */
   busy?: boolean;
+  /**
+   * 当前生效的方言 id（C14），来自 `settings.imageDialectId`。
+   *
+   * 🔴 只用来决定**重画入口旁边那句提示**（与 `SceneImageSegment` 同一个 prop、同一份
+   * 判定）。缺省空串读作内置 danbooru 方言 —— 老记录同档，于是 v1 的图不会集体挂上
+   * 这句提示。
+   */
+  dialectId?: string;
 }>();
 
 const emit = defineEmits<{
@@ -109,6 +132,27 @@ const pinnableSeed = computed<{ name: string; seed: number } | null>(() => {
 const dropped = computed(() => props.record.blobDropped === true);
 const charactersText = computed(() =>
   props.record.characters.length > 0 ? props.record.characters.join('、') : '—',
+);
+
+/**
+ * 后端 / 方言（C14）。两者都有「缺席即默认」的读法，判定在 `cg-gallery.ts` ——
+ * 老记录没有这两个字段，而它们**全部**是 NAI + danbooru 画的，不是「不知道」。
+ */
+const providerText = computed(() => providerLabelOf(props.record));
+const dialectText = computed(() => dialectIdOf(props.record));
+
+/** 装配告警的中文行（C15）；空数组 = 这一张一切正常，整节不渲染 */
+const warningLines = computed(() => composeWarningLines(props.record.composeWarnings));
+
+/**
+ * 重画之前要不要提醒「这份手改提示词是为另一方言写的」（C14）。
+ *
+ * 🔴 **提醒不是阻断**（判定文档里那条）：那份手改可能正是为新方言重写的，按钮照常可点。
+ * 🔴 判定读的是**记录里那份已保存的** `editedScenePrompt`，不是编辑框里的草稿 ——
+ * 正在改的那份还没落库，拿它判等于对用户当下的动作评头论足。
+ */
+const dialectMismatch = computed(() =>
+  isRedrawDialectMismatch(props.record, props.dialectId ?? ''),
 );
 
 function sizeText(bytes: number | undefined): string {
@@ -211,6 +255,13 @@ function timeText(ts: number): string {
       <div class="cg-kv">
         <span>模型</span><b>{{ record.model || '—' }}</b>
       </div>
+      <!-- 出图后端 / 方言（C14）：缺席读作 novelai + danbooru，不渲染成「未知」 -->
+      <div class="cg-kv">
+        <span>后端</span><b>{{ providerText }}</b>
+      </div>
+      <div class="cg-kv">
+        <span>方言</span><b :title="dialectText">{{ dialectText }}</b>
+      </div>
       <div class="cg-kv">
         <span>seed</span><b>{{ record.seed ?? '随机' }}</b>
       </div>
@@ -221,6 +272,12 @@ function timeText(ts: number): string {
         <span>生成于</span><b>{{ timeText(record.createdAt) }}</b>
       </div>
     </div>
+
+    <!--
+      装配告警（C15）—— 画面里为什么少了个人，这里是唯一说得出口的地方。
+      不阻断、不惊悚：它陈述一件已经发生的事，措辞按「出图时的方言」写。
+    -->
+    <p v-for="line in warningLines" :key="line" class="cg-warn">{{ line }}</p>
 
     <section class="cg-section">
       <h5 class="cg-label">场景提示词</h5>
@@ -234,6 +291,8 @@ function timeText(ts: number): string {
       <p class="cg-note">
         改过之后重画会直接用你写的这份，不再跑一次提示词生成。清空即回到原来那份。
       </p>
+      <!-- C14：这份手改是为另一方言写的 —— 提示，不阻断（「保存并重画」照样点得动） -->
+      <p v-if="dialectMismatch" class="cg-dialect-hint">{{ REDRAW_DIALECT_MISMATCH_HINT }}</p>
       <div class="cg-prompt-actions">
         <AppButton
           variant="secondary"
@@ -257,6 +316,8 @@ function timeText(ts: number): string {
 
     <section class="cg-section">
       <h5 class="cg-label">这一张</h5>
+      <!-- C14：这里的「重画」同样会逐字沿用那份手改提示词（D26 跳过侧链），说一声 -->
+      <p v-if="dialectMismatch" class="cg-dialect-hint">{{ REDRAW_DIALECT_MISMATCH_HINT }}</p>
       <div class="cg-actions">
         <AppButton variant="secondary" size="sm" :loading="busy" @click="emit('redraw')">
           重画
@@ -466,6 +527,17 @@ function timeText(ts: number): string {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 装配告警（C15）—— warning 语义的一句话，不是错误框（图已经画出来了） */
+.cg-warn {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--theme-warning) 30%, transparent);
+  border-radius: var(--theme-radius-sm);
+  background: color-mix(in srgb, var(--theme-warning) 8%, transparent);
+  color: var(--theme-text-secondary);
+  font-size: 0.6875rem;
+  line-height: 1.6;
+}
 .cg-section {
   display: flex;
   flex-direction: column;
@@ -505,6 +577,14 @@ function timeText(ts: number): string {
   font-size: 0.6875rem;
   line-height: 1.5;
   color: var(--theme-text-muted);
+}
+/* 重画前的方言提醒（C14）—— 与正文里那格插画的 `.si-dialect-hint` 同一副长相:
+ * warning 语义的一句话，不加框（它不是错误，重画照样点得动） */
+.cg-dialect-hint {
+  margin: 0;
+  color: var(--theme-warning);
+  font-size: 0.6875rem;
+  line-height: 1.55;
 }
 .cg-prompt-actions,
 .cg-actions {

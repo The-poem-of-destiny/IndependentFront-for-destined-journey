@@ -80,6 +80,11 @@ src/sillytavern/                    ← 核心引擎
   │         挑条目还有第二个坑：`assemblePresetContent` 按**条目自身的 `enabled`** 过滤、
   │         **不读 `prompt_order`** —— 现行预设 101 条里只有 32 条真的进提示词，
   │         写进一条没启用的条目 = 写进空气
+  │      🔴 **`image_prompt.systemPrompt` 已退役**（图像 v2 / C5，字段已从本文件删除）：
+  │         那段提示词随方言走，真源是 `data/content/image-dialects.json`（内容注册表
+  │         第 7 面，pack 可整份替换），用户改动存 `imageDialectOverrides[dialectId]`。
+  │         留在这里就是 D53 点名的第三份拷贝 —— 换条方言它不跟着换，用户改完看着生效、
+  │         切回来又变回去。该 agent 的 model / 温度 / 世界书旋钮**不动**，仍在本文件
   │      🔴 本文件现存 47 个 U+FFFD 替换字符（16 段 / 6 个 agent），其中一处落在闭合 XML
   │         标签的标签名里（形如 `</□有物品>`，模型看到的是坏标签）。**既有问题，
   │         图像 v1 未修**，已另开任务；改这个文件时别顺手把它们当成自己弄坏的
@@ -190,6 +195,28 @@ src/sillytavern/                    ← 核心引擎
   │                                    集中放才只有一个真相来源。唯一反向边是 `SceneImageMarker`：它要进
   │                                    types.ts 的 `DetectedMarker` 联合，那边 type-only import 回来，
   │                                    本册**不 import types.ts**，边不成环
+  │                                    [图像 v2] +`ImageDialect`（方言的封闭旋钮集，C4）/
+  │                                    `ImageProviderId` + `ImageProviderCapabilities`（能力位属 provider
+  │                                    **不属方言**，C7）/ 失败分类新增 `workflow`·`execution` 两类
+  │                                    （重试语义相反，C12）/ `SceneImageRecord` 的 `provider`+`dialectId`
+  │                                    记录戳（都是可选，缺席读作 novelai + danbooru，老记录免迁移，C14）
+  │                                    / `SceneImageRecord.composeWarnings[]`（C15 的落库告警）
+  ├── image-dialect.ts              ← [图像 v2 / C4·C6] 方言的容错解析（parseImageDialects）+ 按 id 取用
+  │                                    并叠加用户覆盖（resolveImageDialect）。内容注册表**第 7 面**
+  │                                    `imageDialects` 的引擎侧；数据在 `data/content/image-dialects.json`，
+  │                                    pack 可整份替换（与 catalog 等六面同一机制）
+  │                                    🔴 **本模块永不抛**：方言 JSON 是第三方可编辑的数据，认不出的旋钮值
+  │                                       回落 danbooru 形状、认不出的条目整条跳过，返回值永远是合法数组
+  │                                       （容错口径照 workshop-manifest.ts）
+  │                                    🔴 `FALLBACK_IMAGE_DIALECT` = **v1 的行为**穿上方言外衣：注册表这面
+  │                                       缺席 / fetch 404 / 设置里存着已不存在的 id，三条路径全落到它，
+  │                                       画出来的图与 v1 一模一样。三个字符串旋钮**引用** image-defaults
+  │                                       的常量而不是抄一份（抄一份的败法是「改了默认值兜底还是老的」，
+  │                                       而兜底恰恰是没人手工验的那条）
+  │                                    🔴 兜底方言的 `systemPrompt` 是**空串且这是对的** —— 表示「本方言
+  │                                       没话说」（装配层回落 agent-config / 模板），不是「用空提示词调模型」
+  │                                    🔴 覆盖按**方言 id 键控**（C6）：全局单份覆盖会把 danbooru 调优带进
+  │                                       prose 档，静默废掉整个特性。空串**不算覆盖**（清空 = 回落默认）
   ├── image-defaults.ts             ← [图像 v1] 画质后缀 / 固定构图词 / 基础负向 / 限额初值的唯一出处
   │                                    （被 image-prompt、image-quota 与设置页 getDefaults() 共用）
   │                                    🔴 默认模型刻意**不是 Curated**：它既是过滤子集，官方规范画质后缀
@@ -202,6 +229,16 @@ src/sillytavern/                    ← 核心引擎
   │                                       （image-prompt-agent 从这里 import，绝不另抄一份）
   │                                    🔴 无随机、不读时钟、不做 I/O —— 中文→标签是一次 LLM 调用，
   │                                       发生在侧链里；那一步挪进来，本层就再也测不动了
+  │                                    🔴 [图像 v2 / C3] **装配是方言参数化的**（`ComposeOptions.dialect`）：
+  │                                       分隔符 / 归一化器 / 外貌渲染器（danbooru↔prose）/ 世界·分级·人数
+  │                                       三段的形态 / 支不支持负向，全由 `ImageDialect` 决定。只换
+  │                                       systemPrompt 的方言仍会给 krea2 螺栓上六段 danbooru ——
+  │                                       方言必须拥有**整个**装配契约。不传方言时逐字节等于 v1 行为
+  │                                       （金测试就是这条保证本身）
+  │                                    🔴 [图像 v2 / C7] `flattenCharacters`（= provider 无角色槽）时各角色
+  │                                       positive 按标记顺序并进 base、negative 并进 baseNegative，
+  │                                       用方言分隔符。开关来自 **provider 能力位**，不是方言声明的 ——
+  │                                       方言作者声明一个后端没有的能力，败法是静默丢角色
   ├── image-quota.ts                ← [图像 v1] 三层限额（每消息 / 滚动一小时 / 同回合去重）**唯一**判定处
   │                                    🔴 自动档与手动档共用它，差别只在拿到 ok:false 之后做什么。
   │                                       两处各写一份就是漂移的来路 —— 一边改阈值另一边没改，症状是
@@ -212,6 +249,12 @@ src/sillytavern/                    ← 核心引擎
   │                                       （LLM token + Anlas），闸门要在最前面
   │                                    🔴 `source==='manual'` 的 ok:false 语义是**「要确认」不是「不许」**
   │                                       —— 机器该被拦死，人该只被减速
+  │                                    🔴 [图像 v2 / C9] **三层按保护对象拆开**：L1（每消息）/ L2（滚动
+  │                                       一小时）是**花钱防线**，`costModel:'local'` 时整条跳过（本地画一张
+  │                                       只花自己的显卡时间，用户明确推翻了「本地也降档保留」的建议）；
+  │                                       L3（同回合去重，仅 auto）是**正确性规则**，与谁付钱无关，
+  │                                       **对所有 provider 恒开**。`costModel` 取自当前 provider 的能力位，
+  │                                       不是设置里的某个开关，且刻意**必填无默认** —— 两个方向都错得无声
   ├── image-segments.ts             ← [图像 v1] 一条正文 → 文本段/图片段序列（分段在**美化之前**且不看
   │                                    美化开关：否则美化关掉或流式途中，标记会漏成尖括号给玩家看见）
   │                                    🔴 **不许写第二个解析器** —— 调 marker-protocol 的 scanSceneImages
@@ -266,6 +309,28 @@ src/sillytavern/                    ← 核心引擎
   │                                       报的是 **`binary/octet-stream`** —— 一张已生成、已扣点数的图
   │                                       被我们自己扔掉。现在一律先试解包，content-type 只进失败 detail。
   │                                       真机实测：zip 魔数 `50 4b 03 04`，单条目 `image_0.png`
+  ├── image-providers/comfyui.ts    ← [图像 v2 / C10-C13] 工作流 JSON 占位符替换 + ComfyUI 响应解析。
+  │                                    **纯函数层**（照 novelai.ts 的规矩：无 fetch / 无 Dexie / 无随机 /
+  │                                    无时钟）；网络那一半在 `src/ui/lib/image-client.ts` 的
+  │                                    `generateComfyImage`（排队 → 轮询 → 取图三步）
+  │                                    🔴 **在解析后的对象上按值替换，不做原文字符串替换**（C11）：
+  │                                       提示词里第一个引号或反斜杠就会打断 JSON。先 `JSON.parse` 再按值
+  │                                       替换，替进去的内容天然不参与语法。整值是占位符 → 换成对应类型
+  │                                       （seed/steps 是数字）；字符串内嵌 → 串内替换
+  │                                    🔴 **`POST /prompt` 会带着 `node_errors` 返回 HTTP 200**（C12）——
+  │                                       只看状态码的分类器会把「图在跑起来之前就被拒了」当成排队成功，
+  │                                       然后去轮询一个永不出现的 prompt_id，最终报成超时。所以
+  │                                       `parseComfyQueueResponse` **先看响应体、后看状态码**
+  │                                       （与 v1「content-type 撒谎扔掉付费图」同形状，这次提前钉死）
+  │                                    🔴 `workflow`（跑前被拒：缺 checkpoint / 未知节点 / 替换失败）
+  │                                       **不可重试**，文案点名违规节点 id；`execution`（跑到一半 OOM /
+  │                                       节点崩）可重试。两类重试语义相反，**不许合并**
+  │                                    🔴 `parseComfyHistory` 是**三态**（pending / done / failed）：
+  │                                       还在跑时 `/history/{id}` 回的是 `{}` —— 空对象是「等」不是「失败」
+  │                                    图刻意建模成 `Record<string, unknown>`：图是**用户的**（LoRA 栈 /
+  │                                    上采样 / 社区节点都合法），我们只认那几个 `%占位符%`，其余原样搬运。
+  │                                    内置一份最小 SDXL txt2img 图（`BUILTIN_COMFY_WORKFLOW`），
+  │                                    未配置也能跑通
   │
   │  🪦 Q-12：`variables.ts` / `vars-merger.ts` 已删。两者整条链零生产引用
   │     （`variables.ts` 最后一个活着的导出 `formatVariablesForPrompt` 的唯一消费方

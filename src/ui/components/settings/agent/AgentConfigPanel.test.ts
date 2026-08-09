@@ -125,6 +125,37 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     expect(w.findComponent(PresetManager).exists()).toBe(false);
   });
 
+  it('🔴 hidePrompt 真的不渲染提示词卡（图像分区的 image_prompt 用）', () => {
+    const w = mount(AgentConfigPanel, {
+      props: { agentId: 'image_prompt', hidePrompt: true },
+      shallow: true,
+    });
+
+    expect(w.findComponent(AgentPromptCard).exists()).toBe(false);
+    // 参数卡与动作栏照旧 —— 藏的只是提示词那一张
+    expect(w.findComponent(PresetManager).exists()).toBe(false);
+    expect(w.findAllComponents(AppButton)).toHaveLength(2);
+  });
+
+  it('不传 hidePrompt 时一切照旧（默认 false，Agent 分区一个字不用改）', () => {
+    expect(mountPanel('image_prompt').findComponent(AgentPromptCard).exists()).toBe(true);
+  });
+
+  it('🔴 hidePrompt 只藏渲染：草稿等于解析默认时「保存设置」照旧不写覆写层', async () => {
+    mockStore.projectAgentDefaults = {
+      agents: { image_prompt: { systemPrompt: '项目默认提示词' } },
+    };
+    const w = mount(AgentConfigPanel, {
+      props: { agentId: 'image_prompt', hidePrompt: true },
+      shallow: true,
+    });
+
+    await w.findAllComponents(AppButton)[1].vm.$emit('click');
+
+    // 藏起来的草稿没被当成「用户清空了提示词」写成空串 —— 那正是 immediate watch 那条 bug 的形状
+    expect(mockSettings.agents.image_prompt?.systemPrompt).toBeUndefined();
+  });
+
   it('动作栏两个按钮（恢复默认 / 保存设置）—— 占位态无「保存为默认」（D14）', () => {
     expect(mountPanel('char_gen').findAllComponents(AppButton)).toHaveLength(2);
   });

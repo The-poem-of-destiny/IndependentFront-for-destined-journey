@@ -7,6 +7,12 @@ import { coerceLocationNodes, getChildren, getNeighbors } from '../src/sillytave
 import { getBloodlineSet, calcBloodlineModifiers } from '../src/sillytavern/bloodlines';
 import { getNamePoolsContent, randomName, randomHairColor } from '../src/sillytavern/random-tables';
 import { resolveBranding, NEUTRAL_BRANDING } from '../src/ui/branding-defaults';
+import { parseImageDialects, FALLBACK_IMAGE_DIALECT } from '../src/sillytavern/image-dialect';
+import {
+  DEFAULT_IMAGE_BASE_NEGATIVE,
+  DEFAULT_IMAGE_COMPOSITION_TAGS,
+  DEFAULT_IMAGE_QUALITY_SUFFIX,
+} from '../src/sillytavern/image-defaults';
 import { setContentRegistry, getContentRegistry } from '../src/ui/stores/content-store';
 
 /**
@@ -37,6 +43,7 @@ const locationsRaw = readJson(join(PLACEHOLDER_CONTENT, 'locations.json'));
 const bloodlinesRaw = readJson(join(PLACEHOLDER_CONTENT, 'bloodlines.json'));
 const namePoolsRaw = readJson(join(PLACEHOLDER_CONTENT, 'name-pools.json'));
 const brandingRaw = readJson(join(PLACEHOLDER_CONTENT, 'branding.json'));
+const imageDialectsRaw = readJson(join(PLACEHOLDER_CONTENT, 'image-dialects.json'));
 const markersRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'map-marker-presets.json'));
 const audioManifestRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'audio-manifest.json'));
 const beautifierRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'beautifier-rules.json')) as {
@@ -48,7 +55,7 @@ const agentConfigRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'agent-config.json'))
   agents: Record<string, Record<string, unknown>>;
 };
 
-describe('占位内容 · 注册表六面能被生产解析器吃下', () => {
+describe('占位内容 · 注册表七面能被生产解析器吃下', () => {
   beforeEach(() => {
     setContentRegistry({
       catalog: catalogRaw,
@@ -57,6 +64,7 @@ describe('占位内容 · 注册表六面能被生产解析器吃下', () => {
       namePools: namePoolsRaw,
       markers: markersRaw,
       branding: brandingRaw,
+      imageDialects: imageDialectsRaw,
     });
   });
 
@@ -153,6 +161,48 @@ describe('占位内容 · 注册表六面能被生产解析器吃下', () => {
     expect(branding.workshopApiBase).toBe('');
   });
 
+  it('imageDialects：两条内置方言解析得出，且 danbooru 档 = 图像 v1 的行为（C5）', () => {
+    const dialects = parseImageDialects(getContentRegistry().imageDialects);
+    expect(dialects.map((d) => d.id)).toEqual(['danbooru-anime', 'natural-prose']);
+
+    // 🔴 danbooru 档的三个串必须**逐字节**等于引擎常量：这一面是「零行为变化的纯重构」，
+    //    漂了不会报错，只会让每张图悄悄换一套画质词
+    const [danbooru, prose] = dialects;
+    expect(danbooru.qualitySuffix).toBe(DEFAULT_IMAGE_QUALITY_SUFFIX);
+    expect(danbooru.baseNegative).toBe(DEFAULT_IMAGE_BASE_NEGATIVE);
+    expect(danbooru.composition).toBe(DEFAULT_IMAGE_COMPOSITION_TAGS);
+    // 🔴 兜底方言与它**逐格相同，systemPrompt 也算**（2026-08-08 修）：C5 之后这段提示词
+    //    在 agent-config 里已不存在，兜底若留空，注册表这一面缺席时侧链就只剩
+    //    agent-templates 那行 stub 可回落 —— 五条规则一条不剩，图照出、Anlas 照扣。
+    //    这一对断言是那份「兜底 ↔ 内容树」双向漂移的**唯一**守门人（`image-dialect.test.ts`
+    //    读不了盘），所以 systemPrompt 单独再钉一次，好让失败信息直指那一格
+    expect(danbooru.systemPrompt).toBe(FALLBACK_IMAGE_DIALECT.systemPrompt);
+    expect(danbooru).toEqual(FALLBACK_IMAGE_DIALECT);
+
+    // 🔴 C5 已收口：`image_prompt` 的 systemPrompt **从 agent-config 退役**，方言 JSON 是
+    //    唯一真源。两处都留着的话就是 D53 警告的第三份拷贝 —— 改一处不改另一处不报错，
+    //    只是侧链按哪一份说话取决于装配顺序
+    expect(agentConfigRaw.agents.image_prompt.systemPrompt).toBeUndefined();
+    expect(danbooru.systemPrompt.trim().length).toBeGreaterThan(0);
+
+    // prose 档是刻意单薄的占位（真货在私有仓），但**旋钮必须真的不同** ——
+    // 只换 systemPrompt 的方言仍会给 krea2 拼上 danbooru 尾巴（C3 的全部理由）
+    expect(prose.separator).toBe('. ');
+    expect(prose.normalize).toBe('none');
+    expect(prose.appearance).toBe('prose');
+    expect(prose.rating).toBe('none');
+    expect(prose.count).toBe('none');
+    expect(prose.supportsNegative).toBe(false);
+    expect(prose.qualitySuffix).toBe('');
+    expect(prose.baseNegative).toBe('');
+    // 三个输出标签是引擎协议，换方言不换协议（抽取器只认这三个）。
+    // 🔴 **两条方言都要钉**：C5 之后这里是那份契约的唯一守门人（agent-config 那份已退役）
+    for (const tag of ['<image_prompt>', '<image_negative>', '<image_desc>']) {
+      expect(prose.systemPrompt, `natural-prose 缺少 ${tag}`).toContain(tag);
+      expect(danbooru.systemPrompt, `danbooru-anime 缺少 ${tag}`).toContain(tag);
+    }
+  });
+
   it('markers / audio manifest：空数组（面板空态，D12 / D23）', () => {
     expect(markersRaw).toEqual([]);
     expect(audioManifestRaw).toEqual([]);
@@ -183,9 +233,18 @@ describe('占位内容 · agent-config', () => {
     expect(Object.keys(agentConfigRaw.agents)).toHaveLength(13);
   });
 
-  it('每个 agent 的 systemPrompt 与 template 都非空', () => {
+  it('每个 agent 的 systemPrompt 与 template 都非空（image_prompt 除外 —— 它的那份归方言）', () => {
     for (const [id, agent] of Object.entries(agentConfigRaw.agents)) {
-      expect((agent.systemPrompt as string).trim().length, `${id}.systemPrompt`).toBeGreaterThan(0);
+      // 🔴 image_prompt 的 systemPrompt 已随 C5 退役到 `image-dialects.json`：
+      //    方言拥有整个装配契约，「教模型怎么说话」是其中一格。这里断言它**不在**，
+      //    上面那条 imageDialects 用例断言它在方言里
+      if (id === 'image_prompt') {
+        expect(agent.systemPrompt, 'image_prompt.systemPrompt 应已退役').toBeUndefined();
+      } else {
+        expect((agent.systemPrompt as string).trim().length, `${id}.systemPrompt`).toBeGreaterThan(
+          0,
+        );
+      }
       // story 的可调面是预设，template 天然为空串（agent-defaults.ts 的约定）
       if (id !== 'story') {
         expect((agent.template as string).trim().length, `${id}.template`).toBeGreaterThan(0);
@@ -244,7 +303,8 @@ describe('占位内容 · agent-config', () => {
       plot_post_check: ['<json>', '"worldLineChanged"', '"eventUpdates"', '"newChildEvents"'],
       memory_summary: ['<json>', '"hiddenLine"', '"relatedCharacterIds"', '"importance"'],
       memory_recall: ['"memories"', '"relevance"'],
-      image_prompt: ['<image_prompt>', '<image_negative>', '<image_desc>'],
+      // 🔴 image_prompt 不在这张表里：它的提示词住在方言 JSON（C5），三个输出标签由
+      //    上面 imageDialects 那条用例逐条钉（两条方言各钉一遍 —— 换方言不换协议）
       combat_v3: ['declare_attack', 'declare_action', 'pass_slot', 'write_summary'],
     };
     for (const [id, tokens] of Object.entries(CONTRACT)) {

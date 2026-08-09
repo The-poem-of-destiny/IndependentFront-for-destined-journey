@@ -2,6 +2,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { checkQuota, type QuotaInput } from './image-quota';
 import { IMAGE_QUOTA_WINDOW_MS } from './image-defaults';
+import type { ImageProviderId } from './types-image';
 
 /**
  * image-quota 的**属性测试**（既有的 `image-quota.test.ts` 是例子测试，两者互补）。
@@ -15,11 +16,20 @@ type Record_ = QuotaInput['records'][number];
 
 const source = fc.constantFrom<'auto' | 'manual'>('auto', 'manual');
 
+/**
+ * 记录里那个 provider 由谁付钱 —— 与 `scene-image-seams.ts` 的 `PROVIDER_CAPABILITIES`
+ * 同口径（那张表住在接线层，引擎侧只收这个映射）。
+ */
+const costModelOf = (provider: ImageProviderId | undefined): 'paid' | 'local' =>
+  provider === 'comfyui' ? 'local' : 'paid';
+
 const recordArb = (now: number) =>
   fc.record({
     messageId: fc.constantFrom('m1', 'm2', 'm3'),
     turn: fc.integer({ min: 0, max: 5 }),
     source,
+    // 三种都要采：付费、本地，以及**没盖章**的 v1 老记录（缺席读作 novelai = 付费）
+    provider: fc.constantFrom<ImageProviderId | undefined>(undefined, 'novelai', 'comfyui'),
     // 覆盖窗口内、窗口外，以及时钟回拨造成的「未来」记录
     createdAt: fc.integer({
       min: now - IMAGE_QUOTA_WINDOW_MS * 3,
@@ -41,15 +51,23 @@ const inputArb = fc.record({
     maxPerMessage: fc.integer({ min: 1, max: 5 }),
     maxPerHour: fc.integer({ min: 1, max: 30 }),
   }),
+  // 图像 v2 / C9：两种后端都要被这些不变式覆盖，所以它进采样空间而不是写死 'paid'
+  costModel: fc.constantFrom<'paid' | 'local'>('paid', 'local'),
+  costModelOf: fc.constant(costModelOf),
 });
 
 /** 独立重算三层判据 —— 与实现同源会让测试变成同义反复，所以照设计表重写一遍 */
 function expectedReason(input: QuotaInput): string | null {
-  const { records, target, now, limits } = input;
-  const perMessage = records.filter((r) => r.messageId === target.messageId).length;
-  if (perMessage >= limits.maxPerMessage) return 'per-message';
-  const inWindow = records.filter((r) => now - r.createdAt < IMAGE_QUOTA_WINDOW_MS).length;
-  if (inWindow >= limits.maxPerHour) return 'rolling-window';
+  const { records, target, now, limits, costModel } = input;
+  // 🔴 L1/L2 只在付费后端启用（C9），且**只数付费记录**：本地画的图没有账单，
+  //    不该占付费预算。L3 与两者都无关，它是正确性规则
+  const paid = records.filter((r) => costModelOf(r.provider) === 'paid');
+  if (costModel === 'paid') {
+    const perMessage = paid.filter((r) => r.messageId === target.messageId).length;
+    if (perMessage >= limits.maxPerMessage) return 'per-message';
+    const inWindow = paid.filter((r) => now - r.createdAt < IMAGE_QUOTA_WINDOW_MS).length;
+    if (inWindow >= limits.maxPerHour) return 'rolling-window';
+  }
   if (
     target.source === 'auto' &&
     records.some((r) => r.turn === target.turn && r.source === 'auto')
@@ -129,11 +147,62 @@ describe('checkQuota 不变式', () => {
         fc.integer({ min: 1, max: 5 }),
         fc.integer({ min: 1, max: 30 }),
         (target, maxPerMessage, maxPerHour) => {
-          expect(
-            checkQuota({ records: [], target, now: NOW, limits: { maxPerMessage, maxPerHour } }).ok,
-          ).toBe(true);
+          for (const costModel of ['paid', 'local'] as const) {
+            expect(
+              checkQuota({
+                records: [],
+                target,
+                now: NOW,
+                limits: { maxPerMessage, maxPerHour },
+                costModel,
+              }).ok,
+            ).toBe(true);
+          }
         },
       ),
+    );
+  });
+
+  it('🔴 local 只可能因 same-turn 被拒 —— L1/L2 那两条花钱防线在本地整条不启用（C9）', () => {
+    fc.assert(
+      fc.property(inputArb, (input) => {
+        const verdict = checkQuota({ ...input, costModel: 'local' });
+        if (!verdict.ok) expect(verdict.reason).toBe('same-turn');
+      }),
+    );
+  });
+
+  it('🔴 记录全是本地画的 → L1/L2 永不触发（本地图不占付费预算，C9）', () => {
+    // 这是评审复现的那一幕的属性版：免费画多少张，都不该让付费的第一张被拦。
+    // 唯一还可能拒的层是 L3，它与谁付钱无关。
+    fc.assert(
+      fc.property(inputArb, (input) => {
+        const localOnly = input.records.map((r) => ({ ...r, provider: 'comfyui' as const }));
+        const verdict = checkQuota({ ...input, records: localOnly, costModel: 'paid' });
+        if (!verdict.ok) expect(verdict.reason).toBe('same-turn');
+      }),
+    );
+  });
+
+  it('🔴 把记录换成本地只会更宽松，绝不会把原本放行的那一张拦下', () => {
+    fc.assert(
+      fc.property(inputArb, (input) => {
+        const before = checkQuota(input);
+        if (!before.ok) return;
+        const localOnly = input.records.map((r) => ({ ...r, provider: 'comfyui' as const }));
+        expect(checkQuota({ ...input, records: localOnly }).ok).toBe(true);
+      }),
+    );
+  });
+
+  it('🔴 换成 local 只会更宽松，绝不会把 paid 放行的那一张拦下', () => {
+    // 反过来说也成立：唯一同时命中两种后端的层是 L3，而它与 costModel 无关。
+    fc.assert(
+      fc.property(inputArb, (input) => {
+        const paid = checkQuota({ ...input, costModel: 'paid' });
+        const local = checkQuota({ ...input, costModel: 'local' });
+        if (paid.ok) expect(local.ok).toBe(true);
+      }),
     );
   });
 });

@@ -43,6 +43,12 @@ const props = withDefaults(
      * 而不糊的那一张正是打码本来要挡住的那种场合。
      */
     imageBlurByDefault?: boolean;
+    /**
+     * 当前方言 id（C14），来自 `settings.imageDialectId`。与上一个 prop 同一条纪律：
+     * **两处 `SceneImageSegment` 都要透传** —— 只改一处的表现是「有的图提示、有的不提示」，
+     * 而漏掉的那一处照样会拿着为另一方言写的提示词去重画。
+     */
+    imageDialectId?: string;
   }>(),
   {
     rules: undefined,
@@ -55,6 +61,7 @@ const props = withDefaults(
     imageMode: 'off',
     imageMaxRating: 'general',
     imageBlurByDefault: false,
+    imageDialectId: '',
   },
 );
 
@@ -195,6 +202,7 @@ function paragraphs(text: string): string[] {
         :narrative="strippedNarrative"
         :max-rating="imageMaxRating"
         :blur-by-default="imageBlurByDefault"
+        :dialect-id="imageDialectId"
       />
       <template v-for="(segment, index) in part.kind === 'prose' ? part.segments : []" :key="index">
         <template v-if="!isMatch(segment)">
@@ -234,6 +242,7 @@ function paragraphs(text: string): string[] {
       :narrative="strippedNarrative"
       :max-rating="imageMaxRating"
       :blur-by-default="imageBlurByDefault"
+      :dialect-id="imageDialectId"
     />
   </div>
 </template>

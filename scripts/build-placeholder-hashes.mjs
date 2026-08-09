@@ -207,6 +207,7 @@ export const EXPECTED_SECTION_FILES = [
   'content/bloodlines.json',
   'content/name-pools.json',
   'content/branding.json',
+  'content/image-dialects.json',
 ];
 
 /** 占位 story 预设文件（`byPreset` 来源；同时也进 `bySection`） */

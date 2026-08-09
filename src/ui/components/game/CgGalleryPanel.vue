@@ -20,6 +20,7 @@ import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
+import { useSettingsStore } from '../../stores/settings-store';
 import { useSceneImageUrls } from '../../composables/useSceneImageUrls';
 import { buildGalleryCells, isNearViewport, GALLERY_PRELOAD_MARGIN } from './cg-gallery';
 import CgGalleryDetail from './CgGalleryDetail.vue';
@@ -29,6 +30,9 @@ const game = useGameStore();
 const ui = useUIStore();
 const store = useSceneImageStore();
 const presets = useImagePresetStore();
+// 只为了把当前方言 id 递给详情栏那句重画提醒（C14）——
+// 详情栏是纯呈现组件（不认识 store），供值的人只能是这里
+const settings = useSettingsStore();
 
 const urls = useSceneImageUrls({ source: { blobOf: (id) => store.blobOf(id) } });
 
@@ -334,6 +338,7 @@ function onJump(): void {
         :takes="selectedCell.takes"
         :url="urls.urlFor(selectedRecord.id)"
         :busy="busy"
+        :dialect-id="settings.settings.imageDialectId"
         @select-take="selectedTakeId = $event"
         @update-title="onUpdateTitle"
         @update-description="onUpdateDescription"

@@ -22,5 +22,13 @@ computed 里都不许直接 `getContentRegistry().<face>`** —— 必须先落�
 - 品牌面（era/appTitle…）解析走 `src/ui/branding-defaults.ts` 的 `getBranding()`，
   **别在消费方另写一个 `raw.era` 读法**；血脉走 `bloodlines.getBloodlineSet()` 的注册表缝
   再落 ref（无参 `getBloodlineList()` 在 computed 里会踩同一个坑）。
+- 🔴 **等的必须是 `ensureContentRegistryLoaded()`，不是 `contentReadyPromise`**。后者在
+  content-store **模块加载时就同步兑现**（文件尾 `seedPlaceholderRegistry()` +
+  `markContentReady()`），它只说明「占位骨架就位」，对 `/data/content/*.json` 那几次 fetch
+  一个字都没说。`await contentReadyPromise` 之后重取注册表 = 又读到一次空目录，
+  和不写这段代码等价。2026-08-08 在 `ImagePresetList.vue` 上逮到一次（C15 那句
+  「缺少形态提示」因此在组件整个生命周期里是死的）。
 - 测试里给 store 喂内容：先 `setContentRegistry({...})` **再** `useCreateStore()`。
-  相关：[[reactive-store-mock-vacuous]]
+  组件测试里 mock content-store 时**别把注册表 mock 成一开始就满的** —— 那样「组件等的
+  是哪个 promise」这个问题根本没被问到，接错 promise 照样全绿。要留一个「加载门兑现后
+  才灌值」的用例。相关：[[reactive-store-mock-vacuous]]

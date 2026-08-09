@@ -13,16 +13,23 @@
  * 🔴 `normalizeTagString` 由本模块 **export**，是全仓唯一一份 ——
  *    `image-prompt-agent.ts` 归一化模型输出时 import 它，不要另抄一份。
  *
+ * 🔴 **装配是方言参数化的**（图像 v2 / C3，`ComposeOptions.dialect`）：分隔符、归一化器、
+ *    外貌渲染器、世界/分级/人数三段的形态、负向支不支持，全部由 `ImageDialect` 决定。
+ *    不传方言时逐字节等于 v1 的 danbooru 行为（`FALLBACK_IMAGE_DIALECT`），
+ *    `image-prompt.test.ts` 里那条金测试就是这条保证本身。
+ *
  * 类型全部来自 `types-image.ts`（本子系统的分册，见该文件头注释）；
  * 常量默认值在 `image-defaults.ts`。本文件不重复定义两者中的任何一个。
  */
 
-import { renderAppearanceDanbooru } from './character-appearance';
+import { renderAppearanceDanbooru, renderAppearanceProse } from './character-appearance';
 import { baselineOf, characterPresetKey } from './character-appearance-resolve';
+import { FALLBACK_IMAGE_DIALECT } from './image-dialect';
 import type {
   ComposedCharacter,
   ComposedPrompt,
   ComposeWarning,
+  ImageDialect,
   ImagePreset,
   ImageRating,
   SceneImageMarker,
@@ -108,6 +115,34 @@ export interface ComposeOptions {
   worldTags: string;
   /** 缺省 6（NAI 官方多角色上限，§6.2） */
   maxCharacters?: number;
+  /**
+   * 提示词**方言**（图像 v2 / C3）。缺省 `FALLBACK_IMAGE_DIALECT` = v1 的 danbooru 行为。
+   *
+   * 🔴 本参数只管**行为旋钮**（分隔符 / 归一化 / 外貌渲染器 / 世界·分级·人数三段的形态 /
+   *    支不支持负向）。方言那四个**字符串**旋钮（`qualitySuffix` / `baseNegative` /
+   *    `composition` / `systemPrompt`）**不从这里读** —— 它们照旧从上面那几个 opts 字段进来，
+   *    由调用方先用 `resolveImageDialect` 把「方言默认值 + 用户覆盖」解析成最终值（C6）。
+   *    本层若也去读 `dialect.qualitySuffix`，同一个值就有了两个来源：用户在设置里改过的
+   *    覆盖会被方言的默认值悄悄顶掉，而两边都是合法字符串，**不报错也看不出来**。
+   *
+   * 🔴 缺省必须等价于「没有方言」那条路：`scene-image-seams` 之外还有若干调用点不传它，
+   *    一旦缺省值与 v1 有一个字节的差别，那些路径就在无人察觉的情况下换了吃法。
+   *    金测试（`composePrompt(..., {dialect: FALLBACK_IMAGE_DIALECT})` 与不传时逐字段相等）
+   *    守的就是这条。
+   */
+  dialect?: ImageDialect;
+  /**
+   * 把角色**压平进 base**，而不是各进 `characters[]`（C7，无槽后端）。
+   *
+   * NAI V4 有 per-character 提示词槽（官方抗串味手段），ComfyUI 没有对应物。
+   * `true` 时：每个角色的 positive 按**标记顺序**插在场景段之后、negative 并进
+   * `baseNegative`，`ComposedPrompt.characters` 返回空数组。
+   *
+   * 🔴 能力位属于 **provider 不属于方言**（C7）：让内容包声明一件后端做不到的事，
+   *    败法是**静默丢角色** —— 画面里少了个人，没有任何报错。所以这一格由引擎按
+   *    后端能力传，不从 `ImageDialect` 里读。
+   */
+  flattenCharacters?: boolean;
 }
 
 /** 人数标签（`1girl` / `2girls` / `no humans`）—— 侧链禁写，由本函数从阵容推 */
@@ -179,31 +214,57 @@ export function clampRating(requested: ImageRating | undefined, max: ImageRating
 // 拼接
 // ═══════════════════════════════════════════════════════════
 
+/** `normalize:'none'` 时的归一化器 —— 恒等 */
+const identity = (value: string): string => value;
+
 /**
- * 各段用 `", "` 连接，**空段直接跳过** —— 绝不产出 `", ,"` 或首尾多余逗号（§5.2 不变式）。
+ * 这条方言该用哪个归一化器。
  *
- * 每段先过一遍 `normalizeTagString`：既保证段内不会自带首尾逗号把连接搞脏，
- * 也顺手接住用户在预设里手打的全角标点（§3.2b 的「进装配前」就是这里）。
- * 归一化不动权重语法，因此透传不变式仍然成立。
+ * 🔴 `'none'` 必须是**真恒等**，不是「弱一点的归一化」：散文档吃的是英文句子，
+ *    折叠标点/去重标签会把一句话洗成碎片，而碎片照样能画出图 —— 错得不显眼。
  */
-function joinSegments(segments: readonly string[]): string {
-  const cleaned: string[] = [];
-  for (const raw of segments) {
-    const value = normalizeTagString(raw);
-    if (value.length > 0) cleaned.push(value);
-  }
-  return cleaned.join(', ');
+function normalizerOf(dialect: ImageDialect): (value: string) => string {
+  return dialect.normalize === 'danbooru' ? normalizeTagString : identity;
 }
 
 /**
- * 取预设的 danbooru 正/负向。
+ * 各段用方言的分隔符连接，**空段直接跳过** —— 绝不产出 `", ,"` 或首尾多余逗号（§5.2 不变式）。
  *
- * 🔴 **有属性槽就以槽为准（D58）**，没有才退回老的手写 `dialects.danbooru`。
- *    两者**不合并** —— 合并会让同一个特征出现两次且措辞不一（`silver hair` 与
- *    `white hair` 同时在场），正是槽模型要消灭的那种歧义。迁移路径是把手写串
- *    填进槽，不是让两者共存生效。
+ * 每段先过一遍方言的归一化器：danbooru 档下既保证段内不会自带首尾逗号把连接搞脏，
+ * 也顺手接住用户在预设里手打的全角标点（§3.2b 的「进装配前」就是这里）。
+ * 归一化不动权重语法，因此透传不变式仍然成立。
  *
- * 负向仍从 `dialects.danbooru.negative` 取：槽描述的是「她长什么样」，
+ * 🔴 「空不空」判的是 `trim()` 后的长度，而**推进去的是未 trim 的原值**：
+ *    danbooru 档下 `normalizeTagString` 的产物本来就不带首尾空白，两种判法逐字节等价；
+ *    `normalize:'none'` 档下则挡住了「一段只有空格」被当成真内容连进句子（`a.  . b`）。
+ */
+function joinSegments(
+  segments: readonly string[],
+  separator: string,
+  normalize: (value: string) => string,
+): string {
+  const cleaned: string[] = [];
+  for (const raw of segments) {
+    const value = normalize(raw);
+    if (value.trim().length > 0) cleaned.push(value);
+  }
+  return cleaned.join(separator);
+}
+
+/**
+ * 取预设在**当前方言**下的正/负向。
+ *
+ * 🔴 **有属性槽就以槽为准（D58）**，没有才退回**同一方言的**手写串
+ *    （`dialects.danbooru` / `dialects.prose`）。两者**不合并** —— 合并会让同一个特征
+ *    出现两次且措辞不一（`silver hair` 与 `white hair` 同时在场），正是槽模型要消灭的
+ *    那种歧义。迁移路径是把手写串填进槽，不是让两者共存生效。
+ *
+ * 🔴 **跨方言不透传**（C15，用户裁定）：prose 方言下只有 `dialects.danbooru` 的老预设
+ *    **不降级透传**，它会走成 `missing-preset`（跳过 + 告警）。把一串 danbooru 标签塞进
+ *    吃句子的模型，产出的是一张谁也没要的图，而调用方还以为角色被钉住了。告警有人消费：
+ *    `SceneImageRecord.composeWarnings` 落库、CG 详情页写明某角色为何缺席。
+ *
+ * 负向仍从 `dialects.*.negative` 取：槽描述的是「她长什么样」，
  * 而角色负向是「别把她画成什么样」，两者不同源。
  *
  * 🔴 判据是 `baselineOf`（= 槽里**有内容**）而**不是** `preset.appearance !== undefined`。
@@ -212,16 +273,20 @@ function joinSegments(segments: readonly string[]): string {
  *    产出空串，于是这条用户明明填过的预设被当成「没有预设」丢掉，画出来是个随机人。
  *    不报错、不告警，只是那个角色永远不像。
  */
-function danbooruOf(
+function appearanceOf(
   preset: ImagePreset | undefined,
+  mode: ImageDialect['appearance'],
 ): { positive: string; negative: string } | undefined {
   if (!preset) return undefined;
-  const negative = preset.dialects?.danbooru?.negative ?? '';
+  const handwritten = mode === 'prose' ? preset.dialects?.prose : preset.dialects?.danbooru;
+  const negative = handwritten?.negative ?? '';
   const appearance = baselineOf(preset);
   if (appearance) {
-    return { positive: renderAppearanceDanbooru(appearance), negative };
+    const positive =
+      mode === 'prose' ? renderAppearanceProse(appearance) : renderAppearanceDanbooru(appearance);
+    return { positive, negative };
   }
-  return preset.dialects?.danbooru;
+  return handwritten;
 }
 
 /**
@@ -248,33 +313,27 @@ export function composePrompt(
 ): ComposedPrompt {
   const warnings: ComposeWarning[] = [];
 
+  // 🔴 缺省 = v1 的 danbooru 形态。没有这一句，所有不传方言的调用点会当场换吃法
+  const dialect = opts.dialect ?? FALLBACK_IMAGE_DIALECT;
+  const separator = dialect.separator;
+  const normalize = normalizerOf(dialect);
+
   // ── rating 钳位（D38），静默 ──
+  // 🔴 钳位**照算不误**，即便本方言不出 rating 段：调用方拿这个值往记录里写、
+  //    也往侧链里喂（见 clampRating 的注释）。只在拼接时跳过那一段。
   const rating = clampRating(marker.rating, opts.maxRating);
 
   // ── 人数：Code 推，且**把模型写的那个剥掉**（2026-08-05）──
   // 🔴 提示词已明令不许写人数，但规则是概率性的（三轮采样 22–28% 写错）。
   //    这里的剥离是确定性的：两个人数标签同时出现会让 NAI 画出多余的人。
+  // 🔴 `count:'none'` 时**连剥离一起关掉**（C4 那条注释的原话）：`COUNT_TAG_RE` 只认
+  //    tag 形态，可散文里的句子不该有任何正则去碰 —— 剥了不报错，只是把一句英文咬掉一块。
   const maxCharactersForCount = opts.maxCharacters ?? 6;
-  const countTags = deriveCountTags(
-    marker.characters.slice(0, Math.max(0, maxCharactersForCount)),
-    presets,
-  );
+  const countTags =
+    dialect.count === 'tag'
+      ? deriveCountTags(marker.characters.slice(0, Math.max(0, maxCharactersForCount)), presets)
+      : '';
   const sceneWithoutCounts = countTags === '' ? scenePrompt : scenePrompt.replace(COUNT_TAG_RE, '');
-
-  // ── base：顺序即权重，画质后缀压在最后（§5.2）──
-  //    地点那一段没了，场景串自己带（D59）；人数由 Code 推（见 deriveCountTags）
-  const base = joinSegments([
-    countTags, // [0] 人数 —— **Code 推的**，压在最前（NAI 靠它决定画几个人）
-    sceneWithoutCounts, // [1] 场景 —— 这一刻正在发生什么（含地点长什么样）
-    opts.worldTags, // [2] 世界状态 —— 天光如何
-    opts.compositionTags, // [3] 构图
-    `rating:${rating}`, // [4] 分级
-    opts.qualitySuffix, // [5] 🔴 画质后缀在末尾，不是开头
-  ]);
-
-  // ── baseNegative：全局 ∪ 追加 ∪ 场景（地点那一段随 D59 一起没了）──
-  // 🔴 角色的 negative **不在这里** —— 它进各自的槽（官方的抗串味手段，§6.2）
-  const baseNegative = joinSegments([opts.baseNegative, opts.extraNegative, sceneNegative]);
 
   // ── 角色：顺序 = 标记里 characters 的顺序（V4 的 use_order 依赖它），别排序别去重 ──
   const maxCharacters = opts.maxCharacters ?? 6;
@@ -290,19 +349,22 @@ export function composePrompt(
 
   for (const name of kept) {
     const preset = presets.get(characterPresetKey(name));
-    const dialect = danbooruOf(preset);
-    const positive = dialect === undefined ? '' : normalizeTagString(dialect.positive);
-    if (positive === '') {
-      // 没预设、或预设没有可用的 danbooru 正向 = 这个槽给不出任何一致性信息。
+    const rendered = appearanceOf(preset, dialect.appearance);
+    const positive = rendered === undefined ? '' : normalize(rendered.positive);
+    if (positive.trim() === '') {
+      // 没预设、或预设在**当前方言**下没有可用正向 = 这个槽给不出任何一致性信息。
       // 🔴 跳过该角色并告警，**不报错** —— AI 刚造的 NPC 没人写过预设，
-      //    只画场景也比拒绝生成好得多。
+      //    只画场景也比拒绝生成好得多。C15 让这条告警最终落库并出现在 CG 详情页。
       warnings.push({ kind: 'missing-preset', name });
       continue;
     }
     characters.push({
       name,
       positive,
-      negative: normalizeTagString(dialect?.negative ?? ''),
+      // 🔴 `supportsNegative:false`（flux / krea 那类 CFG 1.0 模型）时**当场清空**，
+      //    不是收下再让下游默默丢掉 —— 后者没有任何一处看得见，用户会一直以为
+      //    「别把她画成金发」这句话生效了。
+      negative: dialect.supportsNegative ? normalize(rendered?.negative ?? '') : '',
     });
     // seed 取**第一个**带 pinnedSeed 的角色的值；都没有则 undefined = 随机
     if (seed === undefined && preset?.pinnedSeed !== undefined) seed = preset.pinnedSeed;
@@ -311,5 +373,45 @@ export function composePrompt(
   // 🔴 超出上限要**告警**，不静默丢
   if (dropped.length > 0) warnings.push({ kind: 'characters-truncated', dropped });
 
-  return { base, baseNegative, characters, warnings, seed };
+  // ── C7：无槽后端把角色压平进 base（场景段之后，标记顺序），负向并进 baseNegative ──
+  const flatten = opts.flattenCharacters === true;
+  const flattenedPositives = flatten ? characters.map((row) => row.positive) : [];
+  const flattenedNegatives = flatten ? characters.map((row) => row.negative) : [];
+
+  // ── base：顺序即权重，画质后缀压在最后（§5.2）──
+  //    地点那一段没了，场景串自己带（D59）；人数由 Code 推（见 deriveCountTags）
+  const base = joinSegments(
+    [
+      countTags, // [0] 人数 —— **Code 推的**，压在最前（NAI 靠它决定画几个人）
+      sceneWithoutCounts, // [1] 场景 —— 这一刻正在发生什么（含地点长什么样）
+      ...flattenedPositives, // [1.5] 无槽后端的角色（C7）；有槽后端这里是空数组
+      dialect.world === 'none' ? '' : opts.worldTags, // [2] 世界状态 —— 天光如何
+      opts.compositionTags, // [3] 构图
+      dialect.rating === 'none' ? '' : `rating:${rating}`, // [4] 分级
+      opts.qualitySuffix, // [5] 🔴 画质后缀在末尾，不是开头
+    ],
+    separator,
+    normalize,
+  );
+
+  // ── baseNegative：全局 ∪ 追加 ∪ 场景（地点那一段随 D59 一起没了）──
+  // 🔴 有槽后端下角色的 negative **不在这里** —— 它进各自的槽（官方的抗串味手段，§6.2）。
+  //    只有压平模式才把它们并进来，因为那种后端根本没有槽可进。
+  const baseNegative = dialect.supportsNegative
+    ? joinSegments(
+        [opts.baseNegative, opts.extraNegative, sceneNegative, ...flattenedNegatives],
+        separator,
+        normalize,
+      )
+    : '';
+
+  return {
+    base,
+    baseNegative,
+    // 🔴 压平之后 `characters` 必须是**空数组**：内容已经在 base 里了，两处都留会让
+    //    NAI 形状的下游把同一个角色写两遍（`novelai.ts` 的三重冗余会照单展开）。
+    characters: flatten ? [] : characters,
+    warnings,
+    seed,
+  };
 }

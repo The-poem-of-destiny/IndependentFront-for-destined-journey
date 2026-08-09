@@ -17,6 +17,10 @@
  * 🔴 `pinnedSeed` 的说明必须**照实说**：同一 seed 只让构图更接近，**不保证同一张脸**。
  *    把它写成"锁定角色长相"会造出一个我们守不住的承诺。它现实中的设置路径是图鉴里的
  *    「把这次的 seed 钉给他」，这里只提供查看与清除。
+ *
+ * 🔴 **散文方言下「只有标签形式」的老预设会被静默跳过**（图像 v2 / C15）：装配层判它
+ *    `missing-preset`，图里那个人干脆不出现，而这张表看上去一切正常。所以每行带一句
+ *    提示 —— 判定在 `preset-dialect-form.ts`（与装配层同源的纯函数），这里只渲染。
  */
 import { computed, onMounted, ref } from 'vue';
 import AppCard from '../../shared/AppCard.vue';
@@ -25,24 +29,65 @@ import AppModal from '../../shared/AppModal.vue';
 import AppTabs from '../../shared/AppTabs.vue';
 import { useImagePresetStore } from '../../../stores/image-preset-store';
 import { useCharacterAppearanceStore } from '../../../stores/character-appearance-store';
+import { useSettingsStore } from '../../../stores/settings-store';
 import { useUIStore } from '../../../stores/ui-store';
-import type { ImagePreset, ImagePresetKind } from '@engine/types-image';
+import { ensureContentRegistryLoaded, getContentRegistry } from '../../../stores/content-store';
+import type { ImageDialect, ImagePreset, ImagePresetKind } from '@engine/types-image';
+import { parseImageDialects, resolveImageDialect } from '@engine/image-dialect';
 import {
   APPEARANCE_SLOT_ORDER,
   EMPTY_APPEARANCE,
   type CharacterAppearance,
 } from '@engine/character-appearance';
 import { bootstrapAppearance } from '@engine/character-appearance-agent';
+import { PRESET_NO_FORM_HINT, lacksFormUnderDialect } from './preset-dialect-form';
 
 const store = useImagePresetStore();
 const session = useCharacterAppearanceStore();
+const settings = useSettingsStore();
 const ui = useUIStore();
+
+// ═══ 当前方言（C15 的提示行靠它）═══
+//
+// 🔴 内容注册表**不是响应式的**（`getContentRegistry()` 是一个同步取值函数）——
+//    直接写进 computed 会把「还没灌注完的空注册表」永久缓存下来，表现为提示行
+//    永远不出现。所以落一个 ref，并在**加载门**兑现后再读一次。
+//
+// 🔴 等的必须是 `ensureContentRegistryLoaded()`，**不是** `contentReadyPromise`
+//    （两张卡的姐妹写法同此）：后者在 content-store **模块加载时就同步兑现**
+//    （`seedPlaceholderRegistry()` + `markContentReady()`），它说的是「占位骨架已就位」，
+//    对 `/data/content/image-dialects.json` 那次 fetch 一个字都没说。本卡若在那次
+//    fetch 在途时挂载，`dialects` 会永远停在 `[]` → `resolveImageDialect` 回落内置
+//    danbooru → 每一行的 `lacksForm()` 恒为 false → C15 那句提示在本组件整个生命周期里
+//    **是死的**，而它要打破的正是「设置页看着一切正常、图里那个人就是没出现」的沉默。
+const dialects = ref<ImageDialect[]>(parseImageDialects(getContentRegistry().imageDialects));
+
+/**
+ * 当前生效的方言。覆盖袋也一并叠上：虽然本卡只看 `appearance` 这一格（覆盖改不到它），
+ * 但取用口只该有一种写法 —— 少传一个参数的版本迟早会被抄去别处。
+ */
+const activeDialect = computed<ImageDialect>(() => {
+  const s = settings.settings;
+  return resolveImageDialect(
+    dialects.value,
+    s.imageDialectId,
+    s.imageDialectOverrides?.[s.imageDialectId],
+  );
+});
+
+/** 这一行的角色在当前方言下画不出形象（判定在 preset-dialect-form.ts） */
+function lacksForm(row: ImagePreset): boolean {
+  return lacksFormUnderDialect(row, activeDialect.value);
+}
 
 onMounted(() => {
   void store.init();
   // 会话副本按存档存（D56）。没有活动存档时它是空的，界面据此说明白，
   // 而不是画一个点了没反应的重置按钮。
   if (ui.activeSaveId) void session.load(ui.activeSaveId);
+  void ensureContentRegistryLoaded().then(() => {
+    dialects.value = parseImageDialects(getContentRegistry().imageDialects);
+  });
 });
 
 // ═══ 会话副本（D56）═══
@@ -300,6 +345,11 @@ function summarize(row: ImagePreset): string {
         <div class="preset-main">
           <span class="preset-name">{{ row.name }}</span>
           <span class="preset-summary">{{ summarize(row) }}</span>
+          <!--
+            C15：散文方言下只有 danbooru 标签的老预设会被**静默跳过**（不做跨方言降级），
+            画面里就是少了个人。这一行是那件事唯一看得见的地方。
+          -->
+          <span v-if="lacksForm(row)" class="dialect-warn">{{ PRESET_NO_FORM_HINT }}</span>
           <!-- 会话副本：只列**改过的槽**，让「现在与初始差在哪」一眼看得见 -->
           <ul v-if="sessionSlots(row.name).length > 0" class="session-diff">
             <li v-for="d in sessionSlots(row.name)" :key="d.slot">
@@ -515,6 +565,13 @@ function summarize(row: ImagePreset): string {
 .diff-slot {
   color: var(--theme-primary);
   margin-right: 4px;
+}
+/* C15 提示行 —— warning 语义（design.md §1 的语义徽章配方，只取色不做胶囊：
+ * 它是一句完整的话，压成小圆角标签会被截断成读不懂的半句） */
+.dialect-warn {
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--theme-warning);
 }
 /* 只有本档外貌的角色（v1.3）—— 与上面那张表刻意分开，两者的归属不同
  *

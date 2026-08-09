@@ -14,8 +14,12 @@ import {
   anchorKeyOf,
   buildGalleryCells,
   canPinSeed,
+  composeWarningLines,
+  dialectIdOf,
   isGalleryVisible,
   isNearViewport,
+  providerLabelOf,
+  providerOf,
   soleCharacterOf,
 } from './cg-gallery';
 import type { SceneImageRecord } from '@engine/types-image';
@@ -163,5 +167,57 @@ describe('isNearViewport', () => {
   it('余量可调，边界是闭的', () => {
     expect(isNearViewport({ top: vh + 100, bottom: vh + 200 }, vh, 100)).toBe(true);
     expect(isNearViewport({ top: vh + 101, bottom: vh + 200 }, vh, 100)).toBe(false);
+  });
+});
+
+describe('出图元数据的缺席默认（C14）', () => {
+  it('🔴 provider 缺席读作 novelai —— v1 老记录全是它画的，不是「未知」', () => {
+    expect(providerOf(rec())).toBe('novelai');
+    expect(providerLabelOf(rec())).toBe('NovelAI');
+  });
+
+  it('provider 写了就照写', () => {
+    expect(providerOf(rec({ provider: 'comfyui' }))).toBe('comfyui');
+    expect(providerLabelOf(rec({ provider: 'comfyui' }))).toBe('ComfyUI');
+  });
+
+  it('dialectId 缺席 / 空串读作内置 danbooru 方言', () => {
+    expect(dialectIdOf(rec())).toBe('danbooru-anime');
+    expect(dialectIdOf(rec({ dialectId: '' }))).toBe('danbooru-anime');
+    expect(dialectIdOf(rec({ dialectId: 'natural-prose' }))).toBe('natural-prose');
+  });
+});
+
+describe('composeWarningLines — 装配告警的唯一消费面（C15）', () => {
+  it('没有告警时一行都不出（缺席与空数组同档）', () => {
+    expect(composeWarningLines(undefined)).toEqual([]);
+    expect(composeWarningLines([])).toEqual([]);
+  });
+
+  it('缺形象的角色聚成一行，名字原样、按出现顺序', () => {
+    const lines = composeWarningLines([
+      { kind: 'missing-preset', name: '苏婉' },
+      { kind: 'missing-preset', name: '林越' },
+    ]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('苏婉、林越');
+    // 措辞说的是**出图时**的方言，不是用户此刻选的那条（告警是历史事实）
+    expect(lines[0]).toContain('出图时的方言');
+    expect(lines[0]).not.toContain('当前方言');
+  });
+
+  it('超上限被截掉的角色是另一行 —— 两类原因不同，混成一句会指错方向', () => {
+    const lines = composeWarningLines([
+      { kind: 'missing-preset', name: '苏婉' },
+      { kind: 'characters-truncated', dropped: ['甲', '乙'] },
+    ]);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain('甲、乙');
+    expect(lines[1]).toContain('超出单张上限');
+  });
+
+  it('空名字不入行 —— 免得出现「未入画角色: 、」这种读不懂的半句', () => {
+    expect(composeWarningLines([{ kind: 'missing-preset', name: '' }])).toEqual([]);
+    expect(composeWarningLines([{ kind: 'characters-truncated', dropped: [''] }])).toEqual([]);
   });
 });

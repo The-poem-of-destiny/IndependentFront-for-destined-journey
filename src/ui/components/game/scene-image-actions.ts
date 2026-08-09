@@ -14,6 +14,7 @@
  * 🔴 本模块**不做**七态判定 —— 那是 `scene-image-view.ts` 的唯一职责。这里的输入
  * 已经是 `done` 那一格之内的东西。
  */
+import { FALLBACK_IMAGE_DIALECT } from '@engine/image-dialect';
 import type { SceneImageRecord } from '@engine/types-image';
 
 /** {@link copyablePromptOf} 需要的最小切面 —— 三个候选字段 */
@@ -59,4 +60,43 @@ export function nextTakeId(ids: readonly string[], currentId: string | null): st
   const i = currentId === null ? -1 : ids.indexOf(currentId);
   // 找不到（-1）时 (i + 1) % n === 0 → 回到第一张，正是想要的
   return ids[(i + 1) % ids.length] ?? null;
+}
+
+// ═══ 重画与方言（图像 v2 / C14）═══
+
+/** 提示那句中文 —— 常量而不是模板字面量，测试与界面读同一份 */
+export const REDRAW_DIALECT_MISMATCH_HINT = '这份手改提示词是为另一方言写的';
+
+/** {@link isRedrawDialectMismatch} 需要的最小切面 */
+export type DialectBearingRecord = Pick<SceneImageRecord, 'editedScenePrompt' | 'dialectId'>;
+
+/**
+ * 重画之前要不要提醒一句「这份手改提示词是为另一方言写的」（C14）。
+ *
+ * 🔴 **只在有 `editedScenePrompt` 时提醒**。没有手改时，方言变了引擎会**自己重跑侧链**
+ * （D31 的缓存只在方言内有效）—— 那条路已经是对的，再弹一句提示只会教会用户忽略它。
+ * 有手改时相反：`editedScenePrompt` 逐字优先且跳过侧链（D26），于是一串 danbooru 标签
+ * 会被原样送进吃句子的模型，画出来是一张谁也没要的图，而**没有任何东西会报错**。
+ *
+ * 🔴 **提醒不是阻断**：那份手改可能正是用户为新方言重写的，也可能他就是要那个效果。
+ * 判定只回一个布尔，按钮照常可点。
+ *
+ * 🔴 两边的「缺席」都读作内置 danbooru 方言（C14）：老记录没有 `dialectId`，而它们
+ * 全部是 danbooru 装配的；把 `undefined` 当成「不匹配」会让每一张 v1 老图都挂上这句
+ * 提示 —— 一句对所有人都出现的提示等于没有提示。
+ *
+ * @param activeDialectId 当前设置里的方言 id；空串/缺席同样读作内置 danbooru
+ */
+export function isRedrawDialectMismatch(
+  record: DialectBearingRecord,
+  activeDialectId: string | undefined,
+): boolean {
+  const edited = record.editedScenePrompt;
+  if (typeof edited !== 'string' || edited.trim() === '') return false;
+  const recorded = normalizeDialectId(record.dialectId);
+  return recorded !== normalizeDialectId(activeDialectId);
+}
+
+function normalizeDialectId(id: string | undefined): string {
+  return typeof id === 'string' && id !== '' ? id : FALLBACK_IMAGE_DIALECT.id;
 }

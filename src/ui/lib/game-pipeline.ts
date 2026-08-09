@@ -111,6 +111,35 @@ const AGENT_LABELS: Record<string, string> = {
   plot_outline: '剧情大纲',
 };
 
+/**
+ * 把方言的 systemPrompt **合并**进 `image_prompt` 那条 config（图像 v2 / C3·C5）。
+ *
+ * 为什么是「合并」而不是「另造一条」: `buildAgentMessagesAsync` 只从 `configs` 里认
+ * systemPrompt，而**同一条 config 还带着这个 agent 的全部 LLM 旋钮**（模型 / 温度 /
+ * maxTokens / 世界书 —— `image-prompt-agent` 会把它们再查一遍）。新造一条顶掉原来的，
+ * 用户在设置页调的模型与采样参数就全部静默回落成缺省 —— 不报错，只是这条侧链换了个
+ * 模型在跑。所以这里克隆整条、只换那一格。
+ *
+ * @param override 空 / 只剩空白 / undefined → 原样返回（走 agent-config 或模板兜底，
+ *   即图像 v1 行为）。🔴 **空白也要挡**：设置页今天不再写下只含空白的覆盖，但老档里
+ *   可能躺着一份 —— 它会把这条侧链的整段 systemPrompt 换成一个空格，产出一串垃圾而
+ *   没有任何一处报错。
+ */
+export function withImagePromptSystem(
+  configs: readonly AgentConfig[],
+  override: string | undefined,
+): AgentConfig[] {
+  if (!override || override.trim() === '') return [...configs];
+  const index = configs.findIndex((c) => c.agentId === 'image_prompt');
+  if (index >= 0) {
+    return configs.map((c, i) => (i === index ? { ...c, systemPrompt: override } : c));
+  }
+  // 生产里到不了这里（`buildAgentConfigs` 的名单固定含 image_prompt）。真到了的话，
+  // 宁可补一条只带提示词的：没有它，方言的整段吃法会静默失效，而那是没有任何症状的。
+  console.warn('[GamePipeline] configs 里没有 image_prompt，合成一条只带 systemPrompt 的');
+  return [...configs, { agentId: 'image_prompt', systemPrompt: override } as AgentConfig];
+}
+
 export class GamePipeline {
   private game: ReturnType<typeof useGameStore>;
   private settings: ReturnType<typeof useSettingsStore>;
@@ -1767,11 +1796,17 @@ export class GamePipeline {
    * 闸门要在最前面 —— 否则自动档会为被限流器拦下的插画白烧一次侧链调用。这条排序
    * 由 store 的 `generate()` 保证，本方法只管调用本身。
    *
-   * 🔴 **不抛错**：一切失败降级成 `errorKind: 'prompt-agent'`，NAI 一次都不会发。
+   * 🔴 **不抛错**：一切失败降级成 `errorKind: 'prompt-agent'`，上游一次都不会发。
+   *
+   * 🔴 `systemPromptOverride` 是**当前方言**那段话（图像 v2 / C3·C5）。方言拥有整个装配
+   *    契约，「教模型怎么说话」是其中一格 —— 而方言解析只在 `scene-image-seams` 一处
+   *    发生（本方法不认识方言，也不该认识）。传进来就**合并**进 image_prompt 那条 config，
+   *    不传就照旧走 agent-config / 模板兜底。
    */
   async runImagePromptAgent(
     request: ImagePromptRequest,
     signal?: AbortSignal,
+    systemPromptOverride?: string,
   ): Promise<ImagePromptOutput | ImageGenFailure> {
     const fail = (detail: string): ImageGenFailure => ({
       ok: false,
@@ -1794,7 +1829,7 @@ export class GamePipeline {
           request,
           context: this.currentContext ?? this.buildContext(''),
           endpoint,
-          configs: chain.agentConfigs,
+          configs: withImagePromptSystem(chain.agentConfigs, systemPromptOverride),
           worldBooks: chain.worldBooks,
           presets: chain.presets,
           ...(signal ? { signal } : {}),

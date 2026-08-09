@@ -3,7 +3,9 @@ import {
   collectSelectedSystemCoreWorkshopBookIds,
   extractStoryOptions,
   GamePipeline,
+  withImagePromptSystem,
 } from './game-pipeline';
+import type { AgentConfig } from '@engine/types';
 import { patchAgentSettings } from '../stores/agent-settings';
 import type { AgentResult } from '@engine/types';
 
@@ -1001,6 +1003,72 @@ describe('flushEjsVarsDiffs — EJS vars 差量提交 (工坊 P2 / D5)', () => {
     const diffs = lastDiffs();
     expect(diffs).toHaveLength(1);
     expect(diffs[0].replace).toEqual([{ path: 'sys.小键', value: 1 }]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 🖼 方言 systemPrompt 注入（图像 v2 / C3·C5）
+// ═══════════════════════════════════════════════════════════
+
+describe('withImagePromptSystem', () => {
+  function cfg(over: Partial<AgentConfig> = {}): AgentConfig {
+    return {
+      agentId: 'image_prompt',
+      enabled: true,
+      apiEndpointId: 'ep_1',
+      model: 'gpt-x',
+      temperature: 0.3,
+      maxTokens: 4096,
+      topP: 0.9,
+      frequencyPenalty: 0.1,
+      presencePenalty: 0.2,
+      retryOnFail: true,
+      timeout: 120000,
+      userId: 'fp|save|image_prompt',
+      promptTemplate: { fixedSystem: '', fixedExamples: '' },
+      worldBookIds: ['book_a'],
+      systemPrompt: '老的那份',
+      ...over,
+    };
+  }
+
+  it('🔴 只换 systemPrompt，模型与采样旋钮**一格不动**', () => {
+    const configs = [cfg({ agentId: 'story', systemPrompt: 'story 的' }), cfg()];
+    const out = withImagePromptSystem(configs, '方言写的');
+
+    const image = out.find((c) => c.agentId === 'image_prompt');
+    expect(image?.systemPrompt).toBe('方言写的');
+    // 新造一条顶掉原来的，用户在设置页调的模型与采样参数就全部静默回落成缺省
+    expect(image?.model).toBe('gpt-x');
+    expect(image?.temperature).toBe(0.3);
+    expect(image?.maxTokens).toBe(4096);
+    expect(image?.topP).toBe(0.9);
+    expect(image?.frequencyPenalty).toBe(0.1);
+    expect(image?.presencePenalty).toBe(0.2);
+    expect(image?.worldBookIds).toEqual(['book_a']);
+    // 别人的 config 一个字节不动
+    expect(out.find((c) => c.agentId === 'story')?.systemPrompt).toBe('story 的');
+    // 原数组不被就地改写（调用方还拿着 chainData 那一份）
+    expect(configs[1].systemPrompt).toBe('老的那份');
+  });
+
+  it('不传覆盖 = 原样返回（走 agent-config / 模板兜底，即图像 v1 行为）', () => {
+    const configs = [cfg()];
+    expect(withImagePromptSystem(configs, undefined)[0].systemPrompt).toBe('老的那份');
+    expect(withImagePromptSystem(configs, '')[0].systemPrompt).toBe('老的那份');
+  });
+
+  it('🔴 只剩空白的覆盖照样当没有 —— 否则整段提示词变成一个空格，且不报错', () => {
+    // 设置页今天不再写下这种值（判空前先 trim），但老档里可能躺着一份
+    const configs = [cfg()];
+    expect(withImagePromptSystem(configs, ' ')[0].systemPrompt).toBe('老的那份');
+    expect(withImagePromptSystem(configs, '\n\t ')[0].systemPrompt).toBe('老的那份');
+  });
+
+  it('configs 里没有 image_prompt 时补一条（宁可多一条，也不让方言静默失效）', () => {
+    const out = withImagePromptSystem([cfg({ agentId: 'story' })], '方言写的');
+    expect(out).toHaveLength(2);
+    expect(out[1]).toMatchObject({ agentId: 'image_prompt', systemPrompt: '方言写的' });
   });
 });
 

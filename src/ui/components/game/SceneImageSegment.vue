@@ -47,7 +47,12 @@ import { useCharacterAppearanceStore } from '../../stores/character-appearance-s
 import { useUIStore } from '../../stores/ui-store';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
-import { copyablePromptOf, nextTakeId } from './scene-image-actions';
+import {
+  REDRAW_DIALECT_MISMATCH_HINT,
+  copyablePromptOf,
+  isRedrawDialectMismatch,
+  nextTakeId,
+} from './scene-image-actions';
 import { missingPresetHint, resolveSceneImageView } from './scene-image-view';
 
 const props = withDefaults(
@@ -80,6 +85,15 @@ const props = withDefaults(
      * （见文件头第 1 条）。缺省 `false` 与设置默认值同档。
      */
     blurByDefault?: boolean;
+    /**
+     * 当前生效的方言 id（C14），来自 `settings.imageDialectId`。
+     *
+     * 🔴 只用来决定**重画入口旁边那句提示**：这一格的记录带着手改提示词、而那份手改是
+     * 为另一条方言写的时候，重画会逐字沿用它（D26 跳过侧链），产出一张谁也没要的图 ——
+     * 而这件事不会报任何错。缺省空串读作内置 danbooru 方言（老记录同档，于是 v1 的图
+     * 不会集体挂上这句提示）。
+     */
+    dialectId?: string;
   }>(),
   {
     anchorKind: 'marker',
@@ -91,6 +105,7 @@ const props = withDefaults(
     narrative: '',
     maxRating: 'general',
     blurByDefault: false,
+    dialectId: '',
   },
 );
 
@@ -190,6 +205,15 @@ const view = computed(() =>
 const presetHint = computed(() =>
   view.value.kind === 'done' ? missingPresetHint(view.value.missingPresets) : '',
 );
+
+/**
+ * 重画入口旁那句方言提示（C14）。**判定在 `scene-image-actions.ts`**，这里只问一次。
+ * 非阻断 —— 按钮照常可点，它只是把一件不会报错的事说出来。
+ */
+const dialectMismatch = computed(() => {
+  const r = record.value;
+  return r !== undefined && isRedrawDialectMismatch(r, props.dialectId);
+});
 
 // ═══ object URL ═══
 
@@ -460,7 +484,9 @@ function goPresets(): void {
       <span class="si-title">{{ view.title }}</span>
       <span class="si-intent">{{ view.intent }}</span>
       <span class="si-status">正在生成 · 已用 {{ view.elapsedSec }} 秒</span>
-      <AppButton variant="ghost" size="sm" @click="cancel">中止（本次仍会计费）</AppButton>
+      <AppButton variant="ghost" size="sm" @click="cancel">{{
+        view.billsOnAbort ? '中止（本次仍会计费）' : '中止'
+      }}</AppButton>
     </div>
 
     <!-- 画好了 -->
@@ -552,6 +578,8 @@ function goPresets(): void {
       <span class="si-title">{{ view.title }}</span>
       <span class="si-intent">{{ view.description }}</span>
       <span class="si-status">字节已清理</span>
+      <!-- C14：手改提示词是为另一方言写的 —— 提示，不阻断（重画照样点得动） -->
+      <span v-if="dialectMismatch" class="si-dialect-hint">{{ REDRAW_DIALECT_MISMATCH_HINT }}</span>
       <AppButton variant="secondary" size="sm" :loading="busy" @click="redraw">重画</AppButton>
     </div>
 
@@ -559,6 +587,8 @@ function goPresets(): void {
     <div v-else class="si-frame si-failed">
       <span class="si-title">{{ view.title }}</span>
       <span class="si-status si-error">{{ view.message }}</span>
+      <!-- C14：同上 —— 重试会逐字沿用那份手改提示词（D26 跳过侧链），说一声 -->
+      <span v-if="dialectMismatch" class="si-dialect-hint">{{ REDRAW_DIALECT_MISMATCH_HINT }}</span>
       <div class="si-actions">
         <AppButton
           v-if="view.retryable"
@@ -689,6 +719,15 @@ function goPresets(): void {
 
 .si-error {
   color: var(--theme-error);
+}
+
+/* C14 方言提示 —— warning 语义（不是 error：图能画，只是可能不是你要的那张） */
+.si-dialect-hint {
+  max-width: 32em;
+  color: var(--theme-warning);
+  font-size: 0.6875rem;
+  line-height: 1.55;
+  text-indent: 0;
 }
 
 .si-action-label {

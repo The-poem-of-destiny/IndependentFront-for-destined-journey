@@ -12,8 +12,9 @@ import {
   DEFAULT_IMAGE_COMPOSITION_TAGS,
   DEFAULT_IMAGE_QUALITY_SUFFIX,
 } from './image-defaults';
+import { FALLBACK_IMAGE_DIALECT } from './image-dialect';
 import { composePrompt, normalizeTagString, type ComposeOptions } from './image-prompt';
-import type { ImagePreset, ImageRating, SceneImageMarker } from './types-image';
+import type { ImageDialect, ImagePreset, ImageRating, SceneImageMarker } from './types-image';
 import { EMPTY_APPEARANCE, type CharacterAppearance } from './character-appearance';
 
 // ═══════════════════════════════════════════════════════════
@@ -688,5 +689,318 @@ describe('composePrompt —— 人数标签', () => {
     const out = composePrompt('no humans, scenery', '', marker([]), presetMap(), BARE);
     // 推不出人数 → 场景串原样保留，绝不凭空造一个人数标签
     expect(out.base).toContain('no humans');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 方言参数化（图像 v2 / C3·C4·C6·C7·C15）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 一条散文方言。
+ *
+ * 🔴 四个**字符串**旋钮（qualitySuffix / baseNegative / composition / systemPrompt）在这里
+ *    写什么都不影响装配 —— `composePrompt` **不读它们**（C6：解析「方言默认值 + 用户覆盖」
+ *    是调用方的事，四个最终值照旧从 `ComposeOptions` 的同名字段进来）。故意都留空，
+ *    免得日后有人照着这份夹具以为它们生效。
+ */
+function prose(patch: Partial<ImageDialect> = {}): ImageDialect {
+  return {
+    id: 'natural-prose',
+    label: '自然语',
+    separator: '. ',
+    normalize: 'none',
+    appearance: 'prose',
+    world: 'none',
+    rating: 'none',
+    count: 'none',
+    supportsNegative: false,
+    qualitySuffix: '',
+    baseNegative: '',
+    composition: '',
+    systemPrompt: '',
+    ...patch,
+  };
+}
+
+/** 带九槽的角色预设；`handwritten` 是老形态的 danbooru 串 */
+function slotted(
+  name: string,
+  appearance: Partial<CharacterAppearance>,
+  dialects: ImagePreset['dialects'] = {},
+): ImagePreset {
+  return {
+    key: `character:${name}`,
+    kind: 'character',
+    name,
+    appearance: { ...EMPTY_APPEARANCE, ...appearance },
+    dialects,
+    createdAt: 0,
+    updatedAt: 0,
+  };
+}
+
+describe('composePrompt —— 方言缺省 = v1 逐字节不变（金测试）', () => {
+  /**
+   * 🔴 这一条是整个 C3 重构的安全网：**不传 dialect** 与 **传 FALLBACK_IMAGE_DIALECT**
+   *    必须给出完全一样的产物。全仓有若干调用点不传方言（seams 之外还有测试与将来的
+   *    新入口），缺省值一旦与 v1 差一个字节，那些路径就在无人察觉的情况下换了吃法 ——
+   *    不报错，只是画出来的图不一样了。
+   */
+  const fixture = (dialect?: ImageDialect) =>
+    composePrompt(
+      '2girls, tavern interior, sitting across a table，candlelight',
+      'modern clothing',
+      marker(['苏婉', '雷恩', '路人甲'], 'questionable'),
+      presetMap(
+        slotted(
+          '苏婉',
+          { count: '1girl', hairColor: 'silver hair', outfit: 'white robe' },
+          { danbooru: { positive: 'OLD', negative: 'red hair' } },
+        ),
+        preset('character', '雷恩', 'boy, black hair', 'blonde hair', 4242),
+      ),
+      {
+        ...opts({
+          worldTags: 'night, rain',
+          compositionTags: 'wide shot',
+          qualitySuffix: 'masterpiece, best quality',
+          baseNegative: 'lowres',
+          extraNegative: 'blurry',
+          maxRating: 'explicit',
+        }),
+        ...(dialect === undefined ? {} : { dialect }),
+      },
+    );
+
+  it('🔴 传 FALLBACK_IMAGE_DIALECT 与不传，产物逐字段相等', () => {
+    expect(fixture(FALLBACK_IMAGE_DIALECT)).toEqual(fixture());
+  });
+
+  it('且那份产物确实是 v1 的样子（夹具不是空的，否则上一条恒真）', () => {
+    const out = fixture();
+    expect(out.base).toBe(
+      '1girl, tavern interior, sitting across a table, candlelight, night, rain, wide shot, rating:questionable, masterpiece, best quality',
+    );
+    expect(out.baseNegative).toBe('lowres, blurry, modern clothing');
+    expect(out.characters).toEqual([
+      { name: '苏婉', positive: '1girl, silver hair, white robe', negative: 'red hair' },
+      { name: '雷恩', positive: 'boy, black hair', negative: 'blonde hair' },
+    ]);
+    expect(out.warnings).toEqual([{ kind: 'missing-preset', name: '路人甲' }]);
+    expect(out.seed).toBe(4242);
+  });
+});
+
+describe('composePrompt —— prose 方言（C3/C15）', () => {
+  it('段与段之间用方言的分隔符，不是 ", "', () => {
+    const out = composePrompt('a young woman sits alone by the hearth', '', marker(), presetMap(), {
+      ...opts({
+        worldTags: 'night, rain',
+        compositionTags: 'a wide, cinematic view',
+        qualitySuffix: 'photorealistic, sharp focus',
+      }),
+      dialect: prose(),
+    });
+    // world:'none' → worldTags 整段不出；rating:'none' → 没有 rating 段
+    expect(out.base).toBe(
+      'a young woman sits alone by the hearth. a wide, cinematic view. photorealistic, sharp focus',
+    );
+  });
+
+  it('🔴 rating:none → 不出 rating 标签（钳位照算，只是不拼进去）', () => {
+    const out = composePrompt('a quiet room', '', marker([], 'explicit'), presetMap(), {
+      ...BARE,
+      dialect: prose(),
+    });
+    expect(out.base).toBe('a quiet room');
+    expect(out.base).not.toContain('rating:');
+  });
+
+  it('🔴 count:none → 不推人数段，也**不拿正则去咬**模型写的句子', () => {
+    // 同一份输入在 danbooru 档下会被剥成 "1girl, a scene where … talking"；
+    // 散文档下 COUNT_TAG_RE 一次都不许运行 —— 它只认 tag 形态，咬进句子里不报错，
+    // 只是把一段英文咬掉一块。
+    const scene = 'a scene where 2girls and 1boy are talking';
+    const map = presetMap(slotted('甲', { count: '1girl', build: 'slender' }));
+
+    const out = composePrompt(scene, '', marker(['甲']), map, {
+      ...BARE,
+      dialect: prose(),
+    });
+    expect(out.base).toBe(scene);
+
+    // 对照：danbooru 档确实会推人数并剥掉模型写的那个
+    const danbooru = composePrompt(scene, '', marker(['甲']), map, BARE);
+    expect(danbooru.base.startsWith('1girl')).toBe(true);
+    expect(danbooru.base).not.toContain('2girls');
+  });
+
+  it('🔴 有槽的预设走 renderAppearanceProse（count 槽不进散文）', () => {
+    const out = composePrompt(
+      'scene',
+      '',
+      marker(['艾莉丝']),
+      presetMap(
+        slotted('艾莉丝', {
+          count: '1girl',
+          hairColor: 'silver hair',
+          build: 'slender',
+          outfit: 'a white mage robe',
+        }),
+      ),
+      { ...BARE, dialect: prose() },
+    );
+    expect(out.characters).toEqual([
+      { name: '艾莉丝', positive: 'slender; silver hair; a white mage robe', negative: '' },
+    ]);
+    expect(out.warnings).toEqual([]);
+  });
+
+  it('🔴 只有手写 danbooru 串的老预设 → missing-preset 跳过 + 告警（C15，不降级透传）', () => {
+    const out = composePrompt(
+      'scene',
+      '',
+      marker(['甲']),
+      presetMap(preset('character', '甲', '1girl, silver hair, blue eyes', 'red hair')),
+      { ...BARE, dialect: prose() },
+    );
+    expect(out.characters).toEqual([]);
+    expect(out.warnings).toEqual([{ kind: 'missing-preset', name: '甲' }]);
+    expect(out.base).not.toContain('silver hair'); // 透传是**没有**的那条路
+  });
+
+  it('预设自己写了 dialects.prose 时用它（那个预留字段终于有了消费方）', () => {
+    const out = composePrompt(
+      'scene',
+      '',
+      marker(['甲']),
+      presetMap({
+        key: 'character:甲',
+        kind: 'character',
+        name: '甲',
+        dialects: {
+          danbooru: { positive: 'SHOULD_NOT_APPEAR', negative: 'NOR_THIS' },
+          prose: { positive: 'a tall elf with silver hair', negative: 'no armor' },
+        },
+        createdAt: 0,
+        updatedAt: 0,
+      }),
+      { ...BARE, dialect: prose({ supportsNegative: true }) },
+    );
+    expect(out.characters).toEqual([
+      { name: '甲', positive: 'a tall elf with silver hair', negative: 'no armor' },
+    ]);
+  });
+
+  it('🔴 supportsNegative:false → baseNegative 与每个角色的 negative 全部清空', () => {
+    const map = presetMap(
+      slotted('甲', { build: 'slender' }, { prose: { positive: '', negative: 'no armor' } }),
+    );
+    const args = (dialect: ImageDialect) =>
+      composePrompt('scene', 'modern clothing', marker(['甲']), map, {
+        ...opts({ baseNegative: 'low quality', extraNegative: 'watermark', qualitySuffix: '' }),
+        dialect,
+      });
+
+    const off = args(prose());
+    expect(off.baseNegative).toBe('');
+    expect(off.characters[0].negative).toBe('');
+
+    // 对照：同一份输入在 supportsNegative:true 下四段都在 —— 上面那条不是恒真
+    const on = args(prose({ supportsNegative: true }));
+    expect(on.baseNegative).toBe('low quality. watermark. modern clothing');
+    expect(on.characters[0].negative).toBe('no armor');
+  });
+
+  it('normalize:none 是**真恒等**：全角标点与空白一个字符都不动', () => {
+    const scene = 'She turns，slowly，and  smiles';
+    const out = composePrompt(scene, '', marker(), presetMap(), { ...BARE, dialect: prose() });
+    expect(out.base).toBe(scene);
+  });
+});
+
+describe('composePrompt —— flattenCharacters（C7 无槽后端）', () => {
+  const 苏婉 = preset('character', '苏婉', 'girl, silver hair', 'red hair');
+  const 雷恩 = preset('character', '雷恩', 'boy, black hair', 'blonde hair');
+
+  it('🔴 角色 positive 按标记顺序插在场景段之后，characters[] 清空', () => {
+    const out = composePrompt(
+      'tavern interior',
+      '',
+      marker(['苏婉', '雷恩']),
+      presetMap(苏婉, 雷恩),
+      {
+        ...opts({
+          worldTags: 'night',
+          compositionTags: 'wide shot',
+          qualitySuffix: 'masterpiece',
+        }),
+        flattenCharacters: true,
+      },
+    );
+    expect(out.base).toBe(
+      'tavern interior, girl, silver hair, boy, black hair, night, wide shot, rating:explicit, masterpiece',
+    );
+    expect(out.characters).toEqual([]);
+  });
+
+  it('🔴 角色 negative 并进 baseNegative（排在 sceneNegative 之后）', () => {
+    const out = composePrompt(
+      'scene',
+      'modern clothing',
+      marker(['苏婉', '雷恩']),
+      presetMap(苏婉, 雷恩),
+      {
+        ...BARE,
+        baseNegative: 'lowres',
+        extraNegative: 'blurry',
+        flattenCharacters: true,
+      },
+    );
+    expect(out.baseNegative).toBe('lowres, blurry, modern clothing, red hair, blonde hair');
+  });
+
+  it('告警与 seed 与有槽模式**逐字相同** —— 压平只改载体，不改判定', () => {
+    const names = ['a', 'b', 'c', 'd', 'e', 'f', '没人写过的家伙', 'h'];
+    const rows = [
+      ...names.slice(0, 5).map((n) => preset('character', n, `${n} hair`)),
+      preset('character', 'f', 'f hair', '', 777),
+    ];
+    const args = (flattenCharacters: boolean) =>
+      composePrompt('scene', '', marker(names), presetMap(...rows), {
+        ...opts({ maxCharacters: 7 }),
+        flattenCharacters,
+      });
+
+    const slottedOut = args(false);
+    const flatOut = args(true);
+    expect(flatOut.warnings).toEqual(slottedOut.warnings);
+    expect(flatOut.warnings).toEqual([
+      { kind: 'missing-preset', name: '没人写过的家伙' },
+      { kind: 'characters-truncated', dropped: ['h'] },
+    ]);
+    expect(flatOut.seed).toBe(777);
+    expect(flatOut.seed).toBe(slottedOut.seed);
+    // 被跳过的角色同样不进 base（压平不是「顺便把没预设的也塞进去」）
+    expect(flatOut.base).not.toContain('没人写过的家伙');
+  });
+
+  it('0 角色时压平模式与有槽模式的 base 完全一致（纯风景）', () => {
+    const bare = (flattenCharacters: boolean) =>
+      composePrompt('landscape', '', marker([]), presetMap(), { ...BARE, flattenCharacters });
+    expect(bare(true)).toEqual(bare(false));
+  });
+
+  it('压平 + prose：角色句子用方言分隔符接在场景之后', () => {
+    const out = composePrompt(
+      'two travellers rest by a fire',
+      '',
+      marker(['甲']),
+      presetMap(slotted('甲', { build: 'slender', hairColor: 'silver hair' })),
+      { ...BARE, dialect: prose(), flattenCharacters: true },
+    );
+    expect(out.base).toBe('two travellers rest by a fire. slender; silver hair');
+    expect(out.characters).toEqual([]);
   });
 });

@@ -14,7 +14,7 @@ import {
   IMAGE_QUOTA_WINDOW_MS,
 } from './image-defaults';
 import { checkQuota, type QuotaInput } from './image-quota';
-import type { SceneImageRecord, SceneImageStatus } from './types-image';
+import type { ImageProviderId, SceneImageRecord, SceneImageStatus } from './types-image';
 
 const NOW = 1_700_000_000_000;
 
@@ -56,12 +56,17 @@ function makeRecord(over: Partial<SceneImageRecord> = {}): SceneImageRecord {
   };
 }
 
+/**
+ * 缺省 `costModel: 'paid'` —— 既有全部用例写的都是付费后端那条路（图像 v1 的唯一后端），
+ * 于是它们一个字节都不用改。本地后端那半在文件末尾单开一节。
+ */
 function input(over: Partial<QuotaInput> = {}): QuotaInput {
   return {
     records: [],
     target: { messageId: 'msg-1', turn: 1, source: 'auto' },
     now: NOW,
     limits: DEFAULT_LIMITS,
+    costModel: 'paid',
     ...over,
   };
 }
@@ -417,5 +422,184 @@ describe('纯度与文案', () => {
     expect(hourly.ok === false && hourly.message).toContain(
       `${DEFAULT_IMAGE_MAX_PER_HOUR}/${DEFAULT_IMAGE_MAX_PER_HOUR}`,
     );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// costModel 分层（图像 v2 / C9）
+// ═══════════════════════════════════════════════════════════
+
+describe('costModel: local —— L1/L2 是花钱防线，本地后端不设上限', () => {
+  it('L1 每消息：paid 拦、local 放行（同一份记录、同一份阈值）', () => {
+    const records = Array.from({ length: DEFAULT_IMAGE_MAX_PER_MESSAGE }, (_, i) =>
+      makeRecord({ turn: 50 + i }),
+    );
+    // 目标是 manual，避开 L3（L3 只拦 auto）—— 这里要单独看 L1
+    const target = { messageId: 'msg-1', turn: 999, source: 'manual' as const };
+
+    const paid = checkQuota(input({ records, target, costModel: 'paid' }));
+    expect(paid.ok === false && paid.reason).toBe('per-message');
+
+    const local = checkQuota(input({ records, target, costModel: 'local' }));
+    expect(local.ok).toBe(true);
+  });
+
+  it('L2 滚动一小时：paid 拦、local 放行', () => {
+    const records = spreadRecords(DEFAULT_IMAGE_MAX_PER_HOUR);
+    const target = { messageId: 'fresh', turn: 999, source: 'manual' as const };
+
+    const paid = checkQuota(input({ records, target, costModel: 'paid' }));
+    expect(paid.ok === false && paid.reason).toBe('rolling-window');
+
+    expect(checkQuota(input({ records, target, costModel: 'local' })).ok).toBe(true);
+  });
+
+  it('🔴 L3 同回合去重对 local **照样开火** —— 它是正确性规则，不是花钱规则', () => {
+    // 一回合自动开火两次产出两张近乎相同的图 + 图鉴里两条重复条目，
+    // 这件事与谁付钱无关。本地后端照样难看，所以这一条与 costModel 无关。
+    const records = [makeRecord({ messageId: 'other', turn: 7, source: 'auto' })];
+    const target = { messageId: 'msg-1', turn: 7, source: 'auto' as const };
+
+    for (const costModel of ['paid', 'local'] as const) {
+      const verdict = checkQuota(input({ records, target, costModel }));
+      expect(verdict.ok, `costModel=${costModel} 应被 L3 拦下`).toBe(false);
+      if (!verdict.ok) expect(verdict.reason).toBe('same-turn');
+    }
+  });
+
+  it('local 下手动开火不受任何张数限制（用户裁定：本地免费就该无上限）', () => {
+    // 远超两条阈值的记录堆在同一条消息、同一小时里
+    const records = [
+      ...Array.from({ length: 50 }, () => makeRecord({ messageId: 'msg-1' })),
+      ...spreadRecords(50),
+    ];
+    const verdict = checkQuota(
+      input({
+        records,
+        target: { messageId: 'msg-1', turn: 4242, source: 'manual' },
+        costModel: 'local',
+      }),
+    );
+    expect(verdict.ok).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 记录按各自盖的章算账（图像 v2 / C9，2026-08-08 评审补）
+// ═══════════════════════════════════════════════════════════
+
+/** 与 `scene-image-seams.ts` 的 `PROVIDER_CAPABILITIES` 同口径：只有 NAI 收钱 */
+const costModelOf = (provider: ImageProviderId | undefined): 'paid' | 'local' =>
+  provider === 'comfyui' ? 'local' : 'paid';
+
+describe('🔴 L1/L2 只算付费记录 —— 本地画的图不许去啃付费预算', () => {
+  it('切回 NAI 的第一张付费图不该被一堆本地图拦下（评审复现的那一幕）', () => {
+    // 本地免费连画 25 张（超过每小时 20 的阈值），然后切回 NovelAI 画第一张
+    const records = spreadRecords(25).map((r) => makeRecord({ ...r, provider: 'comfyui' }));
+    const verdict = checkQuota(
+      input({
+        records,
+        costModelOf,
+        target: { messageId: 'fresh-msg', turn: 999, source: 'auto' },
+        costModel: 'paid',
+      }),
+    );
+    // 修之前这里报的是 rolling-window「已达本小时上限（25/20）」，而付费的一张都没画过
+    expect(verdict).toEqual({ ok: true });
+  });
+
+  it('同一条消息上的本地图不占 L1', () => {
+    const records = Array.from({ length: DEFAULT_IMAGE_MAX_PER_MESSAGE * 3 }, (_, i) =>
+      makeRecord({ provider: 'comfyui', turn: 50 + i }),
+    );
+    expect(
+      checkQuota(
+        input({
+          records,
+          costModelOf,
+          target: { messageId: 'msg-1', turn: 999, source: 'manual' },
+        }),
+      ),
+    ).toEqual({ ok: true });
+  });
+
+  it('混着算：只有付费那几条计数，够数了照拦', () => {
+    const paid = Array.from({ length: DEFAULT_IMAGE_MAX_PER_MESSAGE }, (_, i) =>
+      makeRecord({ provider: 'novelai', turn: 50 + i }),
+    );
+    const local = Array.from({ length: 20 }, (_, i) =>
+      makeRecord({ provider: 'comfyui', turn: 80 + i }),
+    );
+    const target = { messageId: 'msg-1', turn: 999, source: 'manual' as const };
+
+    // 付费的那几条刚好顶满 L1
+    const full = checkQuota(input({ records: [...paid, ...local], costModelOf, target }));
+    expect(full.ok === false && full.reason).toBe('per-message');
+    // 文案里的分子只数付费那几条 —— 把本地图算进去会说出一个用户对不上的数字
+    expect(full.ok === false && full.message).toContain(
+      `${DEFAULT_IMAGE_MAX_PER_MESSAGE}/${DEFAULT_IMAGE_MAX_PER_MESSAGE}`,
+    );
+
+    // 去掉一条付费的就该放行（证明差别真的来自付费那几条，不是本地那堆）
+    const nearly = checkQuota(
+      input({ records: [...paid.slice(1), ...local], costModelOf, target }),
+    );
+    expect(nearly).toEqual({ ok: true });
+  });
+
+  it('🔴 没盖章的老记录**照样计入** —— 它们全是 NAI 画的（缺席读作 novelai）', () => {
+    const records = Array.from({ length: DEFAULT_IMAGE_MAX_PER_MESSAGE }, (_, i) =>
+      makeRecord({ turn: 50 + i }),
+    );
+    expect(records.every((r) => r.provider === undefined)).toBe(true);
+    const verdict = checkQuota(
+      input({ records, costModelOf, target: { messageId: 'msg-1', turn: 999, source: 'manual' } }),
+    );
+    expect(verdict.ok === false && verdict.reason).toBe('per-message');
+  });
+
+  it('🔴 没交 costModelOf 时一律按付费计 —— 缺省只会多拦，不会多花', () => {
+    const records = spreadRecords(DEFAULT_IMAGE_MAX_PER_HOUR).map((r) =>
+      makeRecord({ ...r, provider: 'comfyui' }),
+    );
+    // 刻意不传 costModelOf（`input()` 也不带）：本地记录被当成付费的，拦下
+    const verdict = checkQuota(
+      input({ records, target: { messageId: 'fresh', turn: 999, source: 'auto' } }),
+    );
+    expect(verdict.ok === false && verdict.reason).toBe('rolling-window');
+  });
+
+  it('🔴 L3 照样看全部记录 —— 本地画过一张，这一回合就已经有插画了', () => {
+    // L3 是正确性规则：同一回合再自动开一张，产出的是两张近乎相同的图，与谁付钱无关
+    const records = [
+      makeRecord({ messageId: 'earlier', turn: 7, source: 'auto', provider: 'comfyui' }),
+    ];
+    const verdict = checkQuota(
+      input({
+        records,
+        costModelOf,
+        target: { messageId: 'msg-1', turn: 7, source: 'auto' },
+        costModel: 'paid',
+      }),
+    );
+    expect(verdict.ok === false && verdict.reason).toBe('same-turn');
+  });
+
+  it('🔴 目标档与记录档是两件事：目标 local 时，一堆付费记录照样不拦', () => {
+    // 反向那半在上面几条里 —— 这一条钉的是「两个方向互不牵连」
+    const records = [
+      ...Array.from({ length: 50 }, () => makeRecord({ provider: 'novelai' })),
+      ...spreadRecords(50).map((r) => makeRecord({ ...r, provider: 'novelai' })),
+    ];
+    expect(
+      checkQuota(
+        input({
+          records,
+          costModelOf,
+          target: { messageId: 'msg-1', turn: 4242, source: 'manual' },
+          costModel: 'local',
+        }),
+      ),
+    ).toEqual({ ok: true });
   });
 });

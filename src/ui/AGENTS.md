@@ -80,6 +80,20 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      替身用），归一化与早退在 `resolveImageBaseUrl`：补协议、剃掉
 │   │                                      BFF 会自己拼的 `/ai/generate-image`、文本域**只报错不改写**
 │   │                                      （改写等于替用户决定令牌送去哪台机器）
+│   │                                   [图像 v2 / C10·C13] +`generateComfyImage`：排队（POST
+│   │                                   `/api/image/comfy/prompt`）→ 每 1.5s 轮询 `/comfy/history/{id}`
+│   │                                   → 取图 `/comfy/view`，三条路由全部复用 BFF 的 `forward()`
+│   │                                   （SSRF 名单早已放行 localhost，ollama 先例），用户免配 CORS
+│   │                                   🔴 单 Promise 契约不变 —— 轮询在本层内部，**不做 WebSocket**；
+│   │                                      超时是 **provider 属性**：NAI 维持 120s，Comfy 默认 600s
+│   │                                      且可配。2 分钟硬闸会把仍在渲染的图记成失败，随后图又悄悄
+│   │                                      落在输出目录里
+│   │                                   🔴 地址口径与 NAI **相反**：`COMFY_DEFAULT_BASE_URL`
+│   │                                      （`http://127.0.0.1:8188`）只是缺省，真值来自
+│   │                                      `imageComfy.baseUrl`（C16）—— 本地地址填错的败法是诚实的
+│   │                                      connection-refused，不是指向别处的上游错
+│   │                                   解析（占位符替换 / node_errors / history 三态）归引擎的
+│   │                                   image-providers/comfyui.ts，本层同样不解析
 │   ├── scene-image-seams.ts         ← [图像 v1] 把 scene-image-store 的三条缝（checkQuota /
 │   │                                   runPromptAgent / send）接到真实实现上，**唯一**生产实现
 │   │                                   🔴 缝必须在**存档加载时**挂上，否则每次 generate() 都以
@@ -89,6 +103,20 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      （seams 的「地址一概不传」+ ApiSection.image-endpoint 的源码断言）
 │   │                                   刻意做成**不碰 Pinia 的工厂**（入参全是取值函数）——「缝挂上没有」
 │   │                                   「限额拒绝时侧链一次都没被调用」这类断言不必挂载任何组件
+│   │                                   [图像 v2 / C1·C2·C3] **两条正交分叉线都在本文件收口**：
+│   │                                   🔴 `PROVIDER_CAPABILITIES`（supportsCharacterSlots / costModel /
+│   │                                      defaultTimeoutMs）是**全仓唯一一张能力表** —— `send` 按
+│   │                                      `imageProvider` 分叉去 `generateNaiImage` / `generateComfyImage`，
+│   │                                      装配的 `flattenCharacters`、限额的 `costModel` 都从这里取。
+│   │                                      能力位属 provider 不属方言（C7）
+│   │                                   🔴 方言**每次调用现取现解析**（`parseImageDialects` +
+│   │                                      `resolveImageDialect`）：设置页换方言不必重挂缝。缝收到的是
+│   │                                      **原料不是成品**（注册表那一面 + 覆盖袋），解析口径全仓一处
+│   │                                   🔴 账本记的是**真正发出去的东西**（Q-21）：NAI 从请求体回读，
+│   │                                      ComfyUI 从喂给 `substituteWorkflow` 的那袋值回读 ——
+│   │                                      不从设置里再算一遍。seed 在这一层定死（客户端那个时钟兜底
+│   │                                      只是保险）
+│   │                                   `runtimeInfo()` 是记录戳（provider + dialectId）的唯一供给方
 │   ├── quality-colors.ts / test-fixtures.ts / toSystemEvent.ts
 │   └── variables.css + 10 主题 CSS（parchment/obsidian/crimson/indigo/bronze/sakura/ivory/misty-lilac/forest/ocean）
 │
@@ -107,6 +135,26 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   那会让 `s.agentTopp` 重新变成合法的 unknown）
 │   │                                   已迁出的历史键与迁移标志位刻意**不声明** —— 应用代码碰它
 │   │                                   就是编译错误，迁移模块经宽参数照常工作
+│   │                                   🔴 [图像 v2 / C8] 图像那 17 个平铺 `image*` 字段全是 NAI 形，
+│   │                                      已重构为 **per-provider 袋子**：`imageProvider` /
+│   │                                      `imageDialectId` / `imageDialectOverrides[dialectId]` +
+│   │                                      共享档（尺寸/步数/CFG/分级/打码/全局负向，两家都读，
+│   │                                      comfy 侧作 `%token%` 替换值）+ `imageNovelai`（端点/模型/
+│   │                                      采样器/档位 + **限额**，随 C9 归付费后端）+ `imageComfy`
+│   │                                      （baseUrl / workflowJson / timeoutMs / pollIntervalMs）
+│   ├── image-settings-migration.ts  ← [图像 v2 / C8] 上面那次重构的一次性形状迁移。与
+│   │                                   `agent-settings-migration` **完全同一类**（同对象内重排、零跨存储、
+│   │                                   无标志位、纯函数永不抛），**不是**六步迁移那一类
+│   │                                   🔴 在 `ref()` **之前**同步跑：响应式状态从第一拍起只有新形状，
+│   │                                      读取侧不需要「有时平铺、有时袋子」的兼容分支
+│   │                                   🔴 **一个旧平铺键都不在时整个早退**，连 agents 袋那步也不做 ——
+│   │                                      `agents.image_prompt.systemPrompt` 也要搬进方言覆盖，但无条件
+│   │                                      搬运会在**下次启动时把用户刚写的提示词偷走**。旧平铺键当总闸
+│   │                                      是安全的：那个 agent 与那 17 个字段是同一版上线的
+│   │                                   🔴 覆盖**只在与默认不同时才落**（C6）：相等意味着用户从没改过，
+│   │                                      落一份覆盖会把今天的默认值永久钉死在这个档案上。
+│   │                                      `systemPrompt` 无法同步比较（方言 JSON 要 fetch），一律当覆盖搬
+│   │                                      —— 内容相同的覆盖无害（行为逐字节一致，只是多存一份）
 │   ├── agent-settings.ts            ← [Q-18] per-Agent 设置唯一读写口（get/patch/reset/fillMissing
 │   │                                   /listConfigured/updateAgentWorldBookIds）+ AGENT_SETTINGS_DEFAULTS
 │   │                                   （0.7/1.0/0/0/16384 全应用唯一出处，此前四文件六处拷贝）
@@ -139,6 +187,19 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      挡不住永不兑现的 send（那种交给测试框架超时更好定位）
 │   │                                   🔴 重画是**追加 take 不覆盖**；同一锚点下 pinned 至多一条；
 │   │                                      'marker' 与 'message-end' 两种锚点的 occurrence 各自独立计数
+│   │                                   🔴 [图像 v2 / C14] 新记录盖 `provider` + `dialectId` 戳，值由缝的
+│   │                                      `runtimeInfo()` 给 —— **store 不认识 provider 也不认识方言**，
+│   │                                      只是把答案抄进记录。两处缺席都读作 novelai + 内置 danbooru
+│   │                                      （`LEGACY_DIALECT_ID`），老记录免迁移
+│   │                                   🔴 **缓存的场景串只在方言内有效**：重画时源记录方言不匹配就
+│   │                                      **不继承** `scenePrompt`，让侧链重跑（D31 的缓存是方言内的）。
+│   │                                      那串 danbooru 标签喂给吃句子的模型产出的是一张谁也没要的图，
+│   │                                      而调用方以为「重画 = 用我现在的配置再来一次」。
+│   │                                      `editedScenePrompt` **不在此列**（D26 逐字优先），
+│   │                                      对不对由界面提示，不由 store 替他丢掉。缝没接 `runtimeInfo`
+│   │                                      时一律算数 = v1 行为（不认识方言时凭空重跑是在白花钱）
+│   │                                   🔴 装配告警落库（`composeWarnings`，C15）**只在非空时写** ——
+│   │                                      缺席就是「一切正常」；告警只有缝交得出，store 自己算不出来
 │   │                                   限额/侧链/发请求三件事都不在本店（三条注入缝，见 lib/scene-image-seams.ts）
 │   │                                   🔴 用量统计与「清理」**不在本店** —— 走 `@engine/database` 的
 │   │                                      getSceneImageUsage / listCleanableSceneImageIds /
@@ -239,14 +300,21 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │       │                              **同一份存储**，不复制到 UiSettings
 │   │       │                           🔴 它**不进 agent-list.ts 的 AGENT_LIST**（D53）——同一份配置
 │   │       │                              开两个入口，用户就要猜哪个是权威的（先例：combat_v3）
-│   │       ├── ImageRenderCard.vue  ← 第二卡「出图」：三档开关 + NAI 参数 + 限额，全存 UiSettings
+│   │       │                           🔴 [图像 v2 / C3·C6] 给 AgentConfigPanel 传 **`hide-prompt`**
+│   │       │                              （该 prop 为此新增），自己画一个**按方言**的编辑器：
+│   │       │                              systemPrompt 是方言属性，存 `imageDialectOverrides[id]`，
+│   │       │                              占位符显示的是**方言 JSON 的默认形态**（显示叠加后的值，
+│   │       │                              用户就再也看不出自己改没改过）。留着那个旧框的下场正是 C6
+│   │       │                              点名的静默漂移：两个长得一样的框，一个跟方言走一个不跟
+│   │       ├── ImageRenderCard.vue  ← 第二卡「出图」：后端选择 + 三档开关 + per-provider 参数与限额，
+│   │       │                           全存 UiSettings
 │   │       │                           🔴 三档不是三个光秃秃的单选（D44）：auto 项底下带后果行，
 │   │       │                              首次切到 auto 弹一次确认（imageAutoConfirmed 记住）。
 │   │       │                              后果行的数字取**当前设置值**，照文案写死会变成一句假话
 │   │       │                           🔴 **免费额度是 Opus 专属的**（D43 补丁 2026-08-04）：默认参数满足
 │   │       │                              Opus 全部三条，于是这行字曾对**每个**账户都说「免费」——
 │   │       │                              按点数付费的账户每张扣约 17 点却被告知不花钱。档位由
-│   │       │                              `imageNaiTier` 明说，默认 `'unset'`（不猜）；`estimateAnlasCost`
+│   │       │                              `imageNovelai.tier` 明说，默认 `'unset'`（不猜）；`estimateAnlasCost`
 │   │       │                              的 tier 缺省同样是 `'unset'` 而非 `'opus'` —— 忘了传的调用方
 │   │       │                              不该白得一个乐观答案
 │   │       │                           🔴 免费额度指示只在 consumes-anlas 时报数：anlasPerSample 在免费档内
@@ -256,6 +324,29 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │       │                           🔴 本分区里有**两处**都叫「提示词」：这张卡的画质后缀/全局负向是
 │   │       │                              **图本身的提示词**，上一张卡的 systemPrompt 是**教模型怎么转标签**。
 │   │       │                              写错框两边都不报错，只是画出来不对
+│   │       │                           🔴 [图像 v2] 卡上多两个选择器：**后端**（novelai / comfyui，C1）
+│   │       │                              与**方言**（与后端正交，C2；下拉从内容注册表第 7 面读，
+│   │       │                              那一面缺席就退化成内置兜底方言 —— 下拉永远不是空的）。
+│   │       │                              🔴 注册表**不是响应式的**（模块级 `let`）：computed 里直接读会
+│   │       │                              永久缓存空目录，必须落 `ref` + 加载完再刷
+│   │       │                           🔴 [C6] 画质后缀 / 全局负向两格绑的不再是平铺字段，而是
+│   │       │                              **当前方言的覆盖**：空 = 回落方言 JSON 默认（不是「一个空后缀」）
+│   │       │                           🔴 [C9·C16] 切到 ComfyUI 要把 NAI 专属的整块藏掉（端点 / 模型 /
+│   │       │                              采样器 / Anlas 卡 / 每消息·每小时上限 —— 本地档那两个上限
+│   │       │                              根本不存在），换上 baseUrl + 工作流粘贴框。判据写成
+│   │       │                              「等于 comfyui」而不是「不等于 novelai」
+│   │       │                           🔴 工作流**空 = 合法**（用内置最小 SDXL 图）；失焦校验只**提前告知
+│   │       │                              不拦保存**（躺在里面的是用户从 ComfyUI 导出的整张图）。
+│   │       │                              超时输入读不懂（清空/负数）**不写** —— 存成 0 等于每张图
+│   │       │                              一发出去就超时
+│   │       ├── preset-dialect-form.ts ← [图像 v2 / C15] 「这条预设在当前方言下还有没有可用形象」的纯判定
+│   │       │                           🔴 必须与装配层（`composePrompt` 的 `missing-preset` 分支）**给出
+│   │       │                              同一个答案**，所以是独立纯函数不是模板里的表达式 —— 两边不一致
+│   │       │                              的表现不是报错，是「设置页说好好的，图里那个人就是没出现」
+│   │       │                           🔴 `appearance` 用 `hasAppearanceContent` 而**不是** `!== undefined`
+│   │       │                              （D62）：编辑器整份写回九个槽，「只填过老标签框」的预设带着一个
+│   │       │                              存在但全空的 `appearance`，按存在性判会漏掉最该提示的那一类
+│   │       │                           🔴 `dialects.danbooru` **不算数**：C15 明确不做跨方言降级透传
 │   │       └── ImagePresetList.vue  ← 第三卡「视觉预设」：角色**初始设定**（属性槽）+ 本档变化
 │   │                                   🔴 地点页签已随 D59 删除（地点无法穷举，改由侧链现写）
 │   │                                   🔴 D56 两份定义：初始设定全局可编辑；剧情里的变化由出图 AI
@@ -268,6 +359,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      唯一路径，且**由人按下**
 │   │                                   🔴 编辑器里九个槽**各有输入框且留空即空值**（D58）：
 │   │                                      只写非空槽会让「清空某个槽」永远做不到
+│   │                                   🔴 [图像 v2 / C15] 散文方言下「只有标签形式」的老预设会被装配层
+│   │                                      **静默跳过**，所以每行要挂角标（判定在 preset-dialect-form.ts，
+│   │                                      本组件只渲染）。跳过是静默的，正是要补这个角标的理由
 │   │                                   🔴 名字被占用时如实报 store 的 name-taken，**别自动编号**：
 │   │                                      预设是**按名字**被出图链路查中的，编过号的名字永远查不中
 │   │                                   🔴 pinnedSeed 的说明必须照实说「同一 seed 只让构图更接近，
@@ -301,6 +395,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── scene-image-actions.ts   ← [图像 v1] done 态里两件纯判定：复制的必须是**这张实际发出去的**
 │   │   │                               那份提示词（记录里躺着三个候选，取错不报错）；角标 2/3 的点击是
 │   │   │                               **浏览**不是钉住（后者会落库、正文从此定死）
+│   │   │                               🔴 [图像 v2 / C14] +重画前的方言提醒（SceneImageSegment 渲染）：
+│   │   │                                  **只在有 `editedScenePrompt` 时提醒**。没手改时方言变了引擎会
+│   │   │                                  自己重跑侧链，那条路已经是对的，再弹一句只会教会用户忽略它。
+│   │   │                                  **提醒不是阻断**（那份手改可能正是为新方言写的）；两边缺席
+│   │   │                                  都读作内置 danbooru 方言
 │   │   ├── CgGalleryPanel.vue / CgGalleryDetail.vue / cg-gallery.ts
 │   │   │                             ← [图像 v1] CG 图鉴 = 同一批 SceneImageRecord 的**第二个视图**，
 │   │   │                               零新数据模型（折叠/排序/收录判据在纯函数 cg-gallery.ts）
@@ -310,6 +409,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               🔴 懒加载**双保险**：IntersectionObserver **加上** 500ms 定时兜底
 │   │   │                                  （对视口 ±1500px 复查）。单靠观察器在低带宽/弱设备上会不触发，
 │   │   │                                  表现为一屏空白框 —— 那种「我这边好好的」的 bug
+│   │   │                               🔴 [图像 v2 / C14·C15] 详情页多两行：**出图后端 / 方言**（缺席读作
+│   │   │                                  novelai + danbooru，**不渲染成「未知」**）与 `composeWarnings`
+│   │   │                                  的说明行 —— `ComposedPrompt.warnings` 在 v1 里产出后全仓无人读，
+│   │   │                                  于是「某角色在那条方言下没有可用形象，已跳过」对玩家完全不可见，
+│   │   │                                  他只看到画面里少了个人。措辞说**「出图时的方言」不是「当前方言」**：
+│   │   │                                  告警是那一次装配留下的，把历史事实说成现状会让排查走错方向。
+│   │   │                                  不做 toast（每张图都会响）、不阻断（AI 新造 NPC 无预设仍要画场景）
 │   │   ├── WorkshopEnablePanel.vue  ← [工坊] 每存档「内容启用」面板（建档后仍可改）
 │   │   └── (战斗面板见 combat/ 子组件，docs/reference/combat-system-architecture.md)
 │   └── workshop/                    ← [工坊 P1] 创意工坊页
@@ -334,21 +440,21 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 
 ### 设置页 13 分区
 
-| 分区           | 内容                                                                                                                                                                                                                                      |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 🔌 API 配置    | API 池 CRUD、连接测试、模型列表获取、模型推荐                                                                                                                                                                                             |
-| 🤖 Agent 配置  | 11 个汉化 Agent、模型选择、世界书开关、System Prompt 编辑                                                                                                                                                                                 |
-| 📚 世界书      | [占位] 导入/新建按钮                                                                                                                                                                                                                      |
-| 📖 剧情系统    | 8 种剧情偏向、模式/年份/难度/外部NPC/自定义偏好、大纲预览                                                                                                                                                                                 |
-| 🧠 记忆 & 缓存 | 召回数/压缩阈值/快照上限/缓存策略                                                                                                                                                                                                         |
-| 🎨 外观主题    | 10 主题网格、字体风格、字体大小、悬停延迟、减少动态效果                                                                                                                                                                                   |
-| 💬 消息显示    | 系统通知开关 + 7 种事件类型过滤                                                                                                                                                                                                           |
-| ✨ 输出美化    | 预设规则库 (22条) + auto-enable 绑定 + 三段式 UI + CRUD                                                                                                                                                                                   |
-| 🎵 音频        | 混音台 + 播放列表 + 音轨库（音乐文件夹条/上传/搜索/场景配乐开关）                                                                                                                                                                         |
-| 🖼 素材         | 导入条 + 素材库（按角色分组/扁平表/多选批删）+ 变体抽屉（设主图/裁剪/改名）                                                                                                                                                               |
-| 🖼 图像生成     | 三张卡：提示词生成（`image_prompt` 的 Agent 配置，存 `agents` 袋子）/ 出图（三档开关 + NAI 参数 + 免费额度指示，存 `UiSettings`）/ 视觉预设（角色初始设定存 Dexie `imagePresets`；本档外貌存 `characterAppearances`，含「存为初始设定」） |
-| 💾 存档数据    | 导出/导入/清除（排除音频库与素材库，各有独立导出口）                                                                                                                                                                                      |
-| ℹ 关于         | 引擎版本/技术栈/统计                                                                                                                                                                                                                      |
+| 分区           | 内容                                                                                                                                                                                                                                                                                                                                            |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🔌 API 配置    | API 池 CRUD、连接测试、模型列表获取、模型推荐                                                                                                                                                                                                                                                                                                   |
+| 🤖 Agent 配置  | 11 个汉化 Agent、模型选择、世界书开关、System Prompt 编辑                                                                                                                                                                                                                                                                                       |
+| 📚 世界书      | [占位] 导入/新建按钮                                                                                                                                                                                                                                                                                                                            |
+| 📖 剧情系统    | 8 种剧情偏向、模式/年份/难度/外部NPC/自定义偏好、大纲预览                                                                                                                                                                                                                                                                                       |
+| 🧠 记忆 & 缓存 | 召回数/压缩阈值/快照上限/缓存策略                                                                                                                                                                                                                                                                                                               |
+| 🎨 外观主题    | 10 主题网格、字体风格、字体大小、悬停延迟、减少动态效果                                                                                                                                                                                                                                                                                         |
+| 💬 消息显示    | 系统通知开关 + 7 种事件类型过滤                                                                                                                                                                                                                                                                                                                 |
+| ✨ 输出美化    | 预设规则库 (22条) + auto-enable 绑定 + 三段式 UI + CRUD                                                                                                                                                                                                                                                                                         |
+| 🎵 音频        | 混音台 + 播放列表 + 音轨库（音乐文件夹条/上传/搜索/场景配乐开关）                                                                                                                                                                                                                                                                               |
+| 🖼 素材         | 导入条 + 素材库（按角色分组/扁平表/多选批删）+ 变体抽屉（设主图/裁剪/改名）                                                                                                                                                                                                                                                                     |
+| 🖼 图像生成     | 三张卡：提示词生成（`image_prompt` 的模型/温度/世界书存 `agents` 袋子；systemPrompt 按方言存 `imageDialectOverrides`）/ 出图（后端 + 方言选择 + 三档开关 + per-provider 参数与限额，存 `UiSettings` 的 `imageNovelai`/`imageComfy` 袋）/ 视觉预设（角色初始设定存 Dexie `imagePresets`；本档外貌存 `characterAppearances`，含「存为初始设定」） |
+| 💾 存档数据    | 导出/导入/清除（排除音频库与素材库，各有独立导出口）                                                                                                                                                                                                                                                                                            |
+| ℹ 关于         | 引擎版本/技术栈/统计                                                                                                                                                                                                                                                                                                                            |
 
 ### 预设系统（正文 Agent 专用）
 

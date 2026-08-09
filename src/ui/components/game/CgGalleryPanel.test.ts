@@ -23,12 +23,19 @@ let mockGame: Record<string, unknown>;
 let mockUi: { toast: ReturnType<typeof vi.fn> };
 let mockPresets: Record<string, unknown>;
 
+/** 只为详情栏那句重画提醒供值（C14）；顺带避开 settings-store 的启动期 I/O */
+const mockSettings = reactive<Record<string, unknown>>({});
+
 vi.mock('../../stores/scene-image-store', () => ({ useSceneImageStore: () => mockScene }));
 vi.mock('../../stores/game-store', () => ({ useGameStore: () => mockGame }));
 vi.mock('../../stores/ui-store', () => ({ useUIStore: () => mockUi }));
 vi.mock('../../stores/image-preset-store', () => ({ useImagePresetStore: () => mockPresets }));
+vi.mock('../../stores/settings-store', () => ({
+  useSettingsStore: () => ({ settings: mockSettings }),
+}));
 
 import CgGalleryPanel from './CgGalleryPanel.vue';
+import { REDRAW_DIALECT_MISMATCH_HINT } from './scene-image-actions';
 
 function rec(over: Partial<SceneImageRecord> = {}): SceneImageRecord {
   return {
@@ -60,6 +67,8 @@ function rec(over: Partial<SceneImageRecord> = {}): SceneImageRecord {
 beforeEach(() => {
   vi.useFakeTimers();
   records.value = [];
+  for (const k of Object.keys(mockSettings)) delete mockSettings[k];
+  mockSettings.imageDialectId = 'danbooru-anime';
   // jsdom 没有 object URL 工厂 —— 补一个计数假件（asset-url.ts 是惰性取全局的）
   let n = 0;
   (globalThis.URL as unknown as { createObjectURL: unknown }).createObjectURL = vi.fn(
@@ -163,6 +172,90 @@ describe('CgGalleryPanel', () => {
     await w.find('.cg-cell').trigger('click');
     await flushPromises();
     expect(w.text()).not.toContain('把这次的 seed 钉给');
+    w.unmount();
+  });
+
+  it('🔴 详情页写出「为什么少了个人」—— 装配告警的唯一出口（C15）', async () => {
+    // v1 里 ComposedPrompt.warnings 产出后全仓无人读：玩家只看到画面里少了个人。
+    // 这条断言就是那件事被看见的证明
+    records.value = [
+      rec({
+        id: 'a',
+        characters: ['苏婉', '林越'],
+        composeWarnings: [{ kind: 'missing-preset', name: '林越' }],
+      }),
+    ];
+    const w = await mountPanel();
+    await w.find('.cg-cell').trigger('click');
+    await flushPromises();
+
+    const warn = w.find('.cg-warn');
+    expect(warn.exists()).toBe(true);
+    expect(warn.text()).toContain('林越');
+    expect(warn.text()).toContain('没有可用形象');
+    w.unmount();
+  });
+
+  it('没有告警的图不出那一行（正常的图不该带一条解释）', async () => {
+    records.value = [rec({ id: 'a' })];
+    const w = await mountPanel();
+    await w.find('.cg-cell').trigger('click');
+    await flushPromises();
+    expect(w.find('.cg-warn').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('详情页写出后端与方言；老记录读作 NovelAI + danbooru（C14）', async () => {
+    records.value = [rec({ id: 'a' })];
+    const w = await mountPanel();
+    await w.find('.cg-cell').trigger('click');
+    await flushPromises();
+    expect(w.find('.cg-detail').text()).toContain('NovelAI');
+    expect(w.find('.cg-detail').text()).toContain('danbooru-anime');
+    w.unmount();
+  });
+
+  /**
+   * 🔴 重画前的方言提醒（C14）。
+   *
+   * 正文里那一格插画早就有这句话，而图鉴这边有**两个「重画」外加一个就地改提示词的
+   * 编辑器**（「保存并重画」）—— 落进 `editedScenePrompt` 的那份按 D26 被逐字使用、
+   * 跳过侧链，于是「当初在 danbooru 下手改过、今天换了散文方言再重画」得到的是一张
+   * 标签汤。同一个危险在正文里会提醒、在图鉴里不会，比两处都不提醒更糟。
+   *
+   * 判定本身在 `scene-image-actions.test.ts`；这里问的是**有没有人供值**
+   * （`blurByDefault` 当年就是逻辑对、默认值对、全仓没人传）。
+   */
+  async function openDetail(over: Partial<SceneImageRecord>) {
+    records.value = [rec({ id: 'a', ...over })];
+    const w = await mountPanel();
+    await w.find('.cg-cell').trigger('click');
+    await flushPromises();
+    return w;
+  }
+
+  it('🔴 手改提示词是为另一方言写的 → 重画入口旁边给出提醒（不阻断）', async () => {
+    mockSettings.imageDialectId = 'natural-prose';
+    const w = await openDetail({ editedScenePrompt: 'tavern, night', dialectId: 'danbooru-anime' });
+
+    expect(w.findAll('.cg-dialect-hint').length).toBeGreaterThan(0);
+    expect(w.find('.cg-dialect-hint').text()).toContain(REDRAW_DIALECT_MISMATCH_HINT);
+    // 提醒不是阻断 —— 「保存并重画」照样点得动
+    const redraw = w.findAll('button').find((b) => b.text().includes('保存并重画'));
+    expect(redraw?.attributes('disabled')).toBeUndefined();
+    w.unmount();
+  });
+
+  it('没有手改提示词时不提醒 —— 方言变了引擎会自己重跑侧链', async () => {
+    mockSettings.imageDialectId = 'natural-prose';
+    const w = await openDetail({ dialectId: 'danbooru-anime' });
+    expect(w.find('.cg-dialect-hint').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('老记录（两边都没有 dialectId）读作内置 danbooru，于是不提醒', async () => {
+    const w = await openDetail({ editedScenePrompt: 'tavern, night' });
+    expect(w.find('.cg-dialect-hint').exists()).toBe(false);
     w.unmount();
   });
 

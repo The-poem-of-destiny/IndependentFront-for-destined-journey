@@ -26,6 +26,125 @@ import type {
 /** 三档开关（D14） */
 export type ImageGenMode = 'off' | 'manual' | 'auto';
 
+// ═══ 出图后端（图像 v2 / C1）═══
+
+/**
+ * 出图后端标识（C1）。
+ *
+ * 🔴 **与方言正交**（C2）：后端说的是「谁来画」，方言说的是「怎么跟它说话」。
+ * ComfyUI 上同时挂动漫检查点与 krea2 —— 吃法不是后端的属性，所以两者各有一个字段，
+ * 绝不合并成一个「模式」枚举。
+ */
+export type ImageProviderId = 'novelai' | 'comfyui';
+
+/**
+ * 一个后端的**能力位**（C1）—— 装配层与限额层据此分叉。
+ *
+ * 🔴 **能力位属于 provider，不属于方言**（C7）：方言是纯数据、由内容包提供，
+ * 让它声明「我支持角色槽」等于让内容作者宣布一件后端做不到的事，而**败法是静默丢角色**
+ * （没有报错，只是画面里少了个人）。所以这三格由引擎按后端硬定义。
+ */
+export interface ImageProviderCapabilities {
+  id: ImageProviderId;
+  /**
+   * 有没有 per-character 提示词槽（C7）。
+   * NAI V4 有（官方抗串味手段，§6.2）；ComfyUI 没有 —— 装配层把各角色 positive
+   * 按标记顺序压平进 base、negative 并进 baseNegative。
+   */
+  supportsCharacterSlots: boolean;
+  /**
+   * 谁付钱（C9）。`'paid'` 才启用 L1/L2 花钱防线；`'local'` 不设上限。
+   * L3（同回合去重）是**正确性**规则，与本字段无关，对所有后端恒开。
+   */
+  costModel: 'paid' | 'local';
+  /**
+   * 单次请求的超时（C13）。
+   * 🔴 **是后端属性不是全局常量**：NAI 的 120s 拿去卡本地 ComfyUI，会把一张仍在渲染的图
+   * 记成失败，随后它又悄悄落进输出目录 —— 用户看到的是「失败了但硬盘上有图」。
+   */
+  defaultTimeoutMs: number;
+}
+
+// ═══ 提示词方言（图像 v2 / C3·C4）═══
+
+/**
+ * 一条**提示词方言** —— 「怎么跟这个画图模型说话」的**整个装配契约**（C3/C4）。
+ *
+ * 🔴 **不是只换一句 systemPrompt**。只换侧链提示词的话，`composePrompt` 螺栓上去的
+ *    六段一段都不会变，krea2 仍会收到 `…, night, rain, wide shot, rating:explicit,
+ *    masterpiece, no text` 这种 danbooru 尾巴。所以分隔符、归一化、外貌渲染器、
+ *    世界/分级/人数三段的形态、负向支不支持、后缀、基础负向、构图词**全在方言里**。
+ *
+ * 🔴 **纯数据 + 封闭旋钮集**（C4）：私有内容仓不能跨边界发代码，所以行为被压成引擎
+ *    解释的封闭枚举。加旋钮要同时改引擎的解释器 —— 这正是我们想要的摩擦，
+ *    它让「内容包能改什么」永远是一份看得见的清单。
+ *
+ * 落点：`data/content/image-dialects.json`，内容注册表第 7 面（pack 可整份替换）。
+ */
+export interface ImageDialect {
+  /** 稳定标识，用户设置与 `SceneImageRecord.dialectId` 都存它 */
+  id: string;
+  /** 设置页下拉里显示的中文名 */
+  label: string;
+  /** 段与段之间的连接串。danbooru 系是 `', '`，散文系是 `'. '` */
+  separator: string;
+  /**
+   * 归一化器（`'none'` 时恒等）。
+   * danbooru 档会折叠空白、统一半角标点、去重标签；散文档**必须**是 `'none'` ——
+   * 拿标签归一化去洗一个英文句子，洗出来的是碎片。
+   */
+  normalize: 'danbooru' | 'none';
+  /** 角色外貌九槽渲染成哪种形态（`renderAppearance*` 二选一） */
+  appearance: 'danbooru' | 'prose';
+  /** 世界状态段（时段/天气，D39）：出标签还是整段不出。`'phrase'` 预留，v2 不做 */
+  world: 'tags' | 'none';
+  /** 分级段：出 `rating:*` 标签还是不出 */
+  rating: 'tag' | 'none';
+  /**
+   * 人数段：出 `1girl` / `2girls` 这类标签还是不出。
+   * 🔴 剥离模型自写人数标签的那条正则**只在本档为 `'tag'` 时启用** ——
+   *    它只匹配 tag 形态，但散文里的 "two women" 不该有任何正则去碰。
+   */
+  count: 'tag' | 'none';
+  /**
+   * 这套吃法认不认负向提示词。
+   * flux / krea 这类 CFG 1.0 的模型**根本不吃**；`false` 时 UI 要**可见地禁用**
+   * 负向输入框，而不是收下再静默丢掉（C6）。
+   */
+  supportsNegative: boolean;
+  /** 画质后缀（拼在**末尾**，顺序即权重）。散文档通常为空串 */
+  qualitySuffix: string;
+  /** 基础负向。`supportsNegative:false` 时应为空串 */
+  baseNegative: string;
+  /** 固定构图词 */
+  composition: string;
+  /**
+   * `image_prompt` 侧链的 systemPrompt。
+   *
+   * 空串 = 本方言没自带提示词，装配层回落到别处（agent-config / 模板）——
+   * **不是错误**，所以解析器不为空串报警。
+   */
+  systemPrompt: string;
+}
+
+/**
+ * 用户对某条方言四个字符串旋钮的覆盖（C6）。
+ *
+ * 🔴 **按方言 id 键控，不是全局一份**：全局单份会把用户为 danbooru 调的画质后缀
+ *    原样带进 prose 档，静默废掉整个特性。存储形状是
+ *    `imageDialectOverrides[dialectId]`，缺席/空串 = 回落方言 JSON 的默认值。
+ *
+ * 🔴 **空字符串不算覆盖**（`resolveImageDialect` 的合并规则）：设置页的输入框清空
+ *    表达的是「我不改了，用默认」，不是「我要一个空的画质后缀」。想要真的清空，
+ *    该由方言自己（或私有仓的方言）把默认值写成空串。
+ */
+export interface ImageDialectOverride {
+  systemPrompt?: string;
+  qualitySuffix?: string;
+  baseNegative?: string;
+  composition?: string;
+}
+
 /** 内容分级。v1 只映射成 NAI 提示词里的 `rating:*` tag（§6.2） */
 export type ImageRating = 'general' | 'sensitive' | 'questionable' | 'explicit';
 
@@ -328,6 +447,22 @@ export interface SceneImageRecord {
   occurrence: number;
   /** 同一处的第几次重画，从 0 起（D17）。正文显示最大者，图鉴显示全部 */
   take: number;
+
+  /**
+   * 哪个后端画的（C14，图像 v2）。
+   *
+   * 🔴 **缺席 = `'novelai'`**。v1 的记录里没有这个字段，而它们**全部**是 NAI 画的 ——
+   * 缺省读作 novelai 让老记录免迁移，写入侧照常一律显式写。别把 `undefined` 读成
+   * 「不知道」再去弹一个「无法重画」，那是给历史记录凭空造一个残缺态。
+   */
+  provider?: ImageProviderId;
+  /**
+   * 用哪条方言装配的（C14）。
+   *
+   * 重画时与**当前**方言比对：一致 → 复用缓存的 `scenePrompt`（D31 的缓存只在方言内
+   * 有效）；不一致 → 重跑 `image_prompt` 侧链。缺席 = v1 老记录，按 danbooru 系处理。
+   */
+  dialectId?: string;
   /** 剧情顺序 —— 图鉴默认排序键 + D23 同回合去重键。取自所属消息的 turn */
   turn: number;
 
@@ -394,6 +529,16 @@ export interface SceneImageRecord {
    */
   blobDropped?: boolean;
 
+  /**
+   * 装配这张图时攒下的告警（C15）。缺席或空数组 = 装配一切正常。
+   *
+   * 🔴 落库是为了让告警**有人消费**：`ComposedPrompt.warnings` 在 v1 里产出后
+   * 全仓无人读，于是「这个角色在当前方言下没有可用形象，已跳过」这件事对玩家完全不可见 ——
+   * 他只看到画面里少了个人。CG 详情页读这一格，写一行说明为何某角色缺席。
+   * 🔴 刻意**不做运行时 toast**：每张图都会响。
+   */
+  composeWarnings?: ComposeWarning[];
+
   /** status='failed' 时的可读原因（已本地化，§12） */
   error?: string;
   /** 失败分类，供统计与"要不要显示重试" */
@@ -455,7 +600,18 @@ export type ImageGenFailureKind =
   | 'upstream' // 5xx
   | 'network' // 连不上 / 超时
   | 'aborted' // 用户取消 / 切存档
-  | 'bad-response'; // content-type 不是 zip，或 zip 里没有图
+  | 'bad-response' // content-type 不是 zip，或 zip 里没有图
+  /**
+   * ComfyUI: 图**在跑起来之前**就被拒（缺 checkpoint、未知节点、占位符替换失败）。
+   *
+   * 🔴 与 `execution` **重试语义相反**，所以是两类不是一类（C12）：图本身有问题，
+   * 再按一百次「重试」都是同样的拒绝。文案要点名违规的节点 id。
+   * 🔴 `POST /prompt` 会带着 `node_errors` 返回 **HTTP 200** —— 只看状态码的分类器
+   * 会把它当成功。判据必须落在响应体上（与 v1「content-type 撒谎扔掉付费图」同形状的坑）。
+   */
+  | 'workflow'
+  /** ComfyUI: 跑到一半挂了（OOM、节点崩溃）。**可重试** —— 换个时机常常就过了（C12） */
+  | 'execution';
 
 export interface ImageGenFailure {
   ok: false;

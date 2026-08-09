@@ -123,6 +123,7 @@ function seedFixtureRegistry() {
     namePools: undefined,
     markers: undefined,
     branding: { era: FIXTURE_ERA },
+    imageDialects: undefined,
   });
 }
 
@@ -243,6 +244,7 @@ describe('内容加载门 —— 目录来自注册表而不是编译期常量',
       namePools: undefined,
       markers: undefined,
       branding,
+      imageDialects: undefined,
     });
     return useCreateStore();
   }
@@ -977,6 +979,7 @@ describe('buildOpeningPrompt', () => {
       namePools: undefined,
       markers: undefined,
       branding: undefined,
+      imageDialects: undefined,
     });
     setActivePinia(createPinia());
     const bare = useCreateStore();

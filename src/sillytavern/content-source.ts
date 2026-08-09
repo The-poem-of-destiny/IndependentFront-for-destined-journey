@@ -309,7 +309,13 @@ export function validatePackOrThrow(pack: unknown): PackValidationNote[] {
   }
 
   // 对象型分节的统一形状校验
-  const objectSectionNames = ['catalog', 'bloodlines', 'namePools', 'branding'] as const;
+  const objectSectionNames = [
+    'catalog',
+    'bloodlines',
+    'namePools',
+    'branding',
+    'imageDialects',
+  ] as const;
   for (const name of objectSectionNames) {
     const v = pack[name];
     if (v !== undefined && !isPlainObject(v)) {
