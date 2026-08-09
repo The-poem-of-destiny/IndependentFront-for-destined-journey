@@ -653,3 +653,103 @@ describe('markOpeningPromptConsumed', () => {
     expect(await store.releaseOpeningPromptClaim()).toBe(false);
   });
 });
+
+// ===== removeItem / removeSkill / removeCharacter =====
+
+describe('removeItem / removeSkill / removeCharacter', () => {
+  beforeEach(async () => {
+    try {
+      await clearAllData();
+    } catch {
+      /* db may not exist yet */
+    }
+    await initializeDatabase();
+  });
+
+  /** 种入：玩家（带物品+技能）+ 一个 NPC */
+  async function seedPlayerAndNpc() {
+    await saveSaveSlot(
+      makeSaveSlot({
+        metadata: {
+          characterName: '理查德',
+          userName: 'Tester',
+          gameStartTime: '001-01-01',
+          totalTurns: 2,
+        } as any,
+      }),
+    );
+    await saveCharacter(
+      makeChar({
+        id: 'player-1',
+        name: '理查德',
+        type: 'player',
+        hp: 30,
+        maxHp: 100,
+        inventory: [
+          { name: '铁剑', quantity: 1, rarity: '普通' as const },
+          { name: '治疗药水', quantity: 3, rarity: '普通' as const },
+        ] as any,
+        skills: [{ name: '火球术', level: 1 } as any],
+      }),
+    );
+    await saveCharacter(makeChar({ id: 'npc-1', name: '龙套甲', type: 'npc', hp: 10, maxHp: 20 }));
+    await saveSaveProfile(makeProfile({ fp: 3 }));
+  }
+
+  it('removeItem 丢弃物品：数量扣减，扣到 0 移除', async () => {
+    await seedPlayerAndNpc();
+    const store = makeStore();
+    await store.loadSave(SAVE_ID);
+    expect(store.player?.name).toBe('理查德');
+
+    // 丢弃治疗药水 1 瓶 → 剩 2
+    const r1 = await store.removeItem('治疗药水', 1);
+    expect(r1.ok).toBe(true);
+    expect(store.player?.inventory.find((i) => i.name === '治疗药水')?.quantity).toBe(2);
+
+    // 再丢 2 瓶 → 归零移除
+    const r2 = await store.removeItem('治疗药水', 2);
+    expect(r2.ok).toBe(true);
+    expect(store.player?.inventory.find((i) => i.name === '治疗药水')).toBeUndefined();
+    // 铁剑还在
+    expect(store.player?.inventory.some((i) => i.name === '铁剑')).toBe(true);
+  });
+
+  it('removeItem 丢弃不存在的物品 → 报错', async () => {
+    await seedPlayerAndNpc();
+    const store = makeStore();
+    await store.loadSave(SAVE_ID);
+    const r = await store.removeItem('不存在的物品', 1);
+    expect(r.ok).toBe(false);
+    expect(r.error).toBeTruthy();
+  });
+
+  it('removeSkill 删除技能', async () => {
+    await seedPlayerAndNpc();
+    const store = makeStore();
+    await store.loadSave(SAVE_ID);
+    expect(store.player?.skills.some((s) => s.name === '火球术')).toBe(true);
+
+    const r = await store.removeSkill('火球术');
+    expect(r.ok).toBe(true);
+    expect(store.player?.skills.some((s) => s.name === '火球术')).toBe(false);
+  });
+
+  it('removeCharacter 删除 NPC（玩家不可删）', async () => {
+    await seedPlayerAndNpc();
+    const store = makeStore();
+    await store.loadSave(SAVE_ID);
+    expect(store.npcs.some((c) => c.name === '龙套甲')).toBe(true);
+
+    // 删 NPC 成功，且内存角色整表替换后 NPC 消失
+    const r = await store.removeCharacter('龙套甲');
+    expect(r.ok).toBe(true);
+    expect(store.npcs.some((c) => c.name === '龙套甲')).toBe(false);
+    // 玩家还在
+    expect(store.player?.name).toBe('理查德');
+
+    // 删玩家被拒
+    const r2 = await store.removeCharacter('理查德');
+    expect(r2.ok).toBe(false);
+  });
+});

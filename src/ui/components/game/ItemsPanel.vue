@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import { useGameStore } from '../../stores/game-store';
+import { useUIStore } from '../../stores/ui-store';
 import { qualityVar } from '../../lib/quality-colors';
 // Q-11: 品质推断是确定性游戏规则（ADR-11），已下沉引擎侧；这里与
 // CharacterListPanel 曾各存一份逐字相同的实现，两份阈值一致纯属运气。
@@ -12,6 +13,7 @@ import type { InventoryItem, QualityLevel, Skill } from '@engine/types';
 import { QUALITY_RANK } from '@engine/types';
 
 const game = useGameStore();
+const ui = useUIStore();
 
 type Category = 'inventory' | 'equipment' | 'skills';
 const activeCategory = ref<Category>('inventory');
@@ -189,6 +191,46 @@ const rawCombatJson = computed(() => {
 watch([selectedIdx, activeCategory], () => {
   showRaw.value = false;
 });
+
+// ═══ 玩家主动丢弃/删除（清理持有物）═══
+
+const removing = ref(false);
+
+/** 丢弃背包物品（含装备）：整叠丢弃，确认后走 remove_item op。 */
+async function discardSelectedItem() {
+  const entry = selected.value;
+  if (!entry || entry.kind !== 'item') return;
+  const row = entry.row;
+  const name = row.name;
+  const label = row.equippedSlot ? `装备「${name}」` : `物品「${name}」`;
+  const ok = window.confirm(`丢弃${label}？丢弃后不可恢复。`);
+  if (!ok) return;
+  removing.value = true;
+  const result = await game.removeItem(name, row.quantity ?? 1);
+  removing.value = false;
+  if (result.ok) {
+    ui.toast(`已丢弃「${name}」`, 'info');
+  } else {
+    ui.toast(result.error || '丢弃失败', 'error');
+  }
+}
+
+/** 删除技能：确认后走 remove_skill op。 */
+async function removeSelectedSkill() {
+  const entry = selected.value;
+  if (!entry || entry.kind !== 'skill') return;
+  const name = entry.row.name;
+  const ok = window.confirm(`删除技能「${name}」？删除后不可恢复。`);
+  if (!ok) return;
+  removing.value = true;
+  const result = await game.removeSkill(name);
+  removing.value = false;
+  if (result.ok) {
+    ui.toast(`已删除技能「${name}」`, 'info');
+  } else {
+    ui.toast(result.error || '删除失败', 'error');
+  }
+}
 </script>
 
 <template>
@@ -322,6 +364,26 @@ watch([selectedIdx, activeCategory], () => {
             </template>
             <div v-else class="script-empty">(该物品无原始数据)</div>
           </div>
+        </div>
+
+        <!-- 删除/丢弃 -->
+        <div class="detail-remove">
+          <button
+            v-if="selected.kind === 'item'"
+            class="remove-btn"
+            :disabled="removing"
+            @click="discardSelectedItem"
+          >
+            丢弃{{ selected.row.equippedSlot ? '装备' : '' }}
+          </button>
+          <button
+            v-else-if="selected.kind === 'skill'"
+            class="remove-btn"
+            :disabled="removing"
+            @click="removeSelectedSkill"
+          >
+            删除技能
+          </button>
         </div>
       </div>
       <div v-else class="detail-empty">选择一件物品查看详情</div>
@@ -738,6 +800,30 @@ watch([selectedIdx, activeCategory], () => {
   height: 1px;
   background: linear-gradient(to right, transparent, var(--theme-text-muted), transparent);
   opacity: 0.3;
+}
+
+.detail-remove {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--theme-card-border);
+}
+.remove-btn {
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  font-family: inherit;
+  color: var(--theme-danger, #e5484d);
+  background: color-mix(in srgb, var(--theme-danger, #e5484d) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-danger, #e5484d) 40%, transparent);
+  border-radius: var(--theme-radius-sm, 4px);
+  cursor: pointer;
+  transition: all var(--theme-transition-fast);
+}
+.remove-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--theme-danger, #e5484d) 18%, transparent);
+}
+.remove-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .empty {

@@ -17,9 +17,13 @@ import type { AssetMetaRecord } from '@engine/types';
 
 let mockGame: any;
 let mockAssets: any;
+let mockUi: any;
 
 vi.mock('../../stores/game-store', () => ({
   useGameStore: () => mockGame,
+}));
+vi.mock('../../stores/ui-store', () => ({
+  useUIStore: () => mockUi,
 }));
 vi.mock('../../stores/asset-store', () => ({
   useAssetStore: () => mockAssets,
@@ -66,6 +70,9 @@ beforeEach(() => {
     fp: 3,
     saveProfile: { affections: {}, contracts: [] },
     getThoughts: vi.fn(() => ''),
+  };
+  mockUi = {
+    toast: vi.fn(),
   };
   mockAssets = {
     assets: [] as AssetMetaRecord[],

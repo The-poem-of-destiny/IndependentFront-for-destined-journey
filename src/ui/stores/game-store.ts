@@ -829,6 +829,62 @@ export const useGameStore = defineStore('game', () => {
     return { ok: true };
   }
 
+  // === 玩家主动删除（物品/装备/技能/角色）—— 用户可自由清理持有物 ===
+
+  /**
+   * 丢弃/删除一件物品（含装备）。经 commitChatState 走 remove_item op，
+   * 数量扣到 0 自动移除条目。改名/装备进背包等关联由引擎处理。
+   */
+  async function removeItem(
+    itemName: string,
+    quantity = 1,
+  ): Promise<{ ok: boolean; error?: string }> {
+    if (!activeSaveId.value) return { ok: false, error: '无活跃存档' };
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'remove_item',
+        target: `characters.${player.value?.name ?? ''}`,
+        value: { name: itemName, quantity },
+      },
+    ]);
+    if (result.success) await refreshFromDb();
+    return result.success ? { ok: true } : { ok: false, error: result.errors.join('; ') };
+  }
+
+  /** 删除一个技能（按名）。 */
+  async function removeSkill(skillName: string): Promise<{ ok: boolean; error?: string }> {
+    if (!activeSaveId.value) return { ok: false, error: '无活跃存档' };
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'remove_skill',
+        target: `characters.${player.value?.name ?? ''}`,
+        value: { name: skillName },
+      },
+    ]);
+    if (result.success) await refreshFromDb();
+    return result.success ? { ok: true } : { ok: false, error: result.errors.join('; ') };
+  }
+
+  /**
+   * 删除一个角色（按名）。用于清理龙套/NPC。
+   * 🔴 只删角色行本身，不清理记忆/剧情关联（用户意图是删龙套，非清除叙事痕迹）。
+   * 🔴 成功后**整表替换**内存角色：refreshFromDb 是合并语义，删掉的角色不会从内存消失。
+   */
+  async function removeCharacter(characterName: string): Promise<{ ok: boolean; error?: string }> {
+    if (!activeSaveId.value) return { ok: false, error: '无活跃存档' };
+    if (player.value?.name === characterName) return { ok: false, error: '不能删除玩家角色' };
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      { op: 'remove_character', target: `characters.${characterName}` },
+    ]);
+    if (result.success) {
+      characters.value = (await getCharacters(activeSaveId.value)) as CharacterState[];
+    }
+    return result.success ? { ok: true } : { ok: false, error: result.errors.join('; ') };
+  }
+
   return {
     saves,
     activeSaveId,
@@ -906,5 +962,8 @@ export const useGameStore = defineStore('game', () => {
     restoreMessages,
     rollbackOneTurn,
     restoreToSnapshot,
+    removeItem,
+    removeSkill,
+    removeCharacter,
   };
 });

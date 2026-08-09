@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { useGameStore } from '../../stores/game-store';
+import { useUIStore } from '../../stores/ui-store';
 import AssetMedia from '../shared/AssetMedia.vue';
 import { ASSET_TYPE_AVATAR_CHAIN } from '@engine/asset-resolve';
 import { getAffectionLabel } from '@engine/affection-system';
@@ -11,6 +12,7 @@ import ResourceBar from '../shared/ResourceBar.vue';
 import BuffChip from '../shared/BuffChip.vue';
 
 const game = useGameStore();
+const ui = useUIStore();
 
 // ═══ NPC 列表 ═══
 const selectedIdx = ref(0);
@@ -75,6 +77,27 @@ const selScripts = computed(() => {
   return undefined;
 });
 const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.value).length > 0);
+
+// ═══ 删除角色（清理龙套 NPC）═══
+const removing = ref(false);
+
+async function deleteSelectedNpc() {
+  const npc = selected.value;
+  if (!npc) return;
+  const name = npc.name;
+  const ok = window.confirm(
+    `删除角色「${name}」？\n该角色将从存档中移除（不会清除涉及它的记忆/剧情记录）。删除后不可恢复。`,
+  );
+  if (!ok) return;
+  removing.value = true;
+  const result = await game.removeCharacter(name);
+  removing.value = false;
+  if (result.ok) {
+    ui.toast(`已删除角色「${name}」`, 'info');
+  } else {
+    ui.toast(result.error || '删除失败', 'error');
+  }
+}
 </script>
 
 <template>
@@ -153,6 +176,14 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
             </div>
             <div class="d-tier">{{ selected.tierName }} · Lv.{{ selected.level }}</div>
           </div>
+          <button
+            class="d-remove-btn"
+            :disabled="removing"
+            title="删除该角色（清理龙套）"
+            @click="deleteSelectedNpc"
+          >
+            删除
+          </button>
         </div>
 
         <!-- 标签 + 好感度 -->
@@ -715,6 +746,26 @@ const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.val
   align-items: center;
   padding-bottom: 10px;
   border-bottom: 2px solid var(--theme-card-border);
+}
+.d-remove-btn {
+  margin-left: auto;
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  font-family: inherit;
+  color: var(--theme-danger, #e5484d);
+  background: color-mix(in srgb, var(--theme-danger, #e5484d) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-danger, #e5484d) 40%, transparent);
+  border-radius: var(--theme-radius-sm, 4px);
+  cursor: pointer;
+  transition: all var(--theme-transition-fast);
+  flex-shrink: 0;
+}
+.d-remove-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--theme-danger, #e5484d) 18%, transparent);
+}
+.d-remove-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .d-avatar {
   width: 3.5rem;
