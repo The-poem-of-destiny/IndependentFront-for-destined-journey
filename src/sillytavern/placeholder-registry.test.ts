@@ -556,47 +556,47 @@ describe('INVENTORY', () => {
 // ========== GAME_TIME ==========
 
 describe('GAME_TIME', () => {
-  it('extracts world keys from variables', () => {
+  it('优先读 ctx.gameTime 绝对时钟，variables 世界键作补充', () => {
     const ctx = mockCtx({
+      gameTime: { era: '光辉纪元', year: 1, month: 5, day: 24, weekday: 3, hour: 15, minute: 30 },
       variables: {
-        时间: '光辉纪元001年-05月-24日-15:30',
         位置: '北方-诺斯加德-白曜城-铁匠铺',
         天气: '晴',
         季节: '春季',
       },
     });
     const result = PLACEHOLDER_REGISTRY['GAME_TIME'](ctx, mockConfig());
-    expect(result).toContain('时间:');
+    expect(result).toContain('时间: 光辉纪元0001年');
+    expect(result).toContain('15:30');
     expect(result).toContain('位置:');
-    expect(result).toContain('天气:');
     expect(result).toContain('季节:');
     expect(result).toContain('白曜城');
   });
-
   it('handles missing world keys', () => {
     const ctx = mockCtx({ variables: {} });
     const result = PLACEHOLDER_REGISTRY['GAME_TIME'](ctx, mockConfig());
     expect(result).toBe('');
   });
 
-  it('extracts alternative key names (English)', () => {
+  it('无 ctx.gameTime 时回落 variables 的世界键（不含时间键）', () => {
     const ctx = mockCtx({
       variables: {
-        time: 'evening',
         location: 'Whiteforge',
         weather: 'rainy',
         era: '复兴纪元',
       },
     });
     const result = PLACEHOLDER_REGISTRY['GAME_TIME'](ctx, mockConfig());
-    expect(result).toContain('time:');
     expect(result).toContain('location:');
     expect(result).toContain('weather:');
     expect(result).toContain('era:');
+    // variables 里的时间键不再作为时钟来源（时间只能来自 ctx.gameTime）
+    expect(result).not.toContain('time:');
   });
 
   it('ignores non-world keys', () => {
     const ctx = mockCtx({
+      gameTime: { era: '', year: 488, month: 1, day: 1, weekday: 1, hour: 22, minute: 5 },
       variables: {
         金钱: 200,
         HP: 85,
@@ -604,14 +604,14 @@ describe('GAME_TIME', () => {
       },
     });
     const result = PLACEHOLDER_REGISTRY['GAME_TIME'](ctx, mockConfig());
-    expect(result).toContain('时间:');
+    expect(result).toContain('时间: 0488年');
+    expect(result).toContain('22:05');
     expect(result).not.toContain('金钱');
     expect(result).not.toContain('HP');
   });
 });
 
 // ========== ACTIVE_EFFECTS ==========
-
 describe('ACTIVE_EFFECTS', () => {
   it('extracts status effects from characters', () => {
     const effects: StatusEffect[] = [

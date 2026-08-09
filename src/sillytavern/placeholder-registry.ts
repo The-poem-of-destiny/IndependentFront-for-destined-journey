@@ -30,6 +30,7 @@ import {
 import { parseSetvars, resolveGetvars, resolveRandoms } from './preset-loader';
 import { buildZoneContext, filterZoneContent, getAgentZoneVisibility } from './context-visibility';
 import { defaultHistoryLayers } from './agent-templates';
+import { formatGameTime } from './time-system';
 
 // ═══════════════════════════════════════════════════════════
 // Module-Level Globals
@@ -352,13 +353,22 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     return lines.join('\n');
   },
 
-  /** {{GAME_TIME}} — 从 variables 中提取时间/位置/天气/纪元等世界键 */
+  /**
+   * {{GAME_TIME}} — 当前游戏时间 + 世界键（天气/位置/季节等）。
+   *
+   * 🔴 2026-08-08 时间漂移根因之一：旧实现只读 `ctx.variables` 的『时间』键，而
+   *    variables.sys 几乎只有『天气』，于是时钟永远渲染不出来——story 写「第二天早上」
+   *    时根本看不到系统时间，无从判断矛盾。现在优先 `formatGameTime(ctx.gameTime)`
+   *    （存档级权威时钟），variables 的世界键只作天气/季节等补充。
+   */
   GAME_TIME: (ctx, _config, _params) => {
     const vars = ctx.variables ?? {};
+    const parts: string[] = [];
+    if (ctx.gameTime) {
+      const t = formatGameTime(ctx.gameTime);
+      if (t) parts.push(`时间: ${t}`);
+    }
     const worldKeys = [
-      '时间',
-      'time',
-      'timeOfDay',
       '位置',
       'location',
       'currentRegion',
@@ -373,7 +383,6 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
       'era',
       'dangerLevel',
     ];
-    const parts: string[] = [];
     for (const k of worldKeys) {
       if (vars[k] != null) {
         parts.push(`${k}: ${vars[k]}`);
