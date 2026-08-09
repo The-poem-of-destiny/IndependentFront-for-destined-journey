@@ -1,0 +1,2184 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Astral Drift — home backdrop</title>
+    <style>
+      /*
+        ASTRAL DRIFT — third attempt at the home-page backdrop. Read this before changing it.
+
+        The earlier study still on disk is MagicCircle.standalone.html (v1) — canvas-glyph
+        decals, 34 blended layers over a full-screen procedural nebula. MagicCircleV2 (the
+        cold sigil: opaque lit sigil geometry, fast, reviewed as "messy and unpolished") has
+        been deleted at the reviewer's request.
+
+        CORRECTION on v1, because earlier drafts of this comment asserted the opposite and it
+        shaped the whole design: v1 IS NOT SLOW on desktop. Measured properly with
+        EXT_disjoint_timer_query_webgl2 on a warmed-up RTX 4090 at 1983x1597 (dpr 1.5), v1's
+        entire frame is ~0.64 ms, and NO component is individually resolvable above the
+        ~0.1 ms noise floor — not the nebula dome, not the shadow map, not the 20 blended
+        full-disc layers, not the bloom chain. The 7.9 ms figure quoted in earlier notes came
+        from a contaminated measurement (a second WebGL page running at 60 fps in another
+        tab, plus my own draw-call wrapper hooks), and the "nebula dome = 3.8 ms" attribution
+        built on top of it was wrong.
+
+        So this file is a VISUAL argument, not a rescue. The fill-rate discipline below is
+        still worth keeping — a laptop GPU is fill-rate poor where a 4090 is not, and none of
+        it costs anything — but it is not what fixed v1, because v1 was not broken on the
+        axis I claimed.
+
+        This one is built from the opposite premise, taken from the references the reviewer
+        picked out (freefrontend.com/three-js): Chromatic Aberration WebGL Sine Wave, Neon 3D
+        Tubes, Live Clouds, Particle Teapot, Zooming Spiral, Snowfall, Starfall, Storm. Every
+        one of those is the SAME picture:
+
+          - a near-black field with one dominant luminous form and a lot of empty space,
+          - smooth continuous curves, never small repeated ornament,
+          - a white-hot core with coloured fringes (that is what chromatic aberration reads
+            as, and it is why the neon-tube pens look expensive),
+          - softness and depth from volume and parallax, not from added detail.
+
+        So the composition here is deliberately three things and nothing else:
+          1. the galaxy at centre — the one element the reviewer liked in v2,
+          2. one sweeping arc of light low in the frame, RGB-split at its edges,
+          3. depth: star shells, drifting veils, foreground dust, occasional starfall.
+
+        The top third of the frame is kept dark ON PURPOSE. That is where page copy goes.
+        Press T to toggle a sample title and check legibility before changing any brightness.
+
+        Load-bearing performance rules carried over from v2, all of them measured there:
+          - No full-screen procedural noise. The veils sample a texture baked once at startup
+            rather than evaluating ~200 hashes per pixel per frame, as v1's dome does for a
+            backdrop that drifts at uTime*0.003. On the 4090 that saving is below the noise
+            floor; the reason to keep it is that ALU is the axis where a laptop GPU is
+            weakest relative to a desktop one, so this is insurance, not a measured win.
+          - No MSAA on the composer chain. EffectComposer clones its target, so `samples`
+            multisamples every post pass as well as the scene: 1.70 ms -> 4.52 ms at 3 Mpix
+            for zero benefit, since a full-screen quad has no geometric edges. FXAA runs last
+            instead, after tone mapping, in device pixels.
+          - Point sprites size from a real projection uniform, not the copy-paste
+            `size * (300.0 / -mvPosition.z)` idiom, which silently assumes a ~50 deg fov and a
+            close viewer. At this camera that idiom yields sub-pixel sprites and the whole
+            particle system renders as nothing at all.
+          - Every layer here is additive, so draw order does not affect the result. All of
+            them therefore run depthTest:false / depthWrite:false and skip sorting entirely.
+      */
+      :root {
+        color-scheme: dark;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #01020a;
+        overflow: hidden;
+        font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      }
+
+      .stage {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        touch-action: none;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      /*
+        Vignette and the top scrim live in CSS, not in a fragment pass: they are static
+        gradients over the whole frame and cost the compositor nothing, where a shader pass
+        would be a full-screen read/write every frame. The scrim is what guarantees page copy
+        stays legible no matter how bright the scene gets.
+      */
+      .vignette {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background:
+          linear-gradient(
+            to bottom,
+            rgba(1, 2, 10, 0.66) 0%,
+            rgba(1, 2, 10, 0.22) 22%,
+            rgba(0, 0, 0, 0) 42%
+          ),
+          radial-gradient(
+            ellipse 78% 74% at 50% 46%,
+            rgba(0, 0, 0, 0) 42%,
+            rgba(1, 2, 10, 0.4) 76%,
+            rgba(0, 1, 6, 0.9) 100%
+          );
+      }
+
+      .title {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        padding-top: 8.5vh;
+        pointer-events: none;
+        user-select: none;
+        text-align: center;
+      }
+
+      .title.hidden {
+        display: none;
+      }
+
+      .title h1 {
+        margin: 0;
+        font-family: 'Songti SC', 'Noto Serif SC', 'Source Han Serif SC', serif;
+        font-size: clamp(34px, 6.2vw, 76px);
+        font-weight: 500;
+        letter-spacing: 0.34em;
+        text-indent: 0.34em;
+        color: #eef4ff;
+        text-shadow:
+          0 0 26px rgba(120, 180, 255, 0.34),
+          0 2px 40px rgba(0, 0, 0, 0.7);
+      }
+
+      .title p {
+        margin: 14px 0 0;
+        font-size: clamp(10px, 1.15vw, 13px);
+        letter-spacing: 0.5em;
+        text-indent: 0.5em;
+        color: rgba(178, 202, 236, 0.66);
+      }
+
+      .hud {
+        position: absolute;
+        left: 18px;
+        bottom: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        border: 1px solid rgba(120, 170, 235, 0.14);
+        background: rgba(4, 8, 18, 0.62);
+        backdrop-filter: blur(8px);
+        color: #9fb6d8;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        user-select: none;
+      }
+
+      .hud.hidden {
+        display: none;
+      }
+
+      .hud-readout {
+        display: flex;
+        gap: 14px;
+        font-variant-numeric: tabular-nums;
+        color: #7d94b6;
+      }
+
+      .hud-readout b {
+        color: #cfe2ff;
+        font-weight: 600;
+      }
+
+      .hud-row {
+        display: grid;
+        grid-template-columns: 62px 116px 34px;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .hud-row input {
+        width: 116px;
+        accent-color: #6fb6ff;
+      }
+
+      .hud-row span:last-child {
+        text-align: right;
+        color: #cfe2ff;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .hud-hint {
+        color: #55698a;
+        font-size: 10px;
+        letter-spacing: 0.04em;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div class="stage">
+      <canvas id="drift-canvas"></canvas>
+      <div class="vignette"></div>
+      <div class="title" id="title">
+        <h1>命定之诗</h1>
+        <p>FATED POEM</p>
+      </div>
+      <div class="hud" id="hud">
+        <div class="hud-readout">
+          <span><b id="stat-fps">--</b> fps</span>
+          <span><b id="stat-ms">--</b> ms</span>
+          <span><b id="stat-calls">--</b> calls</span>
+          <span><b id="stat-scale">--</b> scale</span>
+        </div>
+        <div class="hud-row">
+          <span>bloom</span><input id="dial-bloom" type="range" min="0" max="200" value="100" />
+          <span id="val-bloom">1.00</span>
+        </div>
+        <div class="hud-row">
+          <span>galaxy</span><input id="dial-galaxy" type="range" min="0" max="200" value="100" />
+          <span id="val-galaxy">1.00</span>
+        </div>
+        <div class="hud-row">
+          <span>arc</span><input id="dial-arc" type="range" min="0" max="200" value="100" />
+          <span id="val-arc">1.00</span>
+        </div>
+        <div class="hud-row">
+          <span>veils</span><input id="dial-veils" type="range" min="0" max="200" value="100" />
+          <span id="val-veils">1.00</span>
+        </div>
+        <div class="hud-hint">move the pointer to parallax · T title · H panel</div>
+      </div>
+    </div>
+
+    <script type="module">
+      import * as THREE from 'three';
+      import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+      import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+      import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+      import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+      import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
+      import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+
+      const TAU = Math.PI * 2;
+      const canvas = document.querySelector('#drift-canvas');
+      const stage = document.querySelector('.stage');
+      const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      const dials = { bloom: 1, galaxy: 1, arc: 1, veils: 1 };
+
+      // ----------------------------------------------------------------------------------
+      // Palette.
+      //
+      // Read the galaxy row top to bottom as a single exposure curve, not as four colours:
+      // white-hot core, gold shoulder, violet mid, cyan rim, near-black outskirts. The hue
+      // travel is what sells depth in a particle disc — a one-hue galaxy reads as a smudge.
+      // The veils are deliberately DARKER than they look here; they are drawn at ~0.05 alpha
+      // and exist to make the black field have air in it, not to be seen as clouds.
+      // ----------------------------------------------------------------------------------
+      const PALETTE = {
+        field: 0x01020a,
+
+        coreHot: new THREE.Color(0xfff8ea),
+        coreGold: new THREE.Color(0xffc271),
+        armViolet: new THREE.Color(0xb46bff),
+        armCyan: new THREE.Color(0x4fb4ff),
+        armEdge: new THREE.Color(0x14356e),
+
+        veilBlue: new THREE.Color(0x14406f),
+        veilViolet: new THREE.Color(0x3a1d63),
+        veilTeal: new THREE.Color(0x0e4a52),
+
+        arcTint: new THREE.Color(0x8fd0ff),
+        starCool: new THREE.Color(0xcfe2ff),
+        starWarm: new THREE.Color(0xffd9a8),
+        meteor: new THREE.Color(0xdff0ff),
+      };
+
+      // ----------------------------------------------------------------------------------
+      // Renderer. antialias:false on purpose — the composer renders into its own target, so
+      // MSAA on the default framebuffer would only antialias a full-screen quad.
+      // ----------------------------------------------------------------------------------
+      const renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: false,
+        alpha: false,
+        stencil: false,
+        depth: false,
+        powerPreference: 'high-performance',
+      });
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 0.98;
+      renderer.setClearColor(PALETTE.field, 1);
+      renderer.shadowMap.enabled = false;
+
+      const scene = new THREE.Scene();
+      // Nothing in this scene is depth-tested and everything is additive, so per-object
+      // sorting is pure CPU cost with no visual consequence.
+      scene.matrixWorldAutoUpdate = true;
+      scene.sortObjects = false;
+
+      const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 400);
+      const CAMERA_BASE = new THREE.Vector3(0, 0.35, 20.5);
+      const CAMERA_TARGET = new THREE.Vector3(0, 0.15, 0);
+
+      // ==================================================================================
+      // Mip-chain bloom. Ported unchanged from v2, where it was already tuned and measured at
+      // ~0.3 ms at 3 Mpix: 13-tap downsample / 3x3 tent upsample (Jimenez 2014), Karis
+      // average on level 0 so single-pixel stars blur instead of strobing, and an
+      // energy-conserving mix(scene, bloom, strength) composite so raising strength trades
+      // sharpness for halation rather than blowing the frame to white.
+      //
+      // On this piece bloom is not a garnish — it IS the look. Every luminous element is
+      // authored small and hot and allowed to bleed, which is how the reference pens get
+      // their soft neon core without painting a soft neon core.
+      // ==================================================================================
+      class MipBloomPass extends Pass {
+        constructor() {
+          super();
+          this.strength = 0.2;
+          this.radius = 0.85;
+          this.mips = [];
+          this.quad = new FullScreenQuad(null);
+
+          const vertexShader = /* glsl */ `
+            varying vec2 vUv;
+
+            void main() {
+              vUv = uv;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `;
+
+          this.downMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+              tInput: { value: null },
+              uTexel: { value: new THREE.Vector2(1, 1) },
+              uKaris: { value: 0 },
+            },
+            vertexShader,
+            fragmentShader: /* glsl */ `
+              uniform sampler2D tInput;
+              uniform vec2 uTexel;
+              uniform float uKaris;
+              varying vec2 vUv;
+
+              float karisWeight(vec3 colorSample) {
+                return 1.0 / (1.0 + max(colorSample.r, max(colorSample.g, colorSample.b)));
+              }
+
+              void main() {
+                vec2 texel = uTexel;
+                vec3 a = texture2D(tInput, vUv + texel * vec2(-2.0, 2.0)).rgb;
+                vec3 b = texture2D(tInput, vUv + texel * vec2(0.0, 2.0)).rgb;
+                vec3 c = texture2D(tInput, vUv + texel * vec2(2.0, 2.0)).rgb;
+                vec3 d = texture2D(tInput, vUv + texel * vec2(-2.0, 0.0)).rgb;
+                vec3 e = texture2D(tInput, vUv).rgb;
+                vec3 f = texture2D(tInput, vUv + texel * vec2(2.0, 0.0)).rgb;
+                vec3 g = texture2D(tInput, vUv + texel * vec2(-2.0, -2.0)).rgb;
+                vec3 h = texture2D(tInput, vUv + texel * vec2(0.0, -2.0)).rgb;
+                vec3 i = texture2D(tInput, vUv + texel * vec2(2.0, -2.0)).rgb;
+                vec3 j = texture2D(tInput, vUv + texel * vec2(-1.0, 1.0)).rgb;
+                vec3 k = texture2D(tInput, vUv + texel * vec2(1.0, 1.0)).rgb;
+                vec3 l = texture2D(tInput, vUv + texel * vec2(-1.0, -1.0)).rgb;
+                vec3 m = texture2D(tInput, vUv + texel * vec2(1.0, -1.0)).rgb;
+
+                if (uKaris > 0.5) {
+                  vec3 box0 = (a + b + d + e) * 0.25;
+                  vec3 box1 = (b + c + e + f) * 0.25;
+                  vec3 box2 = (d + e + g + h) * 0.25;
+                  vec3 box3 = (e + f + h + i) * 0.25;
+                  vec3 box4 = (j + k + l + m) * 0.25;
+                  float w0 = karisWeight(box0);
+                  float w1 = karisWeight(box1);
+                  float w2 = karisWeight(box2);
+                  float w3 = karisWeight(box3);
+                  float w4 = karisWeight(box4);
+                  vec3 result = box4 * (0.5 * w4) + (box0 * w0 + box1 * w1 + box2 * w2 + box3 * w3) * 0.125;
+                  float norm = 0.5 * w4 + (w0 + w1 + w2 + w3) * 0.125;
+                  gl_FragColor = vec4(result / max(norm, 1e-4), 1.0);
+                } else {
+                  vec3 result = e * 0.125;
+                  result += (a + c + g + i) * 0.03125;
+                  result += (b + d + f + h) * 0.0625;
+                  result += (j + k + l + m) * 0.125;
+                  gl_FragColor = vec4(result, 1.0);
+                }
+              }
+            `,
+            depthTest: false,
+            depthWrite: false,
+          });
+
+          this.upMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+              tInput: { value: null },
+              uTexel: { value: new THREE.Vector2(1, 1) },
+              uScale: { value: 1 },
+            },
+            vertexShader,
+            fragmentShader: /* glsl */ `
+              uniform sampler2D tInput;
+              uniform vec2 uTexel;
+              uniform float uScale;
+              varying vec2 vUv;
+
+              void main() {
+                vec2 texel = uTexel;
+                vec3 result = texture2D(tInput, vUv + texel * vec2(-1.0, 1.0)).rgb;
+                result += texture2D(tInput, vUv + texel * vec2(0.0, 1.0)).rgb * 2.0;
+                result += texture2D(tInput, vUv + texel * vec2(1.0, 1.0)).rgb;
+                result += texture2D(tInput, vUv + texel * vec2(-1.0, 0.0)).rgb * 2.0;
+                result += texture2D(tInput, vUv).rgb * 4.0;
+                result += texture2D(tInput, vUv + texel * vec2(1.0, 0.0)).rgb * 2.0;
+                result += texture2D(tInput, vUv + texel * vec2(-1.0, -1.0)).rgb;
+                result += texture2D(tInput, vUv + texel * vec2(0.0, -1.0)).rgb * 2.0;
+                result += texture2D(tInput, vUv + texel * vec2(1.0, -1.0)).rgb;
+                gl_FragColor = vec4(result * (uScale / 16.0), 1.0);
+              }
+            `,
+            depthTest: false,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            transparent: true,
+          });
+
+          this.compositeMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+              tDiffuse: { value: null },
+              tBloom: { value: null },
+              uStrength: { value: this.strength },
+              uNorm: { value: 1 },
+            },
+            vertexShader,
+            fragmentShader: /* glsl */ `
+              uniform sampler2D tDiffuse;
+              uniform sampler2D tBloom;
+              uniform float uStrength;
+              uniform float uNorm;
+              varying vec2 vUv;
+
+              void main() {
+                vec3 sceneColor = texture2D(tDiffuse, vUv).rgb;
+                vec3 bloomColor = texture2D(tBloom, vUv).rgb / uNorm;
+                gl_FragColor = vec4(mix(sceneColor, bloomColor, uStrength), 1.0);
+              }
+            `,
+            depthTest: false,
+            depthWrite: false,
+          });
+        }
+
+        setSize(width, height) {
+          for (const mip of this.mips) mip.target.dispose();
+          this.mips = [];
+          let mipWidth = Math.max(1, Math.floor(width / 2));
+          let mipHeight = Math.max(1, Math.floor(height / 2));
+          while (Math.min(mipWidth, mipHeight) >= 16 && this.mips.length < 8) {
+            this.mips.push({
+              target: new THREE.WebGLRenderTarget(mipWidth, mipHeight, {
+                type: THREE.HalfFloatType,
+                minFilter: THREE.LinearFilter,
+                magFilter: THREE.LinearFilter,
+                depthBuffer: false,
+              }),
+              texelSize: new THREE.Vector2(1 / mipWidth, 1 / mipHeight),
+            });
+            mipWidth = Math.max(1, Math.floor(mipWidth / 2));
+            mipHeight = Math.max(1, Math.floor(mipHeight / 2));
+          }
+        }
+
+        render(renderer, writeBuffer, readBuffer) {
+          if (this.mips.length === 0) return;
+          const previousAutoClear = renderer.autoClear;
+          renderer.autoClear = false;
+
+          let sourceTexture = readBuffer.texture;
+          let sourceTexel = new THREE.Vector2(1 / readBuffer.width, 1 / readBuffer.height);
+          this.quad.material = this.downMaterial;
+          for (let level = 0; level < this.mips.length; level += 1) {
+            const mip = this.mips[level];
+            this.downMaterial.uniforms.tInput.value = sourceTexture;
+            this.downMaterial.uniforms.uTexel.value.copy(sourceTexel);
+            this.downMaterial.uniforms.uKaris.value = level === 0 ? 1 : 0;
+            renderer.setRenderTarget(mip.target);
+            renderer.clear();
+            this.quad.render(renderer);
+            sourceTexture = mip.target.texture;
+            sourceTexel = mip.texelSize;
+          }
+
+          this.quad.material = this.upMaterial;
+          this.upMaterial.uniforms.uScale.value = this.radius;
+          for (let level = this.mips.length - 2; level >= 0; level -= 1) {
+            const smaller = this.mips[level + 1];
+            this.upMaterial.uniforms.tInput.value = smaller.target.texture;
+            this.upMaterial.uniforms.uTexel.value.copy(smaller.texelSize);
+            renderer.setRenderTarget(this.mips[level].target);
+            this.quad.render(renderer);
+          }
+
+          let norm = 0;
+          for (let level = 0; level < this.mips.length; level += 1) {
+            norm += Math.pow(this.radius, level);
+          }
+          this.quad.material = this.compositeMaterial;
+          this.compositeMaterial.uniforms.tDiffuse.value = readBuffer.texture;
+          this.compositeMaterial.uniforms.tBloom.value = this.mips[0].target.texture;
+          this.compositeMaterial.uniforms.uStrength.value = this.strength;
+          this.compositeMaterial.uniforms.uNorm.value = norm;
+          renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+          if (!this.renderToScreen) renderer.clear();
+          this.quad.render(renderer);
+
+          renderer.autoClear = previousAutoClear;
+        }
+      }
+
+      const composerTarget = new THREE.WebGLRenderTarget(1, 1, {
+        type: THREE.HalfFloatType,
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        depthBuffer: false,
+        samples: 0,
+      });
+      const composer = new EffectComposer(renderer, composerTarget);
+      composer.addPass(new RenderPass(scene, camera));
+
+      const bloom = new MipBloomPass();
+      composer.addPass(bloom);
+
+      // ----------------------------------------------------------------------------------
+      // Grade. The aberration term here is radial and grows with distance from centre, the
+      // way a real lens misbehaves — a constant offset reads as a printing misregistration
+      // instead. It is small: the arc carries its own, much larger, authored fringe, and two
+      // strong splits stacked on each other just looks broken.
+      // ----------------------------------------------------------------------------------
+      const gradePass = new ShaderPass({
+        uniforms: {
+          tDiffuse: { value: null },
+          uTime: { value: 0 },
+          uResolution: { value: new THREE.Vector2(1, 1) },
+        },
+        vertexShader: /* glsl */ `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: /* glsl */ `
+          uniform sampler2D tDiffuse;
+          uniform float uTime;
+          uniform vec2 uResolution;
+          varying vec2 vUv;
+
+          float hash21(vec2 point) {
+            point = fract(point * vec2(123.34, 345.45));
+            point += dot(point, point + 34.345);
+            return fract(point.x * point.y);
+          }
+
+          void main() {
+            vec2 centered = vUv - 0.5;
+            float radial = dot(centered, centered);
+            vec2 aberration = centered * (0.0007 + radial * 0.0052);
+
+            vec3 color;
+            color.r = texture2D(tDiffuse, vUv + aberration).r;
+            color.g = texture2D(tDiffuse, vUv).g;
+            color.b = texture2D(tDiffuse, vUv - aberration).b;
+
+            // Lift the deepest shadows a hair off pure black and cool them. Absolute zero in
+            // the corners is what makes a dark frame read as a flat card; a faint blue floor
+            // tells the eye there is air out there.
+            color += vec3(0.0022, 0.0038, 0.0082) * (1.0 - smoothstep(0.0, 0.6, radial));
+
+            color = (color - 0.5) * 1.05 + 0.5;
+            // Split tone: shadows cool, highlights warm. Half a percent each way; any more
+            // and the galaxy's own hue travel stops being the thing carrying the colour.
+            float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+            color *= mix(vec3(0.975, 0.995, 1.03), vec3(1.02, 1.0, 0.985), smoothstep(0.15, 0.85, luma));
+
+            float grain = hash21(vUv * uResolution + fract(uTime * 0.061) * 79.0) - 0.5;
+            color += grain * 0.0055;
+            color *= 1.0 - smoothstep(0.12, 0.74, radial) * 0.3;
+
+            gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);
+          }
+        `,
+      });
+      composer.addPass(gradePass);
+      composer.addPass(new OutputPass());
+
+      const fxaaPass = new ShaderPass(FXAAShader);
+      composer.addPass(fxaaPass);
+
+      // ==================================================================================
+      // Shared uniforms.
+      //
+      // uProjScale converts a world-space radius into pixels for gl_PointSize. Every point
+      // system in the scene reads the same object, so a resize fixes all of them at once.
+      // ==================================================================================
+      const uTime = { value: 0 };
+      const uProjScale = { value: 1000 };
+
+      const POINT_HEAD = /* glsl */ `
+        // Round soft sprite with a hot core, computed rather than sampled: a 32x32 alpha
+        // texture would cost a fetch per fragment for a shape that is two instructions.
+        float sprite(vec2 coord) {
+          float d = length(coord - 0.5) * 2.0;
+          float halo = smoothstep(1.0, 0.0, d);
+          return halo * halo * (0.55 + 0.45 * pow(max(0.0, 1.0 - d), 6.0) * 3.0);
+        }
+      `;
+
+      // ==================================================================================
+      // Baked volume texture for the veils.
+      //
+      // Five octaves of value noise over 256x256, once, at startup: ~330k hash evaluations
+      // total. v1 paid that PER PIXEL PER FRAME for the same visual result. RGB carries the
+      // structure (sampled at a scrolling uv so the volume churns) and A carries a static
+      // radial envelope (sampled at the quad's own uv so the billboard has no visible edge).
+      // Sampling both from one texture keeps it to two fetches and one texture unit.
+      // ==================================================================================
+      function bakeVeilTexture(size = 256) {
+        // PERIODIC noise, and this is not a nicety.
+        //
+        // The first bake used freq *= 2.03 and an unbounded hash lattice, i.e. it did not
+        // tile. On the veils that was invisible, because a radial alpha envelope hides the
+        // quad edge. On the full-frame storm layer it was catastrophic and instantly
+        // legible: the seams show up as HARD AXIS-ALIGNED RECTANGLES across the sky, at
+        // exactly vUv = 1/1.3, 1/2.9, 1/5.7 — the scroll scales. It reads as a broken
+        // texture, not as a cloud.
+        //
+        // Fix: lattice coordinates wrap at a period, octave frequencies are exact powers of
+        // two so every octave wraps on the same boundary, and u in [0,1] maps to exactly one
+        // period. Then any repeat scale in any shader tiles seamlessly.
+        const PERIOD = 8;
+        const wrap = (value, period) => ((value % period) + period) % period;
+        const hash = (x, y) => {
+          const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+          return n - Math.floor(n);
+        };
+        const noise = (x, y, period) => {
+          const xi = Math.floor(x);
+          const yi = Math.floor(y);
+          const xf = x - xi;
+          const yf = y - yi;
+          const u = xf * xf * (3 - 2 * xf);
+          const v = yf * yf * (3 - 2 * yf);
+          const x0 = wrap(xi, period);
+          const y0 = wrap(yi, period);
+          const x1 = wrap(xi + 1, period);
+          const y1 = wrap(yi + 1, period);
+          const a = hash(x0, y0);
+          const b = hash(x1, y0);
+          const c = hash(x0, y1);
+          const d = hash(x1, y1);
+          return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
+        };
+        const fbm = (x, y) => {
+          let sum = 0;
+          let amp = 0.5;
+          for (let octave = 0; octave < 5; octave += 1) {
+            const freq = 1 << octave;
+            sum += noise(x * freq, y * freq, PERIOD * freq) * amp;
+            amp *= 0.5;
+          }
+          return sum;
+        };
+
+        const data = new Uint8Array(size * size * 4);
+        for (let y = 0; y < size; y += 1) {
+          for (let x = 0; x < size; x += 1) {
+            const u = x / size;
+            const v = y / size;
+            // Ridged fbm: the |2n-1| fold puts filaments where the noise crosses its mean,
+            // which is what makes a cloud look like it has structure rather than lumps.
+            // u,v span exactly one period, which is what makes the result tileable.
+            const raw = fbm(u * PERIOD, v * PERIOD);
+            const ridged = 1.0 - Math.abs(raw * 2.0 - 1.0);
+            const structure = Math.pow(Math.max(0, ridged), 1.8);
+
+            const dx = u - 0.5;
+            const dy = v - 0.5;
+            const dist = Math.sqrt(dx * dx + dy * dy) * 2.0;
+            const envelope = Math.pow(Math.max(0, 1.0 - dist), 2.2);
+
+            const index = (y * size + x) * 4;
+            const level = Math.round(THREE.MathUtils.clamp(structure, 0, 1) * 255);
+            data[index] = level;
+            data[index + 1] = level;
+            data[index + 2] = level;
+            data[index + 3] = Math.round(THREE.MathUtils.clamp(envelope, 0, 1) * 255);
+          }
+        }
+
+        const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.generateMipmaps = true;
+        texture.needsUpdate = true;
+        return texture;
+      }
+
+      const veilTexture = bakeVeilTexture();
+
+      // ==================================================================================
+      // Layer 1 — star shells.
+      //
+      // Three shells at different distances so pointer parallax separates them. Twinkle is
+      // per-star and incommensurate (two sines at unrelated rates) so the field never
+      // pulses as one object, which is the tell that gives away a cheap starfield.
+      // ==================================================================================
+      function buildStars() {
+        const SHELLS = [
+          { count: 900, near: 42, far: 62, size: 0.055, gain: 0.9 },
+          { count: 760, near: 66, far: 96, size: 0.075, gain: 0.68 },
+          { count: 620, near: 100, far: 150, size: 0.1, gain: 0.5 },
+        ];
+
+        const total = SHELLS.reduce((sum, shell) => sum + shell.count, 0);
+        const positions = new Float32Array(total * 3);
+        const colors = new Float32Array(total * 3);
+        const scalars = new Float32Array(total * 3); // size, seed, gain
+
+        const color = new THREE.Color();
+        let cursor = 0;
+        for (const shell of SHELLS) {
+          for (let index = 0; index < shell.count; index += 1) {
+            // Cosine-distributed elevation keeps the density even on the sphere; naive
+            // uniform latitude clumps every shell at its poles.
+            const theta = Math.random() * TAU;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const radius = THREE.MathUtils.lerp(shell.near, shell.far, Math.random());
+            positions[cursor * 3] = Math.sin(phi) * Math.cos(theta) * radius;
+            positions[cursor * 3 + 1] = Math.cos(phi) * radius * 0.72;
+            positions[cursor * 3 + 2] = Math.sin(phi) * Math.sin(theta) * radius;
+
+            const warmth = Math.pow(Math.random(), 2.6);
+            color.copy(PALETTE.starCool).lerp(PALETTE.starWarm, warmth);
+            const brightness = 0.35 + Math.pow(Math.random(), 2.2) * 1.3;
+            colors[cursor * 3] = color.r * brightness;
+            colors[cursor * 3 + 1] = color.g * brightness;
+            colors[cursor * 3 + 2] = color.b * brightness;
+
+            scalars[cursor * 3] = shell.size * (0.6 + Math.random() * 0.9);
+            scalars[cursor * 3 + 1] = Math.random() * TAU;
+            scalars[cursor * 3 + 2] = shell.gain;
+            cursor += 1;
+          }
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
+        geometry.setAttribute('aScalar', new THREE.BufferAttribute(scalars, 3));
+
+        const material = new THREE.ShaderMaterial({
+          uniforms: { uTime, uProjScale },
+          vertexShader: /* glsl */ `
+            attribute vec3 aColor;
+            attribute vec3 aScalar;
+            uniform float uTime;
+            uniform float uProjScale;
+            varying vec3 vColor;
+
+            void main() {
+              float seed = aScalar.y;
+              float twinkle = 0.72
+                + 0.28 * sin(uTime * 0.9 + seed)
+                + 0.16 * sin(uTime * 1.63 + seed * 2.7);
+              vColor = aColor * aScalar.z * max(0.05, twinkle);
+
+              vec4 viewPos = modelViewMatrix * vec4(position, 1.0);
+              gl_Position = projectionMatrix * viewPos;
+              gl_PointSize = clamp(aScalar.x * uProjScale / -viewPos.z, 1.0, 9.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            ${POINT_HEAD}
+            varying vec3 vColor;
+
+            void main() {
+              gl_FragColor = vec4(vColor * sprite(gl_PointCoord), 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+        });
+
+        const points = new THREE.Points(geometry, material);
+        points.frustumCulled = false;
+        scene.add(points);
+        return { points, material };
+      }
+
+      // ==================================================================================
+      // Layer 2 — volume veils.
+      //
+      // Seven large quads, each with its own drift rate and tint. They are the only thing in
+      // the frame with a soft large-area gradient, and they are what keeps the black from
+      // reading as an empty background colour.
+      // ==================================================================================
+      function buildVeils() {
+        const SPECS = [
+          { pos: [-7.5, 2.4, -14], size: 21, tint: PALETTE.veilBlue, alpha: 0.26, spin: 0.012, drift: 0.0075 },
+          { pos: [8.2, -1.4, -17], size: 25, tint: PALETTE.veilViolet, alpha: 0.22, spin: -0.009, drift: -0.0058 },
+          { pos: [0.5, -5.2, -10], size: 19, tint: PALETTE.veilTeal, alpha: 0.17, spin: 0.016, drift: 0.0092 },
+          { pos: [-11, -4.5, -22], size: 30, tint: PALETTE.veilBlue, alpha: 0.15, spin: -0.006, drift: 0.0041 },
+          { pos: [12, 5.5, -24], size: 28, tint: PALETTE.veilViolet, alpha: 0.13, spin: 0.008, drift: -0.0067 },
+          { pos: [-2, 6.5, -19], size: 22, tint: PALETTE.veilTeal, alpha: 0.11, spin: -0.013, drift: 0.0053 },
+          { pos: [3.5, 0.5, -7], size: 15, tint: PALETTE.veilBlue, alpha: 0.1, spin: 0.02, drift: -0.011 },
+        ];
+
+        const geometry = new THREE.PlaneGeometry(1, 1);
+        const group = new THREE.Group();
+        const materials = [];
+
+        for (const spec of SPECS) {
+          const material = new THREE.ShaderMaterial({
+            uniforms: {
+              uTime,
+              tVeil: { value: veilTexture },
+              uTint: { value: spec.tint.clone() },
+              uAlpha: { value: spec.alpha },
+              uDial: { value: 1 },
+              uDrift: { value: spec.drift },
+              uSeed: { value: Math.random() * 10 },
+            },
+            vertexShader: /* glsl */ `
+              varying vec2 vUv;
+              void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+              }
+            `,
+            fragmentShader: /* glsl */ `
+              uniform sampler2D tVeil;
+              uniform vec3 uTint;
+              uniform float uAlpha;
+              uniform float uDial;
+              uniform float uDrift;
+              uniform float uSeed;
+              uniform float uTime;
+              varying vec2 vUv;
+
+              void main() {
+                // Envelope from the quad's own uv (static, so the billboard edge never
+                // shows); structure from a scrolling, differently-scaled uv (so the volume
+                // churns). Two fetches, one texture.
+                float envelope = texture2D(tVeil, vUv).a;
+                vec2 flow = vUv * 1.9 + vec2(uTime * uDrift, uTime * uDrift * 0.6) + uSeed;
+                float structure = texture2D(tVeil, flow).r;
+                vec2 flow2 = vUv * 0.9 - vec2(uTime * uDrift * 0.55, 0.0) + uSeed * 0.37;
+                structure = mix(structure, texture2D(tVeil, flow2).r, 0.45);
+
+                float density = envelope * (0.25 + 0.75 * structure);
+                gl_FragColor = vec4(uTint * density * uAlpha * uDial, 1.0);
+              }
+            `,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthTest: false,
+            depthWrite: false,
+          });
+
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.position.set(spec.pos[0], spec.pos[1], spec.pos[2]);
+          mesh.scale.setScalar(spec.size);
+          mesh.rotation.z = Math.random() * TAU;
+          mesh.userData.spin = spec.spin;
+          mesh.frustumCulled = false;
+          group.add(mesh);
+          materials.push(material);
+        }
+
+        scene.add(group);
+        return { group, materials };
+      }
+
+      // ==================================================================================
+      // Layer 1b — the storm.
+      //
+      // From the Storm and Snowfall references, and it is the single biggest thing the first
+      // draft of this piece was missing. Both of those pens fill the ENTIRE frame with
+      // churning volume; there is no object and no empty space, and that is why they read as
+      // atmosphere rather than as a picture of something. My first draft was one galaxy in a
+      // black rectangle: correct, tasteful, and inert.
+      //
+      // A full-screen fragment pass is the most expensive real estate in the frame, and v1's
+      // dome does ~200 hash evaluations per pixel on exactly this footprint. This is three
+      // texture fetches of noise baked once at startup, scrolling at three unrelated rates:
+      // same churn, roughly two orders of magnitude less arithmetic. (On a 4090 that saving
+      // does not clear the noise floor — see the correction in the file header. ALU is where
+      // laptop GPUs are weakest, so this is insurance, not a measured win.)
+      // ==================================================================================
+      function buildStorm() {
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uDial: { value: 1 },
+            tVeil: { value: veilTexture },
+            uDeep: { value: new THREE.Color(0x0a1a4a) },
+            uLit: { value: new THREE.Color(0x2b5fa8) },
+            uWarm: { value: new THREE.Color(0x4a2f6b) },
+          },
+          vertexShader: /* glsl */ `
+            varying vec2 vUv;
+            void main() {
+              vUv = uv;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform sampler2D tVeil;
+            uniform float uTime;
+            uniform float uDial;
+            uniform vec3 uDeep;
+            uniform vec3 uLit;
+            uniform vec3 uWarm;
+            varying vec2 vUv;
+
+            void main() {
+              // Three octaves, three directions, three speeds. Sharing one direction is what
+              // makes cheap cloud layers look like a sliding wallpaper.
+              float a = texture2D(tVeil, vUv * 1.3 + vec2(uTime * 0.0032, uTime * 0.0018)).r;
+              float b = texture2D(tVeil, vUv * 2.9 - vec2(uTime * 0.0051, uTime * -0.0026)).r;
+              float c = texture2D(tVeil, vUv * 5.7 + vec2(uTime * -0.0044, uTime * 0.0061)).r;
+
+              float body = a * 0.55 + b * 0.3 + c * 0.15;
+              // Sharpen into billows. Without the curve it is fog; with it there are edges,
+              // and edges are what let the eye read depth in a cloud.
+              body = pow(clamp(body * 1.35, 0.0, 1.0), 2.3);
+
+              // Darker at the top of the frame, where page copy lives.
+              float sky = smoothstep(0.15, 0.95, vUv.y);
+              float lit = smoothstep(0.35, 0.85, a);
+
+              vec3 color = mix(uDeep, uLit, lit);
+              color = mix(color, uWarm, smoothstep(0.5, 0.95, c) * 0.55);
+              // 0.14, not the 0.5 of the first pass. A full-frame additive layer touches
+              // every pixel in the picture, so its gain is effectively a global exposure
+              // control: at 0.5 it lifted the entire field to mid blue and there was no
+              // black left anywhere for the galaxy to be bright against.
+              gl_FragColor = vec4(color * body * (0.28 + 0.72 * sky) * 0.14 * uDial, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+        });
+
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+        mesh.position.set(0, 0, -70);
+        mesh.scale.set(200, 130, 1);
+        mesh.frustumCulled = false;
+        scene.add(mesh);
+        return { mesh, material };
+      }
+
+      // ==================================================================================
+      // Layer 1c — bokeh.
+      //
+      // From the Snowfall and Starfall references: both are full of large, soft, defocused
+      // discs sitting among the sharp specks. Real defocused points are not gaussian blobs —
+      // an out-of-focus point light images the APERTURE, so it has a flat interior and a
+      // brighter rim. That rim is the entire tell, and it costs two smoothsteps.
+      // ==================================================================================
+      function buildBokeh() {
+        const COUNT = 74;
+        const positions = new Float32Array(COUNT * 3);
+        const colors = new Float32Array(COUNT * 3);
+        const scalars = new Float32Array(COUNT * 3); // size, seed, brightness
+
+        const tints = [
+          new THREE.Color(0xbcd8ff),
+          new THREE.Color(0xffd7a0),
+          new THREE.Color(0xc3a6ff),
+          new THREE.Color(0x9fe8ff),
+        ];
+
+        for (let index = 0; index < COUNT; index += 1) {
+          positions[index * 3] = (Math.random() - 0.5) * 34;
+          positions[index * 3 + 1] = (Math.random() - 0.5) * 22;
+          positions[index * 3 + 2] = 1 + Math.random() * 15;
+
+          const tint = tints[Math.floor(Math.random() * tints.length)];
+          colors[index * 3] = tint.r;
+          colors[index * 3 + 1] = tint.g;
+          colors[index * 3 + 2] = tint.b;
+
+          // Kept small and dim on purpose. Big bright bokeh reads as dirt on the lens rather
+          // than as depth; in the reference pens the discs are numerous and quiet.
+          scalars[index * 3] = 0.14 + Math.pow(Math.random(), 1.8) * 0.4;
+          scalars[index * 3 + 1] = Math.random() * TAU;
+          scalars[index * 3 + 2] = 0.02 + Math.pow(Math.random(), 2.4) * 0.045;
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
+        geometry.setAttribute('aScalar', new THREE.BufferAttribute(scalars, 3));
+
+        const material = new THREE.ShaderMaterial({
+          uniforms: { uTime, uProjScale, uDial: { value: 1 } },
+          vertexShader: /* glsl */ `
+            attribute vec3 aColor;
+            attribute vec3 aScalar;
+            uniform float uTime;
+            uniform float uProjScale;
+            varying vec3 vColor;
+
+            void main() {
+              float seed = aScalar.y;
+              vec3 p = position;
+              p.x += sin(uTime * 0.041 + seed) * 1.4;
+              p.y += cos(uTime * 0.033 + seed * 1.9) * 0.9 - uTime * 0.06;
+              p.y = mod(p.y + 11.0, 22.0) - 11.0;
+
+              vColor = aColor * aScalar.z * (0.7 + 0.3 * sin(uTime * 0.29 + seed * 2.1));
+
+              vec4 viewPos = modelViewMatrix * vec4(p, 1.0);
+              gl_Position = projectionMatrix * viewPos;
+              gl_PointSize = clamp(aScalar.x * uProjScale / -viewPos.z, 2.0, 150.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uDial;
+            varying vec3 vColor;
+
+            void main() {
+              float d = length(gl_PointCoord - 0.5) * 2.0;
+              // Flat interior, bright rim: the image of an aperture, not a gaussian.
+              float disc = 1.0 - smoothstep(0.72, 1.0, d);
+              float rim = smoothstep(0.5, 0.86, d) * (1.0 - smoothstep(0.9, 1.02, d));
+              gl_FragColor = vec4(vColor * (disc * 0.45 + rim * 0.85) * uDial, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+        });
+
+        const points = new THREE.Points(geometry, material);
+        points.frustumCulled = false;
+        scene.add(points);
+        return { points, material };
+      }
+
+      // ==================================================================================
+      // Layer 3 — the galaxy. The one element carried over from v2 by request.
+      //
+      // Built in the XY plane and tilted as a group, so "flat" is the default and the tilt
+      // is one number to tune. The arms are a log spiral: angle grows linearly with radius,
+      // which is the only winding rule that keeps arm WIDTH constant as the disc grows —
+      // a fixed angular offset per ring gives you a pinwheel, not a galaxy.
+      //
+      // Differential rotation happens in the VERTEX SHADER from a per-point radius, so the
+      // arms wind up over time with zero CPU work and zero buffer uploads.
+      // ==================================================================================
+      function buildGalaxy() {
+        // 120k points, and the count is doing a specific job: at 58k every sprite was a
+        // separate dot and the arms read as spray-paint. Particles only stop looking like
+        // particles when they OVERLAP, so density and sprite size have to rise together and
+        // per-point brightness has to fall to match. Points are vertex-bound and these are
+        // 2-3 px, so the whole disc is well under half a screen of fill.
+        const COUNT = 120000;
+        const RADIUS = 5.0;
+        const ARMS = 3;
+        // Logarithmic winding, not linear. theta = ln(1 + kr) winds hard near the centre and
+        // relaxes outward, which is what a real spiral does; a linear theta = SPIN*r leaves
+        // the arms straight near the middle and they converge into a visible polygon — the
+        // previous draft had a distinct violet triangle sitting over the bulge.
+        const WIND_K = 2.2;
+        const WIND_GAIN = 2.6;
+        // Rigid pattern speed, radians per second. One turn every ~4.5 minutes: fast enough
+        // that a returning visitor sees a different frame, slow enough to be unreadable as
+        // motion. The haze reads the same constant, so the two never separate.
+        const PATTERN_SPEED = 0.0235;
+        // Fraction of the population that ignores the arms entirely. Without it the disc is
+        // three ribbons on black and reads as a pinwheel decal; with it the arms sit inside
+        // a body. Draft one had ARMS=4 at spread 0.66 rad against an arm spacing of 1.57 rad,
+        // i.e. the arms overlapped each other and the whole disc came out as one smooth blob.
+        const HALO_SHARE = 0.26;
+
+        const positions = new Float32Array(COUNT * 3);
+        const scalars = new Float32Array(COUNT * 3); // radius01, seed, size
+
+        // Box-Muller: real gaussian scatter. Sum-of-uniforms fakes it badly at the tails,
+        // and the tails are exactly the stars that read as an arm having a soft edge.
+        const gaussian = () => {
+          let u = 0;
+          let v = 0;
+          while (u === 0) u = Math.random();
+          while (v === 0) v = Math.random();
+          return Math.sqrt(-2 * Math.log(u)) * Math.cos(TAU * v);
+        };
+
+        for (let index = 0; index < COUNT; index += 1) {
+          // Concentrating on r^0.62 puts roughly half the population inside 30% of the
+          // radius, which is what gives the disc a bulge without modelling one.
+          const t = Math.pow(Math.random(), 0.78);
+          const radius = t * RADIUS;
+
+          // Inside the bulge the arms are forced off: a real bulge is a smooth spheroid, and
+          // leaving the arm term switched on all the way to r=0 is what draws the polygon.
+          const inHalo = Math.random() < HALO_SHARE || t < 0.17;
+          const arm = Math.floor(Math.random() * ARMS);
+          const armAngle = (arm / ARMS) * TAU;
+          // Arm spread must stay well under the arm spacing (TAU/ARMS) or the arms merge.
+          const spread = inHalo ? 1.2 : 0.05 + t * 0.19;
+          const angle =
+            armAngle + Math.log(1 + radius * WIND_K) * WIND_GAIN + gaussian() * spread;
+
+          // A little extra radial jitter breaks the "drawn with a compass" look at the rim.
+          const jitter = gaussian() * (0.02 + t * 0.11);
+          const finalRadius = Math.max(0.02, radius + jitter);
+
+          positions[index * 3] = Math.cos(angle) * finalRadius;
+          positions[index * 3 + 1] = Math.sin(angle) * finalRadius;
+          // The disc is thick at the core and thin at the rim, like a real one.
+          positions[index * 3 + 2] = gaussian() * (0.42 * Math.exp(-t * 2.6) + 0.03);
+
+          scalars[index * 3] = finalRadius / RADIUS;
+          scalars[index * 3 + 1] = Math.random() * TAU;
+          scalars[index * 3 + 2] = 0.022 + Math.pow(Math.random(), 3.0) * 0.055;
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('aScalar', new THREE.BufferAttribute(scalars, 3));
+
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uProjScale,
+            uDial: { value: 1 },
+            uPattern: { value: PATTERN_SPEED },
+            uCoreHot: { value: PALETTE.coreHot.clone() },
+            uCoreGold: { value: PALETTE.coreGold.clone() },
+            uArmViolet: { value: PALETTE.armViolet.clone() },
+            uArmCyan: { value: PALETTE.armCyan.clone() },
+            uArmEdge: { value: PALETTE.armEdge.clone() },
+          },
+          vertexShader: /* glsl */ `
+            attribute vec3 aScalar;
+            uniform float uTime;
+            uniform float uProjScale;
+            uniform float uDial;
+            uniform float uPattern;
+            uniform vec3 uCoreHot;
+            uniform vec3 uCoreGold;
+            uniform vec3 uArmViolet;
+            uniform vec3 uArmCyan;
+            uniform vec3 uArmEdge;
+            varying vec3 vColor;
+
+            void main() {
+              float q = aScalar.x;
+              float seed = aScalar.y;
+
+              // THE WINDING PROBLEM, and why this is not a differential rotation.
+              //
+              // The obvious thing — omega = k/(a + q) so inner material sweeps faster — is
+              // what a real disc does, and it is what the previous draft did. Rendered, it
+              // is wrong: shear accumulates without bound, and by t = 170 s the three arms
+              // had wrapped far enough to close into concentric rings. A bullseye. Real
+              // galaxies have the same problem and resolve it the same way this does: the
+              // ARMS ARE NOT MATERIAL. They are a pattern that turns rigidly, while
+              // individual stars move through it.
+              //
+              // So the pattern rotates at one speed for every radius (no shear, ever), and
+              // the stars get a bounded epicyclic wobble on top, which reads as motion
+              // WITHIN the arms without ever pulling them apart.
+              float r = length(position.xy);
+              float baseAngle = atan(position.y, position.x);
+
+              // Epicyclic frequency rises toward the centre, as it does in a real disc.
+              float kappa = 0.55 + 0.85 / (0.25 + q * 1.6);
+              float epi = uTime * kappa * 0.35 + seed * 6.2831853;
+              float wobbleR = r * (1.0 + sin(epi) * 0.045);
+              float wobbleA = baseAngle + uTime * uPattern + cos(epi) * 0.05;
+
+              vec3 spun = vec3(cos(wobbleA) * wobbleR, sin(wobbleA) * wobbleR, position.z);
+
+              // One exposure curve, four stops. Ordering is the whole look.
+              vec3 tint = mix(uCoreHot, uCoreGold, smoothstep(0.0, 0.19, q));
+              tint = mix(tint, uArmViolet, smoothstep(0.15, 0.46, q));
+              tint = mix(tint, uArmCyan, smoothstep(0.40, 0.78, q));
+              tint = mix(tint, uArmEdge, smoothstep(0.74, 1.0, q));
+
+              // Gentle falloff. Draft two dropped to 0.5 by q=0.34 and left a dead annulus
+              // between the gold bulge and the cyan rim — the disc read as a ring, not a
+              // spiral. The mid radii are where the arms actually are, so they get the light.
+              float brightness = mix(3.0, 1.05, smoothstep(0.0, 0.46, q));
+              brightness *= 1.0 - smoothstep(0.78, 1.04, q) * 0.7;
+              float flicker = 0.85 + 0.15 * sin(uTime * 1.7 + seed * 3.1);
+              vColor = tint * brightness * flicker * uDial;
+
+              vec4 viewPos = modelViewMatrix * vec4(spun, 1.0);
+              gl_Position = projectionMatrix * viewPos;
+              // Core stars are drawn smaller, not bigger: they are already the brightest
+              // thing in the frame, and letting them also be the largest turns the bulge
+              // into one white blob the moment bloom touches it.
+              float size = aScalar.z * (0.55 + q * 0.85);
+              gl_PointSize = clamp(size * uProjScale / -viewPos.z, 1.0, 7.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            ${POINT_HEAD}
+            varying vec3 vColor;
+
+            void main() {
+              gl_FragColor = vec4(vColor * sprite(gl_PointCoord) * 0.3, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+        });
+
+        const points = new THREE.Points(geometry, material);
+        points.frustumCulled = false;
+
+        const group = new THREE.Group();
+        group.add(points);
+        // 1.0 rad, not the 0.62 of draft two: cos(0.62) squashes the disc by only 19%, which
+        // the eye reads as a flat circle seen head-on. At 1.0 it is 54% and the thing is
+        // unmistakably a disc lying in space.
+        group.rotation.x = 1.0;
+        group.rotation.z = -0.24;
+        scene.add(group);
+        return {
+          group,
+          points,
+          material,
+          radius: RADIUS,
+          arms: ARMS,
+          windK: WIND_K,
+          windGain: WIND_GAIN,
+          patternSpeed: PATTERN_SPEED,
+        };
+      }
+
+      // ==================================================================================
+      // Layer 3b — the disc haze.
+      //
+      // One quad lying in the galaxy's own plane, carrying an ANALYTIC version of exactly the
+      // same spiral the points are sampled from. This is the difference between "a particle
+      // system" and "a galaxy": however many points you scatter, the gaps between them stay
+      // visible, and gaps read as spray-paint. The haze fills them with continuous light, so
+      // the points become stars sitting inside a luminous body instead of being the body.
+      //
+      // It has to track the points exactly or the two desynchronise into a double image, so
+      // it re-uses the same three numbers — ARMS, WIND_K, WIND_GAIN — and the same
+      // differential rotation law omega(q). Change one and you must change the other.
+      // ==================================================================================
+      function buildDiscHaze(spec) {
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uDial: { value: 1 },
+            tVeil: { value: veilTexture },
+            uArms: { value: spec.arms },
+            uWindK: { value: spec.windK },
+            uWindGain: { value: spec.windGain },
+            uPattern: { value: spec.patternSpeed },
+            uCoreHot: { value: PALETTE.coreHot.clone() },
+            uCoreGold: { value: PALETTE.coreGold.clone() },
+            uArmViolet: { value: PALETTE.armViolet.clone() },
+            uArmCyan: { value: PALETTE.armCyan.clone() },
+            uArmEdge: { value: PALETTE.armEdge.clone() },
+          },
+          vertexShader: /* glsl */ `
+            varying vec2 vPos;
+            void main() {
+              // Quad spans -1..1 in the disc plane; the fragment shader works in disc radii.
+              vPos = uv * 2.0 - 1.0;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uTime;
+            uniform float uDial;
+            uniform sampler2D tVeil;
+            uniform float uArms;
+            uniform float uWindK;
+            uniform float uWindGain;
+            uniform float uPattern;
+            uniform vec3 uCoreHot;
+            uniform vec3 uCoreGold;
+            uniform vec3 uArmViolet;
+            uniform vec3 uArmCyan;
+            uniform vec3 uArmEdge;
+            varying vec2 vPos;
+
+            void main() {
+              float q = length(vPos);
+              if (q > 1.0) discard;
+
+              float radius = q * 5.0;
+              // Points are rotated BY +uPattern*t, so the pattern this shader draws has to
+              // be read at -uPattern*t to land in the same place. Same constant, no shear.
+              float angle = atan(vPos.y, vPos.x) - uTime * uPattern;
+
+              float wound = angle - log(1.0 + radius * uWindK) * uWindGain;
+              float arms = cos(uArms * wound) * 0.5 + 0.5;
+              arms = pow(arms, 2.0);
+
+              // Break the perfectly analytic arms with the same baked noise the veils use,
+              // sampled in polar so the grain travels with the arm rather than across it.
+              vec2 grainUv = vec2(wound * 0.16, q * 1.3 + uTime * 0.004);
+              float grain = texture2D(tVeil, grainUv).r;
+              arms *= 0.55 + 0.9 * grain;
+
+              // Exponential body with a bulge floor, so the haze does not stop at the last arm.
+              float body = exp(-q * 3.1) * 0.9 + exp(-q * 8.0) * 1.6;
+              float density = body * (0.3 + 0.7 * arms);
+              density *= 1.0 - smoothstep(0.72, 1.0, q);
+
+              vec3 tint = mix(uCoreHot, uCoreGold, smoothstep(0.0, 0.17, q));
+              tint = mix(tint, uArmViolet, smoothstep(0.14, 0.44, q));
+              tint = mix(tint, uArmCyan, smoothstep(0.38, 0.76, q));
+              tint = mix(tint, uArmEdge, smoothstep(0.72, 1.0, q));
+
+              gl_FragColor = vec4(tint * density * 0.5 * uDial, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+        mesh.scale.setScalar(spec.radius * 2);
+        mesh.frustumCulled = false;
+        return { mesh, material };
+      }
+
+      // ==================================================================================
+      // Layer 3c — the orbit rings.
+      //
+      // This is what turns an astronomical picture into a magical one, and it is the cue
+      // taken from the Zooming Spiral reference: many thin concentric strokes converging on
+      // a centre. A photograph of a galaxy is beautiful and inert; a galaxy with a ring
+      // system drawn around it in light is an INSTRUMENT, and an instrument implies someone
+      // operating it. That is the whole difference between "looks good" and "looks magical".
+      //
+      // Forty-odd rings in ONE draw call: they are a fract() pattern over radius, so the
+      // count is a uniform rather than forty pieces of geometry. Width is resolved with
+      // fwidth so they antialias themselves at any distance and never alias into moire — the
+      // failure that ate v2's outer bands whenever the camera tilted low.
+      // ==================================================================================
+      function buildRingField(spec) {
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uDial: { value: 1 },
+            uInner: { value: spec.inner },
+            uCount: { value: spec.count },
+            uGold: { value: PALETTE.coreGold.clone() },
+            uCyan: { value: PALETTE.armCyan.clone() },
+            uHot: { value: PALETTE.coreHot.clone() },
+          },
+          vertexShader: /* glsl */ `
+            varying vec2 vPos;
+            void main() {
+              vPos = uv * 2.0 - 1.0;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uTime;
+            uniform float uDial;
+            uniform float uInner;
+            uniform float uCount;
+            uniform vec3 uGold;
+            uniform vec3 uCyan;
+            uniform vec3 uHot;
+            varying vec2 vPos;
+
+            float hash11(float n) {
+              return fract(sin(n * 127.1) * 43758.5453123);
+            }
+
+            void main() {
+              float r = length(vPos);
+              if (r > 1.0 || r < uInner) discard;
+
+              // pow() spaces the rings unevenly — evenly spaced rings read as a machined
+              // grating, uneven ones read as something that was drawn.
+              float phase = pow(r, 0.82) * uCount;
+              float id = floor(phase);
+              float f = fract(phase);
+
+              // Screen-space-correct line width: fwidth is the whole reason this can carry
+              // forty rings to the horizon without turning into interference fringes.
+              float aa = max(fwidth(phase), 1e-5);
+              float dist = min(f, 1.0 - f);
+              float seed = hash11(id);
+              float weight = 0.16 + seed * 0.5;
+              float line = 1.0 - smoothstep(0.0, aa * (1.2 + weight * 2.2), dist);
+
+              // Each ring keeps its own brightness and its own slow breath, so the set never
+              // pulses as one object.
+              float breath = 0.45 + 0.55 * sin(uTime * (0.18 + seed * 0.5) + seed * 20.0);
+              // Skewed hard, not spread evenly: with a linear ramp every ring lands at a
+              // similar value and the set reads as a contour map. pow(seed, 2.4) keeps most
+              // of them near-invisible and lets three or four carry the whole figure.
+              float bright = (0.1 + pow(seed, 2.4) * 1.55) * (0.5 + 0.5 * breath);
+              bright *= 1.0 - smoothstep(0.25, 0.95, r) * 0.6;
+
+              // One charge travelling outward through the whole system. This is the "someone
+              // is operating it" beat; without it the rings are just decoration.
+              float pulseFront = fract(uTime * 0.045);
+              float travel = pow(max(0.0, 1.0 - abs(r - pulseFront * 1.25) * 7.0), 3.0);
+
+              // Angular gaps: a broken arc reads as drawn, a closed circle reads as printed.
+              float angle = atan(vPos.y, vPos.x);
+              float gate = smoothstep(0.15, 0.5, abs(sin(angle * (1.0 + floor(seed * 4.0)) + seed * 9.0)));
+              gate = mix(1.0, gate, step(0.55, seed));
+
+              float fade = smoothstep(uInner, uInner + 0.12, r) * (1.0 - smoothstep(0.72, 1.0, r));
+
+              vec3 tint = mix(uCyan, uGold, step(0.5, hash11(id + 7.3)));
+              vec3 color = tint * bright + uHot * travel * 1.6;
+              gl_FragColor = vec4(color * line * gate * fade * (0.5 + travel * 2.0) * 0.5 * uDial, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+        mesh.scale.setScalar(spec.outer * 2);
+        mesh.frustumCulled = false;
+        return { mesh, material };
+      }
+
+      // ==================================================================================
+      // Layer 4 — the core.
+      //
+      // A camera-facing quad with an analytic falloff, plus a wide anamorphic streak. The
+      // streak is the single cheapest thing that reads as "expensive render" — real
+      // spherical optics do it, so its absence is what makes CG glows look like decals.
+      // ==================================================================================
+      function buildCore() {
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uDial: { value: 1 },
+            uHot: { value: PALETTE.coreHot.clone() },
+            uGold: { value: PALETTE.coreGold.clone() },
+          },
+          vertexShader: /* glsl */ `
+            varying vec2 vUv;
+            void main() {
+              vUv = uv;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uTime;
+            uniform float uDial;
+            uniform vec3 uHot;
+            uniform vec3 uGold;
+            varying vec2 vUv;
+
+            void main() {
+              vec2 p = (vUv - 0.5) * 2.0;
+              float d = length(p);
+
+              // Three nested falloffs: a broad halo, a tight core, and a pinpoint. Summing
+              // powers of the same distance is what gives a glow a shoulder instead of a
+              // linear ramp, and the shoulder is the part the eye reads as brightness.
+              float halo = pow(max(0.0, 1.0 - d), 3.0) * 0.34;
+              float core = pow(max(0.0, 1.0 - d), 9.0) * 0.8;
+              float pin = pow(max(0.0, 1.0 - d), 40.0) * 1.7;
+
+              // Anamorphic streak: wide in x, razor thin in y. Kept quiet — draft one had it
+              // at 0.55 and the piece read as a lens flare with a galaxy behind it.
+              float streak = pow(max(0.0, 1.0 - abs(p.y) * 16.0), 3.0)
+                           * pow(max(0.0, 1.0 - abs(p.x) * 1.05), 2.4) * 0.3;
+
+              float breathe = 0.9 + 0.1 * sin(uTime * 0.42);
+              vec3 color = uGold * (halo + streak * 0.55) + uHot * (core + pin + streak * 0.45);
+              gl_FragColor = vec4(color * breathe * uDial, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+        });
+
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+        mesh.scale.set(5.0, 5.0, 1);
+        mesh.frustumCulled = false;
+        scene.add(mesh);
+        return { mesh, material };
+      }
+
+      // ==================================================================================
+      // Layer 5 — the arc.
+      //
+      // This is the "Chromatic Aberration WebGL Sine Wave" reference, rebuilt rather than
+      // copied: a wide shallow smile low in the frame, white at the centreline with red
+      // riding one edge and blue the other.
+      //
+      // The fringe is NOT the post-process aberration. It comes from evaluating the arc's
+      // own cross-section profile three times at three slightly different offsets, which is
+      // what a lens actually does to a bright thin source, and it survives at full strength
+      // where a global RGB shift would smear the entire frame to get the same edge.
+      //
+      // Geometry is a static ribbon; the undulation is a vertex displacement that depends
+      // only on position ALONG the arc, so both edge vertices of a rib move together and
+      // the ribbon waves without changing width.
+      // ==================================================================================
+      function buildArc(spec) {
+        const SEGMENTS = 300;
+        const positions = new Float32Array((SEGMENTS + 1) * 2 * 3);
+        const params = new Float32Array((SEGMENTS + 1) * 2 * 2); // t, v
+        const indices = [];
+
+        for (let i = 0; i <= SEGMENTS; i += 1) {
+          const t = i / SEGMENTS;
+          const x = (t - 0.5) * 2 * spec.span;
+          const norm = x / spec.span;
+          // Quadratic smile plus a long slow tilt, so it is not a symmetric bowl.
+          const y = spec.y + spec.sag * norm * norm + spec.tilt * norm;
+          const z = spec.z - spec.depth * norm * norm;
+          // Taper the ends to nothing: a ribbon that runs off-frame at full width reads as
+          // a mistake in a composition this empty.
+          const taper = Math.pow(Math.max(0, 1 - Math.abs(norm)), 0.55);
+          const width = spec.width * (0.25 + 0.75 * taper);
+
+          for (let side = 0; side < 2; side += 1) {
+            const v = side === 0 ? -1 : 1;
+            const base = (i * 2 + side) * 3;
+            positions[base] = x;
+            positions[base + 1] = y + v * width;
+            positions[base + 2] = z;
+            params[(i * 2 + side) * 2] = t;
+            params[(i * 2 + side) * 2 + 1] = v;
+          }
+
+          if (i < SEGMENTS) {
+            const a = i * 2;
+            indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+          }
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('aParam', new THREE.BufferAttribute(params, 2));
+        geometry.setIndex(indices);
+
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uDial: { value: 1 },
+            uTint: { value: spec.tint.clone() },
+            uIntensity: { value: spec.intensity },
+            uShift: { value: spec.shift },
+            uSoft: { value: spec.soft },
+            uAmp: { value: spec.amp },
+            uPhase: { value: spec.phase },
+          },
+          vertexShader: /* glsl */ `
+            attribute vec2 aParam;
+            uniform float uTime;
+            uniform float uAmp;
+            uniform float uPhase;
+            varying float vT;
+            varying float vV;
+
+            void main() {
+              vT = aParam.x;
+              vV = aParam.y;
+
+              // Depends on t only, never on v, so the two vertices of a rib move as one.
+              float wave = sin(vT * 7.3 + uTime * 0.42 + uPhase) * 0.62
+                         + sin(vT * 3.1 - uTime * 0.27 + uPhase * 1.7) * 1.0
+                         + sin(vT * 13.7 + uTime * 0.61) * 0.18;
+
+              vec3 p = position;
+              p.y += wave * uAmp;
+              p.z += cos(vT * 5.1 + uTime * 0.23 + uPhase) * uAmp * 1.4;
+
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform vec3 uTint;
+            uniform float uIntensity;
+            uniform float uShift;
+            uniform float uSoft;
+            uniform float uDial;
+            uniform float uTime;
+            varying float vT;
+            varying float vV;
+
+            float profile(float v, float k) {
+              return pow(max(0.0, 1.0 - abs(v)), k);
+            }
+
+            void main() {
+              // Three samples of the same cross-section, offset per channel. Red rides the
+              // -v edge, blue the +v edge, and where all three overlap you get white.
+              float r = profile(vV + uShift, uSoft);
+              float g = profile(vV, uSoft);
+              float b = profile(vV - uShift, uSoft);
+              vec3 split = vec3(r, g, b);
+
+              float core = profile(vV, uSoft * 7.0);
+
+              // Fade the ends so the ribbon resolves into the field instead of stopping.
+              float ends = smoothstep(0.0, 0.16, vT) * (1.0 - smoothstep(0.84, 1.0, vT));
+
+              // One slow bright travelling along it, so the arc is alive without moving.
+              float travel = pow(max(0.0, sin(vT * 3.14159 - uTime * 0.17)), 5.0);
+
+              vec3 color = split * uTint * (0.85 + travel * 0.9);
+              color += vec3(1.0) * core * (1.1 + travel * 1.4);
+
+              gl_FragColor = vec4(color * uIntensity * ends * uDial, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.frustumCulled = false;
+        scene.add(mesh);
+        return { mesh, material };
+      }
+
+      // ==================================================================================
+      // Layer 6 — starfall.
+      //
+      // Quads, not GL lines: line width is locked to 1px on every WebGL implementation, and
+      // a 1px streak against bloom is a dotted artefact rather than a meteor. Each meteor is
+      // one quad whose head and tail positions are solved in the vertex shader from a
+      // per-meteor seed, so the buffer is static and nothing is uploaded per frame.
+      // ==================================================================================
+      function buildMeteors() {
+        const COUNT = 11;
+        const vertexCount = COUNT * 4;
+        const start = new Float32Array(vertexCount * 3);
+        const dir = new Float32Array(vertexCount * 3);
+        const perp = new Float32Array(vertexCount * 3);
+        const params = new Float32Array(vertexCount * 4); // u, v, seed, rate
+        const shape = new Float32Array(vertexCount * 2); // travel, width
+        const indices = [];
+
+        const forward = new THREE.Vector3(0, 0, 1);
+        const direction = new THREE.Vector3();
+        const sideways = new THREE.Vector3();
+
+        for (let meteor = 0; meteor < COUNT; meteor += 1) {
+          // Enter high and to one side, exit low and across. Mixed handedness, or they read
+          // as rain.
+          const handed = Math.random() < 0.5 ? -1 : 1;
+          const originX = handed * (7 + Math.random() * 13);
+          const originY = 5 + Math.random() * 9;
+          const originZ = -6 - Math.random() * 22;
+          direction.set(-handed * (0.55 + Math.random() * 0.5), -(0.72 + Math.random() * 0.4), 0.06).normalize();
+          sideways.crossVectors(direction, forward).normalize();
+
+          const seed = Math.random();
+          const rate = 0.028 + Math.random() * 0.03;
+          const travel = 22 + Math.random() * 16;
+          const width = 0.035 + Math.random() * 0.05;
+
+          for (let corner = 0; corner < 4; corner += 1) {
+            const vertex = meteor * 4 + corner;
+            const u = corner < 2 ? 0 : 1; // 0 tail, 1 head
+            const v = corner % 2 === 0 ? -1 : 1;
+
+            start[vertex * 3] = originX;
+            start[vertex * 3 + 1] = originY;
+            start[vertex * 3 + 2] = originZ;
+            dir[vertex * 3] = direction.x;
+            dir[vertex * 3 + 1] = direction.y;
+            dir[vertex * 3 + 2] = direction.z;
+            perp[vertex * 3] = sideways.x;
+            perp[vertex * 3 + 1] = sideways.y;
+            perp[vertex * 3 + 2] = sideways.z;
+
+            params[vertex * 4] = u;
+            params[vertex * 4 + 1] = v;
+            params[vertex * 4 + 2] = seed;
+            params[vertex * 4 + 3] = rate;
+            shape[vertex * 2] = travel;
+            shape[vertex * 2 + 1] = width;
+          }
+
+          const base = meteor * 4;
+          indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        // `position` is required by three's shader plumbing even though every coordinate is
+        // solved in the vertex shader; the start attribute is the real anchor.
+        geometry.setAttribute('position', new THREE.BufferAttribute(start, 3));
+        geometry.setAttribute('aDir', new THREE.BufferAttribute(dir, 3));
+        geometry.setAttribute('aPerp', new THREE.BufferAttribute(perp, 3));
+        geometry.setAttribute('aParam', new THREE.BufferAttribute(params, 4));
+        geometry.setAttribute('aShape', new THREE.BufferAttribute(shape, 2));
+        geometry.setIndex(indices);
+
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uDial: { value: 1 },
+            uTint: { value: PALETTE.meteor.clone() },
+            uWarm: { value: PALETTE.starWarm.clone() },
+            uTail: { value: 4.2 },
+          },
+          vertexShader: /* glsl */ `
+            attribute vec3 aDir;
+            attribute vec3 aPerp;
+            attribute vec4 aParam;
+            attribute vec2 aShape;
+            uniform float uTime;
+            uniform float uTail;
+            varying float vU;
+            varying float vV;
+            varying float vAlpha;
+
+            void main() {
+              float u = aParam.x;
+              float seed = aParam.z;
+              float rate = aParam.w;
+              float travel = aShape.x;
+              float width = aShape.y;
+
+              float cycle = fract(uTime * rate + seed);
+              float head = cycle * travel;
+              // Clamping the tail at 0 makes the streak GROW out of nothing at launch
+              // instead of appearing full length, which is both correct and prettier.
+              float tail = max(0.0, head - uTail);
+              float along = mix(tail, head, u);
+
+              // The streak is a wedge: wide at the head, pinched at the tail.
+              vec3 p = position + aDir * along + aPerp * aParam.y * width * (0.18 + 0.82 * u);
+
+              // Visible for the first fifth of the cycle only; the rest is the wait. With 11
+              // meteors that averages about two on screen, which is an event rather than
+              // weather.
+              vAlpha = smoothstep(0.0, 0.015, cycle) * (1.0 - smoothstep(0.10, 0.20, cycle));
+              vU = u;
+              vV = aParam.y;
+
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform vec3 uTint;
+            uniform vec3 uWarm;
+            uniform float uDial;
+            varying float vU;
+            varying float vV;
+            varying float vAlpha;
+
+            void main() {
+              float across = pow(max(0.0, 1.0 - abs(vV)), 2.0);
+              float along = pow(vU, 2.6);
+              vec3 color = mix(uTint, uWarm, pow(vU, 6.0) * 0.55);
+              float core = pow(vU, 22.0);
+              gl_FragColor = vec4((color * along + vec3(1.0) * core) * across * vAlpha * 2.4 * uDial, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.frustumCulled = false;
+        scene.add(mesh);
+        return { mesh, material };
+      }
+
+      // ==================================================================================
+      // Layer 7 — foreground dust.
+      //
+      // Close to the camera, large, dim and soft: these never read as objects, they read as
+      // the lens having something in front of it. This is the layer that does most of the
+      // work in the pointer parallax, because it moves furthest per degree.
+      // ==================================================================================
+      function buildDust() {
+        const COUNT = 620;
+        const positions = new Float32Array(COUNT * 3);
+        const scalars = new Float32Array(COUNT * 3); // size, seed, brightness
+
+        for (let index = 0; index < COUNT; index += 1) {
+          positions[index * 3] = (Math.random() - 0.5) * 26;
+          positions[index * 3 + 1] = (Math.random() - 0.5) * 18;
+          positions[index * 3 + 2] = 2 + Math.random() * 13;
+          scalars[index * 3] = 0.02 + Math.pow(Math.random(), 2.0) * 0.09;
+          scalars[index * 3 + 1] = Math.random() * TAU;
+          scalars[index * 3 + 2] = 0.1 + Math.pow(Math.random(), 2.4) * 0.55;
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('aScalar', new THREE.BufferAttribute(scalars, 3));
+
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uProjScale,
+            uTint: { value: PALETTE.starCool.clone() },
+          },
+          vertexShader: /* glsl */ `
+            attribute vec3 aScalar;
+            uniform float uTime;
+            uniform float uProjScale;
+            varying float vBright;
+
+            void main() {
+              float seed = aScalar.y;
+              vec3 p = position;
+              // Slow lissajous drift. Two unrelated rates per axis so nothing in the field
+              // ever moves in step with anything else.
+              p.x += sin(uTime * 0.07 + seed) * 0.9 + sin(uTime * 0.031 + seed * 2.3) * 0.5;
+              p.y += cos(uTime * 0.055 + seed * 1.7) * 0.7 - uTime * 0.045;
+              p.y = mod(p.y + 9.0, 18.0) - 9.0;
+
+              vBright = aScalar.z * (0.55 + 0.45 * sin(uTime * 0.5 + seed * 3.7));
+
+              vec4 viewPos = modelViewMatrix * vec4(p, 1.0);
+              gl_Position = projectionMatrix * viewPos;
+              gl_PointSize = clamp(aScalar.x * uProjScale / -viewPos.z, 1.0, 26.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            ${POINT_HEAD}
+            uniform vec3 uTint;
+            varying float vBright;
+
+            void main() {
+              gl_FragColor = vec4(uTint * sprite(gl_PointCoord) * vBright * 0.3, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+        });
+
+        const points = new THREE.Points(geometry, material);
+        points.frustumCulled = false;
+        scene.add(points);
+        return { points, material };
+      }
+
+      const storm = buildStorm();
+      const stars = buildStars();
+      const veils = buildVeils();
+      const bokeh = buildBokeh();
+      const galaxy = buildGalaxy();
+      const haze = buildDiscHaze(galaxy);
+      galaxy.group.add(haze.mesh);
+      // Rings live in the galaxy's own plane, so they tilt with it and read as orbits rather
+      // than as a flat overlay pasted on the frame.
+      const rings = buildRingField({ inner: 0.3, outer: galaxy.radius * 1.72, count: 24 });
+      galaxy.group.add(rings.mesh);
+      const core = buildCore();
+      const arcs = [
+        buildArc({
+          span: 17,
+          y: -5.4,
+          sag: 3.6,
+          tilt: 0.5,
+          z: -5.5,
+          depth: 2.4,
+          width: 0.5,
+          amp: 0.34,
+          phase: 0,
+          intensity: 1.25,
+          // shift is measured in half-widths. Draft one used 0.5 — half the ribbon — and the
+          // arc came out a flat rainbow band instead of a white line with a lens's fringe on
+          // it. The reference has the split confined to the outer rim; that is this number.
+          shift: 0.2,
+          soft: 2.6,
+          tint: PALETTE.arcTint.clone(),
+        }),
+        buildArc({
+          span: 15,
+          y: -6.6,
+          sag: 2.2,
+          tilt: -1.1,
+          z: -2.5,
+          depth: 1.2,
+          width: 0.34,
+          amp: 0.26,
+          phase: 2.4,
+          intensity: 0.26,
+          shift: 0.26,
+          soft: 3.6,
+          tint: PALETTE.armViolet.clone(),
+        }),
+      ];
+      const meteors = buildMeteors();
+      const dust = buildDust();
+
+      // ==================================================================================
+      // Resolution governor.
+      //
+      // The honest fix for "it cooks my laptop" is not a fixed pixel-ratio guess — v1's
+      // clamp of 1.5 was a guess and it was wrong for an M4 Pro. This measures the actual
+      // median frame cost and moves the render scale until the frame fits the budget, so the
+      // piece is as sharp as the machine can afford and never sharper. It starts at 1 and
+      // has to earn its way up, so a weak GPU never pays for a resolution it cannot hold
+      // even for the first second.
+      // ==================================================================================
+      const FRAME_INTERVAL_MS = 1000 / 30;
+      const governor = {
+        scale: 1,
+        min: 0.5,
+        max: Math.min(devicePixelRatio, 2),
+        samples: [],
+        lastAdjust: 0,
+      };
+      governor.scale = Math.min(1, governor.max);
+
+      let viewportWidth = 1;
+      let viewportHeight = 1;
+
+      function applyScale() {
+        const pixelRatio = governor.scale;
+        renderer.setPixelRatio(pixelRatio);
+        renderer.setSize(viewportWidth, viewportHeight, false);
+        composer.setPixelRatio(pixelRatio);
+        composer.setSize(viewportWidth, viewportHeight);
+        gradePass.uniforms.uResolution.value.set(
+          viewportWidth * pixelRatio,
+          viewportHeight * pixelRatio,
+        );
+        // FXAA reads neighbours by texel offset, so it needs DEVICE pixels. Feeding it CSS
+        // pixels makes it sample 1/pixelRatio of a texel away — a no-op that still costs a
+        // full pass, which is the quiet way this pass ends up doing nothing on hiDPI.
+        fxaaPass.material.uniforms.resolution.value.set(
+          1 / (viewportWidth * pixelRatio),
+          1 / (viewportHeight * pixelRatio),
+        );
+        uProjScale.value =
+          (viewportHeight * pixelRatio) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+      }
+
+      function resize() {
+        const bounds = stage.getBoundingClientRect();
+        viewportWidth = Math.max(1, Math.round(bounds.width));
+        viewportHeight = Math.max(1, Math.round(bounds.height));
+        camera.aspect = viewportWidth / viewportHeight;
+        camera.updateProjectionMatrix();
+        applyScale();
+      }
+
+      function considerScale(medianMs, now) {
+        if (now - governor.lastAdjust < 900) return;
+        const budget = FRAME_INTERVAL_MS * 0.72; // leave headroom for the compositor
+        let next = governor.scale;
+        if (medianMs > budget) next = governor.scale * 0.86;
+        else if (medianMs < budget * 0.55) next = governor.scale * 1.07;
+        next = THREE.MathUtils.clamp(next, governor.min, governor.max);
+        if (Math.abs(next - governor.scale) > 0.01) {
+          governor.scale = next;
+          applyScale();
+          governor.lastAdjust = now;
+        }
+      }
+
+      // ==================================================================================
+      // Pointer parallax.
+      //
+      // The camera moves, not the scene, so every layer separates by its real distance for
+      // free. Targets are damped rather than followed: an undamped camera tracks the mouse
+      // exactly and immediately looks like a cheap mousemove handler.
+      // ==================================================================================
+      const pointer = { x: 0, y: 0, targetX: 0, targetY: 0 };
+
+      function setupPointer() {
+        stage.addEventListener('pointermove', (event) => {
+          const bounds = stage.getBoundingClientRect();
+          pointer.targetX = ((event.clientX - bounds.left) / bounds.width - 0.5) * 2;
+          pointer.targetY = ((event.clientY - bounds.top) / bounds.height - 0.5) * 2;
+        });
+        stage.addEventListener('pointerleave', () => {
+          pointer.targetX = 0;
+          pointer.targetY = 0;
+        });
+      }
+
+      function setupDials() {
+        for (const key of ['bloom', 'galaxy', 'arc', 'veils']) {
+          const input = document.querySelector('#dial-' + key);
+          const label = document.querySelector('#val-' + key);
+          const sync = () => {
+            dials[key] = Number(input.value) / 100;
+            label.textContent = dials[key].toFixed(2);
+          };
+          input.addEventListener('input', sync);
+          sync();
+        }
+        addEventListener('keydown', (event) => {
+          if (event.key === 'h' || event.key === 'H') {
+            document.querySelector('#hud').classList.toggle('hidden');
+          }
+          if (event.key === 't' || event.key === 'T') {
+            document.querySelector('#title').classList.toggle('hidden');
+          }
+        });
+      }
+
+      const statFps = document.querySelector('#stat-fps');
+      const statMs = document.querySelector('#stat-ms');
+      const statCalls = document.querySelector('#stat-calls');
+      const statScale = document.querySelector('#stat-scale');
+
+      // ==================================================================================
+      // Frame loop. 30 fps cap: this is a slow ambient piece and nothing in it benefits from
+      // 60, let alone the 120 a ProMotion panel would otherwise drive. Scene time comes from
+      // the wall clock, so the cap changes smoothness only, never tempo.
+      // ==================================================================================
+      const clock = new THREE.Clock();
+      const REDUCED_MOTION_TIME = 26.0;
+      let lastFrameStamp = -Infinity;
+      let fpsWindowStart = 0;
+      let fpsWindowFrames = 0;
+
+      function animate(frameStamp = 0) {
+        requestAnimationFrame(animate);
+        if (frameStamp - lastFrameStamp < FRAME_INTERVAL_MS - 1) return;
+        lastFrameStamp = frameStamp;
+
+        const frameStart = performance.now();
+        const time = reducedMotion ? REDUCED_MOTION_TIME : clock.getElapsedTime();
+        uTime.value = time;
+
+        pointer.x += (pointer.targetX - pointer.x) * 0.045;
+        pointer.y += (pointer.targetY - pointer.y) * 0.045;
+
+        // Autonomous drift so the piece lives without a pointer, plus a very slow dolly.
+        // The dolly is the "zooming spiral" cue: it never arrives anywhere, it just keeps
+        // the parallax from settling.
+        const driftX = Math.sin(time * 0.043) * 0.55 + Math.sin(time * 0.017) * 0.3;
+        const driftY = Math.cos(time * 0.037) * 0.32;
+        const dolly = Math.sin(time * 0.021) * 0.85;
+
+        camera.position.set(
+          CAMERA_BASE.x + driftX - pointer.x * 1.15,
+          CAMERA_BASE.y + driftY + pointer.y * 0.7,
+          CAMERA_BASE.z + dolly,
+        );
+        camera.lookAt(CAMERA_TARGET);
+        // Barely-there roll. At this amplitude it is not seen, it is only felt.
+        camera.rotation.z += Math.sin(time * 0.029) * 0.012;
+
+        galaxy.group.rotation.z = -0.24 + Math.sin(time * 0.02) * 0.03;
+        core.mesh.quaternion.copy(camera.quaternion);
+        for (const child of veils.group.children) child.rotation.z += child.userData.spin * 0.016;
+
+        galaxy.material.uniforms.uDial.value = dials.galaxy;
+        haze.material.uniforms.uDial.value = dials.galaxy;
+        rings.material.uniforms.uDial.value = dials.galaxy;
+        core.material.uniforms.uDial.value = dials.galaxy;
+        for (const arc of arcs) arc.material.uniforms.uDial.value = dials.arc;
+        for (const material of veils.materials) material.uniforms.uDial.value = dials.veils;
+        storm.material.uniforms.uDial.value = dials.veils;
+        bokeh.material.uniforms.uDial.value = dials.veils;
+
+        bloom.strength = 0.28 * dials.bloom;
+        bloom.radius = 0.86;
+        gradePass.uniforms.uTime.value = time;
+
+        composer.render();
+
+        // ---- governor + readout
+        const cost = performance.now() - frameStart;
+        governor.samples.push(cost);
+        if (governor.samples.length > 24) governor.samples.shift();
+        if (governor.samples.length === 24) {
+          const sorted = [...governor.samples].sort((a, b) => a - b);
+          considerScale(sorted[12], frameStamp);
+        }
+        fpsWindowFrames += 1;
+        if (frameStamp - fpsWindowStart > 500) {
+          const fps = (fpsWindowFrames * 1000) / (frameStamp - fpsWindowStart);
+          statFps.textContent = fps.toFixed(0);
+          statMs.textContent = cost.toFixed(1);
+          statCalls.textContent = renderer.info.render.calls;
+          statScale.textContent = governor.scale.toFixed(2);
+          fpsWindowStart = frameStamp;
+          fpsWindowFrames = 0;
+        }
+      }
+
+      new ResizeObserver(resize).observe(stage);
+      resize();
+      setupPointer();
+      setupDials();
+      animate();
+
+      // Handles for the offscreen probe harness (screenshot + benchmark without a visible
+      // pane). Harmless in production; the standalone page is a study, not shipped chrome.
+      window.__ad = {
+        THREE,
+        renderer,
+        scene,
+        camera,
+        composer,
+        animate,
+        bloom,
+        gradePass,
+        fxaaPass,
+        governor,
+        resize,
+        applyScale,
+        dials,
+        layers: { storm, stars, veils, bokeh, galaxy, haze, rings, core, arcs, meteors, dust },
+        uniforms: { uTime, uProjScale },
+        clock,
+        // Scrub scene time. Everything animated reads the clock, so this is the only way to
+        // preview a composition minutes ahead without waiting minutes.
+        setTime(seconds) {
+          clock.startTime = performance.now() - seconds * 1000;
+          clock.oldTime = clock.startTime;
+          clock.elapsedTime = 0;
+        },
+      };
+    </script>
+  </body>
+</html>
