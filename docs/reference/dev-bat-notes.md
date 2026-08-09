@@ -116,22 +116,26 @@ ERROR: Input redirection is not supported, exiting the process immediately.
 
 ---
 
-## 五、内容仓模式 `--content`（D14 跨仓读写）
+## 五、内容仓模式（D14 跨仓读写，默认自动启用）
 
 内容-引擎分离波 4（D14）之后，`/data/*` 的读取与「保存为默认」的写入默认落在 **公开仓占位内容**（只读）；只有设置环境变量 `POEM_CONTENT_DIR` 时，才指向**内容仓**（真实内容真源）并开放写入。
 
-`dev.bat --content`（或 `npm run dev -- --content`）就是干这个的：未显式设置 `POEM_CONTENT_DIR` 时，自动指向引擎仓的兄弟目录 `..\fated_poem_independent_assets\data`（内容仓的 data 子目录）。已显式设置则尊重原值，不覆盖。
+**默认自动启用**：`dev.bat` 启动时检测引擎仓的兄弟目录 `..\fated_poem_independent_assets\data`（内容仓的 data 子目录）是否存在——存在则自动设 `POEM_CONTENT_DIR` 进入内容仓模式，**无需任何参数**。已显式设置 `POEM_CONTENT_DIR` 时尊重原值，不覆盖。
+
+- `dev.bat --no-content`（或 `npm run dev -- --no-content`）：显式退回占位模式（内容只读、按钮隐藏）
+- `dev.bat --content`：历史兼容参数，等价于默认行为
+- ⚠️ 注意：`dev.bat` 的 `if not defined POEM_CONTENT_DIR (...)` 用了**括号块内的延迟展开坑**（块内 `if defined` 读的是块开始时的值），所以分支写成无嵌套结构（`%~1`/`%~2` 直接判 `--no-content`，`if exist` 独立成块）——改这段务必保持"每条语句独立一行"的结构，别把 `set` 和 `if defined` 塞进同一个括号块。
 
 ### 三条务必知道
 
 1. **路径必须是内容仓的 `data` 子目录**，不是内容仓根。`vite.config.ts` 的 `dataDir = poemContentDir`，中间件 `resolve(dataDir, 'defaults/...')`——传错一级就写不进 `data/defaults/agent-config.json`。
-2. **「保存为默认」按钮的出现与否完全由它决定**：`AgentConfigPanel.vue` 的 `canSaveAsDefault = __POEM_CONTENT_DIR__`（vite 编译期布尔）。不带 `--content` 时按钮不渲染——这是刻意设计（占位内容不允许被 UI 写）。主人想改内容：`npm run dev -- --content` 即可，按钮自然出现。
+2. **「保存为默认」按钮的出现与否完全由它决定**：`AgentConfigPanel.vue` 的 `canSaveAsDefault = __POEM_CONTENT_DIR__`（vite 编译期布尔）。内容仓存在时按钮自动出现；`--no-content` 或内容仓缺失时按钮隐藏——这是刻意设计（占位内容不允许被 UI 写）。主人想改内容：直接 `npm run dev` 即可（内容仓存在时自动启用）。
 3. **跨仓库写入是设计内行为，且是安全的**：内容仓是独立 git 仓库（`E:\code\fated_poem_independent_assets`），写入 = 内容仓出现未提交改动，引擎仓零污染。改完记得去内容仓 git commit。写入路径有 P1-03 越界防御（`relative() startsWith('..') || isAbsolute`），Windows 绝对路径逃逸会被 400 拦下。
 
 ### 为什么不能无条件显示按钮
 
-把 `canSaveAsDefault` 改成恒真、或去掉 `--content` 分支，都等于让「保存为默认」在**占位模式**下也能点——那会把公开仓的 `agent-config.json` 占位文件写脏，而占位内容本应是「首次启动无 pack 时的兜底」，一旦被 UI 覆盖就失去了兜底性质。正确做法始终是：**开发时用 `--content` 指向内容仓，把改动写进内容仓**。
+把 `canSaveAsDefault` 改成恒真，等于让「保存为默认」在**占位模式**下也能点——那会把公开仓的 `agent-config.json` 占位文件写脏，而占位内容本应是「首次启动无 pack 时的兜底」，一旦被 UI 覆盖就失去了兜底性质。正确做法始终是：**开发时用内容仓（自动启用），把改动写进内容仓**。
 
 ### 坑：本段改动遵守第一节铁律
 
-`--content` 分支的注释全部纯 ASCII，`echo` 行保留中文（实测安全）。参数解析用 `for %%A in (%*)` 匹配 `--content`——不带参数时 `%*` 为空、循环不执行、变量不设置，行为与旧版完全一致。
+内容仓分支的注释全部纯 ASCII，`echo` 行保留中文（实测安全）。参数解析用 `%~1`/`%~2` 判 `--no-content`、`if exist` 独立成块——避开 cmd 括号块内 `set` + `if defined` 的延迟展开陷阱（实测：同一块内 `set "NO_CONTENT="` 后 `if not defined NO_CONTENT` 恒真，会让 `--no-content` 失效）。
