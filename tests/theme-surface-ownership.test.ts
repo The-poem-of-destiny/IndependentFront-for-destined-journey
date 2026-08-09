@@ -25,6 +25,16 @@ function readRule(css: string, selector: string): string {
   return css.slice(start, end + 1);
 }
 
+function readLastRule(css: string, selector: string): string {
+  const start = css.lastIndexOf(selector);
+  const end = css.indexOf('}', start);
+
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+
+  return css.slice(start, end + 1);
+}
+
 describe('play-area theme surface ownership', () => {
   it('does not bake responsive panel frames into fixed 16:9 viewport plates', () => {
     const integrationCss = readFileSync(
@@ -80,5 +90,38 @@ describe('play-area theme surface ownership', () => {
 
     expect(rule).toContain('gilded-orrery-field-v2.webp');
     expect(rule).toMatch(/background-size:\s*100% 100%,\s*cover;/);
+  });
+
+  it('keeps the Crimson right-panel artwork covered at wide viewports', () => {
+    const crimsonCss = readFileSync(join(UI_ROOT, 'themes', 'crimson.css'), 'utf8');
+    const rule = readLastRule(
+      crimsonCss,
+      ":root[data-theme='crimson'] body .game-page-layout .status-hud::after",
+    );
+
+    expect(rule).toContain('background-image: var(--crimson-right-panel);');
+    expect(rule).toContain('background-size: cover;');
+    expect(rule).toContain('background-position: right bottom;');
+  });
+
+  it('slides one shared Crimson cap between stationary tab buttons', () => {
+    const crimsonCss = readFileSync(join(UI_ROOT, 'themes', 'crimson.css'), 'utf8');
+    const appTabs = readFileSync(join(UI_ROOT, 'components', 'shared', 'AppTabs.vue'), 'utf8');
+    const activeTabRule = readLastRule(
+      crimsonCss,
+      ":root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-active {",
+    );
+
+    expect(appTabs).toContain('class="tab-selection"');
+    expect(appTabs).toContain("'--tab-selection-offset': `${activeIndex * 100}%`");
+    expect(appTabs).toContain("'--tab-selection-width': `${100 / count}%`");
+    expect(crimsonCss).toContain('background-image: var(--crimson-tab-cap);');
+    expect(crimsonCss).toContain('transform: translateX(var(--tab-selection-offset));');
+    expect(crimsonCss).toContain('transition: transform 180ms ease;');
+    expect(activeTabRule).toContain('transform: none !important;');
+    expect(crimsonCss).not.toContain('translateY(3px)');
+    expect(crimsonCss).not.toContain('.tab-active::before');
+    expect(crimsonCss).not.toContain('animation:');
+    expect(crimsonCss).not.toContain('@keyframes');
   });
 });
