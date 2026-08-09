@@ -677,6 +677,29 @@
   height: 100%;
 }
 
+:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-selection,
+:root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-selection {
+  display: block;
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  left: 0;
+  width: var(--tab-selection-width);
+  height: 100%;
+  pointer-events: none;
+  background-color: transparent;
+  background-image: var(--crimson-tab-cap);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  opacity: 1;
+  clip-path: none;
+  border-radius: 0;
+  box-shadow: none;
+  transform: translateX(var(--tab-selection-offset));
+  transition: transform 180ms ease;
+}
+
 :root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-item {
   position: relative;
   z-index: 1;
@@ -727,24 +750,6 @@
   transform: none !important;
   filter: none;
   text-shadow: 0 0 7px rgba(151, 43, 57, 0.34);
-}
-
-:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-active::before {
-  content: '';
-  position: absolute;
-  z-index: 1;
-  inset: 0;
-  pointer-events: none;
-  background-color: transparent;
-  background-image: var(--crimson-tab-cap);
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 100% 100%;
-  opacity: 1;
-  filter: brightness(1.18) contrast(1.08) saturate(1.04) drop-shadow(0 3px 2px rgba(0, 0, 0, 0.74))
-    drop-shadow(0 1px 2px rgba(177, 28, 49, 0.52));
-  clip-path: none;
-  box-shadow: none;
 }
 
 :root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-active::after {
@@ -1073,24 +1078,6 @@
   transform: none !important;
   filter: none;
   text-shadow: 0 0 7px rgba(151, 43, 57, 0.34);
-}
-
-:root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-active::before {
-  content: '';
-  position: absolute;
-  z-index: 1;
-  inset: 0;
-  pointer-events: none;
-  background-color: transparent;
-  background-image: var(--crimson-tab-cap);
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 100% 100%;
-  opacity: 1;
-  filter: brightness(1.18) contrast(1.08) saturate(1.04) drop-shadow(0 3px 2px rgba(0, 0, 0, 0.74))
-    drop-shadow(0 1px 2px rgba(177, 28, 49, 0.52));
-  clip-path: none;
-  box-shadow: none;
 }
 
 :root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-active::after {
@@ -1446,11 +1433,63 @@
   width: 100%;
   height: 100%;
   background-image: var(--crimson-right-panel);
-  background-size: auto max(100%, 62rem);
+  background-size: cover;
   background-position: right bottom;
   mix-blend-mode: normal;
   opacity: 0.62;
   transform: none;
+}
+
+/* Interaction-only pilot: hover reveals an inlay on the stationary strip. */
+:root[data-theme='crimson']
+  body
+  .game-page-layout
+  .hold-body
+  > .tab-bar
+  .tab-item:not(.tab-active)::after {
+  display: block;
+  content: '';
+  position: absolute;
+  z-index: 2;
+  right: 20%;
+  bottom: 5px;
+  left: 20%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(var(--crimson-inlay-gold-rgb) / 82%),
+    transparent
+  );
+  opacity: 0;
+  transform: scaleX(0.35);
+  transition:
+    opacity 180ms ease-out,
+    transform 180ms ease-out;
+  pointer-events: none;
+}
+
+:root[data-theme='crimson']
+  body
+  .game-page-layout
+  .hold-body
+  > .tab-bar
+  .tab-item:not(.tab-active):is(:hover, :focus-visible) {
+  color: var(--theme-text-primary);
+  outline: none;
+  text-shadow:
+    0 0 7px color-mix(in srgb, var(--theme-primary) 42%, transparent),
+    0 1px 2px rgba(0, 0, 0, 0.82);
+}
+
+:root[data-theme='crimson']
+  body
+  .game-page-layout
+  .hold-body
+  > .tab-bar
+  .tab-item:not(.tab-active):is(:hover, :focus-visible)::after {
+  opacity: 0.82;
+  transform: scaleX(1);
 }
 
 /* Stats, effects, and inventory share one neutral liquid-glass body. Their
@@ -1677,8 +1716,8 @@
   filter: brightness(1.32) contrast(1.06) saturate(0.94) drop-shadow(0 2px 2px rgba(0, 0, 0, 0.72));
 }
 
-:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-active::before,
-:root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-active::before {
+:root[data-theme='crimson'] body .game-page-layout .scene-panel > .tab-bar .tab-selection,
+:root[data-theme='crimson'] body .game-page-layout .hold-body > .tab-bar .tab-selection {
   filter: brightness(1.28) contrast(1.06) saturate(1.04) drop-shadow(0 3px 2px rgba(0, 0, 0, 0.7))
     drop-shadow(0 1px 2px rgba(177, 28, 49, 0.48));
 }

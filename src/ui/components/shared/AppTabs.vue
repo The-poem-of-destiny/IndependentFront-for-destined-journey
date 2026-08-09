@@ -1,5 +1,7 @@
 <script setup lang="ts" generic="T extends string">
-defineProps<{
+import { computed } from 'vue';
+
+const props = defineProps<{
   tabs: { key: T; label: string; badge?: number }[];
   active: T;
 }>();
@@ -7,6 +9,19 @@ defineProps<{
 const emit = defineEmits<{
   select: [key: T];
 }>();
+
+const selectionStyle = computed(() => {
+  const count = Math.max(1, props.tabs.length);
+  const activeIndex = Math.max(
+    0,
+    props.tabs.findIndex((tab) => tab.key === props.active),
+  );
+
+  return {
+    '--tab-selection-offset': `${activeIndex * 100}%`,
+    '--tab-selection-width': `${100 / count}%`,
+  };
+});
 </script>
 
 <template>
@@ -22,6 +37,7 @@ const emit = defineEmits<{
         <span class="tab-label">{{ tab.label }}</span>
         <span v-if="tab.badge !== undefined" class="tab-badge">{{ tab.badge }}</span>
       </button>
+      <span class="tab-selection" :style="selectionStyle" aria-hidden="true"></span>
     </div>
   </div>
 </template>
@@ -37,6 +53,10 @@ const emit = defineEmits<{
   scrollbar-width: none;
 }
 .tab-list::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-selection {
   display: none;
 }
 
