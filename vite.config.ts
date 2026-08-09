@@ -99,11 +99,16 @@ export default defineConfig({
             if (req.method !== 'PUT' && req.method !== 'POST') return next();
             const id = (req.url || '').replace(/^\//, '').replace(/\.json$/, '');
             if (!id || id.includes('..')) return next();
-            let body = '';
+            const chunks: Buffer[] = [];
             req.on('data', (chunk: Buffer) => {
-              body += chunk.toString();
+              // 🔴 攒 Buffer 最后统一 toString（2026-08-08 真机）：HTTP 把请求体拆成
+              //    多个 chunk 时，多字节中文可能恰被切成两半——每块各自 toString() 会
+              //    在切分处产生 U+FFFD 替换字符（"展示"曾被切成"展[替换符][替换符]示"、
+              //    顿号丢失），就是 chunk 边界切碎了 UTF-8。
+              chunks.push(chunk);
             });
             req.on('end', () => {
+              const body = Buffer.concat(chunks).toString('utf8');
               try {
                 const worldbooksDir = resolve(dataDir, 'worldbooks');
                 const filePath = resolve(worldbooksDir, `${id}.json`);
@@ -136,11 +141,14 @@ export default defineConfig({
             const rawUrl = (req.url || '').replace(/^\//, '').replace(/\.json$/, '');
             const fileName = rawUrl || 'agent-config';
             if (fileName.includes('..')) return next();
-            let body = '';
+            const chunks: Buffer[] = [];
             req.on('data', (chunk: Buffer) => {
-              body += chunk.toString();
+              // 🔴 攒 Buffer 最后统一 toString（2026-08-08 真机）：同 /api/worldbooks，
+              //    chunk 边界切碎多字节中文时每块各自 toString() 会产 U+FFFD。
+              chunks.push(chunk);
             });
             req.on('end', () => {
+              const body = Buffer.concat(chunks).toString('utf8');
               try {
                 const defaultsDir = resolve(dataDir, 'defaults');
                 if (!fs.existsSync(defaultsDir)) fs.mkdirSync(defaultsDir, { recursive: true });
