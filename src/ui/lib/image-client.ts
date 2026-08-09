@@ -42,6 +42,7 @@ import { parseNaiZip, type NaiRequestBody } from '@engine/image-providers/novela
 import {
   BUILTIN_COMFY_WORKFLOW,
   comfyFail,
+  isComfyPromptRunning,
   parseComfyHistory,
   parseComfyQueueResponse,
   parseComfyWorkflow,
@@ -356,23 +357,37 @@ interface TimeoutGuard {
   dispose: () => void;
 }
 
+/** 单调时钟优先（改系统时间不该影响一次超时判定），没有就退回 Date */
+function nowMs(): number {
+  const perf = (globalThis as { performance?: { now?: () => number } }).performance;
+  return typeof perf?.now === 'function' ? perf.now() : Date.now();
+}
+
 function armTimeout(timeoutMs: number, external?: AbortSignal): TimeoutGuard {
+  const deadlineFrom = nowMs();
+  const limit = Math.max(1, timeoutMs);
   const Ctor = (globalThis as { AbortController?: typeof AbortController }).AbortController;
-  // 没有 AbortController（极老环境 / 精简 runtime）: 原样透传外部信号，
-  // 超时能力降级为无 —— 降级也好过在这里抛出去
+  // 没有 AbortController（极老环境 / 精简 runtime）: 原样透传外部信号 ——
+  // **掐不断在飞的那一发请求**，这一条降级不了。
+  //
+  // 🔴 但 `timedOut()` **不能**跟着退化成恒 false（2026-08-08 审查逮到）: ComfyUI 那半边
+  //    是个 `for(;;)` 轮询循环，唯一的出口就是 `abortFailure()` 里那次 `timedOut()` 查询。
+  //    恒 false 等于把总时限一起关掉，循环会一直转下去（每 1.5 秒一发请求，永不停手）。
+  //    所以这里改用**墙上时钟**兜底: 掐不断已发出的请求，至少循环是有界的。
   if (typeof Ctor !== 'function') {
-    return { signal: external, timedOut: () => false, dispose: () => {} };
+    return {
+      signal: external,
+      timedOut: () => nowMs() - deadlineFrom >= limit,
+      dispose: () => {},
+    };
   }
 
   const ctrl = new Ctor();
   let fired = false;
-  const timer = setTimeout(
-    () => {
-      fired = true;
-      ctrl.abort();
-    },
-    Math.max(1, timeoutMs),
-  );
+  const timer = setTimeout(() => {
+    fired = true;
+    ctrl.abort();
+  }, limit);
 
   const relay = (): void => ctrl.abort();
   if (external) {
@@ -539,10 +554,29 @@ function describeError(err: unknown): string {
 // 3. **超时是 600 秒不是 120 秒**（C13）: 本地出图慢得多，2 分钟硬闸会把一张仍在渲染的图
 //    记成失败，然后它又悄悄落在用户的输出目录里 —— 最难解释的那种「失败」。
 
-/** 同源 BFF 路由（`server/routes/image.ts` 的三条 `forward()`） */
+/** 同源 BFF 路由（`server/routes/image.ts` 的几条 `forward()`） */
 export const COMFY_BFF_PROMPT = '/api/image/comfy/prompt';
 export const COMFY_BFF_HISTORY = '/api/image/comfy/history';
 export const COMFY_BFF_VIEW = '/api/image/comfy/view';
+/** 取消善后专用（GET 查队列 / POST 点名删）—— 见 {@link cancelComfyPrompt} */
+export const COMFY_BFF_QUEUE = '/api/image/comfy/queue';
+/** 取消善后专用（掐掉正在跑的那张）—— 见 {@link cancelComfyPrompt} */
+export const COMFY_BFF_INTERRUPT = '/api/image/comfy/interrupt';
+
+/** BFF 自己会补的上游路径。用户把它一起粘进 base 时要剃掉（同 NAI 那半边的 `NAI_IMAGE_PATH`） */
+const COMFY_PROMPT_PATH = '/prompt';
+
+/**
+ * `/view` 单张图的字节上限 —— 64 MB。
+ *
+ * 本地后端不收费也不限速，一条 `%height%: 100000` 的笔误、一条把整段视频塞进 SaveImage
+ * 的社区节点，交上来的就是几百 MB。`arrayBuffer()` 会把它整块吃进内存，然后这块内存要
+ * 一路走到 Dexie —— 页面卡死的位置离原因很远。
+ *
+ * 🔴 宽到「任何一张正经的高分辨率 PNG 都进得来」（4096×4096 的无损 PNG 也就十几 MB）。
+ *    这道闸挡的是**离谱**，不是「大」。
+ */
+export const COMFY_VIEW_MAX_BYTES = 64 * 1024 * 1024;
 
 /** ComfyUI 默认地址（本机默认端口）。地址住 provider 袋，不进 API 池（C16） */
 export const COMFY_DEFAULT_BASE_URL = 'http://127.0.0.1:8188';
@@ -562,13 +596,20 @@ const COMFY_POLL_INTERVAL_MS = 1_500;
 /**
  * ComfyUI 地址归一化。
  *
- * 刻意**比 {@link resolveImageBaseUrl} 简单**: NAI 那格有「填成文本域会收到一句指向
- * 模型名的错」这种陷阱，所以那边要认域名、要剃路径。ComfyUI 没有这类陷阱 ——
- * 地址填错的败法是**诚实的** connection-refused（C16）。这里只做三件不改变「打给谁」
- * 的事: 去空白、补 scheme、剃尾斜杠。
+ * 比 {@link resolveImageBaseUrl} 简单一点: NAI 那格有「填成文本域会收到一句指向模型名的错」
+ * 这种陷阱，所以那边还要认域名。ComfyUI 没有这类陷阱 —— 地址填错的败法是**诚实的**
+ * connection-refused（C16）。这里只做四件不改变「打给谁」的事: 去空白、补 scheme、
+ * **剃掉 fragment 与查询串**、剃掉尾斜杠与用户顺手粘上的 `/prompt`。
  *
  * 🔴 补的是 **http** 不是 https: 默认目标是 `127.0.0.1:8188`，ComfyUI 默认不开 TLS。
  *    补 https 会让「填了 localhost:8188」变成一次必然失败的握手。
+ *
+ * 🔴 **fragment 必须剃掉**（2026-08-08 审查逮到）: 用户从浏览器地址栏整条复制过来的是
+ *    `http://127.0.0.1:8188/#/workflow` 这种形状 —— `new URL()` 认得它，于是它原样活到
+ *    请求上，`POST /prompt` 打成 `…/#/workflow/prompt`，ComfyUI 用**首页 HTML** 回了个
+ *    200。`node_errors` 没有、`prompt_id` 也没有，最后落到「2xx 响应里没有 prompt_id」，
+ *    而后面那截原本要放正文的地方是**空的**（正文不是 JSON，被 `readJsonBody` 咽掉了）。
+ *    一个纯地址问题，报出来的是一句没有任何线索的话。查询串同理。
  */
 export function resolveComfyBaseUrl(
   raw: string | undefined,
@@ -597,7 +638,18 @@ export function resolveComfyBaseUrl(
     };
   }
 
-  return { ok: true, base: withScheme.replace(/\/+$/, '') };
+  // 只留「打给谁」那部分: 协议 + 凭据 + 主机 + 路径前缀（反代挂在子路径上是合法配置）。
+  // fragment / query 在这一步蒸发 —— 它们对一个 base 没有任何意义，留着只会拼进上游路径。
+  const credentials = url.username
+    ? `${url.username}${url.password ? `:${url.password}` : ''}@`
+    : '';
+  const path = url.pathname.replace(/\/+$/, '');
+  // 用户顺手把 `/prompt` 也粘进来时剃掉 —— 否则打成 `.../prompt/prompt`
+  const stripped = path.toLowerCase().endsWith(COMFY_PROMPT_PATH)
+    ? path.slice(0, -COMFY_PROMPT_PATH.length)
+    : path;
+
+  return { ok: true, base: `${url.protocol}//${credentials}${url.host}${stripped}` };
 }
 
 export interface ComfyGenerateOptions {
@@ -650,21 +702,102 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-/** 读一条 JSON 响应（`/prompt` 与 `/history` 专用；**绝不用在 `/view` 上**） */
-async function readJsonBody(res: ImageResponseLike): Promise<unknown> {
-  if (typeof res.text !== 'function') return undefined;
+/** 非 JSON 正文进 detail 时的长度闸（同 `summarizeUpstreamDetail` 的口径） */
+const RAW_SNIPPET_MAX = 160;
+
+/**
+ * 一条 JSON 响应的两面: 解出来的值，以及**解不出来时**的原文片段。
+ *
+ * 🔴 原文片段不是可有可无的（2026-08-08 审查逮到）: 地址指到了别的服务（A1111 / 路由器
+ *    管理页 / ComfyUI 自己的首页 HTML）时，那些页面照样回 200，于是解析器只能报
+ *    「2xx 响应里没有 prompt_id: 」—— **冒号后面是空的**，因为正文被这里咽掉了。
+ *    留一小段原文，「打到了一个 HTML 页面」就一眼可辨。
+ */
+interface JsonBody {
+  /** 解析成功时的值；不是 JSON / 读不动 / 空正文时为 undefined */
+  value: unknown;
+  /** 仅在 `value === undefined` 且确实读到了字节时有值（已折叠空白并截断） */
+  raw?: string;
+}
+
+/** 读一条 JSON 响应（`/prompt` `/history` `/queue` 专用；**绝不用在 `/view` 上**） */
+async function readJsonBody(res: ImageResponseLike | undefined): Promise<JsonBody> {
+  if (!res || typeof res.text !== 'function') return { value: undefined };
   let raw: string;
   try {
     raw = await res.text();
   } catch {
-    return undefined;
+    return { value: undefined };
   }
-  if (!raw.trim()) return undefined;
+
+  const compact = raw.replace(/\s+/g, ' ').trim();
+  if (!compact) return { value: undefined };
+
   try {
-    return JSON.parse(raw);
+    return { value: JSON.parse(raw) };
   } catch {
-    // 不是 JSON（HTML 拦截页 / 纯文本）—— 交给上层按状态码分类，这里不编内容
-    return undefined;
+    // 不是 JSON（HTML 拦截页 / 纯文本）—— 分类仍交给上层，这里只把原文原样带出去，不编内容
+    return {
+      value: undefined,
+      raw: compact.length > RAW_SNIPPET_MAX ? `${compact.slice(0, RAW_SNIPPET_MAX)}…` : compact,
+    };
+  }
+}
+
+/**
+ * 正文不是 JSON 时，把那段原文接进失败的 detail。
+ *
+ * 不动 `message`（给用户看的那句话不该变成一屏 HTML），只补 detail —— detail 正是
+ * 「排查时唯一能看的东西」。
+ */
+function withRawSnippet(failure: ImageGenFailure, body: JsonBody): ImageGenFailure {
+  if (!body.raw) return failure;
+  const snippet = `响应正文不是 JSON: ${body.raw}`;
+  return { ...failure, detail: failure.detail ? `${failure.detail} | ${snippet}` : snippet };
+}
+
+/** 超限那条的 UI 文案 —— 点名文件，并说清是哪一格能改（尺寸在工作流里） */
+function oversizeMessage(filename: string): string {
+  const mb = Math.round(COMFY_VIEW_MAX_BYTES / (1024 * 1024));
+  return `ComfyUI 出的这张图超过 ${mb} MB（${filename}），没有收下 —— 检查工作流里的尺寸与输出节点`;
+}
+
+/**
+ * 取消的善后: 让 ComfyUI 那头也停下来（2026-08-08 审查逮到）。
+ *
+ * 🔴 **取消不取消上游，就等于没取消**。我们这边 abort 掉的只是自己的轮询，那张图在
+ *    ComfyUI 里照跑不误 —— 显卡照占、图照落进输出目录，而用户随手按的「重试」会**排在
+ *    那张被遗弃的图后面**，于是「取消之后反而更慢了」。
+ *
+ * 两步，**顺序不能反**:
+ * 1. `POST /queue {delete:[id]}` —— 点名删，只动我们自己那一项，任何状态下都安全。
+ * 2. `POST /interrupt` —— 它掐的是「**此刻正在跑的那个**」，**不收 prompt_id**。所以发它
+ *    之前必须先 `GET /queue` 确认正在跑的就是我们这张（排队中的那种已被第 1 步摘掉）。
+ *    盲发的下场是掐掉用户自己在 ComfyUI 界面里跑的另一张图 —— 一次取消变成一次破坏。
+ *
+ * 🔴 **全程尽力而为**: 任何一步失败都咽掉。用户已经取消了，再抛一句「取消失败」既没有
+ *    可操作性，还会盖掉真正的结果（`aborted`）。
+ */
+async function cancelComfyPrompt(
+  impl: ImageFetchLike,
+  headers: Record<string, string>,
+  promptId: string,
+): Promise<void> {
+  try {
+    await impl(COMFY_BFF_QUEUE, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ delete: [promptId] }),
+    });
+
+    const res = await impl(COMFY_BFF_QUEUE, { method: 'GET', headers });
+    if (!res?.ok) return;
+    const queue = await readJsonBody(res);
+    if (!isComfyPromptRunning(queue.value, promptId)) return;
+
+    await impl(COMFY_BFF_INTERRUPT, { method: 'POST', headers, body: '{}' });
+  } catch {
+    // 见上：善后失败不许冒成用户看见的错误
   }
 }
 
@@ -704,18 +837,46 @@ export async function generateComfyImage(opts: ComfyGenerateOptions): Promise<Im
   const pollIntervalMs = opts.pollIntervalMs ?? COMFY_POLL_INTERVAL_MS;
   const guard = armTimeout(timeoutMs, opts.signal);
 
-  const abortFailure = (): ImageGenFailure | undefined => {
-    if (guard.timedOut())
-      return comfyFail('network', `等待 ComfyUI 超过 ${Math.round(timeoutMs / 1000)} 秒`);
-    if (opts.signal?.aborted) return comfyFail('aborted');
-    return undefined;
-  };
-
   const jsonHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
     // `forward()` 从这个 header 取上游 base（SSRF 名单在那边，本层不重复判）
     'X-Target-Base-URL': base,
+  };
+
+  /** 排上队之后才有值 —— 取消善后要靠它点名（见 {@link cancelComfyPrompt}） */
+  let acceptedPromptId: string | undefined;
+
+  const abortFailure = (): ImageGenFailure | undefined => {
+    if (guard.timedOut()) {
+      const secs = Math.round(timeoutMs / 1000);
+      // 🔴 **超时不许穿 `network` 那句话**（2026-08-08 审查逮到）: 那句是「连不上 ComfyUI，
+      //    确认它已启动、地址填对了」，而走到这里恰恰证明**连上了**（排队都成功了）。
+      //    一次 11 分钟的本地慢渲染（600 秒上限是够得着的）被告知去检查地址，人会去改一个
+      //    完全正确的输入框。分类仍是 network（重试语义一致），但话得说实在的那件事。
+      return comfyFail(
+        'network',
+        `等待 ComfyUI 超过 ${secs} 秒`,
+        `等了 ${secs} 秒还没等到 ComfyUI 的结果。那张图可能仍在渲染 —— 去 ComfyUI 界面看一眼；` +
+          `本机就是慢的话，把「出图超时」调大，或把工作流简化一点`,
+      );
+    }
+    if (opts.signal?.aborted) return comfyFail('aborted');
+    return undefined;
+  };
+
+  /**
+   * 与 {@link abortFailure} 同一件事，外加**用户取消时让上游也停下**。
+   *
+   * 超时那一支刻意**不**触发取消: 上面那句话已经说了「可能仍在渲染」，我们不该一边这么说
+   * 一边把它掐掉 —— 一张跑了 10 分钟的图，用户多半宁愿它跑完。
+   */
+  const interruptedFailure = async (): Promise<ImageGenFailure | undefined> => {
+    const failure = abortFailure();
+    if (failure?.kind === 'aborted' && acceptedPromptId) {
+      await cancelComfyPrompt(impl, jsonHeaders, acceptedPromptId);
+    }
+    return failure;
   };
 
   try {
@@ -732,22 +893,34 @@ export async function generateComfyImage(opts: ComfyGenerateOptions): Promise<Im
         ...(guard.signal ? { signal: guard.signal } : {}),
       });
     } catch (err) {
-      return abortFailure() ?? comfyFail('network', describeError(err));
+      return (await interruptedFailure()) ?? comfyFail('network', describeError(err));
+    }
+
+    // 响应对象本身不可读（fetch 替身兑现了 undefined 之类）—— 早退成一条失败，
+    // 别让「永不抛穿」的契约败在一次属性解引用上（NAI 那半边同一道守卫）
+    if (!queueRes || typeof queueRes.text !== 'function') {
+      return comfyFail('bad-response', '/prompt 的响应对象不可读');
     }
 
     // 🔴 200 也要读体: `node_errors` 就藏在那里（C12）
+    const queueBody = await readJsonBody(queueRes);
     const queued = parseComfyQueueResponse(
-      typeof queueRes?.status === 'number' ? queueRes.status : 0,
-      await readJsonBody(queueRes),
+      typeof queueRes.status === 'number' ? queueRes.status : 0,
+      queueBody.value,
     );
-    if (!queued.ok) return queued;
+    // 正文不是 JSON 时把原文片段接上 —— 否则「没有 prompt_id: 」后面空空如也
+    if (!queued.ok) return withRawSnippet(queued, queueBody);
+    acceptedPromptId = queued.promptId;
 
     // ── 2. 轮询 ──
+    // 🔴 这个 `for(;;)` 的**唯一**出口是下面那次 `interruptedFailure()`（外加 done/failed）。
+    //    所以 `armTimeout` 在没有 AbortController 的环境里也必须给得出一个会变 true 的
+    //    `timedOut()`（那边用墙上时钟兜底）—— 恒 false 会让这个循环永远转下去。
     const historyUrl = `${COMFY_BFF_HISTORY}/${encodeURIComponent(queued.promptId)}`;
     let images: ComfyImageRef[] | undefined;
 
     for (;;) {
-      const interrupted = abortFailure();
+      const interrupted = await interruptedFailure();
       if (interrupted) return interrupted;
 
       let res: ImageResponseLike;
@@ -758,7 +931,7 @@ export async function generateComfyImage(opts: ComfyGenerateOptions): Promise<Im
           ...(guard.signal ? { signal: guard.signal } : {}),
         });
       } catch (err) {
-        return abortFailure() ?? comfyFail('network', describeError(err));
+        return (await interruptedFailure()) ?? comfyFail('network', describeError(err));
       }
 
       if (!res?.ok) {
@@ -768,8 +941,9 @@ export async function generateComfyImage(opts: ComfyGenerateOptions): Promise<Im
         return comfyFail('bad-request', detail);
       }
 
-      const state = parseComfyHistory(await readJsonBody(res), queued.promptId);
-      if (state.state === 'failed') return state.failure;
+      const historyBody = await readJsonBody(res);
+      const state = parseComfyHistory(historyBody.value, queued.promptId);
+      if (state.state === 'failed') return withRawSnippet(state.failure, historyBody);
       if (state.state === 'done') {
         images = state.images;
         break;
@@ -783,7 +957,7 @@ export async function generateComfyImage(opts: ComfyGenerateOptions): Promise<Im
     let contentType = '';
 
     for (const ref of images) {
-      const interrupted = abortFailure();
+      const interrupted = await interruptedFailure();
       if (interrupted) return interrupted;
 
       const query = new URLSearchParams({
@@ -811,13 +985,26 @@ export async function generateComfyImage(opts: ComfyGenerateOptions): Promise<Im
         return comfyFail('bad-response', `/view 得到 HTTP ${status}（${ref.filename}）`);
       }
 
+      // 🔴 上游**声明**的体积就超了 → 连读都不读。这与「字节是权威、content-type 只是线索」
+      //    那条不矛盾: 那条禁的是拿 header 去否决**已经拿到手的**字节；这里是在字节存在之前
+      //    决定要不要把它整块吃进内存，而说错了也只是白拒一张荒唐大的图。文案说的是
+      //    「声明了多少」，不假装我们量过。header 缺席（分块传输）时读完再量一次。
+      const declared = Number(res.headers?.get('content-length') ?? '');
+      if (Number.isFinite(declared) && declared > COMFY_VIEW_MAX_BYTES) {
+        return comfyFail(
+          'bad-response',
+          `/view 声明了 ${declared} 字节，超过 ${COMFY_VIEW_MAX_BYTES} 的上限（${ref.filename}）`,
+          oversizeMessage(ref.filename),
+        );
+      }
+
       let buf: ArrayBuffer;
       try {
         // 🔴 全流程唯一读**字节**的地方，且必须是 arrayBuffer（见本节头注释第 2 条）
         buf = await res.arrayBuffer();
       } catch (err) {
         return (
-          abortFailure() ??
+          (await interruptedFailure()) ??
           comfyFail('bad-response', `/view 字节读取失败（${ref.filename}）: ${describeError(err)}`)
         );
       }
@@ -825,6 +1012,15 @@ export async function generateComfyImage(opts: ComfyGenerateOptions): Promise<Im
       const data = new Uint8Array(buf);
       if (data.length === 0) {
         return comfyFail('bad-response', `/view 返回了 0 字节（${ref.filename}）`);
+      }
+      // 上游没报 content-length（分块传输）时这一格才有意义 —— 已经读进内存了，
+      // 但至少别让它继续往 Dexie 走，且失败说得清是尺寸问题
+      if (data.length > COMFY_VIEW_MAX_BYTES) {
+        return comfyFail(
+          'bad-response',
+          `/view 取回 ${data.length} 字节，超过 ${COMFY_VIEW_MAX_BYTES} 的上限（${ref.filename}）`,
+          oversizeMessage(ref.filename),
+        );
       }
 
       if (!contentType) contentType = res.headers?.get('content-type') ?? '';

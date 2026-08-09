@@ -13,6 +13,7 @@ import {
   BUILTIN_COMFY_WORKFLOW,
   COMFY_FAILURE_MESSAGES,
   comfyFail,
+  isComfyPromptRunning,
   parseComfyHistory,
   parseComfyQueueResponse,
   parseComfyWorkflow,
@@ -263,12 +264,53 @@ describe('parseComfyQueueResponse', () => {
     });
   });
 
-  it('400 + node_errors 同样归 workflow', () => {
+  it('400 + node_errors 同样归 workflow，且点名的那句话进得了文案', () => {
     const result = parseComfyQueueResponse(400, {
       error: { type: 'prompt_outputs_failed_validation' },
       node_errors: { '9': { errors: [{ message: 'Required input is missing' }] } },
     });
     expect(result).toMatchObject({ ok: false, kind: 'workflow', retryable: false });
+    if (result.ok) return;
+    expect(result.message).toContain('节点 9');
+    expect(result.message).toContain('Required input is missing');
+  });
+
+  it('🔴 整份提示词被拒: error 是**对象**、node_errors 是空的 —— 原因照样要冒出来', () => {
+    const result = parseComfyQueueResponse(400, {
+      error: {
+        type: 'prompt_no_outputs',
+        message: 'Prompt has no outputs',
+        details: '',
+        extra_info: {},
+      },
+      node_errors: {},
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'workflow', retryable: false });
+    if (result.ok) return;
+    // 只认字符串形态时，这里曾是光秃秃的「工作流被 ComfyUI 拒绝了」+「HTTP 400」
+    expect(result.message).toContain('Prompt has no outputs');
+    expect(result.message).toContain('prompt_no_outputs');
+    expect(result.detail).toContain('Prompt has no outputs');
+  });
+
+  it('对象 error 的 details 也带上；只有 type 时 type 自己就是那句话', () => {
+    const withDetails = parseComfyQueueResponse(400, {
+      error: { type: 'invalid_prompt', message: 'Cannot execute', details: 'missing node 7' },
+    });
+    if (withDetails.ok) throw new Error('unreachable');
+    expect(withDetails.message).toContain('missing node 7');
+
+    const typeOnly = parseComfyQueueResponse(500, { error: { type: 'internal_boom' } });
+    if (typeOnly.ok) throw new Error('unreachable');
+    expect(typeOnly.kind).toBe('upstream');
+    expect(typeOnly.detail).toContain('internal_boom');
+  });
+
+  it('字符串形态的 error 一如既往（这次改动不许动它）', () => {
+    const result = parseComfyQueueResponse(400, { error: 'bad prompt' });
+    if (result.ok) throw new Error('unreachable');
+    expect(result.message).toContain('bad prompt');
   });
 
   it('状态码分类说的是 ComfyUI 的话，不是 NovelAI 的', () => {
@@ -439,5 +481,32 @@ describe('comfyFail / BUILTIN_COMFY_WORKFLOW', () => {
       'SaveImage',
     ]);
     expect(JSON.stringify(BUILTIN_COMFY_WORKFLOW)).toContain('sd_xl_base_1.0.safetensors');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// isComfyPromptRunning（取消链路的「别误伤」判据）
+// ═══════════════════════════════════════════════════════════
+
+describe('isComfyPromptRunning', () => {
+  const queue = {
+    queue_running: [[0, 'p1', { '3': {} }, {}, []]],
+    queue_pending: [[1, 'p2', { '3': {} }, {}, []]],
+  };
+
+  it('正在跑的就是这一张 → true', () => {
+    expect(isComfyPromptRunning(queue, 'p1')).toBe(true);
+  });
+
+  it('🔴 只在排队里 → false：interrupt 掐的是「当前那个」，此时发出去掐的是别人的图', () => {
+    expect(isComfyPromptRunning(queue, 'p2')).toBe(false);
+    expect(isComfyPromptRunning(queue, 'p3')).toBe(false);
+  });
+
+  it('认不出的形状一律 false（少掐一次好过多掐一次）', () => {
+    expect(isComfyPromptRunning(undefined, 'p1')).toBe(false);
+    expect(isComfyPromptRunning({}, 'p1')).toBe(false);
+    expect(isComfyPromptRunning({ queue_running: 'nope' }, 'p1')).toBe(false);
+    expect(isComfyPromptRunning({ queue_running: [{ prompt_id: 'p1' }] }, 'p1')).toBe(false);
   });
 });

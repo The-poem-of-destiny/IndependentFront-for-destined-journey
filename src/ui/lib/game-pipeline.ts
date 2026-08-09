@@ -120,13 +120,16 @@ const AGENT_LABELS: Record<string, string> = {
  * 用户在设置页调的模型与采样参数就全部静默回落成缺省 —— 不报错，只是这条侧链换了个
  * 模型在跑。所以这里克隆整条、只换那一格。
  *
- * @param override 空 / undefined → 原样返回（走 agent-config 或模板兜底，即图像 v1 行为）
+ * @param override 空 / 只剩空白 / undefined → 原样返回（走 agent-config 或模板兜底，
+ *   即图像 v1 行为）。🔴 **空白也要挡**：设置页今天不再写下只含空白的覆盖，但老档里
+ *   可能躺着一份 —— 它会把这条侧链的整段 systemPrompt 换成一个空格，产出一串垃圾而
+ *   没有任何一处报错。
  */
 export function withImagePromptSystem(
   configs: readonly AgentConfig[],
   override: string | undefined,
 ): AgentConfig[] {
-  if (!override) return [...configs];
+  if (!override || override.trim() === '') return [...configs];
   const index = configs.findIndex((c) => c.agentId === 'image_prompt');
   if (index >= 0) {
     return configs.map((c, i) => (i === index ? { ...c, systemPrompt: override } : c));

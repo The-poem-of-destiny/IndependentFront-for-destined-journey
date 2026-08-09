@@ -504,12 +504,65 @@ describe('🔴 ImageRenderCard —— 方言选择与覆盖（C2/C6）', () => {
     const w = mount(ImageRenderCard);
 
     expect(w.find('.extra-negative').attributes('disabled')).toBeDefined();
-    expect(w.find('.negative-off').text()).toContain('不支持负向');
+    const offs = w.findAll('.negative-off');
+    expect(offs.length).toBeGreaterThan(0);
+    expect(offs[offs.length - 1].text()).toContain('不支持负向');
   });
 
-  it('吃负向的方言下那一格照常可用（禁用是方言属性，不是永久状态）', () => {
+  it('🔴 supportsNegative:false → **方言级**基础负向也一起停用（两格是同一次丢弃）', async () => {
+    // 装配层（image-prompt.ts 的 supportsNegative 分支）在这条方言下把基础负向整段丢成
+    // 空串 —— 只停用旁边那格、这格照收，就成了「这格生效那格不生效」的猜谜
+    mockSettings.imageDialectId = 'natural-prose';
+    const w = mount(ImageRenderCard);
+
+    expect(w.find('.base-negative').attributes('disabled')).toBeDefined();
+    expect(w.findAll('.negative-off')).toHaveLength(2);
+  });
+
+  it('吃负向的方言下那两格照常可用（禁用是方言属性，不是永久状态）', () => {
     const w = mount(ImageRenderCard);
     expect(w.find('.extra-negative').attributes('disabled')).toBeUndefined();
+    expect(w.find('.base-negative').attributes('disabled')).toBeUndefined();
     expect(w.find('.negative-off').exists()).toBe(false);
+  });
+});
+
+describe('🔴 ImageRenderCard —— 覆盖的清空语义（与 ImagePromptCard 同一条纪律）', () => {
+  it('清空 = **删键**，不是写一个空串（空串键是永远不生效的脏数据）', async () => {
+    mockSettings.imageDialectOverrides = {
+      'danbooru-anime': { qualitySuffix: '旧后缀', baseNegative: '旧负向' },
+    };
+    const w = mount(ImageRenderCard);
+    const textareas = w.findAll('textarea');
+
+    await textareas[0].setValue('');
+    expect('qualitySuffix' in mockSettings.imageDialectOverrides['danbooru-anime']).toBe(false);
+    // 另一格不受牵连
+    expect(mockSettings.imageDialectOverrides['danbooru-anime'].baseNegative).toBe('旧负向');
+
+    await textareas[1].setValue('');
+    expect('baseNegative' in mockSettings.imageDialectOverrides['danbooru-anime']).toBe(false);
+  });
+
+  it('🔴 只剩空白也算清空 —— 一个空格是一份完全合法的覆盖，装配层会照单收下', async () => {
+    mockSettings.imageDialectOverrides = { 'danbooru-anime': { qualitySuffix: '旧后缀' } };
+    const w = mount(ImageRenderCard);
+
+    await w.findAll('textarea')[0].setValue('  \n ');
+    expect('qualitySuffix' in mockSettings.imageDialectOverrides['danbooru-anime']).toBe(false);
+  });
+
+  it('清空时不凭空造出一个空覆盖记录（本来没有的方言仍然没有）', async () => {
+    const w = mount(ImageRenderCard);
+    await w.findAll('textarea')[0].setValue(' ');
+    expect(mockSettings.imageDialectOverrides['danbooru-anime']).toBeUndefined();
+  });
+
+  it('写非空值时仍存**原样文本**（回写 trim 后的值会在打字途中抹掉刚敲的空格）', async () => {
+    const w = mount(ImageRenderCard);
+    await w.findAll('textarea')[0].setValue('masterpiece, ');
+    expect(mockSettings.imageDialectOverrides['danbooru-anime'].qualitySuffix).toBe(
+      'masterpiece, ',
+    );
   });
 });

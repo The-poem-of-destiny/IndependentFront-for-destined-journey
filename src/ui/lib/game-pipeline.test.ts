@@ -1058,6 +1058,13 @@ describe('withImagePromptSystem', () => {
     expect(withImagePromptSystem(configs, '')[0].systemPrompt).toBe('老的那份');
   });
 
+  it('🔴 只剩空白的覆盖照样当没有 —— 否则整段提示词变成一个空格，且不报错', () => {
+    // 设置页今天不再写下这种值（判空前先 trim），但老档里可能躺着一份
+    const configs = [cfg()];
+    expect(withImagePromptSystem(configs, ' ')[0].systemPrompt).toBe('老的那份');
+    expect(withImagePromptSystem(configs, '\n\t ')[0].systemPrompt).toBe('老的那份');
+  });
+
   it('configs 里没有 image_prompt 时补一条（宁可多一条，也不让方言静默失效）', () => {
     const out = withImagePromptSystem([cfg({ agentId: 'story' })], '方言写的');
     expect(out).toHaveLength(2);

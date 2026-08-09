@@ -31,7 +31,7 @@ import { useImagePresetStore } from '../../../stores/image-preset-store';
 import { useCharacterAppearanceStore } from '../../../stores/character-appearance-store';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { useUIStore } from '../../../stores/ui-store';
-import { contentReadyPromise, getContentRegistry } from '../../../stores/content-store';
+import { ensureContentRegistryLoaded, getContentRegistry } from '../../../stores/content-store';
 import type { ImageDialect, ImagePreset, ImagePresetKind } from '@engine/types-image';
 import { parseImageDialects, resolveImageDialect } from '@engine/image-dialect';
 import {
@@ -51,7 +51,15 @@ const ui = useUIStore();
 //
 // 🔴 内容注册表**不是响应式的**（`getContentRegistry()` 是一个同步取值函数）——
 //    直接写进 computed 会把「还没灌注完的空注册表」永久缓存下来，表现为提示行
-//    永远不出现。所以落一个 ref，并在 `contentReadyPromise` 兑现后再读一次。
+//    永远不出现。所以落一个 ref，并在**加载门**兑现后再读一次。
+//
+// 🔴 等的必须是 `ensureContentRegistryLoaded()`，**不是** `contentReadyPromise`
+//    （两张卡的姐妹写法同此）：后者在 content-store **模块加载时就同步兑现**
+//    （`seedPlaceholderRegistry()` + `markContentReady()`），它说的是「占位骨架已就位」，
+//    对 `/data/content/image-dialects.json` 那次 fetch 一个字都没说。本卡若在那次
+//    fetch 在途时挂载，`dialects` 会永远停在 `[]` → `resolveImageDialect` 回落内置
+//    danbooru → 每一行的 `lacksForm()` 恒为 false → C15 那句提示在本组件整个生命周期里
+//    **是死的**，而它要打破的正是「设置页看着一切正常、图里那个人就是没出现」的沉默。
 const dialects = ref<ImageDialect[]>(parseImageDialects(getContentRegistry().imageDialects));
 
 /**
@@ -77,7 +85,7 @@ onMounted(() => {
   // 会话副本按存档存（D56）。没有活动存档时它是空的，界面据此说明白，
   // 而不是画一个点了没反应的重置按钮。
   if (ui.activeSaveId) void session.load(ui.activeSaveId);
-  void contentReadyPromise.then(() => {
+  void ensureContentRegistryLoaded().then(() => {
     dialects.value = parseImageDialects(getContentRegistry().imageDialects);
   });
 });

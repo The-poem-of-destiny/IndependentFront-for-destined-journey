@@ -13,8 +13,13 @@
  *    写坏的地方；这里抛一次 = 整个应用起不来。
  */
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_IMAGE_BASE_NEGATIVE, DEFAULT_IMAGE_QUALITY_SUFFIX } from '@engine/image-defaults';
-import { migrateImageSettings } from './image-settings-migration';
+import {
+  DEFAULT_IMAGE_BASE_NEGATIVE,
+  DEFAULT_IMAGE_PROMPT_SYSTEM,
+  DEFAULT_IMAGE_QUALITY_SUFFIX,
+} from '@engine/image-defaults';
+import { migrateImageSettings, normalizeImageSettings } from './image-settings-migration';
+import type { ImageNovelaiSettings } from './settings-types';
 
 const DIALECT = 'danbooru-anime';
 
@@ -179,6 +184,32 @@ describe('migrateImageSettings —— 画质后缀 / 基础负向 → 方言覆�
     migrateImageSettings(bag);
     expect(bag.imageDialectOverrides).toEqual({});
   });
+
+  it('🔴 落点是**常量** danbooru-anime，不是用户当前选的那条方言', () => {
+    // v1 那三个串**全是照 danbooru 调的**（画质后缀是 danbooru 画质词、基础负向是
+    // danbooru 负向词、侧链提示词整篇在教模型「只输出 danbooru 标签」）。
+    // 把落点改成 `bag.imageDialectId` 看起来更「贴心」，实际是把一条动漫尾巴焊死在
+    // 散文方言上 —— 而全套用例此前都用 danbooru-anime 当当前方言，那个改动一条都不会红。
+    const bag = makeBag({
+      ...legacyDefaults(),
+      imageQualitySuffix: 'mine',
+      imageBaseNegative: 'no hands',
+    });
+    bag.imageDialectId = 'natural-prose';
+    bag.agents = { image_prompt: { systemPrompt: '我自己写的' } };
+
+    migrateImageSettings(bag);
+
+    expect(bag.imageDialectOverrides).toEqual({
+      'danbooru-anime': {
+        qualitySuffix: 'mine',
+        baseNegative: 'no hands',
+        systemPrompt: '我自己写的',
+      },
+    });
+    // 用户选的方言原样保留 —— 迁移不替他换方言
+    expect(bag.imageDialectId).toBe('natural-prose');
+  });
 });
 
 // ═══ agents 袋里的侧链提示词（C5）═══
@@ -201,6 +232,49 @@ describe('migrateImageSettings —— image_prompt.systemPrompt 退役成方言�
     expect(bag.agents).toEqual({
       image_prompt: { model: 'gpt-x' },
       story: { systemPrompt: '别动我' },
+    });
+  });
+
+  it('🔴 覆写层里那份是**出厂原文**时直接丢弃，不许搬成覆盖', () => {
+    // PR #29（boot 播种默认值进 settings.agents）→ PR #42（D44 删播种）之间建的档案，
+    // 覆写层里躺的正是这段出厂原文 —— 用户一个字都没写过。搬成覆盖 = 把他永久钉死在
+    // 今天这段文本上（日后方言 JSON / pack 更新一个字节也够不到他），
+    // 设置页还会显示一个他从没填过的、填满的覆盖框。
+    const bag = makeBag();
+    bag.agents = {
+      image_prompt: { model: 'gpt-x', systemPrompt: DEFAULT_IMAGE_PROMPT_SYSTEM },
+    };
+
+    const res = migrateImageSettings(bag);
+
+    expect(res.droppedFactoryAgentPrompt).toBe(true);
+    expect(res.movedAgentPrompt).toBe(false);
+    expect(bag.imageDialectOverrides).toEqual({});
+    // 覆写层里那个字段照样清掉（丢弃与搬走都不留第三份拷贝）
+    expect(bag.agents).toEqual({ image_prompt: { model: 'gpt-x' } });
+  });
+
+  it('出厂原文被丢弃后整条覆写只剩空壳时，连壳一起删', () => {
+    const bag = makeBag();
+    bag.agents = { image_prompt: { systemPrompt: DEFAULT_IMAGE_PROMPT_SYSTEM } };
+
+    migrateImageSettings(bag);
+
+    expect(bag.agents).toEqual({});
+  });
+
+  it('手改过一个字的提示词照常搬 —— 判据是逐字节相同，不是「长得像」', () => {
+    const bag = makeBag();
+    bag.agents = {
+      image_prompt: { systemPrompt: `${DEFAULT_IMAGE_PROMPT_SYSTEM}\n6. 永远画成黄昏。` },
+    };
+
+    const res = migrateImageSettings(bag);
+
+    expect(res.movedAgentPrompt).toBe(true);
+    expect(res.droppedFactoryAgentPrompt).toBe(false);
+    expect(bag.imageDialectOverrides).toEqual({
+      [DIALECT]: { systemPrompt: `${DEFAULT_IMAGE_PROMPT_SYSTEM}\n6. 永远画成黄昏。` },
     });
   });
 
@@ -294,5 +368,100 @@ describe('migrateImageSettings —— 幂等与容错', () => {
     expect((bag.imageNovelai as { maxPerHour: number }).maxPerHour).toBe(3);
     // 没出现的旧键不影响袋子里其余默认
     expect((bag.imageNovelai as { model: string }).model).toBe('nai-diffusion-4-5-full');
+  });
+});
+
+// ═══ 归一化（每次加载都跑，与旧键无关）═══
+
+const FALLBACK_NOVELAI = {
+  endpointId: null,
+  model: '',
+  sampler: 'k_euler_ancestral',
+  noiseSchedule: 'karras',
+  ucPreset: 0,
+  tier: 'unset',
+  maxPerMessage: 2,
+  maxPerHour: 20,
+};
+
+describe('normalizeImageSettings —— 袋子永远合法且不残缺', () => {
+  it('🔴 已经迁过的坏档案照样修 —— 修复不许被旧键闸门挡住', () => {
+    // 旧键一个都不在（早就迁完了），但袋子被手改 localStorage / 别的版本写坏。
+    // 此前这段修复关在「至少有一个旧键」的闸门后面，于是这种档案永远修不好，
+    // 而下游 `checkQuota` 读的是 `s.imageNovelai.maxPerMessage` —— 当场 TypeError。
+    const bag: Record<string, unknown> = {
+      ...freshBags(),
+      imageNovelai: null,
+      imageComfy: 5,
+      imageDialectOverrides: 'nope',
+    };
+
+    const res = migrateImageSettings(bag);
+
+    expect(res.migrated).toBe(false); // 没有旧键 → 确实没搬东西
+    expect(bag.imageNovelai).toEqual(FALLBACK_NOVELAI);
+    expect(bag.imageComfy).toEqual({
+      baseUrl: 'http://127.0.0.1:8188',
+      workflowJson: '',
+      timeoutMs: 600_000,
+      pollIntervalMs: 1_500,
+    });
+    expect(bag.imageDialectOverrides).toEqual({});
+  });
+
+  it('🔴 袋内缺字段从默认值补 —— store 的 `{ ...defaults, ...saved }` 只盖一层', () => {
+    // 日后往 ImageNovelaiSettings 加一格，老用户的 saved.imageNovelai 整只盖掉 defaults 那只，
+    // 新字段到手就是 undefined。「加新设置要改两处」在袋子内部会这样静默失效。
+    const bag: Record<string, unknown> = {
+      ...freshBags(),
+      imageNovelai: { endpointId: 'ep', model: 'm' },
+    };
+
+    const res = normalizeImageSettings(bag);
+
+    expect(res.filledFields).toContain('imageNovelai.tier');
+    expect(res.filledFields).toContain('imageNovelai.maxPerHour');
+    expect(bag.imageNovelai).toEqual({ ...FALLBACK_NOVELAI, endpointId: 'ep', model: 'm' });
+  });
+
+  it('defaults 参数优先于模块兜底（生产上传的是 getDefaults() 的那两只袋子）', () => {
+    const bag: Record<string, unknown> = { imageNovelai: 'garbage' };
+    const production: ImageNovelaiSettings = {
+      endpointId: null,
+      model: 'nai-diffusion-4-5-full',
+      sampler: 'k_euler_ancestral',
+      noiseSchedule: 'karras',
+      ucPreset: 0,
+      tier: 'unset',
+      maxPerMessage: 2,
+      maxPerHour: 20,
+    };
+
+    normalizeImageSettings(bag, { imageNovelai: production });
+
+    // 兜底那份的 model 是空串；这里必须拿到生产默认值
+    expect((bag.imageNovelai as { model: string }).model).toBe('nai-diffusion-4-5-full');
+  });
+
+  it('已经合法的袋子一个字节都不动，且第二次是彻底空转', () => {
+    const bag: Record<string, unknown> = { ...freshBags() };
+    const before = JSON.stringify(bag);
+
+    const first = normalizeImageSettings(bag);
+    expect(first).toEqual({ rebuilt: [], filledFields: [] });
+    expect(JSON.stringify(bag)).toBe(before);
+
+    const second = normalizeImageSettings(bag);
+    expect(second).toEqual({ rebuilt: [], filledFields: [] });
+    expect(JSON.stringify(bag)).toBe(before);
+  });
+
+  it('方言 id / 后端认不出时回落，且不抛', () => {
+    const bag: Record<string, unknown> = { imageDialectId: 42, imageProvider: 'midjourney' };
+
+    expect(() => normalizeImageSettings(bag)).not.toThrow();
+
+    expect(bag.imageDialectId).toBe(DIALECT);
+    expect(bag.imageProvider).toBe('novelai');
   });
 });

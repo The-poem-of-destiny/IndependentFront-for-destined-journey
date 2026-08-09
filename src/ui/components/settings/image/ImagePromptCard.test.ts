@@ -116,6 +116,23 @@ describe('ImagePromptCard —— 按方言分档的 systemPrompt（C6）', () =>
     expect('systemPrompt' in mockSettings.imageDialectOverrides['danbooru-anime']).toBe(false);
   });
 
+  it('🔴 只剩空白也算清空 —— 一个空格会成为这条侧链的**全部**系统提示词', async () => {
+    // resolveImageDialect 只看 length > 0、装配层只看真假：' ' 是一份完全合法的覆盖，
+    // 于是 image_prompt 顶着一个内容为空格的 systemPrompt 去跑，产出垃圾且无人报错
+    mockSettings.imageDialectOverrides = { 'danbooru-anime': { systemPrompt: '旧的' } };
+    const w = mountCard();
+
+    await w.find('.dialect-prompt-input').setValue('   \n ');
+    expect('systemPrompt' in mockSettings.imageDialectOverrides['danbooru-anime']).toBe(false);
+    expect(w.find('.dialect-prompt-state').text()).toContain('方言自带');
+  });
+
+  it('清空时不凭空造出一个空覆盖记录（本来没有的方言仍然没有）', async () => {
+    const w = mountCard();
+    await w.find('.dialect-prompt-input').setValue(' ');
+    expect(mockSettings.imageDialectOverrides['danbooru-anime']).toBeUndefined();
+  });
+
   it('「恢复本方言默认」按钮清掉覆盖，且只在真有覆盖时可按', async () => {
     const w = mountCard();
     const button = () => w.findAllComponents(AppButton).find((b) => b.text().includes('恢复'))!;
@@ -144,7 +161,9 @@ describe('ImagePromptCard —— 按方言分档的 systemPrompt（C6）', () =>
     const w = mountCard();
 
     expect(w.find('.dialect-prompt-head h4').text()).toContain('动漫标签');
-    // 兜底方言不自带提示词 —— 占位符要说清「会回落到内置模板」，不是留个空框
-    expect(w.find('.dialect-prompt-input').attributes('placeholder')).toContain('回落');
+    // 兜底方言**自带 v1 那段完整提示词**（2026-08-08 修）：占位符直接把它摆出来，
+    // 用户看得见「留空会用哪一份」。此前这里是空的、占位符只说一句「会回落到内置模板」——
+    // 而那个「内置模板」其实是 agent-templates 的一行 stub，规则一条都没有
+    expect(w.find('.dialect-prompt-input').attributes('placeholder')).toContain('<image_prompt>');
   });
 });

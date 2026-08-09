@@ -219,4 +219,56 @@ describe('BFF ComfyUI passthrough', () => {
       await echo.close();
     }
   });
+
+  // 🔴 取消善后的两条（2026-08-08 审查补）。没有它们，前端的「取消」只停自己的轮询，
+  // ComfyUI 那头照跑不误 —— 显卡照占、图照落进输出目录，而随后那次重试还要排在
+  // 这张被遗弃的图后面。
+  it('POST /comfy/queue 打到上游 /queue，删除指令原样过', async () => {
+    const echo = await startEcho(Buffer.from('{}'), 'application/json');
+    try {
+      const response = await buildHonoApp().request('/api/image/comfy/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Target-Base-URL': echo.base },
+        body: JSON.stringify({ delete: ['p1'] }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('x-seen-url')).toBe('/queue');
+      expect(response.headers.get('x-seen-method')).toBe('POST');
+    } finally {
+      await echo.close();
+    }
+  });
+
+  it('GET /comfy/queue 同一条路由 —— 发 /interrupt 之前要先问「跑的是不是我们这张」', async () => {
+    const echo = await startEcho(Buffer.from('{"queue_running":[]}'), 'application/json');
+    try {
+      const response = await buildHonoApp().request('/api/image/comfy/queue', {
+        headers: { 'X-Target-Base-URL': echo.base },
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('x-seen-url')).toBe('/queue');
+      expect(response.headers.get('x-seen-method')).toBe('GET');
+    } finally {
+      await echo.close();
+    }
+  });
+
+  it('POST /comfy/interrupt 打到上游 /interrupt', async () => {
+    const echo = await startEcho(Buffer.from('{}'), 'application/json');
+    try {
+      const response = await buildHonoApp().request('/api/image/comfy/interrupt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Target-Base-URL': echo.base },
+        body: '{}',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('x-seen-url')).toBe('/interrupt');
+      expect(response.headers.get('x-seen-method')).toBe('POST');
+    } finally {
+      await echo.close();
+    }
+  });
 });

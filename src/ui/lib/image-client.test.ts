@@ -17,9 +17,12 @@ import type { NaiRequestBody } from '@engine/image-providers/novelai';
 import type { ComfySubstitutionValues } from '@engine/image-providers/comfyui';
 import {
   COMFY_BFF_HISTORY,
+  COMFY_BFF_INTERRUPT,
   COMFY_BFF_PROMPT,
+  COMFY_BFF_QUEUE,
   COMFY_BFF_VIEW,
   COMFY_DEFAULT_BASE_URL,
+  COMFY_VIEW_MAX_BYTES,
   generateComfyImage,
   resolveComfyBaseUrl,
   IMAGE_BFF_ENDPOINT,
@@ -650,12 +653,16 @@ describe('generateComfyImage', () => {
     body?: unknown;
     /** 让这一发 fetch 直接抛（模拟 connection refused） */
     throws?: boolean;
+    /** 正文根本不是 JSON（指到了 A1111 / 路由器管理页 / ComfyUI 首页那种） */
+    text?: string;
   }
 
   interface ViewStub {
     status?: number;
     bytes?: Uint8Array;
     contentType?: string;
+    /** 上游声明的 content-length（不给就不发这个头） */
+    contentLength?: string;
   }
 
   interface ComfyStubOpts {
@@ -665,6 +672,8 @@ describe('generateComfyImage', () => {
     view?: ViewStub;
     /** 每次 history 请求时调一下（测试用它在轮询中途取消） */
     onHistory?: (index: number) => void;
+    /** `GET /queue` 的答复（取消善后用它判断「正在跑的是不是我们这张」） */
+    queueState?: JsonStub;
   }
 
   /** 一张「PNG」—— 魔数真，其余是非法 UTF-8 字节（被按文本读过就会现形） */
@@ -681,7 +690,7 @@ describe('generateComfyImage', () => {
       arrayBuffer: async () => {
         throw new Error('JSON 路径不该读字节');
       },
-      text: async () => JSON.stringify(stub.body ?? {}),
+      text: async () => stub.text ?? JSON.stringify(stub.body ?? {}),
     };
   }
 
@@ -694,7 +703,12 @@ describe('generateComfyImage', () => {
       ok: status >= 200 && status < 300,
       status,
       headers: {
-        get: (n) => (n.toLowerCase() === 'content-type' ? (stub.contentType ?? 'image/png') : null),
+        get: (n) => {
+          const key = n.toLowerCase();
+          if (key === 'content-type') return stub.contentType ?? 'image/png';
+          if (key === 'content-length') return stub.contentLength ?? null;
+          return null;
+        },
       },
       arrayBuffer,
       text,
@@ -746,6 +760,14 @@ describe('generateComfyImage', () => {
         if (stub.throws) throw new Error('fetch failed');
         return jsonResponse(stub);
       }
+
+      // 取消善后的两条（点名删 / 查谁在跑 / 掐断）
+      if (url.startsWith(COMFY_BFF_QUEUE)) {
+        const stub = opts.queueState ?? { body: { queue_running: [], queue_pending: [] } };
+        if (stub.throws) throw new Error('fetch failed');
+        return jsonResponse(init?.method === 'GET' ? stub : { body: {} });
+      }
+      if (url.startsWith(COMFY_BFF_INTERRUPT)) return jsonResponse({ body: {} });
 
       return view.res;
     };
@@ -849,7 +871,7 @@ describe('generateComfyImage', () => {
     expect(urlsOf(calls).some((u) => u.startsWith(COMFY_BFF_VIEW))).toBe(false);
   });
 
-  it('总时限到了 → network 失败，detail 里报等了多少秒', async () => {
+  it('🔴 总时限到了 → 说的是「等了 N 秒、可能仍在渲染」，不是「地址填对了吗」', async () => {
     stubComfy({ history: [{ body: {} }] }); // 永远 pending
 
     const result = await generateComfyImage({
@@ -862,6 +884,13 @@ describe('generateComfyImage', () => {
     if (result.ok) return;
     expect(result.message).toContain('ComfyUI');
     expect(result.detail).toContain('秒');
+
+    // 走到这一步说明**连上了**（排队都成功了）。让人去查地址是把 11 分钟的本地慢渲染
+    // 诬告成配置错误 —— 他会去改一个完全正确的输入框
+    expect(result.message).not.toContain('地址');
+    expect(result.message).toMatch(/等了 \d+ 秒/); // 测试把上限压到毫秒级，这里只钉形状
+    expect(result.message).toContain('渲染');
+    expect(result.message).toContain('超时');
   });
 
   it('轮询途中用户取消 → aborted，且立刻停手', async () => {
@@ -1018,6 +1047,153 @@ describe('generateComfyImage', () => {
       kind: 'bad-request',
     });
   });
+
+  // ── 取消要真的取消上游（2026-08-08 审查）──────────────────────
+
+  it('🔴 排上队之后取消 → 点名从 ComfyUI 队列里删掉，不是只停自己的轮询', async () => {
+    const controller = new AbortController();
+    const { calls } = stubComfy({
+      history: [{ body: {} }],
+      onHistory: (i) => {
+        if (i === 0) controller.abort();
+      },
+    });
+
+    const result = await generateComfyImage({
+      values: comfyValues(),
+      signal: controller.signal,
+      ...fast,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'aborted' });
+
+    const del = calls.find((c) => c.url.startsWith(COMFY_BFF_QUEUE) && c.init?.method === 'POST');
+    expect(del).toBeDefined();
+    expect(JSON.parse(del?.init?.body ?? '{}')).toEqual({ delete: ['p1'] });
+    expect(del?.init?.headers?.['X-Target-Base-URL']).toBe(COMFY_DEFAULT_BASE_URL);
+  });
+
+  it('🔴 正在跑的是我们这张才发 /interrupt —— 它掐的是「当前那个」，不收 prompt_id', async () => {
+    const controller = new AbortController();
+    const { calls } = stubComfy({
+      history: [{ body: {} }],
+      queueState: { body: { queue_running: [[0, 'p1', {}, {}, []]], queue_pending: [] } },
+      onHistory: (i) => {
+        if (i === 0) controller.abort();
+      },
+    });
+
+    await generateComfyImage({ values: comfyValues(), signal: controller.signal, ...fast });
+
+    expect(calls.some((c) => c.url.startsWith(COMFY_BFF_INTERRUPT))).toBe(true);
+  });
+
+  it('🔴 队列里跑的是别人那张 → 绝不 interrupt（否则一次取消变成一次破坏）', async () => {
+    const controller = new AbortController();
+    const { calls } = stubComfy({
+      history: [{ body: {} }],
+      queueState: { body: { queue_running: [[0, 'someone-else', {}, {}, []]] } },
+      onHistory: (i) => {
+        if (i === 0) controller.abort();
+      },
+    });
+
+    await generateComfyImage({ values: comfyValues(), signal: controller.signal, ...fast });
+
+    expect(calls.some((c) => c.url.startsWith(COMFY_BFF_INTERRUPT))).toBe(false);
+  });
+
+  it('善后自己失败了也不冒泡 —— 结果仍是干净的 aborted', async () => {
+    const controller = new AbortController();
+    stubComfy({
+      history: [{ body: {} }],
+      queueState: { throws: true },
+      onHistory: (i) => {
+        if (i === 0) controller.abort();
+      },
+    });
+
+    const result = await generateComfyImage({
+      values: comfyValues(),
+      signal: controller.signal,
+      ...fast,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'aborted' });
+  });
+
+  it('还没排上队就取消 → 无队可删，一发善后请求都不产生', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const { calls } = stubComfy();
+
+    await generateComfyImage({ values: comfyValues(), signal: controller.signal, ...fast });
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it('🔴 超时**不**掐上游 —— 文案刚说了「可能仍在渲染」，不能转头把它掐掉', async () => {
+    const { calls } = stubComfy({ history: [{ body: {} }] });
+
+    await generateComfyImage({ values: comfyValues(), pollIntervalMs: 0, timeoutMs: 30 });
+
+    expect(calls.some((c) => c.url.startsWith(COMFY_BFF_INTERRUPT))).toBe(false);
+    expect(calls.some((c) => c.url.startsWith(COMFY_BFF_QUEUE))).toBe(false);
+  });
+
+  // ── 正文不是 JSON 时留得下线索（2026-08-08 审查）────────────────
+
+  it('🔴 指到了别的服务（回 200 HTML）→ detail 里留得下原文片段，而不是一句空的冒号', async () => {
+    stubComfy({ queue: { status: 200, text: '<!doctype html><html><body>ComfyUI</body></html>' } });
+
+    const result = await generateComfyImage({ values: comfyValues(), ...fast });
+
+    expect(result).toMatchObject({ ok: false, kind: 'bad-response' });
+    if (result.ok) return;
+    expect(result.detail).toContain('响应正文不是 JSON');
+    expect(result.detail).toContain('<!doctype html>');
+  });
+
+  it('正文是合法 JSON 时不多接那段话', async () => {
+    stubComfy({ queue: { status: 200, body: { number: 1 } } });
+    const result = await generateComfyImage({ values: comfyValues(), ...fast });
+    if (result.ok) throw new Error('unreachable');
+    expect(result.detail).not.toContain('响应正文不是 JSON');
+  });
+
+  it('🔴 fetch 替身兑现了 undefined → bad-response，不许抛穿「永不抛穿」的契约', async () => {
+    setImageFetch(async () => undefined as unknown as ImageResponseLike);
+    const result = await generateComfyImage({ values: comfyValues(), ...fast });
+    expect(result).toMatchObject({ ok: false, kind: 'bad-response' });
+  });
+
+  // ── /view 的体积闸（2026-08-08 审查）──────────────────────────
+
+  it('🔴 上游声明的体积就超上限 → 连读都不读', async () => {
+    const { view } = stubComfy({ view: { contentLength: String(COMFY_VIEW_MAX_BYTES + 1) } });
+
+    const result = await generateComfyImage({ values: comfyValues(), ...fast });
+
+    expect(result).toMatchObject({ ok: false, kind: 'bad-response' });
+    if (result.ok) return;
+    expect(result.detail).toContain('声明了');
+    expect(result.message).toContain('MB');
+    // 整块吃进内存这件事本身就是要避免的 —— 所以一次都没读
+    expect(view.arrayBuffer).not.toHaveBeenCalled();
+  });
+
+  it('没有 content-length（分块传输）时读完再量一次', async () => {
+    stubComfy({ view: { bytes: new Uint8Array(COMFY_VIEW_MAX_BYTES + 1) } });
+    const result = await generateComfyImage({ values: comfyValues(), ...fast });
+    expect(result).toMatchObject({ ok: false, kind: 'bad-response' });
+    if (result.ok) return;
+    expect(result.detail).toContain('取回');
+  });
+
+  it('正常大小的图不受这道闸影响（挡的是离谱，不是「大」）', async () => {
+    stubComfy({ view: { contentLength: String(12 * 1024 * 1024) } });
+    expect((await generateComfyImage({ values: comfyValues(), ...fast })).ok).toBe(true);
+  });
 });
 
 describe('resolveComfyBaseUrl', () => {
@@ -1042,5 +1218,32 @@ describe('resolveComfyBaseUrl', () => {
 
   it('协议不是 http/https → 就地报错，一次请求都不发', () => {
     expect(resolveComfyBaseUrl('ftp://box')).toMatchObject({ ok: false });
+  });
+
+  it('🔴 从浏览器地址栏整条粘过来的 fragment 必须剃掉', () => {
+    // 留着它 → `POST /prompt` 打成 `…/#/workflow/prompt`，ComfyUI 拿首页 HTML 回 200，
+    // 最后报成一句「2xx 响应里没有 prompt_id: 」而冒号后面什么都没有
+    expect(resolveComfyBaseUrl('http://127.0.0.1:8188/#/workflow')).toEqual({
+      ok: true,
+      base: 'http://127.0.0.1:8188',
+    });
+    expect(resolveComfyBaseUrl('127.0.0.1:8188/?foo=bar#x')).toEqual({
+      ok: true,
+      base: 'http://127.0.0.1:8188',
+    });
+  });
+
+  it('顺手粘上的 /prompt 剃掉（否则打成 /prompt/prompt）', () => {
+    expect(resolveComfyBaseUrl('http://127.0.0.1:8188/prompt')).toEqual({
+      ok: true,
+      base: 'http://127.0.0.1:8188',
+    });
+  });
+
+  it('反代挂在子路径上是合法配置，路径前缀要留着', () => {
+    expect(resolveComfyBaseUrl('https://box.example.com/comfy/')).toEqual({
+      ok: true,
+      base: 'https://box.example.com/comfy',
+    });
   });
 });

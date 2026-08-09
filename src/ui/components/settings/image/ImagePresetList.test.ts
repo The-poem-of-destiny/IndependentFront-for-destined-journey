@@ -22,16 +22,23 @@ vi.mock('../../../stores/settings-store', () => ({
   useSettingsStore: () => ({ settings: mockSettings }),
 }));
 
-/** 内容注册表不是响应式的，测试里换表之后重新挂载即可（生产靠 contentReadyPromise） */
-const registryDialects: unknown = {
+/**
+ * 内容注册表不是响应式的，测试里换表之后重新挂载即可（生产靠**加载门**）。
+ *
+ * 🔴 `registryFace` 与 `ensurePromise` 都是可变的：加载门兑现**之前**注册表是空的
+ * 才叫在途，而「在途时挂载会怎样」正是本文件最后一组用例要问的事。
+ */
+const DIALECT_FIXTURE: unknown = {
   dialects: [
     { id: 'danbooru-anime', label: '动漫标签', appearance: 'danbooru' },
     { id: 'natural-prose', label: '自然语', appearance: 'prose', normalize: 'none' },
   ],
 };
+let registryFace: unknown;
+let ensurePromise: Promise<void>;
 vi.mock('../../../stores/content-store', () => ({
-  contentReadyPromise: Promise.resolve(),
-  getContentRegistry: () => ({ imageDialects: registryDialects }),
+  getContentRegistry: () => ({ imageDialects: registryFace }),
+  ensureContentRegistryLoaded: () => ensurePromise,
 }));
 
 const presetStore = reactive({
@@ -80,6 +87,8 @@ async function mountList() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  registryFace = DIALECT_FIXTURE;
+  ensurePromise = Promise.resolve();
   for (const k of Object.keys(mockSettings)) delete mockSettings[k];
   Object.assign(mockSettings, { imageDialectId: 'danbooru-anime', imageDialectOverrides: {} });
   sessionStore.rows = [];
@@ -123,5 +132,39 @@ describe('C15：当前方言下无可用形象的提示', () => {
 
     const wrapper = await mountList();
     expect(wrapper.text()).not.toContain(PRESET_NO_FORM_HINT);
+  });
+});
+
+describe('🔴 C15：方言表还在路上时挂载，提示行仍要活过来', () => {
+  /**
+   * 这一组问的是**接线**，不是判据。
+   *
+   * 上面那些用例都从一份**已经灌好**的注册表出发，于是「组件等的是哪个 promise」
+   * 这个问题根本没被问到 —— 等一个在模块加载时就同步兑现的 promise（它只说明占位骨架
+   * 就位，对 `image-dialects.json` 那次 fetch 一个字都没说）照样全绿。真机上的败法是:
+   * 分区在 fetch 在途时挂载 → `dialects` 永远是 `[]` → 回落内置 danbooru →
+   * `lacksForm()` 恒 false → C15 那句提示在本组件整个生命周期里都不出现。
+   */
+  it('挂载时注册表还空着 → 先不标；加载门兑现后那一行自己出现', async () => {
+    mockSettings.imageDialectId = 'natural-prose';
+    registryFace = undefined;
+    let release = (): void => {};
+    ensurePromise = new Promise<void>((resolve) => {
+      release = () => {
+        registryFace = DIALECT_FIXTURE;
+        resolve();
+      };
+    });
+
+    const wrapper = await mountList();
+    // 空注册表 → 回落内置 danbooru → 老预设在那边照常可用，所以此刻不该标
+    expect(wrapper.text()).not.toContain(PRESET_NO_FORM_HINT);
+
+    release();
+    await flushPromises();
+
+    const rows = wrapper.findAll('.preset-row');
+    expect(rows[0]?.text()).toContain(PRESET_NO_FORM_HINT);
+    expect(rows[1]?.text()).not.toContain(PRESET_NO_FORM_HINT);
   });
 });

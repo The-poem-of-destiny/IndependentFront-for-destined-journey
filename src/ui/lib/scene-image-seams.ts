@@ -120,9 +120,20 @@ const PROVIDER_CAPABILITIES: Record<ImageProviderId, ImageProviderCapabilities> 
   },
 };
 
+/**
+ * 按 id 取能力位。认不出的 id（回退包 / 手改 localStorage / 老记录里存着一个已下线的
+ * 后端）→ 退回 v1 那条路（novelai）。`undefined` 走同一条路：`SceneImageRecord.provider`
+ * 缺席**就是** novelai（那些记录全是 NAI 画的），不是「不知道」。
+ */
+function capabilitiesById(id: ImageProviderId | undefined): ImageProviderCapabilities {
+  return (
+    (id !== undefined ? PROVIDER_CAPABILITIES[id] : undefined) ?? PROVIDER_CAPABILITIES.novelai
+  );
+}
+
 /** 设置里存着一个不认识的 provider（回退包 / 手改 localStorage）→ 退回 v1 那条路 */
 function capabilitiesOf(s: ImageRuntimeSettings): ImageProviderCapabilities {
-  return PROVIDER_CAPABILITIES[s.imageProvider] ?? PROVIDER_CAPABILITIES.novelai;
+  return capabilitiesById(s.imageProvider);
 }
 
 /** 世界状态（D39）—— 由 Code 查引擎得出，**不问 AI** */
@@ -180,8 +191,27 @@ export interface SceneImageSeamDeps {
   charactersNeedingBaseline?: (names: readonly string[]) => string[];
 }
 
-/** NAI 与 ComfyUI 回的都是 PNG（§6）。造 blob 时声明它，落库的 `mime` 仍从 blob 上回读 */
-const NAI_IMAGE_MIME = 'image/png';
+/** 兜底类型：NAI 恒回 PNG（§6），ComfyUI 没说清楚时也按 PNG 算。落库的 `mime` 仍从 blob 上回读 */
+const DEFAULT_IMAGE_MIME = 'image/png';
+
+/**
+ * ComfyUI 那张图**到底是什么格式**，只有上游的 content-type 知道（2026-08-08 评审补）。
+ *
+ * 🔴 这一格曾照 PNG 写死，而那是**假的账**：用户的工作流以 `SaveAnimatedWEBP` / JPEG 结尾时，
+ *    字节是 webp/jpeg、记录上却写着 `image/png` —— CG 图鉴的下载扩展名
+ *    （`CgGalleryPanel.extOf`）与格式标注全跟着错，存下来的文件双击打不开。
+ *    NAI 那条不受影响（它只回 PNG），所以只有 ComfyUI 分支按上游声明取值。
+ *
+ * 🔴 但 content-type 只作**类型标注**，仍不进任何判据 —— 「拿可变的 header 去否决不可变的
+ *    字节」正是 v1 扔掉一张已扣费图片的那次教训（见 `image-client.parseNaiZip`）。
+ *    取值口径：剃掉 `; charset=` 那类参数、折小写；空 / 缺席 / 认不出的形态
+ *    （`application/octet-stream` 那类）一律回落 PNG —— 存一个派生不出扩展名的类型，
+ *    比存一个偶尔猜错的类型更糟。
+ */
+function resolveBlobMime(contentType: string | undefined): string {
+  const bare = (contentType ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
+  return /^(image|video)\/[a-z0-9.+-]+$/.test(bare) ? bare : DEFAULT_IMAGE_MIME;
+}
 
 /**
  * 「现在这一次用哪条方言」—— **每次调用现算**（C6）。
@@ -190,12 +220,22 @@ const NAI_IMAGE_MIME = 'image/png';
  *    缓存过一次的话，症状是「切了方言，第一张图还是老吃法」。
  */
 function resolveDialect(deps: SceneImageSeamDeps, s: ImageRuntimeSettings): ImageDialect {
+  return resolveDialectById(deps, s, s.imageDialectId);
+}
+
+/**
+ * 按**指定 id** 取方言（覆盖仍按同一个 id 键控，C6）。
+ *
+ * 存在的理由只有一个：{@link sendOne} 装配时用的是**记录盖的章**而不是当下的设置
+ * （见那里的注释）。id 认不出时 `resolveImageDialect` 自己会回落，本层不另判。
+ */
+function resolveDialectById(
+  deps: SceneImageSeamDeps,
+  s: ImageRuntimeSettings,
+  dialectId: string,
+): ImageDialect {
   const dialects = parseImageDialects(deps.rawDialects?.());
-  return resolveImageDialect(
-    dialects,
-    s.imageDialectId,
-    s.imageDialectOverrides?.[s.imageDialectId],
-  );
+  return resolveImageDialect(dialects, dialectId, s.imageDialectOverrides?.[dialectId]);
 }
 
 /**
@@ -261,6 +301,11 @@ export function buildSceneImageSeams(deps: SceneImageSeamDeps): SceneImageSeams 
         },
         // 🔴 **当前**后端的能力位，不是记录里那个：限额判的是「现在这一张要不要花钱」
         costModel: capabilitiesOf(s).costModel,
+        // 🔴 反过来，**既有记录**按各自盖的章算账（C9，2026-08-08 评审补）：预算是被
+        //    「花过钱的那些」吃掉的。少了这一格，本地免费画的 25 张会顶满 NAI 的每小时
+        //    额度 —— 切回付费后端时第一张就被拦，而账单上一分钱都没花过。
+        //    能力表只有本文件这一张，所以这个映射也只能由本层交进去。
+        costModelOf: (provider) => capabilitiesById(provider).costModel,
       });
     },
 
@@ -277,8 +322,15 @@ export function buildSceneImageSeams(deps: SceneImageSeamDeps): SceneImageSeams 
     runPromptAgent: async (req, signal) => {
       // 🔴 方言的 systemPrompt 在**这一层**解析（C3/C5）：方言解析全仓只有一处，
       //    store 不认识方言、pipeline 只负责把这段话合进 image_prompt 的 config。
-      //    空串 = 本方言没话说 → 不传，agent 侧回落它自己的兜底（`FALLBACK_IMAGE_DIALECT`
-      //    的 systemPrompt 正是空串，那条路必须与图像 v1 逐字一致）。
+      //    空串 = **内容包作者**在方言 JSON 里明说「本方言没话说」→ 不传，让 agent 侧
+      //    回落它自己的兜底。
+      //
+      // 🔴 注册表缺席那条路**不走这个空串分支**：`FALLBACK_IMAGE_DIALECT` 自带
+      //    `DEFAULT_IMAGE_PROMPT_SYSTEM`（v1 那段完整提示词，2026-08-08 修），所以这里
+      //    照常把它当作有话说交下去 —— 与图像 v1 逐字一致的正是**这一条**。把兜底改回
+      //    空串会让侧链跑在 `agent-templates.ts` 的一行 stub 上，五条 v1 规则一条不剩，
+      //    而失败是静默的（图照出、Anlas 照扣，只是内容不对）。
+      //    回归断言：scene-image-seams.test.ts「注册表缺席时收到的是兜底那段 v1 原文」。
       const dialectPrompt = resolveDialect(deps, deps.settings()).systemPrompt;
       const out =
         dialectPrompt !== ''
@@ -360,18 +412,23 @@ function withWarnings(out: SceneImageSendResult, composed: ComposedPrompt): Scen
   return out;
 }
 
-/** 把上游回来的字节做成 blob + 指纹；空字节是明确失败（不落一条 0 字节的「成功」） */
+/**
+ * 把上游回来的字节做成 blob + 指纹；空字节是明确失败（不落一条 0 字节的「成功」）。
+ *
+ * `mime` 由调用方给：NAI 恒 PNG，ComfyUI 照上游声明（见 {@link resolveBlobMime}）。
+ */
 async function toBlob(
   result: Extract<ImageGenerateResult, { ok: true }>,
   hash: (bytes: Uint8Array) => Promise<string | undefined>,
   emptyDetail: string,
+  mime: string,
 ): Promise<{ ok: true; blob: Blob; digest: string | undefined } | ImageGenFailure> {
   const bytes = result.images[0];
   if (!bytes || bytes.length === 0) {
     return localFailure('bad-response', emptyDetail, true, '解出来的图是空的');
   }
   // Blob 构造走 `slice().buffer`: 直接喂 Uint8Array 变量在 vitest 下跑得过、tsc 过不了
-  const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: NAI_IMAGE_MIME });
+  const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: mime });
   return { ok: true, blob, digest: await hash(bytes) };
 }
 
@@ -380,6 +437,21 @@ async function toBlob(
  *
  * 两条分支各自负责「怎么发」与「账本怎么记」，但装配（`composeFor`）与落库形状
  * （`SceneImageSendResult`）是共用的 —— store / 队列 / 七态真值表 / CG 图鉴一份不复制。
+ *
+ * 🔴 **分叉读的是记录盖的章，不是当下的设置**（C14/C9，2026-08-08 评审补）。
+ *    限额是在**准入那一刻**按当时的后端判的（`runtimeInfo()` 同时把它盖进记录），
+ *    而队列可能要排很久 —— 本地渲染一张 600 秒是常态。这一格读当下设置的话：
+ *    排一串 ComfyUI 的活（local，L1/L2 整条跳过），中途把后端切成 NovelAI，
+ *    队列里每一条都会改道发去 NAI —— **一条都没过过花钱那道闸**。
+ *    准入时的状态管这条记录的一辈子：过闸的是什么，跑的就必须是什么。
+ *
+ * 🔴 方言同理，但它跟的是**场景串写给谁**：记录上那个 `dialectId` 由 store 在
+ *    「提示词落定」的同一步刷新（缓存复用 / 侧链重跑都算），所以照它装配 = 装配契约
+ *    与手里这串提示词永远同源。读当下设置的话，侧链刚用散文档写完一句英文句子，
+ *    装配就可能给它接上一条动漫尾巴。
+ *
+ *    两格都**缺席时回落当下设置** —— 那是 v1 的记录（或没接 `runtimeInfo` 的测试），
+ *    v1 的行为本来就是「一切现取现算」。
  */
 async function sendOne(
   input: SceneImageSendInput,
@@ -390,8 +462,10 @@ async function sendOne(
   hash: (bytes: Uint8Array) => Promise<string | undefined>,
 ): Promise<SceneImageSendResult | ImageGenFailure> {
   const s = deps.settings();
-  const caps = capabilitiesOf(s);
-  const dialect = resolveDialect(deps, s);
+  const stamped = input.record;
+  const caps =
+    stamped.provider !== undefined ? capabilitiesById(stamped.provider) : capabilitiesOf(s);
+  const dialect = resolveDialectById(deps, s, stamped.dialectId ?? s.imageDialectId);
   const composed = composeFor(deps, s, dialect, caps, input);
 
   return caps.id === 'comfyui'
@@ -447,7 +521,8 @@ async function sendViaNovelai(
   });
   if (!result.ok) return result;
 
-  const made = await toBlob(result, hash, 'NovelAI 返回了看不懂的内容');
+  // NAI 恒回 PNG（zip 里那张 `image_0.png`）—— 这一条不看 content-type
+  const made = await toBlob(result, hash, 'NovelAI 返回了看不懂的内容', DEFAULT_IMAGE_MIME);
   if (!made.ok) return made;
   const { blob, digest } = made;
 
@@ -527,7 +602,14 @@ async function sendViaComfy(
   });
   if (!result.ok) return result;
 
-  const made = await toBlob(result, hash, 'ComfyUI 返回了看不懂的内容');
+  // 🔴 格式**照上游声明**：工作流的存图节点可能吐 webp/jpeg，写死 PNG 会让下载的
+  //    文件带一个打不开的扩展名（见 resolveBlobMime）
+  const made = await toBlob(
+    result,
+    hash,
+    'ComfyUI 返回了看不懂的内容',
+    resolveBlobMime(result.contentType),
+  );
   if (!made.ok) return made;
 
   const out: SceneImageSendResult = {

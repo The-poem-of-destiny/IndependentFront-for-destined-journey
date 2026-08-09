@@ -180,6 +180,70 @@ describe('settings-store', () => {
     expect(keys).toContain('memoryCacheStrategy');
   });
 
+  // ═══ 图像设置：构造完成的那一拍就必须是合法袋子 ═══
+  //
+  // image-settings-migration.ts 的文件头写着「必须在 ref() 之前，否则设置页那一拍会
+  // 炸在 undefined 上」—— 那是一条**关于 store 怎么接线**的断言，而此前只有纯函数级
+  // 用例：把 settings-store 里那两行删掉，纯函数测试一条都不会红。
+
+  /** 用一份指定的 localStorage 内容重新构造一个 store（迁移只在构造期跑一次） */
+  function bootWith(payload: Record<string, unknown>) {
+    store_.clear();
+    store_.set('fated-poem-settings', JSON.stringify(payload));
+    setActivePinia(createPinia());
+    return useSettingsStore();
+  }
+
+  it('v1 平铺档案：useSettingsStore() 返回时已是袋子形状，旧平铺键一个不剩', () => {
+    const s = bootWith({
+      imageEndpointId: 'ep_nai',
+      imageModel: 'nai-diffusion-3',
+      imageSampler: 'k_dpmpp_2m',
+      imageMaxPerMessage: 5,
+      imageMaxPerHour: 7,
+      imageQualitySuffix: 'mine',
+    });
+
+    expect(s.settings.imageNovelai).toEqual({
+      endpointId: 'ep_nai',
+      model: 'nai-diffusion-3',
+      sampler: 'k_dpmpp_2m',
+      noiseSchedule: 'karras',
+      ucPreset: 0,
+      tier: 'unset',
+      maxPerMessage: 5,
+      maxPerHour: 7,
+    });
+    expect(s.settings.imageDialectOverrides).toEqual({
+      'danbooru-anime': { qualitySuffix: 'mine' },
+    });
+    for (const key of ['imageEndpointId', 'imageModel', 'imageSampler', 'imageQualitySuffix']) {
+      expect(key in s.settings).toBe(false);
+    }
+  });
+
+  it('🔴 已迁过的档案里袋子被写坏 → 构造时就修好（此前只有带旧键时才修）', () => {
+    // 症状不在这里：下游 checkQuota 读 `s.imageNovelai.maxPerMessage`，
+    // 袋子是 null / 数字时直接 TypeError 炸在 admitAndEnqueue 里。
+    const s = bootWith({ imageNovelai: null, imageComfy: 5, imageDialectOverrides: 'nope' });
+
+    expect(s.settings.imageNovelai.maxPerMessage).toBe(2);
+    expect(s.settings.imageComfy.baseUrl).toBe('http://127.0.0.1:8188');
+    expect(s.settings.imageDialectOverrides).toEqual({});
+  });
+
+  it('🔴 袋内缺字段用 getDefaults() 补齐 —— 浅合并只盖一层，缺的格不会自己出现', () => {
+    const s = bootWith({ imageNovelai: { endpointId: 'ep', maxPerMessage: 4 } });
+
+    // 模块兜底那份 model 是空串；这里必须是生产默认值 → 证明 store 确实把 defaults 传了进去
+    expect(s.settings.imageNovelai.model).toBe('nai-diffusion-4-5-full');
+    expect(s.settings.imageNovelai.tier).toBe('unset');
+    expect(s.settings.imageNovelai.maxPerHour).toBe(20);
+    // 用户存过的两格原样保留
+    expect(s.settings.imageNovelai.endpointId).toBe('ep');
+    expect(s.settings.imageNovelai.maxPerMessage).toBe(4);
+  });
+
   it('剧情系统新档默认值形状对齐 create-store', () => {
     expect(store.settings.plotMode).toBe('off');
     expect(store.settings.plotDurationYears).toBe(5);

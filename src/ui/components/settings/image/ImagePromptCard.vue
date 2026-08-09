@@ -76,14 +76,23 @@ const activeDialect = computed(() => resolveImageDialect(dialects.value, s.image
  * 🔴 **清空 = 删键**，不是写一个空串：`resolveImageDialect` 把空串当「没覆盖」，
  *    留着一个空串键只会在设置里攒下永远不生效的脏数据（与 AgentConfigPanel 的
  *    diff-write「相等就删键」同一条纪律）。
+ *
+ * 🔴 **只剩空白也算清空**：判空前先 `trim()`。`resolveImageDialect` 只看 `length > 0`、
+ *    装配层只看真假 —— 于是框里剩下的一个空格会成为一份**完全合法的覆盖**，
+ *    `image_prompt` 那条侧链就顶着一个内容为 `' '` 的 systemPrompt 去跑，产出一串垃圾
+ *    而**没有任何一处报错**。存进去的仍是原样文本（不是 trim 后的）：回写 trim 后的值
+ *    会在用户敲下换行/空格的当口把它抹掉，光标跟着跳。
  */
 const dialectPrompt = computed<string>({
   get: () => s.imageDialectOverrides?.[s.imageDialectId]?.systemPrompt ?? '',
   set: (value: string) => {
+    if (value.trim() === '') {
+      delete s.imageDialectOverrides?.[s.imageDialectId]?.systemPrompt;
+      return;
+    }
     if (!s.imageDialectOverrides) s.imageDialectOverrides = {};
     const entry = (s.imageDialectOverrides[s.imageDialectId] ??= {});
-    if (value.length === 0) delete entry.systemPrompt;
-    else entry.systemPrompt = value;
+    entry.systemPrompt = value;
   },
 });
 

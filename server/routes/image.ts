@@ -46,4 +46,21 @@ app.get('/comfy/history/:id', (c) =>
 
 app.get('/comfy/view', (c) => forward(c, `/view${new URL(c.req.url).search}`));
 
+/**
+ * ── 取消善后的两条（2026-08-08 审查补）──────────────────────────
+ *
+ * 前端 abort 掉的只是自己的轮询，ComfyUI 那头照跑不误 —— 显卡照占、图照落进输出目录，
+ * 而用户随手按的「重试」会排在那张被遗弃的图后面。所以取消时要够得着这两条上游接口:
+ *
+ * - `POST /queue`   —— 带 `{"delete":["<prompt_id>"]}` **点名删**掉还在排队的那一项
+ * - `GET  /queue`   —— 看**正在跑的**是不是我们这张（`/interrupt` 不收 prompt_id，
+ *                      盲发会掐掉用户自己在界面里跑的另一张图）
+ * - `POST /interrupt` —— 掐掉当前正在跑的那个
+ *
+ * 🔴 与上面几条同一条纪律: `forward()` 一行，本层不读体、不判、不改。
+ */
+app.on(['GET', 'POST'], '/comfy/queue', (c) => forward(c, '/queue'));
+
+app.post('/comfy/interrupt', (c) => forward(c, '/interrupt'));
+
 export { app as imageRoutes };

@@ -1,10 +1,15 @@
 /**
  * image-defaults.ts — 图像生成子系统的常量默认值（设计 §6.2 / §5.2 / §5.3）
  *
- * 装什么: 画质后缀表 / 固定构图词 / 基础负向 / 限额默认值 / §12.2 那张表里被
- *         **多方共用**的两格（`bad-response` 文案与「要不要显示重试」）。
+ * 装什么: 画质后缀表 / 固定构图词 / 基础负向 / **侧链系统提示词** / 限额默认值 /
+ *         §12.2 那张表里被**多方共用**的两格（`bad-response` 文案与「要不要显示重试」）。
+ *
  * 不装什么: 任何逻辑。本文件是纯常量，被 `image-prompt.ts`、`image-quota.ts` 与
  *           设置页的 `getDefaults()` 共用 —— 它存在的意义就是让这些值只有一处。
+ *
+ * 🔴 画质后缀 / 基础负向 / 构图词 / 侧链提示词这**四个串**合起来 = **图像 v1 的行为**，
+ *    也就是 `FALLBACK_IMAGE_DIALECT` 的四格文本旋钮。兜底方言**引用**它们而不是抄一份 ——
+ *    抄一份的败法是「改了默认值，兜底路径还是老的」，而兜底恰恰是没人会去手工验的那条路。
  *
  * 🔴 这些默认值大多是**可配置项的初值**（`ComposeOptions` / `UiSettings`），
  *    不是硬编码常量。改这里等于改所有新存档的起点。
@@ -96,6 +101,26 @@ export const DEFAULT_IMAGE_COMPOSITION_TAGS = 'wide shot, depth of field';
  */
 export const DEFAULT_IMAGE_BASE_NEGATIVE =
   'lowres, aliasing, blurry, jpeg artifacts, worst quality, bad quality, bad anatomy, bad hands, extra digits, fewer digits, watermark, signature, username, artist name, text, logo';
+
+// ═══ 侧链提示词（§5.1 / 图像 v2 C5）═══
+
+/**
+ * `image_prompt` 侧链的 v1 系统提示词，也是**内置 `danbooru-anime` 方言**
+ * （`FALLBACK_IMAGE_DIALECT.systemPrompt`）的默认值。
+ *
+ * 🔴 **它必须逐字节等于 `data/content/image-dialects.json` 里 `danbooru-anime` 那条的
+ * `systemPrompt`**。图像 v2（C5）把这段话从 `agent-config.json` 挪进了方言 JSON，于是
+ * 「pack 把第 7 面整份换掉且不带 danbooru 条」「`/data/content/image-dialects.json` 取不到」
+ * 这两条路上，方言就是本文件这份兜底。两份漂开不会报错，只会让那两条路上的侧链
+ * 按另一套规则说话。`image-dialect.test.ts` 直接读那个 JSON 做双向断言钉住这条。
+ *
+ * 🔴 **绝不能是空串**（2026-08-08 审查发现的那个洞）：空串会让装配层回落到
+ * `agent-templates.ts` 的一行 stub —— 那一行里五条规则一条都没有，模型会自己写外貌、
+ * 人数、天气、画质词，引擎再在上面追加一份自己的，画出来的东西是错的，而且照样扣 Anlas。
+ * 「没自带提示词」这个语义留给**内容包作者**（方言 JSON 里写空串），不是兜底该有的形态。
+ */
+export const DEFAULT_IMAGE_PROMPT_SYSTEM =
+  '你的工作是把一段中文场景描述转换成 danbooru 风格的英文标签串，供文生图模型使用。\n\n规则:\n1. 只输出 danbooru 标签，英文小写，用逗号分隔，全部使用 ASCII 半角标点（不要全角逗号、顿号、书名号）。\n2. 不要写角色外观（发色、瞳色、五官、服装、身材等）——那些由角色预设负责。你只写场景、动作、姿态、光线、氛围、构图。\n   🔴 也不要写人数标签（1girl / 2girls / 1boy / no humans）——出场几个人引擎自己知道，会由它追加；两个人数标签同时出现会让模型画出多余的人。\n3. 不要写时段与天气（dusk、night、sunset、evening、morning、rain、snow、overcast 等）——几点钟、什么天气由引擎按游戏内时间追加；你写的那个词会和引擎的词同时出现，模型只挑一个听。\n   光线的**质感**照写不误：candlelight、backlight、rim lighting、dim lighting、cinematic lighting 描述的是这一刻怎么被照亮，不是几点钟。\n4. 不要写画质词（best quality 之类），也不要写分级标签（rating:*）——这两类由引擎追加。分级只是给你参考画面尺度的上下文。\n5. 只输出下面三个标签，不要写解释、开场白或任何别的内容:\n<image_prompt>正向标签串</image_prompt>\n<image_negative>本场景专属的负向标签串，通常留空</image_negative>\n<image_desc>一句中文说明，用作图鉴里的副标题</image_desc>';
 
 // ═══ 限额（§5.3）═══
 

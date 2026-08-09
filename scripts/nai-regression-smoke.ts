@@ -8,7 +8,7 @@
  *
  * 用法: npx vite-node scripts/nai-regression-smoke.ts   （需要 dev server 已在 5173）
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { parseImageDialects, resolveImageDialect } from '@engine/image-dialect';
@@ -19,10 +19,14 @@ import { generateNaiImage, setImageFetch } from '@ui/lib/image-client';
 
 async function main(): Promise<void> {
   // 1. key 从 .env.local 读（绝不打印）
+  //
+  // 🔴 引号必须剥掉: `.env` 的惯例写法是 `KEY="pst-…"`，而 `(\S+)` 会把两个引号**一起**
+  //    收进 token，于是 NAI 回 401 —— 症状读起来是「令牌无效」，人会去重新申请一个
+  //    完全没问题的令牌。CRLF 的 `\r` 同理（trim 掉）。
   const env = readFileSync(resolve(process.cwd(), '.env.local'), 'utf8');
-  const m = env.match(/^NOVELAI_API_KEY=(\S+)/m);
+  const m = env.match(/^NOVELAI_API_KEY\s*=\s*(.+)$/m);
   if (!m) throw new Error('NOVELAI_API_KEY not found in .env.local');
-  const token = m[1];
+  const token = m[1].trim().replace(/^(['"])([\s\S]*)\1$/, '$2');
 
   // 2. 方言从内容 JSON 解析（与应用同一份数据）
   const raw: unknown = JSON.parse(
@@ -75,7 +79,11 @@ async function main(): Promise<void> {
   }
   const png = result.images[0]!;
   const magic = Buffer.from(png.slice(0, 8)).toString('hex');
-  const out = resolve(process.cwd(), 'nai_regression.png');
+  // 🔴 落在 `tmp/`（.gitignore 里已整目录忽略），不是仓库根: 根目录那份没被忽略过，
+  //    跑一次冒烟就在 `git status` 里多一个未跟踪的二进制文件，等着被 `git add -A` 带走
+  const outDir = resolve(process.cwd(), 'tmp');
+  mkdirSync(outDir, { recursive: true });
+  const out = resolve(outDir, 'nai_regression.png');
   writeFileSync(out, png);
   console.log(
     `[OK] ${secs}s | ${png.length} bytes | magic ${magic} | content-type ${result.contentType} | saved ${out}`,

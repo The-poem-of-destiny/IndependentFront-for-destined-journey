@@ -328,6 +328,39 @@ function firstNodeErrorMessage(nodeErrors: Record<string, unknown>): string | un
 }
 
 /**
+ * 整份提示词被拒时那个 `error` 字段 → 一句能进文案的话。
+ *
+ * 🔴 **`error` 有两种形状，只认字符串那种会把整条错误吞掉**（2026-08-08 审查逮到）。
+ *    节点级的问题走 `node_errors`，而**整张图**级的拒绝（没有输出节点、图为空、
+ *    提示词校验整体失败）走的是一个**对象**:
+ *
+ *    ```json
+ *    { "error": { "type": "prompt_no_outputs", "message": "Prompt has no outputs",
+ *                 "details": "", "extra_info": {} }, "node_errors": {} }
+ *    ```
+ *
+ *    此时 `node_errors` 是**空的**（那条分支不进），只按 `typeof === 'string'` 取的话
+ *    `upstream` 恒为 undefined —— 用户拿到的是一句「工作流被 ComfyUI 拒绝了」加一句
+ *    「HTTP 400」，**上游明明已经把原因写在响应里了**。与「content-type 撒谎扔掉付费图」
+ *    同一类：把上游给的确定信息在自己这一层丢掉。
+ */
+function extractUpstreamError(record: Record<string, unknown> | undefined): string | undefined {
+  const raw = record?.error;
+  if (typeof raw === 'string') return raw.trim() || undefined;
+  if (!isRecord(raw)) return undefined;
+
+  const message = typeof raw.message === 'string' ? raw.message.trim() : '';
+  // `type` 是 ComfyUI 的错误码（`prompt_no_outputs` 这类）—— 带上它，用户拿这个词
+  // 去 issue 区一搜就有；message 缺席时它自己就是唯一能说的话
+  const type = typeof raw.type === 'string' ? raw.type.trim() : '';
+  const details = typeof raw.details === 'string' ? raw.details.trim() : '';
+
+  const head = message && type ? `${message}（${type}）` : message || type;
+  if (!head) return undefined;
+  return details && details !== message ? `${head}：${details}` : head;
+}
+
+/**
  * `POST /prompt` 的状态码 + 响应体 → 「排上队了」或一条失败。
  *
  * 🔴 **`node_errors` 优先于状态码，任何状态码上都查**（C12）。ComfyUI 在图被拒时
@@ -359,7 +392,7 @@ export function parseComfyQueueResponse(status: number, body: unknown): ComfyQue
   if (status < 200 || status >= 300) {
     // 400 常见于「图结构对不上」，但没有 node_errors 时说不清是哪一节 ——
     // 归 workflow（不可重试）而不是 bad-request：重发同一份图不会变好
-    const upstream = typeof record?.error === 'string' ? record.error : undefined;
+    const upstream = extractUpstreamError(record);
     const detail = `HTTP ${status}${upstream ? `: ${clip(upstream)}` : ''}`;
 
     if (status >= 500) return comfyFail('upstream', detail);
@@ -510,6 +543,30 @@ export function parseComfyHistory(body: unknown, promptId: string): ComfyHistory
   }
 
   return { state: 'done', images };
+}
+
+// ═══════════════════════════════════════════════════════════
+// GET /queue 的响应
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * `GET /queue` 的响应体里，**正在跑的**是不是这一张。
+ *
+ * 线格式: `{ queue_running: [[number, promptId, prompt, extra, outputs]], queue_pending: [...] }`
+ * —— 每一项是个**数组**（不是对象），`[1]` 才是 prompt_id。
+ *
+ * 🔴 存在的唯一理由是**别误伤**（取消链路）: `POST /interrupt` 掐的是「此刻正在跑的那个」，
+ *    它不收 prompt_id。我们这张若还在排队（`queue_pending`），盲发 interrupt 掐掉的是
+ *    用户自己在 ComfyUI 界面里跑的另一张图 —— 一次「取消」变成了一次破坏。
+ *    排队中的那种从队列里**点名删**（`POST /queue {delete:[id]}`）就够了。
+ *
+ * 认不出的形状一律返回 `false`: 取消的善后是尽力而为，宁可少掐一次也不能多掐一次。
+ */
+export function isComfyPromptRunning(body: unknown, promptId: string): boolean {
+  if (!isRecord(body)) return false;
+  const running = body.queue_running;
+  if (!Array.isArray(running)) return false;
+  return running.some((entry) => Array.isArray(entry) && entry[1] === promptId);
 }
 
 // ═══════════════════════════════════════════════════════════

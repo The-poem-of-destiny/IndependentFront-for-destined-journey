@@ -123,11 +123,23 @@ const activeDialect = computed(() => resolveImageDialect(dialects.value, s.image
  *   · 空 = 回落方言 JSON 的默认值（不是「一个空的画质后缀」）
  *   · 写了东西 = 只对当前这条方言生效
  * 方言选择器与「这一格的默认值长什么样」的占位提示是 T7a 的事，本次只改址不改样。
+ *
+ * 🔴 **清空 = 删键**，与 `ImagePromptCard` 的 `dialectPrompt` 同一条纪律：
+ *    `resolveImageDialect` 把空串当「没覆盖」，写一个空串键只是在设置里攒下永远不生效的
+ *    脏数据（行为无害，但下次读这袋子的人得先分辨「这条是不是覆盖」）。
+ * 🔴 **判空前先 `trim()`**：留在框里的一个空格既不是覆盖也不是清空，两边都说不通 ——
+ *    而它会一路走到装配层被当成一份真覆盖。存进去的仍是**原样文本**（不是 trim 后的）:
+ *    回写 trim 后的值会在用户敲下一个空格的当口把它抹掉，光标跟着跳。
  */
 function dialectOverride(field: 'qualitySuffix' | 'baseNegative') {
   return computed<string>({
     get: () => s.imageDialectOverrides?.[s.imageDialectId]?.[field] ?? '',
     set: (value: string) => {
+      if (value.trim() === '') {
+        // 整袋子/这一格本来就不在时，什么都不必建 —— 清空不该凭空造出一个空覆盖
+        delete s.imageDialectOverrides?.[s.imageDialectId]?.[field];
+        return;
+      }
       if (!s.imageDialectOverrides) s.imageDialectOverrides = {};
       const entry = (s.imageDialectOverrides[s.imageDialectId] ??= {});
       entry[field] = value;
@@ -535,12 +547,23 @@ const RATINGS: { key: ImageRating; label: string }[] = [
         <p class="form-hint">
           每一张图都带上。只写画质与解剖类缺陷，分级由下面的上限管。留空 = 回落方言默认。
         </p>
+        <!--
+          🔴 不吃负向的方言下这一格也要**可见地禁用**（C6）。装配层
+          （`composePrompt` 的 `supportsNegative` 分支）在这条方言下把基础负向整段丢成
+          空串 —— 与旁边那格「我的追加」是同一次丢弃。只停用其中一格、另一格照收，
+          就成了「这一格生效那一格不生效」的猜谜，而两格其实都不生效。
+        -->
         <textarea
           v-model="baseNegative"
-          class="form-input form-textarea"
+          class="form-input form-textarea base-negative"
           rows="3"
           :placeholder="activeDialect.baseNegative"
+          :disabled="!activeDialect.supportsNegative"
         ></textarea>
+        <span v-if="!activeDialect.supportsNegative" class="negative-off">
+          当前方言不支持负向提示词，这一格已停用 —— 这条方言下的基础负向会被整段丢掉，
+          收下再悄悄丢掉只会让人以为它生效了。
+        </span>
       </label>
       <label class="form-label"
         >全局负向（我的追加）
@@ -747,7 +770,9 @@ const RATINGS: { key: ImageRating; label: string }[] = [
   border-radius: var(--theme-radius-md);
 }
 
-/* 方言不吃负向时那一格的可见说明（C6：可见地禁用，不静默丢弃） */
+/* 方言不吃负向时那两格的可见说明（C6：可见地禁用，不静默丢弃）——
+ * 方言级「基础负向」与全局「我的追加」在这条方言下是同一次丢弃，所以同一副长相 */
+.base-negative:disabled,
 .extra-negative:disabled {
   opacity: 0.55;
   cursor: not-allowed;

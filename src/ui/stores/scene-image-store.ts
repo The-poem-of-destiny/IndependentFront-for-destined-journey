@@ -53,6 +53,7 @@ import {
   getSceneImages,
   saveSceneImage,
 } from '@engine/database';
+import { FALLBACK_IMAGE_DIALECT } from '@engine/image-dialect';
 import { detach } from './db-write';
 
 // ═══════════════════════════════════════════════════════════
@@ -161,8 +162,13 @@ export interface SceneImageSeams {
  *
  * 图像 v1 的记录全是 danbooru 系装配的 —— 缺席不是「不知道」，是一段确定的历史。
  * 把它读成「不知道」再去弹一个「无法重画」，等于给老记录凭空造一个残缺态。
+ *
+ * 🔴 **引用 `FALLBACK_IMAGE_DIALECT.id`，不抄那个字符串**：兜底方言就是「v1 的行为」
+ *    本身，两者必须是同一条。抄一份的败法正是 `image-dialect.ts` 文件头点名的那种 ——
+ *    哪天兜底方言改了 id，这里静默地开始拿一个谁也不认识的 id 去比对，
+ *    表现是每条老记录重画时都白跑一次侧链。
  */
-const LEGACY_DIALECT_ID = 'danbooru-anime';
+const LEGACY_DIALECT_ID = FALLBACK_IMAGE_DIALECT.id;
 
 // ═══════════════════════════════════════════════════════════
 // 对外形状
@@ -865,6 +871,12 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
    *    **排队期间**用户切了方言那一刻 —— 记录盖的是入队时的章，装配却用当下的配置，
    *    两者不一致时那串缓存已经不算数了。判据放在两处不是重复：一处管「要不要抄过来」，
    *    一处管「抄过来之后还算不算数」。
+   *
+   * 🔴 走到第 3 条（侧链真的重跑了）时，**记录的方言章跟着一起换**（2026-08-08 评审补）。
+   *    侧链是在当下这条方言上跑的，章却停在入队那一刻 —— 记录于是一边攥着一串散文提示词、
+   *    一边声称自己是 danbooru 的产物。两处塌方：CG 详情页那行「出图时的方言」在说假话；
+   *    日后切回被声称的那条方言，`dialectMatches` 又会判成一致，把这串散文当缓存继承给
+   *    一次 danbooru 的重画。**章必须描述手里这串提示词的出身。**
    */
   async function resolveScenePrompt(
     record: SceneImageRecord,
@@ -873,13 +885,19 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
     | { ok: true; record: SceneImageRecord; scenePrompt: string }
     | { ok: false; failure: ImageGenFailure }
   > {
+    // 🔴 **一次生成只取一次运行态**：下面要用它三回 —— 判缓存还算不算数、侧链跑在哪条
+    //    方言上（缝内部现取现解析，与这一次同一拍）、跑完给记录盖哪个章。分三次去读的话，
+    //    中间隔着一次几秒钟的 LLM 调用，用户切一次方言就能让「判据」「产出」「盖的章」
+    //    分属三条方言，而记录只会记下最后那一个 —— 又是一句假话。
+    const runtime = seams.runtimeInfo?.();
+
     const edited = record.editedScenePrompt;
     if (edited !== undefined && edited.trim() !== '') {
       return { ok: true, record, scenePrompt: edited };
     }
 
     const cached = record.scenePrompt;
-    if (cached.trim() !== '' && cachedPromptStillValid(record)) {
+    if (cached.trim() !== '' && cachedPromptStillValid(record, runtime)) {
       return { ok: true, record, scenePrompt: cached };
     }
 
@@ -913,6 +931,15 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
       sceneNegative: produced.sceneNegative,
       // agent 写的说明是**初值不是定论**（D18）：用户已经写过的不覆盖
       description: record.description !== '' ? record.description : produced.desc,
+      // 🔴 提示词与它的方言章**同一步落库**（见函数头第三条）：这串东西就是在
+      //    `runtime.dialectId` 那条方言上写出来的，章必须这么说。
+      //
+      // 🔴 **`provider` 不跟着刷**，哪怕它此刻已经变了。那一格是**准入时过的那道花钱闸**
+      //    留下的凭证，`sendOne` 照它分叉（C9）—— 跟着当下设置刷新，等于给「排一串本地
+      //    的活、中途切成 NovelAI」开一条免检通道：那些记录会顺着新章发去付费后端，
+      //    而它们准入时走的是本地那条、L1/L2 根本没判过。方言换了只是换一种说法，
+      //    后端换了是换一个账单。
+      ...(runtime ? { dialectId: runtime.dialectId } : {}),
     });
     if (!next) {
       return { ok: false, failure: failureOf('prompt-agent', '记录已不存在。', false) };
@@ -925,9 +952,14 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
    *
    * 缝没接 `runtimeInfo`（测试 / 老接线）→ 一律算数，也就是图像 v1 的行为：
    * 不认识方言的时候不该假装认识，凭空重跑一次侧链是在白花钱。
+   *
+   * @param runtime 由 {@link resolveScenePrompt} 抓好传进来的那一份快照 —— 本函数刻意
+   *                **不自己去读** `seams.runtimeInfo()`，判据与随后盖的章必须同源。
    */
-  function cachedPromptStillValid(record: SceneImageRecord): boolean {
-    const runtime = seams.runtimeInfo?.();
+  function cachedPromptStillValid(
+    record: SceneImageRecord,
+    runtime: SceneImageRuntimeInfo | undefined,
+  ): boolean {
     if (!runtime) return true;
     return (record.dialectId ?? LEGACY_DIALECT_ID) === runtime.dialectId;
   }

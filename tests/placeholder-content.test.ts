@@ -171,8 +171,13 @@ describe('占位内容 · 注册表七面能被生产解析器吃下', () => {
     expect(danbooru.qualitySuffix).toBe(DEFAULT_IMAGE_QUALITY_SUFFIX);
     expect(danbooru.baseNegative).toBe(DEFAULT_IMAGE_BASE_NEGATIVE);
     expect(danbooru.composition).toBe(DEFAULT_IMAGE_COMPOSITION_TAGS);
-    // 兜底方言与它同形（唯一的差别是兜底不自带 systemPrompt）
-    expect({ ...danbooru, systemPrompt: '' }).toEqual(FALLBACK_IMAGE_DIALECT);
+    // 🔴 兜底方言与它**逐格相同，systemPrompt 也算**（2026-08-08 修）：C5 之后这段提示词
+    //    在 agent-config 里已不存在，兜底若留空，注册表这一面缺席时侧链就只剩
+    //    agent-templates 那行 stub 可回落 —— 五条规则一条不剩，图照出、Anlas 照扣。
+    //    这一对断言是那份「兜底 ↔ 内容树」双向漂移的**唯一**守门人（`image-dialect.test.ts`
+    //    读不了盘），所以 systemPrompt 单独再钉一次，好让失败信息直指那一格
+    expect(danbooru.systemPrompt).toBe(FALLBACK_IMAGE_DIALECT.systemPrompt);
+    expect(danbooru).toEqual(FALLBACK_IMAGE_DIALECT);
 
     // 🔴 C5 已收口：`image_prompt` 的 systemPrompt **从 agent-config 退役**，方言 JSON 是
     //    唯一真源。两处都留着的话就是 D53 警告的第三份拷贝 —— 改一处不改另一处不报错，

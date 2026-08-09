@@ -30,7 +30,7 @@ import { FALLBACK_IMAGE_DIALECT } from '@engine/image-dialect';
 import { detach } from './db-write';
 import { migrateLegacyAgentOverrides } from './agent-settings';
 import { migrateLegacyAgentMaps } from './agent-settings-migration';
-import { migrateImageSettings } from './image-settings-migration';
+import { migrateImageSettings, normalizeImageSettings } from './image-settings-migration';
 import type { UiSettings } from './settings-types';
 import {
   apiEndpointToEntry,
@@ -346,12 +346,27 @@ export const useSettingsStore = defineStore('settings', () => {
   //    它是纯内存重排、无 I/O、幂等，所以这里同步跑没有代价。
   migrateLegacyAgentMaps(merged);
 
-  // 图像 v2 / C8：17 个平铺 `image*` → per-provider 袋子 + 方言覆盖。
+  // 图像 v2 / C8：图像设置的**归一化 + 一次性形状迁移**，两件事分开跑。
   //
-  // 🔴 位置同上，理由也同上：必须在 `ref()` **之前**同步跑。它同样是纯内存重排、
-  //    无 I/O、幂等（旧平铺键在不在就是信号），所以在这里跑没有代价。
-  //    放到 ref 之后会有一段「响应式状态里还是平铺形状」的窗口 —— 而设置页此刻
-  //    读的是 `s.imageNovelai.model`，那一拍会当场炸在 undefined 上。
+  // 🔴 位置同上，理由也同上：必须在 `ref()` **之前**同步跑。两者都是纯内存重排、
+  //    无 I/O、幂等，所以在这里跑没有代价。放到 ref 之后会有一段「响应式状态里
+  //    还是平铺形状」的窗口 —— 而设置页此刻读的是 `s.imageNovelai.model`，
+  //    那一拍会当场炸在 undefined 上。
+  //
+  // 🔴 归一化**每次加载都跑，且不受旧平铺键闸门管**（2026-08-08 审查修正）：
+  //    上面那句 `{ ...defaults, ...saved }` 只浅合并**一层** —— `saved.imageNovelai`
+  //    整只盖掉 `defaults.imageNovelai`。于是
+  //      · localStorage 里躺着 `imageNovelai: null` / `: 5`（手改 / 别的版本写坏）的
+  //        **已迁过**的档案，此前永远修不回来，`checkQuota` 读 `.maxPerMessage` 直接 TypeError；
+  //      · 日后往 `ImageNovelaiSettings` / `ImageComfySettings` 加字段，老用户拿到 `undefined`
+  //        ——「加新设置要改两处」那条约定在袋子内部会静默失效。
+  //    默认值从 `defaults` 传进去（`getDefaults()` 是唯一真源，迁移模块里那两份兜底
+  //    只在它单独被调用时才用）。
+  normalizeImageSettings(merged, {
+    imageNovelai: defaults.imageNovelai,
+    imageComfy: defaults.imageComfy,
+  });
+  // 一次性搬运：17 个平铺 `image*` → per-provider 袋子 + 方言覆盖（旧平铺键在不在就是信号）
   migrateImageSettings(merged);
 
   // Phase 0: 内置世界书合并已搬去 worldbook-store 的 init()（设计 D4 第 6 步）——
