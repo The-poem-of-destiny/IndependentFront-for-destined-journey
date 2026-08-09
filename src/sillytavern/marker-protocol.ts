@@ -160,6 +160,8 @@ const MARKER_SPECS: { [K in BlockMarkerType]: MarkerSpec<MarkerOf<K>> } = {
     fields: (a) => ({
       combatType: a['combatType'],
       environment: a['environment'],
+      allies: a['allies'],
+      enemies: a['enemies'],
     }),
   },
   char_detect: {

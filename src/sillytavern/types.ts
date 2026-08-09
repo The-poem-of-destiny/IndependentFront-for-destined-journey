@@ -3009,6 +3009,19 @@ export interface CombatTriggerMarker extends DetectedMarkerBase {
   combatType?: string;
   /** 战斗环境描述 */
   environment?: string;
+  /**
+   * 己方角色名（逗号分隔，可含新生成的盟友）。缺省 = 仅玩家。
+   * 🆕 2026-08-08: 此前 combat 把所有非 player 角色都当 enemy，
+   * 己方 NPC（如契约的妲丽安）会被敌方 Agent 控制。调度器在 combat_trigger
+   * 里显式声明 allies，pipeline 按名分阵营。
+   */
+  allies?: string;
+  /**
+   * 敌方角色名（逗号分隔，含新生成的怪物/NPC）。缺省 = 除 allies 外的在场角色。
+   * 🆕 2026-08-08: 配合"敌方无名必生成"规则，调度器在此声明敌方名单，
+   * 并为其发 <char_gen_request>。
+   */
+  enemies?: string;
   /** 标签内部正文 (AI 描述的战斗场景和参战方) */
   bodyText?: string;
 }

@@ -202,6 +202,15 @@ describe('scanCombatTriggers', () => {
     expect(markers[0].environment).toBe('地下迷宫');
   });
 
+  it('应解析 allies/enemies 阵营声明（2026-08-08 阵营修复）', () => {
+    const text =
+      '<combat_trigger combatType="标准" environment="旧磨坊" allies="妲丽安" enemies="水鼠群,洞中魔物">奥利雅思 vs 水鼠群</combat_trigger>';
+    const markers = scanCombatTriggers(text);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].allies).toBe('妲丽安');
+    expect(markers[0].enemies).toBe('水鼠群,洞中魔物');
+  });
+
   it('空 combat_trigger body 应能检测', () => {
     const text = '<combat_trigger></combat_trigger>';
     const markers = scanCombatTriggers(text);

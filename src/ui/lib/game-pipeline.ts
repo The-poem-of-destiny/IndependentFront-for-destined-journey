@@ -26,6 +26,7 @@ import type {
   PlayAudioMarker,
   MemoryRecord,
   WorkshopProject,
+  CharacterState,
 } from '@engine/types';
 import type {
   ImageGenFailure,
@@ -1531,11 +1532,36 @@ export class GamePipeline {
       const { runCombatV3 } = await import('@engine/combat-v3');
       const { characterToCombatParticipant } = await import('@engine/combat-v2-types');
 
-      // 组装 bundle：全部人物 → CombatParticipant（player → ally，其余 → enemy）
+      // 组装 bundle：全部人物 → CombatParticipant。
+      // 🔴 2026-08-08 阵营修复：调度器在 combat_trigger 上声明 allies/enemies 名单，
+      //    按名分阵营——否则所有非 player 角色都被当 enemy（契约的妲丽安会被敌方
+      //    Agent 控制）。名单缺省时回退到旧行为（player=ally，其余=enemy）。
       const playerC = this.game.characters.find((c) => c.type === 'player');
+      const allyNames = new Set(
+        (marker.allies ?? '')
+          .split(/[,，]/)
+          .map((s) => s.trim())
+          .filter(Boolean),
+      );
+      const enemyNames = new Set(
+        (marker.enemies ?? '')
+          .split(/[,，]/)
+          .map((s) => s.trim())
+          .filter(Boolean),
+      );
+      const sideOf = (c: CharacterState): 'ally' | 'enemy' => {
+        if (allyNames.size > 0 || enemyNames.size > 0) {
+          // 调度器给了名单 → 名单内命中按阵营，未命中的：玩家归 ally，其余归 enemy
+          if (allyNames.has(c.name)) return 'ally';
+          if (enemyNames.has(c.name)) return 'enemy';
+          return c.type === 'player' ? 'ally' : 'enemy';
+        }
+        // 无名单 → 旧行为
+        return c.type === 'player' ? 'ally' : 'enemy';
+      };
       const participants = this.game.characters
         .filter((c) => c.hp > 0)
-        .map((c) => characterToCombatParticipant(c, c.type === 'player' ? 'ally' : 'enemy'));
+        .map((c) => characterToCombatParticipant(c, sideOf(c)));
       const fpSnapshot = this.game.fp ?? 0;
       const bundle = {
         combatId: `v3-${Date.now()}-${this.saveId}`,
