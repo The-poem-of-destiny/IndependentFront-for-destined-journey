@@ -35,6 +35,26 @@ Implementation notes:
 - Accessibility fallbacks may use higher opacity and disable blur.
 - Prefer a quieter result over adding more highlights, glow, or shadow.
 
+### Responsive frame ownership
+
+Status: owner-approved structural rule
+Scope: every play-area theme at every desktop aspect ratio
+Flexibility: materials and ornament may vary; frame ownership may not
+
+- The live DOM region owns its border, inset, corner, divider, and junction. A
+  full-viewport raster must never supply structural seams for responsive panels.
+- Full-viewport artwork must be frame-free and use uniform `cover` scaling.
+  Framed artwork may only be cropped inside the exact live region whose frame it
+  depicts.
+- Never scale a raster independently on both axes. Use `cover`, `contain`, or one
+  constrained axis with the other left `auto`; absorb overflow with a matching
+  surface color.
+- Qinghua porcelain and Crimson rose window are the structural references: their
+  ornament belongs to a live panel, while the responsive layout remains the
+  single source of truth for geometry.
+- Validate 1920 x 1080, 2560 x 1440, and 3840 x 2160, plus one taller and one
+  wider stress viewport before handoff.
+
 ## Theme-specific decisions
 
 ### Qinghua porcelain
@@ -49,3 +69,36 @@ Implementation notes:
 - The established tab treatment uses a continuous stone base and one separate active cap.
 - Blood glass is reserved for the chat text treatment unless the user explicitly expands its scope.
 - Backpack and character modals use asset-free, gold-framed neutral liquid glass; fixed-size blood-control artwork must not be stretched across their panels or sub-elements.
+
+### Remaining theme identities
+
+Status: owner-approved directions; all eight themes implemented and reference-verified in the real game UI
+Scope: the eight themes outside Qinghua porcelain and Crimson rose window
+Flexibility: selected references are visual truth; responsive frame ownership remains mandatory
+
+| Theme                         | Mode  | Structural palette                               | Primary accent          |
+| ----------------------------- | ----- | ------------------------------------------------ | ----------------------- |
+| Wayfarer's Atlas / 远行者舆图 | Light | parchment `#e5d8c2` · folio `#f1e7d5`            | old brass `#8d642f`     |
+| Moonwhite Brocade / 月白云锦  | Light | moonwhite `#e9e6df` · silk `#f5f3ed`             | woven gold `#887142`    |
+| Jade Conservatory / 翡翠温室  | Light | sage glass `#dce5d7` · botanical paper `#edf2e9` | verdigris `#4c755f`     |
+| Aurora Frostglass / 极光霜晶  | Light | frost `#e6ebf2` · crystal `#f1f4f8`              | aurora violet `#725b9b` |
+| Gilded Orrery / 玄金星盘      | Dark  | obsidian `#0e1015` · night slate `#090b10`       | antique gold `#c9a85f`  |
+| Bronze Mechanism / 古铜机巧   | Dark  | leather `#1b1510` · hammered bronze `#2a2118`    | warm brass `#c48c4b`    |
+| Nocturne Sakura / 夜樱漆匣    | Dark  | black lacquer `#120d12` · plum lacquer `#21151f` | pearl pink `#c67998`    |
+| Abyssal Cathedral / 深海圣堂  | Dark  | abyss `#07131b` · submerged stone `#0d202b`      | sea glass `#55a7b7`     |
+
+#### Locked implementation directions
+
+| Theme                         | Decision                                 | Reference                                            |
+| ----------------------------- | ---------------------------------------- | ---------------------------------------------------- |
+| Wayfarer's Atlas / 远行者舆图 | Full theme: brass navigator's instrument | `artifacts/theme-looks/wayfarers-atlas/look-4.png`   |
+| Moonwhite Brocade / 月白云锦  | Minimal moonwhite brocade relief         | `artifacts/theme-looks/moonwhite-brocade/look-4.png` |
+| Jade Conservatory / 翡翠温室  | Full theme: carved jade lattice          | `artifacts/theme-looks/jade-conservatory/look-4.png` |
+| Aurora Frostglass / 极光霜晶  | Full theme: boreal aurora wash           | `artifacts/theme-looks/aurora-frostglass/look-2.png` |
+| Gilded Orrery / 玄金星盘      | Full theme: armillary brass mechanism    | `artifacts/theme-looks/gilded-orrery/look-2.png`     |
+| Bronze Mechanism / 古铜机巧   | Full theme: precision guild instrument   | `artifacts/theme-looks/bronze-mechanism/look-3.png`  |
+| Nocturne Sakura / 夜樱漆匣    | Full theme: moonlit falling petals       | `artifacts/theme-looks/nocturne-sakura/look-5.png`   |
+| Abyssal Cathedral / 深海圣堂  | Full theme: submerged Gothic nave        | `artifacts/theme-looks/abyssal-cathedral/look-2.png` |
+
+The detailed visual contracts and rejection criteria are recorded in
+`docs/planning/2026-08-08-selected-theme-directions.md`.

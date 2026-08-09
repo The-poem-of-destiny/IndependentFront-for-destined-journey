@@ -1,51 +1,720 @@
-/* ===== Sakura (樱) — 紫粉浪漫风格 ===== */
+/*
+ * Nocturne Sakura / 夜樱漆匣 — owner-selected look-5.
+ * THESIS: a black-lacquer writing casket under moonlight, never a pink dark mode.
+ * OWN WORLD: indigo-black reading well, plum lacquer chassis, pearl blossom inlay,
+ * sparse authored petals, and one hairline aged-gold joinery system.
+ * FIRST VIEWPORT: branch weight stays at the outer corners while the central field
+ * remains quiet enough for long Chinese narrative copy.
+ */
 [data-theme='sakura'] {
-  --theme-window-bg: #1a1018;
-  --theme-window-border: #3d2a3a;
-  --theme-content-bg: #150d14;
-  --theme-card-bg: #22151f;
-  --theme-card-border: #3d2a3a;
-  --theme-surface-muted: color-mix(in srgb, #1a1018 72%, #22151f 28%);
-  --theme-overlay-bg: color-mix(in srgb, #1a1018 58%, transparent);
+  --theme-window-bg: #0a080d;
+  --theme-window-border: #604556;
+  --theme-content-bg: #0b0910;
+  --theme-card-bg: #1b121a;
+  --theme-card-border: #533b4b;
+  --theme-surface-muted: #160f17;
+  --theme-overlay-bg: rgba(6, 4, 8, 0.9);
 
-  --theme-title-bar-bg: #1f141d;
-  --theme-title-bar-text: #f5e0f0;
-  --theme-title-bar-icon: #c090b8;
-  --theme-title-bar-btn-hover: rgba(255, 255, 255, 0.06);
-  --theme-tab-bar-bg: #1c121a;
-  --theme-tab-text: #a08098;
-  --theme-tab-active-text: #f5d0e8;
-  --theme-tab-indicator: #e080b0;
-  --theme-tab-hover-bg: rgba(255, 255, 255, 0.04);
+  --theme-title-bar-bg: #110c12;
+  --theme-title-bar-text: #eadde4;
+  --theme-title-bar-icon: #cfa8b8;
+  --theme-title-bar-btn-hover: rgba(198, 121, 152, 0.09);
+  --theme-tab-bar-bg: #120c13;
+  --theme-tab-text: #a98596;
+  --theme-tab-active-text: #ecdce5;
+  --theme-tab-indicator: #c67998;
+  --theme-tab-hover-bg: rgba(198, 121, 152, 0.07);
 
-  --theme-text-primary: #f5e0f0;
-  --theme-text-secondary: #c090b8;
-  --theme-text-muted: #7a5a70;
+  --theme-text-primary: #eadde4;
+  --theme-text-secondary: #bea3b0;
+  --theme-text-muted: #917383;
 
-  --theme-primary: #e080b0;
+  --theme-primary: #c67998;
+  --theme-primary-text: #1a0f16;
+  --theme-primary-bg: rgba(198, 121, 152, 0.14);
+  --theme-color-primary: var(--theme-primary);
+  --theme-success: #72ae83;
+  --theme-warning: #cfa65c;
+  --theme-error: #cf6571;
 
-  --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
-  --theme-success: #6bbf8a;
-  --theme-warning: #e0b060;
-  --theme-error: #e06070;
+  --theme-hp: #bd5c6d;
+  --theme-mp: #667fba;
+  --theme-sp: #5f9872;
+  --theme-exp: #b6914e;
+  --theme-affection: #d686a5;
+  --theme-affection-bg: rgba(214, 134, 165, 0.15);
+  --theme-affection-text: #efbfd0;
 
-  --theme-hp: #e06070;
-  --theme-mp: #8090e0;
-  --theme-sp: #6bbf8a;
-  --theme-exp: #e0b060;
-  --theme-affection: #f090b0;
-  --theme-affection-bg: rgba(240, 144, 176, 0.18);
-  --theme-affection-text: #f8c0d0;
+  --theme-quality-common: #bda9b5;
+  --theme-quality-uncommon: #72ae83;
+  --theme-quality-rare: #768bd0;
+  --theme-quality-epic: #a77ac5;
+  --theme-quality-legendary: #cfa65c;
+  --theme-quality-mythic: #d686a5;
+  --theme-quality-unique: #d69167;
 
-  --theme-quality-common: #c0a8b8;
-  --theme-quality-uncommon: #6bbf8a;
-  --theme-quality-rare: #8090e0;
-  --theme-quality-epic: #b080d8;
-  --theme-quality-legendary: #e0b060;
-  --theme-quality-mythic: #f090b0;
-  --theme-quality-unique: #f0a060;
+  --theme-currency-gold: #cfa65c;
+  --theme-currency-silver: #bda9b5;
+  --theme-currency-copper: #b47761;
 
-  --theme-currency-gold: #e0b060;
-  --theme-currency-silver: #c0a8b8;
-  --theme-currency-copper: #c08060;
+  --theme-radius-sm: 2px;
+  --theme-radius-md: 3px;
+  --theme-radius-lg: 4px;
+  --theme-shadow-sm: 0 2px 5px rgba(0, 0, 0, 0.34);
+  --theme-shadow-md: 0 5px 14px rgba(0, 0, 0, 0.44);
+  --theme-shadow-lg: 0 12px 30px rgba(0, 0, 0, 0.58);
+  --paper-stack: inset 0 1px 0 rgba(238, 203, 219, 0.035), 0 5px 14px rgba(0, 0, 0, 0.3);
+
+  --sakura-field: url('../assets/themes/sakura/nocturne-sakura-bg.webp');
+  --sakura-petals: url('../assets/themes/sakura/sakura-petals.webp');
+  --sakura-lacquer: rgba(12, 8, 13, 0.84);
+  --sakura-pearl: #d2a1b4;
+  --sakura-pearl-bright: #ecd0dc;
+  --sakura-rose-dark: #71475d;
+  --sakura-gold: #94734d;
+  --sakura-gold-bright: #b18b5a;
+  --sakura-keyline: rgba(177, 139, 90, 0.46);
+  --sakura-keyline-soft: rgba(177, 139, 90, 0.2);
+  --sakura-rose-line: rgba(198, 121, 152, 0.34);
+  --sakura-specular: rgba(245, 218, 231, 0.12);
+  --sakura-reflection: linear-gradient(
+    108deg,
+    transparent 0 43%,
+    rgba(239, 207, 221, 0.025) 47%,
+    rgba(239, 207, 221, 0.115) 50%,
+    rgba(239, 207, 221, 0.02) 54%,
+    transparent 58% 100%
+  );
+}
+
+/* The casket is one continuous illustrated lacquer plate. */
+:root[data-theme='sakura'] body .game-page-layout {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--theme-window-bg);
+  background-image: linear-gradient(rgba(6, 5, 9, 0.24), rgba(6, 5, 9, 0.44)), var(--sakura-field);
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: cover;
+}
+
+:root[data-theme='sakura'] body .game-page-layout > * {
+  position: relative;
+  z-index: 1;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .game-body {
+  background: transparent;
+}
+
+:root[data-theme='sakura'] body .game-page-layout,
+:root[data-theme='sakura'] body .game-page-layout .scene-tab-body,
+:root[data-theme='sakura'] body .game-page-layout .status-overview,
+:root[data-theme='sakura'] body .game-page-layout .chat-messages {
+  scrollbar-color: var(--sakura-rose-dark) rgba(8, 6, 10, 0.58);
+}
+
+/* Structural lacquer: one gold seam outside, one rose seam inside. */
+:root[data-theme='sakura'] body .game-page-layout .top-bar,
+:root[data-theme='sakura'] body .game-page-layout .side-toolbar,
+:root[data-theme='sakura'] body .game-page-layout .scene-panel,
+:root[data-theme='sakura'] body .game-page-layout .status-hud,
+:root[data-theme='sakura'] body .game-page-layout .input-bar {
+  background-color: var(--sakura-lacquer);
+  background-image: linear-gradient(rgba(7, 5, 9, 0.67), rgba(7, 5, 9, 0.67)), var(--sakura-field);
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: auto 78vh;
+  background-attachment: fixed;
+  border-color: var(--sakura-keyline);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .top-bar {
+  background-color: rgba(9, 7, 11, 0.86);
+  background-position: center top;
+  border-bottom: 1px solid var(--sakura-gold);
+  box-shadow:
+    inset 0 -1px 0 var(--sakura-rose-line),
+    0 3px 9px rgba(0, 0, 0, 0.45);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .top-divider {
+  background: linear-gradient(to bottom, transparent, var(--sakura-gold), transparent);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .top-save-name {
+  color: var(--sakura-pearl-bright);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.84);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .top-title-text {
+  color: color-mix(in srgb, var(--sakura-pearl) 78%, var(--theme-text-secondary));
+  letter-spacing: 0.06em;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .top-title-rule {
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--sakura-gold) 25%,
+    var(--sakura-gold-bright) 50%,
+    var(--sakura-gold) 75%,
+    transparent
+  );
+  opacity: 0.82;
+}
+
+/* Pearl-set controls expose a narrow lacquer reflection, never a pink fill. */
+:root[data-theme='sakura'] body .game-page-layout .top-btn,
+:root[data-theme='sakura'] body .game-page-layout .tool-btn,
+:root[data-theme='sakura'] body .game-page-layout .collapse-toggle,
+:root[data-theme='sakura'] body .game-page-layout .input-btn,
+:root[data-theme='sakura'] body .game-page-layout .scene-title-action {
+  background-color: rgba(25, 15, 24, 0.54);
+  background-image: var(--sakura-reflection);
+  background-repeat: no-repeat;
+  background-size: 250% 100%;
+  background-position: 114% 0;
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-sm);
+  color: var(--theme-title-bar-icon);
+  box-shadow: inset 0 1px 0 rgba(245, 218, 231, 0.025);
+  transition:
+    background-position 360ms ease-out,
+    background-color 170ms ease-out,
+    border-color 170ms ease-out,
+    box-shadow 170ms ease-out,
+    color 170ms ease-out;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .top-btn:hover,
+:root[data-theme='sakura'] body .game-page-layout .tool-btn:hover,
+:root[data-theme='sakura'] body .game-page-layout .collapse-toggle:hover,
+:root[data-theme='sakura'] body .game-page-layout .input-btn:hover,
+:root[data-theme='sakura'] body .game-page-layout .scene-title-action:hover {
+  background-color: rgba(43, 25, 39, 0.78);
+  background-position: -16% 0;
+  border-color: var(--sakura-rose-line);
+  color: var(--sakura-pearl-bright);
+  box-shadow:
+    inset 0 1px 0 var(--sakura-specular),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.56);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .top-btn:focus-visible,
+:root[data-theme='sakura'] body .game-page-layout .tool-btn:focus-visible,
+:root[data-theme='sakura'] body .game-page-layout .collapse-toggle:focus-visible,
+:root[data-theme='sakura'] body .game-page-layout .input-btn:focus-visible,
+:root[data-theme='sakura'] body .game-page-layout .scene-title-action:focus-visible,
+:root[data-theme='sakura'] body .game-page-layout .tab-item:focus-visible,
+:root[data-theme='sakura'] body .game-page-layout .section-header.clickable:focus-visible,
+:root[data-theme='sakura'] body .game-page-layout .quest-item:focus-visible,
+:root[data-theme='sakura'] body .game-page-layout .scene-npc-item:focus-visible,
+:root[data-theme='sakura'] body .game-page-layout .item-row:focus-visible,
+:root[data-theme='sakura'] body .game-page-layout .portrait-slot:focus-visible {
+  outline: 1px solid var(--sakura-pearl-bright);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 2px rgba(99, 58, 80, 0.8);
+}
+
+/* The left rail preserves the reference's strongest branch cluster at its base. */
+:root[data-theme='sakura'] body .game-page-layout .side-toolbar {
+  padding-top: var(--theme-spacing-lg);
+  gap: var(--theme-spacing-xs);
+  background-color: rgba(10, 7, 11, 0.66);
+  background-position: left bottom;
+  border-right: 1px solid var(--sakura-gold);
+  box-shadow:
+    inset -1px 0 0 var(--sakura-rose-line),
+    2px 0 8px rgba(0, 0, 0, 0.38);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .side-toolbar .tool-btn {
+  margin-inline: var(--theme-spacing-xs);
+  padding-block: 7px;
+  background-color: rgba(31, 18, 29, 0.61);
+  border-color: rgba(198, 121, 152, 0.08);
+  color: #c9a6b5;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .side-toolbar .tool-btn:hover,
+:root[data-theme='sakura'] body .game-page-layout .side-toolbar .tool-btn:focus-visible {
+  border-color: var(--sakura-rose-line);
+  color: var(--sakura-pearl-bright);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .side-toolbar .collapse-toggle {
+  margin-inline: var(--theme-spacing-xs);
+  border-top-color: var(--sakura-keyline-soft);
+}
+
+/* Side ledgers sit deeper than the command rail and retain illustrated corners. */
+:root[data-theme='sakura'] body .game-page-layout .scene-panel {
+  background-color: rgba(8, 6, 10, 0.79);
+  background-position: left bottom;
+  border-right: 1px solid var(--sakura-gold);
+  box-shadow:
+    inset -1px 0 0 var(--sakura-rose-line),
+    2px 0 0 rgba(0, 0, 0, 0.7),
+    inset 0 0 32px rgba(0, 0, 0, 0.25);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .status-hud {
+  background-color: rgba(9, 6, 11, 0.8);
+  background-position: right top;
+  border-left: 1px solid var(--sakura-gold);
+  box-shadow:
+    inset 1px 0 0 var(--sakura-rose-line),
+    -2px 0 0 rgba(0, 0, 0, 0.7),
+    inset 0 0 32px rgba(0, 0, 0, 0.25);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .scene-top {
+  background-color: rgba(18, 11, 18, 0.68);
+  border-bottom: 1px solid var(--sakura-keyline);
+  box-shadow:
+    inset 0 -1px 0 var(--sakura-rose-line),
+    0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .scene-date-line,
+:root[data-theme='sakura'] body .game-page-layout .scene-location,
+:root[data-theme='sakura'] body .game-page-layout .scene-tod-clock {
+  color: var(--sakura-pearl-bright);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .scene-section-title,
+:root[data-theme='sakura'] body .game-page-layout .section-title {
+  color: color-mix(in srgb, var(--sakura-pearl) 72%, var(--theme-text-secondary));
+}
+
+/* Connected lacquer tabs with one precise pearl inlay. */
+:root[data-theme='sakura'] body .game-page-layout .tab-bar {
+  background-color: rgba(13, 8, 13, 0.72);
+  border-top: 1px solid rgba(177, 139, 90, 0.08);
+  border-bottom: 1px solid var(--sakura-gold);
+  box-shadow:
+    inset 0 1px 0 rgba(240, 210, 223, 0.025),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.7);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .tab-list {
+  gap: 0;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .tab-item {
+  min-width: 0;
+  padding: 9px var(--theme-spacing-sm);
+  background-color: transparent;
+  border: 0;
+  border-right: 1px solid rgba(177, 139, 90, 0.1);
+  border-radius: 0;
+  color: var(--theme-tab-text);
+  box-shadow: none;
+  transition:
+    background-color 170ms ease-out,
+    color 170ms ease-out,
+    box-shadow 170ms ease-out;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .tab-item:last-child {
+  border-right: 0;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .tab-item:hover {
+  background-color: rgba(198, 121, 152, 0.04);
+  color: var(--sakura-pearl-bright);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .tab-active {
+  background-color: rgba(30, 18, 28, 0.62);
+  color: var(--sakura-pearl-bright);
+  box-shadow:
+    inset 0 1px 0 rgba(240, 210, 223, 0.065),
+    inset 0 -2px 0 rgba(8, 5, 9, 0.8);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .tab-item::after {
+  height: 1px;
+  left: var(--theme-spacing-sm);
+  right: var(--theme-spacing-sm);
+  background: transparent;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .tab-active::after {
+  background: linear-gradient(to right, transparent, var(--sakura-pearl) 16% 84%, transparent);
+  box-shadow: 0 -1px 0 rgba(239, 205, 220, 0.09);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .tab-badge {
+  background: #834858;
+  color: #f0dce4;
+  border: 1px solid rgba(235, 199, 215, 0.16);
+}
+
+/* Ledger rows are written directly into lacquer, avoiding card-stack clutter. */
+:root[data-theme='sakura'] body .game-page-layout .quest-list,
+:root[data-theme='sakura'] body .game-page-layout .scene-npc-list,
+:root[data-theme='sakura'] body .game-page-layout .item-list {
+  gap: 0;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .quest-item,
+:root[data-theme='sakura'] body .game-page-layout .scene-npc-item,
+:root[data-theme='sakura'] body .game-page-layout .news-item,
+:root[data-theme='sakura'] body .game-page-layout .item-row,
+:root[data-theme='sakura'] body .game-page-layout .system-notif {
+  background-color: rgba(21, 13, 20, 0.25);
+  border: 0;
+  border-bottom: 1px solid rgba(198, 121, 152, 0.13);
+  border-radius: 0;
+  box-shadow: none;
+  transition:
+    background-color 170ms ease-out,
+    border-color 170ms ease-out,
+    box-shadow 170ms ease-out;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .quest-item:hover,
+:root[data-theme='sakura'] body .game-page-layout .quest-item:focus-visible,
+:root[data-theme='sakura'] body .game-page-layout .quest-item.open,
+:root[data-theme='sakura'] body .game-page-layout .scene-npc-item:hover,
+:root[data-theme='sakura'] body .game-page-layout .scene-npc-item:focus-visible,
+:root[data-theme='sakura'] body .game-page-layout .scene-npc-item.hovered,
+:root[data-theme='sakura'] body .game-page-layout .news-item:hover,
+:root[data-theme='sakura'] body .game-page-layout .item-row:hover,
+:root[data-theme='sakura'] body .game-page-layout .item-row:focus-visible,
+:root[data-theme='sakura'] body .game-page-layout .system-notif:hover,
+:root[data-theme='sakura'] body .game-page-layout .system-notif:focus-visible {
+  background-color: rgba(198, 121, 152, 0.055);
+  border-bottom-color: var(--sakura-rose-line);
+  box-shadow: inset 0 1px 0 rgba(245, 218, 231, 0.03);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .quest-detail,
+:root[data-theme='sakura'] body .game-page-layout .item-detail {
+  background-color: rgba(24, 14, 22, 0.72);
+  border: 1px solid var(--sakura-rose-line);
+  border-radius: var(--theme-radius-sm);
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(245, 218, 231, 0.025);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .item-entry.open .item-row {
+  background-color: rgba(198, 121, 152, 0.04);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .det-chip,
+:root[data-theme='sakura'] body .game-page-layout .npc-tier,
+:root[data-theme='sakura'] body .game-page-layout .item-tag {
+  background-color: rgba(27, 17, 26, 0.76);
+  border: 1px solid var(--sakura-rose-line);
+  border-radius: var(--theme-radius-sm);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .npc-portrait,
+:root[data-theme='sakura'] body .game-page-layout .avatar-shape-square {
+  border: 1px solid var(--sakura-gold);
+  border-radius: var(--theme-radius-sm);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.72),
+    inset 0 1px 0 var(--sakura-specular),
+    0 5px 13px rgba(0, 0, 0, 0.4);
+}
+
+/* Indigo moonlight opens the central reading well; petals remain edge-weighted. */
+:root[data-theme='sakura'] body .game-page-layout .chat-flow {
+  position: relative;
+  background-color: rgba(6, 6, 10, 0.54);
+  background-image:
+    linear-gradient(rgba(6, 5, 9, 0.26), rgba(6, 5, 9, 0.26)), var(--sakura-petals),
+    radial-gradient(ellipse 74% 62% at 52% 6%, rgba(73, 87, 137, 0.27), transparent 66%),
+    linear-gradient(rgba(6, 6, 10, 0.44), rgba(6, 5, 9, 0.68)), var(--sakura-field);
+  background-repeat: no-repeat;
+  background-position:
+    center center,
+    52% 0,
+    center center,
+    center center,
+    center center;
+  background-size: cover, cover, cover, cover, cover;
+  background-attachment: scroll, scroll, scroll, scroll, fixed;
+  box-shadow:
+    inset 1px 0 0 var(--sakura-keyline-soft),
+    inset -1px 0 0 var(--sakura-keyline-soft),
+    inset 0 0 72px rgba(0, 0, 0, 0.2);
+  animation: sakura-petal-drift 18s ease-in-out infinite alternate;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .chat-messages {
+  background-color: transparent;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.78);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .bubble-narrative-full {
+  color: #e8dce4;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .bubble-player,
+:root[data-theme='sakura'] body .game-page-layout .dialogue-card {
+  background-color: rgba(24, 16, 25, 0.78);
+  border-color: var(--sakura-rose-line);
+  border-radius: var(--theme-radius-sm);
+  box-shadow:
+    inset 0 1px 0 rgba(245, 218, 231, 0.035),
+    0 5px 13px rgba(0, 0, 0, 0.24);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .chat-empty-glyph,
+:root[data-theme='sakura'] body .game-page-layout .loading-dot {
+  color: var(--sakura-pearl);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.88);
+}
+
+@keyframes sakura-petal-drift {
+  from {
+    background-position:
+      center center,
+      52% -2px,
+      center center,
+      center center,
+      center center;
+  }
+
+  to {
+    background-position:
+      center center,
+      49.5% 13px,
+      center center,
+      center center,
+      center center;
+  }
+}
+
+/* The input is one connected lacquer writing tray with a pearl command plate. */
+:root[data-theme='sakura'] body .game-page-layout .input-bar {
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  background-color: rgba(9, 6, 11, 0.9);
+  border-top: 1px solid var(--sakura-gold);
+  box-shadow:
+    inset 0 1px 0 var(--sakura-rose-line),
+    0 -6px 15px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .input-field {
+  background-color: rgba(14, 9, 15, 0.9);
+  border: 1px solid var(--sakura-rose-dark);
+  border-radius: var(--theme-radius-sm);
+  color: var(--sakura-pearl-bright);
+  caret-color: var(--sakura-pearl);
+  box-shadow:
+    inset 0 2px 7px rgba(0, 0, 0, 0.62),
+    inset 0 0 0 1px rgba(245, 218, 231, 0.02);
+  transition:
+    border-color 170ms ease-out,
+    box-shadow 170ms ease-out;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .input-field::placeholder {
+  color: #957688;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .input-field:focus {
+  border-color: var(--sakura-pearl);
+  box-shadow:
+    inset 0 2px 7px rgba(0, 0, 0, 0.62),
+    0 0 0 1px rgba(237, 205, 219, 0.24);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .send-btn {
+  background-color: rgba(53, 28, 43, 0.86);
+  border-color: var(--sakura-rose-dark);
+  color: var(--sakura-pearl-bright);
+  box-shadow:
+    inset 0 1px 0 var(--sakura-specular),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.46);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .send-btn:active {
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.62),
+    inset 0 -1px 0 rgba(245, 218, 231, 0.06);
+}
+
+/* Status portrait is a lacquer inset with sparse corner blossoms. */
+:root[data-theme='sakura'] body .game-page-layout .status-overview > .section:first-child {
+  background-color: rgba(17, 10, 17, 0.66);
+  border-bottom-color: var(--sakura-keyline);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .player-summary {
+  background-image:
+    linear-gradient(rgba(14, 8, 14, 0.56), rgba(14, 8, 14, 0.82)), var(--sakura-field);
+  background-repeat: no-repeat;
+  background-position: 95% 4%;
+  background-size: 176% auto;
+}
+
+:root[data-theme='sakura'] body .game-page-layout .avatar.avatar-xl {
+  background-color: rgba(26, 15, 24, 0.86);
+  background-image:
+    linear-gradient(rgba(20, 12, 20, 0.32), rgba(20, 12, 20, 0.56)), var(--sakura-field);
+  background-repeat: no-repeat;
+  background-position: 96% 5%;
+  background-size: 250% auto;
+  color: var(--sakura-pearl-bright);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .summary-name {
+  color: var(--sakura-pearl-bright);
+  letter-spacing: 0.08em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .status-glass > .section {
+  background-color: rgba(16, 10, 16, 0.34);
+  border-bottom-color: rgba(198, 121, 152, 0.18);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .section-header.clickable:hover {
+  background-color: rgba(198, 121, 152, 0.035);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .attr-grid {
+  gap: var(--theme-spacing-xs);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .attr-grid .kv-item {
+  background-color: rgba(25, 15, 24, 0.82);
+  border: 1px solid rgba(198, 121, 152, 0.16);
+  border-radius: var(--theme-radius-sm);
+  box-shadow:
+    inset 0 1px 0 rgba(245, 218, 231, 0.03),
+    inset 0 -2px 5px rgba(0, 0, 0, 0.36);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .res-track {
+  background-color: rgba(7, 5, 9, 0.84);
+  border: 1px solid rgba(198, 121, 152, 0.2);
+  border-radius: var(--theme-radius-sm);
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.68),
+    inset 0 1px 0 rgba(245, 218, 231, 0.02);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .res-fill {
+  border-radius: 1px;
+  opacity: 0.86;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 240, 247, 0.11),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.38);
+}
+
+:root[data-theme='sakura'] body .game-page-layout .res-values {
+  color: #f1e4ea;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.96),
+    0 0 3px rgba(0, 0, 0, 0.72);
+}
+
+/* Floating surfaces keep the same lacquer-and-inlay depth model. */
+:root[data-theme='sakura'] body .options-popup,
+:root[data-theme='sakura'] body .thought-bubble,
+:root[data-theme='sakura'] body .buff-pop,
+:root[data-theme='sakura'] body .cascader-dropdown,
+:root[data-theme='sakura'] body .modal-content {
+  background-color: rgba(13, 8, 13, 0.97);
+  background-image:
+    linear-gradient(rgba(10, 6, 10, 0.58), rgba(10, 6, 10, 0.72)), var(--sakura-field);
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: cover;
+  border: 1px solid var(--sakura-gold);
+  border-radius: var(--theme-radius-sm);
+  box-shadow:
+    inset 0 1px 0 var(--sakura-rose-line),
+    0 14px 34px rgba(0, 0, 0, 0.62);
+}
+
+:root[data-theme='sakura'] body .option-item:hover,
+:root[data-theme='sakura'] body .option-item:focus-visible,
+:root[data-theme='sakura'] body .option-custom:hover,
+:root[data-theme='sakura'] body .option-custom:focus-visible {
+  background-color: rgba(198, 121, 152, 0.065);
+  color: var(--sakura-pearl-bright);
+}
+
+@media (max-width: 1100px) {
+  :root[data-theme='sakura'] body .game-page-layout {
+    background-position: 45% center;
+  }
+
+  :root[data-theme='sakura'] body .game-page-layout .scene-panel,
+  :root[data-theme='sakura'] body .game-page-layout .status-hud {
+    background-color: rgba(9, 6, 11, 0.9);
+  }
+
+  :root[data-theme='sakura'] body .game-page-layout .chat-flow {
+    background-position:
+      center center,
+      50% 0,
+      center center,
+      center center,
+      48% center;
+  }
+
+  :root[data-theme='sakura'] body .game-page-layout .tab-item {
+    padding-inline: var(--theme-spacing-xs);
+    font-size: 0.78rem;
+  }
+
+  :root[data-theme='sakura'] body .game-page-layout .top-title-rule {
+    width: var(--theme-spacing-xl);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme='sakura'] body .game-page-layout .top-bar,
+  :root[data-theme='sakura'] body .game-page-layout .side-toolbar,
+  :root[data-theme='sakura'] body .game-page-layout .scene-panel,
+  :root[data-theme='sakura'] body .game-page-layout .status-hud,
+  :root[data-theme='sakura'] body .game-page-layout .input-bar,
+  :root[data-theme='sakura'] body .game-page-layout .chat-flow {
+    background-color: #09070b;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  :root[data-theme='sakura'] body .game-page-layout .scene-top,
+  :root[data-theme='sakura'] body .game-page-layout .status-glass > .section,
+  :root[data-theme='sakura'] body .game-page-layout .quest-detail,
+  :root[data-theme='sakura'] body .game-page-layout .item-detail,
+  :root[data-theme='sakura'] body .game-page-layout .input-field {
+    background-color: #160f17;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme='sakura'] body .game-page-layout .chat-flow {
+    animation: none;
+  }
+
+  :root[data-theme='sakura'] body .game-page-layout .top-btn,
+  :root[data-theme='sakura'] body .game-page-layout .tool-btn,
+  :root[data-theme='sakura'] body .game-page-layout .collapse-toggle,
+  :root[data-theme='sakura'] body .game-page-layout .input-btn,
+  :root[data-theme='sakura'] body .game-page-layout .scene-title-action,
+  :root[data-theme='sakura'] body .game-page-layout .tab-item,
+  :root[data-theme='sakura'] body .game-page-layout .quest-item,
+  :root[data-theme='sakura'] body .game-page-layout .scene-npc-item,
+  :root[data-theme='sakura'] body .game-page-layout .news-item,
+  :root[data-theme='sakura'] body .game-page-layout .item-row,
+  :root[data-theme='sakura'] body .game-page-layout .system-notif,
+  :root[data-theme='sakura'] body .game-page-layout .input-field {
+    transition: none;
+  }
 }

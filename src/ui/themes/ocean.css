@@ -1,28 +1,29 @@
-/* ===== Ocean (海洋) — 深海蓝黑风格 ===== */
+/* ===== Abyssal Cathedral (深海圣堂) — 深海石材与冷光海玻璃 ===== */
 [data-theme='ocean'] {
-  --theme-window-bg: #0a1628;
-  --theme-window-border: #1a3550;
-  --theme-content-bg: #081220;
-  --theme-card-bg: #101e35;
-  --theme-card-border: #1a3550;
-  --theme-surface-muted: color-mix(in srgb, #0a1628 72%, #101e35 28%);
-  --theme-overlay-bg: color-mix(in srgb, #0a1628 58%, transparent);
+  --theme-window-bg: #07131b;
+  --theme-window-border: #254757;
+  --theme-content-bg: #050d14;
+  --theme-card-bg: #0d202b;
+  --theme-card-border: #2b5060;
+  --theme-surface-muted: #091923;
+  --theme-overlay-bg: rgba(3, 8, 12, 0.82);
 
-  --theme-title-bar-bg: #0e1c33;
-  --theme-title-bar-text: #d8e8f8;
-  --theme-title-bar-icon: #80a8d0;
-  --theme-title-bar-btn-hover: rgba(255, 255, 255, 0.06);
-  --theme-tab-bar-bg: #0c192e;
-  --theme-tab-text: #6888b0;
-  --theme-tab-active-text: #c8e0f8;
-  --theme-tab-indicator: #48a8f0;
-  --theme-tab-hover-bg: rgba(255, 255, 255, 0.04);
+  --theme-title-bar-bg: #0a1a24;
+  --theme-title-bar-text: #deedf0;
+  --theme-title-bar-icon: #8eb9c2;
+  --theme-title-bar-btn-hover: rgba(85, 167, 183, 0.1);
+  --theme-tab-bar-bg: #081720;
+  --theme-tab-text: #76a0aa;
+  --theme-tab-active-text: #e2f0f2;
+  --theme-tab-indicator: #55a7b7;
+  --theme-tab-hover-bg: rgba(85, 167, 183, 0.08);
 
-  --theme-text-primary: #d8e8f8;
-  --theme-text-secondary: #80a8d0;
-  --theme-text-muted: #587088;
+  --theme-text-primary: #deedf0;
+  --theme-text-secondary: #94b9c1;
+  --theme-text-muted: #617f87;
 
-  --theme-primary: #48a8f0;
+  --theme-primary: #55a7b7;
+  --theme-primary-text: #061319;
 
   --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
   --theme-success: #48d890;
@@ -48,4 +49,8 @@
   --theme-currency-gold: #e8b84b;
   --theme-currency-silver: #b0c0d0;
   --theme-currency-copper: #c88058;
+
+  --theme-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --theme-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --theme-shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.52);
 }
