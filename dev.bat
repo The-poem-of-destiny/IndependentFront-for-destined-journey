@@ -21,20 +21,23 @@ echo ==============================
 echo.
 
 :: ------------------------------------------------------------------
-:: Optional content-repo mode (content-engine split wave 4, D14).
-::   dev.bat --content   (or: npm run dev -- --content)
+:: Content-repo mode (content-engine split wave 4, D14).
 :: Points /data/* reads AND the "save as default" UI write at the real
 :: content repo (sibling dir ..\fated_poem_independent_assets\data)
 :: instead of the public/data placeholder. This also makes the
 :: "save as default" button appear (it is hidden unless the
-:: __POEM_CONTENT_DIR__ define is true). Without --content the
-:: placeholder stays read-only and the button stays hidden -- by design,
-:: so placeholder content can never be written by the UI.
-:: A pre-set POEM_CONTENT_DIR env var always wins (no override).
-if not defined POEM_CONTENT_DIR (
-    for %%A in (%*) do if /i "%%~A"=="--content" (
-        set "POEM_CONTENT_DIR=%~dp0..\fated_poem_independent_assets\data"
-    )
+:: __POEM_CONTENT_DIR__ define is true).
+::
+:: Default: AUTO-ENABLED -- if the sibling content repo exists, dev
+:: starts in content mode with no extra args. Pass --no-content to
+:: force placeholder mode (read-only, button hidden). --content is
+:: accepted for compatibility. A pre-set POEM_CONTENT_DIR env var
+:: always wins (no override).
+:: --no-content wins: skip auto-detect even if the sibling repo exists.
+if /i "%~1"=="--no-content" set "NO_CONTENT=1"
+if /i "%~2"=="--no-content" set "NO_CONTENT=1"
+if not defined POEM_CONTENT_DIR if not defined NO_CONTENT (
+    if exist "%~dp0..\fated_poem_independent_assets\data" set "POEM_CONTENT_DIR=%~dp0..\fated_poem_independent_assets\data"
 )
 if defined POEM_CONTENT_DIR echo [dev] content repo: %POEM_CONTENT_DIR%
 
