@@ -356,3 +356,52 @@ describe('MAX_TOOL_ROUNDS 超限自动 pass', () => {
     expect(result.outcome).toBe('ally_win');
   });
 });
+
+describe('战斗 agent tools 注入（2026-08-08 真机 bug 回归）', () => {
+  it('routeEnemyCommand 请求必须带 combat_v3 的工具定义（否则模型收不到 schema，只能文本猜参数名）', async () => {
+    // 乙(敌方)高血量：甲打不死 → 轮到乙行动 → 战斗 agent 被调用
+    const { opts, setQueue } = mkOpts();
+    opts.bundle = mkBundle({
+      combatId: 'coord-tools-test',
+      participants: [
+        mkParticipant('甲'), // player
+        mkParticipant('乙', {
+          side: 'enemy',
+          characterId: '乙',
+          name: '乙',
+          hp: 5000,
+          maxHp: 5000,
+        }),
+      ],
+    });
+    setQueue(atkTurn());
+    let capturedReq: { tools?: unknown } | null = null;
+
+    // 敌方路由 → 战斗 agent；捕获它收到的 request，断言 tools 已注入
+    opts.deps.clientFactory = () =>
+      ({
+        chatWithTools: async (req: { tools?: unknown }) => {
+          capturedReq = req;
+          // 返回一个合法 declare_attack
+          return {
+            output: 'ok',
+            rawResponse: '',
+            toolCalls: [
+              {
+                name: 'declare_attack',
+                arguments: { actorName: '乙', targetName: '甲', intentionLevel: '战术' },
+              },
+            ],
+          } as never;
+        },
+        chat: async () => ({ output: null, rawResponse: '' }) as never,
+      }) as never;
+
+    await runCombatV3(opts);
+    expect(capturedReq).not.toBeNull();
+    const tools = (capturedReq as { tools?: Array<{ function: { name: string } }> })?.tools ?? [];
+    const names = tools.map((t) => t.function.name);
+    expect(names).toContain('declare_attack');
+    expect(names).toContain('declare_action');
+  });
+});

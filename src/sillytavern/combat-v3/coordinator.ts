@@ -34,6 +34,7 @@ import { projectToAgent } from './projection-agent';
 import { projectToUi } from './projection-ui';
 import { lookupSummon } from './summon-pool';
 import { runCharGenForCombat } from '../char-gen-agent';
+import { getToolsForAgent } from '../agent-tools';
 import type {
   CombatCommand,
   CombatDefinitionBundle,
@@ -482,8 +483,11 @@ async function routeEnemyCommand(
           content: `轮到敌方「${req.unitName}」行动（我方单位由玩家控制）。\n\n${panel}`,
         },
       ],
-      // tools 由外层按 AGENT_TOOL_MAP['combat_v3'] 注入；这里传 undefined 走默认
-      tools: undefined,
+      // 🔴 tools 必须显式注入（2026-08-08 真机 bug）：此前 `tools: undefined` 且
+      //    agent-client 不自动注入 → 模型收不到 declare_attack 的 schema → 只能文本猜
+      //    参数名（target≠targetName）→ toolCalls 空 → 战斗 agent 每步 pass → abandon。
+      //    先例：char_gen/item_gen/craft_gen 都在调用点显式 getToolsForAgent()，照抄。
+      tools: getToolsForAgent('combat_v3'),
     },
     (name, args) => toolCallToCommand(name, args, session.snapshot().revision, req.unitId),
     { maxRounds: MAX_TOOL_ROUNDS },
