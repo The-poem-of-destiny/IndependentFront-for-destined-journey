@@ -67,6 +67,7 @@ Flexibility: materials and ornament may vary; frame ownership may not
 ### Crimson rose window
 
 - The established tab treatment uses a continuous stone base and one separate active cap.
+- Motion is interaction-triggered only; do not use ambient or continuously looping theme animation. Crimson tab strips use one shared active cap that slides horizontally between fixed button positions.
 - Blood glass is reserved for the chat text treatment unless the user explicitly expands its scope.
 - Backpack and character modals use asset-free, gold-framed neutral liquid glass; fixed-size blood-control artwork must not be stretched across their panels or sub-elements.
 
