@@ -264,3 +264,66 @@ D6 那个「整帧反相成纸上刻印」是原型里实际跑通的方案，�
 | 新增文件 | 约 12 个（场景拆分占 9 个）                                   |
 | 改动文件 | 3 个（HomePage.vue / settings-types.ts / SettingsPage.vue）   |
 | 运行时   | 实测 0.3 ms/帧、1 draw call、30 fps 上限；governor 兜底弱 GPU |
+
+---
+
+## 7. 许可核查（2026-08-09）
+
+> 不是法律意见。这里记的是**查到了什么、没查到什么**，以及集成时要补的那一件事。
+
+### 7.1 freefrontend.com 是目录站，不是代码来源
+
+各 standalone 的文件头都写了「参考取自 freefrontend.com/three-js」。实测该站：
+
+- 它**不托管代码**。每个条目是一张卡片：标题 + 说明 + `demo & code` 外链 + 作者的
+  CodePen 主页链接 + 一个 `data-slug-hash`（CodePen pen 的 slug），部分条目还带
+  `License:` 字段。全站 three.js 分类共 **163 个条目 / 14 页**（实测抓取）。
+- 因此**它本身不授予任何许可** —— 许可归各 pen 的作者。目录站只是把人送过去。
+
+### 7.2 逐条查到的许可
+
+| 文件头点名的 demo                            | 作者         | 目录页标注 | pen slug  |
+| -------------------------------------------- | ------------ | ---------- | --------- |
+| Chromatic Aberration WebGL Sine Wave         | Yuki         | **MIT**    | `yLgYpWM` |
+| Neon 3D Tubes Cursor Trail                   | Kevin Levron | **MIT**    | `qEbdVjK` |
+| Live Clouds with Three.js                    | 未标注       | 无字段     | `GRbGLgy` |
+| Particle Teapot with Glow Effects            | 未标注       | 无字段     | `YPyQVNm` |
+| Zooming Spiral / Snowfall / Starfall / Storm | —            | **未确认** | 未定位    |
+
+两点如实说明：
+
+- 「无字段」不等于「无许可」。**CodePen 公开 pen 默认即 MIT**（官方文档：
+  "Public pens are automatically MIT licensed"），所以这两条落回 MIT。
+- 最后四个**没查实**：用精确标题在 14 页目录里定位不到（可能改过名或已下架）。
+  因为下面 §7.3 的结论，这个缺口不影响裁定，但它是个缺口，不要当成已确认。
+
+### 7.3 关键结论：那些是**视觉参考**，不是代码来源
+
+许可义务只在**用了人家的代码**时才发生。著作权保护的是表达，不是想法、视觉风格或技法，
+所以「看着一个 pen 的观感、自己写一遍」不产生任何义务 —— 哪怕那个 pen 是专有的。
+
+对四份 standalone 做的代码审计（结果全部为零）：
+
+- 无第三方 GLSL 片段：**没有** Ashima/Gustavson 的 `mod289` / `permute` / `taylorInvSqrt`
+  一族 simplex 噪声（这类才是真正带署名义务、又最容易被粘进来的东西）
+- 无任何版权头、无 `LICENSE` 声明、无 vendored 文件
+- 唯一的「公用片段」是 `fract(sin(dot(...)) * 43758.5453)` 这个哈希惯用法 ——
+  着色器界的民间语汇，不构成可保护的作品
+- 文件头本身写着 "rebuilt rather than copied"，并且有一处**明确拒绝**了常见的
+  复制粘贴写法（`size * (300.0 / -mvPosition.z)` 那个假定 50° fov 的点精灵惯用法），
+  这是独立实现的旁证而非事后声明
+
+**风险评级：低。** 即便将来发现某处确有雷同，最坏情况是 MIT 义务 —— 附上版权与许可文本
+即可，无传染性。
+
+### 7.4 集成时**必须补**的一件事
+
+`three` 目前只在 standalone 里从 CDN 引入（不构成再分发）。一旦按 D3 进
+`dependencies` 并随 `dist-ui` 分发，**MIT 就要求随分发附版权与许可全文**。
+
+本仓已有现成机制，照着做即可（三处，缺一不可）：
+
+1. `public/licenses/three.txt` —— 放 three.js 的 MIT 全文
+2. `THIRD-PARTY-NOTICES.md` —— 增一节
+3. `AboutSection.vue` —— **可选**。MIT 不要求界面可见署名（那是 Font Awesome 的
+   CC BY 才有的硬要求），静态文件随分发即可满足。要加也行，但别把它当成义务
