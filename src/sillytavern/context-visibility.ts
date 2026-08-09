@@ -214,11 +214,14 @@ export function buildZoneContext(ctx: AgentContext): Record<ZoneId, VariableZone
   };
 
   // --- npc zone ---
+  // 🔴 2026-08-08 在场判定断链修复：present=false 的角色（离队/远处/退场）不进
+  //    CHARACTER_STATE 上下文。此前 buildZoneContext 不按 present 过滤，所有角色
+  //    无论在场与否都注入 AI —— 在场状态形同虚设。player 恒在场不受过滤。
   zones.npc = {
     config: { injectAs: 'list' },
     visibility: [],
     content: {
-      characters: ctx.characters ?? [],
+      characters: ctx.characters?.filter((c) => c.type === 'player' || c.present !== false) ?? [],
     },
   };
 

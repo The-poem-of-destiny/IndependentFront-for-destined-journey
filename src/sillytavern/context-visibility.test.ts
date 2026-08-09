@@ -274,6 +274,21 @@ describe('buildZoneContext', () => {
     expect(zones.npc.content.characters).toHaveLength(2);
   });
 
+  it('🆕 present=false 的角色不进 npc zone（2026-08-08 在场判定断链修复）', () => {
+    const ctx = makeAgentContext({
+      characters: [
+        makeCharacter({ id: 'p1', type: 'player', name: '凯恩' }),
+        makeCharacter({ id: 'n1', type: 'npc', name: '在场的老铁匠', present: true }),
+        makeCharacter({ id: 'n2', type: 'npc', name: '离队的老约翰', present: false }),
+      ],
+    });
+    const zones = buildZoneContext(ctx);
+    const names = zones.npc.content.characters.map((c) => c.name);
+    expect(names).toContain('凯恩'); // player 恒在场
+    expect(names).toContain('在场的老铁匠');
+    expect(names).not.toContain('离队的老约翰'); // present=false 被过滤
+  });
+
   it('world zone extracts world-state keys', () => {
     const ctx = makeAgentContext({
       variables: { 时间: '下午', 位置: '铁匠铺', 天气: '晴', user_count: 5 },
