@@ -1,1 +1,696 @@
-/* Obsidian (玄墨) — 默认主题已在 variables.css 中定义（暖墨底 + 古金） */
+/* Gilded Orrery (玄金星盘) — black-stone armillary instrument. */
+[data-theme='obsidian'] {
+  --theme-window-bg: #090b10;
+  --theme-window-border: #343033;
+  --theme-content-bg: #090c11;
+  --theme-card-bg: #11151b;
+  --theme-card-border: #4a402c;
+  --theme-surface-muted: #12161c;
+  --theme-overlay-bg: rgba(4, 5, 8, 0.9);
+
+  --theme-title-bar-bg: #0b0e13;
+  --theme-title-bar-text: #e8deca;
+  --theme-title-bar-icon: #c5aa6b;
+  --theme-title-bar-btn-hover: rgba(201, 168, 95, 0.1);
+  --theme-tab-bar-bg: #0b0e13;
+  --theme-tab-text: #9f9687;
+  --theme-tab-active-text: #eadfc8;
+  --theme-tab-indicator: #c9a85f;
+  --theme-tab-hover-bg: rgba(201, 168, 95, 0.075);
+
+  --theme-text-primary: #e8deca;
+  --theme-text-secondary: #bdb3a1;
+  --theme-text-muted: #92897b;
+
+  --theme-primary: #c9a85f;
+  --theme-primary-bg: rgba(201, 168, 95, 0.13);
+  --theme-primary-text: #171208;
+  --theme-color-primary: var(--theme-primary);
+  --theme-success: #65ad79;
+  --theme-warning: #d2a653;
+  --theme-error: #ce6259;
+
+  --theme-hp: #b94f4a;
+  --theme-mp: #4f74ae;
+  --theme-sp: #4f8c65;
+  --theme-exp: #a6843f;
+
+  --theme-radius-sm: 2px;
+  --theme-radius-md: 3px;
+  --theme-radius-lg: 4px;
+  --paper-stack: inset 0 1px 0 rgba(229, 204, 142, 0.045), 0 4px 10px rgba(0, 0, 0, 0.28);
+
+  --orrery-field: url('../assets/themes/obsidian/gilded-orrery-field-v3.webp');
+  --orrery-stone: rgba(8, 11, 15, 0.88);
+  --orrery-stone-deep: rgba(5, 7, 10, 0.94);
+  --orrery-stone-raised: rgba(17, 20, 25, 0.94);
+  --orrery-brass-dark: #776034;
+  --orrery-brass: #9e8040;
+  --orrery-brass-bright: #c9a85f;
+  --orrery-parchment: #e8deca;
+  --orrery-keyline: rgba(213, 177, 92, 0.52);
+  --orrery-keyline-soft: rgba(205, 169, 90, 0.24);
+  --orrery-specular: rgba(232, 205, 137, 0.16);
+  --orrery-reflection: linear-gradient(
+    112deg,
+    transparent 0 38%,
+    rgba(229, 204, 142, 0.03) 44%,
+    rgba(229, 204, 142, 0.15) 49%,
+    rgba(229, 204, 142, 0.035) 54%,
+    transparent 60% 100%
+  );
+}
+
+/* One continuous instrument plate establishes scale across all four ledgers. */
+:root[data-theme='obsidian'] body .game-page-layout {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--theme-window-bg);
+  background-image: linear-gradient(rgba(4, 6, 9, 0.09), rgba(4, 6, 9, 0.16)), var(--orrery-field);
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: cover;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout > * {
+  position: relative;
+  z-index: 1;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .game-body {
+  background: transparent;
+}
+
+/* Raised structural rails: a dark keyline, a restrained brass ridge, and a deep well. */
+:root[data-theme='obsidian'] body .game-page-layout .top-bar,
+:root[data-theme='obsidian'] body .game-page-layout .side-toolbar,
+:root[data-theme='obsidian'] body .game-page-layout .scene-panel,
+:root[data-theme='obsidian'] body .game-page-layout .status-hud,
+:root[data-theme='obsidian'] body .game-page-layout .input-bar {
+  background-color: var(--orrery-stone);
+  background-image:
+    linear-gradient(rgba(5, 7, 10, 0.36), rgba(5, 7, 10, 0.36)), var(--orrery-field);
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: cover;
+  background-attachment: fixed;
+  border-color: var(--orrery-keyline);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .top-bar {
+  background-color: rgba(7, 9, 13, 0.84);
+  border-bottom: 1px solid var(--orrery-brass-dark);
+  box-shadow:
+    inset 0 -1px 0 rgba(222, 188, 108, 0.28),
+    0 2px 8px rgba(0, 0, 0, 0.42);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .top-divider {
+  background: linear-gradient(to bottom, transparent, var(--orrery-brass), transparent);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .top-save-name {
+  color: var(--orrery-parchment);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.82);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .top-title-text {
+  color: color-mix(in srgb, var(--orrery-brass-bright) 82%, var(--theme-text-secondary));
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .top-title-rule {
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--orrery-brass-dark) 22%,
+    var(--orrery-brass-bright) 50%,
+    var(--orrery-brass-dark) 78%,
+    transparent
+  );
+}
+
+/* Enamel instrument keys. Reflection travels inside the plate, never on the chassis. */
+:root[data-theme='obsidian'] body .game-page-layout .top-btn,
+:root[data-theme='obsidian'] body .game-page-layout .tool-btn,
+:root[data-theme='obsidian'] body .game-page-layout .collapse-toggle,
+:root[data-theme='obsidian'] body .game-page-layout .input-btn,
+:root[data-theme='obsidian'] body .game-page-layout .scene-title-action {
+  background-color: rgba(11, 14, 19, 0.66);
+  background-image: var(--orrery-reflection);
+  background-repeat: no-repeat;
+  background-size: 240% 100%;
+  background-position: 112% 0;
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-sm);
+  color: var(--theme-title-bar-icon);
+  box-shadow: inset 0 1px 0 rgba(232, 205, 137, 0.025);
+  transition:
+    background-position 360ms ease-out,
+    background-color 170ms ease-out,
+    border-color 170ms ease-out,
+    box-shadow 170ms ease-out,
+    color 170ms ease-out;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .top-btn:hover,
+:root[data-theme='obsidian'] body .game-page-layout .tool-btn:hover,
+:root[data-theme='obsidian'] body .game-page-layout .collapse-toggle:hover,
+:root[data-theme='obsidian'] body .game-page-layout .input-btn:hover,
+:root[data-theme='obsidian'] body .game-page-layout .scene-title-action:hover {
+  background-color: rgba(23, 25, 28, 0.82);
+  background-position: -18% 0;
+  border-color: var(--orrery-keyline);
+  color: var(--orrery-parchment);
+  box-shadow:
+    inset 0 1px 0 var(--orrery-specular),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.58);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .top-btn:focus-visible,
+:root[data-theme='obsidian'] body .game-page-layout .tool-btn:focus-visible,
+:root[data-theme='obsidian'] body .game-page-layout .collapse-toggle:focus-visible,
+:root[data-theme='obsidian'] body .game-page-layout .input-btn:focus-visible,
+:root[data-theme='obsidian'] body .game-page-layout .scene-title-action:focus-visible,
+:root[data-theme='obsidian'] body .game-page-layout .tab-item:focus-visible,
+:root[data-theme='obsidian'] body .game-page-layout .section-header.clickable:focus-visible,
+:root[data-theme='obsidian'] body .game-page-layout .quest-item:focus-visible,
+:root[data-theme='obsidian'] body .game-page-layout .item-row:focus-visible,
+:root[data-theme='obsidian'] body .game-page-layout .portrait-slot:focus-visible {
+  outline: 1px solid var(--orrery-parchment);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 2px var(--orrery-brass-dark);
+}
+
+/* The narrow rail is a black instrument spine with individually seated keys. */
+:root[data-theme='obsidian'] body .game-page-layout .side-toolbar {
+  padding-top: var(--theme-spacing-lg);
+  gap: var(--theme-spacing-xs);
+  background-color: rgba(6, 8, 12, 0.84);
+  border-right: 1px solid var(--orrery-brass);
+  box-shadow:
+    inset -1px 0 0 rgba(239, 207, 130, 0.18),
+    1px 0 0 rgba(0, 0, 0, 0.78),
+    3px 0 8px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .side-toolbar .tool-btn {
+  margin-inline: var(--theme-spacing-xs);
+  padding-block: 7px;
+  background-color: rgba(12, 15, 20, 0.7);
+  border-color: rgba(151, 124, 66, 0.13);
+  color: #bda76f;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .side-toolbar .tool-btn:hover,
+:root[data-theme='obsidian'] body .game-page-layout .side-toolbar .tool-btn:focus-visible {
+  border-color: var(--orrery-brass);
+  color: #e4cf99;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .side-toolbar .collapse-toggle {
+  margin-inline: var(--theme-spacing-xs);
+  border-top-color: var(--orrery-keyline-soft);
+}
+
+/* Recessed scene and status ledgers reveal the same stone plate below them. */
+:root[data-theme='obsidian'] body .game-page-layout .scene-panel {
+  background-color: rgba(7, 9, 13, 0.81);
+  border-right: 1px solid var(--orrery-brass);
+  box-shadow:
+    inset -1px 0 0 rgba(239, 207, 130, 0.16),
+    1px 0 0 rgba(0, 0, 0, 0.84),
+    inset 0 0 28px rgba(0, 0, 0, 0.24);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .status-hud {
+  background-color: rgba(7, 9, 13, 0.82);
+  border-left: 1px solid var(--orrery-brass);
+  box-shadow:
+    inset 1px 0 0 rgba(239, 207, 130, 0.16),
+    -1px 0 0 rgba(0, 0, 0, 0.84),
+    inset 0 0 28px rgba(0, 0, 0, 0.24);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .scene-top {
+  background-color: rgba(8, 11, 15, 0.76);
+  border-bottom: 1px solid var(--orrery-keyline);
+  box-shadow:
+    inset 0 -1px 0 rgba(0, 0, 0, 0.62),
+    0 3px 8px rgba(0, 0, 0, 0.16);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .scene-date-line,
+:root[data-theme='obsidian'] body .game-page-layout .scene-location,
+:root[data-theme='obsidian'] body .game-page-layout .scene-tod-clock {
+  color: var(--orrery-parchment);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .scene-section-title,
+:root[data-theme='obsidian'] body .game-page-layout .section-title {
+  color: color-mix(in srgb, var(--orrery-brass-bright) 70%, var(--theme-text-secondary));
+}
+
+/* Connected instrument selectors: black cells seated into one continuous rail. */
+:root[data-theme='obsidian'] body .game-page-layout .tab-bar {
+  background-color: rgba(6, 8, 12, 0.74);
+  border-top: 1px solid rgba(211, 174, 90, 0.08);
+  border-bottom: 1px solid var(--orrery-brass-dark);
+  box-shadow:
+    inset 0 1px 0 rgba(230, 204, 141, 0.03),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.72);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .tab-list {
+  gap: 0;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .tab-item {
+  min-width: 0;
+  padding: 9px var(--theme-spacing-sm);
+  background-color: transparent;
+  border: 0;
+  border-right: 1px solid rgba(185, 151, 76, 0.12);
+  border-radius: 0;
+  color: var(--theme-tab-text);
+  box-shadow: none;
+  transition:
+    background-color 170ms ease-out,
+    color 170ms ease-out,
+    box-shadow 170ms ease-out;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .tab-item:last-child {
+  border-right: 0;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .tab-item:hover {
+  background-color: rgba(201, 168, 95, 0.055);
+  color: var(--orrery-parchment);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .tab-active {
+  background-color: rgba(24, 24, 22, 0.76);
+  color: var(--orrery-parchment);
+  box-shadow:
+    inset 0 1px 0 rgba(232, 205, 137, 0.1),
+    inset 0 -3px 0 rgba(6, 7, 9, 0.78);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .tab-item::after {
+  height: 1px;
+  left: var(--theme-spacing-sm);
+  right: var(--theme-spacing-sm);
+  background: transparent;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .tab-active::after {
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--orrery-brass-bright) 18% 82%,
+    transparent
+  );
+  box-shadow: 0 -1px 0 rgba(232, 205, 137, 0.14);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .tab-badge {
+  background: #944c43;
+  color: #f0dfc5;
+  border: 1px solid rgba(232, 205, 137, 0.16);
+}
+
+/* Sparse ledger rows: information is engraved into the well, not boxed into cards. */
+:root[data-theme='obsidian'] body .game-page-layout .quest-list,
+:root[data-theme='obsidian'] body .game-page-layout .scene-npc-list,
+:root[data-theme='obsidian'] body .game-page-layout .item-list {
+  gap: 0;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .quest-item,
+:root[data-theme='obsidian'] body .game-page-layout .scene-npc-item,
+:root[data-theme='obsidian'] body .game-page-layout .news-item,
+:root[data-theme='obsidian'] body .game-page-layout .item-row,
+:root[data-theme='obsidian'] body .game-page-layout .system-notif {
+  background-color: rgba(10, 13, 18, 0.26);
+  border: 0;
+  border-bottom: 1px solid rgba(181, 148, 75, 0.15);
+  border-radius: 0;
+  box-shadow: none;
+  transition:
+    background-color 170ms ease-out,
+    border-color 170ms ease-out,
+    box-shadow 170ms ease-out;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .quest-item:hover,
+:root[data-theme='obsidian'] body .game-page-layout .quest-item:focus-visible,
+:root[data-theme='obsidian'] body .game-page-layout .quest-item.open,
+:root[data-theme='obsidian'] body .game-page-layout .scene-npc-item:hover,
+:root[data-theme='obsidian'] body .game-page-layout .scene-npc-item:focus-visible,
+:root[data-theme='obsidian'] body .game-page-layout .scene-npc-item.hovered,
+:root[data-theme='obsidian'] body .game-page-layout .news-item:hover,
+:root[data-theme='obsidian'] body .game-page-layout .item-row:hover,
+:root[data-theme='obsidian'] body .game-page-layout .item-row:focus-visible,
+:root[data-theme='obsidian'] body .game-page-layout .system-notif:hover,
+:root[data-theme='obsidian'] body .game-page-layout .system-notif:focus-visible {
+  background-color: rgba(201, 168, 95, 0.06);
+  border-bottom-color: var(--orrery-keyline);
+  box-shadow: inset 0 1px 0 rgba(232, 205, 137, 0.035);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .quest-detail,
+:root[data-theme='obsidian'] body .game-page-layout .item-detail {
+  background-color: rgba(13, 17, 22, 0.68);
+  border: 1px solid var(--orrery-keyline-soft);
+  border-radius: var(--theme-radius-sm);
+  box-shadow:
+    inset 0 1px 4px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(232, 205, 137, 0.03);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .item-entry.open .item-row {
+  background-color: rgba(201, 168, 95, 0.045);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .det-chip,
+:root[data-theme='obsidian'] body .game-page-layout .npc-tier,
+:root[data-theme='obsidian'] body .game-page-layout .item-tag {
+  background-color: rgba(15, 18, 23, 0.72);
+  border: 1px solid var(--orrery-keyline-soft);
+  border-radius: var(--theme-radius-sm);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .npc-portrait,
+:root[data-theme='obsidian'] body .game-page-layout .avatar-shape-square {
+  border: 1px solid var(--orrery-brass-dark);
+  border-radius: var(--theme-radius-sm);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.72),
+    inset 0 1px 0 rgba(232, 205, 137, 0.12),
+    0 4px 10px rgba(0, 0, 0, 0.34);
+}
+
+/* The narrative well stays the calmest region while retaining the huge orbital scale. */
+:root[data-theme='obsidian'] body .game-page-layout .chat-flow {
+  position: relative;
+  background-color: rgba(5, 7, 10, 0.54);
+  background-image: linear-gradient(rgba(3, 5, 8, 0.2), rgba(3, 5, 8, 0.2)), var(--orrery-field);
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: cover;
+  background-attachment: fixed;
+  box-shadow:
+    inset 1px 0 0 rgba(218, 181, 93, 0.19),
+    inset -1px 0 0 rgba(218, 181, 93, 0.19),
+    inset 0 0 72px rgba(0, 0, 0, 0.2);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .chat-messages {
+  background-color: transparent;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.78);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .bubble-narrative-full {
+  color: var(--orrery-parchment);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .bubble-player,
+:root[data-theme='obsidian'] body .game-page-layout .dialogue-card {
+  background-color: rgba(14, 18, 23, 0.78);
+  border-color: var(--orrery-keyline-soft);
+  border-radius: var(--theme-radius-sm);
+  box-shadow:
+    inset 0 1px 0 rgba(232, 205, 137, 0.035),
+    0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .chat-empty-glyph,
+:root[data-theme='obsidian'] body .game-page-layout .loading-dot {
+  color: var(--orrery-brass-bright);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.86);
+}
+
+/* Black writing well and compact brass command plate. */
+:root[data-theme='obsidian'] body .game-page-layout .input-bar {
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  background-color: rgba(6, 8, 12, 0.88);
+  border-top: 1px solid var(--orrery-brass-dark);
+  box-shadow:
+    inset 0 1px 0 rgba(229, 197, 122, 0.12),
+    0 -5px 14px rgba(0, 0, 0, 0.3);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .input-field {
+  background-color: rgba(7, 10, 14, 0.9);
+  border: 1px solid var(--orrery-brass-dark);
+  border-radius: var(--theme-radius-sm);
+  color: var(--orrery-parchment);
+  box-shadow:
+    inset 0 2px 7px rgba(0, 0, 0, 0.58),
+    inset 0 0 0 1px rgba(232, 205, 137, 0.025);
+  transition:
+    border-color 170ms ease-out,
+    box-shadow 170ms ease-out;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .input-field:focus {
+  border-color: var(--orrery-brass-bright);
+  box-shadow:
+    inset 0 2px 7px rgba(0, 0, 0, 0.58),
+    0 0 0 1px rgba(232, 222, 202, 0.34);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .send-btn {
+  background-color: rgba(29, 26, 19, 0.86);
+  border-color: var(--orrery-brass);
+  color: var(--orrery-brass-bright);
+  box-shadow:
+    inset 0 1px 0 var(--orrery-specular),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.48);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .send-btn:active {
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.62),
+    inset 0 -1px 0 rgba(232, 205, 137, 0.08);
+}
+
+/* Celestial chart recess behind the avatar; content remains sparse below. */
+:root[data-theme='obsidian'] body .game-page-layout .status-overview > .section:first-child {
+  background-color: rgba(7, 9, 13, 0.64);
+  border-bottom-color: var(--orrery-keyline);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .player-summary {
+  background-image:
+    linear-gradient(rgba(7, 9, 13, 0.48), rgba(7, 9, 13, 0.86)), var(--orrery-field);
+  background-repeat: no-repeat;
+  background-position: 86% 3%;
+  background-size: 185% auto;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .avatar.avatar-xl {
+  background-color: rgba(7, 10, 14, 0.82);
+  background-image:
+    linear-gradient(rgba(8, 10, 14, 0.18), rgba(8, 10, 14, 0.34)), var(--orrery-field);
+  background-repeat: no-repeat;
+  background-position: 88% 8%;
+  background-size: 280% auto;
+  color: var(--orrery-parchment);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .summary-name {
+  color: var(--orrery-parchment);
+  letter-spacing: 0.08em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .status-glass > .section {
+  background-color: rgba(8, 11, 15, 0.34);
+  border-bottom-color: rgba(181, 148, 75, 0.2);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .section-header.clickable:hover {
+  background-color: rgba(201, 168, 95, 0.04);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .attr-grid {
+  gap: var(--theme-spacing-xs);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .attr-grid .kv-item {
+  background-color: rgba(13, 17, 22, 0.82);
+  border: 1px solid rgba(181, 148, 75, 0.17);
+  border-radius: var(--theme-radius-sm);
+  box-shadow:
+    inset 0 1px 0 rgba(232, 205, 137, 0.035),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .res-track {
+  background-color: rgba(4, 6, 9, 0.82);
+  border: 1px solid rgba(181, 148, 75, 0.25);
+  border-radius: var(--theme-radius-sm);
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.66),
+    inset 0 1px 0 rgba(232, 205, 137, 0.025);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .res-fill {
+  border-radius: 1px;
+  opacity: 0.88;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 244, 218, 0.12),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.38);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .res-values {
+  color: #f2eadb;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.94),
+    0 0 3px rgba(0, 0, 0, 0.76);
+}
+
+/* Floating wells continue the same three-layer material hierarchy. */
+:root[data-theme='obsidian'] body .options-popup,
+:root[data-theme='obsidian'] body .thought-bubble,
+:root[data-theme='obsidian'] body .buff-pop,
+:root[data-theme='obsidian'] body .cascader-dropdown,
+:root[data-theme='obsidian'] body .modal-content {
+  background-color: rgba(9, 12, 17, 0.97);
+  border: 1px solid var(--orrery-brass-dark);
+  border-radius: var(--theme-radius-sm);
+  box-shadow:
+    inset 0 1px 0 rgba(232, 205, 137, 0.055),
+    0 12px 30px rgba(0, 0, 0, 0.58);
+}
+
+:root[data-theme='obsidian'] body .option-item:hover,
+:root[data-theme='obsidian'] body .option-item:focus-visible,
+:root[data-theme='obsidian'] body .option-custom:hover,
+:root[data-theme='obsidian'] body .option-custom:focus-visible {
+  background-color: rgba(201, 168, 95, 0.07);
+  color: var(--orrery-parchment);
+}
+
+@media (max-width: 1100px) {
+  :root[data-theme='obsidian'] body .game-page-layout {
+    background-position: 48% center;
+  }
+
+  :root[data-theme='obsidian'] body .game-page-layout .scene-panel,
+  :root[data-theme='obsidian'] body .game-page-layout .status-hud {
+    background-color: rgba(7, 9, 13, 0.9);
+  }
+
+  :root[data-theme='obsidian'] body .game-page-layout .tab-item {
+    padding-inline: var(--theme-spacing-xs);
+    font-size: 0.78rem;
+  }
+
+  :root[data-theme='obsidian'] body .game-page-layout .top-title-rule {
+    width: var(--theme-spacing-xl);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme='obsidian'] body .game-page-layout .top-bar,
+  :root[data-theme='obsidian'] body .game-page-layout .side-toolbar,
+  :root[data-theme='obsidian'] body .game-page-layout .scene-panel,
+  :root[data-theme='obsidian'] body .game-page-layout .status-hud,
+  :root[data-theme='obsidian'] body .game-page-layout .input-bar,
+  :root[data-theme='obsidian'] body .game-page-layout .chat-flow {
+    background-color: #080b0f;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  :root[data-theme='obsidian'] body .game-page-layout .scene-top,
+  :root[data-theme='obsidian'] body .game-page-layout .status-glass > .section,
+  :root[data-theme='obsidian'] body .game-page-layout .quest-detail,
+  :root[data-theme='obsidian'] body .game-page-layout .item-detail,
+  :root[data-theme='obsidian'] body .game-page-layout .input-field {
+    background-color: #0d1117;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme='obsidian'] body .game-page-layout .top-btn,
+  :root[data-theme='obsidian'] body .game-page-layout .tool-btn,
+  :root[data-theme='obsidian'] body .game-page-layout .collapse-toggle,
+  :root[data-theme='obsidian'] body .game-page-layout .input-btn,
+  :root[data-theme='obsidian'] body .game-page-layout .scene-title-action,
+  :root[data-theme='obsidian'] body .game-page-layout .tab-item,
+  :root[data-theme='obsidian'] body .game-page-layout .quest-item,
+  :root[data-theme='obsidian'] body .game-page-layout .scene-npc-item,
+  :root[data-theme='obsidian'] body .game-page-layout .news-item,
+  :root[data-theme='obsidian'] body .game-page-layout .item-row,
+  :root[data-theme='obsidian'] body .game-page-layout .system-notif,
+  :root[data-theme='obsidian'] body .game-page-layout .input-field {
+    transition: none;
+  }
+}
+
+/* Owner fidelity rework: expose the full armillary field and let thicker brass
+   rails read as one celestial instrument instead of flat dark card borders. */
+:root[data-theme='obsidian'] body .game-page-layout {
+  background-color: #06080c;
+  background-image: var(--orrery-field);
+  background-position: center;
+  background-size: cover;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .game-body,
+:root[data-theme='obsidian'] body .game-page-layout .chat-flow,
+:root[data-theme='obsidian'] body .game-page-layout .chat-messages {
+  background: transparent;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .top-bar,
+:root[data-theme='obsidian'] body .game-page-layout .side-toolbar,
+:root[data-theme='obsidian'] body .game-page-layout .scene-panel,
+:root[data-theme='obsidian'] body .game-page-layout .status-hud,
+:root[data-theme='obsidian'] body .game-page-layout .input-bar {
+  background-image: none;
+  background-color: rgba(5, 7, 10, 0.58);
+  border: 2px solid rgba(158, 128, 64, 0.68);
+  box-shadow:
+    inset 0 0 0 1px rgba(3, 4, 6, 0.96),
+    inset 0 0 0 2px rgba(218, 180, 93, 0.12),
+    0 6px 18px rgba(0, 0, 0, 0.38);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .scene-panel,
+:root[data-theme='obsidian'] body .game-page-layout .status-hud {
+  background-color: rgba(5, 7, 10, 0.68);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .bubble-narrative-full {
+  background-color: rgba(8, 11, 15, 0.62);
+  border: 1px solid rgba(200, 167, 88, 0.34);
+  box-shadow:
+    inset 0 1px 0 rgba(229, 204, 142, 0.06),
+    0 10px 26px rgba(0, 0, 0, 0.28);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .scene-top,
+:root[data-theme='obsidian'] body .game-page-layout .scene-tab-body,
+:root[data-theme='obsidian'] body .game-page-layout .status-overview,
+:root[data-theme='obsidian'] body .game-page-layout .status-glass,
+:root[data-theme='obsidian'] body .game-page-layout .section,
+:root[data-theme='obsidian'] body .game-page-layout .tab-bar {
+  background-color: rgba(8, 11, 15, 0.46);
+  background-image: none;
+  border-color: rgba(181, 147, 74, 0.28);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .tool-btn,
+:root[data-theme='obsidian'] body .game-page-layout .collapse-toggle,
+:root[data-theme='obsidian'] body .game-page-layout .input-field,
+:root[data-theme='obsidian'] body .game-page-layout .tab-item {
+  background-color: rgba(7, 10, 14, 0.7);
+  border-color: rgba(183, 150, 77, 0.36);
+}

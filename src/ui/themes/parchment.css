@@ -1,29 +1,29 @@
-/* ===== Parchment (羊皮纸) — 暖色古典风格 ===== */
+/* ===== Wayfarer's Atlas (远行者舆图) — 羊皮地图与旧黄铜 ===== */
 [data-theme='parchment'] {
-  --theme-window-bg: #f5efe6;
-  --theme-window-border: #d3c5b3;
-  --theme-content-bg: #faf6f0;
-  --theme-card-bg: rgba(253, 250, 245, 0.9);
-  --theme-card-border: #d4c4b0;
-  --theme-surface-muted: rgba(240, 230, 210, 0.9);
-  --theme-overlay-bg: rgba(0, 0, 0, 0.4);
+  --theme-window-bg: #e5d8c2;
+  --theme-window-border: #b9a27f;
+  --theme-content-bg: #f1e7d5;
+  --theme-card-bg: rgba(250, 245, 234, 0.94);
+  --theme-card-border: #c5b18f;
+  --theme-surface-muted: #dfd0b7;
+  --theme-overlay-bg: rgba(45, 34, 23, 0.44);
 
-  --theme-title-bar-bg: #ede0d4;
-  --theme-title-bar-text: #5d4037;
-  --theme-title-bar-icon: #8c6d62;
-  --theme-title-bar-btn-hover: rgba(139, 115, 85, 0.1);
-  --theme-tab-bar-bg: #f0e8db;
-  --theme-tab-text: #8c6d62;
-  --theme-tab-active-text: #5d4037;
-  --theme-tab-indicator: #d4af37;
-  --theme-tab-hover-bg: rgba(139, 115, 85, 0.08);
+  --theme-title-bar-bg: #d8c6a8;
+  --theme-title-bar-text: #3c2d20;
+  --theme-title-bar-icon: #80694f;
+  --theme-title-bar-btn-hover: rgba(90, 63, 36, 0.1);
+  --theme-tab-bar-bg: #e2d4bd;
+  --theme-tab-text: #78634e;
+  --theme-tab-active-text: #392b20;
+  --theme-tab-indicator: #8d642f;
+  --theme-tab-hover-bg: rgba(104, 74, 42, 0.09);
 
-  --theme-text-primary: #3a3a3a;
-  --theme-text-secondary: #666666;
-  --theme-text-muted: #9d8873;
+  --theme-text-primary: #33281f;
+  --theme-text-secondary: #645342;
+  --theme-text-muted: #6f5a43;
 
-  --theme-primary: #b8942e;
-  --theme-primary-text: #fdfaf3;
+  --theme-primary: #8d642f;
+  --theme-primary-text: #fffaf0;
 
   --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
   --theme-success: #388e3c;
@@ -64,7 +64,718 @@
      `<html>` 的内联变量。本主题此前把 `--theme-font-body` 改成衬线，于是换主题会
      悄悄改掉正文字体，而设置页的下拉框还显示着原来的值 —— 主题只管颜色。 */
 
-  --theme-shadow-sm: 0 1px 3px rgba(139, 115, 85, 0.12);
-  --theme-shadow-md: 0 2px 8px rgba(139, 115, 85, 0.18);
-  --theme-shadow-lg: 0 4px 16px rgba(139, 115, 85, 0.25);
+  --theme-shadow-sm: 0 1px 3px rgba(71, 50, 29, 0.14);
+  --theme-shadow-md: 0 2px 8px rgba(71, 50, 29, 0.2);
+  --theme-shadow-lg: 0 4px 16px rgba(71, 50, 29, 0.28);
+
+  --parchment-vellum: #e5d8c2;
+  --parchment-folio: #f1e7d5;
+  --parchment-ink: #33281f;
+  --parchment-brass: #8d642f;
+  --parchment-brass-dark: #4b3419;
+  --parchment-brass-recess: #2d1e0f;
+  --parchment-brass-ridge: #b58a4d;
+  --parchment-brass-light: #d7ba77;
+  --parchment-keyline: rgba(49, 31, 14, 0.88);
+  --parchment-vellum-shadow: rgba(67, 45, 22, 0.2);
+  --parchment-azimuth: url('../assets/themes/parchment/navigator-azimuth-v2.webp');
+  --parchment-ledger-patina: url('../assets/themes/parchment/aged-vellum-ledger-v1.webp');
+}
+
+/* The Atlas surface is one navigator's chassis: rigid brass structure around
+   quiet vellum ledgers, with a single fixed azimuth plate behind the story. */
+:root[data-theme='parchment'] body .game-page-layout {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--parchment-brass-recess);
+  color: var(--parchment-ink);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .game-body {
+  background-color: var(--parchment-brass-recess);
+  box-shadow:
+    inset 0 1px 0 rgba(225, 201, 139, 0.62),
+    inset 0 -1px 0 rgba(31, 19, 8, 0.88);
+}
+
+/* -- Continuous measuring rail ------------------------------------------ */
+:root[data-theme='parchment'] body .game-page-layout .top-bar {
+  position: relative;
+  min-height: 2.75rem;
+  background-color: var(--parchment-brass);
+  background-image: linear-gradient(
+    to bottom,
+    var(--parchment-brass-light) 0,
+    var(--parchment-brass-ridge) 10%,
+    #8b622c 38%,
+    #69451d 72%,
+    var(--parchment-brass-recess) 100%
+  );
+  border-top: 1px solid var(--parchment-keyline);
+  border-bottom: 1px solid var(--parchment-keyline);
+  box-shadow:
+    inset 0 1px 0 rgba(245, 224, 166, 0.72),
+    inset 0 -2px 0 rgba(38, 23, 9, 0.78),
+    0 3px 7px rgba(36, 22, 9, 0.46);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-bar::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  right: 5rem;
+  bottom: 2px;
+  left: 5rem;
+  height: 6px;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 7px,
+      rgba(42, 25, 9, 0.76) 7px 8px,
+      transparent 8px 15px
+    ),
+    linear-gradient(to bottom, transparent, rgba(225, 190, 119, 0.22));
+  border-block: 1px solid rgba(49, 30, 11, 0.42);
+  opacity: 0.74;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-bar > * {
+  position: relative;
+  z-index: 1;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-title {
+  min-height: 1.65rem;
+  padding-inline: var(--theme-spacing-lg);
+  background: rgba(229, 216, 194, 0.78);
+  border: 1px solid var(--parchment-brass-dark);
+  border-radius: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 246, 218, 0.62),
+    inset 0 -2px 3px rgba(74, 49, 23, 0.18),
+    0 0 0 1px rgba(199, 160, 91, 0.62);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-title-text {
+  color: var(--parchment-ink);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-title-rule {
+  width: 3.5rem;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--parchment-brass-dark) 22%,
+    var(--parchment-brass-light) 50%,
+    var(--parchment-brass-dark) 78%,
+    transparent
+  );
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-btn {
+  min-height: 1.8rem;
+  color: #35230f;
+  background-color: rgba(241, 222, 180, 0.2);
+  border: 1px solid transparent;
+  border-radius: 2px;
+  text-shadow: 0 1px 0 rgba(231, 205, 147, 0.6);
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    box-shadow 150ms ease-out,
+    color 150ms ease-out;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-btn:hover {
+  color: #211407;
+  background-color: rgba(244, 218, 159, 0.38);
+  border-color: rgba(70, 45, 20, 0.56);
+  box-shadow: inset 0 1px 0 rgba(255, 235, 185, 0.54);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-btn:active {
+  background-color: rgba(69, 43, 17, 0.18);
+  box-shadow:
+    inset 0 2px 4px rgba(38, 23, 9, 0.42),
+    inset 0 -1px 0 rgba(225, 191, 118, 0.28);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-divider {
+  background: var(--parchment-brass-dark);
+  box-shadow: 1px 0 0 rgba(224, 191, 122, 0.48);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-save-name {
+  color: #33220f;
+  text-shadow: 0 1px 0 rgba(232, 203, 142, 0.58);
+}
+
+/* -- Brass instrument key rail ------------------------------------------ */
+:root[data-theme='parchment'] body .game-page-layout .side-toolbar {
+  padding-top: var(--theme-spacing-sm);
+  gap: 3px;
+  background-color: #563713;
+  background-image: linear-gradient(
+    90deg,
+    var(--parchment-brass-recess),
+    #9a6c30 13%,
+    #795020 43%,
+    #523315 84%,
+    var(--parchment-brass-recess)
+  );
+  border-right: 1px solid var(--parchment-keyline);
+  box-shadow:
+    inset 1px 0 0 rgba(229, 202, 141, 0.54),
+    inset -3px 0 0 rgba(35, 20, 7, 0.78),
+    3px 0 6px rgba(31, 18, 6, 0.42);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .side-toolbar .tool-btn,
+:root[data-theme='parchment'] body .game-page-layout .side-toolbar .collapse-toggle {
+  position: relative;
+  min-height: 2.8rem;
+  margin-inline: 5px;
+  color: #34220f;
+  background-color: #88602c;
+  background-image: linear-gradient(
+    135deg,
+    rgba(202, 166, 99, 0.74),
+    rgba(130, 87, 36, 0.94) 42%,
+    rgba(73, 44, 16, 0.98)
+  );
+  border: 1px solid var(--parchment-brass-dark);
+  border-radius: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(239, 214, 157, 0.62),
+    inset 0 -2px 3px rgba(49, 30, 11, 0.26),
+    0 1px 0 rgba(36, 22, 9, 0.56);
+  text-shadow: 0 1px 0 rgba(224, 190, 122, 0.42);
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    box-shadow 150ms ease-out,
+    color 150ms ease-out;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .side-toolbar .collapse-toggle {
+  min-height: 2.4rem;
+  margin-top: auto;
+  border-top: 1px solid var(--parchment-brass-dark);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .side-toolbar .tool-btn:hover,
+:root[data-theme='parchment'] body .game-page-layout .side-toolbar .collapse-toggle:hover {
+  color: #211406;
+  background-color: #bd9452;
+  border-color: #3b260f;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 231, 172, 0.8),
+    inset 0 -1px 0 rgba(73, 45, 17, 0.38),
+    0 1px 2px rgba(42, 26, 10, 0.36);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .side-toolbar .tool-btn:active,
+:root[data-theme='parchment'] body .game-page-layout .side-toolbar .collapse-toggle:active {
+  background-color: #765024;
+  box-shadow:
+    inset 0 2px 5px rgba(39, 23, 8, 0.58),
+    inset 0 -1px 0 rgba(217, 179, 107, 0.28);
+}
+
+/* -- Framed vellum ledgers ---------------------------------------------- */
+:root[data-theme='parchment'] body .game-page-layout .scene-panel,
+:root[data-theme='parchment'] body .game-page-layout .status-hud {
+  position: relative;
+  background-color: var(--parchment-folio);
+  background-image: var(--parchment-ledger-patina);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  border-color: var(--parchment-keyline);
+  box-shadow:
+    inset 0 0 0 2px rgba(211, 174, 103, 0.76),
+    inset 0 0 0 4px rgba(74, 47, 18, 0.9),
+    inset 0 0 0 6px rgba(156, 109, 49, 0.72),
+    inset 0 0 22px rgba(58, 36, 14, 0.34),
+    3px 0 7px rgba(31, 18, 6, 0.38);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .scene-panel::before,
+:root[data-theme='parchment'] body .game-page-layout .status-hud::before {
+  content: '';
+  position: absolute;
+  z-index: 4;
+  inset: 5px;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle, #e0bd76 0 18%, #8c5c25 20% 44%, #35200a 47% 62%, transparent 65%),
+    radial-gradient(circle, #e0bd76 0 18%, #8c5c25 20% 44%, #35200a 47% 62%, transparent 65%),
+    radial-gradient(circle, #e0bd76 0 18%, #8c5c25 20% 44%, #35200a 47% 62%, transparent 65%),
+    radial-gradient(circle, #e0bd76 0 18%, #8c5c25 20% 44%, #35200a 47% 62%, transparent 65%);
+  background-repeat: no-repeat;
+  background-position:
+    left top,
+    right top,
+    left bottom,
+    right bottom;
+  background-size: 12px 12px;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .scene-panel {
+  border-right: 1px solid var(--parchment-keyline);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .status-hud {
+  border-left: 1px solid var(--parchment-keyline);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .scene-top,
+:root[data-theme='parchment'] body .game-page-layout .section,
+:root[data-theme='parchment'] body .game-page-layout .attribute-section {
+  border-color: rgba(88, 58, 28, 0.52);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .scene-top,
+:root[data-theme='parchment'] body .game-page-layout .player-summary {
+  background-color: rgba(238, 220, 188, 0.32);
+  box-shadow:
+    inset 0 -5px 12px rgba(79, 52, 26, 0.1),
+    inset 0 1px 0 rgba(255, 244, 216, 0.38);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .scene-section-title,
+:root[data-theme='parchment'] body .game-page-layout .section-title {
+  color: #6b5135;
+  letter-spacing: 0.07em;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .section-header.clickable:hover {
+  color: #3d2915;
+  background-color: rgba(141, 100, 47, 0.065);
+}
+
+/* Connected shallow selectors, like keys on a survey instrument. */
+:root[data-theme='parchment'] body .game-page-layout .tab-bar {
+  background: transparent;
+  border-bottom: 0;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .tab-list {
+  gap: 0;
+  padding: 2px;
+  background-color: var(--parchment-brass-dark);
+  border: 1px solid var(--parchment-keyline);
+  border-radius: 2px;
+  box-shadow:
+    inset 0 1px 2px rgba(30, 18, 7, 0.52),
+    0 1px 0 rgba(213, 177, 108, 0.32);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .tab-item {
+  min-width: 0;
+  color: #60482e;
+  background-color: #d8c5a6;
+  border: 1px solid rgba(86, 57, 27, 0.44);
+  border-radius: 1px;
+  box-shadow: inset 0 1px 0 rgba(255, 244, 218, 0.46);
+  transition:
+    background-color 150ms ease-out,
+    box-shadow 150ms ease-out,
+    color 150ms ease-out;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .tab-item::after {
+  display: none;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .tab-item:hover {
+  color: #35230f;
+  background-color: #e4d3b6;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .tab-active {
+  color: #2c1d0d;
+  background-color: #c19a5b;
+  box-shadow:
+    inset 0 2px 4px rgba(52, 33, 13, 0.32),
+    inset 0 -1px 0 rgba(236, 205, 145, 0.44);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .tab-badge {
+  background-color: #9f271f;
+  color: #fff3df;
+  border: 1px solid rgba(67, 22, 15, 0.58);
+}
+
+/* -- Fixed azimuth field ------------------------------------------------ */
+:root[data-theme='parchment'] body .game-page-layout .chat-flow {
+  position: relative;
+  background-color: var(--parchment-vellum);
+  background-image: var(--parchment-azimuth);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  border-inline: 1px solid var(--parchment-keyline);
+  box-shadow:
+    inset 0 0 0 2px rgba(221, 183, 109, 0.78),
+    inset 0 0 0 5px rgba(54, 33, 11, 0.92),
+    inset 0 0 0 7px rgba(146, 99, 39, 0.78),
+    inset 0 0 32px rgba(43, 25, 8, 0.36),
+    0 0 8px rgba(31, 18, 6, 0.48);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .chat-messages {
+  background-color: rgba(241, 231, 213, 0.16);
+  background-image: none;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .chat-empty {
+  color: #5c452e;
+  text-shadow: 0 1px 0 rgba(255, 245, 218, 0.7);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .chat-empty-glyph {
+  color: var(--parchment-brass);
+  filter: drop-shadow(0 1px 0 rgba(255, 239, 195, 0.62));
+}
+
+:root[data-theme='parchment'] body .game-page-layout .bubble-player,
+:root[data-theme='parchment'] body .game-page-layout .system-notif {
+  background-color: rgba(241, 229, 204, 0.88);
+  border: 1px solid rgba(86, 57, 27, 0.62);
+  border-radius: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 246, 221, 0.72),
+    0 2px 6px rgba(65, 43, 20, 0.14);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .bubble-narrative-full {
+  color: #382a1e;
+  background-color: rgba(244, 234, 214, 0.78);
+  border: 1px solid rgba(94, 61, 26, 0.46);
+  border-radius: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 248, 226, 0.56),
+    0 2px 7px rgba(54, 34, 14, 0.16);
+  text-shadow: 0 1px 0 rgba(255, 247, 226, 0.58);
+}
+
+/* Vellum command strip seated inside its own brass housing. */
+:root[data-theme='parchment'] body .game-page-layout .input-bar {
+  gap: var(--theme-spacing-sm);
+  padding: 7px 9px;
+  background-color: #775124;
+  background-image: linear-gradient(
+    to bottom,
+    var(--parchment-brass-ridge),
+    var(--parchment-brass) 38%,
+    var(--parchment-brass-dark)
+  );
+  border-top: 1px solid var(--parchment-keyline);
+  box-shadow:
+    inset 0 1px 0 rgba(232, 203, 141, 0.62),
+    inset 0 -2px 0 rgba(44, 27, 11, 0.54);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .input-field {
+  min-height: 2.35rem;
+  color: var(--parchment-ink);
+  background-color: rgba(244, 234, 213, 0.96);
+  border: 1px solid var(--parchment-brass-recess);
+  border-radius: 2px;
+  box-shadow:
+    inset 0 2px 5px rgba(66, 43, 20, 0.18),
+    0 0 0 1px rgba(199, 159, 91, 0.56);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .input-field:focus {
+  border-color: #3c260e;
+  outline: 2px solid rgba(222, 186, 112, 0.9);
+  outline-offset: 1px;
+  box-shadow:
+    inset 0 2px 5px rgba(66, 43, 20, 0.18),
+    0 0 0 1px rgba(61, 39, 15, 0.74);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .input-btn,
+:root[data-theme='parchment'] body .game-page-layout .send-btn {
+  color: #2c1b09;
+  background-color: #a97c3c;
+  background-image: linear-gradient(145deg, #d3b36f, #9b6e32 58%, #68431c);
+  border: 1px solid var(--parchment-brass-recess);
+  border-radius: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(249, 225, 167, 0.6),
+    inset 0 -2px 3px rgba(42, 25, 8, 0.3);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .input-btn:hover,
+:root[data-theme='parchment'] body .game-page-layout .send-btn:hover {
+  color: #1d1105;
+  background-color: #bb914e;
+  border-color: #2d1b09;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 235, 184, 0.74),
+    0 1px 3px rgba(38, 22, 7, 0.3);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .input-btn:active,
+:root[data-theme='parchment'] body .game-page-layout .send-btn:active {
+  box-shadow:
+    inset 0 2px 5px rgba(37, 21, 6, 0.56),
+    inset 0 -1px 0 rgba(220, 179, 104, 0.3);
+}
+
+/* -- Instrument readouts and ledger rows ------------------------------- */
+:root[data-theme='parchment'] body .game-page-layout .avatar-shape-square,
+:root[data-theme='parchment'] body .game-page-layout .npc-portrait,
+:root[data-theme='parchment'] body .game-page-layout .portrait-slot {
+  border-color: var(--parchment-brass-dark);
+  border-radius: 2px;
+  box-shadow:
+    0 0 0 1px rgba(190, 149, 79, 0.7),
+    inset 0 0 9px rgba(61, 39, 16, 0.18),
+    0 3px 7px rgba(57, 37, 16, 0.18);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .summary-name {
+  color: #362615;
+  letter-spacing: 0.055em;
+  text-shadow: 0 1px 0 rgba(255, 244, 217, 0.7);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .res-track {
+  min-height: 0.9rem;
+  background-color: rgba(74, 50, 25, 0.17);
+  border: 1px solid rgba(69, 45, 20, 0.68);
+  border-radius: 2px;
+  box-shadow:
+    inset 0 2px 4px rgba(53, 34, 15, 0.28),
+    0 1px 0 rgba(255, 244, 216, 0.48);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .res-fill {
+  border-radius: 1px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    inset 0 -1px 2px rgba(25, 16, 8, 0.24);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .res-values {
+  color: #fff8ea;
+  text-shadow: 0 1px 2px rgba(24, 15, 6, 0.86);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .attr-grid {
+  gap: 3px;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .kv-item,
+:root[data-theme='parchment'] body .game-page-layout .attr-grid .kv-item {
+  background-color: rgba(214, 192, 155, 0.58);
+  border: 1px solid rgba(100, 68, 34, 0.48);
+  border-radius: 2px;
+  box-shadow: inset 0 1px 0 rgba(255, 246, 221, 0.5);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .quest-item,
+:root[data-theme='parchment'] body .game-page-layout .news-item,
+:root[data-theme='parchment'] body .game-page-layout .scene-npc-item,
+:root[data-theme='parchment'] body .game-page-layout .item-entry,
+:root[data-theme='parchment'] body .game-page-layout .item-row {
+  border-radius: 2px;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    box-shadow 150ms ease-out;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .quest-item,
+:root[data-theme='parchment'] body .game-page-layout .item-entry {
+  background-color: rgba(228, 211, 181, 0.5);
+  border: 1px solid rgba(101, 68, 34, 0.42);
+  box-shadow: inset 0 1px 0 rgba(255, 245, 219, 0.4);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .quest-item:hover,
+:root[data-theme='parchment'] body .game-page-layout .news-item:hover,
+:root[data-theme='parchment'] body .game-page-layout .scene-npc-item:hover,
+:root[data-theme='parchment'] body .game-page-layout .scene-npc-item.hovered,
+:root[data-theme='parchment'] body .game-page-layout .item-entry:hover,
+:root[data-theme='parchment'] body .game-page-layout .item-row:hover {
+  background-color: rgba(188, 151, 91, 0.18);
+  border-color: rgba(91, 59, 27, 0.64);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .quest-item.open,
+:root[data-theme='parchment'] body .game-page-layout .news-item.expanded,
+:root[data-theme='parchment'] body .game-page-layout .item-entry.open,
+:root[data-theme='parchment'] body .game-page-layout .item-row.open {
+  background-color: rgba(196, 159, 100, 0.26);
+  border-color: var(--parchment-brass-dark);
+  box-shadow:
+    inset 0 2px 5px rgba(65, 42, 18, 0.16),
+    0 0 0 1px rgba(185, 139, 69, 0.32);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .quest-item.open .quest-detail,
+:root[data-theme='parchment'] body .game-page-layout .item-entry.open .item-detail,
+:root[data-theme='parchment'] body .game-page-layout .news-item.expanded .news-content {
+  border-color: rgba(91, 60, 29, 0.38);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .item-detail,
+:root[data-theme='parchment'] body .game-page-layout .options-popup {
+  background-color: rgba(244, 233, 211, 0.98);
+  border: 1px solid var(--parchment-brass-dark);
+  border-radius: 2px;
+  box-shadow:
+    inset 0 0 0 1px rgba(193, 150, 80, 0.42),
+    0 5px 13px rgba(51, 32, 14, 0.28);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .det-chip,
+:root[data-theme='parchment'] body .game-page-layout .item-tag,
+:root[data-theme='parchment'] body .game-page-layout .npc-tier {
+  background-color: rgba(208, 183, 141, 0.44);
+  border-color: rgba(93, 61, 28, 0.42);
+  border-radius: 2px;
+}
+
+/* Focus belongs to the inner instrument plate, never to the outer chassis. */
+:root[data-theme='parchment']
+  body
+  .game-page-layout
+  :is(
+    button,
+    [role='button'],
+    [tabindex]:not([tabindex='-1']),
+    select,
+    textarea,
+    input
+  ):focus-visible {
+  outline: 2px solid #513516;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 1px rgba(231, 197, 128, 0.94);
+}
+
+@media (max-width: 1100px) {
+  :root[data-theme='parchment'] body .game-page-layout .chat-flow {
+    background-size: auto 100%;
+  }
+
+  :root[data-theme='parchment'] body .game-page-layout .top-title {
+    padding-inline: var(--theme-spacing-sm);
+  }
+
+  :root[data-theme='parchment'] body .game-page-layout .top-title-rule {
+    width: 2rem;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme='parchment'] body .game-page-layout .chat-messages,
+  :root[data-theme='parchment'] body .game-page-layout .scene-panel,
+  :root[data-theme='parchment'] body .game-page-layout .status-hud,
+  :root[data-theme='parchment'] body .game-page-layout .input-field,
+  :root[data-theme='parchment'] body .game-page-layout .bubble-player,
+  :root[data-theme='parchment'] body .game-page-layout .system-notif,
+  :root[data-theme='parchment'] body .game-page-layout .options-popup {
+    background-color: var(--parchment-folio);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme='parchment'] body .game-page-layout *,
+  :root[data-theme='parchment'] body .game-page-layout *::before,
+  :root[data-theme='parchment'] body .game-page-layout *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/* Owner fidelity rework: the real interface is mounted directly into one authored
+   brass navigator chassis. The prior CSS rails and separate dial no longer compete. */
+[data-theme='parchment'] {
+  --parchment-chassis: url('../assets/themes/parchment/wayfarer-chassis-v3.webp');
+}
+
+:root[data-theme='parchment'] body .game-page-layout {
+  background-color: #2d1e0f;
+  background-image: var(--parchment-chassis);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .game-body,
+:root[data-theme='parchment'] body .game-page-layout .chat-flow,
+:root[data-theme='parchment'] body .game-page-layout .chat-messages {
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-bar,
+:root[data-theme='parchment'] body .game-page-layout .side-toolbar,
+:root[data-theme='parchment'] body .game-page-layout .scene-panel,
+:root[data-theme='parchment'] body .game-page-layout .status-hud,
+:root[data-theme='parchment'] body .game-page-layout .input-bar {
+  background-color: transparent;
+  background-image: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-bar::after,
+:root[data-theme='parchment'] body .game-page-layout .scene-panel::before,
+:root[data-theme='parchment'] body .game-page-layout .status-hud::before {
+  display: none;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .scene-top,
+:root[data-theme='parchment'] body .game-page-layout .scene-tab-body,
+:root[data-theme='parchment'] body .game-page-layout .status-overview,
+:root[data-theme='parchment'] body .game-page-layout .status-glass,
+:root[data-theme='parchment'] body .game-page-layout .section,
+:root[data-theme='parchment'] body .game-page-layout .tab-bar {
+  background-color: rgba(244, 231, 205, 0.46);
+  background-image: none;
+  border-color: rgba(92, 59, 25, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 246, 220, 0.44);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .bubble-narrative-full {
+  background-color: rgba(246, 233, 207, 0.58);
+  border: 1px solid rgba(91, 57, 23, 0.34);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 249, 227, 0.56),
+    0 8px 22px rgba(54, 34, 14, 0.12);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-title,
+:root[data-theme='parchment'] body .game-page-layout .tool-btn,
+:root[data-theme='parchment'] body .game-page-layout .collapse-toggle,
+:root[data-theme='parchment'] body .game-page-layout .input-field,
+:root[data-theme='parchment'] body .game-page-layout .tab-item {
+  background-color: rgba(233, 211, 171, 0.42);
+  background-image: none;
+  border-color: rgba(75, 47, 19, 0.44);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .input-field {
+  box-shadow:
+    inset 0 2px 5px rgba(63, 39, 15, 0.16),
+    0 1px 0 rgba(255, 244, 216, 0.46);
+}
+
+@media (max-width: 1100px) {
+  :root[data-theme='parchment'] body .game-page-layout {
+    background-size: auto 100%;
+  }
 }

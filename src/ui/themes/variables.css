@@ -4,39 +4,39 @@
    使用 color-mix() 做动态透明度计算
    ============================================================ */
 
-/* ===== 默认主题 (obsidian — 玄墨 · 暖墨底 + 古金) =====
-   场景：深夜暖光台灯下翻开一部命运之书 */
+/* ===== 默认主题 (obsidian — 玄金星盘 · 黑曜石与古金) =====
+   场景：无光观星台上缓慢运转的命运星盘 */
 :root,
 [data-theme='obsidian'] {
-  /* 基础背景 — 暖墨色阶（褐黑，微暖色相） */
-  --theme-window-bg: #191512;
-  --theme-window-border: #3a3128;
-  --theme-content-bg: #14110d;
-  --theme-card-bg: #211c16;
-  --theme-card-border: #362e23;
-  --theme-surface-muted: color-mix(in srgb, #191512 72%, #211c16 28%);
-  --theme-overlay-bg: color-mix(in srgb, #14110d 62%, transparent);
+  /* 基础背景 — 冷黑曜石色阶 */
+  --theme-window-bg: #0e1015;
+  --theme-window-border: #303641;
+  --theme-content-bg: #090b10;
+  --theme-card-bg: #161a22;
+  --theme-card-border: #353c49;
+  --theme-surface-muted: #11151c;
+  --theme-overlay-bg: rgba(5, 6, 9, 0.82);
 
   /* 标题栏/导航 */
-  --theme-title-bar-bg: #1e1914;
-  --theme-title-bar-text: #f0e9db;
-  --theme-title-bar-icon: #b5a88f;
-  --theme-title-bar-btn-hover: rgba(230, 200, 150, 0.08);
-  --theme-tab-bar-bg: #1b1712;
-  --theme-tab-text: #a3977f;
-  --theme-tab-active-text: #f2ebdd;
-  --theme-tab-indicator: #c9a86a;
-  --theme-tab-hover-bg: rgba(230, 200, 150, 0.06);
+  --theme-title-bar-bg: #131720;
+  --theme-title-bar-text: #eee9df;
+  --theme-title-bar-icon: #aaa69d;
+  --theme-title-bar-btn-hover: rgba(201, 168, 95, 0.09);
+  --theme-tab-bar-bg: #10131a;
+  --theme-tab-text: #97938a;
+  --theme-tab-active-text: #f2ede3;
+  --theme-tab-indicator: #c9a85f;
+  --theme-tab-hover-bg: rgba(201, 168, 95, 0.07);
 
   /* 文字 — 暖白阶 */
-  --theme-text-primary: #f0e9db;
-  --theme-text-secondary: #cfc4ad;
-  --theme-text-muted: #9a8e76;
+  --theme-text-primary: #eee9df;
+  --theme-text-secondary: #c1bbb0;
+  --theme-text-muted: #878279;
 
   /* 语义色 — 主色为古金（烫金点缀：饰线/选中态/主按钮） */
-  --theme-primary: #c9a86a;
+  --theme-primary: #c9a85f;
   --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 18%, transparent);
-  --theme-primary-text: #1c150c;
+  --theme-primary-text: #18130a;
   --theme-color-primary: var(--theme-primary); /* 别名：所有 create 组件引用此名 */
   --theme-success: #58b083;
   --theme-warning: #d9a441;

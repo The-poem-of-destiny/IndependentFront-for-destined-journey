@@ -1,59 +1,510 @@
-/* ===== Misty Lilac (雾紫) — 淡紫梦幻风格 ===== */
+/* ===== Aurora Frostglass — boreal observation window ===== */
 [data-theme='misty-lilac'] {
-  --theme-window-bg: #f5f0fa;
-  --theme-window-border: #d8c8e8;
-  --theme-content-bg: #faf8fc;
-  --theme-card-bg: rgba(255, 255, 255, 0.85);
-  --theme-card-border: #d8c8e8;
-  --theme-surface-muted: #ede4f5;
-  --theme-overlay-bg: rgba(0, 0, 0, 0.3);
+  --theme-window-bg: #dce7f3;
+  --theme-window-border: #a8bcd3;
+  --theme-content-bg: rgba(224, 235, 247, 0.68);
+  --theme-card-bg: rgba(230, 239, 249, 0.7);
+  --theme-card-border: rgba(114, 135, 177, 0.36);
+  --theme-surface-muted: rgba(199, 216, 237, 0.42);
+  --theme-overlay-bg: rgba(36, 47, 78, 0.34);
 
-  --theme-title-bar-bg: #efe8f5;
-  --theme-title-bar-text: #4a3060;
-  --theme-title-bar-icon: #8a68b0;
-  --theme-title-bar-btn-hover: rgba(0, 0, 0, 0.05);
-  --theme-tab-bar-bg: #ebe0f0;
-  --theme-tab-text: #8a68b0;
-  --theme-tab-active-text: #4a3060;
-  --theme-tab-indicator: #9a72f8;
-  --theme-tab-hover-bg: rgba(0, 0, 0, 0.04);
+  --theme-title-bar-bg: rgba(217, 231, 246, 0.56);
+  --theme-title-bar-text: #293953;
+  --theme-title-bar-icon: #5b6687;
+  --theme-title-bar-btn-hover: rgba(94, 91, 157, 0.12);
+  --theme-tab-bar-bg: rgba(215, 228, 243, 0.52);
+  --theme-tab-text: #59647f;
+  --theme-tab-active-text: #2a3857;
+  --theme-tab-indicator: #7962b1;
+  --theme-tab-hover-bg: rgba(111, 94, 168, 0.1);
 
-  --theme-text-primary: #3a2848;
-  --theme-text-secondary: #685878;
-  --theme-text-muted: #9888a8;
+  --theme-text-primary: #243551;
+  --theme-text-secondary: #435675;
+  --theme-text-muted: #52647e;
 
-  --theme-primary: #8a5fe8;
+  --theme-primary: #725b9b;
   --theme-primary-text: #fdfbff;
+  --theme-primary-bg: rgba(114, 91, 155, 0.12);
+  --theme-success: #3f8c69;
+  --theme-warning: #b4782d;
+  --theme-error: #bd425c;
 
-  --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
-  --theme-success: #4a9e6c;
-  --theme-warning: #d4983c;
-  --theme-error: #d0445c;
+  --theme-hp: #b64458;
+  --theme-mp: #5268bd;
+  --theme-sp: #388161;
+  --theme-exp: #a87325;
+  --theme-affection: #cc5f97;
+  --theme-affection-bg: rgba(204, 95, 151, 0.12);
+  --theme-affection-text: #9b3f70;
 
-  --theme-hp: #d0445c;
-  --theme-mp: #6878e0;
-  --theme-sp: #4a9e6c;
-  --theme-exp: #d4983c;
-  --theme-affection: #e068a0;
-  --theme-affection-bg: rgba(224, 104, 160, 0.1);
-  --theme-affection-text: #b04878;
+  --theme-quality-common: #867e96;
+  --theme-quality-uncommon: #3f8c69;
+  --theme-quality-rare: #5268bd;
+  --theme-quality-epic: #7956c5;
+  --theme-quality-legendary: #b4782d;
+  --theme-quality-mythic: #cc5f97;
+  --theme-quality-unique: #c66e3e;
 
-  --theme-quality-common: #a090b0;
-  --theme-quality-uncommon: #4a9e6c;
-  --theme-quality-rare: #6878e0;
-  --theme-quality-epic: #9a72f8;
-  --theme-quality-legendary: #d4983c;
-  --theme-quality-mythic: #e068a0;
-  --theme-quality-unique: #e08848;
+  --theme-currency-gold: #a77d2e;
+  --theme-currency-silver: #7f8297;
+  --theme-currency-copper: #ad684a;
 
-  --theme-currency-gold: #c8a848;
-  --theme-currency-silver: #b0a8b8;
-  --theme-currency-copper: #c88050;
+  --theme-shadow-sm: 0 2px 5px rgba(43, 62, 96, 0.09);
+  --theme-shadow-md: 0 5px 13px rgba(43, 62, 96, 0.13);
+  --theme-shadow-lg: 0 9px 24px rgba(43, 62, 96, 0.17);
+  --paper-stack: none;
 
-  /* 🔴 字体**不在主题里定义** —— 理由同 parchment.css。本主题这两行原本只是把
-     `:root` 的值原样重复了一遍（无实际效果），但留着会诱使人以为「主题可以定字体」 */
+  --aurora-scene: url('../assets/themes/misty-lilac/aurora-valley.webp');
+  --aurora-glass-edge: rgba(245, 251, 255, 0.7);
+  --aurora-glass-low-edge: rgba(86, 105, 148, 0.18);
+  --aurora-gold-seam: rgba(187, 148, 77, 0.48);
+  --aurora-panel: rgba(218, 232, 247, 0.56);
+  --aurora-panel-dense: rgba(225, 236, 248, 0.64);
+  --aurora-control: rgba(225, 236, 249, 0.43);
+  --aurora-control-active: rgba(218, 229, 246, 0.68);
+}
 
-  --theme-shadow-sm: 0 1px 3px rgba(100, 60, 130, 0.08);
-  --theme-shadow-md: 0 2px 8px rgba(100, 60, 130, 0.12);
-  --theme-shadow-lg: 0 4px 16px rgba(100, 60, 130, 0.18);
+/* The scenic layer belongs only to the central reading field. */
+:root[data-theme='misty-lilac'] body .game-page-layout {
+  position: relative;
+  isolation: isolate;
+  background: #d7e4f2;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .chat-flow {
+  position: relative;
+  isolation: isolate;
+  background-color: #dbe7f4;
+  background-image: var(--aurora-scene);
+  background-repeat: no-repeat;
+  background-position: 50% 48%;
+  background-size: cover;
+  box-shadow:
+    inset 1px 0 0 var(--aurora-gold-seam),
+    inset -1px 0 0 var(--aurora-gold-seam);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .chat-messages {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+  text-shadow: 0 1px 0 rgba(248, 252, 255, 0.72);
+}
+
+/* Sky-tinted frostglass: low blur, one specular edge, one quiet shadow. */
+:root[data-theme='misty-lilac'] body .game-page-layout .top-bar,
+:root[data-theme='misty-lilac'] body .game-page-layout .side-toolbar,
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-panel,
+:root[data-theme='misty-lilac'] body .game-page-layout .status-hud,
+:root[data-theme='misty-lilac'] body .game-page-layout .input-bar {
+  background-color: var(--aurora-panel);
+  border-color: rgba(110, 133, 174, 0.35);
+  backdrop-filter: blur(7px) saturate(108%);
+  -webkit-backdrop-filter: blur(7px) saturate(108%);
+  box-shadow:
+    inset 0 1px 0 var(--aurora-glass-edge),
+    0 4px 13px rgba(50, 69, 106, 0.1);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .top-bar {
+  border-bottom-color: var(--aurora-gold-seam);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .side-toolbar {
+  background-color: rgba(210, 226, 243, 0.54);
+  border-right-color: var(--aurora-gold-seam);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-panel,
+:root[data-theme='misty-lilac'] body .game-page-layout .status-hud {
+  background-color: var(--aurora-panel-dense);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-panel {
+  border-right-color: var(--aurora-gold-seam);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .status-hud {
+  border-left-color: var(--aurora-gold-seam);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .input-bar {
+  z-index: 2;
+  border-top-color: var(--aurora-gold-seam);
+  background-color: rgba(212, 226, 244, 0.56);
+}
+
+/* Quiet ledger divisions let the scene colour continue through the glass. */
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-top,
+:root[data-theme='misty-lilac'] body .game-page-layout .status-overview > .section,
+:root[data-theme='misty-lilac'] body .game-page-layout .section,
+:root[data-theme='misty-lilac'] body .game-page-layout .tab-bar {
+  border-color: rgba(101, 126, 170, 0.24);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-top {
+  background: rgba(232, 240, 249, 0.2);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-tab-body,
+:root[data-theme='misty-lilac'] body .game-page-layout .status-overview {
+  background: rgba(214, 228, 244, 0.1);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .player-summary {
+  background: rgba(203, 220, 240, 0.1);
+}
+
+/* Glass controls remain flatter and clearer than the side ledgers. */
+:root[data-theme='misty-lilac'] body .game-page-layout .top-btn,
+:root[data-theme='misty-lilac'] body .game-page-layout .tool-btn,
+:root[data-theme='misty-lilac'] body .game-page-layout .collapse-toggle,
+:root[data-theme='misty-lilac'] body .game-page-layout .input-btn,
+:root[data-theme='misty-lilac'] body .game-page-layout .input-field,
+:root[data-theme='misty-lilac'] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger),
+:root[data-theme='misty-lilac'] body .game-page-layout .form-input,
+:root[data-theme='misty-lilac'] body .game-page-layout .form-select,
+:root[data-theme='misty-lilac'] body .game-page-layout select {
+  background-color: var(--aurora-control);
+  border: 1px solid rgba(116, 137, 177, 0.32);
+  color: var(--theme-text-secondary);
+  backdrop-filter: blur(5px) saturate(106%);
+  -webkit-backdrop-filter: blur(5px) saturate(106%);
+  box-shadow:
+    inset 0 1px 0 var(--aurora-glass-edge),
+    0 3px 8px rgba(50, 69, 106, 0.08);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .top-btn {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .side-toolbar .tool-btn {
+  margin-inline: 5px;
+  border-radius: 7px;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .input-field {
+  background-color: rgba(235, 243, 251, 0.64);
+  border-radius: 7px;
+  color: var(--theme-text-primary);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .input-btn,
+:root[data-theme='misty-lilac'] body .game-page-layout .send-btn {
+  border-radius: 7px;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .send-btn {
+  color: #6552a8;
+  border-color: rgba(106, 85, 170, 0.37);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .top-btn:hover,
+:root[data-theme='misty-lilac'] body .game-page-layout .tool-btn:hover,
+:root[data-theme='misty-lilac'] body .game-page-layout .collapse-toggle:hover,
+:root[data-theme='misty-lilac'] body .game-page-layout .input-btn:hover,
+:root[data-theme='misty-lilac']
+  body
+  .game-page-layout
+  .app-btn:not(.btn-primary):not(.btn-danger):hover,
+:root[data-theme='misty-lilac'] body .game-page-layout .form-select:hover,
+:root[data-theme='misty-lilac'] body .game-page-layout select:hover {
+  background-color: var(--aurora-control-active);
+  border-color: rgba(104, 89, 167, 0.46);
+  color: var(--theme-tab-active-text);
+  box-shadow:
+    inset 0 1px 0 rgba(250, 253, 255, 0.84),
+    0 4px 10px rgba(70, 78, 130, 0.11);
+}
+
+/* Connected ice-rail tabs, with an aurora-violet active edge. */
+:root[data-theme='misty-lilac'] body .game-page-layout .tab-bar {
+  background-color: rgba(205, 222, 241, 0.34);
+  backdrop-filter: blur(5px) saturate(106%);
+  -webkit-backdrop-filter: blur(5px) saturate(106%);
+  box-shadow: inset 0 1px 0 rgba(245, 251, 255, 0.5);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .tab-item {
+  border: 1px solid transparent;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .tab-item:hover {
+  background-color: rgba(218, 231, 246, 0.42);
+  border-color: rgba(122, 145, 186, 0.18);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .tab-active {
+  background-color: rgba(219, 230, 247, 0.58);
+  border-color: rgba(112, 91, 165, 0.27);
+  color: #3e3f78;
+  box-shadow: inset 0 1px 0 var(--aurora-glass-edge);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .tab-active::after {
+  height: 2px;
+  background: #7860b4;
+}
+
+/* Rows and expanded ledgers use the same low-blur pane language. */
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-npc-item,
+:root[data-theme='misty-lilac'] body .game-page-layout .quest-item,
+:root[data-theme='misty-lilac'] body .game-page-layout .news-item,
+:root[data-theme='misty-lilac'] body .game-page-layout .system-notif,
+:root[data-theme='misty-lilac'] body .game-page-layout .item-row,
+:root[data-theme='misty-lilac'] body .game-page-layout .item-detail {
+  border-color: rgba(111, 135, 177, 0.25);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-npc-item:hover,
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-npc-item:focus-visible,
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-npc-item.hovered,
+:root[data-theme='misty-lilac'] body .game-page-layout .quest-item:hover,
+:root[data-theme='misty-lilac'] body .game-page-layout .quest-item:focus-visible,
+:root[data-theme='misty-lilac'] body .game-page-layout .news-item:hover,
+:root[data-theme='misty-lilac'] body .game-page-layout .news-item:focus-visible,
+:root[data-theme='misty-lilac'] body .game-page-layout .item-row:hover,
+:root[data-theme='misty-lilac'] body .game-page-layout .item-row:focus-visible {
+  background-color: rgba(214, 229, 245, 0.58);
+  border-color: rgba(106, 89, 167, 0.32);
+  box-shadow: inset 0 1px 0 rgba(249, 253, 255, 0.66);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .quest-item.open,
+:root[data-theme='misty-lilac'] body .game-page-layout .news-item.expanded,
+:root[data-theme='misty-lilac'] body .game-page-layout .item-entry.open .item-row,
+:root[data-theme='misty-lilac'] body .game-page-layout .item-detail {
+  background-color: rgba(220, 232, 246, 0.7);
+  border-color: rgba(106, 89, 167, 0.34);
+  backdrop-filter: blur(5px) saturate(105%);
+  -webkit-backdrop-filter: blur(5px) saturate(105%);
+  box-shadow:
+    inset 0 1px 0 rgba(249, 253, 255, 0.7),
+    0 4px 10px rgba(54, 72, 111, 0.08);
+}
+
+/* Frost pane portraits and compact crystal attribute lenses. */
+:root[data-theme='misty-lilac'] body .game-page-layout .portrait-slot,
+:root[data-theme='misty-lilac'] body .game-page-layout .avatar,
+:root[data-theme='misty-lilac'] body .game-page-layout .npc-portrait {
+  border-color: rgba(119, 137, 181, 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(249, 253, 255, 0.7),
+    0 5px 14px rgba(58, 74, 113, 0.11);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .attr-grid .kv-item,
+:root[data-theme='misty-lilac'] body .game-page-layout .det-chip,
+:root[data-theme='misty-lilac'] body .game-page-layout .item-tag {
+  background-color: rgba(220, 232, 246, 0.49);
+  border: 1px solid rgba(114, 139, 179, 0.24);
+  box-shadow: inset 0 1px 0 rgba(249, 253, 255, 0.58);
+}
+
+/* Semantic fills stay saturated inside translucent ice channels. */
+:root[data-theme='misty-lilac'] body .game-page-layout .res-track,
+:root[data-theme='misty-lilac'] body .game-page-layout .aff-track {
+  background-color: rgba(143, 164, 197, 0.23);
+  border-color: rgba(112, 137, 176, 0.28);
+  box-shadow: inset 0 1px 3px rgba(54, 72, 111, 0.12);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .res-fill {
+  filter: saturate(108%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+/* Long-form text receives a localized veil, not an opaque card. */
+:root[data-theme='misty-lilac'] body .game-page-layout .bubble-narrative-full {
+  color: #263955;
+  background-color: rgba(235, 243, 251, 0.58);
+  border-radius: 8px;
+  box-shadow:
+    inset 0 1px 0 rgba(250, 253, 255, 0.64),
+    0 5px 15px rgba(48, 63, 103, 0.1);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .bubble-player {
+  background-color: rgba(225, 236, 248, 0.63);
+  border-color: rgba(107, 91, 164, 0.26);
+  box-shadow: inset 0 1px 0 rgba(249, 253, 255, 0.64);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .chat-empty {
+  color: #485c7d;
+  text-shadow: 0 1px 0 rgba(249, 253, 255, 0.8);
+}
+
+/* Keyboard focus is explicit on pale glass. */
+:root[data-theme='misty-lilac'] body .game-page-layout button:focus-visible,
+:root[data-theme='misty-lilac'] body .game-page-layout [role='button']:focus-visible,
+:root[data-theme='misty-lilac'] body .game-page-layout textarea:focus-visible,
+:root[data-theme='misty-lilac'] body .game-page-layout select:focus-visible,
+:root[data-theme='misty-lilac'] body .game-page-layout input:focus-visible {
+  outline: 2px solid rgba(94, 74, 157, 0.74);
+  outline-offset: 1px;
+  border-color: rgba(94, 74, 157, 0.58);
+}
+
+@media (max-width: 1100px) {
+  :root[data-theme='misty-lilac'] body .game-page-layout .chat-flow {
+    background-position: 50% center;
+    background-size: auto 100%;
+  }
+
+  :root[data-theme='misty-lilac'] body .game-page-layout .top-bar,
+  :root[data-theme='misty-lilac'] body .game-page-layout .side-toolbar,
+  :root[data-theme='misty-lilac'] body .game-page-layout .scene-panel,
+  :root[data-theme='misty-lilac'] body .game-page-layout .status-hud,
+  :root[data-theme='misty-lilac'] body .game-page-layout .input-bar {
+    backdrop-filter: blur(5px) saturate(105%);
+    -webkit-backdrop-filter: blur(5px) saturate(105%);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme='misty-lilac'] body .game-page-layout .top-bar,
+  :root[data-theme='misty-lilac'] body .game-page-layout .side-toolbar,
+  :root[data-theme='misty-lilac'] body .game-page-layout .scene-panel,
+  :root[data-theme='misty-lilac'] body .game-page-layout .status-hud,
+  :root[data-theme='misty-lilac'] body .game-page-layout .input-bar,
+  :root[data-theme='misty-lilac'] body .game-page-layout .tab-bar,
+  :root[data-theme='misty-lilac'] body .game-page-layout .top-btn,
+  :root[data-theme='misty-lilac'] body .game-page-layout .tool-btn,
+  :root[data-theme='misty-lilac'] body .game-page-layout .collapse-toggle,
+  :root[data-theme='misty-lilac'] body .game-page-layout .input-btn,
+  :root[data-theme='misty-lilac'] body .game-page-layout .input-field,
+  :root[data-theme='misty-lilac'] body .game-page-layout .quest-item.open,
+  :root[data-theme='misty-lilac'] body .game-page-layout .news-item.expanded,
+  :root[data-theme='misty-lilac'] body .game-page-layout .item-detail {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  :root[data-theme='misty-lilac'] body .game-page-layout .scene-panel,
+  :root[data-theme='misty-lilac'] body .game-page-layout .status-hud {
+    background-color: #e2ebf5;
+  }
+
+  :root[data-theme='misty-lilac'] body .game-page-layout .top-bar,
+  :root[data-theme='misty-lilac'] body .game-page-layout .side-toolbar,
+  :root[data-theme='misty-lilac'] body .game-page-layout .input-bar {
+    background-color: #dce8f4;
+  }
+
+  :root[data-theme='misty-lilac'] body .game-page-layout .chat-messages {
+    background-color: transparent;
+  }
+
+  :root[data-theme='misty-lilac'] body .game-page-layout .bubble-narrative-full {
+    background-color: #e8f0f8;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme='misty-lilac'] body .game-page-layout *,
+  :root[data-theme='misty-lilac'] body .game-page-layout *::before,
+  :root[data-theme='misty-lilac'] body .game-page-layout *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/* Owner fidelity rework: one pale aurora scene now lights the entire instrument.
+   Frostglass samples that scene instead of turning the side ledgers opaque gray. */
+[data-theme='misty-lilac'] {
+  --aurora-scene: url('../assets/themes/misty-lilac/aurora-frostglass-scene-v3.webp');
+  --aurora-panel: rgba(216, 231, 248, 0.2);
+  --aurora-panel-dense: rgba(220, 233, 248, 0.18);
+  --aurora-control: rgba(229, 239, 251, 0.34);
+  --aurora-control-active: rgba(234, 241, 252, 0.58);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout {
+  background-color: #dce9f7;
+  background-image:
+    linear-gradient(rgba(66, 85, 130, 0.07), rgba(66, 85, 130, 0.07)), var(--aurora-scene);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .game-body,
+:root[data-theme='misty-lilac'] body .game-page-layout .chat-flow,
+:root[data-theme='misty-lilac'] body .game-page-layout .chat-messages {
+  background: transparent;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .top-bar,
+:root[data-theme='misty-lilac'] body .game-page-layout .side-toolbar,
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-panel,
+:root[data-theme='misty-lilac'] body .game-page-layout .status-hud,
+:root[data-theme='misty-lilac'] body .game-page-layout .input-bar {
+  background-image: none;
+  border-color: rgba(129, 145, 188, 0.32);
+  backdrop-filter: blur(5px) saturate(112%);
+  -webkit-backdrop-filter: blur(5px) saturate(112%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.76),
+    0 4px 16px rgba(72, 89, 132, 0.08);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .top-bar,
+:root[data-theme='misty-lilac'] body .game-page-layout .side-toolbar {
+  background-color: rgba(217, 231, 248, 0.24);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-panel,
+:root[data-theme='misty-lilac'] body .game-page-layout .status-hud {
+  background-color: var(--aurora-panel-dense);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .input-bar {
+  background-color: rgba(218, 232, 249, 0.36);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-top,
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-tab-body,
+:root[data-theme='misty-lilac'] body .game-page-layout .status-overview,
+:root[data-theme='misty-lilac'] body .game-page-layout .status-glass,
+:root[data-theme='misty-lilac'] body .game-page-layout .section,
+:root[data-theme='misty-lilac'] body .game-page-layout .tab-bar {
+  background-color: rgba(225, 236, 249, 0.14);
+  background-image: none;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .bubble-narrative-full {
+  background-color: rgba(235, 243, 252, 0.24);
+  border: 1px solid rgba(247, 252, 255, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.66),
+    0 8px 24px rgba(54, 72, 118, 0.1);
+  backdrop-filter: blur(3px) saturate(104%);
+  -webkit-backdrop-filter: blur(3px) saturate(104%);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .chat-empty {
+  color: #344c70;
+  text-shadow: 0 1px 0 rgba(250, 253, 255, 0.92);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .input-field,
+:root[data-theme='misty-lilac'] body .game-page-layout .tool-btn,
+:root[data-theme='misty-lilac'] body .game-page-layout .collapse-toggle {
+  background-color: var(--aurora-control);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme='misty-lilac'] body .game-page-layout .scene-panel,
+  :root[data-theme='misty-lilac'] body .game-page-layout .status-hud,
+  :root[data-theme='misty-lilac'] body .game-page-layout .bubble-narrative-full {
+    background-color: #e2edf9;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }

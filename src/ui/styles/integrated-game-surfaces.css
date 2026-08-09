@@ -1,0 +1,2557 @@
+/*
+ * Final material-integration pass for the seven themes under review.
+ *
+ * These rules deliberately load after the individual theme sheets. The
+ * generated plates provide the material world; live components provide only
+ * structure, legibility, and interaction. They must never become a second
+ * layer of generic application cards above the plate.
+ */
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout {
+  isolation: isolate;
+  overflow: hidden;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  :is(.game-body, .chat-flow, .chat-messages) {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  :is(.top-bar, .side-toolbar, .scene-panel, .status-hud, .input-bar) {
+  margin: 0;
+  border-radius: 0;
+  background-image: none;
+  box-shadow: none;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  :is(.top-bar, .side-toolbar, .scene-panel, .status-hud, .input-bar)::before,
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  :is(.top-bar, .side-toolbar, .scene-panel, .status-hud, .input-bar)::after {
+  display: none;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  :is(
+    .scene-top,
+    .scene-tab-body,
+    .status-overview,
+    .status-glass,
+    .section,
+    .player-summary,
+    .tab-bar,
+    .hold-body
+  ) {
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  :is(
+    .tool-btn,
+    .collapse-toggle,
+    .top-btn,
+    .input-btn,
+    .scene-title-action,
+    .tab-item,
+    .quest-item,
+    .scene-npc-item,
+    .news-item,
+    .system-notif,
+    .item-entry,
+    .item-row,
+    .kv-item,
+    .bubble-player,
+    .bubble-narrative-full,
+    .dialogue-card,
+    .input-field,
+    .option-item,
+    .option-custom
+  ) {
+  border-radius: 2px;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  :is(.quest-list, .scene-npc-list, .scene-news-list, .item-list) {
+  gap: 0;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row) {
+  margin: 0;
+  border-width: 0 0 1px;
+  box-shadow: none;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  .tab-item {
+  border-width: 0 1px 0 0;
+  border-style: solid;
+  box-shadow: none;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  .tab-list {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  .tab-item:last-child {
+  border-right: 0;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze']
+  )
+  body
+  .game-page-layout
+  .tab-item::after {
+  left: 10%;
+  right: 10%;
+  bottom: 1px;
+  height: 2px;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze']
+  )
+  body
+  .game-page-layout
+  :is(.options-popup, .thought-bubble, .buff-pop, .cascader-dropdown) {
+  border-radius: 2px;
+}
+
+/* --------------------------------------------------------------------- */
+/* Wayfarer's Atlas: vellum is the surface; brass is the structure.       */
+/* --------------------------------------------------------------------- */
+
+:root[data-theme='parchment'] {
+  --parchment-chassis: url('../assets/themes/parchment/wayfarer-chassis-16x9-v4.webp');
+}
+
+:root[data-theme='parchment'] body .game-page-layout {
+  background-color: #d9bc82;
+  background-image: var(--parchment-chassis);
+  background-position: center;
+  background-size: 100vw auto;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 0 0 3px rgba(64, 38, 14, 0.86);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-bar {
+  color: #33200f;
+  background:
+    linear-gradient(180deg, rgba(224, 184, 103, 0.68), rgba(123, 78, 30, 0.36)),
+    rgba(151, 103, 49, 0.28);
+  border: 0;
+  border-bottom: 3px double rgba(74, 45, 18, 0.92);
+  box-shadow:
+    inset 0 -1px 0 rgba(225, 186, 106, 0.72),
+    0 2px 5px rgba(47, 28, 10, 0.28);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .side-toolbar {
+  background: rgba(92, 58, 24, 0.16);
+  border: 0;
+  border-right: 3px double rgba(68, 40, 15, 0.94);
+  box-shadow: inset -1px 0 0 rgba(226, 184, 100, 0.62);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .scene-panel {
+  background: rgba(239, 220, 184, 0.07);
+  border: 0;
+  border-right: 3px double rgba(65, 38, 14, 0.92);
+  box-shadow: inset -1px 0 0 rgba(221, 181, 98, 0.56);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .status-hud {
+  background: rgba(239, 220, 184, 0.08);
+  border: 0;
+  border-left: 3px double rgba(65, 38, 14, 0.92);
+  box-shadow: inset 1px 0 0 rgba(221, 181, 98, 0.56);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .input-bar {
+  padding: 7px 12px;
+  background: rgba(91, 56, 22, 0.1);
+  border: 0;
+  border-top: 3px double rgba(65, 38, 14, 0.94);
+  box-shadow: inset 0 1px 0 rgba(227, 188, 108, 0.66);
+}
+
+:root[data-theme='parchment'] body .game-page-layout :is(.scene-top, .section-header, .tab-bar) {
+  border-color: rgba(78, 47, 19, 0.66);
+  background-color: rgba(230, 205, 158, 0.12);
+  box-shadow: inset 0 -1px 0 rgba(255, 241, 204, 0.36);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .status-glass > .section,
+:root[data-theme='parchment'] body .game-page-layout .status-overview > .section {
+  border-color: rgba(79, 48, 19, 0.56);
+  background: transparent;
+}
+
+:root[data-theme='parchment']
+  body
+  .game-page-layout
+  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action) {
+  color: #3d2814;
+  background:
+    linear-gradient(180deg, rgba(233, 197, 125, 0.32), rgba(119, 76, 31, 0.12)),
+    rgba(184, 137, 68, 0.12);
+  border: 1px solid rgba(66, 39, 14, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 226, 165, 0.62),
+    inset 0 -1px 2px rgba(60, 35, 13, 0.28);
+}
+
+:root[data-theme='parchment']
+  body
+  .game-page-layout
+  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action):hover {
+  color: #24170c;
+  background:
+    linear-gradient(180deg, rgba(245, 213, 147, 0.5), rgba(130, 81, 30, 0.18)),
+    rgba(184, 137, 68, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 235, 191, 0.74),
+    0 2px 5px rgba(59, 34, 11, 0.18);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .tab-bar {
+  border-top: 1px solid rgba(92, 58, 24, 0.42);
+  border-bottom: 1px solid rgba(72, 42, 15, 0.68);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .tab-item {
+  color: #624a31;
+  background: rgba(222, 195, 147, 0.08);
+  border-color: rgba(89, 55, 22, 0.42);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .tab-item:hover {
+  color: #302010;
+  background: rgba(204, 164, 96, 0.18);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .tab-active {
+  color: #28190c;
+  background: rgba(215, 177, 108, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(245, 217, 160, 0.42);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .tab-active::after {
+  background: #6f461d;
+  box-shadow: 0 -1px 0 rgba(235, 197, 122, 0.78);
+}
+
+:root[data-theme='parchment']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row) {
+  background: transparent;
+  border-color: rgba(93, 62, 30, 0.28);
+}
+
+:root[data-theme='parchment']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row):hover {
+  background: rgba(176, 128, 60, 0.1);
+  border-color: rgba(89, 54, 21, 0.48);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .bubble-narrative-full {
+  background: rgba(247, 230, 197, 0.08);
+  border: 0;
+  box-shadow: none;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .bubble-player,
+:root[data-theme='parchment'] body .game-page-layout .dialogue-card {
+  background-image: var(--parchment-ledger-patina);
+  background-color: rgba(241, 221, 182, 0.78);
+  border: 1px solid rgba(85, 50, 18, 0.54);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 244, 214, 0.62),
+    0 4px 12px rgba(54, 31, 10, 0.14);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .input-field {
+  color: #332315;
+  background-image: var(--parchment-ledger-patina);
+  background-color: rgba(241, 221, 182, 0.54);
+  border: 1px solid rgba(65, 38, 14, 0.72);
+  box-shadow:
+    inset 0 2px 5px rgba(63, 39, 15, 0.18),
+    inset 0 0 0 1px rgba(255, 239, 198, 0.36);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .portrait-slot {
+  padding: 7px;
+  border: 2px double rgba(79, 48, 19, 0.78);
+  background-image: var(--parchment-ledger-patina);
+  background-color: rgba(222, 194, 145, 0.35);
+  box-shadow:
+    inset 0 0 0 2px rgba(241, 213, 155, 0.34),
+    0 5px 12px rgba(52, 31, 11, 0.18);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .portrait-slot .avatar-shape-square {
+  color: #4c351c;
+  background-color: rgba(229, 204, 157, 0.2);
+  background-image:
+    linear-gradient(rgba(239, 219, 181, 0.3), rgba(239, 219, 181, 0.3)), var(--parchment-azimuth);
+  background-position: center;
+  background-size: cover;
+  border-radius: 1px;
+  box-shadow: inset 0 0 12px rgba(77, 48, 18, 0.15);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .kv-item {
+  background: rgba(180, 137, 76, 0.15);
+  border: 1px solid rgba(89, 56, 24, 0.28);
+  box-shadow: inset 0 1px 0 rgba(250, 225, 176, 0.34);
+}
+
+/* --------------------------------------------------------------------- */
+/* Jade Conservatory: intact relief, quiet paper, raised carved controls. */
+/* --------------------------------------------------------------------- */
+
+:root[data-theme='forest'] {
+  --forest-chassis: url('../assets/themes/forest/jade-conservatory-chassis-16x9-v2.webp');
+}
+
+:root[data-theme='forest'] body .game-page-layout {
+  background-color: #e8eee4;
+  background-image: var(--forest-chassis);
+  background-position: center;
+  background-size: 100vw auto;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 0 0 3px rgba(103, 132, 107, 0.54);
+}
+
+:root[data-theme='forest'] body .game-page-layout::after {
+  display: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-bar {
+  background: rgba(216, 227, 212, 0.14);
+  border: 0;
+  border-bottom: 3px double rgba(105, 129, 107, 0.58);
+  box-shadow:
+    inset 0 -1px 0 rgba(255, 255, 248, 0.82),
+    0 2px 5px rgba(46, 72, 51, 0.12);
+}
+
+:root[data-theme='forest'] body .game-page-layout .side-toolbar {
+  background: rgba(207, 220, 204, 0.12);
+  border: 0;
+  border-right: 3px double rgba(99, 126, 103, 0.58);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 249, 0.78);
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-panel {
+  background: rgba(248, 247, 238, 0.11);
+  border: 0;
+  border-right: 3px double rgba(100, 126, 102, 0.54);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 249, 0.82);
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-hud {
+  background: rgba(248, 247, 238, 0.11);
+  border: 0;
+  border-left: 3px double rgba(100, 126, 102, 0.54);
+  box-shadow: inset 1px 0 0 rgba(255, 255, 249, 0.82);
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-bar {
+  padding: 7px 12px;
+  background: rgba(223, 232, 218, 0.12);
+  border: 0;
+  border-top: 3px double rgba(99, 126, 102, 0.56);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 250, 0.86);
+}
+
+:root[data-theme='forest'] body .game-page-layout :is(.scene-top, .section-header, .tab-bar) {
+  color: #294233;
+  background: rgba(214, 226, 211, 0.18);
+  border-color: rgba(95, 123, 99, 0.38);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 249, 0.72);
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-glass > .section,
+:root[data-theme='forest'] body .game-page-layout .status-overview > .section {
+  background: transparent;
+  border-color: rgba(92, 119, 96, 0.36);
+}
+
+:root[data-theme='forest']
+  body
+  .game-page-layout
+  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action) {
+  color: #375440;
+  background:
+    linear-gradient(180deg, rgba(250, 252, 244, 0.6), rgba(160, 184, 161, 0.2)),
+    rgba(205, 220, 202, 0.24);
+  border: 1px solid rgba(91, 119, 95, 0.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 251, 0.92),
+    inset 0 -2px 3px rgba(72, 100, 77, 0.16),
+    0 1px 3px rgba(55, 82, 61, 0.1);
+}
+
+:root[data-theme='forest']
+  body
+  .game-page-layout
+  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action):hover {
+  color: #1f3c2b;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 250, 0.78), rgba(145, 176, 151, 0.28)),
+    rgba(193, 214, 194, 0.34);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 3px 7px rgba(55, 82, 61, 0.14);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-bar {
+  border-top: 1px solid rgba(95, 124, 99, 0.3);
+  border-bottom: 1px solid rgba(84, 111, 90, 0.5);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item {
+  color: #506957;
+  background:
+    linear-gradient(180deg, rgba(253, 253, 248, 0.36), rgba(167, 190, 167, 0.13)),
+    rgba(218, 229, 214, 0.13);
+  border-color: rgba(95, 122, 99, 0.38);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 250, 0.68);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item:hover {
+  color: #294735;
+  background: rgba(188, 210, 190, 0.28);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-active {
+  color: #21422f;
+  background:
+    linear-gradient(180deg, rgba(246, 250, 242, 0.54), rgba(143, 177, 150, 0.24)),
+    rgba(202, 219, 200, 0.3);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 252, 0.9),
+    inset 0 0 0 1px rgba(126, 156, 129, 0.24);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-active::after {
+  background: #44735a;
+  box-shadow: 0 -1px 0 rgba(245, 252, 244, 0.86);
+}
+
+:root[data-theme='forest']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row) {
+  background: transparent;
+  border-color: rgba(91, 120, 97, 0.23);
+}
+
+:root[data-theme='forest']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row):hover {
+  background: rgba(142, 176, 149, 0.1);
+  border-color: rgba(77, 112, 85, 0.4);
+}
+
+:root[data-theme='forest'] body .game-page-layout .bubble-narrative-full {
+  background: rgba(250, 249, 242, 0.08);
+  border: 0;
+  box-shadow: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .bubble-player,
+:root[data-theme='forest'] body .game-page-layout .dialogue-card {
+  background: rgba(248, 248, 240, 0.7);
+  border: 1px solid rgba(92, 121, 97, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 252, 0.86),
+    0 4px 12px rgba(49, 77, 55, 0.1);
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-field {
+  color: #26372c;
+  background: rgba(249, 249, 241, 0.46);
+  border: 1px solid rgba(85, 114, 90, 0.52);
+  box-shadow:
+    inset 0 2px 5px rgba(58, 86, 64, 0.11),
+    inset 0 0 0 1px rgba(255, 255, 251, 0.68);
+}
+
+:root[data-theme='forest'] body .game-page-layout .portrait-slot {
+  padding: 9px;
+  border: 2px double rgba(91, 119, 96, 0.58);
+  background-color: rgba(222, 233, 219, 0.3);
+  background-image: var(--forest-avatar-medallion);
+  background-position: center;
+  background-size: cover;
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 250, 0.72),
+    0 5px 13px rgba(52, 79, 58, 0.13);
+}
+
+:root[data-theme='forest'] body .game-page-layout .kv-item {
+  background:
+    linear-gradient(180deg, rgba(250, 252, 247, 0.4), rgba(159, 183, 161, 0.13)),
+    rgba(214, 227, 211, 0.14);
+  border: 1px solid rgba(91, 119, 96, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 252, 0.74);
+}
+
+/* --------------------------------------------------------------------- */
+/* Moonwhite Brocade: the silk chassis is the surface, never a card grid. */
+/* --------------------------------------------------------------------- */
+
+:root[data-theme='ivory'] {
+  --moonwhite-chassis: url('../assets/themes/ivory/moonwhite-brocade-chassis-16x9-v1.webp');
+}
+
+:root[data-theme='ivory'] body .game-page-layout {
+  color: #35322e;
+  background-color: #eeeae2;
+  background-image: var(--moonwhite-chassis);
+  background-position: center;
+  background-size: 100vw auto;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 0 0 1px rgba(140, 126, 98, 0.32);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .top-bar,
+:root[data-theme='ivory'] body .game-page-layout .side-toolbar,
+:root[data-theme='ivory'] body .game-page-layout .scene-panel,
+:root[data-theme='ivory'] body .game-page-layout .status-hud,
+:root[data-theme='ivory'] body .game-page-layout .input-bar {
+  background: rgba(251, 249, 244, 0.055);
+  border-color: rgba(143, 129, 102, 0.32);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 253, 0.68);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .top-bar {
+  border-width: 0 0 1px;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .side-toolbar {
+  border-width: 0 1px 0 0;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .scene-panel {
+  border-width: 0 1px 0 0;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .status-hud {
+  border-width: 0 0 0 1px;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .input-bar {
+  border-width: 1px 0 0;
+}
+
+:root[data-theme='ivory']
+  body
+  .game-page-layout
+  :is(
+    .scene-top,
+    .scene-tab-body,
+    .status-overview,
+    .status-glass,
+    .section,
+    .player-summary,
+    .tab-bar
+  ) {
+  background: transparent;
+  border-color: rgba(139, 125, 99, 0.24);
+  box-shadow: none;
+}
+
+:root[data-theme='ivory'] body .game-page-layout :is(.scene-top, .section-header, .tab-bar) {
+  background: rgba(248, 246, 240, 0.08);
+  box-shadow: inset 0 -1px 0 rgba(133, 116, 79, 0.17);
+}
+
+:root[data-theme='ivory']
+  body
+  .game-page-layout
+  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action) {
+  color: #5b554b;
+  background: rgba(247, 244, 237, 0.14);
+  border: 1px solid rgba(142, 128, 99, 0.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 253, 0.82),
+    inset 0 -1px 2px rgba(92, 80, 57, 0.08);
+}
+
+:root[data-theme='ivory']
+  body
+  .game-page-layout
+  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action):hover {
+  color: #3e3525;
+  background: rgba(229, 220, 201, 0.28);
+  border-color: rgba(136, 113, 66, 0.42);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .tab-bar {
+  border-top: 1px solid rgba(151, 138, 112, 0.18);
+  border-bottom: 1px solid rgba(132, 117, 88, 0.24);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .tab-item {
+  color: #69645c;
+  background: transparent;
+  border-color: rgba(145, 132, 106, 0.2);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .tab-item:hover {
+  color: #403a31;
+  background: rgba(226, 219, 205, 0.2);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .tab-active {
+  color: #332e27;
+  background: rgba(237, 230, 215, 0.18);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .tab-active::after {
+  background: #8a7040;
+  box-shadow: 0 -1px 0 rgba(255, 253, 247, 0.74);
+}
+
+:root[data-theme='ivory']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row) {
+  background: transparent;
+  border-color: rgba(140, 127, 103, 0.2);
+  box-shadow: none;
+}
+
+:root[data-theme='ivory']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row):hover {
+  background: rgba(222, 214, 199, 0.2);
+  border-color: rgba(137, 114, 68, 0.34);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .bubble-narrative-full {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .bubble-player,
+:root[data-theme='ivory'] body .game-page-layout .dialogue-card {
+  background: rgba(249, 247, 241, 0.54);
+  border: 1px solid rgba(145, 130, 101, 0.3);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 253, 0.8),
+    0 3px 10px rgba(75, 67, 52, 0.07);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .input-field {
+  color: #454039;
+  background: rgba(252, 250, 246, 0.3);
+  border: 1px solid rgba(137, 121, 90, 0.32);
+  box-shadow:
+    inset 0 2px 5px rgba(79, 69, 51, 0.09),
+    inset 0 1px 0 rgba(255, 255, 253, 0.78);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .portrait-slot {
+  padding: 7px;
+  background: rgba(249, 247, 240, 0.16);
+  border: 3px double rgba(139, 120, 82, 0.34);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 253, 0.7),
+    0 4px 12px rgba(77, 68, 51, 0.08);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .portrait-slot .avatar-shape-square {
+  color: #575149;
+  background: rgba(249, 247, 241, 0.2);
+  border-radius: 1px;
+  box-shadow: inset 0 0 12px rgba(92, 81, 61, 0.08);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .kv-item {
+  background: rgba(244, 241, 233, 0.16);
+  border: 1px solid rgba(143, 130, 105, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 253, 0.66);
+}
+
+:root[data-theme='ivory']
+  body
+  .game-page-layout
+  :is(.options-popup, .thought-bubble, .buff-pop, .cascader-dropdown) {
+  background: rgba(247, 244, 237, 0.97);
+  border: 1px solid rgba(137, 119, 84, 0.42);
+  box-shadow: 0 8px 24px rgba(67, 59, 45, 0.16);
+}
+
+/* --------------------------------------------------------------------- */
+/* Aurora Frostglass: one continuous sky behind genuinely clear ledgers. */
+/* --------------------------------------------------------------------- */
+
+:root[data-theme='misty-lilac'] body .game-page-layout {
+  background-color: #cddff1;
+  background-image:
+    linear-gradient(rgba(54, 74, 132, 0.07), rgba(54, 74, 132, 0.07)), var(--aurora-scene);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .top-bar,
+:root[data-theme='misty-lilac'] body .game-page-layout .side-toolbar,
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-panel,
+:root[data-theme='misty-lilac'] body .game-page-layout .status-hud,
+:root[data-theme='misty-lilac'] body .game-page-layout .input-bar {
+  background: rgba(218, 232, 249, 0.045);
+  border-color: rgba(248, 252, 255, 0.68);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 3px 12px rgba(63, 83, 132, 0.055);
+  backdrop-filter: blur(1.5px) saturate(106%);
+  -webkit-backdrop-filter: blur(1.5px) saturate(106%);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .top-bar {
+  border-width: 0 0 1px;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .side-toolbar {
+  border-width: 0 1px 0 0;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-panel {
+  border-width: 0 1px 0 0;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .status-hud {
+  border-width: 0 0 0 1px;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .input-bar {
+  border-width: 1px 0 0;
+}
+
+:root[data-theme='misty-lilac']
+  body
+  .game-page-layout
+  :is(
+    .scene-top,
+    .scene-tab-body,
+    .status-overview,
+    .status-glass,
+    .section,
+    .player-summary,
+    .tab-bar
+  ) {
+  background: transparent;
+  border-color: rgba(249, 252, 255, 0.44);
+  box-shadow: none;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .status-glass > .section,
+:root[data-theme='misty-lilac'] body .game-page-layout .status-overview > .section {
+  background: rgba(225, 237, 250, 0.028);
+  border-color: rgba(247, 251, 255, 0.42);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout :is(.scene-top, .section-header, .tab-bar) {
+  background: rgba(231, 241, 252, 0.045);
+  box-shadow: inset 0 -1px 0 rgba(250, 253, 255, 0.42);
+}
+
+:root[data-theme='misty-lilac']
+  body
+  .game-page-layout
+  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action) {
+  color: #43567f;
+  background: rgba(224, 237, 251, 0.07);
+  border: 1px solid rgba(249, 252, 255, 0.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.68),
+    0 2px 7px rgba(55, 74, 124, 0.055);
+}
+
+:root[data-theme='misty-lilac']
+  body
+  .game-page-layout
+  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action):hover {
+  color: #342a6c;
+  background: rgba(226, 226, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.78);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 3px 10px rgba(95, 78, 171, 0.1);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .tab-bar {
+  border-top: 1px solid rgba(250, 253, 255, 0.34);
+  border-bottom: 1px solid rgba(126, 147, 195, 0.22);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .tab-item {
+  color: #526180;
+  background: transparent;
+  border-color: rgba(247, 251, 255, 0.34);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .tab-item:hover {
+  color: #3e3873;
+  background: rgba(219, 228, 255, 0.12);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .tab-active {
+  color: #3c2d78;
+  background: rgba(220, 214, 255, 0.1);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .tab-active::after {
+  background: #8064df;
+  box-shadow:
+    0 0 5px rgba(122, 94, 224, 0.4),
+    0 -1px 0 rgba(255, 255, 255, 0.82);
+}
+
+:root[data-theme='misty-lilac']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row) {
+  background: transparent;
+  border-color: rgba(248, 252, 255, 0.3);
+  box-shadow: none;
+}
+
+:root[data-theme='misty-lilac']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row):hover {
+  background: rgba(221, 224, 255, 0.11);
+  border-color: rgba(250, 253, 255, 0.58);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .bubble-narrative-full {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .bubble-player,
+:root[data-theme='misty-lilac'] body .game-page-layout .dialogue-card {
+  background: rgba(221, 235, 252, 0.13);
+  border: 1px solid rgba(250, 253, 255, 0.58);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    0 5px 14px rgba(65, 83, 133, 0.08);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .input-field {
+  color: #2d3d60;
+  background: rgba(226, 238, 252, 0.11);
+  border: 1px solid rgba(251, 253, 255, 0.68);
+  box-shadow:
+    inset 0 1px 4px rgba(55, 75, 123, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .portrait-slot {
+  padding: 7px;
+  border: 1px solid rgba(251, 253, 255, 0.72);
+  background: rgba(222, 235, 251, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 7px 18px rgba(60, 78, 126, 0.1);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .portrait-slot .avatar-shape-square {
+  color: #354a73;
+  background-color: rgba(216, 231, 249, 0.08);
+  background-image:
+    linear-gradient(rgba(223, 236, 251, 0.28), rgba(223, 236, 251, 0.28)), var(--aurora-scene);
+  background-position: 62% 12%;
+  background-size: 245%;
+  border: 1px solid rgba(250, 253, 255, 0.66);
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 14px rgba(255, 255, 255, 0.28),
+    0 3px 10px rgba(62, 82, 132, 0.08);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .kv-item {
+  background: rgba(225, 237, 251, 0.08);
+  border: 1px solid rgba(251, 253, 255, 0.42);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52);
+}
+
+/* --------------------------------------------------------------------- */
+/* Gilded Orrery: engraved slate remains visible through every ledger.    */
+/* --------------------------------------------------------------------- */
+
+:root[data-theme='obsidian'] {
+  --orrery-field: url('../assets/themes/obsidian/gilded-orrery-chassis-16x9-v4.webp');
+}
+
+:root[data-theme='obsidian'] body .game-page-layout {
+  background-color: #05070a;
+  background-image: linear-gradient(rgba(3, 5, 8, 0.06), rgba(3, 5, 8, 0.06)), var(--orrery-field);
+  background-position: center;
+  background-size: 100vw auto;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 0 0 2px rgba(147, 118, 59, 0.72);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .top-bar {
+  background: rgba(4, 6, 9, 0.18);
+  border: 0;
+  border-bottom: 2px solid rgba(157, 126, 64, 0.76);
+  box-shadow:
+    inset 0 -1px 0 rgba(224, 188, 102, 0.18),
+    0 3px 10px rgba(0, 0, 0, 0.36);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .side-toolbar {
+  background: rgba(4, 6, 9, 0.22);
+  border: 0;
+  border-right: 2px solid rgba(155, 124, 62, 0.72);
+  box-shadow:
+    inset -1px 0 0 rgba(229, 192, 104, 0.14),
+    3px 0 10px rgba(0, 0, 0, 0.24);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .scene-panel {
+  background: rgba(3, 5, 8, 0.4);
+  border: 0;
+  border-right: 2px solid rgba(154, 123, 61, 0.7);
+  box-shadow: inset -1px 0 0 rgba(227, 190, 103, 0.12);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .status-hud {
+  background: rgba(3, 5, 8, 0.42);
+  border: 0;
+  border-left: 2px solid rgba(154, 123, 61, 0.7);
+  box-shadow: inset 1px 0 0 rgba(227, 190, 103, 0.12);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .input-bar {
+  background: rgba(4, 6, 9, 0.16);
+  border: 0;
+  border-top: 2px solid rgba(154, 123, 61, 0.72);
+  box-shadow: inset 0 1px 0 rgba(227, 190, 103, 0.12);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout :is(.scene-top, .section-header, .tab-bar) {
+  color: #d8c7a5;
+  background: rgba(6, 9, 13, 0.14);
+  border-color: rgba(184, 149, 76, 0.44);
+  box-shadow: inset 0 -1px 0 rgba(222, 185, 99, 0.08);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .status-glass > .section,
+:root[data-theme='obsidian'] body .game-page-layout .status-overview > .section {
+  background: transparent;
+  border-color: rgba(176, 142, 72, 0.38);
+}
+
+:root[data-theme='obsidian']
+  body
+  .game-page-layout
+  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action) {
+  color: #c9aa69;
+  background: rgba(7, 10, 14, 0.24);
+  border: 1px solid rgba(167, 134, 68, 0.48);
+  box-shadow:
+    inset 0 1px 0 rgba(229, 201, 136, 0.1),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.32);
+}
+
+:root[data-theme='obsidian']
+  body
+  .game-page-layout
+  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action):hover {
+  color: #f0deb7;
+  background: rgba(178, 140, 63, 0.12);
+  border-color: rgba(211, 174, 88, 0.74);
+  box-shadow:
+    inset 0 1px 0 rgba(241, 210, 141, 0.16),
+    0 4px 12px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .tab-bar {
+  border-top: 1px solid rgba(167, 134, 68, 0.34);
+  border-bottom: 1px solid rgba(174, 141, 72, 0.56);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .tab-item {
+  color: #a99b83;
+  background: rgba(5, 8, 11, 0.1);
+  border-color: rgba(164, 131, 66, 0.3);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .tab-item:hover {
+  color: #dfcfae;
+  background: rgba(170, 134, 61, 0.08);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .tab-active {
+  color: #edd9aa;
+  background: rgba(177, 139, 62, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(203, 167, 84, 0.12);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .tab-active::after {
+  background: #cda95c;
+  box-shadow: 0 0 4px rgba(205, 169, 92, 0.25);
+}
+
+:root[data-theme='obsidian']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row) {
+  background: transparent;
+  border-color: rgba(169, 136, 70, 0.22);
+}
+
+:root[data-theme='obsidian']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row):hover {
+  background: rgba(172, 135, 61, 0.07);
+  border-color: rgba(195, 158, 80, 0.42);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .bubble-narrative-full {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .bubble-player,
+:root[data-theme='obsidian'] body .game-page-layout .dialogue-card {
+  background: rgba(5, 8, 11, 0.5);
+  border: 1px solid rgba(177, 143, 72, 0.44);
+  box-shadow:
+    inset 0 1px 0 rgba(229, 201, 137, 0.07),
+    0 6px 16px rgba(0, 0, 0, 0.28);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .input-field {
+  color: #e5d8bf;
+  background: rgba(5, 8, 11, 0.38);
+  border: 1px solid rgba(174, 140, 70, 0.64);
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.46),
+    inset 0 1px 0 rgba(226, 193, 123, 0.08);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .portrait-slot {
+  padding: 7px;
+  border: 2px double rgba(172, 139, 70, 0.72);
+  background: rgba(5, 8, 11, 0.26);
+  box-shadow:
+    inset 0 0 0 2px rgba(224, 188, 99, 0.08),
+    0 8px 20px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .portrait-slot .avatar-shape-square {
+  color: #e5d3ab;
+  background-color: rgba(4, 7, 10, 0.34);
+  background-image:
+    linear-gradient(rgba(4, 7, 10, 0.22), rgba(4, 7, 10, 0.22)), var(--orrery-field);
+  background-position: 50% 8%;
+  background-size: 280%;
+  border-radius: 1px;
+  box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.5);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .kv-item {
+  background: rgba(5, 8, 11, 0.34);
+  border: 1px solid rgba(156, 125, 63, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(227, 195, 125, 0.06),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.26);
+}
+
+:root[data-theme='obsidian']
+  body
+  .game-page-layout
+  :is(.scene-panel, .status-hud, .top-bar, .input-bar) {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+/* --------------------------------------------------------------------- */
+/* Bronze Mechanism: tooled leather wells and machined brass controls.    */
+/* --------------------------------------------------------------------- */
+
+:root[data-theme='bronze'] {
+  --bronze-chassis-plate: url('../assets/themes/bronze/bronze-mechanism-chassis-16x9-v5.webp');
+}
+
+:root[data-theme='bronze'] body .game-page-layout {
+  background-color: #080503;
+  background-image: var(--bronze-chassis-plate);
+  background-position: center;
+  background-size: 100vw auto;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 0 0 3px rgba(145, 96, 50, 0.74);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .top-bar {
+  background: rgba(14, 9, 6, 0.16);
+  border: 0;
+  border-bottom: 3px double rgba(157, 106, 56, 0.8);
+  box-shadow:
+    inset 0 -1px 0 rgba(227, 171, 99, 0.22),
+    0 3px 10px rgba(0, 0, 0, 0.42);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .side-toolbar {
+  background: rgba(15, 9, 6, 0.2);
+  border: 0;
+  border-right: 3px double rgba(153, 102, 54, 0.78);
+  box-shadow:
+    inset -1px 0 0 rgba(229, 171, 97, 0.2),
+    3px 0 10px rgba(0, 0, 0, 0.3);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .scene-panel {
+  background: rgba(16, 10, 7, 0.16);
+  border: 0;
+  border-right: 3px double rgba(151, 101, 54, 0.76);
+  box-shadow: inset -1px 0 0 rgba(225, 168, 95, 0.18);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .status-hud {
+  background: rgba(16, 10, 7, 0.16);
+  border: 0;
+  border-left: 3px double rgba(151, 101, 54, 0.76);
+  box-shadow: inset 1px 0 0 rgba(225, 168, 95, 0.18);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .input-bar {
+  background: rgba(16, 10, 7, 0.16);
+  border: 0;
+  border-top: 3px double rgba(151, 101, 54, 0.78);
+  box-shadow: inset 0 1px 0 rgba(225, 168, 95, 0.18);
+}
+
+:root[data-theme='bronze'] body .game-page-layout :is(.scene-top, .section-header, .tab-bar) {
+  color: #e3c08f;
+  background: rgba(26, 17, 11, 0.17);
+  border-color: rgba(174, 117, 61, 0.5);
+  box-shadow: inset 0 -1px 0 rgba(227, 173, 103, 0.1);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .status-glass > .section,
+:root[data-theme='bronze'] body .game-page-layout .status-overview > .section {
+  background: transparent;
+  border-color: rgba(169, 113, 60, 0.44);
+}
+
+:root[data-theme='bronze']
+  body
+  .game-page-layout
+  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action) {
+  color: #d4a766;
+  background:
+    linear-gradient(180deg, rgba(85, 54, 30, 0.28), rgba(14, 9, 6, 0.38)), rgba(25, 16, 10, 0.22);
+  border: 1px solid rgba(185, 127, 69, 0.62);
+  box-shadow:
+    inset 0 1px 0 rgba(236, 190, 127, 0.16),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.5);
+}
+
+:root[data-theme='bronze']
+  body
+  .game-page-layout
+  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action):hover {
+  color: #f1d4a4;
+  background:
+    linear-gradient(180deg, rgba(117, 75, 39, 0.4), rgba(20, 12, 8, 0.44)), rgba(38, 24, 14, 0.3);
+  border-color: rgba(219, 159, 89, 0.82);
+  box-shadow:
+    inset 0 1px 0 rgba(244, 202, 142, 0.24),
+    0 4px 12px rgba(0, 0, 0, 0.36);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .tab-bar {
+  border-top: 1px solid rgba(161, 107, 57, 0.42);
+  border-bottom: 1px solid rgba(178, 119, 62, 0.62);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .tab-item {
+  color: #c39c6c;
+  background: rgba(20, 13, 9, 0.12);
+  border-color: rgba(158, 105, 56, 0.38);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .tab-item:hover {
+  color: #ecd0a1;
+  background: rgba(133, 84, 42, 0.11);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .tab-active {
+  color: #f0d3a0;
+  background:
+    linear-gradient(180deg, rgba(96, 60, 31, 0.23), rgba(14, 9, 6, 0.2)), rgba(78, 47, 25, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(212, 151, 82, 0.12);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .tab-active::after {
+  background: #d09a57;
+  box-shadow: 0 0 4px rgba(208, 154, 87, 0.22);
+}
+
+:root[data-theme='bronze']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row) {
+  background: transparent;
+  border-color: rgba(166, 111, 59, 0.26);
+  box-shadow: none;
+}
+
+:root[data-theme='bronze']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row):hover {
+  background: rgba(151, 94, 47, 0.09);
+  border-color: rgba(201, 139, 73, 0.46);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .bubble-narrative-full {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+:root[data-theme='bronze'] body .game-page-layout .bubble-player,
+:root[data-theme='bronze'] body .game-page-layout .dialogue-card {
+  background: rgba(14, 9, 6, 0.48);
+  border: 1px solid rgba(179, 121, 64, 0.52);
+  box-shadow:
+    inset 0 1px 0 rgba(231, 181, 115, 0.1),
+    0 6px 16px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .input-field {
+  color: #eadcc5;
+  background: rgba(14, 9, 6, 0.38);
+  border: 1px solid rgba(184, 124, 66, 0.7);
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.52),
+    inset 0 1px 0 rgba(231, 180, 112, 0.1);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .portrait-slot {
+  padding: 7px;
+  border: 3px double rgba(178, 120, 64, 0.76);
+  background: rgba(13, 8, 5, 0.24);
+  box-shadow:
+    inset 0 0 0 2px rgba(227, 173, 103, 0.1),
+    0 8px 20px rgba(0, 0, 0, 0.42);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .portrait-slot .avatar-shape-square {
+  color: #ead8bb;
+  background: rgba(15, 9, 6, 0.38);
+  border-radius: 1px;
+  box-shadow: inset 0 0 14px rgba(0, 0, 0, 0.5);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .npc-portrait {
+  color: #fff8e9;
+  background: var(--npc-avatar-color, var(--theme-quality-common));
+  border: 2px double rgba(204, 145, 79, 0.76);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 225, 176, 0.22),
+    0 4px 9px rgba(0, 0, 0, 0.5);
+  filter: saturate(0.95) brightness(1.05);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .kv-item {
+  background:
+    linear-gradient(180deg, rgba(65, 40, 23, 0.24), rgba(11, 7, 5, 0.34)), rgba(20, 13, 8, 0.2);
+  border: 1px solid rgba(158, 105, 56, 0.32);
+  box-shadow:
+    inset 0 1px 0 rgba(225, 173, 107, 0.08),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .chat-flow::before {
+  display: block;
+  top: 50%;
+  width: 48px;
+  height: 48px;
+  opacity: 0.84;
+}
+
+/* --------------------------------------------------------------------- */
+/* Abyssal Cathedral: submerged stone and coral tracery form one nave.    */
+/* --------------------------------------------------------------------- */
+
+:root[data-theme='ocean'] {
+  --abyssal-chassis: url('../assets/themes/ocean/abyssal-cathedral-chassis-16x9-v1.webp');
+}
+
+:root[data-theme='ocean'] body .game-page-layout {
+  color: #dcebed;
+  background-color: #030a10;
+  background-image:
+    linear-gradient(rgba(2, 8, 12, 0.08), rgba(2, 8, 12, 0.08)), var(--abyssal-chassis);
+  background-position: center;
+  background-size: 100vw auto;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 0 0 1px rgba(70, 139, 154, 0.5);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .top-bar,
+:root[data-theme='ocean'] body .game-page-layout .side-toolbar,
+:root[data-theme='ocean'] body .game-page-layout .scene-panel,
+:root[data-theme='ocean'] body .game-page-layout .status-hud,
+:root[data-theme='ocean'] body .game-page-layout .input-bar {
+  background: rgba(2, 9, 14, 0.16);
+  border-color: rgba(67, 139, 154, 0.42);
+  box-shadow: inset 0 1px 0 rgba(137, 201, 210, 0.08);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .top-bar {
+  border-width: 0 0 1px;
+}
+
+:root[data-theme='ocean'] body .game-page-layout .side-toolbar {
+  border-width: 0 1px 0 0;
+}
+
+:root[data-theme='ocean'] body .game-page-layout .scene-panel {
+  background: rgba(2, 8, 13, 0.28);
+  border-width: 0 1px 0 0;
+}
+
+:root[data-theme='ocean'] body .game-page-layout .status-hud {
+  background: rgba(2, 8, 13, 0.3);
+  border-width: 0 0 0 1px;
+}
+
+:root[data-theme='ocean'] body .game-page-layout .input-bar {
+  border-width: 1px 0 0;
+}
+
+:root[data-theme='ocean']
+  body
+  .game-page-layout
+  :is(
+    .scene-top,
+    .scene-tab-body,
+    .status-overview,
+    .status-glass,
+    .section,
+    .player-summary,
+    .tab-bar
+  ) {
+  background: transparent;
+  border-color: rgba(74, 145, 159, 0.28);
+  box-shadow: none;
+}
+
+:root[data-theme='ocean'] body .game-page-layout :is(.scene-top, .section-header, .tab-bar) {
+  color: #c9e1e5;
+  background: rgba(5, 20, 28, 0.14);
+  box-shadow: inset 0 -1px 0 rgba(92, 178, 193, 0.18);
+}
+
+:root[data-theme='ocean']
+  body
+  .game-page-layout
+  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action) {
+  color: #8fc5cf;
+  background: rgba(5, 22, 30, 0.22);
+  border: 1px solid rgba(74, 151, 165, 0.48);
+  box-shadow:
+    inset 0 1px 0 rgba(148, 217, 224, 0.11),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.36);
+}
+
+:root[data-theme='ocean']
+  body
+  .game-page-layout
+  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action):hover {
+  color: #e0f4f5;
+  background: rgba(55, 132, 148, 0.18);
+  border-color: rgba(109, 193, 206, 0.7);
+  box-shadow:
+    inset 0 1px 0 rgba(176, 230, 234, 0.16),
+    0 0 10px rgba(55, 151, 169, 0.12);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .tab-bar {
+  border-top: 1px solid rgba(63, 132, 146, 0.22);
+  border-bottom: 1px solid rgba(74, 151, 165, 0.42);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .tab-item {
+  color: #7faab2;
+  background: transparent;
+  border-color: rgba(66, 134, 148, 0.26);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .tab-item:hover {
+  color: #c9e8eb;
+  background: rgba(54, 126, 141, 0.12);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .tab-active {
+  color: #e0f2f4;
+  background: rgba(58, 139, 155, 0.1);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .tab-active::after {
+  background: #63b4c2;
+  box-shadow: 0 0 6px rgba(90, 182, 198, 0.34);
+}
+
+:root[data-theme='ocean']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row) {
+  background: transparent;
+  border-color: rgba(65, 132, 145, 0.24);
+  box-shadow: none;
+}
+
+:root[data-theme='ocean']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row):hover {
+  background: rgba(42, 112, 127, 0.11);
+  border-color: rgba(88, 176, 191, 0.46);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .bubble-narrative-full {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+:root[data-theme='ocean'] body .game-page-layout .bubble-player,
+:root[data-theme='ocean'] body .game-page-layout .dialogue-card {
+  background: rgba(4, 16, 23, 0.56);
+  border: 1px solid rgba(75, 149, 163, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(148, 211, 219, 0.1),
+    0 6px 18px rgba(0, 0, 0, 0.36);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .input-field {
+  color: #d8ebed;
+  background: rgba(3, 14, 21, 0.44);
+  border: 1px solid rgba(72, 148, 162, 0.58);
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(151, 216, 222, 0.09);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .portrait-slot {
+  padding: 7px;
+  background: rgba(3, 13, 20, 0.26);
+  border: 3px double rgba(73, 151, 165, 0.58);
+  box-shadow:
+    inset 0 0 0 1px rgba(143, 205, 214, 0.09),
+    0 7px 18px rgba(0, 0, 0, 0.4);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .portrait-slot .avatar-shape-square {
+  color: #dceff1;
+  background: rgba(3, 15, 22, 0.34);
+  border: 1px solid rgba(79, 158, 172, 0.42);
+  border-radius: 1px;
+  box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.52);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .kv-item {
+  background: rgba(5, 20, 28, 0.22);
+  border: 1px solid rgba(67, 136, 149, 0.3);
+  box-shadow: inset 0 1px 0 rgba(139, 203, 211, 0.07);
+}
+
+/* Expanded rows remain part of the ledger instead of opening a web card. */
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  .item-detail {
+  margin: 0 0 6px;
+  border-width: 1px 0;
+  border-style: solid;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  .det-chip {
+  padding: 0 4px;
+  border-radius: 1px;
+  box-shadow: none;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .item-detail {
+  background: rgba(233, 207, 158, 0.13);
+  border-color: rgba(86, 52, 20, 0.32);
+  box-shadow: inset 0 1px 0 rgba(255, 239, 198, 0.28);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .det-chip {
+  background: rgba(128, 82, 33, 0.09);
+  border-color: rgba(89, 55, 22, 0.3);
+}
+
+:root[data-theme='forest'] body .game-page-layout .item-detail {
+  background: rgba(239, 244, 235, 0.14);
+  border-color: rgba(88, 118, 94, 0.27);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 250, 0.58);
+}
+
+:root[data-theme='forest'] body .game-page-layout .det-chip {
+  background: rgba(123, 157, 130, 0.1);
+  border-color: rgba(88, 118, 94, 0.27);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .item-detail {
+  background: rgba(246, 242, 234, 0.12);
+  border-color: rgba(139, 124, 95, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 253, 0.52);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .det-chip {
+  background: rgba(192, 181, 158, 0.1);
+  border-color: rgba(139, 124, 95, 0.23);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .item-detail {
+  background: rgba(222, 236, 250, 0.08);
+  border-color: rgba(249, 252, 255, 0.44);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.56);
+  backdrop-filter: blur(1px) saturate(106%);
+  -webkit-backdrop-filter: blur(1px) saturate(106%);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .det-chip {
+  background: rgba(226, 238, 250, 0.12);
+  border-color: rgba(248, 252, 255, 0.54);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .item-detail {
+  background: rgba(7, 10, 13, 0.14);
+  border-color: rgba(166, 132, 65, 0.3);
+  box-shadow: inset 0 1px 0 rgba(221, 188, 107, 0.08);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .det-chip {
+  background: rgba(142, 110, 53, 0.08);
+  border-color: rgba(162, 127, 61, 0.3);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .item-detail {
+  background: rgba(35, 20, 12, 0.16);
+  border-color: rgba(172, 113, 58, 0.34);
+  box-shadow: inset 0 1px 0 rgba(226, 162, 94, 0.08);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .det-chip {
+  background: rgba(135, 78, 40, 0.1);
+  border-color: rgba(171, 110, 56, 0.34);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .item-detail {
+  background: rgba(4, 18, 25, 0.18);
+  border-color: rgba(69, 143, 157, 0.32);
+  box-shadow: inset 0 1px 0 rgba(137, 203, 211, 0.07);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .det-chip {
+  background: rgba(43, 105, 118, 0.1);
+  border-color: rgba(69, 143, 157, 0.33);
+}
+
+/* Floating wells use the same material instead of a generic elevated card. */
+:root[data-theme='parchment']
+  body
+  :is(.options-popup, .thought-bubble, .buff-pop, .cascader-dropdown) {
+  background-image: var(--parchment-ledger-patina);
+  background-color: rgba(239, 218, 178, 0.96);
+  border: 2px double rgba(77, 46, 17, 0.7);
+}
+
+:root[data-theme='forest']
+  body
+  :is(.options-popup, .thought-bubble, .buff-pop, .cascader-dropdown) {
+  background: rgba(244, 246, 238, 0.97);
+  border: 2px double rgba(91, 119, 96, 0.55);
+}
+
+:root[data-theme='ivory'] body :is(.options-popup, .thought-bubble, .buff-pop, .cascader-dropdown) {
+  background: rgba(247, 244, 237, 0.97);
+  border: 2px double rgba(137, 119, 84, 0.42);
+}
+
+:root[data-theme='misty-lilac']
+  body
+  :is(.options-popup, .thought-bubble, .buff-pop, .cascader-dropdown) {
+  background: rgba(218, 232, 249, 0.82);
+  border: 1px solid rgba(250, 253, 255, 0.8);
+  backdrop-filter: blur(12px) saturate(112%);
+  -webkit-backdrop-filter: blur(12px) saturate(112%);
+}
+
+:root[data-theme='obsidian']
+  body
+  :is(.options-popup, .thought-bubble, .buff-pop, .cascader-dropdown) {
+  background: rgba(5, 8, 11, 0.96);
+  border: 2px double rgba(174, 140, 70, 0.64);
+}
+
+:root[data-theme='bronze']
+  body
+  :is(.options-popup, .thought-bubble, .buff-pop, .cascader-dropdown) {
+  background: rgba(15, 9, 6, 0.97);
+  border: 2px double rgba(182, 122, 65, 0.68);
+}
+
+:root[data-theme='ocean'] body :is(.options-popup, .thought-bubble, .buff-pop, .cascader-dropdown) {
+  background: rgba(3, 14, 21, 0.97);
+  border: 2px double rgba(72, 150, 164, 0.58);
+}
+
+/* The 16:9 target scales uniformly. No chassis uses independent x/y scaling. */
+@media (aspect-ratio >= 16 / 9) {
+  :root[data-theme='forest'] body .game-page-layout,
+  :root[data-theme='ivory'] body .game-page-layout,
+  :root[data-theme='ocean'] body .game-page-layout {
+    background-size: 100vw auto;
+  }
+
+  :root[data-theme='parchment'] body .game-page-layout,
+  :root[data-theme='obsidian'] body .game-page-layout,
+  :root[data-theme='bronze'] body .game-page-layout {
+    background-size: 100vw auto;
+  }
+}
+
+@media (max-width: 1100px) {
+  :root[data-theme='forest'] body .game-page-layout,
+  :root[data-theme='ivory'] body .game-page-layout,
+  :root[data-theme='ocean'] body .game-page-layout {
+    background-size: 100vw auto;
+  }
+
+  :root[data-theme='parchment'] body .game-page-layout,
+  :root[data-theme='obsidian'] body .game-page-layout,
+  :root[data-theme='bronze'] body .game-page-layout {
+    background-size: 100vw auto;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme='misty-lilac']
+    body
+    .game-page-layout
+    :is(.top-bar, .side-toolbar, .scene-panel, .status-hud, .input-bar) {
+    background: rgba(220, 234, 249, 0.58);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  :root[data-theme='misty-lilac']
+    body
+    .game-page-layout
+    :is(.scene-top, .scene-tab-body, .status-overview, .status-glass, .section) {
+    background: rgba(228, 239, 250, 0.38);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:is(
+      [data-theme='parchment'],
+      [data-theme='forest'],
+      [data-theme='ivory'],
+      [data-theme='misty-lilac'],
+      [data-theme='obsidian'],
+      [data-theme='bronze'],
+      [data-theme='ocean']
+    )
+    body
+    .game-page-layout
+    *,
+  :root:is(
+      [data-theme='parchment'],
+      [data-theme='forest'],
+      [data-theme='ivory'],
+      [data-theme='misty-lilac'],
+      [data-theme='obsidian'],
+      [data-theme='bronze'],
+      [data-theme='ocean']
+    )
+    body
+    .game-page-layout
+    *::before,
+  :root:is(
+      [data-theme='parchment'],
+      [data-theme='forest'],
+      [data-theme='ivory'],
+      [data-theme='misty-lilac'],
+      [data-theme='obsidian'],
+      [data-theme='bronze'],
+      [data-theme='ocean']
+    )
+    body
+    .game-page-layout
+    *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/* --------------------------------------------------------------------- */
+/* Live-region ownership correction.                                     */
+/*                                                                        */
+/* Scenic art may crop inside a real component, but it never supplies the */
+/* component's frame. Every visible seam below belongs to the element it  */
+/* encloses, matching the proven Qinghua and crimson construction model.  */
+/* --------------------------------------------------------------------- */
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout::before,
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout::after {
+  content: none;
+  display: none;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  :is(.top-bar, .side-toolbar, .scene-panel, .chat-flow, .status-hud, .input-bar) {
+  position: relative;
+  box-sizing: border-box;
+  background-clip: padding-box;
+}
+
+:root:is(
+    [data-theme='parchment'],
+    [data-theme='forest'],
+    [data-theme='ivory'],
+    [data-theme='misty-lilac'],
+    [data-theme='obsidian'],
+    [data-theme='bronze'],
+    [data-theme='ocean']
+  )
+  body
+  .game-page-layout
+  :is(.game-body, .chat-flow, .chat-messages) {
+  border-radius: 0;
+}
+
+/* Wayfarer's Atlas: one live brass frame around each vellum ledger. */
+:root[data-theme='parchment'] body .game-page-layout {
+  background: #2d1e0f;
+  box-shadow: inset 0 0 0 2px #4b3419;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .game-body {
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  background: #2d1e0f;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .top-bar {
+  margin: 0;
+  border: 0;
+  border-bottom: 3px double #4b3419;
+  border-radius: 0;
+  background: linear-gradient(180deg, rgba(229, 195, 122, 0.9), rgba(122, 79, 30, 0.92)), #8d642f;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 235, 181, 0.78),
+    inset 0 -1px 0 rgba(48, 28, 9, 0.74),
+    0 2px 5px rgba(43, 25, 8, 0.34);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .side-toolbar,
+:root[data-theme='parchment'] body .game-page-layout .scene-panel,
+:root[data-theme='parchment'] body .game-page-layout .status-hud {
+  margin: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(rgba(241, 222, 187, 0.18), rgba(220, 191, 139, 0.08)),
+    var(--parchment-ledger-patina) center / cover no-repeat,
+    #ead7b8;
+  box-shadow:
+    inset 0 0 0 1px rgba(220, 181, 108, 0.72),
+    inset 0 0 0 3px rgba(73, 45, 17, 0.82),
+    inset 0 0 18px rgba(63, 39, 14, 0.2);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .side-toolbar {
+  border: 0;
+  border-right: 3px double #4b3419;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .scene-panel {
+  border: 0;
+  border-right: 3px double #4b3419;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .status-hud {
+  border: 0;
+  border-left: 3px double #4b3419;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .chat-flow {
+  border: 0;
+  background:
+    linear-gradient(rgba(244, 224, 186, 0.25), rgba(226, 193, 137, 0.18)),
+    var(--parchment-azimuth) center / cover no-repeat,
+    var(--parchment-ledger-patina) center / cover no-repeat,
+    #e8d0a5;
+  box-shadow:
+    inset 3px 0 0 #4b3419,
+    inset -3px 0 0 #4b3419,
+    inset 0 0 0 5px rgba(190, 143, 67, 0.5),
+    inset 0 0 28px rgba(71, 43, 14, 0.18);
+}
+
+:root[data-theme='parchment'] body .game-page-layout .chat-messages {
+  background: transparent;
+}
+
+:root[data-theme='parchment'] body .game-page-layout .input-bar {
+  margin: 0 8px 7px;
+  padding: 7px;
+  border: 3px double #4b3419;
+  border-radius: 2px;
+  background:
+    linear-gradient(rgba(237, 215, 175, 0.76), rgba(209, 173, 111, 0.72)),
+    var(--parchment-ledger-patina) center / cover no-repeat;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 239, 198, 0.68),
+    0 -2px 5px rgba(66, 40, 14, 0.24);
+}
+
+/* Jade Conservatory: the botanical relief is cropped per live ledger. */
+:root[data-theme='forest'] body .game-page-layout {
+  background:
+    radial-gradient(circle at 14% 12%, rgba(255, 255, 248, 0.64), transparent 36%),
+    linear-gradient(135deg, #eaf0e5, #dce7d8 54%, #edf1e8);
+  box-shadow: inset 0 0 0 2px rgba(89, 119, 94, 0.44);
+}
+
+:root[data-theme='forest'] body .game-page-layout .game-body {
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  background: transparent;
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-bar,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar,
+:root[data-theme='forest'] body .game-page-layout .scene-panel,
+:root[data-theme='forest'] body .game-page-layout .status-hud,
+:root[data-theme='forest'] body .game-page-layout .input-bar {
+  margin: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(115deg, rgba(255, 255, 249, 0.62), rgba(217, 229, 214, 0.54)), #e4eadf;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 250, 0.92),
+    inset 0 0 0 2px rgba(103, 132, 107, 0.28),
+    inset 0 0 14px rgba(49, 79, 57, 0.1);
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-bar {
+  border: 0;
+  border-bottom: 3px double rgba(83, 112, 90, 0.72);
+}
+
+:root[data-theme='forest'] body .game-page-layout .side-toolbar,
+:root[data-theme='forest'] body .game-page-layout .scene-panel {
+  border: 0;
+  border-right: 3px double rgba(83, 112, 90, 0.7);
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-hud {
+  border: 0;
+  border-left: 3px double rgba(83, 112, 90, 0.7);
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-flow {
+  overflow: hidden;
+  border: 0;
+  background-color: #f0f1e8;
+  background-image:
+    linear-gradient(rgba(250, 249, 241, 0.36), rgba(238, 241, 232, 0.28)), var(--forest-chassis);
+  background-repeat: no-repeat;
+  background-position: center, center;
+  background-size:
+    100% 100%,
+    200% auto;
+  box-shadow:
+    inset 3px 0 0 rgba(82, 111, 88, 0.72),
+    inset -3px 0 0 rgba(82, 111, 88, 0.72),
+    inset 0 0 30px rgba(59, 88, 66, 0.1);
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-messages {
+  background: transparent;
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-bar {
+  margin: 0 8px 7px;
+  padding: 7px;
+  border: 2px solid rgba(76, 117, 95, 0.64);
+  border-radius: 3px;
+  background: rgba(239, 244, 235, 0.72);
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-panel::after,
+:root[data-theme='forest'] body .game-page-layout .chat-flow::after,
+:root[data-theme='forest'] body .game-page-layout .status-hud::after {
+  content: '';
+  display: block;
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  border: 10px solid transparent;
+  border-image-source: var(--forest-avatar-medallion);
+  border-image-slice: 92;
+  border-image-width: 10px;
+  border-image-repeat: round;
+  pointer-events: none;
+}
+
+/* Moonwhite Brocade: woven light, restrained seams, no framed bitmap. */
+:root[data-theme='ivory'] body .game-page-layout {
+  background-color: #edeae3;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(133, 116, 82, 0.024) 0 1px, transparent 1px 9px),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.28) 0 1px, transparent 1px 11px),
+    linear-gradient(135deg, #f5f2eb, #e9e5dc 52%, #f2efe8);
+  box-shadow: inset 0 0 0 1px rgba(137, 122, 92, 0.3);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .game-body {
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  background: transparent;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .top-bar,
+:root[data-theme='ivory'] body .game-page-layout .side-toolbar,
+:root[data-theme='ivory'] body .game-page-layout .scene-panel,
+:root[data-theme='ivory'] body .game-page-layout .status-hud,
+:root[data-theme='ivory'] body .game-page-layout .input-bar {
+  margin: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(105deg, rgba(255, 255, 253, 0.54), rgba(228, 224, 214, 0.34)),
+    rgba(245, 243, 237, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 254, 0.88);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .top-bar {
+  border: 0;
+  border-bottom: 1px solid rgba(136, 113, 66, 0.42);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .side-toolbar,
+:root[data-theme='ivory'] body .game-page-layout .scene-panel {
+  border: 0;
+  border-right: 1px solid rgba(136, 113, 66, 0.38);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .status-hud {
+  border: 0;
+  border-left: 1px solid rgba(136, 113, 66, 0.38);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .chat-flow {
+  border: 0;
+  background:
+    radial-gradient(
+      circle at 50% 48%,
+      transparent 0 18%,
+      rgba(141, 120, 78, 0.045) 18.3% 18.7%,
+      transparent 19%
+    ),
+    radial-gradient(ellipse at 15% 22%, rgba(255, 255, 255, 0.5), transparent 44%),
+    linear-gradient(135deg, rgba(250, 248, 243, 0.92), rgba(237, 233, 225, 0.92));
+  box-shadow:
+    inset 1px 0 0 rgba(136, 113, 66, 0.28),
+    inset -1px 0 0 rgba(136, 113, 66, 0.28);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .chat-messages {
+  background: transparent;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .input-bar {
+  margin: 0 10px 8px;
+  padding: 7px;
+  border: 1px solid rgba(136, 113, 66, 0.42);
+  border-radius: 3px;
+  background: rgba(249, 247, 242, 0.76);
+}
+
+/* Aurora Frostglass: one frame-free scene behind genuinely translucent glass. */
+:root[data-theme='misty-lilac'] body .game-page-layout {
+  background-color: #dce9f7;
+  background-image: var(--aurora-scene);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  box-shadow: inset 0 0 0 1px rgba(248, 252, 255, 0.7);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .game-body {
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  background: transparent;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .top-bar,
+:root[data-theme='misty-lilac'] body .game-page-layout .side-toolbar,
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-panel,
+:root[data-theme='misty-lilac'] body .game-page-layout .status-hud,
+:root[data-theme='misty-lilac'] body .game-page-layout .input-bar {
+  margin: 0;
+  border-radius: 0;
+  background: rgba(221, 235, 250, 0.19);
+  backdrop-filter: blur(9px) saturate(112%);
+  -webkit-backdrop-filter: blur(9px) saturate(112%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 0 18px rgba(255, 255, 255, 0.08);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .top-bar {
+  border: 0;
+  border-bottom: 1px solid rgba(246, 251, 255, 0.72);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .side-toolbar,
+:root[data-theme='misty-lilac'] body .game-page-layout .scene-panel {
+  border: 0;
+  border-right: 1px solid rgba(247, 252, 255, 0.72);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .status-hud {
+  border: 0;
+  border-left: 1px solid rgba(247, 252, 255, 0.72);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .chat-flow,
+:root[data-theme='misty-lilac'] body .game-page-layout .chat-messages {
+  border: 0;
+  background: transparent;
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .chat-flow {
+  box-shadow:
+    inset 1px 0 0 rgba(248, 252, 255, 0.64),
+    inset -1px 0 0 rgba(248, 252, 255, 0.64);
+}
+
+:root[data-theme='misty-lilac'] body .game-page-layout .input-bar {
+  margin: 0 8px 7px;
+  padding: 7px;
+  border: 1px solid rgba(250, 253, 255, 0.78);
+  border-radius: 4px;
+  background: rgba(220, 233, 249, 0.28);
+}
+
+/* Gilded Orrery: one frame-free orbital field sits behind live DOM seams. */
+:root[data-theme='obsidian'] body .game-page-layout {
+  --orrery-surface: url('../assets/themes/obsidian/gilded-orrery-field-v2.webp');
+  background-color: #06080b;
+  background-image:
+    linear-gradient(rgba(3, 5, 8, 0.16), rgba(3, 5, 8, 0.24)), var(--orrery-surface);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size:
+    100% 100%,
+    cover;
+  box-shadow: inset 0 0 0 2px rgba(128, 96, 42, 0.62);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .game-body {
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  background: transparent;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .top-bar,
+:root[data-theme='obsidian'] body .game-page-layout .side-toolbar,
+:root[data-theme='obsidian'] body .game-page-layout .scene-panel,
+:root[data-theme='obsidian'] body .game-page-layout .status-hud,
+:root[data-theme='obsidian'] body .game-page-layout .input-bar {
+  margin: 0;
+  border-radius: 0;
+  background: linear-gradient(rgba(7, 10, 14, 0.78), rgba(3, 5, 8, 0.84));
+  box-shadow:
+    inset 0 1px 0 rgba(222, 188, 108, 0.12),
+    inset 0 0 16px rgba(0, 0, 0, 0.38);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .top-bar {
+  border: 0;
+  border-bottom: 3px double rgba(169, 133, 62, 0.78);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .side-toolbar,
+:root[data-theme='obsidian'] body .game-page-layout .scene-panel {
+  border: 0;
+  border-right: 3px double rgba(160, 125, 58, 0.76);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .status-hud {
+  border: 0;
+  border-left: 3px double rgba(160, 125, 58, 0.76);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .chat-flow {
+  overflow: hidden;
+  border: 0;
+  background-color: rgba(3, 5, 8, 0.12);
+  background-image: linear-gradient(rgba(3, 5, 8, 0.04), rgba(3, 5, 8, 0.16));
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  box-shadow:
+    inset 3px 0 0 rgba(164, 128, 58, 0.72),
+    inset -3px 0 0 rgba(164, 128, 58, 0.72),
+    inset 0 0 62px rgba(0, 0, 0, 0.2);
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .chat-messages {
+  background: transparent;
+}
+
+:root[data-theme='obsidian'] body .game-page-layout .input-bar {
+  margin: 0 8px 7px;
+  padding: 7px;
+  border: 2px solid rgba(157, 122, 55, 0.72);
+  border-radius: 2px;
+  background: rgba(4, 7, 10, 0.72);
+}
+
+/* Bronze Mechanism: CSS/live frames carry the chassis; raster stays ornamental. */
+:root[data-theme='bronze'] body .game-page-layout {
+  background:
+    radial-gradient(circle at 50% 48%, rgba(160, 102, 50, 0.055), transparent 44%),
+    linear-gradient(135deg, #120c08, #070503 62%, #130d08);
+  box-shadow: inset 0 0 0 3px #583a21;
+}
+
+:root[data-theme='bronze'] body .game-page-layout .top-bar {
+  margin: 5px 6px 0;
+  border: 3px solid #8f6437;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #2b2017, #17100b);
+  box-shadow:
+    inset 0 0 0 1px #0b0704,
+    inset 0 0 0 2px rgba(222, 169, 96, 0.24),
+    0 2px 6px rgba(0, 0, 0, 0.58);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .game-body {
+  margin: 0 6px 6px;
+  padding-top: 5px;
+  gap: 5px;
+  background: linear-gradient(90deg, #20140c, #81562e 50%, #20140c);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .side-toolbar,
+:root[data-theme='bronze'] body .game-page-layout .scene-panel,
+:root[data-theme='bronze'] body .game-page-layout .status-hud,
+:root[data-theme='bronze'] body .game-page-layout .chat-flow {
+  margin: 0;
+  border: 3px solid #8f6437;
+  border-radius: 2px;
+  background: linear-gradient(145deg, rgba(44, 31, 21, 0.72), rgba(17, 11, 7, 0.82)), #17100b;
+  box-shadow:
+    inset 0 0 0 1px #0a0705,
+    inset 0 0 0 3px rgba(211, 155, 87, 0.18),
+    inset 0 0 18px rgba(0, 0, 0, 0.58),
+    0 0 0 1px #100a06;
+}
+
+:root[data-theme='bronze'] body .game-page-layout .chat-messages {
+  background: transparent;
+}
+
+:root[data-theme='bronze'] body .game-page-layout .input-bar {
+  margin: 0 7px 7px;
+  padding: 7px;
+  border: 3px solid #8f6437;
+  border-radius: 2px;
+  background: #17100b;
+  box-shadow:
+    inset 0 0 0 1px #0b0704,
+    inset 0 0 0 2px rgba(219, 165, 95, 0.2),
+    inset 0 3px 0 rgba(223, 169, 99, 0.1);
+}
+
+:root[data-theme='bronze'] body .game-page-layout .side-toolbar::before {
+  content: '';
+  display: block;
+  position: absolute;
+  top: 7px;
+  left: 50%;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--bronze-cap) center / cover no-repeat;
+  box-shadow:
+    0 0 0 2px #120b07,
+    0 0 0 3px #956438,
+    0 3px 7px rgba(0, 0, 0, 0.72);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+:root[data-theme='bronze'] body .game-page-layout .scene-panel::after,
+:root[data-theme='bronze'] body .game-page-layout .status-hud::before {
+  content: '';
+  display: block;
+  position: absolute;
+  top: 5px;
+  z-index: 4;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bronze-cap) center / cover no-repeat;
+  pointer-events: none;
+}
+
+:root[data-theme='bronze'] body .game-page-layout .scene-panel::after {
+  right: 5px;
+}
+
+:root[data-theme='bronze'] body .game-page-layout .status-hud::before {
+  left: 5px;
+}
+
+:root[data-theme='bronze'] body .game-page-layout .chat-flow::before {
+  content: '';
+  display: block;
+  position: absolute;
+  left: 50%;
+  top: 73%;
+  z-index: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--bronze-reticle) center / cover no-repeat;
+  filter: contrast(1.14) brightness(1.12) saturate(0.88);
+  opacity: 0.94;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* Abyssal Cathedral: the nave crops into the real chat well only. */
+:root[data-theme='ocean'] body .game-page-layout {
+  background:
+    radial-gradient(circle at 50% 12%, rgba(51, 130, 145, 0.08), transparent 40%),
+    linear-gradient(135deg, #07131b, #02080d 62%, #081824);
+  box-shadow: inset 0 0 0 2px rgba(52, 126, 141, 0.54);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .game-body {
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  background: transparent;
+}
+
+:root[data-theme='ocean'] body .game-page-layout .top-bar,
+:root[data-theme='ocean'] body .game-page-layout .side-toolbar,
+:root[data-theme='ocean'] body .game-page-layout .scene-panel,
+:root[data-theme='ocean'] body .game-page-layout .status-hud,
+:root[data-theme='ocean'] body .game-page-layout .input-bar {
+  margin: 0;
+  border-radius: 0;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(56, 139, 154, 0.08), transparent 36%),
+    rgba(2, 11, 17, 0.86);
+  box-shadow:
+    inset 0 1px 0 rgba(118, 195, 207, 0.1),
+    inset 0 0 18px rgba(0, 0, 0, 0.46);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .top-bar {
+  border: 0;
+  border-bottom: 3px double rgba(58, 139, 154, 0.68);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .side-toolbar,
+:root[data-theme='ocean'] body .game-page-layout .scene-panel {
+  border: 0;
+  border-right: 3px double rgba(58, 139, 154, 0.66);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .status-hud {
+  border: 0;
+  border-left: 3px double rgba(58, 139, 154, 0.66);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .chat-flow {
+  overflow: hidden;
+  border: 0;
+  background-color: #031019;
+  background-image:
+    linear-gradient(rgba(1, 7, 11, 0.08), rgba(1, 7, 11, 0.28)), var(--abyssal-chassis);
+  background-repeat: no-repeat;
+  background-position:
+    center,
+    center top;
+  background-size:
+    100% 100%,
+    200% auto;
+  box-shadow:
+    inset 3px 0 0 rgba(55, 134, 149, 0.68),
+    inset -3px 0 0 rgba(55, 134, 149, 0.68),
+    inset 0 0 52px rgba(0, 0, 0, 0.2);
+}
+
+:root[data-theme='ocean'] body .game-page-layout .chat-messages {
+  background: transparent;
+}
+
+:root[data-theme='ocean'] body .game-page-layout .input-bar {
+  margin: 0 8px 7px;
+  padding: 7px;
+  border: 2px solid rgba(69, 147, 161, 0.66);
+  border-radius: 2px;
+  background: rgba(2, 12, 18, 0.82);
+}
+
+@media (max-width: 1100px) {
+  :root[data-theme='forest'] body .game-page-layout .chat-flow,
+  :root[data-theme='obsidian'] body .game-page-layout .chat-flow,
+  :root[data-theme='ocean'] body .game-page-layout .chat-flow {
+    background-size:
+      100% 100%,
+      auto 100%;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme='misty-lilac']
+    body
+    .game-page-layout
+    :is(.top-bar, .side-toolbar, .scene-panel, .status-hud, .input-bar) {
+    background: rgba(221, 234, 248, 0.72);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
