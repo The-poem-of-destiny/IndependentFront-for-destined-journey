@@ -272,3 +272,106 @@ describe('BFF ComfyUI passthrough', () => {
     }
   });
 });
+
+describe('BFF base URL 规范化（SEC-09）', () => {
+  // 🔴 各路由把上游路径写死在 suffix 里，靠的是「suffix 一定会拼上去」这个前提。
+  // base 末尾一个 `#` 就能把它整段吃进 fragment（fetch 不发 fragment），BFF 随即
+  // 沦为任意主机 + 任意路径的取回器。下面第一条就是那次实测的回归钉子。
+
+  /** 起一台把「我看到的 URL」回显在头里的假上游 */
+  async function startEcho() {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on('end', () => {
+        response.writeHead(200, {
+          'Content-Type': 'application/json',
+          'X-Seen-Url': String(request.url ?? ''),
+        });
+        response.end('{}');
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      upstream.once('error', reject);
+      upstream.listen(0, '127.0.0.1', resolve);
+    });
+    const address = upstream.address() as AddressInfo;
+    return {
+      base: `http://127.0.0.1:${address.port}`,
+      close: () =>
+        new Promise<void>((resolve, reject) => {
+          upstream.close((error) => (error ? reject(error) : resolve()));
+        }),
+    };
+  }
+
+  it('🔴 base 末尾的 `#` 吃不掉 suffix —— 上游拿到的路径仍以约定 suffix 结尾', async () => {
+    const echo = await startEcho();
+    try {
+      const response = await buildHonoApp().request(
+        '/api/image/comfy/view?filename=x.png&type=output',
+        { headers: { 'X-Target-Base-URL': `${echo.base}/data/stolen.json#` } },
+      );
+
+      expect(response.status).toBe(200);
+      // 修之前这里是光秃秃的 `/data/stolen.json` —— suffix 整段进了 fragment
+      expect(response.headers.get('x-seen-url')).toBe(
+        '/data/stolen.json/view?filename=x.png&type=output',
+      );
+    } finally {
+      await echo.close();
+    }
+  });
+
+  it('base 自带的 query 同样吃不掉 suffix', async () => {
+    const echo = await startEcho();
+    try {
+      const response = await buildHonoApp().request('/api/image/comfy/view?filename=x.png', {
+        headers: { 'X-Target-Base-URL': `${echo.base}/data/stolen.json?a=1` },
+      });
+
+      expect(response.headers.get('x-seen-url')).toBe('/data/stolen.json/view?filename=x.png');
+    } finally {
+      await echo.close();
+    }
+  });
+
+  it('base 带 path 时照旧保留（不是被剃成 origin）', async () => {
+    const echo = await startEcho();
+    try {
+      const response = await buildHonoApp().request('/api/image/comfy/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Target-Base-URL': `${echo.base}/a/b` },
+        body: '{}',
+      });
+
+      expect(response.headers.get('x-seen-url')).toBe('/a/b/prompt');
+    } finally {
+      await echo.close();
+    }
+  });
+
+  it('base 尾部斜杠照旧剃掉（不产生 //）', async () => {
+    const echo = await startEcho();
+    try {
+      const response = await buildHonoApp().request('/api/image/comfy/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Target-Base-URL': `${echo.base}/a/b//` },
+        body: '{}',
+      });
+
+      expect(response.headers.get('x-seen-url')).toBe('/a/b/prompt');
+    } finally {
+      await echo.close();
+    }
+  });
+
+  it('过得了 ^https?:// 但 URL 解析不了的 base → 400（此前一路走到 fetch 才 502）', async () => {
+    const response = await buildHonoApp().request('/api/image/comfy/prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Target-Base-URL': 'http://' },
+      body: '{}',
+    });
+
+    expect(response.status).toBe(400);
+  });
+});

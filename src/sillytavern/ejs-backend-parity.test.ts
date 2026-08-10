@@ -264,6 +264,43 @@ describe('渲染语义对齐', () => {
     SLOW,
   );
 
+  // 🔴 COR-08（2026-08-09 审查）：既有的 stats 用例**全是单条目**的，而缺陷只在
+  // 「同一趟里条目 A 写了 stats、条目 B 再读」时显形 —— QuickJS 整趟只编组一次，
+  // runEntry 的回滚也只碰 vars 与 _local。两个后端给出不同答案，且**双方都 ok:true**。
+  it(
+    '🔴 跨条目 stats 隔离：一条目写只读轴，不漏给后面的条目（两后端同答案）',
+    async () => {
+      const entries = [
+        { uid: 1, content: '<% stats.主角.背包 = ["剑"]; stats.主角.背包.push("污染") %>写完了' },
+        { uid: 2, content: '<%= JSON.stringify(stats.主角.背包 ?? null) %>' },
+      ];
+      const r = await bothBackends(entries);
+
+      expect(r.quickjsOk).toEqual(r.legacyOk);
+      // 关键：第二条目读到的必须是**没被上一条动过**的 stats
+      expect(r.quickjsText[1]).toBe('null');
+      expect(r.quickjsText).toEqual(r.legacyText);
+    },
+    SLOW,
+  );
+
+  it(
+    '🔴 更糟的变体：写完 stats 再抛错 —— 条目被回滚，但它对只读轴的写也不许活下来',
+    async () => {
+      const entries = [
+        { uid: 1, content: '<% stats.主角.等级 = 999; throw new Error("boom") %>' },
+        { uid: 2, content: '<%= stats.主角.等级 %>' },
+      ];
+      const r = await bothBackends(entries);
+
+      expect(r.quickjsOk[0]).toBe(false); // 第一条目失败 → 原文注入
+      expect(r.quickjsText[1]).toBe('12'); // 第二条目读到的仍是 makeCtx 里那个 12
+      expect(r.quickjsText).toEqual(r.legacyText);
+      expect(r.quickjsOk).toEqual(r.legacyOk);
+    },
+    SLOW,
+  );
+
   it(
     '宿主查询面（chat / char / quest / lore / engine）一致',
     async () => {

@@ -15,7 +15,7 @@ import { reduce } from '../reducer';
 import { applyOutcome } from '../state';
 import { createCombatState } from '../state';
 import { buildIndex } from '../automata/index-active';
-import { handleRoundClose } from './round';
+import { handleRoundClose, handleRoundOpen } from './round';
 import type { CombatState, CompiledAutomaton, DomainEvent, SummonedUnitDefinition } from '../types';
 import { mkBundle } from '../test-utils';
 
@@ -242,5 +242,47 @@ describe('A35-3：duration 到期 round.close 移除 + 摘 automaton', () => {
     const after2 = applyOutcome(after1, rc2);
     expect(after2.units[ghoulId]).toBeUndefined();
     expect(after2.activeEffects.byOwner[ghoulId]).toBeUndefined();
+  });
+
+  // 🔴 COR-13 回归（2026-08-09 审查）：上面那条用例连调两次 handleRoundClose、**从不跑
+  // handleRoundOpen** —— 而真实轮次是 close → open → close。「召唤时限」的 category 是
+  // 「增益」、timeUnit 是「回合」，于是它此前会被 round.open 的通用增益 tick 再减一次：
+  // 每轮减两次，且**只有 round.close 那条会发 UnitDespawned**。偶数时长的召唤因此在
+  // round.open 归零 —— 计时器被静默删掉，单位永远留在战斗里。
+  it('🔴 走完整轮次（close → open → close）：偶数时长的召唤每轮只减一次并如期消失', () => {
+    const bundle = mkBundle();
+    let s: CombatState = createCombatState(bundle);
+    s = withAutomaton(s, spawnAutomaton('甲'));
+
+    const freeze = castSummon(s, bundle);
+    const requestId =
+      freeze.requiredInput?.kind === 'CharGenRequest' ? freeze.requiredInput.requestId : '';
+    const summoned = reduce(bundle, freeze.next!, {
+      commandId: 'c2',
+      expectedRevision: freeze.next!.revision,
+      kind: 'SupplyUnit',
+      actorId: '甲',
+      cost: 'none',
+      payload: { requestId, definition: ghoul() },
+    });
+    const ghoulId = '腐化食尸鬼';
+    const durationOf = (st: CombatState) =>
+      st.units[ghoulId]?.statusEffects.find((x) => x.name === '召唤时限')?.remainingTime;
+    expect(durationOf(summoned.next!)).toBe(2);
+
+    // 第 1 轮 close：2 → 1
+    const after1 = applyOutcome(summoned.next!, handleRoundClose(bundle, summoned.next!));
+    expect(durationOf(after1)).toBe(1);
+
+    // 第 2 轮 open：**一动不动**（修之前这里 1 → 0，buff 被删、单位却还在）
+    const afterOpen = applyOutcome(after1, handleRoundOpen(bundle, after1));
+    expect(afterOpen.units[ghoulId]).toBeTruthy();
+    expect(durationOf(afterOpen)).toBe(1);
+
+    // 第 2 轮 close：1 → 0 → 真的消失
+    const rc2 = handleRoundClose(bundle, afterOpen);
+    expect(rc2.removeUnitIds).toContain(ghoulId);
+    expect(rc2.events.some((e) => e.kind === 'UnitDespawned')).toBe(true);
+    expect(applyOutcome(afterOpen, rc2).units[ghoulId]).toBeUndefined();
   });
 });

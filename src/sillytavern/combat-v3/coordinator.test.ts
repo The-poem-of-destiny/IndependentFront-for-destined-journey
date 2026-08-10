@@ -15,6 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildUnitPersistPatches,
+  currentInitiative,
   resolveUnitIdByName,
   runCombatV3,
   UnsupportedInM2,
@@ -128,6 +129,47 @@ function atkTurn(): CombatCommand[] {
     },
   ];
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// COR-12（2026-08-09 审查）：续骰 / rejection 恢复必须指向**内核当前行动单位**
+// ══════════════════════════════════════════════════════════════════════════
+describe('COR-12：恢复用的是当前行动单位，不是先攻首位', () => {
+  /** 最小 session 替身：phase 决定 currentTurnIndex 到底算不算数 */
+  const sessionWith = (order: string[], idx: number, phase = 'SlotConsume') =>
+    ({ snapshot: () => ({ initiativeOrder: order, currentTurnIndex: idx, phase }) }) as never;
+
+  it('🔴 回合中（SlotConsume）返回当前单位 —— 修复前返回 initiativeOrder[0]', () => {
+    // 这正是那条 bug 的形状：乙 正在行动时骰子耗尽 → 续骰 → 恢复却问 甲，
+    // 于是下一条命令带着错误行动者，consumeSlot 以 INVALID_PHASE 拒绝，
+    // coordinator 跳出并以空补丁放弃整场战斗。
+    expect(currentInitiative(sessionWith(['甲', '乙', '丙'], 1))).toBe('乙');
+    expect(currentInitiative(sessionWith(['甲', '乙', '丙'], 2))).toBe('丙');
+  });
+
+  it('回合中的其余三个 phase 同样算数（UnitTurnOpen / MoraleCheck / UnitTurnClose）', () => {
+    for (const phase of ['UnitTurnOpen', 'MoraleCheck', 'UnitTurnClose']) {
+      expect(currentInitiative(sessionWith(['甲', '乙'], 1, phase))).toBe('乙');
+    }
+  });
+
+  // 🔴 2026-08-10 审查逮到：初版没有 phase 分流，在**最常发生**的那条续骰路径上反而更差。
+  // initiative 通道只有 10 颗骰（32/10/7/6/5），4 个单位打到第 3 轮必然耗尽；而
+  // `initiative.ts` 骰子耗尽时 `return out` 早于 `currentTurnIndex = 0`，
+  // `unit-turn` 收尾最后一位时又不写该字段（停在 len-1），`reduceSupplyDice` 也零推进
+  // —— 于是这里拿到的是**上一轮先攻末位**，比旧代码的「上一轮首位」更不可能对。
+  it('🔴 Initiative / RoundOpen / CombatOpen 下游标是陈旧的 → 退回 initiativeOrder[0]', () => {
+    for (const phase of ['Initiative', 'RoundOpen', 'CombatOpen', 'RoundClose']) {
+      // 游标停在末位（上一轮收尾留下的残值），但正确答案要等重掷先攻才知道
+      expect(currentInitiative(sessionWith(['甲', '乙', '丙'], 2, phase))).toBe('甲');
+    }
+  });
+
+  it('游标越界钳到末位、空序列返回空串（对齐 phases/unit-turn 的 currentUnitId）', () => {
+    expect(currentInitiative(sessionWith(['甲', '乙'], 9))).toBe('乙');
+    expect(currentInitiative(sessionWith([], 0))).toBe('');
+    expect(currentInitiative(sessionWith([], 0, 'Initiative'))).toBe('');
+  });
+});
 
 describe('A2-1：终局一次 commitChatState', () => {
   it('甲攻击乙 → 乙死亡 → hp_zero → settle → 只 commit 一次', async () => {
