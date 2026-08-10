@@ -849,7 +849,10 @@ export function collectSettlementFacts(events: readonly DomainEvent[]): Settleme
       case 'DamageApplied': {
         const fact =
           facts.find(
-            (f) => f.attackerId === evt.attackerId && f.targetId === evt.targetId && f.final === undefined,
+            (f) =>
+              f.attackerId === evt.attackerId &&
+              f.targetId === evt.targetId &&
+              f.final === undefined,
           ) ?? facts.find((f) => f.attackerId === evt.attackerId && f.targetId === evt.targetId);
         if (fact) {
           fact.preReduction = evt.preReduction;
@@ -1022,9 +1025,7 @@ async function executeCombatQuery(
         variables: ctx.context?.variables ?? {},
       });
     default:
-      throw new Error(
-        `未知查询工具「${name}」，可用: ${[...COMBAT_QUERY_TOOLS].join(', ')}`,
-      );
+      throw new Error(`未知查询工具「${name}」，可用: ${[...COMBAT_QUERY_TOOLS].join(', ')}`);
   }
 }
 

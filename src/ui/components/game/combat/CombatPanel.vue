@@ -86,9 +86,7 @@ function confirmRestart() {
 
     <!-- 重开战斗确认（§3.5 原文文案） -->
     <AppModal :open="restartOpen" title="重开战斗" size="sm" @update:open="restartOpen = $event">
-      <p class="combat-confirm-text">
-        重新开始本场战斗？当前战斗进度将丢弃，回到开战前状态。
-      </p>
+      <p class="combat-confirm-text">重新开始本场战斗？当前战斗进度将丢弃，回到开战前状态。</p>
       <template #footer>
         <AppButton variant="ghost" size="sm" @click="restartOpen = false">再想想</AppButton>
         <AppButton variant="primary" size="sm" @click="confirmRestart">重新开始</AppButton>

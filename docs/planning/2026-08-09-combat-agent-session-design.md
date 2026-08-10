@@ -23,13 +23,13 @@
 
 ### 1.2 已确认的问题（真机证据）
 
-| # | 问题 | 证据 |
-|---|------|------|
-| 1 | **战斗 Agent 提示词缺失**（仅 125 字，AI 靠瞎猜决策） | reasoning 14812 字全是"我猜是狼人，可能用爪击" |
-| 2 | **查询工具被误当 Command**（get_character 返回 pass-attack） | reasoning："returned PassAttack commands instead of character data" |
-| 3 | **战斗面板不弹出**（v3_combat_started 从未 emit） | coordinator 只 emit dispatch 后事件，漏了 openCombat 的 CombatOpened |
-| 4 | **v3 数据流未接进 CombatPanel**（面板读 v2 activeCombat，v3 写 v3ActiveCombat） | CombatPanel.vue:12-17 vs game-store.ts:152 |
-| 5 | **阵营误判**（非 player 全当 enemy） | 已修（allies/enemies），待真机验证 |
+| #   | 问题                                                                            | 证据                                                                 |
+| --- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| 1   | **战斗 Agent 提示词缺失**（仅 125 字，AI 靠瞎猜决策）                           | reasoning 14812 字全是"我猜是狼人，可能用爪击"                       |
+| 2   | **查询工具被误当 Command**（get_character 返回 pass-attack）                    | reasoning："returned PassAttack commands instead of character data"  |
+| 3   | **战斗面板不弹出**（v3_combat_started 从未 emit）                               | coordinator 只 emit dispatch 后事件，漏了 openCombat 的 CombatOpened |
+| 4   | **v3 数据流未接进 CombatPanel**（面板读 v2 activeCombat，v3 写 v3ActiveCombat） | CombatPanel.vue:12-17 vs game-store.ts:152                           |
+| 5   | **阵营误判**（非 player 全当 enemy）                                            | 已修（allies/enemies），待真机验证                                   |
 
 ---
 
@@ -57,6 +57,7 @@
 **现状**：`chatWithTools` 走 `chat`（非流式，一次性等完整响应）。`agent-client` 已有 `chatStream` 能力但战斗未用。
 
 **候选方案**：
+
 - **A. 开流式**：正文按 token 流出，玩家能实时看到 AI 的决策/叙事；但工具调用链在流式中要逐段解析（assistant 消息分片），实现复杂
 - **B. 保持非流式**：整段等完再渲染，简单可靠；持久会话模式下每回合等待时间可能较长（多轮工具 + 长正文）
 
@@ -67,6 +68,7 @@
 **现状**：战斗工具 schema 已定义（agent-tools.ts 6+4 个），但 coordinator 传 `tools: undefined`（已修：注入 getToolsForAgent）。**AI 不知道"何时该调哪个工具"**——system prompt 没教它"想用技能先 get_character"。
 
 **候选方案**：
+
 - **A. system prompt 明确工具链**：教 AI"决策前先 get_combat_state 拿当前面板 → 需要技能详情再 get_character/get_inventory → 最后 declare_attack/declare_action"
 - **B. 工具结果只喂当轮、不进历史**：避免历史里出现同一角色多版本状态（前文分析过的坑）
 - **C. 查询类 vs 命令类工具分开处理**：查询工具返回数据、不产生 Command；命令工具才映射到 Command（这是问题 2 的修复）
@@ -78,6 +80,7 @@
 **现状**：`chatWithTools` 收集 reasoning（agent-client.ts:220 `[Round N]` 前缀），但**只进 agentLog，不展示给玩家**。DebugPanel 能看到。
 
 **候选方案**：
+
 - **A. 完全隐藏**：思维链只进日志，玩家只看正文/决策结果
 - **B. 战斗面板展示思维链**：玩家能看到 AI 的决策过程（像 COT 展示），增加透明感但打断沉浸
 - **C. 摘要式展示**：面板显示"敌方决定攻击奥利雅思"这种一行决策说明，不暴露完整思维链
@@ -89,6 +92,7 @@
 **现状**：战斗回退 = 重进（重新触发 combat_trigger）。存档快照（restoreSnapshot）是另一套（回合级存档，恢复后清理 createdAt 之后的分支）。
 
 **候选方案**：
+
 - **A. 战斗前自动打快照**：进入战斗时打一张 pre-combat 快照，玩家可回退到开战前（现状有 reason='pre-combat' 快照类型但未见实际触发）
 - **B. 沿用现状**：回退走回合级快照（restoreSnapshot），战斗中途回退 = 恢复上一回合存档
 - **C. 战斗内 checkpoint**：持久会话模式下，每回合存 CombatState 快照，可逐回合回退（最细粒度，实现最重）
@@ -98,6 +102,7 @@
 ### 决策 6：战斗 system prompt 内容清单（无论 1A/1B 都要补）
 
 需要覆盖：
+
 - 角色定位：你是"敌方单位"决策 agent；玩家控制"友方"
 - 面板解读：怎么读 `{战况总览}`（回合/阵营/HP/MP/SP/攻/动/状态/战意/序列/FP）
 - 每回合固定流程（主人设计）：重新获取角色资源 → 判断当前单位 → 声明动作 → 正文 → 停止符
@@ -125,10 +130,10 @@
 
 ## 四、附：问题修复清单（决策后一并实施）
 
-| # | 问题 | 状态 |
-|---|------|------|
-| 1 | 战斗 Agent 提示词缺失 | 待决策 1+6 |
-| 2 | 查询工具被误当 Command | 待决策 3C |
-| 3 | 战斗面板不弹出（CombatOpened 未 emit） | 待修（纯 bug，不依赖决策） |
-| 4 | v3 数据流未接进 CombatPanel | 待修（与决策 1 相关） |
-| 5 | 阵营误判（allies/enemies） | 已修，待真机验证 |
+| #   | 问题                                   | 状态                       |
+| --- | -------------------------------------- | -------------------------- |
+| 1   | 战斗 Agent 提示词缺失                  | 待决策 1+6                 |
+| 2   | 查询工具被误当 Command                 | 待决策 3C                  |
+| 3   | 战斗面板不弹出（CombatOpened 未 emit） | 待修（纯 bug，不依赖决策） |
+| 4   | v3 数据流未接进 CombatPanel            | 待修（与决策 1 相关）      |
+| 5   | 阵营误判（allies/enemies）             | 已修，待真机验证           |

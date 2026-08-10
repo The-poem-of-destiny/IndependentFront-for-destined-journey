@@ -498,7 +498,9 @@ describe('combat system prompt 来源（2026-08-09 §2.7：configs 优先，删�
     }) as AgentConfig;
 
   /** 让敌方（乙）轮到自己行动 → 捕获 chatWithTools 收到的第一条 system 消息 */
-  async function captureSystemContent(over: { configs?: AgentConfig[] }): Promise<string | undefined> {
+  async function captureSystemContent(over: {
+    configs?: AgentConfig[];
+  }): Promise<string | undefined> {
     const { opts, setQueue } = mkOpts();
     opts.bundle = mkBundle({
       combatId: 'coord-sys-test',
@@ -666,7 +668,10 @@ describe('查询/命令分流（2026-08-09 §2.2 决策 3C：查询工具不产 
     const { opts, history } = enemyTurnOpts([
       [
         { name: 'get_character', args: { characterId: '乙' } },
-        { name: 'declare_attack', args: { actorName: '乙', targetName: '甲', intentionLevel: '战术' } },
+        {
+          name: 'declare_attack',
+          args: { actorName: '乙', targetName: '甲', intentionLevel: '战术' },
+        },
       ],
       [{ name: 'pass_slot', args: { actorName: '乙', slot: 'action' } }],
     ]);
@@ -694,7 +699,10 @@ describe('查询/命令分流（2026-08-09 §2.2 决策 3C：查询工具不产 
     const { opts, history } = enemyTurnOpts([
       [
         { name: 'get_unit_detail', args: { characterId: '乙' } },
-        { name: 'declare_attack', args: { actorName: '乙', targetName: '甲', intentionLevel: '战术' } },
+        {
+          name: 'declare_attack',
+          args: { actorName: '乙', targetName: '甲', intentionLevel: '战术' },
+        },
       ],
       [{ name: 'pass_slot', args: { actorName: '乙', slot: 'action' } }],
     ]);
@@ -723,7 +731,10 @@ describe('查询/命令分流（2026-08-09 §2.2 决策 3C：查询工具不产 
     // lastCommandFromResult 必须跳过末尾查询、取 declare_attack，否则旧逻辑静默 pass。
     const { opts, history } = enemyTurnOpts([
       [
-        { name: 'declare_attack', args: { actorName: '乙', targetName: '甲', intentionLevel: '战术' } },
+        {
+          name: 'declare_attack',
+          args: { actorName: '乙', targetName: '甲', intentionLevel: '战术' },
+        },
         { name: 'get_character', args: { characterId: '乙' } },
       ],
       [{ name: 'pass_slot', args: { actorName: '乙', slot: 'action' } }],
@@ -850,7 +861,10 @@ describe('持久会话（2026-08-09 §2.1 决策 1A：整场一个 client + 消�
 
     // 持久会话句柄（模拟 runCombatV3 闭包持有）：messages 留空数组，由 routeEnemyCommand
     // 首次调用时 push system，随后逐回合累积
-    const combatSession = { messages: [] as Array<{ role: string; content: string | null }>, client: null };
+    const combatSession = {
+      messages: [] as Array<{ role: string; content: string | null }>,
+      client: null,
+    };
 
     // mock client：记录工厂调用次数 + 捕获每次收到的 messages 引用；脚本按调用序
     // （每次 chatWithTools 调用 = 一个敌方槽位决策）消费，末尾重复最后一条。
@@ -862,10 +876,18 @@ describe('持久会话（2026-08-09 §2.1 决策 1A：整场一个 client + 消�
       // 第 1 次调用（乙·攻击槽）：先查后攻
       [
         { name: 'get_character', args: { characterId: '乙' } },
-        { name: 'declare_attack', args: { actorName: '乙', targetName: '甲', intentionLevel: '战术' } },
+        {
+          name: 'declare_attack',
+          args: { actorName: '乙', targetName: '甲', intentionLevel: '战术' },
+        },
       ],
       // 第 2 次调用（丙·攻击槽）：直接攻
-      [{ name: 'declare_attack', args: { actorName: '丙', targetName: '甲', intentionLevel: '常规' } }],
+      [
+        {
+          name: 'declare_attack',
+          args: { actorName: '丙', targetName: '甲', intentionLevel: '常规' },
+        },
+      ],
     ];
     let callIdx = 0;
     const ctx: Parameters<typeof routeEnemyCommand>[2] = {
@@ -934,7 +956,9 @@ describe('持久会话（2026-08-09 §2.1 决策 1A：整场一个 client + 消�
     expect(toolMsgs.some((m) => (m.content ?? '').includes('"found":true'))).toBe(true);
     // 7. 消息形状对 API 合法：每条 tool 消息都有对应 assistant.tool_calls.id
     const toolCallIds = lastSnapshot
-      .filter((m) => m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0)
+      .filter(
+        (m) => m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0,
+      )
       .flatMap((m) => (m.tool_calls as Array<{ id: string }>).map((tc) => tc.id));
     expect(toolCallIds.length).toBeGreaterThanOrEqual(1);
     for (const id of toolMsgs.map((m) => m.tool_call_id)) {
@@ -972,7 +996,8 @@ describe('持久会话（2026-08-09 §2.1 决策 1A：整场一个 client + 消�
       let q: CombatCommand[] = [];
       let n = 0;
       return async () => {
-        if (q.length === 0) q = atkTurn().map((c) => ({ ...c, commandId: `${c.commandId}-${++n}` }));
+        if (q.length === 0)
+          q = atkTurn().map((c) => ({ ...c, commandId: `${c.commandId}-${++n}` }));
         return q.shift()!;
       };
     })();
@@ -983,7 +1008,12 @@ describe('持久会话（2026-08-09 §2.1 决策 1A：整场一个 client + 消�
     let callIdx = 0;
     const scripts: Array<Array<{ name: string; args: Record<string, any> }>> = [
       // 意图用常规：避免战术意图的对抗检定路径（本任务无关的既有协调局限）
-      [{ name: 'declare_attack', args: { actorName: '乙', targetName: '甲', intentionLevel: '常规' } }],
+      [
+        {
+          name: 'declare_attack',
+          args: { actorName: '乙', targetName: '甲', intentionLevel: '常规' },
+        },
+      ],
       [{ name: 'pass_slot', args: { actorName: '乙', slot: 'action' } }],
     ];
     opts.deps.clientFactory = () => {
@@ -1076,8 +1106,24 @@ describe('结算演绎（2026-08-09 §2.5：数字即时 + AI 叙事补上）', 
     const facts = collectSettlementFacts([
       { kind: 'AttackDeclared', attackerId: '甲', targetId: '乙', intentionLevel: '常规' },
       { kind: 'AttackDeclared', attackerId: '甲', targetId: '乙', intentionLevel: '战术' },
-      { kind: 'AttackResolved', attackerId: '甲', targetId: '乙', checkValue: 12, rating: '常规', hit: true, dice: [12] },
-      { kind: 'AttackResolved', attackerId: '甲', targetId: '乙', checkValue: 8, rating: '战术', hit: false, dice: [8] },
+      {
+        kind: 'AttackResolved',
+        attackerId: '甲',
+        targetId: '乙',
+        checkValue: 12,
+        rating: '常规',
+        hit: true,
+        dice: [12],
+      },
+      {
+        kind: 'AttackResolved',
+        attackerId: '甲',
+        targetId: '乙',
+        checkValue: 8,
+        rating: '战术',
+        hit: false,
+        dice: [8],
+      },
     ]);
     expect(facts).toHaveLength(2);
     expect(facts[0].checkValue).toBe(12);
@@ -1176,7 +1222,8 @@ describe('结算演绎（2026-08-09 §2.5：数字即时 + AI 叙事补上）', 
       let q: CombatCommand[] = [];
       let n = 0;
       return async () => {
-        if (q.length === 0) q = atkTurn().map((c) => ({ ...c, commandId: `${c.commandId}-${++n}` }));
+        if (q.length === 0)
+          q = atkTurn().map((c) => ({ ...c, commandId: `${c.commandId}-${++n}` }));
         return q.shift()!;
       };
     })();
@@ -1321,9 +1368,9 @@ describe('T10：终局落库回写（2026-08-09 §2.6 方案 1：战斗后角色
 
     // FP patch 与单位回写 patch 在**同一次** commit 的同一数组里
     // （op:'set' 是 toPatches 既有形态，不在 StatePatchOp 联合，断言时绕过类型）
-    expect(patches.some((p) => (p as { op?: string }).op === 'set' && p.target === 'users.fp')).toBe(
-      true,
-    );
+    expect(
+      patches.some((p) => (p as { op?: string }).op === 'set' && p.target === 'users.fp'),
+    ).toBe(true);
 
     // 甲：满血 500 / mp 100 / sp 50 覆写（战斗无消耗，原样回写）
     expect(patches).toContainEqual({ op: 'set_hp', target: 'characters.甲', value: 500 });
@@ -1389,7 +1436,13 @@ describe('T11：write_summary 终局摘要收集（2026-08-09 §2.2 改造：不
       combatId: 'coord-t11-e2e',
       participants: [
         mkParticipant('甲', { hp: 5000, maxHp: 5000 }),
-        mkParticipant('乙', { side: 'enemy', characterId: '乙', name: '乙', hp: 1000, maxHp: 1000 }),
+        mkParticipant('乙', {
+          side: 'enemy',
+          characterId: '乙',
+          name: '乙',
+          hp: 1000,
+          maxHp: 1000,
+        }),
       ],
     });
     // 乙的行动脚本（每次 chatWithTools 调用 = 乙一个槽位的决策；照持久会话端到端先例
@@ -1429,7 +1482,8 @@ describe('T11：write_summary 终局摘要收集（2026-08-09 §2.2 改造：不
       let q: CombatCommand[] = [];
       let n = 0;
       return async () => {
-        if (q.length === 0) q = atkTurn().map((c) => ({ ...c, commandId: `${c.commandId}-${++n}` }));
+        if (q.length === 0)
+          q = atkTurn().map((c) => ({ ...c, commandId: `${c.commandId}-${++n}` }));
         return q.shift()!;
       };
     })();

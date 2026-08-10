@@ -44,18 +44,22 @@ vi.mock('@engine/database', () => ({
 }));
 
 // 工坊 P2 (D5): EJS 差量落库走 createStateManager(...).commitChatState —— 拦下来验载荷
-const { commitSpy, advanceTurnSpy, toastSpy, createSnapshotSpy, runCombatV3Mock } = vi.hoisted(() => ({
-  commitSpy: vi.fn(async () => ({
-    success: true,
-    patchesApplied: 0,
-    eventsGenerated: [],
-    errors: [] as string[],
-  })),
-  advanceTurnSpy: vi.fn(async () => {}),
-  createSnapshotSpy: vi.fn(async () => ({ id: 'snap-pre-combat', reason: 'pre-combat', turn: 0 }) as any),
-  toastSpy: vi.fn(),
-  runCombatV3Mock: vi.fn(),
-}));
+const { commitSpy, advanceTurnSpy, toastSpy, createSnapshotSpy, runCombatV3Mock } = vi.hoisted(
+  () => ({
+    commitSpy: vi.fn(async () => ({
+      success: true,
+      patchesApplied: 0,
+      eventsGenerated: [],
+      errors: [] as string[],
+    })),
+    advanceTurnSpy: vi.fn(async () => {}),
+    createSnapshotSpy: vi.fn(
+      async () => ({ id: 'snap-pre-combat', reason: 'pre-combat', turn: 0 }) as any,
+    ),
+    toastSpy: vi.fn(),
+    runCombatV3Mock: vi.fn(),
+  }),
+);
 
 vi.mock('@engine/state-manager', () => ({
   createStateManager: vi.fn(() => ({

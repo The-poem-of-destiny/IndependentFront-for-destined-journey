@@ -23,7 +23,12 @@ import {
 } from '@engine/database';
 import { createDefaultCharacterState } from '@engine/types';
 import type { SaveSlot, SaveProfile, CharacterState, PlotOutline, PlotEvent } from '@engine/types';
-import { runCombatV3, type CombatCommand, type CombatView, type RunCombatV3Opts } from '@engine/combat-v3';
+import {
+  runCombatV3,
+  type CombatCommand,
+  type CombatView,
+  type RunCombatV3Opts,
+} from '@engine/combat-v3';
 import type { CombatClient, CombatEvent } from '@engine/combat-v2-types';
 import { mkAttack, mkBundle, mkParticipant, mkPass } from '../../sillytavern/combat-v3/test-utils';
 
@@ -658,7 +663,9 @@ describe('M2 v3 战斗接线', () => {
     await store.loadSave(SAVE_ID);
 
     // 模拟战斗中：角色被削到 hp=30（战斗进行中的状态，快照恢复后应回到 80）
-    await saveCharacter(makeChar({ id: 'hero', name: '理查德', type: 'player', hp: 30, maxHp: 100 }));
+    await saveCharacter(
+      makeChar({ id: 'hero', name: '理查德', type: 'player', hp: 30, maxHp: 100 }),
+    );
 
     let restarted = false;
     store.setCombatCoordinator({
@@ -775,7 +782,12 @@ describe('M2 v3 战斗接线', () => {
     await vi.waitFor(() => {
       expect(seen.filter((e) => e.type === 'v3_awaiting_player_input').length).toBe(2);
     });
-    await store.submitCombatCommand({ kind: 'PassAction', actorId: '甲', cost: 'action', payload: {} });
+    await store.submitCombatCommand({
+      kind: 'PassAction',
+      actorId: '甲',
+      cost: 'action',
+      payload: {},
+    });
 
     const result = await runPromise;
     expect(result.outcome).toBe('ally_win');
@@ -796,7 +808,9 @@ describe('T15 v3 事件链路（真实 runCombatV3 → store）', () => {
   });
 
   /** fake 敌方 agent client：脚本化工具调用（一次调用 = 一个 Command）；无脚本 → 防御性 pass */
-  function fakeEnemyClient(script: Array<{ name: string; args: Record<string, any> }>): CombatClient {
+  function fakeEnemyClient(
+    script: Array<{ name: string; args: Record<string, any> }>,
+  ): CombatClient {
     let idx = 0;
     return {
       chatWithTools: async () => {

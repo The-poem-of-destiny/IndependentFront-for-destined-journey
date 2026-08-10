@@ -139,24 +139,9 @@ const buffChips = computed(() =>
 
     <!-- ── HP / MP / SP 资源条 ── -->
     <div class="unit-resources" :class="{ 'hp-flashing': isLowHp }">
-      <ResourceBar
-        label="HP"
-        :current="unit.hp"
-        :max="unit.maxHp"
-        color="var(--theme-hp)"
-      />
-      <ResourceBar
-        label="MP"
-        :current="unit.mp"
-        :max="unit.maxMp"
-        color="var(--theme-mp)"
-      />
-      <ResourceBar
-        label="SP"
-        :current="unit.sp"
-        :max="unit.maxSp"
-        color="var(--theme-sp)"
-      />
+      <ResourceBar label="HP" :current="unit.hp" :max="unit.maxHp" color="var(--theme-hp)" />
+      <ResourceBar label="MP" :current="unit.mp" :max="unit.maxMp" color="var(--theme-mp)" />
+      <ResourceBar label="SP" :current="unit.sp" :max="unit.maxSp" color="var(--theme-sp)" />
     </div>
 
     <!-- ── Buff chips（每个 buff 和它的剩余回合小标成组渲染） ── -->

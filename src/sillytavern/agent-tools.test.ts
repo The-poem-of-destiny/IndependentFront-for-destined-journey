@@ -286,13 +286,23 @@ describe('复用工具回归保护', () => {
         { name: '钢铁皮肤', description: '硬化表皮。', type: 'passive' },
       ],
       inventory: [
-        { name: '巨剑', quantity: 1, equippedSlot: '武器', rarity: '史诗', effects: { 锋利: '伤害+8' } },
+        {
+          name: '巨剑',
+          quantity: 1,
+          equippedSlot: '武器',
+          rarity: '史诗',
+          effects: { 锋利: '伤害+8' },
+        },
         { name: '重甲', quantity: 1, equippedSlot: '身体', rarity: '稀有' },
         { name: '治疗药水', quantity: 2, type: '消耗品' }, // 躺背包 → 不出现在 equipment
       ],
     });
 
-    const r = await executeToolCall('get_unit_detail', { characterId: '敌方首领' }, makeCtx([char]));
+    const r = await executeToolCall(
+      'get_unit_detail',
+      { characterId: '敌方首领' },
+      makeCtx([char]),
+    );
 
     expect(r.found).toBe(true);
     // 五维
@@ -312,7 +322,11 @@ describe('复用工具回归保护', () => {
   });
 
   it('get_unit_detail 未命中返回 found:false', async () => {
-    const r = await executeToolCall('get_unit_detail', { characterId: '不存在的单位' }, makeCtx([]));
+    const r = await executeToolCall(
+      'get_unit_detail',
+      { characterId: '不存在的单位' },
+      makeCtx([]),
+    );
     expect(r.found).toBe(false);
     expect(r.characterId).toBe('不存在的单位');
   });

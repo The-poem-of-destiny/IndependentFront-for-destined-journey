@@ -140,7 +140,15 @@ describe('映射正确性', () => {
       },
     };
     const out = projectToUi(
-      [{ kind: 'CombatOpened', combatId: 'c', combatType: '标准', unitIds: ['甲', '乙'], bundleHash: 'h' }],
+      [
+        {
+          kind: 'CombatOpened',
+          combatId: 'c',
+          combatType: '标准',
+          unitIds: ['甲', '乙'],
+          bundleHash: 'h',
+        },
+      ],
       { units },
     );
     expect(out).toHaveLength(2);
