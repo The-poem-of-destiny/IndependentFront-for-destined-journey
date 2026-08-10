@@ -371,8 +371,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── game/
 │   │   ├── GamePage.vue             ← 游戏页主布局（三栏 + 6 弹窗；持有 --rail-w）
 │   │   ├── MapPanel.vue / TopBar.vue / SideToolbar.vue / ScenePanel.vue / ChatFlow.vue / InputBar.vue
-│   │   │                               [图像 v1] ChatFlow 右键菜单加「为这一段配图」：回退仍只在最新
-│   │   │                               一条 assistant 消息，配图**哪条都行**（story 被教了克制使用）
+│   │   │                               [图像 v1] ChatFlow 右键菜单加「为这一段配图」：回退只在**最新一条**
+│   │   │                               消息上 —— assistant「回退本轮」/ user「回退到这条输入」（正文没
+│   │   │                               生成时右键自己的输入撤回重发），配图**哪条都行**（story 被教了克制使用）
 │   │   │                               🔴 `off` 档下这一项**不出现** —— 功能整个关掉了、右键里却还留着
 │   │   │                                  一个能开始花钱的入口，是「关掉了但没完全关掉」那类最招人烦的 bug
 │   │   │                               锚点是 anchorKind:'message-end'，不做选中文本锚定（原文一改就丢）

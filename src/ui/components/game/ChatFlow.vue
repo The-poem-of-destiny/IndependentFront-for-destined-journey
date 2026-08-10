@@ -145,8 +145,10 @@ function handleNarrativeResize() {
 /**
  * 🔴 菜单项**按消息过滤**（D33）：
  *
- * - 回退本轮 —— 仍然只在**最新一条** assistant 消息上出现（回退的是"这一轮"，
- *   对着三屏之前的段落给它，语义是空的）。
+ * - 回退 —— 只在**最新一条**消息上出现：assistant 消息「回退本轮」（撤回该轮、
+ *   恢复上一轮快照、把输入回填输入框）；user 消息「回退到这条输入」（正文没生成
+ *   或报错时，正文都点不到，正好右键自己的输入撤回重发）。对着三屏之前的消息给
+ *   它，语义是空的。
  * - 为这一段配图 —— **哪条都行**。story 被教了「克制使用」，所以"AI 没配图但我想要
  *   这一刻"必然存在，而付钱的是玩家。
  * - 🔴 `off` 档下配图项**不出现**。整个功能关掉时右键里还留着一个能开始花钱的入口，
@@ -158,6 +160,7 @@ const ctxMenu = ref<{
   x: number;
   y: number;
   msgId: string;
+  role: ChatMessage['role'];
   canRollback: boolean;
   canImage: boolean;
 } | null>(null);
@@ -171,7 +174,25 @@ const latestAssistantMsg = computed<ChatMessage | undefined>(() => {
   return undefined;
 });
 
+/** 最新一条 user 消息（user 消息上「回退到这条输入」仅对它生效） */
+const latestUserMsg = computed<ChatMessage | undefined>(() => {
+  const list = props.messages ?? [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i].role === 'user') return list[i];
+  }
+  return undefined;
+});
+
+/** 「回退」项的文案：assistant = 回退本轮；user = 回退到这条输入 */
+function rollbackLabel(msg: ChatMessage): string {
+  return msg.role === 'user' ? '回退到这条输入' : '回退本轮';
+}
+
 function menuFor(msg: ChatMessage): { canRollback: boolean; canImage: boolean } {
+  // user 消息：只有最新一条能回退；「为这一段配图」是给正文的，user 上不出现
+  if (msg.role === 'user') {
+    return { canRollback: latestUserMsg.value?.id === msg.id, canImage: false };
+  }
   return {
     canRollback: latestAssistantMsg.value?.id === msg.id,
     canImage: s.imageGenMode !== 'off',
@@ -190,7 +211,7 @@ function ctxHint(msg: ChatMessage): string {
   if (!canOpenMenu(msg)) return '';
   const can = menuFor(msg);
   const items: string[] = [];
-  if (can.canRollback) items.push('回退本轮');
+  if (can.canRollback) items.push(rollbackLabel(msg));
   if (can.canImage) items.push('为这一段配图');
   items.push('复制');
   return `右键：${items.join(' / ')}`;
@@ -202,7 +223,7 @@ function onContextMenu(e: MouseEvent, msg: ChatMessage) {
   // 视口夹紧，避免菜单溢出屏幕
   const x = Math.min(e.clientX, window.innerWidth - 200);
   const y = Math.min(e.clientY, window.innerHeight - 128);
-  ctxMenu.value = { x, y, msgId: msg.id, ...menuFor(msg) };
+  ctxMenu.value = { x, y, msgId: msg.id, role: msg.role, ...menuFor(msg) };
 }
 
 function closeCtxMenu() {
@@ -322,7 +343,12 @@ onUnmounted(() => {
 
       <template v-for="msg in messages" :key="msg.id">
         <!-- 用户消息 -->
-        <div v-if="msg.role === 'user'" class="bubble-row bubble-row-player">
+        <div
+          v-if="msg.role === 'user'"
+          class="bubble-row bubble-row-player"
+          :title="ctxHint(msg)"
+          @contextmenu="onContextMenu($event, msg)"
+        >
           <div class="bubble bubble-player">
             <span class="bubble-prefix">你:</span>
             <!-- 内容先过 escapeHtml()，再只把换行还原成 <br>。别把 escapeHtml 摘掉 -->
@@ -437,7 +463,9 @@ onUnmounted(() => {
           :disabled="game.isInCombat"
           @click.stop="ctxRollback"
         >
-          <i class="fa-solid fa-rotate-left" /> 回退本轮
+          <i class="fa-solid fa-rotate-left" /> {{
+            ctxMenu.role === 'user' ? '回退到这条输入' : '回退本轮'
+          }}
         </button>
         <button v-if="ctxMenu.canImage" class="ctx-item" @click.stop="ctxSceneImage">
           <i class="fa-solid fa-image" /> 为这一段配图
