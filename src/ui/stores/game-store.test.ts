@@ -32,6 +32,16 @@ import {
 import type { CombatClient, CombatEvent } from '@engine/combat-v2-types';
 import { mkAttack, mkBundle, mkParticipant, mkPass } from '../../sillytavern/combat-v3/test-utils';
 
+/**
+ * 引擎的 `allocateAttributePoint` 在这里被替身掉 —— 它自己的校验/落库有一整份真实 DB
+ * 集成测试（`src/sillytavern/attribute-allocation.test.ts`）。本文件要证的是**接线**：
+ * 参数按 (saveId, 玩家名, 维度) 传对了，成功之后回读了。
+ */
+const allocateAttributePointMock = vi.hoisted(() => vi.fn());
+vi.mock('@engine/attribute-allocation', () => ({
+  allocateAttributePoint: allocateAttributePointMock,
+}));
+
 // ===== 辅助 =====
 
 const SAVE_ID = 'save-refresh-test';
@@ -973,6 +983,90 @@ describe('EJS 诊断累计', () => {
     expect(game.ejsFallbacks).toHaveLength(1);
     expect(game.ejsVarsRejections).toHaveLength(1);
     expect(game.ejsUiLog).toHaveLength(1);
+  });
+});
+
+// ===== allocateAttrPoint（自由属性点） =====
+
+describe('allocateAttrPoint', () => {
+  let store: ReturnType<typeof useGameStore>;
+
+  beforeEach(async () => {
+    try {
+      await clearAllData();
+    } catch {
+      /* db may not exist yet */
+    }
+    await initializeDatabase();
+    allocateAttributePointMock.mockReset();
+    store = makeStore();
+  });
+
+  /** 存档 + 一个叫「理查德」的主角 */
+  async function seedPlayer() {
+    await saveSaveSlot(makeSaveSlot());
+    await saveCharacter(
+      makeChar({ id: 'hero', name: '理查德', type: 'player', hp: 30, maxHp: 100 }),
+    );
+    await saveSaveProfile(makeProfile());
+    await store.loadSave(SAVE_ID);
+  }
+
+  it('按 (saveId, 玩家名, 维度) 调引擎，成功后回读 DB（面板才看得见新值）', async () => {
+    await seedPlayer();
+    allocateAttributePointMock.mockResolvedValue({ ok: true });
+
+    // 引擎已被替身，DB 不会自己变 —— 手动模拟「引擎落库了」，
+    // 回读跑没跑就成了内存里看得出来的差别。
+    await saveCharacter(
+      makeChar({ id: 'hero', name: '理查德', type: 'player', hp: 99, maxHp: 100 }),
+    );
+
+    const result = await store.allocateAttrPoint('str');
+
+    expect(result).toEqual({ ok: true });
+    expect(allocateAttributePointMock).toHaveBeenCalledWith(SAVE_ID, '理查德', 'str');
+    expect(store.characters.find((c) => c.id === 'hero')?.hp).toBe(99);
+  });
+
+  it('无活跃存档 → 直接 ok:false，引擎一次都不调', async () => {
+    const result = await store.allocateAttrPoint('dex');
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeTruthy();
+    expect(allocateAttributePointMock).not.toHaveBeenCalled();
+  });
+
+  it('有存档但没有主角 → ok:false，引擎一次都不调', async () => {
+    await saveSaveSlot(makeSaveSlot());
+    await store.loadSave(SAVE_ID);
+    const result = await store.allocateAttrPoint('con');
+    expect(result.ok).toBe(false);
+    expect(allocateAttributePointMock).not.toHaveBeenCalled();
+  });
+
+  it('引擎拒绝 → 原样交回失败原因，且不回读（组件负责播报）', async () => {
+    await seedPlayer();
+    allocateAttributePointMock.mockResolvedValue({ ok: false, error: '没有可用的自由属性点' });
+
+    await saveCharacter(
+      makeChar({ id: 'hero', name: '理查德', type: 'player', hp: 99, maxHp: 100 }),
+    );
+
+    const result = await store.allocateAttrPoint('int');
+
+    expect(result).toEqual({ ok: false, error: '没有可用的自由属性点' });
+    expect(store.characters.find((c) => c.id === 'hero')?.hp).toBe(30);
+  });
+
+  it('引擎抛异常 → 收成 ok:false，不把异常泼给组件', async () => {
+    await seedPlayer();
+    allocateAttributePointMock.mockRejectedValue(new Error('boom'));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await store.allocateAttrPoint('spi');
+
+    expect(result.ok).toBe(false);
+    spy.mockRestore();
   });
 });
 
