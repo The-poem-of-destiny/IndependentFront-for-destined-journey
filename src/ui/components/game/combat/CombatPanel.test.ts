@@ -163,5 +163,6 @@ describe('CombatPanel F2 就绪态', () => {
     expect(wrapper.find('.combat-ready').exists()).toBe(false);
     expect(wrapper.find('.combat-header').exists()).toBe(true); // 开打态视图
     expect(wrapper.find('.combat-action-bar').exists()).toBe(true);
+    expect(wrapper.text()).toContain('100 / 100');
   });
 });

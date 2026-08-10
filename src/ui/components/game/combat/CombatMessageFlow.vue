@@ -79,15 +79,24 @@ watch(
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--theme-primary) 2%, transparent),
+      transparent 30%
+    ),
+    var(--theme-content-bg);
 }
 
 .combat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: var(--theme-spacing-lg, 20px) 20px 28px;
+  padding: var(--theme-spacing-md) var(--theme-spacing-xl);
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: var(--theme-spacing-sm);
+  scrollbar-width: thin;
+  scrollbar-color: var(--theme-card-border) transparent;
 }
 
 /* ===== 空态（design.md §5.2） ===== */
@@ -112,12 +121,12 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 4px 0;
+  gap: var(--theme-spacing-md);
+  padding: var(--theme-spacing-xs) 0;
   font-size: 0.75rem;
   letter-spacing: 0.05em;
   color: var(--theme-text-muted);
-  font-family: var(--theme-font-title, 'Noto Serif SC', serif);
+  font-family: var(--theme-font-title);
   position: relative;
 }
 /* 两侧渐变线（::before 左 / ::after 右） */
@@ -170,17 +179,16 @@ watch(
 /* 叙事行 + 动作行均居中 */
 .bubble-row-narrative,
 .bubble-row-action {
-  justify-content: center;
+  justify-content: stretch;
 }
 
 /* ===== 叙事气泡（参考 ChatFlow .bubble-narrative-full） ===== */
 .bubble {
   width: 100%;
-  max-width: 70ch;
-  padding: 4px 8px;
-  border-radius: var(--theme-radius-md, 8px);
-  font-size: 0.9375rem;
-  line-height: 1.8;
+  padding: var(--theme-spacing-xs) var(--theme-spacing-sm);
+  border-radius: var(--theme-radius-md);
+  font-size: 0.875rem;
+  line-height: 1.7;
   text-align: left;
 }
 .bubble-narrative-full {
@@ -191,7 +199,9 @@ watch(
 
 /* 叙事正文段落（design.md §2.5 首行缩进） */
 .narrative-body {
-  font-family: var(--theme-font-title, 'Noto Serif SC', serif);
+  max-width: 90ch;
+  margin-inline: auto;
+  font-family: var(--theme-font-title);
   color: var(--theme-text-primary);
   line-height: 1.8;
   text-wrap: pretty;
@@ -210,6 +220,22 @@ watch(
 
 /* ===== 动作卡片行 ===== */
 .bubble-row-action {
-  /* CombatActionCard 自身控制宽度（max-width 72ch 级别） */
+  width: 100%;
+  position: relative;
+  padding-left: var(--theme-spacing-lg);
+}
+
+.bubble-row-action::before {
+  content: '◇';
+  position: absolute;
+  left: 0;
+  top: var(--theme-spacing-sm);
+  color: var(--theme-primary);
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.bubble-row-action :deep(.combat-action-card) {
+  width: 100%;
 }
 </style>

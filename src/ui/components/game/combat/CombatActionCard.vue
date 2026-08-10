@@ -144,6 +144,9 @@ const ratingColor = computed((): string => {
 /** 工具名 → 中文标签映射 */
 const toolLabel = computed((): string => {
   const map: Record<string, string> = {
+    attack: '攻击',
+    cost: '消耗',
+    flee: '逃跑',
     combat_attack: '攻击',
     combat_use_skill: '技能',
     combat_use_item: '道具',
@@ -363,11 +366,12 @@ const fullResult = computed((): CombatActionResult | null => {
 <style scoped>
 /* ════════ 卡片骨架 ════════ */
 .combat-action-card {
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-md, 6px);
+  border: 1px solid transparent;
+  border-bottom-color: var(--theme-card-border);
+  border-radius: 0;
   overflow: hidden;
-  background: var(--theme-card-bg);
-  box-shadow: var(--paper-stack, 0 2px 8px rgba(0, 0, 0, 0.15));
+  background: transparent;
+  box-shadow: none;
 }
 
 /* ════════ 折叠态头部 ════════ */
@@ -375,15 +379,17 @@ const fullResult = computed((): CombatActionResult | null => {
   display: flex;
   align-items: center;
   gap: var(--theme-spacing-sm, 8px);
-  padding: 8px var(--theme-spacing-md, 12px);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
   min-height: 36px; /* design §8: 触摸目标 ≥ 36px */
   cursor: pointer;
   user-select: none;
-  background: var(--theme-surface-muted);
-  transition: background 0.15s ease;
+  background: transparent;
+  transition:
+    background var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
 }
 .cac-header:hover {
-  background: var(--theme-surface-hover, var(--theme-card-bg));
+  background: color-mix(in srgb, var(--theme-primary) 5%, var(--theme-card-bg));
 }
 .cac-header:focus-visible {
   outline: 2px solid var(--theme-primary);
@@ -403,7 +409,7 @@ const fullResult = computed((): CombatActionResult | null => {
   color: var(--theme-text-muted);
   background: var(--theme-card-bg);
   padding: 1px 6px;
-  border-radius: var(--theme-radius-sm, 4px);
+  border-radius: var(--theme-radius-sm);
   border: 1px solid var(--theme-card-border);
 }
 
@@ -501,12 +507,14 @@ const fullResult = computed((): CombatActionResult | null => {
 
 /* ════════ 展开态内容 ════════ */
 .cac-body {
-  padding: var(--theme-spacing-md, 12px) var(--theme-spacing-md, 12px);
+  padding: var(--theme-spacing-md);
   display: flex;
   flex-direction: column;
   gap: var(--theme-spacing-sm, 8px);
   font-size: 0.75rem; /* 12px 管线步 */
   color: var(--theme-text-primary);
+  background: color-mix(in srgb, var(--theme-card-bg) 76%, var(--theme-content-bg));
+  border-top: 1px solid var(--theme-card-border);
 }
 
 .cac-body--fallback {

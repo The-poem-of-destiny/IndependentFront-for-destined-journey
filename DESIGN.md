@@ -55,6 +55,25 @@ Flexibility: materials and ornament may vary; frame ownership may not
 - Validate 1920 x 1080, 2560 x 1440, and 3840 x 2160, plus one taller and one
   wider stress viewport before handoff.
 
+### Combat command table
+
+Status: owner-approved structural direction
+Scope: the active combat overlay across all themes
+Flexibility: materials and ornament may vary by theme; the feature and interaction contract may not
+
+- Build the combat overlay entirely from live HTML and CSS. Do not add runtime
+  artwork for its frame, side plaques, initiative rail, ledger, or controls.
+- Preserve the composition order: header and existing initiative projection,
+  enemy roster, scrollable battle ledger, ally roster, then command dock.
+- Retain the ready gate, collapse and reopen affordance, unit details, buffs,
+  morale, structured commands, free-text commands, end turn, skip, and restart.
+- The UI may reorganize existing `CombatView` data but must not add a
+  `CombatCommand`, engine state, or combat mechanic.
+- Use each theme's semantic surfaces and colors, with the primary accent limited
+  to seams, active states, and restrained hierarchy cues.
+- Reflow the command dock and keep the battlefield scrollable on narrow
+  viewports; do not remove or merge existing actions to make them fit.
+
 ## Theme-specific decisions
 
 ### Qinghua porcelain
