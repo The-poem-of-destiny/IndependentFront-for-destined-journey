@@ -465,8 +465,8 @@ function formatJson(value: unknown): string {
   color: var(--theme-text-muted);
 }
 .debug-tool-call {
-  margin-top: 4px;
-  padding: 4px 6px;
+  margin-top: var(--theme-spacing-xs);
+  padding: var(--theme-spacing-xs) calc(var(--theme-spacing-md) / 2);
   border: 1px solid var(--theme-card-border);
   border-radius: 3px;
   background: var(--theme-card-bg);

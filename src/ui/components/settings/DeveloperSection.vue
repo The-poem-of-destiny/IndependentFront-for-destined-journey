@@ -121,7 +121,7 @@ const s = useSettingsStore().settings;
   display: inline-flex;
   align-items: center;
   gap: var(--theme-spacing-xs);
-  padding: 2px 8px;
+  padding: calc(var(--theme-spacing-xs) / 2) var(--theme-spacing-sm);
   border: 1px solid var(--theme-card-border);
   border-radius: 999px;
   color: var(--theme-text-muted);
@@ -181,7 +181,7 @@ const s = useSettingsStore().settings;
 
 .developer-capabilities strong {
   display: block;
-  margin-bottom: 2px;
+  margin-bottom: calc(var(--theme-spacing-xs) / 2);
   color: var(--theme-text-primary);
   font-size: 0.8rem;
 }

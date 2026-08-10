@@ -84,4 +84,32 @@ describe('TurnActivityLedger', () => {
     expect(wrapper.find('.activity-recovery button').exists()).toBe(true);
     wrapper.unmount();
   });
+
+  it.each([
+    ['failed', '世界的回应在此中断，可以再次尝试。'],
+    ['cancelled', '本回合已停下，可以再次尝试。'],
+  ] as const)(
+    'reopens a manually collapsed active run when it becomes %s',
+    async (status, message) => {
+      const run = makeRun();
+      const wrapper = mount(TurnActivityLedger, { props: { run, canRetry: true } });
+      const heading = wrapper.get('button.activity-heading');
+
+      await heading.trigger('click');
+      expect(heading.attributes('aria-expanded')).toBe('false');
+
+      await wrapper.setProps({
+        run: {
+          ...run,
+          status,
+          completedAt: Date.now(),
+          message,
+        },
+      });
+
+      expect(heading.attributes('aria-expanded')).toBe('true');
+      expect(wrapper.get('.activity-recovery').text()).toContain(message);
+      wrapper.unmount();
+    },
+  );
 });

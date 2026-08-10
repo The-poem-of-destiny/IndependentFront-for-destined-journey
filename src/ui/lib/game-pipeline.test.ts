@@ -44,22 +44,28 @@ vi.mock('@engine/database', () => ({
 }));
 
 // 工坊 P2 (D5): EJS 差量落库走 createStateManager(...).commitChatState —— 拦下来验载荷
-const { commitSpy, advanceTurnSpy, toastSpy, createSnapshotSpy, runCombatV3Mock } = vi.hoisted(
-  () => ({
-    commitSpy: vi.fn(async () => ({
-      success: true,
-      patchesApplied: 0,
-      eventsGenerated: [],
-      errors: [] as string[],
-    })),
-    advanceTurnSpy: vi.fn(async () => {}),
-    createSnapshotSpy: vi.fn(
-      async () => ({ id: 'snap-pre-combat', reason: 'pre-combat', turn: 0 }) as any,
-    ),
-    toastSpy: vi.fn(),
-    runCombatV3Mock: vi.fn(),
-  }),
-);
+const {
+  commitSpy,
+  advanceTurnSpy,
+  toastSpy,
+  createSnapshotSpy,
+  runCombatV3Mock,
+  callImagePromptAgentMock,
+} = vi.hoisted(() => ({
+  commitSpy: vi.fn(async () => ({
+    success: true,
+    patchesApplied: 0,
+    eventsGenerated: [],
+    errors: [] as string[],
+  })),
+  advanceTurnSpy: vi.fn(async () => {}),
+  createSnapshotSpy: vi.fn(
+    async () => ({ id: 'snap-pre-combat', reason: 'pre-combat', turn: 0 }) as any,
+  ),
+  toastSpy: vi.fn(),
+  runCombatV3Mock: vi.fn(),
+  callImagePromptAgentMock: vi.fn(),
+}));
 
 vi.mock('@engine/state-manager', () => ({
   createStateManager: vi.fn(() => ({
@@ -73,6 +79,10 @@ vi.mock('@engine/state-manager', () => ({
 // 断言 setCombatCoordinator 在 runCombatV3 **之前**挂好（玩家首决策挂起的根因修复）。
 vi.mock('@engine/combat-v3', () => ({
   runCombatV3: runCombatV3Mock,
+}));
+
+vi.mock('@engine/image-prompt-agent', () => ({
+  callImagePromptAgent: callImagePromptAgentMock,
 }));
 
 vi.mock('../stores/ui-store', () => ({
@@ -1133,6 +1143,52 @@ describe('withImagePromptSystem', () => {
     const out = withImagePromptSystem([cfg({ agentId: 'story' })], '方言写的');
     expect(out).toHaveLength(2);
     expect(out[1]).toMatchObject({ agentId: 'image_prompt', systemPrompt: '方言写的' });
+  });
+});
+
+describe('runImagePromptAgent — activity ledger', () => {
+  beforeEach(() => {
+    callImagePromptAgentMock.mockReset();
+  });
+
+  it('registers and settles a standalone image_prompt step around the Agent call', async () => {
+    const gameStore = makeGameStore();
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore({
+        apiPool: [{ id: 'ep-image', name: 'image', model: 'image-model' }],
+      }),
+      saveId: 'save-test',
+    });
+    (pipeline as any).ensureChainData = vi.fn(async () => ({
+      agentConfigs: [],
+      worldBooks: [],
+      presets: [],
+    }));
+    callImagePromptAgentMock.mockResolvedValue({
+      ok: true,
+      value: {
+        scenePrompt: 'moonlit tavern',
+        sceneNegative: '',
+        desc: '月下旅店',
+      },
+    });
+
+    await pipeline.runImagePromptAgent({
+      intent: '月下的旅店',
+      characters: [],
+      narrative: '旅店安静地立在月色里。',
+      rating: 'general',
+    });
+
+    expect(gameStore.startAgentActivityRun).toHaveBeenCalledWith(undefined, true);
+    expect(gameStore.updateAgentStatus).toHaveBeenCalledWith('image_prompt', 'activity-test');
+    expect(callImagePromptAgentMock).toHaveBeenCalledOnce();
+    expect(gameStore.clearAgentStatus).toHaveBeenCalledWith(
+      'image_prompt',
+      undefined,
+      'activity-test',
+    );
   });
 });
 

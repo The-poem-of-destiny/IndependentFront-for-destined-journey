@@ -120,7 +120,11 @@ watch(
   (status, previous) => {
     syncTimer();
     const wasActive = previous === 'running' || previous === 'stopping';
-    if (wasActive && status === 'completed' && !userToggled.value) expanded.value = false;
+    if (wasActive && (status === 'failed' || status === 'cancelled')) {
+      expanded.value = true;
+    } else if (wasActive && status === 'completed' && !userToggled.value) {
+      expanded.value = false;
+    }
     notifyResize();
   },
 );

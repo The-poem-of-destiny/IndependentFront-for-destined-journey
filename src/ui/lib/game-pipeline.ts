@@ -2071,6 +2071,10 @@ export class GamePipeline {
     const endpoint = this.getEndpointForAgent('image_prompt');
     if (!endpoint) return fail('未配置 API endpoint');
 
+    const activityRunId = this.activeRunId ?? this.game.startAgentActivityRun(undefined, true);
+    this.game.updateAgentStatus('image_prompt', activityRunId);
+    let activityError: string | undefined;
+
     try {
       // 手动档可能在任何时候点（甚至本会话还没跑过一轮），chainData 不能假定已就绪
       const chain = await this.ensureChainData();
@@ -2088,10 +2092,14 @@ export class GamePipeline {
         },
         { clientFactory: this.getClientFactory() },
       );
+      if (!result.ok) activityError = result.detail;
       return result.ok ? result.value : result;
     } catch (err) {
+      activityError = err instanceof Error ? err.message : String(err);
       console.error('[GamePipeline] image_prompt 侧链失败:', err);
-      return fail(err instanceof Error ? err.message : String(err));
+      return fail(activityError);
+    } finally {
+      this.game.clearAgentStatus('image_prompt', activityError, activityRunId);
     }
   }
 
